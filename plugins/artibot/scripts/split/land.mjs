@@ -55,30 +55,64 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
  *     never a silent pass: `check-unused-ratchet` once destroyed its own
  *     baseline and printed PASS when node_modules was absent. Fail closed.
  *
+ * WHICH BYTES GET LINTED (#G14, fixed 2026-09-10): eslint reads the WORKING
+ * TREE, not git objects, so the cwd it is spawned in decides what is checked.
+ * This row used to spawn it in `pluginRoot` — the checkout the RUNNER was
+ * started from, normally the parent on master — so it linted the parent's
+ * bytes while claiming to report on the limb. Two symptoms, one cause: a
+ * violation that existed only on the limb read as PASS, and a file NEW on the
+ * limb ("No files matching the pattern") read as FAIL — measured on 3/5 limbs
+ * in reports/SPLIT/split-5f9fe3.md. It now lints in `worktreePath`'s plugin
+ * root, verifies through git that that checkout really has `branch` on it, and
+ * names the directory it linted in every detail string. A missing or wrong
+ * `worktreePath` is UNSUPPORTED; falling back to `pluginRoot` was the defect.
+ * The one exception is SKIP, which is decided first: a limb that changed no
+ * .js/.mjs reads no working tree at all, so it needs no valid one.
+ *
+ * The eslint BINARY still comes from `pluginRoot/node_modules` (the runner's
+ * install) while the cwd is the worktree — the worktree only needs whatever its
+ * own `eslint.config.js` imports.
+ *
+ * The right branch is still not the right bytes, so the checkout is verified
+ * twice: `HEAD` must be `branch`, and no file in the lint set may carry an
+ * uncommitted change. Without the second check a limb whose branch holds a
+ * violation passes whenever its worktree happens to hold a fixed copy.
+ *
  * WHAT THIS ROW CANNOT SEE: files outside `plugins/artibot/` (the CI lint
  * script is plugin-scoped, so neither can CI); anything eslint is configured
- * to ignore; and whether the limb branch is the thing being linted — eslint
- * reads the WORKING TREE, so running this from a checkout that does not have
- * the limb checked out lints the wrong bytes. The row reports the paths it
- * linted so that mismatch is visible rather than assumed.
+ * to ignore; uncommitted changes to files NOT in the lint set (deliberate —
+ * unrelated dirt is not this row's business); and whether the worktree has the
+ * `node_modules` its config needs — that surfaces as eslint exit 2 and is
+ * reported as UNSUPPORTED, not predicted.
  *
  * @param {object} p
- * @param {string} p.cwd - parent repo root
+ * @param {string} p.cwd - parent repo root (git only; refs are shared across worktrees)
  * @param {string} p.base - base ref
  * @param {string} p.branch - limb branch
+ * @param {string} p.worktreePath - the limb's checkout root (`plan.limbs[].worktreePath`)
  * @param {typeof defaultExec} [p.exec=defaultExec] - git runner (injected in tests)
  * @param {typeof spawnSync} [p.spawn=spawnSync] - process runner for eslint
- * @param {string} [p.pluginRoot=PLUGIN_ROOT]
+ * @param {string} [p.pluginRoot=PLUGIN_ROOT] - where the eslint binary lives
  * @returns {{ id: string, name: string, ok: boolean, detail: string }}
  */
 export function lintCheck({
-  cwd, base, branch, exec = defaultExec, spawn = spawnSync, pluginRoot = PLUGIN_ROOT,
+  cwd, base, branch, worktreePath, exec = defaultExec, spawn = spawnSync, pluginRoot = PLUGIN_ROOT,
 } = {}) {
   const mk = (ok, detail) => Object.freeze({ id: 'lint', name: 'lint (변경 파일 한정)', ok, detail });
 
   // `-z`: this repo has Korean paths and `core.quotepath` defaults to on, so
   // newline-separated output would arrive C-quoted and split wrong.
-  const names = exec(['diff', '--name-only', '-z', `${base}..${branch}`], { cwd });
+  // `--diff-filter=d`: a file the limb DELETED is still a changed path, but it
+  // is gone from the worktree, and eslint exits 2 on a path it cannot resolve —
+  // a successful deletion would read as a lint failure.
+  //
+  // Lowercase `d` EXCLUDES deletions and keeps everything else, typechanges
+  // included. Measured 2026-09-10 on git 2.54.0.windows.1 with a blob->symlink
+  // commit: `--name-status` gave `D gone.js / M keep.js / T link.js`, and the
+  // filter dropped only the `D`. A `.js` that became a symlink therefore stays
+  // in the lint set, which is intended — eslint either follows it or fails to
+  // parse it, and both are loud. Nothing here can turn it into a PASS.
+  const names = exec(['diff', '--name-only', '-z', '--diff-filter=d', `${base}..${branch}`], { cwd });
   if (names.status !== 0) return mk(false, `UNSUPPORTED — git diff 실패: ${(names.stderr || '').trim().split('\n')[0] || `exit ${names.status}`}`);
 
   const prefix = 'plugins/artibot/';
@@ -88,7 +122,59 @@ export function lintCheck({
   const outside = lintable.filter((f) => !f.startsWith(prefix));
   const outsideNote = outside.length ? ` · 플러그인 밖 ${outside.length}건 미검사(CI lint 스코프도 동일)` : '';
 
+  // Ordering: SKIP is decided BEFORE the worktree is validated. With nothing to
+  // lint there are no bytes to read from the wrong tree, so demanding a valid
+  // worktree there would fail limbs that touch no JS for a reason that cannot
+  // affect them. Everything past this line does read a working tree.
   if (inPlugin.length === 0) return mk(true, `SKIP — 변경된 .js/.mjs 0건${outsideNote}`);
+
+  // Each UNSUPPORTED below opens with a different phrase on purpose: the table
+  // is often the only thing read, so the reason has to be legible without
+  // opening the plan or the worktree. `tests/split/land-lint.test.js` pins that
+  // they stay pairwise distinct.
+  if (typeof worktreePath !== 'string' || !worktreePath.trim()) {
+    return mk(false, `UNSUPPORTED — worktreePath 없음(plan limbs[] 에 미기재이거나 --plan 이 다른 파일을 가리킨다): 어느 체크아웃을 린트할지 알 수 없다. 러너 루트로 대체하면 줄기가 아닌 바이트를 검사하므로(#G14) 실패로 닫는다${outsideNote}`);
+  }
+  const wtRoot = path.resolve(worktreePath);
+  if (!fs.existsSync(wtRoot)) return mk(false, `UNSUPPORTED — worktree 디렉터리 없음 (${wtRoot}); plan 의 worktreePath 가 낡았거나 창이 정리됐다${outsideNote}`);
+
+  // The header used to merely DOCUMENT that nothing verified the checkout; this
+  // closes it. Refs are shared across worktrees but working trees are not, so
+  // ask the worktree itself what it has checked out.
+  //
+  // One call for both facts: `rev-parse --short HEAD --abbrev-ref HEAD` is
+  // "fatal: Needed a single revision" and `--abbrev-ref HEAD HEAD` answers the
+  // ref name twice (both measured 2026-09-10 on git 2.54.0.windows.1), so the
+  // working form is sha first, name second, shortened here.
+  // These two open with the reason, not with the word `worktree`: they used to
+  // read `worktree HEAD 조회 실패` and `worktree HEAD 불일치`, which are identical
+  // for the first 12 characters — and the detail column is what gets truncated.
+  const head = exec(['rev-parse', 'HEAD', '--abbrev-ref', 'HEAD'], { cwd: wtRoot });
+  if (head.status !== 0) return mk(false, `UNSUPPORTED — HEAD 조회 실패: worktree ${wtRoot} 에서 rev-parse 가 ${(head.stderr || '').trim().split('\n')[0] || `exit ${head.status}`}${outsideNote}`);
+  const [headSha = '', headName = ''] = String(head.stdout || '').trim().split('\n').map((s) => s.trim());
+  // A detached worktree answers the ref name `HEAD`, which is why the sha is
+  // reported too — otherwise two different wrong states print the same word.
+  const at = headSha ? ` (${headSha.slice(0, 12)})` : '';
+  if (headName !== branch) return mk(false, `UNSUPPORTED — HEAD 불일치: ${headName || '(이름 불명)'}${at} 가 체크아웃돼 있고 줄기 ${branch} 가 아니다 — worktree ${wtRoot}; 다른 트리를 린트하면 결과가 줄기와 무관하다${outsideNote}`);
+
+  // The right branch is not yet the right BYTES. eslint reads the working tree,
+  // so an uncommitted edit to a file in the lint set is what gets graded — a
+  // limb whose branch carries a violation passes if the worktree happens to
+  // hold a fixed copy. The row's whole contract is that it reports on the
+  // limb's committed bytes, so an overlap is refused rather than graded.
+  // Scoped to `inPlugin` on purpose: unrelated dirt is not this row's business.
+  // `--untracked-files=no` because a new file that is not in `base..branch` is
+  // not in the lint set either.
+  const dirty = exec(['status', '--porcelain', '-z', '--untracked-files=no', '--', ...inPlugin.map((f) => prefix + f)], { cwd: wtRoot });
+  if (dirty.status !== 0) return mk(false, `UNSUPPORTED — status 조회 실패: worktree ${wtRoot} 에서 ${(dirty.stderr || '').trim().split('\n')[0] || `exit ${dirty.status}`}${outsideNote}`);
+  const dirtyEntries = String(dirty.stdout || '').split('\0').filter(Boolean);
+  if (dirtyEntries.length) {
+    // With a denominator: "3건이 더럽다" does not say whether that is all of
+    // the lint set or a corner of it, and the two lead somewhere different.
+    const shown = dirtyEntries.slice(0, 3).map((e) => e.trim()).join(', ');
+    const more = dirtyEntries.length > 3 ? ` 외 ${dirtyEntries.length - 3}건` : '';
+    return mk(false, `UNSUPPORTED — 미커밋 변경 겹침: 린트 대상 ${inPlugin.length}건 중 ${dirtyEntries.length}건이 worktree ${wtRoot} 에서 미커밋 (${shown}${more}) — 커밋 후 재실행. 미커밋 바이트를 채점하면 줄기가 아닌 것을 채점한다${outsideNote}`);
+  }
 
   // The eslint JS entry, not the `.bin` shim: spawning `eslint.cmd` without a
   // shell is EINVAL on Windows since Node 20 (measured 2026-09-04 — the row
@@ -97,13 +183,20 @@ export function lintCheck({
   const bin = path.join(pluginRoot, 'node_modules', 'eslint', 'bin', 'eslint.js');
   if (!fs.existsSync(bin)) return mk(false, `UNSUPPORTED — eslint 없음 (${bin}); npm ci 후 재실행. PASS 로 넘기지 않는다${outsideNote}`);
 
+  const wtPluginRoot = path.join(wtRoot, 'plugins', 'artibot');
   const r = spawn(process.execPath, [bin, '--max-warnings=0', ...inPlugin], {
-    cwd: pluginRoot, encoding: 'utf-8', windowsHide: true, timeout: 180000, maxBuffer: 64 * 1024 * 1024,
+    cwd: wtPluginRoot, encoding: 'utf-8', windowsHide: true, timeout: 180000, maxBuffer: 64 * 1024 * 1024,
   });
-  if (r.error) return mk(false, `UNSUPPORTED — eslint 실행 실패: ${r.error.message}${outsideNote}`);
-  if (r.status === 0) return mk(true, `${inPlugin.length}파일 0 errors 0 warnings${outsideNote}`);
+  if (r.error) return mk(false, `UNSUPPORTED — eslint 실행 실패 (${wtPluginRoot}): ${r.error.message}${outsideNote}`);
+  if (r.status === 0) return mk(true, `${inPlugin.length}파일 0 errors 0 warnings @ ${wtPluginRoot}${outsideNote}`);
   const first = String(r.stdout || r.stderr || '').trim().split('\n').filter(Boolean).slice(-2).join(' / ');
-  return mk(false, `${inPlugin.length}파일 — ${first}${outsideNote}`);
+  // eslint exits 1 for "lint problems found" and 2 for "configuration problem
+  // or internal error" (measured 2026-09-10 on 10.2.1: a config importing a
+  // missing package, and an unresolvable path, both exit 2). Only 1 is the
+  // limb's fault; 2 means we could not lint at all, which must not read as a
+  // verdict on the limb — and must never degrade to PASS.
+  if (r.status !== 1) return mk(false, `UNSUPPORTED — eslint 설정/입력 오류 exit ${r.status} @ ${wtPluginRoot} — ${first}; worktree 에 node_modules 가 없으면 scripts/split/worktree-setup.mjs ${wtRoot} 로 깔고 재실행${outsideNote}`);
+  return mk(false, `${inPlugin.length}파일 @ ${wtPluginRoot} — ${first}${outsideNote}`);
 }
 const USAGE = 'usage: node scripts/split/land.mjs <limb> [--base <ref>] [--plan <path>] [--json] [--pr-body <out>]';
 
@@ -205,8 +298,13 @@ export function runLand({ argv, cwd = process.cwd(), stdout = (s) => process.std
   // Appended, not merged into the lib: see lintCheck's header. A failing lint
   // downgrades PASS to FAIL but never overwrites UNSUPPORTED — that status
   // means the git-side checks could not run at all, which is the louder fact.
+  // `worktreePath` comes from the plan, not from `cwd`: git refs are shared so
+  // the diff works from anywhere, but eslint reads a working tree and only the
+  // limb's own checkout has the limb's bytes (#G14). A plan entry without it is
+  // UNSUPPORTED inside `lintCheck` — there is no safe fallback.
   const lint = lintCheck({
-    cwd: parentRoot, base, branch: loaded.entry.branch, ...(exec ? { exec } : {}), ...(lintSpawn ? { spawn: lintSpawn } : {}),
+    cwd: parentRoot, base, branch: loaded.entry.branch, worktreePath: loaded.entry.worktreePath,
+    ...(exec ? { exec } : {}), ...(lintSpawn ? { spawn: lintSpawn } : {}),
   });
   const result = {
     ...checked,
