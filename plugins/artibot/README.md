@@ -170,7 +170,10 @@ are called **without a namespace prefix** (`/save`, `/sc`, `/daily`). It also
 enables Agent Teams, wires the themed statusline, and seeds a conservative
 read-only permission allowlist (`Read`/`Glob`/`Grep`) into
 `~/.claude/settings.json`, so you won't be re-prompted to approve routine safe
-reads. To uninstall: `bash install.sh uninstall`.
+reads. To uninstall: `bash install.sh uninstall`. If a native marketplace install
+is already present (`~/.claude/plugins/cache/artibot/artibot/<version>/`), the
+scripts skip the flat copy of agents and commands by default; pass `--flat`
+(`install.sh`) or `-Flat` (`install.ps1`) to force it.
 
 > **Windows:** run `install.sh` from **Git Bash** (ships with
 > [Git for Windows](https://gitforwindows.org/)). A native PowerShell
@@ -181,7 +184,7 @@ reads. To uninstall: `bash install.sh uninstall`.
 | Install method | Command form | Example | Prefix |
 |---|---|---|---|
 | Native marketplace (`/plugin install`) | namespaced | `/artibot:save`, `/artibot:sc`, `/artibot:daily` | `artibot:` |
-| `install.sh` / `install.ps1` (flat) | flat | `/save`, `/sc`, `/daily` | none |
+| `install.sh` / `install.ps1` (flat) | flat — skipped by default when a native install is detected; `--flat` / `-Flat` forces | `/save`, `/sc`, `/daily` | none |
 
 All examples in this README use the **flat** form (`/save`). If you installed
 via the native marketplace, prepend `artibot:` to every command (`/artibot:save`).
@@ -516,6 +519,9 @@ bash install.sh          # macOS / Linux / Windows의 Git Bash
 env 키(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`)는 `settings.json`이 **없을 때**
 새로 만들면서 함께 시드합니다. 파일이 이미 있으면 `install.sh`는 키를 덮어쓰지 않고
 수동 추가 안내만 출력합니다(`install.ps1`은 없는 키를 병합해 넣습니다).
+네이티브 마켓플레이스 설치가 이미 있으면(`~/.claude/plugins/cache/artibot/artibot/<버전>/`)
+두 스크립트는 agents·commands 의 flat 복사를 기본으로 건너뜁니다. 강제하려면
+`--flat`(`install.sh`) 또는 `-Flat`(`install.ps1`)을 넘기세요.
 제거: `bash install.sh uninstall`
 
 > **Windows:** `install.sh`는 **Git Bash**([Git for Windows](https://gitforwindows.org/) 동봉)에서 실행하세요.
@@ -527,7 +533,7 @@ env 키(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`)는 `settings.json`이 **없
 
 | 설치 방식 | 커맨드 형식 | 예시 | 프리픽스 |
 |---|---|---|---|
-| **`install.sh` / `install.ps1`** (권장) | flat | `/save`, `/sc`, `/daily` | 없음 |
+| **`install.sh` / `install.ps1`** (권장) | flat — 네이티브 설치 감지 시 기본 건너뜀, `--flat` / `-Flat` 로 강제 | `/save`, `/sc`, `/daily` | 없음 |
 | `claude plugin install` (마켓플레이스) | 네임스페이스 | `/artibot:save`, `/artibot:sc`, `/artibot:daily` | `artibot:` |
 
 이 README의 모든 예제는 **flat** 형식(`/save`)을 사용합니다. 마켓플레이스로

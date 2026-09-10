@@ -114,12 +114,15 @@ cd artibot/plugins/artibot
 bash install.sh          # macOS / Linux / Git Bash on Windows
 ```
 
-This flat-copies agents and commands into `~/.claude/`, so slash commands are
-called **without a prefix** (`/save`, `/sc`, `/daily`). It seeds the Agent Teams env
+This flat-copies agents and commands into `~/.claude/` (with one exception noted
+below), so slash commands are called **without a prefix** (`/save`, `/sc`, `/daily`). It seeds the Agent Teams env
 var (see [Prerequisites](#prerequisites) for the exact per-script behavior), wires the
 themed statusline, and seeds a conservative read-only permission
 allowlist (`Read`/`Glob`/`Grep`) into `~/.claude/settings.json`, removing the
-repeated approval prompts new users hit on first run. To uninstall:
+repeated approval prompts new users hit on first run. If a native marketplace install
+is already present (`~/.claude/plugins/cache/artibot/artibot/<version>/`), the scripts
+skip the flat copy of agents and commands by default; pass `--flat` (`install.sh`) or
+`-Flat` (`install.ps1`) to force it. To uninstall:
 `bash install.sh uninstall`.
 
 > **Windows:** run `install.sh` from **Git Bash** ([Git for Windows](https://gitforwindows.org/)),
@@ -130,7 +133,7 @@ repeated approval prompts new users hit on first run. To uninstall:
 | Install method | Command form | Example |
 |---|---|---|
 | Native marketplace (`/plugin install`) | namespaced `artibot:` | `/artibot:save`, `/artibot:sc` |
-| `install.sh` / `install.ps1` (flat) | flat (no prefix) | `/save`, `/sc`, `/daily` |
+| `install.sh` / `install.ps1` (flat) | flat (no prefix) — skipped by default when a native install is detected; `--flat`/`-Flat` forces | `/save`, `/sc`, `/daily` |
 
 ### Requirements
 
