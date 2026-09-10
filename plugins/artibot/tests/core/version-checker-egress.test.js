@@ -42,6 +42,24 @@ vi.mock('../../lib/core/data-egress-guard.js', () => ({
 
 const { checkForUpdate } = await import('../../lib/core/version-checker.js');
 
+// File-scope ambient-env isolation, covering BOTH describes below. A
+// contributor who exported ARTIBOT_UPDATE_CHECK=0 to silence the update check
+// in their own shell would otherwise turn the egress assertions red, because a
+// disabled checker never fetches. Restore is exact: delete when the variable
+// was never set, put the original string back when it was. Same pattern as
+// tests/hooks/session-start.test.js.
+let savedUpdateCheckEnv;
+
+beforeEach(() => {
+  savedUpdateCheckEnv = process.env.ARTIBOT_UPDATE_CHECK;
+  delete process.env.ARTIBOT_UPDATE_CHECK;
+});
+
+afterEach(() => {
+  if (savedUpdateCheckEnv === undefined) delete process.env.ARTIBOT_UPDATE_CHECK;
+  else process.env.ARTIBOT_UPDATE_CHECK = savedUpdateCheckEnv;
+});
+
 describe('version-checker: assertEgressAllowed gate', () => {
   let originalFetch;
 
@@ -114,14 +132,12 @@ describe('version-checker: assertEgressAllowed gate', () => {
 // ---------------------------------------------------------------------------
 describe('version-checker: opt-out — no egress when disabled', () => {
   let originalFetch;
-  let hadEnvVar;
-  let originalEnvVar;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockAssertEgress.mockReset();
-    hadEnvVar = 'ARTIBOT_UPDATE_CHECK' in process.env;
-    originalEnvVar = process.env.ARTIBOT_UPDATE_CHECK;
+    // ARTIBOT_UPDATE_CHECK save/restore lives at file scope above, so the
+    // test below is free to set it and the next describe still starts clean.
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(() =>
       Promise.resolve({
@@ -134,14 +150,6 @@ describe('version-checker: opt-out — no egress when disabled', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    // Restore the ambient variable exactly: delete it if it was never set,
-    // otherwise put the original string back. Leaving it set would silently
-    // disable the check for every test file that runs afterwards.
-    if (hadEnvVar) {
-      process.env.ARTIBOT_UPDATE_CHECK = originalEnvVar;
-    } else {
-      delete process.env.ARTIBOT_UPDATE_CHECK;
-    }
   });
 
   it('sends nothing when the env variable disables the check', async () => {

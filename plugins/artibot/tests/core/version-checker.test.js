@@ -64,6 +64,7 @@ const _CACHE_FILE_PATH =
 
 describe('version-checker', () => {
   let originalFetch;
+  let savedUpdateCheckEnv;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -73,6 +74,13 @@ describe('version-checker', () => {
     });
     fsMock.writeFileSync.mockImplementation(() => {});
     fsMock.mkdirSync.mockImplementation(() => {});
+    // Ambient-env isolation. A contributor who opted out of the update check
+    // in their own shell must still get a green `npm test`: without this,
+    // ARTIBOT_UPDATE_CHECK=0 in the environment silently disables the checker
+    // and turns every network-path assertion below red. Same pattern as
+    // tests/hooks/session-start.test.js.
+    savedUpdateCheckEnv = process.env.ARTIBOT_UPDATE_CHECK;
+    delete process.env.ARTIBOT_UPDATE_CHECK;
     // Save and replace global fetch
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn();
@@ -80,6 +88,8 @@ describe('version-checker', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (savedUpdateCheckEnv === undefined) delete process.env.ARTIBOT_UPDATE_CHECK;
+    else process.env.ARTIBOT_UPDATE_CHECK = savedUpdateCheckEnv;
   });
 
   // =========================================================================
@@ -547,8 +557,10 @@ describe('version-checker', () => {
     });
 
     it('enables the check by default when called with no arguments at all', () => {
-      // Ambient process.env carries no ARTIBOT_UPDATE_CHECK in CI or dev
-      // shells; this pins the zero-argument shape session-start relies on.
+      // The suite's beforeEach deletes ARTIBOT_UPDATE_CHECK from process.env,
+      // so the zero-argument call resolves against a known-empty variable
+      // rather than whatever the contributor happens to have exported. This
+      // pins the shape session-start relies on.
       const policy = resolveUpdateCheckPolicy();
       expect(policy.enabled).toBe(true);
       expect(policy.source).toBe('default');
