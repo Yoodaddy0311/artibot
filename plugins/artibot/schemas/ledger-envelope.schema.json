@@ -59,12 +59,12 @@
     "pid": {
       "type": "integer",
       "minimum": 0,
-      "description": "Emitting OS process id. Part of the reader-side dedupe key (session_id,source,pid,seq): the writer never does read-then-append, so duplicate and missing lines are judged when reading (lane 6 §2.8). session_id leads the key because a PID is only unique while the process lives -- the OS reuses it, so without session_id two unrelated lines from a recycled PID could collide (T-51 #3; implemented at lib/runtime/ledger.js#dedupeKey)."
+      "description": "Emitting OS process id. Part of the reader-side dedupe key (session_id,source,pid,seq,ts):the writer never does read-then-append, so duplicate and missing lines are judged when reading (lane 6 §2.8). session_id leads the key because a PID is only unique while the process lives -- the OS reuses it, so without session_id two unrelated lines from a recycled PID could collide (T-51 #3; implemented at lib/runtime/ledger.js#dedupeKey)."
     },
     "seq": {
       "type": "integer",
       "minimum": 0,
-      "description": "Monotonic per-process counter. Part of the (session_id,source,pid,seq) dedupe key."
+      "description": "Monotonic per-process counter. Part of the (session_id,source,pid,seq,ts) dedupe key — ts joined in 2026-09-10 because the counter restarts at 0 in every process and Windows reuses pids within a session."
     },
     "action_id": {
       "type": "string",

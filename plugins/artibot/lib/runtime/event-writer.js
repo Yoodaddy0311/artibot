@@ -56,8 +56,9 @@
  * processes (lane 6 §0 row 3, §2.8). A small write is not split, which is what
  * the 4 KB cap buys; tests/firewall/ledger-append-survival.test.js fixes that
  * as a measurement rather than an inference. Duplicates and gaps are judged BY
- * THE READER on `(session_id, source, pid, seq)` (`ledger.js#dedupeKey`) — the
- * writer never reads the file it appends to.
+ * THE READER on `(session_id, source, pid, seq, ts)` (`ledger.js#dedupeKey`,
+ * `ts` added 2026-09-10 so a reused pid with a fresh seq 0 is not a duplicate)
+ * — the writer never reads the file it appends to.
  *
  * LAYERING: this module is L5; importing L3 and L2 is downward and allowed.
  *
@@ -271,7 +272,7 @@ let seqCounter = 0;
  * coordinated across processes.
  *
  * That is exactly why the reader's dedupe key is
- * `(session_id, source, pid, seq)` and not the three fields alone: a counter
+ * `(session_id, source, pid, seq, ts)` and not the three fields alone: a counter
  * each process owns restarts at 0 in the next one, so a reused pid would make
  * a later line collide with an older one. `lib/runtime/ledger.js#dedupeKey` is
  * the single definition.

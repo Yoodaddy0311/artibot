@@ -229,7 +229,7 @@ describe('gaps are enumerated, never hidden', () => {
     expect(index.totals.events['ledger.rejected']).toBeUndefined();
   });
 
-  it('a duplicate is collapsed on (source, pid, seq) AND reported', () => {
+  it('a duplicate is collapsed on (session_id, source, pid, seq, ts) AND reported', () => {
     // Collapsing silently would make a double-written line indistinguishable
     // from a single one, which is the thing the reader-side dedupe exists to
     // make visible.

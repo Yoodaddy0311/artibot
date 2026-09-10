@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### /split Wave 1 (split-b87130, 배치 랜딩 d410ebb0 · 2026-09-10)
+
+#### Fixed
+- **UPS 발신자 가드 — 피어/에이전트 봉투 차단** (`scripts/hooks/_userprompt-dispatcher.js`): 호스트 2.1.267 은 UserPromptSubmit 페이로드에 `source` 를 싣지 않고(캡처 7/7 부재) 훅 `prompt` 는 큐 원문 봉투라, `<cross-session-message`·`<agent-message`(실측 2) + `<teammate-message`·`[Cross-session idle notice]`(바이너리 리터럴, 훅 미관측 표기) 를 선두 마커로 차단. 렌더 프레이밍 "Another Claude session sent a message" 는 훅에 도달하지 않는다(브리프 전제 오류 → 실측 정정). 디스패처 테스트 샌드박스를 `mkdtemp` 직접 파생 cwd + 빈 `.git` 마커로 자기 앵커링 — 테스트의 HOME 덮어쓰기가 `resolveProjectRoot` 홈 제외를 무력화해 실 홈 스토어에 결정 원장을 쓰던 누수 폐쇄.
+- **ledger reader dedupe 키 pid 충돌** (`lib/runtime/ledger.js`·`lib/replay/replay.js#dedupeKey`): `(session_id,source,pid,seq)` → `(…,ts)`. 프로세스당 seq 0 + Windows pid 재사용이 별개 이벤트를 duplicate 로 탈락시키던 결함. 두 키 동시 전환으로 `no-second-source` 방향 불변식("replay 는 ledger 보다 더 접지 않는다") 복구. 실원장 census 0→0(2026-09-09 doctor 가 읽은 원장은 소재 미확인, 증거는 픽스처).
+- **`land.mjs` lint 행 worktree cwd (#G14)**: 줄기 worktree 의 `plugins/artibot` 을 cwd 로 eslint. `plan.json` `limbs[].worktreePath` 필요, HEAD ≠ 줄기 브랜치·린트 대상과 겹치는 미커밋 변경·eslint 부재 등 10종은 각각 다른 문장의 `UNSUPPORTED`(fallback 없음). 종전 설치본은 부모 바이트를 읽어 PASS 누수·신규 파일 FAIL 오탐 양쪽을 냈다.
+- **`landBatch` 사이드 브랜치 lease + 접두 중복 (#G25)** (`lib/git/batch-landing.js`): 모든 `ci/**` push 에 `--force-with-lease`(기대값 = `ls-remote` 관측 tip, 부재면 빈 값), `integrationBranchName` 이 선두 `split-` 를 한 번만 접어 `ci/split-<sid>`. 라이브 1회: 2차 재실행이 1차 stale 브랜치 위에서 진행.
+
+#### Docs
+- `commands/split.md`·`skills/split/references/operations.md`: integrate 브랜치 표기 `ci/{runId}`, master ff push 는 플레인(lease 는 사이드 브랜치), land 7행 표·lint 행 UNSUPPORTED 사유, 운용 규칙 "land 는 창 닫기 전". `lib/runtime/event-writer.js`·`schemas/ledger-envelope.schema.json` dedupe 키 서술 5필드.
+
 ## [4.57.0] — 2026-09-09
 
 ### 4차 배치(split-5f9fe3) — Observe 분모 3종 writer · UPS 발신자 가드 · guardrail 오탐 소거
@@ -38,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Known
 - **라이브 미확인 5항(설치 후 첫 세션에서 판정)**: PreToolUse 페이로드 `cwd`/`session_id` 실재(없으면 human.asked 프로덕션 기록 0) · SessionEnd payload `cwd` · `/doctor` 커맨드 경유 Check 8-②/9 PASS · Explore/investigator `route.selected` 생성 · UPS 가드가 cross-session 인사도 막는지.
-- 러너 결함 2(후속): `scripts/split/land.mjs` lint 행이 부모 cwd 라 줄기 신규 파일 미탐(3/5 줄기 오탐) · `lib/git/batch-landing.js` 재시도 시 사이드 브랜치 non-ff(`ci/split-split-<run>` 접두 중복 포함).
+- 러너 결함 2(후속): `scripts/split/land.mjs` lint 행이 부모 cwd 라 줄기 신규 파일 미탐(3/5 줄기 오탐) · `lib/git/batch-landing.js` 재시도 시 사이드 브랜치 non-ff(`ci/split-split-<run>` 접두 중복 포함). → **2026-09-10 split-b87130 Wave 1 에서 둘 다 수리 착지(d410ebb0, [Unreleased] 참조).**
 - `commands/doctor.md` Check 8 호출 예 `project` 인자 누락 → basename≠artibot 워크트리 전부 `projection-drift` 위양성(후속). 같은 세션 2번째 substantive 프롬프트마다 `mission.created` 재발행(기존, 판독 무해). 재개 세션 usage 증분은 과소집계(reader 최신값 우선이 정답, 후속). 이벤트별 `sources` 위젠 게이트 부재.
 
 
@@ -75,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `review.claim_audit` writer 배선 0 · `effort` 필드 없음(층화 착시 경고, 설계 §4.4).
 - WebFetch 매처 실발화·MultiEdit/NotebookEdit 매치는 추론. `Write|Edit` 는 향후 이름에 Write/Edit 가 든 MCP 도구에도 매치한다.
 - `pruneDecisionTrail` 은 `enabled` 를 보지 않는다(호출자 0). `readSpawns` 는 파일 부재를 `[]` 로 접는다(프로즈가 `undefined` 구분을 지운다).
-- `land.mjs` lint 행이 브랜치 신규 파일을 메인 트리에서 찾아 FAIL(2줄기 실측) — 후속.
+- `land.mjs` lint 행이 브랜치 신규 파일을 메인 트리에서 찾아 FAIL(2줄기 실측) — 후속(→ 2026-09-10 #G14 수리 착지).
 - 잔존 "28" 산문(CONTRIBUTING·INSTALL·AGENTS.md:4·mcp-server.json:6·주석·_marketplace·cowork README) — 게이트 무관, 후속.
 
 

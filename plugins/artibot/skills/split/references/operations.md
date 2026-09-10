@@ -26,7 +26,7 @@
 ## land <limb> (메인 세션 전용 · 읽기 전용 · 랜딩 체크리스트 — A2)
 
 리더가 랜딩마다 손으로 재던 6개를 기계가 한 번에 잰다(Ontology 6랜딩 × ~4 왕복 실측; 수동 grep 이 실제로 절대경로 인용 2건을 잡았다).
-`node <pluginRoot>/scripts/split/land.mjs <limb> [--base <ref>] [--plan <path>] [--json] [--pr-body <out>]` → `lib/git/limb-landing-check.js#checkLimbLanding` 이 6행 표를 낸다:
+`node <pluginRoot>/scripts/split/land.mjs <limb> [--base <ref>] [--plan <path>] [--json] [--pr-body <out>]` → `lib/git/limb-landing-check.js#checkLimbLanding` 이 7행 표(6행 + `lint`)를 낸다. `lint` 행은 **줄기 worktree** 의 `plugins/artibot` 을 cwd 로 잰다(2026-09-10 #G14 수리 — `plan.json` `limbs[].worktreePath` 가 필요하며 미기재·HEAD 불일치·린트 대상과 겹치는 미커밋 변경·eslint 부재는 각각 다른 문장의 `UNSUPPORTED`, fallback 없음). 운용 규칙 2건: ① worktree 를 지우면 lint 행이 `UNSUPPORTED` 가 되므로 **`land` 는 창을 닫기 전에** 돌린다 ② 설치본이 수리 전 버전이면 줄기/소스 판 `land.mjs` 를 직접 부른다(설치본 lint 행은 부모 바이트를 읽는다):
 `trailer`(first-parent 규칙) · `ownership`(`git diff --name-only -z <base>...<branch>` ⊆ 계획의 `affectedPaths` + `.artibot/split/<limb>/**` — **`-z` 는 load-bearing이다**: 한글 리포에서 `core.quotepath` 기본값이 켜져 있어 `-z` 없이는 git 이 경로를 C-quote 로 감싸고, 파서가 그것을 allowlist 밖 경로로 읽어 **거짓 FAIL** 을 낸다. 출력은 개행이 아니라 **NUL 로 분리**해 파싱한다. 실측 2026-09-04, 후속 19 #1) · `binary`(`--numstat` 의 `-\t-` 0건) · `citations`(추가된 줄에 `.artibot/split/` 이나 `<드라이브>:/Users/` 절대경로 인용 0건) · `merge-dry-run`(`lib/git/merge-preflight.js#mergeTreePair`) · `behind-base`(정보만).
 - `PASS` → exit 0, **승인이 아니다** — PR 본문 골격의 `## 검수` 는 검수자/리더가 쓰는 칸이고 `## 게이트` 수치는 자리표시자다.
 - `FAIL` → 빨간 행의 `detail` 을 그대로 줄기 창에 `SendMessage`.
