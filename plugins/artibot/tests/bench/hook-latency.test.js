@@ -41,9 +41,16 @@
  *     as the table configures, only the runner and
  *     `tests/bench/hook-latency.bench.js` can answer.
  *   - **Whether a payload is ACCEPTED by the hook it targets.** Well-formed,
- *     sandbox-scoped, serializable and not `danger` is all that is checked. A
- *     hook could still reject it as semantically wrong and exit early, and the
- *     bench would measure that early-return path while looking identical here.
+ *     sandbox-scoped, serializable, and carrying only an allowlisted `echo`
+ *     command, is all that is checked. A hook could still reject it as
+ *     semantically wrong and exit early, and the bench would measure that
+ *     early-return path while looking identical here.
+ *   - **Whether that allowlist agrees with any risk classifier.** The command
+ *     shape is asserted directly rather than delegated to a risk-classifier
+ *     module owned by another branch, so nothing here breaks when such a
+ *     module changes its level strings or signature. The two could disagree;
+ *     only the local claim is made, and it is the stronger of the two. Do not
+ *     reintroduce the delegation to shorten this file.
  *   - **Anything about the guards.** No guard verdict is exercised here at
  *     all; that whole contract moved to the sibling file named above.
  *   - **Import-time isolation beyond two proxies.** "main() did not run" is
@@ -62,7 +69,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { classifyRisk } from '../../lib/autopilot/safety.js';
 import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 import { SLOTS, summarize } from '../../scripts/bench/hook-latency.mjs';
 
@@ -378,23 +384,41 @@ describe('SLOTS — payload builders are sandbox-scoped, serializable and harmle
     expect(a).not.toBe(b);
   });
 
-  it('never carries a command a risk guard would classify as danger', () => {
+  it('carries only an allowlisted echo command in any tool_input', () => {
+    // An ALLOWLIST, checked here rather than delegated to a risk classifier.
+    //
+    // Delegating was the first design and it was wrong twice over. It made
+    // this suite fail whenever another branch changed that classifier's level
+    // strings or signature, and — worse — it stated the weaker claim. "No
+    // rule in some catalogue matched" is not "this string is harmless": a
+    // command can be destructive and simply not be enumerated yet, and the
+    // delegated check would pass. Naming the exact shape a bench payload may
+    // carry is the claim actually worth making, and it cannot rot.
+    //
+    // The shape is `echo` plus one whitespace-free argument. Anything a slot
+    // grows later — a redirect, a pipe, a second word, a different program —
+    // turns this red and gets read by a person.
+    const ALLOWED_COMMAND = /^echo\s+\S+$/;
     const commands = [];
     for (const name of Object.keys(SLOTS)) {
       const payload = SLOTS[name].payload(sandbox);
       const command = payload.tool_input && payload.tool_input.command;
       if (typeof command !== 'string') continue;
       commands.push(command);
-      expect(classifyRisk(command).level, `${name}: ${command}`).not.toBe('danger');
+      expect(command, `${name} carries a non-allowlisted command`).toMatch(ALLOWED_COMMAND);
     }
     // Non-vacuousness: at least the two Bash-tool slots must have been checked.
     expect(commands.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('classifies a genuinely destructive command as danger (control for the check above)', () => {
-    // Proves the guard used in the previous test can say `danger` at all,
-    // without putting a runnable destructive string in a slot payload.
-    expect(classifyRisk('git reset --hard HEAD~5').level).toBe('danger');
+  it('rejects a command outside the allowlist (control for the check above)', () => {
+    // Proves the pattern above discriminates rather than matching everything.
+    // Both rejects are shapes a payload could plausibly drift into; neither is
+    // a destructive string, which has no place in a test literal.
+    const ALLOWED_COMMAND = /^echo\s+\S+$/;
+    expect('echo bench').toMatch(ALLOWED_COMMAND);
+    expect('echo bench > out.txt').not.toMatch(ALLOWED_COMMAND);
+    expect('node script.js').not.toMatch(ALLOWED_COMMAND);
   });
 
   it('writes nothing to disk while building payloads', () => {

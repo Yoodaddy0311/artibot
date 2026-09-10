@@ -75,13 +75,44 @@
  * come from the runner's `defaultGuardSpecs()` — real `~/.artibot` (tree),
  * `~/.claude/artibot` (leak-scan), this worktree's `.artibot/runtime`, and the
  * PARENT checkout's `.artibot/runtime`, which the runner already derives from
- * `git rev-parse --git-common-dir` and guards in strict `tree` mode. This file
- * adds one `leak-scan` per `runtime` directory aimed straight at
- * `ledger.jsonl`. That is not redundant: the parent ledger is appended to by
- * whatever other sessions are live, so a strict `tree` verdict of CHANGED
- * there is ambiguous on its own. The paired leak-scan says whether a
- * `bench-` session id — one this file authored — is what appeared. Both
- * verdicts are in the thrown message so the two causes are told apart.
+ * `git rev-parse --git-common-dir`. This file adds one `leak-scan` per
+ * `runtime` directory aimed straight at `ledger.jsonl`. That is not redundant:
+ * a `tree` verdict of CHANGED on a ledger other live sessions append to is
+ * ambiguous on its own, while the paired leak-scan answers the narrower
+ * question — did a value THIS RUN generated end up in there. Its clean verdict
+ * reads `clean (0 of N generated values found)`.
+ *
+ * The two rows are paired for reporting by PATH CONTAINMENT, not by
+ * `path.dirname`. A tree guard on `…/.artibot/runtime` and a leak-scan on
+ * `…/.artibot/runtime/ledger.jsonl` have different dirnames, so the dirname
+ * match an earlier revision of this file used never paired them: the thrown
+ * message carried the `[tree]` verdict alone and dropped the very row that
+ * disambiguates it. Found in review, measured 2026-09-11 01:15 KST.
+ *
+ * WRITERS MODES — A CLEAN STRICT RUN IS RARE AND WORTH MORE THAN A TOLERATED ONE
+ *
+ * `compareGuards(before, after, { writers })` takes `strict` (the default) or
+ * `tolerate`, and `ARTIBOT_BENCH_WRITERS=tolerate` selects the latter here.
+ * Strict fails on ANY change to a `tree` guard. Tolerate fails only on a change
+ * carrying one of this run's generated values and reports the rest as
+ * `CHANGED (unattributed …)` at exit 0.
+ *
+ * A clean STRICT run is the strongest evidence this file can produce, because
+ * it is the only result that rules out a write nobody can attribute. It is also
+ * structurally unobtainable while a team is working. Measured here 2026-09-11
+ * 01:2x KST: the parent checkout's ledger stood at 185,004 bytes holding 179
+ * `mission.candidate_deferred` rows, every one of them under a UUID session id
+ * belonging to a concurrent session rather than the `bench-`-prefixed ids this
+ * file mints. One more such row landing between the two snapshots fails a
+ * strict run on activity this bench did not cause.
+ *
+ * TOLERATE IS THE WEAKER RESULT AND MUST NOT BE QUOTED AS THE OTHER ONE. It
+ * clears a change on the ABSENCE of a fingerprint, and a leak need not carry
+ * one: a hook that bumps a counter or rewrites a summary derived from bench
+ * activity leaves no random suffix behind, and tolerate reads that as someone
+ * else's traffic. That is why every guard row carries `strictWouldFail` and why
+ * the verdict bench prints it next to the writers mode — a tolerated pass whose
+ * rows say `strictWouldFail: true` is a pass with a caveat, not a clean run.
  *
  * @module tests/bench/hook-latency
  */
@@ -126,6 +157,15 @@ const BENCH_OPTIONS = {
 
 /** 1 warmup + 3 timed. Asserted, not assumed — see verifyCallCounts(). */
 const EXPECTED_CALLS_PER_SLOT = BENCH_OPTIONS.warmupIterations + BENCH_OPTIONS.iterations;
+
+/**
+ * `strict` (default) or `tolerate`, read once from `ARTIBOT_BENCH_WRITERS`.
+ *
+ * Anything other than the exact string `tolerate` leaves strict in place, which
+ * is how the runner reads its own `--writers` flag — a typo must not silently
+ * buy the weaker mode.
+ */
+const WRITERS_MODE = process.env.ARTIBOT_BENCH_WRITERS === 'tolerate' ? 'tolerate' : 'strict';
 
 /**
  * The 8 slots. Names must match keys of the runner's `SLOTS`; `runOnce` throws
@@ -219,30 +259,77 @@ async function spawnSlot(slotName) {
  */
 function describeGuardRows(rows) {
   return rows
-    .map((row) => `  [${row.mode}] ${row.path}\n      ${row.before} -> ${row.after}: ${row.verdict}`)
+    .map((row) => `  [${row.mode}] ${row.path}\n`
+      + `      ${row.before} -> ${row.after}: ${row.verdict}\n`
+      + `      strictWouldFail: ${row.strictWouldFail}`)
     .join('\n');
 }
 
 /**
- * Re-snapshot and compare. Throws on any violation, and prints every row of
- * every path that had one — the strict `tree` verdict and the attributable
- * `leak-scan` verdict for the same directory sit side by side, which is what
- * separates "this bench leaked" from "another session appended".
+ * Whether two guard paths describe the same store, by containment.
+ *
+ * `path.dirname` is the wrong test and was the bug here: the tree guard on
+ * `…/.artibot/runtime` and the leak-scan on `…/.artibot/runtime/ledger.jsonl`
+ * have dirnames one level apart, so comparing dirnames left every violation
+ * reported without the row that explains it. Containment is checked in both
+ * directions so the pairing survives whichever of the two is the violating row.
+ *
+ * @param {string} a absolute path
+ * @param {string} b absolute path
+ * @returns {boolean}
+ */
+function isSameStore(a, b) {
+  return a === b || a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
+}
+
+/**
+ * Print every guard row. Not a debug artifact — this IS the verdict bench's
+ * report surface, and it runs on a pass as much as on a failure. A tolerated
+ * pass is only honest if the rows it tolerated, and their `strictWouldFail`
+ * flags, are visible without re-running in the other mode.
+ *
+ * @param {Array<object>} rows compareGuards() output
+ * @returns {void}
+ */
+function reportGuardRows(rows) {
+  const wouldFail = rows.filter((row) => row.strictWouldFail).length;
+  // eslint-disable-next-line no-console
+  console.log(
+    `hook-latency guards: writers=${WRITERS_MODE}; `
+    + `${wouldFail} of ${rows.length} guard(s) would fail under strict\n`
+    + describeGuardRows(rows),
+  );
+}
+
+/**
+ * Re-snapshot, compare under the selected writers mode, report every row, and
+ * throw on any violation. The thrown message carries every row of every store
+ * that had one, so the strict `tree` verdict and the attributable `leak-scan`
+ * verdict for the same store sit side by side — which is what separates "this
+ * bench leaked" from "another session appended".
  *
  * @returns {Promise<void>}
  */
 async function verifyGuards() {
-  const rows = compareGuards(guardsBefore, await snapshotGuards(guardSpecs()));
+  const rows = compareGuards(
+    guardsBefore,
+    await snapshotGuards(guardSpecs()),
+    { writers: WRITERS_MODE },
+  );
+  reportGuardRows(rows);
+
   const violations = rows.filter((row) => row.violation);
   if (violations.length === 0) return;
 
-  const touched = new Set(violations.map((row) => path.dirname(row.path)));
-  const context = rows.filter((row) => touched.has(path.dirname(row.path)));
+  const context = rows.filter((row) => violations.some((bad) => isSameStore(row.path, bad.path)));
   throw new Error(
-    `hook-latency bench touched a guarded store (${violations.length} violation(s)).\n`
+    `hook-latency bench touched a guarded store `
+    + `(${violations.length} violation(s), writers=${WRITERS_MODE}).\n`
     + `${describeGuardRows(context)}\n`
-    + '  A "clean (no new bench- ids)" leak-scan next to a CHANGED tree on the same\n'
-    + '  directory means a concurrent session wrote there, not this bench.',
+    + '  A "clean (0 of N generated values found)" leak-scan next to a CHANGED tree on\n'
+    + '  the same store means a concurrent session wrote there, not this bench.\n'
+    + '  ARTIBOT_BENCH_WRITERS=tolerate passes on unattributed writes — a WEAKER\n'
+    + '  result, which is what the strictWouldFail flag on each row is there to say.',
   );
 }
 

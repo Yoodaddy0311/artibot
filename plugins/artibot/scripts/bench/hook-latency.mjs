@@ -112,6 +112,17 @@
  * fingerprint-free writes, so `strictWouldFail` rides along on every report and
  * a tolerated pass must never be quoted as if it were a strict one.
  *
+ * TWO LAYERS, TWO POLICIES, ON PURPOSE. The CLI REJECTS an unrecognized mode:
+ * `parseArgs` throws and the process exits 1 (measured: `--writers lenient` ->
+ * exit 1, one stderr line naming the accepted values). The library NORMALIZES
+ * one: `compareGuards(before, after, options)` treats anything that is not the
+ * string `tolerate` — absent, misspelled, undefined — as `strict`. An operator
+ * who types a mode has an intent that a typo would silently betray, so the
+ * command surface demands an exact word; a caller that omits the option wants
+ * the default, and the default must be the safe end of the range. The
+ * asymmetry is the point, not an oversight: neither layer can be made to
+ * silently run in the weaker mode.
+ *
  * One deliberate divergence from those suites: the sandbox cwd IS a git
  * repository here, where theirs is not. They use a non-git cwd to make the
  * git-autopilot hooks structurally unable to act. A latency bench that skipped
@@ -1130,7 +1141,8 @@ function treeDigest(root) {
  *
  * SELF-CHECK CONTROLS. A detector is worth only its false-negative rate, so the
  * matrix below is run against this function rather than assumed. Measured
- * 2026-09-10T16:00Z (01:00 KST):
+ * approx. 2026-09-10T15:56Z (00:56 KST) — the run immediately preceded the
+ * suite that started at 00:57:41, which is the closest timestamp recorded:
  *
  *   clean  another session's typed command carrying `…/artibot-bench-cwd-XYZ12/
  *          bench.txt`, logged verbatim as a `human.asked` row   <- the sibling
@@ -1141,7 +1153,8 @@ function treeDigest(root) {
  *   LEAK   a session id this process emitted
  *   LEAK   the basename of a sandbox this process created
  *
- * And three more for `--writers tolerate`, measured 2026-09-10T16:10Z (01:10 KST):
+ * And three more for `--writers tolerate`, measured approx. 2026-09-10T16:03Z
+ * (01:03 KST) — again bounded by the suite that started at 01:04:36:
  *
  *   exit 0  an unrelated row appended to a `tree` store -> `CHANGED
  *           (unattributed …)`, violation false, strictWouldFail TRUE, and one
@@ -1323,15 +1336,25 @@ export async function snapshotGuards(paths) {
 }
 
 /**
- * Verdict for one leak-scan guard: did any file gain a `bench-` occurrence?
+ * Verdict for one leak-scan guard: does any file hold a value THIS run
+ * generated?
  *
- * Comparing counts rather than presence is deliberate. A file may already hold
- * `bench-` strings from an earlier run of this tool; only an INCREASE during
- * this run is attributable to this run.
+ * Presence, not growth — the body says the same thing at greater length. An
+ * earlier revision of this function subtracted the before counts from the after
+ * counts, and this comment still described that behaviour after the body had
+ * moved on. Growth was the right rule while the markers included fixed literals
+ * that a store could legitimately already contain; it became the wrong one once
+ * every marker carried a random suffix minted by this process, because such a
+ * value cannot pre-exist and a hook that wrote it just before the first
+ * snapshot is the same leak as one that wrote it between the two.
+ *
+ * The informational counts on the side are still compared by growth. That is
+ * not an inconsistency: those markers are naming patterns anyone can produce,
+ * so for them "already there" and "appeared" really are different facts.
  *
  * @param {object} before
  * @param {object} after
- * @returns {{verdict: string, violation: boolean}}
+ * @returns {{verdict: string, violation: boolean, informational: string}}
  */
 function compareLeakScan(before, after) {
   const afterExact = after.leaks?.exact || {};
@@ -1447,57 +1470,55 @@ function finalize(result) {
  * @returns {object}
  */
 function compareOne(prev, afterEntry, writers) {
-  {
-    const next = afterEntry
-      || { state: 'missing-snapshot', mode: prev.mode, leaks: null, entries: [] };
-    const shape = {
-      path: prev.path,
-      mode: prev.mode,
-      before: prev.state,
-      after: next.state,
-      entries: {
-        before: prev.entries || [],
-        after: next.entries || [],
-      },
-      entriesTruncated:
-        (prev.entries || []).length >= GUARD_ENTRY_LIMIT
-        || (next.entries || []).length >= GUARD_ENTRY_LIMIT,
-      // Size of the exact-match set the leak verdict was decided against. A
-      // reader can tell "clean because nothing leaked" from "clean because the
-      // set was empty and nothing could have matched".
-      exactMarkerCount: exactLeakMarkers().length,
-    };
+  const next = afterEntry
+    || { state: 'missing-snapshot', mode: prev.mode, leaks: null, entries: [] };
+  const shape = {
+    path: prev.path,
+    mode: prev.mode,
+    before: prev.state,
+    after: next.state,
+    entries: {
+      before: prev.entries || [],
+      after: next.entries || [],
+    },
+    entriesTruncated:
+      (prev.entries || []).length >= GUARD_ENTRY_LIMIT
+      || (next.entries || []).length >= GUARD_ENTRY_LIMIT,
+    // Size of the exact-match set the leak verdict was decided against. A
+    // reader can tell "clean because nothing leaked" from "clean because the
+    // set was empty and nothing could have matched".
+    exactMarkerCount: exactLeakMarkers().length,
+  };
 
-    if (prev.mode === 'leak-scan') return { ...shape, ...compareLeakScan(prev, next) };
+  if (prev.mode === 'leak-scan') return { ...shape, ...compareLeakScan(prev, next) };
 
-    // Every remaining mode fails on an attributable leak FIRST, before the
-    // digest is consulted. A value this run generated, sitting in a guarded
-    // store, is a violation in either writers mode and whatever else changed.
-    const leak = compareLeakScan(prev, next);
-    if (leak.violation) return { ...shape, ...leak };
+  // Every remaining mode fails on an attributable leak FIRST, before the
+  // digest is consulted. A value this run generated, sitting in a guarded
+  // store, is a violation in either writers mode and whatever else changed.
+  const leak = compareLeakScan(prev, next);
+  if (leak.violation) return { ...shape, ...leak };
 
-    if (prev.state === 'absent' && next.state === 'absent') {
-      return { ...shape, verdict: 'absent/absent', violation: false };
-    }
-    if (prev.state === next.state) return { ...shape, verdict: 'unchanged', violation: false };
-    if (prev.mode === 'informational') {
-      return { ...shape, verdict: 'CHANGED (informational — gitignored runtime dir)', violation: false };
-    }
-    if (prev.mode === 'observe') {
-      return {
-        ...shape,
-        verdict: 'CHANGED (observe — recorded, not a failure; compare entries)',
-        violation: false,
-        // `observe` never failed under strict either, so strictWouldFail stays
-        // false here — but the row evidence is just as useful, so tolerate
-        // attaches it rather than reserving it for the modes that changed
-        // verdict.
-        ...(writers === 'tolerate' ? { unattributedRows: newRowsBetween(prev, next) } : {}),
-      };
-    }
-    if (writers === 'tolerate') return { ...shape, ...tolerateVerdict(prev, next) };
-    return { ...shape, verdict: 'CHANGED', violation: true };
+  if (prev.state === 'absent' && next.state === 'absent') {
+    return { ...shape, verdict: 'absent/absent', violation: false };
   }
+  if (prev.state === next.state) return { ...shape, verdict: 'unchanged', violation: false };
+  if (prev.mode === 'informational') {
+    return { ...shape, verdict: 'CHANGED (informational — gitignored runtime dir)', violation: false };
+  }
+  if (prev.mode === 'observe') {
+    return {
+      ...shape,
+      verdict: 'CHANGED (observe — recorded, not a failure; compare entries)',
+      violation: false,
+      // `observe` never failed under strict either, so strictWouldFail stays
+      // false here — but the row evidence is just as useful, so tolerate
+      // attaches it rather than reserving it for the modes that changed
+      // verdict.
+      ...(writers === 'tolerate' ? { unattributedRows: newRowsBetween(prev, next) } : {}),
+    };
+  }
+  if (writers === 'tolerate') return { ...shape, ...tolerateVerdict(prev, next) };
+  return { ...shape, verdict: 'CHANGED', violation: true };
 }
 
 /**
@@ -1732,7 +1753,16 @@ function printHuman(report) {
   console.log(`node       ${env.node} | artibot ${env.pluginVersion} | HEAD ${String(env.headSha).slice(0, 8)}`);
   console.log(`machine    ${env.os} | ${env.cores} cores | ${env.cpu}`);
   console.log(`runs       n=${report.n}, warmup=${report.warmup} (warmup excluded from stats)`);
-  console.log(`writers    mode: ${report.writersMode}${report.strictWouldFail ? '  |  strict would FAIL' : ''}`);
+  // The same flag means different news in the two modes. Under `tolerate` it
+  // is the whole point of the line: the run passed, and a stricter check would
+  // not have. Under `strict` a would-fail IS the failure, already spelled out
+  // on the guard lines below, so `mode: strict | strict would FAIL` read as a
+  // stutter — it is labelled as the violation it is instead.
+  let writersNote = '';
+  if (report.strictWouldFail) {
+    writersNote = report.writersMode === 'tolerate' ? '  |  strict would FAIL' : '  |  violation';
+  }
+  console.log(`writers    mode: ${report.writersMode}${writersNote}`);
   console.log('');
 
   const header = [
@@ -1917,9 +1947,15 @@ async function main() {
     n: opts.n,
     warmup: opts.warmup,
     writersMode: opts.writers,
-    // True when at least one guard passed only because of `tolerate`. A run
-    // reported as clean with this set is a weaker result than one without it,
-    // and the flag is what keeps the two from reading alike downstream.
+    // True when at least one before/after pair WOULD fail under strict — which
+    // covers two different runs: any actual violation, and a change that
+    // `tolerate` downgraded to a pass.
+    //
+    // Not "passed only because of tolerate", which was the earlier wording and
+    // is false on a strict run that failed: there the flag is true and nothing
+    // passed at all. The flag answers "would the strongest available check have
+    // failed here", so a clean tolerate run carrying it is a weaker result than
+    // one without, and a failing strict run carrying it is simply consistent.
     strictWouldFail: guards.some((guard) => guard.strictWouldFail),
     declaredBudgetsMs: DECLARED_BUDGETS,
     results,
