@@ -1,4 +1,48 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-09 22:0x, nowhe 머신, master = 4f79f7e5 + 이 커밋, 설치본 4.57.0)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-10 11:4x KST, AsusHeechangLee 머신, master = d410ebb0 + 이 커밋, 설치본 4.57.0)
+
+> 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
+
+## 지금 상태 (2026-09-10 11:4x KST 실측)
+
+| 항목 | 값 |
+|---|---|
+| master | **d410ebb0** = base 0c75f942 + `/split` Wave 1 배치 랜딩(ci/split-b87130, 4줄기 + 배치 병합 4 = 10커밋). CI 전체 그린(2차). 로컬 = origin |
+| /split 런 | runId **split-b87130** (플랜 09:3x, 3 wave · 10 줄기 · 직렬 3). **Wave 1 4/4 landed** · Wave 2 브리프 4/4 작성(창 미개설) · Wave 3 미착수 |
+| 설치본 | 4.57.0. **줄기가 고친 `land.mjs`·`batch-landing.js` 는 소스에만 있고 설치본은 옛 판** — 다음 릴리스 전까지 `/split land`·integrate 는 worktree/소스 판을 직접 부르거나 `npm run sync:local` |
+
+## Wave 1 결과 (origin/master d410ebb0, 리더 판독 = first-parent 트레일러 + land 7/7 + 4-way merge-preflight SAFE)
+
+| limb | done 커밋 | 내용 | 라이브 검증 |
+|---|---|---|---|
+| ups-source-guard | f8ecac6f (3파일 +554/-17) | UPS 가드 — `<cross-session-message`·`<agent-message` 봉투 마커(호스트 2.1.267 은 `source` 를 싣지 않음, 캡처 7/7 부재) + 디스패처 테스트 샌드박스 자기 앵커(HOME 덮어쓰기가 `resolveProjectRoot` 홈 제외를 무력화해 실 홈 스토어에 쓰던 결함) | worktree 디스패처 2경로 `0 hooks run` |
+| ledger-dedupe-pid | ff8fd961 (5파일 +128/-21) | `dedupeKey` 5필드(ts 추가) — ledger.js·replay.js 동시, 패리티 방향 불변식 복구 | 실원장 census 0→0(브리프의 pid 중복 전제가 틀렸음, 증거는 픽스처) |
+| land-lint-cwd | c4b50eb2 (2파일 +552/-30) | `land` lint 행이 줄기 worktree 를 잰다(#G14), UNSUPPORTED 10종 fail-closed | 4줄기 전부 이 판으로 판독 |
+| landbatch-lease | fc24b5fb (2파일 +306/-10) | `landBatch` 모든 push `--force-with-lease`(ls-remote 관측 SHA / 부재=빈 값) + `ci/split-` 접두 1회(#G25) | 2차 재실행이 1차 stale ci 브랜치 위에서 `lease …: ff2b8ed0` 로 진행 — 라이브 작동 |
+
+**integrate 1차 not-green 교훈**: 전체 vitest 15,253 중 1 실패 = `tests/firewall/dispatcher-cwd-sandbox-required.test.js`(ups 의 새 샌드박스가 미등록 메커니즘). 줄기는 표적 스위트만 돌리는 규약이라 못 봤다 → **Wave 2 브리프부터 "소유 파일을 스캔하는 firewall 게이트는 소스 스캔형이라 안전, 반드시 돌려라"** 를 넣었다. 수리는 소유 파일 1줄(`sandboxCwd = mkdtempSync(...)`)로 방화벽 무수정.
+
+## 다음 할 일 (우선순위순)
+
+| # | 작업 | 근거·주의 |
+|---|---|---|
+| P0 | **Wave 2 창 4개 열기** — 리포 루트에서 `claude --worktree split-artibot-{doctor-check8-arg,schema-route-drift,install-hygiene,readme-drift}` → 리더 창에서 `/split 계속`(worktree-setup → dispatch → status). 브리프는 `.artibot/split/<limb>/brief.md`(로컬, 이 머신). plan.json base 는 **d410ebb0** 로 올렸다(Wave 1 트레일러가 `<base>..<branch>` 에 새지 않게) | 다른 머신이면 브리프를 이 절 + NEXT-SESSION 09-09 절에서 재구성 |
+| P1 | 리더 docs 커밋(소유 밖 후속, 줄기 4개 보고 합산): `commands/split.md` — land 절 lint UNSUPPORTED 사유 4종, `ci/split-{runId}`→`ci/split-<sid>` 표기 3곳(:30,:204,:206), "ff push(--force-with-lease)" 오기 · `skills/split/references/operations.md:29` 6행 표→7행 + 운용 규칙 "land 는 창 닫기 전(worktree 삭제 뒤 lint 행 UNSUPPORTED)" · `CHANGELOG.md` :41/:78 후속 닫기 · `lib/runtime/event-writer.js:59,274`·`schemas/ledger-envelope.schema.json:62,67` dedupe 키 서술 5필드 · `tests/replay/replay.test.js:232` it 제목 | 전부 줄기 done 보고에 file:line 있음(줄번호는 d410ebb0 기준으로 재확인) |
+| P1 | Wave 3 브리프 2개(version-check-optout · autoapprove-danger-filter) + 직렬 3건(lock-harness · skill-description-render · hook-latency-bench) 소유 파일 확정 | 직렬분은 affectedPaths 가 없어 플래너가 wave 에 못 넣었다 |
+| P2 | 관찰 후속(미확인, 판정 없음): ① 세션 9120048e 가 09-03 부터 **홈 스토어** `~/.artibot/runtime/decisions/` 에 503행(리포 밖 cwd 폴백?) ② 호스트 peer hold — 인터랙티브 발신→bypass 수신은 승인 대기, `-p` 발신은 즉시(ups 추론) ③ `resolveProjectRoot` 홈 제외가 HOME 덮어쓰기에 무력(설계 항목) ④ 인프로세스 팀원 도착은 원 사람 턴 prompt_id 재사용, cross-session 은 고유 | |
+
+## 측정 고지 (split-b87130, 두 스토어 병합 20이벤트 — 소스 리포 11 + 설치 캐시 9)
+1. 실오퍼레이터 데이터 3건(n=3) — `/split` vs `-fast` 속도 비교는 여전히 주장할 수 없다.
+2. wall-clock 은 인간 대기 포함 — 이 런은 `open-windows` 세그먼트 미기록(창을 오너가 plan 직후 열어 리더가 확인 절차를 안 거침), `confirm-integrate` 2ms(승인이 4/4 PASS 전에 선행).
+3. 사람 대기 비율 **null%**(분자 humanWaitMs=2, 분모 run=null — `run` start 가 plan 3회 재실행으로 3번 기록·end 1번, 미쌍 1건) — `humanWaitReevalPct`=50 대비 **미측정**. 판정과 C단계 재개는 사람이 결정한다. 교훈: plan 재실행 시 `run` 세그먼트를 다시 열지 말 것(resume 규약과 동일).
+
+## 이 세션 관찰(도구)
+- 리더 세션에 도착한 피어 메시지 **전부**에 UserPromptSubmit 라우팅 컨텍스트(`[artibot:route …]`·`[auto-team-suggested]`)가 붙었다 — ups-source-guard 결함의 리더 측 독립 재현(설치본 4.57.0 은 수리 전).
+- Git Bash heredoc 에서 백슬래시·한글+따옴표 혼합 본문이 2회 깨졌다(`\\` 소실, `$'…'` EOF). JS 는 ASCII 파일로 빼고, 한글 마크다운은 Write 도구로.
+- 줄기 창이 소유 밖 실 스토어(홈 `decisions/`)의 테스트 오염 파일을 리더 승인 없이 삭제한 사건 1건(합성 id, 손실 0) → 브리프 환경 경고에 "worktree 밖 삭제는 리더에게 먼저" 고정.
+
+---
+
+# (구) NEXT-SESSION — 크로스머신 핸드오프 (2026-09-09 22:0x, nowhe 머신, master = 4f79f7e5 + 이 커밋, 설치본 4.57.0)
 
 > 다른 머신에서는 `git pull` → `claude plugin update`(4.57.0) → 재시작 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`reports/AUTOPILOT/`·`.artibot/runtime/`·`.artibot/ledger/`)은 이 머신에만 있다. 이 절의 수치는 전부 이 머신 원장 실측이다.
 
