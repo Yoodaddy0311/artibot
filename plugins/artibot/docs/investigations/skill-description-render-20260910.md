@@ -55,7 +55,7 @@
 - 채취: 스킬 목록은 시스템 프롬프트 본문이 아니라 **user 메시지에 붙는 attachment** 다. 세션 jsonl 의 `$.rendered[0].content`(record 5, `<system-reminder>` 블록)에 원문이 저장된다. 기록된 `systemPrompt`(27,173자)에는 목록이 없다. 아래 수치는 전부 호스트가 만든 문자열을 직접 잰 값이지 모델 자기보고가 아니다. (실측)
 - 모든 실험은 스크래치패드 mkdtemp 아래 임시 플러그인, cwd 도 임시 디렉터리(git 리포 밖). `~/.claude/plugins` · `~/.claude/settings.json` 접촉 0, 리포 파일 수정 0, `~/.claude.json` 읽기만.
 
-### 3.2 바이너리에서 추출한 알고리즘 (`C:\Users\HeechangLee\.local\bin\claude.exe` 2.1.267, 220,051,616 B, 오프셋 191,857,681; 난독화 심볼 `bke` 예산 · `tor` 선정 · `WFe` 우선순위 · `QHe` 설명 상한 · `Wis` 면제)
+### 3.2 바이너리에서 추출한 알고리즘 (`~/.local/bin/claude.exe` 2.1.267, 220,051,616 B, 오프셋 191,857,681; 난독화 심볼 `bke` 예산 · `tor` 선정 · `WFe` 우선순위 · `QHe` 설명 상한 · `Wis` 면제)
 
 ```
 budget = env.SLASH_COMMAND_TOOL_CHAR_BUDGET
@@ -124,7 +124,7 @@ description 본문 = `${description} - ${when_to_use}` (when_to_use 있을 때�
 - 리더 스크래치패드 인용 대조: exp 가 대조한 항목 전부 일치, 틀린 인용 0.
 
 ### 3.6 원시 산출물 (절대경로)
-- 원시 출력: `C:\Users\HEECHA~1\AppData\Local\Temp\claude\C--Users-HeechangLee-Desktop-AI-Artibot\7f2cf483-6554-4775-bb07-fd4a3b9938ec\scratchpad\exp\raw\` — `E0-validate-details.txt`, `E0b-details.txt`, `E1A.out`, `E1A.debug`, `E1AB.out`, `E1AB.skillblock.txt`, `E1AB.sysprompt.txt`, `E2A.out`, `E2A.skillblock.txt`, `E2FG.out`, `E2FG.skillblock.txt`, `E34.out`, `E34.skillblock.txt`, `E2MTIME.out`, `E2MTIME.skillblock.txt`
+- 원시 출력(`<scratchpad>` = 이 세션의 임시 스크래치 디렉터리; 리포에 보존하지 않음 — 리더 결정 01:02): `<scratchpad>/exp/raw/` — `E0-validate-details.txt`, `E0b-details.txt`, `E1A.out`, `E1A.debug`, `E1AB.out`, `E1AB.skillblock.txt`, `E1AB.sysprompt.txt`, `E2A.out`, `E2A.skillblock.txt`, `E2FG.out`, `E2FG.skillblock.txt`, `E34.out`, `E34.skillblock.txt`, `E2MTIME.out`, `E2MTIME.skillblock.txt`
 - 입력 플러그인 트리: `…\scratchpad\exp\run1\pgA` ~ `pgG`
 - 스크립트: `…\scratchpad\exp\` — `gen.js`, `gen2.js`, `gen3.js`, `gen4.js`(E5), `e1a.sh`, `e1ab.sh`, `e2a.sh`, `e2fg.sh`, `e34.sh`, `e2mtime.sh`, `e5.sh`, `findskills.js`(jsonl→목록 블록 추출), `budget.js`(호스트 회계 F 재계산), `measure.js`, `usage.js`(WFe 점수), `bingrep.js`, `desclen.js`
 - E5 입력: `…\scratchpad\exp\run1\pgI`, 원시 `raw\E5*.{out,debug}`, `E5-6.skillblock.txt` · `E5-7.skillblock.txt` · `E5-8.skillblock.txt`
@@ -139,7 +139,7 @@ description 본문 = `${description} - ${when_to_use}` (when_to_use 있을 때�
 | Q3 렌더 12 vs 이름만 67(목록 62 + 은닉 dmi 5; 분모 79) 2×2 | 따옴표 형태 · 블록 · argument-hint(전부 있음) · allowed-tools(전부 있음) · model/user-invocable(없음) · mtime · size · CRLF · BOM · dup key · 동명 스킬 · frontmatter 줄수 — **어느 속성도 분리 못 함**. `history.jsonl`(4,903행) 사용 빈도도 무분리(update 34회 이름만 vs analytics 0회 렌더). 같은 description 텍스트(79파일 합계 8,306 동일)가 `~/.claude/commands` 위치에선 73/73(목록 열거; 파일 79, §1 정정), 플러그인 위치에선 12/79 렌더 → 파일 내용이 아니라 위치·호스트 처리가 변수 | 실측 / (텍스트 동일성은 합계로만) |
 | Q4 cowork 3 vs 43, nexus | 어떤 속성도 분리 못 함. mtime 46 전부 2026-07-09. lab-hello(렌더) · lab-skill(이름만)은 같은 블록 형식 · 같은 키 집합 | 실측 |
 | Q5 렌더 description 합산 | 사용자 스킬 1,795 + 사용자 커맨드 ≤7,802(정정: 초판 8,306 은 dmi 5 포함 79파일 합) + cowork 커맨드 1,848 + artibot 12 커맨드 1,743 + cowork 3 스킬 987 + lab-hello 309 = ≤14,484 / + ui-ux 914 = **≤15,395**(정정: 초판 15,902; 내장 14 미확인). 참고: artibot 79 커맨드 전체 8,306 · cowork 46 스킬 전체 15,552 · artibot 114 스킬 전체 **39,326**. 잘린 경계는 정확히 analytics(101자) \| analyze(74자) | 실측(합·경계) / 추론(상한 단위) |
-| Q6 호스트 사용 저장소 | 1차 "없음" 은 탐색 범위 오류 — **정정**: 홈 루트 `C:\Users\HeechangLee\.claude.json` 의 `skillUsage` 키, 65항목, 값 `{usageCount, lastUsedAt(ms epoch)}`(105,896 B, mtime 00:26 갱신 중). 무접두 키(`team` 386 · `save` 253 · `resume` 217 · `autopilot` 138 …)와 플러그인 한정 키(`artibot:save` 7 · `artibot:split` 4 · `artibot:team` 1 …) 공존 | 실측 |
+| Q6 호스트 사용 저장소 | 1차 "없음" 은 탐색 범위 오류 — **정정**: 홈 루트 `~/.claude.json` 의 `skillUsage` 키, 65항목, 값 `{usageCount, lastUsedAt(ms epoch)}`(105,896 B, mtime 00:26 갱신 중). 무접두 키(`team` 386 · `save` 253 · `resume` 217 · `autopilot` 138 …)와 플러그인 한정 키(`artibot:save` 7 · `artibot:split` 4 · `artibot:team` 1 …) 공존 | 실측 |
 | Q7 `ci-utils.js#extractFrontmatter` | 블록 스칼라 3종(본문 2줄 · 빈 본문 · 빈 줄 포함) 전부 값 `"|"` 반환, 인라인은 따옴표 포함 원문. `validate-skills.js` 는 `if (!frontmatter[field])` 만 검사(00:21 기준 :51-58) → `"|"` 는 truthy → **빈 `description: |` 도 PASS**. 현 코퍼스에 빈 블록 0(실해 0) | 실측 |
 
 ### 4.1 결정 대조 — `skillUsage` 플러그인 한정 키 vs 렌더 집합 (분모 247 = artibot 커맨드 74 + cowork 커맨드 21 + cowork 스킬 46 + artibot 스킬 101 + nexus 4 + ui-ux 1, 00:27)
