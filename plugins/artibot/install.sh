@@ -488,6 +488,17 @@ setup_directories() {
 # its NATIVE signal — `cacheMarker` = ~/.claude/plugins/cache. Two spellings of
 # one fact: if that module's marker ever moves, this must move with it.
 #
+# WHY NOT JUST CALL THAT MODULE. It answers a different question. detectInstallMode
+# classifies the RUNNING plugin root — it asks whether the code currently executing
+# was loaded out of the cache, by testing `pluginRoot` / `CLAUDE_PLUGIN_ROOT`
+# against the marker. The installer is not running from there: it runs from a
+# source checkout (SCRIPT_DIR), so that call would report `legacy` no matter how
+# many native versions are installed, and the flat copy would never be suppressed.
+# The question here is "is a native install present ON DISK", which is a directory
+# probe, not a classification of self. Shelling out to node for it would also make
+# a copy step depend on the runtime staying importable mid-install — the tree it
+# would import from is one of the trees this script is in the middle of replacing.
+#
 # Stricter here than there in one respect, deliberately: the bare cache root is
 # NOT enough. Claude Code creates ARTIBOT_PLUGIN_CACHE_ROOT and fills it with a
 # per-version directory (install_plugin_cache below iterates exactly those), so
@@ -509,9 +520,13 @@ ARTIBOT_FLAT_COPY="${ARTIBOT_FLAT_COPY:-0}"
 ARTIBOT_FLAT_COPY_SKIPPED=0
 
 detect_native_plugin_install() {
-  # ARTIBOT_PLUGIN_CACHE_ROOT (:9) is the same marker lib/core/install-mode.js#
-  # detectInstallMode uses for its NATIVE signal — its `cacheMarker` is
-  # ~/.claude/plugins/cache. The `:-` default is not cosmetic: these functions
+  # ARTIBOT_PLUGIN_CACHE_ROOT (declared next to ARTIBOT_DIR at the top of this
+  # file — named rather than cited by line, because line numbers rot) is the same
+  # marker lib/core/install-mode.js#detectInstallMode uses for its NATIVE signal;
+  # its `cacheMarker` is ~/.claude/plugins/cache. See the section note above for
+  # why that module cannot simply be called from here.
+  #
+  # The `:-` default is not cosmetic: these functions
   # get extracted and run standalone by tests under `set -u`, and an empty root
   # fails the -d check below, i.e. "no native install" — the direction that
   # copies rather than the one that silently suppresses.
@@ -733,9 +748,12 @@ install_marketplace_mirror() {
 # non-destructive on a fresh-install path while still propagating runtime
 # files to whatever cache versions already exist.
 install_plugin_cache() {
-  # Reads the single top-level constant (:9) rather than repeating the literal —
-  # detect_native_plugin_install must agree with this function about what "the
-  # cache" is, and two literals is exactly how those answers diverge.
+  # Reads the single top-level ARTIBOT_PLUGIN_CACHE_ROOT rather than repeating
+  # the literal — detect_native_plugin_install must agree with this function
+  # about what "the cache" is, and two literals is exactly how those answers
+  # diverge. Behaviour is otherwise unchanged: an unset/empty root fails the -d
+  # check below and takes the same "not present, skip" path a missing directory
+  # always did.
   local cache_root="${ARTIBOT_PLUGIN_CACHE_ROOT:-}"
   if [ ! -d "${cache_root}" ]; then
     log "Plugin cache not present (skip cache sync)"

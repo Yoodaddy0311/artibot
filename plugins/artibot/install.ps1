@@ -13,8 +13,8 @@
     rules/                              -> ~/.claude/rules/artibot/
 
   The flat copy of commands/ and agents/ is SKIPPED when the native marketplace
-  plugin is already installed (a version directory under
-  ~/.claude/plugins/cache/artibot/artibot). Doing both puts every agent and
+  plugin is already installed (a version directory under the Claude Code plugin
+  cache - the run prints the detected path). Doing both puts every agent and
   command into the session system prompt TWICE. Pass -Flat to force the copy.
 
   Seeds a conservative read-only permission allowlist (Read/Glob/Grep) into
@@ -366,11 +366,22 @@ function Copy-Tree {
 # ---------------------------------------------------------------------------
 # Same marker as lib/core/install-mode.js#detectInstallMode, whose NATIVE signal
 # is the Claude marketplace plugin cache (its `cacheMarker`, built from
-# ~/.claude/plugins/cache). This narrows that to the artibot plugin's own cache
-# root and requires at least one VERSION subdirectory: Claude Code creates
-# ~/.claude/plugins/cache/artibot/artibot/<version>/ per installed version, and
-# the bare parent directory survives an uninstall, so its mere existence proves
-# nothing. Update-PluginCache below reads the same root for the same reason.
+# ~/.claude/plugins/cache). $PluginCacheRoot narrows that to this plugin's own
+# cache root; the path itself is written down only at that declaration.
+#
+# WHY NOT JUST CALL detectInstallMode: it classifies the RUNNING plugin root -
+# it asks whether the code currently executing was loaded out of the cache. The
+# installer is not that code. It runs from a source checkout (or a curl-piped
+# copy), so its own root is never under the cache and the module would answer
+# "not native" every time. The question here is a different one: is a native
+# install present on this machine, whatever this script was launched from. Same
+# marker, different subject, so the check is duplicated deliberately - and the
+# marker stays a single literal in each installer to keep the two honest.
+#
+# Requires at least one VERSION subdirectory, not merely the root: Claude Code
+# creates one directory per installed version underneath it, and the bare parent
+# survives an uninstall, so its existence alone proves nothing.
+# Update-PluginCache below reads the same variable for the same reason.
 #
 # Returns the detected version-directory path (a string) on a hit and $null
 # otherwise, so callers can name the path in their message. Pure - it never
