@@ -29,6 +29,7 @@
  * run with no runtime deps either way.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -469,13 +470,50 @@ describe('data_schema — the receipt schema validates the event data', () => {
   });
 
   it('lets route.selected be emitted by the hook that actually writes it', () => {
-    // The Observe-phase writer is the SubagentStart hook (T-31), which had been
+    // The Observe-phase writer is the PreToolUse hook (T-31), which had been
     // setting source:'scheduler' only because this list allowed nothing else.
     // Labelling an emitter as something it is not, to satisfy a schema, is the
     // defect rather than the fix -- so the vocabulary follows the fact.
     // `scheduler` stays for the cognitive-router path from Canary onward.
     expect(allowlist.events['route.selected'].sources).toContain('hook');
     expect(allowlist.events['route.selected'].sources).toContain('scheduler');
+  });
+
+  it('cites only hook scripts that exist and carry the event literal they emit', () => {
+    // Line numbers rot; this pins the CLAIM instead. A spec sentence that
+    // names scripts/hooks/<file>.js as the writer of an event is checked
+    // against that file: it must exist, and it must contain the event
+    // literal. The prior route.selected spec named the SubagentStart hook,
+    // which has emitted route.bound (never route.selected) since the receipt
+    // moved to PreToolUse -- the SubagentStart payload carries no action text.
+    const HOOKS_DIR = path.resolve(SCHEMAS_DIR, '../scripts/hooks');
+    const EMITTERS = [
+      ['route.selected', 'route-observe-pre.js'],
+      ['route.bound', 'subagent-handler.js'],
+    ];
+    for (const [event, emitter] of EMITTERS) {
+      const spec = allowlist.events[event].spec;
+      const cited = [
+        ...new Set(
+          [...spec.matchAll(/scripts\/hooks\/([\w-]+\.js)/g)].map((m) => m[1]),
+        ),
+      ];
+      expect(cited, `${event} spec does not name its emitter`).toContain(emitter);
+      for (const file of cited) {
+        expect(
+          existsSync(path.join(HOOKS_DIR, file)),
+          `${event} spec cites a missing file: ${file}`,
+        ).toBe(true);
+      }
+      // Only the emitter must carry the literal. A spec may also name the
+      // other stage's hook, which by definition does not write this event.
+      expect(
+        readFileSync(path.join(HOOKS_DIR, emitter), 'utf-8').includes(
+          `event: '${event}'`,
+        ),
+        `${event} names ${emitter} as its emitter, but that file never emits it`,
+      ).toBe(true);
+    }
   });
 
   it('does not copy any enum the receipt schema owns', () => {
