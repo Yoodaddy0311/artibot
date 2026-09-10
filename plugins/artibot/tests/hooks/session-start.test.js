@@ -36,6 +36,9 @@ const mockState = {
   // Using a factory (thunk) avoids storing a rejected Promise in state, which would
   // trigger vitest's unhandled-rejection detection before the module's catch block runs.
   checkForUpdateFactory: () => Promise.resolve({ hasUpdate: false }),
+  // Args of every checkForUpdate call, in order. The opt-out tests assert the
+  // hook made ZERO calls, which a factory-return assertion cannot express.
+  checkForUpdateCalls: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -134,9 +137,20 @@ vi.mock('node:child_process', async () => {
   };
 });
 
-vi.mock('../../lib/core/version-checker.js', () => ({
-  checkForUpdate: vi.fn(() => mockState.checkForUpdateFactory()),
-}));
+// Partial mock ON PURPOSE. `checkForUpdate` is stubbed because it does network
+// I/O, but `resolveUpdateCheckPolicy` is a pure function and stays REAL — a
+// stubbed resolver would make the precedence tests below assert the stub's
+// behaviour instead of the shipped env-beats-config rule.
+vi.mock('../../lib/core/version-checker.js', async () => {
+  const actual = await vi.importActual('../../lib/core/version-checker.js');
+  return {
+    ...actual,
+    checkForUpdate: vi.fn((...args) => {
+      mockState.checkForUpdateCalls.push(args);
+      return mockState.checkForUpdateFactory();
+    }),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -169,6 +183,10 @@ async function runHook() {
 describe('session-start hook', () => {
   let stderrSpy;
   let exitSpy;
+  // ARTIBOT_UPDATE_CHECK is process-global; the opt-out tests set it and the
+  // whole file shares one process. Capture the entering value (`undefined`
+  // when unset) so afterEach restores exactly that, delete included.
+  let savedUpdateCheckEnv;
 
   beforeEach(() => {
     vi.resetModules();
@@ -184,6 +202,9 @@ describe('session-start hook', () => {
     mockState.statSyncImpl = null;
     mockState.handoffHeadContent = null;
     mockState.checkForUpdateFactory = () => Promise.resolve({ hasUpdate: false });
+    mockState.checkForUpdateCalls = [];
+    savedUpdateCheckEnv = process.env.ARTIBOT_UPDATE_CHECK;
+    delete process.env.ARTIBOT_UPDATE_CHECK;
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
   });
@@ -200,6 +221,8 @@ describe('session-start hook', () => {
     exitSpy.mockRestore();
     delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
     delete process.env.ANTHROPIC_BETA;
+    if (savedUpdateCheckEnv === undefined) delete process.env.ARTIBOT_UPDATE_CHECK;
+    else process.env.ARTIBOT_UPDATE_CHECK = savedUpdateCheckEnv;
   });
 
   async function waitForStdout(timeoutMs = SETTLE_TIMEOUT_MS) {
@@ -407,6 +430,92 @@ describe('session-start hook', () => {
 
       expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
     }, 12000);
+  });
+
+  describe('update check opt-out', () => {
+    /** stderr lines the opt-out gate emitted, ignoring every other hook message. */
+    function disabledNotices() {
+      return stderrSpy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((line) => line.includes('update check disabled'));
+    }
+
+    /** Make loadConfig() see `config`, leaving every other read at ENOENT. */
+    function withConfig(config) {
+      mockState.readFileSyncImpl = (filePath) => {
+        if (String(filePath).includes('artibot.config.json')) {
+          return JSON.stringify(config);
+        }
+        throw new Error('ENOENT');
+      };
+    }
+
+    it('runs the check when neither env nor config opts out', async () => {
+      mockState.checkForUpdateFactory = () =>
+        Promise.resolve({ hasUpdate: true, latestVersion: '9.9.9' });
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      expect(mockState.checkForUpdateCalls).toHaveLength(1);
+      expect(disabledNotices()).toHaveLength(0);
+      expect(mockState.writeStdoutCalls[0][0].message).toContain('/update --force');
+    });
+
+    it('skips the check entirely when ARTIBOT_UPDATE_CHECK opts out', async () => {
+      process.env.ARTIBOT_UPDATE_CHECK = '0';
+      mockState.checkForUpdateFactory = () =>
+        Promise.resolve({ hasUpdate: true, latestVersion: '9.9.9' });
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      expect(mockState.checkForUpdateCalls).toHaveLength(0);
+      expect(disabledNotices()).toEqual([
+        '[artibot] update check disabled (ARTIBOT_UPDATE_CHECK=0)\n',
+      ]);
+      expect(mockState.writeStdoutCalls).toHaveLength(1);
+      expect(mockState.writeStdoutCalls[0][0].message).not.toContain('/update --force');
+    });
+
+    it('skips the check when artibot.config.json sets updateCheck.enabled=false', async () => {
+      withConfig({ version: '2.0.0', updateCheck: { enabled: false } });
+      mockState.checkForUpdateFactory = () =>
+        Promise.resolve({ hasUpdate: true, latestVersion: '9.9.9' });
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      expect(mockState.checkForUpdateCalls).toHaveLength(0);
+      expect(disabledNotices()).toEqual([
+        '[artibot] update check disabled (artibot.config.json updateCheck.enabled=false)\n',
+      ]);
+      expect(mockState.writeStdoutCalls[0][0].message).not.toContain('/update --force');
+    });
+
+    it('lets env=1 override a config opt-out', async () => {
+      process.env.ARTIBOT_UPDATE_CHECK = '1';
+      withConfig({ version: '2.0.0', updateCheck: { enabled: false } });
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      expect(mockState.checkForUpdateCalls).toHaveLength(1);
+      expect(disabledNotices()).toHaveLength(0);
+    });
+
+    it('lets env=0 override a config opt-in', async () => {
+      process.env.ARTIBOT_UPDATE_CHECK = '0';
+      withConfig({ version: '2.0.0', updateCheck: { enabled: true } });
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+      await importAndWait();
+
+      expect(mockState.checkForUpdateCalls).toHaveLength(0);
+      expect(disabledNotices()).toEqual([
+        '[artibot] update check disabled (ARTIBOT_UPDATE_CHECK=0)\n',
+      ]);
+    });
   });
 
   describe('P3-3: long-context opt-in', () => {
