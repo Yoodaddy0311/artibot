@@ -4,7 +4,7 @@
  * feature-parity drift / missing-file / broken-reference cases are caught.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -101,5 +101,54 @@ describe('runInstallChecks — synthetic drift detection', () => {
     const dir = makeFixture();
     const { errors } = runInstallChecks(dir);
     expect(errors).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Native-install skip parity (2026-09-10). PARITY_MATRIX (scripts/ci/validate-
+// install.js) is keyed by FUNCTION NAME only, so a skip branch added to one
+// installer and not the other would still pass it. Pin the shared contract
+// here by content: same detection marker, a force flag in each dialect, and
+// the same user-visible skip line. Behaviour is covered by
+// tests/scripts/install-native-detect.test.js (sh) and
+// tests/scripts/install-ps1-native-detect.test.js (ps1); this block only
+// guards the two files against drifting apart.
+// ---------------------------------------------------------------------------
+describe('install.sh ↔ install.ps1 — native plugin skip parity', () => {
+  const sh = readFileSync(path.join(PLUGIN_ROOT, 'install.sh'), 'utf-8');
+  const ps1 = readFileSync(path.join(PLUGIN_ROOT, 'install.ps1'), 'utf-8');
+
+  it('both installers carry a native-install detector reading the marketplace cache root', () => {
+    expect(sh).toMatch(/^detect_native_plugin_install\(\) \{/m);
+    expect(ps1).toMatch(/^function Test-NativePluginInstall \{/m);
+  });
+
+  it('the cache-root constant is defined ONCE per installer and is the same path in both', () => {
+    // sh:  ARTIBOT_PLUGIN_CACHE_ROOT="${CLAUDE_DIR}/plugins/cache/artibot/artibot"
+    // ps1: $PluginCacheRoot = Join-Path $ClaudeDir 'plugins\cache\artibot\artibot'
+    // Detector and cache mirror in each script must read that one constant —
+    // a second literal is the drift the lead flagged (sh vs ps1 diverging).
+    const shDecl = sh.match(/^ARTIBOT_PLUGIN_CACHE_ROOT="\$\{CLAUDE_DIR\}\/([^"]+)"/m);
+    const ps1Decl = ps1.match(/^\$PluginCacheRoot = Join-Path \$ClaudeDir '([^']+)'/m);
+    expect(shDecl, 'install.sh top-level ARTIBOT_PLUGIN_CACHE_ROOT missing').not.toBeNull();
+    expect(ps1Decl, 'install.ps1 top-level $PluginCacheRoot missing').not.toBeNull();
+    const shRel = shDecl[1];
+    const ps1Rel = ps1Decl[1].replace(/\\/g, '/');
+    expect(ps1Rel).toBe(shRel);
+    // Same marker as lib/core/install-mode.js#detectInstallMode (plugins/cache).
+    expect(shRel).toMatch(/^plugins\/cache\//);
+    // Exactly one literal of the path per file (the declaration itself).
+    expect(sh.split(shRel).length - 1).toBe(1);
+    expect(ps1.split(ps1Decl[1]).length - 1).toBe(1);
+    // PowerShell also accepts the forward-slash spelling — a second literal in
+    // that form would slip past the backslash count above (review minor #1).
+    expect(ps1.split(ps1Rel).length - 1).toBe(0);
+  });
+
+  it('both installers expose a force flag (--flat / -Flat) and the same skip line', () => {
+    expect(sh).toMatch(/--flat/);
+    expect(ps1).toMatch(/\[switch\]\$Flat\b/);
+    expect(sh).toMatch(/native plugin detected at .* skipping flat copy of agents\/commands; use --flat to force/);
+    expect(ps1).toMatch(/native plugin detected at .* skipping flat copy of agents\/commands; use -Flat to force/);
   });
 });
