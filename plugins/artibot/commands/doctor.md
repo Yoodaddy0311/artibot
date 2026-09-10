@@ -278,7 +278,41 @@ This check tests that reproducibility, and reads the `state_version` counter
 for the holes that mean a committed write was lost.
 
 The judgement lives in `lib/project-state/doctor-checks.js` and performs NO
-I/O. This command reads the three inputs and hands them over:
+I/O. This command reads the three inputs and hands them over.
+
+**Step 0 — resolve the project root ONCE, before any read.** Step 1 takes
+`projectRoot` directly (`readLedgerCensus(projectRoot)`); steps 2 and 3 read
+locations DERIVED from it — the store journal under `<git-common-dir>/artibot/`
+(resolved from `projectRoot` by
+`lib/project-state/state-manager.js#resolveStoreLocation`, falling back to
+`<projectRoot>/.artibot/runtime/` only when git cannot answer) and the
+projection at `<projectRoot>/.artibot/state.yaml` — so fixing that value is
+the first thing this check does, not an implicit detail of the caller:
+
+- Compute `projectRoot = resolveProjectRoot(process.cwd())` with
+  `lib/git/project-root.js#resolveProjectRoot`. Never hand a raw
+  `process.cwd()` to the readers, and never hand them the PLUGIN root — that
+  is the `resolveProjectRoot(pluginRoot)` trap Check 7 documents, which
+  resolves INSIDE the plugin tree whenever the plugin has no `.git` ancestor.
+- In a linked worktree — a `/split` window — the nearest marker is a `.git`
+  FILE, and the resolver returns the WORKTREE root. That is the correct answer
+  here: the ledger and the projection it compares are the worktree's own
+  `.artibot/`, and the shared store journal is reached from that same root
+  through the git common dir.
+- Report the result on its own line, verbatim, as
+  `read project root: <absolute path>`. A parity verdict without the root it
+  was measured against is not reproducible by the person reading it.
+- **An empty or unresolved root is `unmeasured`, not a pass.** `readLedgerCensus`
+  returns an EMPTY result for an empty `projectRoot` instead of raising: its
+  `events` half is indistinguishable from an empty ledger, and only the census
+  half (`file.present=false`) says otherwise. Check the value before reading,
+  not after.
+
+Reuse that ONE value for the rest of the run: **Check 9** reads
+`.artibot/missions/<mission_id>/` beneath it, and **Check 10** passes it to
+`loadReplay` and `readSpawns`. If the three checks resolve three different
+roots they describe three different projects while being summarised as one
+health report, which makes the parity and residue comparisons meaningless.
 
 1. **Ledger events + line census** — `readLedgerCensus(projectRoot)` from
    `lib/runtime/ledger.js`, ONE call returning `{events, census}`. `events` goes
@@ -357,6 +391,11 @@ unmeasured rather than healthy.
 - **Whether the ledger it read is the one being written.** This is the same
   resolved-root problem Check 7 documents. State the absolute project root in
   the report so an empty comparison can be told from the wrong tree.
+- **Whether the root it resolved is the tree you meant.** Step 0 reports WHICH
+  root was read; it cannot tell you that root is the one you intended to
+  inspect. A resolver working perfectly in the wrong window still produces a
+  confident verdict about a project nobody asked about. Compare the printed
+  path against the tree you opened — that comparison is a person's job.
 
 ### Check 9: Artifact Health
 
@@ -540,7 +579,7 @@ ARTIBOT HEALTH CHECK
 [check-5-icon] MCP: {server1} ({status}), {server2} ({status})
 [check-6-icon] Memory: {n} stores, {n} entries, {size} total
 [check-7-icon] Explainability: {n} session event lines (24h), {n} cron files, trail legacy(frozen) {exists|absent}/{n}, last {timestamp}
-[check-8-icon] State parity: {status} at state_version {n} ({n} gaps, {n} unpaired)
+[check-8-icon] State parity: {status} at state_version {n} ({n} gaps, {n} unpaired), root {path}
 [check-9-icon] Artifacts: {n}/10 items measured, {n} failing, {n} missions read
 [check-10-icon] Route bind: {n} unbound receipts / {n} unbound spawns, {n} conflicts
 
