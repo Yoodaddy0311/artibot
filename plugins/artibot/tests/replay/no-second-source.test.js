@@ -217,12 +217,30 @@ describe('the restated contracts agree with their originals', () => {
     // which this module keyed on 4 terms and `ledger.js` still keyed on 3. The
     // tripwire was written to go RED the moment T-20 landed, and it did so at
     // 17:58 (measured: ledger.js mtime moved 16:46 → 17:51 mid-task). Both
-    // sides now key on (session_id, source, pid, seq) with the same NUL
+    // sides now key on (session_id, source, pid, seq, ts) with the same NUL
     // separator, so the divergence is closed and the tripwire is retired rather
     // than left behind as a fossil asserting a state that no longer exists.
     const shared = [ln({}), ln({ session_id: 's2' })];
     expect(dedupeEvents(shared)).toHaveLength(2);
     expect(new Set(shared.map(dedupeKey)).size).toBe(2);
+  });
+
+  it('separates a pid the OS reused INSIDE one session, on both sides', () => {
+    // The hazard one level in from the session term. Same session_id, same
+    // source, same pid, and `seq` back at 0 because it restarts in every
+    // process — so all four of the older terms match and only `ts` differs.
+    // Reported by the 2026-09-09 /doctor Check 8 run
+    // (.artibot/guides/NEXT-SESSION.md) and NOT measured here: pid 38976 at
+    // 2026-09-04 17:04Z and again at 17:46Z under ONE session_id, source
+    // `hook`, different bytes. BOTH sides
+    // must carry `ts`, or the direction invariant above flips: a four-term
+    // replay key against a five-term ledger key collapses MORE than the ledger.
+    const reused = [
+      ln({ pid: 38976, seq: 0, ts: '2026-09-04T17:04:00.000Z' }),
+      ln({ pid: 38976, seq: 0, ts: '2026-09-04T17:46:00.000Z' }),
+    ];
+    expect(dedupeEvents(reused)).toHaveLength(2);
+    expect(new Set(reused.map(dedupeKey)).size).toBe(2);
   });
 
   it('dedupeKey and dedupeEvents disagree on nothing across field-boundary cases', () => {

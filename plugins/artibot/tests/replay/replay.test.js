@@ -514,7 +514,7 @@ describe('countBy carries its denominator', () => {
 });
 
 describe('dedupeKey', () => {
-  it('is the (session_id, source, pid, seq) tuple', () => {
+  it('is the (session_id, source, pid, seq, ts) tuple', () => {
     // `event` is NOT part of the identity: two different events cannot share
     // one seq from one process, so a collision here means a writer bug.
     const a = line({ event: 'tool.used' }, { pid: 3, seq: 4 });
@@ -544,7 +544,8 @@ describe('dedupeKey', () => {
     // also what ledger.js#dedupeEvents joins with; pinning it here keeps the
     // two key shapes from drifting apart on the separator alone.
     const key = dedupeKey(line({ event: 'tool.used' }, { pid: 1, seq: 0 }));
-    expect(key.split('\0')).toEqual([SID, 'hook', '1', '0']);
+    expect(key.split('\0'))
+      .toEqual([SID, 'hook', '1', '0', '2026-09-02T10:00:00.000Z']);
   });
 
   it('a session id carrying the separator still cannot collide', () => {

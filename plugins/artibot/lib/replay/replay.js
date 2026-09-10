@@ -54,8 +54,8 @@
  *     verdict is /doctor Check 8's job (T-43); duplicating that judgment here
  *     would create a second answer to one question.
  *  3. THE DEDUPE KEY IS DUPLICATED FROM `ledger.js#dedupeEvents`. Both key on
- *     `(session_id, source, pid, seq)` joined with NUL (verified 2026-09-02
- *     17:5x against `ledger.js#dedupeKey`, same term order, same separator).
+ *     `(session_id, source, pid, seq, ts)` joined with NUL (verified 2026-09-10
+ *     against `ledger.js#dedupeKey`, same term order, same separator).
  *     This module cannot import that function — it lives at L5 and this is L2 —
  *     so the key is restated here and compared BEHAVIOURALLY by
  *     `tests/replay/no-second-source.test.js`. If that test is deleted, the two
@@ -198,7 +198,7 @@ export function envelopeFaults(event) {
 }
 
 /**
- * The `(session_id, source, pid, seq)` dedupe key.
+ * The `(session_id, source, pid, seq, ts)` dedupe key.
  *
  * `session_id` leads because PID IS REUSED. An operating system recycles
  * process ids, and the ledger outlives any one process, so two unrelated
@@ -206,14 +206,29 @@ export function envelopeFaults(event) {
  * their lines collide on `(source, pid, seq)` and the reader silently drops
  * one as a "duplicate" — a lost line that looks like successful dedupe.
  *
+ * `ts` IS THE FIFTH TERM, for that same hazard one level in. `session_id` only
+ * separates a pid reuse ACROSS sessions, and a long session outlives its own
+ * processes too. REPORTED BY THE 2026-09-09 /doctor Check 8 RUN and recorded in
+ * `.artibot/guides/NEXT-SESSION.md`, NOT measured here: pid 38976 emitting at
+ * 2026-09-04 17:04Z and again at 17:46Z under ONE session_id, source `hook`,
+ * both with `seq` 0, different bytes. A line that was genuinely written twice
+ * carries the same
+ * `ts` in both copies, so a real duplicate is still collapsed here and still
+ * reported as a `GAP_TYPES.DUPLICATE`.
+ *
+ * KEEPING THE TERM COUNT EQUAL TO THE LEDGER'S IS THE POINT. A key one term
+ * SHORTER than `ledger.js#dedupeKey` collapses more lines than the ledger does,
+ * which is the unsafe direction — this module would drop a line the record
+ * keeps. `tests/replay/no-second-source.test.js` asserts that direction.
+ *
  * Shape restated from `ledger.js#dedupeEvents`; see "WHAT THIS MODULE CANNOT
- * SEE" #3, which also records that the two are mid-transition.
+ * SEE" #3, which records how the two are kept from drifting.
  *
  * @param {object} e - a screened ledger line.
  * @returns {string} dedupe key.
  */
 export function dedupeKey(e) {
-  return `${e.session_id}${SEP}${e.source}${SEP}${e.pid}${SEP}${e.seq}`;
+  return `${e.session_id}${SEP}${e.source}${SEP}${e.pid}${SEP}${e.seq}${SEP}${e.ts}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +238,7 @@ export function dedupeKey(e) {
 /**
  * Total order over screened lines: `(ts, source, pid, seq)`.
  *
- * Total, not merely consistent: after dedupe, `(source, pid, seq)` is unique,
+ * Total, not merely consistent: after dedupe, `(session_id, source, pid, seq, ts)` is unique,
  * so no two remaining lines compare equal. That is what makes requirement (3)
  * hold — a shuffled input yields a byte-identical index rather than merely a
  * similar one.

@@ -2,7 +2,7 @@
  * Unit contract for the ledger's read projections.
  *
  * The append path is the writer's and is tested in event-writer.test.js; this
- * suite is about what a READER gets back: dedupe on the four-field key,
+ * suite is about what a READER gets back: dedupe on the five-field key,
  * tolerance of a torn tail, the v1.0 run-ledger fold, and the deferred
  * three-valued acceptance judgment.
  *
@@ -218,7 +218,7 @@ describe('readAllEvents', () => {
     expect(readAllEvents(root, { since: '2099-01-01T00:00:00.000Z' })).toHaveLength(0);
   });
 
-  it('drops duplicate lines on (session_id, source, pid, seq)', () => {
+  it('drops duplicate lines on (session_id, source, pid, seq, ts)', () => {
     put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
     // Replay the same line, which is what a duplicated append would look like.
     const file = ledgerFilePath(root);
@@ -265,14 +265,43 @@ describe('readAllEvents', () => {
     expect(readAllEvents(root)).toHaveLength(3);
   });
 
+  it('keeps two lines from a pid the OS reused INSIDE one session, told apart by ts', () => {
+    // The collision the four-field key could not see. One session, one source,
+    // the OS handing the same pid to a later process, and that process's `seq`
+    // restarting at 0 — so (session_id, source, pid, seq) matches and the later
+    // line is dropped as a duplicate it is not. Reported by the 2026-09-09
+    // /doctor Check 8 run (.artibot/guides/NEXT-SESSION.md) and NOT measured by
+    // this suite: pid 38976 at 2026-09-04 17:04Z and 17:46Z, one session_id,
+    // source `hook`, seq 0, different bytes. `ts` tells them apart.
+    const shared = { session_id: SID, source: 'hook', pid: 38976, seq: 0 };
+    const first = { ...shared, ts: '2026-09-04T17:04:00.000Z', event: 'first' };
+    const second = { ...shared, ts: '2026-09-04T17:46:00.000Z', event: 'second' };
+    const out = dedupeEvents([first, second]);
+    expect(out).toHaveLength(2);
+    expect(out.map((e) => e.event)).toEqual(['first', 'second']);
+  });
+
+  it('still folds a true duplicate when neither line carries a ts', () => {
+    // A missing `ts` joins as the string `undefined`, which is a value like any
+    // other: two lines agreeing on the other four fields and carrying no
+    // timestamp remain ONE line. Widening the key must not stop dedupe from
+    // working on an envelope that has no timestamp to offer.
+    const a = { session_id: SID, source: 'hook', pid: 7, seq: 0, event: 'first' };
+    const b = { session_id: SID, source: 'hook', pid: 7, seq: 0, event: 'second' };
+    expect(dedupeEvents([a, b])).toHaveLength(1);
+  });
+
   it('separates key fields with a byte that cannot appear inside one', () => {
     // A space or a colon would let ('a b', 'c') and ('a', 'b c') collide.
     // Written with \u0000 rather than \0: a '\0' followed by a digit is a
     // legacy octal escape and is a parse error under strict mode.
+    expect(dedupeKey({ session_id: 'a', source: 'b', pid: 1, seq: 2, ts: 't' }))
+      .toBe('a\u0000b\u00001\u00002\u0000t');
+    expect(dedupeKey({ session_id: 'a b', source: 'c', pid: 1, seq: 2, ts: 't' }))
+      .not.toBe(dedupeKey({ session_id: 'a', source: 'b c', pid: 1, seq: 2, ts: 't' }));
+    // An envelope with no `ts` still spells ONE stable key, not a varying one.
     expect(dedupeKey({ session_id: 'a', source: 'b', pid: 1, seq: 2 }))
-      .toBe('a\u0000b\u00001\u00002');
-    expect(dedupeKey({ session_id: 'a b', source: 'c', pid: 1, seq: 2 }))
-      .not.toBe(dedupeKey({ session_id: 'a', source: 'b c', pid: 1, seq: 2 }));
+      .toBe('a\u0000b\u00001\u00002\u0000undefined');
   });
 });
 
@@ -412,6 +441,36 @@ describe('readLedgerCensus (F-30) — the reader counts what it drops', () => {
     expect(read.events).toHaveLength(1);
     expect(read.census.dropped.loss.duplicate).toBe(1);
     expect(read.census.lines.nonblank).toBe(2);
+    expectInvariants(read);
+  });
+
+  it('counts a pid reused inside one session as two survivors, not a duplicate', () => {
+    // Same session, same source, same pid, both seq 0 — the exact shape a pid
+    // the OS handed out twice produces, since `seq` restarts at 0 in every
+    // process. The two lines differ in `ts` and in bytes, so they are two
+    // events; on the four-field key the second landed in loss.duplicate and
+    // /doctor Check 8 reported a loss that had not happened.
+    const line = (ts, tool) => JSON.stringify({
+      v: 1,
+      ts,
+      event: 'tool.used',
+      mission_id: MISSION,
+      session_id: SID,
+      source: 'hook',
+      pid: 38976,
+      seq: 0,
+      data: { tool, ok: true, duration_ms: 1 },
+    });
+    put({ event: 'tool.used', data: { tool: 'B', ok: true, duration_ms: 1 } });
+    appendFileSync(
+      ledgerFilePath(root),
+      `${line('2026-09-04T17:04:00.000Z', 'Bash')}\n${line('2026-09-04T17:46:00.000Z', 'Read')}\n`,
+      'utf-8',
+    );
+    const read = readLedgerCensus(root);
+    expect(read.events).toHaveLength(3);
+    expect(read.census.dropped.loss.duplicate).toBe(0);
+    expect(read.census.lines.nonblank).toBe(3);
     expectInvariants(read);
   });
 

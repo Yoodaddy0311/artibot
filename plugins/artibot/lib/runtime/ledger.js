@@ -24,9 +24,9 @@
  *
  * DEDUPE IS THE READER'S JOB — the writer never reads the file it appends to,
  * so a duplicate line is possible in principle and is resolved here, on
- * `(session_id, source, pid, seq)` (lane 6 §2.8 names the last three; the
- * session is added because a reused pid otherwise erases a later line — see
- * {@link dedupeKey}). Duplicates are COUNTED in
+ * `(session_id, source, pid, seq, ts)` (lane 6 §2.8 names source, pid and seq;
+ * the session and the timestamp are added because a reused pid otherwise
+ * erases a later line — see {@link dedupeKey}). Duplicates are COUNTED in
  * `census.dropped.loss.duplicate` (F-30) but not judged: a duplicate should
  * never occur, so a non-zero count is a signal for /doctor Check 8, whose job
  * it also is to count missing sequence numbers (T-43). Duplicating that
@@ -111,7 +111,20 @@ function parseLine(line) {
  * restarts at 0 in every process and the ledger outlives any one of them, so
  * the operating system reusing a pid across sessions or a reboot is enough to
  * make a later line collide with an older one and be dropped as a "duplicate".
- * The four fields together are what actually identify a line.
+ *
+ * `ts` IS PART OF THE KEY FOR THE SAME REASON, one level in. `session_id` only
+ * separates a pid reuse ACROSS sessions, and a long session outlives its own
+ * processes too. REPORTED BY THE 2026-09-09 /doctor Check 8 RUN and recorded in
+ * `.artibot/guides/NEXT-SESSION.md`, NOT measured here: pid 38976 emitting at
+ * 2026-09-04 17:04Z and again at 17:46Z under ONE session_id, source `hook`,
+ * both with `seq` 0 — two unrelated lines with different bytes, keyed
+ * identically, the later one dropped and counted in
+ * `census.dropped.loss.duplicate`, which is what the WARN was. That report is
+ * the whole evidence: a re-read of this machine's parent ledger on 2026-09-10
+ * found no line with that pid, so nothing reproduces it live today.
+ * A line that was genuinely written twice
+ * carries the same `ts` in both copies, so a real duplicate still folds to one.
+ * The five fields together are what actually identify a line.
  *
  * The separator is `\0` rather than a space or a colon because a session id is
  * caller-supplied: without a byte that cannot occur inside a field, two
@@ -127,7 +140,7 @@ function parseLine(line) {
  * @returns {string}
  */
 export function dedupeKey(e) {
-  return `${e?.session_id}\0${e?.source}\0${e?.pid}\0${e?.seq}`;
+  return `${e?.session_id}\0${e?.source}\0${e?.pid}\0${e?.seq}\0${e?.ts}`;
 }
 
 /**
@@ -214,8 +227,9 @@ function emptyCensus(file, file_state = {}) {
  * WHAT THE CENSUS CANNOT SEE (F-30 §7, stated next to the gate): an event that
  * was never attempted (no hook ran), an append that vanished whole at a line
  * boundary (a `seq` hole — Check 8's, not this reader's), lines written to a
- * DIFFERENT file (compare `file.path`), a pid+seq reuse inside one session that
- * is counted as `duplicate` when it was really a loss, the content of what a
+ * DIFFERENT file (compare `file.path`), two genuinely different lines that
+ * agree on ALL FIVE key fields including `ts` (a reused pid on its own no
+ * longer collides — see {@link dedupeKey}), the content of what a
  * `ledger.rejected` line replaced, and any append that lands after this read.
  * `bytes` is the size of the text that was READ, from the same read as the
  * counts, so the two cannot describe different moments.
