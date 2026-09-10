@@ -354,20 +354,93 @@ export const HOST_PROMPT_SOURCES = Object.freeze([
 export const USER_PROMPT_SOURCES = Object.freeze(['user', 'sdk']);
 
 /**
- * Fallback body sniff, used ONLY when `source` is absent (the host says the
- * field may be omitted "while the field rolls out", and older hosts never sent
- * it at all). Both literals are the host's own constants: task notifications
- * begin with the `<task-notification>` element, and other machine turns are
- * prefixed `[SYSTEM NOTIFICATION - NOT USER INPUT]`.
+ * Fallback body sniff, used ONLY when `source` is absent.
  *
- * Deliberately NARROW. Without `source` there is no reliable signal, so
- * anything that does not start with a known machine marker is treated as a
- * user prompt — an over-broad sniff here would silently disable all 6 hooks
- * for real prompts, which is a worse failure than the one being fixed.
+ * NOT a fallback in practice — on the installed host it is the ONLY defense.
+ *
+ * MEASURED. A 7-row capture of real hook input on 2.1.267 at
+ * 2026-09-10T01:06–01:12Z (`-p` first prompt, in-process teammate arrival,
+ * cross-session arrival) carried these keys and no others:
+ *
+ *   7 of 7   session_id, transcript_path, cwd, prompt_id, permission_mode,
+ *            hook_event_name, prompt
+ *   2 of 7   scratchpad_dir, session_title  (interactive / background sessions)
+ *   0 of 7   source
+ *
+ * So `USER_PROMPT_SOURCES` above never runs on this host and the body sniff
+ * carries the whole load. (Reading the minified builders suggests the same
+ * conclusion — `{...Ra(…), hook_event_name:"UserPromptSubmit", prompt:r,
+ * ...!1, session_title:…}`, where `...!1` is a conditional spread resolved to
+ * `false` — but that is INFERENCE. The capture above is the measurement, and
+ * the two disagree about which other keys `Ra` contributes, so trust the
+ * capture.)
+ *
+ * Why this table grew (2026-09-10): with only the first two entries, a peer
+ * SendMessage turn was classified as a human prompt and ran all 6 hooks. Live
+ * measurement in the main session of this window — 2026-09-10T00:59:20Z and
+ * 01:00:49Z, 2 peer turns, 2 `routing-classified` decision rows, 0 human
+ * prompts that day.
+ *
+ * WHAT THE HOOK ACTUALLY RECEIVES — same capture. `prompt` carries the QUEUE's
+ * raw envelope with no framing at all:
+ *
+ *   `<agent-message from="a3ebe9b629a8f39c7">\n…\n</agent-message>` (102B)
+ *   `<cross-session-message from="uds:\\.\pipe\LOCAL\cc-msg-c0f9…"
+ *    from-name="probe-cwd-b-0f" from-mode="bypass">\n…\n
+ *    </cross-session-message>` (205B, nothing before or after)
+ *
+ * That is why the host's RENDER-time framing — `KK = "Another Claude session
+ * sent a message"` with its `${KK}:` / `${KK} while you were working:`
+ * variants, and `gt = "A peer session sent a message while you were
+ * working:"` — is NOT in this table. Those strings are what the model is
+ * shown; they never reach the hook. Listing them would only misclassify a
+ * human who opens a question by quoting one, which the control group in
+ * `tests/hooks/userprompt-dispatcher-resilience.test.js` pins as `user:true`.
+ *
+ * Marker provenance, split by evidence grade:
+ *
+ *   `<task-notification>`        harness task notifications (2026-09-04).
+ *   `[SYSTEM NOTIFICATION`       other machine turns; no closing bracket on
+ *                                purpose, so the `…]` variants match too.
+ *   `<cross-session-message `    LIVE CAPTURE (above) + host `q3`.
+ *   `<agent-message `            LIVE CAPTURE (above) + host `qee`. This is
+ *                                what an in-process subagent's
+ *                                `SendMessage(to="main")` arrives as.
+ *   `<teammate-message `         host binary literal `RP` only — NOT observed
+ *                                on hook input. Kept because the host's own
+ *                                check is ``startsWith(`<${RP} `)`` and its
+ *                                parser requires `teammate_id="…"`.
+ *   `[Cross-session idle notice]` host binary literal only — NOT observed on
+ *                                hook input.
+ *
+ * The three envelope markers carry a TRAILING SPACE, matching the host's own
+ * `<${RP} ` check: every captured envelope puts an attribute (` from=`,
+ * ` teammate_id=`) directly after the tag name, and including the space keeps
+ * a `<agent-messages>` look-alike out of the table without reaching for a
+ * regex. A bare `<agent-message>` with no attribute is therefore ADMITTED — a
+ * documented narrowing, pinned in the tests.
+ *
+ * That narrowing is an ACCEPTED RISK, not a proof of impossibility. The host's
+ * own strip regex is `/^<agent-message[^>]*>\n/`, which tolerates a bare tag,
+ * so a bare envelope is not structurally ruled out. What is measured is only
+ * that every captured envelope carried ` from=`; a bare tag was never observed
+ * (inference, not measurement). If one is ever captured, widen the marker.
+ *
+ * Deliberately NARROW, and matched with `startsWith` after `trimStart()` only.
+ * No regex, no substring search: without `source` there is no reliable signal,
+ * so anything that does not START with a known machine marker is treated as a
+ * user prompt. An over-broad sniff would silently disable all 6 hooks for real
+ * prompts — a worse failure than the one being fixed.
  */
 const NON_USER_BODY_MARKERS = Object.freeze([
   ['<task-notification>', 'body:task-notification'],
   ['[SYSTEM NOTIFICATION', 'body:system-notification'],
+  // Live capture 2026-09-10T01:06–01:12Z. Host `q3` / `qee`.
+  ['<cross-session-message ', 'body:cross-session-message'],
+  ['<agent-message ', 'body:agent-message'],
+  // Host binary literals; not observed on hook input (see note above).
+  ['<teammate-message ', 'body:teammate-message'], // host `RP`
+  ['[Cross-session idle notice]', 'body:idle-notice'],
 ]);
 
 // Derived from the same table the classifier iterates, so the exported list

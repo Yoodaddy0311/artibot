@@ -287,6 +287,179 @@ describe('classifyPromptSource: sender allowlist', () => {
       expect(classifyPromptSource({ prompt: '[SYSTEM NOTIFICATIONS PAUSED] carry on' }).user)
         .toBe(false);
     });
+
+    /**
+     * PEER / AGENT ENVELOPE MARKERS \u2014 the 2026-09-10 hole.
+     *
+     * Live measurement (this main session, 2026-09-10T00:59:20Z and
+     * 01:00:49Z): two peer SendMessage turns arrived, the guard admitted
+     * both, and all 6 hooks ran \u2014 2 `routing-classified` decision rows from
+     * text no human typed, 0 human prompts that day.
+     *
+     * `source` cannot help, and that is MEASURED rather than read off the
+     * minified source. A 7-row capture of real hook input on the installed
+     * 2.1.267 host (2026-09-10T01:06\u201301:12Z, `-p` first prompt + in-process
+     * teammate arrival + cross-session arrival) carried:
+     *
+     *   7 of 7   session_id, transcript_path, cwd, prompt_id, permission_mode,
+     *            hook_event_name, prompt
+     *   2 of 7   scratchpad_dir, session_title  (interactive / background)
+     *   0 of 7   source
+     *
+     * Reading the binary's two hook-input builders points the same way
+     * (`...!1` is a conditional spread resolved to `false`), but that is
+     * INFERENCE and it disagrees with the capture about the other keys, so the
+     * capture is what this suite pins. The body sniff is the ONLY defense here.
+     *
+     * WHAT THE HOOK RECEIVES IS THE RAW ENVELOPE. Same capture, verbatim:
+     *
+     *   `<agent-message from="a3ebe9b629a8f39c7">\n\u2026\n</agent-message>` (102B)
+     *   `<cross-session-message from="uds:\\.\pipe\LOCAL\cc-msg-c0f9\u2026"
+     *    from-name="probe-cwd-b-0f" from-mode="bypass">\n\u2026\n
+     *    </cross-session-message>` (205B, nothing before or after)
+     *
+     * The host's `Another Claude session sent a message:` framing is applied
+     * at RENDER time and never reaches the hook, so it is deliberately NOT a
+     * marker \u2014 the control group below pins that a human quoting that sentence
+     * is still admitted.
+     *
+     * Evidence grade differs per marker and is stated per case: the two
+     * envelope tags are live captures; `<teammate-message ` and
+     * `[Cross-session idle notice]` are host binary literals that have NOT
+     * been observed on hook input.
+     */
+    describe('peer and agent envelope markers (host 2.1.267)', () => {
+      it.each([
+        [
+          'the captured cross-session envelope (LIVE CAPTURE, host `q3`)',
+          '<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-c0f9" from-name="probe-cwd-b-0f" from-mode="bypass">\nCAPTURE_PROBE_PEER_1 hello from peer session\n</cross-session-message>',
+          'body:cross-session-message',
+        ],
+        [
+          'the captured in-process agent envelope (LIVE CAPTURE, host `qee`)',
+          '<agent-message from="a3ebe9b629a8f39c7">\nCAPTURE_PROBE_TEAMMATE_1 hello from teammate\n</agent-message>',
+          'body:agent-message',
+        ],
+        [
+          'team-mode mailbox wrapper (host `RP` literal; NOT observed on hook input)',
+          '<teammate-message teammate_id="team-lead" summary="assign task 1">start on task #1</teammate-message>',
+          'body:teammate-message',
+        ],
+        [
+          'idle notice (host literal; NOT observed on hook input)',
+          '[Cross-session idle notice] "artibot-78", which you asked to be notified about, is idle now',
+          'body:idle-notice',
+        ],
+      ])('rejects %s', async (_label, prompt, reason) => {
+        const { classifyPromptSource } = await import(DISPATCHER);
+        expect(classifyPromptSource({ prompt })).toEqual({ user: false, reason });
+      });
+
+      it('trims leading whitespace before sniffing the envelope markers too', async () => {
+        // Same one-character bypass the task-notification case pins, now on
+        // the markers that carry the live defect.
+        const { classifyPromptSource } = await import(DISPATCHER);
+        expect(classifyPromptSource({ prompt: '  <cross-session-message from="x">\n' }).user)
+          .toBe(false);
+        expect(classifyPromptSource({ prompt: '\n\t<agent-message from="a3eb">\n' }).user)
+          .toBe(false);
+      });
+
+      it('falls back to `user_prompt` for an envelope body as well', async () => {
+        const { classifyPromptSource } = await import(DISPATCHER);
+        expect(classifyPromptSource({ user_prompt: '<cross-session-message from="x">\n' }).user)
+          .toBe(false);
+      });
+
+      /**
+       * DOCUMENTED NARROWNESS \u2014 the envelope markers end in a SPACE.
+       *
+       * All three captured envelope shapes put an attribute (` from=`,
+       * ` teammate_id=`) directly after the tag name, so the space is always
+       * present in practice. Including it is what keeps `<agent-messages>` out
+       * of the table without reaching for a regex, which is the same trade the
+       * `<task-notification>` closing bracket makes above.
+       *
+       * The cost: a bare `<agent-message>` with no attribute is ADMITTED.
+       *
+       * Grade that honestly. The host's strip regex is
+       * `/^<agent-message[^>]*>\n/`, which TOLERATES a bare tag, so nothing
+       * structural rules one out. What is measured is only that every captured
+       * envelope carried ` from=` and that a bare tag was never observed \u2014
+       * inference, not measurement. Pinned here so widening the marker is a
+       * deliberate edit; if a bare envelope is ever captured, widen it.
+       */
+      it.each([
+        ['bare agent tag, no attribute', '<agent-message>hello</agent-message>'],
+        ['bare cross-session tag, no attribute', '<cross-session-message>hello</cross-session-message>'],
+        ['bare teammate tag, no attribute', '<teammate-message>hello</teammate-message>'],
+      ])('ADMITS %s: the marker requires the attribute boundary', async (_label, prompt) => {
+        const { classifyPromptSource } = await import(DISPATCHER);
+        expect(classifyPromptSource({ prompt })).toEqual({ user: true, reason: 'source:absent' });
+      });
+
+      /**
+       * CONTROL GROUP \u2014 the reason these are `startsWith`, not `includes`.
+       *
+       * Every string below contains a marker's words but is a plausible thing
+       * a human types. If any of them flips to `user:false`, the sniff has
+       * become the worse failure the file header warns about: all 6 hooks go
+       * dark for real prompts, silently.
+       *
+       * The first two matter most. The host's render-time framing IS a
+       * sentence a person might paste while asking about their hook log, and
+       * the capture proved that sentence never arrives on hook input \u2014 so
+       * blocking on it would cost real prompts and buy nothing.
+       */
+      it.each([
+        ['host framing quoted at the head', 'Another Claude session sent a message: what does that mean in my hook log?'],
+        ['peer framing quoted at the head', 'A peer session sent a message while you were working: where is that rendered?'],
+        ['marker mid-sentence', 'why did Another Claude session sent a message show up in my hook log?'],
+        ['lowercase at head', 'another claude session sent a message and now the hooks are noisy'],
+        ['tag named mid-sentence', 'fix the <cross-session-message> parser in the dispatcher'],
+        ['agent tag named mid-sentence', 'where does <agent-message from=...> get built?'],
+        ['idle-notice words without the bracket', 'Cross-session idle notice handling is broken, please fix'],
+        ['look-alike tag: the envelope prefixes end with a space', '<agent-messages> is not a real host tag'],
+        ['look-alike teammate tag', '<teammate-messages> is not a real host tag'],
+      ])('ADMITS a human prompt: %s', async (_label, prompt) => {
+        const { classifyPromptSource } = await import(DISPATCHER);
+        expect(classifyPromptSource({ prompt })).toEqual({ user: true, reason: 'source:absent' });
+      });
+
+      /**
+       * THE ACCEPTED COST, stated out loud.
+       *
+       * A human who pastes a raw envelope as the FIRST thing in their prompt
+       * and then asks about it gets blocked. All 6 hooks skip, and the person
+       * sees no answer shaped by them.
+       *
+       * This is the same trade `<task-notification>` already makes, and it is
+       * accepted rather than worked around: a `startsWith` table cannot tell a
+       * quoted envelope from a delivered one, and the alternative — dropping
+       * the marker — re-opens the live defect this branch exists to close.
+       *
+       * Two things keep the cost small. The blocked turn is VISIBLE: one
+       * stderr line naming the reason tag, not a silent drop. And the trigger
+       * is narrow: the envelope must be at the very head, so the far more
+       * common shape ("here's what I got: <envelope>") is admitted, which the
+       * mid-sentence cases above pin.
+       *
+       * If this ever bites a real person, the fix is a `source`-bearing host
+       * or an explicit escape, NOT quietly widening the sniff.
+       */
+      it('ACCEPTED COST: a human pasting a raw envelope at the head IS blocked', async () => {
+        const { classifyPromptSource } = await import(DISPATCHER);
+        expect(classifyPromptSource({
+          prompt: '<cross-session-message from="uds:x">\nping\n</cross-session-message>\n\nwhy did this run all my hooks?',
+        })).toEqual({ user: false, reason: 'body:cross-session-message' });
+
+        // ...but the same question with one word in front is admitted. This is
+        // the line between the accepted cost and an unacceptable one.
+        expect(classifyPromptSource({
+          prompt: 'why did this run all my hooks?\n<cross-session-message from="uds:x">\nping\n</cross-session-message>',
+        })).toEqual({ user: true, reason: 'source:absent' });
+      });
+    });
   });
 
   describe('non-string source falls through to the body rules', () => {
@@ -340,7 +513,20 @@ describe('classifyPromptSource: sender allowlist', () => {
     expect(Object.isFrozen(HOST_PROMPT_SOURCES)).toBe(true);
     expect(Object.isFrozen(USER_PROMPT_SOURCES)).toBe(true);
     expect(Object.isFrozen(NON_USER_BODY_PREFIXES)).toBe(true);
-    expect([...NON_USER_BODY_PREFIXES]).toEqual(['<task-notification>', '[SYSTEM NOTIFICATION']);
+    // The full marker table, pinned in order. Adding a marker without deciding
+    // what it costs a human prompt has to fail here first.
+    //
+    // The three envelope prefixes END IN A SPACE on purpose (attribute
+    // boundary — see the narrowness cases above). Trimming that space is a
+    // widening, so it has to break this line rather than pass quietly.
+    expect([...NON_USER_BODY_PREFIXES]).toEqual([
+      '<task-notification>',
+      '[SYSTEM NOTIFICATION',
+      '<cross-session-message ',
+      '<agent-message ',
+      '<teammate-message ',
+      '[Cross-session idle notice]',
+    ]);
   });
 
   it('source: the guard runs before the rewriter and before any hook', async () => {
