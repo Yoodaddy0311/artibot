@@ -35,7 +35,7 @@ vi.mock('../../lib/core/data-egress-guard.js', () => ({
 // Import after mocks are registered
 // ---------------------------------------------------------------------------
 
-const { isNewerVersion, checkForUpdate } = await import(
+const { isNewerVersion, checkForUpdate, resolveUpdateCheckPolicy } = await import(
   '../../lib/core/version-checker.js'
 );
 
@@ -530,6 +530,280 @@ describe('version-checker', () => {
       const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
 
       expect(result).toEqual({ hasUpdate: false });
+    });
+  });
+
+  // =========================================================================
+  // resolveUpdateCheckPolicy() - pure opt-out resolver, no I/O
+  // Precedence: env (allowlisted values only) > config > default ON.
+  // =========================================================================
+  describe('resolveUpdateCheckPolicy()', () => {
+    it('enables the check by default when neither env nor config says otherwise', () => {
+      expect(resolveUpdateCheckPolicy({ env: {}, config: {} })).toEqual({
+        enabled: true,
+        source: 'default',
+        reason: 'default',
+      });
+    });
+
+    it('enables the check by default when called with no arguments at all', () => {
+      // Ambient process.env carries no ARTIBOT_UPDATE_CHECK in CI or dev
+      // shells; this pins the zero-argument shape session-start relies on.
+      const policy = resolveUpdateCheckPolicy();
+      expect(policy.enabled).toBe(true);
+      expect(policy.source).toBe('default');
+    });
+
+    it.each(['0', 'false', 'off', 'no'])(
+      'disables the check when ARTIBOT_UPDATE_CHECK=%s',
+      (raw) => {
+        expect(
+          resolveUpdateCheckPolicy({ env: { ARTIBOT_UPDATE_CHECK: raw } }),
+        ).toEqual({
+          enabled: false,
+          source: 'env',
+          reason: `ARTIBOT_UPDATE_CHECK=${raw}`,
+        });
+      },
+    );
+
+    it.each(['1', 'true', 'on', 'yes'])(
+      'enables the check when ARTIBOT_UPDATE_CHECK=%s',
+      (raw) => {
+        expect(
+          resolveUpdateCheckPolicy({ env: { ARTIBOT_UPDATE_CHECK: raw } }),
+        ).toEqual({
+          enabled: true,
+          source: 'env',
+          reason: `ARTIBOT_UPDATE_CHECK=${raw}`,
+        });
+      },
+    );
+
+    it('matches env values case-insensitively and ignores surrounding whitespace', () => {
+      expect(
+        resolveUpdateCheckPolicy({ env: { ARTIBOT_UPDATE_CHECK: '  OFF  ' } }),
+      ).toEqual({
+        enabled: false,
+        source: 'env',
+        // reason echoes the RAW value so an operator can spot a stray space.
+        reason: 'ARTIBOT_UPDATE_CHECK=  OFF  ',
+      });
+      expect(
+        resolveUpdateCheckPolicy({ env: { ARTIBOT_UPDATE_CHECK: 'True' } }).enabled,
+      ).toBe(true);
+    });
+
+    it.each(['maybe', '', '2', 'disabled'])(
+      'ignores the unrecognised env value %j and falls through to config',
+      (raw) => {
+        // Allowlist, not denylist: an unknown value must NOT silently disable
+        // or force-enable. It falls through so config keeps its say.
+        expect(
+          resolveUpdateCheckPolicy({
+            env: { ARTIBOT_UPDATE_CHECK: raw },
+            config: { updateCheck: { enabled: false } },
+          }),
+        ).toEqual({
+          enabled: false,
+          source: 'config',
+          reason: 'artibot.config.json updateCheck.enabled=false',
+        });
+      },
+    );
+
+    it('falls back to the default when an unrecognised env value meets no config', () => {
+      expect(
+        resolveUpdateCheckPolicy({
+          env: { ARTIBOT_UPDATE_CHECK: 'maybe' },
+          config: {},
+        }),
+      ).toEqual({ enabled: true, source: 'default', reason: 'default' });
+    });
+
+    it('disables the check when config.updateCheck.enabled is false', () => {
+      expect(
+        resolveUpdateCheckPolicy({
+          env: {},
+          config: { updateCheck: { enabled: false } },
+        }),
+      ).toEqual({
+        enabled: false,
+        source: 'config',
+        reason: 'artibot.config.json updateCheck.enabled=false',
+      });
+    });
+
+    it.each([
+      ['enabled: true', { updateCheck: { enabled: true } }],
+      ['a missing updateCheck key', { team: {} }],
+      ['a non-boolean enabled value', { updateCheck: { enabled: 'false' } }],
+      ['a missing enabled key', { updateCheck: {} }],
+    ])('keeps the check on for config with %s', (_label, config) => {
+      // Strict === false only. The string "false" must NOT disable.
+      expect(resolveUpdateCheckPolicy({ env: {}, config })).toEqual({
+        enabled: true,
+        source: 'default',
+        reason: 'default',
+      });
+    });
+
+    it('lets env=on win over config=off', () => {
+      expect(
+        resolveUpdateCheckPolicy({
+          env: { ARTIBOT_UPDATE_CHECK: '1' },
+          config: { updateCheck: { enabled: false } },
+        }),
+      ).toEqual({
+        enabled: true,
+        source: 'env',
+        reason: 'ARTIBOT_UPDATE_CHECK=1',
+      });
+    });
+
+    it('lets env=off win over config=on', () => {
+      expect(
+        resolveUpdateCheckPolicy({
+          env: { ARTIBOT_UPDATE_CHECK: '0' },
+          config: { updateCheck: { enabled: true } },
+        }),
+      ).toEqual({
+        enabled: false,
+        source: 'env',
+        reason: 'ARTIBOT_UPDATE_CHECK=0',
+      });
+    });
+
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+      ['a string', 'not-an-object'],
+      ['a number', 42],
+      ['an array', []],
+      ['a null updateCheck', { updateCheck: null }],
+      ['a string updateCheck', { updateCheck: 'off' }],
+    ])('does not throw for config that is %s', (_label, config) => {
+      let policy;
+      expect(() => {
+        policy = resolveUpdateCheckPolicy({ env: {}, config });
+      }).not.toThrow();
+      expect(policy).toEqual({
+        enabled: true,
+        source: 'default',
+        reason: 'default',
+      });
+    });
+
+    it('does not throw when env is null', () => {
+      expect(() => resolveUpdateCheckPolicy({ env: null, config: {} })).not.toThrow();
+    });
+
+    it('performs no I/O — no fs call of any kind', () => {
+      resolveUpdateCheckPolicy({ env: { ARTIBOT_UPDATE_CHECK: '0' } });
+      resolveUpdateCheckPolicy({ env: {}, config: { updateCheck: { enabled: false } } });
+      expect(fsMock.existsSync).not.toHaveBeenCalled();
+      expect(fsMock.readFileSync).not.toHaveBeenCalled();
+      expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+      expect(fsMock.mkdirSync).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // checkForUpdate() - opt-out short circuit
+  // =========================================================================
+  describe('checkForUpdate() - opt-out', () => {
+    it('returns a disabled result without touching cache or network when env disables it', async () => {
+      globalThis.fetch = vi.fn();
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR, {
+        env: { ARTIBOT_UPDATE_CHECK: '0' },
+      });
+
+      expect(result).toEqual({
+        hasUpdate: false,
+        disabled: true,
+        source: 'env',
+        reason: 'ARTIBOT_UPDATE_CHECK=0',
+      });
+      expect(fsMock.existsSync).not.toHaveBeenCalled();
+      expect(fsMock.readFileSync).not.toHaveBeenCalled();
+      expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+      expect(fsMock.mkdirSync).not.toHaveBeenCalled();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('returns a disabled result when config disables it', async () => {
+      globalThis.fetch = vi.fn();
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR, {
+        env: {},
+        config: { updateCheck: { enabled: false } },
+      });
+
+      expect(result).toEqual({
+        hasUpdate: false,
+        disabled: true,
+        source: 'config',
+        reason: 'artibot.config.json updateCheck.enabled=false',
+      });
+      expect(fsMock.existsSync).not.toHaveBeenCalled();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits even when a fresh cache entry exists — no cache read at all', async () => {
+      // Opt-out must beat the cache path, not just the network path: a stale
+      // "update available" entry would otherwise keep nagging forever.
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(
+        JSON.stringify({
+          hasUpdate: true,
+          latestVersion: '9.9.9',
+          currentVersion: CURRENT_VERSION,
+          checkedAt: new Date().toISOString(),
+        }),
+      );
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR, {
+        env: { ARTIBOT_UPDATE_CHECK: 'off' },
+      });
+
+      expect(result.disabled).toBe(true);
+      expect(result.hasUpdate).toBe(false);
+      expect(fsMock.existsSync).not.toHaveBeenCalled();
+      expect(fsMock.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('still performs the normal check when opts explicitly enable it', async () => {
+      // Positive control: the gate must not pass by doing nothing.
+      globalThis.fetch = vi.fn(() => makeFetchResponse({ version: '2.0.0' }));
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR, {
+        env: { ARTIBOT_UPDATE_CHECK: '1' },
+        config: { updateCheck: { enabled: false } },
+      });
+
+      expect(result).toEqual({
+        hasUpdate: true,
+        latestVersion: '2.0.0',
+        currentVersion: CURRENT_VERSION,
+      });
+      expect(result.disabled).toBeUndefined();
+      expect(globalThis.fetch).toHaveBeenCalled();
+    });
+
+    it('behaves exactly as before for the legacy two-argument call', async () => {
+      // Back-compat: session-start's existing `checkForUpdate(v, dir)` call
+      // must be unchanged when no opt-out is present in the ambient env.
+      globalThis.fetch = vi.fn(() => makeFetchResponse({ version: '2.0.0' }));
+
+      const result = await checkForUpdate(CURRENT_VERSION, CACHE_DIR);
+
+      expect(result).toEqual({
+        hasUpdate: true,
+        latestVersion: '2.0.0',
+        currentVersion: CURRENT_VERSION,
+      });
+      expect(globalThis.fetch).toHaveBeenCalled();
     });
   });
 });

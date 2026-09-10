@@ -5,12 +5,20 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock node:fs so the module loads without disk access
-vi.mock('node:fs', () => ({
+// Mock node:fs so the module loads without disk access.
+// The opt-out suite below also asserts on these, so they are hoisted into
+// named spies rather than left inline.
+const fsMock = {
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
   writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
+};
+vi.mock('node:fs', () => ({
+  existsSync: (...args) => fsMock.existsSync(...args),
+  readFileSync: (...args) => fsMock.readFileSync(...args),
+  writeFileSync: (...args) => fsMock.writeFileSync(...args),
+  mkdirSync: (...args) => fsMock.mkdirSync(...args),
 }));
 
 // The seam moved: version-checker now routes through `safeFetch` instead of
@@ -95,5 +103,103 @@ describe('version-checker: assertEgressAllowed gate', () => {
     await checkForUpdate('1.0.0', '/fake/cache');
     expect(mockSafeFetch).toHaveBeenCalled();
     expect(globalThis.fetch).toHaveBeenCalledTimes(mockSafeFetch.mock.calls.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Opt-out gate. This file is the canonical home for "did anything leave the
+// machine?" assertions, so the opt-out's egress claim is pinned here rather
+// than in the unit suite: an opt-out that still phones home is the whole
+// defect class this feature exists to prevent.
+// ---------------------------------------------------------------------------
+describe('version-checker: opt-out — no egress when disabled', () => {
+  let originalFetch;
+  let hadEnvVar;
+  let originalEnvVar;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAssertEgress.mockReset();
+    hadEnvVar = 'ARTIBOT_UPDATE_CHECK' in process.env;
+    originalEnvVar = process.env.ARTIBOT_UPDATE_CHECK;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ version: '99.0.0', tag_name: 'v99.0.0' }),
+      }),
+    );
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    // Restore the ambient variable exactly: delete it if it was never set,
+    // otherwise put the original string back. Leaving it set would silently
+    // disable the check for every test file that runs afterwards.
+    if (hadEnvVar) {
+      process.env.ARTIBOT_UPDATE_CHECK = originalEnvVar;
+    } else {
+      delete process.env.ARTIBOT_UPDATE_CHECK;
+    }
+  });
+
+  it('sends nothing when the env variable disables the check', async () => {
+    const result = await checkForUpdate('1.0.0', '/fake/cache', {
+      env: { ARTIBOT_UPDATE_CHECK: '0' },
+    });
+
+    expect(mockSafeFetch).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockAssertEgress).not.toHaveBeenCalled();
+    expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+    expect(fsMock.mkdirSync).not.toHaveBeenCalled();
+    expect(result.disabled).toBe(true);
+    expect(result.source).toBe('env');
+  });
+
+  it('sends nothing when config disables the check', async () => {
+    const result = await checkForUpdate('1.0.0', '/fake/cache', {
+      env: {},
+      config: { updateCheck: { enabled: false } },
+    });
+
+    expect(mockSafeFetch).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockAssertEgress).not.toHaveBeenCalled();
+    expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+    expect(fsMock.mkdirSync).not.toHaveBeenCalled();
+    expect(result.disabled).toBe(true);
+    expect(result.source).toBe('config');
+  });
+
+  it('still sends when env enables the check over a disabling config', async () => {
+    // Positive control. Without this, all of the above would pass on a
+    // version-checker that simply never fetched anything at all.
+    const result = await checkForUpdate('1.0.0', '/fake/cache', {
+      env: { ARTIBOT_UPDATE_CHECK: '1' },
+      config: { updateCheck: { enabled: false } },
+    });
+
+    expect(mockSafeFetch.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(globalThis.fetch).toHaveBeenCalled();
+    expect(mockAssertEgress).toHaveBeenCalled();
+    expect(result.disabled).toBeUndefined();
+    expect(result.hasUpdate).toBe(true);
+  });
+
+  it('sends nothing on a legacy two-argument call when the real process.env opts out', async () => {
+    // The default-env path: session-start calls checkForUpdate(v, dir) with no
+    // opts, so process.env must be what actually silences it in production.
+    process.env.ARTIBOT_UPDATE_CHECK = '0';
+
+    const result = await checkForUpdate('1.0.0', '/fake/cache');
+
+    expect(mockSafeFetch).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockAssertEgress).not.toHaveBeenCalled();
+    expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+    expect(result.disabled).toBe(true);
+    expect(result.source).toBe('env');
   });
 });
