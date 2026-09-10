@@ -44,7 +44,12 @@
  *     아직 없다.
  *  5. **`.artibot/project.md` 의 내용**은 보지 않는다. 존재만 본다. 내용 계약은
  *     `project-md-contract` 게이트(T-02)의 몫이다.
- *  6. **`ARTIBOT.md` 는 리포 루트 문서 링크 스캐너의 대상이 아니다.**
+ *  6. **`IGNORED_RUNTIME_PATHS` 항목의 실재는 보지 않는다.** 런타임 산출물이라
+ *     CI 신규 체크아웃에는 없기 때문이다(설계상 포기한 절반). 그래서 그 경로의
+ *     기능이 **정말 동작하는지**는 이 게이트의 근거가 될 수 없다 — 표기가 거짓이
+ *     아님만 본다. 대신 그 경로가 실제로 gitignore 대상인지는 `git check-ignore`
+ *     로 잠근다(추적 파일을 몰래 실재 검사에서 빼내는 것을 막는 뒷문 잠금).
+ *  7. **`ARTIBOT.md` 는 리포 루트 문서 링크 스캐너의 대상이 아니다.**
  *     `scripts/ci/ci-utils.js#ROOT_SCAN_FILES` 는 명시 allowlist 5종이고 거기에
  *     `ARTIBOT.md` 가 없다(실측 2026-09-02). 따라서 이 파일 안의 깨진 링크는
  *     `docs:check` 가 잡지 못하며, 이 게이트도 링크 도달성은 보지 않는다.
@@ -52,6 +57,7 @@
  * @module tests/firewall/artibot-entry-parity
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +82,48 @@ const DESIGN_TEMPLATE = join(
 
 /** 읽기 순서 항목에 붙일 수 있는 유일한 접미사. allowlist — 다른 표기는 없다. */
 const NOT_LANDED = 'not yet landed';
+
+/**
+ * 런타임이 생성하고 `.gitignore` 되는 읽기 순서 항목 — **경로 allowlist**.
+ *
+ * 이 목록의 항목은 "기능으로는 착지했으나 파일은 추적되지 않는다". 그래서 판정이
+ * 반쪽이다 —
+ *   - 미착지 표기는 **없어야 한다**(남아 있으면 레드. fail-closed),
+ *   - 실재는 **단언하지 않는다**(신규 체크아웃인 CI 에는 파일이 없다).
+ *
+ * ── 왜 `git check-ignore` 를 분기 조건으로 쓰지 않는가 ──────────────────────
+ * 이유는 둘이고, 각각 독립적으로 치명적이다.
+ *
+ * (1) **`check-ignore` exit 0 은 "무시된다" 조차 신뢰할 수 없다.** 존재하지 않는
+ *     디렉터리를 **뒤에 슬래시를 붙여** 물으면 git 은 빈 패턴을 근거로 0 을 준다.
+ *     실측 2026-09-10 —
+ *       `git check-ignore -v -- .artibot/missions/` → exit 0, `.gitignore:154:`
+ *       `git check-ignore -v -- .artibot/zzz/`      → exit 0, `.gitignore:154:`  ← 없는 경로
+ *       `git check-ignore -v -- .artibot/missions`  → exit 1 (슬래시만 뗀 것)
+ *     `.gitignore:154` 는 **빈 줄**이고(`sed -n '154p' .gitignore | cat -A` → `$`),
+ *     `.gitignore` 에서 missions 를 언급하는 곳은 :119 **주석** 한 줄뿐이다. 그 주석은
+ *     오히려 missions 를 정본 추적 대상으로 적고 있다. 즉 **missions 는 무시 대상도
+ *     아니고 실재하지도 않는다** — 이 파일의 이전 판(그리고 그 근거로 쓰인 리더 전제)은
+ *     이 지점에서 틀렸었다.
+ *
+ * (2) 하필 `verifiablePath()` 가 읽기 순서 3·4(`Active mission …`)에 대해 돌려주는
+ *     값이 **슬래시로 끝나는** `.artibot/missions/` 다(:217). 그래서 check-ignore 를
+ *     분기로 쓰면 (1) 의 아티팩트만으로 missions 가 면제 분기로 쓸려 들어가, 아직
+ *     실재하지 않는 missions 의 **정직한** 미착지 표기를 강제로 떼게 되고, missions 가
+ *     실제로 착지하는 날을 이 게이트가 영영 못 보게 된다(fail-open).
+ *
+ * 정리하면 **check-ignore exit 0 은 "착지했다" 도 "무시된다" 도 함의하지 않는다.**
+ * 그래서 "착지했다" 판정은 사람이 한 건씩 여기 적고, git 은 그 적힌 내용이 참인지
+ * **검증만** 한다(아래 `allowlist 의 각 항목이 실제로 gitignore 되어 있다`).
+ * 그 검증이 이 상수가 **추적 파일의 실재 검사를 빠져나가는 뒷문**이 되지 않게 하는
+ * 잠금이며, 검증 자신이 (1) 에 당하지 않도록 **슬래시로 끝나는 항목을 먼저 거부**한다.
+ */
+const IGNORED_RUNTIME_PATHS = new Set([
+  // 오너 결정 2026-09-10: 런타임이 이 파일을 실제로 쓰고 있다 = 착지. 표기 제거.
+  // (`state_version` 은 세션 중에도 올라가는 값이라 여기 박지 않는다 — 재현 명령:
+  //  `grep -m1 state_version .artibot/state.yaml`)
+  '.artibot/state.yaml',
+]);
 
 /**
  * T-01 이전 루트 `CLAUDE.md` 의 내용 5줄. 어댑터는 **추가**이지 대체가 아니므로
@@ -187,6 +235,28 @@ function verifiablePath(item) {
   return null;
 }
 
+/**
+ * 표기·실재 대조의 (실제값, 기대값) 쌍을 만든다.
+ *
+ * **순수 함수다 — FS 도 git 도 보지 않는다.** 그래서 자기검증이 CI(파일 부재)와
+ * 로컬(파일 존재) 양쪽을 실제 리포를 건드리지 않고 픽스처로 재현할 수 있다.
+ *
+ * @param {string} rel - 리포 상대 경로
+ * @param {boolean} marked - 미착지 표기가 붙어 있는가
+ * @param {boolean} exists - 실제로 존재하는가
+ * @returns {{actual: object, expected: object}} 같으면 그린, 다르면 레드
+ */
+function parityVerdict(rel, marked, exists) {
+  if (IGNORED_RUNTIME_PATHS.has(rel)) {
+    // 실재를 비교 대상에서 **뺀다** — 있어도 없어도 판정이 같아야 한다.
+    return { actual: { path: rel, marked }, expected: { path: rel, marked: false } };
+  }
+  return {
+    actual: { path: rel, marked, exists },
+    expected: { path: rel, marked: !exists, exists },
+  };
+}
+
 const artibotText = existsSync(ARTIBOT_MD) ? readFileSync(ARTIBOT_MD, 'utf8') : null;
 const claudeText = existsSync(ROOT_CLAUDE_MD) ? readFileSync(ROOT_CLAUDE_MD, 'utf8') : null;
 const templateText = existsSync(DESIGN_TEMPLATE) ? readFileSync(DESIGN_TEMPLATE, 'utf8') : null;
@@ -261,13 +331,48 @@ describe('미착지 표기 — 표기와 실제가 양방향으로 일치한다'
     expect(items.filter((i) => verifiablePath(i) !== null).length).toBeGreaterThan(0);
   });
 
+  it('실재까지 대조하는 항목이 최소 1건 남아 있다 (allowlist 가 게이트를 비우지 않았다)', () => {
+    const stillChecked = items
+      .map(verifiablePath)
+      .filter((p) => p !== null && !IGNORED_RUNTIME_PATHS.has(p));
+    expect(stillChecked.length).toBeGreaterThan(0);
+  });
+
+  it('allowlist 의 각 항목이 실제로 gitignore 되어 있다 (뒷문 잠금)', () => {
+    const rels = [...IGNORED_RUNTIME_PATHS];
+
+    // 슬래시로 끝나는 항목은 이 잠금 자체를 무력화한다 — 없는 디렉터리라도
+    // `check-ignore -q -- '<없는 경로>/'` 가 빈 패턴(`.gitignore:154:`)으로 exit 0 을
+    // 준다(실측 2026-09-10: `.artibot/zzz/` 가 `.artibot/missions/` 와 동일 출력).
+    // 그래서 잠금을 돌리기 **전에** 거부한다.
+    expect(rels.filter((r) => r.endsWith('/'))).toEqual([]);
+
+    const verdicts = rels.map((rel) => {
+      try {
+        // exit 0 = 무시됨. exit 1(비무시)·128(오류)·git 부재는 전부 throw → 불합격.
+        execFileSync('git', ['check-ignore', '-q', '--', rel], {
+          cwd: REPO_ROOT,
+          stdio: 'ignore',
+        });
+        return { path: rel, ignored: true };
+      } catch {
+        return { path: rel, ignored: false };
+      }
+    });
+    expect(verdicts).toEqual(rels.map((rel) => ({ path: rel, ignored: true })));
+  });
+
   for (const item of items) {
     const rel = verifiablePath(item);
     if (rel === null) continue;
     const marked = item.includes(NOT_LANDED);
-    it(`${rel} — 표기(${marked ? '미착지' : '착지'})와 실제 존재가 일치한다`, () => {
+    const label = IGNORED_RUNTIME_PATHS.has(rel)
+      ? `${rel} — 런타임 산출물: 표기(${marked ? '미착지' : '착지'})만 보고 실재는 묻지 않는다`
+      : `${rel} — 표기(${marked ? '미착지' : '착지'})와 실제 존재가 일치한다`;
+    it(label, () => {
       const exists = existsSync(join(REPO_ROOT, rel));
-      expect({ path: rel, marked, exists }).toEqual({ path: rel, marked: !exists, exists });
+      const { actual, expected } = parityVerdict(rel, marked, exists);
+      expect(actual).toEqual(expected);
     });
   }
 });
@@ -332,6 +437,60 @@ describe('스캐너 자기검증 — 추출기가 실제로 드리프트를 본�
     ]);
     expect(verifiablePath('Relevant ADRs')).toBeNull();
     expect(verifiablePath('Review / Outcome when applicable')).toBeNull();
+  });
+
+  /**
+   * `parityVerdict` 결과가 그린인지 **boolean 으로** 답한다.
+   *
+   * `toEqual` 로 대체할 수 없다 — 그건 단언이라 값을 안 준다. 네 경우의 통과/실패를
+   * **한 배열로 한 번에** 비교하려면 술어가 필요하다. 두 객체 다 `parityVerdict`
+   * 안에서 같은 키 순서의 평평한 리터럴로 만들어지므로 직렬화 비교로 충분하고,
+   * 혹시 순서가 어긋나면 여기가 레드가 난다(fail-closed — 조용히 통과하지 않는다).
+   *
+   * @param {{actual: object, expected: object}} v - parityVerdict 결과
+   * @returns {boolean} 그린이면 true
+   */
+  const agrees = (v) => JSON.stringify(v.actual) === JSON.stringify(v.expected);
+
+  it('런타임 allowlist 항목 — 표기 부재는 실재와 무관하게 통과, 표기 잔존은 레드', () => {
+    const rel = '.artibot/state.yaml';
+    expect(IGNORED_RUNTIME_PATHS.has(rel)).toBe(true);
+
+    // [표기, 실재] → 통과 여부. 3·4행이 CI(신규 체크아웃, 파일 부재) 시나리오다.
+    const cases = [
+      [false, true],
+      [true, true],
+      [false, false],
+      [true, false],
+    ];
+    expect(cases.map(([m, e]) => agrees(parityVerdict(rel, m, e)))).toEqual([
+      true, // 표기 없음 + 로컬 존재  → 그린
+      false, // 표기 남음 + 로컬 존재  → 레드 (썩은 표기)
+      true, // 표기 없음 + CI 부재    → 그린 ← 이 분기가 이번 변경의 목적
+      false, // 표기 남음 + CI 부재    → 레드 (fail-closed: 무시 경로도 표기는 금지)
+    ]);
+
+    // 실재를 아예 단언 대상에 넣지 않는다(있음/없음이 같은 판정을 낸다).
+    expect('exists' in parityVerdict(rel, false, true).actual).toBe(false);
+    expect(parityVerdict(rel, false, true)).toEqual(parityVerdict(rel, false, false));
+  });
+
+  it('allowlist 밖 경로는 양방향 대조가 그대로다 (기존 계약 무변경)', () => {
+    const rel = '.artibot/project.md';
+    expect(IGNORED_RUNTIME_PATHS.has(rel)).toBe(false);
+
+    const cases = [
+      [false, true],
+      [true, false],
+      [false, false],
+      [true, true],
+    ];
+    expect(cases.map(([m, e]) => agrees(parityVerdict(rel, m, e)))).toEqual([
+      true, // 착지 표기 + 실재    → 그린
+      true, // 미착지 표기 + 부재  → 그린
+      false, // 표기 없는데 부재    → 레드 (allowlist 밖이면 CI 부재도 레드가 맞다)
+      false, // 표기 있는데 실재    → 레드 (썩은 표기)
+    ]);
   });
 
   it('어댑터 없는 CLAUDE.md 를 통과시키지 않는다', () => {

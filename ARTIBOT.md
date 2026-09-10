@@ -9,12 +9,14 @@ canonical artifact instead.
 Entries marked `not yet landed` do not exist in this tree yet. The marker is
 enforced by `plugins/artibot/tests/firewall/artibot-entry-parity.test.js`: it must
 be removed in the same change that creates the artifact, and it must be present
-while the artifact is absent.
+while the artifact is absent. Runtime-generated, gitignored entries are exempt from
+the existence half of that check — they carry no marker and may be absent in a fresh
+checkout (allowlist: `IGNORED_RUNTIME_PATHS` in that test).
 
 ## Read Order
 
 1. `.artibot/project.md`
-2. `.artibot/state.yaml` — not yet landed
+2. `.artibot/state.yaml`
 3. Active mission `intent.md` — not yet landed
 4. Active mission `plan.md` — not yet landed
 5. Relevant ADRs
