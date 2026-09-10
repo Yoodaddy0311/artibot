@@ -77,8 +77,8 @@ let sandboxRoot;
  * `package.json`, with the home directory excluded), then the start directory.
  * A bare `mkdtemp` cwd under the OS temp dir has none of the first three, so
  * the walk climbed out of the temp tree — and because this suite overrides
- * HOME/USERPROFILE to `sandboxHome`, the real `C:/Users/<user>` no longer
- * counted as "home" and its `.artibot` won the outermost-marker rule. Result:
+ * HOME/USERPROFILE to `sandboxHome`, the developer's real home directory no
+ * longer counted as "home" and its `.artibot` won the outermost-marker rule. Result:
  * every run wrote fixture decision rows into the developer's REAL store at
  * `~/.artibot/runtime/decisions/`. Measured by the team lead at 10:26 KST on
  * 2026-09-10 — 6 leaked `guard-*.events.ndjson` files; an unanchored run at
@@ -773,7 +773,7 @@ describe('_userprompt-dispatcher (integration)', () => {
      * LEAK TRIPWIRE — the sandbox must not reach the developer's real store.
      *
      * Before the project-root anchor, it did: overriding HOME/USERPROFILE made
-     * the real `C:/Users/<user>` stop counting as "home" in
+     * the developer's real home directory stop counting as "home" in
      * `resolveProjectRoot`'s home-exclusion rule, so its `.artibot` became the
      * outermost weak marker for a temp-dir cwd and won. Six fixture sessions
      * landed in `~/.artibot/runtime/decisions/` (measured by the team lead at
