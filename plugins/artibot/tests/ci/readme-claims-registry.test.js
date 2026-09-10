@@ -79,6 +79,7 @@ describe('CLAIM_PATTERNS contract', () => {
         'hook regs': ['42 hook registrations', '42'],
         'hook scripts': ['42 hook scripts', '42'],
         'CI scripts': ['42 CI scripts', '42'],
+        rules: ['42 auto-activating rules', '42'],
         tests: ['9,900+ tests', '9,900'],
         'skills (ko)': ['42개 도메인 스킬', '42'],
         'commands (ko)': ['42개 슬래시 커맨드', '42'],

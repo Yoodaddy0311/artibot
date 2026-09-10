@@ -35,12 +35,14 @@ discovery (the community catalog + a possible Anthropic-Verified badge).
 Native marketplace install loads only what Claude Code's plugin schema supports.
 Two gaps must be disclosed honestly so listing copy does not overclaim parity:
 
-1. **The 8 auto-activating rules are NOT delivered.** `plugin.json` declares a
+1. **The 10 auto-activating rules are NOT delivered.** `plugin.json` declares a
    `rules[]` array (DEV Protocol, Quality Gates, agent-coordination, config-safety,
-   clean-state, frontend/backend/test patterns), but `rules` is **outside the
+   clean-state, frontend/backend/test patterns, verification-discipline,
+   question-recommendations), but `rules` is **outside the
    official plugin manifest schema** — `claude plugin validate` reports it as an
    ignored field. These rules are placed only by `install.sh` (`install_rules()`
-   → `~/.claude/rules/artibot/`, install.sh:295-306, count verified at :927). So a
+   → `~/.claude/rules/artibot/`, install.sh#install_rules; the installed count is
+   reported by install.sh#verify_install). So a
    purely native install does not get automatic DEV-protocol / quality-gate
    enforcement; only the full `install.sh` path does.
 2. **A few convenience commands assume the flat layout.** `/theme`, `/update`, and
@@ -202,7 +204,7 @@ Core capabilities:
 - A marketing/knowledge-work skill set (SEO, CRO, ad copy, analytics,
   presentations) alongside the developer-focused agents.
 
-Known limitations of the native marketplace install path: the 8
+Known limitations of the native marketplace install path: the 10
 auto-activating rule files (DEV Protocol, Quality Gates, and related
 coordination patterns) are not delivered natively — Claude Code's plugin
 manifest schema has no field for them, so they load only via the full
@@ -231,7 +233,7 @@ https://github.com/Yoodaddy0311/artibot
 
 **Known limitations disclosure (form field, if offered separately from the description)**
 ```text
-Native marketplace install does not deliver 8 auto-activating rule files
+Native marketplace install does not deliver 10 auto-activating rule files
 (DEV Protocol / Quality Gates enforcement) — Claude Code's plugin schema has
 no "rules" field, so `claude plugin validate` reports it as unrecognized and
 ignores it. Use the repo's full install.sh/install.ps1 path if you rely on

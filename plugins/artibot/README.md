@@ -5,7 +5,6 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
 [![Lint](https://img.shields.io/badge/lint-clean-brightgreen?style=flat-square)](./eslint.config.js)
-[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen?style=flat-square)](./tests/)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)](https://github.com/anthropics/claude-code)
 
 > **Cognitive orchestration OS for Claude Code** — hierarchical memory, verifiable-reward learning (RLVR), MCP server, and multi-platform agent teams.
@@ -34,7 +33,12 @@ cd artibot/plugins/artibot && bash install.sh
 /daily       # auto-generated session retrospective with team metrics
 ```
 
-That's it. No manual config. Agent Teams auto-enables on first session start.
+That's it. No manual config beyond one setting: `~/.claude/settings.json` needs
+`"env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }` for Agent Teams.
+`install.ps1` adds the key when it is missing; `install.sh` writes it only when
+`settings.json` does not exist yet, and otherwise just prints the line for you to
+add. The marketplace install seeds nothing. The SessionStart hook only reads the
+setting and prints a hint — it never writes it.
 
 ---
 
@@ -73,10 +77,12 @@ Inside the Claude Code plugin category, Artibot leads on **Self-improvement (10/
 flowchart TD
     U[User Request] --> SC[/sc Smart Router/]
     SC --> CR[Cognitive Router<br/>complexity scoring]
-    CR -->|score &lt; 0.4| S1[System 1<br/>fast pattern match]
-    CR -->|score &gt;= 0.4| S2[System 2<br/>deliberative reasoning]
-    S1 --> SUB[Sub-Agent Mode<br/>Task one-way]
-    S2 --> TM[Agent Team Mode<br/>named spawns + P2P]
+    CR -->|score &lt; threshold 0.4| S1[System 1 label<br/>simple request]
+    CR -->|score &gt;= threshold 0.4| S2[System 2 label<br/>complex request]
+    S1 --> TT{team.autoApplyTriggers<br/>subtasks or files &gt;= 3<br/>OR tier high &gt;= 0.6}
+    S2 --> TT
+    TT -->|no| SUB[Sub-Agent Mode<br/>Task one-way]
+    TT -->|yes| TM[Agent Team Mode<br/>named spawns + P2P]
     SUB --> RT[Runtime Middleware Pipeline<br/>11 stages]
     TM --> RT
     RT --> AG[30 Specialist Agents<br/>orchestrator + 29 teammates]
@@ -102,7 +108,7 @@ Per-module detail lives in each source file's JSDoc `@module` header under the `
 
 | Pillar | What you get |
 |---|---|
-| **Cognitive Routing** | System 1 (fast pattern match, <100ms) vs System 2 (deliberate-tier routing), auto-escalation rules |
+| **Cognitive Routing** | System 1 / System 2 classification by weighted complexity score against a threshold (default 0.4, adapts within 0.2–0.7 from outcome feedback) |
 | **Hierarchical Memory** | working / episodic / semantic layers with promotion/demotion, MEMORY.md index, 3-scope (user / project / session) |
 | **RLVR Self-Learning** | Verifiable-reward signals (test pass / typecheck / no-revisit) bias routing and skill promotion — no external reward model, no RL policy optimizer (the GRPO optimizer was removed in the 2026-06 lean redesign) |
 | **MCP Server** | Artibot publishes its own MCP server (skills, agents, memory, git bridges); also consumes Context7 + Playwright |
@@ -130,17 +136,19 @@ Run these two commands from inside any Claude Code session:
 Claude Code fetches the plugin straight from GitHub into its own plugin cache —
 no `git clone`, no copy step, no shell script. Commands, agents, skills, and
 hooks all load through `${CLAUDE_PLUGIN_ROOT}`, and updates are managed for you
-via `/plugin marketplace update artibot`. Agent Teams auto-enables on first
-session start.
+via `/plugin marketplace update artibot`. Agent Teams is **not** seeded by this
+path — add `"env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }` to
+`~/.claude/settings.json` yourself. Only `install.sh` / `install.ps1` write it.
 
 Native install **namespaces every command** under the `artibot:` prefix — call
 `/artibot:save`, `/artibot:sc`, `/artibot:daily`. (CLI equivalent for scripts:
 `claude plugin marketplace add Yoodaddy0311/artibot` then
 `claude plugin install artibot@artibot`.)
 
-> **Note — native install does not deliver the 8 auto-activating rules** (DEV
-> Protocol, Quality Gates, agent-coordination, config-safety, clean-state, and the
-> frontend/backend/test patterns). Claude Code's plugin schema has no `rules` field,
+> **Note — native install does not deliver the 10 auto-activating rules** (DEV
+> Protocol, Quality Gates, agent-coordination, config-safety, clean-state, the
+> frontend/backend/test patterns, verification-discipline, question-recommendations).
+> Claude Code's plugin schema has no `rules` field,
 > so `claude plugin validate` flags it as an ignored field; the rules load only when
 > `install.sh` copies them to `~/.claude/rules/artibot/`. If you want that automatic
 > DEV-protocol / quality-gate enforcement, use the full install below. `/theme` and
@@ -214,7 +222,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 |---|---|---|
 | `version` | `4.57.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
-| `cognitive.system1.maxLatency` | `100` | ms — System 1 response cap before escalation |
+| `cognitive.system1.maxLatency` | `100` | ms — unused (System 1 execution engine removed; key kept for schema compatibility) |
 | `learning.lifelong.batchSize` | `50` | Experiences per lifelong-learning batch |
 | `team.engine` | `"claude-agent-teams"` | Native Claude Code Agent Teams |
 | `team.delegationMode` | `true` | Orchestrator coordinates only, never writes code |
@@ -479,7 +487,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 16개 이벤트에 27개 훅 등록 (HTTP webhook 알림 포함)
+- 16개 이벤트에 27개 훅 등록 (HTTP webhook 알림 포함) — `hooks/hooks.json`의 매처 엔트리 기준. 이 중 2개(SubagentStart·TeammateIdle)는 스크립트를 2개씩 실행하므로 실제 실행 커맨드는 29개
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
 - **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
@@ -503,9 +511,12 @@ bash install.sh          # macOS / Linux / Windows의 Git Bash
 
 이것이 **권장 경로**입니다. 커맨드·에이전트를 `~/.claude/`에 flat 복사하므로
 슬래시 커맨드를 **프리픽스 없이** 호출합니다 (`/save`, `/sc`, `/daily`).
-Agent Teams 자동 활성화 + `~/.claude/settings.json`에 보수적인 읽기 전용
-허용목록(`Read`/`Glob`/`Grep`)을 시드해서, 안전한 읽기 작업마다 권한 prompt가
-반복되지 않습니다. 제거: `bash install.sh uninstall`
+`~/.claude/settings.json`에 보수적인 읽기 전용 허용목록(`Read`/`Glob`/`Grep`)을
+시드해서, 안전한 읽기 작업마다 권한 prompt가 반복되지 않습니다. Agent Teams
+env 키(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"`)는 `settings.json`이 **없을 때**
+새로 만들면서 함께 시드합니다. 파일이 이미 있으면 `install.sh`는 키를 덮어쓰지 않고
+수동 추가 안내만 출력합니다(`install.ps1`은 없는 키를 병합해 넣습니다).
+제거: `bash install.sh uninstall`
 
 > **Windows:** `install.sh`는 **Git Bash**([Git for Windows](https://gitforwindows.org/) 동봉)에서 실행하세요.
 > 네이티브 PowerShell 설치 스크립트도 제공됩니다: `powershell -ExecutionPolicy Bypass -File install.ps1`.
@@ -530,13 +541,14 @@ claude plugin install artibot@artibot
 
 마켓플레이스 설치는 **모든** 커맨드를 `artibot:` 프리픽스로 네임스페이스합니다 —
 예: `/save` → `/artibot:save`. `claude plugin`을 통한 플러그인 관리형 업데이트가
-필요한 경우에만 사용하세요. Agent Teams는 첫 세션에서 자동 활성화됩니다.
-제거: `claude plugin uninstall artibot`
+필요한 경우에만 사용하세요. 이 경로는 Agent Teams env 키를 **시드하지 않습니다** —
+`~/.claude/settings.json`에 `"env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }`을
+직접 추가하세요. 제거: `claude plugin uninstall artibot`
 
 ### 요구사항
 - Claude Code CLI
 - Node.js >= 18.0.0
-- Agent Teams (Artibot이 자동 활성화, 또는 수동: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)
+- Agent Teams (`install.sh`/`install.ps1`가 `settings.json`에 시드, 또는 수동: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)
 
 ---
 
@@ -1055,17 +1067,23 @@ Artibot v1.3+부터 Kahneman의 이중 처리 이론에서 영감을 받은 인�
 ```
 사용자 요청
     ↓
-Cognitive Router (threshold: 0.4)
-    ├── confidence >= 0.6 → System 1 (빠른 직관 처리, <100ms)
-    │       → 패턴 매칭 → 즉시 응답
-    └── confidence < 0.6 → System 2 (심층 분석 처리)
-            → 심층 분석 → 정밀 응답
+Cognitive Router (threshold: 0.4, 피드백으로 0.2~0.7 적응)
+    ↓
+복잡도 score = steps .25 + domains .20 + uncertainty .20 + risk .20 + novelty .15
+    ├── score < threshold → System 1 (단순 요청 라벨)
+    └── score >= threshold → System 2 (복잡 요청 라벨)
 ```
 
-| 시스템 | 방식 | 최대 지연 | 적용 상황 |
-|--------|------|-----------|-----------|
-| **System 1** | 직관적, 패턴 기반 | 100ms | 반복 작업, 명확한 의도 |
-| **System 2** | 분석적, 심층 추론 | 제한 없음 | 복잡한 추론, 불확실한 의도 |
+| 시스템 | 방식 | 적용 상황 |
+|--------|------|-----------|
+| **System 1** | 직관적, 패턴 기반 | 반복 작업, 명확한 의도 |
+| **System 2** | 분석적, 심층 추론 | 복잡한 추론, 불확실한 의도 |
+
+> **주의**: System 1/2 는 복잡도 분류 **라벨**이며, 별도 실행 엔진(패턴 캐시·지연 상한·자동
+> 에스컬레이션)은 제거되었습니다. `cognitive.system1.*` / `cognitive.system2.*` 설정 키는
+> 스키마 호환을 위해 남아 있을 뿐 소비되지 않습니다. `confidence` 는 분기 입력이 아니라
+> score 와 threshold 사이 거리로 계산되는 **출력값**입니다 (`lib/cognitive/router.js`
+> `classifyComplexity`, 2026-09-10 확인).
 
 ### 지속 학습 시스템
 
@@ -1487,7 +1505,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-16개 이벤트에 27개 훅이 등록되어 있습니다.
+16개 이벤트에 27개 훅이 등록되어 있습니다 — `hooks/hooks.json`의 매처 엔트리 기준입니다. SubagentStart·TeammateIdle 매처는 각각 스크립트를 2개씩 실행하므로, 실제로 실행되는 커맨드 수는 29개입니다.
 
 ### 이벤트별 훅
 
