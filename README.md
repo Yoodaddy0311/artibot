@@ -4,7 +4,6 @@
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
-[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen?style=flat-square)](plugins/artibot/tests/)
 [![Lint](https://img.shields.io/badge/lint-clean-brightgreen?style=flat-square)](plugins/artibot/eslint.config.js)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)](https://github.com/anthropics/claude-code)
 [![Cowork Plugin](https://img.shields.io/badge/Claude_Cowork-Plugin-orange?style=flat-square)](https://claude.com/cowork)
@@ -56,7 +55,7 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 - **Guard Registry** -- Centralized guard pipeline with `registerGuard()`/`executeChain()` API, 6 built-in guards extracted from hook scripts (75% code reduction)
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
-- **27 Hook Registrations** -- Across 16 event types: cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot
+- **27 Hook Registrations** (`hooks.json` matcher entries) -- Across 16 event types: cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot. Two entries fan out to two scripts each, so 29 hook commands run in total
 - **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
@@ -74,7 +73,12 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 
 ### Prerequisites
 
-**Agent Teams** is auto-enabled by Artibot on first session start. No manual setup needed.
+**Agent Teams** is seeded by the install script, not by the plugin at runtime.
+`install.ps1` adds `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` to `~/.claude/settings.json`
+whenever the key is missing; `install.sh` writes it only when that file does not exist
+yet, and otherwise prints the line for you to add. The native marketplace install runs
+neither script, so on that path add the env entry yourself. The SessionStart hook only
+reads the setting and prints a hint — it does not enable anything.
 
 ### Installation
 
@@ -88,7 +92,9 @@ Claude Code fetches the plugin straight from GitHub into its plugin cache — no
 `git clone`, no shell script. Commands, agents, skills, and hooks load via
 `${CLAUDE_PLUGIN_ROOT}`; updates come through `/plugin marketplace update artibot`.
 Native install **namespaces every command** under the `artibot:` prefix (call
-`/artibot:save`, `/artibot:sc`). Agent Teams auto-enables on first session start.
+`/artibot:save`, `/artibot:sc`). Agent Teams is **not** seeded by this path — add
+`"env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }` to `~/.claude/settings.json`
+manually, since `/plugin install` does not run the install scripts.
 To uninstall: `/plugin uninstall artibot@artibot`.
 
 > **Native install does not deliver the 10 auto-activating rules** (DEV Protocol,
@@ -108,11 +114,15 @@ cd artibot/plugins/artibot
 bash install.sh          # macOS / Linux / Git Bash on Windows
 ```
 
-This flat-copies agents and commands into `~/.claude/`, so slash commands are
-called **without a prefix** (`/save`, `/sc`, `/daily`). It enables Agent Teams,
-wires the themed statusline, and seeds a conservative read-only permission
+This flat-copies agents and commands into `~/.claude/` (with one exception noted
+below), so slash commands are called **without a prefix** (`/save`, `/sc`, `/daily`). It seeds the Agent Teams env
+var (see [Prerequisites](#prerequisites) for the exact per-script behavior), wires the
+themed statusline, and seeds a conservative read-only permission
 allowlist (`Read`/`Glob`/`Grep`) into `~/.claude/settings.json`, removing the
-repeated approval prompts new users hit on first run. To uninstall:
+repeated approval prompts new users hit on first run. If a native marketplace install
+is already present (`~/.claude/plugins/cache/artibot/artibot/<version>/`), the scripts
+skip the flat copy of agents and commands by default; pass `--flat` (`install.sh`) or
+`-Flat` (`install.ps1`) to force it. To uninstall:
 `bash install.sh uninstall`.
 
 > **Windows:** run `install.sh` from **Git Bash** ([Git for Windows](https://gitforwindows.org/)),
@@ -123,13 +133,13 @@ repeated approval prompts new users hit on first run. To uninstall:
 | Install method | Command form | Example |
 |---|---|---|
 | Native marketplace (`/plugin install`) | namespaced `artibot:` | `/artibot:save`, `/artibot:sc` |
-| `install.sh` / `install.ps1` (flat) | flat (no prefix) | `/save`, `/sc`, `/daily` |
+| `install.sh` / `install.ps1` (flat) | flat (no prefix) — skipped by default when a native install is detected; `--flat`/`-Flat` forces | `/save`, `/sc`, `/daily` |
 
 ### Requirements
 
 - [Claude Code](https://github.com/anthropics/claude-code) CLI
 - Node.js >= 18.0.0
-- Agent Teams (auto-enabled by Artibot, or manually set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)
+- Agent Teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `~/.claude/settings.json` — seeded by the install script, or set manually)
 
 ### Cross-Platform Installation
 
@@ -375,36 +385,34 @@ User Request
 | (hook-based) |      + uncertainty (0.20) + risk (0.20) + novelty (0.15)
 +------+------+
        |
-       +--- score < 0.4 ---> System 1 (Fast / Intuitive)
-       |                       - Pattern-matched from cached experience
-       |                       - Target latency: < 100ms
-       |                       - Keyword-based heuristic scoring
+       +--- score < threshold ---> System 1 (label: fast / intuitive)
        |
-       +--- score >= 0.4 ---> System 2 (Deep / Deliberative)
-       |                       - Multi-step structured reasoning
-       |                       - Full context + dependency analysis
-       |                       - Sandbox verification for high-risk ops
-       |
-       +--- confidence < 0.6 or latency exceeded ---> Escalation
-                                System 1 -> System 2 automatic fallback
+       +--- score >= threshold --> System 2 (label: deep / deliberative)
+
+  threshold defaults to 0.4 and adapts within 0.2-0.7 from outcome feedback
+  confidence = min(1, 0.5 + |score - threshold| * 2)
 ```
 
-### Escalation Rules
-- System 1 confidence drops below 0.6
-- Processing time exceeds 100ms
-- No matching pattern in System 1 cache
-- Security or production keywords detected
-- Request spans 3+ domains
-- Explicit `--think`, `--think-hard`, or `--ultrathink` flag
+> **What the router does today:** it consults no pattern cache, and it has no latency
+> cap, no confidence-based escalation, and no sandbox step. `lib/cognitive/router.js`
+> only classifies — it returns a score, a System 1/2 label, and a confidence derived
+> from the distance to the threshold — and adapts that threshold up or down from
+> outcome feedback. A native effort hint, when present, can override the label
+> directly, and confidence is then floored at 0.8. The `cognitive.system1.*` /
+> `cognitive.system2.*` config keys are unused (see [Configuration](#configuration)).
 
 ### Integration with Delegation
 
-The cognitive router feeds directly into the orchestration delegation mode:
+The router's label and the team auto-delegation trigger are two independent axes:
 
-| Complexity Score | System | Delegation Mode |
-|-----------------|--------|-----------------|
-| < 0.4 | System 1 | Sub-Agent (Task tool) |
-| >= 0.4 | System 2 | Agent Team (Teams API) |
+| Axis | Boundary | Where |
+|------|----------|-------|
+| Cognitive router (System 1 / 2 label) | score < 0.4 -> System 1, >= 0.4 -> System 2 (adaptive 0.2-0.7) | `lib/cognitive/router.js` |
+| Team auto-delegation (`/team` trigger) | any of: subtasks >= 3, files >= 3 (subtasks and files are one size signal: both proxy the sub-objective count), complexity tier `high` (score >= 0.6); bypassed for question/diagnose/explain/lookup intents | `team.autoApplyTriggers` + `lib/cognitive/workflow-plan.js#complexityTier` |
+
+The two thresholds are independent: a System 2 classification (>= 0.4) does not by
+itself trigger a team. `team.delegationModeSelection.*.condition` in the config is
+descriptive text that no code evaluates.
 
 #### Sub-Agent vs Agent Teams
 
@@ -762,7 +770,10 @@ daily (work recap/retrospective), team (parallel orchestration), session-worklog
 
 ## Hooks
 
-27 hook registrations across 16 event types.
+27 hook registrations across 16 event types. A "registration" is one matcher entry
+in [`hooks.json`](plugins/artibot/hooks/hooks.json). Two entries (`SubagentStart`,
+`TeammateIdle`) each fan out to two scripts, so 29 hook commands run in total, drawn
+from 27 distinct command strings.
 
 <details>
 <summary>Hook Event Table</summary>
@@ -908,7 +919,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `1.14.1` |
+| `version` | Plugin version | `4.57.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) (unused — engine removed) | `100` |
@@ -1041,9 +1052,12 @@ You can install **both** in the same Anthropic account — `artibot` runs in you
 
 ## Version
 
-**4.13.0** (2026-05-19) — feat: `/save` single-shot session handoff command (+`/resume`) — `.artibot/HANDOFF.md` produces 5s next-session context restore. Safety boost: YAML frontmatter (machineId/createdAt/branch), git-lock graceful fail (5s timeout), 10m archive throttle, atomic advisor consumed marking. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for full history.
-
-**4.12.0** (2026-05-19) — Comprehensive audit fixes: security hardening (timing-safe auth, K_SERVICE bypass removed, shell-injection surfaces eliminated), manifest drift sync, layer-cycle fix.
+**4.57.0** (2026-09-09) — 4th landing batch (`split-5f9fe3`): removed the guardrail
+false-denial banner that mislabelled orchestration tools as denied, fixed the `/doctor`
+Check 8-② multi-record misjudgement on shared `state_version` values, added a sender
+guard so `UserPromptSubmit` no longer compiles host notifications into prompts, and
+synced 15 drifted public counts. See [CHANGELOG](./plugins/artibot/CHANGELOG.md) for
+full history.
 
 [📖 Full release history — CHANGELOG](./plugins/artibot/CHANGELOG.md)
 

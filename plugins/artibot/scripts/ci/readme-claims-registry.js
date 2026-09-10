@@ -464,6 +464,21 @@ export const CLAIM_PATTERNS = [
   // "19 CI validation scripts") cannot silently unbind the gate — the failure
   // mode that left this claim uncovered while it drifted to 6-vs-19.
   { key: 'ciScripts', regex: /(\d{1,3})(\s+CI\s+(?:validation\s+)?scripts?\b)/gi, label: 'CI scripts', lang: 'en' },
+  // `rules` was computed by collectActuals() from the start but had NO pattern
+  // until 2026-09-10, so every "N auto-activating rules" sentence drifted
+  // unwatched. Measured that day across the 9 SCAN_TARGETS: 7 bindings, of which
+  // 4 claimed 8 against an actual 10 — plugins/artibot/README.md plus THREE in
+  // docs/MARKETPLACE-SUBMISSION.md — while the root README's 3 already said 10.
+  // The two documents contradicted each other and nothing noticed.
+  // One of the three wraps a line ("the 8\nauto-activating rule files"), which is
+  // why the tail uses `\s+` rather than a literal space. Scan the file whole, not
+  // line by line: a line-oriented grep returns 6 and silently drops that one —
+  // it is precisely the occurrence that stayed stale longest.
+  // `rules?` covers the "rule files" phrasing carrying two of the four.
+  // The count is a 1-depth .md listing (see collectActuals), so `\d{1,2}` is
+  // deliberate: a three-digit rules claim is a category error, not a drift, and
+  // must not be silently healed into.
+  { key: 'rules', regex: /(\d{1,2})(\s+auto-activating\s+rules?)/gi, label: 'rules', lang: 'en' },
 
   // Suite size. DELIBERATELY NARROW: it binds only comma-grouped numbers or
   // 4-or-more digits, so it sees "9,900+ tests" and "14953 tests" but not the
