@@ -596,13 +596,13 @@ jobs:
           HAS_PAT: ${{ secrets.ARTIBOT_LANDING_PAT != '' }}
         run: |
           # Change detection moved here from the landing step so both paths share
-          # a single answer. Same file set, same semantics as before: no diff
-          # means nothing to land and both landing steps skip.
-          #
-          # Include root .claude-plugin/marketplace.json — it is the Claude
-          # Code marketplace routing file and drifted to 4.13.1 vs plugin.json
-          # 4.19.6 (incident 2026-06-08) because nothing wrote to it. The
-          # sync-marketplace-meta.mjs step above now updates both files.
+          # a single answer: no diff means nothing to land and both landing
+          # steps skip. The file set is SYNC_PATHS (job env) — the same nine
+          # files the self-heal steps above rewrite, and the same list both
+          # `git add` lines stage. Until 2026-09-11 this step and the landing
+          # steps named four files by hand (root .claude-plugin/marketplace.json
+          # was added after it drifted to 4.13.1 vs plugin.json 4.19.6, incident
+          # 2026-06-08); the other five healed files were never committed.
           #
           # ${SYNC_PATHS} (job env) is deliberately unquoted: the folded value is
           # one space-separated line and word-splitting is how it becomes nine

@@ -84,7 +84,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // 읽기 전용 import. 산문 자가치유가 **실제로 쓰는** 대상 목록이 여기 하나뿐이라
 // YAML 의 SYNC_PATHS 와 집합 대조할 수 있다. 이 파일은 registry 를 수정하지 않는다.
-import { SYNC_TARGETS } from '../../scripts/ci/readme-claims-registry.js';
+import { SYNC_TARGETS, VALIDATE_ONLY_TARGETS } from '../../scripts/ci/readme-claims-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -996,10 +996,7 @@ describe('산문 힐링 대상 ↔ 랜딩 커밋 대상 lockstep', () => {
     }
   });
 
-  it('VALIDATE_ONLY_TARGETS 가 비어 있다 (대조에서 뺀 전제)', async () => {
-    const { VALIDATE_ONLY_TARGETS } = await import(
-      '../../scripts/ci/readme-claims-registry.js'
-    );
+  it('VALIDATE_ONLY_TARGETS 가 비어 있다 (대조에서 뺀 전제)', () => {
     // 비지 않게 되면 "커밋 대상 = SYNC_TARGETS" 전제를 다시 따져야 한다.
     expect(VALIDATE_ONLY_TARGETS).toEqual([]);
   });
