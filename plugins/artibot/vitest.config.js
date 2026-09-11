@@ -87,6 +87,26 @@ export default defineConfig({
         test: {
           name: 'autopilot',
           include: ['tests/autopilot/**/*.test.{js,mjs}'],
+          // Benchmarks are owned by the `main` project below. Without this,
+          // vitest's default benchmark glob
+          // (`**/*.{bench,benchmark}.?(c|m)[jt]s?(x)`) matches in EVERY
+          // project, so `vitest bench --run` executed both `.bench.js` files
+          // twice — measured 2026-09-11: 10 suite runs (5 suites x 2
+          // projects), 160s wall, with `hook-latency.bench.js` alone spending
+          // 43s + 45s on the same work. Scoping this to `tests/autopilot/**`
+          // (where no `.bench.js` exists today) rather than `[]` keeps the
+          // project's ownership rule readable and still admits a future
+          // autopilot-specific benchmark without another config edit.
+          //
+          // `benchmark` belongs under `test:`, unlike `pool` above: vitest
+          // 4.0.18 declares `benchmark?: BenchmarkUserOptions` on
+          // `InlineConfig`, and `ProjectConfig = Omit<InlineConfig,
+          // NonProjectOptions | 'sequencer' | 'deps'>` does not strip it
+          // (`NonProjectOptions` has no `benchmark` member). Verified against
+          // the shipped `.d.ts` rather than assumed.
+          benchmark: {
+            include: ['tests/autopilot/**/*.bench.{js,mjs}'],
+          },
         },
       },
       {
@@ -95,6 +115,11 @@ export default defineConfig({
           name: 'main',
           include: ['tests/**/*.test.{js,mjs}'],
           exclude: ['tests/autopilot/**/*.test.{js,mjs}'],
+          // Explicit rather than relying on vitest's default benchmark glob,
+          // which also reaches outside `tests/`.
+          benchmark: {
+            include: ['tests/bench/**/*.bench.{js,mjs}'],
+          },
         },
       },
     ],

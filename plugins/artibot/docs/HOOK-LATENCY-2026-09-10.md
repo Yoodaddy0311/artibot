@@ -587,8 +587,13 @@ run 2(00:42)는 leak-scan 은 통과했지만 `tree` guard 3종이 CHANGED 로 F
 `current-teammates.json`, `first-run-state.json`, `last-main-agent-edit.timestamp`,
 `self-control-welcomed.marker`, `token-usage-session.json` 은 **네 실행 모두 크기 불변**이었다.
 **벤치를 한 번 돌릴 때마다 `user-profile.json` 이 약 3~4 KB 자란다.** 네 실행에 걸쳐
-1,056 → 20,193 B 로 **19배**가 됐다. gitignored 라 커밋에는 영향이 없지만 무한히 자라므로
-기록한다. 어느 훅이 쓰는지는 **미확인**.
+1,056 → 20,193 B 로 **19배**가 됐다. gitignored 라 커밋에는 영향이 없다. 다만 **무제한 성장은
+아니다** — `lib/core/user-profile.js#MAX_STORED_SIGNALS = 200` 이 `signals` 를 링버퍼로 잘라
+(`recordSignal` 의 `slice(-MAX_STORED_SIGNALS)`) 상한이 걸린다. 2026-09-11 실측 신호 1건당
+약 101 B 이므로 정상상태 상한은 **약 20 KB**이고, 위 네 실행의 1,056 → 20,193 B 는 **상한에
+도달하기까지의 구간**이지 상한 없는 성장의 증거가 아니다. 쓰는 주체는
+`scripts/hooks/runtime-prompt.js#recordPromptSignals` → `user-profile.js#recordSignal` 이다
+(2026-09-11 확인).
 
 이 파일은 재현 명령 절의 "tolerate 가 못 보는 것" 세 번째 항목에 해당한다 — 증가분에 벤치
 exact 지문이 있는지 확인하지 않았고, 없다면 `tolerate` 는 이 성장을 unattributed 로 넘긴다.
@@ -744,6 +749,9 @@ run 4(본표)만 보면 추정 오버헤드는 **954.61 ms 로 3000 의 31.8%** 
 
 ## 소유 밖 후속 (보고만, 적용하지 않음)
 
+> 2026-09-11 갱신: 아래 **1번(`package.json` bench 스크립트)과 2번(`vitest.config.js`
+> `benchmark.include`)은 test-hygiene-bench 줄기에서 적용되어 해소됐다.** 나머지 항목은 그대로 열려 있다.
+
 1. **`package.json` `bench` 스크립트.** 현재 `package.json` 의 `scripts` 에 bench 항목이
    없다(항목 26개). 제안:
    `"bench:hooks": "node scripts/bench/hook-latency.mjs --slot all --n 20 --warmup 2"` 와
@@ -770,8 +778,9 @@ run 4(본표)만 보면 추정 오버헤드는 **954.61 ms 로 3000 의 31.8%** 
    `tests/dispatcher/*.test.js` 전역 grep 결과 **4건 전부**가 같은 오차를 갖는다.
    줄번호 대신 심볼(`#spawnHook`)로 바꾸면 다시 썩지 않는다.
 5. **`user-profile.json` 이 벤치 실행마다 약 3~4 KB 자란다.** 위 informational guard 절 참조.
-   **네 실행에서 1,056 → 20,193 B 로 19배**가 됐다. gitignored 라 커밋 영향은 없지만 무한히
-   자란다. 어느 훅이 쓰는지 **미확인**.
+   **네 실행에서 1,056 → 20,193 B 로 19배**가 됐다. gitignored 라 커밋 영향은 없고, 성장은
+   `MAX_STORED_SIGNALS = 200` 링버퍼로 **약 20 KB 에서 멈춘다**(신호 1건당 약 101 B, 2026-09-11
+   실측) — 위 구간은 상한 도달 전이다. 쓰는 주체는 `runtime-prompt.js#recordPromptSignals`.
 6. **벤치는 strict 모드에서 다른 세션이 유휴일 때만 exit 0 이 된다.** 설계상 그렇다
    (`tree` guard 는 fail-closed 여야 한다). `--writers tolerate` 는 그 제약을 푸는 대신
    판정을 좁힌다. 다만 이 사실이 러너 헤더에는 적혀 있지 않다. "이 도구가 못 보는 것"
