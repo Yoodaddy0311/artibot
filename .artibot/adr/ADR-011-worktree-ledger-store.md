@@ -12,7 +12,7 @@ number: 11
 
 ## Status
 
-Accepted — 2026-09-11 (오너 결정 ①~④, 리더 경유; 코드 착지 줄기 worktree-ledger-store). 초안은 split 창 `doctor-project-name` 의 architect 정찰(읽기 전용, 코드·커밋 0)이 썼다. 착지 순서는 **W5-a(project name) → 이 ADR 승인 → W5-b 코드**. 브리프 초안 `.artibot/split/worktree-ledger-store/brief-draft.md`(85줄, 01:19~01:30 KST)와 리더 실측(14:22 KST)을 입력으로 받아 인용을 재검증했다(§0).
+Accepted — 2026-09-11, 오너 결정 4건(리더 경유, 2026-09-11) 반영: ① 이 줄기(W5-b)는 `ledger.jsonl` 만 옮긴다 — `spawns.ndjson` 은 다음 웨이브 W5-b-6 ② 구파일 `ledger.jsonl.pre-adr011` 보존, 삭제는 v4.60.0 릴리스 태그 뒤 릴리스 체크리스트 항목 ③ 훅 지연 임계치 없음 — `hook-latency.mjs --n 20` base/HEAD 슬롯별 p50 보고만 ④ 설계 정본 §3.6 리터럴 개정 승인. 초안은 split 창 `doctor-project-name` 의 architect 정찰(읽기 전용, 코드·커밋 0)이 썼다. 착지 순서는 **W5-a(project name) → 이 ADR(W5-b B0) → W5-b 코드(B1~B5)**. 브리프 초안 `.artibot/split/worktree-ledger-store/brief-draft.md`(85줄, 01:19~01:30 KST)와 리더 실측(14:22 KST)을 입력으로 받아 인용을 재검증했다(§0). 착지 창 재검증(2026-09-11 B0)은 §0 표 0-14~0-19 행.
 
 ---
 
@@ -33,6 +33,12 @@ Accepted — 2026-09-11 (오너 결정 ①~④, 리더 경유; 코드 착지 줄
 | 0-11 | 브리프 | "현 시점 위반 0" | 메인 루트 기준만 맞다. worktree 루트에서는 0-1 대로 `unmeasured`(잠복 FAIL). |
 | 0-12 | 브리프 | `v5-config-firewall.test.js` `ALLOWED_SUBKEYS` 가 `ledger` 신키 차단, `:217-220` 상대경로 핀 | 맞다(:138-142, :217-220). |
 | 0-13 | doctor.md:253-257 | "store 는 per worktree" | 이건 **Check 7 의 decisions 스토어**(`.artibot/runtime/decisions/`) 얘기라 StateStore 와 모순이 아니다. 독자가 헷갈릴 수 있어 적어 둔다. |
+| 0-14 | 이 ADR §2(a) | 변경 지점 "테스트 3파일 치환" | **목록이 틀렸고 수는 4다.** 디스크에 실제 `.git` 을 만드는 픽스처는 `hook-decision-invariance.test.js`(:109·:111) · `subagent-handler-routing-fields.test.js`(:530-535, :534 `git init`) · `tests/runtime/human-asked-record.spawn.test.js`(:82 `.git`, :115 리터럴, :245-249 케이스 B) · `tests/firewall/host-payload-contract.test.js`(:115·:121 `git init`, :122 `.artibot/runtime` FILE) 4파일. 초안 3 중 `state-updated-pairing.test.js` 는 주입 스텁이라 빠지고(§2(a) 교정) 2파일이 들어왔다. B0 착지 창 재독으로 줄번호 확인(2026-09-11). |
+| 0-15 | 이 ADR §5 ⑦ | "G16 문구 테스트(:1146) 갱신" | **틀렸다.** `tests/commands/doctor-checks-8-9.test.js:1146-1157` 이 핀하는 7문구(`resolveProjectRoot`·`read project root:`·Check 9·Check 10·`.artibot/missions/`·`loadReplay`·`readSpawns`)에 :297-301 의 "worktree's own" 문구는 없다(B0 grep, 2026-09-11). 기존 describe 무수정, W5-b describe 추가(B4). |
+| 0-16 | 브리프 §측정 "훅 지연" | 벤치 leak-scan 맹점 "미확인" | **코드로 확정(실행 전).** `scripts/bench/hook-latency.mjs#defaultGuardSpecs`(:1637-1658) 의 가드는 `<USERPROFILE>/.artibot`(tree)·`<USERPROFILE>/.claude/artibot`(leak-scan)·`<PLUGIN_ROOT>/runtime`(informational)·`<repo>/.artibot/runtime`(observe, :1646)·`<main>/.artibot/runtime`(tree, :1648-1653) 5개 — `<git-common-dir>/artibot/` 를 보는 가드 0. 샌드박스는 헤더 :41-42 자인대로 `git init` 1커밋이라 변경 후 벤치 훅은 새 분기(`resolveGitCommonDir` → `<sandbox>/.git/artibot/`)를 실제로 탄다 → p50 차이는 새 경로를 잰 값. 대신 실 리포로 새는 원장 쓰기는 `<main>/.git/artibot/ledger.jsonl` 에 떨어져 가드 밖이고, :1613-1623 observe 주석도 낡는다(이미 "Four entries" 인데 코드는 5개). 소유 밖 후속. |
+| 0-17 | 브리프 정정 | `hook-decision-invariance.test.js:82` = `APPROVED` | :82 는 빈 줄이 맞으나 `APPROVED` 는 **:84** 다 — 초안 판정의 ":81" 도 틀렸다(:81 은 `HOOK` 상수; B0 착지 창 재측정 2026-09-11). 원장 관련은 헤더 :19-24(이미 ADR-011 반영 문구)·:110-112(`.git` mkdir)·:114-115(케이스 B)·`ledgerEvents`(현 :171). 판정 영향 0. |
+| 0-18 | 이 ADR·브리프 | `state-manager.js` :97·:109·:132 | B0 첫 읽기 시점엔 맞았고 같은 세션 안에서 B1(커밋 f4882946)이 착지해 지금은 `lib/project-state/store-location.js`(:40 `STORE_DIR_NAME`·:43 `FALLBACK_RELATIVE`·:57 `resolveStoreLocation`) + `state-manager.js` :100 import·:125 re-export. 줄번호는 썩는다 — 이하 심볼로. |
+| 0-19 | 신규 | 인용 게이트 | 이 ADR 은 `.artibot/adr/` 착지 즉시 `tests/firewall/citation-resolution.test.js` 스캔 대상(`scripts/ci/validate-doc-links.js#gatherAllDocFiles` 가 `.artibot/adr` 추적 파일 포함). 등록 루트 아래 `:NN`·`#symbol` 인용만 판정, 위반은 baseline 래칫. `state-manager.js#resolveStoreLocation` 은 re-export 줄이 `hasJsSymbol` 의 `export {…}` 분기에 걸려 계속 ok. |
 
 ---
 
@@ -60,7 +66,7 @@ Accepted — 2026-09-11 (오너 결정 ①~④, 리더 경유; 코드 착지 줄
 - **D2** 어느 worktree 루트에서든 Check 8 을 돌리면 자기 원장(거의 빈 파일)과 공유 journal 을 비교한다 → journal 이 비어 있지 않은 한 집합 위반. 오늘 판정은 `unmeasured`(projection 부재), worktree 에 state.yaml 이 생기는 첫 커밋부터 FAIL(§0-1).
 **설계 정본과의 관계.** `ARTIBOT-5.0-DESIGN.md:20` OD-4 "F3 = 위치는 worktree 가 공유하는 git-common-dir 아래 → Replay Store·Checkpoint Store 도 같은 백엔드·같은 위치", `:491` "정본은 ledger.jsonl 하나", `event-writer.js` 헤더 :5 "ONE physical ledger of record". 반면 §3.6 의 경로 리터럴은 `<projectRoot>/.artibot/runtime/ledger.jsonl`(헤더 :8, config :865). 원칙과 리터럴이 worktree 존재 시 충돌하며, ADR 에 ledger/store 항목은 0(INDEX.md 10건 확인).
 
-**게이트 현황.** `tests/firewall/ledger-append-survival.test.js` 는 3프로세스 × 20행 60/60 을 핀하고 N>3·4KB 근접·네트워크 FS 는 못 본다고 자인한다(:21-35). `tests/project-state/state-store-wiring.test.js:34-41` 은 "worktree 분산·동거 미측정" 자인. `tests/project-state/git-common-dir.test.js:105-140` 이 `.git` 파일 케이스(합성)를, G16 이 실제 `git worktree add` 를 덮는다.
+**게이트 현황.** `tests/firewall/ledger-append-survival.test.js` 는 3프로세스 × 20행 60/60 을 핀하고 N>3·4KB 근접·네트워크 FS 는 못 본다고 자인한다(:21-35). `tests/project-state/state-store-wiring.test.js:34-41` 은 "worktree 분산·동거 미측정" 자인. `tests/project-state/git-common-dir.test.js:105-140` 이 `.git` 파일 케이스(합성)를, G16 이 실제 `git worktree add` 를 덮는다. `tests/runtime/event-writer.test.js` 의 `it('honors an explicit ledgerPath override')`(:420-427, 단언 :426)는 `opts.ledgerPath` 명시 시 상대 join 유지를 이미 핀한다 — (a) 의 "명시 시 현행 유지" 조건(`event-writer.js#ledgerFilePath` :263-264)은 신규 게이트 불요.
 
 ---
 
@@ -70,7 +76,7 @@ Accepted — 2026-09-11 (오너 결정 ①~④, 리더 경유; 코드 착지 줄
 - **내용**: `ledgerFilePath(projectRoot, opts)` 가 `opts.ledgerPath` 명시 시 현행(상대 join) 유지, 아니면 `resolveGitCommonDir(projectRoot)` → 있으면 `resolveStoreLocation(...).dir + basename(rel)`, 없으면 현행 `path.join(projectRoot, rel)`. `resolveStoreLocation`·`STORE_DIR_NAME`·`FALLBACK_RELATIVE` 를 fs 없는 신설 `lib/project-state/store-location.js`(L2) 로 이주하고 `state-manager.js` 는 re-export. L5→L2 하향 import, 순환 없음(event-writer→store-location/git-common-dir; state-manager→store-location; tasks→ledger,state-manager).
 - **장점**: D1·D2 를 같은 한 줄로 닫는다. 지워진 worktree 의 역사가 남는다. 위치 규칙이 한 곳(`store-location.js`)이 되어 "원장은 어디" 와 "store 는 어디" 가 정의상 같은 답이 된다. 폴백이 현행 경로와 바이트 동일이라 비-git tmpdir 테스트는 자동 그린. writers 5·readers 6(브리프 전수)이 전부 `ledgerFilePath` 를 경유하므로 호출부 무수정.
 - **단점**: 창 N개가 **처음으로 한 파일에 동시 append** 한다(오늘은 창마다 자기 파일). `subagent-handler.js` 128KB 꼬리가 N창 트래픽을 받는다. `spawns.ndjson` 이 로컬에 남아 Check 10 이 비대칭이 된다. 훅 append 마다 stat+read ≤3 syscall 추가. 1회 이관 필요.
-- **변경 지점**: `event-writer.js#ledgerFilePath` · 신설 `store-location.js` · `state-manager.js`(re-export) · `ledger.js` 헤더 · 테스트 3파일 치환(`hook-decision-invariance.test.js`:19-21/:168 의 ENOTDIR 케이스는 `.git/artibot` 차단으로 치환, `state-updated-pairing.test.js:277`, `subagent-handler-routing-fields.test.js:530-546`) · 리터럴 핀 ≥9(브리프 목록) · 신규 firewall 1 · doctor.md :297-301·:414-415 · config 주석 2곳 · `.gitignore:134-136` 주석.
+- **변경 지점**(브리프 소유 allowlist 와 일치, 2026-09-11 B0): 코드 4 — `event-writer.js#ledgerFilePath` + 헤더 :5-8 · 신설 `store-location.js`(fs 0) · `state-manager.js`(이주 + re-export) · `ledger.js` 헤더. 테스트 신설/확장 5 — `store-location.test.js` 신설 · `event-writer.test.js` +3 · `ledger-store-colocation.test.js` 신설(G1~G4) · `ledger-append-survival.test.js` N=8 케이스 + 헤더 · `state-store-wiring.test.js` 헤더 :34-41 + :123-128 stale 주석. 테스트 치환 4(픽스처가 디스크에 실제 `.git` 을 만들어 새 경로로 간다) — `hook-decision-invariance.test.js`(:109 `.git`, :111 케이스 B → `.git/artibot` FILE, :168 리터럴) · `human-asked-record.spawn.test.js`(:82 `.git`, :115 리터럴, :245-249 케이스 B) · `subagent-handler-routing-fields.test.js`(:530-535) · `host-payload-contract.test.js`(:121-122 Case 4). **판정 1건 교정(B0 착지 창, 2026-09-11)**: `tests/firewall/state-updated-pairing.test.js:277` 은 치환 대상이 **아니다** — :264·:318 의 `resolveGitCommonDir: () => '.git'` 은 `createStateStore` 에 주는 주입 스텁이라 디스크에 `.git` 을 만들지 않고(`tests/project-state/helpers.js#makeProjectRoot` 는 맨 `mkdtempSync`), :266 이 부르는 실 `writeEvent` 는 그 주입을 받지 않아 `event-writer.js#ledgerFilePath` 가 실 `resolveGitCommonDir` → null → 폴백 경로로 간다. 리터럴 핀이지만 깨지지 않는 6파일(비-git 픽스처 = 폴백) + 이 1파일 = 7 은 **무수정, 실행으로 증명** — 편집 대상이 아니다. 문서 — 이 ADR + `INDEX.md` 행·총계 · 설계 §3.6 :214 · `commands/doctor.md` Check 8(Step 0 :285-288, :297-301, :414-415)·Check 10(:547-548, :591-592) 블록 안에서만 · `doctor-checks-8-9.test.js` W5-b describe 추가. **이 줄기 밖(리더 일괄)**: config 주석 2곳(:865·:870) · `.gitignore:134-136` 주석 · CHANGELOG · `tasks.js:84`.
 - **회귀·결합**: `v5-config-firewall` `ALLOWED_SUBKEYS` 는 신키를 막으므로 키를 만들지 않는다(§5 ②). `scorecard.md:67` raw `process.cwd()` 는 cwd 가 리포 루트가 아니면 오늘도 틀린 트리를 읽으므로 별건 유지.
 
 ### (b) 원장 로컬 유지 + `/doctor` 가 살아있는 worktree 원장 합산 — 기각
@@ -125,24 +131,24 @@ F3 되돌림. 설계가 "측정한 실패"(`state-manager.js` 헤더 :18-26)로 
 
 ---
 
-## 5. Decision (추천안)
+## 5. Decision (채택 — 오너 승인 2026-09-11)
 
-> ## ✓ **추천: (a) — 원장 위치 = StateStore 위치 규칙의 출력. `ledgerFilePath` 가 `store-location.js` 를 따르고, common dir 이 없으면 현행 경로로 폴백.**
+> ## ✓ **채택: (a) — 원장 위치 = StateStore 위치 규칙의 출력. `ledgerFilePath` 가 `store-location.js` 를 따르고, common dir 이 없으면 현행 경로로 폴백.**
 
 **원칙(위치 규칙 한 줄):** *원장과 집합 비교되는 append-only 기록(journal, ledger, spawns)은 git common dir 아래 한 곳에 산다. 투영(state.yaml)·진단 런 스토어(decisions/)·스크래치는 `projectRoot` 로컬에 남는다.*
-**브리프 초안의 미결 7건에 대한 답:**
+**브리프 초안의 미결 7건에 대한 답(③·⑤·⑥ 은 오너 결정 반영, 2026-09-11 리더 경유):**
 
 | # | 결정 | 답 |
 |---|---|---|
 | ① | 위치 | `<commonDir>/artibot/ledger.jsonl` **확정**. basename 은 `ledger.path` 의 basename 을 쓴다(오늘 `ledger.jsonl`). |
 | ② | config 키 신설 vs `stateStore.location` 추종 | **추종.** 신키 0(`ALLOWED_SUBKEYS` 무수정). `ledger.path` 는 "비-git 폴백 경로" 로 의미가 좁아지며 값·`v5-config-firewall :217-220` 핀은 불변. 주석만 갱신. |
-| ③ | `spawns.ndjson` 동반 이동 vs Check 10 세션 필터 | **규칙상 동반 이동**(집합 비교되는 기록). 단 `.artibot/ledger/` 는 대화 원장(사적 데이터, `.gitignore:115`)과 같은 디렉터리라 별 줄기(W5-b-6, `spawn-ledger.js#spawnLedgerPath` 만)로 분리. **시점(같은 웨이브 vs 다음)은 오너 결정.** 그 사이 doctor.md Check 10 "cannot see" 에 비대칭을 명기. 세션 필터는 기각(공유 원장에서 세션으로 자르면 Check 10 이 "이 창" 의 검사로 좁아져 창 간 잔여를 못 본다). |
+| ③ | `spawns.ndjson` 동반 이동 vs Check 10 세션 필터 | **규칙상 동반 이동**(집합 비교되는 기록). 단 `.artibot/ledger/` 는 대화 원장(사적 데이터, `.gitignore:115`)과 같은 디렉터리라 별 줄기(W5-b-6, `spawn-ledger.js#spawnLedgerPath` 만)로 분리. **오너 결정 ①(2026-09-11, 리더 경유): 이 줄기(W5-b)는 `ledger.jsonl` 만 옮긴다 — `spawns.ndjson` 은 다음 웨이브 W5-b-6.** 그 사이 doctor.md Check 10 "cannot see"(:591-592) 에 비대칭 문장("원장은 전 창 합산, spawns 는 이 트리 — W5-b-6 전까지 `checkRouteBindResidue` 의 mismatch WARN 은 구조적일 수 있다")을 넣는다(B4). 세션 필터는 기각(공유 원장에서 세션으로 자르면 Check 10 이 "이 창" 의 검사로 좁아져 창 간 잔여를 못 본다). |
 | ④ | decisions 스토어 2원화 | **허용, 명문화.** T-37 관측 전용, Check 7 이 이미 "per worktree" 로 서술(doctor.md:253-257). 원장과 비교되지 않는다. |
-| ⑤ | 이관 순서·구파일 | 메인 파일 순서 그대로 → `git worktree list --porcelain` 순으로 worktree 원장 순서 그대로. **ts 재정렬 없음**(append-only 의미 보존, 리더가 `(session,source,pid,seq,ts)` 로 dedupe). 구파일은 삭제하지 않고 `ledger.jsonl.pre-adr011` 로 개명 보존. **보존 기간(1릴리스 뒤 삭제 제안)은 오너 결정.** |
-| ⑥ | 훅 지연 허용치 | 수치가 없으므로 허용치를 지어내지 않는다. `hook-latency.mjs` N=20 전후 비교를 W5-b 완료 기준에 넣고, **p50 증가분이 보이면 그 값을 들고 오너 결정.** |
-| ⑦ | doctor.md 개정 순서 | W5-a 착지 → W5-b 코드 → **같은 커밋**에서 doctor.md :297-301("worktree 자기 것" → "같은 공유 원장, `census.file.path` 로 확인")·:414-415·G16 문구 테스트(:1146) 갱신. G16 의 핵심 주장 "루트를 하나만 푼다" 는 유지되므로 게이트 완화가 아니다. 오너 결정 불요, 순서만. |
+| ⑤ | 이관 순서·구파일 | 메인 파일 순서 그대로 → `git worktree list --porcelain` 순으로 worktree 원장 순서 그대로. **ts 재정렬 없음**(append-only 의미 보존, 리더가 `(session,source,pid,seq,ts)` 로 dedupe). 구파일은 삭제하지 않고 `ledger.jsonl.pre-adr011` 로 개명 보존. **오너 결정 ②(2026-09-11, 리더 경유): 보존한다. 삭제는 v4.60.0 릴리스 태그 뒤 릴리스 체크리스트 항목 — 이 줄기 밖(§1회 이관 절차 4).** |
+| ⑥ | 훅 지연 허용치 | **오너 결정 ③(2026-09-11, 리더 경유): 임계치 없음.** `scripts/bench/hook-latency.mjs --n 20` 을 base 커밋과 HEAD 에서 각각 돌려 슬롯별 p50 전후 표(증감 부호 포함)를 보고만 한다(브리프 완료 기준 2). 판정 기준이 아니라 관측 기록이다. 벤치 가드가 `<git-common-dir>/artibot/` 를 못 보는 맹점(§0-16)을 결과 옆에 명기한다. |
+| ⑦ | doctor.md 개정 순서 | W5-a 착지 → W5-b 코드 → **같은 커밋**에서 doctor.md Check 8 Step 0 :285-288 심볼(`store-location.js#resolveStoreLocation`)·:297-301("worktree 자기 것" → "같은 공유 원장, `census.file.path` 로 확인; projection 은 여전히 트리별")·:414-415, Check 10 :547-548·:591-592 갱신 + `tests/commands/doctor-checks-8-9.test.js` 에 W5-b 문구 핀 describe **추가**. 기존 G16·W5-a describe 는 무수정 — :1146-1157 이 핀하는 7문구에 :297-301 문구는 없다(2026-09-11 B0 grep). G16 의 핵심 주장 "루트를 하나만 푼다" 는 유지되므로 게이트 완화가 아니다. 오너 결정 불요, 순서만. |
 
-**추가 결정(오너 승인 필요):** `ARTIBOT-5.0-DESIGN.md` §3.6 경로 리터럴을 "`<git-common-dir>/artibot/ledger.jsonl`(비-git 폴백 `<projectRoot>/.artibot/runtime/`)" 로 개정. 설계 정본 편집은 오너 게이트(메모리 `feedback-design-canon-first`).
+**추가 결정 — 오너 승인 완료 ④(2026-09-11, 리더 경유):** `ARTIBOT-5.0-DESIGN.md` §3.6 의 경로 리터럴(:214 "물리 정본 = `<projectRoot>/.artibot/runtime/ledger.jsonl` 하나")을 "`<git-common-dir>/artibot/ledger.jsonl`(비-git 폴백 `<projectRoot>/.artibot/runtime/ledger.jsonl`)" 로 개정한다(B0, 착지 커밋 921dcf3c). 같은 파일의 §3.6 밖 `ledger.jsonl` 언급 16줄(B0 실측)은 완전 경로 리터럴이 아니라 손대지 않는다. 설계 정본 편집은 오너 게이트(메모리 `feedback-design-canon-first`)였고 이 건은 통과했다.
 
 ---
 
@@ -180,13 +186,13 @@ F3 되돌림. 설계가 "측정한 실패"(`state-manager.js` 헤더 :18-26)로 
 - G4 G16 패턴으로 실제 `git worktree add` 1건에서 G1 재확인(git 부재 시 G16 과 같은 처리).
 - `ledger-append-survival` 를 N=8 프로세스로 **확장**(기존 N=3 케이스 유지).
 
-**이 게이트가 못 보는 것(규율 §9):** N>8·4KB 근접·네트워크 FS 의 `'a'` 원자성 / 라이브 훅 페이로드(테스트는 writer 를 직접 부른다) / 훅 지연 / 128KB 꼬리 희석 / 지워진 worktree 의 history 보존(구조로 보장, 테스트는 "지운 뒤에도 파일이 있다" 이상을 증명 못 함) / projection 이름 드리프트(W5-a 게이트) / `spawns.ndjson` 비대칭(③ 전까지) / 설치본이 새 코드인지(설치본 grep 은 사람이).
+**이 게이트가 못 보는 것(규율 §9):** N>8·4KB 근접·네트워크 FS 의 `'a'` 원자성 / 라이브 훅 페이로드(테스트는 writer 를 직접 부른다) / 훅 지연 / 128KB 꼬리 희석 / 지워진 worktree 의 history 보존(구조로 보장, 테스트는 "지운 뒤에도 파일이 있다" 이상을 증명 못 함) / projection 이름 드리프트(W5-a 게이트) / `spawns.ndjson` 비대칭(③ 전까지) / 설치본이 새 코드인지(설치본 grep 은 사람이) / 훅 지연(완료 기준 2 의 벤치가 잰다 — 임계치 없음, 오너 ③; 그 벤치의 가드는 `<git-common-dir>/artibot/` 를 못 본다, §0-16) / 이관 정확성(완료 기준 3 의 스크래치 드라이런이 잰다 — 실 스토어 상태·이관 시점에 살아있는 창의 동시 쓰기·설치본 경로는 못 본다) / 테스트 자체가 실 `<parent>/.git/artibot/` 을 오염시켰는지(`git status` 에 안 보이는 경로라 조용하다 — G1~G4 는 tmp 루트만 쓰고 그 사실을 헤더에 적는다) / doctor.md 문구(이 게이트가 아니라 `doctor-checks-8-9` 의 W5-b describe 가 핀) / 훅이 넘기는 projectRoot 가 worktree 루트인지(G16 별도).
 
 ## 1회 이관 절차
 
 0. **전제**: W5-a 착지, W5-b 코드가 릴리스·**설치본 갱신 완료**(훅은 설치본에서 돈다), split 창 전부 닫힘(`git worktree list` = master 1건). 설치본 `event-writer.js` 에 `store-location` import 가 있는지 grep 으로 확인.
 1. **백업**: 메인 원장 + 살아있는 worktree 원장 전부를 스크래치로 복사, 각 행수·sha256 기록(이 시점 재측정 — 14:22 값 346/6/4/5 는 낡는다).
-2. **병합 스크립트**(ASCII `.mjs`, 파일 경유 실행): 대상 `<commonDir>/artibot/ledger.jsonl` 이 **이미 있으면 중단**(fail-closed, 오너 판단). 메인 → worktree 순, 원문 행 그대로(재직렬화·정렬 없음, 빈 줄 제거).
+2. **병합 스크립트**(ASCII `.mjs`, 파일 경유 실행): 대상 `<commonDir>/artibot/ledger.jsonl` 이 **이미 있으면 중단**(fail-closed, 오너 판단). 메인 → worktree 순, 원문 행 그대로(재직렬화·정렬 없음, 빈 줄 제거). W5-b 드라이런 스크립트: `<worktree>/.artibot/split/worktree-ledger-store/migrate-ledger.mjs`(미추적, `.gitignore:93`), sha256 `3379aa6fb3d7bc0c668a0955654ccd7885a6335eb524cc7e86e752a7ebecca12` — 인터페이스 `--main <f> [--worktree <f>...] --out <f> [--report <json>]`, exit 0/1/2/3(선존재)/4(행수 불일치, 출력 삭제). 드라이런 실측(2026-09-11 06:45Z, investigator 독립 재현): 메인+worktree 5 = 384행 Σ 일치, 출력 sha256 `3bb1aee4…`, `loss.duplicate` 0, 선존재 재실행 exit 3. 실 이관 시점에 `plugins/artibot/scripts/` 로 승격 + direct-run-guard 적용 여부는 리더 결정(이 줄기 밖).
 3. **검증**: 결과 행수 = Σ 입력 비공백 행수. `readLedgerCensus(mainRoot)` 의 `loss.duplicate` 보고(0 기대, 아니면 그대로 보고). 메인 루트와 worktree 루트 1곳(새로 하나 만들어) 에서 Check 8: `ledger-subset-violation` 0, 두 `census.file.path` 동일. 결과를 NEXT-SESSION 에 시각과 함께 기록.
 4. **구파일**: `ledger.jsonl.pre-adr011` 로 개명(삭제 금지, 보존 기간은 ⑤).
 5. **라이브 확인**: 메인 창 1 + worktree 창 1 에서 사람이 프롬프트 1개씩 → 공유 파일에 session_id 2종, `mission.candidate_deferred` 또는 `mission.created` 각 1 이상, Check 8 위반 0, Check 10 결과(`pass`/`warn`/`unmeasured`) 명시.
@@ -195,8 +201,8 @@ F3 되돌림. 설계가 "측정한 실패"(`state-manager.js` 헤더 :18-26)로 
 
 - 3개 worktree 창의 실제 UPS 페이로드(`prompt` 본문 선두·`source`) — §0-2 는 코드 기전 + 결과 정합이지 포착이 아니다.
 - 2026-09-10 dispatcher 표 확장 시각 vs 사건 세션 시각의 선후.
-- `tests/firewall/hook-decision-invariance.test.js:82` 의 내용(":168" 만 확인).
-- 브리프가 든 비-git tmp 루트 테스트 8파일의 red/green — 폴백 설계상 그린 예상이나 실행 전 판정 불가.
+- 브리프의 리터럴 유지 6파일 + 자동 추종 6파일의 red/green — 폴백 설계상 그린 예상이나 실행 전 판정 불가.
+- 벤치 가드 맹점(§0-16)은 코드 정적 확인 — 실제 누수 발생 여부는 실행 전.
 - `resolveGitCommonDir` 훅 지연 실수치 · Windows `'a'` N>3 원자성 · 128KB 꼬리 희석 임계.
 - 리더의 "worktree 루트 집합 대조" 가 journal 을 `resolveGitCommonDir` 경유로 찾았는지(찾았다면 I5 를 한 번 더 닫는 증거). — 창 주석(2026-09-11 14:4x KST): **경유하지 않았다.** 창의 측정 스크립트는 부모 `.git/artibot/project-state.jsonl` 경로를 직접 적었다. I5 의 추가 증거가 아니다.
 - `~/.artibot` 홈 스토어로 새는 원장 유무(NEXT-SESSION P2), 삭제된 worktree 원장 백업 현황.
