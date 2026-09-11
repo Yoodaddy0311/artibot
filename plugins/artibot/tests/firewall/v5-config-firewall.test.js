@@ -313,7 +313,7 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['autopilot.fast.agentsPerCpu', 2],
     ['autopilot.fast.maxWorktrees', 12],
     ['autopilot.fast.maxRisk', 'medium'],
-    ['split.maxWindows', 4],
+    ['split.maxWindows', 8],
     ['split.minStems', 2],
     ['split.dispatch.budget', 600000],
     ['agents.modelPolicy.phaseRoles.review', 'fable'],

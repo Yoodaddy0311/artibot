@@ -805,7 +805,7 @@
     }
   },
   "split": {
-    "maxWindows": 4,
+    "maxWindows": 8,
     "minStems": 2,
     "serverEntryPaths": [],
     "humanWaitReevalPct": 50,

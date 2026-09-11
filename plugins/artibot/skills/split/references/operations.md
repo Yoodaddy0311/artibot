@@ -60,7 +60,7 @@
 
 `node <pluginRoot>/scripts/split/worktree-setup.mjs <worktreePath> --limb <limb> [--json]` — `config.split.worktreeSetup` 대로 부모의 `node_modules` 를 junction(win32 `mklink /J`, posix symlink)으로 걸고, `.env.local` 을 없을 때만 복사하고, `envPerLane` 을 `<worktreePath>/.artibot/split/<limb>/lane.env` 로 쓴다(`{limb}`/`{limb_}` 치환 — 레인별 e2e DB 이름). 재실행은 전건 skip.
 - 실사고 근거: node_modules 부재로 ratchet 자기파괴, pkg 루트 SDK 폴백 = 거짓 red, `.env.local` 미복사 빌드 실패, 공유 DB 에서 병렬 레인의 autoReset 이 형제 시드 삭제(9/2).
-- **정리는 `--teardown` 만** — `lstat().isSymbolicLink()` 인 reparse point 만 `rmdir`, 재귀 삭제 0. 링크 자리에 실디렉터리가 있으면 refuse(exit 1) — junction 을 `rm -rf` 하면 부모 957항목이 지워지는 위험이 실측됐다.
+- **정리는 `--teardown` 만** — `lstat().isSymbolicLink()` 인 reparse point 만 `rmdir`, 재귀 삭제 0. 링크 자리에 실디렉터리가 있으면 refuse(exit 1) — junction 을 `rm -rf` 하면 부모 957항목이 지워지는 위험이 실측됐다. **창 닫기 순서**: `--teardown`(junction 제거) → 죽은 pid 확인 → `git worktree unlock`(락 잔존 시) → `git worktree remove` → `git worktree prune` — teardown 을 remove 뒤로 미루면 junction 이 남는다(2026-09-11 정리에서 13개 잔존).
 
 ## restore-blob <file...> (역주입 원복 · 지문 절차 — A7)
 

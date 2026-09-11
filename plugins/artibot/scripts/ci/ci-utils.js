@@ -470,8 +470,27 @@ export function assertRootTreeScanFloor(root, count) {
 }
 
 /**
+ * A block-scalar indicator standing where a value would be: `|`, `>`, their
+ * chomping/indent spellings (`|-`, `|+`, `>2`), and a trailing `# comment`.
+ *
+ * Matches the recognition range of `validate-skills.js#BLOCK_SCALAR_DESCRIPTION`
+ * on purpose — a header one of them accepts and the other does not is how an
+ * empty description passed both paths at once (measured 2026-09-11).
+ */
+const BLOCK_SCALAR_INDICATOR = /^[|>][0-9+-]*[ \t]*(?:#.*)?$/;
+
+/**
  * Extract YAML frontmatter fields from a Markdown file's content.
- * Supports simple key:value pairs (no nested objects).
+ *
+ * Supports simple `key: value` pairs plus block scalars, whose body is folded
+ * into one space-joined string. Nested objects are not parsed.
+ *
+ * A block scalar's value is its BODY, never the `|` header. Storing the header
+ * (the behaviour before 2026-09-11) made an empty `description:` block parse to
+ * the truthy string `"|"`, so every validator that checks presence reported
+ * green on a skill with no description at all. An empty body now yields `''`,
+ * which those same presence checks correctly reject.
+ *
  * @param {string} content - Raw file content
  * @returns {object|null} Parsed key-value pairs, or null if no frontmatter found
  */
@@ -483,13 +502,31 @@ export function extractFrontmatter(content) {
   const normalized = String(content).replace(/\r\n/g, '\n');
   const match = normalized.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
-  // Simple YAML key:value parser (no nested objects).
-  // Block scalars (`key: |`) and list values are stored as raw scalar values
-  // (truthy), which is sufficient for CI validators that only check presence.
+
   const fields = {};
-  for (const line of match[1].split('\n')) {
-    const kv = line.match(/^(\w[\w-]*):\s*(.+)$/);
-    if (kv) fields[kv[1].trim()] = kv[2].trim();
+  const lines = match[1].split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const kv = lines[i].match(/^(\w[\w-]*):\s*(.+)$/);
+    if (!kv) continue;
+    const value = kv[2].trim();
+    if (!BLOCK_SCALAR_INDICATOR.test(value)) {
+      // Inline values keep their raw text, quotes and all: consumers compare
+      // these strings as written. List values (a bare `key:` with `- item`
+      // lines beneath) still do not match `(.+)` and remain unparsed, as before.
+      fields[kv[1].trim()] = value;
+      continue;
+    }
+    // Fold the body: every following indented or blank line, stopping at the
+    // next column-0 key. Blank lines are separators, not content, so they are
+    // dropped rather than joined (`lint-skill-descriptions.js#extractDescription`
+    // keeps them and thus emits a double space there; the folded text is
+    // otherwise identical).
+    const body = [];
+    while (i + 1 < lines.length && (lines[i + 1].trim() === '' || /^\s/.test(lines[i + 1]))) {
+      i += 1;
+      if (lines[i].trim() !== '') body.push(lines[i].trim());
+    }
+    fields[kv[1].trim()] = body.join(' ').trim();
   }
   return fields;
 }

@@ -18,7 +18,7 @@ category: orchestration
 tokens: 2500
 agents: [orchestrator, planner]
 whenNotToUse: "Work that fits in one window — fewer than two stems with disjoint file ownership (use /team), a single dependency chain (sequential is faster), tasks that all touch one shared file or one dev-server port, or when the user cannot open a second terminal. Not the session sizer's `sequence` recommendation (that splits one task across consecutive sessions, not concurrent windows)."
-source_hash: 793e5f00
+source_hash: ac722a69
 ---
 
 # /split
@@ -39,7 +39,7 @@ source_hash: 793e5f00
 |---|---|---|
 | `/team`, `/autopilot`, `/dynamic`(Workflow 도구), `/ultraplan` | 1 | 창 안의 에이전트 또는 스크립트 런 |
 | `/autopilot --fast` | 1 | 창 안의 worker worktree fan-out |
-| `/split` | N (실용 상한 4) | 창 자체 — 컨텍스트·리더·랜딩 파이프라인이 N개 |
+| `/split` | N (상한 8 — 오너 2026-09-11 처리량 우선 지시, 하드캡 worktree 12) | 창 자체 — 컨텍스트·리더·랜딩 파이프라인이 N개 |
 
 `/split` 은 위 메커니즘을 대체하지 않습니다. 각 줄기 창 안에서는 여전히 `/team` 이나 `/autopilot` 을 씁니다.
 
