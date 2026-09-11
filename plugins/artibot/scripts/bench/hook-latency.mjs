@@ -1636,7 +1636,7 @@ function gitRead(args, cwd) {
 /**
  * The default guard set.
  *
- * Four entries, for four different blast radii:
+ * Five entries, for five different blast radii:
  *   1. `<USERPROFILE>/.artibot` — the real ledger and decision store.
  *   2. `<invocation repo>/.artibot/runtime` — this checkout's runtime ledger.
  *      `observe` mode, NOT `tree`. This is the store the session running the

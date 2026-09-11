@@ -54,7 +54,9 @@
  *
  *   - **Whether the guards protect the REAL stores.** Every verdict is pinned
  *     against throwaway directories. That `defaultGuardSpecs()` names the right
- *     real paths is not asserted — asserting it means reading them.
+ *     real paths is not asserted beyond the spec-inventory block at the end,
+ *     which checks one spec's NAME shape without opening it — asserting more
+ *     means reading the real stores.
  *   - **Whether a concurrent writer is correctly identified in practice.**
  *     `unattributedRows` is pinned against rows this suite wrote itself. A real
  *     session's rows may omit `session_id`, `ts` or `event` entirely, and the
@@ -646,7 +648,9 @@ describe('defaultGuardSpecs() — spec inventory', () => {
   it('lists <git common dir>/artibot/ledger.jsonl as a tree spec, whether or not the file exists', () => {
     const specs = defaultGuardSpecs();
     const ledgerSpecs = specs.filter((spec) => spec.path.endsWith(path.join('artibot', 'ledger.jsonl')));
-    // Exactly one: the dedupe branch must not double-list it.
+    // Exactly one: the spec is pushed once; a second push anywhere would show
+    // here. (This does NOT exercise the dedupe guard around that push — no
+    // earlier spec can share the ledger path, so that branch is unreachable.)
     expect(ledgerSpecs).toHaveLength(1);
     expect(ledgerSpecs[0].mode).toBe('tree');
     // Under the common dir, not under a worktree's .artibot/runtime.

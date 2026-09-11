@@ -213,7 +213,7 @@ node scripts/bench/hook-latency.mjs --slot all --n 20 --warmup 2 --json \
   > <scratch>/hook-latency-n20-run4.json
 ```
 
-> 2026-09-11 갱신: 기본 스펙에 `<git common dir>/artibot/ledger.jsonl` 이 추가됐다(`defaultGuardSpecs` #5 —
+> 2026-09-11 갱신: 기본 스펙에 `<git common dir>/artibot/ledger.jsonl` 이 추가됐다(`defaultGuardSpecs` 헤더 주석의 5번 항목 — 아래 run 표의 위치 번호 #5/#6 과는 다른 번호다 —
 > 원장이 git 공용 디렉터리로 이관되는 W5-b 착지 대비). 대상이 전후 모두 부재하면 `[SKIP]`(`skipped: true`,
 > `absent/absent`) 로 표기되며 `ok` 로 뭉개지지 않는다 — 부재는 통과가 아니다.
 
@@ -418,7 +418,7 @@ hunk 가 두 개 있다. 둘 다 **JSDoc 주석 줄만 바꾼다**(로컬 시각
 
 ## guards 결과
 
-러너는 `--guard` 인자 1개와 기본 5개, 합쳐 **6종**의 스토어를 측정 전후로 스냅샷한다.
+러너는 `--guard` 인자 1개와 기본 5개, 합쳐 **6종**의 스토어를 측정 전후로 스냅샷한다(run 3/4 당시 러너 기준 — 2026-09-11 이후 기본 스펙 +1, 위 `--guard` 절 참조).
 네 가지 모드의 뜻은 `compareGuards()` 의 JSDoc 이 정본이다.
 
 | 모드 | 판정 기준 |
