@@ -34,7 +34,7 @@ import { resolveModel } from '../../lib/core/model-policy.js';
  *
  * Every assertion runs the hooks as CHILD PROCESSES against a temporary git
  * repo, because the properties under test are on-disk facts: which columns
- * land in `.artibot/ledger/spawns.ndjson`, and which lines land in the run
+ * land in `<git-common-dir>/artibot/spawns.ndjson`, and which lines land in the run
  * ledger — `<git-common-dir>/artibot/ledger.jsonl` in a repository after
  * ADR-011, which is why every read here goes through `ledgerFilePath` instead
  * of a literal. HOME and `cwd` both point into a temp dir, so no test here

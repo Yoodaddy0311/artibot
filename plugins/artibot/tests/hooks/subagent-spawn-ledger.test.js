@@ -71,7 +71,8 @@ describe('spawn-ledger store', () => {
   });
 
   it('falls back to <projectRoot>/.artibot/runtime when the root is not a repository', () => {
-    // Same two-branch rule as the runtime ledger (ADR-011 decision F3); the
+    // Same two-branch rule as the runtime ledger (ADR-011 §5 decision 3,
+    // design item F3); the
     // literal is pinned here so a change to the shared rule cannot move the
     // spawn ledger silently.
     expect(spawnLedgerPath(tmp)).toBe(path.join(tmp, '.artibot', 'runtime', SPAWN_FILE));
