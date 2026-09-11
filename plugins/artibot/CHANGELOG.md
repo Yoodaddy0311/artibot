@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.60.0] — 2026-09-11
+
 ### split-68e984 / split-68e984w6 — 2 wave · 8 줄기 (2026-09-11, 배치 랜딩 dcd4ce5a → 663411a2)
 
 **행동 변화 고지.** ① 안전한 다중 줄 스크립트가 더 이상 PreToolUse 에서 막히지 않는다 — L1 정규화가 모든 공백 런을 공백 하나로 접어 `git branch -d old` + 개행 + `echo -f done` 2줄이 한 줄로 보였고, 그래서 강제 삭제로 오판됐다(4.59.0 이 L2 에서만 고치고 L1 은 "별도 줄기 + 오너 결정"으로 남겼던 그 불일치다). ② `dd … of=/dev/…` 가 **L1 에서도** 차단된다 — 종전 L1 규칙은 `if=` 가 `dd` 바로 뒤에 올 때만 잡아 `dd of=/dev/sda`·`sudo dd bs=4M if=img of=/dev/sdb` 를 통과시켰다. 파일 대 파일 `dd` 는 종전대로 L1 차단이다(완화 0). ③ **fork bomb 이 처음으로 실제 차단된다** — 종전 정규식의 `()` 는 빈 캡처 그룹이라 실제 `:(){ :|:& };:` 가 APPROVED 였다(2026-09-11 executeChain 실측, 회귀가 아니라 처음부터 잠복). 괄호 없는 형태도 계속 차단되는 순증이다. ④ `/doctor` Check 8 이 **체크아웃 디렉터리 이름이 `artibot` 이 아닌 모든 트리**에서 내던 거짓 `projection-drift` 가 사라진다(부모 `Artibot`, linked worktree `split-artibot-*` 전부). ⑤ `/split` 기본 창 수 상한이 **4 → 8** 이다(하드캡 12 불변). ⑥ L2 의 `dd`·`curl`·`wget`·`git push` 4계열 규칙이 명령어 뒤 **192자 창**만 본다 — 그보다 뒤에 오는 `of=/dev/`·URL·`| sh`·강제 푸시 플래그는 **안 잡힌다**(실패 방향은 과소 판정). ReDoS 교환이며 수치는 아래 항목에 있다. ⑦ 이벤트 원장의 물리 위치가 `<projectRoot>/.artibot/runtime/ledger.jsonl` 에서 **`<git-common-dir>/artibot/ledger.jsonl`** 로 바뀐다(ADR-011) — linked worktree 전부가 메인의 원장 하나를 공유한다. 비-git 루트는 종전 경로 그대로다. 구파일은 삭제하지 않고 `ledger.jsonl.pre-adr011` 로 보존하며, **실제 이관은 이번 배치에 포함되지 않는다**(릴리스 뒤 별도 절차). ⑧ `lang-reference` 스킬의 `description` 이 호스트 캡(1,536B) 아래로 줄어든다 — 종전 값은 그 캡을 넘어 스킬 활성화에 쓰이는 문자열이 잘렸다.

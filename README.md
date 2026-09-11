@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.59.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.60.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.59.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.60.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -919,7 +919,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.59.0` |
+| `version` | Plugin version | `4.60.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1053,6 +1053,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.60.0** (2026-09-11) — `/split` Waves 5+6, 8 limbs (batch dcd4ce5a → 663411a2): L1 command normalization keeps newlines (safe multi-line scripts no longer blocked); `dd … of=/dev/` blocked at L1 too; fork bomb actually blocked for the first time (the old regex had an empty capture group); `git checkout -- .` / `git restore -- .` and lease+blind force-push combos closed at L1; L2 `dd`/`curl`/`wget`/`git push` rules bounded to a 192-char window (ReDoS: 40KB 850ms → 15ms) with a documented blind spot; `/doctor` Check 8 resolves the project name instead of folding to `artibot`; release.yml prose sync moved after the test count with a single 9-path `SYNC_PATHS` list (fixes #117/#118 badge landings); ADR-011 moves the event ledger to `<git-common-dir>/artibot/ledger.jsonl` (migration is a separate step); frontmatter duplicate-key gate + block-scalar parser fix; `split.maxWindows` 4 → 8; `handoff-store` unique tmp names (same-ms collision) + EPERM retry.
 
 **4.59.0** (2026-09-11) — Risk classifier, both layers (L1 `blocked-patterns.js` · L2 `autopilot/safety.js`), four owner-decided rule changes: `git push --force-with-lease` / `--force-if-includes` drops from danger to caution (plain `--force` / `-f` stay danger); bare `TRUNCATE` only fires on SQL statement form (grep/echo/git-log mentions no longer match); new `dd … of=/dev/…` danger rule; `git branch -d` is no longer read as `-D` (the `/i` flag was the bug) while `-D`, `-fd`/`-df`, `--delete --force`, and flags after the branch name are now blocked at both layers (previously `-q -D`, `-Dv`, `--delete --force`, `-fd` slipped through L1). Parity matrix 21→27 rows. Note: L1 still folds newlines before matching, so a multi-line script whose later line carries `-f` remains blocked at L1 (pinned as owner-decision; root fix deferred).
 
