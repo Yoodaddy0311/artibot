@@ -111,8 +111,10 @@ git bundle create feature-backup.bundle feat/login main
 # 특정 파일만 되돌리기
 git restore 파일명.js
 
-# 전체 되돌리기 (복구 불가 — 경고)
-git restore .
+# 여러 파일도 경로를 명시 (복구 불가 — 경고)
+git restore <경로1> <경로2>
+
+# restore/checkout 에 점(.) 하나를 주는 전체 되돌리기는 PreToolUse 가드가 차단한다 — 필요하면 사람이 터미널에서 직접 실행
 ```
 
 ### 커밋 되돌리기
@@ -153,7 +155,7 @@ git checkout -b experiment/$(date +%Y%m%d)
 ## Guardrails
 
 - `git reset --hard`는 데이터 손실 위험 — 항상 경고 후 실행
-- `git restore .` 전 stash 또는 커밋 여부 확인
+- 경로 지정 `git restore <path>` 전 stash 또는 커밋 여부 확인 — 전체 되돌리기는 가드 차단 대상(사람 직접)
 - 공유 브랜치(main/develop)에서 `reset --hard` 절대 안내 금지
 - bundle 파일은 `.gitignore` 된 경로에 저장 권장 (저장소 내부 금지)
 - stash 목록이 10개 이상이면 정리 제안
