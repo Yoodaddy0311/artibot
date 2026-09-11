@@ -213,6 +213,10 @@ node scripts/bench/hook-latency.mjs --slot all --n 20 --warmup 2 --json \
   > <scratch>/hook-latency-n20-run4.json
 ```
 
+> 2026-09-11 갱신: 기본 스펙에 `<git common dir>/artibot/ledger.jsonl` 이 추가됐다(`defaultGuardSpecs` #5 —
+> 원장이 git 공용 디렉터리로 이관되는 W5-b 착지 대비). 대상이 전후 모두 부재하면 `[SKIP]`(`skipped: true`,
+> `absent/absent`) 로 표기되며 `ok` 로 뭉개지지 않는다 — 부재는 통과가 아니다.
+
 **strict clean exit 0 이 가장 강한 증거다.** tolerate 는 판정을 약화시키는 대신 실행 가능성을
 얻는 거래이고, 그 거래로 잃는 것이 바로 아래 문단이다. 가능하면 유휴 창을 잡아 strict 로
 돌려라.

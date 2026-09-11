@@ -308,6 +308,15 @@ describe('user-profile', () => {
       // profile at a directory and make every write fail.
       expect(resolveProfilePath()).toBe(profilePath);
     });
+
+    it('treats a whitespace-only string as unset', () => {
+      // A shell that exports the var with an empty-looking value (`export
+      // ARTIBOT_USER_PROFILE_PATH=" "`) is not falsy, so the empty-string
+      // guard above does not catch it. Untrimmed, `resolve('  ')` is CWD —
+      // the same silent-directory failure, reached by a different route.
+      vi.stubEnv('ARTIBOT_USER_PROFILE_PATH', '  ');
+      expect(resolveProfilePath()).toBe(profilePath);
+    });
   });
 
   describe('tmp file hygiene', () => {

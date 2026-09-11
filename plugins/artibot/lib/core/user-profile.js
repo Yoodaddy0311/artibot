@@ -123,13 +123,14 @@ function resolveConfiguredPath(newPath) {
  * consulted after the cache would always lose. Measured 2026-09-11: one short
  * bench run wrote 5 fixture signals into the developer's live profile.
  *
- * Empty/unset env is "not configured", never `path.resolve('')` — that would
- * silently resolve to CWD (a directory) and make every write fail.
+ * Empty, unset, or whitespace-only env is "not configured", never
+ * `path.resolve('')` / `path.resolve('  ')` — both resolve to CWD, a
+ * directory, which would make every subsequent write fail silently.
  *
  * @returns {string}
  */
 export function resolveProfilePath() {
-  const envPath = process.env.ARTIBOT_USER_PROFILE_PATH;
+  const envPath = process.env.ARTIBOT_USER_PROFILE_PATH?.trim();
   if (envPath) return path.resolve(envPath);
   if (cachedProfilePath) return cachedProfilePath;
   const defaultPath = path.join(getHomeDir(), '.claude', 'artibot', 'user-profile.json');
