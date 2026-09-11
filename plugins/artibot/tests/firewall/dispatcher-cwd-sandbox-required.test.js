@@ -2,7 +2,7 @@
  * Firewall — a test that spawns a dispatcher or a git-autopilot hook must hand
  * it a sandboxed working directory.
  *
- * WHY. `spawnHook` passes no `cwd` (`scripts/hooks/_dispatcher-utils.js:126`),
+ * WHY. `spawnHook` passes no `cwd` (`scripts/hooks/_dispatcher-utils.js#spawnHook`),
  * so every hook the dispatcher spawns inherits the cwd the TEST chose, and the
  * git-autopilot hooks resolve the repository from that cwd alone
  * (`git-autopilot-setup.js:105`, `git-autopilot-session.js:61` — both run

@@ -350,10 +350,11 @@ jobs:
       #     (measured 2026-08-24: this repo has had 3 issues in its whole
       #     history) and it fails closed — an unseen issue simply stays open.
       #   - A badge sync landed by a route that touches neither the branch nor a
-      #     PR from it — someone committing the four files to master by hand, or
-      #     cherry-picking them onto a differently named branch. Nothing here
-      #     observes that, so the issue stays open for a human to close. This is
-      #     the deliberate fail-closed direction, not an oversight.
+      #     PR from it — someone committing the synced files (SYNC_PATHS) to
+      #     master by hand, or cherry-picking them onto a differently named
+      #     branch. Nothing here observes that, so the issue stays open for a
+      #     human to close. This is the deliberate fail-closed direction, not
+      #     an oversight.
       #   - A `land` issue whose branch was never pushed at all (the first of
       #     the ff path's six failure paths). `compare` 404s on a branch that
       #     does not exist, which reads as "not landed" — correct by accident
@@ -478,7 +479,7 @@ jobs:
         id: counts
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          AGENTS=$(find plugins/artibot/agents -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+          AGENTS=$(find plugins/artibot/agents -maxdepth 1 -type f -name '*.md' ! -name INDEX.md | wc -l | tr -d ' ')
           COMMANDS=$(find plugins/artibot/commands -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
           SKILLS=$(find plugins/artibot/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
           # TESTFILES = number of test *files* (README badge granularity).

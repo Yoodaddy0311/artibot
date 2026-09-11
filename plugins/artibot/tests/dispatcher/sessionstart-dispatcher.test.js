@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * code path that hooks.json wires up. Individual hooks are themselves spawned
  * as grand-child processes inside the dispatcher, so each test triggers the
  * full process tree. `spawnHook` passes no `cwd`
- * (`scripts/hooks/_dispatcher-utils.js:126`), so every grand-child inherits
+ * (`scripts/hooks/_dispatcher-utils.js#spawnHook`), so every grand-child inherits
  * whatever cwd this file hands the dispatcher — the cwd below is load-bearing,
  * not incidental.
  *

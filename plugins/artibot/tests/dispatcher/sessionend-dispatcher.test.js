@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * TWO redirections, for two different blast radii — the second one matches
  * `sessionstart-dispatcher.test.js`, which had to add it after a measured
  * incident. `spawnHook` passes no `cwd`
- * (`scripts/hooks/_dispatcher-utils.js:126`), so every grand-child inherits
+ * (`scripts/hooks/_dispatcher-utils.js#spawnHook`), so every grand-child inherits
  * whatever cwd this file hands the dispatcher: the cwd below is load-bearing,
  * not incidental.
  *
