@@ -98,7 +98,7 @@ export default defineConfig({
           // project's ownership rule readable and still admits a future
           // autopilot-specific benchmark without another config edit.
           //
-          // `benchmark` belongs under `test:`, unlike `pool` above: vitest
+          // `benchmark` belongs under `test:`: vitest
           // 4.0.18 declares `benchmark?: BenchmarkUserOptions` on
           // `InlineConfig`, and `ProjectConfig = Omit<InlineConfig,
           // NonProjectOptions | 'sequencer' | 'deps'>` does not strip it
