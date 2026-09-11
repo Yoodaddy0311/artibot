@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   _resetPathCache,
@@ -11,9 +11,10 @@ import {
   detectSkillLevel,
   getProfile,
   recordSignal,
+  resolveProfilePath,
   setSkillLevel,
 } from '../../lib/core/user-profile.js';
-import { getPluginRoot } from '../../lib/core/platform.js';
+import { getHomeDir, getPluginRoot } from '../../lib/core/platform.js';
 import {
   readDecisionEvents,
   recordSkillLevelChanged,
@@ -260,6 +261,52 @@ describe('user-profile', () => {
       await recordSignal({ type: 'slash-command', value: 'home-expand' });
       expect(existsSync(expected)).toBe(true);
       try { rmSync(expected); } catch { /* ignore */ }
+    });
+  });
+
+  // The benchmark runner sandboxes a measured child by moving HOME/USERPROFILE
+  // (scripts/bench/hook-latency.mjs#hookEnv). That alone does NOT move this
+  // store: artibot.config.json's `ux.profilePath` is plugin-root-relative, so
+  // `configureProfilePath()` re-roots it under the real checkout and the child
+  // writes into the developer's live profile. Measured 2026-09-11: one
+  // `--slot all --n 3 --warmup 1` run added 5 signals to the real
+  // `runtime/user-profile.json`, every one of them the bench's own fixture
+  // prompt. `ARTIBOT_USER_PROFILE_PATH` is the redirect that closes that hole.
+  //
+  // It is deliberately checked BEFORE the `cachedProfilePath` branch: the hook
+  // calls `configureProfilePath(config.ux.profilePath)` on every prompt, so an
+  // override consulted after the cache would always lose.
+  describe('resolveProfilePath() ARTIBOT_USER_PROFILE_PATH override', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('returns the env path, outranking a configured path', () => {
+      const envTarget = uniquePath();
+      // The outer beforeEach already called configureProfilePath(profilePath),
+      // so this asserts the override beats a populated cache, not just an
+      // empty one.
+      expect(resolveProfilePath()).toBe(profilePath);
+      vi.stubEnv('ARTIBOT_USER_PROFILE_PATH', envTarget);
+      expect(resolveProfilePath()).toBe(resolve(envTarget));
+    });
+
+    it('resolves a relative env path against CWD, not the plugin root', () => {
+      vi.stubEnv('ARTIBOT_USER_PROFILE_PATH', 'sandbox-profile.json');
+      expect(resolveProfilePath()).toBe(resolve('sandbox-profile.json'));
+    });
+
+    it('falls back to the default home path when unset and unconfigured', () => {
+      _resetPathCache();
+      expect(resolveProfilePath())
+        .toBe(join(getHomeDir(), '.claude', 'artibot', 'user-profile.json'));
+    });
+
+    it('treats an empty string as unset', () => {
+      vi.stubEnv('ARTIBOT_USER_PROFILE_PATH', '');
+      // Must not become `resolve('')` (= CWD), which would silently point the
+      // profile at a directory and make every write fail.
+      expect(resolveProfilePath()).toBe(profilePath);
     });
   });
 

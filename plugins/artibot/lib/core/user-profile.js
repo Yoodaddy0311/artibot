@@ -4,7 +4,10 @@
  * 'novice' or 'pro'. Starts on the safe side ('novice') and self-promotes
  * once enough positive pro-signals accumulate.
  *
- * Persistence target: `config.ux.profilePath` (default `~/.claude/artibot/user-profile.json`).
+ * Persistence target: `config.ux.profilePath` (default `~/.claude/artibot/user-profile.json`),
+ * overridden by the `ARTIBOT_USER_PROFILE_PATH` env var when set — it wins over
+ * the config value so a sandboxed harness can redirect this store. See
+ * `resolveProfilePath` for why the env is checked first.
  *
  * @module lib/core/user-profile
  */
@@ -102,16 +105,32 @@ function resolveConfiguredPath(newPath) {
 }
 
 /**
- * Resolve the profile file path. Uses the override if `configureProfilePath`
- * has been called, otherwise falls back to the default under the home dir.
+ * Resolve the profile file path. Precedence:
+ *   1. `ARTIBOT_USER_PROFILE_PATH` env (sandbox redirect — see below)
+ *   2. the override installed by `configureProfilePath`
+ *   3. the default under the home dir
  *
  * Exported so readers (e.g. self-benchmark's userProfileSignals) resolve the
  * exact same path the writer uses, instead of duplicating the path string and
  * drifting apart.
  *
+ * The env override outranks `configureProfilePath` on purpose. Harnesses that
+ * sandbox a child by moving HOME (`scripts/bench/hook-latency.mjs#hookEnv`)
+ * cannot move this store that way, because `config.ux.profilePath` is
+ * plugin-root-relative and gets re-rooted under the real checkout. The hook
+ * re-applies that config value on every prompt
+ * (`scripts/hooks/runtime-prompt.js#recordPromptSignals`), so an override
+ * consulted after the cache would always lose. Measured 2026-09-11: one short
+ * bench run wrote 5 fixture signals into the developer's live profile.
+ *
+ * Empty/unset env is "not configured", never `path.resolve('')` — that would
+ * silently resolve to CWD (a directory) and make every write fail.
+ *
  * @returns {string}
  */
 export function resolveProfilePath() {
+  const envPath = process.env.ARTIBOT_USER_PROFILE_PATH;
+  if (envPath) return path.resolve(envPath);
   if (cachedProfilePath) return cachedProfilePath;
   const defaultPath = path.join(getHomeDir(), '.claude', 'artibot', 'user-profile.json');
   return defaultPath;

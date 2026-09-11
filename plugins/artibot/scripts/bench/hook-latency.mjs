@@ -72,7 +72,18 @@
  *
  * Every child runs with HOME/USERPROFILE and cwd redirected into throwaway
  * temp directories, and with the same four disable flags the dispatcher test
- * suites use. This is the convention established by
+ * suites use, plus a fifth env that REDIRECTS rather than disables:
+ * `ARTIBOT_USER_PROFILE_PATH`. It exists because moving HOME is not enough for
+ * that one store — `artibot.config.json`'s `ux.profilePath` is
+ * plugin-root-relative, and `CLAUDE_PLUGIN_ROOT` below deliberately points at
+ * the real checkout, so the skill-level profile resolved under the developer's
+ * live tree no matter where HOME pointed. Measured 2026-09-11 before the fix:
+ * one `--slot all --n 3 --warmup 1` run grew the real
+ * `runtime/user-profile.json` from 2,433 to 2,988 B, and all 25 signals in it
+ * were the bench's own fixture prompt. A redirect is used instead of a
+ * `*_DISABLE` flag on purpose: disabling would skip the write and shorten the
+ * very UserPromptSubmit latency this tool reports. This is the convention
+ * established by
  * `tests/dispatcher/sessionstart-dispatcher.test.js` and
  * `tests/dispatcher/sessionend-dispatcher.test.js` after measured incidents in
  * which test fixtures reached the developer's real learning store and the real
@@ -718,6 +729,9 @@ function hookEnv(sandbox, extra) {
     // learning store receives the bench fixtures.
     USERPROFILE: sandbox.home,
     HOME: sandbox.home,
+    // Redirect, not a disable: `ux.profilePath` is plugin-root-relative, so
+    // the two lines above do NOT move this store. See ISOLATION in the header.
+    ARTIBOT_USER_PROFILE_PATH: path.join(sandbox.home, '.claude', 'artibot', 'user-profile.json'),
     ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
     ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
     ARTIBOT_SWARM_DISABLE: '1',
