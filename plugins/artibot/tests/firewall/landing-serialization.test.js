@@ -90,11 +90,17 @@ let lockDir = '';
 let origin = '';
 let work = '';
 
+// stderr is CAPTURED, not inherited: on a non-zero exit `execFileSync` throws
+// with git's own diagnostic attached to the error, instead of the bare
+// "Command failed: git …" that `'ignore'` produced. Nothing is printed while
+// the command succeeds, so this adds no output noise, and the return value is
+// still stdout alone — the `toBe('')` assertions on `status --porcelain` and
+// `merge-base --is-ancestor` are unaffected.
 function git(args, cwd) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   }).trim();
 }
@@ -319,7 +325,47 @@ describe('waitForGreen (port of release.yml wait_for_green)', () => {
   });
 });
 
-describe('landBatch against a local bare remote', () => {
+// Wall-clock budget, NOT a relaxed gate. Every `it` below drives real `git`
+// child processes against a real bare remote, so its duration is spawn cost,
+// not logic cost.
+//
+// The numbers below come from three DIFFERENT sources and are deliberately not
+// merged — do not read the whole block as one measurement.
+//
+//   [A] Measured by this change (2026-09-11, Windows, machine shared with
+//       sibling vitest runs in other worktrees):
+//         - At `--testTimeout=8000` the failure is `Test timed out in 8000ms`
+//           on BOTH moved-once (8,793ms) and moved-twice (8,677ms), while the
+//           happy path is already 5,023ms. That is why the budget belongs to
+//           the whole describe and not to one `it`.
+//         - Ten runs of this file with no other vitest workers put moved-once
+//           between 6,029ms and 28,662ms. The slow tail is inside 5% of the
+//           global 30_000 with nothing else in the run, so this is a real
+//           flake and not a parallelism artefact.
+//         - At `--testTimeout=2000` every `it` in this describe still passed
+//           (10.9-11.5s) while the child-process race test OUTSIDE it died at
+//           2,309ms, which is what pins that this suite option overrides the
+//           global one.
+//
+//   [B] Quoted from the 2026-09-11 load investigation brief, NOT re-measured
+//       here: 10.6s alone; 15.5/18.9/23.3s with 119 test files in parallel;
+//       23,328ms with 217 (78% of the global 30_000), implying the full
+//       608-file run has no headroom left. Also from that brief: the
+//       moved-once case spawns 39 gits (22 on the first landing attempt + 17
+//       on the rebuild). Treat the spawn count and the parallel figures as
+//       second-hand.
+//
+//   [C] Measured by the limb's load probe (217 files in parallel), reported
+//       separately and NOT against this final tree: moved-once at
+//       28,167 / 30,163 / 28,825ms — i.e. one of three runs already exceeded
+//       the global 30_000.
+//
+// What these tests prove is serialization and rebase correctness; the
+// 10-minute poll ceiling is explicitly NOT wall-clock here (`pollMs: 0` +
+// injected `sleep`, see the module header). No assertion is weakened and the
+// global `testTimeout` in vitest.config.js stays at 30_000 — only the deadline
+// for this suite's process spawning moves.
+describe('landBatch against a local bare remote', { timeout: 120_000 }, () => {
   const common = () => ({
     cwd: work,
     limbs: ['L1', 'L3'],
@@ -350,15 +396,33 @@ describe('landBatch against a local bare remote', () => {
   it('base moved once while waiting → rebuild on the new base, force-with-lease, land (rebuilds=1)', async () => {
     let moved = null;
     let polls = 0;
+    // `waitForGreen` turns ANY fetcher throw into `payload = null` and keeps
+    // polling (`lib/git/batch-landing.js#waitForGreen`, the `catch` around
+    // `await opts.fetchCheckRuns(sha)`). That swallow is the release.yml
+    // `wait_for_green` contract and is deliberately not changed here — but it
+    // also swallows failures of OUR helper, which is not the subject under
+    // test. Measured 2026-09-11 by injecting a `throw` into `moveOriginMain`:
+    // the only symptom was `AssertionError: expected +0 to be 1` on `rebuilds`
+    // below, with the git error text gone. Capturing it and asserting it FIRST
+    // makes the helper's own failure report itself instead of masquerading as
+    // a rebuild-count defect. This adds an assertion; it relaxes none.
+    let moveError = null;
     const r = await landBatch({
       ...common(),
       runId: 'moved-once',
       fetchCheckRuns: async () => {
         polls += 1;
-        if (polls === 1) moved = moveOriginMain();
+        if (polls === 1) {
+          try {
+            moved = moveOriginMain();
+          } catch (err) {
+            moveError ??= err;
+          }
+        }
         return GREEN;
       },
     });
+    expect(moveError, `moveOriginMain (the test's "other writer") threw: ${moveError?.message ?? ''}`).toBeNull();
     expect(r.status).toBe('landed');
     expect(r.rebuilds).toBe(1);
     expect(polls).toBe(2);
@@ -370,11 +434,23 @@ describe('landBatch against a local bare remote', () => {
   });
 
   it('base keeps moving → exactly one rebuild, then needs-human with the branch left for a person', async () => {
+    // Same swallow as the test above, and the same risk of it hiding a helper
+    // failure — here it would surface as a bare `needs-human` vs `landed`
+    // mismatch. First error wins; later polls cannot overwrite it.
+    let moveError = null;
     const r = await landBatch({
       ...common(),
       runId: 'moved-twice',
-      fetchCheckRuns: async () => { moveOriginMain(); return GREEN; },
+      fetchCheckRuns: async () => {
+        try {
+          moveOriginMain();
+        } catch (err) {
+          moveError ??= err;
+        }
+        return GREEN;
+      },
     });
+    expect(moveError, `moveOriginMain (the test's "other writer") threw: ${moveError?.message ?? ''}`).toBeNull();
     expect(r.status).toBe('needs-human');
     expect(r.rebuilds).toBe(1);
     expect(originTip('main')).not.toBe(r.sha);
