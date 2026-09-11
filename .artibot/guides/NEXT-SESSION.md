@@ -1,6 +1,39 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-11 02:1x KST, AsusHeechangLee 머신, master = db29d707 + 이 커밋, 설치본 4.58.0)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-11 18:0x KST, AsusHeechangLee 머신, master = 663411a2 + docs 커밋, 설치본 4.59.0)
 
-> 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
+> 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## Wave 6 착지 + Wave 7 준비 (2026-09-11 18:0x KST, 세션 artibot-7b/25918244, master **663411a2**)
+
+**Wave 6 (split-68e984w6, base dcd4ce5a, 5창)**: 부분 배치 2회 — p1 `e72723b7`(docs-comment-parity 395a0185 · schema-frontmatter 8cde9a0b) → p2 `663411a2`(guard-residual 9ba35ea7 · test-hygiene-bench 6e173859 · worktree-ledger-store b98f9b2a), 둘 다 CI 7/7 · rebuilds 0. `git diff --shortstat dcd4ce5a 663411a2` = 66 files, +3,970/−697. land 7/7 PASS ×5(1차 FAIL 3건 전부 리더 plan/브리프 결함: guard-residual 헬퍼 동반 테스트 누락(W6-d) · event-writer.test.js plan 누락(W5-b) · **ADR·승격 스크립트가 gitignored `.artibot/split/` 경로 인용**(W5-b, citations 게이트가 2회 잡음 — 실결함, 이관 스크립트를 `scripts/ledger/migrate-ledger-adr011.mjs` 로 승격해 해소)). 리더 전체 vitest(663411a2, 창 유휴 상태): 15,955 pass / 1 fail / 12 skip(15,968, 3,886 files) — 실패 1 = `tests/git/git-dir.test.js` "ordinary checkout → own .git"(getGitDir null, duration 2,054ms), Wave 6 에서 그 파일·테스트 diff 0, 단독 3회 13/13 → 부하 의존(spawn 타임아웃 추정, 미확인). 이전 라운드의 landing-serialization·handoff-store 는 이번 미재발. 상세는 CHANGELOG [Unreleased](이 커밋) 항목 — 각 줄기 done 보고의 수치·못 보는 것 포함.
+
+**세션 한도 사건(16:16~16:19 KST)**: 3창의 팀원 5명이 "session limit · resets 7pm" 으로 동시 종료(작업 중간). 창은 살아 미커밋 산출물을 검증 후 wip 커밋, 16:4x 재스폰은 성공(한도가 풀렸거나 부분적 — 원인 미확인). 리더 처치: done 2줄기를 **부분 배치**로 먼저 착지(진행 보호), 나머지는 done 전 `git merge origin/master`(충돌 0). 오너가 `/login` 으로 계정 전환(tf→tf2)한 시각과의 인과는 미확인.
+
+**오너 결정(권장안 위임, 17:xx)**: W6-b 범위 추가 — ①②③ 셸 분리자 컷 양층 · `-f` 꼬리 `(?![\w-])` 양층 · L2 fork-bomb 규칙(L1 바이트 동일) · L2 git-push 3규칙도 `{0,192}` 창 · 다중 줄 `git checkout .\n…` 기대값 block 추인. W6-d A4 프로필 env 격리 지금 적용. ADR 경로 정정: `.artibot/adr/` 단일 정본(리더의 `plugins/artibot/docs/adr/` 지시가 틀림).
+
+**gotcha 신규**: (79) 리더가 브리프에 쓴 파일이라도 **plan.json allowlist 에 안 넣으면 land 가 막는다** — plan 생성 시 브리프 allowlist 절을 파싱해 넣고, 헬퍼 `.js` 는 `.test.js` 동반. (80) 추적 문서(ADR·스크립트 헤더)에 `.artibot/split/` 경로를 쓰지 마라 — citations 게이트 `/\.artibot[\\/]split[\\/]/` 가 잡고, worktree 정리 시 사라지는 경로다. 산출물은 추적 경로로 승격 후 인용. (81) 세션 한도는 팀원부터 죽인다 — 창은 산출물을 즉시 wip 커밋해야 하고, 리더는 done 줄기를 부분 배치로 먼저 착지한다. (82) 리더 전체 vitest 를 5창 부하 중 돌리면 52분 무출력(원인 미확인) — 착지 후 창 유휴 상태에서 돌려라. (83) `landBatch` 는 워킹트리를 안 건드리므로 docs 커밋 재료를 워킹트리에 미리 준비해도 된다(이번 세션 실증). (84) `git merge-tree`/preflight 는 3줄기 pairwise SAFE 였고 실제 병합도 충돌 0 — Wave 6 소유권 분리가 유효했다.
+
+**Wave 7 후보(브리프 초안, 부모 `.artibot/split/<limb>/brief-draft.md`)**: `spawn-ledger-store`(80줄, W5-b-6, Q3=(B) runtime 폴백, W5-b 착지본 위) · `frontmatter-hardening`(50줄, 빈 description 3소비자 PASS 구멍 + 게이트, 호스트 중복키 = 마지막 값 실측) · `guard-command-position`(134줄, **측정 절만** — L1 34/34·L2 17/17 규칙이 `echo "X"` 언급에 발화, 원인은 명령 위치 미앵커; 설계 판정 미작성) · `changelog-wave56`(리더 인라인으로 처리됨 — 이 커밋). `l2-forkbomb-parity` 는 W6-b 에 흡수 완료. 추가 후보: `landing-serialization :350` rebuild 케이스 30s 타임아웃(제안 (a)(b)(c) 미적용) · 120KB ReDoS 상한 명문화("50ms 는 40KB 기준") · `hook-latency.mjs` 헤더 "Keeping it untracked" 1단어 · `.pre-adr011` 삭제 = v4.60.0 릴리스 체크리스트 · 실 원장 이관(ADR §절차, `scripts/ledger/migrate-ledger-adr011.mjs`, 선존재 exit 3).
+
+**오너 판단 후보**: `runtime/user-profile.json` 신호 25/25 가 벤치 프롬프트로 오염(사용자 데이터라 창이 미삭제 — 삭제 권장) · `~/.claude.json`·`~/.claude/settings.json` 이 16:30~16:31 에 sha 변화(정찰 팀원 쓰기 0, 동시 세션 3, 주체 미확인).
+
+**다음 할 일**: ① 이 docs 커밋 랜딩(ci 경유) ② **v4.60.0 릴리스**(release.yml 순서 수리의 첫 라이브 실증 — sync-readmes 로그에 prose 출력이 marketplace 뒤인지·`ci/sync-badges-v4.60.0` CI 초록인지) ③ `npm run sync:local` + 플러그인 캐시 확인 ④ Wave 5·6 worktree 8개 정리(gotcha 61·68 순서: teardown → pid → unlock → remove → prune) + 로컬 브랜치 삭제(오너 `-d`) ⑤ `/split plan` Wave 7(위 후보 3~5줄기).
+
+## Wave 5 착지 + Wave 6 배정 (2026-09-11 15:4x KST, 세션 artibot-7b/25918244, master **dcd4ce5a**)
+
+**Wave 5 (split-68e984, base b092a42c)**: 3줄기 → 배치 `dcd4ce5a`(9091eb2a·83d73014·dcd4ce5a fold), CI 7/7, rebuilds 0, 11파일 +1,886/−64. land 7/7 PASS ×3(guard-normalize 는 리더 승인 문서 경로를 plan allowlist 에 안 넣어 1차 ownership FAIL → plan 보정 후 PASS, gotcha 75). 리더 전체 vitest(dcd4ce5a, 15:4x): 15,792 pass / 2 fail / 12 skip — 실패 2건(`tests/firewall/landing-serialization.test.js` rebuild 케이스 · `tests/handoff/handoff-store.test.js` 아카이브 재사용) 단독 재실행 2회 43/43 → 병렬 부하 플레이크(둘 다 W6-d 후속에 편입).
+| limb | done | 핵심 |
+|---|---|---|
+| doctor-project-name | d1ded07f | Check 8 프로젝트명 해소 순서(인자 > 문자열 파싱 > 객체 > unmeasured), `'artibot'` fold 제거, doctor.md Check 8 절 갱신, 92 tests |
+| guard-normalize | 3ca95219 | L1 `normalizeCommand` 줄바꿈 보존(`\\\r?\n`→공백 → `\r?\n`→`\n` → `[^\S\n]+`→공백), 39규칙×435셀 회귀 0 / 강화 82, OLD 정규화 120KB 5,325ms→6ms · L1 `dd … of=/dev/` 규칙 `{0,192}` · **포크밤 규칙 빈 캡처그룹 결함 수리**(종전 표준형 approve) · 표 `docs/investigations/guard-normalize-20260911.md` |
+| release-claims-sync | c298a7f0 | release.yml 산문 동기화를 tests 집계 뒤로 이동 + `SYNC_PATHS` 9경로 단일 목록(종전 4파일만 스테이징 → #117/#118 재발 원인 2) + 순서·집합 대조 테스트 19건. **라이브 실증은 v4.60.0 런에서** |
+
+**오너 결정(15:0x, 권장안 위임)**: ADR-011 ① spawns.ndjson 이관 = 다음 웨이브 별 줄기 ② `.pre-adr011` 보존 = v4.60.0 태그까지 ③ 훅 지연 허용치 = 수치 안 짓고 hook-latency N=20 전후 비교 ④ ARTIBOT-5.0-DESIGN.md §3.6 경로 리터럴 개정 승인. Wave 6 후보 3건: `release-landing-credentials.test.js` 파일명 변경(→ `release-landing-push-identity.test.js`, 도구 민감어 차단 회피) · L2 curl/wget `{0,192}` · lang-reference description 1,536 이하 축약. **`split.maxWindows` 4→8**(오너 14:5x "처리량 우선" 지시, 하드캡 worktree 12) — config lockstep 5파일은 W6-a 가 커밋, plan 은 override 로 8 적용.
+
+**Wave 6 (split-68e984w6, base dcd4ce5a, 1 wave · 5창)**: worktree-ledger-store(W5-b, ADR-011 (a) 안) · docs-comment-parity(후속 A1·A6·A12·A13·A14 + maxWindows lockstep) · guard-residual(B1 `git checkout -- .`·B2 lease+force 면제·B3 dd 2차식·B7·A5·A10 + curl/wget 바운드) · schema-frontmatter(A7 platforms 중복 게이트·A9 블록 스칼라·A8 lang-reference 축약) · test-hygiene-bench(B6 플레이크·B8 badge-stall 분할·A2/A3 bench·A4·파일명 변경). 브리프 5건 `.artibot/split/<limb>/brief.md`(정찰 창 산출 + 리더 "plan 조정" 절: hook-decision-invariance·state-store-wiring → W5-b 단독, badge-stall·credentials·lockstep·release.yml 단독 소유, guard-registry.js → W6-b). 정찰 실존 표(25건: 실존 19 · 해소 3 · 제외 3)는 `.artibot/split/release-claims-sync` 창 보고에.
+
+**gotcha 신규**: (75) 리더가 메시지로 allowlist 확장을 승인하면 **plan.json 도 같이 고쳐라** — land ownership 은 plan 을 본다. (76) 웨이브 장벽이 병목: plan 에 백로그 전부를 넣고, 다음 웨이브 브리프는 유휴 창 정찰로 미리 만들어 integrate 를 기다리지 않는다(오너 지시, 메모리 `feedback-split-throughput-first`). (77) `landBatch` 는 `wait:{attempts,pollMs}` 로 CI 상한을 넘겨라 — 기본 40×15s=10분은 오늘 CI(12~13분)에 못 미친다(80×15s 로 성공). (78) 크로스세션 메시지는 UPS 디스패처가 non-user 로 분류해 runtime-prompt 를 안 태운다 → worktree 창이 mission/state 를 안 쓰는 이유. 사람이 직접 치면 재발.
+
+**소유 밖 후속(신규)**: `landing-serialization.test.js` rebuild 케이스 플레이크 · `Compute counts` agents=31(INDEX.md 포함, 로그 전용) · HOOK-LATENCY 문서 후속 3·6 · L2 fork bomb 규칙 부재(L1 block / L2 safe, 매트릭스 owner-decision) · `safety.js:50-56` 주석 낡음(W6-b) · Check 7 S3 원장 mtime 신호가 W5-b 뒤 낡음(W5-b 보고 필수 항목).
 
 ## 오너 결정 4건 이행 + v4.59.0 릴리스 (2026-09-11 10:5x KST, 세션 25918244, master **a32a7de2**, 태그 v4.59.0)
 
@@ -449,7 +482,7 @@ Check 8 후속 결정(오너): worktree 원장을 합산해 판정할지(Check 8
 d6fdd2fa **decision-events 배선 수정** (D5·D7 이 `state.context` 를 넘겨 기록 100%
 skipped 이던 것을 `state.input` 으로 — 실파이프라인 회귀 4건 신설) ·
 f3505fd9 **릴리즈 ff 착지 수정** (persist-credentials:false + PR_REMOTE 동반 +
-wait_for_green total=0 조기판정 + firewall 게이트 release-landing-credentials 9건).
+wait_for_green total=0 조기판정 + firewall 게이트 release-landing-push-identity(구 release-landing-credentials, W6-d 개명) 9건).
 전체 스위트 11,207 pass / 40 skip (513파일, 커밋 직전 실측). 크로스체크·뮤테이션
 대조 전건 통과. 사용자 액션 잔여: PAT 토큰 종류 확인 · `ci/sync-badges-v4.51.0`
 브랜치 삭제(파생값이라 체리픽 불필요) · #114 수동 종료(자동 해소 조건 영구 거짓).

@@ -539,7 +539,7 @@ export function recordWorkflowPlanDecision(runId, plan, opts = {}) {
  * Longest string accepted into a topology reason list. Larger than
  * MAX_REASON_LENGTH because the provenance differs: topology reasons are fixed
  * pattern ids plus JSON.stringify'd CONFIG values
- * (`policy:split.maxWindows=4(observe-only)`), never text generated from a
+ * (`policy:split.maxWindows=8(observe-only)`), never text generated from a
  * prompt. A size bound, not a privacy bound — the privacy property is that
  * `topology-router.js` puts no prompt text in `reason[]` at all, returning
  * pattern IDS from fixed tables (`topology-router.js#FAST_PATTERNS` and
