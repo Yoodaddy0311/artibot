@@ -2,9 +2,9 @@
 context: fork
 name: lang-reference
 description: |
-  프로그래밍 언어 패턴 참조 허브 — C++, C#, Elixir, Flutter/Dart, Go, Java, JavaScript, Kotlin, PHP, Python, R, Ruby, Rust, Scala, Swift, TypeScript 16개 언어의 모던 패턴·프레임워크 베스트 프랙티스·테스트 이디엄·안티패턴을 통합 제공.
-  Auto-activates when: 위 언어의 소스 파일을 다루거나, 해당 언어의 프레임워크 이름(FastAPI, Spring Boot, Phoenix, Laravel, Rails, SwiftUI, Axum, Gin, Echo, Fiber, Ktor, Vapor, Next.js, Remix, Astro, Flutter, Django, Shiny, Cats Effect, ZIO, Akka, Spark, Ktor, Blazor, Quarkus, Compose 등)이 언급되거나, 빌드 도구(CMake, Cargo, Maven, Gradle, SBT, Composer, NuGet, uv, poetry, Bundler, Mix, pubspec, Bun, Deno)·타입 시스템·동시성 패턴 질문이 감지될 때.
-  Triggers: c++, C++, cpp, .cpp, .hpp, .h, cmake, smart pointer, RAII, concepts, ranges, constexpr, move semantics, csharp, C#, .cs, .csproj, dotnet, .NET, asp.net, blazor, entity framework, LINQ, minimal api, pattern matching, nuget, elixir, Elixir, .ex, .exs, phoenix, liveview, ecto, genserver, otp, mix, supervisor, erlang, beam, flutter, Flutter, dart, Dart, .dart, riverpod, go_router, material 3, widget, pubspec, freezed, bloc, cross-platform, go, golang, Go, .go, goroutine, channel, interface, error handling, go modules, Echo, Fiber, Gin, table-driven test, java, Java, .java, generics, streams, records, sealed classes, Spring Boot, Quarkus, JUnit 5, Mockito, Maven, Gradle, javascript, JavaScript, .js, .mjs, .cjs, node.js, bun, deno, ESM, vitest, express, async/await, ES2024, kotlin, Kotlin, .kt, .kts, coroutines, ktor, compose multiplatform, sealed class, data class, spring boot kotlin, gradle kotlin, jetpack compose, php, PHP, .php, laravel, symfony, eloquent, composer, artisan, blade, doctrine, pest, phpstan, python, Python, .py, type hints, dataclass, asyncio, pydantic, FastAPI, Django, pytest, poetry, uv, venv, r language, R language, .R, .Rmd, tidyverse, ggplot2, dplyr, shiny, quarto, pipe operator, tibble, data.frame, CRAN, ruby, Ruby, .rb, rails, activerecord, hotwire, turbo, rspec, bundler, Gemfile, ractor, sidekiq, rust, Rust, .rs, ownership, borrow, lifetime, trait, enum, Result, Option, cargo, Axum, Actix, tokio, scala, Scala, .scala, .sc, akka, cats effect, zio, spark, sbt, given, opaque type, case class, play framework, swift, Swift, .swift, swiftui, combine, actor, xcode, ios, macos, vapor, swift package, typescript, TypeScript, .ts, .tsx, strict mode, utility types, discriminated union, branded types, tsconfig, type safety, type alias
+  프로그래밍 언어 패턴 참조 허브 — C++, C#, Elixir, Flutter/Dart, Go, Java, JavaScript, Kotlin, PHP, Python, R, Ruby, Rust, Scala, Swift, TypeScript 16개 언어의 모던 패턴·프레임워크 관용구·테스트 이디엄·안티패턴.
+  Auto-activates when: 위 언어의 소스 파일, 프레임워크 이름, 빌드 도구, 타입 시스템, 동시성 패턴 질문이 감지될 때 — FastAPI, Django, Spring Boot, Phoenix, Laravel, Rails, SwiftUI, Jetpack Compose, Axum, Gin, Ktor, Blazor, Akka, Shiny, CMake, Cargo, Maven, Gradle, Composer, NuGet, uv, Mix, Bun, Deno.
+  Triggers: cpp, csharp, dotnet, elixir, dart, flutter, golang, java, javascript, kotlin, php, python, ruby, rust, scala, swift, typescript, r language, goroutine, coroutines, ownership, borrow, lifetime, trait, generics, sealed class, type hints, dataclass, asyncio, smart pointer, RAII, LINQ, liveview, activerecord, eloquent, tidyverse, cats effect, ESM, strict mode, discriminated union, 확장자 .cpp .hpp .cs .ex .dart .go .java .js .kt .php .py .R .rb .rs .scala .swift .ts .tsx
 lang: [en, ko]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
@@ -206,7 +206,6 @@ category: "language"
 whenNotToUse: "Architecture decisions, infrastructure configuration, or non-language-specific tasks where language idiom patterns and framework conventions are not the subject."
 level1_tokens: 200
 level2_tokens: 1200
-platforms: [claude-code, gemini-cli, codex-cli, cursor]
 source_hash: b25de159
 ---
 
