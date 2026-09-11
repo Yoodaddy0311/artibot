@@ -34,9 +34,11 @@ import { resolveModel } from '../../lib/core/model-policy.js';
  *
  * Every assertion runs the hooks as CHILD PROCESSES against a temporary git
  * repo, because the properties under test are on-disk facts: which columns
- * land in `.artibot/ledger/spawns.ndjson`, and which lines land in
- * `.artibot/runtime/ledger.jsonl`. HOME and `cwd` both point into a temp dir,
- * so no test here touches the developer's own `.artibot/` tree.
+ * land in `.artibot/ledger/spawns.ndjson`, and which lines land in the run
+ * ledger — `<git-common-dir>/artibot/ledger.jsonl` in a repository after
+ * ADR-011, which is why every read here goes through `ledgerFilePath` instead
+ * of a literal. HOME and `cwd` both point into a temp dir, so no test here
+ * touches the developer's own `.artibot/` or `.git/artibot/` tree.
  *
  * WHAT THIS FILE DOES NOT PROVE (rules §9 — write the gate's blind spots next
  * to the gate):
@@ -51,6 +53,15 @@ import { resolveModel } from '../../lib/core/model-policy.js';
  *   - THAT THE RECOMMENDATION IS ANY GOOD. `route-scorer` is uncalibrated in
  *     Phase 0.
  *   - HOOK LATENCY. Two processes now run per spawn (pre + start). Unmeasured.
+ *   - THE WRITER'S ENOTDIR BRANCH ON BIND. The "unwritable run ledger" case
+ *     below blocks the ledger's parent directory, but `bindRoute` returns
+ *     `skipped:unbound` from the empty tail before it ever attempts the append
+ *     (measured 2026-09-11), so that case exercises the stdout and spawn-record
+ *     halves of its claim only. The condition it reaches for needs a tail
+ *     holding a receipt AND an unwritable target simultaneously, which a single
+ *     blocking file cannot be; a read-only directory bit is not enforced for
+ *     the owner on Windows. The append-failure path IS covered where it is
+ *     reachable: tests/firewall/hook-decision-invariance.test.js condition B.
  */
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -527,12 +538,15 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     const ok = runHook(basePayload({ agent_id: 'agent-baseline' }), 'start', home);
     expect(ok.status).toBe(0);
 
-    // Now block ONLY `.artibot/runtime` (a file where the directory must go).
-    // `.artibot/ledger` stays writable, so the spawn record must still land.
+    // Now block ONLY the run ledger's parent directory (a file where the
+    // directory must go). `.artibot/ledger` stays writable, so the spawn record
+    // must still land. `git init` runs FIRST: after ADR-011 that parent lives
+    // under the repository's git common dir, so `ledgerFilePath` can only name
+    // it once the repo exists.
     const repo2 = path.join(tmp, 'repo2');
-    mkdirSync(path.join(repo2, '.artibot'), { recursive: true });
+    mkdirSync(repo2, { recursive: true });
     execFileSync('git', ['init'], { cwd: repo2, stdio: 'ignore', windowsHide: true });
-    writeFileSync(path.join(repo2, '.artibot', 'runtime'), 'not a dir', 'utf-8');
+    writeFileSync(path.dirname(ledgerFilePath(repo2)), 'not a dir', 'utf-8');
 
     const blocked = runHook({ ...basePayload({ agent_id: 'agent-baseline' }), cwd: repo2 }, 'start', home);
     expect(blocked.status).toBe(0);
@@ -545,6 +559,16 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     expect(rec.agentId).toBe('agent-baseline');
     expect(rec.route_ledger.startsWith('skipped:')).toBe(true);
     expect(rec.route_ledger).not.toBe('ok:bound');
+    // MEASURED, NOT ASSUMED (2026-09-11): the value here is `skipped:unbound`,
+    // which `bindRoute` returns from `matchReceipt(...) === null` BEFORE it ever
+    // calls `appendLedgerEvent` (scripts/hooks/subagent-handler.js#bindRoute).
+    // repo2 is fresh, so its tail holds no receipt and the unwritable append is
+    // never attempted. What this case therefore proves is the stdout and
+    // spawn-record half of the claim, not the writer's ENOTDIR branch — and it
+    // would read the same way if the fixture stopped blocking anything. Making
+    // it bite needs a tail with a receipt AND an unwritable target at once,
+    // which one file cannot be; see the blind-spot list in the header.
+    expect(rec.route_ledger).toBe('skipped:unbound');
   });
 
   it('stdout is the pre-T-31 literal on start and on stop', () => {

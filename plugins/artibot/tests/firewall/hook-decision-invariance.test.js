@@ -16,10 +16,13 @@
  *   C  no `cwd` in the payload           → the record is never attempted
  *   D  project root exists, ledger tree does not → the writer creates it
  *
- * B is built by making `<root>/.artibot` a regular FILE, so
- * `mkdirSync(<root>/.artibot/runtime)` fails with ENOTDIR
- * (lib/runtime/event-writer.js:875). That is portable; a read-only directory
- * bit is not enforced for the owner on Windows.
+ * B is built by making the ledger's own PARENT DIRECTORY a regular FILE, so the
+ * writer's `mkdirSync` of it fails with ENOTDIR
+ * (lib/runtime/event-writer.js#appendLedgerLine). Every root here has a `.git`
+ * directory, so after ADR-011 that parent is `<root>/.git/artibot` rather than
+ * `<root>/.artibot/runtime` — the fixture names the same writer failure at the
+ * path the writer now uses. ENOTDIR is portable; a read-only directory bit is
+ * not enforced for the owner on Windows.
  *
  * D exists because the brief's third condition — "a path that does not exist" —
  * is NOT a failure mode: the writer creates the tree recursively at that same
@@ -71,6 +74,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // Safe to import: the hook's direct-run guard keeps `main()` from firing when
 // the module is imported rather than spawned as argv[1].
 import { buildQuestionId } from '../../scripts/hooks/pre-bash.js';
+import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
@@ -108,7 +112,9 @@ function condition(name) {
   if (name === 'C') return { cwd: null, root: null, landsRecords: false };
   mkdirSync(path.join(root, '.git'), { recursive: true });
   if (name === 'B') {
-    writeFileSync(path.join(root, '.artibot'), 'not a directory\n', 'utf-8');
+    // The ledger's parent directory, as a FILE. Derived from the writer's own
+    // path rule so the fixture cannot drift away from where it writes.
+    writeFileSync(path.dirname(ledgerFilePath(root)), 'not a directory\n', 'utf-8');
     return { cwd: root, root, landsRecords: false };
   }
   if (name === 'D') {
@@ -165,7 +171,7 @@ function runHookError() {
  */
 function ledgerEvents(root) {
   if (root === null) return [];
-  const file = path.join(root, '.artibot', 'runtime', 'ledger.jsonl');
+  const file = ledgerFilePath(root);
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf-8')
     .split('\n')

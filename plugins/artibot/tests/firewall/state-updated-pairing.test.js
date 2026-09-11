@@ -28,9 +28,8 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeEvent } from '../../lib/runtime/event-writer.js';
+import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
 import { createStateStore, readJournal, reduceProjectState } from '../../lib/project-state/state-manager.js';
 import {
   cleanup, makeStore, mission, MISSION_ID, seed, task,
@@ -274,7 +273,7 @@ describe('the refusal predicate is measured against the REAL writer', () => {
     expect(out.ok).toBe(true);
     expect(out.state_version).toBe(1);
 
-    const ledger = path.join(projectRoot, '.artibot', 'runtime', 'ledger.jsonl');
+    const ledger = ledgerFilePath(projectRoot);
     const lines = readFileSync(ledger, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
     const updated = lines.filter((l) => l.event === 'state.updated');
     expect(updated).toHaveLength(1);

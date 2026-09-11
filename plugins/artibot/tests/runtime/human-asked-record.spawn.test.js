@@ -6,8 +6,9 @@
  * object survives contact with `appendLedgerEvent`. A `data` shape the
  * allowlist rejects lands as `ledger.rejected` and the record is lost — green
  * unit tests and an empty ledger are perfectly compatible. So this file spawns
- * the actual hooks, lets them write an actual `.artibot/runtime/ledger.jsonl`,
- * and reads it back.
+ * the actual hooks, lets them write an actual run ledger (wherever
+ * `ledgerFilePath` puts it — `<root>/.git/artibot/ledger.jsonl` in these
+ * repositories, per ADR-011), and reads it back.
  *
  * It is the Write/Edit counterpart to
  * `tests/firewall/hook-decision-invariance.test.js`, which already covers
@@ -60,6 +61,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildQuestionId } from '../../lib/runtime/human-asked-record.js';
+import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 
 // This file spawns ~15 child processes; the budget buys headroom for load, not
 // for a slow assertion. Nothing here waits on a timer.
@@ -112,7 +114,7 @@ function runHook(hook, payload, cwd, env = {}) {
  */
 function ledgerEvents(root) {
   if (root === null) return [];
-  const file = path.join(root, '.artibot', 'runtime', 'ledger.jsonl');
+  const file = ledgerFilePath(root);
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf-8')
     .split('\n')
@@ -242,11 +244,14 @@ describe('pre-write: human.asked lands in a real ledger', () => {
     const rootA = makeRoot('inv-A');
     const a = runHook(PRE_WRITE, payloadFor(rootA, true), rootA);
 
-    // B — `<root>/.artibot` is a regular FILE, so mkdir of `.artibot/runtime`
-    // fails with ENOTDIR. Portable; a read-only directory bit is not enforced
-    // for the owner on Windows.
+    // B — the ledger's own PARENT DIRECTORY is a regular FILE, so the writer's
+    // mkdir of it fails with ENOTDIR. Every root here has a `.git` directory,
+    // so after ADR-011 that parent is `<root>/.git/artibot`; deriving it from
+    // `ledgerFilePath` keeps the fixture pinned to where the writer writes.
+    // Portable; a read-only directory bit is not enforced for the owner on
+    // Windows.
     const rootB = makeRoot('inv-B');
-    writeFileSync(path.join(rootB, '.artibot'), 'not a directory\n', 'utf-8');
+    writeFileSync(path.dirname(ledgerFilePath(rootB)), 'not a directory\n', 'utf-8');
     const b = runHook(PRE_WRITE, payloadFor(rootB, true), rootB);
 
     // C — no `cwd` key at all, so the append is never attempted.
