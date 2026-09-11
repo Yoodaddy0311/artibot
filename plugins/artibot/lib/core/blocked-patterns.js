@@ -79,7 +79,43 @@ const BLOCKED_PATTERNS = Object.freeze([
   { pattern: /git\s+clean\s+-\w*f/i, label: 'git clean -f', category: 'git' },
   { pattern: /git\s+checkout\s+\.\s*$/i, label: 'git checkout . (discard all changes)', category: 'git' },
   { pattern: /git\s+restore\s+\.\s*$/i, label: 'git restore . (discard all changes)', category: 'git' },
-  { pattern: /git\s+branch\s+-D\b/i, label: 'git branch -D (force delete)', category: 'git' },
+  // Owner decision 2026-09-11 ④. Kept byte-identical to the `git-branch-delete`
+  // rule in lib/autopilot/safety.js — the two layers judge the same shapes, and
+  // a drift between them is exactly what this decision was cleaning up.
+  // Case handling is deliberate and uneven: `git` case-insensitive (a shell
+  // resolves `GIT branch`), `branch` lowercase (git rejects `git BRANCH` —
+  // "is not a git command", measured 2026-09-11), `-D` case-sensitive (that
+  // single letter is the whole point). The /i flag this rule used to carry
+  // collapsed the last distinction and blocked the safe `git branch -d topic`
+  // at PreToolUse (measured 2026-09-11). The old shape also required `-D` to
+  // sit immediately after `branch`, so `-q -D`, `-Dv`, `--delete --force` and
+  // `-fd` all walked through. Three force-delete shapes now match:
+  //   1. a short-flag bundle containing uppercase D  (-D, -qD, -Dv, -Df)
+  //   2. a delete flag AND a force flag anywhere     (-fd, -df, -f -d)
+  //   3. --delete together with --force
+  // "anywhere" includes after the branch name (`git branch -d topic -f`, which
+  // git really does honour). A backslash line continuation (`\` + LF or CRLF)
+  // keeps the run open — it is one command.
+  // THE NEWLINE BOUND IN THIS PATTERN DOES NOT REACH L1 BEHAVIOUR. The pattern
+  // stops an option run at a bare newline, but checkDangerousCommand below also
+  // tests a normalizeCommand variant, and normalizeCommand collapses every \s+
+  // run to one space (guard-registry.js#normalizeCommand). So the newline is
+  // already gone by the time this pattern runs on the second variant, and
+  // `git branch -d old\necho -f done` is still blocked here while L2 grades it
+  // safe (measured 2026-09-11 through executeChain). Do NOT "fix" that by
+  // loosening this pattern — the normalization is shared by all 38 rules and
+  // changing `/\s+/g` to `/[^\S\n]+/g` is a separate piece of work. The
+  // divergence is pinned as an owner-decision row in
+  // tests/core/guard-registry-safe-override-scope.test.js.
+  // Tokens and separators cannot parse two ways — the option branch demands a
+  // dash then \w, the argument branch forbids a leading dash, the continuation
+  // branch starts with a backslash (never whitespace) — so the scan is linear
+  // (120KB adversarial input < 1ms, measured).
+  {
+    pattern: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-z]*f[a-z]*)(?![\w-])))/,
+    label: 'git branch -D (force delete)',
+    category: 'git',
+  },
   // `clear` deletes every stash entry at once — strictly more destructive than
   // `drop`, which takes one. `pop` and `push` stay out: they restore or create.
   // Trailing \b keeps the rule from firing on a longer word that merely starts

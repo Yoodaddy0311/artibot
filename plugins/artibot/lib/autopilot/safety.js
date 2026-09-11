@@ -18,9 +18,52 @@
  * this catalogue only grades severity on top of it and never widens what runs.
  */
 export const DANGEROUS_PATTERNS = Object.freeze([
-  { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n]*--force(-with-lease)?\b/i, reason: 'Destructive git push --force' },
+  // Owner decision 2026-09-11 ①: the lease/if-includes forms are a CHECKED
+  // force push — L1 (blocked-patterns.js safeOverrides on the two `git push`
+  // rules) lets them through on purpose. Grading them 'danger' here made the
+  // two layers say opposite things about the same command, so the checked form
+  // drops to 'caution' while a blind `--force` / `-f` stays 'danger'.
+  // The negative lookahead is what splits them: `--force` followed by
+  // `-with-lease` or `-if-includes` is not a blind force.
+  { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n]*--force(?!-with-lease|-if-includes)\b/i, reason: 'Destructive git push --force' },
+  { id: 'git-force-push-lease', level: 'caution', test: /\bgit\s+push\b[^\n]*--force-(?:with-lease|if-includes)\b/i, reason: 'Checked force push (--force-with-lease/--force-if-includes) — allowed at PreToolUse, still rewrites remote history' },
   { id: 'git-force-push-short', level: 'danger', test: /\bgit\s+push\b[^\n]*\s-f(\s|$)/i, reason: 'Destructive git push -f' },
-  { id: 'git-branch-delete', level: 'danger', test: /\bgit\s+branch\s+-D\b/i, reason: 'Force-delete git branch (-D)' },
+  // Owner decision 2026-09-11 ④: CASE HANDLING IS DELIBERATE AND UNEVEN.
+  // `git` is matched case-insensitively ([gG][iI][tT]) because a shell resolves
+  // `GIT branch` fine; `branch` stays lowercase because git itself rejects
+  // `git BRANCH` ("is not a git command", measured 2026-09-11); `-D` stays
+  // case-sensitive because that single letter is the whole point — `-D`
+  // force-deletes an unmerged branch and `-d` refuses to. The /i flag this rule
+  // used to carry collapsed the last distinction and made the safe everyday
+  // `git branch -d topic` register as danger.
+  // Three shapes count as a force delete:
+  //   1. a short-flag bundle containing uppercase D  (-D, -qD, -Dv, -Df)
+  //   2. a delete flag AND a force flag anywhere     (-fd, -df, -f -d)
+  //   3. --delete together with --force
+  // "anywhere" is literal: the option run also steps over non-option arguments,
+  // so a flag AFTER the branch name counts (`git branch -d topic -f`, which git
+  // really does honour). The run ends at a shell separator (; & |) and at a
+  // NEWLINE, but a BACKSLASH line continuation (`\` + LF, or `\` + CRLF) is
+  // whitespace inside one command, so it keeps the run open.
+  // Without the newline bound a `-f` on a later line of a multi-line script
+  // satisfied the force lookahead and `git branch -d old\nrm -rf build` was
+  // graded danger (measured 2026-09-11, 2 false positives). NOTE THE ASYMMETRY:
+  // this bound only holds at L2. L1 (guard-registry#checkDangerousCommand) also
+  // tests a normalizeCommand variant that collapses every \s+ run to a single
+  // space, so at L1 the newline is erased before the pattern ever sees it and
+  // the same two commands are still blocked. Fixing that means changing
+  // normalizeCommand for all 38 rules — out of scope here, pinned as an
+  // owner-decision row in tests/core/guard-registry-safe-override-scope.test.js.
+  // Run tokens stay unambiguous: the option branch demands a dash then \w, the
+  // argument branch forbids a leading dash, and the continuation branch starts
+  // with a backslash (never whitespace), so no token or separator can parse two
+  // ways and the scan is linear (120KB adversarial input < 5ms, measured).
+  {
+    id: 'git-branch-delete',
+    level: 'danger',
+    test: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-z]*f[a-z]*)(?![\w-])))/,
+    reason: 'Force-delete git branch (-D / --delete --force)',
+  },
   { id: 'git-reset-hard', level: 'danger', test: /\bgit\s+reset\s+--hard\b/i, reason: 'git reset --hard discards work' },
   { id: 'git-clean-force', level: 'danger', test: /\bgit\s+clean\s+-[a-z]*f/i, reason: 'git clean -f deletes untracked files' },
   { id: 'git-checkout-discard', level: 'danger', test: /\bgit\s+checkout\s+(?:--\s+)?\.(?=\s|$)/i, reason: 'git checkout . discards all uncommitted changes' },
@@ -53,9 +96,34 @@ export const DANGEROUS_PATTERNS = Object.freeze([
     test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/~*]|\$HOME\b)\S+/i,
     reason: 'recursive delete of a scoped path (blocked at PreToolUse by blocked-patterns)',
   },
+  // Owner decision 2026-09-11 ③: L1 (blocked-patterns.js `dd\s+if=`, category
+  // 'disk') blocks every dd invocation, so an L2 verdict of 'safe' broke the
+  // "L1 block => L2 at least caution" direction rule. Only the raw-device
+  // target is graded here — a file-to-file `dd if=a.img of=b.img` is still L1
+  // block / L2 safe, which is a known open divergence, not a decided one.
+  { id: 'dd-device-write', level: 'danger', test: /\bdd\b[^\n]*\sof=\/dev\//i, reason: 'dd writing to a raw block device' },
   { id: 'sql-drop-table', level: 'danger', test: /\bDROP\s+TABLE\b/i, reason: 'SQL DROP TABLE' },
   { id: 'sql-drop-database', level: 'danger', test: /\bDROP\s+DATABASE\b/i, reason: 'SQL DROP DATABASE' },
-  { id: 'sql-truncate', level: 'danger', test: /\bTRUNCATE\b/i, reason: 'SQL TRUNCATE' },
+  // Owner decision 2026-09-11 ②: `/\bTRUNCATE\b/i` fired on any mention of the
+  // word, so `grep -n -i "truncate\|force-with-lease" file` was blocked at
+  // PreToolUse (measured 2026-09-11). The word alone proves nothing; a SQL
+  // statement does. Two accepted shapes:
+  //   1. TRUNCATE {TABLE|ONLY|DATABASE} <identifier>
+  //   2. TRUNCATE <identifier list> followed by a statement terminator or a
+  //      TRUNCATE-only keyword (; CASCADE RESTRICT RESTART/CONTINUE IDENTITY)
+  // Both alternatives need whitespace then an identifier CHARACTER, which is
+  // what rejects `truncate -s 0 file.log` (coreutils), `"truncate\|force"`
+  // (grep argument), `--grep=truncate` and `fs.truncateSync(p)`.
+  // WHAT THIS RULE STILL MISSES (do not read a green suite as coverage):
+  // a bare `psql -c "TRUNCATE users"` — no keyword, no terminator — is NOT
+  // matched. Adding the closing quote as a terminator would re-admit prose
+  // like `echo "truncate cache"`, so the miss is deliberate.
+  // WHAT THIS RULE GETS WRONG: prose that happens to be one word plus a
+  // semicolon — `echo "truncate cache;"` — is graded danger. Rare, and the
+  // failure is toward blocking rather than allowing, so it is accepted.
+  // Linear by construction: the identifier class, \s and ',' are disjoint and
+  // the repeat group needs a literal comma per iteration.
+  { id: 'sql-truncate', level: 'danger', test: /\bTRUNCATE\s+(?:(?:TABLE|ONLY|DATABASE)\s+[\w."`]+|[\w."`]+(?:\s*,\s*[\w."`]+)*\s*(?:;|\bCASCADE\b|\bRESTRICT\b|\b(?:RESTART|CONTINUE)\s+IDENTITY\b))/i, reason: 'SQL TRUNCATE' },
   { id: 'sql-delete-no-where', level: 'danger', test: /\bDELETE\s+FROM\s+[\w."` ]+(?!.*\bWHERE\b)/is, reason: 'DELETE FROM without WHERE' },
   { id: 'secret-openai', level: 'danger', test: /\bsk-[A-Za-z0-9]{16,}\b/, reason: 'Possible OpenAI secret key' },
   { id: 'secret-stripe-pub', level: 'caution', test: /\bpk_(live|test)_[A-Za-z0-9]{16,}\b/, reason: 'Possible Stripe key literal' },

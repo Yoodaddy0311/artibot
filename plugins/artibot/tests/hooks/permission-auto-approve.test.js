@@ -16,7 +16,11 @@ const HOOK_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'permission-auto-ap
 
 /** Assembled so the literal never appears in a Bash command this repo guards. */
 const FORCE_PUSH = `git push --${'force'} origin main`;
-const LEASE_PUSH = `git push --${'force'}-with-lease origin main`;
+// 2026-09-11 교체: lease 단독(`git push --force-with-lease`)은 오너 결정 ① 이후
+// 두 정본이 **합의**한다(L1 exempt / L2 caution) — 더 이상 "한쪽만 잡는" 예시가
+// 아니다. `-f` 를 함께 실으면 L1 은 safeOverrides 로 여전히 면제하는데
+// L2 는 git-force-push-short 로 danger 를 낸다. 실측 2026-09-11.
+const LEASE_PUSH = `git push -f --${'force'}-with-lease origin main`;
 
 describe('matchesAllowEntry/edge cases', () => {
   it('null entry → false', () => {
@@ -156,8 +160,9 @@ describe('evaluatePermission/danger filter (pure, judge injected)', () => {
 });
 
 describe('evaluatePermission/합집합이 실제로 작동한다는 증거', () => {
-  // 측정 2026-09-10: blocked-patterns 는 --force-with-lease 를 exempt 하고
-  // safety.js#classifyRisk 는 danger(git-force-push) 로 본다. 한쪽만 잡는다.
+  // 측정 2026-09-11: blocked-patterns 는 --force-with-lease 가 실린 push 를
+  // safeOverrides 로 통째로 exempt 하고(-f 규칙 포함), safety.js#classifyRisk 는
+  // 같은 명령을 danger(git-force-push-short) 로 본다. 한쪽만 잡는다.
   it('safety.js 만 잡는 케이스 → 보류 (blocked-patterns 는 approve)', () => {
     const out = evaluatePermission({
       toolName: 'Bash',
@@ -169,11 +174,15 @@ describe('evaluatePermission/합집합이 실제로 작동한다는 증거', () 
     expect(out.withheld?.reason).toContain('git-force-push');
   });
 
-  // 측정 2026-09-10: 반대 방향. blocked-patterns 는 block, classifyRisk 는 safe.
+  // 측정 2026-09-11: 반대 방향. blocked-patterns 는 `dd\s+if=` 로 모든 dd 를
+  // block 하는데 classifyRisk 의 dd-device-write 는 `of=` 가 /dev/ 를 가리킬
+  // 때만 danger 다. 그래서 파일 대 파일 dd 는 L1 block / L2 safe 로 갈린다.
+  // 종전 예시였던 `of=/dev/sda` 는 오너 결정 ③ 이후 양쪽이 합의해(block+danger)
+  // 이 방향을 더 이상 증명하지 못한다.
   it('blocked-patterns 만 잡는 케이스 → 보류 (classifyRisk 는 safe)', () => {
     const out = evaluatePermission({
       toolName: 'Bash',
-      toolInput: { command: 'dd if=/dev/zero of=/dev/sda' },
+      toolInput: { command: 'dd if=a.img of=b.img' },
       allowlist: [{ tool: '*' }],
     });
     expect(out.decision).toBeNull();
