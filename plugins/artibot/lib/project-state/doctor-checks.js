@@ -282,7 +282,7 @@ function parseProjectName(text) {
  * every checkout whose directory is named otherwise (the parent `Artibot`,
  * every `split-artibot-*` linked worktree) render a name it never had and read
  * as `projection-drift`. The canonical name is the basename of the project root
- * (`state-manager.js#createProjectStateStore`), which only the caller knows.
+ * (`state-manager.js#createStateStore`), which only the caller knows.
  *
  * @param {object|string} projection - The `state.yaml` projection, parsed or raw.
  * @param {string} [project] - The caller's explicit name, if it passed one.
