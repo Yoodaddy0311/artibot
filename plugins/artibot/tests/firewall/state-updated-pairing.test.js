@@ -16,8 +16,9 @@
  *  - **Real concurrency.** Every case below is single-process and
  *    single-threaded. `withFileLock` is advisory and fail-OPEN, so contention
  *    behaviour under N real processes is NOT measured here. The sibling gate
- *    `ledger-append-survival.test.js` (T-20) owns the 3-process 60/60 append
- *    measurement; this file owns the pairing rule only.
+ *    `ledger-append-survival.test.js` (T-20) owns the multi-process append
+ *    measurement (3 and 8 processes x 20 lines, fallback and git-common-dir
+ *    locations, ADR-011); this file owns the pairing rule only.
  *  - **The real ledger writer.** The port is a recording stub. Envelope
  *    completion (`v`/`ts`/`pid`/`seq`), the 4KB line cap and the vocabulary
  *    allowlist are T-20's, and a change there is not visible here.
