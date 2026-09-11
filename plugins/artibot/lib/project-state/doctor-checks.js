@@ -232,6 +232,72 @@ function compareLedgerVersions(journal, events) {
 }
 
 /**
+ * The `project:` entry of a rendered `state.yaml`, as a top-level key.
+ *
+ * Horizontal whitespace only, deliberately. `\s` matches `\n` in JavaScript,
+ * so the obvious `/^project:\s*(.+?)\s*$/m` would, on a `project:` line with an
+ * EMPTY value, jump the newline and capture the next line's text as the name.
+ * `[ \t]` cannot cross a line, and the leading `\S` makes an empty value a
+ * non-match — which is the honest answer, not a guess. `\r` is trimmed so a
+ * CRLF file resolves the same name (its bytes still fail the parity compare).
+ */
+const PROJECT_LINE = /^project:[ \t]*(\S[^\n]*?)[ \t\r]*$/m;
+
+/**
+ * Read the project name out of a rendered `state.yaml` text.
+ *
+ * `yaml.js#needsQuoting` quotes names a YAML reader would otherwise coerce
+ * (`1.0`, `true`, `no`), so a quoted scalar is decoded back to its value —
+ * `JSON.stringify` is what wrote it (`yaml.js#emitString`), so `JSON.parse` is
+ * the matching decoder, not a convenience. A value that opens with a quote but
+ * does not decode (single-quoted YAML, a hand-edited file) keeps its raw text:
+ * a name we cannot decode is still better evidence than one we invented.
+ *
+ * @param {string} text - Raw `state.yaml` text.
+ * @returns {string|undefined} The name, or undefined when the file has no
+ *   top-level `project:` entry with a value.
+ */
+function parseProjectName(text) {
+  const match = PROJECT_LINE.exec(text);
+  if (match === null) return undefined;
+  const raw = match[1];
+  if (raw.startsWith('"') || raw.startsWith("'")) {
+    try {
+      const decoded = JSON.parse(raw);
+      if (typeof decoded === 'string') return decoded;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+/**
+ * Resolve the project name the base snapshot must carry, in the order the
+ * caller's evidence is trustworthy: the explicit argument, then the projection
+ * itself, then nothing.
+ *
+ * There is deliberately no default. The name is NOT derivable from the journal
+ * — records carry no `project` key — so folding to a literal `'artibot'` made
+ * every checkout whose directory is named otherwise (the parent `Artibot`,
+ * every `split-artibot-*` linked worktree) render a name it never had and read
+ * as `projection-drift`. The canonical name is the basename of the project root
+ * (`state-manager.js#createStateStore`), which only the caller knows.
+ *
+ * @param {object|string} projection - The `state.yaml` projection, parsed or raw.
+ * @param {string} [project] - The caller's explicit name, if it passed one.
+ * @returns {string|undefined} The resolved name, or undefined when unresolvable.
+ */
+function resolveProjectName(projection, project) {
+  if (project !== undefined && project !== null) return project;
+  if (typeof projection === 'string') return parseProjectName(projection);
+  if (typeof projection === 'object' && typeof projection.project === 'string') {
+    return projection.project;
+  }
+  return undefined;
+}
+
+/**
  * Check 8, first half — does `reduce(journal)` still equal `state.yaml`, and
  * does the ledger still hold every version the store committed?
  *
@@ -245,11 +311,20 @@ function compareLedgerVersions(journal, events) {
  * `dropped_total.loss > 0` adds a finding, and it is `warn`: damaged lines do
  * not change the parity verdict and the ledger is the truth (no `--fix`).
  *
+ * A fifth consideration: the base snapshot's project NAME. It is resolved in
+ * one order — this argument, then the projection's own `project` entry (parsed
+ * from the text when the projection arrives raw), then nothing. There is no
+ * default: an unresolved name makes the projection comparison `unmeasured`
+ * rather than a byte comparison against an invented name, which would measure
+ * the invention. See `resolveProjectName`.
+ *
  * @param {object} input - Check inputs.
  * @param {object[]} input.events - Ledger events (`readLedgerCensus().events`).
  * @param {object[]} input.journal - Store journal records.
  * @param {object|string} input.projection - The `state.yaml` projection, parsed or raw.
- * @param {string} [input.project] - Project name for the base snapshot.
+ * @param {string} [input.project] - Project name for the base snapshot —
+ *   `path.basename(projectRoot)`, which only the caller can know. Absent, it is
+ *   read from the projection; unresolved, the comparison is not attempted.
  * @param {object} [input.census] - `readLedgerCensus().census`; absent = NOT COUNTED.
  * @returns {{status: string, findings: object[], census: object}} The verdict,
  *   its findings, and the census verdict (`unmeasured` | `pass` | `warn`).
@@ -271,14 +346,24 @@ export function checkLedgerStateParity(input = {}) {
       census: censusVerdict,
     };
   }
-  const projectName = project
-    ?? (typeof projection === 'object' ? projection.project : undefined)
-    ?? 'artibot';
-  const { state, warnings } = reduceProjectState(journal, { project: projectName });
+  const projectName = resolveProjectName(projection, project);
+  const { state, warnings } = reduceProjectState(
+    journal,
+    projectName === undefined ? {} : { project: projectName },
+  );
   const findings = warnings.map((w) => ({
     code: 'journal-warning', status: CheckStatus.WARN, detail: w,
   }));
-  findings.push(...compareProjection(state, projection));
+  if (projectName === undefined) {
+    findings.push({
+      code: 'project-name-unresolved', status: CheckStatus.UNMEASURED,
+      detail: 'the project name was neither passed nor present in the projection — the rebuild'
+        + ' would carry a name the store never had, so parity was NOT compared; the ledger'
+        + ' superset invariant below was still checked',
+    });
+  } else {
+    findings.push(...compareProjection(state, projection));
+  }
   findings.push(...compareLedgerVersions(journal, events));
   if (censusVerdict.status === CheckStatus.WARN) {
     findings.push({

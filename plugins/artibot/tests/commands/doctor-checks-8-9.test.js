@@ -226,6 +226,105 @@ describe('checkLedgerStateParity — the journal still reproduces state.yaml', (
     expect(read.status).toBe(CheckStatus.PASS);
     expect(checkLedgerStateParity({}).status).toBe(CheckStatus.UNMEASURED);
   });
+
+  // -------------------------------------------------------------------------
+  // The project name a RAW projection carries (G17)
+  //
+  // The name is not derivable from the journal — no record in the fixture (nor,
+  // as reported for the real store, in production) carries a `project` key, so
+  // `reduceProjectState` keeps whatever base name it was handed. When the
+  // caller passes raw text and no name, the name must come from the TEXT, and
+  // when it cannot, the verdict is `unmeasured`: a byte comparison against a
+  // guessed name measures the guess, not the parity.
+  // -------------------------------------------------------------------------
+
+  /**
+   * `state.yaml` text for the fixture journal above, written out BY HAND for
+   * the same reason `EXPECTED_PROJECTION` is — text produced by the renderer
+   * this check calls would assert nothing. Key order follows
+   * `projection.js#MISSION_KEY_ORDER` (intent, plan, status, workers,
+   * blocked_by), indent is `yaml.js#INDENT` (two spaces).
+   *
+   * `nameScalar` is the ALREADY-RENDERED YAML scalar, so a name that
+   * `yaml.js#needsQuoting` quotes is written here as `"1.0"`, quotes included.
+   */
+  const projectionText = (nameScalar, stateVersion = 1) => [
+    `project: ${nameScalar}`,
+    `state_version: ${stateVersion}`,
+    `updated_at: ${TS}`,
+    'active_missions:',
+    `  ${MID}:`,
+    '    intent:',
+    '      path: i',
+    '      revision: 1',
+    '    plan:',
+    '      path: p',
+    '      revision: 1',
+    '    status: executing',
+    '    workers: {}',
+    '    blocked_by: []',
+    '',
+  ].join('\n');
+
+  const rawParity = (projection, project) => checkLedgerStateParity({
+    events: [stateUpdated(1)],
+    journal: [missionRecord(1, MISSION)],
+    projection,
+    ...(project === undefined ? {} : { project }),
+  });
+
+  it('reads the project name out of raw text when no name was passed', () => {
+    // The defect this pins: a checkout whose basename is not `artibot` (the
+    // parent `Artibot`, every `split-artibot-*` worktree) read as drift.
+    const result = rawParity(projectionText('Artibot'));
+    expect(codes(result)).not.toContain('projection-drift');
+    expect(result.status).toBe(CheckStatus.PASS);
+  });
+
+  it('still fails on real drift in raw text whose name parses cleanly', () => {
+    const result = rawParity(projectionText('Artibot', 2));
+    expect(result.status).toBe(CheckStatus.FAIL);
+    expect(codes(result)).toContain('projection-drift');
+    expect(result.findings[0].comparison).toBe('bytes');
+  });
+
+  it('lets an explicit project argument beat the name parsed from the text', () => {
+    const text = projectionText('Artibot');
+    const result = rawParity(text, 'Other');
+    expect(result.status).toBe(CheckStatus.FAIL);
+    expect(result.findings[0].comparison).toBe('bytes');
+    // The sharpest observable that the ARGUMENT was folded, not the parsed
+    // name: `Other` is exactly two bytes shorter than `Artibot`, so the
+    // rendered side must be two bytes shorter than the supplied text.
+    expect(result.findings[0].detail).toContain(`(${text.length - 2} B) differs`);
+  });
+
+  it('reports unmeasured rather than folding to a default name it guessed', () => {
+    const result = rawParity('state_version: 1\nactive_missions: {}\n');
+    expect(result.status).toBe(CheckStatus.UNMEASURED);
+    expect(codes(result)).toContain('project-name-unresolved');
+    expect(codes(result)).not.toContain('projection-drift');
+  });
+
+  it('still checks the ledger superset invariant when the name is unresolved', () => {
+    const result = checkLedgerStateParity({
+      events: [],
+      journal: [missionRecord(1, MISSION)],
+      projection: 'state_version: 1\n',
+    });
+    expect(codes(result)).toContain('project-name-unresolved');
+    expect(codes(result)).toContain('ledger-subset-violation');
+    expect(result.status).toBe(CheckStatus.FAIL);
+  });
+
+  it('unquotes a project name the emitter had to quote, such as 1.0', () => {
+    // `yaml.js#needsQuoting` quotes `1.0` (NUMERIC_PLAIN), so the text on disk
+    // reads `project: "1.0"`. Folding the name as `"1.0"` WITH the quotes
+    // would re-render as `project: "\"1.0\""` and read as drift.
+    const result = rawParity(projectionText('"1.0"'));
+    expect(codes(result)).not.toContain('projection-drift');
+    expect(result.status).toBe(CheckStatus.PASS);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1000,5 +1099,61 @@ describe('resolveProjectRoot returns the worktree root, not the main repo (G16)'
     const got = norm(resolveProjectRoot(path.join(mainRoot, 'sub')));
     expect(got).toBe(norm(mainRoot));
     expect(got).not.toBe(norm(path.join(mainRoot, 'sub')));
+  });
+});
+
+/**
+ * W5-a — the project NAME, not only the project ROOT.
+ *
+ * G16 pinned WHERE this check reads from and left WHAT the compared projection
+ * is called to the caller. The fold's base snapshot carries that name, the
+ * rendered `state.yaml` puts it on its first `project:` line, and the store
+ * journal never records it — so a byte comparison is only meaningful when the
+ * caller supplies the same name the store used. A caller who omitted it had the
+ * name folded to a hard-coded default, which reported drift in every checkout
+ * whose directory basename was not that default.
+ *
+ * These are PROSE gates on the same section: they assert the document now names
+ * the derivation rule and the argument. They do NOT assert that any executor
+ * obeys it — the third blindspot in this file's header applies unchanged.
+ */
+describe('Check 8 names the project (W5-a)', () => {
+  const section = () => checkSections(CURRENT).get('Check 8');
+
+  it('derives the name from the root resolved in Step 0', () => {
+    expect(section()).toContain('path.basename(projectRoot)');
+  });
+
+  it('cites the store function whose rule it is copying', () => {
+    // `#symbol`, never `file:line`: `tests/firewall/citation-resolution.test.js`
+    // resolves every backticked citation in every tracked doc, and a line number
+    // in a file under edit goes stale without anything here turning red.
+    expect(section()).toContain('`lib/project-state/state-manager.js#createStateStore`');
+  });
+
+  it('passes `project` in the call example, between projection and census', () => {
+    // The defect WAS an omitted argument, so the example is pinned as a literal.
+    // A bare toContain('project') would be green on the word "projection".
+    expect(section()).toContain(
+      'checkLedgerStateParity({events, journal, projection, project, census})',
+    );
+  });
+
+  it('states the unresolved-name verdict by its finding code', () => {
+    expect(section()).toContain('project-name-unresolved');
+  });
+
+  it('still carries every G16 phrase — the new prose displaced none of it', () => {
+    // Belt and braces, deliberately duplicating the G16 describe above: an edit
+    // that adds the W5-a prose by overwriting the root-resolution step then
+    // fails in the describe that made the edit, not only in a neighbouring one.
+    const s = section();
+    expect(s).toContain('`lib/git/project-root.js#resolveProjectRoot`');
+    expect(s).toContain('read project root:');
+    expect(s).toMatch(/Check 9/);
+    expect(s).toMatch(/Check 10/);
+    expect(s).toContain('.artibot/missions/');
+    expect(s).toContain('loadReplay');
+    expect(s).toContain('readSpawns');
   });
 });
