@@ -302,6 +302,15 @@ the first thing this check does, not an implicit detail of the caller:
 - Report the result on its own line, verbatim, as
   `read project root: <absolute path>`. A parity verdict without the root it
   was measured against is not reproducible by the person reading it.
+- **The project NAME is derived from that same root** —
+  `project = path.basename(projectRoot)`, which is the rule the store itself
+  applies (`lib/project-state/state-manager.js#createStateStore`). NOT the
+  config file, NOT `package.json`. Step 3 needs it because the fold's base
+  snapshot carries the name, the projection renders it as its first `project:`
+  line, and the store journal never records it — so a byte comparison of that
+  line is only meaningful when the caller supplies the same name the store
+  used. A worktree whose basename differs from the main checkout's is exactly
+  the case a guessed name turns into a drift report.
 - **An empty or unresolved root is `unmeasured`, not a pass.** `readLedgerCensus`
   returns an EMPTY result for an empty `projectRoot` instead of raising: its
   `events` half is indistinguishable from an empty ledger, and only the census
@@ -331,10 +340,19 @@ health report, which makes the parity and residue comparisons meaningless.
 
 Then call, and report the worse of the two verdicts:
 
-- `checkLedgerStateParity({events, journal, projection, census})` — folds the
-  journal through T-21's `reduceProjectState`, never a second fold of its own,
-  then compares the rebuild against the supplied projection and the two version
-  sets against each other. The result carries a separate `census` key
+- `checkLedgerStateParity({events, journal, projection, project, census})` —
+  folds the journal through T-21's `reduceProjectState`, never a second fold of
+  its own, then compares the rebuild against the supplied projection and the two
+  version sets against each other. `project` is the basename from Step 0, and an
+  explicit value always wins. Omit it and the name falls back to the
+  projection's own — the `project:` line parsed out of raw text, or the
+  `project` key of a parsed object — and when neither source yields one the
+  check reports **unmeasured** with the finding `project-name-unresolved`
+  rather than guessing — it never folds to a default. A guessed name re-renders
+  the projection differing by exactly that one line, which is reported as drift
+  in every checkout the guess does not happen to match. The other findings are
+  still produced: an unresolved name withdraws the byte comparison, not the
+  version-set invariants. The result carries a separate `census` key
   (`status` `pass` | `warn` | `unmeasured`, plus `loss`, `selection`, `path`);
   print it in the Check 8 report as-is, path included, because an empty census
   and a census of the wrong tree are told apart only by path.
@@ -352,7 +370,14 @@ Status for this check — **first matching row wins**:
 | A ledger version has not reached the store yet | **warn** |
 | The journal fold produced a warning | **warn** |
 | `census.dropped_total.loss > 0` — the reader dropped damaged lines | **warn** |
+| The project name resolved from neither the argument nor a `project:` line | **unmeasured** |
 | Otherwise | **pass** |
+
+The project-name row sits BELOW the fail and warn rows on purpose, unlike the
+unmeasured row at the top. An input that was never read leaves nothing to
+compare, so it short-circuits; an unresolved NAME only withdraws the byte
+comparison, and a version-set fault found in the same run is the more severe
+fact and must be the one reported.
 
 The loss row is `warn`, not `fail`: a damaged line does not change the parity
 verdict, and the ledger is the truth, so there is nothing to auto-repair.
