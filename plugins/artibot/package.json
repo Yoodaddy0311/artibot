@@ -30,6 +30,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:coverage:check": "node scripts/ci/validate-coverage.js --check",
+    "bench": "vitest bench --run",
+    "bench:hooks": "node scripts/bench/hook-latency.mjs --slot all --n 20 --warmup 2",
     "eval:runtime": "node scripts/evals/run-runtime-task-suite.js",
     "eval:runtime:check": "node scripts/ci/validate-runtime-evals.js",
     "skill:check": "node scripts/gen-skill-docs.js --check && node scripts/ci/lint-skill-descriptions.js && node scripts/ci/lint-skill-size.js",

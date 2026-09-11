@@ -45,15 +45,18 @@
  * directories with HOME and USERPROFILE redirected into the sandbox. Not a
  * Node spawn, no real path touched, and the test removes both directories and
  * asserts they are gone. Every guard target is inside this suite's own
- * `mkdtemp` root, which `afterAll` removes. `defaultGuardSpecs()` is NOT
- * exercised: it shells out to `git` and returns paths under the real
- * `USERPROFILE`, which is never snapshotted here.
+ * `mkdtemp` root, which `afterAll` removes. `defaultGuardSpecs()` is CALLED in
+ * one block ("spec inventory") but never snapshotted: calling it only shells
+ * out to `git rev-parse` and joins strings, so the real `USERPROFILE` and the
+ * real git dir are read as NAMES and never opened.
  *
  * WHAT THIS FILE CANNOT SEE
  *
  *   - **Whether the guards protect the REAL stores.** Every verdict is pinned
  *     against throwaway directories. That `defaultGuardSpecs()` names the right
- *     real paths is not asserted — asserting it means reading them.
+ *     real paths is not asserted beyond the spec-inventory block at the end,
+ *     which checks one spec's NAME shape without opening it — asserting more
+ *     means reading the real stores.
  *   - **Whether a concurrent writer is correctly identified in practice.**
  *     `unattributedRows` is pinned against rows this suite wrote itself. A real
  *     session's rows may omit `session_id`, `ts` or `event` entirely, and the
@@ -72,7 +75,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  compareGuards, createSandbox, SLOTS, snapshotGuards,
+  compareGuards, createSandbox, defaultGuardSpecs, SLOTS, snapshotGuards,
 } from '../../scripts/bench/hook-latency.mjs';
 
 /**
@@ -160,6 +163,47 @@ describe('snapshotGuards() / compareGuards() — verdict contract', () => {
     expect(guard.verdict).toBe('absent/absent');
     expect(guard.violation).toBe(false);
     expect(guard.before).toBe('absent');
+  });
+
+  // The common-dir ledger spec (defaultGuardSpecs #5) names a FILE that does
+  // not exist yet, so these two pin the pair of outcomes it can produce. The
+  // fixture mirrors the real shape — `<common dir>/artibot/ledger.jsonl` — but
+  // lives entirely under this suite's temp root; nothing here reads the real
+  // git dir.
+  it('skips a common-dir ledger that does not exist yet, rather than passing it', async () => {
+    const commonDir = path.join(freshDir(), '.git');
+    const ledger = path.join(commonDir, 'artibot', 'ledger.jsonl');
+    const guard = await verdictAfter({ path: ledger, mode: 'tree' }, () => {});
+    expect(guard.verdict).toBe('absent/absent');
+    expect(guard.skipped).toBe(true);
+    expect(guard.violation).toBe(false);
+    // A skip must not read as a strict pass either.
+    expect(guard.strictWouldFail).toBe(false);
+  });
+
+  it('fails a common-dir ledger that exists and then changes', async () => {
+    const commonDir = path.join(freshDir(), '.git');
+    const ledger = path.join(commonDir, 'artibot', 'ledger.jsonl');
+    mkdirSync(path.dirname(ledger), { recursive: true });
+    writeFileSync(ledger, '{"event":"seed"}\n', 'utf-8');
+    const guard = await verdictAfter(
+      { path: ledger, mode: 'tree' },
+      () => appendFileSync(ledger, '{"event":"appended"}\n', 'utf-8'),
+    );
+    expect(guard.verdict).toBe('CHANGED');
+    expect(guard.violation).toBe(true);
+    // An evaluated guard is never `skipped`, whichever way it went.
+    expect(guard.skipped).toBe(false);
+    // A single-file target is digested as a file, not walked as a tree.
+    expect(guard.before).toMatch(/^file:/);
+  });
+
+  it('marks skipped false on an evaluated guard', async () => {
+    const dir = freshDir();
+    writeFileSync(path.join(dir, 'a.txt'), 'x', 'utf-8');
+    const guard = await verdictAfter({ path: dir, mode: 'tree' }, () => {});
+    expect(guard.verdict).toBe('unchanged');
+    expect(guard.skipped).toBe(false);
   });
 
   it('fails a tree guard when a file is added', async () => {
@@ -593,5 +637,23 @@ describe('compareGuards() — --writers strict vs tolerate', () => {
       expect(guard.verdict, JSON.stringify(options)).toBe('CHANGED');
       expect(guard.violation, JSON.stringify(options)).toBe(true);
     }
+  });
+});
+
+// Spec inventory: `defaultGuardSpecs()` only shells out to `git rev-parse` and
+// joins strings — nothing here is snapshotted, so the real git dir is read as
+// a NAME only. This pins that the common-dir ledger (spec #5) is listed even
+// while the file does not exist, which is the whole point of that spec.
+describe('defaultGuardSpecs() — spec inventory', () => {
+  it('lists <git common dir>/artibot/ledger.jsonl as a tree spec, whether or not the file exists', () => {
+    const specs = defaultGuardSpecs();
+    const ledgerSpecs = specs.filter((spec) => spec.path.endsWith(path.join('artibot', 'ledger.jsonl')));
+    // Exactly one: the spec is pushed once; a second push anywhere would show
+    // here. (This does NOT exercise the dedupe guard around that push — no
+    // earlier spec can share the ledger path, so that branch is unreachable.)
+    expect(ledgerSpecs).toHaveLength(1);
+    expect(ledgerSpecs[0].mode).toBe('tree');
+    // Under the common dir, not under a worktree's .artibot/runtime.
+    expect(ledgerSpecs[0].path).not.toContain(path.join('.artibot', 'runtime'));
   });
 });

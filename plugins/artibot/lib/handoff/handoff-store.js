@@ -52,6 +52,19 @@ const GIT_TIMEOUT_MS = 5000;
 // The random-hex collision fallback (`-a1b2c3`) intentionally does NOT match:
 // it is not orderable, so it falls back to mtime like any foreign filename.
 const ARCHIVE_STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(?:-(\d+))?\.md$/;
+// Windows returns EPERM from `rename` when another process holds a handle on
+// the destination (search indexer, AV scanner, a concurrent /save in a second
+// window). The contention window is short, so back off briefly and retry.
+// Defensive, not measured: the 2026-09-11 harness (160 concurrent writes from
+// ONE process) observed ZERO EPERM. Concurrent /save across SEPARATE processes
+// — the case this ladder is actually for — remains unmeasured.
+// EPERM only: every other errno (ENOENT, EACCES, EBUSY, ENOSPC, EXDEV, …) is a
+// real failure that must surface on the first attempt, unchanged.
+// ENOENT in particular is NOT a contention signal here and retrying it would
+// be wrong: it meant two writers had built the same tmp path and the first
+// rename consumed it. That is fixed at the source in `tmpPathFor` (random
+// suffix) — see its JSDoc for the 2026-09-11 measurement.
+const RENAME_RETRY_DELAYS_MS = Object.freeze([10, 30, 90]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -148,24 +161,75 @@ async function pickArchiveName(archiveDir, base) {
 }
 
 /**
+ * Default sleep — `setTimeout` wrapped in a promise. Tests inject a fake so
+ * the retry ladder costs no wall-clock time.
+ * @type {SleepFn}
+ */
+function defaultSleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+/**
+ * @typedef {(from: string, to: string) => Promise<void>} RenameFn
+ * @typedef {(ms: number) => Promise<void>} SleepFn
+ */
+
+/**
+ * Scratch path for `atomicWrite`, in the same directory as the target so the
+ * rename stays on one volume. Leading dot keeps it out of archive listings.
+ *
+ * The random suffix is load-bearing, not decoration. The name used to be
+ * `.{basename}.{pid}.{Date.now()}.tmp`: two writes to the same target from ONE
+ * process in the SAME millisecond built the IDENTICAL tmp path, so the first
+ * rename consumed the file and the second failed with ENOENT on its own
+ * *source*. Measured 2026-09-11 on Windows: 16 rejections in 160 concurrent
+ * `writeHandoff` calls, all ENOENT, all on one shared tmp path. Retrying
+ * cannot repair that — the source is gone — so the names must not collide.
+ *
+ * @param {string} targetPath
+ * @returns {string}
+ */
+function tmpPathFor(targetPath) {
+  const stamp = `${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
+  return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${stamp}.tmp`);
+}
+
+/**
  * Atomic write: tmp file in the same directory, then rename. Guarantees
  * no partial reader observes a half-written file.
  *
+ * Retries EPERM (and only EPERM) up to `RENAME_RETRY_DELAYS_MS.length` times
+ * — see that constant for why. On the final failure the stray tmp is removed
+ * and the last error is rethrown untouched, so callers still see the real
+ * errno.
+ *
  * @param {string} targetPath
  * @param {string} content
+ * @param {{ rename?: RenameFn, sleep?: SleepFn }} [io] Injectable fs clock/IO.
  * @returns {Promise<void>}
  */
-async function atomicWrite(targetPath, content) {
+async function atomicWrite(targetPath, content, io = {}) {
+  const renameFn = io.rename ?? rename;
+  const sleepFn = io.sleep ?? defaultSleep;
   const dir = path.dirname(targetPath);
   await mkdir(dir, { recursive: true });
-  const tmp = path.join(dir, `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`);
+  const tmp = tmpPathFor(targetPath);
   await writeFile(tmp, content, 'utf8');
-  try {
-    await rename(tmp, targetPath);
-  } catch (err) {
-    // Best-effort: clean stray tmp on rename failure (e.g. Windows EPERM)
-    try { await rm(tmp, { force: true }); } catch { /* noop */ }
-    throw err;
+
+  const maxAttempts = RENAME_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      await renameFn(tmp, targetPath);
+      return;
+    } catch (err) {
+      const exhausted = attempt === maxAttempts - 1;
+      if (err?.code !== 'EPERM' || exhausted) {
+        // Best-effort: clean stray tmp on terminal rename failure.
+        try { await rm(tmp, { force: true }); } catch { /* noop */ }
+        throw err;
+      }
+      await sleepFn(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
   }
 }
 
@@ -378,6 +442,8 @@ async function resolveArchiveTarget(projectRoot, archiveDir, now, throttleMs, tr
  *   throttleMs?: number,
  *   now?: () => Date,
  *   exec?: ExecFn,
+ *   rename?: RenameFn,
+ *   sleep?: SleepFn,
  * }} options
  * @returns {Promise<{
  *   latestPath: string,
@@ -408,8 +474,9 @@ export async function writeHandoff(markdown, options) {
 
   // Write archive first, then pointer. atomicWrite uses rename so even an
   // in-place overwrite is crash-safe.
-  await atomicWrite(archivePath, markdown);
-  await atomicWrite(pointerPath, markdown);
+  const io = { rename: options.rename, sleep: options.sleep };
+  await atomicWrite(archivePath, markdown, io);
+  await atomicWrite(pointerPath, markdown, io);
 
   // Force archive mtime to match `now()` so the mtime fallback (non-stamped
   // names) and any mtime-sorting consumer follow the caller's clock rather
@@ -667,6 +734,9 @@ export const _internals = Object.freeze({
   POINTER_REL,
   DEFAULT_KEEP,
   DEFAULT_THROTTLE_MS,
+  RENAME_RETRY_DELAYS_MS,
+  atomicWrite,
+  tmpPathFor,
   parseArchiveStamp,
   parsePorcelainZ,
 });

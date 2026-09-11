@@ -2,10 +2,11 @@
  * Tests for lib/handoff/handoff-store.js
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync,
+  utimesSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,13 @@ import {
   writeHandoff,
 } from '../../lib/handoff/handoff-store.js';
 
-const { POINTER_REL, ARCHIVE_DIR, parseArchiveStamp, parsePorcelainZ } = _internals;
+const {
+  POINTER_REL, ARCHIVE_DIR, parseArchiveStamp, parsePorcelainZ, atomicWrite, tmpPathFor,
+  RENAME_RETRY_DELAYS_MS,
+} = _internals;
+
+/** Freeze `Date.now` so tmp-name uniqueness cannot lean on the clock. */
+const FROZEN_NOW_MS = 1_700_000_000_000;
 
 function makeTempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'handoff-store-'));
@@ -579,5 +586,171 @@ describe('handoff-store / _internals parsers', () => {
       deleted: ['.artibot/handoffs/b.md'],
     });
     expect(parsePorcelainZ('')).toEqual({ modified: [], deleted: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// atomicWrite rename retry (Windows EPERM)
+//
+// On Windows a `rename` onto an existing target fails with EPERM while any
+// other process holds a handle on it (indexer, AV scanner, a concurrent
+// /save). The retry is EPERM-only on purpose: every other errno is a real
+// failure that must surface immediately, so this suite pins both directions.
+//
+// These tests drive `_internals.atomicWrite` directly rather than through
+// `writeHandoff`. writeHandoff performs TWO atomic writes (archive + pointer,
+// handoff-store.js `writeHandoff`), so call-count assertions there would
+// conflate the two; one threading test below covers the option plumbing.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fake `rename` that fails the first `failTimes` calls with `code`, then
+ * performs the real rename. Records every call.
+ */
+function makeRenameStub({ failTimes, code }) {
+  const calls = [];
+  const fn = async (from, to) => {
+    calls.push([from, to]);
+    if (calls.length <= failTimes) {
+      const err = new Error(`fake ${code} on rename`);
+      err.code = code;
+      throw err;
+    }
+    renameSync(from, to);
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+/** Fake `sleep` recording the delays it was asked to wait, never waiting. */
+function makeSleepSpy() {
+  const waits = [];
+  const fn = async (ms) => { waits.push(ms); };
+  fn.waits = waits;
+  return fn;
+}
+
+/** Names of stray tmp files left in `dir`. */
+function strayTmps(dir) {
+  return readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+}
+
+describe('handoff-store / atomicWrite rename retry', () => {
+  let root;
+
+  beforeEach(() => { root = makeTempRoot(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('exposes the retry delay ladder as a frozen constant', () => {
+    expect(RENAME_RETRY_DELAYS_MS).toEqual([10, 30, 90]);
+  });
+
+  it('retries EPERM and succeeds on the third rename', async () => {
+    const target = path.join(root, 'out', 'doc.md');
+    const rename = makeRenameStub({ failTimes: 2, code: 'EPERM' });
+    const sleep = makeSleepSpy();
+
+    await atomicWrite(target, '# content\n', { rename, sleep });
+
+    expect(rename.calls).toHaveLength(3);
+    expect(sleep.waits).toEqual([10, 30]);
+    expect(readFileSync(target, 'utf8')).toBe('# content\n');
+    expect(strayTmps(path.dirname(target))).toEqual([]);
+  });
+
+  it('throws the last EPERM after the retry budget is exhausted', async () => {
+    const target = path.join(root, 'out', 'doc.md');
+    const rename = makeRenameStub({ failTimes: Infinity, code: 'EPERM' });
+    const sleep = makeSleepSpy();
+
+    await expect(atomicWrite(target, '# content\n', { rename, sleep }))
+      .rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(rename.calls).toHaveLength(4);
+    expect(sleep.waits).toEqual([10, 30, 90]);
+    expect(existsSync(target)).toBe(false);
+    expect(strayTmps(path.dirname(target))).toEqual([]);
+  });
+
+  it('rethrows a non-EPERM rename error without retrying', async () => {
+    const target = path.join(root, 'out', 'doc.md');
+    const rename = makeRenameStub({ failTimes: Infinity, code: 'EACCES' });
+    const sleep = makeSleepSpy();
+
+    await expect(atomicWrite(target, '# content\n', { rename, sleep }))
+      .rejects.toMatchObject({ code: 'EACCES' });
+
+    expect(rename.calls).toHaveLength(1);
+    expect(sleep.waits).toEqual([]);
+    expect(existsSync(target)).toBe(false);
+    expect(strayTmps(path.dirname(target))).toEqual([]);
+  });
+
+  it('uses the real rename when no override is injected', async () => {
+    const target = path.join(root, 'out', 'doc.md');
+    await atomicWrite(target, '# real\n');
+    expect(readFileSync(target, 'utf8')).toBe('# real\n');
+    expect(strayTmps(path.dirname(target))).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // tmp-name collision (2026-09-11): the tmp name used to be
+  // `.{basename}.{pid}.{Date.now()}.tmp`. Two writes to the same target from
+  // ONE process in the SAME millisecond therefore built the SAME tmp path;
+  // the first rename consumed it and the second got ENOENT on the *source*.
+  // Measured 16 rejections in 160 concurrent writeHandoff calls. Retrying
+  // cannot help — the source is gone — so the tmp name carries random bytes.
+  // Both tests freeze `Date.now` so they fail deterministically without it.
+  // -------------------------------------------------------------------------
+
+  it('tmpPathFor returns a distinct path per call for one target under a frozen clock', () => {
+    const target = path.join(root, 'out', 'doc.md');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW_MS);
+    try {
+      const paths = Array.from({ length: 200 }, () => tmpPathFor(target));
+
+      expect(new Set(paths).size).toBe(200);
+      expect(paths.filter((p) => path.dirname(p) !== path.dirname(target))).toEqual([]);
+      expect(paths.filter((p) => !p.endsWith('.tmp'))).toEqual([]);
+      expect(paths.filter((p) => !path.basename(p).startsWith('.'))).toEqual([]);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('survives 8 concurrent atomicWrite calls on one target under a frozen clock', async () => {
+    const target = path.join(root, 'out', 'doc.md');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW_MS);
+    try {
+      const bodies = Array.from({ length: 8 }, (_, i) => `# body ${i}\n`);
+      const settled = await Promise.allSettled(bodies.map((b) => atomicWrite(target, b)));
+
+      expect(settled.filter((s) => s.status === 'rejected').map((s) => s.reason)).toEqual([]);
+      // Last writer wins; which one is a race, but it must be a whole body.
+      expect(bodies).toContain(readFileSync(target, 'utf8'));
+      expect(strayTmps(path.dirname(target))).toEqual([]);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('writeHandoff threads rename and sleep through to both atomic writes', async () => {
+    const rename = makeRenameStub({ failTimes: 1, code: 'EPERM' });
+    const sleep = makeSleepSpy();
+
+    const res = await writeHandoff('# handoff\n', {
+      projectRoot: root,
+      now: () => new Date(2026, 4, 19, 12, 0, 0),
+      exec: noGitExec,
+      rename,
+      sleep,
+    });
+
+    // archive: 1 EPERM + 1 success; pointer: 1 success.
+    expect(rename.calls).toHaveLength(3);
+    expect(sleep.waits).toEqual([10]);
+    expect(readFileSync(res.latestPath, 'utf8')).toBe('# handoff\n');
+    expect(readFileSync(res.archivePath, 'utf8')).toBe('# handoff\n');
+    expect(strayTmps(path.dirname(res.archivePath))).toEqual([]);
   });
 });

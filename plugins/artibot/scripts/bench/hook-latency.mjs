@@ -72,7 +72,18 @@
  *
  * Every child runs with HOME/USERPROFILE and cwd redirected into throwaway
  * temp directories, and with the same four disable flags the dispatcher test
- * suites use. This is the convention established by
+ * suites use, plus a fifth env that REDIRECTS rather than disables:
+ * `ARTIBOT_USER_PROFILE_PATH`. It exists because moving HOME is not enough for
+ * that one store — `artibot.config.json`'s `ux.profilePath` is
+ * plugin-root-relative, and `CLAUDE_PLUGIN_ROOT` below deliberately points at
+ * the real checkout, so the skill-level profile resolved under the developer's
+ * live tree no matter where HOME pointed. Measured 2026-09-11 before the fix:
+ * one `--slot all --n 3 --warmup 1` run grew the real
+ * `runtime/user-profile.json` from 2,433 to 2,988 B, and all 25 signals in it
+ * were the bench's own fixture prompt. A redirect is used instead of a
+ * `*_DISABLE` flag on purpose: disabling would skip the write and shorten the
+ * very UserPromptSubmit latency this tool reports. This is the convention
+ * established by
  * `tests/dispatcher/sessionstart-dispatcher.test.js` and
  * `tests/dispatcher/sessionend-dispatcher.test.js` after measured incidents in
  * which test fixtures reached the developer's real learning store and the real
@@ -718,6 +729,9 @@ function hookEnv(sandbox, extra) {
     // learning store receives the bench fixtures.
     USERPROFILE: sandbox.home,
     HOME: sandbox.home,
+    // Redirect, not a disable: `ux.profilePath` is plugin-root-relative, so
+    // the two lines above do NOT move this store. See ISOLATION in the header.
+    ARTIBOT_USER_PROFILE_PATH: path.join(sandbox.home, '.claude', 'artibot', 'user-profile.json'),
     ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
     ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
     ARTIBOT_SWARM_DISABLE: '1',
@@ -1455,11 +1469,21 @@ export function compareGuards(before, after, options = {}) {
  * aggregation is a plain `.some()` rather than a search for undefined, and any
  * violation implies it — strict fails on everything tolerate does and more.
  *
+ * `skipped` follows the same rule for the same reason. It marks a guard that
+ * was NOT evaluated because its target does not exist, which is a third
+ * outcome and not a quiet pass: a spec naming a store that a not-yet-landed
+ * change will create would otherwise read as `[ok]` forever, and the guard
+ * would be falsely green on exactly the run it was added for.
+ *
  * @param {object} result
  * @returns {object}
  */
 function finalize(result) {
-  return { ...result, strictWouldFail: Boolean(result.violation || result.strictWouldFail) };
+  return {
+    ...result,
+    strictWouldFail: Boolean(result.violation || result.strictWouldFail),
+    skipped: Boolean(result.skipped),
+  };
 }
 
 /**
@@ -1500,7 +1524,9 @@ function compareOne(prev, afterEntry, writers) {
   if (leak.violation) return { ...shape, ...leak };
 
   if (prev.state === 'absent' && next.state === 'absent') {
-    return { ...shape, verdict: 'absent/absent', violation: false };
+    return {
+      ...shape, verdict: 'absent/absent', violation: false, skipped: true,
+    };
   }
   if (prev.state === next.state) return { ...shape, verdict: 'unchanged', violation: false };
   if (prev.mode === 'informational') {
@@ -1610,7 +1636,7 @@ function gitRead(args, cwd) {
 /**
  * The default guard set.
  *
- * Four entries, for four different blast radii:
+ * Five entries, for five different blast radii:
  *   1. `<USERPROFILE>/.artibot` — the real ledger and decision store.
  *   2. `<invocation repo>/.artibot/runtime` — this checkout's runtime ledger.
  *      `observe` mode, NOT `tree`. This is the store the session running the
@@ -1629,8 +1655,19 @@ function gitRead(args, cwd) {
  *   4. `<USERPROFILE>/.claude/artibot` — leak-scan only; see benchLeakCounts().
  *      Byte identity is not claimed for this store either, and specifically not
  *      for `daily-experiences.json`, which the live session appends to.
+ *   5. `<git common dir>/artibot/ledger.jsonl` — a FILE, `tree`, fail-closed.
+ *      Specs 1-4 all name paths outside the git dir, so a ledger relocated
+ *      under the common dir would have been unguarded and `--guard` would have
+ *      been falsely green on it. At the time this spec was added the file did
+ *      not exist (`lib/runtime/event-writer.js#DEFAULT_LEDGER_REL` is still
+ *      `.artibot/runtime/ledger.jsonl`, joined to a project root by
+ *      `#ledgerFilePath`); it is listed anyway so the guard is in place on the
+ *      run that first creates it. Until then it reports SKIP, not ok.
  *
  * Plus `<PLUGIN_ROOT>/runtime`, informational.
+ *
+ * A spec whose target is absent both before and after is SKIPPED, not passed:
+ * `absent/absent`, `skipped: true`, rendered `[SKIP]`, never a strict failure.
  *
  * @returns {Array<{path: string, mode: string}>}
  */
@@ -1647,10 +1684,23 @@ export function defaultGuardSpecs() {
 
   const commonDir = gitRead(['rev-parse', '--path-format=absolute', '--git-common-dir'], INVOCATION_CWD);
   if (commonDir) {
-    const mainRoot = path.dirname(path.resolve(commonDir));
+    const resolvedCommonDir = path.resolve(commonDir);
+    const mainRoot = path.dirname(resolvedCommonDir);
     const candidate = path.join(mainRoot, '.artibot', 'runtime');
     if (!specs.some((spec) => spec.path === candidate)) {
       specs.push({ path: candidate, mode: 'tree' });
+    }
+    // Every spec above names a path OUTSIDE the git dir, so a ledger that
+    // lives under the common dir had no guard at all. Listed unconditionally
+    // rather than behind an `existsSync`: the spec must be present on the run
+    // that first creates the file, and `snapshotOne` already reports a missing
+    // target as `absent` (-> SKIP), so naming it early costs one skipped row
+    // and closes the window where the guard would silently not exist.
+    // A file, not a directory — `snapshotOne` digests it as `file:<hash>` and
+    // `guardEntries` lists a single-file target relative to its parent.
+    const ledger = path.join(resolvedCommonDir, 'artibot', 'ledger.jsonl');
+    if (!specs.some((spec) => spec.path === ledger)) {
+      specs.push({ path: ledger, mode: 'tree' });
     }
   }
 
@@ -1794,7 +1844,13 @@ function printHuman(report) {
   console.log('GUARDS');
   console.log('------');
   for (const guard of guards) {
-    console.log(`  [${guard.violation ? 'FAIL' : 'ok'}] ${guard.mode.padEnd(13)} ${guard.verdict}`);
+    // Three-way, not two: `SKIP` says the target was absent and nothing was
+    // checked. Collapsing that into `ok` would let a spec for a store that
+    // does not exist yet report as a passing guard.
+    let label = 'ok';
+    if (guard.violation) label = 'FAIL';
+    else if (guard.skipped) label = 'SKIP';
+    console.log(`  [${label}] ${guard.mode.padEnd(13)} ${guard.verdict}`);
     console.log(`         ${guard.path}`);
     if (guard.strictWouldFail && !guard.violation) {
       console.log('         strict would FAIL — this guard passed only under --writers tolerate');
