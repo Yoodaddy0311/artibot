@@ -1163,19 +1163,23 @@ describe('Check 8 names the project (W5-a)', () => {
  * that told operators otherwise had to follow.
  *
  * Before this change both sections asserted "each worktree carries its own
- * `.artibot/`". That is now false for the LEDGER and the store journal (shared
- * at `<git-common-dir>/artibot/`) and still true for the PROJECTION and for
- * `spawns.ndjson`. A reader who kept the old sentence would attribute another
- * window's events to the tree in front of them, which is the same class of
- * defect G16 fixed for the root.
+ * `.artibot/`". That is now false for the LEDGER, the store journal AND the
+ * spawn ledger (all shared at `<git-common-dir>/artibot/`) and still true for
+ * the PROJECTION and for `decisions/`. A reader who kept the old sentence would
+ * attribute another window's events to the tree in front of them, which is the
+ * same class of defect G16 fixed for the root.
+ *
+ * The deferral is over: `spawn-ledger.js#spawnLedgerPath` now follows the same
+ * store-location rule as `event-writer.js#ledgerFilePath`, so the Check 10
+ * asymmetry the old prose described no longer exists. This describe is what
+ * pins the replacement wording — it asserts BOTH shared paths are named and
+ * that the superseded deferral markers are gone, so prose that drifts back to
+ * "tree-local until a later limb" turns this red instead of going quietly stale.
  *
  * These are PROSE gates: they assert the document says the new thing and no
  * longer says the superseded symbol. They do NOT assert runtime behaviour —
  * `tests/firewall/ledger-store-colocation.test.js` owns that, and this file's
- * header blindspot about executors obeying the prose applies unchanged. They
- * also cannot see whether the Check 10 asymmetry is still real: when W5-b-6
- * moves `spawns.ndjson`, these assertions stay green while the prose goes
- * stale, so the `W5-b-6` marker below is the string that must be searched then.
+ * header blindspot about executors obeying the prose applies unchanged.
  */
 describe('W5-b (ADR-011) wording pins — Check 8 / Check 10', () => {
   const eight = () => checkSections(CURRENT).get('Check 8');
@@ -1208,11 +1212,15 @@ describe('W5-b (ADR-011) wording pins — Check 8 / Check 10', () => {
     expect(s).toContain('spawns.ndjson');
   });
 
-  it('Check 10 names the deferred limb that makes its WARN structural', () => {
-    // The finding code is pinned as a literal because the sentence is about
-    // THAT row: a bare "mismatch" would be green on unrelated prose.
+  it('Check 10 states both files under <git-common-dir>/artibot/ and no longer defers the spawn file', () => {
+    // Both FULL paths are pinned as literals: a bare `<git-common-dir>/artibot/`
+    // would be green on prose that still calls one of the two files tree-local.
+    // The two not.toContain assertions are the drift gate — they are the strings
+    // the superseded deferral was written with.
     const s = ten();
-    expect(s).toContain('W5-b-6');
-    expect(s).toContain('route-bind-residue-mismatch');
+    expect(s).toContain('<git-common-dir>/artibot/spawns.ndjson');
+    expect(s).toContain('<git-common-dir>/artibot/ledger.jsonl');
+    expect(s).not.toContain('W5-b-6');
+    expect(s).not.toContain('stays in THIS tree');
   });
 });

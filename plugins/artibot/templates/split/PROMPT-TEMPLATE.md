@@ -22,7 +22,7 @@
 - **팀원 모델은 이름으로 정하지 마라.** `lib/core/model-policy.js#resolveModel(agentType, {}, config)` 이 정본이고, 단계 기본값은 `artibot.config.json#/agents/modelPolicy/phaseRoles`(구현/검수)가 정한다. 모델 ID 를 프롬프트에 하드코딩하지 않는다 — 바로 아래 모델 정책 절이 이 창에 유효한 값을 이미 담고 있다.
 - **하위 묶음마다 `nature: process|judge` 를 붙인다.** `judge`(정합성 판정·반증·결정·감사) 묶음은 `fable.allowlist` 에이전트(investigator·auditor·code-reviewer·spec-reviewer·quality-reviewer·architect·planner·llm-architect·repo-benchmarker·orchestrator) 중 하나에, `process`(grep·측정·계수·구현) 묶음은 build 티어 구현 에이전트에 배정한다. **태깅 단위는 작업이 아니라 산출물(판정 문장)이다** — 한 묶음에 grep 과 판정이 섞이면 그 팀원의 보고가 판정 문장을 포함하는지로 정한다. 태그를 빠뜨리면 현상 유지이고 측정에서 분모 밖으로 빠진다. 정본은 `commands/team.md` §Phase 1 nature 절.
 - **팀원 스폰 프롬프트에는 아래 [보고 계약] 8줄을 그대로 삽입한다.** "SendMessage 로 보고하라" 한 줄로는 부족하다 — 2026-09-04 에 한 검수 팀원이 끝내 무보고였고(일반 텍스트 출력은 유실된다) 창이 두 번째 검수자를 다시 띄워야 했다.
-- **팬아웃의 관측점은 스폰 원장** `{WORKTREE_PATH}/.artibot/ledger/spawns.ndjson` 이다. 계수 축은 `start` 이벤트가 아니라 **start ∪ stop 의 distinct agentId** — 2026-09-04 전수 판독에서 `start` 만 세면 최소 12건 과소, 이벤트 수를 세면 중복으로 과대였다.
+- **팬아웃의 관측점은 스폰 원장** `<git-common-dir>/artibot/spawns.ndjson` 이다 — 모든 창이 공유하는 한 파일이므로 이 창 분은 `sessionId` 로 잘라서 본다(비-git 루트면 `.artibot/runtime/` 폴백). 계수 축은 `start` 이벤트가 아니라 **start ∪ stop 의 distinct agentId** — 2026-09-04 전수 판독에서 `start` 만 세면 최소 12건 과소, 이벤트 수를 세면 중복으로 과대였다.
 - **ref 조작 금지**: `git branch -f` / `-m` / `-D` 로 판독을 맞추지 마라. `land` 가 `no-commits` 를 내는 등 판독이 어긋나면 **리더에게 보고**한다 — 2026-09-04 에 한 창이 스스로 ref 를 옮겨 정본이 둘이 됐다(결과는 무해했으나 그건 운이다).
 {MODEL_POLICY}
 
