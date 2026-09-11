@@ -121,8 +121,11 @@ const BLOCKED_PATTERNS = Object.freeze([
   // the flag is still a real blind force push, and the whitespace-or-end tail
   // missed it: `git push origin main -f; echo done` and `git push -f|cat` were
   // L1 approve / L2 safe until 2026-09-11 18:0x KST (found by the L2 side).
-  // `-fu` and `-f-x` stay approved — a word character or a dash after `f` means
-  // the token is not `-f`.
+  // `-fu` stays approved and `-f-x` is NOW approved — a word character or a dash
+  // after `f` means the token is not `-f`. (`-f-x` was L1 block before
+  // 2026-09-11: the old `-f\b` saw a word boundary between `f` and `-`. git
+  // rejects it as an unknown option, and L2 always graded it safe, so the two
+  // layers converge rather than L1 losing protection.)
   // WINDOW BOUND (ReDoS). Unbounded, the run is quadratic: every `git push`
   // start rescans to the end of the line. Measured 2026-09-11 18:1x KST (node
   // v24.15.0, single regex, `'git push '.repeat` non-matching, 3 runs, all

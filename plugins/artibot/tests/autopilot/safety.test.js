@@ -130,8 +130,9 @@ describe('classifyRisk — scoped recursive delete is caution', () => {
 });
 
 describe('classifyRisk — force push: lease is caution, blind force stays danger', () => {
-  // 오너 결정 2026-09-11 ①. L1(blocked-patterns.js:66-77) 은 --force-with-lease /
-  // --force-if-includes 를 safeOverrides 로 면제한다. L2 가 같은 명령을 danger 로
+  // 오너 결정 2026-09-11 ①. L1(blocked-patterns.js `git push --force` 규칙) 은
+  // --force-with-lease / --force-if-includes 를 패턴 안 부정 예측으로 면제한다
+  // (2026-09-11 까지는 safeOverrides 목록이었다). L2 가 같은 명령을 danger 로
   // 부르면 두 층이 정반대를 말한다 → L2 는 caution 으로 내린다.
   it.each([
     'git push --force origin main',

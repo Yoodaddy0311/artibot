@@ -222,7 +222,7 @@ const PARITY_MATRIX = Object.freeze([
     l2: 'caution',
     l2Id: 'git-force-push-lease',
     status: 'owner-decision',
-    note: '오너 결정 2026-09-11 확정: L2 danger → caution. L1 정본은 lease 허용(blocked-patterns.js:64-77 rationale·safeOverrides). 여전히 agreed 가 아니다 — 헤더 방향 규칙상 L1 pass 는 L2 safe 를 요구하는데, lease 도 원격 히스토리를 다시 쓰므로 safe 로 내리지 않는다. 이 행은 그 잔여 불일치를 핀한다.',
+    note: '오너 결정 2026-09-11 확정: L2 danger → caution. L1 정본은 lease 허용(blocked-patterns.js `git push --force` 규칙의 부정 예측 `(?!-with-lease|-if-includes)` — 2026-09-11 까지는 safeOverrides 목록이었다). 여전히 agreed 가 아니다 — 헤더 방향 규칙상 L1 pass 는 L2 safe 를 요구하는데, lease 도 원격 히스토리를 다시 쓰므로 safe 로 내리지 않는다. 이 행은 그 잔여 불일치를 핀한다.',
   },
   {
     command: 'git push -f --force-with-lease origin main',

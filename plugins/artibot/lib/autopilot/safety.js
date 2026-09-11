@@ -19,8 +19,9 @@
  */
 export const DANGEROUS_PATTERNS = Object.freeze([
   // Owner decision 2026-09-11 ①: the lease/if-includes forms are a CHECKED
-  // force push — L1 (blocked-patterns.js safeOverrides on the two `git push`
-  // rules) lets them through on purpose. Grading them 'danger' here made the
+  // force push — L1 (blocked-patterns.js: the negative lookahead inside the
+  // `git push --force` rule; it used to be a `safeOverrides` list until
+  // 2026-09-11) lets them through on purpose. Grading them 'danger' here made the
   // two layers say opposite things about the same command, so the checked form
   // drops to 'caution' while a blind `--force` / `-f` stays 'danger'.
   // The negative lookahead is what splits them: `--force` followed by
