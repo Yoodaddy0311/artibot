@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 7 배치 착지 (split-68e984w7, base f75e849f → master 0c08d8b3, 4줄기, 26 files +2,754/−188)
+
+- **guard-redos-residual** (`02c3656f` · `c15ca5e9`): L1 `blocked-patterns.js` rm 2규칙 `.*\/` → `{0,512}` 창(513자 초과 `rm --recursive` 는 문서화가 아니라 창 안에서 잡는다 — 리더 결정), wget/curl pipe 2규칙 `\s+.*\|` → `{0,192}`, L2 `safety.js` sql-delete lookahead 창 바운드. 정규식 소스 정적 스캔 게이트(무제한 `.*`/`\s+.*` 런 0, 65규칙) + 규칙별 스캔 상한 allowlist + 7개 L1 창 규칙 경계쌍(창 안 block / 창 밖 pass) + 완전성 단언. 벽시계 성장비 게이트는 한 구간 `t(122,880) < 18×t(20,480)` 으로(gotcha 85 — 러너 `<50ms` 경계값 플레이크 대신 구조 단언). 착지 전 실측: curl pipe 122,880B 13.3s(PreToolUse 5초 예산 2.7배) → 착지 후 창 바운드.
+- **frontmatter-hardening** (`26d4d2db` · `0f152446` · `4f432d24`): `scripts/ci/ci-utils.js` 가 빈 따옴표 frontmatter 값(`description: ""`·`''`)을 `''` 로 접는다(종전 리터럴 따옴표 문자열로 PASS 하던 3소비자 구멍). `tests/ci/frontmatter-empty-values.test.js` 신설 — 에이전트·커맨드·스킬 × 본체·cowork 9셀 RED 게이트(cowork 에이전트를 분모에 포함). 중복 키 = 마지막 값(호스트 실측)을 `skills/skill-authoring/SKILL.md` 에 명문화, `triggers` 규약 문서화. 창이 자기 편집의 `source_hash` 드리프트(cf338637 → 55d21838)를 잡아 재커밋.
+- **spawn-ledger-store** (`4325390e` · `9f8f5692` · `7eefb085` · `1f32cab2`): `lib/learning/ledger/spawn-ledger.js#spawnLedgerPath` 가 ADR-011 §5-3 스토어 위치 규칙을 따른다 — `spawns.ndjson` 이 `ledger.jsonl` 과 같은 `<git-common-dir>/artibot/` 에 놓이고 worktree 마다 갈리지 않는다. colocation 게이트 G1~G5(`tests/firewall/spawn-ledger-colocation.test.js`, 픽스처가 디렉터리가 아니라 파일을 막음), 디스패처 핀은 writer 의 규칙을 경유. doctor Check 8/9 문구·ADR-011·split operations.md 동기화. 실 원장 이관은 줄기 밖(`scripts/ledger/migrate-ledger-adr011.mjs`, 창 전부 닫힘 뒤 리더 수동 1회).
+- **test-load-flakes** (`c5fbaf2f`): `lib/git/git-dir.js` 가 `.git` 레이아웃(파일/디렉터리)을 1순위로 해석해 부하 중 spawn 타임아웃 시 `getGitDir` null 회귀를 줄인다(6훅은 이미 toplevel 을 넘겨 스폰 0). `tests/firewall/landing-serialization.test.js` rebuild 케이스의 벽시계 축을 분리(타임아웃 상향은 창이 훅 예산 표로 철회). **못 보는 것**: 5창 동시 부하에서의 재현은 착지 후 리더 전체 vitest 로만 확인 — Wave 8 부하 중 재발 여부 미측정.
+
+### 문서·워크플로우
+
+- `.artibot/guides/v5-design/V5-BACKLOG.md` 신설 — v5 로드맵 분모 100항목(P0 16 · Observe 27 · Shadow 30 · Canary 20 · GA 7), 진행률 합계 33%(2026-09-11, 기준 f75e849f). 웨이브 입력은 이 파일이고, 부채·후속은 웨이브당 25% 상한(선행 결함만 예외).
+- Observe 종료 판정 재실측(2026-09-11 23:2x): 설계 §4 5축 2/5 — ① substantive 2/40 ② 추천≠정책 7/31 ③ `review.completed` 0/487행(분모 0) ④ `session.end` 어휘 부재로 미측정 ⑤ 구조적 FAIL. doctor Check 8 FAIL 원인은 ADR-011 이관 잔재(구 원장 349행 미이관, 유실 0).
+- NEXT-SESSION gotcha 86~88(메시지 절단 4~5KB · Fable 한도 시 opus 재스폰 · plan.json 소유 겹침은 한쪽 배정 + 부칙).
+
 ## [4.60.0] — 2026-09-11
 
 ### split-68e984 / split-68e984w6 — 2 wave · 8 줄기 (2026-09-11, 배치 랜딩 dcd4ce5a → 663411a2)
