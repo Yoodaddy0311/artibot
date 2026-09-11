@@ -221,6 +221,36 @@ jobs:
       actions: read
       checks: read
 
+    # Single source of truth for the file set this job self-heals AND lands.
+    #
+    # Until 2026-09-11 there were two file sets: the self-healers rewrote the
+    # NINE files in readme-claims-registry.js#SYNC_RELATIVE, while the change
+    # detection and both `git add` lines named only FOUR. The other five
+    # (INSTALL.md, plugins/artibot/{CLAUDE,AGENTS}.md, the mcp-server manifest,
+    # docs/MARKETPLACE-SUBMISSION.md) were healed on the runner and then thrown
+    # away with the runner — so the badge branch shipped a marketplace.json
+    # quoting a new count next to prose still quoting the old one, and
+    # validate-readme-claims --full went red on the very branch the release had
+    # just built. Fixing the step ORDER alone would not have fixed that: the
+    # healed bytes were never in the commit.
+    #
+    # Kept in lockstep with the registry by tests/firewall — the YAML list and
+    # SYNC_TARGETS are compared as SETS, so adding a target on either side
+    # without the other is RED. Folded (`>-`) into one space-separated line,
+    # which is exactly the shape `git diff`/`git add` word-splitting wants.
+    # Relative to the repo root, posix separators, no spaces in any path.
+    env:
+      SYNC_PATHS: >-
+        README.md
+        INSTALL.md
+        .claude-plugin/marketplace.json
+        plugins/artibot/README.md
+        plugins/artibot/CLAUDE.md
+        plugins/artibot/AGENTS.md
+        plugins/artibot/marketplace.json
+        plugins/artibot/.well-known/mcp-server.json
+        plugins/artibot/docs/MARKETPLACE-SUBMISSION.md
+
     steps:
       - name: Checkout master
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -481,13 +511,6 @@ jobs:
           # Root README plugin table row — scoped to artibot row only.
           sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
-      - name: Sync README count prose
-        # Self-heal count prose ("N slash commands", "N skills", …) so a release
-        # that changes a count never leaves drift for the validate-readme-claims
-        # gate to fail on later (the manual hotfix that release ea8a3b9 was).
-        # Idempotent: a no-op when prose already matches file-system counts.
-        run: node plugins/artibot/scripts/ci/sync-readme-claims.js
-
       - name: Install plugin dependencies (for test count)
         working-directory: plugins/artibot
         # Same reasoning as the validate job's install step: the fallback must
@@ -526,6 +549,24 @@ jobs:
             node plugins/artibot/scripts/ci/sync-marketplace-meta.mjs
           fi
 
+      - name: Sync README count prose
+        # Self-heal count prose ("N slash commands", "N skills", …) so a release
+        # that changes a count never leaves drift for the validate-readme-claims
+        # gate to fail on later (the manual hotfix that release ea8a3b9 was).
+        #
+        # MUST run AFTER "Sync marketplace.json metadata", not before. The test
+        # count this prose quotes is read from marketplace.json#qualityMetrics.tests
+        # (readme-claims-registry.js#collectActuals) — the field the step above
+        # writes. Running first makes it self-heal against the PREVIOUS release's
+        # number, then the marketplace step moves the number underneath it, and
+        # the badge-sync side branch fails validate-readme-claims with 4 drifted
+        # documents; badge ff then escalates to an issue. That is exactly what
+        # happened on v4.58.0 (#117) and v4.59.0 (#118), both landed by hand.
+        # (Branch/title literals stay out of this comment on purpose — the
+        # badge-stall gate pins them to a single env declaration.)
+        # Idempotent: a no-op when prose already matches its sources.
+        run: node plugins/artibot/scripts/ci/sync-readme-claims.js
+
       # ── Landing strategy ───────────────────────────────────────────────────
       # There are two ways to get the badge commit onto a protected master, and
       # which one is usable depends on whether a PAT is configured:
@@ -555,14 +596,19 @@ jobs:
           HAS_PAT: ${{ secrets.ARTIBOT_LANDING_PAT != '' }}
         run: |
           # Change detection moved here from the landing step so both paths share
-          # a single answer. Same file set, same semantics as before: no diff
-          # means nothing to land and both landing steps skip.
+          # a single answer: no diff means nothing to land and both landing
+          # steps skip. The file set is SYNC_PATHS (job env) — the same nine
+          # files the self-heal steps above rewrite, and the same list both
+          # `git add` lines stage. Until 2026-09-11 this step and the landing
+          # steps named four files by hand (root .claude-plugin/marketplace.json
+          # was added after it drifted to 4.13.1 vs plugin.json 4.19.6, incident
+          # 2026-06-08); the other five healed files were never committed.
           #
-          # Include root .claude-plugin/marketplace.json — it is the Claude
-          # Code marketplace routing file and drifted to 4.13.1 vs plugin.json
-          # 4.19.6 (incident 2026-06-08) because nothing wrote to it. The
-          # sync-marketplace-meta.mjs step above now updates both files.
-          if git diff --quiet README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json; then
+          # ${SYNC_PATHS} (job env) is deliberately unquoted: the folded value is
+          # one space-separated line and word-splitting is how it becomes nine
+          # pathspecs. Safe because no path contains a space — pinned by the
+          # firewall test, not by hope.
+          if git diff --quiet -- ${SYNC_PATHS}; then
             echo "No README / marketplace changes to land."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -575,20 +621,54 @@ jobs:
             # README diff that is not in the commit. Built here rather than in
             # the landing steps for the same reason the change detection lives
             # here: both paths must give one answer.
+            # Classify the files that actually differ, rather than re-running a
+            # diff per category against hand-written path lists. The `*)` arm is
+            # the catch-all ON PURPOSE: anything added to SYNC_PATHS later is
+            # counted as prose and gets NAMED in the subject, instead of being
+            # silently dropped the way the five prose files were. A negative
+            # list would fail open on exactly that future entry (rules §8).
             readme_changed=false
             marketplace_changed=false
-            git diff --quiet README.md plugins/artibot/README.md || readme_changed=true
-            git diff --quiet plugins/artibot/marketplace.json .claude-plugin/marketplace.json || marketplace_changed=true
+            prose_changed=false
+            for changed_path in $(git diff --name-only -- ${SYNC_PATHS}); do
+              case "${changed_path}" in
+                README.md|plugins/artibot/README.md)
+                  readme_changed=true ;;
+                plugins/artibot/marketplace.json|.claude-plugin/marketplace.json)
+                  marketplace_changed=true ;;
+                *)
+                  prose_changed=true ;;
+              esac
+            done
 
-            if [ "${readme_changed}" = "true" ] && [ "${marketplace_changed}" = "true" ]; then
-              parts="README badges + marketplace meta"
-            elif [ "${readme_changed}" = "true" ]; then
+            # Assembled by concatenation so the two historical subjects stay
+            # byte-identical ("README badges + marketplace meta", "README
+            # badges", "marketplace meta") while the five new files can now say
+            # so themselves.
+            parts=""
+            if [ "${readme_changed}" = "true" ]; then
               parts="README badges"
-            else
-              # Reached only when the READMEs are clean, and this whole branch
-              # runs only when at least one of the four files differs — so the
-              # marketplace half is what changed. Not a default.
-              parts="marketplace meta"
+            fi
+            if [ "${marketplace_changed}" = "true" ]; then
+              if [ -n "${parts}" ]; then
+                parts="${parts} + marketplace meta"
+              else
+                parts="marketplace meta"
+              fi
+            fi
+            if [ "${prose_changed}" = "true" ]; then
+              if [ -n "${parts}" ]; then
+                parts="${parts} + count prose"
+              else
+                parts="count prose"
+              fi
+            fi
+            if [ -z "${parts}" ]; then
+              # Unreachable: this branch runs only when some SYNC_PATHS file
+              # differs, and every differing file lands in one of the three arms
+              # above. Kept so a future refactor that breaks that invariant
+              # produces an honest vague subject instead of `sync  to vX.Y.Z`.
+              parts="release metadata"
             fi
             echo "subject=docs(release): sync ${parts} to ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "Commit subject: docs(release): sync ${parts} to ${GITHUB_REF_NAME}"
@@ -642,7 +722,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
-          git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json
+          # Named pathspecs from the job-level single source of truth — never
+          # `-A`/`-u`/`.`, which would sweep in whatever else the runner left
+          # behind (runtime/, node_modules artefacts, the vitest report).
+          # Unquoted on purpose: word-splitting is what turns one folded line
+          # into nine pathspecs.
+          git add -- ${SYNC_PATHS}
           git commit -m "${SUBJECT}"
 
           # Push with the PAT explicitly. The credential is inlined in the
@@ -855,7 +940,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
-          git add README.md plugins/artibot/README.md plugins/artibot/marketplace.json .claude-plugin/marketplace.json
+          # Named pathspecs from the job-level single source of truth — never
+          # `-A`/`-u`/`.`, which would sweep in whatever else the runner left
+          # behind (runtime/, node_modules artefacts, the vitest report).
+          # Unquoted on purpose: word-splitting is what turns one folded line
+          # into nine pathspecs.
+          git add -- ${SYNC_PATHS}
           # No [skip ci] — the badge PR needs required CI checks to run so
           # auto-merge can proceed. Adding [skip ci] would block both the push
           # AND pull_request triggers, leaving the PR permanently BLOCKED.
