@@ -20,15 +20,20 @@
  * `CLAUDE_PLUGIN_ROOT`, which `lib/core/platform.js#getPluginRoot` honours.
  * Nothing here reads or writes the real tree.
  *
- * What these tests do NOT cover: `extractFrontmatter` (exercised by the
- * validators that consume it), and whether the roots the helpers name actually
+ * `extractFrontmatter` is covered here as of 2026-09-11. It used to be left to
+ * "the validators that consume it", which is how it kept a block scalar's body
+ * out of the parse for as long as it did: every consumer checked presence, so
+ * storing the header `|` as the value passed all of them. A shared parser whose
+ * only test is a downstream presence check is untested where it matters.
+ *
+ * What these tests do NOT cover: whether the roots the helpers name actually
  * contain correct documentation — that is the gates' job, not the module's.
  *
  * @module tests/ci/ci-utils
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +43,7 @@ import {
   assertRootScanFloor,
   assertRootTreeScanFloor,
   assertScanFloors,
+  extractFrontmatter,
   gatherRepoRootDocFiles,
   gatherRepoRootTreeDocFiles,
   getPluginsDir,
@@ -419,5 +425,84 @@ describe('isProjectPluginDir / listPluginRoots', () => {
     const repo = mkdtempSync(path.join(tmpRoot, 'empty-'));
     process.env.CLAUDE_PLUGIN_ROOT = path.join(repo, 'plugins', 'artibot');
     expect(listPluginRoots()).toEqual([]);
+  });
+});
+
+describe('extractFrontmatter', () => {
+  it('returns null when the file has no frontmatter block', () => {
+    expect(extractFrontmatter('# Title\n\nname: not frontmatter\n')).toBeNull();
+  });
+
+  it('keeps an inline value verbatim, quotes included', () => {
+    const fields = extractFrontmatter('---\nname: demo\ndescription: "quoted text"\n---\n\nbody\n');
+    // Consumers compare these strings as written; stripping quotes here would
+    // silently change what every validator sees.
+    expect(fields).toEqual({ name: 'demo', description: '"quoted text"' });
+  });
+
+  it('folds a block scalar body into a single spaced string', () => {
+    const fields = extractFrontmatter(
+      '---\nname: demo\ndescription: |\n  First line.\n  Second line.\nmodel: opus\n---\n\nbody\n',
+    );
+    expect(fields.description).toBe('First line. Second line.');
+    // Folding must stop at the next column-0 key, not swallow it.
+    expect(fields.model).toBe('opus');
+  });
+
+  it('folds a block scalar body that contains blank lines', () => {
+    const fields = extractFrontmatter(
+      '---\ndescription: |\n  First para.\n\n  Second para.\nname: demo\n---\n',
+    );
+    expect(fields.description).toBe('First para. Second para.');
+    expect(fields.name).toBe('demo');
+  });
+
+  it('stores an empty block scalar body as a falsy empty string', () => {
+    // The whole point of the repair: a key with no body must not read as
+    // present. Before 2026-09-11 this was the truthy string '|'.
+    const fields = extractFrontmatter('---\nname: demo\ndescription: |\nmodel: opus\n---\n');
+    expect(fields.description).toBe('');
+    expect(Boolean(fields.description)).toBe(false);
+    expect(fields.model).toBe('opus');
+  });
+
+  it.each([['|'], ['|-'], ['|+'], ['>'], ['>-'], ['>+'], ['|2'], ['| # note']])(
+    'recognises %s as a block scalar header',
+    (indicator) => {
+      const fields = extractFrontmatter(
+        `---\ndescription: ${indicator}\n  Body text.\nname: demo\n---\n`,
+      );
+      expect(fields.description).toBe('Body text.');
+    },
+  );
+
+  it('produces the same fields for CRLF input as for LF', () => {
+    const lf = extractFrontmatter(
+      '---\nname: demo\ndescription: |\n  First line.\n  Second line.\ntokens: "~3K"\n---\n',
+    );
+    const crlf = extractFrontmatter(
+      '---\r\nname: demo\r\ndescription: |\r\n  First line.\r\n  Second line.\r\ntokens: "~3K"\r\n---\r\n',
+    );
+    expect(crlf).toEqual(lf);
+    expect(crlf.description).toBe('First line. Second line.');
+    expect(crlf.tokens).toBe('"~3K"');
+  });
+
+  it('leaves a bare key with an indented list at its existing behaviour', () => {
+    // `allowed:` carries no `|`/`>` indicator, so it is not a block scalar and
+    // folding must not claim it. Measured before and after the 2026-09-11
+    // repair: the key is absent from the result either way. Pinned so that
+    // widening the fold to bare keys cannot happen by accident — that would
+    // change what every consumer sees for list-valued keys.
+    const fields = extractFrontmatter('---\nname: demo\nallowed:\n  - one\n  - two\n---\n');
+    expect(fields.allowed).toBeUndefined();
+    expect(fields.name).toBe('demo');
+  });
+
+  it('reads the live lang-reference description as folded prose', () => {
+    const file = path.join(REAL_REPO_ROOT, 'plugins', 'artibot', 'skills', 'lang-reference', 'SKILL.md');
+    const fields = extractFrontmatter(readFileSync(file, 'utf-8'));
+    expect(fields.description.length).toBeGreaterThan(100);
+    expect(fields.description.startsWith('|')).toBe(false);
   });
 });

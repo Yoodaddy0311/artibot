@@ -3,14 +3,21 @@
  *
  * WHY THIS FILE EXISTS. The skills gate used to answer "is there a description?"
  * with a truthiness test on the parsed frontmatter. That question is not the one
- * it means to ask, because `ci-utils.js#extractFrontmatter` stores a block
- * scalar header (`description: |`) as the literal string `"|"` — a documented,
- * deliberate simplification of that parser. So a SKILL.md carrying
+ * it means to ask, because `ci-utils.js#extractFrontmatter` used to store a
+ * block scalar header (`description: |`) as the literal string `"|"` — a
+ * documented, deliberate simplification of that parser. So a SKILL.md carrying
  *
  *     description: |
  *
  * and nothing after it parsed to `{ description: '|' }`, which is truthy, and
  * the gate printed PASS. Presence of the KEY is not presence of the VALUE.
+ *
+ * That parser was repaired on 2026-09-11: it now folds a block scalar's body
+ * into the value and yields `''` for an empty body, so the truthiness test
+ * would catch this case on its own today. The checks pinned below are kept
+ * anyway — they are what states the requirement, and re-deriving it from the
+ * parser's current behaviour is how the hole reopens the next time that
+ * simplification looks harmless.
  *
  * Nothing in the live corpus was broken this way when the hole was found
  * (measured 2026-09-11: 0 skills with an empty block scalar). That is precisely
@@ -174,7 +181,9 @@ describe('empty block scalar descriptions', () => {
     // The comment used to make the header unrecognisable here while
     // `extractFrontmatter` still stored the truthy `"| # ..."`, so the skill
     // passed both checks with no description at all — the exact fail-open this
-    // file exists to close, wearing one extra token.
+    // file exists to close, wearing one extra token. Since the 2026-09-11
+    // parser repair both paths recognise this header and fold it to `''`; the
+    // pin stays because agreement between the two is the property at stake.
     const content = [
       '---',
       'name: s',

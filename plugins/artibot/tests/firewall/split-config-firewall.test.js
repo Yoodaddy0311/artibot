@@ -47,7 +47,7 @@ const config = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.js
 
 /** PRD Phase 2 가 정한 값. 바꾸려면 PRD 와 이 표를 함께 고쳐라. */
 const EXPECTED_SPLIT = Object.freeze({
-  maxWindows: 4,
+  maxWindows: 8,
   minStems: 2,
   serverEntryPaths: [],
   humanWaitReevalPct: 50,

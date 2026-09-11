@@ -46,11 +46,16 @@ const BLOCK_SCALAR_DESCRIPTION = /^description:[ \t]*([|>][0-9+-]*)[ \t]*(?:#.*)
 /**
  * Inspect a `description` written as a YAML block scalar.
  *
- * Why this exists: `ci-utils.js#extractFrontmatter` stores `description: |` as
- * the literal value `"|"` (documented as intentional at its block-scalar
- * comment). That value is truthy, so a presence check alone passes a skill
- * whose description body is empty — the gate reports green on a skill that has
+ * Why this exists: `ci-utils.js#extractFrontmatter` used to store `description: |`
+ * as the literal value `"|"` (documented as intentional at its block-scalar
+ * comment). That value is truthy, so a presence check alone passed a skill
+ * whose description body is empty — the gate reported green on a skill that had
  * no description at all. Presence of the KEY is not presence of the VALUE.
+ *
+ * Kept after that parser was repaired (2026-09-11, empty body now folds to
+ * `''`) rather than deleted as redundant: this is the check that names the
+ * requirement, and it is a second reader of the same headers, so the two going
+ * out of step becomes a visible failure instead of a silent shared blind spot.
  *
  * @param {string} content Raw SKILL.md text (CRLF tolerated).
  * @returns {{ indicator: string, empty: boolean }|null} Null when the
@@ -129,18 +134,25 @@ function validateSkill(skillsDir, dir) {
   }
 
   const errors = [];
+
+  // Determined before the presence loop so the specific diagnostic can
+  // supersede the generic one. Until 2026-09-11 these could not collide:
+  // `extractFrontmatter` stored the block header, so `description` was the
+  // truthy `"|"` and only this check fired. The parser now folds an empty body
+  // to `''`, which the presence check rejects too — and reporting both would
+  // name a single defect twice while handing the author the wrong repair, since
+  // "Missing required field" is false for a key that is present but empty.
+  const blockScalar = inspectBlockScalarDescription(content);
+  const emptyBlockDescription = Boolean(blockScalar?.empty);
+
   for (const field of REQUIRED_FIELDS) {
+    if (field === 'description' && emptyBlockDescription) continue;
     if (!frontmatter[field]) {
       errors.push(`skills/${dir}/SKILL.md - Missing required field: ${field}`);
     }
   }
 
-  // `frontmatter.description` is the block header string here, never the body,
-  // so the presence check above cannot tell an empty block from a filled one.
-  // Reported separately from "Missing required field": the two defects need
-  // different repairs, so folding them into one message would hide the second.
-  const blockScalar = inspectBlockScalarDescription(content);
-  if (blockScalar?.empty) {
+  if (emptyBlockDescription) {
     errors.push(`skills/${dir}/SKILL.md - Empty block scalar description`);
   }
 
