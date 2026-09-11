@@ -610,6 +610,238 @@ describe('blocked-patterns', () => {
     });
   });
 
+  // 종전 두 규칙은 `git\s+checkout\s+\.\s*$` 처럼 `$` 앵커였다. 그래서 점 뒤에
+  // 무엇이든 오면 L1 을 통과했다 — `git checkout -- .`(git 이 공식 문서에서
+  // 권하는 표기), `git checkout . && echo hi`, `git checkout . ; git status`
+  // 전부 approve 였고 L2(lib/autopilot/safety.js `git-checkout-discard` /
+  // `git-restore-discard`)는 같은 명령을 danger 로 봤다(executeChain 실측
+  // 2026-09-11). 이제 두 패턴은 L2 와 같은 모양이다: `-- ` 구분자를 선택으로
+  // 받고, 앵커 대신 `(?=\s|$)` 예측을 쓴다.
+  describe('git checkout/restore . (discard all changes)', () => {
+    beforeEach(() => {
+      resetGuards();
+      registerBuiltinGuards();
+    });
+
+    const decisionFor = (command) => executeChain(
+      'pre', 'Bash', { tool_name: 'Bash', tool_input: { command } },
+    ).decision;
+
+    const discards = [
+      ['git checkout .', 'git checkout . (discard all changes)'],
+      ['git restore .', 'git restore . (discard all changes)'],
+      ['git checkout -- .', 'git checkout . (discard all changes)'],
+      ['git restore -- .', 'git restore . (discard all changes)'],
+      ['git checkout . && echo hi', 'git checkout . (discard all changes)'],
+      ['git restore . ; git status', 'git restore . (discard all changes)'],
+      ['git checkout . foo', 'git checkout . (discard all changes)'],
+    ];
+
+    for (const [cmd, label] of discards) {
+      it(`should block "${cmd}" as a whole-tree discard`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.category).toBe('git');
+        expect(match.label).toBe(label);
+        // 원시 패턴 그린 !== 판정 경로 그린. 실제 경로로도 건다.
+        expect(decisionFor(cmd)).toBe('block');
+      });
+    }
+
+    // 경계: 점으로 *시작만* 하는 pathspec 은 작업 트리 전체가 아니다. `./` 가
+    // 가장 되돌아가기 쉬운 형태다 — 디렉터리 pathspec 이라 하위 디렉터리에서
+    // 실행하면 그 서브트리만 건드린다. 예측이 점 뒤의 `/` 를 거부해야 한다.
+    const scoped = [
+      'git restore -- file.js',
+      'git checkout -- .gitignore',
+      'git checkout -- ./',
+    ];
+
+    for (const cmd of scoped) {
+      it(`should not block "${cmd}"`, () => {
+        expect(BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd))).toBeUndefined();
+        expect(decisionFor(cmd)).toBe('approve');
+      });
+    }
+  });
+
+  // 종전 두 push 규칙은 `safeOverrides` 목록을 달고 있었고, 그 목록은
+  // guard-registry.js#checkDangerousCommand 에서 **명령 전체**를 상대로
+  // 대조됐다. 그래서 무검사 강제 푸시에 `--force-with-lease` 를 덧붙이기만
+  // 하면 규칙이 통째로 면제됐다 — L1 approve / L2 danger(실측 2026-09-11).
+  // 면제는 이제 패턴 안의 부정 예측이 한다. 두 규칙은 L2 의
+  // `git-force-push` / `git-force-push-short` 와 같은 모양이다.
+  describe('git push force (blind vs checked)', () => {
+    beforeEach(() => {
+      resetGuards();
+      registerBuiltinGuards();
+    });
+
+    const decisionFor = (command) => executeChain(
+      'pre', 'Bash', { tool_name: 'Bash', tool_input: { command } },
+    ).decision;
+
+    /** 이 리포의 Bash 가드가 스캔하는 리터럴이 소스에 통째로 남지 않게 조립한다. */
+    const FORCE = `--${'force'}`;
+    const LEASE = `${FORCE}-with-lease`;
+    const INCLUDES = `${FORCE}-if-includes`;
+
+    const blind = [
+      [`git push origin main ${FORCE}`, 'git push --force'],
+      [`git push ${LEASE} ${FORCE}`, 'git push --force'],
+      [`git push ${LEASE}=main ${FORCE}`, 'git push --force'],
+      [`git push -f ${LEASE}`, 'git push -f'],
+      [`git push ${LEASE} -f origin main`, 'git push -f'],
+      ['git push origin main -f', 'git push -f'],
+    ];
+
+    for (const [cmd, label] of blind) {
+      it(`should block "${cmd}" — the lease flag does not undo a blind force`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.category).toBe('git');
+        expect(match.label).toBe(label);
+        expect(decisionFor(cmd)).toBe('block');
+      });
+    }
+
+    // 과교정 방지: 검사된 강제 푸시는 원래 통과해야 하고, `-fu` 처럼 f 로
+    // 시작하는 다른 플래그 묶음도 강제 푸시가 아니다.
+    const checked = [
+      `git push ${LEASE} origin main`,
+      `git push ${INCLUDES} origin main`,
+      'git push -fu origin main',
+      'git push origin main',
+    ];
+
+    for (const cmd of checked) {
+      it(`should not block "${cmd}"`, () => {
+        expect(BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd))).toBeUndefined();
+        expect(decisionFor(cmd)).toBe('approve');
+      });
+    }
+
+    // `safeOverrides` 는 메커니즘으로 남아 있으나 소비하는 규칙이 없다.
+    // 이 단언이 깨지면 blocked-patterns.js 의 typedef 주석도 같이 고쳐야 한다.
+    it('no rule consumes safeOverrides any more', () => {
+      expect(BLOCKED_PATTERNS.filter((p) => p.safeOverrides)).toEqual([]);
+    });
+
+    // 종전 규칙은 `git\s+push\s+-f\b` 로 push 바로 뒤만 봤다. L2
+    // (lib/autopilot/safety.js `git-force-push-short`)와 같은 모양으로 맞추면
+    // `-f` 가 refspec 뒤에 와도 잡힌다 — git 이 실제로 받아들이는 표기다.
+    // 음성 쪽이 더 중요하다: `-f` **토큰**만 강제 푸시이고, 대시 하나짜리
+    // `-force`, f 로 시작하는 롱옵션, 슬래시 뒤의 `-f`, 다른 플래그가 붙은
+    // `-fu` 는 전부 강제 푸시가 아니다.
+    describe('the -f rule matches the flag token, not the letter', () => {
+      const shortForce = [
+        'git push origin main -f',
+        'git push -f origin',
+        `git push ${LEASE} -f origin main`,
+        'git push -f',
+      ];
+
+      for (const cmd of shortForce) {
+        it(`should block "${cmd}"`, () => {
+          const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+          expect(match).toBeDefined();
+          expect(match.label).toBe('git push -f');
+          expect(decisionFor(cmd)).toBe('block');
+        });
+      }
+
+      const notShortForce = [
+        // 대시 하나 — `-force` 는 `-f` 토큰이 아니다(뒤에 글자가 이어진다).
+        'git push -force origin main',
+        // f 로 시작하는 롱옵션. `\s-f` 는 두 번째 대시에서 끊긴다.
+        'git push --follow-tags origin main',
+        // 브랜치 이름 안의 `-f`. 앞이 공백이 아니라 `/` 다.
+        'git push origin feature/-f',
+        // 플래그 묶음 — `-fu` 는 `-f` 뒤에 글자가 이어지므로 예측이 거부한다.
+        'git push -fu origin main',
+        // 대시가 이어지는 형태. 꼬리 예측이 `[\w-]` 를 거부한다.
+        'git push -f-x origin',
+      ];
+
+      for (const cmd of notShortForce) {
+        it(`should not block "${cmd}"`, () => {
+          expect(BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd))).toBeUndefined();
+          expect(decisionFor(cmd)).toBe('approve');
+        });
+      }
+    });
+
+    // 리더 결정 2026-09-11 17:4x KST. 옵션 런의 문자 클래스가 `[^\n]` 이면
+    // `-f`/`--force` 가 **뒤 명령**의 것이어도 push 것으로 읽혔다. 셸 구분자를
+    // 클래스에서 빼면(`[^\n;&|]`, git-branch-delete 의 `[^\s;&|]` 와 같은 관례)
+    // 런이 구분자에서 끊겨 그 오탐이 사라진다. L2 도 같은 클래스로 간다.
+    describe('the option run stops at a shell separator', () => {
+      // `rm -f` 는 차단 형태가 아니지만 Bash 명령줄에 싣지 않는 관례를 지켜
+      // 테스트 소스 안에서만 조립한다.
+      const otherCommandsFlag = [
+        `git push origin main && ${'rm'} -f x`,
+        'git push origin main; ls -f',
+        'git push origin main | grep -f pattern file',
+      ];
+
+      for (const cmd of otherCommandsFlag) {
+        it(`should not block "${cmd}" — the -f belongs to the next command`, () => {
+          expect(BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd))).toBeUndefined();
+          expect(decisionFor(cmd)).toBe('approve');
+        });
+      }
+    });
+
+    // 리더 결정 2026-09-11 18:0x KST (L2 팀원이 찾음). 꼬리가 `(?=\s|$)` 이면
+    // 구분자가 **바로** 뒤따르는 진짜 무검사 강제 푸시를 놓친다. 꼬리를
+    // `(?![\w-])` 로 옮기면 잡힌다 — git-branch-delete·rm 규칙이 쓰는 관례다.
+    // 음성(`-fu`, `-f-x`)은 그대로 통과해야 한다: 둘 다 `-f` 토큰이 아니다.
+    describe('the -f tail rejects a trailing word char, not a separator', () => {
+      const separatorFollows = [
+        'git push origin main -f; echo done',
+        'git push origin main -f && echo done',
+        'git push -f|cat',
+      ];
+
+      for (const cmd of separatorFollows) {
+        it(`should block "${cmd}" — a separator after -f is still a force push`, () => {
+          const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+          expect(match).toBeDefined();
+          expect(match.label).toBe('git push -f');
+          expect(decisionFor(cmd)).toBe('block');
+        });
+      }
+    });
+
+    // ReDoS 창 바운드. 두 규칙의 `git push` 뒤 구간이 `[^\n]*` 이면 push 시작점
+    // 마다 줄 끝까지 되훑어 2차식이 된다. 실측(단일 정규식, node v24.15.0,
+    // 2026-09-11 18:1x KST, 3회, 입력 `'git push '` 반복 비매치, 최종 모양과
+    // 무바운드 모양을 한 프로세스에서 나란히 측정):
+    //   40,962B  unbounded  --force 129.3/149.0/165.7 ms · -f 165.6/184.8/234.6 ms
+    //   40,962B  최종       --force   5.1/  6.1/  5.2 ms · -f   5.2/  5.1/  6.4 ms
+    // 이 단언은 RED 로 먼저 걸었다: 바운드 전 실제 실패는
+    // `AssertionError: expected 243.83780000000002 to be less than 50` 이었다.
+    // L2(safety.js git-force-push 계열)도 같은 날 같은 `{0,192}` 창으로
+    // 바운드됐다. L1 은 dd 규칙에서 이미 쓰는 관례다.
+    // 이 단언이 못 보는 것: 50ms 는 2차식 복귀를 잡는 벽시계일 뿐, 192자 창이
+    // 만드는 **판정 사각**(아래 blocked-patterns.js 주석)은 잡지 못한다.
+    it('두 push 규칙은 40,962B 적대적 입력에서 50ms 미만이다', () => {
+      const input = 'git push '.repeat(4552).slice(0, 40962);
+      expect(input).toHaveLength(40962);
+
+      const pushRules = BLOCKED_PATTERNS.filter(
+        (p) => p.label === `git push ${FORCE}` || p.label === 'git push -f',
+      );
+      expect(pushRules).toHaveLength(2);
+
+      for (const rule of pushRules) {
+        const started = performance.now();
+        rule.pattern.test(input);
+        expect(performance.now() - started).toBeLessThan(50);
+      }
+    });
+  });
+
   describe('safe commands should not match', () => {
     const safeCommands = [
       'ls -la',

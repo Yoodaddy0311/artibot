@@ -16,11 +16,15 @@ const HOOK_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'permission-auto-ap
 
 /** Assembled so the literal never appears in a Bash command this repo guards. */
 const FORCE_PUSH = `git push --${'force'} origin main`;
-// 2026-09-11 교체: lease 단독(`git push --force-with-lease`)은 오너 결정 ① 이후
-// 두 정본이 **합의**한다(L1 exempt / L2 caution) — 더 이상 "한쪽만 잡는" 예시가
-// 아니다. `-f` 를 함께 실으면 L1 은 safeOverrides 로 여전히 면제하는데
-// L2 는 git-force-push-short 로 danger 를 낸다. 실측 2026-09-11.
-const LEASE_PUSH = `git push -f --${'force'}-with-lease origin main`;
+// 2026-09-11 재교체: 강제 푸시 계열은 더 이상 "L2 만 잡는" 예시가 아니다.
+// lease 단독은 오너 결정 ① 이후 두 정본이 합의하고(L1 pass / L2 caution),
+// `-f`+lease 는 같은 날 L1 의 safeOverrides 구멍이 닫히면서 두 정본 모두
+// 차단으로 합의했다 — L1 이 먼저 block 을 내므로 withheld.reason 이 L2 의
+// matchedId 가 아니라 L1 라벨이 된다. 한쪽만 잡는 예시로는 SQL 문이 남는다:
+// L1 은 `TRUNCATE TABLE/DATABASE` 형만 차단해 bare 문을 통과시키고,
+// L2 는 sql-truncate 로 danger 를 낸다(실측 2026-09-11, 파리티 매트릭스의
+// owner-decision 행과 같은 명령).
+const L2_ONLY_DANGER = `${'TRUNC'}ATE users;`;
 
 describe('matchesAllowEntry/edge cases', () => {
   it('null entry → false', () => {
@@ -160,18 +164,21 @@ describe('evaluatePermission/danger filter (pure, judge injected)', () => {
 });
 
 describe('evaluatePermission/합집합이 실제로 작동한다는 증거', () => {
-  // 측정 2026-09-11: blocked-patterns 는 --force-with-lease 가 실린 push 를
-  // safeOverrides 로 통째로 exempt 하고(-f 규칙 포함), safety.js#classifyRisk 는
-  // 같은 명령을 danger(git-force-push-short) 로 본다. 한쪽만 잡는다.
+  // 측정 2026-09-11: blocked-patterns 의 SQL 규칙은 `truncate\s+table\b` 와
+  // `(DROP|TRUNCATE)\s+(TABLE|DATABASE)` 뿐이라 키워드 없는 bare 문을
+  // approve 한다. safety.js#classifyRisk 의 sql-truncate 는 같은 문을
+  // danger 로 본다. 한쪽만 잡는다 — L1 이 통과시켜야만 이 방향이 증명된다.
   it('safety.js 만 잡는 케이스 → 보류 (blocked-patterns 는 approve)', () => {
     const out = evaluatePermission({
       toolName: 'Bash',
-      toolInput: { command: LEASE_PUSH },
+      toolInput: { command: L2_ONLY_DANGER },
       allowlist: [{ tool: '*' }],
     });
     expect(out.decision).toBeNull();
     expect(out.withheld?.kind).toBe('destructive');
-    expect(out.withheld?.reason).toContain('git-force-push');
+    // 형식은 `${matchedId}: ${reason}` (permission-auto-approve.js#defaultJudge).
+    // 접두사로 고정해 L1 라벨이 대신 실리면 바로 깨지게 한다.
+    expect(out.withheld?.reason).toMatch(/^sql-truncate: /);
   });
 
   // 측정 2026-09-11: 반대 방향. blocked-patterns 는 `dd\s+if=` 로 모든 dd 를

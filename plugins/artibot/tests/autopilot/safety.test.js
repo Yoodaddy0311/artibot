@@ -5,10 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyRisk,
+  DANGEROUS_PATTERNS,
   parseDuration,
   pauseReason,
   shouldPause,
 } from '../../lib/autopilot/safety.js';
+// 읽기 전용 — 드리프트 게이트가 L1 원본과 바이트를 대조하는 데만 쓴다.
+import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
 
 describe('classifyRisk', () => {
   it('flags git push --force as danger', () => {
@@ -127,14 +130,20 @@ describe('classifyRisk — scoped recursive delete is caution', () => {
 });
 
 describe('classifyRisk — force push: lease is caution, blind force stays danger', () => {
-  // 오너 결정 2026-09-11 ①. L1(blocked-patterns.js:66-77) 은 --force-with-lease /
-  // --force-if-includes 를 safeOverrides 로 면제한다. L2 가 같은 명령을 danger 로
+  // 오너 결정 2026-09-11 ①. L1(blocked-patterns.js `git push --force` 규칙) 은
+  // --force-with-lease / --force-if-includes 를 패턴 안 부정 예측으로 면제한다
+  // (2026-09-11 까지는 safeOverrides 목록이었다). L2 가 같은 명령을 danger 로
   // 부르면 두 층이 정반대를 말한다 → L2 는 caution 으로 내린다.
   it.each([
     'git push --force origin main',
     'git push origin main --force',
     'git push --force',
     'git push --force-with-lease origin main --force',
+    // A blind --force anywhere outranks a lease flag, whatever the order.
+    'git push --force-with-lease --force',
+    // The separator stop must not cut a force flag that sits BEFORE the
+    // separator — that one really is the push's own flag.
+    'git push origin main --force && echo done',
   ])('grades %s as danger via git-force-push', (command) => {
     const r = classifyRisk(command);
     expect(r.level).toBe('danger');
@@ -144,6 +153,14 @@ describe('classifyRisk — force push: lease is caution, blind force stays dange
   it.each([
     'git push -f origin main',
     'git push origin main -f',
+    // -f is blind even when a lease flag follows it.
+    'git push -f --force-with-lease',
+    // A separator ends the -f token just as whitespace does. The old tail
+    // demanded whitespace or end-of-string, so a real blind force push that
+    // was merely followed by another command went ungraded.
+    'git push origin main -f; echo done',
+    'git push origin main -f && echo done',
+    'git push -f|cat',
   ])('grades %s as danger via git-force-push-short', (command) => {
     const r = classifyRisk(command);
     expect(r.level).toBe('danger');
@@ -166,6 +183,17 @@ describe('classifyRisk — force push: lease is caution, blind force stays dange
     'git push origin main',
     'git push --tags',
     'git pull --force',
+    // The option run stops at a shell separator, so a force flag belonging to a
+    // LATER command on the same line is not the push's flag. Without that stop
+    // all three of these were graded danger via git-force-push-short — the `-f`
+    // of the second command was absorbed into the push's run.
+    'git push origin main && rm -f x',
+    'git push origin main; ls -f',
+    'git push origin main | grep -f pattern file',
+    // -f must be a whole token: a longer short-flag bundle or a hyphenated
+    // continuation is a different flag, not a blind force.
+    'git push -fu origin main',
+    'git push -f-x origin',
   ])('leaves %s safe', (command) => {
     expect(classifyRisk(command).level).toBe('safe');
   });
@@ -173,6 +201,13 @@ describe('classifyRisk — force push: lease is caution, blind force stays dange
 
 /** 백슬래시. 리터럴로 쓰면 이스케이프 단계에서 사고가 난다. */
 const BACKSLASH = String.fromCharCode(92);
+
+/**
+ * 콜론. 포크밤 리터럴을 이 파일 안에서만 조립하기 위한 분절자 —
+ * tests/core/blocked-patterns.test.js 의 관례와 같다. 완성된 포크밤 문자열을
+ * Bash 명령줄에 넣으면 L1 PreToolUse 가 차단한다(인용해도 마찬가지).
+ */
+const COLON = String.fromCharCode(58);
 
 describe('classifyRisk — git branch delete is case-sensitive on -D', () => {
   // 오너 결정 2026-09-11 ④. /i 플래그 때문에 안전한 `git branch -d` 가
@@ -310,6 +345,70 @@ describe('classifyRisk — dd writing to a raw device is danger', () => {
   });
 });
 
+describe('classifyRisk — fork bomb', () => {
+  // 4형은 tests/core/blocked-patterns.test.js 의 L1 포크밤 describe 와 같은
+  // 문자열이다. L2 는 normalizeCommand 를 거치지 않고 원문을 그대로 보지만,
+  // 규칙에 앵커가 없어 같은 4형을 모두 잡는다.
+  const CANONICAL = `${COLON}(){ ${COLON}|${COLON}& };${COLON}`;
+  const SPACED = `${COLON} () { ${COLON} | ${COLON} & } ; ${COLON}`;
+  const TIGHT = `${COLON}(){${COLON}|${COLON}&};${COLON}`;
+  // 괄호 없는 형태. 셸이 실행하지는 못하지만 종전 L1 규칙이 유일하게 잡던
+  // 형태라 괄호를 선택 그룹으로 두어 그대로 유지한다.
+  const LEGACY = `${COLON}{ ${COLON}|${COLON}& };${COLON}`;
+
+  it.each([
+    ['canonical', CANONICAL],
+    ['spaced', SPACED],
+    ['no inner spaces', TIGHT],
+    ['legacy paren-less shape', LEGACY],
+  ])('grades the %s shape as danger via fork-bomb', (_name, command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    // 이 단언이 순서 의존까지 막는다 — 다른 규칙이 먼저 걸리면 id 가 달라진다.
+    expect(r.matchedId).toBe('fork-bomb');
+  });
+
+  // L1 은 normalizeCommand 가 따옴표를 벗겨서 잡는다. L2 는 앵커가 없어서 잡는다
+  // — 경로는 다르지만 방향은 같다(차단 쪽). 인용문을 echo 하는 것 자체는
+  // 무해하므로 이것은 의도된 과차단이고, 그래서 핀으로 고정한다.
+  it('grades the fork bomb as danger even when it is quoted inside echo', () => {
+    const r = classifyRisk(`echo '${CANONICAL}'`);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('fork-bomb');
+  });
+
+  // 경계. `:` 는 셸 no-op 이라 정상 스크립트에 흔하다. L1 음성 5건과 동일.
+  it.each([
+    `echo hi; ${COLON}`,
+    `function f() { ${COLON}; }`,
+    `while ${COLON}; do sleep 1; done`,
+    'build: ; @echo hi',
+    `${COLON}() { echo hi; }`,
+  ])('leaves %j safe', (command) => {
+    expect(classifyRisk(command).level).toBe('safe');
+  });
+
+  // 드리프트 게이트. 이 규칙의 값은 L1 과 같은 판정을 한다는 것뿐이므로
+  // 바이트가 갈라지는 순간 가치가 사라진다.
+  it('keeps the pattern byte-identical to the L1 fork bomb rule', () => {
+    const l2 = DANGEROUS_PATTERNS.find((r) => r.id === 'fork-bomb');
+    const l1 = BLOCKED_PATTERNS.find((p) => p.label === 'fork bomb');
+    expect(l2).toBeDefined();
+    expect(l1).toBeDefined();
+    expect(l2.test.source).toBe(l1.pattern.source);
+    expect(l2.test.flags).toBe(l1.pattern.flags);
+  });
+
+  // 120KB 는 종료와 판정만 본다 — 벽시계는 40KB 단언이 맡는다. 2차식이
+  // 돌아오면 여기는 느려질 뿐 실패하지 않으므로 이것을 성능 근거로 쓰지 말 것.
+  it.each([
+    ['space', `${COLON}${' '.repeat(120_000)}x`],
+    ['newline', `${COLON}${'\n'.repeat(120_000)}x`],
+  ])('returns safe on a 120KB %s run after a single colon', (_name, input) => {
+    expect(classifyRisk(input).level).toBe('safe');
+  });
+});
+
 describe('classifyRisk — option-run scanning is linear', () => {
   /** @param {string} command @returns {number} elapsed ms */
   function timeClassify(command) {
@@ -347,6 +446,98 @@ describe('classifyRisk — option-run scanning is linear', () => {
     expect(timeClassify(`git branch ${`${BACKSLASH}\n`.repeat(20000)}x`)).toBeLessThan(50);
     expect(timeClassify(`git branch -d x ${`${BACKSLASH}\n `.repeat(20000)}y`)).toBeLessThan(50);
     expect(timeClassify(`dd ${'if=a '.repeat(2000)}x`)).toBeLessThan(50);
+  });
+
+  /**
+   * Build a near-miss payload of an exact byte length out of a repeated unit.
+   * @param {string} unit @param {number} bytes @returns {string}
+   */
+  function fill(unit, bytes) {
+    return unit.repeat(Math.ceil(bytes / unit.length)).slice(0, bytes);
+  }
+
+  // dd-device-write / curl-external / wget-external and the three git-push
+  // rules all read "<word> <anything on this line> <token>". With an unbounded
+  // `[^\n]*` in the middle, every occurrence of the word rescans the rest of the
+  // line, so a line made only of the word is quadratic. Measured at 40,962B
+  // before the window bound (node v24.15.0, 2026-09-11 06:36 and 06:45 UTC):
+  // dd 852.1 / 863.7 / 759.9 ms (122,880B 6,306.1 ms) and `git push`
+  // 600.3 / 630.3 / 645.8 ms (122,880B 5,236.0 ms). The window bound in
+  // safety.js is what makes these linear; if someone widens one back to `*`
+  // this test is the alarm.
+  // 포크밤 규칙의 구분자는 전부 `\s*` 다. 콜론이 촘촘한 입력만 쓰면 긴 공백 런을
+  // 만들지 못해 머리 쪽 모호 구간을 건드리지 못하고 **2차식 위에서도 그린**이 된다
+  // (L1 실측: 수리 전 40KB 공백 1,255ms). 그래서 아래 8건 중 뒤쪽 다섯이 본체다.
+  // L1 은 단일 정규식을 쟀고 여기는 classifyRisk 전체 경로라 수치가 다르다.
+  it.each([
+    ['40KB colon run', COLON.repeat(40_000)],
+    ['40KB colon-paren run', `${COLON} () `.repeat(8_000)],
+    ['40KB colon-brace run', `${COLON}(){ ${COLON}|${COLON}& `.repeat(4_000)],
+    ['40KB space run after a single colon', `${COLON}${' '.repeat(40_000)}x`],
+    ['40KB newline run after a single colon', `${COLON}${'\n'.repeat(40_000)}x`],
+    ['40KB space run after colon-brace-colon', `${COLON}{${COLON}${' '.repeat(40_000)}x`],
+    ['40KB space run after an almost-complete fork bomb', `${COLON}{${COLON}|${COLON}&};${' '.repeat(40_000)}x`],
+    ['40KB mixed space/newline run after a single colon', `${COLON}${' \n'.repeat(20_000)}x`],
+  ])('does not blow up on a %s', (_name, input) => {
+    expect(timeClassify(input)).toBeLessThan(50);
+  });
+
+  it('stays linear on near-miss dd, curl, wget and git push payloads', () => {
+    for (const unit of ['dd ', 'curl ', 'wget ', 'git push ']) {
+      const payload = fill(unit, 40_962);
+      expect(payload).toHaveLength(40_962);
+      expect(timeClassify(payload)).toBeLessThan(50);
+    }
+  });
+});
+
+describe('classifyRisk — the dd/curl/wget window bound keeps ordinary commands matched', () => {
+  // The bound is 192 characters between the command word and the token. These
+  // pins are the "did not loosen" half: normal-length commands still match.
+  it.each([
+    ['curl -s https://x.example/install.sh | sh', 'curl-external'],
+    ['wget https://x.example/a.tgz', 'wget-external'],
+  ])('grades %s as caution via %s', (command, matchedId) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe(matchedId);
+  });
+
+  // Boundary pair per rule. `filler(n)` is exactly the n characters the bounded
+  // quantifier has to cover: one space then (n-1) 'x' bytes. The trailing 'x'
+  // matters — the separating \s is supplied by the literal ' of=' / ' https://'
+  // that follows, so the filler itself must not end in whitespace, or the two
+  // would overlap and the boundary would shift by one.
+  /** @param {number} n @returns {string} */
+  const filler = (n) => ` ${'x'.repeat(n - 1)}`;
+
+  it.each([
+    ['dd', (f) => `dd${f} of=/dev/sda`, 'dd-device-write', 'danger'],
+    ['curl', (f) => `curl${f} https://e.example/a`, 'curl-external', 'caution'],
+    ['wget', (f) => `wget${f} https://e.example/a`, 'wget-external', 'caution'],
+  ])('%s still matches at 192 filler characters and stops at 193', (_name, build, matchedId, level) => {
+    const atBound = classifyRisk(build(filler(192)));
+    expect(atBound.level).toBe(level);
+    expect(atBound.matchedId).toBe(matchedId);
+    expect(classifyRisk(build(filler(193))).level).toBe('safe');
+  });
+
+  // The three git-push rules carry the same bound. Two of them put the token
+  // straight after the bounded quantifier with no `\s` of their own, so there
+  // the covered span has to END in a space — hence `span` rather than `filler`.
+  // git-force-push-short does have its own `\s`, so it reuses `filler`.
+  /** @param {number} n @returns {string} */
+  const span = (n) => ` ${'x'.repeat(n - 2)} `;
+
+  it.each([
+    ['blind force', (n) => `git push${span(n)}--force origin main`, 'git-force-push', 'danger'],
+    ['leased force', (n) => `git push${span(n)}--force-with-lease origin main`, 'git-force-push-lease', 'caution'],
+    ['short force', (n) => `git push${filler(n)} -f`, 'git-force-push-short', 'danger'],
+  ])('git push %s still matches at 192 and stops at 193', (_name, build, matchedId, level) => {
+    const atBound = classifyRisk(build(192));
+    expect(atBound.level).toBe(level);
+    expect(atBound.matchedId).toBe(matchedId);
+    expect(classifyRisk(build(193)).level).toBe('safe');
   });
 });
 

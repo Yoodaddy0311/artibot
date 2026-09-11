@@ -10,10 +10,10 @@
  * `rm -rf /` blocked, `rm -rf / --force-with-lease` allowed. The flag means
  * nothing to `rm`, so it costs an attacker nothing to add.
  *
- * The exemption is therefore attached to the two `git push` rules that need it
- * (`lib/core/blocked-patterns.js`) rather than living as a global list. Category
- * alone would not have been enough: `--force-with-lease` is equally meaningless
- * to `git reset --hard`, which is also in the `git` category.
+ * The exemption moved off the global list onto the two `git push` rules
+ * (`lib/core/blocked-patterns.js`); category scoping was not enough either — the
+ * flag is equally meaningless to `git reset --hard`. Since 2026-09-11 those two
+ * rules exempt via a negative lookahead, so `safeOverrides` has no consumers.
  *
  * SCOPE: this file pins the exemption's reach only. The denylist remains a
  * denylist — semantically equivalent commands (`rm -rf ~`, `find / -delete`)
@@ -169,6 +169,38 @@ const PARITY_MATRIX = Object.freeze([
     note: 'checkout . 과 동형. L2 규칙 착지 전까지 safe (RED 예상).',
   },
   {
+    command: 'git checkout -- .',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'git-checkout-discard',
+    status: 'agreed',
+    note: '`--` 구분자형 — git 공식 문서가 권하는 표기이고 파괴력은 위 행과 같다. 2026-09-11 15:5x KST 실측에서 L1 approve / L2 danger 였다: L1 규칙이 `\\.\\s*$` 앵커라 점 뒤에 무엇이든 오면 놓쳤다. L2 와 같은 `(?:--\\s+)?\\.(?=\\s|$)` 모양으로 바꿔 닫는다.',
+  },
+  {
+    command: 'git restore -- .',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'git-restore-discard',
+    status: 'agreed',
+    note: 'checkout 형과 동형. 두 규칙은 같은 모양이어야 하며, 한쪽만 고치면 이 행이 먼저 깨진다(2026-09-11 15:5x KST 실측 L1 approve / L2 danger).',
+  },
+  {
+    command: 'git checkout . && echo hi',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'git-checkout-discard',
+    status: 'agreed',
+    note: '셸 체이닝 — `&&` 로 명령을 이어붙이면 앵커가 닿지 않아 L1 을 통째로 통과했다(2026-09-11 15:5x KST 실측). 맨 줄바꿈과 달리 `&&` 는 같은 입력 안의 두 명령이고 앞 명령이 파괴적이므로 두 층 모두 잡아야 한다.',
+  },
+  {
+    command: 'echo "git checkout . is dangerous"',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'git-checkout-discard',
+    status: 'owner-decision',
+    note: '오탐 ① — 현재 값을 핀할 뿐 목표 값이 아니다. 명령을 **언급만** 해도 두 층 모두 차단한다(2026-09-11 실측 L1 block / L2 danger). 원인 둘이 겹친다: (1) 두 discard 규칙이 `\\s*$` 앵커를 버려 줄 안 어디서든 매치하고, (2) normalizeCommand 가 따옴표를 먼저 벗기므로 인용이 보호가 되지 않는다. 오너 결정 ②가 정리한 `grep -i "truncate"` 차단과 **같은 실패 양식**이다. 후보 설계 둘: 두 층에 명령 시작 앵커 `(?:^|[;&|]\\s*)` 를 달거나, 따옴표 구간을 매칭에서 제외하거나. 어느 쪽이든 한 층만 고치면 파리티가 깨지므로 동시 변경이어야 한다. Wave 7 `guard-command-position` 으로 큐에 올라가 있다. L1 을 느슨하게 해서 맞추지 말 것 — 이 행이 그 유혹을 막는다.',
+  },
+  {
     command: 'git stash drop',
     l1: 'block',
     l2: 'danger',
@@ -190,7 +222,23 @@ const PARITY_MATRIX = Object.freeze([
     l2: 'caution',
     l2Id: 'git-force-push-lease',
     status: 'owner-decision',
-    note: '오너 결정 2026-09-11 확정: L2 danger → caution. L1 정본은 lease 허용(blocked-patterns.js:64-77 rationale·safeOverrides). 여전히 agreed 가 아니다 — 헤더 방향 규칙상 L1 pass 는 L2 safe 를 요구하는데, lease 도 원격 히스토리를 다시 쓰므로 safe 로 내리지 않는다. 이 행은 그 잔여 불일치를 핀한다.',
+    note: '오너 결정 2026-09-11 확정: L2 danger → caution. L1 정본은 lease 허용(blocked-patterns.js `git push --force` 규칙의 부정 예측 `(?!-with-lease|-if-includes)` — 2026-09-11 까지는 safeOverrides 목록이었다). 여전히 agreed 가 아니다 — 헤더 방향 규칙상 L1 pass 는 L2 safe 를 요구하는데, lease 도 원격 히스토리를 다시 쓰므로 safe 로 내리지 않는다. 이 행은 그 잔여 불일치를 핀한다.',
+  },
+  {
+    command: 'git push -f --force-with-lease origin main',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'git-force-push-short',
+    status: 'agreed',
+    note: '무검사 `-f` 와 lease 플래그를 함께 실은 형태. lease 는 `-f` 가 하는 일을 되돌리지 못한다 — git 은 뒤에 오는 강제 지정을 그대로 쓴다. 2026-09-11 15:5x KST 실측에서 L1 approve / L2 danger 였다: L1 의 `safeOverrides` 가 **명령 전체**를 상대로 대조돼(guard-registry.js#checkDangerousCommand) lease 토큰 한 개가 규칙을 통째로 면제시켰다. 면제를 패턴 안의 부정 예측으로 옮겨 닫는다.',
+  },
+  {
+    command: 'git push origin main -f',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'git-force-push-short',
+    status: 'agreed',
+    note: '`-f` 가 리모트·브랜치 뒤에 오는 형태 — git 이 실제로 받아들이는 표기다. 종전 L1 규칙은 `git\\s+push\\s+-f` 로 push 바로 뒤만 봐서 놓쳤다(2026-09-11 15:5x KST 실측 L1 approve / L2 danger). 인자 순서를 바꿔 우회하는 경로를 막는다.',
   },
   {
     command: 'git reset --hard',
@@ -299,10 +347,10 @@ const PARITY_MATRIX = Object.freeze([
   {
     command: ':(){ :|:& };:',
     l1: 'block',
-    l2: 'safe',
-    l2Id: null,
-    status: 'owner-decision',
-    note: '2026-09-11 guard-normalize 줄기에서 L1 fork bomb 규칙의 빈 캡처그룹 결함을 수리해 표준형이 L1 block 이 됐으나(종전에는 `/:(){ :\\|:& };:/i` 의 `()` 가 빈 그룹이라 실제로 요구하는 문자열이 `:{ :|:& };:` 였고 표준형은 approve 였다) L2 safety.js 에는 대응 규칙이 없다(소유 밖 — DANGEROUS_PATTERNS 25규칙 중 fork/bomb 관련 0건, 14:28 KST 실측). 따라서 L1 block / L2 safe 로 헤더 방향 규칙을 채우지 못한다. L2 규칙 추가는 오너 결정 — 이 행은 그 불일치를 핀한다. L1 을 느슨하게 해서 맞추지 말 것.',
+    l2: 'danger',
+    l2Id: 'fork-bomb',
+    status: 'agreed',
+    note: '오너 결정 2026-09-11 확정: L2 에 fork-bomb 규칙 추가, L1 \'fork bomb\' 규칙과 바이트 동일(source 동일성은 tests/autopilot/safety.test.js 가 핀). 경위 — 같은 날 guard-normalize 줄기에서 L1 규칙의 빈 캡처그룹 결함을 수리해 표준형이 비로소 L1 block 이 됐고(종전에는 `()` 가 빈 그룹이라 실제로 요구하는 문자열이 `:{ :|:& };:` 였으므로 표준형은 approve 였다), 그 시점 L2 에는 대응 규칙이 0건이라(14:28 KST 실측) 이 행은 L1 block / L2 safe 불일치를 핀하는 owner-decision 이었다. L2 규칙이 착지하면서 방향 규칙을 채웠다.',
   },
   {
     command: 'npm publish',

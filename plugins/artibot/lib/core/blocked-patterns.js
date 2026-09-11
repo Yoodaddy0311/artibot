@@ -17,6 +17,13 @@
  *   `--force-with-lease` is just as meaningless to `git reset --hard`, which
  *   shares the `git` category. Add one only where the flag genuinely changes
  *   what the matched command does.
+ *   NO RULE CONSUMES THIS AS OF 2026-09-11: the two `git push` rules were its
+ *   only users and they now exempt the checked force forms with a negative
+ *   lookahead inside the pattern, which a second blind `--force` in the same
+ *   line cannot bypass. The property and the loop that reads it
+ *   (guard-registry.js#checkDangerousCommand) stay for the next rule that needs
+ *   a genuine per-rule exemption; `tests/core/blocked-patterns.test.js` pins the
+ *   zero-consumer state so this paragraph cannot rot silently.
  */
 
 /**
@@ -67,9 +74,15 @@ const BLOCKED_PATTERNS = Object.freeze([
   //   {0,192}     40KB   8.3ms · 120KB   25.7ms   ← chosen
   // WHAT THE BOUND GIVES UP: more than 192 characters between `dd` and the
   // ` of=` token (a very long image path, a pile of operands) evades THIS rule.
-  // L2 is unbounded and still grades such a command danger, so the miss is a
-  // PreToolUse gap, not a full-stack one. Do not raise the bound without
-  // re-measuring 120KB — 256 already lands at 43.6ms.
+  // THIS IS NOW A FULL-STACK BLIND SPOT, NOT A PreToolUse GAP. The sentence
+  // here used to read "L2 is unbounded and still grades such a command danger";
+  // that stopped being true on 2026-09-11, when L2 bounded `dd-device-write`
+  // (and `curl-external` / `wget-external`) to the same `[^\n]{0,192}` window —
+  // see the dd-device-write comment in lib/autopilot/safety.js. Both layers now
+  // share one window, so a command wide enough to evade this rule evades
+  // `classifyRisk` too and nothing downstream re-checks it. Do not raise the
+  // bound on one layer alone, and not without re-measuring 120KB — 256 already
+  // lands at 43.6ms.
   { pattern: /\bdd\b[^\n]{0,192}\sof=\/dev\//i, label: 'dd write to block device', category: 'disk' },
   { pattern: />\s*\/dev\/sd/i, label: 'write to disk device', category: 'disk' },
   { pattern: /format\s+[a-z]:/i, label: 'format drive (Windows)', category: 'disk' },
@@ -81,23 +94,99 @@ const BLOCKED_PATTERNS = Object.freeze([
 
   // ── Git destructive ─────────────────────────────────────────────────
   // `--force-with-lease` / `--force-if-includes` turn a blind force push into a
-  // checked one, so they exempt THESE two rules and nothing else.
+  // checked one, so they must not be blocked. The exemption lives INSIDE the
+  // first pattern as a negative lookahead, not in a `safeOverrides` list.
+  // Why it moved (measured through executeChain 2026-09-11): `safeOverrides` is
+  // tested against the WHOLE command string (guard-registry.js
+  // #checkDangerousCommand), so a single lease token anywhere in the line
+  // exempted the rule even when a blind force was also present —
+  // `git push --force-with-lease --force` and `git push -f --force-with-lease`
+  // were L1 approve while L2 graded both danger. A lookahead cannot be bypassed
+  // that way: it only exempts the `--force` occurrence it sits behind, so a
+  // second, unqualified `--force` still matches.
+  // The `-f` rule gained the same reach as L2: `git push origin main -f` puts
+  // the flag after the refspec, which git honours and `git\s+push\s+-f` missed.
+  // Both shapes are now isomorphic with lib/autopilot/safety.js
+  // (`git-force-push`, `git-force-push-short`) apart from L1's lack of a
+  // capture group.
+  // THE OPTION RUN IS `[^\n;&|]` — it stops at a newline AND at the three shell
+  // separators, the same convention the git-branch-delete rule uses with
+  // `[^\s;&|]`. Owner decision 2026-09-11 17:4x KST, applied to both layers at
+  // once. Written as `[^\n]` the run walked past a separator into the NEXT
+  // command and read its flags as the push's own, so `git push origin main &&
+  // rm -f x`, `git push origin main; ls -f` and `git push origin main | grep -f
+  // pattern file` all blocked (measured 2026-09-11). The separator class ends
+  // that class of false positive outright rather than accepting it.
+  // THE `-f` TAIL IS `(?![\w-])`, not `(?=\s|$)`. A separator directly after
+  // the flag is still a real blind force push, and the whitespace-or-end tail
+  // missed it: `git push origin main -f; echo done` and `git push -f|cat` were
+  // L1 approve / L2 safe until 2026-09-11 18:0x KST (found by the L2 side).
+  // `-fu` stays approved and `-f-x` is NOW approved — a word character or a dash
+  // after `f` means the token is not `-f`. (`-f-x` was L1 block before
+  // 2026-09-11: the old `-f\b` saw a word boundary between `f` and `-`. git
+  // rejects it as an unknown option, and L2 always graded it safe, so the two
+  // layers converge rather than L1 losing protection.)
+  // WINDOW BOUND (ReDoS). Unbounded, the run is quadratic: every `git push`
+  // start rescans to the end of the line. Measured 2026-09-11 18:1x KST (node
+  // v24.15.0, single regex, `'git push '.repeat` non-matching, 3 runs, all
+  // shapes in ONE process so the rows are comparable):
+  //          40,962B unbounded      40,962B final     9,216B unbounded  9,216B final
+  //  --force 129.3/149.0/165.7 ms   5.1/6.1/5.2 ms    10.6/10.3/9.7 ms  1.3/1.0/1.1 ms
+  //  -f      165.6/184.8/234.6 ms   5.2/5.1/6.4 ms     9.0/ 8.8/10.8 ms 1.0/1.0/1.1 ms
+  // 192 is the window the dd rule above already uses, and L2 bounded its
+  // git-force-push / -lease / -short rules to the same width on 2026-09-11, so
+  // the two layers share one number.
+  // WHAT THE BOUND GIVES UP — A FULL-STACK BLIND SPOT, NOT A PreToolUse GAP.
+  // More than 192 characters between `git push` and the force token (a pile of
+  // refspecs, a long remote URL spelled out in full) evades THESE rules, and
+  // since L2 now carries the same window it evades `classifyRisk` too. Nothing
+  // downstream re-checks it. Measured 2026-09-11 with filler between the two
+  // tokens: 192 chars -> L1 block / L2 danger; 197 chars -> L1 APPROVE and L2
+  // SAFE. Do not raise the bound on one layer alone.
+  // THE BLIND SPOT THE SEPARATOR CLASS CREATES (do not read a green suite as
+  // precision). The class cannot tell a separator that SPLITS commands from one
+  // sitting inside a quoted argument, and it stops at both. So
+  // `git push "a;b" --force` is L1 APPROVE and L2 SAFE (measured 2026-09-11):
+  // the raw variant stops the run at the `;`, and normalizeCommand strips the
+  // quotes before the second pass, so the normalized variant stops there too.
+  // Both layers carry the class, so this is full-stack. Closing it needs real
+  // quote-aware tokenization on both layers, not a wider class.
   {
-    pattern: /git\s+push\s+.*--force(?!-with-lease)/i,
+    pattern: /\bgit\s+push\b[^\n;&|]{0,192}--force(?!-with-lease|-if-includes)\b/i,
     label: 'git push --force',
     category: 'git',
-    safeOverrides: [/--force-with-lease/i, /--force-if-includes/i],
   },
   {
-    pattern: /git\s+push\s+-f\b/i,
+    pattern: /\bgit\s+push\b[^\n;&|]{0,192}\s-f(?![\w-])/i,
     label: 'git push -f',
     category: 'git',
-    safeOverrides: [/--force-with-lease/i, /--force-if-includes/i],
   },
   { pattern: /git\s+reset\s+--hard/i, label: 'git reset --hard', category: 'git' },
   { pattern: /git\s+clean\s+-\w*f/i, label: 'git clean -f', category: 'git' },
-  { pattern: /git\s+checkout\s+\.\s*$/i, label: 'git checkout . (discard all changes)', category: 'git' },
-  { pattern: /git\s+restore\s+\.\s*$/i, label: 'git restore . (discard all changes)', category: 'git' },
+  // These two used to end in `\.\s*$`. The anchor meant anything after the dot
+  // let the command through: `git checkout -- .` (the separator form git's own
+  // documentation recommends), `git checkout . && echo hi`, `git checkout . ;
+  // git status` and `git checkout . foo` were all L1 approve while L2
+  // (`git-checkout-discard` / `git-restore-discard`, lib/autopilot/safety.js)
+  // graded every one of them danger — measured through executeChain on
+  // 2026-09-11. The shapes below are byte-identical to L2 apart from L2's
+  // leading `\b`. The `(?=\s|$)` lookahead is what keeps the scoped pathspecs
+  // out: `git checkout -- ./` and `git checkout -- .gitignore` still pass,
+  // because a `/` or a word character after the dot is not the whole tree.
+  // NOTE the reach this buys: the rule is no longer confined to the last line,
+  // so `git checkout .` followed by a newline and another command now blocks
+  // (it did not before). That is the L2 verdict, and the pin moved with it in
+  // tests/core/guard-registry.test.js.
+  // AND THE OVER-BLOCK THAT COMES WITH IT: dropping the anchor also lets the
+  // rule fire on PROSE that merely quotes the command —
+  // `echo "git checkout . is dangerous"` is newly L1 block (approve before,
+  // measured 2026-09-11; normalizeCommand strips the quotes first, so the
+  // quoting does not protect it). This is the same failure mode as the
+  // `grep -i "truncate"` block that owner decision ② cleaned up, and L2 has
+  // carried it since its own rule landed. Fixing it means requiring a command
+  // position on BOTH layers, not loosening this one.
+  { pattern: /git\s+checkout\s+(?:--\s+)?\.(?=\s|$)/i, label: 'git checkout . (discard all changes)', category: 'git' },
+  { pattern: /git\s+restore\s+(?:--\s+)?\.(?=\s|$)/i, label: 'git restore . (discard all changes)', category: 'git' },
   // Owner decision 2026-09-11 ④. Kept byte-identical to the `git-branch-delete`
   // rule in lib/autopilot/safety.js — the two layers judge the same shapes, and
   // a drift between them is exactly what this decision was cleaning up.
