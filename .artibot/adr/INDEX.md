@@ -32,5 +32,6 @@
 | 008 | lib/orchestration/ 휴면 828줄 처분 | active | 2026-08-26 | ← `ADR-003`(루트 `docs/adr/`) | [`ADR-008-lib-orchestration-휴면-828줄-처분.md`](./ADR-008-lib-orchestration-휴면-828줄-처분.md) |
 | 009 | team.worktreeIsolation orphan 설정 삭제 | active | 2026-08-26 | ← `ADR-004`(루트 `docs/adr/`) | [`ADR-009-team-worktreeisolation-orphan-설정-삭제.md`](./ADR-009-team-worktreeisolation-orphan-설정-삭제.md) |
 | 010 | merge-tree 사전 충돌 탐지 소유권 — lib/git/merge-preflight.js 로 승격해 /git worktree check 와 /split integrate 양쪽이 소비 | active | 2026-08-26 | ← `ADR-005`(루트 `docs/adr/`) | [`ADR-010-merge-tree-사전-충돌-탐지-소유권-lib-git-merge-preflight-js-로-승격해-git-worktree-check-와-split-integrate-양쪽이-소비.md`](./ADR-010-merge-tree-사전-충돌-탐지-소유권-lib-git-merge-preflight-js-로-승격해-git-worktree-check-와-split-integrate-양쪽이-소비.md) |
+| 011 | linked worktree 원장 위치 — StateStore 와 같은 git-common-dir 동거(안 a) | active | 2026-09-11 | — | [`ADR-011-worktree-ledger-store.md`](./ADR-011-worktree-ledger-store.md) |
 
-총 10 건. `ageDays` 열은 두지 않는다 — 정적 파일에 적힌 경과일은 쓰는 순간 낡는다.
+총 11 건. `ageDays` 열은 두지 않는다 — 정적 파일에 적힌 경과일은 쓰는 순간 낡는다.
