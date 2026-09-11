@@ -137,10 +137,65 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   //   git push  unbounded 600.3 / 630.3 / 645.8 ms · 120KB 5,236.0 ms
   //   git push  {0,192}    15.7 /  16.5 /  13.8 ms · 120KB    41.5 ms
   // (the `git push` rows are the cost of all three git-push rules together)
-  // The convention is < 50 ms because bash-risk-guard.js runs inside a 5s
-  // PreToolUse hook; the same bound and the same reasoning are in
-  // lib/core/blocked-patterns.js on L1's twin dd rule. 120KB already sits
-  // close to that convention, so treat it as the ceiling, not as headroom.
+  // HOW LINEARITY IS GATED (convention, revised 2026-09-11). The convention was
+  // a flat "< 50 ms" wall clock until 2026-09-11, chosen because
+  // bash-risk-guard.js runs inside a 5s PreToolUse hook. That single number was
+  // doing two incompatible jobs: tight enough to catch a quadratic regression,
+  // loose enough never to flake. It failed at both — a `< 50` assertion landed
+  // at 50.54 ms on a Windows runner, and 120KB already sat close enough to 50
+  // that the margin was noise. The bound is now three layers, in order of
+  // authority:
+  //   (i)   THE CANONICAL GATE IS A STATIC SCAN OF THE REGEX SOURCE
+  //         (tests/autopilot/safety.test.js, describe 'ReDoS 정적 스캔').
+  //         It walks every rule in this catalogue AND in
+  //         lib/core/blocked-patterns.js and fails on an unbounded run — a `.`
+  //         or a negated class quantified past the ceiling ALLOWED FOR THAT
+  //         RULE that can match whitespace. The default ceiling is 192 and the
+  //         rm pair is registered at 512 (`WINDOW_CEILING_OVERRIDES`); a rule
+  //         that is not registered fails the moment it goes past 192, so a NEW
+  //         rule cannot ship a wide window unnoticed. An earlier draft used one
+  //         global ceiling of 512 and was fail-open: widening `wget-external`
+  //         to 512 left the scan GREEN and only the boundary pair caught it
+  //         (measured 2026-09-11). The registration is a permission to exceed
+  //         192, not a statement of exact width. Exact widths are pinned by
+  //         boundary pairs, and a third assertion checks that every windowed
+  //         rule HAS one, so the three do not overlap: scanner = permission to
+  //         exceed 192, boundary pair = exact width, completeness assertion =
+  //         no rule missing a pair. If any two disagree, that RED is correct;
+  //         do not edit the list to match.
+  //         COVERAGE WAS NOT SYMMETRIC BETWEEN THE LAYERS, AND NOW IS.
+  //         Audited 2026-09-11: L1 had exact-width pins for 4 of its 7 windowed
+  //         rules — `dd write to block device` and the two `git push` rules had
+  //         none, so widening any of the three inside the ceiling would have
+  //         gone unnoticed on both layers. Closed the same day: the BOUNDARY
+  //         table in tests/core/blocked-patterns.test.js now carries 7 rows
+  //         (match at the width, miss one past it) plus its own completeness
+  //         assertion. Both layers now pin every windowed rule, and both have a
+  //         completeness assertion, so neither can gain a rule with a window
+  //         and no pin. The lesson survives the fix: a claim like "the boundary
+  //         pairs catch it" is true only of the catalogue it was measured on —
+  //         check the other layer before repeating it repo-wide.
+  //         No wall clock, so no flake. Read the "못 보는 것" list next to that
+  //         scanner before treating a green scan as proof of anything.
+  //   (ii)  40,962B wall clock is a `< 200 ms` SMOKE bound only. It catches a
+  //         blow-up, not a slow drift.
+  //   (iii) ONE growth gate: t(122,880) < 18 x t(20,480), 3-run medians, 4 ms
+  //         floor. Adjacent 2x spans were inside the noise band (40,962/20,480
+  //         up to 3.39, 122,880/40,962 up to 3.85 measured 2026-09-11 over
+  //         7 rules x 10 runs), which overlaps or crowds the 3.0 / 4.5
+  //         thresholds an earlier draft used. The 6x span separates noise
+  //         (<= 8.44) from the quadratic signal (34-41, against the 6^2 = 36
+  //         a quadratic predicts), so 18 sits in the empty gap between them.
+  //         Ratios are near-invariant to machine speed, which is why they, not
+  //         the absolute numbers, carry the verdict.
+  // 122,880B IS NOT ASSERTED as a wall clock. Its measurements live in the
+  // tables in this comment instead, and they are 3-run figures: a single dd run
+  // hit 56.2 ms once in 5 on 2026-09-11, which is exactly the kind of tail a
+  // flat threshold turns into a flaky gate. Re-measure 120KB whenever the
+  // window, the separator class, or a preprocessing step (guard-registry.js
+  // #normalizeCommand) changes — the tables above go stale silently otherwise.
+  // The same 192 window and the same reasoning are in
+  // lib/core/blocked-patterns.js on L1's twin dd rule.
   // WHAT THE BOUND GIVES UP — do not read a green suite as coverage for these:
   // more than 192 characters between the command word and the token evades the
   // rule entirely. For dd/curl/wget the token is ` of=/dev/` or ` http(s)://`,
