@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.59.0] — 2026-09-11
+
 ### 위험 분류기 2층(L1 `blocked-patterns.js` · L2 `autopilot/safety.js`) 규칙 4건 — 오너 결정 2026-09-11
 
 **행동 변화 고지.** ① `git push --force-with-lease` / `--force-if-includes` 가 danger 에서 **caution** 으로 내려간다 — PreToolUse 에서 차단되지 않고 경고 1줄만 남는다(L1 은 원래부터 면제했다). 무검사 `--force` 와 `-f` 는 danger 그대로. ② 명령 어디든 `TRUNCATE` 라는 **단어**가 있으면 차단하던 규칙이 **SQL 문 형태**를 요구하도록 좁혀진다 — `grep -n -i "truncate\|force-with-lease" file` 같은 명령이 더 이상 막히지 않는다(2026-09-11 실제로 막혔다). ③ `dd … of=/dev/…` 가 L2 danger 로 새로 잡힌다(L1 은 이미 차단 중이었고 L2 만 safe 였다). ④ 안전한 `git branch -d` / `--delete` 가 **두 층 모두에서** 통과한다 — 양쪽 규칙의 `/i` 플래그가 `-D` 와 `-d` 를 같은 것으로 봐서 실제로 작업이 막혔다. 반대로 `--delete --force` · `-fd`/`-df` · `-q -D` · `-Dv` · **인수 뒤에 플래그가 오는 형태(`git branch -d topic -f` · `git branch topic -D`)** 는 새로 차단된다(종전에는 두 층 다 통과시켰고, git 은 이 형태를 실제로 실행한다). `GIT branch -D` 처럼 명령어만 대문자인 형태도 계속 차단된다.

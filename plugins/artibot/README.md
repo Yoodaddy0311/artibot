@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.58.0-blue?style=flat-square)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.59.0-blue?style=flat-square)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](./tests/)
@@ -223,7 +223,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 
 | Field | Default | Purpose |
 |---|---|---|
-| `version` | `4.58.0` | Synced across plugin.json / package.json / artibot.config.json |
+| `version` | `4.59.0` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `permissions.autoApprove` | `[]` | PermissionRequest allowlist `{tool, commandPattern}` (not the `settings.json` allowlist). A matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive/unjudgeable commands fall back to the normal prompt |
 | `updateCheck.enabled` | `true` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` wins over config. Off = no network call, no cache write |
