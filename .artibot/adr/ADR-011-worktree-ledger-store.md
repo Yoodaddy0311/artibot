@@ -12,7 +12,7 @@ number: 11
 
 ## Status
 
-Accepted — 2026-09-11, 오너 결정 4건(리더 경유, 2026-09-11) 반영: ① 이 줄기(W5-b)는 `ledger.jsonl` 만 옮긴다 — `spawns.ndjson` 은 다음 웨이브 W5-b-6 ② 구파일 `ledger.jsonl.pre-adr011` 보존, 삭제는 v4.60.0 릴리스 태그 뒤 릴리스 체크리스트 항목 ③ 훅 지연 임계치 없음 — `hook-latency.mjs --n 20` base/HEAD 슬롯별 p50 보고만 ④ 설계 정본 §3.6 리터럴 개정 승인. 초안은 split 창 `doctor-project-name` 의 architect 정찰(읽기 전용, 코드·커밋 0)이 썼다. 착지 순서는 **W5-a(project name) → 이 ADR(W5-b B0) → W5-b 코드(B1~B5)**. 브리프 초안 `.artibot/split/worktree-ledger-store/brief-draft.md`(85줄, 01:19~01:30 KST)와 리더 실측(14:22 KST)을 입력으로 받아 인용을 재검증했다(§0). 착지 창 재검증(2026-09-11 B0)은 §0 표 0-14~0-19 행.
+Accepted — 2026-09-11, 오너 결정 4건(리더 경유, 2026-09-11) 반영: ① 이 줄기(W5-b)는 `ledger.jsonl` 만 옮긴다 — `spawns.ndjson` 은 다음 웨이브 W5-b-6 ② 구파일 `ledger.jsonl.pre-adr011` 보존, 삭제는 v4.60.0 릴리스 태그 뒤 릴리스 체크리스트 항목 ③ 훅 지연 임계치 없음 — `hook-latency.mjs --n 20` base/HEAD 슬롯별 p50 보고만 ④ 설계 정본 §3.6 리터럴 개정 승인. 초안은 split 창 `doctor-project-name` 의 architect 정찰(읽기 전용, 코드·커밋 0)이 썼다. 착지 순서는 **W5-a(project name) → 이 ADR(W5-b B0) → W5-b 코드(B1~B5)**. 브리프 초안(85줄, 01:19~01:30 KST; 리더 핸드오프에 보존, 미추적 split 폴더 산출물이라 여기서는 경로를 인용하지 않는다)와 리더 실측(14:22 KST)을 입력으로 받아 인용을 재검증했다(§0). 착지 창 재검증(2026-09-11 B0)은 §0 표 0-14~0-19 행.
 
 ---
 
@@ -192,7 +192,7 @@ F3 되돌림. 설계가 "측정한 실패"(`state-manager.js` 헤더 :18-26)로 
 
 0. **전제**: W5-a 착지, W5-b 코드가 릴리스·**설치본 갱신 완료**(훅은 설치본에서 돈다), split 창 전부 닫힘(`git worktree list` = master 1건). 설치본 `event-writer.js` 에 `store-location` import 가 있는지 grep 으로 확인.
 1. **백업**: 메인 원장 + 살아있는 worktree 원장 전부를 스크래치로 복사, 각 행수·sha256 기록(이 시점 재측정 — 14:22 값 346/6/4/5 는 낡는다).
-2. **병합 스크립트**(ASCII `.mjs`, 파일 경유 실행): 대상 `<commonDir>/artibot/ledger.jsonl` 이 **이미 있으면 중단**(fail-closed, 오너 판단). 메인 → worktree 순, 원문 행 그대로(재직렬화·정렬 없음, 빈 줄 제거). W5-b 드라이런 스크립트: `<worktree>/.artibot/split/worktree-ledger-store/migrate-ledger.mjs`(미추적, `.gitignore:93`), sha256 `3379aa6fb3d7bc0c668a0955654ccd7885a6335eb524cc7e86e752a7ebecca12` — 인터페이스 `--main <f> [--worktree <f>...] --out <f> [--report <json>]`, exit 0/1/2/3(선존재)/4(행수 불일치, 출력 삭제). 드라이런 실측(2026-09-11 06:45Z, investigator 독립 재현): 메인+worktree 5 = 384행 Σ 일치, 출력 sha256 `3bb1aee4…`, `loss.duplicate` 0, 선존재 재실행 exit 3. 실 이관 시점에 `plugins/artibot/scripts/` 로 승격 + direct-run-guard 적용 여부는 리더 결정(이 줄기 밖).
+2. **병합 스크립트**(ASCII `.mjs`, 파일 경유 실행): 대상 `<commonDir>/artibot/ledger.jsonl` 이 **이미 있으면 중단**(fail-closed, 오너 판단). 메인 → worktree 순, 원문 행 그대로(재직렬화·정렬 없음, 빈 줄 제거). W5-b 드라이런 스크립트: `plugins/artibot/scripts/ledger/migrate-ledger-adr011.mjs`(추적; 드라이런 시점 원본 sha256 `3379aa6fb3d7bc0c668a0955654ccd7885a6335eb524cc7e86e752a7ebecca12`, 승격 시 헤더 문단 추가 + `node:fs` named import 정렬 1줄(`sort-imports` 게이트) + USAGE 파일명 갱신, 로직 무수정, 동반 테스트 `tests/ledger/migrate-ledger-adr011.test.js`) — 인터페이스 `--main <f> [--worktree <f>...] --out <f> [--report <json>]`, exit 0/1/2/3(선존재)/4(행수 불일치, 출력 삭제). 드라이런 실측(2026-09-11 06:45Z, investigator 독립 재현): 메인+worktree 5 = 384행 Σ 일치, 출력 sha256 `3bb1aee4…`, `loss.duplicate` 0, 선존재 재실행 exit 3. 승격은 land citations 게이트(미추적 경로 인용 금지) 때문에 이 줄기에서 선행했다(리더 결정 2026-09-11 17:1x); direct-run-guard 적용 완료.
 3. **검증**: 결과 행수 = Σ 입력 비공백 행수. `readLedgerCensus(mainRoot)` 의 `loss.duplicate` 보고(0 기대, 아니면 그대로 보고). 메인 루트와 worktree 루트 1곳(새로 하나 만들어) 에서 Check 8: `ledger-subset-violation` 0, 두 `census.file.path` 동일. 결과를 NEXT-SESSION 에 시각과 함께 기록.
 4. **구파일**: `ledger.jsonl.pre-adr011` 로 개명(삭제 금지, 보존 기간은 ⑤).
 5. **라이브 확인**: 메인 창 1 + worktree 창 1 에서 사람이 프롬프트 1개씩 → 공유 파일에 session_id 2종, `mission.candidate_deferred` 또는 `mission.created` 각 1 이상, Check 8 위반 0, Check 10 결과(`pass`/`warn`/`unmeasured`) 명시.
