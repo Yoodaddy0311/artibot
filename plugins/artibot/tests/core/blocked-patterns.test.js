@@ -28,9 +28,14 @@ const medianMs = (fn, runs = 3) => {
 const filler = (unit, size) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
 
 /**
- * 비율 단언의 바닥값(ms). 분모가 서브밀리초로 내려가면 타이머 해상도만으로
- * 비율이 튄다(포크밤 공백 런 20,480B 가 0.24~0.52ms — 이 구간에서 120/20 이
- * 잡음만으로 11.4까지 갔다). 그 구간에서는 비율 대신 이 절대 허용치를 쓴다.
+ * 비율 단언의 감쇠항(ms). 분자·분모에 **함께** 더해 서브밀리초 구간의 타이머
+ * 잡음을 눌러 준다(포크밤 공백 런 20,480B 가 0.24~0.52ms — 이 구간에서
+ * 120/20 이 잡음만으로 11.4까지 갔다).
+ *
+ * 종전에는 `max(18·t20, 4)` 형태의 **절대 캡**이었다. 그 형태는 t20 이
+ * 0.22ms 미만일 때만 캡이 발동해서, 정작 흔한 1~5ms 구간에는 아무 완충이
+ * 없었다. L2 정적 스캔 쪽과 공식을 통일하면서 시프트 형태로 바꿨다
+ * (검수 제안, 오너 승인 2026-09-11).
  */
 const RATIO_FLOOR_MS = 4;
 
@@ -47,15 +52,32 @@ const RATIO_FLOOR_MS = 4;
  * 임계 18은 잡음 상한의 2.1배이자 신호 하한의 절반 — 양쪽으로 2배 여유다.
  * 분모를 10,240B 로 내리지 마라. 회차 간 흔들림이 커서 분모로 못 쓴다.
  *
- * 이 단언이 못 보는 것: 창을 {0,100000} 으로 키우면 세 시점이 함께 느려질 뿐
- * 비율은 그대로다. 그건 소스 구조 단언이 잡는다 — 둘은 서로를 대체하지 않는다.
+ * 공식은 `(t120 + 4) / (t20 + 4) < 18` — 감쇠항을 **양쪽에** 더한 시프트형이다
+ * (`RATIO_FLOOR_MS` 참조). 바운드된 6규칙의 최악 여유가 실측으로 늘었다
+ * (2026-09-11 22:34, 규칙당 10회):
+ *   규칙                   생비율 최악(여유)     감쇠 최악(여유)
+ *   rm -rf / rm -fr        8.50 (2.12x) / 7.53 (2.39x)   4.36 (4.13x) / 4.22 (4.26x)
+ *   dd / curl / wget       7.81 (2.30x) / 6.31 (2.85x) / 6.69 (2.69x)
+ *                          4.43 (4.06x) / 3.24 (5.55x) / 3.11 (5.78x)
+ *   git push --force       9.22 (1.95x)                  2.91 (6.19x)
+ * 실제 회귀는 그대로 잡는다 — 바운드 전 모양을 메모리에서 되살려 잰 값:
+ *   rm -rf 31.2 · curl 35.8 · dd 35.6 · git push 30.2  (전부 임계 18 초과 = RED)
+ *
+ * 이 단언이 못 보는 것 (둘 다 다른 단언이 맡는다):
+ *  1. 창을 {0,100000} 으로 키우면 세 시점이 함께 느려질 뿐 비율은 그대로다.
+ *     → 소스 구조 단언(`toBe(width)`)이 잡는다.
+ *  2. **감쇠항이 만드는 사각**: 순수 2차식(36배)이라도 `t20` 이 3.78ms 미만이면
+ *     `(36t+4)/(t+4) < 18` 이라 통과한다. 지금 바운드된 규칙 중 dd(t20≈112ms
+ *     불량 시)·rm·curl 은 회귀하면 t20 이 그 위로 올라가므로 실측상 잡히지만,
+ *     원래 아주 빠른 규칙이 2차식이 되면 여기서는 조용하다. 그 구간은 절대값이
+ *     수십 ms 라 예산 위협이 아니어서 의도적으로 감수한 교환이다.
  * @param {(size: number) => string} makeInput 크기별 입력 생성기
  * @param {(input: string) => unknown} run 측정 대상 호출
  */
 const expectSubQuadratic = (makeInput, run) => {
   const t20 = medianMs(() => run(makeInput(20480)));
   const t120 = medianMs(() => run(makeInput(122880)));
-  expect(t120).toBeLessThan(Math.max(t20 * 18, RATIO_FLOOR_MS));
+  expect((t120 + RATIO_FLOOR_MS) / (t20 + RATIO_FLOOR_MS)).toBeLessThan(18);
 };
 
 describe('blocked-patterns', () => {
@@ -552,7 +574,12 @@ describe('blocked-patterns', () => {
       expect(rule.pattern.source).not.toContain('[^\\n]*');
       const bound = rule.pattern.source.match(/\[\^\\n\]\{0,(\d+)\}/);
       expect(bound).not.toBeNull();
-      expect(Number(bound[1])).toBeLessThanOrEqual(256);
+      // 종전 `≤256` 은 상한이라 192 → 256 확대를 못 잡았다. 정확값으로 바꾼다
+      // (오너 지시 2026-09-11). 같은 폭을 'window bounds' describe 의
+      // BOUNDARY 테이블도 핀하므로 이 숫자는 의도된 중복이다 — dd 규칙 옆에
+      // 폭이 보이는 편이 읽는 사람에게 낫다는 판단. 둘이 어긋나면 두 곳이
+      // 동시에 RED 가 되므로 조용히 갈라지지는 않는다.
+      expect(Number(bound[1])).toBe(192);
     });
 
     // 120KB 는 종료·정확성만 본다(시간 단언 없음). 무한 창이 돌아오면 여기는
@@ -612,9 +639,20 @@ describe('blocked-patterns', () => {
     // 창 밖은 **해당 규칙의 pattern.test** 로만 단언한다. 전체 경로 판정은
     // 아래 사각지대 핀이 따로 본다 — rm 은 다른 규칙이 받아내고 파이프는
     // 받아내는 규칙이 없다.
+    // 이 테이블이 **창 폭의 정본**이다. 아래 완결성 단언이 이 라벨 집합과
+    // 카탈로그의 바운드 규칙 집합이 같은지 보므로, 창을 단 규칙이 여기
+    // 빠지면 RED 다.
+    // 필러 주의 — 규칙마다 창 앞뒤 토큰이 다르다. `dd`·`git push` 는 뒤에
+    // 단어경계(`\b`)가 있어 필러가 단어문자로 시작하면 규칙 자체가 발화하지
+    // 않는다(창 폭과 무관한 거짓 miss). 그래서 필러를 공백으로 연다.
+    // git push 창은 `[^\n;&|]` 라 세미콜론·앰퍼샌드·파이프가 들어가면 런이
+    // 끊긴다 — 필러는 `x` 만 쓴다.
     const BOUNDARY = [
       ['rm -rf with path', 512, (n) => `rm -rf ${'a'.repeat(n - 1)}/x`],
       ['rm -fr with path', 512, (n) => `rm -fr ${'a'.repeat(n - 1)}/x`],
+      ['dd write to block device', 192, (n) => `dd ${'x'.repeat(n - 1)} of=/dev/sda`],
+      ['git push --force', 192, (n) => `git push ${'x'.repeat(n - 1)}${`--${'force'}`}`],
+      ['git push -f', 192, (n) => `git push ${'x'.repeat(n - 1)} -f`],
       ['curl pipe to interpreter', 192, (n) => `curl ${'a'.repeat(n)}|sh`],
       ['wget pipe to interpreter', 192, (n) => `wget ${'a'.repeat(n)}|sh`],
     ];
@@ -625,6 +663,39 @@ describe('blocked-patterns', () => {
 
     it.each(BOUNDARY)('%s stops matching one char past %d', (label, width, make) => {
       expect(ruleFor(label).pattern.test(make(width + 1))).toBe(false);
+    });
+
+    /**
+     * 완결성 메타 단언 — **폭을 복제하지 않는다. 누락만 잡는다.**
+     * 정확한 창 폭의 정본은 위 `BOUNDARY` 테이블 하나이고 여기에는 숫자가
+     * 없다. 이 단언이 보는 것은 오직 "창을 가진 규칙 중 경계 쌍이 없는 게
+     * 있는가"다.
+     *
+     * 왜 필요한가(2026-09-11 실측): 창 확대는 **순수 superset 변경**이라
+     * 기존 양성·음성 테스트로는 원리적으로 안 잡힌다 — 짧은 명령의 판정은
+     * 폭과 무관하기 때문이다. 오직 "창 밖 miss" 단언만이 잡는다. 그런데 이
+     * 파일이 핀하던 규칙은 4개였고 `dd write to block device`,
+     * `git push --force`, `git push -f` 3건은 경계 쌍이 **없었다**. B 의
+     * 정적 스캔은 상한만 보므로(safety.test.js `WINDOW_CEILING_DEFAULT` 192
+     * + `WINDOW_CEILING_OVERRIDES` — 당시엔 전역 `SCAN_WINDOW_MAX` 512) 그 3건을
+     * 상한 안에서 넓히면 양층 어디서도 RED 가 나지 않았다.
+     *
+     * 역할 분담(셋은 서로를 대체하지 못한다):
+     *   정적 스캔  — 상한 초과 · `.*` 무한 런 (양 카탈로그 전수)
+     *   경계 쌍    — 규칙별 **정확** 폭 (정본)
+     *   이 단언    — 경계 쌍 **누락 0** (신규 규칙에 fail-closed)
+     *
+     * 이 단언이 못 보는 것: 폭이 맞는지는 안 본다. 라벨이 테이블에 있기만
+     * 하면 통과한다 — 값은 경계 쌍이 본다. 그리고 카탈로그 밖 정규식은
+     * 범위 밖이다(예: lib/security/human-gates.js).
+     */
+    it('every bounded rule has a boundary-pair entry (no silent new window)', () => {
+      const bounded = BLOCKED_PATTERNS
+        .filter((p) => /\[\^[^\]]*\]\{0,\d+\}/.test(p.pattern.source))
+        .map((p) => p.label)
+        .sort();
+      const pinned = BOUNDARY.map(([label]) => label).sort();
+      expect(bounded).toEqual(pinned);
     });
 
     // rm 창이 정말 512 인지 — 192 로 되돌아가면 여기서 빨간불이 난다.
@@ -699,15 +770,12 @@ describe('blocked-patterns', () => {
     // 상한은 규칙군마다 다르다. rm 은 경로를 재므로 512, 파이프는 옵션·URL 을
     // 재므로 192 — 각각 **자기 폭으로 정확히** 단언한다. 공통 상한(예: 둘 다
     // ≤512)으로 뭉뚱그리면 파이프 창이 조용히 넓어져도 통과한다.
-    it.each([
-      ['rm -rf with path', 512],
-      ['rm -fr with path', 512],
-      ['curl pipe to interpreter', 192],
-      ['wget pipe to interpreter', 192],
-    ])('%s bounds its run to exactly %d instead of scanning to end of line', (label, width) => {
+    // 폭은 `BOUNDARY` 에서 가져온다 — 숫자를 여기 다시 적으면 정본이 둘이 되고,
+    // 둘이 어긋나면 어느 쪽이 맞는지 알 수 없게 된다.
+    it.each(BOUNDARY)('%s bounds its run to exactly %d instead of scanning to end of line', (label, width) => {
       const { source } = ruleFor(label).pattern;
       expect(source).not.toContain('.*');
-      const bound = source.match(/\[\^\\n\]\{0,(\d+)\}/);
+      const bound = source.match(/\[\^[^\]]*\]\{0,(\d+)\}/);
       expect(bound).not.toBeNull();
       expect(Number(bound[1])).toBe(width);
     });

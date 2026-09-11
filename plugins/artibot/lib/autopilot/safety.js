@@ -149,15 +149,32 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   //         (tests/autopilot/safety.test.js, describe 'ReDoS 정적 스캔').
   //         It walks every rule in this catalogue AND in
   //         lib/core/blocked-patterns.js and fails on an unbounded run — a `.`
-  //         or a negated class quantified past the CEILING that can match
-  //         whitespace. The ceiling is 512, the widest window any rule actually
-  //         uses: L1's two rm rules carry `{0,512}` for MAX_PATH headroom
-  //         (leader decision 2026-09-11), while dd, the wget/curl pipe rules
-  //         and the git-push rules stay at 192. The scanner checks ONLY that
-  //         ceiling; the exact width each rule carries is pinned separately by
-  //         the boundary pairs (192/193 here, 512/513 in
-  //         tests/core/blocked-patterns.test.js), so a rule silently widening
-  //         from 192 to 512 fails there, not here.
+  //         or a negated class quantified past the ceiling ALLOWED FOR THAT
+  //         RULE that can match whitespace. The default ceiling is 192 and the
+  //         rm pair is registered at 512 (`WINDOW_CEILING_OVERRIDES`); a rule
+  //         that is not registered fails the moment it goes past 192, so a NEW
+  //         rule cannot ship a wide window unnoticed. An earlier draft used one
+  //         global ceiling of 512 and was fail-open: widening `wget-external`
+  //         to 512 left the scan GREEN and only the boundary pair caught it
+  //         (measured 2026-09-11). The registration is a permission to exceed
+  //         192, not a statement of exact width. Exact widths are pinned by
+  //         boundary pairs, and a third assertion checks that every windowed
+  //         rule HAS one, so the three do not overlap: scanner = permission to
+  //         exceed 192, boundary pair = exact width, completeness assertion =
+  //         no rule missing a pair. If any two disagree, that RED is correct;
+  //         do not edit the list to match.
+  //         COVERAGE WAS NOT SYMMETRIC BETWEEN THE LAYERS, AND NOW IS.
+  //         Audited 2026-09-11: L1 had exact-width pins for 4 of its 7 windowed
+  //         rules — `dd write to block device` and the two `git push` rules had
+  //         none, so widening any of the three inside the ceiling would have
+  //         gone unnoticed on both layers. Closed the same day: the BOUNDARY
+  //         table in tests/core/blocked-patterns.test.js now carries 7 rows
+  //         (match at the width, miss one past it) plus its own completeness
+  //         assertion. Both layers now pin every windowed rule, and both have a
+  //         completeness assertion, so neither can gain a rule with a window
+  //         and no pin. The lesson survives the fix: a claim like "the boundary
+  //         pairs catch it" is true only of the catalogue it was measured on —
+  //         check the other layer before repeating it repo-wide.
   //         No wall clock, so no flake. Read the "못 보는 것" list next to that
   //         scanner before treating a green scan as proof of anything.
   //   (ii)  40,962B wall clock is a `< 200 ms` SMOKE bound only. It catches a

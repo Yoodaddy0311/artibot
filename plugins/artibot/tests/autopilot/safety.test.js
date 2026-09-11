@@ -421,7 +421,8 @@ describe('classifyRisk — fork bomb', () => {
 //
 // 무제한 런의 정의(이 스캐너가 RED 로 보는 것) — 세 조건을 모두 만족할 때:
 //   1. 원자가 `.` 또는 부정 문자클래스 `[^…]` 이고,
-//   2. 수량자의 상한이 512 초과이고(`*` `+` `{n,}` = 무한, `{0,513}` = 513),
+//   2. 수량자의 상한이 **그 규칙에 허가된 창**을 넘고(기본 192, 예외 등록분만
+//      512 — `WINDOW_CEILING_OVERRIDES`; `*` `+` `{n,}` = 무한, `{0,193}` = 193),
 //   3. 그 원자가 공백 문자를 하나라도 매치할 수 있을 때.
 //
 // 3번은 브리프 원안에 없던 좁힘이다. 근거: 실측된 2차식 5건(dd·curl·wget·
@@ -451,25 +452,70 @@ describe('classifyRisk — fork bomb', () => {
 //     기준 `lib/security/human-gates.js:179,181` 에 `\bcurl\b[^\n]*` ·
 //     `\bgit\s+push\b[^\n]*` 가 무앵커로 남아 있고(같은 2차식 모양), 같은 파일
 //     :260,261 은 `^` 앵커라 해당하지 않는다. 그 파일은 이 작업의 소유 밖이다.
-//  8. **규칙별 정확한 창 값.** 상한(512)만 본다. 192 를 쓰던 규칙이 512 로
-//     넓어져도 여기는 그린이다 — 그건 경계 쌍 단언(192/193 · 512/513)이 잡는다.
-//     `SCAN_WINDOW_MAX` JSDoc 에 어느 테스트가 그 자리를 맡는지 적어 뒀다.
+//  8. **등록된 예외 규칙의 정확한 창 값.** 기본 192 를 넘는 창은 등록해야만
+//     통과하므로 **신규 규칙 구멍은 닫혔다**(2026-09-11 리더 판정 전에는 전역
+//     상한 512 였고, 그때는 열려 있었다 — 아래 실측 참조). 남는 것은 *등록된*
+//     2건뿐이다: rm 규칙이 512 안에서 어떤 값을 쓰든 여기는 그린이다. 그 정확
+//     값은 tests/core/blocked-patterns.test.js 의 정확값 `toBe` 와 경계 쌍이
+//     핀한다. 이 목록은 상한 허가일 뿐 폭의 정본이 아니다.
+//     실측(B, 2026-09-11): 전역 상한 512 이던 판에서 L2 `wget-external` 을
+//     `{0,192}` → `{0,512}` 로 넓혀 보니 **정적 스캔은 그린**이었고 경계 쌍
+//     단언 하나만 RED 였다. 경계 쌍이 없는 신규 규칙이었다면 아무것도 못 잡았다.
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * 허용 최대 창. 이보다 넓은 수량자는 무제한과 같이 취급한다.
+ * 기본 허용 최대 창. **192 를 넘는 창은 아래 OVERRIDES 에 등록해야 통과한다**
+ * — 등록 안 된 규칙이 넓은 창을 쓰면 RED 다(신규 규칙 fail-closed).
  *
- * 512 = rm 규칙의 MAX_PATH 여유 창(Windows MAX_PATH 260 + 여유, 2026-09-11
- * 리더 artibot-7b 결정). dd · wget/curl pipe · git push 7건은 **192** 그대로다.
- *
- * **이 스캐너는 상한만 본다.** 규칙별 정확한 창 값(rm 512 · 그 외 192)은 각
- * 파일의 구조 단언이 핀한다 — L1 은 tests/core/blocked-patterns.test.js 의
- * 경계 쌍, L2 는 이 파일의 describe
- * 'classifyRisk — the dd/curl/wget window bound keeps ordinary commands
- * matched'(192/193 쌍 6건). 그러므로 어떤 규칙이 192 에서 512 로 몰래 넓어져도
- * 여기는 그린이고 저쪽이 RED 가 된다. 이 상수를 그 핀의 대용으로 읽지 마라.
+ * 왜 전역 상수가 아니라 기본값 + 허가 목록인가(2026-09-11 리더 판정): 전역
+ * 상한을 512 로 올렸던 판이 fail-open 이었다. 실측 — 그 상태에서 L2
+ * `wget-external` 을 `{0,192}` → `{0,512}` 로 넓혀 보니 **정적 스캔은 그린**
+ * 이었고 경계 쌍 단언 하나만 RED 였다. 기존 규칙은 경계 쌍이 받쳐 줘서 막혔지만,
+ * 경계 쌍 없이 새로 추가되는 규칙은 아무것도 잡지 못했다. 규율 §8 — 부정 목록은
+ * 미래 항목에 fail-open 이고, 허용 목록은 아니다.
  */
-const SCAN_WINDOW_MAX = 512;
+const WINDOW_CEILING_DEFAULT = 192;
+
+/**
+ * 192 를 넘도록 **허가된** 규칙 목록. 키는 `<층>:<식별자>` 로, L1 은 label,
+ * L2 는 id 를 쓴다(2026-09-11 현재 L2 예외 0건).
+ *
+ * 층 접두가 붙은 이유: 접두 없이 label 과 id 를 한 객체에 섞으면 **네임스페이스가
+ * 겹친다.** 지금은 충돌이 없지만, 미래에 L2 id 가 L1 label 과 같은 문자열이 되면
+ * 등록하지 않은 층에까지 조용히 예외가 적용된다 — 키 목록을 고정하는 핀 it 은
+ * 새 키 추가는 잡아도 그 충돌은 감지하지 못한다. 접두가 그 경로를 아예 없앤다.
+ *
+ * 이것은 **폭 표가 아니라 상한 허가 목록**이다. 정확한 폭의 정본은 여전히
+ * 경계 쌍·구조 단언이다 — L1 은 tests/core/blocked-patterns.test.js 의 정확값
+ * `toBe`(rm 512 · pipe 192), L2 는 이 파일의 describe 'classifyRisk — the
+ * dd/curl/wget window bound keeps ordinary commands matched'(192/193 쌍 6건).
+ *
+ * **두 값이 어긋나면 RED 가 맞다. 여기를 고쳐 맞추지 마라** — 게이트를
+ * 통과시키려 게이트를 깎지 않는다(규율 §10). 폭이 정말 바뀌어야 하면 정본 쪽을
+ * 먼저 옮기고 그 근거를 남긴 뒤 여기를 따라 올려라.
+ *
+ * rm 2건이 512 인 이유: rm 의 타깃은 PATH 이고 Windows MAX_PATH 는 260 이라
+ * 192 창은 평범한 긴 경로를 아예 못 본다. 192 를 적용했더니
+ * `rm --recursive <193자 이상>/x` 가 종전 L1 block → approve 로 뒤집혔고
+ * (L2 에도 recursive-only 규칙이 없어 full-stack), 그건 사각이 아니라 커버리지
+ * 회귀라 리더가 문서화 대신 창을 옮겼다. dd·pipe·git-push 는 옵션과 URL 을 재는
+ * 다른 분포라 192 로 남는다 — dd 가 192 인 건 512 를 택할 이유가 없어서지
+ * 512 가 금지라서가 아니다.
+ */
+const WINDOW_CEILING_OVERRIDES = Object.freeze({
+  'L1:rm -rf with path': 512,
+  'L1:rm -fr with path': 512,
+});
+
+/**
+ * 규칙 하나에 적용할 상한을 고른다.
+ * @param {'L1'|'L2'} layer 카탈로그 — L1 = blocked-patterns, L2 = safety
+ * @param {string} key L1 은 label, L2 는 id
+ * @returns {number}
+ */
+function ceilingFor(layer, key) {
+  return WINDOW_CEILING_OVERRIDES[`${layer}:${key}`] ?? WINDOW_CEILING_DEFAULT;
+}
 /** 클래스가 공백을 매치할 수 있는지 보는 프로브 문자들. */
 const SCAN_WHITESPACE = [' ', '\t', '\n', '\r', '\f', '\v'];
 
@@ -529,7 +575,7 @@ function canMatchWhitespace(classSource, flags) {
  * @param {string} source @param {string} [flags]
  * @returns {{ index: number, snippet: string, kind: 'unbounded'|'wide-window' }[]}
  */
-function findUnboundedRuns(source, flags = '') {
+function findUnboundedRuns(source, flags = '', ceiling = WINDOW_CEILING_DEFAULT) {
   const found = [];
   let i = 0;
   while (i < source.length) {
@@ -571,7 +617,7 @@ function findUnboundedRuns(source, flags = '') {
     i = q.end;
     if (source[i] === '?') i += 1; // lazy
     if (!atom) continue;
-    if (q.max <= SCAN_WINDOW_MAX) continue;
+    if (q.max <= ceiling) continue;
     if (!canMatchWhitespace(atom.classSource, flags)) continue;
     found.push({
       index: atomStart,
@@ -602,18 +648,20 @@ function findUnboundedRuns(source, flags = '') {
 const SCAN_ALLOWLIST = new Set(['sql-delete-no-where']);
 
 describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () => {
-  it.each(BLOCKED_PATTERNS.map((p, idx) => [`L1[${idx}] ${p.label}`, p.pattern]))(
-    '%s', (_name, pattern) => {
-      expect(findUnboundedRuns(pattern.source, pattern.flags).map((h) => h.snippet)).toEqual([]);
+  it.each(BLOCKED_PATTERNS.map((p, idx) => [`L1[${idx}] ${p.label}`, p.pattern, p.label]))(
+    '%s', (_name, pattern, key) => {
+      const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('L1', key));
+      expect(hits.map((h) => h.snippet)).toEqual([]);
     },
   );
 
   it.each(
     DANGEROUS_PATTERNS
       .filter((r) => !SCAN_ALLOWLIST.has(r.id))
-      .map((r) => [`L2 ${r.id}`, r.test]),
-  )('%s', (_name, pattern) => {
-    expect(findUnboundedRuns(pattern.source, pattern.flags).map((h) => h.snippet)).toEqual([]);
+      .map((r) => [`L2 ${r.id}`, r.test, r.id]),
+  )('%s', (_name, pattern, key) => {
+    const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('L2', key));
+    expect(hits.map((h) => h.snippet)).toEqual([]);
   });
 
   it('예외는 sql-delete-no-where 한 건뿐이다', () => {
@@ -637,7 +685,8 @@ describe('ReDoS 정적 스캔 — 스캐너 자기검증', () => {
     ['dot plus with the s flag', /a.+b/s],
     ['negated-newline class star', /[^\n]*x/],
     ['negated-newline class plus', /[^\n]+x/],
-    ['a window wider than the 512 ceiling', /[^\n]{0,513}y/],
+    ['a window one past the default ceiling', /[^\n]{0,193}y/],
+    ['a window at the rm exception width but unregistered', /[^\n]{0,512}y/],
     ['a window far wider than the ceiling', /[^\n]{0,1000}y/],
     ['an open-ended repeat', /[^\n]{3,}z/],
   ])('reports %s', (_name, re) => {
@@ -649,8 +698,6 @@ describe('ReDoS 정적 스캔 — 스캐너 자기검증', () => {
     ['a dot and a star inside a class', /[.*]/],
     ['a window at exactly 192', /[^\n]{0,192}q/],
     ['a separator window at 192', /[^\n;&|]{0,192}q/],
-    // 경계값. rm 2규칙이 실제로 쓰는 창이라 여기가 음성이어야 한다.
-    ['a window at exactly the 512 ceiling', /[^\n]{0,512}q/],
     // 아래 셋은 "못 보는 것" 목록의 1·4번 그대로다. 통과가 안전을 뜻하지 않는다.
     ['a positive-class run (out of scope)', /[\w."` ]+/],
     ['an open repeat on a positive class (out of scope)', /[A-Za-z0-9]{16,}/],
@@ -667,15 +714,51 @@ describe('ReDoS 정적 스캔 — 스캐너 자기검증', () => {
   });
 
   it('reports a wide window as wide-window, not unbounded', () => {
-    const hits = findUnboundedRuns(/\bdd\b[^\n]{0,513}\sof=/.source, 'i');
+    const hits = findUnboundedRuns(/\bdd\b[^\n]{0,193}\sof=/.source, 'i');
     expect(hits.map((h) => h.kind)).toEqual(['wide-window']);
   });
 
-  // 상한 상수가 조용히 움직이면 이 게이트의 의미가 통째로 바뀐다.
-  it('pins the ceiling at 512 and the boundary either side of it', () => {
-    expect(SCAN_WINDOW_MAX).toBe(512);
-    expect(findUnboundedRuns(/[^\n]{0,512}q/.source)).toEqual([]);
-    expect(findUnboundedRuns(/[^\n]{0,513}q/.source)).toHaveLength(1);
+  // 상한 기본값이나 예외 목록이 조용히 움직이면 게이트의 의미가 통째로 바뀐다.
+  it('pins the default ceiling at 192 and the boundary either side of it', () => {
+    expect(WINDOW_CEILING_DEFAULT).toBe(192);
+    expect(findUnboundedRuns(/[^\n]{0,192}q/.source)).toEqual([]);
+    expect(findUnboundedRuns(/[^\n]{0,193}q/.source)).toHaveLength(1);
+  });
+
+  it('pins the override list to exactly the two L1 rm rules at 512', () => {
+    expect(Object.keys(WINDOW_CEILING_OVERRIDES).sort()).toEqual([
+      'L1:rm -fr with path',
+      'L1:rm -rf with path',
+    ]);
+    expect(WINDOW_CEILING_OVERRIDES['L1:rm -rf with path']).toBe(512);
+    expect(WINDOW_CEILING_OVERRIDES['L1:rm -fr with path']).toBe(512);
+  });
+
+  // 실행형 반증. 등록되지 않은 규칙은 192 를 넘는 순간 잡히고, 등록된 이름으로
+  // 조회해야만 512 까지 통과한다 — 신규 규칙이 fail-closed 라는 주장의 증거다.
+  it('reports a wide window on a rule that is not registered', () => {
+    expect(findUnboundedRuns(/[^\n]{0,193}z/.source, '', ceilingFor('L1', 'not-registered'))).toHaveLength(1);
+    expect(findUnboundedRuns(/[^\n]{0,512}z/.source, '', ceilingFor('L2', 'not-registered'))).toHaveLength(1);
+  });
+
+  it('lets a registered rule run to 512 but not past it', () => {
+    const ceiling = ceilingFor('L1', 'rm -rf with path');
+    expect(ceiling).toBe(512);
+    expect(findUnboundedRuns(/[^\n]{0,512}z/.source, '', ceiling)).toEqual([]);
+    expect(findUnboundedRuns(/[^\n]{0,513}z/.source, '', ceiling)).toHaveLength(1);
+  });
+
+  // 층 접두가 실제로 네임스페이스를 가르는지. 접두 없이 label 과 id 를 섞어
+  // 두면 같은 문자열이 양쪽 층에 조용히 예외를 주는데, 핀 it 은 키 목록만
+  // 고정하므로 그 충돌을 못 본다. 여기가 그 자리를 맡는다.
+  it('keeps the L1 and L2 key namespaces apart', () => {
+    // 같은 식별자라도 등록된 층에서만 512 가 나온다.
+    expect(ceilingFor('L1', 'rm -rf with path')).toBe(512);
+    expect(ceilingFor('L2', 'rm -rf with path')).toBe(WINDOW_CEILING_DEFAULT);
+    // 등록 키는 전부 층 접두를 달고 있다.
+    for (const key of Object.keys(WINDOW_CEILING_OVERRIDES)) {
+      expect(key).toMatch(/^L[12]:/);
+    }
   });
 });
 
@@ -866,6 +949,81 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
   });
 });
 
+/**
+ * 경계 쌍 테이블 — 토큰 앞에 `\s` 를 스스로 갖는 규칙들(filler 형).
+ * @type {[string, (f: string) => string, string, string][]}
+ */
+const FILLER_BOUNDARY_PAIRS = [
+  ['dd', (f) => `dd${f} of=/dev/sda`, 'dd-device-write', 'danger'],
+  ['curl', (f) => `curl${f} https://e.example/a`, 'curl-external', 'caution'],
+  ['wget', (f) => `wget${f} https://e.example/a`, 'wget-external', 'caution'],
+];
+
+/**
+ * 경계 쌍 테이블 — git push 3종. `span`/`filler` 클로저를 받아 조립한다.
+ * @param {(n: number) => string} span @param {(n: number) => string} filler
+ * @returns {[string, (n: number) => string, string, string][]}
+ */
+const SPAN_BOUNDARY_PAIRS = (span, filler) => [
+  ['blind force', (n) => `git push${span(n)}--force origin main`, 'git-force-push', 'danger'],
+  ['leased force', (n) => `git push${span(n)}--force-with-lease origin main`, 'git-force-push-lease', 'caution'],
+  ['short force', (n) => `git push${filler(n)} -f`, 'git-force-push-short', 'danger'],
+];
+
+/** 경계 쌍이 실제로 존재하는 규칙 id 집합. */
+const BOUNDARY_PAIR_IDS = [
+  ...FILLER_BOUNDARY_PAIRS.map((row) => row[2]),
+  ...SPAN_BOUNDARY_PAIRS((n) => `${n}`, (n) => `${n}`).map((row) => row[2]),
+];
+
+/**
+ * `source` 에 바운드된 부정 클래스 창 `[^…]{n,m}` 이 있는가.
+ * @param {string} source @returns {boolean}
+ */
+function hasBoundedWindow(source) {
+  return /\[\^(?:\\.|[^\]\\])*\]\{\d+,\d+\}/.test(source);
+}
+
+describe('ReDoS 창 게이트 — 창을 가진 L2 규칙은 전부 경계 쌍을 갖는다', () => {
+  // 세 장치가 **한 게이트**이고 역할이 겹치지 않는다:
+  //   정적 스캔  = 상한 허가 (192 초과는 등록된 규칙만)
+  //   경계 쌍    = 정확 폭   (192 매치 / 193 miss)
+  //   이 단언    = 누락 0    (창을 가졌는데 경계 쌍이 없는 규칙이 없다)
+  //
+  // 왜 필요한가: 창 확대는 **순수 superset 변경**이라 기존 양성·음성 테스트로는
+  // 원리적으로 안 잡힌다(짧은 명령은 폭과 무관하게 계속 매치한다). 창밖 miss
+  // 단언만이 잡는데, 신규 규칙이 창만 달고 경계 쌍 없이 들어오면 그 단언 자체가
+  // 없다. 그러면 스캐너는 등록 없이는 192 까지만 허용하므로 192 짜리 신규 규칙은
+  // 통과하고, 그 규칙의 폭을 핀하는 것은 리포에 하나도 없게 된다.
+  //
+  // **폭 숫자를 여기서 복제하지 않는다** — 집합의 동일성만 본다. 정확 폭의 정본은
+  // 경계 쌍 하나뿐이고, 여기를 고쳐 그린을 만들면 게이트를 깎는 것이다(규율 §10).
+  // 짝이 되는 L1 단언은 A 소유의 tests/core/blocked-patterns.test.js 에 있다
+  // (2026-09-11 기준 A 가 넣는 중 — 이 파일은 L2 만 책임진다).
+  it('windowed rule ids === boundary pair ids', () => {
+    const windowed = DANGEROUS_PATTERNS
+      .filter((r) => hasBoundedWindow(r.test.source))
+      .map((r) => r.id)
+      .sort();
+    expect(windowed).toEqual([...BOUNDARY_PAIR_IDS].sort());
+  });
+
+  it('finds the six windowed rules it is supposed to find', () => {
+    // 분모를 고정한다 — 위 단언이 "0 === 0" 으로 공허하게 그린이 되지 않도록.
+    const windowed = DANGEROUS_PATTERNS.filter((r) => hasBoundedWindow(r.test.source));
+    expect(windowed).toHaveLength(6);
+    expect(BOUNDARY_PAIR_IDS).toHaveLength(6);
+  });
+
+  it('detects a bounded window and ignores shapes that are not one', () => {
+    expect(hasBoundedWindow(/\bdd\b[^\n]{0,192}\sof=/.source)).toBe(true);
+    expect(hasBoundedWindow(/\bgit\s+push\b[^\n;&|]{0,192}--force/.source)).toBe(true);
+    expect(hasBoundedWindow(/[^\s;&|]*/.source)).toBe(false);
+    expect(hasBoundedWindow(/\bDROP\s+TABLE\b/.source)).toBe(false);
+    expect(hasBoundedWindow(/[\w."` ]{0,192}/.source)).toBe(false);
+  });
+});
+
 describe('classifyRisk — the dd/curl/wget window bound keeps ordinary commands matched', () => {
   // The bound is 192 characters between the command word and the token. These
   // pins are the "did not loosen" half: normal-length commands still match.
@@ -886,11 +1044,7 @@ describe('classifyRisk — the dd/curl/wget window bound keeps ordinary commands
   /** @param {number} n @returns {string} */
   const filler = (n) => ` ${'x'.repeat(n - 1)}`;
 
-  it.each([
-    ['dd', (f) => `dd${f} of=/dev/sda`, 'dd-device-write', 'danger'],
-    ['curl', (f) => `curl${f} https://e.example/a`, 'curl-external', 'caution'],
-    ['wget', (f) => `wget${f} https://e.example/a`, 'wget-external', 'caution'],
-  ])('%s still matches at 192 filler characters and stops at 193', (_name, build, matchedId, level) => {
+  it.each(FILLER_BOUNDARY_PAIRS)('%s still matches at 192 filler characters and stops at 193', (_name, build, matchedId, level) => {
     const atBound = classifyRisk(build(filler(192)));
     expect(atBound.level).toBe(level);
     expect(atBound.matchedId).toBe(matchedId);
@@ -904,11 +1058,7 @@ describe('classifyRisk — the dd/curl/wget window bound keeps ordinary commands
   /** @param {number} n @returns {string} */
   const span = (n) => ` ${'x'.repeat(n - 2)} `;
 
-  it.each([
-    ['blind force', (n) => `git push${span(n)}--force origin main`, 'git-force-push', 'danger'],
-    ['leased force', (n) => `git push${span(n)}--force-with-lease origin main`, 'git-force-push-lease', 'caution'],
-    ['short force', (n) => `git push${filler(n)} -f`, 'git-force-push-short', 'danger'],
-  ])('git push %s still matches at 192 and stops at 193', (_name, build, matchedId, level) => {
+  it.each(SPAN_BOUNDARY_PAIRS(span, filler))('git push %s still matches at 192 and stops at 193', (_name, build, matchedId, level) => {
     const atBound = classifyRisk(build(192));
     expect(atBound.level).toBe(level);
     expect(atBound.matchedId).toBe(matchedId);

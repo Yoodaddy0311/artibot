@@ -35,6 +35,15 @@ const BLOCKED_PATTERNS = Object.freeze([
   // ── Filesystem destruction ──────────────────────────────────────────
   // WINDOW BOUND (ReDoS). Both rules used to end in `.*\/`. `.` never crosses a
   // newline, so `[^\n]{0,N}` preserves the meaning and only caps the width.
+  // NOT BYTE-IDENTICAL, THOUGH: `.` also refuses lone `\r`, U+2028 and U+2029,
+  // while `[^\n]` walks through all three. The direction is toward MORE
+  // blocking, never less, and the verdict does not actually move — measured
+  // 2026-09-11 22:3x over 11 cases comparing both shapes on the raw string AND
+  // on normalizeCommand output (what executeChain really tests): 0 verdict
+  // changes. The reason is that normalizeCommand folds a lone `\r` and both
+  // separators to a space (`curl a\rb` -> `curl a b`), so the dot-based rule
+  // already matched the normalized variant and already blocked. CRLF still
+  // stops the run at the `\n` on both shapes.
   // Unbounded the shape is quadratic: every `rm` start rescans to the end of the
   // line hunting for a `/`.
   // 512 FOR THE rm PAIR (MAX_PATH 260 + margin, leader decision 2026-09-11); the
@@ -340,7 +349,12 @@ const BLOCKED_PATTERNS = Object.freeze([
   // ── Network abuse ───────────────────────────────────────────────────
   // WINDOW BOUND (ReDoS). Both rules used to read `\s+.*\|`, which is quadratic
   // for the same reason the rm and dd rules were: every `curl` / `wget` start
-  // rescans to the end of the line looking for a pipe. Measured 2026-09-11
+  // rescans to the end of the line looking for a pipe.
+  // ON `.` vs `[^\n]` — see the same note over the rm pair. `[^\n]` crosses a
+  // lone `\r` and U+2028/2029 where `.` would not, which can only ADD matches,
+  // and the executeChain verdict is unchanged (11 cases, 0 changes, measured
+  // 2026-09-11 22:3x): normalizeCommand folds those three to a space before the
+  // second pass, so the dot-based rule already blocked them. Measured 2026-09-11
   // 21:0x (before) and 21:13 KST (after), node v24.15.0, 56 then 64 concurrent
   // node.exe — that load inflates the absolute values, not the ratios. Median
   // of 3, `single regex / full PreToolUse path` (executeChain = raw +
