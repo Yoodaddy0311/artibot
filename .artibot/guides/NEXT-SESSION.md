@@ -2,6 +2,20 @@
 
 > 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
 
+## 오너 결정 4건 이행 + v4.59.0 릴리스 (2026-09-11 10:5x KST, 세션 25918244, master **a32a7de2**, 태그 v4.59.0)
+
+**오너 결정(09:3x)**: ① `--force-with-lease` L2 caution ② bare TRUNCATE L2 를 문 형태로 ③ `dd … of=/dev/` L2 danger 추가 ④ ①②③ 반영 후 4.59.0 릴리스. 리더 추가: `git branch -d` 오탐(`/i`) 양층 수리.
+
+**착지**: `9a4794c3` fix(guard) 8파일 +495/−17 → `a32a7de2` release: v4.59.0 (lockstep 12파일). ci/guard-rules-4 경유 CI 7/7 → master ff → 태그 push → release.yml run 34552692234(태그 기동 실측, 완료 여부는 아래 §미확인). `npm run sync:local` 로 설치본 4.59.0(`~/.claude/artibot/`) 갱신 실측. **라이브 프로브**: 아침에 차단됐던 `grep -n -i "truncate\|force-with-lease" file` 이 이 세션 PreToolUse 를 통과(10:5x 실측). 플러그인 캐시(`~/.claude/plugins/cache/artibot/artibot/`)는 4.58.0 까지만 — `claude plugin update` 는 오너 실행.
+
+**팀 운용**: tdd-guide(opus) 구현 3라운드 + code-reviewer(fable) 3라운드(REQUEST-CHANGES ×2 → APPROVE). 검수가 잡은 것: I-1 옵션 런 토큰이 대시 없는 인수를 못 건너뛰어 `git branch -d topic -f` 양층 통과(실제 git 은 강제 삭제) → 토큰 두 갈래(옵션 | 무대시 인수) + 셸 구분자 종료로 교정 · I-2 `/i` 제거로 `GIT branch -D` 완화 → `[gG][iI][tT]` 만 무시 · N-1 **L1 은 normalizeCommand(`guard-registry.js:216` `\s+`→공백) 변형도 대조하므로 줄바꿈 경계가 L1 에서 무효** — 원시 `pattern.test()` 만 보는 테스트가 초록이라 착시(규율 §9) → 문서 교정 + 매트릭스 owner-decision 행으로 핀 · N-2 백슬래시 줄 연속은 한 명령 → 구분자 `(?:[^\S\n]|\\\r?\n)+`(구현자가 CRLF 누락을 잡아 `\r?` 보강). 구현자가 검수자 정규식의 오탐 2건(다음 줄 `-f` 차용)을 실측으로 잡음 — 검수 제안도 재실측해야 한다는 선례. 리더 실측: 8스위트 423/423 · 전체 15,659→15,672 pass / 0 fail · eslint 0 · release-check PASS · docs:check PASS · tests/ci 847/847.
+
+**gotcha 신규**: (70) 리더가 `git branch -d` 를 못 지운 원인은 L1·L2 **둘 다** `/i` — 한 층만 고치면 여전히 차단. (71) 검수자가 준 정규식도 구현자가 재실측 — `\s+` 구분자가 줄바꿈을 건너뛰어 다음 줄 플래그를 빌려오는 오탐. (72) **L1 판정은 정규화 변형도 본다** — 정규식의 `\n` 경계·`$` 앵커는 L1 에서 무효일 수 있다, 테스트는 `executeChain` 경로로 써야 실제 판정. (73) Windows 줄 연속은 `\` `\r` `\n` 3글자 — `\\\n` 만 잡으면 CRLF 파일의 스크립트를 놓친다.
+
+**오너 결정 대기(신규)**: (a) `normalizeCommand` `/\s+/g` → `/[^\S\n]+/g`(줄바꿈 보존) — L1 38규칙 전부 영향, `git checkout \.\s*$` 류 `$` 앵커 판정 변동 가능(미측정), 별도 줄기 + 전체 음성 대조 필요. 매트릭스 `git branch -d old\necho -f done` 행(l1 block / l2 safe / owner-decision) 이 현재값 핀. (b) `dd if=a.img of=b.img` L1 block / L2 safe 불일치(엄격 쪽) — 매트릭스 행 미추가, `permission-auto-approve.test.js:173` 이 예시로 보유. (c) `dd of=/dev/sda`·`sudo dd bs=4M if=img of=/dev/sdb` 는 L1 `dd\s+if=` 인접 요구 때문에 approve / L2 danger — L1 강화 후보.
+
+**소유 밖 후속(신규)**: `tests/handoff/handoff-store.test.js` 상주 플레이크 2종(EPERM rename · 같은 분 파일명 충돌, 구현자 6회 중 1회) · `permission-auto-approve.test.js:174` `toContain('git-force-push')` 가 `-short` 부분 문자열로 만족 → 정확 일치로 · `git push --force-with-lease --force` L1 approve(safeOverrides 가 명령 전체 면제) / L2 danger · `psql -c "TRUNCATE users"`(키워드·종결자 없음) L2 미탐(의도적 구멍, 주석 명시) · `echo "truncate cache;"` L2 danger 오탐(수용, 주석 명시) · L2 `dd` 규칙 `\bdd\b[^\n]*` 는 dd 단어 반복 시 2차(9KB 10ms, 기존 curl/wget 컨벤션).
+
 ## Wave 4 후처리 (2026-09-11 09:0x KST, 세션 25918244, master 8f90c10c, 재부팅 뒤)
 
 **재부팅 원인 실측**: Windows Update 자동 재시작(System 로그 ID 1074 — 02:29:09 MoUsoCoreWorker → 02:33:02·02:33:33 TrustedInstaller, 마지막 부팅 02:34:02). 48h 내 Kernel-Power 41·6008 0건. 마지막 핸드오프 02:18 저장, 커밋·워킹트리·워크트리 3개 전부 손실 0.
