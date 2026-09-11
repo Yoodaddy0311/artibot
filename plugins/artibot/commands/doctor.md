@@ -519,7 +519,7 @@ PreToolUse(Agent), keyed by the host's `tool_use_id`; `scripts/hooks/subagent-ha
 records a `route.bound` line at SubagentStart naming that `tool_use_id` and the
 `agent_id` that spawned — or, when no receipt matched, stamps
 `route_ledger: 'skipped:unbound'` on the spawn record in
-`.artibot/ledger/spawns.ndjson` and writes nothing to the central ledger.
+`<git-common-dir>/artibot/spawns.ndjson` and writes nothing to the central ledger.
 Neither hook keeps a pending list. The join is recomputed from the ledger
 (§3: "별도 상태 파일을 두지 않는다 — 두 번째 진실원 금지"), and this check
 reports what that join left over on BOTH sides, side by side.
@@ -557,9 +557,11 @@ Status for this check — **first matching row wins**:
 | Otherwise | **pass** |
 
 Report BOTH counts together with the session scope and BOTH absolute file
-paths (the SHARED ledger `<git-common-dir>/artibot/ledger.jsonl`, falling back
-to `.artibot/runtime/ledger.jsonl` when git cannot answer — ADR-011 — and the
-tree-local `.artibot/ledger/spawns.ndjson`), the conflict count (or "not
+paths — both are SHARED under `<git-common-dir>/artibot/`:
+`<git-common-dir>/artibot/ledger.jsonl` and
+`<git-common-dir>/artibot/spawns.ndjson`, falling back to
+`.artibot/runtime/ledger.jsonl` and `.artibot/runtime/spawns.ndjson` when git
+cannot answer (ADR-011 §5 ③) — the conflict count (or "not
 counted" when the join was not read), and the bind side's own bounds — a
 10-minute candidate window and a 128 KB ledger tail
 (`subagent-handler.js#RECEIPT_WINDOW_MS`, `#RECEIPT_TAIL_BYTES`) — because a
@@ -602,15 +604,17 @@ fixtures only.
   state both paths and both mtimes in the report.
 - **Spawn records with no session.** `countUnboundSpawns` buckets a record whose
   `sessionId` is null under `null`; a session-scoped read misses it.
-- **Which worktree each side came from — the two sides are NOT symmetric.** The
-  ledger, which is the receipt side, is SHARED by every linked worktree
-  (`<git-common-dir>/artibot/ledger.jsonl`, ADR-011) and therefore sums all open
-  windows; `spawns.ndjson` stays in THIS tree until W5-b-6 moves it beside the
-  ledger. So a `route-bind-residue-mismatch` WARN can be structural rather than
-  a real miss: another window's unbound receipt has no spawn record in this
-  tree's file, which is exactly the "both counts non-zero AND different" row.
-  Until W5-b-6 lands, read both lists and both paths before treating that WARN
-  as a defect.
+- **Which worktree each side came from.** Both sides now live under
+  `<git-common-dir>/artibot/` (ADR-011 §5 ③), so both sum every linked
+  worktree and the receipt/spawn asymmetry that once made a mismatch WARN
+  structural is gone. Only the projection (`state.yaml`) and `decisions/` stay
+  per-tree. What this cannot see is an INSTALL older than that rule: the hooks
+  run from the install, so an old `spawn-ledger.js` keeps writing the tree-local
+  `.artibot/ledger/` file, the shared path holds no spawn file at all, the spawn
+  count comes back `undefined`, and the verdict is `unmeasured` — NOT a warn.
+  Once the install is current, an `unmeasured` on the spawn side means the
+  one-time migration (ADR-011 §1회 이관 절차) has not been run yet, not that
+  nothing spawned.
 
 ## Output Format
 

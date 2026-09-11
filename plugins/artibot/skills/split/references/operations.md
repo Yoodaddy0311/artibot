@@ -46,7 +46,7 @@
 `node <pluginRoot>/scripts/split/fanout-probe.mjs --parent <parentRoot> [--all]` — 창 메인 트랜스크립트가 10분 내 갱신됐는데 서브에이전트 갱신이 5분 내 0 이면 `[fanout SOLO]` 1행, 조용하면 출력 없음(임계 `config.split.supervisor.probe.*`).
 - `run.json.lanes[limb].state` 가 `active` 가 아닌 줄기(랜딩 후 dispatch 대기·검수 대기·결합 게이트 직렬 구간)는 경보 제외 — Ontology 실측에서 SOLO 경보 수십 건 중 실개입 0건이 전부 이 유휴 창이었다.
 - 줄기·상태를 못 찾으면 **경보하고** `(state unknown)` 을 붙인다(침묵 쪽으로 실패하지 않는다).
-- 스폰 원장 `.artibot/ledger/spawns.ndjson`(`lib/learning/ledger/spawn-ledger.js`, SubagentStart/Stop 훅이 쓴다)이 쌓이면 트랜스크립트 계수 대신 그 원장을 읽는 것이 다음 단계다(미배선).
+- 스폰 원장 `<git-common-dir>/artibot/spawns.ndjson`(`lib/learning/ledger/spawn-ledger.js`, SubagentStart/Stop 훅이 쓴다 — 전 창 공유, 창별 분리는 `sessionId`)이 쌓이면 트랜스크립트 계수 대신 그 원장을 읽는 것이 다음 단계다(미배선).
 
 ## lane-state <limb> <state> (운용 상태 기록 — probe·watch 의 입력)
 

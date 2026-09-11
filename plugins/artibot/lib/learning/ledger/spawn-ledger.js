@@ -7,12 +7,20 @@
  * the model policy (impl tier vs review tier) had no audit surface at all.
  * This store closes that gap from the SubagentStart/SubagentStop hook:
  *
- *   <projectRoot>/.artibot/ledger/spawns.ndjson   — one record per line
+ *   <git-common-dir>/artibot/spawns.ndjson       — one record per line
  *
- * The directory is the same gitignored tree the ambient ledger uses
- * (`lib/learning/ledger/store.js#LEDGER_REL`), so existing rotation/ignore
- * rules cover it. `.ndjson` (not `.jsonl`) keeps it out of the ambient
- * ledger's per-session rotation sweep, which only targets `*.jsonl`.
+ * The directory is the one the runtime ledger and the state journal already
+ * share (ADR-011 §5 decision 3, the rule in
+ * `lib/project-state/store-location.js#resolveStoreLocation`), so every linked
+ * worktree of a repository appends to ONE file and a `/split` window is a
+ * `sessionId` slice of it rather than a divergent copy. Outside a repository
+ * the same rule falls back to `<projectRoot>/.artibot/runtime/`.
+ *
+ * The `*.jsonl` neighbours in that directory (`ledger.jsonl`,
+ * `project-state.jsonl`) are journals and ledgers that are NOT rotated
+ * (ADR-011 §7-1). `.ndjson` is kept as this file's extension anyway: it is the
+ * name every existing reader and audit already uses, and it keeps the file out
+ * of any sweep written against `*.jsonl`.
  *
  * Record shape (one line):
  *   { ts, sessionId, agentId, agentName, agentType, requestedModel,
@@ -55,15 +63,9 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { resolveGitCommonDir } from '../../project-state/git-common-dir.js';
+import { FALLBACK_RELATIVE, resolveStoreLocation } from '../../project-state/store-location.js';
 import { redactSecrets } from './redact.js';
-
-/**
- * Ledger directory relative to the project root. Mirrors
- * `store.js#LEDGER_REL` (asserted equal by the spawn-ledger test) so the
- * ambient ledger and the spawn ledger always share one tree.
- * @type {string}
- */
-export const LEDGER_REL = path.join('.artibot', 'ledger');
 
 /** @type {string} */
 export const SPAWN_FILE = 'spawns.ndjson';
@@ -72,12 +74,25 @@ export const SPAWN_FILE = 'spawns.ndjson';
 export const SPAWN_EVENTS = Object.freeze(['start', 'stop']);
 
 /**
- * Absolute path of the spawn ledger for a project root.
+ * Absolute path of the spawn ledger for a project root — the same two-branch
+ * rule `lib/runtime/event-writer.js#ledgerFilePath` applies, so the spawn
+ * ledger and the runtime ledger can never disagree about which directory holds
+ * a project's history.
+ *
+ * The `null` branch is spelled out rather than delegated to
+ * `resolveStoreLocation`, which throws on an empty `projectRoot`. Every caller
+ * here sits behind a hook that must never see an exception, and the guard also
+ * keeps `spawnLedgerPath('')` returning a path instead of throwing.
+ *
  * @param {string} projectRoot
- * @returns {string}
+ * @returns {string} `<git-common-dir>/artibot/spawns.ndjson` inside a
+ *   repository, `<projectRoot>/.artibot/runtime/spawns.ndjson` outside one
  */
 export function spawnLedgerPath(projectRoot) {
-  return path.join(projectRoot, LEDGER_REL, SPAWN_FILE);
+  const gitCommonDir = resolveGitCommonDir(projectRoot);
+  if (gitCommonDir === null) return path.join(projectRoot, FALLBACK_RELATIVE, SPAWN_FILE);
+  const { dir } = resolveStoreLocation({ projectRoot, gitCommonDir });
+  return path.join(dir, SPAWN_FILE);
 }
 
 /**
@@ -172,9 +187,10 @@ function normalizeRecord(record, now) {
 }
 
 /**
- * Append one spawn record to `<projectRoot>/.artibot/ledger/spawns.ndjson`.
- * Creates the directory on first use. Synchronous so a short-lived hook
- * process cannot exit before the line lands. Never throws.
+ * Append one spawn record to the file {@link spawnLedgerPath} names — shared by
+ * every linked worktree of a repository. Creates the directory on first use.
+ * Synchronous so a short-lived hook process cannot exit before the line lands.
+ * Never throws.
  *
  * @param {string} projectRoot absolute project root
  * @param {object} record see module header for the shape

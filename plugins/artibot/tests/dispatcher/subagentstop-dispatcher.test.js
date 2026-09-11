@@ -5,6 +5,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { spawnLedgerPath } from '../../lib/learning/ledger/spawn-ledger.js';
+
 /**
  * SubagentStop dispatcher integration tests.
  *
@@ -33,7 +35,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *    subagent-handler / agent-evaluator / workflow-status), so unlike
  *    SessionStart there is no `checkout -b` to prevent here. What the plan
  *    flagged instead was `subagent-handler.js:87 payloadProjectRoot` ->
- *    `<projectRoot>/.artibot/ledger/spawns.ndjson`. MEASURED: that write does
+ *    the spawn ledger `spawnLedgerPath` names for that root, which after
+ *    W5-b-6 is `<git-common-dir>/artibot/spawns.ndjson` inside a repository
+ *    and `<projectRoot>/.artibot/runtime/spawns.ndjson` outside one (it was a
+ *    literal `<projectRoot>/.artibot/ledger/spawns.ndjson` before). MEASURED:
+ *    that write does
  *    NOT reach the repository from this suite, and could not, because
  *    `payloadProjectRoot` reads the PAYLOAD `cwd` key (:80-84) and skips when
  *    it is absent rather than falling back to `process.cwd()` — no payload in
@@ -238,7 +244,10 @@ describe('_subagentstop-dispatcher (integration)', () => {
 
     // Resolved the way the hook would resolve it, from the checkout this file
     // lives in — the ledger the plan flagged as the C-2 blast radius.
-    const ledger = path.join(PLUGIN_ROOT, '..', '..', '.artibot', 'ledger', 'spawns.ndjson');
+    // Resolved through the WRITER'S OWN rule, never a literal: this is a
+    // NEGATIVE assertion, so a stale hard-coded path would point at a file
+    // that does not exist and pass vacuously forever.
+    const ledger = spawnLedgerPath(path.join(PLUGIN_ROOT, '..', '..'));
     const rows = existsSync(ledger) ? readFileSync(ledger, 'utf-8') : '';
     for (const fixture of ['subagentstop-test-1', 'subagentstop-test-2', 'subagentstop-no-side-effects']) {
       expect(rows).not.toContain(fixture);

@@ -34,7 +34,7 @@ import { resolveModel } from '../../lib/core/model-policy.js';
  *
  * Every assertion runs the hooks as CHILD PROCESSES against a temporary git
  * repo, because the properties under test are on-disk facts: which columns
- * land in `.artibot/ledger/spawns.ndjson`, and which lines land in the run
+ * land in `<git-common-dir>/artibot/spawns.ndjson`, and which lines land in the run
  * ledger — `<git-common-dir>/artibot/ledger.jsonl` in a repository after
  * ADR-011, which is why every read here goes through `ledgerFilePath` instead
  * of a literal. HOME and `cwd` both point into a temp dir, so no test here
@@ -53,15 +53,23 @@ import { resolveModel } from '../../lib/core/model-policy.js';
  *   - THAT THE RECOMMENDATION IS ANY GOOD. `route-scorer` is uncalibrated in
  *     Phase 0.
  *   - HOOK LATENCY. Two processes now run per spawn (pre + start). Unmeasured.
- *   - THE WRITER'S MKDIR-FAILURE BRANCH ON BIND. The "unwritable run ledger" case
- *     below blocks the ledger's parent directory, but `bindRoute` returns
- *     `skipped:unbound` from the empty tail before it ever attempts the append
- *     (measured 2026-09-11), so that case exercises the stdout and spawn-record
- *     halves of its claim only. The condition it reaches for needs a tail
- *     holding a receipt AND an unwritable target simultaneously, which a single
- *     blocking file cannot be; a read-only directory bit is not enforced for
- *     the owner on Windows. The append-failure path IS covered where it is
- *     reachable: tests/firewall/hook-decision-invariance.test.js condition B.
+ *   - THE WRITER'S APPEND-FAILURE BRANCH ON BIND. The "unwritable run ledger"
+ *     case below blocks the ledger FILE ITSELF (a directory where the file must
+ *     go), but `bindRoute` returns `skipped:unbound` from the empty tail before
+ *     it ever attempts the append (measured 2026-09-11), so that case exercises
+ *     the stdout and spawn-record halves of its claim only. The condition it
+ *     reaches for needs a tail holding a receipt AND an unwritable target
+ *     simultaneously, which that fixture does not build; a read-only directory
+ *     bit is not enforced for the owner on Windows. The append-failure path IS
+ *     covered where it is reachable:
+ *     tests/firewall/hook-decision-invariance.test.js condition B.
+ *
+ *     THE FIXTURE BLOCKS THE FILE, NOT THE DIRECTORY, AND THAT IS LOAD-BEARING.
+ *     After W5-b-6 the spawn ledger resolves to the SAME directory as the run
+ *     ledger (`lib/learning/ledger/spawn-ledger.js#spawnLedgerPath` shares
+ *     `ledgerFilePath`'s two-branch rule), so a fixture that made
+ *     `<repo>/.git/artibot` a file would block `spawns.ndjson` too and the
+ *     spawn-record half of the claim would silently stop being measured.
  */
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -538,15 +546,18 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     const ok = runHook(basePayload({ agent_id: 'agent-baseline' }), 'start', home);
     expect(ok.status).toBe(0);
 
-    // Now block ONLY the run ledger's parent directory (a file where the
-    // directory must go). `.artibot/ledger` stays writable, so the spawn record
-    // must still land. `git init` runs FIRST: after ADR-011 that parent lives
-    // under the repository's git common dir, so `ledgerFilePath` can only name
-    // it once the repo exists.
+    // Now block ONLY the run ledger FILE (a directory where the file must go),
+    // so its append fails with EISDIR while the directory holding it stays
+    // writable. That distinction is the fixture: after W5-b-6 `spawns.ndjson`
+    // is a SIBLING of `ledger.jsonl` in that same directory, so blocking the
+    // directory would block the spawn record too and this case could no longer
+    // tell whether the record survived. `git init` runs FIRST: after ADR-011
+    // both files live under the repository's git common dir, so `ledgerFilePath`
+    // can only name them once the repo exists.
     const repo2 = path.join(tmp, 'repo2');
     mkdirSync(repo2, { recursive: true });
     execFileSync('git', ['init'], { cwd: repo2, stdio: 'ignore', windowsHide: true });
-    writeFileSync(path.dirname(ledgerFilePath(repo2)), 'not a dir', 'utf-8');
+    mkdirSync(ledgerFilePath(repo2), { recursive: true });
 
     const blocked = runHook({ ...basePayload({ agent_id: 'agent-baseline' }), cwd: repo2 }, 'start', home);
     expect(blocked.status).toBe(0);
@@ -564,10 +575,10 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     // calls `appendLedgerEvent` (scripts/hooks/subagent-handler.js#bindRoute).
     // repo2 is fresh, so its tail holds no receipt and the unwritable append is
     // never attempted. What this case therefore proves is the stdout and
-    // spawn-record half of the claim, not the writer's mkdir-failure branch — and it
-    // would read the same way if the fixture stopped blocking anything. Making
-    // it bite needs a tail with a receipt AND an unwritable target at once,
-    // which one file cannot be; see the blind-spot list in the header.
+    // spawn-record half of the claim, not the writer's append-failure branch — and
+    // it would read the same way if the fixture stopped blocking anything. Making
+    // it bite needs a tail with a receipt AND an unwritable target at once, which
+    // this fixture does not build; see the blind-spot list in the header.
     expect(rec.route_ledger).toBe('skipped:unbound');
   });
 
