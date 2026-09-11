@@ -191,7 +191,7 @@ memory, self-learning, and native Agent Teams for Claude Code.
 Artibot is a 5-layer orchestration framework for Claude Code built on the
 native Agent Teams API (named Agent spawns/SendMessage/TaskCreate - not one-shot
 fire-and-forget delegation). It ships 30 specialized agents, 79 slash commands, and
-114 domain skills, backed by 15,684+ automated tests.
+114 domain skills, backed by 15,968+ automated tests.
 
 Core capabilities:
 - Dual-process cognitive routing (System 1 fast pattern-match / System 2
