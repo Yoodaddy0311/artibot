@@ -89,10 +89,10 @@ function payloadProjectRoot(hookData) {
 }
 
 /**
- * Append one line to the project-local spawn ledger
- * (`<projectRoot>/.artibot/ledger/spawns.ndjson`). Best-effort audit surface
- * for fan-out counts and model-policy drift — must NEVER throw and never
- * touches stdout.
+ * Append one line to the repository-shared spawn ledger
+ * (`<git-common-dir>/artibot/spawns.ndjson`, `<projectRoot>/.artibot/runtime/`
+ * outside a repository). Best-effort audit surface for fan-out counts and
+ * model-policy drift — must NEVER throw and never touches stdout.
  *
  * @param {object} hookData - Parsed hook payload
  * @param {string|null} projectRoot - Root from {@link payloadProjectRoot}

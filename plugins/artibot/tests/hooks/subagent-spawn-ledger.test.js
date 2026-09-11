@@ -6,9 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  appendSpawn, LEDGER_REL, readSpawns, SPAWN_FILE, spawnLedgerPath, summarizeSpawns,
+  appendSpawn, readSpawns, SPAWN_FILE, spawnLedgerPath, summarizeSpawns,
 } from '../../lib/learning/ledger/spawn-ledger.js';
-import { _internals as storeInternals } from '../../lib/learning/ledger/store.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveModel } from '../../lib/core/model-policy.js';
 
@@ -71,11 +70,40 @@ describe('spawn-ledger store', () => {
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
-  it('shares the ambient ledger directory convention with store.js', () => {
-    expect(LEDGER_REL).toBe(storeInternals.LEDGER_REL);
-    expect(spawnLedgerPath(tmp)).toBe(path.join(tmp, '.artibot', 'ledger', SPAWN_FILE));
-    // `.ndjson` keeps the file out of rotateLedger's `*.jsonl` sweep.
+  it('falls back to <projectRoot>/.artibot/runtime when the root is not a repository', () => {
+    // Same two-branch rule as the runtime ledger (ADR-011 decision F3); the
+    // literal is pinned here so a change to the shared rule cannot move the
+    // spawn ledger silently.
+    expect(spawnLedgerPath(tmp)).toBe(path.join(tmp, '.artibot', 'runtime', SPAWN_FILE));
+    // `.ndjson` keeps the file out of rotateLedger's `*.jsonl` sweep, and marks
+    // it as not one of the sibling journals/ledgers in the same directory.
     expect(SPAWN_FILE.endsWith('.jsonl')).toBe(false);
+  });
+
+  it('lands under <git-common-dir>/artibot in a main checkout', () => {
+    // A `.git` DIRECTORY with no `commondir` file is the ordinary checkout
+    // shape; no `git init` needed, the resolver is pure fs.
+    mkdirSync(path.join(tmp, '.git'), { recursive: true });
+    expect(spawnLedgerPath(tmp)).toBe(path.join(tmp, '.git', 'artibot', SPAWN_FILE));
+  });
+
+  it('converges a linked worktree and its main checkout on ONE file', () => {
+    // Synthetic linked-worktree layout, mirroring the shape git writes:
+    // `<wt>/.git` is a FILE pointing at `<main>/.git/worktrees/wt`, which holds
+    // a `commondir` file with a RELATIVE `../..` back to the common dir.
+    const main = path.join(tmp, 'main');
+    const wt = path.join(tmp, 'wt');
+    const mainGitDir = path.join(main, '.git');
+    const perWorktree = path.join(mainGitDir, 'worktrees', 'wt');
+    mkdirSync(perWorktree, { recursive: true });
+    writeFileSync(path.join(perWorktree, 'commondir'), '../..\n');
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(path.join(wt, '.git'), `gitdir: ${perWorktree}\n`);
+
+    // The point of the rule: N split windows must not keep divergent copies.
+    const expected = path.join(mainGitDir, 'artibot', SPAWN_FILE);
+    expect(spawnLedgerPath(main)).toBe(expected);
+    expect(spawnLedgerPath(wt)).toBe(expected);
   });
 
   it('appendSpawn writes one valid NDJSON line per call and creates the dir', () => {

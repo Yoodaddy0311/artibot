@@ -1206,7 +1206,7 @@ describe('W5-b (ADR-011) wording pins — Check 8 / Check 10', () => {
     expect(eight()).not.toContain("the worktree's own");
   });
 
-  it('Check 10 states the shared ledger path beside the tree-local spawn file', () => {
+  it('Check 10 states the shared ledger path beside the (now shared) spawn file name', () => {
     const s = ten();
     expect(s).toContain('<git-common-dir>/artibot/ledger.jsonl');
     expect(s).toContain('spawns.ndjson');
