@@ -13,7 +13,8 @@
  * two spellings to `''`, which the same presence checks reject.
  *
  * The live corpus has zero occurrences (measured 2026-09-11: 0 across 114
- * artibot + 46 cowork SKILL.md, 30 agent .md, 79 + 21 command .md), so this
+ * artibot + 46 cowork SKILL.md, 30 + 12 cowork agent .md, 79 + 21 command
+ * .md), so this
  * gate is preventive, not a cleanup. That is the point: the defect class was
  * invisible, not absent.
  *
@@ -78,8 +79,9 @@ const REQUIRED_KEYS = ['description', 'name', 'model', 'argument-hint'];
 /**
  * A required key at column 0 whose entire value is an empty quote pair.
  *
- * `[ \t]*` rather than `\s*` on purpose: `\s` would match a newline and let the
- * match run past the end of the line.
+ * `[ \t]*` rather than `\s*` to name the whitespace class explicitly. The input
+ * is already split into single lines, so the two are equivalent here; the
+ * narrower class just states the intent.
  */
 const EMPTY_QUOTED_VALUE = new RegExp(`^(${REQUIRED_KEYS.join('|')}):[ \\t]*(""|'')[ \\t]*$`);
 
