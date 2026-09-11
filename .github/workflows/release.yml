@@ -481,13 +481,6 @@ jobs:
           # Root README plugin table row — scoped to artibot row only.
           sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
-      - name: Sync README count prose
-        # Self-heal count prose ("N slash commands", "N skills", …) so a release
-        # that changes a count never leaves drift for the validate-readme-claims
-        # gate to fail on later (the manual hotfix that release ea8a3b9 was).
-        # Idempotent: a no-op when prose already matches file-system counts.
-        run: node plugins/artibot/scripts/ci/sync-readme-claims.js
-
       - name: Install plugin dependencies (for test count)
         working-directory: plugins/artibot
         # Same reasoning as the validate job's install step: the fallback must
@@ -525,6 +518,24 @@ jobs:
           else
             node plugins/artibot/scripts/ci/sync-marketplace-meta.mjs
           fi
+
+      - name: Sync README count prose
+        # Self-heal count prose ("N slash commands", "N skills", …) so a release
+        # that changes a count never leaves drift for the validate-readme-claims
+        # gate to fail on later (the manual hotfix that release ea8a3b9 was).
+        #
+        # MUST run AFTER "Sync marketplace.json metadata", not before. The test
+        # count this prose quotes is read from marketplace.json#qualityMetrics.tests
+        # (readme-claims-registry.js#collectActuals) — the field the step above
+        # writes. Running first makes it self-heal against the PREVIOUS release's
+        # number, then the marketplace step moves the number underneath it, and
+        # the badge-sync side branch fails validate-readme-claims with 4 drifted
+        # documents; badge ff then escalates to an issue. That is exactly what
+        # happened on v4.58.0 (#117) and v4.59.0 (#118), both landed by hand.
+        # (Branch/title literals stay out of this comment on purpose — the
+        # badge-stall gate pins them to a single env declaration.)
+        # Idempotent: a no-op when prose already matches its sources.
+        run: node plugins/artibot/scripts/ci/sync-readme-claims.js
 
       # ── Landing strategy ───────────────────────────────────────────────────
       # There are two ways to get the badge commit onto a protected master, and
