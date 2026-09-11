@@ -170,6 +170,146 @@ describe('guard-registry', () => {
     });
   });
 
+  // normalizeCommand keeps line breaks so that L1 (this file) and L2
+  // (lib/autopilot/safety.js) read a multi-line script the same way: a BARE
+  // newline ends a shell command, a BACKSLASH + newline does not. Everything
+  // here goes through the real executeChain path, never raw pattern.test().
+  // Measured 2026-09-11 across the full BLOCKED_PATTERNS matrix: no regression,
+  // i.e. no single dangerous shell command that used to be blocked now passes.
+  // Cell counts are not repeated here on purpose — they move whenever
+  // BLOCKED_PATTERNS changes. The table, its denominator and its measurement
+  // timestamp: docs/investigations/guard-normalize-20260911.md.
+  describe('dangerous-command guard — newline semantics', () => {
+    beforeEach(() => registerBuiltinGuards());
+    const decisionFor = (command) => executeChain(
+      'pre', 'Bash', makeHookData('Bash', { tool_input: { command } }),
+    ).decision;
+
+    describe('a bare newline separates shell commands', () => {
+      // Two safe commands. Before the newline-preserving fold, normalizeCommand
+      // collapsed the break to a space, so the trailing `-f` of `echo -f done`
+      // satisfied the force-flag lookahead of the git-branch rule and this safe
+      // script was blocked at PreToolUse. L2 always graded it safe.
+      it.each([
+        ['LF', 'git branch -d old\necho -f done'],
+        ['CRLF', 'git branch -d old\r\necho -f done'],
+      ])('approves a safe two-line script (%s)', (_eol, command) => {
+        expect(decisionFor(command)).toBe('approve');
+      });
+
+      it.each([
+        ['git', 'git\nbranch -D topic'],
+        ['git branch', 'git branch\n-D topic'],
+      ])('approves a force-delete split across lines after %s', (_where, command) => {
+        // In a shell these are two commands; neither one deletes a branch.
+        expect(decisionFor(command)).toBe('approve');
+      });
+
+      it('still blocks a dangerous command sitting on a later line', () => {
+        expect(decisionFor('echo hi\nrm -rf /tmp/x')).toBe('block');
+        expect(decisionFor('echo hi\r\nrm -rf /tmp/x')).toBe('block');
+      });
+
+      it('still blocks a dangerous first line followed by a harmless one', () => {
+        expect(decisionFor('rm -rf /tmp/x\necho hi')).toBe('block');
+        expect(decisionFor('git reset --hard\r\necho hi')).toBe('block');
+      });
+
+      it('treats a LONE carriage return as intra-line whitespace, not a break', () => {
+        // `[^\S\n]+` folds a bare CR to a space, so the lines glue and the rule
+        // still fires. That is the fail-closed direction and it matches bash,
+        // which does not terminate a command at a bare CR either.
+        const CR = String.fromCharCode(13);
+        expect(decisionFor(`git${CR}branch -D topic`)).toBe('block');
+        expect(decisionFor(`git branch -d old${CR}echo -f done`)).toBe('block');
+      });
+    });
+
+    describe('a backslash continuation is ONE command', () => {
+      const BACKSLASH = String.fromCharCode(92);
+      const cont = (eol) => ` ${BACKSLASH}${eol}`;
+
+      it.each([
+        ['LF', `rm -rf${cont('\n')}foo/`],
+        ['CRLF', `rm -rf${cont('\r\n')}foo/`],
+      ])('blocks rm -rf with a continued path (%s)', (_eol, command) => {
+        // Joining the continuation is what keeps this blocked: with a naive
+        // [^\S\n] fold the backslash survives, `.*` cannot cross the newline,
+        // and the command would newly pass.
+        expect(decisionFor(command)).toBe('block');
+      });
+
+      it.each([
+        ['LF', `git branch -d topic${cont('\n')}-f`],
+        ['CRLF', `git branch -d topic${cont('\r\n')}-f`],
+      ])('blocks a git-branch force delete continued onto the next line (%s)', (_eol, command) => {
+        expect(decisionFor(command)).toBe('block');
+      });
+
+      it.each([
+        ['git reset --hard', `git${cont('\n')}reset --hard`],
+        ['git push -f', `git push${cont('\n')}-f origin main`],
+        ['chmod -R 777', `chmod -R${cont('\n')}777 /var/www`],
+        ['redirect to device', `cat payload >${cont('\n')}/dev/sda`],
+      ])('blocks %s written as a continuation', (_label, command) => {
+        // These all PASSED before the change: the old unescape step never
+        // crossed a newline, so a stray backslash sat between the tokens.
+        expect(decisionFor(command)).toBe('block');
+      });
+    });
+
+    describe('`$`-anchored rules keep their reach', () => {
+      // blocked-patterns.js rules anchored with `\s*$`: git checkout . / git
+      // restore . / DELETE FROM without WHERE / empty PATH. None is weakened by
+      // the fold (0 of 24 cells changed, measured 2026-09-11), so the `m` flag
+      // stays off — with /m, `DELETE FROM users\nWHERE id = 1` would become a
+      // new false positive.
+      const ANCHORED = ['git checkout .', 'git restore .', 'delete from users;', 'export PATH='];
+
+      it.each(ANCHORED)('blocks %s on a single line', (base) => {
+        expect(decisionFor(base)).toBe('block');
+      });
+      it.each(ANCHORED)('blocks %s with a trailing LF', (base) => {
+        expect(decisionFor(`${base}\n`)).toBe('block');
+      });
+      it.each(ANCHORED)('blocks %s with a trailing CRLF', (base) => {
+        expect(decisionFor(`${base}\r\n`)).toBe('block');
+      });
+      it.each(ANCHORED)('blocks %s with trailing spaces before the newline', (base) => {
+        // Pinning that no per-line trim is needed: the raw variant's `\s*$`
+        // already eats the spaces and the break.
+        expect(decisionFor(`${base}   \n`)).toBe('block');
+      });
+      it.each(ANCHORED)('approves %s when another line follows (unchanged by the fold)', (base) => {
+        // Measured both before and after: `pass` in both. The anchor never
+        // reached past the first line, and the old fold produced
+        // `git checkout . echo hi`, which does not match either.
+        expect(decisionFor(`${base}\necho hi`)).toBe('approve');
+        expect(decisionFor(`${base}\r\necho hi`)).toBe('approve');
+      });
+    });
+
+    describe('linear scan on adversarial input', () => {
+      const BACKSLASH = String.fromCharCode(92);
+      it.each([
+        ['40KB newlines', '\n'.repeat(40 * 1024)],
+        ['120KB newlines', '\n'.repeat(120 * 1024)],
+        ['40KB spaces', ' '.repeat(40 * 1024)],
+        ['120KB spaces', ' '.repeat(120 * 1024)],
+        ['40KB CRLF', '\r\n'.repeat(20 * 1024)],
+        ['120KB CRLF', '\r\n'.repeat(60 * 1024)],
+        ['40KB continuations', `${BACKSLASH}\n`.repeat(20 * 1024)],
+        ['120KB continuations', `${BACKSLASH}\n`.repeat(60 * 1024)],
+        ['40KB mixed', 'a \n'.repeat(13 * 1024)],
+        ['120KB mixed', 'git branch a \n'.repeat(8 * 1024)],
+      ])('stays under 50ms on %s', (_label, command) => {
+        const started = performance.now();
+        decisionFor(command);
+        expect(performance.now() - started).toBeLessThan(50);
+      });
+    });
+  });
+
   describe('sensitive-file guard', () => {
     beforeEach(() => registerBuiltinGuards());
     it.each(['/project/.env', '/project/.env.local', '/project/credentials.json',

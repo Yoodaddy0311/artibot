@@ -52,6 +52,25 @@ const BLOCKED_PATTERNS = Object.freeze([
   // ── Disk / device ───────────────────────────────────────────────────
   { pattern: /mkfs\./i, label: 'format filesystem', category: 'disk' },
   { pattern: /dd\s+if=/i, label: 'dd raw disk write', category: 'disk' },
+  // The rule above only sees `if=` sitting immediately after `dd`, so
+  // `dd of=/dev/sda` and `sudo dd bs=4M if=img of=/dev/sdb` walked through L1
+  // while L2 (`dd-device-write`, lib/autopilot/safety.js) graded both danger
+  // (measured 2026-09-11). This rule closes that direction. It stays BELOW the
+  // `dd\s+if=` rule on purpose: callers take the first match, and
+  // tests/hooks/pre-bash.test.js pins `dd if=/dev/zero of=/dev/sda` to the
+  // 'dd raw disk write' label.
+  // WINDOW BOUND (ReDoS). L2 writes this as `\bdd\b[^\n]*\sof=\/dev\/`. That
+  // shape is quadratic: every `dd` start scans the rest of the line. Measured
+  // 2026-09-11 (node v24.15.0, single regex, `'dd '.repeat(n)` non-matching):
+  //   unbounded   40KB 456.6ms · 120KB 3808.1ms   ← blows the 50ms convention
+  //   {0,512}     40KB  29.7ms · 120KB   72.0ms
+  //   {0,192}     40KB   8.3ms · 120KB   25.7ms   ← chosen
+  // WHAT THE BOUND GIVES UP: more than 192 characters between `dd` and the
+  // ` of=` token (a very long image path, a pile of operands) evades THIS rule.
+  // L2 is unbounded and still grades such a command danger, so the miss is a
+  // PreToolUse gap, not a full-stack one. Do not raise the bound without
+  // re-measuring 120KB — 256 already lands at 43.6ms.
+  { pattern: /\bdd\b[^\n]{0,192}\sof=\/dev\//i, label: 'dd write to block device', category: 'disk' },
   { pattern: />\s*\/dev\/sd/i, label: 'write to disk device', category: 'disk' },
   { pattern: /format\s+[a-z]:/i, label: 'format drive (Windows)', category: 'disk' },
   { pattern: /diskpart/i, label: 'diskpart (Windows disk management)', category: 'disk' },
@@ -96,17 +115,16 @@ const BLOCKED_PATTERNS = Object.freeze([
   // "anywhere" includes after the branch name (`git branch -d topic -f`, which
   // git really does honour). A backslash line continuation (`\` + LF or CRLF)
   // keeps the run open — it is one command.
-  // THE NEWLINE BOUND IN THIS PATTERN DOES NOT REACH L1 BEHAVIOUR. The pattern
-  // stops an option run at a bare newline, but checkDangerousCommand below also
-  // tests a normalizeCommand variant, and normalizeCommand collapses every \s+
-  // run to one space (guard-registry.js#normalizeCommand). So the newline is
-  // already gone by the time this pattern runs on the second variant, and
-  // `git branch -d old\necho -f done` is still blocked here while L2 grades it
-  // safe (measured 2026-09-11 through executeChain). Do NOT "fix" that by
-  // loosening this pattern — the normalization is shared by all 38 rules and
-  // changing `/\s+/g` to `/[^\S\n]+/g` is a separate piece of work. The
-  // divergence is pinned as an owner-decision row in
-  // tests/core/guard-registry-safe-override-scope.test.js.
+  // THE NEWLINE BOUND IN THIS PATTERN NOW REACHES L1 BEHAVIOUR. The pattern
+  // stops an option run at a bare newline, and normalizeCommand
+  // (guard-registry.js#normalizeCommand) preserves that newline: it joins a
+  // backslash continuation (`\` + LF or CRLF) into one space, normalizes CRLF
+  // to LF, and folds only intra-line whitespace. It used to collapse every \s+
+  // run — including bare newlines — to one space, which made this pattern's
+  // newline bound invisible on the normalized variant. So L1 and L2 now share
+  // the newline boundary: `git branch -d old\necho -f done` is L1 approve /
+  // L2 safe, pinned through executeChain in tests/core/guard-registry.test.js
+  // and as a row in the parity matrix.
   // Tokens and separators cannot parse two ways — the option branch demands a
   // dash then \w, the argument branch forbids a leading dash, the continuation
   // branch starts with a backslash (never whitespace) — so the scan is linear
@@ -131,13 +149,45 @@ const BLOCKED_PATTERNS = Object.freeze([
   // ── Package publishing ──────────────────────────────────────────────
   { pattern: /npm\s+publish/i, label: 'npm publish', category: 'package' },
 
-  // ── System shutdown / reboot ────────────────────────────────────────
+  // ── System shutdown / reboot / local DoS ────────────────────────────
   { pattern: /shutdown\s/i, label: 'system shutdown', category: 'system' },
   { pattern: /reboot\b/i, label: 'system reboot', category: 'system' },
   { pattern: /init\s+0\b/i, label: 'init 0 (halt)', category: 'system' },
+  // This rule used to read `/:(){ :\|:& };:/i` and sit under 'Network abuse'.
+  // Two defects, both latent from the start (measured 2026-09-11 through
+  // executeChain, not a regression):
+  //   1. `()` was an EMPTY CAPTURE GROUP, not a literal pair of parentheses.
+  //      The string the regex actually demanded was `:{ :|:& };:` — a name
+  //      the shell cannot run. The real fork bomb `:(){ :|:& };:` was
+  //      APPROVED, and so were `: () { :|:& };:` and `:(){:|:&};:`.
+  //   2. It exhausts local process slots; nothing about it is network abuse.
+  //      Hence category 'system'. No consumer keys on the category value
+  //      (verified 2026-09-11), and 'network' survives on the wget/curl rules.
+  // The parentheses are now escaped and optional, so the paren-less shape the
+  // old regex caught stays caught — this is a strict superset, no loosening.
+  // Separators are `\s*` (newline included: a function body may span lines).
+  // LINEARITY — the invariant is NOT "each `\s*` is followed by a literal".
+  // The first draft of this rule read `:\s*(?:\(\s*\))?\s*\{` and was QUADRATIC
+  // (review found it 2026-09-11): the optional group sits between two `\s*`, so
+  // a run of N spaces could be split N ways between them before `\{` failed.
+  // Measured on the old shape: `':' + ' '.repeat(40000) + 'x'` 1255ms, the same
+  // with newlines 1077ms, 120KB spaces 17199ms — 3x the input, 13.7x the time.
+  // The colon-dense inputs the tests used at the time never built a long
+  // whitespace run, so they were green on a quadratic regex.
+  // THE INVARIANT THAT ACTUALLY HOLDS HERE: no two `\s*` are separated only by
+  // an optional group. The single leading `\s*` is shared by both branches and
+  // every other `\s*` is followed by a distinct literal, so one whitespace run
+  // is never divided between two quantifiers. Keep it that way when editing:
+  // moving that `\s*` inside or outside the group is not cosmetic.
+  // Measured after the fix (single regex): 40KB spaces 0.1ms, 40KB newlines
+  // 0.1ms, 120KB spaces 0.5ms, 120KB newlines 0.4ms.
+  {
+    pattern: /:\s*(?:\(\s*\)\s*)?\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,
+    label: 'fork bomb',
+    category: 'system',
+  },
 
   // ── Network abuse ───────────────────────────────────────────────────
-  { pattern: /:(){ :\|:& };:/i, label: 'fork bomb', category: 'network' },
   { pattern: /wget\s+.*\|\s*(sh|bash|zsh|python[23]?|perl|ruby|node)/i, label: 'wget pipe to interpreter', category: 'network' },
   { pattern: /curl\s+.*\|\s*(sh|bash|zsh|python[23]?|perl|ruby|node)/i, label: 'curl pipe to interpreter', category: 'network' },
 
