@@ -57,6 +57,8 @@ Run locally: `node scripts/ci/lint-skill-descriptions.js` (exits non-zero on new
 
 Triggers are what the model matches against incoming user utterances to decide whether to load this skill at all.
 
+**`triggers:` is not a host activation field.** The host activates a skill from its `description` (plus `when_to_use`); it never reads the `triggers:` key. Measured 2026-09-11 on claude 2.1.268: trigger phrases rendered 0 times across 3 runs, and the binary's recognised-key array does not list `triggers` — the render count is measured, while "that array is the complete set of recognised keys" is inference and the official documentation was not read. Every consumer of `triggers:` in this repo is Artibot's own tooling (`scripts/gen-skill-docs.js`, `scripts/hooks/skill-validation-check.js`, `lib/core/skill-exporter.js`, `lib/adapters/adapter-utils.js`, `lib/sdk/artibot-sdk.js`). The practical consequence for the rules below: vocabulary you cut from `description` to keep it short is **not** preserved for host activation by moving it into `triggers:`. If a phrase has to make the skill fire, it belongs in `description`.
+
 **Rules**:
 - Include ≥3 real user utterances, at least one in Korean.
 - Cover implicit signals (not just explicit requests) — a user asking "how do I structure this?" while editing a SKILL.md is an implicit trigger.

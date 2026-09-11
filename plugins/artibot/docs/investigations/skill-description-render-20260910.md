@@ -255,8 +255,10 @@ git diff --stat 90505f0c HEAD -- plugins/artibot/skills plugins/artibot/commands
 node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.USERPROFILE+'/.claude.json','utf8')).skillUsage)"
 
 # 격리 실험 (임시 디렉터리 cwd — git 리포 안에서 실행 금지: SessionStart 훅이 브랜치를 옮긴다)
-claude -p --setting-sources "" --strict-mcp-config --plugin-dir <임시플러그인> --tools Skill \
-  --model claude-haiku-4-5-20251001 --max-turns 1 --debug "list skills"   # 목록은 세션 jsonl $.rendered[0].content 에서 추출
+# 프롬프트는 `-p` 바로 뒤에 둔다. 2.1.268 에서 `--debug "list skills"` 로 쓰면
+# `--debug` 가 프롬프트를 자기 인자로 삼켜 프롬프트 없이 실행되고 exit 1 로 끝난다(실측 2026-09-11).
+claude -p "list skills" --setting-sources "" --strict-mcp-config --plugin-dir <임시플러그인> --tools Skill \
+  --model claude-haiku-4-5-20251001 --max-turns 1 --debug                 # 목록은 세션 jsonl $.rendered[0].content 에서 추출
 SLASH_COMMAND_TOOL_CHAR_BUDGET=100000 claude -p ...                        # 예산 덮어쓰기 검증
 grep -n "Skill listing over budget" <debug 로그>                            # 예산 초과 신호: "[WARN] Skill listing over budget: N skills, C chars > B budget — descriptions will be truncated." 부재 = 예산 내
 claude -p --model claude-opus-5[1m] ...                                    # 1M 창 예산 비례 확인(E5: 동일 pgC 60/60)

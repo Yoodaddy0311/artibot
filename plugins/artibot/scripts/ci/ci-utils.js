@@ -513,7 +513,17 @@ export function extractFrontmatter(content) {
       // Inline values keep their raw text, quotes and all: consumers compare
       // these strings as written. List values (a bare `key:` with `- item`
       // lines beneath) still do not match `(.+)` and remain unparsed, as before.
-      fields[kv[1].trim()] = value;
+      //
+      // One exception: the two EMPTY quote spellings `""` and `''` fold to
+      // `''`. Kept raw they were 2-character truthy strings, so a key present
+      // with no value passed every presence check — `description: ""` was
+      // PASS/PASS/PASS across validate-skills, validate-agents and
+      // validate-commands (measured 2026-09-11), the same fail-open the empty
+      // block scalar had. The exception is spelling-exact, NOT a trim or a
+      // general unquote: `" "` and `"a"` stay verbatim (pinned in
+      // `tests/ci/ci-utils.test.js`), because stripping quotes generally would
+      // change what every consumer compares.
+      fields[kv[1].trim()] = value === '""' || value === "''" ? '' : value;
       continue;
     }
     // Fold the body: every following indented or blank line, stopping at the

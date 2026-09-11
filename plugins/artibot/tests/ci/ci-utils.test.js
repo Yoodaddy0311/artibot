@@ -499,6 +499,53 @@ describe('extractFrontmatter', () => {
     expect(fields.name).toBe('demo');
   });
 
+  it('normalizes an empty double-quoted inline value to a falsy empty string', () => {
+    // `description: ""` is a key present with no description. Storing the raw
+    // two-character string made it truthy, so every presence check in
+    // validate-skills/agents/commands reported green (measured 2026-09-11:
+    // PASS/PASS/PASS on all three). Only the two EMPTY spellings normalize.
+    const fields = extractFrontmatter('---\nname: demo\ndescription: ""\n---\n\nbody\n');
+    expect(fields.description).toBe('');
+    expect(Boolean(fields.description)).toBe(false);
+    expect(fields.name).toBe('demo');
+  });
+
+  it('normalizes an empty single-quoted inline value to a falsy empty string', () => {
+    const fields = extractFrontmatter("---\nname: demo\ndescription: ''\n---\n\nbody\n");
+    expect(fields.description).toBe('');
+    expect(Boolean(fields.description)).toBe(false);
+  });
+
+  it('keeps a quoted single space verbatim', () => {
+    // The normalization is spelling-exact, not a trim: `" "` is a value with
+    // content as far as this parser is concerned, and stripping its quotes
+    // would change what consumers compare. Widening to "semantically empty"
+    // values is deliberately out of scope.
+    const fields = extractFrontmatter('---\nname: demo\ndescription: " "\n---\n');
+    expect(fields.description).toBe('" "');
+    expect(Boolean(fields.description)).toBe(true);
+  });
+
+  it('keeps a quoted non-empty value verbatim', () => {
+    const fields = extractFrontmatter('---\nname: demo\ndescription: "a"\n---\n');
+    expect(fields.description).toBe('"a"');
+  });
+
+  it('normalizes empty quoted values in CRLF files too', () => {
+    // Without CRLF normalization the value would be `""\r`, which matches
+    // neither spelling and would stay truthy on Windows-checkout files only.
+    const fields = extractFrontmatter('---\r\nname: demo\r\ndescription: ""\r\nmodel: opus\r\n---\r\n');
+    expect(fields.description).toBe('');
+    expect(fields.model).toBe('opus');
+  });
+
+  it('normalizes empty quotes for every required field, not just description', () => {
+    const fields = extractFrontmatter(
+      '---\nname: ""\ndescription: \'\'\nmodel: ""\nargument-hint: ""\n---\n',
+    );
+    expect(fields).toEqual({ name: '', description: '', model: '', 'argument-hint': '' });
+  });
+
   it('reads the live lang-reference description as folded prose', () => {
     const file = path.join(REAL_REPO_ROOT, 'plugins', 'artibot', 'skills', 'lang-reference', 'SKILL.md');
     const fields = extractFrontmatter(readFileSync(file, 'utf-8'));

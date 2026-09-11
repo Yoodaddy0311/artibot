@@ -29,7 +29,7 @@
     "triggers": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Keywords or phrases that auto-activate this skill."
+      "description": "Keywords or phrases for Artibot's own tooling. NOT a host activation field: the host activates a skill from `description` (plus `when_to_use`) and does not read `triggers` — measured 2026-09-11 on claude 2.1.268, where trigger tokens rendered 0 times across 3 runs, and the binary's recognised-key array does not list it (that the array is the COMPLETE set of recognised keys is inference, not measured; the official docs were not read). Consumers are all Artibot tools: scripts/gen-skill-docs.js, scripts/hooks/skill-validation-check.js, lib/core/skill-exporter.js, lib/adapters/adapter-utils.js, lib/sdk/artibot-sdk.js. Vocabulary dropped from `description` is therefore NOT preserved for host activation by moving it here."
     },
     "agents": {
       "type": "array",
