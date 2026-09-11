@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { BLOCKED_PATTERNS, CATEGORIES } from '../../lib/core/blocked-patterns.js';
+import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
 
 /** 백슬래시. 리터럴로 쓰면 이스케이프 단계에서 사고가 난다. */
 const BACKSLASH = String.fromCharCode(92);
+/** 콜론. 포크밤 문자열을 조립해 파일 안에 실행형 리터럴을 남기지 않는다. */
+const COLON = String.fromCharCode(58);
 
 describe('blocked-patterns', () => {
   describe('BLOCKED_PATTERNS', () => {
@@ -233,13 +236,9 @@ describe('blocked-patterns', () => {
       'git branch -d feature; rm -f x',
       // 줄바꿈도 런을 끝낸다. 둘째 줄은 그 자체로 통과하는 명령이어야
       // 이 경계만 검증한다(검수 정규식 실측 오탐 2건).
-      // 주의: 이 두 줄은 **원시 패턴** 기준이다. 실제 L1 경로
-      // (guard-registry#checkDangerousCommand)는 normalizeCommand 가
-      // `/\s+/g` 로 줄바꿈을 접은 변형도 대조하므로 `git branch -d old` +
-      // 줄바꿈 + `echo -f done` 은 **여전히 block 된다**. 그 불일치는
-      // tests/core/guard-registry-safe-override-scope.test.js 의
-      // owner-decision 행이 판정 경로에서 핀한다. 여기서 그린이라고
-      // "L1 에서 줄바꿈 경계가 산다"고 읽으면 안 된다.
+      // 여기 두 줄은 **원시 패턴** 기준이다. 실제 판정 경로(executeChain)
+      // 단언은 tests/core/guard-registry.test.js 에 있고, 패리티 매트릭스가
+      // 이 줄바꿈 케이스를 L1 approve / L2 safe 로 핀한다.
       'git branch -d old\nnpm run build -- --force',
       'git branch -d feature\necho -f done',
       // 줄 연속 뒤라도 셸 구분자는 런을 끝낸다.
@@ -403,6 +402,212 @@ describe('blocked-patterns', () => {
         expect(match).toBeUndefined();
       });
     }
+  });
+
+  describe('dd write to a block device', () => {
+    // 기존 `dd\s+if=` 규칙은 `if=` 가 `dd` 바로 뒤에 올 때만 잡는다. 그래서
+    // `dd of=/dev/sda` 와 `sudo dd bs=4M if=img of=/dev/sdb` 가 L1 을 통과했다
+    // (측정 2026-09-11). L2(lib/autopilot/safety.js `dd-device-write`)는 같은
+    // 명령을 danger 로 본다 — L1 이 더 느슨한 방향의 불일치였다.
+    const deviceWrites = [
+      'dd of=/dev/sda',
+      'sudo dd bs=4M if=img of=/dev/sdb',
+      'dd bs=1M count=10 of=/dev/nvme0n1',
+      'DD OF=/DEV/SDA',
+    ];
+
+    for (const cmd of deviceWrites) {
+      it(`should block "${cmd}" via the device-write rule`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.category).toBe('disk');
+        expect(match.label).toBe('dd write to block device');
+      });
+    }
+
+    // `if=` 가 바로 뒤에 오는 형태는 기존 규칙이 먼저 잡는다. 규칙 순서를
+    // 바꾸면 tests/hooks/pre-bash.test.js 의 라벨 단언이 깨진다.
+    const legacyFirst = [
+      'dd if=/dev/zero of=/dev/sda',
+      'dd if=a.img of=b.img',
+    ];
+
+    for (const cmd of legacyFirst) {
+      it(`keeps "${cmd}" on the pre-existing dd rule`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeDefined();
+        expect(match.label).toBe('dd raw disk write');
+      });
+    }
+
+    it('also matches the device-write rule on dd if=/dev/zero of=/dev/sda', () => {
+      const rule = BLOCKED_PATTERNS.find((p) => p.label === 'dd write to block device');
+      expect(rule).toBeDefined();
+      expect(rule.pattern.test('dd if=/dev/zero of=/dev/sda')).toBe(true);
+    });
+
+    // 경계. `\bdd\b` 가 `add` 안에서 발화하면 안 된다.
+    const allowed = [
+      'echo "add of=/dev/sda"',
+      'git add of=/dev/null.txt',
+      'dd --help',
+      'grep dd file',
+      'dd of=/devices/x',
+      'dd of=backup.img',
+    ];
+
+    for (const cmd of allowed) {
+      it(`should not block "${cmd}"`, () => {
+        const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(cmd));
+        expect(match).toBeUndefined();
+      });
+    }
+
+    // ReDoS. `\bdd\b[^\n]*\sof=\/dev\/` 는 `dd` 시작 지점마다 줄 끝까지 훑어
+    // 적대 입력에서 2차식이 된다. 창을 [^\n]{0,192} 로 묶은 뒤의 실측을 핀한다.
+    it('does not blow up on a 40KB non-matching dd run', () => {
+      const started = performance.now();
+      BLOCKED_PATTERNS.find((p) => p.pattern.test(`${'dd '.repeat(13334)}x`));
+      expect(performance.now() - started).toBeLessThan(50);
+    });
+
+    // 120KB 는 벽시계 절대값으로 걸지 않는다. 로컬 실측이 28.2ms 라 50ms 대비
+    // 여유가 1.8배뿐이고, 8파일 병렬 실행에서 실제로 1회 흔들렸다(2026-09-11
+    // 14:24). 대신 결함의 원인인 **무한 창**을 구조로 고정한다 — 이건 부하와
+    // 무관하게 결정적이다.
+    // 이 단언이 못 보는 것: 실행 시간을 재지 않는다. 누가 창을 {0,100000} 으로
+    // 키우면 여기는 통과하고 40KB 단언이 잡아야 한다. 실측 수치는 규칙 옆
+    // 주석(lib/core/blocked-patterns.js, 'WINDOW BOUND (ReDoS)')에 있다.
+    it('bounds the dd device-write window instead of scanning to end of line', () => {
+      const rule = BLOCKED_PATTERNS.find((p) => p.label === 'dd write to block device');
+      expect(rule).toBeDefined();
+      expect(rule.pattern.source).not.toContain('[^\\n]*');
+      const bound = rule.pattern.source.match(/\[\^\\n\]\{0,(\d+)\}/);
+      expect(bound).not.toBeNull();
+      expect(Number(bound[1])).toBeLessThanOrEqual(256);
+    });
+
+    // 120KB 는 종료·정확성만 본다(시간 단언 없음). 무한 창이 돌아오면 여기는
+    // 느려질 뿐 실패하지 않는다 — 그건 위 구조 단언이 잡는다.
+    it('returns no match on a 120KB non-matching dd run', () => {
+      const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(`${'dd '.repeat(40000)}x`));
+      expect(match).toBeUndefined();
+    });
+
+    it('does not blow up on a 44KB close-miss run (of=/dev without the slash)', () => {
+      const started = performance.now();
+      BLOCKED_PATTERNS.find((p) => p.pattern.test(`${'dd of=/dev '.repeat(4000)}x`));
+      expect(performance.now() - started).toBeLessThan(50);
+    });
+
+    it('stays fast on a 52KB matching run', () => {
+      const started = performance.now();
+      const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(`${'dd of=/dev/x '.repeat(4000)}`));
+      expect(match).toBeDefined();
+      expect(performance.now() - started).toBeLessThan(50);
+    });
+  });
+
+  // `()` 안에 아무것도 없는 캡처그룹이라 종전 규칙 `/:(){ :\|:& };:/i` 이
+  // 실제로 요구한 문자열은 `:{ :|:& };:` 였다. 즉 표준 포크밤은 approve 였고
+  // 셸에서 의미 없는 문자열만 block 이었다(executeChain 실측 2026-09-11 14:15,
+  // 표준형·공백변형·무공백형 전부 approve). 회귀가 아니라 잠복 결함이다.
+  // 판정은 executeChain 경로로 건다 — 원시 pattern.test 로는 normalizeCommand 의
+  // 따옴표 벗기기가 판정에 끼치는 영향을 볼 수 없다. dangerous-command 가드는
+  // category 'security-critical'(lib/core/guard-registry.js#registerBuiltinGuards)
+  // 이라 cwd 가 Artibot 리포가 아니어도 실행된다 — guard-registry.test.js 가 쓰는
+  // isArtibotRepo 스텁이 여기서는 필요 없다.
+  describe('fork bomb', () => {
+    beforeEach(() => {
+      resetGuards();
+      registerBuiltinGuards();
+    });
+
+    const decisionFor = (command) => executeChain(
+      'pre', 'Bash', { tool_name: 'Bash', tool_input: { command } },
+    ).decision;
+
+    const CANONICAL = `${COLON}(){ ${COLON}|${COLON}& };${COLON}`;
+    const SPACED = `${COLON} () { ${COLON} | ${COLON} & } ; ${COLON}`;
+    const TIGHT = `${COLON}(){${COLON}|${COLON}&};${COLON}`;
+    // 괄호 없는 형태. 셸에서는 `:{` 가 함수 정의가 아니라 이름이 `:{` 인 명령이라
+    // 실행되지 않지만, 종전 규칙이 유일하게 잡던 형태다. 새 규칙은 괄호를 선택
+    // 그룹으로 두어 이 차단을 그대로 유지한다 — 완화 0, 강화만.
+    const LEGACY = `${COLON}{ ${COLON}|${COLON}& };${COLON}`;
+
+    it.each([
+      ['canonical', CANONICAL],
+      ['spaced', SPACED],
+      ['no inner spaces', TIGHT],
+      ['legacy paren-less shape', LEGACY],
+    ])('blocks the %s shape through executeChain', (_name, command) => {
+      expect(decisionFor(command)).toBe('block');
+    });
+
+    it.each([
+      ['canonical', CANONICAL],
+      ['spaced', SPACED],
+      ['no inner spaces', TIGHT],
+      ['legacy paren-less shape', LEGACY],
+    ])('matches the fork bomb rule for the %s shape', (_name, command) => {
+      const match = BLOCKED_PATTERNS.find((p) => p.pattern.test(command));
+      expect(match).toBeDefined();
+      expect(match.label).toBe('fork bomb');
+      expect(match.category).toBe('system');
+    });
+
+    // 따옴표 안에 있어도 block 이다. normalizeCommand 가 따옴표를 벗기므로
+    // 판정 경로가 본문을 그대로 본다. 인용문을 echo 하는 것 자체는 무해하지만
+    // 방향이 차단 쪽이라 의도된 동작으로 핀한다.
+    it('blocks the fork bomb even when it is quoted inside echo', () => {
+      expect(decisionFor(`echo '${CANONICAL}'`)).toBe('block');
+    });
+
+    // 경계. `:` 는 셸의 no-op 이라 정상 스크립트에 흔하다.
+    it.each([
+      `echo hi; ${COLON}`,
+      `function f() { ${COLON}; }`,
+      `while ${COLON}; do sleep 1; done`,
+      'build: ; @echo hi',
+      `${COLON}() { echo hi; }`,
+    ])('approves %j', (command) => {
+      expect(decisionFor(command)).toBe('approve');
+    });
+
+    // 토큰 사이 구분자가 `\s*` 로 늘어난 뒤의 적대 입력.
+    // 아래 콜론이 촘촘한 세 입력은 **거짓 그린이었다**: 긴 공백 런을 만들지
+    // 않아 머리 부분의 모호 구간을 건드리지 못했다. 검수 실측(2026-09-11 14:45)
+    // 이 잡아낸 진짜 최악 입력은 그 다음 세 개 — 콜론 하나 뒤에 공백/개행이
+    // 길게 이어지는 형태다. 수리 전 측정: 40KB 공백 1,255ms · 40KB 개행
+    // 1,077ms · 120KB 공백 17,199ms (크기 3배에 시간 13.7배 = 2차식).
+    // `:` 는 셸 no-op 이라 정상 스크립트에도 흔하고, normalizeCommand 는 개행
+    // 런을 보존하므로 원시·정규화 두 변형 다 이 입력을 만난다.
+    it.each([
+      ['40KB colon run', COLON.repeat(40000)],
+      ['40KB colon-paren run', `${COLON} () `.repeat(8000)],
+      ['40KB colon-brace run', `${COLON}(){ ${COLON}|${COLON}& `.repeat(4000)],
+      ['40KB space run after a single colon', `${COLON}${' '.repeat(40000)}x`],
+      ['40KB newline run after a single colon', `${COLON}${'\n'.repeat(40000)}x`],
+      ['40KB space run after colon-brace-colon', `${COLON}{${COLON}${' '.repeat(40000)}x`],
+      // 꼬리 쪽 `\s*` 들도 같은 계열로 훑는다 — 머리만 고치고 꼬리를 안 보면
+      // 같은 거짓 그린을 반복한다.
+      ['40KB space run after an almost-complete fork bomb', `${COLON}{${COLON}|${COLON}&};${' '.repeat(40000)}x`],
+      ['40KB mixed space/newline run after a single colon', `${COLON}${' \n'.repeat(20000)}x`],
+    ])('does not blow up on a %s', (_name, input) => {
+      const started = performance.now();
+      BLOCKED_PATTERNS.find((p) => p.pattern.test(input));
+      expect(performance.now() - started).toBeLessThan(50);
+    });
+
+    // 120KB 는 종료·비매치만 본다(벽시계 없이 — dd 120KB 와 같은 방식).
+    // 2차식이 돌아오면 여기는 느려질 뿐 실패하지 않는다. 그건 위 40KB 단언이
+    // 잡는다.
+    it.each([
+      ['space', `${COLON}${' '.repeat(120000)}x`],
+      ['newline', `${COLON}${'\n'.repeat(120000)}x`],
+    ])('returns no match on a 120KB %s run after a single colon', (_name, input) => {
+      expect(BLOCKED_PATTERNS.find((p) => p.pattern.test(input))).toBeUndefined();
+    });
   });
 
   describe('safe commands should not match', () => {
