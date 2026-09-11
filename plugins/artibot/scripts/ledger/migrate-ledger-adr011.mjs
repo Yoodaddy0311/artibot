@@ -4,7 +4,7 @@
  * linked-worktree ledger into ONE shared file, fail-closed.
  *
  * This is NOT a library and NOT wired into any runtime path. It is the
- * "1회 이관 절차" step 2 of `.artibot/split/worktree-ledger-store/adr-011-draft.md`
+ * "1회 이관 절차" step 2 of `.artibot/adr/ADR-011-worktree-ledger-store.md`
  * run by hand, once, after the code has shipped AND the installed copy has been
  * refreshed AND every split window is closed. Keeping it untracked and
  * argument-driven is deliberate: the target path must be supplied by the caller,
@@ -12,9 +12,10 @@
  * being changed by the same limb and a migration must not depend on which
  * version of the resolver happens to be loaded.
  *
- * PROVENANCE (tracked copy). Promoted from the W5-b dry-run tool
- * `.artibot/split/worktree-ledger-store/migrate-ledger.mjs`
- * (sha256 3379aa6fb3d7bc0c668a0955654ccd7885a6335eb524cc7e86e752a7ebecca12);
+ * PROVENANCE (tracked copy). Promoted from the W5-b dry-run tool that lived in
+ * the limb worktree's run-local split folder (untracked; preserved in the
+ * leader handoff; sha256
+ * 3379aa6fb3d7bc0c668a0955654ccd7885a6335eb524cc7e86e752a7ebecca12);
  * no logic was rewritten. It is the tool named by ADR-011 "1회 이관
  * 절차" step 2. Being tracked does NOT wire it into any runtime path or CI step:
  * the real migration stays a one-time MANUAL run by a human, after ADR-011
