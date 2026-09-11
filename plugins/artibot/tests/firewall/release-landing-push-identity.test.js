@@ -66,7 +66,7 @@
  *   - **`git push` 이외의 유출 경로는 보지 않는다.** 누가 `curl` 로 REST push
  *     를 하거나 새 스텝을 추가하면 여기 걸리지 않는다.
  *
- * @module tests/firewall/release-landing-credentials
+ * @module tests/firewall/release-landing-push-identity
  */
 
 import { existsSync, readFileSync } from 'node:fs';
