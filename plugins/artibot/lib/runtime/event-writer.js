@@ -3,9 +3,16 @@
  * per-line byte cap, secret redaction, and the single append primitive.
  *
  * ONE physical ledger of record (design ARTIBOT-5.0-DESIGN.md §3.6; lane 6
- * §2.1/§5-①):
+ * §2.1/§5-①) — one JSON object per line, in whichever of these two places the
+ * shared store rule names (`lib/project-state/store-location.js`, ADR-011):
  *
- *   <projectRoot>/.artibot/runtime/ledger.jsonl   — one JSON object per line
+ *   <git-common-dir>/artibot/ledger.jsonl       — shared by every linked
+ *       worktree, because they all share the main checkout's common dir. This
+ *       is what makes "ONE physical ledger" true when `/split` windows exist;
+ *       a per-worktree ledger gave N windows N divergent files.
+ *   <projectRoot>/.artibot/runtime/ledger.jsonl  — fallback when no git common
+ *       dir resolves (non-git roots, tmpdir fixtures). Per-tree, and therefore
+ *       byte-identical to the pre-ADR-011 behavior for those callers.
  *
  * `projectRoot` is INJECTED, never derived here. `pluginRoot` also has a
  * `runtime/` directory, so the leading `.artibot/` in the configured path is
@@ -78,6 +85,8 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { readClock } from '../core/clock.js';
+import { resolveGitCommonDir } from '../project-state/git-common-dir.js';
+import { resolveStoreLocation } from '../project-state/store-location.js';
 import { SOURCES } from '../supervisor/event-types.js';
 import { redactDeep, UNSAFE_KEYS } from './ledger-redaction.js';
 import {
@@ -231,13 +240,36 @@ export function getLedgerSettings(opts = {}) {
 }
 
 /**
- * Absolute ledger file path for a project root.
+ * Absolute ledger file path for a project root — ONE rule, two cases, and an
+ * explicit override that bypasses both (ADR-011).
+ *
+ * The location rule is NOT defined here: it is
+ * `lib/project-state/store-location.js#resolveStoreLocation`, the same module
+ * the StateStore uses. That shared import is the point — `/doctor` Check 8
+ * compares the journal's `state_version` set against this ledger's, so the two
+ * must answer "where does this project's history live?" from one rule or the
+ * comparison is between stores that were never meant to line up.
+ *
+ * `opts.ledgerPath` still joins against `projectRoot` directly. Callers that
+ * name a path are asking for THAT path, and test fixtures rely on it to write
+ * somewhere predictable without synthesizing a repository.
+ *
  * @param {string} projectRoot
  * @param {{ledgerPath?: string}} [opts]
  * @returns {string}
  */
 export function ledgerFilePath(projectRoot, opts = {}) {
-  return path.join(projectRoot, getLedgerSettings(opts).rel);
+  const { rel } = getLedgerSettings(opts);
+  if (typeof opts.ledgerPath === 'string' && opts.ledgerPath.length > 0) {
+    return path.join(projectRoot, rel);
+  }
+  const gitCommonDir = resolveGitCommonDir(projectRoot);
+  if (gitCommonDir === null) return path.join(projectRoot, rel);
+  // Only the file NAME carries over from the configured relative path; the
+  // directory comes from the shared rule. Joining the whole `rel` would bury
+  // the ledger at `<commonDir>/artibot/.artibot/runtime/ledger.jsonl`.
+  const { dir } = resolveStoreLocation({ projectRoot, gitCommonDir });
+  return path.join(dir, path.basename(rel));
 }
 
 /**

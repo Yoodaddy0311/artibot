@@ -2,7 +2,9 @@
  * Central run ledger — the append surface plus the read projections over it.
  *
  * The physical file is ONE append-only JSONL stream per project
- * (`<projectRoot>/.artibot/runtime/ledger.jsonl`); the write mechanics,
+ * (`<git-common-dir>/artibot/ledger.jsonl`, shared by every linked worktree;
+ * `<projectRoot>/.artibot/runtime/ledger.jsonl` when no git common dir
+ * resolves — ADR-011); the write mechanics,
  * envelope, vocabulary allowlist, byte cap, and redaction all live in
  * `./event-writer.js`. This module is the API that callers and readers use:
  *

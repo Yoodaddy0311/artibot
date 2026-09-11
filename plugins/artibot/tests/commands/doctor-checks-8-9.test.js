@@ -1157,3 +1157,62 @@ describe('Check 8 names the project (W5-a)', () => {
     expect(s).toContain('readSpawns');
   });
 });
+
+/**
+ * W5-b (ADR-011) — the ledger moved to the git common dir, and the two sections
+ * that told operators otherwise had to follow.
+ *
+ * Before this change both sections asserted "each worktree carries its own
+ * `.artibot/`". That is now false for the LEDGER and the store journal (shared
+ * at `<git-common-dir>/artibot/`) and still true for the PROJECTION and for
+ * `spawns.ndjson`. A reader who kept the old sentence would attribute another
+ * window's events to the tree in front of them, which is the same class of
+ * defect G16 fixed for the root.
+ *
+ * These are PROSE gates: they assert the document says the new thing and no
+ * longer says the superseded symbol. They do NOT assert runtime behaviour —
+ * `tests/firewall/ledger-store-colocation.test.js` owns that, and this file's
+ * header blindspot about executors obeying the prose applies unchanged. They
+ * also cannot see whether the Check 10 asymmetry is still real: when W5-b-6
+ * moves `spawns.ndjson`, these assertions stay green while the prose goes
+ * stale, so the `W5-b-6` marker below is the string that must be searched then.
+ */
+describe('W5-b (ADR-011) wording pins — Check 8 / Check 10', () => {
+  const eight = () => checkSections(CURRENT).get('Check 8');
+  const ten = () => checkSections(CURRENT).get('Check 10');
+
+  it('Check 8 cites the store-location module the resolver moved to', () => {
+    // `#symbol`, never `file:line` — same rule as the W5-a citation above.
+    expect(eight()).toContain('`lib/project-state/store-location.js#resolveStoreLocation`');
+  });
+
+  it('Check 8 no longer cites the superseded state-manager path', () => {
+    // A re-export keeps that import working, so nothing else would turn red if
+    // the document kept pointing at the old home of the rule.
+    expect(eight()).not.toContain('state-manager.js#resolveStoreLocation');
+  });
+
+  it('Check 8 names the shared ledger path and how to confirm it', () => {
+    const s = eight();
+    expect(s).toContain('<git-common-dir>/artibot/ledger.jsonl');
+    expect(s).toContain('census.file.path');
+  });
+
+  it('Check 8 no longer claims the worktree compares its own ledger', () => {
+    expect(eight()).not.toContain("the worktree's own");
+  });
+
+  it('Check 10 states the shared ledger path beside the tree-local spawn file', () => {
+    const s = ten();
+    expect(s).toContain('<git-common-dir>/artibot/ledger.jsonl');
+    expect(s).toContain('spawns.ndjson');
+  });
+
+  it('Check 10 names the deferred limb that makes its WARN structural', () => {
+    // The finding code is pinned as a literal because the sentence is about
+    // THAT row: a bare "mismatch" would be green on unrelated prose.
+    const s = ten();
+    expect(s).toContain('W5-b-6');
+    expect(s).toContain('route-bind-residue-mismatch');
+  });
+});

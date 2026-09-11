@@ -25,6 +25,11 @@
  * and REPORTS the fallback with a reason — a silent fallback would put a
  * per-worktree store back exactly where the design says it must not be.
  *
+ * The location rule itself lives in `store-location.js`, because the runtime
+ * ledger shares it (ADR-011) and the two stores have to answer "where does
+ * this project's history live?" with the same path. This file re-exports it so
+ * a store consumer still needs one import.
+ *
  * ── Write ordering, and why the ledger goes first ──────────────────────────
  * One committed write is: CAS check -> validate the draft -> append
  * `state.updated{state_version}` to the ledger -> append journal records ->
@@ -92,9 +97,7 @@ import { applyRecord, readJournal, reduceProjectState } from './journal.js';
 import { buildProjection, clone, renderProjection } from './projection.js';
 import { reconcileStore } from './reconcile.js';
 import { validateMissionId, validateSnapshot } from './validate.js';
-
-/** Journal + snapshot live in this directory under the git common dir (F3). */
-export const STORE_DIR_NAME = 'artibot';
+import { resolveStoreLocation } from './store-location.js';
 
 /** Derived snapshot: a cache. Delete it and the journal rebuilds it. */
 export const SNAPSHOT_FILE = 'project-state.json';
@@ -105,9 +108,6 @@ export const JOURNAL_FILE = 'project-state.jsonl';
 /** Projection path, relative to `projectRoot`. Untracked (T-08). */
 export const PROJECTION_RELATIVE = path.join('.artibot', 'state.yaml');
 
-/** Fallback store root when the git common dir cannot be resolved. */
-export const FALLBACK_RELATIVE = path.join('.artibot', 'runtime');
-
 /**
  * Warning added to a commit result when the caller passed no `expectedVersion`
  * and the write therefore ran without a compare-and-set (last-writer-wins).
@@ -117,42 +117,12 @@ export const FALLBACK_RELATIVE = path.join('.artibot', 'runtime');
  */
 export const CAS_SKIPPED_WARNING = 'cas:skipped';
 
-/**
- * Resolve where the store lives.
- *
- * @param {object} params - Resolution inputs.
- * @param {string} params.projectRoot - Absolute project root.
- * @param {string|null} [params.gitCommonDir] - Result of the injected git port.
- * @returns {{dir: string, source: 'git-common-dir'|'project-root-fallback', reason: string|null}}
- *   The store directory, which rule produced it, and why the primary rule failed.
- * @example
- * resolveStoreLocation({ projectRoot: '/repo', gitCommonDir: '.git' }).dir;
- * // '/repo/.git/artibot'  — a RELATIVE common dir is resolved against projectRoot
- */
-export function resolveStoreLocation({ projectRoot, gitCommonDir }) {
-  if (typeof projectRoot !== 'string' || projectRoot === '') {
-    throw new TypeError('createStateStore: projectRoot must be a non-empty absolute path');
-  }
-  if (typeof gitCommonDir === 'string' && gitCommonDir !== '') {
-    // Measured on git 2.54.0.windows.1 (2026-09-02): `git rev-parse
-    // --git-common-dir` prints a RELATIVE '.git' in a main checkout and an
-    // ABSOLUTE path to the main .git in a linked worktree. path.resolve
-    // handles both; treating the output as always-absolute would have
-    // produced a store at the process CWD in the common case.
-    return {
-      dir: path.resolve(projectRoot, gitCommonDir, STORE_DIR_NAME),
-      source: 'git-common-dir',
-      reason: null,
-    };
-  }
-  return {
-    dir: path.join(projectRoot, FALLBACK_RELATIVE),
-    source: 'project-root-fallback',
-    reason:
-      'git common dir unresolved (not a repository, git missing, or the injected port returned nothing) — '
-      + 'the store is per-worktree here, so two /split windows would keep divergent copies',
-  };
-}
+// Re-exported so a consumer of the store needs one import, not two, and so the
+// existing `resolveStoreLocation` import sites keep working. The definitions
+// live in store-location.js because `lib/runtime/event-writer.js` needs the
+// same rule for the ledger (ADR-011) and an L5 module may not reach it through
+// this file, which imports `node:fs`.
+export { FALLBACK_RELATIVE, resolveStoreLocation, STORE_DIR_NAME } from './store-location.js';
 
 // Re-exported so a consumer of the store needs one import, not three. The
 // definitions live in journal.js because reconcile.js needs them too and a

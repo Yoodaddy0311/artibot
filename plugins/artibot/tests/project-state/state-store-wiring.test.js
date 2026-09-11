@@ -31,14 +31,15 @@
  *    what two writers do to each other.
  *  - **Real concurrency.** No contention is generated. A lost update under
  *    load would not show up in any assertion below.
- *  - **Ledger distribution across worktrees.** The ledger is resolved from a
- *    single `projectRoot`. Whether N `/split` windows converge on ONE ledger
- *    while the store converges on ONE git common dir is the whole point of
- *    the design, and it is NOT measured here — this fixture has one root.
- *  - **Store/ledger co-location.** The store lands under the git COMMON dir
- *    and the ledger under `<projectRoot>/.artibot/runtime/`. In a linked
- *    worktree those diverge. This tmpdir is a plain checkout, so the two
- *    resolve to the same repository by construction.
+ *  - **Worktree distribution and store/ledger co-location.** Since ADR-011 the
+ *    ledger and the store answer "where does this project's history live?" with
+ *    the SAME rule, so in a linked worktree N `/split` windows should converge
+ *    on one ledger file and one journal. That convergence is measured by
+ *    `tests/firewall/ledger-store-colocation.test.js` (cases G1-G4), NOT here:
+ *    this fixture is ONE root, a plain checkout with a `.git` directory, where
+ *    there is nothing to diverge from and the two land side by side under
+ *    `<root>/.git/artibot/` by construction. The projection stays per-tree even
+ *    after ADR-011, which is also that suite's case and not this one's.
  *  - **Adjacent same-version records.** Check 9 folds a run of equal
  *    `state_version` values into ONE transaction, which is what makes the
  *    healthy [1, 1, 2] below pass. Journal records carry no transaction id, so
@@ -121,11 +122,19 @@ async function runAndInspect(runs = 1) {
     : undefined;
 
   // `createStateStore` defaults `project` to `path.basename(projectRoot)`, and
-  // the wiring passes no override. It is supplied EXPLICITLY rather than left
-  // to Check 8's own `?? 'artibot'` default, which would rename the project
-  // mid-comparison and surface as a projection drift that is really a naming
-  // mismatch. The assumption is asserted on its own below, so a wiring that
-  // chose another name fails loudly instead of hiding inside a drift finding.
+  // the wiring passes no override, so the basename is the name under test. It is
+  // supplied EXPLICITLY because Check 8 has no default of its own: read
+  // 2026-09-11, `doctor-checks.js#resolveProjectName` resolves in ONE order —
+  // this argument, then a `project` entry parsed out of the raw projection text,
+  // then a projection object's own `project` key, then `undefined` — and
+  // `undefined` makes `checkLedgerStateParity` emit `project-name-unresolved`
+  // and SKIP the projection comparison rather than invent a name. Passing the
+  // name is what keeps the comparison a byte comparison instead of unmeasured.
+  // (The one `?? 'artibot'` literal nearby is `journal.js#emptySnapshot`'s base
+  // snapshot name, reached only on that unresolved path, never as a name parity
+  // compares against.) The assumption is asserted on its own below, so a wiring
+  // that chose another name fails loudly instead of hiding inside a drift
+  // finding.
   const project = path.basename(projectRoot);
   const parity = checkLedgerStateParity({ events, journal, projection, project, census });
   const gaps = checkStateVersionGaps({ journal });

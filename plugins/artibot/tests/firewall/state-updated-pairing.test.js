@@ -16,8 +16,9 @@
  *  - **Real concurrency.** Every case below is single-process and
  *    single-threaded. `withFileLock` is advisory and fail-OPEN, so contention
  *    behaviour under N real processes is NOT measured here. The sibling gate
- *    `ledger-append-survival.test.js` (T-20) owns the 3-process 60/60 append
- *    measurement; this file owns the pairing rule only.
+ *    `ledger-append-survival.test.js` (T-20) owns the multi-process append
+ *    measurement (3 and 8 processes x 20 lines, fallback and git-common-dir
+ *    locations, ADR-011); this file owns the pairing rule only.
  *  - **The real ledger writer.** The port is a recording stub. Envelope
  *    completion (`v`/`ts`/`pid`/`seq`), the 4KB line cap and the vocabulary
  *    allowlist are T-20's, and a change there is not visible here.
@@ -28,9 +29,8 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeEvent } from '../../lib/runtime/event-writer.js';
+import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
 import { createStateStore, readJournal, reduceProjectState } from '../../lib/project-state/state-manager.js';
 import {
   cleanup, makeStore, mission, MISSION_ID, seed, task,
@@ -274,7 +274,7 @@ describe('the refusal predicate is measured against the REAL writer', () => {
     expect(out.ok).toBe(true);
     expect(out.state_version).toBe(1);
 
-    const ledger = path.join(projectRoot, '.artibot', 'runtime', 'ledger.jsonl');
+    const ledger = ledgerFilePath(projectRoot);
     const lines = readFileSync(ledger, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
     const updated = lines.filter((l) => l.event === 'state.updated');
     expect(updated).toHaveLength(1);

@@ -329,7 +329,11 @@ describe('middleware/tasks — StateStore wiring on mission.created', () => {
     // The deferral itself IS recorded, so absence of the store must not be
     // read as "the middleware did nothing".
     expect(eventsNamed('mission.candidate_deferred')).toHaveLength(1);
-    expect(existsSync(storeDir())).toBe(false);
+    // The STORE's own files, not the directory: since ADR-011 the run ledger
+    // shares `<git-common-dir>/artibot/`, and the deferral line above put it
+    // there, so directory absence no longer means "the store was skipped".
+    expect(existsSync(path.join(storeDir(), 'project-state.jsonl'))).toBe(false);
+    expect(existsSync(path.join(storeDir(), 'project-state.json'))).toBe(false);
     expect(existsSync(yamlPath())).toBe(false);
   });
 
@@ -370,17 +374,29 @@ describe('middleware/tasks — StateStore wiring on mission.created', () => {
     expect(existsSync(path.join(projectRoot, '.artibot', 'runtime', 'project-state.jsonl')))
       .toBe(true);
     // The real `.git` is still there — the fallback came from the injected
-    // port, so this also proves the port is the only thing consulted.
-    expect(existsSync(storeDir())).toBe(false);
+    // port, so this also proves the port is the only thing consulted. Asserted
+    // on the store's own files: the run ledger resolves git for itself (no
+    // injection reaches it) and since ADR-011 it creates this same directory.
+    expect(existsSync(path.join(storeDir(), 'project-state.jsonl'))).toBe(false);
+    expect(existsSync(path.join(storeDir(), 'project-state.json'))).toBe(false);
   });
 
   it('fails open: a store directory blocked by a file changes no other field', async () => {
     // A FILE where the store directory must be. `ensureDirSync` throws EEXIST
     // on this, and it is a failure that can be injected identically on Windows
     // and POSIX — unlike a chmod, which Windows does not honour.
-    writeFileSync(storeDir(), 'not a directory\n');
+    //
+    // The store is pointed at a DIFFERENT common dir than the real one, and
+    // only that one is blocked. Since ADR-011 the run ledger resolves git for
+    // itself and lands in `<root>/.git/artibot/`; blocking that directory would
+    // break the ledger too, and the claim under test is precisely that a store
+    // failure leaves the ledger alone. Blocking the store's own directory is
+    // what isolates the two.
+    const altCommonDir = path.join(projectRoot, 'alt-common');
+    mkdirSync(altCommonDir, { recursive: true });
+    writeFileSync(path.join(altCommonDir, 'artibot'), 'not a directory\n');
 
-    const result = await run(SUBSTANTIVE);
+    const result = await run(SUBSTANTIVE, { resolveGitCommonDir: () => altCommonDir });
     const task = result.context.tasks;
 
     expect(task.mission.ledger).toBe('appended');

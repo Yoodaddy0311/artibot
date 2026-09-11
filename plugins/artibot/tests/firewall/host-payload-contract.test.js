@@ -114,12 +114,15 @@ describe('PreToolUse(Agent) observer is mute and harmless — 8 payload shapes',
     mkdirSync(repo, { recursive: true });
     execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
 
-    // Case 4: `.artibot/runtime` exists as a FILE where the writer needs a
-    // directory, in a second repo so the other cases keep a writable ledger.
+    // Case 4: the ledger's own parent directory exists as a FILE where the
+    // writer needs a directory, in a second repo so the other cases keep a
+    // writable ledger. `git init` runs FIRST, because after ADR-011 that parent
+    // is inside the repository's git common dir and `ledgerFilePath` can only
+    // name it once the repo exists.
     const blockedRepo = path.join(tmp, 'blocked');
-    mkdirSync(path.join(blockedRepo, '.artibot'), { recursive: true });
+    mkdirSync(blockedRepo, { recursive: true });
     execFileSync('git', ['init'], { cwd: blockedRepo, stdio: 'ignore', windowsHide: true });
-    writeFileSync(path.join(blockedRepo, '.artibot', 'runtime'), 'not a dir', 'utf-8');
+    writeFileSync(path.dirname(ledgerFilePath(blockedRepo)), 'not a dir', 'utf-8');
 
     const noToolInput = base();
     delete noToolInput.tool_input;

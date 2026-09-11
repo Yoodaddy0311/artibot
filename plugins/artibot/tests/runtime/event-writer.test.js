@@ -31,7 +31,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -437,6 +439,60 @@ describe('append mechanics', () => {
   it('nextSeq never repeats a value', () => {
     resetSeq();
     expect([nextSeq(), nextSeq(), nextSeq()]).toEqual([0, 1, 2]);
+  });
+});
+
+/**
+ * Synthesize the on-disk layout git writes for a LINKED worktree: a `.git`
+ * FILE at the worktree root pointing at `<main>/.git/worktrees/<name>`, and a
+ * `commondir` file in that per-worktree directory holding a relative `../..`
+ * back to `<main>/.git`.
+ *
+ * Cloned from `tests/project-state/git-common-dir.test.js#makeLinkedWorktree`
+ * on purpose — that suite owns the resolver's contract, and importing its
+ * private helper across suites would couple two files that test different
+ * modules.
+ *
+ * @param {object} params - Layout inputs.
+ * @param {string} params.mainGitDir - Absolute `<main>/.git` (must exist).
+ * @param {string} params.worktreeRoot - Root the `.git` FILE is written into.
+ * @param {string} [params.name='wt'] - Worktree name under `worktrees/`.
+ * @returns {string} Absolute per-worktree git dir.
+ */
+function makeLinkedWorktree({ mainGitDir, worktreeRoot, name = 'wt' }) {
+  const perWorktree = path.join(mainGitDir, 'worktrees', name);
+  mkdirSync(perWorktree, { recursive: true });
+  writeFileSync(path.join(perWorktree, 'commondir'), '../..\n');
+  mkdirSync(worktreeRoot, { recursive: true });
+  writeFileSync(path.join(worktreeRoot, '.git'), `gitdir: ${perWorktree}\n`);
+  return perWorktree;
+}
+
+describe('ledger location follows the shared store rule (ADR-011)', () => {
+  it('puts the ledger under the git common dir in a main checkout', () => {
+    const main = path.join(root, 'main');
+    mkdirSync(path.join(main, '.git'), { recursive: true });
+    expect(ledgerFilePath(main))
+      .toBe(path.join(main, '.git', 'artibot', 'ledger.jsonl'));
+  });
+
+  it('resolves a linked worktree to the SAME file as its main checkout', () => {
+    const main = path.join(root, 'main');
+    const wt = path.join(root, 'wt');
+    const mainGitDir = path.join(main, '.git');
+    mkdirSync(mainGitDir, { recursive: true });
+    makeLinkedWorktree({ mainGitDir, worktreeRoot: wt });
+
+    const shared = path.join(main, '.git', 'artibot', 'ledger.jsonl');
+    expect(ledgerFilePath(main)).toBe(shared);
+    expect(ledgerFilePath(wt)).toBe(shared);
+  });
+
+  it('honors an explicit ledgerPath even when a git common dir resolves', () => {
+    const main = path.join(root, 'main');
+    mkdirSync(path.join(main, '.git'), { recursive: true });
+    expect(ledgerFilePath(main, { ledgerPath: 'custom/ledger.jsonl' }))
+      .toBe(path.join(main, 'custom', 'ledger.jsonl'));
   });
 });
 
