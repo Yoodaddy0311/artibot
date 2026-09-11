@@ -31,7 +31,7 @@ The `direct` degradation mode already lists the supported non–Claude Code plat
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Run the suite (15,200+ tests via vitest) |
+| `npm test` | Run the suite (15,684+ tests via vitest) |
 | `npm run test:coverage` | Run tests with coverage reporting |
 | `npm run lint` | ESLint — 0 errors/warnings target |
 | `npm run ci` | Full gate: validate + skill:check + lint + test + eval:runtime |
