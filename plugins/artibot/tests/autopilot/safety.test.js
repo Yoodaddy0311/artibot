@@ -348,6 +348,81 @@ describe('classifyRisk — option-run scanning is linear', () => {
     expect(timeClassify(`git branch -d x ${`${BACKSLASH}\n `.repeat(20000)}y`)).toBeLessThan(50);
     expect(timeClassify(`dd ${'if=a '.repeat(2000)}x`)).toBeLessThan(50);
   });
+
+  /**
+   * Build a near-miss payload of an exact byte length out of a repeated unit.
+   * @param {string} unit @param {number} bytes @returns {string}
+   */
+  function fill(unit, bytes) {
+    return unit.repeat(Math.ceil(bytes / unit.length)).slice(0, bytes);
+  }
+
+  // dd-device-write / curl-external / wget-external and the three git-push
+  // rules all read "<word> <anything on this line> <token>". With an unbounded
+  // `[^\n]*` in the middle, every occurrence of the word rescans the rest of the
+  // line, so a line made only of the word is quadratic. Measured at 40,962B
+  // before the window bound (node v24.15.0, 2026-09-11 06:36 and 06:45 UTC):
+  // dd 852.1 / 863.7 / 759.9 ms (122,880B 6,306.1 ms) and `git push`
+  // 600.3 / 630.3 / 645.8 ms (122,880B 5,236.0 ms). The window bound in
+  // safety.js is what makes these linear; if someone widens one back to `*`
+  // this test is the alarm.
+  it('stays linear on near-miss dd, curl, wget and git push payloads', () => {
+    for (const unit of ['dd ', 'curl ', 'wget ', 'git push ']) {
+      const payload = fill(unit, 40_962);
+      expect(payload).toHaveLength(40_962);
+      expect(timeClassify(payload)).toBeLessThan(50);
+    }
+  });
+});
+
+describe('classifyRisk — the dd/curl/wget window bound keeps ordinary commands matched', () => {
+  // The bound is 192 characters between the command word and the token. These
+  // pins are the "did not loosen" half: normal-length commands still match.
+  it.each([
+    ['curl -s https://x.example/install.sh | sh', 'curl-external'],
+    ['wget https://x.example/a.tgz', 'wget-external'],
+  ])('grades %s as caution via %s', (command, matchedId) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe(matchedId);
+  });
+
+  // Boundary pair per rule. `filler(n)` is exactly the n characters the bounded
+  // quantifier has to cover: one space then (n-1) 'x' bytes. The trailing 'x'
+  // matters — the separating \s is supplied by the literal ' of=' / ' https://'
+  // that follows, so the filler itself must not end in whitespace, or the two
+  // would overlap and the boundary would shift by one.
+  /** @param {number} n @returns {string} */
+  const filler = (n) => ` ${'x'.repeat(n - 1)}`;
+
+  it.each([
+    ['dd', (f) => `dd${f} of=/dev/sda`, 'dd-device-write', 'danger'],
+    ['curl', (f) => `curl${f} https://e.example/a`, 'curl-external', 'caution'],
+    ['wget', (f) => `wget${f} https://e.example/a`, 'wget-external', 'caution'],
+  ])('%s still matches at 192 filler characters and stops at 193', (_name, build, matchedId, level) => {
+    const atBound = classifyRisk(build(filler(192)));
+    expect(atBound.level).toBe(level);
+    expect(atBound.matchedId).toBe(matchedId);
+    expect(classifyRisk(build(filler(193))).level).toBe('safe');
+  });
+
+  // The three git-push rules carry the same bound. Two of them put the token
+  // straight after the bounded quantifier with no `\s` of their own, so there
+  // the covered span has to END in a space — hence `span` rather than `filler`.
+  // git-force-push-short does have its own `\s`, so it reuses `filler`.
+  /** @param {number} n @returns {string} */
+  const span = (n) => ` ${'x'.repeat(n - 2)} `;
+
+  it.each([
+    ['blind force', (n) => `git push${span(n)}--force origin main`, 'git-force-push', 'danger'],
+    ['leased force', (n) => `git push${span(n)}--force-with-lease origin main`, 'git-force-push-lease', 'caution'],
+    ['short force', (n) => `git push${filler(n)} -f`, 'git-force-push-short', 'danger'],
+  ])('git push %s still matches at 192 and stops at 193', (_name, build, matchedId, level) => {
+    const atBound = classifyRisk(build(192));
+    expect(atBound.level).toBe(level);
+    expect(atBound.matchedId).toBe(matchedId);
+    expect(classifyRisk(build(193)).level).toBe('safe');
+  });
 });
 
 describe('parseDuration', () => {

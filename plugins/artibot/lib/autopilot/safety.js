@@ -25,9 +25,13 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // drops to 'caution' while a blind `--force` / `-f` stays 'danger'.
   // The negative lookahead is what splits them: `--force` followed by
   // `-with-lease` or `-if-includes` is not a blind force.
-  { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n]*--force(?!-with-lease|-if-includes)\b/i, reason: 'Destructive git push --force' },
-  { id: 'git-force-push-lease', level: 'caution', test: /\bgit\s+push\b[^\n]*--force-(?:with-lease|if-includes)\b/i, reason: 'Checked force push (--force-with-lease/--force-if-includes) — allowed at PreToolUse, still rewrites remote history' },
-  { id: 'git-force-push-short', level: 'danger', test: /\bgit\s+push\b[^\n]*\s-f(\s|$)/i, reason: 'Destructive git push -f' },
+  // These three carry the same 192-character window bound as dd-device-write
+  // below, for the same ReDoS reason and with the same blind spot — see that
+  // comment. Here the token is the force flag, so a force flag more than 192
+  // characters into the command is not graded.
+  { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n]{0,192}--force(?!-with-lease|-if-includes)\b/i, reason: 'Destructive git push --force' },
+  { id: 'git-force-push-lease', level: 'caution', test: /\bgit\s+push\b[^\n]{0,192}--force-(?:with-lease|if-includes)\b/i, reason: 'Checked force push (--force-with-lease/--force-if-includes) — allowed at PreToolUse, still rewrites remote history' },
+  { id: 'git-force-push-short', level: 'danger', test: /\bgit\s+push\b[^\n]{0,192}\s-f(\s|$)/i, reason: 'Destructive git push -f' },
   // Owner decision 2026-09-11 ④: CASE HANDLING IS DELIBERATE AND UNEVEN.
   // `git` is matched case-insensitively ([gG][iI][tT]) because a shell resolves
   // `GIT branch` fine; `branch` stays lowercase because git itself rejects
@@ -47,13 +51,11 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // whitespace inside one command, so it keeps the run open.
   // Without the newline bound a `-f` on a later line of a multi-line script
   // satisfied the force lookahead and `git branch -d old\nrm -rf build` was
-  // graded danger (measured 2026-09-11, 2 false positives). NOTE THE ASYMMETRY:
-  // this bound only holds at L2. L1 (guard-registry#checkDangerousCommand) also
-  // tests a normalizeCommand variant that collapses every \s+ run to a single
-  // space, so at L1 the newline is erased before the pattern ever sees it and
-  // the same two commands are still blocked. Fixing that means changing
-  // normalizeCommand for all 38 rules — out of scope here, pinned as an
-  // owner-decision row in tests/core/guard-registry-safe-override-scope.test.js.
+  // graded danger (measured 2026-09-11, 2 false positives). Since 2026-09-11
+  // guard-registry.js#normalizeCommand preserves bare newlines — it joins
+  // backslash continuations, normalizes CRLF to LF and folds only intra-line
+  // whitespace — so L1 and L2 share this boundary; see the git-branch-delete
+  // comment in lib/core/blocked-patterns.js and the parity matrix row.
   // Run tokens stay unambiguous: the option branch demands a dash then \w, the
   // argument branch forbids a leading dash, and the continuation branch starts
   // with a backslash (never whitespace), so no token or separator can parse two
@@ -101,7 +103,38 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // "L1 block => L2 at least caution" direction rule. Only the raw-device
   // target is graded here — a file-to-file `dd if=a.img of=b.img` is still L1
   // block / L2 safe, which is a known open divergence, not a decided one.
-  { id: 'dd-device-write', level: 'danger', test: /\bdd\b[^\n]*\sof=\/dev\//i, reason: 'dd writing to a raw block device' },
+  // WINDOW BOUND (ReDoS) — applies to this rule, to curl-external /
+  // wget-external below, and to the three git-push rules above, all of which
+  // share the "<word> <anything> <token>" shape.
+  // `[^\n]*` between the word and the token is quadratic: every occurrence of
+  // the word rescans the rest of the line, so a line made only of the word
+  // costs O(n^2). Measured here (node v24.15.0, 2026-09-11 06:36-06:47 UTC,
+  // classifyRisk on `'<word> '` repeated to the byte count, non-matching;
+  // 3 runs at 40,962B, 1 run at 122,880B):
+  //   dd        unbounded 852.1 / 863.7 / 759.9 ms · 120KB 6,306.1 ms
+  //   dd        {0,192}    15.4 /  14.2 /  14.4 ms · 120KB    35.4 ms  <- chosen
+  //   curl      unbounded 461.7 / 500.5 / 444.3 ms
+  //   curl      {0,192}     7.6 /   7.4 /   7.6 ms · 120KB    21.5 ms
+  //   wget      unbounded 483.3 / 498.2 / 504.8 ms
+  //   wget      {0,192}     7.9 /   7.5 /   8.4 ms · 120KB    23.5 ms
+  //   git push  unbounded 600.3 / 630.3 / 645.8 ms · 120KB 5,236.0 ms
+  //   git push  {0,192}    15.7 /  16.5 /  13.8 ms · 120KB    41.5 ms
+  // (the `git push` rows are the cost of all three git-push rules together)
+  // The convention is < 50 ms because bash-risk-guard.js runs inside a 5s
+  // PreToolUse hook; the same bound and the same reasoning are in
+  // lib/core/blocked-patterns.js on L1's twin dd rule. 120KB already sits
+  // close to that convention, so treat it as the ceiling, not as headroom.
+  // WHAT THE BOUND GIVES UP — do not read a green suite as coverage for these:
+  // more than 192 characters between the command word and the token evades the
+  // rule entirely. For dd/curl/wget the token is ` of=/dev/` or ` http(s)://`,
+  // so a long operand list, a huge image path, a URL buried after a pile of
+  // flags, or a `| sh` far down the line all sit in that blind spot. For the
+  // git-push rules the token is the force flag, so many refspecs or a long
+  // remote URL ahead of `--force` / `-f` / `--force-with-lease` hides it the
+  // same way. All of these are graded safe. The failure direction is toward
+  // under-grading, and nothing else catches it at L2, so raising the bound is
+  // a real option — but re-measure 120KB before doing it.
+  { id: 'dd-device-write', level: 'danger', test: /\bdd\b[^\n]{0,192}\sof=\/dev\//i, reason: 'dd writing to a raw block device' },
   { id: 'sql-drop-table', level: 'danger', test: /\bDROP\s+TABLE\b/i, reason: 'SQL DROP TABLE' },
   { id: 'sql-drop-database', level: 'danger', test: /\bDROP\s+DATABASE\b/i, reason: 'SQL DROP DATABASE' },
   // Owner decision 2026-09-11 ②: `/\bTRUNCATE\b/i` fired on any mention of the
@@ -129,8 +162,10 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   { id: 'secret-stripe-pub', level: 'caution', test: /\bpk_(live|test)_[A-Za-z0-9]{16,}\b/, reason: 'Possible Stripe key literal' },
   { id: 'secret-private-key', level: 'danger', test: /-----BEGIN [A-Z ]*PRIVATE KEY-----/, reason: 'PEM private key block' },
   { id: 'secret-aws', level: 'danger', test: /\baws_secret_access_key\b/i, reason: 'AWS secret access key reference' },
-  { id: 'curl-external', level: 'caution', test: /\bcurl\b[^\n]*\shttps?:\/\//i, reason: 'curl to external host' },
-  { id: 'wget-external', level: 'caution', test: /\bwget\b[^\n]*\shttps?:\/\//i, reason: 'wget from external host' },
+  // Same window bound and the same blind spot as dd-device-write above — see
+  // that comment. A URL more than 192 characters into the command is not graded.
+  { id: 'curl-external', level: 'caution', test: /\bcurl\b[^\n]{0,192}\shttps?:\/\//i, reason: 'curl to external host' },
+  { id: 'wget-external', level: 'caution', test: /\bwget\b[^\n]{0,192}\shttps?:\/\//i, reason: 'wget from external host' },
   { id: 'npm-publish', level: 'danger', test: /\bnpm\s+publish\b/i, reason: 'npm publish (release-grade action)' },
   { id: 'docker-prune', level: 'caution', test: /\bdocker\s+system\s+prune\b/i, reason: 'docker prune deletes resources' },
 ]);
