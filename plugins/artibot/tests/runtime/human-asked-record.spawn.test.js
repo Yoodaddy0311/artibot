@@ -27,7 +27,7 @@
  *
  * ── THE STDOUT-INVARIANCE CONDITIONS ────────────────────────────────────────
  *   A  writable project root                      → the record lands
- *   B  `<root>/.artibot` is a regular FILE        → mkdir fails ENOTDIR, dropped
+ *   B  ledger parent dir is a regular FILE        → mkdir throws (EEXIST), dropped
  *   C  no `cwd` key in the payload                → never attempted
  *
  *  The child's PROCESS cwd is the condition root in all three, so `cwd ||
@@ -245,7 +245,8 @@ describe('pre-write: human.asked lands in a real ledger', () => {
     const a = runHook(PRE_WRITE, payloadFor(rootA, true), rootA);
 
     // B — the ledger's own PARENT DIRECTORY is a regular FILE, so the writer's
-    // mkdir of it fails with ENOTDIR. Every root here has a `.git` directory,
+    // mkdir of it fails (EEXIST on Node 24: the mkdir target itself is the
+    // file; the writer drops on any throw). Every root here has a `.git` directory,
     // so after ADR-011 that parent is `<root>/.git/artibot`; deriving it from
     // `ledgerFilePath` keeps the fixture pinned to where the writer writes.
     // Portable; a read-only directory bit is not enforced for the owner on

@@ -53,7 +53,7 @@ import { resolveModel } from '../../lib/core/model-policy.js';
  *   - THAT THE RECOMMENDATION IS ANY GOOD. `route-scorer` is uncalibrated in
  *     Phase 0.
  *   - HOOK LATENCY. Two processes now run per spawn (pre + start). Unmeasured.
- *   - THE WRITER'S ENOTDIR BRANCH ON BIND. The "unwritable run ledger" case
+ *   - THE WRITER'S MKDIR-FAILURE BRANCH ON BIND. The "unwritable run ledger" case
  *     below blocks the ledger's parent directory, but `bindRoute` returns
  *     `skipped:unbound` from the empty tail before it ever attempts the append
  *     (measured 2026-09-11), so that case exercises the stdout and spawn-record
@@ -564,7 +564,7 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     // calls `appendLedgerEvent` (scripts/hooks/subagent-handler.js#bindRoute).
     // repo2 is fresh, so its tail holds no receipt and the unwritable append is
     // never attempted. What this case therefore proves is the stdout and
-    // spawn-record half of the claim, not the writer's ENOTDIR branch — and it
+    // spawn-record half of the claim, not the writer's mkdir-failure branch — and it
     // would read the same way if the fixture stopped blocking anything. Making
     // it bite needs a tail with a receipt AND an unwritable target at once,
     // which one file cannot be; see the blind-spot list in the header.

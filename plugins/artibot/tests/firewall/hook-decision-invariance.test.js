@@ -17,12 +17,14 @@
  *   D  project root exists, ledger tree does not → the writer creates it
  *
  * B is built by making the ledger's own PARENT DIRECTORY a regular FILE, so the
- * writer's `mkdirSync` of it fails with ENOTDIR
- * (lib/runtime/event-writer.js#appendLedgerLine). Every root here has a `.git`
- * directory, so after ADR-011 that parent is `<root>/.git/artibot` rather than
- * `<root>/.artibot/runtime` — the fixture names the same writer failure at the
- * path the writer now uses. ENOTDIR is portable; a read-only directory bit is
- * not enforced for the owner on Windows.
+ * writer's `mkdirSync` of it fails (EEXIST on Node 24 — the mkdir target
+ * itself is the file; the pre-ADR-011 fixture blocked the parent's parent and
+ * got ENOTDIR) (lib/runtime/event-writer.js#appendLedgerLine). Every root here
+ * has a `.git` directory, so after ADR-011 that parent is `<root>/.git/artibot`
+ * rather than `<root>/.artibot/runtime` — the fixture names the same writer
+ * failure at the path the writer now uses. The writer drops on ANY throw, so
+ * the exact code is not load-bearing; a blocking file is portable while a
+ * read-only directory bit is not enforced for the owner on Windows.
  *
  * D exists because the brief's third condition — "a path that does not exist" —
  * is NOT a failure mode: the writer creates the tree recursively at that same
