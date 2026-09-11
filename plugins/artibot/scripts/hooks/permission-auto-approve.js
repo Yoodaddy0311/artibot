@@ -20,9 +20,9 @@
  *      `lib/core/blocked-patterns.js#BLOCKED_PATTERNS`), and
  *    - `lib/autopilot/safety.js#classifyRisk` (`danger` level).
  *  The union is load-bearing because the two lists genuinely differ (measured
- *  2026-09-10): `--force-with-lease` is exempt in blocked-patterns but `danger`
- *  to classifyRisk, while a raw-disk `dd` is blocked by the guard and `safe` to
- *  classifyRisk.
+ *  2026-09-11): a bare `TRUNCATE users;` and a naked `sk-…` key literal pass the
+ *  guard and are `danger` to classifyRisk, while a file-to-file
+ *  `dd if=a.img of=b.img` is blocked by the guard and `safe` to classifyRisk.
  *
  *  The verdict is a function of the COMMAND STRING ALONE — no cwd is read or
  *  passed. Both judges are synchronous regex matchers, so there is no timeout

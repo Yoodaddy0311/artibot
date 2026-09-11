@@ -259,11 +259,13 @@ describe('guard-registry', () => {
     });
 
     describe('`$`-anchored rules keep their reach', () => {
-      // blocked-patterns.js rules anchored with `\s*$`: git checkout . / git
-      // restore . / DELETE FROM without WHERE / empty PATH. None is weakened by
-      // the fold (0 of 24 cells changed, measured 2026-09-11), so the `m` flag
-      // stays off — with /m, `DELETE FROM users\nWHERE id = 1` would become a
-      // new false positive.
+      // Four blocked-patterns.js rules were anchored with `\s*$`. `git checkout
+      // .` / `git restore .` dropped the anchor for a `(?=\s|$)` lookahead on
+      // 2026-09-11 (see blocked-patterns.js) and now block past the first line;
+      // DELETE FROM without WHERE / empty PATH keep the anchor. None is weakened
+      // by the fold (0 of 24 cells changed, measured 2026-09-11), so the `m`
+      // flag stays off — with /m, `DELETE FROM users\nWHERE id = 1` would become
+      // a new false positive.
       const ANCHORED = ['git checkout .', 'git restore .', 'delete from users;', 'export PATH='];
 
       it.each(ANCHORED)('blocks %s on a single line', (base) => {
@@ -280,12 +282,30 @@ describe('guard-registry', () => {
         // already eats the spaces and the break.
         expect(decisionFor(`${base}   \n`)).toBe('block');
       });
-      it.each(ANCHORED)('approves %s when another line follows (unchanged by the fold)', (base) => {
+      it.each(['delete from users;', 'export PATH='])('approves %s when another line follows (unchanged by the fold)', (base) => {
         // Measured both before and after: `pass` in both. The anchor never
         // reached past the first line, and the old fold produced
-        // `git checkout . echo hi`, which does not match either.
+        // `delete from users; echo hi`, which does not match either.
         expect(decisionFor(`${base}\necho hi`)).toBe('approve');
         expect(decisionFor(`${base}\r\necho hi`)).toBe('approve');
+      });
+
+      // `git checkout .` / `git restore .` left the it.each above on
+      // 2026-09-11: their `\s*$` anchor was replaced by a `(?=\s|$)` lookahead
+      // so the rule reaches the first line of a multi-line command (it also had
+      // to, to catch `git checkout -- .` and `git checkout . && echo hi`).
+      // BLOCK IS THE CORRECT VERDICT HERE, not a side effect to tolerate. The
+      // newline-preserving normalizeCommand is what makes the other rules read
+      // a two-line script as two shell commands — and that is exactly why these
+      // two must block: the FIRST line, on its own, is a whole-tree discard.
+      // Unlike `git branch -d old` + `echo -f done`, where the danger only
+      // appeared by gluing the lines together, nothing on the second line is
+      // needed to make `git checkout .` destructive.
+      // L2 (lib/autopilot/safety.js `git-checkout-discard`) has graded these
+      // danger since the sibling change, so this is the two layers converging.
+      it.each(['git checkout .', 'git restore .'])('blocks %s even when another line follows', (base) => {
+        expect(decisionFor(`${base}\necho hi`)).toBe('block');
+        expect(decisionFor(`${base}\r\necho hi`)).toBe('block');
       });
     });
 
