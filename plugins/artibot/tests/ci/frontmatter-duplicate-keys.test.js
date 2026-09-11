@@ -18,8 +18,23 @@
  * What this gate does NOT see: duplicates below the first `---`…`---` block,
  * keys that differ only in indentation (an indented `key:` is a nested field,
  * not a top-level one, and is not counted), and semantic conflicts between
- * DIFFERENT keys. It also says nothing about which value a host would honour —
- * the corpus has no duplicate with differing values to measure that against.
+ * DIFFERENT keys.
+ *
+ * Which value the host honours IS now measured: on claude 2.1.268 a skill whose
+ * frontmatter declares `description:` twice renders the LAST value (2026-09-11,
+ * 3 runs: the first value's marker token appeared 0 times, the last value's 3
+ * times). That is the same direction `extractFrontmatter` overwrites in, so the
+ * repo parser and the host agree — the duplicate is latent rather than a
+ * divergence. `claude plugin validate` emits 0 duplicate-key warnings, so the
+ * host's own validator is not a second reader here; this gate is.
+ *
+ * The agents and commands scan is non-recursive, which costs nothing today: the
+ * corpus has 0 nested `.md` under those directories (measured 2026-09-11). A
+ * subdirectory added later would be skipped silently.
+ *
+ * For `name` specifically, first-vs-last is not a question at all: a plugin
+ * skill's list key is its DIRECTORY name and the frontmatter `name:` is inert
+ * (a skill carrying a single `name:` renders it 0 times, same measurement).
  *
  * @module tests/ci/frontmatter-duplicate-keys
  */

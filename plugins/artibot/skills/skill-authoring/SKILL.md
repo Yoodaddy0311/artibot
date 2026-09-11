@@ -20,7 +20,7 @@ agents:
 tokens: "~3K"
 category: "meta"
 whenNotToUse: "Editing a skill's body content when the frontmatter is already correct and the change is a minor prose fix. Do not apply the full pressure-test loop for trivial description typos."
-source_hash: cf338637
+source_hash: 55d21838
 ---
 
 # Skill Authoring (Meta-Skill)
@@ -56,6 +56,8 @@ Run locally: `node scripts/ci/lint-skill-descriptions.js` (exits non-zero on new
 ## 3. Trigger Design
 
 Triggers are what the model matches against incoming user utterances to decide whether to load this skill at all.
+
+**`triggers:` is not a host activation field.** The host activates a skill from its `description` (plus `when_to_use`); it never reads the `triggers:` key. Measured 2026-09-11 on claude 2.1.268: trigger phrases rendered 0 times across 3 runs, and the binary's recognised-key array does not list `triggers` — the render count is measured, while "that array is the complete set of recognised keys" is inference and the official documentation was not read. Every consumer of `triggers:` in this repo is Artibot's own tooling (`scripts/gen-skill-docs.js`, `scripts/hooks/skill-validation-check.js`, `lib/core/skill-exporter.js`, `lib/adapters/adapter-utils.js`, `lib/sdk/artibot-sdk.js`). The practical consequence for the rules below: vocabulary you cut from `description` to keep it short is **not** preserved for host activation by moving it into `triggers:`. If a phrase has to make the skill fire, it belongs in `description`.
 
 **Rules**:
 - Include ≥3 real user utterances, at least one in Korean.
