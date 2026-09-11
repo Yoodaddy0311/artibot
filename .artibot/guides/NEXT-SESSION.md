@@ -2,6 +2,17 @@
 
 > 다른 머신에서는 `git pull` → 설치본 4.57.0 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 전부 이 세션(artibot-78) 리더 실측이다.
 
+## Wave 4 후처리 (2026-09-11 09:0x KST, 세션 25918244, master 8f90c10c, 재부팅 뒤)
+
+**재부팅 원인 실측**: Windows Update 자동 재시작(System 로그 ID 1074 — 02:29:09 MoUsoCoreWorker → 02:33:02·02:33:33 TrustedInstaller, 마지막 부팅 02:34:02). 48h 내 Kernel-Power 41·6008 0건. 마지막 핸드오프 02:18 저장, 커밋·워킹트리·워크트리 3개 전부 손실 0.
+
+**gotcha #61 절차 실행 결과**:
+- 락 pid 45164·34624·41108 전부 사망(tasklist) → 워크트리 3개(judge-parity·skill-description-render·hook-latency-bench) 수정 0·미추적 0·tip 이 master 조상 확인 → `unlock` → `remove` → `prune` 완료. `git worktree list` = master 1건.
+- **신규 관측(68)**: `git worktree remove` 뒤에도 `.claude/worktrees/<limb>/plugins/artibot/node_modules` **junction** 이 남는다(worktree-setup 이 만든 링크, 이번 정리 13개 = Wave 1~4 누적). `rm -r` 은 junction 을 따라가 실제 node_modules 를 지울 수 있으므로 **`cmd /c rmdir <junction>` 으로 링크만 끊고** 빈 디렉터리 rmdir. 실측: node_modules 항목 107 → 107 유지. `.claude/worktrees/` 디렉터리 자체 제거됨. 다음: worktree-setup.mjs 짝으로 teardown 에 junction 해제 넣기.
+- **신규 관측(69)**: `lib/autopilot/safety.js:23` `git-branch-delete` 정규식이 `/\bgit\s+branch\s+-D\b/i` — **`i` 플래그 때문에 안전 삭제 `-d` 도 danger 로 차단**. 병합 확인된 브랜치 삭제가 리더 세션에서 불가. judge-parity 소유 모듈 → 소유 밖 후속 13번째. 수리 = `i` 제거(또는 `-D` 만 대소문자 구분).
+- **미완(오너 실행 필요)**: 로컬 병합 브랜치 13개(`git branch --merged master | grep worktree-split-` — Wave 1~4 전부 master 조상) 삭제. 명령: `git branch -d $(git branch --merged master --format='%(refname:short)' | grep '^worktree-split-')`.
+- **오너 결정(09:1x)**: 원격 `ci/*` 5개 **전부 삭제 실행** — split-b87130(db29d707)·wave4-followups(5d51e9fc)·wave4-handoff(8f90c10c)·wave4-owner-decisions(a34db926) 4개는 master 조상, `ci/sync-badges-v4.58.0`(4707411e) 만 미포함이었으나 차이는 `plugins/artibot/marketplace.json` qualityMetrics.tests 15200→15368 한 줄(version 은 양쪽 4.58.0, 4.59.0 릴리스 때 재생성). `git push origin --delete` 5/5 성공, `git fetch --prune` 후 원격 ci/* 0건. 로컬 13개는 오너가 `!` 로 직접 삭제하기로 결정(가드 무수정).
+
 ## Wave 4 착지 (2026-09-11 02:0x KST, 세션 artibot-ce, 설치본 4.58.0, master **db29d707** = 5d51e9fc + 3줄기)
 
 리더 실측: `git diff --shortstat 5d51e9fc db29d707` = 13 files, +5,489/−33. 배치 랜딩 2회 — 1차 `1ae491bf` **not-green**(15,553건 중 1건: `tests/ci/direct-run-guard.test.js` 가 `scripts/bench/hook-latency.mjs` 의 프로브 **문자열 리터럴** 안 `process.argv[1]` 을 잡음, 스캐너는 주석만 벗김) → 줄기가 `40cdf344` 로 수리 → 2차 `db29d707` CI 전부 초록(polls 26), rebuilds 0, master ff. 창 3개 lane-state `done`, worktree 3개는 **미정리**(락 잔존 예상 — gotcha #61 절차: 죽은 pid 확인 → unlock → remove → prune).
