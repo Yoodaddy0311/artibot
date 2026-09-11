@@ -281,11 +281,11 @@ The judgement lives in `lib/project-state/doctor-checks.js` and performs NO
 I/O. This command reads the three inputs and hands them over.
 
 **Step 0 — resolve the project root ONCE, before any read.** Step 1 takes
-`projectRoot` directly (`readLedgerCensus(projectRoot)`); steps 2 and 3 read
-locations DERIVED from it — the store journal under `<git-common-dir>/artibot/`
-(resolved from `projectRoot` by
-`lib/project-state/state-manager.js#resolveStoreLocation`, falling back to
-`<projectRoot>/.artibot/runtime/` only when git cannot answer) and the
+`projectRoot` directly (`readLedgerCensus(projectRoot)`), and every location the
+three steps actually open is DERIVED from it — the ledger AND the store journal
+under `<git-common-dir>/artibot/` (both resolved from `projectRoot` by
+`lib/project-state/store-location.js#resolveStoreLocation`, falling back to
+`<projectRoot>/.artibot/runtime/` only when git cannot answer; ADR-011), and the
 projection at `<projectRoot>/.artibot/state.yaml` — so fixing that value is
 the first thing this check does, not an implicit detail of the caller:
 
@@ -296,9 +296,15 @@ the first thing this check does, not an implicit detail of the caller:
   resolves INSIDE the plugin tree whenever the plugin has no `.git` ancestor.
 - In a linked worktree — a `/split` window — the nearest marker is a `.git`
   FILE, and the resolver returns the WORKTREE root. That is the correct answer
-  here: the ledger and the projection it compares are the worktree's own
-  `.artibot/`, and the shared store journal is reached from that same root
-  through the git common dir.
+  here, but do not read it as "this tree's own files": the ledger is the SAME
+  shared file every window appends to, `<git-common-dir>/artibot/ledger.jsonl`,
+  and the store journal sits beside it in that same directory (ADR-011).
+  Confirm it rather than assuming it — `census.file.path` from Step 1 is the
+  same absolute path whichever root the check ran from. The projection is
+  still PER TREE at `<projectRoot>/.artibot/state.yaml`, so a worktree
+  compares the shared history against its own projection. Only a root where
+  git cannot answer keeps a tree-local ledger, at
+  `<projectRoot>/.artibot/runtime/ledger.jsonl`.
 - Report the result on its own line, verbatim, as
   `read project root: <absolute path>`. A parity verdict without the root it
   was measured against is not reproducible by the person reading it.
@@ -411,8 +417,14 @@ unmeasured rather than healthy.
   indistinguishable from both being right.
 - **A lost write that never reached either store or ledger.** The counter only
   exposes writes that got a number; a write that died before CAS leaves no hole.
-- **Anything about a second worktree.** Each worktree carries its own
-  `.artibot/`, so this compares one tree and says nothing about the others.
+- **Which worktree the history it read came from.** The ledger and the store
+  journal are SHARED by every linked worktree under `<git-common-dir>/artibot/`
+  (ADR-011), so the events and the version sets compared here are the sum of
+  all open windows. Neither side can be attributed to the tree Step 0 resolved.
+- **A second worktree's projection.** The projection stays PER TREE, so this
+  compares the shared history against one `state.yaml` and says nothing about
+  the projections of the other trees — one of them can be drifting while this
+  run reports `pass`.
 - **Whether the ledger it read is the one being written.** This is the same
   resolved-root problem Check 7 documents. State the absolute project root in
   the report so an empty comparison can be told from the wrong tree.
@@ -545,9 +557,11 @@ Status for this check — **first matching row wins**:
 | Otherwise | **pass** |
 
 Report BOTH counts together with the session scope and BOTH absolute file
-paths (`.artibot/runtime/ledger.jsonl` and `.artibot/ledger/spawns.ndjson`),
-the conflict count (or "not counted" when the join was not read), and the bind
-side's own bounds — a 10-minute candidate window and a 128 KB ledger tail
+paths (the SHARED ledger `<git-common-dir>/artibot/ledger.jsonl`, falling back
+to `.artibot/runtime/ledger.jsonl` when git cannot answer — ADR-011 — and the
+tree-local `.artibot/ledger/spawns.ndjson`), the conflict count (or "not
+counted" when the join was not read), and the bind side's own bounds — a
+10-minute candidate window and a 128 KB ledger tail
 (`subagent-handler.js#RECEIPT_WINDOW_MS`, `#RECEIPT_TAIL_BYTES`) — because a
 receipt older than that window is unbound BY DESIGN and belongs in the reader's
 explanation of the number, not in a warning.
@@ -588,8 +602,15 @@ fixtures only.
   state both paths and both mtimes in the report.
 - **Spawn records with no session.** `countUnboundSpawns` buckets a record whose
   `sessionId` is null under `null`; a session-scoped read misses it.
-- **Anything about a second worktree.** Both files are per worktree, so this
-  compares one tree and says nothing about the others.
+- **Which worktree each side came from — the two sides are NOT symmetric.** The
+  ledger, which is the receipt side, is SHARED by every linked worktree
+  (`<git-common-dir>/artibot/ledger.jsonl`, ADR-011) and therefore sums all open
+  windows; `spawns.ndjson` stays in THIS tree until W5-b-6 moves it beside the
+  ledger. So a `route-bind-residue-mismatch` WARN can be structural rather than
+  a real miss: another window's unbound receipt has no spawn record in this
+  tree's file, which is exactly the "both counts non-zero AND different" row.
+  Until W5-b-6 lands, read both lists and both paths before treating that WARN
+  as a defect.
 
 ## Output Format
 
