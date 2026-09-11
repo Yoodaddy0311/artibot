@@ -55,6 +55,9 @@ const ARCHIVE_STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(?:-(\d+))?\.md
 // Windows returns EPERM from `rename` when another process holds a handle on
 // the destination (search indexer, AV scanner, a concurrent /save in a second
 // window). The contention window is short, so back off briefly and retry.
+// Defensive, not measured: the 2026-09-11 harness (160 concurrent writes from
+// ONE process) observed ZERO EPERM. Concurrent /save across SEPARATE processes
+// — the case this ladder is actually for — remains unmeasured.
 // EPERM only: every other errno (ENOENT, EACCES, EBUSY, ENOSPC, EXDEV, …) is a
 // real failure that must surface on the first attempt, unchanged.
 // ENOENT in particular is NOT a contention signal here and retrying it would
