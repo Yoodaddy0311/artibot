@@ -29,9 +29,25 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // below, for the same ReDoS reason and with the same blind spot — see that
   // comment. Here the token is the force flag, so a force flag more than 192
   // characters into the command is not graded.
-  { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n]{0,192}--force(?!-with-lease|-if-includes)\b/i, reason: 'Destructive git push --force' },
-  { id: 'git-force-push-lease', level: 'caution', test: /\bgit\s+push\b[^\n]{0,192}--force-(?:with-lease|if-includes)\b/i, reason: 'Checked force push (--force-with-lease/--force-if-includes) — allowed at PreToolUse, still rewrites remote history' },
-  { id: 'git-force-push-short', level: 'danger', test: /\bgit\s+push\b[^\n]{0,192}\s-f(\s|$)/i, reason: 'Destructive git push -f' },
+  // The run also stops at a shell separator (; & |), like git-branch-delete
+  // below: with a plain `[^\n]` the `-f` of a LATER command on the same line was
+  // absorbed into the push's run, so `git push origin main && rm -f x`,
+  // `git push origin main; ls -f` and `git push origin main | grep -f p f` were
+  // all graded danger via git-force-push-short (3 false positives, measured
+  // 2026-09-11). That flag belongs to the second command, not to the push.
+  // git-force-push-short ends the `-f` token with `(?![\w-])` — the convention
+  // git-branch-delete and the rm rules already use — so `;`, `&` and `|` count
+  // as the end of the token too (2026-09-11) — and not only those three: any
+  // character other than a word character or a hyphen ends it (`.`, `=`, `"`,
+  // `)` included; 4 such rows moved safe -> danger, all fail-closed, measured
+  // 2026-09-11). The old tail demanded whitespace
+  // or end-of-string, which silently let a real blind force push through
+  // whenever another command followed it: `git push origin main -f; echo done`
+  // and `git push -f|cat` were graded safe (measured 2026-09-11).
+  // `-fu` and `-f-x` stay safe — a longer bundle is a different flag.
+  { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n;&|]{0,192}--force(?!-with-lease|-if-includes)\b/i, reason: 'Destructive git push --force' },
+  { id: 'git-force-push-lease', level: 'caution', test: /\bgit\s+push\b[^\n;&|]{0,192}--force-(?:with-lease|if-includes)\b/i, reason: 'Checked force push (--force-with-lease/--force-if-includes) — allowed at PreToolUse, still rewrites remote history' },
+  { id: 'git-force-push-short', level: 'danger', test: /\bgit\s+push\b[^\n;&|]{0,192}\s-f(?![\w-])/i, reason: 'Destructive git push -f' },
   // Owner decision 2026-09-11 ④: CASE HANDLING IS DELIBERATE AND UNEVEN.
   // `git` is matched case-insensitively ([gG][iI][tT]) because a shell resolves
   // `GIT branch` fine; `branch` stays lowercase because git itself rejects
@@ -134,7 +150,27 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // same way. All of these are graded safe. The failure direction is toward
   // under-grading, and nothing else catches it at L2, so raising the bound is
   // a real option — but re-measure 120KB before doing it.
+  // The git-push rules give up one more thing, because their run also stops at
+  // a shell separator: a separator inside a QUOTED argument ends the run just
+  // as a real one does. `git push "a;b" --force` is graded safe (measured
+  // 2026-09-11 — it was danger before the separator stop). L2 reads the raw
+  // command text and does no shell parsing, so it cannot tell a quoted `;`
+  // from an operator. Trading that for the three false positives the stop
+  // removes was the 2026-09-11 leader decision; both directions are real.
   { id: 'dd-device-write', level: 'danger', test: /\bdd\b[^\n]{0,192}\sof=\/dev\//i, reason: 'dd writing to a raw block device' },
+  // Byte-identical to the 'fork bomb' rule in lib/core/blocked-patterns.js;
+  // tests/autopilot/safety.test.js pins `source` and `flags` equality, so a
+  // one-sided edit fails the suite. Keep them identical — the only value this
+  // copy has is that both layers judge the same shapes.
+  // LINEARITY — the invariant is NOT "each `\s*` is followed by a literal". It
+  // is: no two `\s*` are separated only by an optional group. The single
+  // LEADING `\s*` is shared by both branches, so one whitespace run is never
+  // divided between two quantifiers. Moving it inside or outside the group is
+  // not cosmetic — the first draft (`:\s*(?:\(\s*\))?\s*\{`) was QUADRATIC:
+  // 40KB of spaces 1,255ms, 120KB 17,199ms (L1 review, 2026-09-11). Inputs
+  // dense in colons never build a long whitespace run and stay green on the
+  // quadratic shape, so they prove nothing on their own.
+  { id: 'fork-bomb', level: 'danger', test: /:\s*(?:\(\s*\)\s*)?\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'Shell fork bomb (exhausts the local process table)' },
   { id: 'sql-drop-table', level: 'danger', test: /\bDROP\s+TABLE\b/i, reason: 'SQL DROP TABLE' },
   { id: 'sql-drop-database', level: 'danger', test: /\bDROP\s+DATABASE\b/i, reason: 'SQL DROP DATABASE' },
   // Owner decision 2026-09-11 ②: `/\bTRUNCATE\b/i` fired on any mention of the
