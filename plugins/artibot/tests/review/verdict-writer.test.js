@@ -1,0 +1,722 @@
+/**
+ * `lib/review/independent-reviewer` — the `review.completed` /
+ * `review.claim_audit` LEDGER WRITERS.
+ *
+ * The parsers decide whether a reviewer's answer is admissible; these functions
+ * turn an admissible answer into the INPUT of a ledger line. They still perform
+ * no I/O: the append and the already-written-keys lookup arrive as ports, which
+ * is what lets this suite drive the REAL writer without the module importing L5.
+ *
+ * ── The five properties this suite is here to hold ─────────────────────────
+ *  1. A BUILT INPUT IS ACCEPTED BY THE REAL WRITER. Every happy-path case runs
+ *     through `lib/runtime/ledger.js#appendLedgerEvent` into a `mkdtemp`
+ *     project root and then COUNTS `ledger.rejected` lines in the raw file. A
+ *     rejected line is written to the same file and `ok:false` is returned, so
+ *     asserting `ok:true` alone would not see a line the contract refused —
+ *     and asserting only the line count would count the rejection as the line.
+ *  2. AN INADMISSIBLE ANSWER PRODUCES NO LINE AT ALL. Legacy vocabulary,
+ *     ambiguous tokens, a missing envelope `model`, `claims_refuted >
+ *     claims_total` — each yields zero bytes in the ledger. Design §3.4: a
+ *     schema violation is never read as a pass, and "no usable answer" must not
+ *     become a `PASS` row in the measurement store.
+ *  3. AN ABSENT OPTIONAL FIELD OMITS ITS KEY. `subject_model` and `nature` are
+ *     absent, not null and not `'unknown'`. The allowlist declares both as
+ *     `type: string` / `enum_ref`, and `lib/runtime/ledger-schema.js
+ *     #matchesType` rejects null — so a key present with a placeholder value is
+ *     either a rejected line or, worse, a value that later aggregates as if it
+ *     were a model.
+ *  4. RE-RUNNING WRITES NOTHING TWICE. The idempotency key is derived from the
+ *     answer's identity, and a second `recordReviewOutcome` over the same text
+ *     dedupes rather than appending. Mirrors `scripts/hooks/session-end.js
+ *     #existingReceiptKeys`.
+ *  5. A PORT THAT THROWS DOES NOT ESCAPE. `recordReviewOutcome` is called from
+ *     hook-shaped contexts; its own bookkeeping may not take the caller down.
+ *
+ * ── What this suite does NOT prove ─────────────────────────────────────────
+ *  - That a real reviewer agent emits either block. No production caller wires
+ *    these functions yet; a sibling bundle builds the CLI. Green here says the
+ *    writer accepts what this module builds, not that anything builds it.
+ *  - That `claims_total` was counted by the rule of 설계 §4.4 #2. A well-formed
+ *    block with an invented denominator is green, exactly as in
+ *    `tests/review/claim-audit.test.js`.
+ *  - Anything about concurrency. One process, sequential appends.
+ *  - That the temp-root path resolution matches a real project's: every write
+ *    here passes an explicit `ledgerPath`, which bypasses the git-common-dir
+ *    rule in `event-writer.js#ledgerFilePath` on purpose.
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import { resetSeq } from '../../lib/runtime/event-writer.js';
+import {
+  buildClaimAuditEvent,
+  buildReviewCompletedEvent,
+  claimAuditIdempotencyKey,
+  parseClaimAudit,
+  parseReviewVerdict,
+  recordReviewOutcome,
+  REVIEW_CLAIM_AUDIT_EVENT,
+  REVIEW_COMPLETED_EVENT,
+  REVIEW_LEDGER_SOURCE,
+  reviewCompletedIdempotencyKey,
+} from '../../lib/review/independent-reviewer.js';
+
+const LEDGER_REL = 'ledger.jsonl';
+const SID = 'sess-review-writer';
+const MISSION = 'M-20260912-001';
+const MODEL = 'claude-fable-5-1';
+const FINDINGS_REF = '.artibot/missions/M-20260912-001/review.md';
+const REVIEWER = 'agent-reviewer-7';
+
+let root;
+
+/**
+ * @param {object} [over] field overrides; `undefined` deletes the key
+ * @returns {object} a valid reviewOutputV2 document
+ */
+function v2Doc(over = {}) {
+  const base = {
+    schema_version: 2,
+    verdict: 'PASS',
+    findings: [],
+    evidence: [{ kind: 'file', file: 'lib/review/independent-reviewer.js', line: 1 }],
+    recommended_action: 'proceed',
+    mission_id: MISSION,
+    intent_revision: 3,
+    plan_revision: 1,
+    diff_ref: 'HEAD~1..HEAD',
+    test_evidence: [{ kind: 'command', command: 'npx vitest run tests/review', output: 'ok' }],
+    regression_evidence: [{ kind: 'command', command: 'npx vitest run tests/review', output: 'ok' }],
+    verification_id: 'v1-abc',
+    next_steps: [],
+    ...over,
+  };
+  for (const [k, v] of Object.entries(over)) if (v === undefined) delete base[k];
+  return base;
+}
+
+/**
+ * @param {object} [over] field overrides; `undefined` deletes the key
+ * @returns {object} a valid `claim_audit` block payload
+ */
+function auditBlock(over = {}) {
+  const base = {
+    subject_agent_type: 'code-reviewer',
+    nature: 'judge',
+    claims_total: 12,
+    claims_refuted: 3,
+    evidence_refs: ['lib/review/independent-reviewer.js:699'],
+    ...over,
+  };
+  for (const [k, v] of Object.entries(over)) if (v === undefined) delete base[k];
+  return base;
+}
+
+/**
+ * One reviewer answer carrying the verdict document and the audit block as two
+ * fenced JSON blocks, verdict first — the order a Phase 4.5 answer uses.
+ *
+ * @param {object} [parts] `{verdict, audit}` overrides; `audit:null` omits the
+ *   audit block, `verdict:null` omits the verdict document
+ * @returns {string} markdown
+ */
+function answer({ verdict = {}, audit = {} } = {}) {
+  const blocks = ['검수 결과를 아래에 첨부한다.', ''];
+  if (verdict !== null) {
+    blocks.push('```json', JSON.stringify(v2Doc(verdict), null, 2), '```', '');
+  }
+  if (audit !== null) {
+    blocks.push('```json', JSON.stringify({ claim_audit: auditBlock(audit) }, null, 2), '```', '');
+  }
+  return blocks.join('\n');
+}
+
+/** @returns {string} absolute path of the temp ledger */
+function ledgerFile() {
+  return path.join(root, LEDGER_REL);
+}
+
+/** @returns {object[]} every parsed line of the raw file, rejections INCLUDED */
+function rawLines() {
+  const file = ledgerFile();
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8')
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+    .map((l) => JSON.parse(l));
+}
+
+/** @returns {object[]} only the writer's own refusal lines */
+function rejectedLines() {
+  return rawLines().filter((l) => l.event === 'ledger.rejected');
+}
+
+/**
+ * Append one built input through the real writer.
+ *
+ * @param {object} input a `build*Event` result's `input`
+ * @returns {object} the writer's result
+ */
+function append(input) {
+  return appendLedgerEvent(root, input, { ledgerPath: LEDGER_REL });
+}
+
+/**
+ * Ports wired to the real ledger: the append precedent plus the
+ * already-written-keys lookup of `session-end.js#existingReceiptKeys`.
+ *
+ * @returns {{append: Function, existingKeys: Function, appended: object[]}}
+ */
+function livePorts() {
+  const appended = [];
+  return {
+    appended,
+    append: (input) => {
+      appended.push(input);
+      return append(input);
+    },
+    existingKeys: () => readAllEvents(root, { session_id: SID, ledgerPath: LEDGER_REL })
+      .map((e) => e.idempotency_key)
+      .filter((k) => typeof k === 'string' && k.length > 0),
+  };
+}
+
+/**
+ * The arguments `recordReviewOutcome` takes for the happy path.
+ *
+ * @param {object} [over] overrides
+ * @returns {object} args
+ */
+function recordArgs(over = {}) {
+  return {
+    verdictText: answer(),
+    sessionId: SID,
+    missionId: MISSION,
+    model: MODEL,
+    findingsRef: FINDINGS_REF,
+    reviewerId: REVIEWER,
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  root = mkdtempSync(path.join(tmpdir(), 'artibot-review-writer-'));
+  resetSeq();
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+describe('the event vocabulary this module writes', () => {
+  it('names the two events and the one permitted source', () => {
+    expect(REVIEW_COMPLETED_EVENT).toBe('review.completed');
+    expect(REVIEW_CLAIM_AUDIT_EVENT).toBe('review.claim_audit');
+    expect(REVIEW_LEDGER_SOURCE).toBe('reviewer');
+  });
+});
+
+describe('parseReviewVerdict exposes verification_id', () => {
+  it('carries the v2 document value on ok:true', () => {
+    expect(parseReviewVerdict(v2Doc()).verificationId).toBe('v1-abc');
+    expect(parseReviewVerdict(v2Doc({ verification_id: 'v1-zzz' })).verificationId).toBe('v1-zzz');
+  });
+
+  it('is null for every answer that is not an admissible v2 document', () => {
+    expect(parseReviewVerdict('APPROVE').verificationId).toBeNull();
+    expect(parseReviewVerdict(v2Doc({ verification_id: undefined })).verificationId).toBeNull();
+    expect(parseReviewVerdict(null).verificationId).toBeNull();
+  });
+
+  it('keeps every pre-existing key of the result', () => {
+    const r = parseReviewVerdict(v2Doc());
+    for (const key of ['ok', 'verdict', 'errors', 'schemaVersion', 'foldedVerdict', 'sources']) {
+      expect(Object.prototype.hasOwnProperty.call(r, key), key).toBe(true);
+    }
+  });
+});
+
+describe('buildReviewCompletedEvent — the real writer accepts the input', () => {
+  it('writes exactly one review.completed line and zero rejections', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      missionId: MISSION,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+      reviewerId: REVIEWER,
+    });
+    expect(built.ok).toBe(true);
+
+    const res = append(built.input);
+    expect(res.ok).toBe(true);
+
+    const lines = rawLines();
+    expect(lines).toHaveLength(1);
+    expect(rejectedLines()).toHaveLength(0);
+
+    const [line] = lines;
+    expect(line.event).toBe('review.completed');
+    expect(line.source).toBe('reviewer');
+    expect(line.model).toBe(MODEL);
+    expect(line.mission_id).toBe(MISSION);
+    expect(line.session_id).toBe(SID);
+    expect(line.worker).toBe(REVIEWER);
+    expect(line.idempotency_key).toBe('review.completed:sess-review-writer:v1-abc');
+    expect(line.data.verdict).toBe('PASS');
+    expect(line.data.findings_ref).toBe(FINDINGS_REF);
+    expect(line.data.verification_id).toBe('v1-abc');
+  });
+
+  it('accepts all five canonical verdicts', () => {
+    for (const verdict of ['PASS', 'REPAIR_REQUIRED', 'REPLAN_REQUIRED',
+      'INTENT_REVIEW_REQUIRED', 'BLOCK']) {
+      const built = buildReviewCompletedEvent({
+        parsed: parseReviewVerdict(v2Doc({ verdict })),
+        sessionId: SID,
+        model: MODEL,
+        findingsRef: FINDINGS_REF,
+      });
+      expect(built.ok, verdict).toBe(true);
+      expect(append(built.input).ok, verdict).toBe(true);
+    }
+    expect(rawLines()).toHaveLength(5);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('keeps envelope-only keys out of data', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      missionId: MISSION,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+      reviewerId: REVIEWER,
+    });
+    for (const key of ['session_id', 'mission_id', 'model', 'worker', 'source',
+      'idempotency_key', 'event']) {
+      expect(Object.prototype.hasOwnProperty.call(built.input.data, key), key).toBe(false);
+    }
+    expect(Object.keys(built.input.data).sort())
+      .toEqual(['findings_ref', 'verdict', 'verification_id']);
+  });
+
+  it('omits mission_id when it does not match the ledger pattern', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      missionId: 'not-a-mission-id',
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(built.ok).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(built.input, 'mission_id')).toBe(false);
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('omits worker when no reviewer id was given', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(Object.prototype.hasOwnProperty.call(built.input, 'worker')).toBe(false);
+  });
+
+  it.each([
+    ['legacy APPROVE text', { parsed: parseReviewVerdict('APPROVE') }],
+    ['ambiguous SPEC_FAIL text', { parsed: parseReviewVerdict('SPEC_FAIL') }],
+    ['a v2 document missing a required field',
+      { parsed: parseReviewVerdict(v2Doc({ verdict: undefined })) }],
+  ])('refuses to build from %s', (_label, over) => {
+    const built = buildReviewCompletedEvent({
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+      ...over,
+    });
+    expect(built.ok).toBe(false);
+    expect(typeof built.reason).toBe('string');
+    expect(built.input).toBeUndefined();
+  });
+
+  it('records the folded legacy verdict nowhere — APPROVE leaves no line', () => {
+    const parsed = parseReviewVerdict('APPROVE');
+    expect(parsed.foldedVerdict).toBe('PASS');
+    expect(buildReviewCompletedEvent({
+      parsed, sessionId: SID, model: MODEL, findingsRef: FINDINGS_REF,
+    }).ok).toBe(false);
+    expect(rawLines()).toHaveLength(0);
+  });
+
+  it.each([
+    ['model', { model: undefined }],
+    ['model (blank)', { model: '' }],
+    ['sessionId', { sessionId: undefined }],
+    ['sessionId (blank)', { sessionId: '' }],
+    ['findingsRef', { findingsRef: undefined }],
+    ['findingsRef (blank)', { findingsRef: '' }],
+  ])('refuses to build when %s is missing', (_label, over) => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+      ...over,
+    });
+    expect(built.ok).toBe(false);
+  });
+});
+
+describe('buildClaimAuditEvent — optional keys are ABSENT, never null', () => {
+  it('writes one line whose subject_model key does not exist', () => {
+    const built = buildClaimAuditEvent({
+      parsed: parseClaimAudit({ claim_audit: auditBlock() }),
+      sessionId: SID,
+      missionId: MISSION,
+      model: MODEL,
+      reviewerId: REVIEWER,
+    });
+    expect(built.ok).toBe(true);
+    expect('subject_model' in built.input.data).toBe(false);
+
+    expect(append(built.input).ok).toBe(true);
+    const lines = rawLines();
+    expect(lines).toHaveLength(1);
+    expect(rejectedLines()).toHaveLength(0);
+
+    const [line] = lines;
+    expect(line.event).toBe('review.claim_audit');
+    expect(line.source).toBe('reviewer');
+    expect('subject_model' in line.data).toBe(false);
+    expect(line.data.nature).toBe('judge');
+    expect(line.data.subject_agent_type).toBe('code-reviewer');
+    expect(line.data.claims_total).toBe(12);
+    expect(line.data.claims_refuted).toBe(3);
+    expect(line.data.evidence_refs).toEqual(['lib/review/independent-reviewer.js:699']);
+  });
+
+  it('omits nature when the report was untagged', () => {
+    const built = buildClaimAuditEvent({
+      parsed: parseClaimAudit({ claim_audit: auditBlock({ nature: undefined }) }),
+      sessionId: SID,
+      model: MODEL,
+    });
+    expect(built.ok).toBe(true);
+    expect('nature' in built.input.data).toBe(false);
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('includes subject_model and subject_agent_id when the block carried them', () => {
+    const built = buildClaimAuditEvent({
+      parsed: parseClaimAudit({
+        claim_audit: auditBlock({ subject_model: 'claude-opus-5', subject_agent_id: 'ag-77' }),
+      }),
+      sessionId: SID,
+      model: MODEL,
+    });
+    expect(built.input.data.subject_model).toBe('claude-opus-5');
+    expect(built.input.data.subject_agent_id).toBe('ag-77');
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('omits evidence_refs when the block had none', () => {
+    const built = buildClaimAuditEvent({
+      parsed: parseClaimAudit({ claim_audit: auditBlock({ evidence_refs: undefined }) }),
+      sessionId: SID,
+    });
+    expect(built.ok).toBe(true);
+    expect('evidence_refs' in built.input.data).toBe(false);
+  });
+
+  it('builds without an envelope model — the allowlist does not require one here', () => {
+    const built = buildClaimAuditEvent({
+      parsed: parseClaimAudit({ claim_audit: auditBlock() }),
+      sessionId: SID,
+    });
+    expect(built.ok).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(built.input, 'model')).toBe(false);
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('keeps envelope-only keys out of data', () => {
+    const built = buildClaimAuditEvent({
+      parsed: parseClaimAudit({ claim_audit: auditBlock() }),
+      sessionId: SID,
+      missionId: MISSION,
+      model: MODEL,
+      reviewerId: REVIEWER,
+    });
+    for (const key of ['session_id', 'mission_id', 'model', 'worker', 'source', 'event']) {
+      expect(Object.prototype.hasOwnProperty.call(built.input.data, key), key).toBe(false);
+    }
+  });
+
+  it.each([
+    ['claims_refuted exceeds claims_total', { claims_total: 2, claims_refuted: 5 }],
+    ['the denominator is missing', { claims_total: undefined }],
+    ['a count is a string', { claims_total: '12' }],
+    ['nature is off-enum', { nature: 'vibes' }],
+    ['subject_agent_type is missing', { subject_agent_type: undefined }],
+  ])('refuses to build when %s', (_label, over) => {
+    const parsed = parseClaimAudit({ claim_audit: auditBlock(over) });
+    expect(parsed.ok).toBe(false);
+    const built = buildClaimAuditEvent({ parsed, sessionId: SID, model: MODEL });
+    expect(built.ok).toBe(false);
+    expect(built.input).toBeUndefined();
+  });
+
+  it('refuses to build without a session id', () => {
+    expect(buildClaimAuditEvent({
+      parsed: parseClaimAudit({ claim_audit: auditBlock() }),
+    }).ok).toBe(false);
+  });
+});
+
+describe('idempotency keys', () => {
+  it('spells review.completed as event:session:verification_id', () => {
+    expect(reviewCompletedIdempotencyKey(SID, 'v1-abc'))
+      .toBe('review.completed:sess-review-writer:v1-abc');
+  });
+
+  it('spells claim_audit as event:session:subject_agent_type:12 hex', () => {
+    const key = claimAuditIdempotencyKey(SID, parseClaimAudit({ claim_audit: auditBlock() }));
+    expect(key).toMatch(/^review\.claim_audit:sess-review-writer:code-reviewer:[0-9a-f]{12}$/);
+  });
+
+  it('is stable across key order and repeated calls', () => {
+    const a = claimAuditIdempotencyKey(SID, parseClaimAudit({ claim_audit: auditBlock() }));
+    const b = claimAuditIdempotencyKey(SID, parseClaimAudit({
+      claim_audit: {
+        evidence_refs: ['lib/review/independent-reviewer.js:699'],
+        claims_refuted: 3,
+        claims_total: 12,
+        nature: 'judge',
+        subject_agent_type: 'code-reviewer',
+      },
+    }));
+    expect(a).toBe(b);
+  });
+
+  it('changes when any counted field changes', () => {
+    const base = claimAuditIdempotencyKey(SID, parseClaimAudit({ claim_audit: auditBlock() }));
+    const variants = [
+      { claims_total: 13 },
+      { claims_refuted: 4 },
+      { nature: 'process' },
+      { subject_agent_type: 'tdd-guide' },
+      { subject_agent_id: 'ag-1' },
+      { evidence_refs: ['other.js:1'] },
+    ];
+    for (const over of variants) {
+      const key = claimAuditIdempotencyKey(SID, parseClaimAudit({
+        claim_audit: auditBlock(over),
+      }));
+      expect(key, JSON.stringify(over)).not.toBe(base);
+    }
+  });
+
+  it('does NOT change when subject_model alone changes', () => {
+    // subject_model is unknowable until the L2 D1 route-receipt bind lands, so
+    // hashing it would make the same audit dedupe-distinct before and after the
+    // bind — the one field whose later arrival must not create a second line.
+    const without = claimAuditIdempotencyKey(SID, parseClaimAudit({
+      claim_audit: auditBlock(),
+    }));
+    const withModel = claimAuditIdempotencyKey(SID, parseClaimAudit({
+      claim_audit: auditBlock({ subject_model: 'claude-opus-5' }),
+    }));
+    expect(withModel).toBe(without);
+  });
+
+  it('separates two sessions', () => {
+    const a = claimAuditIdempotencyKey('s1', parseClaimAudit({ claim_audit: auditBlock() }));
+    const b = claimAuditIdempotencyKey('s2', parseClaimAudit({ claim_audit: auditBlock() }));
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('recordReviewOutcome — both blocks, through the real ledger', () => {
+  it('appends two lines from one answer and zero rejections', () => {
+    const ports = livePorts();
+    const out = recordReviewOutcome(recordArgs(), ports);
+
+    expect(out.review.status).toBe('appended');
+    expect(out.claimAudit.status).toBe('appended');
+    expect(out.parsed.verdict.ok).toBe(true);
+    expect(out.parsed.claimAudit.ok).toBe(true);
+
+    const lines = rawLines();
+    expect(lines).toHaveLength(2);
+    expect(rejectedLines()).toHaveLength(0);
+    expect(lines.map((l) => l.event).sort())
+      .toEqual(['review.claim_audit', 'review.completed']);
+  });
+
+  it('dedupes both events on a second identical call', () => {
+    const ports = livePorts();
+    const first = recordReviewOutcome(recordArgs(), ports);
+    expect(first.review.status).toBe('appended');
+    expect(first.claimAudit.status).toBe('appended');
+    expect(rawLines()).toHaveLength(2);
+
+    const second = recordReviewOutcome(recordArgs(), ports);
+    expect(second.review.status).toBe('deduped');
+    expect(second.claimAudit.status).toBe('deduped');
+    expect(second.review.key).toBe(first.review.key);
+    expect(second.claimAudit.key).toBe(first.claimAudit.key);
+
+    expect(rawLines()).toHaveLength(2);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('skips the review half and still writes the audit half for legacy text', () => {
+    const ports = livePorts();
+    const text = ['APPROVE — 문제 없다.', '',
+      JSON.stringify({ claim_audit: auditBlock() }), ''].join('\n');
+    const out = recordReviewOutcome(recordArgs({ verdictText: text }), ports);
+
+    expect(out.review.status).toBe('skipped');
+    expect(out.claimAudit.status).toBe('appended');
+    const lines = rawLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0].event).toBe('review.claim_audit');
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it.each([
+    ['legacy APPROVE', 'APPROVE'],
+    ['ambiguous SPEC_FAIL', 'SPEC_FAIL'],
+    ['prose with no token', '검수했고 괜찮아 보인다.'],
+  ])('writes nothing at all for %s', (_label, text) => {
+    const out = recordReviewOutcome(recordArgs({ verdictText: text }), livePorts());
+    expect(out.review.status).toBe('skipped');
+    expect(out.claimAudit.status).toBe('skipped');
+    expect(rawLines()).toHaveLength(0);
+    expect(existsSync(ledgerFile())).toBe(false);
+  });
+
+  it('writes nothing when the envelope model is missing', () => {
+    const out = recordReviewOutcome(recordArgs({ model: undefined }), livePorts());
+    expect(out.review.status).toBe('skipped');
+    // The audit half does not require an envelope model, so it still lands.
+    expect(out.claimAudit.status).toBe('appended');
+    expect(rawLines().filter((l) => l.event === 'review.completed')).toHaveLength(0);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('skips the audit half when claims_refuted exceeds claims_total', () => {
+    const ports = livePorts();
+    const text = answer({ audit: { claims_total: 2, claims_refuted: 5 } });
+    const out = recordReviewOutcome(recordArgs({ verdictText: text }), ports);
+
+    expect(out.claimAudit.status).toBe('skipped');
+    expect(out.review.status).toBe('appended');
+    const lines = rawLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0].event).toBe('review.completed');
+  });
+
+  it('skips the audit half when the answer carries no audit block', () => {
+    const out = recordReviewOutcome(
+      recordArgs({ verdictText: answer({ audit: null }) }), livePorts(),
+    );
+    expect(out.review.status).toBe('appended');
+    expect(out.claimAudit.status).toBe('skipped');
+    expect(rawLines()).toHaveLength(1);
+  });
+
+  it('passes the validateSchema port through to the verdict parser', () => {
+    const calls = [];
+    const out = recordReviewOutcome(recordArgs({
+      validateSchema: (doc) => {
+        calls.push(doc.verdict);
+        return { ok: false, errors: ['nope'] };
+      },
+    }), livePorts());
+    expect(calls).toEqual(['PASS']);
+    expect(out.review.status).toBe('skipped');
+    expect(rawLines().filter((l) => l.event === 'review.completed')).toHaveLength(0);
+  });
+});
+
+describe('recordReviewOutcome — never throws', () => {
+  it('reports port-threw:append and lets no exception escape', () => {
+    const out = recordReviewOutcome(recordArgs(), {
+      append: () => { throw new Error('disk on fire'); },
+      existingKeys: () => [],
+    });
+    expect(out.review.status).toBe('rejected');
+    expect(out.review.reason.startsWith('port-threw:')).toBe(true);
+    expect(out.review.reason).toBe('port-threw:append');
+    expect(out.claimAudit.status).toBe('rejected');
+    expect(out.claimAudit.reason).toBe('port-threw:append');
+  });
+
+  it('reports port-threw:existingKeys without appending', () => {
+    let appends = 0;
+    const out = recordReviewOutcome(recordArgs(), {
+      append: () => { appends += 1; return { ok: true }; },
+      existingKeys: () => { throw new Error('unreadable'); },
+    });
+    expect(out.review.status).toBe('rejected');
+    expect(out.review.reason).toBe('port-threw:existingKeys');
+    expect(out.claimAudit.reason).toBe('port-threw:existingKeys');
+    expect(appends).toBe(0);
+  });
+
+  it('reports the writer reason when the append port refuses', () => {
+    const out = recordReviewOutcome(recordArgs(), {
+      append: () => ({ ok: false, reason: 'unregistered-event', rejected: true }),
+      existingKeys: () => [],
+    });
+    expect(out.review.status).toBe('rejected');
+    expect(out.review.reason).toBe('unregistered-event');
+  });
+
+  it('rejects rather than throwing when a port is missing', () => {
+    const out = recordReviewOutcome(recordArgs(), {});
+    expect(out.review.status).toBe('rejected');
+    expect(out.review.reason).toBe('port-missing:append');
+    expect(out.claimAudit.status).toBe('rejected');
+  });
+
+  it('rejects rather than throwing when ports is absent entirely', () => {
+    const out = recordReviewOutcome(recordArgs());
+    expect(out.review.status).toBe('rejected');
+    expect(out.claimAudit.status).toBe('rejected');
+  });
+
+  it.each([
+    ['undefined args', undefined],
+    ['null args', null],
+    ['a number', 42],
+    ['an empty object', {}],
+  ])('returns a fully shaped result for %s', (_label, args) => {
+    const out = recordReviewOutcome(args, { append: () => ({ ok: true }), existingKeys: () => [] });
+    expect(out.review.status).toBe('skipped');
+    expect(out.claimAudit.status).toBe('skipped');
+    expect(out.parsed.verdict.ok).toBe(false);
+    expect(out.parsed.claimAudit.ok).toBe(false);
+  });
+
+  it('accepts an iterable of keys, not only an array', () => {
+    const keys = new Set([reviewCompletedIdempotencyKey(SID, 'v1-abc')]);
+    const out = recordReviewOutcome(recordArgs(), {
+      append: (input) => append(input),
+      existingKeys: () => keys,
+    });
+    expect(out.review.status).toBe('deduped');
+    expect(out.claimAudit.status).toBe('appended');
+    expect(rawLines()).toHaveLength(1);
+  });
+});
