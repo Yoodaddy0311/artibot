@@ -205,10 +205,10 @@ export async function resolveTranscriptModels(transcriptPath) {
  * Reduce a full attribution to the shape stored on learning rows.
  *
  * `model` is the **session leader** model (main thread). `subagentMix` is kept
- * alongside it rather than dropped: with 28 agents on one tier the two agree,
- * but the moment tiers diverge a session's score belongs partly to whichever
- * models did the delegated work — and a record that only named the leader
- * would silently misattribute it.
+ * alongside it rather than dropped: a single-tier fleet made the two agree, but
+ * now that tiers diverge (10 `fable` / 20 `opus` of 30) a session's score
+ * belongs partly to whichever models did the delegated work — and a record
+ * that only named the leader would silently misattribute it.
  *
  * @param {object} attribution - Result of {@link resolveTranscriptModels}
  * @returns {{
