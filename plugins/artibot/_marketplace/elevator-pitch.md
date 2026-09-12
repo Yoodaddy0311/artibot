@@ -2,7 +2,7 @@
 
 ## 100-word value proposition (listing description)
 
-Artibot turns Claude Code into an autonomous agent OS. It ships 28 specialist
+Artibot turns Claude Code into an autonomous agent OS. It ships 30 specialist
 agents, 113 skills, and 75 commands wired into an 11-stage cognitive runtime
 that automatically decomposes work, routes to parallel teams, and
 cross-verifies results — no slash commands required. Lifelong learning
@@ -17,11 +17,11 @@ runtime dependencies. Ready for serious work.
 
 ## One-liner (≤ 80 chars)
 
-Autonomous agent for Claude Code — 28 agents, parallel teams, lifelong learning.
+Autonomous agent for Claude Code — 30 agents, parallel teams, lifelong learning.
 
 ## Tweet-length (≤ 280 chars)
 
-Artibot v4.36.0 — the autonomous agent OS for Claude Code. 28 agents, 113 skills,
+Artibot v4.36.0 — the autonomous agent OS for Claude Code. 30 agents, 113 skills,
 parallel teams, dual-process cognition, lifelong learning, opt-in OTEL,
 local-only data policy, 9,300+ tests. BUSL-1.1. Zero runtime deps. Production-grade.
 

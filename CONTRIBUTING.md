@@ -105,8 +105,11 @@ description: >
 
 ### Model tier policy
 
-The fleet currently runs a **single tier**: all 28 agents resolve to `opus`.
-There is no per-agent tier choice to make — write `model: opus` and move on.
+The fleet currently runs **two tiers**: of the 30 agents, 10 resolve to `fable`
+and the other 20 resolve to `opus`. The 10 are exactly the design/review roles
+listed in `artibot.config.json#/agents/modelPolicy/fable/allowlist` (owner
+decision, 2026-09-02). Default for a new agent is `model: opus`; write
+`model: fable` only for a design/review role that is on that allowlist.
 
 Tiers are named by tier, never by model ID. The tier → model ID mapping lives in
 `plugins/artibot/lib/core/model-catalog.js#MODELS`; do not hardcode a model ID in
@@ -114,13 +117,15 @@ docs, prompts, or agent files.
 
 | Bucket | Declared tier | Effective tier | Agents |
 |--------|---------------|----------------|--------|
-| `high` | `fable` | `opus` | 21 |
+| `high` | `fable` | `fable` (allowlisted 10) / `opus` (rest) | 23 |
 | `medium` | `opus` | `opus` | 7 |
 
-**Declared vs effective.** The `high` bucket still *declares* `fable`, but the
-opt-in gate `artibot.config.json#/agents/modelPolicy/fable/enabled` is `false`,
-so every `fable` request is demoted to `opus`. Effective tier is therefore
-`opus` for all 28 agents. Read the effective value with
+**Declared vs effective.** The whole `high` bucket *declares* `fable`, but the
+opt-in gate `artibot.config.json#/agents/modelPolicy/fable/enabled` is `true`
+and only the 10 agents on `fable.allowlist` resolve to `fable`; every other
+`fable` declaration in that bucket is demoted to `opus`. Effective tier is
+therefore `fable` for the 10 allowlisted agents and `opus` for the other 20.
+Read the effective value with
 `lib/core/model-policy.js#resolveModel` — the single source of truth — not from
 the bucket's declared `model` field (`getPolicyModel(name, config)` returns the
 *declared* tier and will say `fable` — and it needs that hydrated config as its

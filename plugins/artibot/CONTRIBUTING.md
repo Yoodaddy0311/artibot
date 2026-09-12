@@ -244,8 +244,8 @@ Every agent that participates in Agent Teams must include:
 
 | Model | Use case | Cost |
 |-------|----------|------|
-| `opus` | **신규 에이전트의 기본값** (`claude-opus-5`) — 설계·구현·검수·마케팅 전 영역. 현재 28개 에이전트 전량이 이 티어 | High |
-| `fable` | 현재 OFF (`modelPolicy.fable.enabled=false`). 켜더라도 allowlist 등재 + security denylist 회피 조건을 `lib/core/model-policy.js` 게이트로 통과해야 실효 | Highest (2.6× opus) |
+| `opus` | **신규 에이전트의 기본값** (`claude-opus-5`) — 설계·구현·검수·마케팅 전 영역. 현재 30개 중 20개가 이 티어 | High |
+| `fable` | 현재 ON (`modelPolicy.fable.enabled=true`, allowlist 10종 = 30개 중 10개). allowlist 등재 + security denylist 회피 조건을 `lib/core/model-policy.js` 게이트로 통과해야 실효 | Highest (2.6× opus) |
 | `sonnet` | 정책 미사용 (전량 opus 상향) — 외부/실험 에이전트용 | Medium |
 | `haiku` | Lightweight tasks, documentation sync, content generation | Lowest |
 
