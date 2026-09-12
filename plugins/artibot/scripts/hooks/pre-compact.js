@@ -10,8 +10,9 @@
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createErrorHandler, getClaudeDir, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
+import { estimateTokens } from '../../lib/context/context-pressure.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'pre-compact';
@@ -173,14 +174,10 @@ function processTagsInContent(text) {
   return text.replace(/<analysis>[\s\S]*?<\/analysis>/g, '');
 }
 
-/**
- * Estimate token count using chars/4 + 1 heuristic.
- * @param {string} text
- * @returns {number}
- */
-function estimateTokens(text) {
-  return Math.ceil(text.length / 4) + 1;
-}
+// `estimateTokens` used to live here as a module-private copy. It is now
+// imported from `lib/context/context-pressure.js`, which owns the chars/4 + 1
+// heuristic for both compaction hooks. The formula is byte-identical; the
+// values this file produces are pinned in `tests/hooks/pre-compact.test.js`.
 
 // -------------------------------------------------------------------------
 // Summary Builder
@@ -326,6 +323,47 @@ function writePreCompactState(state) {
 }
 
 /**
+ * Size of the session transcript, in bytes (vNext PR-CX02).
+ *
+ * Why this exists: the live PreCompact payload carries NO `messages`
+ * (measured 2026-09-12 against `~/.claude/artibot-pre-compact.json`, savedAt
+ * 2026-09-11T14:40:09Z — `tokenEstimate: 1`, `summary.scope` all zero). So
+ * `tokenEstimate` cannot tell PostCompact how full the window was, and the
+ * transcript file is the only size signal the payload does carry.
+ *
+ * It OVERSTATES the window — the JSONL keeps envelopes, tool results, and
+ * turns the host already compacted away. `computeContextPressure` ranks it
+ * last and flags it `overstates: true`; nothing here tries to correct it.
+ *
+ * Never throws: a missing, locked, or non-string path is `null`.
+ *
+ * @param {unknown} transcriptPath
+ * @returns {number|null}
+ */
+function readTranscriptBytes(transcriptPath) {
+  if (typeof transcriptPath !== 'string' || !transcriptPath) return null;
+  try {
+    const size = statSync(transcriptPath).size;
+    return typeof size === 'number' && Number.isFinite(size) ? size : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The host's own `context_window` block, passed through verbatim when it is a
+ * plain object. This is the only MEASURED capacity signal available to the
+ * PostCompact hook; everything else it can reach is a heuristic.
+ *
+ * @param {unknown} contextWindow
+ * @returns {object|null}
+ */
+function readContextWindow(contextWindow) {
+  return contextWindow && typeof contextWindow === 'object' && !Array.isArray(contextWindow)
+    ? contextWindow : null;
+}
+
+/**
  * Load current artibot state from disk.
  * @param {string} statePath
  * @returns {object}
@@ -337,6 +375,46 @@ function loadCurrentState(statePath) {
   } catch {
     return {};
   }
+}
+
+/**
+ * The object written to `~/.claude/artibot-pre-compact.json`. That file is the
+ * ONLY channel from PreCompact to PostCompact, so its keys are a contract:
+ * `scripts/hooks/post-compact-rehydrate.js` reads `gitState` (identity gate),
+ * `summary`, `stateFilePath`, and — since PR-CX02 — `tokenEstimate`,
+ * `transcriptBytes` and `contextWindow` (the pressure inputs).
+ *
+ * @param {{ hookData: object, currentState: object, summary: object, tokenEstimate: number }} args
+ * @returns {object}
+ */
+function buildSnapshot({ hookData, currentState, summary, tokenEstimate }) {
+  // AD-40: capture git/cwd snapshot for human-readable resume context.
+  // Wrapped per-call internally so failures never reach the main flow.
+  const gitState = captureGitState();
+  const stateFilePath = writePreCompactState(gitState);
+  return {
+    savedAt: new Date().toISOString(),
+    reason: 'pre-compact',
+    state: currentState,
+    summary,
+    tokenEstimate,
+    // Additive (vNext PR-CX02): the two pressure inputs the live payload
+    // actually carries. The live PreCompact payload has no `messages`, so
+    // `tokenEstimate` alone says nothing about how full the window was.
+    transcriptBytes: readTranscriptBytes(hookData.transcript_path),
+    contextWindow: readContextWindow(hookData.context_window),
+    suppress_follow_up_questions: true,
+    gitState: {
+      cwd: gitState.cwd,
+      branch: gitState.branch,
+      // Additive (vNext PR-CX01): read by scripts/hooks/post-compact-rehydrate.js
+      // together with `sessionId` below; summary logic is unchanged.
+      head: gitState.head,
+      hasStatus: Boolean(gitState.gitStatus && gitState.gitStatus.trim().length > 0),
+    },
+    stateFilePath,
+    sessionId: typeof hookData.session_id === 'string' ? hookData.session_id : null,
+  };
 }
 
 // -------------------------------------------------------------------------
@@ -363,30 +441,7 @@ export async function main() {
     .join('');
   const tokenEstimate = estimateTokens(totalText);
 
-  // AD-40: capture git/cwd snapshot for human-readable resume context.
-  // Wrapped per-call internally so failures never reach the main flow.
-  const gitState = captureGitState();
-  const stateFilePath = writePreCompactState(gitState);
-
-  // Save snapshot before compaction
-  const snapshot = {
-    savedAt: new Date().toISOString(),
-    reason: 'pre-compact',
-    state: currentState,
-    summary,
-    tokenEstimate,
-    suppress_follow_up_questions: true,
-    gitState: {
-      cwd: gitState.cwd,
-      branch: gitState.branch,
-      // Additive (vNext PR-CX01): read by scripts/hooks/post-compact-rehydrate.js
-      // together with `sessionId` below; summary logic above is unchanged.
-      head: gitState.head,
-      hasStatus: Boolean(gitState.gitStatus && gitState.gitStatus.trim().length > 0),
-    },
-    stateFilePath,
-    sessionId: typeof hookData.session_id === 'string' ? hookData.session_id : null,
-  };
+  const snapshot = buildSnapshot({ hookData, currentState, summary, tokenEstimate });
 
   try {
     mkdirSync(claudeDir, { recursive: true });

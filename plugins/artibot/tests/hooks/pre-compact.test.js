@@ -20,12 +20,15 @@ vi.mock('node:fs', async () => {
     existsSync: vi.fn(() => false),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    // PR-CX02: the hook now stats `transcript_path`. Default = absent, so the
+    // pre-existing cases below keep the exact behaviour they pinned.
+    statSync: vi.fn(() => { throw new Error('ENOENT'); }),
   };
 });
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
 const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
-const { readFileSync, existsSync, writeFileSync, mkdirSync } = await import('node:fs');
+const { readFileSync, existsSync, writeFileSync, mkdirSync, statSync } = await import('node:fs');
 
 /**
  * Import the hook and run its entry point. The module carries a direct-run
@@ -54,6 +57,7 @@ describe('pre-compact hook', () => {
     readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
     writeFileSync.mockImplementation(() => {});
     mkdirSync.mockImplementation(() => {});
+    statSync.mockImplementation(() => { throw new Error('ENOENT'); });
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   });
 
@@ -293,6 +297,75 @@ describe('pre-compact hook', () => {
 
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
       expect(stderrOutput).toContain('[artibot:pre-compact]');
+    });
+  });
+
+  // ── PR-CX02 ────────────────────────────────────────────────────────────────
+  // The snapshot is the only thing PostCompact can read, so what it does and
+  // does not carry is a contract. `writePreCompactState` never reaches its
+  // own `writeFileSync` here (the mocked `scripts/utils/index.js` leaves
+  // `getPluginRoot` undefined, so it throws into its own try/catch), which is
+  // why call 0 is the snapshot for every case below.
+  describe('pressure inputs carried in the snapshot', () => {
+    /**
+     * @returns {Promise<object>} the parsed snapshot JSON
+     */
+    async function snapshotAfter(hookData) {
+      readStdin.mockResolvedValue(JSON.stringify(hookData));
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+      return JSON.parse(writeFileSync.mock.calls[0][1]);
+    }
+
+    it('pins tokenEstimate at chars/4 + 1 for a known message fixture', async () => {
+      const snap = await snapshotAfter({ messages: [{ role: 'user', content: 'x'.repeat(4000) }] });
+      expect(snap.tokenEstimate).toBe(1001);
+    });
+
+    it('reports tokenEstimate 1 when the payload carries no messages (the live case)', async () => {
+      // Measured against the live snapshot `~/.claude/artibot-pre-compact.json`
+      // (savedAt 2026-09-11T14:40:09Z): tokenEstimate 1, summary.scope all 0.
+      // The host's PreCompact payload does NOT include the transcript, so this
+      // number says nothing about context size — hence transcriptBytes below.
+      const snap = await snapshotAfter({ session_id: 'sess-live' });
+      expect(snap.tokenEstimate).toBe(1);
+      expect(snap.summary.scope).toEqual({ user: 0, assistant: 0, tool: 0 });
+    });
+
+    it('records transcriptBytes from transcript_path when the file can be stat-ed', async () => {
+      statSync.mockReturnValue({ size: 4_194_304 });
+      const snap = await snapshotAfter({ transcript_path: '/tmp/sess.jsonl' });
+      expect(statSync).toHaveBeenCalledWith('/tmp/sess.jsonl');
+      expect(snap.transcriptBytes).toBe(4_194_304);
+    });
+
+    it('records transcriptBytes null when transcript_path is absent or not a string', async () => {
+      statSync.mockReturnValue({ size: 10 });
+      expect((await snapshotAfter({})).transcriptBytes).toBe(null);
+      vi.clearAllMocks();
+      statSync.mockReturnValue({ size: 10 });
+      writeFileSync.mockImplementation(() => {});
+      expect((await snapshotAfter({ transcript_path: 42 })).transcriptBytes).toBe(null);
+    });
+
+    it('records transcriptBytes null when statSync throws, and does not crash the hook', async () => {
+      statSync.mockImplementation(() => { throw new Error('EACCES'); });
+      const snap = await snapshotAfter({ transcript_path: '/tmp/locked.jsonl' });
+      expect(snap.transcriptBytes).toBe(null);
+      expect(snap.reason).toBe('pre-compact');
+    });
+
+    it('records context_window verbatim when it is an object, null otherwise', async () => {
+      const withWindow = await snapshotAfter({ context_window: { current_tokens: 150_000, max_tokens: 200_000 } });
+      expect(withWindow.contextWindow).toEqual({ current_tokens: 150_000, max_tokens: 200_000 });
+      vi.clearAllMocks();
+      writeFileSync.mockImplementation(() => {});
+      statSync.mockImplementation(() => { throw new Error('ENOENT'); });
+      expect((await snapshotAfter({ context_window: 'big' })).contextWindow).toBe(null);
+      vi.clearAllMocks();
+      writeFileSync.mockImplementation(() => {});
+      statSync.mockImplementation(() => { throw new Error('ENOENT'); });
+      expect((await snapshotAfter({})).contextWindow).toBe(null);
     });
   });
 });

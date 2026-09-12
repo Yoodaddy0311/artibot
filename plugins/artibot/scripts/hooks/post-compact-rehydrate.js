@@ -51,7 +51,10 @@ import { createErrorHandler, getClaudeDir, logHookError } from '../../lib/core/h
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { readLatestHandoff } from '../../lib/handoff/handoff-store.js';
-import { buildRehydrationBundle, DEFAULT_MAX_BYTES } from '../../lib/context/rehydration.js';
+import { buildRehydrationBundle, DEFAULT_MAX_BYTES, reportContextReceipt } from '../../lib/context/rehydration.js';
+import { buildContextPressureEvent, computeContextPressure, estimateTokens } from '../../lib/context/context-pressure.js';
+import { BASELINE_TIER, MODELS } from '../../lib/core/model-catalog.js';
+import { appendEvent } from '../../lib/supervisor/run-store.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'post-compact-rehydrate';
@@ -66,13 +69,19 @@ export const LIFECYCLE_DEFAULTS = Object.freeze({
   enabled: false,
   postCompactRehydrate: true,
   maxRehydrateBytes: DEFAULT_MAX_BYTES,
+  // Where `appendEvent` writes the supervisor stream. null = the store's own
+  // default (`lib/observability/split-telemetry.js#getSplitStoreDir`). This is
+  // a TEST SEAM: production config names no directory, and no new env var was
+  // added for it — it rides the one overlay that already exists.
+  supervisorStoreDir: null,
 });
 
 /**
  * Resolve the lifecycle settings: defaults ← config ← env overlay. Never throws.
  * @param {object|null} config
  * @param {NodeJS.ProcessEnv} [env]
- * @returns {{ enabled: boolean, postCompactRehydrate: boolean, maxRehydrateBytes: number }}
+ * @returns {{ enabled: boolean, postCompactRehydrate: boolean, maxRehydrateBytes: number,
+ *            supervisorStoreDir: string|null }}
  */
 export function resolveLifecycle(config, env = process.env) {
   const fromConfig = config?.split?.contextLifecycle && typeof config.split.contextLifecycle === 'object'
@@ -88,6 +97,8 @@ export function resolveLifecycle(config, env = process.env) {
     postCompactRehydrate: merged.postCompactRehydrate !== false,
     maxRehydrateBytes: Number.isInteger(merged.maxRehydrateBytes) && merged.maxRehydrateBytes > 0
       ? merged.maxRehydrateBytes : DEFAULT_MAX_BYTES,
+    supervisorStoreDir: typeof merged.supervisorStoreDir === 'string' && merged.supervisorStoreDir
+      ? merged.supervisorStoreDir : null,
   };
 }
 
@@ -206,6 +217,222 @@ function persist(record, bundleText, claudeDir) {
 }
 
 /**
+ * Score how full the context window was (vNext PR-CX02). RECORD ONLY — the
+ * `recommendation` string is never acted on here, and no worker is rotated.
+ *
+ * A REFUSED snapshot is never scored. It describes another worktree's
+ * session, so its token counts are somebody else's; producing a number from
+ * them would look exactly like a measurement of this session.
+ *
+ * The capacity is contested (`context-tracker.js` says 128k, the catalog says
+ * 200k/1M), so this records WHICH denominator it used rather than picking one
+ * silently: the host's own `context_window.max_tokens` when present, else the
+ * baseline tier's `ctxLimit`.
+ *
+ * @param {object|null} snapshot - the PreCompact snapshot
+ * @param {object} hookData
+ * @param {boolean} identityOk
+ * @returns {{ pressure: object, capacitySource: string|null }}
+ */
+function scorePressure(snapshot, hookData, identityOk) {
+  if (!identityOk) {
+    return {
+      pressure: { score: null, level: null, recommendation: 'none', reason: 'snapshot-refused' },
+      capacitySource: null,
+    };
+  }
+  const cw = snapshot?.contextWindow && typeof snapshot.contextWindow === 'object' ? snapshot.contextWindow : null;
+  const hostMax = typeof cw?.max_tokens === 'number' && Number.isFinite(cw.max_tokens) && cw.max_tokens > 0
+    ? cw.max_tokens : null;
+  return {
+    pressure: computeContextPressure({
+      currentTokens: cw?.current_tokens,
+      maxTokens: hostMax ?? MODELS[BASELINE_TIER].ctxLimit,
+      tokenEstimate: snapshot?.tokenEstimate,
+      transcriptBytes: snapshot?.transcriptBytes,
+      compactTrigger: hookData.compact_trigger,
+    }),
+    capacitySource: hostMax !== null ? 'context_window.max_tokens' : `catalog:${BASELINE_TIER}.ctxLimit`,
+  };
+}
+
+/**
+ * Append one `context-pressure` envelope to the run's supervisor stream, when
+ * there is a run to attach it to. Write-only: nothing reads this back, nothing
+ * rotates the file, and the reducer treats the type as a heartbeat.
+ *
+ * An unscored pressure is not appended — a null score in an append-only stream
+ * is a row that can only ever be skipped by a reader.
+ *
+ * @param {object} pressure - a {@link scorePressure} result
+ * @param {{ runJson: object|null, briefs: Array<{ limb: string }> }} split
+ * @param {string|null} sessionId
+ * @param {string|null} storeDir
+ * @returns {{ appended: boolean, runId?: string, reason?: string, errors?: string[]|null }}
+ */
+function emitPressureEvent(pressure, split, sessionId, storeDir) {
+  if (pressure.score === null) return { appended: false, reason: `not-scored:${pressure.reason ?? 'unknown'}` };
+  const runId = typeof split.runJson?.runId === 'string' && split.runJson.runId ? split.runJson.runId : null;
+  if (!runId) return { appended: false, reason: 'no-split-run' };
+  const event = buildContextPressureEvent(pressure, { laneId: split.briefs[0]?.limb ?? null, sessionId });
+  try {
+    const res = appendEvent(runId, event, storeDir ? { storeDir } : {});
+    return res.appended
+      ? { appended: true, runId }
+      : { appended: false, runId, reason: 'append-refused', errors: res.errors ?? null };
+  } catch {
+    // A hook may not die of its own bookkeeping.
+    return { appended: false, runId, reason: 'append-threw' };
+  }
+}
+
+/**
+ * Assemble the Context Receipt and record the gap. `writer: null` is
+ * DELIBERATE: measured 2026-09-12, the ledger writer refuses
+ * `context.compiled` from `source: 'hook'` and records a `ledger.rejected`
+ * line instead, so wiring a port here would write one rejection per
+ * compaction and publish nothing. The eleven leaves this caller cannot fill
+ * are recorded instead — see `lib/context/context-receipt.js`.
+ *
+ * @param {object} bundle
+ * @param {object|null} snapshot
+ * @param {string|null} compactSummary
+ * @param {string|null} sessionId
+ * @param {string} stamp
+ * @returns {{ emitted: boolean, reason: string|null, missing: string[] }}
+ */
+function reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp) {
+  const r = reportContextReceipt({
+    receiptInput: {
+      receiptId: `ctx-${sessionId ? sessionId.slice(0, 8) : 'nosession'}-${stamp}`,
+      missionId: null, // no mission is in scope at a compaction
+      // Only a snapshot we accepted may supply the input side.
+      inputTokens: bundle.identity.ok ? snapshot?.tokenEstimate : undefined,
+      outputTokens: estimateTokens(compactSummary ?? '') + estimateTokens(bundle.text),
+      protectedSections: [],
+    },
+    sessionId,
+    source: 'hook',
+    writer: null,
+  });
+  return { emitted: r.emitted, reason: r.reason, missing: r.missing };
+}
+
+/**
+ * Read everything the bundle is folded from. Every read is individually
+ * guarded: missing evidence degrades the bundle, it never stops the hook.
+ *
+ * @param {string} cwd
+ * @param {string} snapshotPath
+ * @param {object} hookData
+ * @returns {Promise<{ snapshot: object|null, current: object, projectRoot: string,
+ *                     handoff: object|null, split: object, compactSummary: string|null }>}
+ */
+async function gatherEvidence(cwd, snapshotPath, hookData) {
+  let projectRoot = cwd;
+  try {
+    projectRoot = resolveProjectRoot(cwd) || cwd;
+  } catch { /* keep cwd */ }
+  let handoff = null;
+  try {
+    handoff = await readLatestHandoff(projectRoot);
+  } catch { /* none */ }
+  return {
+    snapshot: readJsonSafe(snapshotPath),
+    current: captureCurrentIdentity(cwd),
+    projectRoot,
+    handoff,
+    split: collectSplitEvidence(cwd, projectRoot),
+    compactSummary: typeof hookData.compact_summary === 'string' ? hookData.compact_summary : null,
+  };
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof gatherEvidence>>} evidence
+ * @param {string} snapshotPath
+ * @param {string} plannedMdPath
+ * @param {number} maxBytes
+ * @returns {object} a {@link buildRehydrationBundle} result
+ */
+function composeBundle(evidence, snapshotPath, plannedMdPath, maxBytes) {
+  const { snapshot } = evidence;
+  return buildRehydrationBundle({
+    snapshot,
+    current: evidence.current,
+    compactSummary: evidence.compactSummary,
+    handoff: evidence.handoff,
+    split: evidence.split,
+    maxBytes,
+    paths: {
+      bundlePath: plannedMdPath,
+      snapshotPath: snapshot ? snapshotPath : null,
+      stateFilePath: typeof snapshot?.stateFilePath === 'string' ? snapshot.stateFilePath : null,
+    },
+  });
+}
+
+/**
+ * The whole PR-CX02 measurement, in one place so `main` carries one line for
+ * it. Record-only: none of these four fields reaches `systemMessage`.
+ *
+ * @param {{ evidence: object, hookData: object, bundle: object,
+ *           sessionId: string|null, stamp: string, storeDir: string|null }} args
+ * @returns {{ pressure: object, capacitySource: string|null,
+ *             pressureEvent: object, contextReceipt: object }}
+ */
+function measureContext({ evidence, hookData, bundle, sessionId, stamp, storeDir }) {
+  const { snapshot, split, compactSummary } = evidence;
+  const { pressure, capacitySource } = scorePressure(snapshot, hookData, bundle.identity.ok);
+  return {
+    pressure,
+    capacitySource,
+    pressureEvent: emitPressureEvent(pressure, split, sessionId, storeDir),
+    contextReceipt: reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp),
+  };
+}
+
+/**
+ * The machine-readable record written to `~/.claude/artibot-post-compact.json`.
+ *
+ * @param {{ savedAt: string, event: string, sessionId: string|null, hookData: object,
+ *           cwd: string, evidence: object, bundle: object, measured: object }} args
+ * @returns {object}
+ */
+function buildRecord({ savedAt, event, sessionId, hookData, cwd, evidence, bundle, measured }) {
+  return {
+    savedAt,
+    event,
+    sessionId,
+    trigger: typeof hookData.compact_trigger === 'string' ? hookData.compact_trigger : null,
+    cwd,
+    projectRoot: evidence.projectRoot,
+    identity: bundle.identity,
+    bytes: bundle.bytes,
+    maxBytes: bundle.maxBytes,
+    truncated: bundle.truncated,
+    sections: bundle.sections,
+    warnings: bundle.warnings,
+    compactSummary: evidence.compactSummary,
+    ...measured,
+  };
+}
+
+/**
+ * One stderr line for the PR-CX02 record. Stderr only: `systemMessage` is the
+ * user-visible channel and this PR changes it by zero bytes.
+ *
+ * @param {object} pressure
+ * @param {{ appended: boolean, reason?: string }} pressureEvent
+ * @param {{ reason: string|null, missing: string[] }} receipt
+ * @returns {string}
+ */
+function formatPressureLine(pressure, pressureEvent, receipt) {
+  const event = pressureEvent.appended ? 'appended' : `skipped:${pressureEvent.reason ?? 'error'}`;
+  return `pressure=${pressure.score ?? 'null'} level=${pressure.level ?? 'null'} event=${event}`
+    + ` receipt=${receipt.reason ?? 'emitted'} missing=${receipt.missing.length}`;
+}
+
+/**
  * @returns {Promise<object|null>}
  */
 async function loadConfigSafe() {
@@ -236,54 +463,23 @@ export async function main() {
   const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : process.cwd();
   const claudeDir = getClaudeDir();
   const snapshotPath = path.join(claudeDir, 'artibot-pre-compact.json');
-  const snapshot = readJsonSafe(snapshotPath);
-  const current = captureCurrentIdentity(cwd);
-
-  let projectRoot = cwd;
-  try {
-    projectRoot = resolveProjectRoot(cwd) || cwd;
-  } catch { /* keep cwd */ }
-  let handoff = null;
-  try {
-    handoff = await readLatestHandoff(projectRoot);
-  } catch { /* none */ }
-  const split = collectSplitEvidence(cwd, projectRoot);
-  const compactSummary = typeof hookData.compact_summary === 'string' ? hookData.compact_summary : null;
+  const evidence = await gatherEvidence(cwd, snapshotPath, hookData);
 
   const savedAt = new Date().toISOString();
   const stamp = savedAt.replace(/[:.]/g, '-');
   const plannedMdPath = path.join(claudeDir, 'artibot', 'post-compact', `post-compact-${stamp}.md`);
-  const bundle = buildRehydrationBundle({
-    snapshot,
-    current,
-    compactSummary,
-    handoff,
-    split,
-    maxBytes: lifecycle.maxRehydrateBytes,
-    paths: {
-      bundlePath: plannedMdPath,
-      snapshotPath: snapshot ? snapshotPath : null,
-      stateFilePath: typeof snapshot?.stateFilePath === 'string' ? snapshot.stateFilePath : null,
-    },
+  const bundle = composeBundle(evidence, snapshotPath, plannedMdPath, lifecycle.maxRehydrateBytes);
+
+  const sessionId = typeof hookData.session_id === 'string' ? hookData.session_id : null;
+  // vNext PR-CX02 — recorded alongside the bundle; it never changes the bundle.
+  const measured = measureContext({
+    evidence, hookData, bundle, sessionId, stamp, storeDir: lifecycle.supervisorStoreDir,
   });
 
-  const record = {
-    savedAt,
-    event,
-    sessionId: typeof hookData.session_id === 'string' ? hookData.session_id : null,
-    trigger: typeof hookData.compact_trigger === 'string' ? hookData.compact_trigger : null,
-    cwd,
-    projectRoot,
-    identity: bundle.identity,
-    bytes: bundle.bytes,
-    maxBytes: bundle.maxBytes,
-    truncated: bundle.truncated,
-    sections: bundle.sections,
-    warnings: bundle.warnings,
-    compactSummary,
-  };
+  const record = buildRecord({ savedAt, event, sessionId, hookData, cwd, evidence, bundle, measured });
   const written = persist(record, bundle.text, claudeDir);
   log(`bundle ${bundle.bytes}B/${bundle.maxBytes}B identity=${bundle.identity.ok ? 'ok' : 'refused'}${bundle.truncated ? ' truncated' : ''} → ${written.mdPath ?? 'unsaved'}`);
+  log(formatPressureLine(measured.pressure, measured.pressureEvent, measured.contextReceipt));
 
   if (event === 'SessionStart') {
     // SessionStart(compact): plain stdout is injected into context (per claude-code-guide).

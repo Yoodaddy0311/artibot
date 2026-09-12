@@ -30,6 +30,8 @@
  * @module lib/context/rehydration
  */
 
+import { assembleContextReceipt } from './context-receipt.js';
+
 /** Design §04: initial payload of a fresh context ≤ 10 KB. */
 export const DEFAULT_MAX_BYTES = 10240;
 
@@ -409,4 +411,80 @@ export function buildRehydrationBundle(input = {}) {
     if (byteLength(text) > maxBytes) text = truncateToBytes(text, maxBytes).text;
   }
   return { text, bytes: byteLength(text), maxBytes, truncated, sections, identity, warnings };
+}
+
+/**
+ * Assemble a Context Receipt and offer it to an INJECTED writer port
+ * (vNext PR-CX02).
+ *
+ * ── Why the port is a parameter ─────────────────────────────────────────────
+ * The obvious implementation imports `lib/runtime/event-writer.js` and calls
+ * it. This module may not: `lib/context/` is below `lib/runtime/`, upper
+ * layers import lower only, and `tests/firewall/layer-registration-coverage`
+ * enforces it. So the caller passes the writer in. That also makes the next
+ * paragraph testable without a ledger on disk.
+ *
+ * ── Why the PostCompact caller passes `writer: null` today ──────────────────
+ * Measured 2026-09-12 against the real writer in a temp project root: a
+ * `context.compiled` event with `source: 'hook'` is REFUSED
+ * (`source-not-allowed:hook`) and the ledger records a single
+ * `ledger.rejected` line; the same event from `source: 'worker'` is accepted.
+ * The PostCompact hook is a hook, so it cannot publish. It therefore injects
+ * no port and records the gap instead of writing a rejection line on every
+ * compaction. `tests/context/rehydration.test.js` pins both halves of that
+ * measurement so the day the allowlist changes, the pin fails and someone
+ * decides deliberately.
+ *
+ * ── Why an incomplete receipt is never sent ─────────────────────────────────
+ * `assembleContextReceipt` returns `ok:false` with the dotted paths it could
+ * not fill. Handing that to the writer would either be rejected (noise) or,
+ * worse, tempt a future caller to zero-fill `transforms.*` — signed token
+ * deltas where `0` means "ran, changed nothing". A false measurement in an
+ * append-only ledger is unrecoverable, so the port is not called at all.
+ *
+ * Never throws: the callers are hooks whose failure would be invisible.
+ *
+ * @param {{
+ *   receiptInput?: object,
+ *   sessionId?: string|null,
+ *   source?: string,
+ *   writer?: { writeEvent?: Function }|null,
+ * }} [args]
+ * @returns {{ emitted: boolean, reason: string|null, missing: string[],
+ *             writer?: unknown, assembled: object }}
+ */
+export function reportContextReceipt(args = {}) {
+  const { receiptInput, sessionId = null, source, writer } = args && typeof args === 'object' ? args : {};
+  const assembled = assembleContextReceipt(receiptInput ?? {});
+  const missing = Array.isArray(assembled.missing) ? assembled.missing : [];
+
+  if (!writer || typeof writer.writeEvent !== 'function') {
+    return { emitted: false, reason: 'no-writer-port', missing, assembled };
+  }
+  if (assembled.ok !== true) {
+    return { emitted: false, reason: 'receipt-incomplete', missing, assembled };
+  }
+
+  const receipt = assembled.receipt;
+  let res;
+  try {
+    res = writer.writeEvent({
+      event: 'context.compiled',
+      mission_id: receipt.mission_id,
+      session_id: sessionId,
+      source,
+      data: receipt,
+    });
+  } catch {
+    // A port that throws is a broken port, not a broken receipt. Say which.
+    return { emitted: false, reason: 'writer-threw', missing: [], assembled };
+  }
+  const emitted = Boolean(res?.ok);
+  return {
+    emitted,
+    reason: emitted ? null : (res?.reason ?? 'writer-refused'),
+    missing: [],
+    writer: res,
+    assembled,
+  };
 }

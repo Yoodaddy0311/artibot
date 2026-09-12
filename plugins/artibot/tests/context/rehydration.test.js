@@ -10,17 +10,25 @@
  * hook's contract, not this module's).
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
+import * as rehydration from '../../lib/context/rehydration.js';
 import {
   buildRehydrationBundle,
   byteLength,
   compareIdentity,
   DEFAULT_MAX_BYTES,
+  reportContextReceipt,
   SECTION_CAPS,
   SECTION_ORDER,
   truncateToBytes,
 } from '../../lib/context/rehydration.js';
+// Imported in the TEST only: the module under test must not reach into the
+// runtime layer, so the real writer is injected as a port from here.
+import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
 
 const CWD = 'C:/Users/x/Desktop/Repo/.claude/worktrees/split-repo-a';
 
@@ -269,5 +277,164 @@ describe('buildRehydrationBundle — budget', () => {
   it('bad maxBytes falls back to the 10KB default', () => {
     expect(buildRehydrationBundle({ maxBytes: -1 }).maxBytes).toBe(DEFAULT_MAX_BYTES);
     expect(buildRehydrationBundle({ maxBytes: '5000' }).maxBytes).toBe(DEFAULT_MAX_BYTES);
+  });
+});
+
+/**
+ * `reportContextReceipt` — assemble a Context Receipt and hand it to an
+ * INJECTED writer port. The port is a parameter rather than an import because
+ * `lib/context/` sits below `lib/runtime/`; importing the writer here would
+ * break the layer rule that `tests/firewall/layer-registration-coverage.test.js`
+ * guards. The real writer is imported in this file instead.
+ */
+describe('reportContextReceipt', () => {
+  /** @type {string[]} */
+  const tmpRoots = [];
+
+  afterEach(() => {
+    while (tmpRoots.length > 0) {
+      rmSync(/** @type {string} */ (tmpRoots.pop()), { recursive: true, force: true });
+    }
+  });
+
+  /** @returns {string} a project root that exists only for this test */
+  function tmpRoot() {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cx02-receipt-'));
+    tmpRoots.push(dir);
+    return dir;
+  }
+
+  /**
+   * A receipt input that satisfies every required schema key. Shape copied
+   * from `tests/hooks/runtime-prompt-memory-instrumentation.test.js:160-175`
+   * (`validReceipt()`), mapped to this module's camelCase input.
+   * @param {object} [over]
+   * @returns {object}
+   */
+  function completeInput(over = {}) {
+    return {
+      receiptId: 'ctx-1',
+      missionId: 'M-20260902-S12345678',
+      basedOn: { intentRevision: 1, planRevision: 1 },
+      inputTokens: 100,
+      transforms: {
+        dedup: 0, tool_compression: 0, history_trim: 0, memory_add: 12, project_knowledge_add: 0,
+      },
+      protectedSections: [],
+      outputTokens: 112,
+      cache: { provider: 'anthropic', hit_tokens: 0, created_tokens: 0 },
+      strategyVersion: 1,
+      ...over,
+    };
+  }
+
+  /**
+   * @param {string} file
+   * @returns {object[]}
+   */
+  function readLines(file) {
+    return readFileSync(file, 'utf-8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+  }
+
+  it('exports the seven PR-CX01 names plus reportContextReceipt and nothing else', () => {
+    expect(Object.keys(rehydration).sort()).toEqual([
+      'DEFAULT_MAX_BYTES',
+      'SECTION_CAPS',
+      'SECTION_ORDER',
+      'buildRehydrationBundle',
+      'byteLength',
+      'compareIdentity',
+      'reportContextReceipt',
+      'truncateToBytes',
+    ].sort());
+  });
+
+  it('emits through an accepting port and passes the ledger field names through', () => {
+    /** @type {object[]} */
+    const calls = [];
+    const writer = { writeEvent: (input) => { calls.push(input); return { ok: true }; } };
+    const r = reportContextReceipt({
+      receiptInput: completeInput(), sessionId: 'sess-9', source: 'worker', writer,
+    });
+    expect(r.emitted).toBe(true);
+    expect(r.reason).toBe(null);
+    expect(r.missing).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      event: 'context.compiled',
+      mission_id: 'M-20260902-S12345678',
+      session_id: 'sess-9',
+      source: 'worker',
+    });
+    expect(calls[0].data.context_receipt_id).toBe('ctx-1');
+    expect(calls[0].data.cache).toEqual({ provider: 'anthropic', hit_tokens: 0, created_tokens: 0 });
+  });
+
+  it('reports no-writer-port when no port is injected, and still assembles', () => {
+    for (const writer of [null, undefined, {}, { writeEvent: 'nope' }]) {
+      const r = reportContextReceipt({ receiptInput: completeInput(), writer });
+      expect(r.emitted).toBe(false);
+      expect(r.reason).toBe('no-writer-port');
+      expect(r.assembled.ok).toBe(true);
+    }
+  });
+
+  it('never sends a known-incomplete receipt: the port is not called at all', () => {
+    let called = 0;
+    const writer = { writeEvent: () => { called += 1; return { ok: true }; } };
+    const r = reportContextReceipt({
+      receiptInput: { receiptId: 'ctx-2', outputTokens: 5 }, sessionId: 's', source: 'hook', writer,
+    });
+    expect(called).toBe(0);
+    expect(r.emitted).toBe(false);
+    expect(r.reason).toBe('receipt-incomplete');
+    expect(r.missing).toContain('mission_id');
+    expect(r.missing.length).toBeGreaterThan(0);
+  });
+
+  it('a throwing port is reported, not propagated', () => {
+    const writer = { writeEvent: () => { throw new Error('ledger on fire'); } };
+    const r = reportContextReceipt({
+      receiptInput: completeInput(), sessionId: 's', source: 'worker', writer,
+    });
+    expect(r.emitted).toBe(false);
+    expect(r.reason).toBe('writer-threw');
+  });
+
+  it('a port that refuses without a reason still reports a reason', () => {
+    const r = reportContextReceipt({
+      receiptInput: completeInput(), source: 'worker', writer: { writeEvent: () => ({ ok: false }) },
+    });
+    expect(r).toMatchObject({ emitted: false, reason: 'writer-refused' });
+  });
+
+  // ── The measurement this whole PR turns on ────────────────────────────────
+  // The real ledger writer REFUSES `context.compiled` from a hook. So the
+  // PostCompact hook cannot publish its receipt today, and that refusal is
+  // pinned here rather than worked around.
+  it('REAL writer: context.compiled from source=hook is refused and only a ledger.rejected line lands', () => {
+    const root = tmpRoot();
+    const writer = { writeEvent: (input) => writeEvent(root, input) };
+    const r = reportContextReceipt({
+      receiptInput: completeInput(), sessionId: 'sess-hook', source: 'hook', writer,
+    });
+    expect(r.emitted).toBe(false);
+    expect(r.reason).toBe('source-not-allowed:hook');
+    const lines = readLines(ledgerFilePath(root));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].event).toBe('ledger.rejected');
+  });
+
+  it('REAL writer control: the same receipt from source=worker is accepted', () => {
+    const root = tmpRoot();
+    const writer = { writeEvent: (input) => writeEvent(root, input) };
+    const r = reportContextReceipt({
+      receiptInput: completeInput(), sessionId: 'sess-worker', source: 'worker', writer,
+    });
+    expect(r.emitted).toBe(true);
+    expect(r.reason).toBe(null);
+    const lines = readLines(ledgerFilePath(root));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].event).toBe('context.compiled');
   });
 });
