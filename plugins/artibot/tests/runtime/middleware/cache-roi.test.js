@@ -59,7 +59,13 @@ describe('_safeInt', () => {
 
 describe('cache-roi pricing source', () => {
   it('carries no PRICING_USD_PER_M identifier outside comments', () => {
-    const code = stripComments(readFileSync(CACHE_ROI_SRC_URL, 'utf8'));
+    const raw = readFileSync(CACHE_ROI_SRC_URL, 'utf8');
+    // Stripper self-verification (rules §10): the raw source DOES mention the
+    // identifier once, in the comment explaining its removal. If this
+    // precondition fails the scan below proves nothing; if the stripper
+    // silently stopped stripping, the 0-hits assertion is what goes red.
+    expect(raw.match(/PRICING_USD_PER_M/g) || []).toHaveLength(1);
+    const code = stripComments(raw);
     const hits = code.match(/PRICING_USD_PER_M/g) || [];
     expect(hits).toHaveLength(0);
   });

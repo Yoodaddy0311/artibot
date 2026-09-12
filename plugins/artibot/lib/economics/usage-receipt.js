@@ -263,9 +263,9 @@ function counter(usage, key) {
  *    exposes one cache-creation counter and no TTL, so 1-hour writes (2x the
  *    5m rate) are not separable from it. The result is therefore a LOWER
  *    BOUND on cache-write spend, not an exact figure — read it that way.
- *  - `thinking_tokens` is NOT a term. The API already counts thinking inside
- *    `output_tokens`; the receipt repeats it as a breakdown field only. Adding
- *    it would bill the same tokens twice at the most expensive rate.
+ *  - `thinking_tokens` is NOT a term. Per Anthropic API docs `output_tokens`
+ *    already includes thinking (API-doc claim, NOT verified in this repo —
+ *    no fixture pins it, 2026-09-12). Adding it would double-bill.
  *
  * Nothing is rounded: the caller decides display precision, and rounding here
  * would make a sum of receipts disagree with a receipt of the sum.
@@ -693,7 +693,9 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
  *   other value leaves the default unpriced output unchanged, so a caller that
  *   passes a truthy string by accident gets null rather than a number nobody
  *   asked for. The default is pinned by the schema-guard firewall; see COST in
- *   the module header before changing it.
+ *   the module header before changing it. An `estimate`-graded receipt is
+ *   priced too: its missing counters enter the formula as 0, so its total is
+ *   a LOWER BOUND — `usage.source` is the honesty marker, not a null cost.
  * @returns {Promise<{receipts: object[], meta: object}>}
  * @throws {TypeError} When `transcriptPath` or `missionId` is not a non-empty string.
  *
