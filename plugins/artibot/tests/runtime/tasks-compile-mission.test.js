@@ -270,6 +270,43 @@ describe('T-25 — ledger append', () => {
     expect(readFileSync(ledgerPath(), 'utf-8')).not.toContain('mission-candidate-deferred');
   });
 
+  it('carries a title on the DEFERRED line too — stage ② has no other source for it', async () => {
+    // THE STAGE ② CARRIER (design §3.1 "mission_id 발급 2단계").
+    // `scripts/hooks/intent-observe-pre.js` promotes this candidate to
+    // `mission.created` at the session's first Write/Edit, by which time the
+    // prompt is gone. Without this key the promoted mission can only be named
+    // after the file being written, which is a filename, not an intent.
+    //
+    // The allowlist declares `mission.candidate_deferred` with typed
+    // `fields {reason, signals}` and `required: []`, and
+    // `event-writer.js#validateDeclaredFields` type-checks only DECLARED keys.
+    // So the half of this test that matters is that the WRITER ACCEPTED the
+    // line: a refused envelope lands as `ledger.rejected`, never as this event.
+    const task = await runMiddleware({ input: { prompt: '대시보드를 만들어줘' } });
+    const lines = readLedger();
+
+    expect(task.mission.substantive).toBe(false);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].event).toBe('mission.candidate_deferred');
+    expect(lines[0].data.title).toBeTypeOf('string');
+    expect(lines[0].data.title.length).toBeGreaterThan(0);
+    // The pre-existing two keys are untouched — this is additive.
+    expect(lines[0].data.reason).toBeTypeOf('string');
+    expect(Array.isArray(lines[0].data.signals)).toBe(true);
+  });
+
+  it('caps the deferred title at the same 120 chars mission.created uses', async () => {
+    // One cap, one expression (`tasks.js#missionTitle`). An uncapped goal on a
+    // line the writer must keep under 4 KB is how a required field gets folded
+    // away and the whole envelope rejected.
+    await runMiddleware({ input: { prompt: '가'.repeat(400) } });
+    const lines = readLedger();
+
+    expect(lines[0].event).toBe('mission.candidate_deferred');
+    expect(lines[0].data.title).toHaveLength(120);
+    expect(Buffer.byteLength(`${JSON.stringify(lines[0])}\n`, 'utf8')).toBeLessThanOrEqual(4096);
+  });
+
   it('appends nothing and records why when no project root is knowable', async () => {
     const task = await runMiddleware({
       input: { hookData: { session_id: SESSION } },
