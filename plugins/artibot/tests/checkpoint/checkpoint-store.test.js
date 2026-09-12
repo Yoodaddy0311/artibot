@@ -1,7 +1,7 @@
 /**
  * Behaviour pins for the Checkpoint Store's four verbs.
  *
- * The store is the append port for mission checkpoints (design §8.2, §21-26;
+ * The store is the append port for mission checkpoints (design §8.2, adopting scorecard §21-26;
  * scorecard §22 interface, §25 state isolation). It knows FOUR things: append a
  * record, fetch one back by id, fetch a mission's last one, and list a
  * mission's ids in write order. It deliberately does NOT know the 13-field

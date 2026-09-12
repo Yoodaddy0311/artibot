@@ -44,7 +44,8 @@
  *     copies `Date`, `Map`, `Set` and `RegExp`, but the FILE adapter serializes
  *     through `JSON.stringify`, so those types do not survive a round trip
  *     through disk at all. Whether a caller may put one in a checkpoint is the
- *     validator's question (team B), and this gate does not answer it.
+ *     validator's question (`checkpoint-validator.js`), and this gate does not
+ *     answer it.
  *   - PROTOTYPE POLLUTION. `structuredClone` drops the prototype and returns a
  *     plain object, so a mutation through `__proto__` is not the same
  *     experiment as the four below. It is UNMEASURED here.
@@ -54,8 +55,16 @@
  *   - CONCURRENT MUTATION. Everything here is single-threaded and sequential.
  *     Two readers editing one loaded record at the same time is not measured.
  *   - THE VALIDATOR'S COPY. Only this store is measured. Whether
- *     `checkpoint-validator.js` or `checkpoint-service.js` (team B) preserve the
- *     same isolation is their gate's question.
+ *     `checkpoint-validator.js` or `checkpoint-service.js` preserve the same
+ *     isolation is their own tests' question.
+ *   - THE FILE ROWS DO NOT PIN copy(). Measured 2026-09-12 by review: with the
+ *     store's `copy()` replaced by the identity function, the 8 file-adapter
+ *     rows below STAY GREEN, because `file-store.js#readAll` re-parses the
+ *     JSONL on every read and so isolates by itself. Only the 8 memory-adapter
+ *     rows detect a store that has stopped copying. The file rows therefore
+ *     measure the adapter round trip, not the store's clone — both are kept
+ *     because production runs the file adapter, and the memory rows are the
+ *     ones that guard the store.
  *
  * @module tests/firewall/checkpoint-immutability
  */

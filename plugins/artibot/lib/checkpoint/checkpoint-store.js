@@ -8,7 +8,7 @@
  * those four verbs (`save`, `load`, `latest`, `list`) and nothing else. It is
  * append-only: there is no update and no delete, because a checkpoint that can
  * be edited after the fact cannot be used to explain what a run actually did
- * (design ARTIBOT-5.0-DESIGN.md §8.2, §21-26).
+ * (design ARTIBOT-5.0-DESIGN.md §8.2, adopting scorecard §21-26).
  *
  * ── What it deliberately does NOT know ────────────────────────────────────
  * The checkpoint's field schema. `mission_id` is the ONLY field read here, and
