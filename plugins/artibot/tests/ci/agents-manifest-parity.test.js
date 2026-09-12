@@ -46,7 +46,11 @@
  *        따라서 여기서 `investigator` 가 스폰되는 것은 매니페스트가 불필요하다는
  *        증거가 **아니다**(경로가 둘이라 관측이 교란된다).
  *  (iii) frontmatter `name:` 과 파일명의 불일치는 이 게이트 밖이다
- *        (`tests/firewall/agent-name-references.test.js` 소관).
+ *        (`tests/firewall/agent-name-references.test.js` 소관). 카탈로그 파일명
+ *        제외 규약도 게이트마다 다르다(여기·validate.js 는 대소문자 무시,
+ *        readme-claims-registry.js:179·agent-name-references:163 은 정확 일치) —
+ *        `Readme.md` 류 입력이면 이 게이트는 제외하고 registry 는 세어 옆
+ *        게이트(validate-readme-claims)가 red 를 낸다. 조용한 구멍은 아니다.
  *  (iv)  이 스위트의 그린을 **"신규 설치에서 동작한다"** 의 근거로 쓰지 마라.
  *        픽스처가 이 리포 자신이다. 설치본·캐시본은 여기서 한 번도 안 읽는다.
  *
@@ -98,10 +102,12 @@ const ENTRY_PATTERN = /^\.\/agents\/[^/\\]+\.md$/;
  *   `manifestEntries` 는 `./agents/<name>.md` 형식의 문자열 배열,
  *   `directoryFiles` 는 파일명(`<name>.md`) 배열.
  * @returns {{ missingFromManifest: string[], missingOnDisk: string[],
- *             malformed: string[], ok: boolean }}
+ *             malformed: string[], duplicates: string[], ok: boolean }}
  *   `missingFromManifest` = 디스크에 있으나 매니페스트에 없는 파일명,
  *   `missingOnDisk` = 매니페스트에 있으나 디스크에 없는 항목(원문 그대로),
- *   `malformed` = 형식을 벗어난 매니페스트 항목(디스크 대조에서 제외된다).
+ *   `malformed` = 형식을 벗어난 매니페스트 항목(디스크 대조에서 제외된다),
+ *   `duplicates` = 매니페스트에 두 번 이상 적힌 항목(Set 으로 접히면 조용히
+ *   통과하므로 따로 센다 — 검수 지적 2026-09-12).
  * @throws {TypeError} 입력이 배열이 아니거나 비어 있을 때 (fail-closed —
  *   빈 입력을 "차이 0건"으로 통과시키면 파일 부재가 그린이 된다).
  */
@@ -114,6 +120,12 @@ export function computeAgentParity({ manifestEntries, directoryFiles } = {}) {
   }
 
   const malformed = manifestEntries.filter((entry) => !ENTRY_PATTERN.test(entry));
+  const seen = new Set();
+  const duplicates = [];
+  for (const entry of manifestEntries) {
+    if (seen.has(entry) && !duplicates.includes(entry)) duplicates.push(entry);
+    seen.add(entry);
+  }
   const manifestNames = new Set(
     manifestEntries
       .filter((entry) => ENTRY_PATTERN.test(entry))
@@ -133,7 +145,12 @@ export function computeAgentParity({ manifestEntries, directoryFiles } = {}) {
     missingFromManifest,
     missingOnDisk,
     malformed,
-    ok: missingFromManifest.length === 0 && missingOnDisk.length === 0 && malformed.length === 0,
+    duplicates,
+    ok:
+      missingFromManifest.length === 0 &&
+      missingOnDisk.length === 0 &&
+      malformed.length === 0 &&
+      duplicates.length === 0,
   };
 }
 
@@ -219,6 +236,10 @@ describe('plugin.json#agents ↔ agents/ 디렉터리 패리티', () => {
           parity.missingOnDisk,
           `${rel}: plugin.json#agents 에 있으나 파일이 없다 → ${parity.missingOnDisk.join(', ')}`,
         ).toEqual([]);
+        expect(
+          parity.duplicates,
+          `${rel}: plugin.json#agents 에 두 번 이상 적힌 항목 → ${parity.duplicates.join(', ')}`,
+        ).toEqual([]);
         expect(parity.ok).toBe(true);
       });
     });
@@ -255,8 +276,20 @@ describe('computeAgentParity 자기검증', () => {
       missingFromManifest: [],
       missingOnDisk: [],
       malformed: [],
+      duplicates: [],
       ok: true,
     });
+  });
+
+  it('매니페스트에 같은 항목이 두 번 있으면 duplicates 에 잡히고 ok 를 깬다 (Set 접힘 방지)', () => {
+    const result = computeAgentParity({
+      manifestEntries: ['./agents/alpha.md', './agents/beta.md', './agents/alpha.md'],
+      directoryFiles: ['alpha.md', 'beta.md'],
+    });
+    expect(result.duplicates).toEqual(['./agents/alpha.md']);
+    expect(result.missingFromManifest).toEqual([]);
+    expect(result.missingOnDisk).toEqual([]);
+    expect(result.ok).toBe(false);
   });
 
   it('매니페스트에서 1건을 빼면 missingFromManifest 에 그 파일명이 잡힌다', () => {
