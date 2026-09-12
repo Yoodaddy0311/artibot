@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHECKPOINT_FIELDS,
+  CHECKPOINT_REQUIRED_FIELDS,
   isLaneOpsState,
   isLaneTerminal,
   isRunTerminal,
@@ -19,6 +21,7 @@ import {
   LANE_STATES,
   RUN_LINEAR_STATES,
   RUN_STATES,
+  validateCheckpoint,
   validateEvent,
   validateLaneState,
   validateRunState,
@@ -146,5 +149,149 @@ describe('validateRunState / validateLaneState', () => {
     expect(validateLaneState({ ...ok, reviewVerdict: 'MAYBE' }).ok).toBe(false);
     expect(validateLaneState({ ...ok, reviewVerdict: null }).ok).toBe(true);
     expect(validateLaneState({ ...ok, lastHeartbeatAt: 'soon' }).ok).toBe(false);
+  });
+});
+
+/**
+ * The 13 keys of the design's "Checkpoint content" block, in its order. Kept
+ * written out here on purpose: if the module's own constant were the only
+ * copy, the test would agree with any drift in it.
+ */
+const SCORECARD_CHECKPOINT_KEYS = [
+  'mission_id',
+  'session_id',
+  'intent_revision',
+  'plan_revision',
+  'execution_profile_version',
+  'active_tasks',
+  'completed_action_results',
+  'routing_epoch',
+  'current_model',
+  'artifact_versions',
+  'replay_cursor',
+  'ledger_cursor',
+  'resumable',
+];
+
+const FULL_CHECKPOINT = Object.freeze({
+  mission_id: 'm-1',
+  session_id: 's-1',
+  intent_revision: 3,
+  plan_revision: 5,
+  execution_profile_version: 2,
+  active_tasks: [{ id: 't1' }],
+  completed_action_results: [{ id: 'a1' }],
+  routing_epoch: 'epoch-7',
+  current_model: 'opus',
+  artifact_versions: { 'docs/x.md': 2 },
+  replay_cursor: 0,
+  ledger_cursor: 12,
+  resumable: true,
+});
+
+const MINIMAL_CHECKPOINT = Object.freeze({
+  mission_id: 'm-1', session_id: 's-1', intent_revision: 0, plan_revision: 0, resumable: false,
+});
+
+/**
+ * @param {string} key
+ * @returns {Record<string, unknown>}
+ */
+function withoutKey(key) {
+  const copy = { ...FULL_CHECKPOINT };
+  delete copy[key];
+  return copy;
+}
+
+describe('validateCheckpoint', () => {
+  it('the field list is the 13 keys of the design block, in order', () => {
+    expect([...CHECKPOINT_FIELDS]).toEqual(SCORECARD_CHECKPOINT_KEYS);
+    expect(CHECKPOINT_FIELDS).toHaveLength(13);
+  });
+
+  it('every required field is one of the 13', () => {
+    for (const key of CHECKPOINT_REQUIRED_FIELDS) expect(CHECKPOINT_FIELDS).toContain(key);
+    expect(CHECKPOINT_REQUIRED_FIELDS.length).toBeLessThan(CHECKPOINT_FIELDS.length);
+  });
+
+  it('accepts a checkpoint carrying all 13 fields', () => {
+    expect(validateCheckpoint(FULL_CHECKPOINT)).toEqual({ ok: true, errors: [] });
+  });
+
+  it('accepts a checkpoint carrying only the required fields', () => {
+    expect(validateCheckpoint(MINIMAL_CHECKPOINT)).toEqual({ ok: true, errors: [] });
+  });
+
+  it.each([...CHECKPOINT_REQUIRED_FIELDS])('rejects a checkpoint missing %s', (key) => {
+    const r = validateCheckpoint(withoutKey(key));
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.startsWith(`${key}: must be`))).toBe(true);
+  });
+
+  it.each([
+    ['mission_id', ''],
+    ['mission_id', 7],
+    ['session_id', 7],
+    ['intent_revision', -1],
+    ['intent_revision', 1.5],
+    ['plan_revision', '4'],
+    ['resumable', 'true'],
+    ['execution_profile_version', -1],
+    ['active_tasks', {}],
+    ['completed_action_results', 'none'],
+    ['artifact_versions', []],
+    ['current_model', 7],
+    ['routing_epoch', 7],
+    ['replay_cursor', -1],
+    ['ledger_cursor', 1.5],
+  ])('rejects %s of the wrong type', (key, bad) => {
+    const r = validateCheckpoint({ ...FULL_CHECKPOINT, [key]: bad });
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.startsWith(`${key}: must be`))).toBe(true);
+  });
+
+  it.each(['execution_profile_version', 'current_model', 'routing_epoch', 'replay_cursor', 'ledger_cursor'])(
+    'accepts null for the nullable optional %s',
+    (key) => {
+      expect(validateCheckpoint({ ...FULL_CHECKPOINT, [key]: null }).ok).toBe(true);
+    },
+  );
+
+  it('accepts the string forms of the cursor and profile fields', () => {
+    const r = validateCheckpoint({
+      ...FULL_CHECKPOINT,
+      execution_profile_version: 'v2',
+      replay_cursor: 'evt-9',
+      ledger_cursor: 'evt-9',
+      routing_epoch: { id: 'e7' },
+    });
+    expect(r).toEqual({ ok: true, errors: [] });
+  });
+
+  it('rejects an unknown top-level key (allowlist, fail-closed)', () => {
+    const r = validateCheckpoint({ ...FULL_CHECKPOINT, model_hint: 'opus' });
+    expect(r.ok).toBe(false);
+    expect(r.errors).toContain('unknown key: model_hint');
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['an array', []],
+    ['a string', 'checkpoint'],
+    ['a number', 3],
+  ])('rejects %s as the checkpoint', (_label, input) => {
+    expect(validateCheckpoint(input)).toEqual({ ok: false, errors: ['checkpoint: must be an object'] });
+  });
+
+  it('reports every problem at once rather than the first', () => {
+    const r = validateCheckpoint({ mission_id: '', session_id: 1, intent_revision: -1 });
+    expect(r.ok).toBe(false);
+    expect(r.errors.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('never throws for hostile input', () => {
+    expect(() => validateCheckpoint(Object.create(null))).not.toThrow();
+    expect(() => validateCheckpoint(new Map())).not.toThrow();
   });
 });
