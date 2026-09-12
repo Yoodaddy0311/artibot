@@ -1,5 +1,5 @@
 /**
- * `lib/verification/unified-verifier.js` — the `verify.completed` ledger writer:
+ * `lib/verification/verify-writer.js` — the `verify.completed` ledger writer:
  * pure envelope builders plus one port-driven recorder.
  *
  * What this proves: that a verdict becomes one overall line plus one line per
@@ -39,16 +39,15 @@ import {
   foldGateState,
   LAYER_UNSPECIFIED,
 } from '../../lib/runtime/artifact-lifecycle-gates.js';
+import { LAYERS, verify } from '../../lib/verification/unified-verifier.js';
 import {
   buildVerifyCompletedEvents,
-  LAYERS,
   recordVerification,
   toVerifyResult,
-  verify,
   VERIFY_COMPLETED_EVENT,
   VERIFY_LEDGER_SOURCE,
   verifyCompletedIdempotencyKey,
-} from '../../lib/verification/unified-verifier.js';
+} from '../../lib/verification/verify-writer.js';
 
 const AT = () => new Date('2026-09-12T00:15:30.000Z');
 const SID = 'sess-verify-writer-01';

@@ -52,18 +52,17 @@ import path from 'node:path';
 
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
+import { parseClaimAudit, parseReviewVerdict } from '../../lib/review/independent-reviewer.js';
 import {
   buildClaimAuditEvent,
   buildReviewCompletedEvent,
   claimAuditIdempotencyKey,
-  parseClaimAudit,
-  parseReviewVerdict,
   recordReviewOutcome,
   REVIEW_CLAIM_AUDIT_EVENT,
   REVIEW_COMPLETED_EVENT,
   REVIEW_LEDGER_SOURCE,
   reviewCompletedIdempotencyKey,
-} from '../../lib/review/independent-reviewer.js';
+} from '../../lib/review/verdict-writer.js';
 
 const LEDGER_REL = 'ledger.jsonl';
 const SID = 'sess-review-writer';
