@@ -447,3 +447,137 @@ export function validateRunState(state) {
   }
   return { ok: errors.length === 0, errors };
 }
+
+/**
+ * The checkpoint content block, in the order of the design's "Checkpoint
+ * content" listing. Frozen and exported so tests and `lib/checkpoint/*` can
+ * compare against ONE list instead of retyping it — the design addendum's
+ * rule is that the field list has a single home and no JSON copy under
+ * `schemas/`.
+ */
+export const CHECKPOINT_FIELDS = Object.freeze([
+  'mission_id',
+  'session_id',
+  'intent_revision',
+  'plan_revision',
+  'execution_profile_version',
+  'active_tasks',
+  'completed_action_results',
+  'routing_epoch',
+  'current_model',
+  'artifact_versions',
+  'replay_cursor',
+  'ledger_cursor',
+  'resumable',
+]);
+
+/**
+ * The subset a checkpoint cannot omit. The design lists the thirteen fields
+ * but does NOT mark any of them required, so this split is an implementation
+ * decision, recorded here rather than left implicit:
+ *
+ * - `mission_id` / `session_id` — a checkpoint that cannot say which mission
+ *   and session it belongs to cannot be found again by `store.latest`.
+ * - `intent_revision` / `plan_revision` — the Resume Contract compares both
+ *   immediately after schema validation; absent, resume cannot even decide
+ *   whether the checkpoint is stale, which is worse than refusing it now.
+ * - `resumable` — the flag the whole record exists to carry. Absent it would
+ *   have to be *assumed*, and either assumption is unsafe.
+ *
+ * Everything else is optional-but-typed: the fields describe progress, and a
+ * checkpoint taken before there is any progress legitimately has none of
+ * them. Typing them when present keeps the allowlist honest without forcing
+ * callers to write `active_tasks: []` to mean "nothing yet".
+ */
+export const CHECKPOINT_REQUIRED_FIELDS = Object.freeze([
+  'mission_id',
+  'session_id',
+  'intent_revision',
+  'plan_revision',
+  'resumable',
+]);
+
+const CHECKPOINT_FIELD_SET = new Set(CHECKPOINT_FIELDS);
+
+/**
+ * @param {unknown} v
+ * @returns {boolean}
+ */
+function isIndex(v) {
+  return Number.isInteger(v) && /** @type {number} */ (v) >= 0;
+}
+
+/**
+ * @param {unknown} v
+ * @returns {boolean}
+ */
+function isPlainObject(v) {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * A cursor is an offset, an opaque id, or "not started". Both forms are in
+ * play — the ledger cursor is an event id, the replay cursor an index — and
+ * the design does not pick one, so both are accepted rather than guessed.
+ *
+ * @param {unknown} v
+ * @returns {boolean}
+ */
+function isCursor(v) {
+  return v === null || typeof v === 'string' || isIndex(v);
+}
+
+/** Required field → [predicate, expectation phrase]. */
+const CHECKPOINT_REQUIRED_RULES = Object.freeze({
+  mission_id: [isNonEmptyString, 'a non-empty string'],
+  session_id: [(v) => typeof v === 'string', 'a string'],
+  intent_revision: [isIndex, 'an integer >= 0'],
+  plan_revision: [isIndex, 'an integer >= 0'],
+  resumable: [(v) => typeof v === 'boolean', 'a boolean'],
+});
+
+/** Optional field → [predicate, expectation phrase]. Checked when present. */
+const CHECKPOINT_OPTIONAL_RULES = Object.freeze({
+  execution_profile_version: [(v) => v === null || typeof v === 'string' || isIndex(v), 'an integer >= 0, a string, or null'],
+  active_tasks: [Array.isArray, 'an array'],
+  completed_action_results: [Array.isArray, 'an array'],
+  routing_epoch: [(v) => v === null || typeof v === 'string' || isPlainObject(v), 'a string, an object, or null'],
+  current_model: [isStringOrNull, 'a string or null'],
+  artifact_versions: [isPlainObject, 'an object'],
+  replay_cursor: [isCursor, 'an integer >= 0, a string, or null'],
+  ledger_cursor: [isCursor, 'an integer >= 0, a string, or null'],
+});
+
+/**
+ * Validate a checkpoint content block against the design's thirteen fields.
+ *
+ * Structural only, in the shape of the validators above: `{ ok, errors }`,
+ * never throws, every problem reported in one pass. Unknown top-level keys
+ * are errors — an allowlist, so a field added to a writer without being added
+ * here fails closed instead of riding along unvalidated.
+ *
+ * What it deliberately does NOT do: compare `intent_revision` /
+ * `plan_revision` against the live mission, judge whether a completed action
+ * result may be reused, or decide anything about resume beyond the schema.
+ * Those are later steps of the Resume Contract and belong to their owners.
+ *
+ * @param {unknown} checkpoint
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
+export function validateCheckpoint(checkpoint) {
+  if (!isPlainObject(checkpoint)) {
+    return { ok: false, errors: ['checkpoint: must be an object'] };
+  }
+  const c = /** @type {Record<string, unknown>} */ (checkpoint);
+  const errors = [];
+  for (const [key, [ok, phrase]] of Object.entries(CHECKPOINT_REQUIRED_RULES)) {
+    if (!ok(c[key])) errors.push(`${key}: must be ${phrase}`);
+  }
+  for (const [key, [ok, phrase]] of Object.entries(CHECKPOINT_OPTIONAL_RULES)) {
+    if (c[key] !== undefined && !ok(c[key])) errors.push(`${key}: must be ${phrase}`);
+  }
+  for (const key of Object.keys(c)) {
+    if (!CHECKPOINT_FIELD_SET.has(key)) errors.push(`unknown key: ${key}`);
+  }
+  return { ok: errors.length === 0, errors };
+}
