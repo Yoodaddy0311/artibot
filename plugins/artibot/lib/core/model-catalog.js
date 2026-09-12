@@ -1,5 +1,6 @@
 /**
- * Model catalog — the single source of truth for Claude model SPECS.
+ * Model catalog — the single source of truth for Claude model SPECS **and
+ * PRICES**.
  *
  * Where `model-policy.js` answers "which model for agent X" (reads
  * `artibot.config.json`), this module answers "what ARE the models" — their
@@ -7,6 +8,13 @@
  * constraints. It is a pure data module: no config, no I/O, no other lib
  * imports. Docs (`scripts/gen-model-catalog-docs.js`) and any cost/budget math
  * derive from here so the numbers live in exactly one place.
+ *
+ * Price readers (no second price table may exist anywhere else):
+ *   - `lib/runtime/middleware/cache-roi.js` — cache read/write break-even math
+ *   - `lib/economics/usage-receipt.js` — per-call cost stamped onto receipts
+ * Routing readers (specs + cost factor, not the cache columns):
+ *   - `lib/routing/route-scorer.js`
+ *   - `lib/routing/route-hysteresis.js`
  *
  * Design constraints (mirror lib/core/model-policy.js):
  *   - Zero deps; imports NO other lib module (one-way: nothing flows in)
@@ -58,15 +66,68 @@ export const BASELINE_TIER = 'opus';
 export const CATALOG_VERSION = '2026-09-02';
 
 /**
+ * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
+ * `priceOutPerMTok`, and the three `priceCache*PerMTok` fields. Those five
+ * numbers were verified against {@link PRICING_SOURCE} on this date.
+ *
+ * Deliberately separate from {@link CATALOG_VERSION}: that stamp covers the
+ * whole catalog (IDs, limits, coefficients, constraints), so folding prices
+ * into it would make every unrelated limit edit claim "prices re-verified".
+ * A cost record needs to know when the PRICE it used was last checked.
+ *
+ * Date-shaped (`YYYY-MM-DD`), not semver — it answers "when were the numbers
+ * last verified", which is the question a replayed cost record actually asks.
+ * **Bump it in the same commit as any price change.** A stale stamp is worse
+ * than no stamp, because consumers trust it. Nothing machine-enforces that
+ * coupling today (see `tests/core/model-catalog-version.test.js` header).
+ *
+ * @type {string}
+ */
+export const PRICING_VERSION = '2026-09-12';
+
+/**
+ * Where the price columns came from: the official Anthropic pricing page.
+ *
+ * **Scheme-less on purpose.** `tests/ci/data-policy-outbound-guard.test.js`
+ * scans this file's raw source and fails it on any `http`/`https` URL literal
+ * anywhere — comments included — to enforce the Artibot DATA POLICY (model
+ * economy modules are pure local computation, no outbound anything). So the
+ * source is cited as a bare path; never add a scheme to this string or write
+ * one in any comment in this file.
+ *
+ * @type {string}
+ */
+export const PRICING_SOURCE =
+  'platform.claude.com/docs/en/about-claude/pricing';
+
+/**
  * Model specs keyed by Artibot tier alias. These are the tier enums the Claude
  * Code Agent/Task `model` parameter accepts (`sonnet|opus|haiku|fable`), each
  * mapped to its current underlying model ID and verified specs.
+ *
+ * **Cache prices are stored as literals, never derived.** The official page
+ * footnotes that cache hits and refreshes on Claude Fable 5.1 are priced at
+ * 0.025x the base input price while all other models use the standard 0.1x
+ * multiplier — so a single "10% of input" rule would overcharge fable cache
+ * reads by 4x. Write-price multipliers (1.25x for the 5-minute TTL, 2x for the
+ * 1-hour TTL) are uniform today, but they are pinned as literals too so a
+ * future per-model exception lands as a value edit, not a formula rewrite.
+ *
+ * Two measurement flags travel with the data so consumers can tell a verified
+ * number from an estimate: `priceMeasured` (the five price columns, checked
+ * against {@link PRICING_SOURCE} on {@link PRICING_VERSION}) and
+ * `tokenizerCoeffMeasured` (see {@link getCostFactor} — currently false).
  *
  * @type {Readonly<Record<string, Readonly<{
  *   id: string,
  *   priceInPerMTok: number,
  *   priceOutPerMTok: number,
+ *   priceCacheReadPerMTok: number,
+ *   priceCacheWrite5mPerMTok: number,
+ *   priceCacheWrite1hPerMTok: number,
+ *   priceMeasured: boolean,
  *   tokenizerCoeff: number,
+ *   tokenizerCoeffMeasured: boolean,
  *   ctxLimit: number,
  *   outLimit: number,
  *   thinkingMode: 'adaptive'|'always-on',
@@ -79,7 +140,12 @@ export const MODELS = deepFreeze({
     id: 'claude-haiku-4-5',
     priceInPerMTok: 1,
     priceOutPerMTok: 5,
+    priceCacheReadPerMTok: 0.1,
+    priceCacheWrite5mPerMTok: 1.25,
+    priceCacheWrite1hPerMTok: 2,
+    priceMeasured: true,
     tokenizerCoeff: 1.0,
+    tokenizerCoeffMeasured: false,
     ctxLimit: 200_000,
     outLimit: 64_000,
     thinkingMode: 'adaptive',
@@ -90,7 +156,12 @@ export const MODELS = deepFreeze({
     id: 'claude-sonnet-4-6',
     priceInPerMTok: 3,
     priceOutPerMTok: 15,
+    priceCacheReadPerMTok: 0.3,
+    priceCacheWrite5mPerMTok: 3.75,
+    priceCacheWrite1hPerMTok: 6,
+    priceMeasured: true,
     tokenizerCoeff: 1.0,
+    tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
     outLimit: 64_000,
     thinkingMode: 'adaptive',
@@ -101,7 +172,12 @@ export const MODELS = deepFreeze({
     id: 'claude-opus-5',
     priceInPerMTok: 5,
     priceOutPerMTok: 25,
+    priceCacheReadPerMTok: 0.5,
+    priceCacheWrite5mPerMTok: 6.25,
+    priceCacheWrite1hPerMTok: 10,
+    priceMeasured: true,
     tokenizerCoeff: 1.0,
+    tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
     outLimit: 128_000,
     thinkingMode: 'adaptive',
@@ -112,7 +188,13 @@ export const MODELS = deepFreeze({
     id: 'claude-fable-5-1',
     priceInPerMTok: 10,
     priceOutPerMTok: 50,
+    // 0.025x input, NOT the 0.1x every other tier uses — official footnote.
+    priceCacheReadPerMTok: 0.25,
+    priceCacheWrite5mPerMTok: 12.5,
+    priceCacheWrite1hPerMTok: 20,
+    priceMeasured: true,
     tokenizerCoeff: 1.3,
+    tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
     outLimit: 128_000,
     thinkingMode: 'always-on',
@@ -210,13 +292,61 @@ export function getTokenizerCoeff(tier) {
 }
 
 /**
- * Effective cost factor of a tier relative to the baseline (Opus 4.8): the
- * input-price ratio multiplied by the tokenizer coefficient (more tokens per
- * unit of content = more spend even at the same per-token price). Unknown tiers
- * and a missing/invalid baseline return 1.0.
+ * Per-MTok pricing for a role or tier, in one flat shape for cost math. The
+ * single lookup every price consumer should use — reading `MODELS[tier]`
+ * fields directly spreads the field names across modules.
+ *
+ * Resolves through {@link resolveRole}, so `'frontier'` and `'opus'` both
+ * work. Returns null (never throws) for unknown or non-string input.
+ *
+ * @param {string} roleOrTier - A ROLE_ALIASES key or a tier key.
+ * @returns {Readonly<{
+ *   tier: string, id: string, input: number, output: number,
+ *   cacheRead: number, cacheWrite5m: number, cacheWrite1h: number,
+ *   measured: boolean, version: string
+ * }>|null} Frozen pricing record, or null if unresolvable.
+ *
+ * @example
+ * getPricing('frontier'); // { tier: 'opus', input: 5, cacheRead: 0.5, ... }
+ * getPricing('nope'); // null
+ */
+export function getPricing(roleOrTier) {
+  const tier = resolveRole(roleOrTier);
+  const spec = getModel(tier);
+  if (!spec) return null;
+  return Object.freeze({
+    tier,
+    id: spec.id,
+    input: spec.priceInPerMTok,
+    output: spec.priceOutPerMTok,
+    cacheRead: spec.priceCacheReadPerMTok,
+    cacheWrite5m: spec.priceCacheWrite5mPerMTok,
+    cacheWrite1h: spec.priceCacheWrite1hPerMTok,
+    measured: spec.priceMeasured,
+    version: PRICING_VERSION,
+  });
+}
+
+/**
+ * Effective cost factor of a tier relative to the baseline
+ * `MODELS[BASELINE_TIER]` (`claude-opus-5`): the input-price ratio multiplied
+ * by the tokenizer coefficient (more tokens per unit of content = more spend
+ * even at the same per-token price). Unknown tiers and a missing/invalid
+ * baseline return 1.0.
+ *
+ * **The factor is UNMEASURED while `tokenizerCoeffMeasured` is false on the
+ * tiers involved — which is every tier today.** The price ratio half is
+ * verified; the tokenizer half is not. The official pricing page states that
+ * Claude 4.7 and later models use a newer tokenizer producing roughly 30% more
+ * tokens, while Sonnet 4.6 and earlier use the previous one — so the baseline
+ * `opus` (claude-opus-5) and `fable` (claude-fable-5-1) are on the SAME
+ * tokenizer, which makes the shipped `fable: 1.3` relative to opus an
+ * unverified carry-over and the resulting 2.6 an estimate, not a measurement.
+ * Changing the coefficient (and therefore this factor) is an owner decision
+ * pending a real token-count measurement; this note flags it only.
  *
  * @param {string} tier - Tier alias.
- * @returns {number} Cost factor; e.g. fable = (10/5) * 1.3 = 2.6.
+ * @returns {number} Cost factor; e.g. fable = (10/5) * 1.3 = 2.6 (estimate).
  *
  * @example
  * getCostFactor('fable'); // 2.6

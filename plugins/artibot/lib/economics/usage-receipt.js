@@ -36,31 +36,28 @@
  *
  * COST
  * ----
- * `cost.total` is ALWAYS null here, and that is not a stub. Two price tables
- * exist in this repo and are maintained INDEPENDENTLY — nothing reconciles
- * them: `lib/core/model-catalog.js#MODELS` and
- * `lib/runtime/middleware/cache-roi.js#PRICING_USD_PER_M`.
+ * The two-table problem is RESOLVED as of 2026-09-12. There was a period when
+ * this repo maintained two independent price tables — `model-catalog.js#MODELS`
+ * and a private `PRICING_USD_PER_M` inside `cache-roi.js` — whose input-price
+ * ratios were measured on 2026-09-03 at haiku 0.8x, sonnet 1.0x, opus 3.0x,
+ * fable 3.0x, i.e. not one factor but four, so no single correction existed.
+ * That is history: `cache-roi.js` now reads the catalog, the catalog carries
+ * the cacheRead/cacheWrite columns it previously lacked, and the rates were
+ * checked against the official price list at
+ * `platform.claude.com/docs/en/about-claude/pricing` (scheme-less on purpose,
+ * to keep grep hygiene consistent with the catalog).
  *
- * The gap between them is NOT a single factor. Measured 2026-09-03, cache-roi
- * over catalog on input price (output price gives the same four ratios):
+ * So a pricing path now exists: {@link priceUsage}, reachable from
+ * {@link buildUsageReceipts} via the explicit `priceReceipts` option.
  *
- *   haiku 0.8x | sonnet 1.0x | opus 3.0x | fable 3.0x
- *
- * So haiku is cheaper in one table, sonnet is identical, and only opus and
- * fable differ threefold. (An earlier revision of this comment said "~3x",
- * full stop — true for half the tiers and wrong for the other half, which is
- * exactly the kind of number that gets quoted onward as if it covered all
- * four.) The tables are not even the same shape: cache-roi carries cacheRead
- * and cacheWrite columns plus an `unknown` fallback tier, and the catalog has
- * no equivalent for any of them. No code compares the two — repo-wide grep
- * for PRICING_USD_PER_M returns cache-roi.js itself and this comment, and no
- * cross-validation.
- *
- * Picking one is the Shadow-phase "single price table" item. Until it lands,
- * any number this module emitted would be an unverified number wearing a
- * measured label. `cost.pricing_version` is required by the schema even so,
- * and carries {@link PRICING_VERSION_UNRESOLVED} to say exactly that no table
- * was used.
+ * It is OFF BY DEFAULT, and that is not a stub either. The firewall
+ * `tests/firewall/usage-receipt-schema-guard.test.js` pins `cost.total` to
+ * null for every receipt built with default options. Flipping the default is
+ * an owner decision that must change the writer and that gate in ONE commit —
+ * doing it here alone would either break the gate or, worse, land a silent
+ * behaviour change under a green suite. Until then `cost.pricing_version`
+ * carries {@link PRICING_VERSION_UNRESOLVED}, which states that no table was
+ * consulted rather than naming one that was not.
  *
  * WHAT THIS MODULE DOES NOT DO
  * ----------------------------
@@ -80,7 +77,12 @@ import { createReadStream, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 
-import { CATALOG_VERSION, MODELS } from '../core/model-catalog.js';
+import {
+  CATALOG_VERSION,
+  getPricing,
+  MODELS,
+  PRICING_VERSION,
+} from '../core/model-catalog.js';
 
 /**
  * Receipt schema revision this writer emits. Must match the `const` in
@@ -237,6 +239,68 @@ export function resolveModelIdentity(rawModelId) {
 function counter(usage, key) {
   const value = usage?.[key];
   return Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
+}
+
+/**
+ * Price one receipt `usage` block against the catalog, in USD.
+ *
+ * FORMULA (fixed here; every rate is USD per million tokens, from
+ * `model-catalog.js#getPricing`):
+ *
+ *   total = fresh_input_tokens    * input        / 1e6
+ *         + cached_input_tokens   * cacheRead    / 1e6
+ *         + cache_creation_tokens * cacheWrite5m / 1e6
+ *         + output_tokens         * output       / 1e6
+ *
+ * Three of those columns are the whole point of writing it out:
+ *
+ *  - `cached_input_tokens` bills at cacheRead, NOT at the input rate. Cache
+ *    hits are the largest counter in a typical transcript and the cheapest
+ *    column (fable: 0.25 vs 10 per MTok), so charging them as fresh input
+ *    over-counts by 10x-40x depending on tier. That single swap would dwarf
+ *    every other error in this module.
+ *  - `cache_creation_tokens` bills at the 5-MINUTE write rate. The transcript
+ *    exposes one cache-creation counter and no TTL, so 1-hour writes (2x the
+ *    5m rate) are not separable from it. The result is therefore a LOWER
+ *    BOUND on cache-write spend, not an exact figure — read it that way.
+ *  - `thinking_tokens` is NOT a term. The API already counts thinking inside
+ *    `output_tokens`; the receipt repeats it as a breakdown field only. Adding
+ *    it would bill the same tokens twice at the most expensive rate.
+ *
+ * Nothing is rounded: the caller decides display precision, and rounding here
+ * would make a sum of receipts disagree with a receipt of the sum.
+ *
+ * Never throws, and never returns NaN: a missing, negative or non-finite
+ * counter contributes 0, matching {@link counter}'s normalisation elsewhere in
+ * this module. An unknown tier, or a tier whose catalog entry is not
+ * `measured`, yields `total: null` with {@link PRICING_VERSION_UNRESOLVED} —
+ * the same statement the unpriced default makes, because an unverified rate
+ * wearing a version stamp is exactly what this module refuses to emit.
+ *
+ * @param {object} usage - Receipt `usage` block: `fresh_input_tokens`,
+ *   `cached_input_tokens`, `cache_creation_tokens`, `output_tokens`, and
+ *   optionally `thinking_tokens` (ignored, see above).
+ * @param {string} tier - Catalog tier alias (`haiku|sonnet|opus|fable`).
+ * @returns {{total: number|null, pricing_version: string}}
+ */
+export function priceUsage(usage, tier) {
+  const pricing = typeof tier === 'string' && tier.length > 0
+    ? getPricing(tier)
+    : null;
+  if (pricing?.measured !== true) {
+    return { total: null, pricing_version: PRICING_VERSION_UNRESOLVED };
+  }
+
+  // Written term-by-term, exactly as the formula above reads. Factoring the
+  // /1e6 out would be algebraically identical and one fewer division, but the
+  // block comment is the contract other modules are expected to check against.
+  const total =
+    counter(usage, 'fresh_input_tokens') * pricing.input / 1e6
+    + counter(usage, 'cached_input_tokens') * pricing.cacheRead / 1e6
+    + counter(usage, 'cache_creation_tokens') * pricing.cacheWrite5m / 1e6
+    + counter(usage, 'output_tokens') * pricing.output / 1e6;
+
+  return { total, pricing_version: PRICING_VERSION };
 }
 
 /**
@@ -546,9 +610,12 @@ function normaliseOutcome(supplied) {
  * @param {object} group
  * @param {string} missionId
  * @param {object} outcomes - run_id -> partial outcome block.
+ * @param {boolean} priceReceipts - Opt-in pricing. Passed as an argument, not
+ *   read from module state, so two concurrent calls cannot see each other's
+ *   setting.
  * @returns {{receipt: object|null, reason: string|null, source: string}}
  */
-function buildReceipt(group, missionId, outcomes) {
+function buildReceipt(group, missionId, outcomes, priceReceipts) {
   const source = group.failures > 0 ? 'estimate' : 'transcript';
 
   if (group.minTs === null || group.maxTs === null) {
@@ -584,7 +651,12 @@ function buildReceipt(group, missionId, outcomes) {
         latency_ms: group.maxTs - group.minTs,
       },
       outcome: normaliseOutcome(outcomes[group.runId]),
-      cost: { total: null, pricing_version: PRICING_VERSION_UNRESOLVED },
+      // Identity came from the exact-id reverse index, so `tier` is a catalog
+      // key or the group would not exist — priceUsage's unknown-tier branch is
+      // unreachable from here, and is kept for direct callers.
+      cost: priceReceipts === true
+        ? priceUsage(usage, group.identity.tier)
+        : { total: null, pricing_version: PRICING_VERSION_UNRESOLVED },
     },
     reason: null,
     source,
@@ -616,6 +688,12 @@ function buildReceipt(group, missionId, outcomes) {
  *   any of those. Injected in tests so no test reads a real home directory.
  * @param {(transcriptPath: string) => string[]|Promise<string[]>} [options.listSubagentTranscripts]
  *   - Subagent discovery port.
+ * @param {boolean} [options.priceReceipts=false] - Fill `cost.total` from
+ *   {@link priceUsage}. Opt-in, and only the literal `true` enables it: any
+ *   other value leaves the default unpriced output unchanged, so a caller that
+ *   passes a truthy string by accident gets null rather than a number nobody
+ *   asked for. The default is pinned by the schema-guard firewall; see COST in
+ *   the module header before changing it.
  * @returns {Promise<{receipts: object[], meta: object}>}
  * @throws {TypeError} When `transcriptPath` or `missionId` is not a non-empty string.
  *
@@ -627,7 +705,8 @@ function buildReceipt(group, missionId, outcomes) {
  * meta.coverage; // 1 when every assistant entry parsed cleanly
  */
 export async function buildUsageReceipts(options) {
-  const { transcriptPath, missionId, outcomes = {} } = options ?? {};
+  const { transcriptPath, missionId, outcomes = {}, priceReceipts = false } =
+    options ?? {};
   if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) {
     throw new TypeError('buildUsageReceipts: transcriptPath must be a non-empty string');
   }
@@ -660,7 +739,7 @@ export async function buildUsageReceipts(options) {
     await foldFile(state, file, readTranscript);
   }
 
-  return finalise(state, missionId, outcomes);
+  return finalise(state, missionId, outcomes, priceReceipts);
 }
 
 /**
@@ -669,9 +748,10 @@ export async function buildUsageReceipts(options) {
  * @param {object} state
  * @param {string} missionId
  * @param {Record<string, object>} outcomes
+ * @param {boolean} priceReceipts - Threaded through to {@link buildReceipt}.
  * @returns {{receipts: object[], meta: object}}
  */
-function finalise(state, missionId, outcomes) {
+function finalise(state, missionId, outcomes, priceReceipts) {
   const { meta } = state;
   const receipts = [];
   const modelsPerRun = new Map();
@@ -682,7 +762,12 @@ function finalise(state, missionId, outcomes) {
     models.add(group.identity.model_id);
     modelsPerRun.set(group.runId, models);
 
-    const { receipt, reason, source } = buildReceipt(group, missionId, outcomes);
+    const { receipt, reason, source } = buildReceipt(
+      group,
+      missionId,
+      outcomes,
+      priceReceipts,
+    );
     if (receipt === null) {
       meta.skipped.push({
         run_id: group.runId,

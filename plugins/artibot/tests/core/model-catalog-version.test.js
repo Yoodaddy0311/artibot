@@ -21,7 +21,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { CATALOG_VERSION, MODELS } from '../../lib/core/model-catalog.js';
+import {
+  CATALOG_VERSION,
+  MODELS,
+  PRICING_SOURCE,
+  PRICING_VERSION,
+} from '../../lib/core/model-catalog.js';
 
 describe('CATALOG_VERSION', () => {
   it('문자열로 export 된다', () => {
@@ -48,5 +53,55 @@ describe('CATALOG_VERSION', () => {
   it('상수는 재할당되지 않는다 (모듈 export 는 읽기 전용 바인딩)', () => {
     const mod = { CATALOG_VERSION };
     expect(mod.CATALOG_VERSION).toBe(CATALOG_VERSION);
+  });
+});
+
+/**
+ * `PRICING_VERSION` 은 `CATALOG_VERSION` 과 **다른 도장**이다.
+ * CATALOG_VERSION 은 카탈로그 데이터 전체(ID·한도·계수 포함), PRICING_VERSION 은
+ * **가격 열만**(in/out/cacheRead/cacheWrite5m/cacheWrite1h) 을 대상으로 한다.
+ * 둘을 하나로 합치면 한도 한 줄 고칠 때마다 "가격을 재검증했다"는 거짓 신호가 찍힌다.
+ *
+ * ── 이 게이트가 못 보는 것 (rules §9) ───────────────────────────────────────
+ *  1. **날짜의 진위.** 형식·실재 달력 날짜만 본다. 그 날 실제로 공식 페이지와
+ *     대조했는지는 기계가 알 수 없다.
+ *  2. **신선도.** 가격을 고치고 PRICING_VERSION 을 안 올린 커밋은 이 파일을
+ *     통과한다. 값↔버전을 묶는 해시 검사는 없다.
+ *  3. **출처의 유효성.** PRICING_SOURCE 가 스킴 없는 비어 있지 않은 문자열인지만
+ *     본다. 그 경로가 실재하는지는 확인하지 않는다(아웃바운드 금지 — 의도된 한계).
+ */
+describe('PRICING_VERSION', () => {
+  it('문자열로 export 된다', () => {
+    expect(typeof PRICING_VERSION).toBe('string');
+    expect(PRICING_VERSION).not.toBe('');
+  });
+
+  it('YYYY-MM-DD 형식이다 ("언제 가격을 검증했나" 를 답하는 도장)', () => {
+    expect(PRICING_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('실재하는 달력 날짜다 (2026-13-45 같은 값을 막는다)', () => {
+    const parsed = new Date(`${PRICING_VERSION}T00:00:00Z`);
+    expect(Number.isNaN(parsed.getTime())).toBe(false);
+    expect(parsed.toISOString().slice(0, 10)).toBe(PRICING_VERSION);
+  });
+
+  it('도장 찍을 가격 열이 실재한다 (분모)', () => {
+    for (const spec of Object.values(MODELS)) {
+      expect(Number.isFinite(spec.priceCacheReadPerMTok)).toBe(true);
+    }
+  });
+});
+
+describe('PRICING_SOURCE', () => {
+  it('비어 있지 않은 문자열이다', () => {
+    expect(typeof PRICING_SOURCE).toBe('string');
+    expect(PRICING_SOURCE.length).toBeGreaterThan(0);
+  });
+
+  it('http 로 시작하지 않는다 (아웃바운드 가드가 URL 리터럴을 금지한다)', () => {
+    // tests/ci/data-policy-outbound-guard.test.js 가 model-catalog.js 소스에서
+    // http/https 리터럴 0건을 강제한다 → 스킴을 뺀 경로 문자열로 저장한다.
+    expect(PRICING_SOURCE.startsWith('http')).toBe(false);
   });
 });
