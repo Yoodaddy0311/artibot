@@ -47,6 +47,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { appendLedgerEvent, ledgerFilePath } from '../../lib/runtime/ledger.js';
+import { SkipReason } from '../../lib/runtime/artifact-lifecycle.js';
 import { sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
@@ -355,6 +356,67 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
       const before = readFileSync(file, 'utf-8');
       expect(runHook(writePayload({ tool_use_id: 'toolu_intent_2' }), home).status).toBe(0);
       expect(readFileSync(file, 'utf-8')).toBe(before);
+    });
+
+    it.skipIf(!APPLY_CAN_WRITE)('still records the mission when the FILE write fails', () => {
+      // The records and the document are not one transaction, and this is the
+      // case that proves which way the asymmetry runs: the ledger line and the
+      // store row are written first and survive, the file does not appear, and
+      // the process still exits 0 with empty stdout.
+      //
+      // A REAL failure, not a stub: the mission directory exists as a FILE
+      // where `apply` needs a directory, so `ensureDirSync` throws inside
+      // `writeOneArtifact` and comes back as `SkipReason.WRITE_FAILED`. The
+      // latch above does not fire, because `<M>/intent.md` does not exist.
+      expect(seedDeferred().ok).toBe(true);
+      mkdirSync(path.join(repo, '.artibot', 'missions'), { recursive: true });
+      writeFileSync(path.join(repo, '.artibot', 'missions', missionId), 'not a dir', 'utf-8');
+
+      const r = runHook(writePayload(), home);
+      expect(r.status).toBe(0);
+      expect(r.stdoutBytes).toBe(0);
+
+      // The promotion happened even though the document did not.
+      const created = readRunLedger(repo).filter((l) => l.event === 'mission.created');
+      expect(created).toHaveLength(1);
+      expect(openStore(repo).getMission(missionId)).not.toBeNull();
+      expect(existsSync(intentArtifactPath(repo, missionId))).toBe(false);
+    });
+
+    it.skipIf(!APPLY_CAN_WRITE)('names WHY the file write produced nothing', async () => {
+      // In-process, because the child process is mute by design and the reason
+      // exists only in the return value. Without this the case above would be
+      // green for any failure whatsoever — including the hook throwing before
+      // it ever reached `apply` — and could not tell the two apart.
+      //
+      // A SECOND session id, so this does not collide with the child-process
+      // case above: the mission id is a pure function of (session id, UTC date).
+      const sessionId = 'sess-writefail-2bcdefgh';
+      const id = sessionFallbackMissionId(sessionId, new Date());
+      expect(appendLedgerEvent(repo, {
+        event: 'mission.candidate_deferred',
+        session_id: sessionId,
+        mission_id: id,
+        source: 'hook',
+        data: { reason: 'substantive-gate:deferred', signals: [], title: DEFERRED_TITLE },
+      }).ok).toBe(true);
+      mkdirSync(path.join(repo, '.artibot', 'missions'), { recursive: true });
+      writeFileSync(path.join(repo, '.artibot', 'missions', id), 'not a dir', 'utf-8');
+
+      const out = await observeIntent({
+        cwd: repo,
+        session_id: sessionId,
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(repo, 'lib', 'parser.js'), content: 'x' },
+      });
+
+      expect(out.ok).toBe(true);
+      expect(out.promoted).toBe(true);
+      expect(out.written).toBe(0);
+      // The exact code, from `artifact-lifecycle.js#SkipReason`. This is what
+      // makes the assertion a measurement of the filesystem refusal rather than
+      // of "something went wrong somewhere".
+      expect(out.skipped).toEqual([SkipReason.WRITE_FAILED]);
     });
 
     it('states the gate when apply() still cannot write', () => {

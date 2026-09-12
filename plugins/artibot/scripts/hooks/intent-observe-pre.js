@@ -306,7 +306,8 @@ function promote(ctx) {
  *
  * @param {{projectRoot: string, missionId: string, title: string, revision: number,
  *   text: string, config: object|undefined}} ctx
- * @returns {number} files written
+ * @returns {{written: number, skipped: string[]}} `skipped` carries
+ *   `SkipReason` codes, so a write that silently produced no file says why.
  */
 function writeIntent(ctx) {
   const planResult = plan({
@@ -330,7 +331,17 @@ function writeIntent(ctx) {
     config: ctx.config,
     content: { intent: ctx.text },
   });
-  return Array.isArray(applied?.written) ? applied.written.length : 0;
+  return {
+    written: Array.isArray(applied?.written) ? applied.written.length : 0,
+    // REPORTED, not swallowed. `apply` refuses per write rather than throwing
+    // (`SkipReason.NO_CONTENT` · `PATH_OUTSIDE_MISSIONS_DIR` · `ALREADY_EXISTS`
+    // · `WRITE_FAILED`), so without this a hook that produced no file is
+    // indistinguishable from one that produced a file — and this hook cannot
+    // print, which makes the return value the only place the reason can live.
+    skipped: Array.isArray(applied?.skipped)
+      ? applied.skipped.map((s) => String(s?.reason ?? 'unknown'))
+      : [],
+  };
 }
 
 /**
@@ -434,8 +445,14 @@ export async function observeIntent(hookData) {
       title, action: s1Action(filePath), missionId, revision,
     });
     const text = serializeIntentMd(compiled.contract, { originalRequest: title });
-    const written = writeIntent({ projectRoot, missionId, title, revision, text, config });
-    return { ok: true, missionId, promoted, written };
+    const result = writeIntent({ projectRoot, missionId, title, revision, text, config });
+    // `ok` stays TRUE on a skipped file. The records are the mission; the
+    // document is a projection of them, and a failed projection must not be
+    // reported as a failed promotion — the ledger line and the store row are
+    // both on disk by this point and saying otherwise would be the lie.
+    return result.written === 0 && result.skipped.length > 0
+      ? { ok: true, missionId, promoted, written: 0, skipped: result.skipped }
+      : { ok: true, missionId, promoted, written: result.written };
   } catch (err) {
     return { ok: false, reason: err?.message || 'observe-failed' };
   }
