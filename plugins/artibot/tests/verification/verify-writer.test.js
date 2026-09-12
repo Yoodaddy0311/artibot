@@ -11,11 +11,15 @@
  * verdict appends nothing; and that a throwing port becomes a `rejected` line
  * instead of an exception.
  *
- * What it cannot prove (rules §9): that the reader
- * `lib/runtime/artifact-lifecycle-gates.js#foldGateState` folds these lines the
- * way its own tests say it does — that module is not imported here, and the
- * alignment asserted below is the SHAPE its `tallyLayer` reads (`data.layer`,
- * `data.result`, `data.verification_id`), not its output. Nothing here measures
+ * The reader is measured, not assumed: the last describe block feeds the lines
+ * this writer actually wrote through the REAL
+ * `lib/runtime/artifact-lifecycle-gates.js#foldGateState` and asserts its output
+ * — a per-layer tally of three buckets plus `unspecified` for the overall line.
+ * That assertion has teeth because the same block strips `data.layer` from the
+ * same lines and shows the fold then collapses all four into one bucket, which
+ * is the exact failure a shape-only check could not see.
+ *
+ * What it cannot prove (rules §9): nothing here measures
  * a real ledger under concurrency, and the 4096-byte line cap is not exercised:
  * the evidence entries used are a few hundred bytes, so a green run here says
  * nothing about the writer's fold path for oversized verdicts (the exact
@@ -30,6 +34,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
+import {
+  buildFindings,
+  foldGateState,
+  LAYER_UNSPECIFIED,
+} from '../../lib/runtime/artifact-lifecycle-gates.js';
 import {
   buildVerifyCompletedEvents,
   LAYERS,
@@ -477,6 +486,73 @@ describe('recordVerification', () => {
     const out = recordVerification(passVerdict(), { sessionId: SID }, ports());
     const written = existingKeys();
     expect(out.lines.map((l) => l.key).sort()).toEqual(written.sort());
+  });
+
+  it('rejects every line when existingKeys returns something it cannot iterate', () => {
+    // A non-iterable return is a wiring defect, and the only safe reading of it
+    // is "I do not know which keys exist". Guessing "none" would append a
+    // second copy of every line and inflate the reader's per-layer tally — the
+    // same double count the throwing case above refuses, reached by a different
+    // route, so it gets the same `port-threw:existingKeys` reason.
+    for (const bad of [42, { keys: [] }, true]) {
+      resetSeq();
+      let out;
+      expect(() => {
+        out = recordVerification(passVerdict(), { sessionId: SID }, { append, existingKeys: () => bad });
+      }).not.toThrow();
+      expect(out).toMatchObject({ appended: 0, deduped: 0, rejected: 4, skipped: 0 });
+      expect(out.lines.every((l) => l.reason === 'port-threw:existingKeys')).toBe(true);
+      expect(rawLines()).toEqual([]);
+    }
+  });
+});
+
+describe('the real reader folds the lines this writer wrote', () => {
+  /**
+   * The one cross-module claim worth measuring rather than asserting by shape:
+   * `foldGateState` is imported and run over the ledger this test filled, so a
+   * change to either side that broke the join would fail here.
+   */
+  it('tallies one bucket per layer plus `unspecified` for the overall line', () => {
+    const verdict = passVerdict();
+    const out = recordVerification(verdict, { sessionId: SID, missionId: MISSION }, { append, existingKeys });
+    expect(out.appended).toBe(4);
+
+    const gate = foldGateState(rawLines());
+    expect(gate.verifierVerificationId).toBe(verdict.verification_id);
+    expect(gate.sawUnmeasured).toBe(true);
+    expect([...gate.layers.keys()]).toEqual([LAYER_UNSPECIFIED, ...LAYERS]);
+    expect(gate.layers.get(LAYER_UNSPECIFIED)).toMatchObject({ pass: 1, fail: 0, unmeasured: 0, other: 0 });
+    expect(gate.layers.get('deterministic')).toMatchObject({ pass: 1, unmeasured: 0, other: 0 });
+    expect(gate.layers.get('behavioral')).toMatchObject({ pass: 0, unmeasured: 1, other: 0 });
+    expect(gate.layers.get('operational')).toMatchObject({ pass: 0, unmeasured: 1, other: 0 });
+    // Nothing landed in the `other` bucket, i.e. every `result` this writer
+    // emits is inside the reader's own enum.
+    for (const counts of gate.layers.values()) expect(counts.other).toBe(0);
+  });
+
+  it('collapses to one bucket once `data.layer` is stripped — so the tally above has teeth', () => {
+    // The mutation check for the assertion above. If this writer ever stopped
+    // setting `data.layer`, the reader would still fold happily and report a
+    // single `unspecified` bucket of four; the previous test is only meaningful
+    // because that outcome is distinguishable, and this pins the difference.
+    const built = buildVerifyCompletedEvents(passVerdict(), { sessionId: SID });
+    const stripped = built.inputs.map((i) => {
+      const { layer: _layer, ...data } = i.data;
+      return { event: i.event, data };
+    });
+    const gate = foldGateState(stripped);
+    expect([...gate.layers.keys()]).toEqual([LAYER_UNSPECIFIED]);
+    expect(gate.layers.get(LAYER_UNSPECIFIED).pass + gate.layers.get(LAYER_UNSPECIFIED).unmeasured).toBe(4);
+  });
+
+  it('renders the tally as four per-layer findings', () => {
+    recordVerification(passVerdict(), { sessionId: SID }, { append, existingKeys });
+    const findings = buildFindings(foldGateState(rawLines()), (s) => s);
+    expect(findings).toHaveLength(4);
+    expect(findings.every((f) => f.code === 'VERIFICATION_LAYER')).toBe(true);
+    expect(findings.every((f) => f.total === 1)).toBe(true);
+    expect(findings.map((f) => f.layer)).toEqual([LAYER_UNSPECIFIED, ...LAYERS]);
   });
 });
 
