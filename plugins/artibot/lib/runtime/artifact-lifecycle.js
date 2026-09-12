@@ -1,5 +1,6 @@
 /**
- * Event → artifact handler skeleton (PRD 부록 A T-40). **Dry-run only.**
+ * Event → artifact handler (PRD 부록 A T-40). **Plans always; writes only
+ * behind three gates.**
  *
  * Hardening §6 inverts who owns mission documentation:
  *
@@ -10,17 +11,23 @@
  * commands/agents emit **events only** — design §7.2 §6, which routes every
  * writer in design §3.3's migration table through this one handler.
  *
- * **Writes zero files.** Design §7.3 places artifact-lifecycle (§48 #10) in
- * Shadow, behind Observe — "기록만, 행동 변화 0, **산출물 파일 생성 0**". So
- * {@link plan} returns the writes it *would* make and {@link apply} exists only
- * to be fail-closed. There is deliberately no `fs` import: its absence is a
- * stronger proof than a spy, and the test asserts both.
+ * **{@link plan} writes zero files; {@link apply} writes only with all three
+ * gates open.** Design §7.3 places artifact-lifecycle (§48 #10) in Shadow, so
+ * the writer is opt-in three times over: `dryRun === true`, config
+ * {@link APPLY_GATE_PATH} `=== true`, and a per-call `write === true`. With the
+ * third closed — which is every pre-existing caller — `apply` returns the same
+ * report it always did and makes zero filesystem calls. That is asserted
+ * dynamically by spies, and structurally by the fact that every filesystem
+ * call in this file sits below the `export function apply(` line, which a test
+ * checks against the source text.
  *
- * **L5. One sibling import, by design** (design §1-8): only
- * `./artifact-lifecycle-gates.js`, which this file layers on top of and which
- * imports nothing itself. `lib/runtime/{event-writer,ledger}.js` (T-20) are
- * **not** imported — events arrive as an argument and redaction as a port, so
- * nothing here depends on a sibling still in flight.
+ * **L5, importing L1 only** (design §1-8): `./artifact-lifecycle-gates.js`,
+ * which this file layers on top of and which imports nothing itself, plus
+ * `../core/file.js` for the crash-safe write primitive — a temp-file + rename
+ * that already exists rather than a second copy of it here.
+ * `lib/runtime/{event-writer,ledger}.js` (T-20) are **not** imported — events
+ * arrive as an argument and redaction as a port, so nothing here depends on a
+ * sibling still in flight.
  *
  * **The four handlers** are {@link EVENT_TO_ARTIFACT}; the gates that can stop
  * one are {@link BlockCode}, and events that produce nothing are
@@ -60,6 +67,8 @@ import {
   isPlainObject,
   isRevision,
 } from './artifact-lifecycle-gates.js';
+import { atomicWriteTextSync, ensureDirSync } from '../core/file.js';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 // The completion gates and the staleness vocabulary live in the sibling module
@@ -177,6 +186,26 @@ export const RefusalCode = Object.freeze({
   MISSING_REQUIRED_DATA: 'MISSING_REQUIRED_DATA',
   /** Hardening §11: this idempotency key already produced a write. */
   IDEMPOTENT_REPLAY: 'IDEMPOTENT_REPLAY',
+});
+
+/**
+ * Why {@link apply} declined to write a planned artifact.
+ *
+ * Distinct from {@link RefusalCode}, which says why {@link plan} produced no
+ * candidate at all. These are apply-time facts about the *disk* — the content,
+ * the path, the file that is already there — and none of them is an exception:
+ * one bad write must not abandon the rest of the batch. Closed vocabulary, same
+ * rule as everything else here (Hardening §25): never payload text.
+ */
+export const SkipReason = Object.freeze({
+  /** `options.content[kind]` was absent or not a string. */
+  NO_CONTENT: 'NO_CONTENT',
+  /** The planned path resolved outside `<projectRoot>/.artibot/missions/`. */
+  PATH_OUTSIDE_MISSIONS_DIR: 'PATH_OUTSIDE_MISSIONS_DIR',
+  /** A file is already there. Artifacts are never clobbered. */
+  ALREADY_EXISTS: 'ALREADY_EXISTS',
+  /** The filesystem threw. Carries `error` (the message) and stops nothing else. */
+  WRITE_FAILED: 'WRITE_FAILED',
 });
 
 /** Config path whose truthiness {@link apply} demands. */
@@ -481,21 +510,52 @@ export function plan(input) {
 }
 
 /**
- * Fail-closed placeholder for the Shadow-stage writer. **Writes nothing.**
+ * Carry out a {@link plan}, behind three gates. **Two of the three are closed
+ * in every pre-existing caller, and then this writes nothing.**
  *
- * Two independent gates, neither satisfiable by accident. First,
- * `options.dryRun === true` — not "truthy", not defaulted, because Phase 0 and
- * Observe forbid artifact file creation outright (design §7.3). Second,
- * `options.config` must carry {@link APPLY_GATE_PATH} set to `true`; that key
- * does not exist in `artibot.config.json` (measured 2026-09-02) and this task
- * does not add it, so today every call throws. That is the intended state, not
- * an oversight — the gate lands with the Shadow writer.
+ * None of the gates is satisfiable by accident — each is `=== true`, never
+ * truthy, never defaulted:
  *
- * Even with both gates open this returns `written: []`. Nothing here can write.
+ *   1. `options.dryRun === true`. Kept as-is from the fail-closed placeholder,
+ *      despite now reading like a contradiction: it is the flag every current
+ *      caller already passes, so its meaning is "I am a caller that knows this
+ *      module", not "do not write". Gate 3 is what says whether to write.
+ *   2. `options.config` carries {@link APPLY_GATE_PATH} set to `true`. That key
+ *      now exists in `artibot.config.json` (added with this writer, measured
+ *      2026-09-12), so this gate is open in production — it is the kill switch,
+ *      flipped in one place without a deploy.
+ *   3. `options.write === true`. Per-call, and the only thing that actually
+ *      turns the planner into a writer. Closed, the return value is
+ *      byte-identical to the old placeholder's — `{dryRun: true, written: [],
+ *      wouldWrite, blocked}` — and not one filesystem call is made.
+ *
+ * With all three open, each unblocked write is attempted independently and a
+ * failure is *reported*, not thrown: a missing content string, a path that
+ * escaped the missions directory, a file already on disk, or an exception from
+ * the filesystem each land in `skipped` with a {@link SkipReason} and the batch
+ * continues. `apply` throws only for caller bugs — a closed gate, a `planResult`
+ * that is not one, or a missing `projectRoot`.
+ *
+ * **Never clobbers.** An artifact already on disk is `ALREADY_EXISTS`, even
+ * though {@link plan}'s `appliedIdempotencyKeys` should have caught it first
+ * (Hardening §11). Two independent guards, because the caller supplies the keys
+ * and a caller that forgot them must still not destroy a hand-edited document.
  *
  * @param {object} planResult Output of {@link plan}.
- * @param {{dryRun?: boolean, config?: object}} [options]
- * @returns {{dryRun: true, written: object[], wouldWrite: object[], blocked: object[]}}
+ * @param {object} [options]
+ * @param {boolean} [options.dryRun] Gate 1. Must be exactly `true`.
+ * @param {object} [options.config] Gate 2. Must carry {@link APPLY_GATE_PATH}.
+ * @param {boolean} [options.write] Gate 3. Must be exactly `true` to write.
+ * @param {string} [options.projectRoot] Required when `write === true`: the
+ *   containment root every planned path is checked against. Injected rather
+ *   than derived, for the design §3.3 reason — `process.cwd()` is how a
+ *   worktree writes into the wrong repository.
+ * @param {Record<string, string>} [options.content] `kind` → exact file bytes.
+ *   This module routes and guards; it does not render. A kind without a string
+ *   here is `NO_CONTENT`.
+ * @returns {{dryRun: boolean, written: object[], wouldWrite: object[],
+ *   blocked: object[], skipped?: object[]}} `skipped` is present only when the
+ *   writer ran.
  */
 export function apply(planResult, options = {}) {
   if (options.dryRun !== true) {
@@ -508,17 +568,80 @@ export function apply(planResult, options = {}) {
   if (options.config?.runtime?.artifactLifecycle?.enabled !== true) {
     throw new Error(
       `artifact-lifecycle: apply() requires config ${APPLY_GATE_PATH} === true. `
-        + 'The key is absent from artibot.config.json by design; it lands with '
-        + 'the Shadow-stage writer.',
+        + 'It is the kill switch for the Shadow-stage writer; set it to false '
+        + 'and this module creates zero artifact files.',
     );
   }
   if (!isPlainObject(planResult) || !Array.isArray(planResult.writes)) {
     throw new TypeError('artifact-lifecycle: apply() needs a plan() result');
   }
-  return {
-    dryRun: true,
-    written: [],
-    wouldWrite: planResult.writes.filter((w) => !w.blocked),
-    blocked: planResult.writes.filter((w) => Boolean(w.blocked)),
-  };
+
+  const wouldWrite = planResult.writes.filter((w) => !w.blocked);
+  const blocked = planResult.writes.filter((w) => Boolean(w.blocked));
+
+  // Gate 3. Everything above this line is what every existing caller sees, and
+  // the early return is why they see no filesystem access whatsoever.
+  if (options.write !== true) {
+    return { dryRun: true, written: [], wouldWrite, blocked };
+  }
+
+  if (typeof options.projectRoot !== 'string' || options.projectRoot.length === 0) {
+    throw new TypeError(
+      'artifact-lifecycle: apply({ write: true }) requires an injected projectRoot',
+    );
+  }
+
+  const written = [];
+  const skipped = [];
+  const missionsRoot = path.resolve(path.join(options.projectRoot, ...MISSIONS_DIR));
+  for (const write of wouldWrite) {
+    const outcome = writeOneArtifact(write, missionsRoot, options.content);
+    if (outcome.written) written.push(outcome.written);
+    else skipped.push(outcome.skipped);
+  }
+
+  return { dryRun: false, written, wouldWrite: [], blocked, skipped };
+}
+
+/**
+ * Is `target` inside `missionsRoot`?
+ *
+ * Both sides are resolved first, so a `..` segment is collapsed before the
+ * comparison rather than being compared as text. An empty relative path means
+ * the target *is* the missions directory, which is not a file and is refused
+ * for the same reason.
+ */
+function isInsideMissionsDir(missionsRoot, target) {
+  const rel = path.relative(missionsRoot, target);
+  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * Attempt one planned write. Returns `{written}` or `{skipped}` — never throws
+ * for anything the filesystem does, because the next write in the batch is
+ * still owed its attempt.
+ */
+function writeOneArtifact(write, missionsRoot, content) {
+  const body = isPlainObject(content) ? content[write.kind] : undefined;
+  if (typeof body !== 'string') {
+    return { skipped: { ...write, reason: SkipReason.NO_CONTENT } };
+  }
+
+  const target = path.resolve(write.path);
+  if (!isInsideMissionsDir(missionsRoot, target)) {
+    return { skipped: { ...write, reason: SkipReason.PATH_OUTSIDE_MISSIONS_DIR } };
+  }
+  if (existsSync(target)) {
+    return { skipped: { ...write, reason: SkipReason.ALREADY_EXISTS } };
+  }
+
+  try {
+    ensureDirSync(path.dirname(target));
+    atomicWriteTextSync(target, body);
+  } catch (err) {
+    return {
+      skipped: { ...write, reason: SkipReason.WRITE_FAILED, error: String(err?.message ?? err) },
+    };
+  }
+  return { written: { ...write, bytes: Buffer.byteLength(body, 'utf8') } };
 }

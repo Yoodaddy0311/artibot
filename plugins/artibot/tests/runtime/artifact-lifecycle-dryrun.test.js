@@ -669,24 +669,44 @@ describe('staleness propagation through plan()', () => {
 // ---------------------------------------------------------------------------
 
 describe('writes zero files', () => {
-  it.each([
-    ['artifact-lifecycle.js', MODULE_PATH],
-    ['artifact-lifecycle-gates.js', GATES_PATH],
-  ])('%s imports no filesystem module at all (static proof)', (_name, file) => {
-    const source = readFileSync(file, 'utf8');
+  it('artifact-lifecycle-gates.js imports no filesystem module at all (static proof)', () => {
+    // The judgment half stays pure. Only the parent gained a writer.
+    const source = readFileSync(GATES_PATH, 'utf8');
     expect(source).not.toMatch(/\bfrom\s+'node:fs(\/promises)?'/);
     expect(source).not.toMatch(/\brequire\s*\(\s*['"]fs['"]\s*\)/);
   });
 
-  it('keeps the parent on exactly one sibling import, and the gates on none', () => {
+  it('keeps every filesystem call in the parent below apply() (static proof)', () => {
+    // The parent now writes, so "no fs import" is no longer the available
+    // proof. This is the structural one that survives: `plan()` and everything
+    // it calls are defined ABOVE `export function apply(`, so a filesystem call
+    // appearing above that line would mean the planner had acquired one.
+    const source = readFileSync(MODULE_PATH, 'utf8');
+    const applyAt = source.indexOf('export function apply(');
+    expect(applyAt).toBeGreaterThan(0);
+
+    for (const call of ['atomicWriteTextSync(', 'ensureDirSync(', 'existsSync(']) {
+      const offsets = [];
+      for (let at = source.indexOf(call); at !== -1; at = source.indexOf(call, at + 1)) {
+        offsets.push(at);
+      }
+      expect(offsets.length).toBeGreaterThan(0);
+      for (const offset of offsets) expect(offset).toBeGreaterThan(applyAt);
+    }
+  });
+
+  it('keeps the parent on one sibling + one L1 import, and the gates on none', () => {
     // The split must not become a licence to pull more of the runtime in. The
     // gates module imports nothing at all, which is what makes it safe for the
-    // parent to depend on it without a cycle.
+    // parent to depend on it without a cycle. `../core/file.js` is L1, which L5
+    // may import; a `../<any other layer>/` edge here would be the regression.
     const parentEdges = [
       ...readFileSync(MODULE_PATH, 'utf8').matchAll(/^(?:import|export)[^;]*from\s+'([^']+)'/gm),
     ].map((m) => m[1]);
     expect([...new Set(parentEdges)].sort()).toEqual([
+      '../core/file.js',
       './artifact-lifecycle-gates.js',
+      'node:fs',
       'node:path',
     ]);
 
@@ -769,10 +789,15 @@ describe('apply() fail-closed', () => {
     ).toThrow(/requires config/);
   });
 
-  it('is refused by the live artibot.config.json, which has no gate key', () => {
+  it('is opened by the live artibot.config.json, and still writes nothing', () => {
+    // The gate-2 key now ships enabled. Gate 3 (`write: true`), which this call
+    // does not pass, is what keeps the live config from creating a file — so
+    // the honest assertion is "opens, and writes nothing anyway", not "throws".
     const config = JSON.parse(readFileSync(path.join(PKG_ROOT, 'artibot.config.json'), 'utf8'));
-    expect(config.runtime?.artifactLifecycle).toBeUndefined();
-    expect(() => apply(runPlan(completionEvents()), { dryRun: true, config })).toThrow();
+    expect(config.runtime.artifactLifecycle.enabled).toBe(true);
+    const report = apply(runPlan(completionEvents()), { dryRun: true, config });
+    expect(report.dryRun).toBe(true);
+    expect(report.written).toEqual([]);
   });
 
   it('separates would-write from blocked, and writes neither', () => {
