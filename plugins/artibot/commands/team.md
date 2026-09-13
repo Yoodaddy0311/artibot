@@ -333,6 +333,9 @@ Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
 - **REQUEST_CHANGES** → 해당 팀원에게 수정 지시 후 재검수
 - **REJECT** → 리더가 유저에게 보고, 재작업 또는 방향 전환
 
+- **검수 문서 형식** — 인스펙터의 최종 답변에는 `schema_version: 2` 검수 문서(정규 verdict `PASS`|`REPAIR_REQUIRED`|`REPLAN_REQUIRED`|`INTENT_REVIEW_REQUIRED`|`BLOCK` 와 `verification_id` 포함)와 `claim_audit` 블록을 함께 싣는다 — 두 블록은 한 답변 안에 나란히 놓는다(v2 스키마가 `additionalProperties: false` 라 verdict 안에 audit 을 넣으면 그 verdict 가 무효가 된다). `claim_audit.subject_model` 은 모르면 **키 자체를 쓰지 마라** — `null` 을 쓰면 파서가 블록 전체를 거부해 audit 줄이 남지 않는다.
+- **기록되는 경로** — SubagentStop 훅이 그 두 블록을 `review.completed` / `review.claim_audit` 원장 줄로 기록한다. 위 `APPROVE`/`REQUEST_CHANGES`/`REJECT` 만 담긴 레거시 답변은 측정용으로 접히기만 하고 **기록되지 않는다** — 판정이 원장에 남기를 원하면 v2 문서를 함께 실어라.
+
 ### 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
 
 `[보고 계약]` 이 **팀원→리더** 방향을 규율한다면, 아래는 **리더→사용자** 방향의 대칭 계약이다.

@@ -211,18 +211,24 @@ export class ReviewContractError extends Error {
 }
 
 /**
+ * Exported for `./verdict-writer.js` only. The writer applies the same
+ * emptiness rule to the same fields, so a second definition there would be a
+ * place for the two to disagree about whether `'  '` is a value.
+ *
  * @param {unknown} v value to test
  * @returns {boolean} true when `v` is a non-empty string after trimming
  */
-function isNonEmptyString(v) {
+export function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim() !== '';
 }
 
 /**
+ * Exported for `./verdict-writer.js` only — see {@link isNonEmptyString}.
+ *
  * @param {unknown} v value to test
  * @returns {boolean} true when `v` is an array with at least one entry
  */
-function isNonEmptyArray(v) {
+export function isNonEmptyArray(v) {
   return Array.isArray(v) && v.length > 0;
 }
 
@@ -631,6 +637,13 @@ function checkV2Structure(doc) {
  * Normalize a result, keeping `verdict` null whenever `ok` is false so no
  * caller can read an inadmissible answer as a verdict.
  *
+ * `verificationId` follows the same rule as `verdict`: it is the document's
+ * `verification_id` on `ok:true` and null on every other outcome. It is a
+ * separate field rather than something the caller digs out of its own copy of
+ * the document, because it is the identity the ledger's `review.completed`
+ * idempotency key is built from — an inadmissible answer must not be able to
+ * hand a writer a key that looks like a recorded verdict.
+ *
  * @param {object} base partial result
  * @returns {object} normalized result
  */
@@ -642,6 +655,9 @@ function result(base) {
     schemaVersion: base.schemaVersion ?? null,
     foldedVerdict: base.foldedVerdict ?? null,
     sources: base.sources ?? [],
+    verificationId: base.ok === true && isNonEmptyString(base.verificationId)
+      ? base.verificationId
+      : null,
   };
   if (base.ambiguous === true) {
     out.ambiguous = true;
@@ -694,7 +710,8 @@ function applyValidatorPort(doc, validateSchema, errors) {
  *   optional JSON-Schema validator port for the v2 definition
  * @returns {{ok: boolean, verdict: string|null, errors: object[],
  *   schemaVersion: number|null, foldedVerdict: string|null, sources: string[],
- *   ambiguous?: true, candidates?: string[]}} parse outcome
+ *   verificationId: string|null, ambiguous?: true, candidates?: string[]}}
+ *   parse outcome
  */
 export function parseReviewVerdict(textOrJson, opts = {}) {
   const { validateSchema } = opts && typeof opts === 'object' ? opts : {};
@@ -721,7 +738,13 @@ export function parseReviewVerdict(textOrJson, opts = {}) {
     const errors = checkV2Structure(doc);
     if (typeof validateSchema === 'function') applyValidatorPort(doc, validateSchema, errors);
     if (errors.length > 0) return result({ ok: false, errors, schemaVersion: 2 });
-    return result({ ok: true, verdict: doc.verdict, schemaVersion: 2, sources: ['v2'] });
+    return result({
+      ok: true,
+      verdict: doc.verdict,
+      verificationId: doc.verification_id,
+      schemaVersion: 2,
+      sources: ['v2'],
+    });
   }
 
   // ── legacy path ─────────────────────────────────────────────────────────
@@ -826,10 +849,16 @@ function claimResult(base) {
 /**
  * Key-order-independent identity for two claim_audit blocks.
  *
+ * Exported for `./verdict-writer.js`, which hashes the same serialization into
+ * an idempotency key. This one MUST be shared rather than copied: a second
+ * definition that drifted would change the digest of an unchanged audit block
+ * and write a duplicate ledger line, which is the double-count the key exists
+ * to prevent — and nothing would throw.
+ *
  * @param {unknown} value any JSON value
  * @returns {string} a canonical serialization
  */
-function stableStringify(value) {
+export function stableStringify(value) {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   if (value !== null && typeof value === 'object') {
     const body = Object.keys(value).sort()

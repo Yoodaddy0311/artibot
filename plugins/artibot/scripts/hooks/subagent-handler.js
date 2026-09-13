@@ -17,6 +17,7 @@ import { getActionClassForAgent } from '../../lib/routing/action-classifier.js';
 import { appendLedgerEvent, ledgerFilePath } from '../../lib/runtime/ledger.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
+import { isReviewerStop, recordReviewFromStop, reviewLedgerColumn } from './_review-stop-record.js';
 
 /**
  * Read an explicitly-requested model from the hook payload, if present.
@@ -741,10 +742,19 @@ function handleStop(hookData, ids) {
   });
   const taskId = extractTaskId(hookData);
   const sessionId = hookData?.session_id || hookData?.sessionId || null;
-  recordSpawn(hookData, payloadProjectRoot(hookData), {
+  const missionId = resolveMissionId(hookData, sessionId);
+  const projectRoot = payloadProjectRoot(hookData);
+  // Tracked type wins: a stop payload that disagrees with the START record is another spawn.
+  const effectiveType = tracked?.agentType ?? agentType;
+  // Reviewer stops only (allowlist — see `_review-stop-record.js#isReviewerStop`);
+  // `identityOf` is injected because that module must not import this one back.
+  const review = isReviewerStop(effectiveType, identityOf)
+    ? recordReviewFromStop(hookData, { agentId, agentType: effectiveType, sessionId, missionId }, projectRoot)
+    : null;
+  recordSpawn(hookData, projectRoot, {
     event: 'stop',
     agentId,
-    agentType: tracked?.agentType ?? agentType,
+    agentType: effectiveType,
     canonicalModel: tracked?.canonicalModel ?? null,
     modelMismatch: tracked?.modelMismatch === true,
     durationMs: spawnDurationMs(tracked),
@@ -752,8 +762,9 @@ function handleStop(hookData, ids) {
     actionClass: tracked?.actionClass ?? null,
     routing_epoch_id: agentId,
     depth: extractDepth(hookData),
-    mission_id: resolveMissionId(hookData, sessionId),
+    mission_id: missionId,
     ...(taskId === null ? {} : { task_id: taskId }),
+    ...(review === null ? {} : { review_ledger: reviewLedgerColumn(review) }),
   });
   writeStdout({ message: `[team] Agent deregistered: ${agentId}` });
 }

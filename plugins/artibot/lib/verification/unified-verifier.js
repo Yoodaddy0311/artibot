@@ -138,10 +138,14 @@ export const VERIFICATION_ID_VERSION = 'v1';
 const EVIDENCE_KEYS = Object.freeze(['kind', 'file', 'line', 'command', 'output', 'measured_at', 'note']);
 
 /**
+ * Exported additively for `./verify-writer.js`, which builds the same kind of
+ * reason string and would otherwise carry a second copy of this — two spellings
+ * of "what did the caller actually pass" that could drift apart.
+ *
  * @param {unknown} v
  * @returns {string} Short type description for a reason string.
  */
-function describe(v) {
+export function describe(v) {
   if (v === null) return 'null';
   if (Array.isArray(v)) return 'array';
   return typeof v;
