@@ -17,36 +17,97 @@
  */
 
 import path from 'node:path';
+import { getPricing, PRICING_VERSION } from '../../core/model-catalog.js';
 import { atomicWriteJson } from '../../core/file.js';
 import { getPluginRoot } from '../../core/platform.js';
 import { emit } from '../../core/event-bus.js';
 
 // ---------------------------------------------------------------------------
-// Pricing (USD per 1M tokens). Verified 2026-04. Sync quarterly.
-// Cache read = 10% of input; cache write = 125% of input.
+// Pricing (USD per 1M tokens).
+//
+// There is no local price table here any more. The literal `PRICING_USD_PER_M`
+// object that used to live at this spot was DELETED: it was a second,
+// independently maintained price table that had drifted onto retired models
+// (its opus row was Opus 4.1 at $15/$75 and its haiku row was Haiku 3.5 at
+// $0.80/$4). Prices now come from `lib/core/model-catalog.js` and are stamped
+// with `PRICING_VERSION` so a stored metric can be replayed against the exact
+// table that produced it. A layer-5 module importing layer-1 is allowed.
+//
+// The 1.3 fable tokenizer coefficient is NOT applied anywhere in this module,
+// and that is deliberate: this middleware prices the ACTUAL token counts the
+// API reported in its `usage` payload, which already reflect the tokenizer.
+// The coefficient is a PREDICTION axis and belongs to `getCostFactor`, which
+// estimates tokens that have not been spent yet.
 // ---------------------------------------------------------------------------
 
-const PRICING_USD_PER_M = Object.freeze({
-  // fable per-token price = 2x opus (model-catalog.js price ratio 10/5). The
-  // 1.3 tokenizer coefficient is NOT applied here: this table prices actual
-  // token counts from the usage payload, which already reflect the coefficient.
-  fable: { input: 30.0, output: 150.0, cacheRead: 3.0, cacheWrite: 37.5 },
-  opus: { input: 15.0, output: 75.0, cacheRead: 1.5, cacheWrite: 18.75 },
-  sonnet: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
-  haiku: { input: 0.8, output: 4.0, cacheRead: 0.08, cacheWrite: 1.0 },
-  unknown: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
-});
+/**
+ * Tier whose prices are used when a model string matches no known tier.
+ *
+ * Chosen as `sonnet` because the deleted table's `unknown` row was numerically
+ * identical to its `sonnet` row, so unknown models keep their prior relative
+ * behaviour. The catalog is guaranteed to carry this tier; a null here would
+ * be a catalog bug, and failing loudly beats silently pricing at zero.
+ */
+export const UNKNOWN_FALLBACK_TIER = 'sonnet';
 
-/** @param {string} model @returns {{input:number,output:number,cacheRead:number,cacheWrite:number}} */
+/**
+ * Resolve catalog prices for an arbitrary model string by SUBSTRING match.
+ *
+ * Why substring, and why it stays here: the inputs are heterogeneous. The
+ * model string reaching this middleware comes from `resolveModel` below, whose
+ * best source is `state.context.backend.selected` — that can be a tier alias
+ * (`opus`), a current catalog id (`claude-opus-5`), or an older id the catalog
+ * no longer lists (`claude-opus-4-8`). An exact-id lookup would drop the third
+ * case onto the fallback row.
+ *
+ * This asymmetry with `lib/economics/usage-receipt.js` is deliberate, not an
+ * oversight: that module is the LEDGER writer and fails CLOSED through an
+ * exact-id reverse index, because a ledger row must never carry a guessed
+ * price. This one is best-effort accounting for a session roll-up and fails
+ * OPEN to {@link UNKNOWN_FALLBACK_TIER}. Now that both read the same catalog,
+ * the asymmetry only decides WHICH tier is picked — never what a tier costs.
+ *
+ * @param {string} model - Model id, tier alias, or anything at all.
+ * @returns {object} Frozen catalog pricing row (see model-catalog#getPricing).
+ */
 function resolvePricing(model) {
-  if (!model || typeof model !== 'string') return PRICING_USD_PER_M.unknown;
+  if (!model || typeof model !== 'string') return getPricing(UNKNOWN_FALLBACK_TIER);
   const lower = model.toLowerCase();
-  if (lower.includes('fable')) return PRICING_USD_PER_M.fable;
-  if (lower.includes('opus')) return PRICING_USD_PER_M.opus;
-  if (lower.includes('sonnet')) return PRICING_USD_PER_M.sonnet;
-  if (lower.includes('haiku')) return PRICING_USD_PER_M.haiku;
-  return PRICING_USD_PER_M.unknown;
+  if (lower.includes('fable')) return getPricing('fable');
+  if (lower.includes('opus')) return getPricing('opus');
+  if (lower.includes('sonnet')) return getPricing('sonnet');
+  if (lower.includes('haiku')) return getPricing('haiku');
+  return getPricing(UNKNOWN_FALLBACK_TIER);
 }
+
+/**
+ * Back-compat view of catalog prices in this module's historical shape.
+ *
+ * Exported as `_PRICING` for tests and any reader that still expects
+ * `{input, output, cacheRead, cacheWrite}` keyed by tier plus `unknown`.
+ * `cacheWrite` is the 5-minute write rate; the old key name is kept for this
+ * compatibility alias only — new code should read the catalog row directly,
+ * which distinguishes `cacheWrite5m` from `cacheWrite1h`.
+ *
+ * @param {string} tier
+ */
+function toCompatRow(tier) {
+  const p = getPricing(tier);
+  return Object.freeze({
+    input: p.input,
+    output: p.output,
+    cacheRead: p.cacheRead,
+    cacheWrite: p.cacheWrite5m,
+  });
+}
+
+const PRICING_COMPAT = Object.freeze({
+  fable: toCompatRow('fable'),
+  opus: toCompatRow('opus'),
+  sonnet: toCompatRow('sonnet'),
+  haiku: toCompatRow('haiku'),
+  unknown: toCompatRow(UNKNOWN_FALLBACK_TIER),
+});
 
 // ---------------------------------------------------------------------------
 // Pure metric computation
@@ -79,9 +140,15 @@ export function computeCacheMetrics(usage, model, nowFn = Date.now) {
 
   const savedCostUsd =
     (cacheReadTokens / 1_000_000) * (pricing.input - pricing.cacheRead);
+  // `cache_creation_input_tokens` is priced at the 5-MINUTE write rate. The
+  // Anthropic usage payload does not distinguish 1-hour writes from 5-minute
+  // ones through this single counter, and the 1-hour rate is higher (catalog
+  // `cacheWrite1h` = 2x input vs `cacheWrite5m` = 1.25x input, so 1.6x the
+  // 5-minute rate). `spentCostUsd` is therefore a LOWER BOUND whenever a
+  // 1-hour TTL is in play, not an exact charge.
   const spentCostUsd =
     (cacheReadTokens / 1_000_000) * pricing.cacheRead +
-    (cacheCreationTokens / 1_000_000) * pricing.cacheWrite +
+    (cacheCreationTokens / 1_000_000) * pricing.cacheWrite5m +
     (inputTokens / 1_000_000) * pricing.input +
     (outputTokens / 1_000_000) * pricing.output;
 
@@ -96,6 +163,8 @@ export function computeCacheMetrics(usage, model, nowFn = Date.now) {
     savedCostUsd,
     spentCostUsd,
     model: model || 'unknown',
+    pricingTier: pricing.tier,
+    pricingVersion: PRICING_VERSION,
     timestamp: new Date(nowFn()).toISOString(),
   });
 }
@@ -248,7 +317,7 @@ export function createCacheRoiMiddleware(options = {}) {
 // ---------------------------------------------------------------------------
 
 export {
-  PRICING_USD_PER_M as _PRICING,
+  PRICING_COMPAT as _PRICING,
   resolvePricing as _resolvePricing,
   safeInt as _safeInt,
   extractUsage as _extractUsage,

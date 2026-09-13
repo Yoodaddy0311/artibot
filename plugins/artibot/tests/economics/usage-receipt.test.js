@@ -20,9 +20,11 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { PRICING_VERSION } from '../../lib/core/model-catalog.js';
 import {
   buildUsageReceipts,
   emptyResult,
+  priceUsage,
   PRICING_VERSION_UNRESOLVED,
   resolveModelIdentity,
   SCHEMA_VERSION,
@@ -482,5 +484,185 @@ describe('emptyResult', () => {
     const a = emptyResult();
     a.meta.entries = 5;
     expect(emptyResult().meta.entries).toBe(0);
+  });
+});
+
+/**
+ * One million of every counter, so each expected total reads as the per-MTok
+ * price itself. A smaller fixture would pass just as well against a formula
+ * that swapped two rate columns, because the products would all be tiny.
+ */
+const ONE_MTOK_EACH = Object.freeze({
+  fresh_input_tokens: 1_000_000,
+  cached_input_tokens: 1_000_000,
+  cache_creation_tokens: 1_000_000,
+  output_tokens: 1_000_000,
+});
+
+describe('priceUsage', () => {
+  // Expected = input + cacheRead + cacheWrite5m + output, one MTok of each.
+  // Sourced from the catalog's own table, NOT restated from a price page here:
+  // a second hand-typed copy of the rates is the two-table problem again.
+  it.each([
+    ['fable', 10 + 0.25 + 12.5 + 50],
+    ['opus', 5 + 0.5 + 6.25 + 25],
+    ['haiku', 1 + 0.1 + 1.25 + 5],
+    ['sonnet', 3 + 0.3 + 3.75 + 15],
+  ])('prices one MTok of each counter for %s', (tier, expected) => {
+    const priced = priceUsage(ONE_MTOK_EACH, tier);
+    expect(priced.total).toBeCloseTo(expected, 9);
+    expect(priced.pricing_version).toBe(PRICING_VERSION);
+  });
+
+  it('charges cache reads at the cache-read rate, not the fresh input rate', () => {
+    // fable: cacheRead 0.25 vs input 10 — a 40x over-count if the columns are
+    // swapped. This is the single arithmetic error the formula exists to avoid.
+    const cacheOnly = priceUsage({ cached_input_tokens: 1_000_000 }, 'fable');
+    expect(cacheOnly.total).toBeCloseTo(0.25, 9);
+  });
+
+  it('never adds thinking_tokens again, because output_tokens already contains them', () => {
+    const withThinking = priceUsage(
+      { ...ONE_MTOK_EACH, thinking_tokens: 1_000_000 },
+      'opus',
+    );
+    const without = priceUsage(ONE_MTOK_EACH, 'opus');
+    expect(withThinking.total).toBe(without.total);
+  });
+
+  it.each([['mythos'], [null], [undefined], [''], [42]])(
+    'returns an unresolved null total for tier %p',
+    (tier) => {
+      expect(priceUsage(ONE_MTOK_EACH, tier)).toEqual({
+        total: null,
+        pricing_version: PRICING_VERSION_UNRESOLVED,
+      });
+    },
+  );
+
+  it('reports the unresolved sentinel, never the real version, when it did not price', () => {
+    expect(priceUsage(ONE_MTOK_EACH, 'mythos').pricing_version)
+      .not.toBe(PRICING_VERSION);
+  });
+
+  // `measured: false` has no live instance in the catalog today, and the
+  // catalog is deep-frozen so a test cannot synthesize one. The guard is read
+  // from `getPricing(tier)?.measured` in the source; the unknown-tier cases
+  // above cover the same null-returning branch. Stated rather than faked: a
+  // test that stubbed the frozen catalog would prove only that the stub works.
+  it('treats a missing usage block as zero, not as NaN', () => {
+    for (const usage of [undefined, null, {}, 'nope', 7]) {
+      const priced = priceUsage(usage, 'opus');
+      expect(priced.total).toBe(0);
+      expect(Number.isNaN(priced.total)).toBe(false);
+    }
+  });
+
+  it('counts negative and non-finite counters as zero rather than crediting them', () => {
+    const priced = priceUsage(
+      {
+        fresh_input_tokens: -1_000_000,
+        cached_input_tokens: Number.NaN,
+        cache_creation_tokens: Number.POSITIVE_INFINITY,
+        output_tokens: 1_000_000,
+      },
+      'opus',
+    );
+    // Only the one valid counter contributes: 1 MTok output at 25/MTok.
+    expect(priced.total).toBeCloseTo(25, 9);
+  });
+
+  it('never throws on any input shape', () => {
+    expect(() => priceUsage(Symbol('x'), Symbol('y'))).not.toThrow();
+    expect(() => priceUsage([], [])).not.toThrow();
+  });
+});
+
+describe('priceReceipts option', () => {
+  // There is no ajv schema oracle in THIS file (the firewall sibling owns it),
+  // so nothing below asserts schema conformance — only the emitted shape.
+  it('leaves cost.total null by default, byte-for-byte the unpriced output', async () => {
+    const result = await run({
+      [MAIN]: jsonl([
+        assistantEntry({ requestId: 'req-1' }),
+        assistantEntry({ requestId: 'req-2', model: 'claude-fable-5-1' }),
+      ]),
+    });
+    expect(result.receipts).toHaveLength(2);
+    for (const receipt of result.receipts) {
+      expect(receipt.cost).toEqual({
+        total: null,
+        pricing_version: PRICING_VERSION_UNRESOLVED,
+      });
+    }
+  });
+
+  it('prices every receipt from its own tier when opted in', async () => {
+    const result = await run(
+      {
+        [MAIN]: jsonl([
+          assistantEntry({ requestId: 'req-1', model: 'claude-opus-5' }),
+          assistantEntry({ requestId: 'req-2', model: 'claude-fable-5-1' }),
+        ]),
+      },
+      [],
+      { priceReceipts: true },
+    );
+
+    expect(result.receipts).toHaveLength(2);
+    for (const receipt of result.receipts) {
+      const expected = priceUsage(receipt.usage, receipt.model_identity.tier);
+      expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
+      expect(Number.isFinite(receipt.cost.total)).toBe(true);
+      expect(receipt.cost.total).toBeGreaterThanOrEqual(0);
+      expect(receipt.cost.total).toBe(expected.total);
+    }
+    // Different tiers must not collapse to the same number.
+    const totals = result.receipts.map((r) => r.cost.total);
+    expect(new Set(totals).size).toBe(2);
+  });
+
+  it('prices a subagent receipt independently of the main thread', async () => {
+    const result = await run(
+      {
+        [MAIN]: jsonl([assistantEntry({ model: 'claude-opus-5' })]),
+        [SUB]: jsonl([
+          assistantEntry({ requestId: 'req-s1', model: 'claude-haiku-4-5' }),
+        ]),
+      },
+      [SUB],
+      { priceReceipts: true },
+    );
+
+    const sub = result.receipts.find((r) => r.run_id === 'agent-abc123');
+    expect(sub.model_identity.tier).toBe('haiku');
+    expect(sub.cost.total).toBe(priceUsage(sub.usage, 'haiku').total);
+  });
+
+  it('prices an estimate-graded receipt too, and says so via the source field', async () => {
+    // A degraded receipt is still a real spend. Refusing to price it would
+    // understate the total; the honesty marker is `usage.source`, not a null.
+    const result = await run(
+      {
+        [MAIN]: jsonl([
+          assistantEntry({ requestId: 'req-1', usage: { output_tokens: null } }),
+        ]),
+      },
+      [],
+      { priceReceipts: true },
+    );
+    expect(result.receipts[0].usage.source).toBe('estimate');
+    expect(Number.isFinite(result.receipts[0].cost.total)).toBe(true);
+  });
+
+  it('ignores a non-true option value and stays unpriced', async () => {
+    for (const value of ['true', 1, {}]) {
+      const result = await run(
+        { [MAIN]: jsonl([assistantEntry()]) },
+        [],
+        { priceReceipts: value },
+      );
+      expect(result.receipts[0].cost.total).toBeNull();
+    }
   });
 });
