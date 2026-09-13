@@ -37,16 +37,36 @@
  *  - Whether any caller invokes this at all. Nothing in the repository calls
  *    `recordHumanResolved` from a hook: it is reached through the CLI, by a
  *    model that chooses to run it. That choice is unmeasured and unenforced.
- *  - Line folding. `foldOversized` drops every non-required `data` key past the
- *    cap, which for this event leaves only `decision`. A long `decision` would
- *    therefore drop `question_id` itself and silently unjoin the pair. Nothing
- *    here approaches that threshold.
+ *  - THE BYTE CAP, except through the drift pin at the bottom. `decision` is
+ *    the only REQUIRED key of this event, so an oversized one has two distinct
+ *    bad outcomes and `appendLedgerEvent` is a spy for both of them here:
+ *      * slightly over  — `foldOversized` keeps `{decision, evidence_refs}` and
+ *        drops everything else INCLUDING `question_id`, so the line lands and
+ *        joins nothing;
+ *      * far over       — the folded line is still over the cap and the whole
+ *        record becomes a `ledger.rejected` line (measured: a 5,000-byte
+ *        decision produced `line-too-large:5251` on 2026-09-13).
+ *    `HUMAN_RESOLVED_DECISION_MAX_BYTES` closes both, and
+ *    `tests/ledger/record-human-resolved.test.js` is where a real ledger file
+ *    is read back to prove it.
  */
 
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+/**
+ * The REAL writer, imported statically and never stubbed.
+ *
+ * `vi.doMock` is not hoisted, so this binding is resolved at module-eval time —
+ * before any `beforeEach` runs — and keeps pointing at the genuine module no
+ * matter what the edge mocks below do. `event-writer.js#writeEvent` rather than
+ * `ledger.js#appendLedgerEvent` only to put the point beyond argument: the
+ * latter is a one-line passthrough to the former AND is the specifier the mocks
+ * replace, so naming it here would invite the question every time.
+ */
+import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
 
 const RECORDER = '../../lib/runtime/human-asked-record.js';
 const LEDGER = '../../lib/runtime/ledger.js';
@@ -309,12 +329,39 @@ describe('recordHumanResolved — what it refuses to write', () => {
     // lib/runtime/ledger-schema.js carries `verify_result` only, so an
     // uppercase spelling reaches the validator unchanged and is rejected.
     ['the kind is uppercase', { kind: 'APPROVAL' }],
+    // `line-too-large` — see the drift pin at the bottom of this file for the
+    // measurement, and the header for the two ways an oversized decision goes
+    // wrong. 5,000 bytes is the size the reviewer reproduced on 2026-09-13.
+    ['the decision is far over the cap', { decision: 'y'.repeat(5000) }],
+    ['the decision is one byte over the cap', { decision: 'y'.repeat(3073) }],
   ];
 
   it.each(SKIPS)('appends nothing when %s', async (_label, over) => {
     const { recordHumanResolved } = await loadRecorder();
 
     await recordHumanResolved(resolvedArgs(over));
+
+    expect(mocks.append).not.toHaveBeenCalled();
+  });
+
+  it('records a decision exactly at the cap', async () => {
+    const { recordHumanResolved } = await loadRecorder();
+
+    await recordHumanResolved(resolvedArgs({ decision: 'y'.repeat(3072) }));
+
+    // NEGATIVE CONTROL for the two rows above: the guard must be a BOUNDARY,
+    // not a blanket refusal of long decisions. Without this, a check that
+    // rejected everything over a few bytes would pass the skip cases.
+    expect(onlyEvent().data.decision).toHaveLength(3072);
+  });
+
+  it('measures the cap in BYTES, not characters', async () => {
+    const { recordHumanResolved } = await loadRecorder();
+
+    // 1,100 Korean characters are 3,300 UTF-8 bytes but only 1,100 `.length`.
+    // A `.length` check would wave this through and the writer would then
+    // reject or fold the line — the failure this guard exists to prevent.
+    await recordHumanResolved(resolvedArgs({ decision: '가'.repeat(1100) }));
 
     expect(mocks.append).not.toHaveBeenCalled();
   });
@@ -427,6 +474,109 @@ describe('describeHumanQuestion', () => {
     expect(described.question_id).toBe(buildQuestionId(SID, null, ''));
   });
 });
+
+describe('recordHumanAsked — the key order T-40 must not have moved', () => {
+  /**
+   * INSERTION ORDER, asserted without `.sort()`.
+   *
+   * Every other assertion about the asked line in this repository sorts the key
+   * list, so all of them would stay green if the T-40 refactor had reordered
+   * the `data` object — and a reordered object serializes to different BYTES
+   * for a line that is already in the field. The asked suite is required to
+   * stay unmodified, so the pin for that refactor belongs here, next to the
+   * code that introduced the risk.
+   *
+   * These two rows cover both conditional keys: `gate` (present only when a row
+   * claims the subject) and `path` (present only for Write and Edit).
+   */
+  const ORDERS = [
+    {
+      label: 'a Write with both conditional keys',
+      tool: 'Write',
+      subject: GATED_PATH,
+      keys: ['question_id', 'hits', 'reason', 'decision', 'tool', 'gate', 'path'],
+    },
+    {
+      label: 'a Bash call with neither',
+      tool: 'Bash',
+      subject: UNGATED_COMMAND,
+      keys: ['question_id', 'hits', 'reason', 'decision', 'tool'],
+    },
+  ];
+
+  it.each(ORDERS)('keeps the field order for $label', async ({ tool, subject, keys }) => {
+    const { recordHumanAsked } = await loadRecorder();
+    const hookData = tool === 'Bash' ? bashData(subject) : writeData(subject, { tool });
+
+    await recordHumanAsked({ hookData, tool, reason: 'blocked' });
+
+    expect(Object.keys(onlyEvent().data)).toEqual(keys);
+  });
+});
+
+describe('HUMAN_RESOLVED_DECISION_MAX_BYTES', () => {
+  /** Temp roots this block made, removed at the end. */
+  const roots = [];
+  afterAll(() => {
+    for (const root of roots) {
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* noop */ }
+    }
+  });
+
+  it('leaves room for the writer overhead under the allowlist cap', async () => {
+    const { HUMAN_RESOLVED_DECISION_MAX_BYTES } = await loadRecorder();
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const allowlistPath = path.resolve(here, '..', '..', 'schemas', 'ledger-events.allowlist.json');
+    const cap = JSON.parse(readFileSync(allowlistPath, 'utf-8')).limits.line_max_bytes;
+
+    // The overhead is MEASURED, never hardcoded: write one real line through
+    // the real writer and subtract the decision's own bytes. A hardcoded number
+    // would drift the day the envelope gains a field, and the guard would go
+    // from "comfortably under the cap" to "over it" with this test still green.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'artibot-hres-budget-'));
+    roots.push(root);
+    const decision = 'd'.repeat(64);
+    const result = writeEvent(root, {
+      event: 'human.resolved',
+      session_id: SID,
+      source: 'human',
+      // The WIDEST data shape this recorder can emit, minus `path` — the point
+      // of the subtraction below is the fixed cost, and `path` is the variable
+      // term this guard deliberately does not model.
+      data: {
+        question_id: buildIdShape(),
+        decision,
+        tool: 'Write',
+        kind: 'approval',
+        kind_source: 'self-report',
+        gate: 'HG-13',
+      },
+    });
+    expect(result.ok).toBe(true);
+    const line = readFileSync(ledgerFilePath(root), 'utf-8').trim();
+    const overhead = Buffer.byteLength(line, 'utf-8') - Buffer.byteLength(decision, 'utf-8');
+
+    expect(HUMAN_RESOLVED_DECISION_MAX_BYTES + overhead).toBeLessThanOrEqual(cap);
+
+    // THE HOLE, stated as a number rather than a hope. Whatever is left over is
+    // the entire budget for `path`, which is a caller-supplied file path of
+    // unbounded length and is NOT checked by the guard. A Write whose path
+    // exceeds this still overflows the cap exactly as before.
+    const pathBudget = cap - (HUMAN_RESOLVED_DECISION_MAX_BYTES + overhead);
+    expect(pathBudget).toBeGreaterThan(0);
+    // Measured 2026-09-13 22:4x: overhead 303 bytes, budget 721. Neither is
+    // asserted as an equality — the pid and seq digit counts move the overhead
+    // by a byte or two between runs, so an equality here would be a flake.
+    // The floor must fail when the headroom COLLAPSES, not when a field is
+    // renamed.
+    expect(pathBudget).toBeGreaterThan(512);
+  });
+});
+
+/** A question id of the real shape, for byte-accurate measurement. */
+function buildIdShape() {
+  return `q-${'s'.repeat(8)}-${'0'.repeat(12)}`;
+}
 
 describe('HUMAN_RESOLVED_KINDS', () => {
   it('matches the allowlist enum it exists to enforce', async () => {

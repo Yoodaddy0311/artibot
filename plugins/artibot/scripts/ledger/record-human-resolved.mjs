@@ -44,6 +44,11 @@
  *  0  the line was recorded, OR a precondition was missing and stdout says so
  *  2  usage error: the command line itself is wrong, and NOTHING was written
  *
+ *  READ `recorded` BEFORE TRUSTING AN EXIT 0. The precondition most likely to
+ *  surprise a caller is `decision-too-long`: one ledger line has a byte cap, so
+ *  a decision over `HUMAN_RESOLVED_DECISION_MAX_BYTES` is DROPPED rather than
+ *  truncated. Summarise the answer instead of pasting a transcript.
+ *
  *  A recording failure is not the caller's problem and must not fail its step --
  *  that is the Observe contract. A malformed command line is a different thing:
  *  it means the model asked for something impossible, and exiting 0 over it

@@ -41,10 +41,13 @@
  *  - WHETHER THE `kind` IS TRUE. The script records what it is told. `kind`,
  *    and `decision` with it, are self-reports — see the module header.
  *  - THE INSTALLED COPY. These cases run the file in this worktree.
- *  - LINE FOLDING. `foldOversized` drops every non-required `data` key past the
- *    4 KB cap, which for this event leaves only `decision` — so a long decision
- *    would drop `question_id` itself and silently unjoin the pair. The
- *    decisions here are a few dozen bytes and never approach it.
+ *  - THE PATH HALF OF THE BYTE CAP. `refuses a decision that would not fit`
+ *    below covers an oversized `decision`, which the recorder checks. It does
+ *    NOT check the `path` it writes for Write and Edit, and that path is a
+ *    caller-supplied string of unbounded length. A subject longer than the
+ *    residual budget (721 bytes, measured 2026-09-13 by the drift pin in
+ *    `tests/runtime/human-resolved-record.test.js`) still overflows the cap and
+ *    still lands as `ledger.rejected`. Nothing here exercises that.
  *
  * @module tests/ledger/record-human-resolved
  */
@@ -274,6 +277,30 @@ describe('record-human-resolved: what it refuses to write', () => {
     // a silent exit 0 here would tell the model it had recorded something.
     expect(printed.recorded).toBe(false);
     expect(printed.skipped).toBe('no-session-id');
+    expect(ledgerEvents(root)).toEqual([]);
+  });
+
+  it('refuses a decision that would not fit on one ledger line', () => {
+    const root = makeRoot('J');
+
+    const out = runCli([
+      '--tool', 'Bash', '--subject', 'ls -al', '--decision', 'y'.repeat(5000),
+      '--session', SID, '--cwd', root,
+    ], root);
+
+    // REGRESSION PIN, reproduced by review on 2026-09-13 before the guard
+    // existed: this exact command wrote
+    // `{"event":"ledger.rejected","data":{"raw_event":"human.resolved",
+    // "reason":"line-too-large:5251"}}` while stdout claimed `recorded:true`.
+    // Both halves of that were wrong — a noise line in place of the record, and
+    // a caller told it had succeeded.
+    expect(out.status).toBe(0);
+    const printed = JSON.parse(out.stdout);
+    expect(printed.recorded).toBe(false);
+    expect(printed.skipped).toBe('decision-too-long');
+    // The ledger must be EMPTY: no `human.resolved`, and no `ledger.rejected`
+    // either. `resolvedIn` alone would not catch the rejected line, so the
+    // whole file is asserted.
     expect(ledgerEvents(root)).toEqual([]);
   });
 

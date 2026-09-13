@@ -113,9 +113,16 @@
  *  this module can check up front, it checks — a missing `session_id`
  *  (`invalid-envelope:session_id`), a missing `decision`
  *  (`missing-required-data:decision`), a `kind` outside its enum
- *  (`enum-violation:kind`). Skipping is the cheaper failure, and it is the only
- *  one that leaves the ledger honest. `HUMAN_RESOLVED_KINDS` is a copy of the
- *  schema's vocabulary, pinned against the schema by the unit test.
+ *  (`enum-violation:kind`), an oversized `decision` (`line-too-large:…`).
+ *  Skipping is the cheaper failure, and it is the only one that leaves the
+ *  ledger honest. `HUMAN_RESOLVED_KINDS` and
+ *  `HUMAN_RESOLVED_DECISION_MAX_BYTES` are both copies of what the schema says,
+ *  pinned against it by the unit test rather than read at runtime.
+ *
+ *  THE CHECKS ARE NOT COMPLETE, AND THE GAP IS NAMED. `data.path` carries the
+ *  Write/Edit subject verbatim and is not length-checked, so a path longer than
+ *  the residual byte budget still produces a `ledger.rejected` line. See
+ *  `HUMAN_RESOLVED_DECISION_MAX_BYTES` for the measurement and the open hole.
  *
  * @module lib/runtime/human-asked-record
  */
@@ -302,14 +309,55 @@ export async function describeHumanQuestion(question, gates) {
 export const HUMAN_RESOLVED_KINDS = Object.freeze(['correction', 'decision', 'approval']);
 
 /**
+ * The largest `decision` this module will try to record, in BYTES.
+ *
+ * WHY A LIMIT EXISTS AT ALL. `decision` is the only REQUIRED key of
+ * `human.resolved`, and `event-writer.js#foldOversized` keeps exactly the
+ * required keys plus `evidence_refs`. So an oversized decision fails in one of
+ * two ways, neither of them visible to the caller:
+ *   - slightly over the cap: the fold succeeds by dropping everything else,
+ *     INCLUDING `question_id`. The line lands and joins nothing.
+ *   - far over: the folded line is still too big and the whole record becomes a
+ *     `ledger.rejected` line. MEASURED 2026-09-13 — a 5,000-byte decision
+ *     produced `line-too-large:5251`, one noise line and no record.
+ * Refusing up front is the only outcome that leaves the ledger honest.
+ *
+ * WHY 3072 AND NOT `limits.line_max_bytes`. Deriving it would mean reading and
+ * parsing `schemas/ledger-events.allowlist.json` inside a synchronous function
+ * on a path that must never throw, which is the opposite of the deferred-import
+ * contract this module is built on. So it is a code constant with headroom, and
+ * the drift is caught by a test instead: the pin in
+ * `tests/runtime/human-resolved-record.test.js` MEASURES the envelope overhead
+ * from a real written line and asserts this constant plus that overhead still
+ * fits under the allowlist's cap.
+ *
+ * WHAT THIS DOES NOT COVER — `path`. The Write/Edit subject is copied onto the
+ * line as `data.path`, it is caller-supplied, and its length is unbounded. The
+ * budget left for it is whatever the cap has after this constant and the
+ * envelope, measured at 721 bytes on 2026-09-13. A longer path still overflows
+ * and still lands as `ledger.rejected`, exactly as before. That case is
+ * UNMEASURED by any test here and is a known, open hole — not a solved problem.
+ */
+export const HUMAN_RESOLVED_DECISION_MAX_BYTES = 3072;
+
+/**
  * Why a `human.resolved` record would be skipped, or null when it will be
  * written.
  *
  * Exported so the CLI can TELL THE CALLER it recorded nothing instead of
  * exiting 0 over a silent no-op. One function, two consumers: the recorder
  * branches on it and the CLI prints it, so "what gets written" and "what the
- * model is told was written" cannot disagree. Every reason here corresponds to
- * a rejection `event-writer.js` would otherwise append — see the header.
+ * model is told was written" cannot disagree.
+ *
+ * THE REASONS ARE NOT ALL THE SAME KIND OF RULE. Four of them pre-empt a
+ * rejection `event-writer.js` would otherwise append — `no-session-id`
+ * (`invalid-envelope:session_id`), `no-decision`
+ * (`missing-required-data:decision`), `kind-not-in-enum` (`enum-violation:kind`)
+ * and `decision-too-long` (`line-too-large:…`). `no-project-root` is NOT one of
+ * them: the writer would accept an injected root perfectly well, and this
+ * module refuses to invent one for reasons of its own (see the header, "WHY THE
+ * PROJECT ROOT IS NOT DERIVED"). Conflating the two would suggest the rule
+ * could be relaxed by changing the writer, which is not so.
  *
  * @param {object} args same shape `recordHumanResolved` takes
  * @returns {string|null}
@@ -319,6 +367,13 @@ export function humanResolvedSkipReason(args) {
   if (typeof cwd !== 'string' || cwd === '') return 'no-project-root';
   if (typeof sessionId !== 'string' || sessionId === '') return 'no-session-id';
   if (typeof decision !== 'string' || decision === '') return 'no-decision';
+  // BYTES, not `.length`. The cap the writer applies is a byte cap, so a
+  // character count would wave through any decision written in a script whose
+  // characters cost more than one byte — 1,100 Korean characters are 3,300
+  // bytes and would be rejected by a writer this function had just approved.
+  if (Buffer.byteLength(decision, 'utf8') > HUMAN_RESOLVED_DECISION_MAX_BYTES) {
+    return 'decision-too-long';
+  }
   // `undefined` and `null` both mean "not reported", which is legal — the
   // allowlist leaves `kind` optional. Anything else must be in the enum: a
   // present-but-invalid `kind` is `enum-violation:kind`, and case is NOT folded
