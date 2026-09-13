@@ -337,6 +337,22 @@ describe('middleware/tasks — StateStore wiring on mission.created', () => {
     expect(existsSync(yamlPath())).toBe(false);
   });
 
+  it('leaves a title on the deferred line for stage ② to promote under', async () => {
+    // Paired with the store assertion above ON PURPOSE: this is the one case
+    // where the ledger records MORE than the store does, and the extra key is
+    // what `scripts/hooks/intent-observe-pre.js` reads at the session's first
+    // Write/Edit to name the mission it opens (design §3.1 stage ②).
+    await run(DEFERRED);
+
+    const deferred = eventsNamed('mission.candidate_deferred');
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0].data.title).toBeTypeOf('string');
+    expect(deferred[0].data.title.length).toBeGreaterThan(0);
+    expect(deferred[0].data.title.length).toBeLessThanOrEqual(120);
+    // Still no mission row — a title is not a mission.
+    expect(eventsNamed('mission.created')).toHaveLength(0);
+  });
+
   it('skips the store when a substantive prompt carries no session id', async () => {
     const state = storeState(SUBSTANTIVE);
     delete state.input.hookData.session_id;

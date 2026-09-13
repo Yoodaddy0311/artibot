@@ -271,6 +271,21 @@ function buildMissionLedgerData(eventName, result, prompt) {
   return {
     reason: result.deferred ? 'substantive-gate:deferred' : 'substantive-gate:not-substantive',
     signals: Array.isArray(result.signals) ? result.signals.slice(0, MISSION_SIGNALS_MAX) : [],
+    // THE TITLE CARRIER FOR STAGE ② (design §3.1 "mission_id 발급 2단계").
+    //
+    // A deferred candidate is the only record of what the user asked for, and
+    // `scripts/hooks/intent-observe-pre.js` promotes it to `mission.created`
+    // at the session's first write tool — by which time the prompt is gone.
+    // Without this key the promotion has to name the mission after the file
+    // being written, which is a filename, not an intent.
+    //
+    // The allowlist declares `mission.candidate_deferred` with
+    // `required: []` and typed `fields {reason, signals}` only;
+    // `event-writer.js#validateDeclaredFields` type-checks DECLARED keys and
+    // passes undeclared ones, so this rides legally without widening the
+    // schema. Capped by `missionTitle` at MISSION_TITLE_MAX for the same
+    // reason `mission.created` is: the line has a 4 KB budget.
+    title: missionTitle(result, prompt),
   };
 }
 
@@ -411,12 +426,18 @@ function summarizeMissionCommit(commit, missionId, location) {
  * walk a running mission backwards, and the store would faithfully record the
  * lie.
  *
+ * EXPORTED, not private, because `scripts/hooks/intent-observe-pre.js` writes
+ * the SAME row from stage ② (design §3.1) and a second copy of this mutator
+ * would be a second definition of what a mission row is. The preserving
+ * behaviour above is exactly what stage ② needs and is the part that a
+ * duplicate would most easily get wrong.
+ *
  * @param {string} missionId mission the row belongs to
  * @param {string} title from {@link missionTitle}
  * @param {number} revision from {@link missionIntentRevision}
  * @returns {(current: object|null) => object} mutator for `updateMission`
  */
-function missionMutator(missionId, title, revision) {
+export function missionMutator(missionId, title, revision) {
   return (current) => ({
     ...(current ?? {}),
     title,
@@ -443,13 +464,18 @@ function missionMutator(missionId, title, revision) {
  * pinning it to the same instant the ledger append used is what makes the two
  * lines timestamp-comparable rather than merely close together.
  *
+ * EXPORTED alongside {@link missionMutator} so stage ②
+ * (`scripts/hooks/intent-observe-pre.js`) binds the SAME four ports. The
+ * `source: 'hook'` and the ledger port in particular are the pairing that makes
+ * a stage-② store write indistinguishable from a stage-① one in the ledger.
+ *
  * @param {string} projectRoot absolute project root
  * @param {string} sessionId raw session id for the ledger envelope
  * @param {number} nowMs the single epoch-ms reading for this prompt
  * @param {{resolveGitCommonDir: (root: string) => string|null}} deps injected ports
  * @returns {object} the StateStore
  */
-function openMissionStore(projectRoot, sessionId, nowMs, deps) {
+export function openMissionStore(projectRoot, sessionId, nowMs, deps) {
   return createStateStore({
     projectRoot,
     sessionId,

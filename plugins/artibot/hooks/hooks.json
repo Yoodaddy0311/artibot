@@ -103,6 +103,18 @@
         "category": "observability"
       },
       {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/intent-observe-pre.js",
+            "timeout": 5
+          }
+        ],
+        "priority": "optional",
+        "category": "observability"
+      },
+      {
         "matcher": "WebFetch",
         "hooks": [
           {
