@@ -7,16 +7,18 @@
 - 출처 우선순위: `ARTIBOT-5.0-DESIGN.md` §4 로드맵 > §7.3(§48 P0 14 사상) > §8.4(§55 P0 15 사상) > 부록 0-2 후속(1)(2)(3) 오너 결정 > `NEXT-SESSION.md` > `CHANGELOG.md`.
 - 인용은 `file#symbol` 또는 `§번호`. 줄번호는 쓰지 않는다.
 
-## §1 진행률 요약 (분모 = §2 항목 수, 2026-09-11 f75e849f 기준)
+## §1 진행률 요약 (분모 = §2 항목 수, 2026-09-13 34b6dbf6 기준 — Wave 8 부분 배치 p1 e9e24e2e + p2 34b6dbf6 반영)
 
 | 단계 | 항목 | done | in-progress | todo | 보류 | 기각 | 진행률(done/항목) |
 |---|---|---|---|---|---|---|---|
 | Phase 0 정본 착지 | 16 | 13 | 1 | 2 | 0 | 0 | 81% |
 | Observe 기록만 | 27 | 17 | 6 | 4 | 0 | 0 | 63% |
-| Shadow 비교 | 30 | 1 | 11 | 15 | 3 | 0 | 3% |
+| Shadow 비교 | 30 | 3 | 11 | 13 | 3 | 0 | 10% |
 | Canary 저위험 자동 | 20 | 1 | 0 | 18 | 0 | 1 | 5% |
 | GA | 7 | 1 | 0 | 6 | 0 | 0 | 14% |
-| **합계** | **100** | **33** | **18** | **45** | **3** | **1** | **33%** |
+| **합계** | **100** | **35** | **18** | **43** | **3** | **1** | **35%** |
+
+> Wave 8 (split-68e984w8, base a40b8448) 착지 이력: p1 `e9e24e2e` = checkpoint-store-dr01(SH-21) + plugin-manifest-agents(§3 부채) · p2 `34b6dbf6` = pricing-unify(SH-07). 미착지 5줄기(context-receipt-cx02 SH-16 · intent-md-generator SH-01/02 · verdict-verify-writer OB-06/07 · human-resolved-writer SH-27 · routebench-baseline SH-25)는 status 유지.
 
 읽는 법: 진행률은 done 만 센다(in-progress 는 0). 보류·기각은 분모에 남긴다(오너 결정으로 되살아날 수 있음). §3 부채 트랙은 이 표에 섞지 않는다.
 
@@ -87,7 +89,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | SH-04 | `topology-actual` vs 추천 일치율(`/doctor`) | §4 · §3.5 | todo | lib grep `topology-actual` 0건 | — | |
 | SH-05 | 라우터 추천 스폰의 영수증·평가점수 비교 | §4 · §3.2 | todo | 미확인(라이브 표본: 4.58.0 investigator recommended opus→selected fable 1건) | — | |
 | SH-06 | recovery 분류 기록(기존 고정 전이와 달랐을 때) | §4 · §3.4 | in-progress | `lib/recovery/{failure-classifier,recovery-controller,plan-repair}.js` 존재 | — | engine 배선 미확인; 적용은 CA-03 |
-| SH-07 | 가격 단일화 + 5.1 계수 실측(D1·I1, cache-roi 명시) | §4 · §3.2 · 부록 가격표 행 | todo | `usage.receipt` cost null · pricing_version unresolved(NEXT-SESSION 09-09 P2) | `usage-receipt-schema-guard` | `lib/runtime/middleware/cache-roi.js` 미참조 교차 테스트 0 |
+| SH-07 | 가격 단일화 + 5.1 계수 실측(D1·I1, cache-roi 명시) | §4 · §3.2 · 부록 가격표 행 | done | Wave 8 p2 `34b6dbf6`(줄기 done `d6cccd0c`): `lib/core/model-catalog.js` 단일 가격표 → `lib/economics/usage-receipt.js`·`lib/runtime/middleware/cache-roi.js` 가 읽음 + `tests/economics/pricing-parity.test.js` 패리티 게이트(카탈로그·cache-roi·receipt·routing 한 표) | `usage-receipt-schema-guard` · `pricing-parity` | `cost.total` null 핀 유지(5.1 계수 실측은 미완 — 계수는 미검증 수치, I1 잔여) |
 | SH-08 | seeded-defect 코퍼스 N 확정 + catch-rate·FP·위치정확도(opus 비교군) | §4 · §3.4 · C6 | todo | 코퍼스 grep 0건(픽스처 언급만) | — | **오너 결정 C6 선행(N·목표)** |
 | SH-09 | 헌법 단계 B(B-1 체크포인트 결정형만 · B-2 Rationalizations 강등 · B-3 GRPO 절, A4) | §4 · §3.7 | todo | 미확인 | — | 조건: Observe 원장 1릴리스 후 |
 | SH-10 | HANDOFF/NEXT-SESSION 렌더 뷰 전환(`derived-from` 헤더) | §4 · §3.3 | todo | 미확인 | `artifact-governance` #6 | |
@@ -101,7 +103,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | SH-18 | ADR question gate 4조건 기록(§48 #27) | §7.3 | in-progress | `lib/planning/question-gate.js` 존재; `adr.*` 이벤트 0(부록 T-40) | — | 강제는 CA-15 |
 | SH-19 | delegation depth 기록(§36) | §7.3 | todo | 미확인 | — | |
 | SH-20 | Final Scorecard(outcome.md 트리거, §55 #11) | §8.4 | todo | 미확인 | — | SH-02 선행 |
-| SH-21 | Checkpoint/Resume DR01·DR02 `lib/checkpoint/` + 불변성 테스트(§55 #12·#13) | §8.4 · §8.2 §21~26 · vnext ADDENDUM §6 | todo | `lib/checkpoint/` 부재(Glob 0) · `tests/firewall/checkpoint-immutability.test.js` 부재 | (신설 예정) | 순서 DR01→CX02→DR02; 재개 정본 = 트레일러 증거·checkpoint 는 주입 번들(§3.5 확정) |
+| SH-21 | Checkpoint/Resume DR01·DR02 `lib/checkpoint/` + 불변성 테스트(§55 #12·#13) | §8.4 · §8.2 §21~26 · vnext ADDENDUM §6 | done(DR01) | Wave 8 p1 `e9e24e2e`(줄기 done `40a8d21d`): `lib/checkpoint/{checkpoint-store,checkpoint-service,checkpoint-validator}.js` + `adapters/` · `lib/supervisor/contracts.js#validateCheckpoint` · `tests/firewall/checkpoint-immutability.test.js` · `tests/checkpoint/` 4파일 | `checkpoint-immutability` | DR02(재개 주입)는 미착수 — 순서 DR01→CX02→DR02; 재개 정본 = 트레일러 증거·checkpoint 는 주입 번들(§3.5 확정) |
 | SH-22 | 메모리 주입 A/B(`ARTIBOT_RUNTIME_MEMORY_DISABLE`) | §8.4 · G2 | 보류 | 후속(1) G2: 계측만 유지, 표본 n>1 축적 후 | — | 임계 미확인 |
 | SH-23 | Mission Reflection(미션 경계 reflect) | §8.4 · §8.2 §16 | todo | 미확인 | — | G2 후 |
 | SH-24 | Generated Knowledge `.artibot/generated/` | §8.4 · G3 | 보류 | 후속(1) G3: 도입 보류(소비처 0) | — | 소비처 ≥1 시 재검토 |
@@ -167,7 +169,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | UPS 발신자 가드(task-notification · cross-session · agent 봉투) | done | 4.57.0 + 4.58.0 `_userprompt-dispatcher.js`; 라이브 PASS 4.58.0 판정 5 | Observe(routing-classified 분모) |
 | install 이중 적재 · rules 전달(ADR-002) | done | 4.58.0 `install.sh`/`install.ps1` | — |
 | frontmatter 중복키·블록 스칼라·빈 description 게이트 | in-progress | `62d4d608`(4.60.0) done; W7 `frontmatter-hardening` `4f432d24` done(배치 랜딩 중) | — |
-| `plugin.json#agents` 28 vs `agents/*.md` 30(auditor·investigator 누락) | todo | Wave 8 후보 `frontmatter-followups`(실결함, 신규 설치 스폰 실패 추론) | Observe(MP-3 에이전트 실효) |
+| `plugin.json#agents` 28 vs `agents/*.md` 30(auditor·investigator 누락) | done | Wave 8 p1 `e9e24e2e`(줄기 `8e59d7ca`·`007b527b`): `plugin.json#agents` 30 등록 + `tests/ci/agents-manifest-parity.test.js` 매니페스트↔디렉터리 패리티 게이트(중복 항목 보고 포함) | Observe(MP-3 에이전트 실효) |
 | 테스트 플레이크(git-dir spawn · handoff-store EPERM · landing-serialization rebuild 30s) | in-progress | `c571b49d` EPERM 재시도 done; W7 `test-load-flakes` done `c5fbaf2f`(배치 랜딩 중) | (랜딩 게이트 신뢰) |
 | hook-latency-bench(N=20, 예산 초과 0) | done | `40cdf344`(4.58.0 Wave 4) | Canary(훅 확대 시 예산) |
 | skill-description-render 원인(호스트 `skillUsage` 규약) | done | `033e19da` | — |
