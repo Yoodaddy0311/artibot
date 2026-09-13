@@ -28,9 +28,12 @@
  *     {@link APPLY_CAN_WRITE} and skips itself, loudly, on a tree where `apply`
  *     still cannot write. Measured 2026-09-12: the branch EXISTS, so that case
  *     RAN and the file write below is a measurement, not an aspiration.
- *   - A GENUINE IMPORT-TIME FAILURE of a dependency module. It cannot be
- *     produced without editing production code, so the stdout-invariance table
- *     records it as UNMEASURED rather than faking it.
+ *   - THAT EVERY DEPENDENCY IS COVERED BY THE IMPORT-FAILURE CASE. One module
+ *     (`lib/runtime/ledger.js`) is broken at import time and measured — stdout
+ *     0 bytes, exit 0, no ledger line — which is the third row of the brief's
+ *     stdout table and was UNMEASURED before. The other nine lazy imports are
+ *     assumed to behave the same because they are awaited by the same
+ *     `Promise.all` inside the same try, NOT because each was measured.
  *   - LATENCY IN PRODUCTION. The spawn budget below is informational: a tmpdir
  *     repo with a handful of ledger lines is not a live repo.
  *
@@ -44,10 +47,10 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { appendLedgerEvent, ledgerFilePath } from '../../lib/runtime/ledger.js';
-import { SkipReason } from '../../lib/runtime/artifact-lifecycle.js';
+import { ARTIFACT_BASENAME, MISSIONS_DIR, SkipReason } from '../../lib/runtime/artifact-lifecycle.js';
 import { sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
@@ -82,6 +85,9 @@ const APPLY_CAN_WRITE = /options\.write\s*===\s*true/.test(LIFECYCLE_SRC);
 
 const SESSION_ID = 'sess-intent-1abcdefg';
 const DEFERRED_TITLE = 'Fix the flaky parser test';
+/** One UTC day. The mission id's date part is `new Date()`-derived, so this is
+ * how a session that crossed midnight is reproduced without a fake clock. */
+const ONE_DAY_MS = 86_400_000;
 
 /** Run the hook exactly as the host does: fresh process, JSON on stdin. */
 function runHook(payload, home, { raw = null } = {}) {
@@ -100,6 +106,73 @@ function runHook(payload, home, { raw = null } = {}) {
     stdout,
     stdoutBytes: stdout.length,
     stderr: String(res.stderr ?? ''),
+  };
+}
+
+/**
+ * Run the hook with `lib/runtime/ledger.js` FAILING AT IMPORT TIME.
+ *
+ * The third row of the stdout-invariance table, and the one the earlier
+ * revision of this file recorded as UNMEASURED. It is produced without editing
+ * production code: `module.register()` installs a `load` hook that replaces the
+ * ledger module's source with a throw, so every importer of it — the hook's own
+ * lazy import and `tasks.js`'s static one alike — rejects.
+ *
+ * A RUNNER, not a direct spawn, because the loader hook has to be registered
+ * before the hook module is resolved. `main()` is called explicitly since
+ * `isMainEntry` is false under an importing runner.
+ *
+ * The runner puts `main()`'s return value in a FILE, never on stdout, and the
+ * caller asserts on it: without that, a `load` hook that silently stopped
+ * matching would leave this case green while measuring the ordinary path.
+ *
+ * @param {object} payload
+ * @param {string} home
+ * @param {string} dir - scratch directory for the generated .mjs files
+ * @returns {{status: number|null, stdout: Buffer, stdoutBytes: number,
+ *   stderr: string, outcome: object|null}}
+ */
+function runHookWithBrokenLedger(payload, home, dir) {
+  const LEDGER = 'lib/runtime/ledger.js';
+  const hooks = path.join(dir, 'break-ledger-hooks.mjs');
+  writeFileSync(hooks, [
+    'export async function load(url, context, nextLoad) {',
+    `  if (url.replace(/\\\\/g, '/').endsWith(${JSON.stringify(LEDGER)})) {`,
+    '    return {',
+    "      format: 'module',",
+    '      shortCircuit: true,',
+    '      source: \'throw new Error("ledger module failed to load");\',',
+    '    };',
+    '  }',
+    '  return nextLoad(url, context);',
+    '}',
+    '',
+  ].join('\n'), 'utf-8');
+
+  const outFile = path.join(dir, 'break-ledger-outcome.json');
+  const runner = path.join(dir, 'break-ledger-runner.mjs');
+  writeFileSync(runner, [
+    "import { register } from 'node:module';",
+    "import { writeFileSync as wf } from 'node:fs';",
+    `register(${JSON.stringify(pathToFileURL(hooks).href)});`,
+    `const mod = await import(${JSON.stringify(pathToFileURL(HOOK).href)});`,
+    'const out = await mod.main();',
+    `wf(${JSON.stringify(outFile)}, JSON.stringify(out ?? null), 'utf-8');`,
+    '',
+  ].join('\n'), 'utf-8');
+
+  const res = spawnSync(process.execPath, [runner], {
+    input: JSON.stringify(payload),
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    windowsHide: true,
+  });
+  const stdout = res.stdout ?? Buffer.alloc(0);
+  return {
+    status: res.status,
+    stdout,
+    stdoutBytes: stdout.length,
+    stderr: String(res.stderr ?? ''),
+    outcome: existsSync(outFile) ? JSON.parse(readFileSync(outFile, 'utf-8')) : null,
   };
 }
 
@@ -174,11 +247,11 @@ describe('intent-observe-pre — S1 action allowlist (§3.3)', () => {
 });
 
 describe('intent-observe-pre — mission id', () => {
-  it('takes a valid payload mission id verbatim', () => {
-    expect(resolveMissionId({ mission_id: 'M-20260904-Sabcdefgh' }, 'sess')).toBe('M-20260904-Sabcdefgh');
+  it('takes a valid payload mission id verbatim', async () => {
+    expect(await resolveMissionId({ mission_id: 'M-20260904-Sabcdefgh' }, 'sess')).toBe('M-20260904-Sabcdefgh');
   });
 
-  it('falls back to the SAME id stage ① uses, not to mission-id.js', () => {
+  it('falls back to the SAME id stage ① uses, not to mission-id.js', async () => {
     // THE DISCREPANCY THIS PINS. Two different functions carry this name:
     // `lib/runtime/event-writer.js#sessionFallbackMissionId(sessionId, when)`
     // (positional, sha256 fallback, returns null) and
@@ -188,14 +261,25 @@ describe('intent-observe-pre — mission id', () => {
     // (`lib/runtime/middleware/tasks.js#resolveMissionIdentity`), so stage ②
     // must read under the same one or it looks for a row that is not there.
     const short = 'a-b-c';
-    expect(resolveMissionId({}, short)).toBe(sessionFallbackMissionId(short, new Date()));
-    expect(resolveMissionId({}, SESSION_ID)).toBe(sessionFallbackMissionId(SESSION_ID, new Date()));
-    expect(resolveMissionId({}, null)).toBeNull();
+    expect(await resolveMissionId({}, short)).toBe(sessionFallbackMissionId(short, new Date()));
+    expect(await resolveMissionId({}, SESSION_ID)).toBe(sessionFallbackMissionId(SESSION_ID, new Date()));
+    expect(await resolveMissionId({}, null)).toBeNull();
   });
 
   it('names the one allowed artifact path under the mission folder', () => {
     const p = intentArtifactPath('/repo', 'M-20260912-Sabcdefgh');
     expect(p.split(/[\\/]/).slice(-4)).toEqual(['.artibot', 'missions', 'M-20260912-Sabcdefgh', 'intent.md']);
+  });
+
+  it('joins the SAME segments artifact-lifecycle owns, so the latch cannot drift', () => {
+    // The hook keeps its own join (the constants live behind a lazy import and
+    // this helper is synchronous). That is a DUPLICATE DEFINITION, so the
+    // drift is caught here instead: if `MISSIONS_DIR` or `ARTIFACT_BASENAME`
+    // ever moves, the latch would silently test a path the writer no longer
+    // produces, and this assertion goes red first.
+    const id = 'M-20260912-Sabcdefgh';
+    expect(intentArtifactPath('/repo', id))
+      .toBe(path.join('/repo', ...MISSIONS_DIR, id, ARTIFACT_BASENAME.intent));
   });
 });
 
@@ -225,11 +309,15 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
     },
   });
 
-  /** Seed stage ①'s deferred candidate for this session. */
+  /**
+   * Seed stage ①'s deferred candidate for this session. `over.missionId` files
+   * it under a DIFFERENT id than today's derived one — that is the whole
+   * cross-midnight case, and stage ① is the half that owns id issuance.
+   */
   const seedDeferred = (over = {}) => appendLedgerEvent(repo, {
     event: 'mission.candidate_deferred',
     session_id: SESSION_ID,
-    mission_id: missionId,
+    mission_id: over.missionId ?? missionId,
     source: 'hook',
     data: {
       reason: 'substantive-gate:deferred',
@@ -287,6 +375,64 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
 
     expect(after1).toBe(1);
     expect(after2).toBe(1);
+  });
+
+  it('adopts the CANDIDATE ROW\'s mission id when the session crossed UTC midnight', () => {
+    // THE REGRESSION THIS PINS (review R1, Important 1). The mission id's date
+    // part comes from `new Date()`, so a session that starts before 00:00 UTC
+    // and writes after it derives a DIFFERENT id at stage ② than stage ① filed
+    // its candidate under. Deriving the id first and filtering the ledger by it
+    // made every such session a permanent `no-candidate` — in KST that is every
+    // session crossing 09:00 local. Stage ① holds the issuing authority, so the
+    // row's own `mission_id` is what stage ② must adopt.
+    const yesterday = sessionFallbackMissionId(SESSION_ID, new Date(Date.now() - ONE_DAY_MS));
+    expect(yesterday).not.toBe(missionId);
+    expect(seedDeferred({ missionId: yesterday }).ok).toBe(true);
+
+    const r = runHook(writePayload(), home);
+    expect(r.status).toBe(0);
+    expect(r.stdoutBytes).toBe(0);
+
+    const created = readRunLedger(repo).filter((l) => l.event === 'mission.created');
+    expect(created).toHaveLength(1);
+    expect(created[0].mission_id).toBe(yesterday);
+    expect(created[0].data.title).toBe(DEFERRED_TITLE);
+
+    const mission = openStore(repo).getMission(yesterday);
+    expect(mission).not.toBeNull();
+    expect(mission.intent.path).toBe(`missions/${yesterday}/intent.md`);
+
+    // The document follows the ADOPTED id, and today's derived id gets nothing.
+    expect(existsSync(intentArtifactPath(repo, yesterday))).toBe(APPLY_CAN_WRITE);
+    expect(existsSync(intentArtifactPath(repo, missionId))).toBe(false);
+  });
+
+  it.skipIf(!APPLY_CAN_WRITE)('latches on the ADOPTED id, not on the date-derived one', () => {
+    // Without this the cross-midnight fix would promote on EVERY write of the
+    // session: the latch reads `<derived>/intent.md`, which never appears.
+    const yesterday = sessionFallbackMissionId(SESSION_ID, new Date(Date.now() - ONE_DAY_MS));
+    expect(seedDeferred({ missionId: yesterday }).ok).toBe(true);
+    expect(runHook(writePayload(), home).status).toBe(0);
+
+    const r2 = runHook(writePayload({ tool_use_id: 'toolu_intent_2' }), home);
+    expect(r2.status).toBe(0);
+    expect(r2.stdoutBytes).toBe(0);
+    expect(readRunLedger(repo).filter((l) => l.event === 'mission.created')).toHaveLength(1);
+  });
+
+  it('adopts the LATEST candidate row when the session filed more than one', () => {
+    const older = sessionFallbackMissionId(SESSION_ID, new Date(Date.now() - 2 * ONE_DAY_MS));
+    const newer = sessionFallbackMissionId(SESSION_ID, new Date(Date.now() - ONE_DAY_MS));
+    expect(older).not.toBe(newer);
+    expect(seedDeferred({ missionId: older, data: { title: 'the older one' } }).ok).toBe(true);
+    expect(seedDeferred({ missionId: newer }).ok).toBe(true);
+
+    expect(runHook(writePayload(), home).status).toBe(0);
+
+    const created = readRunLedger(repo).filter((l) => l.event === 'mission.created');
+    expect(created).toHaveLength(1);
+    expect(created[0].mission_id).toBe(newer);
+    expect(created[0].data.title).toBe(DEFERRED_TITLE);
   });
 
   it('records nothing when there is no candidate for this session (fail-closed)', () => {
@@ -436,14 +582,16 @@ describe('intent-observe-pre — stdout invariance across failure modes', () => 
   let home;
   let repo;
   let blocked;
+  let broken;
 
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'artibot-intent-fw-')));
     home = path.join(tmp, 'home');
     repo = path.join(tmp, 'repo');
     blocked = path.join(tmp, 'blocked');
+    broken = path.join(tmp, 'broken');
     mkdirSync(path.join(home, '.claude'), { recursive: true });
-    for (const dir of [repo, blocked]) {
+    for (const dir of [repo, blocked, broken]) {
       mkdirSync(dir, { recursive: true });
       execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
     }
@@ -500,6 +648,66 @@ describe('intent-observe-pre — stdout invariance across failure modes', () => 
     for (const [name, r] of results) {
       expect(r.stdout.equals(first), `${name}: stdout bytes must match case 1`).toBe(true);
     }
+  });
+
+  it('holds stdout and exit status when a dependency FAILS AT IMPORT TIME', () => {
+    // The third measurement of the brief's stdout table, compared against the
+    // two that were already measured, IN ONE PLACE — (a) the success path and
+    // (b) a real ledger WRITE failure. Comparing them here is the point: an
+    // import failure is the mode that used to kill the process before `main()`
+    // ran, which left stdout at 0 bytes but exit at 1. exit 1 does not cancel a
+    // tool call (only exit 2 does), so that was never a block-point breach —
+    // but it was an unmeasured claim, and the hook's own header promises exit 0
+    // "under every input".
+    const sid = SESSION_ID;
+    const missionId = sessionFallbackMissionId(sid, new Date());
+    const payload = (cwd) => ({
+      cwd,
+      hook_event_name: 'PreToolUse',
+      session_id: sid,
+      tool_name: 'Write',
+      tool_use_id: 'toolu_imp_1',
+      tool_input: { file_path: path.join(cwd, 'a.js'), content: 'x' },
+    });
+    const candidate = (root) => appendLedgerEvent(root, {
+      event: 'mission.candidate_deferred',
+      session_id: sid,
+      mission_id: missionId,
+      source: 'hook',
+      data: { reason: 'substantive-gate:deferred', signals: [], title: DEFERRED_TITLE },
+    });
+    expect(candidate(repo).ok).toBe(true);
+    expect(candidate(broken).ok).toBe(true);
+    const beforeBroken = readRunLedger(broken).length;
+
+    const importFailure = runHookWithBrokenLedger(payload(broken), home, tmp);
+    const results = [
+      ['a success', runHook(payload(repo), home)],
+      ['b ledger write failure', runHook(payload(blocked), home)],
+      ['c ledger import failure', importFailure],
+    ];
+    expect(results).toHaveLength(3);
+
+    // FIXTURE SELF-CHECK. `main()` has to have RETURNED, and have returned the
+    // import rejection — a `load` hook that stopped matching would otherwise
+    // leave this case green while quietly measuring the ordinary path.
+    expect(importFailure.outcome).not.toBeNull();
+    expect(importFailure.outcome.ok).toBe(false);
+    expect(importFailure.outcome.reason).toMatch(/ledger module failed to load/);
+
+    for (const [name, r] of results) {
+      expect(r.stdoutBytes, `${name}: stdout must be empty`).toBe(0);
+      expect(r.status, `${name}: exit must be 0`).toBe(0);
+      expect(r.stdout.equals(results[0][1].stdout), `${name}: stdout bytes must match (a)`).toBe(true);
+    }
+
+    // (a) really promoted, so the comparison is against a LIVE success and not
+    // against three mutually silent no-ops.
+    expect(readRunLedger(repo).filter((l) => l.event === 'mission.created')).toHaveLength(1);
+    // (c) wrote nothing: the module that appends is the module that failed.
+    expect(readRunLedger(broken)).toHaveLength(beforeBroken);
+    expect(readRunLedger(broken).filter((l) => l.event === 'mission.created')).toHaveLength(0);
+    expect(existsSync(intentArtifactPath(broken, missionId))).toBe(false);
   });
 
   it('leaves no ledger behind when the ledger directory is unwritable', () => {

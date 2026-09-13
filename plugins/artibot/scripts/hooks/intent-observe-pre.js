@@ -23,7 +23,10 @@
  *   - NOTHING is ever written to stdout. Not on success, not on failure. This
  *     module does not import `writeStdout` at all.
  *   - `main()` never throws — the body is wrapped, and the direct-run guard
- *     re-catches so even an import-time surprise cannot escape.
+ *     re-catches so even an import-time surprise cannot escape. The `lib/`
+ *     imports are DEFERRED into that wrapped body (see {@link loadDeps}), so a
+ *     dependency that throws while it loads is a caught rejection rather than
+ *     an uncaught top-level one; measured, not assumed.
  *   - `process.exitCode` is pinned to 0 before anything else runs.
  *   - `tool_name` outside {@link WRITE_TOOLS} returns on the FIRST check,
  *     before any ledger, config or store module does any work. The `hooks.json`
@@ -65,17 +68,58 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { parseJSON, readStdin } from '../utils/index.js';
-import { loadConfig } from '../../lib/core/config.js';
-import { resolveProjectRoot } from '../../lib/git/project-root.js';
-import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
-import { sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
-import { isMissionId } from '../../lib/mission/mission-id.js';
-import { compileMission } from '../../lib/mission/compiler.js';
-import { serializeIntentMd } from '../../lib/intent/artifact.js';
-import { apply, plan } from '../../lib/runtime/artifact-lifecycle.js';
-import { missionMutator, openMissionStore } from '../../lib/runtime/middleware/tasks.js';
-import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { isMainEntry } from './_main-entry.js';
+
+/**
+ * Every `lib/` module this hook needs — imported LAZILY, inside the try.
+ *
+ * WHY NOT STATIC IMPORTS. A static `import` of a module that throws while it is
+ * being evaluated kills the process BEFORE `main()` exists: Node prints the
+ * stack on stderr and exits 1. stdout stays empty, so that failure mode never
+ * breached the block point (only exit 2 cancels a tool call) — but "exit 0
+ * under every input", which this file's header promises, was not true of it,
+ * and it was UNMEASURABLE without editing this file. Moving the imports here
+ * puts them inside {@link observeIntent}'s catch, which makes the promise true
+ * and the measurement possible (`tests/hooks/intent-observe-pre.test.js`
+ * replaces `lib/runtime/ledger.js` with a throwing module via a `load` hook).
+ *
+ * `node:fs`, `node:path` and `../utils/index.js` stay static on purpose: the
+ * first two cannot fail, and the third is what `main()` needs to read stdin at
+ * all. `Promise.all` rather than sequential awaits — these are ten independent
+ * module graphs and any one of them rejecting is the same single failure.
+ *
+ * @returns {Promise<object>} the named bindings, flat
+ */
+async function loadDeps() {
+  const [core, git, ledger, writer, missionId, compiler, artifact, lifecycle, tasks, commonDir] =
+    await Promise.all([
+      import('../../lib/core/config.js'),
+      import('../../lib/git/project-root.js'),
+      import('../../lib/runtime/ledger.js'),
+      import('../../lib/runtime/event-writer.js'),
+      import('../../lib/mission/mission-id.js'),
+      import('../../lib/mission/compiler.js'),
+      import('../../lib/intent/artifact.js'),
+      import('../../lib/runtime/artifact-lifecycle.js'),
+      import('../../lib/runtime/middleware/tasks.js'),
+      import('../../lib/project-state/git-common-dir.js'),
+    ]);
+  return {
+    loadConfig: core.loadConfig,
+    resolveProjectRoot: git.resolveProjectRoot,
+    appendLedgerEvent: ledger.appendLedgerEvent,
+    readAllEvents: ledger.readAllEvents,
+    sessionFallbackMissionId: writer.sessionFallbackMissionId,
+    isMissionId: missionId.isMissionId,
+    compileMission: compiler.compileMission,
+    serializeIntentMd: artifact.serializeIntentMd,
+    apply: lifecycle.apply,
+    plan: lifecycle.plan,
+    missionMutator: tasks.missionMutator,
+    openMissionStore: tasks.openMissionStore,
+    resolveGitCommonDir: commonDir.resolveGitCommonDir,
+  };
+}
 
 /**
  * The tools this hook answers to. An ALLOWLIST, not a denylist: a host that
@@ -135,8 +179,14 @@ export function intentArtifactPath(projectRoot, missionId) {
 }
 
 /**
- * Mission id for this session: the payload's when it names a valid one, else
- * the session fallback.
+ * Mission id DERIVED for this session: the payload's when it names a valid one,
+ * else the session fallback.
+ *
+ * A FALLBACK, NOT THE ANSWER. The derived id carries today's UTC date, so it is
+ * only the right id while stage ① and stage ② land on the same UTC day; the id
+ * actually in force is the one on the candidate ROW (see
+ * {@link latestCandidateForSession}), and this function is what runs when the
+ * session has no row to adopt from.
  *
  * Uses the EVENT-WRITER form deliberately — see the fork note in the module
  * header. Never throws: a `null` here becomes a `no-mission` return, not a
@@ -144,15 +194,17 @@ export function intentArtifactPath(projectRoot, missionId) {
  *
  * @param {object} hookData - Parsed payload
  * @param {string|null} sessionId
- * @returns {string|null}
+ * @param {object|null} [deps] - Pre-loaded {@link loadDeps} bindings
+ * @returns {Promise<string|null>}
  */
-export function resolveMissionId(hookData, sessionId) {
+export async function resolveMissionId(hookData, sessionId, deps = null) {
+  const d = deps ?? await loadDeps();
   const declared = hookData?.mission_id ?? hookData?.missionId;
-  if (isMissionId(declared)) return declared;
+  if (d.isMissionId(declared)) return declared;
   if (str(sessionId) === null) return null;
   try {
-    const id = sessionFallbackMissionId(sessionId, new Date());
-    return isMissionId(id) ? id : null;
+    const id = d.sessionFallbackMissionId(sessionId, new Date());
+    return d.isMissionId(id) ? id : null;
   } catch {
     return null;
   }
@@ -208,24 +260,38 @@ export function promotionTitle(data, filePath) {
 }
 
 /**
- * The latest ledger line for this mission that could evidence a mission.
+ * The latest ledger line for this SESSION that could evidence a mission.
  *
- * Read per SESSION and filtered by mission id, because the session is the only
- * key stage ① and stage ② share for certain — the mission id is DERIVED from
- * it, so filtering by session first means a mismatch in the derivation shows up
- * as `no-candidate` rather than as a silent read of the wrong session's rows.
+ * THE SESSION IS THE KEY, AND THE ROW CARRIES THE ID. The mission id's date
+ * part comes from the wall clock, so stage ② re-deriving it is wrong the moment
+ * a session crosses 00:00 UTC — in KST that is every session spanning 09:00.
+ * Filtering by a re-derived id made those sessions a permanent `no-candidate`
+ * (review R1, Important 1). Stage ① is the half that ISSUES the id, so stage ②
+ * reads by session and ADOPTS `mission_id` off the row it finds.
  *
+ * `missionId` is passed only when the payload DECLARED one; then it is a
+ * filter, because a declared id is the caller's assertion about which mission
+ * this write belongs to and a row under a different id is not evidence for it.
+ * When it is null, rows whose `mission_id` is not a well-formed mission id are
+ * skipped — an adopted id goes straight into a filesystem path.
+ *
+ * LAST WINS. Ledger order is append order, so the last matching row is the
+ * newest statement the session made about itself.
+ *
+ * @param {object} deps - {@link loadDeps} bindings
  * @param {string} projectRoot
  * @param {string} sessionId
- * @param {string} missionId
+ * @param {string|null} [missionId] - filter, when the payload declared one
  * @returns {object|null}
  */
-function latestCandidate(projectRoot, sessionId, missionId) {
-  const events = readAllEvents(projectRoot, { session_id: sessionId });
+function latestCandidateForSession(deps, projectRoot, sessionId, missionId = null) {
+  const events = deps.readAllEvents(projectRoot, { session_id: sessionId });
   let found = null;
   for (const e of events) {
-    if (e?.mission_id !== missionId) continue;
     if (!CANDIDATE_EVENTS.has(e?.event)) continue;
+    if (missionId === null ? !deps.isMissionId(e?.mission_id) : e?.mission_id !== missionId) {
+      continue;
+    }
     found = e;
   }
   return found;
@@ -240,11 +306,12 @@ function latestCandidate(projectRoot, sessionId, missionId) {
  * that carries `mission_id`/`intent_revision` through
  * `compiler.js#assignOptionalFields` into the document.
  *
- * @param {{title: string, action: string, missionId: string, revision: number}} spec
+ * @param {{deps: object, title: string, action: string, missionId: string,
+ *   revision: number}} spec
  * @returns {object} `compileMission` result
  */
 function compilePromotion(spec) {
-  return compileMission({
+  return spec.deps.compileMission({
     prompt: spec.title,
     stage: 'execution',
     completion: { expected_actions: [spec.action] },
@@ -263,12 +330,12 @@ function compilePromotion(spec) {
  * (`/doctor` Check 8-③, restated in `tasks.js#recordMissionState`), so a failed
  * append must not be followed by a store write that invents one.
  *
- * @param {{projectRoot: string, sessionId: string, missionId: string, title: string,
- *   revision: number, store: object}} ctx
+ * @param {{deps: object, projectRoot: string, sessionId: string, missionId: string,
+ *   title: string, revision: number, store: object}} ctx
  * @returns {{ok: boolean, reason?: string}}
  */
 function promote(ctx) {
-  const appended = appendLedgerEvent(ctx.projectRoot, {
+  const appended = ctx.deps.appendLedgerEvent(ctx.projectRoot, {
     event: 'mission.created',
     session_id: ctx.sessionId,
     mission_id: ctx.missionId,
@@ -279,7 +346,7 @@ function promote(ctx) {
     return { ok: false, reason: `append-failed:${appended?.reason ?? 'unknown'}` };
   }
 
-  const mutator = missionMutator(ctx.missionId, ctx.title, ctx.revision);
+  const mutator = ctx.deps.missionMutator(ctx.missionId, ctx.title, ctx.revision);
   const opts = { reason: 'mission.created' };
   let commit = ctx.store.updateMission(ctx.missionId, mutator, {
     ...opts, expectedVersion: ctx.store.getState().state_version,
@@ -304,13 +371,13 @@ function promote(ctx) {
  * entry (`SkipReason.ALREADY_EXISTS`, `NO_CONTENT`, …) is a 0 here, not a
  * failure — the artifact is never clobbered and the hook stays mute.
  *
- * @param {{projectRoot: string, missionId: string, title: string, revision: number,
- *   text: string, config: object|undefined}} ctx
+ * @param {{deps: object, projectRoot: string, missionId: string, title: string,
+ *   revision: number, text: string, config: object|undefined}} ctx
  * @returns {{written: number, skipped: string[]}} `skipped` carries
  *   `SkipReason` codes, so a write that silently produced no file says why.
  */
 function writeIntent(ctx) {
-  const planResult = plan({
+  const planResult = ctx.deps.plan({
     events: [{
       event: 'mission.created',
       mission_id: ctx.missionId,
@@ -324,7 +391,7 @@ function writeIntent(ctx) {
     },
     projectRoot: ctx.projectRoot,
   });
-  const applied = apply(planResult, {
+  const applied = ctx.deps.apply(planResult, {
     dryRun: true,
     write: true,
     projectRoot: ctx.projectRoot,
@@ -362,16 +429,46 @@ export async function observeIntent(hookData) {
     if (sessionId === null) return { ok: false, reason: 'no-session' };
     const cwd = str(hookData?.cwd);
     if (cwd === null) return { ok: false, reason: 'no-cwd' };
-    const projectRoot = resolveProjectRoot(cwd);
+    const deps = await loadDeps();
+    const projectRoot = deps.resolveProjectRoot(cwd);
     if (str(projectRoot) === null) return { ok: false, reason: 'no-project-root' };
-    const missionId = resolveMissionId(hookData, sessionId);
+
+    const derivedId = await resolveMissionId(hookData, sessionId, deps);
+    // THE FAST LATCH. The design says "the FIRST write tool of a session"; the
+    // artifact's own existence is the cheapest true statement of "this session
+    // already ran stage ②". It is checked against the DERIVED id first because
+    // that costs one `existsSync`, and it is the id in force for every session
+    // that did not cross 00:00 UTC — i.e. almost all of them.
+    //
+    // WHAT IT CANNOT SEE, AND WHAT THAT COSTS (rules §9). Two cases miss it and
+    // pay one `readAllEvents` — a WHOLE-FILE read filtered in memory, not a
+    // seek — on every write:
+    //   - a session that crossed midnight, whose document sits under the
+    //     adopted id (bounded: the second latch catches it from write 2 on);
+    //   - any session at all while `runtime.artifactLifecycle.enabled` is
+    //     false, because then no document is ever written and NO latch can
+    //     fire. Unbounded in the ledger's size, and the reason the read is the
+    //     thing to revisit if the ledger grows (review R1, Suggestion 2).
+    if (derivedId !== null && existsSync(intentArtifactPath(projectRoot, derivedId))) {
+      return {
+        ok: true, reason: 'already-written', missionId: derivedId, promoted: false, written: 0,
+      };
+    }
+
+    const declared = hookData?.mission_id ?? hookData?.missionId;
+    // `undefined` = not read yet, `null` = read and absent. Two states, because
+    // "no candidate" must not trigger a second full ledger read below.
+    let candidate;
+    let missionId = derivedId;
+    if (!deps.isMissionId(declared)) {
+      candidate = latestCandidateForSession(deps, projectRoot, sessionId);
+      if (deps.isMissionId(candidate?.mission_id)) missionId = candidate.mission_id;
+    }
     if (missionId === null) return { ok: false, reason: 'no-mission' };
 
-    // THE LATCH, and it is deliberately the FIRST filesystem read. The design
-    // says "the FIRST write tool of a session"; the artifact's own existence is
-    // the cheapest true statement of "this session already ran stage ②", and it
-    // costs one `existsSync` instead of a whole ledger read on every subsequent
-    // edit of the session.
+    // THE LATCH, on the ADOPTED id. Without it the cross-midnight session would
+    // promote on every single write: the fast latch above tests a path that
+    // session never produces.
     const intentPath = intentArtifactPath(projectRoot, missionId);
     if (existsSync(intentPath)) {
       return { ok: true, reason: 'already-written', missionId, promoted: false, written: 0 };
@@ -379,13 +476,15 @@ export async function observeIntent(hookData) {
 
     let config;
     try {
-      config = await loadConfig();
+      config = await deps.loadConfig();
     } catch {
       config = undefined;
     }
 
     const filePath = hookData?.tool_input?.file_path;
-    const store = openMissionStore(projectRoot, sessionId, Date.now(), { resolveGitCommonDir });
+    const store = deps.openMissionStore(projectRoot, sessionId, Date.now(), {
+      resolveGitCommonDir: deps.resolveGitCommonDir,
+    });
     const existing = store.getMission(missionId);
 
     let title;
@@ -393,7 +492,11 @@ export async function observeIntent(hookData) {
     let promoted = false;
 
     if (existing === null || existing === undefined) {
-      const candidate = latestCandidate(projectRoot, sessionId, missionId);
+      // Only when the payload DECLARED an id: that path skips the lookup above,
+      // and the row must then be one filed under the declared id.
+      if (candidate === undefined) {
+        candidate = latestCandidateForSession(deps, projectRoot, sessionId, missionId);
+      }
       // FAIL-CLOSED. No candidate means stage ① never judged this session, and
       // opening a mission from a bare tool call would invent the one thing the
       // two-stage split exists to avoid.
@@ -413,7 +516,7 @@ export async function observeIntent(hookData) {
           : FIRST_REVISION;
       } else {
         const compiled = compilePromotion({
-          title, action: s1Action(filePath), missionId, revision,
+          deps, title, action: s1Action(filePath), missionId, revision,
         });
         // Unreachable for all three S1 actions — asserted rather than assumed,
         // because a change to the substantive gate that stopped S1 firing would
@@ -421,7 +524,9 @@ export async function observeIntent(hookData) {
         if (compiled.meta?.ledgerEvent !== 'mission.created') {
           return { ok: false, reason: 'not-substantive' };
         }
-        const result = promote({ projectRoot, sessionId, missionId, title, revision, store });
+        const result = promote({
+          deps, projectRoot, sessionId, missionId, title, revision, store,
+        });
         if (result.ok !== true) return { ok: false, reason: result.reason };
         promoted = true;
       }
@@ -442,10 +547,12 @@ export async function observeIntent(hookData) {
     }
 
     const compiled = compilePromotion({
-      title, action: s1Action(filePath), missionId, revision,
+      deps, title, action: s1Action(filePath), missionId, revision,
     });
-    const text = serializeIntentMd(compiled.contract, { originalRequest: title });
-    const result = writeIntent({ projectRoot, missionId, title, revision, text, config });
+    const text = deps.serializeIntentMd(compiled.contract, { originalRequest: title });
+    const result = writeIntent({
+      deps, projectRoot, missionId, title, revision, text, config,
+    });
     // `ok` stays TRUE on a skipped file. The records are the mission; the
     // document is a projection of them, and a failed projection must not be
     // reported as a failed promotion — the ledger line and the store row are
