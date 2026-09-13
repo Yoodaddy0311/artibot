@@ -7,18 +7,18 @@
 - 출처 우선순위: `ARTIBOT-5.0-DESIGN.md` §4 로드맵 > §7.3(§48 P0 14 사상) > §8.4(§55 P0 15 사상) > 부록 0-2 후속(1)(2)(3) 오너 결정 > `NEXT-SESSION.md` > `CHANGELOG.md`.
 - 인용은 `file#symbol` 또는 `§번호`. 줄번호는 쓰지 않는다.
 
-## §1 진행률 요약 (분모 = §2 항목 수, 2026-09-13 34b6dbf6 기준 — Wave 8 부분 배치 p1 e9e24e2e + p2 34b6dbf6 반영)
+## §1 진행률 요약 (분모 = §2 항목 수, 2026-09-13 ee86a639 기준 — Wave 8 8/8 착지 반영)
 
 | 단계 | 항목 | done | in-progress | todo | 보류 | 기각 | 진행률(done/항목) |
 |---|---|---|---|---|---|---|---|
 | Phase 0 정본 착지 | 16 | 13 | 1 | 2 | 0 | 0 | 81% |
-| Observe 기록만 | 27 | 17 | 6 | 4 | 0 | 0 | 63% |
-| Shadow 비교 | 30 | 3 | 11 | 13 | 3 | 0 | 10% |
+| Observe 기록만 | 27 | 18 | 5 | 4 | 0 | 0 | 67% |
+| Shadow 비교 | 30 | 6 | 9 | 12 | 3 | 0 | 20% |
 | Canary 저위험 자동 | 20 | 1 | 0 | 18 | 0 | 1 | 5% |
 | GA | 7 | 1 | 0 | 6 | 0 | 0 | 14% |
-| **합계** | **100** | **35** | **18** | **43** | **3** | **1** | **35%** |
+| **합계** | **100** | **39** | **15** | **42** | **3** | **1** | **39%** |
 
-> Wave 8 (split-68e984w8, base a40b8448) 착지 이력: p1 `e9e24e2e` = checkpoint-store-dr01(SH-21) + plugin-manifest-agents(§3 부채) · p2 `34b6dbf6` = pricing-unify(SH-07). 미착지 5줄기(context-receipt-cx02 SH-16 · intent-md-generator SH-01/02 · verdict-verify-writer OB-06/07 · human-resolved-writer SH-27 · routebench-baseline SH-25)는 status 유지.
+> Wave 8 (split-68e984w8, base a40b8448, 8줄기) 착지 이력: p1 `e9e24e2e` = checkpoint-store-dr01(SH-21 DR01) + plugin-manifest-agents(§3 부채) · p2 `34b6dbf6` = pricing-unify(SH-07) · p3 `b906264a` = context-receipt-cx02(SH-16) · p4 `9300568e` = intent-md-generator(SH-01/02) + routebench-baseline(SH-25) + verdict-verify-writer(OB-06/07) + README 카운트 동기화(p4 1차 `ca0f0da7` not-green: hooks.json 핀 2건 → 줄기 수정 `7d75031a` 후 2차 초록) · p5 `ee86a639` = human-resolved-writer(SH-27). a40b8448→ee86a639 합계 74 files +14,989/−277(`git diff --shortstat`), 줄기별 수치는 CHANGELOG [Unreleased] Wave 8 절. **done 으로 올리지 않은 것**: SH-16(writer 착지, PostCompact 시점 11 leaves 결손으로 라이브 발행 0 — 구조적), SH-02(intent.md 만, review/outcome.md 핸들러 실행 0), OB-07(verify.completed writer 착지, 런타임 호출자 0).
 
 읽는 법: 진행률은 done 만 센다(in-progress 는 0). 보류·기각은 분모에 남긴다(오너 결정으로 되살아날 수 있음). §3 부채 트랙은 이 표에 섞지 않는다.
 
@@ -56,8 +56,8 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | OB-03 | `compileMission` 모든 프롬프트(기록만) | §4 · §3.1 | done | `lib/mission/compiler.js#compileMission` · `tasks.js` `mission.candidate_deferred` | `nl-activation-fixture`(93/93) | S4·S6 미배선 → deferred 다수(부록 T-25), 발화율 분모 미측정 |
 | OB-04 | 라우터 Observe: `route.selected`(PreToolUse Agent) + `route.bound` + `AGENT_ACTION_CLASS` 32키 + epoch=agentId(§48 #11 · §55 #2·#5) | §4 · §3.2 · 후속(1) receipt 위치 · 후속(2)-b D-2 | done | 4.55.0 `scripts/hooks/route-observe-pre.js` · `subagent-handler.js#observeRoute`; 라이브 PASS(4.57.0·4.58.0 판정 4) | `host-payload-contract` · Check 10 | `canonicalModel` 4.58.0 부터 값 등장(원인 미확인); spawn-ledger 필드는 D7 임시 |
 | OB-05 | `decision-events` 훅 배선 + `topology-recommended` | §4 · §3.5 | done | `lib/observability/decision-events.js` 어휘 5종 · `lib/topology/topology-router.js`; 스토어 projectRoot(후속(1) 결정 D) | `decisions-store-sandbox-required` · `hook-decision-invariance` | |
-| OB-06 | `independent-reviewer` verdict 파싱·기록 + clean-room `buildReviewRequest`(§48 #13) | §4 · §3.4 · MP-4 | in-progress | 파서 `lib/review/independent-reviewer.js#parseReviewVerdict`·`#parseClaimAudit`; **`review.completed`·`review.claim_audit` writer 0**(scripts grep 0, 4.56.0 Known) | `review-verdict-adapter` | Shadow 분모(파싱률) 생기려면 writer 필요 |
-| OB-07 | `unified-verifier` UNMEASURED 카운트 | §4 · §3.4 · C4 | in-progress | `lib/verification/unified-verifier.js` 존재; `verify.completed` writer scripts 0 | — | 런타임 호출자 미확인 |
+| OB-06 | `independent-reviewer` verdict 파싱·기록 + clean-room `buildReviewRequest`(§48 #13) | §4 · §3.4 · MP-4 | done | Wave 8 p4 `9300568e`(줄기 done `7298bc34`): `lib/review/verdict-writer.js`·`claim-audit-writer.js`(pure + ports) + SubagentStop 배선 `scripts/hooks/_review-stop-record.js#recordReviewFromStop`(`last_assistant_message` 실림 실측, stdout 바이트 불변 4케이스) + idempotency(usage-receipt 선례 형태) + `tests/hooks/subagent-handler-review-writer.test.js` | `review-verdict-adapter` · `hook-decision-invariance` | 파싱률 분모 = 배포 후 라이브 원장(2026-09-13 두 원장 233+349행 모두 0 = 미측정); `team.md` v2+claim_audit 준수율 라이브 0 |
+| OB-07 | `unified-verifier` UNMEASURED 카운트 | §4 · §3.4 · C4 | in-progress | Wave 8 p4 `9300568e`: `lib/verification/verify-writer.js`(`verify.completed`, pure + ports) 착지; **런타임 호출자 0**(`verify()`·`recordVerification` 호출자 grep 0, 줄기 실측) | — | dev-verify-gate 배선은 별 줄기(CA-13 계열); 층별 UNMEASURED 분모 0 미측정 |
 | OB-08 | usage receipt 파서 + writer(§55 #8) | §4 · §3.2 · D2 | done | 4.57.0 `scripts/hooks/session-end.js#recordUsageReceipts` · `lib/economics/usage-receipt.js#buildUsageReceipts`; 라이브 PASS(4.57.0·4.58.0 판정 2) | `usage-receipt-schema-guard` | cost.total null · pricing_version unresolved(I1); 커버리지 ≥95% 비율 미계산 |
 | OB-09 | `/doctor` Check 8(+9·10 동승) | §4 · §3.6 | done | `lib/project-state/doctor-checks.js#checkLedgerStateParity`·`#checkStateVersionGaps`; W5-a `23ec79be`·`d1ded07f`(4.60.0) | Check 8 실행형 worktree 테스트(4.58.0 #G16) | 4.60.0 설치본 재판정 필요(§4) |
 | OB-10 | Mission Controller 기록 전용(§48 #2) | §7.3 · F4 | todo | `lib/mission/` 6파일 중 controller 없음(Glob) | — | 전이 결정은 CA-14 |
@@ -83,8 +83,8 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 
 | ID | 항목 | 출처 | status | evidence | 게이트 | 비고 |
 |---|---|---|---|---|---|---|
-| SH-01 | `missions/<M>/intent.md` 생성 시작(§48 #3, v1.1 P0-4) | §4 · §3.1 · C9 | todo | `.artibot/missions/` 부재(Glob 0; 4.58.0 "진짜 미착지"); 자재 `lib/intent/artifact.js` · `schemas/intent-md.template.md` 존재 | `artifact-governance` | 선행: Observe substantive 분포(S4·S6 배선) |
-| SH-02 | artifact-lifecycle 이벤트→intent/plan/review/outcome.md(§48 #10) | §7.3 · Hardening §6 | in-progress | `lib/runtime/artifact-lifecycle.js` 핸들러(plan.revised·review.completed·mission.completed) 존재; 실행 0(missions 0) | — | `plan.md ← plan.revised`(부록 T-40) |
+| SH-01 | `missions/<M>/intent.md` 생성 시작(§48 #3, v1.1 P0-4) | §4 · §3.1 · C9 | done | Wave 8 p4 `9300568e`(줄기 done `7d75031a`): PreToolUse `Write\|Edit` 훅 `scripts/hooks/intent-observe-pre.js`(stage-② S1 확정 → `mission.created` + `missions/<id>/intent.md`, stdout 바이트 불변 3케이스) + `lib/runtime/artifact-lifecycle.js#apply` 게이트 3(`write===true`) writer; 임시 리포 실측 intent.md 677B 왕복 동일 3회 독립; `tasks.js` title 운반 | `artifact-governance` · `hooks-schema-shape`(핀 갱신) | C9 베이스라인 created/(created+deferred)=20/243=8.23%(stage-② 배포 전, 우회 직접 측정 아님); **config `runtime.artifactLifecycle.enabled:true` 기본 ON = 릴리스 오너 결정**; 라이브 호스트 발화 미측정 |
+| SH-02 | artifact-lifecycle 이벤트→intent/plan/review/outcome.md(§48 #10) | §7.3 · Hardening §6 | in-progress | intent.md 쓰기는 SH-01(p4 `9300568e`)로 착지; plan/review/outcome.md 핸들러(plan.revised·review.completed·mission.completed)는 존재하나 실행 0(missions 라이브 0) | — | `review.completed` writer 가 OB-06 으로 착지해 review.md 경로 입력은 생김(라이브 0); `plan.md ← plan.revised`(부록 T-40) |
 | SH-03 | `command_activation` vs 실제 슬래시/힌트 수락 + nl-activation eval ≥90% 실사용 대조 | §4 · §3.1 | in-progress | `tests/evals/fixtures/nl-activation.cases.jsonl` + `nl-activation-fixture.test.js`(93/93) | `nl-activation-fixture` | 실사용 대조 0; A3 Act 시점은 원장 1릴리스 후 |
 | SH-04 | `topology-actual` vs 추천 일치율(`/doctor`) | §4 · §3.5 | todo | lib grep `topology-actual` 0건 | — | |
 | SH-05 | 라우터 추천 스폰의 영수증·평가점수 비교 | §4 · §3.2 | todo | 미확인(라이브 표본: 4.58.0 investigator recommended opus→selected fable 1건) | — | |
@@ -98,7 +98,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | SH-13 | resume/reconcile(§48 #17-18, vNext DR02) | §7.3 · Hardening §13 | in-progress | `lib/project-state/reconcile.js` 존재; `/resume` Resume Contract 미배선 | — | DR02 입력(lane-state 라이브) 비어 있음 |
 | SH-14 | idempotency 런타임 원칙(§48 #19) | §7.3 · Hardening §11 | in-progress | `session-end.js#recordUsageReceipts` idempotency key · `lib/supervisor/run-store.js#appendEvent` actionId | — | 전 writer 일반화 미확인 |
 | SH-15 | evidence registry `.artibot/runtime/evidence.jsonl`(§48 #20) | §7.3 · Hardening §23 | todo | 미확인 | — | 부록 유보(v1.1 runtime/ 허용 범위) 미해소 |
-| SH-16 | Context Receipt writer(`context.compiled`, §55 #7 · §48 #21) + vNext CX02 | §8.4 · §8.2 §8 | in-progress | 어휘·스키마 존재; writer `lib/context/rehydration.js` PostCompact — config `split.contextLifecycle.enabled=false`, 라이브 0회 | — | CX02 context-pressure emitter 0 |
+| SH-16 | Context Receipt writer(`context.compiled`, §55 #7 · §48 #21) + vNext CX02 | §8.4 · §8.2 §8 | in-progress | Wave 8 p3 `b906264a`(줄기 done `fc21e99e`): `lib/context/context-pressure.js`(순수 점수, `round4(clamp(tokens/maxTokens))`, 호스트 `context_window` 없으면 null) · `context-receipt.js`(조립기, dotted missing) · `rehydration.js#reportContextReceipt`(writer 주입 포트) + PostCompact 배선; 2×2 source 실측 핀(hook 거부·worker 수락). **라이브 발행 0 — 구조적**: PostCompact 시점 필수 10키 중 6(라이브 5)만 채움, mission_id·based_on·transforms·cache 생산자가 훅 경로에 없음 | — | 오너 결정: allowlist `context.compiled.sources` 에 `hook` 추가 여부(설계 §8.2 ↔ allowlist `["worker"]` 드리프트) — 영수증을 훅에서 완성할 수 있을 때 함께; `context-tracker.js` 128k 하드코딩 vs 카탈로그 ctxLimit 드리프트(§3) |
 | SH-17 | Artifact Health `/doctor` Check 9(§48 #24) | §7.3 | done | `doctor-checks.js#checkArtifactHealth` · `commands/doctor.md` Check 9; 라이브 실행(unmeasured, missions 0) | — | Shadow 사상이나 이미 착지 |
 | SH-18 | ADR question gate 4조건 기록(§48 #27) | §7.3 | in-progress | `lib/planning/question-gate.js` 존재; `adr.*` 이벤트 0(부록 T-40) | — | 강제는 CA-15 |
 | SH-19 | delegation depth 기록(§36) | §7.3 | todo | 미확인 | — | |
@@ -107,9 +107,9 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | SH-22 | 메모리 주입 A/B(`ARTIBOT_RUNTIME_MEMORY_DISABLE`) | §8.4 · G2 | 보류 | 후속(1) G2: 계측만 유지, 표본 n>1 축적 후 | — | 임계 미확인 |
 | SH-23 | Mission Reflection(미션 경계 reflect) | §8.4 · §8.2 §16 | todo | 미확인 | — | G2 후 |
 | SH-24 | Generated Knowledge `.artibot/generated/` | §8.4 · G3 | 보류 | 후속(1) G3: 도입 보류(소비처 0) | — | 소비처 ≥1 시 재검토 |
-| SH-25 | RouteBench + 기준선 B0~B4 | §8.4 · §8.2 §11 · G4 | in-progress | `tests/evals/fixtures/routebench/scenarios.{example.jsonl,schema.json}`(예시만) | — | 러너 0; `_benchmarks/routing/` 미확인; B2 = `resolveModel` 2티어 |
+| SH-25 | RouteBench + 기준선 B0~B4 | §8.4 · §8.2 §11 · G4 | done | Wave 8 p4 `9300568e`(줄기 done `560d1bce`): `scripts/bench/routebench.mjs`(오프라인 채점, 결정성 핀, 네트워크 금지 39토큰 + 양성 대조) + `tests/evals/fixtures/routebench/baselines.{json,schema.json}`(B0~B6; B2=`resolveModel` 호출, B3/B4 `definition_confidence:"inferred"`, B6 `unimplemented`) + `scenarios.schema.json` 선택 `agentType` + 러너·픽스처 테스트 2; 봉투 `policy_source{fable_enabled,allowlist_size}` + `baselines_sha256` | `no-control-bytes`(pairKey NUL 수리) | 예시 시나리오 2건 전부 `fixture-pending`(배관 증명, 정책 재현 아님); **오너 결정: B4 가 classifier 에 `agentType` 을 공급할지**(현재 class 항상 default); B3 정적 표는 security-reviewer→fable(denylist 는 resolveModel 전용) 괴리 노출 |
 | SH-26 | Replay EXACT/PARTIAL/SIMULATED 라벨 | §8.4 · §8.2 §13 | todo | 미확인 | — | |
-| SH-27 | Human kind 3분리 `human.resolved{kind}` writer | §8.4 · §8.2 §19 | in-progress | 어휘 allowlist 존재; writer scripts 0(#G22) | `ledger-vocab-allowlist` | 모델이 AskUserQuestion 직후 기록 |
+| SH-27 | Human kind 3분리 `human.resolved{kind}` writer | §8.4 · §8.2 §19 | done | Wave 8 p5 `ee86a639`(줄기 done `c20ca01f`): `lib/runtime/human-asked-record.js#recordHumanResolved`(kind enum 3, 스킵 사유 5, decision 3,072B 사전검사) + CLI `scripts/ledger/record-human-resolved.mjs`(모델이 답 직후 호출, `question_id` 를 asked 와 같은 경로로 재계산 — 실제 pre-write 훅 spawn 대조) + `.artibot/project.md` §Human Approval Boundaries 규약 7줄 | `ledger-vocab-allowlist` · `project-md-contract` | 호출부 (a) PostToolUse 부적합(페이로드에 subject 없음, 호스트 발화 미확인) → (b) CLI; `kind_source:"self-report"`; **CLI 호출 주체 아직 0**(호출률 미측정); 라이브 `human.asked` 52 / `human.resolved` 0(2026-09-13) |
 | SH-28 | residency/cooldown 보정 | §8.4 · G5 | 보류 | 후속(1) G4·G5: `UNCALIBRATED` 유지 | — | 보정 자격 측정 미확인 |
 | SH-29 | Existence Audit carrier 필드 결정(`tool.used.data.skill` 등) | 부록 T-44 | todo | 미확인 | — | OB-24 의 분모 |
 | SH-30 | decisions 사이드채널 sources 규칙 통일(hook 발행자 이벤트) | 부록 T-51 2차 C | todo | 미확인 | — | |
@@ -189,7 +189,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 |---|---|---|---|
 | ① compile 성공률 · substantive 분포 | 미판정 | 분모 미측정 — S4·S6 미배선으로 deferred 다수(부록 T-25), Check 9 item 5 missions 0 | writer 는 있음; 분포 집계 스크립트 0 |
 | ② 추천≠정책 스폰 비율 | 미판정 | `route.selected`/`route.bound` 라이브 PASS(4.58.0 5/6 bound)이나 비율 집계 없음; 관측 1건(investigator opus→fable) | Avoided Switch(OB-21) 착지 후 |
-| ③ verdict 파싱률 · 층별 UNMEASURED 비율 | 미판정(분모 0) | `review.completed`·`verify.completed` writer 0 | OB-06·OB-07 writer 착지 후 |
+| ③ verdict 파싱률 · 층별 UNMEASURED 비율 | 미판정(분모 0) | writer 3종 착지(Wave 8 p4 `9300568e`) 이나 2026-09-13 라이브 원장 `.git/artibot/ledger.jsonl` 233행 + 레거시 349행 모두 `review.*`·`verify.completed` 0 — 호출부 미배포(설치본 4.59.0) | 설치본 갱신 + 인스펙터 1릴리스 뒤 재집계; verify 는 런타임 호출자 배선(CA-13) 선행 |
 | ④ 영수증 커버리지 ≥95% | 미판정 | `usage.receipt` 라이브 PASS(source=hook)이나 커버리지 비율·parseFailures 집계 없음; cost null | 집계 + I1 가격 |
 | ⑤ 훅·커맨드·스킬 발화 카운트(Existence Audit) | FAIL(구조적) | 분모 부재 `unmeasured:no-event-carries-<kind>`(부록 T-44); 4훅은 디스크 산출물 0(4.55.0 「구조적 한계」) | SH-29 carrier 필드 결정 후 |
 
