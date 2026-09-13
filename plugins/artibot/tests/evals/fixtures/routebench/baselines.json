@@ -1,0 +1,92 @@
+{
+  "$schema": "./baselines.schema.json",
+  "schema_version": 1,
+  "source": "MODEL-SWITCHING-SCORECARD.md section 11 (B0..B6, mandatory vs optional); ARTIBOT-5.0-DESIGN.md appendix 0-2 follow-up (1) G4 (B2 = resolveModel as-is)",
+  "agent_type_supply": {
+    "decision": "scenario.agentType",
+    "why": "resolveModel gates fable by agentType allowlist/denylist; without the agent name B2 is not the current policy. Added as an optional property to scenarios.schema.json (additionalProperties:false forced a schema edit). B2, B3, B4 MUST refuse (not score) a scenario without agentType."
+  },
+  "baselines": [
+    {
+      "id": "B0",
+      "name": "Fixed Sonnet",
+      "kind": "fixed",
+      "required": true,
+      "status": "implemented",
+      "definition_confidence": "exact",
+      "resolver": { "type": "constant", "tier": "sonnet" }
+    },
+    {
+      "id": "B1",
+      "name": "Fixed Opus",
+      "kind": "fixed",
+      "required": true,
+      "status": "implemented",
+      "definition_confidence": "exact",
+      "resolver": { "type": "constant", "tier": "opus" }
+    },
+    {
+      "id": "B2",
+      "name": "Current v4 Policy",
+      "kind": "policy",
+      "required": true,
+      "status": "implemented",
+      "definition_confidence": "exact",
+      "resolver": {
+        "type": "module",
+        "module": "lib/core/model-policy.js",
+        "export": "resolveModel",
+        "call": "resolveModel(scenario.agentType, {}, config)",
+        "note": "call only - never copied or modified (G4). No role is passed: a phase role is runtime context, not a scenario property."
+      }
+    },
+    {
+      "id": "B3",
+      "name": "v5 Static Heuristic",
+      "kind": "heuristic",
+      "required": true,
+      "status": "implemented",
+      "definition_confidence": "inferred",
+      "resolver": {
+        "type": "module",
+        "module": "lib/routing/action-classifier.js",
+        "export": "classifyAction",
+        "call": "ACTION_CLASS_TIERS[classifyAction({ agentType: scenario.agentType }).actionClass]",
+        "note": "Scorecard section 11 names B3 without defining it; ACTION_CLASS_TIERS is the only static class-to-tier table in lib/routing/, so this mapping is inferred, not transcribed."
+      }
+    },
+    {
+      "id": "B4",
+      "name": "v5 Adaptive Router",
+      "kind": "adaptive",
+      "required": true,
+      "status": "implemented",
+      "definition_confidence": "inferred",
+      "resolver": {
+        "type": "module",
+        "module": "lib/routing/adaptive-model-router.js",
+        "export": "routeModel",
+        "call": "routeModel({ agentType: scenario.agentType, config }).models.recommended?.tier ?? null",
+        "note": "recommended = utility-ranked top from scoreRoutes; a null recommendation is recorded as null, never substituted with models.selected (that is B2)."
+      }
+    },
+    {
+      "id": "B5",
+      "name": "Fixed Fable",
+      "kind": "fixed",
+      "required": false,
+      "status": "implemented",
+      "definition_confidence": "exact",
+      "resolver": { "type": "constant", "tier": "fable" }
+    },
+    {
+      "id": "B6",
+      "name": "Hindsight Oracle",
+      "kind": "oracle",
+      "required": false,
+      "status": "unimplemented",
+      "definition_confidence": "exact",
+      "reason": "Requires a recorded outcome per (scenario, candidate tier) to pick the best tier in hindsight. No outcome corpus exists in the repo (both example scenarios are fixture.status=pending). A runner MUST refuse to score B6 rather than emit a placeholder."
+    }
+  ]
+}
