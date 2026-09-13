@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 8 부분 배치 착지 (split-68e984w8, base a40b8448 → p1 e9e24e2e → p2 34b6dbf6, 3/8줄기)
+
+- **checkpoint-store-dr01** (`376e1c28` · `40a8d21d`, p1): `lib/checkpoint/{checkpoint-store,checkpoint-service,checkpoint-validator}.js` + `adapters/` 신설, `lib/supervisor/contracts.js#validateCheckpoint`, `tests/firewall/checkpoint-immutability.test.js` 불변성 게이트 + `tests/checkpoint/` 4파일 (11 files +1,996). V5 SH-21 DR01 done, DR02 미착수.
+- **plugin-manifest-agents** (`8e59d7ca` · `ccde42c7` · `007b527b`, p1): `.claude-plugin/plugin.json#agents` 28→30(auditor·investigator 등록) + `tests/ci/agents-manifest-parity.test.js` 매니페스트↔`agents/*.md` 패리티 게이트(중복 항목 보고), "28 agents" 산문 5파일 30 으로 정정 (7 files +391/−20). V5 §3 부채 1건 done.
+- **pricing-unify** (`ebfce23c` · `e189c17b` · `f3f2be19` · `d6cccd0c`, p2): `lib/core/model-catalog.js` 단일 가격표를 `lib/economics/usage-receipt.js`·`lib/runtime/middleware/cache-roi.js` 가 읽고, `tests/economics/pricing-parity.test.js` 가 카탈로그·cache-roi·receipt·routing 을 한 표로 고정 (8 files +1,156/−82). `cost.total` null 핀 유지. V5 SH-07 done(5.1 계수 실측은 잔여).
+- V5-BACKLOG §1 진행률 33% → **35%**(Shadow 1→3 done). 미착지 5줄기(context-receipt-cx02 · intent-md-generator · verdict-verify-writer wip / human-resolved-writer · routebench-baseline 커밋 0)는 창 재개 대기 — 2026-09-13 21:4x 실측 창 8개 pid 전부 사망, verdict-verify-writer 7 · routebench-baseline 6 파일 미커밋 잔존.
+
 ### Wave 7 배치 착지 (split-68e984w7, base f75e849f → master 0c08d8b3, 4줄기, 26 files +2,754/−188)
 
 - **guard-redos-residual** (`02c3656f` · `c15ca5e9`): L1 `blocked-patterns.js` rm 2규칙 `.*\/` → `{0,512}` 창(513자 초과 `rm --recursive` 는 문서화가 아니라 창 안에서 잡는다 — 리더 결정), wget/curl pipe 2규칙 `\s+.*\|` → `{0,192}`, L2 `safety.js` sql-delete lookahead 창 바운드. 정규식 소스 정적 스캔 게이트(무제한 `.*`/`\s+.*` 런 0, 65규칙) + 규칙별 스캔 상한 allowlist + 7개 L1 창 규칙 경계쌍(창 안 block / 창 밖 pass) + 완전성 단언. 벽시계 성장비 게이트는 한 구간 `t(122,880) < 18×t(20,480)` 으로(gotcha 85 — 러너 `<50ms` 경계값 플레이크 대신 구조 단언). 착지 전 실측: curl pipe 122,880B 13.3s(PreToolUse 5초 예산 2.7배) → 착지 후 창 바운드.
