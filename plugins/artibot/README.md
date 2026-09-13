@@ -492,7 +492,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### 지능형 훅 시스템
 
-- 16개 이벤트에 27개 훅 등록 (HTTP webhook 알림 포함) — `hooks/hooks.json`의 매처 엔트리 기준. 이 중 2개(SubagentStart·TeammateIdle)는 스크립트를 2개씩 실행하므로 실제 실행 커맨드는 29개
+- 16개 이벤트에 28개 훅 등록 (HTTP webhook 알림 포함) — `hooks/hooks.json`의 매처 엔트리 기준. 이 중 2개(SubagentStart·TeammateIdle)는 스크립트를 2개씩 실행하므로 실제 실행 커맨드는 29개
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
 - **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
@@ -1513,7 +1513,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 
 ## 훅 시스템
 
-16개 이벤트에 27개 훅이 등록되어 있습니다 — `hooks/hooks.json`의 매처 엔트리 기준입니다. SubagentStart·TeammateIdle 매처는 각각 스크립트를 2개씩 실행하므로, 실제로 실행되는 커맨드 수는 29개입니다.
+16개 이벤트에 28개 훅이 등록되어 있습니다 — `hooks/hooks.json`의 매처 엔트리 기준입니다. SubagentStart·TeammateIdle 매처는 각각 스크립트를 2개씩 실행하므로, 실제로 실행되는 커맨드 수는 29개입니다.
 
 ### 이벤트별 훅
 
@@ -1609,7 +1609,7 @@ plugins/artibot/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 70개 훅 스크립트 파일 (.js 64 + .mjs 6, ESM, file-lock 포함)
+│   ├── hooks/                   # 72개 훅 스크립트 파일 (.js 64 + .mjs 6, ESM, file-lock 포함)
 │   ├── ci/                      # 20개 CI 검증 스크립트 (.js 18 + .mjs 2)
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
