@@ -133,6 +133,7 @@ const OPTIONAL_FIELDS = Object.freeze([
   ['mission_id', 'string'],
   ['task_id', 'string'],
   ['route_ledger', 'string'],
+  ['review_ledger', 'string'],
 ]);
 
 /**
