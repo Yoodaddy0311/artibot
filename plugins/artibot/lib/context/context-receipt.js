@@ -16,7 +16,9 @@
  * (`scripts/hooks/post-compact-rehydrate.js`): it can supply
  * `schema_version`, `strategy_version`, `context_receipt_id`,
  * `protected_sections` (`[]` is a statement per the schema), `input_tokens`
- * and `output_tokens` — six of the ten keys, 11 schema leaves short. It
+ * (only when the host reports `context_window.current_tokens` — the live
+ * 2026-09-11 snapshot carried no such key, so live it is five of ten) and
+ * `output_tokens` — six of the ten keys, 11 schema leaves short. It
  * cannot supply `mission_id` (no mission is in scope at a compaction),
  * `based_on.*` (revisions are produced only inside mission artifacts),
  * `transforms.*` (0 of 5 instrumented) or `cache.*` (single writer:
