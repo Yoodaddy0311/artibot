@@ -33,6 +33,16 @@
  * SessionStart hook took it over. Also not a gate — `status` shows it so an
  * operator stops re-reading porcelain by hand.
  *
+ * Pre-exclusion (`excludeLimbs`, 2026-09-14): a limb that already landed and had
+ * its worktree cleaned up is not a missing worktree, it is a finished one. The
+ * caller takes it out of the decision by name. What this module cannot see is
+ * WHY a name is on that list — the source of truth for "done" (run.json lanes
+ * state `done` ∪ the leader's explicit list) lives in the caller, so a wrong
+ * list silently produces a confident answer about the wrong set of limbs.
+ * Measured 2026-09-14 01:26 KST: Wave 8's plan (8 limbs, all worktrees cleaned)
+ * resolved to `refused` with missingWorktrees 8/8 and the leader removed the
+ * limbs by hand; this input closes that.
+ *
  * Idempotence: same inputs → deep-equal output, inputs untouched. Re-running
  * dispatch re-issues the same messages; that is intended ("재발행"). The
  * message is an optimisation — the limb brief on disk
@@ -288,23 +298,35 @@ export function buildLimbMessage(plan, limb) {
  * @param {string} [input.platform=process.platform] - path-equality rule
  * @param {(p: string, platform: string) => string} [input.canonicalize=canonicalPath] - path canonicaliser (injectable for pure tests)
  * @param {Record<string, string>} [input.bodies] - per-limb message body (the `SplitWindow` prompt text from `open`); a limb without one gets the pointer message from {@link buildLimbMessage}
+ * @param {ReadonlyArray<string>} [input.excludeLimbs=[]] - limb names to take out of the decision BEFORE it is made (a landed limb whose worktree was cleaned up). Non-array → `[]`; non-string entries ignored; duplicates dropped, input order kept. An excluded limb stays in `limbs[]` with its observations and `excluded:true`, but is left out of `missingWorktrees`/`unopenedWindows`/`ambiguousWindows`/`messages`. WHY a name is on this list is not visible here — see the note in the `excluded` return field.
  * @returns {Readonly<{
  *   status: 'ready'|'refused'|'unavailable',
  *   reasons: ReadonlyArray<string>,
- *   limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, worktreeExists: boolean, branchMatches: boolean|null, branchRelocatedByHook: boolean|null, sessions: ReadonlyArray<string>, windowOpen: boolean }>,
+ *   limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, worktreeExists: boolean, branchMatches: boolean|null, branchRelocatedByHook: boolean|null, sessions: ReadonlyArray<string>, windowOpen: boolean, excluded: boolean }>,
  *   missingWorktrees: ReadonlyArray<string>,
  *   unopenedWindows: ReadonlyArray<string>,
  *   ambiguousWindows: ReadonlyArray<string>,
  *   messages: ReadonlyArray<{ to: string, limb: string, body: string }>,
+ *   excluded: ReadonlyArray<{ limb: string, reason: 'excluded-by-input'|'unknown-limb' }>,
  * }>}
  */
 export function resolveDispatch({
   plan, worktrees, sessions, messaging, platform = process.platform, canonicalize = canonicalPath, bodies,
+  excludeLimbs = [],
 } = {}) {
   const limbsIn = Array.isArray(plan?.limbs) ? plan.limbs : [];
   const wts = Array.isArray(worktrees) ? worktrees : [];
   const known = new Map(wts.map((w) => [canonicalize(w?.path, platform), w]));
   const sessionList = Array.isArray(sessions) ? sessions : [];
+
+  // Dedupe while keeping input order; anything not a string is not a limb name.
+  const excludeOrder = [];
+  const excludeSet = new Set();
+  for (const name of Array.isArray(excludeLimbs) ? excludeLimbs : []) {
+    if (typeof name !== 'string' || excludeSet.has(name)) continue;
+    excludeSet.add(name);
+    excludeOrder.push(name);
+  }
 
   const limbs = limbsIn.map((l) => {
     const key = canonicalize(l?.worktreePath, platform);
@@ -324,12 +346,24 @@ export function resolveDispatch({
         : null,
       sessions: Object.freeze(matches),
       windowOpen: matches.length === 1,
+      // Boolean, not three-valued like branchMatches: exclusion is an INPUT, so
+      // "not observed" cannot happen — a limb is on the list or it is not.
+      excluded: excludeSet.has(String(l?.limb ?? '')),
     });
   });
 
-  const missingWorktrees = limbs.filter((l) => !l.worktreeExists).map((l) => l.limb);
-  const ambiguousWindows = limbs.filter((l) => l.sessions.length >= 2).map((l) => l.limb);
-  const unopenedWindows = limbs.filter((l) => l.sessions.length === 0).map((l) => l.limb);
+  const planned = new Set(limbs.map((l) => l.limb));
+  const excluded = excludeOrder.map((limb) => Object.freeze({
+    limb,
+    reason: planned.has(limb) ? 'excluded-by-input' : 'unknown-limb',
+  }));
+
+  // Everything below decides on the ACTIVE limbs only. The excluded rows keep
+  // their observations for reporting, but cannot refuse the run.
+  const active = limbs.filter((l) => !l.excluded);
+  const missingWorktrees = active.filter((l) => !l.worktreeExists).map((l) => l.limb);
+  const ambiguousWindows = active.filter((l) => l.sessions.length >= 2).map((l) => l.limb);
+  const unopenedWindows = active.filter((l) => l.sessions.length === 0).map((l) => l.limb);
 
   const reasons = [];
   let status = 'ready';
@@ -344,9 +378,12 @@ export function resolveDispatch({
     reasons.push(`env ${MESSAGING_SOCKET_ENV} 부재 — cross-session messaging 이 꺼져 있다`);
   }
   if (status !== 'unavailable') {
-    if (limbsIn.length === 0) {
+    if (active.length === 0) {
       status = 'refused';
-      reasons.push('계획에 줄기가 없다');
+      const droppedByInput = limbs.length - active.length;
+      reasons.push(droppedByInput > 0
+        ? `계획에 줄기가 없다 (excludeLimbs 로 ${droppedByInput}개 제외)`
+        : '계획에 줄기가 없다');
     }
     if (missingWorktrees.length > 0) {
       status = 'refused';
@@ -366,7 +403,7 @@ export function resolveDispatch({
     ? bodies[l.limb]
     : buildLimbMessage(plan, l));
   const messages = status === 'ready'
-    ? limbs.map((l) => Object.freeze({ to: l.sessions[0], limb: l.limb, body: bodyFor(l) }))
+    ? active.map((l) => Object.freeze({ to: l.sessions[0], limb: l.limb, body: bodyFor(l) }))
     : [];
 
   return Object.freeze({
@@ -377,6 +414,7 @@ export function resolveDispatch({
     unopenedWindows: Object.freeze(unopenedWindows),
     ambiguousWindows: Object.freeze(ambiguousWindows),
     messages: Object.freeze(messages),
+    excluded: Object.freeze(excluded),
   });
 }
 
