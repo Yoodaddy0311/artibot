@@ -52,7 +52,7 @@
         "module": "lib/routing/action-classifier.js",
         "export": "classifyAction",
         "call": "ACTION_CLASS_TIERS[classifyAction({ agentType: scenario.agentType }).actionClass]",
-        "note": "Scorecard section 11 names B3 without defining it; ACTION_CLASS_TIERS is the only static class-to-tier table in lib/routing/, so this mapping is inferred, not transcribed."
+        "note": "Scorecard section 11 names B3 without defining it; ACTION_CLASS_TIERS is the only static class-to-tier table in lib/routing/, so this mapping is inferred, not transcribed. Read the scope narrowly: classifyAction is fed the AGENT SIGNAL ONLY. A scenario carries no command, no text and no tool footprint - scenarios.schema.json is additionalProperties:false and defines none of them - so B3 as scored here is the agent -> class -> tier path of the classifier, not the whole classifier. An agent outside the agent table therefore falls through to DEFAULT_ACTION_CLASS (implement -> opus), which a row records as selection.source 'default' rather than 'agent'."
       }
     },
     {
@@ -67,7 +67,7 @@
         "module": "lib/routing/adaptive-model-router.js",
         "export": "routeModel",
         "call": "routeModel({ agentType: scenario.agentType, config }).models.recommended?.tier ?? null",
-        "note": "recommended = utility-ranked top from scoreRoutes; a null recommendation is recorded as null, never substituted with models.selected (that is B2)."
+        "note": "recommended = utility-ranked top from scoreRoutes; a null recommendation is recorded as null, never substituted with models.selected (that is B2). Read the scope narrowly: routeModel does NOT feed agentType to its classifier (it classifies from src.input only), so under this call the action class is always the default, implement. B4 as scored here is therefore the scorer's choice for the implement class within the policy ceiling that config allows this agent - policyAllowedTiers(src.agentType, ..., src.config) bounds the candidate set, so config and the agent name do reach models.recommended, but the class does not. Passing input:{agentType} instead would change which class is ranked and is a B4 DEFINITION change (inferred, so an owner decision) that would also change the call string above."
       }
     },
     {

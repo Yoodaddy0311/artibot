@@ -139,10 +139,23 @@ const MODULE_RESOLVERS = {
   },
   // B4 - v5 adaptive router. `models.recommended` is the router's own pick;
   // `models.selected` is policy and is already B2, so substituting it here
-  // would make B4 a duplicate of B2 and hide every divergence. `config` is
-  // threaded for fidelity to the declared call, but note what it does and does
-  // not reach: `routeModel` passes it to `resolveModel` for `models.selected`
-  // ONLY, so B4's recorded tier is the same with it and without it.
+  // would make B4 a duplicate of B2 and hide every divergence.
+  //
+  // `config` reaches BOTH halves of that receipt, not just policy:
+  // `pickRoute` -> `resolveCandidateTiers(src)` -> `policyAllowedTiers(
+  // src.agentType, ..., src.config)` makes the CANDIDATE CEILING itself
+  // config-dependent. Measured 2026-09-13: the ceiling for `planner` is
+  // ['opus'] with no config and ['opus', 'fable'] with the loaded one.
+  //
+  // What B4 records is nonetheless the scorer's pick for the DEFAULT action
+  // class: `routeModel` classifies from `src.input` and never forwards
+  // `src.agentType`, so every scenario this runner feeds it lands on
+  // `implement`. Read B4 as "top-ranked tier for the implement class, within
+  // the ceiling the loaded policy allows this agent" - not as a judgement about
+  // the agent's own work. The config dependence is invisible only because
+  // `implement` ranks opus first in both ceilings; asking the same router for
+  // the `architecture` class returns fable with the loaded config and opus
+  // without it.
   'lib/routing/adaptive-model-router.js#routeModel': (agentType, config) => {
     const receipt = routeModel({ agentType, config });
     return {
@@ -161,8 +174,9 @@ const MODULE_RESOLVERS = {
  * Recording it is the point rather than a detail: `routeModel` classifies from
  * `input.input`, NEVER from `input.agentType` (see `resolveClassification`), so
  * B4's class is the `default` fallback for every scenario this runner feeds it.
- * The agent name reaches `models.selected` (policy) and not `models.recommended`
- * (the router's own pick), which is what B4 records.
+ * The agent name still reaches `models.recommended` - through
+ * `policyAllowedTiers`, which bounds the candidate set - but it never reaches
+ * the CLASS, and the class is what the scorer ranks within that set.
  *
  * @param {unknown} reason - the receipt's `reason` array
  * @returns {string|null} signal name, or null when no `class:` code is present
@@ -259,9 +273,21 @@ function fixtureRefusal(scenario) {
   return existsSync(abs) ? null : 'fixture-missing';
 }
 
-/** @returns {string} stable key for a completed (scenario, baseline) pair */
+/**
+ * Stable key for a completed (scenario, baseline) pair. The separator is NUL
+ * because it cannot occur in either id, so no pair of ids can collide - but it
+ * is written as the ESCAPE `\0`, never as a raw 0x00 byte in the source. A raw
+ * byte here made `file` report this script as binary data and slipped past the
+ * ASCII-only test, which treats 0x00 as in-range. The runtime string is
+ * identical either way, and this key never leaves memory: it is a Map key only
+ * (used at the two call sites below), and nothing serializes it.
+ *
+ * @param {string} scenarioId
+ * @param {string} baselineId
+ * @returns {string}
+ */
 function pairKey(scenarioId, baselineId) {
-  return `${scenarioId} ${baselineId}`;
+  return `${scenarioId}\0${baselineId}`;
 }
 
 /**
