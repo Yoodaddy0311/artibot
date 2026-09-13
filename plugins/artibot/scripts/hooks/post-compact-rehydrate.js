@@ -53,7 +53,6 @@ import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { readLatestHandoff } from '../../lib/handoff/handoff-store.js';
 import { buildRehydrationBundle, DEFAULT_MAX_BYTES, reportContextReceipt } from '../../lib/context/rehydration.js';
 import { buildContextPressureEvent, computeContextPressure, estimateTokens } from '../../lib/context/context-pressure.js';
-import { BASELINE_TIER, MODELS } from '../../lib/core/model-catalog.js';
 import { appendEvent } from '../../lib/supervisor/run-store.js';
 import { isMainEntry } from './_main-entry.js';
 
@@ -224,10 +223,11 @@ function persist(record, bundleText, claudeDir) {
  * session, so its token counts are somebody else's; producing a number from
  * them would look exactly like a measurement of this session.
  *
- * The capacity is contested (`context-tracker.js` says 128k, the catalog says
- * 200k/1M), so this records WHICH denominator it used rather than picking one
- * silently: the host's own `context_window.max_tokens` when present, else the
- * baseline tier's `ctxLimit`.
+ * The only capacity this hook may use is the host's own
+ * `context_window.max_tokens`. `MODELS[tier].ctxLimit` is the catalog's
+ * capacity, but only a caller that knows its tier can read it, and a
+ * PostCompact payload names no model — so when the host reports no capacity
+ * the result is an unscored `capacity-unknown`, not a borrowed number.
  *
  * @param {object|null} snapshot - the PreCompact snapshot
  * @param {object} hookData
@@ -247,12 +247,12 @@ function scorePressure(snapshot, hookData, identityOk) {
   return {
     pressure: computeContextPressure({
       currentTokens: cw?.current_tokens,
-      maxTokens: hostMax ?? MODELS[BASELINE_TIER].ctxLimit,
+      maxTokens: hostMax,
       tokenEstimate: snapshot?.tokenEstimate,
       transcriptBytes: snapshot?.transcriptBytes,
       compactTrigger: hookData.compact_trigger,
     }),
-    capacitySource: hostMax !== null ? 'context_window.max_tokens' : `catalog:${BASELINE_TIER}.ctxLimit`,
+    capacitySource: hostMax !== null ? 'context_window.max_tokens' : null,
   };
 }
 

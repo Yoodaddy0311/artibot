@@ -381,15 +381,32 @@ describe('pressure + receipt (PR-CX02)', () => {
     expect(r.stderr).toContain('event=skipped:no-split-run');
   });
 
-  it('no context_window: falls back to transcriptBytes over the catalog capacity, and says so', () => {
+  it('no context_window: the capacity is unknown, so there is no score and no substituted denominator', () => {
+    // A PostCompact payload names no model (`session_id`, `cwd`,
+    // `permission_mode`, `hook_event_name`, `compact_trigger`,
+    // `compact_summary`) and the PreCompact snapshot carries no tier either,
+    // so this hook cannot know which `MODELS[tier].ctxLimit` applies. It
+    // reports the gap instead of borrowing a number.
     writePressureSnapshot({ cwd: repo, branch: 'master', head, hasStatus: false },
       { transcriptBytes: 2_000_000 });
     const r = runHook(payload(), lifecycleEnv());
     const rec = readRecord();
     expect(rec.pressure.inputs.tokenSource).toBe('transcriptBytes');
     expect(rec.pressure.inputs.overstates).toBe(true);
-    expect(rec.capacitySource).toBe('catalog:opus.ctxLimit');
-    expect(rec.pressure.inputs.maxTokens).toBe(1_000_000);
+    expect(rec.pressure.score).toBe(null);
+    expect(rec.pressure.level).toBe(null);
+    expect(rec.pressure.reason).toBe('capacity-unknown');
+    expect(rec.capacitySource).toBe(null);
+    expect(rec.pressure.inputs.maxTokens).toBe(null);
+    // No catalog capacity anywhere in the record or on stderr: 200k and 1M are
+    // the two the catalog could have supplied, 128k is context-tracker's.
+    const recorded = JSON.stringify(rec);
+    for (const n of ['1000000', '200000', '128000']) {
+      expect(recorded, n).not.toContain(n);
+      expect(r.stderr, n).not.toContain(n);
+    }
+    expect(r.stderr).toContain('pressure=null level=null event=skipped:not-scored:capacity-unknown');
+    expect(supervisorLines('split-cx02test')).toHaveLength(0);
     expect(r.status).toBe(0);
   });
 
