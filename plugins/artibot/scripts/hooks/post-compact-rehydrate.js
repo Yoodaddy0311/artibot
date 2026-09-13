@@ -302,12 +302,20 @@ function emitPressureEvent(pressure, split, sessionId, storeDir) {
  * @returns {{ emitted: boolean, reason: string|null, missing: string[] }}
  */
 function reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp) {
+  // Only a snapshot we accepted may supply the input side, and only from
+  // `context_window.current_tokens`. NOT from `tokenEstimate`: the live
+  // PreCompact payload carries no `messages`, so that field is saved as 1
+  // (`scripts/hooks/pre-compact.js:328-330`). Passing the 1 through would
+  // write a false measurement; leaving it out puts `input_tokens` in `missing`.
+  const current = snapshot?.contextWindow?.current_tokens;
+  const measuredInput = bundle.identity.ok && Number.isInteger(current) && current >= 0
+    ? current
+    : undefined;
   const r = reportContextReceipt({
     receiptInput: {
       receiptId: `ctx-${sessionId ? sessionId.slice(0, 8) : 'nosession'}-${stamp}`,
       missionId: null, // no mission is in scope at a compaction
-      // Only a snapshot we accepted may supply the input side.
-      inputTokens: bundle.identity.ok ? snapshot?.tokenEstimate : undefined,
+      inputTokens: measuredInput,
       outputTokens: estimateTokens(compactSummary ?? '') + estimateTokens(bundle.text),
       protectedSections: [],
     },

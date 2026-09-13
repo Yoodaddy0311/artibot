@@ -336,6 +336,20 @@ describe('pressure + receipt (PR-CX02)', () => {
     expect(r.stderr).toContain('pressure=0.75 level=warn event=appended receipt=no-writer-port missing=11');
   });
 
+  it('leaves input_tokens missing when the snapshot carries only the degenerate tokenEstimate', () => {
+    // The live PreCompact payload carries no `messages`, so the snapshot is
+    // written with `tokenEstimate: 1` (`scripts/hooks/pre-compact.js:328-330`).
+    // That 1 is not a measurement and may not be reported as one.
+    writePressureSnapshot({ cwd: repo, branch: 'master', head, hasStatus: false }, { tokenEstimate: 1 });
+    const r = runHook(payload(), lifecycleEnv());
+    expect(r.status).toBe(0);
+
+    const rec = readRecord();
+    expect(rec.identity.ok).toBe(true); // the snapshot was ACCEPTED; only the number is unusable
+    expect(rec.contextReceipt.missing).toContain('input_tokens');
+    expect(rec.contextReceipt.missing).toHaveLength(12);
+  });
+
   it('the emission path never moves systemMessage, whether the append lands or fails', () => {
     writePressureSnapshot({ cwd: repo, branch: 'master', head, hasStatus: false },
       { tokenEstimate: 1234, contextWindow: { current_tokens: 150_000, max_tokens: 200_000 } });

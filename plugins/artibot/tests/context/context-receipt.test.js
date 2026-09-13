@@ -4,9 +4,11 @@
  * The point of this module is a REFUSAL, so the point of this file is to pin
  * that refusal. `schemas/context-receipt.schema.json` requires ten top-level
  * keys with `additionalProperties:false` at every level; a PostCompact hook
- * can honestly supply four of them. Measured 2026-09-12: `mission_id` has no
- * producer reachable from a hook (env `ARTIBOT_MISSION_ID` is referenced
- * nowhere in `lib/` or `scripts/`), `based_on.*` is produced only inside
+ * can honestly supply six of them — two are constants (`schema_version`,
+ * `strategy_version`) and four are measured. Measured 2026-09-12:
+ * `mission_id` has no producer reachable from a hook (env
+ * `ARTIBOT_MISSION_ID` is referenced nowhere in `lib/` or `scripts/`),
+ * `based_on.*` is produced only inside
  * mission artifacts (`lib/intent/artifact.js`, `lib/runtime/artifact-lifecycle.js`),
  * `transforms.*` is 0/5 measured, and `cache.*` has a single writer
  * (`lib/economics/usage-receipt.js`). So the assembler must report those as
