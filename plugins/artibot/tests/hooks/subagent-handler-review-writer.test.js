@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,8 +35,10 @@ import { ledgerFilePath } from '../../lib/runtime/ledger.js';
  *   - THAT `last_assistant_message` CARRIES A WHOLE REPORT. The C1 probe
  *     measured it as a string on 2/2 live runs with a 2-character answer
  *     ("ok"); the host's truncation limit for a long review document is
- *     UNMEASURED. The transcript fallback exists for that case and is exercised
- *     here only with a fixture the same size as the direct field.
+ *     UNMEASURED. The transcript fallback exists for that case; section 9 now
+ *     drives it with a transcript LARGER than the 8 MB read window, but no real
+ *     subagent transcript of that size has been measured — the size is the
+ *     fixture's, not an observed one.
  *   - HOOK LATENCY. The stop path now reads a bounded transcript tail and the
  *     ledger. The dispatcher slot allows 5000 ms
  *     (`hooks/dispatch-table.json`); no profile has been taken.
@@ -442,4 +444,90 @@ describe('subagent-handler review-ledger writer (child process)', () => {
     expect(existsSync(ledgerFilePath(repo))).toBe(false);
     expect(reviewLedger()).toBe('review=skipped:no-text,audit=skipped:no-text');
   });
+
+  // -------------------------------------------------------------------------
+  // 9. the bounded tail — the branch that only a transcript over the window
+  //    size can reach
+  // -------------------------------------------------------------------------
+  //
+  // Every fixture above is a few kilobytes, so until this section existed the
+  // `size > TRANSCRIPT_TAIL_BYTES` arm of `readLastAssistantEntry` had NEVER
+  // RUN in any test: the offset arithmetic, the partial-line drop, and the
+  // backwards scan over a window were all covered only by the `start === 0`
+  // path. A fixture smaller than the cap cannot exercise a cap (rules §9).
+
+  /**
+   * `TRANSCRIPT_TAIL_BYTES` restated, not imported.
+   *
+   * The constant is module-private in `scripts/hooks/_review-stop-record.js`,
+   * and a test that read its value out of the code under test could never
+   * disagree with it. Restating it means a change to the production window
+   * makes the alignment assertion below fail LOUDLY instead of the boundary
+   * case quietly degrading into a fixture that no longer straddles anything.
+   */
+  const TAIL_BYTES = 8 * 1024 * 1024;
+
+  /** One filler transcript line carrying `n` bytes of payload text. */
+  const fillerLine = (n) => JSON.stringify({
+    type: 'user', message: { role: 'user', content: 'x'.repeat(n) },
+  });
+
+  /** An assistant transcript line whose answer carries `id` as its verification id. */
+  const assistantLine = (id) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: answer({ verdict: { verification_id: id } }) }],
+      model: MODEL,
+    },
+  });
+
+  it('reads a transcript larger than the window from its tail and still records the last answer', () => {
+    const lines = [
+      ...Array.from({ length: 9 }, () => fillerLine(1024 * 1024)),
+      assistantLine('v-tail'),
+      JSON.stringify({ type: 'summary', summary: 'done' }),
+    ];
+    writeFileSync(transcript, `${lines.join('\n')}\n`, 'utf-8');
+    // Below the cap this test would silently exercise the ordinary path.
+    expect(statSync(transcript).size).toBeGreaterThan(TAIL_BYTES);
+
+    const res = runHook(stopPayload({ last_assistant_message: undefined }), home);
+    expect(res.status).toBe(0);
+
+    expect(eventsOf()).toEqual(['review.completed', 'review.claim_audit']);
+    // Only the transcript copy carries this id, so the tail read is what fed it.
+    expect(lineOf('review.completed').data.verification_id).toBe('v-tail');
+  }, 60000);
+
+  it('discards the window\'s truncated first line even when that fragment parses as an assistant entry', () => {
+    // Laid out so the window's FIRST BYTE is the `{` that opens a decoy
+    // assistant object sitting at the end of a longer line: everything after
+    // the pad totals exactly one window. The decoy is then the only assistant
+    // entry in the window, so dropping it is the difference between "no answer"
+    // and a verdict line invented out of a half-read line.
+    const PAD = 1024;
+    const decoy = assistantLine('v-decoy');
+    const summary = JSON.stringify({ type: 'summary', summary: 'done' });
+    const fixed = decoy.length + 1 + fillerLine(0).length + 1 + summary.length + 1;
+    const filler = fillerLine(TAIL_BYTES - fixed);
+    writeFileSync(transcript, `${'P'.repeat(PAD)}${decoy}\n${filler}\n${summary}\n`, 'utf-8');
+
+    // --- the fixture checks itself, because a misaligned one would pass -----
+    const raw = readFileSync(transcript);
+    expect(raw.length).toBe(PAD + TAIL_BYTES);
+    expect(raw.toString('utf8', PAD, PAD + 1)).toBe('{');
+    // The fragment the reader must throw away is, on its own, a WELL-FORMED
+    // assistant entry with a model and a valid v2 document. That is what makes
+    // the green below non-vacuous: without the partial-line drop this same
+    // fixture writes `review.completed` with `v-decoy`.
+    const fragment = raw.toString('utf8', PAD).split('\n')[0];
+    expect(JSON.parse(fragment).type).toBe('assistant');
+    // -----------------------------------------------------------------------
+
+    const res = runHook(stopPayload({ last_assistant_message: undefined }), home);
+    expect(res.status).toBe(0);
+    expect(existsSync(ledgerFilePath(repo))).toBe(false);
+    expect(reviewLedger()).toBe('review=skipped:no-text,audit=skipped:no-text');
+  }, 60000);
 });
