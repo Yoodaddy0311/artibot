@@ -331,6 +331,10 @@ export const HUMAN_RESOLVED_KINDS = Object.freeze(['correction', 'decision', 'ap
  * from a real written line and asserts this constant plus that overhead still
  * fits under the allowlist's cap.
  *
+ * THE NUMBER ITSELF IS A CONVENIENCE, NOT A MEASUREMENT: three quarters of the
+ * 4,096-byte cap. The length distribution of real AskUserQuestion answers is
+ * UNMEASURED (no caller has run this path yet, so there is no denominator).
+ *
  * WHAT THIS DOES NOT COVER — `path`. The Write/Edit subject is copied onto the
  * line as `data.path`, it is caller-supplied, and its length is unbounded. The
  * budget left for it is whatever the cap has after this constant and the

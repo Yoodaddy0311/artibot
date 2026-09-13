@@ -160,7 +160,8 @@ human 인데 강제 none)는 **알려진 구멍**이지 승인 면제가 아니�
 **답을 받은 뒤의 기록은 모델의 몫이다.** 훅 block 은 `human.asked` 를 원장에 쓰지만 짝인
 `human.resolved` 는 훅이 쓸 수 없다 — `AskUserQuestion` 답을 받은 직후 모델이
 `node plugins/artibot/scripts/ledger/record-human-resolved.mjs --tool <Bash|Write|Edit> --subject <차단된 명령|경로 그대로> --decision <답> [--kind correction|decision|approval]`
-을 1회 실행한다(`question_id` 는 asked 와 같은 경로로 재계산되므로 subject 를 바꿔 적으면 짝이 안 맞는다).
+을 1회 실행한다(`question_id` 는 asked 와 같은 경로로 재계산되므로 subject 를 바꿔 적으면 짝이 안 맞는다.
+`--decision` 은 3,072B 상한 — 넘으면 stdout `recorded:false` 로 기록되지 않으니 답을 요약해 적는다).
 짝 없는 `human.asked` 가 곧 "묻지 않고 재구성" 의 탐지 신호다(설계 §3.4 OD-5). `kind` 는 자기신고이며 강제 0.
 
 ## References
