@@ -136,6 +136,10 @@ const PRETOOLUSE_INTENT = {
   'bash-risk-guard.js': ['Bash'],
   'route-observe-pre.js': ['Agent'],
   'webfetch-cache-pre.js': ['WebFetch'],
+  // Stage-2 S1 confirmation (mission promotion). Host-side the unanchored
+  // `Write|Edit` also fires on MultiEdit/NotebookEdit; the script drops those
+  // by name (its WRITE_TOOLS allowlist is {Write, Edit}).
+  'intent-observe-pre.js': WRITE_TOOLS,
 };
 
 describe('hooks.json schema shape', () => {
