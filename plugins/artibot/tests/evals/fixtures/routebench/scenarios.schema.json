@@ -17,6 +17,12 @@
       "minLength": 1,
       "description": "Human-readable one line. Not an identifier."
     },
+    "agentType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which agent this scenario runs as. Optional, and absent from both example scenarios, so adding it broke nothing — but baselines B2, B3 and B4 all read it, and B2 cannot be evaluated without it: `lib/core/model-policy.js#resolveModel` gates the fable tier on an agent allowlist and a denylist, so a missing agent name degrades it to the bucket default, which is NOT the current v4 policy it is supposed to be the control group for (baselines.json `agent_type_supply`). A runner MUST refuse to score those three baselines on a scenario that omits this rather than substituting a default. Spelled camelCase against this file's otherwise snake_case convention on purpose: it is the exact parameter name `resolveModel` takes, and a benchmark that renamed the key would invite a caller to pass it under the wrong name.",
+      "$comment": "`additionalProperties: false` is why admitting this key required editing the schema at all; a scenario could not carry it as an extra field."
+    },
     "task_class": {
       "type": "string",
       "enum": [

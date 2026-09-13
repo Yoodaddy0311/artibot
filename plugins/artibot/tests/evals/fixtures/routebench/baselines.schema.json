@@ -1,0 +1,164 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://artibot.dev/schemas/routebench-baselines.schema.json",
+  "title": "RouteBenchBaselines",
+  "description": "The RouteBench baseline REGISTRY. DEFINITION ONLY - nothing in this directory executes a benchmark; run results stay local under `_benchmarks/routing/` because `_benchmarks/` is gitignored (design ARTIBOT-5.0-DESIGN.md section 8.2). The vocabulary is transcribed from MODEL-SWITCHING-SCORECARD.md section 11, which lists B0..B4 under '반드시 비교' (must compare) and B5..B6 under '선택' (optional). That mandatory/optional split CANNOT be carried by the `enum` in scenarios.schema.json: an enum says which ids are spellable, not which ones a scenario is obliged to run against, and there is no draft-07 keyword that makes enum membership conditional on an external document. So the split is encoded as data - a per-item `required` boolean - and a test asserts it against the scorecard. The same reasoning applies to `status` and `definition_confidence`: the scorecard names B3 and B4 without giving an algorithm for either, and a schema that could not record 'this resolver is our reading, not the doc's words' would let an inference pass as a transcription. Draft-07 is deliberate: this repo resolves ajv 6.x, which cannot compile 2020-12 - same constraint as scenarios.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "agent_type_supply", "baselines"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative pointer to the sibling schema file, so an editor validates this document without a registry lookup."
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Registry format version. Bumped when the SHAPE changes, not when a baseline is added - adding B7 is a data edit, not a format change."
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which documents these definitions come from. Required for the same reason `source` is required on an nl-activation case: without it nobody can tell later whether a changed definition is a fix or a regression."
+    },
+    "agent_type_supply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "why"],
+      "description": "How a scenario supplies the agent name that B2, B3 and B4 all need. Recorded here rather than assumed, because `resolveModel` gates the fable tier on an agent allowlist and denylist: without an agent name it degrades to the bucket default, which is NOT the current policy, so a nameless B2 would be a control group for nothing.",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The chosen supply route, as a dotted path a runner can read."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The argument for that route, long enough to be re-judged. A decision with no reason rots into a convention nobody dares change."
+        }
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "description": "Exactly the seven baselines of MODEL-SWITCHING-SCORECARD.md section 11, in id order. The `allOf`/`contains` block below pins MEMBERSHIP (every one of B0..B6 appears) rather than only spelling, because `items.enum` alone accepts a document of seven copies of B0 - it constrains what an id may say, not that the set is complete. The mandatory/optional split lives on each item's `required` flag and NOT in this enum, for the reason given on the document description: B0..B4 are 반드시 비교 and B5..B6 are 선택 in the scorecard, and JSON Schema has no way to make an enum member conditionally obligatory. A scenario may still legitimately run a subset, which is why scenarios.schema.json does not encode the split either; this registry is where a runner learns which omissions need an argument.",
+      "items": { "$ref": "#/definitions/baseline" },
+      "allOf": [
+        { "contains": { "properties": { "id": { "const": "B0" } }, "required": ["id"] } },
+        { "contains": { "properties": { "id": { "const": "B1" } }, "required": ["id"] } },
+        { "contains": { "properties": { "id": { "const": "B2" } }, "required": ["id"] } },
+        { "contains": { "properties": { "id": { "const": "B3" } }, "required": ["id"] } },
+        { "contains": { "properties": { "id": { "const": "B4" } }, "required": ["id"] } },
+        { "contains": { "properties": { "id": { "const": "B5" } }, "required": ["id"] } },
+        { "contains": { "properties": { "id": { "const": "B6" } }, "required": ["id"] } }
+      ]
+    }
+  },
+  "definitions": {
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "required", "status", "definition_confidence"],
+      "description": "One baseline policy. `resolver` and `reason` are mutually exclusive and conditionally required: an implemented baseline owes a resolver and must NOT carry a reason for absence, an unimplemented one owes a reason and must NOT carry a resolver. Both present would let a runner pick whichever it read first.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": ["B0", "B1", "B2", "B3", "B4", "B5", "B6"],
+          "description": "MODEL-SWITCHING-SCORECARD.md section 11 verbatim. Same seven values as scenarios.schema.json#/properties/baselines/items/enum; a test asserts the two lists are equal so the vocabulary cannot drift apart."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The scorecard's own label for this baseline, e.g. 'Current v4 Policy'. Human-readable, not an identifier."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["fixed", "policy", "heuristic", "adaptive", "oracle"],
+          "description": "What KIND of decision procedure this is, which is what a reader needs to know whether a comparison is fair. `fixed` ignores the scenario entirely; `policy` is the shipped v4 rule; `heuristic` is a static table lookup; `adaptive` scores candidates at decision time; `oracle` is only computable after the outcome is known and is therefore an upper bound, never a deployable policy."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "True for the five baselines the scorecard marks 반드시 비교 (B0..B4), false for the two marked 선택 (B5..B6). A runner that omits a required baseline is reporting an incomparable result, not a smaller one."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["implemented", "unimplemented"],
+          "description": "Whether a resolver exists today. `unimplemented` is a declaration, not a gap: a runner MUST refuse to score such a baseline rather than emit a placeholder, the same discipline scenarios.schema.json applies to a pending fixture."
+        },
+        "definition_confidence": {
+          "type": "string",
+          "enum": ["exact", "inferred"],
+          "description": "`exact` means the definition is transcribed from the source document. `inferred` means the source names the baseline but does not define it algorithmically, so the resolver is a reading of this repository and carries a note arguing for it. Without this field an inference would be indistinguishable from a transcription, and the next reader would treat a guess as a citation."
+        },
+        "resolver": { "$ref": "#/definitions/resolver" },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why no resolver exists. Required when status is unimplemented, forbidden otherwise."
+        }
+      },
+      "if": {
+        "properties": { "status": { "const": "implemented" } },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["resolver"],
+        "not": { "required": ["reason"] }
+      },
+      "else": {
+        "required": ["reason"],
+        "not": { "required": ["resolver"] }
+      }
+    },
+    "resolver": {
+      "description": "How to obtain a tier for one scenario; required when status is implemented and forbidden otherwise. Either a constant tier or a call into a module that already exists in this repository. There is deliberately no third form: an inline expression or a copied rule would drift away from the code it mirrors, and B2's whole value as the Shadow control group is that it CALLS the live policy instead of restating it (design ARTIBOT-5.0-DESIGN.md G4).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "tier"],
+          "properties": {
+            "type": { "const": "constant" },
+            "tier": {
+              "type": "string",
+              "enum": ["haiku", "sonnet", "opus", "fable"],
+              "description": "The one tier this baseline always returns, ignoring the scenario. Vocabulary is the model-catalog tier set; a tier outside it is a typo, not a new model."
+            },
+            "note": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "module", "export", "call"],
+          "properties": {
+            "type": { "const": "module" },
+            "module": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Plugin-root-relative path to the module, e.g. `lib/core/model-policy.js`. A test imports every one of these for real, because a path that exists and an export that works are two different claims."
+            },
+            "export": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The named export to call. Asserted to be a function by actually importing the module."
+            },
+            "call": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The exact call expression, written out so a reader sees which arguments are supplied and which are deliberately not. A phase role, for instance, is runtime context and is NOT a scenario property, so B2 passes none."
+            },
+            "note": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Required in practice for an inferred baseline: it carries the argument for why this call is the right reading of an undefined baseline."
+            }
+          }
+        }
+      ]
+    }
+  }
+}
