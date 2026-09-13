@@ -317,10 +317,24 @@ describe('baselines.schema.json - negative controls', () => {
     expect(validator(doc)).toBe(false);
   });
 
-  it('rejects a duplicated baseline entry', () => {
+  it('rejects a duplicated baseline entry on uniqueItems, not on length', () => {
+    // The earlier version of this control PUSHED a copy, giving 8 items, so
+    // `maxItems: 7` alone rejected it and `uniqueItems` was never exercised.
+    // Here B1 is OVERWRITTEN with a second B0: the array stays at exactly seven
+    // items, so length cannot be the reason, and the error list is inspected
+    // rather than just the boolean.
+    //
+    // What this control CANNOT do is isolate `uniqueItems` completely. With
+    // exactly seven items and a `contains` clause per id, a duplicate forces
+    // some id out of the document, so `contains` fires too - that is a property
+    // of the schema, not a weakness here. Both keywords are asserted present.
     const doc = clone(baselines);
-    doc.baselines.push(clone(doc.baselines[0]));
+    doc.baselines[1] = clone(doc.baselines[0]);
+    expect(doc.baselines).toHaveLength(7);
     expect(validator(doc)).toBe(false);
+    const keywords = (validator.errors ?? []).map((e) => e.keyword);
+    expect(keywords).toContain('uniqueItems');
+    expect(keywords).toContain('contains');
   });
 
   it('rejects status:implemented with no resolver', () => {

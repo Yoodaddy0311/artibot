@@ -40,6 +40,15 @@
  *      metrics into one number up front, and the scenario schema has no `score`
  *      property for the same reason.
  *
+ * WHICH POLICY ANSWERED
+ *
+ * B2 calls `resolveModel`, whose answer depends on the fable gate in
+ * `artibot.config.json`. The runner loads that config and passes it to every
+ * resolver explicitly, and the envelope records `policy_source`
+ * (`fable_enabled`, `allowlist_size`) plus `baselines_sha256` so a results file
+ * names the policy and the baseline registry it was scored under. A file that
+ * does not is not comparable with another one.
+ *
  * OFFLINE BY CONSTRUCTION
  *
  * No network module is imported and no request is issued - a firewall test
@@ -59,9 +68,11 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { ACTION_CLASS_TIERS, classifyAction } from '../../lib/routing/action-classifier.js';
+import { createHash } from 'node:crypto';
+import { isMainEntry } from '../hooks/_main-entry.js';
+import { loadConfig } from '../../lib/core/config.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isMainEntry } from '../hooks/_main-entry.js';
 import { resolveModel } from '../../lib/core/model-policy.js';
 import { routeModel } from '../../lib/routing/adaptive-model-router.js';
 
@@ -85,28 +96,84 @@ const METRICS_NOTE = [
  * matching and the pair is REFUSED as `resolver-unsupported` instead of being
  * silently scored by the old code path. An allowlist, not a deny list.
  *
- * Each entry takes the agentType and returns a tier string or null.
+ * Each entry takes the agentType and the LOADED config, and returns
+ * `{ tier, source }` - the tier string (null when the module declines to pick
+ * one) and the name of the signal the module decided on, or null when the
+ * module exposes no such signal.
  *
- * @type {Record<string, (agentType: string) => (string|null)>}
+ * WHY `config` IS AN ARGUMENT AND NOT LEFT UNDEFINED
+ *
+ * `resolveModel(agent, {}, undefined)` falls back to `getConfig()`, which
+ * THROWS until `loadConfig()` has run; `model-policy.js#resolveConfigSource`
+ * catches that throw and returns null, which `loadFableGate` turns into
+ * `{ enabled: false, allowlist: [] }`. An un-hydrated B2 therefore scores a
+ * fable gate that is OFF against an EMPTY allowlist - not the live policy it
+ * claims to be. Measured in this worktree 2026-09-13 with a scratch probe:
+ * planner / architect / code-reviewer resolve to `opus` before `loadConfig()`
+ * and to `fable` after it. `scripts/ci/validate-model-policy.js#main` hydrates
+ * the cache the same way and for the same reason.
+ *
+ * @type {Record<string, (agentType: string, config: object|undefined) =>
+ *   {tier: string|null, source: string|null}>}
  */
 const MODULE_RESOLVERS = {
-  // B2 - current v4 policy. `config` is left undefined on purpose so the live
-  // artibot.config.json policy is what answers; no `role` is passed, because a
-  // role would select phaseRoles and that is a different question.
-  'lib/core/model-policy.js#resolveModel': (agentType) => resolveModel(agentType, {}, undefined),
-  // B3 - v5 static heuristic: the frozen actionClass -> tier table.
+  // B2 - current v4 policy, answered by the config this run loaded. No `role`
+  // is passed, because a role would select phaseRoles and that is a different
+  // question. `resolveModel` returns a bare tier and names no signal, so
+  // `source` is null.
+  'lib/core/model-policy.js#resolveModel': (agentType, config) => ({
+    tier: resolveModel(agentType, {}, config),
+    source: null,
+  }),
+  // B3 - v5 static heuristic: the frozen actionClass -> tier table. `source` is
+  // the classifier's deciding signal, recorded so that a row decided by the
+  // `implement` FALLBACK (source `default`, tier `opus`) is distinguishable
+  // from one the agent table actually matched (source `agent`). Without it the
+  // two are the same row whenever both land on opus.
   'lib/routing/action-classifier.js#classifyAction': (agentType) => {
     const classified = classifyAction({ agentType });
-    return ACTION_CLASS_TIERS[classified.actionClass] ?? null;
+    return {
+      tier: ACTION_CLASS_TIERS[classified.actionClass] ?? null,
+      source: classified.factors?.source ?? null,
+    };
   },
   // B4 - v5 adaptive router. `models.recommended` is the router's own pick;
   // `models.selected` is policy and is already B2, so substituting it here
-  // would make B4 a duplicate of B2 and hide every divergence.
-  'lib/routing/adaptive-model-router.js#routeModel': (agentType) => {
-    const receipt = routeModel({ agentType });
-    return receipt.models.recommended?.tier ?? null;
+  // would make B4 a duplicate of B2 and hide every divergence. `config` is
+  // threaded for fidelity to the declared call, but note what it does and does
+  // not reach: `routeModel` passes it to `resolveModel` for `models.selected`
+  // ONLY, so B4's recorded tier is the same with it and without it.
+  'lib/routing/adaptive-model-router.js#routeModel': (agentType, config) => {
+    const receipt = routeModel({ agentType, config });
+    return {
+      tier: receipt.models.recommended?.tier ?? null,
+      source: classSource(receipt.reason),
+    };
   },
 };
+
+/**
+ * The classifier signal a RouteReceipt used, read out of its `reason` array.
+ * `adaptive-model-router.js#routeModel` pushes `class:<source>` as the first
+ * reason code and exposes that signal in no other field, so the reason array is
+ * the only place it can be read from.
+ *
+ * Recording it is the point rather than a detail: `routeModel` classifies from
+ * `input.input`, NEVER from `input.agentType` (see `resolveClassification`), so
+ * B4's class is the `default` fallback for every scenario this runner feeds it.
+ * The agent name reaches `models.selected` (policy) and not `models.recommended`
+ * (the router's own pick), which is what B4 records.
+ *
+ * @param {unknown} reason - the receipt's `reason` array
+ * @returns {string|null} signal name, or null when no `class:` code is present
+ */
+function classSource(reason) {
+  const codes = Array.isArray(reason) ? reason : [];
+  for (const code of codes) {
+    if (typeof code === 'string' && code.startsWith('class:')) return code.slice('class:'.length);
+  }
+  return null;
+}
 
 /** @returns {{status:'refused', reason:string, selection:null}} */
 function refusal(reason) {
@@ -114,10 +181,39 @@ function refusal(reason) {
 }
 
 /**
+ * Turn a resolver's answer into a row outcome.
+ *
+ * A null (or non-string) tier is a REFUSAL, not a scored row. `status:
+ * "scored"` sitting next to `selection.tier: null` reads as "this baseline
+ * chose nothing, and that was fine", and both ways it happens deserve a name
+ * instead: an unvalidated `--baselines` file whose constant resolver carries no
+ * `tier`, and B4 answering `route:no-candidate` for a class with no candidate
+ * in the catalog.
+ *
+ * `selection` always carries the same three keys in the same order, so rows
+ * stay byte-comparable: `tier`, `resolver` ('constant' or 'module'), and
+ * `source` (the deciding signal, null when the resolver names none).
+ *
+ * @param {unknown} tier - what the resolver returned
+ * @param {string} resolverKind - 'constant' or 'module'
+ * @param {string|null} source - deciding signal, or null
+ * @returns {{status:string, reason:string|null, selection:object|null}}
+ */
+function selectionOrRefusal(tier, resolverKind, source) {
+  if (typeof tier !== 'string' || tier === '') return refusal('resolver-returned-null');
+  return {
+    status: 'scored',
+    reason: null,
+    selection: { tier, resolver: resolverKind, source: source ?? null },
+  };
+}
+
+/**
  * Resolve one baseline for one agentType, without touching scenario state.
  *
  * @param {object|undefined} baseline - entry from baselines.json, or undefined
- * @param {{agentType?: string|null}} [context]
+ * @param {{agentType?: string|null, config?: object}} [context] - `config` is
+ *   the loaded artibot.config.json; module resolvers receive it verbatim.
  * @returns {{status:string, reason:string|null, selection:object|null}}
  */
 export function resolveBaseline(baseline, context = {}) {
@@ -127,13 +223,7 @@ export function resolveBaseline(baseline, context = {}) {
   const resolver = baseline.resolver;
   if (!resolver || typeof resolver !== 'object') return refusal('resolver-unsupported');
 
-  if (resolver.type === 'constant') {
-    return {
-      status: 'scored',
-      reason: null,
-      selection: { tier: resolver.tier ?? null, resolver: 'constant' },
-    };
-  }
+  if (resolver.type === 'constant') return selectionOrRefusal(resolver.tier, 'constant', null);
   if (resolver.type !== 'module') return refusal('resolver-unsupported');
 
   const fn = MODULE_RESOLVERS[`${resolver.module}#${resolver.export}`];
@@ -144,11 +234,8 @@ export function resolveBaseline(baseline, context = {}) {
     : null;
   if (agentType === null) return refusal('agent-type-missing');
 
-  return {
-    status: 'scored',
-    reason: null,
-    selection: { tier: fn(agentType) ?? null, resolver: 'module' },
-  };
+  const picked = fn(agentType, context.config);
+  return selectionOrRefusal(picked?.tier, 'module', picked?.source ?? null);
 }
 
 /**
@@ -210,7 +297,7 @@ function makeRow(scenario, baselineId, outcome, passes) {
  * @param {object} scenario
  * @param {string} baselineId
  * @param {Map<string, object>} byId
- * @param {{n: number, prior: Map<string, object>}} opts
+ * @param {{n: number, prior: Map<string, object>, config?: object}} opts
  * @returns {object} row
  */
 function scorePair(scenario, baselineId, byId, opts) {
@@ -233,7 +320,7 @@ function scorePair(scenario, baselineId, byId, opts) {
   const blocked = fixtureRefusal(scenario);
   if (blocked !== null) return makeRow(scenario, baselineId, refusal(blocked), null);
 
-  const context = { agentType: scenario.agentType ?? null };
+  const context = { agentType: scenario.agentType ?? null, config: opts.config };
   const first = resolveBaseline(baseline, context);
   if (first.status !== 'scored') return makeRow(scenario, baselineId, first, null);
 
@@ -258,12 +345,16 @@ function scorePair(scenario, baselineId, byId, opts) {
  *
  * @param {object[]} scenarios
  * @param {object} baselines - parsed baselines.json
- * @param {{n?: number, prior?: Map<string, object>}} [opts]
+ * @param {{n?: number, prior?: Map<string, object>, config?: object}} [opts] -
+ *   `config` is the loaded artibot.config.json. It is an ARGUMENT, never read
+ *   from a module-level cache inside scoring, so two calls with the same
+ *   arguments still produce the same rows.
  * @returns {object[]} rows sorted by (scenario_id, baseline)
  */
 export function scoreScenarios(scenarios, baselines, opts = {}) {
   const n = Number.isInteger(opts.n) && opts.n >= 1 ? opts.n : 1;
   const prior = opts.prior instanceof Map ? opts.prior : new Map();
+  const config = opts.config;
   const list = Array.isArray(baselines?.baselines) ? baselines.baselines : [];
   const byId = new Map(list.map((entry) => [entry.id, entry]));
 
@@ -271,16 +362,25 @@ export function scoreScenarios(scenarios, baselines, opts = {}) {
   for (const scenario of scenarios) {
     const ids = Array.isArray(scenario.baselines) ? scenario.baselines : [];
     for (const baselineId of ids) {
-      rows.push(scorePair(scenario, baselineId, byId, { n, prior }));
+      rows.push(scorePair(scenario, baselineId, byId, { n, prior, config }));
     }
   }
 
-  rows.sort((a, b) => (
-    a.scenario_id === b.scenario_id
-      ? a.baseline.localeCompare(b.baseline)
-      : a.scenario_id.localeCompare(b.scenario_id)
-  ));
+  // Plain byte comparison, NOT localeCompare: `localeCompare` is locale- and
+  // ICU-build-dependent, so the same rows can sort differently on two machines
+  // and break the byte-for-byte comparison this file's determinism rests on.
+  rows.sort((a, b) => compareStrings(a.scenario_id, b.scenario_id)
+    || compareStrings(a.baseline, b.baseline));
   return rows;
+}
+
+/**
+ * Byte-order string comparison. @param {string} a @param {string} b
+ * @returns {number} -1, 0 or 1
+ */
+function compareStrings(a, b) {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
 }
 
 /**
@@ -310,14 +410,45 @@ function readScenarios(file) {
 }
 
 /**
- * Index the scored rows of a previous results file for completed-pair skip.
+ * Is this prior row a COMPLETED pair - one that must not be rescored?
+ *
+ * Two statuses qualify, and the second one is the bug fix. Run 2 rewrites every
+ * row run 1 scored as `skipped`/`completed-pair`, carrying the selection
+ * forward. Indexing `scored` alone therefore made the skip survive exactly one
+ * run: run 3 read a file full of `skipped` rows, found nothing completed, and
+ * rescored everything. `refused` never qualifies - a refusal is an outcome that
+ * a fixture landing or a baseline implementation is meant to change, so it must
+ * be retried on the next run.
+ *
+ * @param {object} row
+ * @returns {boolean}
+ */
+function isCompletedRow(row) {
+  if (!row || typeof row !== 'object') return false;
+  if (row.status === 'scored') return true;
+  return row.status === 'skipped'
+    && row.reason === 'completed-pair'
+    && row.selection !== null
+    && row.selection !== undefined;
+}
+
+/**
+ * Index the completed rows of a previous results file for completed-pair skip.
  * A missing or unreadable file means "nothing completed", never an abort: the
  * first run of any scenarios file has no prior output by definition.
  *
+ * A prior file whose `baselines_sha256` is not byte-identical to the baselines
+ * this run loaded is discarded WHOLE. Carrying rows across a baselines edit
+ * would let a run report a tier that the current B2 definition never produced,
+ * and the skip is silent by design, so nothing downstream would show it. A file
+ * written before the field existed has no sha and is discarded for the same
+ * reason: unprovable is not the same as matching.
+ *
  * @param {string} file
+ * @param {string} baselinesSha - sha256 of the baselines file this run read
  * @returns {Map<string, object>}
  */
-function readPriorRows(file) {
+function readPriorRows(file, baselinesSha) {
   const prior = new Map();
   if (!existsSync(file)) return prior;
   let parsed;
@@ -326,9 +457,10 @@ function readPriorRows(file) {
   } catch {
     return prior;
   }
+  if ((parsed?.baselines_sha256 ?? null) !== baselinesSha) return prior;
   const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
   for (const row of rows) {
-    if (row && row.status === 'scored') prior.set(pairKey(row.scenario_id, row.baseline), row);
+    if (isCompletedRow(row)) prior.set(pairKey(row.scenario_id, row.baseline), row);
   }
   return prior;
 }
@@ -348,6 +480,27 @@ function recordedPath(abs) {
     return `<external>/${path.basename(abs)}`;
   }
   return rel.split(path.sep).join('/');
+}
+
+/**
+ * The fable gate exactly as this run saw it.
+ *
+ * Recorded because B2 IS that gate: the same agent resolves to `fable` with the
+ * gate on and `opus` with it off, so two results files that do not each say
+ * which policy answered are not comparable with one another at all. Two numbers
+ * only - the kill-switch and the allowlist SIZE. The allowlist itself is not
+ * copied: a results file that restated the policy would be one more thing to
+ * drift, and `artibot.config.json` remains the single source.
+ *
+ * @param {object|undefined} config - the loaded config
+ * @returns {{fable_enabled: boolean, allowlist_size: number}}
+ */
+function policySource(config) {
+  const fable = config?.agents?.modelPolicy?.fable;
+  return {
+    fable_enabled: fable?.enabled === true,
+    allowlist_size: Array.isArray(fable?.allowlist) ? fable.allowlist.length : 0,
+  };
 }
 
 /** @returns {{scored:number, refused:number, skipped:number}} counts only */
@@ -377,19 +530,28 @@ export async function runRouteBench(opts) {
   const n = Number.isInteger(opts.n) && opts.n >= 1 ? opts.n : 1;
 
   const scenarios = readScenarios(scenariosPath);
-  const baselines = JSON.parse(readFileSync(baselinesPath, 'utf-8'));
+  const baselinesBytes = readFileSync(baselinesPath);
+  const baselines = JSON.parse(baselinesBytes.toString('utf-8'));
+  const baselinesSha = createHash('sha256').update(baselinesBytes).digest('hex');
+
+  // Hydrate the config cache and pass the result down explicitly, the way
+  // scripts/ci/validate-model-policy.js#main does. Without this, B2 scores an
+  // empty policy - see the MODULE_RESOLVERS header.
+  const config = await loadConfig();
 
   const stem = path.basename(scenariosPath, path.extname(scenariosPath));
   const outFile = path.join(outDir, `${stem}.results.json`);
-  const prior = opts.noSkip === true ? new Map() : readPriorRows(outFile);
+  const prior = opts.noSkip === true ? new Map() : readPriorRows(outFile, baselinesSha);
 
-  const rows = scoreScenarios(scenarios, baselines, { n, prior });
+  const rows = scoreScenarios(scenarios, baselines, { n, prior, config });
   const report = {
     schema_version: SCHEMA_VERSION,
     generated_at: new Date().toISOString(),
     scenarios_file: recordedPath(scenariosPath),
     baselines_file: recordedPath(baselinesPath),
     baselines_schema_version: baselines.schema_version ?? null,
+    baselines_sha256: baselinesSha,
+    policy_source: policySource(config),
     metrics_note: METRICS_NOTE,
     rows,
     summary: summarize(rows),
@@ -455,7 +617,11 @@ function printUsage() {
     '                     passes are a SELF-CHECK, not a sample: pass k must return',
     '                     the same selection as pass 1 or the run aborts with',
     '                     determinism_violation. It does not average anything.',
-    '  --no-skip          rescore pairs that a previous results file already scored.',
+    '  --no-skip          rescore pairs a previous results file already completed.',
+    '                     Completed means scored, or skipped as completed-pair with a',
+    '                     selection; a refusal is never completed. A prior file whose',
+    '                     baselines_sha256 differs from the current baselines file is',
+    '                     ignored whole, with or without this flag.',
     '  --help             this text.',
     '',
     'Exit codes: 0 the run completed (refusals are normal outcomes and do not',

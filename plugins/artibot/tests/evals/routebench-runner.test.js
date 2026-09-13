@@ -36,11 +36,29 @@ import {
   runRouteBench,
   scoreScenarios,
 } from '../../scripts/bench/routebench.mjs';
+import { createHash } from 'node:crypto';
+import { loadConfig } from '../../lib/core/config.js';
 import path from 'node:path';
 import { resolveModel } from '../../lib/core/model-policy.js';
 import { routeModel } from '../../lib/routing/adaptive-model-router.js';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * The live config, loaded once here and passed to every expectation.
+ *
+ * The runner hydrates the same cache internally, so an expectation written as
+ * `resolveModel(agent, {}, undefined)` would ALSO be right - but only because
+ * the runner ran first. That is an order dependency, not an assertion, and it
+ * would go green again the day the runner stops loading the config. Every
+ * expectation below names the config it scored against.
+ */
+const CONFIG = await loadConfig();
+
+/** @returns {string} sha256 of a file's bytes, hex - the runner's own spelling */
+function sha256Of(file) {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '../..');
@@ -88,7 +106,7 @@ const BASELINES = {
         type: 'module',
         module: 'lib/core/model-policy.js',
         export: 'resolveModel',
-        call: 'resolveModel(agentType, {}, undefined)',
+        call: 'resolveModel(scenario.agentType, {}, config)',
       },
     },
     {
@@ -116,7 +134,7 @@ const BASELINES = {
         type: 'module',
         module: 'lib/routing/adaptive-model-router.js',
         export: 'routeModel',
-        call: 'routeModel({ agentType }).models.recommended?.tier ?? null',
+        call: 'routeModel({ agentType: scenario.agentType, config }).models.recommended?.tier ?? null',
       },
     },
     {
@@ -187,6 +205,11 @@ function row(results, scenarioId, baseline) {
   );
   if (!found) throw new Error(`no row for ${scenarioId}/${baseline}`);
   return found;
+}
+
+/** @returns {object} a structural clone safe to mutate */
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 /** Collect every object key in a parsed JSON tree. @returns {string[]} */
@@ -277,15 +300,103 @@ describe('routebench runner - scoring a present fixture', () => {
     expect(row(report, 'synthetic-case', 'B5').selection.tier).toBe('fable');
 
     expect(row(report, 'synthetic-case', 'B2').selection.tier)
-      .toBe(resolveModel('planner', {}, undefined));
+      .toBe(resolveModel('planner', {}, CONFIG));
     expect(row(report, 'synthetic-case', 'B3').selection.tier)
       .toBe(ACTION_CLASS_TIERS[classifyAction({ agentType: 'planner' }).actionClass]);
     expect(row(report, 'synthetic-case', 'B4').selection.tier)
-      .toBe(routeModel({ agentType: 'planner' }).models.recommended?.tier ?? null);
+      .toBe(routeModel({ agentType: 'planner', config: CONFIG }).models.recommended?.tier ?? null);
 
     expect(row(report, 'synthetic-case', 'B0').selection.resolver).toBe('constant');
     expect(row(report, 'synthetic-case', 'B2').selection.resolver).toBe('module');
     expect(row(report, 'synthetic-case', 'B0').passes).toBe(1);
+  });
+
+  it('records one selection shape everywhere: tier, resolver, source', async () => {
+    const { scenariosFile } = writeScenario({ id: 'synthetic-shape', agentType: 'planner' });
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out: freshDir('shape'), n: 1,
+    });
+    for (const r of report.rows) {
+      expect(Object.keys(r.selection)).toEqual(['tier', 'resolver', 'source']);
+    }
+    // A constant resolver decides nothing, so it names no signal. So does
+    // resolveModel, which returns a bare tier string.
+    expect(row(report, 'synthetic-shape', 'B0').selection.source).toBeNull();
+    expect(row(report, 'synthetic-shape', 'B2').selection.source).toBeNull();
+    expect(row(report, 'synthetic-shape', 'B3').selection.source).toBe('agent');
+  });
+
+  it('scores B2 against the LOADED policy, not the empty one resolveModel falls back to', async () => {
+    // The regression this pins: resolveModel(agent, {}, undefined) reaches
+    // getConfig(), which throws until loadConfig() has run; model-policy.js
+    // catches that and answers from an EMPTY fable gate. B2 would then be
+    // "current v4 policy" in name only. 'planner' is read out of the live
+    // allowlist below rather than assumed to be in it.
+    const allowlist = CONFIG.agents.modelPolicy.fable.allowlist;
+    expect(CONFIG.agents.modelPolicy.fable.enabled).toBe(true);
+    expect(allowlist).toContain('planner');
+
+    const loaded = resolveModel('planner', {}, CONFIG);
+    const empty = resolveModel('planner', {}, {});
+    expect(loaded).not.toBe(empty);
+
+    const { scenariosFile } = writeScenario({ id: 'synthetic-gate2', agentType: 'planner' });
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out: freshDir('gate2'), n: 1,
+    });
+    expect(row(report, 'synthetic-gate2', 'B2').selection.tier).toBe(loaded);
+    expect(row(report, 'synthetic-gate2', 'B2').selection.tier).not.toBe(empty);
+  });
+
+  it('records the policy the run was scored under in the envelope', async () => {
+    const { scenariosFile } = writeScenario({ id: 'synthetic-policy', agentType: 'planner' });
+    const out = freshDir('policy');
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out, n: 1,
+    });
+    const fable = CONFIG.agents.modelPolicy.fable;
+    expect(report.policy_source).toEqual({
+      fable_enabled: fable.enabled === true,
+      allowlist_size: fable.allowlist.length,
+    });
+    expect(report.baselines_sha256).toBe(sha256Of(baselinesPath));
+    expect(readResults(out, 'synthetic').policy_source).toEqual(report.policy_source);
+  });
+
+  it('refuses rather than scoring when a resolver returns no tier', () => {
+    // Reachable two ways: an unvalidated --baselines file whose constant
+    // resolver has no `tier`, and a module resolver answering null. Both used
+    // to produce status:"scored" with selection.tier:null, which reads as a
+    // decision rather than an absence.
+    const noTier = resolveBaseline(
+      { id: 'BX', status: 'implemented', resolver: { type: 'constant' } },
+      { agentType: 'planner' },
+    );
+    expect(noTier.status).toBe('refused');
+    expect(noTier.reason).toBe('resolver-returned-null');
+    expect(noTier.selection).toBeNull();
+
+    const blankTier = resolveBaseline(
+      { id: 'BY', status: 'implemented', resolver: { type: 'constant', tier: '' } },
+      { agentType: 'planner' },
+    );
+    expect(blankTier.reason).toBe('resolver-returned-null');
+  });
+
+  it('keeps the classifier signal for B3, so a fallback class is not read as a match', () => {
+    // classifyAction falls back to `implement` (-> opus) for an agent it does
+    // not know. That row and a genuine agent-table hit on opus are the same
+    // tier; only `source` tells them apart.
+    const b3 = BASELINES.baselines.find((b) => b.id === 'B3');
+    const known = resolveBaseline(b3, { agentType: 'planner', config: CONFIG });
+    const unknown = resolveBaseline(b3, { agentType: 'no-such-agent-xyz', config: CONFIG });
+
+    expect(known.selection.source).toBe(classifyAction({ agentType: 'planner' }).factors.source);
+    expect(known.selection.source).toBe('agent');
+    expect(unknown.selection.source)
+      .toBe(classifyAction({ agentType: 'no-such-agent-xyz' }).factors.source);
+    expect(unknown.selection.source).not.toBe('agent');
+    expect(unknown.selection.tier).toBe(ACTION_CLASS_TIERS.implement);
   });
 
   it('shows the fable allowlist gate: B2 differs from fixed-fable for a non-allowlisted agent', async () => {
@@ -303,7 +414,7 @@ describe('routebench runner - scoring a present fixture', () => {
 
     const b2 = row(report, 'synthetic-backend', 'B2').selection.tier;
     const b5 = row(report, 'synthetic-backend', 'B5').selection.tier;
-    expect(b2).toBe(resolveModel('backend-developer', {}, undefined));
+    expect(b2).toBe(resolveModel('backend-developer', {}, CONFIG));
     expect(b5).toBe('fable');
     expect(b2).not.toBe(b5);
   });
@@ -420,26 +531,25 @@ describe('routebench runner - determinism', () => {
 });
 
 describe('routebench runner - completed-pair skip', () => {
-  it('carries a prior scored selection forward, and --no-skip recomputes it', async () => {
-    const { scenariosFile } = writeScenario({ id: 'synthetic-skip', agentType: 'planner' });
-    const out = freshDir('skip');
+  /**
+   * Write a prior results file into `out` with one row, stamped with the sha of
+   * the baselines file the run will read.
+   *
+   * @param {string} out - output directory
+   * @param {object} row0 - the single prior row
+   * @returns {void}
+   */
+  function seedPrior(out, row0) {
     const seeded = {
       schema_version: 1,
       generated_at: '2000-01-01T00:00:00.000Z',
       scenarios_file: 'seed',
       baselines_file: 'seed',
       baselines_schema_version: 1,
+      baselines_sha256: sha256Of(baselinesPath),
+      policy_source: { fable_enabled: true, allowlist_size: 0 },
       metrics_note: 'seed',
-      rows: [{
-        scenario_id: 'synthetic-skip',
-        baseline: 'B0',
-        status: 'scored',
-        reason: null,
-        selection: { tier: 'haiku', resolver: 'constant' },
-        passes: 1,
-        metrics_requested: ['total_cost'],
-        metrics_measured: [],
-      }],
+      rows: [row0],
       summary: { scored: 1, refused: 0, skipped: 0 },
     };
     writeFileSync(
@@ -447,6 +557,21 @@ describe('routebench runner - completed-pair skip', () => {
       `${JSON.stringify(seeded, null, 2)}\n`,
       'utf-8',
     );
+  }
+
+  it('carries a prior scored selection forward, and --no-skip recomputes it', async () => {
+    const { scenariosFile } = writeScenario({ id: 'synthetic-skip', agentType: 'planner' });
+    const out = freshDir('skip');
+    seedPrior(out, {
+      scenario_id: 'synthetic-skip',
+      baseline: 'B0',
+      status: 'scored',
+      reason: null,
+      selection: { tier: 'haiku', resolver: 'constant', source: null },
+      passes: 1,
+      metrics_requested: ['total_cost'],
+      metrics_measured: [],
+    });
 
     const skipped = await runRouteBench({
       scenarios: scenariosFile, baselines: baselinesPath, out, n: 1,
@@ -464,6 +589,106 @@ describe('routebench runner - completed-pair skip', () => {
     expect(fresh.status).toBe('scored');
     expect(fresh.selection.tier).toBe('sonnet');
     expect(recomputed.summary.skipped).toBe(0);
+  });
+
+  it('keeps skipping across a THIRD run, because run 2 rewrote the rows as skipped', async () => {
+    // The regression: run 2 writes every carried pair as
+    // status:"skipped"/reason:"completed-pair". Indexing only status:"scored"
+    // made run 3 read a file with no scored row, find nothing completed, and
+    // rescore the lot - so the skip survived exactly one run and the feature
+    // silently did nothing from run 3 onward.
+    const { scenariosFile } = writeScenario({ id: 'synthetic-run3', agentType: 'planner' });
+    const out = freshDir('run3');
+    const args = { scenarios: scenariosFile, baselines: baselinesPath, out, n: 1 };
+
+    const run1 = await runRouteBench(args);
+    expect(run1.summary.scored).toBe(6);
+    expect(run1.summary.skipped).toBe(0);
+
+    const run2 = await runRouteBench(args);
+    expect(run2.summary.skipped).toBe(6);
+    expect(run2.summary.scored).toBe(0);
+
+    const run3 = await runRouteBench(args);
+    expect(run3.summary.skipped).toBe(6);
+    expect(run3.summary.scored).toBe(0);
+    expect(row(run3, 'synthetic-run3', 'B0').selection.tier).toBe('sonnet');
+  });
+
+  it('rescores a prior REFUSED pair instead of carrying the refusal forward', async () => {
+    // A refusal is the outcome a landed fixture or an implemented baseline is
+    // supposed to change. Treating it as completed would freeze the run at the
+    // first thing that ever went wrong.
+    const { scenariosFile } = writeScenario({ id: 'synthetic-refused', agentType: 'planner' });
+    const out = freshDir('refused');
+    seedPrior(out, {
+      scenario_id: 'synthetic-refused',
+      baseline: 'B0',
+      status: 'refused',
+      reason: 'fixture-pending',
+      selection: null,
+      passes: null,
+      metrics_requested: ['total_cost'],
+      metrics_measured: [],
+    });
+
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out, n: 1,
+    });
+    const r = row(report, 'synthetic-refused', 'B0');
+    expect(r.status).toBe('scored');
+    expect(r.selection.tier).toBe('sonnet');
+    expect(report.summary.skipped).toBe(0);
+  });
+
+  it('ignores a prior file whose baselines_sha256 does not match this run', async () => {
+    const { scenariosFile } = writeScenario({ id: 'synthetic-sha', agentType: 'planner' });
+    const out = freshDir('sha');
+    const args = { scenarios: scenariosFile, baselines: baselinesPath, out, n: 1 };
+
+    await runRouteBench(args);
+    expect((await runRouteBench(args)).summary.skipped).toBe(6);
+
+    // Edit the baselines file the run reads. Every carried row was produced by
+    // a definition that no longer exists, so none of them may be reused.
+    const edited = clone(BASELINES);
+    edited.baselines.find((b) => b.id === 'B0').resolver.tier = 'haiku';
+    writeFileSync(baselinesPath, `${JSON.stringify(edited, null, 2)}\n`, 'utf-8');
+    try {
+      const after = await runRouteBench(args);
+      expect(after.summary.skipped).toBe(0);
+      expect(after.summary.scored).toBe(6);
+      expect(row(after, 'synthetic-sha', 'B0').selection.tier).toBe('haiku');
+    } finally {
+      writeFileSync(baselinesPath, `${JSON.stringify(BASELINES, null, 2)}\n`, 'utf-8');
+    }
+  });
+
+  it('ignores a prior file written before baselines_sha256 existed', async () => {
+    // Unprovable is not the same as matching: a file with no sha cannot be
+    // shown to have come from these baselines, so it is discarded whole.
+    const { scenariosFile } = writeScenario({ id: 'synthetic-nosha', agentType: 'planner' });
+    const out = freshDir('nosha');
+    seedPrior(out, {
+      scenario_id: 'synthetic-nosha',
+      baseline: 'B0',
+      status: 'scored',
+      reason: null,
+      selection: { tier: 'haiku', resolver: 'constant', source: null },
+      passes: 1,
+      metrics_requested: ['total_cost'],
+      metrics_measured: [],
+    });
+    const seededPath = path.join(out, 'synthetic.results.json');
+    const doc = JSON.parse(readFileSync(seededPath, 'utf-8'));
+    delete doc.baselines_sha256;
+    writeFileSync(seededPath, `${JSON.stringify(doc, null, 2)}\n`, 'utf-8');
+
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out, n: 1,
+    });
+    expect(report.summary.skipped).toBe(0);
+    expect(row(report, 'synthetic-nosha', 'B0').selection.tier).toBe('sonnet');
   });
 });
 
@@ -508,14 +733,50 @@ describe('routebench runner - CLI surface', () => {
 describe('routebench runner - source hygiene', () => {
   const source = () => readFileSync(path.join(PLUGIN_ROOT, 'scripts/bench/routebench.mjs'), 'utf-8');
 
+  /**
+   * Every spelling that would put a network (or a shell-out to one) in this
+   * file. Both quote styles are listed because the old list only had single
+   * quotes, and this repo's lint does not forbid double-quoted imports - so
+   * `import "undici"` would have sailed past it. `node:child_process` is here
+   * for the same reason a network import is: a spawned curl is a request.
+   *
+   * Bare `'net'` and `"net"` carry their quotes so the token cannot match the
+   * word inside prose; `fetch(` carries its paren for the same reason.
+   */
+  const FORBIDDEN_SOURCE_TOKENS = Object.freeze([
+    'node:http', 'node:https', 'node:net', 'node:dns', 'node:tls', 'node:child_process',
+    "'node:http'", "'node:https'", "'node:net'", "'node:dns'", "'node:tls'",
+    "'node:child_process'", "'http'", "'https'", "'net'", "'dns'", "'tls'",
+    "'undici'", "'node-fetch'", "'axios'", "'child_process'",
+    '"node:http"', '"node:https"', '"node:net"', '"node:dns"', '"node:tls"',
+    '"node:child_process"', '"http"', '"https"', '"net"', '"dns"', '"tls"',
+    '"undici"', '"node-fetch"', '"axios"', '"child_process"',
+    'fetch(', 'XMLHttpRequest', 'WebSocket',
+  ]);
+
+  /**
+   * The scan itself, so the positive and the negative case run the SAME code.
+   *
+   * @param {string} text - source text to scan
+   * @returns {string[]} every forbidden token present
+   */
+  function networkTokensIn(text) {
+    return FORBIDDEN_SOURCE_TOKENS.filter((token) => text.includes(token));
+  }
+
   it('requests no network module', () => {
-    const text = source();
-    for (const forbidden of [
-      'node:http', 'node:https', 'node:net', 'node:dns', 'node:tls',
-      "'http'", "'https'", 'fetch(',
-    ]) {
-      expect(text).not.toContain(forbidden);
+    expect(networkTokensIn(source())).toEqual([]);
+  });
+
+  it('the network scan actually fires - proven by injecting into a copy', () => {
+    // A not-to-contain assertion nothing has ever tripped is a list of strings,
+    // not a gate. The file on disk is never written: the import is appended to
+    // an in-memory copy of its text.
+    for (const forbidden of FORBIDDEN_SOURCE_TOKENS) {
+      const injected = `${source()}\nimport ${forbidden};\n`;
+      expect(networkTokensIn(injected)).toContain(forbidden);
     }
+    expect(networkTokensIn(`${source()}\nimport 'undici';\n`)).toEqual(["'undici'"]);
   });
 
   it('uses no clock or randomness in scoring', () => {
