@@ -49,6 +49,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { resetConfig } from '../../lib/core/config.js';
 import { appendLedgerEvent, ledgerFilePath } from '../../lib/runtime/ledger.js';
 import { ARTIFACT_BASENAME, MISSIONS_DIR, SkipReason } from '../../lib/runtime/artifact-lifecycle.js';
 import { sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
@@ -292,6 +293,8 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
   let home;
   let repo;
   let missionId;
+  let pluginRootOverride;
+  let previousPluginRoot;
 
   const writePayload = (over = {}) => ({
     cwd: repo,
@@ -335,9 +338,40 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
     mkdirSync(repo, { recursive: true });
     execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
     missionId = sessionFallbackMissionId(SESSION_ID, new Date());
+
+    // GATE 2, HELD OPEN ON PURPOSE. 4.61.0 ships
+    // `runtime.artifactLifecycle.enabled: false` (Observe), and the hook checks
+    // that key AFTER its ledger/store records — so on the shipped config every
+    // write-through case below would go green for the wrong reason: no file,
+    // because the gate is shut, not because the writer was measured. The cases
+    // here measure the WRITER, so they supply their own open gate through the
+    // documented override (`CLAUDE_PLUGIN_ROOT` → `lib/core/platform.js#getPluginRoot`)
+    // instead of depending on whatever the release happens to ship. The shipped
+    // value is pinned in tests/runtime/artifact-lifecycle-{apply,dryrun}.test.js.
+    // Everything but the one key is copied from the real config, so this is the
+    // live configuration with the kill switch flipped, not a stub.
+    pluginRootOverride = path.join(tmp, 'plugin-root');
+    mkdirSync(pluginRootOverride, { recursive: true });
+    const liveConfig = JSON.parse(
+      readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'),
+    );
+    liveConfig.runtime.artifactLifecycle.enabled = true;
+    writeFileSync(
+      path.join(pluginRootOverride, 'artibot.config.json'),
+      JSON.stringify(liveConfig, null, 2),
+      'utf-8',
+    );
+    previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRootOverride;
+    // `loadConfig` memoises by (path, mtime); the in-process case below would
+    // otherwise read a config cached by an earlier suite.
+    resetConfig();
   });
 
   afterEach(() => {
+    if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
+    resetConfig();
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
   });
 

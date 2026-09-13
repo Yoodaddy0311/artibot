@@ -518,8 +518,8 @@ describe('gate 2 wiring (artibot.config.json)', () => {
     fs.readFileSync(path.join(PKG_ROOT, 'artibot.config.json'), 'utf8'),
   );
 
-  it('declares runtime.artifactLifecycle.enabled as a real boolean true', () => {
-    expect(config.runtime.artifactLifecycle.enabled).toBe(true);
+  it('ships runtime.artifactLifecycle.enabled false in 4.61.0 (Observe)', () => {
+    expect(config.runtime.artifactLifecycle.enabled).toBe(false);
     expect(typeof config.runtime.artifactLifecycle.enabled).toBe('boolean');
   });
 
@@ -530,12 +530,21 @@ describe('gate 2 wiring (artibot.config.json)', () => {
 
   it('is reachable at the exact dotted path apply() reads', () => {
     const value = APPLY_GATE_PATH.split('.').reduce((node, key) => node?.[key], config);
-    expect(value).toBe(true);
+    expect(value).toBe(false);
+    expect(typeof value).toBe('boolean');
   });
 
-  it('lets the LIVE config open gate 2, and gate 3 still holds the line', () => {
+  it('keeps the LIVE config closed at gate 2, so apply() throws', () => {
     const result = runPlan(completionEvents());
-    const report = apply(result, { dryRun: true, config });
+    expect(() => apply(result, { dryRun: true, config })).toThrow(/requires config/);
+    expect(filesUnder(root)).toEqual([]);
+  });
+
+  // The shipped value is false in 4.61.0; the gate-2 mechanism is exercised
+  // with an explicit true so that turning the key on stays covered, not assumed.
+  it('opens gate 2 on an explicit true, and gate 3 still holds the line', () => {
+    const result = runPlan(completionEvents());
+    const report = apply(result, { dryRun: true, config: ENABLED_CONFIG });
     expect(report.dryRun).toBe(true);
     expect(report.written).toEqual([]);
     expect(filesUnder(root)).toEqual([]);

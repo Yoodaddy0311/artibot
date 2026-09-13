@@ -789,15 +789,24 @@ describe('apply() fail-closed', () => {
     ).toThrow(/requires config/);
   });
 
-  it('is opened by the live artibot.config.json, and still writes nothing', () => {
-    // The gate-2 key now ships enabled. Gate 3 (`write: true`), which this call
-    // does not pass, is what keeps the live config from creating a file — so
-    // the honest assertion is "opens, and writes nothing anyway", not "throws".
-    const config = JSON.parse(readFileSync(path.join(PKG_ROOT, 'artibot.config.json'), 'utf8'));
-    expect(config.runtime.artifactLifecycle.enabled).toBe(true);
-    const report = apply(runPlan(completionEvents()), { dryRun: true, config });
+  it('is opened by an explicit true, and still writes nothing', () => {
+    // The shipped value is false in 4.61.0; the mechanism is exercised with an
+    // explicit true so the opened path stays covered. Gate 3 (`write: true`),
+    // which this call does not pass, is what keeps an OPEN gate 2 from creating
+    // a file — so the honest assertion here is "opens, and writes nothing
+    // anyway", not "throws". The shipped value is pinned separately below.
+    const report = apply(runPlan(completionEvents()), {
+      dryRun: true,
+      config: { runtime: { artifactLifecycle: { enabled: true } } },
+    });
     expect(report.dryRun).toBe(true);
     expect(report.written).toEqual([]);
+  });
+
+  it('pins the shipped artibot.config.json gate value as a real boolean false', () => {
+    const config = JSON.parse(readFileSync(path.join(PKG_ROOT, 'artibot.config.json'), 'utf8'));
+    expect(config.runtime.artifactLifecycle.enabled).toBe(false);
+    expect(typeof config.runtime.artifactLifecycle.enabled).toBe('boolean');
   });
 
   it('separates would-write from blocked, and writes neither', () => {
