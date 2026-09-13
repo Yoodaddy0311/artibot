@@ -1,9 +1,12 @@
 /**
- * `lib/review/independent-reviewer` — the `review.completed` /
+ * `lib/review/verdict-writer` — the `review.completed` /
  * `review.claim_audit` LEDGER WRITERS.
  *
- * The parsers decide whether a reviewer's answer is admissible; these functions
- * turn an admissible answer into the INPUT of a ledger line. They still perform
+ * The parsers, which live in `lib/review/independent-reviewer.js` and are
+ * covered by `tests/review/independent-reviewer.test.js` and
+ * `tests/review/claim-audit.test.js`, decide whether a reviewer's answer is
+ * admissible; the functions under test here turn an admissible answer into the
+ * INPUT of a ledger line. They still perform
  * no I/O: the append and the already-written-keys lookup arrive as ports, which
  * is what lets this suite drive the REAL writer without the module importing L5.
  *
@@ -43,6 +46,21 @@
  *  - That the temp-root path resolution matches a real project's: every write
  *    here passes an explicit `ledgerPath`, which bypasses the git-common-dir
  *    rule in `event-writer.js#ledgerFilePath` on purpose.
+ *  - THAT A LINE SURVIVES THE 4096-BYTE CAP WITH ITS OPTIONAL KEYS. This is the
+ *    gap most likely to turn a green suite into a wrong measurement, because the
+ *    loss is silent and the blocks here are small. `event-writer.js
+ *    #DEFAULT_LINE_MAX_BYTES` is 4096 (read 2026-09-12, `event-writer.js:125`),
+ *    and an oversized line goes through `foldOversized` (`:658`), which keeps
+ *    only `requiredDataKeys(spec)` plus `evidence_refs`. For
+ *    `review.claim_audit` the allowlist requires exactly `subject_agent_type`,
+ *    `claims_total`, `claims_refuted` (`schemas/ledger-events.allowlist.json`
+ *    `:342-346`, no `data_schema`, so the fold does apply) — therefore `nature`,
+ *    `subject_model` and `subject_agent_id` are the FIRST things dropped. A real
+ *    audit with long `evidence_refs` keeps its two counts and loses precisely
+ *    the three fields §4.1 stratifies by, so the row survives as a line and
+ *    still falls out of the stratified denominator. No test is added here: the
+ *    cap and the fold are the ledger writer's behaviour, not this module's, and
+ *    the allowlist is read-only to us. A test belongs beside `foldOversized`.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -236,6 +254,24 @@ describe('parseReviewVerdict exposes verification_id', () => {
     for (const key of ['ok', 'verdict', 'errors', 'schemaVersion', 'foldedVerdict', 'sources']) {
       expect(Object.prototype.hasOwnProperty.call(r, key), key).toBe(true);
     }
+  });
+
+  it('exposes exactly these 7 keys and no others on an admissible document', () => {
+    // Exactness, not presence: the test above cannot see a key being ADDED, and
+    // a new field on the parse result is a decision this writer has to make
+    // (hash it into an idempotency key, put it in `data`, or ignore it). Failing
+    // here is the intended way for that decision to become visible. `ambiguous`
+    // and `candidates` are deliberately out of scope — they appear only on the
+    // ambiguous path, which never reaches a builder.
+    expect(Object.keys(parseReviewVerdict(v2Doc())).sort()).toEqual([
+      'errors',
+      'foldedVerdict',
+      'ok',
+      'schemaVersion',
+      'sources',
+      'verdict',
+      'verificationId',
+    ]);
   });
 });
 
@@ -525,9 +561,13 @@ describe('idempotency keys', () => {
   });
 
   it('does NOT change when subject_model alone changes', () => {
-    // subject_model is unknowable until the L2 D1 route-receipt bind lands, so
-    // hashing it would make the same audit dedupe-distinct before and after the
-    // bind — the one field whose later arrival must not create a second line.
+    // What this pins is a LOSS, accepted deliberately: a reviewer that re-emits
+    // the same audit with subject_model now filled in gets the richer line
+    // deduped away. It is NOT protection against a before/after-bind pair —
+    // buildClaimAuditEvent has no argument a bind could inject a model through,
+    // so this writer cannot emit that pair at all. One audit is one measurement
+    // and so one line; filling in the reviewed agent's model is the L2 D1
+    // route-receipt bind's job (설계 §1.3), joining on subject_agent_id.
     const without = claimAuditIdempotencyKey(SID, parseClaimAudit({
       claim_audit: auditBlock(),
     }));

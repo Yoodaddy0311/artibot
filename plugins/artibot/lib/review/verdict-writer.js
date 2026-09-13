@@ -21,8 +21,10 @@
  * network. L2 may not import `lib/runtime/` (L5), so the append and the
  * already-written-keys lookup arrive as PORTS: the ledger writer is the
  * caller's dependency, not this module's. The ports mirror
- * `lib/verification/unified-verifier.js#recordVerification`, which solved the
- * same problem for `verify.completed`.
+ * `lib/verification/verify-writer.js#recordVerification`, which solved the same
+ * problem for `verify.completed` — and which moved out of
+ * `unified-verifier.js` in the same commit this module was split out of, for
+ * the same reason.
  *
  * ── An absent optional field OMITS ITS KEY ──────────────────────────────────
  * `subject_model`, `subject_agent_id`, `nature` and `evidence_refs` are
@@ -110,11 +112,27 @@ export function reviewCompletedIdempotencyKey(sessionId, verificationId) {
  * Idempotency key for one `review.claim_audit` line.
  *
  * An audit block has no id of its own, so the identity is a digest of the
- * fields that make it the audit it is. `subject_model` is deliberately NOT
- * hashed: it is unknowable before the L2 D1 route-receipt bind (설계 §1.3), so
- * hashing it would make the same audit dedupe-distinct before and after the
- * bind and write a second line for one measurement. Every other field is
+ * fields that make it the audit it is. Every field except `subject_model` is
  * hashed, so correcting a count is a NEW line rather than a silent overwrite.
+ *
+ * ── What excluding `subject_model` actually does ────────────────────────────
+ * Not what an earlier version of this comment claimed. It does NOT protect a
+ * before/after-bind pair from double-writing: `subject_model` can only reach
+ * here from the reviewer's own block via `parseClaimAudit`, and
+ * {@link buildClaimAuditEvent} has no argument through which a bind could
+ * inject one, so this writer cannot produce those two lines in the first place.
+ *
+ * The real, measurable effect is a LOSS: if a reviewer re-emits the same audit
+ * with `subject_model` now filled in, the richer line hashes identically and is
+ * deduped away silently. That is accepted, because one audit is one measurement
+ * and therefore one line — enriching it with the reviewed agent's model is the
+ * job of the L2 D1 route-receipt bind (설계 §1.3), which joins on
+ * `subject_agent_id`, not of a second reviewer emission. A re-emit that differs
+ * only by a field the reviewer could not have known (SubagentStart carries no
+ * model) is not new information. Do NOT add a `subjectModel` parameter to make
+ * such a re-emit distinct; that would put the bind's job in the writer.
+ * The dedupe is pinned by `tests/review/verdict-writer.test.js`
+ * ("does NOT change when subject_model alone changes").
  *
  * @param {string} sessionId envelope `session_id`
  * @param {object} audit a {@link parseClaimAudit} result

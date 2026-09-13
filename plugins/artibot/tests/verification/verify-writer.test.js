@@ -19,16 +19,33 @@
  * same lines and shows the fold then collapses all four into one bucket, which
  * is the exact failure a shape-only check could not see.
  *
- * What it cannot prove (rules §9): nothing here measures
- * a real ledger under concurrency, and the 4096-byte line cap is not exercised:
- * the evidence entries used are a few hundred bytes, so a green run here says
- * nothing about the writer's fold path for oversized verdicts (the exact
- * false-confidence shape rules §9 names).
+ * The 4096-byte line cap IS exercised, and that is new. Review round 1 found the
+ * earlier version of this file proving nothing about it: every fixture used
+ * `output:'ok'`, so the cap was never approached — the §9 false-green shape
+ * exactly. The cap block now drives 5 KB and 40 KB of captured output through
+ * the REAL `appendLedgerEvent` and asserts 0 `ledger.rejected` lines and
+ * `folded === false`, plus a 400-entry case for the other axis.
+ *
+ * What it still cannot prove (rules §9):
+ *  1. That a line survives REDACTION growth. `redactDeep` runs downstream of
+ *     this module and `[REDACTED_KEY]` is longer than the short secret it
+ *     replaces, so output dense with secrets can grow after the writer sized it.
+ *     `LINE_RESERVE_BYTES` is slack for that, not a proof, and no fixture here
+ *     contains a secret.
+ *  2. That a real ledger holds under concurrency. Every case here is one
+ *     process appending to a fresh temp file.
+ *  3. That the bound is right for evidence shapes other than long `output` /
+ *     `note` — a verdict whose bulk sits in `command` or `file` strings is
+ *     bounded only by the entry-dropping stage, which is measured at 400
+ *     entries and nowhere near the thousands a pathological caller could send.
+ *  4. That any production caller wires this at all. Nothing in `lib/` or
+ *     `scripts/` calls `recordVerification` yet.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -42,6 +59,9 @@ import {
 import { LAYERS, verify } from '../../lib/verification/unified-verifier.js';
 import {
   buildVerifyCompletedEvents,
+  EVIDENCE_TRUNCATION_MARK,
+  LEDGER_LINE_MAX_BYTES,
+  LINE_RESERVE_BYTES,
   recordVerification,
   toVerifyResult,
   VERIFY_COMPLETED_EVENT,
@@ -54,6 +74,10 @@ const SID = 'sess-verify-writer-01';
 const MISSION = 'M-20260912-001';
 /** Relative — `getLedgerSettings` joins it onto the injected projectRoot. */
 const LEDGER_REL = path.join('.artibot', 'runtime', 'ledger.jsonl');
+const ALLOWLIST_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../schemas/ledger-events.allowlist.json',
+);
 
 /** Exit-0 result in `lib/autopilot/goal-evaluator.js#evaluateGoal`'s shape. */
 const detPass = {
@@ -552,6 +576,179 @@ describe('the real reader folds the lines this writer wrote', () => {
     expect(findings.every((f) => f.code === 'VERIFICATION_LAYER')).toBe(true);
     expect(findings.every((f) => f.total === 1)).toBe(true);
     expect(findings.map((f) => f.layer)).toEqual([LAYER_UNSPECIFIED, ...LAYERS]);
+  });
+});
+
+describe('the 4096-byte line cap', () => {
+  /**
+   * A deterministic layer input whose CAPTURED OUTPUT is `bytes` long, taken
+   * through the synthesizing path in `normalizeDeterministic` (:311-319 on
+   * 2026-09-12) — `command` present, so `stdout` + `stderr` become
+   * `evidence[0].output` with no truncation anywhere in the verifier. This is
+   * the real shape a vitest run produces, and the reason the cap matters.
+   */
+  function verdictWithOutput(bytes) {
+    return verify({
+      layers: {
+        deterministic: {
+          exitCode: 0,
+          command: 'npx vitest run tests/verification',
+          stdout: 'x'.repeat(bytes),
+          stderr: '',
+          reason: 'validationCommand exit code 0',
+          evidence: [],
+        },
+      },
+      now: AT,
+    });
+  }
+
+  /** Bytes of the ledger line an input becomes, newline included — the cap's unit. */
+  function inputBytes(input) {
+    return Buffer.byteLength(`${JSON.stringify(input)}\n`, 'utf8');
+  }
+
+  /** The entry the bounded line carries for the deterministic layer. */
+  function detEvidence(built) {
+    return built.inputs.find((i) => i.data.layer === 'deterministic').data.evidence[0];
+  }
+
+  it('copies `limits.line_max_bytes` from the allowlist without drift', () => {
+    // The module cannot import the allowlist (L5 data, and this is L2), so the
+    // number is copied. This is the assertion that keeps the copy honest: if the
+    // ledger ever raises or lowers its cap, this fails rather than letting the
+    // writer size lines against a number nobody maintains.
+    const allowlist = JSON.parse(readFileSync(ALLOWLIST_PATH, 'utf8'));
+    expect(allowlist.limits.line_max_bytes).toBe(LEDGER_LINE_MAX_BYTES);
+  });
+
+  it('reserves more than the envelope keys the ledger adds downstream', () => {
+    // The reserve exists because this module sizes an INPUT while the cap is
+    // measured on the assembled ENVELOPE. Measured here rather than asserted
+    // from the comment: append one line and compare what came back with what
+    // went in, so the reserve is checked against the real overhead.
+    const built = buildVerifyCompletedEvents(passVerdict(), { sessionId: SID });
+    const sent = built.inputs[0];
+    append(sent);
+    const landed = rawLines()[0];
+    const overhead = inputBytes(landed) - inputBytes(sent);
+    expect(overhead).toBeGreaterThan(0);
+    expect(overhead).toBeLessThan(LINE_RESERVE_BYTES);
+  });
+
+  it('keeps every line under the cap for ~5 KB of captured output', () => {
+    const built = buildVerifyCompletedEvents(verdictWithOutput(5 * 1024), { sessionId: SID, missionId: MISSION });
+    expect(built.ok).toBe(true);
+    expect(built.inputs).toHaveLength(4);
+    for (const input of built.inputs) {
+      expect(inputBytes(input)).toBeLessThanOrEqual(LEDGER_LINE_MAX_BYTES - LINE_RESERVE_BYTES);
+    }
+  });
+
+  it('keeps every line under the cap for ~40 KB of captured output', () => {
+    const built = buildVerifyCompletedEvents(verdictWithOutput(40 * 1024), { sessionId: SID, missionId: MISSION });
+    expect(built.ok).toBe(true);
+    for (const input of built.inputs) {
+      expect(inputBytes(input)).toBeLessThanOrEqual(LEDGER_LINE_MAX_BYTES - LINE_RESERVE_BYTES);
+    }
+  });
+
+  it('lands all four lines through the REAL writer, unfolded and unrejected', () => {
+    // The measurement that the blocking defect is actually closed. Before the
+    // bound, the overall and deterministic lines came back `line-too-large` and
+    // only the two empty-evidence layers landed, so the reader saw pass 0.
+    for (const bytes of [5 * 1024, 40 * 1024]) {
+      rmSync(path.join(root, LEDGER_REL), { force: true });
+      const built = buildVerifyCompletedEvents(verdictWithOutput(bytes), { sessionId: SID, missionId: MISSION });
+      const results = built.inputs.map((input) => append(input));
+      expect(results.every((r) => r.ok === true)).toBe(true);
+      expect(results.every((r) => r.folded === false)).toBe(true);
+      const lines = rawLines();
+      expect(lines.filter((l) => l.event === 'ledger.rejected')).toHaveLength(0);
+      expect(lines.filter((l) => l.event === VERIFY_COMPLETED_EVENT)).toHaveLength(4);
+      for (const line of lines) expect(inputBytes(line)).toBeLessThanOrEqual(LEDGER_LINE_MAX_BYTES);
+    }
+  });
+
+  it('folds through `recordVerification` with the full four-line tally', () => {
+    const out = recordVerification(
+      verdictWithOutput(40 * 1024), { sessionId: SID, missionId: MISSION }, { append, existingKeys },
+    );
+    expect(out).toMatchObject({ appended: 4, deduped: 0, rejected: 0, skipped: 0 });
+    const gate = foldGateState(rawLines());
+    expect(gate.layers.get('deterministic')).toMatchObject({ pass: 1, unmeasured: 0, other: 0 });
+    expect(gate.layers.get(LAYER_UNSPECIFIED)).toMatchObject({ pass: 1, unmeasured: 0, other: 0 });
+  });
+
+  it('says how much it removed, in the entry it shortened', () => {
+    const built = buildVerifyCompletedEvents(verdictWithOutput(5 * 1024), { sessionId: SID });
+    const entry = detEvidence(built);
+    expect(entry.output).toContain(EVIDENCE_TRUNCATION_MARK);
+    expect(entry.output).toMatch(/\[truncated \d+ of 5120 bytes\]$/);
+    // The head is kept, not a placeholder: the first bytes of a failing command's
+    // output are the part a reader needs.
+    expect(entry.output.startsWith('xxxx')).toBe(true);
+    // Identity fields survive — a shortened entry is still the same evidence.
+    expect(entry.kind).toBe('command');
+    expect(entry.command).toBe('npx vitest run tests/verification');
+  });
+
+  it('leaves the verdict it was handed byte-identical', () => {
+    // The writer must not mutate its input. `verification_id` is hashed from the
+    // FULL evidence, so a writer that shortened the verdict in place would move
+    // the join key and make the same verdict hash two ways.
+    const verdict = verdictWithOutput(5 * 1024);
+    const before = JSON.stringify(verdict);
+    const built = buildVerifyCompletedEvents(verdict, { sessionId: SID });
+    expect(JSON.stringify(verdict)).toBe(before);
+    expect(verdict.layers[0].evidence[0].output).toHaveLength(5 * 1024);
+    expect(built.inputs[0].data.verification_id).toBe(verdict.verification_id);
+  });
+
+  it('does not touch evidence that already fits', () => {
+    const built = buildVerifyCompletedEvents(passVerdict(), { sessionId: SID });
+    for (const input of built.inputs) {
+      for (const entry of input.data.evidence) {
+        expect(JSON.stringify(entry)).not.toContain(EVIDENCE_TRUNCATION_MARK);
+      }
+    }
+    expect(detEvidence(built).output).toBe('ok');
+  });
+
+  it('bounds many entries as well as one big one', () => {
+    // The single-entry case is the one the adapter produces today; a verdict
+    // assembled by hand can carry hundreds. Both must fit, and the line must
+    // still name the layer it measured.
+    const evidence = Array.from({ length: 400 }, (_unused, i) => ({
+      kind: 'command', command: `step ${i}`, output: 'y'.repeat(512),
+    }));
+    const verdict = verify({
+      layers: { deterministic: { exitCode: 0, evidence } },
+      now: AT,
+    });
+    const built = buildVerifyCompletedEvents(verdict, { sessionId: SID, missionId: MISSION });
+    expect(built.ok).toBe(true);
+    for (const input of built.inputs) {
+      expect(inputBytes(input)).toBeLessThanOrEqual(LEDGER_LINE_MAX_BYTES - LINE_RESERVE_BYTES);
+    }
+    const det = built.inputs.find((i) => i.data.layer === 'deterministic');
+    expect(det.data.result).toBe('pass');
+    expect(det.data.verification_id).toBe(verdict.verification_id);
+    // Entries that were dropped whole are counted, never silently absent.
+    expect(JSON.stringify(det.data.evidence)).toContain('dropped');
+    const results = det.data.evidence.length;
+    expect(results).toBeGreaterThan(0);
+  });
+
+  it('never throws on evidence JSON cannot serialize', () => {
+    // `buildVerifyCompletedEvents` is reachable with a hand-built verdict, so the
+    // bound has to survive a circular `output` rather than take the module down.
+    const circular = { kind: 'command', command: 'c', output: 'z'.repeat(9000) };
+    circular.self = circular;
+    const verdict = { ...passVerdict(), evidence: [circular] };
+    let built;
+    expect(() => { built = buildVerifyCompletedEvents(verdict, { sessionId: SID }); }).not.toThrow();
+    expect(built.ok).toBe(true);
   });
 });
 

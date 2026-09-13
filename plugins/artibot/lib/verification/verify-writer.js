@@ -104,31 +104,256 @@ export function verifyCompletedIdempotencyKey(sessionId, verificationId, layer) 
   return `${base}:${layer}`;
 }
 
+// ---------------------------------------------------------------------------
+// The byte cap
+// ---------------------------------------------------------------------------
+
+/**
+ * ── Why the writer bounds evidence at all ───────────────────────────────────
+ * The deterministic adapter (`./unified-verifier.js#normalizeDeterministic`,
+ * :311-319 on 2026-09-12) puts a command's FULL stdout+stderr into
+ * `evidence[0].output` and truncates nothing. A vitest run is a few KB, so an
+ * unbounded line is several times the ledger's cap, and the ledger's own
+ * overflow path cannot save it: `lib/runtime/event-writer.js#foldOversized`
+ * (:658 on 2026-09-12) drops only the keys the event does NOT require, which for
+ * `verify.completed` means `layer` and `verification_id` — `evidence` is
+ * required and stays. The folded line is still over the cap, so
+ * `appendWithinCap` (:752) refuses it as `line-too-large`.
+ *
+ * Measured before this bound existed (11:05 KST 2026-09-12): 5 KB of captured
+ * output produced a 5,492-byte overall line and a 5,530-byte deterministic
+ * line; 40 KB produced 41,332 and 41,370. Both over 4096, both rejected — while
+ * the two layers nobody ran, carrying no evidence, landed at 334 and 336 bytes.
+ * The reader therefore saw `pass 0` and two `unmeasured` lines with no
+ * `verification_id`: a verdict that PASSED read as a verdict that was not
+ * measured. That is the exact substitution this module exists to prevent, so
+ * shortening the evidence is the honest trade and dropping the line is not.
+ */
+
+/**
+ * Pinned copy of `schemas/ledger-events.allowlist.json#limits.line_max_bytes`
+ * (read 2026-09-12: `4096`). Copied rather than imported because the allowlist
+ * is L5 data owned by the ledger and this is an L2 module. The copy is held
+ * honest by a drift assertion in `tests/verification/verify-writer.test.js`
+ * that reads the allowlist and compares.
+ */
+export const LEDGER_LINE_MAX_BYTES = 4096;
+
+/**
+ * Bytes held back from the cap for what `lib/runtime/event-writer.js#buildEnvelope`
+ * (:396 on 2026-09-12) adds AFTER this module hands its input over: `v`, `ts`,
+ * `pid`, `seq`, and a `mission_id` fallback when the caller supplied none. Those
+ * keys are ~113 bytes at their widest, and the test measures the real overhead
+ * against this number rather than trusting the arithmetic.
+ *
+ * The remainder is deliberate slack for the one thing this module cannot
+ * measure: `redactDeep` runs downstream and `[REDACTED_KEY]` is LONGER than the
+ * short secret it replaces, so redaction can GROW a line this module already
+ * sized. The slack absorbs the realistic case. It is NOT a proof — output dense
+ * with short secrets could still overflow, and the ledger's own
+ * fold-then-reject path stays the backstop for that.
+ */
+export const LINE_RESERVE_BYTES = 512;
+
+/**
+ * The evidence fields this module will shorten. `kind`, `file`, `line`,
+ * `command` and `measured_at` are IDENTITY — shortening them would leave an
+ * entry that no longer says which measurement it came from, which is worse than
+ * a short one that does.
+ */
+const BOUNDED_EVIDENCE_FIELDS = Object.freeze(['output', 'note']);
+
+/**
+ * Present in every value this module shortened, so a reader can tell a short
+ * output from a command that printed little. Exported for the test and for any
+ * reader that needs to detect the condition rather than pattern-match prose.
+ */
+export const EVIDENCE_TRUNCATION_MARK = '…[truncated ';
+
+/**
+ * Names how much went, not just that something did. A bare ellipsis would let a
+ * 40 KB output and a 4 KB one look alike in the ledger.
+ *
+ * @param {number} keptBytes
+ * @param {number} totalBytes
+ * @returns {string}
+ */
+function truncationSuffix(keptBytes, totalBytes) {
+  return `${EVIDENCE_TRUNCATION_MARK}${totalBytes - keptBytes} of ${totalBytes} bytes]`;
+}
+
+/**
+ * The longest prefix of `s` that fits in `maxBytes` UTF-8 bytes, cut on a
+ * character boundary.
+ *
+ * Boundary-aware on purpose: slicing a Buffer mid-character and decoding it
+ * yields U+FFFD, which re-encodes to THREE bytes and could push the line back
+ * over the cap the slice was meant to bring it under.
+ *
+ * @param {string} s
+ * @param {number} maxBytes
+ * @returns {string}
+ */
+function sliceUtf8(s, maxBytes) {
+  if (maxBytes <= 0) return '';
+  const buf = Buffer.from(s, 'utf8');
+  if (buf.length <= maxBytes) return s;
+  let end = maxBytes;
+  while (end > 0 && (buf[end] & 0xC0) === 0x80) end -= 1;
+  return buf.subarray(0, end).toString('utf8');
+}
+
+/**
+ * A copy of one entry whose bounded fields fit `shareBytes` each, or the entry
+ * itself when nothing needed shortening.
+ *
+ * Returns a COPY. The verdict it came from is the caller's, and
+ * `verification_id` is hashed from the full evidence — mutating an entry here
+ * would move the join key that ties this line to `review.md` and `outcome.md`.
+ *
+ * @param {unknown} entry
+ * @param {number} shareBytes
+ * @returns {unknown}
+ */
+function shrinkEvidenceEntry(entry, shareBytes) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  const e = /** @type {Record<string, unknown>} */ (entry);
+  let out = null;
+  for (const key of BOUNDED_EVIDENCE_FIELDS) {
+    const value = e[key];
+    if (typeof value !== 'string') continue;
+    const total = Buffer.byteLength(value, 'utf8');
+    if (total <= shareBytes) continue;
+    const head = sliceUtf8(value, shareBytes);
+    if (out === null) out = { ...e };
+    out[key] = `${head}${truncationSuffix(Buffer.byteLength(head, 'utf8'), total)}`;
+  }
+  return out ?? entry;
+}
+
+/**
+ * The entry that stands in for evidence dropped whole. A COUNT, because an
+ * absent entry reads to the gate as a smaller denominator while a counted one
+ * reads as a measurement that did not fit.
+ *
+ * Shaped as a `command` entry so it satisfies
+ * `./unified-verifier.js#canonicalEvidence` if it is ever fed back through.
+ *
+ * @param {number} dropped
+ * @param {number} total
+ * @returns {Record<string, unknown>}
+ */
+function dropMarkerEntry(dropped, total) {
+  return {
+    kind: 'command',
+    command: 'verify-writer:evidence-bound',
+    output: `${dropped} of ${total} evidence entries dropped to fit the ${LEDGER_LINE_MAX_BYTES}-byte ledger line cap`,
+  };
+}
+
+/**
+ * Serialized size of one line, newline included — the unit the cap is measured
+ * in (`lib/runtime/event-writer.js#lineBytes`, :635 on 2026-09-12).
+ *
+ * `Infinity` for anything `JSON.stringify` refuses, which routes a circular
+ * entry to the most-reduced candidate instead of throwing out of a module whose
+ * contract is that it never throws.
+ *
+ * @param {object} input
+ * @returns {number}
+ */
+function lineBytesOf(input) {
+  try {
+    return Buffer.byteLength(`${JSON.stringify(input)}\n`, 'utf8');
+  } catch {
+    return Infinity;
+  }
+}
+
+/**
+ * The most complete version of one line that fits `limit` bytes.
+ *
+ * Three stages, each strictly more lossy than the last, and every stage is
+ * MEASURED rather than computed — JSON escaping means a string cut to N bytes
+ * can serialize to more than N, so the only trustworthy budget is one that has
+ * been serialized and weighed.
+ *
+ *   1. shorten `output`/`note` to a shared per-field budget, halving until it
+ *      fits;
+ *   2. shorten them to nothing but their marker;
+ *   3. drop whole entries from the END, leaving a counted marker entry.
+ *
+ * Deterministic at every stage: the same verdict always yields the same line, so
+ * a re-run dedupes on its idempotency key instead of appending a second,
+ * differently-shortened copy.
+ *
+ * A line still over `limit` with NO evidence at all is returned as-is. That
+ * needs a session or verification id of some kilobytes, and it is the one case
+ * this module genuinely cannot fix — the ledger's rejection is then the right
+ * outcome rather than something to paper over here.
+ *
+ * @param {(evidence: Array<unknown>) => object} build
+ * @param {Array<unknown>} evidence
+ * @param {number} limit
+ * @returns {object}
+ */
+function fitLine(build, evidence, limit) {
+  const full = build(evidence);
+  if (lineBytesOf(full) <= limit) return full;
+
+  const emptied = evidence.map((e) => shrinkEvidenceEntry(e, 0));
+  const floor = lineBytesOf(build(emptied));
+  let share = Math.max(0, limit - floor);
+  while (share > 0) {
+    const candidate = build(evidence.map((e) => shrinkEvidenceEntry(e, share)));
+    if (lineBytesOf(candidate) <= limit) return candidate;
+    share = Math.floor(share / 2);
+  }
+
+  const bare = build(emptied);
+  if (lineBytesOf(bare) <= limit) return bare;
+
+  for (let keep = emptied.length - 1; keep >= 0; keep -= 1) {
+    const candidate = build([
+      ...emptied.slice(0, keep),
+      dropMarkerEntry(emptied.length - keep, emptied.length),
+    ]);
+    if (lineBytesOf(candidate) <= limit) return candidate;
+  }
+  return build([]);
+}
+
 /**
  * One ledger envelope input. `data` carries the four contract keys and nothing
  * else — an envelope key duplicated into `data` would be a second, divergent
  * copy of a field the envelope already owns.
+ *
+ * `data.evidence` is bounded here, at the last point before the line leaves this
+ * module. The verdict's own evidence is untouched.
  *
  * @param {{ sessionId: string, missionId: string|null, verificationId: string,
  *   layer: string|null, result: string, evidence: Array<unknown> }} p
  * @returns {object}
  */
 function verifyEventInput(p) {
-  const data = {};
-  if (p.layer !== null) data.layer = p.layer;
-  data.result = p.result;
-  data.evidence = p.evidence;
-  data.verification_id = p.verificationId;
-  return {
-    event: VERIFY_COMPLETED_EVENT,
-    session_id: p.sessionId,
-    ...(p.missionId === null ? {} : { mission_id: p.missionId }),
-    source: VERIFY_LEDGER_SOURCE,
-    idempotency_key: verifyCompletedIdempotencyKey(
-      p.sessionId, p.verificationId, p.layer === null ? undefined : p.layer,
-    ),
-    data,
+  const build = (evidence) => {
+    const data = {};
+    if (p.layer !== null) data.layer = p.layer;
+    data.result = p.result;
+    data.evidence = evidence;
+    data.verification_id = p.verificationId;
+    return {
+      event: VERIFY_COMPLETED_EVENT,
+      session_id: p.sessionId,
+      ...(p.missionId === null ? {} : { mission_id: p.missionId }),
+      source: VERIFY_LEDGER_SOURCE,
+      idempotency_key: verifyCompletedIdempotencyKey(
+        p.sessionId, p.verificationId, p.layer === null ? undefined : p.layer,
+      ),
+      data,
+    };
   };
+  return fitLine(build, p.evidence, LEDGER_LINE_MAX_BYTES - LINE_RESERVE_BYTES);
 }
 
 /**
