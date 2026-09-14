@@ -142,7 +142,8 @@ export function foldCostTerms(receipts) {
  * True when a receipt's recommended tier and selected tier both exist and differ.
  *
  * Both halves must be present: a receipt missing either one is not evidence of
- * agreement, so it lands in `absent` instead of being scored as a match.
+ * agreement, so it is excluded from the denominator — and counted by
+ * `routing.tier_comparability` — instead of being scored as a match.
  *
  * @param {object} receipt - a `route.selected` line.
  * @returns {boolean} whether the two tiers are present and unequal.
@@ -296,7 +297,6 @@ function avoidedSwitchMetrics(routes) {
         + 'data.reason[] hysteresis:* → §38 3분류',
       denominator: fold.comparable,
       numerator: fold.avoided,
-      absent: fold.denominator - fold.comparable,
       counts: fold.byReason,
       note: '설계 §38(MODEL-SWITCHING-SCORECARD.md) 사유 3분류 cache_affinity/low_benefit/'
         + "residency. Observe 대리 정의는 ARTIBOT-5.0-DESIGN.md:479 '추천≠정책 스폰'. 사상 "
@@ -373,14 +373,26 @@ export function buildRoutingScorecard(replay) {
         + '라우터 추천이 아니다(route-receipt 스키마 models 절).',
     }),
     metric({
+      key: 'routing.tier_comparability',
+      label: '추천·선택 티어 비교 가능 영수증',
+      source: 'route.selected · data.models.recommended.tier ∧ .selected.tier 둘 다 있는 영수증 '
+        + '÷ route.selected',
+      denominator: routes.length,
+      numerator: comparable,
+      note: 'recommended·selected 티어가 둘 다 있는 영수증의 몫. 이 행이 100% 가 아니면 아래 두 '
+        + '비율(routing.recommendation_divergence · routing.avoided_switch)의 분모가 전체보다 '
+        + '작다 — 비교 불가 영수증은 그 두 행의 absent 가 아니라 여기서 보인다(absent 는 분모 '
+        + '안의 결측만 센다, metric.js).',
+    }),
+    metric({
       key: 'routing.recommendation_divergence',
       label: '추천 ≠ 선택 (Observe 지표)',
       source: 'route.selected · data.models.recommended.tier vs .selected.tier',
       denominator: comparable,
       numerator: countWhere(routes, divergedTier),
-      absent: routes.length - comparable,
-      note: '분모는 두 티어가 모두 있는 영수증만이다 — 한쪽이 없으면 일치로 세지 않고 미분류로 '
-        + '뺀다. 어느 쪽이 옳았는지는 판정하지 않는다(헤더 #4).',
+      note: '분모는 두 티어가 모두 있는 영수증만이다 — 한쪽이 없으면 일치로 세지 않고 분모에서 '
+        + '뺀다. 빠진 영수증 수는 routing.tier_comparability 행이 센다. 어느 쪽이 옳았는지는 '
+        + '판정하지 않는다(헤더 #4).',
     }),
     ...avoidedSwitchMetrics(routes),
     metric({

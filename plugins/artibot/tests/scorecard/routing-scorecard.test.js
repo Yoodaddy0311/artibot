@@ -102,6 +102,26 @@ describe('routing-scorecard — 라이브 모양 영수증', () => {
     expect(pinned.ratio).toBe(0);
   });
 
+  it('models 없는 라이브 모양 줄이 섞여도 카드가 서고, 그 줄은 tier_comparability 에서 보인다', () => {
+    const withoutModels = buildEnvelope({
+      session_id: 'sess-live-0001',
+      source: 'hook',
+      mission_id: 'M-20260914-001',
+      event: 'route.selected',
+      routing_epoch_id: 'toolu_5',
+      ts: '2026-09-14T00:10:05.000Z',
+      data: { decision: { type: 'route' }, reason: [...LIVE_AGREED_REASON], source: 'shadow' },
+    }, { pid: 4242, seq: 5 });
+    const card = buildRoutingScorecard(buildReplay([...LIVE_LINES, withoutModels]));
+    const row = (key) => {
+      const m = card.metrics.find((x) => x.key === key);
+      return [m.numerator, m.denominator, m.absent];
+    };
+    expect(row('routing.tier_comparability')).toEqual([4, 5, 0]);
+    expect(row('routing.recommendation_divergence')).toEqual([2, 4, 0]);
+    expect(row('routing.avoided_switch')).toEqual([2, 4, 0]);
+  });
+
   it('두 번 접어도 바이트가 같다', () => {
     const replay = buildReplay(LIVE_LINES);
     expect(JSON.stringify(buildRoutingScorecard(replay)))
