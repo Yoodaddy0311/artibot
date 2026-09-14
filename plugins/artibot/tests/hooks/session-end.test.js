@@ -1113,9 +1113,10 @@ describe('session-end hook - learning pipeline', () => {
         expect(row.data.unresolved_models).toEqual([]);
 
         // An unregistered event is refused by the writer and recorded as
-        // `ledger.rejected`. Asserting zero of those is what makes this test
-        // fail loudly if the allowlist entry is ever removed, instead of
-        // silently measuring nothing.
+        // `ledger.rejected`. If the allowlist entry is ever removed, the
+        // `theEndedRow` length check above fails first (reverse-injection run
+        // 2026-09-14: 4/7 RED there); this assertion names the CAUSE — the
+        // refused row — so the failure is read as "unregistered", not "lost".
         expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
       });
 
