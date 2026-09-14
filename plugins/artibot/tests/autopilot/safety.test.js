@@ -141,6 +141,138 @@ describe('classifyRisk — scoped recursive delete is caution', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// rm-rf-root — 타깃 터미네이터(2026-09-14, guard-l2-followups ①).
+//
+// 종전 루트 분기는 `\/(?:\s|$|\*|\w)` 였다. `/` 뒤에 공백·입력끝·`*`·단어문자가
+// 와야만 매치하므로 셸이 토큰을 끝내는 **다른 모든 방법**이 사각이었다. 실측
+// 2026-09-14(node v24.15.0, 규칙 단독 + classifyRisk + L1 executeChain 3열):
+// 타깃 34형 중 23형이 L2 safe 였고, 래퍼 10형 중 9형이 safe 였다.
+//
+// 이 사각이 비싼 이유는 **언급이 아니라 실행형**이라는 데 있다. `sh -c "…"`,
+// `eval "…"`, 백틱, `(…)`, `{ …; }` 는 전부 실행되는 형태인데 danger 가 아니었다.
+// heredoc 만 danger 였고 그것도 우연이다 — 줄바꿈이 옛 터미네이터 집합에 있었다.
+// L1 은 34형 + 10래퍼 전부 block 이었으므로 이것은 **L2 단독 결함**이고
+// PreToolUse 차단에는 영향이 0 이었다. 그래도 방향 규칙(L1 block ⇒ L2 ≥ caution)
+// 위반이 32건이었다.
+//
+// 이 describe 가 증명하지 않는 것: L1 쪽 판정은 여기서 재지 않는다. 세 열
+// 재현표는 PARITY(tests/core/guard-registry-safe-override-scope.test.js)가
+// 행 단위로 핀하고, 이 파일은 L2 판정만 책임진다.
+describe('classifyRisk — rm-rf-root reads every shell token terminator', () => {
+  // 종전 miss 16형 + 종전 hit 형을 한 표로 둔다. 분모가 보여야 "16형을 고쳤다"가
+  // 검증 가능한 문장이 된다.
+  it.each([
+    // 루트 분기 — 인용부호·괄호·분리자·리다이렉트
+    'rm -rf /"',
+    "rm -rf /'",
+    'rm -rf /)',
+    'rm -rf /;',
+    'rm -rf /&',
+    'rm -rf /|',
+    'rm -rf />x',
+    // 루트 분기 — 두 번째 `/` 와 `.`. `rm -rf //` 와 `rm -rf /.` 는 루트를 지운다.
+    'rm -rf //',
+    'rm -rf /.',
+    'rm -rf /..',
+    // `--` 구분자 뒤에서도 같다.
+    'rm -rf -- /"',
+    // `~` 분기 — 같은 모양의 같은 구멍
+    'rm -rf ~"',
+    'rm -rf ~)',
+    'rm -rf ~;',
+    'rm -rf ~&',
+    'rm -rf ~|',
+    // `$HOME` 분기
+    'rm -rf $HOME"',
+    'rm -rf $HOME;',
+    'rm -rf $HOME&',
+    'rm -rf $HOME)',
+    'rm -rf $HOME|',
+  ])('grades %s as danger via rm-rf-root', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 래퍼 9형. heredoc 은 종전에도 danger 라 위 'still grades a heredoc body'
+  // it 이 이미 갖고 있다 — 여기 다시 넣지 않는다.
+  it.each([
+    ['pipe to sh', 'echo "rm -rf /" | sh'],
+    ['command substitution', 'echo "$(rm -rf /)"'],
+    ['sh -c double-quoted', 'sh -c "rm -rf /"'],
+    ['sh -c single-quoted', "sh -c 'rm -rf /'"],
+    ['bash -c with $HOME', 'bash -c "rm -rf $HOME"'],
+    ['subshell', '(rm -rf /)'],
+    ['brace group', '{ rm -rf /; }'],
+    ['eval', 'eval "rm -rf /"'],
+    ['backticks', '`rm -rf /`'],
+  ])('grades the %s wrapper as danger via rm-rf-root', (_name, command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 따옴표 감싼 타깃. 종전에는 rm-rf-path 로 흘러 **caution 으로 강등**됐다 —
+  // L1 은 정규화로 따옴표를 지우고 block 하는데 L2 만 "범위가 정해진 경로"로
+  // 읽었다. 타깃 앞 `["']?` 가 그 한 자리를 메운다.
+  it.each([
+    'rm -rf "/"',
+    "rm -rf '/'",
+    'rm -rf "$HOME"',
+  ])('grades the quoted target %s as danger via rm-rf-root', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 수용된 과대 판정. 큰따옴표 안의 `~` 는 확장되지 않으므로 이것은 문자 그대로의
+  // `./~` 디렉터리를 지운다 — 즉 홈이 아니다. 방향이 차단 쪽이라 받되 **조용히
+  // 두지 않는다.** 실사용 발생률은 미측정(트랜스크립트 조사 안 함).
+  it('accepts the quoted-tilde over-match knowingly', () => {
+    const r = classifyRisk('rm -rf "~"');
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 남은 miss 2형. 고치지 않는다 — 커버리지 확대는 오너 결정이고, 여기서는
+  // **지금 무엇이 통과하는지**를 기록한다. 둘 다 L1 은 block 이므로 방향 규칙
+  // 위반이 남아 있다는 사실도 함께 핀한다(실측 2026-09-14).
+  it('still misses ${HOME} and ~user (documented, out of scope)', () => {
+    // `${HOME}` 은 중괄호 확장이라 `\$HOME` 리터럴에 안 걸린다. rm-rf-path 가
+    // 받아서 caution 이 되므로 완전한 사각은 아니다.
+    expect(classifyRisk('rm -rf ${HOME}').matchedId).toBe('rm-rf-path');
+    // `~user` 는 다른 사용자의 홈이다. `~` 분기가 바로 뒤에 터미네이터를
+    // 요구하므로 안 걸리고, 여기는 여전히 L2 safe = full-stack 방향 위반이다.
+    expect(classifyRisk('rm -rf ~user').level).toBe('safe');
+  });
+
+  // 음성 16형. 이 편집은 **터미네이터를 넓히는** 변경이라 원리적으로 과대 판정
+  // 위험이 있다 — 그 위험을 재는 자리가 여기다. 실측 2026-09-14: 신규 매치 0.
+  it.each([
+    'rm -rf ./build',
+    'rm -rf build',
+    'rm -fr dist',
+    'rm -rf node_modules/.cache',
+    'rm -rfv dist',
+    'rm -r -f dist',
+    'rm --recursive --force dist',
+    'rm -rf -- build',
+    'rm -f file.txt',
+    'rm --force file.txt',
+    'rm -f /',
+    'rm /tmp/file.txt',
+    'ls -la /tmp',
+    'rm -r ./build',
+    'rm -rf *',
+    // 따옴표 분기가 아무 토큰이나 받지 않는지. `["']?` 뒤에도 타깃은
+    // `/`·`~`·`$HOME` 이어야 한다.
+    'rm -rf "build"',
+  ])('leaves %s off rm-rf-root', (command) => {
+    expect(classifyRisk(command).matchedId).not.toBe('rm-rf-root');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // rm-recursive-path — force 플래그 없는 재귀 삭제(리더 추가 목표 A, 2026-09-14).
 //
 // 왜 생겼나(실측 2026-09-14, node v24.15.0, executeChain + classifyRisk 17형):
@@ -606,10 +738,15 @@ describe('classifyRisk — printer-segment preprocessing across the catalogue', 
   // 규칙 소스는 그대로인데 판정이 safe -> danger 로 움직인다. 방향이 차단
   // 쪽이라 받아들이지만, **조용히 두지 않는다**.
   // 원인: sql-delete-no-where 의 꼬리 `(?!.*\bWHERE\b)` 는 줄 끝까지가 아니라
-  // 입력 끝까지(`s` 플래그) 훑는다. `DELETE FROM t; echo "WHERE"` 에서 종전에는
+  // 입력 끝까지(`s` 플래그) 훑었다. `DELETE FROM t; echo "WHERE"` 에서 종전에는
   // 그 `WHERE` 가 lookahead 를 막아 safe 였다 — 즉 **인쇄되는 단어 하나로 SQL
   // 규칙을 무력화할 수 있었다.** 전처리가 인쇄 세그먼트를 비우면서 그 우회가
-  // 닫혔다. 실측 2026-09-14: 규칙을 raw 에 대면 false, 전처리 결과에 대면 true.
+  // 닫혔다.
+  //
+  // **2026-09-14 후속(guard-l2-followups ②)**: 이제 규칙 자체도 `[^;]{0,192}`
+  // 라 `;` 를 못 넘는다. 즉 이 우회는 두 번 닫혀 있고, 이 it 은 더 이상 전처리
+  // 단독의 증거가 아니다. 전처리와 무관한 규칙 단독 증거는 아래 describe 의
+  // 'closes the printed-WHERE bypass in the rule source alone' 이 맡는다.
   it('closes the "print the word WHERE to defuse the rule" bypass', () => {
     const r = classifyRisk('DELETE FROM t; echo "WHERE"');
     expect(r.level).toBe('danger');
@@ -617,13 +754,96 @@ describe('classifyRisk — printer-segment preprocessing across the catalogue', 
   });
 
   // 음성 대조 — 진짜 WHERE 절은 인쇄물이 아니므로 전처리가 손대지 않는다.
-  // 이 입력이 danger 인 것은 이 줄기와 무관한 **선재 오탐**이다(전처리는 여기서
-  // no-op: blankPrinterSegments 출력 === 입력, 실측 2026-09-14). 규칙의 몸통
-  // 문자클래스가 공백을 포함해 `t WHERE id` 까지 삼킨 뒤 lookahead 가 성립해
-  // 버린다. 여기서 고치지 않는다 — 이 줄기는 정규식을 0건 편집한다. 핀만 해
-  // 두어 다음 사람이 "전처리 탓"으로 오진하지 않게 한다.
-  it('leaves the pre-existing WHERE false positive exactly as it was', () => {
-    expect(classifyRisk('DELETE FROM t WHERE id=1').matchedId).toBe('sql-delete-no-where');
+  //
+  // **2026-09-14 반전**(guard-l2-followups ②). 이 it 은 종전에 선재 오탐을
+  // "그대로 두었다"고 핀했다 — 그 줄기가 정규식을 0건 편집했기 때문이다. 이제
+  // 규칙 몸통에서 공백을 뺐으므로 오탐이 사라졌고, 핀도 뒤집는다. 원인은
+  // 그때 적어 둔 그대로였다: 몸통 문자클래스가 공백을 포함해 `t WHERE id` 까지
+  // 삼킨 뒤 `=` 에서 멈추면 lookahead 가 성립해 버렸다.
+  it('no longer fires on a single-line WHERE clause', () => {
+    const r = classifyRisk('DELETE FROM t WHERE id=1');
+    expect(r.level).toBe('safe');
+    expect(r.matchedId).toBeUndefined();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// sql-delete-no-where — 몸통 클래스 + 창 있는 lookahead(2026-09-14, ②).
+//
+// 두 자리를 고쳤다. (1) 몸통 `[\w."` ]+` 에서 공백 제거 — 단일행 WHERE 8형이
+// 전부 오탐이었다(실측 8/8). (2) lookahead `(?!.*\bWHERE\b)` → `(?![^;]{0,192}…)`
+// 이고 `s` 플래그 삭제. `[^;]` 는 문장 경계를 못 넘으므로 **뒷 문장의 WHERE 로
+// 앞 문장을 무력화하는 우회**가 닫힌다.
+//
+// 포기하는 것: 테이블명 뒤 193자 이후의 WHERE 는 보이지 않아 danger 로 판정한다
+// (fail-closed). 그 폭의 정본은 아래 경계 쌍 하나뿐이다.
+describe('classifyRisk — sql-delete-no-where reads the WHERE that belongs to it', () => {
+  it.each([
+    'DELETE FROM t WHERE id=1',
+    "DELETE FROM t WHERE name = 'x'",
+    'DELETE FROM t WHERE id IN (1,2)',
+    'DELETE FROM t WHERE active',
+    'DELETE FROM a USING b WHERE a.id=b.id',
+    'DELETE FROM t WHERE',
+    'psql -c "DELETE FROM t WHERE id=1"',
+    `DELETE FROM t WHERE ${'x'.repeat(200)}`,
+  ])('leaves %s safe', (command) => {
+    expect(classifyRisk(command).level).toBe('safe');
+  });
+
+  // 진성 9형. 오탐 수리가 진양성을 깎지 않았다는 것이 이 목록의 전부다.
+  it.each([
+    'DELETE FROM t;',
+    'DELETE FROM t',
+    'DELETE FROM "t"',
+    '`DELETE FROM t`;',
+    'DELETE FROM db.t',
+    'DELETE FROM t RETURNING *',
+    'DELETE FROM t ORDER BY id LIMIT 1',
+    'DELETE FROM t\n',
+    'psql -c "DELETE FROM t"',
+  ])('keeps %s at danger', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('sql-delete-no-where');
+  });
+
+  // 줄바꿈 WHERE. `[^;]` 는 줄바꿈을 넘으므로 `s` 플래그를 지워도 계속 safe 다
+  // — `s` 는 `.` 에만 의미가 있었고 새 식에는 `.` 이 없다.
+  it.each([
+    'DELETE FROM t\nWHERE id=1',
+    'DELETE FROM t\n  WHERE id=1',
+  ])('leaves the multi-line form %j safe', (command) => {
+    expect(classifyRisk(command).level).toBe('safe');
+  });
+
+  // `;` 경계. 뒷 문장의 WHERE 는 앞 문장과 무관하다.
+  it('does not let a later statement WHERE defuse this one', () => {
+    const r = classifyRisk('DELETE FROM t; SELECT 1 WHERE x');
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('sql-delete-no-where');
+  });
+
+  // 위 'closes the "print the word WHERE to defuse the rule" bypass' 는 전체
+  // 경로(전처리 포함)를 재고, 이 it 은 **규칙 소스 단독**을 잰다. 두 개가 다른
+  // 것을 증명한다 — 종전에는 그 우회가 전처리에만 의존해 닫혀 있었고, 전처리를
+  // 끄면 되살아났다. 이제 규칙 혼자로도 닫힌다.
+  it('closes the printed-WHERE bypass in the rule source alone, with no preprocessing', () => {
+    const rule = DANGEROUS_PATTERNS.find((r) => r.id === 'sql-delete-no-where');
+    expect(rule.test.test('DELETE FROM t; echo "WHERE"')).toBe(true);
+    // 같은 식이 진짜 WHERE 절은 여전히 비껴간다 — 위 true 가 "무조건 매치"가
+    // 아니라는 분모.
+    expect(rule.test.test('DELETE FROM t WHERE id=1')).toBe(false);
+  });
+
+  // 포기 범위를 실행형으로 못 박는다. 193 은 창(192)의 첫 바깥 값이고, 그
+  // 바깥에서는 WHERE 가 있어도 danger 다 — fail-closed 이지 사각이 아니다.
+  it('grades a WHERE past the 192-character window as danger (fail-closed)', () => {
+    // 테이블명과 WHERE 사이가 정확히 193자 — 창의 첫 바깥 값.
+    const past = `DELETE FROM t ${'x'.repeat(191)} WHERE y`;
+    const r = classifyRisk(past);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('sql-delete-no-where');
   });
 });
 
@@ -853,23 +1073,28 @@ function findUnboundedRuns(source, flags = '', ceiling = WINDOW_CEILING_DEFAULT)
 }
 
 /**
- * 스캔 예외. **id 기준 정확히 1건**이고, 넓히려면 아래 두 it 을 모두 고쳐야 한다.
+ * 스캔 예외. **2026-09-14 부로 공집합이다.**
  *
- * sql-delete-no-where 의 `(?!.*\bWHERE\b)` 는 실측 선형이므로 규칙을 깎지 않고
- * 스캔이 비켜간다(검증 규율 §10: 게이트를 통과시키려 규칙을 깎지 않는다).
- * 실측 — node v24.15.0, 2026-09-11 12:10 UTC, 3회 중앙값, 단일 정규식 /
- * classifyRisk 전체 경로, 비매치 반복형(`'DELETE FROM t '`) 과 WHERE 꼬리
- * 적대형(같은 반복 + 끝에 ` WHERE x`):
- *          10,240B      20,480B      40,962B      122,880B
- *   반복형 0.01 / 0.07  0.02 / 0.12  0.06 / 0.26  0.12 / 0.68  ms
- *   꼬리형 0.01 / 0.08  0.02 / 0.12  0.04 / 0.26  0.12 / 0.70  ms
- * 입력 12배에 시간 12배 — 선형이다.
+ * 종전 유일 항목은 `sql-delete-no-where` 였고 근거는 "`(?!.*\bWHERE\b)` 는 실측
+ * 선형"이었다. **그 근거는 틀렸다.** 그 측정은 비매치 반복형(`'DELETE FROM t '`)
+ * 으로 했는데 그 입력은 **첫 시도에서 매치가 끝나** 백트래킹을 한 번도 밟지
+ * 않는다. 매 시도 위치에서 실패하는 입력으로 다시 재면 2차식이 나온다 —
+ * 실측(node v24.15.0, 2026-09-14, 3회 중앙값, 규칙 단독,
+ * `fill('DELETE FROM t=1 WHERE x ', n)`):
+ *            20,480B   40,962B   122,880B   raw t122880/t20480
+ *   옛 규칙    6.10      26.00     257.00     42x  <- 2차식
+ *   현 규칙    0.38       0.74       3.09     5.6x
+ * 절대값은 실행마다 크게 흔들리지만(옛 규칙 122,880B 가 5회에서 132~257ms)
+ * 모양은 안 흔들린다 — 옛 비율 16~60x, 현 비율 3~9x.
+ * 두 측정 모두 참이었고 **일반화가 거짓**이었다. 교훈은 규율 §9 그대로다:
+ * 픽스처가 현실과 다르면 그 그린은 아무것도 증명하지 않는다.
  *
- * "lookahead 안이면 전부 예외" 같은 일반 규칙은 채택하지 않았다. lookahead 도
- * 2차식일 수 있다. 예외는 이 id 하나이고, `.*` 가 lookahead 밖으로 나가면
- * 아래 it 이 RED 가 된다.
+ * 지금 규칙은 `[^;]{0,192}` 로 창이 있어 스캐너 기본 상한(192) 안이고, `.` 이
+ * 없어 무제한 런 자체가 0 이다. 예외가 필요 없으므로 목록을 비웠다 — 규칙을
+ * 깎아 게이트를 통과시킨 것이 아니라 게이트를 만족하도록 **규칙을 고쳤다**
+ * (규율 §10). 아래 두 it 이 "예외 0건"과 "그 규칙 스캔 0 hit"을 각각 붙든다.
  */
-const SCAN_ALLOWLIST = new Set(['sql-delete-no-where']);
+const SCAN_ALLOWLIST = new Set();
 
 /**
  * 세 번째 카탈로그(HG)의 예외. 키는 `<행 id>[<패턴 인덱스>]`.
@@ -912,17 +1137,24 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
     expect(hits.map((h) => h.snippet)).toEqual([]);
   });
 
-  it('예외는 sql-delete-no-where 한 건뿐이다', () => {
-    expect([...SCAN_ALLOWLIST]).toEqual(['sql-delete-no-where']);
+  it('L2 예외는 0건이다', () => {
+    expect([...SCAN_ALLOWLIST]).toEqual([]);
+    // 위 L2 it.each 의 분모가 카탈로그 전체인지. 예외가 하나라도 생기면
+    // 여기가 먼저 RED 다 — 조용히 규칙 하나가 스캔 밖으로 나가지 않는다.
+    expect(DANGEROUS_PATTERNS.filter((r) => !SCAN_ALLOWLIST.has(r.id)))
+      .toHaveLength(DANGEROUS_PATTERNS.length);
   });
 
-  it('sql-delete-no-where 의 유일한 무제한 런은 부정 lookahead 안에 있다', () => {
+  it('sql-delete-no-where 는 무제한 런이 0 이라 예외가 필요 없다', () => {
     const rule = DANGEROUS_PATTERNS.find((r) => r.id === 'sql-delete-no-where');
-    const hits = findUnboundedRuns(rule.test.source, rule.test.flags);
-    expect(hits).toHaveLength(1);
-    expect(hits[0].snippet).toBe('.*');
-    // lookahead 밖으로 옮기면 이 단언이 RED 가 된다 — 예외가 넓어지지 않는다.
-    expect(rule.test.source.slice(hits[0].index - 3, hits[0].index)).toBe('(?!');
+    expect(findUnboundedRuns(rule.test.source, rule.test.flags)).toEqual([]);
+    // 근거를 모양으로 못 박는다. `.` 이 없고(그래서 `s` 플래그도 없다) 창이
+    // 기본 상한 안이다. `{0,192}` 를 넓히거나 `.*` 로 되돌리면 위 L2 it.each 가
+    // RED 가 되고, 예외를 다시 추가하려면 바로 위 '예외는 0건' it 도 함께
+    // 고쳐야 한다 — 두 군데를 고치게 만드는 것이 이 쌍의 목적이다.
+    expect(rule.test.source).toContain('[^;]{0,192}');
+    expect(rule.test.source).not.toContain('.*');
+    expect(rule.test.flags).not.toContain('s');
   });
 
   // ── 세 번째 카탈로그 (2026-09-14) ─────────────────────────────────────────
@@ -1106,6 +1338,23 @@ const RATIO_FLOOR_MS = 4;
  *
  * 바닥값은 2차식 신호를 지우지 않는다: 수리 전 포크밤은 40KB 1,255ms /
  * 120KB 17,199ms 였고, 바닥값 4ms 를 넣어도 13.7 로 남는다.
+ *
+ * **못 보는 것 — 임계에 걸치는 2차식(2026-09-14 실측).** 위 문장은 절대값이
+ * 큰 2차식에 대해서만 참이다. t(20,480) 이 바닥값과 같은 자릿수면 4ms 가
+ * 분모를 지배해 비율이 주저앉는다. 실사례는 옛 sql-delete-no-where 다. 규칙을
+ * 옛 소스로 되돌려 전체 경로를 재면(`fill('DELETE FROM t=1 WHERE x ', n)`,
+ * 3회 중앙값, node v24.15.0, Windows, 같은 하네스 4회 반복):
+ *   growth  18.80 / 17.70 / 22.57 / 12.44   <- 4회 중 2회만 임계 18 초과
+ *   raw t122880/t20480  30.5 / 35.7 / 43.2 / 16.6x  <- 전부 2차식
+ * 즉 **이 게이트는 진짜 2차식을 절반만 잡았다.** 판정이 러너 잡음에 뒤집힌다.
+ * (현행 식은 같은 4회에서 1.38 / 1.71 / 1.92 / 2.17 로 여유가 한 자릿수다.)
+ *
+ * 바닥값을 내리지 않는다: 포크밤 공백 런처럼 진짜 선형이고 빠른 규칙에서 생
+ * 비율이 무의미하게 튀는 것을 막는 값이고 그 근거는 실측이다. 대신 결론을
+ * 적어 둔다 — **성장 게이트는 정적 스캔의 보조이지 대체가 아니다.** 주 게이트는
+ * 위 ReDoS 정적 스캔이고, 이 사건의 실제 경로는 그 스캔이 옛 식의 `.*` 를
+ * 잡았을 것을 `SCAN_ALLOWLIST` 예외가 비켜 가게 한 것이었다. 예외를 적을 때는
+ * 그 예외가 어느 게이트를 끄는지까지 적어야 한다.
  * @param {number} numerator @param {number} denominator @returns {number}
  */
 function growth(numerator, denominator) {
@@ -1202,6 +1451,33 @@ const SCALED_PAYLOADS = [
   ['fork-bomb space run', (n) => `${COLON}${' '.repeat(n - 2)}x`],
   // rm 규칙군의 위험은 지수식(그룹 수량자)이라 정적 스캐너가 못 본다(#3).
   ['rm option run', (n) => `rm ${fill('--opt ', n - 4)}x`],
+  // 2026-09-14 ① — 넓어진 터미네이터 클래스를 겨눈다. 루트 분기가 터미네이터를
+  // 통째로 잃었고 `~`/`$HOME` 은 분리자 7종을 얻었으므로, 그 문자들이 촘촘한
+  // 입력에서 새 백트래킹이 생기지 않는지 본다.
+  //
+  // **이 두 형이 약한 신호라는 것을 적어 둔다**: 둘 다 첫 위치에서 매치하므로
+  // rm-rf-root 는 즉시 반환한다. 그러면 재는 것은 그 앞 규칙 25개 + 전처리이지
+  // 새 클래스의 백트래킹이 아니다. 새 클래스 자체의 선형성은 규칙 단독 실측이
+  // 근거다(122,880B 0.01ms, 위 safety.js 주석). 여기는 "전체 경로가 이 입력에서
+  // 터지지 않는다"만 증명한다 — 게이트 옆에 게이트가 못 보는 것을 적는다.
+  ['quote-root fill', (n) => fill('rm -rf /" ', n)],
+  ['tilde-paren fill', (n) => fill('rm -rf ~) ', n)],
+  // 2026-09-14 ② — sql-delete-no-where 는 종전에 SCAN_ALLOWLIST 에 있어 정적
+  // 스캔 밖이었고 여기에도 payload 가 없었다. 즉 **3층 중 어느 층도 이 규칙을
+  // 보지 않았다.** 그 상태에서 옛 식은 2차식이었다. 이제 (i) 스캔 대상이고
+  // 이 행이 (ii)(iii) 을 맡는다.
+  //
+  // 형 선정: `t=1 WHERE x` 반복은 **매 시도 위치에서 실패**한다. 옛 식의 선형
+  // 주장을 만든 `'DELETE FROM t '` 반복은 첫 시도에 매치해 끝나므로 이 자리에
+  // 쓰면 2차식 위에서도 그린이다 — 픽스처가 결론을 바꾼 실제 사례다(위
+  // SCAN_ALLOWLIST JSDoc 의 수치표).
+  //
+  // **이 행이 못 하는 것**: 옛 식으로 되돌려도 이 행이 RED 가 된다는 보장이
+  // 없다. 실측 4회 성장 18.80 / 17.70 / 22.57 / 12.44 — 임계 18 을 넘은 것이
+  // 4회 중 2회다(raw 비율은 4회 모두 16~43x 로 2차식). 되돌림을 확실히 잡는
+  // 것은 위 ReDoS 정적 스캔이고(`.*` = 무제한 런 = 즉시 RED, 예외 0건),
+  // 이 행은 그 보조다. `growth` JSDoc 의 "못 보는 것" 절 참조.
+  ['sql delete near-miss', (n) => fill('DELETE FROM t=1 WHERE x ', n)],
 
   // ── 전처리 경로 (2026-09-14, guard-command-position) ─────────────────────
   // 위 6형은 **규칙**을 겨눈다. 아래 9형은 `blankPrinterSegments` 의 토크나이저를
@@ -1309,10 +1585,25 @@ const SPAN_BOUNDARY_PAIRS = (span, filler) => [
   ['short force', (n) => `git push${filler(n)} -f`, 'git-force-push-short', 'danger'],
 ];
 
+/**
+ * 경계 쌍 테이블 — 창이 **부정 lookahead 안**에 있어 판정이 뒤집힌 규칙
+ * (2026-09-14, sql-delete-no-where). 위 두 표는 "창 안이면 매치"지만 여기는
+ * 창 안에서 WHERE 를 **찾으면 매치하지 않는다.** 그래서 192 = safe,
+ * 193 = danger 로 방향이 반대다.
+ *
+ * 별도 표로 둔 이유: 같은 it.each 에 섞으면 단언 방향을 행마다 분기해야 하고,
+ * 그러면 방향을 잘못 적은 행이 조용히 통과한다. 표를 나눠 단언을 고정한다.
+ * @type {[string, (gap: string) => string, string, string][]}
+ */
+const LOOKAHEAD_BOUNDARY_PAIRS = [
+  ['sql-delete-no-where', (gap) => `DELETE FROM t${gap}WHERE y`, 'sql-delete-no-where', 'danger'],
+];
+
 /** 경계 쌍이 실제로 존재하는 규칙 id 집합. */
 const BOUNDARY_PAIR_IDS = [
   ...FILLER_BOUNDARY_PAIRS.map((row) => row[2]),
   ...SPAN_BOUNDARY_PAIRS((n) => `${n}`, (n) => `${n}`).map((row) => row[2]),
+  ...LOOKAHEAD_BOUNDARY_PAIRS.map((row) => row[2]),
 ];
 
 /**
@@ -1347,16 +1638,21 @@ describe('ReDoS 창 게이트 — 창을 가진 L2 규칙은 전부 경계 쌍�
     expect(windowed).toEqual([...BOUNDARY_PAIR_IDS].sort());
   });
 
-  it('finds the six windowed rules it is supposed to find', () => {
+  it('finds the seven windowed rules it is supposed to find', () => {
     // 분모를 고정한다 — 위 단언이 "0 === 0" 으로 공허하게 그린이 되지 않도록.
+    // 6 -> 7 (2026-09-14): sql-delete-no-where 의 lookahead 가 `.*` 에서
+    // `[^;]{0,192}` 로 바뀌면서 창을 **얻었다**. 창을 얻은 규칙은 경계 쌍을
+    // 갖는다는 것이 이 게이트의 전부이고, 실제로 그 경로로 걸렸다.
     const windowed = DANGEROUS_PATTERNS.filter((r) => hasBoundedWindow(r.test.source));
-    expect(windowed).toHaveLength(6);
-    expect(BOUNDARY_PAIR_IDS).toHaveLength(6);
+    expect(windowed).toHaveLength(7);
+    expect(BOUNDARY_PAIR_IDS).toHaveLength(7);
   });
 
   it('detects a bounded window and ignores shapes that are not one', () => {
     expect(hasBoundedWindow(/\bdd\b[^\n]{0,192}\sof=/.source)).toBe(true);
     expect(hasBoundedWindow(/\bgit\s+push\b[^\n;&|]{0,192}--force/.source)).toBe(true);
+    // 부정 lookahead 안의 창도 창이다 — 위치가 아니라 모양이 기준이다.
+    expect(hasBoundedWindow(/x(?![^;]{0,192}\bY\b)/.source)).toBe(true);
     expect(hasBoundedWindow(/[^\s;&|]*/.source)).toBe(false);
     expect(hasBoundedWindow(/\bDROP\s+TABLE\b/.source)).toBe(false);
     expect(hasBoundedWindow(/[\w."` ]{0,192}/.source)).toBe(false);
@@ -1402,6 +1698,21 @@ describe('classifyRisk — the dd/curl/wget window bound keeps ordinary commands
     expect(atBound.level).toBe(level);
     expect(atBound.matchedId).toBe(matchedId);
     expect(classifyRisk(build(193)).level).toBe('safe');
+  });
+
+  // 뒤집힌 쌍(2026-09-14). 창이 부정 lookahead 안에 있으므로 방향이 반대다:
+  // 창 안에서 WHERE 를 찾으면 규칙이 발화하지 **않는다**. 그래서 192 = safe,
+  // 193 = danger 이고, 이것이 "193자 밖의 WHERE 는 못 보고 fail-closed 로
+  // danger 를 낸다"는 포기 범위의 정본이다.
+  //
+  // `span` 을 쓰는 이유: lookahead 본문은 `[^;]{0,192}` 뒤에 바로 `\bWHERE\b`
+  // 라 자기 `\s` 가 없다. 창이 테이블명과 WHERE 사이 **전부**를 덮어야 하므로
+  // 간격이 공백으로 끝나야 한다 — filler(끝이 'x')를 쓰면 경계가 한 칸 밀린다.
+  it.each(LOOKAHEAD_BOUNDARY_PAIRS)('%s stays safe at a 192-character gap and flips to danger at 193', (_name, build, matchedId, level) => {
+    expect(classifyRisk(build(span(192))).level).toBe('safe');
+    const past = classifyRisk(build(span(193)));
+    expect(past.level).toBe(level);
+    expect(past.matchedId).toBe(matchedId);
   });
 });
 

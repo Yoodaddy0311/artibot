@@ -100,10 +100,43 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // The option token must stay `--?\w[\w-]*` — a shape that lets `--opt` split
   // two ways (e.g. `-{1,2}[\w-]+`) backtracks 2^n on a non-matching tail, and
   // the 5s PreToolUse hook would drop the verdict instead of failing loudly.
+  // TARGET TERMINATORS (2026-09-14). The root branch used to be
+  // `\/(?:\s|$|\*|\w)` — a `/` had to be followed by whitespace, end-of-input,
+  // `*` or a word character. That rejected every OTHER way a shell can end the
+  // token, so `rm -rf /"`, `/)`, `/;`, `/&`, `/|`, `/>x`, `//`, `/.` and `/..`
+  // all graded SAFE. The `~` and `$HOME` branches carried the same shape and
+  // the same holes. The cost was not cosmetic: `sh -c "rm -rf /"`,
+  // `eval "rm -rf /"`, `` `rm -rf /` ``, `(rm -rf /)` and `{ rm -rf /; }` are
+  // EXECUTING forms, not mentions, and all five were safe (measured rule-alone
+  // 2026-09-14: 9 of 10 wrapper forms missed; heredoc was the only hit because
+  // a newline happens to be in the old terminator set).
+  // Three edits, nothing else:
+  //   (a) root branch -> bare `\/`. A word starting with `/` is always an
+  //       absolute path, so the terminator group was never load-bearing there;
+  //       the old `\w` alternative already admitted `/tmp`.
+  //   (b) `~` and `$HOME` keep a terminator, widened to shell separators:
+  //       `(?:\s|$|\/|[;&|()<>"'`])`. They cannot drop it — `~user` and
+  //       `$HOMEDIR` are different targets, unlike `/x` which is still root-relative.
+  //   (c) an optional `["']?` before the target, so a quoted target is graded
+  //       at the same level as the bare one. `rm -rf "/"` used to fall through
+  //       to rm-rf-path (caution) while L1 normalizes the quotes away and
+  //       blocks — L2 was the only layer reading it as merely scoped.
+  // ACCEPTED OVER-MATCH: `rm -rf "~"` is graded danger. Inside double quotes a
+  // tilde is NOT expanded, so that command deletes a literal `./~` directory.
+  // The failure is toward blocking and the form is vanishingly rare; the real
+  // frequency is unmeasured (no transcript census).
+  // STILL MISSED, deliberately out of scope (owner decision): `${HOME}` (brace
+  // expansion — needs its own branch) and `~user` (another user's home — the
+  // `~` branch requires a terminator right after the tilde). Measured
+  // 2026-09-14: 32 of 34 target forms match, these two are the remainder.
+  // Linear, unchanged: the option run is untouched and the new class adds no
+  // quantifier. Rule-alone median of 3 at 122,880B (node v24.15.0, Windows):
+  // option run 0.47ms, space run 0.65ms, quote-root fill 0.01ms, tilde-paren
+  // fill 0.01ms — the same shape as before the edit (option run 0.49ms).
   {
     id: 'rm-rf-root',
     level: 'danger',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?:\/(?:\s|$|\*|\w)|~(?:\s|$|\/)|\$HOME(?:\s|$|\/))/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:\s|$|\/|[;&|()<>"'`])|\$HOME(?:\s|$|\/|[;&|()<>"'`]))/i,
     reason: 'rm -rf on root or home',
   },
   {
@@ -300,7 +333,42 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // Linear by construction: the identifier class, \s and ',' are disjoint and
   // the repeat group needs a literal comma per iteration.
   { id: 'sql-truncate', level: 'danger', test: /\bTRUNCATE\s+(?:(?:TABLE|ONLY|DATABASE)\s+[\w."`]+|[\w."`]+(?:\s*,\s*[\w."`]+)*\s*(?:;|\bCASCADE\b|\bRESTRICT\b|\b(?:RESTART|CONTINUE)\s+IDENTITY\b))/i, reason: 'SQL TRUNCATE' },
-  { id: 'sql-delete-no-where', level: 'danger', test: /\bDELETE\s+FROM\s+[\w."` ]+(?!.*\bWHERE\b)/is, reason: 'DELETE FROM without WHERE' },
+  // 2026-09-14. The old body class `[\w."` ]+` contained a SPACE, so on
+  // `DELETE FROM t WHERE id=1` it swallowed `t WHERE id`, stopped at the `=`,
+  // and the `(?!.*\bWHERE\b)` lookahead then found no further WHERE and
+  // succeeded. Every single-line WHERE clause was graded danger — 8 of 8
+  // measured forms, including `psql -c "DELETE FROM t WHERE id=1"`. Dropping
+  // the space from the class is the whole fix for that half.
+  // The lookahead body changed `.*` -> `[^;]{0,192}` (and the `s` flag went
+  // with the `.`). Two things follow:
+  //   STATEMENT BOUNDARY. `[^;]` cannot cross a `;`, so a WHERE belonging to a
+  //   LATER statement no longer defuses this one: `DELETE FROM t; SELECT 1
+  //   WHERE x` is danger, and so is `DELETE FROM t; echo "WHERE"` — the latter
+  //   from the rule source ALONE, with no help from printer-segment blanking.
+  //   That bypass used to need preprocessing to close; now it is closed twice.
+  //   WHAT IS GIVEN UP. The window is 192 (the 4.60.0 convention, same as
+  //   dd/curl/wget/git-push). A WHERE more than 192 characters after the table
+  //   name is not seen, so such a statement is graded DANGER. That is
+  //   fail-closed — the give-up direction is toward blocking, not allowing —
+  //   and the exact width is pinned by the 192/193 boundary pair in
+  //   tests/autopilot/safety.test.js, which is the canonical source for it.
+  // `[` and `]` are still NOT in the body class: `[dbo].[t]` stays a miss.
+  // Widening coverage there is a separate decision, not a bug fix.
+  // TIMING — this is why the old shape could not stay. Rule-alone medians of 3
+  // at 20,480 / 40,962 / 122,880B (node v24.15.0, Windows, 2026-09-14) on
+  // `fill('DELETE FROM t=1 WHERE x ', n)`, an input that fails at every
+  // attempt position:
+  //   old `[\w."` ]+(?!.*\bWHERE\b)`   6.10 /  26.00 / 257.00 ms  -> raw 42x
+  //   new `[\w."`]+(?![^;]{0,192}…)`   0.38 /   0.74 /   3.09 ms  -> raw 5.6x
+  // Absolute values swing a lot on this machine (the old rule's 122,880B figure
+  // ranged 132-257ms over five runs) but the SHAPE does not: the old raw ratio
+  // stayed 16-60x across every run and the new one 3-9x. Quadratic vs linear.
+  // The old rule sat in the static scanner's SCAN_ALLOWLIST on the strength of
+  // a "measured linear" note. That note was measured on `'DELETE FROM t '`
+  // repeats, which match on the FIRST attempt and therefore never exercise the
+  // backtracking; both statements were true and the generalisation was not.
+  // The new shape has no unbounded run at all, so the allowlist is now empty.
+  { id: 'sql-delete-no-where', level: 'danger', test: /\bDELETE\s+FROM\s+[\w."`]+(?![^;]{0,192}\bWHERE\b)/i, reason: 'DELETE FROM without WHERE' },
   { id: 'secret-openai', level: 'danger', test: /\bsk-[A-Za-z0-9]{16,}\b/, reason: 'Possible OpenAI secret key' },
   { id: 'secret-stripe-pub', level: 'caution', test: /\bpk_(live|test)_[A-Za-z0-9]{16,}\b/, reason: 'Possible Stripe key literal' },
   { id: 'secret-private-key', level: 'danger', test: /-----BEGIN [A-Z ]*PRIVATE KEY-----/, reason: 'PEM private key block' },
