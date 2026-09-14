@@ -41,7 +41,7 @@ import { execFileSync } from 'node:child_process';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { integrationBranchName, landBatch } from '../../lib/git/batch-landing.js';
+import { integrationBranchName, landBatch, MAX_REBUILDS } from '../../lib/git/batch-landing.js';
 import { runGit } from '../../lib/git/merge-preflight.js';
 
 let root = '';
@@ -121,8 +121,51 @@ function branchPush(pushes, branch) {
   return pushes.find((args) => args.some((a) => a.endsWith(`:refs/heads/${branch}`)));
 }
 
+/**
+ * An `exec` that counts the three things an F09 misclassification doubles —
+ * builds, CI-bearing attempts and fast-forward pushes at the base — and lets a
+ * hook decide what the fast-forward push and the base tip read do. Counting is
+ * by argv, not by log line: `update-ref` is issued by `buildBatchCommit` and by
+ * nothing else in `lib/git/` (grep `update-ref` in `merge-preflight.js`: 0 hits,
+ * 2026-09-14), and `ls-remote … refs/heads/main` is only `readRemoteTip` on the
+ * base. A hook returning null delegates to real git against the bare remote.
+ *
+ * @param {{builds:number, baseTipReads:number, targetPushes:number}} counts
+ * @param {{onTargetPush?:(n:number)=>object|null, onBaseTip?:(n:number)=>object|null}} hooks
+ */
+function countingExec(counts, hooks = {}) {
+  return (args, opts) => {
+    if (args[0] === 'update-ref') counts.builds += 1;
+    if (args[0] === 'ls-remote' && args.includes('refs/heads/main')) {
+      counts.baseTipReads += 1;
+      const stub = hooks.onBaseTip?.(counts.baseTipReads);
+      if (stub) return stub;
+    }
+    if (args[0] === 'push' && args.some((a) => a.endsWith(':refs/heads/main'))) {
+      counts.targetPushes += 1;
+      const stub = hooks.onTargetPush?.(counts.targetPushes);
+      if (stub) return stub;
+    }
+    return runGit(args, opts);
+  };
+}
+
+const zeroCounts = () => ({ builds: 0, baseTipReads: 0, targetPushes: 0 });
+
 const GREEN = { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'success' }] };
 const instant = { pollMs: 0, sleep: async () => {} };
+
+/**
+ * Always-green CI that counts how many times it was consulted. One green
+ * payload ends `waitForGreen` in a single poll, so the count is the number of
+ * CI-bearing attempts — the quantity F09 was doubling.
+ */
+function countingGreen(box) {
+  return async () => {
+    box.polls += 1;
+    return GREEN;
+  };
+}
 
 const common = () => ({
   cwd: work,
@@ -274,5 +317,134 @@ describe('landBatch integration branch', () => {
     expect(originTip('ci/split-other')).toBe(other);
     expect(pushes.flat().join(' ')).not.toContain('ci/split-other');
     expect(branchPush(pushes, 'ci/split-mine')).toContain('--force-with-lease=refs/heads/ci/split-mine:');
+  });
+});
+
+/**
+ * F09 — a refused fast-forward push is not evidence that the base moved.
+ *
+ * The refusal and the move are two different events that used to share one
+ * return value: any non-zero ff push came back `moved`, so the caller rebuilt
+ * the batch and paid a second CI run to be refused by the same unchanged base.
+ * What separates them is one more tip read, and these four cases pin each arm
+ * of it by COUNTING work rather than by reading the result status alone —
+ * `push-failed` with a rebuild behind it would still be wrong.
+ */
+describe('landBatch ff-push refusal classification (F09)', () => {
+  it('F09(a): a refusal at an unchanged tip is push-failed after exactly one build and one CI run', async () => {
+    const branch = 'ci/split-f09-protected';
+    const counts = zeroCounts();
+    const ci = { polls: 0 };
+    const mainBefore = originTip('main');
+    // Branch protection speaks through the push, not through the ref: the tip
+    // never moves, so a rebuild can only be refused again.
+    const exec = countingExec(counts, {
+      onTargetPush: () => ({
+        status: 1,
+        stdout: '',
+        stderr: 'remote: GH006: Protected branch update failed for refs/heads/main.',
+      }),
+    });
+
+    const r = await landBatch({
+      ...common(), runId: 'f09-protected', exec, fetchCheckRuns: countingGreen(ci),
+    });
+
+    expect(r.status).toBe('push-failed');
+    // The real cause reaches the caller instead of dying in the log.
+    expect(r.reason).toContain('GH006');
+    expect(r.reason).toContain(mainBefore);
+    expect(r.rebuilds).toBe(0);
+    expect(r.sha).toBe(r.build.sha);
+    expect(r.base).toBe(mainBefore);
+    // The point of the fix, in numbers: no second build, no second CI run.
+    expect(counts.builds).toBe(1);
+    expect(ci.polls).toBe(1);
+    expect(counts.targetPushes).toBe(1);
+    // Nothing is discarded — the green batch stays on the remote for a human.
+    expect(originTip(branch)).toBe(r.sha);
+    expect(originTip('main')).toBe(mainBefore);
+  });
+
+  it('F09(b): a base that really moved under the push is still found, rebuilt once and landed', async () => {
+    const counts = zeroCounts();
+    const ci = { polls: 0 };
+    let movedTo = null;
+    // Moving the ref in the microseconds AFTER the pre-push re-check and BEFORE
+    // the push is the strict:true race the pre-check cannot close. Real git
+    // refuses the push as non-fast-forward; the re-read is what tells us why.
+    const exec = countingExec(counts, {
+      onTargetPush: () => {
+        if (!movedTo) movedTo = advanceOriginMain();
+        return null;
+      },
+    });
+
+    const r = await landBatch({
+      ...common(), runId: 'f09-raced-base', exec, fetchCheckRuns: countingGreen(ci),
+    });
+
+    expect(movedTo).not.toBeNull();
+    expect(r.status).toBe('landed');
+    expect(r.rebuilds).toBe(1);
+    expect(counts.builds).toBe(2);
+    expect(ci.polls).toBe(2);
+    expect(counts.targetPushes).toBe(2);
+    expect(r.base).toBe(movedTo);
+    expect(originTip('main')).toBe(r.sha);
+    expect(r.log.some((l) => l.includes('found after ff refusal'))).toBe(true);
+  });
+
+  it('F09(c): a base that moves under every push stops at maxRebuilds with needs-human', async () => {
+    const counts = zeroCounts();
+    const ci = { polls: 0 };
+    const exec = countingExec(counts, {
+      onTargetPush: () => {
+        advanceOriginMain();
+        return null;
+      },
+    });
+
+    const r = await landBatch({
+      ...common(), runId: 'f09-chased', exec, fetchCheckRuns: countingGreen(ci),
+    });
+
+    expect(r.status).toBe('needs-human');
+    expect(r.rebuilds).toBe(MAX_REBUILDS);
+    // One attempt more than the rebuild budget, and not one more than that.
+    expect(counts.targetPushes).toBe(MAX_REBUILDS + 1);
+    expect(counts.builds).toBe(MAX_REBUILDS + 1);
+    expect(ci.polls).toBe(MAX_REBUILDS + 1);
+    expect(originTip('ci/split-f09-chased')).toBe(r.sha);
+  });
+
+  it('F09(d): a tip re-read that fails after the refusal is push-failed, never a guessed move', async () => {
+    const counts = zeroCounts();
+    const ci = { polls: 0 };
+    let refused = false;
+    // Fail-closed direction: reading `moved` out of an unknown tip is what
+    // burns a rebuild, so an unreadable tip must stop rather than retry.
+    const exec = countingExec(counts, {
+      onTargetPush: () => {
+        refused = true;
+        return { status: 1, stdout: '', stderr: 'fatal: the remote end hung up unexpectedly' };
+      },
+      onBaseTip: () => (refused
+        ? { status: 128, stdout: '', stderr: 'fatal: unable to access remote' }
+        : null),
+    });
+
+    const r = await landBatch({
+      ...common(), runId: 'f09-blind', exec, fetchCheckRuns: countingGreen(ci),
+    });
+
+    expect(r.status).toBe('push-failed');
+    expect(r.reason).toContain('tip 재확인 실패');
+    expect(r.reason).toContain('hung up');
+    expect(r.rebuilds).toBe(0);
+    expect(counts.builds).toBe(1);
+    expect(ci.polls).toBe(1);
+    expect(counts.targetPushes).toBe(1);
+    expect(originTip('ci/split-f09-blind')).toBe(r.sha);
   });
 });
