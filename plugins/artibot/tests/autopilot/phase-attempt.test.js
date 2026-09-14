@@ -15,6 +15,7 @@ import {
   ATTEMPT_RERUN_ALLOWLIST,
   ATTEMPT_STATUS,
   isAttemptArmed,
+  journalAttempt,
   openPhaseAttempt,
   reconcileAttemptOnResume,
 } from '../../lib/autopilot/phase-attempt.js';
@@ -168,6 +169,70 @@ describe('reconcileAttemptOnResume — allowlist, not deny-list', () => {
     expect(reconcileAttemptOnResume(stateWith({
       activePhaseAttempt: { status: ATTEMPT_STATUS.STARTED },
     }))).toEqual({ action: 'none' });
+  });
+});
+
+describe('attemptJournal — the append-only half', () => {
+  it('records a started row when an attempt is opened', () => {
+    const state = stateWith({ phase: 'EXECUTE' });
+    const attempt = openPhaseAttempt(state, { phase: 'EXECUTE', runner: 'team-create' });
+
+    expect(state.attemptJournal).toHaveLength(1);
+    expect(state.attemptJournal[0]).toMatchObject({
+      attemptId: attempt.attemptId,
+      phase: 'EXECUTE',
+      event: 'started',
+      from: 'EXECUTE',
+      to: 'EXECUTE',
+    });
+    expect(state.attemptJournal[0].at).toEqual(expect.any(String));
+  });
+
+  it('records exactly one acknowledged row per attemptId', () => {
+    const state = stateWith();
+    const attempt = openPhaseAttempt(state, { phase: 'EXECUTE' });
+    ackPhaseAttempt(state, { phase: 'EXECUTE', status: 'done' });
+
+    // Re-install the same attempt — the only way to reach a second ACK, and
+    // the shape a buggy driver replaying a result would produce.
+    state.activePhaseAttempt = attempt;
+    expect(ackPhaseAttempt(state, { phase: 'EXECUTE', status: 'done' })).not.toBeNull();
+
+    const acked = state.attemptJournal.filter((row) => row.event === 'acknowledged');
+    expect(acked).toHaveLength(1);
+    expect(acked[0]).toMatchObject({ attemptId: attempt.attemptId, reason: 'done' });
+  });
+
+  it('keeps the record after the slot is cleared', () => {
+    // activePhaseAttempt is erased by the very ACK a post-mortem wants to read.
+    const state = stateWith();
+    openPhaseAttempt(state, { phase: 'EXECUTE' });
+    ackPhaseAttempt(state, { phase: 'EXECUTE', status: 'done' });
+
+    expect(state.activePhaseAttempt).toBeNull();
+    expect(state.attemptJournal.map((row) => row.event)).toEqual(['started', 'acknowledged']);
+  });
+
+  it('writes nothing when a mismatched ACK is refused', () => {
+    const state = stateWith();
+    openPhaseAttempt(state, { phase: 'EXECUTE' });
+    ackPhaseAttempt(state, { phase: 'PLAN', status: 'done' });
+    expect(state.attemptJournal.filter((row) => row.event === 'acknowledged')).toHaveLength(0);
+  });
+
+  it('appends caller-supplied rows with every field defaulted', () => {
+    const state = stateWith();
+    const row = journalAttempt(state, { attemptId: 'a1', phase: 'EXECUTE', event: 'paused' });
+
+    expect(row).toMatchObject({ attemptId: 'a1', event: 'paused', from: null, to: null, reason: null });
+    expect(state.attemptJournal).toEqual([row]);
+  });
+
+  it('replaces a non-array journal slot instead of throwing', () => {
+    const state = stateWith({ attemptJournal: 'corrupt' });
+    journalAttempt(state, { event: 'rerun' });
+    expect(state.attemptJournal).toHaveLength(1);
+    expect(journalAttempt(null, { event: 'rerun' })).toBeNull();
   });
 });
 

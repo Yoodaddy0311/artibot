@@ -13,6 +13,78 @@ import { appendLesson } from './memory.js';
 import { ackPhaseAttempt } from './phase-attempt.js';
 
 /**
+ * Phase names in canonical order.
+ *
+ * EVALUATE (v4.6.0) sits between IMPROVE and REPORT and is a no-op
+ * "gate" for legacy sessions (no Goal Contract). When a Goal Contract
+ * is present, runPhaseGoalEvaluate may instead emit a re-EXECUTE
+ * instruction to start another iteration.
+ */
+export const PHASES = Object.freeze([
+  'INTAKE',
+  'PLAN',
+  'EXECUTE',
+  'CROSS_CHECK',
+  'VERIFY',
+  'IMPROVE',
+  'EVALUATE',
+  'REPORT',
+]);
+
+/**
+ * Determine the next phase to run from the current phase label.
+ * @param {string} current
+ * @returns {string|null}
+ */
+export function nextPhaseAfter(current) {
+  if (current === 'COMPLETED' || current === 'ABORTED') return null;
+  if (current === 'PAUSED') return null;
+  const idx = PHASES.indexOf(current);
+  if (idx === -1) return 'PLAN';
+  if (idx >= PHASES.length - 1) return null;
+  return PHASES[idx + 1];
+}
+
+/**
+ * Mark `phase` as the phase this session has just entered.
+ *
+ * `state.phase` alone is ambiguous — it has to mean "most recently
+ * entered/completed", and every reader that wants "what runs next" must go
+ * through {@link nextTarget}. Entering a phase therefore clears any explicit
+ * `pendingPhase` override: the override existed to redirect the runner that is
+ * now running, so keeping it would redirect the *next* one as well.
+ *
+ * @param {object} state - Live session state (mutated).
+ * @param {string} phase
+ * @returns {object} mutated state
+ */
+export function enterPhase(state, phase) {
+  if (!state) throw new TypeError('state required');
+  state.phase = phase;
+  state.pendingPhase = null;
+  return state;
+}
+
+/**
+ * Resolve the phase a resume should run next. Pure — reads, never mutates.
+ *
+ * `pendingPhase` is the explicit answer and wins when it names a real phase;
+ * everything else is the v2 derivation kept verbatim so a state written before
+ * this field existed resumes exactly where it used to.
+ *
+ * @param {object} state
+ * @returns {string|null} phase label, or null when the session is terminal
+ */
+export function nextTarget(state) {
+  const phase = state?.phase;
+  if (phase === 'COMPLETED' || phase === 'ABORTED') return null;
+  const pending = state?.pendingPhase;
+  if (typeof pending === 'string' && PHASES.includes(pending)) return pending;
+  if (phase === 'PAUSED') return state?.lastPhase || 'PLAN';
+  return nextPhaseAfter(phase) || phase;
+}
+
+/**
  * Best-effort lesson append. Skips when state.featureKey is unset (Phase 0
  * has not run yet) and never throws into Phase logic.
  * @param {object} state
@@ -67,6 +139,17 @@ export function recordPhaseResult(state, payload = {}) {
       message: `Phase ${phase} 완료 확인 (attempt ${acked.attemptId})`,
       data: { attemptId: acked.attemptId, resultStatus: acked.resultStatus },
     });
+  }
+  // A result for a phase the session is paused *on* is what lifts the pause:
+  // the work is now accounted for, so `phase` becomes that phase (completed)
+  // and the runner target advances past it. Without this, resume would re-read
+  // `PAUSED` + `lastPhase` and hand the same phase out a second time (AP-01).
+  // The plain in-flow case (`state.phase === phase`, nothing acked) leaves
+  // `pendingPhase` alone so an explicit target — goal-loop's corrective
+  // EXECUTE — survives a later driver report for the phase that set it.
+  if (acked || (state.phase === 'PAUSED' && state.lastPhase === phase)) {
+    state.phase = phase;
+    state.pendingPhase = nextPhaseAfter(phase);
   }
   if (phase === 'IMPROVE') {
     const improvements = Array.isArray(rest.improvements) ? rest.improvements : [];
@@ -146,6 +229,7 @@ export function recordSecretLeak(state, leak = {}) {
     state.lastPhase = state.phase;
   }
   state.phase = 'PAUSED';
+  state.pendingPhase = state.lastPhase || null;
   state.pausedReason = `secret-leak: ${kind}`;
   safeAppendLesson(state, {
     lesson: `SecretLeak at ${state.lastPhase || 'unknown'}: ${kind}`,

@@ -25,7 +25,27 @@
 import { evaluateGoal } from './goal-evaluator.js';
 import { DEFAULT_MAX_ITERATIONS } from './goal-schema.js';
 import { persist, recordPhase, tick } from './_engine-helpers.js';
+import { enterPhase } from './engine-state.js';
 import { notifyIteration } from './notification.js';
+
+/**
+ * Freeze the session on a goal-level decision.
+ *
+ * `lastPhase`/`pendingPhase` both name EVALUATE so a resume re-enters the
+ * evaluator rather than restarting the pipeline. Before this, a goal pause
+ * wrote `PAUSED` with no `lastPhase`, and resume's `lastPhase || 'PLAN'`
+ * fallback silently sent a capped session back to PLAN.
+ *
+ * @param {object} state
+ * @param {string} reason
+ * @returns {void}
+ */
+function pauseOnGoal(state, reason) {
+  state.phase = 'PAUSED';
+  state.lastPhase = 'EVALUATE';
+  state.pendingPhase = 'EVALUATE';
+  state.pausedReason = reason;
+}
 
 /**
  * Build a Phase 4 progress heartbeat slot for telemetry events. Keeps
@@ -59,7 +79,7 @@ function buildProgress(state, contract, evalResult) {
  * @returns {object} instruction object (phase-result | pause)
  */
 export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
-  state.phase = 'EVALUATE';
+  enterPhase(state, 'EVALUATE');
   tick(state.sessionId, {
     phase: 'EVALUATE',
     type: 'phase-start',
@@ -119,8 +139,7 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
     state.lastIterationSHA = currentSHA;
   }
   if (state.consecutiveSameSHA >= 3) {
-    state.phase = 'PAUSED';
-    state.pausedReason = 'no progress detected (same SHA across 3 iterations)';
+    pauseOnGoal(state, 'no progress detected (same SHA across 3 iterations)');
     persist(state);
     tick(state.sessionId, {
       phase: 'EVALUATE',
@@ -178,8 +197,7 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
 
   // Low confidence (e.g. no validationCommand) → manual gate.
   if (evalResult.confidence < 0.8) {
-    state.phase = 'PAUSED';
-    state.pausedReason = `manual evaluation required: ${evalResult.reason}`;
+    pauseOnGoal(state, `manual evaluation required: ${evalResult.reason}`);
     persist(state);
     tick(state.sessionId, {
       phase: 'EVALUATE',
@@ -205,8 +223,7 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
   const maxIter = contract.maxIterations || DEFAULT_MAX_ITERATIONS;
 
   if (state.goalIterations >= maxIter) {
-    state.phase = 'PAUSED';
-    state.pausedReason = `max iterations (${maxIter}) reached without meeting stopping condition`;
+    pauseOnGoal(state, `max iterations (${maxIter}) reached without meeting stopping condition`);
     persist(state);
     tick(state.sessionId, {
       phase: 'EVALUATE',
@@ -231,8 +248,11 @@ export function runPhaseGoalEvaluate(state, evaluatorOpts = {}) {
     };
   }
 
-  // Iterate: reset phase to EXECUTE, emit re-execute instruction.
-  state.phase = 'EXECUTE';
+  // Iterate: EVALUATE is what just completed, EXECUTE is what must run next.
+  // Writing `phase = 'EXECUTE'` here used to mean "next", which resume read as
+  // "completed" and answered with CROSS_CHECK — silently skipping the
+  // corrective iteration (AP-02).
+  state.pendingPhase = 'EXECUTE';
   recordPhase(state, { name: 'EVALUATE', status: 'iterate', iteration: state.goalIterations });
   persist(state);
   tick(state.sessionId, {

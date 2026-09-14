@@ -9,10 +9,11 @@
  */
 
 import path from 'node:path';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { resolveRunEventsPath } from '../observability/run-events.js';
+import { migrateV2toV3, SCHEMA_VERSION_V3 } from './migrate-v3.js';
 
 /**
  * Current persisted-state schema version. Bump when the on-disk shape
@@ -21,8 +22,15 @@ import { resolveRunEventsPath } from '../observability/run-events.js';
  *
  * v1: pre-versioned legacy state (no `schemaVersion` field).
  * v2: guarantees `queuedQuestions`, `checkpoints`, `timeline` arrays.
+ * v3: adds `subCheckpoints`, `attemptJournal`, and `pendingPhase` — the
+ *     explicit "what runs next" that disambiguates `phase` (see
+ *     engine-state.js#nextTarget).
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = SCHEMA_VERSION_V3;
+
+/** Intermediate version stamped before the v2→v3 step, which rejects v<2. */
+const SCHEMA_VERSION_V2 = 2;
+
 
 /**
  * Filesystem error codes that indicate a transient lock on a freshly-written
@@ -145,6 +153,7 @@ export function saveSession(state) {
   // if serialization throws (circular ref, BigInt, etc.) no tmp file was
   // ever created, so there is nothing to clean up.
   const payload = JSON.stringify(state, null, 2);
+  backupBeforeUpgrade(state, filePath);
   try {
     writeFileSync(tmp, payload, 'utf-8');
     renameWithRetry(tmp, filePath);
@@ -156,11 +165,41 @@ export function saveSession(state) {
 }
 
 /**
+ * Copy the pre-upgrade bytes aside, once, before a newer-schema state
+ * overwrites them. The decision is made from the file on disk, not from a
+ * marker on the object: `loadSession` deliberately does NOT re-persist
+ * (`getStatus()`/`listSessions` load every session, so a persist-on-load would
+ * rewrite the whole store on a read), and any in-memory marker is lost the
+ * moment a caller clones the state (`{...state}`, JSON round-trip) before
+ * saving it. Reading the current file's `schemaVersion` survives both.
+ *
+ * @param {object} state
+ * @param {string} filePath
+ * @returns {void}
+ */
+function backupBeforeUpgrade(state, filePath) {
+  const to = state.schemaVersion;
+  if (typeof to !== 'number' || !Number.isFinite(to)) return;
+  try {
+    if (!existsSync(filePath)) return;
+    const onDisk = JSON.parse(readFileSync(filePath, 'utf-8'))?.schemaVersion;
+    const from = typeof onDisk === 'number' && Number.isFinite(onDisk) ? onDisk : 1;
+    if (from >= to) return;
+    const backupPath = `${filePath}.v${from}.bak`;
+    if (!existsSync(backupPath)) copyFileSync(filePath, backupPath);
+  } catch {
+    /* best-effort: a missing backup must never block the save itself */
+  }
+}
+
+/**
  * Load a session by id. Returns null if missing or unreadable.
  *
- * Legacy (v1) state is transparently upgraded via {@link migrateState}.
- * On successful upgrade, the migrated state is immediately re-persisted
- * so the next load is already at {@link CURRENT_SCHEMA_VERSION}.
+ * Legacy state is transparently upgraded via {@link migrateState}, **in memory
+ * only**. The file on disk is left exactly as it was; the upgrade lands on the
+ * first {@link saveSession} of the returned object, which also takes the
+ * one-time `.v<old>.bak`. Re-persisting here would mean `getStatus()` — which
+ * loads every session in the store — rewrites the whole store on a read.
  *
  * Migration failure is treated as advisory: the original (untouched)
  * parsed state is returned so the caller never sees a hard error from
@@ -190,11 +229,6 @@ export function loadSession(sessionId) {
     emitMigrationWarn(sessionId, err);
     return parsed;
   }
-  try {
-    saveSession(migrated);
-  } catch {
-    /* save failure is non-fatal — in-memory migrated state is still returned */
-  }
   return migrated;
 }
 
@@ -222,7 +256,11 @@ export function isLegacyState(state) {
  *     (engine.js code paths assume `.push()` works on these slots).
  *   - Stamp `schemaVersion`.
  *
- * Idempotent: calling on an already-v2 object returns an equivalent v2 object.
+ * v2 → v3 then runs as its own leaf step ({@link migrateV2toV3}) plus
+ * {@link reconcileV3}. The chain is ordered because `migrateV2toV3` rejects
+ * anything below v2, so v1 input must be stamped v2 first.
+ *
+ * Idempotent: calling on an already-current object returns an equivalent one.
  *
  * @param {object} state
  * @returns {object} migrated state (new reference)
@@ -241,7 +279,29 @@ export function migrateState(state) {
   // (`telemetry.appendEvent`), which `replay.js#findUnterminatedPhases` reads.
   // Legacy sessions on disk may still carry a stale `timeline` array; it is
   // simply ignored rather than migrated, since it never held real data.
-  next.schemaVersion = CURRENT_SCHEMA_VERSION;
+  next.schemaVersion = SCHEMA_VERSION_V2;
+  return reconcileV3(migrateV2toV3(next));
+}
+
+/**
+ * v3 reconcile — fill the slots `migrateV2toV3` does not own.
+ *
+ * `pendingPhase` is the delicate one. A v2 session frozen at `PAUSED` recorded
+ * only `lastPhase`, and the v2 reader's meaning of that pair was "resume by
+ * re-entering lastPhase". Copying it into `pendingPhase` preserves exactly that
+ * — it does NOT claim the phase succeeded. If the session also has an open
+ * `activePhaseAttempt`, `settleOutstandingAttempt` still pauses the resume
+ * before `pendingPhase` is ever read.
+ *
+ * @param {object} state
+ * @returns {object} reconciled state (new reference)
+ */
+function reconcileV3(state) {
+  const next = { ...state };
+  if (!Array.isArray(next.attemptJournal)) next.attemptJournal = [];
+  if (next.phase === 'PAUSED' && next.pendingPhase === undefined) {
+    next.pendingPhase = typeof next.lastPhase === 'string' ? next.lastPhase : null;
+  }
   return next;
 }
 
@@ -322,8 +382,12 @@ export function deleteSession(sessionId) {
  * (`lock.js:80`), so a session id alone cannot name one; `releaseLock` owns
  * that path.
  *
+ * Pre-upgrade `.v<n>.bak` copies are swept too: they are written by the same
+ * disposable sessions, and leaving them behind would recreate the exact ndjson
+ * leak measured above in a second file family.
+ *
  * @param {string} sessionId
- * @returns {{ session: boolean, events: boolean }} What was actually removed.
+ * @returns {{ session: boolean, events: boolean, backups: number }} What was actually removed.
  */
 export function deleteSessionArtifacts(sessionId) {
   const session = deleteSession(sessionId);
@@ -337,7 +401,31 @@ export function deleteSessionArtifacts(sessionId) {
   } catch {
     // Best-effort, mirroring deleteSession: cleanup must never fail a caller.
   }
-  return { session, events };
+  return { session, events, backups: deleteSchemaBackups(sessionId) };
+}
+
+/**
+ * Remove every `<sessionId>.json.v<n>.bak` left by a schema upgrade.
+ * @param {string} sessionId
+ * @returns {number} how many backup files were removed
+ */
+function deleteSchemaBackups(sessionId) {
+  let removed = 0;
+  try {
+    const dir = getStoreDir();
+    if (!existsSync(dir)) return 0;
+    const prefix = `${sessionId}.json.v`;
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(prefix) || !name.endsWith('.bak')) continue;
+      try {
+        unlinkSync(path.join(dir, name));
+        removed += 1;
+      } catch { /* ignore a single stubborn file */ }
+    }
+  } catch {
+    /* best-effort */
+  }
+  return removed;
 }
 
 /**

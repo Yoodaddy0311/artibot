@@ -101,6 +101,48 @@ function lastCheckpointSha(state) {
 }
 
 /**
+ * Append one row to the additive `state.attemptJournal`.
+ *
+ * `activePhaseAttempt` is a single slot: it answers "is something outstanding
+ * right now" and is erased by the very ACK a post-mortem wants to read. The
+ * journal is the append-only half — it keeps who handed what out, and how each
+ * hand-off ended, after the slot is gone.
+ *
+ * @param {object} state - Live session state (mutated).
+ * @param {{attemptId?: string|null, phase?: string|null,
+ *          event?: 'started'|'acknowledged'|'paused'|'rerun',
+ *          from?: string|null, to?: string|null, reason?: string|null}} entry
+ * @returns {object|null} the appended row, or null for a non-object state
+ */
+export function journalAttempt(state, entry = {}) {
+  if (!state || typeof state !== 'object') return null;
+  if (!Array.isArray(state.attemptJournal)) state.attemptJournal = [];
+  const row = {
+    attemptId: entry.attemptId ?? null,
+    phase: entry.phase ?? null,
+    event: entry.event ?? null,
+    from: entry.from ?? null,
+    to: entry.to ?? null,
+    reason: entry.reason ?? null,
+    at: new Date().toISOString(),
+  };
+  state.attemptJournal.push(row);
+  return row;
+}
+
+/**
+ * True when `attemptId` already has an `acknowledged` row.
+ * @param {object} state
+ * @param {string} attemptId
+ * @returns {boolean}
+ */
+function alreadyAcknowledged(state, attemptId) {
+  const journal = state?.attemptJournal;
+  if (!Array.isArray(journal)) return false;
+  return journal.some((row) => row?.event === 'acknowledged' && row?.attemptId === attemptId);
+}
+
+/**
  * Open a durable attempt on `state` and return it.
  *
  * Additive: writes only `state.activePhaseAttempt`, so the schema version is
@@ -126,6 +168,13 @@ export function openPhaseAttempt(state, spec) {
     startedAt: new Date().toISOString(),
   };
   state.activePhaseAttempt = attempt;
+  journalAttempt(state, {
+    attemptId: attempt.attemptId,
+    phase: attempt.phase,
+    event: 'started',
+    from: typeof state.phase === 'string' ? state.phase : null,
+    to: attempt.phase,
+  });
   return attempt;
 }
 
@@ -150,6 +199,18 @@ export function ackPhaseAttempt(state, payload = {}) {
     committedAt: new Date().toISOString(),
     resultStatus: typeof payload.status === 'string' ? payload.status : null,
   };
+  // Keyed on attemptId, not on the slot: the slot is cleared below, so a
+  // duplicate ACK of a re-installed attempt is the only way here twice, and it
+  // must not double-count a single hand-off in the post-mortem record.
+  if (!alreadyAcknowledged(state, attempt.attemptId)) {
+    journalAttempt(state, {
+      attemptId: attempt.attemptId,
+      phase: attempt.phase,
+      event: 'acknowledged',
+      from: attempt.phase,
+      reason: acked.resultStatus,
+    });
+  }
   // Clearing the slot is what prevents a permanent recovery loop: a session
   // that completed normally must produce zero recovery notes on resume.
   state.activePhaseAttempt = null;

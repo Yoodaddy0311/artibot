@@ -10,7 +10,7 @@
  *   - immutability (input not mutated)
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   CURRENT_SCHEMA_VERSION,
@@ -21,6 +21,8 @@ import {
   migrateState,
   saveSession,
 } from '../../lib/autopilot/session-store.js';
+import { nextPhaseAfter } from '../../lib/autopilot/engine-state.js';
+import { reconcileAttemptOnResume } from '../../lib/autopilot/phase-attempt.js';
 
 const tracked = [];
 
@@ -170,18 +172,24 @@ describe('loadSession migration path', () => {
     writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
   }
 
-  it('migrates a v1 file on read and re-persists it as v2', () => {
+  it('migrates a legacy file in memory and leaves the bytes on disk alone', () => {
+    // No persist-on-load: `getStatus()` and `listSessions` load EVERY session
+    // in the store, so re-persisting here would rewrite every legacy file in it
+    // on a single status call.
     const sessionId = track(`ap-load-mig-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     writeRawState(sessionId, { sessionId, task: 'legacy on disk' });
+    const rawBefore = readFileSync(getSessionPath(sessionId), 'utf-8');
 
     const loaded = loadSession(sessionId);
     expect(loaded.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(Array.isArray(loaded.queuedQuestions)).toBe(true);
     expect(Array.isArray(loaded.checkpoints)).toBe(true);
 
-    // Second load should hit the fast path (already v2)
-    const loadedAgain = loadSession(sessionId);
-    expect(loadedAgain.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(readFileSync(getSessionPath(sessionId), 'utf-8')).toBe(rawBefore);
+    expect(existsSync(`${getSessionPath(sessionId)}.v1.bak`)).toBe(false);
+
+    // Every load re-derives the same answer, so the contract is stable.
+    expect(loadSession(sessionId).schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   });
 
   it('returns already-v2 state untouched (no migration overhead)', () => {
@@ -200,5 +208,137 @@ describe('loadSession migration path', () => {
 
   it('returns null when session file is missing', () => {
     expect(loadSession('ap-nonexistent-mig-xyz')).toBeNull();
+  });
+});
+
+describe('v2 → v3 upgrade on the first save', () => {
+  function writeV2(sessionId, extra = {}) {
+    const filePath = getSessionPath(sessionId);
+    if (!existsSync(dirname(filePath))) mkdirSync(dirname(filePath), { recursive: true });
+    const state = { sessionId, schemaVersion: 2, task: 'v2 on disk', phases: [], ...extra };
+    writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
+    return filePath;
+  }
+
+  it('writes the .bak from the original bytes exactly once, on the first save', () => {
+    const sessionId = track(`ap-v3-bak-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const filePath = writeV2(sessionId);
+    const originalBytes = readFileSync(filePath, 'utf-8');
+    const backupPath = `${filePath}.v2.bak`;
+
+    const migrated = loadSession(sessionId);
+    expect(migrated.schemaVersion).toBe(3);
+    expect(existsSync(backupPath)).toBe(false);
+
+    saveSession(migrated);
+    expect(readFileSync(backupPath, 'utf-8')).toBe(originalBytes);
+    expect(JSON.parse(readFileSync(filePath, 'utf-8')).schemaVersion).toBe(3);
+
+    // Second save must not re-snapshot: the marker is one-shot, so a long run
+    // cannot bury the original under a chain of identical backups.
+    migrated.task = 'changed after upgrade';
+    saveSession(migrated);
+    expect(readFileSync(backupPath, 'utf-8')).toBe(originalBytes);
+    expect(existsSync(`${filePath}.v3.bak`)).toBe(false);
+  });
+
+  it('backfills subCheckpoints and attemptJournal without touching carried fields', () => {
+    const sessionId = track(`ap-v3-fields-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    writeV2(sessionId, { goalIterations: 2, lastReviewedSHA: 'abc1234', fastProfile: { enabled: true } });
+
+    const migrated = loadSession(sessionId);
+    expect(migrated.subCheckpoints).toEqual([]);
+    expect(migrated.attemptJournal).toEqual([]);
+    expect(migrated.goalIterations).toBe(2);
+    expect(migrated.lastReviewedSHA).toBe('abc1234');
+    expect(migrated.fastProfile).toEqual({ enabled: true });
+  });
+
+  it('reconciles a v2 PAUSED session by copying lastPhase into pendingPhase', () => {
+    const sessionId = track(`ap-v3-paused-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    writeV2(sessionId, { phase: 'PAUSED', lastPhase: 'VERIFY' });
+
+    const migrated = loadSession(sessionId);
+    // Preserves the v2 reader's meaning ("re-enter lastPhase"). It does NOT
+    // claim VERIFY succeeded — nothing here advances past it.
+    expect(migrated.pendingPhase).toBe('VERIFY');
+    expect(migrated.phase).toBe('PAUSED');
+  });
+
+  it('reconciles a v2 PAUSED session with no lastPhase to a null pendingPhase', () => {
+    const sessionId = track(`ap-v3-paused-nolast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    writeV2(sessionId, { phase: 'PAUSED' });
+    expect(loadSession(sessionId).pendingPhase).toBeNull();
+  });
+
+  it('leaves a non-PAUSED v2 session without a pendingPhase override', () => {
+    const sessionId = track(`ap-v3-running-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    writeV2(sessionId, { phase: 'EXECUTE' });
+    expect(loadSession(sessionId).pendingPhase).toBeUndefined();
+  });
+
+  it('still pauses a migrated session whose EXECUTE attempt was never acknowledged', () => {
+    // The reconcile must not launder an outstanding hand-off into "resume here".
+    const sessionId = track(`ap-v3-attempt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    writeV2(sessionId, {
+      phase: 'PAUSED',
+      lastPhase: 'EXECUTE',
+      activePhaseAttempt: {
+        attemptId: 'att-1', phase: 'EXECUTE', status: 'started', checkpointSha: null, startedAt: '2026-09-01T00:00:00.000Z',
+      },
+    });
+
+    const migrated = loadSession(sessionId);
+    expect(migrated.pendingPhase).toBe('EXECUTE');
+    expect(reconcileAttemptOnResume(migrated).action).toBe('pause');
+  });
+
+  it('deletes the .bak alongside the session', () => {
+    const sessionId = `ap-v3-cleanup-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const filePath = writeV2(sessionId);
+    saveSession(loadSession(sessionId));
+    expect(existsSync(`${filePath}.v2.bak`)).toBe(true);
+
+    expect(deleteSessionArtifacts(sessionId)).toMatchObject({ session: true, backups: 1 });
+    expect(existsSync(`${filePath}.v2.bak`)).toBe(false);
+  });
+});
+
+describe('v3 → v2 downgrade — where a legacy reader agrees and where it does not', () => {
+  /** The exact derivation v2 resume used, applied to a v3 state. */
+  function legacyTarget(state) {
+    return state.phase === 'PAUSED' ? (state.lastPhase || 'PLAN') : nextPhaseAfter(state.phase);
+  }
+
+  it('agrees with v3 on a post-ACK EXECUTE session', () => {
+    const postAck = { phase: 'EXECUTE', pendingPhase: 'CROSS_CHECK', activePhaseAttempt: null };
+    expect(legacyTarget(postAck)).toBe('CROSS_CHECK');
+    expect(legacyTarget(postAck)).toBe(postAck.pendingPhase);
+  });
+
+  it('diverges on a mid-iteration goal session — the documented downgrade limit', () => {
+    // v3 says EXECUTE (the corrective iteration). A v2 reader sees phase
+    // EVALUATE and derives its successor, REPORT — it would END the session
+    // instead of iterating. Hence: 진행 중 goal 세션은 다운그레이드 후 재개 금지.
+    const iterating = { phase: 'EVALUATE', pendingPhase: 'EXECUTE', goalIterations: 1 };
+    expect(legacyTarget(iterating)).toBe('REPORT');
+    expect(legacyTarget(iterating)).not.toBe(iterating.pendingPhase);
+    // It fails forward, never into a duplicate EXECUTE — the outcome the
+    // attempt machinery exists to prevent.
+    expect(legacyTarget(iterating)).not.toBe('EXECUTE');
+  });
+
+  it('restores the exact v2 file from the .bak bytes', () => {
+    const sessionId = track(`ap-v3-restore-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const filePath = getSessionPath(sessionId);
+    if (!existsSync(dirname(filePath))) mkdirSync(dirname(filePath), { recursive: true });
+    const v2Bytes = JSON.stringify({ sessionId, schemaVersion: 2, phase: 'PAUSED', lastPhase: 'EXECUTE' }, null, 2);
+    writeFileSync(filePath, v2Bytes, 'utf-8');
+
+    saveSession(loadSession(sessionId));
+    expect(JSON.parse(readFileSync(filePath, 'utf-8')).schemaVersion).toBe(3);
+
+    writeFileSync(filePath, readFileSync(`${filePath}.v2.bak`, 'utf-8'), 'utf-8');
+    expect(readFileSync(filePath, 'utf-8')).toBe(v2Bytes);
   });
 });

@@ -17,6 +17,9 @@ import {
   resumeAutopilot,
   runPhase1Plan,
   runPhase2Execute,
+  runPhase3CrossCheck,
+  runPhase4Verify,
+  runPhase5Improve,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { planFastExecution, resolveFastCpuCount } from '../../lib/autopilot/fast-execution.js';
@@ -614,6 +617,10 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     const paused = loadSession(r.sessionId);
     paused.phase = 'PAUSED';
     paused.lastPhase = 'EXECUTE';
+    // The ACK above advanced pendingPhase to CROSS_CHECK. This fixture is a
+    // hand-built pause on EXECUTE, so it has to say so in v3 terms too —
+    // otherwise the explicit target, not the pause, would pick the runner.
+    paused.pendingPhase = 'EXECUTE';
     paused.options.cpuCount = 64;
     paused.options.fastTasks = Array.from({ length: 16 }, (_, index) => ({
       id: `expanded-${index + 1}`,
@@ -662,6 +669,94 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(resumed.recoveryNote).toContain('자동 재실행하지 않습니다');
     // It must not have silently started EXECUTE again.
     expect(resumed.instruction.type).not.toBe('team-create');
+  });
+
+  it('should resume into CROSS_CHECK after an operator ACK, never a second EXECUTE (AP-01)', async () => {
+    // The defect: the ACK cleared the attempt, but the resume target was still
+    // read off the `PAUSED` + `lastPhase` pair, which still said EXECUTE. So
+    // the escape hatch handed the SAME work out again — the one outcome the
+    // attempt machinery exists to prevent.
+    const r = await start({
+      task: 'runner test ap01 double execute',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('ap01'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+    const attemptId = loadSession(r.sessionId).activePhaseAttempt.attemptId;
+
+    // Crash shape: the hand-off never came back, so the first resume pauses.
+    expect((await resumeAutopilot(r.sessionId)).status).toBe('paused');
+    expect(loadSession(r.sessionId)).toMatchObject({ phase: 'PAUSED', lastPhase: 'EXECUTE' });
+
+    const resumed = await resumeAutopilot(r.sessionId, { ackOutstandingAttempt: true });
+
+    expect(resumed.phase).toBe('CROSS_CHECK');
+    expect(resumed.instruction.phase).toBe('CROSS_CHECK');
+    expect(resumed.instruction.type).not.toBe('team-create');
+
+    const after = loadSession(r.sessionId);
+    expect(after.activePhaseAttempt).toBeNull();
+    // Exactly one hand-off, exactly one acknowledgement of it.
+    expect(after.attemptJournal.filter((e) => e.event === 'started' && e.phase === 'EXECUTE')).toHaveLength(1);
+    expect(after.attemptJournal.filter((e) => e.event === 'acknowledged' && e.attemptId === attemptId)).toHaveLength(1);
+  });
+
+  it('should treat a duplicate phase result as a no-op on the attempt record', async () => {
+    const r = await start({
+      task: 'runner test duplicate ack',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('dup-ack'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    runPhase2Execute(state);
+
+    recordPhaseResult(loadSession(r.sessionId), { phase: 'EXECUTE', status: 'done' });
+    const afterFirst = loadSession(r.sessionId);
+    const journalAfterFirst = JSON.stringify(afterFirst.attemptJournal);
+
+    recordPhaseResult(loadSession(r.sessionId), { phase: 'EXECUTE', status: 'done' });
+    const afterSecond = loadSession(r.sessionId);
+
+    expect(JSON.stringify(afterSecond.attemptJournal)).toBe(journalAfterFirst);
+    expect(afterSecond.activePhaseAttempt).toBeNull();
+    expect(afterSecond.pendingPhase).toBe('CROSS_CHECK');
+  });
+
+  it.each([
+    ['PLAN', runPhase1Plan, 'EXECUTE'],
+    ['CROSS_CHECK', runPhase3CrossCheck, 'VERIFY'],
+    ['VERIFY', runPhase4Verify, 'IMPROVE'],
+    ['IMPROVE', runPhase5Improve, 'EVALUATE'],
+  ])('should land on the successor exactly once after a crash during %s', async (label, runner, successor) => {
+    // "Crash" = the runner ran and persisted, then the process vanished. The
+    // only thing a restart has is the file, so the target must be derivable
+    // from it alone — reloading is what makes this a restart and not a
+    // continuation of the in-memory object.
+    const r = await start({
+      task: `runner test crash point ${label}`,
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId(`crash-${label}`),
+    });
+    track(r.sessionId);
+    runner(loadSession(r.sessionId));
+
+    const restarted = loadSession(r.sessionId);
+    expect(restarted.phase).toBe(label);
+    expect(restarted.pendingPhase).toBeNull();
+    expect(restarted.activePhaseAttempt ?? null).toBeNull();
+
+    const resumed = await resumeAutopilot(r.sessionId);
+    expect(resumed.status).toBe('ok');
+    expect(resumed.phase).toBe(successor);
+    expect(resumed.instruction.phase).toBe(successor);
   });
 
   it('should produce no recovery note when the session completed its phase normally', async () => {

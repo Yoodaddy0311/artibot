@@ -10,9 +10,15 @@
  * harmless in unit tests.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { runPhaseGoalEvaluate } from '../../lib/autopilot/goal-loop.js';
+import { resumeAutopilot } from '../../lib/autopilot/engine.js';
+import { retryGoal } from '../../lib/autopilot/goal-control.js';
 import * as sessionStore from '../../lib/autopilot/session-store.js';
+import { deleteSessionArtifacts, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
 import * as telemetry from '../../lib/autopilot/telemetry.js';
 
 const baseContract = Object.freeze({
@@ -83,7 +89,11 @@ describe('runPhaseGoalEvaluate — iterate (not met, under cap)', () => {
     expect(r.iteration).toBe(1);
     expect(r.maxIterations).toBe(3);
     expect(state.goalIterations).toBe(1);
-    expect(state.phase).toBe('EXECUTE');
+    // AP-02 contract: `phase` is what just COMPLETED (EVALUATE); the corrective
+    // EXECUTE is named in `pendingPhase`. Writing 'EXECUTE' into `phase` here
+    // was the defect — resume read it as completed and skipped the iteration.
+    expect(state.phase).toBe('EVALUATE');
+    expect(state.pendingPhase).toBe('EXECUTE');
   });
 
   it('iterates again on consecutive failures until iter == max-1', () => {
@@ -104,6 +114,10 @@ describe('runPhaseGoalEvaluate — max iterations PAUSE', () => {
     expect(r.type).toBe('pause');
     expect(r.reason).toMatch(/max iterations \(3\) reached/);
     expect(state.phase).toBe('PAUSED');
+    // A goal pause used to write PAUSED with no lastPhase, so resume's
+    // `lastPhase || 'PLAN'` fallback restarted the whole pipeline at PLAN.
+    expect(state.lastPhase).toBe('EVALUATE');
+    expect(state.pendingPhase).toBe('EVALUATE');
   });
 });
 
@@ -146,6 +160,92 @@ describe('runPhaseGoalEvaluate — no-progress guard (same SHA 3x)', () => {
     runPhaseGoalEvaluate(state, { runCommand });
     expect(state.consecutiveSameSHA).toBe(1);
     expect(state.lastIterationSHA).toBe('new456');
+  });
+});
+
+describe('AP-02 — the corrective EXECUTE survives a persist/resume round trip', () => {
+  // These cases use the REAL session store: the defect lived entirely in what
+  // resume read back off disk, so a mocked saveSession would have hidden it.
+  // `node -e process.exit(3)` is the validation command because resume calls
+  // runPhaseGoalEvaluate with no DI hook — a mock here would prove nothing.
+  const failingContract = Object.freeze({
+    ...baseContract,
+    validationCommand: 'node -e "process.exit(3)"',
+  });
+  const tracked = new Set();
+  // ARTIFACT ISOLATION CONTRACT: resume drives real phase runners, and a drift
+  // to REPORT would write reports/AUTOPILOT/ under the operator's checkout.
+  let artifactRoot = '';
+
+  beforeAll(() => {
+    artifactRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-goal-loop-artifacts-'));
+  });
+
+  afterAll(() => {
+    try { rmSync(artifactRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  beforeEach(() => {
+    // Runs after the outer beforeEach, so this drops its store/telemetry mocks.
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    for (const id of tracked) {
+      try { deleteSessionArtifacts(id); } catch { /* ignore */ }
+    }
+    tracked.clear();
+  });
+
+  function trackedState(overrides = {}) {
+    const state = makeState({
+      goalContract: failingContract,
+      options: { projectRoot: artifactRoot },
+      ...overrides,
+    });
+    tracked.add(state.sessionId);
+    return state;
+  }
+
+  it('resumes into EXECUTE — not CROSS_CHECK — after an iterate decision', async () => {
+    const state = trackedState();
+    const runCommand = vi.fn(() => ({ exitCode: 1, stdout: '', stderr: 'fail' }));
+    runPhaseGoalEvaluate(state, { runCommand });
+    saveSession(state);
+
+    const onDisk = loadSession(state.sessionId);
+    expect(onDisk.phase).toBe('EVALUATE');
+    expect(onDisk.pendingPhase).toBe('EXECUTE');
+
+    const resumed = await resumeAutopilot(state.sessionId);
+
+    expect(resumed.phase).toBe('EXECUTE');
+    expect(resumed.instruction.type).toBe('team-create');
+    expect(resumed.instruction.phase).toBe('EXECUTE');
+    // The iteration counter is what the cap is enforced on; losing it across a
+    // resume would silently hand the session an extra full set of iterations.
+    expect(loadSession(state.sessionId).goalIterations).toBe(1);
+  });
+
+  it('re-enters EVALUATE on a capped session and only iterates once retryGoal lifts the cap', async () => {
+    const state = trackedState({ goalIterations: 2 });
+    const runCommand = vi.fn(() => ({ exitCode: 1, stdout: '', stderr: '' }));
+    expect(runPhaseGoalEvaluate(state, { runCommand }).type).toBe('pause');
+    saveSession(state);
+
+    // Capped: resume must re-enter the evaluator and pause again, never EXECUTE.
+    const blocked = await resumeAutopilot(state.sessionId);
+    expect(blocked.status).toBe('paused');
+    expect(blocked.instruction.reason).toMatch(/max iterations/);
+    expect(loadSession(state.sessionId).pendingPhase).toBe('EVALUATE');
+
+    // retryGoal is the documented exit from the cap (goal-control.js).
+    expect(retryGoal(state.sessionId).ok).toBe(true);
+    const retried = await resumeAutopilot(state.sessionId);
+
+    expect(retried.instruction.type).toBe('phase-result');
+    expect(retried.instruction.nextPhase).toBe('EXECUTE');
+    expect(loadSession(state.sessionId).pendingPhase).toBe('EXECUTE');
   });
 });
 
