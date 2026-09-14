@@ -174,7 +174,7 @@ function limbOrder(run, lanes) {
  * {@link readLaneOpsState} (so the allowlist is applied in exactly one place)
  * and pairs it with the caller's per-limb evidence.
  *
- * @param {object|null|undefined} runJson - parsed `<parentRoot>/.artibot/split/run.json`
+ * @param {object|null|undefined} runJson - the leader's parsed split `run.json` (same file `readLaneOpsState` documents)
  * @param {Record<string, { lane?: object, gitEvidence?: object, session?: object }>|null} [lanesInput]
  *   per-limb evidence the caller gathered; a limb with no entry reconciles as `unknown`
  * @param {{ nowMs?: number, thresholds?: object }} [options]

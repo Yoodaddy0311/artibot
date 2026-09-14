@@ -58,7 +58,7 @@ Parse $ARGUMENTS:
 플래그가 없으면 이 절은 **통째로 건너뛴다** — 기본 출력은 한 글자도 달라지지 않는다. `--contract` 가 있을 때만 기본 핸드오프 출력이 **끝난 뒤에** 아래 두 블록을 덧붙인다.
 
 1. **Resume Contract 보고** — `lib/checkpoint/resume-controller.js#buildResumeReport` 로 Scorecard §51 의 10단계 중 **1~9 단계**(스키마 검증 → `intent_revision`/`plan_revision` 대조 → 아티팩트·커서 확인)를 평가해 단계별 `ok` / `blocked_by` 를 표로 출력한다. 10단계 Resume(실제 재개)는 Canary 라 **이 커맨드의 범위 밖이며 실행하지 않는다**.
-2. **lane reconcile 보고** — `lib/supervisor/lane-reconcile.js#reconcileLanes` 로 `.artibot/split/run.json` 의 레인 상태를 git 증거와 대조해 레인별 `blocked_by: ['reconcile:<사유>']` 를 출력한다. 허용 목록 밖 상태·state↔git 불일치는 fail-closed 로 사유를 남긴다 (설계 §3.5).
+2. **lane reconcile 보고** — `lib/supervisor/lane-reconcile.js#reconcileLanes` 로 리더의 split 런 상태 파일(`run.json`)의 레인 상태를 git 증거와 대조해 레인별 `blocked_by: ['reconcile:<사유>']` 를 출력한다. 허용 목록 밖 상태·state↔git 불일치는 fail-closed 로 사유를 남긴다 (설계 §3.5).
 
 출력·실패 규칙:
 
