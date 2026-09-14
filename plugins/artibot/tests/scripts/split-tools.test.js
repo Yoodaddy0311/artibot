@@ -306,6 +306,33 @@ describe('dispatch.mjs runDispatch — lane state + fork point (F07)', () => {
     expect(readRunJson(parent).lanes.auth.since).toBe(since);
   });
 
+  // 2026-09-14 실측: prompt 헤더(`base={BASE}`)와 포인터(`(base: ...)`)가 둘 다
+  // plan.base 만 실었다. land 는 `--base > forkPoint > plan.base` 로 고르므로 실제
+  // 분기점이 plan.base 와 다른 줄기에서 창과 land 가 서로 다른 base 를 본다.
+  // 첫 dispatch 에서 이미 맞아야 한다 — fork point 기록이 렌더링보다 앞선다.
+  it('renders the recorded fork point as the prompt base and the pointer base on the FIRST dispatch', async () => {
+    const { parent, rows } = seedParent();
+    const head = initRepoAt(rows[0].worktreePath);
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.forkPoint).toMatchObject({ value: head, recorded: true });
+    expect(r.prompt).toContain(`base=${head}`);
+    expect(r.prompt).not.toContain('base=deadbeef');
+    expect(r.pointer).toContain(`(base: ${head})`);
+    // prompt.md 는 반환된 문자열과 같은 바이트여야 한다 (창이 읽는 정본).
+    expect(fs.readFileSync(r.promptPath, 'utf-8')).toBe(r.prompt);
+  });
+
+  it('--dry-run without a recorded fork point falls back to plan.base and stays idempotent', async () => {
+    const { parent } = seedParent();
+    const a = await dispatch.runDispatch(dispatch.parseArgs(['auth', '--dry-run']), { cwd: parent, config: null });
+    expect(a.forkPoint.value).toBeNull();
+    expect(a.prompt).toContain('base=deadbeef');
+    expect(a.pointer).toContain('(base: deadbeef)');
+    const b = await dispatch.runDispatch(dispatch.parseArgs(['auth', '--dry-run']), { cwd: parent, config: null });
+    expect(b.prompt).toBe(a.prompt);
+    expect(b.pointer).toBe(a.pointer);
+  });
+
   // 이 줄기가 고치려는 (a) 케이스. plan.base(B0) 뒤로 master 가 B1 로 전진한 뒤
   // 거기서 worktree 가 갈라졌다. `rev-parse HEAD` 는 작업 팁을 박제해 land 의
   // diff 에서 창의 커밋 2개를 빼버리고(거짓 PASS 방향),

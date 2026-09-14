@@ -130,6 +130,25 @@ describe('dispatch — 준비 완료 경로', () => {
     expect(buildLimbMessage(PLAN, { ...PLAN.limbs[0], promptPath: null })).toBe(base);
     expect(base.split('\n')).toHaveLength(5);
   });
+
+  // 2026-09-14 실측: 창이 읽는 포인터의 base 는 plan.base 인데 `land.mjs` 는
+  // `--base > forkPoint > plan.base` 순으로 고른다. 실제 분기점이 plan.base 보다
+  // 앞선 줄기에서 창과 land 가 서로 다른 base 를 본다. forkPoint 는 선택 필드다.
+  it('limb.forkPoint 가 있으면 브랜치 줄의 base 가 그 값이다 (land 와 같은 우선순위)', () => {
+    const body = buildLimbMessage(PLAN, { ...PLAN.limbs[0], forkPoint: 'c732eaa9' });
+    const lines = body.split('\n');
+    expect(lines[2]).toBe(`브랜치: ${PLAN.limbs[0].branch} (base: c732eaa9)`);
+    expect(body).not.toContain('(base: master)');
+    expect(body).toBe(buildLimbMessage(PLAN, { ...PLAN.limbs[0], forkPoint: 'c732eaa9' }));
+  });
+
+  it('forkPoint 가 없거나 null·빈 문자열이면 기존 문구 그대로다 (plan.base 로 폴백)', () => {
+    const base = buildLimbMessage(PLAN, PLAN.limbs[0]);
+    expect(base).toContain(`(base: ${PLAN.base})`);
+    expect(buildLimbMessage(PLAN, { ...PLAN.limbs[0], forkPoint: null })).toBe(base);
+    expect(buildLimbMessage(PLAN, { ...PLAN.limbs[0], forkPoint: '' })).toBe(base);
+    expect(buildLimbMessage(PLAN, { ...PLAN.limbs[0], forkPoint: undefined })).toBe(base);
+  });
 });
 
 describe('dispatch — 훅이 옮긴 브랜치 표시 (gotchas #18/#22)', () => {

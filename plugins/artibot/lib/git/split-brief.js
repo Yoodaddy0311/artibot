@@ -188,12 +188,13 @@ export function missingSections(briefText, requiredSections = DEFAULT_REQUIRED_S
  * @param {string} input.branch - limb branch (for the pointer message)
  * @param {{ runId: string, base: string }} input.plan - plan.json (for the pointer message)
  * @param {string} [input.prompt] - rendered prompt; omitted = no prompt.md written
+ * @param {string|null} [input.forkPoint] - recorded fork point for the pointer's base line; omitted/empty = `plan.base` (see {@link buildLimbMessage})
  * @param {ReadonlyArray<RegExp>} [input.requiredSections]
  * @param {boolean} [input.dryRun=false] - verify only; write nothing
  * @returns {{ briefPath: string, promptPath: string|null, sourceBrief: string, pointer: string, copied: boolean, siblings: Array<{ name: string, copied: boolean, sourcePath: string, destPath: string }> }}
  */
 export function materializeLimb({
-  parentRoot, worktreePath, limb, branch, plan, prompt, requiredSections = DEFAULT_REQUIRED_SECTIONS, dryRun = false,
+  parentRoot, worktreePath, limb, branch, plan, prompt, forkPoint, requiredSections = DEFAULT_REQUIRED_SECTIONS, dryRun = false,
 } = {}) {
   for (const [k, v] of [['parentRoot', parentRoot], ['worktreePath', worktreePath], ['limb', limb]]) {
     if (typeof v !== 'string' || !v) throw new TypeError(`materializeLimb: ${k} is required`);
@@ -224,7 +225,13 @@ export function materializeLimb({
   const promptPath = typeof prompt === 'string' ? dst.prompt : null;
   const pointer = buildLimbMessage(
     { runId: String(plan?.runId ?? ''), base: String(plan?.base ?? '') },
-    { limb, worktreePath, branch: String(branch ?? ''), promptPath },
+    {
+      limb,
+      worktreePath,
+      branch: String(branch ?? ''),
+      promptPath,
+      forkPoint: typeof forkPoint === 'string' && forkPoint ? forkPoint : null,
+    },
   );
   return {
     briefPath: dst.brief,
