@@ -1,6 +1,6 @@
 ---
 description: (Artibot) 이전 세션 핸드오프 복원 — 전체 HANDOFF + 첫 프롬프트 후보 표시
-argument-hint: '[--run] [--list]'
+argument-hint: '[--run] [--list] [--contract]'
 allowed-tools: [Read, Bash, Grep]
 toolset: team
 ---
@@ -19,6 +19,7 @@ Parse $ARGUMENTS:
 - `--run`: 1순위 첫 프롬프트 후보를 사용자 confirm 후 실행 제안. **자동 실행 없음 — 항상 사용자 승인 필요**
 - `--list`: `.artibot/handoffs/` 의 아카이브 목록 (mtime · size · filename) 표시 후 종료
 - `--archive <filename>`: 특정 아카이브를 stdout으로 표시 (latest 대신)
+- `--contract`: Resume Contract + lane reconcile 보고를 기본 출력 **뒤에** 덧붙임. **보고 전용 — 상태 전이·재개 실행 없음.** 플래그가 없으면 출력은 종전과 완전히 동일
 
 ## Execution Flow
 
@@ -51,6 +52,19 @@ Parse $ARGUMENTS:
 4. **검출 안 됨**: 일반 confirm — "1번 프롬프트를 실행하시겠습니까? (y/N)" — 기본 N
 5. 사용자 응답 `y/Y/yes` 외에는 모두 거부로 처리 → "사용자 거부 — 종료" 출력 후 종료
 6. 승인 시: prompt 텍스트를 Claude에게 다음 message 로 전달 — **자동 Bash 실행 절대 없음**
+
+### `--contract` 모드 (opt-in · 보고 전용)
+
+플래그가 없으면 이 절은 **통째로 건너뛴다** — 기본 출력은 한 글자도 달라지지 않는다. `--contract` 가 있을 때만 기본 핸드오프 출력이 **끝난 뒤에** 아래 두 블록을 덧붙인다.
+
+1. **Resume Contract 보고** — `lib/checkpoint/resume-controller.js#buildResumeReport` 로 Scorecard §51 의 10단계 중 **1~9 단계**(스키마 검증 → `intent_revision`/`plan_revision` 대조 → 아티팩트·커서 확인)를 평가해 단계별 `ok` / `blocked_by` 를 표로 출력한다. 10단계 Resume(실제 재개)는 Canary 라 **이 커맨드의 범위 밖이며 실행하지 않는다**.
+2. **lane reconcile 보고** — `lib/supervisor/lane-reconcile.js#reconcileLanes` 로 `.artibot/split/run.json` 의 레인 상태를 git 증거와 대조해 레인별 `blocked_by: ['reconcile:<사유>']` 를 출력한다. 허용 목록 밖 상태·state↔git 불일치는 fail-closed 로 사유를 남긴다 (설계 §3.5).
+
+출력·실패 규칙:
+
+- 두 블록 모두 **읽기·계산·출력만** 한다. 어느 단계도 파일을 쓰지 않고, 어떤 상태도 전이시키지 않는다.
+- `blocked_by` 가 빈 항목은 `-` 로 표시한다. 빈 배열을 "검증 통과"로 바꿔 쓰지 말 것 — 둘은 다른 진술이다.
+- 모듈 부재·JSON 파싱 실패는 그 블록만 `측정 불가: <사유>` 한 줄로 적고, 기본 핸드오프 출력은 그대로 유지한다 (부분 실패가 `/resume` 본래 기능을 막지 않는다).
 
 ## Output Format
 
@@ -90,6 +104,7 @@ Parse $ARGUMENTS:
 - Do NOT 핸드오프 마크다운을 수정하거나 ANSI 색상을 추가하지 말 것 — 원문 보존
 - Do NOT 핸드오프 부재 시 빈 출력으로 종료하지 말 것 — 항상 `/save` 권장 메시지 출력
 - Do NOT advisor 신호를 `/resume` 에서 마킹하지 말 것 — `/save` 의 책임 (`/resume` 은 read-only)
+- Do NOT `--contract` 가 lease 회수·claimTask·reconcile({apply:true})·이벤트 기록을 하게 하지 말 것 — 보고 전용
 
 ## Edge Cases
 
