@@ -33,5 +33,6 @@
 | 009 | team.worktreeIsolation orphan 설정 삭제 | active | 2026-08-26 | ← `ADR-004`(루트 `docs/adr/`) | [`ADR-009-team-worktreeisolation-orphan-설정-삭제.md`](./ADR-009-team-worktreeisolation-orphan-설정-삭제.md) |
 | 010 | merge-tree 사전 충돌 탐지 소유권 — lib/git/merge-preflight.js 로 승격해 /git worktree check 와 /split integrate 양쪽이 소비 | active | 2026-08-26 | ← `ADR-005`(루트 `docs/adr/`) | [`ADR-010-merge-tree-사전-충돌-탐지-소유권-lib-git-merge-preflight-js-로-승격해-git-worktree-check-와-split-integrate-양쪽이-소비.md`](./ADR-010-merge-tree-사전-충돌-탐지-소유권-lib-git-merge-preflight-js-로-승격해-git-worktree-check-와-split-integrate-양쪽이-소비.md) |
 | 011 | linked worktree 원장 위치 — StateStore 와 같은 git-common-dir 동거(안 a) | active | 2026-09-11 | — | [`ADR-011-worktree-ledger-store.md`](./ADR-011-worktree-ledger-store.md) |
+| 012 | Wave 10 편성 — 8창 롤링 + 감사 결함(F01~F10)을 로드맵 선행 불변식으로 흡수 (오너 결정 E1·E2·E3·G1 확정 기록) | active | 2026-09-14 | — | [`ADR-012-wave-10-편성-8창-롤링-감사-결함을-로드맵-선행-불변식으로-흡수.md`](./ADR-012-wave-10-편성-8창-롤링-감사-결함을-로드맵-선행-불변식으로-흡수.md) |
 
-총 11 건. `ageDays` 열은 두지 않는다 — 정적 파일에 적힌 경과일은 쓰는 순간 낡는다.
+총 12 건. `ageDays` 열은 두지 않는다 — 정적 파일에 적힌 경과일은 쓰는 순간 낡는다.

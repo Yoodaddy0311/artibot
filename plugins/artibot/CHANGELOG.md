@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.62.0] — 2026-09-14
+
+### 행동 변화 고지
+
+① 4.62.0 은 **Wave 9 착지분(8줄기, a81ee154 → 3ba981eb, 44 files +8,800/−112)을 그대로 출하**한다 — 기능 코드 추가 0, 릴리스 lockstep 커밋 1. v4.61.0 태그 뒤 HEAD 까지 52 files +8,902/−139 가 설치본에 실리지 않아 Observe 종료 판정 ③(`verify.completed` 분모)·④(`session.ended` 분모)의 라이브 값이 0 이었다. 이 릴리스 + `sync:local` + 호스트 재시작이 그 분모의 t0 다(핸드오프의 "플러그인 캐시 4.59.0 → `claude plugin update`" 는 원인 오판 — 캐시 내용은 이미 4.61.0 이었다).
+
+② 행동이 바뀌는 곳은 **PreToolUse 가드의 명령 위치 앵커**(guard-command-position) 하나다: `echo "rm -rf /"` 같은 언급형은 더 이상 L1/L2 를 발화시키지 않고(8래퍼 0/39), 실행형 양성 손실 0(L1 2,872건 490→476, 손실 14 전부 언급형). Stop 훅 `dev-verify-gate` 가 원장에 분모행을 쓰고, SessionEnd 가 `session.ended` 1행을 쓰며, SubagentStop 이 review.md 를 만들 수 있으나 `runtime.artifactLifecycle.enabled=false` 출하가 유지되므로 파일 생성은 0 이다.
+
+③ **임시 경고(autopilot `--worktree`)**: 감사 F01 — REPORT 단계 정리가 통합 여부를 확인하지 않고 worktree 와 `autopilot/*` 결과 브랜치를 삭제한다(`lib/autopilot/engine.js#runPhase6Report` → `reapSessionArtifacts`). 수리는 Wave 10 창 1(`autopilot-phase-transition`) 이며, 그 전까지 `--worktree` 세션은 **REPORT 전에 결과 브랜치를 사람이 병합·백업**하라. Git 객체는 즉시 소실되지 않으므로 SHA 로 복구할 여지는 있다.
+
+④ ADR-011 원장 1회 이관 실행(2026-09-14 12:31 KST): 레거시 `.artibot/runtime/ledger.jsonl` 349행 + 라이브 공유 `.git/artibot/ledger.jsonl` 389행 → 738행 병합(lineCountMatch true, sha256 `a9f35e0d…`). 구파일은 `ledger.jsonl.pre-adr011` 로 보존. spawns 는 레거시 파일 부재로 이관 대상 없음(공유 경로 125행 그대로).
+
+
 ### Wave 9 배치 착지 (split-68e984w9, base a81ee154 → p1 18ac5644 → p2 f1f8311e → p3 3ba981eb, 8/8줄기, 44 files +8,800/−112)
 
 배치 수치(`git diff --shortstat`, 2026-09-14 10:3x 실측): p1 `a81ee154..18ac5644` = 14 files +1,311/−44 · p2 `18ac5644..f1f8311e` = 9 files +2,255/−6 · p3 `f1f8311e..3ba981eb` = 21 files +5,234/−62 · **합계 `a81ee154..3ba981eb` = 44 files +8,800/−112**. 줄기별 수치(각 줄기 `git diff --shortstat a81ee154 <doneCommit>`)의 합이 배치 합계와 정확히 일치한다 — 줄기 간 파일 겹침 0 이라는 소유권 전제의 사후 확인이다.

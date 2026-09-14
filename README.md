@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.61.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.62.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.61.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.62.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -919,7 +919,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.61.0` |
+| `version` | Plugin version | `4.62.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1053,6 +1053,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.62.0** (2026-09-14) — Ships `/split` Wave 9 as-is (8 limbs, base a81ee154 → 3ba981eb, 44 files +8,800/−112; zero new feature code, one lockstep commit): command-position anchoring for the PreToolUse guards (`lib/core/command-segments.js` — mention-only `echo "rm -rf /"` no longer fires L1/L2, 0/39 across 8 wrappers, zero executable true-positive loss), Stop-hook `dev-verify-gate` writing the `verify.completed` denominator row, SessionEnd writing `session.ended` (allowlist 39 entries), review.md serializer wired to SubagentStop (inert while `runtime.artifactLifecycle.enabled=false`), split dispatch pre-excluding landed limbs, RouteBench B4 fed with `agentType`, Avoided-Switch fold (first live value: 12 of 102 `route.selected` rows, 11.8%), and report-only DR02 resume/reconcile. Measurement note: live `verify.completed`/`session.ended` were 0 before this release because the Wave 9 code had not shipped, not because of a stale plugin cache. Known open defect (audit F01): autopilot `--worktree` REPORT cleanup deletes the result branch without checking integration — merge or back up the branch before REPORT until Wave 10 lands the fix.
 
 **4.61.0** (2026-09-14) — `/split` Waves 7+8, 12 limbs (Wave 7 base f75e849f → 0c08d8b3, 4 limbs, 26 files +2,754/−188; Wave 8 base a40b8448 → ee86a639, 8 limbs, 74 files +14,989/−277): ReDoS residual closed — L1 `rm` rules bounded to a 512-char window and `wget`/`curl` pipe rules to 192, plus a static regex scanner gate (0 unbounded runs across 65 rules) after a measured 122,880B curl-pipe run took 13.3s against the 5s PreToolUse budget; frontmatter empty quoted values (`description: ""`) now fold to `''` for all three consumers, with a 9-cell RED gate; `spawns.ndjson` moves next to `ledger.jsonl` under `<git-common-dir>/artibot/` per ADR-011 §5-3, so linked worktrees share one store; checkpoint store + immutability firewall (`lib/checkpoint/`); plugin manifest `agents` 28 → 30 with a manifest↔`agents/*.md` parity gate; one pricing table in `lib/core/model-catalog.js` now feeds usage receipts and cache-ROI, pinned by a parity test; context pressure/receipt assembly returns null without a host `context_window.max_tokens` instead of falling back to the catalog; a PreToolUse `Write|Edit` hook that can write `missions/<id>/intent.md`, shipped inert — `runtime.artifactLifecycle.enabled` defaults to `false`, so the ledger and store records are written and zero artifact files are created until the Shadow-stage release flips it; offline route-scoring runner `scripts/bench/routebench.mjs` with B0–B6 baselines; verdict writer wired to SubagentStop, claim-audit and verify writers landed with zero runtime callers; `recordHumanResolved` plus a CLI that recomputes `question_id` on the asked path. Measurement notes: context receipts fill 6 of 10 required keys at PostCompact, so live publication is structurally 0; review/verify ledger rows are 0 because the runtime callers are not deployed yet.
 
