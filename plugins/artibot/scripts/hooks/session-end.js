@@ -575,7 +575,7 @@ function safeProjectRoot(d, cwd) {
  * @param {string} [eventName] - Ledger event to collect keys for.
  * @returns {Set<string>}
  */
-function existingIdempotencyKeys(d, projectRoot, sessionId, eventName = 'usage.receipt') {
+function existingReceiptKeys(d, projectRoot, sessionId, eventName = 'usage.receipt') {
   try {
     const events = d.readAllEvents(projectRoot, { session_id: sessionId });
     const keys = new Set();
@@ -663,7 +663,7 @@ async function collectUsageReceipts(hookData, deps) {
 
   const envelopes = d.toUsageReceiptEnvelopes(receipts, { sessionId });
   const tally = appendReceiptEnvelopes(
-    d, projectRoot, envelopes, existingIdempotencyKeys(d, projectRoot, sessionId),
+    d, projectRoot, envelopes, existingReceiptKeys(d, projectRoot, sessionId),
   );
   return receiptOutcome({ ...tally, receipts: receipts.length, coverage }, unresolved);
 }
@@ -692,7 +692,7 @@ const SESSION_ENDED_EVENT = 'session.ended';
  */
 function appendSessionEndedEvent(d, projectRoot, sessionId, outcome, flags) {
   const key = `${SESSION_ENDED_EVENT}:${sessionId}`;
-  const seen = existingIdempotencyKeys(d, projectRoot, sessionId, SESSION_ENDED_EVENT);
+  const seen = existingReceiptKeys(d, projectRoot, sessionId, SESSION_ENDED_EVENT);
   if (seen.has(key)) return;
 
   const result = outcome?.result ?? {};
