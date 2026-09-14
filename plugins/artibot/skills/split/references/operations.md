@@ -18,9 +18,10 @@
 ## dispatch <limb> (프롬프트 전문 붙여넣기 금지 — A5)
 
 `node <pluginRoot>/scripts/split/dispatch.mjs <limb> [--window <세션>] [--gotchas <파일>] [--budget N] [--dry-run] [--json]`.
-1. `plan.json` 의 줄기 행 → 부모 브리프 `<parentRoot>/.artibot/split/<limb>/brief.md` 를 worktree 로 원자 복사(`lib/git/split-brief.js#materializeLimb` — 소유/allowlist 절·완료 절이 없으면 refuse) → `prompt.md` 렌더(`lib/git/split-brief.js#renderPrompt` — 미해결 `{PLACEHOLDER}` 가 남으면 refuse).
+1. `plan.json` 의 줄기 행 → 부모 브리프 `brief.md`(`path.join('<parentRoot>', '.artibot', 'split', '<limb>', 'brief.md')`) 를 worktree 로 원자 복사(`lib/git/split-brief.js#materializeLimb` — 소유/allowlist 절·완료 절이 없으면 refuse) + 동반 파일 allowlist `SIBLING_FILES`(`leader-addendum.md`, 있으면 복사·없으면 건너뜀·글롭 아님 — 반환 `siblings[].copied`) → `prompt.md` 렌더(`lib/git/split-brief.js#renderPrompt` — 미해결 `{PLACEHOLDER}` 가 남으면 refuse).
+1b. dry-run 이 아니면 ① `lanes[limb] = { state: 'active', since, window }` 를 `lane-state.mjs#setLaneState` → `lib/topology/split-state.js#writeWorkerState` 체인으로 기록(writer 단일, 어휘 `LANE_OPS_STATES`; 기존 값이 allowlist 밖이면 출력 `laneState.warning`) ② `plan.json` `limbs[].forkPoint` 가 없으면 worktree 에서 `git merge-base <ref> HEAD`(ref 는 `master` → `main` → `origin/master` → `origin/main` 순으로 처음 성공하는 것, 결과 `forkPoint.ref` — 로컬 우선인 이유: worktree 는 부모 로컬 HEAD 에서 분기하므로 미푸시 로컬 커밋이 있으면 origin/* 은 분기점보다 오래된 값을 준다) 로 채운다(있으면 보존·git 호출 0, 재발행 멱등; 네 ref 다 없으면 `forkPoint.recorded:false` + 사유, land 는 plan.base 폴백 + `--base` 안내). `rev-parse HEAD` 가 아닌 이유: 창이 dispatch 전에 커밋을 쌓았으면 HEAD 는 작업 팁이라 land 의 diff 에서 그 작업이 통째로 빠진다(거짓 PASS 방향). 못 보는 것: 줄기가 master 를 merge 한 뒤면 값이 머지한 master 팁이 된다 — `--base master` 관례와 같은 의미이지만 "최초 분기점" 은 아니다.
 2. `{REPORT_CONTRACT}` 는 `commands/split.md` 의 `[보고 계약]` 펜스를 그대로(`{리더 이름}` → 부모 세션 — parity 게이트 상속), `{MODEL_POLICY}` 는 `lib/core/model-policy.js#resolveModel` 해석값(모델 ID 하드코딩 0), `{GOTCHAS_DELTA}` 는 `<parentRoot>/.artibot/split/gotchas.md`(없으면 "(없음)"). 템플릿 정본 `templates/split/PROMPT-TEMPLATE.md`(플레이스홀더 14종, `config.split.dispatch.template` 로 교체).
-3. 출력 `{ to, limb, pointer, promptPath }` 의 **`pointer` 1줄만** 리더가 `SendMessage(to, pointer)` 한다. `to` 가 `null` 이면 `ListAgents` 로 세션을 찾아 `--window` 로 재실행. `--dry-run` 은 쓰기 0.
+3. 출력 `{ to, limb, pointer, promptPath, siblings, laneState, forkPoint }` 의 **`pointer` 1줄만** 리더가 `SendMessage(to, pointer)` 한다 — 포인터는 brief.md 와 prompt.md 둘 다 가리킨다(`split-dispatch.js#buildLimbMessage` `promptPath`, 없으면 종전 문구 그대로). `to` 가 `null` 이면 `ListAgents` 로 세션을 찾아 `--window` 로 재실행. `--dry-run` 은 쓰기 0.
 - 근거(Ontology 9회 실측): 리더가 2.5KB 프롬프트를 창마다 복제 전송하며 치환 실수 위험 + 리더 컨텍스트 소모. 전체 줄기를 한 번에 판정·발송하는 절차는 커맨드 §dispatch 1~5.
 
 ## land <limb> (메인 세션 전용 · 읽기 전용 · 랜딩 체크리스트 — A2)
@@ -31,7 +32,7 @@
 - `PASS` → exit 0, **승인이 아니다** — PR 본문 골격의 `## 검수` 는 검수자/리더가 쓰는 칸이고 `## 게이트` 수치는 자리표시자다.
 - `FAIL` → 빨간 행의 `detail` 을 그대로 줄기 창에 `SendMessage`.
 - `UNSUPPORTED` → git < 2.38, 직렬 랜딩으로 강등(절대 PASS 아님).
-- **base 선택(실측)**: 줄기가 main 을 merge 했으면 `--base master` 처럼 **살아 있는 ref** 를 준다 — plan.json 의 SHA base 로는 머지된 main 의 남의 파일이 소유권 위반으로 잡힌다. push·merge·쓰기 없음(`--pr-body` 파일만).
+- **base 선택(실측)**: 우선순위 `--base` > `plan.limbs[].forkPoint`(dispatch 가 기록한 worktree 분기점) > `plan.base`(plan 시점 SHA). 줄기가 main 을 merge 했으면 `--base master` 처럼 **살아 있는 ref** 를 준다 — plan.json 의 SHA base 로는 머지된 main 의 남의 파일이 소유권 위반으로 잡힌다(2026-09-14: plan.base 와 분기점 사이 master docs 6파일이 같은 증상, forkPoint 가 닫는다). 표 아래 `base` 정보 절이 어느 값을 썼는지·plan.base 와의 거리(commits)·forkPoint 미기록 시 `merge-base master <branch>` 참고값을 낸다(checks 행 아님, exit code 무영향). push·merge·쓰기 없음(`--pr-body` 파일만).
 
 ## watch (관측 전용 · 자율도 S0 · 메인 세션 — vNext PR-SV02)
 
@@ -50,7 +51,7 @@
 
 ## lane-state <limb> <state> (운용 상태 기록 — probe·watch 의 입력)
 
-- 레인 상태 갱신: `node <pluginRoot>/scripts/split/lane-state.mjs <limb> <state> [--window <세션>] [--note <한줄>]` — state ∈ `pending|active|awaiting-dispatch|review|serial-gate|closing|done|suspended`(`lib/supervisor/contracts.js#LANE_OPS_STATES`). dispatch 직후 `active`, 검수 넘길 때 `review`, 랜딩 후 `done`, suspend 뒤 `suspended`. **이걸 적어야** probe 의 오탐 억제와 watch 의 ops 열이 켜진다(2026-09-02 blindspot: 쓰는 도구가 없어 전 줄기 unknown 이었다).
+- 레인 상태 갱신: `node <pluginRoot>/scripts/split/lane-state.mjs <limb> <state> [--window <세션>] [--note <한줄>]` — state ∈ `pending|active|awaiting-dispatch|review|serial-gate|closing|done|suspended`(`lib/supervisor/contracts.js#LANE_OPS_STATES`). dispatch 직후 `active`(**`dispatch.mjs` 가 자동 기록** — 손으로 안 쓴다), 검수 넘길 때 `review`, 랜딩 후 `done`(리더 수동 — `landBatch` 는 run.json 을 모른다), suspend 뒤 `suspended`. **이걸 적어야** probe 의 오탐 억제와 watch 의 ops 열이 켜진다(2026-09-02 blindspot: 쓰는 도구가 없어 전 줄기 unknown 이었다; 2026-09-14: 손으로 쓴 `dispatched`·`landed` 가 allowlist 밖이라 다시 8/8 unknown — 이미 쓰인 값은 코드가 고치지 않으니 `lane-state.mjs <limb> active|done` 으로 1회 정정). 쓰기 체인은 `setLaneState` → `lib/topology/split-state.js#writeWorkerState` 하나다.
 - 현황: `node <pluginRoot>/scripts/split/lane-state.mjs --list` — plan.json 의 모든 줄기와 state/since/window 표(미설정·allowlist 밖 = unknown, fanout-probe 와 같은 판정).
 - 규칙: allowlist 밖 state·plan.json 밖 limb 는 refuse(exit 1), 다른 run.json 키는 절대 지우지 않는다(실런 run.json 의 `metrics`·`landings`·`rebootShutdown_*` 보존). 오타 lane 을 만들 길이 없으므로 이름은 plan.json 그대로.
 

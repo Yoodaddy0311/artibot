@@ -22,6 +22,8 @@
  * Outputs (unless --dry-run):
  *   <worktreePath>/.artibot/split/<limb>/brief.md   byte-exact copy
  *   <worktreePath>/.artibot/split/<limb>/prompt.md  rendered prompt
+ *   parent run.json                                 lanes[limb] = active (via lane-state.mjs)
+ *   parent plan.json                                limbs[].forkPoint, written once
  *
  * Exit codes: 0 ok · 1 refused / error (message on stderr, or JSON with --json).
  *
@@ -30,10 +32,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { extractReportContract, materializeLimb, renderModelPolicy, renderPrompt } from '../../lib/git/split-brief.js';
 import { getRepoIdentity, repoShortName } from '../../lib/git/repo-identity.js';
-import { readRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
+import { forkPointForLimb, readRunJson, updatePlanJson, windowForLimb } from '../../lib/git/split-run-file.js';
+import { isLaneOpsState } from '../../lib/supervisor/contracts.js';
+import { setLaneState } from './lane-state.mjs';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { limbsFromPlan } from '../../lib/git/split-dispatch.js';
 import { loadConfig } from '../../lib/core/config.js';
@@ -57,7 +62,7 @@ export const HELP = `usage: node scripts/split/dispatch.mjs <limb> [options]
   --gotchas <path>    text for {GOTCHAS_DELTA} (default: .artibot/split/gotchas.md, else "(없음)")
   --budget <n>        {BUDGET} (default: artibot.config.json#split.dispatch.budget, else ${DEFAULT_BUDGET})
   --dry-run           render only; write nothing (prints the prompt with --json)
-  --json              machine output { to, limb, pointer, promptPath, briefPath }
+  --json              machine output { to, limb, pointer, promptPath, briefPath, siblings, laneState, forkPoint }
 
 This script NEVER sends. Take \`pointer\` and send it yourself:
   SendMessage(to=<to>, message=<pointer>)
@@ -137,13 +142,99 @@ function readTextOrNull(p) {
   }
 }
 
+/** The word recorded in `run.json.lanes[limb]`, verbatim, or `null`. */
+function recordedLaneWord(run, limb) {
+  const raw = run?.lanes && typeof run.lanes === 'object' ? run.lanes[limb] : undefined;
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object' && typeof raw.state === 'string') return raw.state;
+  return null;
+}
+
+/**
+ * Refs tried, in order, as "the line this limb integrates back into".
+ *
+ * LOCAL FIRST, remote-tracking as the fallback: a worktree is cut from the
+ * local HEAD, so when the parent holds unpushed commits `origin/master` sits
+ * BEHIND the real fork point and would record a base older than the branch
+ * actually diverged at. `origin/*` only answers when no local ref exists
+ * (a fresh clone that never created the branch locally).
+ */
+const INTEGRATION_REFS = Object.freeze(['master', 'main', 'origin/master', 'origin/main']);
+
+/**
+ * Record the limb's fork point in `plan.json` — the sha its worktree was
+ * really cut at — once. Never overwrites: a re-dispatch must not move a fork
+ * point a landing already computed its diff against.
+ *
+ * `git merge-base <integrationRef> HEAD`, NOT `rev-parse HEAD`, and not
+ * `merge-base plan.base HEAD`:
+ *  - `rev-parse HEAD` is only the fork point while the window has committed
+ *    nothing. Run dispatch once the window is working and it stamps the WORK
+ *    TIP, which makes `land`'s `forkPoint..branch` diff skip everything
+ *    committed earlier — ownership and citation checks go blind on it. That is
+ *    the unsafe direction (too-new base → too-small diff → false PASS).
+ *  - `merge-base plan.base HEAD` cannot help: `plan.base` is an ancestor of
+ *    the worktree's real fork point, so the merge base IS `plan.base` and the
+ *    recorded value would never differ from the value it is meant to correct.
+ *
+ * Against a live ref the answer is right in all three shapes: a freshly opened
+ * worktree gives HEAD, a working one gives where it branched, and one that
+ * merged the integration line in gives that merged tip — the same value
+ * `land --base master` would use.
+ *
+ * A git failure (worktree not opened, no integration ref) is reported, not
+ * thrown: dispatch's job is the brief, and a missing fork point costs `land` a
+ * fallback to `plan.base`, not the run.
+ *
+ * @param {{ parentRoot: string, plan: object, worktreePath: string, limb: string }} p
+ * @returns {{ value: string|null, recorded: boolean, reason: string|null, ref: string|null }}
+ */
+function recordForkPoint({ parentRoot, plan, worktreePath, limb }) {
+  const existing = forkPointForLimb(plan, limb);
+  if (existing) return { value: existing, recorded: false, reason: 'already-recorded', ref: null };
+  let base = null;
+  let ref = null;
+  const failures = [];
+  for (const candidate of INTEGRATION_REFS) {
+    let out;
+    try {
+      out = String(execFileSync('git', ['merge-base', candidate, 'HEAD'], {
+        cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000, windowsHide: true,
+      })).trim();
+    } catch (err) {
+      failures.push(`${candidate}: ${err?.message ?? err}`);
+      continue;
+    }
+    if (out) {
+      base = out;
+      ref = candidate;
+      break;
+    }
+    failures.push(`${candidate}: empty output`);
+  }
+  if (!base) {
+    return { value: null, recorded: false, ref: null, reason: `git merge-base <ref> HEAD failed in ${worktreePath} — tried ${INTEGRATION_REFS.join(', ')} (${failures.join(' | ')})` };
+  }
+  updatePlanJson(parentRoot, (cur) => {
+    const limbs = Array.isArray(cur.limbs) ? [...cur.limbs] : [];
+    const i = limbs.findIndex((l) => l && l.limb === limb);
+    if (i < 0 || forkPointForLimb(cur, limb)) return cur;
+    limbs[i] = { ...limbs[i], forkPoint: base };
+    return { ...cur, limbs };
+  });
+  return { value: base, recorded: true, reason: null, ref };
+}
+
 /**
  * Run dispatch for one limb. Pure apart from the reads listed in the module
- * header and the two writes `materializeLimb` does (skipped with `dryRun`).
+ * header and the writes `materializeLimb`, `setLaneState` and
+ * `recordForkPoint` do (all skipped with `dryRun`).
  *
  * @param {ReturnType<typeof parseArgs>} args
  * @param {{ cwd?: string, config?: object|null, splitMdPath?: string }} [opts] - `config` injectable for tests (null = read via loadConfig)
- * @returns {Promise<{ to: string|null, limb: string, pointer: string, promptPath: string|null, briefPath: string, copied: boolean, dryRun: boolean, prompt: string }>}
+ * @returns {Promise<{ to: string|null, limb: string, pointer: string, promptPath: string|null, briefPath: string, copied: boolean, siblings: Array<{ name: string, copied: boolean, sourcePath: string, destPath: string }>, dryRun: boolean, prompt: string, laneState: { state: string, previous: string|null, previousRaw: string|null, warning: string|null, written: boolean, ledger: string|null }, forkPoint: { value: string|null, recorded: boolean, reason: string|null, ref: string|null } }>}
+ *   `laneState.previous` is the recorded word ONLY when it was in the allowlist; `previousRaw` is what was there either way, and `warning` names the gap. `ledger` is `null` on a dry run (nothing was written) — see `setLaneState` for the values.
+ *   `forkPoint.ref` is which of {@link INTEGRATION_REFS} answered, `null` when none did or when the value was already recorded.
  */
 export async function runDispatch(args, opts = {}) {
   if (!args.limb) throw new Error('limb is required (see --help)');
@@ -204,8 +295,24 @@ export async function runDispatch(args, opts = {}) {
     parentRoot, worktreePath: row.worktreePath, limb: row.limb, branch: row.branch, plan, prompt, dryRun: args.dryRun,
   });
   const to = args.window ?? windowForLimb(run, row.limb);
+
+  // `operations.md` §lane-state: a dispatched lane is `active`. Until
+  // 2026-09-14 nothing wrote it, so the leader hand-wrote a word outside
+  // `LANE_OPS_STATES` and every reader answered `unknown`.
+  const previousRaw = recordedLaneWord(run, row.limb);
+  const previous = isLaneOpsState(previousRaw) ? previousRaw : null;
+  const warning = previousRaw !== null && previous === null
+    ? `run.json lanes[${row.limb}].state '${previousRaw}' 는 allowlist 밖 — readLaneOpsState 가 null 로 읽어 excludeLimbs 선제외 0건 처리됐다, 이번 기록으로 'active' 로 교체됨`
+    : null;
+  const laneWrite = args.dryRun ? null : setLaneState({ limb: row.limb, state: 'active', window: to ?? null }, { cwd: parentRoot });
+  const laneState = { state: 'active', previous, previousRaw, warning, written: !args.dryRun, ledger: laneWrite?.ledger ?? null };
+
+  const forkPoint = args.dryRun
+    ? { value: forkPointForLimb(plan, row.limb), recorded: false, reason: 'dry-run' }
+    : recordForkPoint({ parentRoot, plan, worktreePath: row.worktreePath, limb: row.limb });
+
   return {
-    to, limb: row.limb, pointer: mat.pointer, promptPath: mat.promptPath, briefPath: mat.briefPath, copied: mat.copied, dryRun: args.dryRun, prompt,
+    to, limb: row.limb, pointer: mat.pointer, promptPath: mat.promptPath, briefPath: mat.briefPath, copied: mat.copied, siblings: mat.siblings, dryRun: args.dryRun, prompt, laneState, forkPoint,
   };
 }
 
@@ -241,6 +348,18 @@ export async function main(argv, opts = {}) {
         `to: ${r.to ?? '(unknown — pass --window; SendMessage target needed)'}`,
         `brief: ${r.briefPath}${r.copied ? ' (copied)' : ''}`,
         `prompt: ${r.promptPath ?? '(not written)'}`,
+        // `absent` and `not copied` are different answers: a dry run and a
+        // window-reuse worktree both leave `copied:false` with the file right
+        // there, and reporting those as "absent" would tell the leader to go
+        // copy something that already exists.
+        `addendum: ${r.siblings.map((s) => {
+          if (s.copied) return `${s.name} copied`;
+          if (!fs.existsSync(s.sourcePath)) return `${s.name} absent`;
+          return `${s.name} ${r.dryRun ? 'not copied (dry-run)' : 'already in place'}`;
+        }).join(', ')}`,
+        `lane: ${r.laneState.previousRaw ?? 'unknown'} → ${r.laneState.state}${r.laneState.written ? '' : ' (dry-run — not written)'}`,
+        ...(r.laneState.warning ? [`warning: ${r.laneState.warning}`] : []),
+        `forkPoint: ${r.forkPoint.value ?? '(none)'}${r.forkPoint.recorded ? ` (recorded via ${r.forkPoint.ref})` : ` (${r.forkPoint.reason})`}`,
         '',
         'pointer (send this ONE message yourself — this script never sends):',
         r.pointer,

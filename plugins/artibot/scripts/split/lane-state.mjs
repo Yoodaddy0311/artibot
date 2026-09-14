@@ -12,17 +12,28 @@
  * Shape written (the reader accepts a string or `{ state }`; the object form
  * is used so a window and a note can ride along):
  *
- *   run.json.lanes[limb] = { state, since: ISO, window?: session, note?: text }
+ *   run.json.lanes[limb] = { state, since: ISO, window?: session, note?: text,
+ *                            projected_from: 'run.json', updated_at: ISO }
+ *
+ * `projected_from`/`updated_at` are stamped by `writeWorkerState`, not here:
+ * `since` moves only on a state change, so a re-assert needs a second
+ * timestamp to say the record was touched at all.
  *
  * Rules (all fail-closed, exit 1 with the reason):
  *   - `state` must be in `LANE_OPS_STATES` — the allowlist is printed on refusal.
  *   - `limb` must be in `plan.json` — no `--force`; a typo must not create a lane.
  *   - Every other key of `run.json` is preserved verbatim (live files carry
  *     free-form `metrics`, `landings`, `rebootShutdown_*`, …); other lanes'
- *     entries are preserved too. Writes go through
- *     `lib/git/split-run-file.js#updateRunJson` (atomic tmp + rename).
+ *     entries are preserved too.
  *   - `since` is set when the state CHANGES; re-asserting the same state keeps
  *     the earlier `since` (idempotent re-runs do not reset the clock).
+ *
+ * ONE writer, one chain: this script validates (allowlist + plan membership,
+ * the part callers get wrong) and then hands the write to
+ * `lib/topology/split-state.js#writeWorkerState`, which owns the record shape,
+ * the `since` rule and the ledger ordering. `scripts/split/dispatch.mjs` calls
+ * `setLaneState`, never `run.json` directly, so there is exactly one path from
+ * any caller to that key.
  *
  * `--list` prints every plan limb with its current state (`unknown` when the
  * key is absent or outside the allowlist — the same answer the reader gives).
@@ -33,7 +44,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isLaneOpsState, LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
-import { readRunJson, updateRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
+import { readRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
+import { writeWorkerState } from '../../lib/topology/split-state.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
 export const HELP = `usage: node scripts/split/lane-state.mjs <limb> <state> [--window <session>] [--note <text>] [--json]
@@ -45,7 +57,7 @@ export const HELP = `usage: node scripts/split/lane-state.mjs <limb> <state> [--
   --list             print every plan limb with its current ops state
   --json             machine output
 
-Writes run.json.lanes[<limb>] = { state, since, window?, note? } atomically; every other run.json key is preserved.
+Writes run.json.lanes[<limb>] = { state, since, window?, note?, projected_from, updated_at } atomically; every other run.json key is preserved.
 Refuses a state outside the allowlist and a limb not in plan.json (no --force).`;
 
 /**
@@ -104,7 +116,7 @@ function currentEntry(run, limb) {
  *
  * @param {{ limb: string, state: string, window?: string|null, note?: string|null }} input
  * @param {{ cwd?: string, now?: () => Date }} [opts]
- * @returns {{ limb: string, state: string, previous: string|null, since: string, window: string|null, note: string|null, changed: boolean }}
+ * @returns {{ limb: string, state: string, previous: string|null, since: string, window: string|null, note: string|null, changed: boolean, ledger: string }} - `ledger` is what the event half did: `appended`, `skipped:no-event` (this transition owes none), `skipped:no-port` (no ledger injected — this CLI injects none) or `skipped:missing:<key>`. A skip is a real hole in `ledger ⊇ store` and this return is its only signal.
  */
 export function setLaneState({ limb, state, window = null, note = null }, opts = {}) {
   const parentRoot = path.resolve(opts.cwd ?? process.cwd());
@@ -116,26 +128,29 @@ export function setLaneState({ limb, state, window = null, note = null }, opts =
   if (!limbs.includes(limb)) {
     throw new Error(`limb ${JSON.stringify(limb)} not in plan.json (known: ${limbs.join(', ') || '(none)'}) — no --force, fix the name`);
   }
-  const now = (opts.now ?? (() => new Date()))().toISOString();
-  let result = null;
-  updateRunJson(parentRoot, (cur) => {
-    const prev = currentEntry(cur, limb);
-    const changed = prev.state !== state;
-    const since = changed || !prev.since ? now : prev.since;
-    const win = window ?? prev.window ?? windowForLimb(cur, limb);
-    // Preserve hand-added keys (`pr`, `inspector`, …): spread the existing
-    // object entry and overwrite only state/since/window/note. A string entry
-    // (`lanes[limb] = 'review'`) is promoted to the object form.
-    const base = prev.raw && typeof prev.raw === 'object' ? prev.raw : {};
-    const entry = { ...base, state, since };
-    if (win) entry.window = win;
-    const noteOut = note ?? prev.note;
-    if (noteOut) entry.note = noteOut;
-    const lanes = cur.lanes && typeof cur.lanes === 'object' && !Array.isArray(cur.lanes) ? cur.lanes : {};
-    result = { limb, state, previous: prev.state, since, window: win ?? null, note: noteOut ?? null, changed };
-    return { ...cur, lanes: { ...lanes, [limb]: entry } };
+  const run = readRunJson(parentRoot);
+  const prev = currentEntry(run, limb);
+  // Resolved here, not in the writer: the window fallback chain
+  // (argument → recorded lane entry → `windowReuse`) is this script's rule.
+  // `writeWorkerState` only carries the value it is handed.
+  const win = window ?? prev.window ?? windowForLimb(run, limb);
+  const noteOut = note ?? prev.note;
+  const written = writeWorkerState({
+    runDir: path.join(parentRoot, '.artibot', 'split'),
+    worker: limb,
+    patch: { ops_state: state, ...(win ? { window: win } : {}), ...(noteOut ? { note: noteOut } : {}) },
+    now: opts.now,
   });
-  return result;
+  return {
+    limb,
+    state,
+    previous: prev.state,
+    since: written.record.since,
+    window: win ?? null,
+    note: noteOut ?? null,
+    changed: prev.state !== state,
+    ledger: written.ledger,
+  };
 }
 
 /**

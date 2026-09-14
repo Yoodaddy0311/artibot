@@ -19,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as dispatch from '../../scripts/split/dispatch.mjs';
 import * as laneState from '../../scripts/split/lane-state.mjs';
@@ -26,8 +27,11 @@ import * as restore from '../../scripts/split/restore-blob.mjs';
 import * as resume from '../../scripts/split/resume-notices.mjs';
 import * as suspend from '../../scripts/split/suspend.mjs';
 import * as wts from '../../scripts/split/worktree-setup.mjs';
-import { readRunJson, writeRunJson } from '../../lib/git/split-run-file.js';
+import { forkPointForLimb, readPlanJson, readRunJson, writeRunJson } from '../../lib/git/split-run-file.js';
 import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
+import { readLaneOpsState } from '../../lib/supervisor/lane-monitor.js';
+
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const tmpDirs = [];
 const mkTmp = (label = 'split-tools-') => {
@@ -182,8 +186,14 @@ describe('dispatch.mjs runDispatch (temp parent root, real template + real comma
     const c = collect();
     expect(await dispatch.main(['auth', '--json'], { cwd: parent, config: null, ...c.io })).toBe(0);
     const parsed = JSON.parse(c.stdout());
-    expect(Object.keys(parsed).sort()).toEqual(['briefPath', 'copied', 'dryRun', 'limb', 'pointer', 'promptPath', 'to']);
+    expect(Object.keys(parsed).sort()).toEqual(['briefPath', 'copied', 'dryRun', 'forkPoint', 'laneState', 'limb', 'pointer', 'promptPath', 'siblings', 'to']);
     expect(parsed.to).toBe('split-demo-auth-3f');
+    expect(parsed.siblings).toEqual([{
+      name: 'leader-addendum.md',
+      copied: false,
+      sourcePath: path.join(parent, '.artibot', 'split', 'auth', 'leader-addendum.md'),
+      destPath: path.join(readPlanJson(parent).limbs[0].worktreePath, '.artibot', 'split', 'auth', 'leader-addendum.md'),
+    }]);
     const e = collect();
     expect(await dispatch.main(['nope', '--json'], { cwd: parent, config: null, ...e.io })).toBe(1);
     expect(JSON.parse(e.stdout()).error).toMatch(/not in plan.json/);
@@ -194,6 +204,225 @@ describe('dispatch.mjs runDispatch (temp parent root, real template + real comma
     const bad = collect();
     expect(await dispatch.main(['--bogus'], { ...bad.io })).toBe(1);
     expect(bad.stderr()).toMatch(/unknown option/);
+  });
+});
+
+/**
+ * F07 / lane-writer unification. Measured 2026-09-14 on the live Wave 10 run:
+ * `dispatch.mjs` wrote no lane state at all, so the leader hand-wrote
+ * `dispatched` — a word outside `LANE_OPS_STATES` — and `readLaneOpsState`
+ * answered `null` for 8/8 lanes, which made `excludeLimbs` pre-exclusion,
+ * `watch` and `fanout-probe` all read `unknown`.
+ *
+ * What this block cannot see (rules §9): whether the window a lane names is
+ * really running, and whether `fanout-probe`/`watch` consume the value — both
+ * are live observations. It fixes only what `dispatch` writes.
+ */
+describe('dispatch.mjs runDispatch — lane state + fork point (F07)', () => {
+  const runPathOf = (parent) => path.join(parent, '.artibot', 'split', 'run.json');
+  const planPathOf = (parent) => path.join(parent, '.artibot', 'split', 'plan.json');
+
+  /** A standalone git repo at `dir` on `branch` with one commit; returns HEAD. */
+  function initRepoAt(dir, branch = 'main') {
+    git(dir, 'init', '-q', '-b', branch);
+    git(dir, 'config', 'user.email', 'b@example.invalid');
+    git(dir, 'config', 'user.name', 'B');
+    git(dir, 'config', 'commit.gpgsign', 'false');
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'x\n');
+    git(dir, 'add', 'f.txt');
+    git(dir, 'commit', '-q', '-m', 'init');
+    return git(dir, 'rev-parse', 'HEAD').trim();
+  }
+
+  /** Overwrite `plan.base` — seedParent hardcodes a fake sha. */
+  function setPlanBase(parent, base) {
+    const p = JSON.parse(fs.readFileSync(planPathOf(parent), 'utf-8'));
+    fs.writeFileSync(planPathOf(parent), JSON.stringify({ ...p, base }, null, 2));
+  }
+
+  it('records lanes[limb] = active and the allowlist reader sees it', async () => {
+    const { parent } = seedParent();
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.laneState).toEqual({ state: 'active', previous: null, previousRaw: null, warning: null, written: true, ledger: 'skipped:no-event' });
+    const run = readRunJson(parent);
+    expect(run.lanes.auth.state).toBe('active');
+    expect(run.lanes.auth.window).toBe('split-demo-auth-3f');
+    expect(readLaneOpsState(run, 'auth')).toBe('active');
+  });
+
+  it('preserves metrics, landings, windowReuse and other lanes', async () => {
+    const { parent } = seedParent({ limbs: ['auth', 'billing'] });
+    writeRunJson(parent, {
+      ...readRunJson(parent),
+      metrics: { lanes: { auth: { files: 3 } } },
+      landings: [{ limb: 'billing', at: 't' }],
+      lanes: { billing: 'review' },
+    });
+    await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    const run = readRunJson(parent);
+    expect(run.metrics).toEqual({ lanes: { auth: { files: 3 } } });
+    expect(run.landings).toEqual([{ limb: 'billing', at: 't' }]);
+    expect(run.lanes.billing).toBe('review');
+    expect(run.windowReuse.billing).toBe(`split-demo-billing-3f @ ${path.join(parent, 'x')}`);
+  });
+
+  it('warns when the recorded word was outside the allowlist, and replaces it', async () => {
+    const { parent } = seedParent();
+    writeRunJson(parent, { ...readRunJson(parent), lanes: { auth: 'dispatched' } });
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.laneState.previousRaw).toBe('dispatched');
+    expect(r.laneState.previous).toBeNull();
+    expect(r.laneState.warning).toContain('allowlist 밖');
+    expect(r.laneState.written).toBe(true);
+    expect(readLaneOpsState(readRunJson(parent), 'auth')).toBe('active');
+  });
+
+  it('--dry-run leaves run.json and plan.json byte-identical but still reports the warning', async () => {
+    const { parent } = seedParent();
+    writeRunJson(parent, { ...readRunJson(parent), lanes: { auth: 'dispatched' } });
+    const runBefore = fs.readFileSync(runPathOf(parent));
+    const planBefore = fs.readFileSync(planPathOf(parent));
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth', '--dry-run']), { cwd: parent, config: null });
+    expect(r.laneState).toMatchObject({ state: 'active', previousRaw: 'dispatched', written: false, ledger: null });
+    expect(r.laneState.warning).toContain('allowlist 밖');
+    expect(r.forkPoint.recorded).toBe(false);
+    expect(fs.readFileSync(runPathOf(parent))).toEqual(runBefore);
+    expect(fs.readFileSync(planPathOf(parent))).toEqual(planBefore);
+  });
+
+  it('a freshly opened worktree (no commits of its own) forks at HEAD, and re-dispatch never moves it', async () => {
+    const { parent, rows } = seedParent();
+    const head = initRepoAt(rows[0].worktreePath);
+    const t1 = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(t1.forkPoint).toEqual({ value: head, recorded: true, reason: null, ref: 'main' });
+    expect(forkPointForLimb(readPlanJson(parent), 'auth')).toBe(head);
+    const since = readRunJson(parent).lanes.auth.since;
+
+    git(rows[0].worktreePath, 'commit', '-q', '--allow-empty', '-m', 'second');
+    const t2 = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(t2.forkPoint).toEqual({ value: head, recorded: false, reason: 'already-recorded', ref: null });
+    expect(forkPointForLimb(readPlanJson(parent), 'auth')).toBe(head);
+    expect(t2.laneState).toMatchObject({ state: 'active', previous: 'active', written: true });
+    expect(readRunJson(parent).lanes.auth.since).toBe(since);
+  });
+
+  // 이 줄기가 고치려는 (a) 케이스. plan.base(B0) 뒤로 master 가 B1 로 전진한 뒤
+  // 거기서 worktree 가 갈라졌다. `rev-parse HEAD` 는 작업 팁을 박제해 land 의
+  // diff 에서 창의 커밋 2개를 빼버리고(거짓 PASS 방향),
+  // `merge-base plan.base HEAD` 는 B0 가 B1 의 조상이라 언제나 B0 를 돌려줘
+  // 고치려던 값을 그대로 재생산한다. 살아 있는 ref 만 B1 을 짚는다.
+  it('a working worktree forks at the integration ref, not at HEAD and not at plan.base', async () => {
+    const { parent, rows } = seedParent();
+    const wt = rows[0].worktreePath;
+    const b0 = initRepoAt(wt, 'master');
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'B1');
+    const b1 = git(wt, 'rev-parse', 'HEAD').trim();
+    git(wt, 'checkout', '-q', '-b', 'worktree-split-demo-auth');
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'w1');
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'w2');
+    const head = git(wt, 'rev-parse', 'HEAD').trim();
+    setPlanBase(parent, b0);
+
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.forkPoint).toEqual({ value: b1, recorded: true, reason: null, ref: 'master' });
+    expect(r.forkPoint.value).not.toBe(head);
+    expect(r.forkPoint.value).not.toBe(b0);
+    expect(forkPointForLimb(readPlanJson(parent), 'auth')).toBe(b1);
+  });
+
+  // 로컬 우선 순서의 핀. 부모에 미푸시 커밋이 있으면 origin/* 은 실제 분기점보다
+  // 뒤에 있어서, 순서가 뒤집히면 base 가 너무 낡은 값으로 기록된다.
+  it('prefers the local ref over origin/* — an unpushed remote-tracking ref is behind the fork point', async () => {
+    const { parent, rows } = seedParent();
+    const wt = rows[0].worktreePath;
+    const b0 = initRepoAt(wt, 'master');
+    git(wt, 'update-ref', 'refs/remotes/origin/master', b0);
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'B1 (unpushed)');
+    const b1 = git(wt, 'rev-parse', 'HEAD').trim();
+    git(wt, 'checkout', '-q', '-b', 'worktree-split-demo-auth');
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'w1');
+
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.forkPoint).toEqual({ value: b1, recorded: true, reason: null, ref: 'master' });
+    expect(r.forkPoint.value).not.toBe(b0);
+  });
+
+  it('falls back to origin/* when no local master/main exists', async () => {
+    const { parent, rows } = seedParent();
+    const wt = rows[0].worktreePath;
+    const b0 = initRepoAt(wt, 'dev');
+    git(wt, 'update-ref', 'refs/remotes/origin/master', b0);
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'w1');
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.forkPoint).toEqual({ value: b0, recorded: true, reason: null, ref: 'origin/master' });
+  });
+
+  it('reports recorded:false with a reason when none of the four integration refs exists', async () => {
+    const { parent, rows } = seedParent();
+    initRepoAt(rows[0].worktreePath, 'dev');
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.forkPoint).toMatchObject({ value: null, recorded: false, ref: null });
+    expect(r.forkPoint.reason).toMatch(/tried master, main, origin\/master, origin\/main/);
+    expect(forkPointForLimb(readPlanJson(parent), 'auth')).toBeNull();
+    expect(readLaneOpsState(readRunJson(parent), 'auth')).toBe('active');
+  });
+
+  it('reports recorded:false with a reason when the worktree is not a git repo — everything else still runs', async () => {
+    const { parent } = seedParent();
+    const r = await dispatch.runDispatch(dispatch.parseArgs(['auth']), { cwd: parent, config: null });
+    expect(r.forkPoint.recorded).toBe(false);
+    expect(r.forkPoint.value).toBeNull();
+    expect(r.forkPoint.reason).toMatch(/merge-base/);
+    expect(r.copied).toBe(true);
+    expect(readLaneOpsState(readRunJson(parent), 'auth')).toBe('active');
+    expect(forkPointForLimb(readPlanJson(parent), 'auth')).toBeNull();
+  });
+
+  it('the human output names the lane transition', async () => {
+    const { parent } = seedParent();
+    const c = collect();
+    expect(await dispatch.main(['auth'], { cwd: parent, config: null, ...c.io })).toBe(0);
+    expect(c.stdout()).toMatch(/lane: unknown → active/);
+  });
+
+  // 리더가 dispatch 출력만 보고 addendum 이 창까지 갔는지 알 수 있어야 한다.
+  it('surfaces the addendum in --json and in the human output, and tells absent from not-copied', async () => {
+    const { parent, rows } = seedParent();
+    fs.writeFileSync(path.join(parent, '.artibot', 'split', 'auth', 'leader-addendum.md'), '# 보충\n');
+
+    const c = collect();
+    expect(await dispatch.main(['auth', '--json'], { cwd: parent, config: null, ...c.io })).toBe(0);
+    expect(JSON.parse(c.stdout()).siblings[0]).toMatchObject({ name: 'leader-addendum.md', copied: true });
+    expect(fs.readFileSync(path.join(rows[0].worktreePath, '.artibot', 'split', 'auth', 'leader-addendum.md'), 'utf-8')).toBe('# 보충\n');
+
+    const h = collect();
+    expect(await dispatch.main(['auth'], { cwd: parent, config: null, ...h.io })).toBe(0);
+    expect(h.stdout()).toMatch(/addendum: leader-addendum\.md copied/);
+
+    // 있는데 안 옮긴 것(dry-run)을 "absent" 로 말하면 리더가 없는 파일을 찾는다.
+    const d = collect();
+    expect(await dispatch.main(['auth', '--dry-run'], { cwd: parent, config: null, ...d.io })).toBe(0);
+    expect(d.stdout()).toMatch(/addendum: leader-addendum\.md not copied \(dry-run\)/);
+
+    const { parent: bare } = seedParent();
+    const b = collect();
+    expect(await dispatch.main(['auth'], { cwd: bare, config: null, ...b.io })).toBe(0);
+    expect(b.stdout()).toMatch(/addendum: leader-addendum\.md absent/);
+  });
+
+  // 어휘 자기검증: 라이브에서 리더가 손으로 쓴 allowlist 밖 단어가 코드로
+  // 굳어지지 않게 한다. `tests/supervisor/v11-status-mapping.test.js:188` 의
+  // EMITTER 와 같은 형태이지만 그쪽은 `failed` 만 잰다 — 이 두 단어는 여기서 잰다.
+  it('neither script emits a state value outside LANE_OPS_STATES', () => {
+    const emitter = (word) => new RegExp(String.raw`state["']?\s*[:=]\s*["']` + word + String.raw`["']`);
+    for (const file of ['dispatch.mjs', 'lane-state.mjs']) {
+      const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'split', file), 'utf-8');
+      for (const word of ['dispatched', 'landed']) {
+        expect(emitter(word).test(src), `${file} emits ${word}`).toBe(false);
+      }
+      const literals = [...src.matchAll(/\bstate:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+      expect(literals.every((w) => LANE_OPS_STATES.includes(w)), `${file}: ${literals.join(', ')}`).toBe(true);
+    }
   });
 });
 
@@ -563,7 +792,7 @@ describe('lane-state.mjs (writer for run.json.lanes[limb] — the reader is lib/
     expect(c.stderr()).toMatch(/lane-state refused/);
   });
 
-  it('writes { state, since, window, note } atomically, preserves every other key and other lanes, and the reader sees it', async () => {
+  it('writes { state, since, window, note } atomically, preserves every other key and other lanes, and the reader sees it', () => {
     const { parent } = seedParent({ limbs: ['auth', 'billing'] });
     writeRunJson(parent, {
       runId: 'split-abc123',
@@ -574,15 +803,21 @@ describe('lane-state.mjs (writer for run.json.lanes[limb] — the reader is lib/
     });
     const now = () => new Date('2026-09-02T10:00:00.000Z');
     const r = laneState.setLaneState({ limb: 'auth', state: 'active', note: 'wave 1' }, { cwd: parent, now });
-    expect(r).toEqual({ limb: 'auth', state: 'active', previous: null, since: '2026-09-02T10:00:00.000Z', window: 'split-demo-auth-3f', note: 'wave 1', changed: true });
+    // `skipped:no-event`: `active` owes no ledger event (only awaiting-dispatch
+    // / done / failed do), so nothing was skipped silently here.
+    expect(r).toEqual({ limb: 'auth', state: 'active', previous: null, since: '2026-09-02T10:00:00.000Z', window: 'split-demo-auth-3f', note: 'wave 1', changed: true, ledger: 'skipped:no-event' });
     const run = readRunJson(parent);
-    expect(run.lanes.auth).toEqual({ state: 'active', since: '2026-09-02T10:00:00.000Z', window: 'split-demo-auth-3f', note: 'wave 1' });
+    // toMatchObject, not toEqual: the write now goes through the single lane
+    // writer (`lib/topology/split-state.js#writeWorkerState`), which also
+    // stamps `projected_from`/`updated_at`. The four keys below are the
+    // meaning and stay exact.
+    expect(run.lanes.auth).toMatchObject({ state: 'active', since: '2026-09-02T10:00:00.000Z', window: 'split-demo-auth-3f', note: 'wave 1' });
+    expect(run.lanes.auth).toMatchObject({ projected_from: 'run.json', updated_at: '2026-09-02T10:00:00.000Z' });
     expect(run.lanes.billing).toBe('review');
     expect(run.metrics).toEqual({ lanes: { auth: { files: 3 } } });
     expect(run.rebootShutdown_20260902).toEqual({ at: 't', ok: true });
     expect(run.windowReuse.billing).toBe('split-demo-billing-3f @ y');
     expect(fs.readdirSync(path.join(parent, '.artibot', 'split')).filter((f) => f.includes('.tmp'))).toEqual([]);
-    const { readLaneOpsState } = await import('../../lib/supervisor/lane-monitor.js');
     expect(readLaneOpsState(run, 'auth')).toBe('active');
     expect(readLaneOpsState(run, 'billing')).toBe('review');
   });
@@ -596,18 +831,22 @@ describe('lane-state.mjs (writer for run.json.lanes[limb] — the reader is lib/
     expect(same).toMatchObject({ changed: false, since: '2026-09-02T10:00:00.000Z', previous: 'active' });
     const moved = laneState.setLaneState({ limb: 'auth', state: 'review', window: 'w-new' }, { cwd: parent, now: t2 });
     expect(moved).toMatchObject({ changed: true, since: '2026-09-02T11:00:00.000Z', previous: 'active', window: 'w-new' });
-    expect(readRunJson(parent).lanes.auth).toEqual({ state: 'review', since: '2026-09-02T11:00:00.000Z', window: 'w-new' });
+    expect(readRunJson(parent).lanes.auth).toMatchObject({ state: 'review', since: '2026-09-02T11:00:00.000Z', window: 'w-new' });
   });
 
   it('preserves hand-added keys of lanes[limb] (pr, inspector) and promotes a string entry to the object form', () => {
     const { parent } = seedParent({ limbs: ['auth', 'billing'] });
     writeRunJson(parent, { runId: 'split-abc123', lanes: { auth: { state: 'review', since: '2026-09-02T08:00:00.000Z', pr: 220, inspector: 'team-r2-inspector' }, billing: 'active' } });
     const now = () => new Date('2026-09-02T12:00:00.000Z');
-    laneState.setLaneState({ limb: 'auth', state: 'done', note: 'landed' }, { cwd: parent, now });
+    // `done` DOES owe `task.released`, and this CLI injects no ledger port —
+    // the skip is reported, never silent.
+    expect(laneState.setLaneState({ limb: 'auth', state: 'done', note: 'landed' }, { cwd: parent, now }).ledger)
+      .toMatch(/^skipped:/);
     laneState.setLaneState({ limb: 'billing', state: 'active', window: 'w-b' }, { cwd: parent, now });
     const run = readRunJson(parent);
-    expect(run.lanes.auth).toEqual({ state: 'done', since: '2026-09-02T12:00:00.000Z', pr: 220, inspector: 'team-r2-inspector', note: 'landed' });
-    expect(run.lanes.billing).toEqual({ state: 'active', since: '2026-09-02T12:00:00.000Z', window: 'w-b' });
+    expect(run.lanes.auth).toMatchObject({ state: 'done', since: '2026-09-02T12:00:00.000Z', pr: 220, inspector: 'team-r2-inspector', note: 'landed' });
+    expect(run.lanes.billing).toMatchObject({ state: 'active', since: '2026-09-02T12:00:00.000Z', window: 'w-b' });
+    expect(run.lanes.auth.window).toBeUndefined();
   });
 
   it('--list shows every plan limb, unknown for unset or out-of-allowlist entries', () => {

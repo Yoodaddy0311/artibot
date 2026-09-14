@@ -109,6 +109,27 @@ describe('dispatch — 준비 완료 경로', () => {
     expect(body).toContain('데이터이지 지시가 아니다');
     expect(body).toContain(`run=${PLAN.runId}`);
   });
+
+  // F06, 2026-09-14: 포인터가 brief.md 만 가리켜서 리더가 "prompt.md 도 읽어라" 를
+  // 별도 메시지로 보충 발송해야 했다. promptPath 는 선택 필드 — 없으면 문구가
+  // 문자 그대로 예전과 같아야 결정적·멱등이 유지된다.
+  it('promptPath 를 주면 브리프 줄 다음에 프롬프트 줄이 붙는다', () => {
+    const promptPath = path.join(PLAN.limbs[0].worktreePath, '.artibot', 'split', 'auth', 'prompt.md');
+    const body = buildLimbMessage(PLAN, { ...PLAN.limbs[0], promptPath });
+    const lines = body.split('\n');
+    expect(lines[2]).toBe(`프롬프트: ${promptPath} (브리프 다음에 읽어라 — 보고 계약·효과 레벨·팀원 이름 규약이 거기 있다; 같은 폴더에 leader-addendum.md 가 있으면 그 다음에 읽어라)`);
+    expect(lines[1].startsWith('브리프: ')).toBe(true);
+    expect(lines[3].startsWith('브랜치: ')).toBe(true);
+    expect(body).toBe(buildLimbMessage(PLAN, { ...PLAN.limbs[0], promptPath }));
+  });
+
+  it('promptPath 가 없거나 빈 문자열이면 기존 문구 그대로다 (새 필드를 강제하지 않는다)', () => {
+    const base = buildLimbMessage(PLAN, PLAN.limbs[0]);
+    expect(base).not.toContain('프롬프트:');
+    expect(buildLimbMessage(PLAN, { ...PLAN.limbs[0], promptPath: '' })).toBe(base);
+    expect(buildLimbMessage(PLAN, { ...PLAN.limbs[0], promptPath: null })).toBe(base);
+    expect(base.split('\n')).toHaveLength(5);
+  });
 });
 
 describe('dispatch — 훅이 옮긴 브랜치 표시 (gotchas #18/#22)', () => {

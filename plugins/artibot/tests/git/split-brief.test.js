@@ -20,6 +20,7 @@ import {
   PROMPT_PLACEHOLDERS,
   renderModelPolicy,
   renderPrompt,
+  SIBLING_FILES,
 } from '../../lib/git/split-brief.js';
 import { buildLimbMessage } from '../../lib/git/split-dispatch.js';
 import { loadConfig } from '../../lib/core/config.js';
@@ -234,7 +235,9 @@ describe('materializeLimb', () => {
     expect(r.copied).toBe(true);
     expect(fs.readFileSync(r.briefPath)).toEqual(Buffer.from(BRIEF));
     expect(fs.readFileSync(r.promptPath, 'utf-8')).toBe('PROMPT');
-    expect(r.pointer).toBe(buildLimbMessage(plan, { limb: 'auth', worktreePath: wt, branch: 'worktree-split-x-auth' }));
+    expect(r.pointer).toBe(buildLimbMessage(plan, {
+      limb: 'auth', worktreePath: wt, branch: 'worktree-split-x-auth', promptPath: r.promptPath,
+    }));
     expect(r.sourceBrief).toBe(path.join(parent, '.artibot', 'split', 'auth', 'brief.md'));
     const leftovers = fs.readdirSync(path.dirname(r.briefPath)).filter((f) => f.includes('.tmp.'));
     expect(leftovers).toEqual([]);
@@ -282,5 +285,100 @@ describe('materializeLimb', () => {
   it('rejects missing required inputs', () => {
     expect(() => materializeLimb({ parentRoot: '', worktreePath: 'x', limb: 'a' })).toThrow(TypeError);
     expect(() => materializeLimb()).toThrow(TypeError);
+  });
+
+  // 2026-09-14 실측(라이브 1건): 부모에 leader-addendum.md 가 있어도 worktree 로
+  // 가지 않아 리더가 손으로 복사했다. 아래는 그 복사를 코드로 옮긴 것의 핀이다.
+  // 이 절이 못 보는 것: 창이 addendum 을 실제로 읽는지(라이브 관측).
+  describe('sibling files', () => {
+    const ADDENDUM = '# addendum\r\n- 창 보충 지시\r\n';
+    const siblingOf = (root, limb, name) => path.join(root, '.artibot', 'split', limb, name);
+    const write = (root, limb, name, text) => {
+      fs.mkdirSync(path.join(root, '.artibot', 'split', limb), { recursive: true });
+      fs.writeFileSync(siblingOf(root, limb, name), text);
+    };
+
+    it('is an allowlist of exact names, not a glob', () => {
+      expect(SIBLING_FILES).toEqual(['leader-addendum.md']);
+      expect(Object.isFrozen(SIBLING_FILES)).toBe(true);
+      expect(SIBLING_FILES.some((n) => n.includes('*'))).toBe(false);
+    });
+
+    it('copies leader-addendum.md byte-exactly when the parent has one', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      write(parent, 'auth', 'leader-addendum.md', ADDENDUM);
+      const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P' });
+      expect(r.siblings).toEqual([{
+        name: 'leader-addendum.md',
+        copied: true,
+        sourcePath: siblingOf(parent, 'auth', 'leader-addendum.md'),
+        destPath: siblingOf(wt, 'auth', 'leader-addendum.md'),
+      }]);
+      expect(fs.readFileSync(r.siblings[0].destPath)).toEqual(Buffer.from(ADDENDUM));
+      expect(fs.readdirSync(path.dirname(r.briefPath)).filter((f) => f.includes('.tmp.'))).toEqual([]);
+    });
+
+    it('reports copied:false and writes nothing when the parent has no addendum', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P' });
+      expect(r.siblings.map((s) => [s.name, s.copied])).toEqual([['leader-addendum.md', false]]);
+      expect(fs.existsSync(siblingOf(wt, 'auth', 'leader-addendum.md'))).toBe(false);
+    });
+
+    it('does not carry brief-draft.md across — a recon artefact is not on the allowlist', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      write(parent, 'auth', 'brief-draft.md', '# 정찰 초안');
+      const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P' });
+      expect(fs.existsSync(siblingOf(wt, 'auth', 'brief-draft.md'))).toBe(false);
+      expect(r.siblings.map((s) => s.name)).toEqual(['leader-addendum.md']);
+      expect(fs.readdirSync(path.dirname(r.briefPath)).sort()).toEqual(['brief.md', 'prompt.md']);
+    });
+
+    it('dryRun writes no sibling', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      write(parent, 'auth', 'leader-addendum.md', ADDENDUM);
+      const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P', dryRun: true });
+      expect(r.siblings[0].copied).toBe(false);
+      expect(fs.existsSync(path.join(wt, '.artibot'))).toBe(false);
+    });
+
+    it('skips the sibling copy when the worktree is the parent (window reuse)', () => {
+      const parent = mkTmp();
+      seed(parent, 'auth');
+      write(parent, 'auth', 'leader-addendum.md', ADDENDUM);
+      const r = materializeLimb({ parentRoot: parent, worktreePath: parent, limb: 'auth', branch: 'b', plan, prompt: 'P' });
+      expect(r.siblings[0].copied).toBe(false);
+      expect(fs.readFileSync(siblingOf(parent, 'auth', 'leader-addendum.md'))).toEqual(Buffer.from(ADDENDUM));
+    });
+  });
+
+  describe('pointer names prompt.md (F06)', () => {
+    it('carries a 프롬프트 line pointing at the written prompt.md', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P' });
+      expect(r.pointer).toContain(`프롬프트: ${r.promptPath}`);
+      expect(r.pointer).toContain('leader-addendum.md');
+      expect(r.pointer.indexOf('브리프:')).toBeLessThan(r.pointer.indexOf('프롬프트:'));
+      expect(r.pointer.indexOf('프롬프트:')).toBeLessThan(r.pointer.indexOf('브랜치:'));
+    });
+
+    it('has no 프롬프트 line when no prompt was rendered', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan });
+      expect(r.promptPath).toBeNull();
+      expect(r.pointer).not.toContain('프롬프트:');
+    });
   });
 });
