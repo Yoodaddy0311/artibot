@@ -31,31 +31,13 @@ import {
   reapSessionArtifacts,
   worktreeRequested,
 } from './engine-cleanup.js';
-import { recordPhaseResult, safeAppendLesson } from './engine-state.js';
+import { enterPhase, nextTarget, recordPhaseResult, safeAppendLesson } from './engine-state.js';
 import { buildBlockedResult, resolveAutopilotConsent } from './consent-gate.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { getRepoIdentity } from '../git/repo-identity.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
-import { openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
-/**
- * Phase names in canonical order.
- *
- * EVALUATE (v4.6.0) sits between IMPROVE and REPORT and is a no-op
- * "gate" for legacy sessions (no Goal Contract). When a Goal Contract
- * is present, runPhaseGoalEvaluate may instead emit a re-EXECUTE
- * instruction to start another iteration.
- */
-export const PHASES = Object.freeze([
-  'INTAKE',
-  'PLAN',
-  'EXECUTE',
-  'CROSS_CHECK',
-  'VERIFY',
-  'IMPROVE',
-  'EVALUATE',
-  'REPORT',
-]);
+import { journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
 
 /**
  * Check if the session should freeze; returns a pause instruction when true.
@@ -69,6 +51,7 @@ function maybePause(state) {
     state.lastPhase = state.phase;
   }
   state.phase = 'PAUSED';
+  state.pendingPhase = state.lastPhase || null;
   state.pausedReason = reason;
   safeAppendLesson(state, {
     lesson: `Pause at ${state.lastPhase || 'unknown'}: ${reason}`,
@@ -105,7 +88,7 @@ function maybePause(state) {
  * @returns {object} instruction
  */
 export function runPhase0Intake(state) {
-  state.phase = 'INTAKE';
+  enterPhase(state, 'INTAKE');
   tick(state.sessionId, { phase: 'INTAKE', type: 'phase-start', level: 'info', message: 'Phase 0 INTAKE 시작' });
   try {
     const featureKey = extractKey(state.task || '');
@@ -181,7 +164,7 @@ export function runPhase0Intake(state) {
 
 /** Phase 1 — Plan: instruction for main Claude to delegate to planner agent. */
 export function runPhase1Plan(state) {
-  state.phase = 'PLAN';
+  enterPhase(state, 'PLAN');
   tick(state.sessionId, { phase: 'PLAN', type: 'phase-start', level: 'info', message: 'Phase 1 PLAN 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
@@ -317,7 +300,7 @@ function buildDynamicRunInstruction(state) {
  * @returns {object}
  */
 export function runPhase2Execute(state) {
-  state.phase = 'EXECUTE';
+  enterPhase(state, 'EXECUTE');
   tick(state.sessionId, { phase: 'EXECUTE', type: 'phase-start', level: 'info', message: 'Phase 2 EXECUTE 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
@@ -423,7 +406,7 @@ export function runPhase2Execute(state) {
  * @returns {object}
  */
 export function runPhase3CrossCheck(state) {
-  state.phase = 'CROSS_CHECK';
+  enterPhase(state, 'CROSS_CHECK');
   tick(state.sessionId, { phase: 'CROSS_CHECK', type: 'phase-start', level: 'info', message: 'Phase 3 CROSS_CHECK 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
@@ -486,7 +469,7 @@ function attachMcpVerify(state, instruction) {
  * @returns {object}
  */
 export function runPhase4Verify(state) {
-  state.phase = 'VERIFY';
+  enterPhase(state, 'VERIFY');
   tick(state.sessionId, { phase: 'VERIFY', type: 'phase-start', level: 'info', message: 'Phase 4 VERIFY 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
@@ -524,7 +507,7 @@ export function runPhase4Verify(state) {
  * @returns {object}
  */
 export function runPhase5Improve(state) {
-  state.phase = 'IMPROVE';
+  enterPhase(state, 'IMPROVE');
   tick(state.sessionId, { phase: 'IMPROVE', type: 'phase-start', level: 'info', message: 'Phase 5 IMPROVE 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
@@ -553,14 +536,14 @@ export function runPhase5Improve(state) {
 
 /** Phase 6 — Report: generate completion report and notify. */
 export function runPhase6Report(state) {
-  state.phase = 'REPORT';
+  enterPhase(state, 'REPORT');
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-start', level: 'info', message: 'Phase 6 REPORT 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
   state.completedAt = new Date().toISOString();
   const { filePath } = generateReport(state.sessionId, { projectRoot: state.options?.projectRoot });
   state.reportPath = filePath;
-  state.phase = 'COMPLETED';
+  enterPhase(state, 'COMPLETED');
   recordPhase(state, { name: 'REPORT', status: 'done', artifact: filePath });
   safeAppendLesson(state, {
     lesson: `Completed: ${(state.task || '').slice(0, 160)}`,
@@ -667,6 +650,7 @@ export async function startAutopilot({ task, mode, options, sessionId, consentOv
   if (!lockResult.ok) {
     const holderId = lockResult.holder?.sessionId || 'unknown';
     state.phase = 'PAUSED';
+    state.pendingPhase = 'INTAKE';
     state.pausedReason = `lock-held-by-${holderId}`;
     persist(state);
     tick(state.sessionId, {
@@ -727,20 +711,6 @@ const PHASE_TO_RUNNER = Object.freeze({
   EVALUATE: runPhaseGoalEvaluate,
   REPORT: runPhase6Report,
 });
-
-/**
- * Determine the next phase to run from the current phase label.
- * @param {string} current
- * @returns {string|null}
- */
-function nextPhaseAfter(current) {
-  if (current === 'COMPLETED' || current === 'ABORTED') return null;
-  if (current === 'PAUSED') return null;
-  const idx = PHASES.indexOf(current);
-  if (idx === -1) return 'PLAN';
-  if (idx >= PHASES.length - 1) return null;
-  return PHASES[idx + 1];
-}
 
 /**
  * Resume a session by running its next phase exactly once.
@@ -810,9 +780,7 @@ export async function resumeAutopilot(
   const pauseResult = settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt);
   if (pauseResult) return pauseResult;
 
-  const target = state.phase === 'PAUSED'
-    ? state.lastPhase || 'PLAN'
-    : nextPhaseAfter(state.phase) || state.phase;
+  const target = nextTarget(state);
   const runner = PHASE_TO_RUNNER[target];
   if (!runner) {
     return { phase: state.phase, status: 'unknown-phase' };
@@ -823,6 +791,16 @@ export async function resumeAutopilot(
     status: instruction?.type === 'pause' ? 'paused' : 'ok',
     instruction,
   };
+}
+
+/**
+ * Shared journal fields for a reconciliation outcome; the caller adds `event`.
+ * @param {{attempt: object, note?: string}} reconciled
+ * @returns {{attemptId: string, phase: string, from: string, to: string, reason: string|null}}
+ */
+function journalRow(reconciled) {
+  const phase = reconciled.attempt.phase;
+  return { attemptId: reconciled.attempt.attemptId, phase, from: phase, to: phase, reason: reconciled.note || null };
 }
 
 /**
@@ -857,6 +835,12 @@ function settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt) {
     // Clear the slot so the re-run opens its own attempt rather than
     // inheriting a stale one — otherwise a repeated crash would loop forever.
     state.activePhaseAttempt = null;
+    // Name the re-run explicitly. Deriving it would give nextPhaseAfter(phase),
+    // i.e. the phase AFTER the one we just decided to redo — a "rerun" that
+    // never reran. Unreachable today (only EXECUTE arms an attempt, and EXECUTE
+    // is not on the allowlist) but wrong the moment another phase is armed.
+    state.pendingPhase = reconciled.attempt.phase;
+    journalAttempt(state, { ...journalRow(reconciled), event: 'rerun' });
     persist(state);
     return null;
   }
@@ -885,6 +869,8 @@ function settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt) {
 
   state.phase = 'PAUSED';
   state.lastPhase = reconciled.attempt.phase;
+  state.pendingPhase = reconciled.attempt.phase;
+  journalAttempt(state, { ...journalRow(reconciled), event: 'paused' });
   persist(state);
   tick(sessionId, {
     phase: reconciled.attempt.phase,
@@ -938,7 +924,7 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
   if (!sessionId) throw new TypeError('sessionId required');
   const state = loadSession(sessionId);
   if (!state) throw new Error(`session not found: ${sessionId}`);
-  state.phase = 'ABORTED';
+  enterPhase(state, 'ABORTED');
   state.abortedAt = new Date().toISOString();
   state.summary = state.summary || `Aborted ${graceful ? 'gracefully' : 'forcefully'} by user.`;
   persist(state);
@@ -979,6 +965,10 @@ export { listActiveWorktrees } from './engine-cleanup.js';
 // State record/mutation helpers → engine-state.js
 export {
   classifyFailure,
+  enterPhase,
+  nextPhaseAfter,
+  nextTarget,
+  PHASES,
   recordCheckpoint,
   recordPhaseResult,
   recordSecretLeak,
