@@ -13,12 +13,21 @@ import {
 // 읽기 전용 — 두 곳이 쓴다. (1) 포크밤 드리프트 게이트가 L1 원본과 바이트를
 // 대조한다. (2) 아래 ReDoS 정적 스캔이 **세 카탈로그**(L1 · L2 · HG)를 한 번에
 // 훑는다 — 2026-09-14 에 HUMAN_GATE_MATRIX 가 세 번째로 들어왔다(스캐너 헤더
-// "못 보는 것" 7번 참조). 이 파일은 L1 소스를 편집하지 않는다.
+// "못 보는 것" 7번 = tests/helpers/regex-scan.js 참조). 이 파일은 L1 소스를
+// 편집하지 않는다.
 import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
 // 읽기 전용 — 정적 스캔의 **세 번째 카탈로그**(2026-09-14 추가). 같은
 // PreToolUse 경로(probe 'command', tools Bash)를 타면서 두 카탈로그 밖이라
 // 종전 스캔이 못 보던 자리다. 이 파일은 human-gates.js 를 편집하지 않는다.
 import { HUMAN_GATE_MATRIX } from '../../lib/security/human-gates.js';
+// 정적 스캐너의 유일한 구현(2026-09-14 추출). 종전에는 이 파일과
+// tests/firewall/human-gate-matrix-selfcheck.test.js 섹션 G 가 같은 HG 29패턴을
+// 서로 다른 규칙으로 두 번 훑었고 HG-11 예외도 두 곳에 있었다.
+import {
+  ceilingFor,
+  findUnboundedRuns,
+  HG_SCAN_ALLOWLIST,
+} from '../helpers/regex-scan.js';
 
 describe('classifyRisk', () => {
   it('flags git push --force as danger', () => {
@@ -847,230 +856,20 @@ describe('classifyRisk — sql-delete-no-where reads the WHERE that belongs to i
   });
 });
 
-// ───────────────────────────────────────────────────────────────────────────
-// ReDoS 정적 스캐너 — 선형성의 **정본 게이트**.
+// ────────────────────────────────────────────────────────────────────────────
+// ReDoS 정적 스캔 — 선형성의 **정본 게이트**.
 //
-// 왜 벽시계가 아니라 소스인가: 시간 단언은 러너에 따라 흔들린다(Windows 에서
-// `< 50` 이 50.54ms 로 떨어진 사례, 2026-09-11). 느슨하게 하면 게이트가 죽고
-// 조이면 플레이크가 된다. 정규식 **소스의 모양**은 머신과 무관하므로 이쪽이
-// 주 게이트이고, 아래 타이밍 블록은 smoke + 성장 비율로 내려간다.
+// 스캐너 구현과 그 교리(무제한 런의 정의 3조건 · 창 상한 허가 목록 · **못 보는 것**
+// 8국)은 2026-09-14 부터 `tests/helpers/regex-scan.js` 에 있다. 거기가 정본이고
+// 이 파일은 그것을 **세 카탈로그에 적용**하는 자리다. 호출 파일은 둘이다 —
+// 이 파일(L1 · L2 · HG 카탈로그 스캔)와
+// `tests/firewall/human-gate-matrix-selfcheck.test.js` 섹션 G(HG 구조 핀).
+// 스캐너 자체의 자기검증은 `tests/helpers/regex-scan.test.js` 로 같이 옮겼다.
 //
-// 무제한 런의 정의(이 스캐너가 RED 로 보는 것) — 세 조건을 모두 만족할 때:
-//   1. 원자가 `.` 또는 부정 문자클래스 `[^…]` 이고,
-//   2. 수량자의 상한이 **그 규칙에 허가된 창**을 넘고(기본 192, 예외 등록분만
-//      512 — `WINDOW_CEILING_OVERRIDES`; `*` `+` `{n,}` = 무한, `{0,193}` = 193),
-//   3. 그 원자가 공백 문자를 하나라도 매치할 수 있을 때.
-//
-// 3번은 브리프 원안에 없던 좁힘이다. 근거: 실측된 2차식 5건(dd·curl·wget·
-// git push 규칙 3종)은 전부 "<단어> <한 줄 아무거나> <토큰>" 모양이었고, 가운데
-// 런이 **공백을 넘어 여러 토큰을 가로지를 수 있어서** 단어가 나올 때마다 줄
-// 끝까지 재스캔했다. 공백을 못 넘는 런은 토큰 하나 안에 갇힌다. 3번 없이
-// 돌리면 git-branch-delete 의 토큰 본체 `[^\s;&|]*` 가 L1·L2 양쪽에서 6건씩
-// RED 가 된다(2026-09-11 12:10 UTC 실측). 그 규칙은 120KB 적대 입력에서 선형인
-// 것이 이미 측정돼 있으므로 12건 전부 오탐이다.
-//
-// ── 이 스캐너가 못 보는 것 (그린을 이 목록의 근거로 쓰지 말 것) ──
-//  1. 긍정 문자클래스의 무제한 런. `[\w."` ]+` 는 공백을 포함하지만 스캔하지
-//     않는다 — 뒤따르는 필수 토큰이 클래스에 안 들어가면 2차식이 아닐 수 있어
-//     모양만으로 판정이 서지 않는다.
-//  2. 축약 부정 클래스 `\S` `\W` `\D`. rm-rf-path 꼬리의 `\S+` 와 L1
-//     'rm recursive+force' 의 `(?:\s+-\S+)*` 가 여기 해당한다.
-//  3. 그룹에 붙은 수량자 = 중첩 수량자. `(?:\s+--?\w[\w-]*)*` 처럼 rm 규칙군의
-//     **지수식** 위험이 이 모양인데 스캐너는 보지 않는다. 아래 `--opt` 프로브가
-//     그 자리를 맡는다.
-//  4. 공백을 못 넘는 무제한 런. 토큰 하나가 무한히 길면 O(토큰²) 은 여전히
-//     가능하다. 실측된 사례는 없고, 생기면 아래 성장 비율이 잡아야 한다.
-//  5. 전처리(guard-registry#normalizeCommand)와의 상호작용, 규칙 간 평가 순서,
-//     classifyRisk 전체 경로의 합산 비용.
-//  6. `[]]` 같은 JS 문자클래스 극단 문법(파싱 실패 시 fail-closed 로 보고한다).
-//  7. **범위 — 2026-09-14 에 세 카탈로그로 넓혔다.** 이 스캔은 이제
-//     BLOCKED_PATTERNS(L1) · DANGEROUS_PATTERNS(L2) · HUMAN_GATE_MATRIX(HG,
-//     `lib/security/human-gates.js` 13행 29패턴)를 훑는다. HG 를 들인 이유는
-//     그 표가 같은 PreToolUse 경로(probe 'command', tools Bash)를 타면서 두
-//     카탈로그 밖이라 종전 스캔이 **구조적으로** 못 봤기 때문이다. 실제로
-//     HG-07 의 curl·git push 런은 무앵커 `[^\n]*` 였고 122,880B 에서 각각
-//     1,658.6 / 1,085.4ms 였다(실측 2026-09-14 01:3x KST) — 같은 2차식 모양이
-//     스캔 밖에서 살아 있었다. 지금은 `{0,192}` 로 바운드됐고 스캔 대상이다.
-//     **여전히 밖인 것**: 리포의 나머지 정규식 전부(`lib/core/guard-registry.js`
-//     의 SENSITIVE_PATTERNS·SECRET_CONTENT_PATTERNS, `scripts/hooks/**`,
-//     `lib/core/command-segments.js` 의 전처리 정규식). 네 번째 카탈로그가
-//     필요해지면 같은 자리에 추가하라 — "세 개면 충분하다"는 근거는 없다.
-//  8. **등록된 예외 규칙의 정확한 창 값.** 기본 192 를 넘는 창은 등록해야만
-//     통과하므로 **신규 규칙 구멍은 닫혔다**(2026-09-11 리더 판정 전에는 전역
-//     상한 512 였고, 그때는 열려 있었다 — 아래 실측 참조). 남는 것은 *등록된*
-//     2건뿐이다: rm 규칙이 512 안에서 어떤 값을 쓰든 여기는 그린이다. 그 정확
-//     값은 tests/core/blocked-patterns.test.js 의 정확값 `toBe` 와 경계 쌍이
-//     핀한다. 이 목록은 상한 허가일 뿐 폭의 정본이 아니다.
-//     실측(B, 2026-09-11): 전역 상한 512 이던 판에서 L2 `wget-external` 을
-//     `{0,192}` → `{0,512}` 로 넓혀 보니 **정적 스캔은 그린**이었고 경계 쌍
-//     단언 하나만 RED 였다. 경계 쌍이 없는 신규 규칙이었다면 아무것도 못 잡았다.
-// ───────────────────────────────────────────────────────────────────────────
-
-/**
- * 기본 허용 최대 창. **192 를 넘는 창은 아래 OVERRIDES 에 등록해야 통과한다**
- * — 등록 안 된 규칙이 넓은 창을 쓰면 RED 다(신규 규칙 fail-closed).
- *
- * 왜 전역 상수가 아니라 기본값 + 허가 목록인가(2026-09-11 리더 판정): 전역
- * 상한을 512 로 올렸던 판이 fail-open 이었다. 실측 — 그 상태에서 L2
- * `wget-external` 을 `{0,192}` → `{0,512}` 로 넓혀 보니 **정적 스캔은 그린**
- * 이었고 경계 쌍 단언 하나만 RED 였다. 기존 규칙은 경계 쌍이 받쳐 줘서 막혔지만,
- * 경계 쌍 없이 새로 추가되는 규칙은 아무것도 잡지 못했다. 규율 §8 — 부정 목록은
- * 미래 항목에 fail-open 이고, 허용 목록은 아니다.
- */
-const WINDOW_CEILING_DEFAULT = 192;
-
-/**
- * 192 를 넘도록 **허가된** 규칙 목록. 키는 `<층>:<식별자>` 로, L1 은 label,
- * L2 는 id 를 쓴다(2026-09-11 현재 L2 예외 0건).
- *
- * 층 접두가 붙은 이유: 접두 없이 label 과 id 를 한 객체에 섞으면 **네임스페이스가
- * 겹친다.** 지금은 충돌이 없지만, 미래에 L2 id 가 L1 label 과 같은 문자열이 되면
- * 등록하지 않은 층에까지 조용히 예외가 적용된다 — 키 목록을 고정하는 핀 it 은
- * 새 키 추가는 잡아도 그 충돌은 감지하지 못한다. 접두가 그 경로를 아예 없앤다.
- *
- * 이것은 **폭 표가 아니라 상한 허가 목록**이다. 정확한 폭의 정본은 여전히
- * 경계 쌍·구조 단언이다 — L1 은 tests/core/blocked-patterns.test.js 의 정확값
- * `toBe`(rm 512 · pipe 192), L2 는 이 파일의 describe 'classifyRisk — the
- * dd/curl/wget window bound keeps ordinary commands matched'(192/193 쌍 6건).
- *
- * **두 값이 어긋나면 RED 가 맞다. 여기를 고쳐 맞추지 마라** — 게이트를
- * 통과시키려 게이트를 깎지 않는다(규율 §10). 폭이 정말 바뀌어야 하면 정본 쪽을
- * 먼저 옮기고 그 근거를 남긴 뒤 여기를 따라 올려라.
- *
- * rm 2건이 512 인 이유: rm 의 타깃은 PATH 이고 Windows MAX_PATH 는 260 이라
- * 192 창은 평범한 긴 경로를 아예 못 본다. 192 를 적용했더니
- * `rm --recursive <193자 이상>/x` 가 종전 L1 block → approve 로 뒤집혔고
- * (L2 에도 recursive-only 규칙이 없어 full-stack), 그건 사각이 아니라 커버리지
- * 회귀라 리더가 문서화 대신 창을 옮겼다. dd·pipe·git-push 는 옵션과 URL 을 재는
- * 다른 분포라 192 로 남는다 — dd 가 192 인 건 512 를 택할 이유가 없어서지
- * 512 가 금지라서가 아니다.
- */
-const WINDOW_CEILING_OVERRIDES = Object.freeze({
-  'L1:rm -rf with path': 512,
-  'L1:rm -fr with path': 512,
-});
-
-/**
- * 규칙 하나에 적용할 상한을 고른다.
- * @param {'L1'|'L2'|'HG'} layer 카탈로그 — L1 = blocked-patterns,
- *   L2 = safety, HG = security/human-gates (2026-09-14 추가)
- * @param {string} key L1 은 label, L2 는 id, HG 는 `<행 id>[<패턴 인덱스>]`
- * @returns {number}
- */
-function ceilingFor(layer, key) {
-  return WINDOW_CEILING_OVERRIDES[`${layer}:${key}`] ?? WINDOW_CEILING_DEFAULT;
-}
-/** 클래스가 공백을 매치할 수 있는지 보는 프로브 문자들. */
-const SCAN_WHITESPACE = [' ', '\t', '\n', '\r', '\f', '\v'];
-
-/**
- * 문자클래스 하나를 읽는다. JS 비-v 모드에서는 `[` 또는 `[^` 직후의 `]` 도
- * 클래스를 닫으므로 특례가 없다.
- * @param {string} source @param {number} start
- * @returns {{ end: number, negated: boolean } | null}
- */
-function readCharClass(source, start) {
-  let i = start + 1;
-  const negated = source[i] === '^';
-  if (negated) i += 1;
-  while (i < source.length) {
-    if (source[i] === '\\') { i += 2; continue; }
-    if (source[i] === ']') return { end: i + 1, negated };
-    i += 1;
-  }
-  return null;
-}
-
-/**
- * 수량자 하나를 읽는다. 상한이 없으면 Infinity.
- * @param {string} source @param {number} i
- * @returns {{ end: number, max: number } | null}
- */
-function readQuantifier(source, i) {
-  const ch = source[i];
-  if (ch === '*' || ch === '+') return { end: i + 1, max: Infinity };
-  if (ch === '?') return { end: i + 1, max: 1 };
-  if (ch !== '{') return null;
-  const m = /^\{(\d+)(,(\d+)?)?\}/.exec(source.slice(i));
-  if (!m) return null;
-  const max = m[2] === undefined ? Number(m[1]) : (m[3] === undefined ? Infinity : Number(m[3]));
-  return { end: i + m[0].length, max };
-}
-
-/**
- * 이 원자가 공백을 하나라도 매치할 수 있는가. `.` 은 어느 모드에서도 스페이스와
- * 탭을 매치하므로 항상 true. 파싱 불가면 fail-closed(true)로 보고한다.
- * @param {string|null} classSource `[^…]` 원문, `.` 이면 null
- * @param {string} flags
- * @returns {boolean}
- */
-function canMatchWhitespace(classSource, flags) {
-  if (classSource === null) return true;
-  try {
-    const probe = new RegExp(classSource, flags.includes('i') ? 'i' : '');
-    return SCAN_WHITESPACE.some((c) => probe.test(c));
-  } catch {
-    return true;
-  }
-}
-
-/**
- * 정규식 소스를 이스케이프 인식하며 걸어서 무제한 런을 보고한다.
- * @param {string} source @param {string} [flags]
- * @returns {{ index: number, snippet: string, kind: 'unbounded'|'wide-window' }[]}
- */
-function findUnboundedRuns(source, flags = '', ceiling = WINDOW_CEILING_DEFAULT) {
-  const found = [];
-  let i = 0;
-  while (i < source.length) {
-    const ch = source[i];
-    const atomStart = i;
-    /** @type {{ classSource: string|null } | null} */
-    let atom = null;
-    if (ch === '\\') {
-      i += 2;
-    } else if (ch === '[') {
-      const cls = readCharClass(source, i);
-      if (!cls) { i += 1; continue; }
-      if (cls.negated) atom = { classSource: source.slice(atomStart, cls.end) };
-      i = cls.end;
-    } else if (ch === '(') {
-      // 그룹 여는 괄호는 원자가 아니다. 수량자는 닫는 괄호에 붙는다.
-      const open = /^\((?:\?:|\?=|\?!|\?<=|\?<!|\?<[A-Za-z_$][\w$]*>)?/.exec(source.slice(i));
-      i += open[0].length;
-      continue;
-    } else if (ch === ')') {
-      i += 1;
-      const groupQuantifier = readQuantifier(source, i);
-      // 그룹 수량자는 이번 스캔 범위 밖(못 보는 것 #3). 오파싱만 막고 넘어간다.
-      if (groupQuantifier) {
-        i = groupQuantifier.end;
-        if (source[i] === '?') i += 1;
-      }
-      continue;
-    } else if (ch === '.') {
-      atom = { classSource: null };
-      i += 1;
-    } else {
-      i += 1;
-    }
-
-    const q = readQuantifier(source, i);
-    if (!q) continue;
-    const quantifierEnd = q.end;
-    i = q.end;
-    if (source[i] === '?') i += 1; // lazy
-    if (!atom) continue;
-    if (q.max <= ceiling) continue;
-    if (!canMatchWhitespace(atom.classSource, flags)) continue;
-    found.push({
-      index: atomStart,
-      snippet: source.slice(atomStart, quantifierEnd),
-      kind: q.max === Infinity ? 'unbounded' : 'wide-window',
-    });
-  }
-  return found;
-}
+// 아래 `SCAN_ALLOWLIST` 만 이 파일에 남는다 — L2 카탈로그 전용 정책이고
+// DANGEROUS_PATTERNS 를 소유한 것이 이 파일이기 때문이다. HG 예외는 두 파일이
+// 함께 쓰므로 헬퍼의 `HG_SCAN_ALLOWLIST` 가 유일한 등록처다.
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * 스캔 예외. **2026-09-14 부로 공집합이다.**
@@ -1096,30 +895,6 @@ function findUnboundedRuns(source, flags = '', ceiling = WINDOW_CEILING_DEFAULT)
  */
 const SCAN_ALLOWLIST = new Set();
 
-/**
- * 세 번째 카탈로그(HG)의 예외. 키는 `<행 id>[<패턴 인덱스>]`.
- *
- * **리더 지시 교정(2026-09-14).** 지시는 "D 가 HG-07 을 바운드하면 세 번째
- * 카탈로그는 그린"이었으나 실측하면 그렇지 않다. HG-11 의 두 패턴도
- * `[^\n]*` 무제한 런을 갖는다 — 스캐너는 순수 구문 도구라 `^` 앵커를 보지
- * 않기 때문이다. D 의 소유는 HG-07 뿐이므로 그 두 건은 바운드되지 않는다.
- *
- * 왜 바운드가 아니라 예외인가: 두 패턴은 `^\s*(?:cat|less|…)` 로 **시작
- * 앵커**를 갖고 `m` 플래그가 없다. `^` 는 문자열 첫 위치에서만 매치하므로
- * 엔진이 시도하는 시작 위치가 하나뿐이고, 2차식의 원인인 "단어가 나올 때마다
- * 줄 끝까지 재스캔"이 성립하지 않는다. 실측(3회 중앙값, node v24.15.0,
- * 2026-09-14 01:3x KST, `'cat '` 반복 근접-비매치):
- *   HG-11[0] `.env`      20,480B 0.0 · 40,962B 0.0 · 122,880B 0.1 ms
- *   HG-11[1] `id_rsa` 등 20,480B 0.0 · 40,962B 0.0 · 122,880B 0.3 ms
- * 같은 시각 같은 하네스에서 바운드 전 HG-07[0] 은 122,880B 1,658.6ms 였다 —
- * 네 자릿수 차이다. 폭을 좁히면 커버리지만 잃고 얻는 것이 없다.
- *
- * 이 예외는 "lookahead 안이면 전부 예외" 같은 일반 규칙이 아니라 `SCAN_ALLOWLIST`
- * 와 같은 **열거형**이다. 앵커가 사라지면 면제 근거도 사라지므로 아래
- * `'HG-11[0]' 는 ^ 로 시작하고 m 플래그가 없다` it 이 그것을 실행형으로 붙든다.
- */
-const HG_SCAN_ALLOWLIST = new Set(['HG-11[0]', 'HG-11[1]']);
-
 describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () => {
   it.each(BLOCKED_PATTERNS.map((p, idx) => [`L1[${idx}] ${p.label}`, p.pattern, p.label]))(
     '%s', (_name, pattern, key) => {
@@ -1135,6 +910,20 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
   )('%s', (_name, pattern, key) => {
     const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('L2', key));
     expect(hits.map((h) => h.snippet)).toEqual([]);
+  });
+
+  // 세 카탈로그를 합친 분모. 위 세 it.each 가 "몇 개를 훑었는지"는 러너 출력에
+  // 안 보이므로, 카탈로그가 줄어들어도 전부 그린이다. 여기가 그 자리를 맡는다.
+  //
+  // 2026-09-14: 이 줄기 브리프는 분모를 39 + 26 + 29 = 94 로 적었으나 실측은
+  // **39 + 27 + 29 = 95** 다(L2 는 27개 — 헬퍼 추출 전후 hit 집합을 덤프해
+  // 대조하면서 드러났다). 문서의 수치가 아니라 이 it 이 정본이다.
+  it('scans 95 patterns across the three catalogues (39 + 27 + 29)', () => {
+    expect(BLOCKED_PATTERNS).toHaveLength(39);
+    expect(DANGEROUS_PATTERNS).toHaveLength(27);
+    const hg = HUMAN_GATE_MATRIX.reduce((n, row) => n + row.patterns.length, 0);
+    expect(hg).toBe(29);
+    expect(BLOCKED_PATTERNS.length + DANGEROUS_PATTERNS.length + hg).toBe(95);
   });
 
   it('L2 예외는 0건이다', () => {
@@ -1200,96 +989,6 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
     expect(pattern.flags).not.toContain('m');
     // 면제가 사소하지 않다는 반증 — 앵커를 빼면 스캐너가 실제로 잡는다.
     expect(findUnboundedRuns(pattern.source.slice(1), pattern.flags).length).toBeGreaterThan(0);
-  });
-});
-
-describe('ReDoS 정적 스캔 — 스캐너 자기검증', () => {
-  // 게이트 자체가 거짓 그린이 되지 않게 스캐너를 스캐너로 검증한다.
-  it.each([
-    ['dot star', /a.*b/],
-    ['dot plus with the s flag', /a.+b/s],
-    ['negated-newline class star', /[^\n]*x/],
-    ['negated-newline class plus', /[^\n]+x/],
-    ['a window one past the default ceiling', /[^\n]{0,193}y/],
-    ['a window at the rm exception width but unregistered', /[^\n]{0,512}y/],
-    ['a window far wider than the ceiling', /[^\n]{0,1000}y/],
-    ['an open-ended repeat', /[^\n]{3,}z/],
-  ])('reports %s', (_name, re) => {
-    expect(findUnboundedRuns(re.source, re.flags).length).toBeGreaterThan(0);
-  });
-
-  it.each([
-    ['an escaped dot and star', /\.\*/],
-    ['a dot and a star inside a class', /[.*]/],
-    ['a window at exactly 192', /[^\n]{0,192}q/],
-    ['a separator window at 192', /[^\n;&|]{0,192}q/],
-    // 아래 셋은 "못 보는 것" 목록의 1·4번 그대로다. 통과가 안전을 뜻하지 않는다.
-    ['a positive-class run (out of scope)', /[\w."` ]+/],
-    ['an open repeat on a positive class (out of scope)', /[A-Za-z0-9]{16,}/],
-    ['a token-confined run that cannot cross whitespace', /[^\s;&|]*/],
-    ['a negated class that is alternated, not quantified', /(?:[^\S\n]|\\\r?\n)+x/],
-  ])('does not report %s', (_name, re) => {
-    expect(findUnboundedRuns(re.source, re.flags)).toEqual([]);
-  });
-
-  it('reports the exact span and kind, not just a boolean', () => {
-    const hits = findUnboundedRuns(/\bdd\b[^\n]*\sof=/.source, 'i');
-    // `\bdd\b` 는 소스에서 6자다(백슬래시 2개 포함).
-    expect(hits).toEqual([{ index: 6, snippet: '[^\\n]*', kind: 'unbounded' }]);
-  });
-
-  it('reports a wide window as wide-window, not unbounded', () => {
-    const hits = findUnboundedRuns(/\bdd\b[^\n]{0,193}\sof=/.source, 'i');
-    expect(hits.map((h) => h.kind)).toEqual(['wide-window']);
-  });
-
-  // 상한 기본값이나 예외 목록이 조용히 움직이면 게이트의 의미가 통째로 바뀐다.
-  it('pins the default ceiling at 192 and the boundary either side of it', () => {
-    expect(WINDOW_CEILING_DEFAULT).toBe(192);
-    expect(findUnboundedRuns(/[^\n]{0,192}q/.source)).toEqual([]);
-    expect(findUnboundedRuns(/[^\n]{0,193}q/.source)).toHaveLength(1);
-  });
-
-  it('pins the override list to exactly the two L1 rm rules at 512', () => {
-    expect(Object.keys(WINDOW_CEILING_OVERRIDES).sort()).toEqual([
-      'L1:rm -fr with path',
-      'L1:rm -rf with path',
-    ]);
-    expect(WINDOW_CEILING_OVERRIDES['L1:rm -rf with path']).toBe(512);
-    expect(WINDOW_CEILING_OVERRIDES['L1:rm -fr with path']).toBe(512);
-  });
-
-  // 실행형 반증. 등록되지 않은 규칙은 192 를 넘는 순간 잡히고, 등록된 이름으로
-  // 조회해야만 512 까지 통과한다 — 신규 규칙이 fail-closed 라는 주장의 증거다.
-  it('reports a wide window on a rule that is not registered', () => {
-    expect(findUnboundedRuns(/[^\n]{0,193}z/.source, '', ceilingFor('L1', 'not-registered'))).toHaveLength(1);
-    expect(findUnboundedRuns(/[^\n]{0,512}z/.source, '', ceilingFor('L2', 'not-registered'))).toHaveLength(1);
-  });
-
-  it('lets a registered rule run to 512 but not past it', () => {
-    const ceiling = ceilingFor('L1', 'rm -rf with path');
-    expect(ceiling).toBe(512);
-    expect(findUnboundedRuns(/[^\n]{0,512}z/.source, '', ceiling)).toEqual([]);
-    expect(findUnboundedRuns(/[^\n]{0,513}z/.source, '', ceiling)).toHaveLength(1);
-  });
-
-  // 층 접두가 실제로 네임스페이스를 가르는지. 접두 없이 label 과 id 를 섞어
-  // 두면 같은 문자열이 양쪽 층에 조용히 예외를 주는데, 핀 it 은 키 목록만
-  // 고정하므로 그 충돌을 못 본다. 여기가 그 자리를 맡는다.
-  it('keeps the L1, L2 and HG key namespaces apart', () => {
-    // 같은 식별자라도 등록된 층에서만 512 가 나온다.
-    expect(ceilingFor('L1', 'rm -rf with path')).toBe(512);
-    expect(ceilingFor('L2', 'rm -rf with path')).toBe(WINDOW_CEILING_DEFAULT);
-    expect(ceilingFor('HG', 'rm -rf with path')).toBe(WINDOW_CEILING_DEFAULT);
-    // 등록 키는 전부 층 접두를 달고 있다.
-    for (const key of Object.keys(WINDOW_CEILING_OVERRIDES)) {
-      expect(key).toMatch(/^(?:L[12]|HG):/);
-    }
-    // HG 는 2026-09-14 현재 등록 0건이다 — 세 번째 카탈로그가 예외를 들고
-    // 들어오지 않았다는 핀. HG 패턴이 192 를 넘으려면 여기 등록해야 하고,
-    // 그러면 위 'pins the override list to exactly the two L1 rm rules' 가
-    // 먼저 RED 가 된다.
-    expect(Object.keys(WINDOW_CEILING_OVERRIDES).filter((k) => k.startsWith('HG:'))).toEqual([]);
   });
 });
 

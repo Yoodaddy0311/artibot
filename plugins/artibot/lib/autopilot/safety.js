@@ -363,6 +363,9 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // Absolute values swing a lot on this machine (the old rule's 122,880B figure
   // ranged 132-257ms over five runs) but the SHAPE does not: the old raw ratio
   // stayed 16-60x across every run and the new one 3-9x. Quadratic vs linear.
+  // Full classifyRisk path at 122,880B with the new rule: 2.70-4.05 ms on this
+  // machine (same session); the 1.2 ms figure in the recon brief was a
+  // different machine, so only the ratio is portable, not the absolute.
   // The old rule sat in the static scanner's SCAN_ALLOWLIST on the strength of
   // a "measured linear" note. That note was measured on `'DELETE FROM t '`
   // repeats, which match on the FIRST attempt and therefore never exercise the
