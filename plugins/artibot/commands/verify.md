@@ -53,6 +53,7 @@ Parse $ARGUMENTS:
 - Default: Stop on first failure, report which step failed
 - `--continue`: Run all steps, aggregate all failures
 - `--fix`: Attempt auto-fix for lint/format issues only
+- After the pipeline ends, record the outcome: `node scripts/ledger/record-verify.mjs --status <PASS|FAIL> --command "<one-line summary>" --session "$CLAUDE_SESSION_ID"` (deterministic layer, self-report; exit 0 even if the ledger write fails)
 
 ## Output Format
 
