@@ -907,7 +907,14 @@ describe('session-end hook - learning pipeline', () => {
       expect(res.receipts).toBe(2);
       expect(res.appended).toBe(0);
       expect(res.reason).toContain('source-not-allowed:reviewer');
-      expect(appendLedgerEvent).toHaveBeenCalledTimes(2);
+      // BOTH receipts were offered to the writer — the point of this test.
+      // Filtered by event name rather than counted as a bare total, because
+      // the stage also appends one `session.ended` row after the summary
+      // line; a bare total conflates "every receipt was tried" with "nothing
+      // else was written".
+      const offered = appendLedgerEvent.mock.calls.filter(([, env]) => env.event === 'usage.receipt');
+      expect(offered).toHaveLength(2);
+      expect(appendLedgerEvent).toHaveBeenCalledTimes(3);
       expectOneSummaryLine();
     });
 
@@ -1047,6 +1054,221 @@ describe('session-end hook - learning pipeline', () => {
       });
       expect(seen).not.toBe('not-a-mission-id');
       expect(seen).toMatch(/^M-\d{8}-S[0-9A-Za-z]{8}$/);
+    });
+
+    // -----------------------------------------------------------------------
+    // 8. session.ended — the DENOMINATOR row
+    //
+    // `usage.receipt` counts sessions that PRODUCED receipts. Divided by
+    // nothing, that number cannot distinguish "few sessions ended" from "most
+    // sessions ended without a receipt". `session.ended` is written after the
+    // receipt stage REGARDLESS of its outcome, so "sessions that ended" is
+    // countable on its own and coverage has a real denominator.
+    //
+    // WHAT A GREEN RUN HERE DOES NOT PROVE: that SessionEnd fires in a live
+    // host, nor that the row is ever read. Both are outside this suite.
+    // -----------------------------------------------------------------------
+    describe('session.ended', () => {
+      /** The one session.ended row of a run, or a failure naming what was found. */
+      async function theEndedRow(file) {
+        const rows = await ledgerLines(file, 'session.ended');
+        expect(rows).toHaveLength(1);
+        return rows[0];
+      }
+
+      it('appends one row carrying the same outcome the summary line reports', async () => {
+        const project = await makeProject();
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+        const hookData = {
+          session_id: project.sessionId,
+          transcript_path: project.transcriptPath,
+          cwd: project.root,
+        };
+
+        stderrSpy.mockClear();
+        const res = await recordUsageReceipts(hookData, deps);
+        // The denominator row must not cost a second line of operator output.
+        expectOneSummaryLine();
+
+        const file = ledgerFilePath(resolveProjectRoot(project.root));
+        const row = await theEndedRow(file);
+
+        expect(row.source).toBe('hook');
+        expect(row.session_id).toBe(project.sessionId);
+        expect(row.idempotency_key).toBe(`session.ended:${project.sessionId}`);
+
+        // SAME SOURCE, not merely the same shape: every counter is compared to
+        // the value the caller was handed, so a row built from a second,
+        // re-derived outcome would fail here.
+        expect(row.data.receipt_status).toBe(res.status);
+        expect(row.data.appended).toBe(res.appended);
+        expect(row.data.rejected).toBe(res.rejected);
+        expect(row.data.deduped).toBe(res.deduped);
+        expect(row.data.receipts).toBe(res.receipts);
+        expect(row.data.coverage).toBe(res.coverage);
+        expect(row.data.reason).toBe(res.reason);
+
+        expect(row.data.transcript_present).toBe(true);
+        expect(row.data.session_fallback).toBe(false);
+        expect(row.data.unresolved_models).toEqual([]);
+
+        // An unregistered event is refused by the writer and recorded as
+        // `ledger.rejected`. If the allowlist entry is ever removed, the
+        // `theEndedRow` length check above fails first (reverse-injection run
+        // 2026-09-14: 4/7 RED there); this assertion names the CAUSE — the
+        // refused row — so the failure is read as "unregistered", not "lost".
+        expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+      });
+
+      it('records nothing extra on a second call for the same session', async () => {
+        const project = await makeProject();
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+        const hookData = {
+          session_id: project.sessionId,
+          transcript_path: project.transcriptPath,
+          cwd: project.root,
+        };
+        const file = ledgerFilePath(resolveProjectRoot(project.root));
+
+        await recordUsageReceipts(hookData, deps);
+        stderrSpy.mockClear();
+        const second = await recordUsageReceipts(hookData, deps);
+
+        // The receipt stage still dedupes as before — this row does not change
+        // that contract, it only adds a denominator beside it.
+        expect(second.status).toBe('skipped');
+        expect(second.reason).toBe('already-recorded');
+        expectOneSummaryLine();
+
+        // A session that ends twice is still ONE ended session. Two rows would
+        // make the denominator larger than reality and DEFLATE coverage.
+        expect(await ledgerLines(file, 'session.ended')).toHaveLength(1);
+        expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+      });
+
+      it('counts a session whose receipt stage skipped for want of a transcript', async () => {
+        // The case the denominator exists for: nothing was measured, and the
+        // session still ended. If this row were written only on success, the
+        // sessions missing from the numerator would be missing from the
+        // denominator too, and coverage would read 100%.
+        const project = await makeProject();
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+        const file = ledgerFilePath(resolveProjectRoot(project.root));
+
+        stderrSpy.mockClear();
+        const res = await recordUsageReceipts(
+          { session_id: project.sessionId, cwd: project.root },
+          deps,
+        );
+
+        expect(res.status).toBe('skipped');
+        expect(res.reason).toBe('no-transcript');
+        expectOneSummaryLine();
+
+        const row = await theEndedRow(file);
+        expect(row.data.receipt_status).toBe('skipped');
+        expect(row.data.reason).toBe('no-transcript');
+        expect(row.data.transcript_present).toBe(false);
+        expect(row.data.session_fallback).toBe(false);
+        expect(row.data.appended).toBe(0);
+        expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+      });
+
+      it('counts a payload with no session id under a synthesized id', async () => {
+        const project = await makeProject();
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+        const file = ledgerFilePath(resolveProjectRoot(project.root));
+
+        const res = await recordUsageReceipts(
+          { transcript_path: project.transcriptPath, cwd: project.root },
+          deps,
+        );
+        expect(res.reason).toBe('no-session-id');
+
+        const row = await theEndedRow(file);
+        expect(row.session_id).toMatch(/^session-\d+$/);
+        expect(row.data.session_fallback).toBe(true);
+        expect(row.data.transcript_present).toBe(true);
+        expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+      });
+
+      it('writes no row and does not throw when the payload carries no cwd', async () => {
+        // Without cwd the ledger root is unknown. Writing to a guessed root
+        // would file this session under some other project, which is worse
+        // than not counting it.
+        const project = await makeProject();
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+        const file = ledgerFilePath(resolveProjectRoot(project.root));
+
+        await expect(recordUsageReceipts(
+          { session_id: project.sessionId, transcript_path: project.transcriptPath },
+          deps,
+        )).resolves.toMatchObject({ status: 'skipped', reason: 'no-cwd' });
+
+        expect(await ledgerLines(file, 'session.ended')).toHaveLength(0);
+      });
+
+      it('still returns the receipt result when the ledger append throws', async () => {
+        const { deps } = await realDeps();
+        const missionId = 'M-20260905-001';
+        const appendLedgerEvent = vi.fn(() => { throw new Error('ledger on fire'); });
+
+        stderrSpy.mockClear();
+        const res = await recordUsageReceipts(
+          {
+            session_id: 'sess-abcdef01',
+            transcript_path: '/tmp/t.jsonl',
+            cwd: '/tmp/x',
+            mission_id: missionId,
+          },
+          {
+            ...deps,
+            buildUsageReceipts: async () => ({
+              receipts: [fakeReceipt('run-a', missionId)],
+              meta: { coverage: 1 },
+            }),
+            appendLedgerEvent,
+            readAllEvents: () => [],
+            resolveProjectRoot: () => '/tmp/x',
+          },
+        );
+
+        expect(res.status).toBeDefined();
+        expect(res.appended).toBe(0);
+        expectOneSummaryLine();
+
+        // The attempt is what is asserted, not its success: the throw is
+        // swallowed, so only the call record proves the row was tried at all.
+        expect(appendLedgerEvent).toHaveBeenCalledTimes(2);
+        expect(appendLedgerEvent.mock.calls[1][1].event).toBe('session.ended');
+      });
+
+      it('attempts the append even when the dedupe lookup itself throws', async () => {
+        // An unreadable ledger yields an empty seen-set, which PERMITS the
+        // append — the same fail-open choice the receipt stage makes, for the
+        // same reason: a missing row is a permanent hole, a duplicate is not.
+        const { deps } = await realDeps();
+        const appendLedgerEvent = vi.fn(() => ({ ok: true }));
+
+        const res = await recordUsageReceipts(
+          { session_id: 'sess-abcdef01', cwd: '/tmp/x' },
+          {
+            ...deps,
+            appendLedgerEvent,
+            readAllEvents: () => { throw new Error('unreadable ledger'); },
+            resolveProjectRoot: () => '/tmp/x',
+          },
+        );
+
+        expect(res.reason).toBe('no-transcript');
+        expect(appendLedgerEvent).toHaveBeenCalledTimes(1);
+        expect(appendLedgerEvent.mock.calls[0][1]).toMatchObject({
+          event: 'session.ended',
+          session_id: 'sess-abcdef01',
+          source: 'hook',
+          idempotency_key: 'session.ended:sess-abcdef01',
+        });
+      });
     });
   });
 });

@@ -643,6 +643,53 @@
       ],
       "spec": "lane 6 §5-④ pairs promoted with rejected."
     },
+    "session.ended": {
+      "required": [
+        "receipt_status"
+      ],
+      "fields": {
+        "receipt_status": {
+          "type": "string"
+        },
+        "receipts": {
+          "type": "integer"
+        },
+        "appended": {
+          "type": "integer"
+        },
+        "rejected": {
+          "type": "integer"
+        },
+        "deduped": {
+          "type": "integer"
+        },
+        "coverage": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unresolved_models": {
+          "type": "array"
+        },
+        "transcript_present": {
+          "type": "boolean"
+        },
+        "session_fallback": {
+          "type": "boolean"
+        }
+      },
+      "sources": [
+        "hook"
+      ],
+      "spec": "V5-BACKLOG §4 Observe 종료 조건 축 ④ 분모 -- one row per ended session, written by scripts/hooks/session-end.js#recordSessionEnded after the usage.receipt stage regardless of that stage's outcome, so 'sessions that ended' is countable independently of 'sessions that produced receipts'. Idempotency key session.ended:<session_id>; a re-fired SessionEnd (ended --resume) is deduped by readAllEvents like usage.receipt. session_fallback:true marks a payload with no session_id (id synthesized; still counted, never excluded -- excluding would inflate coverage). No enum on purpose (first cut)."
+    },
     "ledger.rejected": {
       "required": [
         "raw_event",
