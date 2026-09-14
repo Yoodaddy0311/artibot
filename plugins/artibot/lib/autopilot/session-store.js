@@ -31,17 +31,6 @@ export const CURRENT_SCHEMA_VERSION = SCHEMA_VERSION_V3;
 /** Intermediate version stamped before the v2→v3 step, which rejects v<2. */
 const SCHEMA_VERSION_V2 = 2;
 
-/**
- * Marks an in-memory state that was migrated on read, carrying the version it
- * had on disk. Non-enumerable and a Symbol, so it survives mutation and
- * `{...state}` but never reaches JSON — the file must not learn about it.
- *
- * It exists because `loadSession` deliberately does NOT re-persist: `getStatus()`
- * and `listSessions` load every session file, so a persist-on-load would rewrite
- * the entire store on one status call. The rewrite therefore happens on the
- * first real save, which is also the only moment a `.bak` is worth taking.
- */
-const MIGRATED_FROM = Symbol('artibot.autopilot.migratedFromVersion');
 
 /**
  * Filesystem error codes that indicate a transient lock on a freshly-written
@@ -172,25 +161,32 @@ export function saveSession(state) {
     try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw early */ }
     throw err;
   }
-  delete state[MIGRATED_FROM];
   return filePath;
 }
 
 /**
- * Copy the pre-upgrade bytes aside, once, before a migrated state overwrites
- * them. Only fires for a state {@link loadSession} actually migrated, so a
- * normal save never touches the disk twice.
+ * Copy the pre-upgrade bytes aside, once, before a newer-schema state
+ * overwrites them. The decision is made from the file on disk, not from a
+ * marker on the object: `loadSession` deliberately does NOT re-persist
+ * (`getStatus()`/`listSessions` load every session, so a persist-on-load would
+ * rewrite the whole store on a read), and any in-memory marker is lost the
+ * moment a caller clones the state (`{...state}`, JSON round-trip) before
+ * saving it. Reading the current file's `schemaVersion` survives both.
  *
  * @param {object} state
  * @param {string} filePath
  * @returns {void}
  */
 function backupBeforeUpgrade(state, filePath) {
-  const from = state[MIGRATED_FROM];
-  if (typeof from !== 'number') return;
+  const to = state.schemaVersion;
+  if (typeof to !== 'number' || !Number.isFinite(to)) return;
   try {
+    if (!existsSync(filePath)) return;
+    const onDisk = JSON.parse(readFileSync(filePath, 'utf-8'))?.schemaVersion;
+    const from = typeof onDisk === 'number' && Number.isFinite(onDisk) ? onDisk : 1;
+    if (from >= to) return;
     const backupPath = `${filePath}.v${from}.bak`;
-    if (existsSync(filePath) && !existsSync(backupPath)) copyFileSync(filePath, backupPath);
+    if (!existsSync(backupPath)) copyFileSync(filePath, backupPath);
   } catch {
     /* best-effort: a missing backup must never block the save itself */
   }
@@ -233,13 +229,6 @@ export function loadSession(sessionId) {
     emitMigrationWarn(sessionId, err);
     return parsed;
   }
-  const onDisk = parsed.schemaVersion;
-  Object.defineProperty(migrated, MIGRATED_FROM, {
-    value: typeof onDisk === 'number' && Number.isFinite(onDisk) ? onDisk : 1,
-    writable: true,
-    enumerable: false,
-    configurable: true,
-  });
   return migrated;
 }
 

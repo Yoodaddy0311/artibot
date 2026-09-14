@@ -331,14 +331,18 @@ function listLocalBranches(prefix, cwd) {
   try {
     const result = spawnSync(
       'git',
-      ['for-each-ref', '--format=%(refname:short)', `refs/heads/${prefix}`],
+      // Full refname, not `:short` — short names become `heads/<x>` when a tag
+      // or remote branch shares the name, which would no longer match the
+      // branch's own ref in the evidence sweep.
+      ['for-each-ref', '--format=%(refname)', `refs/heads/${prefix}`],
       gitOpts(cwd),
     );
     if (result.error || result.status !== 0) return [];
     return (result.stdout || '')
       .split(/\r?\n/)
       .map((s) => s.trim())
-      .filter(Boolean);
+      .filter((s) => s.startsWith('refs/heads/'))
+      .map((s) => s.slice('refs/heads/'.length));
   } catch {
     return [];
   }
@@ -624,7 +628,9 @@ function reapMissingWorktree(branch, { cwd, integrationTarget }) {
     evidence: ev.evidence,
   };
   if (!ev.integrated) return { ...base, action: 'preserved', reason: ev.reason };
-  deleteAutopilotBranch(branch, cwd);
+  if (!deleteAutopilotBranch(branch, cwd)) {
+    return { ...base, action: 'preserved', reason: 'branch-delete-failed' };
+  }
   return { ...base, action: 'absent', reason: 'worktree-absent', resultRef: null };
 }
 
