@@ -67,11 +67,42 @@ export async function releaseSessionKeepAwake(sessionId) {
 }
 import { shouldActivateTui } from './tui.js';
 import { recordPhaseUsage } from './cost-tracker.js';
+import { budgetStatus, normalizeBudget } from './safety.js';
+
+/**
+ * Coerce a budget option into a positive finite number, accepting numeric
+ * strings; anything else (absent, empty, NaN, <= 0) yields undefined.
+ * @param {unknown} value
+ * @returns {number|undefined}
+ */
+function budgetOption(value) {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * Format a token count compactly (1.2M / 12.3k / 450) for budget messages.
+ * @param {number} n
+ * @returns {string}
+ */
+function fmtTokens(n) {
+  const v = Number.isFinite(n) && n > 0 ? n : 0;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+  return String(Math.round(v));
+}
 
 /**
  * Build the initial autopilot session state object. Factored out of
  * engine.js to keep that module under the 800-line quality gate and
  * to colocate state-shape concerns next to the persistence helpers.
+ *
+ * BUDGET UNITS (F03): `budgetTokens` is the canonical field and the default
+ * 2_000_000 matches the documented `--budget <tokens>`. The legacy `budget`
+ * key is still mirrored so readers that have not migrated yet
+ * (`prd-generator.js:125`) keep working. Removal plan: one release after
+ * `budgetTokens` ships, drop the mirror here and the compat read in
+ * `safety.js#normalizeBudget` together — they are the only two sites.
  *
  * @param {{ task: string, mode?: string, options?: object, sessionId?: string }} args
  * @returns {object} initial state
@@ -79,6 +110,15 @@ import { recordPhaseUsage } from './cost-tracker.js';
 export function makeInitialState({ task, mode, options, sessionId }) {
   const id = sessionId || newSessionId();
   const requestedOptions = options && typeof options === 'object' ? options : {};
+  // A caller that only knows the legacy flag still gets a canonical token
+  // limit; an explicit budgetTokens always wins. Coercion happens HERE, at the
+  // state boundary: the command driver hands `--budget 500000` over as text,
+  // and `normalizeBudget` deliberately rejects strings, so an uncoerced value
+  // would persist as a string and silently mean "no limit". A value that is
+  // not a positive number falls back to the documented default (fail-closed).
+  const budgetTokens = budgetOption(requestedOptions.budgetTokens)
+    ?? budgetOption(requestedOptions.budget) ?? 2_000_000;
+  const budgetUsd = budgetOption(requestedOptions.budgetUsd);
   return {
     sessionId: id,
     task: task || '',
@@ -87,8 +127,12 @@ export function makeInitialState({ task, mode, options, sessionId }) {
     updatedAt: new Date().toISOString(),
     options: {
       maxDuration: '4h',
-      budget: 2_000_000,
       ...requestedOptions,
+      budgetTokens,
+      budgetUsd,
+      // Legacy mirror of the SAME resolved value — see the BUDGET UNITS note
+      // above; two different numbers here would give the two readers two answers.
+      budget: budgetTokens,
       // Command parsing owns aliases; engine state accepts exactly one
       // canonical representation so persisted/resumed sessions are unambiguous.
       fast: requestedOptions.fast === true,
@@ -216,25 +260,97 @@ export function notePhaseCost(state, phase, usage) {
  *
  * Returns null when no threshold is crossed or when state is unusable.
  *
- * @param {object} state - live session state (reads state.options.budget)
- * @param {{ crossed: 50|80|95|null, used: number, percent: number }} threshold
+ * The message is rendered in the unit that actually crossed — a token
+ * threshold printed with a `$` sign is what let F03 hide in plain sight.
+ *
+ * @param {object} state - live session state (budget limits via normalizeBudget)
+ * @param {{ crossed: 50|80|95|null, unit?: 'tokens'|'usd', used: number,
+ *           percent: number }} threshold
+ * @param {{notifyPause?:Function, notifyDanger?:Function}} [deps] - test seam
  * @returns {object|null} notification instruction or null
  */
-export function buildCostWarningInstruction(state, threshold) {
+export function buildCostWarningInstruction(state, threshold, deps = {}) {
   if (!state || typeof state !== 'object' || !state.sessionId) return null;
   if (!threshold || threshold.crossed === null || threshold.crossed === undefined) return null;
   const pct = Number.isFinite(threshold.percent) ? threshold.percent : 0;
   const used = Number.isFinite(threshold.used) ? threshold.used : 0;
-  const limit = Number(state.options?.budget) || 0;
-  const reason = `budget ${threshold.crossed}% reached ($${used.toFixed(4)} / $${limit.toFixed(4)} = ${pct}%)`;
+  const limits = normalizeBudget(state.options);
+  const unit = threshold.unit === 'usd' ? 'usd' : 'tokens';
+  const limit = (unit === 'usd' ? limits.budgetUsd : limits.budgetTokens) ?? 0;
+  const amounts = unit === 'usd'
+    ? `$${used.toFixed(4)} / $${limit.toFixed(4)}`
+    : `${fmtTokens(used)} / ${fmtTokens(limit)} tokens`;
+  const reason = `budget ${threshold.crossed}% reached (${amounts} = ${pct}%)`;
+  const danger = typeof deps.notifyDanger === 'function' ? deps.notifyDanger : notifyDanger;
+  const pause = typeof deps.notifyPause === 'function' ? deps.notifyPause : notifyPause;
   try {
     if (threshold.crossed === 95) {
-      return notifyDanger(state.sessionId, {
+      return danger(state.sessionId, {
         riskType: 'budget-threshold-95',
-        detail: { used, limit, percent: pct },
+        detail: {
+          used, limit, percent: pct, unit,
+        },
       });
     }
-    return notifyPause(state.sessionId, reason);
+    return pause(state.sessionId, reason);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Budget gate for the engine's dispatch / resume-ACK sites.
+ *
+ * Emits telemetry and returns the status; it never pauses by itself —
+ * `safety.js#shouldPause` owns that decision, and this gate exists so the
+ * decision is *observable* before and after every delegation.
+ *
+ * Three events: `budget-check` (info) on every call, `budget-usage-unknown`
+ * (warn) once per session, and `budget-exceeded` (warn) whenever a unit is
+ * exhausted. The unknown warning is deduped via `state.usage.unknownWarnedAt`
+ * so a long run does not emit it on every dispatch.
+ *
+ * Never throws — a budget gate that crashes the engine is worse than one
+ * that misses a warning.
+ *
+ * @param {object} state - live session state
+ * @param {'dispatch'|'ack'} site - where the gate fired
+ * @param {{appendEvent?:Function, persist?:Function}} [deps] - test seam
+ * @returns {object|null} budgetStatus, or null when state is unusable
+ */
+export function checkBudgetGate(state, site, deps = {}) {
+  try {
+    if (!state || typeof state !== 'object' || !state.sessionId) return null;
+    const emit = typeof deps.appendEvent === 'function'
+      ? (id, ev) => { try { deps.appendEvent(id, ev); } catch { /* best-effort */ } }
+      : tick;
+    const save = typeof deps.persist === 'function' ? deps.persist : persist;
+    const status = budgetStatus(state);
+    const data = { site, ...status };
+    emit(state.sessionId, {
+      phase: state.phase || null, type: 'budget-check', level: 'info', message: `budget check @${site}`, data,
+    });
+    if (!status.usageKnown) {
+      const usage = state.usage && typeof state.usage === 'object' ? state.usage : {};
+      if (typeof usage.unknownWarnedAt !== 'string') {
+        usage.unknownWarnedAt = new Date().toISOString();
+        state.usage = usage;
+        emit(state.sessionId, {
+          phase: state.phase || null,
+          type: 'budget-usage-unknown',
+          level: 'warn',
+          message: 'budget limit configured but usage was never measured — treating as unknown, not as under budget',
+          data,
+        });
+        try { save(state); } catch { /* persistence best-effort */ }
+      }
+    }
+    if (status.tokens?.exceeded === true || status.usd?.exceeded === true) {
+      emit(state.sessionId, {
+        phase: state.phase || null, type: 'budget-exceeded', level: 'warn', message: `budget exhausted @${site}`, data,
+      });
+    }
+    return status;
   } catch {
     return null;
   }
