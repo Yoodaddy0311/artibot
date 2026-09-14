@@ -16,6 +16,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ensureDirSync } from '../core/file.js';
@@ -37,6 +38,32 @@ function gitOpts(cwd) {
   const opts = { encoding: 'utf-8', timeout: GIT_TIMEOUT_MS };
   if (cwd) opts.cwd = cwd;
   return opts;
+}
+
+/**
+ * Run a git command, normalizing spawn errors into a uniform result so callers
+ * can distinguish "git said no" (status 1) from "the lookup itself broke"
+ * (status null / non-zero non-1) — the distinction the fail-closed evidence
+ * allowlist depends on.
+ * @param {string[]} args
+ * @param {string} [cwd]
+ * @returns {{ok: boolean, status: number|null, stdout: string, stderr: string}}
+ */
+function git(args, cwd) {
+  try {
+    const r = spawnSync('git', args, gitOpts(cwd));
+    if (r.error) {
+      return { ok: false, status: null, stdout: '', stderr: r.error.message || 'spawn error' };
+    }
+    return {
+      ok: r.status === 0,
+      status: r.status,
+      stdout: r.stdout || '',
+      stderr: r.stderr || '',
+    };
+  } catch (err) {
+    return { ok: false, status: null, stdout: '', stderr: err?.message || 'git spawn threw' };
+  }
 }
 
 /**
@@ -323,18 +350,27 @@ function liveWorktreeBranches(cwd) {
  * Safety: only `autopilot/`-prefixed branches are ever inspected or deleted;
  * any branch still checked out in a live worktree is left untouched. User
  * branches (master/claude/*) are never matched.
- * @param {{cwd?: string, reapBranches?: boolean}} [opts]
+ * Result preservation (F01): an orphan branch is deleted only when
+ * {@link resolveIntegrationEvidence} finds its tip reachable from another ref.
+ * Branches carrying unintegrated commits are reported in `preserved` and left
+ * on disk — "no live worktree" is not evidence that the work was integrated.
+ * @param {{cwd?: string, reapBranches?: boolean, integrationTarget?: string|null}} [opts]
  *   reapBranches — defaults true; set false for prune-only behavior.
- * @returns {{pruned: number, branchesDeleted: number}}
+ * @returns {{pruned: number, branchesDeleted: number,
+ *   removed: Array<{branch: string, sha: string|null, reason: string}>,
+ *   preserved: Array<{branch: string, sha: string|null, reason: string}>}}
  */
 export function pruneOrphans(opts = {}) {
   const result = spawnSync('git', ['worktree', 'prune', '--verbose'], gitOpts(opts.cwd));
-  if (result.error || result.status !== 0) return { pruned: 0, branchesDeleted: 0 };
+  if (result.error || result.status !== 0) {
+    return { pruned: 0, branchesDeleted: 0, removed: [], preserved: [] };
+  }
   const out = (result.stdout || '') + (result.stderr || '');
   const matches = out.match(/Removing worktrees\/|Removing\s+/gi);
   listCache = null;
 
-  let branchesDeleted = 0;
+  const removed = [];
+  const preserved = [];
   if (opts.reapBranches !== false) {
     // Branches still attached to a live worktree must be preserved. Resolve the
     // live set from the SAME repo we are pruning (cwd-scoped porcelain) so the
@@ -342,8 +378,261 @@ export function pruneOrphans(opts = {}) {
     const live = new Set(liveWorktreeBranches(opts.cwd));
     for (const branch of listLocalBranches(AUTOPILOT_BRANCH_PREFIX, opts.cwd)) {
       if (live.has(branch)) continue;
-      if (deleteAutopilotBranch(branch, opts.cwd)) branchesDeleted += 1;
+      reapOrphanBranch(branch, opts, removed, preserved);
     }
   }
-  return { pruned: matches ? matches.length : 0, branchesDeleted };
+  return {
+    pruned: matches ? matches.length : 0,
+    branchesDeleted: removed.length,
+    removed,
+    preserved,
+  };
+}
+
+/**
+ * Decide one orphan branch's fate and push the outcome onto the report arrays.
+ * @param {string} branch
+ * @param {{cwd?: string, integrationTarget?: string|null}} opts
+ * @param {object[]} removed
+ * @param {object[]} preserved
+ */
+function reapOrphanBranch(branch, opts, removed, preserved) {
+  const revParse = git(['rev-parse', branch], opts.cwd);
+  const sha = revParse.ok ? revParse.stdout.trim() : null;
+  const evidence = resolveIntegrationEvidence(sha, {
+    cwd: opts.cwd,
+    integrationTarget: opts.integrationTarget,
+    selfBranch: branch,
+  });
+  if (!evidence.integrated) {
+    preserved.push({ branch, sha, reason: evidence.reason });
+    return;
+  }
+  if (deleteAutopilotBranch(branch, opts.cwd)) {
+    removed.push({ branch, sha, reason: evidence.reason });
+  } else {
+    preserved.push({ branch, sha, reason: 'branch-delete-failed' });
+  }
+}
+
+/**
+ * Decide whether a commit is safe to discard.
+ *
+ * Allowlist, never a deny-list: deletion is permitted ONLY when at least one
+ * positive piece of evidence says the commit survives elsewhere. A deny-list
+ * ("delete unless X") fails open the moment a new way of holding work appears.
+ *
+ *   (a) `<sha>` is an ancestor of an explicit `integrationTarget`;
+ *   (b) some ref under refs/heads or refs/remotes other than the branch we are
+ *       about to delete contains `<sha>` — this is what lets a pushed-but-
+ *       unmerged branch count, and what keeps a zero-commit session branch
+ *       (still sitting on the base tip) deletable.
+ *
+ * Any failure of the lookups themselves is fail-closed: unknown means keep.
+ * @param {string|null} sha
+ * @param {{cwd?: string, integrationTarget?: string|null, selfBranch?: string|null}} [opts]
+ * @returns {{integrated: boolean, evidence: string[], reason: string}}
+ */
+export function resolveIntegrationEvidence(sha, opts = {}) {
+  const fail = { integrated: false, evidence: [], reason: 'evidence-lookup-failed' };
+  if (!sha || typeof sha !== 'string') return fail;
+  const { cwd, integrationTarget, selfBranch } = opts;
+  const evidence = [];
+
+  const target = typeof integrationTarget === 'string' ? integrationTarget.trim() : '';
+  if (target) {
+    // exit 0 = ancestor, 1 = not an ancestor (a real answer), anything else
+    // (128, spawn failure) = the lookup broke and we must not conclude.
+    const anc = git(['merge-base', '--is-ancestor', sha, target], cwd);
+    if (anc.status === 0) evidence.push(`integrated-into:${target}`);
+    else if (anc.status !== 1) return fail;
+  }
+
+  const refs = git(
+    ['for-each-ref', '--format=%(refname)', '--contains', sha, 'refs/heads', 'refs/remotes'],
+    cwd,
+  );
+  if (!refs.ok) return fail;
+  const selfRef = normalizeSelfRef(selfBranch);
+  for (const ref of refs.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+    if (ref === selfRef) continue;
+    evidence.push(`reachable-from:${ref}`);
+  }
+
+  if (evidence.length === 0) {
+    return { integrated: false, evidence, reason: 'no-integration-evidence' };
+  }
+  return { integrated: true, evidence, reason: 'integrated' };
+}
+
+/**
+ * Normalize a branch name to a full ref so it can be excluded from the
+ * `--contains` sweep (a branch containing its own tip proves nothing).
+ * @param {string|null|undefined} selfBranch
+ * @returns {string|null}
+ */
+function normalizeSelfRef(selfBranch) {
+  if (!selfBranch || typeof selfBranch !== 'string') return null;
+  return selfBranch.startsWith('refs/') ? selfBranch : `refs/heads/${selfBranch}`;
+}
+
+/**
+ * Does the worktree hold `.artibot/missions` content? Mission files are session
+ * results, and they are checked independently of `dirty` because their loss is
+ * silent whether or not git tracks them at the moment of the reap.
+ * @param {string} wtPath
+ * @returns {boolean}
+ */
+function hasMissions(wtPath) {
+  try {
+    const dir = path.join(wtPath, '.artibot', 'missions');
+    if (!statSync(dir).isDirectory()) return false;
+    return readdirSync(dir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Describe what a worktree is currently holding: its HEAD commit, whether the
+ * tree has uncommitted changes (untracked files count), and whether mission
+ * artifacts are present.
+ * @param {string} wtPath
+ * @param {string} [cwd]
+ * @returns {{sha: string|null, dirty: boolean, missionsPresent: boolean}}
+ */
+export function describeWorktreeHead(wtPath, cwd) {
+  if (!wtPath || typeof wtPath !== 'string') {
+    return { sha: null, dirty: false, missionsPresent: false };
+  }
+  const head = git(['-C', wtPath, 'rev-parse', 'HEAD'], cwd);
+  const sha = head.ok ? head.stdout.trim() || null : null;
+  const status = git(['-C', wtPath, 'status', '--porcelain'], cwd);
+  // A status lookup that fails tells us nothing about the tree, so it counts as
+  // dirty rather than clean — unknown must never authorize a delete.
+  const dirty = status.ok ? status.stdout.trim().length > 0 : true;
+  return { sha, dirty, missionsPresent: hasMissions(wtPath) };
+}
+
+/**
+ * Reap a session's worktree, but only when its commits demonstrably survive
+ * elsewhere. Replaces the unconditional remove+branch-delete that could render
+ * a committed-but-unmerged session result unreachable.
+ *
+ * `force` is NOT an override for the preservation rules — it is passed through
+ * to `git worktree remove --force` for the case where removal was already
+ * authorized. A forced abort therefore no longer discards uncommitted work.
+ * @param {string} sessionId
+ * @param {{cwd?: string, force?: boolean, integrationTarget?: string|null}} [opts]
+ * @returns {{ok: boolean, action: 'removed'|'preserved'|'absent', reason: string,
+ *   resultHead: string|null, resultRef: string|null, branch: string|null,
+ *   evidence: string[], error?: string}}
+ */
+export function reapWorktree(sessionId, opts = {}) {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ...emptyReap(), ok: false, reason: 'invalid-session-id' };
+  }
+  try {
+    const { cwd, force = false, integrationTarget = null } = opts;
+    const wtPath = getWorktreePath(sessionId);
+    // null for a detached worktree — kept null so resultRef stays honest.
+    const branch = resolveSessionBranch(sessionId, cwd);
+    if (!existsSync(wtPath)) {
+      const fallback = branch || `${AUTOPILOT_BRANCH_PREFIX}${sessionId}`;
+      return reapMissingWorktree(fallback, { cwd, integrationTarget });
+    }
+    return reapLiveWorktree(sessionId, wtPath, branch, { cwd, force, integrationTarget });
+  } catch (err) {
+    return {
+      ...emptyReap(),
+      ok: false,
+      action: 'preserved',
+      reason: 'reap-threw',
+      error: err?.message || String(err),
+    };
+  }
+}
+
+/**
+ * Neutral reap result used as the base of every return shape.
+ * @returns {object}
+ */
+function emptyReap() {
+  return {
+    ok: true,
+    action: 'absent',
+    reason: '',
+    resultHead: null,
+    resultRef: null,
+    branch: null,
+    evidence: [],
+  };
+}
+
+/**
+ * Worktree directory is gone; only the branch may remain. Delete it when the
+ * evidence allowlist permits, otherwise keep it and report why.
+ * @param {string} branch
+ * @param {{cwd?: string, integrationTarget?: string|null}} opts
+ * @returns {object}
+ */
+function reapMissingWorktree(branch, { cwd, integrationTarget }) {
+  const revParse = git(['rev-parse', '--verify', branch], cwd);
+  if (!revParse.ok) {
+    return { ...emptyReap(), branch, action: 'absent', reason: 'worktree-absent' };
+  }
+  const sha = revParse.stdout.trim();
+  const ev = resolveIntegrationEvidence(sha, { cwd, integrationTarget, selfBranch: branch });
+  const base = {
+    ...emptyReap(),
+    branch,
+    resultHead: sha,
+    resultRef: `refs/heads/${branch}`,
+    evidence: ev.evidence,
+  };
+  if (!ev.integrated) return { ...base, action: 'preserved', reason: ev.reason };
+  deleteAutopilotBranch(branch, cwd);
+  return { ...base, action: 'absent', reason: 'worktree-absent', resultRef: null };
+}
+
+/**
+ * Decide the fate of a worktree that still exists on disk. First match wins:
+ * unresolvable head → missions → dirty → missing evidence → remove.
+ * @param {string} sessionId
+ * @param {string} wtPath
+ * @param {string} branch
+ * @param {{cwd?: string, force?: boolean, integrationTarget?: string|null}} opts
+ * @returns {object}
+ */
+function reapLiveWorktree(sessionId, wtPath, branch, { cwd, force, integrationTarget }) {
+  const head = describeWorktreeHead(wtPath, cwd);
+  const base = {
+    ...emptyReap(),
+    branch,
+    resultHead: head.sha,
+    resultRef: branch ? `refs/heads/${branch}` : null,
+  };
+  const keep = (reason) => ({ ...base, action: 'preserved', reason });
+
+  if (!head.sha) return keep('head-unresolvable');
+  // Checked before `dirty` so the operator gets the specific reason.
+  if (head.missionsPresent) return keep('missions-present');
+  if (head.dirty) return keep('dirty-worktree');
+
+  const ev = resolveIntegrationEvidence(head.sha, {
+    cwd,
+    integrationTarget,
+    selfBranch: branch,
+  });
+  if (!ev.integrated) return { ...keep(ev.reason), evidence: ev.evidence };
+
+  const removal = removeWorktree(sessionId, { cwd, force, deleteBranch: true });
+  if (!removal.ok) {
+    return {
+      ...keep('remove-failed'),
+      evidence: ev.evidence,
+      error: removal.error || 'worktree removal failed',
+    };
+  }
+  return { ...base, action: 'removed', reason: ev.reason, evidence: ev.evidence };
 }
