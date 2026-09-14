@@ -58,9 +58,26 @@
  * the only judge of that. The local lock cannot see another machine; the base
  * re-check right before the fast-forward push and `--force-with-lease` on every
  * integration-branch push (the first one included, expecting the tip read
- * moments earlier, or "absent") are the guards for the remote race, and a writer that
- * pushes in the microseconds between the re-check and the push is caught by
- * git's own non-fast-forward rejection, which is then handled as "moved".
+ * moments earlier, or "absent") are the guards for the remote race, and a writer
+ * that pushes in the microseconds between the re-check and the push is caught by
+ * git's own non-fast-forward rejection. That rejection is NOT self-describing:
+ * a refused fast-forward push is re-read against the base tip before it is
+ * called anything (`classifyFfRefusal`), because "the base moved" and "the
+ * remote will not take this push" produce the same non-zero exit and only the
+ * first is worth a rebuild.
+ *
+ *   tip differs ....... moved; rebuild (this is the strict:true race)
+ *   tip unchanged ..... `push-failed`, stderr carried in `reason`
+ *   tip unreadable .... `push-failed` (fail-closed; a guess costs a CI run)
+ *
+ * What this classification still cannot see:
+ *   - **Live branch protection.** `strict`/`enforce_admins` is a GitHub
+ *     behaviour; a local bare remote has none, so the suite injects the refusal
+ *     (a GH006 stderr) rather than provoking one. The mapping from a real
+ *     protection refusal to this branch is unmeasured here.
+ *   - **The TOCTOU window itself.** A move landing between the re-read and any
+ *     next step is still invisible; that residue is absorbed by the one rebuild
+ *     the `moved` arm already allows, not eliminated.
  *
  * @module lib/git/batch-landing
  */
@@ -450,6 +467,49 @@ async function attemptLanding(ctx, rebuilds) {
     log.push(`fast-forwarded ${base} onto ${branch} @ ${build.sha}`);
     return { done: result('landed', { reason: 'fast-forward push accepted', build, sha: build.sha, base: baseSha, rebuilds }) };
   }
-  log.push(`ff push refused: ${(ff.stderr || ff.stdout).trim()}`);
+  return classifyFfRefusal(ctx, { build, baseSha, rebuilds, ff });
+}
+
+/**
+ * Decide what a refused fast-forward push MEANS, by reading the base tip once
+ * more instead of assuming.
+ *
+ * A refusal used to return `moved` unconditionally, so a base that had not
+ * moved at all — branch protection, a missing permission, a dead network — sent
+ * the caller round the rebuild loop to pay a second CI run and be refused by
+ * the identical tip, then to report `needs-human` with the false reason "moved
+ * again" while the real stderr stayed in the log (measured 2026-09-14 on
+ * HEAD c732eaa9: 2 builds, 2 CI runs, 2 pushes, reason without the GH006 text).
+ * Only a tip that actually differs is the `strict:true` race worth rebuilding
+ * for; an unchanged tip and an unreadable tip both stop here, the unreadable one
+ * because guessing `moved` is exactly the wasted rebuild being removed.
+ *
+ * The batch is never discarded: `<branch> @ build.sha` stays on the remote,
+ * green, for a human to land or drop.
+ *
+ * @param {object} ctx
+ * @param {{build: BatchBuild, baseSha: string, rebuilds: number, ff: {stdout:string, stderr:string}}} p
+ * @returns {{done?: LandResult, moved?: boolean, build?: BatchBuild, baseSha?: string}}
+ */
+function classifyFfRefusal(ctx, { build, baseSha, rebuilds, ff }) {
+  const { cwd, branch, base, remote, exec, log, result } = ctx;
+  const detail = (ff.stderr || ff.stdout || '').trim();
+  log.push(`ff push refused: ${detail}`);
+
+  const tipNow = readRemoteTip({ exec, cwd, remote, branch: base });
+  const kept = `${branch} @ ${build.sha} kept on ${remote}`;
+  const stop = (reason) => ({ done: result('push-failed', {
+    reason, build, sha: build.sha, base: baseSha, rebuilds,
+  }) });
+
+  if (tipNow === null) {
+    log.push(`${base} tip unreadable after ff refusal; ${kept}`);
+    return stop(`ff push ${base} refused and tip 재확인 실패 (cannot read ${remote}/${base} after the refusal): ${detail}`);
+  }
+  if (tipNow === baseSha) {
+    log.push(`${base} unchanged at ${baseSha} after ff refusal; ${kept}`);
+    return stop(`ff push ${base} refused at unchanged tip ${baseSha}: ${detail}`);
+  }
+  log.push(`${base} moved ${baseSha} -> ${tipNow} (found after ff refusal)`);
   return { moved: true, build, baseSha };
 }
