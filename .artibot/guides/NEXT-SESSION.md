@@ -1,6 +1,56 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-14 KST 갱신, AsusHeechangLee 머신, master = 9948348c, Wave 8 8/8 착지 + worktree·브랜치 정리 완료, v4.61.0 릴리스 완료(태그 7dd14049, GitHub Release 공개), sync:local 4.61.0 · 플러그인 캐시 4.59.0 라벨(오너 `claude plugin update` 대기))
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-14 KST 갱신, AsusHeechangLee 머신, master = 3ba981eb, **Wave 9 8/8 착지**(p1 18ac5644 · p2 f1f8311e · p3 3ba981eb) · worktree 8 + 로컬 브랜치 8 **정리 대기** · 릴리스 미실시(의도), sync:local 4.61.0 · 플러그인 캐시 4.59.0 라벨(오너 `claude plugin update` 대기))
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## Wave 9 착지 (2026-09-14, 세션 artibot-17/cdcd06, master 3ba981eb)
+
+**Wave 9 착지 (split-68e984w9, 8창 1 wave, 8/8줄기)**: base `a81ee154` → p1 **`18ac5644`**(avoided-switch-fold · routebench-b4-agenttype · split-ops-dispatch-land) → p2 **`f1f8311e`**(session-end-vocab · resume-contract-dr02) → p3 **`3ba981eb`**(guard-command-position · review-md-writer · verify-gate-wiring). `git diff --shortstat a81ee154 3ba981eb` = **44 files +8,800/−112**(2026-09-14 10:3x 실측). 줄기별 8개 diff 의 합이 배치 합계와 정확히 일치한다 — 소유권 겹침 0 의 사후 확인. 랜딩 3배치 전부 rebuild 0, landCheck 8/8 `7/7 PASS`.
+
+| 줄기 | done SHA | 배치 | 파일 | 핵심 (1줄) |
+|---|---|---|---|---|
+| avoided-switch-fold | `c158a718` | p1 | 4 files +493/−5 | `routing-scorecard.js` Avoided Switch fold + `scorecard/index.js` export — OB-21 **done**, §4 ② 첫 값 `route.selected` 102 중 12 = **11.8%** |
+| routebench-b4-agenttype | `1fbe6961` | p1 | 5 files +260/−25 | `routebench.mjs` B4 가 `routeModel` 에 `input:{agentType}` 공급(오너 결정 ③ 이행, lib 무변경) — SH-25 후속 done, `baselines_sha256` 변동 |
+| split-ops-dispatch-land | `2fc59540` | p1 | 5 files +558/−14 | `split-dispatch.js` 완료줄기 선제외 + `land.mjs` 설정 파일 핀 테스트 나열 — gotcha 91·92 대응, §3 부채 done |
+| session-end-vocab | `5b2f8b5e` | p2 | 3 files +380/−5 | allowlist `session.ended` 1항목(총 **39**) + `session-end.js#recordSessionEnded` — §4 ④ **분모** 착지(라이브 0, 설치본 미갱신) |
+| resume-contract-dr02 | `2df68903` | p2 | 6 files +1,875/−1 | `resume-controller.js` + `lane-reconcile.js` 신설(**report-only**) + `commands/resume.md` — SH-13 **in-progress 유지**(apply 는 후속) |
+| guard-command-position | `10cb53ff` | p3 | 11 files +1,925/−57 | `lib/core/command-segments.js` 신설로 명령 위치 앵커 — 언급 8래퍼 0/39, 실행형 양성 손실 0(L1 490→476, 손실 14 전부 언급형), PARITY 38→50, 최악 35.0ms/40,962B — §3 부채 done |
+| review-md-writer | `15af93e2` | p3 | 4 files +1,948/−5 | `lib/review/review-artifact.js` + `_review-stop-record.js` 배선 = review.md 왕복 실증 — SH-02 **in-progress 유지**(plan/outcome emitter 0) |
+| verify-gate-wiring | `de8d238a` | p3 | 6 files +1,361(삭제 0) | Stop 훅 `dev-verify-gate.js` 분모행 + CLI `record-verify.mjs` 분자행(결정 L-3) — OB-07 **in-progress 유지**(호출자 ≥1 충족, 라이브 분모 0) |
+
+**V5-BACKLOG 진행률**: §1 합계 **39% → 40%**(done 39 → 40, Observe 18 → 19). status 가 바뀐 로드맵 항목은 **OB-21 단 1건**이고 나머지는 evidence 만 갱신했다. done 으로 올리지 않은 것 4건 — OB-07(호출자는 생겼으나 라이브 분모 0) · SH-02(review.md 1경로만) · SH-13(report-only 만) · SH-16(Wave 8 부터 유지). §3 부채는 2건 done(guard-command-position · split-ops-dispatch-land) + 신규 행 3건 추가(guard L2 잔여 2 · 정적 스캔 4번째 카탈로그 · split 운용).
+
+**운영 사건 2건**:
+1. **팀원 세션 한도 — 8창 동시 사망**. 2026-09-14 01:35 KST 에 8창 전부의 opus 팀원이 "session limit · resets 2:30am" 으로 동시에 죽었다. 산출물 유실 0 — 각 창이 wip 트레일러로 보호했다(gotcha 81). 리더가 상태를 확인한 것은 09:05(창 idle 약 7시간 30분)이고, 8줄기 done 보고는 09:16~09:59 에 몰렸다. 원인은 계정 단위 한도로 **추론**한다(호스트 계측 없음).
+2. **plan base ≠ worktree 분기점**. plan base `7dd14049` 와 worktree 분기점 `a81ee154` 가 docs 2커밋만큼 달랐다. `land.mjs:115` 가 `plan.base..branch` 를 diff 하므로 그대로 두면 모든 줄기의 소유권 검사에 무관한 6파일이 누출될 예정이었다. **8개 worktree HEAD 가 전부 `a81ee154` 이고 줄기 커밋 0** 임을 실측한 뒤 plan·run 의 base 를 옮기고 `planBaseOriginal` 을 보존했다(잡아낸 것은 session-end 창). 또 `dispatch.mjs` 는 `brief.md` 만 복사하므로 `leader-addendum.md` 는 리더가 수동 복사했다(guard 줄기).
+
+**리더 인용 오류(전부 창이 정정)**: ① 설계 "§36" 인용 — §36 은 delegation 한도 행이고 Avoided Switch 원문은 **§38**(`MODEL-SWITCHING-SCORECARD.md` "38. Avoided Switches도 성능이다"); 설계 `:479` 가 §36·§38·§37·§39 를 한 행으로 묶은 탓이다(V5-BACKLOG OB-21 출처 정정 완료) ② `fable.allowlist` "8종" → 정본 **10** ③ 스캐너 위치를 잘못 지목(정답 `safety.test.js`) ④ verify CLI exit 규약을 브리프 문구로 줬으나 정답은 **SH-27 선례**(사용 오류 exit 2 · 기록 실패 exit 0 `recorded:false`) ⑤ `lib/supervisor` 를 L1 로 봤으나 **L2** ⑥ `LANE_OPS_STATES` 위치 = `contracts.js:122-132` ⑦ "같은 길이 공백" 필러 지시가 `$` 앵커 핀을 반전시킴 → `@` 로 정정 ⑧ review `based_on` 2멤버 ⑨ `handleStop` 은 동기 ⑩ `run.json` "landed" 어휘(리더가 덮어씀). 더해 게이트 FAIL 3건 — ownership FAIL 1(avoided: `index.js` export 3줄 + stem 테스트 신규가 리더 plan 에 없었다 → allowlist 추가) · citations FAIL 2(`split.md:169` · dr02 인용 2줄, 둘 다 문구 수정 재커밋).
+
+**gotcha 신규**: (94) **plan base 는 worktree 분기점이 아니다** — `/split plan` 이 base 를 박은 뒤 master 가 전진하면 `land.mjs` 의 `plan.base..branch` diff 에 남의 커밋이 섞여 소유권 검사가 거짓 위반을 낸다. 창을 열기 전에 `git -C <worktree> rev-parse HEAD` 8개를 재고, 전부 같고 줄기 커밋이 0 이면 base 를 그 값으로 옮겨라(`planBaseOriginal` 보존). (95) **`dispatch.mjs` 는 `brief.md` 만 복사한다** — `leader-addendum.md` 를 쓴 줄기는 리더가 수동 복사하지 않으면 창이 addendum 없이 착수한다. (96) **팀원이 계정 한도로 죽어도 창은 살아 있다** — 8창 전부의 팀원이 동시에 죽었지만 wip 트레일러 덕에 산출물 유실은 0 이었다. 유휴 신호를 "착수 실패" 로 읽지 말고 창에 물어라. (97) **줄기가 새로 만드는 stem 테스트도 plan allowlist 에 미리 넣어라** — Stop 게이트는 `<stem>.test.js` / `<stem>-<suffix>.test.js` 만 커버로 인정하는데(접두형 미인정), 줄기가 추가할 파일은 리더 plan 작성 시점에 없어 빠지기 쉽다. Wave 9 에서 avoided·verify 두 줄기가 ownership FAIL 로 드러났다. (98) **레인 상태 어휘는 `LANE_OPS_STATES` allowlist 안에서만 써라** — `run.json` 에 `"landed"` 를 쓰면 `readLaneOpsState` 가 unknown 을 돌려주고 DR02 의 reconcile 이 전 레인을 `reconcile:ops-state-unknown` 으로 읽는다. 착지 후에는 `lane-state.mjs <limb> done`(결정 L-4).
+
+**오너 결정 후보 6건(Wave 10 전에 닫으면 좋음)**:
+1. **RouteBench 시나리오 A/B/C** — `routebench-scenarios-live/brief-draft.md` 가 3안을 놓았다. 시나리오 2건이 `fixture-pending` 인 상태를 어떻게 풀 것인가.
+2. **Canary 진입 판정** — guard 부채가 닫혀 선행 조건이 바뀌었다. §3 의 Canary 선행 항목 잔여를 다시 세야 한다.
+3. **verify CLI `source=supervisor`** — `record-verify.mjs` 의 호출 주체 표기.
+4. **store `state_version` 17 vs 원장 `state.updated` 3** — 두 수가 다르다. 어느 쪽이 정본인지 미결.
+5. **review revision 승계** — 설계 §7.2 결정. store 중첩 `intent.revision` · 체크포인트 최상위 `intent_revision` · 원장 `plan_revision`(공급 0) 3분기.
+6. **`metric()` absent 계약 A/A′** — `scorecard-absent-contract/brief-draft.md` 가 A′ 권장(`absent:0` + `routing.tier_comparability` 행). 지금은 models 없는 영수증이 과반이면 throw(KNOWN DEFECT 핀 `routing-scorecard.js:504-517`).
+
+**Wave 10 후보 = 보존 7 + 작성 중 1**(`.artibot/split/*/brief-draft.md`, 2026-09-14 09:2x~10:0x 정찰 산출 — Glob·`wc -l` 실측 10:4x):
+
+| 초안 | 줄 | 성격 |
+|---|---|---|
+| `scorecard-absent-contract/` | 76 | avoided-switch-fold 소유 밖 후속 ③ · `metric()` absent 계약 |
+| `session-end-fold/` | 65 | Observe 종료 조건 축 ④ fold · 커버리지 ≥95% |
+| `routebench-scenarios-live/` | 91 | SH-25 후속 · **오너 결정 1건 필요** |
+| `split-ops-base-addendum/` | 96 | 부채 · split-ops-dispatch-land 후속 a/b/c |
+| `resume-contract-apply/` | 218 | Canary · SH-13 후속 · CA-09 · §51 step 10 |
+| `verify-numerator-rate/` | 80 | OB-07 후속 (2)(6)(7) 통합 |
+| `plan-outcome-emitters/` | 91 | Shadow · SH-02 잔여 / OB-07 / SH-20 / CA-13 선행 (10:07 부모 보존) |
+| `guard-l2-followups/` | — | **작성 중**(guard 창 investigator, 리더 보존 예정) — 10:4x 기준 디렉터리 미생성 |
+
+> **경위(숨기지 않고 기록)**: followups-wave9 는 초안을 7건으로 적었으나 10:3x 실측 시점에 `guard-l2-followups/`·`plan-outcome-emitters/` 둘 다 디렉터리가 없었다. `plan-outcome-emitters/` 는 그 직후(10:07 작성분이 10:4x 재실측에서 확인) 부모가 보존했고, `guard-l2-followups/` 는 **아직 작성 중**이다. 또 `split-ops-base-addendum/` 은 followups 에 이름이 없는 추가 산출이다. guard L2 후속 내용 자체는 브리프와 별개로 V5-BACKLOG §3 신규 행 2개(L2 잔여 2건 · 정적 스캔 4번째 카탈로그)에, plan/outcome emitter 후속은 SH-02 비고에 옮겨 두었다.
+
+**다음 할 일**: ① **worktree 8개 + 로컬 브랜치 8개 정리** — `git worktree list` 9행(부모 + 8, 전부 `locked`), `git branch --list "worktree-split-artibot-*"` = 8(2026-09-14 10:3x 실측). Wave 8 선례대로 `git worktree remove` 실패 시 PowerShell 에서(gotcha 93). ② **전체 vitest** — 창이 전부 닫힌 뒤 1회, 리포 전체 수치로. ③ **실 원장 이관** `scripts/ledger/migrate-ledger-adr011.mjs`(선존재 exit 3) + `.pre-adr011` 정리 — 파일 0건은 "삭제 완료" 가 아니라 이관을 안 돌려서 생긴 적이 없는 것이다(V5-BACKLOG §3 in-progress). ④ **오너 `claude plugin update`** — Wave 9 의 라이브 0 세 건(`verify.completed` 분모 · `session.ended` 분모 · review.md 경로)이 전부 설치본 갱신을 기다린다. 갱신 후 §4 ②④ 재집계. ⑤ 릴리스는 이번 웨이브에서 **의도적으로 미실시**.
 
 ## Wave 8 착지 + 정리 완료 + v4.61.0 준비 (2026-09-14, 세션 artibot-17/cdcd06, master 34940d2b)
 
