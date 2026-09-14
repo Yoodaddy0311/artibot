@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { blankPrinterSegments } from '../../lib/core/command-segments.js';
+import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
 
 /** 백슬래시. 리터럴로 쓰면 이스케이프 단계에서 사고가 난다. */
 const BACKSLASH = String.fromCharCode(92);
@@ -34,6 +35,17 @@ const RATIO_FLOOR_MS = 4;
 
 /** 크기 스케일 임계. 선형 기대 6.0, 2차식 기대 36.0 사이의 18. */
 const GROWTH_LIMIT = 18;
+
+/**
+ * 블랭크 채움 문자. **공백이 아니다** — `lib/core/command-segments.js#BLANK_FILL`
+ * 참조. 공백으로 채우면 `$` 앵커 L1 규칙(`delete from …;\s*$`)이 공백이 된
+ * 둘째 줄을 후행 공백으로 읽어 통과해 버린다(리더 실측 2026-09-14).
+ * 이 상수를 바꾸려면 아래 `$`-앵커 회귀 it 가 먼저 RED 가 되어야 한다.
+ */
+const FILL = '@';
+
+/** 세그먼트가 통째로 블랭크됐는가 — 채움 문자와 보존된 줄바꿈만 남는다. */
+const isFullyBlanked = (text) => /^[@\n\r]*$/.test(text);
 
 /** `unit` 을 정확히 size 바이트까지 반복한다. */
 const sized = (unit, size) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
@@ -86,21 +98,23 @@ describe('command-segments', () => {
       ['unterminated quote', 'echo "rm -rf /'],
       ['test builtin', 'test -f /etc/passwd'],
     ])('blanks a %s segment', (_name, command) => {
-      expect(blankPrinterSegments(command).trim()).toBe('');
+      const blanked = blankPrinterSegments(command);
+      expect(isFullyBlanked(blanked)).toBe(true);
+      expect(blanked).toHaveLength(command.length);
     });
 
     it('blanks both the echo and the trailing comment', () => {
-      expect(blankPrinterSegments('echo hi # rm -rf /').trim()).toBe('');
+      expect(isFullyBlanked(blankPrinterSegments('echo hi # rm -rf /'))).toBe(true);
     });
 
     it('blanks the echo inside a subshell group', () => {
-      const blanked = blankPrinterSegments('(echo "rm -rf /")');
-      expect(blanked).toBe('(                ');
-      expect(blanked).toHaveLength('(echo "rm -rf /")'.length);
+      const command = '(echo "rm -rf /")';
+      expect(blankPrinterSegments(command)).toBe(`(${FILL.repeat(16)}`);
+      expect(blankPrinterSegments(command)).toHaveLength(command.length);
     });
 
     it('blanks the echo inside a brace group', () => {
-      expect(blankPrinterSegments('{ echo "rm -rf /"; }').replace(/\s+/g, '')).toBe('{;}');
+      expect(blankPrinterSegments('{ echo "rm -rf /"; }')).toBe(`{${FILL.repeat(16)}; }`);
     });
   });
 
@@ -175,13 +189,13 @@ describe('command-segments', () => {
       const blanked = blankPrinterSegments(command);
       expect(blanked).toHaveLength(command.length);
       expect(blanked.split('\n')).toHaveLength(3);
-      expect(blanked.trim()).toBe('');
+      expect(isFullyBlanked(blanked)).toBe(true);
     });
 
     it('preserves a CR inside a blanked CRLF input', () => {
       const command = 'echo one\r\necho two';
       const blanked = blankPrinterSegments(command);
-      expect(blanked).toBe('        \r\n        ');
+      expect(blanked).toBe(`${FILL.repeat(8)}\r\n${FILL.repeat(8)}`);
     });
 
     it('keeps every character outside an exempt segment byte-identical', () => {
@@ -204,6 +218,41 @@ describe('command-segments', () => {
 
     it('returns the empty input unchanged', () => {
       expect(blankPrinterSegments('')).toBe('');
+    });
+  });
+
+  // 채움 문자가 공백이면 안 되는 이유를 회귀로 고정한다. `$` 앵커 L1 규칙
+  // (`delete from <table> …;\s*$`, `export PATH=\s*$`)은 문자열 끝의 공백을
+  // 흡수한다 — 둘째 줄 `echo hi` 를 공백으로 채우면 첫 줄이 "문장 끝까지"로
+  // 읽혀 approve 이던 두 핀이 block 으로 뒤집힌다(리더 실측 2026-09-14,
+  // `tests/core/guard-registry.test.js` 의 줄바꿈 경계 핀 2건).
+  // 이 describe 가 그린인데 `BLANK_FILL` 을 ' ' 로 되돌리면 RED 가 되어야 한다.
+  describe('blankPrinterSegments — 채움 문자가 `$` 앵커를 건드리지 않는다', () => {
+    beforeEach(() => {
+      resetGuards();
+      registerBuiltinGuards();
+    });
+
+    const decisionFor = (command) => executeChain(
+      'pre', 'Bash', { tool_name: 'Bash', tool_input: { command } },
+    ).decision;
+
+    it.each([
+      ['sql-delete', 'delete from users;\necho hi'],
+      ['export PATH', 'export PATH=\necho hi'],
+    ])('keeps the %s newline-boundary pin at approve', (_name, command) => {
+      expect(decisionFor(command)).toBe('approve');
+    });
+
+    it.each([
+      ['sql-delete', 'delete from users;\necho hi'],
+      ['export PATH', 'export PATH=\necho hi'],
+    ])('introduces no whitespace when blanking the second line of a %s pin', (_name, command) => {
+      const blanked = blankPrinterSegments(command);
+      expect(blanked).toHaveLength(command.length);
+      // 보존된 줄바꿈 말고는 공백이 새로 생기지 않는다. 원문에 있던 공백은
+      // 블랭크된 구간에서 채움 문자로 바뀌므로, 남은 공백은 원문 첫 줄의 것뿐이다.
+      expect(blanked.slice(command.indexOf('\n') + 1)).toMatch(/^[@]*$/);
     });
   });
 

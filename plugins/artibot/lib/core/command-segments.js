@@ -12,11 +12,12 @@
  * blanking whole segments whose command word is a known printer — lost none.
  *
  * WHAT IT DOES. Splits the command into shell segments (quote-aware), decides
- * per segment whether it can possibly execute its arguments, and replaces the
- * text of the ones that cannot with spaces. Offsets and line structure survive
- * (`\n`/`\r` are kept, output length === input length), so every rule that
- * depends on a newline boundary or on `[^\n]{0,N}` bounds keeps its meaning and
- * no rule regex has to change.
+ * per segment whether it can possibly execute its arguments, and rewrites the
+ * text of the ones that cannot with {@link BLANK_FILL} — an inert filler, NOT a
+ * space (see that constant for the measurement that forced it). Offsets and
+ * line structure survive (`\n`/`\r` are kept, output length === input length),
+ * so every rule that depends on a newline boundary or on `[^\n]{0,N}` bounds
+ * keeps its meaning and no rule regex has to change.
  *
  * WHY SEGMENT-LEVEL AND NOT A SHAPE REGEX. "skip the whole command when it
  * matches /^echo /" is fail-OPEN: `echo "safe" ; rm -rf /` would walk through
@@ -109,7 +110,8 @@ const LONG_WORD = '\u0000';
  *
  * The returned string has exactly the same length as the input, every character
  * outside an exempt segment is byte-identical, and inside an exempt segment
- * only `\n` and `\r` survive. Single pass, O(n) in the input length.
+ * only `\n` and `\r` survive — every other character becomes
+ * {@link BLANK_FILL}. Single pass, O(n) in the input length.
  *
  * @param {string} raw Raw command text, exactly as the user typed it.
  * @returns {string} Same-length text with printer segments blanked out.
@@ -161,6 +163,8 @@ function collectExemptRanges(raw) {
     truncated: false,
     seg: freshSegment(),
     segStart: 0,
+    sepLength: 1,
+    sepPipe: false,
   };
 
   let i = 0;
@@ -183,10 +187,9 @@ function collectExemptRanges(raw) {
     if (ch === '#' && !state.wordOpen) { i = readComment(state, i, ranges); continue; }
     if (ch === '<' || ch === '>') { i = readRedirect(state, i); continue; }
 
-    const separator = takeSeparator(state, ch, i);
-    if (separator) {
-      closeSegment(state, i, separator.pipe, ranges);
-      i += separator.length;
+    if (takeSeparator(state, ch, i)) {
+      closeSegment(state, i, state.sepPipe, ranges);
+      i += state.sepLength;
       state.segStart = i;
       continue;
     }
@@ -204,25 +207,35 @@ function collectExemptRanges(raw) {
 /**
  * Classify `ch` as a segment separator at the top level.
  * `||` is a separator but NOT a pipe; `|` and `|&` are pipes (condition ii).
- * @param {object} state
+ *
+ * Answers a boolean and writes the width/pipe-ness into `state` instead of
+ * returning a record: a 122,880-byte separator run calls this once per byte,
+ * and returning a fresh object there allocated 120K short-lived records for
+ * nothing (measured 2026-09-14, see the linearity block in the test file).
+ *
+ * @param {object} state Scanner state; receives `sepLength` and `sepPipe`.
  * @param {string} ch
  * @param {number} i
- * @returns {{length: number, pipe: boolean}|null}
+ * @returns {boolean} whether `ch` starts a separator
  */
 function takeSeparator(state, ch, i) {
-  const next = state.raw[i + 1];
-  if (ch === '\n' || ch === ';') return { length: 1, pipe: false };
-  if (ch === '&') return { length: next === '&' ? 2 : 1, pipe: false };
+  state.sepLength = 1;
+  state.sepPipe = false;
+  if (ch === '\n' || ch === ';') return true;
+  if (ch === '&') {
+    state.sepLength = state.raw[i + 1] === '&' ? 2 : 1;
+    return true;
+  }
   if (ch === '|') {
-    if (next === '|') return { length: 2, pipe: false };
-    return { length: next === '&' ? 2 : 1, pipe: true };
+    const next = state.raw[i + 1];
+    if (next === '|') { state.sepLength = 2; return true; }
+    state.sepLength = next === '&' ? 2 : 1;
+    state.sepPipe = true;
+    return true;
   }
   // Grouping punctuation splits only at a word boundary, so `rm -rf /{a,b}`
   // and `find … {} \;` keep their command word attached to its own segment.
-  if (!state.wordOpen && (ch === '(' || ch === ')' || ch === '{' || ch === '}')) {
-    return { length: 1, pipe: false };
-  }
-  return null;
+  return !state.wordOpen && (ch === '(' || ch === ')' || ch === '{' || ch === '}');
 }
 
 /**
@@ -443,8 +456,16 @@ function finishWord(state) {
  */
 function closeSegment(state, end, pipe, ranges) {
   finishWord(state);
+  // A zero-width segment consumed no characters, so nothing was accumulated in
+  // it and the record can be reused instead of reallocated. This is the whole
+  // cost of a 122,880-byte `;`/`\n`/`|` run, which closes one empty segment per
+  // byte (measured 2026-09-14: 120K newlines 4.07ms before, see the test file).
+  if (end <= state.segStart) {
+    state.seg.pipe = false;
+    return;
+  }
   state.seg.pipe = pipe;
-  if (end > state.segStart && isExemptSegment(state.seg)) {
+  if (isExemptSegment(state.seg)) {
     ranges.push({ start: state.segStart, end });
   }
   state.seg = freshSegment();
