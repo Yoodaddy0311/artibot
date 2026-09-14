@@ -504,7 +504,8 @@ describe('foldAvoidedSwitches — 설계 §38 회피된 전환', () => {
   it('KNOWN DEFECT: comparable 이 비교 불가 영수증보다 적으면 카드가 던진다', () => {
     // 이 행들은 denominator=comparable, absent=routes-comparable 이라 절반 넘게 models 가
     // 없으면 metric() 의 `absent > denominator` 가 걸린다. recommendation_divergence
-    // (routing-scorecard.js:208, 2026-09-14 측정)가 먼저 같은 모양으로 던지므로 이 결함은
+    // (routing-scorecard.js `key: 'routing.recommendation_divergence'` 행, 2026-09-14 측정)가
+    // 먼저 같은 모양으로 던지므로 이 결함은
     // 새로 들어온 것이 아니라 기존 행에서 물려받은 것이다. 여기 적어 두는 이유는, 안 적으면
     // 라이브에서 처음 발견되기 때문이다. 고치는 것은 이 작업의 소유 범위 밖이다.
     const lopsided = buildReplay([

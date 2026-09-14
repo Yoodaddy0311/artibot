@@ -184,6 +184,11 @@ export function comparableTiers(receipt) {
  *
  * An ALLOWLIST, like `DECISION_TYPES`: a hysteresis code outside these lists is
  * reported as `other:<code>` rather than folded into a neighbouring reason.
+ *
+ * `hysteresis-band` sits under `low_benefit` by interpretation, not by a
+ * sentence in §38: a utility inside the ±band means the gain did not clear the
+ * switch cost by the margin the policy demands (`route-hysteresis.js`
+ * decision order, step 5), which is "low expected benefit" in §38's words.
  */
 export const AVOIDED_SWITCH_REASONS = Object.freeze({
   cache_affinity: Object.freeze([]),
