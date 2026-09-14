@@ -121,12 +121,12 @@
       "type": "object",
       "required": ["total", "pricing_version"],
       "additionalProperties": false,
-      "description": "Attempt cost. total is nullable by design: lane 2 §3 decision 1 records that the catalog price table and cache-roi.js disagree by roughly 3x, and until one source of truth is chosen a writer must emit null rather than an unverified number. pricing_version is required either way, so a later backfill knows which table produced (or failed to produce) the value.",
+      "description": "Attempt cost. total is numeric when the writer priced from the catalog, which is the default since 2026-09-14 (the two-table disagreement recorded in lane 2 §3 decision 1 was resolved on 2026-09-12: cache-roi.js now reads the same catalog). total is null only when the caller opted out (priceReceipts:false) or the tier's catalog row is not 'measured'. pricing_version is required either way, so a later backfill knows which table produced (or failed to produce) the value.",
       "properties": {
         "total": {
           "type": ["number", "null"],
           "minimum": 0,
-          "description": "Total cost from the catalog unit price times the usage counters, or null when the price table is unverified."
+          "description": "Total cost from the catalog unit price times the usage counters. Null only when the caller opted out (priceReceipts:false) or the tier's catalog row is not 'measured'."
         },
         "pricing_version": {
           "type": "string",

@@ -192,43 +192,62 @@ describe('pricing parity: version stamp', () => {
     expect(priceUsage({}, 'opus').pricing_version).toBe(PRICING_VERSION);
   });
 
-  it('the UNPRICED default of buildUsageReceipts stays "unresolved", not a date', async () => {
+  const main = '/fake/projects/slug/sess-parity.jsonl';
+  const entry = {
+    type: 'assistant',
+    requestId: 'req-parity-1',
+    timestamp: '2026-09-12T00:00:00.000Z',
+    effort: 'high',
+    message: {
+      model: 'claude-opus-5',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'x' }],
+      usage: {
+        input_tokens: 100,
+        cache_read_input_tokens: 900,
+        cache_creation_input_tokens: 50,
+        output_tokens: 20,
+      },
+    },
+  };
+
+  /** Same fixture both ways, so only the option differs between the two tests. */
+  const buildParity = (extra = {}) => buildUsageReceipts({
+    transcriptPath: main,
+    missionId: 'm-parity',
+    readTranscript: (p) => {
+      if (p !== main) throw new Error(`ENOENT ${p}`);
+      return JSON.stringify(entry);
+    },
+    listSubagentTranscripts: () => [],
+    ...extra,
+  });
+
+  it('the DEFAULT of buildUsageReceipts stamps PRICING_VERSION and a numeric total', async () => {
     // Pinned by tests/firewall/usage-receipt-schema-guard.test.js too. Repeated
     // here because this suite is where someone wiring a new consumer will look:
-    // a version stamp on an unpriced row would claim a table was consulted.
-    const main = '/fake/projects/slug/sess-parity.jsonl';
-    const entry = {
-      type: 'assistant',
-      requestId: 'req-parity-1',
-      timestamp: '2026-09-12T00:00:00.000Z',
-      effort: 'high',
-      message: {
-        model: 'claude-opus-5',
-        role: 'assistant',
-        content: [{ type: 'text', text: 'x' }],
-        usage: {
-          input_tokens: 100,
-          cache_read_input_tokens: 900,
-          cache_creation_input_tokens: 50,
-          output_tokens: 20,
-        },
-      },
-    };
-    const { receipts } = await buildUsageReceipts({
-      transcriptPath: main,
-      missionId: 'm-parity',
-      readTranscript: (p) => {
-        if (p !== main) throw new Error(`ENOENT ${p}`);
-        return JSON.stringify(entry);
-      },
-      listSubagentTranscripts: () => [],
-    });
+    // the stamp on a priced row must name the table that produced the number.
+    const { receipts } = await buildParity();
+
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].cost.pricing_version).toBe(PRICING_VERSION);
+    expect(Number.isFinite(receipts[0].cost.total)).toBe(true);
+    expect(receipts[0].cost.total).toBe(
+      priceUsage(receipts[0].usage, receipts[0].model_identity.tier).total,
+    );
+  });
+
+  it('priceReceipts:false stays "unresolved", never a date', async () => {
+    // The mirror of the test above: an unpriced row must not carry a version
+    // stamp, because a stamp would claim a table was consulted when none was.
+    const { receipts } = await buildParity({ priceReceipts: false });
 
     expect(receipts).toHaveLength(1);
     expect(receipts[0].cost).toEqual({
       total: null,
       pricing_version: PRICING_VERSION_UNRESOLVED,
     });
+    expect(receipts[0].cost.pricing_version).not.toBe(PRICING_VERSION);
   });
 });
 
