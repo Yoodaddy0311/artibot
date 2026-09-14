@@ -235,6 +235,7 @@ function recordForkPoint({ parentRoot, plan, worktreePath, limb }) {
  * @returns {Promise<{ to: string|null, limb: string, pointer: string, promptPath: string|null, briefPath: string, copied: boolean, siblings: Array<{ name: string, copied: boolean, sourcePath: string, destPath: string }>, dryRun: boolean, prompt: string, laneState: { state: string, previous: string|null, previousRaw: string|null, warning: string|null, written: boolean, ledger: string|null }, forkPoint: { value: string|null, recorded: boolean, reason: string|null, ref: string|null } }>}
  *   `laneState.previous` is the recorded word ONLY when it was in the allowlist; `previousRaw` is what was there either way, and `warning` names the gap. `ledger` is `null` on a dry run (nothing was written) — see `setLaneState` for the values.
  *   `forkPoint.ref` is which of {@link INTEGRATION_REFS} answered, `null` when none did or when the value was already recorded.
+ *   `forkPoint` is resolved FIRST so `prompt` (`base=`) and `pointer` (`(base: )`) carry it; it falls back to `plan.base` only when nothing is recorded.
  */
 export async function runDispatch(args, opts = {}) {
   if (!args.limb) throw new Error('limb is required (see --help)');
@@ -274,13 +275,22 @@ export async function runDispatch(args, opts = {}) {
   const budget = args.budget ?? (Number.isInteger(dispatchCfg.budget) && dispatchCfg.budget > 0 ? dispatchCfg.budget : DEFAULT_BUDGET);
   const parentRootOut = typeof plan.parentRoot === 'string' && plan.parentRoot ? plan.parentRoot : parentRoot;
 
+  // Resolved BEFORE the prompt/pointer are rendered: on the FIRST dispatch the
+  // in-memory plan has no `forkPoint` yet, so rendering first would always emit
+  // `plan.base` — the value `land` will NOT use. The two writes (plan.json here,
+  // brief/prompt below) are independent and both skipped on `--dry-run`, so the
+  // reordering changes only which base the window is told.
+  const forkPoint = args.dryRun
+    ? { value: forkPointForLimb(plan, row.limb), recorded: false, reason: 'dry-run' }
+    : recordForkPoint({ parentRoot, plan, worktreePath: row.worktreePath, limb: row.limb });
+
   const prompt = renderPrompt(template, {
     RUN: String(plan.runId ?? ''),
     LIMB: row.limb,
     WORKTREE_DIR: path.basename(row.worktreePath.replace(/[\\/]+$/, '')),
     WORKTREE_PATH: fwd(row.worktreePath),
     BRANCH: row.branch,
-    BASE: String(plan.base ?? ''),
+    BASE: String(forkPoint.value ?? plan.base ?? ''),
     PARENT: parent,
     PARENT_ROOT: fwd(parentRootOut),
     SLUG: toProjectSlug(parentRootOut),
@@ -292,7 +302,7 @@ export async function runDispatch(args, opts = {}) {
   });
 
   const mat = materializeLimb({
-    parentRoot, worktreePath: row.worktreePath, limb: row.limb, branch: row.branch, plan, prompt, dryRun: args.dryRun,
+    parentRoot, worktreePath: row.worktreePath, limb: row.limb, branch: row.branch, plan, prompt, forkPoint: forkPoint.value, dryRun: args.dryRun,
   });
   const to = args.window ?? windowForLimb(run, row.limb);
 
@@ -306,10 +316,6 @@ export async function runDispatch(args, opts = {}) {
     : null;
   const laneWrite = args.dryRun ? null : setLaneState({ limb: row.limb, state: 'active', window: to ?? null }, { cwd: parentRoot });
   const laneState = { state: 'active', previous, previousRaw, warning, written: !args.dryRun, ledger: laneWrite?.ledger ?? null };
-
-  const forkPoint = args.dryRun
-    ? { value: forkPointForLimb(plan, row.limb), recorded: false, reason: 'dry-run' }
-    : recordForkPoint({ parentRoot, plan, worktreePath: row.worktreePath, limb: row.limb });
 
   return {
     to, limb: row.limb, pointer: mat.pointer, promptPath: mat.promptPath, briefPath: mat.briefPath, copied: mat.copied, siblings: mat.siblings, dryRun: args.dryRun, prompt, laneState, forkPoint,
