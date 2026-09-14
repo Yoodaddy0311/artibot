@@ -24,8 +24,8 @@
     "agent_type_supply": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decision", "why"],
-      "description": "How a scenario supplies the agent name that B2, B3 and B4 all need. Recorded here rather than assumed, because `resolveModel` gates the fable tier on an agent allowlist and denylist: without an agent name it degrades to the bucket default, which is NOT the current policy, so a nameless B2 would be a control group for nothing.",
+      "required": ["decision", "why", "b4_input"],
+      "description": "How a scenario supplies the agent name that B2, B3 and B4 all need. Recorded here rather than assumed, because `resolveModel` gates the fable tier on an agent allowlist and denylist: without an agent name it degrades to the bucket default, which is NOT the current policy, so a nameless B2 would be a control group for nothing. `decision` and `why` answer WHERE the name comes from; `b4_input` answers a second, separable question - whether B4 hands that name to its CLASSIFIER - which the two of them cannot express because the same supply route was compatible with both answers.",
       "properties": {
         "decision": {
           "type": "string",
@@ -36,6 +36,28 @@
           "type": "string",
           "minLength": 1,
           "description": "The argument for that route, long enough to be re-judged. A decision with no reason rots into a convention nobody dares change."
+        },
+        "b4_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agentType", "decision", "why"],
+          "description": "Whether B4 passes the agent name into `routeModel`'s `input`, which is what decides whether its action class comes from AGENT_ACTION_CLASS or from the implement default. This is DATA rather than prose in `resolver.note` for one reason: the question was open for a while, was settled by an owner decision, and a note is not a field a schema can require - a later registry could quietly stop supplying the name and still validate, reopening a settled question with nothing going red. Keeping it required, closed and `const`-pinned means reversing the decision costs an argument, which is the correct price.",
+          "properties": {
+            "agentType": {
+              "const": true,
+              "description": "Pinned `const: true`, not `type: boolean`. B4 supplies `input.agentType`; a document that says otherwise is not recording a configuration choice, it is reversing an owner decision, and it should fail validation rather than flip a flag."
+            },
+            "decision": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Which decision settled this and when, so the reader can find the ruling rather than trust the field."
+            },
+            "why": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The argument, long enough to be re-judged against the code it describes - the same standard `agent_type_supply.why` is held to."
+            }
+          }
         }
       }
     },

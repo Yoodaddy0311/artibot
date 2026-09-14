@@ -1,10 +1,15 @@
 {
   "$schema": "./baselines.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "source": "MODEL-SWITCHING-SCORECARD.md section 11 (B0..B6, mandatory vs optional); ARTIBOT-5.0-DESIGN.md appendix 0-2 follow-up (1) G4 (B2 = resolveModel as-is)",
   "agent_type_supply": {
     "decision": "scenario.agentType",
-    "why": "resolveModel gates fable by agentType allowlist/denylist; without the agent name B2 is not the current policy. Added as an optional property to scenarios.schema.json (additionalProperties:false forced a schema edit). B2, B3, B4 MUST refuse (not score) a scenario without agentType."
+    "why": "resolveModel gates fable by agentType allowlist/denylist; without the agent name B2 is not the current policy. Added as an optional property to scenarios.schema.json (additionalProperties:false forced a schema edit). B2, B3, B4 MUST refuse (not score) a scenario without agentType. Supplying the name to a baseline and supplying it to that baseline's CLASSIFIER are two different acts: B2 and B3 take it as a positional/agent argument, while B4 reaches its classifier only through routeModel's input object, so B4's supply is recorded separately in b4_input.",
+    "b4_input": {
+      "agentType": true,
+      "decision": "owner decision 3, 2026-09-14: supply scenario.agentType to routeModel as input.agentType",
+      "why": "routeModel's resolveClassification passes only src.input to classifyAction, and classifyAction reads agentType off that object, so an omitted input.agentType makes every B4 row fall to DEFAULT_ACTION_CLASS (implement) no matter which agent the scenario names. Measured 2026-09-14 with fable.enabled=true and a 10-agent allowlist: without the input, 5 of 5 table agents scored class:default -> implement -> opus, so B4 was ranking one class for every scenario and could not differ from a fixed-class baseline on the agent axis at all. With it, planner and architect classify as architecture and code-reviewer as review. No lib/ change is involved - the input was always accepted, the registry simply was not passing it."
+    }
   },
   "baselines": [
     {
@@ -66,8 +71,8 @@
         "type": "module",
         "module": "lib/routing/adaptive-model-router.js",
         "export": "routeModel",
-        "call": "routeModel({ agentType: scenario.agentType, config }).models.recommended?.tier ?? null",
-        "note": "recommended = utility-ranked top from scoreRoutes; a null recommendation is recorded as null, never substituted with models.selected (that is B2). Read the scope narrowly: routeModel does NOT feed agentType to its classifier (it classifies from src.input only), so under this call the action class is always the default, implement. B4 as scored here is therefore the scorer's choice for the implement class within the policy ceiling that config allows this agent - policyAllowedTiers(src.agentType, ..., src.config) bounds the candidate set, so config and the agent name do reach models.recommended, but the class does not. Passing input:{agentType} instead would change which class is ranked and is a B4 DEFINITION change (inferred, so an owner decision) that would also change the call string above."
+        "call": "routeModel({ agentType: scenario.agentType, config, input: { agentType: scenario.agentType } }).models.recommended?.tier ?? null",
+        "note": "recommended = utility-ranked top from scoreRoutes; a null recommendation is recorded as null, never substituted with models.selected (that is B2). The agent name is supplied TWICE on purpose and the two arguments do different jobs: routeModel classifies from src.input only (resolveClassification hands src.input to classifyAction, which reads agentType off it), so input.agentType is what makes the action class come from AGENT_ACTION_CLASS with factors.source 'agent' instead of the implement default; the top-level agentType is what the policy ceiling reads. An agent outside that table still falls through to the default class, which is why a row must record selection source rather than assume it. The ceiling wins where they disagree - policyAllowedTiers(src.agentType, ..., src.config) bounds the candidate set before scoring, measured 2026-09-14: security-reviewer classifies as review yet is capped at opus by FABLE_DENYLIST, so B4 and B3's static table disagree on that agent. That divergence is an exposure, not a defect: B3 is the table and B4 is the table under policy, and this work does not reconcile them. Owner decision 3 (2026-09-14) fixed the INPUT, not the algorithm - routeModel plus models.recommended is still this repo's reading of a baseline the scorecard only names, so definition_confidence stays inferred."
       }
     },
     {
