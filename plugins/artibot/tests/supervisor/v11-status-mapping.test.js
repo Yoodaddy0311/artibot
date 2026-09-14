@@ -170,6 +170,12 @@ const SKIP_DIRS = new Set([
   // (15 false hits; green on CI, where no nested worktree exists). A nested
   // checkout is not the source tree.
   '.claude',
+  // Local-only audit/benchmark clones (gitignored `_benchmarks/`, untracked
+  // `_reports/`): on 2026-09-14 a cloned competitor repo under
+  // `_benchmarks/plugin-comparison-2026-09-14/omc/` carried its own
+  // `runtime-insight.test.ts` and was reported as a 'failed' emitter — the
+  // only red in a 17,364-test run. Neither directory is the source tree.
+  '_benchmarks', '_reports',
 ]);
 const SCAN_EXT = /\.(?:js|mjs|cjs|ts|mts|cts|json)$/;
 const SELF = resolve(HERE, 'v11-status-mapping.test.js');
