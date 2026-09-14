@@ -155,3 +155,162 @@ describe('HUMAN_GATE_MATRIX — 소비자가 쓰는 축', () => {
     }
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// HG-07 무제한 런 수리 — 창 폭 핀 · 경계 쌍 · 타이밍 게이트
+// ───────────────────────────────────────────────────────────────────────────
+//
+// 아래 헬퍼 3종은 `tests/autopilot/safety.test.js` 와 **형식만** 같은 자급형
+// 복사본이다. 테스트 파일끼리 import 하지 않는다 — 한쪽을 지우거나 옮기면
+// 다른 쪽이 조용히 죽고, 그 죽음은 그린으로 보인다.
+
+/**
+ * 반복 단위로 정확히 bytes 길이의 근접-비매치 payload 를 만든다.
+ * @param {string} unit @param {number} bytes @returns {string}
+ */
+function fill(unit, bytes) {
+  return unit.repeat(Math.ceil(bytes / unit.length)).slice(0, bytes);
+}
+
+/**
+ * fn 을 runs 회 돌려 경과 시간의 중앙값(ms). 단발 벽시계는 GC·스케줄러에 흔들린다.
+ * @param {() => void} fn @param {number} runs @returns {number}
+ */
+function medianMs(fn, runs) {
+  const samples = [];
+  for (let i = 0; i < runs; i += 1) {
+    const started = performance.now();
+    fn();
+    samples.push(performance.now() - started);
+  }
+  samples.sort((a, b) => a - b);
+  return samples[Math.floor(runs / 2)];
+}
+
+/** 성장 게이트의 바닥값(ms). 빠르고 선형인 규칙에서 생 비율이 튀는 것을 막는다. */
+const RATIO_FLOOR_MS = 4;
+
+/**
+ * 6배 구간의 성장 비율. 인접 2배 구간은 분해능이 없어 쓰지 않는다
+ * (근거는 safety.test.js `growth` 의 JSDoc 실측표).
+ * @param {number} numerator @param {number} denominator @returns {number}
+ */
+function growth(numerator, denominator) {
+  return (numerator + RATIO_FLOOR_MS) / (denominator + RATIO_FLOOR_MS);
+}
+
+/** HG-07 patterns[] 의 문서화된 순서. 인덱스로 집는 근거다. */
+const HG07_PATTERN_ORDER = ['curl -X', 'gh pr merge', 'git push master|main'];
+
+describe('HG-07 — 창 폭 (i) 정적 소스 핀', () => {
+  it('patterns[] 는 문서화된 3개 순서를 유지한다', () => {
+    expect(getGateRow('HG-07').patterns).toHaveLength(HG07_PATTERN_ORDER.length);
+  });
+
+  it('curl -X 규칙의 원문이 바운드된 창을 갖는다', () => {
+    const source = getGateRow('HG-07').patterns[0].source;
+    expect(source).toBe(/\bcurl\b[^\n]{0,192}\s-X\s*['"]?(?:POST|PUT|PATCH|DELETE)\b/i.source);
+    expect(source).toContain('{0,192}');
+    expect(source).not.toContain('[^\\n]*');
+  });
+
+  it('git push master|main 규칙의 원문이 바운드된 창을 갖는다', () => {
+    const source = getGateRow('HG-07').patterns[2].source;
+    expect(source).toBe(/\bgit\s+push\b[^\n]{0,192}\b(?:master|main)\b/i.source);
+    expect(source).toContain('{0,192}');
+    expect(source).not.toContain('[^\\n]*');
+  });
+});
+
+describe('HG-07 — 창 폭 경계 쌍 (192 매치 / 193 miss)', () => {
+  // curl 규칙은 토큰 앞에 자기 `\s` 를 갖는다(`[^\n]{0,192}\s-X`). 그래서 창이
+  // 덮어야 하는 것은 **공백으로 끝나지 않는** n 바이트다 — 끝이 공백이면 창과
+  // 규칙의 `\s` 가 겹쳐 경계가 한 칸 밀린다.
+  /** @param {number} n @returns {string} */
+  const filler = (n) => ` ${'x'.repeat(n - 1)}`;
+
+  // git push 규칙은 자기 `\s` 가 없고 `\b(?:master|main)\b` 가 곧바로 온다.
+  // 그래서 창이 덮는 구간이 **공백으로 끝나야** `\b` 가 선다.
+  /** @param {number} n @returns {string} */
+  const span = (n) => ` ${'x'.repeat(n - 2)} `;
+
+  it('curl: 창 192 는 HG-07, 193 은 미분류', () => {
+    expect(filler(192)).toHaveLength(192);
+    expect(ids({ tool: 'Bash', command: `curl${filler(192)} -X POST https://e.example/v1` }))
+      .toContain('HG-07');
+    expect(ids({ tool: 'Bash', command: `curl${filler(193)} -X POST https://e.example/v1` }))
+      .not.toContain('HG-07');
+  });
+
+  it('git push: 창 192 는 HG-07, 193 은 미분류', () => {
+    expect(span(192)).toHaveLength(192);
+    expect(ids({ tool: 'Bash', command: `git push${span(192)}main` })).toContain('HG-07');
+    expect(ids({ tool: 'Bash', command: `git push${span(193)}main` })).not.toContain('HG-07');
+  });
+
+  it('짧은 실제 명령은 창 폭과 무관하게 계속 걸린다 (회귀 방지)', () => {
+    expect(ids({ tool: 'Bash', command: 'curl -X POST https://api.example.com/v1/items' }))
+      .toContain('HG-07');
+    expect(ids({ tool: 'Bash', command: 'git push origin master' })).toContain('HG-07');
+  });
+});
+
+describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범위 안이다', () => {
+  // 3층 중 (ii)(iii). (i) 은 위 정적 소스 핀이고 그쪽이 정본이다.
+  //
+  // ── 실측 (node v24.15.0, Windows 11, 이 워크트리, `classify` median-of-3) ──
+  // 재현: 이 describe 를 그대로 돌리면 된다. 아래 표는 별도 프로브의 같은 호출.
+  //
+  //   수리 전 (a81ee154 `[^\n]*`, 2026-09-13T16:31Z)
+  //     fill('curl ',     n)  20,480B  64.3ms · 40,962B 260.0ms · 122,880B 1,839.8ms
+  //     fill('git push ', n)  20,480B  20.8ms · 40,962B  72.6ms · 122,880B   684.8ms
+  //     6배 구간 성장비 curl 26.99 · git push 27.78  → 임계 18 초과(2차식)
+  //   수리 후 (`[^\n]{0,192}`, 2026-09-14T00:16Z)
+  //     fill('curl ',     n)  20,480B   2.8ms · 40,962B   4.8ms · 122,880B    19.5ms
+  //     fill('git push ', n)  20,480B   2.3ms · 40,962B   3.9ms · 122,880B    10.0ms
+  //     6배 구간 성장비 curl  3.46 · git push  2.22  → 임계 18 아래
+  //
+  // 이 게이트 자신이 바운드 전 코드에서 관측한 값은 curl 31.74 · git push 28.49
+  // 였다(2026-09-13 RED 실행). 프로브 표와 숫자가 다른 것은 같은 양(2차식)을
+  // 부하가 다른 두 시점에 잰 것이기 때문이다 — 판정은 양쪽 다 같다.
+  //
+  // 절대값은 넉넉한 smoke 로만 두고 판정은 비율에 맡긴다 — 비율은 머신 속도에
+  // 거의 불변이다(safety.test.js `growth` JSDoc 의 잡음·신호 실측 참조).
+  //
+  // 못 보는 것: 이 블록은 **크기에 따라 스케일되는** 입력만 본다. 그리고 이 수치는
+  // human-gates `classify` 단독이다 — PreToolUse 훅 **전체** 경로(L1 executeChain +
+  // L2 classifyRisk + 여기)의 40,962B 총비용은 별도 실측이고, 그 값은 이 파일이
+  // 고정하지 않는다(2026-09-14T00:16Z 실측 sum: curl 24.4ms · git push 26.0ms ·
+  // dd 35.0ms · rm --opt 4.3ms, lib/core/command-segments.js 전처리 포함).
+  /** @type {[string, (n: number) => string][]} */
+  const SCALED_PAYLOADS = [
+    ['curl', (n) => fill('curl ', n)],
+    ['git push', (n) => fill('git push ', n)],
+  ];
+
+  it.each(SCALED_PAYLOADS)(
+    '%s: t(122,880) < 18 × t(20,480)',
+    (_name, build) => {
+      /** @param {number} n @returns {number} */
+      const run = (n) => {
+        const payload = build(n);
+        return medianMs(() => classify({ tool: 'Bash', command: payload }), 3);
+      };
+      const t20480 = run(20_480);
+      const t40962 = run(40_962);
+      // 회귀 시 120KB 측정으로 넘어가기 전에 여기서 빨리 실패시킨다.
+      expect(t40962).toBeLessThan(200);
+      const t122880 = run(122_880);
+      expect(growth(t122880, t20480)).toBeLessThan(18);
+    },
+    30_000,
+  );
+
+  it('payload 가 주장하는 바이트 크기로 만들어진다', () => {
+    for (const [, build] of SCALED_PAYLOADS) {
+      expect(build(20_480)).toHaveLength(20_480);
+      expect(build(40_962)).toHaveLength(40_962);
+      expect(build(122_880)).toHaveLength(122_880);
+    }
+  });
+});

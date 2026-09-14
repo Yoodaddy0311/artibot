@@ -41,12 +41,17 @@
  *                      tightening that has no evidence behind it yet, so the
  *                      owner decides. `note` states which.
  *
- * Expected values are the TARGET state after two sibling changes land:
- *   - L1 gains a pathless recursive-delete rule (`rm -rf build`).
- *   - L2 gains git-checkout-discard / git-restore-discard / git-stash-drop
- *     (danger) and rm-rf-path (caution).
- * Until then some rows are RED by design — that is the TDD red phase, not a
- * broken suite.
+ * The sibling changes those target values waited on have all landed (L1's
+ * pathless recursive-delete rule; L2's git-checkout-discard /
+ * git-restore-discard / git-stash-drop / rm-rf-path), so no row is RED by
+ * design any more. A red row now means a real disagreement.
+ *
+ * 2026-09-14 (guard-command-position) added a THIRD input to both layers:
+ * lib/core/command-segments.js#blankPrinterSegments blanks printer segments
+ * before either layer reads the text. It edits no rule regex. Twelve rows were
+ * added for it — four veto conditions, four mention wrappers, the two
+ * rm-recursive-path rows, and two residual divergences. Read the
+ * `echo "git checkout . is dangerous"` row first; it is the one that moved.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -194,11 +199,11 @@ const PARITY_MATRIX = Object.freeze([
   },
   {
     command: 'echo "git checkout . is dangerous"',
-    l1: 'block',
-    l2: 'danger',
-    l2Id: 'git-checkout-discard',
-    status: 'owner-decision',
-    note: '오탐 ① — 현재 값을 핀할 뿐 목표 값이 아니다. 명령을 **언급만** 해도 두 층 모두 차단한다(2026-09-11 실측 L1 block / L2 danger). 원인 둘이 겹친다: (1) 두 discard 규칙이 `\\s*$` 앵커를 버려 줄 안 어디서든 매치하고, (2) normalizeCommand 가 따옴표를 먼저 벗기므로 인용이 보호가 되지 않는다. 오너 결정 ②가 정리한 `grep -i "truncate"` 차단과 **같은 실패 양식**이다. 후보 설계 둘: 두 층에 명령 시작 앵커 `(?:^|[;&|]\\s*)` 를 달거나, 따옴표 구간을 매칭에서 제외하거나. 어느 쪽이든 한 층만 고치면 파리티가 깨지므로 동시 변경이어야 한다. Wave 7 `guard-command-position` 으로 큐에 올라가 있다. L1 을 느슨하게 해서 맞추지 말 것 — 이 행이 그 유혹을 막는다.',
+    l1: 'pass',
+    l2: 'safe',
+    l2Id: null,
+    status: 'agreed',
+    note: '오탐 ① **해소**(2026-09-14, guard-command-position). 종전 값은 L1 block / L2 danger 였고 owner-decision 으로 "현재 값을 핀할 뿐 목표가 아니다"라고 적혀 있었다. 명령을 언급만 하는 것은 실행이 아니다 — 이제 두 층 모두 통과한다. 수리는 규칙이 아니라 **전처리**다: `lib/core/command-segments.js#blankPrinterSegments` 가 프린터 세그먼트(echo·printf·grep·주석·`git commit -m` …)를 같은 길이로 비운 뒤 두 층이 그 텍스트를 본다. 규칙 정규식은 L1·L2 통틀어 **0건 수정**이다. 브리프가 비교한 3안 중 명령 시작 앵커와 따옴표 구간 제거는 각각 적대 67형에서 실행형 양성을 18건씩 잃어 기각됐다. 면제는 허용목록 안에서만 일어나고 파이프·치환·리다이렉트가 각각 거부권을 가지므로 fail-closed 다 — 그 네 경로의 양성 대조가 바로 아래 행들이다. L1 을 느슨하게 해서 맞춘 것이 아니라는 증거도 그 행들이다.',
   },
   {
     command: 'git stash drop',
@@ -423,6 +428,107 @@ const PARITY_MATRIX = Object.freeze([
     l2Id: 'rm-rf-root',
     status: 'agreed',
     note: '분리 플래그+절대경로 — 00:22 KST 실측 양쪽 통과. 구멍이 루트 하나가 아니라 절대경로 전반임을 고정한다.',
+  },
+
+  // ── 프린터 세그먼트 면제의 거부권 4종 (2026-09-14 추가) ────────────────────
+  // 위 `echo "git checkout . is dangerous"` 행이 pass/safe 로 올라간 것이
+  // **강등이 아니라 정확해진 것**임을 증명하는 양성 대조다. 이 네 행이 빠지면
+  // 그 행은 "언급을 통과시킨다"는 말만 남고 fail-open 과 구별되지 않는다.
+  {
+    command: 'echo "rm -rf /tmp" | sh',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'agreed',
+    note: '면제 조건 (ii) — 프린터의 출력이 파이프로 다른 프로그램에 들어가면 그것은 인쇄가 아니라 실행이다. 세그먼트 뒤에 `|` 가 있으면 면제가 거부되고 텍스트는 두 층에 바이트 그대로 도달한다(2026-09-14 실측 L1 block / L2 danger, `blankPrinterSegments` 출력이 입력과 동일).',
+  },
+  {
+    command: 'echo "$(rm -rf /tmp)"',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'agreed',
+    note: '면제 조건 (iii) — 명령 치환은 따옴표 안에서도 실행된다. 세그먼트에 `$(`·백틱·`<(`·`>(` 가 하나라도 있으면 면제가 거부된다(2026-09-14 실측). 홑따옴표 안의 `$(…)` 는 셸이 실행하지 않지만 거부 쪽으로 통일했다 — fail-closed.',
+  },
+  {
+    command: 'echo "safe" ; rm -rf /',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'agreed',
+    note: '**세그먼트 단위가 핵심인 이유.** "명령이 `/^echo /` 로 시작하면 통째로 건너뛴다" 식의 형태 정규식이었다면 이 입력은 fail-open 이었다. 면제는 `echo "safe"` 세그먼트에만 적용되고 `;` 뒤의 파괴적 세그먼트는 그대로 남는다(2026-09-14 실측: 전처리 출력이 `@@@@@@@@@@@@; rm -rf /`).',
+  },
+  {
+    command: 'echo x > /dev/sda',
+    l1: 'block',
+    l2: 'safe',
+    l2Id: null,
+    status: 'owner-decision',
+    note: '면제 조건 (iv) — unquoted 리다이렉트가 있으면 프린터가 아니다. L1 은 "write to disk device" 규칙으로 차단하고(2026-09-14 실측) 면제도 거부된다. **L2 는 대응 규칙이 없어 safe 다** — dd 파일-대-파일(`dd if=a.img of=b.img`)과 같은 종류의 open divergence 이고, 이 줄기가 만든 것이 아니라 원래 있던 것이다(전처리는 이 입력에서 no-op). 방향 규칙상 L1 block 은 L2 caution 이상을 요구하므로 agreed 가 아니다. 닫으려면 L2 에 리다이렉트-투-디바이스 규칙을 새로 넣어야 하고, 그것은 이 줄기의 범위 밖이라 오너 결정으로 남긴다.',
+  },
+  {
+    command: 'echo "rm -rf /" | sh',
+    l1: 'block',
+    l2: 'safe',
+    l2Id: null,
+    status: 'owner-decision',
+    note: '**리더 인용 교정**(2026-09-14). 이 행은 block/danger 로 지시됐으나 실측은 block/**safe** 다. 원인은 전처리가 아니다 — `blankPrinterSegments` 출력이 입력과 바이트 동일함을 확인했고(조건 ii 가 면제를 거부), 위 `/tmp` 행이 같은 모양에서 danger 다. 원인은 **L2 rm-rf-root 의 선재 결함**이다: 루트 타깃 분기가 `\\/(?:\\s|$|\\*|\\w)` 라 `/` 바로 뒤에 닫는 따옴표가 오면 어느 분기도 맞지 않는다. 규칙 단독 실측 — `rm -rf /` true · `rm -rf /"` false · `rm -rf /)` false · `rm -rf /tmp"` true. 즉 정확히 **루트 타깃 + 직후 인용부호** 한 형태이고 `echo "$(rm -rf /)"` 도 같은 원인이다. 이 줄기의 소유(전처리·언급 위치) 밖이라 고치지 않고 핀만 한다. 고칠 때는 타깃 클래스에 따옴표·괄호를 더하는 것이지 창이나 앵커를 손대는 것이 아니다.',
+  },
+  {
+    command: 'cat <<\'EOF\'\nrm -rf /\nEOF',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'owner-decision',
+    note: '**의도된 잔여 오탐.** heredoc 본문의 언급은 계속 차단된다. 전처리는 heredoc 을 해석하지 않는데, 이것은 누락이 아니라 결정이다 — 본문을 "인쇄되는 텍스트"로 보기 시작하면 `bash <<EOF` 가 통째로 사각이 된다(본문이 곧 실행되는 스크립트다). 언급 8래퍼 중 heredoc 만 종전 발화율을 유지한다(브리프 표 c 열: L1 37/39 · L2 22/22). 오너가 이 비용을 받을지가 결정 사항이라 owner-decision 이다.',
+  },
+  {
+    command: '# rm -rf /tmp/x',
+    l1: 'pass',
+    l2: 'safe',
+    l2Id: null,
+    status: 'agreed',
+    note: 'unquoted `#` 이후는 셸에서 주석이므로 실행량이 0 이다. 종전에는 두 층 모두 차단했고, 주석형은 정규화가 손댈 것이 없는데도 34/34 발화했다 — 원인이 따옴표 제거가 아니라 **앵커 부재**라는 것을 이 래퍼가 가장 깨끗하게 보여 준다(브리프 §배경 원인 순위 1차).',
+  },
+  {
+    command: "printf '%s' 'TRUNCATE users;'",
+    l1: 'pass',
+    l2: 'safe',
+    l2Id: null,
+    status: 'agreed',
+    note: '`printf` 래퍼. 아래 `TRUNCATE users;` 행과 짝이다 — 그 행은 bare 문이라 여전히 L2 danger 이고(오너 결정 ②), 이 행은 같은 문자열이 인쇄 인자일 때 통과함을 고정한다. 두 행이 함께 있어야 "전처리가 SQL 규칙을 무력화한 것 아니냐"는 물음에 답이 된다.',
+  },
+  {
+    command: 'grep -rn "DROP TABLE" .',
+    l1: 'pass',
+    l2: 'safe',
+    l2Id: null,
+    status: 'agreed',
+    note: '`grep` 래퍼. 위 `grep -n -i "truncate\\|force-with-lease" …` 행과 같은 실패 양식이었으나 그 행은 규칙을 좁혀 고쳤고 이 행은 전처리가 고친다. 규칙을 좁히는 수리는 규칙마다 반복해야 하지만 전처리는 카탈로그 전체에 한 번 적용된다 — 그 차이를 이 행이 기록한다.',
+  },
+  {
+    command: 'git commit -m "rm -rf build"',
+    l1: 'pass',
+    l2: 'safe',
+    l2Id: null,
+    status: 'agreed',
+    note: '`git commit -m` 메시지 형. 허용목록이 `git` 전체가 아니라 `commit|tag|notes` 의 `-m` 형에 한정되고 `-e`/`--exec`/`--edit` 가 있으면 거부된다는 점이 중요하다 — `git` 을 통째로 프린터로 두면 `git push --force` 가 면제된다.',
+  },
+  {
+    command: 'rm --recursive a/b/c',
+    l1: 'block',
+    l2: 'caution',
+    l2Id: 'rm-recursive-path',
+    status: 'agreed',
+    note: '리더 추가 목표 A. force 플래그 없는 재귀 삭제는 종전 L1 block / L2 **safe** 로 방향 규칙 위반이었다(2026-09-14 실측). L1 은 `rm -rf with path` 규칙의 `--recursive` 분기가 창(512) 안의 `/` 와 함께일 때 잡는다. L2 신규 규칙 `rm-recursive-path`(caution)가 그 짝을 채운다. 아래 513자 행이 창 밖 짝이다.',
+  },
+  {
+    command: `rm --recursive ${'a'.repeat(513)}/x`,
+    l1: 'pass',
+    l2: 'caution',
+    l2Id: 'rm-recursive-path',
+    status: 'owner-decision',
+    note: '리더 추가 목표 A, 창 밖 짝. 513 은 L1 `rm -rf with path` 창(`[^\\n]{0,512}`)의 첫 바깥 값이라 L1 이 approve 로 뒤집힌다 — 그 폭의 정본은 tests/core/blocked-patterns.test.js 의 경계 쌍이고 여기서 복제하지 않는다. 종전에는 L1 approve + L2 safe = **full-stack 사각**이었고 blocked-patterns.js 가 "THE ONE RESIDUAL BLIND SPOT" 으로 문서화해 둔 자리다. L2 규칙이 caution 을 채워 사각이 닫혔다. L1 pass 가 남아 있으므로 헤더 방향 규칙상 agreed 가 아니다 — 닫는 방법은 L1 창을 더 넓히는 것이 아니라(오너가 이미 그 경로를 기각했다) L2 가 받는 것이고, 이 행이 그 상태를 핀한다.',
   },
 ]);
 

@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BLOCKED_PATTERNS, CATEGORIES } from '../../lib/core/blocked-patterns.js';
-import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
+import { blankPrinterSegments } from '../../lib/core/command-segments.js';
+import {
+  executeChain, normalizeCommand, registerBuiltinGuards, resetGuards,
+} from '../../lib/core/guard-registry.js';
 
 /** 백슬래시. 리터럴로 쓰면 이스케이프 단계에서 사고가 난다. */
 const BACKSLASH = String.fromCharCode(92);
@@ -848,11 +851,27 @@ describe('blocked-patterns', () => {
       expect(match.category).toBe('system');
     });
 
-    // 따옴표 안에 있어도 block 이다. normalizeCommand 가 따옴표를 벗기므로
-    // 판정 경로가 본문을 그대로 본다. 인용문을 echo 하는 것 자체는 무해하지만
-    // 방향이 차단 쪽이라 의도된 동작으로 핀한다.
-    it('blocks the fork bomb even when it is quoted inside echo', () => {
-      expect(decisionFor(`echo '${CANONICAL}'`)).toBe('block');
+    // 계약 반전 (2026-09-14, lib/core/command-segments.js 착지).
+    // 종전에는 block 이었다 — normalizeCommand 가 따옴표를 벗기므로 판정 경로가
+    // 본문을 그대로 봤고, "방향이 차단 쪽"이라는 이유로 의도된 동작으로 핀돼
+    // 있었다. 그 핀이 실제로 만든 것은 **오탐**이다: 인용문을 echo 하는 것은
+    // 실행이 아니다. 같은 오탐이 정찰·검수 창에서 실제로 6건 작업을 막았다
+    // (2026-09-11). 이제 프린터 세그먼트 전처리가 `echo '…'` 세그먼트를 통째로
+    // 지우므로 approve 다.
+    //
+    // 완화가 아니라는 근거는 바로 아래 두 핀이다 — 인용문이 **실행 경로로
+    // 흘러가는** 두 형태(파이프·명령 치환)는 그대로 block 이다. 면제 조건
+    // (ii)(iii) 가 각각 이것을 막는다. 이 세 it 는 한 몸이니 따로 지우지 마라.
+    it('approves the fork bomb when it is only quoted inside echo', () => {
+      expect(decisionFor(`echo '${CANONICAL}'`)).toBe('approve');
+    });
+
+    it('still blocks a quoted fork bomb piped into a shell', () => {
+      expect(decisionFor(`echo '${CANONICAL}' | sh`)).toBe('block');
+    });
+
+    it('still blocks a fork bomb inside a command substitution', () => {
+      expect(decisionFor(`echo "$(${CANONICAL})"`)).toBe('block');
     });
 
     // 경계. `:` 는 셸의 no-op 이라 정상 스크립트에 흔하다.
@@ -1172,5 +1191,122 @@ describe('blocked-patterns', () => {
         expect(match).toBeUndefined();
       });
     }
+  });
+
+  // L1 전체 경로 = 전처리(blankPrinterSegments) + 원시 변형 + normalizeCommand
+  // 변형 × 39규칙. 규칙 단위 스윕은 위에 있고 여기는 **단계가 하나 늘어난 뒤의
+  // 합계**를 본다 — 전처리가 선형이어도 그것이 만든 출력이 다음 단계를 2차식으로
+  // 밀 수 있으므로 단계별 그린은 합계의 근거가 못 된다.
+  //
+  // 형식은 W7 규약(brief §타이밍 규약): 40,962B `<200ms` smoke + 20,480B →
+  // 122,880B 비율 `< 18`(3회 중앙값, 감쇠항 4ms 시프트형). 정본 게이트는 규칙
+  // 소스 정적 스캔이고 이 벽시계는 smoke 다.
+  //
+  // 이 단언이 못 보는 것: 전처리가 **없던 매치를 만들어 내는** 경우는 시간이
+  // 아니라 판정 문제라 여기서는 안 보인다 — 그건 위 포크밤 3핀과
+  // tests/core/guard-registry.test.js 의 줄바꿈·continuation 핀이 맡는다.
+  //
+  // 실측 2026-09-14 09:2x KST, node v24.15.0, Windows 11, 다른 창 동시 실행 중.
+  // 전처리 단계 단독 122,880B 중앙값(5회): 개행런 0.76 · `;`런 3.02 · `|`런 1.19
+  // · `&&`런 1.35 · `echo x; `런 13.80 · 공백런 6.08 · 따옴표스팬 5.57 · `$(`런
+  // 1.02 · 불균형따옴표 1.58 · 주석런 8.67 · continuation 1.77 ms.
+  // (분리자 런의 개행 비용은 세그먼트 레코드 재사용 전 4.07ms 였다 — 같은 프로브
+  //  a-timing.mjs 로 전/후 측정.)
+  describe('L1 full path with printer-segment preprocessing stays linear', () => {
+    beforeEach(() => {
+      resetGuards();
+      registerBuiltinGuards();
+    });
+
+    const runChain = (command) => executeChain(
+      'pre', 'Bash', { tool_name: 'Bash', tool_input: { command } },
+    );
+
+    /** `echo "aaa…"` 한 덩어리 — 따옴표 스팬 하나가 입력 전체를 덮는 모양. */
+    const oneQuotedSpan = (size) => {
+      const head = 'echo "';
+      return `${head}${'a'.repeat(Math.max(0, size - head.length - 1))}"`.slice(0, size);
+    };
+
+    const PREPROCESS_SHAPES = [
+      ['echo segment run', (size) => filler('echo x; ', size)],
+      ['space run', (size) => `echo ${' '.repeat(Math.max(0, size - 5))}`.slice(0, size)],
+      ['semicolon run', (size) => filler(';', size)],
+      ['pipe run', (size) => filler('|', size)],
+      ['and-and run', (size) => filler('&&', size)],
+      ['one long quoted span', oneQuotedSpan],
+      ['dollar-paren run', (size) => filler('$(', size)],
+      ['dollar-brace run', (size) => filler('${', size)],
+      ['unbalanced quote', (size) => `echo "${'a'.repeat(Math.max(0, size - 6))}`.slice(0, size)],
+      ['comment run', (size) => filler('# x\n', size)],
+      ['backslash continuation run', (size) => filler(`x ${BACKSLASH}\n`, size)],
+    ];
+
+    it.each(PREPROCESS_SHAPES)('builds the %s shape at the exact requested size', (_name, build) => {
+      for (const size of [20480, 40962, 122880]) {
+        expect(build(size)).toHaveLength(size);
+      }
+    });
+
+    it.each(PREPROCESS_SHAPES)('stays under 200ms at 40,962B through executeChain on a %s', (_name, build) => {
+      const input = build(40962);
+      expect(medianMs(() => runChain(input))).toBeLessThan(200);
+    });
+
+    it.each(PREPROCESS_SHAPES)('scales sub-quadratically through executeChain on a %s', (_name, build) => {
+      expectSubQuadratic(build, runChain);
+    });
+
+    // ── `$(`·`${` 런은 한때 이 표에서 빠져 있었다 (2026-09-14 이력) ──────────
+    // 두 형태는 전체 경로에서 **2차식**이었다. 원인은 전처리가 아니라
+    // `lib/core/guard-registry.js#normalizeCommand` 의 닫히지 않는 여는 토큰
+    // 처리였다: `/\$\(([^)]*)\)/g` 와 `/\$\{[^}]*\}/g` 가 여는 토큰마다 입력
+    // 끝까지 훑고 실패했다. 40,962B 에 여는 토큰이 20,481개면 그게 그대로 제곱이다.
+    // 이 줄기가 만든 회귀가 아니었다 — 전처리를 항등 함수로 둔 복제 경로에서도
+    // 같았다. 그래서 한동안 10,240B 카브아웃으로 두었다가, 리더 결정(10:1x KST)
+    // 으로 이 줄기에서 함께 고쳤다. 카브아웃은 제거됐고 두 형태는 위 표의 다른
+    // 8형과 **똑같은** 40,962B `<200ms` + 20,480→122,880 비율 `<18` 을 받는다.
+    //
+    // 실측(3회 중앙값, node v24.15.0, Windows 11), `$(` 런:
+    //   size      preprocess  normalize(전)  chain(전)   normalize(후)  chain(후)
+    //   20,480B     0.42ms       155.81ms    118.70ms       3.88ms      4.66ms
+    //   40,962B     0.13ms       580.42ms    656.77ms       8.78ms      9.93ms
+    //  122,880B     0.31ms      5917.25ms   5573.34ms      24.40ms     25.19ms
+    //   growth      0.98          37.05       45.45          3.60        3.37
+    // `${` 런 normalizeCommand growth(10,240→40,962, 4배 구간, 2차식 기대 16):
+    // 14.22 → 2.10. 손대지 않은 다른 여는 토큰은 전/후 모두 선형이다
+    // (백틱 1.06→1.05 · `"` 1.07→1.08 · `'` 1.10→1.03 · `$` 1.08→1.02 ·
+    //  `\` 1.23→1.11). 전처리 단계는 전후 모두 평평(1.04 / 0.98).
+    // 122,880B 전체 경로 절대값: 5,573ms → 25.19ms (221배).
+    it.each([
+      ['dollar-paren', '$(', ')'],
+      ['dollar-brace', '${', '}'],
+    ])('unwraps a %s body at the 192-character bound and not past it', (_name, open, close) => {
+      const inner = 'a'.repeat(192);
+      expect(normalizeCommand(`${open}${inner}${close}`)).not.toContain(open);
+      expect(normalizeCommand(`${open}${inner}a${close}`)).toContain(open);
+    });
+
+    // 바운드가 **가리는 것이 없다**는 핀. 192자를 넘는 치환 안의 위험 명령은
+    // 정규화 변형에서 `$(…)` 스펠링 그대로 남지만, checkDangerousCommand 는
+    // **원시 변형도** 대조하므로 원문에 바이트 동일하게 남아 있는 그 명령이
+    // 그대로 걸린다. 즉 바운드의 손실은 ">192자 본문의 **벗겨진** 스펠링으로만
+    // 매치될 수 있었던 규칙"에 한정되고, 방향은 정규화 변형에서 매치가 주는
+    // 쪽뿐이다. 실행형 리터럴을 소스에 남기지 않으려고 위험 문자열은 조립한다.
+    const RM = `r${'m'} -${'r'}f /`;
+    it.each([
+      ['at the bound', 192],
+      ['past the bound', 400],
+      ['far past the bound', 4096],
+    ])('still blocks a dangerous command inside a substitution %s', (_name, padding) => {
+      const command = `echo "$(${'a'.repeat(padding)}; ${RM})"`;
+      expect(runChain(command).decision).toBe('block');
+    });
+
+    it('keeps the raw variant byte-identical for an over-long substitution', () => {
+      const command = `echo "$(${'a'.repeat(400)}; ${RM})"`;
+      // 전처리는 조건 (iii) 으로 면제를 거부하므로 입력을 그대로 돌려준다.
+      expect(blankPrinterSegments(command)).toBe(command);
+    });
   });
 });

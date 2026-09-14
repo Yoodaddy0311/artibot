@@ -7,6 +7,8 @@
  * @module lib/autopilot/safety
  */
 
+import { blankPrinterSegments } from '../core/command-segments.js';
+
 /**
  * Pattern catalogue used by classifyRisk. Each entry has:
  *  - id: unique identifier
@@ -16,6 +18,11 @@
  *
  * lib/core/blocked-patterns.js (L1, PreToolUse) is the canonical block list;
  * this catalogue only grades severity on top of it and never widens what runs.
+ * That still holds after 2026-09-14, when both layers gained the SAME printer-
+ * segment preprocessing (lib/core/command-segments.js): it narrows what either
+ * layer READS, identically on both, so the two cannot drift apart through it.
+ * The rules below are matched against that preprocessed text — except the four
+ * `secret-*` rules, which classifyRisk deliberately keeps on the raw text.
  */
 export const DANGEROUS_PATTERNS = Object.freeze([
   // Owner decision 2026-09-11 ①: the lease/if-includes forms are a CHECKED
@@ -114,6 +121,50 @@ export const DANGEROUS_PATTERNS = Object.freeze([
     level: 'caution',
     test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/~*]|\$HOME\b)\S+/i,
     reason: 'recursive delete of a scoped path (blocked at PreToolUse by blocked-patterns)',
+  },
+  // Keep AFTER rm-rf-path. classifyRisk returns the FIRST caution it meets, so
+  // catalogue order — not rule precision — decides which id a command reports.
+  // Put this rule earlier and `rm -rf ./build` would start reporting
+  // 'rm-recursive-path' instead of 'rm-rf-path', silently rewriting pins in
+  // tests/autopilot/safety.test.js and the PARITY matrix.
+  //
+  // WHAT THIS CLOSES (measured 2026-09-14 through executeChain + classifyRisk,
+  // node v24.15.0): a recursive delete with NO force flag was a FULL-STACK
+  // blind spot, not a PreToolUse gap.
+  //   L1 `rm -rf with path` / `rm -fr with path` (blocked-patterns.js) need a
+  //   force flag in the combined token, and `rm recursive+force (any target)`
+  //   needs one too; only the `--recursive` long form reaches L1 at all, and
+  //   then only when a `/` sits inside its `[^\n]{0,512}` window.
+  //   L2 `rm-rf-root` needs a `/`-, `~`- or `$HOME`-leading target and
+  //   `rm-rf-path` needs a force flag.
+  // So before this rule: `rm -r ./build` L1 approve / L2 safe · `rm -R x`
+  // approve/safe · `rm --recursive <513 filler>/x` approve/safe. Only
+  // `rm --recursive a/b/c` (short path) was caught, and by L1 alone.
+  // The width half of that gap is documented in blocked-patterns.js
+  // ("THE ONE RESIDUAL BLIND SPOT") and pinned in
+  // tests/core/blocked-patterns.test.js under 'DOCUMENTED BLIND SPOT'; the
+  // owner routed the fix to this stem rather than widening the L1 window.
+  //
+  // LEVEL IS `caution`, NOT `danger`. Inside its window L1 already blocks the
+  // shape, so the direction rule (L1 block => L2 at least caution) only asks
+  // for caution; and a forceless recursive delete stops at the first
+  // write-protected file, which is a real difference from `rm -rf`.
+  //
+  // SHAPE = rm-rf-path minus the force lookahead. It carries NO window, so it
+  // is out of the static scanner's scope by construction and must NOT appear
+  // in the boundary-pair set (`hasBoundedWindow` is what keeps those two
+  // assertions honest). The tail `\S+` and the nested `(?:\s+--?\w[\w-]*)*`
+  // are the scanner's blind spots #2 and #3 — the `rm option run` scaled
+  // payload and the `--opt` x26/40 probe in safety.test.js cover that place
+  // instead, and both run whole classifyRisk, so they pick this rule up for
+  // free. The option token must stay `--?\w[\w-]*` for the same reason
+  // rm-rf-root gives above: a shape that lets `--opt` split two ways
+  // backtracks 2^n.
+  {
+    id: 'rm-recursive-path',
+    level: 'caution',
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/~*]|\$HOME\b)\S+/i,
+    reason: 'recursive delete of a scoped path without a force flag (L1 blocks it inside its 512-char window; this closes the full-stack gap past it)',
   },
   // Owner decision 2026-09-11 ③: L1 (blocked-patterns.js `dd\s+if=`, category
   // 'disk') blocks every dd invocation, so an L2 verdict of 'safe' broke the
@@ -294,9 +345,20 @@ export function classifyRisk(toolCall) {
   const text = probeText(toolCall);
   if (!text) return { level: 'safe', reason: 'empty payload' };
 
+  // Printer-segment preprocessing, shared with L1 (lib/core/command-segments.js,
+  // 2026-09-14): `echo "…"`, `# …`, `printf`, `grep`, `git commit -m` segments
+  // are blanked before grading, so a pure mention is no longer danger. It is
+  // segment-level and allowlist-only (fail-closed): `echo x; rm -rf /` keeps
+  // its `rm -rf /`, and a pipe / `$(…)` / redirect out of a printer vetoes the
+  // exemption. The four `secret-*` rules deliberately read the RAW text —
+  // echoing a secret still leaks it. Heredoc bodies and `$(…)` are never
+  // blanked (intended residual over-grading).
+  const scanned = blankPrinterSegments(text);
+
   let cautionHit = null;
   for (const rule of DANGEROUS_PATTERNS) {
-    if (rule.test.test(text)) {
+    const subject = rule.id.startsWith('secret-') ? text : scanned;
+    if (rule.test.test(subject)) {
       if (rule.level === 'danger') {
         return { level: 'danger', reason: rule.reason, matchedId: rule.id };
       }
