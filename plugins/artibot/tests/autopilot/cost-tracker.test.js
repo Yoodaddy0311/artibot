@@ -152,11 +152,32 @@ describe('getSessionCost', () => {
     expect(summary.budgetUsage).toBeNull();
   });
 
-  it('returns budgetUsage with percent when state.options.budget > 0', () => {
+  // F03: the legacy `options.budget` is TOKENS, not dollars. 10 here is a
+  // 10-token limit, so 4 tokens of traffic is 40% — the 2.5 USD spent
+  // alongside it has no limit to be measured against and stays null.
+  it('reads the legacy options.budget as a TOKEN limit', () => {
     const m = makeStore({ sessionId: 'ap-7', options: { budget: 10 } });
-    recordPhaseUsage('ap-7', 'EXECUTE', { costUsd: 2.5 }, m.opts);
+    recordPhaseUsage('ap-7', 'EXECUTE', { tokensIn: 3, tokensOut: 1, costUsd: 2.5 }, m.opts);
     const summary = getSessionCost('ap-7', m.opts);
-    expect(summary.budgetUsage).toEqual({ limit: 10, used: 2.5, percent: 25 });
+    expect(summary.budgetUsage.tokens).toEqual({ limit: 10, used: 4, percent: 40 });
+    expect(summary.budgetUsage.usd).toBeNull();
+    expect(summary.budgetUsage.usageKnown).toBe(true);
+    expect(summary.budgetUsage.source).toBe('budget-compat');
+  });
+
+  it('measures USD spend against options.budgetUsd', () => {
+    const m = makeStore({ sessionId: 'ap-7b', options: { budgetUsd: 10 } });
+    recordPhaseUsage('ap-7b', 'EXECUTE', { costUsd: 2.5 }, m.opts);
+    const summary = getSessionCost('ap-7b', m.opts);
+    expect(summary.budgetUsage.usd).toEqual({ limit: 10, used: 2.5, percent: 25 });
+    expect(summary.budgetUsage.tokens).toBeNull();
+  });
+
+  it('reports usage as unknown when no usage was ever recorded', () => {
+    const m = makeStore({ sessionId: 'ap-7c', options: { budgetTokens: 10 } });
+    const summary = getSessionCost('ap-7c', m.opts);
+    expect(summary.budgetUsage.usageKnown).toBe(false);
+    expect(summary.budgetUsage.tokens).toEqual({ limit: 10, used: null, percent: null });
   });
 
   it('returns budgetUsage:null when budget = 0', () => {
@@ -170,15 +191,13 @@ describe('getSessionCost', () => {
 describe('checkBudgetThreshold', () => {
   it('returns empty result when sessionId or limit is missing/invalid', () => {
     const m = makeStore({ sessionId: 'ap-9' });
-    expect(checkBudgetThreshold('', { limitUsd: 10, ...m.opts })).toEqual({
-      crossed: null, used: 0, percent: 0,
-    });
-    expect(checkBudgetThreshold('ap-9', { limitUsd: 0, ...m.opts })).toEqual({
-      crossed: null, used: 0, percent: 0,
-    });
-    expect(checkBudgetThreshold('ap-9', { limitUsd: -5, ...m.opts })).toEqual({
-      crossed: null, used: 0, percent: 0,
-    });
+    const empty = {
+      crossed: null, unit: null, used: 0, percent: 0, byUnit: { tokens: null, usd: null }, usageKnown: false,
+    };
+    expect(checkBudgetThreshold('', { limitUsd: 10, ...m.opts })).toEqual(empty);
+    // No limit in opts and none in state.options → nothing to measure against.
+    expect(checkBudgetThreshold('ap-9', { limitUsd: 0, ...m.opts })).toEqual(empty);
+    expect(checkBudgetThreshold('ap-9', { limitUsd: -5, ...m.opts })).toEqual(empty);
   });
 
   it('crosses 50% boundary exactly once', () => {
@@ -245,9 +264,27 @@ describe('renderCostBlock', () => {
       totalTokens: 1000,
       totalCostUsd: 2.5,
       perPhase: [{ phase: 'EXECUTE', tokensIn: 500, tokensOut: 500, costUsd: 2.5 }],
-      budgetUsage: { limit: 10, used: 2.5, percent: 25 },
+      budgetUsage: {
+        tokens: null, usd: { limit: 10, used: 2.5, percent: 25 }, usageKnown: true, source: 'none', measuredAt: null,
+      },
     });
     expect(md).toContain('**Budget**: $2.5000 / $10.0000 (25%)');
+  });
+
+  it('shows both units on the Budget row when both limits are set', () => {
+    const md = renderCostBlock({
+      totalTokens: 1000,
+      totalCostUsd: 2.5,
+      perPhase: [{ phase: 'EXECUTE', tokensIn: 500, tokensOut: 500, costUsd: 2.5 }],
+      budgetUsage: {
+        tokens: { limit: 2000, used: 1000, percent: 50 },
+        usd: { limit: 10, used: 2.5, percent: 25 },
+        usageKnown: true,
+        source: 'budgetTokens',
+        measuredAt: null,
+      },
+    });
+    expect(md).toContain('**Budget**: 1.0k / 2.0k tokens (50%) | $2.5000 / $10.0000 (25%)');
   });
 });
 
@@ -266,9 +303,11 @@ describe('renderCostInline', () => {
       perPhase: [
         { phase: 'INTAKE', tokensIn: 12000, tokensOut: 2000, costUsd: 0.23 },
       ],
-      budgetUsage: { limit: 5, used: 0.23, percent: 4.6 },
+      budgetUsage: {
+        tokens: null, usd: { limit: 5, used: 0.23, percent: 4.6 }, usageKnown: true, source: 'none', measuredAt: null,
+      },
     });
-    expect(line).toContain('cost: $0.2300 / $5.0000 (4.6%)');
+    expect(line).toContain('budget: $0.2300 / $5.0000 (4.6%)');
     expect(line).toContain('INTAKE 12.0k/2.0k');
   });
 

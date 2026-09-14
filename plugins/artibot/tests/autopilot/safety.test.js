@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  budgetExceeded,
   classifyRisk,
   DANGEROUS_PATTERNS,
   parseDuration,
@@ -1454,5 +1455,72 @@ describe('shouldPause', () => {
   it('does not trigger at testFailures 4', () => {
     const state = { counters: { buildFailures: 0, testFailures: 4 } };
     expect(shouldPause(state)).toBe(false);
+  });
+
+  // F03 — the budget is documented in tokens; before this branch existed the
+  // limit was compared against USD spend and never fired.
+  const budgetState = (tokens, options) => ({
+    counters: { buildFailures: 0, testFailures: 0 },
+    options,
+    usage: { totals: { tokensIn: tokens, tokensOut: 0, costUsd: 0 }, phases: {} },
+  });
+
+  it('triggers when the token budget is exhausted', () => {
+    const state = budgetState(2_100_000, { budgetTokens: 2_000_000 });
+    expect(budgetExceeded(state)).toBe(true);
+    expect(shouldPause(state)).toBe(true);
+    expect(pauseReason(state)).toBe('budget-exceeded');
+  });
+
+  it('treats exactly 100% as exhausted', () => {
+    const state = budgetState(2_000_000, { budgetTokens: 2_000_000 });
+    expect(shouldPause(state)).toBe(true);
+    expect(pauseReason(state)).toBe('budget-exceeded');
+  });
+
+  it('does not trigger below the token limit', () => {
+    const state = budgetState(1_999_999, { budgetTokens: 2_000_000 });
+    expect(shouldPause(state)).toBe(false);
+    expect(pauseReason(state)).toBeNull();
+  });
+
+  it('reads a legacy options.budget as tokens', () => {
+    const state = budgetState(2_100_000, { budget: 2_000_000 });
+    expect(shouldPause(state)).toBe(true);
+    expect(pauseReason(state)).toBe('budget-exceeded');
+  });
+
+  it('triggers on an exhausted USD budget independently of tokens', () => {
+    const state = {
+      counters: { buildFailures: 0, testFailures: 0 },
+      options: { budgetTokens: 2_000_000, budgetUsd: 60 },
+      usage: { totals: { tokensIn: 10, tokensOut: 0, costUsd: 61 }, phases: {} },
+    };
+    expect(shouldPause(state)).toBe(true);
+    expect(pauseReason(state)).toBe('budget-exceeded');
+  });
+
+  it('never pauses when usage was never measured', () => {
+    const state = { counters: { buildFailures: 0, testFailures: 0 }, options: { budgetTokens: 2_000_000 } };
+    expect(budgetExceeded(state)).toBe(false);
+    expect(shouldPause(state)).toBe(false);
+    expect(pauseReason(state)).toBeNull();
+  });
+
+  it('never pauses when no budget is configured', () => {
+    const state = budgetState(9_999_999, {});
+    expect(shouldPause(state)).toBe(false);
+  });
+
+  it('keeps the higher-priority reasons ahead of the budget branch', () => {
+    const state = budgetState(2_100_000, { budgetTokens: 2_000_000 });
+    state.counters.buildFailures = 3;
+    expect(pauseReason(state)).toBe('build-failures-threshold');
+  });
+
+  it('ranks the budget branch ahead of a recorded danger error', () => {
+    const state = budgetState(2_100_000, { budgetTokens: 2_000_000 });
+    state.errors = [{ severity: 'danger', kind: 'rm-rf' }];
+    expect(pauseReason(state)).toBe('budget-exceeded');
   });
 });

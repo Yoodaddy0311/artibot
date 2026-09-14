@@ -469,6 +469,156 @@ export function parseDuration(input) {
   return value * mult;
 }
 
+const BUDGET_UNKNOWN = Object.freeze({
+  tokens: null, usd: null, known: false, source: null, measuredAt: null,
+});
+
+/**
+ * Coerce a value into a positive finite limit, or null.
+ * Strings are rejected on purpose: a limit that arrived as text means the
+ * caller never parsed it, and silently coercing hides that bug.
+ * @param {unknown} n
+ * @returns {number|null}
+ */
+function positiveLimit(n) {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Resolve the session's budget limits into explicit units.
+ *
+ * `options.budget` is the legacy field. `commands/autopilot.md` documents it as
+ * `--budget <tokens>`, so it is read AS TOKENS here — that is the documented
+ * contract, and the USD reading it used to get was the bug (F03). This compat
+ * read is non-destructive and scheduled for removal one release after
+ * `budgetTokens` ships; this function is the only place in the plugin that
+ * reads `options.budget`.
+ *
+ * `budgetUsd` is an independent second limit, not a conversion of the first.
+ *
+ * @param {object|null|undefined} options - state.options
+ * @returns {{budgetTokens:number|null, budgetUsd:number|null,
+ *            source:'budgetTokens'|'budget-compat'|'none'}}
+ */
+export function normalizeBudget(options) {
+  const o = options && typeof options === 'object' ? options : {};
+  const canonical = positiveLimit(o.budgetTokens);
+  const legacy = canonical === null ? positiveLimit(o.budget) : null;
+  const budgetTokens = canonical !== null ? canonical : legacy;
+  const source = canonical !== null ? 'budgetTokens'
+    : (legacy !== null ? 'budget-compat' : 'none');
+  return { budgetTokens, budgetUsd: positiveLimit(o.budgetUsd), source };
+}
+
+/**
+ * Read what the session has actually consumed, distinguishing "zero" from
+ * "not measured". An unmeasured session returns `known:false` with every
+ * number null — never 0, because a 0 that means "no telemetry yet" reads as
+ * "plenty of budget left" and is exactly how an exhausted run keeps going.
+ *
+ * @param {object|null|undefined} state
+ * @returns {{tokens:number|null, usd:number|null, known:boolean,
+ *            source:string|null, measuredAt:string|null}}
+ */
+export function readUsage(state) {
+  if (!state || typeof state !== 'object') return { ...BUDGET_UNKNOWN };
+  const usage = state.usage && typeof state.usage === 'object' ? state.usage : null;
+  const totals = usage && usage.totals && typeof usage.totals === 'object' ? usage.totals : null;
+  const counter = Number(state.tokenUsage);
+  const counterKnown = Number.isFinite(counter) && counter > 0;
+  if (!totals && !counterKnown) return { ...BUDGET_UNKNOWN };
+
+  const totalsIn = Number(totals?.tokensIn);
+  const totalsOut = Number(totals?.tokensOut);
+  const fromTotals = (Number.isFinite(totalsIn) ? totalsIn : 0)
+    + (Number.isFinite(totalsOut) ? totalsOut : 0);
+  const fromCounter = counterKnown ? counter : 0;
+  const tokens = Math.max(fromTotals, fromCounter);
+  const costUsd = Number(totals?.costUsd);
+  const phases = usage && usage.phases && typeof usage.phases === 'object' ? usage.phases : {};
+  const stamps = Object.values(phases)
+    .map((p) => (p && typeof p.lastTs === 'string' ? p.lastTs : null))
+    .filter((ts) => ts !== null)
+    .sort();
+  return {
+    tokens,
+    usd: totals && Number.isFinite(costUsd) ? costUsd : null,
+    known: true,
+    source: fromCounter > fromTotals ? 'tokenUsage' : 'usage.totals',
+    measuredAt: stamps[stamps.length - 1]
+      ?? (typeof state.updatedAt === 'string' ? state.updatedAt : null),
+  };
+}
+
+/**
+ * Round a ratio to a one-decimal percentage.
+ * @param {number} used
+ * @param {number} limit
+ * @returns {number}
+ */
+function pct(used, limit) {
+  return Math.round((used / limit) * 1000) / 10;
+}
+
+/**
+ * Build one `{unit, limit, used, percent, exceeded}` block, or null when the
+ * unit has no limit configured.
+ * @param {'tokens'|'usd'} unit
+ * @param {number|null} limit
+ * @param {number|null} used
+ * @returns {{unit:string, limit:number, used:number|null, percent:number|null, exceeded:boolean}|null}
+ */
+function unitBlock(unit, limit, used) {
+  if (limit === null) return null;
+  if (used === null || !Number.isFinite(used)) {
+    return {
+      unit, limit, used: null, percent: null, exceeded: false,
+    };
+  }
+  return {
+    unit, limit, used, percent: pct(used, limit), exceeded: used >= limit,
+  };
+}
+
+/**
+ * Budget status per unit.
+ *
+ * `exceeded` is `used >= limit`, not `>`: the documented contract is
+ * "초과 시 pause", and a run that has consumed exactly its allowance has
+ * nothing left to spend. Treating exhaustion as a pause is the fail-closed
+ * reading — the failure mode of the strict `>` reading is a run that keeps
+ * spending forever at exactly 100%.
+ *
+ * With `usageKnown:false` no unit is ever `exceeded` — an unmeasured session
+ * is unknown, not safe, and the caller decides what to do about that
+ * (the engine's budget gate emits a `budget-usage-unknown` warning).
+ *
+ * @param {object} state
+ * @returns {{tokens:object|null, usd:object|null, usageKnown:boolean,
+ *            source:string, measuredAt:string|null}}
+ */
+export function budgetStatus(state) {
+  const { budgetTokens, budgetUsd, source } = normalizeBudget(state?.options);
+  const usage = readUsage(state);
+  return {
+    tokens: unitBlock('tokens', budgetTokens, usage.known ? usage.tokens : null),
+    usd: unitBlock('usd', budgetUsd, usage.known ? usage.usd : null),
+    usageKnown: usage.known,
+    source,
+    measuredAt: usage.measuredAt,
+  };
+}
+
+/**
+ * True when any configured budget unit is exhausted.
+ * @param {object} state
+ * @returns {boolean}
+ */
+export function budgetExceeded(state) {
+  const status = budgetStatus(state);
+  return status.tokens?.exceeded === true || status.usd?.exceeded === true;
+}
+
 /**
  * Decide whether the autopilot session should be paused.
  * Triggers per PRD section 5.5:
@@ -476,6 +626,7 @@ export function parseDuration(input) {
  *  - test failures >= 5
  *  - context usage > 85%
  *  - duration exceeded options.maxDuration
+ *  - budget exhausted in any configured unit (F03)
  *
  * @param {object} state - Session state
  * @returns {boolean}
@@ -497,6 +648,8 @@ export function shouldPause(state) {
     const started = Date.parse(state.createdAt);
     if (Number.isFinite(started) && Date.now() - started > maxDur) return true;
   }
+
+  if (budgetExceeded(state)) return true;
 
   // Runtime feeder: severity-tagged errors are written by engine-state.js
   // #recordRiskEvent, which the Bash PreToolUse risk guard
@@ -526,6 +679,7 @@ export function pauseReason(state) {
     const started = Date.parse(state.createdAt);
     if (Number.isFinite(started) && Date.now() - started > maxDur) return 'max-duration-exceeded';
   }
+  if (budgetExceeded(state)) return 'budget-exceeded';
   if (Array.isArray(state.errors) && state.errors.some((e) => e?.severity === 'danger')) return 'danger-error-recorded';
   return 'unknown';
 }
