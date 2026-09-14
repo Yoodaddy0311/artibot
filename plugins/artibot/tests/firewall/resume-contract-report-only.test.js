@@ -7,7 +7,8 @@
  * steps whose names are all verbs — "Restore Task Graph", "Find expired worker
  * leases", "Reconcile Ledger". Every one of those names is one keystroke away
  * from the write that Shadow forbids: `getLease` sits beside `claimTask` on the
- * same store object (`lib/project-state/state-manager.js:430` and `:432`), and
+ * same store object (`lib/project-state/state-manager.js:430` and `:432`,
+ * measured 2026-09-14), and
  * `reconcile` repairs the snapshot the moment it is handed `apply: true`
  * (`lib/project-state/reconcile.js:51`, the `if (drifted && opts.apply === true)`
  * branch). A controller that took one of those turns would still return a
@@ -73,10 +74,13 @@ const MISSION = 'm-1';
 const NOW_MS = Date.parse('2026-09-14T12:00:00.000Z');
 
 /**
- * The five state-changing bindings on the StateStore
- * (`state-manager.js:187`, `:432`, `:433`, `:434`, `:435`). None may be called.
+ * The five state-changing bindings on the StateStore, measured 2026-09-14 at
+ * `lib/project-state/state-manager.js:431-435` (`buildStoreApi`) — every write
+ * the store exposes, and none of them may be called. They sit immediately
+ * below the three read bindings this controller does use (`:428-430`), which
+ * is the whole reason the gate exists.
  */
-const WRITE_PORTS = Object.freeze(['save', 'claimTask', 'releaseTask', 'heartbeatWorker', 'appendEvent']);
+const WRITE_PORTS = Object.freeze(['updateMission', 'claimTask', 'releaseTask', 'heartbeatWorker', 'appendEvent']);
 
 /** Tokens that would mean the module reached for I/O or a clock of its own. */
 const FORBIDDEN_TOKENS = Object.freeze([

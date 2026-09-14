@@ -94,6 +94,74 @@ function stepOf(report, step) {
   return report.steps.find((s) => s.step === step);
 }
 
+/**
+ * @param {object} over - Fields to overlay on the base checkpoint.
+ * @returns {Function} A `latestValid` fake returning that checkpoint.
+ */
+function withCheckpoint(over) {
+  return async () => ({
+    ok: true,
+    record: { checkpoint_id: 'cp-1', ts: 't', checkpoint: { ...CHECKPOINT, ...over } },
+    errors: [],
+  });
+}
+
+/**
+ * One fixture per declared reason, so the emitted set can be compared against
+ * the declared set in both directions. A declared reason that no fixture
+ * provokes is either dead vocabulary or an untested branch, and a reason that
+ * appears in a report without being declared is invisible to every reviewer
+ * who reads only the constant — the equality below catches both.
+ * @type {ReadonlyArray<{name: string, over: object}>}
+ */
+const REASON_FIXTURES = Object.freeze([
+  { name: 'nothing stored', over: { latestValid: async () => ({ ok: false, record: null, errors: [] }) } },
+  {
+    name: 'stored but invalid',
+    over: { latestValid: async () => ({ ok: false, record: null, errors: ['plan_revision: must be an integer >= 0'] }) },
+  },
+  { name: 'no latestValid port at all', over: { latestValid: null } },
+  {
+    name: 'a record that carries no checkpoint',
+    over: { latestValid: async () => ({ ok: true, record: { checkpoint_id: 'cp-1', ts: 't' }, errors: [] }) },
+  },
+  { name: 'mission absent', over: { getMission: () => null } },
+  { name: 'intent revision mismatch', over: { getMission: () => ({ ...MISSION_RECORD, intent: { revision: 7 } }) } },
+  { name: 'plan revision mismatch', over: { getMission: () => ({ ...MISSION_RECORD, plan: { revision: 9 } }) } },
+  { name: 'task graph absent', over: { getTaskGraph: () => null } },
+  {
+    name: 'active task absent from the graph',
+    over: {
+      latestValid: withCheckpoint({ active_tasks: ['T-9'] }),
+      getTaskGraph: () => ({ schema_version: 1, mission_id: MISSION, tasks: [{ id: 'T-1' }] }),
+    },
+  },
+  { name: 'active task carrying no id', over: { latestValid: withCheckpoint({ active_tasks: [{ status: 'open' }] }) } },
+  {
+    name: 'expired lease',
+    over: {
+      getTaskGraph: () => ({ schema_version: 1, mission_id: MISSION, tasks: [{ id: 'T-1' }] }),
+      getLease: () => ({ owner: 'w-1', expires_at: '2026-09-14T10:00:00.000Z' }),
+      isLeaseExpired: () => true,
+    },
+  },
+  { name: 'no clock', over: { now: null } },
+  {
+    name: 'a lease the adapter refuses to judge',
+    over: {
+      getTaskGraph: () => ({ schema_version: 1, mission_id: MISSION, tasks: [{ id: 'T-1' }] }),
+      getLease: () => ({ owner: 'w-1' }),
+      isLeaseExpired: () => { throw new TypeError('lease adapter: expires_at must be a non-empty ISO-8601 string'); },
+    },
+  },
+  {
+    name: 'ledger drift with gaps and an extra version',
+    over: { reconcile: () => ({ ...RECONCILE_CLEAN, ok: false, drifted: true, gaps: [3], extraInStore: [5] }) },
+  },
+  { name: 'reconcile throwing', over: { reconcile: () => { throw new Error('journal unreadable'); } } },
+  { name: 'no model resolves', over: { resolveModel: () => null } },
+]);
+
 describe('report shape', () => {
   it('returns exactly the nine reportable steps, never a step 10', async () => {
     const report = await buildResumeReport(makePorts(), { missionId: MISSION });
@@ -122,6 +190,15 @@ describe('report shape', () => {
     expect(values.length).toBeGreaterThan(0);
     expect(values.every((v) => v.startsWith('reconcile:'))).toBe(true);
     expect(Object.isFrozen(RESUME_BLOCK_REASONS)).toBe(true);
+  });
+
+  it(`emits every one of the ${Object.keys(RESUME_BLOCK_REASONS).length} declared reasons, and nothing undeclared`, async () => {
+    const emitted = new Set();
+    for (const fixture of REASON_FIXTURES) {
+      const report = await buildResumeReport(makePorts(fixture.over), { missionId: MISSION });
+      for (const reason of report.blocked_by) emitted.add(reason);
+    }
+    expect([...emitted].sort()).toEqual(Object.values(RESUME_BLOCK_REASONS).sort());
   });
 
   it('resumes only when nothing blocks and the checkpoint says resumable', async () => {
