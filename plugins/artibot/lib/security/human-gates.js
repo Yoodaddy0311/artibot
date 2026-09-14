@@ -179,14 +179,38 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     // unbounded `[^\n]*` — the same "<word> <anything> <token>" shape that made
     // the L2 dd/curl/wget/git-push rules quadratic — and this matrix sits on
     // the same PreToolUse path (probe 'command', tools Bash) but outside both
-    // regex catalogues, so the W7 static scan never saw it. Measured before the
-    // bound on `'curl '.repeat(n)` / `'git push '.repeat(n)` (see
-    // tests/security/human-gates.test.js for the numbers and the gate). Bounded
-    // to `{0,192}` like the 4.60.0 convention. WHAT IT GIVES UP: a `-X POST` or
-    // a `main` more than 192 characters into the command is not classified.
-    // This matrix records, it does not block, so the loss is observability.
-    // Gate: tests/autopilot/safety.test.js scans this matrix as its third
-    // catalogue; tests/security/human-gates.test.js pins 192/193 boundary pairs.
+    // regex catalogues, so the W7 static scan never saw it. Bounded to
+    // `{0,192}`, the 4.60.0 convention shared with the L2 dd/curl/wget/git-push
+    // rules.
+    //
+    // MEASURED — `classify({tool:'Bash', command})`, median of 3, node v24.15.0,
+    // Windows 11. Payload is the near-miss filler `'curl '` / `'git push '`
+    // repeated to the byte size, which is the shape that makes the run quadratic
+    // (every occurrence of the head word rescans the rest of the line):
+    //                      20,480B    40,962B     122,880B   growth(6x)
+    //   before  curl         64.3ms    260.0ms    1,839.8ms      26.99
+    //   before  git push     20.8ms     72.6ms      684.8ms      27.78
+    //   after   curl          2.8ms      4.8ms       19.5ms       3.46
+    //   after   git push      2.3ms      3.9ms       10.0ms       2.22
+    // Whole PreToolUse path at 40,962B after the bound (L1 executeChain + L2
+    // classifyRisk + this classify, printer-segment preprocessing included):
+    // 24.4ms curl, 26.0ms git push, 35.0ms dd, 4.3ms `rm --opt`.
+    //
+    // WHAT IT GIVES UP: a `-X POST` or a `main` more than 192 characters into
+    // the command is no longer classified. This matrix RECORDS, it does not
+    // block (see the Observe contract at the top of this file), so what is lost
+    // is observability, not safety — nothing that used to be blocked stops
+    // being blocked. The two `[^\n]*` runs left in HG-11 are deliberate: they
+    // are `^`-anchored, so there is one match start and the run stays linear
+    // (measured 0.54ms at 122,880B). The exemption is registered by exact
+    // pattern source in the selfcheck below, not inferred from the anchor.
+    //
+    // GATES: tests/autopilot/safety.test.js scans this matrix as its third
+    // catalogue (`findUnboundedRuns`, the 192 ceiling);
+    // tests/firewall/human-gate-matrix-selfcheck.test.js section G is the cheap
+    // structural pin plus the exemption registry;
+    // tests/security/human-gates.test.js pins the 192/193 boundary pairs, the
+    // exact pattern sources, and the growth ratio, and carries the same table.
     patterns: Object.freeze([
       /\bcurl\b[^\n]{0,192}\s-X\s*['"]?(?:POST|PUT|PATCH|DELETE)\b/i,
       /\bgh\s+pr\s+merge\b/i,

@@ -258,14 +258,30 @@ describe('HG-07 — 창 폭 경계 쌍 (192 매치 / 193 miss)', () => {
 describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범위 안이다', () => {
   // 3층 중 (ii)(iii). (i) 은 위 정적 소스 핀이고 그쪽이 정본이다.
   //
-  // 실측(node v24.15.0, 이 창, median-of-3):
-  //   수리 전  classify  fill('curl ')      20,480B  64.3ms / 40,962B 260.0ms / 122,880B 1,839.8ms
-  //            classify  fill('git push ')  20,480B  20.8ms / 40,962B  72.6ms / 122,880B   684.8ms
-  //   수리 후  classify  fill('curl ')      20,480B   0.9ms / 40,962B   1.8ms / 122,880B     5.6ms
-  //            classify  fill('git push ')  20,480B   0.6ms / 40,962B   1.2ms / 122,880B     3.5ms
-  // 수리 전 성장비는 curl 26.98 · git push 27.79 로 임계 18 을 넘는다(2차식).
+  // ── 실측 (node v24.15.0, Windows 11, 이 워크트리, `classify` median-of-3) ──
+  // 재현: 이 describe 를 그대로 돌리면 된다. 아래 표는 별도 프로브의 같은 호출.
+  //
+  //   수리 전 (a81ee154 `[^\n]*`, 2026-09-13T16:31Z)
+  //     fill('curl ',     n)  20,480B  64.3ms · 40,962B 260.0ms · 122,880B 1,839.8ms
+  //     fill('git push ', n)  20,480B  20.8ms · 40,962B  72.6ms · 122,880B   684.8ms
+  //     6배 구간 성장비 curl 26.99 · git push 27.78  → 임계 18 초과(2차식)
+  //   수리 후 (`[^\n]{0,192}`, 2026-09-14T00:16Z)
+  //     fill('curl ',     n)  20,480B   2.8ms · 40,962B   4.8ms · 122,880B    19.5ms
+  //     fill('git push ', n)  20,480B   2.3ms · 40,962B   3.9ms · 122,880B    10.0ms
+  //     6배 구간 성장비 curl  3.46 · git push  2.22  → 임계 18 아래
+  //
+  // 이 게이트 자신이 바운드 전 코드에서 관측한 값은 curl 31.74 · git push 28.49
+  // 였다(2026-09-13 RED 실행). 프로브 표와 숫자가 다른 것은 같은 양(2차식)을
+  // 부하가 다른 두 시점에 잰 것이기 때문이다 — 판정은 양쪽 다 같다.
+  //
   // 절대값은 넉넉한 smoke 로만 두고 판정은 비율에 맡긴다 — 비율은 머신 속도에
   // 거의 불변이다(safety.test.js `growth` JSDoc 의 잡음·신호 실측 참조).
+  //
+  // 못 보는 것: 이 블록은 **크기에 따라 스케일되는** 입력만 본다. 그리고 이 수치는
+  // human-gates `classify` 단독이다 — PreToolUse 훅 **전체** 경로(L1 executeChain +
+  // L2 classifyRisk + 여기)의 40,962B 총비용은 별도 실측이고, 그 값은 이 파일이
+  // 고정하지 않는다(2026-09-14T00:16Z 실측 sum: curl 24.4ms · git push 26.0ms ·
+  // dd 35.0ms · rm --opt 4.3ms, lib/core/command-segments.js 전처리 포함).
   /** @type {[string, (n: number) => string][]} */
   const SCALED_PAYLOADS = [
     ['curl', (n) => fill('curl ', n)],
