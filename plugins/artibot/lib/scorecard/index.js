@@ -26,12 +26,15 @@
  */
 
 export {
+  AVOIDED_SWITCH_REASONS,
   COST_TERMS,
   DECISION_TYPES,
   ROUTING_KIND,
   buildRoutingScorecard,
+  classifyAvoidedReason,
   comparableTiers,
   divergedTier,
+  foldAvoidedSwitches,
   foldCostTerms,
 } from './routing-scorecard.js';
 
