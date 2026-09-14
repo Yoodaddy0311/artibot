@@ -175,10 +175,22 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     policyRef: 'policy:autopilot.safety.blockExternalSend',
     probe: 'command',
     tools: Object.freeze(['Bash']),
+    // WINDOW BOUND (ReDoS, 2026-09-14). The curl and git-push runs were
+    // unbounded `[^\n]*` — the same "<word> <anything> <token>" shape that made
+    // the L2 dd/curl/wget/git-push rules quadratic — and this matrix sits on
+    // the same PreToolUse path (probe 'command', tools Bash) but outside both
+    // regex catalogues, so the W7 static scan never saw it. Measured before the
+    // bound on `'curl '.repeat(n)` / `'git push '.repeat(n)` (see
+    // tests/security/human-gates.test.js for the numbers and the gate). Bounded
+    // to `{0,192}` like the 4.60.0 convention. WHAT IT GIVES UP: a `-X POST` or
+    // a `main` more than 192 characters into the command is not classified.
+    // This matrix records, it does not block, so the loss is observability.
+    // Gate: tests/autopilot/safety.test.js scans this matrix as its third
+    // catalogue; tests/security/human-gates.test.js pins 192/193 boundary pairs.
     patterns: Object.freeze([
-      /\bcurl\b[^\n]*\s-X\s*['"]?(?:POST|PUT|PATCH|DELETE)\b/i,
+      /\bcurl\b[^\n]{0,192}\s-X\s*['"]?(?:POST|PUT|PATCH|DELETE)\b/i,
       /\bgh\s+pr\s+merge\b/i,
-      /\bgit\s+push\b[^\n]*\b(?:master|main)\b/i,
+      /\bgit\s+push\b[^\n]{0,192}\b(?:master|main)\b/i,
     ]),
     existingCoverage: Object.freeze([
       'lib/autopilot/safety.js DANGEROUS_PATTERNS id="curl-external" (level=caution — 차단 아님)',

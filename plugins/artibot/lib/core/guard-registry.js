@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BLOCKED_PATTERNS } from './blocked-patterns.js';
+import { blankPrinterSegments } from './command-segments.js';
 import { extractFilePath, isArtibotRepo, isSkippablePath, matchesPathPattern } from './hook-utils.js';
 
 // -------------------------------------------------------------------------
@@ -333,8 +334,20 @@ function checkDangerousCommand(ctx) {
   const command = ctx.toolInput?.command || '';
   if (!command) return null;
 
-  const normalized = normalizeCommand(command);
-  const variants = [command, normalized];
+  // Printer-segment preprocessing (lib/core/command-segments.js, 2026-09-14):
+  // segments whose command word can only print or match its arguments
+  // (`echo "…"`, `# …`, `printf`, `grep`, `git commit -m`) are blanked BEFORE
+  // the rules run, so a pure mention no longer blocks. Same length as the raw
+  // command, newlines kept, so every `[^\n]{0,N}` window and newline boundary
+  // in BLOCKED_PATTERNS keeps its meaning. Segment-level is what keeps it
+  // fail-closed: `echo "safe" ; rm -rf /` still reaches the rules as `rm -rf /`,
+  // and a pipe, a `$(…)`, or a redirect out of a printer vetoes the exemption.
+  // NOT blanked (still blocked on mention): heredoc bodies, `$(…)`/backticks,
+  // printers outside the allowlist (`logger`, `cat`). safeOverrides and the
+  // reason text keep reading the RAW command.
+  const scanned = blankPrinterSegments(command);
+  const normalized = normalizeCommand(scanned);
+  const variants = [scanned, normalized];
 
   for (const { pattern, label, safeOverrides } of BLOCKED_PATTERNS) {
     for (const variant of variants) {

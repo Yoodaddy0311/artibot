@@ -7,6 +7,8 @@
  * @module lib/autopilot/safety
  */
 
+import { blankPrinterSegments } from '../core/command-segments.js';
+
 /**
  * Pattern catalogue used by classifyRisk. Each entry has:
  *  - id: unique identifier
@@ -338,9 +340,20 @@ export function classifyRisk(toolCall) {
   const text = probeText(toolCall);
   if (!text) return { level: 'safe', reason: 'empty payload' };
 
+  // Printer-segment preprocessing, shared with L1 (lib/core/command-segments.js,
+  // 2026-09-14): `echo "…"`, `# …`, `printf`, `grep`, `git commit -m` segments
+  // are blanked before grading, so a pure mention is no longer danger. It is
+  // segment-level and allowlist-only (fail-closed): `echo x; rm -rf /` keeps
+  // its `rm -rf /`, and a pipe / `$(…)` / redirect out of a printer vetoes the
+  // exemption. The four `secret-*` rules deliberately read the RAW text —
+  // echoing a secret still leaks it. Heredoc bodies and `$(…)` are never
+  // blanked (intended residual over-grading).
+  const scanned = blankPrinterSegments(text);
+
   let cautionHit = null;
   for (const rule of DANGEROUS_PATTERNS) {
-    if (rule.test.test(text)) {
+    const subject = rule.id.startsWith('secret-') ? text : scanned;
+    if (rule.test.test(subject)) {
       if (rule.level === 'danger') {
         return { level: 'danger', reason: rule.reason, matchedId: rule.id };
       }
