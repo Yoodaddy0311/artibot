@@ -469,6 +469,28 @@ export function missionMutator(missionId, title, revision) {
 }
 
 /**
+ * Raise a mission row's `plan.revision`. PRESERVING, not replacing — same
+ * rationale as {@link missionMutator}: `title`, `status`, `intent`, `controller`
+ * and `blocked_by` survive, because a plan write says nothing about them.
+ * THE ONLY CODE THAT RAISES `plan.revision`. Before this, nothing did — measured
+ * 2026-09-14: the two production `updateMission` callers ({@link
+ * recordMissionState}, `intent-observe-pre.js#promote`) both pass {@link
+ * missionMutator}, which only ever SEEDS `plan` at revision 1. EXPORTED for
+ * `scripts/hooks/_plan-observe-record.js` rather than duplicated there: a copy
+ * would be a second definition of what a mission row is.
+ *
+ * @param {string} missionId mission the row belongs to
+ * @param {number} revision the NEW revision (`validateMission`: integer >= 1)
+ * @returns {(current: object|null) => object} mutator for `updateMission`
+ */
+export function planRevisionMutator(missionId, revision) {
+  return (current) => ({
+    ...(current ?? {}),
+    plan: { path: `missions/${missionId}/plan.md`, revision },
+  });
+}
+
+/**
  * Open the StateStore for this prompt, with every port bound.
  *
  * EXTRACTED from {@link recordMissionState} to keep that function inside the

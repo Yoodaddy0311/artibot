@@ -1609,7 +1609,7 @@ plugins/artibot/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 72개 훅 스크립트 파일 (.js 64 + .mjs 6, ESM, file-lock 포함)
+│   ├── hooks/                   # 73개 훅 스크립트 파일 (.js 64 + .mjs 6, ESM, file-lock 포함)
 │   ├── ci/                      # 20개 CI 검증 스크립트 (.js 18 + .mjs 2)
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
