@@ -16,7 +16,7 @@ import { generatePRD } from './prd-generator.js';
 import { generateReport } from './report-generator.js';
 import { parseGoalContract } from './prd-parser.js';
 import { runPhaseGoalEvaluate } from './goal-loop.js';
-import { acquireSessionKeepAwake, buildCostWarningInstruction, buildTuiInstruction, makeInitialState, maybeDangerNote, notePhaseCost, notePhaseProgress, persist, recordPhase, releaseSessionKeepAwake, tick } from './_engine-helpers.js';
+import { acquireSessionKeepAwake, buildCostWarningInstruction, buildTuiInstruction, checkBudgetGate, makeInitialState, maybeDangerNote, notePhaseCost, notePhaseProgress, persist, recordPhase, releaseSessionKeepAwake, tick } from './_engine-helpers.js';
 import { loadSession } from './session-store.js';
 import { pauseReason, shouldPause } from './safety.js';
 import {
@@ -45,6 +45,7 @@ import { journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './ph
  * @returns {object|null} pause instruction or null
  */
 function maybePause(state) {
+  checkBudgetGate(state, 'dispatch'); // observability only — shouldPause below owns the budget-exceeded decision
   if (!shouldPause(state)) return null;
   const reason = pauseReason(state) || 'safety-trigger';
   if (state.phase && state.phase !== 'PAUSED') {
@@ -292,6 +293,26 @@ function buildDynamicRunInstruction(state) {
 }
 
 /**
+ * Standard EXECUTE instruction. `--no-team` (`options.team === false`) keeps the ADR-003 name
+ * `team-create` (vocabulary, not a literal team); the BODY orders a solo run, zero `Agent()` spawns.
+ * @param {object} state
+ * @returns {object}
+ */
+function buildStandardTeamInstruction(state) {
+  const solo = state?.options?.team === false;
+  if (solo) tick(state.sessionId, { phase: 'EXECUTE', type: 'solo-execution', level: 'info', message: 'Phase 2 EXECUTE 단독 실행 (--no-team) — teammate 스폰 없음', data: { reason: 'team-disabled' } });
+  return { type: 'team-create', phase: 'EXECUTE', sessionId: state.sessionId, nextPhase: 'CROSS_CHECK', ...(solo ? { execution: 'solo' } : {}),
+    instructions: [
+      `Autopilot 세션 ${state.sessionId} Phase 2.`,
+      solo ? '단독 실행 — Agent() teammate 스폰 0. 리더가 Phase 1 의 작업 단위를 순차로 직접 수행.' : 'Agent(name=…) 로 병렬 teammate 를 생성하고 Phase 1 의 작업 단위를 분배.',
+      `${solo ? '리더는' : '각 teammate 는'} 본 작업 디렉토리만 수정. 외부 송신/destructive action 금지.`,
+      'WIP commit 30분 주기. checkpoint SHA 를 session.checkpoints 에 기록.',
+    ],
+    teamHint: solo ? { parallel: false, leadAgent: 'main', solo: true, reason: 'team-disabled' } : { parallel: true, leadAgent: 'orchestrator' },
+  };
+}
+
+/**
  * Phase 2 — Execute: instruction to spin up a parallel team, or (when the
  * session opted into the deterministic runner via `--runner dynamic`) a
  * harness Workflow-tool run. Default path is byte-identical to the legacy
@@ -379,19 +400,7 @@ export function runPhase2Execute(state) {
   });
   notePhaseProgress(state, 'PLAN', 'EXECUTE');
   const instruction = runner === 'dynamic-run' ? buildDynamicRunInstruction(state) : fast?.enabled
-    ? buildFastTeamInstruction(state, fast) : {
-    type: 'team-create',
-    phase: 'EXECUTE',
-    sessionId: state.sessionId,
-    nextPhase: 'CROSS_CHECK',
-    instructions: [
-      `Autopilot 세션 ${state.sessionId} Phase 2.`,
-      'Agent(name=…) 로 병렬 teammate 를 생성하고 Phase 1 의 작업 단위를 분배.',
-      '각 teammate 는 본 작업 디렉토리만 수정. 외부 송신/destructive action 금지.',
-      'WIP commit 30분 주기. checkpoint SHA 를 session.checkpoints 에 기록.',
-    ],
-    teamHint: { parallel: true, leadAgent: 'orchestrator' },
-  };
+    ? buildFastTeamInstruction(state, fast) : buildStandardTeamInstruction(state);
   if (fast && !fast.enabled) instruction.fast = fast;
   if (worktreePath) {
     instruction.worktreePath = worktreePath;
@@ -857,6 +866,7 @@ function settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt) {
       attemptId: reconciled.attempt.attemptId,
       ackedBy: 'resume-operator',
     });
+    checkBudgetGate(state, 'ack');
     tick(sessionId, {
       phase: reconciled.attempt.phase,
       type: 'attempt-acknowledged',

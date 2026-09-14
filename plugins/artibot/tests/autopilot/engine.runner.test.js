@@ -25,6 +25,7 @@ import {
 import { planFastExecution, resolveFastCpuCount } from '../../lib/autopilot/fast-execution.js';
 import { recordPhaseResult } from '../../lib/autopilot/engine-state.js';
 import { deleteSessionArtifacts, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
+import { readEvents } from '../../lib/autopilot/telemetry.js';
 
 function gitAvailable() {
   try {
@@ -236,6 +237,9 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(inst.teamHint).toEqual({ parallel: true, leadAgent: 'orchestrator' });
     // Stage 1 contract: default instruction carries no runner field (unchanged shape).
     expect(inst.runner).toBeUndefined();
+    // …and no `execution` marker either: the solo body is `--no-team` only.
+    expect(inst.execution).toBeUndefined();
+    expect(inst.instructions.join('\n')).toContain('Agent(name=…)');
   });
 
   it('should emit a dynamic-run instruction when runner="dynamic"', async () => {
@@ -477,6 +481,58 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(inst.fast.worktreePlan).toBeUndefined();
     // Both eligible tasks are serialized under the interlock, not silently kept.
     expect(inst.fast.serial.map((entry) => entry.taskId).sort()).toEqual(['api', 'ui']);
+    // Demoting the fan-out is only half the interlock. This test used to stop at
+    // `type`+`fast`, and a green here still shipped an instruction whose BODY
+    // ordered `Agent(name=…)` parallel spawns with `teamHint.parallel:true` —
+    // i.e. the engine demoted FAST and then told the driver to build a team
+    // anyway. The body is the half that decides whether teammates appear.
+    expect(inst.execution).toBe('solo');
+    expect(inst.teamHint.parallel).toBe(false);
+  });
+
+  it('should return a single main execution instruction for team:false (no fast)', async () => {
+    const r = await start({
+      task: 'runner test team-disabled-standard',
+      mode: 'default',
+      options: { team: false },
+      sessionId: uniqueId('team-disabled-standard'),
+    });
+    track(r.sessionId);
+    const state = loadSession(r.sessionId);
+    runPhase1Plan(state);
+    const inst = runPhase2Execute(state);
+
+    // ADR-003 runner vocabulary is a contract: `team-create` is a runner NAME.
+    // `--no-team` changes the body, never the type (autopilot.md:330).
+    expect(inst.type).toBe('team-create');
+    expect(inst.nextPhase).toBe('CROSS_CHECK');
+    expect(inst.execution).toBe('solo');
+    expect(inst.teamHint).toEqual({ parallel: false, leadAgent: 'main', solo: true, reason: 'team-disabled' });
+
+    const text = inst.instructions.join('\n');
+    expect(text).not.toContain('Agent(name=');
+    expect(text).toContain('단독');
+    // The solo body drops none of the standing rules the team body carried.
+    expect(text).toContain('외부 송신/destructive action 금지');
+    expect(text).toContain('checkpoint SHA');
+
+    // The instruction shape alone is invisible to `:status`; the reason code has
+    // to reach telemetry or an operator cannot tell a solo run from a team run
+    // that spawned nobody.
+    const solo = readEvents(r.sessionId).filter((e) => e.type === 'solo-execution');
+    expect(solo).toHaveLength(1);
+    expect(solo[0]).toMatchObject({ phase: 'EXECUTE', level: 'info', data: { reason: 'team-disabled' } });
+  });
+
+  it('should leave the dynamic-run instruction unchanged under team:false', async () => {
+    // A Workflow-tool run has no teammates by construction, so there is nothing
+    // for `--no-team` to disable — the solo marker must not leak onto it.
+    const inst = await phase2Instruction({ team: false, runner: 'dynamic' }, 'team-disabled-dynamic');
+
+    expect(inst.type).toBe('dynamic-run');
+    expect(inst.runner).toBe('dynamic-run');
+    expect(inst.execution).toBeUndefined();
+    expect(inst.teamHint).toBeUndefined();
   });
 
   it('should persist requested, eligible, planned, and worktree fast telemetry in session state', async () => {
