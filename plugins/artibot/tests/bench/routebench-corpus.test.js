@@ -462,6 +462,42 @@ describe('postconditionViolations() — the gate, and controls proving it discri
     expect(postconditionViolations('')).toEqual([]);
     expect(postconditionViolations(undefined)).toEqual([]);
   });
+
+  it('catches every control byte except LF, so the gate is not "anything goes"', () => {
+    // LF is the only control character a corpus may contain: the extractor
+    // writes one per row and nothing else. Each of these is asserted on its own
+    // so that widening the class later shows up here rather than silently.
+    for (const code of [0x09, 0x00, 0x1b, 0x0b, 0x0c]) {
+      const ch = String.fromCharCode(code);
+      expect(postconditionViolations(`{"a":1}${ch}`), `0x${code.toString(16)}`)
+        .toContain('non-ascii');
+    }
+    expect(postconditionViolations('{"a":1}\n')).toEqual([]);
+  });
+
+  it('REJECTS a CR, which is why the corpora carry -text in .gitattributes', () => {
+    // This is a deliberate strictness, not an oversight, and it is the assertion
+    // that failed on Windows CI on 2026-09-14: `actions/checkout` with
+    // core.autocrlf=true rewrote the LF-only blobs to CRLF, and the gate fired
+    // on bytes the blob never contained. The fix is at the checkout, not here -
+    // `.gitattributes` marks the corpus glob `-text`, the same treatment the
+    // repo already gives reports/SPLIT ndjson and the UserPromptSubmit fixture.
+    //
+    // Loosening this predicate to tolerate CR would have made CI green by
+    // deleting the only check that can tell a mangled checkout from an intact
+    // one, and the corpus is EVIDENCE: a re-extraction must compare byte for
+    // byte against the tracked file. Note the runner's `corpusViolations`
+    // legitimately tolerates CRLF - it splits on /\r?\n/ and asserts on parsed
+    // values, a different contract from this byte-level post-condition.
+    // A two-row corpus rendered the way an autocrlf checkout renders it. `clean`
+    // is one line with no newline of its own, so the file body is built first
+    // and only then re-rendered - replacing on `clean` alone would be a no-op
+    // and the assertion would prove nothing.
+    const body = `${clean}\n${clean}\n`;
+    expect(postconditionViolations(body)).toEqual([]);
+    expect(postconditionViolations(body.replace(/\n/g, '\r\n'))).toEqual(['non-ascii']);
+    expect(postconditionViolations(`${clean}\r\n`)).toEqual(['non-ascii']);
+  });
 });
 
 describe('extractCorpus() — filtering, ordering and the denominator', () => {

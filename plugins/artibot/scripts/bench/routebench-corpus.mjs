@@ -63,6 +63,14 @@
  * loses IEEE-754 representation noise and nothing else - no value measured had
  * more than two meaningful decimals.
  *
+ * CR IS REJECTED TOO
+ *
+ * CR (0x0D) is rejected as well - corpora are LF-only by policy, pinned `-text`
+ * in the root `.gitattributes` so an autocrlf checkout cannot rewrite them (the
+ * 2026-09-14 Windows CI red was exactly that, before the pin); the fix belongs
+ * at the checkout, never in the predicate, which is the only thing that can
+ * tell a mangled checkout from an intact one. See `postconditionViolations`.
+ *
  * @module scripts/bench/routebench-corpus
  */
 
@@ -313,6 +321,7 @@ export function scrubRow(event, labels) {
  * tests strings, while a 17-digit float literal is a 17-character hex run in
  * the bytes that get committed. The stricter reading is the one worth
  * asserting, because the file is what a reader and a future gate will see.
+ * CR is rejected too - see "CR IS REJECTED TOO" in the module header.
  *
  * @param {string} text
  * @returns {string[]} violation codes
