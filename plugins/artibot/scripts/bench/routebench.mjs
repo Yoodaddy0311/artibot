@@ -49,6 +49,13 @@
  * names the policy and the baseline registry it was scored under. A file that
  * does not is not comparable with another one.
  *
+ * `b4_input` records the other half of that: which fields B4 handed the
+ * classifier, `{ agentType: true }` since owner decision 3 (2026-09-14).
+ * A results file written BEFORE that decision is not comparable with one
+ * written after it - B4 then classified every row as `default`/`implement`
+ * rather than from the agent's own class, and `baselines_sha256` differs too
+ * because the B4 `call` string in the baselines registry changed with it.
+ *
  * OFFLINE BY CONSTRUCTION
  *
  * No network module is imported and no request is issued - a firewall test
@@ -88,6 +95,15 @@ const METRICS_NOTE = [
   'measures no metric, so metrics_measured is always empty and',
   'metrics_requested is the scenario\'s outstanding list, not a result.',
 ].join(' ');
+
+/**
+ * Which fields B4 hands `routeModel` as CLASSIFIER input, recorded in every
+ * envelope. A flag map rather than a list because the question a reader has is
+ * "was agentType supplied?", and a boolean answers it without the reader
+ * having to know how the array is ordered. Frozen and serialized as-is, so the
+ * field changes only when this constant does - see the B4 resolver comment.
+ */
+const B4_INPUT_FIELDS = Object.freeze({ agentType: true });
 
 /**
  * Baseline resolvers, keyed by the `<module>#<export>` pair the baselines
@@ -147,17 +163,25 @@ const MODULE_RESOLVERS = {
   // config-dependent. Measured 2026-09-13: the ceiling for `planner` is
   // ['opus'] with no config and ['opus', 'fable'] with the loaded one.
   //
-  // What B4 records is nonetheless the scorer's pick for the DEFAULT action
-  // class: `routeModel` classifies from `src.input` and never forwards
-  // `src.agentType`, so every scenario this runner feeds it lands on
-  // `implement`. Read B4 as "top-ranked tier for the implement class, within
-  // the ceiling the loaded policy allows this agent" - not as a judgement about
-  // the agent's own work. The config dependence is invisible only because
-  // `implement` ranks opus first in both ceilings; asking the same router for
-  // the `architecture` class returns fable with the loaded config and opus
-  // without it.
+  // The agent name is supplied TWICE, on purpose, because the router reads it
+  // in two unrelated places. `agentType` at the top level reaches only
+  // `policyAllowedTiers` (the ceiling above). The CLASS comes from
+  // `src.input`: `resolveClassification` spreads `src.input` into
+  // `classifyAction`, which maps `input.agentType` through AGENT_ACTION_CLASS.
+  // Passing the top-level field alone leaves `src.input` empty and every row
+  // classifies as `default` -> `implement`, which is a class no live caller
+  // produces: `scripts/hooks/route-observe-pre.js` passes `input: {agentType}`.
+  // Owner decision 3, 2026-09-14: B4 supplies it, and `lib/` is not touched.
+  //
+  // THE CEILING STILL BEATS THE CLASS. Measured in this worktree 2026-09-14:
+  // `security-reviewer` classifies as `review` (source `agent`) exactly like
+  // `code-reviewer`, yet recommends opus where code-reviewer recommends fable,
+  // because FABLE_DENYLIST keeps fable out of its candidate set. A B4 row is
+  // therefore "top-ranked tier for this agent's own action class, within the
+  // ceiling the loaded policy allows it" - never the class's pick on its own.
+  // That is B3, and the two differing is the divergence B4 exists to show.
   'lib/routing/adaptive-model-router.js#routeModel': (agentType, config) => {
-    const receipt = routeModel({ agentType, config });
+    const receipt = routeModel({ agentType, config, input: { agentType } });
     return {
       tier: receipt.models.recommended?.tier ?? null,
       source: classSource(receipt.reason),
@@ -171,12 +195,13 @@ const MODULE_RESOLVERS = {
  * reason code and exposes that signal in no other field, so the reason array is
  * the only place it can be read from.
  *
- * Recording it is the point rather than a detail: `routeModel` classifies from
- * `input.input`, NEVER from `input.agentType` (see `resolveClassification`), so
- * B4's class is the `default` fallback for every scenario this runner feeds it.
- * The agent name still reaches `models.recommended` - through
- * `policyAllowedTiers`, which bounds the candidate set - but it never reaches
- * the CLASS, and the class is what the scorer ranks within that set.
+ * It is still recorded now that B4 supplies `input: {agentType}`, because the
+ * supply does not guarantee a match: `classifyAction` maps only the agents in
+ * AGENT_ACTION_CLASS, and anything outside that table falls back to source
+ * `default` / class `implement`. A fallback row and a genuine agent-table hit
+ * are the same tier whenever both land on opus, so without this field the two
+ * are indistinguishable - which is exactly the confusion that made every row
+ * look scored before the supply landed.
  *
  * @param {unknown} reason - the receipt's `reason` array
  * @returns {string|null} signal name, or null when no `class:` code is present
@@ -578,6 +603,7 @@ export async function runRouteBench(opts) {
     baselines_schema_version: baselines.schema_version ?? null,
     baselines_sha256: baselinesSha,
     policy_source: policySource(config),
+    b4_input: B4_INPUT_FIELDS,
     metrics_note: METRICS_NOTE,
     rows,
     summary: summarize(rows),

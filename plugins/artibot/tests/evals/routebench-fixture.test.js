@@ -30,6 +30,10 @@
  *     equal `scenarios.schema.json#/properties/baselines/items/enum`. Two files
  *     naming baselines independently is exactly how B5 ends up meaning two
  *     different things.
+ *  8. Owner decision 3 (2026-09-14) - B4 feeds `scenario.agentType` to
+ *     `routeModel` as `input.agentType` - is recorded as REQUIRED data at
+ *     `agent_type_supply.b4_input`, not only as prose in a note, so a later
+ *     registry edit cannot drop the decision and still validate.
  *
  * What this file does NOT see
  * ---------------------------
@@ -54,6 +58,10 @@
  *    like a measurement.
  *  - **Scenario coverage.** Nothing here asserts that any scenario actually
  *    lists B3 or B4. `scenarios.example.jsonl` is not edited by this work.
+ *  - **Whether the runner actually passes `input.agentType`.** Item 8 pins the
+ *    DECLARATION in the registry; whether executing code honours it is
+ *    `routebench-runner.test.js`. A registry that says `b4_input.agentType:
+ *    true` and a runner that omits the field would both be green here.
  *
  * Why ajv rather than the hand-rolled subset validator in
  * `nl-activation-fixture.test.js:176-266`: that validator covers no
@@ -183,6 +191,9 @@ describe('baselines.schema.json - the schema itself', () => {
     expect(baselineSchema.properties.baselines.items.$ref).toBe('#/definitions/baseline');
     expect(baselineSchema.definitions.baseline.additionalProperties).toBe(false);
     expect(baselineSchema.properties.agent_type_supply.additionalProperties).toBe(false);
+    expect(
+      baselineSchema.properties.agent_type_supply.properties.b4_input.additionalProperties,
+    ).toBe(false);
     for (const branch of baselineSchema.definitions.resolver.oneOf) {
       expect(branch.additionalProperties, branch.properties.type.const).toBe(false);
     }
@@ -206,7 +217,11 @@ describe('baselines.json - validates and matches the scorecard', () => {
 
   it('points $schema at the sibling schema file', () => {
     expect(baselines.$schema).toBe('./baselines.schema.json');
-    expect(baselines.schema_version).toBe(1);
+    // Bumped 1 -> 2 when `agent_type_supply.b4_input` became a REQUIRED
+    // sub-object. The schema's own `schema_version` description says the
+    // number moves when the SHAPE changes, and adding a required property is
+    // a shape change - a registry written against v1 is no longer valid.
+    expect(baselines.schema_version).toBe(2);
   });
 
   it('carries exactly B0..B6, each once', () => {
@@ -232,6 +247,45 @@ describe('baselines.json - validates and matches the scorecard', () => {
     expect(baselines.source).toContain('MODEL-SWITCHING-SCORECARD.md');
     expect(baselines.agent_type_supply.decision).toBe('scenario.agentType');
     expect(baselines.agent_type_supply.why.length).toBeGreaterThan(80);
+  });
+
+  it('records the B4 input decision as data, not only as prose', () => {
+    // Owner decision 3 (2026-09-14) settled a question the earlier note left
+    // open: B4 supplies `scenario.agentType` to `routeModel` as
+    // `input.agentType`. It lives in a REQUIRED sub-object rather than only
+    // inside `why`, so a later registry edit cannot drop the decision while
+    // still validating - which is exactly how a settled question reopens
+    // itself silently.
+    const b4Input = baselines.agent_type_supply.b4_input;
+    expect(b4Input.agentType).toBe(true);
+    expect(typeof b4Input.decision).toBe('string');
+    expect(b4Input.decision.length).toBeGreaterThan(0);
+    expect(b4Input.why.length).toBeGreaterThan(80);
+  });
+
+  it('feeds agentType into B4 as input.agentType and still reads models.recommended', () => {
+    // Two claims, both needed. The first is the decision: the agent name now
+    // reaches the classifier, so the action class comes from
+    // AGENT_ACTION_CLASS instead of the implement default. The second is that
+    // only the INPUT moved - B4 is still `models.recommended`, not
+    // `models.selected` (that is B2).
+    const call = byId.get('B4').resolver.call;
+    expect(call).toContain('input: { agentType: scenario.agentType }');
+    expect(call).toContain('models.recommended');
+  });
+
+  it('keeps B4 inferred and says the decision fixed the input, not the algorithm', () => {
+    // `exact` means transcribed from the source document. Owner decision 3
+    // named the input; it did not write B4's algorithm into the scorecard, so
+    // `routeModel(...).models.recommended` remains this repo's reading and
+    // the confidence field must not be upgraded on the strength of a decision
+    // about something else.
+    const b4 = byId.get('B4');
+    expect(b4.definition_confidence).toBe('inferred');
+    expect(b4.resolver.note).toContain('decision 3');
+    expect(b4.resolver.note).toContain('2026-09-14');
+    expect(b4.resolver.note).toContain('not the algorithm');
+    expect(b4.resolver.note).toContain('inferred');
   });
 
   it('labels B3 and B4 as inferred and the rest as exact', () => {
@@ -374,6 +428,36 @@ describe('baselines.schema.json - negative controls', () => {
   it('rejects an unexpected top-level property', () => {
     const doc = clone(baselines);
     doc.score = 0.9;
+    expect(validator(doc)).toBe(false);
+  });
+
+  it('rejects agent_type_supply with b4_input removed', () => {
+    // `b4_input` is in `agent_type_supply.required` for this control alone: a
+    // decision that a document may simply omit is a convention, and a future
+    // registry would drop it without anything going red.
+    const doc = clone(baselines);
+    delete doc.agent_type_supply.b4_input;
+    expect(validator(doc)).toBe(false);
+  });
+
+  it('rejects b4_input.agentType flipped to false', () => {
+    // The field is `const: true`, not `type: boolean`. Flipping it would mean
+    // B4 stopped being fed the agent name - a reversal of owner decision 3,
+    // which is an argument to be had in the note, not a boolean edit. This
+    // control also proves draft-07 `const` actually compiles under ajv 6,
+    // which is the only validator this gate runs.
+    const doc = clone(baselines);
+    doc.agent_type_supply.b4_input.agentType = false;
+    expect(validator(doc)).toBe(false);
+  });
+
+  it('rejects an unknown key inside b4_input', () => {
+    // The sub-object is closed for the same reason the rest of the schema is:
+    // a typo-ed key would sit in the fixture asserting nothing. `role` is the
+    // realistic typo - it is a routeModel input that a scenario deliberately
+    // does NOT carry.
+    const doc = clone(baselines);
+    doc.agent_type_supply.b4_input.role = 'crosscheck';
     expect(validator(doc)).toBe(false);
   });
 });

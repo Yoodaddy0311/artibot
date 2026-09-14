@@ -134,7 +134,7 @@ const BASELINES = {
         type: 'module',
         module: 'lib/routing/adaptive-model-router.js',
         export: 'routeModel',
-        call: 'routeModel({ agentType: scenario.agentType, config }).models.recommended?.tier ?? null',
+        call: 'routeModel({ agentType: scenario.agentType, config, input: { agentType: scenario.agentType } }).models.recommended?.tier ?? null',
       },
     },
     {
@@ -304,7 +304,9 @@ describe('routebench runner - scoring a present fixture', () => {
     expect(row(report, 'synthetic-case', 'B3').selection.tier)
       .toBe(ACTION_CLASS_TIERS[classifyAction({ agentType: 'planner' }).actionClass]);
     expect(row(report, 'synthetic-case', 'B4').selection.tier)
-      .toBe(routeModel({ agentType: 'planner', config: CONFIG }).models.recommended?.tier ?? null);
+      .toBe(routeModel({
+        agentType: 'planner', config: CONFIG, input: { agentType: 'planner' },
+      }).models.recommended?.tier ?? null);
 
     expect(row(report, 'synthetic-case', 'B0').selection.resolver).toBe('constant');
     expect(row(report, 'synthetic-case', 'B2').selection.resolver).toBe('module');
@@ -361,6 +363,19 @@ describe('routebench runner - scoring a present fixture', () => {
     });
     expect(report.baselines_sha256).toBe(sha256Of(baselinesPath));
     expect(readResults(out, 'synthetic').policy_source).toEqual(report.policy_source);
+
+    // The second half of "which policy answered": policy_source names the gate,
+    // b4_input names what B4 was ASKED. A file that records the gate but not
+    // the question is not comparable with one written under the other supply,
+    // and the two cannot be told apart by tier alone (they agree on opus for
+    // every agent the ceiling pins there). Adjacent by design.
+    expect(report.b4_input).toEqual({ agentType: true });
+    const onDisk = readResults(out, 'synthetic');
+    expect(onDisk.b4_input).toEqual({ agentType: true });
+    const keys = Object.keys(onDisk);
+    expect(keys.indexOf('b4_input')).toBe(keys.indexOf('policy_source') + 1);
+    expect(Object.keys(report).indexOf('b4_input'))
+      .toBe(Object.keys(report).indexOf('policy_source') + 1);
   });
 
   it('refuses rather than scoring when a resolver returns no tier', () => {
@@ -397,6 +412,75 @@ describe('routebench runner - scoring a present fixture', () => {
       .toBe(classifyAction({ agentType: 'no-such-agent-xyz' }).factors.source);
     expect(unknown.selection.source).not.toBe('agent');
     expect(unknown.selection.tier).toBe(ACTION_CLASS_TIERS.implement);
+  });
+
+  /** @returns {object} the B4 baseline entry from the local contract */
+  function b4Baseline() {
+    return BASELINES.baselines.find((b) => b.id === 'B4');
+  }
+
+  /**
+   * B4 as the runner now asks it: agentType supplied as classifier input.
+   *
+   * @param {string} agentType
+   * @returns {object} RouteReceipt
+   */
+  function b4Receipt(agentType) {
+    return routeModel({ agentType, config: CONFIG, input: { agentType } });
+  }
+
+  it('supplies agentType to B4s classifier, so no row falls back to the default class', () => {
+    // Owner decision 3 (2026-09-14): B4 feeds scenario.agentType to routeModel
+    // as classifier INPUT. Before that, `routeModel({ agentType, config })`
+    // left `src.input` empty and every row classified as `default`/implement -
+    // a class no live caller ever produces (`route-observe-pre.js` passes
+    // `input: { agentType }`). Tiers are recomputed here, never hardcoded.
+    const agents = ['planner', 'architect', 'code-reviewer', 'security-reviewer', 'tdd-guide'];
+    for (const agentType of agents) {
+      const outcome = resolveBaseline(b4Baseline(), { agentType, config: CONFIG });
+      expect(outcome.status).toBe('scored');
+      expect(outcome.selection.source).toBe(classifyAction({ agentType }).factors.source);
+      expect(outcome.selection.source).toBe('agent');
+      expect(outcome.selection.source).not.toBe('default');
+      expect(outcome.selection.tier).toBe(b4Receipt(agentType).models.recommended?.tier ?? null);
+    }
+  });
+
+  it('changes B4s answer: the unsupplied call it replaced scored the default class', () => {
+    // Both halves are asserted so the test itself witnesses that the old shape
+    // was RED, not just that the new one is green. The divergence is only
+    // visible while the fable gate is on and planner is allowlisted, so that
+    // precondition is read out of the live config first (gate2 pattern above).
+    expect(CONFIG.agents.modelPolicy.fable.enabled).toBe(true);
+    expect(CONFIG.agents.modelPolicy.fable.allowlist).toContain('planner');
+
+    const supplied = b4Receipt('planner');
+    const unsupplied = routeModel({ agentType: 'planner', config: CONFIG });
+    expect(unsupplied.reason).toContain('class:default');
+    expect(supplied.reason).toContain('class:agent');
+
+    const scored = resolveBaseline(b4Baseline(), { agentType: 'planner', config: CONFIG });
+    expect(scored.selection.tier).toBe(supplied.models.recommended?.tier ?? null);
+    expect(scored.selection.tier).not.toBe(unsupplied.models.recommended?.tier ?? null);
+  });
+
+  it('keeps the policy ceiling above the class for B4: security-reviewer stays at its B2 tier', () => {
+    // security-reviewer is on FABLE_DENYLIST, so `policyAllowedTiers` bounds
+    // the candidate set no matter which class the classifier picks. Its B4
+    // class IS the agent table's `review` - the supply reached it - and the
+    // tier is still B2's. Recomputed from both modules, no literal tier here.
+    const receipt = b4Receipt('security-reviewer');
+    expect(receipt.reason).toContain('class:agent');
+    expect(receipt.action.type)
+      .toBe(classifyAction({ agentType: 'security-reviewer' }).actionClass);
+
+    const scored = resolveBaseline(b4Baseline(), {
+      agentType: 'security-reviewer', config: CONFIG,
+    });
+    expect(scored.selection.tier).toBe(resolveModel('security-reviewer', {}, CONFIG));
+    // The class on its own would rank a different tier first (that is B3).
+    expect(scored.selection.tier)
+      .not.toBe(ACTION_CLASS_TIERS[classifyAction({ agentType: 'security-reviewer' }).actionClass]);
   });
 
   it('shows the fable allowlist gate: B2 differs from fixed-fable for a non-allowlisted agent', async () => {
