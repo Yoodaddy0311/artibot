@@ -568,7 +568,22 @@ export async function observeIntent(hookData) {
 /**
  * Hook entry. Reads stdin, records, and returns — no stdout, no non-zero exit,
  * no throw, under every input.
- * @returns {Promise<object>}
+ *
+ * It records TWO things from one payload: the intent half (this file) and, by
+ * delegation to `_plan-observe-record.js`, the plan half — a write to
+ * `.artibot/missions/<M>/plan.md` becomes a `plan.revision` bump plus a
+ * `plan.revised` line. The delegation cannot change what `main()` ANSWERS: the
+ * import AND the call are settled by a trailing `.catch`, and the observer's own
+ * outcome is discarded, so a failed import, a module whose shape drifted, and a
+ * failed record all leave this return value and the exit code alone.
+ *
+ * A TRAILING `.catch`, NOT `.then(fn, onRejected)`. The two-argument form
+ * handles only the IMPORT's rejection — a `TypeError` from calling a
+ * `observePlanWrite` that the module no longer exports would sail past it into
+ * `main()`'s own catch and change this return value. stdout and the exit code
+ * were never at risk either way (measured); the return value was.
+ *
+ * @returns {Promise<object>} {@link observeIntent}'s result, unchanged
  */
 export async function main() {
   process.exitCode = 0;
@@ -576,7 +591,11 @@ export async function main() {
     const raw = await readStdin();
     // parseJSON returns null on malformed input; observeIntent then falls out
     // at its first check. Non-JSON stdin is a no-op, not an error.
-    return await observeIntent(parseJSON(raw));
+    const parsed = parseJSON(raw);
+    const outcome = await observeIntent(parsed);
+    await import('./_plan-observe-record.js')
+      .then((m) => m.observePlanWrite(parsed)).catch(() => null);
+    return outcome;
   } catch (err) {
     return { ok: false, reason: err?.message || 'main-failed' };
   }
