@@ -108,8 +108,13 @@ const ledgerMock = vi.hoisted(() => ({
 }));
 
 vi.mock('../../lib/runtime/ledger.js', () => ({
+  // `stdoutChunksAtAppend` 는 순서 계약의 관측점이다: 이 append 가 일어난
+  // 순간 stdout 이 이미 쓰였는지를 그 자리에서 찍는다. 사후에 두 배열을
+  // 비교하는 것으로는 순서를 알 수 없다.
   appendLedgerEvent: vi.fn((projectRoot, event) => {
-    ledgerMock.appends.push({ projectRoot, event });
+    ledgerMock.appends.push({
+      projectRoot, event, stdoutChunksAtAppend: mockState.stdoutChunks.length,
+    });
     return {
       ok: true, path: '<mocked>', event: event.event, seq: ledgerMock.appends.length, bytes: 0,
     };
@@ -532,6 +537,29 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     const overall = ledgerMock.appends.filter(({ event }) => !('layer' in event.data));
     expect(overall).toHaveLength(1);
     expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  /**
+   * 순서 계약 핀 — stdout 이 원장보다 **먼저**다.
+   *
+   * 근거: `_dispatcher-utils.js#spawnHook` (:110) 은 8000ms 타임아웃에서
+   * SIGTERM 을 보낸 뒤에도 **그때까지 모은 stdout 으로 resolve** 하고
+   * (`finish('timeout')` :145 → `finish` :122-126), `_stop-dispatcher.js:74-76`
+   * 은 `r.value.status` 를 보지 않고 `r.value.stdout` 만 파싱한다. 그래서
+   * stdout 을 먼저 쓰면 원장이 아무리 늦어도 block 결정은 살아남는다. 이
+   * 순서가 뒤집히면 그 보장이 사라지므로 여기서 못박는다.
+   */
+  it('원장 append 시점에 stdout 은 이미 쓰여 있다(순서 계약)', async () => {
+    const main = await loadMain();
+    await main();
+
+    expect(ledgerMock.appends, '관측점이 비면 아래 단언은 공허하다').toHaveLength(4);
+    for (const record of ledgerMock.appends) {
+      expect(
+        record.stdoutChunksAtAppend,
+        'append 가 일어난 순간 stdout 이 이미 1건 쓰여 있어야 한다',
+      ).toBe(1);
+    }
   });
 
   it('세션과 verify.completed 로 좁혀서만 기존 키를 읽는다', async () => {

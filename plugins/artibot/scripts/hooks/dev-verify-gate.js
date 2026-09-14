@@ -30,7 +30,9 @@
  * `result: "unmeasured"`. See {@link recordUnmeasuredDenominator}. It is
  * observation only: the write cannot change what this hook prints, and the
  * fingerprint cache above — not the writer's idempotency key — is what keeps one
- * working-tree state from being counted twice.
+ * working-tree state from being counted twice. The record is written AFTER
+ * stdout, and no time budget guards it — see the ordering note in `main()` for
+ * the dispatcher behaviour that makes both of those safe.
  *
  * WHAT THIS RECORD CANNOT SEE (rules §9, next to the gate): whether the model
  * actually verified anything afterwards (no line closes the loop yet, so the
@@ -295,6 +297,15 @@ function resolveHookEventName(hookData) {
  * absence. A denominator prefers the absence, so the throw is left to propagate
  * into the writer's own guard rather than swallowed here.
  *
+ * NO TIME BUDGET GUARDS THIS, AND NONE IS NEEDED. Both the ledger read and the
+ * append are SYNCHRONOUS fs calls, so a call already under way cannot be
+ * interrupted; any budget could only be a precheck between steps. The caller
+ * removes the need for one by printing stdout FIRST — see `main()`. A budget
+ * measured from `main()` entry would also have been mostly spent on the three
+ * `git` subprocesses above it (measured 2026-09-14 09:30 KST: median 1040ms,
+ * p95 1355ms before this function is even called), so it would refuse valid
+ * records on a busy machine — losing the denominator it was meant to protect.
+ *
  * @param {string} repoRoot Ledger root — the writer derives the file from it.
  * @param {object} hookData Raw Stop payload; `session_id` is the join key.
  * @returns {Promise<object>} the writer's tally (`appended`/`deduped`/
@@ -376,21 +387,41 @@ export async function main() {
 
   saveFingerprint(pluginRoot, fingerprint);
 
-  // The gate has decided to fire — record the unmeasured denominator. This is a
-  // SIDE EFFECT ONLY: the tally is not read, no branch below depends on it, and
-  // every failure mode (import, read, append) is absorbed here, so the stdout
-  // envelope underneath is the same in all of them.
-  try {
-    await recordUnmeasuredDenominator(repoRoot, hookData);
-  } catch (err) {
-    logHookError(HOOK_NAME, 'failed to record the unmeasured verify denominator', err);
-  }
-
   // Mode-aware output: 'enforce' (default) blocks the stop; 'advisory' surfaces
   // the same checklist as non-blocking 2.1.163 additionalContext feedback.
   const mode = loadVerifyMode();
   const hookEventName = resolveHookEventName(hookData);
   writeStdout(buildDevVerifyOutput(DEV_VERIFY_REASON, { mode, hookEventName }));
+
+  // STDOUT FIRST, LEDGER SECOND — and that ordering is the whole guard against a
+  // slow ledger costing the model its DEV verify ask.
+  //
+  // `scripts/hooks/_dispatcher-utils.js#spawnHook` (:110) collects this child's
+  // stdout into `chunks` as it arrives and, when the 8000ms timer fires, sends
+  // SIGTERM and still RESOLVES with everything collected so far
+  // (`finish('timeout')` :145 → `finish` :122-126). `_stop-dispatcher.js:74-76`
+  // then reads ONLY `r.value.stdout` and never looks at `r.value.status`. So a
+  // decision already written to stdout survives the timeout intact, and the
+  // fail-open window for the block decision is ZERO no matter how long the
+  // ledger takes. That is simpler than any budget, and it is why no budget is
+  // armed here.
+  //
+  // The precedent that records BEFORE stdout, `scripts/hooks/subagent-handler.js
+  // #handleStop` (:751-769), is not in conflict: its stdout is
+  // `{ message: '[team] Agent deregistered: …' }`, which carries no decision, so
+  // losing it costs a log line rather than a gate.
+  //
+  // UNMEASURED: on Windows a piped stdout write is asynchronous, so whether the
+  // bytes are flushed before a SIGTERM that lands in the same tick is not
+  // something this comment has tested.
+  //
+  // The record itself is a SIDE EFFECT ONLY: the tally is not read, nothing
+  // branches on it, and every failure mode (import, read, append) is absorbed.
+  try {
+    await recordUnmeasuredDenominator(repoRoot, hookData);
+  } catch (err) {
+    logHookError(HOOK_NAME, 'failed to record the unmeasured verify denominator', err);
+  }
 }
 
 // Direct-run guard: importing this module (tests) must not execute the hook.
