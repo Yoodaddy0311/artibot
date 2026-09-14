@@ -2,6 +2,18 @@
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
 
+## Wave 10 자율 착지 + 창 재사용 (2026-09-14 14:0x~18:3x KST, 세션 artibot-5d/0480e6, master = **096d5897**(배치 11, Wave 10 코드 착지 13/13 완료) — 배치별 SHA 는 `run.json.landings` 정본)
+
+**한 줄**: 오너 `/autopilot` 위임(run.json `delegation`)으로 Wave 10 8줄기 + 롤링 3 + 코드0 1 = 11 착지(배치 9회, 재빌드 0), 창 8개를 닫지 않고 재사용해 롤링 4·정찰 9 를 돌렸다. 상세는 CHANGELOG [Unreleased] "Wave 10 배치 착지". `autopilot-budget-units`(F03+F10)도 배치 10 착지 — 프로브 5/5 false, 예산이 처음으로 실제 집행(라이브 pause 전환 0/2,668). 진행 중: `dispatch-base-forkpoint`(XS 부채, nl-activation 창 3번째 재사용). Wave 11 정찰 9/9 산출.
+
+**선행 발견(P1 실측)**: 설치본 `~/.claude/artibot/` 에 `schemas/` 디렉터리가 4.62.0 까지 한 번도 실린 적이 없어 모든 ledger 이벤트가 `unregistered-event` 로 거부되고 있었다(gotcha 104, `df85f702`). 수정 뒤 라이브 `verify.completed` 가 05:21Z 부터 쌓임(112줄 @08:44Z) — Observe ③ 분모 t0 는 **05:21Z**(4.62.0 재시작이 아니라 설치본 수정 시점).
+
+**gotcha 신규**: (105) **plan.json `affectedPaths` 에 소스마다 테스트 짝을 반드시 넣어라** — 이번 런 리더 누락으로 land ownership FAIL 3회(split-ops 5파일·routing 6파일·autopilot 6파일), 전부 보충 후 PASS. 창의 신규 stem 테스트(`lane-state.test.js`)도 같은 부류. (106) **창 재사용은 된다**: done 창에 `ExitWorktree(action=keep)` → `EnterWorktree(name=split-artibot-<limb>)` — CLI `--worktree` 로 연 세션에서도 성공(6/6). 새 HEAD 는 origin/master 최신(`worktree.baseRef` 미설정=fresh) → 리더가 dispatch 전 origin/master 를 최신으로. 옛 worktree 디렉터리는 창이 핸들을 쥐어 `git worktree remove`·PowerShell 삭제 모두 실패 — 창 종료 뒤 정리(run.json `cleanupPending`). (107) **리더 세션은 유휴 중 창 메시지로 깨지 않는다** — 06:4x~07:5x 1시간 공백(양방향 큐 적체). 대책 = `/loop`(동적) 15분 틱 + 배치 착지는 bg 알림. dispatch 뒤 'started' 가 몇 분 안에 없으면 status-check 로 깨워라. (108) **롤링 줄기의 base 는 forkPoint** — plan.base 는 1차 줄기용. split-ops 착지 뒤 land/dispatch 가 자동 적용(`--base > forkPoint > plan.base`), 단 `{BASE}`·포인터 렌더는 아직 plan.base(부채 `dispatch-base-forkpoint`, XS). (109) **Windows CI autocrlf**: LF 로 커밋된 증거 파일도 Windows 러너 체크아웃에서 CRLF 가 되어 `/[^\x20-\x7E\n]/` 류 검사가 RED — 증거 파일은 `.gitattributes -text` 로 고정(정규식 완화 금지, 거짓 그린 방향). (110) **거짓 그린 실사례(규율 §9)**: Windows 8.3 단축 경로(`HEECHA~1`) vs `git worktree list` realpath 불일치를 테스트가 worktree 미생성 시 early-return 으로 못 봄(autopilot AP-05). (111) 세션 한도(16:00 KST 리셋)로 팀원 4명 사망(fable 검수자 2·opus 팀원 2) — 창들이 "리셋 뒤 재스폰" 으로 자체 복구, 리더는 리셋이 지났음을 알려 대기 시간을 줄였다. (112) 롤링 배정 때 README 훅 카운트 동반은 창 몫(plan allowlist 에 README 2파일 추가) — 리더가 나중에 하면 배치 CI RED.
+
+**오너 결정 대기(정찰 초안에 후보+권장안)**: OB-17 D1 incumbent 원천(K1 권장)·D2 `residency-unknown`(H1 권장) · nl-activation 분자 writer 스토어 · verify 훅 세션 salt · OB-26 `recommendMinSubtasks=7`(§5 D12 를 승인으로 볼지) · SH-29 hook carrier 신규 이벤트 여부 · outcome-md-emitter 결정 9건 · F04(b) OD1~OD5 · SH-06 D1~D5 · plan-md-emitter Important-2(게이트 open 시 호스트 Write 가 훅 렌더를 덮음).
+
+**다음 할 일**: ① budget-units done → land → 배치 10 착지 → 프로브 AP-03/04 false 확인 ② 리더 통합: `sync:local` 재실행(설치본 갱신) · 옛 worktree 4+ 디렉터리 정리 · 로컬 브랜치 `worktree-split-artibot-*` 정리(전부 merged) · V5-BACKLOG 행 갱신(OB-21 done 유지, OB-07 numerator, SH-03 계측기 착지, SH-04 F04 기록, SH-07 pricing 기본 true, §3 F06~F09 done, §4 ③④ 라이브 수치) ③ Wave 11 plan — 정찰 초안 9건(`hg09`·`sh06`·`f04b`·`wire-preintake`·`sh29`·`ob26`·`ob17-switch-reasons`·`outcome-md-emitter`·`verify-completed-producer`) + 부채 `dispatch-base-forkpoint` ④ 4.63.0 릴리스(체크리스트 아래 절).
+
 ## v4.62.0 릴리스 + 원장 이관 + v5.0 로드맵 확정 (2026-09-14 12:xx KST, 세션 artibot-16/d2f6a2c2, master = c2f300e3)
 
 **한 줄**: Wave 9 착지분을 4.62.0 으로 출하했고(기능 코드 0), ADR-011 원장 1회 이관을 실행했으며, `/ultraplan` 으로 v5.0 GA 로드맵(Wave 10~13)을 확정해 오너 결정 4건을 받았다. **다음 세션 첫 일 = 호스트 재시작 확인 → `/split plan` Wave 10(8줄기 + 롤링 5)**.
