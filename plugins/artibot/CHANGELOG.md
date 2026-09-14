@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **설치본 `schemas/` 디렉터리 누락** (2026-09-14 발견): `install_hooks()`(install.sh)와 그 PowerShell 동형(install.ps1)이 `hooks`·`scripts`·`lib`·`output-styles`만 `~/.claude/artibot/`로 복사하고 `schemas/`는 빠뜨려 왔다. `lib/runtime/event-writer.js#getAllowlist()`가 `schemas/ledger-events.allowlist.json`을 찾지 못해 빈 허용목록으로 폴백했고, `session.ended`를 포함한 모든 ledger 이벤트가 `unregistered-event`로 거부됐다 — 4.62.0 Wave 9 `session-end-vocab` 줄기가 코드는 착지시켰지만 설치본에는 한 번도 반영되지 못한 근본 원인. `install_hooks`·`install_marketplace_mirror`·`install_plugin_cache`(및 install.ps1의 3개 동형 함수) 전부에 `schemas` 추가, `tests/firewall/install-files-smoke.test.js`에 회귀 가드 추가(`schemas/ledger-events.allowlist.json` 실재 단언). `sync:local` 재실행 후 설치본에서 `getAllowlist()` 이벤트 39종·`session.ended`/`verify.completed` 등록 실측 확인.
+
 ## [4.62.0] — 2026-09-14
 
 ### 행동 변화 고지

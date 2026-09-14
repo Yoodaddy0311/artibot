@@ -440,7 +440,12 @@ function Install-Assets {
   # `$null =` because Copy-Tree now returns a bool and an uncaptured return
   # value would print "True" into the install log. Failures are tallied in
   # $script:InstallFailures, so nothing here needs the value.
-  foreach ($dir in @('skills', 'hooks', 'scripts', 'lib', 'output-styles')) {
+  # 'schemas' must ship: lib/runtime/event-writer.js#getAllowlist() reads
+  # schemas/ledger-events.allowlist.json relative to the plugin root at
+  # runtime. Omitting it left every event (session.ended included) rejected
+  # as unregistered-event, silently fail-closed (found 2026-09-14; parity
+  # fix, see install.sh#install_hooks for the bash-side history).
+  foreach ($dir in @('skills', 'hooks', 'scripts', 'lib', 'schemas', 'output-styles')) {
     $null = Copy-Tree -SrcDir (Join-Path $ScriptDir $dir) -DstDir $ArtibotDir
   }
 
@@ -868,7 +873,7 @@ function Update-MarketplaceMirror {
   }
 
   # Hot runtime paths come from the direct install we just wrote.
-  foreach ($dir in @('scripts', 'hooks', 'lib', 'skills', 'output-styles', '.claude-plugin')) {
+  foreach ($dir in @('scripts', 'hooks', 'lib', 'skills', 'output-styles', 'schemas', '.claude-plugin')) {
     $src = Join-Path $ArtibotDir $dir
     if (Test-Path -LiteralPath $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $mktRoot $dir) }
   }
@@ -908,7 +913,7 @@ function Update-PluginCache {
   $synced = 0
   Get-ChildItem -LiteralPath $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $vRoot = $_.FullName
-    foreach ($dir in @('scripts', 'hooks', 'lib', 'output-styles')) {
+    foreach ($dir in @('scripts', 'hooks', 'lib', 'output-styles', 'schemas')) {
       $src = Join-Path $ArtibotDir $dir
       if (Test-Path -LiteralPath $src) { $null = Copy-DirClean -SrcDir $src -DstDir (Join-Path $vRoot $dir) }
     }

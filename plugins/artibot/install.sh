@@ -648,6 +648,16 @@ install_hooks() {
   atomic_replace_dir "${SCRIPT_DIR}/hooks" "${ARTIBOT_DIR}/hooks" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
   atomic_replace_dir "${SCRIPT_DIR}/scripts" "${ARTIBOT_DIR}/scripts" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
   atomic_replace_dir "${SCRIPT_DIR}/lib" "${ARTIBOT_DIR}/lib" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
+  # lib/runtime/event-writer.js and ~30 other lib/scripts modules resolve
+  # schema JSON relative to the plugin root at runtime (readPluginJson).
+  # Omitting this dir left every installed copy without
+  # schemas/ledger-events.allowlist.json, so getAllowlist() fell back to
+  # {} and validateEventContract() rejected every ledger event
+  # (unregistered-event) — session.ended/verify.completed could never post
+  # a live row (found 2026-09-14 while checking the 4.62.0 Observe gate).
+  if [ -d "${SCRIPT_DIR}/schemas" ]; then
+    atomic_replace_dir "${SCRIPT_DIR}/schemas" "${ARTIBOT_DIR}/schemas" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
+  fi
   if [ -d "${SCRIPT_DIR}/output-styles" ]; then
     atomic_replace_dir "${SCRIPT_DIR}/output-styles" "${ARTIBOT_DIR}/output-styles" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
   fi
@@ -706,7 +716,7 @@ install_marketplace_mirror() {
 
   # Mirror the hot paths from the direct install we just wrote.
   # Same clean-replace contract as install_hooks for parity.
-  for dir in scripts hooks lib skills output-styles .claude-plugin; do
+  for dir in scripts hooks lib skills output-styles schemas .claude-plugin; do
     if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
       atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${mkt_root}/${dir}" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
     fi
@@ -773,7 +783,7 @@ install_plugin_cache() {
     # the one that made atomic_replace_dir necessary: a session whose hook
     # fires while this loop is mid-copy resolves its imports against whatever
     # exists at that instant.
-    for dir in scripts hooks lib output-styles; do
+    for dir in scripts hooks lib output-styles schemas; do
       if [ -d "${ARTIBOT_DIR}/${dir}" ]; then
         atomic_replace_dir "${ARTIBOT_DIR}/${dir}" "${v_root}/${dir}" || INSTALL_FAILURES=$(( ${INSTALL_FAILURES:-0} + 1 ))
       fi

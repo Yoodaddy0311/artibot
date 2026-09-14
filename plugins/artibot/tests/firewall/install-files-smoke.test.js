@@ -130,8 +130,14 @@ const INSTALL_SH = join(PLUGIN_ROOT, 'install.sh');
  *   ARTIBOT_DIR = $CLAUDE_DIR/artibot
  * agents/commands/rules 는 **CLAUDE_DIR 바로 아래**이고, artibot/ 아래가 아니다
  * (install_agents:404, install_commands:417, install_rules:607). skills/hooks/
- * scripts/lib 만 ARTIBOT_DIR 아래로 간다(install_skills:429, install_hooks:446-448).
+ * scripts/lib/schemas 가 ARTIBOT_DIR 아래로 간다(install_skills:429, install_hooks:648-659).
  * 이 구분을 틀리면 "설치됐다" 는 단언이 빈 디렉터리를 세게 된다.
+ *
+ * schemas 는 2026-09-14 까지 이 목록에 없었다 — install_hooks() 가 복사하지
+ * 않아 설치본에는 schemas/ 디렉터리 자체가 없었고, lib/runtime/event-writer.js
+ * 의 getAllowlist() 가 빈 {} 로 폴백해 session.ended 같은 모든 원장 이벤트가
+ * unregistered-event 로 거부됐다(4.62.0 Observe 게이트 점검 중 실측). 회귀 방지로
+ * 여기 추가했다.
  */
 const EXPECTED_DIRS = [
   '.claude/agents',
@@ -141,12 +147,16 @@ const EXPECTED_DIRS = [
   '.claude/artibot/hooks',
   '.claude/artibot/scripts',
   '.claude/artibot/lib',
+  '.claude/artibot/schemas',
 ];
 
 /** 디스패처가 이 둘 없이는 아예 뜨지 못한다. 개수가 아니라 이름으로 못박는다. */
 const EXPECTED_FILES = [
   '.claude/artibot/hooks/hooks.json',
   '.claude/artibot/hooks/dispatch-table.json',
+  // lib/runtime/event-writer.js#getAllowlist() 의 단일 진실원. 없으면
+  // 모든 ledger 이벤트가 unregistered-event 로 fail-closed 된다(위 주석 참조).
+  '.claude/artibot/schemas/ledger-events.allowlist.json',
 ];
 
 /** @type {string} */
