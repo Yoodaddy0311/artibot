@@ -88,7 +88,7 @@ function deleteAutopilotBranch(branch, cwd) {
  * Canonicalize a path for comparison against `git worktree list` output.
  *
  * `getWorktreesRoot()` can fall back to `os.tmpdir()`, which on Windows is the
- * 8.3 short form (`C:\Users\HEECHA~1\...`), while git porcelain reports the
+ * 8.3 short form (`...\HEECHA~1\...` style), while git porcelain reports the
  * resolved long form. A plain `path.normalize` compare then never matches, and
  * the caller silently loses the branch name.
  * @param {string} p

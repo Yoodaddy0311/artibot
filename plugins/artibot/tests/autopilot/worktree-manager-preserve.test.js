@@ -143,7 +143,7 @@ describe('resolveIntegrationEvidence', () => {
 });
 
 // AP-05 regression: the worktrees root can be `os.tmpdir()`, which on Windows
-// is the 8.3 short form (C:\Users\HEECHA~1\...) while git porcelain reports the
+// is the 8.3 short form (...\HEECHA~1\... style) while git porcelain reports the
 // resolved long form. Matching porcelain against a locally built path then
 // yields no branch, and a null `selfBranch` makes the branch under reap count
 // as its own integration evidence.
