@@ -401,3 +401,34 @@ describe('F03 state + render surfaces', () => {
     expect(renderCostInline(summary)).toContain('budget: unknown usage');
   });
 });
+
+describe('F03 (i) makeInitialState coerces budget options at the state boundary', () => {
+  // The command driver passes `--budget 500000` as text. normalizeBudget
+  // rejects strings on purpose, so an uncoerced string would persist and
+  // silently mean "no limit" — the exact hole the reviewer constructed.
+  it('accepts a numeric-string legacy budget as tokens', () => {
+    const s = makeInitialState({ task: 't', options: { budget: '500000' } });
+    expect(s.options.budgetTokens).toBe(500000);
+    expect(s.options.budget).toBe(500000);
+    expect(normalizeBudget(s.options)).toMatchObject({ budgetTokens: 500000, source: 'budgetTokens' });
+    expect(budgetStatus({ ...s, usage: { totals: { tokensIn: 600000, tokensOut: 0, costUsd: 0 } } }).tokens.exceeded).toBe(true);
+  });
+
+  it('falls back to the 2M default for a non-numeric string (fail-closed, never unlimited)', () => {
+    const s = makeInitialState({ task: 't', options: { budgetTokens: 'abc', budget: '' } });
+    expect(s.options.budgetTokens).toBe(2_000_000);
+    expect(normalizeBudget(s.options).budgetTokens).toBe(2_000_000);
+  });
+
+  it('coerces budgetUsd strings and drops invalid ones', () => {
+    expect(makeInitialState({ task: 't', options: { budgetUsd: '12.5' } }).options.budgetUsd).toBe(12.5);
+    expect(makeInitialState({ task: 't', options: { budgetUsd: 'nope' } }).options.budgetUsd).toBeUndefined();
+    expect(normalizeBudget(makeInitialState({ task: 't', options: { budgetUsd: 'nope' } }).options).budgetUsd).toBeNull();
+  });
+
+  it('mirrors one resolved value into legacy budget when both keys are given', () => {
+    const s = makeInitialState({ task: 't', options: { budget: 5, budgetTokens: 7 } });
+    expect(s.options.budgetTokens).toBe(7);
+    expect(s.options.budget).toBe(7);
+  });
+});

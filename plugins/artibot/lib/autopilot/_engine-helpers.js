@@ -70,6 +70,17 @@ import { recordPhaseUsage } from './cost-tracker.js';
 import { budgetStatus, normalizeBudget } from './safety.js';
 
 /**
+ * Coerce a budget option into a positive finite number, accepting numeric
+ * strings; anything else (absent, empty, NaN, <= 0) yields undefined.
+ * @param {unknown} value
+ * @returns {number|undefined}
+ */
+function budgetOption(value) {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Format a token count compactly (1.2M / 12.3k / 450) for budget messages.
  * @param {number} n
  * @returns {string}
@@ -100,8 +111,14 @@ export function makeInitialState({ task, mode, options, sessionId }) {
   const id = sessionId || newSessionId();
   const requestedOptions = options && typeof options === 'object' ? options : {};
   // A caller that only knows the legacy flag still gets a canonical token
-  // limit; an explicit budgetTokens always wins.
-  const budgetTokens = requestedOptions.budgetTokens ?? requestedOptions.budget ?? 2_000_000;
+  // limit; an explicit budgetTokens always wins. Coercion happens HERE, at the
+  // state boundary: the command driver hands `--budget 500000` over as text,
+  // and `normalizeBudget` deliberately rejects strings, so an uncoerced value
+  // would persist as a string and silently mean "no limit". A value that is
+  // not a positive number falls back to the documented default (fail-closed).
+  const budgetTokens = budgetOption(requestedOptions.budgetTokens)
+    ?? budgetOption(requestedOptions.budget) ?? 2_000_000;
+  const budgetUsd = budgetOption(requestedOptions.budgetUsd);
   return {
     sessionId: id,
     task: task || '',
@@ -112,8 +129,10 @@ export function makeInitialState({ task, mode, options, sessionId }) {
       maxDuration: '4h',
       ...requestedOptions,
       budgetTokens,
-      // Legacy mirror — see the BUDGET UNITS note above.
-      budget: requestedOptions.budget ?? budgetTokens,
+      budgetUsd,
+      // Legacy mirror of the SAME resolved value — see the BUDGET UNITS note
+      // above; two different numbers here would give the two readers two answers.
+      budget: budgetTokens,
       // Command parsing owns aliases; engine state accepts exactly one
       // canonical representation so persisted/resumed sessions are unambiguous.
       fast: requestedOptions.fast === true,

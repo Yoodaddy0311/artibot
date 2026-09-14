@@ -233,7 +233,7 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
    ```
 2. `$ARGUMENTS` 파싱하여 `{ task, mode, options }` 분해:
    - `mode`: `default` | `night` | `plan` | `resume` | `status` | `abort`
-   - `options`: `{ maxDuration, budgetTokens, budgetUsd?, notify, team, checkpoint, fast }`
+   - `options`: `{ maxDuration, budgetTokens, budgetUsd?, notify, team, checkpoint, fast }` — `--budget`/`--budget-usd` 값은 **숫자로 파싱해 넘긴다**(`makeInitialState`가 숫자 문자열은 한 번 더 강제 변환하고, 숫자가 아니면 기본 2,000,000 토큰으로 fail-closed 한다 — 문자열이 그대로 저장되면 한도가 사라지는 것이 아니라 기본값이 적용된다)
    - `--fast`와 `-fast`는 모두 `options.fast = true`로 정규화한다. `fast-profile` public API는 boolean `fast`만 소비하며 별칭을 다시 해석하지 않는다.
    - `sessionId`: `:resume`/`:status`/`:abort` 인 경우만
 
