@@ -376,6 +376,16 @@ describe('routebench runner - scoring a present fixture', () => {
     expect(keys.indexOf('b4_input')).toBe(keys.indexOf('policy_source') + 1);
     expect(Object.keys(report).indexOf('b4_input'))
       .toBe(Object.keys(report).indexOf('policy_source') + 1);
+
+    // b4_input is a CONSTANT in the runner, so on its own it is a claim, not a
+    // measurement: it would still read `{ agentType: true }` if the resolver
+    // stopped supplying the field. This binds the declaration to the run that
+    // produced it - source `agent` is reachable only when the classifier
+    // actually received an agentType. The tier is not asserted here; the B4
+    // tier expectations live in their own tests and are recomputed there.
+    expect(row(report, 'synthetic-policy', 'B4').selection.source)
+      .toBe(classifyAction({ agentType: 'planner' }).factors.source);
+    expect(row(report, 'synthetic-policy', 'B4').selection.source).toBe('agent');
   });
 
   it('refuses rather than scoring when a resolver returns no tier', () => {

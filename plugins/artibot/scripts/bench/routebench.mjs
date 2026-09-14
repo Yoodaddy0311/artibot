@@ -164,8 +164,12 @@ const MODULE_RESOLVERS = {
   // ['opus'] with no config and ['opus', 'fable'] with the loaded one.
   //
   // The agent name is supplied TWICE, on purpose, because the router reads it
-  // in two unrelated places. `agentType` at the top level reaches only
-  // `policyAllowedTiers` (the ceiling above). The CLASS comes from
+  // in two unrelated places. `agentType` at the top level reaches
+  // `models.recommended` only through `policyAllowedTiers` (the ceiling
+  // above); it also answers `models.selected` directly, via
+  // `resolveModel(src.agentType, ...)` (adaptive-model-router.js, in
+  // `routeModel`, measured 2026-09-14) - but that half is B2 and is not what
+  // B4 records. The CLASS comes from
   // `src.input`: `resolveClassification` spreads `src.input` into
   // `classifyAction`, which maps `input.agentType` through AGENT_ACTION_CLASS.
   // Passing the top-level field alone leaves `src.input` empty and every row
