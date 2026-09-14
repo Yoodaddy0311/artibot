@@ -121,8 +121,9 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   //       at the same level as the bare one. `rm -rf "/"` used to fall through
   //       to rm-rf-path (caution) while L1 normalizes the quotes away and
   //       blocks — L2 was the only layer reading it as merely scoped.
-  // ACCEPTED OVER-MATCH: `rm -rf "~"` is graded danger. Inside double quotes a
-  // tilde is NOT expanded, so that command deletes a literal `./~` directory.
+  // ACCEPTED OVER-MATCH: any quoted tilde-prefixed target — `rm -rf "~"`,
+  // `rm -rf '~'`, `rm -rf "~/x"` — is graded danger. Inside quotes a tilde is
+  // NOT expanded, so those commands touch a literal `./~` path, not $HOME.
   // The failure is toward blocking and the form is vanishingly rare; the real
   // frequency is unmeasured (no transcript census).
   // STILL MISSED, deliberately out of scope (owner decision): `${HOME}` (brace
