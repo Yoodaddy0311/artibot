@@ -251,6 +251,24 @@ function adaptPrompt(prompt) {
 }
 
 /**
+ * THIRD PRODUCER — EXCLUDED FROM THE plan/mode MISMATCH DENOMINATOR
+ * (ruling 2026-09-14). Three places in one UserPromptSubmit turn look like they
+ * route: the runtime middleware chain (builds the plan), the runtime-prompt hook
+ * (records it in the decisions store), and this hook. Only the first two are
+ * measured against each other. This one is out because:
+ *   (a) it yields no plan object and no mode, so `plan !== mode` has no value to
+ *       evaluate here at all — the comparison is undefined, not passing;
+ *   (b) its input is {@link adaptPrompt}'s prompt-shape heuristics, NOT the
+ *       router classification the plan is built from, so a disagreement would
+ *       measure adapter drift — a different quantity;
+ *   (c) its output is advisory text with no consumer that changes routing.
+ * "Hook suggestion fired vs plan.trigger.fired" is a separate, later
+ * measurement; it is NOT this denominator. The ruling changes neither
+ * `evaluateTrigger`'s inputs nor this hook's decision logic.
+ * Pinned by `tests/hooks/auto-team-trigger-denominator.test.js`, whose scan
+ * reads this file verbatim — that is why the two symbols above are described in
+ * prose rather than named.
+ *
  * Render the canonical decision for this prompt.
  * Returns null when the trigger does not fire; otherwise the reason text.
  *

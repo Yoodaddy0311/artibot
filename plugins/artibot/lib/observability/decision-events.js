@@ -489,18 +489,39 @@ export function recordRoutingDecision(runId, classification, opts = {}) {
 }
 
 /**
+ * `data.mode` values `recordWorkflowPlanDecision` admits — the two topologies
+ * `lib/runtime/middleware/tasks.js#createTasksMiddleware` can run a prompt
+ * under. An ALLOWLIST: anything else becomes `null` rather than reaching disk.
+ * A denylist would fail OPEN for whatever topology is named next
+ * (verification-discipline §8), and the value arrives from a caller this module
+ * does not own.
+ */
+const WORKFLOW_PLAN_MODES = Object.freeze(['agentTeam', 'subAgent']);
+
+/**
  * D7 — record the workflow plan: whether a parallel team fired, and why. The
  * planner is `lib/cognitive/workflow-plan.js#buildWorkflowPlan`; the live caller
- * is `lib/runtime/middleware/tasks.js`, in the `agentTeam` branch right after it
- * attaches the plan to `task.meta`.
+ * is `lib/runtime/middleware/tasks.js`, which since F04(a) records on BOTH
+ * routing paths — `subAgent` (system1) as well as `agentTeam` (system2) — and
+ * passes the one it ran under as `opts.mode`.
  *
  * The inline case is recorded too. "No team" is a decision an operator asks
  * about as often as "why a team?", and a record that only exists on one branch
  * cannot answer the other.
  *
+ * `data.runner` AND `data.mode` ARE TWO DIFFERENT FACTS. The first is what the
+ * planner decided; the second is what the caller actually did. The plan↔mode
+ * mismatch is therefore computable from one line:
+ *
+ *   (data.runner === 'team') !== (data.mode === 'agentTeam')
+ *
+ * Both directions are now representable. Before F04(a) only the `agentTeam`
+ * branch wrote here, so `mode` was `agentTeam` by construction and a system1
+ * prompt carrying a `runner: 'team'` plan produced no line at all.
+ *
  * @param {string} runId
  * @param {object} plan - a `buildWorkflowPlan` result
- * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string, mode?: 'agentTeam'|'subAgent' }} [opts]
  * @returns {object|null}
  */
 export function recordWorkflowPlanDecision(runId, plan, opts = {}) {
@@ -514,6 +535,7 @@ export function recordWorkflowPlanDecision(runId, plan, opts = {}) {
 
   const data = {
     ...pick(p, ['runner', 'effort', 'perAgentBudget', 'recommendation', 'autoFire']),
+    mode: WORKFLOW_PLAN_MODES.includes(opts.mode) ? opts.mode : null,
     teammateCount: teammates.length,
     // Agent names only — the sub-objective text they were derived from stays out.
     teammates: teammates.map((t) => (t && typeof t.agent === 'string' ? t.agent : null)),

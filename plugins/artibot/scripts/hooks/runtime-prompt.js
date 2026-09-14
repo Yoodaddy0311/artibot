@@ -66,11 +66,31 @@ async function resolveCommandEffort(commandName, pluginRoot) {
 /**
  * Persist the detected command + effort to runtime/ for downstream consumers
  * (statusline, observability, future native effort API wiring).
+ *
+ * F05: the record now carries identity (`sessionId`, `promptId`) and an
+ * `expiresAt`, and is also written per-session to `runtime/effort/<sid>.json`
+ * by `lib/runtime/task-budget.js#persistEffortRecord`. That helper always writes
+ * the legacy shared file too; the catch below repeats the legacy write directly
+ * so an import failure can never lose it.
+ *
  * @param {{ command: string, effort: string, baseline?: string, shift?: number, reason?: string } | null} meta
  * @param {string} pluginRoot
+ * @param {object} [hookData] - Hook payload carrying `session_id` / `prompt_id`.
+ * @returns {Promise<void>}
  */
-function persistEffortMeta(meta, pluginRoot) {
+async function persistEffortMeta(meta, pluginRoot, hookData = {}) {
   if (!meta) return;
+  try {
+    const tbPath = path.join(pluginRoot, 'lib', 'runtime', 'task-budget.js');
+    const { persistEffortRecord } = await import(toFileUrl(tbPath));
+    persistEffortRecord(meta, pluginRoot, {
+      sessionId: hookData?.session_id ?? null,
+      promptId: hookData?.prompt_id ?? null,
+    });
+    return;
+  } catch {
+    // Fall through to the legacy-only write below.
+  }
   try {
     const runtimeDir = path.join(pluginRoot, 'runtime');
     mkdirSync(runtimeDir, { recursive: true });
@@ -509,6 +529,10 @@ async function resolveScoredEffort(commandName, signals, pluginRoot) {
  * must be applied. When no native signal is present the heuristic result is
  * passed through unchanged (regression-zero).
  *
+ * F05: the persist also writes a per-session record under `runtime/effort/` and
+ * stamps identity + expiry, so a later reader cannot pick up another session's
+ * or an older prompt's band (`lib/runtime/task-budget.js#readEffortRecord`).
+ *
  * @param {string} prompt
  * @param {string} pluginRoot
  * @param {object} [hookData] - Hook payload used to derive Score-Aware signals.
@@ -517,7 +541,7 @@ async function resolveScoredEffort(commandName, signals, pluginRoot) {
 async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
   const commandName = detectSlashCommand(prompt);
   if (!commandName) {
-    persistEffortMeta(null, pluginRoot);
+    await persistEffortMeta(null, pluginRoot, hookData);
     return null;
   }
   const signals = await deriveEffortSignals(prompt, hookData, pluginRoot);
@@ -541,7 +565,7 @@ async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
     }
   }
 
-  persistEffortMeta(effortMeta, pluginRoot);
+  await persistEffortMeta(effortMeta, pluginRoot, hookData);
   return effortMeta;
 }
 

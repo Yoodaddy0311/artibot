@@ -23,7 +23,7 @@ import path from 'node:path';
 import { readJsonFileSync } from '../../core/file.js';
 import { buildWorkflowPlan } from '../../cognitive/workflow-plan.js';
 import { compileMission } from '../../mission/compiler.js';
-import { getTaskBudgetForEffort } from '../task-budget.js';
+import { getTaskBudgetForEffort, readEffortRecord } from '../task-budget.js';
 import { appendLedgerEvent } from '../ledger.js';
 import { sessionFallbackMissionId } from '../event-writer.js';
 import { createStateStore } from '../../project-state/state-manager.js';
@@ -40,13 +40,30 @@ function makeTaskId(nowFn) {
  * Returns null when the effort file is missing or unreadable — downstream code
  * must treat effort/budget as optional.
  *
+ * F05: the file read is delegated to `task-budget.js#readEffortRecord`, which
+ * applies the identity + expiry gate — a record left by ANOTHER session or by an
+ * OLDER prompt is refused rather than propagated into this task. Records written
+ * before F05 carry no identity and are honoured unchanged. The five-key mapping
+ * below is deliberately not extended (see this module's header).
+ *
+ * `nowMs` is the MIDDLEWARE's clock, not `Date.now()`: this middleware already
+ * takes an injected `now` for the task id and `createdAt`, and an expiry judged
+ * on wall-clock while everything else runs on a fixed clock is untestable — a
+ * fixture record would be expired or fresh depending on when the suite ran.
+ *
  * @param {string|undefined} pluginRoot
+ * @param {{ sessionId?: string|null, promptId?: string|null }} [identity]
+ * @param {number} [nowMs] - epoch ms; omitted means the reader uses `Date.now()`.
  * @returns {{ effort: string|null, taskBudget: number|null, command: string|null }|null}
  */
-function readEffortMeta(pluginRoot) {
+function readEffortMeta(pluginRoot, identity = {}, nowMs = undefined) {
   if (!pluginRoot) return null;
   const runtimeDir = path.join(pluginRoot, 'runtime');
-  const effortRaw = readJsonFileSync(path.join(runtimeDir, 'current-effort.json'));
+  const effortRaw = readEffortRecord(pluginRoot, {
+    sessionId: identity.sessionId ?? null,
+    promptId: identity.promptId ?? null,
+    now: nowMs,
+  });
   if (!effortRaw) return null;
 
   const meta = {
@@ -608,6 +625,70 @@ function recordMissionCompile(state, now, deps) {
 }
 
 /**
+ * Config key reserved for F04(b) — the release that makes this middleware
+ * FOLLOW the workflow plan instead of only recording it.
+ *
+ * READ NOWHERE. F04(a) records the plan on every routing path and stamps the
+ * mode the caller actually ran under (`decision-events.js#recordWorkflowPlanDecision`
+ * — `data.mode`), so the plan↔mode mismatch rate can be MEASURED before
+ * anything acts on it. The consumer lands with that measurement, not ahead of
+ * it; the key exists here only so the name is fixed in one place and the
+ * tripwire test in `tests/runtime/middleware/tasks.test.js` ("stays
+ * RECORD-ONLY") can set it and prove nothing reads it yet.
+ */
+export const FOLLOW_WORKFLOW_PLAN_CONFIG_KEY = 'team.followWorkflowPlan';
+
+/**
+ * Build the workflow plan for this prompt and record it — on EVERY routing path.
+ *
+ * P2: one unified plan (team trigger + per-teammate effort/budget) derived from
+ * the single complexity classification. `workflow-plan.js` is pure L4
+ * (router-only); the L5 `budgetResolver` port is injected here.
+ *
+ * RUNS FOR BOTH MODES since F04(a). It used to run only for `agentTeam`, which
+ * left system1 — the majority of prompts — with no `workflow-planned` line, and
+ * made one of the two mismatch directions unrepresentable: the only writer was
+ * the branch where the mode is `agentTeam` by construction. Whether the plan is
+ * ATTACHED to `task.meta` is a separate decision, still `agentTeam`-only, and
+ * stays with the caller.
+ *
+ * Explainability (D7) — observe-only. Records whether a parallel team fired and
+ * the trigger reasons; agent names only, no sub-objective text. The session id
+ * comes from `state.input`, where the hook payload lives — the same place
+ * `pluginRoot` is read from.
+ *
+ * `cwd` is passed RAW, not through this file's `resolveProjectRoot(state)`
+ * helper: the recorder runs the payload through
+ * `lib/git/project-root.js#resolveProjectRoot` itself, and every call site
+ * handing it the same raw `cwd` is what guarantees all four recorders agree on
+ * one store directory. Pre-resolving here would introduce a second answer,
+ * which is the split store this store is being moved to avoid.
+ *
+ * @param {object} state middleware state
+ * @param {string|undefined} pluginRoot root the config is read from
+ * @param {object} intent `state.context.intent`, already defaulted by the caller
+ * @param {'agentTeam'|'subAgent'} mode the topology this prompt actually ran under
+ * @returns {object} the `buildWorkflowPlan` result
+ */
+function planAndRecordWorkflow(state, pluginRoot, intent, mode) {
+  const cfg = readJsonFileSync(path.join(pluginRoot || '', 'artibot.config.json')) || {};
+  const classification = {
+    score: state.context.routing?.score ?? 0,
+    factors: state.context.routing?.classification?.factors,
+  };
+  const plan = buildWorkflowPlan(classification, intent, cfg, {
+    budgetResolver: (e) => getTaskBudgetForEffort(e, cfg) || 0,
+  });
+
+  recordWorkflowPlanDecision(resolveDecisionRunId(state.input), plan, {
+    cwd: state.input?.hookData?.cwd,
+    mode,
+  });
+
+  return plan;
+}
+
+/**
  * @param {object} [options]
  * @param {() => number} [options.now] - Clock injection for deterministic tests.
  * @param {(projectRoot: string) => string|null} [options.resolveGitCommonDir] - Git
@@ -652,7 +733,10 @@ export function createTasksMiddleware(options = {}) {
     const pluginRoot = state.input?.pluginRoot
       || state.context?.pluginRoot
       || state.pluginRoot;
-    const effortMeta = readEffortMeta(pluginRoot);
+    const effortMeta = readEffortMeta(pluginRoot, {
+      sessionId: state.input?.hookData?.session_id ?? state.input?.sessionId ?? null,
+      promptId: state.input?.hookData?.prompt_id ?? null,
+    }, now());
     if (effortMeta && effortMeta.effort) {
       task.meta = {
         effort: effortMeta.effort,
@@ -663,38 +747,16 @@ export function createTasksMiddleware(options = {}) {
       };
     }
 
-    // P2: derive a unified workflow plan (team trigger + per-teammate
-    // effort/budget) from the single complexity classification. Attached only
-    // for agentTeam mode so the orchestrator can prefix each teammate with
-    // `[artibot:effort][artibot:task-budget]` from the SAME source as the
-    // trigger decision. workflow-plan.js is pure L4 (router-only); the L5
-    // budgetResolver port is injected here.
+    // P2 / F04(a): plan on EVERY path, record on every path — but ATTACH only
+    // for agentTeam. The attachment is what the orchestrator reads to prefix
+    // each teammate with `[artibot:effort][artibot:task-budget]` from the SAME
+    // source as the trigger decision, and three live readers
+    // (`middleware/subagents.js`, `runtime-prompt.js#buildTeamDirective` and
+    // `#recordObserveOnlyDecisions`) require `undefined` here on system1. F04(a)
+    // is RECORD-ONLY: see {@link FOLLOW_WORKFLOW_PLAN_CONFIG_KEY}.
+    const plan = planAndRecordWorkflow(state, pluginRoot, intent, mode);
     if (mode === 'agentTeam') {
-      const cfg = readJsonFileSync(path.join(pluginRoot || '', 'artibot.config.json')) || {};
-      const classification = {
-        score: state.context.routing?.score ?? 0,
-        factors: state.context.routing?.classification?.factors,
-      };
-      const plan = buildWorkflowPlan(classification, intent, cfg, {
-        budgetResolver: (e) => getTaskBudgetForEffort(e, cfg) || 0,
-      });
       task.meta = { ...(task.meta || {}), workflowPlan: plan };
-
-      // Explainability (D7) — observe-only. Records whether a parallel team
-      // fired and the trigger reasons, including the inline case; agent names
-      // only, no sub-objective text. Session id comes from `state.input` (where
-      // the hook payload lives), the same place `pluginRoot` is read from above.
-      //
-      // `cwd` is passed RAW, not through this file's `resolveProjectRoot(state)`
-      // helper: the recorder runs the payload through
-      // `lib/git/project-root.js#resolveProjectRoot` itself, and every call site
-      // handing it the same raw `cwd` is what guarantees all four recorders
-      // agree on one store directory. Pre-resolving here would introduce a
-      // second answer, which is the split store this store is being moved to
-      // avoid.
-      recordWorkflowPlanDecision(resolveDecisionRunId(state.input), plan, {
-        cwd: state.input?.hookData?.cwd,
-      });
     }
 
     // T-25: compile a Mission Contract for EVERY prompt and record it. Placed

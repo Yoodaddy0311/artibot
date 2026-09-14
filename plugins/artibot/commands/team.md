@@ -122,9 +122,11 @@ Break the user's request into independent work units, 각 단위에 **작업 성
 Before spawning teammates, `scripts/hooks/runtime-prompt.js` has already written:
 - `runtime/current-effort.json` — 현재 커맨드의 effort level (max/xhigh/high/medium/low)
 - `runtime/current-task-budget.json` — 해당 effort에 매핑된 max_tokens budget
+- `runtime/effort/<session_id>.json` — 세션 범위 기록(`sessionId`·`promptId`·`expiresAt`, TTL 10분, GC 는 최신 32개만 남김). 미들웨어가 **이 파일을 먼저** 읽으므로 동시에 도는 두 세션이 서로의 effort 를 덮어쓰지 않는다. `runtime/current-effort.json` 은 대시보드·statusline 용으로 매 프롬프트 계속 기록된다.
+- 설정 키 `team.followWorkflowPlan` 은 **예약**(기본 off) — 다음 릴리스의 F04(b) 소비처용이다. 이번 릴리스는 결정 스토어에 `plan`↔`mode` 를 기록만 한다(`workflow-planned` 라인에 `data.mode` 추가).
 
 The orchestrator MUST:
-1. Phase 1 시작 직후 두 파일을 Read (없으면 effort=xhigh, budget=128000 기본값 적용)
+1. Phase 1 시작 직후 앞 두 파일(`current-effort.json`·`current-task-budget.json`)을 Read (없으면 effort=xhigh, budget=128000 기본값 적용)
 2. 각 팀원의 초기 프롬프트 맨 앞에 아래 디렉티브를 포함:
    ```
    [artibot:effort level={effort} command=team][artibot:task-budget max_tokens={budget}]
