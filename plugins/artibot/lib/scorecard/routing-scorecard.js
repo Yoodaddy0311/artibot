@@ -55,11 +55,26 @@
  *     shadow learner past Observe and no shadow line can exist yet. When one
  *     can, this card will silently mix the two — that is a known future defect,
  *     recorded here rather than discovered later.
+ *  7. CACHE AFFINITY AS AN AVOIDED-SWITCH REASON. §38 names three reasons a
+ *     switch is worth avoiding, and `lib/routing/route-hysteresis.js` emits a
+ *     code for only two of them. `AVOIDED_SWITCH_REASONS.cache_affinity` is
+ *     therefore an empty allowlist and its bucket is always 0. THAT ZERO MEANS
+ *     "NOT RECORDED", NOT "NEVER HAPPENED" — reading it the second way would
+ *     credit the router with a reason it has no way to write down.
+ *  8. PINS, IN PHASE 0. `routing.avoided_switch_pinned` has a real denominator
+ *     and an expected numerator of zero, because the only receipt writer
+ *     (`lib/routing/adaptive-model-router.js#routeModel`) derives `decision.type`
+ *     from `currentTier`, and nothing supplies `currentTier` before Shadow. So
+ *     the row measures the WRITER's state, not the router's restraint, until
+ *     that field is populated. It is emitted anyway so the day it moves is
+ *     visible; a row added later would have no baseline to move from.
  *
  * @module lib/scorecard/routing-scorecard
  */
 
-import { countWhere, freezeCard, histogramMetric, metric, readPath, tallyBy } from './metric.js';
+import {
+  countWhere, freezeCard, histogramMetric, metric, readPath, sortedCounts, tallyBy,
+} from './metric.js';
 
 /** Card kind, matching `SESSION_KIND`'s role in the renderer. */
 export const ROUTING_KIND = 'routing';
@@ -151,6 +166,153 @@ export function comparableTiers(receipt) {
 }
 
 /**
+ * The §38 reasons a switch can be avoided, each mapped to the receipt `reason[]`
+ * codes that evidence it.
+ *
+ * Design §38 ("Avoided Switches도 성능이다",
+ * `.artibot/guides/v5-design/MODEL-SWITCHING-SCORECARD.md`) names three: cache
+ * affinity, low expected benefit, and minimum residency. The codes come from
+ * `lib/routing/route-hysteresis.js`, which the router prefixes with
+ * `hysteresis:` before writing them onto the receipt
+ * (`adaptive-model-router.js#routeModel`).
+ *
+ * `cache_affinity` IS EMPTY, AND STAYS VISIBLE. No code in the hysteresis
+ * vocabulary means "held for cache affinity" today, so there is nothing to list.
+ * Dropping the key would make the card claim §38 has two reasons; keeping it
+ * empty makes the gap countable — the row will read 0 for it, and "WHAT THIS
+ * CARD CANNOT SEE" #7 says that 0 means unrecorded, not absent.
+ *
+ * An ALLOWLIST, like `DECISION_TYPES`: a hysteresis code outside these lists is
+ * reported as `other:<code>` rather than folded into a neighbouring reason.
+ */
+export const AVOIDED_SWITCH_REASONS = Object.freeze({
+  cache_affinity: Object.freeze([]),
+  low_benefit: Object.freeze(['hysteresis:below-threshold', 'hysteresis:hysteresis-band']),
+  residency: Object.freeze(['hysteresis:minimum-residency']),
+});
+
+/** Returned when a receipt carries no usable reason code at all. */
+const REASON_NONE = 'other:none';
+
+/**
+ * Name the §38 reason a receipt evidences, or report that it evidences none.
+ *
+ * Scanning is IN RECEIPT ORDER but allowlist membership wins over position: the
+ * live `reason[]` always opens with `class:*` and `effort:*` (router lines 480-486
+ * as of 2026-09-14), so "first code" would classify every receipt identically
+ * and mean nothing. The first code that IS in an allowlist decides.
+ *
+ * Nothing is ever hidden. An unmapped receipt returns `other:<code>` naming the
+ * code that was actually there — preferring the first `hysteresis:` code, since
+ * that is the field that would have carried the answer — so a new hysteresis
+ * code shows up as its own histogram bucket instead of vanishing into a reason
+ * it was never evidence for.
+ *
+ * @param {unknown} reason - a receipt's `data.reason`, trusted to be nothing.
+ * @returns {string} a key of `AVOIDED_SWITCH_REASONS`, or `other:<code>`.
+ */
+export function classifyAvoidedReason(reason) {
+  if (!Array.isArray(reason)) return REASON_NONE;
+  let firstCode = null;
+  let firstHysteresis = null;
+  for (const code of reason) {
+    if (typeof code !== 'string' || code.length === 0) continue;
+    for (const [name, codes] of Object.entries(AVOIDED_SWITCH_REASONS)) {
+      if (codes.includes(code)) return name;
+    }
+    if (firstCode === null) firstCode = code;
+    if (firstHysteresis === null && code.startsWith('hysteresis:')) firstHysteresis = code;
+  }
+  const unmapped = firstHysteresis ?? firstCode;
+  return unmapped === null ? REASON_NONE : `other:${unmapped}`;
+}
+
+/**
+ * Fold the avoided switches out of a set of route receipts.
+ *
+ * "Avoided" is `divergedTier` — the router recommended one tier and another was
+ * selected — which is the Observe-era proxy design §5 settles on
+ * (`ARTIBOT-5.0-DESIGN.md:479`: "추천≠정책 스폰 = pin 사유 있는 회피"). It is
+ * deliberately the SAME SET that `routing.recommendation_divergence` counts;
+ * this fold adds the reason distribution over that set rather than a second,
+ * differently-drawn population that could disagree with it.
+ *
+ * `byDecision` buckets a missing `decision.type` as `absent` instead of skipping
+ * it, so its counts always sum to `avoided` and a receipt cannot fall out of the
+ * histogram unnoticed.
+ *
+ * @param {object[]} receipts - `route.selected` lines. Not mutated.
+ * @returns {{avoided: number, pinned: number, byReason: Record<string, number>,
+ *   byDecision: Record<string, number>, comparable: number, denominator: number}}
+ */
+export function foldAvoidedSwitches(receipts) {
+  const lines = Array.isArray(receipts) ? receipts : [];
+  const byReason = {};
+  const byDecision = {};
+  let avoided = 0;
+  let pinned = 0;
+  for (const receipt of lines) {
+    if (!divergedTier(receipt)) continue;
+    avoided += 1;
+    const reason = classifyAvoidedReason(readPath(receipt, ['data', 'reason']));
+    byReason[reason] = (byReason[reason] ?? 0) + 1;
+    const type = readPath(receipt, ['data', 'decision', 'type']);
+    const bucket = typeof type === 'string' && type.length > 0 ? type : 'absent';
+    byDecision[bucket] = (byDecision[bucket] ?? 0) + 1;
+    if (bucket === 'pin') pinned += 1;
+  }
+  return {
+    avoided,
+    pinned,
+    byReason: sortedCounts(byReason),
+    byDecision: sortedCounts(byDecision),
+    comparable: countWhere(lines, comparableTiers),
+    denominator: lines.length,
+  };
+}
+
+/**
+ * The two §38 avoided-switch rows, built together because they share one fold.
+ *
+ * Split out of `buildRoutingScorecard` so the pair is read as one unit: the
+ * second row's denominator IS the first row's numerator, and a reader who
+ * changes one without the other silently changes what the ratio means.
+ *
+ * @param {object[]} routes - `route.selected` lines.
+ * @returns {Readonly<object>[]} the two metrics, in render order.
+ */
+function avoidedSwitchMetrics(routes) {
+  const fold = foldAvoidedSwitches(routes);
+  return [
+    metric({
+      key: 'routing.avoided_switch',
+      label: 'Avoided Switch (추천≠선택 · 사유 분류)',
+      source: 'route.selected · models.recommended.tier ≠ models.selected.tier · '
+        + 'data.reason[] hysteresis:* → §38 3분류',
+      denominator: fold.comparable,
+      numerator: fold.avoided,
+      absent: fold.denominator - fold.comparable,
+      counts: fold.byReason,
+      note: '설계 §38(MODEL-SWITCHING-SCORECARD.md) 사유 3분류 cache_affinity/low_benefit/'
+        + "residency. Observe 대리 정의는 ARTIBOT-5.0-DESIGN.md:479 '추천≠정책 스폰'. 사상 "
+        + '불가 코드는 other:<code> 로 보인다. 분자는 routing.recommendation_divergence 와 '
+        + '같은 집합이고 이 행은 그 집합의 사유 분포를 더한다.',
+    }),
+    metric({
+      key: 'routing.avoided_switch_pinned',
+      label: 'Avoided Switch 중 decision=pin',
+      source: "route.selected{decision.type='pin'} ∩ 추천≠선택 ÷ 추천≠선택",
+      denominator: fold.avoided,
+      numerator: fold.pinned,
+      counts: fold.byDecision,
+      note: 'Phase 0 writer(adaptive-model-router.js#routeModel)는 currentTier 가 null 이라 '
+        + 'pin 을 내지 않는다 — 분모가 있어도 분자 0 이 기대값이며 Shadow 에서 currentTier 가 '
+        + '실리면 오른다. 분모 0 이면 unmeasured.',
+    }),
+  ];
+}
+
+/**
  * Build the routing card.
  *
  * @param {object} replay - a `buildReplay` index (T-41). Read only.
@@ -215,6 +377,7 @@ export function buildRoutingScorecard(replay) {
       note: '분모는 두 티어가 모두 있는 영수증만이다 — 한쪽이 없으면 일치로 세지 않고 미분류로 '
         + '뺀다. 어느 쪽이 옳았는지는 판정하지 않는다(헤더 #4).',
     }),
+    ...avoidedSwitchMetrics(routes),
     metric({
       key: 'routing.switch_applied',
       label: '스위치 제안 대비 적용',
