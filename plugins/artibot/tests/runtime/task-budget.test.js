@@ -5,16 +5,25 @@
  * - getTaskBudgetForEffort() per-level mapping + config override
  * - buildTaskBudgetDirective() output format + beta header toggle
  * - persistTaskBudget() file write + idempotency
+ * - F05 effort records: buildEffortRecord / persistEffortRecord /
+ *   readEffortRecord / gcEffortRecords
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
+  buildEffortRecord,
   buildTaskBudgetDirective,
+  EFFORT_RECORD_KEEP,
+  EFFORT_RECORD_TTL_MS,
+  EFFORT_RECORDS_DIRNAME,
+  gcEffortRecords,
   getTaskBudgetForEffort,
+  persistEffortRecord,
   persistTaskBudget,
+  readEffortRecord,
 } from '../../lib/runtime/task-budget.js';
 
 describe('getTaskBudgetForEffort', () => {
@@ -270,5 +279,103 @@ describe('persistTaskBudget', () => {
     const data = JSON.parse(readFileSync(second, 'utf-8'));
     expect(data.command).toBe('code-review');
     expect(data.budget).toBe(64000);
+  });
+});
+
+describe('F05 effort records', () => {
+  const META = { command: 'implement', effort: 'max', baseline: 'xhigh', shift: 1, reason: 'r' };
+  const T0 = Date.parse('2026-09-14T00:00:00.000Z');
+  let tmpRoot;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-effort-'));
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  it('exports sane defaults', () => {
+    expect(EFFORT_RECORD_TTL_MS).toBe(10 * 60 * 1000);
+    expect(EFFORT_RECORD_KEEP).toBe(32);
+    expect(EFFORT_RECORDS_DIRNAME).toBe('effort');
+  });
+
+  it('buildEffortRecord derives updatedAt/expiresAt from the injected clock', () => {
+    const record = buildEffortRecord(META, { sessionId: 's1', promptId: 'p1', now: T0 });
+    expect(record.updatedAt).toBe(new Date(T0).toISOString());
+    expect(record.expiresAt).toBe(new Date(T0 + EFFORT_RECORD_TTL_MS).toISOString());
+    expect(record.command).toBe('implement');
+  });
+
+  it('buildEffortRecord normalizes blank ids to null', () => {
+    const record = buildEffortRecord(META, { sessionId: '   ', promptId: undefined, now: T0 });
+    expect(record.sessionId).toBeNull();
+    expect(record.promptId).toBeNull();
+  });
+
+  it('buildEffortRecord honours an explicit ttlMs', () => {
+    const record = buildEffortRecord(META, { sessionId: 's1', now: T0, ttlMs: 5000 });
+    expect(record.expiresAt).toBe(new Date(T0 + 5000).toISOString());
+  });
+
+  it('persistEffortRecord writes both files and readEffortRecord round-trips', () => {
+    const { legacyPath, sessionPath } = persistEffortRecord(META, tmpRoot, {
+      sessionId: 's1', promptId: 'p1', now: T0,
+    });
+    expect(existsSync(legacyPath)).toBe(true);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(sessionPath).toBe(path.join(tmpRoot, 'runtime', EFFORT_RECORDS_DIRNAME, 's1.json'));
+
+    const read = readEffortRecord(tmpRoot, { sessionId: 's1', promptId: 'p1', now: T0 + 1 });
+    expect(read.effort).toBe('max');
+    expect(read.shift).toBe(1);
+  });
+
+  it('persistEffortRecord writes nothing for meta === null (the stale file is NOT deleted)', () => {
+    persistEffortRecord(META, tmpRoot, { sessionId: 's1', promptId: 'p1', now: T0 });
+    const legacyPath = path.join(tmpRoot, 'runtime', 'current-effort.json');
+    const before = readFileSync(legacyPath, 'utf8');
+
+    expect(persistEffortRecord(null, tmpRoot, { sessionId: 's1', now: T0 }))
+      .toEqual({ legacyPath: null, sessionPath: null });
+    expect(readFileSync(legacyPath, 'utf8')).toBe(before);
+  });
+
+  it('persistEffortRecord rejects a missing pluginRoot without throwing', () => {
+    expect(persistEffortRecord(META, '', { sessionId: 's1' }))
+      .toEqual({ legacyPath: null, sessionPath: null });
+    expect(persistEffortRecord(META, null, { sessionId: 's1' }))
+      .toEqual({ legacyPath: null, sessionPath: null });
+  });
+
+  it('persistEffortRecord never throws when runtime/ cannot be created', () => {
+    writeFileSync(path.join(tmpRoot, 'runtime'), 'not a directory');
+    expect(() => persistEffortRecord(META, tmpRoot, { sessionId: 's1', now: T0 })).not.toThrow();
+    expect(persistEffortRecord(META, tmpRoot, { sessionId: 's1', now: T0 }))
+      .toEqual({ legacyPath: null, sessionPath: null });
+  });
+
+  it('readEffortRecord rejects a missing pluginRoot and unparseable files', () => {
+    expect(readEffortRecord('', { sessionId: 's1' })).toBeNull();
+    writeFileSync(path.join(tmpRoot, 'runtime'), '');
+    rmSync(path.join(tmpRoot, 'runtime'));
+    persistEffortRecord(META, tmpRoot, { sessionId: 's1', now: T0 });
+    writeFileSync(path.join(tmpRoot, 'runtime', 'current-effort.json'), '{ not json');
+    rmSync(path.join(tmpRoot, 'runtime', EFFORT_RECORDS_DIRNAME), { recursive: true, force: true });
+    expect(readEffortRecord(tmpRoot, { sessionId: 's1', now: T0 })).toBeNull();
+  });
+
+  it('gcEffortRecords keeps the newest `keep` records', () => {
+    for (let i = 0; i < 5; i += 1) {
+      persistEffortRecord(META, tmpRoot, { sessionId: `s${i}`, now: T0, keep: 100 });
+    }
+    const dir = path.join(tmpRoot, 'runtime', EFFORT_RECORDS_DIRNAME);
+    expect(readdirSync(dir).length).toBe(5);
+
+    const result = gcEffortRecords(dir, { now: T0, keep: 2 });
+    expect(result.kept).toBe(2);
+    expect(result.removed).toBe(3);
+    expect(readdirSync(dir).length).toBe(2);
   });
 });

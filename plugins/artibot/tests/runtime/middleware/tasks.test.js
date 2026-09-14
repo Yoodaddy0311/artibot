@@ -7,6 +7,10 @@ import { sessionFallbackMissionId } from '../../../lib/runtime/event-writer.js';
 import { appendLedgerEvent, readLedgerCensus } from '../../../lib/runtime/ledger.js';
 import { createStateStore, readJournal } from '../../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../../lib/project-state/git-common-dir.js';
+import {
+  readDecisionEvents,
+  WORKFLOW_PLANNED,
+} from '../../../lib/observability/decision-events.js';
 
 function makeState(overrides = {}) {
   return {
@@ -140,14 +144,22 @@ describe('middleware/tasks', () => {
 
 describe('middleware/tasks — Score-Aware effort meta propagation', () => {
   let pluginRoot;
+  let projectRoot;
 
   beforeEach(() => {
     pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-'));
     mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
+    // A sandbox project root for the cases that supply a `session_id`. Without a
+    // `cwd`, `recordWorkflowPlanDecision` resolves the root from `process.cwd()`
+    // and writes `<repo>/.artibot/runtime/decisions/<sid>.events.ndjson` for real
+    // — measured: 21 `workflow-planned` lines in the worktree's own store.
+    projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-proj-'));
+    mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
   });
 
   afterEach(() => {
     rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
   });
 
   function writeEffortFixture(meta) {
@@ -155,6 +167,12 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
       path.join(pluginRoot, 'runtime', 'current-effort.json'),
       JSON.stringify(meta) + '\n',
     );
+  }
+
+  function writeSessionFixture(sessionId, meta) {
+    const dir = path.join(pluginRoot, 'runtime', 'effort');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, `${sessionId}.json`), JSON.stringify(meta) + '\n');
   }
 
   it('propagates shift + reason from current-effort.json into task.meta', async () => {
@@ -201,6 +219,85 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     const result = await mw(state);
 
     expect(result.context.tasks.meta).toBeUndefined();
+  });
+
+  // F05 — the reader passes its own identity to `readEffortRecord`, so a record
+  // another session left behind cannot become this task's effort. The fixtures
+  // above carry no identity and stay honoured (that is the compatibility pin).
+  it('prefers the per-session record when hookData.session_id matches', async () => {
+    writeEffortFixture({ command: 'daily', effort: 'low', sessionId: 'sess-B', promptId: 'b1' });
+    writeSessionFixture('sess-A', {
+      command: 'implement', effort: 'max', shift: 1, reason: 'own-session', sessionId: 'sess-A',
+    });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toEqual({
+      effort: 'max', command: 'implement', taskBudget: null, shift: 1, reason: 'own-session',
+    });
+  });
+
+  it('ignores a legacy record left by another session when the reader has a session id', async () => {
+    writeEffortFixture({ command: 'daily', effort: 'low', sessionId: 'sess-B', promptId: 'b1' });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toBeUndefined();
+  });
+
+  // The expiry is judged on the middleware's INJECTED clock. Of the two cases
+  // below, only the SECOND distinguishes that from wall-clock: the injected
+  // 1700000000000 is in 2023, so a record expiring before it is expired on both
+  // clocks (measured: the refusal case stays green with the clock thread removed),
+  // while a record expiring 60s after it is fresh ONLY on the injected clock
+  // (measured: that case goes red with the thread removed).
+  it('refuses an expired per-session record under the injected clock', async () => {
+    writeSessionFixture('sess-A', {
+      command: 'implement', effort: 'max', sessionId: 'sess-A',
+      expiresAt: new Date(1700000000000 - 1).toISOString(),
+    });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toBeUndefined();
+  });
+
+  it('honours a per-session record that expires AFTER the injected clock', async () => {
+    writeSessionFixture('sess-A', {
+      command: 'implement', effort: 'max', shift: 1, reason: 'own-session', sessionId: 'sess-A',
+      expiresAt: new Date(1700000000000 + 60_000).toISOString(),
+    });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toEqual({
+      effort: 'max', command: 'implement', taskBudget: null, shift: 1, reason: 'own-session',
+    });
+  });
+
+  it('still honours a legacy fixture with no identity when the reader has a session id', async () => {
+    writeEffortFixture({ command: 'implement', effort: 'high', shift: 0, reason: 'baseline' });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toEqual({
+      effort: 'high', command: 'implement', taskBudget: null, shift: 0, reason: 'baseline',
+    });
   });
 });
 
@@ -571,5 +668,187 @@ describe('middleware/tasks — mission identity under a moving clock', () => {
     const updates = readLedgerCensus(root).events.filter((e) => e.event === 'state.updated');
     expect(updates.map((e) => e.data.state_version)).toEqual([1, 2]);
     expect(updates[1].data.status).toBe('executing');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F04(a) — the workflow plan is built and RECORDED on every routing path.
+//
+// Before this change `buildWorkflowPlan` and `recordWorkflowPlanDecision` ran
+// only inside the `mode === 'agentTeam'` branch, so system1 — the majority of
+// prompts — produced no `workflow-planned` line at all. One consequence was a
+// measurement hole, not a cosmetic one: a line whose `runner` is `team` while
+// the caller ran `subAgent` was UNREPRESENTABLE, because the only writer was
+// the branch where mode is `agentTeam` by construction.
+//
+// RECORD ONLY. `task.meta.workflowPlan` still appears for `agentTeam` and only
+// for it, because three live readers — `middleware/subagents.js`,
+// `runtime-prompt.js#buildTeamDirective`/`#buildRecommendationDirective`, and
+// `runtime-prompt.js#recordObserveOnlyDecisions` — read that key and must keep
+// seeing `undefined` on system1. The "record-only holds" case below is the
+// tripwire for the release that changes that.
+//
+// STORE ISOLATION: `hookData.cwd` is a temp directory holding a real `.git`,
+// so `decision-events.js#getDecisionStoreDir` resolves into the sandbox rather
+// than walking up to this repository's live store.
+// ---------------------------------------------------------------------------
+
+describe('middleware/tasks — workflow plan recorded on BOTH routing paths (F04a)', () => {
+  const PROMPT = 'implement the oauth login, write tests for it, and review the auth flow';
+
+  /** 2 recommendations + minSubtasks 2 → the trigger fires whatever the score. */
+  const TEAM_TRIGGER_CONFIG = {
+    team: { enabled: true, autoApplyTriggers: { logic: 'OR', minSubtasks: 2, minFiles: 2, minComplexity: 'high' } },
+    runtime: { effort: { budgetMap: { xhigh: 128000, high: 64000, medium: 32000, low: 16000 } } },
+  };
+
+  /** Two sub-objectives, the shape `middleware/router.js` writes. */
+  const TWO_RECOMMENDATIONS = [
+    { intent: 'implement', commands: ['/implement'], agents: ['backend-developer'] },
+    { intent: 'test', commands: ['/tdd'], agents: ['tdd-guide'] },
+  ];
+
+  let projectRoot;
+  let pluginRoot;
+  let sessionCounter = 0;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-f04a-'));
+    mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
+    pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-f04a-plugin-'));
+    mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
+    writeConfig(TEAM_TRIGGER_CONFIG);
+  });
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true });
+    rmSync(pluginRoot, { recursive: true, force: true });
+  });
+
+  function writeConfig(cfg) {
+    writeFileSync(path.join(pluginRoot, 'artibot.config.json'), JSON.stringify(cfg));
+  }
+
+  function writeEffort(meta) {
+    writeFileSync(path.join(pluginRoot, 'runtime', 'current-effort.json'), JSON.stringify(meta));
+  }
+
+  /** One session id per run: the store is keyed by it, so sharing would pool lines. */
+  function nextSessionId() {
+    sessionCounter += 1;
+    return `sess-f04a-${sessionCounter}`;
+  }
+
+  function planState(system, sessionId, overrides = {}) {
+    return {
+      input: {
+        prompt: PROMPT,
+        pluginRoot,
+        hookData: { cwd: projectRoot, session_id: sessionId },
+      },
+      context: {
+        routing: { system, score: system === 'system2' ? 0.9 : 0.2 },
+        intent: {
+          best: 'action:implement',
+          commands: ['/implement'],
+          agents: ['backend-developer'],
+          ambiguous: false,
+          ...overrides.intent,
+        },
+      },
+      messageParts: [],
+      userPrompt: PROMPT,
+    };
+  }
+
+  async function runPlan(system, overrides = {}) {
+    const sessionId = nextSessionId();
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const result = await mw(planState(system, sessionId, overrides));
+    const planned = readDecisionEvents(sessionId, { cwd: projectRoot })
+      .filter((e) => e.type === WORKFLOW_PLANNED);
+    return { task: result.context.tasks, planned };
+  }
+
+  it('records one workflow-planned line carrying mode=subAgent for a system1 prompt', async () => {
+    const { task, planned } = await runPlan('system1');
+
+    expect(task.mode).toBe('subAgent');
+    expect(planned).toHaveLength(1);
+    expect(planned[0].data.mode).toBe('subAgent');
+    expect(planned[0].phase).toBe('PLAN');
+  });
+
+  it('records one workflow-planned line carrying mode=agentTeam for a system2 prompt', async () => {
+    const { task, planned } = await runPlan('system2');
+
+    expect(task.mode).toBe('agentTeam');
+    expect(planned).toHaveLength(1);
+    expect(planned[0].data.mode).toBe('agentTeam');
+  });
+
+  it('records on every state with a session id, and attaches meta.workflowPlan only for agentTeam', async () => {
+    // The 100% claim, over a table rather than one happy path: the recording
+    // must not depend on the effort file, the recommendations, or the score —
+    // only on a session id being present. Six states, both systems.
+    const TABLE = [
+      { name: 'system1 bare', system: 'system1', effort: null, intent: {} },
+      { name: 'system1 + effort file', system: 'system1', effort: { command: 'daily', effort: 'medium' }, intent: {} },
+      { name: 'system1 + 2 recommendations', system: 'system1', effort: null, intent: { recommendations: TWO_RECOMMENDATIONS } },
+      { name: 'system2 bare', system: 'system2', effort: null, intent: {} },
+      { name: 'system2 + effort file', system: 'system2', effort: { command: 'implement', effort: 'max', shift: 1, reason: 'score>=0.7 (+1)' }, intent: {} },
+      { name: 'system2 + 2 recommendations', system: 'system2', effort: null, intent: { recommendations: TWO_RECOMMENDATIONS } },
+    ];
+
+    const report = [];
+    for (const row of TABLE) {
+      rmSync(path.join(pluginRoot, 'runtime', 'current-effort.json'), { force: true });
+      if (row.effort) writeEffort(row.effort);
+      const { task, planned } = await runPlan(row.system, { intent: row.intent });
+      report.push({
+        name: row.name,
+        lines: planned.length,
+        mode: planned[0]?.data.mode ?? null,
+        hasPlan: task.meta?.workflowPlan !== undefined,
+      });
+    }
+
+    expect(report).toEqual(TABLE.map((row) => ({
+      name: row.name,
+      lines: 1,
+      mode: row.system === 'system2' ? 'agentTeam' : 'subAgent',
+      hasPlan: row.system === 'system2',
+    })));
+  });
+
+  it('skips the store — rather than bucketing — when the prompt carries no session id', async () => {
+    // The absence must stay visible as `skipped`, which is what /doctor reads.
+    // Asserted here because F04(a) doubles the number of calls that can skip.
+    const state = planState('system1', 'sess-f04a-unused');
+    delete state.input.hookData.session_id;
+    const result = await createTasksMiddleware({ now: () => 1700000000000 })(state);
+
+    expect(result.context.tasks.mode).toBe('subAgent');
+    expect(existsSync(path.join(projectRoot, '.artibot', 'runtime', 'decisions')))
+      .toBe(false);
+  });
+
+  it('stays RECORD-ONLY: a system1 prompt whose plan says runner=team still runs subAgent', async () => {
+    // THE TRIPWIRE for F04(b). The config key is present and true, the plan
+    // genuinely resolves to `team`, and the middleware must still not act on
+    // it — no mode change, no `task.meta.workflowPlan` on system1. When the
+    // next release flips this, this case is the one that goes red, on purpose.
+    writeConfig({ ...TEAM_TRIGGER_CONFIG, team: { ...TEAM_TRIGGER_CONFIG.team, followWorkflowPlan: true } });
+
+    const { task, planned } = await runPlan('system1', { intent: { recommendations: TWO_RECOMMENDATIONS } });
+
+    expect(planned).toHaveLength(1);
+    // Negative control: without this the claim below is vacuous.
+    expect(planned[0].data.runner).toBe('team');
+    expect(planned[0].data.mode).toBe('subAgent');
+
+    expect(task.mode).toBe('subAgent');
+    expect(task.phases).toEqual(['execute', 'verify']);
+    expect(task.meta?.workflowPlan).toBeUndefined();
   });
 });

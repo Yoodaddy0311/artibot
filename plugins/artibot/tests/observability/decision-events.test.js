@@ -154,6 +154,48 @@ describe('decision-events — workflow plan (D7)', () => {
     const ev = recordWorkflowPlanDecision('run-1', PLAN, { storeDir });
     expect(ev.data.teammates).toEqual(['backend-developer', 'tdd-guide']);
   });
+
+  // -------------------------------------------------------------------------
+  // F04(a) — `data.mode`, the CALLER's topology, beside `data.runner`, the
+  // plan's. Two different facts: until F04(a) the recorder only ever heard
+  // from the `agentTeam` branch, so every `runner: 'inline'` line on disk was
+  // a plan the caller did not follow and no line existed for the reverse
+  // direction at all. One field makes both directions countable.
+  // -------------------------------------------------------------------------
+
+  it('records the caller mode for both allowlisted values', () => {
+    expect(recordWorkflowPlanDecision('run-1', PLAN, { storeDir, mode: 'agentTeam' }).data.mode)
+      .toBe('agentTeam');
+    expect(recordWorkflowPlanDecision('run-2', PLAN, { storeDir, mode: 'subAgent' }).data.mode)
+      .toBe('subAgent');
+  });
+
+  it('nulls an unknown or absent mode instead of writing it (allowlist, not denylist)', () => {
+    // A denylist would fail OPEN for whatever topology is invented next, and
+    // the value reaches the recorder from a caller this module does not own.
+    const offContract = [undefined, null, '', 'agentteam', 'system2', 'inline', 2, { m: 'x' }];
+    for (const mode of offContract) {
+      expect(recordWorkflowPlanDecision('run-1', PLAN, { storeDir, mode }).data.mode).toBeNull();
+    }
+    const raw = fsSync.readFileSync(getDecisionEventsPath('run-1', { storeDir }), 'utf-8');
+    expect(raw).not.toContain('agentteam');
+    expect(raw).not.toContain('system2');
+  });
+
+  it('leaves the message byte-identical whether or not a mode is supplied', () => {
+    // Readers parse `message` for the runner; adding a field must not move it.
+    const without = recordWorkflowPlanDecision('run-1', PLAN, { storeDir });
+    const withMode = recordWorkflowPlanDecision('run-2', PLAN, { storeDir, mode: 'subAgent' });
+    expect(withMode.message).toBe(without.message);
+  });
+
+  it('makes the plan-vs-mode mismatch computable from one line', () => {
+    const mismatch = recordWorkflowPlanDecision('run-1', PLAN, { storeDir, mode: 'subAgent' });
+    const agree = recordWorkflowPlanDecision('run-2', PLAN, { storeDir, mode: 'agentTeam' });
+    const isMismatch = (d) => (d.runner === 'team') !== (d.mode === 'agentTeam');
+    expect(isMismatch(mismatch.data)).toBe(true);
+    expect(isMismatch(agree.data)).toBe(false);
+  });
 });
 
 describe('decision-events — append-only survival', () => {
