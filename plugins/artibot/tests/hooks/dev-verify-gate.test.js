@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
+import { verifyCompletedIdempotencyKey } from '../../lib/verification/verify-writer.js';
 
 /**
  * dev-verify-gate.js — v4.5.8 marker-based DEV verify gate.
@@ -86,6 +88,37 @@ vi.mock('node:child_process', () => ({
 vi.mock('../../lib/git/repo-root-cache.js', () => ({
   getRepoRoot: vi.fn(() => mockState.repoRoot),
   getHeadSha: vi.fn(() => 'abc1234'),
+}));
+
+/**
+ * 원장 포트 대역(OB-07). `mockState.repoRoot` 는 '/fake/repo' 라 실제 디스크의
+ * `C:\fake\repo` (POSIX 라면 `/fake/repo`) 로 풀린다 — 훅이 이제 원장을 쓰므로
+ * 대역이 없으면 이 스위트가 샌드박스 밖에 파일을 만든다. 그래서 append/read
+ * 두 포트를 여기서 가로챈다. `vi.hoisted` 인 이유: `vi.mock` 팩토리는 변수
+ * 선언 위로 끌어올려지므로 평범한 `const` 는 팩토리 안에서 TDZ 로 죽는다.
+ */
+const ledgerMock = vi.hoisted(() => ({
+  /** @type {Array<{projectRoot: string, event: object}>} */
+  appends: [],
+  /** @type {Array<{projectRoot: string, filter: object}>} */
+  reads: [],
+  readThrows: false,
+  /** @type {object[]} */
+  events: [],
+}));
+
+vi.mock('../../lib/runtime/ledger.js', () => ({
+  appendLedgerEvent: vi.fn((projectRoot, event) => {
+    ledgerMock.appends.push({ projectRoot, event });
+    return {
+      ok: true, path: '<mocked>', event: event.event, seq: ledgerMock.appends.length, bytes: 0,
+    };
+  }),
+  readAllEvents: vi.fn((projectRoot, filter) => {
+    ledgerMock.reads.push({ projectRoot, filter });
+    if (ledgerMock.readThrows) throw new Error('ledger unreadable (injected)');
+    return ledgerMock.events;
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -406,5 +439,172 @@ describe('excluded-files filter (ground truth)', () => {
       'SESSION-NOTES.md',
     ]);
     expect(result).toEqual(['.artibot/OTHER-NOTES.md', 'SESSION-NOTES.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 미측정 분모(unmeasured denominator) — 원장 배선 (OB-07)
+//
+// 게이트가 발화하면 `verify.completed` 4줄(레이어 3 + overall 1)을 전부
+// `result: "unmeasured"` 로 남긴다. 이 스위트는 **주입된 포트**로만 잰다.
+// 실제 프로세스로 재는 쪽(원장 파일 내용·stdout 바이트·멱등성)은
+// `tests/hooks/dev-verify-gate-ledger.test.js` 에 있다 — 이 파일은
+// `node:child_process` 를 execSync 만 있는 팩토리로 대역하므로 여기서는
+// 자식 프로세스를 띄울 수 없다.
+//
+// 케이스 (c)"lib import 실패"는 여기서만 잴 수 있다. 훅은 `lib/` 를 자기
+// 파일 기준 상대경로로 푸므로 샌드박스로는 그 모듈을 없앨 수 없고,
+// `vi.doMock` 으로 던지는 모듈을 꽂는 것이 유일한 측정 수단이다.
+// ---------------------------------------------------------------------------
+describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
+  let denomRoot;
+
+  /**
+   * PINNED COPY of `dev-verify-gate.js#DEV_VERIFY_REASON` (모듈 비공개라
+   * import 불가). 훅의 문자열이 바뀌면 이 단언이 깨지고 둘을 함께 고치게 된다.
+   */
+  const DEV_VERIFY_REASON =
+    'DEV verify (CLAUDE.md DEV Protocol): report per-item evidence (file:line); '
+    + "flag anything unproven as 'Pending verification'.";
+
+  // 이 스위트에서 `resolveConfigPath` 는 대역에 없어 loadVerifyMode() 가
+  // 기본값으로 떨어진다 → mode 'enforce'.
+  const EXPECTED_STDOUT = JSON.stringify(
+    buildDevVerifyOutput(DEV_VERIFY_REASON, { mode: 'enforce', hookEventName: 'Stop' }),
+  );
+
+  const SESSION = 'sessVGW00001';
+
+  function fireFixture() {
+    denomRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-denom-'));
+    mockState.pluginRoot = denomRoot;
+    mockState.stdoutChunks = [];
+    mockState.execLog = [];
+    mockState.dualDiff = { z: 'lib/a.js\0', plain: 'lib/a.js\n' };
+    mockState.stdin = JSON.stringify({
+      session_id: SESSION, hook_event_name: 'Stop', stop_hook_active: false,
+    });
+    // 마커만 있고 캐시가 없으면 게이트가 발화한다.
+    const runtime = path.join(denomRoot, 'runtime');
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(path.join(runtime, 'last-main-agent-edit.timestamp'), 'x');
+  }
+
+  beforeEach(() => {
+    ledgerMock.appends.length = 0;
+    ledgerMock.reads.length = 0;
+    ledgerMock.readThrows = false;
+    ledgerMock.events = [];
+    fireFixture();
+  });
+
+  afterEach(() => {
+    try { rmSync(denomRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    vi.doUnmock('../../lib/verification/unified-verifier.js');
+    vi.resetModules();
+  });
+
+  async function loadMain() {
+    const mod = await import('../../scripts/hooks/dev-verify-gate.js');
+    return mod.main;
+  }
+
+  it('레이어 3줄 + overall 1줄을 모두 unmeasured 로 append 한다', async () => {
+    const main = await loadMain();
+    await main();
+
+    expect(ledgerMock.appends).toHaveLength(4);
+    for (const { projectRoot, event } of ledgerMock.appends) {
+      expect(projectRoot).toBe(mockState.repoRoot);
+      expect(event.event).toBe('verify.completed');
+      expect(event.session_id).toBe(SESSION);
+      expect(event.source).toBe('gate');
+      expect(event.data.result).toBe('unmeasured');
+    }
+    const layers = ledgerMock.appends
+      .map(({ event }) => event.data.layer)
+      .filter((l) => typeof l === 'string')
+      .sort();
+    expect(layers).toEqual(['behavioral', 'deterministic', 'operational']);
+    // overall 줄은 layer 키 자체가 없어야 한다 — 읽기측
+    // `lib/runtime/artifact-lifecycle-gates.js#tallyLayer` 가 그때만 별도
+    // 버킷으로 세고, 레이어별 집계를 오염시키지 않는다.
+    const overall = ledgerMock.appends.filter(({ event }) => !('layer' in event.data));
+    expect(overall).toHaveLength(1);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('세션과 verify.completed 로 좁혀서만 기존 키를 읽는다', async () => {
+    const main = await loadMain();
+    await main();
+    expect(ledgerMock.reads).toHaveLength(1);
+    expect(ledgerMock.reads[0]).toEqual({
+      projectRoot: mockState.repoRoot,
+      filter: { session_id: SESSION, event: 'verify.completed' },
+    });
+  });
+
+  it('샌드박스 밖(/fake/repo)에 아무것도 만들지 않는다', async () => {
+    const main = await loadMain();
+    await main();
+    // 대역이 빠지면 event-writer 가 실제로 여기에 디렉터리를 판다.
+    expect(existsSync(path.resolve('/fake'))).toBe(false);
+    expect(existsSync(path.resolve('/fake/repo'))).toBe(false);
+  });
+
+  it('stdin 에 session_id 가 없으면 원장을 건드리지 않는다', async () => {
+    mockState.stdin = JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: false });
+    const main = await loadMain();
+    await main();
+    expect(ledgerMock.appends).toHaveLength(0);
+    expect(ledgerMock.reads).toHaveLength(0);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('이미 있는 키는 다시 append 하지 않는다(같은 초 재시도)', async () => {
+    // 1차 발화로 실제 키를 얻고, 그 키들을 "이미 원장에 있는 줄"로 되먹인다.
+    const main = await loadMain();
+    await main();
+    const first = ledgerMock.appends.map(({ event }) => event);
+    expect(first).toHaveLength(4);
+    ledgerMock.events = first.map((event) => ({
+      event: 'verify.completed', idempotency_key: event.idempotency_key,
+    }));
+    // 키 생성 규칙 자체도 함께 못박는다.
+    const verificationId = first[0].data.verification_id;
+    expect(ledgerMock.events.map((e) => e.idempotency_key)).toContain(
+      verifyCompletedIdempotencyKey(SESSION, verificationId),
+    );
+
+    ledgerMock.appends.length = 0;
+    fireFixture();
+    await main();
+    // 같은 초에 다시 돌면 verification_id 가 같아 전부 deduped 다. 다른 초면
+    // 새 id 라 4줄이 더 붙는다 — 그래서 둘 중 하나여야 하고, 0 이 아니라면
+    // 반드시 4 여야 한다.
+    expect([0, 4]).toContain(ledgerMock.appends.length);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('existingKeys 읽기가 던지면 한 줄도 쓰지 않는다(중복보다 부재를 택한다)', async () => {
+    ledgerMock.readThrows = true;
+    const main = await loadMain();
+    await main();
+    expect(ledgerMock.reads).toHaveLength(1);
+    expect(ledgerMock.appends).toHaveLength(0);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('(케이스 c) 검증 lib 가 로드 중 던져도 stdout 은 바이트 동일하다', async () => {
+    vi.resetModules();
+    vi.doMock('../../lib/verification/unified-verifier.js', () => {
+      throw new Error('injected import-time failure');
+    });
+    const main = await loadMain();
+    await main();
+    expect(ledgerMock.appends).toHaveLength(0);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+    expect(Buffer.from(mockState.stdoutChunks[0], 'utf-8')
+      .equals(Buffer.from(EXPECTED_STDOUT, 'utf-8'))).toBe(true);
   });
 });
