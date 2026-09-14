@@ -18,6 +18,10 @@
  *     이미 잡는 것은 `existingCoverage[]` 인용으로만 남긴다.
  *  F. **Observe = 기록만.** `classify` 가 돌려주는 것은 `{id, reason}` 뿐이고
  *     `decision`·`block` 같은 필드를 만들지 않는다. 이 파일이 그 모양을 고정한다.
+ *  G. **무제한 런 0.** 룩어헤드 밖의 `[^\n]*`·`[^\n]+`·`.*`·`.+` 를 가진 패턴은
+ *     명시 등록된 예외뿐이다. 값싼 **구조 핀**이고, 전체 스캐너는
+ *     `tests/autopilot/safety.test.js` 쪽에 있다(HUMAN_GATE_MATRIX 를 세 번째
+ *     카탈로그로 그리 배선하는 것은 별도 작업 소유).
  *
  * ── 이 게이트가 못 보는 것 (검증 규율 §9 · PRD R-05) ────────────────────────
  *
@@ -308,5 +312,108 @@ describe('human-gate matrix — Observe = 기록만 (F)', () => {
 
   it('반환 봉투는 hits 키 하나뿐이다', () => {
     expect(Object.keys(classify({ tool: 'Bash', command: 'ls' }))).toEqual(['hits']);
+  });
+});
+
+/**
+ * 무제한 런의 표기형. 라벨은 사람이 읽는 이름이고, 정규식이 판정한다.
+ * `.` 앞의 역슬래시를 배제해 `\.` + 별도 수량자 같은 자리를 거짓 양성으로 잡지 않는다.
+ * @type {ReadonlyArray<[string, RegExp]>}
+ */
+const UNBOUNDED_RUN_FORMS = Object.freeze([
+  ['[^\\n]*', /\[\^\\n\]\*/],
+  ['[^\\n]+', /\[\^\\n\]\+/],
+  ['.*', /(?<!\\)\.\*/],
+  ['.+', /(?<!\\)\.\+/],
+]);
+
+/**
+ * 룩어헤드 **밖**의 무제한 런을 찾는다.
+ *
+ * 룩어헤드를 제외하는 이유: 부정 룩어헤드 안의 런은 매치 위치를 늘리지 않고
+ * 한 번만 평가된다(HG-09 의 `(?![\s\S]*\bWHERE\b)`). 위험한 것은 매치 시작
+ * 위치마다 줄 끝까지 훑고 되돌아오는 **본문** 런이다.
+ *
+ * 한계(적어 두지 않으면 이 게이트가 다음 착시의 근거가 된다 — 검증 규율 §9):
+ * 룩어헤드 제거는 `[^)]*` 로 하므로 **괄호를 품은 룩어헤드**는 온전히 지워지지
+ * 않는다. 현재 매트릭스에 그런 룩어헤드는 0건이고, 남으면 거짓 양성 쪽으로
+ * 기운다(그린을 만들지 않는다). 정밀 파서가 필요해지면 그때 옮긴다.
+ *
+ * @param {string} source 정규식 원문
+ * @returns {string[]} 발견된 런의 라벨 목록. 빈 배열이면 통과
+ */
+function unboundedRunsOutsideLookahead(source) {
+  const body = source.replace(/\(\?[=!][^)]*\)/g, '');
+  return UNBOUNDED_RUN_FORMS.filter(([, probe]) => probe.test(body)).map(([label]) => label);
+}
+
+/**
+ * 명시 등록된 예외 — **allowlist 다(부정 목록이 아니다)**. 여기 없는 무제한 런은
+ * 전부 RED 이므로, 새 패턴이 런을 달고 들어오면 등록 없이는 통과하지 못한다.
+ *
+ * 등록 근거(2026-09-13 16:3x UTC, node v24.15.0, 이 워크트리 실측):
+ *  HG-11 의 두 패턴은 `^` 앵커라 매치 시작 위치가 **1곳뿐**이다. 그래서 뒤따르는
+ *  `[^\n]*` 는 2차식을 만들지 않는다. `classify` median-of-3 실측:
+ *    `fill('cat ', n)`   20,480B 0.12ms · 122,880B 0.54ms  (6배 구간 성장 1.10)
+ *    `fill('cat x ', n)` 20,480B 0.08ms · 122,880B 0.49ms  (6배 구간 성장 1.10)
+ *  비교: 바운드 전 HG-07 의 무앵커 런은 같은 척도에서 122,880B 1,839.8ms 였다.
+ *
+ * 포기하는 것: 앵커가 있어도 `\s*` 뒤에 대안 분기가 늘면 앞머리에서 모호해질 수
+ * 있다. 이 예외는 "앵커면 안전" 을 일반화하지 않는다 — **이 두 원문**만 면제한다.
+ * @type {ReadonlyArray<string>}
+ */
+const ANCHORED_LINEAR_EXEMPTIONS = Object.freeze([
+  String.raw`^\s*(?:cat|less|head|tail|more|type)\b[^\n]*\.env(?:\.[\w-]+)?\b`,
+  String.raw`^\s*(?:cat|less|head|tail|more|type)\b[^\n]*\b(?:id_rsa|id_ed25519|credentials\.json|kubeconfig)\b`,
+]);
+
+describe('human-gate matrix — 무제한 런 0 (G)', () => {
+  it('등록된 예외를 빼면 무제한 런을 가진 패턴이 없다', () => {
+    const offenders = [];
+    for (const row of HUMAN_GATE_MATRIX) {
+      for (const pattern of row.patterns) {
+        if (ANCHORED_LINEAR_EXEMPTIONS.includes(pattern.source)) continue;
+        const runs = unboundedRunsOutsideLookahead(pattern.source);
+        if (runs.length > 0) {
+          offenders.push(`${row.id}: ${runs.join(',')} in ${pattern.source}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('예외 목록은 실재하고, 전부 ^ 앵커이며, 유령 항목이 없다', () => {
+    const live = new Set(
+      HUMAN_GATE_MATRIX.flatMap((row) => row.patterns.map((p) => p.source)),
+    );
+    for (const source of ANCHORED_LINEAR_EXEMPTIONS) {
+      // 매트릭스에서 사라진 예외를 남겨 두면 다음 사람이 그 자리를 재사용한다.
+      expect(live.has(source), `stale exemption: ${source}`).toBe(true);
+      expect(source.startsWith('^'), `exemption must be anchored: ${source}`).toBe(true);
+      expect(unboundedRunsOutsideLookahead(source).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('HG-07 의 두 규칙은 예외가 아니라 바운드로 통과한다', () => {
+    const hg07 = HUMAN_GATE_MATRIX.find((row) => row.id === 'HG-07');
+    for (const index of [0, 2]) {
+      const { source } = hg07.patterns[index];
+      expect(ANCHORED_LINEAR_EXEMPTIONS).not.toContain(source);
+      expect(source).toContain('[^\\n]{0,192}');
+    }
+  });
+
+  it('일부러 심은 무앵커 런을 이 검사가 보고한다 (스캐너 자기검증)', () => {
+    // 검사가 조용히 그린이 되지 않는지 — 규율 §10.
+    expect(unboundedRunsOutsideLookahead(/\bcurl\b[^\n]*x/i.source)).toEqual(['[^\\n]*']);
+    expect(unboundedRunsOutsideLookahead(/\bcurl\b[^\n]+x/i.source)).toEqual(['[^\\n]+']);
+    expect(unboundedRunsOutsideLookahead(/\bcurl\b.*x/i.source)).toEqual(['.*']);
+    expect(unboundedRunsOutsideLookahead(/\bcurl\b.+x/i.source)).toEqual(['.+']);
+    // 반대 방향: 바운드된 창과 이스케이프된 점은 보고하지 않는다.
+    expect(unboundedRunsOutsideLookahead(/\bcurl\b[^\n]{0,192}x/i.source)).toEqual([]);
+    expect(unboundedRunsOutsideLookahead(/a\.env\b/i.source)).toEqual([]);
+    // 룩어헤드 안의 런은 면제된다 — HG-09 의 실제 원문으로 확인한다.
+    expect(unboundedRunsOutsideLookahead(/\bUPDATE\s+\w+\s+SET\b(?![\s\S]*\bWHERE\b)/i.source))
+      .toEqual([]);
   });
 });

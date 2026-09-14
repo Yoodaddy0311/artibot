@@ -14,6 +14,10 @@ import {
 // 대조한다. (2) 아래 ReDoS 정적 스캔이 L1·L2 규칙을 한 번에 훑는다. 이 파일은
 // L1 소스를 편집하지 않는다.
 import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
+// 읽기 전용 — 정적 스캔의 **세 번째 카탈로그**(2026-09-14 추가). 같은
+// PreToolUse 경로(probe 'command', tools Bash)를 타면서 두 카탈로그 밖이라
+// 종전 스캔이 못 보던 자리다. 이 파일은 human-gates.js 를 편집하지 않는다.
+import { HUMAN_GATE_MATRIX } from '../../lib/security/human-gates.js';
 
 describe('classifyRisk', () => {
   it('flags git push --force as danger', () => {
@@ -92,11 +96,15 @@ describe('classifyRisk — scoped recursive delete is caution', () => {
     expect(r.matchedId).toBe('rm-rf-path');
   });
 
+  // `rm -r dir` · `rm -rv dir` · `rm --recursive dir` USED TO SIT IN THIS LIST.
+  // They moved to the rm-recursive-path describe below on 2026-09-14 — the new
+  // rule is what made them caution, so leaving them pinned safe here would have
+  // been pinning the blind spot. They are the only three rows this catalogue
+  // addition flips (measured: the 17-command probe in the report, and the
+  // targeted suites tests/hooks/{bash-risk-guard,pre-bash,permission-auto-approve}
+  // carry no force-less recursive rm pin at all).
   it.each([
     'rm -f file.txt',
-    'rm -r dir',
-    'rm -rv dir',
-    'rm --recursive dir',
     'rm --force file.txt',
     'rm -f /',
     'rm /tmp/file.txt',
@@ -128,6 +136,103 @@ describe('classifyRisk — scoped recursive delete is caution', () => {
     const r = classifyRisk(command);
     expect(r.level).toBe('danger');
     expect(r.matchedId).toBe(matchedId);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// rm-recursive-path — force 플래그 없는 재귀 삭제(리더 추가 목표 A, 2026-09-14).
+//
+// 왜 생겼나(실측 2026-09-14, node v24.15.0, executeChain + classifyRisk 17형):
+// force 없는 재귀 삭제는 **full-stack 사각**이었다.
+//   rm -r ./build                 L1 approve / L2 safe
+//   rm -R x                       L1 approve / L2 safe
+//   rm -r dir · rm -rv dir        L1 approve / L2 safe
+//   rm --recursive dir            L1 approve / L2 safe
+//   rm --recursive <513자>/x      L1 approve / L2 safe   <- 창(512) 밖
+//   rm --recursive a/b/c          L1 block   / L2 safe   <- L1 단독, 방향 규칙 위반
+// L1 은 `rm -rf with path`(-\w*r\w*f 결합 토큰) 와 `rm recursive+force
+// (any target)` 둘 다 force 를 요구하고, `--recursive` 롱폼만 창 안의 `/` 와
+// 함께일 때 잡는다. L2 는 rm-rf-root 가 `/`·`~`·$HOME 타깃을, rm-rf-path 가
+// force 를 요구했다. 이 규칙이 그 교집합을 메운다.
+//
+// 이 describe 가 증명하지 않는 것: L1 쪽 폭(512)은 여기서 재지 않는다 —
+// tests/core/blocked-patterns.test.js 의 'DOCUMENTED BLIND SPOT' 과 경계 쌍이
+// 그 정본이고, 이 파일은 L2 판정만 책임진다.
+describe('classifyRisk — force-less recursive delete is caution', () => {
+  it.each([
+    'rm -r ./build',
+    'rm --recursive a/b/c',
+    'rm -R x',
+    'rm -r dir',
+    'rm -rv dir',
+    'rm --recursive dir',
+    'rm -r -- dir',
+  ])('grades %s as caution via rm-recursive-path', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe('rm-recursive-path');
+  });
+
+  // 창 밖 경로. L1 은 여기서 approve 이므로(창 512) 이 행이 그린이라는 것이
+  // full-stack 사각이 닫혔다는 유일한 증거다. 513 은 L1 창의 첫 바깥 값이다.
+  it('grades a recursive delete with a path past the L1 512-char window as caution', () => {
+    const r = classifyRisk(`rm --recursive ${'a'.repeat(513)}/x`);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe('rm-recursive-path');
+  });
+
+  // 순서 의존 핀. force 가 있으면 rm-rf-path 가 먼저 잡아야 한다 — 새 규칙을
+  // 배열 앞으로 옮기면 여기가 먼저 깨진다(caution 은 첫 히트가 이긴다).
+  it.each([
+    ['rm -rf ./build', 'rm-rf-path'],
+    ['rm -r -f dist', 'rm-rf-path'],
+    ['rm --recursive --force out', 'rm-rf-path'],
+  ])('leaves %s on rm-rf-path, not the new rule', (command, matchedId) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe(matchedId);
+  });
+
+  // 음성 대조. 재귀 플래그가 없으면 발화하지 않는다.
+  it.each([
+    'rm x',
+    'rm -f x',
+    'rm -i x',
+    'rm -- x',
+  ])('leaves %s safe', (command) => {
+    expect(classifyRisk(command).level).toBe('safe');
+  });
+
+  // 루트·글로브 타깃은 위 두 규칙이 danger 로 먼저 가져간다 — 새 규칙이
+  // 그것을 caution 으로 강등시키지 않는지 본다.
+  it.each([
+    ['rm -rf /', 'rm-rf-root'],
+    ['rm -r /', 'rm-rf-root'],
+    ['rm -r ~/x', 'rm-rf-root'],
+    ['rm -r $HOME/x', 'rm-rf-root'],
+    ['rm -r *', 'rm-rf-broad'],
+  ])('keeps %s at danger via %s', (command, matchedId) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe(matchedId);
+  });
+
+  // 창 게이트와의 관계: 이 규칙은 창을 갖지 않으므로 경계 쌍 집합에 들어가면
+  // 안 된다. 아래 'windowed rule ids === boundary pair ids' 가 집합 동일성을
+  // 보지만, 그 단언은 규칙이 창을 **얻었을 때**만 움직인다. 여기서 직접 못
+  // 박아 둔다 — 누가 이 규칙에 `[^\n]{0,N}` 을 끼워 넣으면 양쪽이 함께 RED 다.
+  it('carries no window, so it is out of the boundary-pair set', () => {
+    const rule = DANGEROUS_PATTERNS.find((r) => r.id === 'rm-recursive-path');
+    expect(rule).toBeDefined();
+    expect(rule.level).toBe('caution');
+    expect(hasBoundedWindow(rule.test.source)).toBe(false);
+  });
+
+  // 배열 순서 자체를 핀한다. 위 'leaves … on rm-rf-path' 와 중복이 아니다 —
+  // 저쪽은 판정을, 여기는 원인을 고정한다.
+  it('sits after rm-rf-path in the catalogue', () => {
+    const ids = DANGEROUS_PATTERNS.map((r) => r.id);
+    expect(ids.indexOf('rm-recursive-path')).toBeGreaterThan(ids.indexOf('rm-rf-path'));
   });
 });
 
