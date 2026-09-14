@@ -36,6 +36,16 @@ export const PROMPT_PLACEHOLDERS = Object.freeze([
  */
 export const DEFAULT_REQUIRED_SECTIONS = Object.freeze([/소유|allowlist/i, /완료/]);
 
+/**
+ * Files copied into the worktree beside `brief.md` when the parent has them.
+ *
+ * An ALLOWLIST of exact names, deliberately not a glob: the same folder is
+ * where recon output (`brief-draft.md`) and the leader's scratch land, and a
+ * glob would ship all of it into every limb window. A missing file is not an
+ * error — the addendum is optional by construction.
+ */
+export const SIBLING_FILES = Object.freeze(['leader-addendum.md']);
+
 /** Fence-block regex shared with `tests/commands/report-contract-parity.test.js#extractBlock`. */
 const CONTRACT_BLOCK = /```\r?\n(\[보고 계약\][\s\S]*?)\r?\n```/;
 
@@ -161,9 +171,10 @@ export function missingSections(briefText, requiredSections = DEFAULT_REQUIRED_S
 }
 
 /**
- * Copy `<parentRoot>/.artibot/split/<limb>/brief.md` into the worktree
- * (atomic, byte-exact), verify its required sections, write `prompt.md`
- * beside it, and return the one-line pointer the leader sends.
+ * Copy the parent limb brief into the worktree (atomic, byte-exact), verify
+ * its required sections, write `prompt.md` beside it, copy every
+ * {@link SIBLING_FILES} the parent has, and return the one-line pointer the
+ * leader sends.
  *
  * Refuses (throws) when the parent brief is missing — a worktree brief is a
  * copy, never an original — and when a required section is absent. When the
@@ -179,7 +190,7 @@ export function missingSections(briefText, requiredSections = DEFAULT_REQUIRED_S
  * @param {string} [input.prompt] - rendered prompt; omitted = no prompt.md written
  * @param {ReadonlyArray<RegExp>} [input.requiredSections]
  * @param {boolean} [input.dryRun=false] - verify only; write nothing
- * @returns {{ briefPath: string, promptPath: string|null, sourceBrief: string, pointer: string, copied: boolean }}
+ * @returns {{ briefPath: string, promptPath: string|null, sourceBrief: string, pointer: string, copied: boolean, siblings: Array<{ name: string, copied: boolean, sourcePath: string, destPath: string }> }}
  */
 export function materializeLimb({
   parentRoot, worktreePath, limb, branch, plan, prompt, requiredSections = DEFAULT_REQUIRED_SECTIONS, dryRun = false,
@@ -203,15 +214,24 @@ export function materializeLimb({
     if (willCopy) atomicWriteBytes(dst.brief, bytes);
     if (typeof prompt === 'string') atomicWriteBytes(dst.prompt, Buffer.from(prompt, 'utf-8'));
   }
+  const siblings = SIBLING_FILES.map((name) => {
+    const sourcePath = path.join(src.dir, name);
+    const destPath = path.join(dst.dir, name);
+    const copy = !dryRun && path.resolve(sourcePath) !== path.resolve(destPath) && fs.existsSync(sourcePath);
+    if (copy) atomicWriteBytes(destPath, fs.readFileSync(sourcePath));
+    return { name, copied: copy, sourcePath, destPath };
+  });
+  const promptPath = typeof prompt === 'string' ? dst.prompt : null;
   const pointer = buildLimbMessage(
     { runId: String(plan?.runId ?? ''), base: String(plan?.base ?? '') },
-    { limb, worktreePath, branch: String(branch ?? '') },
+    { limb, worktreePath, branch: String(branch ?? ''), promptPath },
   );
   return {
     briefPath: dst.brief,
-    promptPath: typeof prompt === 'string' ? dst.prompt : null,
+    promptPath,
     sourceBrief: src.brief,
     pointer,
     copied: !dryRun && willCopy,
+    siblings,
   };
 }

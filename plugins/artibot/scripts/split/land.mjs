@@ -18,10 +18,22 @@
  * files that literally cite a config file this limb changed. Information only:
  * nothing is executed, no check row is added, and the exit code is unaffected.
  *
- * `--base` defaults to `plan.base` (the plan-time SHA). Once a limb has
- * merged an advanced main, pass the live ref (`--base master`) or the
- * ownership diff will list other limbs' merged-in files (lib header,
- * "Base choice matters").
+ * BASE PRECEDENCE ({@link effectiveBase}): `--base` > `plan.limbs[].forkPoint`
+ * > `plan.base`. `plan.base` is the SHA at PLAN time, but a worktree is created
+ * later and branches off whatever the integration branch had advanced to by
+ * then, so every commit that landed in between reads as this limb's change —
+ * measured as `ownership FAIL` on files no one on the limb touched. `forkPoint`
+ * is what `dispatch` records at worktree creation and is therefore the honest
+ * base. The resolved base is printed as one line under the table (`--json`:
+ * `effectiveBase`); it is information, not a check row, and cannot move the
+ * exit code.
+ *
+ * WHAT THAT LINE CANNOT SEE: a limb REBASED after dispatch — `forkPoint` is
+ * still used, and the mismatch appears only as a note; the `merge-base` shown
+ * when no fork point was recorded depends on the LIVE `master` ref and is never
+ * used as the base; and a `forkPoint` that is itself wrong (a window that
+ * committed before dispatch recorded it) yields an empty diff, which the
+ * existing `empty` check reports as FAIL rather than this line.
  *
  * Exit codes: 0 PASS · 1 FAIL / UNSUPPORTED / usage or plan error.
  *
@@ -32,6 +44,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { checkLimbLanding, defaultExec } from '../../lib/git/limb-landing-check.js';
+import { forkPointForLimb } from '../../lib/git/split-run-file.js';
 import { fileURLToPath } from 'node:url';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
@@ -350,6 +363,106 @@ export function formatPinTests(result) {
   return lines.join('\n');
 }
 
+/** The branch limbs are cut from and merged back into. */
+const INTEGRATION_REF = 'master';
+
+/**
+ * Resolve which ref the landing checks should diff against, and say why.
+ *
+ * PRECEDENCE — `--base` > `forkPoint` > `plan.base`. The CLI flag wins
+ * unconditionally: it is the operator's override for the case this function
+ * cannot reason about (a limb that has since merged an advanced main), and an
+ * override that a recorded value could beat would not be an override.
+ *
+ * Everything past picking the base is INFORMATION. No `checks[]` row is added
+ * — `tests/git/limb-landing-check.test.js` and `tests/split/land-pin-tests.test.js`
+ * both pin `checks.length === 7`, and more importantly a base that is merely
+ * surprising is not a landing defect. The `git` calls here only ever produce
+ * `note` text; `mergeBase` in particular is computed against the LIVE
+ * integration ref and is deliberately never used as `base` (that would make the
+ * checklist's answer depend on when it was run).
+ *
+ * The three `note` texts open with different words on purpose: like the
+ * `UNSUPPORTED` strings in {@link lintCheck}, this line is often read truncated,
+ * so `source` has to be legible from the first few characters.
+ *
+ * @param {object} p
+ * @param {string|null} [p.cliBase] - `--base` value, or null
+ * @param {string} [p.planBase] - `plan.base`
+ * @param {string|null} [p.forkPoint] - `plan.limbs[].forkPoint`, or null
+ * @param {string} [p.branch] - limb branch, for the merge-base hint
+ * @param {string} [p.cwd] - parent repo root
+ * @param {typeof defaultExec} [p.exec=defaultExec] - git runner (injected in tests)
+ * @param {string} [p.integrationRef=INTEGRATION_REF]
+ * @returns {Readonly<{ base: string, source: 'cli'|'forkPoint'|'plan', planBase: string, forkPoint: string|null, aheadOfPlanBase: number|null, mergeBase: string|null, note: string }>}
+ */
+export function effectiveBase({
+  cliBase = null, planBase = '', forkPoint = null, branch = '', cwd = process.cwd(),
+  exec = defaultExec, integrationRef = INTEGRATION_REF,
+} = {}) {
+  const plan = typeof planBase === 'string' ? planBase : '';
+  const fork = typeof forkPoint === 'string' && forkPoint.trim() ? forkPoint.trim() : null;
+  const short = (s) => String(s).slice(0, 12);
+  const mk = (base, source, note, extra = {}) => Object.freeze({
+    base, source, planBase: plan, forkPoint: fork, aheadOfPlanBase: null, mergeBase: null, note, ...extra,
+  });
+
+  if (typeof cliBase === 'string' && cliBase.trim()) {
+    return mk(cliBase.trim(), 'cli', `--base 로 명시한 ref 가 이긴다 — forkPoint(${fork ? short(fork) : '미기록'})·plan.base(${plan ? short(plan) : '없음'}) 를 모두 무시한다.`);
+  }
+
+  if (fork) {
+    if (!plan || fork === plan) {
+      return mk(fork, 'forkPoint', `forkPoint 기록값을 base 로 쓴다 — ${plan ? 'plan.base 와 같음' : 'plan.base 없음'}.`);
+    }
+    // `rev-list --count A..B` is 0 when B is not ahead of A, so it cannot by
+    // itself distinguish "same commit" from "diverged"; the ancestry test below
+    // is what separates a fast-forward fork point from a rebased one.
+    const counted = exec(['rev-list', '--count', `${plan}..${fork}`], { cwd });
+    const n = counted.status === 0 ? Number.parseInt(String(counted.stdout || '').trim(), 10) : NaN;
+    const ahead = Number.isFinite(n) ? n : null;
+    const anc = exec(['merge-base', '--is-ancestor', plan, fork], { cwd });
+    // A rebased limb still lands on its fork point — refusing it here would
+    // block a legitimate workflow over a fact the checks themselves will show.
+    // But it is not passed over in silence either.
+    const rebased = anc.status !== 0
+      ? ' forkPoint 가 plan.base 의 후손이 아님(줄기가 리베이스됐을 수 있다) — 그래도 forkPoint 를 쓴다.'
+      : '';
+    const aheadNote = ahead === null
+      ? '앞선 커밋 수 미확인(rev-list 실패)'
+      : `plan.base 보다 ${ahead} commits 앞`;
+    return mk(fork, 'forkPoint', `forkPoint 기록값을 base 로 쓴다 — ${aheadNote}.${rebased}`, { aheadOfPlanBase: ahead });
+  }
+
+  if (!plan) return mk('', 'plan', 'plan.base 폴백 불가 — forkPoint 미기록이고 plan.base 도 없다.');
+
+  let mergeBase = null;
+  let hint = '';
+  if (branch) {
+    const mb = exec(['merge-base', integrationRef, branch], { cwd });
+    if (mb.status === 0 && String(mb.stdout || '').trim()) {
+      mergeBase = String(mb.stdout).trim();
+      hint = mergeBase === plan
+        ? ` ${integrationRef} 와의 merge-base 도 plan.base 와 같다.`
+        : ` ${integrationRef} 와의 merge-base 는 ${short(mergeBase)} 로 plan.base 와 다르다 — 정보일 뿐 base 로 쓰지 않는다; 필요하면 --base ${short(mergeBase)} 를 명시하라.`;
+    } else {
+      hint = ` ${integrationRef} 와의 merge-base 계산 실패(${(mb.stderr || '').trim().split('\n')[0] || `exit ${mb.status}`}) — 비교 정보 없음.`;
+    }
+  }
+  return mk(plan, 'plan', `plan.base 폴백 — forkPoint 미기록(dispatch 가 기록하기 전 계획이거나 수기 plan).${hint}`, { mergeBase });
+}
+
+/**
+ * Render {@link effectiveBase} as the one-line table-mode section. Separate
+ * from `formatLandingTable` for the same reason as {@link formatPinTests}:
+ * that signature is pinned elsewhere and this text is not a check.
+ * @param {ReturnType<typeof effectiveBase>} info
+ * @returns {string}
+ */
+export function formatEffectiveBase(info) {
+  return `effective base: ${info.base || '(없음)'} · source=${info.source} — ${info.note}`;
+}
+
 const USAGE = 'usage: node scripts/split/land.mjs <limb> [--base <ref>] [--plan <path>] [--json] [--pr-body <out>]';
 
 /**
@@ -434,7 +547,15 @@ export function runLand({ argv, cwd = process.cwd(), stdout = (s) => process.std
     stderr(loaded.error);
     return 1;
   }
-  const base = args.base ?? (typeof loaded.plan.base === 'string' ? loaded.plan.base : '');
+  const baseInfo = effectiveBase({
+    cliBase: args.base,
+    planBase: typeof loaded.plan.base === 'string' ? loaded.plan.base : '',
+    forkPoint: forkPointForLimb(loaded.plan, args.limb),
+    branch: loaded.entry.branch,
+    cwd: parentRoot,
+    ...(exec ? { exec } : {}),
+  });
+  const base = baseInfo.base;
   if (!base) {
     stderr('no base: plan.base missing and --base not given');
     return 1;
@@ -480,10 +601,17 @@ export function runLand({ argv, cwd = process.cwd(), stdout = (s) => process.std
   if (args.json) {
     stdout(JSON.stringify({
       limb: args.limb, branch: loaded.entry.branch, base, ...result,
+      effectiveBase: baseInfo,
       pinTests: pins.pinTests, pinTestsScanned: pins.scanned,
     }, null, 2));
   } else {
-    stdout(`${formatLandingTable(result, { limb: args.limb, branch: loaded.entry.branch, base })}\n\n${formatPinTests(pins)}`);
+    stdout([
+      formatLandingTable(result, { limb: args.limb, branch: loaded.entry.branch, base }),
+      '',
+      formatEffectiveBase(baseInfo),
+      '',
+      formatPinTests(pins),
+    ].join('\n'));
   }
   return result.status === 'PASS' ? 0 : 1;
 }
