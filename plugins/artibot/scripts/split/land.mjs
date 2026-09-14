@@ -14,6 +14,10 @@
  * `--pr-body <out>` file. PASS is not approval — `## 검수` in the PR body is
  * for a human verdict (see the lib header).
  *
+ * It also prints a `pin tests` section ({@link pinTestsFor}) naming the test
+ * files that literally cite a config file this limb changed. Information only:
+ * nothing is executed, no check row is added, and the exit code is unaffected.
+ *
  * `--base` defaults to `plan.base` (the plan-time SHA). Once a limb has
  * merged an advanced main, pass the live ref (`--base master`) or the
  * ownership diff will list other limbs' merged-in files (lib header,
@@ -198,6 +202,154 @@ export function lintCheck({
   if (r.status !== 1) return mk(false, `UNSUPPORTED — eslint 설정/입력 오류 exit ${r.status} @ ${wtPluginRoot} — ${first}; worktree 에 node_modules 가 없으면 scripts/split/worktree-setup.mjs ${wtRoot} 로 깔고 재실행${outsideNote}`);
   return mk(false, `${inPlugin.length}파일 @ ${wtPluginRoot} — ${first}${outsideNote}`);
 }
+/**
+ * Config files whose basename is worth grepping the test tree for. A limb that
+ * edits one of these usually needs a test that is NOT in its own allowlist.
+ * Allowlist, not denylist: an unknown config name yields an empty result rather
+ * than a scan of everything (rules §8 — a negative list fail-opens on additions,
+ * and here "fail-open" would mean a full-tree grep per changed file).
+ */
+export const CONFIG_PIN_BASENAMES = Object.freeze([
+  'artibot.config.json',
+  'dispatch-table.json',
+  'hooks.json',
+  'ledger-events.allowlist.json',
+  'plugin.json',
+]);
+
+/** `plugins/artibot/schemas/**\/*.json` — every schema is a config pin target. */
+const SCHEMA_DIR_RE = /(?:^|\/)plugins\/artibot\/schemas\/[^\0]+\.json$/;
+
+/** Normalise a path to `/` separators so Windows output is pasteable. */
+const slash = (p) => String(p).replaceAll('\\', '/');
+
+/**
+ * Is this changed file one whose basename we grep the test tree for?
+ * @param {string} file - repo-root-relative path
+ * @returns {boolean}
+ */
+function isConfigPinTarget(file) {
+  const norm = slash(file);
+  if (SCHEMA_DIR_RE.test(norm)) return true;
+  const base = norm.slice(norm.lastIndexOf('/') + 1);
+  return CONFIG_PIN_BASENAMES.includes(base);
+}
+
+/**
+ * Recursively list `*.test.js` / `*.test.mjs` under `root`, as `/`-separated
+ * paths relative to `root`, sorted. Nothing is excluded — not `fixtures`, not
+ * even `node_modules` — because the vitest project include is literally
+ * `tests/**\/*.test.{js,mjs}`. Vitest's DEFAULT exclude does drop
+ * `**\/node_modules/**`, so this list is a superset of what would run if a
+ * `node_modules` ever appeared under `tests/` (0 today, measured 2026-09-14).
+ * Listing more, never less, is the safe side for a "run these" hint.
+ * @param {string} root
+ * @returns {string[]}
+ */
+function defaultListTests(root) {
+  const out = [];
+  const walk = (dir, rel) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory: not a test file we can name
+    }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(path.join(dir, e.name), childRel);
+      else if (/\.test\.(?:js|mjs)$/.test(e.name)) out.push(childRel);
+    }
+  };
+  walk(root, '');
+  return out.sort();
+}
+
+/**
+ * For each changed CONFIG file, list the test files that cite its basename
+ * literally. Pure and injectable; it reads test sources but executes nothing.
+ *
+ * WHAT THIS GREP CANNOT SEE — three blind spots, all real shapes in this repo:
+ *   1. A filename assembled from a variable: `` `${name}.json` `` or
+ *      `name + '.json'`. The basename never appears as a literal, so a test
+ *      that loads the changed file this way is reported as 0 hits.
+ *   2. A directory-glob loader: `readdirSync(path.join(ROOT,'schemas'))` then
+ *      validating every entry. It cites the DIRECTORY, never the file, so
+ *      schema changes look untested here.
+ *   3. Non-`.test.js` companions — a snapshot such as
+ *      `tests/hooks-schema-fingerprint.txt` is what actually turns red, but it
+ *      is not a test file and is never listed. Only the test that reads it is,
+ *      and only if that test also cites the config basename.
+ * WHAT IT DOES SEE, and the reason it is worth having: the `path.join`
+ * assembled form, `path.join(PLUGIN_ROOT, 'hooks', 'hooks.json')`, keeps the
+ * basename as a literal argument — that is exactly the shape of
+ * `tests/hooks-schema-shape.test.js:60` (`HOOKS_JSON_PATH`, measured
+ * 2026-09-14 01:34 KST), the test the Wave 8 p4 batch missed.
+ *
+ * A 0-hit result is therefore NOT evidence that no test covers the file; it is
+ * evidence that no test NAMES it. The table wording says so.
+ *
+ * @param {ReadonlyArray<string>} changedFiles - repo-root-relative paths
+ * @param {string} testsRoot - directory to scan
+ * @param {{ listTests?: (root: string) => string[], readFile?: (p: string) => string }} [deps]
+ * @returns {Readonly<{ pinTests: Readonly<Record<string, ReadonlyArray<string>>>, scanned: number, unreadable: number }>}
+ */
+export function pinTestsFor(changedFiles, testsRoot, deps = {}) {
+  const { listTests = defaultListTests, readFile = (p) => fs.readFileSync(p, 'utf-8') } = deps;
+  const files = Array.isArray(changedFiles) ? changedFiles : [];
+  // Deduplicated and sorted so the same diff always prints the same section.
+  const targets = [...new Set(files.filter((f) => typeof f === 'string' && isConfigPinTarget(f)).map(slash))].sort();
+  const empty = () => Object.freeze({ pinTests: Object.freeze({}), scanned: 0, unreadable: 0 });
+  if (targets.length === 0) return empty(); // no scan at all — the common case
+
+  const rootSlash = slash(testsRoot).replace(/\/+$/, '');
+  let tests;
+  try {
+    tests = [...listTests(testsRoot)].map(slash).sort();
+  } catch {
+    return empty();
+  }
+
+  const basenames = targets.map((t) => t.slice(t.lastIndexOf('/') + 1));
+  const hits = Object.fromEntries(targets.map((t) => [t, []]));
+  let unreadable = 0;
+  for (const rel of tests) {
+    let body;
+    try {
+      body = readFile(`${rootSlash}/${rel}`);
+    } catch {
+      unreadable += 1;
+      continue;
+    }
+    const text = String(body);
+    for (let i = 0; i < targets.length; i += 1) {
+      if (text.includes(basenames[i])) hits[targets[i]].push(rel);
+    }
+  }
+  for (const t of targets) hits[t] = Object.freeze(hits[t].sort());
+  return Object.freeze({ pinTests: Object.freeze(hits), scanned: tests.length, unreadable });
+}
+
+/**
+ * Render {@link pinTestsFor} as a table-mode section. Separate from
+ * `formatLandingTable` on purpose: that signature is pinned by
+ * `tests/git/limb-landing-check.test.js`, and this text is not a check.
+ * @param {ReturnType<typeof pinTestsFor>} result
+ * @returns {string}
+ */
+export function formatPinTests(result) {
+  const entries = Object.entries(result?.pinTests ?? {});
+  if (entries.length === 0) return 'pin tests: 설정 파일 변경 0건';
+  const lines = ['pin tests (정보 — 실행하지 않는다, 표적 스위트 결정은 리더):'];
+  for (const [file, list] of entries) {
+    lines.push(list.length
+      ? `  ${file} → ${list.length}건 / 스캔 ${result.scanned}: ${list.join(', ')}`
+      : `  ${file} → 0건 (사각 3종 가능: 조립 파일명·글롭 로더·스냅샷) / 스캔 ${result.scanned}`);
+  }
+  if (result.unreadable) lines.push(`  (읽지 못한 테스트 파일 ${result.unreadable}건은 스캔에서 빠졌다)`);
+  return lines.join('\n');
+}
+
 const USAGE = 'usage: node scripts/split/land.mjs <limb> [--base <ref>] [--plan <path>] [--json] [--pr-body <out>]';
 
 /**
@@ -319,10 +471,19 @@ export function runLand({ argv, cwd = process.cwd(), stdout = (s) => process.std
       return 1;
     }
   }
+  // Information only — no `checks[]` row, no effect on `status` or the exit
+  // code. The tests scanned are the RUNNER's plugin tree (`PLUGIN_ROOT`), not
+  // the limb's worktree, because the pin that matters is the one in the PARENT
+  // tree the batch merges into. Consequence, stated rather than hidden: a test
+  // the limb itself ADDS is outside this scan and will not be listed.
+  const pins = pinTestsFor(result.changedFiles ?? [], path.join(PLUGIN_ROOT, 'tests'));
   if (args.json) {
-    stdout(JSON.stringify({ limb: args.limb, branch: loaded.entry.branch, base, ...result }, null, 2));
+    stdout(JSON.stringify({
+      limb: args.limb, branch: loaded.entry.branch, base, ...result,
+      pinTests: pins.pinTests, pinTestsScanned: pins.scanned,
+    }, null, 2));
   } else {
-    stdout(formatLandingTable(result, { limb: args.limb, branch: loaded.entry.branch, base }));
+    stdout(`${formatLandingTable(result, { limb: args.limb, branch: loaded.entry.branch, base })}\n\n${formatPinTests(pins)}`);
   }
   return result.status === 'PASS' ? 0 : 1;
 }

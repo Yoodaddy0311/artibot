@@ -24,6 +24,9 @@
  *  4. **픽스처 규모**: 줄기 2개·세션 3행. 상한 8창은 안 본다.
  *  5. **`listWorktrees` 외 I/O 없음** — 파일시스템 부작용 0 은 임시 리포의
  *     `readdirSync` 전후 비교로만 본다(리포 밖 쓰기는 관측 범위 밖).
+ *  6. **`excludeLimbs` 의 출처는 안 본다.** 이 파일은 "제외하면 이렇게 판정한다"
+ *     만 고정한다. 어느 줄기가 정말 done 인지(run.json lanes state `done` ∪ 리더
+ *     명시 목록)는 호출자가 정하며, 잘못된 제외 목록은 이 게이트를 그냥 통과한다.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -153,7 +156,15 @@ describe('dispatch — 훅이 옮긴 브랜치 표시 (gotchas #18/#22)', () => 
     const r = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
     expect(Object.keys(r.limbs[0])).toEqual([
       'limb', 'worktreePath', 'branch', 'worktreeExists', 'branchMatches',
-      'branchRelocatedByHook', 'sessions', 'windowOpen',
+      'branchRelocatedByHook', 'sessions', 'windowOpen', 'excluded',
+    ]);
+  });
+
+  it('반환 최상위 키 순서도 고정이다 — 새 키는 끝에만 붙는다', () => {
+    const r = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(Object.keys(r)).toEqual([
+      'status', 'reasons', 'limbs', 'missingWorktrees', 'unopenedWindows',
+      'ambiguousWindows', 'messages', 'excluded',
     ]);
   });
 });
@@ -215,6 +226,125 @@ describe('dispatch — fail-closed: 거부', () => {
     const r = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: [], messaging: OK });
     expect(r.status).toBe('refused');
     expect(r.unopenedWindows).toEqual(['auth', 'api']);
+  });
+});
+
+describe('dispatch — excludeLimbs (착지·정리된 줄기 선제외)', () => {
+  // 2026-09-14 01:26 KST 실측: Wave 8 plan.json(줄기 8) + 라이브 porcelain 으로
+  // resolveDispatch → refused, missingWorktrees 8/8. 착지 후 정리된 worktree 를
+  // 빼는 입력이 없어 계획 전체가 거부됐고 리더가 손으로 줄기를 뺐다. 이 입력이
+  // 그 수작업을 닫는다. 무엇이 done 인지는 호출자가 정한다(이 파일 밖).
+
+  it('전부 제외하면 refused — "계획에 줄기가 없다" + 제외 2건', () => {
+    const r = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['auth', 'api'],
+    });
+    expect(r.status).toBe('refused');
+    expect(r.reasons.join('\n')).toContain('계획에 줄기가 없다');
+    expect(r.messages).toEqual([]);
+    expect(r.excluded).toEqual([
+      { limb: 'auth', reason: 'excluded-by-input' },
+      { limb: 'api', reason: 'excluded-by-input' },
+    ]);
+  });
+
+  it('줄기 0개 계획의 기존 문구는 그대로다 — 제외로 빈 경우만 꼬리가 붙는다', () => {
+    const empty = resolveDispatch({ plan: { ...PLAN, limbs: [] }, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(empty.reasons).toContain('계획에 줄기가 없다');
+    const byExclude = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['auth', 'api'],
+    });
+    expect(byExclude.reasons).toContain('계획에 줄기가 없다 (excludeLimbs 로 2개 제외)');
+  });
+
+  it('일부 제외하면 남은 줄기만으로 판정한다 — 제외된 줄기의 결손은 거부 사유가 아니다', () => {
+    // auth 의 worktree 가 없다(착지 후 정리됨). 제외 없이는 refused 였을 입력이다.
+    const landed = [WORKTREES[0], WORKTREES[2]];
+    const before = resolveDispatch({ plan: PLAN, worktrees: landed, sessions: SESSIONS, messaging: OK });
+    expect(before.status).toBe('refused');
+    expect(before.missingWorktrees).toEqual(['auth']);
+
+    const r = resolveDispatch({
+      plan: PLAN, worktrees: landed, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['auth'],
+    });
+    expect(r.status).toBe('ready');
+    expect(r.missingWorktrees).toEqual([]);
+    expect(r.unopenedWindows).toEqual([]);
+    expect(r.ambiguousWindows).toEqual([]);
+    expect(r.messages.map((m) => [m.to, m.limb])).toEqual([['split-rr-api-a1', 'api']]);
+    expect(r.limbs.map((l) => [l.limb, l.excluded])).toEqual([['auth', true], ['api', false]]);
+  });
+
+  it('제외해도 관측 필드는 그대로 채운다 (보고용 — null 로 지우지 않는다)', () => {
+    const r = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['auth'],
+    });
+    const auth = r.limbs[0];
+    expect(auth.excluded).toBe(true);
+    expect(auth.worktreeExists).toBe(true);
+    expect(auth.branchMatches).toBe(true);
+    expect(auth.branchRelocatedByHook).toBe(false);
+    expect(auth.sessions).toEqual(['split-rr-auth-3f']);
+    expect(auth.windowOpen).toBe(true);
+    // 불리언이지 three-valued 가 아니다 — "모른다" 가 없는 필드다.
+    expect(typeof r.limbs[1].excluded).toBe('boolean');
+  });
+
+  it('계획에 없는 이름은 unknown-limb 으로 보고하되 판정을 바꾸지 않는다 (숨기지 않는다)', () => {
+    const base = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK, excludeLimbs: [] });
+    const r = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['ghost'],
+    });
+    expect(r.excluded).toEqual([{ limb: 'ghost', reason: 'unknown-limb' }]);
+    expect(r.limbs).toHaveLength(PLAN.limbs.length);
+    expect({ ...r, excluded: null }).toEqual({ ...base, excluded: null });
+  });
+
+  it('생략·비배열·중복·비문자열 입력은 모두 같은 결과로 수렴한다 (멱등)', () => {
+    const omitted = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(omitted.excluded).toEqual([]);
+    for (const bad of [null, undefined, 'auth', 42, { auth: true }]) {
+      const r = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK, excludeLimbs: bad });
+      expect(r).toEqual(omitted);
+    }
+    // 비문자열 항목은 무시, 중복은 제거, 입력 순서 유지.
+    const dup = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['api', 'api', null, 7, 'auth', 'api'],
+    });
+    expect(dup.excluded).toEqual([
+      { limb: 'api', reason: 'excluded-by-input' },
+      { limb: 'auth', reason: 'excluded-by-input' },
+    ]);
+    const once = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK,
+      excludeLimbs: ['api', 'auth'],
+    });
+    expect(dup).toEqual(once);
+  });
+
+  it('unavailable 은 제외보다 앞선다 — 관측 불가면 제외 계산만 남기고 판정은 그대로다', () => {
+    const r = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: null, messaging: OK,
+      excludeLimbs: ['auth'],
+    });
+    expect(r.status).toBe('unavailable');
+    expect(r.excluded).toEqual([{ limb: 'auth', reason: 'excluded-by-input' }]);
+  });
+
+  it('제외 입력은 변형되지 않고 결과는 불변이다', () => {
+    const input = ['auth'];
+    const r = resolveDispatch({
+      plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK, excludeLimbs: input,
+    });
+    expect(input).toEqual(['auth']);
+    expect(Object.isFrozen(r.excluded)).toBe(true);
+    expect(Object.isFrozen(r.excluded[0])).toBe(true);
   });
 });
 
