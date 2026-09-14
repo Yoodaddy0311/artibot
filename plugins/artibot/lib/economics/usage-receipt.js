@@ -36,28 +36,23 @@
  *
  * COST
  * ----
- * The two-table problem is RESOLVED as of 2026-09-12. There was a period when
- * this repo maintained two independent price tables — `model-catalog.js#MODELS`
- * and a private `PRICING_USD_PER_M` inside `cache-roi.js` — whose input-price
- * ratios were measured on 2026-09-03 at haiku 0.8x, sonnet 1.0x, opus 3.0x,
- * fable 3.0x, i.e. not one factor but four, so no single correction existed.
- * That is history: `cache-roi.js` now reads the catalog, the catalog carries
- * the cacheRead/cacheWrite columns it previously lacked, and the rates were
- * checked against the official price list at
- * `platform.claude.com/docs/en/about-claude/pricing` (scheme-less on purpose,
- * to keep grep hygiene consistent with the catalog).
+ * The two-table problem is RESOLVED as of 2026-09-12: `cache-roi.js` dropped its
+ * private `PRICING_USD_PER_M` (input-price ratios vs the catalog, measured
+ * 2026-09-03: haiku 0.8x / sonnet 1.0x / opus 3.0x / fable 3.0x — four factors,
+ * no single correction). Both now read `model-catalog.js#MODELS`, which gained
+ * the cacheRead/cacheWrite columns, checked against
+ * `platform.claude.com/docs/en/about-claude/pricing` (scheme-less for grep hygiene).
  *
- * So a pricing path now exists: {@link priceUsage}, reachable from
- * {@link buildUsageReceipts} via the explicit `priceReceipts` option.
- *
- * It is OFF BY DEFAULT, and that is not a stub either. The firewall
- * `tests/firewall/usage-receipt-schema-guard.test.js` pins `cost.total` to
- * null for every receipt built with default options. Flipping the default is
- * an owner decision that must change the writer and that gate in ONE commit —
- * doing it here alone would either break the gate or, worse, land a silent
- * behaviour change under a green suite. Until then `cost.pricing_version`
- * carries {@link PRICING_VERSION_UNRESOLVED}, which states that no table was
- * consulted rather than naming one that was not.
+ * Pricing via {@link priceUsage} is therefore ON BY DEFAULT since 2026-09-14
+ * (owner decision 2026-09-12). `tests/firewall/usage-receipt-schema-guard.test.js`
+ * pins a numeric `cost.total >= 0` and `cost.pricing_version === PRICING_VERSION`
+ * on every default-built receipt. `priceReceipts: false` is the only opt-out and
+ * yields {@link PRICING_VERSION_UNRESOLVED} — "no table was consulted", never a
+ * table that was not; `priceUsage` emits the same for a tier whose catalog row is
+ * not `measured`. Flipping the default back must change this default and that
+ * gate in ONE commit, or the gate goes red or a silent behaviour change lands
+ * under a green suite. Still unchecked anywhere: whether the catalog rates equal
+ * the published page on any given day.
  *
  * WHAT THIS MODULE DOES NOT DO
  * ----------------------------
@@ -274,7 +269,7 @@ function counter(usage, key) {
  * counter contributes 0, matching {@link counter}'s normalisation elsewhere in
  * this module. An unknown tier, or a tier whose catalog entry is not
  * `measured`, yields `total: null` with {@link PRICING_VERSION_UNRESOLVED} —
- * the same statement the unpriced default makes, because an unverified rate
+ * the same statement the `priceReceipts: false` opt-out makes, because an unverified rate
  * wearing a version stamp is exactly what this module refuses to emit.
  *
  * @param {object} usage - Receipt `usage` block: `fresh_input_tokens`,
@@ -610,9 +605,9 @@ function normaliseOutcome(supplied) {
  * @param {object} group
  * @param {string} missionId
  * @param {object} outcomes - run_id -> partial outcome block.
- * @param {boolean} priceReceipts - Opt-in pricing. Passed as an argument, not
- *   read from module state, so two concurrent calls cannot see each other's
- *   setting.
+ * @param {boolean} priceReceipts - Pricing switch, default true; only the
+ *   literal `false` opts out. Passed as an argument, not read from module
+ *   state, so two concurrent calls cannot see each other's setting.
  * @returns {{receipt: object|null, reason: string|null, source: string}}
  */
 function buildReceipt(group, missionId, outcomes, priceReceipts) {
@@ -654,9 +649,13 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
       // Identity came from the exact-id reverse index, so `tier` is a catalog
       // key or the group would not exist — priceUsage's unknown-tier branch is
       // unreachable from here, and is kept for direct callers.
-      cost: priceReceipts === true
-        ? priceUsage(usage, group.identity.tier)
-        : { total: null, pricing_version: PRICING_VERSION_UNRESOLVED },
+      // Allowlist-of-one on the OPT-OUT side: only the literal `false` skips
+      // pricing. With pricing on by default, a truthy-check would let
+      // `priceReceipts: 0` or a stray `''` silently unprice a row, and an
+      // unpriced row is indistinguishable downstream from a free attempt.
+      cost: priceReceipts === false
+        ? { total: null, pricing_version: PRICING_VERSION_UNRESOLVED }
+        : priceUsage(usage, group.identity.tier),
     },
     reason: null,
     source,
@@ -688,12 +687,12 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
  *   any of those. Injected in tests so no test reads a real home directory.
  * @param {(transcriptPath: string) => string[]|Promise<string[]>} [options.listSubagentTranscripts]
  *   - Subagent discovery port.
- * @param {boolean} [options.priceReceipts=false] - Fill `cost.total` from
- *   {@link priceUsage}. Opt-in, and only the literal `true` enables it: any
- *   other value leaves the default unpriced output unchanged, so a caller that
- *   passes a truthy string by accident gets null rather than a number nobody
- *   asked for. The default is pinned by the schema-guard firewall; see COST in
- *   the module header before changing it. An `estimate`-graded receipt is
+ * @param {boolean} [options.priceReceipts=true] - Fill `cost.total` from
+ *   {@link priceUsage}. ON by default; only the literal `false` disables it,
+ *   and every other value (including the string `'false'`, `0`, `null`) prices.
+ *   The opt-out is an allowlist of one so that a stray falsy value cannot
+ *   silently unprice a row. The default is pinned by the schema-guard firewall;
+ *   see COST in the module header before changing it. An `estimate`-graded receipt is
  *   priced too: its missing counters enter the formula as 0, so its total is
  *   a LOWER BOUND — `usage.source` is the honesty marker, not a null cost.
  * @returns {Promise<{receipts: object[], meta: object}>}
@@ -707,7 +706,7 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
  * meta.coverage; // 1 when every assistant entry parsed cleanly
  */
 export async function buildUsageReceipts(options) {
-  const { transcriptPath, missionId, outcomes = {}, priceReceipts = false } =
+  const { transcriptPath, missionId, outcomes = {}, priceReceipts = true } =
     options ?? {};
   if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) {
     throw new TypeError('buildUsageReceipts: transcriptPath must be a non-empty string');

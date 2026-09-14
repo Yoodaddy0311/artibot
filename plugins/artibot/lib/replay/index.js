@@ -36,6 +36,8 @@ export {
 
 export { loadReplay } from './load.js';
 
+export { SESSION_COVERAGE_EVENTS, foldSessionCoverage } from './session-coverage.js';
+
 export {
   ROUTE_EVENTS,
   TOOL_USE_SHADOW_PREFIX,

@@ -39,7 +39,11 @@
  *    and this suite is forbidden from reading `~/.claude/projects` to check.
  *  - No production caller exists. A green run says the writer CAN produce a
  *    valid receipt, not that one is ever produced or appended to the ledger.
- *  - `cost.total` is null by design, so nothing here exercises pricing at all.
+ *  - Pricing IS exercised here (it is ON by default since 2026-09-14), but only
+ *    the ARITHMETIC is: every assertion below reads the same catalog the writer
+ *    reads, so the two agree by construction. Whether the catalog rates match
+ *    the published price page is NOT checked anywhere in this repo — that is
+ *    blind spot (a) named in `tests/economics/pricing-parity.test.js`.
  *  - Coverage arithmetic is checked on fixtures of 1-3 entries. A ratio
  *    measured on three entries says nothing about the live >=95% target.
  */
@@ -49,7 +53,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { buildUsageReceipts } from '../../lib/economics/usage-receipt.js';
+import { PRICING_VERSION } from '../../lib/core/model-catalog.js';
+import {
+  buildUsageReceipts,
+  priceUsage,
+  PRICING_VERSION_UNRESOLVED,
+} from '../../lib/economics/usage-receipt.js';
 
 let Ajv = null;
 try {
@@ -153,12 +162,13 @@ const FIXTURES = {
  * Run the writer over an in-memory file map. Both ports are injected, so this
  * gate never reads a real home directory — asserted below.
  */
-function build(mainBody, { subagentBody = null } = {}) {
+function build(mainBody, { subagentBody = null, options = {} } = {}) {
   const files = { [MAIN]: mainBody };
   if (subagentBody !== null) files[SUB] = subagentBody;
   return buildUsageReceipts({
     transcriptPath: MAIN,
     missionId: 'mission-guard-1',
+    ...options,
     readTranscript: (p) => {
       if (!(p in files)) throw new Error(`ENOENT ${p}`);
       return files[p];
@@ -323,15 +333,72 @@ describe('usage receipt — no double counting', () => {
 });
 
 describe('usage receipt — the fields T-16 requires the writer to be honest about', () => {
-  it('never prices a receipt while the price table is unresolved', async () => {
+  it('prices every default-built receipt from the catalog and stamps PRICING_VERSION', async () => {
+    const validate = Ajv === null
+      ? () => {
+        throw new Error(AJV_MISSING);
+      }
+      : new Ajv({ allErrors: true }).compile(attemptSchema);
+
     const { receipts } = await build(FIXTURES.clean, {
       subagentBody: FIXTURES.subagent,
     });
+    // Two, not "some": main thread AND subagent must both be priced.
+    expect(receipts).toHaveLength(2);
+    for (const receipt of receipts) {
+      expect(typeof receipt.cost.total).toBe('number');
+      expect(Number.isFinite(receipt.cost.total)).toBe(true);
+      expect(receipt.cost.total).toBeGreaterThanOrEqual(0);
+      expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
+      // The schema's `total` is ["number","null"], so a priced row must still
+      // conform — a green pricing assertion over an invalid receipt would be
+      // the exact drift this gate exists to catch.
+      expect(validate(receipt)).toBe(true);
+    }
+  });
+
+  it('opting out with priceReceipts:false yields a null total marked unresolved', async () => {
+    const validate = Ajv === null
+      ? () => {
+        throw new Error(AJV_MISSING);
+      }
+      : new Ajv({ allErrors: true }).compile(attemptSchema);
+
+    const { receipts } = await build(FIXTURES.clean, {
+      subagentBody: FIXTURES.subagent,
+      options: { priceReceipts: false },
+    });
+    expect(receipts.length).toBeGreaterThan(0);
     for (const receipt of receipts) {
       expect(receipt.cost.total).toBeNull();
-      expect(typeof receipt.cost.pricing_version).toBe('string');
-      expect(receipt.cost.pricing_version.length).toBeGreaterThan(0);
+      expect(receipt.cost.pricing_version).toBe(PRICING_VERSION_UNRESOLVED);
+      expect(validate(receipt)).toBe(true);
     }
+  });
+
+  it('keeps thinking_tokens <= output_tokens (NECESSARY condition only, not proof of inclusion)', async () => {
+    // What is asserted: the folded thinking counter never exceeds the folded
+    // output counter. What is NOT asserted, and is NOT verifiable in this repo:
+    // whether the provider's `output_tokens` INCLUDES `thinking_tokens`. If it
+    // does not, pricing output alone UNDERSTATES the bill — the transcript
+    // carries no invoice to settle it against. Do not read this test as
+    // "thinking is billed correctly".
+    const { receipts } = await build(FIXTURES.clean);
+    const receipt = receipts[0];
+    expect(receipt.usage).toHaveProperty('thinking_tokens');
+    expect(receipt.usage.thinking_tokens).toBeLessThanOrEqual(
+      receipt.usage.output_tokens,
+    );
+
+    // The writer's number is priceUsage's number, not a second formula.
+    const tier = receipt.model_identity.tier;
+    expect(receipt.cost.total).toBe(priceUsage(receipt.usage, tier).total);
+
+    // And priceUsage has no thinking term: deleting the key must not move it.
+    const withoutThinking = { ...receipt.usage };
+    delete withoutThinking.thinking_tokens;
+    expect(priceUsage(withoutThinking, tier).total)
+      .toBe(priceUsage(receipt.usage, tier).total);
   });
 
   it('stamps the catalog version the identity was resolved against', async () => {

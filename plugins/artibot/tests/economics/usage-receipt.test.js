@@ -198,12 +198,14 @@ describe('buildUsageReceipts — clean fold', () => {
     expect(Object.keys(result.receipts[0])).not.toContain('action_id');
   });
 
-  it('leaves cost unpriced with the unresolved marker', async () => {
+  it('prices cost from the catalog by default and stamps the table version', async () => {
     const result = await run({ [MAIN]: jsonl([assistantEntry()]) });
-    expect(result.receipts[0].cost).toEqual({
-      total: null,
-      pricing_version: PRICING_VERSION_UNRESOLVED,
+    const receipt = result.receipts[0];
+    expect(receipt.cost).toEqual({
+      total: priceUsage(receipt.usage, receipt.model_identity.tier).total,
+      pricing_version: PRICING_VERSION,
     });
+    expect(Number.isFinite(receipt.cost.total)).toBe(true);
   });
 
   it('defaults the outcome to unlabelled, with accepted null not false', async () => {
@@ -581,33 +583,34 @@ describe('priceUsage', () => {
 describe('priceReceipts option', () => {
   // There is no ajv schema oracle in THIS file (the firewall sibling owns it),
   // so nothing below asserts schema conformance — only the emitted shape.
-  it('leaves cost.total null by default, byte-for-byte the unpriced output', async () => {
-    const result = await run({
+  it('prices by default, byte-for-byte the explicitly opted-in output', async () => {
+    const files = {
       [MAIN]: jsonl([
         assistantEntry({ requestId: 'req-1' }),
         assistantEntry({ requestId: 'req-2', model: 'claude-fable-5-1' }),
       ]),
-    });
-    expect(result.receipts).toHaveLength(2);
-    for (const receipt of result.receipts) {
-      expect(receipt.cost).toEqual({
-        total: null,
-        pricing_version: PRICING_VERSION_UNRESOLVED,
-      });
+    };
+    const byDefault = await run(files);
+    const optedIn = await run(files, [], { priceReceipts: true });
+
+    expect(byDefault.receipts).toHaveLength(2);
+    // Byte-for-byte: the default is not "similar to" the opted-in path, it IS
+    // that path. Comparing only cost.total would miss a divergence elsewhere.
+    expect(byDefault.receipts).toEqual(optedIn.receipts);
+    for (const receipt of byDefault.receipts) {
+      expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
+      expect(Number.isFinite(receipt.cost.total)).toBe(true);
     }
   });
 
-  it('prices every receipt from its own tier when opted in', async () => {
-    const result = await run(
-      {
-        [MAIN]: jsonl([
-          assistantEntry({ requestId: 'req-1', model: 'claude-opus-5' }),
-          assistantEntry({ requestId: 'req-2', model: 'claude-fable-5-1' }),
-        ]),
-      },
-      [],
-      { priceReceipts: true },
-    );
+  it('prices every receipt from its own tier, with no option passed', async () => {
+    // Deliberately no `priceReceipts`: this is the per-tier pin ON THE DEFAULT.
+    const result = await run({
+      [MAIN]: jsonl([
+        assistantEntry({ requestId: 'req-1', model: 'claude-opus-5' }),
+        assistantEntry({ requestId: 'req-2', model: 'claude-fable-5-1' }),
+      ]),
+    });
 
     expect(result.receipts).toHaveLength(2);
     for (const receipt of result.receipts) {
@@ -655,14 +658,34 @@ describe('priceReceipts option', () => {
     expect(Number.isFinite(result.receipts[0].cost.total)).toBe(true);
   });
 
-  it('ignores a non-true option value and stays unpriced', async () => {
-    for (const value of ['true', 1, {}]) {
+  it('only the literal false opts out', async () => {
+    const result = await run(
+      { [MAIN]: jsonl([assistantEntry()]) },
+      [],
+      { priceReceipts: false },
+    );
+    expect(result.receipts[0].cost).toEqual({
+      total: null,
+      pricing_version: PRICING_VERSION_UNRESOLVED,
+    });
+  });
+
+  it.each([['false'], [0], [undefined], [null], [1], [{}]])(
+    'still prices for priceReceipts %p — the opt-out is an allowlist of one',
+    async (value) => {
+      // The string 'false' is the surprising member and is spelled out on
+      // purpose: it reads like an opt-out and is NOT one. The alternative — a
+      // falsy check — would let `0`, `''` and `null` unprice a row silently,
+      // and downstream an unpriced row is indistinguishable from a free
+      // attempt. Refusing all but `false` makes the miss loud at the call site
+      // instead of quiet in the ledger.
       const result = await run(
         { [MAIN]: jsonl([assistantEntry()]) },
         [],
         { priceReceipts: value },
       );
-      expect(result.receipts[0].cost.total).toBeNull();
-    }
-  });
+      expect(result.receipts[0].cost.pricing_version).toBe(PRICING_VERSION);
+      expect(Number.isFinite(result.receipts[0].cost.total)).toBe(true);
+    },
+  );
 });
