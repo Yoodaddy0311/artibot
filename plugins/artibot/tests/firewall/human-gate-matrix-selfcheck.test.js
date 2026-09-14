@@ -58,6 +58,9 @@ import {
 } from '../../lib/security/human-gates.js';
 import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
 import { DANGEROUS_PATTERNS } from '../../lib/autopilot/safety.js';
+// 섹션 G 의 스캐너(2026-09-14 통합). 종전 사설 판은 삭제됐고,
+// 구현과 HG 예외 목록이 여기 하나로 모였다 — 아래 G 서문 참조.
+import { ceilingFor, findUnboundedRuns, HG_SCAN_ALLOWLIST } from '../helpers/regex-scan.js';
 
 /**
  * 행마다 양성 1건 · 음성 1건. 행이 늘면 여기도 늘어야 한다(D 가 강제).
@@ -316,104 +319,74 @@ describe('human-gate matrix — Observe = 기록만 (F)', () => {
 });
 
 /**
- * 무제한 런의 표기형. 라벨은 사람이 읽는 이름이고, 정규식이 판정한다.
- * `.` 앞의 역슬래시를 배제해 `\.` + 별도 수량자 같은 자리를 거짓 양성으로 잡지 않는다.
- * @type {ReadonlyArray<[string, RegExp]>}
+ * 섹션 G 는 2026-09-14 부터 **사설 스캐너를 두지 않는다.**
+ *
+ * 종전에는 이 파일의 `unboundedRunsOutsideLookahead`(룩어헤드를 `[^)]*` 로 지운
+ * 뒤 네 가지 표기형을 문자열 대조하는 단순판)와 tests/autopilot/safety.test.js 의
+ * `findUnboundedRuns`(소스를 이스케이프 인식하며 걷는 구문 스캐너)가 **같은 HG
+ * 29패턴을 서로 다른 규칙으로 두 번** 훑었고, HG-11 예외도 두 곳(여기 원문 배열 ·
+ * 거기 키 집합)에 있었다. 구현이 둘이면 한쪽만 고쳐지고, 예외가 둘이면 한쪽만
+ * 지워진다. 둘 다 `tests/helpers/regex-scan.js` 하나로 합쳤다.
+ *
+ * **버린 것 — "룩어헤드 안이면 면제" 일반 규칙.** 종전 근거는 "부정 룩어헤드 안의
+ * 런은 매치 위치를 늘리지 않고 한 번만 평가된다"였다. 그 일반화는 거짓이다.
+ * HG-09 의 `UPDATE … SET\b(?![\s\S]*\bWHERE\b)` 는 룩어헤드 안에서 2차식이다 —
+ * 규칙 단독 실측(2026-09-14, node v24.15.0, Windows, 서로 다른 payload 3회
+ * 중앙값, 반복 단위마다 WHERE 가 붙은 입력) 20,480B 5.04 · 40,962B 15.41 ·
+ * 122,880B 107.98ms, 6배 구간 raw 21.4배. 헬퍼에서 그 원문이 조용한 이유는
+ * 면제가 아니라 런의 원자가 **긍정 클래스**(`[\s\S]`)여서이고, 그 사각은 헬퍼
+ * 헤더 "못 보는 것" 7(h) 에 수치와 함께 등록돼 있다. 규율 §8 — 일반 면제는 미래
+ * 항목에 fail-open 이다.
+ *
+ * 옛 스캐너의 자기검증 단언 4건(+ 반대 방향 3건)은 삭제하지 않고
+ * `tests/helpers/regex-scan.test.js` 의 describe '옛 섹션 G 의 자기검증' 으로
+ * 옮겼다. 여기 남은 것은 **HG 표에 대한 구조 핀**뿐이다: 예외를 뺀 전 패턴이
+ * 무제한 런 0 · 예외 목록에 유령 항목 0 · HG-07 은 예외가 아니라 바운드로 통과.
  */
-const UNBOUNDED_RUN_FORMS = Object.freeze([
-  ['[^\\n]*', /\[\^\\n\]\*/],
-  ['[^\\n]+', /\[\^\\n\]\+/],
-  ['.*', /(?<!\\)\.\*/],
-  ['.+', /(?<!\\)\.\+/],
-]);
-
-/**
- * 룩어헤드 **밖**의 무제한 런을 찾는다.
- *
- * 룩어헤드를 제외하는 이유: 부정 룩어헤드 안의 런은 매치 위치를 늘리지 않고
- * 한 번만 평가된다(HG-09 의 `(?![\s\S]*\bWHERE\b)`). 위험한 것은 매치 시작
- * 위치마다 줄 끝까지 훑고 되돌아오는 **본문** 런이다.
- *
- * 한계(적어 두지 않으면 이 게이트가 다음 착시의 근거가 된다 — 검증 규율 §9):
- * 룩어헤드 제거는 `[^)]*` 로 하므로 **괄호를 품은 룩어헤드**는 온전히 지워지지
- * 않는다. 현재 매트릭스에 그런 룩어헤드는 0건이고, 남으면 거짓 양성 쪽으로
- * 기운다(그린을 만들지 않는다). 정밀 파서가 필요해지면 그때 옮긴다.
- *
- * @param {string} source 정규식 원문
- * @returns {string[]} 발견된 런의 라벨 목록. 빈 배열이면 통과
- */
-function unboundedRunsOutsideLookahead(source) {
-  const body = source.replace(/\(\?[=!][^)]*\)/g, '');
-  return UNBOUNDED_RUN_FORMS.filter(([, probe]) => probe.test(body)).map(([label]) => label);
-}
-
-/**
- * 명시 등록된 예외 — **allowlist 다(부정 목록이 아니다)**. 여기 없는 무제한 런은
- * 전부 RED 이므로, 새 패턴이 런을 달고 들어오면 등록 없이는 통과하지 못한다.
- *
- * 등록 근거(2026-09-13 16:3x UTC, node v24.15.0, 이 워크트리 실측):
- *  HG-11 의 두 패턴은 `^` 앵커라 매치 시작 위치가 **1곳뿐**이다. 그래서 뒤따르는
- *  `[^\n]*` 는 2차식을 만들지 않는다. `classify` median-of-3 실측:
- *    `fill('cat ', n)`   20,480B 0.12ms · 122,880B 0.54ms  (6배 구간 성장 1.10)
- *    `fill('cat x ', n)` 20,480B 0.08ms · 122,880B 0.49ms  (6배 구간 성장 1.10)
- *  비교: 바운드 전 HG-07 의 무앵커 런은 같은 척도에서 122,880B 1,839.8ms 였다.
- *
- * 포기하는 것: 앵커가 있어도 `\s*` 뒤에 대안 분기가 늘면 앞머리에서 모호해질 수
- * 있다. 이 예외는 "앵커면 안전" 을 일반화하지 않는다 — **이 두 원문**만 면제한다.
- * @type {ReadonlyArray<string>}
- */
-const ANCHORED_LINEAR_EXEMPTIONS = Object.freeze([
-  String.raw`^\s*(?:cat|less|head|tail|more|type)\b[^\n]*\.env(?:\.[\w-]+)?\b`,
-  String.raw`^\s*(?:cat|less|head|tail|more|type)\b[^\n]*\b(?:id_rsa|id_ed25519|credentials\.json|kubeconfig)\b`,
-]);
-
 describe('human-gate matrix — 무제한 런 0 (G)', () => {
+  /** `<행 id>[<패턴 인덱스>]` → 정규식. 예외 키를 실물과 대조하는 데 쓴다. */
+  const byKey = new Map(
+    HUMAN_GATE_MATRIX.flatMap((row) => row.patterns.map((pattern, i) => [`${row.id}[${i}]`, pattern])),
+  );
+
   it('등록된 예외를 빼면 무제한 런을 가진 패턴이 없다', () => {
     const offenders = [];
-    for (const row of HUMAN_GATE_MATRIX) {
-      for (const pattern of row.patterns) {
-        if (ANCHORED_LINEAR_EXEMPTIONS.includes(pattern.source)) continue;
-        const runs = unboundedRunsOutsideLookahead(pattern.source);
-        if (runs.length > 0) {
-          offenders.push(`${row.id}: ${runs.join(',')} in ${pattern.source}`);
-        }
+    for (const [key, pattern] of byKey) {
+      if (HG_SCAN_ALLOWLIST.has(key)) continue;
+      const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('HG', key));
+      if (hits.length > 0) {
+        offenders.push(`${key}: ${hits.map((h) => h.snippet).join(',')} in ${pattern.source}`);
       }
     }
     expect(offenders).toEqual([]);
   });
 
   it('예외 목록은 실재하고, 전부 ^ 앵커이며, 유령 항목이 없다', () => {
-    const live = new Set(
-      HUMAN_GATE_MATRIX.flatMap((row) => row.patterns.map((p) => p.source)),
-    );
-    for (const source of ANCHORED_LINEAR_EXEMPTIONS) {
+    for (const key of HG_SCAN_ALLOWLIST) {
       // 매트릭스에서 사라진 예외를 남겨 두면 다음 사람이 그 자리를 재사용한다.
-      expect(live.has(source), `stale exemption: ${source}`).toBe(true);
-      expect(source.startsWith('^'), `exemption must be anchored: ${source}`).toBe(true);
-      expect(unboundedRunsOutsideLookahead(source).length).toBeGreaterThan(0);
+      const pattern = byKey.get(key);
+      expect(pattern, `stale exemption: ${key}`).toBeDefined();
+      expect(pattern.source.startsWith('^'), `exemption must be anchored: ${key}`).toBe(true);
+      expect(pattern.flags, `anchored exemption must not be multiline: ${key}`).not.toContain('m');
+      // 면제가 사소하지 않다는 반증 — 면제가 없으면 스캐너가 실제로 잡는다.
+      expect(findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('HG', key)).length)
+        .toBeGreaterThan(0);
     }
   });
 
   it('HG-07 의 두 규칙은 예외가 아니라 바운드로 통과한다', () => {
-    const hg07 = HUMAN_GATE_MATRIX.find((row) => row.id === 'HG-07');
-    for (const index of [0, 2]) {
-      const { source } = hg07.patterns[index];
-      expect(ANCHORED_LINEAR_EXEMPTIONS).not.toContain(source);
-      expect(source).toContain('[^\\n]{0,192}');
+    for (const key of ['HG-07[0]', 'HG-07[2]']) {
+      const pattern = byKey.get(key);
+      expect(pattern, `missing pattern: ${key}`).toBeDefined();
+      expect(HG_SCAN_ALLOWLIST.has(key)).toBe(false);
+      expect(pattern.source).toContain('[^\\n]{0,192}');
     }
   });
 
-  it('일부러 심은 무앵커 런을 이 검사가 보고한다 (스캐너 자기검증)', () => {
-    // 검사가 조용히 그린이 되지 않는지 — 규율 §10.
-    expect(unboundedRunsOutsideLookahead(/\bcurl\b[^\n]*x/i.source)).toEqual(['[^\\n]*']);
-    expect(unboundedRunsOutsideLookahead(/\bcurl\b[^\n]+x/i.source)).toEqual(['[^\\n]+']);
-    expect(unboundedRunsOutsideLookahead(/\bcurl\b.*x/i.source)).toEqual(['.*']);
-    expect(unboundedRunsOutsideLookahead(/\bcurl\b.+x/i.source)).toEqual(['.+']);
-    // 반대 방향: 바운드된 창과 이스케이프된 점은 보고하지 않는다.
-    expect(unboundedRunsOutsideLookahead(/\bcurl\b[^\n]{0,192}x/i.source)).toEqual([]);
-    expect(unboundedRunsOutsideLookahead(/a\.env\b/i.source)).toEqual([]);
-    // 룩어헤드 안의 런은 면제된다 — HG-09 의 실제 원문으로 확인한다.
-    expect(unboundedRunsOutsideLookahead(/\bUPDATE\s+\w+\s+SET\b(?![\s\S]*\bWHERE\b)/i.source))
-      .toEqual([]);
+  it('예외는 HG-11 두 건뿐이다 — 등록처는 헬퍼 하나다', () => {
+    expect([...HG_SCAN_ALLOWLIST].sort()).toEqual(['HG-11[0]', 'HG-11[1]']);
+    // 분모 고정. 위 it.each 아닌 루프들이 "0개를 돌고 통과"하지 않도록.
+    expect(byKey.size).toBe(29);
+    expect(HUMAN_GATE_MATRIX).toHaveLength(13);
   });
 });
