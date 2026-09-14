@@ -13,7 +13,7 @@
  *     metrics are all O(n) counts whose cost at size is untested.
  *   - WHETHER THE METRIC SET IS THE RIGHT ONE. The suite pins what each metric
  *     computes and where its denominator comes from. It cannot tell you that
- *     §34's ROUTING block wanted these ten rows rather than some other ten;
+ *     §34's ROUTING block wanted these eleven rows rather than some other set;
  *     the five §34 rows this card deliberately omits are argued in the module
  *     headers and asserted nowhere, because absence of a metric has no
  *     mechanical signature.
@@ -340,7 +340,18 @@ describe('buildRoutingScorecard — Route Receipt fold', () => {
     const m = pick(routingCard, 'routing.recommendation_divergence');
     expect(m.denominator).toBe(2);
     expect(m.numerator).toBe(1);
-    expect(m.absent).toBe(1);
+    expect(m.absent).toBe(0);
+  });
+
+  it('비교 가능 영수증 행이 분모에서 빠진 몫을 보여 준다', () => {
+    const m = pick(routingCard, 'routing.tier_comparability');
+    expect([m.numerator, m.denominator, m.absent]).toEqual([2, 3, 0]);
+  });
+
+  it('tier_comparability 가 recommendation_divergence 바로 앞에 온다', () => {
+    const keys = routingCard.metrics.map((x) => x.key);
+    expect(keys.indexOf('routing.recommendation_divergence'))
+      .toBe(keys.indexOf('routing.tier_comparability') + 1);
   });
 
   it('스위치 제안이 0 이면 적용률은 unmeasured 이지 0% 가 아니다', () => {
@@ -460,10 +471,15 @@ describe('foldAvoidedSwitches — 설계 §38 회피된 전환', () => {
     const m = pick(avoidedCard, 'routing.avoided_switch');
     expect(m.numerator).toBe(8);
     expect(m.denominator).toBe(9);
-    expect(m.absent).toBe(1);
+    expect(m.absent).toBe(0);
     expect(m.counts).toEqual(fold.byReason);
     // 분자는 recommendation_divergence 와 같은 집합이다 — 두 행이 다른 수를 말하면 안 된다.
     expect(m.numerator).toBe(pick(avoidedCard, 'routing.recommendation_divergence').numerator);
+  });
+
+  it('avoided 픽스처의 tier_comparability 는 9/10 이다 — 빠진 1건이 여기서 보인다', () => {
+    const m = pick(avoidedCard, 'routing.tier_comparability');
+    expect([m.numerator, m.denominator, m.absent]).toEqual([9, 10, 0]);
   });
 
   it('카드의 routing.avoided_switch_pinned 분모는 avoided 다', () => {
@@ -484,36 +500,49 @@ describe('foldAvoidedSwitches — 설계 §38 회피된 전환', () => {
     const m = pick(routingCard, 'routing.avoided_switch');
     expect(m.numerator).toBe(1);
     expect(m.denominator).toBe(2);
-    expect(m.absent).toBe(1);
+    expect(m.absent).toBe(0);
     expect(m.counts).toEqual({ 'other:none': 1 });
     const pinned = pick(routingCard, 'routing.avoided_switch_pinned');
     expect(pinned.numerator).toBe(1);
     expect(pinned.denominator).toBe(1);
   });
 
-  it('빈 원장이면 두 행 모두 unmeasured 다 — 0% 가 아니다', () => {
+  it('빈 원장이면 세 행 모두 unmeasured 다 — 0% 가 아니다', () => {
     const card = buildRoutingScorecard(emptyReplay);
-    for (const key of ['routing.avoided_switch', 'routing.avoided_switch_pinned']) {
+    for (const key of [
+      'routing.tier_comparability', 'routing.avoided_switch', 'routing.avoided_switch_pinned',
+    ]) {
       const m = pick(card, key);
       expect(m.state).toBe(METRIC_STATE.UNMEASURED);
       expect(m.ratio).toBeNull();
-      expect(m.counts).toEqual({});
     }
+    // 히스토그램을 싣는 두 행만 빈 counts 다. tier_comparability 는 비율 행이라 counts 가 null.
+    expect(pick(card, 'routing.tier_comparability').counts).toBeNull();
+    expect(pick(card, 'routing.avoided_switch').counts).toEqual({});
+    expect(pick(card, 'routing.avoided_switch_pinned').counts).toEqual({});
   });
 
-  it('KNOWN DEFECT: comparable 이 비교 불가 영수증보다 적으면 카드가 던진다', () => {
-    // 이 행들은 denominator=comparable, absent=routes-comparable 이라 절반 넘게 models 가
-    // 없으면 metric() 의 `absent > denominator` 가 걸린다. recommendation_divergence
-    // (routing-scorecard.js `key: 'routing.recommendation_divergence'` 행, 2026-09-14 측정)가
-    // 먼저 같은 모양으로 던지므로 이 결함은
-    // 새로 들어온 것이 아니라 기존 행에서 물려받은 것이다. 여기 적어 두는 이유는, 안 적으면
-    // 라이브에서 처음 발견되기 때문이다. 고치는 것은 이 작업의 소유 범위 밖이다.
+  it('비교 불가 영수증이 과반이어도 카드가 선다 — absent 는 분모 안의 결측만 센다', () => {
+    // metric.js 의 `absent` 는 "분모에 든 구성원 중 쓸 값이 없던 것"이고, 그래서
+    // `absent > denominator` 는 던진다. 분모(comparable) 밖의 영수증을 absent 로 실으면
+    // 그 계약을 깨는 것이라, 두 비율 행은 absent 를 싣지 않는다. 비교 불가 영수증은
+    // 사라지는 것이 아니라 routing.tier_comparability 행에서 보인다.
     const lopsided = buildReplay([
       routeLine(1, 'route', 'fable', 'opus', ['hysteresis:below-threshold']),
       routeLine(2, 'route'),
       routeLine(3, 'route'),
     ]);
-    expect(() => buildRoutingScorecard(lopsided)).toThrow(TypeError);
+    const card = buildRoutingScorecard(lopsided);
+    const divergence = pick(card, 'routing.recommendation_divergence');
+    expect([divergence.numerator, divergence.denominator, divergence.absent]).toEqual([1, 1, 0]);
+    const avoided = pick(card, 'routing.avoided_switch');
+    expect([avoided.numerator, avoided.denominator, avoided.absent]).toEqual([1, 1, 0]);
+    expect(avoided.counts).toEqual({ low_benefit: 1 });
+    const comparability = pick(card, 'routing.tier_comparability');
+    expect([comparability.numerator, comparability.denominator, comparability.absent])
+      .toEqual([1, 3, 0]);
+    expect(comparability.ratio).toBe(1 / 3);
+    expect(comparability.state).toBe(METRIC_STATE.MEASURED);
   });
 });
 
@@ -628,7 +657,7 @@ describe('renderScorecardMarkdown', () => {
 
   it('미측정 절이 분모와 함께 개수를 밝힌다', () => {
     const out = renderScorecardMarkdown(buildRoutingScorecard(emptyReplay));
-    expect(out).toContain('10 / 10 지표가 분모 0 이다');
+    expect(out).toContain('11 / 11 지표가 분모 0 이다');
   });
 
   it('알 수 없는 kind 는 렌더하지 않고 던진다', () => {
