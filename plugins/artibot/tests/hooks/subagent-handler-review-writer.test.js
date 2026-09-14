@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 
 import { readSpawns } from '../../lib/learning/ledger/spawn-ledger.js';
 import { ledgerFilePath } from '../../lib/runtime/ledger.js';
+import { sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
+import { missionMutator, openMissionStore } from '../../lib/runtime/middleware/tasks.js';
+import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
+import { parseReviewMd, reviewArtifactPath } from '../../lib/review/review-artifact.js';
 
 /**
  * C2 — the SubagentStop hook RECORDS a reviewer's answer as `review.completed`
@@ -530,4 +534,402 @@ describe('subagent-handler review-ledger writer (child process)', () => {
     expect(existsSync(ledgerFilePath(repo))).toBe(false);
     expect(reviewLedger()).toBe('review=skipped:no-text,audit=skipped:no-text');
   }, 60000);
+});
+
+/**
+ * C2b — the same stop also renders `review.md`, and renders it NOWHERE ELSE.
+ *
+ * WHY A SECOND FILE-LEVEL GATE. The block above proves a verdict reaches the
+ * LEDGER; a ledger line is a measurement nobody reads. `review.md` is that
+ * measurement put where a human and a later mission both look. The two are
+ * asserted to AGREE here, because two renderings of one verdict that can drift
+ * are worse than one rendering.
+ *
+ * THE WRITE IS AN UNAWAITED ASYNC TAIL (`_review-stop-record.js#planReviewArtifact`
+ * starts it and returns). It is observable from outside only because the child
+ * process cannot exit before its event loop drains, so every case below reads
+ * the filesystem AFTER `spawnSync` returned. If that invariant ever breaks,
+ * these go red rather than silently measuring nothing.
+ *
+ * EVERY CASE SETS ITS OWN GATE, through the documented `CLAUDE_PLUGIN_ROOT`
+ * override (the same technique as `tests/hooks/intent-observe-pre.test.js`).
+ * `beforeEach` builds two plugin roots from the live config — one with
+ * `runtime.artifactLifecycle.enabled` forced true, one forced false — so no
+ * case here depends on which way the release currently ships it. 4.61.0 ships
+ * false and zero live `review.md` is the CORRECT production state; that value
+ * is RECORDED by exactly one test, which asserts nothing about behaviour, so
+ * opening the kill switch for real turns that one line red and nothing else.
+ *
+ * WHAT GREEN HERE DOES NOT PROVE (rules §9):
+ *   - THAT A SECOND REVIEW OF ONE MISSION IS HANDLED. It is not: section c
+ *     MEASURES that a superseding verdict is dropped at ALREADY_EXISTS,
+ *     because no caller anywhere bumps a review revision. That is a recorded
+ *     gap, not a covered behaviour.
+ *   - HOOK LATENCY. Measured out-of-band on 2026-09-14 and reported to the
+ *     leader; no wall-clock assertion is made here, because a timing threshold
+ *     on shared CI hardware is a flake, not a gate.
+ *   - THAT A DYNAMIC IMPORT FAILURE IS SURVIVED. The tail's `import()` calls
+ *     cannot be made to fail from outside the process, so that branch is
+ *     UNMEASURED — it is guarded by the same `catch` as everything else.
+ */
+describe('subagent-handler review.md artifact (child process)', () => {
+  let tmp;
+  let home;
+  let repo;
+  let transcript;
+  let pluginRoot;
+  let closedRoot;
+  let missionId;
+
+  /**
+   * A plugin root holding the live config with the kill switch forced either
+   * way. Everything but that one key is exactly what ships, so these are the
+   * real configuration under two settings rather than a fixture of one.
+   *
+   * @param {string} name directory name under the sandbox
+   * @param {object} live parsed `artibot.config.json`
+   * @param {boolean} enabled value for `runtime.artifactLifecycle.enabled`
+   * @returns {string} absolute plugin root
+   */
+  function writeRoot(name, live, enabled) {
+    const dir = path.join(tmp, name);
+    mkdirSync(dir, { recursive: true });
+    const config = {
+      ...live,
+      runtime: { ...live.runtime, artifactLifecycle: { ...live.runtime.artifactLifecycle, enabled } },
+    };
+    writeFileSync(path.join(dir, 'artibot.config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    return dir;
+  }
+
+  /** @returns {string} the transcript path, with `text` as the last assistant turn */
+  function writeTranscript(text = answer()) {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'go' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', model: MODEL, content: [{ type: 'text', text }] } }),
+    ];
+    writeFileSync(transcript, `${lines.join('\n')}\n`, 'utf-8');
+    return transcript;
+  }
+
+  /** @param {object} [over] overrides; `undefined` deletes the key @returns {object} payload */
+  function stopPayload(over = {}) {
+    const base = {
+      agent_id: AGENT_ID,
+      agent_transcript_path: transcript,
+      agent_type: 'code-reviewer',
+      cwd: repo,
+      hook_event_name: 'SubagentStop',
+      last_assistant_message: answer(),
+      session_id: SID,
+      stop_hook_active: false,
+      transcript_path: path.join(tmp, 'main.jsonl'),
+      ...over,
+    };
+    for (const [k, v] of Object.entries(over)) if (v === undefined) delete base[k];
+    return base;
+  }
+
+  /**
+   * Run the stop hook with an explicit plugin root. Always explicit: inheriting
+   * whatever `CLAUDE_PLUGIN_ROOT` the developer's shell happens to carry would
+   * decide the gate for the test.
+   *
+   * @param {object} payload stdin
+   * @param {string} root value for `CLAUDE_PLUGIN_ROOT`
+   * @returns {{status: number|null, stdout: string, stderr: string}} result
+   */
+  function runStop(payload, root) {
+    const res = spawnSync(process.execPath, [HOOK, 'stop'], {
+      input: JSON.stringify(payload),
+      encoding: 'utf-8',
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_ROOT: root },
+      windowsHide: true,
+    });
+    return { status: res.status, stdout: String(res.stdout || ''), stderr: String(res.stderr || '') };
+  }
+
+  /** Give the mission a StateStore row — the tail refuses to write without one. */
+  function seedMissionRow() {
+    openMissionStore(repo, SID, Date.now(), { resolveGitCommonDir })
+      .updateMission(missionId, missionMutator(missionId, 'seed', 1), { reason: 'test-seed' });
+  }
+
+  /** @returns {string[]} every file under `.artibot/missions`, recursively */
+  function missionFiles(dir = path.join(repo, '.artibot', 'missions')) {
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory()
+      ? missionFiles(path.join(dir, e.name))
+      : [path.join(dir, e.name)]));
+  }
+
+  /** @returns {object[]} parsed ledger lines */
+  function rawLedger() {
+    const file = ledgerFilePath(repo);
+    if (!existsSync(file)) return [];
+    return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  }
+
+  /** @param {string} event @returns {object|undefined} the first line of that event */
+  const lineOf = (event) => rawLedger().find((l) => l.event === event);
+
+  /** @returns {string|undefined} `review_ledger` of the last stop record */
+  function reviewLedger() {
+    const recs = readSpawns(repo, { sessionId: SID }).filter((r) => r.event === 'stop');
+    return recs[recs.length - 1]?.review_ledger;
+  }
+
+  const artifact = () => reviewArtifactPath(repo, missionId);
+
+  /** The stdout contract this whole path is forbidden to move. */
+  const EXPECTED_STDOUT = `[team] Agent deregistered: ${AGENT_ID}`;
+
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'artibot-c2-md-')));
+    home = path.join(tmp, 'home');
+    repo = path.join(tmp, 'repo');
+    mkdirSync(path.join(home, '.claude'), { recursive: true });
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(path.join(tmp, 'subagents'), { recursive: true });
+    transcript = path.join(tmp, 'subagents', `${AGENT_ID}.jsonl`);
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
+
+    // Same id the hook derives: `subagent-handler.js#resolveMissionId` falls
+    // back to this function when the payload declares no `mission_id`.
+    // MIDNIGHT: both readings are `Date.now()` milliseconds apart, so a run
+    // spanning UTC midnight could disagree. Not defended against — the window
+    // is microseconds wide and a guard would be untestable.
+    missionId = sessionFallbackMissionId({ sessionId: SID, nowMs: Date.now() });
+
+    // TWO plugin roots, both the live configuration with ONE key set — neither
+    // is a stub, and NEITHER depends on what the release currently ships. An
+    // earlier draft pointed the closed-gate cases at the real plugin root,
+    // which meant the day someone opens the kill switch for real, three tests
+    // here would have failed for a reason that has nothing to do with them.
+    // What those cases mean is "the gate is shut", so they set it shut.
+    const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
+    pluginRoot = writeRoot('plugin-root-open', live, true);
+    closedRoot = writeRoot('plugin-root-closed', live, false);
+  });
+
+  afterEach(() => {
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  // -------------------------------------------------------------------------
+  // a. the file exists, parses, and says the same thing as the ledger
+  // -------------------------------------------------------------------------
+
+  it('writes review.md at the mission artifact path when the gate is open and the row exists', () => {
+    seedMissionRow();
+    writeTranscript();
+    expect(runStop(stopPayload(), pluginRoot).status).toBe(0);
+
+    expect(existsSync(artifact())).toBe(true);
+    // Exactly one artifact, and it is that one — a writer that also produced an
+    // intent.md or a stray temp file would pass a bare `existsSync`.
+    expect(missionFiles()).toEqual([artifact()]);
+  }, 60000);
+
+  it('round-trips the written review.md through parseReviewMd', () => {
+    seedMissionRow();
+    writeTranscript();
+    runStop(stopPayload(), pluginRoot);
+
+    const parsed = parseReviewMd(readFileSync(artifact(), 'utf-8'));
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.ok).toBe(true);
+  }, 60000);
+
+  it('renders the same verdict the review.completed ledger line recorded', () => {
+    seedMissionRow();
+    writeTranscript(answer({ verdict: { verification_id: 'v-agree' } }));
+    runStop(stopPayload({ last_assistant_message: undefined }), pluginRoot);
+
+    const { review } = parseReviewMd(readFileSync(artifact(), 'utf-8'));
+    const ledger = lineOf('review.completed');
+    // The envelope's mission id, NOT the `mission_id` written inside the
+    // reviewer's own document — those are different facts and the artifact
+    // must carry the one the pipeline keys on.
+    expect(review.missionId).toBe(missionId);
+    expect(review.verdict).toBe(ledger.data.verdict);
+    expect(review.findingsRef).toBe(`transcript:${AGENT_ID}`);
+    expect(review.findingsRef).toBe(ledger.data.findings_ref);
+    expect(review.verificationId).toBe(ledger.data.verification_id);
+    expect(review.basedOn.intentRevision).toBe(1);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // b. every closed gate produces ZERO files
+  // -------------------------------------------------------------------------
+
+  it('writes no file when the kill switch is false', () => {
+    seedMissionRow();
+    writeTranscript();
+    expect(runStop(stopPayload(), closedRoot).status).toBe(0);
+
+    expect(missionFiles()).toEqual([]);
+    // ...and the ledger half still happened, so this is the gate refusing the
+    // FILE, not the whole review path failing.
+    expect(lineOf('review.completed')).toBeTruthy();
+  }, 60000);
+
+  it('RECORDS the shipped kill-switch value: 4.61.0 creates zero review.md', () => {
+    // THE ONLY test that reads the released configuration, and it asserts
+    // nothing about behaviour. Its whole job is to make the shipped value a
+    // stated fact instead of an assumption other tests lean on — no case above
+    // depends on it, so opening the kill switch for real turns exactly THIS
+    // line red, which is the deliberate release decision it should turn red on.
+    const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
+    expect(live.runtime.artifactLifecycle.enabled).toBe(false);
+  });
+
+  it('writes no file when the payload carries no cwd, even with the gate open', () => {
+    seedMissionRow();
+    writeTranscript();
+    expect(runStop(stopPayload({ cwd: undefined }), pluginRoot).status).toBe(0);
+
+    expect(missionFiles()).toEqual([]);
+    // No cwd means no project root, so the hook records nothing INTO the repo:
+    // no review line, no spawn record, no artifact. `recordReviewFromStop`
+    // refuses at `no-cwd` and the pre-flight never runs. (A ledger FILE does
+    // exist here — `seedMissionRow` above wrote `state.updated` into it. That
+    // is the fixture's line, which is exactly why this counts events by name
+    // instead of asserting the file away.)
+    expect(rawLedger().filter((l) => String(l.event).startsWith('review.'))).toEqual([]);
+    expect(reviewLedger()).toBeUndefined();
+  }, 60000);
+
+  it('writes no file when the mission has no StateStore row, even with the gate open', () => {
+    writeTranscript();
+    expect(runStop(stopPayload(), pluginRoot).status).toBe(0);
+
+    // FAIL-CLOSED. The row is the only source of `based_on`, and a review.md
+    // claiming to review revision 1 of an intent nobody recorded is a lie the
+    // file format cannot express as "unknown".
+    expect(missionFiles()).toEqual([]);
+    expect(lineOf('review.completed')).toBeTruthy();
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // c. a second review of one mission — MEASURED, not fixed
+  // -------------------------------------------------------------------------
+
+  it('leaves the file untouched when the identical stop is redelivered', () => {
+    seedMissionRow();
+    writeTranscript();
+    runStop(stopPayload(), pluginRoot);
+    const first = { bytes: readFileSync(artifact()), mtime: statSync(artifact()).mtimeMs };
+
+    runStop(stopPayload(), pluginRoot);
+
+    expect(missionFiles()).toEqual([artifact()]);
+    expect(readFileSync(artifact())).toEqual(first.bytes);
+    // Untouched, not rewritten-identically: the pre-flight latches on
+    // `review-not-appended` (the ledger half dedupes) before any file access.
+    expect(statSync(artifact()).mtimeMs).toBe(first.mtime);
+  }, 60000);
+
+  it('KEEPS THE FIRST VERDICT when a superseding review lands — a recorded gap', () => {
+    seedMissionRow();
+    writeTranscript(answer({ verdict: { verification_id: 'v-first' } }));
+    runStop(stopPayload({ last_assistant_message: undefined }), pluginRoot);
+    expect(parseReviewMd(readFileSync(artifact(), 'utf-8')).review.verdict).toBe('PASS');
+
+    writeTranscript(answer({
+      verdict: { verdict: 'REPAIR_REQUIRED', verification_id: 'v-second' },
+    }));
+    runStop(stopPayload({ last_assistant_message: undefined }), pluginRoot);
+
+    // The SECOND verdict reached the ledger and did NOT reach the file.
+    expect(rawLedger().filter((l) => l.event === 'review.completed')).toHaveLength(2);
+    const kept = parseReviewMd(readFileSync(artifact(), 'utf-8')).review;
+    expect(kept.verdict).toBe('PASS');
+    expect(kept.verificationId).toBe('v-first');
+    // WHY: nothing in the pipeline bumps a review revision, so the tail always
+    // renders revision 1 and `apply()` stops at ALREADY_EXISTS. Superseding is
+    // NOT IMPLEMENTED, and that is a PENDING DECISION rather than a bug —
+    // review revision succession is owner decision §7.2
+    // (`.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md:357`), still open.
+    // Until it is decided a second verdict reaches the ledger and not the file.
+    // This test pins that, so the day it is implemented this line is what has
+    // to change on purpose.
+    expect(kept.revision).toBe(1);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // d. the hook's answer never moves
+  // -------------------------------------------------------------------------
+
+  it('emits byte-identical stdout whether the write succeeds, is gated off, or fails', () => {
+    seedMissionRow();
+    writeTranscript();
+    const ok = runStop(stopPayload(), pluginRoot);
+    expect(existsSync(artifact())).toBe(true);
+
+    rmSync(path.join(repo, '.artibot'), { recursive: true, force: true });
+    seedMissionRow();
+    const gated = runStop(stopPayload({ session_id: `${SID}b` }), closedRoot);
+
+    // A FILE where the mission DIRECTORY has to go, so `ensureDirSync` throws
+    // and `writeOneArtifact` returns WRITE_FAILED. Chosen over an unwritable
+    // directory because file permissions are not portable to Windows.
+    rmSync(path.join(repo, '.artibot'), { recursive: true, force: true });
+    seedMissionRow();
+    mkdirSync(path.join(repo, '.artibot', 'missions'), { recursive: true });
+    writeFileSync(path.join(repo, '.artibot', 'missions', missionId), 'not a directory', 'utf-8');
+    const failed = runStop(stopPayload({ session_id: `${SID}c` }), pluginRoot);
+    expect(existsSync(artifact())).toBe(false);
+
+    for (const res of [ok, gated, failed]) {
+      expect(res.status).toBe(0);
+      expect(JSON.parse(res.stdout)).toEqual({ message: EXPECTED_STDOUT });
+    }
+    expect(gated.stdout).toBe(ok.stdout);
+    expect(failed.stdout).toBe(ok.stdout);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // e. the ledger the block above measures is unchanged
+  // -------------------------------------------------------------------------
+
+  it('adds no ledger line and no spawn-column grammar of its own', () => {
+    seedMissionRow();
+    writeTranscript();
+    runStop(stopPayload(), pluginRoot);
+    expect(existsSync(artifact())).toBe(true);
+
+    // Exactly the two review lines the pre-artifact writer produced, in order.
+    expect(rawLedger().map((l) => l.event).filter((e) => e.startsWith('review.')))
+      .toEqual(['review.completed', 'review.claim_audit']);
+    // The spawn column keeps the `review=<status>,audit=<status>` grammar: the
+    // artifact label is deliberately NOT carried into it, because that string
+    // is pinned by the ledger-vocabulary firewall.
+    expect(reviewLedger()).toBe('review=appended,audit=appended');
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // f. plan()'s input contract, in-process — the two ways this caller could
+  //    have got it wrong, pinned as throw/refuse rather than assumed.
+  // -------------------------------------------------------------------------
+
+  it('refuses to plan a review write without a missionState or a revision', async () => {
+    const { plan } = await import('../../lib/runtime/artifact-lifecycle.js');
+    const events = [{
+      event: 'review.completed',
+      mission_id: missionId,
+      seq: 0,
+      data: { verdict: 'PASS', findings_ref: `transcript:${AGENT_ID}`, verification_id: 'v-x' },
+    }];
+
+    // No `missionState` at all: a CALLER BUG, so it throws rather than refusing.
+    expect(() => plan({ events, projectRoot: repo }))
+      .toThrow(/requires missionState\.missionId/);
+
+    // A missionState with no review revision: BAD DATA, so it refuses per line.
+    // This is why the tail always passes `reviewRevision: FIRST_REVIEW_REVISION`.
+    const refused = plan({ events, missionState: { missionId }, projectRoot: repo });
+    expect(refused.writes).toEqual([]);
+    expect(refused.refused[0].code).toBe('MISSING_REQUIRED_DATA');
+  });
 });

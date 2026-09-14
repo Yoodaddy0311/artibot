@@ -11,7 +11,10 @@
  */
 
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
+import path from 'node:path';
 
+import { readJsonFileSync } from '../../lib/core/file.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
 import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 
@@ -38,6 +41,62 @@ import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 // a field meaning "which model served this turn" would make the model-policy
 // measurement quote itself as evidence. When the transcript cannot supply one,
 // the verdict line is SKIPPED — a visible absence beats a plausible invention.
+//
+// THE review.md ARTIFACT (added 2026-09-14) CHANGES NONE OF THAT. A ledger line
+// is a measurement; `review.md` is the same measurement rendered where a human
+// reads it. It is written by {@link planReviewArtifact}, which DECIDES NOTHING
+// EITHER: it never throws, it is invisible to stdout, and it is entered only
+// when the ledger line was actually APPENDED — so a skipped, refused or
+// deduped verdict produces no file. The write itself is behind
+// `runtime.artifactLifecycle.enabled`, which ships FALSE (4.61.0), so on the
+// shipped configuration this path stops at a config read.
+//
+// SYNC PRE-FLIGHT, ASYNC TAIL — and why it has to be that shape.
+// `subagent-handler.js#handleStop` is SYNCHRONOUS and `main()` calls it without
+// `await`, so nothing here can be awaited into the stop's return path. The
+// pre-flight is therefore sync (cheap: object reads and one config read) and
+// the write is an unawaited async tail. The process outlives
+// the stdout write because the success path has no `process.exit` — the
+// dispatcher waits for the child's `exit` event, which fires when the event
+// loop drains, pending dynamic imports included.
+//
+// NOTHING NEW IS STATICALLY IMPORTED. Every module this path needs is
+// `import()`ed inside the tail.
+//
+// MARGINAL LOAD COST — read the CONDITION, not just the number. Reproduce with
+// one fresh process per sample, importing the real hook first so the timed
+// module pays only for what the handler graph has not already loaded:
+//
+//     node --input-type=module -e "
+//       await import('./scripts/hooks/subagent-handler.js');
+//       const t = performance.now();
+//       await import('<module>');
+//       process.stdout.write(String(performance.now() - t));"
+//
+//                                          A: after subagent-handler   B: after
+//                                             (N=5, the real cost)     an 11-module
+//                                                                      hand-list (N=3)
+//     lib/runtime/middleware/tasks.js          13.8 –  14.7 ms          135 – 168 ms
+//     lib/runtime/artifact-lifecycle.js         1.5 –   1.6 ms           12 –  18 ms
+//     lib/review/review-artifact.js             1.1 –   1.6 ms            7 –  11 ms
+//     lib/project-state/git-common-dir.js       0.1 –   0.2 ms          0.4 – 0.7 ms
+//
+// Measured 2026-09-14, Windows 11, Node 24.x. COLUMN B IS THE WRONG NUMBER and
+// is kept only so nobody re-derives it: it warmed the graph from a hand-written
+// module list that missed transitive dependencies, so each timed import was
+// billed for deps the real handler already has. Column A is the condition
+// production is in. Reviewer independently reproduced A (14.5 / 1.4 / 0.8 /
+// 0.1, N=1).
+//
+// THE CONCLUSION IS UNCHANGED at either magnitude: a static import is paid by
+// EVERY SubagentStop and the ~24 non-reviewer agent types never reach this
+// code, so even column A's 1.3 ms buys nothing. That is why
+// `review-artifact.js` is dynamic too — and why the `already-exists` check
+// lives in the tail rather than in the pre-flight, where it would have needed
+// `reviewArtifactPath` synchronously. The check is worth almost nothing up
+// front anyway: a REDELIVERED stop already stops at `review-not-appended`, so
+// the only case that reaches the tail with a file present is a genuinely new
+// verdict for an already-reviewed mission.
 // ---------------------------------------------------------------------------
 
 /**
@@ -239,6 +298,176 @@ function reviewSkipped(reason) {
 }
 
 /**
+ * Read the plugin's config SYNCHRONOUSLY, for the one key this file gates on.
+ *
+ * `lib/core/config.js#loadConfig` is async and cannot be used from a sync
+ * pre-flight. The precedent for this exact substitution is
+ * `lib/runtime/middleware/tasks.js:673`, and it is honest for THIS key only:
+ * `loadConfig` merges the file over `DEFAULTS`, and `DEFAULTS` has no `runtime`
+ * key, so for `runtime.artifactLifecycle.enabled` the raw file and the merged
+ * config agree. DEVIATION TO KNOW ABOUT: this skips `loadConfig`'s memoisation
+ * and any future default it might grow for that path.
+ *
+ * @returns {object|null} parsed `artibot.config.json`, or null when unreadable
+ */
+function readPluginConfigSync() {
+  return readJsonFileSync(path.join(getPluginRoot(), 'artibot.config.json'), null);
+}
+
+/**
+ * Decide — synchronously and without throwing — whether to start a `review.md`
+ * write, and start it.
+ *
+ * NEVER THROWS AND NEVER AWAITS. Its return value is a label for the caller's
+ * summary and nothing else reads it; `scheduled` means the tail was STARTED,
+ * not that a file exists. Every refusal is named so the absence of a file is
+ * explainable from the summary alone rather than looking like a silent failure.
+ *
+ * The order of the checks is the order of increasing cost: object reads, then
+ * one config read. `review-not-appended` is first and catches the most cases —
+ * a skipped verdict, a refused one, and a REDELIVERED stop, whose ledger half
+ * dedupes to `skipped`. That is why a redelivery cannot even reach the store.
+ *
+ * @param {{outcome: object, ids: {agentType: string, sessionId: string,
+ *   missionId: string|null}, projectRoot: string, model: string|null,
+ *   findingsRef: string}} ctx the caller's already-built inputs
+ * @returns {{status: 'skipped'|'scheduled', reason?: string}} what was decided
+ */
+export function planReviewArtifact(ctx) {
+  try {
+    const { outcome, ids, projectRoot } = ctx;
+    if (outcome?.review?.status !== 'appended') {
+      return { status: 'skipped', reason: 'review-not-appended' };
+    }
+    const missionId = ids?.missionId ?? null;
+    if (typeof missionId !== 'string' || missionId === '') {
+      return { status: 'skipped', reason: 'no-mission' };
+    }
+    // Unreachable from `recordReviewFromStop`, which refuses a null root before
+    // any of this. Kept because this function's contract is "never throws".
+    if (typeof projectRoot !== 'string' || projectRoot === '') {
+      return { status: 'skipped', reason: 'no-cwd' };
+    }
+    const config = readPluginConfigSync();
+    if (config?.runtime?.artifactLifecycle?.enabled !== true) {
+      return { status: 'skipped', reason: 'write-disabled' };
+    }
+    // Deliberately NOT awaited: see the module header. The tail cannot reject.
+    void writeReviewArtifact({ ...ctx, missionId, config });
+    return { status: 'scheduled' };
+  } catch {
+    // A pre-flight that throws would take `recordReviewFromStop`'s whole
+    // summary down to `{ error }` and lose the ledger statuses with it.
+    return { status: 'skipped', reason: 'plan-failed' };
+  }
+}
+
+/**
+ * Write `review.md`, in the background, on a best-effort basis.
+ *
+ * NEVER REJECTS. Every failure is silent by design: this runs after the hook
+ * has already printed its stdout, so there is no longer anywhere to report to,
+ * and an unhandled rejection here would change the hook's exit code — the one
+ * thing the whole review path is forbidden to touch.
+ *
+ * FAIL-CLOSED ON A MISSING STORE ROW. When the StateStore has no row for this
+ * mission, nothing is written. The row is the only source of the `based_on`
+ * revisions, and `intent.md` itself is only ever written for a mission that has
+ * a row; inventing revision 1 here would make `review.md` claim it reviewed an
+ * intent nobody recorded.
+ *
+ * @param {object} ctx {@link planReviewArtifact}'s ctx plus `missionId`,`config`
+ * @returns {Promise<void>} resolves when the attempt is over, always fulfilled
+ */
+async function writeReviewArtifact(ctx) {
+  try {
+    const { ids, projectRoot, missionId, config } = ctx;
+    const [lifecycle, tasks, gitDir, artifact] = await Promise.all([
+      import('../../lib/runtime/artifact-lifecycle.js'),
+      import('../../lib/runtime/middleware/tasks.js'),
+      import('../../lib/project-state/git-common-dir.js'),
+      import('../../lib/review/review-artifact.js'),
+    ]);
+    const { FIRST_REVIEW_REVISION, reviewArtifactPath, serializeReviewMd } = artifact;
+
+    // `apply()` would refuse this anyway (ALREADY_EXISTS, never a clobber); the
+    // check is here to skip the store read, not to make the write safe.
+    if (existsSync(reviewArtifactPath(projectRoot, missionId))) return;
+
+    const store = tasks.openMissionStore(projectRoot, ids.sessionId, Date.now(), {
+      resolveGitCommonDir: gitDir.resolveGitCommonDir,
+    });
+    const row = store.getMission(missionId);
+    if (row === null) return;
+    const intentRevision = row.intent?.revision;
+    if (!Number.isInteger(intentRevision)) return;
+    // `plan.revision` is optional in a way `intent.revision` is not: the schema
+    // requires the key, but a row seeded before a plan existed can still carry
+    // a non-integer, and `null` is the serializer's word for "no plan yet".
+    const planRevision = Number.isInteger(row.plan?.revision) ? row.plan.revision : null;
+
+    const verdict = ctx.outcome.parsed.verdict;
+    const text = serializeReviewMd({
+      missionId,
+      verdict: verdict.verdict,
+      findingsRef: ctx.findingsRef,
+      verificationId: verdict.verificationId,
+      // Always the first revision. Superseding an existing `review.md` is not
+      // implemented anywhere in the pipeline — no caller bumps a review
+      // revision — so a second review of one mission stops at ALREADY_EXISTS.
+      //
+      // NOT AN OVERSIGHT, A PENDING DECISION: review revision succession is
+      // owner decision §7.2 (`.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md:357`),
+      // still open. Until it lands, the SECOND verdict of a mission reaches the
+      // ledger and NOT the file. Pinned by
+      // `tests/hooks/subagent-handler-review-writer.test.js` ("KEEPS THE FIRST
+      // VERDICT"), which is the line that has to change when it is decided.
+      revision: FIRST_REVIEW_REVISION,
+      basedOn: { intentRevision, planRevision },
+      reviewerId: ids.agentType,
+      model: ctx.model,
+      ts: new Date().toISOString(),
+    });
+
+    // The envelope is REBUILT rather than reused: `recordReviewOutcome` returns
+    // statuses, not the line it appended. These are the two `data` keys
+    // `REQUIRED_EVENT_DATA['review.completed']` names, plus the id the ledger
+    // line also carries, and they come from the same parse the ledger used.
+    const planResult = lifecycle.plan({
+      events: [{
+        event: 'review.completed',
+        mission_id: missionId,
+        seq: 0,
+        data: {
+          verdict: verdict.verdict,
+          findings_ref: ctx.findingsRef,
+          verification_id: verdict.verificationId,
+        },
+      }],
+      missionState: {
+        missionId,
+        intentRevision,
+        planRevision,
+        reviewRevision: FIRST_REVIEW_REVISION,
+        appliedIdempotencyKeys: [],
+      },
+      projectRoot,
+    });
+    lifecycle.apply(planResult, {
+      // `dryRun: true` is the "I know this module" flag, not "do not write";
+      // `write: true` is what authorises the filesystem. See `apply`'s doc.
+      dryRun: true,
+      write: true,
+      projectRoot,
+      config,
+      content: { review: text },
+    });
+  } catch {
+    /* best-effort: the hook has already answered. */
+  }
+}
+
+/**
  * Record a reviewer's answer as up to two ledger lines.
  *
  * The ports are built HERE rather than inside the writer because
@@ -249,6 +478,11 @@ function reviewSkipped(reason) {
  *
  * NEVER THROWS: anything unexpected becomes `{ error: '<ConstructorName>' }`,
  * which lands in the spawn column and nowhere else.
+ *
+ * On the APPENDED path it also starts the `review.md` write (see
+ * {@link planReviewArtifact}); the returned `artifact` label says what that
+ * decided. The pre-flight refusals from {@link reviewSkipped} return before any
+ * of this and carry no `artifact` key at all.
  *
  * @param {object} hookData parsed hook payload
  * @param {{agentId: string, agentType: string, sessionId: string|null,
@@ -265,16 +499,19 @@ export function recordReviewFromStop(hookData, ids, projectRoot) {
     const verdictText = reviewerText(hookData, entry);
     if (verdictText === null) return reviewSkipped('no-text');
 
+    const model = reviewerModel(entry);
+    // Leader decision 2026-09-12: the agent id, never the transcript PATH — a
+    // path carries a home directory and a session id into a tracked ledger.
+    const findingsRef = `transcript:${ids.agentId}`;
+
     const outcome = recordReviewOutcome({
       verdictText,
       sessionId,
       missionId: ids.missionId,
       // The reviewer's own model, from its transcript. Absent ⇒ the verdict
       // line is skipped by the writer; see the block comment above.
-      model: reviewerModel(entry),
-      // Leader decision 2026-09-12: the agent id, never the transcript PATH — a
-      // path carries a home directory and a session id into a tracked ledger.
-      findingsRef: `transcript:${ids.agentId}`,
+      model,
+      findingsRef,
       reviewerId: ids.agentType,
     }, {
       append: (input) => appendLedgerEvent(projectRoot, input),
@@ -288,6 +525,12 @@ export function recordReviewFromStop(hookData, ids, projectRoot) {
       reviewReason: outcome.review.reason ?? null,
       claimAudit: outcome.claimAudit.status,
       claimAuditReason: outcome.claimAudit.reason ?? null,
+      // NOT carried into `reviewLedgerColumn`: the spawn column is a summary of
+      // what the LEDGER recorded, and widening its grammar would change a
+      // string the vocabulary firewall pins. The label is for callers/tests.
+      artifact: planReviewArtifact({
+        outcome, ids, projectRoot, model, findingsRef,
+      }),
       parsed: {
         ok: outcome.parsed.verdict.ok === true,
         // The legacy fold is an OBSERVATION, not a verdict: it says what an
