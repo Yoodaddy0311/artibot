@@ -10,7 +10,9 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -138,6 +140,84 @@ describe('resolveIntegrationEvidence', () => {
     expect(ev.integrated).toBe(false);
     expect(ev.reason).toBe('evidence-lookup-failed');
   });
+});
+
+// AP-05 regression: the worktrees root can be `os.tmpdir()`, which on Windows
+// is the 8.3 short form (C:\Users\HEECHA~1\...) while git porcelain reports the
+// resolved long form. Matching porcelain against a locally built path then
+// yields no branch, and a null `selfBranch` makes the branch under reap count
+// as its own integration evidence.
+const SHORT_PATHS = process.platform === 'win32'
+  && realpathSync.native(os.tmpdir()) !== os.tmpdir();
+
+describe('branch resolution is independent of path spelling', () => {
+  it('describeWorktreeHead reports the checked-out branch and detached=false', () => {
+    if (!gitAvailable()) return;
+    const s = makeSessionWorktree('head');
+    if (!s) return;
+    const head = describeWorktreeHead(s.wtPath, repo);
+    expect(head.branch).toBe(s.branch);
+    expect(head.detached).toBe(false);
+    expect(head.sha).toBeTruthy();
+  });
+
+  it.skipIf(!SHORT_PATHS)(
+    'resolves the same branch from the 8.3 short and realpath long spellings',
+    () => {
+      if (!gitAvailable()) return;
+      const scratch = mkdtempSync(path.join(os.tmpdir(), 'artibot-f01-short-'));
+      const shortPath = path.join(scratch, 'wt');
+      const branch = `autopilot/short-${process.pid}-${Date.now()}`;
+      try {
+        if (git(['worktree', 'add', '-b', branch, shortPath, 'main'], repo).status !== 0) return;
+        const longPath = realpathSync.native(shortPath);
+        expect(longPath).not.toBe(shortPath); // the mismatch actually exists
+        // Unique commit — otherwise HEAD is main's tip and genuinely integrated.
+        const sha = commitInside(shortPath, 'short-work.txt', 'unintegrated\n');
+
+        expect(describeWorktreeHead(shortPath, repo).branch).toBe(branch);
+        expect(describeWorktreeHead(longPath, repo).branch).toBe(branch);
+
+        // Why a null selfBranch is fatal: the branch under reap answers for
+        // itself and the reaper concludes the work is safely integrated.
+        expect(resolveIntegrationEvidence(sha, { cwd: repo, selfBranch: null }).integrated)
+          .toBe(true);
+        expect(resolveIntegrationEvidence(sha, { cwd: repo, selfBranch: branch }))
+          .toMatchObject({ integrated: false, reason: 'no-integration-evidence' });
+      } finally {
+        git(['worktree', 'remove', '--force', shortPath], repo);
+        git(['branch', '-D', branch], repo);
+        rmSync(scratch, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'preserves through reapWorktree when git registered a case-variant path',
+    () => {
+      if (!gitAvailable()) return;
+      const sessionId = uniqueId('case');
+      const branch = `autopilot/${sessionId}`;
+      const wtPath = getWorktreePath(sessionId);
+      mkdirSync(path.dirname(wtPath), { recursive: true });
+      // Same directory, different spelling — NTFS is case-insensitive, so git
+      // records the variant while getWorktreePath() returns the canonical one.
+      const variant = path.join(
+        path.dirname(wtPath).toUpperCase(),
+        path.basename(wtPath),
+      );
+      if (git(['worktree', 'add', '-b', branch, variant, 'main'], repo).status !== 0) return;
+      sessions.add(sessionId);
+      const sha = commitInside(variant, 'case-work.txt', 'unintegrated\n');
+
+      const res = reapWorktree(sessionId, { cwd: repo, force: true });
+      expect(res.action).toBe('preserved');
+      expect(res.branch).toBe(branch);
+      expect(res.resultRef).toBe(`refs/heads/${branch}`);
+      expect(branchExists(repo, branch)).toBe(true);
+      expect(reachableRefs(repo, sha)).toContain(`refs/heads/${branch}`);
+    },
+  );
 });
 
 describe('reapWorktree preservation', () => {
@@ -308,7 +388,9 @@ describe('engine integration — unintegrated results survive REPORT and ABORT',
   it('(d-i) REPORT preserves a committed-but-unmerged session branch', async () => {
     if (!gitAvailable()) return;
     const s = await startSession('report');
-    if (!s.worktreePath) return; // git refused the worktree — nothing to assert
+    // A worktree that failed to create must be RED: an early return here would
+    // turn the whole AP-05 assertion into a silent green.
+    expect(s.worktreePath).toBeTruthy();
     const sha = commitInside(s.worktreePath, 'ap05.txt', 'unintegrated\n');
 
     runPhase6Report(loadSession(s.sessionId));
@@ -324,7 +406,7 @@ describe('engine integration — unintegrated results survive REPORT and ABORT',
   it('(d-ii) non-graceful ABORT preserves a committed-but-unmerged branch', async () => {
     if (!gitAvailable()) return;
     const s = await startSession('abort');
-    if (!s.worktreePath) return;
+    expect(s.worktreePath).toBeTruthy();
     const sha = commitInside(s.worktreePath, 'ap05-abort.txt', 'unintegrated\n');
 
     await abortAutopilot(s.sessionId, { graceful: false });

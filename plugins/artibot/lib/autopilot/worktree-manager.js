@@ -16,7 +16,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ensureDirSync } from '../core/file.js';
@@ -85,6 +85,27 @@ function deleteAutopilotBranch(branch, cwd) {
 }
 
 /**
+ * Canonicalize a path for comparison against `git worktree list` output.
+ *
+ * `getWorktreesRoot()` can fall back to `os.tmpdir()`, which on Windows is the
+ * 8.3 short form (`C:\Users\HEECHA~1\...`), while git porcelain reports the
+ * resolved long form. A plain `path.normalize` compare then never matches, and
+ * the caller silently loses the branch name.
+ * @param {string} p
+ * @returns {string}
+ */
+function canonicalPath(p) {
+  let resolved = p;
+  try {
+    resolved = realpathSync.native(p);
+  } catch {
+    /* path may not exist yet — fall back to lexical normalization */
+  }
+  const normalized = path.normalize(resolved);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+/**
  * Resolve the branch a session's worktree is checked out on, by scanning
  * `git worktree list --porcelain`. Returns null for detached worktrees or
  * when the session worktree is not found.
@@ -96,9 +117,9 @@ function resolveSessionBranch(sessionId, cwd) {
   try {
     const result = spawnSync('git', ['worktree', 'list', '--porcelain'], gitOpts(cwd));
     if (result.error || result.status !== 0) return null;
-    const wtPath = path.normalize(getWorktreePath(sessionId));
+    const wtPath = canonicalPath(getWorktreePath(sessionId));
     for (const rec of parsePorcelain(result.stdout || '')) {
-      if (path.normalize(rec.path) === wtPath) return rec.branch;
+      if (canonicalPath(rec.path) === wtPath) return rec.branch;
     }
   } catch {
     /* best-effort */
@@ -494,24 +515,36 @@ function hasMissions(wtPath) {
 }
 
 /**
- * Describe what a worktree is currently holding: its HEAD commit, whether the
- * tree has uncommitted changes (untracked files count), and whether mission
- * artifacts are present.
+ * Describe what a worktree is currently holding: its HEAD commit, the branch it
+ * is on, whether the tree has uncommitted changes (untracked files count), and
+ * whether mission artifacts are present.
+ *
+ * `branch` comes from `symbolic-ref` inside the worktree, which is independent
+ * of how the path happens to be spelled — unlike matching porcelain output
+ * against a locally built path, which breaks on Windows 8.3 short names.
+ * `detached` distinguishes "no branch by design" from "the lookup failed",
+ * which the caller needs in order to fail closed on the latter.
  * @param {string} wtPath
  * @param {string} [cwd]
- * @returns {{sha: string|null, dirty: boolean, missionsPresent: boolean}}
+ * @returns {{sha: string|null, branch: string|null, detached: boolean,
+ *   dirty: boolean, missionsPresent: boolean}}
  */
 export function describeWorktreeHead(wtPath, cwd) {
   if (!wtPath || typeof wtPath !== 'string') {
-    return { sha: null, dirty: false, missionsPresent: false };
+    return { sha: null, branch: null, detached: false, dirty: false, missionsPresent: false };
   }
   const head = git(['-C', wtPath, 'rev-parse', 'HEAD'], cwd);
   const sha = head.ok ? head.stdout.trim() || null : null;
+  const ref = git(['-C', wtPath, 'symbolic-ref', '-q', '--short', 'HEAD'], cwd);
+  const branch = ref.ok ? ref.stdout.trim() || null : null;
+  // `symbolic-ref -q` exits 1 precisely when HEAD is detached; any other
+  // non-zero status means the lookup itself broke.
+  const detached = !branch && ref.status === 1;
   const status = git(['-C', wtPath, 'status', '--porcelain'], cwd);
   // A status lookup that fails tells us nothing about the tree, so it counts as
   // dirty rather than clean — unknown must never authorize a delete.
   const dirty = status.ok ? status.stdout.trim().length > 0 : true;
-  return { sha, dirty, missionsPresent: hasMissions(wtPath) };
+  return { sha, branch, detached, dirty, missionsPresent: hasMissions(wtPath) };
 }
 
 /**
@@ -597,15 +630,17 @@ function reapMissingWorktree(branch, { cwd, integrationTarget }) {
 
 /**
  * Decide the fate of a worktree that still exists on disk. First match wins:
- * unresolvable head → missions → dirty → missing evidence → remove.
+ * unresolvable head → unresolvable branch → missions → dirty → missing
+ * evidence → remove.
  * @param {string} sessionId
  * @param {string} wtPath
- * @param {string} branch
+ * @param {string|null} porcelainBranch
  * @param {{cwd?: string, force?: boolean, integrationTarget?: string|null}} opts
  * @returns {object}
  */
-function reapLiveWorktree(sessionId, wtPath, branch, { cwd, force, integrationTarget }) {
+function reapLiveWorktree(sessionId, wtPath, porcelainBranch, { cwd, force, integrationTarget }) {
   const head = describeWorktreeHead(wtPath, cwd);
+  const branch = head.branch ?? porcelainBranch;
   const base = {
     ...emptyReap(),
     branch,
@@ -615,6 +650,10 @@ function reapLiveWorktree(sessionId, wtPath, branch, { cwd, force, integrationTa
   const keep = (reason) => ({ ...base, action: 'preserved', reason });
 
   if (!head.sha) return keep('head-unresolvable');
+  // Without a self branch the evidence sweep would count the very branch we are
+  // about to delete as proof of integration. Detached HEADs have no self branch
+  // by design and are safe; a failed lookup is not, so it fails closed.
+  if (!branch && !head.detached) return keep('branch-unresolvable');
   // Checked before `dirty` so the operator gets the specific reason.
   if (head.missionsPresent) return keep('missions-present');
   if (head.dirty) return keep('dirty-worktree');
