@@ -18,6 +18,11 @@ import { blankPrinterSegments } from '../core/command-segments.js';
  *
  * lib/core/blocked-patterns.js (L1, PreToolUse) is the canonical block list;
  * this catalogue only grades severity on top of it and never widens what runs.
+ * That still holds after 2026-09-14, when both layers gained the SAME printer-
+ * segment preprocessing (lib/core/command-segments.js): it narrows what either
+ * layer READS, identically on both, so the two cannot drift apart through it.
+ * The rules below are matched against that preprocessed text — except the four
+ * `secret-*` rules, which classifyRisk deliberately keeps on the raw text.
  */
 export const DANGEROUS_PATTERNS = Object.freeze([
   // Owner decision 2026-09-11 ①: the lease/if-includes forms are a CHECKED

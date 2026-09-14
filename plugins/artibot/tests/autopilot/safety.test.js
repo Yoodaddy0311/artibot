@@ -475,11 +475,36 @@ describe('classifyRisk — fork bomb', () => {
     expect(r.matchedId).toBe('fork-bomb');
   });
 
-  // L1 은 normalizeCommand 가 따옴표를 벗겨서 잡는다. L2 는 앵커가 없어서 잡는다
-  // — 경로는 다르지만 방향은 같다(차단 쪽). 인용문을 echo 하는 것 자체는
-  // 무해하므로 이것은 의도된 과차단이고, 그래서 핀으로 고정한다.
-  it('grades the fork bomb as danger even when it is quoted inside echo', () => {
+  // 2026-09-14 계약 반전(guard-command-position). 종전에는 이 입력이 danger 였고
+  // "의도된 과차단"이라는 주석과 함께 핀돼 있었다. **echo 인용은 실행이 아니다** —
+  // 세그먼트 전처리(lib/core/command-segments.js#blankPrinterSegments)가 프린터
+  // 세그먼트를 통째로 비우므로 순수 언급은 더 이상 발화하지 않는다. 이 오탐은
+  // 관념적인 것이 아니었다: 가드 소스를 다루는 정찰·검수 창에서 2026-09-11 하루에
+  // 6회 실차단됐다(브리프 §배경 실사례).
+  //
+  // 강등이 아니라 **정확해진 것**임을 아래 세 it 이 증명한다 — 파이프·치환·세그먼트
+  // 분리가 붙는 순간 전부 danger 로 돌아온다. 이 네 it 은 한 묶음이다. 위만 남기고
+  // 아래를 지우면 fail-open 이 된다.
+  it('leaves the fork bomb safe when it is only quoted inside echo', () => {
     const r = classifyRisk(`echo '${CANONICAL}'`);
+    expect(r.level).toBe('safe');
+    expect(r.matchedId).toBeUndefined();
+  });
+
+  it.each([
+    ['piped into a shell (condition ii)', (c) => `echo '${c}' | sh`],
+    ['inside a command substitution (condition iii)', (c) => `echo "$(${c})"`],
+    ['in a second segment after a printer (segment split)', (c) => `echo 'safe' ; ${c}`],
+    ['redirected out of the printer (condition iv)', (c) => `echo '${c}' > /tmp/f`],
+  ])('still grades the fork bomb danger when it is %s', (_name, build) => {
+    const r = classifyRisk(build(CANONICAL));
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('fork-bomb');
+  });
+
+  // 허용목록 밖 프린터는 면제되지 않는다(fail-closed 의 실행형 반증).
+  it('still grades the fork bomb danger through a printer outside the allowlist', () => {
+    const r = classifyRisk(`logger '${CANONICAL}'`);
     expect(r.level).toBe('danger');
     expect(r.matchedId).toBe('fork-bomb');
   });
@@ -513,6 +538,91 @@ describe('classifyRisk — fork bomb', () => {
     ['newline', `${COLON}${'\n'.repeat(120_000)}x`],
   ])('returns safe on a 120KB %s run after a single colon', (_name, input) => {
     expect(classifyRisk(input).level).toBe('safe');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 프린터 세그먼트 전처리 × 카탈로그 전체 (2026-09-14, guard-command-position).
+//
+// 포크밤 describe 는 규칙 하나에서 반전을 증명한다. 여기는 그것이 **카탈로그
+// 전반**에 같은 방식으로 적용되는지, 그리고 전처리가 규칙과 상호작용해 판정을
+// 바꾸는 자리가 어디인지를 본다. 후자가 이 블록의 존재 이유다 — 전처리는
+// 규칙을 한 줄도 고치지 않지만 규칙이 보는 **텍스트**를 바꾸므로, "규칙 diff 0"
+// 은 "판정 diff 0" 이 아니다.
+describe('classifyRisk — printer-segment preprocessing across the catalogue', () => {
+  // 언급 래퍼. 종전에는 전부 발화했다(브리프 §배경: L2 20~22/22).
+  it.each([
+    ['echo double-quoted', 'echo "DROP TABLE users"'],
+    ['echo single-quoted', "echo 'git push --force origin main'"],
+    ['shell comment', '# rm -rf /tmp/x'],
+    ['printf', "printf '%s' 'TRUNCATE users;'"],
+    ['grep', 'grep -rn "DROP TABLE" .'],
+    ['git commit -m', 'git commit -m "rm -rf build"'],
+    ['git tag -m', 'git tag -m "npm publish went out" v1'],
+    ['transparent prefix + echo', 'sudo echo "git reset --hard"'],
+    ['assignment prefix + echo', 'FOO=1 echo "git stash clear"'],
+  ])('leaves a %s mention safe', (_name, command) => {
+    expect(classifyRisk(command).level).toBe('safe');
+  });
+
+  // 거부권 4종. 위 목록과 **같은 문자열**이 실행 가능해지는 순간 돌아온다.
+  it.each([
+    ['pipe (ii)', 'echo "DROP TABLE users" | psql', 'sql-drop-table'],
+    ['substitution (iii)', 'echo "$(DROP TABLE users)"', 'sql-drop-table'],
+    ['redirect (iv)', 'echo "DROP TABLE users" > /tmp/f', 'sql-drop-table'],
+    ['segment split', 'echo "safe" ; DROP TABLE users', 'sql-drop-table'],
+    ['printer outside the allowlist', 'logger "DROP TABLE users"', 'sql-drop-table'],
+    ['git commit --exec is not a message form', 'git commit --exec "DROP TABLE users"', 'sql-drop-table'],
+  ])('still grades %s as danger', (_name, command, matchedId) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe(matchedId);
+  });
+
+  // heredoc 본문은 계속 차단된다 — 누락이 아니라 결정이다. 본문을 인쇄물로
+  // 보기 시작하면 `bash <<EOF` 가 통째로 사각이 된다.
+  it('still grades a heredoc body as danger (deliberate residual false positive)', () => {
+    const r = classifyRisk(`cat <<'EOF'\nrm -rf /\nEOF`);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // secret-* 4규칙은 RAW 텍스트를 본다. 시크릿을 echo 하는 것 자체가 유출이므로
+  // 면제가 적용되면 안 된다. 이 it 이 그 예외 경로의 유일한 실행형 증거다.
+  // 리터럴은 조립해서 만든다 — 파일에 그대로 적으면 시크릿 스캐너가 쓰기를
+  // 거부한다(2026-09-14 실차단).
+  it.each([
+    ['secret-aws', `echo "${'aws_secret_access'}_key=x"`, 'secret-aws'],
+    ['secret-openai', `echo "${'sk-'}${'a'.repeat(24)}"`, 'secret-openai'],
+    ['secret-private-key', `echo "-----BEGIN RSA PRIVATE ${'KEY'}-----"`, 'secret-private-key'],
+  ])('keeps %s firing on the raw text even inside a printer', (_name, command, matchedId) => {
+    const r = classifyRisk(command);
+    expect(r.matchedId).toBe(matchedId);
+    expect(r.level).not.toBe('safe');
+  });
+
+  // ── 전처리가 판정을 바꾼 유일한 "더 엄격해진" 자리 ────────────────────────
+  // 규칙 소스는 그대로인데 판정이 safe -> danger 로 움직인다. 방향이 차단
+  // 쪽이라 받아들이지만, **조용히 두지 않는다**.
+  // 원인: sql-delete-no-where 의 꼬리 `(?!.*\bWHERE\b)` 는 줄 끝까지가 아니라
+  // 입력 끝까지(`s` 플래그) 훑는다. `DELETE FROM t; echo "WHERE"` 에서 종전에는
+  // 그 `WHERE` 가 lookahead 를 막아 safe 였다 — 즉 **인쇄되는 단어 하나로 SQL
+  // 규칙을 무력화할 수 있었다.** 전처리가 인쇄 세그먼트를 비우면서 그 우회가
+  // 닫혔다. 실측 2026-09-14: 규칙을 raw 에 대면 false, 전처리 결과에 대면 true.
+  it('closes the "print the word WHERE to defuse the rule" bypass', () => {
+    const r = classifyRisk('DELETE FROM t; echo "WHERE"');
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('sql-delete-no-where');
+  });
+
+  // 음성 대조 — 진짜 WHERE 절은 인쇄물이 아니므로 전처리가 손대지 않는다.
+  // 이 입력이 danger 인 것은 이 줄기와 무관한 **선재 오탐**이다(전처리는 여기서
+  // no-op: blankPrinterSegments 출력 === 입력, 실측 2026-09-14). 규칙의 몸통
+  // 문자클래스가 공백을 포함해 `t WHERE id` 까지 삼킨 뒤 lookahead 가 성립해
+  // 버린다. 여기서 고치지 않는다 — 이 줄기는 정규식을 0건 편집한다. 핀만 해
+  // 두어 다음 사람이 "전처리 탓"으로 오진하지 않게 한다.
+  it('leaves the pre-existing WHERE false positive exactly as it was', () => {
+    expect(classifyRisk('DELETE FROM t WHERE id=1').matchedId).toBe('sql-delete-no-where');
   });
 });
 
@@ -552,11 +662,18 @@ describe('classifyRisk — fork bomb', () => {
 //  5. 전처리(guard-registry#normalizeCommand)와의 상호작용, 규칙 간 평가 순서,
 //     classifyRisk 전체 경로의 합산 비용.
 //  6. `[]]` 같은 JS 문자클래스 극단 문법(파싱 실패 시 fail-closed 로 보고한다).
-//  7. **범위**. 이 스캔은 두 카탈로그(BLOCKED_PATTERNS · DANGEROUS_PATTERNS)만
-//     훑는다. 리포의 다른 정규식은 들어오지 않는다 — 2026-09-11 12:2x UTC 실측
-//     기준 `lib/security/human-gates.js:179,181` 에 `\bcurl\b[^\n]*` ·
-//     `\bgit\s+push\b[^\n]*` 가 무앵커로 남아 있고(같은 2차식 모양), 같은 파일
-//     :260,261 은 `^` 앵커라 해당하지 않는다. 그 파일은 이 작업의 소유 밖이다.
+//  7. **범위 — 2026-09-14 에 세 카탈로그로 넓혔다.** 이 스캔은 이제
+//     BLOCKED_PATTERNS(L1) · DANGEROUS_PATTERNS(L2) · HUMAN_GATE_MATRIX(HG,
+//     `lib/security/human-gates.js` 13행 29패턴)를 훑는다. HG 를 들인 이유는
+//     그 표가 같은 PreToolUse 경로(probe 'command', tools Bash)를 타면서 두
+//     카탈로그 밖이라 종전 스캔이 **구조적으로** 못 봤기 때문이다. 실제로
+//     HG-07 의 curl·git push 런은 무앵커 `[^\n]*` 였고 122,880B 에서 각각
+//     1,658.6 / 1,085.4ms 였다(실측 2026-09-14 01:3x KST) — 같은 2차식 모양이
+//     스캔 밖에서 살아 있었다. 지금은 `{0,192}` 로 바운드됐고 스캔 대상이다.
+//     **여전히 밖인 것**: 리포의 나머지 정규식 전부(`lib/core/guard-registry.js`
+//     의 SENSITIVE_PATTERNS·SECRET_CONTENT_PATTERNS, `scripts/hooks/**`,
+//     `lib/core/command-segments.js` 의 전처리 정규식). 네 번째 카탈로그가
+//     필요해지면 같은 자리에 추가하라 — "세 개면 충분하다"는 근거는 없다.
 //  8. **등록된 예외 규칙의 정확한 창 값.** 기본 192 를 넘는 창은 등록해야만
 //     통과하므로 **신규 규칙 구멍은 닫혔다**(2026-09-11 리더 판정 전에는 전역
 //     상한 512 였고, 그때는 열려 있었다 — 아래 실측 참조). 남는 것은 *등록된*
@@ -614,8 +731,9 @@ const WINDOW_CEILING_OVERRIDES = Object.freeze({
 
 /**
  * 규칙 하나에 적용할 상한을 고른다.
- * @param {'L1'|'L2'} layer 카탈로그 — L1 = blocked-patterns, L2 = safety
- * @param {string} key L1 은 label, L2 는 id
+ * @param {'L1'|'L2'|'HG'} layer 카탈로그 — L1 = blocked-patterns,
+ *   L2 = safety, HG = security/human-gates (2026-09-14 추가)
+ * @param {string} key L1 은 label, L2 는 id, HG 는 `<행 id>[<패턴 인덱스>]`
  * @returns {number}
  */
 function ceilingFor(layer, key) {
@@ -752,6 +870,30 @@ function findUnboundedRuns(source, flags = '', ceiling = WINDOW_CEILING_DEFAULT)
  */
 const SCAN_ALLOWLIST = new Set(['sql-delete-no-where']);
 
+/**
+ * 세 번째 카탈로그(HG)의 예외. 키는 `<행 id>[<패턴 인덱스>]`.
+ *
+ * **리더 지시 교정(2026-09-14).** 지시는 "D 가 HG-07 을 바운드하면 세 번째
+ * 카탈로그는 그린"이었으나 실측하면 그렇지 않다. HG-11 의 두 패턴도
+ * `[^\n]*` 무제한 런을 갖는다 — 스캐너는 순수 구문 도구라 `^` 앵커를 보지
+ * 않기 때문이다. D 의 소유는 HG-07 뿐이므로 그 두 건은 바운드되지 않는다.
+ *
+ * 왜 바운드가 아니라 예외인가: 두 패턴은 `^\s*(?:cat|less|…)` 로 **시작
+ * 앵커**를 갖고 `m` 플래그가 없다. `^` 는 문자열 첫 위치에서만 매치하므로
+ * 엔진이 시도하는 시작 위치가 하나뿐이고, 2차식의 원인인 "단어가 나올 때마다
+ * 줄 끝까지 재스캔"이 성립하지 않는다. 실측(3회 중앙값, node v24.15.0,
+ * 2026-09-14 01:3x KST, `'cat '` 반복 근접-비매치):
+ *   HG-11[0] `.env`      20,480B 0.0 · 40,962B 0.0 · 122,880B 0.1 ms
+ *   HG-11[1] `id_rsa` 등 20,480B 0.0 · 40,962B 0.0 · 122,880B 0.3 ms
+ * 같은 시각 같은 하네스에서 바운드 전 HG-07[0] 은 122,880B 1,658.6ms 였다 —
+ * 네 자릿수 차이다. 폭을 좁히면 커버리지만 잃고 얻는 것이 없다.
+ *
+ * 이 예외는 "lookahead 안이면 전부 예외" 같은 일반 규칙이 아니라 `SCAN_ALLOWLIST`
+ * 와 같은 **열거형**이다. 앵커가 사라지면 면제 근거도 사라지므로 아래
+ * `'HG-11[0]' 는 ^ 로 시작하고 m 플래그가 없다` it 이 그것을 실행형으로 붙든다.
+ */
+const HG_SCAN_ALLOWLIST = new Set(['HG-11[0]', 'HG-11[1]']);
+
 describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () => {
   it.each(BLOCKED_PATTERNS.map((p, idx) => [`L1[${idx}] ${p.label}`, p.pattern, p.label]))(
     '%s', (_name, pattern, key) => {
@@ -780,6 +922,51 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
     expect(hits[0].snippet).toBe('.*');
     // lookahead 밖으로 옮기면 이 단언이 RED 가 된다 — 예외가 넓어지지 않는다.
     expect(rule.test.source.slice(hits[0].index - 3, hits[0].index)).toBe('(?!');
+  });
+
+  // ── 세 번째 카탈로그 (2026-09-14) ─────────────────────────────────────────
+  // 왜 늘렸나: HG 표는 같은 PreToolUse 경로를 탄다(probe 'command', tools Bash)
+  // 면서 두 정규식 카탈로그 밖이라 W7 정적 스캔이 구조적으로 못 봤다. 그 사각의
+  // 비용은 가정이 아니라 실측이었다 — 바운드 전 HG-07 은 단일 정규식으로
+  // 40,962B 187.7ms / 122,880B 1,658.6ms(curl), 90.2 / 1,085.4ms(git push)였다
+  // (3회 중앙값, node v24.15.0, 2026-09-14 01:3x KST, 다른 세션 부하 있음).
+  // 5초 훅 예산 안이지만 2차식 곡선이고, 스캐너가 못 보는 한 다음 규칙도 같은
+  // 모양으로 들어온다. 이제 본다.
+  it.each(
+    HUMAN_GATE_MATRIX.flatMap((row) => row.patterns.map((pattern, i) => [
+      `HG ${row.id}[${i}]`, pattern, `${row.id}[${i}]`,
+    ])),
+  )('%s', (_name, pattern, key) => {
+    if (HG_SCAN_ALLOWLIST.has(key)) return;
+    const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('HG', key));
+    expect(hits.map((h) => h.snippet)).toEqual([]);
+  });
+
+  // 분모 고정. 위 it.each 가 "0개를 훑고 통과"하는 공허한 그린이 되지 않도록.
+  // 숫자가 움직이면 HG 표가 바뀐 것이므로 읽고 나서 고치는 게 맞다.
+  it('scans all 29 human-gate patterns across 13 rows', () => {
+    expect(HUMAN_GATE_MATRIX).toHaveLength(13);
+    const total = HUMAN_GATE_MATRIX.reduce((n, row) => n + row.patterns.length, 0);
+    expect(total).toBe(29);
+    // HG-10 은 patterns 가 비어 있다(패턴화 불가 선언). 그 행이 있어도
+    // flatMap 이 무너지지 않는다는 것을 여기서 함께 본다.
+    expect(HUMAN_GATE_MATRIX.filter((row) => row.patterns.length === 0).map((r) => r.id))
+      .toEqual(['HG-10']);
+  });
+
+  it('예외는 `^` 앵커를 가진 HG-11 두 건뿐이다', () => {
+    expect([...HG_SCAN_ALLOWLIST].sort()).toEqual(['HG-11[0]', 'HG-11[1]']);
+  });
+
+  // 예외의 근거를 실행형으로 붙든다. 면제 사유는 "앵커가 있다" 이므로, 앵커가
+  // 사라지면(누가 `^` 를 떼거나 `m` 플래그를 붙이면) 면제가 성립하지 않는다.
+  it.each([...HG_SCAN_ALLOWLIST])('%s 는 `^` 로 시작하고 m 플래그가 없다', (key) => {
+    const [, id, idx] = /^(HG-\d+)\[(\d+)\]$/.exec(key);
+    const pattern = HUMAN_GATE_MATRIX.find((row) => row.id === id).patterns[Number(idx)];
+    expect(pattern.source.startsWith('^')).toBe(true);
+    expect(pattern.flags).not.toContain('m');
+    // 면제가 사소하지 않다는 반증 — 앵커를 빼면 스캐너가 실제로 잡는다.
+    expect(findUnboundedRuns(pattern.source.slice(1), pattern.flags).length).toBeGreaterThan(0);
   });
 });
 
@@ -856,14 +1043,20 @@ describe('ReDoS 정적 스캔 — 스캐너 자기검증', () => {
   // 층 접두가 실제로 네임스페이스를 가르는지. 접두 없이 label 과 id 를 섞어
   // 두면 같은 문자열이 양쪽 층에 조용히 예외를 주는데, 핀 it 은 키 목록만
   // 고정하므로 그 충돌을 못 본다. 여기가 그 자리를 맡는다.
-  it('keeps the L1 and L2 key namespaces apart', () => {
+  it('keeps the L1, L2 and HG key namespaces apart', () => {
     // 같은 식별자라도 등록된 층에서만 512 가 나온다.
     expect(ceilingFor('L1', 'rm -rf with path')).toBe(512);
     expect(ceilingFor('L2', 'rm -rf with path')).toBe(WINDOW_CEILING_DEFAULT);
+    expect(ceilingFor('HG', 'rm -rf with path')).toBe(WINDOW_CEILING_DEFAULT);
     // 등록 키는 전부 층 접두를 달고 있다.
     for (const key of Object.keys(WINDOW_CEILING_OVERRIDES)) {
-      expect(key).toMatch(/^L[12]:/);
+      expect(key).toMatch(/^(?:L[12]|HG):/);
     }
+    // HG 는 2026-09-14 현재 등록 0건이다 — 세 번째 카탈로그가 예외를 들고
+    // 들어오지 않았다는 핀. HG 패턴이 192 를 넘으려면 여기 등록해야 하고,
+    // 그러면 위 'pins the override list to exactly the two L1 rm rules' 가
+    // 먼저 RED 가 된다.
+    expect(Object.keys(WINDOW_CEILING_OVERRIDES).filter((k) => k.startsWith('HG:'))).toEqual([]);
   });
 });
 
@@ -1008,6 +1201,46 @@ const SCALED_PAYLOADS = [
   ['fork-bomb space run', (n) => `${COLON}${' '.repeat(n - 2)}x`],
   // rm 규칙군의 위험은 지수식(그룹 수량자)이라 정적 스캐너가 못 본다(#3).
   ['rm option run', (n) => `rm ${fill('--opt ', n - 4)}x`],
+
+  // ── 전처리 경로 (2026-09-14, guard-command-position) ─────────────────────
+  // 위 6형은 **규칙**을 겨눈다. 아래 9형은 `blankPrinterSegments` 의 토크나이저를
+  // 겨눈다 — 규칙이 선형이어도 전처리가 2차식이면 전체 경로가 2차식이다.
+  // 설계 프로브의 c 열 수치는 세그먼트마다 문자열을 재조립해 O(n²)였고 그래서
+  // **무효다**(브리프 §미확인). 아래가 구현 실측이고 이것이 정본이다.
+  //
+  // 형태 선정 근거 — 토크나이저가 상태를 바꾸는 자리 전부:
+  //   분리자 런(`;` `|` `&&`) · 세그먼트가 수만 개로 쪼개지는 형(echo x; 반복)
+  //   · 한 세그먼트가 입력 전체인 형(따옴표 스팬·주석·공백 런)
+  //   · 닫히지 않는 상태(불균형 따옴표·`$(` 런).
+  // 마지막 둘이 본체다: 열린 상태를 만날 때마다 끝까지 다시 읽는 구현이면
+  // 거기서 터진다.
+  //
+  // 실측 — classifyRisk 전체 경로(전처리 포함), 3회 중앙값, node v24.15.0,
+  // Windows 11, 2026-09-14 09:2x KST. 122,880B 는 **단언하지 않는다**(규약);
+  // 규칙 주석에 수치를 병기하라는 요구가 이 표다.
+  //            20,480B  40,962B  122,880B   growth(6배 구간, 임계 18)
+  //   echo-semicolon  5.7    4.8     7.1      1.14
+  //   semicolon       0.7    0.6     2.1      1.30
+  //   pipe            0.7    0.4     1.7      1.22
+  //   and-and         0.9    1.0     2.8      1.38
+  //   quoted span     0.8    1.1     3.4      1.53
+  //   subst-open      0.7    0.5     0.9      1.03
+  //   unbalanced "    0.6    1.3     3.6      1.65
+  //   comment         0.5    1.0     2.1      1.37
+  //   space           0.9    1.3     4.4      1.73
+  // 전부 선형(최대 1.73 대 임계 18, 잡음 상한 8.44 아래)이고 40,962B 최대
+  // 4.8ms 로 200ms smoke 대비 40배 여유다. **창·분리자 클래스·전처리 단계를
+  // 바꾸면 이 표를 다시 재라** — 안 재면 표가 조용히 썩고 그 다음 착시의
+  // 근거가 된다.
+  ['echo-semicolon run', (n) => fill('echo x; ', n)],
+  ['semicolon run', (n) => ';'.repeat(n)],
+  ['pipe run', (n) => '|'.repeat(n)],
+  ['and-and run', (n) => fill('&& ', n)],
+  ['quoted span', (n) => `echo "${'a'.repeat(n - 7)}"`],
+  ['subst-open run', (n) => fill('$(', n)],
+  ['unbalanced quote', (n) => `echo "${'a'.repeat(n - 6)}`],
+  ['comment run', (n) => `# ${'x'.repeat(n - 2)}`],
+  ['space run', (n) => `${' '.repeat(n - 1)}x`],
 ];
 
 describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 안이다', () => {
