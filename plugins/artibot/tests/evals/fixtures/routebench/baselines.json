@@ -91,7 +91,7 @@
       "required": false,
       "status": "unimplemented",
       "definition_confidence": "exact",
-      "reason": "Requires a recorded outcome per (scenario, candidate tier) to pick the best tier in hindsight. No outcome corpus exists in the repo (both example scenarios are fixture.status=pending). A runner MUST refuse to score B6 rather than emit a placeholder."
+      "reason": "Requires a recorded outcome per (scenario, candidate tier) to pick the best tier in hindsight. Four scenarios now carry a present corpus (152 rows total across live-investigator-explore 21, live-tdd-guide-implement 80, live-code-reviewer-review 45, live-doc-updater-edit-routine 6, extracted from route.selected N=185, measured 2026-09-14T06:15:53Z) but not one of those rows carries an outcome: a route.selected event records the decision only, usage.receipt outcome.status was unknown for 72 of 72 receipts at that same reading, and no receipt is joined to a corpus row. So the corpus changed B6's problem from 'no rows' to 'rows without hindsight', which is the same refusal — a hindsight oracle still has nothing to look back at. A runner MUST refuse to score B6 rather than emit a placeholder."
     }
   ]
 }
