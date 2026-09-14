@@ -22,3 +22,12 @@ reports/SPLIT/**/*.ndjson -text
 # host's default) would rewrite its 59 LFs to CRLF on checkout, making a fresh
 # clone see 5,106B and shifting every extraction span in the fixture.
 plugins/artibot/tests/fixtures/ups-task-notification-2026-09-04.txt -text
+
+# RouteBench live corpora — byte-immutable, same reasoning as above.
+# Scrubbed route.selected rows extracted from the run ledger by
+# scripts/bench/routebench-corpus.mjs, which writes LF only, and whose
+# post-condition gate rejects CR on purpose (the corpus is evidence: a
+# re-extraction must compare byte-for-byte against the tracked file). The
+# 2026-09-14 Windows CI checkout with core.autocrlf=true rewrote them to CRLF
+# and the gate went red on bytes the blob never contained.
+plugins/artibot/tests/evals/fixtures/routebench/corpus/*.jsonl -text

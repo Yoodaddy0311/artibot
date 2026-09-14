@@ -515,17 +515,27 @@ describe('routebench/scenarios.schema.json — vocabulary the design fixes', () 
 });
 
 describe('routebench/scenarios.example.jsonl', () => {
-  it('defines exactly the two example scenarios and validates them', () => {
-    expect(scenarioRecords).toHaveLength(2);
+  it('defines six scenarios and validates every one of them', () => {
+    // Two definition-only examples plus four live rows extracted from the run
+    // ledger. The count is pinned rather than left open so a row appended
+    // without a reviewer reading this file turns it red.
+    expect(scenarioRecords).toHaveLength(6);
     for (const record of scenarioRecords) {
       expect(validate(scenarioSchema, record.value), `line ${record.lineNumber}`).toEqual([]);
     }
   });
 
   it('reserves a high_risk_review seat whose fixture is declared pending', () => {
-    const seeded = scenarioRecords
+    // `find` takes the FIRST high_risk_review row, and the seeded-defect
+    // example is deliberately kept ahead of live-code-reviewer-review, which
+    // shares the class but ships a present corpus. The ordering is load-bearing
+    // for this assertion, so it is stated rather than left to luck.
+    const highRisk = scenarioRecords
       .map((record) => record.value)
-      .find((scenario) => scenario.task_class === 'high_risk_review');
+      .filter((scenario) => scenario.task_class === 'high_risk_review');
+    expect(highRisk.map((scenario) => scenario.id))
+      .toEqual(['seeded-defect-seven-axis-review', 'live-code-reviewer-review']);
+    const seeded = highRisk[0];
     expect(seeded).toBeDefined();
     // Lane 4 owns the seeded-defect corpus. A pending fixture is declared, not
     // faked: an empty fixture file would let a runner score it as zero cases.

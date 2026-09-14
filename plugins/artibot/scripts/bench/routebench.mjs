@@ -24,11 +24,15 @@
  *      empty, and the scenario's `metrics` list is copied through as
  *      `metrics_requested` - a record of what is still owed, not of what was
  *      measured. Do not read a green run as evidence about cost or quality.
- *   2. The shipped fixture is 2 scenarios and BOTH declare
- *      `fixture.status: "pending"`, so the default invocation scores nothing at
- *      all and refuses every pair. That green proves the plumbing works. It
- *      does not prove that any baseline reproduces live policy, because no
- *      scenario with a real corpus exists yet.
+ *   2. The shipped fixture is 6 scenarios: 2 still `fixture.status: "pending"`
+ *      and refuse every pair, 4 with scrubbed live corpora under
+ *      `tests/evals/fixtures/routebench/corpus/`. The runner OPENS those, but
+ *      only to check the file is non-empty, every line is a JSON object, and no
+ *      row carries a raw identifier (`FORBIDDEN_CORPUS_KEYS`, or a hex run
+ *      longer than the 8-char hashes the scrub keeps). It measures NOTHING from
+ *      them: `metrics_measured` stays empty for every pair, and a scored row
+ *      means "this baseline picked this tier for this agentType", never "this
+ *      baseline was replayed against these rows".
  *   3. Live scenario distribution is unmeasured. The design's EXACT / PARTIAL /
  *      SIMULATED replay labels (ARTIBOT-5.0-DESIGN.md section 8.2) exist because
  *      a replay is not a counterfactual; this runner copies `replay_mode`
@@ -282,14 +286,92 @@ export function resolveBaseline(baseline, context = {}) {
 }
 
 /**
+ * Keys that must never appear in a scrubbed corpus row, at any depth. Each is a
+ * raw runtime identifier: it names one execution, so it leaks operational
+ * detail and lets two corpora be joined back together. The extractor that
+ * WRITES the corpora exports the same list under the same name, kept
+ * byte-identical by convention - a key added there is added here in the same
+ * edit. Duplicated rather than imported on purpose: the gate must be able to
+ * refuse a corpus written by an extractor version this runner never saw.
+ *
+ * @type {readonly string[]}
+ */
+export const FORBIDDEN_CORPUS_KEYS = Object.freeze([
+  'session_id', 'mission_id', 'pid', 'seq', 'idempotency_key',
+  'tool_use_id', 'routing_epoch_id', 'route_receipt_id', 'action_id',
+]);
+
+/**
+ * A hex run longer than the 8 characters the scrub's truncated hashes use, so 9
+ * is the first length that cannot have come from the scrub: a raw id (uuid
+ * segment, sha, trace id) that leaked past it.
+ */
+const RAW_HEX_RUN = /[0-9a-f]{9,}/;
+
+/**
+ * Every scrub violation reachable from one parsed value, recursively.
+ * @param {unknown} node @param {string[]} acc - appended in place
+ * @returns {string[]} acc
+ */
+function scanNode(node, acc) {
+  if (typeof node === 'string') {
+    if (RAW_HEX_RUN.test(node)) acc.push('raw-hex-run');
+  } else if (Array.isArray(node)) {
+    for (const item of node) scanNode(item, acc);
+  } else if (node !== null && typeof node === 'object') {
+    for (const [key, value] of Object.entries(node)) {
+      if (FORBIDDEN_CORPUS_KEYS.includes(key)) acc.push(`forbidden-key:${key}`);
+      scanNode(value, acc);
+    }
+  }
+  return acc;
+}
+
+/**
+ * Why this corpus text is not a usable scrubbed corpus. Empty array means it is.
+ * Pure and exported so the predicate is testable without a file on disk. It
+ * reads the rows and MEASURES NOTHING from them - nothing it returns reaches a
+ * result row. A malformed line refuses the whole scenario rather than being
+ * skipped, matching `readScenarios` on bad JSONL; a refusal row rather than an
+ * abort, so one bad corpus cannot stop the other scenarios.
+ *
+ * @param {string} text - the corpus file's contents
+ * @returns {string[]} violation codes, prefixed with their 1-based line number
+ */
+export function corpusViolations(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  const violations = [];
+  let rows = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (line === '') continue;
+    rows += 1;
+    let parsed;
+    try { parsed = JSON.parse(line); } catch { parsed = undefined; }
+    if (parsed === undefined) { violations.push(`line ${index + 1}: not-json`); continue; }
+    const isObject = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+    if (!isObject) { violations.push(`line ${index + 1}: not-an-object`); continue; }
+    for (const code of scanNode(parsed, [])) violations.push(`line ${index + 1}: ${code}`);
+  }
+  if (rows === 0) violations.push('corpus-empty');
+  return violations;
+}
+
+/**
  * Why this scenario's fixture cannot be scored, or null when it can.
  *
  * `pending` is refused rather than scored as empty because the scenario schema
  * says so in as many words: an empty fixture would otherwise read as "zero
- * failures", which is the most flattering possible wrong answer.
+ * failures", the most flattering possible wrong answer. `present` used to be
+ * checked with `existsSync` alone, which made a zero-byte file a green run -
+ * the same wrong answer with a file next to it. Owner decision E3 (2026-09-14):
+ * a present corpus is OPENED and must be non-empty and scrubbed, or the
+ * scenario refuses as `fixture-invalid`. Reading it measures nothing;
+ * `metrics_measured` stays `[]` for every row this function admits.
  *
  * @param {object} scenario
- * @returns {string|null}
+ * @returns {string|null} 'fixture-pending', 'fixture-missing',
+ *   'fixture-invalid', or null when the fixture is usable
  */
 function fixtureRefusal(scenario) {
   const fixture = scenario.fixture;
@@ -299,7 +381,8 @@ function fixtureRefusal(scenario) {
   const abs = path.isAbsolute(fixture.path)
     ? fixture.path
     : path.resolve(PLUGIN_ROOT, fixture.path);
-  return existsSync(abs) ? null : 'fixture-missing';
+  if (!existsSync(abs)) return 'fixture-missing';
+  return corpusViolations(readFileSync(abs, 'utf-8')).length > 0 ? 'fixture-invalid' : null;
 }
 
 /**

@@ -4,11 +4,12 @@
  * What this file proves
  * ---------------------
  *  1. The shipped fixture (`tests/evals/fixtures/routebench/scenarios.example.jsonl`)
- *     runs end to end and produces ZERO scored rows: both of its scenarios carry
- *     `fixture.status: "pending"`, and the scenario schema says a runner MUST
- *     refuse such a scenario rather than scoring it as empty
- *     (scenarios.schema.json#/properties/fixture/properties/status). A green run
- *     here proves the plumbing, NOT that any baseline reproduces live policy.
+ *     runs end to end. Its 2 original scenarios carry `fixture.status:
+ *     "pending"` and every one of their rows is REFUSED, because the scenario
+ *     schema says a runner must refuse such a scenario rather than score it as
+ *     empty (scenarios.schema.json#/properties/fixture/properties/status). Its
+ *     4 live scenarios carry scrubbed corpora and are scored. A green run here
+ *     proves the plumbing, NOT that any baseline reproduces live policy.
  *  2. Each module-backed baseline resolves through the real routing module it
  *     names, and the expected tier is recomputed INDEPENDENTLY in the test by
  *     calling that module directly. The test never hardcodes a tier for B2/B3/B4,
@@ -31,11 +32,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { ACTION_CLASS_TIERS, classifyAction } from '../../lib/routing/action-classifier.js';
 import {
+  corpusViolations,
+  FORBIDDEN_CORPUS_KEYS,
   parseArgs,
   resolveBaseline,
   runRouteBench,
   scoreScenarios,
 } from '../../scripts/bench/routebench.mjs';
+import {
+  FORBIDDEN_CORPUS_KEYS as EXTRACTOR_FORBIDDEN_KEYS,
+} from '../../scripts/bench/routebench-corpus.mjs';
 import { createHash } from 'node:crypto';
 import { loadConfig } from '../../lib/core/config.js';
 import path from 'node:path';
@@ -170,12 +176,14 @@ function freshDir(tag) {
  * Write a one-line JSONL scenarios file plus the fixture it points at.
  *
  * @param {object} overrides - merged over the default scenario
+ * @param {string} [corpus] - the fixture file's contents. Defaults to one clean
+ *   scrubbed row, so every pre-existing caller keeps scoring.
  * @returns {{ scenariosFile: string, scenario: object }}
  */
-function writeScenario(overrides = {}) {
+function writeScenario(overrides = {}, corpus = '{"case":1}\n') {
   const dir = freshDir('scen');
   const fixtureFile = path.join(dir, 'corpus.jsonl');
-  writeFileSync(fixtureFile, '{"case":1}\n', 'utf-8');
+  writeFileSync(fixtureFile, corpus, 'utf-8');
   const scenario = {
     id: 'synthetic-case',
     title: 'synthetic',
@@ -237,8 +245,39 @@ afterAll(() => {
   if (sandbox) rmSync(sandbox, { recursive: true, force: true });
 });
 
+/**
+ * The shipped fixture's scenario ids and their declared baseline sets, as
+ * MEASURED on 2026-09-14 from scenarios.example.jsonl. Pinned as a literal so
+ * that adding, removing or re-baselining a scenario is a red test rather than a
+ * silently different benchmark. Tiers are NOT pinned here - they are recomputed
+ * from the modules below, per this file's rule.
+ */
+const SHIPPED_PENDING = Object.freeze({
+  'split-four-window-fanout': ['B0', 'B1', 'B2', 'B3', 'B4'],
+  'seeded-defect-seven-axis-review': ['B0', 'B1', 'B2', 'B3', 'B4', 'B5'],
+});
+const SHIPPED_LIVE = Object.freeze({
+  'live-investigator-explore': { agentType: 'investigator', baselines: ['B0', 'B1', 'B2', 'B3', 'B4', 'B5'] },
+  'live-tdd-guide-implement': { agentType: 'tdd-guide', baselines: ['B0', 'B1', 'B2', 'B3', 'B4'] },
+  'live-code-reviewer-review': { agentType: 'code-reviewer', baselines: ['B0', 'B1', 'B2', 'B3', 'B4', 'B5'] },
+  'live-doc-updater-edit-routine': { agentType: 'doc-updater', baselines: ['B0', 'B1', 'B2', 'B3', 'B4'] },
+});
+
+/** The tier a baseline id picks for an agentType, recomputed. @returns {string} */
+function expectedTier(baselineId, agentType) {
+  if (baselineId === 'B0') return 'sonnet';
+  if (baselineId === 'B1') return 'opus';
+  if (baselineId === 'B5') return 'fable';
+  if (baselineId === 'B2') return resolveModel(agentType, {}, CONFIG);
+  if (baselineId === 'B3') {
+    return ACTION_CLASS_TIERS[classifyAction({ agentType }).actionClass];
+  }
+  return routeModel({ agentType, config: CONFIG, input: { agentType } })
+    .models.recommended?.tier ?? null;
+}
+
 describe('routebench runner - shipped fixture', () => {
-  it('refuses every pair of scenarios.example.jsonl because both fixtures are pending', async () => {
+  it('refuses the pending scenarios and scores the live ones, tier by recomputed tier', async () => {
     const out = freshDir('example');
     const report = await runRouteBench({
       scenarios: EXAMPLE_SCENARIOS,
@@ -247,18 +286,54 @@ describe('routebench runner - shipped fixture', () => {
       n: 1,
     });
 
-    expect(report.summary.scored).toBe(0);
-    expect(report.summary.refused).toBe(report.rows.length);
-    expect(report.rows.length).toBe(11);
-    for (const r of report.rows) {
-      expect(r.status).toBe('refused');
-      expect(r.reason).toBe('fixture-pending');
-      expect(r.selection).toBeNull();
+    // 11 pending rows + 22 live rows. Both halves are pinned, because a fixture
+    // edit that silently drops a scenario would otherwise still be green.
+    expect(report.rows.length).toBe(33);
+    expect(report.summary).toEqual({ scored: 22, refused: 11, skipped: 0 });
+
+    for (const [id, ids] of Object.entries(SHIPPED_PENDING)) {
+      for (const baselineId of ids) {
+        const r = row(report, id, baselineId);
+        expect(r.status).toBe('refused');
+        expect(r.reason).toBe('fixture-pending');
+        expect(r.selection).toBeNull();
+      }
     }
+
+    for (const [id, spec] of Object.entries(SHIPPED_LIVE)) {
+      for (const baselineId of spec.baselines) {
+        const r = row(report, id, baselineId);
+        expect(`${id}/${baselineId}:${r.status}`).toBe(`${id}/${baselineId}:scored`);
+        expect(r.selection.tier).toBe(expectedTier(baselineId, spec.agentType));
+        // Reading the corpus measured nothing. This is the whole point of the
+        // fixture-invalid gate being a GATE and not an instrument.
+        expect(r.metrics_measured).toEqual([]);
+        expect(r.metrics_requested.length).toBeGreaterThan(0);
+      }
+    }
+
+    // The live set is not degenerate: at least one scenario has the three
+    // policy baselines disagreeing, which is the divergence the benchmark
+    // exists to record. Measured 2026-09-14: investigator is B2 fable, B3
+    // sonnet, B4 opus - three different tiers on one row.
+    const inv = 'live-investigator-explore';
+    const tiers = ['B2', 'B3', 'B4'].map((b) => row(report, inv, b).selection.tier);
+    expect(new Set(tiers).size).toBe(3);
 
     const onDisk = readResults(out, 'scenarios.example');
     expect(onDisk.rows).toEqual(report.rows);
     expect(onDisk.schema_version).toBe(1);
+  });
+
+  it('every live corpus on disk passes the scrub gate it is scored under', () => {
+    // The runner's acceptance is the assertion above; this one names WHY each
+    // file was accepted, so a corpus that starts leaking an id fails here with
+    // the offending line rather than as a bare fixture-invalid row.
+    for (const id of Object.keys(SHIPPED_LIVE)) {
+      const file = path.join(FIXTURE_DIR, 'corpus', `${id}.jsonl`);
+      expect(existsSync(file)).toBe(true);
+      expect(corpusViolations(readFileSync(file, 'utf-8'))).toEqual([]);
+    }
   });
 
   it('keeps the local baselines contract in step with the shipped baselines.json', () => {
@@ -578,6 +653,180 @@ describe('routebench runner - scoring a present fixture', () => {
   });
 });
 
+/**
+ * A 40-hex identifier, the shape the scrub is supposed to have removed. It is
+ * ASSEMBLED from five 8-hex chunks rather than written out, because a literal
+ * 40-hex string in a source file trips this repo's secret scanner - the value
+ * at runtime is identical, and each chunk on its own is a legal scrubbed hash.
+ */
+const RAW_ID = ['3f2a9c1b', '7e4d8a6f', '5c0b2d9e', '8a7f6c5b', '4a3d2e1f'].join('');
+
+describe('routebench runner - corpus scrub gate', () => {
+  /**
+   * Score a one-scenario run whose present fixture holds `corpus`.
+   *
+   * @param {string} id - scenario id
+   * @param {string} corpus - fixture file contents
+   * @returns {Promise<object>} the report
+   */
+  async function runWithCorpus(id, corpus) {
+    const { scenariosFile } = writeScenario({ id, agentType: 'planner' }, corpus);
+    return runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out: freshDir(`corpus-${id}`), n: 1,
+    });
+  }
+
+  it('refuses every pair as fixture-invalid when a present corpus is EMPTY', async () => {
+    // The false green this closes: fixtureRefusal used to stop at existsSync,
+    // so a zero-byte file declared `present` scored every baseline. "Zero rows"
+    // then read as "the corpus agrees with policy", which is the most
+    // flattering possible wrong answer - the same one `pending` exists to stop.
+    const report = await runWithCorpus('synthetic-empty', '');
+    expect(report.summary.scored).toBe(0);
+    expect(report.summary.refused).toBe(report.rows.length);
+    expect(report.rows.length).toBe(6);
+    for (const r of report.rows) {
+      expect(r.reason).toBe('fixture-invalid');
+      expect(r.selection).toBeNull();
+    }
+  });
+
+  it('treats a whitespace-only corpus as empty, not as one blank row', async () => {
+    const report = await runWithCorpus('synthetic-blank', '\n   \n\r\n');
+    for (const r of report.rows) expect(r.reason).toBe('fixture-invalid');
+  });
+
+  it('accepts a minimal scrubbed row: one line of {} scores every baseline', async () => {
+    // The gate must not be a content schema. It checks that rows EXIST and are
+    // clean; what a row carries is bundle A's extractor contract, not this one.
+    const report = await runWithCorpus('synthetic-minimal', '{}\n');
+    expect(report.summary.scored).toBe(6);
+    expect(report.summary.refused).toBe(0);
+    expect(row(report, 'synthetic-minimal', 'B0').selection.tier).toBe('sonnet');
+  });
+
+  it('refuses a corpus row carrying a forbidden raw identifier key', async () => {
+    const report = await runWithCorpus(
+      'synthetic-sid', '{"agentType":"planner"}\n{"session_id":"c58ea3e3"}\n',
+    );
+    expect(report.summary.scored).toBe(0);
+    for (const r of report.rows) expect(r.reason).toBe('fixture-invalid');
+  });
+
+  it('refuses a corpus row whose string value holds a hex run longer than 8', async () => {
+    const report = await runWithCorpus('synthetic-hex', `{"trace":"${RAW_ID}"}\n`);
+    expect(report.summary.scored).toBe(0);
+    for (const r of report.rows) expect(r.reason).toBe('fixture-invalid');
+  });
+
+  it('refuses the whole scenario when any corpus line is malformed JSON', async () => {
+    // Consistent with readScenarios aborting on bad JSONL, except that here it
+    // is a refusal row: one bad corpus must not stop the other scenarios.
+    const report = await runWithCorpus('synthetic-badline', '{"ok":1}\n{ not json\n');
+    expect(report.summary.scored).toBe(0);
+    for (const r of report.rows) expect(r.reason).toBe('fixture-invalid');
+  });
+
+  it('keeps the refusal order: an unknown or unimplemented baseline outranks the corpus check', async () => {
+    // Order matters because a run with BOTH problems must name the same reason
+    // every time. The baseline stages come first, so an empty corpus does not
+    // rename them.
+    const { scenariosFile } = writeScenario(
+      { id: 'synthetic-order', agentType: 'planner', baselines: ['B6', 'B9', 'B0'] }, '',
+    );
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out: freshDir('order'), n: 1,
+    });
+    expect(row(report, 'synthetic-order', 'B6').reason).toBe('baseline-unimplemented');
+    expect(row(report, 'synthetic-order', 'B9').reason).toBe('baseline-unknown');
+    expect(row(report, 'synthetic-order', 'B0').reason).toBe('fixture-invalid');
+  });
+
+  it('keeps fixture-missing ahead of fixture-invalid: an absent file is not an invalid one', async () => {
+    const dir = freshDir('gone');
+    const scenario = {
+      id: 'synthetic-gone',
+      task_class: 'debugging',
+      baselines: ['B0'],
+      metrics: ['total_cost'],
+      fixture: { status: 'present', path: path.join(dir, 'nope.jsonl') },
+      source: 'design-v5-8.2',
+    };
+    const scenariosFile = path.join(dir, 'gone.jsonl');
+    writeFileSync(scenariosFile, `${JSON.stringify(scenario)}\n`, 'utf-8');
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out: freshDir('gone-out'), n: 1,
+    });
+    expect(row(report, 'synthetic-gone', 'B0').reason).toBe('fixture-missing');
+  });
+});
+
+describe('routebench runner - corpusViolations predicate', () => {
+  it('returns no violation for a clean multi-row corpus', () => {
+    expect(corpusViolations('{"a":1}\n{"b":{"c":["x",2,null]}}\n')).toEqual([]);
+    expect(corpusViolations('{}\n')).toEqual([]);
+  });
+
+  it('keeps the 8-hex hashes the scrub deliberately preserves', () => {
+    // The corpora bundle A ships carry `session`/`mission`/`epoch` truncated to
+    // 8 hex characters. Nine is the first length the scrub cannot produce, so
+    // the boundary is asserted from both sides.
+    expect(corpusViolations('{"session":"c58ea3e3","mission":"27f8e247"}\n')).toEqual([]);
+    expect(corpusViolations('{"h":"abcdefab"}\n')).toEqual([]);
+    expect(corpusViolations('{"h":"abcdefab1"}\n')).toEqual(['line 1: raw-hex-run']);
+  });
+
+  it('names each violation kind with the line it came from', () => {
+    expect(corpusViolations('')).toEqual(['corpus-empty']);
+    expect(corpusViolations('\n \n')).toEqual(['corpus-empty']);
+    expect(corpusViolations('{"ok":1}\n{ not json\n')).toEqual(['line 2: not-json']);
+    expect(corpusViolations('[1,2]\n')).toEqual(['line 1: not-an-object']);
+    expect(corpusViolations('"a string"\n')).toEqual(['line 1: not-an-object']);
+    expect(corpusViolations('null\n')).toEqual(['line 1: not-an-object']);
+    expect(corpusViolations('{"pid":42}\n')).toEqual(['line 1: forbidden-key:pid']);
+    expect(corpusViolations(`{"t":"${RAW_ID}"}\n`)).toEqual(['line 1: raw-hex-run']);
+  });
+
+  it('finds a forbidden key and a raw hex run at any depth, in objects and arrays', () => {
+    expect(corpusViolations('{"a":{"b":[{"seq":3}]}}\n'))
+      .toEqual(['line 1: forbidden-key:seq']);
+    expect(corpusViolations(`{"rows":[{"nested":{"v":"${RAW_ID}"}}]}\n`))
+      .toEqual(['line 1: raw-hex-run']);
+  });
+
+  it('catches every key in FORBIDDEN_CORPUS_KEYS, one per key', () => {
+    // A frozen list nothing exercises is a comment. Each entry is proven to
+    // refuse on its own, so removing one turns red here.
+    for (const key of FORBIDDEN_CORPUS_KEYS) {
+      expect(corpusViolations(`${JSON.stringify({ [key]: 'v' })}\n`))
+        .toEqual([`line 1: forbidden-key:${key}`]);
+    }
+    expect(FORBIDDEN_CORPUS_KEYS).toEqual([
+      'session_id', 'mission_id', 'pid', 'seq', 'idempotency_key',
+      'tool_use_id', 'routing_epoch_id', 'route_receipt_id', 'action_id',
+    ]);
+    expect(Object.isFrozen(FORBIDDEN_CORPUS_KEYS)).toBe(true);
+  });
+
+  it('holds the same forbidden-key list as the extractor that writes the corpora', () => {
+    // The runner's JSDoc says the two copies are kept byte-identical by
+    // convention. A convention with no gate is a comment, so this is the gate.
+    // The import is STATIC and unguarded on purpose: the extractor and this
+    // file land in the same commit, so an existsSync guard here would fail open
+    // - the day the extractor moved or was deleted, the drift check would go
+    // quietly green instead of red.
+    expect(EXTRACTOR_FORBIDDEN_KEYS).toEqual(FORBIDDEN_CORPUS_KEYS);
+  });
+
+  it('reports every violation it finds rather than stopping at the first', () => {
+    expect(corpusViolations(`{"pid":1}\n{"t":"${RAW_ID}"}\n{ bad\n`)).toEqual([
+      'line 1: forbidden-key:pid',
+      'line 2: raw-hex-run',
+      'line 3: not-json',
+    ]);
+  });
+});
+
 describe('routebench runner - determinism', () => {
   it('produces byte-identical output apart from generated_at', async () => {
     const { scenariosFile } = writeScenario({ id: 'synthetic-det', agentType: 'planner' });
@@ -592,6 +841,25 @@ describe('routebench runner - determinism', () => {
     delete a.generated_at;
     delete b.generated_at;
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+
+  it('produces identical rows for the SHIPPED fixture across two --n 2 runs', async () => {
+    // The synthetic determinism test above uses one hand-written scenario. This
+    // one runs the real fixture, including the four live corpora, so the corpus
+    // read is covered too: reading a file per pair must not make a row depend
+    // on which pass or which run opened it. Separate out dirs, because a shared
+    // one would let run 2 carry run 1 forward as completed-pair and prove
+    // nothing.
+    const args = { scenarios: EXAMPLE_SCENARIOS, baselines: baselinesPath, n: 2 };
+    const first = await runRouteBench({ ...args, out: freshDir('shipped-a') });
+    const second = await runRouteBench({ ...args, out: freshDir('shipped-b') });
+
+    expect(JSON.stringify(first.rows)).toBe(JSON.stringify(second.rows));
+    expect(first.summary).toEqual(second.summary);
+    expect(first.summary.skipped).toBe(0);
+    for (const r of first.rows) {
+      expect(r.passes).toBe(r.status === 'scored' ? 2 : null);
+    }
   });
 
   it('records the pass count when --n is greater than one', async () => {

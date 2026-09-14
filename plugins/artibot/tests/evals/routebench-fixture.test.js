@@ -23,9 +23,11 @@
  *     AND an export that is actually a function there - checked by really
  *     importing the module. "The file exists" and "the export works" are two
  *     different statements; this block makes both.
- *  6. `scenarios.schema.json` now admits an optional `agentType`, and the two
- *     lines of `scenarios.example.jsonl` still validate with the file itself
- *     unedited.
+ *  6. `scenarios.schema.json` admits an optional `agentType`, and all six lines
+ *     of `scenarios.example.jsonl` validate. The two ORIGINAL examples still
+ *     declare no `agentType`, which is what keeps the property optional rather
+ *     than a breaking change; the four live rows each declare one and it
+ *     matches every row of the corpus they point at.
  *  7. The baseline id vocabulary is single-sourced: the ids in `baselines.json`
  *     equal `scenarios.schema.json#/properties/baselines/items/enum`. Two files
  *     naming baselines independently is exactly how B5 ends up meaning two
@@ -50,14 +52,20 @@
  *  - **Whether calling a resolver returns a sensible tier.** Block 5 proves the
  *    export is a function; it does not invoke it. Resolver EXECUTION belongs to
  *    the runner, which does not exist yet.
- *  - **B6.** The Hindsight Oracle needs a recorded outcome per (scenario,
- *    candidate tier) and no outcome corpus exists in this repo - both example
- *    scenarios declare `fixture.status: "pending"`. It is carried as
- *    `status: "unimplemented"` with a written reason precisely so a runner
- *    refuses to score it instead of emitting a placeholder that would look
- *    like a measurement.
+ *  - **B6.** The Hindsight Oracle needs a recorded OUTCOME per (scenario,
+ *    candidate tier). Four scenarios now ship a present corpus, so the old
+ *    reason ("no corpus exists") is retired - but a `route.selected` row
+ *    records the decision only, `usage.receipt outcome.status` was `unknown`
+ *    for 72 of 72 receipts at extraction (2026-09-14T06:15:53Z), and no
+ *    receipt is joined to a corpus row. The refusal therefore stands on a NEW
+ *    premise, "rows without hindsight", which the B6 test asserts directly so
+ *    it cannot go stale again unnoticed. It stays `status: "unimplemented"`
+ *    with a written reason so a runner refuses to score it rather than
+ *    emitting a placeholder that would look like a measurement.
  *  - **Scenario coverage.** Nothing here asserts that any scenario actually
- *    lists B3 or B4. `scenarios.example.jsonl` is not edited by this work.
+ *    lists B3 or B4, nor that a corpus is large enough to support any
+ *    conclusion - the doc-updater corpus is 6 rows out of `route.selected`
+ *    N=185. Row counts are one repository's four-day traffic, not a sample.
  *  - **Whether the runner actually passes `input.agentType`.** Item 8 pins the
  *    DECLARATION in the registry; whether executing code honours it is
  *    `routebench-runner.test.js`. A registry that says `b4_input.agentType:
@@ -301,16 +309,49 @@ describe('baselines.json - validates and matches the scorecard', () => {
     }
   });
 
-  it('refuses to implement B6 and says why instead of faking it', () => {
+  it('refuses to implement B6 and says why instead of faking it', async () => {
     const b6 = byId.get('B6');
     expect(b6.status).toBe('unimplemented');
     expect(b6.resolver).toBeUndefined();
     expect(b6.reason.length).toBeGreaterThan(80);
-    // The premise of that refusal, measured rather than asserted from memory:
-    // no scenario in the repo has a present fixture, so no outcome corpus
-    // exists for a hindsight policy to look back at.
-    const present = scenarioRecords.filter((r) => r.value.fixture?.status === 'present');
-    expect(present).toEqual([]);
+    // The premise of that refusal, measured rather than asserted from memory.
+    //
+    // It USED to be "no scenario has a present fixture". That is no longer
+    // true: four live scenarios ship scrubbed corpora extracted from the run
+    // ledger. The refusal survives anyway, and the reason is worth being exact
+    // about — B6 needs an OUTCOME per (scenario, candidate tier), and a
+    // `route.selected` row records the decision only. So the premise moved
+    // from "no rows" to "rows without hindsight" and the verdict did not.
+    // Loosening this test to stop checking the premise would have hidden that.
+    const present = scenarioRecords
+      .filter((r) => r.value.fixture?.status === 'present')
+      .map((r) => r.value.id)
+      .sort();
+    expect(present).toEqual([
+      'live-code-reviewer-review',
+      'live-doc-updater-edit-routine',
+      'live-investigator-explore',
+      'live-tdd-guide-implement',
+    ]);
+    // A present fixture must be a file that exists and holds at least one row,
+    // otherwise `status: "present"` is the empty-fixture lie the schema's
+    // `pending` value exists to prevent.
+    for (const record of scenarioRecords.filter((r) => r.value.fixture?.status === 'present')) {
+      const corpusPath = path.join(PLUGIN_ROOT, record.value.fixture.path);
+      expect(existsSync(corpusPath), record.value.id).toBe(true);
+       
+      const rows = (await readFile(corpusPath, 'utf-8')).split('\n').filter((l) => l.trim());
+      expect(rows.length, record.value.id).toBeGreaterThan(0);
+    }
+    // And no corpus row may carry an outcome — that is the whole reason B6
+    // still refuses. A row that grew one must turn this red so someone
+    // revisits the refusal instead of leaving it stale.
+    const investigator = path.join(
+      PLUGIN_ROOT, 'tests/evals/fixtures/routebench/corpus/live-investigator-explore.jsonl',
+    );
+    const firstRow = JSON.parse((await readFile(investigator, 'utf-8')).split('\n')[0]);
+    expect(Object.keys(firstRow)).not.toContain('outcome');
+    expect(firstRow.decision.type).toBe('route');
   });
 
   it('keeps B2 pinned to the live policy module, per design G4', () => {
@@ -527,18 +568,56 @@ describe('scenarios.schema.json - agentType is admitted without breaking the exa
     expect(validator({ ...probe, agentTyp: 'planner' })).toBe(false);
   });
 
-  it('leaves both example scenarios valid, with the example file unedited', () => {
+  it('keeps every scenario valid and splits them by whether agentType is declared', () => {
     const validator = compile(scenarioSchema);
-    expect(scenarioRecords).toHaveLength(2);
+    expect(scenarioRecords).toHaveLength(6);
     for (const record of scenarioRecords) {
       const ok = validator(record.value);
       expect(JSON.stringify(validator.errors ?? []), `line ${record.lineNumber}`).toBe('[]');
       expect(ok, `line ${record.lineNumber}`).toBe(true);
     }
-    // Neither example declares agentType today, which is what makes the new
-    // property optional rather than a breaking change.
-    for (const record of scenarioRecords) {
-      expect(record.value.agentType, `line ${record.lineNumber}`).toBeUndefined();
+    // The two ORIGINAL examples still declare no agentType. That is what keeps
+    // the property optional rather than a breaking change, and it is the half
+    // of this claim that would rot silently if the four live rows had simply
+    // been counted in — so the two groups are asserted separately, by id.
+    const withoutAgent = scenarioRecords
+      .filter((r) => r.value.agentType === undefined).map((r) => r.value.id).sort();
+    expect(withoutAgent).toEqual(['seeded-defect-seven-axis-review', 'split-four-window-fanout']);
+    // The four live rows each carry the agent name their corpus was extracted
+    // for. Asserted as an exact map, not a presence check: a row pointing at
+    // another agent's corpus would still "have an agentType".
+    const withAgent = Object.fromEntries(
+      scenarioRecords
+        .filter((r) => r.value.agentType !== undefined)
+        .map((r) => [r.value.id, r.value.agentType]),
+    );
+    expect(withAgent).toEqual({
+      'live-investigator-explore': 'investigator',
+      'live-tdd-guide-implement': 'tdd-guide',
+      'live-code-reviewer-review': 'code-reviewer',
+      'live-doc-updater-edit-routine': 'doc-updater',
+    });
+  });
+
+  it('matches each live scenario agentType to every row of its own corpus', async () => {
+    // The cross-file agreement the map above cannot make on its own: the
+    // scenario says "investigator", so every row of the file it points at must
+    // say "investigator" too. A corpus regenerated for the wrong agent, or a
+    // path copy-pasted between two rows, is invisible to any check that reads
+    // only one of the two files.
+    const live = scenarioRecords
+      .map((r) => r.value)
+      .filter((s) => s.agentType !== undefined);
+    expect(live).toHaveLength(4);
+    for (const scenario of live) {
+       
+      const text = await readFile(path.join(PLUGIN_ROOT, scenario.fixture.path), 'utf-8');
+      const rows = text.split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
+      expect(rows.length, scenario.id).toBeGreaterThan(0);
+      const agents = [...new Set(rows.map((row) => row.agentType))];
+      expect(agents, scenario.id).toEqual([scenario.agentType]);
+      const ids = [...new Set(rows.map((row) => row.scenario_id))];
+      expect(ids, scenario.id).toEqual([scenario.id]);
     }
   });
 });
