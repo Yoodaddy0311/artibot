@@ -52,8 +52,13 @@ export const FIRST_REVIEW_REVISION = 1;
  *
  * Mirrors `lib/runtime/artifact-lifecycle-gates.js#BASED_ON_MEMBERS_BY_KIND`
  * for `ArtifactKind.REVIEW` (ADDENDUM-HARDENING §5). It is embedded rather
- * than imported because that module is L5 and this one is L2; the pair is
- * asserted by the round-trip suite, not by the import graph.
+ * than imported because that module is L5 and this one is L2.
+ *
+ * THE COPY IS UNCHECKED. The source constant is module-private, so no test
+ * compares the two, and the round-trip suite cannot: it only proves that
+ * whatever is written here survives a write and a read. If the members change
+ * over there, this line has to be changed by hand or the two drift silently.
+ * Closing that would mean exporting the constant from an L5 module.
  */
 const REVIEW_BASED_ON_MEMBERS = Object.freeze(['intent_revision', 'plan_revision']);
 
@@ -396,6 +401,42 @@ function readScalar(raw) {
 const KEY_LINE = /^([A-Za-z0-9_]+):(?:[ \t]+(.*))?$/;
 
 /**
+ * A key/value bag with NO prototype.
+ *
+ * Frontmatter keys come from the file, so a plain `{}` would let a document
+ * declare `__proto__:` and have its children answer lookups for keys it never
+ * declared — measured in review: a file with the top-level `verdict` deleted
+ * and `verdict: "PASS"` nested under `__proto__:` read back as a valid PASS.
+ * Nothing here is ever iterated with `for…in` or handed to a caller directly,
+ * so the missing prototype costs nothing.
+ *
+ * @returns {object}
+ */
+function emptyMap() {
+  return Object.create(null);
+}
+
+/**
+ * Report a key that is being declared a second time.
+ *
+ * Last-wins is the wrong default for a document a gate reads: the second line
+ * would silently replace a value the first line already put past validation,
+ * which is the same laundering shape as the inherited-key hole above. Refusing
+ * is cheap because the serializer never emits a duplicate.
+ *
+ * @param {object} bag
+ * @param {string} key
+ * @param {string} trimmed Source line, for the message.
+ * @param {{code: string, message: string}[]} errors Mutated.
+ * @returns {boolean} True when the key was already present.
+ */
+function isDuplicateKey(bag, key, trimmed, errors) {
+  if (!Object.hasOwn(bag, key)) return false;
+  errors.push(makeError(ErrorCode.FRONTMATTER_UNSUPPORTED, `중복 키는 지원하지 않는다: ${trimmed}`));
+  return true;
+}
+
+/**
  * Slice out the frontmatter body, CRLF-normalised.
  *
  * @param {unknown} text
@@ -463,7 +504,8 @@ function foldFrontmatterLine(line, map, parent, errors) {
       errors.push(makeError(ErrorCode.FRONTMATTER_UNSUPPORTED, `중첩은 한 단계까지다: ${trimmed}`));
       return parent;
     }
-    map[key] = {};
+    if (isDuplicateKey(map, key, trimmed, errors)) return parent;
+    map[key] = emptyMap();
     return key;
   }
 
@@ -473,11 +515,12 @@ function foldFrontmatterLine(line, map, parent, errors) {
     return parent;
   }
   if (indent === 0) {
+    if (isDuplicateKey(map, key, trimmed, errors)) return parent;
     map[key] = scalar.value;
     return null;
   }
   if (parent !== null && isPlainObject(map[parent])) {
-    map[parent][key] = scalar.value;
+    if (!isDuplicateKey(map[parent], key, trimmed, errors)) map[parent][key] = scalar.value;
     return parent;
   }
   errors.push(makeError(ErrorCode.FRONTMATTER_UNSUPPORTED, `부모 없는 들여쓰기: ${trimmed}`));
@@ -495,7 +538,7 @@ function readFrontmatter(text, errors) {
   const lines = frontmatterLines(text);
   if (lines === null) return null;
 
-  const map = {};
+  const map = emptyMap();
   let parent = null;
   for (const line of lines) {
     parent = foldFrontmatterLine(line, map, parent, errors);
@@ -508,14 +551,17 @@ function readFrontmatter(text, errors) {
  * `MISSING_KEY` only, so a caller never has to read two errors to learn one
  * fact.
  *
+ * Presence is `Object.hasOwn`, not `!== undefined`: only a key the DOCUMENT
+ * declared counts, whatever the bag may inherit.
+ *
  * @returns {boolean} Whether the value is present AND valid.
  */
 function checkRequired(source, key, label, predicate, expectation, errors) {
-  const value = source[key];
-  if (value === undefined) {
+  if (!Object.hasOwn(source, key)) {
     errors.push(makeError(ErrorCode.MISSING_KEY, `필수 키 누락: ${label}`));
     return false;
   }
+  const value = source[key];
   if (!predicate(value)) {
     errors.push(makeError(ErrorCode.INVALID_VALUE, `${label} ${expectation} (got ${JSON.stringify(value)})`));
     return false;
@@ -553,7 +599,7 @@ const REQUIRED_SCALARS = Object.freeze([
  * @returns {{ intentRevision: unknown, planRevision: number|null }}
  */
 function readBasedOn(map, errors) {
-  const source = isPlainObject(map.based_on) ? map.based_on : {};
+  const source = isPlainObject(map.based_on) ? map.based_on : emptyMap();
   checkRequired(
     source, 'intent_revision', 'based_on.intent_revision',
     (v) => isInteger(v) && v >= 0, 'must be an integer >= 0', errors,

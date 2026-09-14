@@ -61,22 +61,42 @@ import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 // loop drains, pending dynamic imports included.
 //
 // NOTHING NEW IS STATICALLY IMPORTED. Every module this path needs is
-// `import()`ed inside the tail. Marginal load cost, measured 2026-09-14 on a
-// warm hook graph, 3 runs each, in ms:
+// `import()`ed inside the tail.
 //
-//     lib/runtime/middleware/tasks.js        168.1 / 142.0 / 135.1
-//     lib/runtime/artifact-lifecycle.js       16.9 /  12.1 /  17.8
-//     lib/review/review-artifact.js           10.6 /  11.3 /   7.3
-//     lib/project-state/git-common-dir.js      0.7 /   0.4 /   0.6
+// MARGINAL LOAD COST — read the CONDITION, not just the number. Reproduce with
+// one fresh process per sample, importing the real hook first so the timed
+// module pays only for what the handler graph has not already loaded:
 //
-// A static import is paid by EVERY SubagentStop, and the ~24 non-reviewer agent
-// types never reach this code. Even the cheapest of the four is ~10 ms of that
-// tax, which is why `review-artifact.js` is dynamic too — and why the
-// `already-exists` check lives in the tail rather than in the pre-flight, where
-// it would have needed `reviewArtifactPath` synchronously. The check is worth
-// almost nothing up front anyway: a REDELIVERED stop already stops at
-// `review-not-appended`, so the only case that reaches the tail with a file
-// present is a genuinely new verdict for an already-reviewed mission.
+//     node --input-type=module -e "
+//       await import('./scripts/hooks/subagent-handler.js');
+//       const t = performance.now();
+//       await import('<module>');
+//       process.stdout.write(String(performance.now() - t));"
+//
+//                                          A: after subagent-handler   B: after
+//                                             (N=5, the real cost)     an 11-module
+//                                                                      hand-list (N=3)
+//     lib/runtime/middleware/tasks.js          13.8 –  14.7 ms          135 – 168 ms
+//     lib/runtime/artifact-lifecycle.js         1.5 –   1.6 ms           12 –  18 ms
+//     lib/review/review-artifact.js             1.1 –   1.6 ms            7 –  11 ms
+//     lib/project-state/git-common-dir.js       0.1 –   0.2 ms          0.4 – 0.7 ms
+//
+// Measured 2026-09-14, Windows 11, Node 24.x. COLUMN B IS THE WRONG NUMBER and
+// is kept only so nobody re-derives it: it warmed the graph from a hand-written
+// module list that missed transitive dependencies, so each timed import was
+// billed for deps the real handler already has. Column A is the condition
+// production is in. Reviewer independently reproduced A (14.5 / 1.4 / 0.8 /
+// 0.1, N=1).
+//
+// THE CONCLUSION IS UNCHANGED at either magnitude: a static import is paid by
+// EVERY SubagentStop and the ~24 non-reviewer agent types never reach this
+// code, so even column A's 1.3 ms buys nothing. That is why
+// `review-artifact.js` is dynamic too — and why the `already-exists` check
+// lives in the tail rather than in the pre-flight, where it would have needed
+// `reviewArtifactPath` synchronously. The check is worth almost nothing up
+// front anyway: a REDELIVERED stop already stops at `review-not-appended`, so
+// the only case that reaches the tail with a file present is a genuinely new
+// verdict for an already-reviewed mission.
 // ---------------------------------------------------------------------------
 
 /**
@@ -395,6 +415,13 @@ async function writeReviewArtifact(ctx) {
       // Always the first revision. Superseding an existing `review.md` is not
       // implemented anywhere in the pipeline — no caller bumps a review
       // revision — so a second review of one mission stops at ALREADY_EXISTS.
+      //
+      // NOT AN OVERSIGHT, A PENDING DECISION: review revision succession is
+      // owner decision §7.2 (`.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md:357`),
+      // still open. Until it lands, the SECOND verdict of a mission reaches the
+      // ledger and NOT the file. Pinned by
+      // `tests/hooks/subagent-handler-review-writer.test.js` ("KEEPS THE FIRST
+      // VERDICT"), which is the line that has to change when it is decided.
       revision: FIRST_REVIEW_REVISION,
       basedOn: { intentRevision, planRevision },
       reviewerId: ids.agentType,

@@ -551,12 +551,14 @@ describe('subagent-handler review-ledger writer (child process)', () => {
  * the filesystem AFTER `spawnSync` returned. If that invariant ever breaks,
  * these go red rather than silently measuring nothing.
  *
- * THE GATE IS HELD OPEN ON PURPOSE in the write-through cases. 4.61.0 ships
- * `runtime.artifactLifecycle.enabled: false` and zero live `review.md` is the
- * CORRECT production state; measuring the writer therefore requires supplying
- * an open gate through the documented `CLAUDE_PLUGIN_ROOT` override (the same
- * technique as `tests/hooks/intent-observe-pre.test.js`). The shipped value is
- * pinned below so flipping it in the repo turns this red.
+ * EVERY CASE SETS ITS OWN GATE, through the documented `CLAUDE_PLUGIN_ROOT`
+ * override (the same technique as `tests/hooks/intent-observe-pre.test.js`).
+ * `beforeEach` builds two plugin roots from the live config — one with
+ * `runtime.artifactLifecycle.enabled` forced true, one forced false — so no
+ * case here depends on which way the release currently ships it. 4.61.0 ships
+ * false and zero live `review.md` is the CORRECT production state; that value
+ * is RECORDED by exactly one test, which asserts nothing about behaviour, so
+ * opening the kill switch for real turns that one line red and nothing else.
  *
  * WHAT GREEN HERE DOES NOT PROVE (rules §9):
  *   - THAT A SECOND REVIEW OF ONE MISSION IS HANDLED. It is not: section c
@@ -576,7 +578,29 @@ describe('subagent-handler review.md artifact (child process)', () => {
   let repo;
   let transcript;
   let pluginRoot;
+  let closedRoot;
   let missionId;
+
+  /**
+   * A plugin root holding the live config with the kill switch forced either
+   * way. Everything but that one key is exactly what ships, so these are the
+   * real configuration under two settings rather than a fixture of one.
+   *
+   * @param {string} name directory name under the sandbox
+   * @param {object} live parsed `artibot.config.json`
+   * @param {boolean} enabled value for `runtime.artifactLifecycle.enabled`
+   * @returns {string} absolute plugin root
+   */
+  function writeRoot(name, live, enabled) {
+    const dir = path.join(tmp, name);
+    mkdirSync(dir, { recursive: true });
+    const config = {
+      ...live,
+      runtime: { ...live.runtime, artifactLifecycle: { ...live.runtime.artifactLifecycle, enabled } },
+    };
+    writeFileSync(path.join(dir, 'artibot.config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    return dir;
+  }
 
   /** @returns {string} the transcript path, with `text` as the last assistant turn */
   function writeTranscript(text = answer()) {
@@ -677,16 +701,15 @@ describe('subagent-handler review.md artifact (child process)', () => {
     // is microseconds wide and a guard would be untestable.
     missionId = sessionFallbackMissionId({ sessionId: SID, nowMs: Date.now() });
 
-    // The live configuration with one key flipped — not a stub. Everything the
-    // hook reads other than the kill switch is exactly what ships.
-    pluginRoot = path.join(tmp, 'plugin-root');
-    mkdirSync(pluginRoot, { recursive: true });
+    // TWO plugin roots, both the live configuration with ONE key set — neither
+    // is a stub, and NEITHER depends on what the release currently ships. An
+    // earlier draft pointed the closed-gate cases at the real plugin root,
+    // which meant the day someone opens the kill switch for real, three tests
+    // here would have failed for a reason that has nothing to do with them.
+    // What those cases mean is "the gate is shut", so they set it shut.
     const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
-    // Pin the shipped value: this suite's "gate closed" cases point at the real
-    // plugin root and would go green for the wrong reason if it were ever true.
-    expect(live.runtime.artifactLifecycle.enabled).toBe(false);
-    live.runtime.artifactLifecycle.enabled = true;
-    writeFileSync(path.join(pluginRoot, 'artibot.config.json'), JSON.stringify(live, null, 2), 'utf-8');
+    pluginRoot = writeRoot('plugin-root-open', live, true);
+    closedRoot = writeRoot('plugin-root-closed', live, false);
   });
 
   afterEach(() => {
@@ -740,17 +763,26 @@ describe('subagent-handler review.md artifact (child process)', () => {
   // b. every closed gate produces ZERO files
   // -------------------------------------------------------------------------
 
-  it('writes no file on the shipped configuration, where the kill switch is false', () => {
+  it('writes no file when the kill switch is false', () => {
     seedMissionRow();
     writeTranscript();
-    // The REAL plugin root — the gate the release ships.
-    expect(runStop(stopPayload(), PLUGIN_ROOT).status).toBe(0);
+    expect(runStop(stopPayload(), closedRoot).status).toBe(0);
 
     expect(missionFiles()).toEqual([]);
     // ...and the ledger half still happened, so this is the gate refusing the
     // FILE, not the whole review path failing.
     expect(lineOf('review.completed')).toBeTruthy();
   }, 60000);
+
+  it('RECORDS the shipped kill-switch value: 4.61.0 creates zero review.md', () => {
+    // THE ONLY test that reads the released configuration, and it asserts
+    // nothing about behaviour. Its whole job is to make the shipped value a
+    // stated fact instead of an assumption other tests lean on — no case above
+    // depends on it, so opening the kill switch for real turns exactly THIS
+    // line red, which is the deliberate release decision it should turn red on.
+    const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
+    expect(live.runtime.artifactLifecycle.enabled).toBe(false);
+  });
 
   it('writes no file when the payload carries no cwd, even with the gate open', () => {
     seedMissionRow();
@@ -816,8 +848,12 @@ describe('subagent-handler review.md artifact (child process)', () => {
     expect(kept.verificationId).toBe('v-first');
     // WHY: nothing in the pipeline bumps a review revision, so the tail always
     // renders revision 1 and `apply()` stops at ALREADY_EXISTS. Superseding is
-    // NOT IMPLEMENTED. This test pins the current behaviour so that the day it
-    // is implemented, this line is what has to change on purpose.
+    // NOT IMPLEMENTED, and that is a PENDING DECISION rather than a bug —
+    // review revision succession is owner decision §7.2
+    // (`.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md:357`), still open.
+    // Until it is decided a second verdict reaches the ledger and not the file.
+    // This test pins that, so the day it is implemented this line is what has
+    // to change on purpose.
     expect(kept.revision).toBe(1);
   }, 60000);
 
@@ -833,7 +869,7 @@ describe('subagent-handler review.md artifact (child process)', () => {
 
     rmSync(path.join(repo, '.artibot'), { recursive: true, force: true });
     seedMissionRow();
-    const gated = runStop(stopPayload({ session_id: `${SID}b` }), PLUGIN_ROOT);
+    const gated = runStop(stopPayload({ session_id: `${SID}b` }), closedRoot);
 
     // A FILE where the mission DIRECTORY has to go, so `ensureDirSync` throws
     // and `writeOneArtifact` returns WRITE_FAILED. Chosen over an unwritable

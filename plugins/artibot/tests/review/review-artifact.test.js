@@ -395,6 +395,60 @@ describe('parseReviewMd 거부 — 읽을 수 없는 문서는 review:null 이�
 });
 
 // ---------------------------------------------------------------------------
+// (3b) Key identity — regression, found in review
+// ---------------------------------------------------------------------------
+
+describe('parseReviewMd 키 동일성 — 상속 키와 중복 키는 값이 아니다', () => {
+  it('__proto__ 아래에 심은 verdict 를 상속으로 주워 읽지 않는다', () => {
+    const text = serializeReviewMd(fullInput())
+      .split('\n')
+      .filter((l) => !l.startsWith('verdict:'))
+      .join('\n')
+      .replace('based_on:', '__proto__:\n  verdict: "PASS"\nbased_on:');
+    const result = parseReviewMd(text);
+
+    expect(result.ok).toBe(false);
+    expect(result.review).toBeNull();
+    expect(result.errors.some((e) => e.code === 'MISSING_KEY' && e.message.includes('verdict'))).toBe(true);
+  });
+
+  it('Object.prototype 의 이름을 키로 써도 그 상속값이 값으로 통하지 않는다', () => {
+    const text = serializeReviewMd(fullInput())
+      .split('\n')
+      .filter((l) => !l.startsWith('findings_ref:'))
+      .join('\n');
+    const result = parseReviewMd(text.replace('based_on:', 'constructor: "x"\nbased_on:'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.code === 'MISSING_KEY' && e.message.includes('findings_ref'))).toBe(true);
+  });
+
+  it('중복 최상위 키를 거부한다 — 뒤 줄이 앞 줄을 조용히 덮지 않는다', () => {
+    const text = serializeReviewMd(fullInput()).replace('created_at:', 'verdict: "PASS"\ncreated_at:');
+    const result = parseReviewMd(text);
+
+    expect(result.ok).toBe(false);
+    expect(result.review).toBeNull();
+    expect(codesOf(result)).toContain('FRONTMATTER_UNSUPPORTED');
+    expect(result.errors.some((e) => e.message.includes('verdict'))).toBe(true);
+  });
+
+  it('중복 중첩 키도 거부한다 — based_on 도 같은 구멍을 갖지 않는다', () => {
+    const text = serializeReviewMd(fullInput()).replace('  plan_revision: 5', '  plan_revision: 5\n  intent_revision: 99');
+    const result = parseReviewMd(text);
+
+    expect(result.ok).toBe(false);
+    expect(codesOf(result)).toContain('FRONTMATTER_UNSUPPORTED');
+    expect(result.errors.some((e) => e.message.includes('intent_revision'))).toBe(true);
+  });
+
+  it('정상 문서는 중복 판정에 걸리지 않는다 (판정기 자기검증)', () => {
+    expect(parseReviewMd(serializeReviewMd(fullInput())).ok).toBe(true);
+    expect(parseReviewMd(serializeReviewMd(minimalInput())).ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // (4) Path
 // ---------------------------------------------------------------------------
 
