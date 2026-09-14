@@ -27,6 +27,8 @@
  *
  * USAGE
  *   node scripts/ledger/session-coverage.mjs [--cwd <projectRoot>] [--since <iso-or-ms>]
+ *   An all-digit `--since` is read as EPOCH MILLISECONDS, never as a year:
+ *   `--since 2026` cuts at 1970-01-01T00:00:02.026Z, so spell a year as ISO.
  *
  * -- WHY `--cwd` MAY DEFAULT TO `process.cwd()`, AND THE TRAP ----------------
  *  Same rationale and same trap as `scripts/ledger/record-verify.mjs`: the
@@ -85,6 +87,10 @@
  *    ENDED. A session running right now has no `session.ended` row, so a
  *    coverage of 1.0 does not mean every session is covered — it means every
  *    session that has finished so far is.
+ *  - A RE-FIRED SessionEnd. When one session carries two `session.ended` rows
+ *    the fold keeps the FIRST row's self-report and only bumps
+ *    `duplicate_ended_rows`; see the fold's header for why neither row is
+ *    provably "the truth".
  *  - `receipt_status` IS A SELF-REPORT. The hook copies its own outcome into
  *    the row; nothing re-derives it. `by_status` counts claims, and the
  *    `disagree` lists exist precisely because a claim and the receipt rows can
@@ -113,7 +119,7 @@ const COVERAGE_EVENT = 'session.ended';
 /** Flags that take a value. Anything else on the command line is an error. */
 const VALUE_FLAGS = ['--cwd', '--since'];
 
-const USAGE = 'usage: session-coverage.mjs [--cwd <projectRoot>] [--since <iso-or-ms>]';
+const USAGE = 'usage: session-coverage.mjs [--cwd <projectRoot>] [--since <iso | epoch-ms (all digits)>]';
 
 /**
  * Report a usage error on ONE line and nothing else.

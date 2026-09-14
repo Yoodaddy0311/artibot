@@ -8,9 +8,11 @@
  * of that shape survive the ledger's allowlist, envelope validation and byte
  * cap on the way in. A `data` shape the writer refuses lands as
  * `ledger.rejected` and is excluded from every read — green fold tests and an
- * empty coverage report are perfectly compatible. So every case here seeds
- * through the real `appendLedgerEvent`, asserts the file holds ZERO
- * `ledger.rejected` lines, and then spawns the real script against it.
+ * empty coverage report are perfectly compatible. So every seeded case here
+ * writes through the real `appendLedgerEvent` and spawns the real script
+ * against it; the FIRST seeded case asserts the file holds ZERO
+ * `ledger.rejected` lines, and the later cases reuse the same deterministic
+ * seed, so that one assertion covers the shape they all depend on.
  *
  * READ-ONLY IS ASSERTED, NOT ASSUMED. The Observe contract says this script
  * writes nothing, and "it does not import the writer" is a claim about the
