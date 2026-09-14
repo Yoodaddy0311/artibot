@@ -1,6 +1,39 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-14 KST 갱신, AsusHeechangLee 머신, master = 3ba981eb, **Wave 9 8/8 착지**(p1 18ac5644 · p2 f1f8311e · p3 3ba981eb) · worktree 8 + 로컬 브랜치 8 **정리 대기** · 릴리스 미실시(의도), sync:local 4.61.0 · 플러그인 캐시 4.59.0 라벨(오너 `claude plugin update` 대기))
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-14 KST 갱신, AsusHeechangLee 머신, master = c2f300e3 = **v4.62.0 릴리스**(ci/release-4-62-0 경유 착지 대기) · Wave 9 8/8 착지(p1 18ac5644 · p2 f1f8311e · p3 3ba981eb) · worktree 8 + 로컬 브랜치 8 **정리 대기** · sync:local 4.62.0 완료 · **호스트 재시작 대기**)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.62.0 릴리스 + 원장 이관 + v5.0 로드맵 확정 (2026-09-14 12:xx KST, 세션 artibot-16/d2f6a2c2, master = c2f300e3)
+
+**한 줄**: Wave 9 착지분을 4.62.0 으로 출하했고(기능 코드 0), ADR-011 원장 1회 이관을 실행했으며, `/ultraplan` 으로 v5.0 GA 로드맵(Wave 10~13)을 확정해 오너 결정 4건을 받았다. **다음 세션 첫 일 = 호스트 재시작 확인 → `/split plan` Wave 10(8줄기 + 롤링 5)**.
+
+**전제 정정(이 절이 이긴다)**: 위 Wave 9 절과 핸드오프의 "플러그인 캐시 4.59.0 라벨 → 오너 `claude plugin update`" 는 **원인 오판**이다. 캐시 7개 version dir 의 package.json 은 전부 4.61.0 이었고(00:47 일괄 미러), 라이브 `verify.completed`·`session.ended` 0 의 진짜 원인은 **v4.61.0 태그(7dd14049) 뒤 HEAD 까지 52 files +8,902/−139 가 미릴리스**였던 것이다(설치 경로 `dev-verify-gate.js` 에 `recordUnmeasuredDenominator` 0건 / 리포 3건, risk 렌즈 + critic 독립 실측). 4.62.0 + `sync:local` + **호스트 재시작**이 Observe ③④ 분모의 t0 다.
+
+**이 세션 한 일**:
+1. L0 `tests/supervisor/v11-status-mapping.test.js` SKIP_DIRS 에 `_benchmarks`·`_reports` 추가(`ba7d29bb`) — 전체 vitest 유일 실패(환경 오탐) 해소. 단독 11/11.
+2. L2 ADR-011 원장 이관(12:31 KST): 레거시 `.artibot/runtime/ledger.jsonl` 349행 + 라이브 `.git/artibot/ledger.jsonl` 389행(선존재 함정 — 옆으로 옮겨 마지막 `--worktree` 입력) → 738행, lineCountMatch true, sha256 `a9f35e0d…`, `readLedgerCensus` duplicate 0, Check 8 **pass**(journal 28 · projection 2,890B). 구파일 `ledger.jsonl.pre-adr011`(349행) + `ledger.jsonl.live-premerge-20260914`(389행) 보존 — 삭제는 다음 릴리스 체크리스트. spawns 는 레거시 파일 부재 → 이관 대상 없음(공유 125행). 절차 5(라이브 확인: 창 2개 프롬프트 → session_id 2종)는 **미실행**.
+3. L1 v4.62.0 릴리스(`c2f300e3`, 태그 v4.62.0): lockstep 10파일 11항목 + CHANGELOG `## [4.62.0]` 행동 변화 고지 4항 + README Version 줄. release:check PASS, `npm run ci` exit 0(vitest 682 files / 17,365 passed / 12 skipped / 0 failed). 4.62.0 노트 ③ = 감사 F01 임시 경고(`--worktree` REPORT 전 결과 브랜치 병합·백업).
+4. `/ultraplan` 산출: PRD `docs/PRD/v5-ga-roadmap-audit-fold-20260914.md`(git 밖) · ADR-012 · `docs/PRD/.plan-state.json` 40 tasks. 렌즈 3인 1차 스폰은 세션 한도로 전원 사망(01:38Z) → 계정 전환 후 재스폰. critic H4·M9·L8 전부 반영.
+
+**오너 결정 확정 4건(11:5x, 전부 권장안)**: E1 감사 결함은 로드맵 ID 선행 불변식이면 로드맵 산입 + V5-BACKLOG 비고에 F 번호 · E2 Observe ⑤ Existence Audit Shadow 이월(종료는 ①②③④) · E3 RouteBench B(스크럽 코퍼스 + 소비 게이트) · G1 v5.0 GA = GA-02 기전 GA 만, GA-01·GA-03(WP02) 은 v5.1.
+
+**Wave 10 편성(8창, 로드맵 6 + 부채 2, 롤링)** — 정본은 ADR-012·PRD §설계:
+| 창 | 줄기 | 핵심 | 초안 |
+|---|---|---|---|
+| 1 | autopilot-phase-transition | F01 결과 보존 → F02 `nextTarget()` 추출(engine.js 순증 0), session v3 | 없음(청사진 1·2 승격) |
+| 2 | routing-single-decision | F04 2단계(기록→전환) + F05 effort identity(구 파일 병행 + 만료 게이트 + GC) | 없음(청사진 4 승격) |
+| 3 | split-ops-remediation | addendum a/b/c + F06 pointer + F07 잔여 + F08 문구; `split-dispatch.js` 소유 편입 | 96줄 ✓ 재작성 |
+| 4 | economics-coverage | session-end-fold → pricing-default-on(같은 창 순차) | 65 ✓ · 68 ✓ |
+| 5 | scorecard-absent-contract | A′ + selected 문구(:152/:295/:371) + observed_model 행 | 76 ✓ |
+| 6 | verify-numerator-rate A | 판독기만, **team.md 무접촉**(verify.md:56 규약 기존재) | 80 ✓ |
+| 7 | nl-activation-report | Observe ① 분모 `mission.deferral-rate` | 68 ✓ |
+| 8 | guard-l2-followups | L2 잔여 2 + 정적 스캔 카탈로그, 규칙 id 불변 | 145 ✓ |
+롤링: F09(batch-landing 단독) → routebench-live(B) → plan-md-emitter(창 2 뒤, tasks.js 뮤테이터) → F03+F10(창 1·8 뒤) → OB-17 `models.current` 1줄. 겹침 0 은 critic 이 파일 단위 교집합으로 재검증(team.md 1건 → 제거).
+
+**gotcha 신규**: (99) **`indexArtifacts({kind:'adr'})` 를 이 리포에서 부르지 마라** — `.artibot/adr/INDEX.md` 수기 정본(B2 재번호 표)이 자동 표로 덮이고 ADR-011 이 legacy 로 찍힌다. `git checkout` 으로 복원했다. (100) **"설치본 미갱신" 은 먼저 `git diff --shortstat <tag>^{commit} HEAD` 로 미릴리스 여부부터 재라** — 캐시 라벨(dir 이름 4.59.0)과 내용(4.61.0)은 다르다. (101) **플러그인은 split worktree 를 만들지 않는다**(`split.md:274`, `SKILL.md:96`) — gotcha 94 는 forkPoint 기록 + 절차로만 닫힌다. (102) 첫 스폰 팀원 3인이 동시에 세션 한도로 죽으면 같은 이름으로 재스폰하면 된다(`-2` 접미가 붙는다).
+
+**다음 할 일**: ① 호스트 재시작 후 설치 경로 `dev-verify-gate.js` 에 `recordUnmeasuredDenominator` grep ≥1 + 프롬프트 1개로 `session.ended`·`verify.completed` 라이브 ≥1 확인(ADR-011 절차 5 겸) ② L5 V5-BACKLOG 갱신은 이 세션에서 완료(아래 docs 커밋) ③ `/split plan` Wave 10 — 브리프 승격 3건(창 1·2·3) 먼저, stem 테스트 allowlist 선등록, 시작은 한도 리셋 직후 ④ Observe 판정은 4.63.0(Wave 10) 뒤 라이브 ≥1릴리스.
+
+
 
 ## Wave 9 착지 (2026-09-14, 세션 artibot-17/cdcd06, master 3ba981eb)
 

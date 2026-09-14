@@ -1,8 +1,9 @@
 # Artibot v5.0 백로그 — 진행률 단일 분모 (정본)
 
 - 생성: 2026-09-11 (세션 25918244, NEXT-SESSION 「Wave 6 착지 + Wave 7 준비」 22:1x 절 이후). 작성: planner(fable) 초안, 리더 Write.
-- 기준 master: `f75e849f` (Wave 7 4줄기 done — 배치 랜딩 진행 중, 착지 SHA 로 갱신 예정)
-- 설치본: 4.60.0 (NEXT-SESSION 22:0x 관측)
+- 기준 master: `c2f300e3` (release: v4.62.0 — Wave 9 착지분 출하, 2026-09-14 12:5x; 아래 §1 표는 3ba981eb 기준 그대로 — 4.62.0 은 기능 코드 0)
+- 설치본: 4.62.0 (`sync:local` 2026-09-14 13:0x, 설치 경로 `dev-verify-gate.js` 에 `recordUnmeasuredDenominator` 3건 — 호스트 재시작 전)
+- **오너 결정 2026-09-14(E1·E2·E3·G1, ADR-012)**: 감사 F01~F10 은 로드맵 ID 의 선행 불변식이면 로드맵으로 세고 해당 ID 비고에 F 번호를 명기한다(E1) · Observe ⑤ 는 Shadow 이월, 종료 판정은 ①②③④(E2) · RouteBench 는 B안(E3) · v5.0 GA 조건 = GA-02 기전 GA 만, GA-01·GA-03 은 v5.1(G1). Wave 10 편성 정본 = `.artibot/adr/ADR-012-*.md` + `docs/PRD/v5-ga-roadmap-audit-fold-20260914.md`.
 - **이 문서가 v5.0 진행률의 정본이다.** 로드맵 항목의 status·evidence 는 여기서만 갱신한다. 갱신 규칙: 웨이브 착지(배치 랜딩 커밋)마다 리더가 해당 항목의 status·evidence(커밋 SHA 또는 file#symbol)를 갱신하고 헤더의 기준 SHA 를 올린다. `done` 은 evidence 가 있을 때만. 항목 추가는 설계 정본(`ARTIBOT-5.0-DESIGN.md` §4·§7.3·§8.4·부록 결정)에 근거가 있을 때만 — 정찰 후속은 §3 부채 트랙으로.
 - 출처 우선순위: `ARTIBOT-5.0-DESIGN.md` §4 로드맵 > §7.3(§48 P0 14 사상) > §8.4(§55 P0 15 사상) > 부록 0-2 후속(1)(2)(3) 오너 결정 > `NEXT-SESSION.md` > `CHANGELOG.md`.
 - 인용은 `file#symbol` 또는 `§번호`. 줄번호는 쓰지 않는다.
@@ -66,7 +67,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | OB-09 | `/doctor` Check 8(+9·10 동승) | §4 · §3.6 | done | `lib/project-state/doctor-checks.js#checkLedgerStateParity`·`#checkStateVersionGaps`; W5-a `23ec79be`·`d1ded07f`(4.60.0) | Check 8 실행형 worktree 테스트(4.58.0 #G16) | 4.60.0 설치본 재판정 필요(§4) |
 | OB-10 | Mission Controller 기록 전용(§48 #2) | §7.3 · F4 | todo | `lib/mission/` 6파일 중 controller 없음(Glob) | — | 전이 결정은 CA-14 |
 | OB-11 | Execution Profile 8키 기록(§48 #4, F2) | §7.3 · G-1 | done | `lib/routing/execution-profile.js#PRIORITY_ALIASES`(4.55.0) · `schemas/execution-profile.schema.json` | `v5-config-firewall` | G-1b(economy 손실) 미결 |
-| OB-12 | Task Graph 스키마 + store(§48 #6) | §7.3 | in-progress | `schemas/task-graph.schema.json` · `lib/project-state/lease.js` 존재 | — | claimTask/releaseTask 구현 미확인 |
+| OB-12 | Task Graph 스키마 + store(§48 #6) | §7.3 | in-progress | `schemas/task-graph.schema.json` · `lib/project-state/lease.js` · `state-manager.js#claimTask`(만료 재클레임 포함)·`#releaseTask` **실재**(리더 grep 2026-09-14) | — | 구현 있음 · 프로덕션 호출자 0(자기 배선 + resume-controller 주석뿐). done 조건 = 호출자 ≥1(CA-05 `/save`=checkpoint 또는 resume-apply) |
 | OB-13 | 5개념 분리 `lib/routing/` 5모듈(§48 #12) | §7.3 · §3.2 | done | `adaptive-model-router.js` · `model-switcher.js` · `escalation-controller.js` · `route-hysteresis.js` · `execution-profile.js`(+`action-classifier`·`route-scorer`) | `layer-registration-coverage` | `resolveModel` byte-identical 유지 |
 | OB-14 | completion gate 카운트(§48 #14, C4) | §7.3 · 후속(1) C4 | done | `lib/runtime/artifact-lifecycle-gates.js#DEFAULT_POLICY`(unmeasuredBlocksOutcome) · config `review.verify` | — | 강제는 CA-13; config 키 소비처 0(config 주석 실측) |
 | OB-15 | file ownership Task Graph 필드 기록(§48 #16) | §7.3 | todo | 미확인 | 강제는 기존 `lib/git/limb-landing-check.js` | |
@@ -90,9 +91,9 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | SH-01 | `missions/<M>/intent.md` 생성 시작(§48 #3, v1.1 P0-4) | §4 · §3.1 · C9 | done | Wave 8 p4 `9300568e`(줄기 done `7d75031a`): PreToolUse `Write\|Edit` 훅 `scripts/hooks/intent-observe-pre.js`(stage-② S1 확정 → `mission.created` + `missions/<id>/intent.md`, stdout 바이트 불변 3케이스) + `lib/runtime/artifact-lifecycle.js#apply` 게이트 3(`write===true`) writer; 임시 리포 실측 intent.md 677B 왕복 동일 3회 독립; `tasks.js` title 운반 | `artifact-governance` · `hooks-schema-shape`(핀 갱신) | C9 베이스라인 created/(created+deferred)=20/243=8.23%(stage-② 배포 전, 우회 직접 측정 아님); 4.61.0 `false` 출하(결정 2026-09-14 ①), ON 전환 = Shadow 진입 릴리스; 프로젝트 단위 게이트는 Wave 9 후보(설계 :284 B4 동반); 라이브 호스트 발화 미측정 |
 | SH-02 | artifact-lifecycle 이벤트→intent/plan/review/outcome.md(§48 #10) | §7.3 · Hardening §6 | in-progress | intent.md 쓰기는 SH-01(p4 `9300568e`)로 착지. Wave 9 p3(줄기 done `15af93e2`): `lib/review/review-artifact.js` 직렬화기 + SubagentStop 경로 `scripts/hooks/_review-stop-record.js` 배선으로 **review.md 경로 착지**(`review.completed` → review.md 왕복을 테스트로 실증) | — | **in-progress 유지 근거**: 4경로 중 review.md 1개만 착지했고 `plan.revised`·`mission.completed` 는 **emitter 가 0**(lib·scripts grep) 이라 plan.md·outcome.md 는 생성 경로 자체가 없다 — `ledger.js:484` 로 미션이 영구히 열린 상태. 라이브 0 은 정답이다(4.61.0 이 `runtime.artifactLifecycle.enabled=false` 출하, 리더 결정 ①). 후속 — review revision 승계는 설계 §7.2 결정 대기 · apply "never clobbers" 프로세스 간 TOCTOU(`file.js:139-149`, 발생률 미측정) · `plan.md ← plan.revised`(부록 T-40) |
 | SH-03 | `command_activation` vs 실제 슬래시/힌트 수락 + nl-activation eval ≥90% 실사용 대조 | §4 · §3.1 | in-progress | `tests/evals/fixtures/nl-activation.cases.jsonl` + `nl-activation-fixture.test.js`(93/93) | `nl-activation-fixture` | 실사용 대조 0; A3 Act 시점은 원장 1릴리스 후 |
-| SH-04 | `topology-actual` vs 추천 일치율(`/doctor`) | §4 · §3.5 | todo | lib grep `topology-actual` 0건 | — | |
+| SH-04 | `topology-actual` vs 추천 일치율(`/doctor`) | §4 · §3.5 | todo | lib grep `topology-actual` 0건 | — | **선행 = 감사 F04/F05**(E1 산입): `tasks.js:630` 이 System 2 만으로 팀을 정하면 actual≠recommended 가 구조적이라 분모 의미가 없다 → Wave 10 창 2 `routing-single-decision`(F04 2단계 기록→전환 · F05 effort identity) 착지 뒤 측정 |
 | SH-05 | 라우터 추천 스폰의 영수증·평가점수 비교 | §4 · §3.2 | todo | 미확인(라이브 표본: 4.58.0 investigator recommended opus→selected fable 1건) | — | |
-| SH-06 | recovery 분류 기록(기존 고정 전이와 달랐을 때) | §4 · §3.4 | in-progress | `lib/recovery/{failure-classifier,recovery-controller,plan-repair}.js` 존재 | — | engine 배선 미확인; 적용은 CA-03 |
+| SH-06 | recovery 분류 기록(기존 고정 전이와 달랐을 때) | §4 · §3.4 | in-progress | `lib/recovery/{failure-classifier,recovery-controller,plan-repair}.js` 존재(`recovery-controller.js#decide` 실재, engine 호출자 0 — `lib/recovery/*` 는 engine.js 를 import 하지 않음, critic 2026-09-14) | — | **선행 = 감사 F02**(E1 산입): 전이 함수 `nextTarget(state)` 추출(Wave 10 창 1) 위에만 기록 배선을 얹는다 — F02 전 배선 금지. engine 기록 배선은 Wave 11 |
 | SH-07 | 가격 단일화 + 5.1 계수 실측(D1·I1, cache-roi 명시) | §4 · §3.2 · 부록 가격표 행 | done | Wave 8 p2 `34b6dbf6`(줄기 done `d6cccd0c`): `lib/core/model-catalog.js` 단일 가격표 → `lib/economics/usage-receipt.js`·`lib/runtime/middleware/cache-roi.js` 가 읽음 + `tests/economics/pricing-parity.test.js` 패리티 게이트(카탈로그·cache-roi·receipt·routing 한 표) | `usage-receipt-schema-guard` · `pricing-parity` | `cost.total` null 핀 유지(5.1 계수 실측은 미완 — 계수는 미검증 수치, I1 잔여) |
 | SH-08 | seeded-defect 코퍼스 N 확정 + catch-rate·FP·위치정확도(opus 비교군) | §4 · §3.4 · C6 | todo | 코퍼스 grep 0건(픽스처 언급만) | — | **오너 결정 C6 선행(N·목표)** |
 | SH-09 | 헌법 단계 B(B-1 체크포인트 결정형만 · B-2 Rationalizations 강등 · B-3 GRPO 절, A4) | §4 · §3.7 | todo | 미확인 | — | 조건: Observe 원장 1릴리스 후 |
@@ -124,7 +125,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 |---|---|---|---|---|---|---|
 | CA-01 | 저위험 커맨드 자동 활성(A2 allowlist 5종 + autopilot 게이트 히트 0∧allowlist) | §4 · A2·A3 | todo | — | — | A3: Shadow 원장 1릴리스 후 |
 | CA-02 | `classify·status` 만 haiku/sonnet 실적용(`routing.canary.actionClasses`) | §4 · §3.2 OD-2 · D5 | todo | config `routing.canary.actionClasses: []` 실측 | `v5-config-firewall` | I4·I7 선행 |
-| CA-03 | autopilot `nextPhase` = verdict 함수 | §4 · §3.4 | todo | — | — | SH-06 선행 |
+| CA-03 | autopilot `nextPhase` = verdict 함수 | §4 · §3.4 | todo | — | — | SH-06 선행. **선행 = 감사 F01·F02**(E1 산입, Wave 10 창 1 `autopilot-phase-transition`): F01 결과 보존 불변식 없이는 verdict 가 정리를 트리거할 때 미통합 결과 브랜치를 지우고, F02 전이 단일화 없이는 verdict 함수가 꽂힐 자리(`pendingPhase`)가 없다. Wave 12 에 config 기본 false 로 착지, Wave 13 에 ON. CA-14 와 같은 결정 |
 | CA-04 | `HUMAN_GATE_MATRIX` 훅 강제 확대(HG-07/12/13) + `.claude/` 축소(C3) | §4 · §3.5 · C3 | todo | 4.57.0 Known "HG-07/12/13 강제는 Canary 미착수" | `human-gate-matrix-selfcheck` | |
 | CA-05 | `/save`=checkpoint 순서(§31) · `/resume`=ARTIBOT 읽기 순서 | §4 · §3.3 · §8.2 §31 | todo | `commands/save.md` checkpoint 0건 | `command-output-invariance` | SH-21 선행 |
 | CA-06 | 헌법 단계 C-1(ROUTING advisory-only 단계 표기) | §4 · §3.7 | todo | — | — | |
@@ -133,7 +134,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | CA-09 | lease reclaim(§48 #15) | §7.3 | todo | — | — | |
 | CA-10 | delegation cap 차단(§36) | §7.3 | todo | — | — | |
 | CA-11 | split 통합(§48 #22) | §7.3 | todo | — | — | |
-| CA-12 | fast objective 실적용(§48 #23) | §7.3 · §3.2 | todo | — | — | G6 `wallclock_throughput` UNATTESTED 유지 |
+| CA-12 | fast objective 실적용(§48 #23) | §7.3 · §3.2 | todo | — | — | G6 `wallclock_throughput` UNATTESTED 유지. **선행 = 감사 F03·F10**(E1 산입, 롤링 줄기 `autopilot-budget-units`): 토큰/USD 예산 단위 분리(`budgetTokens`+선택 `budgetUsd`) 없이는 fast 가 상한 없이 돌고, `--no-team`(F10) 이 instruction 에 반영되지 않는다. unknown usage 정책은 E9(경고만) |
 | CA-13 | 완료 게이트 강제 = outcome.md 생성기(§48 #14 · §55 #15) | §7.3 · §8.4 · §3.4 | todo | — | — | SH-02·SH-20 선행 |
 | CA-14 | Mission Controller 전이 결정(§48 #2) | §7.3 · F4 | todo | — | — | OB-10 선행 |
 | CA-15 | question gate 강제(§48 #27) | §7.3 | todo | — | — | SH-18 선행 |
@@ -147,9 +148,9 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 
 | ID | 항목 | 출처 | status | evidence | 게이트 | 비고 |
 |---|---|---|---|---|---|---|
-| GA-01 | 저위험 외로 확대 | §4 | todo | — | — | |
+| GA-01 | 저위험 외로 확대 | §4 | todo | — | — | **오너 결정 G1(2026-09-14): v5.1 트랙** — v5.0 릴리스 조건 아님. baseline 캠페인(30~50과제×3회) 뒤 |
 | GA-02 | 4티어 전면 | §4 · §3.2 | todo | — | — | |
-| GA-03 | split 자동 진입(WP02 선행) | §4 · §3.5 | todo | — | — | 창을 사람이 여는 한 불가 |
+| GA-03 | split 자동 진입(WP02 선행) | §4 · §3.5 | todo | — | — | 창을 사람이 여는 한 불가. **오너 결정 G1(2026-09-14): v5.1 트랙** — WP02 = 프로세스 스폰 = HG 매트릭스 신규 행(감사 DEFER "자동 창 실행"). GA-02 는 "기전 GA"(allowlist 로 열리고 config 1키 되돌림 실증)로 v5.0 조건 유지 |
 | GA-04 | §48 P2 7항(#25 identity · #26 role/permission · #28 audit summary · #29 retention/GC · #30 memory promotion 코드 게이트 · #31 schema migration · #32 cross-repo) | §7.3 | todo | `memory.*` 5이벤트 어휘만 존재 | — | 스키마는 Phase 0 예약 |
 | GA-05 | §57 P2 7항(Shadow Learner · 학습 임계 · Canary Router · 롤백 · RouteBench CI · 멀티리포 · 토폴로지 인지 평가) | §8.4 | todo | — | — | Learner 불가침 4경계(§8.2 §14) |
 | GA-06 | GA 비의존 목록 5종 명문화(online RL · 재귀 생성 · 무제한 debate · 은닉 캐시 해킹 · cache_transfer 필드) | §8.2 §9·§58 | todo | 미확인 | — | 문서 항목 |
@@ -169,7 +170,9 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | 정규식 정적 스캔 4번째 카탈로그(`guard-registry` SENSITIVE/SECRET · `scripts/hooks/**` · command-segments 자체 정규식 · `normalizeCommand` 바운드 2건) | todo | Wave 9 실측: `normalizeCommand` 의 `$(…)`·`${…}` 2차식을 줄기 안에서 `{0,192}` 로 수리했으나 **현 3카탈로그 스캔이 이 두 정규식을 보지 못한다**(구조적 사각) | Canary |
 | split 운용 — `resolveDispatch` 완료줄기 선제외(gotcha 92) + `land.mjs` 설정 파일 핀 테스트 나열(gotcha 91) | done | Wave 9 p1 `18ac5644`(줄기 done `2fc59540`, 5 files +558/−14): `lib/git/split-dispatch.js` 선제외 + `scripts/split/land.mjs` 핀 테스트 나열 + `tests/split/land-pin-tests.test.js` 신설 · `commands/split.md` 문구. **잔여**: `excludeLimbs` 가 `split.md` 절차 코드에만 배선(`dispatch.mjs` 는 `resolveDispatch` 미호출) · `pinTestsFor` 는 줄기 자신이 추가한 테스트를 못 봄 · `run.json` `dispatched`/`landed` writer 는 여전히 리더 수기(lib·scripts 0) | (랜딩 게이트 신뢰) |
 | release.yml 산문 동기화 순서 + SYNC_PATHS 9경로 | done | `c298a7f0`(4.60.0); 라이브 실증 v4.60.0 배지 `f75e849f` | (릴리스 절차) |
-| 원장 위치 ADR-011 이관 실행(`ledger.jsonl`·`spawns.ndjson` 리더 수동 1회) + `.pre-adr011` 삭제(v4.61.0) | in-progress | `scripts/ledger/migrate-ledger-adr011.mjs`(선존재 exit 3); 설치본이 `.git/artibot/ledger.jsonl` 67KB 기록 중 | Observe 종료 판정(Check 8 분모) |
+| 원장 위치 ADR-011 이관 실행(`ledger.jsonl`·`spawns.ndjson` 리더 수동 1회) + `.pre-adr011` 삭제 | **done(이관) / 삭제 대기** | 리더 실행 2026-09-14 12:31 KST: 레거시 `.artibot/runtime/ledger.jsonl` 349행 + 라이브 `.git/artibot/ledger.jsonl` 389행(선존재 함정 — 옆으로 옮겨 마지막 `--worktree` 입력) → **738행**, lineCountMatch true, sha256 `a9f35e0d…`, `readLedgerCensus` duplicate 0, Check 8 pass(journal 28). 보존: `ledger.jsonl.pre-adr011`(349) · `ledger.jsonl.live-premerge-20260914`(389). spawns 는 레거시 파일 부재 → 대상 없음(공유 125행). 절차 5(라이브 창 2개 확인) 미실행. **삭제는 4.63.0 릴리스 체크리스트** | Observe 종료 판정(Check 8 분모) |
+| `tests/supervisor/v11-status-mapping.test.js` 가 gitignored `_benchmarks/`·미추적 `_reports/` 를 walk — 전체 vitest 유일 실패(환경 오탐) | done | `ba7d29bb`(2026-09-14) SKIP_DIRS 에 두 디렉터리 추가; 4.62.0 CI 17,365 pass / 0 fail | (랜딩 게이트 신뢰) |
+| 감사 F06~F09(split pointer prompt.md 미참조 · done 창 선제외 잔여 · `interpret-trailers --parse HEAD` 문구 · push 거절 = moved 오분류) | todo | `_reports/v5-pipeline-audit-2026-09-14/AUDIT.md` + 리더 HEAD 재현 2026-09-14(S1·S3·S4 reproduced). 수리 = Wave 10 창 3 `split-ops-remediation`(F06~F08 + addendum a/b/c, `split-dispatch.js` 소유 편입) + 롤링 `batch-landing-push-classify`(F09, `batch-landing.js:355-368` 단독) | (랜딩 게이트 신뢰) |
 | `spawns.ndjson` 공유 스토어 이관(spawn-ledger-store) | in-progress | Wave 7 done `1f32cab2`(배치 랜딩 중), 드라이런 Σ443 일치 | Observe(Check 10 비대칭) |
 | Check 8 프로젝트명 fold(W5-a) | done | `23ec79be`·`d1ded07f`(4.60.0) `doctor-checks.js#checkLedgerStateParity` | Observe 종료 판정 |
 | ledger reader dedupe pid 충돌(ts 키) | done | 4.58.0 `lib/runtime/ledger.js#dedupeKey`·`replay.js` | Observe |
@@ -198,7 +201,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 | ② 추천≠정책 스폰 비율 | **첫 수치 있음, 판정 보류** | OB-21 fold 착지(Wave 9 p1 `18ac5644`) 로 첫 값이 나왔다 — **`route.selected` 102행 중 12 = 11.8%**(2026-09-14 09:10, dedupe 후, 이 리포 원장 1개). 표본 1회·단일 머신이라 종료 판정 임계로 쓸 수 없고, 사유 3분류는 아직 배선 0(`data.source` 133/133 shadow · `residency:unavailable` 133/133 · pin 0 — `route-observe-pre.js:259-276` 이 `currentTier` 미전달) | 설치본 갱신 후 재집계 + OB-17 `actionsSinceSwitch` 배선으로 사유 분류 · `metric()` absent 계약 A/A′ 오너 결정 |
 | ③ verdict 파싱률 · 층별 UNMEASURED 비율 | 미판정(분모 0) | writer 3종 착지(Wave 8 p4 `9300568e`) 이나 2026-09-13 라이브 원장 `.git/artibot/ledger.jsonl` 233행 + 레거시 349행 모두 `review.*`·`verify.completed` 0 — 호출부 미배포(설치본 4.59.0) | verify 분모 훅 배선 착지(줄기 done `de8d238a`, Wave 9 p3 `3ba981eb`) — 설치본 갱신 + 1릴리스 뒤 재집계; `verify.completed` 라이브 0 은 설치본 미갱신 |
 | ④ 영수증 커버리지 ≥95% | 미판정(**분모 어휘는 착지**) | Wave 9 p2 `f1f8311e`(줄기 done `5b2f8b5e`): `session.ended` 가 allowlist 에 올라(총 39 항목) `session-end.js#recordSessionEnded` 가 `usage.receipt` 스테이지 성패와 무관하게 1행을 쓴다 — "끝난 세션" 이 "영수증을 낸 세션" 과 독립으로 세어진다. 다만 **설치본 미갱신이라 라이브 `session.ended` 0** 이고 커버리지 비율·parseFailures 집계 스크립트는 여전히 0; cost null | `claude plugin update` 후 라이브 `session.ended` 누적 → 집계 fold(`lib/replay/`, Wave 10 `session-end-fold` 브리프 초안) + I1 가격 |
-| ⑤ 훅·커맨드·스킬 발화 카운트(Existence Audit) | FAIL(구조적) | 분모 부재 `unmeasured:no-event-carries-<kind>`(부록 T-44); 4훅은 디스크 산출물 0(4.55.0 「구조적 한계」) | SH-29 carrier 필드 결정 후 |
+| ⑤ 훅·커맨드·스킬 발화 카운트(Existence Audit) | **Shadow 이월(오너 결정 E2, 2026-09-14)** | 분모 부재 `unmeasured:no-event-carries-<kind>`(부록 T-44); 4훅은 디스크 산출물 0(4.55.0 「구조적 한계」). carrier 없이는 구조적 FAIL 이라 Observe 종료 판정은 **①②③④ 4축**으로 한다 | SH-29 carrier writer(`tool.used.data.skill\|command\|hook` 3키, E5 권장)는 Wave 12 Shadow 계측 |
 
 인프라 라이브 판정(재사용 프로브 5종): 1 PreToolUse cwd/session_id PASS · 2 SessionEnd usage.receipt PASS · 3 Check 8 — 4.58.0 FAIL(측정 프레임) → 09-10 17:5x 원장 병합 후 parity PASS, 이후 W5-a(23ec79be) 수리 + ADR-011 위치 이관 → **4.60.0 설치본에서 재판정 진행 중(investigator, 2026-09-11 23:0x)** · 4 route.selected PASS · 5 UPS 가드 PASS(4.58.0).
 
