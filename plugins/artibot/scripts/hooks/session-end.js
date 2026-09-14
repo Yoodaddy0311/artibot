@@ -557,12 +557,13 @@ function safeProjectRoot(d, cwd) {
 }
 
 /**
- * Idempotency keys of the `usage.receipt` lines this session already wrote.
+ * Idempotency keys of one event kind this session already wrote.
  * READER, not writer.
  *
  * `lib/runtime/ledger.js#applyUsageReceipt` SUMS every receipt it folds, so a
  * SessionEnd firing twice over one session (an ended `--resume` is the observed
- * way) would double that session's recorded spend.
+ * way) would double that session's recorded spend. {@link SESSION_ENDED_EVENT}
+ * reuses the same lookup so the denominator cannot be counted twice either.
  *
  * An unreadable ledger yields an EMPTY set, which PERMITS the append: a lost
  * receipt is a permanent hole in the measurement, whereas a duplicate is
@@ -571,14 +572,15 @@ function safeProjectRoot(d, cwd) {
  * @param {object} d - Resolved ports.
  * @param {string} projectRoot
  * @param {string} sessionId
+ * @param {string} [eventName] - Ledger event to collect keys for.
  * @returns {Set<string>}
  */
-function existingReceiptKeys(d, projectRoot, sessionId) {
+function existingIdempotencyKeys(d, projectRoot, sessionId, eventName = 'usage.receipt') {
   try {
     const events = d.readAllEvents(projectRoot, { session_id: sessionId });
     const keys = new Set();
     for (const event of Array.isArray(events) ? events : []) {
-      if (event?.event !== 'usage.receipt') continue;
+      if (event?.event !== eventName) continue;
       const key = event.idempotency_key;
       if (typeof key === 'string' && key.length > 0) keys.add(key);
     }
@@ -661,9 +663,102 @@ async function collectUsageReceipts(hookData, deps) {
 
   const envelopes = d.toUsageReceiptEnvelopes(receipts, { sessionId });
   const tally = appendReceiptEnvelopes(
-    d, projectRoot, envelopes, existingReceiptKeys(d, projectRoot, sessionId),
+    d, projectRoot, envelopes, existingIdempotencyKeys(d, projectRoot, sessionId),
   );
   return receiptOutcome({ ...tally, receipts: receipts.length, coverage }, unresolved);
+}
+
+/**
+ * Ledger event naming one session that reached its end.
+ * Must match a key in `schemas/ledger-events.allowlist.json#/events`.
+ * @type {string}
+ */
+const SESSION_ENDED_EVENT = 'session.ended';
+
+/**
+ * Append the `session.ended` row unless this session already has one.
+ *
+ * The data is COPIED from the outcome the caller is about to report, never
+ * re-derived: a row built from a second computation could disagree with the
+ * stderr line about the same session, and there would be no way to tell which
+ * of the two was the measurement.
+ *
+ * @param {object} d - Resolved ports.
+ * @param {string} projectRoot
+ * @param {string} sessionId
+ * @param {{result: object, unresolved: string[]}} outcome - Receipt stage result.
+ * @param {{sessionFallback: boolean, transcriptPresent: boolean}} flags
+ * @returns {void}
+ */
+function appendSessionEndedEvent(d, projectRoot, sessionId, outcome, flags) {
+  const key = `${SESSION_ENDED_EVENT}:${sessionId}`;
+  const seen = existingIdempotencyKeys(d, projectRoot, sessionId, SESSION_ENDED_EVENT);
+  if (seen.has(key)) return;
+
+  const result = outcome?.result ?? {};
+  d.appendLedgerEvent(projectRoot, {
+    event: SESSION_ENDED_EVENT,
+    session_id: sessionId,
+    source: 'hook',
+    idempotency_key: key,
+    data: {
+      receipt_status: result.status,
+      receipts: result.receipts,
+      appended: result.appended,
+      rejected: result.rejected,
+      deduped: result.deduped,
+      coverage: result.coverage,
+      reason: result.reason,
+      unresolved_models: Array.isArray(outcome?.unresolved) ? outcome.unresolved : [],
+      transcript_present: flags.transcriptPresent,
+      session_fallback: flags.sessionFallback,
+    },
+  });
+}
+
+/**
+ * Record that this session ended, whatever the receipt stage did.
+ *
+ * THIS IS THE DENOMINATOR. `usage.receipt` counts sessions that PRODUCED
+ * receipts; on its own that number cannot separate "few sessions ended" from
+ * "most sessions ended without a receipt". Writing this row after the receipt
+ * stage REGARDLESS of its outcome makes "sessions that ended" countable
+ * independently, so Observe's coverage has something real to divide by.
+ *
+ * A payload with no `session_id` still gets a row, under a synthesized id and
+ * `session_fallback: true`. Excluding it would shrink the denominator and
+ * INFLATE coverage — the one error this row exists to prevent.
+ *
+ * `cwd` is the exception: without it the ledger root is unknown, and appending
+ * to a root derived from `process.cwd()` would put this session's row in a
+ * stranger's ledger (same rule as {@link receiptPrecondition}).
+ *
+ * @param {object} hookData - SessionEnd payload.
+ * @param {object} deps - Injection seam; see {@link recordUsageReceipts}.
+ * @param {{result: object, unresolved: string[]}} outcome - Receipt stage result.
+ * @returns {Promise<void>} Always resolves; writes nothing to stderr or stdout.
+ */
+async function recordSessionEnded(hookData, deps, outcome) {
+  if (!hookData || typeof hookData !== 'object') return;
+  const cwd = hookData.cwd;
+  if (typeof cwd !== 'string' || cwd.length === 0) return;
+
+  // Resolved here rather than reused: the receipt stage skips before resolving
+  // its ports on a `no-transcript` payload, which is exactly a session this row
+  // must still count.
+  const d = await resolveReceiptDeps(deps);
+  const projectRoot = safeProjectRoot(d, cwd);
+  if (projectRoot === null) return;
+
+  const declared = hookData.session_id;
+  const sessionFallback = !(typeof declared === 'string' && declared.length > 0);
+  const sessionId = sessionFallback ? `session-${d.now().getTime()}` : declared;
+  const transcriptPath = hookData.transcript_path;
+
+  appendSessionEndedEvent(d, projectRoot, sessionId, outcome, {
+    sessionFallback,
+    transcriptPresent: typeof transcriptPath === 'string' && transcriptPath.length > 0,
+  });
 }
 
 /**
@@ -694,6 +789,10 @@ function formatUsageReceiptLine(result, unresolved = []) {
  * `lib/economics/usage-receipt.js`): `cache-roi.js` and `token-usage.js` must
  * never also fold the same tokens into a receipt.
  *
+ * Also appends the one {@link SESSION_ENDED_EVENT} row for this session, after
+ * the summary line and whatever the receipt stage did — that row is the
+ * DENOMINATOR the receipts are counted against (see {@link recordSessionEnded}).
+ *
  * Observe-phase contract: no behaviour change, no file artifacts, ledger rows
  * only. Never throws and never alters the hook's outcome — a failure to MEASURE
  * spend must not become a failure to END a session.
@@ -717,6 +816,13 @@ export async function recordUsageReceipts(hookData, deps = {}) {
     outcome = receiptOutcome({ status: 'failed', reason: truncateReason(err?.message ?? err) });
   }
   process.stderr.write(formatUsageReceiptLine(outcome.result, outcome.unresolved));
+  // AFTER the summary line, and swallowing everything: the one-line contract
+  // above must hold even if the ledger is unwritable, and a failure to record
+  // the denominator must not become a failure to end a session. The return
+  // value, stdout and the exit code are untouched by what happens here.
+  try {
+    await recordSessionEnded(hookData, deps, outcome);
+  } catch { /* Observe contract: measurement never alters the hook's outcome. */ }
   return outcome.result;
 }
 
