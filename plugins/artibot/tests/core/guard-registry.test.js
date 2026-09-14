@@ -309,23 +309,84 @@ describe('guard-registry', () => {
       });
     });
 
+    // 형식 전환 (2026-09-14, 리더 승인 09:4x KST). 종전에는 10건의 **단일 회차
+    // 절대 벽시계** `<50ms` 였다. 그 형식은 러너 부하에 그대로 노출된다 —
+    // 이 describe 의 `120KB newlines` 가 12파일 병렬 vitest 에서 **104ms** 로
+    // 실패하고 단독 실행에서는 통과했다(리더 관측). 같은 종류의 경계 플레이크가
+    // W7 에서 `safety.test.js` 를 Windows 잡에서만 떨어뜨린 적이 있다
+    // (`expected 50.5407 to be less than 50`).
+    //
+    // W7 규약 형식으로 바꾼다: (1) 입력 크기 구조 단언, (2) 40,962B `<200ms`
+    // smoke(3회 중앙값), (3) 20,480B → 122,880B 비율 `< 18`(3회 중앙값, 감쇠항
+    // 4ms 시프트형 — `tests/core/blocked-patterns.test.js#RATIO_FLOOR_MS` 와 같은
+    // 공식). 비율은 같은 프로세스 안에서 연달아 잰 값이라 러너 속도를 거의 타지
+    // 않는다. 선형 기대 6.0, 2차식 기대 36.0 사이의 18 이다.
+    //
+    // 완화가 아니라 커버리지 확대다: 형태가 5종 → 6종으로 늘었고(종전에는
+    // `a \n` 이 40KB 에만, `git branch a \n` 이 120KB 에만 있어 두 형태 각각
+    // 한 시점만 봤다 — 이제 둘 다 세 시점에서 본다), 시점이 2개 → 3개가 됐다.
+    //
+    // 실측 2026-09-14 09:4x KST, node v24.15.0, Windows 11, 단독 실행, 3회 중앙값
+    // (전처리 단계 `lib/core/command-segments.js` 포함한 현재 경로):
+    //   shape                20,480B   40,962B  122,880B   growth
+    //   newlines                1.38      1.18      4.89     1.65
+    //   spaces                  1.53      0.78      1.28     0.95
+    //   CRLF                    0.82      1.13      2.72     1.40
+    //   continuations           0.75      0.78      3.44     1.56
+    //   mixed word+newline      1.76      2.60      8.56     2.18
+    //   mixed git-branch        1.94      3.48      6.06     1.69
+    // 종전 형식의 같은 지점(120KB newlines)은 단독 4.89ms / 병렬 104ms 였다 —
+    // 절대 벽시계가 잰 것은 규칙의 복잡도가 아니라 러너의 혼잡도였다.
+    //
+    // 이 단언이 못 보는 것: 창을 키워 세 시점이 **함께** 느려지는 회귀는 비율이
+    // 그대로라 여기서 안 보인다. 그건 정규식 소스 정적 스캔이 맡는다
+    // (`[^\n]`·`.` 런은 `{0,N<=192}` 필수 — W7 게이트).
     describe('linear scan on adversarial input', () => {
       const BACKSLASH = String.fromCharCode(92);
-      it.each([
-        ['40KB newlines', '\n'.repeat(40 * 1024)],
-        ['120KB newlines', '\n'.repeat(120 * 1024)],
-        ['40KB spaces', ' '.repeat(40 * 1024)],
-        ['120KB spaces', ' '.repeat(120 * 1024)],
-        ['40KB CRLF', '\r\n'.repeat(20 * 1024)],
-        ['120KB CRLF', '\r\n'.repeat(60 * 1024)],
-        ['40KB continuations', `${BACKSLASH}\n`.repeat(20 * 1024)],
-        ['120KB continuations', `${BACKSLASH}\n`.repeat(60 * 1024)],
-        ['40KB mixed', 'a \n'.repeat(13 * 1024)],
-        ['120KB mixed', 'git branch a \n'.repeat(8 * 1024)],
-      ])('stays under 50ms on %s', (_label, command) => {
-        const started = performance.now();
-        decisionFor(command);
-        expect(performance.now() - started).toBeLessThan(50);
+
+      /** 벽시계 3회 중앙값(ms). 단일 회차는 Windows 러너에서 1.9배까지 흔들린다. */
+      const medianMs = (fn, runs = 3) => {
+        const samples = [];
+        for (let i = 0; i < runs; i += 1) {
+          const started = performance.now();
+          fn();
+          samples.push(performance.now() - started);
+        }
+        return samples.sort((a, b) => a - b)[Math.floor(runs / 2)];
+      };
+
+      /** 비율 단언의 감쇠항(ms). 분자·분모에 함께 더하는 시프트형. */
+      const RATIO_FLOOR_MS = 4;
+
+      /** `unit` 을 정확히 size 바이트까지 반복한다. */
+      const sized = (unit, size) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
+
+      const SHAPES = [
+        ['newlines', '\n'],
+        ['spaces', ' '],
+        ['CRLF', '\r\n'],
+        ['continuations', `${BACKSLASH}\n`],
+        ['mixed word+newline', 'a \n'],
+        ['mixed git-branch', 'git branch a \n'],
+      ];
+
+      it.each(SHAPES)('builds the %s shape at the exact requested size', (_label, unit) => {
+        for (const size of [20480, 40962, 122880]) {
+          expect(sized(unit, size)).toHaveLength(size);
+        }
+      });
+
+      it.each(SHAPES)('stays under 200ms at 40,962B on %s', (_label, unit) => {
+        const command = sized(unit, 40962);
+        expect(medianMs(() => decisionFor(command))).toBeLessThan(200);
+      });
+
+      it.each(SHAPES)('scales sub-quadratically from 20,480B to 122,880B on %s', (_label, unit) => {
+        const small = sized(unit, 20480);
+        const large = sized(unit, 122880);
+        const t20 = medianMs(() => decisionFor(small));
+        const t120 = medianMs(() => decisionFor(large));
+        expect((t120 + RATIO_FLOOR_MS) / (t20 + RATIO_FLOOR_MS)).toBeLessThan(18);
       });
     });
   });

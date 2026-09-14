@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BLOCKED_PATTERNS, CATEGORIES } from '../../lib/core/blocked-patterns.js';
 import { blankPrinterSegments } from '../../lib/core/command-segments.js';
-import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
+import {
+  executeChain, normalizeCommand, registerBuiltinGuards, resetGuards,
+} from '../../lib/core/guard-registry.js';
 
 /** 백슬래시. 리터럴로 쓰면 이스케이프 단계에서 사고가 난다. */
 const BACKSLASH = String.fromCharCode(92);
@@ -1233,6 +1235,8 @@ describe('blocked-patterns', () => {
       ['pipe run', (size) => filler('|', size)],
       ['and-and run', (size) => filler('&&', size)],
       ['one long quoted span', oneQuotedSpan],
+      ['dollar-paren run', (size) => filler('$(', size)],
+      ['dollar-brace run', (size) => filler('${', size)],
       ['unbalanced quote', (size) => `echo "${'a'.repeat(Math.max(0, size - 6))}`.slice(0, size)],
       ['comment run', (size) => filler('# x\n', size)],
       ['backslash continuation run', (size) => filler(`x ${BACKSLASH}\n`, size)],
@@ -1253,40 +1257,56 @@ describe('blocked-patterns', () => {
       expectSubQuadratic(build, runChain);
     });
 
-    // ── 이 표에서 두 형태가 빠진 이유 (숨기지 않고 여기에 적는다) ────────────
-    // `$(` 런과 `${` 런은 전체 경로에서 **2차식**이다. 원인은 전처리가 아니라
+    // ── `$(`·`${` 런은 한때 이 표에서 빠져 있었다 (2026-09-14 이력) ──────────
+    // 두 형태는 전체 경로에서 **2차식**이었다. 원인은 전처리가 아니라
     // `lib/core/guard-registry.js#normalizeCommand` 의 닫히지 않는 여는 토큰
-    // 처리다: `/\$\(([^)]*)\)/g` 와 `/\$\{[^}]*\}/g` 는 여는 토큰마다 입력 끝까지
-    // 훑고 실패한다. 40,962B 에 여는 토큰이 20,481개면 그게 그대로 제곱이다.
+    // 처리였다: `/\$\(([^)]*)\)/g` 와 `/\$\{[^}]*\}/g` 가 여는 토큰마다 입력
+    // 끝까지 훑고 실패했다. 40,962B 에 여는 토큰이 20,481개면 그게 그대로 제곱이다.
+    // 이 줄기가 만든 회귀가 아니었다 — 전처리를 항등 함수로 둔 복제 경로에서도
+    // 같았다. 그래서 한동안 10,240B 카브아웃으로 두었다가, 리더 결정(10:1x KST)
+    // 으로 이 줄기에서 함께 고쳤다. 카브아웃은 제거됐고 두 형태는 위 표의 다른
+    // 8형과 **똑같은** 40,962B `<200ms` + 20,480→122,880 비율 `<18` 을 받는다.
     //
-    // 이 줄기(guard-command-position)가 만든 회귀가 **아니다** — 전처리를 항등
-    // 함수로 둔 복제 경로에서도 같다. 실측 2026-09-14 09:2x KST, node v24.15.0,
-    // Windows 11, 3회 중앙값, `$(` 런:
-    //   size      preprocess   normalize   chain(전처리 없음)   chain(전처리 있음)
-    //   20,480B     0.39ms      155.81ms        142.94ms            118.70ms
-    //   40,962B     0.08ms      580.42ms        690.02ms            656.77ms
-    //  122,880B     0.55ms     5917.25ms       5654.01ms           5573.34ms
-    //   growth       1.04        37.05           38.51               45.45
-    // 전처리 단계 자체는 평평하고(1.04), 전처리를 붙인 쪽이 오히려 조금 빠르다.
-    // normalizeCommand 의 다른 여는 토큰 런은 선형이다(백틱 1.06 · `"` 1.07 ·
-    // `'` 1.10 · `$` 1.08 · `\` 1.23, 10,240B→40,962B).
-    //
-    // 그래서 여기서는 **내 단계가 지키는 것만** 단언한다: 전처리는 122,880B 까지
-    // 선형이고, 전체 경로는 기존 2차식이 아직 감당하는 크기에서만 벽시계를 건다.
-    // 40,962B 단언은 normalizeCommand 가 바운드되기 전에는 켤 수 없다.
-    // 수리 방향(소유 밖): 두 정규식의 `[^)]*`·`[^}]*` 를 `{0,192}` 로 바운드 —
-    // dd/curl/wget/git-push 가 쓰는 4.60.0 관례와 같은 형식.
+    // 실측(3회 중앙값, node v24.15.0, Windows 11), `$(` 런:
+    //   size      preprocess  normalize(전)  chain(전)   normalize(후)  chain(후)
+    //   20,480B     0.42ms       155.81ms    118.70ms       3.88ms      4.66ms
+    //   40,962B     0.13ms       580.42ms    656.77ms       8.78ms      9.93ms
+    //  122,880B     0.31ms      5917.25ms   5573.34ms      24.40ms     25.19ms
+    //   growth      0.98          37.05       45.45          3.60        3.37
+    // `${` 런 normalizeCommand growth(10,240→40,962, 4배 구간, 2차식 기대 16):
+    // 14.22 → 2.10. 손대지 않은 다른 여는 토큰은 전/후 모두 선형이다
+    // (백틱 1.06→1.05 · `"` 1.07→1.08 · `'` 1.10→1.03 · `$` 1.08→1.02 ·
+    //  `\` 1.23→1.11). 전처리 단계는 전후 모두 평평(1.04 / 0.98).
+    // 122,880B 전체 경로 절대값: 5,573ms → 25.19ms (221배).
     it.each([
-      ['dollar-paren', '$('],
-      ['dollar-brace', '${'],
-    ])('keeps the preprocessing stage linear on a %s run that normalizeCommand cannot carry', (_name, unit) => {
-      const build = (size) => filler(unit, size);
-      expect(build(122880)).toHaveLength(122880);
-      expectSubQuadratic(build, blankPrinterSegments);
-      expect(medianMs(() => blankPrinterSegments(build(122880)))).toBeLessThan(200);
-      // 전체 경로는 기존 2차식이 아직 여유 있는 10,240B 에서만 건다
-      // (위 표 기준 20,480B 가 이미 119~143ms 로 200ms 경계에 붙는다).
-      expect(medianMs(() => runChain(build(10240)))).toBeLessThan(200);
+      ['dollar-paren', '$(', ')'],
+      ['dollar-brace', '${', '}'],
+    ])('unwraps a %s body at the 192-character bound and not past it', (_name, open, close) => {
+      const inner = 'a'.repeat(192);
+      expect(normalizeCommand(`${open}${inner}${close}`)).not.toContain(open);
+      expect(normalizeCommand(`${open}${inner}a${close}`)).toContain(open);
+    });
+
+    // 바운드가 **가리는 것이 없다**는 핀. 192자를 넘는 치환 안의 위험 명령은
+    // 정규화 변형에서 `$(…)` 스펠링 그대로 남지만, checkDangerousCommand 는
+    // **원시 변형도** 대조하므로 원문에 바이트 동일하게 남아 있는 그 명령이
+    // 그대로 걸린다. 즉 바운드의 손실은 ">192자 본문의 **벗겨진** 스펠링으로만
+    // 매치될 수 있었던 규칙"에 한정되고, 방향은 정규화 변형에서 매치가 주는
+    // 쪽뿐이다. 실행형 리터럴을 소스에 남기지 않으려고 위험 문자열은 조립한다.
+    const RM = `r${'m'} -${'r'}f /`;
+    it.each([
+      ['at the bound', 192],
+      ['past the bound', 400],
+      ['far past the bound', 4096],
+    ])('still blocks a dangerous command inside a substitution %s', (_name, padding) => {
+      const command = `echo "$(${'a'.repeat(padding)}; ${RM})"`;
+      expect(runChain(command).decision).toBe('block');
+    });
+
+    it('keeps the raw variant byte-identical for an over-long substitution', () => {
+      const command = `echo "$(${'a'.repeat(400)}; ${RM})"`;
+      // 전처리는 조건 (iii) 으로 면제를 거부하므로 입력을 그대로 돌려준다.
+      expect(blankPrinterSegments(command)).toBe(command);
     });
   });
 });

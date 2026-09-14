@@ -11,8 +11,9 @@ import {
   shouldPause,
 } from '../../lib/autopilot/safety.js';
 // 읽기 전용 — 두 곳이 쓴다. (1) 포크밤 드리프트 게이트가 L1 원본과 바이트를
-// 대조한다. (2) 아래 ReDoS 정적 스캔이 L1·L2 규칙을 한 번에 훑는다. 이 파일은
-// L1 소스를 편집하지 않는다.
+// 대조한다. (2) 아래 ReDoS 정적 스캔이 **세 카탈로그**(L1 · L2 · HG)를 한 번에
+// 훑는다 — 2026-09-14 에 HUMAN_GATE_MATRIX 가 세 번째로 들어왔다(스캐너 헤더
+// "못 보는 것" 7번 참조). 이 파일은 L1 소스를 편집하지 않는다.
 import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
 // 읽기 전용 — 정적 스캔의 **세 번째 카탈로그**(2026-09-14 추가). 같은
 // PreToolUse 경로(probe 'command', tools Bash)를 타면서 두 카탈로그 밖이라
