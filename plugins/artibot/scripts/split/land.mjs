@@ -237,9 +237,12 @@ function isConfigPinTarget(file) {
 
 /**
  * Recursively list `*.test.js` / `*.test.mjs` under `root`, as `/`-separated
- * paths relative to `root`, sorted. Nothing is excluded — not `node_modules`,
- * not `fixtures` — because the vitest project include is literally
- * `tests/**\/*.test.{js,mjs}` and this list has to match what would run.
+ * paths relative to `root`, sorted. Nothing is excluded — not `fixtures`, not
+ * even `node_modules` — because the vitest project include is literally
+ * `tests/**\/*.test.{js,mjs}`. Vitest's DEFAULT exclude does drop
+ * `**\/node_modules/**`, so this list is a superset of what would run if a
+ * `node_modules` ever appeared under `tests/` (0 today, measured 2026-09-14).
+ * Listing more, never less, is the safe side for a "run these" hint.
  * @param {string} root
  * @returns {string[]}
  */
