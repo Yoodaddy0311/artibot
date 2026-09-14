@@ -25,6 +25,19 @@
  *   - SHA + file fingerprint cache (`runtime/last-dev-verify-sha.txt`)
  *     prevents repeated verification asks for the same working-tree state.
  *
+ * Ledger side effect (OB-07): a fire also records the UNMEASURED DENOMINATOR —
+ * four `verify.completed` lines (three layers + overall), all
+ * `result: "unmeasured"`. See {@link recordUnmeasuredDenominator}. It is
+ * observation only: the write cannot change what this hook prints, and the
+ * fingerprint cache above — not the writer's idempotency key — is what keeps one
+ * working-tree state from being counted twice.
+ *
+ * WHAT THIS RECORD CANNOT SEE (rules §9, next to the gate): whether the model
+ * actually verified anything afterwards (no line closes the loop yet, so the
+ * numerator is still missing), turns where the gate correctly bailed, and any
+ * fire in a repo whose ledger is unwritable — that one is a silent absence by
+ * design, since the alternative was to let a bookkeeping failure break Stop.
+ *
  * @module scripts/hooks/dev-verify-gate
  */
 
@@ -254,6 +267,75 @@ function resolveHookEventName(hookData) {
   return hookData?.hook_event_name === 'SubagentStop' ? 'SubagentStop' : 'Stop';
 }
 
+/**
+ * Record the DENOMINATOR of the verification measurement: one
+ * `verify.completed` line per layer, every one of them `result: "unmeasured"`,
+ * plus the overall line.
+ *
+ * WHY UNMEASURED AND NOT A VERDICT. This gate ASKS the model to verify; it
+ * measures nothing itself. Writing a PASS here would be the exact false
+ * measurement the ledger exists to prevent. Writing NOTHING was the previous
+ * behaviour, and it is just as wrong in the other direction: a fire that leaves
+ * no trace makes "how often was the gate answered?" unanswerable, because the
+ * denominator is missing. `verify({ layers: {} })` yields precisely that — three
+ * UNMEASURED rows carrying a `verification_id` other lines can join on.
+ *
+ * WHY THE IMPORTS ARE LAZY. A static `import` of a module that throws while it
+ * is evaluated kills the process before `main()` exists, and this hook's ONLY
+ * contract is the stdout envelope. Deferring the three `lib/` modules into this
+ * function puts an import-time throw inside the caller's catch, the same way
+ * `scripts/hooks/intent-observe-pre.js#loadDeps` (:93) does. stdout is then
+ * byte-identical whether the ledger write succeeds, is rejected, or never loads.
+ *
+ * WHY `existingKeys` IS NOT WRAPPED IN A CATCH. `verify-writer.js#readExistingKeys`
+ * (:466) turns a throwing port into "reject every line", and its header says why
+ * that is deliberate and stricter than `scripts/hooks/session-end.js#existingReceiptKeys`
+ * (:576): a duplicated `verify.completed` inflates the reader's per-layer tally
+ * into a false measurement, while a line that was never written is a visible
+ * absence. A denominator prefers the absence, so the throw is left to propagate
+ * into the writer's own guard rather than swallowed here.
+ *
+ * @param {string} repoRoot Ledger root — the writer derives the file from it.
+ * @param {object} hookData Raw Stop payload; `session_id` is the join key.
+ * @returns {Promise<object>} the writer's tally (`appended`/`deduped`/
+ *   `rejected`/`skipped`). `skipped: 1` means the payload carried no
+ *   `session_id`, which the writer refuses — no id is invented here.
+ */
+async function recordUnmeasuredDenominator(repoRoot, hookData) {
+  const [verifier, writer, ledger] = await Promise.all([
+    import('../../lib/verification/unified-verifier.js'),
+    import('../../lib/verification/verify-writer.js'),
+    import('../../lib/runtime/ledger.js'),
+  ]);
+
+  const sessionId = typeof hookData?.session_id === 'string' ? hookData.session_id : undefined;
+  // `mission_id` is passed through ONLY when the host declared one, matching
+  // `session-end.js:534`. The writer derives a session-scoped fallback itself,
+  // and reading the ledger a second time to resolve the current mission would
+  // cost more than the line is worth.
+  const missionId = typeof hookData?.mission_id === 'string' ? hookData.mission_id : undefined;
+
+  return writer.recordVerification(
+    verifier.verify({ layers: {} }),
+    { sessionId, missionId },
+    {
+      append: (input) => ledger.appendLedgerEvent(repoRoot, input),
+      existingKeys: () => {
+        const events = ledger.readAllEvents(repoRoot, {
+          session_id: sessionId,
+          event: writer.VERIFY_COMPLETED_EVENT,
+        });
+        const keys = [];
+        for (const event of events) {
+          const key = event?.idempotency_key;
+          if (typeof key === 'string' && key.length > 0) keys.push(key);
+        }
+        return keys;
+      },
+    },
+  );
+}
+
 export async function main() {
   // v4.5.8: emergency disable removed. The marker-file pattern below now
   // distinguishes main-agent edits (gate fires) from teammate edits and
@@ -293,6 +375,16 @@ export async function main() {
   if (readLastFingerprint(pluginRoot) === fingerprint) return; // already verified
 
   saveFingerprint(pluginRoot, fingerprint);
+
+  // The gate has decided to fire — record the unmeasured denominator. This is a
+  // SIDE EFFECT ONLY: the tally is not read, no branch below depends on it, and
+  // every failure mode (import, read, append) is absorbed here, so the stdout
+  // envelope underneath is the same in all of them.
+  try {
+    await recordUnmeasuredDenominator(repoRoot, hookData);
+  } catch (err) {
+    logHookError(HOOK_NAME, 'failed to record the unmeasured verify denominator', err);
+  }
 
   // Mode-aware output: 'enforce' (default) blocks the stop; 'advisory' surfaces
   // the same checklist as non-blocking 2.1.163 additionalContext feedback.
