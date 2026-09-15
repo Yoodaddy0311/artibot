@@ -44,7 +44,7 @@ Orchestrator delegates by default. Teammates execute and cross-check.
 | ≥2 independent subtasks OR ≥2 files/domains OR medium+ complexity | **Parallel teammates** via `/team` (auto-triggered) |
 | Any feature / bugfix / refactor | planner → parallel executors → reviewer |
 
-Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out: `--no-team` in prompt, or `team.autoApply: false` in `artibot.config.json`.
+Violation symptom: "all work done inline by main thread" = DNA breach. Opt-out (OD3): the team is OFF when **either** `team.enabled` **or** `team.autoApply` is false in `artibot.config.json`, or when the prompt carries `--no-team`. One owner reads that: `lib/cognitive/workflow-plan.js#isTeamEnabled` — do not re-derive it locally as `team.enabled ?? true`.
 
 **Auto-Team (current policy tier)**: the current policy tier natively supports large-scale parallel delegation — ultracode (xhigh effort + always-on multi-agent permission via mid-conversation system messages) makes this a model-level capability. (`ultracode` is the official Claude Code **2.1.160** rename of the former "workflow" trigger keyword.) Artibot's Operator-Waits DNA still owns the *automatic* trigger: parallel teams fire on intent without the user typing `/team`. Note: the harness `Workflow` tool (deterministic JS orchestration via `agent()`/`parallel()`/`pipeline()`) is a SEPARATE, explicit-opt-in mechanism — it does not auto-fire.
 

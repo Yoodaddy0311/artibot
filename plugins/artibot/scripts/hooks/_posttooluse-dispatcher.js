@@ -16,8 +16,9 @@
  *   7. post-write-tdd.js      Edit / Write      (2s)   — TDD advisory
  *   8. mark-main-agent-edit.js Edit/Write/Multi (3s)   — agent ownership tag
  *   9. tool-tracker.js        *                 (3s)   — universal tracker
- *  10. webfetch-cache-post.js WebFetch          (5s)   — webfetch cache write
- *  11. zero-result-guard.js  Grep / Glob       (3s)   — zero-result scope nudge
+ *  10. tool-used-record.js    Skill             (3s)   — Existence Audit carrier (skill key, SH-29)
+ *  11. webfetch-cache-post.js WebFetch          (5s)   — webfetch cache write
+ *  12. zero-result-guard.js   Grep / Glob       (3s)   — zero-result scope nudge
  *
  * Routing: hooks whose `tools` array does not include the current
  * `extractToolName(payload)` value are skipped entirely (no spawn, no cost).

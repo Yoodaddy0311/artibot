@@ -564,7 +564,9 @@ paths — both are SHARED under `<git-common-dir>/artibot/`:
 cannot answer (ADR-011 §5 ③) — the conflict count (or "not
 counted" when the join was not read), and the bind side's own bounds — a
 10-minute candidate window and a 128 KB ledger tail
-(`subagent-handler.js#RECEIPT_WINDOW_MS`, `#RECEIPT_TAIL_BYTES`) — because a
+(`subagent-handler.js#RECEIPT_WINDOW_MS`, `#RECEIPT_TAIL_BYTES` — the latter is
+an alias for `lib/runtime/ledger-tail.js#DEFAULT_TAIL_BYTES`, which owns the
+131072 literal) — because a
 receipt older than that window is unbound BY DESIGN and belongs in the reader's
 explanation of the number, not in a warning.
 

@@ -32,7 +32,8 @@
  *
  * ── Consuming the existing onFailure payload ──────────────────────────────
  * `runPhase4Verify` already emits `onFailure: { agent, retryLimit: 3,
- * escalateTo: 'pause' }` (engine.js:503-507) and lane 4 §1.6 measured that no
+ * escalateTo: 'pause' }` (engine.js:480 `runPhase4Verify`, re-measured
+ * 2026-09-15; the old :503-507 citation had drifted) and lane 4 §1.6 measured that no
  * code reads it. This module is that reader: `retryLimit` caps repairs and
  * `escalateTo` names the terminal action. The payload is read-only here — the
  * engine is not modified, and `onFailure.agent` is not consulted because

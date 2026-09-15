@@ -459,7 +459,9 @@ function pickRoute(src, actionClass, catalog) {
  * @param {object} [input.profile] - Execution profile, passed to the economics.
  * @param {object} [input.directives] - A `PERFORMANCE_DIRECTIVES` entry.
  * @param {object} [input.signals] - `{contextTokens, cacheReadTokens, retriesSoFar, providerHealth}`.
- * @param {string} [input.currentTier] - Incumbent tier; absent on the first decision.
+ * @param {string} [input.currentTier] - Incumbent tier; absent whenever no
+ *   incumbent can be evidenced — the first decision of a session, or a decision
+ *   whose incumbent source was unreadable. Absent is not "no switch happened".
  * @param {number} [input.actionsSinceSwitch] - Residency counter (§30).
  * @param {object} [input.hysteresis] - Pre-computed `evaluateSwitch` result.
  * @param {{resolveEffort?: Function, budgetFor?: Function}} [input.ports] -

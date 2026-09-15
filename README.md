@@ -890,6 +890,7 @@ plugins/artibot/
 |   +-- [7 domain rules].md
 +-- hooks/
 |   +-- hooks.json               # Hook event mappings
+|   +-- dispatch-table.json      # Per-event hook tables (PostToolUse 12 entries)
 +-- scripts/
 |   +-- hooks/                   # 75 hook scripts (ESM)
 |   +-- ci/                      # 20 CI scripts

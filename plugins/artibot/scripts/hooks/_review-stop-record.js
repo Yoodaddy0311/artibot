@@ -472,7 +472,7 @@ async function writeReviewArtifact(ctx) {
  *
  * The ports are built HERE rather than inside the writer because
  * `lib/review/verdict-writer.js` is L2 and may not import `lib/runtime/` — the
- * same split `unified-verifier.js#recordVerification` already uses. The
+ * same split `lib/verification/verify-writer.js` already uses. The
  * `existingKeys` port is what makes a redelivered stop dedupe instead of
  * inflating the §4.1 denominator with a second copy of one verdict.
  *

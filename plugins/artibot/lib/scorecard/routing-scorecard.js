@@ -26,10 +26,13 @@
  * differently.
  *
  * ── WHAT THIS CARD CANNOT SEE (repo rule §9: write it next to the gate) ──────
- *  1. ZERO LIVE ROUTE RECEIPTS. The `route.selected` writer IS wired
+ *  1. THIN LIVE SAMPLE, NOT ZERO (corrected 2026-09-15). The `route.selected` writer IS wired
  *     (`scripts/hooks/subagent-handler.js#observeRoute`), but every metric here has been
- *     exercised against fixtures only — see session-scorecard.js #1 for why a
- *     wired writer and a populated ledger are still two different statements.
+ *     and live lines now exist (first fold 2026-09-14: 102 `route.selected` rows on
+ *     one machine, one repo). That is a SAMPLE, not a baseline — a single-machine
+ *     single-run distribution cannot carry a threshold. See session-scorecard.js #1
+ *     for why a wired writer and a populated ledger are still two different
+ *     statements; the gap is now "populated but unrepresentative", not "empty".
  *  2. USEFUL vs WASTEFUL SWITCHES (§34, §37). §37 defines "useful" as a switch
  *     after which success rises, retries fall, latency falls, effective cost
  *     falls, or review quality rises — every one of those is an AFTER-THE-FACT
@@ -49,7 +52,10 @@
  *  5. RESIDENCY AND COOLDOWN (§30). `actionsSinceSwitch` is on the receipt and
  *     is not folded: design §8.5 G5 records the initial values 3 and 2 as
  *     "미보정", so a distribution over them would describe an uncalibrated
- *     constant rather than a behaviour.
+ *     constant rather than a behaviour. Updated 2026-09-15 (Wave 11, owner W11-Q2):
+ *     an ABSENT counter is no longer read as "residency not met" — hysteresis emits
+ *     `residency-unknown` as its own reason code, so a future fold must keep
+ *     "unknown" separate from "measured and short of the barrier".
  *  6. SHADOW LINES ARE NOT SEPARATED. The receipt allows `source: 'shadow'`
  *     beside production lines. Nothing here splits them, because §8.4 puts the
  *     shadow learner past Observe and no shadow line can exist yet. When one
@@ -64,10 +70,14 @@
  *  8. PINS, IN PHASE 0. `routing.avoided_switch_pinned` has a real denominator
  *     and an expected numerator of zero, because the only receipt writer
  *     (`lib/routing/adaptive-model-router.js#routeModel`) derives `decision.type`
- *     from `currentTier`, and nothing supplies `currentTier` before Shadow. So
- *     the row measures the WRITER's state, not the router's restraint, until
- *     that field is populated. It is emitted anyway so the day it moves is
- *     visible; a row added later would have no baseline to move from.
+ *     from `currentTier`. Updated 2026-09-15 (Wave 11, owner W11-Q1): the hook
+ *     `scripts/hooks/route-observe-pre.js` now DOES supply `currentTier` — the
+ *     incumbent is read from the transcript tail (last assistant `message.model`
+ *     mapped onto a catalog tier), and `currentTier` and `actionsSinceSwitch` go
+ *     in together or not at all. So this row can move now, but a model the catalog
+ *     does not list still yields no incumbent, which reads as absent rather than
+ *     as an error. Until the catalog drift is closed, a zero here is still partly
+ *     the WRITER's state rather than the router's restraint.
  *
  * @module lib/scorecard/routing-scorecard
  */

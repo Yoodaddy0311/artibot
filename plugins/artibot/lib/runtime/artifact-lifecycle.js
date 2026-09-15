@@ -453,9 +453,10 @@ function planOneWrite(entry, ctx) {
  *   writer takes an injected `projectRoot` (design §3.3), and a path built from
  *   `process.cwd()` is how a worktree writes into the wrong repository.
  * @param {{redact?: (s: string) => string}} [input.ports] Hardening §25 port.
- * @param {{unmeasuredBlocksOutcome?: boolean}} [input.policy] Overrides merged
- *   over {@link DEFAULT_POLICY}. Present because owner decision C4 is open; an
- *   omitted knob keeps the fail-closed default rather than switching the gate off.
+ * @param {{unmeasuredBlocksOutcome?: boolean, requiredLayers?: string[]|null}} [input.policy] Overrides merged
+ *   over {@link DEFAULT_POLICY}. C4 (i) `requiredLayers` landed in Wave 11, so the
+ *   knob is a live override, not a placeholder; an omitted knob still keeps the
+ *   fail-closed default rather than switching the gate off.
  * @returns {{missionId: string, dryRun: true, writes: object[], refused: object[],
  *   staleness: object, policy: object, findings: object[]}} `findings` are
  *   non-blocking counts — today, one per-layer `verify.completed` tally.

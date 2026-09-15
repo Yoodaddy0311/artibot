@@ -60,7 +60,7 @@ Otherwise (<30 lines, single domain, no delegation needed)?
 | Classifier output | Auto-fires? | Notes |
 |---|---|---|
 | `inline` | Yes — orchestrator executes directly | No team creation overhead |
-| `team` | Yes — Operator-Waits DNA triggers automatically | Threshold: `artibot.config.json#/team/autoApplyTriggers`; opt-out via `--no-team` or `team.autoApply: false` |
+| `team` | Yes — Operator-Waits DNA triggers automatically | Threshold: `artibot.config.json#/team/autoApplyTriggers`; OFF when EITHER `team.enabled` or `team.autoApply` is false (OD3 — `lib/cognitive/workflow-plan.js#isTeamEnabled` is the single owner of that reading), or when the prompt carries `--no-team` |
 | `workflow` (= orchestrate mechanism) | **No — advisory only (opt-in)** | Classifier emits a recommendation text; user or orchestrator must explicitly invoke `/orchestrate` (pattern pipelines) or `/dynamic` (Workflow-tool scripts) |
 | `autopilot` | **No — advisory only (opt-in)** | Same advisory surface; never starts an unattended session silently |
 

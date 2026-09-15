@@ -28,7 +28,7 @@ Accepted — 2026-09-11, 오너 결정 4건(리더 경유, 2026-09-11) 반영: �
 | 0-6 | 브리프 | `event-writer.js#ledgerFilePath`(:239-241) `path.join`, git·env 참조 0 | 맞다. `path.join` 이라 `opts.ledgerPath` 에 절대경로를 줘도 우회 불가(Windows 에서 `C:\a\C:\b` 형태로 망가짐, 추론). |
 | 0-7 | 브리프 | `state-store-wiring.test.js:34-41` 헤더 "worktree 분산 미측정" | 맞다. 위치는 `tests/project-state/`(firewall 아님). |
 | 0-8 | 브리프 | `spawn-ledger.js` `<projectRoot>/.artibot/ledger/spawns.ndjson` | 맞다(:10, :66 `LEDGER_REL`, :79, :184, :226). |
-| 0-9 | 브리프 | `subagent-handler.js:333` 128KB 꼬리 | `RECEIPT_TAIL_BYTES=131072`(:249), `readLedgerTail`(:329), 세션 필터로 호출(:530). 맞다. |
+| 0-9 | 브리프 | `subagent-handler.js:333` 128KB 꼬리 | 맞다. **줄번호 재측정 2026-09-15**(종전 :249/:329/:530 은 전부 부패 — 드리프트는 +1 이 아니라 각각 +11 / +11 / −18): `RECEIPT_TAIL_BYTES`(:260)는 이제 리터럴이 아니라 `lib/runtime/ledger-tail.js#DEFAULT_TAIL_BYTES`(:59 = 131072)를 import(:18)한 별칭이고, `readLedgerTail`(:340, JSDoc :329-339), 세션 필터 호출(:512). 131072 라는 값 자체는 그대로다. 이 행도 §0-5 규칙대로 **심볼로 읽어라**. |
 | 0-10 | 브리프 | `.gitignore:137` runtime, `:115` ledger | 맞다. |
 | 0-11 | 브리프 | "현 시점 위반 0" | 메인 루트 기준만 맞다. worktree 루트에서는 0-1 대로 `unmeasured`(잠복 FAIL). |
 | 0-12 | 브리프 | `v5-config-firewall.test.js` `ALLOWED_SUBKEYS` 가 `ledger` 신키 차단, `:217-220` 상대경로 핀 | 맞다(:138-142, :217-220). |

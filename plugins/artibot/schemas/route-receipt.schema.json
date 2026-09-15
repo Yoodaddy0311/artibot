@@ -114,10 +114,10 @@
       "type": "object",
       "required": ["current", "recommended", "selected"],
       "additionalProperties": false,
-      "description": "Exact model identities (§20). current is explicitly nullable — the first decision of a session has no incumbent — but the key stays required so 'no incumbent' is recorded rather than omitted. In Observe, recommended and selected differ whenever the router disagrees with policy; that divergence rate is the Phase 0 metric (PRD S3).",
+      "description": "Exact model identities (§20). current is explicitly nullable — null when no incumbent can be EVIDENCED, which covers both the first decision of a session and a decision whose incumbent source was unavailable — but the key stays required so 'no incumbent' is recorded rather than omitted. In Observe, recommended and selected differ whenever the router disagrees with policy; that divergence rate is the Phase 0 metric (PRD S3).",
       "properties": {
         "current": {
-          "description": "Model in force before this decision, or null when there is none.",
+          "description": "Model in force before this decision, or null when no incumbent can be evidenced (first decision of a session, or no readable incumbent source).",
           "oneOf": [{ "$ref": "#/definitions/model_identity" }, { "type": "null" }]
         },
         "recommended": {

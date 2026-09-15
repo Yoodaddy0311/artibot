@@ -319,6 +319,8 @@ v1.1 이 정한 것(정본 1개·파생 금지 7패턴·제자리 revision·아�
 | D14 | state.yaml 의 사람 직접 기입 필드(owners.humans 등)를 재구성 캐시와 분리 보존하는 방법(v1.1 미명시) | L6 | 사람 기입 필드는 StateStore 의 별도 컬렉션(`project_meta`)에, 투영 시 합성 |
 | D15 | Artibot 자체 메모리(`~/.claude/artibot/memory/`)를 Claude Code 자동 메모리(`~/.claude/projects/<slug>/memory/`)로 합칠지 | L6 | 승격 산출은 후자로, 전자는 학습 패턴 JSON 만(합치지 않음) |
 
+**설계 메모(A27, outcome 창 실측 2026-09-15 — 결정 아님, D3 읽는 법)**: `requiredLayers` 충족 여부를 세는 tally 는 **미션 이력 누적**이다. 한 미션에서 어떤 층이 한 번 `UNMEASURED` 로 기록되면 **뒤이은 pass 가 그것을 지우지 못한다** — 이력에 두 행이 남고 게이트는 "이 미션에 unmeasured 가 있었는가" 를 본다. 그래서 "다시 돌려서 초록으로 만들면 된다" 가 성립하지 않으며, 이것은 결함이 아니라 D3 의 `미되돌림` 조건과 같은 방향의 의도된 성질이다. 같은 이유로 완료 선언 트리거의 **"`verify.completed` ≥1" 은 그 미션 이전 세션 이력을 분모로 읽는다** — 미션이 시작되기 전에 쌓인 verify 행도 조건을 충족시키므로, "이번 미션에서 검증했다" 로 읽으면 안 된다. 트리거를 미션 스코프로 좁히는 것은 W11-Q4 재결정 조건(라이브 `review.completed`·`human.resolved` 가 ≥1 릴리스 쌓인 뒤 (b) 좁힘 재상정)에 걸려 있다.
+
 **E. 구조**
 | # | 결정 | 출처 | 권고 |
 |---|---|---|---|
@@ -1095,3 +1097,24 @@ wire-preintake 새 모듈 0(PRD:70).
 **이 결정이 여는 것(리더 정리, 결정 아님)**: Wave 11 plan 초안 `.artibot/split/plan-wave11-draft.json`
 (8줄기 + 롤링 `outcome-md-emitter`, 부채 1/8) 의 `_ownerDecisions` 에 같은 4건이 기록돼 있다 → `/split plan` 착수 가능.
 **코드 착수는 dispatch 이후** — 이 절은 결정 기록이며 구현 순서를 정하지 않는다.
+
+---
+
+### 부록 0-2 후속(5). 오너 결정 4건 — Wave 11 정리 (2026-09-15 17:4x 확정)
+
+**결정자: 오너 · 결정일: 2026-09-15 17:4x KST · 수단: `AskUserQuestion` · 기록: 리더 지시로 doc-updater 팀원 기록 · 세션 artibot-28/89ada2.**
+위 후속(4) 와 같은 규칙으로 읽는다 — **결정 문구는 오너 원장(선택지 label) 그대로**, 리더 해석·보완 없음.
+대상은 Wave 11 착지 뒤 남은 정리 항목이다(worktree·브랜치·카탈로그·원장·`runtime/autopilot/`).
+번호는 리더 질의지의 O 번호를 그대로 따르며, **O3·O5 는 질의에서 빠져 이 절에 없다**.
+
+| ID | 질문(정리 항목 원문 요지) | 오너 결정 (2026-09-15 17:4x 확정) | 재결정 조건 |
+|---|---|---|---|
+| O1 | `ob17-models-current` 브랜치 강제 삭제(`-D`) — 빈 커밋 `a73eab24` 라 merged 판정이 서지 않는다 | **강제 삭제 승인.** 순서는 `unlock` → `--teardown` → `git worktree remove` → `prune` → `branch -D` | 없음 — 확정 |
+| O2 | `model-catalog.js` 의 sonnet 드리프트(카탈로그 `claude-sonnet-4-6` vs 라이브 전사 `claude-sonnet-5`) 처리 범위 | **id 만 갱신한다. 가격은 미검증 상태 그대로 둔다** — 계수·단가를 같이 손대지 않는다 | 5.1 계수 실측(§7.6 I1)이 끝나면 가격을 따로 상정 |
+| O3 | — | — (질의에 없음) | — |
+| O4 | 구 원장 파일 처분 — `.artibot/runtime/ledger.jsonl.pre-adr011`(204,406B) · `.git/artibot/ledger.jsonl.live-premerge-20260914`(442,576B) · `.git/artibot/ledger.jsonl.bak-20260915-testrows`(1,005행) · plugin-local 28행 | **구 원장 3파일 삭제.** plugin-local 28행은 **이관 후 삭제**(10일·8세션 분산이라 "프로브 잔재" 가설은 기각됨) | 없음 — 확정 |
+| O5 | — | — (질의에 없음) | — |
+| O6 | `runtime/autopilot/` 고아 파일(§5 E4 "격리 후 삭제 승인") 삭제 시점 | **격리가 착지한 뒤에 삭제한다** — 격리 전 삭제 금지 | 격리 줄기가 착지하면 삭제 실행 |
+
+**이 결정이 여는 것(리더 정리, 결정 아님)**: O1 은 Wave 11 정리 잔여(locked worktree + 브랜치)를 닫고, O2 는 `ob17-switch-reasons` 가 남긴 "카탈로그 미등재 모델 미공급" 을 좁히며(가격은 그대로 미검증), O4 는 4.63.0 체크리스트의 미충족 3건 중 원장 2건을 닫는다. O6 은 §3 `session-store-hygiene` 행의 삭제 단계를 게이트한다.
+**코드·삭제 착수는 각 항목의 선행이 충족된 뒤** — 이 절은 결정 기록이며 실행 순서를 정하지 않는다.
