@@ -9,6 +9,16 @@
  * disk had `mode === 'agentTeam'` by construction and the reverse direction
  * (system1 carrying a `runner: 'team'` plan) could not appear at all.
  *
+ * F04(b) ADDED THE SAME SWEEP WITH THE CONSUMER ON. `team.followWorkflowPlan`
+ * makes the plan decide the mode, which means `data.runner` and `data.mode`
+ * become one fact and the mismatch count collapses to 0 by construction. That
+ * is asserted below — not as an improvement, but as the reason the key ships
+ * off (owner decision OD5): the key-off sweep is the only one that still has a
+ * denominator, so it stays in this file and is run first.
+ * Measured 2026-09-15 with the key OFF: 2 of 10 fixture prompts mismatch, both
+ * `runner: 'team'` under `mode: 'subAgent'` — a plan electing a team on a
+ * system1 prompt. Those same 2 are what flips when the key goes on.
+ *
  * WHAT IT ASSERTS vs WHAT IT REPORTS — do not conflate the two:
  *   - ASSERTED (an invariant): every case with a session id produces exactly
  *     one `workflow-planned` line, and that line's `mode` is non-null. This is
@@ -81,16 +91,33 @@ describe('F04(a) — mode is recorded on every routing path (fixture sweep)', ()
     mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
     pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-f04a-sweep-plugin-'));
     mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
-    writeFileSync(
-      path.join(pluginRoot, 'artibot.config.json'),
-      JSON.stringify({
-        team: CONFIG.team,
-        runtime: { effort: { budgetMap: { xhigh: 128000, high: 64000, medium: 32000, low: 16000 } } },
-      }),
-    );
+    // Key ABSENT by default — what ships (owner decision OD5). A test that
+    // wants the F04(b) consumer must say so, and the two states never share a
+    // config file.
+    writeSweepConfig();
     // `threshold` is mutable module state (adaptThreshold moves it).
     resetRouter();
   });
+
+  /**
+   * Write the sweep's `artibot.config.json`.
+   *
+   * @param {boolean} [followWorkflowPlan] - Omit for the shipped default (key
+   *   absent); pass `true`/`false` to pin the F04(b) consumer explicitly.
+   * @returns {void}
+   */
+  function writeSweepConfig(followWorkflowPlan) {
+    const team = followWorkflowPlan === undefined
+      ? CONFIG.team
+      : { ...CONFIG.team, followWorkflowPlan };
+    writeFileSync(
+      path.join(pluginRoot, 'artibot.config.json'),
+      JSON.stringify({
+        team,
+        runtime: { effort: { budgetMap: { xhigh: 128000, high: 64000, medium: 32000, low: 16000 } } },
+      }),
+    );
+  }
 
   afterEach(() => {
     rmSync(projectRoot, { recursive: true, force: true });
@@ -102,10 +129,12 @@ describe('F04(a) — mode is recorded on every routing path (fixture sweep)', ()
    *
    * @param {string} prompt
    * @param {number} index - Distinct session id per case; the store is keyed by it.
+   * @param {string} [tag] - Extra session-id segment so two sweeps in ONE test
+   *   (key off vs key on) cannot pool their lines into the same session.
    * @returns {Promise<{mode: string, lines: object[]}>}
    */
-  async function sweepOne(prompt, index) {
-    const sessionId = `sess-f04a-sweep-${index}`;
+  async function sweepOne(prompt, index, tag = 'base') {
+    const sessionId = `sess-f04a-sweep-${tag}-${index}`;
     const state = {
       input: { prompt, pluginRoot, hookData: { cwd: projectRoot, session_id: sessionId } },
       userPrompt: prompt,
@@ -139,11 +168,19 @@ describe('F04(a) — mode is recorded on every routing path (fixture sweep)', ()
     expect(offContract).toEqual([]);
   });
 
-  it('reports the plan-vs-mode mismatch count over the 10 fixture prompts (measurement, not an invariant)', async () => {
+  /**
+   * Run the whole fixture set and reduce each case to a comparable row.
+   *
+   * @param {string} tag - Session-id segment, distinct per sweep.
+   * @returns {Promise<Array<{runner: string, mode: string, mismatch: boolean,
+   *   agreesWithEnvelope: boolean}>>}
+   */
+  async function sweepRows(tag) {
     const prompts = fixturePrompts();
+    expect(prompts).toHaveLength(10);
     const rows = [];
     for (const [i, prompt] of prompts.entries()) {
-      const { mode, lines } = await sweepOne(prompt, i);
+      const { mode, lines } = await sweepOne(prompt, i, tag);
       const data = lines[0].data;
       rows.push({
         runner: data.runner,
@@ -154,18 +191,84 @@ describe('F04(a) — mode is recorded on every routing path (fixture sweep)', ()
         agreesWithEnvelope: data.mode === mode,
       });
     }
+    return rows;
+  }
 
+  /** @param {object[]} rows @returns {string} the measurement with its denominator. */
+  function mismatchReport(rows) {
     const mismatches = rows.filter((r) => r.mismatch).length;
+    return `plan-vs-mode mismatch: ${mismatches} of ${rows.length} fixture prompts `
+      + `(runner/mode pairs: ${rows.map((r) => `${r.runner}/${r.mode}`).join(', ')})`;
+  }
+
+  it('reports the plan-vs-mode mismatch count over the 10 fixture prompts (measurement, not an invariant)', async () => {
+    const rows = await sweepRows('keyoff');
+
     // The measurement, with its denominator, in the failure message of an
     // assertion that cannot fail for a number — only for a broken sweep.
-    expect(
-      mismatches,
-      `plan-vs-mode mismatch: ${mismatches} of ${rows.length} fixture prompts `
-      + `(runner/mode pairs: ${rows.map((r) => `${r.runner}/${r.mode}`).join(', ')})`,
-    ).toBeLessThanOrEqual(rows.length);
+    expect(rows.filter((r) => r.mismatch).length, mismatchReport(rows))
+      .toBeLessThanOrEqual(rows.length);
 
     // Asserted, unlike the count: the recorded mode is the caller's real one.
     expect(rows.filter((r) => !r.agreesWithEnvelope)).toEqual([]);
     expect(rows.every((r) => r.mode === 'agentTeam' || r.mode === 'subAgent')).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // F04(b) — the same sweep with `team.followWorkflowPlan` ON.
+  //
+  // THE MEASUREMENT TRAP, pinned as a test rather than left in a comment: once
+  // the plan decides the mode, `data.runner === 'team'` and
+  // `data.mode === 'agentTeam'` are the SAME fact, so the mismatch count is 0
+  // by construction and SH-04 has no denominator left to measure. The assertion
+  // below is therefore not evidence that anything improved — it is evidence
+  // that the metric stops working. That is why owner decision OD5 ships the key
+  // off and the key-off sweep above stays in this file.
+  // ---------------------------------------------------------------------------
+  describe('with team.followWorkflowPlan ON (F04(b) consumer)', () => {
+    it('still records exactly one line with a non-null mode for all 10 prompts', async () => {
+      writeSweepConfig(true);
+      const rows = await sweepRows('keyon');
+      expect(rows.filter((r) => !r.agreesWithEnvelope)).toEqual([]);
+      expect(rows.every((r) => r.mode === 'agentTeam' || r.mode === 'subAgent')).toBe(true);
+    });
+
+    it('drives the mismatch count to 0 BY DEFINITION — the SH-04 denominator is gone', async () => {
+      writeSweepConfig(true);
+      const rows = await sweepRows('keyon-mismatch');
+
+      expect(
+        rows.filter((r) => r.mismatch).length,
+        `${mismatchReport(rows)} — with the key ON this can only be 0: the mode IS `
+        + 'the plan. A non-zero count here means the consumer is not wired, not '
+        + 'that the plan and the mode genuinely disagree.',
+      ).toBe(0);
+    });
+
+    it('changes the answer for at least one prompt, or the key is not wired', async () => {
+      // Negative control for the two assertions above. If the fixtures happened
+      // to agree on all 10 rows under both settings, "mismatch === 0" would be
+      // satisfied by a middleware that ignores the key entirely, and this file
+      // would be pinning nothing. Measured 2026-09-15: the two sweeps differ.
+      writeSweepConfig(false);
+      const off = await sweepRows('control-off');
+      writeSweepConfig(true);
+      const on = await sweepRows('control-on');
+
+      const changed = off.filter((row, i) => row.mode !== on[i].mode);
+      expect(
+        changed.length,
+        `key off vs on: ${off.map((r) => r.mode).join(',')} -> ${on.map((r) => r.mode).join(',')}`,
+      ).toBeGreaterThan(0);
+    });
+
+    it('leaves the key-off sweep identical to F04(a): explicit false === absent', async () => {
+      // Behaviour change 0 on the shipped default, asserted rather than
+      // asserted-about. `absent` is what `artibot.config.json` holds today.
+      const absent = await sweepRows('absent');
+      writeSweepConfig(false);
+      const explicitFalse = await sweepRows('explicit-false');
+      expect(explicitFalse).toEqual(absent);
+    });
   });
 });

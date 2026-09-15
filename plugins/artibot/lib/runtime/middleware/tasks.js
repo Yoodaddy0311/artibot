@@ -29,7 +29,7 @@ import { sessionFallbackMissionId } from '../event-writer.js';
 import { createStateStore } from '../../project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../project-state/git-common-dir.js';
 import { extractUserPromptFlagSurface, NO_TEAM_FLAG } from '../../core/hook-utils.js';
-import { planWorkflow, recordWorkflow, resolveWorkflowMode } from './workflow-mode.js';
+import { planWorkflow, readFollowWorkflowPlan, recordWorkflow, resolveWorkflowMode } from './workflow-mode.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -647,35 +647,32 @@ function recordMissionCompile(state, now, deps) {
   }
 }
 
-/**
- * Config key reserved for F04(b) — the release that makes this middleware
- * FOLLOW the workflow plan instead of only recording it.
- *
- * READ NOWHERE. F04(a) records the plan on every routing path and stamps the
- * mode the caller actually ran under (`decision-events.js#recordWorkflowPlanDecision`
- * — `data.mode`), so the plan↔mode mismatch rate can be MEASURED before
- * anything acts on it. The consumer lands with that measurement, not ahead of
- * it; the key exists here only so the name is fixed in one place and the
- * tripwire test in `tests/runtime/middleware/tasks.test.js` ("stays
- * RECORD-ONLY") can set it and prove nothing reads it yet.
- */
-export const FOLLOW_WORKFLOW_PLAN_CONFIG_KEY = 'team.followWorkflowPlan';
+// F04(b)'s config key moved to `workflow-mode.js`, next to the resolver that
+// acts on it. Re-exported — not relocated silently — because this module's
+// export surface is depended on by path and must not change shape.
+export { FOLLOW_WORKFLOW_PLAN_CONFIG_KEY } from './workflow-mode.js';
 
 /**
  * Resolve everything the team gate needs from one config read.
  *
- * The config is read ONCE per prompt: the plan and the mode gate are two
- * consumers, and two reads of one file in one prompt can disagree. `pluginRoot`
- * comes back with it because the effort-meta read downstream needs the same
- * root — resolving it twice is how the two could point at different plugins.
+ * The config is read ONCE per prompt: the plan, the mode gate and the F04(b)
+ * key are three consumers, and two reads of one file in one prompt can
+ * disagree. `pluginRoot` comes back with it because the effort-meta read
+ * downstream needs the same root — resolving it twice is how the two could
+ * point at different plugins.
  *
  * `--no-team` is tested on the FLAG SURFACE, never on the prompt text:
  * `user-prompt-handler` strips the flag and the stripped copy is what reaches
  * `state.input.prompt`, so testing that would read a string the flag has
  * already been removed from (`hook-utils.js#extractUserPromptFlagSurface`).
  *
+ * `followWorkflowPlan` is resolved by `workflow-mode.js#readFollowWorkflowPlan`
+ * rather than read inline, so the key's name, its default and the gate that
+ * uses it stay in one module.
+ *
  * @param {object} state middleware state
- * @returns {{ pluginRoot: string|undefined, cfg: object, optOut: boolean, teamEnabled: boolean }}
+ * @returns {{ pluginRoot: string|undefined, cfg: object, optOut: boolean,
+ *   teamEnabled: boolean, followWorkflowPlan: boolean }}
  */
 function readTeamGateInputs(state) {
   const pluginRoot = state.input?.pluginRoot
@@ -687,6 +684,7 @@ function readTeamGateInputs(state) {
     cfg,
     optOut: NO_TEAM_FLAG.test(extractUserPromptFlagSurface(state.input?.hookData)),
     teamEnabled: isTeamEnabled(cfg.team),
+    followWorkflowPlan: readFollowWorkflowPlan(cfg),
   };
 }
 
@@ -712,12 +710,17 @@ export function createTasksMiddleware(options = {}) {
     const routingSystem = state.context.routing?.system || 'system1';
     const intent = state.context.intent || {};
 
-    const { pluginRoot, cfg, optOut, teamEnabled } = readTeamGateInputs(state);
+    const {
+      pluginRoot, cfg, optOut, teamEnabled, followWorkflowPlan,
+    } = readTeamGateInputs(state);
 
-    // PLAN -> MODE -> RECORD (F04(b) needs the plan before the mode; the
-    // record needs the final mode).
+    // PLAN -> MODE -> RECORD. F04(b) derives the mode FROM the plan when the
+    // key is on, so the plan has to be built first; the record then needs the
+    // mode that was actually run, which is why it comes last.
     const plan = planWorkflow(state, cfg, intent, optOut);
-    const { mode } = resolveWorkflowMode({ routingSystem, teamEnabled, optOut });
+    const { mode } = resolveWorkflowMode({
+      routingSystem, teamEnabled, optOut, followWorkflowPlan, plan,
+    });
     recordWorkflow(state, plan, mode);
 
     const phases = mode === 'agentTeam'
@@ -759,10 +762,11 @@ export function createTasksMiddleware(options = {}) {
     // each teammate with `[artibot:effort][artibot:task-budget]` from the SAME
     // source as the trigger decision, and three live readers
     // (`middleware/subagents.js`, `runtime-prompt.js#buildTeamDirective` and
-    // `#recordObserveOnlyDecisions`) require `undefined` here on system1. F04(a)
-    // is RECORD-ONLY: see {@link FOLLOW_WORKFLOW_PLAN_CONFIG_KEY}.
-    // The OFF gate reaches this through `mode`: OFF resolves to `subAgent`, so
-    // the plan stays unattached and `buildTeamDirective` emits ''.
+    // `#recordObserveOnlyDecisions`) require `undefined` here when no team runs.
+    // Both gates reach this through `mode` alone: an OFF setting and — since
+    // F04(b) — a `runner: 'inline'` plan under `team.followWorkflowPlan` each
+    // resolve to `subAgent`, so the plan stays unattached and
+    // `buildTeamDirective` emits ''.
     if (mode === 'agentTeam') {
       task.meta = { ...(task.meta || {}), workflowPlan: plan };
     }

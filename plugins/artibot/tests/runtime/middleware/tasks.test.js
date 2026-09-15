@@ -833,23 +833,121 @@ describe('middleware/tasks — workflow plan recorded on BOTH routing paths (F04
       .toBe(false);
   });
 
-  it('stays RECORD-ONLY: a system1 prompt whose plan says runner=team still runs subAgent', async () => {
-    // THE TRIPWIRE for F04(b). The config key is present and true, the plan
-    // genuinely resolves to `team`, and the middleware must still not act on
-    // it — no mode change, no `task.meta.workflowPlan` on system1. When the
-    // next release flips this, this case is the one that goes red, on purpose.
-    writeConfig({ ...TEAM_TRIGGER_CONFIG, team: { ...TEAM_TRIGGER_CONFIG.team, followWorkflowPlan: true } });
+  // -------------------------------------------------------------------------
+  // F04(b) — `team.followWorkflowPlan`, the consumer. This block replaces the
+  // F04(a) tripwire ("stays RECORD-ONLY"), which asserted that the key was set
+  // and nothing read it. It is now read, so the same fixture is asserted from
+  // BOTH sides of the key: ON follows the plan, OFF/absent is the F04(a)
+  // behaviour byte for byte. Deleting the OFF case instead of keeping it would
+  // drop the pin on what actually ships — owner decision OD5 ships the key off.
+  // -------------------------------------------------------------------------
+  describe('F04(b): team.followWorkflowPlan decides whether the plan is followed', () => {
+    /** Config whose trigger fires on size alone — 2 recommendations, any score. */
+    function configWithKey(followWorkflowPlan, extraTeam = {}) {
+      const team = { ...TEAM_TRIGGER_CONFIG.team, ...extraTeam };
+      if (followWorkflowPlan !== undefined) team.followWorkflowPlan = followWorkflowPlan;
+      return { ...TEAM_TRIGGER_CONFIG, team };
+    }
 
-    const { task, planned } = await runPlan('system1', { intent: { recommendations: TWO_RECOMMENDATIONS } });
+    /**
+     * Config whose trigger CANNOT fire on the system2 fixture: AND logic needs
+     * both signals, and the size signal needs 5 sub-objectives the fixture does
+     * not have. Complexity alone (score 0.9) is one signal, so the plan comes
+     * back `inline` while routing still says system2 — the only way to observe
+     * the downward direction through the real middleware.
+     */
+    function inlinePlanConfig(followWorkflowPlan) {
+      return {
+        ...TEAM_TRIGGER_CONFIG,
+        team: {
+          ...TEAM_TRIGGER_CONFIG.team,
+          autoApplyTriggers: {
+            logic: 'AND', minSubtasks: 5, minFiles: 5, minComplexity: 'high',
+          },
+          ...(followWorkflowPlan === undefined ? {} : { followWorkflowPlan }),
+        },
+      };
+    }
 
-    expect(planned).toHaveLength(1);
-    // Negative control: without this the claim below is vacuous.
-    expect(planned[0].data.runner).toBe('team');
-    expect(planned[0].data.mode).toBe('subAgent');
+    it('FOLLOWS the plan when the key is true: system1 + runner=team runs a team', async () => {
+      // The inversion of the F04(a) tripwire. `routing.system` is system1 —
+      // under the old rule that alone decided `subAgent` — and the plan says
+      // `team`, so with the key on the plan wins and every downstream surface
+      // (phases, attachment, the recorded mode) moves with it.
+      writeConfig(configWithKey(true));
 
-    expect(task.mode).toBe('subAgent');
-    expect(task.phases).toEqual(['execute', 'verify']);
-    expect(task.meta?.workflowPlan).toBeUndefined();
+      const { task, planned } = await runPlan('system1', { intent: { recommendations: TWO_RECOMMENDATIONS } });
+
+      expect(planned).toHaveLength(1);
+      // Negative control, carried over: without it the claim is vacuous — a
+      // fixture that stopped electing a team would pass a `subAgent` assertion
+      // and would pass this one only by accident.
+      expect(planned[0].data.runner).toBe('team');
+      expect(planned[0].data.mode).toBe('agentTeam');
+
+      expect(task.mode).toBe('agentTeam');
+      expect(task.phases).toEqual(['plan', 'execute', 'verify']);
+      expect(task.meta?.workflowPlan?.runner).toBe('team');
+    });
+
+    it.each([
+      ['absent', undefined],
+      ['explicitly false', false],
+    ])('stays RECORD-ONLY when the key is %s: the same prompt runs subAgent', async (_label, key) => {
+      // What actually ships (OD5). Identical fixture to the case above, so the
+      // pair isolates ONE variable: the config key.
+      writeConfig(configWithKey(key));
+
+      const { task, planned } = await runPlan('system1', { intent: { recommendations: TWO_RECOMMENDATIONS } });
+
+      expect(planned).toHaveLength(1);
+      expect(planned[0].data.runner).toBe('team');
+      expect(planned[0].data.mode).toBe('subAgent');
+
+      expect(task.mode).toBe('subAgent');
+      expect(task.phases).toEqual(['execute', 'verify']);
+      expect(task.meta?.workflowPlan).toBeUndefined();
+    });
+
+    it('OFF outranks the key: team.enabled false + key true + system2 still runs subAgent', async () => {
+      // OD2 above OD5. Turning the consumer on must not resurrect a team the
+      // user switched off, and the record must still name the OFF reason
+      // rather than reporting a threshold that was never evaluated.
+      writeConfig(configWithKey(true, { enabled: false }));
+
+      const { task, planned } = await runPlan('system2', { intent: { recommendations: TWO_RECOMMENDATIONS } });
+
+      expect(task.mode).toBe('subAgent');
+      expect(task.phases).toEqual(['execute', 'verify']);
+      expect(task.meta?.workflowPlan).toBeUndefined();
+      expect(planned[0].data.mode).toBe('subAgent');
+      expect(planned[0].data.runner).toBe('inline');
+      expect(planned[0].data.trigger.reasons).toContain('team-disabled');
+    });
+
+    it('follows the plan DOWNWARD too: key true + system2 + runner=inline runs subAgent', async () => {
+      writeConfig(inlinePlanConfig(true));
+
+      const { task, planned } = await runPlan('system2');
+
+      expect(planned[0].data.runner).toBe('inline');
+      expect(task.mode).toBe('subAgent');
+      expect(task.phases).toEqual(['execute', 'verify']);
+      expect(task.meta?.workflowPlan).toBeUndefined();
+      expect(planned[0].data.mode).toBe('subAgent');
+    });
+
+    it('CONTROL for the downward case: the same prompt with the key off runs agentTeam', async () => {
+      // Without this row the case above proves nothing — a fixture that had
+      // stopped routing system2 would satisfy it for the wrong reason.
+      writeConfig(inlinePlanConfig(false));
+
+      const { task, planned } = await runPlan('system2');
+
+      expect(planned[0].data.runner).toBe('inline');
+      expect(task.mode).toBe('agentTeam');
+      expect(planned[0].data.mode).toBe('agentTeam');
+    });
   });
 
   // -------------------------------------------------------------------------
