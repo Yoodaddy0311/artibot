@@ -32,6 +32,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractUserPromptFlagSurface, extractUserPromptText, NO_TEAM_FLAG } from '../../lib/core/hook-utils.js';
+import { isTeamEnabled } from '../../lib/cognitive/workflow-plan.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'auto-command-suggest';
@@ -110,7 +111,10 @@ function loadConfig(pluginRoot) {
     const team = cfg?.team ?? {};
     const suggest = cfg?.commandSuggest ?? {};
     if (suggest.enabled === false) return { enabled: false };
-    if (team.autoApply === false || team.enabled === false) return { enabled: false };
+    // One owner for the team enable meaning: this was the sixth copy, and the
+    // only one written in the NEGATIVE form — which is how it stayed invisible
+    // to a grep for the positive expression the other five shared.
+    if (!isTeamEnabled(team)) return { enabled: false };
     return { enabled: true };
   } catch {
     // Fail-closed on malformed config: if a user wrote a config file at all,

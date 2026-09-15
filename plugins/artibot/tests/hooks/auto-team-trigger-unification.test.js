@@ -287,15 +287,28 @@ describe('T2 — no canonical decision is loud, not silent', () => {
    */
   async function importHookWith(evaluateTriggerImpl) {
     vi.resetModules();
-    vi.doMock('../../lib/cognitive/workflow-plan.js', () => ({
-      evaluateTrigger: evaluateTriggerImpl,
-      // REAL implementation, not a stub. The hook now takes its enable meaning
-      // from the planner too (one owner, 2026-09-15). A mock that omitted this
-      // would make `loadTeamConfig` throw, and the throw lands on the
-      // malformed-config branch — so all three cases below would go green on
-      // the WRONG stderr line and prove nothing about the decision paths.
-      isTeamEnabled: (team) => team?.enabled !== false && team?.autoApply !== false,
-    }));
+    vi.doMock('../../lib/cognitive/workflow-plan.js', async () => {
+      // The hook takes its enable meaning from the planner too since
+      // 2026-09-15, so a PARTIAL mock of this module has to carry both names.
+      //
+      // What happens without it, stated correctly (an earlier revision of this
+      // comment said "they would go green on the wrong stderr line" — that was
+      // wrong, and measured wrong): `loadTeamConfig` calls `undefined(...)`,
+      // the TypeError lands on its malformed-config branch, and the two cases
+      // below FAIL on their `/returned no decision/` and
+      // `/canonical evaluator threw/` assertions. Loud, not silent. The mock
+      // is still required — it just buys a meaningful failure message rather
+      // than rescuing a false pass.
+      //
+      // `importActual`, not a re-typed expression: a hand-copied predicate in
+      // a test is one more copy of the thing this branch removed, and it would
+      // go on agreeing with the source only by luck.
+      const actual = await vi.importActual('../../lib/cognitive/workflow-plan.js');
+      return {
+        evaluateTrigger: evaluateTriggerImpl,
+        isTeamEnabled: actual.isTeamEnabled,
+      };
+    });
     return import('../../scripts/hooks/auto-team-trigger.js');
   }
 

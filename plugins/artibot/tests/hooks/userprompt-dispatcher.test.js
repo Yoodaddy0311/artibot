@@ -563,6 +563,22 @@ describe('_userprompt-dispatcher (integration)', () => {
     );
     expect(off).not.toBeNull();
     const offCtx = off.hookSpecificOutput?.additionalContext || '';
+    // POSITIVE REACH on the OFF output itself. The three absences below are
+    // measured in a DIFFERENT plugin root from the control above, so a failure
+    // that silenced the runtime-prompt hook in that root — a broken config
+    // copy, a junction that did not resolve, an exception swallowed by the
+    // dispatcher — would empty `additionalContext` and let all three absences
+    // pass while proving nothing. The routing directive is the right witness:
+    // it is emitted regardless of the team setting (see the note on
+    // `workflow-mode.js` — complexity still reaches the model, only the spawn
+    // does not), so its presence says the chain ran and the OFF gate, not the
+    // environment, is what removed the rest.
+    //
+    // The `--no-team` case below needs no equivalent line: it runs in the ON
+    // root and already asserts `[artibot:team opt-out]` is PRESENT in its own
+    // OFF output, which is the same non-vacuity guarantee.
+    expect(offCtx, 'the OFF run must still produce hook output, or the absences below prove nothing')
+      .toContain('[artibot:route system2]');
     // A1 already honours the opt-out — pinned so a regression there is visible
     // separately from the three surfaces that do not.
     expect(offCtx).not.toContain('[auto-team-suggested]');
