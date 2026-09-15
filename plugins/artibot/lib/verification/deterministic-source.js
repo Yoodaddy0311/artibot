@@ -80,6 +80,7 @@ export const REASONS = Object.freeze({
   badTimestamp: 'the vitest result file carries no usable timestamp — freshness is not decidable',
   noMarker: 'no last-main-agent-edit marker — there is nothing for a run to be fresher than',
   stale: 'the vitest result predates the last main-agent edit — that run did not cover this tree',
+  emptyRun: '0 tests ran — an empty run does not measure the tree, whatever its exit status',
 });
 
 /** @param {unknown} v @returns {boolean} */
@@ -136,6 +137,16 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
   const parsed = parseResult(resultJsonText);
   if (!parsed.ok) return { reason: parsed.reason };
   const result = parsed.value;
+
+  // FAIL-OPEN GUARD. `failed === 0` is true of a suite that passed AND of one
+  // that never collected a test — a filter that matched nothing, or a run that
+  // died during collection, writes `totalTests: 0, failed: 0` and would
+  // otherwise be recorded as a verdict about a tree nobody looked at. Found by
+  // cross-review with a real spawn (2026-09-15: a zero-test file landed as
+  // deterministic `pass`, `v1-a69aa375bbc0-…`). The COUNT is the only field
+  // that separates the two cases, so the count is what this checks. A run whose
+  // tests were all SKIPPED still collected them and is left alone.
+  if (result.totalTests === 0) return { reason: REASONS.emptyRun };
 
   const timestamp = result.timestamp;
   const ranAtMs = typeof timestamp === 'string' ? Date.parse(timestamp) : Number.NaN;

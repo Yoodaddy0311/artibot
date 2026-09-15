@@ -414,6 +414,32 @@ describe('dev-verify-gate — deterministic numerator from the vitest reporter',
     expect(denominatorShape(lines)).toEqual(BASELINE_DENOMINATOR_DATA);
   }, 60_000);
 
+  /**
+   * ZERO TESTS IS NOT A GREEN TREE (cross-review C, real spawn).
+   *
+   * C spawned the hook against a FRESH reporter file reading
+   * `totalTests: 0, failed: 0` and got deterministic `pass`
+   * (`v1-a69aa375bbc0-…`). `failed === 0` is equally true of a suite that
+   * passed and of one that never collected a test, so the count is the only
+   * field that separates them. This case pins the fix at the ledger, where the
+   * false `pass` actually showed up.
+   */
+  it('records the pre-numerator denominator when the fresh result ran zero tests', () => {
+    const box = buildSandbox({
+      testResult: reporterPayload({ totalTests: 0, passed: 0, failed: 0, skipped: 0 }),
+      markerAgeMs: 10_000,
+    });
+    const run = runHook(box);
+    expect(run.stdout, `hook stderr: ${run.stderr}`).toBe(EXPECTED_STDOUT);
+
+    const lines = readLedgerLines(box.ledger);
+    expect(lines.length, `sandbox ledger: ${box.ledger} — stderr: ${run.stderr}`).toBe(4);
+    expect(
+      denominatorShape(lines),
+      'an empty run must leave the four lines exactly as the 2026-09-15 baseline',
+    ).toEqual(BASELINE_DENOMINATOR_DATA);
+  }, 60_000);
+
   it('gives the stale and absent fallbacks different verification ids, so a reader can tell them apart', () => {
     const stale = buildSandbox({ testResult: reporterPayload(), markerAgeMs: -600_000 });
     const staleRun = runHook(stale);

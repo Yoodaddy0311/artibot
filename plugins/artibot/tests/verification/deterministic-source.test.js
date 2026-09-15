@@ -149,6 +149,7 @@ describe('deterministic-source — every unmeasured branch', () => {
     ['timestamp in the future', { resultJsonText: resultJson({ timestamp: '2026-09-16T00:00:00.000Z' }), markerMtimeMs: MARKER_MS }, REASONS.badTimestamp],
     ['no main-agent-edit marker', { resultJsonText: resultJson(), markerMtimeMs: null }, REASONS.noMarker],
     ['result older than the marker', { resultJsonText: resultJson({ timestamp: '2026-09-14T23:59:59.999Z' }), markerMtimeMs: MARKER_MS }, REASONS.stale],
+    ['a run of zero tests', { resultJsonText: resultJson({ totalTests: 0, passed: 0, failed: 0, skipped: 0 }), markerMtimeMs: MARKER_MS }, REASONS.emptyRun],
   ];
 
   for (const [name, input, reason] of cases) {
@@ -167,10 +168,44 @@ describe('deterministic-source — every unmeasured branch', () => {
     });
   }
 
+  /**
+   * ZERO TESTS IS NOT A GREEN TREE — fail-open found by cross-review C.
+   *
+   * `failed === 0` is true of a suite that passed AND of a suite that never
+   * ran. Measured by C with a real spawn: a reporter file reading
+   * `totalTests: 0, failed: 0` was recorded as deterministic `pass`
+   * (`v1-a69aa375bbc0-…`). A vitest run filtered down to nothing, or one that
+   * died before collecting, would have written exactly that — so the gate
+   * would report a verdict about a tree nobody looked at.
+   *
+   * The guard is a count check, not a status check, because the count is the
+   * only field that can tell the two apart.
+   */
+  it('refuses to call a run of zero tests a pass, however fresh the file is', () => {
+    const layer = deterministicLayerFrom({
+      resultJsonText: resultJson({ totalTests: 0, passed: 0, failed: 0, skipped: 0 }),
+      markerMtimeMs: MARKER_MS,
+      nowMs: NOW_MS,
+    });
+    expect(layer.exitCode, 'failed===0 is also true of a suite that never ran').toBeUndefined();
+    expect(layer.reason).toBe(REASONS.emptyRun);
+    expect(layer.evidence ?? []).toEqual([]);
+    expect(verify({ layers: { deterministic: layer } }).status).toBe('UNMEASURED');
+  });
+
+  it('still counts a run whose tests were all skipped — something was collected', () => {
+    const layer = deterministicLayerFrom({
+      resultJsonText: resultJson({ totalTests: 12, passed: 0, failed: 0, skipped: 12 }),
+      markerMtimeMs: MARKER_MS,
+      nowMs: NOW_MS,
+    });
+    expect(layer.exitCode, 'the guard is about an EMPTY run, not an idle one').toBe(0);
+  });
+
   it('gives every branch a distinct reason, so the id hash can tell them apart', () => {
     const reasons = Object.values(REASONS);
     expect(new Set(reasons).size).toBe(reasons.length);
-    expect(reasons).toHaveLength(5);
+    expect(reasons).toHaveLength(6);
   });
 
   it('keeps the clock out of the decision when nowMs is unusable (no TTL, owner decision F1)', () => {
@@ -211,6 +246,7 @@ describe('deterministic-source — reason to verification_id hash', () => {
       badTimestamp: hashFor(REASONS.badTimestamp),
       noMarker: hashFor(REASONS.noMarker),
       stale: hashFor(REASONS.stale),
+      emptyRun: hashFor(REASONS.emptyRun),
       // The shape this gate wrote before a source existed. Live ledger lines
       // carrying it are pre-numerator fires, not a new unmeasured branch.
       legacyNoLayerSupplied: hashFor(undefined),
@@ -219,6 +255,7 @@ describe('deterministic-source — reason to verification_id hash', () => {
         "absent": "cd83b9f6c3a6",
         "badTimestamp": "8193e683f558",
         "corrupt": "ecfca95e038e",
+        "emptyRun": "a6a1361a1360",
         "legacyNoLayerSupplied": "83866286c2d8",
         "noMarker": "aff638bdfb2b",
         "stale": "f51a647bdd7d",

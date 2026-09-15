@@ -298,9 +298,10 @@ function resolveHookEventName(hookData) {
  * `pass`/`fail` on the DETERMINISTIC line only when it is at least as new as
  * `runtime/last-main-agent-edit.timestamp` (owner decision F1 — no TTL, because
  * a time window lets a stale green outlive the edit that invalidated it).
- * Anything else — absent, corrupt, undated, no marker, stale — stays
- * `unmeasured`, with the branch recorded in the verdict `reason` and therefore
- * in the `verification_id` hash. `lib/verification/deterministic-source.js`
+ * Anything else — absent, corrupt, undated, no marker, stale, or a run that
+ * collected ZERO tests (`failed === 0` is true of a suite that never ran, so
+ * the count is checked, not the status) — stays `unmeasured`, with the branch
+ * recorded in the verdict `reason` and therefore in the `verification_id` hash. `lib/verification/deterministic-source.js`
  * holds that decision table and the pinned hashes are in its test.
  *
  * Behavioral and operational remain `unmeasured` unconditionally: there is no
