@@ -8,7 +8,7 @@
  * returned/mutated object (persist is best-effort and tolerant of unknown ids).
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   classifyFailure,
   enterPhase,
@@ -22,6 +22,7 @@ import {
 } from '../../lib/autopilot/engine-state.js';
 import { openPhaseAttempt } from '../../lib/autopilot/phase-attempt.js';
 import { shouldPause } from '../../lib/autopilot/safety.js';
+import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
 
 function makeState(overrides = {}) {
   return {
@@ -178,6 +179,52 @@ describe('recordPhaseResult', () => {
         futurePlans: ['cache y'],
       }),
     ).not.toThrow();
+  });
+});
+
+describe('recordPhaseResult — VERIFY is the SH-06 recording point', () => {
+  // These cases persist and emit telemetry, so their artifacts are removed.
+  const sessions = [];
+  const verifyState = (overrides = {}) => {
+    const state = makeState({ phase: 'VERIFY', pendingPhase: null, ...overrides });
+    sessions.push(state.sessionId);
+    return state;
+  };
+
+  afterEach(() => {
+    while (sessions.length) {
+      try {
+        deleteSessionArtifacts(sessions.pop());
+      } catch { /* best-effort */ }
+    }
+  });
+
+  it('journals a failed VERIFY without moving the fixed IMPROVE transition', () => {
+    const state = verifyState({ verifyResult: { ok: false }, crossCheck: { verdict: 'fail' } });
+    const before = { phase: state.phase, pendingPhase: state.pendingPhase, next: nextTarget(state) };
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'failed' });
+
+    expect({ phase: state.phase, pendingPhase: state.pendingPhase, next: nextTarget(state) })
+      .toEqual(before);
+    expect(nextTarget(state)).toBe('IMPROVE');
+    expect(state.recoveryJournal).toHaveLength(1);
+    expect(state.recoveryJournal[0]).toMatchObject({
+      phase: 'VERIFY', status: 'failed', fixedNext: 'IMPROVE', divergent: true,
+    });
+  });
+
+  it('writes no journal row for a clean VERIFY', () => {
+    const state = verifyState({ verifyResult: { status: 'PASS' }, crossCheck: { verdict: 'pass' } });
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' });
+    expect(state.recoveryJournal).toBeUndefined();
+    expect(state.phases.some((p) => p.name === 'VERIFY' && p.status === 'done')).toBe(true);
+  });
+
+  it('leaves the journal untouched for every other phase', () => {
+    const state = verifyState({ phase: 'EXECUTE', verifyResult: { ok: false } });
+    recordPhaseResult(state, { phase: 'EXECUTE', status: 'failed' });
+    expect(state.recoveryJournal).toBeUndefined();
   });
 });
 
