@@ -1,6 +1,30 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = f4555c1c = v4.62.0 + Wave 10 13/13 + Wave 11 준비 docs · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 0/6)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 0/6)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## Wave 11 착지 9/9 (2026-09-15 10:3x~17:0x KST, 세션 artibot-28/89ada2, master = 9165196f)
+
+**한 줄**: Wave 11 8줄기 + 롤링 1 을 배치 9회로 전부 착지시켰다 — 재빌드 0, CI RED 0, 창 재배정 1. base `2b10fd31` → 배치 9 `9165196f` = **84 files +11,728/−439**(리더 `git diff --shortstat` 실측; 배치 8 `ea44a1ab` 시점 중간값은 75 files +10,252/−312). 마지막 배치 9 `verify-completed-producer` 는 16:59 KST 착지(9 files +1,476/−127, 재빌드 0, CI green). **줄기 9개 합(88 files +11,730/−441)이 배치 합보다 files 4 · ins 2 · del 2 많은 원인은 확인됐다** — sh29 와 outcome 이 같은 4파일(`hooks/dispatch-table.json` · `tests/dispatcher/dispatch-table.test.js` · `README.md` · `plugins/artibot/README.md`)을 연달아 고쳐 합산에서 한 번으로 접혔고, 두 배치 커밋 `git diff --name-only` 교집합으로 리더가 대조했다.
+
+| 배치 | 줄기 | 줄기 tip | 배치 SHA | 시각(Z) | diff |
+|---|---|---|---|---|---|
+| 1 | ob26-config-seven | `464b7f7d` | `bb868e7f` | 02:40 | 4 files +23/−11 |
+| 2 | hg09-update-set-quadratic | `cb668070` | `a7ebffcc` | 02:51 | 5 files +334/−37 |
+| 3 | wire-preintake-data-only | `5b3fa076` | `16ea4c57` | 03:01 | 6 files +342/−20 |
+| 4 | sh29-carrier-writer | `1943cae8` | `059e81e1` | 03:11 | 13 files +1,190/−59 |
+| 5 | ob17-switch-reasons | `55b0defa` | `6a2a0eff` | 03:19 | 10 files +1,584/−49 |
+| 6 | sh06-engine-record-wiring | `f2c09d70` | `a40534e1` | 03:30 | 5 files +850/−1 |
+| 7 | outcome-md-emitter (롤링) | `6d612dbf` | `686df95b` | 05:11 | 16 files +4,514/−24 |
+| 8 | f04b-followplan-transition | `a1dc8497` | `ea44a1ab` | 06:32 | 20 files +1,417/−113 |
+| 9 | verify-completed-producer | `f7d0e7f9` | `9165196f` | 07:59 (16:59 KST) | 9 files +1,476/−127 |
+
+**창 운영 실측**: 창 8개 신규 + 재사용 2 + **재배정 1**(verify 원 창이 정지 → sh06 창을 재사용). 창 정지 **2회** — ① Fable 한도 14:12 ② verify 창이 도구 호출 하나에서 10:44~15:4x 정지.
+
+**전체 게이트(gates 팀원 15:40~15:51, master `ea44a1ab`)**: 비테스트 8/8 green · vitest **18,425 passed / 10 failed / 12 skipped**(분모 18,447; 실패 10 = `install-*` 부하 경합 9[격리 실행에서 통과] + `split-tools` F07 플래키 1[진짜]). F07 원인 = `lib/git/split-brief.js#atomicWriteBytes` → `lib/core/file.js:144` `renameSync` EPERM. **이 리포의 전체 게이트는 `npm run ci`** — prebuild·build·check-unused-ratchet 은 없다.
+
+**gotcha 신규**: (116) **`git worktree remove` 뒤 junction 껍데기** — gotcha 113 이 이번 웨이브에서 재확인됐다. 제거 정본은 여전히 `worktree-setup.mjs --teardown`, 재귀 삭제 금지. (117) **창이 한 도구 호출에 수 시간 busy 로 앉아 있을 수 있다** — 그동안 transcript 에 기록이 남지 않고 크로스세션 메시지는 큐에만 쌓인다. 판정은 **transcript mtime + assistant 턴 수**로 하고 `ListAgents` 의 busy/idle 은 근거로 쓰지 마라. 복구 = 오너 Esc 또는 다른 창으로 줄기 재배정(이번 verify 창이 그 사례). (118) **브리프 allowlist 를 글롭으로 쓰면 plan.json 과 어긋난다** — 브리프가 `tests/hooks/auto-team-trigger*.test.js` 같은 글롭인데 `plan.json#affectedPaths` 는 파일 단위라 창이 plan 밖 파일을 커밋했다(f04b 13:3x). 규칙 = 브리프도 plan.json 과 **정확히 같은 파일 목록**으로 쓰고, 창은 **커밋 전마다 `git diff --name-only` ⊆ affectedPaths** 를 대조한다. (119) **리더 지시 교차 금지** — 한 라운드에 한 지시만 내고, 이전 지시를 물릴 때는 **철회를 명시**하라. (120) **이 리포의 전체 게이트는 `npm run ci` 다** — prebuild·build 단계가 없으므로 "prebuild 통과" 를 근거로 쓰면 안 된다. (121) **Windows `renameSync` EPERM 은 확률적이다** — 목적지 파일이 이미 있고 누가 핸들을 쥐고 있을 때 발생하며 부하 시 0.83%. 수리 = `renameWithRetry` 공용화(현재 사본 4곳: `session-store.js`·`lock.js`·`file-lock.js`·`split-brief.js`).
+
+**다음 할 일**: ① F07 수리 + config 등재 커밋 착지 ② `sync:local` → 호스트 재시작 → 판독기 4종(`verify-rate`·`session-coverage`·`nl-activation-report`·`outcome-census`) 라이브 실행 + 기준 7 프로브 ③ 4.63.0 판단 ④ 정리 잔여(locked worktree 6 + verify 창, junction 껍데기 2, `ob17-models-current` 강제 삭제 `-D` 는 오너 승인 뒤) ⑤ 리더 todo 33건을 Wave 12 로 분류.
 
 ## Wave 11 준비 + 리더 정리 (2026-09-15 09:0x~10:0x KST, 세션 artibot-28/89ada2, master = f4555c1c, 코드 변경 0)
 

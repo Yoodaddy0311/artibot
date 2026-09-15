@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 11 배치 착지 (2026-09-15, 세션 artibot-28/89ada2, split-wave11-20260915)
+
+8줄기 + 롤링 1 = 9 착지(배치 9회, 재빌드 0, CI RED 0, 창 재배정 1). base `2b10fd31` → 배치 9 `9165196f` = **84 files +11,728/−439**(리더 `git diff --shortstat` 실측; 중간값으로 배치 8 `ea44a1ab` 시점은 75 files +10,252/−312). 마지막 배치 9 `verify-completed-producer` 는 16:59 KST 착지 — 재빌드 0, CI green.
+
+**정합성 주(줄기 합 ≠ 배치 합, 원인 확인됨)**: 줄기 9개의 diff 를 더하면 88 files +11,730/−441 로 배치 합계(84 files +11,728/−439)보다 files 4 · ins 2 · del 2 가 많다. 원인은 **sh29 와 outcome 이 같은 4파일을 연달아 고쳐 합산에서 한 번으로 접힌 것**이다 — 두 배치 커밋의 `git diff --name-only` 교집합이 `hooks/dispatch-table.json` · `tests/dispatcher/dispatch-table.test.js` · `README.md` · `plugins/artibot/README.md` 4파일로 **확인됐다**(리더). hookScripts 카운트 줄이 73 → 74 → 75 로 두 번 바뀐 것이 ins/del 각 2 의 차이다.
+
+- **ob26-config-seven** (`464b7f7d`, 배치 1 `bb868e7f` @02:40Z, 4 files +23/−11): `split.recommendMinSubtasks` 를 `null` → **7**(§5 D12 권고 이행). V5 OB-26 done.
+- **hg09-update-set-quadratic** (`cb668070`, 배치 2 `a7ebffcc` @02:51Z, 5 files +334/−37): HG-09 의 `[^;]{0,192}` 경계로 **2차식 제거**.
+- **wire-preintake-data-only** (`5b3fa076`, 배치 3 `16ea4c57` @03:01Z, 6 files +342/−20): `observePreIntake` **data-only** — `makeInitialState` 에서 1회.
+- **sh29-carrier-writer** (`1943cae8`, 배치 4 `059e81e1` @03:11Z, 13 files +1,190/−59): `tool.used` writer 를 PostToolUse Skill 로(dispatch-table 12, hookScripts 74). **skill 키만** — 오너 결정 W11-Q3(a), command·hook 은 Wave 12.
+- **ob17-switch-reasons** (`55b0defa`, 배치 5 `6a2a0eff` @03:19Z, 10 files +1,584/−49): H1 `residency-unknown` 사유 코드 + K1 incumbent 를 **전사 tail** 로(`session-start.js` 무접촉). 잔여 — 카탈로그 미등재 `sonnet` 은 미공급.
+- **sh06-engine-record-wiring** (`f2c09d70`, 배치 6 `a40534e1` @03:30Z, 5 files +850/−1): `recovery-record.js` 가 VERIFY 결과를 **관측 저널**로 기록(never-throw 봉인).
+- **outcome-md-emitter** (`6d612dbf`, 배치 7 `686df95b` @05:11Z, 16 files +4,514/−24, 롤링): SessionEnd `mission-complete-record` + `outcome-census` CLI + gates `requiredLayers`(C4 (i)). dispatch-table SessionEnd 7, hookScripts 75.
+- **f04b-followplan-transition** (`a1dc8497`, 배치 8 `ea44a1ab` @06:32Z, 20 files +1,417/−113): team OFF 를 `isTeamEnabled` **단일 소유**로 + `NO_TEAM_FLAG` 1 export + `followWorkflowPlan` 소비자(**코드 기본 false**) + `workflow-mode.js` 신설(`tasks.js` 789줄).
+- **verify-completed-producer** (`f7d0e7f9`, 배치 9 `9165196f` @16:59 KST, 9 files +1,476/−127): `deterministic-source.js`(F1/R1/A1) + `verify-rate` **4버킷 `measured_rate`** + `emptyRun` 봉인.
+
+**오너 결정 4건(2026-09-15 10:0x 확정, 정본 = `ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(4))**: W11-Q1 = **K1 리더 세션 모델**(기전은 전사 tail) · W11-Q2 = **H1 `residency-unknown` 별 코드**(H3 스키마 nullable 은 Wave 12) · W11-Q3 = **(a) skill 키만** · W11-Q4 = **(a) SessionEnd 유도 판정**.
+
+**전체 게이트(gates 팀원 15:40~15:51, master `ea44a1ab`)**: 비테스트 8/8 green · vitest **18,425 passed / 10 failed / 12 skipped**(분모 18,447 — 실패 10 중 `install-*` 부하 경합 9 는 격리 실행에서 통과하고, `split-tools` F07 플래키 1 이 진짜). F07 원인 = `lib/git/split-brief.js#atomicWriteBytes` → `lib/core/file.js:144` `renameSync` EPERM, 수정은 **별도 커밋** 예정. 이 리포의 전체 게이트는 `npm run ci` 이며 prebuild·build·check-unused-ratchet 은 없다.
+
 ### Wave 10 배치 착지 (split-wave10-20260914, base f52b0a98 → 롤링, 2026-09-14 05:5x~09:xxZ, 리더 artibot-5d)
 
 원래 8줄기 + 롤링 5 + 코드 0 판정 1 = 13 착지(배치 11회, 재빌드 0, CI RED 1회 → 수정 재착지).
