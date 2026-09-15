@@ -10,6 +10,14 @@
  * read that module's header before reading a number out of this one, because
  * the list of what the rate CANNOT see is longer than the rate.
  *
+ * SINCE THE PRODUCER LANDED THERE ARE TWO KINDS OF DENOMINATOR, not one: the
+ * Stop hook writes a MEASURED run when a fresh vitest result was on disk and an
+ * unmeasured one when there was nothing honest to read. `rate.firings.hook`
+ * counts both — the hook fired either way — so `rate.firings.rate` still means
+ * "answered by a `/verify` self-report" and the new `rate.firings.measured_rate`
+ * means "measured by the hook itself". READ THEM AS TWO QUESTIONS. Every field
+ * of `rate` comes straight from `computeVerifyRate`; this file adds none.
+ *
  * -- IT WRITES NOTHING, AND THAT IS THE POINT ------------------------------
  *  Every other entry point under `scripts/ledger/` appends. This one imports
  *  no writer, opens no file for writing and creates no directory: a measuring

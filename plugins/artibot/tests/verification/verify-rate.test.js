@@ -111,6 +111,40 @@ function selfReportRun({ session, vid, ts, result = 'pass' }) {
 }
 
 /**
+ * The four lines the Stop hook writes once it CAN measure the deterministic
+ * layer: `pass|fail` on that layer and on the overall fold, behavioral and
+ * operational still `unmeasured` because no runner produces them.
+ *
+ * The evidence shape is the producer's, pinned here so the reader is tested
+ * against the line it will actually meet: a `kind:'file'` entry pointing at the
+ * vitest reporter's output, with the counts in `note` because the ledger
+ * vocabulary has no field for them.
+ *
+ * NOTE THE TRAP THIS SETS UP: the deterministic line of a SELF-REPORT is also
+ * `pass`, so "some line of this id is pass or fail" is true of both kinds. Only
+ * the note tells them apart, which is why `self` must outrank `measured`.
+ *
+ * @param {{session: string, vid: string, ts: string, result?: string}} p
+ * @returns {object[]}
+ */
+function measuredRun({ session, vid, ts, result = 'pass' }) {
+  const deterministic = line({ session, vid, layer: 'deterministic', result, ts });
+  deterministic.data.evidence = [{
+    kind: 'file',
+    file: 'plugins/artibot/runtime/last-test-result.json',
+    line: 1,
+    measured_at: ts,
+    note: 'vitest total=17377 passed=17365 failed=0 skipped=12',
+  }];
+  return [
+    deterministic,
+    line({ session, vid, layer: 'behavioral', result: 'unmeasured', ts }),
+    line({ session, vid, layer: 'operational', result: 'unmeasured', ts }),
+    line({ session, vid, layer: null, result, ts }),
+  ];
+}
+
+/**
  * The fixture the whole contract is stated against: two sessions the hook
  * fired in, one of which later self-reported.
  *
@@ -163,9 +197,18 @@ describe('verify-rate: the brief fixture', () => {
     const r = computeVerifyRate(briefFixture());
 
     expect(r.lines).toEqual({ total: 12, verify_completed: 12, skipped: 0 });
-    expect(r.ids).toEqual({ hook: 2, self_report: 1, other: 0, unknown_stamp: 0 });
-    expect(r.sessions).toEqual({ hook: 2, self_report: 1, answered: 1, rate: 0.5 });
-    expect(r.firings).toEqual({ hook: 2, answered: 1, unordered: 0, rate: 0.5 });
+    // Every pre-`measured` number here is unchanged by the measured bucket:
+    // this fixture contains no measured run, so the new keys read 0 and the
+    // rates read exactly what they read before it existed.
+    expect(r.ids).toEqual({
+      hook: 2, self_report: 1, other: 0, unknown_stamp: 0, measured: 0,
+    });
+    expect(r.sessions).toEqual({
+      hook: 2, self_report: 1, answered: 1, rate: 0.5, measured: 0,
+    });
+    expect(r.firings).toEqual({
+      hook: 2, answered: 1, unordered: 0, rate: 0.5, measured: 0, measured_rate: 0,
+    });
   });
 
   it('keeps two sessions apart when their hook fires share one verification_id', () => {
@@ -185,9 +228,15 @@ describe('verify-rate: the brief fixture', () => {
       ...selfReportRun({ session: 'S2', vid: `v1-cccccccccccc-${STAMP}`, ts: '2026-09-14T12:05:00.000Z' }),
     ]);
 
-    expect(r.ids).toEqual({ hook: 2, self_report: 1, other: 0, unknown_stamp: 0 });
-    expect(r.sessions).toEqual({ hook: 2, self_report: 1, answered: 1, rate: 0.5 });
-    expect(r.firings).toEqual({ hook: 2, answered: 1, unordered: 0, rate: 0.5 });
+    expect(r.ids).toEqual({
+      hook: 2, self_report: 1, other: 0, unknown_stamp: 0, measured: 0,
+    });
+    expect(r.sessions).toEqual({
+      hook: 2, self_report: 1, answered: 1, rate: 0.5, measured: 0,
+    });
+    expect(r.firings).toEqual({
+      hook: 2, answered: 1, unordered: 0, rate: 0.5, measured: 0, measured_rate: 0,
+    });
   });
 
   it('a self-report run is not three hook firings (per-id classification)', () => {
@@ -216,8 +265,12 @@ describe('verify-rate: ordering', () => {
 
     const r = computeVerifyRate(events);
 
-    expect(r.sessions).toEqual({ hook: 1, self_report: 1, answered: 1, rate: 1 });
-    expect(r.firings).toEqual({ hook: 1, answered: 0, unordered: 0, rate: 0 });
+    expect(r.sessions).toEqual({
+      hook: 1, self_report: 1, answered: 1, rate: 1, measured: 0,
+    });
+    expect(r.firings).toEqual({
+      hook: 1, answered: 0, unordered: 0, rate: 0, measured: 0, measured_rate: 0,
+    });
   });
 
   it('answers a firing from a self-report at the same instant', () => {
@@ -236,8 +289,12 @@ describe('verify-rate: ordering', () => {
       ...selfReportRun({ session: 'S2', vid: `v1-cccccccccccc-${STAMP}`, ts: '2026-09-14T12:10:00.000Z' }),
     ]);
 
-    expect(r.sessions).toEqual({ hook: 1, self_report: 1, answered: 0, rate: 0 });
-    expect(r.firings).toEqual({ hook: 1, answered: 0, unordered: 0, rate: 0 });
+    expect(r.sessions).toEqual({
+      hook: 1, self_report: 1, answered: 0, rate: 0, measured: 0,
+    });
+    expect(r.firings).toEqual({
+      hook: 1, answered: 0, unordered: 0, rate: 0, measured: 0, measured_rate: 0,
+    });
   });
 
   it('falls back to the stamp inside verification_id when ts is unusable', () => {
@@ -246,7 +303,9 @@ describe('verify-rate: ordering', () => {
 
     const r = computeVerifyRate([...hook, ...self]);
 
-    expect(r.firings).toEqual({ hook: 1, answered: 1, unordered: 0, rate: 1 });
+    expect(r.firings).toEqual({
+      hook: 1, answered: 1, unordered: 0, rate: 1, measured: 0, measured_rate: 0,
+    });
   });
 
   it('counts an id with no usable ts AND an unknown stamp as unordered, never as answered', () => {
@@ -256,7 +315,9 @@ describe('verify-rate: ordering', () => {
     ]);
 
     expect(r.ids.unknown_stamp).toBe(1);
-    expect(r.firings).toEqual({ hook: 1, answered: 0, unordered: 1, rate: 0 });
+    expect(r.firings).toEqual({
+      hook: 1, answered: 0, unordered: 1, rate: 0, measured: 0, measured_rate: 0,
+    });
     // The session-level answer survives: ordering is the only thing lost.
     expect(r.sessions.answered).toBe(1);
   });
@@ -270,8 +331,142 @@ describe('verify-rate: ordering', () => {
       ...selfReportRun({ session: 'S1', vid: 'v1-cccccccccccc-unknown', ts: 'not a date' }),
     ]);
 
-    expect(r.firings).toEqual({ hook: 1, answered: 0, unordered: 1, rate: 0 });
+    expect(r.firings).toEqual({
+      hook: 1, answered: 0, unordered: 1, rate: 0, measured: 0, measured_rate: 0,
+    });
     expect(r.ids.unknown_stamp).toBe(1);
+  });
+});
+
+/**
+ * The shape the LIVE ledger had at 2026-09-14 17:52 KST — 112 `verify.completed`
+ * lines, 28 firings, 7 sessions, 0 self-reports — with ONE of those firings
+ * turned into a measured one, which is what landing the producer buys.
+ *
+ * Built at the live counts on purpose (rules §9): a two-firing fixture cannot
+ * show the difference between "the measured firing left the denominator" and
+ * "it stayed in it", because at n=2 every wrong answer is also a round number.
+ *
+ * @param {number} measuredIndex which of the 28 firings is measured
+ * @returns {object[]}
+ */
+function liveShapedFixture(measuredIndex) {
+  const events = [];
+  for (let n = 0; n < 28; n += 1) {
+    const session = `S${Math.floor(n / 4)}`;
+    // All 28 share the hook's constant verdict hash; only the second separates
+    // them, exactly as the live ledger does.
+    const vid = `v1-83866286c2d8-20260914T12${String(n).padStart(2, '0')}00Z`;
+    const ts = `2026-09-14T12:${String(n).padStart(2, '0')}:00.000Z`;
+    events.push(...(n === measuredIndex
+      ? measuredRun({ session, vid, ts })
+      : hookRun({ session, vid, ts })));
+  }
+  return events;
+}
+
+describe('verify-rate: the measured bucket', () => {
+  it('counts one measured firing out of the live ledger shape, and leaves every other number alone', () => {
+    const r = computeVerifyRate(liveShapedFixture(13));
+
+    expect(r.lines).toEqual({ total: 112, verify_completed: 112, skipped: 0 });
+    // Four EXCLUSIVE buckets. A measured firing is not a hook firing that
+    // failed to be answered, so it does not sit in `hook`.
+    expect(r.ids).toEqual({
+      hook: 27, self_report: 0, other: 0, unknown_stamp: 0, measured: 1,
+    });
+    // ...but it IS a firing: the hook ran, so it stays in the denominator both
+    // rates divide by. Moving it out would make the rate climb as measurement
+    // improved, which is the opposite of what either number means.
+    expect(r.firings.hook).toBe(28);
+    expect(r.firings.measured).toBe(1);
+    expect(r.firings.measured_rate).toBe(1 / 28);
+    // Nobody self-reported, so the answered rate is still a flat 0 — the new
+    // bucket answers a different question and must not move this one.
+    expect(r.firings.rate).toBe(0);
+    expect(r.firings.answered).toBe(0);
+    expect(r.sessions).toEqual({
+      hook: 7, self_report: 0, answered: 0, rate: 0, measured: 1,
+    });
+  });
+
+  it('reads the same numbers whatever order the lines arrive in', () => {
+    // The CLI hands over file order; a filtered or concatenated ledger does not.
+    const forwards = computeVerifyRate(liveShapedFixture(13));
+    const backwards = computeVerifyRate([...liveShapedFixture(13)].reverse());
+
+    expect(backwards).toEqual(forwards);
+    expect(Object.keys(backwards.firings)).toEqual(Object.keys(forwards.firings));
+  });
+
+  it('keeps a self-report in `self` even though its own lines are `pass`', () => {
+    // THE PRIORITY, ON ITS OWN. `record-verify.mjs` writes `pass` on the
+    // deterministic line and on the overall fold, so a bucket rule that asked
+    // "measured?" before "noted?" would move every self-report out of the
+    // numerator and report 0% answered forever.
+    const r = computeVerifyRate(
+      selfReportRun({ session: 'S1', vid: `v1-cccccccccccc-${STAMP}`, ts: '2026-09-14T12:10:00.000Z' }),
+    );
+
+    expect(r.ids).toEqual({
+      hook: 0, self_report: 1, other: 0, unknown_stamp: 0, measured: 0,
+    });
+  });
+
+  it('keeps a group `self` when a measured line and the note share one id', () => {
+    const ts = '2026-09-14T12:00:00.000Z';
+    const vid = `v1-dddddddddddd-${STAMP}`;
+    const r = computeVerifyRate([
+      ...measuredRun({ session: 'S1', vid, ts }),
+      line({ session: 'S1', vid, layer: 'deterministic', result: 'pass', note: SELF_REPORT_NOTE, ts }),
+    ]);
+
+    expect(r.ids.self_report).toBe(1);
+    expect(r.ids.measured).toBe(0);
+  });
+
+  it('counts a measured firing with no session in `ids`, and in no rate', () => {
+    // Same rule the sessionless hook firing already follows: it happened, and
+    // there is nothing to join it to.
+    const strip = (events) => events.map((e) => {
+      const copy = { ...e };
+      delete copy.session_id;
+      return copy;
+    });
+    const r = computeVerifyRate(
+      strip(measuredRun({ session: 'x', vid: `v1-eeeeeeeeeeee-${STAMP}`, ts: '2026-09-14T12:00:00.000Z' })),
+    );
+
+    expect(r.ids.measured).toBe(1);
+    expect(r.firings).toEqual({
+      hook: 0, answered: 0, unordered: 0, rate: null, measured: 0, measured_rate: null,
+    });
+    expect(r.sessions.measured).toBe(0);
+  });
+
+  it('reports a null measured_rate rather than 0 when no firing joined at all', () => {
+    const r = computeVerifyRate(
+      selfReportRun({ session: 'S1', vid: `v1-cccccccccccc-${STAMP}`, ts: '2026-09-14T12:10:00.000Z' }),
+    );
+
+    expect(r.firings.measured_rate).toBe(null);
+  });
+
+  it('still has an `other` bucket for a result vocabulary it does not know', () => {
+    // `other` did not become dead code when `measured` took its one live
+    // inhabitant: a layer result this reader has never heard of must not be
+    // silently counted as a measurement.
+    const ts = '2026-09-14T12:00:00.000Z';
+    const vid = `v1-ffffffffffff-${STAMP}`;
+    const r = computeVerifyRate([
+      line({ session: 'S1', vid, layer: 'deterministic', result: 'skipped', ts }),
+      line({ session: 'S1', vid, layer: null, result: 'skipped', ts }),
+    ]);
+
+    expect(r.ids).toEqual({
+      hook: 0, self_report: 0, other: 1, unknown_stamp: 0, measured: 0,
+    });
+    expect(r.firings.hook).toBe(0);
   });
 });
 
@@ -281,14 +476,21 @@ describe('verify-rate: denominators it refuses to invent', () => {
       selfReportRun({ session: 'S1', vid: `v1-cccccccccccc-${STAMP}`, ts: '2026-09-14T12:10:00.000Z' }),
     );
 
-    expect(r.sessions).toEqual({ hook: 0, self_report: 1, answered: 0, rate: null });
-    expect(r.firings).toEqual({ hook: 0, answered: 0, unordered: 0, rate: null });
+    expect(r.sessions).toEqual({
+      hook: 0, self_report: 1, answered: 0, rate: null, measured: 0,
+    });
+    expect(r.firings).toEqual({
+      hook: 0, answered: 0, unordered: 0, rate: null, measured: 0, measured_rate: null,
+    });
   });
 
-  it('puts a measured verification in `other`, never on either side', () => {
-    // A line that is neither marked as a self-report nor `unmeasured` is a
-    // future real measurement. Guessing it into `hook` would inflate the
-    // denominator; guessing it into `self_report` would inflate the numerator.
+  it('puts a measured verification in `measured`, never on either side', () => {
+    // WAS `other`, AND THAT WAS THE GAP. A run that is neither marked as a
+    // self-report nor `unmeasured` is a real measurement, and until the Stop
+    // producer landed nobody wrote one, so `other` was where a thing that could
+    // not happen went. Now it happens. Guessing it into `self_report` would
+    // still inflate the numerator, which is why it gets a bucket of its own —
+    // but it stays in the FIRING denominator, because the hook did fire.
     const ts = '2026-09-14T12:00:00.000Z';
     const vid = `v1-dddddddddddd-${STAMP}`;
     const r = computeVerifyRate([
@@ -296,8 +498,15 @@ describe('verify-rate: denominators it refuses to invent', () => {
       line({ session: 'S1', vid, layer: null, result: 'pass', ts }),
     ]);
 
-    expect(r.ids).toEqual({ hook: 0, self_report: 0, other: 1, unknown_stamp: 0 });
-    expect(r.sessions).toEqual({ hook: 0, self_report: 0, answered: 0, rate: null });
+    expect(r.ids).toEqual({
+      hook: 0, self_report: 0, other: 0, unknown_stamp: 0, measured: 1,
+    });
+    expect(r.sessions).toEqual({
+      hook: 1, self_report: 0, answered: 0, rate: 0, measured: 1,
+    });
+    expect(r.firings).toEqual({
+      hook: 1, answered: 0, unordered: 0, rate: 0, measured: 1, measured_rate: 1,
+    });
   });
 
   it('skips what is not a verify.completed line and counts the skip', () => {
@@ -333,10 +542,16 @@ describe('verify-rate: denominators it refuses to invent', () => {
     ]);
 
     // Counted as runs — they exist and this reader saw them...
-    expect(r.ids).toEqual({ hook: 1, self_report: 1, other: 0, unknown_stamp: 0 });
+    expect(r.ids).toEqual({
+      hook: 1, self_report: 1, other: 0, unknown_stamp: 0, measured: 0,
+    });
     // ...and joined to nothing, so they appear in neither rate.
-    expect(r.sessions).toEqual({ hook: 0, self_report: 0, answered: 0, rate: null });
-    expect(r.firings).toEqual({ hook: 0, answered: 0, unordered: 0, rate: null });
+    expect(r.sessions).toEqual({
+      hook: 0, self_report: 0, answered: 0, rate: null, measured: 0,
+    });
+    expect(r.firings).toEqual({
+      hook: 0, answered: 0, unordered: 0, rate: null, measured: 0, measured_rate: null,
+    });
   });
 
   it('belongs a verify.completed line with no verification_id to no id at all', () => {
@@ -351,15 +566,19 @@ describe('verify-rate: denominators it refuses to invent', () => {
     const r = computeVerifyRate([orphan]);
 
     expect(r.lines).toEqual({ total: 1, verify_completed: 1, skipped: 0 });
-    expect(r.ids).toEqual({ hook: 0, self_report: 0, other: 0, unknown_stamp: 0 });
+    expect(r.ids).toEqual({
+      hook: 0, self_report: 0, other: 0, unknown_stamp: 0, measured: 0,
+    });
   });
 
   it('returns the zero shape for an empty, absent or non-array input', () => {
     const zero = {
       lines: { total: 0, verify_completed: 0, skipped: 0 },
-      ids: { hook: 0, self_report: 0, other: 0, unknown_stamp: 0 },
-      sessions: { hook: 0, self_report: 0, answered: 0, rate: null },
-      firings: { hook: 0, answered: 0, unordered: 0, rate: null },
+      ids: { hook: 0, self_report: 0, other: 0, unknown_stamp: 0, measured: 0 },
+      sessions: { hook: 0, self_report: 0, answered: 0, rate: null, measured: 0 },
+      firings: {
+        hook: 0, answered: 0, unordered: 0, rate: null, measured: 0, measured_rate: null,
+      },
     };
     for (const input of [[], undefined, null, 'nope', 7, { length: 3 }]) {
       expect(computeVerifyRate(input)).toEqual(zero);
@@ -378,17 +597,20 @@ describe('verify-rate: the key set a caller can parse blind', () => {
   it('is fixed, in order, for every sub-object', () => {
     const r = computeVerifyRate(briefFixture());
 
+    // The measured keys are APPENDED, never inserted: a caller that pinned the
+    // original order — this file did, at these very lines — keeps reading every
+    // old key at the position it read it at before.
     expect(Object.keys(r)).toEqual(['lines', 'ids', 'sessions', 'firings']);
     expect(Object.keys(r.lines)).toEqual(['total', 'verify_completed', 'skipped']);
-    expect(Object.keys(r.ids)).toEqual(['hook', 'self_report', 'other', 'unknown_stamp']);
-    expect(Object.keys(r.sessions)).toEqual(['hook', 'self_report', 'answered', 'rate']);
-    expect(Object.keys(r.firings)).toEqual(['hook', 'answered', 'unordered', 'rate']);
+    expect(Object.keys(r.ids)).toEqual(['hook', 'self_report', 'other', 'unknown_stamp', 'measured']);
+    expect(Object.keys(r.sessions)).toEqual(['hook', 'self_report', 'answered', 'rate', 'measured']);
+    expect(Object.keys(r.firings)).toEqual(['hook', 'answered', 'unordered', 'rate', 'measured', 'measured_rate']);
   });
 
   it('keeps the key set when there is nothing to report', () => {
     const r = computeVerifyRate([]);
-    expect(Object.keys(r.sessions)).toEqual(['hook', 'self_report', 'answered', 'rate']);
-    expect(Object.keys(r.firings)).toEqual(['hook', 'answered', 'unordered', 'rate']);
+    expect(Object.keys(r.sessions)).toEqual(['hook', 'self_report', 'answered', 'rate', 'measured']);
+    expect(Object.keys(r.firings)).toEqual(['hook', 'answered', 'unordered', 'rate', 'measured', 'measured_rate']);
   });
 });
 
@@ -405,6 +627,11 @@ describe('verify-rate: the key set a caller can parse blind', () => {
  *   5      a self-report and no hook at all
  *   6..9   hook only
  *
+ * NO MEASURED RUN AT THIS SCALE, ON PURPOSE: the live ledger held none at
+ * 2026-09-14 17:52 KST and this oracle's hand-computed numbers are the record
+ * of the shape that was measured. The measured bucket is pinned at the live
+ * proportion instead, by `liveShapedFixture` above — 1 of 28.
+ *
  * @param {number} sessionCount
  * @returns {{events: object[], expected: object}}
  */
@@ -412,9 +639,11 @@ function synthesize(sessionCount) {
   const events = [];
   const expected = {
     lines: { total: 0, verify_completed: 0, skipped: 0 },
-    ids: { hook: 0, self_report: 0, other: 0, unknown_stamp: 0 },
-    sessions: { hook: 0, self_report: 0, answered: 0, rate: null },
-    firings: { hook: 0, answered: 0, unordered: 0, rate: null },
+    ids: { hook: 0, self_report: 0, other: 0, unknown_stamp: 0, measured: 0 },
+    sessions: { hook: 0, self_report: 0, answered: 0, rate: null, measured: 0 },
+    firings: {
+      hook: 0, answered: 0, unordered: 0, rate: null, measured: 0, measured_rate: null,
+    },
   };
   // Minutes added to an epoch, NOT written into the minutes field: a `% 60`
   // there wraps past session 40 and puts a session's self-report BEFORE its
@@ -460,6 +689,8 @@ function synthesize(sessionCount) {
   expected.lines.total = expected.lines.verify_completed + expected.lines.skipped;
   expected.sessions.rate = expected.sessions.answered / expected.sessions.hook;
   expected.firings.rate = expected.firings.answered / expected.firings.hook;
+  // 0, not null: there ARE firings to divide by, and none of them was measured.
+  expected.firings.measured_rate = expected.firings.measured / expected.firings.hook;
   return { events, expected };
 }
 
@@ -471,7 +702,9 @@ describe('verify-rate: at the size of a real ledger', () => {
     // as an oracle: a generator that drifted would otherwise agree with a
     // reader that drifted the same way.
     expect(events).toHaveLength(7000);
-    expect(expected.ids).toEqual({ hook: 225, self_report: 125, other: 0, unknown_stamp: 25 });
+    expect(expected.ids).toEqual({
+      hook: 225, self_report: 125, other: 0, unknown_stamp: 25, measured: 0,
+    });
     expect(expected.firings.answered).toBe(75);
     expect(expected.sessions.answered).toBe(100);
 

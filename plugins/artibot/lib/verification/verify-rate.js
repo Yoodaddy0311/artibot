@@ -3,16 +3,25 @@
  * ledger lines into "how many Stop-hook denominators did a `/verify`
  * self-report answer?".
  *
- * ── Two writers, one event ──────────────────────────────────────────────────
- * `scripts/hooks/dev-verify-gate.js#recordUnmeasuredDenominator` (:315, read
- * 2026-09-14) writes the DENOMINATOR: `verify({ layers: {} })` folded to four
- * lines, every layer `unmeasured`, evidence empty. It fires whether or not any
- * verification happened. `scripts/ledger/record-verify.mjs` writes the
+ * ── Two writers, THREE kinds of run ─────────────────────────────────────────
+ * `scripts/hooks/dev-verify-gate.js#recordVerifyDenominator` (read 2026-09-15)
+ * writes the DENOMINATOR: four lines, one per layer plus the overall fold. It
+ * fires whether or not any verification happened, and since the producer
+ * landed it writes them in one of TWO shapes — deterministic `pass|fail` when
+ * a fresh vitest result was on disk, or every layer `unmeasured` when there was
+ * nothing honest to read. `scripts/ledger/record-verify.mjs` writes the
  * NUMERATOR: four lines for one `/verify` self-report. Both carry
  * `source: 'gate'` because the allowlist accepts no other value
  * (`schemas/ledger-events.allowlist.json:401`), and there is no `kind_source`
- * field to add. So the ONLY ledger-visible difference between the two writers
- * is {@link SELF_REPORT_NOTE} sitting in `data.evidence[0].note`.
+ * field to add. So the ONLY ledger-visible difference between the two WRITERS
+ * is {@link SELF_REPORT_NOTE} sitting in `data.evidence[0].note`, and the only
+ * difference between the hook's two shapes is whether any line of the run
+ * carries a `result` of `pass` or `fail`.
+ *
+ * THAT ORDER MATTERS: a self-report's own deterministic line is `pass` too
+ * (`record-verify.mjs:315`), so "some line is pass" is true of both a
+ * self-report and a measured hook run. The note is checked FIRST — see the
+ * bucket order below.
  *
  * ── WHY THE UNIT IS `verification_id`, NOT THE LINE ─────────────────────────
  * Only the DETERMINISTIC line of a self-report carries that note
@@ -37,12 +46,28 @@
  * `verify-writer.js#verifyCompletedIdempotencyKey` (:101-102) keys on
  * `<event>:<session>:<verification_id>[:layer]`.
  *
- * ── Three buckets, and nothing guessed into the first two ───────────────────
- * self_report — some line of the id carries the note.
- * hook        — no note, and some line is `unmeasured`.
- * other       — everything else, which today means a real measurement nobody
- *               writes yet. It is reported rather than folded into `hook`,
- *               because a future measured line is not a missing self-report.
+ * ── Four buckets, in this order, and nothing guessed into the first two ─────
+ * self_report — some line of the id carries the note. FIRST, because a
+ *               self-report also looks measured.
+ * measured    — no note, and some line has a `result` of `pass` or `fail`:
+ *               the Stop hook found a fresh vitest result and said so.
+ * hook        — no note, nothing measured, and some line is `unmeasured`.
+ * other       — everything else: a `result` vocabulary this reader has never
+ *               heard of. Reported rather than folded into `hook`, because an
+ *               unrecognised verdict is not a missing self-report.
+ *
+ * ── WHAT THE NEW BUCKET DOES AND DOES NOT MOVE ──────────────────────────────
+ * `ids.*` are EXCLUSIVE (`unknown_stamp` excepted, below), so a measured run
+ * leaves `ids.hook`. The FIRING DENOMINATOR is a different question and keeps
+ * the wider answer: `firings.hook` and `sessions.hook` count every joinable run
+ * the Stop hook produced, measured or not, because the hook did fire and the
+ * `/verify` that would have answered it was just as absent. Dropping measured
+ * runs from the denominator would make `firings.rate` CLIMB as measurement
+ * improved, reading as better self-reporting when nothing about reporting had
+ * changed. So `sessions.rate` and `firings.rate` keep their meaning exactly —
+ * "of the Stop-hook runs, how many did a `/verify` self-report answer" — and
+ * the new `firings.measured_rate` answers the separate question "of those same
+ * runs, how many could the hook measure for itself".
  *
  * ── WHAT THIS READER CANNOT SEE (rules §9 — stated next to the number) ──────
  *  - "NO /verify RAN" vs "NOBODY REPORTED ONE". Identical in the ledger, and
@@ -138,6 +163,9 @@ function orderingKey(event, id) {
   return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
 }
 
+/** The two `result` values that mean a layer was actually measured. */
+const MEASURED_RESULTS = new Set(['pass', 'fail']);
+
 /**
  * Group the lines by `(session_id, verification_id)`, counting every line that
  * could not be grouped.
@@ -147,10 +175,17 @@ function orderingKey(event, id) {
  * caller-supplied, so without a byte that cannot occur inside a field two
  * different pairs could be spelled into the same key.
  *
+ * `selfReport`, `unmeasured` and `measured` are each an OR over the run's
+ * lines, and they are NOT mutually exclusive: the measured shape of a hook run
+ * carries a `pass` on deterministic AND `unmeasured` on the two layers no
+ * runner produces. Resolving that into one bucket is {@link classify}'s job,
+ * not this one's.
+ *
  * @param {unknown[]} events
  * @returns {{lines: {total: number, verify_completed: number, skipped: number},
  *            ids: Map<string, {id: string, session: string, selfReport: boolean,
- *                              unmeasured: boolean, at: number|null}>}}
+ *                              unmeasured: boolean, measured: boolean,
+ *                              at: number|null}>}}
  */
 function groupById(events) {
   const lines = { total: 0, verify_completed: 0, skipped: 0 };
@@ -175,12 +210,15 @@ function groupById(events) {
         session,
         selfReport: isSelfReportLine(event),
         unmeasured: e.data?.result === 'unmeasured',
+        measured: MEASURED_RESULTS.has(/** @type {string} */ (e.data?.result)),
         at,
       });
       continue;
     }
     prior.selfReport = prior.selfReport || isSelfReportLine(event);
     prior.unmeasured = prior.unmeasured || e.data?.result === 'unmeasured';
+    prior.measured = prior.measured
+      || MEASURED_RESULTS.has(/** @type {string} */ (e.data?.result));
     // First seen wins: a run's position in time is when it STARTED.
     if (at !== null && (prior.at === null || at < prior.at)) prior.at = at;
   }
@@ -188,35 +226,61 @@ function groupById(events) {
 }
 
 /**
- * Split the grouped runs into the three buckets, and index the joinable ones
+ * Which of the four buckets this run belongs to, or `null` for `other`.
+ *
+ * THE ORDER IS THE CONTRACT. `selfReport` outranks `measured` because a
+ * self-report writes `pass` on its own deterministic line, so asking "is it
+ * measured?" first would empty the numerator. `measured` outranks `unmeasured`
+ * because the hook's measured shape still carries two `unmeasured` layers —
+ * behavioral and operational have no runner — and reading that OR first is
+ * exactly the bug that kept a measured firing indistinguishable from a
+ * never-measured one.
+ *
+ * @param {{selfReport: boolean, measured: boolean, unmeasured: boolean}} rec
+ * @returns {'self'|'measured'|'hook'|null}
+ */
+function bucketOf(rec) {
+  if (rec.selfReport) return 'self';
+  if (rec.measured) return 'measured';
+  if (rec.unmeasured) return 'hook';
+  return null;
+}
+
+/**
+ * Split the grouped runs into the four buckets, and index the joinable ones
  * by session.
  *
  * `counts` covers every run. `bySession` covers only those with a session to
- * join on, so `counts.hook` and the firing denominator can legitimately differ
- * — see the sessionless bullet in the module header.
+ * join on, so `counts.hook` and the firing denominator differ for TWO reasons
+ * now, both deliberate: the sessionless runs are missing from the denominator
+ * (see the module header's bullet) and the measured ones are missing from
+ * `counts.hook` while still belonging to it.
  *
  * @param {Map<string, {id: string, session: string, selfReport: boolean,
- *                      unmeasured: boolean, at: number|null}>} ids
- * @returns {{counts: {hook: number, self_report: number, other: number, unknown_stamp: number},
- *            bySession: Map<string, {hook: object[], self: object[]}>,
+ *                      unmeasured: boolean, measured: boolean, at: number|null}>} ids
+ * @returns {{counts: {hook: number, self_report: number, other: number,
+ *                     unknown_stamp: number, measured: number},
+ *            bySession: Map<string, {hook: object[], self: object[], measured: object[]}>,
  *            unordered: number}}
  */
 function classify(ids) {
-  const counts = { hook: 0, self_report: 0, other: 0, unknown_stamp: 0 };
+  const counts = { hook: 0, self_report: 0, other: 0, unknown_stamp: 0, measured: 0 };
   const bySession = new Map();
+  const countKey = { self: 'self_report', measured: 'measured', hook: 'hook' };
   let unordered = 0;
   for (const rec of ids.values()) {
     if (!STAMP_SHAPE.test(rec.id)) counts.unknown_stamp += 1;
-    const bucket = rec.selfReport ? 'self' : (rec.unmeasured ? 'hook' : null);
+    const bucket = bucketOf(rec);
     if (bucket === null) {
       counts.other += 1;
       continue;
     }
-    if (bucket === 'self') counts.self_report += 1;
-    else counts.hook += 1;
+    counts[countKey[bucket]] += 1;
     if (rec.session === '') continue;
     if (rec.at === null) unordered += 1;
-    if (!bySession.has(rec.session)) bySession.set(rec.session, { hook: [], self: [] });
+    if (!bySession.has(rec.session)) {
+      bySession.set(rec.session, { hook: [], self: [], measured: [] });
+    }
     bySession.get(rec.session)[bucket].push(rec);
   }
   return { counts, bySession, unordered };
@@ -239,22 +303,37 @@ function rateOf(numerator, denominator) {
 /**
  * @typedef {object} VerifyRate
  * @property {{total: number, verify_completed: number, skipped: number}} lines
- * @property {{hook: number, self_report: number, other: number, unknown_stamp: number}} ids
- *   `unknown_stamp` OVERLAPS the three buckets — it counts runs whose
- *   `verification_id` does NOT end in a `YYYYMMDDTHHMMSSZ` stamp, of which
- *   `-unknown` is the writer's own spelling (`buildVerificationId` :573-575).
- *   A clock problem, not a fourth kind of verification.
- * @property {{hook: number, self_report: number, answered: number, rate: number|null}} sessions
- *   `answered` = sessions holding at least one hook id AND at least one
- *   self-report id, in any order.
- * @property {{hook: number, answered: number, unordered: number, rate: number|null}} firings
- *   Per hook run: answered iff the same session holds a self-report run that
- *   started at or after it. `hook` here counts only runs that HAVE a session to
- *   join on, so it is `ids.hook` minus the sessionless ones — a denominator
- *   that included runs nothing could ever answer would read low for a
- *   bookkeeping reason. `unordered` counts joinable runs of EITHER bucket whose
- *   position in time could not be established — an overlapping count, and a
- *   reason a low `rate` may be a reading problem rather than a reporting one.
+ * @property {{hook: number, self_report: number, other: number,
+ *             unknown_stamp: number, measured: number}} ids
+ *   `hook`, `self_report`, `measured` and `other` are EXCLUSIVE: a measured hook
+ *   run is counted in `measured` and NOT in `hook`. `unknown_stamp` OVERLAPS
+ *   all four — it counts runs whose `verification_id` does NOT end in a
+ *   `YYYYMMDDTHHMMSSZ` stamp, of which `-unknown` is the writer's own spelling
+ *   (`buildVerificationId` :573-575). A clock problem, not a kind of
+ *   verification. `measured` is appended after `unknown_stamp` rather than
+ *   inserted beside `hook` so that a caller pinning the key ORDER of the
+ *   original four keeps reading them at the same positions.
+ * @property {{hook: number, self_report: number, answered: number,
+ *             rate: number|null, measured: number}} sessions
+ *   `hook` = sessions holding at least one Stop-hook run of EITHER shape
+ *   (`ids.hook` + `ids.measured`, minus the sessionless). `answered` = sessions
+ *   holding at least one such run AND at least one self-report id, in any
+ *   order. `measured` = sessions holding at least one MEASURED run; it overlaps
+ *   `hook` and is not a denominator. `rate` is unchanged in meaning:
+ *   `answered / hook`, the share of hook-fired sessions a `/verify` answered.
+ * @property {{hook: number, answered: number, unordered: number, rate: number|null,
+ *             measured: number, measured_rate: number|null}} firings
+ *   Per hook run of either shape: answered iff the same session holds a
+ *   self-report run that started at or after it. `hook` counts only runs that
+ *   HAVE a session to join on, so it is `ids.hook` PLUS `ids.measured` minus the
+ *   sessionless ones — a denominator that included runs nothing could ever
+ *   answer would read low for a bookkeeping reason, and one that EXCLUDED the
+ *   measured runs would read high for a worse one. `unordered` counts joinable
+ *   runs of ANY bucket whose position in time could not be established — an
+ *   overlapping count, and a reason a low `rate` may be a reading problem
+ *   rather than a reporting one. `measured` is the joinable subset the hook
+ *   measured for itself and `measured_rate` is `measured / hook`: a DIFFERENT
+ *   question from `rate`, which stays "answered by a self-report".
  */
 
 /**
@@ -269,20 +348,28 @@ export function computeVerifyRate(events) {
   const { lines, ids } = groupById(Array.isArray(events) ? events : []);
   const { counts, bySession, unordered } = classify(ids);
 
-  const sessions = { hook: 0, self_report: 0, answered: 0, rate: null };
-  const firings = { hook: 0, answered: 0, unordered, rate: null };
-  for (const { hook, self } of bySession.values()) {
-    firings.hook += hook.length;
-    if (hook.length > 0) sessions.hook += 1;
+  const sessions = { hook: 0, self_report: 0, answered: 0, rate: null, measured: 0 };
+  const firings = {
+    hook: 0, answered: 0, unordered, rate: null, measured: 0, measured_rate: null,
+  };
+  for (const { hook, self, measured } of bySession.values()) {
+    // Both shapes are firings: the hook ran either way, and the `/verify` that
+    // would have answered it is equally absent. See the typedef.
+    const fired = [...hook, ...measured];
+    firings.hook += fired.length;
+    firings.measured += measured.length;
+    if (fired.length > 0) sessions.hook += 1;
     if (self.length > 0) sessions.self_report += 1;
-    if (hook.length > 0 && self.length > 0) sessions.answered += 1;
-    for (const fire of hook) {
+    if (measured.length > 0) sessions.measured += 1;
+    if (fired.length > 0 && self.length > 0) sessions.answered += 1;
+    for (const fire of fired) {
       if (fire.at === null) continue;
       if (self.some((s) => s.at !== null && s.at >= fire.at)) firings.answered += 1;
     }
   }
   sessions.rate = rateOf(sessions.answered, sessions.hook);
   firings.rate = rateOf(firings.answered, firings.hook);
+  firings.measured_rate = rateOf(firings.measured, firings.hook);
 
   return { lines, ids: counts, sessions, firings };
 }
