@@ -67,3 +67,24 @@ export {
   projectCommandActivation,
   compileMission,
 } from './compiler.js';
+
+export {
+  OUTCOME_ARTIFACT_BASENAME,
+  OUTCOME_SCHEMA_VERSION,
+  OUTCOME_BASED_ON_MEMBERS,
+  OUTCOME_SECTIONS,
+  OUTCOME_REQUIRED_SECTION_KEYS,
+  OUTCOME_NOT_RECORDED,
+  OutcomeFindingCode,
+  isAllowedOutcomeFilePath,
+  missionIdFromOutcomePath,
+  assertOutcomeFilePath,
+  outcomeArtifactPath,
+  serializeOutcomeMd,
+  parseOutcomeMd,
+} from './outcome-artifact.js';
+
+export {
+  emptyOutcomeGateCensus,
+  foldOutcomeGateCensus,
+} from './outcome-gate-census.js';

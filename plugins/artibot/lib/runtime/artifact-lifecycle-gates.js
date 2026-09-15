@@ -84,22 +84,33 @@ export const VERIFY_RESULT_UNMEASURED = 'unmeasured';
 const VERIFY_RESULTS = Object.freeze(['pass', 'fail', VERIFY_RESULT_UNMEASURED]);
 
 /**
- * Policy knobs, and the only one that exists today.
+ * The two policy knobs, both halves of owner decision C4.
  *
- * `unmeasuredBlocksOutcome` was a C4 placeholder; owner decision C4 ("층별
+ * `unmeasuredBlocksOutcome` was provisional; owner decision C4 ("층별
  * 필수/선택 config, Observe 는 카운트만") RULED on 2026-09-03 and kept this value
  * at `true`, so the constant is no longer provisional in the blocking
  * direction — it is the decided answer. `false` still counts without blocking,
- * for the caller that opts out.
+ * for the caller that opts out, and it keeps precedence over everything below:
+ * `false` switches the whole UNMEASURED gate off no matter which layers are
+ * required.
  *
- * The decision's OTHER half — only the `deterministic` layer is required — is
- * recorded at `artibot.config.json#/review/verify` and is NOT implemented here:
- * this module still holds one boolean, not a per-layer required/optional map,
- * and it does NOT read that config. Replacing the boolean with the map is the
- * change C4 authorises and it has not been made, so a green test here says
- * nothing about per-layer enforcement.
+ * `requiredLayers` is the decision's OTHER half — which layers are required and
+ * which are optional — landed 2026-09-15 (limb `outcome-md-emitter`, decision
+ * C4 (i)). It is a list of layer names, or `null`. **`null` is the default and
+ * means today's behaviour byte for byte: ANY `unmeasured` row blocks.** A list
+ * narrows that to the named layers; see {@link normaliseRequiredLayers} for what
+ * counts as a readable list and {@link requiredLayerIsUnmeasured} for the rule.
+ *
+ * THIS MODULE STILL READS NO CONFIG. The value lives at
+ * `artibot.config.json#/review/verify/requiredLayers` (`["deterministic"]`),
+ * and the HOOK that calls `plan()` is what reads it and injects it as
+ * `policy.requiredLayers`. Nothing here opens a file, so a green test here says
+ * the rule is right, not that any caller has wired the config to it.
  */
-export const DEFAULT_POLICY = Object.freeze({ unmeasuredBlocksOutcome: true });
+export const DEFAULT_POLICY = Object.freeze({
+  unmeasuredBlocksOutcome: true,
+  requiredLayers: null,
+});
 
 /**
  * Layer bucket for a `verify.completed` that names no layer.
@@ -132,6 +143,39 @@ export const LAYER_UNRECOGNISED = 'unrecognised';
  * lowercase identifier, so a fourth layer needs no change here.
  */
 export const LAYER_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/**
+ * Read `policy.requiredLayers` into a list of layer names, or `null`. Pure.
+ *
+ * `null` is not "no layers are required" — it is "this module was not told which
+ * layers are required", and the fail-closed answer to that is the old rule:
+ * every `unmeasured` row blocks. That direction matters, because the two
+ * mistakes are not symmetric. Falling back to block-on-any costs a blocked
+ * `outcome.md` that a corrected config unblocks; falling back to block-on-none
+ * would silently accept a mission nobody measured, and it would look like a
+ * pass. So EVERY unreadable value — a string, an object, an empty array, one
+ * bad member among good ones — returns `null`, and a caller that meant to
+ * require one layer and typed it wrong gets the strict rule, not the loose one
+ * (rules §8: allowlist, never a deny list).
+ *
+ * The two sentinels are rejected as members for a different reason:
+ * {@link LAYER_UNSPECIFIED} and {@link LAYER_UNRECOGNISED} are READER buckets,
+ * not layers any producer can measure. "Require `unspecified`" has no writer
+ * that can satisfy it, so it is a malformed request rather than a strict one.
+ *
+ * @param {unknown} raw
+ * @returns {string[]|null} A fresh array — the caller's array is never aliased.
+ */
+export function normaliseRequiredLayers(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const names = [];
+  for (const member of raw) {
+    if (typeof member !== 'string' || !LAYER_NAME_PATTERN.test(member)) return null;
+    if (member === LAYER_UNSPECIFIED || member === LAYER_UNRECOGNISED) return null;
+    names.push(member);
+  }
+  return names;
+}
 
 /** Non-blocking observations. Observe counts; it does not act. */
 export const FindingCode = Object.freeze({
@@ -369,17 +413,74 @@ function verificationIdCarriers(gate) {
 }
 
 /**
+ * Does some REQUIRED layer fail to show a measurement? Pure, non-throwing.
+ *
+ * Two different facts block, and treating them as one is the point: a layer with
+ * an `unmeasured` row was not measured, and a layer with NO row was not measured
+ * either. The second is the one a naive reading drops — an absent row reads as a
+ * smaller denominator rather than as a gap, which is exactly the failure
+ * `verify-writer.js` refuses at the writing end ("all-or-nothing", :24-28). A
+ * layer the caller called required and nobody recorded is the strongest case for
+ * blocking, not an exemption.
+ *
+ * A required layer whose rows are `pass`, `fail`, or `other` does NOT block
+ * here. This gate asks "was it measured", and a FAIL is a measurement; the
+ * review verdict is what judges the result.
+ *
+ * Layers outside the required list are never consulted — they are still counted
+ * in `findings`, which is what "optional" means under decision C4.
+ *
+ * @param {{layers: Map<string, Record<string, number>>}} gate
+ * @param {string[]} required Already normalised; never empty.
+ */
+function requiredLayerIsUnmeasured(gate, required) {
+  for (const layer of required) {
+    const counts = gate.layers.get(layer);
+    if (counts === undefined) return true;
+    if (counts[VERIFY_RESULT_UNMEASURED] > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Should the UNMEASURED gate block? Pure.
+ *
+ * `unmeasuredBlocksOutcome` decides whether the gate exists at all;
+ * `requiredLayers` decides how wide it is. The order is deliberate — the
+ * existing knob keeps precedence, so a caller that opted the gate out does not
+ * get it back by naming a layer.
+ *
+ * THE OVERALL ROW IS WHY THE NARROW RULE IS PER-LAYER AND NOT PER-ROW.
+ * `lib/verification/verify-writer.js#verifyEventInput` (:341 on 2026-09-15)
+ * writes the overall line with NO `layer` key — `if (p.layer !== null)
+ * data.layer = p.layer;` — so {@link tallyLayer} buckets it as
+ * {@link LAYER_UNSPECIFIED}, and the live ledger's overall rows are
+ * `unmeasured`. A rule that still blocked on that bucket would leave every
+ * mission stopped at this gate and decision C4 (i) would change nothing. So the
+ * sentinel buckets are counted and never blocking once a required list is
+ * given: a row that names no readable layer cannot be attributed to a required
+ * one, and this gate only judges layers it was told to judge.
+ */
+function unmeasuredGateBlocks(gate, policy) {
+  if (!policy.unmeasuredBlocksOutcome) return false;
+  const required = normaliseRequiredLayers(policy.requiredLayers);
+  if (required === null) return gate.sawUnmeasured;
+  return requiredLayerIsUnmeasured(gate, required);
+}
+
+/**
  * Gates that stand between `mission.completed` and `outcome.md`.
  *
- * The UNMEASURED gate is the one that answers to policy, because owner decision
- * C4 is still open — see {@link DEFAULT_POLICY}. With
- * `unmeasuredBlocksOutcome: false` the layer counts are still recorded in
- * `findings`; only the block is withheld. Every other gate here rests on a
- * settled decision and takes no parameter.
+ * The UNMEASURED gate is the one that answers to policy — both halves of owner
+ * decision C4, see {@link DEFAULT_POLICY} and {@link unmeasuredGateBlocks}. With
+ * `unmeasuredBlocksOutcome: false`, or with a layer left out of
+ * `requiredLayers`, the layer counts are still recorded in `findings`; only the
+ * block is withheld. Every other gate here rests on a settled decision and takes
+ * no parameter.
  */
 function outcomeBlockCode(gate, staleness, policy) {
   // design §3.4 ①: UNMEASURED first — "재지 못한 것을 PASS 라 부르지 않는다".
-  if (gate.sawUnmeasured && policy.unmeasuredBlocksOutcome) {
+  if (unmeasuredGateBlocks(gate, policy)) {
     return BlockCode.UNMEASURED_VERIFICATION;
   }
   if (gate.lastVerdict !== REVIEW_VERDICT_PASS) return BlockCode.REVIEW_VERDICT_NOT_PASS;
