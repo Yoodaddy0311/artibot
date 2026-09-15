@@ -42,7 +42,6 @@ import { fileURLToPath } from 'node:url';
 import { MODELS } from '../../lib/core/model-catalog.js';
 
 import { ledgerFilePath } from '../../lib/runtime/ledger.js';
-import { DEFAULT_TAIL_BYTES } from '../../lib/runtime/ledger-tail.js';
 import {
   AGENT_TOOL,
   buildReceipt,
@@ -50,6 +49,7 @@ import {
   extractActionText,
   receiptKey,
   receiptPhase,
+  RESIDENCY_TAIL_BYTES,
   resolveIncumbentTier,
   resolveMissionId,
   TOOL_INPUT_KEYS,
@@ -380,7 +380,22 @@ describe('route-observe-pre — incumbent tier and residency (K1), pure function
     // shrinking it silently un-supplies `models.current` on long tool-result
     // tails, and growing it puts an unbounded read on a BLOCK POINT.
     expect(TRANSCRIPT_TAIL_BYTES).toBe(262144);
-    expect(TRANSCRIPT_TAIL_BYTES).toBe(2 * DEFAULT_TAIL_BYTES);
+  });
+
+  it('pins the residency window at 512 KB, sized against false shortfalls', () => {
+    // MEASURED on the live ledger (987,547 B / 1,175 rows, 2026-09-15 02:54Z):
+    // the share of rows whose preceding three SAME-SESSION rows all fall inside
+    // the window was 69/73 at 128 KB, 73/73 at 256 KB, 73/73 at 512 KB. The
+    // 128 KB default would have produced 4/73 FALSE `minimum-residency` holds —
+    // a switch blocked by a shortfall that never happened. 256 KB clears the
+    // sample with ZERO margin (largest same-session gap: 134,596 B), so the
+    // constant is one step above it.
+    expect(RESIDENCY_TAIL_BYTES).toBe(524288);
+    // The two windows are independent budgets over two different streams, and
+    // the ledger's is the larger one: concurrent sessions interleave rows, so
+    // reaching three of THIS session's rows costs more than reaching one
+    // transcript record.
+    expect(RESIDENCY_TAIL_BYTES).toBeGreaterThan(TRANSCRIPT_TAIL_BYTES);
   });
 
   it('maps a full model id to its tier, and refuses anything it cannot name', () => {
@@ -495,8 +510,15 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
    * then-current `scripts/hooks/route-observe-pre.js` against the payload
    * `absentPayload()` builds below and dumping `line.data`. It is pinned here so
    * that supplying the two new inputs cannot change what a receipt looks like
-   * when neither input is available — the no-transcript path must stay
-   * byte-identical to what 220/220 live receipts already recorded.
+   * when neither input is available.
+   *
+   * WHICH "UNCHANGED" THIS IS. The baseline is the dd4771ca (H1) hook output,
+   * NOT the live corpus. It differs from base 2b10fd31 and from the 220/220
+   * receipts already on disk in exactly one reason code —
+   * `hysteresis:minimum-residency` became `hysteresis:residency-unknown` — and
+   * that substitution IS H1's intended change: an absent counter must not be
+   * reported as a measured shortfall. So this pin holds K1 against H1's output,
+   * and a diff against a live row is expected to show that one code.
    */
   const HEAD_ABSENT_RECEIPT = {
     schema_version: 1,
@@ -721,8 +743,12 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
         uuid: `${secret}-uuid`,
         cwd: `/somewhere/${secret}`,
         message: {
+          // fable, NOT the selected tier: `recommended` and `selected` are both
+          // opus for this agent, so an opus id would appear in the ledger even
+          // with the transcript read switched off and this test would pass
+          // vacuously. fable can only have come from the transcript.
           role: 'assistant',
-          model: MODELS.opus.id,
+          model: MODELS.fable.id,
           id: `${secret}-msgid`,
           content: [{ type: 'text', text: `${secret} full reasoning text` }],
         },
@@ -736,9 +762,14 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
     expect(r.stderr).not.toContain(secret);
     expect(Buffer.byteLength(r.stdout, 'utf8')).toBe(0);
 
+    // The read happened at all — without this the leak assertion below is
+    // green for a hook that never opened the file.
+    const [line] = readRunLedger(repo);
+    expect(line.data.models.current.model_id).toBe(MODELS.fable.id);
+
     const raw = readFileSync(ledgerFilePath(repo), 'utf-8');
     // The model id got through; NOTHING else from the transcript did.
-    expect(raw).toContain(MODELS.opus.id);
+    expect(raw).toContain(MODELS.fable.id);
     expect(raw).not.toContain(secret);
   });
 

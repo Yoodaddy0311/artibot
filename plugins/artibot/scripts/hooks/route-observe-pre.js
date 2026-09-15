@@ -165,14 +165,46 @@ function str(value) {
  * hunting for by a wide margin — and when it does not, the result is `null`,
  * which is the honest answer, not a wrong tier.
  *
- * Deliberately 2x `ledger-tail.js#DEFAULT_TAIL_BYTES` rather than inheriting
- * it: that 128 KB is derived from the ledger's 4 KB per-line cap, and the
- * transcript has no such cap. Same window rule, different stream, different
- * budget. NOT comparable to the 8 MB in `_review-stop-record.js:129` — Stop is
- * not a block point and can afford a read this one cannot.
+ * Deliberately NOT inherited from `ledger-tail.js#DEFAULT_TAIL_BYTES`: that
+ * 128 KB is derived from the ledger's 4 KB per-line cap, and the transcript has
+ * no such cap. Same window rule, different stream, different budget. NOT
+ * comparable to the 8 MB in `_review-stop-record.js:129` — Stop is not a block
+ * point and can afford a read this one cannot.
  * @type {number}
  */
 export const TRANSCRIPT_TAIL_BYTES = 262144;
+
+/**
+ * How much of the run ledger is read to count residency — 512 KB.
+ *
+ * A SEPARATE BUDGET FROM THE TRANSCRIPT'S, because it answers a different
+ * question. The transcript read needs to reach ONE record (the last assistant
+ * turn). This read needs to reach the `minimum_residency` barrier's worth of
+ * THIS SESSION'S rows — default 3 (`route-hysteresis.js:76`) — through a ledger
+ * where every concurrent session's rows are interleaved with them. Sessions
+ * running in parallel are what push a session's own previous row arbitrarily
+ * far back, so the window has to clear that interleaving, not just three lines.
+ *
+ * MEASURED on the live ledger (987,547 B / 1,175 rows, 2026-09-15 02:54Z),
+ * as the share of rows whose preceding three same-session rows all fall inside
+ * the window:
+ *
+ *   128 KB -> 69/73   256 KB -> 73/73 (0 headroom)   512 KB -> 73/73
+ *
+ * 128 KB — the inherited default this originally used — produces 4/73 FALSE
+ * `minimum-residency` holds: a real switch blocked by a shortfall that never
+ * happened. 256 KB clears the sample but with zero margin, since the largest
+ * observed gap between one session's consecutive rows was 134,596 B, and a
+ * busier day widens exactly that gap. 512 KB is the same 73/73 with room for
+ * the interleaving to grow.
+ *
+ * THE COST IS NOT THE CONSTRAINT HERE. `readNdjsonTail` p50 went 0.86 ms at
+ * 128 KB to 2.75 ms at 512 KB — under 1% of the hook's ~240 ms end-to-end,
+ * which is dominated by node process startup. Under-counting, by contrast,
+ * changes a routing decision.
+ * @type {number}
+ */
+export const RESIDENCY_TAIL_BYTES = 524288;
 
 /**
  * The host's placeholder `message.model` on an assistant record it injected
@@ -266,7 +298,10 @@ export function resolveIncumbentTier(transcriptPath) {
  *
  * Under-counts by design when the run is older than the tail window: the window
  * is a window (`ledger-tail.js` header), and a low count fails toward holding
- * the incumbent, which is the safe direction.
+ * the incumbent, which is the safe direction. Safe is not free, though — an
+ * under-count reads as `minimum-residency`, a MEASURED shortfall, so it blocks
+ * a switch that should have happened. {@link RESIDENCY_TAIL_BYTES} is sized
+ * against that failure, not against read cost.
  *
  * @param {unknown} events - Parsed ledger rows in append order
  * @param {string|null} sessionId - The session whose rows count
@@ -499,7 +534,11 @@ export async function observePre(hookData) {
     const currentTier = resolveIncumbentTier(hookData?.transcript_path);
     const actionsSinceSwitch = currentTier === null
       ? null
-      : countActionsSinceSwitch(readLedgerTail(projectRoot), sessionId, currentTier);
+      : countActionsSinceSwitch(
+        readLedgerTail(projectRoot, { tailBytes: RESIDENCY_TAIL_BYTES }),
+        sessionId,
+        currentTier,
+      );
 
     const receipt = buildReceipt({
       toolUseId,
