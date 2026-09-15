@@ -1071,3 +1071,27 @@ NEXT-SESSION 쪽이 요약 과정에서 권장을 누락한 것이며, 설계안
 **이 결정이 여는 것(리더 정리, 결정 아님)**: 3차 배치 후보 = D안 에이전트 2종 + allowlist/roster 갱신 +
 `review.claim_audit` 어휘 · docs:check 허용목록 스코프 + 15건 수리 · D9 동결 + writer 2 이관.
 **코드 착수는 `/split plan`(3차) 이후** — 이 절은 결정 기록이며 구현 순서를 정하지 않는다.
+
+---
+
+### 부록 0-2 후속(4). 오너 결정 4건 — Wave 11 (2026-09-15 10:0x 확정)
+
+**결정자: 오너 · 결정일: 2026-09-15 10:0x KST · 수단: `AskUserQuestion` 실답 1회(4건 묶음) · 기록: 리더 지시로 doc-updater 팀원 기록 · 세션 artibot-28/89ada2.**
+위 후속(3) 과 같은 규칙으로 읽는다 — **결정 문구는 오너 원장(선택지 label) 그대로**, 리더 해석·보완 없음.
+대상은 Wave 11 정찰 초안 4건의 결정 절이다:
+`.artibot/split/{ob17-switch-reasons,sh29-carrier-writer,outcome-md-emitter}/brief-draft.md`(로컬 전용).
+**4건 전부 정찰 초안 권장안과 일치**한다. 정본이 이미 답한 12항목은 질문하지 않았다 —
+OB-26 `recommendMinSubtasks=7`(§5 D12) · SH-06 D1~D3(§5 C8 · §3.4) · F04(b) OD2/OD3/OD5 ·
+C4 (iii)+(i) · outcome 결정 3·6 · SH-29 hook 신규 이벤트 Wave 12 · nl-activation 스토어(PRD E6) ·
+wire-preintake 새 모듈 0(PRD:70).
+
+| ID | 질문(정찰 초안 원문 요지) | 오너 결정 (2026-09-15 10:0x 확정) | 재결정 조건 |
+|---|---|---|---|
+| W11-Q1 | OB-17 D1 — 스폰 단위 receipt 의 incumbent(`models.current`) 원천 | **K1 리더 세션 모델.** `route-receipt.schema.json` "세션 스코프" 정의·`model-switcher.js` 와 일치, 스키마 무변경. `session-start.js` 가 payload `model` 키를 읽지 않으므로 호스트 프로브가 ob17 줄기 첫 단계 | 프로브에서 호스트 payload 에 `model` 키가 없으면 K2(같은 세션 직전 스폰의 selected) 재상정 |
+| W11-Q2 | OB-17 D2 — `actionsSinceSwitch` 부재를 hysteresis 가 "잔류 미충족"으로 읽는 착시(라이브 `hysteresis:minimum-residency` 200/200) | **H1 `residency-unknown` 별 코드(fail-closed 유지), H3 스키마 nullable 보류.** ob17 affectedPaths 에 스키마 4경로 추가 안 함 | H1 착지 뒤 라이브 분포에서 `residency-unknown` 이 과반이면 H3 를 Wave 12 에 상정 |
+| W11-Q3 | SH-29 E5 — carrier 3키(skill\|command\|hook) 중 Wave 11 범위 | **(a) skill 만 지금.** `tool.used` writer 가 0 이라 writer 신설. command → `intent.detected` writer, hook → 신규 이벤트(allowlist 39→40)는 Wave 12 어휘 결정 동반 | PRD:111 E5 기록은 "3키" 이므로 Wave 12 착수 시 E5 문구를 분할 표기로 갱신 |
+| W11-Q4 | outcome-md-emitter — `mission.completed{accepted:null}` "완료 선언" 트리거 | **(a) SessionEnd 유도 판정.** 세션 미션 중 `verify.completed ≥1 ∧ mission.completed 0` 이면 발행. 설계 :222 "session-end 또는 nightly", allowlist sources [hook, scheduler] 무수정 | 라이브 `review.completed`·`human.resolved` 가 ≥1 릴리스 동안 쌓이면 (b) 좁힘 재상정 |
+
+**이 결정이 여는 것(리더 정리, 결정 아님)**: Wave 11 plan 초안 `.artibot/split/plan-wave11-draft.json`
+(8줄기 + 롤링 `outcome-md-emitter`, 부채 1/8) 의 `_ownerDecisions` 에 같은 4건이 기록돼 있다 → `/split plan` 착수 가능.
+**코드 착수는 dispatch 이후** — 이 절은 결정 기록이며 구현 순서를 정하지 않는다.
