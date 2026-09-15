@@ -11,6 +11,7 @@
 import { persist, recordPhase, tick } from './_engine-helpers.js';
 import { appendLesson } from './memory.js';
 import { ackPhaseAttempt } from './phase-attempt.js';
+import { recordRecoveryDecision } from './recovery-record.js';
 
 /**
  * Phase names in canonical order.
@@ -122,6 +123,11 @@ export function safeAppendLesson(state, payload) {
  * longer writes it at delegation time, because that is precisely what made a
  * mid-EXECUTE crash look like a cleanly closed phase.
  *
+ * **It is also the SH-06 recovery-recording point** for `VERIFY`, for the same
+ * reason: a verify *result* only exists here. `recovery-record.js` writes a
+ * judgement into `state.recoveryJournal` and changes no transition; CA-03 is
+ * what later lets that judgement steer `pendingPhase`.
+ *
  * @param {object} state
  * @param {{ phase: string, status: string, [k: string]: any }} payload
  * @returns {object} mutated state
@@ -168,6 +174,13 @@ export function recordPhaseResult(state, payload = {}) {
         sourcePhase: 'IMPROVE',
       });
     }
+  }
+  // SH-06 recording point (Observe stage). A VERIFY *result* is the first
+  // moment the engine knows whether verification succeeded, so it is where the
+  // recovery judgement is journalled. Recording only — the transition above is
+  // untouched, and the recorder never throws into this ACK.
+  if (phase === 'VERIFY') {
+    recordRecoveryDecision(state, { ...rest, phase, status, fixedNext: nextPhaseAfter(phase) });
   }
   persist(state);
   return state;
