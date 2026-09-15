@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   atomicWriteJson,
   atomicWriteJsonSync,
@@ -10,6 +10,7 @@ import {
   listFiles,
   readJsonFile,
   readTextFile,
+  renameWithRetry,
   writeJsonFile,
 } from '../../lib/core/file.js';
 import fs from 'node:fs/promises';
@@ -367,6 +368,59 @@ describe('file', () => {
       expect(() => atomicWriteJsonSync(target, { v: 1 })).toThrow();
       const entries = fsSync.readdirSync(tmpDir);
       expect(entries.filter((e) => e.startsWith('sync-collide.json.tmp'))).toEqual([]);
+    });
+  });
+
+  // 2026-09-15 실측: 두 번 쓰는 시퀀스가 부하 하 480회 중 4회(0.83%)
+  // `EPERM: operation not permitted, rename '<dest>.tmp…' -> '<dest>'` 로 실패했다.
+  // 목적지가 이미 있는 두 번째 쓰기에서만 났다 — Windows 는 목적지에 열린 핸들이
+  // 남아 있으면 rename 에 EPERM 을 준다. 두 호출부에서 독립적으로 실증됐다:
+  // lib/git/split-brief.js#atomicWriteBytes(브리프) 와 atomicWriteTextSync(run.json).
+  //
+  // 이 절이 못 보는 것(rules §9): 실제 Windows 핸들 경합. 여기서는 renameSync 를
+  // 대역해 재시도 경로만 핀한다. 빈도 감소는 부하 반복 실측이 답한다.
+  describe('renameWithRetry()', () => {
+    /** Throw `code` on the first `failures` calls, then delegate to the real rename. */
+    function flakyRename(failures, code) {
+      const real = fsSync.renameSync.bind(fsSync);
+      let calls = 0;
+      const spy = vi.spyOn(fsSync, 'renameSync').mockImplementation((from, to) => {
+        calls += 1;
+        if (calls <= failures) {
+          const err = new Error(`${code}: injected rename failure`);
+          err.code = code;
+          throw err;
+        }
+        return real(from, to);
+      });
+      return { spy, count: () => calls };
+    }
+
+    it('retries a transient EPERM and lands the bytes on the third attempt', () => {
+      const tmp = path.join(tmpDir, 'retry.txt.tmp');
+      const dest = path.join(tmpDir, 'retry.txt');
+      fsSync.writeFileSync(tmp, 'payload');
+      const { spy, count } = flakyRename(2, 'EPERM');
+      try {
+        renameWithRetry(tmp, dest);
+        expect(count()).toBe(3);
+        expect(fsSync.readFileSync(dest, 'utf-8')).toBe('payload');
+        expect(fsSync.existsSync(tmp)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('throws ENOENT on the first attempt without retrying', () => {
+      const tmp = path.join(tmpDir, 'nope.txt.tmp');
+      const dest = path.join(tmpDir, 'nope.txt');
+      const { spy, count } = flakyRename(Number.POSITIVE_INFINITY, 'ENOENT');
+      try {
+        expect(() => renameWithRetry(tmp, dest)).toThrow(/ENOENT/);
+        expect(count()).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

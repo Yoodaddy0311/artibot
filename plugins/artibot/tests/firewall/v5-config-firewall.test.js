@@ -71,6 +71,10 @@ import { describe, expect, it } from 'vitest';
 
 import { loadModelPolicy, resolveModel } from '../../lib/core/model-policy.js';
 import { validateConfig } from '../../lib/core/config-schema.js';
+import {
+  FOLLOW_WORKFLOW_PLAN_CONFIG_KEY,
+  readFollowWorkflowPlan,
+} from '../../lib/runtime/middleware/workflow-mode.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
@@ -327,5 +331,43 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
 
   it('fable allowlist 는 10종이다 (MP-3: investigator·auditor 2종 추가)', () => {
     expect(config.agents.modelPolicy.fable.allowlist).toEqual([...FABLE_AGENTS]);
+  });
+});
+
+/**
+ * F04(b) `team.followWorkflowPlan` — 등재값 고정.
+ *
+ * 이 키는 `team` 아래 있어 위의 신설 6키 allowlist 사정권 밖이고,
+ * `split-config-firewall.test.js` 는 `config.split` 만 본다. JSON 스키마도
+ * 비-strict 라 값을 못 본다 — 그래서 여기서 소유한다.
+ *
+ * 지키는 것: (1) 키가 실재하고 (2) **boolean** false 이며 (3) 그 등재가
+ * 소비자를 켜지 않는다. (2)를 따로 두는 이유는 소비자가 `=== true` 리터럴
+ * 비교(`lib/runtime/middleware/workflow-mode.js#readFollowWorkflowPlan`)라서
+ * 문자열 `"false"` 도 OFF 로 읽히기 때문이다 — 타입이 조용히 문자열로 바뀌면
+ * 동작은 같으므로 런타임 테스트로는 안 잡힌다. 그 상태로 값이 `"true"` 가 되면
+ * 켜려는 의도가 조용히 실패한다.
+ *
+ * 이 게이트가 못 보는 것(rules §9):
+ *  - ON 일 때의 동작. `tests/runtime/middleware/workflow-mode.test.js` 와
+ *    `tests/runtime/workflow-plan-mode-record.test.js` 가 양방향을 본다.
+ *  - 스키마 선언. `lib/core/config-schema.js` 의 `team` 은 이 키를
+ *    **선언하지 않는다**(2026-09-15 실측). 비-strict 라 통과할 뿐이므로 오타 키는
+ *    여기서도 스키마에서도 안 잡힌다.
+ */
+describe('team.followWorkflowPlan — F04(b) 전환 키의 등재값', () => {
+  it('키가 등재돼 있고 boolean false 다 (문자열 "false" 거부)', () => {
+    expect(resolveDotPath(config, 'team.followWorkflowPlan')).toBe(false);
+    expect(typeof config.team.followWorkflowPlan).toBe('boolean');
+  });
+
+  it('등재가 소비자를 켜지 않는다 — readFollowWorkflowPlan 이 false 를 준다', () => {
+    // 기본값 등재의 정의는 "동작 변화 0" 이고, 이 단언이 그 직접 증명이다.
+    expect(readFollowWorkflowPlan(config)).toBe(false);
+  });
+
+  it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
+    expect(FOLLOW_WORKFLOW_PLAN_CONFIG_KEY).toBe('team.followWorkflowPlan');
+    expect(resolveDotPath(config, FOLLOW_WORKFLOW_PLAN_CONFIG_KEY)).toBe(false);
   });
 });

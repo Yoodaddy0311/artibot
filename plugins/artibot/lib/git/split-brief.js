@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildLimbMessage } from './split-dispatch.js';
+import { renameWithRetry } from '../core/file.js';
 import { resolveModel } from '../core/model-policy.js';
 
 /** Placeholders `renderPrompt` accepts. Anything else in `{UPPER_SNAKE}` form is an error. */
@@ -145,13 +146,20 @@ function limbPaths(root, limb) {
   return { dir, brief: path.join(dir, 'brief.md'), prompt: path.join(dir, 'prompt.md') };
 }
 
-/** Byte-exact atomic write: tmp sibling + rename, tmp removed on failure. */
+/**
+ * Byte-exact atomic write: tmp sibling + rename, tmp removed on failure.
+ *
+ * The rename goes through `lib/core/file.js#renameWithRetry` because a second
+ * dispatch writes over an existing destination, and on Windows that is where a
+ * transient EPERM appears (measured 2026-09-15: 4 of 480 runs under parallel
+ * vitest load — the `split-tools.test.js` F07 flake).
+ */
 function atomicWriteBytes(dest, bytes) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
   try {
     fs.writeFileSync(tmp, bytes);
-    fs.renameSync(tmp, dest);
+    renameWithRetry(tmp, dest);
   } catch (err) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
     throw err;

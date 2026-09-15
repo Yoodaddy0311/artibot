@@ -56,10 +56,12 @@ export async function readJsonFile(filePath) {
  * trailing newline), so this is transparent to existing callers.
  *
  * The cost of that atomicity is a new failure mode: the write now ends in a
- * rename, which on Windows can throw EPERM/EBUSY when antivirus, the file
- * indexer, or another process momentarily holds the target (see the hardening
- * note at scripts/utils/index.js:102-110). There is no retry here, so such a
- * failure propagates to the caller.
+ * rename, which on Windows can throw EPERM/EBUSY/EACCES when antivirus, the
+ * file indexer, or another process momentarily holds the target (see the
+ * hardening note at scripts/utils/index.js:102-110). Since 2026-09-15 that
+ * rename retries through {@link renameWithRetry} — five attempts with a
+ * 10·20·40·80ms backoff — and only propagates to the caller if the lock
+ * outlives the ~150ms budget, or if the error is not a transient one.
  *
  * @param {string} filePath - Absolute path to write to.
  * @param {object} data - Data to serialize as JSON.
@@ -94,6 +96,73 @@ function buildAtomicTmpPath(filePath) {
  */
 function cleanupTmpSync(tmpPath) {
   try { fsSync.unlinkSync(tmpPath); } catch { /* best-effort */ }
+}
+
+/**
+ * Rename errors worth retrying. On Windows `rename` fails with EPERM (or
+ * EBUSY/EACCES) when the DESTINATION still has an open handle — antivirus, the
+ * search indexer, or another reader that has not closed yet. The condition is
+ * transient and clears in tens of milliseconds.
+ *
+ * Only the destination-exists case is exposed: a rename that CREATES the
+ * destination cannot collide with a handle on it. That is why the failure
+ * always showed up on a second write, never a first.
+ * @type {Set<string>}
+ */
+export const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+/** Rename attempts before the original error propagates. @type {number} */
+export const MAX_RENAME_ATTEMPTS = 5;
+
+/**
+ * Synchronous sleep without busy-wait. `Atomics.wait` on a throwaway cell that
+ * nothing ever notifies always runs the full timeout, so it yields the thread
+ * to the OS scheduler instead of spinning the CPU.
+ *
+ * @param {number} ms - non-negative milliseconds
+ * @returns {void}
+ */
+export function sleepSync(ms) {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * `fs.renameSync` with bounded retry on a transient Windows destination lock.
+ *
+ * Measured (2026-09-15): a two-dispatch `/split` sequence under parallel vitest
+ * load refused in 4 of 480 runs (0.83%) with
+ * `EPERM: operation not permitted, rename '<dest>.tmp.<pid>.<ts>' -> '<dest>'`,
+ * and only ever on the SECOND write. It surfaced at two independent call sites
+ * — `lib/git/split-brief.js#atomicWriteBytes` (brief/prompt/addendum) and
+ * {@link atomicWriteTextSync} below (`run.json`) — which is why the helper
+ * lives here in core rather than being copied a fourth time.
+ *
+ * Backoff is 10·20·40·80ms across five attempts (~150ms budget). Anything that
+ * is not a transient code throws on the first attempt, so a genuine ENOENT or
+ * EXDEV still fails fast. After the final attempt the original error is
+ * re-thrown, so every caller's cleanup contract is unchanged.
+ *
+ * Not yet adopted by the three private copies that predate it
+ * (`lib/autopilot/session-store.js`, `lib/autopilot/lock.js`,
+ * `lib/core/file-lock.js`) — consolidating those is separate work.
+ *
+ * @param {string} tmp - source temp path
+ * @param {string} dest - destination final path
+ * @returns {void}
+ * @example
+ * renameWithRetry(tmpPath, '/path/runtime/state.json');
+ */
+export function renameWithRetry(tmp, dest) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fsSync.renameSync(tmp, dest);
+      return;
+    } catch (err) {
+      if (!TRANSIENT_RENAME_CODES.has(err?.code) || attempt >= MAX_RENAME_ATTEMPTS) throw err;
+      sleepSync(10 * 2 ** (attempt - 1));
+    }
+  }
 }
 
 /**
@@ -141,7 +210,7 @@ export function atomicWriteTextSync(filePath, content) {
   const tmp = buildAtomicTmpPath(filePath);
   try {
     fsSync.writeFileSync(tmp, content, 'utf-8');
-    fsSync.renameSync(tmp, filePath);
+    renameWithRetry(tmp, filePath);
   } catch (err) {
     cleanupTmpSync(tmp);
     throw err;

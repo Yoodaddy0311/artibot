@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_REQUIRED_SECTIONS,
   extractReportContract,
@@ -285,6 +285,66 @@ describe('materializeLimb', () => {
   it('rejects missing required inputs', () => {
     expect(() => materializeLimb({ parentRoot: '', worktreePath: 'x', limb: 'a' })).toThrow(TypeError);
     expect(() => materializeLimb()).toThrow(TypeError);
+  });
+
+  // 2026-09-15 실측: 부하 하 두 번 dispatch 하는 시퀀스 480회 중 4회(0.83%) 가
+  // `EPERM: operation not permitted, rename '<dest>.tmp.<pid>.<ts>' -> '<dest>'`
+  // 로 거부됐다. 목적지가 이미 존재하는 두 번째 dispatch 에서만 났다 — Windows 는
+  // 목적지에 열린 핸들(백신·인덱서)이 남아 있으면 rename 에 EPERM 을 준다.
+  // `tests/scripts/split-tools.test.js` F07 플래키의 원인이었다.
+  //
+  // 이 절이 못 보는 것(rules §9): 실제 Windows 핸들 경합. 여기서는 renameSync 를
+  // 대역해 재시도 경로만 핀한다. 빈도가 실제로 줄었는지는 부하 반복 실측이 답한다.
+  // EBUSY·EACCES 도 같은 재시도 경로를 타지만 이 site 에서 실측된 코드는 EPERM 뿐이라
+  // 케이스는 늘리지 않는다 — 두 코드의 근거는 session-store.js:41 선례다.
+  describe('transient Windows rename lock', () => {
+    /** Throw `code` on the first `failures` calls, then delegate to the real rename. */
+    function flakyRename(failures, code) {
+      const real = fs.renameSync.bind(fs);
+      let calls = 0;
+      const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        calls += 1;
+        if (calls <= failures) {
+          const err = new Error(`${code}: injected rename failure`);
+          err.code = code;
+          throw err;
+        }
+        return real(from, to);
+      });
+      return { spy, count: () => calls };
+    }
+
+    it('EPERM 2회 뒤 성공하면 바이트가 동일하고 tmp 잔존이 0 이다', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      const { spy, count } = flakyRename(2, 'EPERM');
+      try {
+        const r = materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P' });
+        // brief 3회(EPERM·EPERM·성공) + prompt 1회. seed 는 sibling 을 만들지 않는다.
+        expect(count()).toBe(4);
+        expect(fs.readFileSync(r.briefPath)).toEqual(Buffer.from(BRIEF));
+        expect(fs.readFileSync(r.promptPath, 'utf-8')).toBe('P');
+        expect(fs.readdirSync(path.dirname(r.briefPath)).filter((f) => f.includes('.tmp.'))).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('ENOENT 는 재시도 없이 즉시 throw 하고 tmp 를 남기지 않는다', () => {
+      const parent = mkTmp();
+      const wt = mkTmp();
+      seed(parent, 'auth');
+      const { spy, count } = flakyRename(Number.POSITIVE_INFINITY, 'ENOENT');
+      try {
+        expect(() => materializeLimb({ parentRoot: parent, worktreePath: wt, limb: 'auth', branch: 'b', plan, prompt: 'P' }))
+          .toThrow(/ENOENT/);
+        expect(count()).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.readdirSync(path.join(wt, '.artibot', 'split', 'auth')).filter((f) => f.includes('.tmp.'))).toEqual([]);
+    });
   });
 
   // 2026-09-14 실측(라이브 1건): 부모에 leader-addendum.md 가 있어도 worktree 로
