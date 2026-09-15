@@ -289,6 +289,12 @@ describe('T2 — no canonical decision is loud, not silent', () => {
     vi.resetModules();
     vi.doMock('../../lib/cognitive/workflow-plan.js', () => ({
       evaluateTrigger: evaluateTriggerImpl,
+      // REAL implementation, not a stub. The hook now takes its enable meaning
+      // from the planner too (one owner, 2026-09-15). A mock that omitted this
+      // would make `loadTeamConfig` throw, and the throw lands on the
+      // malformed-config branch — so all three cases below would go green on
+      // the WRONG stderr line and prove nothing about the decision paths.
+      isTeamEnabled: (team) => team?.enabled !== false && team?.autoApply !== false,
     }));
     return import('../../scripts/hooks/auto-team-trigger.js');
   }
@@ -336,8 +342,15 @@ describe('T2 — decision-owner anti-drift (source-level)', () => {
   it('the hook statically imports the canonical evaluator', () => {
     // Static, not `await import(...)`: this hook is on the UserPromptSubmit
     // hot path, so resolution cost is paid once per process, not per prompt.
+    //
+    // Additional named imports from the SAME module are allowed (2026-09-15:
+    // `isTeamEnabled` joined `evaluateTrigger` when the enable meaning was
+    // given one owner). That is not a loosening of the anti-drift property:
+    // `auto-team-trigger-denominator.test.js` requires exactly ONE
+    // workflow-plan.js import line and bans every plan/mode producer symbol
+    // from this file, so a second decision owner still cannot get in here.
     expect(HOOK_SRC).toMatch(
-      /^import \{ evaluateTrigger \} from '\.\.\/\.\.\/lib\/cognitive\/workflow-plan\.js';$/m,
+      /^import \{ evaluateTrigger(?:, \w+)* \} from '\.\.\/\.\.\/lib\/cognitive\/workflow-plan\.js';$/m,
     );
     expect(HOOK_SRC).not.toMatch(/await import\([^)]*workflow-plan/);
   });

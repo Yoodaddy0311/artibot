@@ -21,13 +21,12 @@
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { getPluginRoot, parseJSON, readStdin, toFileUrl, writeStdout } from '../utils/index.js';
-import { createErrorHandler, extractUserPromptFlagSurface, extractUserPromptText } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractUserPromptFlagSurface, extractUserPromptText, NO_TEAM_FLAG } from '../../lib/core/hook-utils.js';
 import { resolveAutopilotConsent } from '../../lib/autopilot/consent-gate.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'autopilot-nlu-trigger';
 const NO_AUTOPILOT_FLAG = /--no-autopilot\b/i;
-const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
  * Read team + autopilot config (single source of truth: artibot.config.json).

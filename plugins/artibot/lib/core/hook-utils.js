@@ -329,6 +329,26 @@ export function extractUserPromptFlagSurface(hookData) {
 }
 
 /**
+ * The `--no-team` opt-out flag, as one regex for the whole repository.
+ *
+ * Was four byte-identical copies (user-prompt-handler, auto-team-trigger,
+ * autopilot-nlu-trigger, auto-command-suggest) plus a fifth reader arriving
+ * with the middleware OFF gate. Four copies of a regex is four chances for one
+ * of them to drift, and the opt-out is a stated user intent: a copy that drifts
+ * fails OPEN, spawning a team the user asked not to have.
+ *
+ * Deliberately NOT global: `/g` carries `lastIndex` across calls, so a shared
+ * module-level instance with `/g` would alternate between matching and not
+ * matching on repeated `.test()` calls against the same string.
+ *
+ * Pair it with {@link extractUserPromptFlagSurface}, never with the rewritten
+ * prompt text — see that function's note for why.
+ *
+ * @type {RegExp}
+ */
+export const NO_TEAM_FLAG = /--no-team\b/i;
+
+/**
  * Extract the agent identifier from hook data.
  * Checks agent_id, subagent_id, and name fields.
  * @param {object} hookData - Parsed hook data

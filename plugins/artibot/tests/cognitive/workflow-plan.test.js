@@ -3,6 +3,7 @@ import {
   buildWorkflowPlan,
   deriveTeammateEfforts,
   EFFORT_LADDER,
+  isTeamEnabled,
 } from '../../lib/cognitive/workflow-plan.js';
 import { resolveEffort } from '../../lib/cognitive/router.js';
 
@@ -416,5 +417,124 @@ describe('buildWorkflowPlan() — edge cases', () => {
     const intent = { intents: [], recommendations: [], best: null };
     const plan = buildWorkflowPlan({ score: 0.1 }, intent, CONFIG);
     expect(plan.effort).toBe('xhigh'); // EFFORT_POLICY.team === 'xhigh'
+  });
+});
+
+// --- OFF gate -------------------------------------------------------------
+
+describe('isTeamEnabled()', () => {
+  // Truth table, not examples. `enabled` and `autoApply` are ANDed (owner
+  // decision OD3), and the absent-key row is the one that matters most: it is
+  // what every shipped config without these keys hits.
+  it.each([
+    ['both absent', undefined, true],
+    ['empty object', {}, true],
+    ['enabled:true, autoApply:true', { enabled: true, autoApply: true }, true],
+    ['enabled:false alone', { enabled: false }, false],
+    ['autoApply:false alone', { autoApply: false }, false],
+    ['both false', { enabled: false, autoApply: false }, false],
+    ['enabled:false, autoApply:true', { enabled: false, autoApply: true }, false],
+    ['enabled:true, autoApply:false', { enabled: true, autoApply: false }, false],
+    ['null config', null, true],
+  ])('%s -> %s', (_label, team, expected) => {
+    expect(isTeamEnabled(team)).toBe(expected);
+  });
+
+  it('only the literal false disables — a falsy non-boolean does not', () => {
+    // The gate is `!== false`, not truthiness, so a config that somehow holds
+    // `0` or `''` does not silently turn the team off for a user who never
+    // asked for that.
+    expect(isTeamEnabled({ enabled: 0 })).toBe(true);
+    expect(isTeamEnabled({ autoApply: '' })).toBe(true);
+  });
+
+  it('matches the expression the auto-team hook shipped before unification', () => {
+    // POSITIVE CONTROL for "one owner, same meaning": the hook's old inline
+    // expression, reproduced here, must agree on every row. If this ever
+    // diverges, the two surfaces are back to answering differently.
+    const legacy = (team) => team.autoApply !== false && team.enabled !== false;
+    const rows = [
+      {}, { enabled: true }, { enabled: false }, { autoApply: true },
+      { autoApply: false }, { enabled: false, autoApply: false },
+      { enabled: true, autoApply: false }, { enabled: false, autoApply: true },
+    ];
+    for (const team of rows) expect(isTeamEnabled(team)).toBe(legacy(team));
+  });
+});
+
+describe('buildWorkflowPlan() — OFF gate', () => {
+  // The control: this exact intent/score DOES elect a team. Every "inline"
+  // below is measured against it, so none of them can pass by way of a trigger
+  // that was never going to fire.
+  const FIRING_INTENT = intentWith(4);
+  const FIRING_SCORE = { score: 0.9 };
+
+  it('CONTROL: team is elected when nothing is turned off', () => {
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, CONFIG, { budgetResolver: () => 4000 });
+    expect(plan.runner).toBe('team');
+    expect(plan.trigger.fired).toBe(true);
+    expect(plan.teammates.length).toBe(4);
+  });
+
+  it('team.enabled:false forces inline and says why', () => {
+    const config = { team: { ...CONFIG.team, enabled: false } };
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, config, { budgetResolver: () => 4000 });
+    expect(plan.runner).toBe('inline');
+    expect(plan.autoFire).toBe(false);
+    expect(plan.teammates).toEqual([]);
+    expect(plan.perAgentBudget).toBe(0);
+    expect(plan.trigger.fired).toBe(false);
+    expect(plan.trigger.reasons).toContain('team-disabled');
+  });
+
+  it('team.autoApply:false forces inline and says why', () => {
+    const config = { team: { ...CONFIG.team, autoApply: false } };
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, config, { budgetResolver: () => 4000 });
+    expect(plan.runner).toBe('inline');
+    expect(plan.trigger.reasons).toContain('team-disabled');
+  });
+
+  it('deps.optOut forces inline and says why', () => {
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, CONFIG, {
+      budgetResolver: () => 4000,
+      optOut: true,
+    });
+    expect(plan.runner).toBe('inline');
+    expect(plan.trigger.reasons).toContain('no-team-flag');
+  });
+
+  it('carries BOTH reasons when the config is off AND the flag is present', () => {
+    const config = { team: { ...CONFIG.team, enabled: false } };
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, config, { optOut: true });
+    expect(plan.trigger.reasons.slice(0, 2)).toEqual(['team-disabled', 'no-team-flag']);
+  });
+
+  it('KEEPS the threshold reasons alongside the OFF reason', () => {
+    // Without this, an OFF session and a session that simply never met the
+    // thresholds record the same thing, and the F04(b) mismatch denominator
+    // cannot separate "the user said no" from "the job was small".
+    const config = { team: { ...CONFIG.team, enabled: false } };
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, config, {});
+    expect(plan.trigger.reasons).toContain('team-disabled');
+    expect(plan.trigger.reasons).toContain('complexity>=high');
+    expect(plan.trigger.reasons.indexOf('team-disabled'))
+      .toBeLessThan(plan.trigger.reasons.indexOf('complexity>=high'));
+  });
+
+  it('only the literal true opts out — a truthy non-boolean does not', () => {
+    const plan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, CONFIG, {
+      budgetResolver: () => 4000,
+      optOut: 'yes',
+    });
+    expect(plan.runner).toBe('team');
+  });
+
+  it('leaves the shape of an ordinary inline plan untouched', () => {
+    // The OFF branch must return the SAME shape as a trigger that did not
+    // fire — a caller reading `plan.runner` has no third case to handle.
+    const offPlan = buildWorkflowPlan(FIRING_SCORE, FIRING_INTENT, { team: { ...CONFIG.team, enabled: false } }, {});
+    const quietPlan = buildWorkflowPlan({ score: 0.1 }, intentWith(1), CONFIG, {});
+    expect(Object.keys(offPlan).sort()).toEqual(Object.keys(quietPlan).sort());
+    expect(Object.isFrozen(offPlan)).toBe(true);
   });
 });

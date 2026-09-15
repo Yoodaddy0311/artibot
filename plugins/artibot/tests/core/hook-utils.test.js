@@ -21,6 +21,7 @@ import {
   isSkippablePath,
   logHookError,
   matchesPathPattern,
+  NO_TEAM_FLAG,
   normalizePath,
 } from '../../lib/core/hook-utils.js';
 
@@ -588,5 +589,38 @@ describe('hook-utils / isArtibotRepo', () => {
     } finally {
       process.chdir(orig);
     }
+  });
+});
+
+describe('NO_TEAM_FLAG', () => {
+  // ONE definition for the whole repository (owner decision OD4). It was four
+  // byte-identical copies across the hooks, and a fifth reader was about to be
+  // added by the middleware OFF gate. The source and flags are pinned because
+  // every consumer now inherits whatever this object is: a drift here changes
+  // five surfaces at once, silently, in the fail-OPEN direction (a team spawned
+  // against a stated opt-out).
+  it('is the exact pattern the four hook copies carried', () => {
+    expect(NO_TEAM_FLAG.source).toBe('--no-team\\b');
+    expect(NO_TEAM_FLAG.flags).toBe('i');
+  });
+
+  it('is NOT global — a shared instance with /g would alternate on repeat calls', () => {
+    // `lastIndex` persists on a global regex, so the second `.test()` of the
+    // same string returns false. With one shared module-level instance that is
+    // a real failure mode, not a style point.
+    expect(NO_TEAM_FLAG.global).toBe(false);
+    expect(NO_TEAM_FLAG.test('do it --no-team')).toBe(true);
+    expect(NO_TEAM_FLAG.test('do it --no-team')).toBe(true);
+  });
+
+  it.each([
+    ['plain flag', 'implement the feature --no-team', true],
+    ['uppercase', 'implement the feature --NO-TEAM', true],
+    ['mid-sentence', 'please --no-team do this', true],
+    ['word boundary respected', 'implement --no-teamwork please', false],
+    ['absent', 'implement the feature', false],
+    ['no leading dashes', 'no-team', false],
+  ])('%s', (_label, input, expected) => {
+    expect(NO_TEAM_FLAG.test(input)).toBe(expected);
   });
 });

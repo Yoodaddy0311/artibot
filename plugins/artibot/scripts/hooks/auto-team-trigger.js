@@ -51,12 +51,11 @@
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, extractUserPromptFlagSurface, extractUserPromptText } from '../../lib/core/hook-utils.js';
-import { evaluateTrigger } from '../../lib/cognitive/workflow-plan.js';
+import { createErrorHandler, extractUserPromptFlagSurface, extractUserPromptText, NO_TEAM_FLAG } from '../../lib/core/hook-utils.js';
+import { evaluateTrigger, isTeamEnabled } from '../../lib/cognitive/workflow-plan.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'auto-team-trigger';
-const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
  * ROLLBACK TOGGLE (first release only — delete with the v+1 release).
@@ -178,7 +177,10 @@ function loadTeamConfig(pluginRoot) {
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const team = cfg?.team ?? {};
     return {
-      enabled: team.autoApply !== false && team.enabled !== false,
+      // Same expression as before, now with ONE owner. The middleware path
+      // needs this meaning too (it had none), and a second copy of it is how
+      // this hook and the planner would answer the same question differently.
+      enabled: isTeamEnabled(team),
       triggers: team.autoApplyTriggers || {},
     };
   } catch {

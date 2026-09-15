@@ -54,16 +54,21 @@ let sandboxRepo;
 let sandboxCwd;
 let sandboxRoot;
 /**
- * A SECOND plugin root, identical to `sandboxRoot` except that its
- * `artibot.config.json` carries `team.enabled:false`.
+ * Plugin roots identical to `sandboxRoot` except for one `team` key each:
+ * `enabled:false` and `autoApply:false`. Both spellings are exercised because
+ * both are documented opt-outs (`CLAUDE.md` Operator-Waits names
+ * `team.autoApply`, `artibot.config.json` ships `team.enabled`) and they are
+ * ANDed, so a gate that read only one would honour half the contract.
  *
- * Built as a separate root rather than by rewriting `sandboxRoot`'s config
+ * Built as separate roots rather than by rewriting `sandboxRoot`'s config
  * mid-suite: the config is copied once in `beforeAll`, so mutating it would
  * make every later case in this file depend on execution order. Selected
  * per-case through `runDispatcher`'s env override, which is applied AFTER the
  * default `CLAUDE_PLUGIN_ROOT` and therefore wins.
+ *
+ * @type {Record<string, string>}
  */
-let sandboxOffRoot;
+const sandboxOffRoots = {};
 
 /**
  * SETUP-ONLY ISOLATION (assertions and fixtures are untouched).
@@ -130,23 +135,28 @@ beforeAll(() => {
   );
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
 
-  // TEAM-OFF root. Same links, same real `lib/`, only `team.enabled` differs —
-  // so a difference measured between the two roots is the config key, not the
-  // environment.
-  sandboxOffRoot = mkdtempSync(path.join(tmpdir(), 'artibot-userprompt-off-'));
-  for (const dir of ['lib', 'commands', 'skills', 'agents']) {
-    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(sandboxOffRoot, dir), linkType);
+  // TEAM-OFF roots. Same links, same real `lib/`, one `team` key differs — so
+  // a difference measured between a root and `sandboxRoot` is the config key,
+  // not the environment.
+  const realConfig = readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8');
+  for (const [label, teamOverride] of [
+    ['enabled', { enabled: false }],
+    ['autoApply', { autoApply: false }],
+  ]) {
+    const root = mkdtempSync(path.join(tmpdir(), `artibot-userprompt-off-${label}-`));
+    for (const dir of ['lib', 'commands', 'skills', 'agents']) {
+      symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(root, dir), linkType);
+    }
+    const offConfig = JSON.parse(realConfig);
+    offConfig.team = { ...(offConfig.team || {}), ...teamOverride };
+    writeFileSync(
+      path.join(root, 'artibot.config.json'),
+      JSON.stringify(offConfig, null, 2),
+      'utf-8',
+    );
+    mkdirSync(path.join(root, 'runtime'), { recursive: true });
+    sandboxOffRoots[label] = root;
   }
-  const offConfig = JSON.parse(
-    readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'),
-  );
-  offConfig.team = { ...(offConfig.team || {}), enabled: false };
-  writeFileSync(
-    path.join(sandboxOffRoot, 'artibot.config.json'),
-    JSON.stringify(offConfig, null, 2),
-    'utf-8',
-  );
-  mkdirSync(path.join(sandboxOffRoot, 'runtime'), { recursive: true });
 
   // Pre-existing pollution from before the anchor landed is NOT deleted here:
   // removing files from a developer's real store is not a test's business, and
@@ -167,7 +177,9 @@ afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxRepo) rmSync(sandboxRepo, { recursive: true, force: true });
   if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
-  if (sandboxOffRoot) rmSync(sandboxOffRoot, { recursive: true, force: true });
+  for (const root of Object.values(sandboxOffRoots)) {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 /**
@@ -520,7 +532,10 @@ describe('_userprompt-dispatcher (integration)', () => {
     + '마이그레이션을 프로덕션에 배포한 뒤, 마지막으로 보안 감사와 테스트 커버리지를 추가해줘';
   const TEAM_SURFACES = ['[artibot:team runner=team', 'Execution contract', 'Delegation contract'];
 
-  it('team OFF via team.enabled=false suppresses every team surface', () => {
+  it.each([
+    ['team.enabled=false', 'enabled', '9120048e-3385-4855-a35b-09c89e5dd686'],
+    ['team.autoApply=false', 'autoApply', '9120048e-3385-4855-a35b-09c89e5dd689'],
+  ])('team OFF via %s suppresses every team surface', (_label, rootKey, offSession) => {
     // POSITIVE CONTROL — default (team ON) root, same prompt, same helper.
     const on = runDispatcher({
       hook_event_name: 'UserPromptSubmit',
@@ -537,14 +552,14 @@ describe('_userprompt-dispatcher (integration)', () => {
       .toContain('[artibot:route system2]');
     expect(onCtx).toContain('[auto-team-suggested]');
 
-    // OFF — identical payload, plugin root whose config says team.enabled:false.
+    // OFF — identical payload, plugin root whose config carries the opt-out.
     const off = runDispatcher(
       {
         hook_event_name: 'UserPromptSubmit',
         prompt: TEAM_PROMPT,
-        session_id: '9120048e-3385-4855-a35b-09c89e5dd686',
+        session_id: offSession,
       },
-      { CLAUDE_PLUGIN_ROOT: sandboxOffRoot },
+      { CLAUDE_PLUGIN_ROOT: sandboxOffRoots[rootKey] },
     );
     expect(off).not.toBeNull();
     const offCtx = off.hookSpecificOutput?.additionalContext || '';

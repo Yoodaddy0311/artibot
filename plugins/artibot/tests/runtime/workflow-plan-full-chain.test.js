@@ -114,4 +114,37 @@ describe('workflow-plan full chain — router → tasks → team directive', () 
     // At least one per-teammate effort directive is serialized behind the head.
     expect(directive).toMatch(/\[artibot:effort level=(low|medium|high|xhigh|max)\]/);
   });
+
+  it('the directive is EMPTY end-to-end when the team is turned off', async () => {
+    // The same chain, the same system2 prompt, one config key different. The
+    // case above is this one's control: it proves the directive is non-empty
+    // here whenever the team is on, so an empty string below is the opt-out
+    // and not a chain that stopped producing plans.
+    //
+    // `runtime-prompt.js` is UNTOUCHED by the OFF work. It does not need to
+    // know the team was disabled — it asks the plan, and the plan now says
+    // inline, so the spawn directive collapses to '' on its own.
+    writeFileSync(
+      path.join(pluginRoot, 'artibot.config.json'),
+      JSON.stringify({
+        team: { enabled: false, autoApplyTriggers: CONFIG.team.autoApplyTriggers },
+        runtime: { effort: { budgetMap: { xhigh: 128000, high: 64000, medium: 32000, low: 16000 } } },
+      }),
+    );
+
+    const router = createRouterMiddleware();
+    const tasks = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = freshState();
+
+    await router(state);
+    expect(state.context.routing.system, 'the prompt must still route system2, or this proves nothing')
+      .toBe('system2');
+
+    await tasks(state);
+
+    expect(state.context.tasks.mode).toBe('subAgent');
+    expect(state.context.tasks.meta?.workflowPlan).toBeUndefined();
+    expect(state.userPrompt).not.toContain('Execution contract');
+    expect(buildTeamDirective(state.context.tasks.meta?.workflowPlan)).toBe('');
+  });
 });

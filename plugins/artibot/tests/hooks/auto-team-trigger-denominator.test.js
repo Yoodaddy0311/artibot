@@ -30,7 +30,17 @@ import { evaluatePrompt } from '../../scripts/hooks/auto-team-trigger.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'auto-team-trigger.js');
-const PRODUCER_PATH = path.join(PLUGIN_ROOT, 'lib', 'runtime', 'middleware', 'tasks.js');
+/**
+ * The producer the positive control scans.
+ *
+ * Moved 2026-09-15 from `tasks.js` to `workflow-mode.js`: the plan/record pair
+ * moved there with the mode resolver, so `tasks.js` no longer contains either
+ * needle. Pointing this at the file that still holds them keeps the control
+ * measuring what it was written to measure — a control that scans a file the
+ * symbols left would pass for the wrong reason, which is the failure mode its
+ * own comment warns about.
+ */
+const PRODUCER_PATH = path.join(PLUGIN_ROOT, 'lib', 'runtime', 'middleware', 'workflow-mode.js');
 
 const RULING_MARKER = 'THIRD PRODUCER — EXCLUDED FROM THE plan/mode MISMATCH DENOMINATOR';
 

@@ -851,4 +851,111 @@ describe('middleware/tasks — workflow plan recorded on BOTH routing paths (F04
     expect(task.phases).toEqual(['execute', 'verify']);
     expect(task.meta?.workflowPlan).toBeUndefined();
   });
+
+  // -------------------------------------------------------------------------
+  // OFF GATE. Until 2026-09-15 this middleware read no team enable state at
+  // all: `team.enabled:false` and `--no-team` were honoured by
+  // `scripts/hooks/auto-team-trigger.js` and by nothing else, so a system2
+  // prompt under an explicit opt-out still produced `mode:'agentTeam'`, a
+  // three-phase task, an attached plan (which `runtime-prompt.js` turns into
+  // `[artibot:team runner=team …]`) and an "Execution contract" telling the
+  // model to plan in phases.
+  //
+  // Every case below is measured against the ON control directly beneath this
+  // comment. Without it, "mode is subAgent" would pass just as happily if the
+  // fixture had stopped electing a team for an unrelated reason.
+  // -------------------------------------------------------------------------
+  describe('OFF gate: an opt-out outranks system2 routing', () => {
+    /** The state helper, plus a raw host prompt on hookData for the flag surface. */
+    function offState(system, sessionId, { hostPrompt } = {}) {
+      const state = planState(system, sessionId, { intent: { recommendations: TWO_RECOMMENDATIONS } });
+      if (hostPrompt !== undefined) state.input.hookData.prompt = hostPrompt;
+      return state;
+    }
+
+    async function run(system, { config, hostPrompt } = {}) {
+      if (config) writeConfig(config);
+      const sessionId = nextSessionId();
+      const mw = createTasksMiddleware({ now: () => 1700000000000 });
+      const state = offState(system, sessionId, { hostPrompt });
+      const result = await mw(state);
+      const planned = readDecisionEvents(sessionId, { cwd: projectRoot })
+        .filter((e) => e.type === WORKFLOW_PLANNED);
+      return { task: result.context.tasks, planned, userPrompt: result.userPrompt };
+    }
+
+    it('CONTROL: system2 with the team ON still spawns a team', async () => {
+      const { task, planned, userPrompt } = await run('system2');
+      expect(task.mode).toBe('agentTeam');
+      expect(task.phases).toEqual(['plan', 'execute', 'verify']);
+      expect(task.meta?.workflowPlan?.runner).toBe('team');
+      expect(userPrompt).toContain('Execution contract');
+      expect(planned[0].data.mode).toBe('agentTeam');
+      expect(planned[0].data.runner).toBe('team');
+    });
+
+    it.each([
+      ['team.enabled:false', { enabled: false }, 'team-disabled'],
+      ['team.autoApply:false', { autoApply: false }, 'team-disabled'],
+    ])('%s drops system2 to subAgent', async (_label, off, reason) => {
+      const { task, planned, userPrompt } = await run('system2', {
+        config: { ...TEAM_TRIGGER_CONFIG, team: { ...TEAM_TRIGGER_CONFIG.team, ...off } },
+      });
+
+      expect(task.mode).toBe('subAgent');
+      expect(task.phases).toEqual(['execute', 'verify']);
+      expect(task.meta?.workflowPlan).toBeUndefined();
+      expect(userPrompt).not.toContain('Execution contract');
+
+      // The record must distinguish OFF from "the trigger did not fire".
+      expect(planned).toHaveLength(1);
+      expect(planned[0].data.mode).toBe('subAgent');
+      expect(planned[0].data.runner).toBe('inline');
+      expect(planned[0].data.trigger.reasons).toContain(reason);
+    });
+
+    it('--no-team on the host prompt drops system2 to subAgent', async () => {
+      const { task, planned, userPrompt } = await run('system2', {
+        hostPrompt: `${PROMPT} --no-team`,
+      });
+
+      expect(task.mode).toBe('subAgent');
+      expect(task.phases).toEqual(['execute', 'verify']);
+      expect(task.meta?.workflowPlan).toBeUndefined();
+      expect(userPrompt).not.toContain('Execution contract');
+      expect(planned[0].data.mode).toBe('subAgent');
+      expect(planned[0].data.runner).toBe('inline');
+      expect(planned[0].data.trigger.reasons).toContain('no-team-flag');
+    });
+
+    it('reads the flag from `user_prompt` too, not just `prompt`', async () => {
+      // `extractUserPromptFlagSurface` unions both keys on purpose: an opt-out
+      // is a stated intent and must not be erasable by whichever key a given
+      // host or rewriter happens to fill.
+      const sessionId = nextSessionId();
+      const mw = createTasksMiddleware({ now: () => 1700000000000 });
+      const state = offState('system2', sessionId);
+      state.input.hookData.user_prompt = `${PROMPT} --no-team`;
+      const result = await mw(state);
+      expect(result.context.tasks.mode).toBe('subAgent');
+    });
+
+    it('does not read the flag out of the middle of a word', async () => {
+      // `\b` anchoring: `--no-teamwork` is not an opt-out. Pinned because the
+      // regex now has ONE definition and a change to it reaches four hooks and
+      // this middleware at once.
+      const { task } = await run('system2', { hostPrompt: `${PROMPT} --no-teamwork` });
+      expect(task.mode).toBe('agentTeam');
+    });
+
+    it('leaves system1 alone: OFF changes the record, not the mode', async () => {
+      // system1 was already `subAgent`. The reason is what is new, and it is
+      // what keeps an OFF session distinguishable in the denominator.
+      const { task, planned } = await run('system1', {
+        config: { ...TEAM_TRIGGER_CONFIG, team: { ...TEAM_TRIGGER_CONFIG.team, enabled: false } },
+      });
+      expect(task.mode).toBe('subAgent');
+      expect(planned[0].data.trigger.reasons).toContain('team-disabled');
+    });
+  });
 });
