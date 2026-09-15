@@ -1,0 +1,76 @@
+{
+  "_note": "FROZEN FIXTURE — live host payload KEY NAMES only. Contains NO values: no prompts, no paths, no ids, no cwd, no session_id, no transcript_path, no permission_mode value. NOTE that this event's payload DOES carry the user's prompt body under the `prompt` key on the wire; that value is deliberately absent here and must never be pasted in. Captured by a dev-only probe (scripts/dev/probe-hook-keys.js) registered through a temporary `claude --settings <scratch file>`; ~/.claude/settings.json and hooks/hooks.json were not modified (sha256 of user settings identical before and after). Do not regenerate casually — a differing key set on a newer host is the signal INCIDENT §6.1 ④ wants to see as a diff.",
+  "fixture_format": "INCIDENT-2026-09-03-hook-payload-contract.md §6.1 ① (live-probe variant, see ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §1.2); same field layout as PreToolUse.Agent.json in this directory",
+  "host_version": "2.1.272",
+  "host_version_source": "probe session transcripts (.jsonl) field \"version\" — 3/3 transcript files (2 main sessions + 1 subagent transcript) agree on 2.1.272; `claude --version` on the same host also prints \"2.1.272 (Claude Code)\"",
+  "host_version_note": "Twelve patches newer than PreToolUse.Agent.json (2.1.260). PreToolUse.Agent.json listed the UserPromptSubmit probe under not_measured (\"INCIDENT §7 D2 — out of this limb's scope\"); this file closes that item for the key-set question only.",
+  "binary_sha256": "not-applicable (live probe, not binary-anchor extraction)",
+  "raw": "not-applicable (live probe records key names only; nothing to store verbatim)",
+  "extraction_method": "live probe via --settings, key names only",
+  "extraction_command": "cd <scratch>/probe && claude -p --settings probe-settings.json --output-format json --max-turns 4 \"<prompt>\"   # hook command in probe-settings.json = node <worktree>/plugins/artibot/scripts/dev/probe-hook-keys.js; UserPromptSubmit registered with no matcher field (the event is not tool-scoped)",
+  "extracted_at_kst": "2026-09-15 11:00–11:02",
+  "extracted_by": "split limb ob17-switch-reasons, task B0 (host payload model-key probe, code change 0)",
+  "registration": {
+    "where": "temporary settings JSON in the session scratchpad, passed with --settings; user settings untouched (sha256 647565d5…1edb65 identical before and after, size and mtime unchanged — no revert needed)",
+    "UserPromptSubmit_matcher": "none — the hooks entry omitted `matcher` entirely and fired on 3/3 prompts",
+    "matcher_syntax": "not applicable; UserPromptSubmit is not tool-scoped, so no matcher was supplied and none was needed",
+    "settings_merge_behaviour": "MERGED, not replaced — the user's own pre-existing SessionEnd hook also ran in both probe sessions (it emitted one stderr line, \"Hook cancelled\"), confirming the 2026-09-04 merge observation still holds on 2.1.272",
+    "probe_execution": "headless (claude -p) with cwd = the session scratchpad, NOT the worktree (a repo-rooted SessionStart hook has moved the branch in an earlier session); both sessions returned subtype success, is_error false, exit 0"
+  },
+  "scenarios": [
+    {
+      "id": "a-no-tools",
+      "description": "one headless session, prompt instructs the model to reply with one word and use no tools",
+      "sessions": 1,
+      "userpromptsubmit_rows": 1,
+      "num_turns": 1,
+      "wall_clock_seconds": 33.3,
+      "captured_at_kst": "11:00:18"
+    },
+    {
+      "id": "b-one-agent",
+      "description": "one headless session, prompt instructs the model to call Agent once with subagent_type general-purpose, then reply — TWO rows, the second after the Agent call returned",
+      "sessions": 1,
+      "userpromptsubmit_rows": 2,
+      "num_turns": 2,
+      "wall_clock_seconds": 64.1,
+      "captured_at_kst": "11:01:25, 11:02:04"
+    }
+  ],
+  "totals": {
+    "sessions": 2,
+    "userpromptsubmit_rows": 3,
+    "probe_ndjson_lines_before": 15,
+    "probe_ndjson_lines_after": 22,
+    "probe_ndjson_rows_added": 7
+  },
+  "UserPromptSubmit": {
+    "top_level_keys": ["cwd", "hook_event_name", "permission_mode", "prompt", "prompt_id", "session_id", "transcript_path"],
+    "tool_input_type": "absent (UserPromptSubmit carries no tool_input; the probe recorded tool_input_keys null on 3/3 rows)",
+    "has_prompt_id": true,
+    "has_prompt_id_rows": "3/3",
+    "has_model": false,
+    "has_model_rows": "0/3",
+    "note": "Carries both `prompt` (the body) and `prompt_id`. The prompt_id is the design's 1st-tier correlation key and is also present on PreToolUse and SubagentStart on this host, so a UserPromptSubmit row can be joined to the spawns of the same turn."
+  },
+  "required_keys_for_K1a": ["model"],
+  "verdict": "K1a-no-go",
+  "verdict_rule": "K1(a) — deriving the active model from a hook payload — is a go only if `model` is a top-level key of the event. It is absent on 3/3 UserPromptSubmit rows, so this event cannot source it.",
+  "missing": ["model"],
+  "observations": [
+    "`model` is NOT a top-level key of UserPromptSubmit: documented as optional on the Agent tool's own input schema, but observed in 0/3 rows across 2 headless sessions on this host. The Agent tool schema (read from the probe session transcript's tool list) declares `model` as an optional string with enum [sonnet, opus, haiku, fable] — so the host has a notion of a per-spawn model, it just does not put one on this hook payload.",
+    "The key set is IDENTICAL on all 3 rows, including the second row of scenario b which fired after an Agent call returned — a mid-turn continuation is not distinguishable from a fresh prompt by key names alone.",
+    "Scenario b produced 2 rows from 1 user prompt. Row count is therefore NOT a count of user prompts; anything that meters per-prompt off this event would overcount on turns that use tools.",
+    "`permission_mode` is present here and on PreToolUse, but absent on SessionStart and SubagentStart on the same host — the four key sets are not nested.",
+    "The probe never writes the `prompt` VALUE, which is the reason this event is safe to instrument at all; the key's presence is the whole of what is recorded.",
+    "ndjson rows themselves live at ~/.claude/artibot/runtime/probe-keys.ndjson (value-free); the baseline was 15 lines and the two sessions appended 7."
+  ],
+  "not_measured": [
+    "interactive (non-headless) sessions — only `claude -p` was probed, so whether an interactive UserPromptSubmit carries additional keys (including `model`) is unmeasured",
+    "the VALUE of `permission_mode`, `prompt`, or any other key — the probe records key names only by design",
+    "whether a 64KB+ prompt is masked or truncated by the host on this event (design §6 #3) — not exercised",
+    "whether `model` appears in a session where a non-default model was selected explicitly — both probe sessions ran the host default",
+    "the hook's OUTPUT contract (additionalContext injection, INCIDENT §7 D2) — this capture measured the INPUT key set only",
+    "the installed plugin's own hooks.json registration of UserPromptSubmit — this capture fired through a temporary --settings, as every capture in this directory has"
+  ]
+}

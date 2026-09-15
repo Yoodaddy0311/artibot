@@ -435,12 +435,21 @@ function result(parts) {
  *   1. no candidate tier                      -> `no-candidate`
  *   2. candidate equals incumbent             -> `same-tier`
  *   3. catalog cannot price either tier       -> `catalog-miss`
- *   4. §30 residency barrier not yet met      -> `minimum-residency`
- *   5. utility inside the ±band of threshold  -> `hysteresis-band`
- *   6. utility <= threshold                   -> `below-threshold`
- * Otherwise `hold: false`. A recognised `override` (§29) skips 4-6 but never
+ *   4. §30 residency count unusable/absent    -> `residency-unknown`
+ *   5. §30 residency barrier not yet met      -> `minimum-residency`
+ *   6. utility inside the ±band of threshold  -> `hysteresis-band`
+ *   7. utility <= threshold                   -> `below-threshold`
+ * Otherwise `hold: false`. A recognised `override` (§29) skips 4-7 but never
  * 1-3: an immediate escalation still cannot switch to a tier that does not
  * exist or cannot be priced.
+ *
+ * 4 and 5 both hold, and are deliberately separate codes: `minimum-residency`
+ * asserts a MEASURED count short of the barrier, while `residency-unknown`
+ * asserts only that no usable count arrived (absent, negative, or non-numeric —
+ * `nonNegative` collapses all three to null). Conflating them would report
+ * telemetry gaps as policy decisions. `residency-unknown` is intentionally
+ * outside `routing-scorecard.js#AVOIDED_SWITCH_REASONS`, so it surfaces as its
+ * own `other:` bucket instead of inflating the §38 `residency` row.
  *
  * @param {object} [input] - Evaluation input.
  * @param {string|null} [input.from] - Incumbent tier alias, or null on the first decision.
@@ -525,6 +534,11 @@ export function evaluateSwitch(input = {}) {
   if (override !== null) {
     hold = false;
     reason.push(`override:${override}`);
+  } else if (actions === null) {
+    // No usable count: hold, but say the counter was missing rather than claim
+    // a shortfall that was never measured (§30 fail-closed, honestly labelled).
+    hold = true;
+    reason.push('residency-unknown');
   } else if (!residency.satisfied) {
     hold = true;
     reason.push('minimum-residency');

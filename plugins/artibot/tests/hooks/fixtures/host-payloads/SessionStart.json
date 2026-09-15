@@ -1,0 +1,77 @@
+{
+  "_note": "FROZEN FIXTURE — live host payload KEY NAMES only. Contains NO values: no prompts, no paths, no ids, no cwd, no session_id, no transcript_path, no source value. Captured by a dev-only probe (scripts/dev/probe-hook-keys.js) registered through a temporary `claude --settings <scratch file>`; ~/.claude/settings.json and hooks/hooks.json were not modified (sha256 of user settings identical before and after). Do not regenerate casually — a differing key set on a newer host is the signal INCIDENT §6.1 ④ wants to see as a diff.",
+  "fixture_format": "INCIDENT-2026-09-03-hook-payload-contract.md §6.1 ① (live-probe variant, see ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §1.2); same field layout as PreToolUse.Agent.json in this directory",
+  "host_version": "2.1.272",
+  "host_version_source": "probe session transcripts (.jsonl) field \"version\" — 3/3 transcript files (2 main sessions + 1 subagent transcript) agree on 2.1.272; `claude --version` on the same host also prints \"2.1.272 (Claude Code)\"",
+  "host_version_note": "Twelve patches newer than PreToolUse.Agent.json (2.1.260). The SessionStart key set below had no prior capture, so this file is a first observation, not a diff.",
+  "binary_sha256": "not-applicable (live probe, not binary-anchor extraction)",
+  "raw": "not-applicable (live probe records key names only; nothing to store verbatim)",
+  "extraction_method": "live probe via --settings, key names only",
+  "extraction_command": "cd <scratch>/probe && claude -p --settings probe-settings.json --output-format json --max-turns 4 \"<prompt>\"   # hook command in probe-settings.json = node <worktree>/plugins/artibot/scripts/dev/probe-hook-keys.js; SessionStart matcher \"*\"",
+  "extracted_at_kst": "2026-09-15 11:00–11:02",
+  "extracted_by": "split limb ob17-switch-reasons, task B0 (host payload model-key probe, code change 0)",
+  "registration": {
+    "where": "temporary settings JSON in the session scratchpad, passed with --settings; user settings untouched (sha256 647565d5…1edb65 identical before and after, size and mtime unchanged — no revert needed)",
+    "SessionStart_matcher": "*",
+    "matcher_syntax": "plain string \"*\" fired on the first attempt; the expression form was not tried (the host reads matchers as regex, so the expression form is a known trap — see PreToolUse.Agent.json)",
+    "settings_merge_behaviour": "MERGED, not replaced — the user's own pre-existing SessionEnd hook also ran in both probe sessions (it emitted one stderr line, \"Hook cancelled\"), confirming the 2026-09-04 merge observation still holds on 2.1.272",
+    "probe_execution": "headless (claude -p) with cwd = the session scratchpad, NOT the worktree (a repo-rooted SessionStart hook has moved the branch in an earlier session); both sessions returned subtype success, is_error false, exit 0"
+  },
+  "scenarios": [
+    {
+      "id": "a-no-tools",
+      "description": "one headless session, prompt instructs the model to reply with one word and use no tools",
+      "sessions": 1,
+      "sessionstart_rows": 1,
+      "userpromptsubmit_rows": 1,
+      "num_turns": 1,
+      "wall_clock_seconds": 33.3,
+      "captured_at_kst": "11:00:09"
+    },
+    {
+      "id": "b-one-agent",
+      "description": "one headless session, prompt instructs the model to call Agent once with subagent_type general-purpose, then reply",
+      "sessions": 1,
+      "sessionstart_rows": 1,
+      "userpromptsubmit_rows": 2,
+      "num_turns": 2,
+      "wall_clock_seconds": 64.1,
+      "captured_at_kst": "11:01:18"
+    }
+  ],
+  "totals": {
+    "sessions": 2,
+    "sessionstart_rows": 2,
+    "probe_ndjson_lines_before": 15,
+    "probe_ndjson_lines_after": 22,
+    "probe_ndjson_rows_added": 7
+  },
+  "SessionStart": {
+    "top_level_keys": ["cwd", "hook_event_name", "session_id", "source", "transcript_path"],
+    "tool_input_type": "absent (SessionStart carries no tool_input; the probe recorded tool_input_keys null on 2/2 rows)",
+    "has_prompt_id": false,
+    "has_prompt_id_rows": "0/2",
+    "has_model": false,
+    "has_model_rows": "0/2",
+    "note": "The smallest payload of the four events probed. No prompt_id, so a SessionStart row cannot be correlated to a turn by the design's 1st-tier key; session_id is the only correlation key it shares with the other events."
+  },
+  "required_keys_for_K1a": ["model"],
+  "verdict": "K1a-no-go",
+  "verdict_rule": "K1(a) — deriving the active model from a hook payload — is a go only if `model` is a top-level key of the event. It is absent on 2/2 SessionStart rows, so this event cannot source it.",
+  "missing": ["model"],
+  "observations": [
+    "`model` is NOT a top-level key of SessionStart: documented as optional on the Agent tool's own input schema, but observed in 0/2 headless sessions on this host. The Agent tool schema (read from the probe session transcript's tool list) declares `model` as an optional string with enum [sonnet, opus, haiku, fable] — so the host has a notion of a per-spawn model, it just does not put one on this hook payload.",
+    "`source` is present as a key on 2/2 rows; its VALUE was not recorded (the probe writes key names only), so which source string a headless session reports is unmeasured.",
+    "SessionStart fires once per headless `claude -p` invocation (2 sessions → 2 rows), and did not fire again for the subagent spawned in scenario b.",
+    "No `permission_mode` on SessionStart, unlike UserPromptSubmit and PreToolUse on the same host — the key set is not a superset relationship across events.",
+    "Consistency check across the 7 new probe rows: 1 PreToolUse(Agent) row, 1 SubagentStart row, and exactly 1 subagent transcript file, all three agreeing with the single Agent call in scenario b.",
+    "ndjson rows themselves live at ~/.claude/artibot/runtime/probe-keys.ndjson (value-free); the baseline was 15 lines and the two sessions appended 7."
+  ],
+  "not_measured": [
+    "interactive (non-headless) sessions — only `claude -p` was probed, so whether an interactive SessionStart carries additional keys (including `model`) is unmeasured",
+    "the VALUE of `source` (and of every other key) — the probe records key names only by design",
+    "resume / clear / compact SessionStart variants — only a fresh headless start was exercised",
+    "whether `model` appears on SessionStart in a session where a non-default model was selected explicitly — both probe sessions ran the host default",
+    "the installed plugin's own hooks.json registration of SessionStart — this capture fired through a temporary --settings, as every capture in this directory has"
+  ]
+}

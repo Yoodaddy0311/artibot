@@ -33,6 +33,19 @@
  * `tests/firewall/host-payload-contract.test.js` holds those properties over
  * eight payload shapes (§4).
  *
+ * THE TWO EXTRA READS FAIL TO ABSENT, NEVER TO A GUESS. Naming the incumbent
+ * tier costs a bounded tail read of the host transcript, and counting its
+ * residency costs a second one over the run ledger. Both are best-effort: a
+ * missing `transcript_path`, an unreadable file, no assistant record, or a
+ * `message.model` this repo's catalog does not name all resolve to NOT SUPPLYING
+ * `currentTier` — and `actionsSinceSwitch` is never supplied without it, because
+ * a residency count against an unknown incumbent counts nothing. The router
+ * already distinguishes the two states honestly (`residency:unavailable` plus
+ * `hysteresis:residency-unknown` when the counter is absent, `minimum-residency`
+ * only for a MEASURED shortfall), so silence here degrades into the existing
+ * unknown branch rather than inventing a seat the session never held. The ledger
+ * read is skipped entirely when the tier read came back empty.
+ *
  * WHAT THIS HOOK CANNOT SEE (rules §9 — write it next to the gate):
  *   - Spawns that never go through the `Agent` tool (SDK / scheduled / loop
  *     entry points). They produce a SubagentStart with no receipt to bind, and
@@ -47,11 +60,13 @@
 
 import { parseJSON, readStdin } from '../utils/index.js';
 import { loadConfig } from '../../lib/core/config.js';
+import { MODELS } from '../../lib/core/model-catalog.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { classifyAction } from '../../lib/routing/action-classifier.js';
 import { routeModel } from '../../lib/routing/adaptive-model-router.js';
 import { classifyComplexity } from '../../lib/cognitive/router.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { readLedgerTail, readNdjsonTail } from '../../lib/runtime/ledger-tail.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
 
@@ -128,6 +143,184 @@ export function extractActionText(toolInput) {
  */
 function str(value) {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/**
+ * How much of `transcript_path` is read to find the incumbent model — 256 KB.
+ *
+ * MEASURED, not guessed (21 transcripts of this project, 2026-09-15). The
+ * transcript is not a small file: median 3.9 MB, largest 29.2 MB, so an
+ * unbounded read on a BLOCK POINT is out of the question. What matters is the
+ * distance from EOF back to the start of the last assistant record, because
+ * everything after it (tool_result payloads, user turns) is dead weight this
+ * hook must still cross. Over the 18 transcripts that contain an assistant
+ * record at all, that distance was p50 11.8 KB, p90 28.0 KB, max 81.9 KB;
+ * 64 KB covers 17/18 and 128 KB covers 18/18. 256 KB is the 18/18 bound with
+ * ~3.2x headroom over the worst case observed.
+ *
+ * THE HEADROOM IS NOT PADDING. A single transcript line reached 846 KB in the
+ * same sample, and `readNdjsonTail` DISCARDS the line the window lands inside
+ * (it is almost always a fragment). A window near the size of one line is a
+ * window that can return nothing, so the budget has to clear the record it is
+ * hunting for by a wide margin — and when it does not, the result is `null`,
+ * which is the honest answer, not a wrong tier.
+ *
+ * Deliberately NOT inherited from `ledger-tail.js#DEFAULT_TAIL_BYTES`: that
+ * 128 KB is derived from the ledger's 4 KB per-line cap, and the transcript has
+ * no such cap. Same window rule, different stream, different budget. NOT
+ * comparable to the 8 MB in `_review-stop-record.js:129` — Stop is not a block
+ * point and can afford a read this one cannot.
+ * @type {number}
+ */
+export const TRANSCRIPT_TAIL_BYTES = 262144;
+
+/**
+ * How much of the run ledger is read to count residency — 512 KB.
+ *
+ * A SEPARATE BUDGET FROM THE TRANSCRIPT'S, because it answers a different
+ * question. The transcript read needs to reach ONE record (the last assistant
+ * turn). This read needs to reach the `minimum_residency` barrier's worth of
+ * THIS SESSION'S rows — default 3 (`route-hysteresis.js:76`) — through a ledger
+ * where every concurrent session's rows are interleaved with them. Sessions
+ * running in parallel are what push a session's own previous row arbitrarily
+ * far back, so the window has to clear that interleaving, not just three lines.
+ *
+ * MEASURED on the live ledger (987,547 B / 1,175 rows, 2026-09-15 02:54Z),
+ * as the share of rows whose preceding three same-session rows all fall inside
+ * the window:
+ *
+ *   128 KB -> 69/73   256 KB -> 73/73 (0 headroom)   512 KB -> 73/73
+ *
+ * 128 KB — the inherited default this originally used — produces 4/73 FALSE
+ * `minimum-residency` holds: a real switch blocked by a shortfall that never
+ * happened. 256 KB clears the sample but with zero margin, since the largest
+ * observed gap between one session's consecutive rows was 134,596 B, and a
+ * busier day widens exactly that gap. 512 KB is the same 73/73 with room for
+ * the interleaving to grow.
+ *
+ * THE COST IS NOT THE CONSTRAINT HERE. `readNdjsonTail` p50 went 0.86 ms at
+ * 128 KB to 2.75 ms at 512 KB — under 1% of the hook's ~240 ms end-to-end,
+ * which is dominated by node process startup. Under-counting, by contrast,
+ * changes a routing decision.
+ * @type {number}
+ */
+export const RESIDENCY_TAIL_BYTES = 524288;
+
+/**
+ * The host's placeholder `message.model` on an assistant record it injected
+ * itself rather than one a model produced (interrupts, error notices).
+ *
+ * It is SKIPPED, not treated as unknown. Measured on the same 21 transcripts:
+ * 30/8769 assistant records carry it, and on 1/21 it is the LAST assistant
+ * record — so reading it literally would erase a known incumbent roughly one
+ * session in twenty for a record that is not a model turn at all. Scanning past
+ * it reaches the real one. Any OTHER unrecognised id stops the scan and yields
+ * null: the last real turn IS the incumbent, and skipping past an id we cannot
+ * name would report a tier the session has already left.
+ * @type {string}
+ */
+const SYNTHETIC_MODEL = '<synthetic>';
+
+/**
+ * The tier whose catalog entry has exactly this `id`, or null.
+ *
+ * EXACT, full-id match only. The catalog field is `id` (`model-catalog.js:140`
+ * `MODELS`), and `adaptive-model-router.js#modelIdentity` is what later renames
+ * it to `model_id` on the receipt — this reads the catalog, so it reads `id`.
+ * No prefix, alias or suffix tolerance: an id the catalog does not name is a
+ * tier this repo cannot price, and the router's `models.current` is typed as a
+ * priced identity. Measured consequence, same sample: `claude-sonnet-5` appears
+ * on 293/8769 assistant records while the catalog's sonnet entry is
+ * `claude-sonnet-4-6`, so those resolve to null today. That is CATALOG DRIFT
+ * reported as unknown, which is the fail-closed half of the trade; widening the
+ * matcher here would paper over it in the one place nobody would look.
+ *
+ * @param {unknown} modelId - `message.model` off a transcript record
+ * @returns {string|null} Tier key ('opus' | 'fable' | …), or null
+ */
+function tierForModelId(modelId) {
+  if (typeof modelId !== 'string' || modelId.trim() === '') return null;
+  for (const [tier, spec] of Object.entries(MODELS)) {
+    if (spec?.id === modelId) return tier;
+  }
+  return null;
+}
+
+/**
+ * The tier that was in effect for this session immediately before this
+ * decision, read from the host transcript, or null when nothing evidences one.
+ *
+ * ONLY `message.model` IS EXTRACTED. The transcript is the richest text in the
+ * whole system — prompts, file contents, tool results, absolute paths. Nothing
+ * but the model id crosses out of this function, so nothing else can reach the
+ * receipt, the ledger or stderr. `tests/hooks/route-observe-pre.test.js` proves
+ * it with a sentinel string planted in the transcript and asserted absent from
+ * the written ledger.
+ *
+ * Never throws: `readNdjsonTail` already yields `[]` for a missing or corrupt
+ * file, and the outer catch covers the rest.
+ *
+ * @param {unknown} transcriptPath - `payload.transcript_path`
+ * @returns {string|null} Tier key, or null when unavailable/unrecognised
+ */
+export function resolveIncumbentTier(transcriptPath) {
+  try {
+    if (typeof transcriptPath !== 'string' || transcriptPath.trim() === '') return null;
+    const records = readNdjsonTail(transcriptPath, { tailBytes: TRANSCRIPT_TAIL_BYTES });
+    for (let i = records.length - 1; i >= 0; i -= 1) {
+      const record = records[i];
+      if (record?.type !== 'assistant') continue;
+      const modelId = record?.message?.model;
+      if (modelId === SYNTHETIC_MODEL) continue;
+      return tierForModelId(modelId);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How many consecutive prior decisions in THIS session already sat on `tier`.
+ *
+ * Walks the ledger tail backwards over this session's `route.selected` rows and
+ * counts while `data.models.current.tier` still equals `tier`, stopping at the
+ * first row that names a different tier or none. That stop is the switch: the
+ * count is the residency since it, which is exactly what
+ * `route-hysteresis.js:487` compares against the `minimum_residency` barrier
+ * (default 3, `DEFAULT_SWITCH_POLICY`).
+ *
+ * ROWS FROM OTHER SESSIONS ARE SKIPPED, NOT STOPPERS. One ledger carries every
+ * session in the project interleaved, so treating a neighbour's row as a
+ * boundary would report a shortfall that never happened — and a shortfall is
+ * the reading that BLOCKS a switch. Only this session's own history can end its
+ * own residency.
+ *
+ * Under-counts by design when the run is older than the tail window: the window
+ * is a window (`ledger-tail.js` header), and a low count fails toward holding
+ * the incumbent, which is the safe direction. Safe is not free, though — an
+ * under-count reads as `minimum-residency`, a MEASURED shortfall, so it blocks
+ * a switch that should have happened. {@link RESIDENCY_TAIL_BYTES} is sized
+ * against that failure, not against read cost.
+ *
+ * @param {unknown} events - Parsed ledger rows in append order
+ * @param {string|null} sessionId - The session whose rows count
+ * @param {string|null} tier - Incumbent tier from {@link resolveIncumbentTier}
+ * @returns {number} Consecutive count; 0 when there is nothing to count
+ */
+export function countActionsSinceSwitch(events, sessionId, tier) {
+  if (!Array.isArray(events)) return 0;
+  if (typeof tier !== 'string' || tier === '') return 0;
+  if (typeof sessionId !== 'string' || sessionId === '') return 0;
+  let count = 0;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const row = events[i];
+    if (row?.event !== 'route.selected') continue;
+    if (row?.session_id !== sessionId) continue;
+    if (row?.data?.models?.current?.tier !== tier) break;
+    count += 1;
+  }
+  return count;
 }
 
 /**
@@ -245,8 +438,18 @@ export function receiptPhase(classified) {
  * `canonicalModel` beside it. The two are comparable because they are the same
  * function of the same input.
  *
+ * `currentTier` and `actionsSinceSwitch` go in TOGETHER OR NOT AT ALL, as two
+ * TOP-LEVEL `routeModel` keys — not inside `input`, which is the classifier's
+ * bag (`adaptive-model-router.js:462-463` reads them off `src`, and `src` is
+ * the argument object itself). Omitting the pair is what leaves the receipt
+ * byte-identical to the pre-K1 one, because `routeModel` maps a missing
+ * `currentTier` to `models.current: null` and a missing counter to
+ * `actionsSinceSwitch: 0` plus `residency:unavailable` — the exact shape this
+ * hook emitted before it could see either.
+ *
  * @param {{toolUseId: string, sessionId: string, missionId: string,
- *   agentType: string|null, text: string, config: object|undefined}} ctx
+ *   agentType: string|null, text: string, config: object|undefined,
+ *   currentTier?: string|null, actionsSinceSwitch?: number|null}} ctx
  * @returns {object|null} Receipt, or null when it would be structurally
  *   incomplete (the append is then skipped rather than fabricated)
  */
@@ -256,6 +459,7 @@ export function buildReceipt(ctx) {
   const phase = receiptPhase(classifyAction(input, classifierOptions));
   if (phase === null) return null;
   const timestamp = new Date().toISOString();
+  const incumbent = str(ctx.currentTier);
   const receipt = routeModel({
     agentType: ctx.agentType ?? undefined,
     epoch: ctx.toolUseId,
@@ -263,6 +467,12 @@ export function buildReceipt(ctx) {
     phase,
     input,
     classifierOptions,
+    ...(incumbent === null ? {} : {
+      currentTier: incumbent,
+      actionsSinceSwitch: typeof ctx.actionsSinceSwitch === 'number'
+        ? ctx.actionsSinceSwitch
+        : 0,
+    }),
     evidence: {
       route_receipt_id: `rr-${ctx.toolUseId}-${timestamp}`,
       mission_id: ctx.missionId,
@@ -317,6 +527,19 @@ export async function observePre(hookData) {
       config = undefined;
     }
 
+    // Incumbent first, ledger second: the residency count is meaningless
+    // without a tier to count, so the second read is not paid for unless the
+    // first one produced something. On a block point that ordering IS the
+    // budget — the common "no transcript" case costs one `existsSync`.
+    const currentTier = resolveIncumbentTier(hookData?.transcript_path);
+    const actionsSinceSwitch = currentTier === null
+      ? null
+      : countActionsSinceSwitch(
+        readLedgerTail(projectRoot, { tailBytes: RESIDENCY_TAIL_BYTES }),
+        sessionId,
+        currentTier,
+      );
+
     const receipt = buildReceipt({
       toolUseId,
       sessionId,
@@ -324,6 +547,8 @@ export async function observePre(hookData) {
       agentType: str(toolInput.subagent_type),
       text,
       config,
+      currentTier,
+      actionsSinceSwitch,
     });
     if (receipt === null) return { ok: false, reason: 'no-receipt' };
 

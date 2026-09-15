@@ -6,7 +6,7 @@
  */
 
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
@@ -14,7 +14,8 @@ import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { appendSpawn } from '../../lib/learning/ledger/spawn-ledger.js';
 import { getActionClassForAgent } from '../../lib/routing/action-classifier.js';
-import { appendLedgerEvent, ledgerFilePath } from '../../lib/runtime/ledger.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { DEFAULT_TAIL_BYTES, readLedgerTail as readLedgerTailWindow } from '../../lib/runtime/ledger-tail.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
 import { isReviewerStop, recordReviewFromStop, reviewLedgerColumn } from './_review-stop-record.js';
@@ -243,11 +244,20 @@ function resolveMissionId(hookData, sessionId) {
  * candidate, and the spawn records `skipped:unbound` — which is the honest
  * outcome, not a lost row.
  *
- * COST IS UNMEASURED. One tail read per spawn, bounded by this constant; no
- * profile has been taken.
+ * COST, measured 2026-09-15T02:23Z against the live 962,425 B ledger of this
+ * repo (N=30 in-process calls, node v24.15.0, Windows 11): p50 1.70 ms,
+ * p95 2.95 ms, max 3.41 ms, 161 rows returned per call. One such read per
+ * spawn. It is a single-machine, warm-page-cache number over a ledger whose
+ * tail averages ~0.81 KB/line (131072 B / 161 lines); a cold read, another
+ * disk, or a ledger an order of magnitude larger are all unmeasured.
+ *
+ * The window itself now lives in `lib/runtime/ledger-tail.js` so that a second
+ * hook reading the tail reads the SAME tail; this constant is the receipt
+ * scan's own name for it and is passed explicitly rather than inherited, so
+ * changing the shared default cannot silently move the receipt window.
  * @type {number}
  */
-const RECEIPT_TAIL_BYTES = 131072;
+const RECEIPT_TAIL_BYTES = DEFAULT_TAIL_BYTES;
 
 /** Most unbound receipts considered for one spawn (design §2.2, N=32). */
 const RECEIPT_CANDIDATES_MAX = 32;
@@ -318,47 +328,18 @@ function identityOf(value) {
 /**
  * The last {@link RECEIPT_TAIL_BYTES} of the project ledger, parsed.
  *
- * Reads a WINDOW, not the file: a ledger grows without bound and a spawn hook
- * must not grow with it. The first line of the window is dropped because a
- * byte-offset read almost always lands mid-line — parsing that fragment would
- * either throw (caught, but the whole tail lost) or, worse, succeed on a
- * truncated object. Never throws; an unreadable ledger yields `[]`.
+ * The read itself belongs to `lib/runtime/ledger-tail.js#readLedgerTail` — why
+ * a window at all, why the first line is dropped, and why it never throws are
+ * all documented there. This is the receipt scan's binding of that rule to its
+ * own budget, kept as a named local so every call site in this file asks for
+ * the same window without restating the number.
  *
  * @param {string|null} projectRoot
  * @returns {object[]} Parsed lines in append order
  */
-function readLedgerTail(projectRoot) {
-  let fd = null;
-  try {
-    if (typeof projectRoot !== 'string' || projectRoot.length === 0) return [];
-    const file = ledgerFilePath(projectRoot);
-    if (!existsSync(file)) return [];
-    const size = statSync(file).size;
-    const start = size > RECEIPT_TAIL_BYTES ? size - RECEIPT_TAIL_BYTES : 0;
-    const length = size - start;
-    if (length <= 0) return [];
-    const buf = Buffer.alloc(length);
-    fd = openSync(file, 'r');
-    readSync(fd, buf, 0, length, start);
-    const raw = buf.toString('utf8').split('\n');
-    if (start > 0) raw.shift();
-    const out = [];
-    for (const line of raw) {
-      if (line.trim() === '') continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed && typeof parsed === 'object') out.push(parsed);
-      } catch { /* a corrupt line is skipped, not fatal */ }
-    }
-    return out;
-  } catch {
-    return [];
-  } finally {
-    if (fd !== null) {
-      try { closeSync(fd); } catch { /* noop */ }
-    }
-  }
-}
+const readLedgerTail = (projectRoot) => (
+  readLedgerTailWindow(projectRoot, { tailBytes: RECEIPT_TAIL_BYTES })
+);
 
 /**
  * Reduce the ledger tail to the unbound receipts of ONE session.
