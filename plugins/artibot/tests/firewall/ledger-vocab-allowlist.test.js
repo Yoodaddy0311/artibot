@@ -8,7 +8,9 @@
  *     source of truth (Hardening §46 "canonical 1개"). The moment the writer
  *     grows its own list of event names, the two drift and the file stops being
  *     the answer. This suite reads the writer's SOURCE and requires that the
- *     36 names appear nowhere in it.
+ *     39 names appear nowhere in it (39 registered events measured 2026-09-15;
+ *     this line read 36 when it was written and the count is not asserted
+ *     anywhere — the gate iterates whatever the allowlist holds).
  *
  *  2. A DENYLIST BY ACCIDENT. A negative list is fail-open for every name
  *     invented after it was written (verification-discipline §8). The direction
@@ -21,8 +23,9 @@
  * that passes while measuring nothing.
  *
  * ── WHAT THIS GATE CANNOT SEE (rules §9) ────────────────────────────────────
- *   - WHETHER THE 36 NAMES ARE THE RIGHT 36. Membership is a design decision
- *     (lane 6 §5-②). This checks internal consistency, never adequacy.
+ *   - WHETHER THE 39 NAMES ARE THE RIGHT 39 (39 measured 2026-09-15; 36 when
+ *     this line was written). Membership is a design decision (lane 6 §5-②).
+ *     This checks internal consistency, never adequacy.
  *   - WHETHER ANY EVENT IS EVER EMITTED. Phase 0 has zero callers, so a
  *     registered event with no writer looks identical here to one in daily use.
  *     Emission counts are the Existence Audit's measurement, not this file's.

@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { ledgerFilePath } from '../../lib/runtime/ledger.js';
 
 /**
  * PostToolUse dispatcher integration tests.
@@ -31,8 +33,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *
  *  - HOME/USERPROFILE -> throwaway dir (above).
  *
- *  - cwd -> throwaway NON-git dir. None of the 11 PostToolUse hooks is a
- *    git-autopilot hook (measured 2026-09-04T05:03Z against `HOOKS`), so
+ *  - cwd -> throwaway NON-git dir. None of the 12 PostToolUse hooks is a
+ *    git-autopilot hook (11 measured 2026-09-04T05:03Z against `HOOKS`; the
+ *    12th, `tool-used-record.js`, added 2026-09-15 and read here — it touches
+ *    git only through `resolveProjectRoot(payload.cwd)`, and the round-trip
+ *    case below hands it a `mkdtemp` repo of its own), so
  *    unlike SessionStart there is no `checkout -b` to prevent here. Three
  *    hooks do reach the repository through `process.cwd()`, and all three
  *    reads are read-only:
@@ -69,15 +74,32 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_posttooluse-dis
 /** Throwaway home and working directory for the spawned dispatcher. */
 let sandboxHome;
 let sandboxCwd;
+/**
+ * A THIRD throwaway directory, this one a real repository, used only as the
+ * `cwd` FIELD OF A PAYLOAD — never as the spawn's cwd.
+ *
+ * `tool-used-record.js` resolves its project root from `payload.cwd` and
+ * writes a ledger line under it, so the round-trip case needs a root it may
+ * write into. Pointing the SPAWN at it instead would put a git repository
+ * above every grand-child's cwd, which is precisely the isolation
+ * `tests/firewall/dispatcher-cwd-sandbox-required.test.js` exists to prevent.
+ * The two stay separate: spawn cwd non-git, payload cwd a sandbox repo.
+ */
+let ledgerRepo;
 
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-cwd-'));
+  ledgerRepo = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-ledger-'));
+  // ADR-011 puts the ledger inside the git common dir; without a real `.git`
+  // the root resolves to an ancestor of the temp dir.
+  execFileSync('git', ['init'], { cwd: ledgerRepo, stdio: 'ignore', windowsHide: true });
 });
 
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  if (ledgerRepo) rmSync(ledgerRepo, { recursive: true, force: true });
 });
 
 /**
@@ -181,9 +203,9 @@ describe('_posttooluse-dispatcher (integration)', () => {
     }
   });
 
-  it('registers all 11 wrapped hooks', async () => {
+  it('registers all 12 wrapped hooks', async () => {
     const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(11);
+    expect(mod.HOOKS).toHaveLength(12);
   });
 
   it('selectHooks() routes Grep and Glob to zero-result-guard + tool-tracker', async () => {
@@ -262,6 +284,53 @@ describe('_posttooluse-dispatcher (integration)', () => {
     const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
     const selected = mod.selectHooks(null).map((h) => h.name);
     expect(selected).toEqual(['tool-tracker']);
+  });
+
+  it('selectHooks() routes Skill to tool-used-record + tool-tracker only', async () => {
+    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
+    const selected = mod.selectHooks('Skill').map((h) => h.name);
+    expect(selected).toContain('tool-used-record');
+    expect(selected).toContain('tool-tracker');
+    expect(selected).not.toContain('quality-gate');
+    expect(selected).not.toContain('pre-write-guard');
+    // The writer must not ride along on tools it cannot name a skill for.
+    for (const tool of ['Read', 'Edit', 'Bash', 'Grep']) {
+      expect(mod.selectHooks(tool).map((h) => h.name)).not.toContain('tool-used-record');
+    }
+  });
+
+  /**
+   * END-TO-END for the `tool.used` writer: the row must survive the REAL
+   * dispatcher's spawn, not merely exist when the module is imported.
+   *
+   * This is the measurement SH-29 asked for. `tool.used` was a registered
+   * event with no emitter — 0 rows of 1,052 in the live ledger, measured
+   * 2026-09-15 ~10:5x KST — so nothing had ever proven a line could reach the
+   * file through the dispatcher at all.
+   *
+   * A REJECTION IS ALSO A WRITTEN LINE (`ledger.rejected`), so counting rows
+   * alone would read one as a success. Both streams are asserted.
+   */
+  it('writes one accepted tool.used row through the real dispatcher (Skill route)', () => {
+    const { status } = runDispatcher({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Skill',
+      tool_use_id: 'toolu_posttooluse_skill_1',
+      session_id: 'sess-posttooluse-dispatcher-0001',
+      cwd: ledgerRepo,
+      tool_input: { skill: 'artibot:split' },
+    });
+    expect(status).toBe(0);
+
+    const file = ledgerFilePath(ledgerRepo);
+    expect(existsSync(file)).toBe(true);
+    const lines = readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const used = lines.filter((l) => l.event === 'tool.used');
+    expect(used).toHaveLength(1);
+    expect(used[0].data.skill).toBe('artibot:split');
+    expect(used[0].data.tool).toBe('Skill');
+    expect(used[0].source).toBe('hook');
   });
 
   it('selectHooks() routes MultiEdit to mark-main-agent-edit + tool-tracker', async () => {

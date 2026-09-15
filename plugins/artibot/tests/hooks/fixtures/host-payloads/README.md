@@ -63,3 +63,34 @@ no other test path; relocating it to `tests/hooks/` is fine.
 5. Write the new capture into the fixture with `verdict` per design §1.2:
    `prompt`, `description`, `subagent_type` all present in `tool_input`
    → `"D1-go"`; any missing → `"revert-to-C"` with the missing keys listed.
+
+## Regenerating `PostToolUse.Skill.json`
+
+Same mechanism as above (temporary `--settings` file in the scratchpad, never
+`~/.claude/settings.json` or `hooks/hooks.json`), measured 2026-09-15 on host 2.1.272.
+
+1. Register the probe on **both** `PreToolUse` and `PostToolUse` with the plain
+   string matcher `"Skill"` (the `tool == "Skill"` expression form is untested
+   here and did not fire in an earlier probe). `scripts/dev/probe-hook-keys.js`
+   records top-level keys and `tool_input` keys only; to see `tool_response`
+   keys add a second, scratchpad-only hook command that prints
+   `Object.keys(tool_response)` (and JSON types) to a scratchpad ndjson. Do not
+   add that companion to the repo, and never record values.
+
+2. Run two scenarios headless from the repo root, one session each, `--max-turns 6`:
+   (1) "Invoke the Skill tool exactly once with skill `artibot:quickstart` and no
+   arguments, then reply ok"; (2) the same with a one-word `args`. Every
+   `skills/*/SKILL.md` declares `context: fork`, so pick a skill whose body does
+   nothing external; `artibot:quickstart` was used.
+
+3. Read the new rows from `~/.claude/artibot/runtime/probe-keys.ndjson` filtered
+   by `tool_name == "Skill"` and by timestamp -- the file is append-only and other
+   sessions may write rows into it concurrently. Expect 1 PreToolUse + 1
+   PostToolUse row per scenario.
+
+4. Read `host_version` from the two probe transcripts (step 4 above) and record
+   the branch/reflog of the worktree before and after each run (a SessionStart
+   hook once moved worktree branches; verify it did not).
+
+5. Write the capture with `verdict` = `"skill-key-present"` iff `tool_input.skill`
+   was present on every Skill row, else `"skill-key-absent:<keys seen>"`.
