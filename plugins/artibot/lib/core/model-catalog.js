@@ -155,7 +155,8 @@ export const MODELS = deepFreeze({
     constraints: [],
   },
   sonnet: {
-    id: 'claude-sonnet-4-6',
+    // 2026-09-15 O2: id 갱신, 가격 계수는 미검증(I1).
+    id: 'claude-sonnet-5',
     priceInPerMTok: 3,
     priceOutPerMTok: 15,
     priceCacheReadPerMTok: 0.3,

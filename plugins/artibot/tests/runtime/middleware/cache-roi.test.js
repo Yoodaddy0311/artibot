@@ -98,7 +98,7 @@ describe('_resolvePricing', () => {
     expect(_resolvePricing('claude-fable-5')).toEqual(getPricing('fable'));
     // claude-opus-5 is the shipped `opus` tier ID (model-catalog.js#MODELS).
     expect(_resolvePricing('claude-opus-5')).toEqual(getPricing('opus'));
-    expect(_resolvePricing('claude-sonnet-4-6')).toEqual(getPricing('sonnet'));
+    expect(_resolvePricing('claude-sonnet-5')).toEqual(getPricing('sonnet'));
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('haiku'));
   });
 
@@ -192,7 +192,7 @@ describe('computeCacheMetrics', () => {
   it.each([
     ['claude-fable-5-1', 'fable', 9.75, 72.75],
     ['claude-opus-5', 'opus', 4.5, 36.75],
-    ['claude-sonnet-4-6', 'sonnet', 2.7, 22.05],
+    ['claude-sonnet-5', 'sonnet', 2.7, 22.05],
     ['claude-haiku-4-5', 'haiku', 0.9, 7.35],
   ])('prices 1M tokens per bucket for %s', (model, tier, saved, spent) => {
     const m = computeCacheMetrics(ONE_M_EACH, model, nowFn);

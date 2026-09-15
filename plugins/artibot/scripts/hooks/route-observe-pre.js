@@ -229,11 +229,15 @@ const SYNTHETIC_MODEL = '<synthetic>';
  * it to `model_id` on the receipt — this reads the catalog, so it reads `id`.
  * No prefix, alias or suffix tolerance: an id the catalog does not name is a
  * tier this repo cannot price, and the router's `models.current` is typed as a
- * priced identity. Measured consequence, same sample: `claude-sonnet-5` appears
- * on 293/8769 assistant records while the catalog's sonnet entry is
- * `claude-sonnet-4-6`, so those resolve to null today. That is CATALOG DRIFT
+ * priced identity. Measured consequence, same sample: `claude-sonnet-5` appeared
+ * on 293/8769 assistant records while the catalog's sonnet entry was still
+ * `claude-sonnet-4-6`, so those resolved to null. That was CATALOG DRIFT
  * reported as unknown, which is the fail-closed half of the trade; widening the
- * matcher here would paper over it in the one place nobody would look.
+ * matcher here would have papered over it in the one place nobody would look.
+ * That drift is what owner decision O2 (2026-09-15) closed by moving the
+ * catalog's sonnet `id` to `claude-sonnet-5` — the fix went into the catalog,
+ * not into this matcher, which is still exact-match only. Prices were left
+ * alone (unverified, SH-07 I1), so a null here still means "cannot price".
  *
  * @param {unknown} modelId - `message.model` off a transcript record
  * @returns {string|null} Tier key ('opus' | 'fable' | …), or null
