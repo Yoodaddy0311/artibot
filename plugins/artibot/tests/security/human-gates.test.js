@@ -314,3 +314,177 @@ describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범
     }
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// HG-09 patterns[2] 룩어헤드 창 — 창 폭 핀 · 경계 쌍 · 타이밍 게이트 · 행동
+// ───────────────────────────────────────────────────────────────────────────
+//
+// 위 HG-07 블록과 같은 3층이고 헬퍼(fill · medianMs · growth · ids)도 그대로
+// 쓴다. 다른 것은 **트레이드오프 부호**다: HG-07 의 `{0,192}` 는 관측을 잃고
+// (192자 뒤의 `-X POST` 가 미분류), HG-09 의 `{0,192}` 는 오탐을 더한다
+// (SET 뒤 187자 이후의 진짜 WHERE 는 창 밖 → 부정 룩어헤드가 성립 → 파괴적이지
+// 않은 문장에 fire). 근거와 실측표의 정본은 lib/security/human-gates.js 의
+// HG-09 주석이고, 여기서는 그 계약을 핀한다.
+
+/** HG-09 patterns[] 의 문서화된 순서. 인덱스로 집는 근거다. */
+const HG09_PATTERN_ORDER = ['prisma migrate deploy', 'alembic upgrade', 'UPDATE SET no-WHERE'];
+
+describe('HG-09 — 창 폭 (i) 정적 소스 핀', () => {
+  it('patterns[] 는 문서화된 3개 순서를 유지한다', () => {
+    expect(getGateRow('HG-09').patterns).toHaveLength(HG09_PATTERN_ORDER.length);
+  });
+
+  it('UPDATE SET no-WHERE 규칙의 룩어헤드가 바운드된 창을 갖는다', () => {
+    const source = getGateRow('HG-09').patterns[2].source;
+    expect(source).toBe(/\bUPDATE\s+[\w."`[\]]+\s+SET\b(?![^;]{0,192}\bWHERE\b)/i.source);
+    expect(source).toContain('[^;]{0,192}');
+    expect(source).not.toContain('[\\s\\S]*');
+  });
+});
+
+describe('HG-09 — 창 폭 경계 쌍 (186 비hit / 187 hit)', () => {
+  // 룩어헤드는 `SET` **뒤**에서 시작한다. WHERE 앞 문자 수 = `' a=1 '`(5) + w +
+  // `' '`(1) = w + 6. 이것이 192 이하면 창이 WHERE 를 보고 → 부정 룩어헤드 실패
+  // → 비hit. w = 186 이 마지막으로 보이는 폭이고 w = 187 부터 창 밖이라 hit 한다.
+  // **HG-07 의 192/193 기하와 값이 다르다 — 복사해 쓰지 말 것.**
+  /** @param {number} w @returns {string} */
+  const gap = (w) => `UPDATE t SET a=1 ${'x'.repeat(w)} WHERE x`;
+
+  it('창 186 은 WHERE 를 보므로 걸리지 않는다', () => {
+    expect(ids({ tool: 'Bash', command: gap(186) })).not.toContain('HG-09');
+  });
+
+  it('창 187 은 WHERE 가 창 밖이라 HG-09 로 걸린다', () => {
+    expect(ids({ tool: 'Bash', command: gap(187) })).toContain('HG-09');
+  });
+
+  it('짧은 실제 명령은 창 폭과 무관하게 계속 걸린다 (회귀 방지)', () => {
+    expect(ids({ tool: 'Bash', command: 'UPDATE accounts SET balance = 0' })).toContain('HG-09');
+    expect(ids({ tool: 'Bash', command: 'UPDATE accounts SET balance = 0 WHERE id = 7' }))
+      .not.toContain('HG-09');
+  });
+});
+
+describe('HG-09 — classify 는 크기를 키워도 성장 비율이 선형 범위 안이다', () => {
+  // 3층 중 (ii)(iii). (i) 은 위 정적 소스 핀이고 그쪽이 정본이다.
+  //
+  // ── 실측 (node v24.15.0, Windows 11, 이 워크트리, **규칙 단독** median-of-3,
+  //    회차마다 다른 payload — V8 는 같은 (regex, string) 쌍의 결과를 캐시한다.
+  //    2026-09-15 10:5x KST — human-gates.js HG-09 MEASURED 표와 같은 프로브) ──
+  //                              20,480B    40,962B   122,880B   growth(6배)
+  //   수리 전 `[\s\S]*`      F3     3.66ms    18.58ms   140.66ms      18.88
+  //   수리 전 `[\s\S]*`      F5     1.79ms     8.19ms   110.93ms      19.85
+  //   수리 후 `[^;]{0,192}`  F3     0.00ms     0.00ms     0.00ms       1.00
+  //   수리 후 `[^;]{0,192}`  F5     0.39ms     0.85ms     1.81ms       1.32
+  //
+  // F3 가 수리 후 0.00ms 인 것은 빨라서가 아니라 **첫 후보에서 매치가 끝나서**다
+  // (창 안에 WHERE 가 없으니 부정 룩어헤드가 성립 → 즉시 hit). 전 구간을 실제로
+  // 훑는 선형 대조는 F5 쪽이다. 두 픽스처를 다 두는 이유가 그것이다.
+  //
+  // **F1(`'UPDATE t SET a=1 WHERE '` 반복)은 쓰지 않는다.** 옛 규칙에서 F1 의
+  // growth 가 임계 18 을 5회 중 3회만 넘었다(t20480 이 바닥값 4ms 근처라 비율이
+  // 흔들린다. 이 창 재측정도 18.09 로 임계 바로 위였다). RED 대조가 동전던지기면
+  // 게이트가 아니다.
+  //
+  // **payload 는 회차마다 간다**(위 HG-07 블록과 다른 점, 아래 uniqueRuns 참조).
+  // 사이즈당 payload 를 하나만 쓰면 V8 이 같은 (regex, string) 쌍의 결과를 캐시해
+  // 2회차부터 상수 시간을 돌려주고, 그러면 **옛 규칙의 2차식이 이 게이트에서
+  // 숨는다** — 2026-09-15 실측으로 옛 규칙 F3 의 growth 가 같은 형식에서 12.79
+  // (node 직접)와 19.10(vitest) 사이를 오갔고 F5 는 16.05 로 임계를 못 넘었다.
+  // 회차마다 갈면 F3 20.94 · F5 20.10 으로 안정적으로 초과한다.
+  // RED 마진은 얇다 — 임계 18 대비 +2~3(11~16%), HG-07 의 RED(28~31)보다 좁고
+  // 바닥값 4ms 가 t20480(≈3.7ms)을 눌러 비율을 깎는 구조라 부하 심한 러너에서
+  // 옛 규칙이 그린으로 새어 나갈 여지가 있다(검수 2026-09-15 11:3x KST). 게이트를
+  // 완화하지 말고, 마진이 필요하면 픽스처 쪽(후보 수)을 키워라.
+  //
+  // 이 블록이 못 보는 것: HG-07 블록과 같다 — **크기에 따라 스케일되는** 입력만
+  // 보고, 수치는 `classify` 단독이다. PreToolUse 전체 경로 비용은 human-gates.js
+  // HG-09 주석의 표가 갖는다.
+  /** @type {[string, (n: number) => string][]} */
+  const HG09_SCALED_PAYLOADS = [
+    // F3 — 후보를 반복하고 WHERE 는 꼬리에 하나. 옛 규칙의 2차식이 가장 크게 나온 모양.
+    ['F3 꼬리 WHERE 1개', (n) => fill('UPDATE t SET a=1 ', n - ' WHERE x'.length) + ' WHERE x'],
+    // F5 — 반복 단위마다 WHERE. 새 규칙에서 전 구간을 실제로 훑는 선형 대조다.
+    ['F5 단위마다 WHERE', (n) => fill('UPDATE t\nSET a=1\nWHERE id=1\n', n)],
+  ];
+
+  /**
+   * 길이를 그대로 둔 채 payload 머리에 회차 표식을 박는다. 바이트 수는 build 가
+   * 주장하는 값 그대로이고 꼬리(F3 의 ` WHERE x`)도 보존된다.
+   * @param {(n: number) => string} build @param {number} n @param {number} i
+   * @returns {string}
+   */
+  const tagged = (build, n, i) => {
+    const tag = `/*${i}*/`;
+    return tag + build(n).slice(tag.length);
+  };
+
+  it.each(HG09_SCALED_PAYLOADS)(
+    '%s: t(122,880) < 18 × t(20,480)',
+    (_name, build) => {
+      /** @param {number} n @returns {number} */
+      const run = (n) => {
+        // 측정 대상 밖에서 미리 만든다 — 122KB 문자열 생성비가 타이밍에 섞이면
+        // 선형 바닥이 깔려 2차식 비율이 희석된다.
+        const payloads = [0, 1, 2].map((i) => tagged(build, n, i));
+        let cursor = 0;
+        return medianMs(() => {
+          classify({ tool: 'Bash', command: payloads[cursor] });
+          cursor += 1;
+        }, payloads.length);
+      };
+      const t20480 = run(20_480);
+      const t40962 = run(40_962);
+      // 회귀 시 120KB 측정으로 넘어가기 전에 여기서 빨리 실패시킨다.
+      expect(t40962).toBeLessThan(200);
+      const t122880 = run(122_880);
+      expect(growth(t122880, t20480)).toBeLessThan(18);
+    },
+    30_000,
+  );
+
+  it('payload 가 주장하는 바이트 크기로 만들어진다 — 회차 표식을 박은 뒤에도', () => {
+    for (const [, build] of HG09_SCALED_PAYLOADS) {
+      for (const n of [20_480, 40_962, 122_880]) {
+        expect(build(n)).toHaveLength(n);
+        expect(tagged(build, n, 0)).toHaveLength(n);
+        // 회차마다 실제로 다른 문자열이어야 캐시를 피한다.
+        expect(tagged(build, n, 0)).not.toBe(tagged(build, n, 1));
+      }
+    }
+  });
+});
+
+describe('HG-09 — 창 교체가 바꾼 것과 바꾸지 않은 것 (행동 7형)', () => {
+  // 표의 a·b·c·d·g 는 브리프 설계표의 C1 열 그대로다. **f·h 는 구현 창 정의**
+  // (브리프 요약표에 없던 행) — f 는 새 창이 더하는 오탐을 비용으로 못박고,
+  // h 는 SQL 주석을 모델링하지 않는 현행 동작을 데이터로 남긴다.
+  it.each([
+    // a: 이 규칙의 존재 이유. 무-WHERE 파괴적 UPDATE.
+    ['a 무-WHERE → 걸린다', 'UPDATE accounts SET balance = 0', true],
+    // b: WHERE 가 창 안에 있으면 안 걸린다.
+    ['b 창 안 WHERE → 안 걸린다', 'UPDATE accounts SET balance = 0 WHERE id = 7', false],
+    // c: 옛 규칙이 놓치던 `;` 문장 경계 우회. `[^;]` 가 닫았다.
+    ['c 세미콜론 우회 → 걸린다', 'UPDATE t SET a=1; SELECT 1 WHERE x', true],
+    // d: heredoc 다행 SQL. `[^;\n]` 였다면 여기서 오탐한다 — 그래서 `[^;]` 다.
+    ['d 다행 SQL → 안 걸린다', 'UPDATE t SET a=1\nWHERE id=1', false],
+    // f: 창 밖(300자)의 진짜 WHERE. **새 창이 더하는 오탐**이고, 기록 전용
+    //    매트릭스이므로 비용은 원장 잡음이지 차단이 아니다.
+    [
+      'f 창 밖 WHERE → 걸린다 — 의도된 오탐 핀, 창을 넓혀 "고치지" 말 것',
+      `UPDATE t SET a=1 ${'x'.repeat(300)} WHERE x`,
+      true,
+    ],
+    // g: 대괄호 식별자. 창 교체와 무관하게 유지.
+    ['g 대괄호 식별자 → 걸린다', 'UPDATE [dbo].[t] SET a=1', true],
+    // h: SQL 주석은 모델링하지 않는다. 주석 안의 WHERE 도 WHERE 로 읽어 안 걸린다.
+    [
+      'h 주석 안 WHERE → 안 걸린다 — 의도된 트레이드오프, SQL 주석 미모델링의 현행 동작 핀',
+      'UPDATE t SET a=1 -- WHERE x',
+      false,
+    ],
+  ])('%s', (_label, command, expected) => {
+    const hit = ids({ tool: 'Bash', command }).includes('HG-09');
+    expect(hit).toBe(expected);
+  });
+});

@@ -202,13 +202,14 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     // is observability, not safety — nothing that used to be blocked stops
     // being blocked. The two `[^\n]*` runs left in HG-11 are deliberate: they
     // are `^`-anchored, so there is one match start and the run stays linear
-    // (measured 0.54ms at 122,880B). The exemption is registered by exact
-    // pattern source in the selfcheck below, not inferred from the anchor.
+    // (measured 0.54ms at 122,880B). The exemption is registered by pattern
+    // key (`'HG-11[0]'` / `'HG-11[1]'`) in tests/helpers/regex-scan.js
+    // `HG_SCAN_ALLOWLIST`, the single registry, not inferred from the anchor.
     //
     // GATES: tests/autopilot/safety.test.js scans this matrix as its third
     // catalogue (`findUnboundedRuns`, the 192 ceiling);
     // tests/firewall/human-gate-matrix-selfcheck.test.js section G is the cheap
-    // structural pin plus the exemption registry;
+    // structural pin;
     // tests/security/human-gates.test.js pins the 192/193 boundary pairs, the
     // exact pattern sources, and the growth ratio, and carries the same table.
     patterns: Object.freeze([
@@ -253,10 +254,84 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     policyRef: null,
     probe: 'command',
     tools: Object.freeze(['Bash']),
+    // WINDOW BOUND (ReDoS, 2026-09-15). The no-WHERE run below was
+    // `(?![\s\S]*\bWHERE\b)` — a POSITIVE class inside a negative lookahead,
+    // so it walked to end-of-input from EVERY `UPDATE … SET` start. Quadratic
+    // in the number of candidates (~7,200 in 122,880B), and the W7 static scan
+    // is structurally blind to it (it only reports negative classes and `.`).
+    // Bounded to `[^;]{0,192}`, the same shape as lib/autopilot/safety.js
+    // `sql-delete-no-where`, which also makes the run scannable.
+    //
+    // MEASURED — rule alone, median of 3, a DIFFERENT payload each run (V8
+    // caches the result of an identical (regex, string) pair), node v24.15.0,
+    // Windows 11, this worktree, 2026-09-15 10:5x KST:
+    //                          20,480B    40,962B   122,880B   growth(6x)
+    //   before F1   2.46ms    17.30ms    112.80ms      18.09
+    //   before F3   3.66ms    18.58ms    140.66ms      18.88
+    //   before F5   1.79ms     8.19ms    110.93ms      19.85
+    //   before F6   0.04ms     0.08ms      0.73ms       1.17
+    //   after  F1   0.20ms     0.37ms      2.65ms       1.58
+    //   after  F3   0.00ms     0.00ms      0.00ms       1.00
+    //   after  F5   0.39ms     0.85ms      1.81ms       1.32
+    //   after  F6   0.08ms     0.17ms      0.45ms       1.09
+    // F1 = `'UPDATE t SET a=1 WHERE '` repeated · F3 = `'UPDATE t SET a=1 '`
+    // repeated with one ` WHERE x` at the tail · F5 = the 3-line heredoc form
+    // repeated · F6 = `'UPDATE '` repeated (option-run shape, linear both ways).
+    // `after F3` is 0.00ms because it MATCHES at the first candidate, not
+    // because it is fast; F5 is the fixture that actually walks the whole input.
+    //
+    // Whole-`classify` proxy for the only reaching path, `rm -rf / ; ` +
+    // F3(122,880B) — the prefix is what makes L1 block, which is what makes
+    // this matrix run at all: 143.68ms before, 0.54ms after (same process,
+    // same payload). Hits went `[]` → `['HG-09']` there, which is the
+    // false positive described below, not a new detection.
+    //
+    // REACH: this matrix is reached from exactly one production call site —
+    // scripts/hooks/pre-bash.js post-block record branch → lib/runtime/
+    // human-asked-record.js#recordHumanAsked → classify. That line runs AFTER
+    // writeStdout, so the block decision is already out: the cost delayed the
+    // hook process exit and the ledger write, never the block. Severity =
+    // contract violation + ledger latency, safety impact 0. The end-to-end
+    // hook wall time was NOT resolvable on this machine (4 child runs, decision
+    // `block` every time, 141.6–7,156.7ms with an 18-byte baseline of
+    // 230.6–6,213.0ms — process startup and machine load swamp the rule).
+    //
+    // WINDOW BOUNDARY: 186 / 187, NOT the 192 / 193 of HG-07. The lookahead
+    // starts after `SET`, so the characters before WHERE are `' a=1 '`(5) + w +
+    // `' '`(1) = w + 6; w = 186 still sees WHERE (no hit), w = 187 does not
+    // (hit). tests/security/human-gates.test.js pins both.
+    //
+    // WHAT IT GIVES UP — THE SIGN IS THE REVERSE OF HG-07. HG-07's `{0,192}`
+    // LOSES observation (a `-X POST` past 192 chars goes unclassified). This
+    // one ADDS a false positive: a real WHERE more than 186 characters after
+    // SET falls outside the window, the negative lookahead therefore succeeds,
+    // and the row fires on a statement that is NOT destructive. This matrix
+    // RECORDS, it does not block, so the cost is ledger noise, not a blocked
+    // command — but it is a cost, not a saving, and the test file pins it as
+    // such (shape f). The real distribution of SET–WHERE gaps in issued
+    // commands is UNMEASURED; 192 is inherited from the 4.60.0 convention.
+    // What the window DOES buy besides speed: `UPDATE t SET a=1; SELECT 1
+    // WHERE x` now fires — the old rule read the WHERE of a different
+    // statement and stayed silent. `[^;]` (not `[^;\n]`) is deliberate:
+    // multi-line heredoc SQL with its WHERE on the next line must NOT fire,
+    // and `[^;\n]{0,192}` false-positives there. A WHERE inside a `--` comment
+    // is still read as a WHERE — SQL comments are not modelled.
+    //
+    // NEGATIVE CONTROL: the class alone does not fix this, the WINDOW does.
+    // `(?![^;]*\bWHERE\b)` measured 204.91 / 190.16 / 91.56ms at 122,880B on
+    // F1/F3/F5 (growth 28.64 / 17.17 / 12.46) and is the one variant the static
+    // scanner reports RED (`[{index:33, snippet:'[^;]*'}]`). The adopted source
+    // scans clean at ceilingFor('HG', 'HG-09[2]') = 192.
+    //
+    // GATES: tests/autopilot/safety.test.js scans this matrix as its third
+    // catalogue; tests/security/human-gates.test.js pins the exact source, the
+    // 186/187 boundary pair, the growth ratio and the 7 behaviour shapes, and
+    // carries these tables. What those gates cannot see: the false-positive
+    // rate on real traffic (no corpus).
     patterns: Object.freeze([
       /\bprisma\s+migrate\s+deploy\b/i,
       /\balembic\s+upgrade\b/i,
-      /\bUPDATE\s+[\w."`[\]]+\s+SET\b(?![\s\S]*\bWHERE\b)/i,
+      /\bUPDATE\s+[\w."`[\]]+\s+SET\b(?![^;]{0,192}\bWHERE\b)/i,
     ]),
     existingCoverage: Object.freeze([
       'lib/core/blocked-patterns.js BLOCKED_PATTERNS category="filesystem" (rm -rf 계열)',
