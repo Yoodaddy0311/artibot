@@ -12,6 +12,7 @@
  */
 
 import { newSessionId, saveSession } from './session-store.js';
+import { observePreIntake } from './auto-wire.js';
 import { findUnterminatedPhases } from './replay.js';
 import { reconcileAttemptOnResume } from './phase-attempt.js';
 import { appendEvent, readEvents } from './telemetry.js';
@@ -104,10 +105,16 @@ function fmtTokens(n) {
  * `budgetTokens` ships, drop the mirror here and the compat read in
  * `safety.js#normalizeBudget` together — they are the only two sites.
  *
- * @param {{ task: string, mode?: string, options?: object, sessionId?: string }} args
+ * AUTO-WIRE OBSERVATION (Wave 11): this is where the one and only wired
+ * auto-wire helper fires — data-only. `autoWireDeps` is a top-level arg, NOT
+ * an `options` key, because `options` is persisted into the session JSON and
+ * function handles do not belong in a file on disk.
+ *
+ * @param {{ task: string, mode?: string, options?: object, sessionId?: string,
+ *   autoWireDeps?: {listSessions?: Function, readEvents?: Function, cwd?: string} }} args
  * @returns {object} initial state
  */
-export function makeInitialState({ task, mode, options, sessionId }) {
+export function makeInitialState({ task, mode, options, sessionId, autoWireDeps }) {
   const id = sessionId || newSessionId();
   const requestedOptions = options && typeof options === 'object' ? options : {};
   // A caller that only knows the legacy flag still gets a canonical token
@@ -119,7 +126,7 @@ export function makeInitialState({ task, mode, options, sessionId }) {
   const budgetTokens = budgetOption(requestedOptions.budgetTokens)
     ?? budgetOption(requestedOptions.budget) ?? 2_000_000;
   const budgetUsd = budgetOption(requestedOptions.budgetUsd);
-  return {
+  const state = {
     sessionId: id,
     task: task || '',
     mode: mode || 'default',
@@ -160,6 +167,20 @@ export function makeInitialState({ task, mode, options, sessionId }) {
     goalPaused: false,
     goalControl: null,
   };
+  // Wave 11 data-only observation (PRD v5-ga-roadmap-audit-fold-20260914
+  // "7행 최소 연결" 3행): recorded once per session here — startAutopilot is the
+  // only makeInitialState caller and resume never re-enters it — and never
+  // consumed by any phase runner. observePreIntake absorbs its own errors, so
+  // this line cannot break session startup.
+  state.autoWire = { preIntake: observePreIntake(state, autoWireDeps || {}) };
+  tick(id, {
+    phase: 'INTAKE',
+    type: 'auto-wire-pre-intake',
+    level: 'info',
+    message: 'pre-intake auto-wire observed (data-only, applied=false)',
+    data: state.autoWire.preIntake,
+  });
+  return state;
 }
 
 /**

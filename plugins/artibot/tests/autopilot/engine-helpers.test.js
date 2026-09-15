@@ -1,22 +1,75 @@
 /**
  * Unit tests for lib/autopilot/_engine-helpers.js — preflight integration.
  *
- * Covers buildPreflightInstruction (ok/warn/error branches) and
- * renderPreflightSummary (GFM table form).
+ * Covers buildPreflightInstruction (ok/warn/error branches),
+ * renderPreflightSummary (GFM table form), and makeInitialState's Wave 11
+ * data-only auto-wire observation.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPreflightInstruction,
   makeInitialState,
   renderPreflightSummary,
 } from '../../lib/autopilot/_engine-helpers.js';
+import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
+import { readEvents as readSessionEvents } from '../../lib/autopilot/telemetry.js';
+
+const noHistoryDeps = {
+  listSessions: vi.fn(() => []),
+  readEvents: vi.fn(() => []),
+};
+
+// makeInitialState now writes one telemetry event per call, so every call in
+// this file creates a real runtime/autopilot/<id>.events.ndjson. Pin the id so
+// afterEach can delete it — an unpinned id is unrecoverable and leaks a file.
+const helperIds = new Set();
+
+/**
+ * makeInitialState with a pinned, tracked sessionId and injected empty
+ * session history (so the observation never reads the operator's real store).
+ * @param {object} args - same shape as makeInitialState
+ * @returns {object} initial state
+ */
+function makeTracked(args) {
+  const sessionId = args.sessionId || `ap-helpers-${process.pid}-${helperIds.size + 1}`;
+  helperIds.add(sessionId);
+  return makeInitialState({ autoWireDeps: noHistoryDeps, ...args, sessionId });
+}
+
+afterEach(() => {
+  for (const id of helperIds) {
+    try { deleteSessionArtifacts(id); } catch { /* best-effort cleanup */ }
+  }
+  helperIds.clear();
+});
 
 describe('makeInitialState', () => {
   it('normalizes the fast request to a canonical boolean in persisted options', () => {
-    expect(makeInitialState({ task: 'fast true', options: { fast: true } }).options.fast).toBe(true);
-    expect(makeInitialState({ task: 'fast string', options: { fast: 'true' } }).options.fast).toBe(false);
-    expect(makeInitialState({ task: 'fast absent' }).options.fast).toBe(false);
+    expect(makeTracked({ task: 'fast true', options: { fast: true } }).options.fast).toBe(true);
+    expect(makeTracked({ task: 'fast string', options: { fast: 'true' } }).options.fast).toBe(false);
+    expect(makeTracked({ task: 'fast absent' }).options.fast).toBe(false);
+  });
+
+  it('records a data-only pre-intake observation that is never applied', () => {
+    const state = makeTracked({ task: 'wire pre-intake data only' });
+    expect(state.autoWire.preIntake.applied).toBe(false);
+    expect('instruction' in state.autoWire.preIntake).toBe(false);
+    expect('sessionId' in state.autoWire.preIntake).toBe(false);
+  });
+
+  it('emits exactly one auto-wire-pre-intake event at the INTAKE phase', () => {
+    const state = makeTracked({ task: 'pre-intake telemetry' });
+    const observed = readSessionEvents(state.sessionId)
+      .filter((e) => e.type === 'auto-wire-pre-intake');
+    expect(observed).toHaveLength(1);
+    expect(observed[0].phase).toBe('INTAKE');
+    expect(observed[0].data.applied).toBe(false);
+  });
+
+  it('keeps the DI seam out of the persisted options block', () => {
+    const state = makeTracked({ task: 'deps are not persisted' });
+    expect('autoWireDeps' in state.options).toBe(false);
   });
 });
 
