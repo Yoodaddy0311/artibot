@@ -409,6 +409,45 @@ describe('readNdjsonTail — short reads', () => {
     expect(out.map((r) => r.n)).toEqual([0, 1]);
   });
 
+  it('loses nothing when the read stops exactly ON a newline', () => {
+    // The mirror of the k*STRIDE-1 case. Here the last element after the split
+    // is the empty string, which the blank-line skip eats. Popping the trailing
+    // element unconditionally would be harmless HERE and destructive one byte
+    // earlier — which is why the code discriminates by JSON.parse, not by
+    // position.
+    const file = writeStream(BODY);
+    shortRead.cap = STRIDE * 4;
+    expect(readNdjsonTail(file).map((r) => r.n)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('returns EXACTLY the records whose bytes arrived, at every cut point', () => {
+    // Sweeps all 303 byte offsets across three records instead of trusting one
+    // hand-picked alignment.
+    //
+    // THE COUNT IS THE ASSERTION THAT BITES. "no partial object" and "no gap"
+    // are both true of the UNFIXED code as well — measured: over these same 303
+    // caps the unfixed decode violates neither, it just silently returns fewer
+    // records. An exact expected count is what separates them, and it does:
+    // the formula below matches the fixed decode at 303/303 caps and the
+    // unfixed one at 300/303 (measured 2026-09-15). Record i occupies
+    // [i*STRIDE, i*STRIDE+WIDTH) with its newline at i*STRIDE+WIDTH, so it is
+    // fully present as soon as `cap` reaches the end of its CONTENT — the
+    // newline is a separator, not part of the record.
+    const expected = (cap) => (cap < WIDTH ? 0 : Math.floor((cap - WIDTH) / STRIDE) + 1);
+    const file = writeStream(BODY);
+    for (let cap = 1; cap <= STRIDE * 3; cap += 1) {
+      shortRead.cap = cap;
+      const out = readNdjsonTail(file);
+      expect({ cap, n: out.length }).toEqual({ cap, n: expected(cap) });
+      for (const rec of out) {
+        // A truncated record would be missing `pad` or carry a short one.
+        expect(rec.pad).toBe('a'.repeat(WIDTH - `{"n":${rec.n},"pad":"`.length - 2));
+      }
+      // Whatever came back is a PREFIX of the full sequence, never a gap.
+      expect(out.map((r) => r.n)).toEqual(Array.from({ length: out.length }, (_, i) => i));
+    }
+  });
+
   it('returns [] when the read delivers nothing at all', () => {
     const file = writeStream(BODY);
     shortRead.cap = 0;
