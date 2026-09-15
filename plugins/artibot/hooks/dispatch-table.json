@@ -75,7 +75,8 @@
         { "name": "rotation-runner", "script": "rotation-runner.js", "timeoutMs": 8000 },
         { "name": "memory-tracker",  "script": "memory-tracker.js",  "timeoutMs": 8000, "args": ["SessionEnd"] },
         { "name": "http-notify",     "script": "http-notify.js",     "timeoutMs": 8000 },
-        { "name": "session-ledger",  "script": "session-ledger.mjs", "timeoutMs": 8000, "args": ["SessionEnd"] }
+        { "name": "session-ledger",  "script": "session-ledger.mjs", "timeoutMs": 8000, "args": ["SessionEnd"] },
+        { "name": "mission-complete-record", "script": "mission-complete-record.js", "timeoutMs": 8000 }
       ]
     },
     "SubagentStop": {

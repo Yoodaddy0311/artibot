@@ -48,7 +48,11 @@ const EXPECTED_HANDLER_COUNTS = {
   // post-work passes were converted to on-demand slash commands
   // (commands/blindspot.md, commands/teach-back.md). No more auto-fire at Stop.
   Stop: 6,
-  SessionEnd: 6,
+  // 6 -> 7: mission-complete-record.js joined the slot (Wave 11, SH-02/SH-20
+  // outcome-md emitter). It derives `mission.completed{accepted:null}` from the
+  // session's `verify.completed` rows and reports the outcome.md gate verdict
+  // on stderr; the file write stays behind runtime.artifactLifecycle.enabled.
+  SessionEnd: 7,
   SubagentStop: 3,
   PreCompact: 0,
   // Added 2026-09-02 (vNext PR-CX01): PostCompact is a single-hook slot like

@@ -28,10 +28,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *
  *  - HOME/USERPROFILE -> throwaway dir (above).
  *
- *  - cwd -> throwaway NON-git dir. None of the 6 SessionEnd hooks is a
+ *  - cwd -> throwaway NON-git dir. None of the 7 SessionEnd hooks is a
  *    git-autopilot hook (measured 2026-09-04T05:03Z: `HOOKS` = session-end /
  *    swarm-sync / rotation-runner / memory-tracker / http-notify /
- *    session-ledger), so unlike SessionStart there is no `checkout -b` to
+ *    session-ledger; mission-complete-record joined 2026-09-15 and resolves
+ *    from the PAYLOAD `cwd` only), so unlike SessionStart there is no `checkout -b` to
  *    prevent here. Three of them do read `process.cwd()`, and all three
  *    reads end in the home sandbox rather than the repo:
  *      * `session-end.js:89` and `memory-tracker.js:134` copy the string into
@@ -259,9 +260,9 @@ describe('_sessionend-dispatcher (integration)', () => {
     }
   });
 
-  it('registers all 6 wrapped hooks', async () => {
+  it('registers all 7 wrapped hooks', async () => {
     const mod = await import('../../scripts/hooks/_sessionend-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(6);
+    expect(mod.HOOKS).toHaveLength(7);
     const names = mod.HOOKS.map((h) => h.name);
     expect(names).toContain('session-end');
     expect(names).toContain('swarm-sync');
@@ -269,6 +270,9 @@ describe('_sessionend-dispatcher (integration)', () => {
     expect(names).toContain('memory-tracker');
     expect(names).toContain('http-notify');
     expect(names).toContain('session-ledger');
+    // Wave 11 outcome-md emitter: reads the payload `cwd` (like session-ledger)
+    // and skips when it is absent, so no fixture here reaches a repository.
+    expect(names).toContain('mission-complete-record');
   });
 
   it('passes "SessionEnd" arg to memory-tracker', async () => {

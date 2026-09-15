@@ -50,6 +50,31 @@
  *    than an acceptance.
  *  - `would_write` is a dry-run statement. It says a write was planned, never
  *    that a file exists; under the shipped kill switch none do.
+ *  - **The judgement's inputs are ledger rows, and nothing else.** No agent's
+ *    claim that a mission is finished reaches this fold. That cuts both ways:
+ *    work nobody wrote a line for is invisible here, and a ledger row that is
+ *    ITSELF a self-report (`scripts/ledger/record-verify.mjs` writes
+ *    `verify.completed` from an agent's own account) is counted like a
+ *    measured one. That separation is possible, but only UPSTREAM: a
+ *    self-reported line carries `SELF_REPORT_NOTE` in `data.evidence[0].note`
+ *    (`lib/verification/verify-rate.js:99,118`), and the entries reaching this
+ *    fold carry no evidence at all. A caller that wants the distinction has to
+ *    make it before it builds an entry.
+ *  - **`verification_id` is not an identity, and nothing here joins on it.**
+ *    The hook's verdict is a constant, so its id is `v1-<constant hash>-<stamp
+ *    at SECOND resolution>` and two sessions whose Stop hooks fire in the same
+ *    second produce the SAME id (`lib/verification/verify-rate.js:26-38`,
+ *    measured 2026-09-14: all 13 live ids share the hash `83866286c2d8`).
+ *    `missionId` is this fold's only key. A caller that groups by
+ *    `verification_id` on the way in must key on `(session_id,
+ *    verification_id)`, as `verify-rate.js` does, or it will merge two
+ *    missions into one.
+ *  - **A still-running session's missions are outside the denominator** — or
+ *    they are not, and this fold cannot tell which. Whether a session has
+ *    ended is the CALLER's determination, made before the entries arrive, so
+ *    `declared` counts the sessions the caller chose to look at. A mission
+ *    still in flight that lands its `mission.completed` a minute later moves
+ *    the ratio, and no run of this fold is a final number.
  *  - Nothing here re-runs a gate. A census computed from stale verdicts is
  *    stale, and this file cannot tell.
  *
