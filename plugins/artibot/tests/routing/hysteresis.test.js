@@ -204,7 +204,9 @@ describe('evaluateSwitch — §30 residency', () => {
   it('holds when the counter is absent entirely (fail closed, not fail open)', () => {
     const r = evaluateSwitch({ from: 'opus', to: 'haiku', catalog });
     expect(r.hold).toBe(true);
-    expect(r.reason).toEqual(['minimum-residency']);
+    // Absent is "unknown", not "measured short of the barrier" — see
+    // `route-hysteresis.test.js` for the full reason-code contract.
+    expect(r.reason).toEqual(['residency-unknown']);
     expect(r.residency.actionsSinceSwitch).toBeNull();
   });
 
