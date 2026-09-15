@@ -4,19 +4,18 @@
  * This module writes a judgement about a failed VERIFY and nothing else. It
  * does not touch `state.phase`, `state.pendingPhase`, `state.phases` or any
  * instruction, so the fixed `VERIFY -> IMPROVE` transition
- * (`engine.js#runPhase4Verify`, `engine-state.js#nextPhaseAfter`) is exactly
- * as it was. Flipping that transition to the recommendation recorded here is
+ * (`engine.js#runPhase4Verify`, `engine-state.js#nextPhaseAfter`) is exactly as
+ * it was. Flipping that transition to the recommendation recorded here is
  * CA-03's job, deliberately separate: the switch should be made against a
- * measured denominator rather than a guess, and this journal is that
- * denominator.
+ * measured denominator rather than a guess, and this journal is that denominator.
  *
  * ── Who reads this ────────────────────────────────────────────────────────
  * `state.recoveryJournal` is the input CA-03 will read, so the row carries what
  * a later transition needs (`class`, `action`, `target`, `reason`) plus what an
  * Observe-stage audit needs (`verdictRaw` beside the adapted `verdict`,
- * `verificationStatus`, `fixedNext`). `divergent` is always `true` today — the
- * fixed transition goes to IMPROVE whatever the recommendation is — and exists
- * so the vocabulary is stable before CA-03 starts writing `false`.
+ * `verificationStatus`, `retryLimit`, `fixedNext`). `divergent` is always `true`
+ * today — the fixed transition goes to IMPROVE whatever the recommendation is —
+ * and exists so the vocabulary is stable before CA-03 starts writing `false`.
  *
  * ── Three rules that are not judgement calls ──────────────────────────────
  *  1. **PASS is not recorded.** `failure-classifier.js#classify` names PASS a
@@ -29,8 +28,8 @@
  *
  * Layer: L2, importing `lib/recovery` and `lib/review` (L2 siblings) and
  * nothing higher. It does NOT import `engine-state.js` — that module imports
- * this one — so `fixedNext` arrives through the payload rather than being
- * recomputed, keeping the dependency one-directional.
+ * this one — so `fixedNext` arrives through the payload, keeping the
+ * dependency one-directional.
  *
  * @module lib/autopilot/recovery-record
  */
@@ -58,14 +57,12 @@ const EXPLICIT_STATUSES = Object.freeze(['PASS', 'FAIL', 'UNMEASURED']);
  * Fold a driver-written `state.verifyResult` into a verification status.
  *
  * ALLOWLIST of three explicit shapes, checked independently: `status` spelled
- * exactly `PASS`/`FAIL`/`UNMEASURED`, `ok` as a real boolean, `passed` as a
- * real boolean.
- *
- * Anything else — free-form prose, the `mcp` slot alone, an exit code, a
- * non-object — is `UNMEASURED`, and so are two explicit signals that disagree:
- * a contradiction is not a measurement. Pure, and never reads nested objects —
- * `verifyResult.mcp.ok` is one layer's result, and treating it as the fold
- * would let a single MCP check speak for lint, typecheck, test and build.
+ * exactly `PASS`/`FAIL`/`UNMEASURED`, `ok` as a real boolean, `passed` as a real
+ * boolean. Anything else — free-form prose, the `mcp` slot alone, an exit code,
+ * a non-object — is `UNMEASURED`, and so are two explicit signals that
+ * disagree: a contradiction is not a measurement. Pure, and never reads nested
+ * objects — `verifyResult.mcp.ok` is one layer's result, and treating it as the
+ * fold would let a single MCP check speak for lint, typecheck, test and build.
  *
  * @param {unknown} verifyResult - `state.verifyResult`, any shape.
  * @returns {'PASS'|'FAIL'|'UNMEASURED'}
@@ -89,13 +86,13 @@ export function foldVerify(verifyResult) {
  * Delegates to `lib/review/independent-reviewer.js#foldLegacyToken`, which
  * resolves the token against `ADAPTER_ROWS` — the in-module mirror of
  * `schemas/verdict-adapter-map.json`, kept identical by
- * `tests/review/independent-reviewer.drift.test.js`. There is therefore no
- * mapping table in this file and no second place to update.
+ * `tests/review/independent-reviewer.drift.test.js`. No mapping table lives in
+ * this file, so there is no second place to update.
  *
  * `null` covers all three refusals the map specifies — unmapped token
- * (`rules.unmapped_token: reject`), the ambiguous `SPEC_FAIL` row, and two
- * sources disagreeing on one spelling — and sends `classify()` to the
- * verification fold or to `unknown`, never to a silent PASS. The driver writes
+ * (`rules.unmapped_token: reject`), the ambiguous `SPEC_FAIL` row, two sources
+ * disagreeing on one spelling — and sends `classify()` to the verification fold
+ * or to `unknown`, never to a silent PASS. The driver writes
  * `"pass" | "warn" | "fail"` (`engine.js#runPhase3CrossCheck`) while schema-v1
  * spells the middle token `warning`, so `warn` folds to `null` by design.
  *
@@ -110,13 +107,6 @@ export function adaptVerdict(legacyToken) {
 /** Non-negative integer, or 0. Counters are advisory and must never throw. */
 function intOrZero(value) {
   return Number.isInteger(value) && value >= 0 ? value : 0;
-}
-
-/** How many journal rows already carry this class, plus the current one. */
-function sameClassAttempts(journal, failureClass) {
-  if (!Array.isArray(journal)) return 1;
-  return journal.filter((r) => r !== null && typeof r === 'object' && r.class === failureClass)
-    .length + 1;
 }
 
 /**
@@ -135,14 +125,18 @@ function pushJournal(state, row) {
 }
 
 /**
- * Last-resort journal entry for a recorder that threw. Its own push is
- * guarded: if even this fails, the ACK still proceeds.
+ * Last-resort journal entry for a recorder that threw. EVERY step is guarded:
+ * this runs on the path that already failed, so a throw here escapes straight
+ * into the phase ACK. All three inputs can be hostile — `err.message` and
+ * `state.sessionId` can be accessors that throw, and `phase` can stringify
+ * badly inside the template — and each degrades rather than propagating.
  * @param {object} state
  * @param {string} phase
  * @param {unknown} err
  */
 function journalRecordFailure(state, phase, err) {
-  const message = String(err && err.message ? err.message : err);
+  let message = 'unknown';
+  try { message = String(err && err.message ? err.message : err); } catch { /* degraded */ }
   try {
     pushJournal(state, {
       at: new Date().toISOString(), phase, recordFailed: true, error: message,
@@ -150,23 +144,25 @@ function journalRecordFailure(state, phase, err) {
   } catch {
     /* the journal itself is unusable; the ACK still matters more */
   }
-  tick(state?.sessionId, {
-    phase,
-    type: 'recovery-record-failed',
-    level: 'warn',
-    message: `복구 판정 기록 실패 (${phase}) — 단계 확인은 그대로 진행됩니다`,
-    data: { error: message },
-  });
+  try {
+    tick(state?.sessionId ?? null, {
+      phase,
+      type: 'recovery-record-failed',
+      level: 'warn',
+      message: `복구 판정 기록 실패 (${phase}) — 단계 확인은 그대로 진행됩니다`,
+      data: { error: message },
+    });
+  } catch {
+    /* telemetry is advisory; reading sessionId must not reach the ACK either */
+  }
 }
 
 /**
- * Everything the judgement is made from, read once so the rest of the flow
- * touches no live state. Reading `state.crossCheck` can throw on an
- * accessor-backed state, which is why this runs inside the caller's try.
+ * Everything the judgement is made from, read once. `state.crossCheck` can be
+ * an accessor that throws, which is why this runs inside the caller's try.
  * @param {object} state
  * @param {object} payload
- * @returns {{phase: string|null, status: string|null, fixedNext: string|null,
- *   rawToken: string|null, verdict: string|null, verification: string}}
+ * @returns {{phase: ?string, status: ?string, fixedNext: ?string, rawToken: ?string, verdict: ?string, verification: string}}
  */
 function readSignals(state, payload) {
   const raw = state?.crossCheck?.verdict;
@@ -210,16 +206,16 @@ function judge(state, signals) {
   });
   const counters = state?.counters ?? {};
   const repairAttempts = intOrZero(counters.buildFailures) + intOrZero(counters.testFailures);
-  const seen = sameClassAttempts(state?.recoveryJournal, classification.class);
+  // The classifier already walked `history` with a broader rule than a naive
+  // `row.class` scan; counting again here would be a second, different truth.
+  const seen = intOrZero(classification.signals?.priorSameClass) + 1;
   const decision = decide(classification, {
     onFailure: VERIFY_ON_FAILURE,
     repairAttempts,
     replanAttempts: 0,
     sameClassAttempts: seen,
   });
-  return {
-    classification, decision, repairAttempts, seen,
-  };
+  return { classification, decision, repairAttempts, seen };
 }
 
 /** Row fields mirrored into the event — one list, so the two cannot drift. */
@@ -228,8 +224,8 @@ const TICK_FIELDS = Object.freeze([
 ]);
 
 /**
- * Mirror the journal row into the session event stream. Advisory — `tick`
- * swallows its own failures.
+ * Mirror the row into the session event stream. Advisory — `tick` swallows its
+ * own failures.
  * @param {object} state
  * @param {object} row
  */
@@ -252,13 +248,15 @@ function emitDecisionTick(state, row) {
  *
  * @param {object} state - Live session state. `recoveryJournal` is the only
  *   field mutated; `crossCheck`, `verifyResult`, `counters`, `sessionId` read.
- * @param {{phase?: string, status?: string, fixedNext?: string|null}} payload
- *   The `recordPhaseResult` payload. `fixedNext` is passed in rather than
- *   derived so this module never imports `engine-state.js`.
+ * @param {{phase?: string, status?: string, fixedNext?: ?string}} payload The
+ *   `recordPhaseResult` payload. `fixedNext` is passed in rather than derived
+ *   so this module never imports `engine-state.js`.
  * @returns {object|null} The appended row, or null when nothing was recorded.
  */
 export function recordRecoveryDecision(state, payload = {}) {
-  const phase = payload?.phase ?? null;
+  // Outside the try so the catch can label the row; guarded against a hostile accessor.
+  let phase = null;
+  try { phase = payload?.phase ?? null; } catch { /* degraded to null */ }
   try {
     const signals = readSignals(state, payload);
     // PASS is not a failure. Zero rows, zero telemetry lines.
@@ -282,6 +280,9 @@ export function recordRecoveryDecision(state, payload = {}) {
       reason: decision.reason,
       repairAttempts,
       sameClassAttempts: seen,
+      // Budget this row was judged against (old rows stay readable after an
+      // engine payload change).
+      retryLimit: VERIFY_ON_FAILURE.retryLimit,
       fixedNext: signals.fixedNext,
       // Always true at the Observe stage: the fixed transition ignores the
       // recommendation. CA-03 is what makes `false` possible.

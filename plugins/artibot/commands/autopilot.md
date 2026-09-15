@@ -277,13 +277,13 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
-> **VERIFY 결과 payload 규약 (SH-06, Observe).** `status` 는 완료면 `'done'`, `npm run ci` 가 재시도 3회 뒤에도 빨간 채로 끝나면 `'failed'` 를 쓴다. 기록기는 `'done'` 이외를 전부 실패 신호로 읽으므로 다른 어휘를 써도 기록은 되지만, 저널을 세는 분모가 흔들리지 않게 `'failed'` 로 통일한다.
+> **VERIFY 결과 payload 규약 (SH-06, Observe).** `status` 는 완료면 `'done'`, `npm run ci` 가 재시도 3회 뒤에도 빨간 채로 끝나면 `'failed'` 를 쓴다. 기록기는 `'done'` 이외를 전부 실패 신호로 읽으므로 다른 어휘를 써도 기록은 되지만, 저널을 세는 분모가 흔들리지 않게 `'failed'` 로 통일한다. **3회 재시도 뒤에도 실패해 pause 로 가기 전에 `recordPhaseResult(state, { phase: 'VERIFY', status: 'failed' })` 를 먼저 호출한다** — 호출 없이 pause 하면 저널에 아무것도 남지 않는다.
 >
 > **명시 신호를 남겨라.** `state.verifyResult` 에 `status: 'PASS'|'FAIL'|'UNMEASURED'` 또는 `ok`/`passed` 불리언을 쓰면 분류기가 그 값을 그대로 읽는다. lint/typecheck/test 를 자유형으로만 적으면(`{ lint: 'ok', test: '3 failed' }`) 추측하지 않고 `UNMEASURED` 로 접혀 `unknown → ask_human` 권고가 **기록만** 된다 — 신호 결손률 자체가 Observe 단계의 측정값이다. 함께 읽히는 `state.crossCheck.verdict` 는 `pass`·`fail` 만 어댑터(`schemas/verdict-adapter-map.json`)에 토큰이 있고 `warn` 은 없다(`warning` 철자만 있다) — 미매핑은 추측 없이 `null` 로 분류기에 들어간다.
 >
 > **이 기록은 관측이다** — 전이(`nextPhase: 'IMPROVE'`)·`pendingPhase`·instruction 은 아무것도 바뀌지 않는다. CA-03(후속 웨이브)이 켜지기 전까지 저널은 읽기 전용 측정값이다.
 >
-> 기록 위치는 `state.recoveryJournal[]` 와 세션 `events.ndjson` 의 `type: 'recovery-decided'` 두 곳이다. PASS 로 끝난 VERIFY 는 어느 쪽에도 행을 남기지 않는다.
+> 기록 위치는 `state.recoveryJournal[]` 와 세션 `events.ndjson` 의 `type: 'recovery-decided'` 두 곳이다. PASS 로 끝난 VERIFY 는 어느 쪽에도 행을 남기지 않는다. 여기서 말하는 PASS 는 세 조건이 **동시에** 성립할 때다(`recovery-record.js#isCleanVerify` 와 같은 정의): `status` 가 `'done'` 이고, `verifyResult` 의 명시 신호가 PASS 로 접히고, `crossCheck.verdict` 가 `pass` 이거나 어댑터에 없는 토큰(미매핑)일 때. 셋 중 하나라도 어긋나면 — `done` + `UNMEASURED` 를 포함해 — 행이 남는다.
 
 > **EXECUTE 는 이 호출이 필수다 (ADR-005 2단).** EXECUTE 위임 시 엔진은 `state.activePhaseAttempt` 를 durable 하게 남기고 `phase-end` 를 기록하지 않는다 — 팀이 실제 작업을 끝냈는지는 엔진이 관측할 수 없기 때문이다. `recordPhaseResult(state, { phase: 'EXECUTE', ... })` 가 그 attempt 를 ACK 하고 `phase-end` 를 기록한다. **이 호출을 빠뜨리면 다음 resume 이 "위임 후 미보고" 로 판단해 PAUSE 한다** (재실행은 허용목록 phase 에만 자동 적용되고 EXECUTE 는 목록 밖 — 이미 반영된 작업의 중복 커밋을 막기 위함). 반대로 정상 완주 세션은 ACK 으로 슬롯이 비워지므로 resume 을 반복해도 recovery note 가 생기지 않는다.
 >

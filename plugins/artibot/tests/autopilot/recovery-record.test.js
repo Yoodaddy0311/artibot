@@ -189,7 +189,7 @@ describe('recordRecoveryDecision — the four trigger shapes', () => {
   const REQUIRED_FIELDS = [
     'at', 'phase', 'status', 'verdictRaw', 'verdict', 'verificationStatus',
     'class', 'classReason', 'action', 'target', 'reason', 'repairAttempts',
-    'sameClassAttempts', 'fixedNext', 'divergent', 'recordedBy',
+    'sameClassAttempts', 'retryLimit', 'fixedNext', 'divergent', 'recordedBy',
   ];
 
   it.each([
@@ -268,6 +268,12 @@ describe('VERIFY_ON_FAILURE mirrors the payload the engine actually emits', () =
     expect(VERIFY_ON_FAILURE.retryLimit).toBe(instruction.onFailure.retryLimit);
     expect(VERIFY_ON_FAILURE.escalateTo).toBe(instruction.onFailure.escalateTo);
   });
+
+  it('snapshots the budget onto the row so an old judgement stays readable', () => {
+    const state = makeState('retrylimit-row', { verifyResult: { status: 'FAIL' } });
+    const row = recordRecoveryDecision(state, verifyPayload('failed'));
+    expect(row.retryLimit).toBe(VERIFY_ON_FAILURE.retryLimit);
+  });
 });
 
 describe('recordRecoveryDecision — counters and the ladder', () => {
@@ -324,6 +330,55 @@ describe('recordRecoveryDecision — a recording failure must not block the ACK'
     const failures = readEvents(state.sessionId).filter((e) => e.type === 'recovery-record-failed');
     expect(failures).toHaveLength(1);
     expect(failures[0].level).toBe('warn');
+  });
+
+  it('returns null instead of throwing when reading sessionId itself throws', () => {
+    // The failure path reads state.sessionId to emit telemetry. An accessor
+    // that throws there used to escape the recorder entirely — the never-throw
+    // contract broken on the one path that exists to uphold it. Pinned by a
+    // direct call: through recordPhaseResult, saveSession hits the same getter
+    // first, so that route measures session-store, not this module.
+    const state = makeState('sessionid-throws', { verifyResult: { ok: false } });
+    Object.defineProperty(state, 'crossCheck', {
+      get() { throw new Error('injected crossCheck read failure'); },
+      enumerable: false,
+      configurable: true,
+    });
+    Object.defineProperty(state, 'sessionId', {
+      get() { throw new Error('injected sessionId read failure'); },
+      enumerable: false,
+      configurable: true,
+    });
+
+    let result;
+    expect(() => {
+      result = recordRecoveryDecision(state, { phase: 'VERIFY', status: 'failed' });
+    }).not.toThrow();
+    expect(result).toBeNull();
+    expect(state.recoveryJournal[0]).toMatchObject({ phase: 'VERIFY', recordFailed: true });
+  });
+
+  it('degrades to a placeholder when the thrown value has a throwing message', () => {
+    const state = makeState('message-throws', { verifyResult: { ok: false } });
+    Object.defineProperty(state, 'crossCheck', {
+      get() { throw { get message() { throw new Error('injected message failure'); } }; },
+      enumerable: false,
+      configurable: true,
+    });
+
+    expect(() => recordRecoveryDecision(state, { phase: 'VERIFY', status: 'failed' }))
+      .not.toThrow();
+    expect(state.recoveryJournal[0]).toMatchObject({ recordFailed: true, error: 'unknown' });
+  });
+
+  it('survives a payload whose phase accessor throws', () => {
+    const state = makeState('payload-throws', { verifyResult: { ok: false } });
+    const payload = { status: 'failed' };
+    Object.defineProperty(payload, 'phase', {
+      get() { throw new Error('injected payload failure'); },
+      enumerable: true,
+    });
+    expect(() => recordRecoveryDecision(state, payload)).not.toThrow();
   });
 });
 
