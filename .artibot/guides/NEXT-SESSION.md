@@ -1,6 +1,24 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-14 KST 갱신, AsusHeechangLee 머신, master = c2f300e3 = **v4.62.0 릴리스**(ci/release-4-62-0 경유 착지 대기) · Wave 9 8/8 착지(p1 18ac5644 · p2 f1f8311e · p3 3ba981eb) · worktree 8 + 로컬 브랜치 8 **정리 대기** · sync:local 4.62.0 완료 · **호스트 재시작 대기**)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = ac721255 = v4.62.0 + Wave 10 13/13 착지 · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 plan 초안 오너 결정 4건 대기 · 4.63.0 체크리스트 충족 0/6)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## Wave 11 준비 + 리더 정리 (2026-09-15 09:0x~10:0x KST, 세션 artibot-28/89ada2, master = ac721255, 코드 변경 0)
+
+**한 줄**: Wave 10 잔여 정리(빈 디렉터리·로컬 브랜치·unlocked worktree)를 끝내고, Observe 판독기 3종을 **처음으로 라이브 원장에 돌려 수치를 확보**했으며, Wave 11 plan 초안(8줄기 + 롤링 1)을 오너 결정 4건 대기 상태로 세웠다. 이 세션은 정리·계측·기획만 했고 **코드 변경 0**이다.
+
+**정리 완료(devops 실측)**: 미등록 빈 디렉터리 4개 `rmdir`(`nl-activation-report` · `routing-single-decision` · `scorecard-absent-contract` · `split-ops-remediation`) · 로컬 브랜치 `-d` 6개(위 4 + `autopilot-phase-transition` a88eb5e7 · `routebench-scenarios-live` 9ae3b89d — 전부 origin/master merged, ahead 0) · unlocked worktree 2개 `git worktree remove` + `prune`. 사후 실측: `git worktree list` 9행(master + locked 8) · 브랜치 `worktree-split-artibot-*` 8개 · `.claude/worktrees/` 8개 · HEAD ac721255 불변. run.json `cleanupPending.worktreeDirs` 4개는 전부 처리됐다.
+
+**gotcha 신규**: (113) **`git worktree remove` 는 `plugins/artibot/node_modules` junction 을 남긴다** — exit 0 이어도 디스크에 `plugins/artibot/node_modules`(→ 라이브 `plugins/artibot/node_modules` 를 가리키는 NTFS junction, `scripts/split/worktree-setup.mjs:208` `fs.symlinkSync(source, target, 'junction')`) 껍데기가 남아 뒤따르는 `rmdir` 스윕이 `Directory not empty` 로 실패한다. `find -type f` 는 링크를 세지 않으므로 "빈 트리" 로 오판한다(리더 실수). **정본 제거 수단 = `node plugins/artibot/scripts/split/worktree-setup.mjs <worktreePath> --teardown`** — reparse point 만 제거하고 링크 슬롯에 실디렉터리가 있으면 거부한다(같은 파일 24~27행). 이번에는 옵션 없는 MSYS `rm <link>` 로 끊었고 타깃 무손상이었으나(상위 107 엔트리 · 파일 2,181 · vitest 실행 OK), 같은 파일 헤더 11~12행이 기록한 "junction 을 `rm -rf` 로 지우면 부모로 따라 들어간다 — 부모 957 엔트리가 한 키스트로크 앞이었다" 사고 때문에 **재귀 삭제·`Remove-Item -Recurse` 금지**. 남은 locked 8개 전부 같은 링크를 갖고 있다(리더 실측) → 정리 순서는 `unlock` → `--teardown` → `git worktree remove` → `prune` → `branch -d`(단 `ob17-models-current` 만 `-D` — 빈 커밋 a73eab24 는 의도된 미착지라 merged 판정이 안 선다). (114) **"locked = 창 생존" 은 성립하지 않는다** — 잠금 사유에 적힌 pid 8개가 전부 사망 상태였고(investigator `Get-Process`), WindowsApps `claude.exe` 10개는 Claude Desktop 앱 1개(main 45992)의 자식 프로세스이지 창이 아니다. 반면 `ListAgents` 에는 Wave 10 줄기명을 단 Remote Control 유휴 피어 8개가 idle 로 잡혔다(리더 09:1x) → 창은 데스크톱 앱 내부 세션으로 살아 있을 가능성이 높으나 **`EnterWorktree` 가능 여부는 dispatch 전 미확인**. `[split:reuse]` 성립 여부는 pid·lock 이 아니라 **SendMessage 응답으로 판정**할 것.
+
+**Observe 판독기 첫 라이브 실행(investigator 09:30 KST, 원장 1,034행, 세 스크립트 읽기 전용임을 확인한 뒤 실행, 전부 exit 0)**: `scripts/ledger/verify-rate.mjs` — 훅 발화 35(`verify.completed` 140행 · 9세션), self_report 0, **rate 0** · `scripts/ledger/session-coverage.mjs` — `session.ended` 3 / with_receipts 3, **coverage 1.0**, receipt-only 세션 12, disagree 0 · `scripts/evals/nl-activation-report.mjs` — slash-agreement·hint-acceptance 는 0/0 = **UNMEASURED**(분자 writer 부재), `mission.deferral-rate` **259/284 = 0.912**. **t0 정정**: `session.ended` 최초 행이 2026-09-15T00:06:29Z(= 오늘 09:06 KST, 호스트 재시작 시각)이므로 Observe ④ 분모의 t0 는 릴리스가 아니라 **설치본 갱신 + 호스트 재시작** 시점이다. `verify.completed` 최초 행은 09-14T05:21:46Z 로 기존 ③ t0 와 정합. `--help` 는 `verify-rate`·`session-coverage` 에서 exit 2(SH-27 규약).
+
+**4.63.0 체크리스트 대조(investigator)**: 6항목 중 **충족 0** · 부분 1(`install-files-smoke` 14 passed / 1 skipped, `npm run ci` 전체는 미실행) · 미충족 3(구 원장 2파일이 실재 — `.artibot/runtime/ledger.jsonl.pre-adr011` 204,406B · `.git/artibot/ledger.jsonl.live-premerge-20260914` 442,576B / plugin-local ledger 28행은 10일·8세션에 분산돼 있어 "프로브 잔재" 가설은 **기각**, 처분은 오너 몫 / `V5-BACKLOG.md:175` ADR-011 행이 "삭제 대기" 그대로) · 미착수 1(릴리스 순서) · 값 확보 1(체크리스트 6번 자리에는 위 판독기 수치를 인용한다).
+
+**Wave 11 plan 초안**: `.artibot/split/plan-wave11-draft.json`(gitignore). 8줄기 + 롤링 1(`outcome-md-emitter`), 부채 1/8 = 12.5%(`hg09`), `conflictGroups` 3(ob26↔f04b config · sh29↔outcome 는 dispatch-table + README 같은 줄 · sh29↔ob17 은 allowlist 조건부), 창 배정 8↔8. 정찰 초안에 남아 있는 `dispatch-base-forkpoint` 부채 언급은 **낡았다**(096d5897 로 이미 착지). **오너 결정 대기 4건**: W11-Q1 OB-17 D1 incumbent 원천(K1 권장) · W11-Q2 OB-17 D2 `residency-unknown`(H1 채택, H3 보류 권장) · W11-Q3 SH-29 E5 를 skill 만으로 축소(command 는 Wave 12 `intent.detected`, hook 은 Wave 12 신규 이벤트) · W11-Q4 outcome 완료 선언 트리거 (a) SessionEnd 유도 판정. 정본이 이미 답한 12항목은 질문에서 제외했다(OB-26 = 7 은 §5 D12, SH-06 D1~D3 은 §5 C8·§3.4 등).
+
+**원장 시험행 정정**: 리더가 09:0x 디스패처 시험 실행으로 남긴 `test-hc`·`test-hc2` `session.ended` 2행을 09:10 제거했다. 백업 `.git/artibot/ledger.jsonl.bak-20260915-testrows`(1,005행) — 확인 후 삭제 가능.
+
+**다음 할 일**: ① 오너 결정 4건 회신 → plan 초안의 `parentSession`·`createdAt` 치환 → `/split plan` → dispatch(창 8개에서 `[split:reuse]` 응답 확인) ② V5-BACKLOG 변경분 + 이 NEXT-SESSION 절 커밋(docs) ③ 4.63.0 은 위 체크리스트 미충족 3건 해소 뒤.
 
 ## Wave 10 자율 착지 + 창 재사용 (2026-09-14 14:0x~18:3x KST, 세션 artibot-5d/0480e6, master = **096d5897**(배치 11, Wave 10 코드 착지 13/13 완료) — 배치별 SHA 는 `run.json.landings` 정본)
 
@@ -12,7 +30,7 @@
 
 **오너 결정 대기(정찰 초안에 후보+권장안)**: OB-17 D1 incumbent 원천(K1 권장)·D2 `residency-unknown`(H1 권장) · nl-activation 분자 writer 스토어 · verify 훅 세션 salt · OB-26 `recommendMinSubtasks=7`(§5 D12 를 승인으로 볼지) · SH-29 hook carrier 신규 이벤트 여부 · outcome-md-emitter 결정 9건 · F04(b) OD1~OD5 · SH-06 D1~D5 · plan-md-emitter Important-2(게이트 open 시 호스트 Write 가 훅 렌더를 덮음).
 
-**다음 할 일**: ① budget-units done → land → 배치 10 착지 → 프로브 AP-03/04 false 확인 ② 리더 통합: `sync:local` 재실행(설치본 갱신) · 옛 worktree 4+ 디렉터리 정리 · 로컬 브랜치 `worktree-split-artibot-*` 정리(전부 merged) · V5-BACKLOG 행 갱신(OB-21 done 유지, OB-07 numerator, SH-03 계측기 착지, SH-04 F04 기록, SH-07 pricing 기본 true, §3 F06~F09 done, §4 ③④ 라이브 수치) ③ Wave 11 plan — 정찰 초안 9건(`hg09`·`sh06`·`f04b`·`wire-preintake`·`sh29`·`ob26`·`ob17-switch-reasons`·`outcome-md-emitter`·`verify-completed-producer`) + 부채 `dispatch-base-forkpoint` ④ 4.63.0 릴리스(체크리스트 아래 절).
+**다음 할 일**: ① budget-units done → land → 배치 10 착지 → 프로브 AP-03/04 false 확인 ② 리더 통합: `sync:local` 재실행(설치본 갱신) · ~~옛 worktree 4+ 디렉터리 정리 · 로컬 브랜치 `worktree-split-artibot-*` 정리(전부 merged) · V5-BACKLOG 행 갱신(OB-21 done 유지, OB-07 numerator, SH-03 계측기 착지, SH-04 F04 기록, SH-07 pricing 기본 true, §3 F06~F09 done, §4 ③④ 라이브 수치)~~ → 2026-09-15 완료(위 절) ③ Wave 11 plan — 정찰 초안 9건(`hg09`·`sh06`·`f04b`·`wire-preintake`·`sh29`·`ob26`·`ob17-switch-reasons`·`outcome-md-emitter`·`verify-completed-producer`) + 부채 `dispatch-base-forkpoint`(→ 이미 착지 096d5897) ④ 4.63.0 릴리스(체크리스트 아래 절).
 
 ## v4.62.0 릴리스 + 원장 이관 + v5.0 로드맵 확정 (2026-09-14 12:xx KST, 세션 artibot-16/d2f6a2c2, master = c2f300e3)
 
