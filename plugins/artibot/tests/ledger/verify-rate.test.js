@@ -119,6 +119,47 @@ function selfReportRun({ session, vid, ts }) {
 }
 
 /**
+ * The four lines the Stop hook writes when it COULD measure the deterministic
+ * layer: `pass` there and on the overall fold, the two layers no runner
+ * produces still `unmeasured`, and a `kind:'file'` evidence entry naming the
+ * vitest reporter's output. No self-report note anywhere — that is the whole
+ * difference, and it is what the reader keys on.
+ *
+ * @param {{session: string, vid: string, ts: string}} p
+ * @returns {object[]}
+ */
+function measuredRun({ session, vid, ts }) {
+  const deterministic = line({ session, vid, layer: 'deterministic', result: 'pass', ts });
+  deterministic.data.evidence = [{
+    kind: 'file',
+    file: 'plugins/artibot/runtime/last-test-result.json',
+    line: 1,
+    measured_at: ts,
+    note: 'vitest total=17377 passed=17365 failed=0 skipped=12',
+  }];
+  return [
+    deterministic,
+    line({ session, vid, layer: 'behavioral', result: 'unmeasured', ts }),
+    line({ session, vid, layer: 'operational', result: 'unmeasured', ts }),
+    line({ session, vid, layer: null, result: 'pass', ts }),
+  ];
+}
+
+/**
+ * Write a list of events to the root's real ledger path, one JSON line each.
+ *
+ * @param {string} root
+ * @param {object[]} events
+ * @returns {string} the ledger file path
+ */
+function writeLedger(root, events) {
+  const file = ledgerFilePath(root);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${events.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf-8');
+  return file;
+}
+
+/**
  * Write the brief fixture — two hook firings, one of them answered — into the
  * root's real ledger path.
  *
@@ -126,15 +167,11 @@ function selfReportRun({ session, vid, ts }) {
  * @returns {string} the ledger file path
  */
 function writeFixture(root) {
-  const file = ledgerFilePath(root);
-  mkdirSync(path.dirname(file), { recursive: true });
-  const events = [
+  return writeLedger(root, [
     ...hookRun({ session: 'S1', vid: `v1-aaaaaaaaaaaa-${STAMP}`, ts: '2026-09-14T12:00:00.000Z' }),
     ...hookRun({ session: 'S2', vid: `v1-bbbbbbbbbbbb-${STAMP}`, ts: '2026-09-14T12:05:00.000Z' }),
     ...selfReportRun({ session: 'S1', vid: `v1-cccccccccccc-${STAMP}`, ts: '2026-09-14T12:10:00.000Z' }),
-  ];
-  writeFileSync(file, `${events.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf-8');
-  return file;
+  ]);
 }
 
 /**
@@ -179,7 +216,9 @@ describe('verify-rate CLI: reading a real ledger', () => {
     expect(printed.file).toBe(file);
     expect(printed.rate.sessions.rate).toBe(0.5);
     expect(printed.rate.firings.rate).toBe(0.5);
-    expect(printed.rate.ids).toEqual({ hook: 2, self_report: 1, other: 0, unknown_stamp: 0 });
+    expect(printed.rate.ids).toEqual({
+      hook: 2, self_report: 1, other: 0, unknown_stamp: 0, measured: 0,
+    });
     // The census is what makes the rate readable: 12 survivors out of 12
     // non-blank lines means nothing upstream was dropped.
     expect(printed.census.survivors).toBe(12);
@@ -229,11 +268,60 @@ describe('verify-rate CLI: reading a real ledger', () => {
 
     expect(printed.ok).toBe(true);
     expect(printed.rate.sessions.hook).toBe(1);
-    expect(printed.rate.firings).toEqual({ hook: 1, answered: 1, unordered: 0, rate: 1 });
+    expect(printed.rate.firings).toEqual({
+      hook: 1, answered: 1, unordered: 0, rate: 1, measured: 0, measured_rate: 0,
+    });
     // S2's four lines. A filtered rate whose denominator shrank silently is the
     // failure mode `census.dropped.selection` exists to make visible.
     expect(printed.census.dropped.selection.filtered_out).toBe(4);
     expect(printed.census.survivors).toBe(8);
+  });
+
+  it('prints the measured share of the firings, through a real spawn, touching nothing', () => {
+    // The pure fold is pinned in tests/verification/verify-rate.test.js. What
+    // ONLY a spawn can show is that the new fields survive the path this CLI
+    // actually walks — `readLedgerCensus` parse, dedupe, JSON.stringify — and
+    // that adding them did not turn the reader into a writer.
+    const root = makeRoot('M');
+    const file = writeLedger(root, [
+      ...measuredRun({ session: 'S1', vid: `v1-83866286c2d8-${STAMP}`, ts: '2026-09-14T12:00:00.000Z' }),
+      ...hookRun({ session: 'S1', vid: 'v1-83866286c2d8-20260914T120500Z', ts: '2026-09-14T12:05:00.000Z' }),
+    ]);
+    const dir = path.dirname(file);
+    const before = {
+      bytes: readFileSync(file),
+      mtimeMs: statSync(file).mtimeMs,
+      size: statSync(file).size,
+      listing: readdirSync(dir).sort(),
+    };
+
+    const out = runCli(['--cwd', root], root);
+
+    expect(out.stderr).toBe('');
+    expect(out.status).toBe(0);
+    const printed = parseOut(out);
+    expect(printed.ok).toBe(true);
+    // One of the two firings was measured. BOTH are still firings: the hook
+    // ran twice and no `/verify` answered either, so `rate` reads 0 while
+    // `measured_rate` reads 0.5. A denominator that dropped the measured run
+    // would report 0/1 here and climb as measurement improved.
+    expect(printed.rate.firings).toEqual({
+      hook: 2, answered: 0, unordered: 0, rate: 0, measured: 1, measured_rate: 0.5,
+    });
+    expect(printed.rate.ids).toEqual({
+      hook: 1, self_report: 0, other: 0, unknown_stamp: 0, measured: 1,
+    });
+    expect(printed.rate.sessions.measured).toBe(1);
+    // Eight lines in, eight survivors: the measured run's `kind:'file'`
+    // evidence is not something the reader drops.
+    expect(printed.census.survivors).toBe(8);
+    expect(printed.census.dropped_total).toEqual({ loss: 0, selection: 0 });
+
+    const after = statSync(file);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(after.size).toBe(before.size);
+    expect(readFileSync(file).equals(before.bytes)).toBe(true);
+    expect(readdirSync(dir).sort()).toEqual(before.listing);
   });
 
   it('honours --since', () => {
@@ -245,7 +333,9 @@ describe('verify-rate CLI: reading a real ledger', () => {
     // Only the self-report survives the cut, so there is no firing left to
     // measure and the rate is null rather than 0 — an absent denominator, not
     // a failure to answer.
-    expect(printed.rate.ids).toEqual({ hook: 0, self_report: 1, other: 0, unknown_stamp: 0 });
+    expect(printed.rate.ids).toEqual({
+      hook: 0, self_report: 1, other: 0, unknown_stamp: 0, measured: 0,
+    });
     expect(printed.rate.firings.rate).toBe(null);
     expect(printed.census.dropped.selection.filtered_out).toBe(8);
   });
