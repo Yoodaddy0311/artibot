@@ -39,7 +39,11 @@ const EXPECTED_HANDLER_COUNTS = {
   UserPromptSubmit: 7,
   // 10 -> 11: zero-result-guard.js joined the slot on the Grep/Glob route to
   // nudge on identifier lookups that returned nothing (WP-3 B-1).
-  PostToolUse: 11,
+  // 11 -> 12: tool-used-record.js joined the slot on the Skill route (Wave 11,
+  // SH-29). `tool.used` was a registered event with NO writer — 0 rows of
+  // 1,052 in the live ledger, measured 2026-09-15 — so
+  // lib/replay/existence-audit.js could not count per-skill firings at all.
+  PostToolUse: 12,
   // 8 → 6: blindspot-check.js + teach-back.js left the Stop slot when the
   // post-work passes were converted to on-demand slash commands
   // (commands/blindspot.md, commands/teach-back.md). No more auto-fire at Stop.

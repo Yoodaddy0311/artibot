@@ -1,0 +1,92 @@
+{
+  "_note": "FROZEN FIXTURE -- live host payload KEY NAMES only. Contains NO values: no prompts, no paths, no ids, no cwd, no session_id, no transcript_path. Captured by the dev-only probe (scripts/dev/probe-hook-keys.js, top-level + tool_input keys) plus a scratchpad-only companion script that recorded tool_response KEY NAMES and JSON types (never values), both registered through a temporary claude --settings <scratch file>; ~/.claude/settings.json and hooks/hooks.json were not modified. Do not regenerate casually -- a differing key set on a newer host is the signal INCIDENT section 6.1 (4) wants to see as a diff.",
+  "fixture_format": "same conventions as PreToolUse.Agent.json (INCIDENT-2026-09-03-hook-payload-contract.md section 6.1 (1) live-probe variant)",
+  "host_version": "2.1.272",
+  "host_version_source": "probe session transcripts (.jsonl) field version -- 2/2 probe sessions agree (session 1: 36/36 version lines, session 2: 35/35 version lines, all 2.1.272); claude --version on the same host also prints 2.1.272",
+  "previous_fixture_host_version": "2.1.260 (PreToolUse.Agent.json, 2026-09-04)",
+  "binary_sha256": "not-applicable (live probe, not binary-anchor extraction)",
+  "raw": "not-applicable (live probe records key names only; nothing to store verbatim)",
+  "extraction_method": "live probe via --settings, key names only",
+  "extraction_command": "cd <worktree> && claude -p --settings <scratch>/probe-settings.json --output-format json --max-turns 6 < scenario-<1|2>.txt   # hook commands in probe-settings.json = node <worktree>/plugins/artibot/scripts/dev/probe-hook-keys.js AND PROBE_OUT_DIR=<scratch> node <scratch>/probe-response-keys.mjs (companion, scratchpad only, not in the repo); PreToolUse matcher Skill, PostToolUse matcher Skill",
+  "extracted_at_kst": "2026-09-15 11:05-11:10",
+  "extracted_by": "split limb sh29-carrier-writer (Wave 11), probe teammate (code change 0; this fixture and the README section are the only repo writes)",
+  "registration": {
+    "where": "temporary settings JSON in the session scratchpad, passed with --settings; user settings untouched (no revert needed)",
+    "PreToolUse_matcher": "Skill",
+    "PostToolUse_matcher": "Skill",
+    "matcher_syntax": "plain string Skill fired on the first attempt for both events; the hooks.json expression form (tool == Skill) was therefore not tried (gotcha #49: the expression form did not fire in an earlier probe)",
+    "settings_merge_behaviour": "MERGED, not replaced -- the plugin SessionEnd hook (_sessionend-dispatcher.js) printed a Hook cancelled line on stderr in both probe sessions, and the pre-existing user-level PreToolUse/PostToolUse * hooks stayed registered",
+    "probe_execution": "headless (claude -p) from the limb session Bash tool, cwd = worktree root; both sessions returned subtype success, is_error false, num_turns 3; worktree branch and reflog identical before and after each run"
+  },
+  "scenarios": [
+    {
+      "id": "1-no-args",
+      "description": "one Skill(...) call with skill artibot:quickstart and no arguments",
+      "skill_invocations": 1,
+      "args_passed": false,
+      "pretooluse_rows": 1,
+      "posttooluse_rows": 1,
+      "tool_input_keys": ["skill"],
+      "captured_at_kst": "11:05:28-11:05:33"
+    },
+    {
+      "id": "2-with-args",
+      "description": "one Skill(...) call with skill artibot:quickstart and a one-word args string",
+      "skill_invocations": 1,
+      "args_passed": true,
+      "pretooluse_rows": 1,
+      "posttooluse_rows": 1,
+      "tool_input_keys": ["args", "skill"],
+      "captured_at_kst": "11:09:55-11:09:59"
+    }
+  ],
+  "totals": { "skill_invocations": 2, "pretooluse_rows": 2, "posttooluse_rows": 2, "tool_input_object_rows": 4, "tool_input_non_object_rows": 0, "tool_response_object_rows": 2, "tool_response_non_object_rows": 0 },
+  "PreToolUse": {
+    "tool_name": "Skill",
+    "top_level_keys": ["cwd", "effort", "hook_event_name", "permission_mode", "prompt_id", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path"],
+    "tool_input_type": "object (2/2 rows)",
+    "tool_input_keys_always": ["skill"],
+    "tool_input_keys_conditional": { "args": "present only when the caller passed arguments (scenario 2, 1/1 rows); absent in scenario 1 (1/1 rows)" },
+    "tool_input_keys_union": ["args", "skill"],
+    "has_prompt_id": true,
+    "has_prompt_id_rows": "2/2",
+    "note": "no duration_ms and no tool_response on PreToolUse (2/2 rows)"
+  },
+  "PostToolUse": {
+    "tool_name": "Skill",
+    "top_level_keys": ["cwd", "duration_ms", "effort", "hook_event_name", "permission_mode", "prompt_id", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path"],
+    "top_level_key_types": { "cwd": "string", "duration_ms": "number", "effort": "object", "hook_event_name": "string", "permission_mode": "string", "prompt_id": "string", "session_id": "string", "tool_input": "object", "tool_name": "string", "tool_response": "object", "tool_use_id": "string", "transcript_path": "string" },
+    "tool_input_type": "object (2/2 rows)",
+    "tool_input_keys_always": ["skill"],
+    "tool_input_keys_conditional": { "args": "present only when the caller passed arguments (scenario 2, 1/1 rows); absent in scenario 1 (1/1 rows)" },
+    "tool_input_keys_union": ["args", "skill"],
+    "tool_input_key_types": { "skill": "string", "args": "string" },
+    "tool_response_type": "object (2/2 rows)",
+    "tool_response_keys": ["allowedTools", "commandName", "success"],
+    "tool_response_key_types": { "allowedTools": "array of string (length 3 in 2/2 rows)", "commandName": "string", "success": "boolean" },
+    "duration_ms": "top-level key, JSON number, present 2/2 PostToolUse rows; NOT inside tool_response",
+    "has_prompt_id": true,
+    "has_prompt_id_rows": "2/2"
+  },
+  "required_keys_for_tool_used_record": ["skill"],
+  "verdict": "skill-key-present",
+  "missing": [],
+  "observations": [
+    "tool_input.skill is present on every Skill row (4/4: 2 PreToolUse + 2 PostToolUse). The key name that scripts/hooks/tool-tracker.js case Skill reads (input.skill) and that scripts/hooks/tool-used-record.js reads (hookData.tool_input.skill) is therefore a measured host fact on 2.1.272, no longer an inference.",
+    "tool_input carries only the arguments the caller supplied: args appears only in the with-args scenario. Treat args as optional.",
+    "duration_ms exists as a PostToolUse TOP-LEVEL key (JSON number) and is absent on PreToolUse. It is not nested in tool_response.",
+    "tool_response for Skill is a small object {allowedTools, commandName, success}; it carries no text/content/output key, i.e. the expanded skill body is NOT in the hook payload.",
+    "Both headless sessions reported subagent_stats.spawned = 0 and both transcripts contain 0 isSidechain:true lines, although skills/quickstart/SKILL.md declares context: fork (as do all 115 SKILL.md files in skills/). Inference, not measured: on this host a headless Skill invocation expanded the skill inline (commandName in tool_response is consistent with slash-command expansion) rather than spawning a subagent.",
+    "Rows from a concurrent, unrelated session (SessionStart / UserPromptSubmit / PreToolUse Agent / SubagentStart, 7 rows, 11:00-11:02 KST) landed in the same probe-keys.ndjson before run 1 started (11:05:03 KST). They are excluded by timestamp and tool_name; the shared ndjson file is append-only across sessions.",
+    "The plain-string matcher Skill fired for PreToolUse and PostToolUse on the first attempt; tool_name = Skill on 4/4 rows."
+  ],
+  "not_measured": [
+    "Skill invocation failure (unknown skill name, denied skill): whether PostToolUse still fires with success=false or PostToolUseFailure fires instead, and the tool_response shape in that case",
+    "tool_response.allowedTools when the skill declares no allowed tools (length 3 was observed in 2/2 rows; an empty-array or absent-key case is unmeasured)",
+    "Skill invoked from an interactive (non-headless) session, or from inside a subagent",
+    "expression-form matcher (tool == Skill) in user-level settings -- string form worked first, so untried",
+    "keys inside the effort object (companion recorded its JSON type only)",
+    "whether the pre-existing user-level PostToolUse * hook (a third-party PowerShell shim) also ran -- no observable output",
+    "PostToolUse payload for other tool names -- only Skill was registered"
+  ]
+}

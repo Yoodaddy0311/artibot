@@ -8,13 +8,21 @@
  * because nothing spoke. So the assertions here are mostly about which zero is
  * which.
  *
- *   1. A KIND WITH NO CARRIER REPORTS null, NOT 0. No registered event carries
- *      a hook/command/skill/module name (measured 2026-09-02 across all 36
- *      events in `schemas/ledger-events.allowlist.json`), so today every entry
- *      is unmeasured. `fired: 0` there would be a number nobody measured.
+ *   1. A KIND WITH NO CARRIER REPORTS null, NOT 0. Three kinds still have none:
+ *      no registered event names a hook, a command, or a `lib/` module
+ *      (re-measured 2026-09-15 across all 39 events in
+ *      `schemas/ledger-events.allowlist.json`; it was all four kinds and 36
+ *      events on 2026-09-02). `fired: 0` there would be a number nobody
+ *      measured. `skills` left that state in Wave 11 — `tool.used.skill` is
+ *      written by `scripts/hooks/tool-used-record.js`, so skill entries now
+ *      report real counts and the cases below assert BOTH regimes.
  *   2. A CARRIER WITH AN EMPTY LEDGER IS ALSO null, and carries a DIFFERENT
  *      reason string than case 1. "The field does not exist" and "the field
- *      exists and saw nothing" are different facts about the world.
+ *      exists and saw nothing" are different facts about the world. With a real
+ *      carrier this stopped being hypothetical: a ledger holding no `tool.used`
+ *      row reports `unmeasured:carrier-event-absent-from-ledger`, never
+ *      `fired: 0`, because a zero there would read as removal evidence for a
+ *      skill nobody had instrumented yet.
  *   3. AN EXEMPT ENTRY IS STILL COUNTED, never skipped. Exemption changes the
  *      verdict, not the measurement — CLAUDE.md:88 says "실측과 무관하게 유지".
  *   4. THE EXEMPT LIST DOES NOT DRIFT. The module restates CLAUDE.md:88 as a
@@ -27,10 +35,15 @@
  *      pins `eventsReceived < raw lines`.
  *
  * ── WHAT THESE TESTS CANNOT SEE (repo rules §9) ─────────────────────────────
- *   - NO LIVE LEDGER. `.artibot/runtime/ledger.jsonl` does not exist in this
- *     repository (measured 2026-09-02). Every fixture below is hand-built and
- *     tiny; passing here says the arithmetic is right, not that it survives
- *     real traffic, real volume, or a real inventory. The survivors case does
+ *   - NO FIXTURE HERE IS LIVE TRAFFIC. The 2026-09-02 note said no live ledger
+ *     existed; that reading used the wrong path. The ledger lands at
+ *     `<git-common-dir>/artibot/ledger.jsonl` (`lib/runtime/event-writer.js`
+ *     :261-273), and measured there 2026-09-15 it holds 1,167 lines across 10
+ *     distinct events — with `tool.used` rows = 0, so the newly carried
+ *     `skills` kind has a writer and no rows yet. Every fixture below is
+ *     hand-built and tiny; passing here says the arithmetic is right, not that
+ *     it survives real traffic, real volume, or a real inventory. The
+ *     survivors case does
  *     write a REAL ledger, but into a temp directory, three lines long, so it
  *     proves the reader drops a corrupt line and nothing about live scale.
  *   - NO CONSUMER COUNT IS TESTED, because none is computed. Half of
@@ -106,13 +119,20 @@ function line(event, data) {
 }
 
 describe('an unmeasured kind reports null, never zero', () => {
-  it('every kind has a null carrier today, which is the finding', () => {
-    // If someone adds a carrier, this fails on purpose: the module header states
-    // the measurement, and a new carrier makes that statement stale.
-    for (const kind of AUDITED_KINDS) {
+  it('skills is carried by tool.used.skill; the other three are still null', () => {
+    // A PIN, not a description. If someone adds another carrier this fails on
+    // purpose: the module header states which kinds are measured and why the
+    // rest are not, and a new carrier makes that statement stale. Measured
+    // 2026-09-15 (Wave 11 / SH-29).
+    expect(CARRIERS.skills).toEqual({ event: 'tool.used', field: 'skill' });
+    for (const kind of ['hooks', 'commands', 'modules']) {
       expect(CARRIERS[kind], `${kind} carrier`).toBeNull();
-      expect(CARRIER_NOTES[kind]).toEqual(expect.any(String));
     }
+    // Every kind states WHERE its number comes from, or why there is none.
+    for (const kind of AUDITED_KINDS) {
+      expect(CARRIER_NOTES[kind], `${kind} note`).toEqual(expect.any(String));
+    }
+    expect(CARRIER_NOTES.skills).toContain('tool.used.skill');
   });
 
   it('fired is null and the reason names the kind', () => {
@@ -259,6 +279,108 @@ describe('the fold, exercised through a hypothetical carrier', () => {
   it('rejects a non-array event list', () => {
     expect(() => foldFiredCounts(null, HYPOTHETICAL_CARRIER)).toThrow(/must be an array/);
     expect(() => buildExistenceAudit('nope', { inventory: {} })).toThrow(/must be an array/);
+  });
+});
+
+describe('the skills carrier, folded from real tool.used rows', () => {
+  // The regime this suite existed to describe as impossible. Wave 11 made it
+  // possible, so both halves are pinned: the ledger WITHOUT the carrier event
+  // still refuses to say zero, and the ledger WITH it produces per-skill counts.
+  const INVENTORY = ['artibot:split', 'artibot:team'];
+
+  it('a ledger holding no tool.used row is unmeasured, never a zero', () => {
+    // RED-then-GREEN evidence for the false-zero this module exists to prevent:
+    // the carrier is REAL now, so nothing structural stops a `fired: 0` here —
+    // only the denominator > 0 branch does.
+    const audit = buildExistenceAudit(
+      [line('phase.started', { segment: 'build' })],
+      { inventory: { skills: INVENTORY } },
+    );
+    expect(audit.kinds.skills.entries).toHaveLength(2);
+    for (const entry of audit.kinds.skills.entries) {
+      expect(entry.reason, entry.name).toBe(CARRIER_ABSENT_REASON);
+      expect(entry.reason).toBe('unmeasured:carrier-event-absent-from-ledger');
+      expect(entry.fired, entry.name).toBeNull();
+      expect(entry.fired).not.toBe(0);
+      expect(entry.measured, entry.name).toBe(false);
+    }
+    expect(audit.kinds.skills.denominator).toBe(0);
+    // ...and it is NOT the no-carrier reason: the field exists, it saw nothing.
+    expect(audit.kinds.skills.entries[0].reason).not.toBe(noCarrierReason('skills'));
+    expect(audit.summary.eventsReceived).toBe(1);
+  });
+
+  it('counts per skill, with rows that name none counted as absent', () => {
+    const events = [
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:team' }),
+      // A tool.used row for a non-Skill tool: the key is OMITTED, never null.
+      line('tool.used', { tool: 'Bash', ok: true, duration_ms: 12 }),
+      line('phase.started', { segment: 'build' }),
+    ];
+
+    expect(foldFiredCounts(events, CARRIERS.skills)).toEqual({
+      counts: { 'artibot:split': 2, 'artibot:team': 1 },
+      absent: 1,
+      denominator: 4,
+    });
+
+    const audit = buildExistenceAudit(events, {
+      // The third name is inventoried but never fired. That is now a MEASURED
+      // zero, which is the whole point of the carrier existing.
+      inventory: { skills: [...INVENTORY, 'artibot:doctor'] },
+    });
+    const byNameMap = Object.fromEntries(audit.kinds.skills.entries.map((e) => [e.name, e]));
+    expect(byNameMap['artibot:split'].fired).toBe(2);
+    expect(byNameMap['artibot:team'].fired).toBe(1);
+    expect(byNameMap['artibot:doctor'].fired).toBe(0);
+    for (const entry of audit.kinds.skills.entries) {
+      expect(entry.measured, entry.name).toBe(true);
+      expect(entry.reason, entry.name).toBeNull();
+      expect(entry.denominator, entry.name).toBe(4);
+      // Measured or not, Observe still does not judge.
+      expect(entry.candidate, entry.name).toBe(false);
+      expect(entry.consumers, entry.name).toBe(CONSUMERS_UNMEASURED);
+    }
+    expect(audit.kinds.skills.denominator).toBe(4);
+    expect(audit.summary.measured).toBe(3);
+    // The other three kinds are untouched by the skills carrier.
+    expect(audit.kinds.hooks.carrier).toBeNull();
+  });
+
+  it('a null skill is absent, not a bucket named "null"', () => {
+    // The writer must OMIT the key rather than write null (matchesType rejects
+    // null for a declared string). If one slips through anyway, countBy treats
+    // any non-scalar as absent, so it can never collide with a real skill name.
+    const events = [
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: null }),
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
+    ];
+    const fold = foldFiredCounts(events, CARRIERS.skills);
+    expect(fold).toEqual({ counts: { 'artibot:split': 1 }, absent: 1, denominator: 2 });
+    expect(Object.keys(fold.counts)).not.toContain('null');
+    expect(Object.keys(fold.counts)).not.toContain('undefined');
+
+    const audit = buildExistenceAudit(events, { inventory: { skills: ['null'] } });
+    // A skill literally NAMED "null" must not inherit the absent rows.
+    expect(audit.kinds.skills.entries[0].fired).toBe(0);
+    expect(audit.kinds.skills.entries[0].measured).toBe(true);
+  });
+
+  it('an inventory name that does not match the writer reads as a false zero', () => {
+    // Not a defect this module can fix — a pin on the hazard so the next reader
+    // meets it as a known contract rather than as a surprise deletion. The
+    // writer records the host's name for the skill; an inventory built from
+    // bare directory names does not match it.
+    const events = [
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
+    ];
+    const audit = buildExistenceAudit(events, { inventory: { skills: ['split'] } });
+    const [entry] = audit.kinds.skills.entries;
+    expect(entry.fired).toBe(0);
+    expect(entry.measured).toBe(true);
+    expect(entry.denominator).toBe(1);
   });
 });
 

@@ -7,22 +7,54 @@
  * candidate only, removed by a human, never automatically. That section closes
  * by naming its own hole: "발화 카운트의 분모는 현재 미측정" (CLAUDE.md:90).
  *
- * This module is that denominator, and its first honest answer is that there
- * is not one yet.
+ * This module is that denominator. Since Wave 11 it answers for ONE of the four
+ * kinds — `skills`, through `tool.used.skill` — and still answers `unmeasured`
+ * for the other three.
+ *
+ * WHAT CHANGED (2026-09-15, Wave 11 / SH-29)
+ * ---------------------------------------------------------------------------
+ * A PostToolUse writer, `scripts/hooks/tool-used-record.js`, now records the
+ * skill name in `tool.used.data.skill`, and the allowlist registers that field
+ * (`schemas/ledger-events.allowlist.json:280-295`, event `tool.used`, measured
+ * 2026-09-15). `CARRIERS.skills` below is therefore no longer null, and a
+ * per-skill firing count is a real measurement rather than a declared gap.
+ *
+ * The key is OMITTED, never null, when the name is unavailable: `matchesType`
+ * (`lib/runtime/ledger-schema.js:56-66`) rejects `null` against a declared
+ * `string`, so writing null would produce a REJECTED line instead of an honest
+ * blank. Rows without the key land in the fold's `absent` bucket, so "a tool
+ * fired without naming a skill" stays distinct from a skill that never fired.
+ *
+ * `skill` is deliberately NOT in `required`. `tool.used` covers every tool and
+ * most of them have no skill to name, so requiring it would reject the majority
+ * of the event's own rows.
+ *
+ * `hooks`, `commands` and `modules` stay null, for the reasons unchanged from
+ * the 2026-09-02 survey below. Those reasons were RE-MEASURED 2026-09-15 across
+ * all 39 registered events (39 = `Object.keys(allowlist.events).length`; it was
+ * 36 at the 2026-09-02 pass, and the events added since were read too): no
+ * `data` field names a hook, a command, or a `lib/` module. The closest
+ * candidates are still category labels one level off — `review.requested
+ * .reviewer` and `review.claim_audit.subject_agent_type` name an AGENT, and
+ * `memory.promoted.path` names a memory file, not a module.
  *
  * WHAT WAS MEASURED (2026-09-02, `schemas/ledger-events.allowlist.json`, all 36
- * registered events read end to end)
+ * events registered at that time, read end to end) — HISTORICAL, KEPT
  * ---------------------------------------------------------------------------
- * The question was: which registered event carries, in a named field, the
- * IDENTITY of a hook, a command, a skill, or a module? The answer is none. The
- * near misses are worth writing down, because each looks like a carrier until
- * you read the field:
+ * Kept verbatim in substance because it records why three carriers are still
+ * null, and why the fourth needed a writer before it could exist at all. The
+ * question was: which registered event carries, in a named field, the IDENTITY
+ * of a hook, a command, a skill, or a module? The answer, on that date, was
+ * none. The near misses are worth writing down, because each looks like a
+ * carrier until you read the field:
  *
- *   - `tool.used.tool` (allowlist:232-242) carries the TOOL name — the firewall
- *     fixture writes `{tool: 'Bash'}` (tests/firewall/ledger-vocab-allowlist.
- *     test.js:215). A skill reaches the runtime through the `Skill` tool, so
- *     this field can at best say "a skill fired" and never WHICH skill. An
- *     aggregate that loses the identity is not a per-skill count.
+ *   - `tool.used.tool` (allowlist:280-295 today, :232-242 when this paragraph
+ *     was written) carries the TOOL name — the firewall fixture writes
+ *     `{tool: 'Bash'}` (tests/firewall/ledger-vocab-allowlist.test.js:215). A
+ *     skill reaches the runtime through the `Skill` tool, so THAT field can at
+ *     best say "a skill fired" and never WHICH skill. An aggregate that loses
+ *     the identity is not a per-skill count. This is the near miss Wave 11
+ *     closed — not by rereading `tool`, but by adding a sibling field beside it.
  *   - The envelope `source` enum (ledger-envelope.schema.json:45-58) has the
  *     value `hook`, and six events list `sources: ["hook"]`. That is a CATEGORY
  *     of emitter, one of eight, not a hook name. Counting it yields "hooks
@@ -32,12 +64,13 @@
  *     an artifact identity.
  *   - `worker.claimed.agent_type` names an agent type, not a hook/command/skill.
  *
- * So `CARRIERS` below is all-null, and every entry this module returns today is
- * `unmeasured`. That is the finding, not a stub: the rule in CLAUDE.md cannot be
- * evaluated until a writer records an artifact name, and saying so with a null
- * is the whole point. A `fired: 0` here would be indistinguishable from
- * "measured, never fired", and would let something be deleted for a silence
- * nobody was ever listening for.
+ * So `CARRIERS` below was all-null on 2026-09-02, and every entry this module
+ * returned was `unmeasured`. That was the finding, not a stub: the rule in
+ * CLAUDE.md cannot be evaluated until a writer records an artifact name, and
+ * saying so with a null is the whole point. A `fired: 0` in that state cannot
+ * be told apart from a measured silence, and would let something be deleted for
+ * a silence nobody was ever listening for. Three kinds are still in exactly
+ * that state; `skills` left it on 2026-09-15 and nothing else did.
  *
  * WHY THE EXEMPT LIST IS A CONSTANT AND NOT A PARSE
  * ---------------------------------------------------------------------------
@@ -55,10 +88,19 @@
  * the fail-open shape repo rules §8 keeps warning about.
  *
  * ── WHAT THIS MODULE CANNOT SEE ─────────────────────────────────────────────
- *   - NO LIVE LEDGER EXISTS. `.artibot/runtime/ledger.jsonl` is absent from the
- *     repository root (measured 2026-09-02). Every number obtainable today
- *     comes from an injected fixture, so nothing here has been exercised
- *     against real traffic and no live firing rate is claimed.
+ *   - A LIVE LEDGER EXISTS AND HOLDS NO `tool.used` ROW. The 2026-09-02 note
+ *     here said no live ledger existed at all; it had looked at
+ *     `.artibot/runtime/ledger.jsonl` under the project root, which is NOT
+ *     where the file lands. `ledgerFilePath` (`lib/runtime/event-writer.js`
+ *     :261-273) puts it at `<git-common-dir>/artibot/ledger.jsonl`, shared by
+ *     every linked worktree. Measured there 2026-09-15: 1,167 non-blank lines,
+ *     0 corrupt, 10 distinct events, and `tool.used` rows = 0.
+ *     So the `skills` carrier has a real FIELD, a real WRITER, and still zero
+ *     real ROWS — which is exactly the state `CARRIER_ABSENT_REASON` exists to
+ *     report, and exactly the state in which a `fired: 0` would be a lie.
+ *     Every number obtainable from the tests comes from an injected fixture, so
+ *     nothing here has been exercised against that live traffic and no live
+ *     firing rate is claimed.
  *   - LOSS ABOVE THE READER IS INVISIBLE UNLESS THE CALLER PASSES `census`.
  *     `summary.eventsReceived` counts the lines this module was HANDED. By
  *     then `ledger.js#readAllEvents` has already dropped the corrupt, the
@@ -82,6 +124,13 @@
  *     allowlist. A writer smuggling a hook name into `data` under a key the
  *     allowlist does not register is invisible here — and would be unreadable
  *     by anything else too, which is the actual defect in that case.
+ *   - A REGISTERED FIELD IS NOT A FIRING WRITER. `CARRIERS.skills` says the
+ *     field exists and is readable, not that the hook is installed, reached, or
+ *     succeeding. If `scripts/hooks/tool-used-record.js` stops running, this
+ *     module reports `unmeasured:carrier-event-absent-from-ledger` for an empty
+ *     ledger — but for a ledger holding tool.used rows written by anything
+ *     else, it reports `fired: 0, measured: true` for every skill. Whether the
+ *     writer runs is that file's own gate, not this one's.
  *
  * @module lib/replay/existence-audit
  */
@@ -127,19 +176,25 @@ export const EXEMPT_CONTRACTS = Object.freeze([
 /**
  * Which registered event field carries each kind's artifact NAME.
  *
- * `null` means no registered event carries it — see the header for the four
- * near misses that were checked and rejected. When a writer starts recording
- * one, the change here is a single `{ event: 'x.y', field: 'z' }` and the fold
- * below starts producing numbers with no other edit.
+ * `null` means no registered event carries it — see the header for the near
+ * misses that were checked and rejected. When a writer starts recording one,
+ * the change here is a single `{ event: 'x.y', field: 'z' }` and the fold below
+ * starts producing numbers with no other edit. `skills` is the worked example:
+ * Wave 11 added the writer and the allowlist field, and this one line is the
+ * entire reader-side change.
  */
 export const CARRIERS = Object.freeze({
   hooks: null,
   commands: null,
-  skills: null,
+  skills: Object.freeze({ event: 'tool.used', field: 'skill' }),
   modules: null,
 });
 
-/** Why each kind's carrier is null, naming what was examined. */
+/**
+ * What each kind's carrier is, or why it is still null, naming what was
+ * examined. A note is present for every kind, carried or not — a kind that
+ * reports numbers still has to say WHERE they come from.
+ */
 export const CARRIER_NOTES = Object.freeze({
   hooks:
     'envelope source enum has "hook" (ledger-envelope.schema.json:45-57) but that is '
@@ -148,8 +203,10 @@ export const CARRIER_NOTES = Object.freeze({
     'intent.detected.type is an intent vocabulary and phase.*.segment is a phase name; '
     + 'no registered event data field names a command.',
   skills:
-    'tool.used.tool carries the tool name ("Bash", "Skill"); a skill invocation loses '
-    + 'its identity at that field, so per-skill counting is not expressible.',
+    'tool.used.skill (written by scripts/hooks/tool-used-record.js since Wave 11, '
+    + '2026-09-15) carries the skill name for tool=Skill; rows without the key count as '
+    + '`absent`. The sibling field tool.used.tool carries only the TOOL name ("Bash", '
+    + '"Skill") and loses the skill identity, which is why a second field was needed.',
   modules:
     'no registered event references a lib/ module path or module name in data.',
 });
@@ -177,14 +234,21 @@ export function noCarrierReason(kind) {
  * Fold firing counts for one carrier.
  *
  * Kept exported and carrier-parameterised on purpose: `CARRIERS` is a MEASURED
- * FACT and is all-null today, so a test that exercised the fold by overriding
- * that constant would be testing a fiction. Passing a hypothetical carrier here
- * exercises the arithmetic without touching the finding.
+ * FACT, not a knob. Three of its four entries are still null (2026-09-15), so a
+ * test that produced numbers for those by overriding the constant would be
+ * testing a fiction. Passing a hypothetical carrier here exercises the
+ * arithmetic without touching the finding. `skills` no longer needs the
+ * hypothetical — it has a real carrier and is folded from real rows.
+ *
+ * A value that is absent, null, or non-scalar lands in `absent` rather than in
+ * a bucket of its own (`countBy`, replay.js:445-465), so a writer that omits
+ * `skill` cannot be mistaken for a skill named "null" or "undefined".
  *
  * @param {object[]} events - ledger lines, already ordered and deduped by the caller.
  * @param {?{event: string, field: string}} carrier - carrier declaration, or null.
  * @returns {?{counts: Record<string, number>, absent: number, denominator: number}}
  *   null when there is no carrier — an explicit "not measurable", never a zero.
+ *   `denominator` is rows OF THE CARRIER EVENT, not all events handed in.
  */
 export function foldFiredCounts(events, carrier) {
   assertEvents(events);
@@ -293,6 +357,15 @@ function auditEntry({ name, exemptAs, kind, fold }) {
     kind,
     // null, never 0: an unmeasured silence and a measured silence are different
     // facts, and only one of them is evidence for removal.
+    //
+    // The lookup is by EXACT inventory name. Now that `skills` is carried, that
+    // matters: the writer copies whatever string the host handed it, and which
+    // spelling that is (bare `split`, namespaced `artibot:split`, a path) is
+    // NOT verified here — the writer's own header marks it inferred. An
+    // inventory spelled differently from the rows yields `fired: 0,
+    // measured: true`, a false zero that reads as removal evidence. Matching
+    // the two spellings is the caller's job; this module cannot tell a renamed
+    // skill from a silent one.
     fired: measured ? (fold.counts[name] ?? 0) : null,
     denominator: fold ? fold.denominator : 0,
     measured,
