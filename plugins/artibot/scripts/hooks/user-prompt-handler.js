@@ -20,11 +20,10 @@
  */
 
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, extractUserPromptText } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractUserPromptText, NO_TEAM_FLAG } from '../../lib/core/hook-utils.js';
 import { isMainEntry } from './_main-entry.js';
 
 const REVERIFY_TRIGGER_PREFIX = /^!rv\b|^!(?:재검증)(?=\s|$)/iu;
-const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
  * Special trigger patterns that transform the user prompt.

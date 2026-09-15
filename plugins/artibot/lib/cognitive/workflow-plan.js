@@ -150,6 +150,26 @@ export function evaluateTrigger(classification, intent, triggers) {
 }
 
 /**
+ * Is the auto-team machinery enabled at all for this config?
+ *
+ * SOLE OWNER of the enable/opt-out meaning, the same way `evaluateTrigger` is
+ * the sole owner of the threshold meaning. `scripts/hooks/auto-team-trigger.js`
+ * used to compute this expression itself; the two copies are now one, so a
+ * change of meaning cannot reach one surface and miss the other.
+ *
+ * `enabled` and `autoApply` are ANDed (owner decision OD3, 2026-09-15): either
+ * one set to `false` turns the team off. That is the meaning the hook already
+ * shipped, carried over verbatim rather than redesigned. Absent keys mean ON —
+ * the gate is `!== false`, not truthiness, so `undefined` keeps the default.
+ *
+ * @param {{ enabled?: boolean, autoApply?: boolean }|undefined} teamConfig - `config.team`
+ * @returns {boolean}
+ */
+export function isTeamEnabled(teamConfig) {
+  return teamConfig?.enabled !== false && teamConfig?.autoApply !== false;
+}
+
+/**
  * Read the `/split` recommendation thresholds from config.
  *
  * Two keys, two meanings — do not conflate them:
@@ -258,6 +278,9 @@ export function deriveTeammateEfforts(subObjectives, parentEffort, resolveFn) {
  * @param {object} [deps] - injected ports.
  * @param {(command: string, signals?: object) => ({effort:string}|string)} [deps.resolveEffort]
  * @param {(effort: string) => number} [deps.budgetResolver]
+ * @param {boolean} [deps.optOut] - `--no-team` was present on the prompt's flag
+ *   surface. Passed in rather than parsed here: this module is pure L4 and has
+ *   no access to the hook payload. Any value other than `true` is ignored.
  * @returns {Readonly<{ runner:'inline'|'team', effort:string, perAgentBudget:number,
  *   teammates: ReadonlyArray<object>, trigger: object }>}
  */
@@ -286,7 +309,24 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
 
   const parentCmd = parentCommand(safeIntent);
   const parentEffort = resolveFn(parentCmd);
-  const trigger = evaluateTrigger(cls, safeIntent, triggers);
+  const evaluated = evaluateTrigger(cls, safeIntent, triggers);
+
+  // OFF GATE. The thresholds are not the only input any more: an explicit
+  // opt-out outranks them. `evaluateTrigger` is still called, and its reasons
+  // are still carried, so the record shows what WOULD have fired — otherwise
+  // an OFF session becomes indistinguishable from a session that simply never
+  // met the thresholds, and the F04(b) mismatch denominator loses both.
+  const offReasons = [];
+  if (!isTeamEnabled(config?.team)) offReasons.push('team-disabled');
+  if (deps.optOut === true) offReasons.push('no-team-flag');
+  const trigger = offReasons.length > 0
+    ? {
+      ...evaluated,
+      fired: false,
+      runner: 'inline',
+      reasons: [...offReasons, ...evaluated.reasons],
+    }
+    : evaluated;
 
   const subObjectives = extractSubObjectives(safeIntent);
   const recommendation = deriveRecommendation(subObjectives, complexityTier(cls.score), config?.split);

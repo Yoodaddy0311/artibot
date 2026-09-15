@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -52,6 +53,22 @@ let sandboxHome;
 let sandboxRepo;
 let sandboxCwd;
 let sandboxRoot;
+/**
+ * Plugin roots identical to `sandboxRoot` except for one `team` key each:
+ * `enabled:false` and `autoApply:false`. Both spellings are exercised because
+ * both are documented opt-outs (`CLAUDE.md` Operator-Waits names
+ * `team.autoApply`, `artibot.config.json` ships `team.enabled`) and they are
+ * ANDed, so a gate that read only one would honour half the contract.
+ *
+ * Built as separate roots rather than by rewriting `sandboxRoot`'s config
+ * mid-suite: the config is copied once in `beforeAll`, so mutating it would
+ * make every later case in this file depend on execution order. Selected
+ * per-case through `runDispatcher`'s env override, which is applied AFTER the
+ * default `CLAUDE_PLUGIN_ROOT` and therefore wins.
+ *
+ * @type {Record<string, string>}
+ */
+const sandboxOffRoots = {};
 
 /**
  * SETUP-ONLY ISOLATION (assertions and fixtures are untouched).
@@ -118,6 +135,29 @@ beforeAll(() => {
   );
   mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
 
+  // TEAM-OFF roots. Same links, same real `lib/`, one `team` key differs — so
+  // a difference measured between a root and `sandboxRoot` is the config key,
+  // not the environment.
+  const realConfig = readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8');
+  for (const [label, teamOverride] of [
+    ['enabled', { enabled: false }],
+    ['autoApply', { autoApply: false }],
+  ]) {
+    const root = mkdtempSync(path.join(tmpdir(), `artibot-userprompt-off-${label}-`));
+    for (const dir of ['lib', 'commands', 'skills', 'agents']) {
+      symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(root, dir), linkType);
+    }
+    const offConfig = JSON.parse(realConfig);
+    offConfig.team = { ...(offConfig.team || {}), ...teamOverride };
+    writeFileSync(
+      path.join(root, 'artibot.config.json'),
+      JSON.stringify(offConfig, null, 2),
+      'utf-8',
+    );
+    mkdirSync(path.join(root, 'runtime'), { recursive: true });
+    sandboxOffRoots[label] = root;
+  }
+
   // Pre-existing pollution from before the anchor landed is NOT deleted here:
   // removing files from a developer's real store is not a test's business, and
   // the tripwire below only cares about rows this run creates. Warn so the
@@ -137,6 +177,9 @@ afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxRepo) rmSync(sandboxRepo, { recursive: true, force: true });
   if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
+  for (const root of Object.values(sandboxOffRoots)) {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 /**
@@ -446,6 +489,130 @@ describe('_userprompt-dispatcher (integration)', () => {
     expect(out).not.toBeNull();
     const ctx = out.hookSpecificOutput?.additionalContext || '';
     expect(ctx).toContain('[auto-team-suggested]');
+  });
+
+  /**
+   * TEAM-OFF CONTRACT — the three plan-derived surfaces must honour the opt-out.
+   *
+   * `plugins/artibot/CLAUDE.md` (Operator-Waits DNA) and
+   * `docs/ORCHESTRATION-ROUTING.md` both state the opt-out as
+   * "`--no-team` in prompt, or `team.autoApply: false`". Only
+   * `scripts/hooks/auto-team-trigger.js` implements it (its own calculation at
+   * :181, the flag test at :397). The middleware path never reads the team
+   * enable/opt-out state at all: `lib/cognitive/workflow-plan.js#buildWorkflowPlan`
+   * takes `config.team.autoApplyTriggers` and nothing else, and
+   * `lib/runtime/middleware/tasks.js` derives the mode from `routing.system`.
+   *
+   * So three surfaces survive an OFF setting today:
+   *   E1 `[artibot:team runner=team teammates=N]` — the spawn directive the
+   *      model reads first (runtime-prompt.js#buildTeamDirective).
+   *   E2 `Execution contract` — appended by the tasks middleware for agentTeam.
+   *   E3 `Delegation contract` — appended by the subagents middleware.
+   * All three reach `additionalContext` through
+   * `runtime-prompt.js#stripRouterWrapper`, which keeps every block the
+   * middlewares appended after the prompt.
+   *
+   * Each case below runs its OWN positive control through the SAME helper and
+   * sandbox first. Without that, "the string is absent" would pass just as
+   * happily if the prompt never fired a team at all, or if the surface moved.
+   */
+  /**
+   * FIXTURE REACH (measured 2026-09-15 12:5x KST, base 2b10fd31).
+   *
+   * The `--no-team` cases above use a 3-domain prompt that fires the HOOK
+   * suggestion but routes `system1` — so it never reaches E1/E2/E3 at all, and
+   * an OFF assertion written against it would pass before and after any fix.
+   * This prompt carries step markers ("먼저 … 그 다음 … 마지막으로") and risk
+   * keywords (마이그레이션/프로덕션/배포/감사) on top of five domains, which is
+   * what pushes `classifyComplexity` past the 0.4 routing threshold. Measured
+   * through this same dispatcher: `[artibot:route system2]` present and all
+   * three surfaces present, 1,271 B of `additionalContext`.
+   */
+  const TEAM_PROMPT = '프론트엔드 컴포넌트와 백엔드 API 를 먼저 설계하고, 그 다음 데이터베이스 '
+    + '마이그레이션을 프로덕션에 배포한 뒤, 마지막으로 보안 감사와 테스트 커버리지를 추가해줘';
+  const TEAM_SURFACES = ['[artibot:team runner=team', 'Execution contract', 'Delegation contract'];
+
+  it.each([
+    ['team.enabled=false', 'enabled', '9120048e-3385-4855-a35b-09c89e5dd686'],
+    ['team.autoApply=false', 'autoApply', '9120048e-3385-4855-a35b-09c89e5dd689'],
+  ])('team OFF via %s suppresses every team surface', (_label, rootKey, offSession) => {
+    // POSITIVE CONTROL — default (team ON) root, same prompt, same helper.
+    const on = runDispatcher({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: TEAM_PROMPT,
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd685',
+    });
+    const onCtx = on?.hookSpecificOutput?.additionalContext || '';
+    for (const surface of TEAM_SURFACES) {
+      expect(onCtx, `control must contain ${surface}, or the absence below proves nothing`)
+        .toContain(surface);
+    }
+    // Reach guard: the surfaces above exist only on the system2 path.
+    expect(onCtx, 'fixture must still route system2, or it cannot reach E1/E2/E3')
+      .toContain('[artibot:route system2]');
+    expect(onCtx).toContain('[auto-team-suggested]');
+
+    // OFF — identical payload, plugin root whose config carries the opt-out.
+    const off = runDispatcher(
+      {
+        hook_event_name: 'UserPromptSubmit',
+        prompt: TEAM_PROMPT,
+        session_id: offSession,
+      },
+      { CLAUDE_PLUGIN_ROOT: sandboxOffRoots[rootKey] },
+    );
+    expect(off).not.toBeNull();
+    const offCtx = off.hookSpecificOutput?.additionalContext || '';
+    // POSITIVE REACH on the OFF output itself. The three absences below are
+    // measured in a DIFFERENT plugin root from the control above, so a failure
+    // that silenced the runtime-prompt hook in that root — a broken config
+    // copy, a junction that did not resolve, an exception swallowed by the
+    // dispatcher — would empty `additionalContext` and let all three absences
+    // pass while proving nothing. The routing directive is the right witness:
+    // it is emitted regardless of the team setting (see the note on
+    // `workflow-mode.js` — complexity still reaches the model, only the spawn
+    // does not), so its presence says the chain ran and the OFF gate, not the
+    // environment, is what removed the rest.
+    //
+    // The `--no-team` case below needs no equivalent line: it runs in the ON
+    // root and already asserts `[artibot:team opt-out]` is PRESENT in its own
+    // OFF output, which is the same non-vacuity guarantee.
+    expect(offCtx, 'the OFF run must still produce hook output, or the absences below prove nothing')
+      .toContain('[artibot:route system2]');
+    // A1 already honours the opt-out — pinned so a regression there is visible
+    // separately from the three surfaces that do not.
+    expect(offCtx).not.toContain('[auto-team-suggested]');
+    for (const surface of TEAM_SURFACES) expect(offCtx).not.toContain(surface);
+  });
+
+  it('team OFF via the --no-team flag suppresses every team surface', () => {
+    // POSITIVE CONTROL — same root, same prompt, flag removed.
+    const on = runDispatcher({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: TEAM_PROMPT,
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd687',
+    });
+    const onCtx = on?.hookSpecificOutput?.additionalContext || '';
+    for (const surface of TEAM_SURFACES) {
+      expect(onCtx, `control must contain ${surface}, or the absence below proves nothing`)
+        .toContain(surface);
+    }
+    expect(onCtx, 'fixture must still route system2, or it cannot reach E1/E2/E3')
+      .toContain('[artibot:route system2]');
+
+    const off = runDispatcher({
+      hook_event_name: 'UserPromptSubmit',
+      prompt: `${TEAM_PROMPT} --no-team`,
+      session_id: '9120048e-3385-4855-a35b-09c89e5dd688',
+    });
+    expect(off).not.toBeNull();
+    const offCtx = off.hookSpecificOutput?.additionalContext || '';
+    // The opt-out is stated to the model (user-prompt-handler) …
+    expect(offCtx).toContain('[artibot:team opt-out]');
+    // … the hook honours it …
+    expect(offCtx).not.toContain('[auto-team-suggested]');
+    // … and so must the plan-derived surfaces.
+    for (const surface of TEAM_SURFACES) expect(offCtx).not.toContain(surface);
   });
 
   it('flags short destructive prompts via ambiguity-guard additionalContext', () => {

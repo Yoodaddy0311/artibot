@@ -21,14 +21,15 @@
 
 import path from 'node:path';
 import { readJsonFileSync } from '../../core/file.js';
-import { buildWorkflowPlan } from '../../cognitive/workflow-plan.js';
+import { isTeamEnabled } from '../../cognitive/workflow-plan.js';
 import { compileMission } from '../../mission/compiler.js';
-import { getTaskBudgetForEffort, readEffortRecord } from '../task-budget.js';
+import { readEffortRecord } from '../task-budget.js';
 import { appendLedgerEvent } from '../ledger.js';
 import { sessionFallbackMissionId } from '../event-writer.js';
 import { createStateStore } from '../../project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../project-state/git-common-dir.js';
-import { recordWorkflowPlanDecision, resolveDecisionRunId } from '../../observability/decision-events.js';
+import { extractUserPromptFlagSurface, NO_TEAM_FLAG } from '../../core/hook-utils.js';
+import { planWorkflow, readFollowWorkflowPlan, recordWorkflow, resolveWorkflowMode } from './workflow-mode.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -646,68 +647,45 @@ function recordMissionCompile(state, now, deps) {
   }
 }
 
-/**
- * Config key reserved for F04(b) — the release that makes this middleware
- * FOLLOW the workflow plan instead of only recording it.
- *
- * READ NOWHERE. F04(a) records the plan on every routing path and stamps the
- * mode the caller actually ran under (`decision-events.js#recordWorkflowPlanDecision`
- * — `data.mode`), so the plan↔mode mismatch rate can be MEASURED before
- * anything acts on it. The consumer lands with that measurement, not ahead of
- * it; the key exists here only so the name is fixed in one place and the
- * tripwire test in `tests/runtime/middleware/tasks.test.js` ("stays
- * RECORD-ONLY") can set it and prove nothing reads it yet.
- */
-export const FOLLOW_WORKFLOW_PLAN_CONFIG_KEY = 'team.followWorkflowPlan';
+// F04(b)'s config key moved to `workflow-mode.js`, next to the resolver that
+// acts on it. Re-exported — not relocated silently — because this module's
+// export surface is depended on by path and must not change shape.
+export { FOLLOW_WORKFLOW_PLAN_CONFIG_KEY } from './workflow-mode.js';
 
 /**
- * Build the workflow plan for this prompt and record it — on EVERY routing path.
+ * Resolve everything the team gate needs from one config read.
  *
- * P2: one unified plan (team trigger + per-teammate effort/budget) derived from
- * the single complexity classification. `workflow-plan.js` is pure L4
- * (router-only); the L5 `budgetResolver` port is injected here.
+ * The config is read ONCE per prompt: the plan, the mode gate and the F04(b)
+ * key are three consumers, and two reads of one file in one prompt can
+ * disagree. `pluginRoot` comes back with it because the effort-meta read
+ * downstream needs the same root — resolving it twice is how the two could
+ * point at different plugins.
  *
- * RUNS FOR BOTH MODES since F04(a). It used to run only for `agentTeam`, which
- * left system1 — the majority of prompts — with no `workflow-planned` line, and
- * made one of the two mismatch directions unrepresentable: the only writer was
- * the branch where the mode is `agentTeam` by construction. Whether the plan is
- * ATTACHED to `task.meta` is a separate decision, still `agentTeam`-only, and
- * stays with the caller.
+ * `--no-team` is tested on the FLAG SURFACE, never on the prompt text:
+ * `user-prompt-handler` strips the flag and the stripped copy is what reaches
+ * `state.input.prompt`, so testing that would read a string the flag has
+ * already been removed from (`hook-utils.js#extractUserPromptFlagSurface`).
  *
- * Explainability (D7) — observe-only. Records whether a parallel team fired and
- * the trigger reasons; agent names only, no sub-objective text. The session id
- * comes from `state.input`, where the hook payload lives — the same place
- * `pluginRoot` is read from.
- *
- * `cwd` is passed RAW, not through this file's `resolveProjectRoot(state)`
- * helper: the recorder runs the payload through
- * `lib/git/project-root.js#resolveProjectRoot` itself, and every call site
- * handing it the same raw `cwd` is what guarantees all four recorders agree on
- * one store directory. Pre-resolving here would introduce a second answer,
- * which is the split store this store is being moved to avoid.
+ * `followWorkflowPlan` is resolved by `workflow-mode.js#readFollowWorkflowPlan`
+ * rather than read inline, so the key's name, its default and the gate that
+ * uses it stay in one module.
  *
  * @param {object} state middleware state
- * @param {string|undefined} pluginRoot root the config is read from
- * @param {object} intent `state.context.intent`, already defaulted by the caller
- * @param {'agentTeam'|'subAgent'} mode the topology this prompt actually ran under
- * @returns {object} the `buildWorkflowPlan` result
+ * @returns {{ pluginRoot: string|undefined, cfg: object, optOut: boolean,
+ *   teamEnabled: boolean, followWorkflowPlan: boolean }}
  */
-function planAndRecordWorkflow(state, pluginRoot, intent, mode) {
+function readTeamGateInputs(state) {
+  const pluginRoot = state.input?.pluginRoot
+    || state.context?.pluginRoot
+    || state.pluginRoot;
   const cfg = readJsonFileSync(path.join(pluginRoot || '', 'artibot.config.json')) || {};
-  const classification = {
-    score: state.context.routing?.score ?? 0,
-    factors: state.context.routing?.classification?.factors,
+  return {
+    pluginRoot,
+    cfg,
+    optOut: NO_TEAM_FLAG.test(extractUserPromptFlagSurface(state.input?.hookData)),
+    teamEnabled: isTeamEnabled(cfg.team),
+    followWorkflowPlan: readFollowWorkflowPlan(cfg),
   };
-  const plan = buildWorkflowPlan(classification, intent, cfg, {
-    budgetResolver: (e) => getTaskBudgetForEffort(e, cfg) || 0,
-  });
-
-  recordWorkflowPlanDecision(resolveDecisionRunId(state.input), plan, {
-    cwd: state.input?.hookData?.cwd,
-    mode,
-  });
-
-  return plan;
 }
 
 /**
@@ -730,8 +708,21 @@ export function createTasksMiddleware(options = {}) {
 
   return async function tasksMiddleware(state) {
     const routingSystem = state.context.routing?.system || 'system1';
-    const mode = routingSystem === 'system2' ? 'agentTeam' : 'subAgent';
     const intent = state.context.intent || {};
+
+    const {
+      pluginRoot, cfg, optOut, teamEnabled, followWorkflowPlan,
+    } = readTeamGateInputs(state);
+
+    // PLAN -> MODE -> RECORD. F04(b) derives the mode FROM the plan when the
+    // key is on, so the plan has to be built first; the record then needs the
+    // mode that was actually run, which is why it comes last.
+    const plan = planWorkflow(state, cfg, intent, optOut);
+    const { mode } = resolveWorkflowMode({
+      routingSystem, teamEnabled, optOut, followWorkflowPlan, plan,
+    });
+    recordWorkflow(state, plan, mode);
+
     const phases = mode === 'agentTeam'
       ? ['plan', 'execute', 'verify']
       : ['execute', 'verify'];
@@ -752,9 +743,6 @@ export function createTasksMiddleware(options = {}) {
     // UserPromptSubmit hook (runtime-prompt.js) persisted them. This lets
     // /team orchestrator propagate `[artibot:effort=X][artibot:task-budget=Y]`
     // to each teammate without an explicit re-derive step.
-    const pluginRoot = state.input?.pluginRoot
-      || state.context?.pluginRoot
-      || state.pluginRoot;
     const effortMeta = readEffortMeta(pluginRoot, {
       sessionId: state.input?.hookData?.session_id ?? state.input?.sessionId ?? null,
       promptId: state.input?.hookData?.prompt_id ?? null,
@@ -774,9 +762,11 @@ export function createTasksMiddleware(options = {}) {
     // each teammate with `[artibot:effort][artibot:task-budget]` from the SAME
     // source as the trigger decision, and three live readers
     // (`middleware/subagents.js`, `runtime-prompt.js#buildTeamDirective` and
-    // `#recordObserveOnlyDecisions`) require `undefined` here on system1. F04(a)
-    // is RECORD-ONLY: see {@link FOLLOW_WORKFLOW_PLAN_CONFIG_KEY}.
-    const plan = planAndRecordWorkflow(state, pluginRoot, intent, mode);
+    // `#recordObserveOnlyDecisions`) require `undefined` here when no team runs.
+    // Both gates reach this through `mode` alone: an OFF setting and — since
+    // F04(b) — a `runner: 'inline'` plan under `team.followWorkflowPlan` each
+    // resolve to `subAgent`, so the plan stays unattached and
+    // `buildTeamDirective` emits ''.
     if (mode === 'agentTeam') {
       task.meta = { ...(task.meta || {}), workflowPlan: plan };
     }

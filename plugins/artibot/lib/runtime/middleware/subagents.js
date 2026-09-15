@@ -5,6 +5,8 @@
  * @module lib/runtime/middleware/subagents
  */
 
+import { isTeamEnabled } from '../../cognitive/workflow-plan.js';
+
 // Fallback for when config omits team.delegationModeSelection. Must stay in
 // lockstep with artibot.config.json#/team/delegationModeSelection — a drifted
 // fallback names tools the harness no longer provides, and the contract flows
@@ -77,14 +79,31 @@ export function createSubagentsMiddleware(options = {}) {
       })),
     };
 
+    // Read BEFORE the append below, which is the whole point: this flag was
+    // computed and then ignored. `mode` alone used to decide whether the model
+    // was told to delegate, so `team.enabled:false` still produced a
+    // "Delegation contract" naming teammates. The mode gate upstream
+    // (`workflow-mode.js`) already resolves OFF to `subAgent`, so in practice
+    // this is the second fence rather than the first — kept because a future
+    // caller that sets `task.mode` itself would otherwise reopen the hole.
+    //
+    // `isTeamEnabled`, not a local `team.enabled ?? true`: the local version
+    // ignored `autoApply`, so the two documented spellings of the same opt-out
+    // disagreed here (owner decision OD3 — either one false means off). Every
+    // consumer of `context.subagents` outside this file reads `.contract.*`,
+    // never `.enabled` (measured 2026-09-15 13:27 KST, `grep -rn
+    // "subagents\.enabled|context\.subagents" lib scripts`), so widening the
+    // flag's meaning reaches the prompt gate and nothing else.
+    const teamEnabled = isTeamEnabled(state.config?.team);
+
     state.context.subagents = {
-      enabled: Boolean(state.config?.team?.enabled ?? true),
+      enabled: teamEnabled,
       contract,
     };
 
     state.messageParts.push(`delegate=${mode}`);
 
-    if (mode === 'agentTeam') {
+    if (mode === 'agentTeam' && teamEnabled) {
       state.userPrompt += [
         '',
         'Delegation contract:',
