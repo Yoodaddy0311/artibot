@@ -17,7 +17,7 @@ toolset: team
 
 ## Recommend-hint Reception
 
-When the prompt contains `[artibot:hint recommend=split]`, surface to the user: "이 작업은 줄기가 갈려서 창을 나눠 병렬로 돌리면 빨라요. `/split plan` 으로 나눠 볼까요?" and wait for confirmation before running `plan` (문구 정본은 `plugins/artibot/CLAUDE.md` "Recommend-hint surfacing rule" 의 `recommend=split` 행 — `scripts/hooks/runtime-prompt.js` 가 그 파일을 계약 위치로 지정한다; `tests/firewall/split-window-contract.test.js` 가 문자 동일성을 단언). This is advisory — see `CLAUDE.md` "Recommend-hint surfacing rule" and `docs/ORCHESTRATION-ROUTING.md`. Never open a worktree or send a message from the hint alone. (신호원: `lib/cognitive/workflow-plan.js` `deriveRecommendation` — `config.split.recommendMinSubtasks` 가 정수 ≥2 일 때만 켜지며 출하값은 `null` = OFF(opt-in). `minStems` 는 plan 유효성 하한이지 힌트 임계가 아니다.)
+When the prompt contains `[artibot:hint recommend=split]`, surface to the user: "이 작업은 줄기가 갈려서 창을 나눠 병렬로 돌리면 빨라요. `/split plan` 으로 나눠 볼까요?" and wait for confirmation before running `plan` (문구 정본은 `plugins/artibot/CLAUDE.md` "Recommend-hint surfacing rule" 의 `recommend=split` 행 — `scripts/hooks/runtime-prompt.js` 가 그 파일을 계약 위치로 지정한다; `tests/firewall/split-window-contract.test.js` 가 문자 동일성을 단언). This is advisory — see `CLAUDE.md` "Recommend-hint surfacing rule" and `docs/ORCHESTRATION-ROUTING.md`. Never open a worktree or send a message from the hint alone. (신호원: `lib/cognitive/workflow-plan.js` `deriveRecommendation` — `config.split.recommendMinSubtasks` 가 정수 ≥2 일 때만 켜지며 출하값은 `7`(§5 D12, 2026-09-15; `null` = OFF). 6 이하는 autopilot 힌트를 가리므로 `split-config-firewall` 이 ≤6 을 거부한다. `minStems` 는 plan 유효성 하한이지 힌트 임계가 아니다.)
 
 ## Arguments
 
@@ -37,7 +37,7 @@ Parse $ARGUMENTS — 첫 토큰이 서브커맨드다.
 |---|---|---|
 | `maxWindows` | 8 | 동시 창 상한. `buildFastFanoutPlan` 의 **기존 4키**로 매핑된다(`maxWorktrees`·`hardMaxAgents` 양쪽) — `lib/autopilot/fast-profile.js#normalizeFastProfile` 은 4키만 읽고 새 키는 **무음 폴백**하므로 `limits:{maxWindows}` 로 넘기면 상한이 안 걸린다 |
 | `minStems` | 2 | 이보다 적은 줄기면 `/split` 을 쓰지 않는다(창 1개는 `/team` 이 낫다). plan 유효성 하한 — 힌트 임계가 아니다 |
-| `recommendMinSubtasks` | `null` | `recommend=split` 힌트 발화 임계(sub-objective 수). `null` = OFF(opt-in). 정수 ≥2 로 켜되 **6 이하는 autopilot 힌트(`tier high AND subs ≥ 6`)를 가린다** — 실오퍼레이터 데이터 n=1(split-8f83d7)뿐이라 OFF 출하 유지 |
+| `recommendMinSubtasks` | `7` | `recommend=split` 힌트 발화 임계(sub-objective 수). 출하 7(§5 D12, 2026-09-15 오너 결정). 정수 ≥2 로 켜지며 **6 이하는 autopilot 힌트(`tier high AND subs ≥ 6`)를 가린다** — 7 이 가리지 않는 최소값, `split-config-firewall` 이 ≤6 을 거부 |
 | `serverEntryPaths` | `[]` | 개발 서버 진입 경로. 같은 포트를 두 창이 못 띄우므로 이 경로를 만지는 작업은 한 줄기로 묶는다 |
 | `humanWaitReevalPct` | 50 | 측정 계약의 사람 대기 구간이 총 소요의 이 % 를 넘으면 C단계(headless 창) 재평가 조건 성립 — 기록·병기만, 코드 비교 없음 |
 | `supervisor.*` · `dispatch.*` · `worktreeSetup.*` | (config 의 `comment` 참조) | 2026-09-02 가산 객체 3종 — 관측 임계(S0, 행동 0) · `dispatch` 스크립트의 `{BUDGET}`·템플릿 · `worktree-setup` 의 junction·복사·레인별 env. 절차와 근거는 `skills/split/references/operations.md` |
