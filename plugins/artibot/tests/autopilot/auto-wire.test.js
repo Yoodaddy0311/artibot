@@ -3,13 +3,18 @@
  *
  * Covers each wireXxx() function:
  *   - wirePreIntake: shape, complexity routing, template suggestion, DI
+ *   - observePreIntake: data-only projection (no instruction, never throws)
  *   - wireResume: drift / migration / rebase plan / clean states
  *   - wireVerifyFailure: targets list, recommended, no-checkpoint, label
  *   - wirePhaseEnd: drift threshold, missing/extra, warnPct override
  *   - wireReport: flamegraph + drift, empty state, sort opt
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
+  observePreIntake,
   wirePhaseEnd,
   wirePreIntake,
   wireReport,
@@ -92,6 +97,127 @@ describe('wirePreIntake', () => {
     const out = wirePreIntake({}, 'add feature integration', noHistoryDeps);
     expect(out.instruction).toMatch(/tokens/);
     expect(out.instruction).toMatch(/Suggested template/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// observePreIntake — Wave 11 data-only projection
+//
+// The contract under test is deliberately narrow: this is the ONE auto-wire
+// helper the engine actually calls, and it must record data without ever
+// acting on it or throwing into session startup.
+// ---------------------------------------------------------------------------
+
+const OBSERVE_KEYS = [
+  'applied', 'complexity', 'costEstimate', 'policy', 'skippablePhases', 'suggestedTemplate',
+];
+const POLICY_KEYS = [
+  'autoDrift', 'autoFlamegraph', 'autoRollback', 'costPredict', 'smartSkip',
+];
+
+describe('observePreIntake', () => {
+  // Both cwds are tmpdirs so the resolved policy never depends on whichever
+  // autopilot.config.json happens to sit in the vitest process cwd.
+  let cleanCwd = '';
+  let configCwd = '';
+
+  beforeAll(() => {
+    cleanCwd = mkdtempSync(path.join(os.tmpdir(), 'observe-preintake-clean-'));
+    configCwd = mkdtempSync(path.join(os.tmpdir(), 'observe-preintake-config-'));
+    writeFileSync(
+      path.join(configCwd, 'autopilot.config.json'),
+      JSON.stringify({ autoWire: { costPredict: false } }),
+      'utf-8',
+    );
+  });
+
+  afterAll(() => {
+    for (const dir of [cleanCwd, configCwd]) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+  });
+
+  /**
+   * Observation opts with injected empty history and a config-free cwd.
+   * @param {object} [extra] - overrides merged last
+   * @returns {object}
+   */
+  function opts(extra = {}) {
+    return { ...noHistoryDeps, cwd: cleanCwd, ...extra };
+  }
+
+  it('returns exactly the data-only key set with applied=false', () => {
+    const out = observePreIntake({ task: 'add user search feature', sessionId: 'ap-obs-1' }, opts());
+    expect(Object.keys(out).sort()).toEqual(OBSERVE_KEYS);
+    expect(out.applied).toBe(false);
+  });
+
+  it('drops the instruction and sessionId that wirePreIntake returns', () => {
+    const state = { task: 'add user search feature', sessionId: 'ap-obs-2' };
+    // Guard the premise: the wrapped helper really does return those two keys.
+    const wired = wirePreIntake(state, state.task, noHistoryDeps);
+    expect(typeof wired.instruction).toBe('string');
+    expect(wired.sessionId).toBe('ap-obs-2');
+
+    const out = observePreIntake(state, opts());
+    expect('instruction' in out).toBe(false);
+    expect('sessionId' in out).toBe(false);
+  });
+
+  it('tolerates a missing, null, or non-string task', () => {
+    for (const state of [null, undefined, {}, { task: 42 }, 'not-an-object']) {
+      const out = observePreIntake(state, opts());
+      expect(out.applied).toBe(false);
+      expect(out.error).toBeUndefined();
+      expect(out.costEstimate).toBeTruthy();
+    }
+  });
+
+  it('absorbs a throwing dependency instead of propagating it', () => {
+    const throwingDeps = {
+      listSessions: () => { throw new Error('boom-list'); },
+      readEvents: () => { throw new Error('boom-read'); },
+      cwd: cleanCwd,
+    };
+    let out;
+    expect(() => { out = observePreIntake({ task: 'deps throw' }, throwingDeps); }).not.toThrow();
+    // cost-predictor.js#rollHistory / #aggregateSession already swallow these,
+    // so the normal (non-error) shape is the correct outcome here.
+    expect(Object.keys(out).sort()).toEqual(OBSERVE_KEYS);
+    expect(out.applied).toBe(false);
+  });
+
+  it('returns {error, applied:false} when reading the state itself throws', () => {
+    const hostile = {};
+    Object.defineProperty(hostile, 'task', {
+      get() { throw new Error('hostile getter'); },
+      enumerable: true,
+    });
+    const out = observePreIntake(hostile, opts());
+    expect(out.error).toBe('hostile getter');
+    expect(out.applied).toBe(false);
+  });
+
+  it('is deterministic across repeated calls with the same injected deps', () => {
+    const state = { task: 'refactor the session store into smaller modules' };
+    expect(observePreIntake(state, opts())).toEqual(observePreIntake(state, opts()));
+  });
+
+  it('reports all five policy keys as booleans', () => {
+    const out = observePreIntake({ task: 'policy shape' }, opts());
+    expect(Object.keys(out.policy).sort()).toEqual(POLICY_KEYS);
+    for (const value of Object.values(out.policy)) expect(typeof value).toBe('boolean');
+  });
+
+  it('records a disabled policy flag without letting it suppress the data', () => {
+    const out = observePreIntake(
+      { task: 'policy off but data still recorded' },
+      opts({ cwd: configCwd }),
+    );
+    expect(out.policy.costPredict).toBe(false);
+    // data-only: the flag is recorded, never obeyed — the estimate is still there.
+    expect(typeof out.costEstimate.estimatedTokens).toBe('number');
+    expect(out.applied).toBe(false);
   });
 });
 

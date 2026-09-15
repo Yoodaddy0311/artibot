@@ -8,7 +8,7 @@
  * All cases are pure / DI — in-memory session store, no real session files.
  */
 import {
-  describe, expect, it, vi,
+  afterEach, describe, expect, it, vi,
 } from 'vitest';
 import {
   budgetStatus,
@@ -25,6 +25,37 @@ import {
   renderCostInline,
 } from '../../lib/autopilot/cost-tracker.js';
 import { buildCostWarningInstruction, checkBudgetGate, makeInitialState } from '../../lib/autopilot/_engine-helpers.js';
+import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
+
+// makeInitialState writes one telemetry event per call (Wave 11 data-only
+// auto-wire observation), which is the one place this file is NOT pure: an
+// un-pinned sessionId leaves an unrecoverable runtime/autopilot/<id>.events.ndjson
+// behind. Pin the id and delete it so the header's "no real session files"
+// contract still holds.
+const budgetStateIds = new Set();
+
+/**
+ * makeInitialState with a pinned, tracked sessionId and injected empty session
+ * history, so the call touches no real store and leaves no artifact.
+ * @param {object} args - same shape as makeInitialState
+ * @returns {object} initial state
+ */
+function makeTrackedState(args) {
+  const sessionId = `ap-budget-units-${process.pid}-${budgetStateIds.size + 1}`;
+  budgetStateIds.add(sessionId);
+  return makeInitialState({
+    autoWireDeps: { listSessions: () => [], readEvents: () => [] },
+    ...args,
+    sessionId,
+  });
+}
+
+afterEach(() => {
+  for (const id of budgetStateIds) {
+    try { deleteSessionArtifacts(id); } catch { /* best-effort cleanup */ }
+  }
+  budgetStateIds.clear();
+});
 
 /** In-memory session store + telemetry spy (same shape as cost-tracker.test.js). */
 function makeStore(initialState) {
@@ -339,19 +370,19 @@ describe('F03 (h) buildCostWarningInstruction renders the crossed unit', () => {
 
 describe('F03 state + render surfaces', () => {
   it('makeInitialState defaults budgetTokens and mirrors the legacy field', () => {
-    const s = makeInitialState({ task: 't' });
+    const s = makeTrackedState({ task: 't' });
     expect(s.options.budgetTokens).toBe(2_000_000);
     expect(s.options.budget).toBe(2_000_000);
   });
 
   it('mirrors a caller-supplied legacy budget into budgetTokens', () => {
-    const s = makeInitialState({ task: 't', options: { budget: 500_000 } });
+    const s = makeTrackedState({ task: 't', options: { budget: 500_000 } });
     expect(s.options.budgetTokens).toBe(500_000);
     expect(s.options.budget).toBe(500_000);
   });
 
   it('keeps an explicit budgetTokens over a conflicting legacy budget', () => {
-    const s = makeInitialState({ task: 't', options: { budget: 9, budgetTokens: 7 } });
+    const s = makeTrackedState({ task: 't', options: { budget: 9, budgetTokens: 7 } });
     expect(s.options.budgetTokens).toBe(7);
   });
 
@@ -407,7 +438,7 @@ describe('F03 (i) makeInitialState coerces budget options at the state boundary'
   // rejects strings on purpose, so an uncoerced string would persist and
   // silently mean "no limit" — the exact hole the reviewer constructed.
   it('accepts a numeric-string legacy budget as tokens', () => {
-    const s = makeInitialState({ task: 't', options: { budget: '500000' } });
+    const s = makeTrackedState({ task: 't', options: { budget: '500000' } });
     expect(s.options.budgetTokens).toBe(500000);
     expect(s.options.budget).toBe(500000);
     expect(normalizeBudget(s.options)).toMatchObject({ budgetTokens: 500000, source: 'budgetTokens' });
@@ -415,19 +446,19 @@ describe('F03 (i) makeInitialState coerces budget options at the state boundary'
   });
 
   it('falls back to the 2M default for a non-numeric string (fail-closed, never unlimited)', () => {
-    const s = makeInitialState({ task: 't', options: { budgetTokens: 'abc', budget: '' } });
+    const s = makeTrackedState({ task: 't', options: { budgetTokens: 'abc', budget: '' } });
     expect(s.options.budgetTokens).toBe(2_000_000);
     expect(normalizeBudget(s.options).budgetTokens).toBe(2_000_000);
   });
 
   it('coerces budgetUsd strings and drops invalid ones', () => {
-    expect(makeInitialState({ task: 't', options: { budgetUsd: '12.5' } }).options.budgetUsd).toBe(12.5);
-    expect(makeInitialState({ task: 't', options: { budgetUsd: 'nope' } }).options.budgetUsd).toBeUndefined();
-    expect(normalizeBudget(makeInitialState({ task: 't', options: { budgetUsd: 'nope' } }).options).budgetUsd).toBeNull();
+    expect(makeTrackedState({ task: 't', options: { budgetUsd: '12.5' } }).options.budgetUsd).toBe(12.5);
+    expect(makeTrackedState({ task: 't', options: { budgetUsd: 'nope' } }).options.budgetUsd).toBeUndefined();
+    expect(normalizeBudget(makeTrackedState({ task: 't', options: { budgetUsd: 'nope' } }).options).budgetUsd).toBeNull();
   });
 
   it('mirrors one resolved value into legacy budget when both keys are given', () => {
-    const s = makeInitialState({ task: 't', options: { budget: 5, budgetTokens: 7 } });
+    const s = makeTrackedState({ task: 't', options: { budget: 5, budgetTokens: 7 } });
     expect(s.options.budgetTokens).toBe(7);
     expect(s.options.budget).toBe(7);
   });

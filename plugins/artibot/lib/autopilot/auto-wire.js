@@ -28,14 +28,23 @@
  *
  * Public surface:
  *   - wirePreIntake(state, prompt, opts)
+ *   - observePreIntake(state, opts)
  *   - wireResume(state, opts)
  *   - wireVerifyFailure(state, failedPhase, opts)
  *   - wirePhaseEnd(state, phase, output, opts)
  *   - wireReport(state, opts)
  *
+ * WIRING STATUS (2026-09-15): only `wirePreIntake` is wired into the engine,
+ * and only data-only, via `observePreIntake` →
+ * `_engine-helpers.js#makeInitialState` (recorded to `state.autoWire.preIntake`
+ * plus the `auto-wire-pre-intake` telemetry event, never acted on).
+ * `wireResume` / `wireVerifyFailure` / `wirePhaseEnd` / `wireReport` have no
+ * engine caller yet — they are reachable only from tests and the barrel.
+ *
  * @module lib/autopilot/auto-wire
  */
 
+import { getAutoWirePolicy } from './auto-wire-policy.js';
 import { classifyComplexity, predictCost } from './cost-predictor.js';
 import { classifyTaskComplexity, recommendSkippablePhases } from './smart-skip.js';
 import { listRollbackTargets } from './rollback.js';
@@ -146,6 +155,64 @@ export function wirePreIntake(state, prompt, opts = {}) {
     instruction,
     sessionId: state && typeof state === 'object' ? state.sessionId : null,
   };
+}
+
+/**
+ * Data-only projection of {@link wirePreIntake} for the engine's session-start
+ * path (PRD `v5-ga-roadmap-audit-fold-20260914` § "7행 최소 연결", 3행).
+ *
+ * `instruction` 과 `sessionId` 를 버리고 **기록용 데이터만** 반환한다. 행동은 0 —
+ * 반환된 `policy` 는 관측 시점의 정책을 기록할 뿐이며, 어떤 플래그도 이 함수의
+ * 동작을 바꾸지 않는다(`DEFAULT_AUTOWIRE_POLICY` 가 전부 true 라서 행동이
+ * 붙으면 즉시 전량 발동한다 — 그래서 data-only 가 필수다). `applied:false` 는
+ * 그 계약을 소비자 쪽에서도 읽을 수 있게 만든 표식이다.
+ *
+ * **절대 throw 하지 않는다.** 세션 시작을 막는 관측은 관측이 아니라 결함이므로
+ * 모든 오류는 `{error, applied:false}` 로 내려앉는다.
+ *
+ * @param {object} state - live session state; only `task` and
+ *   `options.projectRoot` are read
+ * @param {{
+ *   listSessions?: Function,
+ *   readEvents?: Function,
+ *   cwd?: string,
+ *   configPath?: string,
+ * }} [opts] - DI seam; `cwd`/`configPath` locate autopilot.config.json
+ * @returns {{
+ *   costEstimate: object,
+ *   complexity: object,
+ *   suggestedTemplate: string,
+ *   skippablePhases: object,
+ *   policy: object,
+ *   applied: false,
+ * } | { error: string, applied: false }}
+ */
+export function observePreIntake(state, opts = {}) {
+  try {
+    const task = state && typeof state === 'object' && typeof state.task === 'string'
+      ? state.task
+      : '';
+    const wired = wirePreIntake(state, task, {
+      listSessions: opts.listSessions,
+      readEvents: opts.readEvents,
+    });
+    const policy = getAutoWirePolicy({
+      cwd: typeof opts.cwd === 'string'
+        ? opts.cwd
+        : (state && typeof state === 'object' ? state.options?.projectRoot : undefined),
+      configPath: opts.configPath,
+    });
+    return {
+      costEstimate: wired.costEstimate,
+      complexity: wired.complexity,
+      suggestedTemplate: wired.suggestedTemplate,
+      skippablePhases: wired.skippablePhases,
+      policy,
+      applied: false,
+    };
+  } catch (err) {
+    return { error: err && err.message ? err.message : String(err), applied: false };
+  }
 }
 
 /**

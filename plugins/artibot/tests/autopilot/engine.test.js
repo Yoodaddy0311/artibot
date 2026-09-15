@@ -15,6 +15,7 @@ import {
   startAutopilot,
 } from '../../lib/autopilot/index.js';
 import { deleteSessionArtifacts, loadSession } from '../../lib/autopilot/session-store.js';
+import { readEvents } from '../../lib/autopilot/telemetry.js';
 import { getLockPath, readLock, releaseLock } from '../../lib/autopilot/lock.js';
 import { getRepoIdentity } from '../../lib/git/repo-identity.js';
 import { execFileSync } from 'node:child_process';
@@ -210,6 +211,29 @@ describe('Phase runner functions return instruction objects', () => {
     const inst = runPhase0Intake(state);
     expect(inst).toBeTruthy();
     expect(typeof inst.type).toBe('string');
+  });
+
+  it('records the pre-intake auto-wire once, data-only, and not again on resume', async () => {
+    const r = await start({ task: 'auto-wire data-only 관측', mode: 'plan' });
+    track(r.sessionId);
+
+    const { preIntake } = loadSession(r.sessionId).autoWire;
+    expect(preIntake).toBeTruthy();
+    expect(preIntake.applied).toBe(false);
+    expect('instruction' in preIntake).toBe(false);
+
+    const countObservations = () => readEvents(r.sessionId)
+      .filter((e) => e.type === 'auto-wire-pre-intake').length;
+    expect(countObservations()).toBe(1);
+
+    // makeInitialState is the only writer and resume never re-enters it.
+    await resumeAutopilot(r.sessionId);
+    expect(countObservations()).toBe(1);
+
+    // The INTAKE instruction shape is untouched by the observation.
+    const state = await getStatus(r.sessionId);
+    expect(Object.keys(runPhase0Intake(state)).sort())
+      .toEqual(['nextPhase', 'phase', 'prdPath', 'sessionId', 'type']);
   });
 
   it('runPhase1Plan returns object with type field', async () => {
