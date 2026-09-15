@@ -45,17 +45,19 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 const config = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
 
-/** PRD Phase 2 가 정한 값. 바꾸려면 PRD 와 이 표를 함께 고쳐라. */
+/** PRD Phase 2 가 정한 값(OB-26 §5 D12 가 recommendMinSubtasks 를 7 로). 바꾸려면 PRD 와 이 표를 함께 고쳐라. */
 const EXPECTED_SPLIT = Object.freeze({
   maxWindows: 8,
   minStems: 2,
   serverEntryPaths: [],
   humanWaitReevalPct: 50,
-  // recommend=split 힌트 발화 임계(sub-objective 수). `null` = 힌트 OFF(opt-in). minStems 는
-  // plan 유효성 하한이지 힌트 임계가 아니다. 출하값이 null 인 이유: 기존 autopilot 힌트가
-  // `tier high AND subs ≥ 6` 이라 6 이하 정수를 출하하면 다중 에이전트 autopilot 힌트가 전부
-  // split 로 바뀐다(출하 config 만으로 기본 동작 변경) + 실오퍼레이터 /split 데이터 0건(2026-08-26).
-  recommendMinSubtasks: null,
+  // recommend=split 힌트 발화 임계(sub-objective 수). minStems 는 plan 유효성 하한이지 힌트
+  // 임계가 아니다. 출하값이 7 인 이유: 설계 §5 D12(오너 결정 2026-09-15, Observe 데이터용)가
+  // 7 을 채택했고, 기존 autopilot 힌트 하한이 `tier high AND subs ≥ 6` 이라 7 이 그 힌트를
+  // 가리지 않는 최소 정수다(실오퍼레이터 /split 런은 reports/SPLIT 기준 n≥4 로 0건이 아니다).
+  // 6 이하 금지: 6 을 출하하면 다중 에이전트 high-tier autopilot 힌트가 전부 split 로 바뀐다
+  // (출하 config 만으로 기본 동작 변경) — 아래 "≤ 6 은 출하 금지" 래칫이 그것을 RED 로 만든다.
+  recommendMinSubtasks: 7,
 });
 
 /**
@@ -159,6 +161,16 @@ describe('artibot.config.json#split — 형태', () => {
   it('serverEntryPaths 는 문자열 배열이다', () => {
     expect(Array.isArray(config.split.serverEntryPaths)).toBe(true);
     expect(config.split.serverEntryPaths.every((p) => typeof p === 'string')).toBe(true);
+  });
+
+  // 래칫: EXPECTED_SPLIT 핀과 함께 값을 내려도 통과하지 못하게 한다. 6 이하는
+  // `lib/cognitive/workflow-plan.js#deriveRecommendation` 의 autopilot 하한(tier high AND
+  // subs ≥ 6)과 겹쳐 그 힌트를 가린다 — 핀만 있으면 표를 6 으로 같이 고치는 순간 조용히
+  // 통과하므로, 숫자와 무관한 부등식으로 한 번 더 막는다.
+  it('recommendMinSubtasks 는 정수이고 6 을 넘는다 (≤ 6 은 autopilot 힌트를 가려 출하 금지)', () => {
+    const v = config.split.recommendMinSubtasks;
+    expect(Number.isInteger(v), `recommendMinSubtasks 가 정수가 아니다: ${JSON.stringify(v)}`).toBe(true);
+    expect(v, 'autopilot 힌트 하한 6 과 겹치거나 그 아래다').toBeGreaterThan(6);
   });
 
   it('humanWaitReevalPct 는 0~100 정수다', () => {

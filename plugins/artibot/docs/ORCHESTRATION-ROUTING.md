@@ -100,7 +100,7 @@ Rules that follow from the table:
 
 - **Recommend-only.** `/split` never auto-fires. The `recommend=split` hint is wired via
   `lib/cognitive/workflow-plan.js#deriveRecommendation`, gated by
-  `config.split.recommendMinSubtasks` (**shipped `null` = OFF, opt-in**; an integer ≥ 2 enables it,
+  `config.split.recommendMinSubtasks` (**shipped `7` since §5 D12, 2026-09-15**; an integer ≥ 2 enables it, `null` = OFF,
   together with `config.split.minStems` as the distinct-agent floor; values ≤ 6 shadow the
   `autopilot` hint, whose floor is 6), and rendered through the
   `scripts/hooks/runtime-prompt.js#RECOMMENDATION_HINTS` allowlist (`workflow | split | autopilot`)

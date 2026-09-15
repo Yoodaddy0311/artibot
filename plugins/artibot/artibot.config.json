@@ -809,7 +809,7 @@
     "minStems": 2,
     "serverEntryPaths": [],
     "humanWaitReevalPct": 50,
-    "recommendMinSubtasks": null,
+    "recommendMinSubtasks": 7,
     "supervisor": {
       "suspectHeartbeatSeconds": 480,
       "staleHeartbeatSeconds": 900,
@@ -834,7 +834,7 @@
       "envPerLane": {},
       "comment": "scripts/split/worktree-setup.mjs: linkDirs are junction-linked from the parent checkout when absent in the worktree (win32 mklink /J, posix symlink); copyFiles are copied only when absent; installCmd (argv array, shell-free) runs only when linkDirs did not cover node_modules; envPerLane writes <worktree>/.artibot/split/<limb>/lane.env with {limb} / {limb_} substituted (e.g. E2E_DB_NAME=app_e2e_{limb_}) so parallel lanes never share an e2e database. --teardown removes reparse points only, never a real directory."
     },
-    "comment": "/split (cross-session multi-worktree). maxWindows maps onto the EXISTING fast-profile keys (limits.maxWorktrees AND limits.hardMaxAgents) because normalizeFastProfile reads only four keys and silently drops unknown ones; serverEntryPaths seeds the conflict grouping so two windows never share a dev-server port; humanWaitReevalPct is the Phase 5 human-wait threshold that re-opens the headless-window (C-stage) question; recommendMinSubtasks: null = recommend=split hint OFF (opt-in). Set an integer >= 2 to enable; NOTE any value <= 6 shadows the autopilot hint (same floor). Shipped OFF because real-operator /split data is 0. These keys never touch the user settings.json cross-session inbound or peer-machine isolation settings (tests/firewall/split-config-firewall.test.js)."
+    "comment": "/split (cross-session multi-worktree). maxWindows maps onto the EXISTING fast-profile keys (limits.maxWorktrees AND limits.hardMaxAgents) because normalizeFastProfile reads only four keys and silently drops unknown ones; serverEntryPaths seeds the conflict grouping so two windows never share a dev-server port; humanWaitReevalPct is the Phase 5 human-wait threshold that re-opens the headless-window (C-stage) question; recommendMinSubtasks: 7 = the recommend=split hint threshold adopted by design §5 D12 (owner decision 2026-09-15, Observe data). 6 is the autopilot hint floor, so 7 is the smallest value that does not shadow it; values <= 6 are refused by the firewall test. These keys never touch the user settings.json cross-session inbound or peer-machine isolation settings (tests/firewall/split-config-firewall.test.js)."
   },
   "topology": {
     "default": "solo",
