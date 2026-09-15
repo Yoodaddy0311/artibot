@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 /**
- * Stop / SubagentStop hook — DEV Verify Gate.
+ * Stop hook — DEV Verify Gate.
+ *
+ * Stop ONLY: `hooks/dispatch-table.json` lists this file under the Stop slot
+ * and not under SubagentStop. `resolveHookEventName` below still echoes a
+ * SubagentStop payload correctly, because the hook is spawnable by hand and a
+ * wrong event name in advisory output would be a lie — but no dispatcher
+ * sends one today.
  *
  * Conditionally surfaces the DEV verify checklist (DECOMPOSE → EXECUTE → VERIFY)
  * to the model AFTER turns that modified code. Read-only / diagnostic turns
@@ -25,20 +31,29 @@
  *   - SHA + file fingerprint cache (`runtime/last-dev-verify-sha.txt`)
  *     prevents repeated verification asks for the same working-tree state.
  *
- * Ledger side effect (OB-07): a fire also records the UNMEASURED DENOMINATOR —
- * four `verify.completed` lines (three layers + overall), all
- * `result: "unmeasured"`. See {@link recordUnmeasuredDenominator}. It is
- * observation only: the write cannot change what this hook prints, and the
- * fingerprint cache above — not the writer's idempotency key — is what keeps one
- * working-tree state from being counted twice. The record is written AFTER
- * stdout, and no time budget guards it — see the ordering note in `main()` for
- * the dispatcher behaviour that makes both of those safe.
+ * Ledger side effect (OB-07): a fire also records four `verify.completed`
+ * lines (three layers + overall). See {@link recordVerifyDenominator}. The
+ * deterministic line carries a real `pass`/`fail` when — and only when — the
+ * vitest reporter's output is at least as new as the last main-agent edit
+ * (owner decision F1), read from the REPO root rather than the plugin root
+ * (owner decision R1); the decision table lives in
+ * `lib/verification/deterministic-source.js`. Every other case, and the other
+ * two layers always, stay `unmeasured`. It is observation only: the write
+ * cannot change what this hook prints, and the fingerprint cache above — not
+ * the writer's idempotency key — is what keeps one working-tree state from
+ * being counted twice. The record is written AFTER stdout, and no time budget
+ * guards it — see the ordering note in `main()` for the dispatcher behaviour
+ * that makes both of those safe.
  *
  * WHAT THIS RECORD CANNOT SEE (rules §9, next to the gate): whether the model
- * actually verified anything afterwards (no line closes the loop yet, so the
- * numerator is still missing), turns where the gate correctly bailed, and any
- * fire in a repo whose ledger is unwritable — that one is a silent absence by
- * design, since the alternative was to let a bookkeeping failure break Stop.
+ * actually verified anything after being asked (the deterministic line reports
+ * the last test run, which may predate the ask), lint / tsc / build (no hook
+ * persists their exit codes, so those layers have no source at all), turns
+ * where the gate correctly bailed, whether a reported run was the whole suite
+ * or a targeted one (the counts ride in `evidence[0].note` so a reader can
+ * judge), and any fire in a repo whose ledger is unwritable — that one is a
+ * silent absence by design, since the alternative was to let a bookkeeping
+ * failure break Stop.
  *
  * @module scripts/hooks/dev-verify-gate
  */
@@ -270,24 +285,44 @@ function resolveHookEventName(hookData) {
 }
 
 /**
- * Record the DENOMINATOR of the verification measurement: one
- * `verify.completed` line per layer, every one of them `result: "unmeasured"`,
- * plus the overall line.
+ * Record the verification measurement for this fire: one `verify.completed`
+ * line per layer plus the overall line.
  *
- * WHY UNMEASURED AND NOT A VERDICT. This gate ASKS the model to verify; it
- * measures nothing itself. Writing a PASS here would be the exact false
- * measurement the ledger exists to prevent. Writing NOTHING was the previous
- * behaviour, and it is just as wrong in the other direction: a fire that leaves
- * no trace makes "how often was the gate answered?" unanswerable, because the
- * denominator is missing. `verify({ layers: {} })` yields precisely that — three
- * UNMEASURED rows carrying a `verification_id` other lines can join on.
+ * WHICH LINE CAN CARRY A VERDICT, AND WHY ONLY THAT ONE. This gate ASKS the
+ * model to verify; it runs nothing itself, so it may only report measurements
+ * something else left behind. Exactly one such artefact exists:
+ * `tests/reporters/test-status-reporter.js` writes the last `npm test` outcome
+ * to `<repoRoot>/plugins/artibot/runtime/last-test-result.json` (owner decision
+ * R1 — the installed plugin copy never has one, so resolving it against
+ * `pluginRoot` would pin the live numerator at zero). That file becomes a
+ * `pass`/`fail` on the DETERMINISTIC line only when it is at least as new as
+ * `runtime/last-main-agent-edit.timestamp` (owner decision F1 — no TTL, because
+ * a time window lets a stale green outlive the edit that invalidated it).
+ * Anything else — absent, corrupt, undated, no marker, stale — stays
+ * `unmeasured`, with the branch recorded in the verdict `reason` and therefore
+ * in the `verification_id` hash. `lib/verification/deterministic-source.js`
+ * holds that decision table and the pinned hashes are in its test.
+ *
+ * Behavioral and operational remain `unmeasured` unconditionally: there is no
+ * behavioral runner and no source of operational readings. Writing a PASS for
+ * either would be the exact false measurement the ledger exists to prevent, and
+ * writing nothing at all — the behaviour before OB-07 — loses the DENOMINATOR
+ * that makes "how often was the gate answered?" answerable. So every fire still
+ * emits all four lines under one `verification_id` other lines can join on.
  *
  * WHY THE IMPORTS ARE LAZY. A static `import` of a module that throws while it
  * is evaluated kills the process before `main()` exists, and this hook's ONLY
- * contract is the stdout envelope. Deferring the three `lib/` modules into this
+ * contract is the stdout envelope. Deferring the four `lib/` modules into this
  * function puts an import-time throw inside the caller's catch, the same way
  * `scripts/hooks/intent-observe-pre.js#loadDeps` (:93) does. stdout is then
  * byte-identical whether the ledger write succeeds, is rejected, or never loads.
+ *
+ * WHY THE FS PORTS ARE INJECTED RATHER THAN IMPORTED BY THE SOURCE MODULE.
+ * `deterministic-source.js` is L2 and pure — no `node:fs` at all — so its
+ * decision table is testable without a filesystem and the only IO in this path
+ * is the three calls below. Both are wrapped by the same catch as the ledger
+ * write, so a permission error on the result file costs a measurement, never
+ * the DEV verify ask.
  *
  * WHY `existingKeys` IS NOT WRAPPED IN A CATCH. `verify-writer.js#readExistingKeys`
  * (:466) turns a throwing port into "reject every line", and its header says why
@@ -306,18 +341,30 @@ function resolveHookEventName(hookData) {
  * p95 1355ms before this function is even called), so it would refuse valid
  * records on a busy machine — losing the denominator it was meant to protect.
  *
- * @param {string} repoRoot Ledger root — the writer derives the file from it.
+ * @param {string} repoRoot Ledger root — the writer derives the file from it,
+ *   and the vitest result file is resolved against it (R1).
+ * @param {string} pluginRoot Root the edit marker lives under. Passed in rather
+ *   than re-resolved so this reads the SAME root `main()` already gated on.
  * @param {object} hookData Raw Stop payload; `session_id` is the join key.
  * @returns {Promise<object>} the writer's tally (`appended`/`deduped`/
  *   `rejected`/`skipped`). `skipped: 1` means the payload carried no
  *   `session_id`, which the writer refuses — no id is invented here.
  */
-async function recordUnmeasuredDenominator(repoRoot, hookData) {
-  const [verifier, writer, ledger] = await Promise.all([
+async function recordVerifyDenominator(repoRoot, pluginRoot, hookData) {
+  const [verifier, writer, ledger, source] = await Promise.all([
     import('../../lib/verification/unified-verifier.js'),
     import('../../lib/verification/verify-writer.js'),
     import('../../lib/runtime/ledger.js'),
+    import('../../lib/verification/deterministic-source.js'),
   ]);
+
+  const layers = source.readDeterministicLayer(
+    {
+      readFile: (file) => (existsSync(file) ? readFileSync(file, 'utf-8') : null),
+      statMtimeMs: (file) => (existsSync(file) ? statSync(file).mtimeMs : null),
+    },
+    { repoRoot, pluginRoot, nowMs: Date.now() },
+  );
 
   const sessionId = typeof hookData?.session_id === 'string' ? hookData.session_id : undefined;
   // `mission_id` is passed through ONLY when the host declared one, matching
@@ -327,7 +374,7 @@ async function recordUnmeasuredDenominator(repoRoot, hookData) {
   const missionId = typeof hookData?.mission_id === 'string' ? hookData.mission_id : undefined;
 
   return writer.recordVerification(
-    verifier.verify({ layers: {} }),
+    verifier.verify({ layers }),
     { sessionId, missionId },
     {
       append: (input) => ledger.appendLedgerEvent(repoRoot, input),
@@ -418,9 +465,9 @@ export async function main() {
   // The record itself is a SIDE EFFECT ONLY: the tally is not read, nothing
   // branches on it, and every failure mode (import, read, append) is absorbed.
   try {
-    await recordUnmeasuredDenominator(repoRoot, hookData);
+    await recordVerifyDenominator(repoRoot, pluginRoot, hookData);
   } catch (err) {
-    logHookError(HOOK_NAME, 'failed to record the unmeasured verify denominator', err);
+    logHookError(HOOK_NAME, 'failed to record the verify denominator', err);
   }
 }
 

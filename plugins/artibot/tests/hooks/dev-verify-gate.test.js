@@ -463,6 +463,8 @@ describe('excluded-files filter (ground truth)', () => {
 // ---------------------------------------------------------------------------
 describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
   let denomRoot;
+  /** 신선 케이스에서만 쓰는 실제 디렉터리. 빈 문자열이면 정리할 것이 없다. */
+  let freshRepoRoot = '';
 
   /**
    * PINNED COPY of `dev-verify-gate.js#DEV_VERIFY_REASON` (모듈 비공개라
@@ -500,11 +502,19 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     ledgerMock.reads.length = 0;
     ledgerMock.readThrows = false;
     ledgerMock.events = [];
+    // Restored per case because the deterministic-source case below repoints it
+    // at a real directory: '/fake/repo' has no vitest result file on any disk,
+    // which is exactly why every OTHER case here stays `unmeasured`.
+    mockState.repoRoot = '/fake/repo';
     fireFixture();
   });
 
   afterEach(() => {
     try { rmSync(denomRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    if (freshRepoRoot) {
+      try { rmSync(freshRepoRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+      freshRepoRoot = '';
+    }
     vi.doUnmock('../../lib/verification/unified-verifier.js');
     vi.resetModules();
   });
@@ -620,6 +630,75 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     await main();
     expect(ledgerMock.reads).toHaveLength(1);
     expect(ledgerMock.appends).toHaveLength(0);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  /**
+   * 신선한 vitest 결과가 있으면 deterministic 만 판정이 된다(오너 결정 F1·R1).
+   *
+   * 이 스위트의 다른 케이스가 전부 `unmeasured` 인 이유가 여기서 드러난다:
+   * `mockState.repoRoot` 가 '/fake/repo' 라 결과 파일이 어느 디스크에도 없다.
+   * `node:fs` 는 대역하지 않으므로 훅은 진짜로 읽는다 — repoRoot 를 실재
+   * 디렉터리로 돌리고 리포터 산출물을 심으면 그것이 곧 분자다.
+   *
+   * 마커 mtime 을 10초 과거로 당기는 이유: fireFixture 가 방금 쓴 마커와
+   * `new Date()` 결과가 같은 밀리초에 걸리면 `>=` 판정이 파일시스템 시간
+   * 해상도에 좌우된다. sleep 대신 utimesSync 로 확정한다.
+   */
+  it('repoRoot 밑의 신선한 vitest 결과는 deterministic 을 pass 로 만든다', async () => {
+    freshRepoRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-fresh-'));
+    mockState.repoRoot = freshRepoRoot;
+    const resultDir = path.join(freshRepoRoot, 'plugins', 'artibot', 'runtime');
+    mkdirSync(resultDir, { recursive: true });
+    writeFileSync(path.join(resultDir, 'last-test-result.json'), JSON.stringify({
+      timestamp: new Date().toISOString(),
+      durationMs: 132138,
+      totalTests: 17377,
+      passed: 17365,
+      failed: 0,
+      skipped: 12,
+      failedFiles: [],
+    }));
+    const marker = path.join(denomRoot, 'runtime', 'last-main-agent-edit.timestamp');
+    const aged = new Date(Date.now() - 10_000);
+    utimesSync(marker, aged, aged);
+
+    const main = await loadMain();
+    await main();
+
+    expect(ledgerMock.appends).toHaveLength(4);
+    const byLayer = new Map(
+      ledgerMock.appends.map(({ event }) => [event.data.layer ?? '<overall>', event.data]),
+    );
+    expect(byLayer.get('deterministic').result).toBe('pass');
+    expect(byLayer.get('<overall>').result, 'deterministic 이 유일한 required 층이다').toBe('pass');
+    expect(byLayer.get('behavioral').result, '러너가 없다').toBe('unmeasured');
+    expect(byLayer.get('operational').result, '판독값이 없다').toBe('unmeasured');
+    // 리포 상대경로여야 한다 — 절대경로를 남기면 다른 기계가 읽을 수 없다.
+    expect(byLayer.get('deterministic').evidence[0].file)
+      .toBe('plugins/artibot/runtime/last-test-result.json');
+    expect(byLayer.get('deterministic').evidence[0].note).toContain('vitest total=17377');
+    expect(mockState.stdoutChunks, 'stdout 은 판정과 무관하게 동일하다').toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('결과가 마지막 main-agent 편집보다 낡았으면 4줄 전부 unmeasured 로 남는다', async () => {
+    freshRepoRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-stale-'));
+    mockState.repoRoot = freshRepoRoot;
+    const resultDir = path.join(freshRepoRoot, 'plugins', 'artibot', 'runtime');
+    mkdirSync(resultDir, { recursive: true });
+    writeFileSync(path.join(resultDir, 'last-test-result.json'), JSON.stringify({
+      timestamp: new Date(Date.now() - 600_000).toISOString(),
+      durationMs: 1, totalTests: 1, passed: 1, failed: 0, skipped: 0, failedFiles: [],
+    }));
+
+    const main = await loadMain();
+    await main();
+
+    expect(ledgerMock.appends).toHaveLength(4);
+    for (const { event } of ledgerMock.appends) {
+      expect(event.data.result, '낡은 초록을 PASS 로 쓰지 않는다(F1)').toBe('unmeasured');
+      expect(event.data.evidence, '미측정 줄은 증거를 남기지 않는다').toEqual([]);
+    }
     expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
   });
 
