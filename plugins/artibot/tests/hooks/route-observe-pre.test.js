@@ -504,7 +504,16 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
 
   /**
    * The data a HEAD (pre-K1) receipt carried for the absent-transcript case,
-   * minus the two fields that move every run.
+   * minus the three fields that move between runs.
+   *
+   * `mission_id` IS NOT PINNED HERE. The payloads below declare none, so the
+   * hook falls back to `sessionFallbackMissionId({ sessionId, nowMs: Date.now() })`
+   * (`scripts/hooks/route-observe-pre.js#resolveMissionId`), whose date half is
+   * the UTC calendar day of the run. A literal `M-20260915-Ssesspre1` froze the
+   * generation day into the fixture and turned the suite red on 2026-09-16 and
+   * every day after. The session-derived half — the part K1 could actually
+   * regress — is asserted separately as `/^M-\d{8}-Ssesspre1$/`, the same shape
+   * assertion `resolveMissionId`'s own unit test already uses at :202.
    *
    * GENERATED, NOT HAND-WRITTEN: produced 2026-09-15T02:23:53Z by spawning the
    * then-current `scripts/hooks/route-observe-pre.js` against the payload
@@ -522,7 +531,6 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
    */
   const HEAD_ABSENT_RECEIPT = {
     schema_version: 1,
-    mission_id: 'M-20260915-Ssesspre1',
     session_id: 'sess-pre-1',
     execution_profile_version: 1,
     shadow_of: 'tool_use:toolu_pre_1',
@@ -725,12 +733,16 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
       rmSync(ledgerFilePath(repo), { force: true });
       expect(runHook(payload, home).status, label).toBe(0);
       const [line] = readRunLedger(repo);
-      // `route_receipt_id` and `timestamp` move every run; everything else is
-      // the frozen HEAD shape.
-      const { route_receipt_id: rid, timestamp, ...rest } = line.data;
+      // `route_receipt_id` and `timestamp` move every run and `mission_id`
+      // carries the run's UTC calendar day; everything else is the frozen HEAD
+      // shape.
+      const {
+        route_receipt_id: rid, timestamp, mission_id: missionId, ...rest
+      } = line.data;
       expect(rest, label).toEqual(HEAD_ABSENT_RECEIPT);
       expect(rid, label).toMatch(/^rr-toolu_pre_1-/);
       expect(timestamp, label).toEqual(expect.any(String));
+      expect(missionId, label).toMatch(/^M-\d{8}-Ssesspre1$/);
     }
   });
 
