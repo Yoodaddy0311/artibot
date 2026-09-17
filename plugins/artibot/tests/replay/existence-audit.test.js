@@ -8,14 +8,25 @@
  * because nothing spoke. So the assertions here are mostly about which zero is
  * which.
  *
- *   1. A KIND WITH NO CARRIER REPORTS null, NOT 0. Three kinds still have none:
- *      no registered event names a hook, a command, or a `lib/` module
- *      (re-measured 2026-09-15 across all 39 events in
- *      `schemas/ledger-events.allowlist.json`; it was all four kinds and 36
- *      events on 2026-09-02). `fired: 0` there would be a number nobody
- *      measured. `skills` left that state in Wave 11 — `tool.used.skill` is
- *      written by `scripts/hooks/tool-used-record.js`, so skill entries now
- *      report real counts and the cases below assert BOTH regimes.
+ *   1. A KIND WITH NO CARRIER REPORTS null, NOT 0. Two kinds still have none:
+ *      no registered event names a command or a `lib/` module (re-measured
+ *      2026-09-15 across the 39 events then in
+ *      `schemas/ledger-events.allowlist.json`, 40 once Wave 12 registered
+ *      `hook.fired`; it was all four kinds and 36 events on 2026-09-02).
+ *      `fired: 0` there would be a number nobody measured. `skills` left that
+ *      state in Wave 11 — `tool.used.skill`, written by
+ *      `scripts/hooks/tool-used-record.js` — and `hooks` in Wave 12 —
+ *      `hook.fired.hooks`, written by `scripts/hooks/_hook-fired-record.js`.
+ *      The cases below assert BOTH regimes.
+ *   1b. THE HOOKS CARRIER IS MULTI-VALUED. One `hook.fired` row is one
+ *      dispatch and names SEVERAL handlers, so the denominator is dispatch
+ *      rows, not names, and a name's count is the number of rows containing
+ *      it. The cases pin that a row whose field is not an array is `absent`
+ *      while still counting toward the denominator, that non-string elements
+ *      are skipped without dropping their row, and that a repeated element
+ *      inside one row counts twice (the chosen semantics — the dispatch table
+ *      never repeats a name within a slot, so a repeat is a writer defect and
+ *      must stay visible).
  *   2. A CARRIER WITH AN EMPTY LEDGER IS ALSO null, and carries a DIFFERENT
  *      reason string than case 1. "The field does not exist" and "the field
  *      exists and saw nothing" are different facts about the world. With a real
@@ -90,6 +101,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = join(__dirname, '..', '..');
 const MODULE_PATH = join(PLUGIN_ROOT, 'lib', 'replay', 'existence-audit.js');
 const CLAUDE_MD_PATH = join(PLUGIN_ROOT, 'CLAUDE.md');
+const DISPATCH_TABLE_PATH = join(PLUGIN_ROOT, 'hooks', 'dispatch-table.json');
 
 /** CLAUDE.md line number (1-based) of the 면제 sentence the constant restates. */
 const EXEMPT_LINE_NO = 88;
@@ -119,13 +131,17 @@ function line(event, data) {
 }
 
 describe('an unmeasured kind reports null, never zero', () => {
-  it('skills is carried by tool.used.skill; the other three are still null', () => {
+  it('hooks and skills are carried; commands and modules are still null', () => {
     // A PIN, not a description. If someone adds another carrier this fails on
     // purpose: the module header states which kinds are measured and why the
-    // rest are not, and a new carrier makes that statement stale. Measured
-    // 2026-09-15 (Wave 11 / SH-29).
+    // rest are not, and a new carrier makes that statement stale. `skills`
+    // measured 2026-09-15 (Wave 11), `hooks` 2026-09-17 (Wave 12), both SH-29.
     expect(CARRIERS.skills).toEqual({ event: 'tool.used', field: 'skill' });
-    for (const kind of ['hooks', 'commands', 'modules']) {
+    expect(CARRIERS.hooks).toEqual({ event: 'hook.fired', field: 'hooks', multi: true });
+    // Only `hooks` is multi-valued; a second one would change how every reader
+    // has to interpret the denominator, so it does not slip in unannounced.
+    expect(AUDITED_KINDS.filter((k) => CARRIERS[k]?.multi === true)).toEqual(['hooks']);
+    for (const kind of ['commands', 'modules']) {
       expect(CARRIERS[kind], `${kind} carrier`).toBeNull();
     }
     // Every kind states WHERE its number comes from, or why there is none.
@@ -133,15 +149,39 @@ describe('an unmeasured kind reports null, never zero', () => {
       expect(CARRIER_NOTES[kind], `${kind} note`).toEqual(expect.any(String));
     }
     expect(CARRIER_NOTES.skills).toContain('tool.used.skill');
+    expect(CARRIER_NOTES.hooks).toContain('hook.fired');
+    expect(CARRIER_NOTES.hooks).toContain('_hook-fired-record.js');
+    // The note must keep naming what the carrier CANNOT see: the 24 hooks
+    // registered straight in hooks.json never produce a hook.fired row, so
+    // their zero is false. A note that drops that number stops warning.
+    expect(CARRIER_NOTES.hooks).toContain('24');
+    expect(CARRIER_NOTES.hooks).toContain('hooks.json');
   });
 
   it('fired is null and the reason names the kind', () => {
-    const audit = buildExistenceAudit([], { inventory: { hooks: ['runtime-prompt'] } });
-    const [entry] = audit.kinds.hooks.entries;
+    const audit = buildExistenceAudit([], { inventory: { commands: ['doctor'] } });
+    const [entry] = audit.kinds.commands.entries;
     expect(entry.fired).toBeNull();
     expect(entry.fired).not.toBe(0);
     expect(entry.measured).toBe(false);
-    expect(entry.reason).toBe('unmeasured:no-event-carries-hook');
+    expect(entry.reason).toBe('unmeasured:no-event-carries-command');
+  });
+
+  it('hooks now reports carrier-absent, not no-carrier, on an empty ledger', () => {
+    // Re-derived for Wave 12: this case used to assert
+    // `unmeasured:no-event-carries-hook`. With a carrier present that reason is
+    // wrong — the field exists and the ledger simply holds none of its rows,
+    // which is a different fact and must keep a different string. `fired` stays
+    // null either way, which is the part that protects against deletion.
+    const audit = buildExistenceAudit([], { inventory: { hooks: ['runtime-prompt'] } });
+    const [entry] = audit.kinds.hooks.entries;
+    expect(entry.reason).toBe(CARRIER_ABSENT_REASON);
+    expect(entry.reason).toBe('unmeasured:carrier-event-absent-from-ledger');
+    expect(entry.reason).not.toBe(noCarrierReason('hooks'));
+    expect(entry.fired).toBeNull();
+    expect(entry.fired).not.toBe(0);
+    expect(entry.measured).toBe(false);
+    expect(audit.kinds.hooks.denominator).toBe(0);
   });
 
   it('the reason string uses the singular kind noun for all four kinds', () => {
@@ -345,8 +385,40 @@ describe('the skills carrier, folded from real tool.used rows', () => {
     }
     expect(audit.kinds.skills.denominator).toBe(4);
     expect(audit.summary.measured).toBe(3);
-    // The other three kinds are untouched by the skills carrier.
-    expect(audit.kinds.hooks.carrier).toBeNull();
+    // The other kinds are untouched by the skills carrier. `hooks` has its own
+    // carrier now, so the assertion is no longer "null" — it is that the two
+    // folds do not see each other's rows: there is no hook.fired line here, so
+    // hooks stays at denominator 0 while skills counts 4.
+    expect(audit.kinds.hooks.carrier).toEqual(CARRIERS.hooks);
+    expect(audit.kinds.hooks.denominator).toBe(0);
+    expect(audit.kinds.commands.carrier).toBeNull();
+    expect(audit.kinds.modules.carrier).toBeNull();
+  });
+
+  it('skills and hooks rows in one ledger do not contaminate each other', () => {
+    const events = [
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
+      line('hook.fired', {
+        slot: 'Stop', hooks: ['stop-recap', 'session-ledger'], failed: [], count: 2,
+      }),
+      line('hook.fired', {
+        slot: 'Stop', hooks: ['stop-recap'], failed: ['stop-recap'], count: 1,
+      }),
+    ];
+    const audit = buildExistenceAudit(events, {
+      inventory: { skills: ['artibot:split'], hooks: ['stop-recap', 'session-ledger'] },
+    });
+    // Two carriers, two independent denominators, from the same three lines.
+    expect(audit.kinds.skills.denominator).toBe(1);
+    expect(audit.kinds.hooks.denominator).toBe(2);
+    expect(audit.kinds.skills.entries[0].fired).toBe(1);
+    const hooksByName = Object.fromEntries(audit.kinds.hooks.entries.map((e) => [e.name, e]));
+    expect(hooksByName['stop-recap'].fired).toBe(2);
+    expect(hooksByName['session-ledger'].fired).toBe(1);
+    // A handler that FAILED still fired. `failed` is a separate field and this
+    // fold does not read it — reporting a failed dispatch as "never fired"
+    // would make a broken hook look like a removal candidate.
+    expect(hooksByName['stop-recap'].measured).toBe(true);
   });
 
   it('a null skill is absent, not a bucket named "null"', () => {
@@ -381,6 +453,210 @@ describe('the skills carrier, folded from real tool.used rows', () => {
     expect(entry.fired).toBe(0);
     expect(entry.measured).toBe(true);
     expect(entry.denominator).toBe(1);
+  });
+});
+
+describe('the hooks carrier is MULTI-valued: one row, many names', () => {
+  // Wave 12 / SH-29, owner decision O8 = a1 (2026-09-17). One `hook.fired` row
+  // per dispatcher invocation. The denominator is DISPATCHES, so a rate built
+  // on it reads "share of dispatches that reached this handler" and can never
+  // exceed 1 — which is the whole reason rows, not names, are counted.
+
+  /** The six handlers a PostToolUse Edit dispatch fanned out to. */
+  const PTU_EDIT = Object.freeze([
+    'pre-write-guard', 'quality-gate', 'post-edit-format', 'post-edit-recovery',
+    'mark-main-agent-edit', 'tool-tracker',
+  ]);
+  /** A PostToolUse Skill dispatch: a shorter fan-out, sharing one name above. */
+  const PTU_SKILL = Object.freeze(['tool-tracker', 'tool-used-record']);
+  /** The seven in-process UserPromptSubmit handlers. */
+  const UPS = Object.freeze([
+    'user-prompt-handler', 'auto-team-trigger', 'runtime-prompt', 'autopilot-nlu-trigger',
+    'auto-command-suggest', 'ambiguity-guard', 'git-autopilot-save',
+  ]);
+
+  const DISPATCHES = [
+    line('hook.fired', {
+      slot: 'PostToolUse', tool: 'Edit', hooks: [...PTU_EDIT], failed: [], count: 6,
+    }),
+    line('hook.fired', {
+      slot: 'PostToolUse', tool: 'Skill', hooks: [...PTU_SKILL], failed: [], count: 2,
+    }),
+    line('hook.fired', { slot: 'UserPromptSubmit', hooks: [...UPS], failed: [], count: 7 }),
+  ];
+
+  /**
+   * Every handler name the dispatch table declares, deduplicated.
+   *
+   * Read from the real file rather than restated: a hard-coded list would pass
+   * forever after someone adds a handler, which is the drift the existence
+   * audit exists to catch. Deduplicated because `memory-tracker` and
+   * `session-ledger` each sit in two slots (44 entries, 42 distinct names,
+   * measured 2026-09-17) and `buildExistenceAudit` refuses a duplicate name.
+   *
+   * @returns {string[]} distinct handler names, in first-appearance order.
+   */
+  function dispatchTableNames() {
+    const table = JSON.parse(readFileSync(DISPATCH_TABLE_PATH, 'utf-8'));
+    const names = Object.values(table.slots).flatMap((s) => s.handlers.map((h) => h.name));
+    expect(names.length, 'dispatch-table handler entries').toBeGreaterThan(0);
+    return [...new Set(names)];
+  }
+
+  it('counts every element of every row; the denominator stays rows', () => {
+    const fold = foldFiredCounts(DISPATCHES, CARRIERS.hooks);
+    // 3 rows carrying 15 name occurrences across 14 distinct names. The
+    // denominator is 3 — the arithmetic that makes "fired/denominator" a share
+    // of dispatches instead of a share of some name total nobody asked for.
+    expect(fold.denominator).toBe(3);
+    expect(fold.absent).toBe(0);
+    expect(fold.counts['tool-tracker']).toBe(2);
+    expect(fold.counts['tool-used-record']).toBe(1);
+    expect(fold.counts['ambiguity-guard']).toBe(1);
+    expect(Object.keys(fold.counts)).toHaveLength(14);
+    expect(Object.values(fold.counts).reduce((a, b) => a + b, 0)).toBe(15);
+    // Key-sorted, like countBy: the same input must serialise identically.
+    expect(Object.keys(fold.counts)).toEqual([...Object.keys(fold.counts)].sort());
+  });
+
+  it('an element repeated inside ONE row counts twice (chosen semantics)', () => {
+    // The alternative was per-row dedupe. Counting occurrences was chosen
+    // because the dispatch table never lists a handler twice in one slot, so a
+    // repeat inside a row is a WRITER defect and must stay visible rather than
+    // be smoothed into a plausible 1. Pinned so the choice cannot drift
+    // silently in either direction.
+    const fold = foldFiredCounts(
+      [line('hook.fired', { slot: 'Stop', hooks: ['stop-recap', 'stop-recap'], count: 2 })],
+      CARRIERS.hooks,
+    );
+    expect(fold).toEqual({ counts: { 'stop-recap': 2 }, absent: 0, denominator: 1 });
+  });
+
+  it('a row whose field is not an array is absent but still counted', () => {
+    const rows = [
+      line('hook.fired', { slot: 'Stop', hooks: ['stop-recap'], count: 1 }),
+      line('hook.fired', { slot: 'Stop', hooks: 'stop-recap', count: 1 }),
+      line('hook.fired', { slot: 'Stop', hooks: null, count: 0 }),
+      line('hook.fired', { slot: 'Stop', count: 0 }),
+    ];
+    const fold = foldFiredCounts(rows, CARRIERS.hooks);
+    expect(fold.absent).toBe(3);
+    // The malformed rows still happened, so they stay in the denominator: a
+    // writer that breaks its own field must DEPRESS the rate, never shrink the
+    // denominator until the survivors look healthy.
+    expect(fold.denominator).toBe(4);
+    expect(fold.counts).toEqual({ 'stop-recap': 1 });
+    expect(Object.keys(fold.counts)).not.toContain('null');
+    expect(Object.keys(fold.counts)).not.toContain('undefined');
+    expect(Object.keys(fold.counts)).not.toContain('s');
+  });
+
+  it('non-string elements are skipped without dropping their row', () => {
+    const fold = foldFiredCounts(
+      [line('hook.fired', {
+        slot: 'Stop', hooks: ['stop-recap', 42, null, undefined, '', { name: 'x' }, ['y']],
+        count: 7,
+      })],
+      CARRIERS.hooks,
+    );
+    // The row named a real handler, so it is NOT absent — dropping it would
+    // lose a firing that genuinely happened.
+    expect(fold).toEqual({ counts: { 'stop-recap': 1 }, absent: 0, denominator: 1 });
+    expect(Object.keys(fold.counts)).toEqual(['stop-recap']);
+  });
+
+  it('a non-multi carrier is byte-for-byte the old single-value behaviour', () => {
+    // The regression guard for the mode switch: `multi` absent or false must
+    // leave countBy in charge, or every skills number changes meaning.
+    const events = [
+      line('tool.used', { tool: 'Skill', skill: 'artibot:split' }),
+      line('tool.used', { tool: 'Bash' }),
+    ];
+    const expected = { counts: { 'artibot:split': 1 }, absent: 1, denominator: 2 };
+    expect(foldFiredCounts(events, CARRIERS.skills)).toEqual(expected);
+    expect(foldFiredCounts(events, { event: 'tool.used', field: 'skill', multi: false }))
+      .toEqual(expected);
+    // An ARRAY value under a non-multi carrier is non-scalar, so countBy files
+    // it as absent rather than silently counting its elements.
+    expect(foldFiredCounts(
+      [line('tool.used', { tool: 'Skill', skill: ['a', 'b'] })],
+      CARRIERS.skills,
+    )).toEqual({ counts: {}, absent: 1, denominator: 1 });
+  });
+
+  it('a malformed multi carrier still throws instead of folding nothing', () => {
+    expect(() => foldFiredCounts(DISPATCHES, { field: 'hooks', multi: true }))
+      .toThrow(/non-empty/);
+    expect(() => foldFiredCounts(DISPATCHES, { event: 'hook.fired', field: '', multi: true }))
+      .toThrow(/non-empty/);
+  });
+
+  it('audits the whole dispatch table: 42 names, 3 dispatches, real counts', () => {
+    const inventory = dispatchTableNames();
+    const audit = buildExistenceAudit(DISPATCHES, { inventory: { hooks: inventory } });
+    const block = audit.kinds.hooks;
+    expect(block.entries).toHaveLength(inventory.length);
+    expect(block.denominator).toBe(3);
+
+    const byNameMap = Object.fromEntries(block.entries.map((e) => [e.name, e]));
+    expect(byNameMap['tool-tracker'].fired).toBe(2);
+    expect(byNameMap['tool-used-record'].fired).toBe(1);
+    for (const name of UPS) expect(byNameMap[name].fired, name).toBe(1);
+    // Inventoried, never dispatched in these three rows: a MEASURED zero, which
+    // is the whole point of the carrier existing. It is a real number, not null.
+    expect(byNameMap['swarm-download'].fired).toBe(0);
+    expect(byNameMap['session-digest'].fired).toBe(0);
+
+    for (const entry of block.entries) {
+      expect(entry.measured, entry.name).toBe(true);
+      expect(entry.reason, entry.name).toBeNull();
+      expect(entry.denominator, entry.name).toBe(3);
+      expect(typeof entry.fired, entry.name).toBe('number');
+      // Measured or not, Observe still does not judge.
+      expect(entry.candidate, entry.name).toBe(false);
+      expect(entry.consumers, entry.name).toBe(CONSUMERS_UNMEASURED);
+    }
+    // Summary agrees with the per-entry verdicts, so a reader cannot get a
+    // different answer depending on which level they read.
+    expect(audit.summary.entries).toBe(inventory.length);
+    expect(audit.summary.measured).toBe(inventory.length);
+    expect(audit.summary.unmeasured).toBe(0);
+    expect(audit.summary.eventsReceived).toBe(3);
+    // The 14 names that appear in the rows fired; the rest are measured zeros.
+    expect(block.entries.filter((e) => e.fired > 0)).toHaveLength(14);
+  });
+
+  it('a prototype key in the inventory reports a number, never a function', () => {
+    // Hygiene (c) of the Wave 11 bundle brief, absorbed 2026-09-17. `counts` is
+    // a plain object, so a bare `counts[name]` for these names reaches
+    // Object.prototype and hands back a FUNCTION, which `?? 0` would keep. An
+    // entry reporting a function where a count belongs corrupts every rollup
+    // downstream, and for `__proto__` a plain assignment would have thrown the
+    // real count away entirely.
+    const PROTO_KEYS = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
+    const rows = [line('hook.fired', { slot: 'Stop', hooks: ['stop-recap'], count: 1 })];
+    const audit = buildExistenceAudit(rows, { inventory: { hooks: PROTO_KEYS } });
+    for (const entry of audit.kinds.hooks.entries) {
+      expect(typeof entry.fired, entry.name).toBe('number');
+      expect(entry.fired, entry.name).toBe(0);
+      expect(entry.measured, entry.name).toBe(true);
+    }
+
+    // ...and when a row DOES name one, it is counted like any other string.
+    const named = [
+      line('hook.fired', { slot: 'Stop', hooks: ['constructor', '__proto__'], count: 2 }),
+    ];
+    const fold = foldFiredCounts(named, CARRIERS.hooks);
+    expect(Object.hasOwn(fold.counts, 'constructor')).toBe(true);
+    expect(Object.hasOwn(fold.counts, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(fold.counts)).toBe(Object.prototype);
+    const counted = buildExistenceAudit(named, {
+      inventory: { hooks: ['constructor', '__proto__', 'toString'] },
+    });
+    const map = Object.fromEntries(counted.kinds.hooks.entries.map((e) => [e.name, e.fired]));
+    expect(map.constructor).toBe(1);
+    expect(map.__proto__).toBe(1);
+    expect(map.toString).toBe(0);
   });
 });
 

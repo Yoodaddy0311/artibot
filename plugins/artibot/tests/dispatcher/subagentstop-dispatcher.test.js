@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { spawnLedgerPath } from '../../lib/learning/ledger/spawn-ledger.js';
+import { ledgerFilePath } from '../../lib/runtime/ledger.js';
 
 /**
  * SubagentStop dispatcher integration tests.
@@ -69,6 +70,34 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_subagentstop-di
 let sandboxHome;
 let sandboxCwd;
 
+/**
+ * Throwaway repositories used ONLY as a payload `cwd` — never as a spawn cwd.
+ *
+ * `hook.fired` (SH-29) resolves its project root from `payload.cwd` and appends
+ * there. Pointing the SPAWN at a repository would put one above every
+ * grand-child's cwd, which is what
+ * `tests/firewall/dispatcher-cwd-sandbox-required.test.js` exists to prevent.
+ * One repo per case, so no case has to subtract another's rows.
+ *
+ * @type {string[]}
+ */
+const extraRepos = [];
+
+/** A throwaway git repository, used only as a payload `cwd`. */
+function makeLedgerRepo(tag) {
+  const dir = mkdtempSync(path.join(tmpdir(), `artibot-subagentstop-${tag}-`));
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+  extraRepos.push(dir);
+  return dir;
+}
+
+/** Parsed ledger lines for a root, `[]` when the file was never created. */
+function readLedger(root) {
+  const file = ledgerFilePath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-subagentstop-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-subagentstop-cwd-'));
@@ -77,6 +106,7 @@ beforeAll(() => {
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  for (const dir of extraRepos) rmSync(dir, { recursive: true, force: true });
 });
 
 /**
@@ -252,5 +282,61 @@ describe('_subagentstop-dispatcher (integration)', () => {
     for (const fixture of ['subagentstop-test-1', 'subagentstop-test-2', 'subagentstop-no-side-effects']) {
       expect(rows).not.toContain(fixture);
     }
+  });
+
+  /**
+   * ROUND TRIP for the `hook.fired` carrier (SH-29, owner O8=a1).
+   *
+   * Deliberately LAST in the file: these are the only cases that hand this slot
+   * a project root, and the spawn-ledger leak assertion above is written
+   * against a state they did not create.
+   *
+   * `data.failed` is asserted as a SUBSET of `data.hooks` rather than empty —
+   * `agent-evaluator` (8s) can legitimately time out on a loaded machine, and a
+   * timeout is a status, not a defect.
+   */
+  it('writes exactly one hook.fired row naming all 3 handlers in table order', () => {
+    const repo = makeLedgerRepo('fired');
+    const { status } = runDispatcher({
+      hook_event_name: 'SubagentStop',
+      session_id: 'sess-hook-fired-subagentstop-0001',
+      subagent_id: 'sub-hook-fired-0001',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('SubagentStop');
+    expect(fired[0].data.hooks).toEqual([
+      'subagent-handler', 'agent-evaluator', 'workflow-status',
+    ]);
+    expect(fired[0].data.count).toBe(3);
+    // No tool on this slot: the key is OMITTED, never null (a null would be a
+    // `type-violation:tool` rejection against the allowlist's declared string).
+    expect('tool' in fired[0].data).toBe(false);
+    expect(fired[0].data.failed.every((n) => fired[0].data.hooks.includes(n))).toBe(true);
+    expect(fired[0].source).toBe('hook');
+    expect(fired[0].session_id).toBe('sess-hook-fired-subagentstop-0001');
+    expect('action_id' in fired[0]).toBe(false);
+    expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
+  });
+
+  /**
+   * FAIL-CLOSED, and silent. No `cwd` means no project root to aim at, so the
+   * carrier returns `{ok:false, reason:'no-cwd'}` — no row, and no
+   * `ledger.rejected` either.
+   */
+  it('writes no hook.fired row when the payload names no cwd', () => {
+    const repo = makeLedgerRepo('fired-nocwd');
+    const { status } = runDispatcher({
+      hook_event_name: 'SubagentStop',
+      session_id: 'sess-hook-fired-subagentstop-0002',
+      subagent_id: 'sub-hook-fired-0002',
+    });
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
   });
 });

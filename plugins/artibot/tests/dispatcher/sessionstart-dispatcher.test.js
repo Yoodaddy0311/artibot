@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { ledgerFilePath } from '../../lib/runtime/ledger.js';
 
 /**
  * SessionStart dispatcher integration tests.
@@ -86,6 +88,37 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_sessionstart-di
 let sandboxHome;
 let sandboxCwd;
 
+/**
+ * Throwaway repositories used ONLY as a payload `cwd` — never as a spawn cwd.
+ *
+ * `hook.fired` (SH-29) resolves its project root from `payload.cwd` and appends
+ * there. Pointing the SPAWN at a repository instead would put one above every
+ * grand-child's cwd, which is exactly the isolation
+ * `tests/firewall/dispatcher-cwd-sandbox-required.test.js` exists to prevent —
+ * and on THIS slot that repository would be reachable by `git-autopilot-setup`,
+ * whose write is a `checkout -b`. The two stay separate: spawn cwd non-git,
+ * payload cwd a sandbox repo. One repo per case, so no case has to subtract
+ * another's rows to count its own.
+ *
+ * @type {string[]}
+ */
+const extraRepos = [];
+
+/** A throwaway git repository, used only as a payload `cwd`. */
+function makeLedgerRepo(tag) {
+  const dir = mkdtempSync(path.join(tmpdir(), `artibot-sessionstart-${tag}-`));
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+  extraRepos.push(dir);
+  return dir;
+}
+
+/** Parsed ledger lines for a root, `[]` when the file was never created. */
+function readLedger(root) {
+  const file = ledgerFilePath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-sessionstart-home-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-sessionstart-cwd-'));
@@ -94,6 +127,7 @@ beforeAll(() => {
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  for (const dir of extraRepos) rmSync(dir, { recursive: true, force: true });
 });
 
 function runDispatcher(payload, env = {}) {
@@ -261,6 +295,98 @@ describe('_sessionstart-dispatcher (integration)', () => {
    * isolation exists to prevent. A failure here means read the reflog before
    * assuming the dispatcher did it.
    */
+  /**
+   * ROUND TRIP for the `hook.fired` carrier (SH-29, owner O8=a1).
+   *
+   * ONE ROW PER DISPATCH, not one per handler: SessionStart fans out to nine
+   * handlers, and the rejected alternative would have written nine lines for
+   * one session open. The row count is the assertion that carries the
+   * decision; `data.hooks` is what keeps the identities the Existence Audit
+   * needs (`lib/replay/existence-audit.js#CARRIERS.hooks` was null until this
+   * event existed).
+   *
+   * `data.failed` is asserted as a SUBSET of `data.hooks`, not as empty. Two of
+   * the nine are network-bound (`swarm-download`, 15s) and a timeout is a
+   * legitimate status, not a defect — pinning `[]` would make this case fail on
+   * a slow or offline machine and teach the next reader to delete it. What must
+   * hold in every environment is that a failure names a handler that ran.
+   */
+  it('writes exactly one hook.fired row naming all 9 handlers in table order', () => {
+    const repo = makeLedgerRepo('fired');
+    const { status } = runDispatcher({
+      hook_event_name: 'SessionStart',
+      source: 'startup',
+      session_id: 'sess-hook-fired-sessionstart-0001',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('SessionStart');
+    expect(fired[0].data.hooks).toEqual([
+      'session-start', 'memory-tracker', 'swarm-download', 'git-autopilot-setup',
+      'image-cleanup', 'session-digest', 'git-autopilot-session',
+      'skill-validation-check', 'session-readback',
+    ]);
+    expect(fired[0].data.count).toBe(9);
+    // No tool on this slot: the key is OMITTED, never null (a null would be a
+    // `type-violation:tool` rejection against the allowlist's declared string).
+    expect('tool' in fired[0].data).toBe(false);
+    expect(fired[0].data.failed.every((n) => fired[0].data.hooks.includes(n))).toBe(true);
+    expect(fired[0].source).toBe('hook');
+    expect(fired[0].session_id).toBe('sess-hook-fired-sessionstart-0001');
+    // SessionStart carries no tool_use_id and no prompt_id, so there is no
+    // correlation key to record and the envelope omits it.
+    expect('action_id' in fired[0]).toBe(false);
+    // The carrier is a library module, not a 10th handler — it never names
+    // itself, and it costs no spawn.
+    expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
+  });
+
+  /**
+   * FAIL-CLOSED, and silent. Without a `cwd` the carrier has no project root
+   * to aim at and returns `{ok:false, reason:'no-cwd'}` — no row, and no
+   * `ledger.rejected` either, because it never hands the writer an envelope it
+   * knows is incomplete. Asserted on a repo this case owns, so "nothing here"
+   * is a real absence rather than a row that landed somewhere else.
+   */
+  it('writes no hook.fired row when the payload names no cwd', () => {
+    const repo = makeLedgerRepo('fired-nocwd');
+    const { status } = runDispatcher({
+      hook_event_name: 'SessionStart',
+      source: 'startup',
+      session_id: 'sess-hook-fired-sessionstart-0002',
+    });
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
+  });
+
+  /**
+   * The self-check below, repeated for the payload shape the round-trip case
+   * introduced. A `cwd` FIELD is new input to nine handlers; this proves it
+   * does not become a second route to the real checkout the way a spawn cwd
+   * would. Writes INSIDE the sandbox repo are acceptable — it is a throwaway.
+   */
+  it('leaves the real repository untouched when payload.cwd is a sandbox repo', () => {
+    const repo = makeLedgerRepo('fired-isolation');
+    const before = realRepoSnapshot();
+    const { status } = runDispatcher({
+      hook_event_name: 'SessionStart',
+      session_id: 'sess-hook-fired-sessionstart-0003',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+    const after = realRepoSnapshot();
+    expect(after.autopilotConfig).toBe(before.autopilotConfig);
+    expect(after.head).toBe(before.head);
+    expect(after.branch).toBe(before.branch);
+    expect(after.reflog).toBe(before.reflog);
+    expect(after.autopilotBranches).toBe(before.autopilotBranches);
+  });
+
   it('leaves the real repository untouched (no autopilot.json write, no HEAD move)', () => {
     // Structural proof the git path is shut: the hooks derive the repo from
     // cwd, and there is no repo to find here. This is what makes the isolation

@@ -20,6 +20,11 @@
  *  11. webfetch-cache-post.js WebFetch          (5s)   — webfetch cache write
  *  12. zero-result-guard.js   Grep / Glob       (3s)   — zero-result scope nudge
  *
+ * `_hook-fired-record.js` is NOT a 13th entry. It is a library module called
+ * in-process after the merged stdout is written, appending ONE `hook.fired`
+ * ledger row per dispatch (SH-29 / owner O8=a1) — a dispatcher-level append,
+ * not a hook, so it costs no spawn and never appears in its own `data.hooks`.
+ *
  * Routing: hooks whose `tools` array does not include the current
  * `extractToolName(payload)` value are skipped entirely (no spawn, no cost).
  * Hooks with `tools: ['*']` run for every tool.
@@ -43,6 +48,7 @@ import {
   spawnHook,
 } from './_dispatcher-utils.js';
 import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
+import { recordHookFired } from './_hook-fired-record.js';
 
 const HOOK_NAME = '_posttooluse-dispatcher';
 const EVENT_NAME = 'PostToolUse';
@@ -82,6 +88,8 @@ async function main() {
   const toolName = extractToolName(payload);
   const active = selectHooks(toolName);
 
+  // Zero selected handlers returns before any spawn, so NO `hook.fired` row is
+  // written: nothing fired, and there is no handler name to attribute.
   if (active.length === 0) return;
 
   const settled = await Promise.allSettled(
@@ -104,6 +112,14 @@ async function main() {
   if (merged) {
     try { process.stdout.write(JSON.stringify(merged)); } catch { /* ignore */ }
   }
+
+  // SH-29 hook carrier (O8=a1): one hook.fired row per dispatch, after stdout.
+  try {
+    recordHookFired({
+      slot: EVENT_NAME, payload, tool: toolName,
+      results: settled.map((r, i) => (r.status === 'fulfilled' ? r.value : { name: active[i].name, status: 'error' })),
+    });
+  } catch { /* never let the carrier touch the slot */ }
 }
 
 if (isMainEntry(import.meta.url)) {

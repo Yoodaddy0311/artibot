@@ -22,6 +22,11 @@
  * Exits with code 0 on every failure path — a crashing teammate evaluator
  * must never block the SubagentStop slot for the parent agent.
  *
+ * `hook.fired` carrier appended after stdout, SH-29 O8=a1 — one ledger row per
+ * dispatch naming every handler above, written by the LIBRARY module
+ * `_hook-fired-record.js` (not a 4th table entry, so it costs no spawn and
+ * never names itself).
+ *
  * @module scripts/hooks/_subagentstop-dispatcher
  */
 
@@ -34,6 +39,7 @@ import {
   spawnHook,
 } from './_dispatcher-utils.js';
 import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
+import { recordHookFired } from './_hook-fired-record.js';
 
 const HOOK_NAME = '_subagentstop-dispatcher';
 const EVENT_NAME = 'SubagentStop';
@@ -76,6 +82,14 @@ async function main() {
   if (merged) {
     try { process.stdout.write(JSON.stringify(merged)); } catch { /* ignore */ }
   }
+
+  // SH-29 hook carrier (O8=a1): one hook.fired row per dispatch, after stdout.
+  try {
+    recordHookFired({
+      slot: EVENT_NAME, payload,
+      results: settled.map((r, i) => (r.status === 'fulfilled' ? r.value : { name: HOOKS[i].name, status: 'error' })),
+    });
+  } catch { /* never let the carrier touch the slot */ }
 }
 
 if (isMainEntry(import.meta.url)) {

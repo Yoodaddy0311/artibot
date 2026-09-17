@@ -7,6 +7,8 @@ import {
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { ledgerFilePath } from '../../lib/runtime/ledger.js';
+
 /**
  * SessionEnd dispatcher integration tests.
  *
@@ -61,6 +63,35 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_sessionend-disp
 let sandboxHome;
 let sandboxCwd;
 
+/**
+ * Throwaway repositories used ONLY as a payload `cwd` — never as a spawn cwd.
+ *
+ * `hook.fired` (SH-29) resolves its project root from `payload.cwd` and appends
+ * there; so do `session-ledger.mjs` and `mission-complete-record.js`, already on
+ * this slot. Pointing the SPAWN at a repository would put one above every
+ * grand-child's cwd, which is what
+ * `tests/firewall/dispatcher-cwd-sandbox-required.test.js` exists to prevent.
+ * One repo per case, so no case has to subtract another's rows.
+ *
+ * @type {string[]}
+ */
+const extraRepos = [];
+
+/** A throwaway git repository, used only as a payload `cwd`. */
+function makeLedgerRepo(tag) {
+  const dir = mkdtempSync(path.join(tmpdir(), `artibot-sessionend-${tag}-`));
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+  extraRepos.push(dir);
+  return dir;
+}
+
+/** Parsed ledger lines for a root, `[]` when the file was never created. */
+function readLedger(root) {
+  const file = ledgerFilePath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-sessionend-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-sessionend-cwd-'));
@@ -69,6 +100,7 @@ beforeAll(() => {
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  for (const dir of extraRepos) rmSync(dir, { recursive: true, force: true });
 });
 
 /**
@@ -147,6 +179,12 @@ const FIXTURE_SESSION_IDS = [
   'end-global-disable',
   'end-stdout',
   'end-no-side-effects',
+  // SH-29 `hook.fired` round-trip ids. Registered here, not merely used: these
+  // two runs hand the slot a project root for the first time, which is exactly
+  // the input that could make a leak land in the real ledger. An id used by a
+  // spawn but absent from this list is a run the detector cannot see.
+  'sess-hook-fired-sessionend-0001',
+  'sess-hook-fired-sessionend-0002',
 ];
 
 /**
@@ -410,5 +448,65 @@ describe('_sessionend-dispatcher (integration)', () => {
     } finally {
       rmSync(probeDir, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * ROUND TRIP for the `hook.fired` carrier (SH-29, owner O8=a1).
+   *
+   * Deliberately LAST in the file: these are the only cases that hand this slot
+   * a project root, and the leak detector above asserts nothing of theirs
+   * reached the real ledger. Ordering them after it keeps that assertion
+   * measuring a state these cases did not create. Their ids are registered in
+   * `FIXTURE_SESSION_IDS`, so a leak from them is visible to it on the next run.
+   *
+   * `data.failed` is asserted as a SUBSET of `data.hooks`, not as empty: two of
+   * the seven are network-bound (`swarm-sync` and `http-notify`, 15s / 8s) and
+   * a timeout is a status rather than a defect. Pinning `[]` would make this
+   * case fail offline and teach the next reader to delete it.
+   */
+  it('writes exactly one hook.fired row naming all 7 handlers in table order', () => {
+    const repo = makeLedgerRepo('fired');
+    const { status } = runDispatcher({
+      hook_event_name: 'SessionEnd',
+      session_id: 'sess-hook-fired-sessionend-0001',
+      reason: 'user-quit',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('SessionEnd');
+    expect(fired[0].data.hooks).toEqual([
+      'session-end', 'swarm-sync', 'rotation-runner', 'memory-tracker',
+      'http-notify', 'session-ledger', 'mission-complete-record',
+    ]);
+    expect(fired[0].data.count).toBe(7);
+    // No tool on this slot: the key is OMITTED, never null (a null would be a
+    // `type-violation:tool` rejection against the allowlist's declared string).
+    expect('tool' in fired[0].data).toBe(false);
+    expect(fired[0].data.failed.every((n) => fired[0].data.hooks.includes(n))).toBe(true);
+    expect(fired[0].source).toBe('hook');
+    expect(fired[0].session_id).toBe('sess-hook-fired-sessionend-0001');
+    expect('action_id' in fired[0]).toBe(false);
+    expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
+  });
+
+  /**
+   * FAIL-CLOSED, and silent. No `cwd` means no project root to aim at, so the
+   * carrier returns `{ok:false, reason:'no-cwd'}` — no row, and no
+   * `ledger.rejected` either.
+   */
+  it('writes no hook.fired row when the payload names no cwd', () => {
+    const repo = makeLedgerRepo('fired-nocwd');
+    const { status } = runDispatcher({
+      hook_event_name: 'SessionEnd',
+      session_id: 'sess-hook-fired-sessionend-0002',
+      reason: 'user-quit',
+    });
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
   });
 });

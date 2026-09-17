@@ -87,6 +87,30 @@ let sandboxCwd;
  */
 let ledgerRepo;
 
+/**
+ * Every directory this file made, so `afterAll` can remove the ones the
+ * `hook.fired` cases create on demand. Each of those cases needs its OWN repo:
+ * the carrier appends one row per dispatch, so two cases sharing a root would
+ * have to subtract each other's rows to count their own — an assertion that
+ * silently weakens the moment a third case is added.
+ */
+const extraRepos = [];
+
+/** A throwaway git repository, used only as a payload `cwd`. */
+function makeLedgerRepo(tag) {
+  const dir = mkdtempSync(path.join(tmpdir(), `artibot-posttooluse-${tag}-`));
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+  extraRepos.push(dir);
+  return dir;
+}
+
+/** Parsed ledger lines for a root, `[]` when the file was never created. */
+function readLedger(root) {
+  const file = ledgerFilePath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-posttooluse-cwd-'));
@@ -100,6 +124,7 @@ afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
   if (ledgerRepo) rmSync(ledgerRepo, { recursive: true, force: true });
+  for (const dir of extraRepos) rmSync(dir, { recursive: true, force: true });
 });
 
 /**
@@ -331,6 +356,82 @@ describe('_posttooluse-dispatcher (integration)', () => {
     expect(used[0].data.skill).toBe('artibot:split');
     expect(used[0].data.tool).toBe('Skill');
     expect(used[0].source).toBe('hook');
+
+    // SH-29 (O8=a1): the two carriers COEXIST on one dispatch and describe
+    // different things — `tool.used` names the skill the host invoked,
+    // `hook.fired` names the handlers Artibot ran because of it. The Skill
+    // route selects exactly two, and the carrier is not one of them.
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('PostToolUse');
+    expect(fired[0].data.tool).toBe('Skill');
+    expect(fired[0].data.hooks).toEqual(['tool-tracker', 'tool-used-record']);
+    expect(fired[0].data.failed).toEqual([]);
+    expect(fired[0].data.count).toBe(2);
+    expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
+    expect(fired[0].action_id).toBe('toolu_posttooluse_skill_1');
+    expect(fired[0].source).toBe('hook');
+  });
+
+  /**
+   * END-TO-END for the `hook.fired` carrier on the busiest PostToolUse route.
+   *
+   * ONE ROW PER DISPATCH, NOT ONE PER HANDLER (owner O8=a1, 2026-09-17). An
+   * Edit payload runs six handlers; the rejected alternative would have written
+   * six lines for one tool call. The row count is therefore the assertion that
+   * carries the decision, and `data.hooks` is what keeps the identities the
+   * Existence Audit needs (`lib/replay/existence-audit.js#CARRIERS.hooks` was
+   * null until this event existed).
+   *
+   * A REJECTION IS ALSO A WRITTEN LINE (`ledger.rejected`) — the arrays in
+   * `data` are the first arrays any Artibot ledger event carries, so both
+   * streams are asserted rather than the row count alone.
+   */
+  it('writes exactly one accepted hook.fired row per Edit dispatch (6 handlers folded in)', () => {
+    const repo = makeLedgerRepo('fired-edit');
+    const { status } = runDispatcher({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: 'x.js' },
+      tool_use_id: 'toolu_posttooluse_edit_1',
+      session_id: 'sess-posttooluse-dispatcher-0002',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('PostToolUse');
+    expect(fired[0].data.tool).toBe('Edit');
+    expect(fired[0].data.count).toBe(6);
+    expect([...fired[0].data.hooks].sort()).toEqual([
+      'mark-main-agent-edit', 'post-edit-format', 'post-edit-recovery',
+      'post-write-tdd', 'quality-gate', 'tool-tracker',
+    ]);
+    expect(fired[0].data.failed).toEqual([]);
+    // Edit selects no `tool.used` writer, so the two carriers are independent.
+    expect(lines.filter((l) => l.event === 'tool.used')).toEqual([]);
+  });
+
+  /**
+   * FAIL-CLOSED, and silent. A payload with no session id cannot produce a
+   * mission id, so `buildHookFiredEnvelope` returns null and NOTHING is
+   * written — not a partial row, and not a `ledger.rejected` either, because
+   * the carrier never hands the writer an envelope it knows is incomplete.
+   * The dispatcher still exits 0 and still merges its handlers' stdout.
+   */
+  it('writes no hook.fired row when the payload names no session', () => {
+    const repo = makeLedgerRepo('fired-nosession');
+    const { status } = runDispatcher({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: 'x.js' },
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
   });
 
   it('selectHooks() routes MultiEdit to mark-main-agent-edit + tool-tracker', async () => {
