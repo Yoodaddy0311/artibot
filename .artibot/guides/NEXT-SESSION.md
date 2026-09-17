@@ -2,16 +2,16 @@
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
 
-## Wave 12 — 배치 1~3 착지 (2026-09-17 KST, 세션 artibot-e8, master = `fe9d5c81`)
+## Wave 12 — 8/8 착지 (2026-09-17 KST, 세션 artibot-e8, master = `6b472785`)
 
-**한 줄**: Wave 12 는 8줄기 중 **7줄기가 배치 3회로 착지**했고 `sh29-command-hook-carriers` 1줄기(배치 4)만 남았다. base 는 `8f614184`(v4.63.0 뒤).
+**한 줄**: Wave 12 는 **8줄기 전부 배치 4회로 착지**했다(재빌드 0, CI RED 0). base `8f614184`(v4.63.0 뒤) → `6b472785` = **83 files +7,921/−302**(`git diff --shortstat 8f614184..6b472785`, 리더 13:2x KST), 25 커밋. 통합 소요 11:14→13:19 KST(배치 1→4).
 
 | 배치 | master SHA | 줄기(도착 커밋) |
 |---|---|---|
 | 1 | `65aaaaf1` | `team-config-hygiene-bundle`(`13c731ae`: team-config-semantics + wave11-hygiene (a)(b)(d)(e)) |
 | 2 | `2da29dd6` | `session-store-hygiene`(`b55cb895`) · `verdict-adapter-warn`(`ae8404c2`) · `report-generator-recovery-journal`(`ba55bd7a`) · `route-bound-canonical-model`(`62d8a590`) |
 | 3 | `fe9d5c81` | `ca03-nextphase-decide`(`58422a3b`) · `nl-activation-numerator-writer`(`5f8ddb7f`) |
-| 4 | **미착지(대기)** | `sh29-command-hook-carriers` — 파트 A wip `42397c99`, 파트 B(runtime-prompt 3경로) + O8-i config 2경로 + README 2파일 `sync-readme-claims` 진행 중. **README 카운트와 SH-29 행은 이 창이 소유한다 — 다른 데서 건드리지 마라.** |
+| 4 | `6b472785` | `sh29-command-hook-carriers`(`970e2aa3`: 파트 A `hook.fired` 42397c99 + 배치 3 master merge 7c798498 + 파트 B command carrier · O8-i `ledger.hookFired.slots` · README 76) — land 는 `--base fe9d5c81`(merge 한 master) 기준 7/7 PASS |
 
 **Wave 13 정찰 초안 7건**(유휴 창이 읽기 전용으로 작성, 코드 0) — 전부 `.artibot/split/<이름>/brief-draft.md`:
 `ob10-mission-controller-record-only`(S~M) · `ca05-save-checkpoint`(S) · `sh04-topology-actual`(S) · `sh05-recommended-spawn-receipt-compare`(S) · `autopilot-test-store-isolation`(S) · `decision-store-dir-strict-options`(S) · `recovery-judge-replan-counter`(S).
@@ -22,7 +22,9 @@
 
 **오너 정리 잔여(사람이 실행)**: ① `.claude/worktrees/async-giggling-quasar` 디렉터리 삭제 ② `git branch -D worktree-split-artibot-ob17-models-current`(O1 승인 완료, 실행만 남음) ③ `archive/*-20260519` 태그 뒤 stale 브랜치 2개 `-D` ④ `_reports/` 미추적 디렉터리 2개 처분.
 
-**다음 할 일**: ① 배치 4(sh29) 착지 — README 동기화·O8-i config 포함 ② 그 뒤 **4.64.0 릴리스 판단**(배치 4 전에는 판단하지 않는다) ③ 릴리스 + `sync:local` + 호스트 재시작 뒤 라이브 재계수 2건 — `route.bound` 결손율(`rb-census.mjs`, 착지 전 271/276 = 98.2%)과 `activation-observed` slash 분모(현재 0) ④ Wave 13 plan 편성(초안 7건 + 위 순서 제약 + 부채 2/7).
+**전체 게이트(리더 실측)**: `npm test` @ `6b472785` 13:2x~13:3x KST 210s = 723 파일 중 722 passed / **18,823 passed · 1 failed · 12 skipped**. 실패 1 = `tests/firewall/stash-ref-isolation.test.js` "drops surplus checkpoints"(102s, `expected 12 to be less than 12`) — Wave 12 diff 에 stash/checkpoint 파일 0, **단독 재실행 6/6 pass** → 부하 플레이크(창 8개 열린 채 측정, refs/stash 공유). 릴리스 차단 아님. 원인 미확인.
+
+**다음 할 일**: ① ~~배치 4 착지~~ 완료(`6b472785`) + 리더 통합 문서 커밋(`ci/wave12-docs`) ② **4.64.0 릴리스 판단** — 위 전체 게이트 기준 차단 0 ③ 릴리스 + `sync:local` + 호스트 재시작 뒤 라이브 재계수 2건 — `route.bound` 결손율(`rb-census.mjs`, 착지 전 271/276 = 98.2%)과 `activation-observed` slash 분모(현재 0) ④ Wave 13 plan 편성(초안 7건 + 위 순서 제약 + 부채 2/7).
 
 ---
 

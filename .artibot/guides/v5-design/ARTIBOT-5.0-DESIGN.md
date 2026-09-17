@@ -1118,3 +1118,19 @@ wire-preintake 새 모듈 0(PRD:70).
 
 **이 결정이 여는 것(리더 정리, 결정 아님)**: O1 은 Wave 11 정리 잔여(locked worktree + 브랜치)를 닫고, O2 는 `ob17-switch-reasons` 가 남긴 "카탈로그 미등재 모델 미공급" 을 좁히며(가격은 그대로 미검증), O4 는 4.63.0 체크리스트의 미충족 3건 중 원장 2건을 닫는다. O6 은 §3 `session-store-hygiene` 행의 삭제 단계를 게이트한다.
 **코드·삭제 착수는 각 항목의 선행이 충족된 뒤** — 이 절은 결정 기록이며 실행 순서를 정하지 않는다.
+
+### 부록 0-2 후속(6). 오너 결정 4건 — Wave 12 (2026-09-17 확정)
+
+**결정자: O8 은 오너 직접(2026-09-17 09:2x KST, 핸드오프 §5 회신) · O3/O5/O7 은 오너의 2026-09-17 위임("오너 결정이 필요한 건 리더가 처리")에 따라 리더 artibot-e8/56df29 가 핸드오프 권장안으로 확정. 기록: 리더 직접(doc-updater 팀원은 Bash 부재로 커밋 불가). 세션 artibot-e8.**
+위 후속(4)·(5) 와 같은 규칙으로 읽는다 — 결정 문구는 결정 원장 그대로, 리더 해석은 "여는 것" 절에만.
+
+| ID | 질문(원문 요지) | 결정 (2026-09-17 확정) | 재결정 조건 |
+|---|---|---|---|
+| O3 | H3 `residency-unknown` 사유를 1릴리스 뒤 nullable 로 — W11-Q2 재결정 조건(H1 뒤 residency-unknown 다수) 대조 | **권장안 진행 — 그대로 둔다.** 라이브 분모가 아직 0(재시작 뒤 원장 행 없음)이라 재결정 조건을 판정할 수 없다 | 라이브 분모 ≥1 릴리스분이 쌓이면 W11-Q2 조건 재판정 |
+| O5 | HG-09 `UPDATE … SET` no-WHERE 를 기록 전용으로 둘지 refuse 로 올릴지 | **권장안 진행 — 기록 전용 유지.** 매트릭스 행(`human-gates.js` HG-09)은 있으나 pre-bash 차단은 guard-registry/L1 blocked-patterns 경유뿐이고 거기 UPDATE 패턴이 없다; human-asked-record 는 기록만. `enforcementNote` 에 이 결정을 적었다(Wave 12 리더 통합 커밋) | Canary(§5 C5 record → refuse) 착수 시 |
+| O7 | `team.followWorkflowPlan` 을 Wave 12 에서 ON 으로 | **권장안 진행 — false 유지.** `artibot.config.json` 주석·`team.md` 가 false 상태 데이터 1릴리스를 요구 | Wave 13 Canary 1키 |
+| O8 | `hook.fired` 어휘 — (a1) 디스패치 1회=1행+핸들러 배열 fold / (a2) 핸들러 1행 / (c) 세션 요약 1행 | **a1.** 디스패치 1회 = 1행, 실행된 핸들러를 `data.hooks` 배열로 그 행에 fold. 부속 O8-i `ledger.hookFired.slots` 기본 ON(6슬롯) | 원장 행 증가율이 예상(≈3×)을 크게 넘으면 슬롯 OFF 로 축소 |
+
+**리더가 위임 범위에서 내린 결정(오너 결정 아님, 기록)**: 부채 비율 분모 = limb(Wave 12 2/8) · `autopilot-test-store-isolation` 의 프로덕션 경로 seam(`ARTIBOT_AUTOPILOT_STORE_DIR`) 허용(`ARTIBOT_STATE_DIR` 선례) · ca03-3 정본 = 적용 시 저널 행 제자리 `divergent:false + appliedNext + appliedBy` + tick `recovery-applied` · verdict-adapter cited_line 취약성은 재측정 관례 유지 · RC-1 행 스냅샷 추가 / RC-2 pause tick 별 줄기 / RC-3 config 주석·autopilot.md 문장 줄기 소유(judge-replan 후보). 전부 `.artibot/split/run.json` `leaderDecisionsAmended`·`wave13Recon` 에 근거와 함께 있다.
+
+**이 결정이 여는 것(리더 정리, 결정 아님)**: O8 은 sh29 파트 A·B(배치 4 `6b472785`)로 착지했고 Existence Audit 의 `hooks`·`commands` carrier 가 채워진다(`modules` 만 null 잔여). O3·O7 은 릴리스 1회분 라이브 데이터를 기다리는 결정이라 4.64.0 뒤에만 재판정 재료가 생긴다. O5 는 Canary 전까지 기록 전용.

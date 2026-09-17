@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 12 배치 착지 (2026-09-17, 세션 artibot-e8/56df29, split-wave12-20260916)
+
+8줄기 = 8 착지(배치 4회, 재빌드 0, CI RED 0, 창 재열기 1 — 첫 시도가 이름 없는 랜덤 worktree 로 열려 `--worktree=<name>` 으로 재개설). base `8f614184`(v4.63.0 뒤) → 배치 4 `6b472785` = **83 files +7,921/−302**(리더 `git diff --shortstat 8f614184..6b472785`, 13:2x KST), 25 커밋. 통합 소요 11:14→13:19 KST.
+
+**정합성 주(줄기 합 ≠ 배치 합, 원인 확인됨)**: 줄기 8개의 shortstat 합은 86 files +7,922/−303 — 배치 합보다 files 3 · ins 1 · del 1 많다. files 3 = 두 줄기가 같은 파일을 만진 경우(`artibot.config.json`·`tests/firewall/v5-config-firewall.test.js` = ca03+sh29, `scripts/hooks/runtime-prompt.js` = nl+sh29 — 계획된 `_deferredPaths`, sh29 가 배치 3 master 를 merge 한 뒤 편집). ins/del 1 은 그 겹침 hunk 의 순효과.
+
+- **team-config-hygiene-bundle** (`13c731ae`, 배치 1 `65aaaaf1` @11:14 KST, 22 files +932/−163): `isTeamEnabled` 단일 소유 + `config-schema` team 21키 전부 선언(스키마 ⊇ 실 config 자기검증) · host-payload 픽스처 `readdir` 열거 · HG-07 성장 게이트 회차 표식 · 리포터 `modules` 필드 · `sleepSync`/`renameWithRetry` 사본 → `lib/core/file.js`. V5 §3 부채 2행 착지.
+- **session-store-hygiene** (`b55cb895`, 배치 2 `2da29dd6` @11:23, 5 files +798/−6): `engine-state.test.js` 스토어 격리(mkdtemp + `CLAUDE_PLUGIN_ROOT`) · `rollHistory` 꼬리부터 usable cap · `scripts/dev/prune-autopilot-store.mjs`(dry-run 기본). **O6 적용**(리더 12:4x): 12,649 파일 12.7MB 삭제, 실 세션 6쌍 보존.
+- **verdict-adapter-warn** (`ae8404c2`, 배치 2, 7 files +153/−25): `verdict-adapter-map.json` 6번째 source `autopilot-driver`(rows 15→18), `warn → PASS` — **관측성 전용**(저널 `verdict` 만 바뀌고 `classify()` 결과 불변, 3케이스 실측) · gate 7 단어경계 + cited_line 리터럴 단언.
+- **report-generator-recovery-journal** (`ba55bd7a`, 배치 2, 4 files +339/−4): dev 프로필 `## Recovery Journal` + 레거시 `## 6b. 복구 판정 저널`(0행이면 바이트 동일).
+- **route-bound-canonical-model** (`62d8a590`, 배치 2, 6 files +441/−14): 이름·fifo 매칭 스폰도 receipt 정의로 `canonicalModel` 기록(`lib/routing/bind-model-fallback.js`). 라이브 결손 271/276(98.2%, 09-17 02:03Z) → 수리 후 기대 결손 = Explore/fork/unbound 만(재계수는 릴리스+`sync:local` 뒤).
+- **ca03-nextphase-decide** (`58422a3b`, 배치 3 `fe9d5c81` @11:34, 7 files +810/−8): `lib/autopilot/recovery-transition.js` + `recordPhaseResult` 게이트, **`autopilot.recovery.transitionFromVerdict:false`**(기본 OFF). 적용 시 저널 행 제자리 `divergent:false + appliedNext + appliedBy` + tick `recovery-applied`. **flip 전제**: `judge()` 의 `replanAttempts:0` 하드코딩(ON 이면 replan→PLAN 무한, 실측 6회 중 상한 0) — Wave 13 `recovery-judge-replan-counter` 뒤에만.
+- **nl-activation-numerator-writer** (`5f8ddb7f`, 배치 3, 8 files +1,460/−12): decisions 8번째 타입 `activation-observed` + `lib/observability/activation-observed.js` + UserPromptSubmit 배선 — **slash 축만**(hint 축·SessionEnd flush 는 Wave 13) · `decisions-store-sandbox-required` 에 writer 등록.
+- **sh29-command-hook-carriers** (`970e2aa3`, 배치 4 `6b472785` @13:19, 27 files +2,989/−71): `hook.fired`(**O8=a1** 디스패치 1회=1행, 6 디스패처, allowlist 39→40) + `intent.detected.fields.command` carrier + `ledger.hookFired.slots` 기본 ON + Existence Audit `hooks`·`commands` carrier(multi fold, `Object.hasOwn`) + README hookScripts 76(`sync-readme-claims`).
+
+**오너 결정(정본 = `ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(6))**: O8 = **a1**(오너 직접) · O3/O5/O7 = 권장안 진행(오너 위임으로 리더 확정). **Wave 13 정찰 초안 7건** 유휴 창 산출(`.artibot/split/<name>/brief-draft.md`): ob10 · ca05 · sh04 · sh05 · recovery-judge-replan-counter · autopilot-test-store-isolation · decision-store-dir-strict-options(부채 2/7).
+
+**전체 게이트**: 배치 4회 CI green(`ci/split-wave12-20260916`). 리포 전체 `npm test` @ `6b472785`(리더, 13:2x~13:3x KST, 210s): **723 파일 중 722 passed / 18,823 passed · 1 failed · 12 skipped**(분모 18,836). 실패 1 = `tests/firewall/stash-ref-isolation.test.js` "drops surplus checkpoints"(102s 소요, `expected 12 to be less than 12`) — Wave 12 는 stash 코드를 건드리지 않았고(`git diff --name-only 8f614184..6b472785` 에 stash/checkpoint 0) **단독 재실행 6/6 pass(30s)** → 전체 실행 부하 의존 플레이크로 분류(refs/stash 는 worktree 간 공유 — 창 8개가 열린 상태에서 측정). 릴리스 차단 아님, 원인 조사는 미확인.
+
 ## [4.63.0] — 2026-09-17
 
 `v4.62.0`(`c2f300e3`) 이후 87 커밋 = **184 files +27,597/−1,253**(`git diff --shortstat v4.62.0^{commit} 9afb908a`, 2026-09-17 측정). `/split` **Wave 10 13/13 + Wave 11 9/9** 착지분 출하. 커밋 유형 분포: merge 22 · fix 21 · feat 16 · docs 15 · test 9 · refactor 2 · config 1 · bench 1.
