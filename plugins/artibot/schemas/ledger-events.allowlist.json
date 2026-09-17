@@ -129,10 +129,15 @@
         "type",
         "confidence"
       ],
+      "fields": {
+        "command": {
+          "type": "string"
+        }
+      },
       "sources": [
         "hook"
       ],
-      "spec": "lane 6 §5-② #2. Replaces decision-events `routing-classified`, whose directory has never been created."
+      "spec": "lane 6 §5-② #2. Replaces decision-events `routing-classified`, whose directory has never been created. SH-29 part B (2026-09-17): `command` is present ONLY for a user-typed slash command recorded by scripts/hooks/runtime-prompt.js, on a row carrying `type: 'slash-command'` and `confidence: 1`; the value is the bare lowercase name detectSlashCommand (lib/mission/mission-id.js) returns, so a namespaced `/artibot:split` is NOT detected and writes no row. Optional, so it stays out of `required` -- a future classifier row has an intent type but no command, and such a row counts as `absent` in the fold. Read by lib/replay/existence-audit.js#CARRIERS.commands."
     },
     "plan.revised": {
       "required": [
@@ -292,6 +297,33 @@
         "hook"
       ],
       "spec": "lane 6 §5-② #10. Wave 11 (2026-09-15): `skill` carries the skill name for tool=Skill; absent when unknown (never null). Optional, so it stays out of `required` -- a tool.used row for any other tool has no skill to name. null is not an alternative: matchesType (lib/runtime/ledger-schema.js:56-66) rejects it for type string, so the writer omits the key instead. Read by lib/replay/existence-audit.js#CARRIERS.skills."
+    },
+    "hook.fired": {
+      "required": [
+        "slot",
+        "hooks"
+      ],
+      "fields": {
+        "slot": {
+          "type": "string"
+        },
+        "hooks": {
+          "type": "array"
+        },
+        "failed": {
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "sources": [
+        "hook"
+      ],
+      "spec": "SH-29 / O8=a1 (owner 2026-09-17): ONE row per dispatcher invocation, with the handler array folded into that row rather than one row per handler. `data.hooks` lists the handler names the dispatcher actually spawned for that payload, in dispatch order and in the dispatch table's raw spelling; `data.failed` is the subset whose spawn status was timeout or error; `count` restates hooks.length so a fold over many rows need not materialize every array; `tool` is present only for the PostToolUse slot. Read by lib/replay/existence-audit.js#CARRIERS.hooks (multi fold). Written by scripts/hooks/_hook-fired-record.js from the 6 dispatchers."
     },
     "retry.scheduled": {
       "required": [

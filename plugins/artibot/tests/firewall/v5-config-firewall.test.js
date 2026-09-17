@@ -64,7 +64,7 @@
  * @module tests/firewall/v5-config-firewall
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -142,7 +142,7 @@ const EXPECTED = Object.freeze({
 const ALLOWED_SUBKEYS = Object.freeze({
   topology: ['default', 'autopilot_fast', 'split', 'reviewTierRef', 'comment'],
   routing: ['observe', 'canary', 'comment'],
-  ledger: ['path', 'maxLineBytes', 'comment'],
+  ledger: ['path', 'maxLineBytes', 'hookFired', 'comment'],
   stateStore: ['backend', 'location', 'comment'],
   missions: ['substantiveSignals', 'idFormat', 'comment'],
   review: ['independent', 'verify', 'comment'],
@@ -232,6 +232,68 @@ describe('v5 신설 최상위 키 6종 — 형태와 값', () => {
 
   it('최상위 키 수가 실측 기준선과 같다 (무단 추가/삭제 탐지)', () => {
     expect(Object.keys(config).length).toBe(EXPECTED_TOP_LEVEL_COUNT);
+  });
+});
+
+/**
+ * 디스패처 슬롯 이름을 **소스에서 유도**한다. 여섯 이름을 여기에 타이핑하면
+ * 디스패처가 하나 늘거나 개명될 때 이 게이트가 조용히 옛 목록을 통과시킨다.
+ *
+ * 유도 기준은 `hooks/dispatch-table.json` 이 **아니다**: 그 파일의 `slots` 는
+ * 2026-09-17 실측 8개(PreCompact·PostCompact 포함)이고, 그 둘에는
+ * `recordHookFired` 를 부르는 디스패처 파일이 없다. O8-i 스위치의 사정권은
+ * 테이블이 선언한 슬롯이 아니라 **실제로 writer 를 호출하는 디스패처**다.
+ *
+ * @returns {string[]} 호출부가 실재하는 디스패처의 EVENT_NAME 들
+ */
+function dispatcherEventNames() {
+  const dir = path.join(PLUGIN_ROOT, 'scripts', 'hooks');
+  const out = [];
+  for (const file of readdirSync(dir).filter((f) => /^_.+-dispatcher\.js$/.test(f))) {
+    const src = readFileSync(path.join(dir, file), 'utf-8');
+    if (!src.includes('recordHookFired')) continue;
+    const m = src.match(/const EVENT_NAME = '([^']+)'/);
+    if (m !== null) out.push(m[1]);
+  }
+  return out;
+}
+
+/**
+ * `ledger.hookFired` — O8-i 스위치(오너 결정 2026-09-17)의 등재값.
+ *
+ * 이 게이트가 못 보는 것(rules §9):
+ *  - **동작.** 목록에서 슬롯을 빼면 실제로 행이 안 써지는지는
+ *    `tests/hooks/_hook-fired-record.test.js` 가 본다. 여기서는 선언만 본다.
+ *  - **기본 ON 규칙.** 키가 없을 때 전건 기록이라는 것은 writer 의 성질이지
+ *    이 config 의 성질이 아니다 — 같은 파일이 소유한다.
+ *  - **발화량.** PostToolUse 가 하루 몇 번 디스패치되는지는 여기서 안 잰다
+ *    (2026-09-15 실측 >= 679/일은 이 표에 없다).
+ */
+describe('ledger.hookFired — O8-i 슬롯 스위치의 등재값', () => {
+  it('hookFired 하위 키는 slots 와 comment 뿐이다 (allowlist)', () => {
+    expect(Object.keys(config.ledger.hookFired).sort()).toEqual(['comment', 'slots']);
+  });
+
+  it('유도기가 디스패처 6개를 실제로 찾는다 (0개를 통과로 읽지 않기 위한 분모)', () => {
+    // 분모를 단언하지 않으면, 유도기가 아무것도 못 찾아도 빈 집합끼리 같아서 통과한다.
+    expect(dispatcherEventNames()).toHaveLength(6);
+  });
+
+  it('slots 는 writer 를 호출하는 디스패처 EVENT_NAME 전건과 같은 집합이다', () => {
+    const slots = config.ledger.hookFired.slots;
+    expect(Array.isArray(slots)).toBe(true);
+    expect([...slots].sort()).toEqual([...dispatcherEventNames()].sort());
+  });
+
+  it('slots 의 모든 이름이 dispatch-table 의 슬롯으로 실재한다 (오타 탐지)', () => {
+    const table = JSON.parse(
+      readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'dispatch-table.json'), 'utf-8'),
+    );
+    const declared = Object.keys(table.slots);
+    expect(config.ledger.hookFired.slots.filter((s) => !declared.includes(s))).toEqual([]);
+    // 역방향은 단언하지 않는다 — 테이블 쪽이 더 넓다(PreCompact·PostCompact 는
+    // 호출부가 없어 스위치 밖이다). 넓다는 사실 자체를 여기서 고정한다.
+    expect(declared.length).toBeGreaterThan(config.ledger.hookFired.slots.length);
   });
 });
 

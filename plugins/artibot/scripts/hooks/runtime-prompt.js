@@ -43,6 +43,14 @@ import { createErrorHandler, extractUserPromptText } from '../../lib/core/hook-u
 // with no imports of their own (`mission-id.js` → `contract.js`) and no
 // top-level side effects, so there is nothing for a sandboxed root to change.
 import { detectSlashCommand } from '../../lib/mission/mission-id.js';
+// SH-29 part B — the COMMAND carrier's three dependencies. Static for the same
+// reason `detectSlashCommand` is: the ledger's location is resolved from the
+// PAYLOAD's `cwd`, never from the plugin root, so a sandboxed root has nothing
+// to change here. `resolveMissionId` is imported rather than re-derived so this
+// writer and `_hook-fired-record.js` cannot drift onto two fallback missions.
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { resolveMissionId } from './_hook-fired-record.js';
 import { isMainEntry } from './_main-entry.js';
 
 /**
@@ -662,6 +670,52 @@ async function recordObserveOnlyDecisions({
 }
 
 /**
+ * SH-29 part B — the COMMAND carrier. ONE `intent.detected` row per USER-TYPED
+ * slash command, which is the field `existence-audit.js#CARRIERS.commands`
+ * reads. A Skill-TOOL invocation is deliberately NOT recorded here:
+ * `tool.used.skill` already carries it, and a second row would double-count one
+ * activation. Fail-closed on a missing session, mission or `cwd` — falling back
+ * to `process.cwd()` would aim the write at another project's ledger. MUTE and
+ * never throwing: this runs in-process inside `_userprompt-dispatcher.js`,
+ * which has its own stdout document to merge.
+ *
+ * @param {{hookData: object, slashCommand: string|null}} args `slashCommand` is
+ *   the bare lowercase name `detectSlashCommand` returned, or null.
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+function recordSlashCommandInvoked({ hookData, slashCommand } = {}) {
+  const str = (v) => (typeof v === 'string' && v.trim() !== '' ? v : null);
+  const command = str(slashCommand);
+  if (command === null) return { ok: false, reason: 'no-slash-command' };
+  try {
+    const sessionId = str(hookData?.session_id);
+    if (sessionId === null) return { ok: false, reason: 'no-session' };
+    const missionId = resolveMissionId(hookData, sessionId);
+    if (missionId === null) return { ok: false, reason: 'no-mission' };
+    const cwd = str(hookData?.cwd);
+    if (cwd === null) return { ok: false, reason: 'no-cwd' };
+    const envelope = {
+      event: 'intent.detected',
+      session_id: sessionId,
+      mission_id: missionId,
+      source: 'hook',
+      data: { type: 'slash-command', confidence: 1, command },
+    };
+    // OMITTED, never empty: `validateOptionalEnvelope` rejects a blank action_id.
+    const actionId = str(hookData?.prompt_id);
+    if (actionId !== null) envelope.action_id = actionId;
+    const result = appendLedgerEvent(resolveProjectRoot(cwd), envelope);
+    if (result?.ok === true) return { ok: true };
+    return { ok: false, reason: String(result?.reason ?? 'append-failed') };
+  } catch (err) {
+    try {
+      process.stderr.write(`[artibot:command-record] ${err?.message || 'record-failed'}\n`);
+    } catch { /* ignore */ }
+    return { ok: false, reason: err?.message || 'record-failed' };
+  }
+}
+
+/**
  * P3-8: record user signal for skill-level auto-detection + G10 macro
  * observation. Both are non-critical and observe-only.
  *
@@ -968,10 +1022,14 @@ export async function handleUserPromptSubmit(hookData) {
   // reach it, so byte-identical stdout is structural rather than a promise.
   // NOT `effortMeta?.command`: that is null whenever `resolveScoredEffort`
   // returns null, even for a slash prompt (`resolveEffortMeta`).
+  const slashCommand = detectSlashCommand(prompt);
   await recordObserveOnlyDecisions({
-    prompt, prepared, runtimeConfig, hookData, pluginRoot,
-    slashCommand: detectSlashCommand(prompt),
+    prompt, prepared, runtimeConfig, hookData, pluginRoot, slashCommand,
   });
+
+  // SH-29 part B — the COMMAND carrier, on the same side of `output` and for
+  // the same reason. Writes to the central LEDGER, not the decisions store.
+  recordSlashCommandInvoked({ hookData, slashCommand });
 
   return output;
 }

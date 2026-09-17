@@ -8,6 +8,8 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { ledgerFilePath } from '../../lib/runtime/ledger.js';
+
 /**
  * UserPromptSubmit dispatcher integration tests.
  *
@@ -180,7 +182,37 @@ afterAll(() => {
   for (const root of Object.values(sandboxOffRoots)) {
     rmSync(root, { recursive: true, force: true });
   }
+  for (const dir of extraRepos) rmSync(dir, { recursive: true, force: true });
 });
+
+/**
+ * Throwaway repositories used ONLY as a payload `cwd` — never as a spawn cwd.
+ *
+ * `hook.fired` (SH-29) resolves its project root from `payload.cwd` and appends
+ * there. The spawn cwd stays `sandboxCwd`, whose empty `.git` MARKER is not a
+ * repository: `git-autopilot-save` must keep taking its `getRepoRoot() === null`
+ * early return, which is the only lever this suite has over it. A real repo
+ * here would hand it one. The two roles therefore cannot share a directory.
+ * One repo per case, so no case has to subtract another's rows.
+ *
+ * @type {string[]}
+ */
+const extraRepos = [];
+
+/** A throwaway git repository, used only as a payload `cwd`. */
+function makeLedgerRepo(tag) {
+  const dir = mkdtempSync(path.join(tmpdir(), `artibot-userprompt-${tag}-`));
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+  extraRepos.push(dir);
+  return dir;
+}
+
+/** Parsed ledger lines for a root, `[]` when the file was never created. */
+function readLedger(root) {
+  const file = ledgerFilePath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
 
 /**
  * The REAL decision store this suite must never write to.
@@ -1106,5 +1138,132 @@ describe('dispatcher writes a single newline-free JSON document to stdout', () =
     if (trimmed.length === 0) return; // permissible: hook chose to pass through
     // Should parse as a single JSON value.
     expect(() => JSON.parse(trimmed)).not.toThrow();
+  });
+});
+
+/**
+ * ROUND TRIP for the `hook.fired` carrier on UserPromptSubmit (SH-29, owner
+ * O8=a1).
+ *
+ * THIS SLOT IS THE ONE WHERE "ZERO HOOKS RAN" IS A REAL STATE. The five other
+ * dispatchers reach their carrier only after spawning something; here the
+ * sender guard returns before ANY handler runs, and O8-iii says a dispatch that
+ * fired nothing writes nothing. So the absence cases below are not defensive
+ * padding — they are the decision.
+ *
+ * ORDER: `data.hooks` is the order the handlers RUN, which is not the order
+ * `hooks/dispatch-table.json` prints. That file is informational for this slot
+ * (its own `note`), and `main()` awaits `runtime-prompt` before
+ * `auto-team-trigger` on purpose so its directives lead the merged context.
+ * Recording the table's order would put a sequence in the ledger that never
+ * happened.
+ */
+describe('hook.fired carrier (UserPromptSubmit round trip)', () => {
+  /** The seven handlers, in the order `main()` actually runs them. */
+  const EXPECTED_HOOKS = [
+    'user-prompt-handler',
+    'runtime-prompt',
+    'auto-team-trigger',
+    'autopilot-nlu-trigger',
+    'auto-command-suggest',
+    'ambiguity-guard',
+    'git-autopilot-save',
+  ];
+
+  it('writes exactly one row naming all 7 handlers, correlated by prompt_id', () => {
+    const repo = makeLedgerRepo('fired');
+    const { status } = runDispatcherRaw({
+      hook_event_name: 'UserPromptSubmit',
+      source: 'user',
+      prompt: '/split status',
+      session_id: 'sess-hook-fired-userpromptsubmit-0001',
+      prompt_id: 'prompt_hook_fired_ups_1',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('UserPromptSubmit');
+    expect(fired[0].data.hooks).toEqual(EXPECTED_HOOKS);
+    expect(fired[0].data.count).toBe(7);
+    // No tool on this slot: the key is OMITTED, never null (a null would be a
+    // `type-violation:tool` rejection against the allowlist's declared string).
+    expect('tool' in fired[0].data).toBe(false);
+    // `failed` is a SUBSET of real failures here and the source says so: only a
+    // THROW is observable, because `safeRun` swallows everything else. A clean
+    // run is empty, and anything present must still name a handler that ran.
+    expect(fired[0].data.failed.every((n) => EXPECTED_HOOKS.includes(n))).toBe(true);
+    expect(fired[0].source).toBe('hook');
+    expect(fired[0].session_id).toBe('sess-hook-fired-userpromptsubmit-0001');
+    // UserPromptSubmit carries no `tool_use_id`, so `prompt_id` is the
+    // correlation key the envelope falls back to.
+    expect(fired[0].action_id).toBe('prompt_hook_fired_ups_1');
+    // The carrier is a library module, not an 8th handler.
+    expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
+
+    // SH-29 part B: the same real dispatch also carries the COMMAND the user
+    // typed, written by runtime-prompt.js in-process (`intent.detected`,
+    // `type:'slash-command'`), correlated by the same prompt_id.
+    const typed = lines.filter((l) => l.event === 'intent.detected');
+    expect(typed).toHaveLength(1);
+    expect(typed[0].data).toEqual({ type: 'slash-command', confidence: 1, command: 'split' });
+    expect(typed[0].action_id).toBe('prompt_hook_fired_ups_1');
+
+    // NOT FOLDED. Over `ledger.maxLineBytes` the writer keeps only the
+    // allowlist's required keys and drops `failed`/`count`/`tool` while still
+    // ACCEPTING the line — a silent narrowing the assertions above would not
+    // notice on their own, since they never read the dropped keys as absent.
+    expect('failed' in fired[0].data).toBe(true);
+    expect('count' in fired[0].data).toBe(true);
+  });
+
+  /**
+   * O8-iii: the sender guard returns before any handler runs, so there is no
+   * handler to attribute and NO row is written. A machine-injected turn must
+   * cost one stderr line and nothing else — a `hook.fired` row here would make
+   * the Existence Audit count firings that never happened.
+   */
+  it('writes no row for a non-user prompt (sender guard, 0 hooks run)', () => {
+    const repo = makeLedgerRepo('fired-nonuser');
+    const { status, stderr } = runDispatcherRaw({
+      hook_event_name: 'UserPromptSubmit',
+      source: 'system',
+      prompt: 'a machine-injected turn',
+      session_id: 'sess-hook-fired-userpromptsubmit-0002',
+      prompt_id: 'prompt_hook_fired_ups_2',
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+    expect(stderr).toContain('0 hooks run');
+    expect(readLedger(repo)).toEqual([]);
+  });
+
+  /** An empty payload has no session and no cwd, so nothing is recordable. */
+  it('writes no row for an empty payload', () => {
+    const repo = makeLedgerRepo('fired-empty');
+    const { status } = runDispatcherRaw({});
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
+  });
+
+  /**
+   * The env rollback is the other zero-hook path, and it is the one that would
+   * be worst to record: a disabled dispatcher that still wrote a row naming
+   * seven handlers would report firings for hooks that were never imported.
+   */
+  it('writes no row when the dispatcher is disabled by env', () => {
+    const repo = makeLedgerRepo('fired-disabled');
+    const { status } = runDispatcherRaw({
+      hook_event_name: 'UserPromptSubmit',
+      source: 'user',
+      prompt: '/split status',
+      session_id: 'sess-hook-fired-userpromptsubmit-0003',
+      cwd: repo,
+    }, { ARTIBOT_DISABLE_DISPATCHER: '1' });
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
   });
 });

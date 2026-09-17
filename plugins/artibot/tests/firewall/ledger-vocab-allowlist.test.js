@@ -8,9 +8,10 @@
  *     source of truth (Hardening §46 "canonical 1개"). The moment the writer
  *     grows its own list of event names, the two drift and the file stops being
  *     the answer. This suite reads the writer's SOURCE and requires that the
- *     39 names appear nowhere in it (39 registered events measured 2026-09-15;
- *     this line read 36 when it was written and the count is not asserted
- *     anywhere — the gate iterates whatever the allowlist holds).
+ *     40 names appear nowhere in it (40 registered events measured 2026-09-17
+ *     via `Object.keys(allowlist.events).length`; 39 on 2026-09-15, and this
+ *     line read 36 when it was written — the count is not asserted anywhere,
+ *     the gate iterates whatever the allowlist holds).
  *
  *  2. A DENYLIST BY ACCIDENT. A negative list is fail-open for every name
  *     invented after it was written (verification-discipline §8). The direction
@@ -23,8 +24,9 @@
  * that passes while measuring nothing.
  *
  * ── WHAT THIS GATE CANNOT SEE (rules §9) ────────────────────────────────────
- *   - WHETHER THE 39 NAMES ARE THE RIGHT 39 (39 measured 2026-09-15; 36 when
- *     this line was written). Membership is a design decision (lane 6 §5-②).
+ *   - WHETHER THE 40 NAMES ARE THE RIGHT 40 (40 measured 2026-09-17; 39 on
+ *     2026-09-15; 36 when this line was written, and the newest is `hook.fired`
+ *     — SH-29 / owner O8=a1). Membership is a design decision (lane 6 §5-②).
  *     This checks internal consistency, never adequacy.
  *   - WHETHER ANY EVENT IS EVER EMITTED. Phase 0 has zero callers, so a
  *     registered event with no writer looks identical here to one in daily use.

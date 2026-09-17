@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { ledgerFilePath } from '../../lib/runtime/ledger.js';
 
 /**
  * Stop dispatcher integration tests.
@@ -51,6 +53,35 @@ const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_stop-dispatcher
 let sandboxHome;
 let sandboxCwd;
 
+/**
+ * Throwaway repositories used ONLY as a payload `cwd` — never as a spawn cwd.
+ *
+ * `hook.fired` (SH-29) resolves its project root from `payload.cwd` and appends
+ * there; so does `session-ledger.mjs`, already on this slot. Pointing the SPAWN
+ * at a repository instead would put one above every grand-child's cwd, which is
+ * the isolation `tests/firewall/dispatcher-cwd-sandbox-required.test.js` exists
+ * to prevent, and on this slot it would be reachable by `git-autopilot-close`.
+ * One repo per case, so no case has to subtract another's rows.
+ *
+ * @type {string[]}
+ */
+const extraRepos = [];
+
+/** A throwaway git repository, used only as a payload `cwd`. */
+function makeLedgerRepo(tag) {
+  const dir = mkdtempSync(path.join(tmpdir(), `artibot-stop-${tag}-`));
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+  extraRepos.push(dir);
+  return dir;
+}
+
+/** Parsed ledger lines for a root, `[]` when the file was never created. */
+function readLedger(root) {
+  const file = ledgerFilePath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
 beforeAll(() => {
   sandboxHome = mkdtempSync(path.join(tmpdir(), 'artibot-stop-home-'));
   sandboxCwd = mkdtempSync(path.join(tmpdir(), 'artibot-stop-cwd-'));
@@ -59,6 +90,7 @@ beforeAll(() => {
 afterAll(() => {
   if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
   if (sandboxCwd) rmSync(sandboxCwd, { recursive: true, force: true });
+  for (const dir of extraRepos) rmSync(dir, { recursive: true, force: true });
 });
 
 function runDispatcher(payload, env = {}) {
@@ -182,5 +214,62 @@ describe('_stop-dispatcher (integration)', () => {
     // later added to this slot that does, it lands here — failing loudly in a
     // temp dir instead of silently appending to the developer's real store.
     expect(existsSync(path.join(sandboxHome, '.claude'))).toBe(false);
+  });
+
+  /**
+   * ROUND TRIP for the `hook.fired` carrier (SH-29, owner O8=a1).
+   *
+   * Deliberately LAST in the file: the canary above asserts this suite has
+   * written no learning store, and these cases hand the hooks a session id and
+   * a project root for the first time. Ordering them after it keeps that
+   * assertion measuring what it was written to measure.
+   *
+   * `data.failed` is asserted as a SUBSET of `data.hooks` rather than empty —
+   * `stop-review-gate` (15s) and `git-autopilot-close` (15s) may legitimately
+   * time out on a loaded machine, and a timeout is a status, not a defect.
+   */
+  it('writes exactly one hook.fired row naming all 6 handlers in table order', () => {
+    const repo = makeLedgerRepo('fired');
+    const { status } = runDispatcher({
+      hook_event_name: 'Stop',
+      session_id: 'sess-hook-fired-stop-0001',
+      stop_hook_active: false,
+      cwd: repo,
+    });
+    expect(status).toBe(0);
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.slot).toBe('Stop');
+    expect(fired[0].data.hooks).toEqual([
+      'stop-review-gate', 'dev-verify-gate', 'git-autopilot-close',
+      'stop-recap', 'session-notes', 'session-ledger',
+    ]);
+    expect(fired[0].data.count).toBe(6);
+    // No tool on this slot: the key is OMITTED, never null (a null would be a
+    // `type-violation:tool` rejection against the allowlist's declared string).
+    expect('tool' in fired[0].data).toBe(false);
+    expect(fired[0].data.failed.every((n) => fired[0].data.hooks.includes(n))).toBe(true);
+    expect(fired[0].source).toBe('hook');
+    expect(fired[0].session_id).toBe('sess-hook-fired-stop-0001');
+    expect('action_id' in fired[0]).toBe(false);
+    expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
+  });
+
+  /**
+   * FAIL-CLOSED, and silent. No `cwd` means no project root to aim at, so the
+   * carrier returns `{ok:false, reason:'no-cwd'}` — no row, and no
+   * `ledger.rejected` either.
+   */
+  it('writes no hook.fired row when the payload names no cwd', () => {
+    const repo = makeLedgerRepo('fired-nocwd');
+    const { status } = runDispatcher({
+      hook_event_name: 'Stop',
+      session_id: 'sess-hook-fired-stop-0002',
+    });
+    expect(status).toBe(0);
+    expect(readLedger(repo)).toEqual([]);
   });
 });

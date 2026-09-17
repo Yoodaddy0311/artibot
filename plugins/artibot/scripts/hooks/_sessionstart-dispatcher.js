@@ -28,11 +28,17 @@
  * Process exits with code 0 on every failure path so a hook crash never
  * blocks the session.
  *
+ * `hook.fired` carrier appended after stdout, SH-29 O8=a1 — one ledger row per
+ * dispatch naming every handler above, written by the LIBRARY module
+ * `_hook-fired-record.js` (not a 10th table entry, so it costs no spawn and
+ * never names itself).
+ *
  * @module scripts/hooks/_sessionstart-dispatcher
  */
 
 import { createFatalHandler, isMainEntry, mergeResults, parseHookStdout, readPayload, spawnHook } from './_dispatcher-utils.js';
 import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
+import { recordHookFired } from './_hook-fired-record.js';
 
 const HOOK_NAME = '_sessionstart-dispatcher';
 const EVENT_NAME = 'SessionStart';
@@ -78,6 +84,14 @@ async function main() {
   if (merged) {
     try { process.stdout.write(JSON.stringify(merged)); } catch { /* ignore */ }
   }
+
+  // SH-29 hook carrier (O8=a1): one hook.fired row per dispatch, after stdout.
+  try {
+    recordHookFired({
+      slot: EVENT_NAME, payload,
+      results: settled.map((r, i) => (r.status === 'fulfilled' ? r.value : { name: HOOKS[i].name, status: 'error' })),
+    });
+  } catch { /* never let the carrier touch the slot */ }
 }
 
 if (isMainEntry(import.meta.url)) {

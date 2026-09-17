@@ -41,6 +41,12 @@
  * Process exits with code 0 on any failure path so a hook crash never blocks
  * the user's prompt from reaching Claude.
  *
+ * `hook.fired` carrier appended after stdout, SH-29 O8=a1 — one ledger row per
+ * dispatch naming the seven handlers above, written by the LIBRARY module
+ * `_hook-fired-record.js` (not an 8th handler, so it costs nothing and never
+ * names itself). A dispatch that ran ZERO hooks — the sender guard's early
+ * return, and the env rollback — writes no row at all.
+ *
  * @module scripts/hooks/_userprompt-dispatcher
  */
 
@@ -63,6 +69,7 @@ import { isMainEntry } from './_main-entry.js';
 // once. The shared reader also wraps the `for await` in try/catch, which this
 // copy did not; behavior on a stdin error stays fail-open ({} then exit 0).
 import { createFatalHandler, isUnsafeMergeKey, readPayload } from './_dispatcher-utils.js';
+import { recordHookFired } from './_hook-fired-record.js';
 
 const HOOK_NAME = '_userprompt-dispatcher';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +78,37 @@ const GIT_AUTOPILOT_SAVE = path.join(HERE, 'git-autopilot-save.js');
 // git invocations (stash + commit). Failure here is observable via stderr
 // only — the user's prompt still proceeds.
 const GIT_AUTOPILOT_TIMEOUT_MS = 8000;
+
+/** The slot this dispatcher records in `hook.fired`. */
+const EVENT_NAME = 'UserPromptSubmit';
+
+/**
+ * The seven handler names `hook.fired` records for this slot, IN THE ORDER
+ * THEY RUN.
+ *
+ * NOT the order `hooks/dispatch-table.json` lists them. That file is
+ * `"informational only"` for this slot (its own `note` says so — the handlers
+ * are ESM imports, not spawns, and no loader consumes them), and it prints
+ * `auto-team-trigger` before `runtime-prompt` while `main()` awaits
+ * `runtime-prompt` FIRST — deliberately, because its directives must be the
+ * first line the model reads. Recording the table's order would have put a
+ * sequence in the ledger that never happened. The five other dispatchers have
+ * no such split: their `HOOKS` array IS the spawn order.
+ *
+ * DRIFT GUARD: `tests/dispatcher/hook-fired-wiring.test.js` reads this file and
+ * fails unless every name here appears as a `safeRun(..., '<name>')` literal
+ * (or, for `git-autopilot-save`, as the spawned script's basename) and the
+ * counts match. A name added to `main()` but not here is therefore red.
+ */
+const HOOK_FIRED_HANDLERS = Object.freeze([
+  'user-prompt-handler',
+  'runtime-prompt',
+  'auto-team-trigger',
+  'autopilot-nlu-trigger',
+  'auto-command-suggest',
+  'ambiguity-guard',
+  'git-autopilot-save',
+]);
 
 /**
  * ALLOWLIST — the top-level keys the host accepts on a hook's stdout.
@@ -151,16 +189,30 @@ function isLegacyStdoutEnabled() {
 /**
  * Run a hook's named export with try/catch. Logs the failure to stderr but
  * never throws — a hook failure must not block the prompt.
+ *
+ * THE RETURN VALUE CANNOT TELL YOU WHETHER IT FAILED. `null` is what a throw
+ * produces AND what a handler that legitimately contributed nothing produces —
+ * five of the six in-process handlers return null on most prompts. That
+ * ambiguity is load-bearing for the merge (both cases contribute nothing) but
+ * useless to the `hook.fired` carrier, which has to name the handlers that
+ * FAILED. `onError` is the seam: an OPTIONAL callback, invoked only on the
+ * throw path, so the three-argument contract every existing caller and
+ * `tests/hooks/userprompt-dispatcher-resilience.test.js` rely on is unchanged.
+ *
  * @param {Function} fn
  * @param {object} payload
  * @param {string} name
+ * @param {(name: string) => void} [onError] called with `name` when `fn` threw
  * @returns {Promise<object|null>}
  */
-async function safeRun(fn, payload, name) {
+async function safeRun(fn, payload, name, onError) {
   try {
     return await fn(payload);
   } catch (err) {
     process.stderr.write(`[artibot:${HOOK_NAME}] ${name} failed: ${err.message}\n`);
+    if (typeof onError === 'function') {
+      try { onError(name); } catch { /* a bookkeeping fault must not block the prompt */ }
+    }
     return null;
   }
 }
@@ -526,7 +578,15 @@ async function main() {
   // — the parallel contributors still run unaffected. If rewriter ever needs
   // to deliver partial results, change safeRun to capture intermediate state
   // and merge here before the parallel fan-out.
-  const rewriterResult = await safeRun(userPromptHandler, payload, 'user-prompt-handler');
+  // SH-29: every name `safeRun` reports a THROW for, for `hook.fired.failed`.
+  // A handler that merely returned null is NOT in here — see the limitation
+  // note at the carrier call.
+  const threw = new Set();
+  const noteThrow = (name) => threw.add(name);
+
+  const rewriterResult = await safeRun(
+    userPromptHandler, payload, 'user-prompt-handler', noteThrow,
+  );
   // Use typeof string check so empty string "" (a legitimate rewriter output)
   // is preserved instead of being treated as missing by a truthy check.
   if (typeof rewriterResult?.user_prompt === 'string') {
@@ -542,11 +602,11 @@ async function main() {
   // the model reads, ahead of the advisory `[auto-team-suggested]` blocks.
   const [parallelResults] = await Promise.all([
     Promise.allSettled([
-      safeRun(runtimePrompt, payload, 'runtime-prompt'),
-      safeRun(autoTeamTrigger, payload, 'auto-team-trigger'),
-      safeRun(autopilotNlu, payload, 'autopilot-nlu-trigger'),
-      safeRun(autoCommandSuggest, payload, 'auto-command-suggest'),
-      safeRun(ambiguityGuard, payload, 'ambiguity-guard'),
+      safeRun(runtimePrompt, payload, 'runtime-prompt', noteThrow),
+      safeRun(autoTeamTrigger, payload, 'auto-team-trigger', noteThrow),
+      safeRun(autopilotNlu, payload, 'autopilot-nlu-trigger', noteThrow),
+      safeRun(autoCommandSuggest, payload, 'auto-command-suggest', noteThrow),
+      safeRun(ambiguityGuard, payload, 'ambiguity-guard', noteThrow),
     ]),
     runGitAutopilotSave(payload),
   ]);
@@ -557,6 +617,31 @@ async function main() {
   if (merged) {
     try { process.stdout.write(JSON.stringify(merged)); } catch { /* ignore */ }
   }
+
+  // SH-29 hook carrier (O8=a1): one hook.fired row per dispatch, after stdout.
+  //
+  // WHAT `failed` DOES NOT SEE HERE (rules §9 — write it next to the gate).
+  // Six of the seven handlers run IN-PROCESS, and `safeRun` swallows their
+  // throws. `noteThrow` recovers exactly that case, so a handler that THREW is
+  // named in `failed`. Everything else is invisible:
+  //   - A handler that returned null, undefined or a malformed result is
+  //     recorded as `ok`. Nothing distinguishes "nothing to contribute" — the
+  //     normal answer for five of the six — from "gave up quietly".
+  //   - `git-autopilot-save` is ALWAYS `ok`. `runGitAutopilotSave` resolves the
+  //     same way on a clean exit, a non-zero exit, a spawn failure and the 8s
+  //     timeout; all four are stderr-only today, so the row would be lying if
+  //     it claimed to know which one happened.
+  // In short, `failed` is a subset of real failures for this slot, never a
+  // superset. `[artibot:_userprompt-dispatcher] <name> failed:` on stderr
+  // remains the only complete record.
+  try {
+    recordHookFired({
+      slot: EVENT_NAME, payload,
+      results: HOOK_FIRED_HANDLERS.map((name) => ({
+        name, status: threw.has(name) ? 'error' : 'ok',
+      })),
+    });
+  } catch { /* never let the carrier touch the slot */ }
 }
 
 if (isMainEntry(import.meta.url)) {

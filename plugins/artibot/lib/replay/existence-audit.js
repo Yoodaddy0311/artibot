@@ -7,9 +7,32 @@
  * candidate only, removed by a human, never automatically. That section closes
  * by naming its own hole: "발화 카운트의 분모는 현재 미측정" (CLAUDE.md:90).
  *
- * This module is that denominator. Since Wave 11 it answers for ONE of the four
- * kinds — `skills`, through `tool.used.skill` — and still answers `unmeasured`
- * for the other three.
+ * This module is that denominator. Since Wave 12 it answers for THREE of the
+ * four kinds — `skills`, through `tool.used.skill`, `hooks`, through
+ * `hook.fired.hooks`, and `commands`, through `intent.detected.command` — and
+ * still answers `unmeasured` for `modules` alone.
+ *
+ * WHAT CHANGED (2026-09-17, Wave 12 / SH-29 part B)
+ * ---------------------------------------------------------------------------
+ * A third writer, `scripts/hooks/runtime-prompt.js#recordSlashCommandInvoked`,
+ * records ONE `intent.detected` row per USER-TYPED slash command, naming it in
+ * `data.command` beside `type: 'slash-command'` and `confidence: 1`. So
+ * `CARRIERS.commands` is no longer null. It is SINGLE-valued, not multi: one
+ * prompt types at most one command. The rows a future intent CLASSIFIER writes
+ * under this same event will carry no `command` key and land in the fold's
+ * `absent` bucket, so that "a command fired" and "an intent was classified and
+ * named no command" stay two different readings.
+ *
+ * WHAT CHANGED (2026-09-17, Wave 12 / SH-29 part A)
+ * ---------------------------------------------------------------------------
+ * A second writer, `scripts/hooks/_hook-fired-record.js`, records ONE
+ * `hook.fired` row per dispatcher invocation, naming in `data.hooks` the
+ * handler names that slot dispatched, in dispatch order. That makes `hooks` the
+ * first MULTI-VALUED carrier: one row names several artifacts at once, so the
+ * fold counts per element rather than per row, and the denominator stays the
+ * number of DISPATCH ROWS, not the number of names. `CARRIERS.hooks` below is
+ * therefore no longer null. The event is registered in the allowlist beside the
+ * other 39, so the survey below re-reads as 40 registered events (2026-09-17).
  *
  * WHAT CHANGED (2026-09-15, Wave 11 / SH-29)
  * ---------------------------------------------------------------------------
@@ -29,14 +52,16 @@
  * most of them have no skill to name, so requiring it would reject the majority
  * of the event's own rows.
  *
- * `hooks`, `commands` and `modules` stay null, for the reasons unchanged from
- * the 2026-09-02 survey below. Those reasons were RE-MEASURED 2026-09-15 across
- * all 39 registered events (39 = `Object.keys(allowlist.events).length`; it was
- * 36 at the 2026-09-02 pass, and the events added since were read too): no
- * `data` field names a hook, a command, or a `lib/` module. The closest
- * candidates are still category labels one level off — `review.requested
- * .reviewer` and `review.claim_audit.subject_agent_type` name an AGENT, and
- * `memory.promoted.path` names a memory file, not a module.
+ * `modules` stays null, for the reasons unchanged from the 2026-09-02 survey
+ * below. Those reasons were RE-MEASURED 2026-09-15 across all 39 registered
+ * events then present (39 = `Object.keys(allowlist.events).length`; it was 36
+ * at the 2026-09-02 pass and 40 once Wave 12 added `hook.fired`, and the events
+ * added at each step were read too): no `data` field names a `lib/` module. The
+ * closest candidates are still category labels one level off —
+ * `review.requested.reviewer` and `review.claim_audit.subject_agent_type` name
+ * an AGENT, and `memory.promoted.path` names a memory file, not a module.
+ * `hooks` and `commands` were in that list until Wave 12; both left by the same
+ * route `skills` did, a new writer, not a rereading of an existing field.
  *
  * WHAT WAS MEASURED (2026-09-02, `schemas/ledger-events.allowlist.json`, all 36
  * events registered at that time, read end to end) — HISTORICAL, KEPT
@@ -58,10 +83,16 @@
  *   - The envelope `source` enum (ledger-envelope.schema.json:45-58) has the
  *     value `hook`, and six events list `sources: ["hook"]`. That is a CATEGORY
  *     of emitter, one of eight, not a hook name. Counting it yields "hooks
- *     fired N times", which is not the per-hook number the rule asks for.
+ *     fired N times", which is not the per-hook number the rule asks for. This
+ *     is the near miss Wave 12 closed, again by adding a field rather than
+ *     rereading one: `hook.fired.hooks` names the handlers, and `source` still
+ *     only says the emitter was a hook.
  *   - `intent.detected.type` (allowlist:104-113) carries an intent type, not a
  *     command name. `phase.started.segment` carries a phase segment. Neither is
- *     an artifact identity.
+ *     an artifact identity. This is the near miss Wave 12 part B closed, for
+ *     the third time by adding a field rather than rereading one: the sibling
+ *     `intent.detected.command` names the command, and `type` still only says
+ *     which intent vocabulary term applied.
  *   - `worker.claimed.agent_type` names an agent type, not a hook/command/skill.
  *
  * So `CARRIERS` below was all-null on 2026-09-02, and every entry this module
@@ -69,8 +100,8 @@
  * CLAUDE.md cannot be evaluated until a writer records an artifact name, and
  * saying so with a null is the whole point. A `fired: 0` in that state cannot
  * be told apart from a measured silence, and would let something be deleted for
- * a silence nobody was ever listening for. Three kinds are still in exactly
- * that state; `skills` left it on 2026-09-15 and nothing else did.
+ * a silence nobody was ever listening for. One kind is still in exactly that
+ * state; `skills` left it on 2026-09-15, `hooks` and `commands` on 2026-09-17.
  *
  * WHY THE EXEMPT LIST IS A CONSTANT AND NOT A PARSE
  * ---------------------------------------------------------------------------
@@ -124,6 +155,32 @@
  *     allowlist. A writer smuggling a hook name into `data` under a key the
  *     allowlist does not register is invisible here — and would be unreadable
  *     by anything else too, which is the actual defect in that case.
+ *   - THE HOOKS CARRIER SEES ONLY THE SIX DISPATCHER SLOTS. `hook.fired` is
+ *     written by the dispatchers, so it covers the 44 handler entries of
+ *     `hooks/dispatch-table.json` (42 distinct names — `memory-tracker` and
+ *     `session-ledger` each sit in two slots; measured 2026-09-17). The 24
+ *     hooks registered DIRECTLY in `hooks/hooks.json`, outside any dispatcher,
+ *     emit no row and are invisible to this fold: PreToolUse 9,
+ *     PostToolUseFailure 3, SubagentStart 2, TeammateIdle 2, TaskCompleted 2,
+ *     Notification 2, PermissionRequest 1, InstructionsLoaded 1, PreCompact 1,
+ *     PostCompact 1 (measured 2026-09-15 from hooks.json, re-measured
+ *     2026-09-17). An inventory listing those 24 gets `fired: 0, measured:
+ *     true` — a FALSE ZERO, the exact shape that reads as removal evidence.
+ *     The row also says nothing about how long a handler ran or what it did.
+ *   - THE COMMANDS CARRIER SEES ONLY WHAT THE USER TYPED, AND ONLY BARE NAMES.
+ *     `intent.detected.command` is written from `detectSlashCommand`
+ *     (`lib/mission/mission-id.js:139-144`), which matches a bare `/name` at
+ *     the start of the prompt and returns it LOWERCASED. Three consequences,
+ *     each a false `fired: 0` waiting for an unwary reader: a NAMESPACED slash
+ *     (`/artibot:split`) is not detected at all and writes no row (known gap,
+ *     pinned at `tests/hooks/runtime-prompt-activation-wiring.test.js:283`); a
+ *     command reached any way OTHER than the user typing it — a hint, a
+ *     command invoked by another command, a subagent — is invisible; and the
+ *     inventory must be spelled as the bare `commands/*.md` stem, because that
+ *     is the only spelling the rows can contain. Normalising the inventory to
+ *     that stem is the CALLER's job (leader decision sh29-3); this module
+ *     matches names literally and cannot tell a renamed command from a silent
+ *     one. The row also says nothing about whether the command then succeeded.
  *   - A REGISTERED FIELD IS NOT A FIRING WRITER. `CARRIERS.skills` says the
  *     field exists and is readable, not that the hook is installed, reached, or
  *     succeeding. If `scripts/hooks/tool-used-record.js` stops running, this
@@ -182,10 +239,16 @@ export const EXEMPT_CONTRACTS = Object.freeze([
  * starts producing numbers with no other edit. `skills` is the worked example:
  * Wave 11 added the writer and the allowlist field, and this one line is the
  * entire reader-side change.
+ *
+ * `multi: true` marks a field whose value is an ARRAY of names rather than one
+ * name. `hooks` is the only such carrier (2026-09-17): one `hook.fired` row is
+ * one dispatch and names every handler that dispatch fanned out to. The flag is
+ * on the carrier and not inferred from the data on purpose — inferring it would
+ * let a single malformed row silently switch counting modes.
  */
 export const CARRIERS = Object.freeze({
-  hooks: null,
-  commands: null,
+  hooks: Object.freeze({ event: 'hook.fired', field: 'hooks', multi: true }),
+  commands: Object.freeze({ event: 'intent.detected', field: 'command' }),
   skills: Object.freeze({ event: 'tool.used', field: 'skill' }),
   modules: null,
 });
@@ -197,11 +260,31 @@ export const CARRIERS = Object.freeze({
  */
 export const CARRIER_NOTES = Object.freeze({
   hooks:
-    'envelope source enum has "hook" (ledger-envelope.schema.json:45-57) but that is '
-    + '1 of 8 emitter categories, not a hook name; no event data field names a hook.',
+    'hook.fired.hooks (written by scripts/hooks/_hook-fired-record.js from the 6 '
+    + 'dispatchers since Wave 12, 2026-09-17) carries handler NAMES as an ARRAY, one row '
+    + 'per dispatch, so the fold is MULTI-VALUED: the denominator is dispatch rows and a '
+    + "name's `fired` is the number of rows whose array contains it. Rows whose field is "
+    + 'not an array count as `absent`. CANNOT SEE: the 24 hooks registered directly in '
+    + 'hooks/hooks.json outside the dispatchers (PreToolUse 9, PostToolUseFailure 3, '
+    + 'SubagentStart 2, TeammateIdle 2, TaskCompleted 2, Notification 2, '
+    + 'PermissionRequest 1, InstructionsLoaded 1, PreCompact 1, PostCompact 1 — measured '
+    + '2026-09-15 from hooks.json), which therefore read as a false `fired: 0`; also not '
+    + 'handler duration and not what the handler did. The envelope source enum still only '
+    + 'says "hook" (ledger-envelope.schema.json:45-57), 1 of 8 emitter categories.',
   commands:
-    'intent.detected.type is an intent vocabulary and phase.*.segment is a phase name; '
-    + 'no registered event data field names a command.',
+    'intent.detected.command (written by scripts/hooks/runtime-prompt.js'
+    + '#recordSlashCommandInvoked since Wave 12, 2026-09-17) carries the command NAME for a '
+    + 'row with type="slash-command" and confidence=1, one row per user-typed slash prompt. '
+    + 'SINGLE-valued, not multi. Rows WITHOUT the key -- the intent-classifier rows this '
+    + 'event was registered for, which have a type but no command -- count as `absent`, so '
+    + '"an intent was classified" and "a command fired" stay distinct. CANNOT SEE: a '
+    + 'NAMESPACED slash (/artibot:split), which detectSlashCommand (lib/mission/mission-id'
+    + '.js:139-144) does not match, so it writes no row at all; and any command not typed by '
+    + 'the user. The inventory must therefore be spelled as the bare commands/*.md stem, '
+    + 'lowercased, which is the only spelling these rows can contain -- normalising it to '
+    + 'that stem is the caller\'s job (leader decision sh29-3), and a mismatch reads as a '
+    + 'false fired: 0. The sibling field intent.detected.type is an intent vocabulary term '
+    + 'and phase.*.segment is a phase name; neither is a command identity.',
   skills:
     'tool.used.skill (written by scripts/hooks/tool-used-record.js since Wave 11, '
     + '2026-09-15) carries the skill name for tool=Skill; rows without the key count as '
@@ -234,21 +317,46 @@ export function noCarrierReason(kind) {
  * Fold firing counts for one carrier.
  *
  * Kept exported and carrier-parameterised on purpose: `CARRIERS` is a MEASURED
- * FACT, not a knob. Three of its four entries are still null (2026-09-15), so a
- * test that produced numbers for those by overriding the constant would be
+ * FACT, not a knob. One of its four entries is still null (2026-09-17), so a
+ * test that produced numbers for that one by overriding the constant would be
  * testing a fiction. Passing a hypothetical carrier here exercises the
- * arithmetic without touching the finding. `skills` no longer needs the
- * hypothetical — it has a real carrier and is folded from real rows.
+ * arithmetic without touching the finding. `skills`, `hooks` and `commands` no
+ * longer need the hypothetical — all three have real carriers and are folded
+ * from real rows.
  *
- * A value that is absent, null, or non-scalar lands in `absent` rather than in
- * a bucket of its own (`countBy`, replay.js:445-465), so a writer that omits
- * `skill` cannot be mistaken for a skill named "null" or "undefined".
+ * SINGLE mode (`multi` unset). A value that is absent, null, or non-scalar
+ * lands in `absent` rather than in a bucket of its own (`countBy`,
+ * replay.js:445-465), so a writer that omits `skill` cannot be mistaken for a
+ * skill named "null" or "undefined".
+ *
+ * MULTI mode (`carrier.multi === true`). The field holds an ARRAY of names and
+ * one row can name many artifacts, so:
+ *   - a row whose field is not an array (missing, null, a bare string) counts
+ *     as `absent` and STILL counts toward `denominator`;
+ *   - non-string and empty-string elements inside an array are SKIPPED — they
+ *     do not become a bucket and they do not make the row absent, because the
+ *     row did name other handlers and dropping it would lose those;
+ *   - an element repeated within ONE row counts TWICE. Chosen over per-row
+ *     dedupe because a dispatch table never lists a handler twice in one slot
+ *     (measured 2026-09-17: 44 entries, 42 distinct names, and every repeat is
+ *     across slots, not within one), so a duplicate inside a row is a writer
+ *     defect that should be visible in the count rather than smoothed away.
+ *   - `denominator` stays the number of CARRIER ROWS. It is dispatches, not
+ *     names, so `fired / denominator` reads as "share of dispatches that
+ *     reached this handler" and can never exceed 1.
+ *
+ * `counts` is built through a `Map` and materialised with `defineProperty`, so
+ * an artifact named `constructor`, `__proto__` or `toString` is ordinary data
+ * and not a prototype member or a setter. `auditEntry` reads it with
+ * `Object.hasOwn` for the same reason.
  *
  * @param {object[]} events - ledger lines, already ordered and deduped by the caller.
- * @param {?{event: string, field: string}} carrier - carrier declaration, or null.
+ * @param {?{event: string, field: string, multi?: boolean}} carrier - carrier
+ *   declaration, or null. `multi: true` selects the array-valued fold above.
  * @returns {?{counts: Record<string, number>, absent: number, denominator: number}}
  *   null when there is no carrier — an explicit "not measurable", never a zero.
- *   `denominator` is rows OF THE CARRIER EVENT, not all events handed in.
+ *   `denominator` is rows OF THE CARRIER EVENT, not all events handed in, and
+ *   in multi mode it is rows and not the number of names those rows carry.
  */
 export function foldFiredCounts(events, carrier) {
   assertEvents(events);
@@ -257,8 +365,24 @@ export function foldFiredCounts(events, carrier) {
     throw new TypeError('foldFiredCounts: carrier needs non-empty { event, field }');
   }
   const rows = events.filter((e) => e && e.event === carrier.event);
-  const { counts, absent, total } = countBy(rows, (e) => e?.data?.[carrier.field]);
-  return { counts, absent, denominator: total };
+  if (carrier.multi !== true) {
+    const { counts, absent, total } = countBy(rows, (e) => e?.data?.[carrier.field]);
+    return { counts, absent, denominator: total };
+  }
+  const tally = new Map();
+  let absent = 0;
+  for (const row of rows) {
+    const value = row?.data?.[carrier.field];
+    if (!Array.isArray(value)) {
+      absent += 1;
+      continue;
+    }
+    for (const element of value) {
+      if (!isNonEmptyString(element)) continue;
+      tally.set(element, (tally.get(element) ?? 0) + 1);
+    }
+  }
+  return { counts: sortedCounts(tally), absent, denominator: rows.length };
 }
 
 /**
@@ -366,7 +490,15 @@ function auditEntry({ name, exemptAs, kind, fold }) {
     // measured: true`, a false zero that reads as removal evidence. Matching
     // the two spellings is the caller's job; this module cannot tell a renamed
     // skill from a silent one.
-    fired: measured ? (fold.counts[name] ?? 0) : null,
+    //
+    // PROTOTYPE-KEY DEFENCE (hygiene (c) of the Wave 11 bundle brief, absorbed
+    // here 2026-09-17). `fold.counts` is a plain object, so `counts[name]` for
+    // an inventory entry named `constructor`, `toString` or `hasOwnProperty`
+    // reaches Object.prototype and returns a FUNCTION — `?? 0` would keep it,
+    // and the entry would report a function where a number belongs. `hasOwn`
+    // asks whether this histogram actually counted that name, which is the
+    // question being asked; anything else reports 0.
+    fired: measured ? (Object.hasOwn(fold.counts, name) ? fold.counts[name] : 0) : null,
     denominator: fold ? fold.denominator : 0,
     measured,
     reason,
@@ -475,4 +607,26 @@ function assertEvents(events) {
  */
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.length > 0;
+}
+
+/**
+ * Materialise a tally as a key-sorted plain object, same shape `countBy` emits.
+ *
+ * Sorted so the same input serialises identically. `defineProperty` rather than
+ * `counts[label] = n` because a plain assignment to `__proto__` runs the
+ * inherited SETTER and stores nothing: the key would silently vanish from the
+ * histogram of an artifact that really is named `__proto__`. Every key here is
+ * an own, enumerable, ordinary data property.
+ *
+ * @param {Map<string, number>} tally - label to count.
+ * @returns {Record<string, number>} key-sorted counts.
+ */
+function sortedCounts(tally) {
+  const counts = {};
+  for (const label of [...tally.keys()].sort()) {
+    Object.defineProperty(counts, label, {
+      value: tally.get(label), enumerable: true, writable: true, configurable: true,
+    });
+  }
+  return counts;
 }

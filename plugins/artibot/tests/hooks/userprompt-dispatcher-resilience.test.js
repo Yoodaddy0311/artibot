@@ -557,3 +557,93 @@ describe('hooks.json: UserPromptSubmit timeout cold-start tolerance', () => {
     expect(dispatcherEntry.timeout).toBeGreaterThanOrEqual(15);
   });
 });
+
+/**
+ * THE FAILURE-OBSERVABILITY DECISION for `hook.fired` (SH-29, owner O8=a1).
+ *
+ * The carrier records `data.failed` — the handlers that did not succeed. On the
+ * five spawn-based slots that is free: `spawnHook` resolves
+ * `'ok' | 'timeout' | 'error'`. On THIS slot the handlers are in-process and
+ * `safeRun` catches, so the return value cannot answer the question: `null` is
+ * what a throw produces AND what five of the six handlers return on a typical
+ * prompt when they have nothing to contribute.
+ *
+ * The decision was to add an OPTIONAL fourth parameter, `onError`, invoked only
+ * on the throw path — not to widen `safeRun`'s three-argument contract, which
+ * this file pins by source and by reconstruction above, and not to infer
+ * failure from `null`, which would have marked a quiet, correct handler as
+ * failed on nearly every prompt.
+ *
+ * What that buys, and what it does not, is asserted below rather than only
+ * written in a comment: a THROW is observable, a null return is not.
+ * `git-autopilot-save` is a child process whose four outcomes
+ * (`runGitAutopilotSave`) all resolve identically, so it is always recorded
+ * `ok`. `data.failed` is therefore a SUBSET of real failures on this slot,
+ * never a superset — stderr remains the only complete record.
+ */
+describe('hook.fired failure observability (UserPromptSubmit)', () => {
+  it('reports a THROW but not a legitimate null return', async () => {
+    // Reconstructed 1:1 from the implementation, the same way the `safeRun`
+    // case above does — the function is module-internal, and its BEHAVIOUR is
+    // the contract under test. The source pins below keep the copy honest.
+    const safeRun = async (fn, payload, name, onError) => {
+      try {
+        return await fn(payload);
+      } catch {
+        if (typeof onError === 'function') onError(name);
+        return null;
+      }
+    };
+
+    const threw = new Set();
+    const noteThrow = (name) => threw.add(name);
+
+    const results = await Promise.allSettled([
+      safeRun(async () => null, {}, 'quiet-handler', noteThrow),
+      safeRun(async () => { throw new Error('boom'); }, {}, 'throwing-handler', noteThrow),
+      safeRun(async () => ({ ok: true }), {}, 'contributing-handler', noteThrow),
+    ]);
+
+    // Every call settles fulfilled — the carrier never sees a rejection here.
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+    // And the two null values are INDISTINGUISHABLE by return value alone,
+    // which is the whole reason `onError` exists.
+    expect(results[0].value).toBeNull();
+    expect(results[1].value).toBeNull();
+
+    expect([...threw]).toEqual(['throwing-handler']);
+  });
+
+  it('source: safeRun takes onError and invokes it only on the catch path', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(DISPATCHER, 'utf-8');
+    expect(src).toMatch(/async function safeRun\(fn, payload, name, onError\)/);
+    // The callback fires inside the catch, AFTER the stderr line, and before
+    // the `return null` the three-argument contract depends on.
+    expect(src).toMatch(/catch \(err\)[\s\S]*?onError\(name\)[\s\S]*?return null/);
+    // A callback fault must not become a prompt failure.
+    expect(src).toMatch(/try \{ onError\(name\); \} catch/);
+  });
+
+  it('source: all six in-process handlers pass the throw reporter', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(DISPATCHER, 'utf-8');
+    const calls = [...src.matchAll(/safeRun\(\s*[A-Za-z_$][\w$]*,\s*payload,\s*'([a-z0-9-]+)',\s*noteThrow/g)];
+    expect(calls).toHaveLength(6);
+    // A handler awaited WITHOUT the reporter would be silently unfailable.
+    const bare = [...src.matchAll(/safeRun\(\s*[A-Za-z_$][\w$]*,\s*payload,\s*'[a-z0-9-]+'\s*\)/g)];
+    expect(bare).toHaveLength(0);
+  });
+
+  it('source: the limitation is written next to the carrier call', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(DISPATCHER, 'utf-8');
+    const callAt = src.indexOf('recordHookFired({');
+    expect(callAt).toBeGreaterThan(-1);
+    // Rules section 9: a gate must carry the note of what it cannot see, or the
+    // gate itself becomes the next reader's evidence that it sees everything.
+    const preamble = src.slice(Math.max(0, callAt - 1400), callAt);
+    expect(preamble).toContain('WHAT `failed` DOES NOT SEE HERE');
+    expect(preamble).toContain('git-autopilot-save` is ALWAYS `ok`');
+  });
+});
