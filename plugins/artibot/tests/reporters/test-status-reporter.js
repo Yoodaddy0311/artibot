@@ -5,6 +5,7 @@
  * Schema (kept compact — SessionStart reads this on every start):
  *   {
  *     "timestamp": "2026-05-16T15:30:00.000Z",
+ *     "modules": 1204,
  *     "totalTests": 7736,
  *     "passed": 7716,
  *     "failed": 20,
@@ -15,6 +16,14 @@
  *
  * Only failing test FILES are recorded — not individual test names — to keep
  * the file small and the SessionStart line readable.
+ *
+ * `modules` is the number of test FILES the run collected. It exists because
+ * every downstream reader of this snapshot — `lib/core/test-status.js` and the
+ * Stop gate's `lib/verification/deterministic-source.js` — previously had only
+ * the four test counts and so could not tell a whole-suite run from a targeted
+ * one. It narrows that, it does not settle it: a filter that happens to match
+ * every file counts the same as no filter at all. The reporter API exposes no
+ * filter, so the honest field is the count, not a "was targeted" boolean.
  *
  * Vitest 4 reporter API: onInit + onTestRunStart + onTestRunEnd.
  *
@@ -90,6 +99,7 @@ export default class TestStatusReporter {
       const payload = {
         timestamp: new Date().toISOString(),
         durationMs: Date.now() - this.startedAt,
+        modules: Array.isArray(testModules) ? testModules.length : 0,
         totalTests,
         passed,
         failed,

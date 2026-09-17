@@ -7,7 +7,7 @@
  * A denominator with no numerator answers nothing, so this module supplies the
  * only numerator the repo can produce today without lying: the exit status of
  * the last `npm test`, as written by
- * `tests/reporters/test-status-reporter.js` (:29-30, :90-98).
+ * `tests/reporters/test-status-reporter.js` (:38-39, :99-108).
  *
  * WHY NOT THE OTHER LAYERS. lint, tsc and build leave no exit code anywhere a
  * hook can read (the PostToolUse Bash hooks read `tool_response.exit_code` and
@@ -169,19 +169,30 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
   if (ranAtMs < Math.floor(Number(markerMtimeMs))) return { reason: REASONS.stale };
 
   const { totalTests, passed, failed, skipped } = result;
+  // The reporter's count of test FILES, added after this module shipped. A
+  // snapshot written before that has no `modules` at all, and one hand-edited
+  // or written by another tool could carry anything — in both cases the clause
+  // is LEFT OUT rather than defaulted to 0, because `modules=0` in the ledger
+  // would read as a run that collected no files, which is a different claim
+  // from "the run did not record this".
+  const modulesClause = isCount(result.modules) ? ` modules=${result.modules}` : '';
   return {
     exitCode: failed === 0 ? 0 : 1,
     reason: `vitest result fresh — ${totalTests} tests, ${passed} passed, ${failed} failed, `
       + `${skipped} skipped (measured ${timestamp}, at or after the last main-agent edit)`,
     // The counts ride in `note` because the ledger drops `reason`. A reader
     // that wants to know whether this was the whole suite or a targeted run
-    // has these four numbers and nothing else — say them plainly.
+    // has these numbers and nothing else — say them plainly. `modules` (the
+    // number of test FILES) narrows that question without answering it: a
+    // filter matching every file counts the same as no filter, and the vitest
+    // reporter API exposes no filter, so no "was targeted" flag is written.
     evidence: [{
       kind: 'file',
       file: RESULT_FILE_RELPATH,
       line: 1,
       measured_at: timestamp,
-      note: `vitest total=${totalTests} passed=${passed} failed=${failed} skipped=${skipped}`,
+      note: `vitest total=${totalTests} passed=${passed} failed=${failed} `
+        + `skipped=${skipped}${modulesClause}`,
     }],
   };
 }
