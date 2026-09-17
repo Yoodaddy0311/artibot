@@ -422,5 +422,87 @@ describe('file', () => {
         spy.mockRestore();
       }
     });
+
+    /**
+     * Capture every backoff sleep without spending the wall time. `sleepSync`
+     * is module-private to `lib/core/file.js`, so it cannot be spied from
+     * here; `Atomics.wait` is its single observable side effect and its 4th
+     * argument IS the requested backoff, which makes the sequence assertable.
+     * Returning 'timed-out' keeps the caller's control flow identical while
+     * the suite pays no sleep.
+     */
+    function captureBackoff() {
+      const sleeps = [];
+      const spy = vi.spyOn(Atomics, 'wait').mockImplementation((_ia, _idx, _val, ms) => {
+        sleeps.push(ms);
+        return 'timed-out';
+      });
+      return { spy, sleeps };
+    }
+
+    it('exhausts the default 5 attempts with an uncapped 10·20·40·80 backoff', () => {
+      const tmp = path.join(tmpDir, 'default.txt.tmp');
+      const dest = path.join(tmpDir, 'default.txt');
+      const { spy: renameSpy, count } = flakyRename(Number.POSITIVE_INFINITY, 'EPERM');
+      const { spy: waitSpy, sleeps } = captureBackoff();
+      try {
+        expect(() => renameWithRetry(tmp, dest)).toThrow(/EPERM/);
+        expect(count()).toBe(5);
+        expect(sleeps).toEqual([10, 20, 40, 80]);
+      } finally {
+        waitSpy.mockRestore();
+        renameSpy.mockRestore();
+      }
+    });
+
+    // The session-store contract (S3, 2026-07): 8 attempts with each backoff
+    // capped at 250ms — a ~810ms bounded budget. Pinned here so the caller can
+    // drop its private copy and still keep the meaning it was raised for.
+    it('honours attempts and maxBackoffMs options, capping the backoff at the ceiling', () => {
+      const tmp = path.join(tmpDir, 'capped.txt.tmp');
+      const dest = path.join(tmpDir, 'capped.txt');
+      const { spy: renameSpy, count } = flakyRename(Number.POSITIVE_INFINITY, 'EPERM');
+      const { spy: waitSpy, sleeps } = captureBackoff();
+      try {
+        expect(() => renameWithRetry(tmp, dest, { attempts: 8, maxBackoffMs: 250 }))
+          .toThrow(/EPERM/);
+        expect(count()).toBe(8);
+        expect(sleeps).toEqual([10, 20, 40, 80, 160, 250, 250]);
+      } finally {
+        waitSpy.mockRestore();
+        renameSpy.mockRestore();
+      }
+    });
+
+    it('succeeds on the 7th attempt when attempts is raised to 8', () => {
+      const tmp = path.join(tmpDir, 'seventh.txt.tmp');
+      const dest = path.join(tmpDir, 'seventh.txt');
+      fsSync.writeFileSync(tmp, 'payload');
+      const { spy: renameSpy, count } = flakyRename(6, 'EBUSY');
+      const { spy: waitSpy } = captureBackoff();
+      try {
+        renameWithRetry(tmp, dest, { attempts: 8, maxBackoffMs: 250 });
+        expect(count()).toBe(7);
+        expect(fsSync.readFileSync(dest, 'utf-8')).toBe('payload');
+      } finally {
+        waitSpy.mockRestore();
+        renameSpy.mockRestore();
+      }
+    });
+
+    it('does not retry a non-transient error even with attempts raised', () => {
+      const tmp = path.join(tmpDir, 'hard.txt.tmp');
+      const dest = path.join(tmpDir, 'hard.txt');
+      const { spy: renameSpy, count } = flakyRename(Number.POSITIVE_INFINITY, 'EXDEV');
+      const { spy: waitSpy, sleeps } = captureBackoff();
+      try {
+        expect(() => renameWithRetry(tmp, dest, { attempts: 8 })).toThrow(/EXDEV/);
+        expect(count()).toBe(1);
+        expect(sleeps).toEqual([]);
+      } finally {
+        waitSpy.mockRestore();
+        renameSpy.mockRestore();
+      }
+    });
   });
 });
