@@ -185,6 +185,45 @@ describe('privacy — the recorder re-validates rather than trusting its caller'
       .toEqual({ split: true, autopilot: false });
   });
 
+  it('drops a predicted_mode carrying free text rather than a mode name', () => {
+    // Cross-review 2026-09-17: a `typeof === 'string'` check let this reach
+    // disk verbatim. A mode is a command-shaped token, so it is bounded like
+    // one.
+    recordActivationObserved(RUN, {
+      predicted_mode: 'SECRET-MODE-TEXT the user asked about their salary',
+    }, { storeDir });
+
+    const raw = rawFile();
+    expect(raw).not.toContain('SECRET-MODE-TEXT');
+    expect(raw).not.toContain('salary');
+    expect(readDecisionEvents(RUN, { storeDir })[0].data.predicted_mode).toBeNull();
+  });
+
+  it('drops an activation KEY carrying free text, not just a bad value', () => {
+    // Cross-review 2026-09-17: filtering by value type alone was not enough —
+    // a boolean under a sentence-shaped KEY reached both `data` and the
+    // `message` line, because the map's keys come from a caller this module
+    // does not own.
+    recordActivationObserved(RUN, {
+      command_activation: { split: true, 'user typed SECRET-KEY-TEXT': true },
+    }, { storeDir });
+
+    const raw = rawFile();
+    expect(raw).not.toContain('SECRET-KEY-TEXT');
+    expect(raw).not.toContain('user typed');
+    const [line] = readDecisionEvents(RUN, { storeDir });
+    expect(line.data.command_activation).toEqual({ split: true });
+    // The message is built from the surviving true keys, so it must be clean too.
+    expect(line.message).toBe('activation slash=none predicted=split');
+  });
+
+  it('keeps an unknown but command-shaped mode, so a new router mode is visible', () => {
+    // The bound is a charset, not an allowlist of today's six modes. A mode
+    // added to the router must still appear rather than silently becoming null.
+    recordActivationObserved(RUN, { predicted_mode: 'quantum_split' }, { storeDir });
+    expect(readDecisionEvents(RUN, { storeDir })[0].data.predicted_mode).toBe('quantum_split');
+  });
+
   it('nulls command_activation when it is not an object', () => {
     for (const bad of ['x', 42, ['split'], null]) {
       recordActivationObserved(RUN, { command_activation: bad }, { storeDir });

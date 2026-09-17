@@ -92,13 +92,6 @@
  */
 
 import path from 'node:path';
-import {
-  ACTIVATION_DATA_KEYS,
-  MAX_PROMPT_ID_LENGTH,
-  NL_MATCH_ID_RE,
-  PREDICTED_SIGNALS,
-  SLASH_NAME_RE,
-} from './activation-observed.js';
 import { redactString } from '../core/redaction.js';
 import { resolveProjectRoot } from '../git/project-root.js';
 import { appendRunEvent, readRunEvents, resolveRunEventsPath } from './run-events.js';
@@ -154,6 +147,68 @@ export const SKILL_LEVEL_CHANGED = 'skill-level-changed';
  * producer. OBSERVE ONLY, like every type here.
  */
 export const ACTIVATION_OBSERVED = 'activation-observed';
+
+/**
+ * The activation vocabulary, owned HERE rather than in the pure builder.
+ *
+ * WHY THE DIRECTION MATTERS. These five were briefly defined in
+ * `./activation-observed.js` and imported by this module, which made THIS
+ * module's load depend on that file — and transitively on
+ * `lib/mission/compiler.js` and the five modules it pulls in. Measured
+ * 2026-09-17 (cross-review): with `activation-observed.js` absent from a lib
+ * copy, importing this module failed `ERR_MODULE_NOT_FOUND` and ALL EIGHT
+ * recorders went silent while the hook still returned its output — the store
+ * would simply never be created, which is indistinguishable from "nothing
+ * happened" to every reader that counts files. A vocabulary owner must not be
+ * able to take its own consumers down, so the dependency now runs one way:
+ * `activation-observed.js` imports these and re-exports them, and this module
+ * imports nothing from it. Do not reintroduce that import — the cycle it would
+ * form is the smaller of the two problems.
+ *
+ * This is also where the other fail-closed vocabularies already live
+ * (`SELF_CONTROL_SUBSYSTEMS`, `SELF_CONTROL_ACTIONS`, `SKILL_LEVELS`), so the
+ * set a recorder admits is readable in one place.
+ */
+
+/**
+ * Every `data` key `recordActivationObserved` writes, and the ONLY ones. The
+ * recorder copies by this list rather than spreading, so a field added to an
+ * upstream result cannot leak to disk by default.
+ */
+export const ACTIVATION_DATA_KEYS = Object.freeze([
+  'observe_only', 'command_activation', 'activation_observed', 'predicted_mode',
+  'predicted_signal', 'predicted_nl_match', 'prompt_id', 'idempotency_key',
+]);
+
+/**
+ * The signal vocabulary, mirroring the `signal` field
+ * `lib/topology/topology-router.js#decideMode` attaches to its decision. An
+ * ALLOWLIST: the recorder nulls anything outside it rather than writing an
+ * unknown token.
+ */
+export const PREDICTED_SIGNALS = Object.freeze([
+  'nl-explicit', 'recommendation', 'runner', 'inference', 'config-default',
+]);
+
+/**
+ * Charset a slash command name must satisfy: exactly what
+ * `lib/mission/mission-id.js#detectSlashCommand` can return (it lowercases and
+ * matches `^([a-z][a-z0-9_-]{0,31})(?=\s|$)`).
+ *
+ * USED FOR THREE THINGS, all of them privacy bounds, not cosmetics:
+ * the observed `slash` value, the `predicted_mode` value, and the KEYS of
+ * `command_activation`. Every mode `decideMode` can return (`solo`,
+ * `subagent`, `team`, `autopilot`, `autopilot_fast`, `split`) and every
+ * activation key the compiler projects (`autopilot`, `autopilot_fast`,
+ * `split`) satisfies it, so nothing real is lost — measured 2026-09-17.
+ */
+export const SLASH_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** Charset an `nl-match:` pattern id must satisfy. A privacy filter. */
+export const NL_MATCH_ID_RE = /^[a-z0-9-]{1,32}$/;
+
+/** Longest prompt id kept. A bound, not a privacy claim — ids are not text. */
+export const MAX_PROMPT_ID_LENGTH = 128;
 
 /**
  * Every `type` this store admits, and the ONLY ones. `record` refuses the rest.
@@ -967,7 +1022,12 @@ function booleanValuesOnly(src) {
   if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
   const out = {};
   for (const [k, v] of Object.entries(src)) {
-    if (typeof v === 'boolean') out[k] = v;
+    // BOTH sides are checked. Filtering values alone was not enough: measured
+    // 2026-09-17 (cross-review), a KEY of `'user typed SECRET-KEY-TEXT'` with a
+    // boolean value reached both `data` and the `message` line, because an
+    // activation map's keys come from a caller this module does not own. Keys
+    // are command names, so the command-name charset is the right bound.
+    if (typeof v === 'boolean' && SLASH_NAME_RE.test(k)) out[k] = v;
   }
   return out;
 }
@@ -1012,7 +1072,14 @@ export function recordActivationObserved(runId, observation, opts = {}) {
     ? { slash }
     : {};
 
-  data.predicted_mode = typeof o.predicted_mode === 'string' ? o.predicted_mode : null;
+  // Charset-checked, not merely type-checked. `typeof === 'string'` let an
+  // arbitrary sentence through to disk (measured 2026-09-17, cross-review); a
+  // mode is a command-shaped token, so it is bounded like one. An UNKNOWN mode
+  // that still fits the charset is kept on purpose — the fail-visible
+  // behaviour a new router mode depends on.
+  data.predicted_mode = typeof o.predicted_mode === 'string' && SLASH_NAME_RE.test(o.predicted_mode)
+    ? o.predicted_mode
+    : null;
   data.predicted_signal = PREDICTED_SIGNALS.includes(o.predicted_signal)
     ? o.predicted_signal
     : null;

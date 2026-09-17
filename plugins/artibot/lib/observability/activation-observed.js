@@ -39,16 +39,28 @@
  */
 
 import { projectCommandActivation } from '../mission/compiler.js';
+import {
+  ACTIVATION_DATA_KEYS,
+  MAX_PROMPT_ID_LENGTH,
+  NL_MATCH_ID_RE,
+  PREDICTED_SIGNALS,
+  SLASH_NAME_RE,
+} from './decision-events.js';
 
 /**
- * Every key {@link buildActivationRecord} emits, and the ONLY ones. The
- * recorder copies by this list rather than spreading, so a field added to an
- * upstream result cannot leak to disk by default.
+ * The vocabulary is OWNED BY `./decision-events.js` and re-exported here.
+ *
+ * The dependency deliberately runs in this direction only. When it ran the
+ * other way, the recorder module could not load without this file, and with
+ * this file absent all eight recorders went silent while the hook still
+ * returned output (measured 2026-09-17, cross-review). The store owner must
+ * not be takeable down by its own payload builder. Re-exported rather than
+ * merely imported so a caller of the builder has one import site for the
+ * shape and the bounds that go with it.
  */
-export const ACTIVATION_DATA_KEYS = Object.freeze([
-  'observe_only', 'command_activation', 'activation_observed', 'predicted_mode',
-  'predicted_signal', 'predicted_nl_match', 'prompt_id', 'idempotency_key',
-]);
+export {
+  ACTIVATION_DATA_KEYS, MAX_PROMPT_ID_LENGTH, NL_MATCH_ID_RE, PREDICTED_SIGNALS, SLASH_NAME_RE,
+};
 
 /**
  * The activation keys a slash command can actually be compared against today.
@@ -69,21 +81,6 @@ export const MEASURABLE_ACTIVATION_KEYS = Object.freeze(['autopilot', 'autopilot
 export const UNMEASURED_ACTIVATION_KEYS = Object.freeze(['plan', 'ultraplan', 'review']);
 
 /**
- * The signal vocabulary, mirroring the `signal` field
- * `topology-router.js#decideMode` attaches to its decision. An ALLOWLIST: the
- * recorder nulls anything outside it rather than writing an unknown token.
- *
- * WHY IT IS RE-DERIVED HERE. `routeTopology` DROPS `signal` from its frozen
- * return (verified 2026-09-17: the return names `mode`, `reason`,
- * `parallelGain`, `exception`, `humanGateHits`, `confidence` and no `signal`),
- * so the only surviving evidence of the signal is the `reason[]` literals.
- * {@link derivePredictedSignal} reconstructs it from those.
- */
-export const PREDICTED_SIGNALS = Object.freeze([
-  'nl-explicit', 'recommendation', 'runner', 'inference', 'config-default',
-]);
-
-/**
  * Wave 13 hint axis: a planner `recommendation` value to the slash command a
  * user would type to accept it.
  *
@@ -95,25 +92,16 @@ export const PREDICTED_SIGNALS = Object.freeze([
  */
 export const HINT_SLASH_MAP = Object.freeze({ split: 'split', autopilot: 'autopilot', watch: 'watch' });
 
-/**
- * Charset a slash command name must satisfy: exactly what
- * `lib/mission/mission-id.js#detectSlashCommand` can return (it lowercases and
- * matches `^([a-z][a-z0-9_-]{0,31})(?=\s|$)`). Re-validated here rather than
- * trusted, because the caller may not have gone through that function.
- */
-export const SLASH_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
-
-/** Charset an `nl-match:` pattern id must satisfy. The privacy filter. */
-export const NL_MATCH_ID_RE = /^[a-z0-9-]{1,32}$/;
-
 /** Prefix `decideMode` pushes for a natural-language / flag pattern hit. */
 const NL_MATCH_PREFIX = 'nl-match:';
 
-/** Longest prompt id kept. A bound, not a privacy claim — ids are not text. */
-export const MAX_PROMPT_ID_LENGTH = 128;
-
 /**
  * Which signal produced `mode`, reconstructed from the router's `reason[]`.
+ *
+ * WHY IT MUST BE RECONSTRUCTED. `routeTopology` DROPS `signal` from its frozen
+ * return (verified 2026-09-17: the return names `mode`, `reason`,
+ * `parallelGain`, `exception`, `humanGateHits`, `confidence` and no `signal`),
+ * so the only surviving evidence of the signal is the `reason[]` literals.
  *
  * Mirrors `topology-router.js#decideMode`, whose own `signal` never survives
  * `routeTopology`. The `nl-match:` test comes FIRST because that branch returns
@@ -188,7 +176,12 @@ export function extractNlMatch(reason) {
  */
 export function buildActivationRecord({ topology, slashCommand, promptId } = {}) {
   const t = topology && typeof topology === 'object' ? topology : {};
-  const mode = typeof t.mode === 'string' ? t.mode : null;
+  // Charset-bounded, matching the recorder exactly. Builder and recorder must
+  // agree: if the builder let an arbitrary sentence through as a mode, the
+  // recorder would silently null it and the two would disagree about what was
+  // recorded. An unknown-but-command-shaped mode is kept, which is what makes a
+  // new router mode fail VISIBLY rather than vanish.
+  const mode = typeof t.mode === 'string' && SLASH_NAME_RE.test(t.mode) ? t.mode : null;
 
   const commandActivation = mode === null
     ? null
