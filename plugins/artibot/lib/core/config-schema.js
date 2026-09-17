@@ -54,16 +54,48 @@ export const configSchema = {
         taskBased: { type: 'object' },
       },
     },
+    // Validation here is non-strict: an UNDECLARED key is not an error, it is
+    // simply unvalidated. That makes an incomplete block fail OPEN, and it did
+    // — measured 2026-09-17, this declared 7 of the 21 keys the shipped
+    // `artibot.config.json#team` carries, so `autoApply: "false"` (a string,
+    // which `isTeamEnabled` reads as ON because it gates on `!== false`) was
+    // accepted as valid. All 21 are now declared, with JSON TYPES ONLY.
+    //
+    // Types only, on purpose: nested keys and enums are deliberately absent so
+    // this file does not become a second owner of meanings that live elsewhere
+    // (`autoApplyTriggers` thresholds belong to
+    // `lib/cognitive/workflow-plan.js#evaluateTrigger`; the enable/opt-out
+    // meaning belongs to `lib/core/team-config.js#isTeamEnabled`). The
+    // key-set completeness is checked mechanically rather than by eye:
+    // `tests/core/config-schema.test.js`, describe
+    // 'team.properties declaration coverage' — which also records what that
+    // check cannot see.
     team: {
       type: 'object',
       properties: {
         enabled: { type: 'boolean' },
+        autoApply: { type: 'boolean' },
+        autoApplyTriggers: { type: 'object' },
         engine: { type: 'string' },
+        envVar: { type: 'string' },
+        // `null` is the shipped value and means "no cap"; a bare
+        // `{ type: 'number' }` would reject this repo's own config.
         maxTeammates: { type: ['number', 'null'], minimum: 1, maximum: 15 },
         ctoAgent: { type: 'string' },
         delegationMode: { type: 'boolean' },
         displayMode: { type: 'string' },
         spawnStrategy: { type: 'string' },
+        followWorkflowPlan: { type: 'boolean' },
+        comment: { type: 'string' },
+        api: { type: 'object' },
+        gracefulDegradation: { type: 'object' },
+        delegationModeSelection: { type: 'object' },
+        levels: { type: 'object' },
+        orchestrationPatterns: { type: 'object' },
+        playbooks: { type: 'object' },
+        playbookMeta: { type: 'object' },
+        messageTypes: { type: 'array' },
+        teamStorage: { type: 'object' },
       },
     },
     swarm: {

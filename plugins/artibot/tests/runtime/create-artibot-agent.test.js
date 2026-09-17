@@ -144,3 +144,41 @@ describe('runtime/createArtibotAgent', () => {
     }
   });
 });
+
+// --- `context.config.teamEnabled` ------------------------------------------
+
+describe('runtime/createArtibotAgent - context.config.teamEnabled', () => {
+  /** Run one prompt against a given `config.team` and return the envelope value. */
+  async function teamEnabledFor(team) {
+    const config = team === undefined
+      ? { ...TEST_CONFIG, team: undefined }
+      : { ...TEST_CONFIG, team: { ...TEST_CONFIG.team, ...team } };
+    const runtime = makeRuntime({ config });
+    const result = await runtime.preparePrompt({
+      prompt: 'fix typo in readme',
+      hookData: { event: 'UserPromptSubmit' },
+    });
+    return result.context.config.teamEnabled;
+  }
+
+  // This field used to be `Boolean(config?.team?.enabled)`, which is a THIRD
+  // answer to the enable question: it ignored the `autoApply` opt-out and it
+  // read an absent `team` block as OFF, the opposite of the shipped default.
+  // Both rows below were wrong before the owner (`lib/core/team-config.js`)
+  // took over, so they are the regression pins, not decoration.
+  it('respects the autoApply opt-out (enabled:true, autoApply:false -> false)', async () => {
+    expect(await teamEnabledFor({ enabled: true, autoApply: false })).toBe(false);
+  });
+
+  it('reads an absent team block as ON, matching the shipped default', async () => {
+    expect(await teamEnabledFor(undefined)).toBe(true);
+  });
+
+  it('is false when enabled is false', async () => {
+    expect(await teamEnabledFor({ enabled: false })).toBe(false);
+  });
+
+  it('is true when both keys are true', async () => {
+    expect(await teamEnabledFor({ enabled: true, autoApply: true })).toBe(true);
+  });
+});

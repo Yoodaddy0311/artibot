@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { configSchema, validateConfig } from '../../lib/core/config-schema.js';
+
+const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('config-schema', () => {
   describe('configSchema', () => {
@@ -273,6 +278,79 @@ describe('config-schema', () => {
       const result = validateConfig(config);
       expect(result.valid).toBe(false);
       expect(result.errors.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // `team` declaration coverage
+  // -------------------------------------------------------------------------
+
+  describe('team.properties declaration coverage', () => {
+    // WHY THIS EXISTS. `validateConfig` is non-strict: an undeclared key is not
+    // an error, it is simply unvalidated. So an incomplete `properties` block
+    // fails OPEN — `team.followWorkflowPlan: "false"` (a string, which the
+    // readers treat as truthy and therefore as ON) sailed through as valid.
+    // Measured 2026-09-17 before this change: the schema declared 7 of the 21
+    // keys the shipped `artibot.config.json#team` actually carries.
+    //
+    // WHAT THIS CHECK DOES NOT SEE.
+    //  1. Value MEANING. It compares key sets and JSON types only. A declared
+    //     `{ type: 'object' }` says nothing about the object's inner keys, so
+    //     `autoApplyTriggers.minSubtasks: "four"` is still unvalidated. That is
+    //     deliberate: the thresholds' owner is `workflow-plan.js#evaluateTrigger`,
+    //     and duplicating their shape here would create a second owner.
+    //  2. Whether the declared TYPE is the RIGHT type. Declaring `engine` as
+    //     `number` would pass this check and break the real config instead.
+    //  3. Keys some other config file or a user override adds. The comparison
+    //     is against this repo's shipped `artibot.config.json` only.
+    const shippedTeam = JSON.parse(
+      readFileSync(join(PLUGIN_ROOT, 'artibot.config.json'), 'utf8'),
+    ).team;
+
+    it('declares every key the shipped artibot.config.json#team carries', () => {
+      const declared = Object.keys(configSchema.properties.team.properties);
+      const shipped = Object.keys(shippedTeam);
+      // Superset, not equality: declaring a key the config does not yet use is
+      // harmless (`validateProperty` skips `undefined`), while the reverse is
+      // the fail-open hole. The direction is the whole point.
+      expect(shipped.filter((k) => !declared.includes(k))).toEqual([]);
+    });
+
+    it('has a non-trivial denominator (guards a scan that finds nothing)', () => {
+      // Without this, an `artibot.config.json` that lost its `team` block would
+      // make the check above pass by comparing two empty sets.
+      expect(Object.keys(shippedTeam).length).toBeGreaterThanOrEqual(20);
+    });
+
+    it('keeps the shipped config valid', () => {
+      // The control for the declaration above: adding types must not invalidate
+      // the very config those types were read off.
+      const shipped = JSON.parse(
+        readFileSync(join(PLUGIN_ROOT, 'artibot.config.json'), 'utf8'),
+      );
+      const result = validateConfig(shipped);
+      expect(result.errors).toEqual([]);
+      expect(result.valid).toBe(true);
+    });
+
+    it('now rejects a STRING "false" where a boolean opt-out belongs', () => {
+      // The effect of the declaration, demonstrated rather than asserted. This
+      // config was VALID before `followWorkflowPlan`/`autoApply` were declared.
+      // It matters because `isTeamEnabled` gates on `!== false`, so the string
+      // "false" reads as ON — the schema is where that typo gets caught.
+      for (const key of ['followWorkflowPlan', 'autoApply', 'enabled']) {
+        const result = validateConfig({ version: '1.0.0', team: { [key]: 'false' } });
+        expect(result.valid).toBe(false);
+        expect(result.errors.join('\n')).toContain(`team.${key}: expected boolean, got string`);
+      }
+    });
+
+    it('accepts the null maxTeammates the shipped config uses', () => {
+      // Regression guard for the one key whose shipped value is `null`: a naive
+      // `{ type: 'number' }` would reject the repo's own config.
+      expect(shippedTeam.maxTeammates).toBeNull();
+      const result = validateConfig({ version: '1.0.0', team: { maxTeammates: null } });
+      expect(result.valid).toBe(true);
     });
   });
 });
