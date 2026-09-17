@@ -2,6 +2,30 @@
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
 
+## Wave 12 — 배치 1~3 착지 (2026-09-17 KST, 세션 artibot-e8, master = `fe9d5c81`)
+
+**한 줄**: Wave 12 는 8줄기 중 **7줄기가 배치 3회로 착지**했고 `sh29-command-hook-carriers` 1줄기(배치 4)만 남았다. base 는 `8f614184`(v4.63.0 뒤).
+
+| 배치 | master SHA | 줄기(도착 커밋) |
+|---|---|---|
+| 1 | `65aaaaf1` | `team-config-hygiene-bundle`(`13c731ae`: team-config-semantics + wave11-hygiene (a)(b)(d)(e)) |
+| 2 | `2da29dd6` | `session-store-hygiene`(`b55cb895`) · `verdict-adapter-warn`(`ae8404c2`) · `report-generator-recovery-journal`(`ba55bd7a`) · `route-bound-canonical-model`(`62d8a590`) |
+| 3 | `fe9d5c81` | `ca03-nextphase-decide`(`58422a3b`) · `nl-activation-numerator-writer`(`5f8ddb7f`) |
+| 4 | **미착지(대기)** | `sh29-command-hook-carriers` — 파트 A wip `42397c99`, 파트 B(runtime-prompt 3경로) + O8-i config 2경로 + README 2파일 `sync-readme-claims` 진행 중. **README 카운트와 SH-29 행은 이 창이 소유한다 — 다른 데서 건드리지 마라.** |
+
+**Wave 13 정찰 초안 7건**(유휴 창이 읽기 전용으로 작성, 코드 0) — 전부 `.artibot/split/<이름>/brief-draft.md`:
+`ob10-mission-controller-record-only`(S~M) · `ca05-save-checkpoint`(S) · `sh04-topology-actual`(S) · `sh05-recommended-spawn-receipt-compare`(S) · `autopilot-test-store-isolation`(S) · `decision-store-dir-strict-options`(S) · `recovery-judge-replan-counter`(S).
+
+**부채 비율 주의**: 초안 7건 중 **2건이 부채**(`autopilot-test-store-isolation` · `decision-store-dir-strict-options`) = 2/7. Wave 13 plan 편성 시 부채 상한 25% 를 넘지 않는지 먼저 확인하라.
+
+**Wave 13 순서 제약(중요)**: CA-03 의 게이트 `autopilot.recovery.transitionFromVerdict` 는 **`recovery-judge-replan-counter` 가 착지한 뒤에만** ON 으로 뒤집는다 — 지금 뒤집으면 같은 class 반복 실패가 `replan`→PLAN 으로 무한 반복한다(실측: 연속 실패 6회 = repair 1 + replan 5, 상한 도달 0, pause 0).
+
+**오너 정리 잔여(사람이 실행)**: ① `.claude/worktrees/async-giggling-quasar` 디렉터리 삭제 ② `git branch -D worktree-split-artibot-ob17-models-current`(O1 승인 완료, 실행만 남음) ③ `archive/*-20260519` 태그 뒤 stale 브랜치 2개 `-D` ④ `_reports/` 미추적 디렉터리 2개 처분.
+
+**다음 할 일**: ① 배치 4(sh29) 착지 — README 동기화·O8-i config 포함 ② 그 뒤 **4.64.0 릴리스 판단**(배치 4 전에는 판단하지 않는다) ③ 릴리스 + `sync:local` + 호스트 재시작 뒤 라이브 재계수 2건 — `route.bound` 결손율(`rb-census.mjs`, 착지 전 271/276 = 98.2%)과 `activation-observed` slash 분모(현재 0) ④ Wave 13 plan 편성(초안 7건 + 위 순서 제약 + 부채 2/7).
+
+---
+
 ## Wave 11 착지 9/9 (2026-09-15 10:3x~17:0x KST, 세션 artibot-28/89ada2, master = 9165196f)
 
 **한 줄**: Wave 11 8줄기 + 롤링 1 을 배치 9회로 전부 착지시켰다 — 재빌드 0, CI RED 0, 창 재배정 1. base `2b10fd31` → 배치 9 `9165196f` = **84 files +11,728/−439**(리더 `git diff --shortstat` 실측; 배치 8 `ea44a1ab` 시점 중간값은 75 files +10,252/−312). 마지막 배치 9 `verify-completed-producer` 는 16:59 KST 착지(9 files +1,476/−127, 재빌드 0, CI green). **줄기 9개 합(88 files +11,730/−441)이 배치 합보다 files 4 · ins 2 · del 2 많은 원인은 확인됐다** — sh29 와 outcome 이 같은 4파일(`hooks/dispatch-table.json` · `tests/dispatcher/dispatch-table.test.js` · `README.md` · `plugins/artibot/README.md`)을 연달아 고쳐 합산에서 한 번으로 접혔고, 두 배치 커밋 `git diff --name-only` 교집합으로 리더가 대조했다.

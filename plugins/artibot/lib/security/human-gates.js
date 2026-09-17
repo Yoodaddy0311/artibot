@@ -250,7 +250,7 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     action: '되돌릴 수 없는 파괴적 행동',
     default: 'human',
     enforcement: 'hook',
-    enforcementNote: 'fs 파괴 · force push · DDL(DROP/TRUNCATE) · DELETE no-WHERE 는 강제된다. 레인 5 §1-D 행 5 실측: UPDATE … SET no-WHERE · prisma migrate deploy · alembic upgrade 는 0건',
+    enforcementNote: 'fs 파괴 · force push · DDL(DROP/TRUNCATE) · DELETE no-WHERE 는 강제된다. 레인 5 §1-D 행 5 실측: UPDATE … SET no-WHERE · prisma migrate deploy · alembic upgrade 는 0건. 오너 결정 O5(2026-09-17): UPDATE … SET no-WHERE 는 이 표에 행만 두고 기록 전용으로 유지한다 — 이 행이 매칭돼도 pre-bash 차단은 일어나지 않으며(차단은 guard-registry/L1 경유뿐), Canary 에서 refuse 승격 예정(설계 §5 C5)',
     policyRef: null,
     probe: 'command',
     tools: Object.freeze(['Bash']),
