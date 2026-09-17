@@ -29,6 +29,7 @@ import {
 } from '../core/file.js';
 import { getPluginRoot } from '../core/platform.js';
 import { resolveProfilePath } from '../core/user-profile.js';
+import { isTeamEnabled } from '../core/team-config.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -156,7 +157,15 @@ export async function gatherRepoStats(pluginRoot) {
   const userProfileSignals = await countJsonKeys(resolveProfilePath());
   const dashboardEnabled = Boolean(config?.dashboard?.enabled);
 
+  // Two DIFFERENT questions, both kept. `autoApply` is the raw single key and
+  // `scoreProductive` both scores it and prints it verbatim as evidence
+  // (`team.autoApply: …`), so its meaning must stay exactly what it was.
+  // `teamEnabled` is the composite opt-out answer, and its sole owner is
+  // `lib/core/team-config.js#isTeamEnabled` — this L3 module can import it only
+  // because the owner sits at L1 (it used to live at L4, out of reach, which is
+  // why this file once answered the enable question with `autoApply` alone).
   const autoApply = Boolean(config?.team?.autoApply);
+  const teamEnabled = isTeamEnabled(config?.team);
   const hookCount = await countHookEntries(path.join(root, 'hooks', 'hooks.json'));
 
   const stats = {
@@ -172,6 +181,7 @@ export async function gatherRepoStats(pluginRoot) {
     lifelongHookRegistered: lifelongHookRegistered > 0,
     postBashFailureHookExists: postBashFailureExists,
     autoApply,
+    teamEnabled,
     hookCount,
     plainLangEntries,
     userProfileSignals,

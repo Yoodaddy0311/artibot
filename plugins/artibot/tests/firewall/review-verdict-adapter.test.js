@@ -17,15 +17,20 @@
  *      서로 다른 계약이 생긴다. 드리프트를 red 로 만든다.
  *   3. v2 verdict enum = 매핑표 `target_verdicts` = Hardening §15 5종. 세 곳이
  *      값과 순서까지 일치해야 한다(한쪽만 늘어나는 것이 가장 흔한 드리프트).
- *   4. 매핑 **전건** — 5개 출처 어휘의 토큰 총수와 행 수가 같고, 각 토큰이 정확히
- *      한 번 나온다. 누락(fail-open)과 중복(모순 매핑) 둘 다 잡는다.
+ *   4. 매핑 **전건** — 6개 출처 어휘의 토큰 총수와 행 수가 같고, 각 (출처, 토큰) 쌍이
+ *      정확히 한 번 나온다. 누락(fail-open)과 중복(모순 매핑) 둘 다 잡는다.
  *   5. `SPEC_FAIL` 은 `ambiguous:true` · `verdict:null` · candidates 정확히
  *      `[REPAIR_REQUIRED, INTENT_REVIEW_REQUIRED]`, 그리고 **유일한 ambiguous 행**.
  *      자동 분류가 생기는 순간 red.
  *   6. `INTENT_REVIEW_REQUIRED` 에 도달하는 비-ambiguous 행이 **0건**임을 고정한다.
  *      이건 결함이 아니라 실측된 어휘 갭이고, 누가 임의 매핑을 채워 넣으면 red.
- *   7. 출처 파일 5종이 실재하고 각자 자기 토큰을 **실제로 포함**한다. 매핑표가
- *      상상 속 어휘를 들고 있지 않다는 것을 리포 파일로 접지한다.
+ *   7. 출처 파일 6종이 실재하고 각자 자기 토큰을 **단어 경계 기준으로** 포함한다.
+ *      매핑표가 상상 속 어휘를 들고 있지 않다는 것을 리포 파일로 접지한다.
+ *      부분문자열 대조는 허점이었다 — `warn` 은 engine.js 의 `level: 'warn'`
+ *      8줄 등 다른 whole-word 10곳(2026-09-17 실측: `\bwarn\b` 11줄 중 인용 줄 1)에
+ *      걸려서, CROSS_CHECK 리터럴이 사라져도 그린이었다.
+ *      추가로 `autopilot-driver` **한 출처에 한해** `cited_line` 의 그 줄이
+ *      `"pass"`·`"warn"`·`"fail"` 을 따옴표 리터럴로 들고 있는지까지 잰다.
  *   8. v2 필수 13필드(v1.1 참조 6종 + verification_id 포함)와 mission_id 패턴.
  *      ajv 로 인스턴스 수준까지 잰다. **ajv 가 없으면 skip 이 아니라 red** 다 —
  *      스키마를 읽을 수 있는 것은 ajv 뿐이라, 부재는 "약한 검증"이 아니라 "무검증"이다.
@@ -40,7 +45,15 @@
  *   재고, 런타임이 이 표를 실제로 읽는지는 재지 않는다.
  * - 스테이지 결합 규칙(SPEC_PASS ∧ QUALITY_PASS)은 `note` 로만 적혀 있고 기계
  *   검증 대상이 아니다.
- * - `cited_line` 은 참고값이다. 줄이 밀려도 red 가 되지 않는다(토큰 포함만 잰다).
+ * - `cited_line` 은 `autopilot-driver` **를 제외하면** 참고값이다. 나머지 5개 출처는
+ *   줄이 밀려도 red 가 되지 않는다(파일 전체 토큰 포함만 잰다). `autopilot-driver`
+ *   만 줄 단위로 고정돼 있어, engine.js 위쪽에 줄이 추가되면 red 가 된다 — 그때의
+ *   정답은 단언 완화가 아니라 `cited_line` 재측정이다.
+ * - 단어 경계 대조도 **그 줄이 CROSS_CHECK 드라이버 지시문인지**는 모른다. 같은
+ *   따옴표 리터럴 세 개를 가진 다른 줄을 가리켜도 그린이다.
+ * - `autopilot-driver` 행 3건은 **관측성 전용**이다. `recovery-record.js` 가
+ *   classify() 앞에서 PASS 를 null 로 접으므로 분류는 바뀌지 않는다. 이 게이트는
+ *   그 접기 동작을 재지 않는다(묶음 B 소관).
  * - `verification_id` 형식은 설계에서 **미정**이라 `minLength:1` 외에는 재지 않는다.
  * - mission_id 패턴은 T-24(발급자)와 **아직 대조되지 않았다**. 발급 형식이 다르면
  *   이 게이트는 그린인 채로 런타임이 거부당한다.
@@ -193,7 +206,7 @@ describe('gate 4 — mapping covers every legacy token exactly once', () => {
     const map = await loadMap();
     const tokenCount = map.sources.reduce((a, s) => a + s.vocabulary.length, 0);
     expect(map.rows).toHaveLength(tokenCount);
-    expect(tokenCount).toBe(15);
+    expect(tokenCount).toBe(18);
   });
 
   it('every (source, token) pair from sources[] has exactly one row', async () => {
@@ -269,21 +282,58 @@ describe('gate 6 — the vocabulary gap is pinned, not papered over', () => {
 });
 
 describe('gate 7 — every source vocabulary is grounded in a real repo file', () => {
-  it('each source file exists and literally contains each of its tokens', async () => {
+  it('each source file exists and contains each of its tokens as a whole word', async () => {
+    // Word-boundary, not substring: `toContain('warn')` also matches
+    // `level: 'warn'` (8 lines; 10 other whole-word hits in engine.js as of
+    // 2026-09-17, only 1 of the 11 being the cited instruction), so a
+    // substring assertion stays green even after the cited vocabulary literal
+    // is deleted. `\b` is safe for every token here — all of them are
+    // [A-Za-z_]+ — and it still tolerates the line moving.
     const map = await loadMap();
     for (const source of map.sources) {
       const abs = path.resolve(REPO_ROOT, source.file);
       expect(existsSync(abs), `${source.id}: missing ${source.file}`).toBe(true);
       const text = await readFile(abs, 'utf-8');
       for (const token of source.vocabulary) {
-        expect(text, `${source.id}: token ${token} absent from ${source.file}`).toContain(
-          token,
-        );
+        // Fail closed if a future token carries a regex metacharacter: `\b`
+        // only means "word boundary" for [A-Za-z_] tokens, and an unescaped
+        // token would silently change what the assertion matches.
+        expect(token, `${source.id}: token ${token} is not a plain word`).toMatch(/^[A-Za-z_]+$/);
+        const re = new RegExp(`\\b${token}\\b`);
+        expect(
+          re.test(text),
+          `${source.id}: token ${token} absent as a whole word from ${source.file}`,
+        ).toBe(true);
       }
     }
   });
 
-  it('lists exactly the five known vocabularies', async () => {
+  it('pins the autopilot-driver vocabulary to the exact cited line, as quoted literals', async () => {
+    // The only source whose `cited_line` is enforced. The driver vocabulary is
+    // three very common English words, so file-wide containment proves nothing
+    // about the CROSS_CHECK instruction; the line itself is the contract.
+    const map = await loadMap();
+    const source = map.sources.find((s) => s.id === 'autopilot-driver');
+    expect(source, 'autopilot-driver source is missing').toBeTruthy();
+    expect(Number.isInteger(source.cited_line)).toBe(true);
+    expect(source.cited_line).toBeGreaterThan(0);
+
+    const abs = path.resolve(REPO_ROOT, source.file);
+    const lines = (await readFile(abs, 'utf-8')).split(/\r?\n/);
+    const line = lines[source.cited_line - 1];
+    expect(
+      typeof line,
+      `${source.file} has ${lines.length} lines, cited_line ${source.cited_line} is out of range`,
+    ).toBe('string');
+    for (const token of source.vocabulary) {
+      expect(
+        line,
+        `cited_line ${source.cited_line} must carry the quoted literal "${token}"`,
+      ).toContain(`"${token}"`);
+    }
+  });
+
+  it('lists exactly the six known vocabularies', async () => {
     const map = await loadMap();
     expect(map.sources.map((s) => s.id)).toEqual([
       'design-v1.0-08',
@@ -291,6 +341,7 @@ describe('gate 7 — every source vocabulary is grounded in a real repo file', (
       'code-reviewer',
       'spec-reviewer',
       'quality-reviewer',
+      'autopilot-driver',
     ]);
   });
 });

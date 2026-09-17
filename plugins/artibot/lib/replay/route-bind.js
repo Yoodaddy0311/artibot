@@ -36,6 +36,9 @@
  * Invariant 2 (subagent_type preservation) needs the spawn record's
  * `canonicalModel` next to the receipt's prediction, which the bind line already
  * carries as `selected_model` / `recommended_model`; it is not re-derived here.
+ * On a NAMED spawn (`agent_type` is a teammate name) `selected_model` is that
+ * receipt's own definition reinterpreted, not an independent policy answer — see
+ * `lib/routing/bind-model-fallback.js`.
  *
  * PURITY (design §1-8, L2). No clock, no filesystem, no randomness. Every list
  * in the result is sorted on a stable key so a shuffled input serializes to the

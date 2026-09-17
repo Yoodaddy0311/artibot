@@ -6,9 +6,35 @@
  * record* helpers' mutation/guard contracts. These functions persist via
  * session-store; we operate on throwaway in-memory state and assert on the
  * returned/mutated object (persist is best-effort and tolerant of unknown ids).
+ *
+ * STORE ISOLATION (measured 2026-09-17). "Persist is best-effort" is not the
+ * same as "persist writes nothing". `recordPhaseResult` / `recordCheckpoint` /
+ * `recordRiskEvent` / `recordSecretLeak` all reach `session-store.js`, whose
+ * `getStoreDir()` (session-store.js:105) resolves to
+ * `<getPluginRoot()>/runtime/autopilot` at CALL time. A single unmodified run
+ * of this file left 16 files there (15 `.json` + 1 `.events.ndjson`), and the
+ * `afterEach deleteSessionArtifacts` below covers only the VERIFY describe, so
+ * the rest accumulated run after run.
+ *
+ * `getPluginRoot()` (lib/core/platform.js:105-120) re-reads
+ * `CLAUDE_PLUGIN_ROOT` on every call and never caches, so pointing the env var
+ * at a temp dir in `beforeAll` is enough even though the module graph is
+ * already imported by then. The `artibot.config.json` stub is written because
+ * `getPluginRoot` treats a config-less directory as a possibly stale root.
+ * Sandbox shape follows `tests/hooks/dev-verify-gate-ledger.test.js`.
+ *
+ * The existing `afterEach` cleanup stays as a second layer; neither replaces
+ * the other.
+ *
+ * WHAT THIS ISOLATION DOES NOT COVER: stores that do not resolve through
+ * `getPluginRoot` (the decisions store walks up to the nearest `.git` instead),
+ * and anything a child process writes.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   classifyFailure,
   enterPhase,
@@ -23,6 +49,25 @@ import {
 import { openPhaseAttempt } from '../../lib/autopilot/phase-attempt.js';
 import { shouldPause } from '../../lib/autopilot/safety.js';
 import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
+
+/** Temp plugin root for this file; created in beforeAll, removed in afterAll. */
+let sandboxRoot = null;
+/** Prior CLAUDE_PLUGIN_ROOT value; `undefined` means it was unset. */
+let previousPluginRoot;
+
+beforeAll(() => {
+  sandboxRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-engine-state-'));
+  writeFileSync(path.join(sandboxRoot, 'artibot.config.json'), '{}', 'utf8');
+  previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  process.env.CLAUDE_PLUGIN_ROOT = sandboxRoot;
+});
+
+afterAll(() => {
+  if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+  else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
+  if (sandboxRoot) rmSync(sandboxRoot, { recursive: true, force: true });
+  sandboxRoot = null;
+});
 
 function makeState(overrides = {}) {
   return {

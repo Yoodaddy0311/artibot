@@ -59,7 +59,10 @@ async function buildFixture(overrides = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'artibot-selfbench-'));
 
   const config = {
-    team: { autoApply: overrides.autoApply ?? true },
+    // `overrides.team` replaces the whole block (and `null` removes it) so a
+    // test can exercise `enabled`/absent-key rows; `overrides.autoApply` stays
+    // as the shorthand every existing test uses.
+    ...(overrides.team === null ? {} : { team: overrides.team ?? { autoApply: overrides.autoApply ?? true } }),
     dashboard: { enabled: overrides.dashboardEnabled ?? false },
     ago: {
       selfBenchmark: {
@@ -196,9 +199,56 @@ describe('self-benchmark/gatherRepoStats', () => {
     expect(s).toHaveProperty('sdkHasCommit');
     expect(s).toHaveProperty('extensionLoaderExists');
     expect(s).toHaveProperty('autoApply');
+    expect(s).toHaveProperty('teamEnabled');
     expect(s).toHaveProperty('hookCount');
     expect(s).toHaveProperty('plainLangEntries');
     expect(s).toHaveProperty('tests.passed');
+  });
+
+  // `autoApply` and `teamEnabled` are two DIFFERENT questions and the stats
+  // envelope keeps both. `autoApply` is the raw single key, and
+  // `scoreProductive` scores it plus prints it as evidence (`team.autoApply:`),
+  // so its value must not change meaning under this field's feet.
+  // `teamEnabled` is the composite opt-out answer owned by
+  // `lib/core/team-config.js#isTeamEnabled`, which this L3 module can import
+  // only because that owner sits at L1.
+  describe('teamEnabled vs autoApply', () => {
+    it('enabled:true + autoApply:false -> teamEnabled false, autoApply false', async () => {
+      const f = await buildFixture({ team: { enabled: true, autoApply: false } });
+      try {
+        const s = await gatherRepoStats(f.dir);
+        expect(s.teamEnabled).toBe(false);
+        expect(s.autoApply).toBe(false);
+      } finally {
+        await rm(f.dir, { recursive: true, force: true }).catch(() => {});
+      }
+    });
+
+    it('enabled:false + autoApply:true -> teamEnabled false while autoApply stays true', async () => {
+      // The row that shows the two fields are not redundant: the raw key says
+      // true, the composite answer says off.
+      const f = await buildFixture({ team: { enabled: false, autoApply: true } });
+      try {
+        const s = await gatherRepoStats(f.dir);
+        expect(s.teamEnabled).toBe(false);
+        expect(s.autoApply).toBe(true);
+      } finally {
+        await rm(f.dir, { recursive: true, force: true }).catch(() => {});
+      }
+    });
+
+    it('absent team block -> teamEnabled true (shipped default) while autoApply is false', async () => {
+      // `autoApply` is `Boolean(undefined)` here, which is exactly why it
+      // cannot stand in for the enable question: absent keys mean ON.
+      const f = await buildFixture({ team: null });
+      try {
+        const s = await gatherRepoStats(f.dir);
+        expect(s.teamEnabled).toBe(true);
+        expect(s.autoApply).toBe(false);
+      } finally {
+        await rm(f.dir, { recursive: true, force: true }).catch(() => {});
+      }
+    });
   });
 
   it('counts commands and EFFORT_POLICY coverage', async () => {

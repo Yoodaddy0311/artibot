@@ -180,9 +180,10 @@ describe('recordSkillLevelChanged()', () => {
 });
 
 describe('the event-type allowlist is closed and live', () => {
-  it('lists exactly the seven types this module writes', () => {
+  it('lists exactly the eight types this module writes', () => {
     expect(Object.isFrozen(DECISION_EVENT_TYPES)).toBe(true);
     expect([...DECISION_EVENT_TYPES].sort()).toEqual([
+      'activation-observed',
       'memory-injection-measured', 'recorder-stats', 'routing-classified',
       'self-control-decided', 'skill-level-changed', 'topology-recommended',
       'workflow-planned',

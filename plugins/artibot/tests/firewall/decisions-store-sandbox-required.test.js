@@ -239,6 +239,13 @@ const TIER1_WRITERS = [
   // D9 (2026-09-05): the trail's unique writers, now store writers.
   tier1Writer('recordSelfControlDecision', /\brecordSelfControlDecision\s*\(/, 'decision-events.js'),
   tier1Writer('recordSkillLevelChanged', /\brecordSkillLevelChanged\s*\(/, 'decision-events.js'),
+  // Wave 12 (2026-09-17): the NL-activation numerator/denominator writer. Its
+  // payload builder `lib/observability/activation-observed.js` is deliberately
+  // NOT a writer — it is pure and names none of the STORE_WRITER_REF symbols,
+  // so the module-axis ratchet correctly leaves it unlisted. Only this
+  // recorder reaches disk, and without this entry a test of it was invisible
+  // to the whole gate.
+  tier1Writer('recordActivationObserved', /\brecordActivationObserved\s*\(/, 'decision-events.js'),
 ];
 
 /**
@@ -421,6 +428,41 @@ describe('scanner self-verification (positive controls)', () => {
       "it('x', async () => { await recordSignal({ type: 'slash-command', value: 'x' }); });",
     ].join('\n');
     expect(reachesWriter(portless)).toBeNull();
+  });
+
+  it('flags the Wave 12 activation recorder, and clears it once the store is pinned', () => {
+    // Measured 2026-09-17, before the TIER1_WRITERS entry above existed: this
+    // source matched none of the eight registered call regexes, so
+    // reachesWriter returned null and the gate demanded no mechanism from it.
+    // A real test of the writer was invisible. This control is what makes the
+    // entry's absence red rather than silent.
+    const bad = [
+      "import { recordActivationObserved } from '../../lib/observability/decision-events.js';",
+      "it('x', () => { recordActivationObserved('run-1', { predicted_mode: 'split' }); });",
+    ].join('\n');
+    expect(reachesWriter(bad)).toBe('tier1:recordActivationObserved');
+    expect(mechanismsIn(bad)).toEqual([]);
+
+    // The negative half: the SAME reach, now isolated, must clear the gate. A
+    // control that only ever proves "flagged" cannot tell a working allowlist
+    // from one that rejects everything.
+    const isolated = [
+      bad,
+      "const storeDir = mkdtempSync(path.join(os.tmpdir(), 'artibot-activation-store-'));",
+      "recordActivationObserved('run-1', {}, { storeDir });",
+    ].join('\n');
+    expect(reachesWriter(isolated)).toBe('tier1:recordActivationObserved');
+    expect(mechanismsIn(isolated)).toContain('storeDir-injected');
+
+    // The pure payload builder is NOT a writer: it has no fs and names none of
+    // the STORE_WRITER_REF symbols, so importing it alone must stay clean.
+    // Otherwise every future consumer of the builder would be dragged into the
+    // gate and forced to pin a store it never touches.
+    const pureBuilder = [
+      "import { buildActivationRecord } from '../../lib/observability/activation-observed.js';",
+      "it('x', () => { expect(buildActivationRecord({ topology: { mode: 'split' } })).toBeTruthy(); });",
+    ].join('\n');
+    expect(reachesWriter(pureBuilder)).toBeNull();
   });
 
   it('flags an unisolated hook call on a plain prompt (tier 2)', () => {

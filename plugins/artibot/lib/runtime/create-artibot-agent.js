@@ -12,6 +12,7 @@
 import { loadConfig } from '../core/config.js';
 import { extractUserPromptText } from '../core/hook-utils.js';
 import { createExtensionRegistry } from '../core/extension.js';
+import { isTeamEnabled } from '../core/team-config.js';
 import { createCompositeBackend } from './backend/composite-backend.js';
 import { createRouterMiddleware } from './middleware/router.js';
 import { createMemoryMiddleware } from './middleware/memory.js';
@@ -316,7 +317,11 @@ export function createArtibotAgent(options = {}) {
           },
           config: {
             threshold: config?.cognitive?.router?.threshold ?? 0.4,
-            teamEnabled: Boolean(config?.team?.enabled),
+            // One owner for the enable meaning (`core/team-config.js`). This
+            // was `Boolean(config?.team?.enabled)`, which answered differently
+            // from every other surface: it ignored the `autoApply` opt-out and
+            // read an absent `team` block as OFF when the shipped default is ON.
+            teamEnabled: isTeamEnabled(config?.team),
             ambiguityThreshold: config?.automation?.ambiguityThreshold ?? 50,
           },
         },

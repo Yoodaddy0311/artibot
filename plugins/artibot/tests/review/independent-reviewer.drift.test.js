@@ -122,9 +122,9 @@ describe('verdict-adapter-map.json mirror', () => {
     expect(comparableRows([...ADAPTER_ROWS])).toEqual(comparableRows(adapterMap.rows));
   });
 
-  it('the row count matches the measured 15', () => {
-    expect(adapterMap.rows).toHaveLength(15);
-    expect(ADAPTER_ROWS).toHaveLength(15);
+  it('the row count matches the measured 18', () => {
+    expect(adapterMap.rows).toHaveLength(18);
+    expect(ADAPTER_ROWS).toHaveLength(18);
   });
 
   it('target_verdicts equals the canonical five', () => {

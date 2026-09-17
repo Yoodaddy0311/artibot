@@ -93,8 +93,10 @@ export function foldVerify(verifyResult) {
  * (`rules.unmapped_token: reject`), the ambiguous `SPEC_FAIL` row, two sources
  * disagreeing on one spelling — and sends `classify()` to the verification fold
  * or to `unknown`, never to a silent PASS. The driver writes
- * `"pass" | "warn" | "fail"` (`engine.js#runPhase3CrossCheck`) while schema-v1
- * spells the middle token `warning`, so `warn` folds to `null` by design.
+ * `"pass" | "warn" | "fail"` (`engine.js#runPhase3CrossCheck`); the map's
+ * `autopilot-driver` source carries all three, folding `warn` to PASS like
+ * every other WARN-family row, and `judge()` below hands a PASS to
+ * `classify()` as `null` — so the mapping is observability only.
  *
  * @param {unknown} legacyToken - Typically `state.crossCheck.verdict`.
  * @returns {string|null} A canonical verdict, or null when undetermined.

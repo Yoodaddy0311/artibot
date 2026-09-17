@@ -44,21 +44,13 @@
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { sleepSync } from './file.js';
 
 /** Maximum time (ms) to wait for a lock before forcing acquisition. */
 const LOCK_TIMEOUT_MS = 5000;
 
 /** Interval (ms) between lock acquisition retries. */
 const LOCK_RETRY_MS = 50;
-
-/**
- * Backing cell for the retry sleep. Nothing ever writes to it or notifies on
- * it, so `Atomics.wait` on index 0 for value 0 always runs the full timeout
- * and returns `'timed-out'` — i.e. it is a synchronous sleep that yields the
- * CPU. Allocated once; every waiter times out independently, so sharing one
- * cell across nested or re-entrant calls is safe.
- */
-const RETRY_SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
 
 /** Signals intercepted so held locks are released before the process dies. */
 const RELEASE_SIGNALS = ['SIGTERM', 'SIGINT'];
@@ -175,13 +167,13 @@ export function withFileLock(filePath, fn) {
     }
 
     // Synchronous sleep that yields the CPU. Measured on Node 24 / Windows:
-    // returns 'timed-out' after ~56ms for a 50ms request, consuming 0.0% of a
-    // core, where the busy-wait it replaces burned 96.7% of one core for the
-    // same wall time. Contended hooks no longer pin a core while waiting.
+    // returns after ~56ms for a 50ms request, consuming 0.0% of a core, where
+    // the busy-wait it replaces burned 96.7% of one core for the same wall
+    // time. Contended hooks no longer pin a core while waiting.
     // The OS timer granularity means each retry overshoots slightly, so a
     // 5s window fits ~89 retries rather than ~100; the timeout itself is
     // wall-clock checked above and is unaffected.
-    Atomics.wait(RETRY_SLEEP_CELL, 0, 0, LOCK_RETRY_MS);
+    sleepSync(LOCK_RETRY_MS);
   }
 
   // Acquire lock

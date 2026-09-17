@@ -5,8 +5,9 @@
  * from a single source so the auto-team decision and each teammate's
  * `[artibot:effort][artibot:task-budget]` prefix stay consistent.
  *
- * Layer integrity: imports effort-policy.js ONLY (the static effort mapping;
- * no routing-graph dependency). `resolveEffort`/`budgetResolver` are injected
+ * Layer integrity: imports effort-policy.js (the static effort mapping; no
+ * routing-graph dependency) and the L1 predicate `core/team-config.js` — both
+ * are leaf, stateless modules at or below this layer. `resolveEffort`/`budgetResolver` are injected
  * via `deps` by the L5 composition root (tasks.js); when absent the planner
  * falls back to the static `getEffortForCommand` mapping and a zero budget so
  * it runs standalone.
@@ -18,6 +19,8 @@
  *
  * @module lib/cognitive/workflow-plan
  */
+
+import { isTeamEnabled } from '../core/team-config.js';
 
 import { getEffortForCommand } from './effort-policy.js';
 
@@ -150,24 +153,23 @@ export function evaluateTrigger(classification, intent, triggers) {
 }
 
 /**
- * Is the auto-team machinery enabled at all for this config?
+ * Re-export of the enable/opt-out predicate, whose owner now lives at L1
+ * (`lib/core/team-config.js#isTeamEnabled`).
  *
- * SOLE OWNER of the enable/opt-out meaning, the same way `evaluateTrigger` is
- * the sole owner of the threshold meaning. `scripts/hooks/auto-team-trigger.js`
- * used to compute this expression itself; the two copies are now one, so a
- * change of meaning cannot reach one surface and miss the other.
+ * WHY IT MOVED AND WHY THIS LINE STAYS. The meaning has to be readable from
+ * every layer — `lib/learning/self-benchmark.js` (L3) and the L5 telemetry
+ * envelope both needed it and, being unable to import L4, each computed
+ * `Boolean(config?.team?.enabled)` instead, which ignores the `autoApply`
+ * opt-out. L1 is reachable from all of them. Seven consumers import the
+ * predicate by this module's path, so the re-export keeps those paths valid
+ * rather than rewriting them; `buildWorkflowPlan` below also calls it locally,
+ * which is why it is imported and re-exported rather than passed through with
+ * `export ... from`.
  *
- * `enabled` and `autoApply` are ANDed (owner decision OD3, 2026-09-15): either
- * one set to `false` turns the team off. That is the meaning the hook already
- * shipped, carried over verbatim rather than redesigned. Absent keys mean ON —
- * the gate is `!== false`, not truthiness, so `undefined` keeps the default.
- *
- * @param {{ enabled?: boolean, autoApply?: boolean }|undefined} teamConfig - `config.team`
- * @returns {boolean}
+ * This is a pass-through, not a second definition: the identity is pinned in
+ * `tests/core/team-config.test.js`.
  */
-export function isTeamEnabled(teamConfig) {
-  return teamConfig?.enabled !== false && teamConfig?.autoApply !== false;
-}
+export { isTeamEnabled };
 
 /**
  * Read the `/split` recommendation thresholds from config.

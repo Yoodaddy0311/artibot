@@ -14,6 +14,7 @@ import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { appendSpawn } from '../../lib/learning/ledger/spawn-ledger.js';
 import { getActionClassForAgent } from '../../lib/routing/action-classifier.js';
+import { resolveBoundModel } from '../../lib/routing/bind-model-fallback.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { DEFAULT_TAIL_BYTES, readLedgerTail as readLedgerTailWindow } from '../../lib/runtime/ledger-tail.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
@@ -474,10 +475,11 @@ function matchReceipt(candidates, promptId, agentType) {
  * NEVER THROWS: every failure becomes a `skipped:<reason>` string and the
  * hook's stdout is untouched either way.
  *
- * @param {object} ctx - `{ hookData, agentId, agentType, sessionId, missionId,
- *   taskId, projectRoot, canonicalModel }`
+ * @param {object} ctx - `{ hookData, agentId, agentType, sessionId, missionId, taskId,
+ *   projectRoot, canonicalModel, config }`
  * @returns {{ recommendedModel: string|null, actionClass: string|null,
- *   routeLedger: string }}
+ *   routeLedger: string, canonicalModel: string|null }} `canonicalModel` is whatever landed
+ *   on the bind row's `selected_model` — the receipt-derived answer on a named spawn.
  */
 /**
  * Kept under the pre-L2-D1 name on purpose. `commands/scorecard.md` cites
@@ -498,6 +500,8 @@ function bindRoute(ctx) {
     recommendedModel: null,
     actionClass: getActionClassForAgent(ctx.agentType),
     routeLedger: 'skipped:unknown',
+    // No receipt ⇒ no definition to read, so non-binding paths keep the policy answer.
+    canonicalModel: typeof ctx.canonicalModel === 'string' ? ctx.canonicalModel : null,
   };
   const skip = (reason) => ({
     ...base, routeLedger: `skipped:${String(reason).slice(0, REASON_MAX)}`,
@@ -533,6 +537,14 @@ function bindRoute(ctx) {
       recommendedModel: match.receipt.recommendedModel ?? null,
       actionClass: match.receipt.actionClass ?? base.actionClass,
     };
+    // The model of the agent that actually spawned. `agent_type` is the DEFINITION name
+    // only on a direct Agent-tool spawn; on a named spawn it is the teammate's name, which
+    // no policy lists, so the definition is read off the receipt instead (rules and blind
+    // spots: bind-model-fallback.js). `ok:bound` holds by construction — a receipt matched.
+    const bound = resolveBoundModel({
+      canonicalModel: ctx.canonicalModel, routeLedger: 'ok:bound', config: ctx.config,
+      receiptSubagentType: match.receipt.subagentType ?? null,
+    });
     const data = {
       tool_use_id: match.receipt.toolUseId,
       agent_id: ctx.agentId,
@@ -543,11 +555,11 @@ function bindRoute(ctx) {
     // WHICH of the two identity spellings matched. Without it, `confidence:
     // 'exact'` cannot be audited against the host behaviour it assumes.
     if (match.matchedOn !== null) data.matched_on = match.matchedOn;
-    // The receipt's `models.selected` was a PREDICTION from `subagent_type`;
-    // this is the policy answer for the agent that actually spawned. Where the
-    // two disagree, the correlation picked the wrong receipt or the prediction
-    // was wrong — either way the pair is what makes that visible.
-    if (typeof ctx.canonicalModel === 'string') data.selected_model = ctx.canonicalModel;
+    // WHEN THE PAIR IS A COMPARISON, AND WHEN IT IS A TAUTOLOGY. Direct spawn: `agent_type`
+    // is the definition, so this is an INDEPENDENT policy answer and a disagreement with the
+    // receipt's prediction is a real signal (wrong receipt, or wrong prediction). Named spawn:
+    // this is RE-DERIVED from the receipt's `subagent_type`, hence equal to its tier BY DEFINITION.
+    if (typeof bound.model === 'string') data.selected_model = bound.model;
     if (observed.recommendedModel !== null) data.recommended_model = observed.recommendedModel;
     if (typeof observed.actionClass === 'string') data.action_class = observed.actionClass;
 
@@ -566,9 +578,10 @@ function bindRoute(ctx) {
     if (ctx.taskId !== null) envelope.task_id = ctx.taskId;
 
     const result = appendLedgerEvent(ctx.projectRoot, envelope);
-    if (result?.ok === true) return { ...observed, routeLedger: 'ok:bound' };
+    if (result?.ok === true) return { ...observed, routeLedger: 'ok:bound', canonicalModel: bound.model };
+    // No bind row exists, so the receipt-derived value has nothing to agree with.
     const why = String(result?.reason ?? 'append-failed').slice(0, REASON_MAX);
-    return { ...observed, routeLedger: `skipped:${why}` };
+    return { ...observed, routeLedger: `skipped:${why}`, canonicalModel: base.canonicalModel };
   } catch (err) {
     return skip(err?.message || 'bind-failed');
   }
@@ -650,14 +663,19 @@ function initTeamContext(loaded, hookData, agentRole) {
 async function handleStart(hookData, ids) {
   const { agentId, agentRole, agentType, statePath } = ids;
   const requestedModel = extractRequestedModel(hookData);
-  const { canonicalModel, modelMismatch } = await checkModelPolicy(agentType, requestedModel);
+  // `config` goes into the bind rather than being re-loaded there: one hydration, one answer.
+  const { canonicalModel, modelMismatch, config } = await checkModelPolicy(agentType, requestedModel);
   const sessionId = hookData?.session_id || hookData?.sessionId || null;
   const taskId = extractTaskId(hookData);
   const missionId = resolveMissionId(hookData, sessionId);
   const projectRoot = payloadProjectRoot(hookData);
   const route = observeRoute({
-    hookData, agentId, agentType, sessionId, missionId, taskId, projectRoot, canonicalModel,
+    hookData, agentId, agentType, sessionId, missionId, taskId, projectRoot, canonicalModel, config,
   });
+  // What the BIND row recorded: `canonicalModel` on a direct spawn, the receipt's
+  // definition on a named one. `modelMismatch` deliberately stays keyed to the
+  // payload's `agent_type` — a name matched no policy key, so nothing contradicts it.
+  const boundModel = route.canonicalModel;
   withFileLock(statePath, () => {
     const loaded = loadState();
     saveState({
@@ -670,7 +688,7 @@ async function handleStart(hookData, ids) {
           agentType,
           active: true,
           startedAt: new Date().toISOString(),
-          canonicalModel,
+          canonicalModel: boundModel,
           modelMismatch,
           recommendedModel: route.recommendedModel,
           actionClass: route.actionClass,
@@ -679,7 +697,7 @@ async function handleStart(hookData, ids) {
     });
   });
   recordSpawn(hookData, projectRoot, {
-    event: 'start', agentId, agentType, requestedModel, canonicalModel, modelMismatch,
+    event: 'start', agentId, agentType, requestedModel, canonicalModel: boundModel, modelMismatch,
     recommendedModel: route.recommendedModel,
     actionClass: route.actionClass,
     routing_epoch_id: agentId,
