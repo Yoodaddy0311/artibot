@@ -389,6 +389,66 @@ describe('subagent-handler v5 routing fields (child process)', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Named spawns: `agent_type` is a NAME, so the model comes from the receipt
+  // -------------------------------------------------------------------------
+
+  it('re-derives the model from the receipt when the payload names the spawn instead of typing it', async () => {
+    // /team and /split spawns report the TEAMMATE NAME in `agent_type`. A name
+    // is not a policy key, so the hook's own lookup answers null and the field
+    // went missing on 244 of 249 live bind rows (2026-09-15 13:42Z). The
+    // definition that actually spawned is on the receipt.
+    expect(runPre(prePayload({
+      tool_input: { subagent_type: 'tdd-guide', name: 'split-x-impl' },
+    }), home).status).toBe(0);
+    const started = runHook(basePayload({ agent_type: 'split-x-impl' }), 'start', home);
+    expect(started.status).toBe(0);
+
+    const expected = resolveModel('tdd-guide', {}, await loadConfig());
+    const { data } = boundLine(repo);
+    const [rec] = readSpawns(repo);
+    expect(data.matched_on).toBe('name');
+    expect(data.selected_model).toBe(expected);
+    expect(rec.canonicalModel).toBe(expected);
+    // No new advisory: the name never matched a policy key, and inventing a
+    // mismatch warning for that would be a false positive, not a finding.
+    expect(rec.modelMismatch).toBe(false);
+    expect(started.stdout.trim()).toBe(
+      JSON.stringify({ message: '[team] Agent registered: agent-route-1 (split-x-impl)' }),
+    );
+  });
+
+  it('leaves selected_model ABSENT when the receipt names a definition the policy does not list', () => {
+    // `Explore` is a host built-in with no declared tier. Recording 'opus' for
+    // it would dress an unknown as a measurement; the honest row omits the key.
+    expect(runPre(prePayload({
+      tool_input: { subagent_type: 'Explore', name: 'probe-x' },
+    }), home).status).toBe(0);
+    expect(runHook(basePayload({ agent_type: 'probe-x' }), 'start', home).status).toBe(0);
+
+    const { data } = boundLine(repo);
+    expect(data).not.toHaveProperty('selected_model');
+    expect(readSpawns(repo)[0].canonicalModel).toBeNull();
+  });
+
+  it('fills the model on a FIFO bind but leaves the guess labelled as one', async () => {
+    // The fallback inherits the tier-3 uncertainty: a wrong receipt yields the
+    // wrong definition's model. `confidence: 'fifo'` is where that is recorded,
+    // and this pins that the fill did NOT quietly upgrade it.
+    const pre = prePayload({ tool_input: { subagent_type: 'code-reviewer' } });
+    delete pre.prompt_id;
+    delete pre.tool_input.name;
+    expect(runPre(pre, home).status).toBe(0);
+    const start = basePayload({ agent_type: 'teammate' });
+    delete start.prompt_id;
+    expect(runHook(start, 'start', home).status).toBe(0);
+
+    const { data } = boundLine(repo);
+    expect(data.confidence).toBe('fifo');
+    expect(data).not.toHaveProperty('matched_on');
+    expect(data.selected_model).toBe(resolveModel('code-reviewer', {}, await loadConfig()));
+  });
+
+  // -------------------------------------------------------------------------
   // Unbound is a first-class, correct outcome
   // -------------------------------------------------------------------------
 
