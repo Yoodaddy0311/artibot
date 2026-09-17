@@ -165,11 +165,15 @@ export const ADAPTER_ROWS = Object.freeze([
   { source: 'quality-reviewer', token: 'QUALITY_PASS', verdict: 'PASS', ambiguous: false, candidates: [] },
   { source: 'quality-reviewer', token: 'QUALITY_WARN', verdict: 'PASS', ambiguous: false, candidates: [] },
   { source: 'quality-reviewer', token: 'QUALITY_FAIL', verdict: 'REPAIR_REQUIRED', ambiguous: false, candidates: [] },
+  { source: 'autopilot-driver', token: 'pass', verdict: 'PASS', ambiguous: false, candidates: [] },
+  { source: 'autopilot-driver', token: 'warn', verdict: 'PASS', ambiguous: false, candidates: [] },
+  { source: 'autopilot-driver', token: 'fail', verdict: 'REPAIR_REQUIRED', ambiguous: false, candidates: [] },
 ]);
 
 /**
  * Tokens that may be recognised inside free-running prose. Lowercase
- * draft/schema-v1 tokens (`pass`, `fail`, `warning`, `repair`, `replan`) are
+ * draft/schema-v1/autopilot-driver tokens (`pass`, `fail`, `warn`, `warning`,
+ * `repair`, `replan`) are
  * excluded on purpose: "the tests pass" is a sentence, not a verdict. They are
  * honoured only as a structured `verdict` field or a labelled `verdict:` line.
  */
@@ -186,7 +190,7 @@ const PROSE_SAFE_TOKENS = Object.freeze([
   'QUALITY_FAIL',
 ]);
 
-/** Labelled verdict lines emitted by the four reviewer vocabularies. */
+/** Labelled verdict lines emitted by the reviewer vocabularies. */
 const LABELLED_VERDICT_LINE =
   /^[\s>*_-]*(?:verdict|judgment|judgement|판정|평결)\s*[:=]\s*["'`]?([A-Za-z_]+)["'`]?/gim;
 

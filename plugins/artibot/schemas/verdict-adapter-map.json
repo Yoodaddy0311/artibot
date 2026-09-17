@@ -1,5 +1,5 @@
 {
-  "$comment": "Vocabulary adapter map: the four legacy review verdict vocabularies (plus the v1.0 design draft) folded into the five canonical verdicts of ADDENDUM-HARDENING section 15. This file is DATA, not a JSON Schema. Canonical prose: v5 lane 4 section 5.3. Enforced by tests/firewall/review-verdict-adapter.test.js.",
+  "$comment": "Vocabulary adapter map: the four legacy review verdict vocabularies (plus the v1.0 design draft and the autopilot Phase 3 CROSS_CHECK driver vocabulary) folded into the five canonical verdicts of ADDENDUM-HARDENING section 15. This file is DATA, not a JSON Schema. Canonical prose: v5 lane 4 section 5.3. Enforced by tests/firewall/review-verdict-adapter.test.js.",
   "schema_version": 1,
   "target_verdicts": [
     "PASS",
@@ -48,6 +48,13 @@
       "file": "plugins/artibot/agents/quality-reviewer.md",
       "cited_line": 136,
       "vocabulary": ["QUALITY_PASS", "QUALITY_WARN", "QUALITY_FAIL"]
+    },
+    {
+      "id": "autopilot-driver",
+      "description": "autopilot engine Phase 3 CROSS_CHECK driver instruction vocabulary (state.crossCheck.verdict)",
+      "file": "plugins/artibot/lib/autopilot/engine.js",
+      "cited_line": 435,
+      "vocabulary": ["pass", "warn", "fail"]
     }
   ],
   "rows": [
@@ -166,6 +173,30 @@
     {
       "source": "quality-reviewer",
       "token": "QUALITY_FAIL",
+      "verdict": "REPAIR_REQUIRED",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "autopilot-driver",
+      "token": "pass",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": ""
+    },
+    {
+      "source": "autopilot-driver",
+      "token": "warn",
+      "verdict": "PASS",
+      "ambiguous": false,
+      "candidates": [],
+      "note": "Demoted to PASS like schema-v1 warning and the *_WARN rows; the recovery journal keeps the raw token as verdictRaw. Observability only: recovery-record.js folds PASS to null before classify(), so classification is unchanged."
+    },
+    {
+      "source": "autopilot-driver",
+      "token": "fail",
       "verdict": "REPAIR_REQUIRED",
       "ambiguous": false,
       "candidates": [],

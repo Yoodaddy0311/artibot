@@ -353,8 +353,14 @@ describe('parseReviewVerdict — folding the four legacy vocabularies', () => {
   it('foldLegacyToken reports every source that uses a shared token', () => {
     const fold = foldLegacyToken('pass');
     expect(fold).toMatchObject({ found: true, verdict: 'PASS', ambiguous: false });
-    expect(fold.sources.sort()).toEqual(['design-v1.0-08', 'schema-v1']);
+    expect(fold.sources.sort()).toEqual(['autopilot-driver', 'design-v1.0-08', 'schema-v1']);
     expect(foldLegacyToken('nope').found).toBe(false);
+  });
+
+  it('folds the driver-only warn token through its single source', () => {
+    const fold = foldLegacyToken('warn');
+    expect(fold).toMatchObject({ found: true, verdict: 'PASS', ambiguous: false });
+    expect(fold.sources).toEqual(['autopilot-driver']);
   });
 });
 
