@@ -30,6 +30,10 @@ const DEFAULT_TOKENS_PER_CHAR = 12;          // empirical lower bound: prompt + 
 const DEFAULT_DURATION_MS = 30 * 60 * 1000;  // 30 minutes
 const DEFAULT_MIN_TOKENS = 8000;             // floor estimate for trivial goal
 const HISTORY_SESSION_CAP = 50;              // limit IO churn when many sessions exist
+// How many sessions may be READ per cap slot while searching backwards for
+// usable history. Bounds the worst case (a store where nothing is usable) at
+// cap x this many readEvents calls instead of a full-store scan.
+const HISTORY_READ_BUDGET_PER_SLOT = 10;
 
 const COMPLEXITY_KEYWORDS = Object.freeze({
   // each tier multiplies the baseline char-derived token estimate
@@ -108,7 +112,22 @@ function aggregateSession(sessionId, readEvents) {
 
 /**
  * Compute the rolling mean of tokens-per-char and duration across the most
- * recent N sessions. Sessions without usable usage are excluded from N.
+ * recent `cap` USABLE sessions. Sessions without usable usage are skipped and
+ * the scan continues further back, rather than consuming a window slot.
+ *
+ * Why not `ids.slice(-cap)`: `listSessions()` is a directory listing, so it is
+ * alphabetical and holds every id the store ever accumulated, usable or not. A
+ * block of unusable ids that sorts to the END of that listing used to fill the
+ * whole window and drive `n` to 0 while real history sat just outside it.
+ *
+ * The backwards scan is bounded: at most `cap * HISTORY_READ_BUDGET_PER_SLOT`
+ * sessions are read, so a store where nothing is usable costs a fixed number of
+ * reads instead of one read per stored session. Usability is decided only by
+ * the events (`aggregateSession` plus a positive tokens-per-char); no rule is
+ * applied to the id string itself.
+ *
+ * Deterministic: the same id list and the same events always yield the same
+ * `{tokensPerChar, avgDurationMs, n}`.
  *
  * @param {{listSessions:Function, readEvents:Function, cap:number}} deps
  * @returns {{tokensPerChar:number, avgDurationMs:number, n:number}}
@@ -119,12 +138,15 @@ function rollHistory(deps) {
   if (!Array.isArray(ids) || ids.length === 0) {
     return { tokensPerChar: 0, avgDurationMs: 0, n: 0 };
   }
-  const recent = ids.slice(-deps.cap);
+  const readBudget = deps.cap * HISTORY_READ_BUDGET_PER_SLOT;
   let n = 0;
+  let reads = 0;
   let sumTokensPerChar = 0;
   let sumDuration = 0;
-  for (const id of recent) {
-    const agg = aggregateSession(id, deps.readEvents);
+  for (let i = ids.length - 1; i >= 0; i -= 1) {
+    if (n >= deps.cap || reads >= readBudget) break;
+    reads += 1;
+    const agg = aggregateSession(ids[i], deps.readEvents);
     if (!agg) continue;
     const chars = agg.taskChars > 0 ? agg.taskChars : 1000;
     const tpc = agg.totalTokens / chars;
@@ -159,7 +181,8 @@ function confidenceFor(n) {
  *
  * Heuristic chain:
  *   1. Extract task text + chars.
- *   2. Pull historical avg tokens/char from up to `cap` recent sessions.
+ *   2. Pull historical avg tokens/char from the `cap` most recent sessions that
+ *      have usable usage, scanning backwards within a bounded read budget.
  *   3. baseTokens = chars * (history.tokensPerChar || DEFAULT_TOKENS_PER_CHAR)
  *   4. Apply complexity multiplier.
  *   5. Floor at DEFAULT_MIN_TOKENS so trivial goals still reserve budget.
