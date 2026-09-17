@@ -55,6 +55,12 @@ export function renderReport(state) {
   const improvements = Array.isArray(state.improvements) ? state.improvements : [];
   const future = Array.isArray(state.futurePlans) ? state.futurePlans : [];
   const verify = state.verifyResult || {};
+  // SH-06 recovery judgements. Section 6b is rendered only when rows exist,
+  // mirroring the conditional `## 9b. 기록된 오류` block below.
+  const journal = buildRecoveryJournalFields(state.recoveryJournal);
+  const recoveryBlock = journal.recoveryJournalCount > 0
+    ? `\n## 6b. 복구 판정 저널\n\n${journal.recoveryJournalTable}\n`
+    : '';
 
   const phaseTable = phases.length
     ? ['| Phase | Status | Duration | Changed Files | Checks |',
@@ -160,7 +166,7 @@ ${crossCheck}
 ## 6. 검증 결과
 
 ${verifyBlock}
-
+${recoveryBlock}
 ## 7. 개선 제안 (Phase 5)
 
 ${improvementsBlock}
@@ -191,6 +197,122 @@ function table(headers, rows) {
   const sep = `|${headers.map(() => '---').join('|')}|`;
   const body = rows.map((r) => `| ${r.map((c) => (c === null || c === undefined ? '-' : String(c))).join(' | ')} |`);
   return [head, sep, ...body].join('\n');
+}
+
+/** Most recent journal rows printed in the report table. */
+const RECOVERY_JOURNAL_MAX_ROWS = 20;
+/** Max characters of a free-text cell (`reason`, `error`) before truncation. */
+const RECOVERY_TEXT_MAX = 120;
+/** Column order of the recovery journal table. */
+const RECOVERY_JOURNAL_HEADERS = [
+  '#', 'at', 'phase', 'status', 'verify', 'verdict', 'class',
+  'action → target', 'attempts', 'fixedNext', 'reason',
+];
+
+/**
+ * Make a value safe for a single markdown table cell.
+ * Missing/empty collapses to '-'; pipes and newlines are neutralized.
+ * @param {*} value
+ * @returns {string}
+ */
+function cell(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value).replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|');
+}
+
+/**
+ * Cell for free text, truncated to `RECOVERY_TEXT_MAX` characters.
+ * @param {*} value
+ * @returns {string}
+ */
+function textCell(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  const raw = String(value);
+  const cut = raw.length > RECOVERY_TEXT_MAX
+    ? `${raw.slice(0, RECOVERY_TEXT_MAX)}…`
+    : raw;
+  return cell(cut);
+}
+
+/**
+ * `verdict` — or `verdict(verdictRaw)` when the raw token differs.
+ * @param {object} row
+ * @returns {string}
+ */
+function verdictCell(row) {
+  const raw = row.verdictRaw;
+  const hasRaw = raw !== null && raw !== undefined && raw !== '' && raw !== row.verdict;
+  return hasRaw ? `${cell(row.verdict)}(${cell(raw)})` : cell(row.verdict);
+}
+
+/**
+ * Join two related fields, collapsing to '-' only when both are absent.
+ * @param {*} a
+ * @param {*} b
+ * @param {string} sep
+ * @returns {string}
+ */
+function pairCell(a, b, sep) {
+  const absent = (v) => v === null || v === undefined || v === '';
+  if (absent(a) && absent(b)) return '-';
+  return `${cell(a)}${sep}${cell(b)}`;
+}
+
+/**
+ * `r<repair>/s<sameClass>/L<retryLimit>` attempt budget cell.
+ * @param {object} row
+ * @returns {string}
+ */
+function attemptsCell(row) {
+  const parts = [row.repairAttempts, row.sameClassAttempts, row.retryLimit];
+  if (parts.every((v) => v === null || v === undefined || v === '')) return '-';
+  return `r${cell(parts[0])}/s${cell(parts[1])}/L${cell(parts[2])}`;
+}
+
+/**
+ * Render one journal row. Tolerates unknown JSON-shaped rows (the journal
+ * round-trips through `session-store.js` as JSON) — never throws on those;
+ * exotic in-memory values (throwing getters, null-prototype objects) are out
+ * of scope. `recordFailed` rows carry a recorder error, not a judgement.
+ * @param {*} row
+ * @param {number} index - zero-based position in the printed slice
+ * @returns {string[]}
+ */
+function recoveryRow(row, index) {
+  const n = index + 1;
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    return [n, ...Array.from({ length: RECOVERY_JOURNAL_HEADERS.length - 1 }, () => '-')];
+  }
+  if (row.recordFailed === true) {
+    return [n, cell(row.at), cell(row.phase), '-', '-', '-', 'record-failed', '-', '-', '-',
+      textCell(row.error)];
+  }
+  return [
+    n, cell(row.at), cell(row.phase), cell(row.status), cell(row.verificationStatus),
+    verdictCell(row), cell(row.class), pairCell(row.action, row.target, ' → '),
+    attemptsCell(row), cell(row.fixedNext), textCell(row.reason),
+  ];
+}
+
+/**
+ * Build the recovery journal template fields from `state.recoveryJournal`.
+ * Pure. A non-array (the producer overwrites corrupt values) or an empty
+ * journal yields count 0 + an 'N/A' table; nothing here ever throws, so a
+ * malformed journal cannot take down report generation.
+ * @param {*} journal
+ * @returns {{ recoveryJournalTable: string, recoveryJournalCount: number }}
+ */
+export function buildRecoveryJournalFields(journal) {
+  if (!Array.isArray(journal) || journal.length === 0) {
+    return { recoveryJournalTable: 'N/A', recoveryJournalCount: 0 };
+  }
+  const shown = journal.slice(-RECOVERY_JOURNAL_MAX_ROWS);
+  const omitted = journal.length - shown.length;
+  let rendered = table(RECOVERY_JOURNAL_HEADERS, shown.map(recoveryRow));
+  if (omitted > 0) {
+    rendered += `\n\n_(+${omitted} more — session.json#recoveryJournal)_`;
+  }
+  return { recoveryJournalTable: rendered, recoveryJournalCount: journal.length };
 }
 
 /**
@@ -344,6 +466,7 @@ export function buildReportData(state) {
     ...buildPhaseFields(phases),
     ...buildVerifyFields(s.verifyResult, s.changedFiles),
     ...buildRiskFields(state),
+    ...buildRecoveryJournalFields(s.recoveryJournal),
     crossCheckTable,
     phaseTimeline,
     phaseDiff,

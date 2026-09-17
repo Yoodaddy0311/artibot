@@ -35,6 +35,12 @@ length: 200-400 lines
 
 {{crossCheckTable}}
 
+## Recovery Journal ({{recoveryJournalCount}})
+
+_VERIFY 가 PASS 로 끝나면 행을 남기지 않는다 — 0 = 실패 판정 없음 또는 SH-06(a40534e1) 이전 세션. 전이는 CA-03 전까지 고정(IMPROVE)이며 `fixedNext` 열이 그 사실이다. `record-failed` 행은 판정이 아니라 기록기 실패다._
+
+{{recoveryJournalTable}}
+
 ## Improvements ({{improvementsCount}})
 
 {{improvementsTable}}
