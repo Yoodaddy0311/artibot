@@ -199,6 +199,38 @@ function growth(numerator, denominator) {
   return (numerator + RATIO_FLOOR_MS) / (denominator + RATIO_FLOOR_MS);
 }
 
+/**
+ * 길이를 그대로 둔 채 payload 머리에 회차 표식을 박는다. 바이트 수는 build 가
+ * 주장하는 값 그대로이고 꼬리(HG-09 F3 의 ` WHERE x`)도 보존된다.
+ *
+ * **왜 필요한가**: V8 은 같은 (regex, string) 쌍의 결과를 캐시한다. 사이즈당
+ * payload 를 하나만 쓰고 그것을 N회 돌리면 2회차부터 상수 시간이 돌아오고,
+ * 그러면 옛 규칙의 2차식이 성장 게이트에서 숨는다. HG-07 · HG-09 두 성장 블록이
+ * 이 정의 하나를 공유한다 — 복제하지 말 것.
+ * @param {(n: number) => string} build @param {number} n @param {number} i
+ * @returns {string}
+ */
+const tagged = (build, n, i) => {
+  const tag = `/*${i}*/`;
+  return tag + build(n).slice(tag.length);
+};
+
+/**
+ * build 를 사이즈 n 에서 회차마다 다른 payload 로 runs 회 돌린 median(ms).
+ * payload 는 측정 대상 밖에서 미리 만든다 — 122KB 문자열 생성비가 타이밍에
+ * 섞이면 선형 바닥이 깔려 2차식 비율이 희석된다.
+ * @param {(n: number) => string} build @param {number} n @param {number} [runs]
+ * @returns {number}
+ */
+function medianOverTagged(build, n, runs = 3) {
+  const payloads = Array.from({ length: runs }, (_, i) => tagged(build, n, i));
+  let cursor = 0;
+  return medianMs(() => {
+    classify({ tool: 'Bash', command: payloads[cursor] });
+    cursor += 1;
+  }, payloads.length);
+}
+
 /** HG-07 patterns[] 의 문서화된 순서. 인덱스로 집는 근거다. */
 const HG07_PATTERN_ORDER = ['curl -X', 'gh pr merge', 'git push master|main'];
 
@@ -277,6 +309,16 @@ describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범
   // 절대값은 넉넉한 smoke 로만 두고 판정은 비율에 맡긴다 — 비율은 머신 속도에
   // 거의 불변이다(safety.test.js `growth` JSDoc 의 잡음·신호 실측 참조).
   //
+  // **payload 는 회차마다 간다**(모듈 레벨 `tagged` · `medianOverTagged`, HG-09
+  // 블록과 정의 1개를 공유). 사이즈당 payload 를 하나만 쓰면 V8 이 같은
+  // (regex, string) 쌍을 캐시해 2·3회차가 바닥값으로 떨어지고, 그러면 옛 규칙의
+  // 2차식이 이 게이트에서 숨을 수 있다. 위 실측표는 표식 도입(2026-09-17) 전
+  // 단일-payload 형식으로 잰 값이다. 같은 날 표식 도입 후 재측정(3회):
+  //     curl     growth 3.70 · 2.91 · 3.41   (전: 3.00 · 3.06 · 3.41)
+  //     git push growth 2.75 · 2.41 · 2.68   (전: 2.50 · 2.66 · 2.76)
+  // 수리된 규칙은 캐시에 의존하지 않았으므로 값이 움직이지 않았다 — 바뀐 것은
+  // 옛 규칙이 회귀했을 때 RED 가 신뢰 가능해졌다는 점이다. 임계 18 은 무변경.
+  //
   // 못 보는 것: 이 블록은 **크기에 따라 스케일되는** 입력만 본다. 그리고 이 수치는
   // human-gates `classify` 단독이다 — PreToolUse 훅 **전체** 경로(L1 executeChain +
   // L2 classifyRisk + 여기)의 40,962B 총비용은 별도 실측이고, 그 값은 이 파일이
@@ -292,10 +334,7 @@ describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범
     '%s: t(122,880) < 18 × t(20,480)',
     (_name, build) => {
       /** @param {number} n @returns {number} */
-      const run = (n) => {
-        const payload = build(n);
-        return medianMs(() => classify({ tool: 'Bash', command: payload }), 3);
-      };
+      const run = (n) => medianOverTagged(build, n);
       const t20480 = run(20_480);
       const t40962 = run(40_962);
       // 회귀 시 120KB 측정으로 넘어가기 전에 여기서 빨리 실패시킨다.
@@ -306,11 +345,23 @@ describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범
     30_000,
   );
 
-  it('payload 가 주장하는 바이트 크기로 만들어진다', () => {
+  it('payload 가 주장하는 바이트 크기로 만들어진다 — 회차 표식을 박은 뒤에도', () => {
     for (const [, build] of SCALED_PAYLOADS) {
-      expect(build(20_480)).toHaveLength(20_480);
-      expect(build(40_962)).toHaveLength(40_962);
-      expect(build(122_880)).toHaveLength(122_880);
+      for (const n of [20_480, 40_962, 122_880]) {
+        expect(build(n)).toHaveLength(n);
+        expect(tagged(build, n, 0)).toHaveLength(n);
+        // 회차마다 실제로 다른 문자열이어야 V8 의 (regex, string) 캐시를 피한다.
+        expect(tagged(build, n, 0)).not.toBe(tagged(build, n, 1));
+      }
+    }
+  });
+
+  it('회차 표식은 규칙 매치 결과를 바꾸지 않는다 (짧은 실제 명령 대조)', () => {
+    // 표식은 머리 5바이트를 덮어쓴다. 스케일 payload 는 근접-비매치라 hit 0 이고,
+    // 표식을 박아도 0 이어야 한다 — 측정이 다른 규칙을 타고 있지 않다는 증거다.
+    for (const [, build] of SCALED_PAYLOADS) {
+      expect(ids({ tool: 'Bash', command: build(20_480) })).toHaveLength(0);
+      expect(ids({ tool: 'Bash', command: tagged(build, 20_480, 0) })).toHaveLength(0);
     }
   });
 });
@@ -319,7 +370,8 @@ describe('HG-07 — classify 는 크기를 키워도 성장 비율이 선형 범
 // HG-09 patterns[2] 룩어헤드 창 — 창 폭 핀 · 경계 쌍 · 타이밍 게이트 · 행동
 // ───────────────────────────────────────────────────────────────────────────
 //
-// 위 HG-07 블록과 같은 3층이고 헬퍼(fill · medianMs · growth · ids)도 그대로
+// 위 HG-07 블록과 같은 3층이고 헬퍼(fill · medianMs · growth · ids · tagged ·
+// medianOverTagged — 모두 모듈 레벨 정의 1개를 공유한다)도 그대로
 // 쓴다. 다른 것은 **트레이드오프 부호**다: HG-07 의 `{0,192}` 는 관측을 잃고
 // (192자 뒤의 `-X POST` 가 미분류), HG-09 의 `{0,192}` 는 오탐을 더한다
 // (SET 뒤 187자 이후의 진짜 WHERE 는 창 밖 → 부정 룩어헤드가 성립 → 파괴적이지
@@ -386,7 +438,8 @@ describe('HG-09 — classify 는 크기를 키워도 성장 비율이 선형 범
   // 흔들린다. 이 창 재측정도 18.09 로 임계 바로 위였다). RED 대조가 동전던지기면
   // 게이트가 아니다.
   //
-  // **payload 는 회차마다 간다**(위 HG-07 블록과 다른 점, 아래 uniqueRuns 참조).
+  // **payload 는 회차마다 간다**(모듈 레벨 `tagged` · `medianOverTagged`. 2026-09-17
+  // 부터 HG-07 블록도 같은 정의를 쓴다 — 예전에는 여기만 그랬다).
   // 사이즈당 payload 를 하나만 쓰면 V8 이 같은 (regex, string) 쌍의 결과를 캐시해
   // 2회차부터 상수 시간을 돌려주고, 그러면 **옛 규칙의 2차식이 이 게이트에서
   // 숨는다** — 2026-09-15 실측으로 옛 규칙 F3 의 growth 가 같은 형식에서 12.79
@@ -408,31 +461,11 @@ describe('HG-09 — classify 는 크기를 키워도 성장 비율이 선형 범
     ['F5 단위마다 WHERE', (n) => fill('UPDATE t\nSET a=1\nWHERE id=1\n', n)],
   ];
 
-  /**
-   * 길이를 그대로 둔 채 payload 머리에 회차 표식을 박는다. 바이트 수는 build 가
-   * 주장하는 값 그대로이고 꼬리(F3 의 ` WHERE x`)도 보존된다.
-   * @param {(n: number) => string} build @param {number} n @param {number} i
-   * @returns {string}
-   */
-  const tagged = (build, n, i) => {
-    const tag = `/*${i}*/`;
-    return tag + build(n).slice(tag.length);
-  };
-
   it.each(HG09_SCALED_PAYLOADS)(
     '%s: t(122,880) < 18 × t(20,480)',
     (_name, build) => {
       /** @param {number} n @returns {number} */
-      const run = (n) => {
-        // 측정 대상 밖에서 미리 만든다 — 122KB 문자열 생성비가 타이밍에 섞이면
-        // 선형 바닥이 깔려 2차식 비율이 희석된다.
-        const payloads = [0, 1, 2].map((i) => tagged(build, n, i));
-        let cursor = 0;
-        return medianMs(() => {
-          classify({ tool: 'Bash', command: payloads[cursor] });
-          cursor += 1;
-        }, payloads.length);
-      };
+      const run = (n) => medianOverTagged(build, n);
       const t20480 = run(20_480);
       const t40962 = run(40_962);
       // 회귀 시 120KB 측정으로 넘어가기 전에 여기서 빨리 실패시킨다.
