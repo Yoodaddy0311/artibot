@@ -11,6 +11,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.63.0] — 2026-09-17
+
+`v4.62.0`(`c2f300e3`) 이후 87 커밋 = **184 files +27,597/−1,253**(`git diff --shortstat v4.62.0^{commit} 9afb908a`, 2026-09-17 측정). `/split` **Wave 10 13/13 + Wave 11 9/9** 착지분 출하. 커밋 유형 분포: merge 22 · fix 21 · feat 16 · docs 15 · test 9 · refactor 2 · config 1 · bench 1.
+
+### 행동 변화 고지
+
+① **`usage.receipt.cost.total` 이 기본으로 숫자가 된다** — `priceReceipts` 기본값 true (`ebd6bc8b`). opt-out 은 `=== false` 명시뿐이다.
+
+② **autopilot 예산이 토큰 단위로 실제 집행된다** (`52e7bdb1`, `3534e286`, `666683cb`) — 종전 코드는 `options.budget`(기본 2,000,000 토큰)을 USD 와 비교해 임계가 발화하지 않았다. 새 pause 사유 `budget-exceeded`, 미측정 사용량은 `unknown` + 세션당 경고 1회, 비수치·`0` `--budget` 은 no-budget 이 아니라 기본 2M(fail-closed).
+
+③ **autopilot `--worktree` REPORT/abort 정리가 미통합 결과 브랜치를 더 이상 삭제하지 않는다** (`faa47638`, `159b2441`, `a88eb5e7`) — 4.62.0 노트 ③ 의 감사 F01 임시 경고를 해제한다.
+
+④ **autopilot 세션 스키마 2 → 3** (`e0565e46`) — 로드 시 메모리 마이그레이션 + `.bak` 1회, durable phase 전이(`pendingPhase`/`nextTarget`, attempt journal).
+
+⑤ **`split.recommendMinSubtasks` 가 `null` → `7`** (`464b7f7d`, §5 D12).
+
+⑥ **모델 카탈로그 `sonnet` id 가 `claude-sonnet-4-6` → `claude-sonnet-5`** (오너 결정 O2, `f2947713`). 가격 행은 미검증 상태 그대로 둔다.
+
+⑦ **`--no-team` 이 실행 지시에서도 단독**(`execution:'solo'`, Agent 스폰 0)이고, team OFF 경로가 워크플로 plan·mode·contract 까지 도달한다 (`3534e286`, `67eb910c`).
+
+### Added
+
+- Stop 훅이 deterministic 층을 vitest 리포터 산출물로 직접 재는 생산자 + `verify-rate` `measured` 버킷 (`8f6df73f`, `321da9a6`).
+- `verify-rate` 판독기 — Stop 훅 분모를 `/verify` self-report 로 답하는 읽기 전용 CLI (`399c9ff2`).
+- `session-coverage` fold + 읽기 전용 CLI (Observe 축 4) (`3da3354f`).
+- SessionEnd `outcome.md` 이미터 — `mission.completed{accepted:null}` + gate census CLI + `requiredLayers` 정책 (`f1c6973a`, `6d612dbf`).
+- `tool.used` writer — PostToolUse Skill 훅 + existence-audit skills carrier (SH-29, `1943cae8`).
+- `route.selected` 영수증이 전사·원장 tail 에서 `currentTier`·`actionsSinceSwitch` 를 공급 (W11-Q1 K1, `b0d5d792`).
+- `plan.md` 이미터 — `plan.revised` 관측 훅 + `plan.revision` 뮤테이터 + 직렬화기 (`68b9b19a`).
+- `nl-activation-report` 읽기 전용 Shadow 계측기 (SH-03, `92aa2f71`).
+- autopilot VERIFY 결과 recovery decision recorder(기록만) + `wirePreIntake` data-only 관측 배선 (`5ff0faf9`, `5b3fa076`).
+- RouteBench 라이브 시나리오 4 + 스크럽 원장 코퍼스 + 코퍼스 소비 게이트 (오너 결정 E3=B, `b9fe7d48`).
+- routing F04(a) plan/mode 기록 + F05 effort identity/expiry (`743ad7bb`), F04(b) `team.followWorkflowPlan` 소비자 — **코드 기본 false** (`0ed257bd`).
+- `/split` forkPoint 실효 base + dispatch 의 addendum 복사·prompt.md 포인터·lane state 기록 (`d59cbe83`).
+
+### Changed
+
+- `readLedgerTail` 을 `lib/runtime/ledger-tail.js` 로 승격하고 `readNdjsonTail` 이 경로를 받도록 변경 (`a4132582`).
+- `renameWithRetry` 공용화 — Windows 임시 rename 락(EPERM/EBUSY/EACCES) 재시도 + `team.followWorkflowPlan` config 등재 (`f8cbf4c2`).
+- team enable 의미를 `isTeamEnabled` 단일 소유로 통일하고 인라인 사본 제거 (`67eb910c`, `98f33d0f`).
+- 정규식 정적 스캐너를 `tests/helpers/regex-scan.js` 로 단일화하고 HG 예외 목록 통합 (`7798155e`).
+
+### Fixed
+
+- **설치본에 `schemas/` 가 실리지 않아 모든 ledger 이벤트가 `unregistered-event` 로 거부되던 결함** — 3개 설치기 함수(및 `install.ps1` 동형) 수정 + 회귀 가드 (`df85f702`).
+- HG-09 `patterns[2]` lookahead 를 `[^;]{0,192}` 로 묶어 ReDoS 2차식 → 선형 (`fc5e8d45`). `rm-rf-root` 터미네이터·래퍼 miss 와 `sql-delete-no-where` 단일행 WHERE 오탐 해소 (`c1c5c049`, `39eab7a0`).
+- autopilot F01 결과 보존 · F02 durable 전이 · F03 예산 단위 · F10 solo 실행 (`faa47638`, `159b2441`, `a88eb5e7`, `e0565e46`, `52e7bdb1`, `3534e286`, `666683cb`).
+- `/split` F09 — `landBatch` 가 ff push 거절을 원격 tip 재읽기로 `push-failed`/`moved` 분류 (`4f4e9c5f`), dispatch 의 `{BASE}` 와 포인터가 기록된 forkPoint 를 먼저 읽음 (`f8a35282`).
+- hysteresis 가 residency 카운터 부재를 `minimum-residency` 가 아니라 `residency-unknown` 으로 판정 (W11-Q2 H1, `dd4771ca`).
+- scorecard routing 두 행의 `absent` 계약 위반 해소 + `routing.tier_comparability` 행 추가 (`b2ac11b9`).
+- 0건 실행(`totalTests` 0)이 deterministic pass 로 새지 않게 `emptyRun` 사유로 UNMEASURED (`f7d0e7f9`).
+- RouteBench 라이브 코퍼스를 `-text` 로 고정해 autocrlf 체크아웃에서 Windows CI RED 를 막음 (`9ae3b89d`).
+- `route-observe-pre` K1 골든 픽스처가 생성일 `mission_id` 를 고정해 2026-09-16 부터 결정적으로 실패하던 문제 (`a3da15fa`).
+
+### 운영 기록
+
+- ADR-011 원장 이관의 **구 원장 파일 삭제 완료**(2026-09-15 17:49 KST, 오너 결정 O4) — `.artibot/runtime/ledger.jsonl.pre-adr011`(204,406B/349행) · `.git/artibot/ledger.jsonl.live-premerge-20260914`(442,576B/389행) · 리더 백업 1,005행. 삭제 전후 라이브 원장 불변, 손실 카운터 0 (기록 커밋 `7a4cd78c`). `plugins/artibot/.artibot/runtime/ledger.jsonl` 28행은 **이월**(`idempotency_key` 0 · 라이브 미포함이라 보존).
+- 4.63.0 릴리스 체크리스트를 `.artibot/guides/NEXT-SESSION.md` 에 유지 (`3abac72b` 초안 → `5d8e0447`, `9afb908a`).
+- 오너 결정 기록: O1/O2/O4/O6 (`7a4cd78c`), O8 `hook.fired` 어휘 = a1(디스패치 1회 = 1행, 핸들러 배열 fold) — 2026-09-17 확정.
+
 ### Wave 11 배치 착지 (2026-09-15, 세션 artibot-28/89ada2, split-wave11-20260915)
 
 8줄기 + 롤링 1 = 9 착지(배치 9회, 재빌드 0, CI RED 0, 창 재배정 1). base `2b10fd31` → 배치 9 `9165196f` = **84 files +11,728/−439**(리더 `git diff --shortstat` 실측; 중간값으로 배치 8 `ea44a1ab` 시점은 75 files +10,252/−312). 마지막 배치 9 `verify-completed-producer` 는 16:59 KST 착지 — 재빌드 0, CI green.

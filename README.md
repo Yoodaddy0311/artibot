@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.62.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.63.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.62.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.63.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.62.0` |
+| `version` | Plugin version | `4.63.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.63.0** (2026-09-17) — Ships `/split` Wave 10 (13 limbs) and Wave 11 (9 limbs) together: 87 commits, 184 files +27,597/−1,253 since v4.62.0. Behavior changes: `usage.receipt.cost.total` is now priced by default (`priceReceipts: true`); autopilot budgets are enforced in **tokens** with a new `budget-exceeded` pause reason and fail-closed defaults for non-numeric `--budget`; autopilot `--worktree` REPORT/abort cleanup no longer deletes unintegrated result branches (clears the 4.62.0 F01 warning); autopilot session schema 2 → 3 with durable phase transitions; `split.recommendMinSubtasks` `null` → `7`; model-catalog `sonnet` id `claude-sonnet-4-6` → `claude-sonnet-5`; `--no-team` now returns a solo execution instruction. New observation surfaces: Stop-hook deterministic-layer producer + `verify-rate` `measured` bucket, `session-coverage` fold and CLI, SessionEnd `outcome.md` emitter with a gate census CLI, `tool.used` writer on PostToolUse Skill, `plan.md` emitter, and the read-only `nl-activation-report` instrument. Security fixes: HG-09 ReDoS quadratic → linear, `rm-rf-root` wrapper/terminator misses and `sql-delete-no-where` single-line false positives closed. Packaging fix: the installed plugin now ships `schemas/`, which had silently rejected every ledger event as `unregistered-event`.
 
 **4.62.0** (2026-09-14) — Ships `/split` Wave 9 as-is (8 limbs, base a81ee154 → 3ba981eb, 44 files +8,800/−112; zero new feature code, one lockstep commit): command-position anchoring for the PreToolUse guards (`lib/core/command-segments.js` — mention-only `echo "rm -rf /"` no longer fires L1/L2, 0/39 across 8 wrappers, zero executable true-positive loss), Stop-hook `dev-verify-gate` writing the `verify.completed` denominator row, SessionEnd writing `session.ended` (allowlist 39 entries), review.md serializer wired to SubagentStop (inert while `runtime.artifactLifecycle.enabled=false`), split dispatch pre-excluding landed limbs, RouteBench B4 fed with `agentType`, Avoided-Switch fold (first live value: 12 of 102 `route.selected` rows, 11.8%), and report-only DR02 resume/reconcile. Measurement note: live `verify.completed`/`session.ended` were 0 before this release because the Wave 9 code had not shipped, not because of a stale plugin cache. Known open defect (audit F01): autopilot `--worktree` REPORT cleanup deletes the result branch without checking integration — merge or back up the branch before REPORT until Wave 10 lands the fix.
 
