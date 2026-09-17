@@ -116,9 +116,14 @@ describe('adaptVerdict — the adapter map is the only source of mappings', () =
     // "pass" | "warn" | "fail" into state.crossCheck.verdict.
     expect(adaptVerdict('pass')).toBe('PASS');
     expect(adaptVerdict('fail')).toBe('REPAIR_REQUIRED');
-    // "warn" is in NO adapter vocabulary — schema-v1 spells it "warning".
-    // rules.unmapped_token is "reject", so it must not become PASS.
-    expect(adaptVerdict('warn')).toBeNull();
+    // "warn" is carried by the `autopilot-driver` source in the adapter map,
+    // which downgrades it to PASS exactly like every other WARN-family row.
+    // This is observability only: the recorder folds a PASS verdict to null
+    // before `classify()` sees it (recovery-record.js#judge), so the class,
+    // action and verificationStatus are the same as they were when the token
+    // was unmapped. See the invariance assertion in "keeps the raw token
+    // beside the adapted verdict" below.
+    expect(adaptVerdict('warn')).toBe('PASS');
   });
 
   it('returns null for an unmapped token rather than downgrading it', () => {
@@ -161,7 +166,9 @@ describe('adaptVerdict — the adapter map is the only source of mappings', () =
 describe('recordRecoveryDecision — a PASS is not a failure and is not recorded', () => {
   it.each([
     ['an explicit PASS verdict', 'pass'],
-    ['an unmapped verdict that folds to null', 'warn'],
+    ['a driver warn that folds to PASS', 'warn'],
+    // Keep the null-fold path covered now that "warn" no longer takes it.
+    ['an unmapped verdict that folds to null', 'LGTM'],
     ['no cross-check at all', undefined],
   ])('writes nothing for done + verification PASS with %s', (_label, verdict) => {
     const state = makeState('pass', {
@@ -231,8 +238,35 @@ describe('recordRecoveryDecision — the four trigger shapes', () => {
     const state = makeState('raw', { crossCheck: { verdict: 'warn' }, verifyResult: { ok: false } });
     const row = recordRecoveryDecision(state, verifyPayload('done'));
     expect(row.verdictRaw).toBe('warn');
-    expect(row.verdict).toBeNull();
+    expect(row.verdict).toBe('PASS');
     expect(row.verificationStatus).toBe('FAIL');
+  });
+
+  it('classifies a driver warn exactly as it did when the token was unmapped', () => {
+    // Before the `autopilot-driver` rows existed, "warn" took the same path as
+    // any unmapped token: adaptVerdict -> null. "LGTM" still takes that path,
+    // so it is the before-control. `judge()` folds a PASS verdict back to null
+    // for classify(), which is why adding the mapping is observability only —
+    // the raw token becomes readable on the row and nothing else moves.
+    const decide = (verdict, label) => {
+      const state = makeState(label, {
+        crossCheck: { verdict },
+        verifyResult: { ok: false },
+      });
+      return recordRecoveryDecision(state, verifyPayload('done'));
+    };
+    const warned = decide('warn', 'invariance-warn');
+    const unmapped = decide('LGTM', 'invariance-unmapped');
+
+    // Whole-row comparison minus the three fields that must differ by
+    // construction (timestamp, the raw token, the adapted verdict): every
+    // other field — class, classReason, action, target, reason, attempts,
+    // verificationStatus, fixedNext, divergent — has to be byte-identical.
+    const everythingElse = ({ at: _at, verdict: _v, verdictRaw: _raw, ...rest }) => rest;
+    expect(everythingElse(warned)).toEqual(everythingElse(unmapped));
+    // Only the recorded verdict differs — that is the whole delta.
+    expect(warned.verdict).toBe('PASS');
+    expect(unmapped.verdict).toBeNull();
   });
 
   it('never lets a reviewer PASS stand in as verification evidence', () => {
