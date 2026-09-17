@@ -274,6 +274,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 엔진이 반환한 `instruction` 객체를 따라 **Phase를 순차 실행**한다. 엔진 `lib/autopilot/engine.js`의 `PHASES`는 8개(INTAKE/PLAN/EXECUTE/CROSS_CHECK/VERIFY/IMPROVE/**EVALUATE**/REPORT)이며, 실행 갯수는 모드에 따라 다르다:
 - **legacy(비-goal) PRD** = Goal Contract 부재 → IMPROVE 다음 EVALUATE를 건너뛰고 바로 REPORT (`lib/autopilot/engine.js#runPhase5Improve` 의 `nextPhaseFromImprove` 분기 — 줄번호는 썩으므로 심볼로 인용). 실효 **7 phase (0~6)**.
 - **goal-driven PRD** = Goal Contract 존재 → IMPROVE 다음 **EVALUATE 실행**(수락기준 미달 시 re-EXECUTE로 재반복, 충족 시 REPORT). 실효 **EVALUATE 추가**.
+- **다음 phase 는 엔진에서 다시 받아라.** 각 Phase 결과를 `recordPhaseResult` 로 기록한 뒤에는 `engine.resumeAutopilot(sessionId)` 를 호출해 새 instruction 을 받는다 — 엔진이 `pendingPhase`(goal-loop 의 re-EXECUTE, CA-03 의 복구 전이)를 그 경로에서만 반영하므로, 이전 instruction 의 `nextPhase` 를 그대로 쓰면 그 전이를 놓친다. 단 `recordPhaseResult(VERIFY)` 뒤 `state.phase === 'PAUSED'` 면(CA-03 복구 전이의 PAUSED — `state.pausedReason` 이 `recovery:<action>`) `resumeAutopilot` 을 부르지 말고 `pausedReason` 을 사용자에게 알린 뒤 Step 4 의 PAUSED 처리(default 모드 종료 경로)로 간다 — `engine.shouldPause(state)` 는 counters·budget·errors 만 보므로 이 pause 를 스스로 감지하지 못한다. resume 은 사람이 `/autopilot:resume` 으로 부를 때만이며 그때 VERIFY 로 재진입한다.
 
 각 Phase 완료 시 `engine.recordPhaseResult(state, { phase, status, ...result })`로 session-store 업데이트 (1번 인자는 `loadSession(sessionId)`로 얻은 **state 객체**, 2번 인자에 `phase`/`status` 포함 payload).
 
@@ -281,7 +282,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 >
 > **명시 신호를 남겨라.** `state.verifyResult` 에 `status: 'PASS'|'FAIL'|'UNMEASURED'` 또는 `ok`/`passed` 불리언을 쓰면 분류기가 그 값을 그대로 읽는다. lint/typecheck/test 를 자유형으로만 적으면(`{ lint: 'ok', test: '3 failed' }`) 추측하지 않고 `UNMEASURED` 로 접혀 `unknown → ask_human` 권고가 **기록만** 된다 — 신호 결손률 자체가 Observe 단계의 측정값이다. 함께 읽히는 `state.crossCheck.verdict` 는 `pass`·`fail` 만 어댑터(`schemas/verdict-adapter-map.json`)에 토큰이 있고 `warn` 은 없다(`warning` 철자만 있다) — 미매핑은 추측 없이 `null` 로 분류기에 들어간다.
 >
-> **이 기록은 관측이다** — 전이(`nextPhase: 'IMPROVE'`)·`pendingPhase`·instruction 은 아무것도 바뀌지 않는다. CA-03(후속 웨이브)이 켜지기 전까지 저널은 읽기 전용 측정값이다.
+> **기본값에서 이 기록은 관측이다** — `autopilot.recovery.transitionFromVerdict` 가 `false`(기본)면 전이(`nextPhase: 'IMPROVE'`)·`pendingPhase`·instruction 은 아무것도 바뀌지 않고 저널은 읽기 전용 측정값이다(현행과 바이트 동일). 키가 `true` 면 저널 행의 `action` 이 다음 phase 를 정한다 — `repair` → EXECUTE(교정 재실행, goal-loop 와 같은 `pendingPhase` 경로), `replan` → PLAN, 그 외(`propose_ultraplan`·`ask_human`·`pause`·미지 값) → PAUSED(`pausedReason: recovery:<action>`, 미지 값은 fail-closed 로 `recovery:unknown-action`; `resume` 하면 다른 pause 와 똑같이 VERIFY 로 재진입한다). 적용되면 같은 저널 행이 `divergent: false`·`appliedNext`·`appliedBy: 'recovery-transition'` 으로 갱신되고 `type: 'recovery-applied'` 이벤트가 추가된다(`recovery-decided` 는 그대로 `divergent: true`). instruction 의 `nextPhase: 'IMPROVE'` 는 결과가 나오기 전에 만들어지므로 키가 켜져 있어도 바뀌지 않는다 — **VERIFY 결과를 기록한 뒤 다음 phase 는 instruction 의 `nextPhase` 가 아니라 `engine.resumeAutopilot(sessionId)` 가 돌려주는 instruction(내부 `nextTarget(state)`)에서 얻어라.** 켜는 것은 측정된 저널 분모를 근거로 Wave 13 별도 커밋에서 판단한다(전제: `recovery-record.js#judge` 가 `replanAttempts` 를 저널에서 유도하지 않는 한 같은 class 반복 실패는 `replan` → PLAN 을 상한 없이 반복한다 — 상한은 `shouldPause` 의 counters 뿐이다).
 >
 > 기록 위치는 `state.recoveryJournal[]` 와 세션 `events.ndjson` 의 `type: 'recovery-decided'` 두 곳이다. PASS 로 끝난 VERIFY 는 어느 쪽에도 행을 남기지 않는다. 여기서 말하는 PASS 는 세 조건이 **동시에** 성립할 때다(`recovery-record.js#isCleanVerify` 와 같은 정의): `status` 가 `'done'` 이고, `verifyResult` 의 명시 신호가 PASS 로 접히고, `crossCheck.verdict` 가 `pass` 이거나 어댑터에 없는 토큰(미매핑)일 때. 셋 중 하나라도 어긋나면 — `done` + `UNMEASURED` 를 포함해 — 행이 남는다.
 
@@ -344,7 +345,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
   <!-- model: model-policy 해석 — review phase-role (2026-09-02 오너 결정: `phaseRoles.review` = fable; spec-reviewer 는 allowlist 8종에 포함) -->
 
 #### Phase 4 — VERIFY
-- `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**.
+- `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**. pause 로 가기 전에 `recordPhaseResult(state, { phase: 'VERIFY', status: 'failed' })` 를 먼저 호출한다(Step 3 SH-06 규약). `autopilot.recovery.transitionFromVerdict` 가 `true` 면 다음 phase 는 저널 행의 `action` 을 따른다(`repair` → EXECUTE, `replan` → PLAN, 그 외 → PAUSED) — `false`(기본)면 현행대로 IMPROVE 고정. 그 외 → PAUSED 로 간 경우 Step 3 불릿과 같이 `state.phase`/`state.pausedReason` 을 직접 확인해 Step 4 로 넘긴다.
 
 #### Phase 5 — IMPROVE
 - 병렬 소환: `Agent(subagent_type="artibot:refactor-cleaner")` + `Agent(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
@@ -497,6 +498,8 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 `artibot.config.json` → `autopilot` 섹션 참조 (`enabled`, `defaultMode`, `limits`, `safety`, `phases`, `paths`, `notification`).
 
 `autopilot.fast`는 fast fan-out의 운영 설정이다. 기본은 `{ hardMaxAgents: 16, agentsPerCpu: 2, maxWorktrees: 12, maxRisk: "medium" }`이며, config 값은 immutable absolute cap(agents 16, worktrees 12, agentsPerCpu 4)을 넘을 수 없고 maxRisk는 `medium`을 넘을 수 없다. 예를 들어 `agentsPerCpu`는 기본 2에서 최대 4까지 조정할 수 있다. malformed 값은 안전한 기본값으로 정규화되고, high/critical risk는 fast wave에 넣지 않는다.
+
+`autopilot.recovery.transitionFromVerdict` (기본 `false`)는 VERIFY 복구 저널 행의 `action` 으로 실제 phase 전이를 일으킬지 정하는 단일 스위치다. `false` 면 저널은 관측 전용이고 전이는 현행 그대로다. `true` 면 `repair` → EXECUTE, `replan` → PLAN, 그 외 → PAUSED 로 간다(Step 3 VERIFY 규약 블록 참조). 판독 소유자는 `lib/autopilot/recovery-transition.js#loadRecoveryTransitionConfig` 하나다.
 
 비활성화는 **두 갈래로 분리**되어 있다 (ADR-004 — 러너 ADR-003 과 별건):
 

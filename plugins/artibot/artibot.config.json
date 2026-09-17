@@ -760,6 +760,10 @@
         "rm-rf-root"
       ]
     },
+    "recovery": {
+      "transitionFromVerdict": false,
+      "comment": "CA-03 (Wave 12, 2026-09-17). false = the SH-06 recovery journal stays observe-only and VERIFY->IMPROVE is fixed (current behaviour, byte-for-byte). true = after a journalled VERIFY failure, engine-state.js#recordPhaseResult hands the row to recovery-transition.js#applyRecoveryTransition: repair->EXECUTE, replan->PLAN, propose_ultraplan/ask_human/pause/unknown->PAUSED (pausedReason recovery:<action>, resume re-enters VERIFY like every other pause). Flipping to true is a separate Wave 13 commit against a measured journal denominator. Read by lib/autopilot/recovery-transition.js#loadRecoveryTransitionConfig only. WAVE-13 FLIP PRECONDITION: recovery-record.js#judge hardcodes replanAttempts:0 and never passes ultraplanProposed, so with this key true a repeated same-class VERIFY failure loops replan->PLAN without a ladder ceiling (measured 2026-09-17: 6 consecutive failed VERIFYs = 1 repair + 5 replan); the only stop is safety.js#shouldPause counters the driver must increment. Derive replanAttempts/ultraplanProposed from the journal (appliedNext==='PLAN' rows / action==='propose_ultraplan' rows) before flipping."
+    },
     "phases": [
       "INTAKE",
       "PLAN",

@@ -325,6 +325,8 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['agents.modelPolicy.fable.enabled', true],
     ['agents.modelPolicy.high.model', 'fable'],
     ['agents.modelPolicy.medium.model', 'opus'],
+    // CA-03 gate (Wave 12): must stay false until a Wave 13 commit flips it deliberately.
+    ['autopilot.recovery.transitionFromVerdict', false],
   ])('%s === %j (무변경)', (dotted, value) => {
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });
