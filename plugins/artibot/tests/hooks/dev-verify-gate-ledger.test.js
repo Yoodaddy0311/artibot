@@ -325,6 +325,12 @@ describe('dev-verify-gate — deterministic numerator from the vitest reporter',
     return {
       timestamp: new Date().toISOString(),
       durationMs: 132138,
+      // Test FILES, as the reporter records them. Present here so the cases
+      // below measure the field END TO END — through the real hook, into the
+      // real ledger — and not just the pure note builder. A snapshot written
+      // before the reporter had the field carries no `modules`, which the
+      // pure tests in `tests/verification/deterministic-source.test.js` cover.
+      modules: 1204,
       totalTests: 17377,
       passed: 17365,
       failed: 0,
@@ -371,6 +377,9 @@ describe('dev-verify-gate — deterministic numerator from the vitest reporter',
     expect(deterministic.evidence[0].file).toBe('plugins/artibot/runtime/last-test-result.json');
     expect(deterministic.evidence[0].note).toContain('vitest total=17377');
     expect(deterministic.evidence[0].note).toContain('failed=0');
+    // How much of the tree the run covered, which the four counts alone left
+    // open. Still not a whole-suite claim — see the reporter's module JSDoc.
+    expect(deterministic.evidence[0].note).toContain('modules=1204');
 
     expect(new Set(lines.map((e) => e.data.verification_id)).size, 'one verdict').toBe(1);
   }, 60_000);

@@ -37,7 +37,7 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import { ensureDirSync } from '../core/file.js';
+import { ensureDirSync, sleepSync } from '../core/file.js';
 import { composeScopedKey } from '../git/repo-identity.js';
 import { getSessionPath, getStoreDir, loadSession } from './session-store.js';
 
@@ -329,26 +329,6 @@ export function acquireLock(featureKey, sessionId, opts = {}) {
     if (last.ok) return last;
   }
   return last;
-}
-
-/**
- * Synchronous sleep without busy-wait. Uses Atomics.wait on an unshared
- * Int32Array view — yields the thread to the OS scheduler instead of
- * spinning the CPU. Falls back to a single small busy-wait slice when
- * SharedArrayBuffer is unavailable in the runtime.
- * @param {number} ms
- */
-function sleepSync(ms) {
-  const target = Math.max(0, ms | 0);
-  if (target === 0) return;
-  try {
-    const sab = new SharedArrayBuffer(4);
-    const ia = new Int32Array(sab);
-    Atomics.wait(ia, 0, 0, target);
-  } catch {
-    const start = Date.now();
-    while (Date.now() - start < target) { /* fallback only */ }
-  }
 }
 
 /**

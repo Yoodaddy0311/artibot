@@ -22,7 +22,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,26 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..', '..', '..', '..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'dev', 'probe-hook-keys.js');
 const FIXTURE = path.join(HERE, 'PreToolUse.Agent.json');
+
+/**
+ * Every `*.json` in this directory is a frozen host-payload fixture and every one
+ * of them must clear the same value-free + metadata contract. Enumerating the
+ * directory (instead of naming one file) is what makes a newly added fixture
+ * inherit the gate automatically. Measured 2026-09-17: 4 files, and the 17-key
+ * intersection of their top-level keys is asserted by COMMON_TOP_LEVEL_KEYS below.
+ */
+const FIXTURE_FILES = readdirSync(HERE).filter((f) => f.endsWith('.json')).sort();
+
+/** Top-level keys present in all fixtures (measured intersection, 2026-09-17). */
+const COMMON_TOP_LEVEL_KEYS = [
+  '_note', 'binary_sha256', 'extracted_at_kst', 'extracted_by', 'extraction_command',
+  'extraction_method', 'fixture_format', 'host_version', 'host_version_source',
+  'missing', 'not_measured', 'observations', 'raw', 'registration', 'scenarios',
+  'totals', 'verdict',
+];
+
+/** Per-scenario keys present in every scenario of every fixture (measured 2026-09-17). */
+const COMMON_SCENARIO_KEYS = ['captured_at_kst', 'description', 'id'];
 
 /** Run the probe with stdin = `input`, home = `home`. Never throws. */
 function runProbe(input, home) {
@@ -129,18 +149,57 @@ describe('scripts/dev/probe-hook-keys.js', () => {
   });
 });
 
-describe('fixture PreToolUse.Agent.json', () => {
+describe('host-payload fixture directory', () => {
+  it('enumerates at least one fixture (fail-closed: an empty glob must not pass silently)', () => {
+    expect(FIXTURE_FILES.length).toBeGreaterThan(0);
+  });
+});
+
+describe.each(FIXTURE_FILES)('fixture %s', (name) => {
+  const text = readFileSync(path.join(HERE, name), 'utf8');
+  const fixture = JSON.parse(text);
+
+  it('carries every §6.1 ① metadata key shared by all fixtures', () => {
+    for (const key of COMMON_TOP_LEVEL_KEYS) expect(fixture).toHaveProperty(key);
+    expect(typeof fixture._note).toBe('string');
+    expect(fixture._note).toMatch(/FROZEN FIXTURE/);
+  });
+
+  it('declares its provenance: live-probe extraction, semver host version, no verbatim capture', () => {
+    expect(fixture.extraction_method).toBe('live probe via --settings, key names only');
+    expect(fixture.host_version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(fixture.extracted_at_kst).toMatch(/^\d{4}-\d{2}-\d{2}\s/);
+    expect(fixture.binary_sha256).toMatch(/^not-applicable\b/);
+    expect(fixture.raw).toMatch(/^not-applicable\b/);
+    expect(typeof fixture.extraction_command).toBe('string');
+    expect(typeof fixture.extracted_by).toBe('string');
+    expect(typeof fixture.verdict).toBe('string');
+    expect(Array.isArray(fixture.missing)).toBe(true);
+    expect(Array.isArray(fixture.not_measured)).toBe(true);
+  });
+
+  it('every scenario carries the shared identity keys', () => {
+    expect(fixture.scenarios.length).toBeGreaterThan(0);
+    for (const s of fixture.scenarios) {
+      for (const key of COMMON_SCENARIO_KEYS) expect(s).toHaveProperty(key);
+    }
+  });
+
+  it('contains no values: no user path, no tool-use id, no session id shape', () => {
+    expect(text).not.toMatch(/HeechangLee|toolu_|\/Users\//);
+    expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+  });
+});
+
+describe('fixture PreToolUse.Agent.json (D1 verdict, this fixture only)', () => {
   const fixture = JSON.parse(readFileSync(FIXTURE, 'utf8'));
 
-  it('declares itself value-free and carries the §6.1 ① required fields', () => {
-    expect(typeof fixture._note).toBe('string');
-    expect(fixture.extraction_method).toBe('live probe via --settings, key names only');
-    for (const key of ['host_version', 'extracted_at_kst', 'scenarios', 'PreToolUse', 'SubagentStart', 'verdict', 'missing']) {
+  it('carries the D1-specific shape: PreToolUse, SubagentStart, required_keys_for_D1', () => {
+    for (const key of ['PreToolUse', 'SubagentStart', 'required_keys_for_D1']) {
       expect(fixture).toHaveProperty(key);
     }
-    expect(fixture.host_version).toMatch(/^\d+\.\d+\.\d+$/);
     for (const s of fixture.scenarios) {
-      for (const key of ['id', 'spawns', 'pretooluse_rows', 'subagentstart_rows']) expect(s).toHaveProperty(key);
+      for (const key of ['spawns', 'pretooluse_rows', 'subagentstart_rows']) expect(s).toHaveProperty(key);
     }
   });
 
@@ -149,11 +208,5 @@ describe('fixture PreToolUse.Agent.json', () => {
     const missing = fixture.required_keys_for_D1.filter((k) => !always.has(k));
     expect(fixture.missing).toEqual(missing);
     expect(fixture.verdict).toBe(missing.length === 0 ? 'D1-go' : 'revert-to-C');
-  });
-
-  it('contains no values: no user path, no tool-use id, no session id shape', () => {
-    const text = readFileSync(FIXTURE, 'utf8');
-    expect(text).not.toMatch(/HeechangLee|toolu_|\/Users\//);
-    expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
   });
 });

@@ -138,29 +138,39 @@ export function sleepSync(ms) {
  * {@link atomicWriteTextSync} below (`run.json`) — which is why the helper
  * lives here in core rather than being copied a fourth time.
  *
- * Backoff is 10·20·40·80ms across five attempts (~150ms budget). Anything that
- * is not a transient code throws on the first attempt, so a genuine ENOENT or
- * EXDEV still fails fast. After the final attempt the original error is
- * re-thrown, so every caller's cleanup contract is unchanged.
+ * Default backoff is 10·20·40·80ms across five attempts (~150ms budget).
+ * Anything that is not a transient code throws on the first attempt, so a
+ * genuine ENOENT or EXDEV still fails fast. After the final attempt the
+ * original error is re-thrown, so every caller's cleanup contract is unchanged.
  *
- * Not yet adopted by the three private copies that predate it
- * (`lib/autopilot/session-store.js`, `lib/autopilot/lock.js`,
- * `lib/core/file-lock.js`) — consolidating those is separate work.
+ * `attempts` and `maxBackoffMs` exist because a caller under heavier FS
+ * contention needs a longer but still bounded budget: `session-store.js`
+ * passes 8 attempts with each sleep capped at 250ms (~810ms), the shape it
+ * was raised to after the S3 flake. The cap only clamps individual sleeps —
+ * the doubling itself is unchanged.
  *
  * @param {string} tmp - source temp path
  * @param {string} dest - destination final path
+ * @param {object} [opts] - retry budget overrides
+ * @param {number} [opts.attempts=MAX_RENAME_ATTEMPTS] - total rename attempts
+ *   including the first; the original error is re-thrown after the last.
+ * @param {number} [opts.maxBackoffMs=Infinity] - ceiling for a single
+ *   inter-attempt sleep, so late attempts cannot block for an unbounded stretch.
  * @returns {void}
  * @example
  * renameWithRetry(tmpPath, '/path/runtime/state.json');
+ * @example
+ * renameWithRetry(tmpPath, statePath, { attempts: 8, maxBackoffMs: 250 });
  */
-export function renameWithRetry(tmp, dest) {
+export function renameWithRetry(tmp, dest, opts = {}) {
+  const { attempts = MAX_RENAME_ATTEMPTS, maxBackoffMs = Infinity } = opts;
   for (let attempt = 1; ; attempt += 1) {
     try {
       fsSync.renameSync(tmp, dest);
       return;
     } catch (err) {
-      if (!TRANSIENT_RENAME_CODES.has(err?.code) || attempt >= MAX_RENAME_ATTEMPTS) throw err;
-      sleepSync(10 * 2 ** (attempt - 1));
+      if (!TRANSIENT_RENAME_CODES.has(err?.code) || attempt >= attempts) throw err;
+      sleepSync(Math.min(10 * 2 ** (attempt - 1), maxBackoffMs));
     }
   }
 }

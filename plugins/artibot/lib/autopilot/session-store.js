@@ -9,8 +9,9 @@
  */
 
 import path from 'node:path';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { renameWithRetry } from '../core/file.js';
 import { getPluginRoot } from '../core/platform.js';
 import { resolveRunEventsPath } from '../observability/run-events.js';
 import { migrateV2toV3, SCHEMA_VERSION_V3 } from './migrate-v3.js';
@@ -31,14 +32,6 @@ export const CURRENT_SCHEMA_VERSION = SCHEMA_VERSION_V3;
 /** Intermediate version stamped before the v2→v3 step, which rejects v<2. */
 const SCHEMA_VERSION_V2 = 2;
 
-
-/**
- * Filesystem error codes that indicate a transient lock on a freshly-written
- * file (antivirus / OneDrive / search-indexer holding a momentary handle on
- * Windows) rather than a hard failure. These are safe to retry.
- * @type {ReadonlySet<string>}
- */
-const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 
 /**
  * Max number of rename attempts before giving up and propagating the error.
@@ -62,40 +55,12 @@ const MAX_RENAME_ATTEMPTS = 8;
 const MAX_RENAME_BACKOFF_MS = 250;
 
 /**
- * Block the current thread for {@link ms} milliseconds without busy-looping.
- * Uses Atomics.wait on a throwaway SharedArrayBuffer so the synchronous
- * saveSession path can back off between retries without spinning the CPU.
- * @param {number} ms - non-negative milliseconds to sleep
- * @returns {void}
+ * This module's retry budget, passed to the shared
+ * {@link renameWithRetry} in core. The two constants above carry the reason
+ * for the values; core owns the loop, the transient-code set, and the sleep.
+ * @type {{ attempts: number, maxBackoffMs: number }}
  */
-function sleepSync(ms) {
-  if (ms <= 0) return;
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/**
- * Atomically rename {@link tmp} to {@link filePath} with bounded retry on
- * transient Windows file locks (EPERM/EBUSY/EACCES). Backoff is exponential
- * (~10ms doubling) but capped at {@link MAX_RENAME_BACKOFF_MS} per sleep, across
- * up to {@link MAX_RENAME_ATTEMPTS} attempts. Non-transient errors propagate
- * immediately. After the final failed attempt the original error is re-thrown so
- * the caller's cleanup contract is unchanged.
- * @param {string} tmp - source temp path
- * @param {string} filePath - destination final path
- * @returns {void}
- */
-function renameWithRetry(tmp, filePath) {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      renameSync(tmp, filePath);
-      return;
-    } catch (err) {
-      const transient = TRANSIENT_RENAME_CODES.has(err.code);
-      if (!transient || attempt >= MAX_RENAME_ATTEMPTS) throw err;
-      sleepSync(Math.min(10 * 2 ** (attempt - 1), MAX_RENAME_BACKOFF_MS));
-    }
-  }
-}
+const RENAME_RETRY_OPTS = { attempts: MAX_RENAME_ATTEMPTS, maxBackoffMs: MAX_RENAME_BACKOFF_MS };
 
 /**
  * Resolve the autopilot runtime directory inside the plugin root.
@@ -156,7 +121,7 @@ export function saveSession(state) {
   backupBeforeUpgrade(state, filePath);
   try {
     writeFileSync(tmp, payload, 'utf-8');
-    renameWithRetry(tmp, filePath);
+    renameWithRetry(tmp, filePath, RENAME_RETRY_OPTS);
   } catch (err) {
     try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw early */ }
     throw err;

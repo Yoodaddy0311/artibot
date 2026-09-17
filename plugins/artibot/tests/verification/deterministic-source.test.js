@@ -30,7 +30,7 @@ const MARKER_MS = Date.parse('2026-09-15T00:00:00.000Z');
 const NOW_MS = Date.parse('2026-09-15T01:00:00.000Z');
 
 /**
- * A reporter payload shaped like `tests/reporters/test-status-reporter.js:90-98`.
+ * A reporter payload shaped like `tests/reporters/test-status-reporter.js:99-108`.
  *
  * @param {object} [over]
  * @returns {string}
@@ -122,6 +122,49 @@ describe('deterministic-source — the fresh path writes a verdict', () => {
       measured_at: '2026-09-15T00:30:00.000Z',
       note: 'vitest total=17377 passed=17365 failed=0 skipped=12',
     }]);
+  });
+
+  /**
+   * `modules` is the reporter's count of test FILES
+   * (`tests/reporters/test-status-reporter.js` — `onTestRunEnd`, added
+   * 2026-09-17). It rides in the note for the same reason the four counts do:
+   * the ledger drops `reason`, so a later reader has the note and nothing else
+   * when asking how much of the tree a verdict covered.
+   *
+   * WHAT IT STILL DOES NOT SETTLE: a filter matching every file counts the
+   * same as no filter, so this narrows "whole suite or targeted" without
+   * deciding it. No boolean is written, because the reporter API exposes no
+   * filter to read one from.
+   */
+  it('names the module count beside the test counts when the reporter wrote one', () => {
+    expect(fresh({ modules: 1204 }).evidence[0].note)
+      .toBe('vitest total=17377 passed=17365 failed=0 skipped=12 modules=1204');
+  });
+
+  /**
+   * BACKWARD COMPATIBILITY. Snapshots written before the reporter gained the
+   * field have no `modules`, and they are still valid measurements — the four
+   * counts are what `parseResult` requires. Omitting the clause is how this
+   * says "not recorded" without inventing a zero, which would read as an empty
+   * run the `emptyRun` guard exists to reject.
+   */
+  it('omits the module count for a pre-field snapshot rather than guessing zero', () => {
+    const note = fresh().evidence[0].note;
+    expect(note).toBe('vitest total=17377 passed=17365 failed=0 skipped=12');
+    expect(note).not.toContain('modules');
+  });
+
+  it('omits the module count when the field is present but not a count', () => {
+    for (const modules of ['1204', -1, 1.5, null, {}]) {
+      expect(fresh({ modules }).evidence[0].note, `modules=${JSON.stringify(modules)}`)
+        .not.toContain('modules');
+    }
+  });
+
+  it('records a zero module count when the reporter really wrote zero', () => {
+    // Reachable only alongside `totalTests > 0`, which no real run produces —
+    // pinned so the guard is known to test the VALUE, not truthiness.
+    expect(fresh({ modules: 0 }).evidence[0].note).toContain('modules=0');
   });
 
   it('survives the verifier evidence schema unchanged (kind:file needs file + line >= 1)', () => {

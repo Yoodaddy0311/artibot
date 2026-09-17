@@ -14,15 +14,22 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('node:fs', () => ({
-  existsSync: vi.fn(() => true),
-  mkdirSync: vi.fn(),
-  readdirSync: vi.fn(() => []),
-  readFileSync: vi.fn(() => '{}'),
-  renameSync: vi.fn(),
-  unlinkSync: vi.fn(),
-  writeFileSync: vi.fn(),
-}));
+// The retry loop itself lives in lib/core/file.js, which reaches fs through the
+// DEFAULT export (`import fsSync from 'node:fs'`). The named exports below are
+// re-exposed as that default so both import styles observe the same spies —
+// without it the mock module has no default and core throws before renaming.
+vi.mock('node:fs', () => {
+  const mod = {
+    existsSync: vi.fn(() => true),
+    mkdirSync: vi.fn(),
+    readdirSync: vi.fn(() => []),
+    readFileSync: vi.fn(() => '{}'),
+    renameSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  };
+  return { ...mod, default: mod };
+});
 
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { saveSession } from '../../lib/autopilot/session-store.js';
