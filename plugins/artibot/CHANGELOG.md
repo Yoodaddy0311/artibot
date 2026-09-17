@@ -11,6 +11,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.64.0] — 2026-09-17
+
+`v4.63.0`(`b7ac9a55`) 이후 29 커밋 = **92 files +8,012/−323**(`git diff --shortstat v4.63.0^{commit} c10451b4`, 2026-09-17 측정). `/split` **Wave 12 8/8** 착지분 출하. 커밋 유형 분포: merge 9 · feat 8 · docs 5 · fix 3 · refactor 2 · test 1 · chore 1.
+
+### 행동 변화 고지
+
+① **`hook.fired` 원장 행이 새로 쌓인다** (`970e2aa3`, 오너 결정 O8=a1) — **디스패치 1회 = 1행**(핸들러 배열은 fold), 디스패처 6곳 전부에서 발화하고 6슬롯이 **기본 ON** 이다. 원장 증가폭이 부담이면 `ledger.hookFired.slots` 로 슬롯을 줄여라. allowlist 는 39 → 40 항목.
+
+② **`intent.detected` 가 `command` carrier 를 싣는다** (`970e2aa3`) — 슬래시 명령마다 1행이 남는다.
+
+③ **decisions 스토어에 `activation-observed` 타입이 추가된다** (`5f8ddb7f`) — UserPromptSubmit 마다 기록되며, 이번 릴리스는 **slash 축만**이다(hint 축·SessionEnd flush 는 Wave 13).
+
+④ **verdict 어댑터가 `warn` → `PASS` 로 접는다** (`ae8404c2`) — **관측성 전용**이다. 저널의 `verdict` 표기만 바뀌고 `classify()` 결과는 불변(3케이스 실측). 어댑터 source 는 6번째 `autopilot-driver` 추가로 rows 15 → 18.
+
+⑤ **`autopilot.recovery.transitionFromVerdict` 는 기본 `false`** (`58422a3b`) — OFF 에서 동작은 종전과 완전히 같다. ON 으로 뒤집는 전제는 `judge()` 의 `replanAttempts:0` 하드코딩 해소(Wave 13 `recovery-judge-replan-counter`)다. 그 전에 켜면 replan → PLAN 무한 루프 위험이 있다.
+
+⑥ **config 스키마가 `team` 21키를 전부 선언한다** (`13c731ae`) — 스키마는 **non-strict 유지**라 미지 키를 막지 않는다. 잡는 것은 선언된 키의 **타입 오기**뿐이다.
+
+### Added
+
+- `hook.fired` 원장 이벤트 + `intent.detected.fields.command` carrier + Existence Audit `hooks`·`commands` carrier(multi fold, `Object.hasOwn`) (SH-29, `970e2aa3`).
+- decisions 8번째 타입 `activation-observed` + `lib/observability/activation-observed.js` + UserPromptSubmit 배선 + `decisions-store-sandbox-required` writer 등록 (`5f8ddb7f`).
+- `lib/autopilot/recovery-transition.js` + `recordPhaseResult` 게이트 — 적용 시 저널 행 제자리 갱신(`divergent:false` + `appliedNext` + `appliedBy`)과 tick `recovery-applied` (CA-03, `58422a3b`).
+- 리포트 생성기 dev 프로필 `## Recovery Journal` 절 + 레거시 `## 6b. 복구 판정 저널`(0행이면 바이트 동일) (`ba55bd7a`).
+- `scripts/dev/prune-autopilot-store.mjs` — autopilot 세션 스토어 가지치기(dry-run 기본) (`b55cb895`).
+
+### Changed
+
+- `route.selected` 가 이름·fifo 매칭 스폰에서도 receipt 정의대로 `canonicalModel` 을 기록 (`lib/routing/bind-model-fallback.js`, `62d8a590`). 라이브 결손 271/276(98.2%, 2026-09-17 02:03Z) 기준이며, 수리 후 기대 결손은 Explore/fork/unbound 뿐이다 — 재계수는 릴리스 + `sync:local` 뒤라 **미확인**.
+- team enable 의미를 `isTeamEnabled` 단일 소유로 통일하고 `config-schema` 가 team 21키를 선언 (`13c731ae`).
+- `sleepSync`/`renameWithRetry` 중복 사본을 `lib/core/file.js` 로 승격 (`13c731ae`).
+- README hookScripts 카운트 76 동기화(`sync-readme-claims`) (`970e2aa3`).
+
+### Fixed
+
+- `engine-state.test.js` 가 실사용 스토어를 오염시키던 문제 — `mkdtemp` + `CLAUDE_PLUGIN_ROOT` 격리 (`b55cb895`).
+- `rollHistory` 가 머리부터 잘라 최신 기록을 버리던 동작을 꼬리부터 usable cap 으로 교정 (`b55cb895`).
+- host-payload 픽스처를 하드코딩 목록이 아닌 `readdir` 열거로 바꿔 신규 픽스처 누락을 차단 (`13c731ae`).
+- HG-07 성장 게이트 회차 표식 + 리포터 `modules` 필드 누락 (`13c731ae`).
+- verdict gate 7 을 단어경계 + `cited_line` 리터럴 단언으로 강화 (`ae8404c2`).
+
+### 운영 기록
+
+- 배치 4회 전부 CI green(`ci/split-wave12-20260916`), 재빌드 0, CI RED 0, 창 재열기 1(첫 시도가 이름 없는 랜덤 worktree 로 열려 `--worktree=<name>` 으로 재개설).
+- O6 적용(리더 12:4x KST): autopilot 세션 스토어에서 12,649 파일 12.7MB 삭제, 실 세션 6쌍 보존.
+- 오너 결정: O8 = **a1**(오너 직접), O3/O5/O7 = 권장안 진행(오너 위임으로 리더 확정). 정본은 `ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(6).
+- Wave 13 정찰 초안 7건을 유휴 창에서 산출: ob10 · ca05 · sh04 · sh05 · recovery-judge-replan-counter · autopilot-test-store-isolation · decision-store-dir-strict-options(부채 2/7).
+- 리포 전체 `npm test` @ `6b472785`(리더, 2026-09-17 13:2x~13:3x KST, 210s): 723 파일 중 722 passed / **18,823 passed · 1 failed · 12 skipped**(분모 18,836). 실패 1 = `tests/firewall/stash-ref-isolation.test.js` "drops surplus checkpoints"(`expected 12 to be less than 12`). Wave 12 는 stash/checkpoint 코드를 건드리지 않았고 단독 재실행 6/6 pass(30s) → 전체 실행 부하 의존 플레이크로 분류. 릴리스 차단 아님, **원인 조사는 미확인**.
+
 ### Wave 12 배치 착지 (2026-09-17, 세션 artibot-e8/56df29, split-wave12-20260916)
 
 8줄기 = 8 착지(배치 4회, 재빌드 0, CI RED 0, 창 재열기 1 — 첫 시도가 이름 없는 랜덤 worktree 로 열려 `--worktree=<name>` 으로 재개설). base `8f614184`(v4.63.0 뒤) → 배치 4 `6b472785` = **83 files +7,921/−302**(리더 `git diff --shortstat 8f614184..6b472785`, 13:2x KST), 25 커밋. 통합 소요 11:14→13:19 KST.
