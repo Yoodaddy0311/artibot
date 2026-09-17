@@ -28,6 +28,7 @@ import { resolveModel } from '../../lib/core/model-policy.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'subagent-handler.js');
+const PRE_HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'route-observe-pre.js');
 
 /**
  * Run the hook as the dispatcher would: fresh node process, JSON on stdin,
@@ -46,6 +47,26 @@ function runHook(payload, action, home) {
     windowsHide: true,
   });
   return { status: res.status, stdout: String(res.stdout || ''), stderr: String(res.stderr || '') };
+}
+
+/**
+ * Run the real PreToolUse hook so the receipt a bind reads is a REAL receipt.
+ * Mirrors the helper in `subagent-handler-routing-fields.test.js`: a
+ * hand-written ledger line would let this file pass against a receipt shape
+ * production never emits.
+ *
+ * @param {object} payload - PreToolUse payload written to stdin
+ * @param {string} home - Sandbox HOME
+ * @returns {{ status: number|null, stdout: string }}
+ */
+function runPre(payload, home) {
+  const res = spawnSync(process.execPath, [PRE_HOOK], {
+    input: JSON.stringify(payload),
+    encoding: 'utf-8',
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    windowsHide: true,
+  });
+  return { status: res.status, stdout: String(res.stdout || '') };
 }
 
 const startRecord = (over = {}) => ({
@@ -285,6 +306,45 @@ describe('subagent-handler.js spawn ledger integration (child process)', () => {
     expect(recs[0].canonicalModel).toBe(expectedTier);
     // State file landed in the sandboxed HOME, not the developer's.
     expect(existsSync(path.join(home, '.claude', 'artibot-state.json'))).toBe(true);
+  });
+
+  it('a named spawn records the receipt-derived canonicalModel, and the stop row inherits it', async () => {
+    // The spawn ledger's model column was null on 250/250 rows (2026-09-13
+    // 15:55Z onward) for exactly one reason: `agent_type` carried the teammate
+    // NAME, which no policy bucket lists. `summarizeSpawns` therefore bucketed
+    // every session under 'unknown'. The definition lives on the receipt.
+    expect(runPre({
+      cwd: repo,
+      hook_event_name: 'PreToolUse',
+      prompt_id: 'pid-named-1',
+      session_id: 'sess-named',
+      tool_name: 'Agent',
+      tool_use_id: 'toolu_named_1',
+      tool_input: {
+        description: 'Implement the ledger byte cap across three modules and add regression tests',
+        prompt: 'the full prompt body',
+        subagent_type: 'tdd-guide',
+        name: 'split-artibot-x-impl',
+      },
+    }, home).status).toBe(0);
+
+    const payload = {
+      session_id: 'sess-named',
+      agent_id: 'agent-named-1',
+      agent_type: 'split-artibot-x-impl',
+      prompt_id: 'pid-named-1',
+      cwd: repo,
+    };
+    expect(runHook(payload, 'start', home).status).toBe(0);
+    expect(runHook(payload, 'stop', home).status).toBe(0);
+
+    const expected = resolveModel('tdd-guide', {}, await loadConfig());
+    const recs = readSpawns(repo, { sessionId: 'sess-named' });
+    expect(recs.map((r) => r.event)).toEqual(['start', 'stop']);
+    expect(recs[0].canonicalModel).toBe(expected);
+    // `handleStop` reads the tracked start entry, so the two rows of one spawn
+    // cannot disagree about which model ran.
+    expect(recs[1].canonicalModel).toBe(expected);
   });
 
   it('stop appends a stop record with durationMs when the start was tracked', () => {
