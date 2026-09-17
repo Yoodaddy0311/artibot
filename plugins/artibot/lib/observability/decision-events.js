@@ -77,6 +77,9 @@
  *   - recordMemoryInjection(runId, measurement, { storeDir, projectRoot, cwd, ts, phase })
  *   - recordSelfControlDecision(runId, decision, { storeDir, projectRoot, cwd, ts, phase })  (D9)
  *   - recordSkillLevelChanged(runId, change, { storeDir, projectRoot, cwd, ts, phase })         (D9)
+ *   - recordActivationObserved(runId, observation, { storeDir, projectRoot, cwd, ts, phase })
+ *     (the NL-activation numerator/denominator; payload built by
+ *     `lib/observability/activation-observed.js#buildActivationRecord`)
  *   - cronRunId(feature, { env, now })  (run id for the scheduler writers above)
  *   - DECISION_EVENT_TYPES / SELF_CONTROL_SUBSYSTEMS / SELF_CONTROL_ACTIONS / SKILL_LEVELS
  *     (the fail-closed vocabularies `record` and the two D9 recorders admit)
@@ -89,6 +92,13 @@
  */
 
 import path from 'node:path';
+import {
+  ACTIVATION_DATA_KEYS,
+  MAX_PROMPT_ID_LENGTH,
+  NL_MATCH_ID_RE,
+  PREDICTED_SIGNALS,
+  SLASH_NAME_RE,
+} from './activation-observed.js';
 import { redactString } from '../core/redaction.js';
 import { resolveProjectRoot } from '../git/project-root.js';
 import { appendRunEvent, readRunEvents, resolveRunEventsPath } from './run-events.js';
@@ -136,6 +146,16 @@ export const SELF_CONTROL_DECIDED = 'self-control-decided';
 export const SKILL_LEVEL_CHANGED = 'skill-level-changed';
 
 /**
+ * NL-activation sighting — the numerator/denominator pair for the §3.7
+ * slash-agreement axis. `scripts/evals/nl-activation-report.mjs#foldActivation`
+ * has read `command_activation` / `activation_observed` since it shipped, but
+ * no runtime producer ever wrote either, so the axis reported `0/0` while
+ * looking like a working instrument. {@link recordActivationObserved} is that
+ * producer. OBSERVE ONLY, like every type here.
+ */
+export const ACTIVATION_OBSERVED = 'activation-observed';
+
+/**
  * Every `type` this store admits, and the ONLY ones. `record` refuses the rest.
  * `tests/observability/decision-events.test.js` scans this module's source and
  * asserts that every `type:` literal written here is a member, so a recorder
@@ -149,6 +169,7 @@ export const DECISION_EVENT_TYPES = Object.freeze([
   RECORDER_STATS,
   SELF_CONTROL_DECIDED,
   SKILL_LEVEL_CHANGED,
+  ACTIVATION_OBSERVED,
 ]);
 
 /**
@@ -925,6 +946,99 @@ export function recordSkillLevelChanged(runId, change, opts = {}) {
     level: 'info',
     message: `skill level ${data.from} -> ${data.to}`
       + (data.signals === null ? '' : ` (${data.signals} signals)`),
+    data,
+  }, opts);
+}
+
+/**
+ * Keep only the boolean entries of an activation map, or null.
+ *
+ * `command_activation` comes from `lib/mission/compiler.js`, which also
+ * projects a `skills: string[]` key on other call paths. Filtering by VALUE
+ * TYPE rather than by name keeps the map open to a future boolean activation
+ * key while making it impossible for a string — the shape prompt-derived text
+ * would arrive in — to ride along. The same trade `numericValuesOnly` makes
+ * for `factors`.
+ *
+ * @param {unknown} src
+ * @returns {object|null}
+ */
+function booleanValuesOnly(src) {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (typeof v === 'boolean') out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Record one NL-activation sighting: what the router WOULD have activated, and
+ * which slash command the user actually typed.
+ *
+ * Takes a {@link module:lib/observability/activation-observed} record rather
+ * than a `routeTopology` result, so the projection stays pure and unit-testable
+ * and this function stays a writer. Every field is re-validated here anyway —
+ * the pure builder is not the only possible caller, and a recorder that trusts
+ * its input is a recorder whose privacy property holds only by convention.
+ *
+ * THE RUN ID IS PART OF THE IDEMPOTENCY KEY. The builder cannot know it (it is
+ * pure), so it emits `activation:<promptId>` and this function rewrites the key
+ * as `activation:<runId>:<promptId>`. Without the run id the key would collide
+ * across sessions that happen to mint the same prompt id, and a deduplicating
+ * reader would drop real records as repeats.
+ *
+ * @param {string} runId
+ * @param {object} observation - a `buildActivationRecord` result
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string, phase?: string }} [opts]
+ * @returns {object|null}
+ */
+export function recordActivationObserved(runId, observation, opts = {}) {
+  if (!runId || typeof runId !== 'string') {
+    stats.skipped += 1;
+    return null;
+  }
+  const o = observation && typeof observation === 'object' ? observation : {};
+  const data = pick(o, ACTIVATION_DATA_KEYS);
+
+  data.observe_only = true;
+  data.command_activation = booleanValuesOnly(o.command_activation);
+
+  // Re-validated against the charset `detectSlashCommand` produces, and rebuilt
+  // as a fresh object so no sibling key inside the container reaches disk.
+  const observed = o.activation_observed;
+  const slash = observed && typeof observed === 'object' ? observed.slash : undefined;
+  data.activation_observed = typeof slash === 'string' && SLASH_NAME_RE.test(slash)
+    ? { slash }
+    : {};
+
+  data.predicted_mode = typeof o.predicted_mode === 'string' ? o.predicted_mode : null;
+  data.predicted_signal = PREDICTED_SIGNALS.includes(o.predicted_signal)
+    ? o.predicted_signal
+    : null;
+  data.predicted_nl_match = typeof o.predicted_nl_match === 'string'
+    && NL_MATCH_ID_RE.test(o.predicted_nl_match)
+    ? o.predicted_nl_match
+    : null;
+  data.prompt_id = typeof o.prompt_id === 'string'
+    && o.prompt_id.length > 0
+    && o.prompt_id.length <= MAX_PROMPT_ID_LENGTH
+    ? o.prompt_id
+    : null;
+  data.idempotency_key = data.prompt_id === null
+    ? null
+    : `activation:${runId}:${data.prompt_id}`;
+
+  const predicted = Object.keys(data.command_activation ?? {})
+    .filter((k) => data.command_activation[k] === true);
+
+  return record(runId, {
+    ts: opts.ts,
+    phase: typeof opts.phase === 'string' ? opts.phase : 'ROUTE',
+    type: ACTIVATION_OBSERVED,
+    level: 'info',
+    message: `activation slash=${data.activation_observed.slash ?? 'none'} `
+      + `predicted=${predicted.length > 0 ? predicted.join(',') : 'none'}`,
     data,
   }, opts);
 }
