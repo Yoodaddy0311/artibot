@@ -40,6 +40,31 @@
  * `type-violation:tool` REJECTION rather than a row missing one field. The same
  * reasoning `tool-used-record.js` applies to `skill`.
  *
+ * ── O8-i SWITCH (owner decision 2026-09-17) ────────────────────────────────
+ * `artibot.config.json#/ledger/hookFired/slots` is an ALLOWLIST of dispatcher
+ * slot names. A dispatch whose slot is not on it is skipped here with
+ * `{ok:false, reason:'slot-disabled'}` and writes no row. It exists so the
+ * owner can silence the NOISIEST slot alone — PostToolUse dispatched >= 679
+ * times/day (measured 2026-09-15) — after two Shadow releases, without an env
+ * var that would disable the whole dispatcher.
+ *
+ * DEFAULT ON, AND THAT DIRECTION IS THE POINT. When the key is ABSENT or its
+ * value is NOT AN ARRAY, {@link readHookFiredSlots} returns `null` and every
+ * slot is recorded exactly as it was before this switch existed. An older
+ * config, a partial install or a malformed edit therefore cannot silently
+ * silence the carrier; only a deliberate array can. (The array direction is
+ * itself an allowlist, so a slot added later is OFF until someone lists it —
+ * fail-closed in the generating direction, rules §8. An EMPTY array is a real
+ * allowlist of none and records nothing.) The read never throws: an unreadable
+ * or unparsable config degrades to `null`, i.e. to recording everything.
+ *
+ * DISABLING A SLOT IS NOT MEASURING IT AT ZERO. With a slot off, its hooks
+ * carry no `hook.fired` row at all, so `lib/replay/existence-audit.js` reads
+ * them as `unmeasured:carrier-event-absent-from-ledger` — NOT as `fired: 0`.
+ * That distinction is the whole reason this module was written, so turning a
+ * slot off removes those hooks from the Existence Audit's denominator rather
+ * than making them removal candidates.
+ *
  * NOT A HOOK, AND NOT A 13th ENTRY IN ANY DISPATCH TABLE. This is a LIBRARY
  * module called in-process by the dispatchers after they have written their
  * merged stdout. It has no `main()`, no stdin read and no direct-run guard,
@@ -86,6 +111,8 @@
  * @module scripts/hooks/_hook-fired-record
  */
 
+import { readFileSync } from 'node:fs';
+
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
@@ -111,6 +138,70 @@ const ERR_TAG = '[artibot:hook-fired-record]';
  */
 function str(value) {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/** Plugin root, for the one config file this module reads. */
+const PLUGIN_ROOT_URL = new URL('../../', import.meta.url);
+
+/** Sentinel: the config has not been consulted in this process yet. */
+const UNREAD = Symbol('hook-fired-slots-unread');
+
+/**
+ * Per-PROCESS memo of the config value. A dispatcher process handles one
+ * payload and exits, so this caches at most one read; it is deliberately NOT a
+ * cross-process cache, and a config edit takes effect on the next dispatch.
+ * @type {readonly string[]|null|typeof UNREAD}
+ */
+let slotsMemo = UNREAD;
+
+/**
+ * Normalise an allowlist candidate. THE ONE PLACE the default-ON rule is
+ * decided, so the config path and the `opts.slots` override cannot disagree.
+ *
+ * Anything that is not an array — absent, `null`, a string, an object, a
+ * malformed edit — becomes `null`, which means "record every slot". Inside an
+ * array, entries that are not non-blank strings are DROPPED rather than
+ * poisoning the list: a blank name matches no slot and would only make the
+ * allowlist look longer than it is.
+ *
+ * @param {unknown} value
+ * @returns {readonly string[]|null} null = every slot
+ */
+function normaliseSlots(value) {
+  if (!Array.isArray(value)) return null;
+  return Object.freeze(value.filter((entry) => str(entry) !== null));
+}
+
+/**
+ * The O8-i allowlist in force for this call.
+ *
+ * PRECEDENCE — explicit `opts.slots` > `artibot.config.json#/ledger/hookFired/
+ * slots` > default ON. Mirrors `lib/runtime/event-writer.js#getLedgerSettings`
+ * (:217-239), which resolves the sibling `ledger` keys the same way.
+ *
+ * Passing `opts.slots` is also the documented TEST SEAM for a malformed config
+ * value: a non-array override travels the same {@link normaliseSlots} branch
+ * the config value does, so a suite can pin "malformed => default ON" without
+ * writing to the real config.
+ *
+ * Never throws. An unreadable or unparsable config yields `null`.
+ *
+ * @param {{slots?: unknown}} [opts]
+ * @returns {readonly string[]|null} null = every slot is recorded
+ */
+export function readHookFiredSlots(opts = {}) {
+  if (opts?.slots !== undefined) return normaliseSlots(opts.slots);
+  if (slotsMemo === UNREAD) {
+    let raw;
+    try {
+      const cfg = JSON.parse(readFileSync(new URL('artibot.config.json', PLUGIN_ROOT_URL), 'utf-8'));
+      raw = cfg?.ledger?.hookFired?.slots;
+    } catch {
+      raw = undefined;
+    }
+    slotsMemo = normaliseSlots(raw);
+  }
+  return slotsMemo;
 }
 
 /**
@@ -196,7 +287,16 @@ export function buildHookFiredEnvelope({ slot, payload, results, tool } = {}) {
 /**
  * Build and append. NEVER throws, NEVER writes stdout.
  *
+ * The O8-i allowlist is consulted AFTER the envelope is built, not before.
+ * Order matters for the reason string and nothing else: an unusable call is
+ * `not-recordable` whatever the allowlist says, and only a WELL-FORMED row for
+ * an unlisted slot is `slot-disabled`. Gating first would relabel every garbage
+ * call as `slot-disabled`, because garbage is never on an allowlist. No row is
+ * written either way — the append is the last step.
+ *
  * @param {object} args see {@link buildHookFiredEnvelope}
+ * @param {unknown} [args.slots] TEST-ONLY override of the O8-i allowlist. The
+ *   six dispatchers do not pass it; see {@link readHookFiredSlots}.
  * @returns {{ok: true, folded: boolean} | {ok: false, reason: string}}
  *   `folded` true means the row was accepted WITHOUT `failed`/`count`/`tool`.
  */
@@ -204,6 +304,10 @@ export function recordHookFired(args) {
   try {
     const envelope = buildHookFiredEnvelope(args || {});
     if (envelope === null) return { ok: false, reason: 'not-recordable' };
+    const allowed = readHookFiredSlots({ slots: args?.slots });
+    if (allowed !== null && !allowed.includes(envelope.data.slot)) {
+      return { ok: false, reason: 'slot-disabled' };
+    }
     // FAIL-CLOSED ON A MISSING cwd, like tool-used-record.js#record. Falling
     // back to `process.cwd()` would aim the write at whatever repository the
     // dispatcher happened to be launched from, which is a different project's

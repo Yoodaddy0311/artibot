@@ -867,6 +867,10 @@
   "ledger": {
     "path": ".artibot/runtime/ledger.jsonl",
     "maxLineBytes": 4096,
+    "hookFired": {
+      "slots": ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd", "SubagentStop"],
+      "comment": "SH-29 / O8-i (owner 2026-09-17). Allowlist of dispatcher slots whose dispatch is recorded as a hook.fired row by scripts/hooks/_hook-fired-record.js#recordHookFired. Default = all 6 (Shadow); remove PostToolUse to drop the ~679 rows/day it adds (measured 2026-09-15) after two releases. Key absent or not an array => every slot recorded (default ON, so an old config cannot silence the carrier); a slot not listed => no row, reason slot-disabled; an EMPTY array is a real allowlist of none and records nothing. Rows are written only from the 6 dispatchers (scripts/hooks/_*-dispatcher.js); hooks/dispatch-table.json declares 8 slots, and the two extra ones (PreCompact, PostCompact) have no dispatcher calling the writer, so they are outside this switch — as are the hooks registered directly in hooks.json. Read by _hook-fired-record.js only."
+    },
     "comment": "Design §3.6 — the ONE physical ledger of record. path is relative to <projectRoot>, NOT to pluginRoot: pluginRoot also has a runtime/ directory, so the leading '.artibot/' is load-bearing and every writer takes projectRoot by injection (§3.6 operating clause 10). The existing 12 ledgers are not deleted; they are demoted to raw-log grade. maxLineBytes 4096 is the per-line cap — content over it goes in evidence_refs rather than inline, and the writer rejects the oversized line (fail-closed). NO WRITER EXISTS as of 2026-09-02 (lib/runtime/event-writer.js absent) and the file itself is not created by this task, so this key describes a contract, not an observed artifact."
   },
   "stateStore": {

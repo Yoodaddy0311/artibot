@@ -1204,6 +1204,14 @@ describe('hook.fired carrier (UserPromptSubmit round trip)', () => {
     // The carrier is a library module, not an 8th handler.
     expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
 
+    // SH-29 part B: the same real dispatch also carries the COMMAND the user
+    // typed, written by runtime-prompt.js in-process (`intent.detected`,
+    // `type:'slash-command'`), correlated by the same prompt_id.
+    const typed = lines.filter((l) => l.event === 'intent.detected');
+    expect(typed).toHaveLength(1);
+    expect(typed[0].data).toEqual({ type: 'slash-command', confidence: 1, command: 'split' });
+    expect(typed[0].action_id).toBe('prompt_hook_fired_ups_1');
+
     // NOT FOLDED. Over `ledger.maxLineBytes` the writer keeps only the
     // allowlist's required keys and drops `failed`/`count`/`tool` while still
     // ACCEPTING the line — a silent narrowing the assertions above would not

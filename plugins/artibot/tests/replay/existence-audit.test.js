@@ -131,19 +131,21 @@ function line(event, data) {
 }
 
 describe('an unmeasured kind reports null, never zero', () => {
-  it('hooks and skills are carried; commands and modules are still null', () => {
+  it('hooks, skills and commands are carried; modules is the only null', () => {
     // A PIN, not a description. If someone adds another carrier this fails on
     // purpose: the module header states which kinds are measured and why the
     // rest are not, and a new carrier makes that statement stale. `skills`
-    // measured 2026-09-15 (Wave 11), `hooks` 2026-09-17 (Wave 12), both SH-29.
+    // measured 2026-09-15 (Wave 11), `hooks` and `commands` 2026-09-17
+    // (Wave 12 parts A and B), all SH-29.
     expect(CARRIERS.skills).toEqual({ event: 'tool.used', field: 'skill' });
     expect(CARRIERS.hooks).toEqual({ event: 'hook.fired', field: 'hooks', multi: true });
+    expect(CARRIERS.commands).toEqual({ event: 'intent.detected', field: 'command' });
     // Only `hooks` is multi-valued; a second one would change how every reader
     // has to interpret the denominator, so it does not slip in unannounced.
+    // `commands` is SINGLE on purpose — one prompt types at most one command.
     expect(AUDITED_KINDS.filter((k) => CARRIERS[k]?.multi === true)).toEqual(['hooks']);
-    for (const kind of ['commands', 'modules']) {
-      expect(CARRIERS[kind], `${kind} carrier`).toBeNull();
-    }
+    expect(CARRIERS.commands.multi).toBeUndefined();
+    expect(AUDITED_KINDS.filter((k) => CARRIERS[k] === null)).toEqual(['modules']);
     // Every kind states WHERE its number comes from, or why there is none.
     for (const kind of AUDITED_KINDS) {
       expect(CARRIER_NOTES[kind], `${kind} note`).toEqual(expect.any(String));
@@ -156,15 +158,35 @@ describe('an unmeasured kind reports null, never zero', () => {
     // their zero is false. A note that drops that number stops warning.
     expect(CARRIER_NOTES.hooks).toContain('24');
     expect(CARRIER_NOTES.hooks).toContain('hooks.json');
+    expect(CARRIER_NOTES.commands).toContain('intent.detected.command');
+    expect(CARRIER_NOTES.commands).toContain('runtime-prompt.js');
+    // Same rule as the hooks note: the commands carrier's blind spots are the
+    // namespaced slash and the inventory spelling, and dropping either from the
+    // note turns a false `fired: 0` back into silent removal evidence.
+    expect(CARRIER_NOTES.commands).toContain('/artibot:split');
+    expect(CARRIER_NOTES.commands).toContain('commands/*.md');
   });
 
   it('fired is null and the reason names the kind', () => {
-    const audit = buildExistenceAudit([], { inventory: { commands: ['doctor'] } });
-    const [entry] = audit.kinds.commands.entries;
+    // MOVED from `commands` to `modules` on 2026-09-17 (SH-29 part B): once a
+    // kind has a carrier its empty-ledger reason is `carrier-event-absent`, not
+    // `no-event-carries`, so this case needs the one kind that still has none.
+    const audit = buildExistenceAudit([], { inventory: { modules: ['replay.js'] } });
+    const [entry] = audit.kinds.modules.entries;
     expect(entry.fired).toBeNull();
     expect(entry.fired).not.toBe(0);
     expect(entry.measured).toBe(false);
-    expect(entry.reason).toBe('unmeasured:no-event-carries-command');
+    expect(entry.reason).toBe('unmeasured:no-event-carries-module');
+  });
+
+  it('commands reports carrier-absent, not no-carrier, on an empty ledger', () => {
+    const audit = buildExistenceAudit([], { inventory: { commands: ['doctor'] } });
+    const [entry] = audit.kinds.commands.entries;
+    expect(entry.reason).toBe(CARRIER_ABSENT_REASON);
+    expect(entry.reason).not.toBe(noCarrierReason('commands'));
+    expect(entry.fired).toBeNull();
+    expect(entry.measured).toBe(false);
+    expect(audit.kinds.commands.denominator).toBe(0);
   });
 
   it('hooks now reports carrier-absent, not no-carrier, on an empty ledger', () => {
@@ -385,13 +407,15 @@ describe('the skills carrier, folded from real tool.used rows', () => {
     }
     expect(audit.kinds.skills.denominator).toBe(4);
     expect(audit.summary.measured).toBe(3);
-    // The other kinds are untouched by the skills carrier. `hooks` has its own
-    // carrier now, so the assertion is no longer "null" — it is that the two
-    // folds do not see each other's rows: there is no hook.fired line here, so
-    // hooks stays at denominator 0 while skills counts 4.
+    // The other kinds are untouched by the skills carrier. `hooks` and
+    // `commands` have their own carriers now, so the assertion is no longer
+    // "null" — it is that the folds do not see each other's rows: there is no
+    // hook.fired and no intent.detected line here, so both stay at denominator
+    // 0 while skills counts 4.
     expect(audit.kinds.hooks.carrier).toEqual(CARRIERS.hooks);
     expect(audit.kinds.hooks.denominator).toBe(0);
-    expect(audit.kinds.commands.carrier).toBeNull();
+    expect(audit.kinds.commands.carrier).toEqual(CARRIERS.commands);
+    expect(audit.kinds.commands.denominator).toBe(0);
     expect(audit.kinds.modules.carrier).toBeNull();
   });
 

@@ -7,11 +7,23 @@
  * candidate only, removed by a human, never automatically. That section closes
  * by naming its own hole: "발화 카운트의 분모는 현재 미측정" (CLAUDE.md:90).
  *
- * This module is that denominator. Since Wave 12 it answers for TWO of the four
- * kinds — `skills`, through `tool.used.skill`, and `hooks`, through
- * `hook.fired.hooks` — and still answers `unmeasured` for the other two.
+ * This module is that denominator. Since Wave 12 it answers for THREE of the
+ * four kinds — `skills`, through `tool.used.skill`, `hooks`, through
+ * `hook.fired.hooks`, and `commands`, through `intent.detected.command` — and
+ * still answers `unmeasured` for `modules` alone.
  *
- * WHAT CHANGED (2026-09-17, Wave 12 / SH-29)
+ * WHAT CHANGED (2026-09-17, Wave 12 / SH-29 part B)
+ * ---------------------------------------------------------------------------
+ * A third writer, `scripts/hooks/runtime-prompt.js#recordSlashCommandInvoked`,
+ * records ONE `intent.detected` row per USER-TYPED slash command, naming it in
+ * `data.command` beside `type: 'slash-command'` and `confidence: 1`. So
+ * `CARRIERS.commands` is no longer null. It is SINGLE-valued, not multi: one
+ * prompt types at most one command. The rows a future intent CLASSIFIER writes
+ * under this same event will carry no `command` key and land in the fold's
+ * `absent` bucket, so that "a command fired" and "an intent was classified and
+ * named no command" stay two different readings.
+ *
+ * WHAT CHANGED (2026-09-17, Wave 12 / SH-29 part A)
  * ---------------------------------------------------------------------------
  * A second writer, `scripts/hooks/_hook-fired-record.js`, records ONE
  * `hook.fired` row per dispatcher invocation, naming in `data.hooks` the
@@ -40,17 +52,16 @@
  * most of them have no skill to name, so requiring it would reject the majority
  * of the event's own rows.
  *
- * `commands` and `modules` stay null, for the reasons unchanged from the
- * 2026-09-02 survey below. Those reasons were RE-MEASURED 2026-09-15 across all
- * 39 registered events then present (39 = `Object.keys(allowlist.events)
- * .length`; it was 36 at the 2026-09-02 pass, 40 once Wave 12 added
- * `hook.fired`, and the events added at each step were read too): no `data`
- * field names a command or a `lib/` module. The closest candidates are still
- * category labels one level off — `review.requested.reviewer` and
- * `review.claim_audit.subject_agent_type` name an AGENT, and
- * `memory.promoted.path` names a memory file, not a module. `hooks` was in that
- * list until Wave 12; it left by the same route `skills` did, a new writer, not
- * a rereading of an existing field.
+ * `modules` stays null, for the reasons unchanged from the 2026-09-02 survey
+ * below. Those reasons were RE-MEASURED 2026-09-15 across all 39 registered
+ * events then present (39 = `Object.keys(allowlist.events).length`; it was 36
+ * at the 2026-09-02 pass and 40 once Wave 12 added `hook.fired`, and the events
+ * added at each step were read too): no `data` field names a `lib/` module. The
+ * closest candidates are still category labels one level off —
+ * `review.requested.reviewer` and `review.claim_audit.subject_agent_type` name
+ * an AGENT, and `memory.promoted.path` names a memory file, not a module.
+ * `hooks` and `commands` were in that list until Wave 12; both left by the same
+ * route `skills` did, a new writer, not a rereading of an existing field.
  *
  * WHAT WAS MEASURED (2026-09-02, `schemas/ledger-events.allowlist.json`, all 36
  * events registered at that time, read end to end) — HISTORICAL, KEPT
@@ -78,7 +89,10 @@
  *     only says the emitter was a hook.
  *   - `intent.detected.type` (allowlist:104-113) carries an intent type, not a
  *     command name. `phase.started.segment` carries a phase segment. Neither is
- *     an artifact identity.
+ *     an artifact identity. This is the near miss Wave 12 part B closed, for
+ *     the third time by adding a field rather than rereading one: the sibling
+ *     `intent.detected.command` names the command, and `type` still only says
+ *     which intent vocabulary term applied.
  *   - `worker.claimed.agent_type` names an agent type, not a hook/command/skill.
  *
  * So `CARRIERS` below was all-null on 2026-09-02, and every entry this module
@@ -86,8 +100,8 @@
  * CLAUDE.md cannot be evaluated until a writer records an artifact name, and
  * saying so with a null is the whole point. A `fired: 0` in that state cannot
  * be told apart from a measured silence, and would let something be deleted for
- * a silence nobody was ever listening for. Two kinds are still in exactly that
- * state; `skills` left it on 2026-09-15 and `hooks` on 2026-09-17.
+ * a silence nobody was ever listening for. One kind is still in exactly that
+ * state; `skills` left it on 2026-09-15, `hooks` and `commands` on 2026-09-17.
  *
  * WHY THE EXEMPT LIST IS A CONSTANT AND NOT A PARSE
  * ---------------------------------------------------------------------------
@@ -153,6 +167,20 @@
  *     2026-09-17). An inventory listing those 24 gets `fired: 0, measured:
  *     true` — a FALSE ZERO, the exact shape that reads as removal evidence.
  *     The row also says nothing about how long a handler ran or what it did.
+ *   - THE COMMANDS CARRIER SEES ONLY WHAT THE USER TYPED, AND ONLY BARE NAMES.
+ *     `intent.detected.command` is written from `detectSlashCommand`
+ *     (`lib/mission/mission-id.js:139-144`), which matches a bare `/name` at
+ *     the start of the prompt and returns it LOWERCASED. Three consequences,
+ *     each a false `fired: 0` waiting for an unwary reader: a NAMESPACED slash
+ *     (`/artibot:split`) is not detected at all and writes no row (known gap,
+ *     pinned at `tests/hooks/runtime-prompt-activation-wiring.test.js:283`); a
+ *     command reached any way OTHER than the user typing it — a hint, a
+ *     command invoked by another command, a subagent — is invisible; and the
+ *     inventory must be spelled as the bare `commands/*.md` stem, because that
+ *     is the only spelling the rows can contain. Normalising the inventory to
+ *     that stem is the CALLER's job (leader decision sh29-3); this module
+ *     matches names literally and cannot tell a renamed command from a silent
+ *     one. The row also says nothing about whether the command then succeeded.
  *   - A REGISTERED FIELD IS NOT A FIRING WRITER. `CARRIERS.skills` says the
  *     field exists and is readable, not that the hook is installed, reached, or
  *     succeeding. If `scripts/hooks/tool-used-record.js` stops running, this
@@ -220,7 +248,7 @@ export const EXEMPT_CONTRACTS = Object.freeze([
  */
 export const CARRIERS = Object.freeze({
   hooks: Object.freeze({ event: 'hook.fired', field: 'hooks', multi: true }),
-  commands: null,
+  commands: Object.freeze({ event: 'intent.detected', field: 'command' }),
   skills: Object.freeze({ event: 'tool.used', field: 'skill' }),
   modules: null,
 });
@@ -244,8 +272,19 @@ export const CARRIER_NOTES = Object.freeze({
     + 'handler duration and not what the handler did. The envelope source enum still only '
     + 'says "hook" (ledger-envelope.schema.json:45-57), 1 of 8 emitter categories.',
   commands:
-    'intent.detected.type is an intent vocabulary and phase.*.segment is a phase name; '
-    + 'no registered event data field names a command.',
+    'intent.detected.command (written by scripts/hooks/runtime-prompt.js'
+    + '#recordSlashCommandInvoked since Wave 12, 2026-09-17) carries the command NAME for a '
+    + 'row with type="slash-command" and confidence=1, one row per user-typed slash prompt. '
+    + 'SINGLE-valued, not multi. Rows WITHOUT the key -- the intent-classifier rows this '
+    + 'event was registered for, which have a type but no command -- count as `absent`, so '
+    + '"an intent was classified" and "a command fired" stay distinct. CANNOT SEE: a '
+    + 'NAMESPACED slash (/artibot:split), which detectSlashCommand (lib/mission/mission-id'
+    + '.js:139-144) does not match, so it writes no row at all; and any command not typed by '
+    + 'the user. The inventory must therefore be spelled as the bare commands/*.md stem, '
+    + 'lowercased, which is the only spelling these rows can contain -- normalising it to '
+    + 'that stem is the caller\'s job (leader decision sh29-3), and a mismatch reads as a '
+    + 'false fired: 0. The sibling field intent.detected.type is an intent vocabulary term '
+    + 'and phase.*.segment is a phase name; neither is a command identity.',
   skills:
     'tool.used.skill (written by scripts/hooks/tool-used-record.js since Wave 11, '
     + '2026-09-15) carries the skill name for tool=Skill; rows without the key count as '
@@ -278,11 +317,12 @@ export function noCarrierReason(kind) {
  * Fold firing counts for one carrier.
  *
  * Kept exported and carrier-parameterised on purpose: `CARRIERS` is a MEASURED
- * FACT, not a knob. Two of its four entries are still null (2026-09-17), so a
- * test that produced numbers for those by overriding the constant would be
+ * FACT, not a knob. One of its four entries is still null (2026-09-17), so a
+ * test that produced numbers for that one by overriding the constant would be
  * testing a fiction. Passing a hypothetical carrier here exercises the
- * arithmetic without touching the finding. `skills` and `hooks` no longer need
- * the hypothetical — both have real carriers and are folded from real rows.
+ * arithmetic without touching the finding. `skills`, `hooks` and `commands` no
+ * longer need the hypothetical — all three have real carriers and are folded
+ * from real rows.
  *
  * SINGLE mode (`multi` unset). A value that is absent, null, or non-scalar
  * lands in `absent` rather than in a bucket of its own (`countBy`,

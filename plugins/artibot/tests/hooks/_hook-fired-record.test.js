@@ -37,6 +37,14 @@
  *   - ANY LIVE FIRING RATE. Nothing here says how often a dispatch happens.
  *   - THAT THE NAMES MATCH REAL FILES. Names are recorded raw; whether a name
  *     resolves to a script is the audit's question, not the writer's.
+ *   - THAT THE SHIPPED SLOT LIST MATCHES THE DISPATCHERS. The O8-i cases below
+ *     read `artibot.config.json` and pin the switch's BEHAVIOUR; whether the
+ *     six names in it are the six that actually call the writer is derived
+ *     from the dispatcher sources by
+ *     `tests/firewall/v5-config-firewall.test.js`.
+ *   - A MALFORMED CONFIG FILE ON DISK. The "malformed => default ON" case uses
+ *     the module's documented `slots` override seam, which travels the same
+ *     normaliser as the config value. Nothing here writes to the real config.
  *
  * @module tests/hooks/_hook-fired-record
  */
@@ -54,8 +62,13 @@ import {
   buildEnvelope, lineBytes, validateEnvelope, validateEventContract,
 } from '../../lib/runtime/event-writer.js';
 import {
-  buildHookFiredEnvelope, HOOK_FIRED_EVENT, recordHookFired,
+  buildHookFiredEnvelope, HOOK_FIRED_EVENT, readHookFiredSlots, recordHookFired,
 } from '../../scripts/hooks/_hook-fired-record.js';
+
+/** The real shipped config, read here so the pin below cannot drift from it. */
+const REAL_CONFIG = JSON.parse(
+  readFileSync(new URL('../../artibot.config.json', import.meta.url), 'utf-8'),
+);
 
 /** >= 8 alphanumerics so the session fallback mission id is issuable. */
 const SESSION_ID = 'sess-hook-fired-record-fixture-0001';
@@ -306,5 +319,115 @@ describe('recordHookFired', () => {
     const rows = readLedger(repo).filter((l) => l.event === HOOK_FIRED_EVENT);
     expect(rows).toHaveLength(1);
     expect(rows[0].data.failed).toEqual(['subagent-stop-a']);
+  });
+});
+
+/**
+ * O8-i — `artibot.config.json#/ledger/hookFired/slots`, the per-slot switch.
+ *
+ * The direction under test is DEFAULT ON: an absent or malformed value must
+ * record everything, because the alternative is a partial install silently
+ * silencing the carrier the Existence Audit depends on.
+ */
+describe('O8-i slot switch', () => {
+  /** Every slot named by the shipped config, so the cases follow it. */
+  const SHIPPED = REAL_CONFIG.ledger.hookFired.slots;
+
+  it('the shipped config lists the six dispatcher slots, and nothing else', () => {
+    expect([...SHIPPED].sort()).toEqual([
+      'PostToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit',
+    ]);
+  });
+
+  describe('readHookFiredSlots', () => {
+    it('with no override, returns the shipped list (the config IS read)', () => {
+      expect([...readHookFiredSlots()]).toEqual(SHIPPED);
+    });
+
+    it('an explicit array wins, and non-string entries are dropped', () => {
+      expect([...readHookFiredSlots({ slots: ['x', 3, null, '', '  ', 'y'] })]).toEqual(['x', 'y']);
+    });
+
+    it('an explicit null means EVERY slot — it does not fall through to config', () => {
+      expect(readHookFiredSlots({ slots: null })).toBeNull();
+    });
+
+    it('a malformed value degrades to null = default ON (the seam for a bad config)', () => {
+      // Same normaliser the config value travels, so this pins the config
+      // branch without writing to the real file.
+      for (const bad of ['PostToolUse', 7, true, {}, { slots: [] }]) {
+        expect(readHookFiredSlots({ slots: bad })).toBeNull();
+      }
+    });
+
+    it('an EMPTY array is a real allowlist of none, not "absent"', () => {
+      expect(readHookFiredSlots({ slots: [] })).toEqual([]);
+      expect(readHookFiredSlots({ slots: [] })).not.toBeNull();
+    });
+
+    it('the returned list is frozen — a caller cannot widen the allowlist', () => {
+      const list = readHookFiredSlots({ slots: ['Stop'] });
+      expect(Object.isFrozen(list)).toBe(true);
+    });
+  });
+
+  describe('recordHookFired honours the allowlist', () => {
+    it('a slot that is NOT listed writes no row and reports slot-disabled', () => {
+      const res = recordHookFired({
+        slot: 'PostToolUse', payload: payload(), results: okResults(), tool: 'Edit',
+        slots: ['Stop'],
+      });
+      expect(res).toEqual({ ok: false, reason: 'slot-disabled' });
+      expect(readLedger(repo)).toEqual([]);
+    });
+
+    it('a slot that IS listed still writes its row', () => {
+      const res = recordHookFired({
+        slot: 'PostToolUse', payload: payload(), results: okResults(), tool: 'Edit',
+        slots: ['PostToolUse'],
+      });
+      expect(res).toEqual({ ok: true, folded: false });
+      expect(readLedger(repo).filter((l) => l.event === HOOK_FIRED_EVENT)).toHaveLength(1);
+    });
+
+    it('slots: null records the slot — an explicit "no allowlist" is default ON', () => {
+      const res = recordHookFired({
+        slot: 'SubagentStop',
+        payload: payload({ hook_event_name: 'SubagentStop' }),
+        results: okResults(['subagent-stop-a']),
+        slots: null,
+      });
+      expect(res).toEqual({ ok: true, folded: false });
+      expect(readLedger(repo).filter((l) => l.event === HOOK_FIRED_EVENT)).toHaveLength(1);
+    });
+
+    it('slots: [] disables EVERY slot — no row from any of the six', () => {
+      for (const slot of SHIPPED) {
+        expect(recordHookFired({
+          slot, payload: payload({ hook_event_name: slot }), results: okResults(), slots: [],
+        })).toEqual({ ok: false, reason: 'slot-disabled' });
+      }
+      expect(readLedger(repo)).toEqual([]);
+    });
+
+    it('an unusable call is not-recordable, NOT slot-disabled (order of checks)', () => {
+      // A gate placed before the build would relabel every garbage call, which
+      // would hide a malformed dispatch behind a switch nobody touched.
+      expect(recordHookFired({ slot: '', payload: payload(), results: [], slots: ['Stop'] }))
+        .toEqual({ ok: false, reason: 'not-recordable' });
+      expect(readLedger(repo)).toEqual([]);
+    });
+
+    it('with NO override, the shipped config still records all six slots', () => {
+      for (const slot of SHIPPED) {
+        expect(recordHookFired({
+          slot,
+          payload: payload({ hook_event_name: slot, tool_use_id: `toolu_${slot}` }),
+          results: okResults(['some-hook']),
+        })).toEqual({ ok: true, folded: false });
+      }
+      const rows = readLedger(repo).filter((l) => l.event === HOOK_FIRED_EVENT);
+      expect(rows.map((r) => r.data.slot)).toEqual([...SHIPPED]);
+    });
   });
 });

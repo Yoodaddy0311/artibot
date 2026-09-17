@@ -129,10 +129,15 @@
         "type",
         "confidence"
       ],
+      "fields": {
+        "command": {
+          "type": "string"
+        }
+      },
       "sources": [
         "hook"
       ],
-      "spec": "lane 6 §5-② #2. Replaces decision-events `routing-classified`, whose directory has never been created."
+      "spec": "lane 6 §5-② #2. Replaces decision-events `routing-classified`, whose directory has never been created. SH-29 part B (2026-09-17): `command` is present ONLY for a user-typed slash command recorded by scripts/hooks/runtime-prompt.js, on a row carrying `type: 'slash-command'` and `confidence: 1`; the value is the bare lowercase name detectSlashCommand (lib/mission/mission-id.js) returns, so a namespaced `/artibot:split` is NOT detected and writes no row. Optional, so it stays out of `required` -- a future classifier row has an intent type but no command, and such a row counts as `absent` in the fold. Read by lib/replay/existence-audit.js#CARRIERS.commands."
     },
     "plan.revised": {
       "required": [
