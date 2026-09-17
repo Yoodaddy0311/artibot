@@ -12,6 +12,7 @@ import { persist, recordPhase, tick } from './_engine-helpers.js';
 import { appendLesson } from './memory.js';
 import { ackPhaseAttempt } from './phase-attempt.js';
 import { recordRecoveryDecision } from './recovery-record.js';
+import { applyRecoveryTransition, loadRecoveryTransitionConfig } from './recovery-transition.js';
 
 /**
  * Phase names in canonical order.
@@ -125,14 +126,20 @@ export function safeAppendLesson(state, payload) {
  *
  * **It is also the SH-06 recovery-recording point** for `VERIFY`, for the same
  * reason: a verify *result* only exists here. `recovery-record.js` writes a
- * judgement into `state.recoveryJournal` and changes no transition; CA-03 is
- * what later lets that judgement steer `pendingPhase`.
+ * judgement into `state.recoveryJournal` and changes no transition. CA-03 — the
+ * wiring that lets that judgement steer `pendingPhase` — also lives here, but
+ * behind the `autopilot.recovery.transitionFromVerdict` gate: OFF (the default)
+ * leaves every field and event exactly as the Observe stage wrote them.
  *
  * @param {object} state
  * @param {{ phase: string, status: string, [k: string]: any }} payload
+ * @param {{transitionFromVerdict?: boolean}} [config] - CA-03 gate, injectable
+ *   for tests (precedent: `engine.js#resolveExecuteRunner(state, config)`).
+ *   Omitted, it is read from `artibot.config.json` — and only when a journal row
+ *   exists, so the clean-VERIFY path does no I/O.
  * @returns {object} mutated state
  */
-export function recordPhaseResult(state, payload = {}) {
+export function recordPhaseResult(state, payload = {}, config = undefined) {
   if (!state) throw new TypeError('state required');
   const { phase, status, ...rest } = payload;
   recordPhase(state, { name: phase, status, ...rest });
@@ -177,10 +184,20 @@ export function recordPhaseResult(state, payload = {}) {
   }
   // SH-06 recording point (Observe stage). A VERIFY *result* is the first
   // moment the engine knows whether verification succeeded, so it is where the
-  // recovery judgement is journalled. Recording only — the transition above is
-  // untouched, and the recorder never throws into this ACK.
+  // recovery judgement is journalled. The recorder never throws into this ACK.
+  // With the CA-03 gate OFF (default) this stays recording-only and the fixed
+  // transition above is untouched; with it ON, `applyRecoveryTransition` moves
+  // `pendingPhase` (or pauses) right after the row is written.
   if (phase === 'VERIFY') {
-    recordRecoveryDecision(state, { ...rest, phase, status, fixedNext: nextPhaseAfter(phase) });
+    const row = recordRecoveryDecision(state, { ...rest, phase, status, fixedNext: nextPhaseAfter(phase) });
+    // CA-03: only a journalled failure can steer the transition, and only when
+    // `autopilot.recovery.transitionFromVerdict` is true. OFF leaves every field
+    // and event exactly as the Observe stage wrote them; the config is not even
+    // read unless a row exists.
+    if (row) {
+      const cfg = config ?? loadRecoveryTransitionConfig();
+      if (cfg?.transitionFromVerdict === true) applyRecoveryTransition(state, row, cfg);
+    }
   }
   persist(state);
   return state;
