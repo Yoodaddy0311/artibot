@@ -181,3 +181,85 @@ describe('predictCost (with history)', () => {
     expect(out.complexity).toBe('high');
   });
 });
+
+/**
+ * History window semantics.
+ *
+ * `listSessions()` is a `readdir` listing, i.e. ALPHABETICAL, not chronological,
+ * and it includes every id ever written to the store. A block of unusable ids
+ * sorting to the end of that list therefore used to consume the whole window:
+ * the old implementation took `ids.slice(-cap)` FIRST and only then dropped the
+ * sessions with no usable usage, so the sample size collapsed to zero while
+ * usable history sat just outside the slice.
+ *
+ * The window is now "scan backwards until `cap` USABLE sessions are found",
+ * bounded by a read budget so a store full of unusable ids cannot turn one
+ * prediction into thousands of file reads. No id-name rule is involved: a
+ * session is judged only by whether its events aggregate to a positive
+ * tokens-per-char.
+ */
+describe('predictCost history window', () => {
+  const usableEvents = (taskChars, totalTokens) => [
+    { ts: '2026-05-16T10:00:00Z', type: 'session-start', data: { task: 'x'.repeat(taskChars) } },
+    { ts: '2026-05-16T10:30:00Z', type: 'usage', data: { tokensIn: totalTokens / 2, tokensOut: totalTokens / 2 } },
+  ];
+
+  it('counts usable sessions that sit beyond the tail block of unusable ids', () => {
+    const usable = ['a-old-1', 'a-old-2', 'a-old-3'];
+    const unusable = Array.from({ length: 60 }, (_, i) => `z-empty-${i}`);
+    const map = Object.fromEntries(usable.map((id) => [id, usableEvents(100, 2000)]));
+    const opts = {
+      listSessions: () => [...usable, ...unusable],
+      readEvents: makeReader(map),
+      cap: 50,
+    };
+    const out = predictCost({ task: 'x'.repeat(100) }, opts);
+    expect(out.basedOnNSessions).toBe(3);
+    expect(out.confidence).toBeGreaterThan(0);
+  });
+
+  it('bounds readEvents calls at cap x 10 when nothing is usable', () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `empty-${i}`);
+    const reader = vi.fn(() => []);
+    const opts = { listSessions: () => ids, readEvents: reader, cap: 5 };
+    const out = predictCost('fix bug', opts);
+    expect(reader.mock.calls.length).toBeLessThanOrEqual(50);
+    expect(out.basedOnNSessions).toBe(0);
+  });
+
+  it('stops at cap and keeps the most recent usable sessions', () => {
+    // 10 old sessions at 100 tokens/char, then 50 recent ones at 20 tokens/char.
+    // With cap=50 only the recent block may be sampled, so the rolling average
+    // must land on 20; a 100 anywhere in the mean would prove an older session
+    // leaked into the window.
+    const old = Array.from({ length: 10 }, (_, i) => `a-old-${i}`);
+    const recent = Array.from({ length: 50 }, (_, i) => `b-recent-${i}`);
+    const map = {
+      ...Object.fromEntries(old.map((id) => [id, usableEvents(100, 10000)])),
+      ...Object.fromEntries(recent.map((id) => [id, usableEvents(100, 2000)])),
+    };
+    const opts = {
+      listSessions: () => [...old, ...recent],
+      readEvents: makeReader(map),
+      cap: 50,
+    };
+    const out = predictCost({ task: 'x'.repeat(100) }, opts);
+    expect(out.basedOnNSessions).toBe(50);
+    expect(out.tokensPerCharUsed).toBeCloseTo(20, 5);
+  });
+
+  it('is deterministic for the same session list and events', () => {
+    const usable = ['a-1', 'a-2'];
+    const unusable = Array.from({ length: 12 }, (_, i) => `z-${i}`);
+    const map = Object.fromEntries(usable.map((id) => [id, usableEvents(100, 2000)]));
+    const makeOpts = () => ({
+      listSessions: () => [...usable, ...unusable],
+      readEvents: makeReader(map),
+      cap: 50,
+    });
+    const first = predictCost({ task: 'implement search' }, makeOpts());
+    const second = predictCost({ task: 'implement search' }, makeOpts());
+    expect(first).toEqual(second);
+    expect(first.basedOnNSessions).toBe(2);
+  });
+});
