@@ -598,8 +598,9 @@ function loadLibModule(pluginRoot, ...segments) {
 }
 
 /**
- * T-37 — record the topology sighting, then the memory measurement. OBSERVE
- * ONLY: `routeTopology` selects nothing and both results are discarded here.
+ * T-37 — record the topology sighting, the NL-activation observation, then the
+ * memory measurement. OBSERVE ONLY: `routeTopology` selects nothing and every
+ * result is discarded here.
  *
  * `evidence.promptText` is supplied because T-36 measured that the router's
  * natural-language activation is dead without it: `detectIntent` carries no
@@ -608,32 +609,48 @@ function loadLibModule(pluginRoot, ...segments) {
  * a fixed table (`#FAST_PATTERNS` / `#SPLIT_PATTERNS`), never the matched text,
  * so no prompt text reaches disk.
  *
- * One try/catch covers all three — each is advisory and must leave the hook's
- * already-computed output untouched.
+ * One try/catch covers all four — each is advisory and must leave the hook's
+ * already-computed output untouched. The activation record gets an INNER try of
+ * its own: it is the newest writer and the only one whose module may be absent
+ * from an older installed tree, and without the inner catch its import failure
+ * would skip the two PRE-EXISTING writers as well (cross-review 2026-09-17).
  *
  * @param {{prompt: string, prepared: object, runtimeConfig: object,
- *   hookData: object, pluginRoot: string}} params
+ *   hookData: object, pluginRoot: string, slashCommand: string|null}} params
+ *   `slashCommand` — `detectSlashCommand(prompt)` result or null; sibling limb
+ *   sh29 appends its command carrier to this same block after this lands.
  * @returns {Promise<void>}
  */
 async function recordObserveOnlyDecisions({
-  prompt, prepared, runtimeConfig, hookData, pluginRoot,
+  prompt, prepared, runtimeConfig, hookData, pluginRoot, slashCommand,
 }) {
   try {
     const { routeTopology } = await loadLibModule(pluginRoot, 'topology', 'topology-router.js');
     const {
-      flushRecorderStats, measureMemoryInjection, recordMemoryInjection,
-      recordTopologyRecommended, resolveDecisionRunId,
+      flushRecorderStats, measureMemoryInjection, recordActivationObserved,
+      recordMemoryInjection, recordTopologyRecommended, resolveDecisionRunId,
     } = await loadLibModule(pluginRoot, 'observability', 'decision-events.js');
 
     const runId = resolveDecisionRunId({ hookData });
-    // One raw `cwd` for all four writers; the recorder resolves the store from it.
+    // One raw `cwd` for all five writers; the recorder resolves the store from it.
     const store = { cwd: hookData?.cwd };
-    recordTopologyRecommended(runId, routeTopology({
+    const topology = routeTopology({
       intent: prepared?.context?.intent,
       workflowPlan: prepared?.context?.tasks?.meta?.workflowPlan,
       config: runtimeConfig,
       evidence: { promptText: typeof prompt === 'string' ? prompt : undefined },
-    }), store);
+    });
+    recordTopologyRecommended(runId, topology, store);
+    try {
+      const { buildActivationRecord } = await loadLibModule(pluginRoot, 'observability', 'activation-observed.js');
+      recordActivationObserved(runId, buildActivationRecord({
+        topology,
+        slashCommand,
+        promptId: typeof hookData?.prompt_id === 'string' ? hookData.prompt_id : null,
+      }), store);
+    } catch {
+      // Activation module missing or failing: the two older writers still run.
+    }
     recordMemoryInjection(runId, measureMemoryInjection(prepared), store);
 
     // LAST: this per-prompt process dies with its counters, and every recorder
@@ -949,8 +966,11 @@ export async function handleUserPromptSubmit(hookData) {
   // T-37 — observe-only records, placed AFTER `output` is already final. The
   // position is the guarantee: the call does not receive `output` and cannot
   // reach it, so byte-identical stdout is structural rather than a promise.
+  // NOT `effortMeta?.command`: that is null whenever `resolveScoredEffort`
+  // returns null, even for a slash prompt (`resolveEffortMeta`).
   await recordObserveOnlyDecisions({
     prompt, prepared, runtimeConfig, hookData, pluginRoot,
+    slashCommand: detectSlashCommand(prompt),
   });
 
   return output;
