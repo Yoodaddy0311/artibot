@@ -22,7 +22,12 @@ import {
   buildRoutingScorecard,
   classifyAvoidedReason,
   foldAvoidedSwitches,
+  foldHoldReasons,
+  foldResidencyCounter,
+  HOLD_REASON_CODES,
+  hysteresisCodes,
 } from '../../lib/scorecard/index.js';
+import { renderScorecardMarkdown } from '../../lib/scorecard/render.js';
 
 /** The live reason vector for a diverged spawn (router recommended opus, policy chose fable). */
 const LIVE_DIVERGED_REASON = Object.freeze([
@@ -126,5 +131,208 @@ describe('routing-scorecard — 라이브 모양 영수증', () => {
     const replay = buildReplay(LIVE_LINES);
     expect(JSON.stringify(buildRoutingScorecard(replay)))
       .toBe(JSON.stringify(buildRoutingScorecard(buildReplay([...LIVE_LINES].reverse()))));
+  });
+});
+
+// ---------------------------------------------------------------------------
+/**
+ * One `route.selected` line for the hold-reason fixture.
+ *
+ * Live-shaped on purpose: `class:*` and `effort:*` open every real `reason[]`
+ * (`adaptive-model-router.js#routeModel`), and the live writer emits AT MOST
+ * ONE `hysteresis:*` code per line because `evaluateSwitch` pushes exactly one.
+ * Line `e` below is the multi-code case, which only a caller-supplied
+ * `src.hysteresis` can produce — it is in the fixture because the fold must not
+ * assume the single-code shape.
+ *
+ * @param {number} seq - ordering term.
+ * @param {unknown} reason - the receipt's `reason[]`, or a non-array.
+ * @param {number|null|undefined} actions - `data.actionsSinceSwitch`.
+ * @returns {object} envelope.
+ */
+function holdLine(seq, reason, actions) {
+  const data = {
+    models: { current: null, recommended: identity('opus'), selected: identity('opus') },
+    decision: { type: 'route' },
+    reason,
+  };
+  if (actions !== undefined) data.actionsSinceSwitch = actions;
+  return buildEnvelope({
+    session_id: 'sess-hold-0001',
+    source: 'hook',
+    mission_id: 'M-20260921-001',
+    event: 'route.selected',
+    routing_epoch_id: `toolu_h${seq}`,
+    ts: `2026-09-21T00:10:${String(seq).padStart(2, '0')}.000Z`,
+    data,
+  }, { pid: 4343, seq });
+}
+
+const OPEN = Object.freeze(['class:agent', 'effort:unavailable']);
+
+// 한 줄 = 한 케이스. 어느 줄이 깨졌는지 바로 읽히도록 순서를 고정한다.
+const HOLD_LINES = [
+  /* a */ holdLine(1, [...OPEN, 'hysteresis:minimum-residency', 'residency:unavailable'], 0),
+  /* b */ holdLine(2, [...OPEN, 'hysteresis:above-threshold'], 5),
+  /* c */ holdLine(3, [...OPEN, 'hysteresis:same-tier'], 3),
+  /* d */ holdLine(4, [...OPEN, 'hysteresis:residency-unknown']),
+  /* e */ holdLine(5, [...OPEN, 'hysteresis:above-threshold', 'hysteresis:minimum-residency'], 2),
+  /* f */ holdLine(6, [...OPEN, 'hysteresis:override:because_i_said_so']),
+  /* g */ holdLine(7, [...OPEN, 'policy:fable']),
+  /* h */ holdLine(8, 'not-an-array', null),
+  /* i */ holdLine(9, ['hysteresis:below-threshold', 'hysteresis:below-threshold']),
+  /* j */ holdLine(10, [...OPEN, 'hysteresis:hysteresis-band'], 7),
+];
+
+const holdReplay = buildReplay(HOLD_LINES);
+const holdCard = buildRoutingScorecard(holdReplay);
+const rowOf = (card, key) => card.metrics.find((m) => m.key === key);
+
+describe('foldHoldReasons — 분자=보류 코드를 가진 영수증, 분모=hysteresis 코드를 가진 영수증', () => {
+  it('보류 코드 allowlist 는 4종이고 above-threshold·same-tier 는 분자 밖이다', () => {
+    expect(HOLD_REASON_CODES.hold).toEqual([
+      'hysteresis:minimum-residency',
+      'hysteresis:residency-unknown',
+      'hysteresis:below-threshold',
+      'hysteresis:hysteresis-band',
+    ]);
+    expect(HOLD_REASON_CODES.allow).toEqual(['hysteresis:above-threshold']);
+    expect(HOLD_REASON_CODES.no_transition).toEqual(['hysteresis:same-tier']);
+  });
+
+  it('residency-unknown 과 minimum-residency 는 별도 버킷이다 (W11-Q2)', () => {
+    expect(HOLD_REASON_CODES.hold).toContain('hysteresis:residency-unknown');
+    expect(HOLD_REASON_CODES.hold).toContain('hysteresis:minimum-residency');
+    const fold = foldHoldReasons(holdReplay.routes);
+    expect(fold.counts['hysteresis:residency-unknown']).toBe(1);
+    expect(fold.counts['hysteresis:minimum-residency']).toBe(2);
+  });
+
+  it('hysteresisCodes 는 hysteresis: 코드만, 영수증 안에서 중복 제거해 낸다', () => {
+    expect(hysteresisCodes(holdReplay.routes[0])).toEqual(['hysteresis:minimum-residency']);
+    expect(hysteresisCodes(holdReplay.routes[8])).toEqual(['hysteresis:below-threshold']);
+    expect(hysteresisCodes(holdReplay.routes[6])).toEqual([]);
+    expect(hysteresisCodes(holdReplay.routes[7])).toEqual([]);
+  });
+
+  it('분모는 코드를 가진 8건, 분자는 보류 코드를 가진 5건이다 (영수증 단위)', () => {
+    const fold = foldHoldReasons(holdReplay.routes);
+    expect(fold.denominator).toBe(10);
+    expect(fold.withCodes).toBe(8);
+    expect(fold.held).toBe(5);
+  });
+
+  it('allowlist 밖 코드는 분자에 들지 않고 other:<code> 로 보인다', () => {
+    const fold = foldHoldReasons(holdReplay.routes);
+    expect(fold.counts['other:hysteresis:override:because_i_said_so']).toBe(1);
+  });
+
+  it('다중 코드 영수증이 있으면 counts 합이 분모를 넘을 수 있다', () => {
+    const fold = foldHoldReasons(holdReplay.routes);
+    expect(fold.counts).toEqual({
+      'hysteresis:above-threshold': 2,
+      'hysteresis:below-threshold': 1,
+      'hysteresis:hysteresis-band': 1,
+      'hysteresis:minimum-residency': 2,
+      'hysteresis:residency-unknown': 1,
+      'hysteresis:same-tier': 1,
+      'other:hysteresis:override:because_i_said_so': 1,
+    });
+    const sum = Object.values(fold.counts).reduce((a, b) => a + b, 0);
+    expect(sum).toBe(9);
+    expect(sum).toBeGreaterThan(fold.withCodes);
+  });
+
+  it('입력을 변형하지 않는다', () => {
+    const before = JSON.stringify(holdReplay.routes);
+    foldHoldReasons(holdReplay.routes);
+    expect(JSON.stringify(holdReplay.routes)).toBe(before);
+  });
+
+  it('라이브 reason 벡터(코드 줄당 1개)도 그대로 보류로 접힌다', () => {
+    const fold = foldHoldReasons(buildReplay(LIVE_LINES).routes);
+    expect([fold.withCodes, fold.held]).toEqual([4, 4]);
+    expect(fold.counts).toEqual({ 'hysteresis:minimum-residency': 4 });
+  });
+});
+
+describe('foldResidencyCounter — 분자=값>0, 분모=actionsSinceSwitch 가 정수인 영수증', () => {
+  it('정수인 5건이 분모, 0 보다 큰 4건이 분자다', () => {
+    const fold = foldResidencyCounter(holdReplay.routes);
+    expect(fold.denominator).toBe(10);
+    expect(fold.present).toBe(5);
+    expect(fold.positive).toBe(4);
+  });
+
+  it('null·부재는 분모에서 빠진다 — 0 과 구별된다', () => {
+    const fold = foldResidencyCounter(buildReplay([
+      holdLine(20, [...OPEN], null),
+      holdLine(21, [...OPEN]),
+      holdLine(22, [...OPEN], 0),
+    ]).routes);
+    expect([fold.present, fold.positive]).toEqual([1, 0]);
+  });
+
+  it('비정수(소수·문자열)는 분모에서 빠진다', () => {
+    const fold = foldResidencyCounter(buildReplay([
+      holdLine(30, [...OPEN], 1.5),
+      holdLine(31, [...OPEN], 4),
+    ]).routes);
+    expect([fold.present, fold.positive]).toEqual([1, 1]);
+  });
+});
+
+describe('buildRoutingScorecard — 보류 사유·잔류 카운터 행', () => {
+  it('routing.hold_reasons 는 5/8 이고 counts 를 싣는다', () => {
+    const m = rowOf(holdCard, 'routing.hold_reasons');
+    expect([m.numerator, m.denominator, m.absent, m.state]).toEqual([5, 8, 0, 'measured']);
+    expect(m.counts['hysteresis:minimum-residency']).toBe(2);
+  });
+
+  it('routing.hold_reason_coverage 는 8/10 — 코드 없는 영수증이 여기서 보인다', () => {
+    const m = rowOf(holdCard, 'routing.hold_reason_coverage');
+    expect([m.numerator, m.denominator, m.absent]).toEqual([8, 10, 0]);
+    expect(m.ratio).toBe(0.8);
+  });
+
+  it('routing.residency_counter 는 4/5, coverage 행은 5/10 이다', () => {
+    const counter = rowOf(holdCard, 'routing.residency_counter');
+    expect([counter.numerator, counter.denominator]).toEqual([4, 5]);
+    expect(counter.counts).toBeNull();
+    const coverage = rowOf(holdCard, 'routing.residency_counter_coverage');
+    expect([coverage.numerator, coverage.denominator]).toEqual([5, 10]);
+  });
+
+  it('새 행은 avoided_switch_pinned 뒤, switch_applied 앞에 온다', () => {
+    const keys = holdCard.metrics.map((m) => m.key);
+    expect(keys.indexOf('routing.hold_reasons'))
+      .toBe(keys.indexOf('routing.avoided_switch_pinned') + 1);
+    expect(keys.indexOf('routing.residency_counter_coverage') + 1)
+      .toBe(keys.indexOf('routing.switch_applied'));
+  });
+
+  it('빈 원장이면 새 네 행 모두 unmeasured 다 — 0% 가 아니다', () => {
+    const card = buildRoutingScorecard(buildReplay([]));
+    for (const key of [
+      'routing.hold_reasons', 'routing.hold_reason_coverage',
+      'routing.residency_counter', 'routing.residency_counter_coverage',
+    ]) {
+      const m = rowOf(card, key);
+      expect(m.state).toBe('unmeasured');
+      expect(m.ratio).toBeNull();
+    }
+    expect(rowOf(card, 'routing.hold_reasons').counts).toEqual({});
+  });
+
+  it('두 번 접어도 바이트가 같다 (보류 행 포함)', () => {
+    expect(JSON.stringify(buildRoutingScorecard(buildReplay([...HOLD_LINES].reverse()))))
+      .toBe(JSON.stringify(holdCard));
+  });
+
+  it('새 행이 기존 렌더 경로(표·분포)로 깨짐 없이 나온다', () => {
+    const md = renderScorecardMarkdown(holdCard);
+    expect(md).toContain('ARTIBOT · ROUTING SCORECARD');
+    expect(md).toContain('hysteresis:minimum-residency');
+    expect(md).toContain('unmeasured');
   });
 });

@@ -39,6 +39,22 @@
  *     comparison needing outcome data that does not exist yet. Switch
  *     Efficiency is their ratio, so it is absent for the same reason. A card
  *     that guessed them would score the router on invented evidence.
+ *     Updated 2026-09-21 (backlog CA-18). The canonical definition is §37's
+ *     closing line, "Switch Efficiency = Useful Switches / Total Switches", and
+ *     `ARTIBOT-5.0-DESIGN.md:505` puts it on the Canary row beside the Switch
+ *     Controller's real application (CA-16, todo) — so it is not an Observe row
+ *     at all. TWO INDEPENDENT REASONS IT STAYS ABSENT, and either alone suffices:
+ *     (a) THE DENOMINATOR IS ZERO. A one-shot live ledger read on 2026-09-21
+ *     (18:39 KST, raw lines, not deduped by receipt id) found 402 `route.selected`
+ *     rows, `model.switched` 0, and `decision.type` route 321 / pin 81 / switch 0.
+ *     Total Switches is 0, so the ratio is unmeasured, not 0%.
+ *     (b) THERE IS NO FIELD TO PUT "USEFUL" IN. `route-receipt.schema.json` sets
+ *     `additionalProperties: false` at every level and defines no outcome field,
+ *     so "useful" cannot be written down even once switches exist.
+ *     CA-18 ITSELF STAYS OPEN. What was built in its place is `routing.hold_reasons`
+ *     and the residency rows described in #5: the router's recorded HOLD reasons,
+ *     which are measurable today, under names that do not contain the word
+ *     "efficiency" — they are not a proxy for it and carry no "useful" verdict.
  *  3. TRANSITION COST AND TIME (§34). The receipt carries them, but as
  *     `terms{}` entries each flagged `measured`, and the schema is explicit
  *     that "before the usage receipt lands, handoffLatency, reorientationRisk
@@ -49,13 +65,21 @@
  *     what the router recorded. `routing.recommendation_divergence` says how
  *     often the recommendation and the selection differed, not which was better
  *     — that judgment is RouteBench's, and §8.4 puts RouteBench in Shadow.
- *  5. RESIDENCY AND COOLDOWN (§30). `actionsSinceSwitch` is on the receipt and
- *     is not folded: design §8.5 G5 records the initial values 3 and 2 as
- *     "미보정", so a distribution over them would describe an uncalibrated
- *     constant rather than a behaviour. Updated 2026-09-15 (Wave 11, owner W11-Q2):
- *     an ABSENT counter is no longer read as "residency not met" — hysteresis emits
- *     `residency-unknown` as its own reason code, so a future fold must keep
- *     "unknown" separate from "measured and short of the barrier".
+ *  5. RESIDENCY AND COOLDOWN (§30). Updated 2026-09-21 (backlog CA-18). WHAT IS
+ *     NOW FOLDED: `routing.residency_counter` reports how often
+ *     `data.actionsSinceSwitch` is PRESENT AS AN INTEGER and, of those, how often
+ *     it is greater than zero — presence and sign only. WHAT IS STILL NOT FOLDED,
+ *     and the reason is unchanged: the counter is never compared against the
+ *     barrier, and no distribution over its VALUES is emitted, because design
+ *     §8.5 G5 records the initial 3 and 2 as "미보정" — a histogram of those values
+ *     would describe an uncalibrated constant rather than a behaviour. The
+ *     W11-Q2 instruction is honoured in `HOLD_REASON_CODES`: `residency-unknown`
+ *     and `minimum-residency` are SEPARATE BUCKETS, so "the counter was missing"
+ *     is never read as "measured and short of the barrier".
+ *     `routing.residency_counter_coverage` carries the receipts with no usable
+ *     counter, following the `routing.tier_comparability` precedent — they are
+ *     outside the first row's denominator, so they cannot be its `absent`
+ *     (metric.js rejects `absent > denominator`) and would otherwise vanish.
  *  6. SHADOW LINES ARE NOT SEPARATED. The receipt allows `source: 'shadow'`
  *     beside production lines. Nothing here splits them, because §8.4 puts the
  *     shadow learner past Observe and no shadow line can exist yet. When one
@@ -327,6 +351,227 @@ function avoidedSwitchMetrics(routes) {
   ];
 }
 
+/** The prefix `adaptive-model-router.js#routeModel` puts on every hysteresis code. */
+const HYSTERESIS_PREFIX = 'hysteresis:';
+
+/**
+ * The hysteresis vocabulary, grouped by what each code says about the decision.
+ *
+ * An ALLOWLIST, like `DECISION_TYPES` and `AVOIDED_SWITCH_REASONS`, and for the
+ * same reason: a negative list ("anything that is not X is a hold") FAILS OPEN —
+ * a code added to `route-hysteresis.js` tomorrow would silently join the
+ * numerator and inflate the hold rate. Here it lands in `other:<code>` instead,
+ * outside the numerator and plainly visible in the histogram.
+ *
+ * `hold` is the numerator of `routing.hold_reasons`: the router evaluated a
+ * transition and kept the incumbent. `allow` (`above-threshold`) is a decision
+ * to switch and `no_transition` (`same-tier`) means there was no transition on
+ * the table at all — both are counted in the histogram and neither is a hold.
+ *
+ * `residency-unknown` AND `minimum-residency` ARE SEPARATE ENTRIES, not one
+ * "residency" bucket (header #5, owner W11-Q2): the first means the counter was
+ * missing and the second means it was measured and short of the barrier. Folding
+ * them together would re-create exactly the confusion that code was added to end.
+ *
+ * NOT LISTED, ON PURPOSE. `evaluateSwitch` also emits `no-candidate`,
+ * `catalog-miss` and `override:<name>`. The first two are holds in the module's
+ * own terms, but they report that the evaluation could not run — not a policy
+ * restraint — and `override:*` is an unbounded family. All three surface as
+ * `other:hysteresis:<code>` so they are counted and visible without being
+ * claimed as evidence of the router holding back.
+ */
+export const HOLD_REASON_CODES = Object.freeze({
+  hold: Object.freeze([
+    'hysteresis:minimum-residency',
+    'hysteresis:residency-unknown',
+    'hysteresis:below-threshold',
+    'hysteresis:hysteresis-band',
+  ]),
+  allow: Object.freeze(['hysteresis:above-threshold']),
+  no_transition: Object.freeze(['hysteresis:same-tier']),
+});
+
+const HOLD_CODE_SET = new Set(HOLD_REASON_CODES.hold);
+const KNOWN_CODE_SET = new Set([
+  ...HOLD_REASON_CODES.hold, ...HOLD_REASON_CODES.allow, ...HOLD_REASON_CODES.no_transition,
+]);
+
+/**
+ * The distinct `hysteresis:*` codes a receipt carries, in receipt order.
+ *
+ * DE-DUPLICATED WITHIN THE RECEIPT so a code repeated on one `reason[]` counts
+ * once: the histogram's unit is "receipts carrying this code", which is the only
+ * reading under which a bucket can be compared with the row's denominator.
+ *
+ * A `data.reason` that is absent or not an array yields `[]` with no exception —
+ * the receipt then falls out of `routing.hold_reasons` entirely and is counted by
+ * `routing.hold_reason_coverage`, never scored as "did not hold".
+ *
+ * @param {object} receipt - a `route.selected` line.
+ * @returns {string[]} distinct hysteresis codes, possibly empty.
+ */
+export function hysteresisCodes(receipt) {
+  const reason = readPath(receipt, ['data', 'reason']);
+  if (!Array.isArray(reason)) return [];
+  const out = [];
+  for (const code of reason) {
+    if (typeof code !== 'string' || !code.startsWith(HYSTERESIS_PREFIX)) continue;
+    if (!out.includes(code)) out.push(code);
+  }
+  return out;
+}
+
+/**
+ * Fold the router's recorded hold reasons over ALL route receipts.
+ *
+ * KPI, stated as numerator over denominator so it cannot be misread:
+ *   `routing.hold_reasons` = receipts carrying at least one `HOLD_REASON_CODES.hold`
+ *   code ÷ receipts carrying at least one `hysteresis:*` code.
+ *
+ * NOT A SUBSET OF `foldAvoidedSwitches`. That fold runs over the diverged
+ * receipts only; this one runs over every receipt, because a hold is recorded
+ * whether or not the recommendation and the selection ended up differing.
+ *
+ * THE NUMERATOR IS PER RECEIPT, NOT PER CODE: a receipt with two hold codes adds
+ * one. `counts` is per code, so SUM(counts) CAN EXCEED `withCodes` — the live
+ * writer emits at most one hysteresis code per line (`evaluateSwitch` pushes
+ * exactly one), but a caller that supplies its own `src.hysteresis` can carry
+ * more, and the pinned test fixes that overflow rather than assuming it away.
+ *
+ * DEDUPE: this fold does NOT deduplicate receipts. `replay.routes` arrives
+ * already deduplicated by `lib/replay/replay.js#orderEvents`, on the envelope key
+ * `(session_id, source, pid, seq, ts)` — NOT on `route_receipt_id`, which nothing
+ * in `lib/replay` reads. Two receipts sharing a receipt id under different
+ * envelope keys would therefore both be counted here.
+ *
+ * @param {object[]} receipts - `route.selected` lines. Not mutated.
+ * @returns {{withCodes: number, held: number, counts: Record<string, number>,
+ *   denominator: number}}
+ */
+export function foldHoldReasons(receipts) {
+  const lines = Array.isArray(receipts) ? receipts : [];
+  const counts = {};
+  let withCodes = 0;
+  let held = 0;
+  for (const receipt of lines) {
+    const codes = hysteresisCodes(receipt);
+    if (codes.length === 0) continue;
+    withCodes += 1;
+    let isHold = false;
+    for (const code of codes) {
+      const key = KNOWN_CODE_SET.has(code) ? code : `other:${code}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+      if (HOLD_CODE_SET.has(code)) isHold = true;
+    }
+    if (isHold) held += 1;
+  }
+  return { withCodes, held, counts: sortedCounts(counts), denominator: lines.length };
+}
+
+/**
+ * Fold the §30 residency counter's PRESENCE and SIGN — never its value.
+ *
+ * KPI: `routing.residency_counter` = receipts whose `data.actionsSinceSwitch` is
+ * greater than zero ÷ receipts whose `data.actionsSinceSwitch` IS AN INTEGER.
+ *
+ * The path is `data.actionsSinceSwitch`, a top-level required property of
+ * `route-receipt.schema.json` (`type: integer`, `minimum: 0`) — the module rule
+ * at the top of this file holds: nothing is read that the schema does not define.
+ *
+ * NO COMPARISON WITH THE BARRIER AND NO VALUE HISTOGRAM. The barrier is built
+ * from `minimum_residency` 3 and `cooldown` 2, which design §8.5 G5 records as
+ * uncalibrated; a row that compared against them, or that binned the values,
+ * would report the constant rather than the router (header #5).
+ *
+ * `null`, absent and non-integer all fall OUT OF THE DENOMINATOR rather than
+ * counting as 0 — `0` is a real measurement and the others are the absence of
+ * one. `routing.residency_counter_coverage` is where they become visible.
+ *
+ * @param {object[]} receipts - `route.selected` lines. Not mutated.
+ * @returns {{present: number, positive: number, denominator: number}}
+ */
+export function foldResidencyCounter(receipts) {
+  const lines = Array.isArray(receipts) ? receipts : [];
+  let present = 0;
+  let positive = 0;
+  for (const receipt of lines) {
+    const value = readPath(receipt, ['data', 'actionsSinceSwitch']);
+    if (!Number.isInteger(value)) continue;
+    present += 1;
+    if (value > 0) positive += 1;
+  }
+  return { present, positive, denominator: lines.length };
+}
+
+/**
+ * The two hold-reason rows, built together because they share one fold.
+ *
+ * Read as a unit: the second row's numerator IS the first row's denominator.
+ *
+ * @param {object[]} routes - `route.selected` lines.
+ * @returns {Readonly<object>[]} the two metrics, in render order.
+ */
+function holdReasonMetrics(routes) {
+  const fold = foldHoldReasons(routes);
+  return [
+    metric({
+      key: 'routing.hold_reasons',
+      label: '보류 사유 (hysteresis 코드 보유 영수증 중 보류)',
+      source: 'route.selected · data.reason[] hysteresis:* 중 보류 코드 보유 영수증 '
+        + '÷ hysteresis:* 코드를 가진 영수증',
+      denominator: fold.withCodes,
+      numerator: fold.held,
+      counts: fold.counts,
+      note: '보류 코드 allowlist 4종(minimum-residency · residency-unknown · below-threshold '
+        + '· hysteresis-band). same-tier(전환이 테이블에 없었음)와 above-threshold(전환 허용)는 '
+        + 'counts 에 보이되 분자 밖이다. allowlist 밖 코드는 other:<code> — 분자에 넣지 않는다. '
+        + '분자는 영수증 단위(보류 코드가 하나라도 있으면 1)라 counts 합은 분모를 넘을 수 있다. '
+        + '이 행은 Switch Efficiency 가 아니다(헤더 #2) — useful 판정을 담지 않는다.',
+    }),
+    metric({
+      key: 'routing.hold_reason_coverage',
+      label: 'hysteresis 코드가 실린 영수증',
+      source: 'route.selected · data.reason[] 에 hysteresis:* 가 있는 영수증 ÷ route.selected',
+      denominator: routes.length,
+      numerator: fold.withCodes,
+      note: 'routing.tier_comparability 와 같은 역할이다 — 코드가 없는 영수증(옛 writer·reason 이 '
+        + '배열이 아닌 줄)은 위 행의 분모에서 빠지고 여기서 보인다. 100% 가 아니면 위 행의 '
+        + '분모가 전체보다 작다는 뜻이다.',
+    }),
+  ];
+}
+
+/**
+ * The two §30 residency rows, built together because they share one fold.
+ *
+ * @param {object[]} routes - `route.selected` lines.
+ * @returns {Readonly<object>[]} the two metrics, in render order.
+ */
+function residencyMetrics(routes) {
+  const fold = foldResidencyCounter(routes);
+  return [
+    metric({
+      key: 'routing.residency_counter',
+      label: '잔류 카운터 > 0 (값 분포 아님)',
+      source: 'route.selected · data.actionsSinceSwitch > 0 ÷ 정수인 영수증',
+      denominator: fold.present,
+      numerator: fold.positive,
+      note: '임계(§8.5 G5 의 3·2)와 비교하지 않고 값 분포도 싣지 않는다 — 그 상수가 "미보정"이라 '
+        + '분포가 라우터가 아니라 상수를 보고하게 된다(헤더 #5). null·부재·비정수는 분모에서 '
+        + '빠진다 — 0 은 실측이고 나머지는 결측이라 다른 진술이다.',
+    }),
+    metric({
+      key: 'routing.residency_counter_coverage',
+      label: '잔류 카운터가 정수로 실린 영수증',
+      source: 'route.selected · data.actionsSinceSwitch 가 정수인 영수증 ÷ route.selected',
+      denominator: routes.length,
+      numerator: fold.present,
+      note: '카운터가 없는 영수증은 위 행의 분모 밖이라 absent 로 실을 수 없고(metric.js 는 '
+        + 'absent > denominator 를 던진다) 여기서 보인다. routing.tier_comparability 선례.',
+    }),
+  ];
+}
+
 /**
  * Build the routing card.
  *
@@ -406,6 +651,8 @@ export function buildRoutingScorecard(replay) {
         + '판정하지 않는다(헤더 #4).',
     }),
     ...avoidedSwitchMetrics(routes),
+    ...holdReasonMetrics(routes),
+    ...residencyMetrics(routes),
     metric({
       key: 'routing.switch_applied',
       label: '스위치 제안 대비 적용',
