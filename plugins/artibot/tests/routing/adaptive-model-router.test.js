@@ -21,10 +21,12 @@ import { describe, expect, it } from 'vitest';
 import {
   modelIdentity,
   resolveCanaryClasses,
+  resolveCandidateTiers,
   routeModel,
   ROUTER_DECISIONS,
 } from '../../lib/routing/adaptive-model-router.js';
 import { MODELS } from '../../lib/core/model-catalog.js';
+import { ACTION_CLASSES } from '../../lib/routing/action-classifier.js';
 import { DEFAULT_CATALOG } from '../../lib/routing/route-scorer.js';
 
 /**
@@ -123,8 +125,20 @@ describe('resolveCanaryClasses — fail-closed normalisation', () => {
   });
 
   it('passes a clean list through unchanged', () => {
-    expect(resolveCanaryClasses({ actionClasses: ['architecture', 'implementation'] }))
-      .toEqual(['architecture', 'implementation']);
+    // Both names are real ACTION_CLASSES members. The helper does NOT check
+    // membership (a typo is silently unmatched), but using real names here
+    // keeps the fixture from implying an unchecked vocabulary is intended.
+    expect(resolveCanaryClasses({ actionClasses: ['architecture', 'implement'] }))
+      .toEqual(['architecture', 'implement']);
+  });
+
+  it('does not validate members against the action-class vocabulary', () => {
+    // Documented, deliberate: membership is not checked, so 'implementation'
+    // (the plausible typo for 'implement') normalises fine and then matches
+    // nothing. Fail-closed, but silent — see resolveSelection precondition 4.
+    expect(ACTION_CLASSES).not.toContain('implementation');
+    expect(resolveCanaryClasses({ actionClasses: ['implementation'] }))
+      .toEqual(['implementation']);
   });
 
   it('never throws on a hostile carrier', () => {
@@ -225,6 +239,87 @@ describe('canary allowlist gate — matched moves the seat, not the vocabulary',
     ];
     for (const value of hostile) {
       expect(() => routeModel(canaryInput({ canary: value }))).not.toThrow();
+    }
+  });
+
+  it('never throws when the INPUT OBJECT itself throws on the canary read', () => {
+    // The carrier is caller-supplied, so the property access is as hostile as
+    // the value. Without readCanary() this getter escapes through routeModel,
+    // which promises never to throw (:443-446 wording).
+    const src = canaryInput();
+    Object.defineProperty(src, 'canary', {
+      get() { throw new Error('hostile getter'); },
+      enumerable: true,
+    });
+    expect(() => routeModel(src)).not.toThrow();
+    expect(routeModel(src).reason.some((code) => code.startsWith('canary:'))).toBe(false);
+  });
+
+  it('changes nothing outside models.selected, reason and decision', () => {
+    const unmatched = routeModel(canaryInput());
+    const matched = routeModel(canaryInput({ canary }));
+    const volatile = new Set(['models', 'reason', 'decision']);
+    for (const key of Object.keys(unmatched)) {
+      if (volatile.has(key)) continue;
+      expect(matched[key]).toEqual(unmatched[key]);
+    }
+    // Inside models, only `selected` moves.
+    expect(matched.models.current).toEqual(unmatched.models.current);
+    expect(matched.models.recommended).toEqual(unmatched.models.recommended);
+    expect(matched.models.selected).not.toEqual(unmatched.models.selected);
+    // And reason differs only by the appended canary entry.
+    expect(matched.reason.filter((code) => !code.startsWith('canary:')))
+      .toEqual(unmatched.reason);
+  });
+});
+
+describe('canary allowlist gate — the policy ceiling still binds', () => {
+  /**
+   * `security-reviewer` is deliberately placed IN `fable.allowlist` here. It is
+   * also in `model-policy.js#FABLE_DENYLIST` (permanent opus, refusal
+   * false-positives), and the denylist must win even when a canary matches —
+   * otherwise one config key would buy an agent a tier the policy forbids.
+   */
+  const DENYLIST_CONFIG = Object.freeze({
+    agents: {
+      modelPolicy: {
+        fable: { enabled: true, allowlist: ['architect', 'security-reviewer'] },
+        high: { model: 'opus', agents: ['architect', 'security-reviewer'] },
+        medium: { model: 'opus', agents: [] },
+        phaseRoles: { build: 'opus', review: 'fable' },
+      },
+    },
+  });
+
+  it('cannot hand a FABLE_DENYLIST agent the fable seat', () => {
+    const src = canaryInput({
+      agentType: 'security-reviewer',
+      role: 'review',
+      actionClass: 'review',
+      config: DENYLIST_CONFIG,
+      canary: { actionClasses: ['review'] },
+    });
+    expect([...resolveCandidateTiers(src)]).toEqual(['opus']);
+    expect(routeModel(src).models.selected.tier).toBe('opus');
+  });
+
+  it('only ever selects a tier that is already a candidate', () => {
+    // The general form of the property above: the gate picks among the tiers
+    // pickRoute scored, and pickRoute scores only resolveCandidateTiers(src).
+    const cases = [
+      canaryInput({ canary: { actionClasses: ['architecture'] } }),
+      canaryInput({ role: 'review', actionClass: 'classify', canary: { actionClasses: ['classify'] } }),
+      canaryInput({ allowedTiers: ['opus'], canary: { actionClasses: ['architecture'] } }),
+      canaryInput({
+        agentType: 'security-reviewer',
+        actionClass: 'review',
+        config: DENYLIST_CONFIG,
+        canary: { actionClasses: ['review'] },
+      }),
+    ];
+    for (const src of cases) {
+      const receipt = routeModel(src);
+      expect([...resolveCandidateTiers(src)]).toContain(receipt.models.selected.tier);
     }
   });
 });

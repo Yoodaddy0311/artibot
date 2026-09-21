@@ -442,6 +442,19 @@ export function receiptPhase(classified) {
  * `canonicalModel` beside it. The two are comparable because they are the same
  * function of the same input.
  *
+ * ONE EXCEPTION, AND IT IS THE CANARY'S. When `routing.canary.actionClasses`
+ * names the class this spawn resolved to, `adaptive-model-router.js#
+ * resolveSelection` puts the RECOMMENDED tier into `models.selected` instead,
+ * and the policy answer survives only as the `policy:<tier>` reason code with
+ * `canary:<tier>` after it. The paragraph above stops holding there: the two are
+ * no longer the same function of the same input. THE BIND ROW IS UNAFFECTED —
+ * `subagent-handler.js#bindRoute` derives `selected_model` from
+ * `resolveBoundModel`, which is `resolveModel` on the definition name
+ * (`bind-model-fallback.js:92`), and nothing in this repo applies a canary tier
+ * to the spawn that actually runs. So a matched receipt records INTENT while the
+ * bind row records EXECUTION; they legitimately disagree, and the bind row is
+ * the truth about what ran. Unreachable while the shipped list is `[]`.
+ *
  * `currentTier` and `actionsSinceSwitch` go in TOGETHER OR NOT AT ALL, as two
  * TOP-LEVEL `routeModel` keys — not inside `input`, which is the classifier's
  * bag (`adaptive-model-router.js:462-463` reads them off `src`, and `src` is
