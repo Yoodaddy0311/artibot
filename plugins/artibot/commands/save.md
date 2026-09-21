@@ -42,6 +42,27 @@ Parse $ARGUMENTS:
 6. **세션 메모리**: 최근 5개 키워드 (recallSessionMemory)
 7. **TaskList**: TaskList tool → 미완료 작업 + in_progress
 
+### Phase A½: 체크포인트 (§31 순서 · runtime.checkpoint.saveOnSave 가 true 일 때만)
+
+이 단계는 runtime.checkpoint.saveOnSave 가 true 일 때만 실행된다. 이 키는 현재 `artibot.config.json` 에 **없다** — 부재 = false = 이 단계를 통째로 스킵하고 출력 표에 "스킵(config off)" 1행만 남긴다. 되돌리기도 이 config 한 줄이다 (Canary, DESIGN §4). 게이트 판정은 `lib/checkpoint/save-checkpoint.js` 의 `isSaveCheckpointEnabled(config)` 가 단독으로 내린다 (엄격 boolean — `true` 아닌 값은 전부 false).
+
+§31 순서대로 8단계이며, 오늘 실제로 도는 것과 부재인 것을 그대로 적는다:
+
+1. **Flush artifacts** — `lib/runtime/artifact-lifecycle.js` 가 담당하며 게이트는 `runtime.artifactLifecycle.enabled` (artifact-lifecycle.js:212 `APPLY_GATE_PATH`). `.artibot/missions` 가 없으면 no-op.
+2. **Task Graph** — `store.getTaskGraph(missionId)` (lib/project-state/state-manager.js:429). `active_tasks` = status 가 `done` 이 아닌 task id 목록.
+3. **State** — `store.getMission(missionId)` (state-manager.js:428) 의 `intent.revision` · `plan.revision` 을 `intent_revision` · `plan_revision` 으로 사상. 값이 없으면 **위조하지 않는다** — validate 가 거부한 사유를 그대로 표기한다.
+4. **Epoch** — 부재. epoch 회전 연산이 없으므로 `routing_epoch: null` 로 기록한다.
+5. **Checkpoint** — `createCheckpointService({ store, appendEvent: null })` (lib/checkpoint/checkpoint-service.js:150) 의 `checkpoint(content, { trigger: '/save' })`. store 는 `createCheckpointStore({ adapter: createFileStoreAdapter({ dir }) })` (checkpoint-store.js:162 · adapters/file-store.js:113), `dir` 는 `resolveStoreLocation({ projectRoot, gitCommonDir }).dir` (lib/project-state/store-location.js:57). `appendEvent` 는 **반드시 null** — 원장 기록은 7단계에서 조립 모듈이 직접 한다 (리더 결정 ca05-2).
+6. **Validate resume** — `buildResumeReport({ latestValid, getMission, getTaskGraph }, { missionId })` (lib/checkpoint/resume-controller.js:542) 를 report-only 로 호출. `resumable` 은 상태를 바꾸지 않고 출력 표에만 쓴다.
+7. **Ledger** — 조립 모듈이 `appendLedgerEvent(projectRoot, { event:'mission.checkpointed', source:'supervisor', data:{ checkpoint_id, trigger:'/save', resumable } })` (lib/runtime/ledger.js:81) 를 호출한다. `source` 는 allowlist 상 `supervisor` 다 (리더 결정 ca05-1 — `save` 는 allowlist 밖이라 `ledger.rejected` 로 강등된다).
+8. **Snapshot Scorecard** — 이 줄기 밖이다 (OB-19, 별도 줄기). 순서상 자리만 확정해 둔다.
+
+호출은 하나다: `buildSaveCheckpoint(ports, { sessionId, trigger:'/save' })`. ports 는 `{ listActiveMissionIds, getMission, getTaskGraph, checkpointService, appendEvent }` 이고 `listActiveMissionIds = () => Object.keys(store.getState().active_missions)` — 활성 mission **전부**가 대상이다 (리더 결정 ca05-6(a)). 0건이면 `skip:no-active-mission` 이고 출력 표는 "스킵(활성 mission 없음)". `session_id` 는 훅 payload 가 1순위이고 env 가 폴백이며, 비어 있으면 `skip:session-missing` 이다 — mission_id·session_id 를 지어내지 않는다. 결과 행은 `{ mission_id, status: saved|rejected|skipped, checkpoint_id, resumable, blocked_by, errors, ledger }`.
+
+체크포인트 결과는 HANDOFF 본문에 넣지 않는다 — `renderHandoffMarkdown` 출력 바이트는 불변이고, 결과는 `/save` 출력 표에만 나타난다.
+
+스로틀은 없다 (ca05-7 미결). `/save` 를 연타하면 `mission.checkpointed` 가 건마다 남고 scorecard 분자(`lib/scorecard/session-scorecard.js`)가 그만큼 오른다.
+
 ### Phase B: 합성 (~0.5s)
 
 1. **첫 프롬프트 후보 생성**: Phase A에서 모은 신호로 `lib/handoff/next-prompt-suggester.js` 의 `suggestFirstPrompts(signals, { max: 3 })` 호출. `signals` 는 실제 시그니처에 맞춰 `{ tasks, recentCommits, wip, gitStatus, unresolved, advisorSignals }` 로 구성 (`tasks`=TaskList 결과, `recentCommits`=git log 10개, `wip`=`{ count, oldestAgeMs }`, `gitStatus`=`{ untracked }`. `unresolved`/`advisorSignals` 는 현재 reserved). 반환 배열 `firstPrompts` = `[{ prompt, rationale, priority }]`.
@@ -116,6 +137,7 @@ Parse $ARGUMENTS:
 | WIP 커밋 | N (oldest ~Nh) |
 | 미해결 결정 | N |
 | 진행 중 작업 | N |
+| 체크포인트 | M-… → cp-… (resumable ✓/✗) · 스킵(config off / 활성 mission 없음 / session 없음) · 거부(validate 사유) |
 
 ## Git 동기화 상태
 
@@ -171,6 +193,8 @@ Parse $ARGUMENTS:
 - Do NOT `git fetch`/네트워크 호출을 `/save` 안에서 자동 수행하지 말 것 — upstream 시각은 마지막 fetch된 remote-tracking ref 기준으로만 비교(오프라인·빠른 저장 보장). fetch는 otherMachineRisk 안내문으로만 권고
 - Do NOT 동기화 정상인데도 경고/액션을 출력하지 말 것 — clean 상태면 "✅ 커밋·푸시 동기화 정상" 한 줄로 끝낼 것
 - Do NOT git 추적 아카이브를 제자리 덮어쓰거나 prune 하지 말 것 — `checkHandoffTrackedIntegrity` 의 M/D 가 0/0 이 아니면 그 자체가 결함이며 출력에서 숨기지 말 것
+- Do NOT mission_id·session_id 를 위조해서 체크포인트를 만들지 말 것 — 없으면 스킵 행으로 표기 (MISSION_ID_RE 형식의 가짜 id 금지)
+- Do NOT 체크포인트 단계가 HANDOFF 본문·handoff-store 추적 보호를 건드리게 하지 말 것 — 체크포인트 결과는 /save 출력 표에만 (DESIGN §31 "HANDOFF 렌더 그대로")
 
 ## Edge Cases
 
@@ -189,6 +213,8 @@ Parse $ARGUMENTS:
 | `.artibot/handoffs/*.md` 가 git 추적됨 (새 워크트리·머지 직후) | 추적 파일은 덮어쓰기·prune 면제, 새 미추적 파일 생성. `protectedTracked` 개수 출력 |
 | git 워크트리인데 `git ls-files` 실패 (인덱스 락·git 없음) | `pruneSkipped: 'git-unknown'` — 덮어쓰기·prune 모두 스킵하고 "추적 확인 불가" 명시 |
 | `--dry-run` | 마크다운 stdout 출력, 디스크 쓰기/마킹 모두 스킵 |
+| `runtime.checkpoint.saveOnSave` 부재/false | Phase A½ 통째 스킵, 표에 "스킵(config off)". 체크포인트·원장 쓰기 0건 |
+| `active_missions` 비어 있음 | `skip:no-active-mission` → 표에 "스킵(활성 mission 없음)", `mission.checkpointed` 0건 |
 
 ## Next Steps
 
