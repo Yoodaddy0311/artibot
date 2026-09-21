@@ -39,13 +39,18 @@
  *     usage field is absent. A copy of that list would be a second copy that
  *     drifts; read it there. Every limit on the fold is a limit on this card,
  *     because this card is arithmetic over that fold and adds no evidence.
- *  2. WHICH FIGURES OF THE FOLD ARE NOT ROWS. `duplicate_binds`,
+ *  2. WHICH FIGURES OF THE FOLD ARE NOT ROWS. `receipts`,
+ *     `main_thread_receipts`, `subagent_receipts`, `duplicate_binds`,
  *     `malformed_binds`, `malformed_receipts`, `model_mismatch`,
  *     `duplicate_receipts`, `multi_model_runs`, `excluded_no_recommendation`,
- *     `agreed_by_model`, `divergence`, `usage_totals` and `latency` are in the
- *     fold and NOT on this card — row-level integrity counters and detail
- *     histograms, where the card is eight rows. A reader who needs them must
- *     read the fold, and their absence here is not evidence they are zero.
+ *     `agreement_rate`, `agreed_by_model`, `divergence`, `usage_totals` and
+ *     `latency` are in the fold and NOT on this card — raw row counts,
+ *     row-level integrity counters and detail histograms, where the card is
+ *     eight rows. A reader who needs them must read the fold, and their absence
+ *     here is not evidence they are zero. `agreement_rate` is the one omission
+ *     that is not a gap: `compare.agreement` carries the same quotient WITH its
+ *     denominator attached, and a bare rate beside it would be the second answer
+ *     to one question that `metric()` exists to prevent.
  *  3. A BUCKET'S COST AGAINST THE OTHER BUCKET'S. `cost.same.total` and
  *     `cost.diverged.total` are each comparable only to their OWN `priced`
  *     population (fold CANNOT SEE #5), so they are reported in the note beside
@@ -74,6 +79,34 @@ export const COMPARE_KIND = 'compare';
 
 /** Decimal places a bucket total is printed with. See `money`. */
 const MONEY_DIGITS = 6;
+
+/**
+ * The confidence buckets `joinSpawnOutcomes` emits, required BY NAME.
+ *
+ * A copy of the fold's `byConfidence` initialiser, and the fixtures compare the
+ * two so the copy cannot drift unnoticed — the same rule `routing-scorecard.js`
+ * applies to `DECISION_TYPES`.
+ */
+const CONFIDENCE_BUCKETS = Object.freeze(['exact', 'name', 'fifo', 'other']);
+
+/**
+ * A histogram ONLY when the row has a denominator.
+ *
+ * A zeroed histogram on a row whose denominator is 0 renders as a `## 분포`
+ * table of `0` counts, and `0` reads as "measured, and the answer is none" —
+ * the misreading `metric.js`'s header exists to prevent. Measured on the empty
+ * ledger at 2026-09-21T04:21:54Z: this card printed 9 zero rows where the
+ * routing card printed no distribution section at all. `render.js` decides what
+ * to draw from `m.counts` being non-empty, and that file is not this batch's to
+ * change, so the card withholds the histogram instead.
+ *
+ * @param {number} denominator - the row's denominator.
+ * @param {Record<string, number>} counts - the histogram.
+ * @returns {Record<string, number>|null} the histogram, or null when unmeasured.
+ */
+function countsIfMeasured(denominator, counts) {
+  return denominator > 0 ? counts : null;
+}
 
 /** Non-negative integer? @param {unknown} v @returns {boolean} */
 function isCount(v) {
@@ -116,7 +149,19 @@ function requireCostBucket(bucket, name) {
 }
 
 /**
- * Validate the explicit null score block.
+ * Validate the explicit null score block, AND refuse a populated one.
+ *
+ * WHY A REAL SCORE IS REJECTED RATHER THAN RENDERED. `scoreMetric`'s denominator
+ * is hard-wired to 0 and its note writes `source: null · value: null` as TEXT,
+ * because no spawn-keyed score writer exists (fold CANNOT SEE #4). The day one
+ * lands, a permissive check here would let the card render a MEASURED score as
+ * `unmeasured` with a note asserting it was null — a false statement produced by
+ * a card that passed validation. The row cannot be fixed by interpolating the
+ * value either: a real score needs a real DENOMINATOR (how many pairs carry
+ * one), and `fold.score` is a single block with no population in it, so the fix
+ * belongs in the fold and then in this row's design. Failing loudly names that
+ * work; rendering quietly hides it. This is the same fail-closed choice
+ * `metric.js` makes for a malformed denominator.
  *
  * @param {unknown} score - `fold.score`.
  * @returns {void}
@@ -128,6 +173,15 @@ function requireScore(score) {
   }
   if (score.value !== null && typeof score.value !== 'number') {
     reject('`score.value` must be a number or null');
+  }
+  if (score.source !== null || score.value !== null) {
+    reject(
+      '`score` carries a real measurement, so a spawn-keyed score writer now exists — '
+      + "but `compare.score`'s denominator is hard-wired to 0 and its note states "
+      + '`source: null · value: null` as text, so this card would render a measured '
+      + 'score as `unmeasured`. Redesign that row with a real denominator (and update '
+      + 'its note) rather than relaxing this check',
+    );
   }
   if (typeof score.reason !== 'string' || score.reason.length === 0) {
     reject('`score.reason` must be a non-empty string saying why the score is null');
@@ -158,8 +212,13 @@ function requireFold(fold) {
     }
   }
   if (!isRecord(fold.by_confidence)) reject('`by_confidence` must be an object');
-  for (const [k, n] of Object.entries(fold.by_confidence)) {
-    if (!isCount(n)) reject(`\`by_confidence.${k}\` must be a non-negative integer`);
+  // BY NAME, not just "every value present is a count": a partial
+  // `by_confidence` would let this card print an exact-only distribution and
+  // call it the distribution over all pairs. The fold emits these four always.
+  for (const f of CONFIDENCE_BUCKETS) {
+    if (!isCount(fold.by_confidence[f])) {
+      reject(`\`by_confidence.${f}\` must be a non-negative integer`);
+    }
   }
   if (!isRecord(fold.cost)) reject('`cost` must be an object');
   for (const f of ['compared', 'unpriced']) {
@@ -239,11 +298,14 @@ function agreementMetric(fold) {
     source: 'spawn-outcome by_agreement.same ÷ compared',
     denominator: fold.compared,
     numerator: same,
-    counts: { same, diverged },
-    note: '분모는 allowlist(exact,name) 확인이고 recommended_model 이 있는 쌍만이다 — '
-      + '나머지는 일치로 세지 않고 분모에서 뺀다(compare.excluded_fifo 행이 센다). 분모 0 '
-      + '이면 unmeasured 이지 "아무 스폰도 추천 모델을 못 받았다"가 아니다. 일치는 품질이 '
-      + '아니고 어느 쪽이 옳았는지는 판정하지 않는다(spawn-outcome.js CANNOT SEE #1).',
+    counts: countsIfMeasured(fold.compared, { same, diverged }),
+    note: '분모는 allowlist(exact,name) 확인이고 recommended_model 이 있는 쌍만이다 — 빠진 '
+      + '쌍은 일치로 세지 않고 분모에서 뺀다. 빠진 사유는 두 종류이고 이 카드는 한쪽만 '
+      + '행으로 싣는다: confidence 로 빠진 쌍은 compare.excluded_fifo 행이 세고, '
+      + 'recommended_model 이 없어 빠진 쌍은 이 카드의 행이 아니다 — pairs − compared − '
+      + 'excluded_fifo 로만 보인다(fold 의 excluded_no_recommendation). 분모 0 이면 '
+      + 'unmeasured 이지 "아무 스폰도 추천 모델을 못 받았다"가 아니다. 일치는 품질이 아니고 '
+      + '어느 쪽이 옳았는지는 판정하지 않는다(spawn-outcome.js CANNOT SEE #1).',
   });
 }
 
@@ -262,7 +324,7 @@ function confidenceMetric(fold, joined) {
     // to `\|`, which is correct but reads as noise in the rendered cell.
     source: 'spawn-outcome by_confidence (exact · name · fifo · other)',
     denominator: joined,
-    counts: fold.by_confidence,
+    counts: countsIfMeasured(joined, fold.by_confidence),
     note: '분모는 짝지어진 전 쌍이다 — 비교에서 제외된 쌍도 이 분포에 들어 있다. 즉 '
       + 'compare.agreement 의 분모와 다른 모집단이며, 두 행의 비율을 같은 분모로 읽으면 '
       + '안 된다. 각 쌍은 자기 리터럴 값으로 버킷되므로 allowlist 밖 값은 fifo 나 other 로 '
@@ -284,11 +346,11 @@ function costMetric(fold) {
     source: 'spawn-outcome cost.compared ÷ compared · cost.same.priced · cost.diverged.priced',
     denominator: fold.compared,
     numerator: cost.compared,
-    counts: {
+    counts: countsIfMeasured(fold.compared, {
       agreed_priced: cost.same.priced,
       diverged_priced: cost.diverged.priced,
       unpriced: cost.unpriced,
-    },
+    }),
     note: `버킷 합계는 자기 priced 모집단과만 비교할 수 있다 — same=${money(cost.same.total)} `
       + `(priced ${cost.same.priced}), diverged=${money(cost.diverged.total)} `
       + `(priced ${cost.diverged.priced}). 모집단이 비면 합계는 null 이고 여기에 unmeasured `
@@ -301,9 +363,12 @@ function costMetric(fold) {
 /**
  * The three residue rows: what the comparison excluded and what never joined.
  *
- * Built together because they are read together — a reader who sees a low
- * `compare.agreement` denominator finds the missing population in exactly these
- * three rows, and each one has a DIFFERENT denominator on purpose.
+ * Built together because they are read together, and each has a DIFFERENT
+ * denominator on purpose. THEY DO NOT ACCOUNT FOR THE WHOLE RESIDUE: a pair
+ * excluded for carrying no `recommended_model` is in NONE of them, and in no row
+ * of this card. It is visible only as `pairs − compared − excluded_fifo`, which
+ * is `fold.excluded_no_recommendation`. Saying otherwise would make this JSDoc
+ * disagree with `compare.excluded_fifo`'s own note, which states the same limit.
  *
  * @param {object} fold - validated fold.
  * @param {number} joined - `fold.pairs.length`.
@@ -342,7 +407,11 @@ function residueMetrics(fold, joined) {
         + '영수증 3장을 쓰고 바인드가 없는 런은 3 이 아니라 1 이다. 분모는 영수증을 낸 '
         + 'distinct 서브에이전트 전체이고(짝지은 쪽 + 못 짝지은 쪽), 메인스레드 영수증은 '
         + '여기 없다. duplicate_binds 는 이 등식을 깨지 않는다 — 중복 바인드 행은 새 '
-        + 'agent_id 를 만들지 않는다(spawn-outcome.js#collect).',
+        + 'agent_id 를 만들지 않는다(spawn-outcome.js#collect). `--since` 로 창을 좁히면 이 '
+        + '행은 위로 편향된다 — 바인드는 SubagentStart 에, 영수증은 SessionEnd 에 쓰여 창 '
+        + '시작 경계를 걸친 스폰은 바인드만 창 밖에 남아 여기로 떨어진다. 창 밖으로 잘린 '
+        + '줄과 아예 쓰이지 않은 줄은 구분되지 않는다(spawn-outcome.js CANNOT SEE #6 '
+        + 'RETENTION AND WINDOWING).',
     }),
   ];
 }

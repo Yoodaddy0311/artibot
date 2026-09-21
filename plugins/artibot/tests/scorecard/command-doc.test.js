@@ -268,6 +268,12 @@ describe('/scorecard — 신규 플래그', () => {
     expect(section).toContain('`0%` 로 쓰지 않는다');
     expect(section).toContain('excluded_fifo');
     expect(section).toContain('CANNOT SEE');
+    // 비용 행의 분모 서술. 처음 쓴 문장이 "가격 없는 쌍은 비용 분모에서 빠진다"
+    // 였는데 `compare-scorecard.js#costMetric` 의 분모는 `fold.compared` 로
+    // unpriced 를 포함한다 — 빠지는 것은 분자와 버킷 합계다. 코드 키 이름으로
+    // 핀하고, 틀렸던 문구는 음성 단언으로 되돌아오지 못하게 막는다.
+    expect(section).toContain('unpriced');
+    expect(section, '비용 분모 서술이 옛 오기로 되돌아갔다').not.toContain('비용 분모에서 빠진다');
   });
 
   it('스니펫이 호출하는 sc.* 가 전부 배럴의 함수로 실존한다', () => {

@@ -278,6 +278,85 @@ function unpricedDivergenceFixture() {
 }
 
 /**
+ * AUXILIARY fixture D — pairs exist but NONE is comparable.
+ *
+ * 3 fifo pairs + 2 pairs with no `recommended_model`, so `pairs.length` is 5 and
+ * `compared` is 0. This is the state where the two denominators of this card
+ * genuinely disagree: the confidence row HAS a denominator (5 joined pairs) while
+ * the agreement and cost rows have none. A card that printed a histogram of
+ * zeroes for the latter two would be reporting "measured, and the answer is
+ * none" over a population it never had.
+ *
+ * @returns {object[]} ledger lines.
+ */
+function allExcludedFixture() {
+  seq = 0;
+  const out = [];
+  for (let i = 0; i < 3; i += 1) {
+    pushPair(out, {
+      agentId: `ax-f${i}`, confidence: 'fifo', recommended: OPUS, served: OPUS, cost: 0.5,
+    });
+  }
+  for (let i = 0; i < 2; i += 1) {
+    pushPair(out, { agentId: `ax-n${i}`, served: OPUS, cost: 0.5 });
+  }
+  return out;
+}
+
+/**
+ * AUXILIARY fixture C — 42 pairs MIXED across every shape at once.
+ *
+ * The main fixture is shape-true to one live reading and therefore has 0 fifo
+ * pairs, 0 `name` binds and one uniform confidence. This one is deliberately
+ * NOT live-shaped: it is the coverage fixture, and it is the only place where
+ * `by_confidence.name` is non-zero, where excluded and unjoined populations
+ * appear together, and where both agreement buckets carry priced AND unpriced
+ * pairs. Its arithmetic is the cross-check on the main fixture's denominators —
+ * two independently built folds, the same eight denominator rules.
+ *
+ * | group | n | confidence | agreement | cost |
+ * |---|---|---|---|---|
+ * | G1 | 14 | exact | same | 0.5 |
+ * | G2 |  4 | exact | same | unpriced |
+ * | G3 |  6 | exact | diverged | 0.125 |
+ * | G4 |  3 | name | diverged | unpriced |
+ * | G5 |  5 | name | same | 0.25 |
+ * | G6 |  6 | fifo | excluded (agrees) | 0.5 |
+ * | G7 |  4 | exact, no recommended_model | excluded | 0.5 |
+ *
+ * Plus 5 receipt-less binds, 3 receipt-only agents, 2 main-thread receipts.
+ *
+ * @returns {object[]} ledger lines.
+ */
+function mixedFixture() {
+  seq = 0;
+  const out = [];
+  let n = 0;
+  const run = (count, spec) => {
+    for (let i = 0; i < count; i += 1) {
+      n += 1;
+      pushPair(out, { agentId: `mx-${String(n).padStart(3, '0')}`, ...spec });
+    }
+  };
+  run(14, { recommended: OPUS, served: OPUS, cost: 0.5 });
+  run(4, { recommended: OPUS, served: OPUS, cost: null });
+  run(6, { recommended: OPUS, served: FABLE, cost: 0.125 });
+  run(3, { confidence: 'name', recommended: OPUS, served: FABLE, cost: null });
+  run(5, { confidence: 'name', recommended: FABLE, served: FABLE, cost: 0.25 });
+  run(6, { confidence: 'fifo', recommended: OPUS, served: OPUS, cost: 0.5 });
+  run(4, { served: OPUS, cost: 0.5 });
+  for (let i = 0; i < 5; i += 1) {
+    out.push(bound({ agentId: `mu-${i}`, recommended: OPUS }));
+  }
+  for (let i = 0; i < 3; i += 1) {
+    out.push(agentReceipt(`mr-${i}`, { model: OPUS, cost: 0.5 }));
+  }
+  out.push(receipt({ runId: 'sess-mixed-main', model: OPUS, cost: 0.5 }));
+  out.push(receipt({ runId: 'sess-mixed-main-b', model: FABLE, cost: 0.25 }));
+  return out;
+}
+
+/**
  * A deterministic permutation — no `Math.random`, so a failure reproduces.
  *
  * A 32-bit LCG (glibc constants) over a copy, Fisher–Yates downward.
@@ -413,8 +492,12 @@ describe('buildCompareScorecard — 행 값과 행 순서', () => {
   });
 
   it('histogram 키는 정렬돼 있다 (JSON 바이트가 입력 순서를 타지 않게)', () => {
-    const counts = card.metrics.find((m) => m.key === 'compare.cost').counts;
-    expect(Object.keys(counts)).toEqual(['agreed_priced', 'diverged_priced', 'unpriced']);
+    // confidence 로 본다 — fold 의 삽입 순서는 exact·name·fifo·other 인데 정렬은
+    // exact·fifo·name·other 라 두 순서가 다르다. cost 의 세 키는 삽입 순서가 이미
+    // 알파벳순이라 그 행으로는 정렬 여부를 증명할 수 없다(공허한 단언).
+    const fold = card.metrics.find((m) => m.key === 'compare.confidence');
+    expect(Object.keys(FOLD.by_confidence)).toEqual(['exact', 'name', 'fifo', 'other']);
+    expect(Object.keys(fold.counts)).toEqual(['exact', 'fifo', 'name', 'other']);
   });
 
   it('비율은 분모로 나눈 값이다 (0% 로 메우지 않는다)', () => {
@@ -441,6 +524,19 @@ describe('buildCompareScorecard — 행 값과 행 순서', () => {
     expect(fifo.note).toContain('allowlist');
     const unjoined = card.metrics.find((m) => m.key === 'compare.unjoined_receipts');
     expect(unjoined.note).toContain('distinct');
+    // S6: 바인드가 영수증보다 먼저 쓰이므로 --since 경계를 걸친 스폰은 이 행으로 떨어진다.
+    expect(unjoined.note).toContain('--since');
+  });
+
+  it('두 note 가 서로 모순되지 않는다 — 제외 사유 2종을 같게 말한다', () => {
+    // I2: agreement note 가 "나머지는 excluded_fifo 행이 센다" 라고 말하면 거짓이다.
+    // recommended_model 부재로 빠진 쌍은 이 카드의 어느 행에도 없다.
+    const agreement = card.metrics.find((m) => m.key === 'compare.agreement');
+    expect(agreement.note).toContain('recommended_model');
+    expect(agreement.note).toContain('excluded_no_recommendation');
+    expect(agreement.note).toContain('이 카드의 행이 아니다');
+    // 정반대로 말하던 문구가 남아 있지 않은지 — 두 note 가 같은 사실을 말해야 한다.
+    expect(agreement.note).not.toContain('나머지는 일치로 세지 않고 분모에서 뺀다(compare.');
   });
 
   it('totals 와 unmeasured 가 카드에서 파생된다', () => {
@@ -517,6 +613,78 @@ describe('보조 픽스처 B — diverged 가 전부 unpriced 면 합계는 0 �
 });
 
 // ---------------------------------------------------------------------------
+describe('보조 픽스처 C — 42쌍 혼합 (name confidence·제외·미조인이 한 fold 에)', () => {
+  const events = mixedFixture();
+  const fold = joinSpawnOutcomes(events);
+  const card = buildCompareScorecard(fold);
+
+  /** Expected rows. Independently derived from the G1..G7 table. */
+  const WANT = Object.freeze({
+    'compare.pairs': { denominator: 47, numerator: 42 },
+    'compare.agreement': { denominator: 32, numerator: 23 },
+    'compare.confidence': { denominator: 42, numerator: null },
+    'compare.cost': { denominator: 32, numerator: 25 },
+    'compare.excluded_fifo': { denominator: 42, numerator: 6 },
+    'compare.unjoined_binds': { denominator: 47, numerator: 5 },
+    'compare.unjoined_receipts': { denominator: 45, numerator: 3 },
+    'compare.score': { denominator: 0, numerator: null },
+  });
+
+  it('fold 가 47바인드·42쌍·비교 32·일치 23·갈림 9 로 접힌다', () => {
+    expect(fold.binds).toBe(47);
+    expect(fold.pairs.length).toBe(42);
+    expect(fold.compared).toBe(32);
+    expect(fold.by_agreement).toEqual({ same: 23, diverged: 9 });
+    expect(fold.excluded_fifo).toBe(6);
+    expect(fold.excluded_no_recommendation).toBe(4);
+    expect(fold.unjoined_binds).toBe(5);
+    expect(fold.unjoined_receipts).toBe(3);
+    expect(fold.main_thread_receipts).toBe(2);
+  });
+
+  it('name confidence 버킷이 0 이 아니다 (주 픽스처가 못 덮는 지점)', () => {
+    expect(fold.by_confidence).toEqual({ exact: 28, name: 8, fifo: 6, other: 0 });
+    expect(card.metrics.find((m) => m.key === 'compare.confidence').counts)
+      .toEqual({ exact: 28, fifo: 6, name: 8, other: 0 });
+  });
+
+  it('양쪽 버킷에 priced 와 unpriced 가 모두 있다', () => {
+    expect(fold.cost).toEqual({
+      compared: 25,
+      unpriced: 7,
+      same: { priced: 19, total: 8.25 },
+      diverged: { priced: 6, total: 0.75 },
+    });
+    const note = card.metrics.find((m) => m.key === 'compare.cost').note;
+    expect(note).toContain('same=8.250000 (priced 19)');
+    expect(note).toContain('diverged=0.750000 (priced 6)');
+  });
+
+  it('행 순서가 주 픽스처와 같다', () => {
+    expect(card.metrics.map((m) => m.key)).toEqual(ROW_KEYS);
+  });
+
+  it.each(ROW_KEYS)('%s 의 분모·분자가 기대값이다', (key) => {
+    const row = card.metrics.find((m) => m.key === key);
+    expect({ denominator: row.denominator, numerator: row.numerator }).toEqual(WANT[key]);
+  });
+
+  it('정합성 등식이 성립한다 (42+5=47 · 42+3=45 · 23+9=32 · 32+6+4=42)', () => {
+    expect(fold.pairs.length + fold.unjoined_binds).toBe(fold.binds);
+    expect(fold.pairs.length + fold.unjoined_receipts).toBe(45);
+    expect(fold.by_agreement.same + fold.by_agreement.diverged).toBe(fold.compared);
+    expect(fold.compared + fold.excluded_fifo + fold.excluded_no_recommendation)
+      .toBe(fold.pairs.length);
+  });
+
+  it('섞어도 바이트가 같다', () => {
+    const other = buildCompareScorecard(joinSpawnOutcomes(shuffled(events, 31)));
+    expect(JSON.stringify(other)).toBe(JSON.stringify(card));
+    expect(renderScorecardMarkdown(other)).toBe(renderScorecardMarkdown(card));
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('결정성 — 입력을 섞어도 바이트가 같다', () => {
   const base = buildCompareScorecard(FOLD);
 
@@ -530,9 +698,10 @@ describe('결정성 — 입력을 섞어도 바이트가 같다', () => {
     expect(renderScorecardMarkdown(card)).toBe(renderScorecardMarkdown(base));
   });
 
-  it('셔플 자기검증 — 순열이 실제로 순서를 바꾼다', () => {
-    // 이 단언이 없으면 위 네 건은 "셔플이 항등함수다" 로도 그린이 된다.
-    const permuted = shuffled(EVENTS, 7);
+  // S4: 자기검증을 실제로 쓰인 시드 전부에 돌린다. 한 시드만 검증하면 다른
+  // 시드가 항등순열이어도 바이트 동일 단언이 공허하게 통과한다.
+  it.each([1, 7, 20260921, 99, 31])('셔플 자기검증 — 시드 %i 가 순서를 실제로 바꾼다', (s) => {
+    const permuted = shuffled(EVENTS, s);
     expect(permuted.length).toBe(EVENTS.length);
     expect(permuted.map((e) => e.seq)).not.toEqual(EVENTS.map((e) => e.seq));
     expect([...permuted].sort((a, b) => a.seq - b.seq).map((e) => e.seq))
@@ -588,8 +757,61 @@ describe('분모 0 — 빈 원장은 8행 전부 unmeasured 다', () => {
     // (tests/scorecard/scorecard.test.js '분모 0 인 행은 ... 퍼센트 수치를 찍지 않는다').
     const out = renderScorecardMarkdown(card);
     expect(out).not.toMatch(/\d+\.\d+%/);
-    expect(out).toContain('unmeasured');
     expect(out).toContain('8 / 8 지표가 분모 0 이다');
+  });
+
+  it('score 행이 값·비율·상태 세 칸 모두 unmeasured 로 찍힌다', () => {
+    // S2: toContain('unmeasured') 만으로는 어느 칸이 그 글자인지 증명되지 않는다.
+    // 행 전체를 단언해 값 칸과 비율 칸이 둘 다 그 단어임을 고정한다.
+    expect(renderScorecardMarkdown(card)).toContain(
+      '| 스폰 결과 점수 (측정자 없음) | unmeasured | 0 | unmeasured | 0 | unmeasured |',
+    );
+  });
+
+  it('분포 절 자체가 없다 — 분모 0 인 행은 건수 0 히스토그램도 찍지 않는다', () => {
+    // I1(B4 실측 2026-09-21T04:21:54Z): 이 카드는 '## 분포' 아래 건수 0 행 9개를
+    // 찍었고, 같은 빈 입력의 routing 카드는 분포 절이 아예 없었다. "0 건" 은
+    // metric.js 헤더가 금지하는 "측정했고 답은 없음" 오독이다. render.js 의
+    // 필터(m.counts && keys.length)는 비소유라, 카드가 counts 를 null 로 낸다.
+    const out = renderScorecardMarkdown(card);
+    expect(out).not.toContain('## 분포');
+    for (const m of card.metrics) expect(m.counts, `${m.key} 가 counts 를 실었다`).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('보조 픽스처 D — 쌍은 있는데 비교 가능한 쌍이 0 이면 분모가 행마다 다르다', () => {
+  const fold = joinSpawnOutcomes(allExcludedFixture());
+  const card = buildCompareScorecard(fold);
+  const row = (key) => card.metrics.find((m) => m.key === key);
+
+  it('fold 가 5쌍·비교 0 으로 접힌다', () => {
+    expect(fold.pairs.length).toBe(5);
+    expect(fold.compared).toBe(0);
+    expect(fold.excluded_fifo).toBe(3);
+    expect(fold.excluded_no_recommendation).toBe(2);
+  });
+
+  it('agreement·cost 는 분모 0 이라 counts 가 null 이다', () => {
+    for (const key of ['compare.agreement', 'compare.cost']) {
+      expect(row(key).denominator, key).toBe(0);
+      expect(row(key).state, key).toBe('unmeasured');
+      expect(row(key).counts, `${key} 가 건수 0 히스토그램을 실었다`).toBeNull();
+    }
+  });
+
+  it('confidence 는 분모(쌍 5)가 있으므로 counts 를 유지한다', () => {
+    expect(row('compare.confidence').denominator).toBe(5);
+    expect(row('compare.confidence').state).toBe('measured');
+    expect(row('compare.confidence').counts).toEqual({ exact: 2, fifo: 3, name: 0, other: 0 });
+  });
+
+  it('분포 절에는 confidence 표만 나온다', () => {
+    const out = renderScorecardMarkdown(card);
+    expect(out).toContain('## 분포');
+    expect(out).toContain('| 바인드 confidence 분포 | fifo | 3 |');
+    expect(out).not.toContain('agreed_priced');
+    expect(out).not.toContain('| 추천 = 실제 서빙 (모델 ID 일치) | same |');
   });
 });
 
@@ -635,8 +857,41 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
     }],
     ['score 가 null', { score: null }],
     ['score.reason 이 빈 문자열', { score: { source: null, value: null, reason: '' } }],
+    // I4-1: by_confidence 의 네 키를 이름으로 요구한다. 부분 fold 가 통과하면
+    // 카드가 exact 만 있는 분포를 전 쌍 분포라고 찍는다.
+    ['by_confidence 가 빈 객체', { by_confidence: {} }],
+    ['by_confidence 에 other 가 없음', { by_confidence: { exact: 1, name: 0, fifo: 0 } }],
+    // S3: 아래 6건은 reject 분기에 도달하는 경로가 없어 미검증이었다.
+    ['cost.same 이 객체가 아님', {
+      cost: { compared: 0, unpriced: 0, same: 'x', diverged: { priced: 0, total: null } },
+    }],
+    ['cost.same.priced 가 음수', {
+      cost: {
+        compared: 0, unpriced: 0, same: { priced: -1, total: null }, diverged: { priced: 0, total: null },
+      },
+    }],
+    ['cost.unpriced 가 없음', {
+      cost: {
+        compared: 0, same: { priced: 0, total: null }, diverged: { priced: 0, total: null },
+      },
+    }],
+    ['by_agreement.diverged 가 문자열', { by_agreement: { same: 0, diverged: 'x' } }],
+    ['score.source 가 숫자', { score: { source: 5, value: null, reason: 'r' } }],
+    ['score.value 가 문자열', { score: { source: null, value: 'x', reason: 'r' } }],
   ])('%s 이면 던진다', (_name, patch) => {
     expect(() => buildCompareScorecard({ ...FOLD, ...patch })).toThrow(TypeError);
+  });
+
+  it.each([
+    ['source 가 실제 writer 이름', { source: 'review.completed', value: null, reason: 'r' }],
+    ['value 가 실제 점수', { source: null, value: 0.82, reason: 'r' }],
+  ])('점수 writer 가 생겨 %s 면 카드를 찍지 않고 던진다 (I4-2)', (_name, score) => {
+    // compare.score 의 분모는 0 으로 하드와이어돼 있고 note 는 `source: null ·
+    // value: null` 을 문자로 박는다. writer 가 생긴 뒤에도 통과시키면 카드가
+    // 실측된 점수를 unmeasured 라고 찍는다 — 거짓 표기다. 행을 다시 설계하라는
+    // 메시지와 함께 거부하는 쪽을 택했다(보고 §I4-2 참조).
+    expect(() => buildCompareScorecard({ ...FOLD, score }))
+      .toThrow(/denominator is hard-wired to 0|redesign/i);
   });
 
   it.each([

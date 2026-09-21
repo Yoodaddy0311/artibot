@@ -112,7 +112,7 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 ```
 
 - `--since <ISO|epoch ms>` 는 **리더 필터에 epoch ms 로** 걸고(`readAllEvents` 의 `filter.since`) 카드 라벨에는 ISO 로 넘긴다. 파싱할 수 없는 값도, **값이 아예 없는 `--since` 도** 조용히 무시하지 않고 메시지와 함께 중단한다 — 범위를 못 건 실행이 전 기간 실행과 같은 출력이 되면 안 된다. 그래서 분기가 `--since` **플래그의 존재**를 보고 값의 존재를 보지 않는다: 값으로 분기하면 `--compare --since` 가 조용히 전 기간 카드를 내는 fail-open 이 된다(실측 확인 후 수정). 스니펫이 `Date` 를 쓰는 것은 **호출자 쪽**이라 허용된다(순수성은 `lib/scorecard/` 의 계약이다).
-- **비교 가능한 쌍이 0 이면 `unmeasured`** 다. `0%` 로 쓰지 않는다. 가격이 없는 쌍은 0 으로 합산하지 않고 비용 분모에서 빠진다 — 0 원으로 세면 측정된 바닥이 실제보다 낮아진다.
+- **비교 가능한 쌍이 0 이면 `unmeasured`** 다. `0%` 로 쓰지 않는다. 가격이 없는 쌍은 0 으로 합산하지 않는다 — `compare.cost` 의 **분모(비교된 쌍)에는 남고**, 분자(priced)와 버킷 합계에서만 빠져 `unpriced` 로 세어진다. 0 원으로 세면 측정된 바닥이 실제보다 낮아진다.
 - `score` 행은 **항상 `unmeasured`**(source 가 null)다 — 원장에 **스폰 키로 점수를 쓰는 기록자가 없다**. 그리고 추천과 서빙이 일치한다는 것은 그 선택이 옳았다는 뜻이 아니다: 일치는 품질이 아니다.
 - `fifo` 처럼 confidence allowlist **밖**에서 묶인 쌍은 비교에서 제외되고 `excluded_fifo` 로 보인다 — 제외는 선택이지 측정이 아니다.
 - 이 카드가 **못 보는 것**은 `lib/replay/spawn-outcome.js` 헤더의 CANNOT SEE 목록이 정본이다(고장인지 정책인지 · fifo 쌍의 정당성 · 멀티모델 런 · 중복 영수증 · 가격 없는 쌍의 비용). 여기에 복제하지 않는다 — 복제하면 두 목록이 갈린다.
