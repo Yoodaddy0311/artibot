@@ -53,7 +53,7 @@ Parse $ARGUMENTS:
 3. **State** — `store.getMission(missionId)` (state-manager.js:428) 의 `intent.revision` · `plan.revision` 을 `intent_revision` · `plan_revision` 으로 사상. 값이 없으면 **위조하지 않는다** — validate 가 거부한 사유를 그대로 표기한다.
 4. **Epoch** — 부재. epoch 회전 연산이 없으므로 `routing_epoch: null` 로 기록한다.
 5. **Checkpoint** — `createCheckpointService({ store, appendEvent: null })` (lib/checkpoint/checkpoint-service.js:150) 의 `checkpoint(content, { trigger: '/save' })`. store 는 `createCheckpointStore({ adapter: createFileStoreAdapter({ dir }) })` (checkpoint-store.js:162 · adapters/file-store.js:113), `dir` 는 `resolveStoreLocation({ projectRoot, gitCommonDir }).dir` (lib/project-state/store-location.js:57). `appendEvent` 는 **반드시 null** — 원장 기록은 7단계에서 조립 모듈이 직접 한다 (리더 결정 ca05-2).
-6. **Validate resume** — `buildResumeReport({ latestValid, getMission, getTaskGraph }, { missionId })` (lib/checkpoint/resume-controller.js:542) 를 report-only 로 호출. `resumable` 은 상태를 바꾸지 않고 출력 표에만 쓴다.
+6. **Validate resume** — `buildResumeReport({ latestValid, getMission, getTaskGraph }, { missionId })` (lib/checkpoint/resume-controller.js:542) 를 report-only 로 호출. `resumable` 은 상태를 바꾸지 않고 출력 표에만 쓴다. 오늘 배선은 위 3포트만 주입하므로 report 의 7·8·9단계(lease·ledger reconcile·model)가 unknown 으로 막혀 `resumable` 은 **항상 ✗** 다 — 결함이 아니라 포트 부재의 정직한 값이며, 체크포인트 저장·원장 기록은 그와 무관하게 이뤄진다.
 7. **Ledger** — 조립 모듈이 `appendLedgerEvent(projectRoot, { event:'mission.checkpointed', source:'supervisor', data:{ checkpoint_id, trigger:'/save', resumable } })` (lib/runtime/ledger.js:81) 를 호출한다. `source` 는 allowlist 상 `supervisor` 다 (리더 결정 ca05-1 — `save` 는 allowlist 밖이라 `ledger.rejected` 로 강등된다).
 8. **Snapshot Scorecard** — 이 줄기 밖이다 (OB-19, 별도 줄기). 순서상 자리만 확정해 둔다.
 

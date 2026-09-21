@@ -356,7 +356,11 @@ describe('the ledger line comes after the resume verdict (steps 5 -> 6 -> 7)', (
 
 describe('landing the pass changes no behaviour: the canary is off', () => {
   it('reads false against the real artibot.config.json today', () => {
-    expect(isSaveCheckpointEnabled(CONFIG)).toBe(false);
+    expect(
+      isSaveCheckpointEnabled(CONFIG),
+      'canary flipped ON: runtime.checkpoint.saveOnSave is true in artibot.config.json — ' +
+        'that is a deliberate decision, so edit this pin on purpose (see header, CONFIG FUTURE)',
+    ).toBe(false);
   });
 
   it('reads true only for a literal boolean true at the canary path', () => {
