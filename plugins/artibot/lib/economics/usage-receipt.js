@@ -162,6 +162,125 @@ export function emptyResult() {
 }
 
 /**
+ * A non-negative integer count, or null when the value is not one.
+ *
+ * Strict on purpose: a coerced `'2'` or a `NaN` read as 0 would let the
+ * accounting below balance by accident, and a cause token derived from an
+ * accidental balance is indistinguishable from a measured one.
+ *
+ * @param {unknown} value
+ * @returns {number|null}
+ */
+function finiteCount(value) {
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Total of a `{key: count}` tally, or null when any member is not a count.
+ *
+ * @param {unknown} tally
+ * @returns {number|null}
+ */
+function sumTally(tally) {
+  if (tally === null || typeof tally !== 'object' || Array.isArray(tally)) return null;
+  let total = 0;
+  for (const value of Object.values(tally)) {
+    const count = finiteCount(value);
+    if (count === null) return null;
+    total += count;
+  }
+  return total;
+}
+
+/**
+ * Entries held by groups that produced no receipt, or null when a skipped
+ * group does not say how many entries it held.
+ *
+ * @param {unknown} skipped - `meta.skipped`
+ * @returns {number|null}
+ */
+function sumSkippedEntries(skipped) {
+  if (!Array.isArray(skipped)) return null;
+  let total = 0;
+  for (const group of skipped) {
+    const count = finiteCount(group?.entries);
+    if (count === null) return null;
+    total += count;
+  }
+  return total;
+}
+
+/**
+ * Why a fold produced zero receipts, read from its own counters.
+ *
+ * WHY THIS LIVES HERE. The caller that reports the reason (the SessionEnd
+ * hook) does not own the meaning of `entries`, `syntheticEntries` or
+ * `skipped[]` — this module does. A reading of those counters written in the
+ * hook would be a second, unversioned copy of this module's semantics, and the
+ * two would drift the first time a counter changes.
+ *
+ * EVERY BRANCH IS A POSITIVE PREDICATE, NEVER A RESIDUAL. There is no "else"
+ * bucket: a meta that matches none of the four is unclassifiable and says so
+ * with `null`, so the caller keeps its bare reason. A residual bucket would
+ * file every future shape of miss under whichever token happened to be last,
+ * and the ledger would read as a measurement of something nobody measured.
+ *
+ * PRECONDITION — A FOLD WITH ANY UNREADABLE FILE IS NEVER CLASSIFIED. Every
+ * token below is a claim about the WHOLE session, and `foldFile` records an
+ * unreadable file by bumping `unreadableFiles` alone: its entries are not in
+ * `entries`, not in `syntheticEntries`, not anywhere. A missing transcript is
+ * therefore shaped exactly like an empty one, and calling it `no-entries`
+ * would assert "nothing was written" about a file nobody read. The check is
+ * top-level rather than a rider on the zero-entry branches, because a
+ * partially unreadable session cannot support the exact-accounting claims
+ * either: entries that were never seen cannot be accounted for.
+ *
+ * The four:
+ *  - `no-entries`      nothing to measure — no assistant entry was folded.
+ *  - `all-synthetic`   entries existed but every one named the synthetic model,
+ *                      which never reaches `entries`. Without this branch it is
+ *                      indistinguishable from an empty transcript.
+ *  - `all-unresolved`  every folded entry named a model the catalog rejects.
+ *  - `no-usage`        entries were folded and every one is accounted for by a
+ *                      named miss, so none of them yielded a USABLE receipt.
+ *                      The misses are: no model on the entry, a model the
+ *                      catalog rejects, and a group the receipt builder
+ *                      skipped — which includes a group whose token counts
+ *                      were perfectly intact but carried no parseable
+ *                      timestamp. The accounting is EXACT: the misses must sum
+ *                      to `entries`, so an unexplained remainder falls through
+ *                      to null rather than being absorbed here.
+ *
+ * WHAT IT DOES NOT ANSWER: whether zero receipts was correct. It reports the
+ * shape of the fold, not a verdict on the session.
+ *
+ * @param {unknown} meta - `meta` of a fold whose `receipts` is empty.
+ * @returns {'no-entries'|'all-synthetic'|'all-unresolved'|'no-usage'|null}
+ */
+export function classifyEmptyReceipts(meta) {
+  if (meta === null || typeof meta !== 'object') return null;
+  if (finiteCount(meta.unreadableFiles) !== 0) return null;
+
+  const entries = finiteCount(meta.entries);
+  const synthetic = finiteCount(meta.syntheticEntries);
+  if (entries === null || synthetic === null) return null;
+
+  if (entries === 0 && synthetic === 0) return 'no-entries';
+  if (entries === 0 && synthetic > 0) return 'all-synthetic';
+
+  const unresolved = sumTally(meta.unresolvedModels);
+  const withoutModel = finiteCount(meta.entriesWithoutModel);
+  const skipped = sumSkippedEntries(meta.skipped);
+  if (unresolved === null || withoutModel === null || skipped === null) return null;
+
+  if (unresolved === entries) return 'all-unresolved';
+  if (unresolved < entries && withoutModel + unresolved + skipped === entries) {
+    return 'no-usage';
+  }
+  return null;
+}
+
+/**
  * Split a transcript model string into the catalog id and its qualifiers.
  *
  * Observed shapes (measured 2026-09-02): a bare catalog id
