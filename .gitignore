@@ -118,6 +118,13 @@ reports/*
 # 추적(정본, 규칙 없음 — 여기 나열하지 않는다):
 #   ARTIBOT.md · .artibot/project.md · .artibot/missions/ · .artibot/adr/
 #   .artibot/memory/ · .artibot/guides/**(설계 세트)
+#   missions 실측(2026-09-21, tests/firewall/missions-clean-tree.test.js): 규칙이
+#   없으므로 미추적 missions 는 `git status --porcelain` 에 `?? .artibot/missions/`
+#   1건으로 보인다(.artibot 전체가 미추적인 리포에서는 `?? .artibot/`)
+#   → autopilot preflight gitClean 은 warn(차단 아님), split land 검사는
+#   영향 없음. 추적 vs 무시 정책은 오너 결정 대기 — 결정 전에는 이 절의 규칙 값을
+#   바꾸지 마라(missions 무시 규칙을 넣으면 gitignore-boundary 의 TRACKED_PATHS
+#   핀 `.artibot/missions/m-0001.md` 가 red 가 되도록 걸려 있다).
 # 로컬(재생성 가능하거나 사적 데이터 — 아래 4규칙):
 #
 # `**/` 는 위 ledger 규칙(:111)과 같은 이유다. 훅의 projectRoot 가 리포 루트가
