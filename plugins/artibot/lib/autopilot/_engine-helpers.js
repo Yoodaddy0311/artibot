@@ -220,6 +220,41 @@ export function persist(state) {
 }
 
 /**
+ * Copy a notifier's `queued` payload into the LIVE state's queue, in the same
+ * shape `notification.js#queueOnSession` writes to disk.
+ *
+ * Why this exists: `queueOnSession` is a read-modify-write against the session
+ * **file**, and a notifier that fires mid-mutation therefore queues onto a state
+ * the caller is about to overwrite with its own whole-state `persist`. Two
+ * distinct losses follow — the entry is erased when the file already existed,
+ * and it is never written at all when it did not, because `queueOnSession`
+ * no-ops on a session it cannot load. Merging into the in-memory state before
+ * the persist closes both, and unlike "announce after the persist" it also
+ * survives the NEXT persist of the same state, since the entry now lives in the
+ * object every later write is made from.
+ *
+ * Never throws: every caller is a phase ACK point, and bookkeeping for an
+ * announcement must not undo a transition the engine has already committed. A
+ * hostile or absent notification degrades to "nothing merged".
+ *
+ * @param {object} state - Live session state (mutated).
+ * @param {?object} notification - A `notification.js` result
+ *   (`{tool, params?, suppressed, queued}`); `null` when the notifier failed.
+ * @returns {boolean} true when an entry was appended.
+ */
+export function mergeQueuedNotification(state, notification) {
+  try {
+    const queued = notification?.queued;
+    if (!queued || typeof queued !== 'object' || Array.isArray(queued)) return false;
+    if (!Array.isArray(state.queuedQuestions)) state.queuedQuestions = [];
+    state.queuedQuestions.push({ ts: new Date().toISOString(), ...queued });
+    return true;
+  } catch {
+    return false; /* queue bookkeeping is best-effort; the transition stands */
+  }
+}
+
+/**
  * Build a danger notification when pause reason or error severity signals
  * a safety-critical event. Returns null when no danger is detected.
  * @param {object} state

@@ -46,6 +46,7 @@ import {
   recordRiskEvent,
   recordSecretLeak,
 } from '../../lib/autopilot/engine-state.js';
+import { mergeQueuedNotification } from '../../lib/autopilot/_engine-helpers.js';
 import { openPhaseAttempt } from '../../lib/autopilot/phase-attempt.js';
 import { shouldPause } from '../../lib/autopilot/safety.js';
 import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
@@ -360,5 +361,60 @@ describe('recordRiskEvent (I-04 dead-branch feeder)', () => {
     const state = makeState();
     recordRiskEvent(state, {});
     expect(state.errors[0]).toMatchObject({ severity: 'danger', reason: null, matchedId: null, command: null });
+  });
+});
+
+/**
+ * `mergeQueuedNotification` is what carries a recovery pause's queue entry into
+ * the state `recordPhaseResult` persists. It runs at a phase ACK point, so the
+ * contract that matters most is the negative one: nothing it is handed may throw
+ * back into the caller and undo a transition the engine already committed.
+ * Hostile shapes are exercised directly here because `recordPhaseResult` can
+ * only produce the well-formed ones.
+ */
+describe('mergeQueuedNotification', () => {
+  it('appends the queued payload with a ts, in queueOnSession shape', () => {
+    const state = {};
+    expect(mergeQueuedNotification(state, { queued: { type: 'pause', reason: 'r' } })).toBe(true);
+    expect(state.queuedQuestions).toHaveLength(1);
+    expect(state.queuedQuestions[0]).toMatchObject({ type: 'pause', reason: 'r' });
+    expect(typeof state.queuedQuestions[0].ts).toBe('string');
+  });
+
+  it('appends to an existing queue rather than replacing it', () => {
+    const state = { queuedQuestions: [{ type: 'completion' }] };
+    mergeQueuedNotification(state, { queued: { type: 'pause' } });
+    expect(state.queuedQuestions.map((q) => q.type)).toEqual(['completion', 'pause']);
+  });
+
+  it('replaces a non-array queuedQuestions instead of throwing on push', () => {
+    const state = { queuedQuestions: 'corrupt' };
+    expect(mergeQueuedNotification(state, { queued: { type: 'pause' } })).toBe(true);
+    expect(state.queuedQuestions).toHaveLength(1);
+  });
+
+  it.each([
+    ['a null notification (the notifier threw)', null],
+    ['an undefined notification', undefined],
+    ['a notification with no queued payload', { suppressed: true }],
+    ['a null queued payload', { queued: null }],
+    ['a string queued payload', { queued: 'pause' }],
+    ['an array queued payload', { queued: [{ type: 'pause' }] }],
+  ])('merges nothing for %s', (_label, notification) => {
+    const state = {};
+    expect(mergeQueuedNotification(state, notification)).toBe(false);
+    expect(state.queuedQuestions).toBeUndefined();
+  });
+
+  it('returns false instead of throwing when the payload has a hostile getter', () => {
+    const notification = { get queued() { throw new Error('hostile'); } };
+    const state = {};
+    expect(() => mergeQueuedNotification(state, notification)).not.toThrow();
+    expect(mergeQueuedNotification(state, notification)).toBe(false);
+  });
+
+  it('returns false instead of throwing when the state rejects the write', () => {
+    const state = Object.freeze({});
+    expect(() => mergeQueuedNotification(state, { queued: { type: 'pause' } })).not.toThrow();
   });
 });

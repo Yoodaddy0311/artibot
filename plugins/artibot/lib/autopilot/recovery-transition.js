@@ -40,15 +40,18 @@
  * same three, in the same shapes. Each is guarded on its own: a notification
  * that throws must not un-pause a session the engine has already stopped.
  *
- * **What actually reaches the operator today is the `pause` event and the
- * lesson — not the notification queue.** This module does not persist, so the
- * queue entry `notification.js#queueOnSession` writes lands on the *pre-
- * transition* session on disk, and the caller's subsequent whole-state persist
- * overwrites it; under the current caller (`engine-state.js#recordPhaseResult`)
- * no queued entry survives. That caller also discards the returned
- * `notification`. Both are the caller's to fix — announcing after the persist is
- * a change to the call site, not to this module — so until then a
- * recovery-driven pause is a quieter pause than `maybePause`'s.
+ * **The queue entry reaches the operator only because the caller merges it.**
+ * This module does not persist, so the entry `notification.js#queueOnSession`
+ * writes lands on the *pre-transition* session on disk, where a later
+ * whole-state persist would erase it — and when no session file exists yet,
+ * `queueOnSession` cannot write it at all. That is why the returned
+ * `notification` is part of this function's contract rather than a courtesy:
+ * `engine-state.js#recordPhaseResult` takes its `queued` payload into the live
+ * state via `_engine-helpers.js#mergeQueuedNotification` before persisting, so
+ * the queue entry is written from the same object as every other field and
+ * survives each subsequent persist. A caller that discards the return value is
+ * back to a pause that announces itself only through the `pause` event and the
+ * lesson.
  *
  * Layer: L2. Imports `_engine-helpers.js`, `memory.js`, `notification.js` and
  * `../core/platform.js` only. It does NOT import `engine-state.js` — that module

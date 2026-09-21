@@ -8,7 +8,7 @@
  * @module lib/autopilot/engine-state
  */
 
-import { persist, recordPhase, tick } from './_engine-helpers.js';
+import { mergeQueuedNotification, persist, recordPhase, tick } from './_engine-helpers.js';
 import { appendLesson } from './memory.js';
 import { ackPhaseAttempt } from './phase-attempt.js';
 import { recordRecoveryDecision } from './recovery-record.js';
@@ -129,7 +129,11 @@ export function safeAppendLesson(state, payload) {
  * judgement into `state.recoveryJournal` and changes no transition. CA-03 — the
  * wiring that lets that judgement steer `pendingPhase` — also lives here, but
  * behind the `autopilot.recovery.transitionFromVerdict` gate: OFF (the default)
- * leaves every field and event exactly as the Observe stage wrote them.
+ * leaves every field and event exactly as the Observe stage wrote them. When it
+ * is ON and the verdict pauses, the returned notification's queue payload is
+ * merged into the live state here, before the persist below — see the comment
+ * at that call for why the merge, and not a later announcement, is what makes
+ * the entry durable.
  *
  * @param {object} state
  * @param {{ phase: string, status: string, [k: string]: any }} payload
@@ -196,7 +200,20 @@ export function recordPhaseResult(state, payload = {}, config = undefined) {
     // read unless a row exists.
     if (row) {
       const cfg = config ?? loadRecoveryTransitionConfig();
-      if (cfg?.transitionFromVerdict === true) applyRecoveryTransition(state, row, cfg);
+      if (cfg?.transitionFromVerdict === true) {
+        const applied = applyRecoveryTransition(state, row, cfg);
+        // The pause notification queues onto the session FILE from inside that
+        // call, i.e. before the persist below rewrites the file from this
+        // object. Taking the returned payload into the live queue is what makes
+        // the persist carry it instead of erasing it — and it is the only
+        // variant that also survives the next persist of this same state.
+        // Narrow on purpose: an unapplied gate, a phase-advancing action, and a
+        // notifier that threw (`notification === null`) all merge nothing, so
+        // every path but an applied PAUSED is byte-identical to before.
+        if (applied?.applied === true && applied.next === 'PAUSED') {
+          mergeQueuedNotification(state, applied.notification);
+        }
+      }
     }
   }
   persist(state);
