@@ -191,8 +191,14 @@ function seedArtifacts(id = missionId, { planText, reviewText } = {}) {
  * The per-project opt-in marker, relative to the project root. Written into the
  * sandbox config EXPLICITLY rather than inherited from the live file, so these
  * cases keep meaning the same thing on the day the shipped default is renamed.
+ *
+ * A DEDICATED FILE WITH NO OTHER MEANING. An earlier draft used
+ * `.artibot/project.md`, which is the v5 project declaration DOCUMENT —
+ * reusing it would have conflated "uses Artibot project-state" with "opted in
+ * to mission artifacts", and a future scaffolder of that document would have
+ * quietly made the gate global again.
  */
-const PROJECT_MARKER = '.artibot/project.md';
+const PROJECT_MARKER = '.artibot/artifact-lifecycle.optin';
 
 /**
  * Give the sandbox repo the marker that opts it into artifact writes.

@@ -29,6 +29,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,7 +57,7 @@ const VID = 'v-9f2c1a';
  * the global `enabled` flag AND this file existing under the project root, so
  * every fixture that opens gate 3 has to be a project that opted in.
  */
-const MARKER_SEGMENTS = Object.freeze(['.artibot', 'project.md']);
+const MARKER_SEGMENTS = Object.freeze(['.artibot', 'artifact-lifecycle.optin']);
 const MARKER_REL = MARKER_SEGMENTS.join('/');
 
 const ENABLED_CONFIG = Object.freeze({
@@ -91,6 +92,11 @@ function seedMarker(dir) {
 afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
   vi.restoreAllMocks();
+  // Belt and braces: a test that returned early without its own restore would
+  // otherwise leave `node:fs`'s NAMED exports bound to a restored spy for the
+  // rest of the file. Cheap, and it makes spy leakage impossible rather than
+  // merely unlikely.
+  syncBuiltinESMExports();
 });
 
 /** Where the module is contracted to put an artifact of this kind. */
@@ -187,7 +193,51 @@ function filesUnderIncludingMarker(dir) {
   return out.sort();
 }
 
-/** Spy on every fs write entry point; returns a `assertNone()` helper. */
+/**
+ * Spy on `fs.statSync` so that a NAMED importer's call is actually counted.
+ *
+ * `vi.spyOn(fs, 'statSync')` alone patches the CommonJS export object. A module
+ * that did `import { statSync } from 'node:fs'` holds a binding that the patch
+ * never reaches, so the spy reports zero however many times that module stats.
+ * `syncBuiltinESMExports()` republishes the builtin's named exports from the
+ * patched object, which is what makes the binding point at the spy. Measured
+ * under vitest 4.0.18 / node v24.15.0 on 2026-09-21: without the sync the
+ * positive control counted 0, with it 1.
+ *
+ * The sync has to run again after restoring, or the named binding keeps
+ * pointing at a dead spy for the rest of the file — hence `restoreSynced()`
+ * rather than a bare `mockRestore()`.
+ */
+function spyOnStatSync() {
+  const spy = vi.spyOn(fs, 'statSync');
+  syncBuiltinESMExports();
+  spy.restoreSynced = () => {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  };
+  return spy;
+}
+
+/**
+ * Spy on every fs write entry point; returns a `assertNone()` helper.
+ *
+ * CORRECTION (measured 2026-09-21, after an earlier revision of this comment
+ * asserted the opposite without measuring): these write spies were NEVER
+ * blind, and `assertNone()` was load-bearing all along. `lib/core/file.js:7`
+ * imports `node:fs` as a DEFAULT import (`import fsSync from 'node:fs'`),
+ * which for a builtin IS the object `vi.spyOn(fs, ...)` patches, so every
+ * `fsSync.writeFileSync` / `fsSync.mkdirSync` call is seen. Proof lives in the
+ * dry-run sibling's positive control: same technique, no sync, a real write
+ * counted writeFileSync 1, mkdirSync 2, renameSync 1.
+ *
+ * Only {@link spyOnStatSync} ever needed `syncBuiltinESMExports()`, because
+ * `lib/runtime/artifact-lifecycle.js:71` uses a NAMED import for `statSync`.
+ * Import style at the CALL SITE is what decides this, not the spy.
+ *
+ * The sync call below is kept deliberately, as cheap insurance: if
+ * `lib/core/file.js` is ever converted to named imports, it is what keeps
+ * these assertions honest instead of silently turning them into decoration.
+ */
 function spyOnFsWrites() {
   const syncTargets = [
     'writeFileSync',
@@ -204,12 +254,14 @@ function spyOnFsWrites() {
     ...syncTargets.map((name) => vi.spyOn(fs, name)),
     ...asyncTargets.map((name) => vi.spyOn(fsPromises, name)),
   ];
+  syncBuiltinESMExports();
   return {
     assertNone() {
       for (const spy of spies) expect(spy).not.toHaveBeenCalled();
     },
     restore() {
       for (const spy of spies) spy.mockRestore();
+      syncBuiltinESMExports();
     },
   };
 }
@@ -570,7 +622,7 @@ describe('gate 2 wiring (artibot.config.json)', () => {
   });
 
   it('ships the project marker path, and exactly three keys under the block', () => {
-    expect(config.runtime.artifactLifecycle.projectMarker).toBe('.artibot/project.md');
+    expect(config.runtime.artifactLifecycle.projectMarker).toBe('.artibot/artifact-lifecycle.optin');
     expect(Object.keys(config.runtime.artifactLifecycle).sort()).toEqual([
       'comment',
       'enabled',
@@ -580,7 +632,7 @@ describe('gate 2 wiring (artibot.config.json)', () => {
 
   it('is reachable at the exact dotted path resolveArtifactGate reads', () => {
     const value = PROJECT_MARKER_PATH.split('.').reduce((node, key) => node?.[key], config);
-    expect(value).toBe('.artibot/project.md');
+    expect(value).toBe('.artibot/artifact-lifecycle.optin');
   });
 
   it('is reachable at the exact dotted path apply() reads', () => {
@@ -656,10 +708,10 @@ describe('resolveArtifactGate — reason table', () => {
   it.each([
     ['absent', undefined],
     ['a traversal', '../outside.md'],
-    ['a backslash path', '.artibot\\project.md'],
+    ['a backslash path', '.artibot\\artifact-lifecycle.optin'],
     ['an absolute path', '/etc/passwd'],
-    ['a drive letter', 'C:/project.md'],
-    ['an array', ['.artibot', 'project.md']],
+    ['a drive letter', 'C:/artifact-lifecycle.optin'],
+    ['an array', ['.artibot', 'artifact-lifecycle.optin']],
     ['the empty string', ''],
   ])('reports MARKER_INVALID when projectMarker is %s, without probing', (_label, marker) => {
     const isFile = probe(true);
@@ -824,19 +876,57 @@ describe('apply() routes gate 2 through the project gate', () => {
     expect(filesUnder(root)).toEqual([]);
   });
 
-  it('keeps the dry-run path free of the filesystem and of projectRoot', () => {
-    const spies = spyOnFsWrites();
+  // POSITIVE CONTROL for the assertion below. Measured 2026-09-21: a plain
+  // `vi.spyOn(fs, 'statSync')` counted ZERO here, on the path where the marker
+  // probe demonstrably stats — because the module under test uses a NAMED
+  // import (`import { existsSync, statSync } from 'node:fs'`) and patching the
+  // default export object does not rebind it. The negative assertion was
+  // therefore vacuous: it would have stayed green with a stat on the dry-run
+  // path. `syncBuiltinESMExports()` republishes the builtin's named exports
+  // from the now-patched object, and the same probe counts 1.
+  //
+  // This test must stay. Without it, a future change that makes the spy blind
+  // again turns the dry-run assertion back into a decoration that always
+  // passes, and nothing would say so.
+  it('sees the marker probe on the write path (positive control for the spy)', () => {
+    const statSpy = spyOnStatSync();
     try {
-      const statSpy = vi.spyOn(fs, 'statSync');
+      apply(runPlan([ev.missionCreated(2)]), {
+        dryRun: true,
+        config: ENABLED_CONFIG,
+        write: true,
+        projectRoot: root,
+        content: { [ArtifactKind.INTENT]: INTENT_MD },
+      });
+      expect(statSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(statSpy).toHaveBeenCalledWith(path.join(root, ...MARKER_SEGMENTS));
+    } finally {
+      statSpy.restoreSynced();
+    }
+  });
+
+  // `projectRoot` IS supplied here, and a valid marker sits under it, so the
+  // only thing standing between the resolver and a `statSync` is `apply()`
+  // withholding the root while gate 3 is closed. Without the root in the
+  // options this test would pass for the wrong reason — it would prove "a
+  // missing root means no probe", which the resolver's own table already
+  // covers, instead of "the dry-run path withholds a root it HAS".
+  it('keeps the dry-run path free of the filesystem, even with a usable projectRoot', () => {
+    const spies = spyOnFsWrites();
+    const statSpy = spyOnStatSync();
+    try {
       const report = apply(runPlan(completionEvents()), {
         dryRun: true,
         config: ENABLED_CONFIG,
+        projectRoot: root,
+        content: { [ArtifactKind.INTENT]: INTENT_MD },
       });
       expect(report.dryRun).toBe(true);
       expect(report.written).toEqual([]);
       expect(statSpy).not.toHaveBeenCalled();
       spies.assertNone();
     } finally {
+      statSpy.restoreSynced();
       spies.restore();
     }
   });

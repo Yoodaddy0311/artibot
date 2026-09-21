@@ -87,12 +87,28 @@ const APPLY_CAN_WRITE = /options\.write\s*===\s*true/.test(LIFECYCLE_SRC);
 /**
  * The per-project marker, relative to the project root.
  *
- * The shipped value of `runtime.artifactLifecycle.projectMarker`. Spelled here
- * rather than read out of the live config so a change to that key makes the
- * matrix below RED — the point of the matrix is that this file and the config
- * agree, and a self-reading fixture can never disagree with itself.
+ * The shipped value of `runtime.artifactLifecycle.projectMarker`, spelled out
+ * rather than read from the live config: a fixture that seeds the marker from
+ * the same value it configures can never disagree with itself, and would go
+ * green against any spelling at all.
+ *
+ * WHAT THIS CONSTANT DOES NOT GATE (rules §9 — write down what the gate cannot
+ * see, next to the gate). It does NOT catch the shipped value drifting away
+ * from this literal. Every sandbox below WRITES `projectMarker` from this
+ * constant into its own config, so the shipped key is never consulted and a
+ * rename in `artibot.config.json` leaves these suites green while silently
+ * disagreeing with production. Agreement between the two is pinned in the
+ * lifecycle module's own suites, not here. Verified equal by hand at
+ * 2026-09-21T09:58Z; that is a point-in-time check, not a gate.
+ *
+ * A DEDICATED FILE, carrying no other meaning. The earlier candidate was the
+ * v5 project declaration document, which conflates two different statements —
+ * "this project uses Artibot project-state" and "this project opted in to
+ * mission artifact files". Anything that scaffolded the declaration would have
+ * re-opened the gate everywhere, which is the failure this gate exists to
+ * prevent.
  */
-const PROJECT_MARKER = '.artibot/project.md';
+const PROJECT_MARKER = '.artibot/artifact-lifecycle.optin';
 
 /** Create the marker file that opens the per-project half of the gate. */
 function seedProjectMarker(root) {
@@ -737,7 +753,41 @@ describe('intent-observe-pre — the per-project gate (a/b/c matrix)', () => {
     expect(c.file).toBe(APPLY_CAN_WRITE);
   });
 
-  it('writes nothing when the marker path is a DIRECTORY named project.md', () => {
+  it('answers write-disabled IN PROCESS when the marker is absent', async () => {
+    // WHAT THE a/b/c MATRIX CANNOT SEE, AND WHY THIS CASE EXISTS. Revert the
+    // gate to a direct `runtime.artifactLifecycle.enabled` read and case (b)
+    // stays GREEN: the hook would call `apply({write: true})`, `apply` throws
+    // on the closed PROJECT gate, and `observeIntent`'s own catch turns that
+    // into exit 0, empty stdout, no file and a recorded mission — the four
+    // things the matrix measures, unchanged. Only the RETURN VALUE separates
+    // "the gate said no" from "the writer exploded and was swallowed", and the
+    // child process is mute by design, so this has to run in process.
+    //
+    // MEASURED: with that reversion in place this case goes RED and reports
+    // `ok: false` with `apply`'s marker-path message.
+    const box = sandbox('b-in-process', { enabled: true, marker: 'none' });
+    process.env.CLAUDE_PLUGIN_ROOT = box.root;
+    resetConfig();
+
+    const out = await observeIntent({
+      cwd: box.repo,
+      session_id: SESSION_ID,
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(box.repo, 'lib', 'parser.js'), content: 'x\n' },
+    });
+
+    // The SAME vocabulary the global-off case returns. Project-off is not a new
+    // status: downstream readers pin `write-disabled` and must not have to
+    // learn a second spelling for "no file, on purpose".
+    expect(out.ok).toBe(true);
+    expect(out.reason).toBe('write-disabled');
+    expect(out.written).toBe(0);
+    // The records still happened — the gate suppresses the file and nothing else.
+    expect(out.promoted).toBe(true);
+    expect(existsSync(intentArtifactPath(box.repo, box.missionId))).toBe(false);
+  });
+
+  it('writes nothing when the marker path is a DIRECTORY, not a file', () => {
     // `existsSync` alone would call this open. The resolver's contract says a
     // REGULAR FILE, and a directory is the cheapest way a project accidentally
     // satisfies a laxer check.

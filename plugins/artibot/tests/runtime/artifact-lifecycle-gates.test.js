@@ -371,8 +371,8 @@ describe('normaliseProjectMarker (B4 per-project gate)', () => {
   // rule is an allowlist and every unreadable value is `null` — which the
   // caller reads as "gate closed", never as "no marker required".
   it.each([
-    ['the shipped value', '.artibot/project.md', ['.artibot', 'project.md']],
-    ['a single segment', 'project.md', ['project.md']],
+    ['the shipped value', '.artibot/artifact-lifecycle.optin', ['.artibot', 'artifact-lifecycle.optin']],
+    ['a single segment', 'artifact-lifecycle.optin', ['artifact-lifecycle.optin']],
     ['a dotfile', '.artibot-project', ['.artibot-project']],
     ['eight segments', 'a/b/c/d/e/f/g/h', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']],
     ['digits, dash, underscore', 'a-1/b_2.md', ['a-1', 'b_2.md']],
@@ -386,15 +386,15 @@ describe('normaliseProjectMarker (B4 per-project gate)', () => {
     ['a bare dot segment', '.'],
     ['an interior parent segment', '.artibot/../../x.md'],
     ['an interior dot segment', '.artibot/./x.md'],
-    ['a backslash separator', '.artibot\\project.md'],
+    ['a backslash separator', '.artibot\\artifact-lifecycle.optin'],
     ['a POSIX absolute path', '/etc/passwd'],
-    ['a drive letter', 'C:/project.md'],
+    ['a drive letter', 'C:/artifact-lifecycle.optin'],
     ['a UNC path', '//server/share/x.md'],
-    ['an empty leading segment', '/project.md'],
+    ['an empty leading segment', '/artifact-lifecycle.optin'],
     ['an empty trailing segment', '.artibot/'],
-    ['an empty interior segment', '.artibot//project.md'],
+    ['an empty interior segment', '.artibot//artifact-lifecycle.optin'],
     ['the empty string', ''],
-    ['a space', 'my project.md'],
+    ['a space', 'my artifact-lifecycle.optin'],
     ['nine segments', 'a/b/c/d/e/f/g/h/i'],
     ['a null byte', 'project\u0000.md'],
   ])('rejects %s with null', (_label, raw) => {
@@ -406,8 +406,8 @@ describe('normaliseProjectMarker (B4 per-project gate)', () => {
     ['null', null],
     ['a number', 1],
     ['true', true],
-    ['an array', ['.artibot', 'project.md']],
-    ['an object', { path: '.artibot/project.md' }],
+    ['an array', ['.artibot', 'artifact-lifecycle.optin']],
+    ['an object', { path: '.artibot/artifact-lifecycle.optin' }],
   ])('rejects %s (non-string) with null', (_label, raw) => {
     expect(normaliseProjectMarker(raw)).toBeNull();
   });
@@ -420,10 +420,10 @@ describe('normaliseProjectMarker (B4 per-project gate)', () => {
   });
 
   it('returns a fresh array the caller cannot alias into the module', () => {
-    const first = normaliseProjectMarker('.artibot/project.md');
-    const second = normaliseProjectMarker('.artibot/project.md');
+    const first = normaliseProjectMarker('.artibot/artifact-lifecycle.optin');
+    const second = normaliseProjectMarker('.artibot/artifact-lifecycle.optin');
     expect(first).not.toBe(second);
     first.push('mutated');
-    expect(normaliseProjectMarker('.artibot/project.md')).toEqual(['.artibot', 'project.md']);
+    expect(normaliseProjectMarker('.artibot/artifact-lifecycle.optin')).toEqual(['.artibot', 'artifact-lifecycle.optin']);
   });
 });

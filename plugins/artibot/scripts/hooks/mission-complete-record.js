@@ -16,7 +16,7 @@
  * is the single resolver: it opens only when the global kill switch
  * `runtime.artifactLifecycle.enabled` is exactly `true` AND the project opted
  * in by carrying the marker file named by `runtime.artifactLifecycle.projectMarker`
- * (shipped `.artibot/project.md`) as a regular file under the project root.
+ * (shipped `.artibot/artifact-lifecycle.optin`) as a regular file under it.
  * Turning the global switch on therefore does NOT start seeding
  * `.artibot/missions/` in every repository a session happens to end in.
  *

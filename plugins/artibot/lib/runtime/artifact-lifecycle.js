@@ -665,12 +665,22 @@ function markerIsFile(target) {
 /**
  * Is the artifact writer allowed to run, for this config and this project?
  *
- * **Never throws**, for anything — a malformed config, a hostile marker value,
- * a probe that raises `EACCES`. A gate that throws where it meant to close is a
+ * **Never throws for any JSON-shaped config, any marker value, or any probe
+ * failure** — a malformed config, a missing branch, a hostile marker string, a
+ * probe that raises `EACCES`. A gate that throws where it meant to close is a
  * gate that turns "do not write here" into a crashed hook, so every failure
  * path is a `reason`, not an exception. That is also why the argument is read
  * defensively rather than destructured in the signature: `resolveArtifactGate(null)`
  * must answer, not blow up.
+ *
+ * The qualifier is exact rather than decorative (judge note, 2026-09-21). A
+ * `config` carrying an accessor that throws — `Object.defineProperty(cfg,
+ * 'runtime', {get() {throw ...}})` — propagates that exception, because reading
+ * the property IS the throw and no `try` here could return a meaningful reason
+ * for it anyway. That shape cannot come out of `JSON.parse`, which is the only
+ * way this config is ever built, so the guarantee holds for every caller that
+ * exists. No code was added for it: a `try` around the property read would buy
+ * an unreachable branch and a false sense that arbitrary objects are safe here.
  *
  * The order is load-bearing:
  *

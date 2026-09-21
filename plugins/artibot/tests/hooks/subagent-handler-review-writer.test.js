@@ -66,8 +66,15 @@ const DOC_MISSION = 'M-20260912-001';
  * The per-project opt-in marker, relative to the project root — the SECOND half
  * of the artifact gate (B4). Stated here rather than read from the live config,
  * so these cases keep meaning the same thing if the shipped default is renamed.
+ *
+ * A DEDICATED FILE WITH NO OTHER MEANING, and that is the point. An earlier
+ * draft used `.artibot/project.md`, which is the v5 project declaration
+ * DOCUMENT — reusing it would have conflated "this project uses Artibot
+ * project-state" with "this project opted in to mission artifacts", and any
+ * future scaffolder of that document would have quietly made the gate global
+ * again. A file whose only job is to say yes cannot be created by accident.
  */
-const PROJECT_MARKER = '.artibot/project.md';
+const PROJECT_MARKER = '.artibot/artifact-lifecycle.optin';
 
 /**
  * Run the hook the way the dispatcher does: fresh node process, JSON on stdin,

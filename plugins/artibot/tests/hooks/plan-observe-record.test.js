@@ -170,11 +170,21 @@ function payload(over = {}) {
 /**
  * The per-project marker, relative to the project root.
  *
- * The shipped value of `runtime.artifactLifecycle.projectMarker`. Spelled out
- * rather than read from the live config, so a change to that key turns the
- * matrix below RED instead of quietly following it.
+ * The shipped value of `runtime.artifactLifecycle.projectMarker`, spelled out
+ * rather than read from the live config, so the fixture cannot quietly follow
+ * a rename it should have been asserting against.
+ *
+ * WHAT IT DOES NOT GATE: the shipped value drifting away from this literal.
+ * Every sandbox here writes `projectMarker` from this constant, so the shipped
+ * key is never read and a rename in `artibot.config.json` leaves this suite
+ * green. That agreement belongs to the lifecycle module's own suites. See the
+ * same constant in `intent-observe-pre.test.js`.
+ *
+ * A DEDICATED FILE, carrying no other meaning — see the same constant in
+ * `intent-observe-pre.test.js` for why the v5 project declaration document was
+ * rejected as the marker.
  */
-const PROJECT_MARKER = '.artibot/project.md';
+const PROJECT_MARKER = '.artibot/artifact-lifecycle.optin';
 
 /** Create the marker file that opens the per-project half of the gate. */
 function seedProjectMarker(root) {
@@ -783,7 +793,45 @@ describe('_plan-observe-record — the per-project gate (a/b/c matrix)', () => {
     expect([a.file, b.file, c.file]).toEqual([false, false, true]);
   });
 
-  it('writes nothing when the marker path is a DIRECTORY named project.md', () => {
+  it('answers write-disabled IN PROCESS when the marker is absent', async () => {
+    // WHAT THE a/b/c MATRIX CANNOT SEE. Revert the gate to a direct
+    // `runtime.artifactLifecycle.enabled` read and case (b) stays GREEN: the
+    // module would call `apply({write: true})`, `apply` throws on the closed
+    // PROJECT gate, and `recordPlanArtifact`'s own catch turns that into
+    // `status: 'plan-failed'` while the ledger line, the exit code and the
+    // empty stdout all stay exactly as the matrix expects. The STATUS is the
+    // only place the two are distinguishable, and the child process cannot
+    // report it.
+    //
+    // MEASURED: with that reversion in place this case goes RED with
+    // `'plan-failed'`.
+    const box = sandbox('b-in-process', { enabled: true, marker: 'none' });
+    process.env.CLAUDE_PLUGIN_ROOT = box.root;
+
+    const out = await observePlanWrite({
+      cwd: box.repo,
+      hook_event_name: 'PreToolUse',
+      session_id: SESSION_ID,
+      tool_name: 'Write',
+      tool_use_id: 'toolu_gate_in_process',
+      tool_input: { file_path: planPath(box.repo, box.missionId), content: '# plan\n' },
+    });
+
+    // The SAME vocabulary the global-off case returns (see the kill-switch
+    // block above): project-off must not introduce a second status string.
+    expect(out.ok).toBe(true);
+    expect(out.artifact.status).toBe('write-disabled');
+    // `plan()` is pure and ran anyway, so the Shadow counts are still real —
+    // this is a closed gate, not a failed writer.
+    expect(out.artifact.wouldWrite).toBe(1);
+    expect(out.artifact.skipped).toBeUndefined();
+    // The record half still happened.
+    expect(out.ledger).toBe('appended');
+    expect(planLines(box.repo)).toHaveLength(1);
+    expect(existsSync(planPath(box.repo, box.missionId))).toBe(false);
+  });
+
+  it('writes nothing when the marker path is a DIRECTORY, not a file', () => {
     const m = measure(sandbox('dir', { enabled: true, marker: 'dir' }));
     expect(m.status).toBe(0);
     expect(m.stdoutBytes).toBe(0);
