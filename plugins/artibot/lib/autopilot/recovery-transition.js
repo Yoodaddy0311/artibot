@@ -36,10 +36,19 @@
  *
  * ── A pause has to announce itself ───────────────────────────────────────
  * Moving the phase fields is only half of a pause. `engine.js#maybePause` also
- * archives a lesson, emits a `pause` event and notifies, and a recovery-driven
- * pause is not a quieter kind of pause — so this module does the same three,
- * in the same shapes. Each is guarded on its own: a notification that throws
- * must not un-pause a session the engine has already stopped.
+ * archives a lesson, emits a `pause` event and notifies, so this module does the
+ * same three, in the same shapes. Each is guarded on its own: a notification
+ * that throws must not un-pause a session the engine has already stopped.
+ *
+ * **What actually reaches the operator today is the `pause` event and the
+ * lesson — not the notification queue.** This module does not persist, so the
+ * queue entry `notification.js#queueOnSession` writes lands on the *pre-
+ * transition* session on disk, and the caller's subsequent whole-state persist
+ * overwrites it; under the current caller (`engine-state.js#recordPhaseResult`)
+ * no queued entry survives. That caller also discards the returned
+ * `notification`. Both are the caller's to fix — announcing after the persist is
+ * a change to the call site, not to this module — so until then a
+ * recovery-driven pause is a quieter pause than `maybePause`'s.
  *
  * Layer: L2. Imports `_engine-helpers.js`, `memory.js`, `notification.js` and
  * `../core/platform.js` only. It does NOT import `engine-state.js` — that module

@@ -125,7 +125,9 @@ function makeNote(overrides = {}) {
 }
 
 beforeEach(() => {
-  mocks.tick.mockClear();
+  // mockReset, not mockClear: the throwing implementations installed by the
+  // failure tests below would otherwise leak into whatever runs next.
+  mocks.tick.mockReset();
   mocks.notifyPause.mockReset();
   mocks.notifyPause.mockReturnValue(makeNote());
   mocks.appendLesson.mockReset();
@@ -447,6 +449,42 @@ describe('applyRecoveryTransition — never throws into the caller', () => {
     const state = Object.freeze(makeState(row));
 
     expect(() => applyRecoveryTransition(state, row, ON)).not.toThrow();
+  });
+
+  /**
+   * A frozen row on a PAUSING action: the session moves (state is written
+   * first), then stamping the row throws — ESM is strict, so assigning to a
+   * frozen property is a TypeError — and the whole call degrades. The half-way
+   * result is deliberate and fail-closed: the session stays PAUSED and the
+   * journal row keeps its honest `divergent: true`, which is safer than a row
+   * claiming `divergent: false` for a transition that did not complete.
+   */
+  it('degrades to applied:false on a frozen row, leaving the session paused', () => {
+    const row = Object.freeze(makeRow({ action: 'ask_human' }));
+    const state = makeState(row, { featureKey: 'feat' });
+
+    let result;
+    expect(() => { result = applyRecoveryTransition(state, row, ON); }).not.toThrow();
+
+    expect(result.applied).toBe(false);
+    expect(result.next).toBeNull();
+    expect(result.pausedReason).toBeNull();
+    expect(result.notification).toBeNull();
+    expect(result.error).toContain('divergent');
+    // The transition committed before the row stamp threw, so the session is
+    // paused and the row is untouched.
+    expect(state.phase).toBe('PAUSED');
+    expect(state.lastPhase).toBe('VERIFY');
+    expect(state.pausedReason).toBe('recovery:ask_human');
+    expect(row.divergent).toBe(true);
+    expect(row.appliedNext).toBeUndefined();
+    // Nothing announced: both the recovery-applied and the pause tick come
+    // after the row stamp, and the notifier after those.
+    expect(mocks.tick).not.toHaveBeenCalled();
+    expect(mocks.notifyPause).not.toHaveBeenCalled();
+    // The lesson does survive an unapplied transition — it is written inside the
+    // state move, and state really is PAUSED, so the archive matches reality.
+    expect(mocks.appendLesson).toHaveBeenCalledTimes(1);
   });
 });
 
