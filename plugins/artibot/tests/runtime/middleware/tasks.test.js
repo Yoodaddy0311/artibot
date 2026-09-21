@@ -7,6 +7,9 @@ import { sessionFallbackMissionId } from '../../../lib/runtime/event-writer.js';
 import { appendLedgerEvent, readLedgerCensus } from '../../../lib/runtime/ledger.js';
 import { createStateStore, readJournal } from '../../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../../lib/project-state/git-common-dir.js';
+import { buildControllerRecord } from '../../../lib/mission/controller.js';
+import { DEFAULT_STALE_MS } from '../../../lib/project-state/lease.js';
+import { validateController } from '../../../lib/project-state/validate.js';
 import {
   readDecisionEvents,
   WORKFLOW_PLANNED,
@@ -521,6 +524,125 @@ describe('middleware/tasks — StateStore wiring on mission.created', () => {
 
     expect(task.mission.store.status).not.toBe('written');
     expect(['error', 'rejected']).toContain(task.mission.store.status);
+  });
+
+  // -------------------------------------------------------------------------
+  // Controller record (OB-10) — the SAME store write also carries the lease.
+  //
+  // The claim under test is not "a controller exists somewhere" but "the one
+  // mission.upsert this middleware already performed now contains a valid
+  // controller". So every case below asserts the write COUNT as well as the
+  // field: a second `updateMission` would satisfy the field assertions and
+  // silently double the ledger, which is the failure mode this wiring is most
+  // likely to introduce.
+  //
+  // `state.yaml` is asserted separately from `project-state.json` on purpose.
+  // The snapshot proves the field was committed; only the rendered projection
+  // proves `projection.js#MISSION_KEY_ORDER` actually carries it out to the
+  // file a human reads. Existence in the store is not the same as reaching the
+  // view.
+  // -------------------------------------------------------------------------
+
+  const snapshotPath = () => path.join(storeDir(), 'project-state.json');
+  const readSnapshot = () => JSON.parse(readFileSync(snapshotPath(), 'utf8'));
+  const controllerOf = (id = missionId()) => readSnapshot().active_missions[id].controller;
+  const iso = (ms) => new Date(ms).toISOString();
+  const upsertsFor = (id) => readJournal(path.join(storeDir(), 'project-state.jsonl'))
+    .records.filter((r) => r.kind === 'mission.upsert' && r.mission_id === id);
+
+  it('records an acquired controller lease on the mission row and renders it into state.yaml', async () => {
+    await run(SUBSTANTIVE);
+    const id = missionId();
+    const controller = controllerOf(id);
+
+    expect(controller).toBeTypeOf('object');
+    expect(controller.session_id).toBe(SESSION_ID);
+    expect(controller.lease.owner).toBe(SESSION_ID);
+    expect(controller.lease.session_id).toBe(SESSION_ID);
+    // The lease instant is the prompt's SINGLE clock reading, not a fresh
+    // `Date.now()`: the lease and the ledger line it pairs with have to be
+    // comparable as one instant, not merely close.
+    expect(controller.lease.acquired_at).toBe(iso(NOW_MS));
+    expect(controller.lease.heartbeat_at).toBe(iso(NOW_MS));
+    expect(controller.lease.expires_at).toBe(iso(NOW_MS + DEFAULT_STALE_MS));
+
+    // The real validator, not a re-spelling of the schema in the test.
+    expect(validateController(controller, id)).toEqual([]);
+
+    const yaml = readFileSync(yamlPath(), 'utf8');
+    expect(yaml).toContain('controller:');
+    expect(yaml).toContain(SESSION_ID);
+  });
+
+  it('adds the controller without adding a second store write', async () => {
+    await run(SUBSTANTIVE);
+
+    // Identical to the pairing case above this block: the controller rides the
+    // existing write, so none of these three numbers may move.
+    expect(eventsNamed('mission.created')).toHaveLength(1);
+    expect(eventsNamed('state.updated')).toHaveLength(1);
+    expect(upsertsFor(missionId())).toHaveLength(1);
+    expect(controllerOf().session_id).toBe(SESSION_ID);
+  });
+
+  it('renews the same session lease on a later prompt, keeping acquired_at fixed', async () => {
+    const LATER_MS = NOW_MS + 60_000;
+    let clock = NOW_MS;
+    const mw = createTasksMiddleware({ now: () => clock });
+
+    await mw(storeState(SUBSTANTIVE));
+    const first = controllerOf();
+    clock = LATER_MS;
+    await mw(storeState(SUBSTANTIVE));
+    const second = controllerOf();
+
+    expect(second.session_id).toBe(SESSION_ID);
+    expect(second.lease.owner).toBe(SESSION_ID);
+    // Renewal moves the heartbeat and the expiry; the acquisition instant is
+    // the evidence of WHEN the claim started and must not drift forward.
+    expect(second.lease.acquired_at).toBe(first.lease.acquired_at);
+    expect(second.lease.acquired_at).toBe(iso(NOW_MS));
+    expect(second.lease.heartbeat_at).toBe(iso(LATER_MS));
+    expect(second.lease.expires_at).toBe(iso(LATER_MS + DEFAULT_STALE_MS));
+    expect(eventsNamed('state.updated')).toHaveLength(2);
+  });
+
+  it('leaves another live session controller byte-identical instead of taking it', async () => {
+    // The fallback mission id is a function of the SESSION, so two sessions
+    // prompting normally never meet on one row — they mint two missions and
+    // both acquire. Contention is therefore staged: session A's live
+    // controller is planted UNDER SESSION B'S row, and then B prompts.
+    const SESSION_B = 'sess-other';
+    const idB = sessionFallbackMissionId(SESSION_B, new Date(NOW_MS));
+    const planted = buildControllerRecord({ sessionId: SESSION_ID, now: NOW_MS });
+
+    const planter = createStateStore({
+      projectRoot,
+      sessionId: SESSION_ID,
+      source: 'hook',
+      now: () => new Date(NOW_MS),
+      appendEvent: (envelope) => appendLedgerEvent(projectRoot, envelope),
+      resolveGitCommonDir: () => resolveGitCommonDir(projectRoot),
+    });
+    const seeded = planter.updateMission(idB, () => ({
+      title: 'planted by session A',
+      status: 'executing',
+      intent: { path: `missions/${idB}/intent.md`, revision: 1 },
+      plan: { path: `missions/${idB}/plan.md`, revision: 1 },
+      controller: planted,
+    }), { reason: 'test.plant' });
+    expect(seeded.ok).toBe(true);
+
+    const result = await createTasksMiddleware({ now: () => NOW_MS })(
+      storeState(SUBSTANTIVE, { session_id: SESSION_B }),
+    );
+    expect(result.context.tasks.mission.store.status).toBe('written');
+
+    // Bytes, not just "still session A": `observeController` returns the
+    // caller's own record for `held`, and an expiry nudged by one millisecond
+    // would still read as A's while destroying the evidence of the claim.
+    expect(controllerOf(idB)).toEqual(planted);
+    expect(eventsNamed('state.updated')).toHaveLength(2);
   });
 });
 

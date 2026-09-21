@@ -23,6 +23,7 @@ import path from 'node:path';
 import { readJsonFileSync } from '../../core/file.js';
 import { isTeamEnabled } from '../../cognitive/workflow-plan.js';
 import { compileMission } from '../../mission/compiler.js';
+import { composeControllerMutator } from '../../mission/controller.js';
 import { readEffortRecord } from '../task-budget.js';
 import { appendLedgerEvent } from '../ledger.js';
 import { sessionFallbackMissionId } from '../event-writer.js';
@@ -547,6 +548,11 @@ export function openMissionStore(projectRoot, sessionId, nowMs, deps) {
  * Nothing here may throw, and nothing here may alter any other field of the
  * middleware's return value: this is bookkeeping attached to a user prompt.
  *
+ * THE MISSION CONTROLLER IS RECORDED HERE by composition, not by a second
+ * write ({@link module:lib/mission/controller}). It is an OBSERVATION: a row
+ * another live session controls is left exactly as found, so this function
+ * still never arbitrates who may write a mission (transitions are CA-14).
+ *
  * @param {object} state middleware state
  * @param {object} result `compileMission()` output
  * @param {number} nowMs the single epoch-ms reading for this prompt
@@ -564,8 +570,12 @@ function recordMissionState(state, result, nowMs, identity, deps) {
     if (!missionId) return skippedMissionStore('no-mission-id');
 
     const store = openMissionStore(projectRoot, sessionId, nowMs, deps);
-    const mutator = missionMutator(
-      missionId, missionTitle(result, String(state.input?.prompt ?? '')), missionIntentRevision(result),
+    // The controller rides the SAME mutator (no extra commit, `state.updated` or
+    // journal record). `nowMs` is threaded, not re-read: lease instant and ledger
+    // `ts` must be ONE instant. The CAS retry re-runs this mutator as a whole.
+    const title = missionTitle(result, String(state.input?.prompt ?? ''));
+    const mutator = composeControllerMutator(
+      missionMutator(missionId, title, missionIntentRevision(result)), { sessionId, now: nowMs },
     );
     const opts = { reason: MISSION_STORE_REASON };
     let commit = store.updateMission(missionId, mutator, {

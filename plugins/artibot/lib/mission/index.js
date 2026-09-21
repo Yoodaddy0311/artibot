@@ -88,3 +88,12 @@ export {
   emptyOutcomeGateCensus,
   foldOutcomeGateCensus,
 } from './outcome-gate-census.js';
+
+export {
+  CONTROLLER_OBSERVATIONS,
+  DEFAULT_CONTROLLER_TTL_MS,
+  buildControllerRecord,
+  observeController,
+  composeControllerMutator,
+  foldControllerCensus,
+} from './controller.js';
