@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import nodePath from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +39,34 @@ const LIB_DIR = nodePath.join(
 );
 const SPLIT_OBJECTIVE_TOKEN = ['wallclock', 'throughput'].join('_');
 const ON = Object.freeze({ applyObjective: true });
+
+/**
+ * The plan key set as of base d1957c8f, IN ORDER — an independent literal, not
+ * a second call to the code under test. Comparing an on-plan to an off-plan
+ * only proves the two agree; it stays green if a new key is added to BOTH.
+ *
+ * Derived by reading `buildFastFanoutPlan`'s two returns (`fast-profile.js`:
+ * the enabled literal and `standardPlan`, which spell the same thirteen keys
+ * in the same order) and then `planFastExecution`'s spread-and-override,
+ * which appends `cpuCount`, `requested`, `requestedParallelism`,
+ * `serialReasons` and `reused` while `serial` and `fallbackReason` keep their
+ * original positions. Both plan flavours therefore carry one identical list.
+ */
+const BASE_PLAN_KEYS = Object.freeze([
+  'profile', 'enabled', 'fallbackReason', 'limits', 'requestedTaskCount',
+  'eligibleTaskCount', 'eligibleParallelism', 'plannedParallelism',
+  'estimatedSpeedup', 'worktrees', 'waves', 'serial', 'conflictGroups',
+  'cpuCount', 'requested', 'requestedParallelism', 'serialReasons', 'reused',
+]);
+
+const BASE_INSTRUCTION_KEYS = Object.freeze([
+  'type', 'phase', 'sessionId', 'nextPhase', 'fast', 'instructions', 'teamHint',
+]);
+
+const BASE_TEAM_HINT_KEYS = Object.freeze([
+  'parallel', 'leadAgent', 'profile', 'plannedParallelism', 'eligibleParallelism',
+  'worktreeCount', 'conflictIsolation', 'waves',
+]);
 
 function task(id, affectedPaths, overrides = {}) {
   return { id, independent: true, affectedPaths, risk: 'low', worktreeEligible: true, ...overrides };
@@ -74,11 +102,16 @@ async function planWithStubbedProfile(impl, limits = ON) {
 }
 
 describe('planFastExecution — objective attachment is off by default', () => {
-  it('omits the key entirely when no flag is given', () => {
+  it('emits exactly the base key list, in order, for an enabled plan', () => {
     const result = plan(fastState());
     expect(result.enabled).toBe(true);
-    expect(Object.hasOwn(result, 'objective')).toBe(false);
-    expect(Object.keys(result)).not.toContain('objective');
+    expect(Object.keys(result)).toEqual([...BASE_PLAN_KEYS]);
+  });
+
+  it('emits exactly the base key list, in order, for a standard fallback', () => {
+    const fallback = plan(fastState({}, [task('only', ['src/alpha'])]));
+    expect(fallback.profile).toBe('standard');
+    expect(Object.keys(fallback)).toEqual([...BASE_PLAN_KEYS]);
   });
 
   it.each([
@@ -173,6 +206,8 @@ describe('planFastExecution — persisted reuse', () => {
     const result = plan(state);
     expect(result.reused).toBe(true);
     expect(Object.hasOwn(result, 'objective')).toBe(false);
+    // Stripping happens on the returned copy; the stored profile is untouched.
+    expect(state.fastProfile.objective).toEqual({ token: 'stale', applied: true });
   });
 
   it('recomputes the objective on reuse when on, ignoring what was stored', () => {
@@ -224,9 +259,13 @@ describe('demoteFastToStandard', () => {
 });
 
 describe('buildFastTeamInstruction', () => {
-  it('is unchanged when the plan carries no objective', () => {
+  it('emits exactly the base key lists, in order, when no objective is present', () => {
     const state = fastState();
     const off = buildFastTeamInstruction(state, plan(state));
+
+    expect(Object.keys(off)).toEqual([...BASE_INSTRUCTION_KEYS]);
+    expect(Object.keys(off.teamHint)).toEqual([...BASE_TEAM_HINT_KEYS]);
+    expect(Object.keys(off.fast)).toEqual([...BASE_PLAN_KEYS, 'worktreePlan']);
     expect(off.instructions).toHaveLength(6);
     expect(off.teamHint.objective).toBeUndefined();
   });
@@ -256,8 +295,18 @@ describe('buildFastTeamInstruction', () => {
   });
 });
 
+/**
+ * The one scan used by BOTH the real check and its own self-verification, so
+ * a scanner that silently stopped matching would fail its own fixture first.
+ */
+function scanForSplitToken(source) {
+  return source.includes(SPLIT_OBJECTIVE_TOKEN);
+}
+
 describe('G6 — the /split objective token never reaches a --fast plan', () => {
-  const sources = ['fast-execution.js', 'fast-profile.js'];
+  const sources = readdirSync(LIB_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
+    .map((entry) => entry.name);
 
   it.each([
     ['default', {}],
@@ -270,13 +319,20 @@ describe('G6 — the /split objective token never reaches a --fast plan', () => 
     expect(JSON.stringify(result)).not.toContain(SPLIT_OBJECTIVE_TOKEN);
   });
 
-  it.each(sources)('%s does not contain the split token literal', (file) => {
-    const src = readFileSync(nodePath.join(LIB_DIR, file), 'utf8');
-    expect(src.includes(SPLIT_OBJECTIVE_TOKEN)).toBe(false);
+  it('scans every lib/autopilot source file, not a hand-picked pair', () => {
+    expect(sources).toContain('fast-execution.js');
+    expect(sources).toContain('fast-profile.js');
+    expect(sources.length).toBeGreaterThan(2);
   });
 
-  it('scanner self-check: the same scan finds the token when it is present', () => {
-    const synthetic = `const objective = '${SPLIT_OBJECTIVE_TOKEN}';`;
-    expect(synthetic.includes(SPLIT_OBJECTIVE_TOKEN)).toBe(true);
+  it.each(sources)('%s does not contain the split token literal', (file) => {
+    expect(scanForSplitToken(readFileSync(nodePath.join(LIB_DIR, file), 'utf8'))).toBe(false);
+  });
+
+  it('the same scanner separates a planted source from a clean one', () => {
+    const planted = `const objective = '${SPLIT_OBJECTIVE_TOKEN}';`;
+    const clean = readFileSync(nodePath.join(LIB_DIR, 'fast-execution.js'), 'utf8');
+    expect(scanForSplitToken(planted)).toBe(true);
+    expect(scanForSplitToken(clean)).toBe(false);
   });
 });

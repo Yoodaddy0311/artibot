@@ -201,10 +201,13 @@ function wantsFastObjective(limits) {
  * Compile the objective a `--fast` mission runs under.
  *
  * The token is never spelled in this module: it comes from
- * `lib/routing/execution-profile.js`, where `PRIORITY_ALIASES.fast -> maximum`
- * and `OBJECTIVE_BY_PRIORITY.maximum` are the attested source. A null
- * objective there is the G-1 fail-closed case, so this returns null too
- * instead of substituting a token of its own.
+ * `lib/routing/execution-profile.js`. The path taken here is the FLAG adapter
+ * — `FLAG_TO_PRIORITY` maps the `fast` flag straight onto `maximum`, and
+ * `OBJECTIVE_BY_PRIORITY.maximum` supplies the token. `PRIORITY_ALIASES.fast`
+ * is a different door onto the same answer, read only when `intent.md`
+ * frontmatter declares `priority: 'fast'`; this call passes no frontmatter.
+ * A null objective there is the G-1 fail-closed case, so this returns null
+ * too instead of substituting a token of its own.
  *
  * `applied` separates "requested" from "in force". A blocked or demoted plan
  * fans nothing out, so its directives reach no worker — a consumer that reads
@@ -331,7 +334,9 @@ export function demoteFastToStandard(fast, reason) {
     serialReasons: [...new Set([...(fast.serialReasons ?? []), reason])],
   };
   // The objective was still REQUESTED; it just no longer governs anything.
-  // Keeping the block with `applied:false` is what lets `:status` say so.
+  // The block is kept with `applied:false` as a record of that. Measured
+  // 2026-09-21: no reader consumes it yet — `:status` does not surface it —
+  // so this is a written-down fact awaiting a consumer, not a live signal.
   if (!fast.objective) return demoted;
   return { ...demoted, objective: { ...fast.objective, applied: false } };
 }
@@ -416,9 +421,13 @@ function buildFastWorktreePlan(state, fast, workerPrefix) {
  * sentence written out by hand, so a change in `PERFORMANCE_DIRECTIVES` cannot
  * leave the prose asserting something the routing no longer does.
  *
- * The closing clause is not decoration. `costWeight: 0` reads as "cost is not
- * a factor", and a driver that took that as "spend freely" would run past the
- * session budget guard, which this profile does not lift.
+ * The closing clause is deliberately value-FREE, unlike the rest of the line.
+ * A low cost weight reads as "cost is not a factor", and a driver that took
+ * that as "spend freely" would run past the session budget guard. That guard
+ * is not lifted at ANY weight, so quoting a number there would make the
+ * sentence a claim about one directive value instead of the standing rule it
+ * actually is — and would contradict the line's own first half the moment the
+ * weight changed.
  */
 function describeFastObjective(objective) {
   const directives = objective.directives ?? {};
@@ -428,7 +437,7 @@ function describeFastObjective(objective) {
     `effort 하한 ${directives.effortFloor ?? '없음'},`,
     `downgrade ${directives.downgradeEnabled ? '활성' : '비활성'},`,
     `accuracy 부목표 ${directives.accuracySecondaryObjective ? '있음' : '없음'}.`,
-    'cost weight 0 은 예산이 풀렸다는 뜻이 아닙니다 — 세션 예산 가드와 승인 게이트는 그대로 유효합니다.',
+    '이 objective 는 예산을 해제하지 않습니다 — 세션 예산 가드와 승인 게이트는 그대로 유효합니다.',
   ].join(' ');
 }
 
