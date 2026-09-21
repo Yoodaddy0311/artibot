@@ -13,7 +13,12 @@
  *     land.mjs 세 곳만 잰다. 훅(stop-recap, git-autopilot-save/close),
  *     `scripts/update-git.js#stashIfDirty`(`--include-untracked` 로 stash 한다),
  *     `lib/autopilot/worktree-manager.js#describeWorktreeHead`,
- *     `scripts/split/watch.mjs` 는 여기서 재지 않는다 — 미확인.
+ *     `scripts/split/watch.mjs`, `lib/handoff/*`, `scripts/update-marketplace.js`,
+ *     `scripts/cron/auto-commit-runner.js` 는 여기서 재지 않는다 — 미확인.
+ *   - 특히 `plugins/artibot-cowork/scripts/release.js#validateGitState`. 소스 대조로는
+ *     porcelain 둘째 열이 공백이 아닌 줄을 전부 unstaged 로 보아 exit 1 을 낸다 —
+ *     미추적 missions 를 실제로 **막는** 것으로 보이는 유일한 소비처인데, 이 파일은
+ *     그것을 실행하지 않는다(2026-09-21 기준 실행 재현 미확인).
  *   - 라이브 `.artibot/missions/` 의 실제 크기·중첩·파일 수. 픽스처는 파일 1~2개다.
  *     픽스처 크기가 현실과 다르면 성능·대량 경로에 대해서는 아무 말도 하지 않는다.
  *   - 정책 자체(missions 를 추적할 것인가 무시할 것인가). 이 파일은 현 상태를
@@ -87,7 +92,6 @@ function writeMission(repo, id) {
 let repoRootGitignore = '';
 let repoA = '';
 let repoC = '';
-let caseAPorcelain = '';
 /** Every temp repo made here, removed in afterAll. */
 const madeRepos = [];
 
@@ -117,7 +121,7 @@ afterAll(() => {
 describe('missions vs. autopilot preflight gitClean', () => {
   it('A — untracked missions make the tree dirty and gitClean warns (not fail)', () => {
     writeMission(repoA, 'm-0001');
-    caseAPorcelain = porcelain(repoA);
+    const caseAPorcelain = porcelain(repoA);
 
     // Recorded verbatim in the limb report. Git collapses a wholly-untracked
     // directory to one entry, so the exact spelling is asserted loosely on the
@@ -133,6 +137,21 @@ describe('missions vs. autopilot preflight gitClean', () => {
     expect(r.status).toBe('warn');
     expect(r.status).not.toBe('fail');
     expect(r.detail).toMatch(/dirty path\(s\)/);
+  });
+
+  it('A3 — with a tracked sibling under .artibot (the real repo shape) the entry is the missions dir', () => {
+    // Case A's `?? .artibot/` spelling is a fixture artifact: there the whole
+    // directory is untracked. The real repository tracks other files under it,
+    // so git cannot collapse that far. Same verdict, different spelling.
+    const repo = freshRepo('artibot-missions-a3-');
+    fsSync.mkdirSync(path.join(repo, '.artibot'), { recursive: true });
+    fsSync.writeFileSync(path.join(repo, '.artibot', 'project.md'), '# project\n');
+    git(['add', '.artibot/project.md'], repo);
+    git(['commit', '-q', '-m', 'chore: track project.md'], repo);
+
+    writeMission(repo, 'm-0001');
+    expect(porcelain(repo)).toBe('?? .artibot/missions/\n');
+    expect(runIndividualCheck('gitClean', { cwd: repo }).status).toBe('warn');
   });
 
   it('A2 — a git failure also degrades to warn, never fail', () => {
@@ -187,6 +206,10 @@ describe('missions vs. split limb landing checks', () => {
 
     expect(porcelain(repoC).trim()).toBe('');
     const before = checkLimbLanding(args);
+    // Without these two, FAIL === FAIL would satisfy the deep-equal below. Not
+    // pinned to 'PASS': an old git without merge-tree answers UNSUPPORTED.
+    expect(before.status).not.toBe('FAIL');
+    expect(before.checks.find((c) => c.id === 'trailer')?.ok).toBe(true);
 
     writeMission(repoC, 'm-0001');
     const dirtyNow = porcelain(repoC);
