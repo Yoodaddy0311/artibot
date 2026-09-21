@@ -34,6 +34,18 @@
  *  `--cwd` still runs with the child cwd inside the temp root, which is exactly
  *  the defaulting behaviour it is there to measure.
  *
+ * ── WHY EVERY SESSION CASE BLANKS BOTH ENV SPELLINGS ───────────────────────
+ *  `runCli` spawns with `{ ...process.env, ...env }`, so anything the PARENT
+ *  shell exports reaches the child unless a case overrides it by name. The CLI
+ *  now reads two spellings — `CLAUDE_SESSION_ID` then `CLAUDE_CODE_SESSION_ID`
+ *  — and measured 2026-09-21 on Windows the host exports the SECOND one and
+ *  leaves the first empty. A case that blanked only `CLAUDE_SESSION_ID` would
+ *  therefore be green on a CI runner that exports neither and red on this
+ *  machine; worse, the "no session" case would write a real row under the live
+ *  session id instead of writing nothing. Every case whose outcome depends on
+ *  the session environment names BOTH variables explicitly, which is what
+ *  makes this file host-independent rather than merely green here.
+ *
  * ── WHAT THIS FILE CANNOT SEE ───────────────────────────────────────────────
  *  - WHETHER ANY MODEL EVER RUNS THIS. Nothing invokes the script: no hook, no
  *    command, no CI step. Its call rate is unmeasured, and a green run here says
@@ -72,6 +84,15 @@ const CLI = path.join(PLUGIN_ROOT, 'scripts', 'ledger', 'record-human-resolved.m
 const PRE_WRITE = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'pre-write.js');
 
 const SID = 'sessRRRRssss';
+
+/** A SECOND fixture id, so "which spelling won" is answerable from the row. */
+const SID_CODE = 'sessRRRRcode';
+
+/** Both env spellings blanked — the only spelling of "no session" that holds. */
+const NO_SESSION_ENV = { CLAUDE_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: '' };
+
+/** The flags every session case shares, so only the env differs between them. */
+const BASE_ARGS = ['--tool', 'Bash', '--subject', 'ls -al', '--decision', 'fine'];
 
 /** @type {string} */
 let tmp;
@@ -232,14 +253,65 @@ describe('record-human-resolved: the line lands in a real ledger', () => {
     const root = makeRoot('E');
 
     const out = runCli(
-      ['--tool', 'Bash', '--subject', 'ls -al', '--decision', 'fine', '--cwd', root],
+      [...BASE_ARGS, '--cwd', root],
       root,
-      { CLAUDE_SESSION_ID: SID },
+      { CLAUDE_SESSION_ID: SID, CLAUDE_CODE_SESSION_ID: '' },
     );
 
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).session).toBe(SID);
     expect(resolvedIn(root)[0].session_id).toBe(SID);
+  });
+
+  it('falls back to CLAUDE_CODE_SESSION_ID when CLAUDE_SESSION_ID is empty', () => {
+    const root = makeRoot('E2');
+
+    // THE CASE THE LIMB EXISTS FOR. Measured 2026-09-21 on Windows: this is the
+    // shape the host actually presents, and before the second read it produced
+    // `recorded:false, skipped "no-session-id"` for every uninstrumented call.
+    const out = runCli(
+      [...BASE_ARGS, '--cwd', root],
+      root,
+      { CLAUDE_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: SID_CODE },
+    );
+
+    expect(out.status).toBe(0);
+    const printed = JSON.parse(out.stdout);
+    expect(printed.recorded).toBe(true);
+    expect(printed.session).toBe(SID_CODE);
+    expect(resolvedIn(root)).toHaveLength(1);
+    expect(resolvedIn(root)[0].session_id).toBe(SID_CODE);
+  });
+
+  it('prefers CLAUDE_SESSION_ID when both env spellings are set', () => {
+    const root = makeRoot('E3');
+
+    // The two ids DIFFER, so the row proves which source won. Equal fixtures
+    // would leave a reversed precedence green.
+    const out = runCli(
+      [...BASE_ARGS, '--cwd', root],
+      root,
+      { CLAUDE_SESSION_ID: SID, CLAUDE_CODE_SESSION_ID: SID_CODE },
+    );
+
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).session).toBe(SID);
+    expect(resolvedIn(root)[0].session_id).toBe(SID);
+  });
+
+  it('prefers --session over both env spellings', () => {
+    const root = makeRoot('E4');
+    const explicit = 'sessRRRRexpl';
+
+    const out = runCli(
+      [...BASE_ARGS, '--session', explicit, '--cwd', root],
+      root,
+      { CLAUDE_SESSION_ID: SID, CLAUDE_CODE_SESSION_ID: SID_CODE },
+    );
+
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).session).toBe(explicit);
+    expect(resolvedIn(root)[0].session_id).toBe(explicit);
   });
 
   it('defaults the project root to the process cwd', () => {
@@ -261,11 +333,9 @@ describe('record-human-resolved: what it refuses to write', () => {
   it('writes nothing and says so when no session id can be found', () => {
     const root = makeRoot('G');
 
-    const out = runCli(
-      ['--tool', 'Bash', '--subject', 'ls -al', '--decision', 'fine', '--cwd', root],
-      root,
-      { CLAUDE_SESSION_ID: '' },
-    );
+    // BOTH spellings blanked. Blanking only the first lets the host's
+    // `CLAUDE_CODE_SESSION_ID` through and files a row under the LIVE session.
+    const out = runCli([...BASE_ARGS, '--cwd', root], root, NO_SESSION_ENV);
 
     // Exit 0: a missing session is an observation about the environment, not a
     // mistake in the command line.

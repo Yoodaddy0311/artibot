@@ -29,6 +29,12 @@
  *     [--command <one-line summary>] [--evidence <ref>]... \
  *     [--layer deterministic] [--session <id>] [--cwd <root>]
  *
+ *   Without `--session` the session id is read from `CLAUDE_SESSION_ID`, then
+ *   from `CLAUDE_CODE_SESSION_ID`. Those three sources are the whole
+ *   allowlist, in that order; when all of them are empty nothing is recorded
+ *   and the refusal says so. See `main` for the measurement behind the second
+ *   spelling.
+ *
  * -- WHY ONLY THE DETERMINISTIC LAYER IS SELF-REPORTABLE --------------------
  *  `--layer` is an ALLOWLIST OF ONE, not a filter against bad values, and the
  *  reason is in the verifier rather than in taste. `behavioralShell`
@@ -297,10 +303,18 @@ export function main(argv, env) {
   const usage = usageError(opts);
   if (usage !== null) return fail(usage);
 
-  // `CLAUDE_SESSION_ID` is a FALLBACK, not a guarantee: commands/scorecard.md
-  // documents it as present in most sessions and absent in some, so a missing
-  // one is reported rather than invented.
-  const session = opts.session || env.CLAUDE_SESSION_ID || '';
+  // THE ENV IS A FALLBACK, NOT A GUARANTEE, AND IT HAS TWO SPELLINGS.
+  // commands/scorecard.md documents `CLAUDE_SESSION_ID` as present in most
+  // sessions and absent in some. Measured 2026-09-21 on Windows: this host
+  // leaves `CLAUDE_SESSION_ID` EMPTY and sets `CLAUDE_CODE_SESSION_ID`
+  // instead, so a call reading only the first spelling records nothing at all.
+  // Other hosts are unmeasured. The resolution order is an ALLOWLIST of
+  // exactly three sources and nothing else:
+  //   `--session` > `CLAUDE_SESSION_ID` > `CLAUDE_CODE_SESSION_ID` > empty.
+  // An empty string counts as absent, which is what `||` already does. When
+  // all three are empty the missing session is REPORTED rather than invented
+  // from the cwd, the pid, the clock or anything else.
+  const session = opts.session || env.CLAUDE_SESSION_ID || env.CLAUDE_CODE_SESSION_ID || '';
   const cwd = opts.cwd || process.cwd();
   const command = (opts.command ?? DEFAULT_COMMAND).trim();
 

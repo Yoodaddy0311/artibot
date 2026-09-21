@@ -47,6 +47,18 @@
  *  path this file computes and the path the child computes come from the same
  *  function over the same root.
  *
+ * ── WHY EVERY SESSION CASE BLANKS BOTH ENV SPELLINGS ───────────────────────
+ *  `runCli` spawns with `{ ...process.env, ...env }`, so anything the PARENT
+ *  shell exports reaches the child unless a case overrides it by name. The CLI
+ *  now reads two spellings — `CLAUDE_SESSION_ID` then `CLAUDE_CODE_SESSION_ID`
+ *  — and measured 2026-09-21 on Windows the host exports the SECOND one and
+ *  leaves the first empty. A case that blanked only `CLAUDE_SESSION_ID` would
+ *  therefore be green on a CI runner that exports neither and red on this
+ *  machine; worse, the "no session" case would write a real row under the live
+ *  session id instead of writing nothing. Every case whose outcome depends on
+ *  the session environment names BOTH variables explicitly, which is what
+ *  makes this file host-independent rather than merely green here.
+ *
  * ── WHY IDEMPOTENCY IS PROVED TWICE, IN TWO DIFFERENT WAYS ─────────────────
  *  `verification_id` embeds `measured_at` at SECOND resolution
  *  (`unified-verifier.js#buildVerificationId`), so two spawns of the same
@@ -102,6 +114,12 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const CLI = path.join(PLUGIN_ROOT, 'scripts', 'ledger', 'record-verify.mjs');
 
 const SID = 'sessVGW00002';
+
+/** A SECOND fixture id, so "which spelling won" is answerable from the row. */
+const SID_CODE = 'sessVGW00003';
+
+/** Both env spellings blanked — the only spelling of "no session" that holds. */
+const NO_SESSION_ENV = { CLAUDE_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: '' };
 
 /** The exact key set the module header promises a caller can parse blind. */
 const STDOUT_KEYS = [
@@ -290,13 +308,64 @@ describe('record-verify: the lines land in a real ledger', () => {
   it('falls back to CLAUDE_SESSION_ID and to the process cwd', () => {
     const root = makeRoot('G');
 
-    const out = runCli(['--status', 'PASS'], root, { CLAUDE_SESSION_ID: SID });
+    const out = runCli(['--status', 'PASS'], root, {
+      CLAUDE_SESSION_ID: SID, CLAUDE_CODE_SESSION_ID: '',
+    });
 
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).session).toBe(SID);
+    // The id on stdout is not the contract — the id in the ROW is what a reader
+    // joins on, so it is read back from the file rather than trusted.
+    expect(verifyLinesIn(root).map((l) => l.session_id)).toEqual([SID, SID, SID, SID]);
     // The one place this CLI departs from the writer's injected-root rule, and
     // it is allowed only because a model runs it from the project root.
     expect(verifyLinesIn(root)).toHaveLength(4);
+  });
+
+  it('falls back to CLAUDE_CODE_SESSION_ID when CLAUDE_SESSION_ID is empty', () => {
+    const root = makeRoot('G2');
+
+    // THE CASE THE LIMB EXISTS FOR. Measured 2026-09-21 on Windows: this is the
+    // shape the host actually presents, and before the second read it produced
+    // `recorded:false, reason "no session_id"` for every uninstrumented call.
+    const out = runCli(['--status', 'PASS', '--cwd', root], root, {
+      CLAUDE_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: SID_CODE,
+    });
+
+    expect(out.status).toBe(0);
+    const printed = JSON.parse(out.stdout);
+    expect(printed.recorded).toBe(true);
+    expect(printed.session).toBe(SID_CODE);
+    expect(verifyLinesIn(root).map((l) => l.session_id)).toEqual(
+      [SID_CODE, SID_CODE, SID_CODE, SID_CODE],
+    );
+  });
+
+  it('prefers CLAUDE_SESSION_ID when both env spellings are set', () => {
+    const root = makeRoot('G3');
+
+    // The two ids DIFFER, so a row proves which source won. Equal fixtures would
+    // leave a reversed precedence green.
+    const out = runCli(['--status', 'PASS', '--cwd', root], root, {
+      CLAUDE_SESSION_ID: SID, CLAUDE_CODE_SESSION_ID: SID_CODE,
+    });
+
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).session).toBe(SID);
+    expect(new Set(verifyLinesIn(root).map((l) => l.session_id))).toEqual(new Set([SID]));
+  });
+
+  it('prefers --session over both env spellings', () => {
+    const root = makeRoot('G4');
+    const explicit = 'sessVGW00004';
+
+    const out = runCli(['--status', 'PASS', '--session', explicit, '--cwd', root], root, {
+      CLAUDE_SESSION_ID: SID, CLAUDE_CODE_SESSION_ID: SID_CODE,
+    });
+
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).session).toBe(explicit);
+    expect(new Set(verifyLinesIn(root).map((l) => l.session_id))).toEqual(new Set([explicit]));
   });
 });
 
@@ -328,7 +397,9 @@ describe('record-verify: what it refuses to write', () => {
   it('writes nothing and says so when no session id can be found', () => {
     const root = makeRoot('I');
 
-    const out = runCli(['--status', 'PASS', '--cwd', root], root, { CLAUDE_SESSION_ID: '' });
+    // BOTH spellings blanked. Blanking only the first lets the host's
+    // `CLAUDE_CODE_SESSION_ID` through and files a row under the LIVE session.
+    const out = runCli(['--status', 'PASS', '--cwd', root], root, NO_SESSION_ENV);
 
     // Exit 0: a missing session is an observation about the environment, not a
     // mistake in the command line.

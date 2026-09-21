@@ -19,18 +19,22 @@
  * carries a `result` of `pass` or `fail`.
  *
  * THAT ORDER MATTERS: a self-report's own deterministic line is `pass` too
- * (`record-verify.mjs:315`), so "some line is pass" is true of both a
+ * (`record-verify.mjs#main`), so "some line is pass" is true of both a
  * self-report and a measured hook run. The note is checked FIRST — see the
  * bucket order below.
  *
  * ── WHY THE UNIT IS `verification_id`, NOT THE LINE ─────────────────────────
- * Only the DETERMINISTIC line of a self-report carries that note
- * (`record-verify.mjs:315`). Its behavioral and operational lines are
- * `unmeasured` with empty evidence — byte-identical in shape to the hook's.
- * Classifying line by line would therefore read every self-report as three
- * extra hook firings: the denominator grows by 3 for each numerator of 1, and
- * a repository where EVERY session self-reported would still report a rate of
- * 25%. Lines are grouped first, and the group is classified once.
+ * TWO of a self-report's four lines carry that note, not one: the OVERALL FOLD
+ * and the DETERMINISTIC layer. Measured 2026-09-21 by spawning the real
+ * `record-verify.mjs#main` into a tmp root and reading `data.evidence[0].note`
+ * off every `verify.completed` row — 2 of 4 rows carried it, and the writer
+ * copies the deterministic layer's evidence onto the fold. The behavioral and
+ * operational lines are `unmeasured` with empty evidence — byte-identical in
+ * shape to the hook's. Classifying line by line would therefore read every
+ * self-report as two extra hook firings: the denominator grows by 4 for a
+ * numerator of 2, and a repository where EVERY session self-reported would
+ * still report a rate of 50%. Lines are grouped first, and the group is
+ * classified once.
  *
  * THE GROUPING KEY IS `(session_id, verification_id)`, NOT THE ID ALONE. A
  * `verification_id` is `v1-<hash of the verdict>-<stamp at SECOND resolution>`
