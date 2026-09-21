@@ -67,8 +67,13 @@
  *     — that judgment is RouteBench's, and §8.4 puts RouteBench in Shadow.
  *  5. RESIDENCY AND COOLDOWN (§30). Updated 2026-09-21 (backlog CA-18). WHAT IS
  *     NOW FOLDED: `routing.residency_counter` reports how often
- *     `data.actionsSinceSwitch` is PRESENT AS AN INTEGER and, of those, how often
- *     it is greater than zero — presence and sign only. WHAT IS STILL NOT FOLDED,
+ *     `data.actionsSinceSwitch` is MEASURED and, of those, how often it is
+ *     greater than zero — presence and sign only. MEASURED IS NOT THE SAME AS
+ *     INTEGER: the writer records a missing count as the integer 0 PLUS the
+ *     reason code `residency:unavailable`, so a bare 0 cannot be told from a
+ *     reading without `reason[]`, and this fold reads both. Treating every
+ *     integer as measured was this row's first defect, corrected the same day it
+ *     landed; `foldResidencyCounter` carries the live numbers. WHAT IS STILL NOT FOLDED,
  *     and the reason is unchanged: the counter is never compared against the
  *     barrier, and no distribution over its VALUES is emitted, because design
  *     §8.5 G5 records the initial 3 and 2 as "미보정" — a histogram of those values
@@ -76,10 +81,13 @@
  *     W11-Q2 instruction is honoured in `HOLD_REASON_CODES`: `residency-unknown`
  *     and `minimum-residency` are SEPARATE BUCKETS, so "the counter was missing"
  *     is never read as "measured and short of the barrier".
- *     `routing.residency_counter_coverage` carries the receipts with no usable
+ *     `routing.residency_counter_coverage` carries the receipts with no measured
  *     counter, following the `routing.tier_comparability` precedent — they are
  *     outside the first row's denominator, so they cannot be its `absent`
- *     (metric.js rejects `absent > denominator`) and would otherwise vanish.
+ *     (metric.js rejects `absent > denominator`) and would otherwise vanish. Its
+ *     `counts` splits them by WHY they left: `residency:unavailable` (the writer
+ *     said it had no count) against `counter_not_integer` (the field was not a
+ *     usable integer at all).
  *  6. SHADOW LINES ARE NOT SEPARATED. The receipt allows `source: 'shadow'`
  *     beside production lines. Nothing here splits them, because §8.4 puts the
  *     shadow learner past Observe and no shadow line can exist yet. When one
@@ -374,11 +382,16 @@ const HYSTERESIS_PREFIX = 'hysteresis:';
  * them together would re-create exactly the confusion that code was added to end.
  *
  * NOT LISTED, ON PURPOSE. `evaluateSwitch` also emits `no-candidate`,
- * `catalog-miss` and `override:<name>`. The first two are holds in the module's
- * own terms, but they report that the evaluation could not run — not a policy
- * restraint — and `override:*` is an unbounded family. All three surface as
- * `other:hysteresis:<code>` so they are counted and visible without being
- * claimed as evidence of the router holding back.
+ * `catalog-miss` and `override:<name>` (the last drawn from `SWITCH_OVERRIDES`,
+ * a frozen five-value allowlist that `evaluateSwitch` filters against, so the
+ * family is closed rather than open-ended). The first two are holds in the
+ * module's own terms, but they report that the evaluation COULD NOT RUN — not a
+ * policy restraint — and `override:*` is the opposite of a hold. All three
+ * surface as `other:hysteresis:<code>` so they are counted and visible without
+ * being claimed as evidence of the router holding back. They are deliberately
+ * NOT promoted into groups here: copying another module's vocabulary into this
+ * one widens the surface that can drift, and `other:` already makes them
+ * countable.
  */
 export const HOLD_REASON_CODES = Object.freeze({
   hold: Object.freeze([
@@ -469,38 +482,80 @@ export function foldHoldReasons(receipts) {
 }
 
 /**
+ * The code the writer emits when it had no residency counter to record.
+ *
+ * A COPY of the literal in `lib/routing/adaptive-model-router.js#routeModel`,
+ * under the same rule as `DECISION_TYPES`: this module may not read another
+ * module at fold time, so the string is restated here and a test compares the
+ * two by driving the real writer.
+ */
+export const RESIDENCY_UNAVAILABLE = 'residency:unavailable';
+
+/**
  * Fold the §30 residency counter's PRESENCE and SIGN — never its value.
  *
  * KPI: `routing.residency_counter` = receipts whose `data.actionsSinceSwitch` is
- * greater than zero ÷ receipts whose `data.actionsSinceSwitch` IS AN INTEGER.
+ * greater than zero ÷ receipts carrying a MEASURED counter.
+ *
+ * A MEASURED COUNTER IS NOT THE SAME AS AN INTEGER ONE, and reading it that way
+ * was this row's first defect (corrected 2026-09-21). The writer does NOT leave
+ * the field null when it has no count: `routeModel` runs it through
+ * `nonNegativeInt`, which maps a missing value to the INTEGER 0, and separately
+ * pushes `residency:unavailable` onto `reason[]`. So a bare 0 is ambiguous — it
+ * is either "no action since the switch" or "never measured" — and only the
+ * reason code tells the two apart. A live read (leader, 2026-09-21 19:16 KST,
+ * raw lines) found 243 of 414 receipts carrying that code, every one of them
+ * with `actionsSinceSwitch: 0`; counting them as measured zeroes put the row at
+ * 124/414 instead of 124/171.
  *
  * The path is `data.actionsSinceSwitch`, a top-level required property of
  * `route-receipt.schema.json` (`type: integer`, `minimum: 0`) — the module rule
  * at the top of this file holds: nothing is read that the schema does not define.
+ * `reason[]` is likewise schema-defined.
  *
  * NO COMPARISON WITH THE BARRIER AND NO VALUE HISTOGRAM. The barrier is built
  * from `minimum_residency` 3 and `cooldown` 2, which design §8.5 G5 records as
  * uncalibrated; a row that compared against them, or that binned the values,
  * would report the constant rather than the router (header #5).
  *
- * `null`, absent and non-integer all fall OUT OF THE DENOMINATOR rather than
- * counting as 0 — `0` is a real measurement and the others are the absence of
- * one. `routing.residency_counter_coverage` is where they become visible.
+ * THE THREE OUTCOMES ARE DISJOINT AND TOTAL — `present + unavailable +
+ * malformed === denominator` — so no receipt can leave the fold unaccounted.
+ * The unavailable test runs FIRST: a receipt carrying the code is excluded on
+ * that evidence whatever its stored value, since the value is known to be a
+ * writer-supplied 0 rather than a reading.
+ *
+ * A `reason` that is not an array is read as "carries no unavailable marker",
+ * not as unavailable. The writer always writes an array, so a non-array is a
+ * line this module cannot interpret; inferring absence from a shape it does not
+ * understand would be inventing evidence. Such a line still leaves the
+ * denominator via `malformed` whenever its counter is not an integer, and
+ * `routing.residency_counter_coverage` shows the split.
  *
  * @param {object[]} receipts - `route.selected` lines. Not mutated.
- * @returns {{present: number, positive: number, denominator: number}}
+ * @returns {{present: number, positive: number, unavailable: number,
+ *   malformed: number, denominator: number}}
  */
 export function foldResidencyCounter(receipts) {
   const lines = Array.isArray(receipts) ? receipts : [];
   let present = 0;
   let positive = 0;
+  let unavailable = 0;
+  let malformed = 0;
   for (const receipt of lines) {
+    const reason = readPath(receipt, ['data', 'reason']);
+    if (Array.isArray(reason) && reason.includes(RESIDENCY_UNAVAILABLE)) {
+      unavailable += 1;
+      continue;
+    }
     const value = readPath(receipt, ['data', 'actionsSinceSwitch']);
-    if (!Number.isInteger(value)) continue;
+    if (!Number.isInteger(value)) {
+      malformed += 1;
+      continue;
+    }
     present += 1;
     if (value > 0) positive += 1;
   }
-  return { present, positive, denominator: lines.length };
+  return { present, positive, unavailable, malformed, denominator: lines.length };
 }
 
 /**
@@ -526,6 +581,8 @@ function holdReasonMetrics(routes) {
         + '· hysteresis-band). same-tier(전환이 테이블에 없었음)와 above-threshold(전환 허용)는 '
         + 'counts 에 보이되 분자 밖이다. allowlist 밖 코드는 other:<code> — 분자에 넣지 않는다. '
         + '분자는 영수증 단위(보류 코드가 하나라도 있으면 1)라 counts 합은 분모를 넘을 수 있다. '
+        + 'no-candidate·catalog-miss 는 평가 자체가 불가였던 줄이라 분모에는 들고 분자 밖이다 '
+        + '— 그래서 "1−비율"은 전환 허용률이 아니다. '
         + '이 행은 Switch Efficiency 가 아니다(헤더 #2) — useful 판정을 담지 않는다.',
     }),
     metric({
@@ -552,22 +609,33 @@ function residencyMetrics(routes) {
   return [
     metric({
       key: 'routing.residency_counter',
-      label: '잔류 카운터 > 0 (값 분포 아님)',
-      source: 'route.selected · data.actionsSinceSwitch > 0 ÷ 정수인 영수증',
+      label: '잔류 카운터 > 0 (실측 카운터 기준 · 값 분포 아님)',
+      source: 'route.selected · data.actionsSinceSwitch > 0 ÷ 실측 카운터를 가진 영수증'
+        + '(reason[] 에 residency:unavailable 이 없고 값이 정수)',
       denominator: fold.present,
       numerator: fold.positive,
-      note: '임계(§8.5 G5 의 3·2)와 비교하지 않고 값 분포도 싣지 않는다 — 그 상수가 "미보정"이라 '
-        + '분포가 라우터가 아니라 상수를 보고하게 된다(헤더 #5). null·부재·비정수는 분모에서 '
-        + '빠진다 — 0 은 실측이고 나머지는 결측이라 다른 진술이다.',
+      note: 'writer 는 카운터가 없을 때 null 이 아니라 정수 0 + reason residency:unavailable 을 '
+        + '쓴다(adaptive-model-router.js#routeModel 의 nonNegativeInt) — 그래서 0 만으로는 '
+        + '실측인지 알 수 없고 reason 을 함께 읽는다. unavailable 표시가 있으면 값이 0 이어도 '
+        + '분모 밖이다. 임계(§8.5 G5 의 3·2)와 비교하지 않고 값 분포도 싣지 않는다 — 그 상수가 '
+        + '"미보정"이라 분포가 라우터가 아니라 상수를 보고하게 된다(헤더 #5).',
     }),
     metric({
       key: 'routing.residency_counter_coverage',
-      label: '잔류 카운터가 정수로 실린 영수증',
-      source: 'route.selected · data.actionsSinceSwitch 가 정수인 영수증 ÷ route.selected',
+      label: '실측 잔류 카운터가 실린 영수증',
+      source: 'route.selected · 실측 카운터를 가진 영수증 ÷ route.selected',
       denominator: routes.length,
       numerator: fold.present,
-      note: '카운터가 없는 영수증은 위 행의 분모 밖이라 absent 로 실을 수 없고(metric.js 는 '
-        + 'absent > denominator 를 던진다) 여기서 보인다. routing.tier_comparability 선례.',
+      counts: {
+        measured: fold.present,
+        [RESIDENCY_UNAVAILABLE]: fold.unavailable,
+        counter_not_integer: fold.malformed,
+      },
+      note: '결측 영수증은 위 행의 분모 밖이라 absent 로 실을 수 없고(metric.js 는 '
+        + 'absent > denominator 를 던진다) 여기서 보인다 — routing.tier_comparability 선례. '
+        + 'counts 가 왜 빠졌는지까지 나눠 싣는다: residency:unavailable(writer 가 결측이라 '
+        + '표시) vs counter_not_integer(값이 정수가 아님). 세 버킷은 서로 배타적이고 합이 '
+        + '분모와 같다.',
     }),
   ];
 }

@@ -30,6 +30,7 @@ export {
   COST_TERMS,
   DECISION_TYPES,
   HOLD_REASON_CODES,
+  RESIDENCY_UNAVAILABLE,
   ROUTING_KIND,
   buildRoutingScorecard,
   classifyAvoidedReason,
