@@ -9,7 +9,7 @@ toolset: team
 
 이전 세션이 `/save` 로 작성한 `.artibot/HANDOFF.md` 를 그대로 stdout 에 출력해 다음 작업을 5초 안에 이어가도록 합니다. 자동 실행은 절대 하지 않으며, `--run` 플래그가 있을 때만 1순위 첫 프롬프트를 확인 프롬프트로 제안합니다 (push/deploy/release/force/delete 키워드는 강제 confirm).
 
-기본 모드·`--list`·`--run` 에서 읽는 파일은 `.artibot/HANDOFF.md` **하나뿐이다** — `lib/handoff/handoff-store.js#readLatestHandoff` 는 그 포인터 파일만 연다. 크로스머신 요지본 `.artibot/guides/NEXT-SESSION.md` 와 `/split` 줄기 worktree 의 `.artibot/HANDOFF.md` 는 읽지 않는다 — 필요하면 직접 `Read` 하라. opt-in 플래그 `--contract`·`--read-order` 는 그 세 경로를 바꾸지 않은 채 각 절이 정하는 파일을 **추가로 읽기만** 한다.
+기본 모드·`--list`·`--run` 에서 읽는 파일은 `.artibot/HANDOFF.md` **하나뿐이다** — `lib/handoff/handoff-store.js#readLatestHandoff` 는 그 포인터 파일만 연다. 크로스머신 요지본 `.artibot/guides/NEXT-SESSION.md` 와 `/split` 줄기 worktree 의 `.artibot/HANDOFF.md` 는 읽지 않는다 — 필요하면 직접 `Read` 하라. opt-in 플래그 `--contract` 는 그 세 경로를 그대로 둔 채 보고 블록만 뒤에 덧붙이고, `--read-order` 는 ARTIBOT 6단계를 **먼저** 읽은 뒤 `.artibot/HANDOFF.md` 를 **폴백으로 뒤로 미룬다**. 둘 다 읽기만 하며, 각각의 절이 정본이다.
 
 Also routed from: 자연어 "이어가기", "어제 어디까지 했지", "지난 세션 복원", "핸드오프 보여줘"
 
@@ -20,7 +20,7 @@ Parse $ARGUMENTS:
 - `--list`: `.artibot/handoffs/` 의 아카이브 목록 (mtime · size · filename) 표시 후 종료
 - `--archive <filename>`: 특정 아카이브를 stdout으로 표시 (latest 대신)
 - `--contract`: Resume Contract + lane reconcile 보고를 기본 출력 **뒤에** 덧붙임. **보고 전용 — 상태 전이·재개 실행 없음.** 플래그가 없으면 출력은 종전과 완전히 동일
-- `--read-order`: 리포 루트 `ARTIBOT.md` 의 `## Read Order` 6단계를 그 순서대로 읽어 기본 출력 **뒤에** 덧붙임. **읽기 전용 — 쓰기·상태 전이 없음.** 플래그가 없으면 출력은 종전과 완전히 동일
+- `--read-order`: 리포 루트 `ARTIBOT.md` 의 `## Read Order` 6단계를 그 순서대로 **먼저** 읽어 출력하고, `.artibot/HANDOFF.md` 는 부재 단계가 있을 때만 그 뒤에 폴백으로 **최대 1회** 읽음. **읽기 전용 — 쓰기·상태 전이 없음.** 플래그가 없으면 출력은 종전과 완전히 동일
 
 ## Execution Flow
 
@@ -77,24 +77,34 @@ Parse $ARGUMENTS:
 2. `artibot.config.json` 의 `runtime.checkpoint.saveOnSave` 가 `true` 일 때 `/save` 가 체크포인트를 **남긴다** (`lib/checkpoint/save-checkpoint.js#isSaveCheckpointEnabled` 가 단독 판정 — 엄격 boolean 이라 `true` 가 아닌 값(부재·문자열 `"true"`·`1`)은 전부 off). 체크포인트가 남아 있으면 HANDOFF **다음에** 그것을 읽어 Resume Contract 보고의 입력으로 쓴다. 이 키는 **쓰는 쪽의 게이트**이며 읽기를 막지 않는다 — 보고는 config 를 보지 않고 체크포인트 스토어를 그대로 읽는다.
 3. 해당 미션의 체크포인트가 없으면 읽을 것이 없을 뿐, 보고 자체는 그대로 나온다 — 그 미션 행에 `blocked_by: ['reconcile:checkpoint-missing']` (`lib/checkpoint/resume-controller.js#RESUME_BLOCK_REASONS`) 이 찍힌다. 부재는 오류가 아니고, 기본 핸드오프 출력도 영향을 받지 않는다.
 
+`--read-order` 가 함께 있으면 HANDOFF 를 읽는 **시점**은 아래 "ARTIBOT 읽기 순서" 절이 정한다 (6단계 뒤 폴백, 최대 1회). 위 1단계는 그 시점을 따르며, 이 절의 나머지 순서와 의미는 그대로다.
+
 체크포인트는 **읽기만** 한다 — `/resume` 은 새 체크포인트를 남기지도, 기존 것을 갱신하지도 않는다. 그 쓰기는 `/save` 의 책임이다 (`/resume` 은 read-only).
 
 ### ARTIBOT 읽기 순서 (`--read-order` 모드에서만 · opt-in)
 
-플래그가 없으면 이 절은 **통째로 건너뛴다** — 기본 출력은 한 글자도 달라지지 않는다. `--read-order` 가 있을 때만 기본 핸드오프 출력이 **끝난 뒤에** 아래 6단계를 번호 순서대로 읽어 덧붙인다.
+플래그가 없으면 이 절은 **통째로 건너뛴다** — 기본 출력은 한 글자도 달라지지 않는다. `--read-order` 가 있을 때는 기본 모드보다 **먼저** 아래 6단계를 번호 순서대로 읽어 출력하고, `.artibot/HANDOFF.md` 는 그 **뒤로 밀려 폴백**이 된다 (설계 "커맨드별 운명" 문단 — `/resume` 은 ARTIBOT 읽기 순서를 실행하고 HANDOFF 는 폴백이다).
 
 정본 순서의 **단일 진실원은 리포 루트 `ARTIBOT.md` 의 `## Read Order`** 다. 이 절은 그것의 사본일 뿐이며, 둘이 어긋나면 핀 테스트 `tests/firewall/resume-contract-report-only.test.js` 가 RED 가 된다. 순서를 여기서 고치지 말고 `ARTIBOT.md` 를 고쳐라.
 
-1. `.artibot/project.md` — 프로젝트 정본을 읽는다. 부재 시 `부재: .artibot/project.md` 한 줄만 적고 다음 단계로 간다.
-2. `.artibot/state.yaml` — 라이브 실행 진실을 읽는다. 부재 시 `부재: .artibot/state.yaml` 한 줄.
-3. 활성 미션의 `intent.md` (`.artibot/missions/<mission-id>/intent.md`) — 성공의 정의를 읽는다. `not yet landed` 산출물이라 부재가 흔하다. 부재 시 `부재: <경로>` 한 줄.
-4. 활성 미션의 `plan.md` (`.artibot/missions/<mission-id>/plan.md`) — 현재 실행 전략을 읽는다. 역시 `not yet landed` 이며, 부재 시 `부재: <경로>` 한 줄.
+단계별 출력 형태: 실재하면 머리줄 `[n/6] <경로>` 뒤에 **요지 5줄 이내**로 적는다 — 정본 파일은 길므로 원문 전재는 하지 않는다. 부재하면 `부재: <경로>` 한 줄이 그 단계의 전부다.
+
+1. `.artibot/project.md` — 프로젝트 정본. 요지는 목적·범위·제약. 부재 시 `부재: .artibot/project.md` 한 줄만 적고 다음 단계로 간다.
+2. `.artibot/state.yaml` — 라이브 실행 진실. 여기서 **활성 미션 id** 를 얻어 3·4단계에 넘긴다. 부재 시 `부재: .artibot/state.yaml` 한 줄.
+3. 활성 미션의 `intent.md` — `.artibot/missions/<미션 id>/intent.md`, 성공의 정의. 미션 id 는 2단계에서 온다; 2단계가 부재이거나 활성 미션이 지목되지 않으면 `부재: 활성 미션 미확정` 한 줄. `not yet landed` 산출물이라 부재가 흔하다.
+4. 활성 미션의 `plan.md` — `.artibot/missions/<미션 id>/plan.md`, 현재 실행 전략. 미션 id 가 미확정이면 역시 `부재: 활성 미션 미확정` 한 줄. 이것도 `not yet landed` 다.
 5. 관련 ADR — `.artibot/adr/` 아래에서 이번 작업에 걸리는 결정 기록만 읽는다. `INDEX.md` 는 수기 정본이라 **읽기만** 하고 재생성·재번호 매기기를 절대 호출하지 않는다. 부재 시 `부재: .artibot/adr/` 한 줄.
-6. Review / Outcome — 해당하는 경우에만 최근 리뷰·결과 기록을 읽는다. 해당 없음이면 `부재: review/outcome` 한 줄.
+6. Review / Outcome — 해당하는 경우에만 읽는다. 경로 단서는 활성 미션 아래의 `review.md`·`outcome.md` (`.artibot/missions/<미션 id>/`). 해당 없음이면 `부재: review/outcome` 한 줄.
 
-**HANDOFF 는 번호 단계가 아니라 그 바깥의 폴백이다.** 위 6단계 중 **부재 단계가 하나라도 있으면** 6단계를 모두 마친 뒤에 `.artibot/HANDOFF.md` 를 폴백으로 읽어 출력한다 — 기본 모드와 같은 `lib/handoff/handoff-store.js#readLatestHandoff` 경로다. 6단계가 **전부 실재하면 HANDOFF 는 읽지 않는다**.
+**HANDOFF 폴백 (번호 단계가 아니다).** 위 6단계 중 **부재 단계가 하나라도 있으면** 6단계 출력이 끝난 **뒤에** 기본 모드 절차를 **한 번** 수행한다 — `readLatestHandoff(projectRoot)` → 원문 그대로 출력 → 첫 프롬프트 후보 박스 (`lib/handoff/handoff-store.js#readLatestHandoff`, 기본 모드와 같은 경로). 6단계가 **전부 실재하면 HANDOFF 는 읽지 않는다**. HANDOFF 파일 자체가 없으면 6단계 출력은 그대로 둔 채 그 뒤에 "핸드오프 없음 — 먼저 `/save` 로 작성하세요." 한 줄만 적는다 — 6단계를 건너뛰고 종료하지 않는다. HANDOFF 는 어떤 경우에도 **한 번을 넘겨 출력하지 않는다**.
 
-이 절은 **읽기 전용**이다 — 어느 단계도 파일을 쓰지 않고, 어떤 상태도 **전이시키지 않는다**. `allowed-tools` 에 Write 가 없는 것이 그 기계적 보증이다. 부재는 오류가 아니며, 부재를 "통과"·"검증됨"으로 바꿔 쓰지 말 것 — 둘은 다른 진술이다.
+플래그 조합 (이 문단이 정본 — 다른 절에서 다시 정의하지 않는다):
+
+- `--list`·`--archive` 는 종전대로 그 모드만 수행하고 종료한다. `--read-order` 는 무시된다.
+- `--run` 은 HANDOFF 의 첫 프롬프트 후보를 입력으로 쓴다. HANDOFF 가 위 폴백으로 **실제로 읽힌 경우에만** `--run` 안전 가드로 진행하고, 읽히지 않았으면 "`--run` 은 HANDOFF 후보가 필요하다" 한 줄 뒤 종료한다 (자동 실행 없음 원칙 불변).
+- `--contract` 블록은 `--read-order` 와 함께 와도 **항상 맨 마지막**에 덧붙는다.
+
+이 절은 **읽기 전용**이다 — 어느 단계도 파일을 쓰지 않고, 어떤 상태도 **전이시키지 않는다**. 확인 가능한 사실은 frontmatter `allowed-tools` 에 `Write`·`Edit` 가 없다는 것까지다. `Bash` 는 허용돼 있으므로 "쓰기 0" 의 나머지는 이 산문 규율이 맡는다 — 이 절의 어느 단계도 Bash 로 파일을 만들거나 고치지 않는다. 부재는 오류가 아니며, 부재를 "통과"·"검증됨"으로 바꿔 쓰지 말 것 — 둘은 다른 진술이다.
 
 ## Output Format
 
@@ -147,6 +157,7 @@ Parse $ARGUMENTS:
 | `--archive <filename>` 미존재 | "아카이브 없음 — `--list` 로 확인하세요." + 종료 |
 | `--run` 키워드 검출 + 사용자 N | "사용자 거부 — 종료" 출력 후 종료 (실행 안 함) |
 | `.artibot/HANDOFF.md` size 0 | 빈 핸드오프 경고 + `/save` 권장 |
+| `--read-order` + 핸드오프 파일 없음 | 6단계 출력은 그대로 내고, 그 뒤에 "핸드오프 없음 — `/save` 로 먼저 작성하세요." 한 줄 (6단계 생략·조기 종료 안 함) |
 
 ## Next Steps
 
