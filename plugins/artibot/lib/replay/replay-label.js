@@ -64,16 +64,40 @@
  *  3. WINDOWING. A bind or a receipt outside the caller's slice is absent, not
  *     late: its Action reads SIMULATED and its bind reads as an orphan. The
  *     label is a property of the INPUT, not of the run.
- *  4. DUPLICATE KEYS. Both upstream folds are first-wins in INPUT order, so a
- *     repeated `tool_use_id` or `agent_id` resolves by position. The repeats
- *     are surfaced as `conflicts` and their Action is graded SIMULATED with
- *     `bind-conflict`, because a broken 1:1 means the evidence cannot be
- *     attributed -- not that it is missing.
- *  5. ITS OWN CONSUMERS. `scripts/bench/routebench.mjs:36-39` describes
- *     `replay_mode` as copied through untouched, but `replay_mode` appears in
- *     NO executable line under `scripts/` or `lib/` (measured 2026-09-21: one
- *     grep hit, and it is that comment). Producing a label does not put it on
- *     a report; that wiring is a separate change.
+ *  4. DUPLICATE KEYS, AND THEY DO NOT ALL LOOK ALIKE. Both upstream folds are
+ *     first-wins in INPUT order, so a repeated `tool_use_id` or `agent_id`
+ *     resolves by position. Where `route-bind.js` SEES the repeat it is in
+ *     `conflicts` and the Action is graded `bind-conflict`. Where it does not
+ *     -- a second bind line for the same agent that carried no `tool_use_id`
+ *     is MALFORMED there and merely a duplicate here -- `conflicts` stays 0
+ *     and the class surfaces as `pair-bind-mismatch` beside
+ *     `unlabeled.malformed_binds` instead. In that case the LABEL is
+ *     order-stable (SIMULATED either way) but the REASON is not: it names
+ *     whichever bind won, which is a property of the input order.
+ *  5. AN AGENT ID REUSED ACROSS SESSIONS. This module inherits the assumption
+ *     stated in `spawn-outcome.js`'s "TWO LINES, ONE SPAWN, TWO DIFFERENT
+ *     KEYS" section: the receipt join is on `agent_id` ALONE and assumes it is
+ *     globally unique, never comparing the receipt's `session_id` to the
+ *     bind's. A reused id therefore lets ANOTHER session's `usage.receipt`
+ *     supply the evidence -- including its `usage.source` -- for this Action's
+ *     grade, and nothing here can tell that apart from the right receipt.
+ *  6. ITS OWN CONSUMERS. `scripts/bench/routebench.mjs:36-39` describes
+ *     `replay_mode` as copied through untouched. Outside this file,
+ *     `replay_mode` occurs under `scripts/` and `lib/` on exactly one line --
+ *     that comment -- and on ZERO executable lines (reproduce:
+ *     `grep -rn replay_mode scripts/ lib/`; measured 2026-09-21). Producing a
+ *     label does not put it on a report; that wiring is a separate change.
+ *
+ * ONE LIVE COUNT (2026-09-21T05:48Z, central ledger, 8,367 events)
+ * ---------------------------------------------------------------------------
+ * 380 Actions: EXACT 0 / PARTIAL 72 / SIMULATED 308, the latter being
+ * `no-usage-receipt` 305 and `fifo-join` 3. `multi_model_runs` 0, `conflicts`
+ * 0, `unlabeled` 0/0/0, and 136 of 136 subagent usage rows were `transcript`.
+ * THE EXACT 0 IS NOT A MEASUREMENT -- it is the structural consequence above,
+ * and it would read 0 on any ledger. The 305 IS a measurement, and its CAUSE
+ * is not visible here: a `usage.receipt` is written at SessionEnd, so a spawn
+ * in a still-open session and a spawn that predates the receipt writer are
+ * indistinguishable from one that will never write one.
  *
  * @module lib/replay/replay-label
  */
@@ -98,20 +122,23 @@ export const NO_ACTIONS_REASON = 'no-actions';
 /**
  * Every reason string this fold can attach to a row.
  *
- * The first nine are SIMULATED causes in evaluation order; the last two are
- * PARTIAL's. They are exported as a frozen map so a caller switches on a
- * constant rather than on a literal that a rename would silently orphan.
+ * THE KEY ORDER IS THE EVALUATION ORDER: the first ten are SIMULATED causes in
+ * the order `gradeBound` tests them (first match wins, so the ladder is a
+ * contract, not an accident of branch layout), and the last two are PARTIAL's.
+ * They are exported as a frozen map so a caller switches on a constant rather
+ * than on a literal that a rename would silently orphan.
  */
 export const REPLAY_LABEL_REASONS = Object.freeze({
   UNBOUND_RECEIPT: 'unbound-receipt',
   BIND_CONFLICT: 'bind-conflict',
   NO_USAGE_RECEIPT: 'no-usage-receipt',
+  PAIR_BIND_MISMATCH: 'pair-bind-mismatch',
   FIFO_JOIN: 'fifo-join',
   CONFIDENCE_MISSING: 'confidence-missing',
-  CONFIDENCE_UNLISTED: 'confidence-unlisted',
   NO_RECOMMENDATION: 'no-recommendation',
+  CONFIDENCE_UNLISTED: 'confidence-unlisted',
   NO_SERVED_MODEL: 'no-served-model',
-  ESTIMATE_USAGE: 'estimate-usage',
+  UNMEASURED_USAGE: 'unmeasured-usage',
   SINGLE_RUN_RESULT: 'single-run-result',
   MULTI_MODEL_SINGLE_RUN: 'multi-model-single-run',
 });
@@ -124,9 +151,14 @@ export const REPLAY_LABEL_REASONS = Object.freeze({
  * unlabelled receipt cannot be graded EXACT/PARTIAL/SIMULATED (section 46), and
  * estimate values must never be mixed into a measured aggregate".
  * `lib/economics/usage-receipt.js#buildReceipt` really does write 'estimate'
- * when the transcript fold failed, so the case is live, not hypothetical. An
- * allowlist rather than a deny-list (repo rule section 8): a fourth source
- * added tomorrow is excluded until someone decides it counts.
+ * when the transcript fold failed, so the case is live, not hypothetical.
+ *
+ * An allowlist rather than a deny-list (repo rule section 8), and the reason it
+ * produces is `unmeasured-usage` rather than `estimate-usage` because THREE
+ * different rows land here: an estimate-graded one, an UNLABELLED one (the key
+ * absent, which the schema forbids and which therefore cannot be graded at
+ * all), and one carrying a source nobody has decided about yet. A deny-list
+ * spelled `source === 'estimate'` would pass the last two silently.
  */
 const MEASURED_USAGE_SOURCES = Object.freeze(['transcript', 'otlp']);
 
@@ -234,13 +266,24 @@ function unmatchedReason(pair) {
 }
 
 /**
- * Grade one BOUND Action. ALLOWLIST: PARTIAL needs all five conditions.
+ * Grade one BOUND Action. ALLOWLIST: PARTIAL needs all six conditions.
  *
  * The label decision reads `pair.agreement`, NOT the confidence tier: the
  * upstream fold owns which tiers may be compared, so a tier added there
  * tomorrow arrives here as `agreement === null` and is graded SIMULATED
  * (fail-closed) without an edit. Confidence and `recommended_model` are read
  * for the REASON only.
+ *
+ * THE PAIR MUST BE THIS BIND'S PAIR. The two upstream folds keep DIFFERENT
+ * bind populations: `route-bind.js#bindOf` requires both join keys and drops
+ * the line otherwise, while `spawn-outcome.js#bindOf` requires only
+ * `data.agent_id` and `#collect` is first-wins in INPUT order. So an agent
+ * whose FIRST bind line carried no `tool_use_id` resolves to a pair describing
+ * a bind that named no Action, and grading from it would read a stranger's
+ * confidence and recommendation -- fail-OPEN, since that stranger may be the
+ * tier-1 line while the line that actually named this Action was a tier-3
+ * guess. Comparing `pair.tool_use_id` to the bind's own closes it: the pair
+ * either describes this Action or it is not evidence about it.
  *
  * @param {object} bind - one `joinRouteBinds().bound[]` row.
  * @param {object|undefined} pair - that agent's `joinSpawnOutcomes()` pair.
@@ -254,9 +297,12 @@ function gradeBound(bind, pair, ctx) {
     return simulated(REPLAY_LABEL_REASONS.BIND_CONFLICT);
   }
   if (pair === undefined) return simulated(REPLAY_LABEL_REASONS.NO_USAGE_RECEIPT);
+  if (pair.tool_use_id !== bind.tool_use_id) {
+    return simulated(REPLAY_LABEL_REASONS.PAIR_BIND_MISMATCH);
+  }
   if (pair.agreement === null) return simulated(unmatchedReason(pair));
   if (pair.served_models.length === 0) return simulated(REPLAY_LABEL_REASONS.NO_SERVED_MODEL);
-  if (ctx.unmeasured.has(bind.agent_id)) return simulated(REPLAY_LABEL_REASONS.ESTIMATE_USAGE);
+  if (ctx.unmeasured.has(bind.agent_id)) return simulated(REPLAY_LABEL_REASONS.UNMEASURED_USAGE);
   return {
     label: 'PARTIAL',
     reason: pair.served_models.length > 1
@@ -292,7 +338,10 @@ function buildRows(join, pairs, ctx) {
     });
   }
   for (const r of join.unbound_receipts) {
-    if (rows.has(r.tool_use_id)) continue;
+    // No `rows.has` guard: `unbound_receipts` is `receipts` MINUS the set of
+    // tool_use_ids any bind named, and every row above came from a bind, so the
+    // two loops cannot collide. A guard here would be a branch no fixture can
+    // reach -- the false coverage this module's header refuses elsewhere.
     rows.set(r.tool_use_id, {
       tool_use_id: r.tool_use_id,
       agent_id: null,

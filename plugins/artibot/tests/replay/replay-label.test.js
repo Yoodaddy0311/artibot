@@ -11,9 +11,12 @@
  *   - ZERO LIVE LINES. Every row below is hand-built in the key layout the
  *     `route-bind` and `spawn-outcome` suites pin. Nothing here says what the
  *     live label distribution IS.
- *   - FIXTURE SCALE. The shared fixture is 12 Actions. Live at the last
- *     measurement recorded in `spawn-outcome.js` was 306 bind rows and 94
- *     receipts. Nothing here says anything about the fold at ledger size.
+ *   - FIXTURE SCALE. The shared fixture is 13 Actions, built so every counter
+ *     has a hand-checkable value. The one live count recorded in
+ *     `replay-label.js`'s header was 380 Actions over 8,367 events, and its
+ *     shape is nothing like this one's (305 of its 308 SIMULATED rows are a
+ *     single reason). Nothing here says anything about the fold at ledger
+ *     size, about read cost, or about the live distribution.
  *   - WHETHER A BOUND PAIR IS THE RIGHT PAIR. `route-bind.js` CANNOT SEE #1:
  *     a wrong receipt bound to a spawn is indistinguishable from a right one,
  *     here and there.
@@ -169,6 +172,25 @@ function agentReceipt(agentId, spec = {}) {
 }
 
 /**
+ * A `route.bound` row carrying NO `tool_use_id`.
+ *
+ * The two upstream folds disagree about this line, which is the whole point:
+ * `route-bind.js#bindOf` needs BOTH join keys and drops it as malformed, while
+ * `spawn-outcome.js#bindOf` needs only `agent_id` and keeps it -- and
+ * `#collect` is first-wins in INPUT order, so whichever of the agent's binds
+ * arrives first decides that agent's pair.
+ *
+ * @param {object} spec - the same spec `bound` takes.
+ * @returns {object} ledger line.
+ */
+function boundWithoutToolUse(spec) {
+  const line = bound(spec);
+  const data = { ...line.data };
+  delete data.tool_use_id;
+  return { ...line, data };
+}
+
+/**
  * One Action's three lines: receipt, bind, and the spawn's usage receipts.
  *
  * @param {object} spec - `toolUseId`, `agentId` and the per-line overrides.
@@ -252,6 +274,13 @@ function fixture() {
       toolUseId: 'toolu_s8', agentId: 'ag-s8', bind: { recommended: OPUS },
       receipts: [{ source: 'estimate' }],
     }),
+    // SIMULATED *and* multi-model: a fifo guess whose run switched model.
+    // `multi_model_runs` describes the JOINED population, so this row counts
+    // there while being graded SIMULATED here.
+    ...action({
+      toolUseId: 'toolu_s9', agentId: 'ag-s9', bind: { confidence: 'fifo', recommended: OPUS },
+      receipts: [{ model: OPUS }, { model: FABLE }],
+    }),
   ];
 }
 
@@ -302,8 +331,17 @@ describe('a multi-model run stays PARTIAL and never becomes EXACT', () => {
     }
   });
 
-  it('counts both multi-model runs and still reports EXACT as 0 (negative control)', () => {
-    expect(f.multi_model_runs).toBe(2);
+  it('counts every multi-model run, SIMULATED ones included', () => {
+    // `multi_model_runs` describes the JOINED population, not the graded-
+    // PARTIAL one. A counter that skipped SIMULATED rows would under-report
+    // mid-run switches exactly where the evidence is weakest.
+    expect(f.multi_model_runs).toBe(3);
+    expect(row(f, 'toolu_s9').label).toBe('SIMULATED');
+    expect(row(f, 'toolu_s9').reason).toBe(REPLAY_LABEL_REASONS.FIFO_JOIN);
+    expect(f.rows.filter((r) => r.label === 'PARTIAL')).toHaveLength(4);
+  });
+
+  it('still reports EXACT as 0 with three multi-model runs (negative control)', () => {
     expect(f.by_label.EXACT).toBe(0);
     expect(f.rows.some((r) => r.label === 'EXACT')).toBe(false);
   });
@@ -367,10 +405,48 @@ describe('every SIMULATED reason is reachable and named', () => {
     simulated('toolu_s7', REPLAY_LABEL_REASONS.NO_SERVED_MODEL);
   });
 
-  it('estimate-grade usage is estimate-usage, even when the models agree', () => {
+  it('estimate-grade usage is unmeasured-usage, even when the models agree', () => {
     // The schema's own words (`attempt-receipt.schema.json` usage.source):
     // "an unlabelled receipt cannot be graded EXACT/PARTIAL/SIMULATED".
-    simulated('toolu_s8', REPLAY_LABEL_REASONS.ESTIMATE_USAGE);
+    simulated('toolu_s8', REPLAY_LABEL_REASONS.UNMEASURED_USAGE);
+  });
+
+  it('an ABSENT usage.source is unmeasured-usage too (allowlist, not deny-list)', () => {
+    // A deny-list spelled `source === 'estimate'` passes every assertion above
+    // and lets an unlabelled receipt through. The schema calls `source`
+    // mandatory precisely because an unlabelled receipt cannot be graded.
+    const lines = action({
+      toolUseId: 'toolu_u1', agentId: 'ag-u1', bind: { recommended: OPUS }, receipts: [],
+    });
+    const r = agentReceipt('ag-u1');
+    delete r.data.usage.source;
+    const out = labelReplay([...lines, r]);
+    expect(out.rows[0].label).toBe('SIMULATED');
+    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.UNMEASURED_USAGE);
+  });
+
+  it('an UNKNOWN usage.source is unmeasured-usage (a fourth source fails closed)', () => {
+    // A source added to the writer tomorrow is excluded until someone decides
+    // it counts -- it does not silently enter the measured population.
+    const lines = action({
+      toolUseId: 'toolu_u2', agentId: 'ag-u2', bind: { recommended: OPUS },
+      receipts: [{ source: 'billing-api' }],
+    });
+    const out = labelReplay(lines);
+    expect(out.rows[0].label).toBe('SIMULATED');
+    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.UNMEASURED_USAGE);
+  });
+
+  it('a non-allowlisted confidence AND a missing recommendation reports the LATTER', () => {
+    // Both causes hold at once. The reason ladder is a CONTRACT, not an
+    // accident of branch order: `no-recommendation` is evaluated before the
+    // by-elimination `confidence-unlisted`, so the row names the cause this
+    // module can prove directly rather than the one it infers.
+    const out = labelReplay(action({
+      toolUseId: 'toolu_u3', agentId: 'ag-u3', bind: { confidence: 'tier-4' },
+    }));
+    expect(out.rows[0].label).toBe('SIMULATED');
+    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.NO_RECOMMENDATION);
   });
 
   it('a conflicted bind is bind-conflict', () => {
@@ -390,17 +466,70 @@ describe('every SIMULATED reason is reachable and named', () => {
     expect(out.conflicts).toBeGreaterThan(0);
   });
 
-  it('covers all nine SIMULATED reasons in one ledger', () => {
+  it('covers eight of the ten SIMULATED reasons in one ledger', () => {
     // Without this, a reason could quietly stop being produced and each
     // individual assertion above would still be satisfiable by some other row.
     const produced = new Set(f.rows.filter((r) => r.label === 'SIMULATED').map((r) => r.reason));
     expect([...produced].sort()).toEqual([
-      'confidence-missing', 'confidence-unlisted', 'estimate-usage', 'fifo-join',
-      'no-recommendation', 'no-served-model', 'no-usage-receipt', 'unbound-receipt',
+      'confidence-missing', 'confidence-unlisted', 'fifo-join', 'no-recommendation',
+      'no-served-model', 'no-usage-receipt', 'unbound-receipt', 'unmeasured-usage',
     ]);
-    // `bind-conflict` needs a duplicate, so it is the one reason the
-    // duplicate-free fixture cannot carry; it is pinned in its own test above.
+    // The two absentees each need a REPEATED key, which this fixture must not
+    // carry (the shuffle test reads it). Both are pinned in their own tests.
     expect(Object.values(REPLAY_LABEL_REASONS)).toContain('bind-conflict');
+    expect(Object.values(REPLAY_LABEL_REASONS)).toContain('pair-bind-mismatch');
+  });
+
+  it('the reason map is the full vocabulary: ten SIMULATED plus two PARTIAL', () => {
+    // The map's ORDER is the evaluation order, and its SIZE is the claim the
+    // header makes. A reason added without updating either drifts silently.
+    const all = Object.values(REPLAY_LABEL_REASONS);
+    expect(all).toHaveLength(12);
+    expect(all.slice(-2)).toEqual(['single-run-result', 'multi-model-single-run']);
+    expect(new Set(all).size).toBe(all.length);
+  });
+});
+
+describe('a pair built from a DIFFERENT bind is not evidence for this Action', () => {
+  // The two upstream folds keep different bind populations, so the pair an
+  // agent id resolves to is not always the pair of the bind that named THIS
+  // Action. Grading from the wrong bind is fail-OPEN: it reads that bind's
+  // confidence and recommendation, so a tier-3 guess can arrive wearing a
+  // tier-1 confidence and be graded PARTIAL.
+  const sel = selected({ toolUseId: 'toolu_x1' });
+  const keyless = boundWithoutToolUse({
+    agentId: 'ag-x1', toolUseId: 'toolu_x1', confidence: 'exact', recommended: OPUS,
+  });
+  const real = bound({
+    agentId: 'ag-x1', toolUseId: 'toolu_x1', confidence: 'fifo', recommended: OPUS,
+  });
+  const used = agentReceipt('ag-x1');
+
+  it('refuses the pair when the keyless bind is seen FIRST', () => {
+    const out = labelReplay([sel, keyless, real, used]);
+    expect(out.rows[0].label).toBe('SIMULATED');
+    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.PAIR_BIND_MISMATCH);
+    // The class is NOT visible as a conflict: route-bind saw one usable bind
+    // for this Action, so invariant 1 never broke. It surfaces here and in
+    // `unlabeled.malformed_binds`.
+    expect(out.conflicts).toBe(0);
+    expect(out.unlabeled.malformed_binds).toBe(1);
+  });
+
+  it('grades the same LABEL when the real bind is seen FIRST', () => {
+    const out = labelReplay([sel, real, keyless, used]);
+    expect(out.rows[0].label).toBe('SIMULATED');
+    // The REASON legitimately differs: here the pair IS this bind's pair, so
+    // the grade comes from the right evidence and the fifo gate is what
+    // excludes it. The LABEL is what must not move with input order.
+    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.FIFO_JOIN);
+  });
+
+  it('never grades either order PARTIAL (the fail-open this pins)', () => {
+    for (const order of [[sel, keyless, real, used], [sel, real, keyless, used]]) {
+      expect(labelReplay(order).by_label.PARTIAL).toBe(0);
+      expect(labelReplay(order).by_label.SIMULATED).toBe(1);
+    }
   });
 });
 
@@ -432,7 +561,7 @@ describe('the usage-source sweep reads the same run_id as the upstream fold', ()
     ];
     const out = labelReplay(lines);
     expect(out.rows[0].label).toBe('SIMULATED');
-    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.ESTIMATE_USAGE);
+    expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.UNMEASURED_USAGE);
   });
 
   it('normalises a missing session_id to null rather than dropping the row', () => {
@@ -502,7 +631,7 @@ describe('the counters partition the denominator', () => {
   const f = labelReplay(fixture());
 
   it('by_label sums to actions and to rows.length', () => {
-    expect(f.actions).toBe(12);
+    expect(f.actions).toBe(13);
     expect(f.rows).toHaveLength(f.actions);
     expect(f.by_label.EXACT + f.by_label.PARTIAL + f.by_label.SIMULATED).toBe(f.actions);
     expect(f.by_label_reason).toBeNull();
@@ -540,7 +669,7 @@ describe('labelReplay() is order-independent and non-mutating', () => {
     const rows = fixture().map((e) => Object.freeze(e));
     Object.freeze(rows);
     expect(() => labelReplay(rows)).not.toThrow();
-    expect(labelReplay(rows).actions).toBe(12);
+    expect(labelReplay(rows).actions).toBe(13);
   });
 });
 
