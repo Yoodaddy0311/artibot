@@ -432,7 +432,8 @@ function buildIdentity(evidence, reason) {
  * discards the WHOLE list rather than applying the readable half — a partially
  * applied allowlist would move a seat its author never named.
  *
- * A CALLER DOES EXIST: `scripts/hooks/route-observe-pre.js#observePre` forwards
+ * A CALLER DOES EXIST: `scripts/hooks/route-observe-pre.js#buildReceipt` — the
+ * site of that file's `routeModel` call, reached from `#observePre` — forwards
  * `config.routing.canary` on every routed action (measured 2026-09-21). What
  * keeps the gate inert is not the absence of a caller but the SHIPPED EMPTY
  * LIST — `artibot.config.json` `routing.canary.actionClasses` is `[]`, pinned

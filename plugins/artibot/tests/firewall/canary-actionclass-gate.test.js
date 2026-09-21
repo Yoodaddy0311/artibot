@@ -40,7 +40,8 @@
  *  1. **User-level overrides.** D reads the repo file only. A user config, an
  *     env var, or any future merge layer can present a non-empty list to the
  *     runtime with this file still green.
- *  2. **The writer.** `scripts/hooks/route-observe-pre.js#observePre` DOES
+ *  2. **The writer.** `scripts/hooks/route-observe-pre.js#buildReceipt` — the
+ *     site of that file's `routeModel` call, reached from `#observePre` — DOES
  *     forward `config.routing.canary` into `routeModel` (measured 2026-09-21),
  *     so the carrier is live — what keeps the mechanism inert is D, the empty
  *     LIST, not the absence of a caller. The day that list is filled, A and C
@@ -61,6 +62,15 @@
  *     baseline — would read divergence as zero under a matched canary, because
  *     recommended and selected are equal by construction and the policy answer
  *     survives only in `reason`. Nothing here tests those consumers.
+ *  6. **The rest of the write path.** Case E runs exactly two steps,
+ *     `validateEnvelope` + `validateEventContract`. It does NOT run the
+ *     writer's secret redaction (`redactDeep`, from
+ *     `lib/runtime/ledger-redaction.js`), its declared-enum normalisation
+ *     (`normalizeDeclaredEnums` / `foldDeclaredEnums`), or the per-line byte
+ *     cap enforced by `appendWithinCap` against `maxLineBytes`
+ *     (`DEFAULT_LINE_MAX_BYTES` = 4096, overridable via `getLedgerSettings`).
+ *     "The validator accepts it" is therefore narrower than "the writer
+ *     appends it": an oversized line is refused (or folded) after this point.
  *
  * @module tests/firewall/canary-actionclass-gate.test
  */
@@ -309,6 +319,27 @@ describe('canary action-class gate — a matched receipt is still appendable', (
     const matched = routeModel(matchedInput);
     // null === accepted; anything else is the writer's rejection reason.
     expect(validateEnvelope(envelope(matched))).toBeNull();
+    expect(validateEventContract(envelope(matched))).toBeNull();
+  });
+
+  it('rejects the shapes this limb deliberately did NOT build', () => {
+    // NEGATIVE CONTROL for case E: a validator that accepts everything would
+    // make E meaningless. These two shapes are the limb brief's ORIGINAL
+    // design — a sixth `decision.type` value `canary`, and a root-level
+    // `canary` block on the receipt. Both were withdrawn because the schema
+    // closes `decision.type` to five values and sets `additionalProperties`
+    // false at the root; the gate was built inside the existing vocabulary
+    // instead. If either of these were accepted, that history would be wrong.
+    const matched = routeModel(matchedInput);
+
+    const sixthType = { ...matched, decision: { ...matched.decision, type: 'canary' } };
+    expect(validateEventContract(envelope(sixthType))).not.toBeNull();
+
+    const rootKey = { ...matched, canary: { enabled: true, matched: true } };
+    expect(validateEventContract(envelope(rootKey))).not.toBeNull();
+
+    // ...and the untouched original still passes, so the rejections above are
+    // about the mutations and not about the fixture.
     expect(validateEventContract(envelope(matched))).toBeNull();
   });
 

@@ -245,7 +245,7 @@ describe('canary allowlist gate — matched moves the seat, not the vocabulary',
   it('never throws when the INPUT OBJECT itself throws on the canary read', () => {
     // The carrier is caller-supplied, so the property access is as hostile as
     // the value. Without readCanary() this getter escapes through routeModel,
-    // which promises never to throw (:443-446 wording).
+    // whose JSDoc opens "Never throws".
     const src = canaryInput();
     Object.defineProperty(src, 'canary', {
       get() { throw new Error('hostile getter'); },
@@ -299,8 +299,12 @@ describe('canary allowlist gate — the policy ceiling still binds', () => {
       config: DENYLIST_CONFIG,
       canary: { actionClasses: ['review'] },
     });
+    const receipt = routeModel(src);
     expect([...resolveCandidateTiers(src)]).toEqual(['opus']);
-    expect(routeModel(src).models.selected.tier).toBe('opus');
+    expect(receipt.models.selected.tier).toBe('opus');
+    // Without this the pin is vacuous: this input's POLICY answer is opus too,
+    // so the test would stay green if matching silently stopped happening.
+    expect(receipt.reason).toContain('canary:opus');
   });
 
   it('only ever selects a tier that is already a candidate', () => {
@@ -319,6 +323,9 @@ describe('canary allowlist gate — the policy ceiling still binds', () => {
     ];
     for (const src of cases) {
       const receipt = routeModel(src);
+      // Every fixture here must actually MATCH, else the containment below is
+      // just restating that the policy tier is a candidate.
+      expect(receipt.reason.some((code) => code.startsWith('canary:'))).toBe(true);
       expect([...resolveCandidateTiers(src)]).toContain(receipt.models.selected.tier);
     }
   });
