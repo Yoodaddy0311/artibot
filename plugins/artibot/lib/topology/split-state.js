@@ -5,8 +5,15 @@
  * ── Why this file exists ──────────────────────────────────────────────────
  * The same question has three answers on disk today (lane-5 §2-D):
  *
- *   1. a StateStore / `state.yaml.workers`  — the design's canonical "now",
- *      NOT BUILT YET (T-21). Reached here only through an injected port.
+ *   1. a StateStore / `state.yaml.workers`  — the design's canonical "now".
+ *      It EXISTS (`lib/project-state/state-manager.js#createStateStore`, with
+ *      production consumers in `lib/runtime/middleware/tasks.js`,
+ *      `scripts/checkpoint/resume-report.mjs` and
+ *      `scripts/hooks/post-compact-rehydrate.js`). What does not exist is a
+ *      route from HERE to it: it is reached only through an injected port and
+ *      no production caller injects one, so this source contributes nothing
+ *      today. Read-path evidence against a real store lives in
+ *      `tests/topology/split-state-sources.test.js`.
  *   2. `<runDir>/run.json.lanes[limb]`      — the leader's operational state,
  *      written by `scripts/split/lane-state.mjs` in the ops vocabulary.
  *   3. the supervisor event stream          — `{runId}.state.json` lanes, a
@@ -20,9 +27,12 @@
  *
  * Writing is narrower than reading: {@link writeWorkerState} writes exactly
  * ONE place, `run.json.lanes[worker]`, stamped `projected_from: 'run.json'`.
- * When the StateStore lands the write target flips to it and `run.json.lanes`
- * becomes the projection — the direction reverses, the "exactly one writer"
- * rule does not.
+ * The design has the write target eventually flipping to the StateStore, with
+ * `run.json.lanes` becoming the projection — the direction reverses, the
+ * "exactly one writer" rule does not. That flip is BLOCKED today, on three
+ * prerequisites none of which live in this file; they are listed under "WHAT
+ * THIS MODULE DOES NOT DO" below so the next planner does not re-issue it as
+ * though it were a local change.
  *
  * The record vocabulary is v1.1's (`V11_STATUSES`: the seven worker statuses
  * plus `failed`); ops and lane words are converted on the way in through the
@@ -34,9 +44,38 @@
  *
  * ── WHAT THIS MODULE DOES NOT DO (write it next to the gate, rules §9) ─────
  *  - It does not talk to the StateStore, the event log, or git. All three are
- *    injected ports. Nothing here proves those readers exist or work; today
- *    exactly zero callers pass any of them — this module is written ahead of
- *    its consumers.
+ *    injected ports. Nothing here proves those readers work in production;
+ *    today exactly zero production callers pass any of them — this module is
+ *    written ahead of its consumers. The one production caller of the write
+ *    is `scripts/split/lane-state.mjs`, and it passes runDir, worker, patch
+ *    and now — no ledger port, no store port. The read has no production
+ *    caller at all.
+ *  - It does not write to the StateStore, and CANNOT today. Three contracts
+ *    block it, all of them outside this module and outside `lib/topology`:
+ *      1. NO RUN-TO-MISSION BINDING. A store write is addressed by an
+ *         `M-YYYYMMDD-…` mission id (`lib/project-state/validate.js#MISSION_ID_PATTERN`).
+ *         A `/split` run is identified by a run id and a limb name; nothing
+ *         maps one to the other, and inventing a mapping here would make this
+ *         file the authority on an identity it does not own.
+ *      2. NOWHERE TO PUT THE OPS KEYS. A worker row is a five-field
+ *         projection of ONE task (`lib/project-state/projection.js#projectWorker`:
+ *         status, owns, heartbeat_at, heartbeat_source, blocked_by), and the
+ *         task schema closes its object (`schemas/task-graph.schema.json`,
+ *         `additionalProperties: false`). `state`, `since`, `window`, `note`
+ *         and `projected_from` have no home there. Measured, not argued: an
+ *         extra task key passes the RUNTIME validator and is then dropped by
+ *         the projection — see the probe in
+ *         `tests/topology/split-state-sources.test.js`.
+ *      3. THE CALLER CANNOT BUILD A STORE. `createStateStore` requires an
+ *         `appendEvent` port and a `sessionId`, and the one production caller
+ *         of the write has neither to give.
+ *    Two further traps a future port must handle, both pinned by that test
+ *    file: the row KEY is the task's OWNER when that owner holds exactly one
+ *    task in the mission (so a lookup by limb name can miss), and the store
+ *    refuses a `blocked_by` reason outside the `lane|gate|human|reconcile`
+ *    allowlist that `split-state-sources.js#stringList` accepts today.
+ *    No `storeWriter` port is added for this: a second zero-consumer
+ *    interface guessing at three unwritten contracts is the defect, not the fix.
  *  - It does not validate the events it hands to `appendEvent`; the writer is
  *    the one validator, and a refusal comes back as `{ok:false}`. The payload
  *    targets `lib/runtime/event-writer.js#writeEvent`, whose `EVENT_RE` takes
@@ -77,8 +116,10 @@ import {
 } from './split-state-sources.js';
 
 /**
- * Read priority, highest first. `'store'` stands for the not-yet-built
- * StateStore / `state.yaml` (T-21); the token is the design's, not a file's.
+ * Read priority, highest first. `'store'` stands for the StateStore /
+ * `state.yaml`, which exists (`lib/project-state/state-manager.js`) but is
+ * reached from here only through the injected `storeReader`; the token names
+ * the SOURCE, not a file this module opens.
  */
 export const STATE_SOURCES = Object.freeze(['store', 'run.json', 'events']);
 
