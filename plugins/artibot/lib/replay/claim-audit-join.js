@@ -174,6 +174,29 @@ function agentIdSet(list, opts) {
 }
 
 /**
+ * The per-agent breakdown, ascending by `agent_id`.
+ *
+ * An ARRAY, not a record: `agent_id` is caller data, and a plain object keyed
+ * by it would make a spawn literally named `__proto__` a prototype write
+ * instead of a visible row.
+ *
+ * @param {Map<string, {audits: number, claims_total: number,
+ *   claims_refuted: number}>} totals - joined audits summed per agent.
+ * @returns {object[]} one row per agent, each with its own `pass_rate`.
+ */
+function byAgentRows(totals) {
+  return [...totals.entries()]
+    .sort((a, b) => cmp(a[0], b[0]))
+    .map(([agent_id, r]) => ({
+      agent_id,
+      audits: r.audits,
+      claims_total: r.claims_total,
+      claims_refuted: r.claims_refuted,
+      pass_rate: rateOf(r.claims_total, r.claims_refuted),
+    }));
+}
+
+/**
  * Join `review.claim_audit` rows to the spawns `route.bound` bound.
  *
  * @param {object[]} events - ledger lines in file order; a non-array reads as
@@ -236,17 +259,6 @@ export function joinClaimAudits(events, opts = {}) {
     claims_total: claimsTotal,
     claims_refuted: claimsRefuted,
     pass_rate: rateOf(claimsTotal, claimsRefuted),
-    // An ARRAY, not a record: `agent_id` is caller data, and a plain object
-    // keyed by it would make a spawn literally named `__proto__` a prototype
-    // write instead of a visible row.
-    by_agent: [...totals.entries()]
-      .sort((a, b) => cmp(a[0], b[0]))
-      .map(([agent_id, r]) => ({
-        agent_id,
-        audits: r.audits,
-        claims_total: r.claims_total,
-        claims_refuted: r.claims_refuted,
-        pass_rate: rateOf(r.claims_total, r.claims_refuted),
-      })),
+    by_agent: byAgentRows(totals),
   };
 }

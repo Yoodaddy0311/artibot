@@ -151,7 +151,9 @@ export const SCORE_UNAVAILABLE_REASON = 'no-spawn-keyed-score-writer';
  * wrote an audit; here, audits were written and not one could be attributed to
  * a bound spawn. This is the state the live ledger is expected to reach first
  * (CANNOT SEE #4), so collapsing it into "unavailable" would hide the writer
- * gap it exists to show.
+ * gap it exists to show. A ledger whose ONLY audit rows are malformed gets
+ * this reason too (`joined` is 0 there as well); `malformed_audits` beside it
+ * is what tells the two apart.
  */
 export const SCORE_NO_JOINED_AUDIT_REASON = 'no-joined-claim-audit';
 
