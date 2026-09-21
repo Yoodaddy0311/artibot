@@ -505,6 +505,16 @@ describe('selectMissionForSession (pure)', () => {
     expect(selectMissionForSession(stateWith([`M-20260921-S${SID8}x`]), SID)).toEqual({ missionId: null });
   });
 
+  it('ignores keys that are not mission ids — a guard that CHANGES which states match', () => {
+    // `lib/mission/mission-id.js#isMissionId` against the pattern in
+    // `lib/mission/contract.js`. Before this guard a hand-edited or
+    // half-written key carrying the right tail counted as a candidate, so the
+    // pair below hit the two-match refusal; now only the real mission is one.
+    expect(selectMissionForSession(stateWith([`x-S${SID8}`]), SID)).toEqual({ missionId: null });
+    expect(selectMissionForSession(stateWith([`x-S${SID8}`, MISSION]), SID).missionId).toBe(MISSION);
+    expect(selectMissionForSession(stateWith([`M-2026092-S${SID8}`]), SID)).toEqual({ missionId: null });
+  });
+
   it('is total: garbage never throws and never invents a mission', () => {
     for (const state of [null, undefined, 42, 'x', {}, { active_missions: null }, { active_missions: [] }]) {
       expect(selectMissionForSession(state, SID), JSON.stringify(state)).toEqual({ missionId: null });
@@ -578,9 +588,7 @@ describe('mission store binding (SH-16)', () => {
    */
   function seedMission(missionId, over = {}) {
     const store = createStateStore({
-      projectRoot: sroot,
-      sessionId: 'sh16-fixture',
-      renderProjectionFile: false,
+      projectRoot: sroot, sessionId: 'sh16-fixture', renderProjectionFile: false,
       resolveGitCommonDir: () => resolveGitCommonDir(sroot),
       appendEvent: () => ({ ok: true, path: '<stub>', seq: 1, bytes: 0 }),
     });
@@ -600,10 +608,10 @@ describe('mission store binding (SH-16)', () => {
     /** @type {Record<string, string>} */ const out = {};
     if (!existsSync(dir)) return out;
     const walk = (cur, prefix) => {
-      for (const entry of readdirSync(cur, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-        const full = path.join(cur, entry.name);
-        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) walk(full, rel);
+      for (const e of readdirSync(cur, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const full = path.join(cur, e.name);
+        const rel = prefix ? `${prefix}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(full, rel);
         else out[rel] = createHash('sha256').update(readFileSync(full)).digest('hex');
       }
     };
@@ -625,18 +633,9 @@ describe('mission store binding (SH-16)', () => {
    * @returns {{ stdout: string, stderr: string, status: number|null }} Outcome.
    */
   function run(body) {
+    const env = { ...process.env, HOME: shome, USERPROFILE: shome, ARTIBOT_CONTEXT_LIFECYCLE_JSON: '{"enabled":true}' };
     const r = spawnSync(process.execPath, [SCRIPT], {
-      cwd: sroot,
-      env: {
-        ...process.env,
-        HOME: shome,
-        USERPROFILE: shome,
-        ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true }),
-      },
-      input: JSON.stringify(body),
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 20000,
+      cwd: sroot, env, input: JSON.stringify(body), encoding: 'utf-8', windowsHide: true, timeout: 20000,
     });
     return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
   }
@@ -647,10 +646,8 @@ describe('mission store binding (SH-16)', () => {
   beforeEach(() => {
     shome = mkdtempSync(path.join(os.tmpdir(), 'pcr-shome-'));
     sroot = mkdtempSync(path.join(os.tmpdir(), 'pcr-sroot-'));
-    git(['init', '-q', '-b', 'master'], sroot);
-    git(['config', 'user.email', 't@example.com'], sroot);
-    git(['config', 'user.name', 't'], sroot);
-    git(['config', 'commit.gpgsign', 'false'], sroot);
+    for (const args of [['init', '-q', '-b', 'master'], ['config', 'user.email', 't@example.com'],
+      ['config', 'user.name', 't'], ['config', 'commit.gpgsign', 'false']]) git(args, sroot);
     writeFileSync(path.join(sroot, 'a.txt'), 'a\n');
     git(['add', 'a.txt'], sroot);
     git(['commit', '-q', '-m', 'base'], sroot);
@@ -733,6 +730,11 @@ describe('mission store binding (SH-16)', () => {
     }));
     expect(ctx.missionId).toBe(MISSION);
     expect(calls).toBe(0);
+
+    // Positive control: a census that cannot SEE a write proves nothing by
+    // staying equal, so make one and require the difference.
+    seedMission(MISSION_TWIN);
+    expect(census(storeDir())).not.toEqual(before);
   });
 
   it('no store on disk: the gap stays at eleven and no store directory is created', () => {
@@ -750,9 +752,29 @@ describe('mission store binding (SH-16)', () => {
     const withStore = run(payload());
     expect(stripStamp(JSON.parse(withStore.stdout).systemMessage))
       .toBe(stripStamp(JSON.parse(without.stdout).systemMessage));
+    // The RAW bytes too: a new top-level key or a reordered one survives a
+    // comparison that parses first and reads a single field.
+    expect(stripStamp(withStore.stdout)).toBe(stripStamp(without.stdout));
     for (const token of [MISSION, 'mission_id', 'based_on', 'intentRevision']) {
       expect(JSON.parse(withStore.stdout).systemMessage, token).not.toContain(token);
     }
+  });
+
+  it('an unreadable journal degrades to the no-store gap, in a real child run', () => {
+    // A DIRECTORY where the journal file belongs. `lib/project-state/journal.js`
+    // guards only the absent case, so its `readFileSync` throws on the path
+    // existing-but-unreadable — the one I/O failure this hook can provoke
+    // without root. What the hook must do with it is degrade, not die.
+    seedMission(MISSION);
+    const journal = path.join(storeDir(), 'project-state.jsonl');
+    rmSync(journal, { force: true });
+    mkdirSync(journal);
+
+    const r = run(payload());
+    expect(r.status).toBe(0);
+    expect(() => JSON.parse(r.stdout)).not.toThrow();
+    expect(record().contextReceipt.missing).toHaveLength(11);
+    expect(record().contextReceipt.missing).toContain('mission_id');
   });
 
   it('degrades to the old behaviour when the store cannot be opened, and never throws', () => {
@@ -768,10 +790,8 @@ describe('mission store binding (SH-16)', () => {
     const empty = mkdtempSync(path.join(os.tmpdir(), 'pcr-empty-'));
     try {
       expect(readMissionContext(empty, SID)).toEqual({ missionId: null });
-      expect(existsSync(path.join(empty, '.artibot'))).toBe(false);
+      expect(existsSync(path.join(empty, '.artibot'))).toBe(false); // and creates nothing
       expect(statSync(empty).isDirectory()).toBe(true);
-    } finally {
-      rmSync(empty, { recursive: true, force: true });
-    }
+    } finally { rmSync(empty, { recursive: true, force: true }); }
   });
 });

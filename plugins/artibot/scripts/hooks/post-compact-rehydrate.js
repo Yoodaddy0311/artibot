@@ -42,6 +42,15 @@
  *   plan_revision}`, read from the project-state store when — and only when —
  *   exactly one active mission ends in `-S<sid8>` for this session.
  *
+ *   ELEVEN is the count this caller can never fill on its own, not what a run
+ *   prints. `input_tokens` is a twelfth, CONDITIONAL leaf: it is missing too
+ *   whenever no accepted snapshot supplies `context_window.current_tokens`
+ *   (see `reportReceipt`). So `missing=` moves 11→8 when the host reports that
+ *   key and 12→9 when it does not. A `missing=9` is therefore not a regression,
+ *   and a bare `missing=11` is ambiguous — no mission with the key present, or
+ *   a mission id without usable revisions with the key absent. Read the NAMES
+ *   in `contextReceipt.missing`, never the count.
+ *
  *   The other EIGHT are the PERMANENT WORKER AXIS:
  *     transforms.{dedup, tool_compression, history_trim, memory_add,
  *                 project_knowledge_add}
@@ -74,6 +83,7 @@ import { readLatestHandoff } from '../../lib/handoff/handoff-store.js';
 import { buildRehydrationBundle, DEFAULT_MAX_BYTES, reportContextReceipt } from '../../lib/context/rehydration.js';
 import { buildContextPressureEvent, computeContextPressure, estimateTokens } from '../../lib/context/context-pressure.js';
 import { appendEvent } from '../../lib/supervisor/run-store.js';
+import { isMissionId } from '../../lib/mission/mission-id.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { isMainEntry } from './_main-entry.js';
@@ -343,11 +353,16 @@ export function sessionSuffix(sessionId) {
  * NEITHER is reported rather than one being guessed.
  *
  * Revisions are read NESTED (`mission.intent.revision`; confirmed against the
- * live store by `lib/checkpoint/resume-controller.js` and written that way by
+ * live store by `lib/checkpoint/resume-controller.js` and read that way by
  * `lib/checkpoint/save-checkpoint.js#buildContent`) and passed through as they
  * are found. Nothing is coerced or defaulted: `lib/context/context-receipt.js`
  * takes integers >= 1 and records the leaf as missing otherwise, which is the
  * honest outcome — a forged `1` would be an unrecoverable false measurement.
+ *
+ * Only keys that are valid mission ids are candidates (`isMissionId`): a
+ * snapshot can be hand-edited or half-written, and a key like `x-Sabcdefgh`
+ * carries the right tail without being a mission. Supplying it as `mission_id`
+ * would put a non-id into a receipt whose schema forbids one.
  *
  * Total: any argument, including a proxy-shaped snapshot, yields a result.
  *
@@ -365,7 +380,7 @@ export function selectMissionForSession(state, sessionId) {
     const tail = `-S${sid8}`;
     let found = null;
     for (const id of Object.keys(missions)) {
-      if (!id.endsWith(tail)) continue;
+      if (!id.endsWith(tail) || !isMissionId(id)) continue;
       if (found !== null) return none; // two or more — the session cannot disambiguate
       found = id;
     }
@@ -435,7 +450,9 @@ export function readMissionContext(projectRoot, sessionId, openStore = openMissi
  * Of the eleven that were missing, `mission_id` and the two `based_on.*`
  * revisions are now supplied WHEN the store names exactly one mission for this
  * session; the remaining eight are the permanent worker axis named in the
- * module header. A partial receipt is still never published.
+ * module header. `input_tokens` is outside that eleven: it goes missing on its
+ * own when the snapshot has no `current_tokens` (12→9 instead of 11→8). A
+ * partial receipt is still never published.
  *
  * @param {object} bundle
  * @param {object|null} snapshot
