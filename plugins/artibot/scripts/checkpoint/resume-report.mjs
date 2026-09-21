@@ -31,6 +31,13 @@
  *      before the journal append). Binding a refusal rather than a no-op means
  *      that if a write path is ever reached from here by accident, it fails
  *      closed instead of committing an unpaired write.
+ *      PRECISELY what "fails closed" covers: no journal line and no snapshot,
+ *      because both are written after the refusal check. It does NOT cover the
+ *      store directory or the file lock — `state-manager.js#commit` creates the
+ *      directory and takes the lock BEFORE calling the body that refuses. So a
+ *      write attempt from here would leave no record, but could leave a
+ *      directory. No such path exists today; this says what the guarantee is
+ *      worth if one is ever added.
  *
  * THE LEDGER WRITER IS NOT IMPORTED — not the function, not its name.
  * `lib/runtime/middleware/tasks.js#openMissionStore` is the existing way to open
@@ -51,6 +58,9 @@
  *
  * ── EXIT CODES ─────────────────────────────────────────────────────────────
  *   0  a report was produced — INCLUDING when everything in it is blocked
+ *   1  an unexpected failure escaped `main` (a bug here, not a finding about
+ *      the project): the message goes to stderr and NO document is printed, so
+ *      a caller never parses a half-built report as a whole one
  *   2  usage error: the command line is wrong and nothing was read
  *
  * A blocked report is a successful report. This is a reporting tool, not a
@@ -285,6 +295,12 @@ async function contractBlock(projectRoot, missionId, nowMs) {
     const report = await buildResumeReport(ports, { missionId: id });
     missions.push({
       mission_id: id,
+      // An id that is in no store still produces a well-formed report — every
+      // step just reads "absent". Without this flag that document is
+      // indistinguishable from a real mission in trouble, which is how a typo'd
+      // `--mission` reads as a finding. The controller cannot say it: a missing
+      // mission and a mission with nothing to say are the same to a read port.
+      in_store: store.getMission(id) !== null,
       checkpoint_id: report.evidence?.checkpoint_id ?? null,
       ts: report.evidence?.ts ?? null,
       resumable: report.resumable,
@@ -341,11 +357,30 @@ function resolveLimbBranches(projectRoot, run, plan) {
 /**
  * Git evidence for one limb, in the shape `lane-monitor.js#assessLane` documents.
  *
- * `dirty` is `null` — NOT measured. Measuring it needs each limb's worktree
- * path and a `git status` inside it, and it only changes the verdict when
- * session presence is known, which this CLI never observes (`ListAgents` is
- * main-session only). `null` reads as "not measured" and degrades toward
- * `unknown`, which is the honest value.
+ * ── THE TIMESTAMP IS ATTRIBUTED, NOT JUST READ ────────────────────────────
+ * `git log -1 <branch>` answers "when was the tip committed?", which is NOT the
+ * question. A limb that has produced nothing sits AT its base, so the tip is the
+ * base commit and its date belongs to whoever made the base — often minutes
+ * old on a fresh run. Handing that to `assessLane` reads as a `commit` signal
+ * minutes old and classifies an idle lane `healthy` with an empty `blocked_by`:
+ * fail-open, in the one direction the supervisor exists to catch.
+ *
+ * So the date is taken only when the limb has commits OF ITS OWN in the base
+ * range — `commitCount > 0` over a `base..branch` walk that resolved. That
+ * property is read off the measurement rather than off a list of `reason`
+ * words, so a new reason cannot quietly join the attributing side. Both halves
+ * matter: without a base there is no range, and a full-history walk counts the
+ * shared past as the limb's own.
+ *
+ * Unattributed means `lastCommitAt: null`, and with no heartbeat either that is
+ * `signal: 'none'` → `health: 'unknown'` (lane-monitor.js, the `signal === 'none'`
+ * return) → `reconcile:lane-unknown`. "Not measured" is louder than a borrowed
+ * timestamp, which is the fail-closed direction.
+ *
+ * `dirty` is `null` — NOT measured, and it changes nothing here: the branch
+ * that reads it (`session.present === false`) is unreachable from this CLI,
+ * which observes no session and therefore passes none. It is present in the
+ * shape only so the evidence object is the one `assessLane` documents.
  *
  * @param {string} projectRoot - Absolute project root.
  * @param {string|null} branch - Limb branch.
@@ -355,8 +390,11 @@ function resolveLimbBranches(projectRoot, run, plan) {
 function limbGitEvidence(projectRoot, branch, base) {
   if (!branch) return { complete: false, lastCommitAt: null, dirty: null, reason: 'no-branch-name' };
   const completion = readLimbCompletion({ cwd: projectRoot, branch, base });
-  const log = git(['log', '-1', '--format=%cI', `refs/heads/${branch}`, '--'], projectRoot);
-  const stamp = log.ok ? log.out.trim() : '';
+  const ownCommits = completion.base !== null && completion.commitCount > 0;
+  // Not merely ignored when unattributable — not asked for. The tip date of a
+  // limb that committed nothing is evidence about the base, not about the limb.
+  const log = ownCommits ? git(['log', '-1', '--format=%cI', `refs/heads/${branch}`, '--'], projectRoot) : null;
+  const stamp = log?.ok === true ? log.out.trim() : '';
   return {
     complete: completion.complete,
     lastCommitAt: stamp === '' ? null : stamp,
@@ -387,7 +425,7 @@ function laneBlock(projectRoot, runJsonPath, nowMs) {
   const gitReasons = new Map();
   for (const { limb, branch } of resolveLimbBranches(projectRoot, run, plan)) {
     const gitEvidence = limbGitEvidence(projectRoot, branch, base);
-    gitReasons.set(limb, { branch, reason: gitEvidence.reason });
+    gitReasons.set(limb, { branch, reason: gitEvidence.reason, lastCommitAt: gitEvidence.lastCommitAt });
     // `session` is deliberately absent: presence is not observed here, and
     // `{present: false}` would be an assertion this CLI cannot make.
     lanesInput[limb] = { gitEvidence };
@@ -397,6 +435,9 @@ function laneBlock(projectRoot, runJsonPath, nowMs) {
     ...r,
     branch: gitReasons.get(r.limb)?.branch ?? null,
     complete_reason: gitReasons.get(r.limb)?.reason ?? null,
+    // Reported so a reader can tell "no commit of its own" from "a commit this
+    // CLI failed to read" — the two produce the same `unknown` health.
+    last_commit_at: gitReasons.get(r.limb)?.lastCommitAt ?? null,
   }));
   return { run_json: runJsonPath, base: base ?? null, plan_json: plan === null ? null : planPath, limbs: rows };
 }
@@ -434,9 +475,10 @@ function renderContract(block) {
   out.push(`store: ${block.store.dir} (${block.store.source})`);
   if (block.missions.length === 0) return [...out, '측정 불가: 활성 mission 0건 — 보고할 대상이 없다'];
   out.push(renderTable(
-    ['mission', 'checkpoint', 'steps ok/fail/unknown', 'resumable', 'blocked_by'],
+    ['mission', 'in store', 'checkpoint', 'steps ok/fail/unknown', 'resumable', 'blocked_by'],
     block.missions.map((m) => [
       m.mission_id,
+      m.in_store ? 'yes' : 'NO (unknown id)',
       m.checkpoint_id ?? '-',
       `${m.steps.ok}/${m.steps.failed}/${m.steps.unknown}`,
       m.resumable === true ? 'yes' : 'no',
@@ -457,7 +499,7 @@ function renderLanes(block) {
   if (block.unavailable) return [...out, `측정 불가: ${block.unavailable}`];
   if (block.limbs.length === 0) return [...out, '측정 불가: 레인 0건 — run.json 에 limbs·lanes 가 없다'];
   out.push(renderTable(
-    ['limb', 'ops', 'lane state', 'health', 'signal', 'complete', 'blocked_by'],
+    ['limb', 'ops', 'lane state', 'health', 'signal', 'complete', 'own last commit', 'blocked_by'],
     block.limbs.map((l) => [
       l.limb ?? '-',
       l.opsState ?? 'unknown',
@@ -465,6 +507,7 @@ function renderLanes(block) {
       l.assessment?.health ?? '-',
       l.assessment?.signal ?? '-',
       l.complete_reason ?? '-',
+      l.last_commit_at ?? '-',
       blockedCell(l.blocked_by),
     ]),
   ));

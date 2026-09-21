@@ -200,9 +200,11 @@ afterAll(() => {
 });
 
 describe('the run writes nothing', () => {
-  it('leaves every file under .artibot byte-identical and creates none (--all)', () => {
-    const tree = path.join(root, '.artibot');
-    const before = census(tree);
+  it('leaves every file under the whole project root byte-identical and creates none (--all)', () => {
+    // The WHOLE root, not just `.artibot`: a write landing anywhere else —
+    // a projection, a lock, a stray temp file — would have been invisible to a
+    // census scoped to the directory we expected to be written to.
+    const before = census(root);
     // The fixture must be non-trivial, or "unchanged" is a statement about an
     // empty directory.
     expect(Object.keys(before).length).toBeGreaterThanOrEqual(3);
@@ -210,7 +212,7 @@ describe('the run writes nothing', () => {
     const res = run(['--all', '--cwd', root]);
     expect(res.status, res.stderr).toBe(0);
 
-    const after = census(tree);
+    const after = census(root);
     expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
     expect(bytesOnly(after)).toEqual(bytesOnly(before));
 
@@ -260,6 +262,27 @@ describe('the Resume Contract block', () => {
     expect(status).toBe(0);
     expect(stdout).toContain('M-20260921-999');
     expect(stdout).toContain('reconcile:checkpoint-missing');
+  });
+
+  it('marks an id the store has never heard of, so a typo does not read as a finding', () => {
+    // Table rows only: the `scope:` header line names the mission too, and
+    // matching it would assert against the wrong line in both directions.
+    const rowFor = (out, id) => out.split('\n').find((l) => l.startsWith('| ') && l.includes(id));
+
+    const unknown = run(['--mission', 'M-20260921-999', '--cwd', root]);
+    const unknownRow = rowFor(unknown.stdout, 'M-20260921-999');
+    expect(unknownRow).toContain('NO (unknown id)');
+    expect(JSON.parse(run(['--mission', 'M-20260921-999', '--cwd', root, '--json']).stdout)
+      .contract.missions[0].in_store).toBe(false);
+
+    // The negative half: a mission that IS in the store must not carry the
+    // marker, or the flag would be decoration rather than a distinction.
+    const real = run(['--mission', MISSION_WITH, '--cwd', root]);
+    const realRow = rowFor(real.stdout, MISSION_WITH);
+    expect(realRow).toBeDefined();
+    expect(realRow).not.toContain('unknown id');
+    expect(JSON.parse(run(['--mission', MISSION_WITH, '--cwd', root, '--json']).stdout)
+      .contract.missions[0].in_store).toBe(true);
   });
 });
 
@@ -314,6 +337,109 @@ describe('the lane reconcile block', () => {
     const rowB = stdout.split('\n').find((l) => l.includes('limb-b'));
     expect(rowB).toBeDefined();
     expect(rowB).not.toContain('reconcile:ops-state-unknown');
+  });
+});
+
+describe('a lane that has committed nothing of its own', () => {
+  /**
+   * A git repository whose history is shared by two branches: `b-empty` sits at
+   * the base commit, `b-work` has one commit past it. Both are made WITHOUT a
+   * checkout (branch pointers only), so nothing outside this temp directory is
+   * ever a git argument.
+   *
+   * @type {{root: string, base: string, runJson: string}}
+   */
+  let repo;
+
+  /**
+   * Run git inside the fixture. Identity and signing are forced on the command
+   * line so a developer's global config cannot make the fixture fail or, worse,
+   * sign it.
+   *
+   * @param {string[]} args - Git arguments.
+   * @param {string} cwd - Fixture directory.
+   * @returns {string} Trimmed stdout.
+   */
+  function fixtureGit(args, cwd) {
+    const res = spawnSync('git', [
+      '-c', 'user.email=fixture@example.invalid', '-c', 'user.name=fixture',
+      '-c', 'commit.gpgsign=false', ...args,
+    ], { cwd, encoding: 'utf-8', timeout: 30_000, windowsHide: true });
+    if (res.status !== 0) throw new Error(`git ${args[0]} failed: ${res.stderr ?? ''}`);
+    return (res.stdout ?? '').trim();
+  }
+
+  beforeAll(() => {
+    const canonicalise = realpathSync.native || realpathSync;
+    const dir = canonicalise(mkdtempSync(path.join(tmpdir(), 'artibot-resume-lane-')));
+    fixtureGit(['init'], dir);
+    fixtureGit(['commit', '--allow-empty', '-m', 'base'], dir);
+    const base = fixtureGit(['rev-parse', 'HEAD'], dir);
+    // b-empty is pinned at the base BEFORE the next commit: that is the shape
+    // under test — a limb sitting exactly where it started.
+    fixtureGit(['branch', 'b-empty'], dir);
+    fixtureGit(['commit', '--allow-empty', '-m', 'limb work'], dir);
+    fixtureGit(['branch', 'b-work'], dir);
+
+    const stateDir = path.join(dir, 'runstate');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(path.join(stateDir, 'plan.json'), JSON.stringify({
+      base,
+      limbs: [{ limb: 'limb-empty', branch: 'b-empty' }, { limb: 'limb-work', branch: 'b-work' }],
+    }), 'utf-8');
+    writeFileSync(path.join(stateDir, 'run.json'), JSON.stringify({
+      runId: 'split-lane-fixture', base,
+      lanes: { 'limb-empty': { state: 'active' }, 'limb-work': { state: 'active' } },
+    }), 'utf-8');
+    repo = { root: dir, base, runJson: path.join(stateDir, 'run.json') };
+  });
+
+  afterAll(() => {
+    if (repo?.root) rmSync(repo.root, { recursive: true, force: true });
+  });
+
+  it('is never healthy on the strength of the BASE commit it is sitting on', () => {
+    // The fail-open this pins: the base was committed seconds ago, so reading
+    // the branch tip would hand `assessLane` a fresh `commit` signal and
+    // classify a lane that has done nothing as healthy with no blocked_by.
+    const { stdout, status } = run(['--all', '--cwd', repo.root, '--run-json', repo.runJson, '--json']);
+    expect(status).toBe(0);
+    const limbs = JSON.parse(stdout).lanes.limbs;
+    const empty = limbs.find((l) => l.limb === 'limb-empty');
+
+    expect(empty.last_commit_at).toBe(null);
+    expect(empty.assessment.health).toBe('unknown');
+    expect(empty.assessment.signal).toBe('none');
+    expect(empty.blocked_by).toContain('reconcile:lane-unknown');
+    expect(empty.assessment.health).not.toBe('healthy');
+  });
+
+  it('is healthy when the commit really is its own (negative control)', () => {
+    // Without this the assertion above would pass on a CLI that had simply
+    // stopped reading git at all.
+    const { stdout } = run(['--all', '--cwd', repo.root, '--run-json', repo.runJson, '--json']);
+    const work = JSON.parse(stdout).lanes.limbs.find((l) => l.limb === 'limb-work');
+
+    expect(work.last_commit_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(work.assessment.health).toBe('healthy');
+    expect(work.assessment.signal).toBe('commit');
+    expect(work.blocked_by).toEqual([]);
+  });
+
+  it('writes nothing into a git-common-dir store either, .git included', () => {
+    // The other fixture is not a repository, so its store falls back to
+    // `.artibot/runtime`. Here `resolveStoreLocation` takes the git branch and
+    // the store path lands under `.git/` — a location the fallback test never
+    // exercises. The census covers the whole tree, git's own files included.
+    const before = census(repo.root);
+    expect(Object.keys(before).some((k) => k.startsWith('.git/'))).toBe(true);
+
+    const res = run(['--all', '--cwd', repo.root, '--run-json', repo.runJson]);
+    expect(res.status, res.stderr).toBe(0);
+
+    const after = census(repo.root);
+    expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
+    expect(bytesOnly(after)).toEqual(bytesOnly(before));
   });
 });
 
