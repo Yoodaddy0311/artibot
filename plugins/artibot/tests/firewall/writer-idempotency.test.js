@@ -8,7 +8,7 @@
  *
  * THE FIRST SENTENCE IS DELIBERATELY NOT "every appender". Two earlier versions
  * of this header claimed completeness and were wrong both times, so the claim
- * is now scoped to what the four families below mechanically detect, and the
+ * is now scoped to what the six families below mechanically detect, and the
  * measured holes are listed under "WHAT THIS GATE CANNOT SEE".
  *
  * TWO ROUNDS OF UNDER-DISCOVERY, RECORDED BECAUSE THE FAILURE MODE REPEATS.
@@ -65,13 +65,16 @@
  *
  * WHAT THIS GATE CANNOT SEE:
  *
- *   - A KEY UNDER ANOTHER NAME, and this is CURRENT, not hypothetical. Four
- *     stores dedupe today without using the word: `supervisor/run-store.js`
- *     (`actionId`, returns `duplicate:true`), `autopilot/memory.js`
- *     (`taskHash` + lesson text, compared against the LAST row only),
- *     `learning/ledger/store.js` (per-session watermark cursor plus a
- *     whole-line Set), and `learning/memory/episodic.js` (content `hash`,
- *     which is also invisible to discovery's `keyed` axis). All read `exempt`.
+ *   - A KEY UNDER ANOTHER NAME, and this is CURRENT, not hypothetical. AT LEAST
+ *     seven stores dedupe today without using the word (a lower bound, not a
+ *     census): `supervisor/run-store.js` (`actionId`, returns
+ *     `duplicate:true`), `autopilot/memory.js` (`taskHash` + lesson text,
+ *     compared against the LAST row only), `learning/ledger/store.js`
+ *     (per-session watermark cursor plus a whole-line Set),
+ *     `learning/memory/episodic.js` (content `hash`),
+ *     `autopilot/failure-memory.js` (`signature` upsert),
+ *     `learning/macro-learner.js` (pattern `fingerprint` upsert) and
+ *     `learning/skill-injector.js` (`ruleHash` set). All read `exempt`.
  *
  *   - READ-MODIFY-WRITE STORES NOT NAMED `append*`/`record*`. Family E keys on
  *     a NAMING convention, so a store whose function is `save*` or `push*`
@@ -108,14 +111,15 @@
  *     keyed. Zero such modules today; the self-verification below pins the
  *     behavior so the day one appears is a deliberate decision.
  *
- *   - STRIPPER MISPARSES. Two measurements, and they disagree. Line-count
- *     preservation across all 395 files: 0 files drift. Review reported 1
- *     misparse (`planning/artifacts.js`, an escaped backtick inside a nested
- *     template substitution) with no classification effect; a line-count proxy
- *     cannot see a same-line misparse, so that count is NOT confirmed here and
- *     NOT refuted. What is measured is that all 53 classifications are stable.
- *     This is a scanner, not a parser: no JSX, no nested template
- *     substitutions.
+ *   - STRIPPER MISPARSES. Two measurements of two different things, both true
+ *     (2026-09-21, all 395 files). Line-count preservation: 0 files drift.
+ *     Residual-comment-line check (does any stripped line still start with a
+ *     JSDoc opener, a ` * ` continuation or a closer): 1 file,
+ *     `planning/artifacts.js`, where an escaped backtick inside a nested
+ *     template substitution flips string parity and the JSDoc after it reads as
+ *     code. That file carries no scanner token, so its classification is
+ *     unchanged, and all 53 classifications are stable. This is a scanner, not
+ *     a parser: no JSX, no nested template substitutions.
  *
  * OPEN DEFECT CANDIDATES, recorded rather than repaired. Seven run-ledger
  * writers append with no idempotency key; each is marked below. Two of them
@@ -414,12 +418,12 @@ const INVENTORY = {
   'autopilot/engine-state.js': x('calls appendLesson into the autopilot lesson store; no key of its own.'),
   'autopilot/recovery-transition.js': x('calls appendLesson into the autopilot lesson store; no key of its own.'),
   'autopilot/memory.js': x('per-feature lessons jsonl. appendLesson drops a row whose taskHash and lesson text match the LAST row only - a key under another name, and a weaker one than it looks.'),
-  'autopilot/failure-memory.js': x('per-repo failure JSON keyed by repoHash; read-modify-write of a cluster list, no per-record key.'),
+  'autopilot/failure-memory.js': x('per-repo failure JSON keyed by repoHash; recordFailureMemory upserts a cluster by signature (findIndex on e.signature) - a key under another name.'),
   'autopilot/goal-budget-aggregator.js': x('per-queue budget JSON rewritten whole; no record stream.'),
 
   // --- core -----------------------------------------------------------------
   'core/decision-trail.js': x('runtime/decision-trail.json; recordDecision reads the array, pushes and rewrites. No per-record key.'),
-  'core/user-profile.js': x('user-profile.json rewritten whole via a temp file; no record stream.'),
+  'core/user-profile.js': x('user-profile.json, read-modify-write: recordSignal pushes a {type, value, timestamp} row onto profile.signals and caps it at MAX_STORED_SIGNALS. A row stream with no key.'),
 
   // --- checkpoint stores ----------------------------------------------------
   'checkpoint/checkpoint-store.js': x('mints checkpoint_id itself and hands the record to an injected adapter.append. The author site for checkpoint identity, but that id is a record id, not an idempotency key.'),
@@ -438,7 +442,7 @@ const INVENTORY = {
   'learning/lifelong-learner.js': x('daily-experiences.json and learning-log.json; read-modify-write with pruning, no per-record key.'),
   'learning/skill-injector.js': x('skill-injection-log.json; a ruleHash set keeps a rule from being injected twice - a key under another name for rules, not for log rows.'),
   'learning/wakeup-scheduler.js': x('wakeup request and rate-limit JSON; read-modify-write of an entries array, no per-record key.'),
-  'learning/kill-switch.js': x('kill-switch state JSON rewritten whole; no record stream.'),
+  'learning/kill-switch.js': x('kill-switch state JSON, read-modify-write: recordFailure pushes an {at, error} row onto a failures array and prunes it to a time window. A row stream with no key.'),
   'learning/macro-learner.js': x('macro-suggestions.json; observations and suggestions upsert by pattern fingerprint, which dedupes suggestions rather than keying rows.'),
 };
 
@@ -568,6 +572,13 @@ describe('scanner self-verification', () => {
 
   it('does not discover an unrelated module', () => {
     expect(c(F.unrelated)).toEqual({ discovered: false, families: '', keyed: false });
+  });
+
+  it('discovers a key producer that assigns the key onto a member and assembles no envelope', () => {
+    // The only string fixture for the member-assignment key site. In real code
+    // `observability/decision-events.js` is keyed through that site alone.
+    expect(c('export const k = (data) => { data.idempotency_key = 1; };'))
+      .toEqual({ discovered: true, families: 'B', keyed: true });
   });
 
   it('does not read an allowlist array element as a key assignment', () => {
