@@ -416,5 +416,22 @@ describe('mergeQueuedNotification', () => {
   it('returns false instead of throwing when the state rejects the write', () => {
     const state = Object.freeze({});
     expect(() => mergeQueuedNotification(state, { queued: { type: 'pause' } })).not.toThrow();
+    expect(mergeQueuedNotification(state, { queued: { type: 'pause' } })).toBe(false);
+  });
+
+  // Every remaining way the merge can be made to throw. The helper runs at a
+  // phase ACK point, so "did not throw" and "reported failure" are two separate
+  // promises and both are asserted.
+  it.each([
+    ['a null state', () => null, { queued: { type: 'pause' } }],
+    ['an undefined state', () => undefined, { queued: { type: 'pause' } }],
+    ['a frozen queuedQuestions array', () => ({ queuedQuestions: Object.freeze([]) }), { queued: { type: 'pause' } }],
+    ['a queued payload whose own getter throws while spreading', () => ({}), {
+      queued: { type: 'pause', get reason() { throw new Error('hostile'); } },
+    }],
+  ])('neither throws nor reports success for %s', (_label, makeTarget, notification) => {
+    const state = makeTarget();
+    expect(() => mergeQueuedNotification(state, notification)).not.toThrow();
+    expect(mergeQueuedNotification(makeTarget(), notification)).toBe(false);
   });
 });

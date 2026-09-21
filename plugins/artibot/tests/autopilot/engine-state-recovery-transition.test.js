@@ -13,7 +13,7 @@
  * injected — so what is pinned here is the path an engine actually takes.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -276,7 +276,17 @@ describe('recordPhaseResult — a recovery pause reaches the persisted queue', (
     process.env[PAIR] = getPluginRoot();
   });
 
+  // Removal comes BEFORE the env restore, and that order is load-bearing twice
+  // over: the file-level `afterEach` has already run `deleteSessionArtifacts`
+  // with `ownDir` still in force (an inner `afterAll` fires after the last
+  // test's `afterEach`), and restoring first would leave this block deleting a
+  // directory it no longer owns the pointer to. Without the removal each run
+  // minted a new `artibot-ca03-queue-<pid>` and left it behind — measured at 6
+  // strays before this was added.
   afterAll(() => {
+    try {
+      rmSync(ownDir, { recursive: true, force: true });
+    } catch { /* best-effort — a locked handle must not fail the suite */ }
     restore(VAR, saved.dir);
     restore(PAIR, saved.root);
   });

@@ -205,11 +205,15 @@ export function recordPhaseResult(state, payload = {}, config = undefined) {
         // The pause notification queues onto the session FILE from inside that
         // call, i.e. before the persist below rewrites the file from this
         // object. Taking the returned payload into the live queue is what makes
-        // the persist carry it instead of erasing it — and it is the only
-        // variant that also survives the next persist of this same state.
-        // Narrow on purpose: an unapplied gate, a phase-advancing action, and a
-        // notifier that threw (`notification === null`) all merge nothing, so
-        // every path but an applied PAUSED is byte-identical to before.
+        // the persist carry it instead of erasing it — and unlike announcing
+        // after the persist, it also survives the next persist of this same
+        // state, because the entry then lives in the object every later write
+        // is made from.
+        // Narrow on purpose: an unapplied gate and a phase-advancing action
+        // never reach the merge, and a notifier that threw reaches it with
+        // `notification === null`, which merges nothing. So the only path that
+        // differs from before is an applied PAUSED whose notification was
+        // actually delivered.
         if (applied?.applied === true && applied.next === 'PAUSED') {
           mergeQueuedNotification(state, applied.notification);
         }
