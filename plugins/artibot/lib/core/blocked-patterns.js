@@ -85,10 +85,14 @@ const BLOCKED_PATTERNS = Object.freeze([
   // flag (L2 grades those `caution`/rm-rf-path as well).
   // THE ONE RESIDUAL BLIND SPOT, AND IT IS FULL-STACK: a recursive delete with
   // NO force flag and a path longer than the window. `rm --recursive <513
-  // filler>/x` matches no L1 rule and reaches approve, and L2 has no
-  // recursive-only rule either (rm-rf-root needs a `/`-, `~`- or `$HOME`-leading
-  // target; rm-rf-path needs a force flag — lib/autopilot/safety.js, ids
-  // measured 2026-09-11 21:33), so it is `classifyRisk` safe too. Inside 512
+  // filler>/x` matches no L1 rule and reaches approve, and L2 had no
+  // recursive-only rule either (rm-rf-root needs a target that LEADS with the
+  // home or root marker; rm-rf-path needs a force flag — lib/autopilot/safety.js,
+  // ids measured 2026-09-11 21:33), so it was `classifyRisk` safe too. That
+  // leading set is no longer three items: 2026-09-14 added quoted targets and
+  // 2026-09-21 added `${HOME}` and `~name`, so do not read the list above as
+  // current — lib/autopilot/safety.js is the only place that enumerates it, on
+  // purpose. Neither edit touches this shape, which leads with filler. Inside 512
   // characters the same command is L1 block, so this is a width gap, not a shape
   // gap, and 512 puts it past any real path. It is pinned in
   // tests/core/blocked-patterns.test.js under 'DOCUMENTED BLIND SPOT' — that pin

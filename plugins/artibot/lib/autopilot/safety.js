@@ -126,18 +126,61 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // NOT expanded, so those commands touch a literal `./~` path, not $HOME.
   // The failure is toward blocking and the form is vanishingly rare; the real
   // frequency is unmeasured (no transcript census).
-  // STILL MISSED, deliberately out of scope (owner decision): `${HOME}` (brace
-  // expansion — needs its own branch) and `~user` (another user's home — the
-  // `~` branch requires a terminator right after the tilde). Measured
-  // 2026-09-14: 32 of 34 target forms match, these two are the remainder.
-  // Linear, unchanged: the option run is untouched and the new class adds no
-  // quantifier. Rule-alone median of 3 at 122,880B (node v24.15.0, Windows):
+  //
+  // 2026-09-21 (guard-l2-residual). The two shapes the 2026-09-14 note left
+  // "out of scope" — `${HOME}` and `~user` — are now graded. The owner reopened
+  // them; that note recorded the scope of THAT wave, not a prohibition.
+  //   (d) `\$HOME` -> `\$(?:HOME|\{HOME\})`. Same target, two spellings, and
+  //       they used to grade differently: the plain form was danger while every
+  //       brace form fell through to rm-rf-path at CAUTION (17 of 17 forms
+  //       measured 2026-09-21). The TERMINATOR SET IS REUSED UNCHANGED, which
+  //       is what keeps `${HOME}x` and `${HOME}_old` off this rule — those are
+  //       SIBLINGS of home (`/home/userx`), exactly as `$HOMEDIR` is.
+  //   (e) the `~` branch gains an optional bounded name: `~(?:[+-]|\w[\w.-]*)?`
+  //       before the same terminator group. `~user` is a home directory, so it
+  //       belongs to this rule and not to the path rules — and it could reach
+  //       neither, because rm-rf-path and rm-recursive-path both exclude
+  //       tilde-leading targets as "rm-rf-root's job" while this branch demanded
+  //       a terminator immediately after the tilde. The shape fell between all
+  //       three rules: 22 of 22 forms were L2 SAFE (measured 2026-09-21).
+  //       With a force flag L1 blocks them, so that was a direction-rule
+  //       violation; the FORCELESS recursive forms (`rm -r ~user`,
+  //       `rm --recursive ~user`, `rm -R ~user`) matched no L1 rule either and
+  //       were a FULL-STACK miss. `~+` / `~-` / `~1` (PWD, OLDPWD, dirstack)
+  //       ride the same branch — not home, but the same tilde expansion into a
+  //       directory, and they were L1 block / L2 safe too.
+  // NO NEW RULE OBJECT: the catalogue is still 27 rules and the static
+  // scanner's denominator (95) is untouched. Both branches are graded 'danger',
+  // so the id list in lib/security/human-gates.js (HG-09 `existingCoverage`,
+  // which names ids and holds no copy of this regex) stays true as written.
+  // ACCEPTED OVER-MATCH (e): a literal relative path whose name starts with a
+  // tilde — `rm -rf ~backup` when no such user exists, so the shell leaves it
+  // unexpanded — is graded danger. Same direction and same kind as the quoted
+  // tilde above; frequency unmeasured.
+  // DELIBERATE RESIDUAL: `${HOME:-/tmp}`, `${HOME:?}`, `${HOME-x}` stay
+  // CAUTION, not danger. The plain branch does not grade `$HOME:-/tmp` either —
+  // `:` is not in the terminator set — and reusing that set unchanged is what
+  // makes (d) safe to make. Closing them means parsing the `${…}` body, which
+  // costs a new quantifier to separate neighbours like `${HOMEBREW_PREFIX:-x}`.
+  // L1 blocks the force forms, so this is under-grading, not a full-stack hole.
+  // Linear, unchanged: the option run is untouched and (d) adds no quantifier.
+  // (e) adds exactly ONE — `[\w.-]*` — and it is followed by a class DISJOINT
+  // from it (whitespace, `/`, and the seven shell separators share no character
+  // with word chars, `.` or `-`), so no input can split two ways and there are
+  // no adjacent quantifiers over overlapping classes. The `[+-]` alternative
+  // cannot overlap the name run either: the run must start with `\w`.
+  // Rule-alone median of 3 at 122,880B (node v24.15.0, Windows):
   // option run 0.47ms, space run 0.65ms, quote-root fill 0.01ms, tilde-paren
-  // fill 0.01ms — the same shape as before the edit (option run 0.49ms).
+  // fill 0.01ms — the same shape as before the edit (option run 0.49ms). The
+  // 2026-09-21 branches are swept by single-run payloads instead, because a
+  // dense repeating input matches at the first position and never enters the
+  // name run at all: `tilde-name run`, `tilde-dot run` and `brace-home
+  // near-miss` in tests/autopilot/safety.test.js, growth-ratio at 6x plus a
+  // 10K/20K/40K/120K structural sweep. Re-measure 120KB if either branch moves.
   {
     id: 'rm-rf-root',
     level: 'danger',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:\s|$|\/|[;&|()<>"'`])|\$HOME(?:\s|$|\/|[;&|()<>"'`]))/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:[+-]|\w[\w.-]*)?(?:\s|$|\/|[;&|()<>"'`])|\$(?:HOME|\{HOME\})(?:\s|$|\/|[;&|()<>"'`]))/i,
     reason: 'rm -rf on root or home',
   },
   {

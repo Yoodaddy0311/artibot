@@ -555,6 +555,49 @@ const PARITY_MATRIX = Object.freeze([
     status: 'agreed',
     note: '옛 루트 분기 `\\/(?:\\s|$|\\*|\\w)` 가 **두 번째 `/` 를 거부**했다. `rm -rf //` 와 `rm -rf /.` `rm -rf /..` 는 전부 루트를 지우는데 L2 safe 였다 — 터미네이터 목록이 "토큰이 끝나는 방법"을 열거하려다 빠뜨린 형이 아니라, 애초에 열거가 불필요한 자리였다는 증거다(`/` 로 시작하는 단어는 언제나 절대경로다). 그래서 수리는 클래스를 늘리는 것이 아니라 루트 분기에서 터미네이터 그룹을 **삭제**하는 것이었다.',
   },
+  // ── guard-l2-residual rm-rf-root ${HOME}·~name (2026-09-21) ───────────────
+  // 2026-09-14 주석이 "범위 밖(오너 결정)"으로 남긴 잔여 2형. 리더가 2026-09-21
+  // 에 재개했고, 규칙을 더하지 않고 rm-rf-root 의 타깃 분기 둘만 넓혀 닫았다.
+  {
+    command: 'rm -rf ${HOME}',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'agreed',
+    note: '**같은 타깃, 다른 표기.** 평문 `$HOME` 은 종전에도 danger 였는데 중괄호 표기는 rm-rf-root 의 `\\$HOME` 리터럴에 안 걸려 rm-rf-path 로 흘러 **caution 으로 강등**됐다(실측 2026-09-21: 중괄호 5형 전부 caution, L1 은 force 가 있으면 block). 방향 규칙 위반은 아니었고 — block ⇒ ≥caution 은 충족했다 — **과소 판정**이었다. 수리는 `\\$HOME` 을 `\\$(?:HOME|\\{HOME\\})` 로 넓힌 것뿐이고, 터미네이터 집합은 평문 분기와 **같은 것을 재사용**한다. 그래서 `${HOME}x`(홈의 형제 `/home/userx`)는 danger 가 아니다 — 평문 쪽 `$HOMEDIR` 와 같은 판단이고 아래 두 음성 대조 행이 그것을 핀한다.',
+  },
+  {
+    command: 'rm -rf ${HOMEDIR}',
+    l1: 'block',
+    l2: 'caution',
+    l2Id: 'rm-rf-path',
+    status: 'agreed',
+    note: '음성 대조 — **다른 변수**가 사고로 danger 가 되지 않는지. 위 행과 짝이고, 한쪽만 있으면 "중괄호면 무조건 danger" 와 구별되지 않는다. 같은 원인의 형 넷을 tests/autopilot/safety.test.js 가 함께 핀한다(`${HOME_DIR}` · `${HOMEPAGE}/x` · `${HOMEBREW_PREFIX}` · `${PROJECT_HOME}`).',
+  },
+  {
+    command: 'rm -rf ${HOME:-/tmp}',
+    l1: 'block',
+    l2: 'caution',
+    l2Id: 'rm-rf-path',
+    status: 'owner-decision',
+    note: '**치환·기본값 연산자 형 — 의도된 잔여 과소 판정.** 이 명령은 실제로 홈을 지우는데 L2 는 caution 이다. danger 로 올리지 않은 이유 둘: ⑴ 일관성 — 평문 분기도 `rm -rf $HOME:-/tmp` 를 danger 로 보지 않는다(터미네이터 집합에 `:` 가 없다). 리더 조건 ③ 이 요구한 "평문과 같은 터미네이터 규칙"을 지키면 이 형은 자동으로 빠진다. ⑵ 비용 — 잡으려면 `${…}` 본문 문법에 새 수량자를 들여야 하고, 그러면 `${HOMEBREW_PREFIX:-/usr}` 같은 이웃을 가르는 일이 그 수량자에 얹힌다. L1 이 force 형을 block 하므로 full-stack 사각은 아니고, force 없는 `rm -r ${HOME:-/tmp}` 도 rm-recursive-path 가 caution 으로 받는다. **미측정**: 실사용 발생률. 오너가 커버리지 확대를 결정하면 이 행이 그 자리다.',
+  },
+  {
+    command: 'rm -rf ~user',
+    l1: 'block',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'agreed',
+    note: '**방향 규칙 위반의 해소.** 종전 L1 block / L2 **safe** 였다 — `~` 분기가 틸드 **바로 뒤**에 터미네이터를 요구했고, rm-rf-path·rm-recursive-path 는 둘 다 `~` 로 시작하는 타깃을 "rm-rf-root 의 일"이라며 제외했다. 세 규칙 사이로 떨어진 자리다(실측 2026-09-21: `~name` 3형 + `~+`·`~-`·`~1` 전부 L2 safe). 수리는 틸드 뒤에 **경계 있는 이름 클래스**(`\\w[\\w.-]*`)를 선택적으로 둔 것이고, 터미네이터 집합은 그대로다. 수용된 과대 판정: 그런 사용자가 없어 셸이 확장하지 않는 리터럴 경로(`rm -rf ~backup`)도 danger 다 — 방향이 차단 쪽이라 받되 safety.test.js 의 전용 it 이 그것을 알고 있다고 기록한다. 발생률은 **미측정**.',
+  },
+  {
+    command: 'rm -r ~user',
+    l1: 'pass',
+    l2: 'danger',
+    l2Id: 'rm-rf-root',
+    status: 'owner-decision',
+    note: '**이 줄기의 본체 — full-stack 사각이었다.** force 플래그가 없으면 L1 의 세 rm 규칙이 전부 비껴간다(`rm -rf with path`·`rm -fr with path` 는 결합 토큰에 force 를 요구하고, `rm recursive+force (any target)` 도 force 를 요구한다). 그래서 종전 L1 approve + L2 safe 로 **어느 층도 보지 않았다**(실측 2026-09-21, executeChain 2열: `rm -r ~user` · `rm --recursive ~user` · `rm -R ~user` 3형). L2 가 danger 로 받아 사각이 닫혔다. L1 pass 가 남아 있으므로 헤더 방향 규칙상 agreed 가 아니다 — 위 `rm --recursive <513자>/x` 행과 **같은 종류의 owner-decision** 이고, 닫는 방법도 같다: L1 을 넓히는 것이 아니라 L2 가 받는 것. L1 규칙은 이 줄기의 소유 밖이다.',
+  },
   // ── guard-l2-followups ② sql-delete-no-where (2026-09-14) ─────────────────
   {
     command: 'DELETE FROM t WHERE id=1',
