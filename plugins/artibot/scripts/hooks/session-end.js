@@ -835,9 +835,10 @@ function formatUsageReceiptLine(result, unresolved = []) {
  *
  * @param {object} hookData - SessionEnd payload.
  * @param {object} [deps] - Injection seam. Any of `buildUsageReceipts`,
- *   `toUsageReceiptEnvelopes`, `appendLedgerEvent`, `readAllEvents`,
- *   `resolveProjectRoot`, `sessionFallbackMissionId`, `isMissionId`,
- *   `pluginRoot`, `now`. Anything absent is imported dynamically.
+ *   `classifyEmptyReceipts`, `toUsageReceiptEnvelopes`, `appendLedgerEvent`,
+ *   `readAllEvents`, `resolveProjectRoot`, `sessionFallbackMissionId`,
+ *   `isMissionId`, `pluginRoot`, `now`. Anything absent is imported
+ *   dynamically.
  * @returns {Promise<{status: string, appended: number, rejected: number,
  *   deduped: number, receipts: number, reason: string|null, coverage: number|null}>}
  */

@@ -1017,6 +1017,34 @@ describe('session-end hook - learning pipeline', () => {
       expect(reason).toBe('no-receipts:no-usage');
     });
 
+    it('falls back to the bare reason when the classifier throws', async () => {
+      // Instrumentation must never be the reason a session cannot end. A
+      // classifier that blows up costs the row its suffix, not its existence.
+      const { deps } = await realDeps();
+      const appendLedgerEvent = vi.fn(() => ({ ok: true }));
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
+        {
+          ...deps,
+          buildUsageReceipts: async () => ({ receipts: [], meta: { coverage: null } }),
+          classifyEmptyReceipts: () => { throw new Error('boom'); },
+          appendLedgerEvent,
+          readAllEvents: () => [],
+          resolveProjectRoot: () => '/tmp/x',
+        },
+      );
+
+      expect(res.status).toBe('skipped');
+      expect(res.reason).toBe('no-receipts');
+
+      // The denominator row is still written, carrying the same bare reason.
+      const ended = appendLedgerEvent.mock.calls
+        .map((c) => c[1])
+        .filter((e) => e.event === 'session.ended');
+      expect(ended).toHaveLength(1);
+      expect(ended[0].data.reason).toBe('no-receipts');
+    });
+
     it('keeps the reason a single bounded token with no free text', async () => {
       const reason = await reasonForMeta({ syntheticEntries: 1 });
       expect(reason).toMatch(/^no-receipts:[a-z-]+$/);

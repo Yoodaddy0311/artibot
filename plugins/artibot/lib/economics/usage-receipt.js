@@ -225,6 +225,16 @@ function sumSkippedEntries(skipped) {
  * file every future shape of miss under whichever token happened to be last,
  * and the ledger would read as a measurement of something nobody measured.
  *
+ * PRECONDITION — A FOLD WITH ANY UNREADABLE FILE IS NEVER CLASSIFIED. Every
+ * token below is a claim about the WHOLE session, and `foldFile` records an
+ * unreadable file by bumping `unreadableFiles` alone: its entries are not in
+ * `entries`, not in `syntheticEntries`, not anywhere. A missing transcript is
+ * therefore shaped exactly like an empty one, and calling it `no-entries`
+ * would assert "nothing was written" about a file nobody read. The check is
+ * top-level rather than a rider on the zero-entry branches, because a
+ * partially unreadable session cannot support the exact-accounting claims
+ * either: entries that were never seen cannot be accounted for.
+ *
  * The four:
  *  - `no-entries`      nothing to measure — no assistant entry was folded.
  *  - `all-synthetic`   entries existed but every one named the synthetic model,
@@ -232,11 +242,14 @@ function sumSkippedEntries(skipped) {
  *                      indistinguishable from an empty transcript.
  *  - `all-unresolved`  every folded entry named a model the catalog rejects.
  *  - `no-usage`        entries were folded and every one is accounted for by a
- *                      named miss — no model, an unknown model, or a group the
- *                      receipt builder skipped. The accounting is EXACT: the
- *                      misses must sum to `entries`, so an unexplained
- *                      remainder falls through to null rather than being
- *                      absorbed here.
+ *                      named miss, so none of them yielded a USABLE receipt.
+ *                      The misses are: no model on the entry, a model the
+ *                      catalog rejects, and a group the receipt builder
+ *                      skipped — which includes a group whose token counts
+ *                      were perfectly intact but carried no parseable
+ *                      timestamp. The accounting is EXACT: the misses must sum
+ *                      to `entries`, so an unexplained remainder falls through
+ *                      to null rather than being absorbed here.
  *
  * WHAT IT DOES NOT ANSWER: whether zero receipts was correct. It reports the
  * shape of the fold, not a verdict on the session.
@@ -246,6 +259,7 @@ function sumSkippedEntries(skipped) {
  */
 export function classifyEmptyReceipts(meta) {
   if (meta === null || typeof meta !== 'object') return null;
+  if (finiteCount(meta.unreadableFiles) !== 0) return null;
 
   const entries = finiteCount(meta.entries);
   const synthetic = finiteCount(meta.syntheticEntries);

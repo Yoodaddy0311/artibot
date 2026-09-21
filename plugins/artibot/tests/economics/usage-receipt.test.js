@@ -781,6 +781,57 @@ describe('classifyEmptyReceipts', () => {
     expect(classifyEmptyReceipts(meta)).toBe('no-usage');
   });
 
+  // -- An unread file is unaccounted input ----------------------------------
+
+  it('refuses to classify a fold whose transcript could not be read', async () => {
+    // THE FAILURE THIS GUARDS. A missing or unreadable file folds nothing, so
+    // `entries` and `syntheticEntries` are both 0 and the shape is identical
+    // to a genuinely empty transcript. Calling that `no-entries` asserts "no
+    // assistant entry was folded" about a file NOBODY READ — a guess that
+    // reads as a measurement once it is in the ledger. It matters live:
+    // `session.ended`'s `transcript_present` is only a check that the payload
+    // carried a path string, so an unreadable transcript reaches here looking
+    // present.
+    const meta = await emptyMetaFor({});
+    expect(meta.files).toBe(1);
+    expect(meta.unreadableFiles).toBe(1);
+    expect(meta.entries).toBe(0);
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it('refuses to classify when only one of several files was unreadable', async () => {
+    // The guard is top-level, not a rider on the zero-entry branches. These
+    // entries WOULD account exactly as `all-unresolved`, but that claim is
+    // about every entry in the session, and one file's entries were never
+    // seen. A partial read cannot support a total claim.
+    const meta = await emptyMetaFor(
+      {
+        [MAIN]: jsonl([
+          assistantEntry({ model: 'gpt-9-turbo', requestId: 'req-a' }),
+          assistantEntry({ model: 'gpt-9-turbo', requestId: 'req-b' }),
+        ]),
+      },
+      [SUB],
+    );
+    expect(meta.files).toBe(2);
+    expect(meta.unreadableFiles).toBe(1);
+    expect(meta.entries).toBe(2);
+    expect(meta.unresolvedModels).toEqual({ 'gpt-9-turbo': 2 });
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it.each([
+    ['absent', {}],
+    ['not a number', { unreadableFiles: 'one' }],
+    ['negative', { unreadableFiles: -1 }],
+  ])('returns null when the unreadable-file count is %s', (_label, patch) => {
+    // Strict for the same reason the other counters are: a count that cannot
+    // be read is not evidence that nothing went unread.
+    const base = emptyResult().meta;
+    delete base.unreadableFiles;
+    expect(classifyEmptyReceipts({ ...base, ...patch })).toBeNull();
+  });
+
   // -- Unclassifiable is reported, never guessed ----------------------------
 
   it.each([
