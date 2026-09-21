@@ -84,21 +84,24 @@
  * a branch it has nothing to do with — an operator running the documented
  * ad-hoc `ARTIBOT_STATE_DIR=/tmp/x npx vitest` skips that block entirely, so
  * the nested store would be created with nothing registered to remove it: the
- * same no-remover shape the 926-directory note at the `rmSync` above records,
+ * same no-remover shape the 926-directory note in the mint block below records,
  * though that pile had a different cause. And a store nested inside the state
  * dir is an extra entry for every test that enumerates or counts the state dir.
  * One directory per worker per store, each with its own remover, has neither
  * problem.
  *
- * CLEANUP IS `afterAll`, NOT `process.once('exit')`. The exit listener above
- * does not run in this environment, measured 2026-09-21: a probe that wrote a
- * marker file as the FIRST statement of the handler produced 0 markers across a
- * 2-worker run, so the handler is never entered — this is not an `rmSync`
- * failure. Vitest appears to tear its pool workers down rather than let them
- * exit normally (mechanism not confirmed). The observable cost had been 23 `artibot-test-autopilot-store-*`
+ * CLEANUP IS `afterAll`, NOT `process.once('exit')` — for BOTH removers in this
+ * file. The exit listener they replaced did not run in this environment,
+ * measured 2026-09-21: a probe that wrote a marker file as the FIRST statement
+ * of the handler produced 0 markers across a 2-worker run, so the handler was
+ * never entered — this was not an `rmSync` failure. Vitest appears to tear its
+ * pool workers down rather than let them exit normally (mechanism not
+ * confirmed). The observable cost had been 23 `artibot-test-autopilot-store-*`
  * and 32 `artibot-test-state-*` directories left in `os.tmpdir()` (counted
- * 2026-09-21); the state-dir pile is the same bug and is deliberately left
- * alone here as out of scope.
+ * 2026-09-21). The state-dir pile was the same bug, out of scope when this
+ * paragraph was written and since fixed the same way: its remover is the
+ * `afterAll` above the `_HOME` stamp, gated by
+ * `tests/firewall/state-dir-cleanup.test.js`.
  *
  * `afterAll` runs per test FILE, so the sandbox is removed between files too.
  * That is a feature, not a cost: a test that depended on store contents written
@@ -137,27 +140,53 @@ import os from 'node:os';
 import path from 'node:path';
 import { getHomeDir, getPluginRoot } from '../../lib/core/platform.js';
 
+// Keyed on the pid, so this is one directory per worker PROCESS. How many test
+// files share one of those is a pool question rather than this file's, and the
+// answer is not the one this comment used to assert: measured 2026-09-21 on
+// vitest 4.0.18, BOTH projects run the forks pool with a fresh process per test
+// file (two files, two pids, in `main` and in `autopilot` alike), so the env
+// does not survive from one file to the next today and each file mints its own
+// directory. The pid key still does its other job — keeping whatever workers do
+// run concurrently off each other's read-modify-write.
+//
+// Computed OUTSIDE the assignment below because the remover needs it too, and
+// has to stay correct under either shape. Where a worker IS reused across files
+// — the arrangement the autopilot project asks for — the block is entered by
+// the first file only, so a remover registered inside it would fire after that
+// one file and leave everything the later files wrote behind. Where it is not
+// reused, every file enters the block and the placement costs nothing. Out
+// here it is right either way, which is why this does not depend on settling
+// the pool question.
+const OWN_STATE_DIR = path.join(os.tmpdir(), `artibot-test-state-${process.pid}`);
+
 if (!process.env.ARTIBOT_STATE_DIR) {
-  // Per worker process, not per file: setup runs once per test file but the
-  // env persists in the worker, and a per-file directory would leave one
-  // temp tree behind for every file in the suite. Keying on the pid also
-  // keeps parallel workers off each other's read-modify-write.
-  const dir = path.join(os.tmpdir(), `artibot-test-state-${process.pid}`);
-  process.env.ARTIBOT_STATE_DIR = dir;
+  process.env.ARTIBOT_STATE_DIR = OWN_STATE_DIR;
   // Not created here. Every writer that lands in it makes its own parents, so
   // pre-creating only guarantees an empty directory per worker whether or not
   // anything was written. Measured 2026-08-30 before this: 926 of these had
   // accumulated in `os.tmpdir()`, 8 of them holding actual checkpoints.
-  //
-  // Removed on exit rather than reused under a fixed name. A fixed name would
-  // be one directory total, but parallel workers would then share a single
-  // read-modify-write store, and this file exists to remove a whole class of
-  // shared-write accident rather than move it somewhere tidier. The contents
-  // are entirely test-generated, so there is nothing here to preserve.
-  process.once('exit', () => {
-    try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
-  });
 }
+
+// Removed after the run rather than reused under a fixed name. A fixed name
+// would be one directory total, but parallel workers would then share a single
+// read-modify-write store, and this file exists to remove a whole class of
+// shared-write accident rather than move it somewhere tidier. The contents are
+// entirely test-generated, so there is nothing here to preserve.
+//
+// `afterAll`, not `process.once('exit')`. The exit listener this replaces was
+// never entered under vitest's pool workers — 0 firings measured, see the
+// CLEANUP paragraph in the header — so it removed nothing and the directories
+// simply accumulated. Same shape as the autopilot store remover below,
+// including the strict-equality guard: an operator running the documented
+// `ARTIBOT_STATE_DIR=/tmp/x npx vitest`, or a test that repointed the variable
+// and left it repointed, keeps their directory. Registered for every test file,
+// so cleanup also happens BETWEEN files; that is safe because a test depending
+// on state written by an earlier file would be order-dependent anyway, and
+// every writer recreates its own parents.
+afterAll(() => {
+  if (process.env.ARTIBOT_STATE_DIR !== OWN_STATE_DIR) return;
+  try { fsSync.rmSync(OWN_STATE_DIR, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 // Records the home the override in force belongs to. Both variables are
 // inherited by spawned children, and a hook test isolates itself by handing the
@@ -178,11 +207,14 @@ process.env.ARTIBOT_STATE_DIR_HOME = getHomeDir();
 // would only guarantee an empty directory per worker whether or not a test
 // touched the store.
 //
-// Computed OUTSIDE the assignment below because the remover needs it too. Setup
-// re-runs per test file but the env persists in the worker, so under the
-// autopilot project's `singleFork` the block below is entered by the first file
-// only — a remover registered inside it would fire after file 1 alone, and
-// whatever the remaining files wrote would be left behind.
+// Computed OUTSIDE the assignment below because the remover needs it too, and
+// has to hold whether or not a worker is reused across files. Where one IS
+// reused the block below is entered by the first file only, and a remover
+// registered inside it would fire after file 1 alone, leaving whatever the
+// remaining files wrote behind. Measured 2026-09-21: this project's
+// `poolOptions.forks.singleFork` is NOT in effect on vitest 4.0.18 — two test
+// files in `--project autopilot` reported two pids — so each file currently
+// mints its own. Out here the constant is right under either shape.
 const OWN_AUTOPILOT_STORE_DIR = path.join(os.tmpdir(), `artibot-test-autopilot-store-${process.pid}`);
 
 if (!process.env.ARTIBOT_AUTOPILOT_STORE_DIR) {
