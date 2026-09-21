@@ -36,6 +36,13 @@
  * Both are reported, neither is rethrown, and the row still reads `saved` —
  * because it was.
  *
+ * One mission's failure is also not the pass's. A port that throws mid-mission
+ * is folded into that mission's row as `errored` with `threw:<Ctor>` and the
+ * next mission still runs, so the missions already checkpointed keep their
+ * rows instead of being lost to one throw. Only the constructor name is
+ * recorded — the message can carry a path or a secret. `errored` is its own
+ * status, not `rejected`: the validator refused nothing here, a port threw.
+ *
  * ── Layer ─────────────────────────────────────────────────────────────────
  * L2, pure over its ports. No filesystem, no config read, no import from
  * `lib/runtime` or `lib/project-state`. The one import is the sibling resume
@@ -300,7 +307,17 @@ export async function buildSaveCheckpoint(ports, options = {}) {
 
   const rows = [];
   for (const id of ids) {
-    rows.push(await saveOne(ports, id, sessionId, trigger));
+    try {
+      rows.push(await saveOne(ports, id, sessionId, trigger));
+    } catch (err) {
+      // `status` is set explicitly because `newRow` opens at `skipped`, which
+      // would read as a mission that had nothing to save. `||`, not `??`: an
+      // anonymous error class has `constructor.name === ''`.
+      const row = newRow(id);
+      row.status = 'errored';
+      row.reason = `threw:${/** @type {any} */ (err)?.constructor?.name || 'Error'}`;
+      rows.push(row);
+    }
   }
   return { skipped: null, rows };
 }

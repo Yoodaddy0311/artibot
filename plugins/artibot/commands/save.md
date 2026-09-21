@@ -57,7 +57,7 @@ Parse $ARGUMENTS:
 7. **Ledger** — 조립 모듈이 `appendLedgerEvent(projectRoot, { event:'mission.checkpointed', source:'supervisor', data:{ checkpoint_id, trigger:'/save', resumable } })` (lib/runtime/ledger.js:81) 를 호출한다. `source` 는 allowlist 상 `supervisor` 다 (리더 결정 ca05-1 — `save` 는 allowlist 밖이라 `ledger.rejected` 로 강등된다).
 8. **Snapshot Scorecard** — 원장을 fold 한 세션 카드(§35)를 `/save` 출력 **맨 아래**(`## 권장 첫 프롬프트` 뒤) 한 절로 인쇄한다. 2~7단계와 달리 `buildSaveCheckpoint` 밖의 별도 읽기 사슬이고 세션 범위 읽기 전용 투영이라, 활성 mission 이 0건이어도(2~7단계가 `skip:no-active-mission`) 카드는 그대로 렌더한다. 카드를 스킵하는 사유는 둘뿐이다: config off · session 없음. 읽기 경로는 `/scorecard --session` 과 같은 것 하나이며 포트를 두 번 넘긴다: `lib/runtime/ledger.js#readAllEvents` → `lib/replay/load.js#loadReplay` (`readEvents` 포트 필수 — 빠뜨리면 던진다. 빈 배열 기본값으로 메우면 배선 오류가 "아무 일도 없던 실행"과 같은 출력이 되므로 일부러 fail-closed) → `lib/scorecard/session-scorecard.js#buildSessionScorecard`(replay, `{ session_id }`) → `lib/scorecard/render.js#renderScorecardMarkdown`(card). **카드는 저장하지 않는다** — 재생성 가능한 투영이고 정본은 원장 하나라서 `lib/scorecard/index.js` 헤더가 "이 디렉터리는 파일을 쓰지 않는다"를 계약으로 못박았다. `session_id` 는 아래 본문 규약(훅 payload 1순위 · env 폴백)을 그대로 쓰고, 비어 있으면 `buildSessionScorecard` 가 이유를 적어 던지므로 카드 절에 "스킵(session 없음)" 한 줄만 남긴다 — 범위 없는 카드를 만들어 원장의 모든 세션을 한 세션인 양 접지 않는다. 이 단계도 Phase A½ 안이라 `runtime.checkpoint.saveOnSave` 가 false 면 절 통째로 스킵된다. 분모 0 인 지표는 `unmeasured` 로 렌더되고 `0%` 로 쓰지 않는다.
 
-2~7단계의 호출은 하나다: `buildSaveCheckpoint(ports, { sessionId, trigger:'/save' })` (8단계는 이 호출 밖의 별도 읽기 사슬이다 — 이 모듈은 scorecard 를 모른다). ports 는 `{ listActiveMissionIds, getMission, getTaskGraph, checkpointService, appendEvent }` 이고 `listActiveMissionIds = () => Object.keys(store.getState().active_missions)` — 활성 mission **전부**가 대상이다 (리더 결정 ca05-6(a)). 0건이면 `skip:no-active-mission` 이고 출력 표는 "스킵(활성 mission 없음)". `session_id` 는 훅 payload 가 1순위이고 env 가 폴백이며, 비어 있으면 `skip:session-missing` 이다 — mission_id·session_id 를 지어내지 않는다. 결과 행은 `{ mission_id, status: saved|rejected|skipped, checkpoint_id, resumable, blocked_by, errors, ledger }`.
+2~7단계의 호출은 하나다: `buildSaveCheckpoint(ports, { sessionId, trigger:'/save' })` (8단계는 이 호출 밖의 별도 읽기 사슬이다 — 이 모듈은 scorecard 를 모른다). ports 는 `{ listActiveMissionIds, getMission, getTaskGraph, checkpointService, appendEvent }` 이고 `listActiveMissionIds = () => Object.keys(store.getState().active_missions)` — 활성 mission **전부**가 대상이다 (리더 결정 ca05-6(a)). 0건이면 `skip:no-active-mission` 이고 출력 표는 "스킵(활성 mission 없음)". `session_id` 는 훅 payload 가 1순위이고 env 가 폴백이며, 비어 있으면 `skip:session-missing` 이다 — mission_id·session_id 를 지어내지 않는다. 결과 행은 `{ mission_id, status: saved|rejected|skipped|errored, checkpoint_id, resumable, blocked_by, errors, ledger }`.
 
 체크포인트 결과도 8단계 세션 카드도 HANDOFF 본문에 넣지 않는다 — `renderHandoffMarkdown` 출력 바이트는 불변이고, 결과는 `/save` 출력 표와 출력 맨 끝의 `## 세션 스코어카드` 절에만 나타난다.
 
@@ -137,7 +137,7 @@ Parse $ARGUMENTS:
 | WIP 커밋 | N (oldest ~Nh) |
 | 미해결 결정 | N |
 | 진행 중 작업 | N |
-| 체크포인트 | M-… → cp-… (resumable ✓/✗) · 스킵(config off / 활성 mission 없음 / session 없음) · 거부(validate 사유) |
+| 체크포인트 | M-… → cp-… (resumable ✓/✗) · 스킵(config off / 활성 mission 없음 / session 없음) · 거부(validate 사유) · 오류(threw:…) |
 
 ## Git 동기화 상태
 

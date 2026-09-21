@@ -389,6 +389,115 @@ describe('buildSaveCheckpoint — multiple missions', () => {
   });
 });
 
+describe('buildSaveCheckpoint — mission isolation', () => {
+  const OTHER = 'M-20260921-002';
+
+  /** A message shaped like a path, so a leak into the rows is unmistakable. */
+  const SENTINEL = '/secret/path/token-xyz';
+
+  /** The record the default fake returns, restated where a per-id fake replaces it. */
+  const LIVE_MISSION = { status: 'executing', intent: { revision: 2 }, plan: { revision: 3 } };
+
+  it('records the first mission as errored and still saves the ones behind it', async () => {
+    const ports = fakePorts({
+      listActiveMissionIds: () => [MID, OTHER],
+      getMission: (id) => {
+        if (id === MID) throw new Error('mission read failed');
+        return LIVE_MISSION;
+      },
+    });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.skipped).toBeNull();
+    expect(out.rows.map((r) => [r.mission_id, r.status])).toEqual([[MID, 'errored'], [OTHER, 'saved']]);
+    // The throwing mission touches no later port; the next one runs the full order.
+    expect(ports.log).toEqual(['getMission', ...SAVE_CHECKPOINT_PORT_ORDER]);
+  });
+
+  it('leaves the rows already built byte-identical when the last mission throws', async () => {
+    const clean = await buildSaveCheckpoint(
+      fakePorts({ listActiveMissionIds: () => [MID, OTHER] }),
+      { sessionId: SESSION },
+    );
+    expect(clean.rows.map((r) => r.status)).toEqual(['saved', 'saved']);
+
+    const ports = fakePorts({
+      listActiveMissionIds: () => [MID, OTHER],
+      checkpoint: (content) => {
+        if (content.mission_id === OTHER) throw new Error('store is full');
+        return { ok: true, checkpoint_id: 'cp-1', ts: '2026-09-21T00:00:00Z', errors: [] };
+      },
+    });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.rows[0]).toEqual(clean.rows[0]);
+    expect(out.rows[1]).toMatchObject({ mission_id: OTHER, status: 'errored', reason: 'threw:Error' });
+  });
+
+  it('names the constructor of a rejected store promise', async () => {
+    // `checkpoint-service.js#saveCheckpoint` REJECTS on a store failure rather
+    // than returning `{ ok: false }`, so this is the real path, not a synthetic one.
+    const ports = fakePorts({ checkpoint: () => Promise.reject(new TypeError('disk gone')) });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.rows[0]).toMatchObject({ status: 'errored', reason: 'threw:TypeError' });
+  });
+
+  it('falls back to Error for an anonymous error class whose constructor name is empty', async () => {
+    let thrown = null;
+    const ports = fakePorts({
+      getMission: () => {
+        // NOT assigned to a binding first: named evaluation would give it a name.
+        thrown = new (class extends Error {})('anon');
+        throw thrown;
+      },
+    });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    // Proves the fixture premise rather than assuming it: `?? 'Error'` would
+    // pass this class through as `threw:`, only `|| 'Error'` catches it.
+    expect(thrown.constructor.name).toBe('');
+    expect(out.rows[0].reason).toBe('threw:Error');
+  });
+
+  it('carries no byte of the exception message into the rows', async () => {
+    const ports = fakePorts({
+      getTaskGraph: () => { throw new Error(`graph read failed: ${SENTINEL}`); },
+    });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.rows[0].status).toBe('errored');
+    expect(JSON.stringify(out)).not.toContain(SENTINEL);
+  });
+
+  it('returns the full errored row shape, never a silently skipped one', async () => {
+    const ports = fakePorts({ getMission: () => { throw new RangeError('out of range'); } });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.rows).toEqual([{
+      mission_id: MID,
+      status: 'errored',
+      reason: 'threw:RangeError',
+      checkpoint_id: null,
+      ts: null,
+      resumable: null,
+      blocked_by: [],
+      errors: [],
+      ledger: null,
+    }]);
+  });
+
+  it('does not reuse the validator-only rejected status for a store failure', async () => {
+    const ports = fakePorts({ checkpoint: () => { throw new Error('store is full'); } });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.rows[0].status).not.toBe('rejected');
+    expect(out.rows[0].status).toBe('errored');
+  });
+
+  it('survives a thrown null, which has no constructor to name', async () => {
+    // `throw null` is legal and reaches the same catch, where `err.constructor`
+    // would itself throw — the optional chain is what keeps the row a row.
+    const ports = fakePorts({ getMission: () => { throw null; } });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.skipped).toBeNull();
+    expect(out.rows[0]).toMatchObject({ status: 'errored', reason: 'threw:Error' });
+  });
+});
+
 describe('buildSaveCheckpoint — real store, real file checkpoint store, real ledger', () => {
   let tmp;
 
