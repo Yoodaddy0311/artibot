@@ -111,8 +111,20 @@ export function ownsFromPlan(planJson) {
 
 /**
  * StateStore / `state.yaml` shape. Accepts either `{ workers: {...} }` or the
- * worker map itself, because the store does not exist yet and pinning one of
- * the two shapes would be guessing at an interface nobody has written.
+ * worker map itself. The store EXISTS
+ * (`lib/project-state/state-manager.js#createStateStore`); both shapes stay
+ * accepted because neither is the store's own output. `getProjection()`
+ * returns `{project, state_version, updated_at, active_missions}` and nests
+ * the worker map two levels down under a mission, so a reader must unwrap it
+ * and may hand over the bare map or re-wrap it — verified against the real
+ * projection in `tests/topology/split-state-sources.test.js`, which also pins
+ * that handing over the WHOLE projection object yields a spurious
+ * `active_missions` row rather than an error.
+ *
+ * The cost of accepting two shapes, stated rather than hidden: in the bare-map
+ * shape a worker literally named `workers` whose record is an object is read
+ * as the wrapper and swallows the map. Not reachable from the real projection
+ * today, and pinned in that test file.
  *
  * @param {unknown} raw
  * @returns {Record<string, RawWorker>}

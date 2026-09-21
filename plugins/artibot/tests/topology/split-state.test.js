@@ -19,9 +19,14 @@
  *
  * WHAT THEY DO NOT COVER (next to the gate, so the gate does not become the
  * next illusion — rules §9):
- *  - The StateStore. It does not exist (T-21). Every `storeReader` here is a
- *    fixture this file wrote, so "store wins" is proven about the priority
- *    code and about NOTHING on disk.
+ *  - The StateStore. It EXISTS
+ *    (`lib/project-state/state-manager.js#createStateStore`), but every
+ *    `storeReader` in THIS file is a fixture this file wrote, so "store wins"
+ *    is proven about the priority code here and about NOTHING on disk. The
+ *    interlock against a real store — a seeded mission projected through
+ *    `getProjection()` into `normalizeStore` and on into `readWorkerState` —
+ *    is pinned in the sibling `split-state-sources.test.js`, together with
+ *    the three contracts that block a write-target flip.
  *  - The real writer. The payload is checked against the SHIPPED
  *    `schemas/ledger-events.allowlist.json`, not against
  *    `event-writer.js#writeEvent` itself: `lib/topology` is L4 and the writer
