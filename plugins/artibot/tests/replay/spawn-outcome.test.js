@@ -51,6 +51,19 @@ const SCORE_BLOCK = { source: null, value: null, reason: 'no-spawn-keyed-score-w
 let seqCounter = 0;
 
 /**
+ * The `method` the writer pairs with each confidence tier.
+ *
+ * `route_bind_method` is an enum of exactly four values
+ * (prompt_id+name | prompt_id+fifo | name-only | fifo-only), so a fixture must
+ * pick one of them rather than invent a plausible-looking string.
+ */
+const METHOD_BY_CONFIDENCE = Object.freeze({
+  exact: 'prompt_id+name',
+  name: 'name-only',
+  fifo: 'prompt_id+fifo', // live: 3 of 3 fifo binds, 2026-09-21T02:05Z
+});
+
+/**
  * A `route.bound` row in the live envelope key order.
  *
  * `routing_epoch_id` = `run_id` = `agent_id` and `action_id` = `tool_use_id`,
@@ -81,12 +94,15 @@ function bound(spec) {
       tool_use_id: toolUseId,
       agent_id: agentId,
       confidence,
-      method: 'ledger-tail',
+      // Derived, not hardcoded: the writer's method and confidence move
+      // together. A non-writer confidence has no writer method either, so the
+      // fallback is arbitrary and only keeps the key present.
+      method: METHOD_BY_CONFIDENCE[confidence] ?? 'name-only',
       ...(agentType === undefined ? {} : { agent_type: agentType }),
       matched_on: 'name', // writer enum is name | subagent_type
       ...(selected === undefined ? {} : { selected_model: selected }),
       ...(recommended === undefined ? {} : { recommended_model: recommended }),
-      action_class: 'spawn',
+      action_class: 'implement', // live values: explore|implement|review|edit-routine|architecture|complex-debug
     },
   };
 }
@@ -467,7 +483,10 @@ describe('joinSpawnOutcomes() pairs and comparison', () => {
 
   it('DUPLICATE RECEIPT: a double-written row inflates the pair, and is counted', () => {
     // `session-end.js#existingReceiptKeys` is the only guard and it FAILS OPEN
-    // on a short or rotated tail. The doubled pair is arithmetically
+    // three ways: `readAllEvents` returns [] for an unreadable file, a catch
+    // turns any throw into an empty Set, and nothing locks, so two concurrent
+    // SessionEnd processes can both read before either appends. The doubled
+    // pair is arithmetically
     // indistinguishable from a run that cost twice as much, so the fold reports
     // the condition and does NOT correct the totals -- deciding which of two
     // identical rows is spurious is not possible from the rows.

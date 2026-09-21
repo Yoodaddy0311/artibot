@@ -68,6 +68,24 @@
  *  this number gets misread. The join owns that distinction; this file only
  *  refuses to flatten it.
  *
+ *  `model_mismatch` AND `duplicate_receipts` ARE ROW-INTEGRITY COUNTERS, NOT
+ *  EXCLUSIONS. Neither removes anything from `compared`, so a reader who sees
+ *  them at zero learns nothing new, and a reader who sees them non-zero must
+ *  discount the numbers BELOW them rather than look for a missing pair.
+ *  `duplicate_receipts` counts, over paired runs only, the receipts beyond one
+ *  per distinct served model; every extra receipt is added to the cost, usage
+ *  and latency sums, so a non-zero value means those sums are INFLATED for
+ *  those pairs while the pair counts beside them are not. `model_mismatch`
+ *  counts rows whose two model spellings disagree — `data.model_identity
+ *  .model_id`, the schema-validated original, against the envelope's `model`,
+ *  which is an unchecked copy lifted out for indexing. The fold trusts the
+ *  identity block and reports the disagreement rather than hiding it behind a
+ *  silent winner, so a non-zero value means "which model served" rests on the
+ *  field this tool chose, not on agreement between the two. Note the two
+ *  counters have DIFFERENT scopes: `model_mismatch` is counted over every
+ *  receipt row, main-thread and malformed included, because it is a property of
+ *  the row; `duplicate_receipts` only over pairs.
+ *
  *  THE SAME RULE GOVERNS EVERY SUM. `cost.same.total`, `cost.diverged.total`
  *  and `latency.{same,diverged}.total_ms` are `null`, never `0`, when their
  *  population (`priced` / `count`) is 0. A sum over zero rows is unmeasured,

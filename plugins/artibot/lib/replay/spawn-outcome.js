@@ -59,9 +59,13 @@
  *     Nor can it see A DOUBLE-WRITTEN RECEIPT. The same (run, model) appended
  *     twice doubles that pair's cost, usage and latency, and is arithmetically
  *     indistinguishable from a run that genuinely cost twice as much. The only
- *     guard is `session-end.js#existingReceiptKeys`, which FAILS OPEN: if the
- *     tail it reads is short, rotated, or unreadable, it finds no prior key and
- *     appends again. `duplicate_receipts` counts the excess rows
+ *     guard is `session-end.js#existingReceiptKeys`, which FAILS OPEN by three
+ *     paths: it reads the WHOLE session via `ledger.js#readAllEvents`, which
+ *     returns `[]` for a missing or unreadable file rather than raising; it
+ *     wraps that read in a `catch` that yields an empty Set; and it holds no
+ *     lock, so two concurrent SessionEnd processes can both read before either
+ *     appends. In each case it finds no prior `idempotency_key` and appends
+ *     again. `duplicate_receipts` counts the excess rows
  *     (receipts minus distinct served models, summed over pairs) so the
  *     condition is visible, but the totals are NOT corrected for it -- which of
  *     two identical rows is the spurious one is not decidable from the rows.
@@ -88,7 +92,7 @@
  *     free". `latency` follows the same rule: `total_ms` is null when `count`
  *     is 0. A bucket total is therefore comparable only against its own
  *     `priced`/`count`, never against the other bucket's.
- *  6. RETENTION AND WINDOWING. A spawn whose bind rotated out of the window
+ *  6. RETENTION AND WINDOWING. A spawn whose bind falls outside the window
  *     looks like an unjoined receipt and vice versa; neither is distinguishable
  *     here from a line that was never written.
  *  7. WHY A USAGE FIELD IS ABSENT. `usage_totals.non_numeric` is NOT a
