@@ -56,7 +56,7 @@ Parse $ARGUMENTS:
 
 ### `--contract` 모드 (opt-in · 보고 전용)
 
-플래그가 없으면 이 절은 **통째로 건너뛴다** — 기본 출력은 한 글자도 달라지지 않는다. `--contract` 가 있을 때만 기본 핸드오프 출력이 **끝난 뒤에** 아래 두 블록을 덧붙인다.
+플래그가 없으면 이 절은 **통째로 건너뛴다** — 기본 출력은 한 글자도 달라지지 않는다. `--contract` 가 있을 때만 기본 핸드오프 출력이 **끝난 뒤에** 아래 두 블록을 덧붙인다. (`--read-order` 가 함께 있으면 블록의 위치와 HANDOFF 출력 여부는 "ARTIBOT 읽기 순서" 절의 플래그 조합 문단이 정한다 — HANDOFF 가 아예 출력되지 않는 경우에도 두 블록은 맨 마지막에 그대로 덧붙는다.)
 
 1. **Resume Contract 보고** — `lib/checkpoint/resume-controller.js#buildResumeReport` 로 Scorecard §51 의 10단계 중 **1~9 단계**(스키마 검증 → `intent_revision`/`plan_revision` 대조 → 아티팩트·커서 확인)를 평가해 단계별 `ok` / `blocked_by` 를 표로 출력한다. 10단계 Resume(실제 재개)는 Canary 라 **이 커맨드의 범위 밖이며 실행하지 않는다**.
 2. **lane reconcile 보고** — `lib/supervisor/lane-reconcile.js#reconcileLanes` 로 리더의 split 런 상태 파일(`run.json`)의 레인 상태를 git 증거와 대조해 레인별 `blocked_by: ['reconcile:<사유>']` 를 출력한다. 허용 목록 밖 상태·state↔git 불일치는 fail-closed 로 사유를 남긴다 (설계 §3.5).
@@ -77,7 +77,7 @@ Parse $ARGUMENTS:
 2. `artibot.config.json` 의 `runtime.checkpoint.saveOnSave` 가 `true` 일 때 `/save` 가 체크포인트를 **남긴다** (`lib/checkpoint/save-checkpoint.js#isSaveCheckpointEnabled` 가 단독 판정 — 엄격 boolean 이라 `true` 가 아닌 값(부재·문자열 `"true"`·`1`)은 전부 off). 체크포인트가 남아 있으면 HANDOFF **다음에** 그것을 읽어 Resume Contract 보고의 입력으로 쓴다. 이 키는 **쓰는 쪽의 게이트**이며 읽기를 막지 않는다 — 보고는 config 를 보지 않고 체크포인트 스토어를 그대로 읽는다.
 3. 해당 미션의 체크포인트가 없으면 읽을 것이 없을 뿐, 보고 자체는 그대로 나온다 — 그 미션 행에 `blocked_by: ['reconcile:checkpoint-missing']` (`lib/checkpoint/resume-controller.js#RESUME_BLOCK_REASONS`) 이 찍힌다. 부재는 오류가 아니고, 기본 핸드오프 출력도 영향을 받지 않는다.
 
-`--read-order` 가 함께 있으면 HANDOFF 를 읽는 **시점**은 아래 "ARTIBOT 읽기 순서" 절이 정한다 (6단계 뒤 폴백, 최대 1회). 위 1단계는 그 시점을 따르며, 이 절의 나머지 순서와 의미는 그대로다.
+`--read-order` 가 함께 있으면 HANDOFF 를 읽는 **시점과 읽을지 여부**를 아래 "ARTIBOT 읽기 순서" 절이 정한다 — 6단계 뒤 폴백으로 최대 1회이고, 6단계가 전부 실재하면 **아예 읽지 않는다**. 위 1단계는 그 판단을 따르며(읽지 않으면 그 기본 출력도 나오지 않는다), 이 절의 나머지 순서와 의미는 그대로다.
 
 체크포인트는 **읽기만** 한다 — `/resume` 은 새 체크포인트를 남기지도, 기존 것을 갱신하지도 않는다. 그 쓰기는 `/save` 의 책임이다 (`/resume` 은 read-only).
 
@@ -93,7 +93,7 @@ Parse $ARGUMENTS:
 2. `.artibot/state.yaml` — 라이브 실행 진실. 여기서 **활성 미션 id** 를 얻어 3·4단계에 넘긴다. 부재 시 `부재: .artibot/state.yaml` 한 줄.
 3. 활성 미션의 `intent.md` — `.artibot/missions/<미션 id>/intent.md`, 성공의 정의. 미션 id 는 2단계에서 온다; 2단계가 부재이거나 활성 미션이 지목되지 않으면 `부재: 활성 미션 미확정` 한 줄. `not yet landed` 산출물이라 부재가 흔하다.
 4. 활성 미션의 `plan.md` — `.artibot/missions/<미션 id>/plan.md`, 현재 실행 전략. 미션 id 가 미확정이면 역시 `부재: 활성 미션 미확정` 한 줄. 이것도 `not yet landed` 다.
-5. 관련 ADR — `.artibot/adr/` 아래에서 이번 작업에 걸리는 결정 기록만 읽는다. `INDEX.md` 는 수기 정본이라 **읽기만** 하고 재생성·재번호 매기기를 절대 호출하지 않는다. 부재 시 `부재: .artibot/adr/` 한 줄.
+5. 관련 ADR — `.artibot/adr/` 아래에서 이번 작업에 걸리는 결정 기록만 읽는다. 여러 건이어도 요지 5줄 상한은 **건별이 아니라 이 단계 합계**이며, 머리줄도 `[5/6]` 하나로 묶는다 (출력 총량 상한 유지). `INDEX.md` 는 수기 정본이라 **읽기만** 하고 재생성·재번호 매기기를 절대 호출하지 않는다. 부재 시 `부재: .artibot/adr/` 한 줄.
 6. Review / Outcome — 해당하는 경우에만 읽는다. 경로 단서는 활성 미션 아래의 `review.md`·`outcome.md` (`.artibot/missions/<미션 id>/`). 해당 없음이면 `부재: review/outcome` 한 줄.
 
 **HANDOFF 폴백 (번호 단계가 아니다).** 위 6단계 중 **부재 단계가 하나라도 있으면** 6단계 출력이 끝난 **뒤에** 기본 모드 절차를 **한 번** 수행한다 — `readLatestHandoff(projectRoot)` → 원문 그대로 출력 → 첫 프롬프트 후보 박스 (`lib/handoff/handoff-store.js#readLatestHandoff`, 기본 모드와 같은 경로). 6단계가 **전부 실재하면 HANDOFF 는 읽지 않는다**. HANDOFF 파일 자체가 없으면 6단계 출력은 그대로 둔 채 그 뒤에 "핸드오프 없음 — 먼저 `/save` 로 작성하세요." 한 줄만 적는다 — 6단계를 건너뛰고 종료하지 않는다. HANDOFF 는 어떤 경우에도 **한 번을 넘겨 출력하지 않는다**.
@@ -101,7 +101,7 @@ Parse $ARGUMENTS:
 플래그 조합 (이 문단이 정본 — 다른 절에서 다시 정의하지 않는다):
 
 - `--list`·`--archive` 는 종전대로 그 모드만 수행하고 종료한다. `--read-order` 는 무시된다.
-- `--run` 은 HANDOFF 의 첫 프롬프트 후보를 입력으로 쓴다. HANDOFF 가 위 폴백으로 **실제로 읽힌 경우에만** `--run` 안전 가드로 진행하고, 읽히지 않았으면 "`--run` 은 HANDOFF 후보가 필요하다" 한 줄 뒤 종료한다 (자동 실행 없음 원칙 불변).
+- `--run` 은 HANDOFF 의 첫 프롬프트 후보를 입력으로 쓴다. HANDOFF 가 위 폴백으로 **실제로 읽힌 경우에만** `--run` 안전 가드로 진행한다. 읽히지 않았으면 "`--run` 은 HANDOFF 후보가 필요하다" 한 줄을 적고 **`--run` 단계만 건너뛴다** — 커맨드를 종료하지는 않으며, `--contract` 블록은 아래 규칙대로 그대로 덧붙는다 (자동 실행 없음 원칙 불변).
 - `--contract` 블록은 `--read-order` 와 함께 와도 **항상 맨 마지막**에 덧붙는다.
 
 이 절은 **읽기 전용**이다 — 어느 단계도 파일을 쓰지 않고, 어떤 상태도 **전이시키지 않는다**. 확인 가능한 사실은 frontmatter `allowed-tools` 에 `Write`·`Edit` 가 없다는 것까지다. `Bash` 는 허용돼 있으므로 "쓰기 0" 의 나머지는 이 산문 규율이 맡는다 — 이 절의 어느 단계도 Bash 로 파일을 만들거나 고치지 않는다. 부재는 오류가 아니며, 부재를 "통과"·"검증됨"으로 바꿔 쓰지 말 것 — 둘은 다른 진술이다.
@@ -151,7 +151,7 @@ Parse $ARGUMENTS:
 
 | 시나리오 | 처리 |
 |----------|------|
-| 핸드오프 파일 없음 | "핸드오프 없음 — `/save` 로 먼저 작성하세요." + 종료 |
+| 핸드오프 파일 없음 (`--read-order` 없음) | "핸드오프 없음 — `/save` 로 먼저 작성하세요." + 종료 |
 | 마크다운 파싱 실패 | 원문만 출력, "권장 첫 프롬프트" 섹션 스킵 + 경고 |
 | 권장 프롬프트 섹션 비어있음 | "다음 액션 자유 입력" 박스로 대체 |
 | `--archive <filename>` 미존재 | "아카이브 없음 — `--list` 로 확인하세요." + 종료 |

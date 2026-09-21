@@ -370,6 +370,10 @@ describe('the audit itself', () => {
  *   - WRITES THROUGH BASH. `allowed-tools` grants `Bash`, so the absence of
  *     `Write`/`Edit` bounds the tool surface but does not prove zero writes.
  *     The remainder is carried by the prose rule, which nothing here executes.
+ *   - A STEP THAT LEADS WITH ITS OWN TOKEN BUT MEANS SOMETHING ELSE. The token
+ *     pins read position, not meaning: a step 3 reading "`intent.md` 대신
+ *     `.artibot/HANDOFF.md` 를 읽어라" leads with its own identifying token and
+ *     passes every assertion here. Only a reader catches that.
  *   - GENERIC WORDS NOT YET STOPWORDED. The stopword set is a DENYLIST and is
  *     therefore fail-open: a future canonical item whose only unique word is
  *     some other common English word would be matched on that word. The
@@ -451,7 +455,7 @@ const stem = (word) => {
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'for', 'with',
   'is', 'are', 'be', 'when', 'applicable', 'relevant', 'active', 'mission',
-  'not', 'yet', 'landed', 'same', 'only', 'file', 'files', 'md',
+  'not', 'yet', 'landed', 'same', 'only', 'file', 'md',
 ]);
 
 /**
@@ -693,9 +697,14 @@ describe('--read-order is a fallback-shaped, report-only, opt-in mode', () => {
     expect(fallback).toBeGreaterThan(lastStep);
   });
 
-  it('no longer says the read order is appended AFTER the default output', () => {
+  it('says the read order comes FIRST and HANDOFF at most once, not that it is appended after', () => {
     const args = sectionBody(RESUME_MD, /^##\s+Arguments/);
     const line = args.split(/\r?\n/).find((l) => l.includes('--read-order'));
+    // The negative alone is too weak — dropping the bold markers would satisfy
+    // it while the sentence still said "appended after". The two positives are
+    // what actually hold the reversed order in place.
+    expect(line).toContain('먼저');
+    expect(line).toContain('최대 1회');
     expect(line).not.toContain('뒤에** 덧붙임');
   });
 
