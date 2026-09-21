@@ -84,7 +84,7 @@
  * a branch it has nothing to do with — an operator running the documented
  * ad-hoc `ARTIBOT_STATE_DIR=/tmp/x npx vitest` skips that block entirely, so
  * the nested store would be created with nothing registered to remove it: the
- * same no-remover shape the 926-directory note at the `rmSync` above records,
+ * same no-remover shape the 926-directory note in the mint block below records,
  * though that pile had a different cause. And a store nested inside the state
  * dir is an extra entry for every test that enumerates or counts the state dir.
  * One directory per worker per store, each with its own remover, has neither
@@ -140,15 +140,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { getHomeDir, getPluginRoot } from '../../lib/core/platform.js';
 
-// Per worker process, not per file: setup runs once per test file but the
-// env persists in the worker, and a per-file directory would leave one
-// temp tree behind for every file in the suite. Keying on the pid also
-// keeps parallel workers off each other's read-modify-write.
+// Keyed on the pid, so this is one directory per worker PROCESS. How many test
+// files share one of those is a pool question rather than this file's, and the
+// answer is not the one this comment used to assert: measured 2026-09-21 on
+// vitest 4.0.18, BOTH projects run the forks pool with a fresh process per test
+// file (two files, two pids, in `main` and in `autopilot` alike), so the env
+// does not survive from one file to the next today and each file mints its own
+// directory. The pid key still does its other job — keeping whatever workers do
+// run concurrently off each other's read-modify-write.
 //
-// Computed OUTSIDE the assignment below because the remover needs it too, for
-// the reason spelled out above `OWN_AUTOPILOT_STORE_DIR`: the block is entered
-// by the first test file only, so a remover registered inside it would fire
-// after that one file and leave whatever every later file wrote behind.
+// Computed OUTSIDE the assignment below because the remover needs it too, and
+// has to stay correct under either shape. Where a worker IS reused across files
+// — the arrangement the autopilot project asks for — the block is entered by
+// the first file only, so a remover registered inside it would fire after that
+// one file and leave everything the later files wrote behind. Where it is not
+// reused, every file enters the block and the placement costs nothing. Out
+// here it is right either way, which is why this does not depend on settling
+// the pool question.
 const OWN_STATE_DIR = path.join(os.tmpdir(), `artibot-test-state-${process.pid}`);
 
 if (!process.env.ARTIBOT_STATE_DIR) {
@@ -199,11 +207,14 @@ process.env.ARTIBOT_STATE_DIR_HOME = getHomeDir();
 // would only guarantee an empty directory per worker whether or not a test
 // touched the store.
 //
-// Computed OUTSIDE the assignment below because the remover needs it too. Setup
-// re-runs per test file but the env persists in the worker, so under the
-// autopilot project's `singleFork` the block below is entered by the first file
-// only — a remover registered inside it would fire after file 1 alone, and
-// whatever the remaining files wrote would be left behind.
+// Computed OUTSIDE the assignment below because the remover needs it too, and
+// has to hold whether or not a worker is reused across files. Where one IS
+// reused the block below is entered by the first file only, and a remover
+// registered inside it would fire after file 1 alone, leaving whatever the
+// remaining files wrote behind. Measured 2026-09-21: this project's
+// `poolOptions.forks.singleFork` is NOT in effect on vitest 4.0.18 — two test
+// files in `--project autopilot` reported two pids — so each file currently
+// mints its own. Out here the constant is right under either shape.
 const OWN_AUTOPILOT_STORE_DIR = path.join(os.tmpdir(), `artibot-test-autopilot-store-${process.pid}`);
 
 if (!process.env.ARTIBOT_AUTOPILOT_STORE_DIR) {

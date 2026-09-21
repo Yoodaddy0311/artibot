@@ -28,11 +28,14 @@
  * setup file with vitest, once, inherited by every project").
  *
  * WHAT THIS GATE CANNOT SEE — do not read a green run as more than it is:
- *   - **The real config's pool shapes.** The child pins `singleFork`, which is
- *     what makes the per-file/per-worker split below observable at all. The
- *     `main` project runs threads with file parallelism; that this file's
- *     conclusion carries over is an argument from the code, not a measurement
- *     made here.
+ *   - **The real config's pool shape.** The child forces one reused worker,
+ *     which is what makes the per-file/per-worker split below observable at
+ *     all. The repo's own runs do NOT have that shape: measured 2026-09-21 on
+ *     vitest 4.0.18, `main` AND `autopilot` both give every test file a fresh
+ *     forks process (two files, two pids, in each project), so in the live
+ *     suite each file mints and removes its own directory rather than sharing
+ *     one. The remover is correct under both, but only the reused-worker case
+ *     is measured here; the live case is an argument from the code.
  *   - **A worker killed mid-file.** `afterAll` does not run then either, so
  *     that worker's directory survives. One per killed worker, not one per run.
  *   - **Anything about the autopilot store.** Its own remover sits in the same
@@ -106,10 +109,19 @@ function fixtureSource(name) {
  * observable, and it took measuring to get: `poolOptions.forks.singleFork` was
  * accepted in silence and ignored at both spellings tried (nested under
  * `test:`, and beside it as `vitest.config.js` does for its project entries) —
- * the two fixtures still reported two pids and two directories on
- * 2026-09-21. `isolate: false` is the form that holds: in the forks pool it
- * reuses one child across files, and `setupFiles` still re-runs per file, which
- * is the property under test.
+ * the two fixtures still reported two pids and two directories on 2026-09-21.
+ * That is not local to this config: `vitest.config.js`'s own autopilot project
+ * spells it the second way and does not get a single fork either, measured the
+ * same day. The likely cause is that vitest 4 removed `poolOptions` in favour
+ * of top-level options (`node_modules/vitest/dist/chunks/coverage.AVPTjMgw.js`
+ * warns exactly that when it finds the key under `test:`); no such warning is
+ * emitted for the sibling spelling, which is dropped without a word. That the
+ * removal is the mechanism is INFERRED from those two observations, not
+ * confirmed against the migration path.
+ *
+ * `isolate: false` is the form that holds: in the forks pool it reuses one
+ * child across files, and `setupFiles` still re-runs per file, which is the
+ * property under test.
  *
  * @param {string} root - Sandbox directory holding `fixtures/`.
  * @returns {string} Module source.
