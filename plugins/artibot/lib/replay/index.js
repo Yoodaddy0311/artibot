@@ -53,6 +53,14 @@ export {
 } from './claim-audit-join.js';
 
 export {
+  EXACT_UNREACHABLE_REASON,
+  NO_ACTIONS_REASON,
+  REPLAY_LABELS,
+  REPLAY_LABEL_REASONS,
+  labelReplay,
+} from './replay-label.js';
+
+export {
   ROUTE_EVENTS,
   TOOL_USE_SHADOW_PREFIX,
   UNBOUND_ROUTE_LEDGER,
