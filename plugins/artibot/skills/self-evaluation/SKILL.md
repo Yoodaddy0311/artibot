@@ -21,7 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
-source_hash: 2c846133
+source_hash: 6b2de433
 whenNotToUse: "Mid-task execution phases where evaluation would interrupt active work; do not apply when there is no completed task output to score or compare."
 ---
 
@@ -41,6 +41,7 @@ whenNotToUse: "Mid-task execution phases where evaluation would interrupt active
 ```
 Generate Candidates (GRPO) -> Rule-Based Group Evaluation -> Update Weights -> Self-Rewarding Score -> Store in Memory -> Better Candidates Next Time
 ```
+> 위 도식의 앞 3단계(Generate Candidates · Group Evaluation · Update Weights)는 은퇴했다. 라이브로 도는 구간은 `Self-Rewarding Score -> Store in Memory` 뿐이다 — 아래 GRPO 절의 은퇴 표기 참조.
 
 ### Self-Rewarding Evaluation Dimensions
 | Dimension | Weight | Description |
@@ -60,6 +61,8 @@ Generate Candidates (GRPO) -> Rule-Based Group Evaluation -> Update Weights -> S
 | 1.0-1.4 | F | Failed, requires major revision |
 
 ### GRPO: Group Relative Policy Optimization
+
+> **Retired (2026-06-20)** — 이 절이 서술하는 후보생성 → 규칙평가 → 가중치갱신 루프는 구현이 제거됐다. 삭제된 모듈 3종: `lib/learning/grpo-optimizer.js` · `lib/learning/grpo/` · `lib/cognitive/grpo-bridge.js`. 근거는 `artibot.config.json` 의 `learning.grpoRouting.comment`(2026-06-20 삭제 경위 기록). 아래 하위 절(CLI Rule-Based Evaluators · Team Composition Rules · GRPO Workflow · Team GRPO)은 **역사 기록으로 보존**하며 실행 지침이 아니다. 오늘 라이브로 남은 GRPO 계열은 lifelong-learning 스킬의 배치 학습 그룹 내 랭킹(`lib/learning/pattern-analyzer.js#grpoRankGroup`) 하나뿐이고, 그것은 이 절의 루프가 아니다.
 
 Rule-based self-learning without external judge AI. Core principle: generate multiple
 candidates for one problem, evaluate them with deterministic rules, rank by relative
@@ -88,7 +91,7 @@ group performance, and update strategy weights so better approaches are preferre
 3. **Evaluate**: Score each candidate against rule set
 4. **Rank**: Relative ranking within the group (no external judge needed)
 5. **Update**: Boost weights for winning strategies, reduce for losing ones
-6. **Persist**: Save weights to `~/.claude/artibot/grpo-history.json`
+6. **Persist**: Save weights to `~/.claude/artibot/grpo-history.json` — 은퇴(라이브 writer 없음). 디스크에 파일이 남아 있으면 `scripts/learning-diag.js` 가 "Retired / dormant" 배너와 함께 **과거 수치로만** 표시한다
 
 #### Team GRPO
 Same pattern applied to team orchestration:
@@ -112,19 +115,24 @@ Toolformer (tool selection) + BlenderBot (memory) + Self-Rewarding (evaluation) 
          |                          |                        |                         |
          +--------- runLearningCycle() integrates all 4 modules --------+
 ```
+> 위 도식의 GRPO 열(`evaluateGroup()`)과 `runLearningCycle()` 줄은 은퇴 — 두 심볼 모두 현재 export 되지 않는다. 남은 3열(`suggestTool()` · `saveMemory()` · `evaluateResult()`)은 export 된다. 그중 `suggestTool()` 은 런타임 호출자가 없고(2026-09-21 기준 정의·barrel·테스트뿐), 도구 학습의 라이브 경로는 `scripts/hooks/tool-tracker.js` 의 `recordUsage` 다. 4모듈을 한 번에 묶는 호출자는 없다 — 세션 종료 시 `lib/learning/pipeline.js#shutdownLearning` 이 메모리 요약 · `evaluateResult` · 경험 수집을 묶어 돈다. 위 GRPO 절의 은퇴 표기 참조.
 
 ## API Reference
 ```javascript
+// Live — these 4 are the only symbols in this import list that lib/learning/index.js exports.
 import {
   // Self-Rewarding
   evaluateResult, getImprovementSuggestions, getTeamPerformance, getLearningTrends,
-  // GRPO
-  generateCandidates, evaluateGroup, updateWeights,
-  generateTeamCandidates, evaluateTeamGroup, updateTeamWeights,
-  getRecommendation, getGrpoStats, CLI_RULES, TEAM_EVALUATION_RULES,
-  // Hybrid cycle
-  runLearningCycle,
 } from '../lib/learning/index.js';
+
+// Retired 2026-06-20 — no longer exported (historical, kept for reference only.
+// Importing these would fail to link; see the retirement note under the GRPO section):
+//   // GRPO
+//   generateCandidates, evaluateGroup, updateWeights,
+//   generateTeamCandidates, evaluateTeamGroup, updateTeamWeights,
+//   getRecommendation, getGrpoStats, CLI_RULES, TEAM_EVALUATION_RULES,
+//   // Hybrid cycle
+//   runLearningCycle,
 
 // --- Self-Rewarding ---
 const evaluation = await evaluateResult(
@@ -132,30 +140,30 @@ const evaluation = await evaluateResult(
   { success: true, testsPass: true, duration: 45000, filesModified: ['auth.js'] }
 );
 
-// --- GRPO: Task strategies ---
-const candidates = generateCandidates({ id: 't1', type: 'build', domain: 'backend' }, 5);
+// --- GRPO: Task strategies --- (historical — retired 2026-06-20, not runnable)
+// const candidates = generateCandidates({ id: 't1', type: 'build', domain: 'backend' }, 5);
 // ... execute each candidate, attach result ...
-candidates[0].result = { exitCode: 0, errors: 0, duration: 3000, commandLength: 20, sideEffects: 0 };
-const groupResult = evaluateGroup(candidates);
-const weights = await updateWeights(groupResult);
+// candidates[0].result = { exitCode: 0, errors: 0, duration: 3000, commandLength: 20, sideEffects: 0 };
+// const groupResult = evaluateGroup(candidates);
+// const weights = await updateWeights(groupResult);
 
-// --- GRPO: Team compositions ---
-const teamCandidates = generateTeamCandidates({ id: 't1', domain: 'security' });
+// --- GRPO: Team compositions --- (historical — retired 2026-06-20, not runnable)
+// const teamCandidates = generateTeamCandidates({ id: 't1', domain: 'security' });
 // ... simulate or execute each team ...
-teamCandidates[0].result = { taskCount: 5, successCount: 4, completedCount: 5, duration: 120000, teamSize: 3 };
-const teamResult = evaluateTeamGroup(teamCandidates);
-const teamWeights = await updateTeamWeights(teamResult);
+// teamCandidates[0].result = { taskCount: 5, successCount: 4, completedCount: 5, duration: 120000, teamSize: 3 };
+// const teamResult = evaluateTeamGroup(teamCandidates);
+// const teamWeights = await updateTeamWeights(teamResult);
 
-// --- Get recommendations ---
-const best = await getRecommendation('team', { domain: 'security' });
+// --- Get recommendations --- (historical — retired 2026-06-20, not runnable)
+// const best = await getRecommendation('team', { domain: 'security' });
 
-// --- Full hybrid cycle ---
-const cycle = await runLearningCycle(task, candidatesWithResults);
+// --- Full hybrid cycle --- (historical — retired 2026-06-20, not runnable)
+// const cycle = await runLearningCycle(task, candidatesWithResults);
 ```
 
 ## Storage
 - Evaluations: `~/.claude/artibot/evaluations.json` (max 500)
-- GRPO history: `~/.claude/artibot/grpo-history.json` (max 300 rounds)
+- GRPO history: `~/.claude/artibot/grpo-history.json` — 은퇴(라이브 writer 없음). `max 300 rounds` 는 과거 수치이며, 남아 있는 파일은 `scripts/learning-diag.js` 가 과거 데이터로만 읽는다
 - Zero external dependencies
 
 ## Workflow Checklist
@@ -165,17 +173,19 @@ Copy this checklist and track progress:
 ```
 Progress:
 - [ ] Step 1: Evaluate completed task across 4 dimensions (accuracy, completeness, efficiency, satisfaction)
-- [ ] Step 2: Generate N candidate strategies (GRPO) if comparing approaches
-- [ ] Step 3: Score each candidate against rule-based evaluators
-- [ ] Step 4: Rank within group — compute relative advantage
-- [ ] Step 5: Update strategy weights (boost winners, reduce losers)
-- [ ] Step 6: Persist evaluation + weights to storage
+- [ ] Step 2: Generate N candidate strategies (GRPO) if comparing approaches (retired 2026-06-20 — skip)
+- [ ] Step 3: Score each candidate against rule-based evaluators (retired 2026-06-20 — skip)
+- [ ] Step 4: Rank within group — compute relative advantage (retired 2026-06-20 — skip)
+- [ ] Step 5: Update strategy weights (boost winners, reduce losers) (retired 2026-06-20 — skip)
+- [ ] Step 6: Persist evaluation + weights to storage (weights retired — persist the evaluation only)
 - [ ] Step 7: Review improvement suggestions if score < 3.0
 ```
 
 ## Human Checkpoints
 
-### Checkpoint 1: 평가 점수 검토 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 평가 점수 검토 (After Step 1)
 **Context**: 4개 차원(정확성·완성도·효율성·만족도)에 따른 자동 채점이 완료된 시점. 가중치 기반 산출이므로 실제 작업 품질과 괴리가 생길 수 있어 사람의 판단이 필요하다.
 **Ask**: "평가 점수가 **실제 작업 품질을 적절히 반영**하고 있나요?"
 **Options**:
@@ -186,6 +196,8 @@ Progress:
 **Freedom**: LOW
 
 ### Checkpoint 2: GRPO 랭킹 유효성 확인 (After Step 4)
+> **Retired (2026-06-20)** — 이 체크포인트가 게이트하던 가중치 업데이트 기능이 은퇴해 현재 발동 조건이 없다. Step 2~5 를 건너뛰면 도달하지 않는다. 아래 본문은 역사 기록으로 보존한다.
+
 **Context**: 후보 전략들의 상대 랭킹이 산출된 시점. 비교 조건이 동등하지 않으면 랭킹이 왜곡될 수 있으므로 저장 전에 검증이 필요하다.
 **Ask**: "GRPO 랭킹이 **실제 품질 차이를 올바르게 반영**하고 있나요?"
 **Options**:
@@ -218,14 +230,16 @@ Progress:
 | Persist to storage | LOW | File paths and max entries are configured |
 | Review suggestions | HIGH | Acting on suggestions is a judgment call |
 
+> 위 표의 `Generate candidates` · `Score candidates` · `Rank within group` · `Update weights` 4행은 은퇴한 GRPO 루프의 단계라 현재 적용되지 않는다(역사 기록). 라이브는 `Evaluate task` · `Persist to storage`(평가 한정) · `Review suggestions`. 위 GRPO 절의 은퇴 표기 참조.
+
 ## Quick Reference
 - Evaluate after every significant task completion
-- Use GRPO when comparing multiple approaches to the same problem
-- Use team GRPO to optimize orchestration patterns per domain
-- `runLearningCycle()` integrates all 4 modules in one call
+- ~~Use GRPO when comparing multiple approaches to the same problem~~ — 은퇴(2026-06-20)
+- ~~Use team GRPO to optimize orchestration patterns per domain~~ — 은퇴(2026-06-20)
+- ~~`runLearningCycle()` integrates all 4 modules in one call~~ — 은퇴, export 없음
 - Review suggestions when scores drop below 3.0
-- Check `getRecommendation()` before selecting strategy or team composition
-- All rule-based: no external judge AI needed
+- ~~Check `getRecommendation()` before selecting strategy or team composition~~ — 은퇴, export 없음
+- Self-Rewarding 평가는 규칙 기반: 외부 judge AI 가 필요 없다(라이브)
 
 ## Rationalizations
 

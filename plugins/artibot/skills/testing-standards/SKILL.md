@@ -26,7 +26,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "testing"
-source_hash: 099835ea
+source_hash: 9d93f0fb
 whenNotToUse: "Do not apply the 80% unit coverage threshold to infrastructure glue code (Docker entrypoints, CI YAML, config loaders with no logic). Do not require E2E tests for backend-only APIs with no user-facing journey — integration tests suffice there."
 ---
 
@@ -95,7 +95,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 테스트 행동 검증 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 테스트 행동 검증 (After Step 1)
 **Context**: TDD의 RED 단계에서 테스트를 작성한 직후입니다. 이 시점에 테스트가 잘못된 행동을 정의하면 이후 모든 구현이 잘못된 방향으로 진행됩니다.
 **Ask**: "작성한 테스트가 **올바른 행동을 정의하고 있나요**? 구현 전에 테스트 내용을 검토해 주세요."
 **Options**:
@@ -105,7 +107,7 @@ Progress:
 **Skippable**: No — 잘못된 테스트로 시작하면 GREEN 단계에서 잘못된 코드가 작성됨
 **Freedom**: MEDIUM
 
-### Checkpoint 2: 리팩토링 결과 승인 (After Step 5)
+### Self-check 2: 리팩토링 결과 승인 (After Step 5)
 **Context**: REFACTOR 단계 완료 후, 모든 테스트가 여전히 통과하는 상태에서 코드 품질 개선 결과를 확인하는 시점입니다.
 **Ask**: "리팩토링된 코드가 **수용 가능한 수준인가요**? 품질과 가독성을 검토해 주세요."
 **Options**:
@@ -126,7 +128,7 @@ Progress:
 **Skippable**: Yes (커버리지가 이미 80% 이상이면 이 체크포인트는 건너뜀)
 **Freedom**: HIGH
 
-### Checkpoint 4: 테스트 품질 최종 검토 (After Step 7)
+### Self-check 4: 테스트 품질 최종 검토 (After Step 7)
 **Context**: 모든 TDD 사이클이 완료된 후, 테스트 코드 자체의 품질 — 격리성, 네이밍, 단일 어설션 — 을 최종 점검하는 시점입니다.
 **Ask**: "테스트 품질 기준을 **모두 충족하나요**? 격리성, 네이밍, 단일 어설션 포커스를 확인해 주세요."
 **Options**:

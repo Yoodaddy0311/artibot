@@ -32,7 +32,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "security"
-source_hash: 68ecb081
+source_hash: dbd2aff4
 whenNotToUse: "Do not apply the full security checklist to internal CLI tools with no network exposure, local-only scripts, or test fixtures. When the attack surface is zero (no external input, no network, no persistence), scale down to secret-check only."
 ---
 
@@ -105,6 +105,8 @@ Progress:
 
 ## Human Checkpoints
 
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
 ### Checkpoint 1: 시크릿 노출 여부 확인 (After Step 1)
 **Context**: 사전 커밋 보안 체크가 완료된 시점. 코드에 하드코딩된 시크릿이 발견되면 즉시 중단하고 로테이션해야 한다 — 이 단계를 지나치면 되돌릴 수 없다.
 **Ask**: "사전 커밋 체크가 완료되었습니다. **코드에서 하드코딩된 API 키, 비밀번호, 토큰이 발견되었나요?**"
@@ -115,7 +117,7 @@ Progress:
 **Skippable**: No — 시크릿 노출은 즉각적인 보안 사고로 이어질 수 있음
 **Freedom**: LOW
 
-### Checkpoint 2: SQL 인젝션 방어 검증 (After Step 3)
+### Self-check 2: SQL 인젝션 방어 검증 (After Step 3)
 **Context**: 파라미터화 쿼리 사용 여부가 검토된 시점. SQL 인젝션은 OWASP Top 1으로 문자열 연결 쿼리가 하나라도 있으면 전체 DB가 위험에 노출된다.
 **Ask**: "SQL 쿼리 검토가 완료되었습니다. **모든 DB 쿼리가 파라미터화 쿼리를 사용하고 있나요?**"
 **Options**:
@@ -125,7 +127,7 @@ Progress:
 **Skippable**: No — 파라미터화되지 않은 쿼리는 즉시 수정 필요
 **Freedom**: LOW
 
-### Checkpoint 3: 인증/인가 커버리지 확인 (After Step 6)
+### Self-check 3: 인증/인가 커버리지 확인 (After Step 6)
 **Context**: 모든 엔드포인트의 인증/인가 적용 여부가 검토된 시점. 커버리지 갭이 있으면 무인증 접근 경로가 생기므로 배포 전에 반드시 해소해야 한다.
 **Ask**: "엔드포인트 인증/인가 검토가 완료되었습니다. **모든 엔드포인트에 적절한 인증과 인가가 적용되어 있나요?**"
 **Options**:

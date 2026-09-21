@@ -24,7 +24,7 @@ agents:
   - "refactor-cleaner"
 tokens: "~3K"
 category: "code-quality"
-source_hash: dda690c5
+source_hash: 06378357
 whenNotToUse: "Throwaway scripts, one-off data migrations, or prototype spikes explicitly scoped to be discarded — applying SOLID/DRY overhead to code with no maintenance lifecycle adds friction without benefit."
 ---
 
@@ -111,7 +111,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 분해 결과 승인 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 분해 결과 승인 (After Step 1)
 **Context**: 요청이 번호가 매겨진 원자적 항목들로 분해된 시점. 분해가 완전하지 않으면 이후 단계에서 누락 항목이 생기고 Zero-Skip Policy 위반으로 이어진다.
 **Ask**: "요청이 다음과 같이 분해되었습니다. **모든 항목이 포함되어 있고 분해 단위가 적절한가요?**"
 **Options**:
@@ -132,7 +134,7 @@ Progress:
 **Skippable**: Yes (기본값 사용) — KISS 접근법으로 진행
 **Freedom**: HIGH
 
-### Checkpoint 3: 완료 증거 검증 (After Step 5)
+### Self-check 3: 완료 증거 검증 (After Step 5)
 **Context**: 각 분해 항목에 대한 완료 증거(파일:라인)가 제출된 시점. "완료했다"는 주장이 아닌 실제 증거로 검증해야 Zero-Skip Policy가 보장된다.
 **Ask**: "각 항목의 완료 증거가 제출되었습니다. **모든 항목에 대해 충분한 증거(파일:라인)가 있나요?**"
 **Options**:
