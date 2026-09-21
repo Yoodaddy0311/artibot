@@ -50,6 +50,11 @@
  *  7. **헤딩 추가.** 무손실 검사는 기준선이 **부분수열로 순서대로** 남았는지만
  *     본다. 새 헤딩이 끼어들어도 RED 가 아니다 — 스킬에 절이 추가되는 것은
  *     정당한 변경이라 그것까지 막으면 게이트를 깎게 된다(rules §10).
+ *  8. **안내 줄의 위치.** 안내 줄이 `## Human Checkpoints` 절 **안에 정확히 1번**
+ *     있는지만 본다. 절 헤딩 바로 아래인지, 체크포인트들 뒤로 밀렸는지는 안 본다.
+ *  9. **B-3 은퇴 표기.** 이 게이트는 B-1 전용이다. `self-evaluation/SKILL.md` 의
+ *     GRPO 은퇴 표기(blockquote·주석화)는 헤딩이 아니라서 전부 지워도 그린이다.
+ *     그 표기가 가리키는 코드 실재 여부도 보지 않는다 — 무게이트(미확인 영역).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -761,6 +766,11 @@ describe('constitution stage B-1 — 22 SKILL.md 체크포인트 재표기', () 
     const renamed = ['# T', SECTION_HEADING, '', '### Self-check 1: X', 'body'].join('\n');
     const violations = scan(renamed, baseline, { decision: [1], selfCheck: [] });
     expect(violations.length).toBeGreaterThan(0);
+    // 아무 위반이나가 아니라 **개수 불일치**로 잡혀야 한다 — 존속해야 할 결정형이
+    // 사라졌고(checkpoint-count), 분류에 없는 Self-check 가 생겼다(selfcheck-count).
+    const joined = violations.join('|');
+    expect(joined).toContain('checkpoint-count: 0 != 1');
+    expect(joined).toContain('selfcheck-count: 1 != 0');
   });
 
   it('검사기가 안내 줄 누락을 잡는다 (self-check)', () => {

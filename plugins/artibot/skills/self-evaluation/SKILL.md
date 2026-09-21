@@ -21,7 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
-source_hash: dc3d5ac1
+source_hash: 6b2de433
 whenNotToUse: "Mid-task execution phases where evaluation would interrupt active work; do not apply when there is no completed task output to score or compare."
 ---
 
@@ -115,11 +115,11 @@ Toolformer (tool selection) + BlenderBot (memory) + Self-Rewarding (evaluation) 
          |                          |                        |                         |
          +--------- runLearningCycle() integrates all 4 modules --------+
 ```
-> 위 도식의 GRPO 열(`evaluateGroup()`)과 `runLearningCycle()` 줄은 은퇴 — 두 심볼 모두 현재 export 되지 않는다. 라이브는 `suggestTool()` · `saveMemory()` · `evaluateResult()` 3열이며, 통합 호출자는 없다. 위 GRPO 절의 은퇴 표기 참조.
+> 위 도식의 GRPO 열(`evaluateGroup()`)과 `runLearningCycle()` 줄은 은퇴 — 두 심볼 모두 현재 export 되지 않는다. 남은 3열(`suggestTool()` · `saveMemory()` · `evaluateResult()`)은 export 된다. 그중 `suggestTool()` 은 런타임 호출자가 없고(2026-09-21 기준 정의·barrel·테스트뿐), 도구 학습의 라이브 경로는 `scripts/hooks/tool-tracker.js` 의 `recordUsage` 다. 4모듈을 한 번에 묶는 호출자는 없다 — 세션 종료 시 `lib/learning/pipeline.js#shutdownLearning` 이 메모리 요약 · `evaluateResult` · 경험 수집을 묶어 돈다. 위 GRPO 절의 은퇴 표기 참조.
 
 ## API Reference
 ```javascript
-// Live — these 4 are the only symbols in this file that lib/learning/index.js exports.
+// Live — these 4 are the only symbols in this import list that lib/learning/index.js exports.
 import {
   // Self-Rewarding
   evaluateResult, getImprovementSuggestions, getTeamPerformance, getLearningTrends,
