@@ -238,6 +238,25 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 
 미확인(판정자 유보 그대로): Observe ②③④ 오늘 수치 · G3 Hardening §45 검토 수행 여부 · `matchesType` 의 null 지원 · 설치된 `/save` 산문 · 2026-09-21 `mission.*` 원장 행의 출처(프로덕션 vs 팀 프로브) · CA-03 저널 분모.
 
+### §4-c Observe 4축 재집계 (2026-09-21 07:30~07:37Z, investigator 실측 + 리더 재실행 대조 — 오너 종료 판정 대기)
+
+**전제 교정**: 판독기 5종(`verify-rate`·`session-coverage`·`route-compare`·`outcome-census`·`topology-agreement`)의 입력은 **중앙 원장 `.git/artibot/ledger.jsonl`**(9,052행 · 4.28MB, 측정 중 증가)이다. `.artibot/ledger/*.jsonl`(50파일 4,597행)은 세션별 원장이며 판독기 입력이 아니다. 설치본 3곳(리포·`~/.claude/artibot`·cache/4.65.0) 판독기 sha 동일. 리더가 `session-coverage.mjs`·`verify-rate.mjs`·`route.selected` 행수·config 3키 값을 07:37Z 에 독립 재실행해 아래 수치와 일치 확인.
+
+| 축 | 2026-09-21 수치(분자/분모) | 재현 명령 | 09-14 대비 | 판정 |
+|---|---|---|---|---|
+| ① substantive 분포 | **집계 스크립트 없음(임시 계수)**: `data.substantive` 보유 행 0/9,023 · `mission.candidate_deferred` 338/338 전부 `substantive-gate:deferred` · `intent.detected` 10건 전부 `type:slash-command` · compile 필드 0 | `node -e` 임시 계수 | 변화 없음(분모 0) | 임계 미정의 + 분자 측정 불능 → **⑤처럼 Shadow 이월 권장** |
+| ② 추천≠정책 스폰 | `route.selected` 381행(receipt_id 중복 0) 중 tier 불일치 **53 = 13.9%**, 전부 opus→fable(policy:fable 강제, class:agent). 09-14 09:10Z 이전 203/23(11.3%) · 이후 178/30(16.9%). 사유 배선 착지: residency 138/381 · pin 70/381 · actionsSinceSwitch>0 100/381. 교차: `route-compare` compared 108 / diverged 15 = 13.9% | `node -e` · `route-compare.mjs` | §4 의 "102행/12 · pin 0 · residency 133/133 unavailable" 과 **분모 불일치**(§4 계수 출처 파일 미확인) · OB-17 사유 배선은 착지됨 | 임계 미정의(수치·사유 있음) → "정책 적용" 라벨 + RouteBench B2 기준선 권장 |
+| ③ verify 파싱률 | `verify.completed` 772행 / 193 id / 46세션. self_report 0 · answered 0 · measured 1 id(0.52%). 층별 unmeasured deterministic 192/193 · behavioral 193/193 · operational 193/193. **UNMEASURED 770/772 = 99.7%** | `node plugins/artibot/scripts/ledger/verify-rate.mjs` | 112줄/28id → 772/193 | 임계 미정의, writer 0 이라 비율 불변 → "분모+writer 배선" 을 종료 조건으로 재정의 권장 |
+| ④ 영수증 커버리지 | ended **26 / with_receipts 24 = 92.3%**, skipped 2(`no-receipts`), receipt_sessions 36, receipt_only 12. 첫 `session.ended` 09-15 00:06Z | `node plugins/artibot/scripts/ledger/session-coverage.mjs` | 0/null → 26/0.923 | **95% 미달**(표본 26). "ended ≥50 에서 재판정" 표본 조건 추가 + 결손 2건 원인 조사를 Shadow 첫 줄기로 권장 |
+
+**§4-b 3키 재판정(전부 유지)** — 달라진 항목만: SH-01 a 가 "미충족→부분충족"(수치는 있음, 종료/면제 기록은 오너 몫); SH-01 e 핀 3곳 실재·전부 false 핀(`artifact-lifecycle-apply.test.js:521-523` · `artifact-lifecycle-dryrun.test.js:808-809` · `subagent-handler-review-writer.test.js:784`) + config 주석 실재; SH-01 b `lib/runtime/artifact-lifecycle*.js` 에 projectGate/B4 0건; CA-05 c "설치된 `/save` 산문" 미확인→**확인**(cache 4.65.0 `commands/save.md` sha 동일, checkpoint 10회 언급) · a `schemas/ledger-events.allowlist.json:576-591` fields 에 `resumable` 미선언 · d `mission.checkpointed` 0/9,023; CA-03 a 미충족 실측(`engine-state.js:199` 반환 버림→`:202` persist, `recovery-transition.js:47-48` 자인) · b 저널 분모 "미확인→0 실측"(원장 `recovery.*`/`verdict.*` 0/9,023, `divergent` 항상 true `:16`) · c 충족(`recovery-record.js:142` ladderFromJournal). config 값 3키 전부 false(`artibot.config.json:764`·`:1072`·`:1112`).
+
+**정합성**: route.selected 381 = route.bound 381 ✓ · usage.receipt 183 = main 36 + subagent 147 ✓ · receipt_sessions 36 − with_receipts 24 = receipt_only 12 ✓ · verify 46세션 > ended 26 은 writer 착지 시점 차이(ended 09-15~, hook.fired 09-17~)라 모순 아님 · **모순 1건**: §4 ② "09-14 09:10 102행/12" 와 중앙 원장 같은 시각 이전 203행/23 이 동시에 참이려면 §4 계수가 다른 파일(세션 원장 합산 또는 미이관 원장)이었어야 한다 — 그 파일 미확인 · `mission.completed` 16세션 중 5개는 `.artibot/ledger/` 에 없다(worktree 세션 추정, 프로덕션/프로브 출처 미확인 유지).
+
+**오너 결정 대기 3건(권장안 포함)**: (1) 종료 정의 — ① 은 Shadow 이월 확정, ②③ 은 "분모+사유/writer 배선 확보" 로 종료 조건 재정의 후 충족 처리 · (2) ④ 임계 — 95% 유지 + "ended ≥50 에서 재판정" · (3) ② 해석 — 13.9% 는 이탈이 아니라 2티어 정책 적용으로 라벨 확정. 세 키 플립은 오너 결정 전까지 **전부 보류 유지**.
+
+**미확인**: §4 ② 102행 출처 파일 · ① compile 성공률(이벤트 없음) · SH-01 c 실측(untracked missions 가 land/preflight 를 실제 통과하는지; `.gitignore:119` 가 missions/ 를 추적 정본으로 명시) · SH-01 d 해석 문서 · CA-05 정합 핀 테스트 존재 · `save-checkpoint-order.test.js` green 여부(미실행) · CA-03 저널이 `.artibot/runtime`·`.git/artibot` 밖에 있을 가능성 · ④ no-receipts 2건 원인 · outcome-census declared 16 / blocked 16(STATE_ROW_ABSENT 14 · ARTIFACT_ABSENT 2)은 축 아님, 참고.
+
 ## §5 Shadow 진입 최소 집합 (선행 순서 · 크기 · 소유)
 
 크기 등급: S ≤150줄 · M 150~600 · L >600 (구현+테스트 합, 추정 — 미측정).
