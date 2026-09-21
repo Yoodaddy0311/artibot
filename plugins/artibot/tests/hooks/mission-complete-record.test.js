@@ -187,10 +187,36 @@ function seedArtifacts(id = missionId, { planText, reviewText } = {}) {
   }), 'utf-8');
 }
 
-/** Point `getPluginRoot()` at a sandbox config with the two knobs this hook reads. */
+/**
+ * The per-project opt-in marker, relative to the project root. Written into the
+ * sandbox config EXPLICITLY rather than inherited from the live file, so these
+ * cases keep meaning the same thing on the day the shipped default is renamed.
+ */
+const PROJECT_MARKER = '.artibot/project.md';
+
+/**
+ * Give the sandbox repo the marker that opts it into artifact writes.
+ *
+ * The SECOND half of the artifact gate (B4). Without it the global kill switch
+ * is not enough, which is the whole point: turning the switch on must not start
+ * seeding `.artibot/missions/` in every repository a session ends in.
+ *
+ * @param {string} [root] project root to opt in
+ */
+function seedProjectMarker(root = repo) {
+  const file = path.join(root, ...PROJECT_MARKER.split('/'));
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '# project\n', 'utf-8');
+}
+
+/** Point `getPluginRoot()` at a sandbox config with the knobs this hook reads. */
 function writeSandboxConfig({ enabled = false, requiredLayers } = {}) {
   const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
   live.runtime.artifactLifecycle.enabled = enabled;
+  // Explicit, always: the resolver reads the marker NAME from config, and a
+  // sandbox that inherited it silently would stop testing the gate the day the
+  // live default moves.
+  live.runtime.artifactLifecycle.projectMarker = PROJECT_MARKER;
   if (requiredLayers !== undefined) {
     live.review = live.review ?? {};
     live.review.verify = { ...(live.review.verify ?? {}), requiredLayers };
@@ -271,6 +297,10 @@ beforeEach(() => {
   // SHIPPED VALUE BY DEFAULT. Cases that measure the writer open it explicitly,
   // so a green run is never mistaken for a file the shipped config would produce.
   writeSandboxConfig({ enabled: false });
+  // The PROJECT half of the gate is opted in by default, so every case here
+  // measures the half it names. The cases that mean "this project never opted
+  // in" remove it explicitly.
+  seedProjectMarker();
 });
 
 afterEach(() => {
@@ -425,6 +455,124 @@ describe('the write path, with the kill switch open', () => {
     expect(f.block).toBe('none');
     expect(f.write).toBe(WriteStatus.WRITE_DISABLED);
     expect(existsSync(path.join(repo, '.artibot', 'missions', missionId, 'outcome.md'))).toBe(false);
+  });
+});
+
+/**
+ * B4 — the artifact gate's COMPLETION CRITERION, as a matrix.
+ *
+ * The gate is a conjunction of two independent conditions, so one open switch
+ * and one present marker are not interchangeable evidence. Three runs of the
+ * REAL hook against three configurations, compared to each other rather than to
+ * a remembered expectation:
+ *
+ *   (a) global false + marker present   -> no file
+ *   (b) global true  + marker absent    -> no file        <- the B4 behaviour
+ *   (c) global true  + marker present   -> outcome.md
+ *
+ * WHAT IS ASSERTED ACROSS ALL THREE, not just in (c): the exit status, the
+ * stdout BYTES (length included — a truncation that happened to share a prefix
+ * would pass a string compare on some shells), and the presence of the
+ * `mission.completed` ledger line. The gate suppresses a FILE and nothing else;
+ * a gate that also swallowed the declaration would be a measurement hole, and
+ * (b) is exactly where such a hole would open.
+ *
+ * WHAT THIS DOES NOT PROVE (rules §9): that the LIVE configuration opts any
+ * real project in. Every root here is a sandbox, and the shipped global value
+ * is pinned separately by the suite above.
+ */
+describe('B4 artifact gate — the completion criterion matrix', () => {
+  /** Everything the write path needs except the gate itself. */
+  function seedPassing() {
+    seedMission();
+    seedVerify(missionId, 'PASS');
+    seedReview();
+    seedArtifacts();
+  }
+
+  /** @returns {string} the path `outcome.md` would take */
+  const outcomeFile = () => path.join(repo, '.artibot', 'missions', missionId, 'outcome.md');
+
+  /** Remove the opt-in marker `beforeEach` seeded. @returns {void} */
+  function removeProjectMarker() {
+    rmSync(path.join(repo, ...PROJECT_MARKER.split('/')), { force: true });
+  }
+
+  /**
+   * Run one cell of the matrix.
+   *
+   * @param {{enabled: boolean, marker: boolean}} cell the gate's two halves
+   * @returns {{res: object, wrote: boolean, declared: boolean}} what came out
+   */
+  function runCell({ enabled, marker }) {
+    seedPassing();
+    writeSandboxConfig({ enabled, requiredLayers: ['deterministic'] });
+    if (!marker) removeProjectMarker();
+
+    const res = runHook(payload());
+    return {
+      res,
+      wrote: existsSync(outcomeFile()),
+      declared: completedLines().length === 1,
+    };
+  }
+
+  it('writes outcome.md ONLY when the switch is open AND the project opted in', () => {
+    const a = runCell({ enabled: false, marker: true });
+    expect(a.wrote).toBe(false);
+
+    // A fresh repo per cell: the previous cell's ledger and store row would
+    // change what `declared` means on the next run.
+    rmSync(repo, { recursive: true, force: true });
+    mkdirSync(repo, { recursive: true });
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
+    seedProjectMarker();
+    const b = runCell({ enabled: true, marker: false });
+    expect(b.wrote).toBe(false);
+
+    rmSync(repo, { recursive: true, force: true });
+    mkdirSync(repo, { recursive: true });
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
+    seedProjectMarker();
+    const c = runCell({ enabled: true, marker: true });
+    expect(c.wrote).toBe(true);
+
+    for (const cell of [a, b, c]) {
+      expect(cell.res.status).toBe(0);
+      // The declaration is the gate's blind spot by design: it happens whether
+      // or not a file does.
+      expect(cell.declared).toBe(true);
+    }
+
+    // stdout is BYTES, compared as Buffers, length first.
+    const bytes = [a, b, c].map((cell) => Buffer.from(cell.res.stdout, 'utf-8'));
+    expect(bytes[1].length).toBe(bytes[0].length);
+    expect(bytes[2].length).toBe(bytes[0].length);
+    expect(bytes[1].equals(bytes[0])).toBe(true);
+    expect(bytes[2].equals(bytes[0])).toBe(true);
+
+    // ...and both refusals name the SAME status. `global-off` and `project-off`
+    // are one word to this hook on purpose — a second string would be a new
+    // decision channel on a path contracted to decide nothing.
+    expect(fields(a.res.lines[0]).write).toBe(WriteStatus.WRITE_DISABLED);
+    expect(fields(b.res.lines[0]).write).toBe(WriteStatus.WRITE_DISABLED);
+    expect(fields(c.res.lines[0]).write).toBe(WriteStatus.WRITTEN);
+  });
+
+  it('treats a DIRECTORY at the marker path as no marker at all', () => {
+    seedPassing();
+    writeSandboxConfig({ enabled: true, requiredLayers: ['deterministic'] });
+    // A regular file is required, not merely an existing path: `.artibot` is a
+    // directory people create for other reasons, and `existsSync` alone would
+    // opt a project in for having one.
+    removeProjectMarker();
+    mkdirSync(path.join(repo, ...PROJECT_MARKER.split('/')), { recursive: true });
+
+    const res = runHook(payload());
+
+    expect(res.status).toBe(0);
+    expect(existsSync(outcomeFile())).toBe(false);
+    expect(fields(res.lines[0]).write).toBe(WriteStatus.WRITE_DISABLED);
   });
 });
 

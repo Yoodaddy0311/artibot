@@ -84,6 +84,24 @@ const LIFECYCLE_SRC = readFileSync(
  */
 const APPLY_CAN_WRITE = /options\.write\s*===\s*true/.test(LIFECYCLE_SRC);
 
+/**
+ * The per-project marker, relative to the project root.
+ *
+ * The shipped value of `runtime.artifactLifecycle.projectMarker`. Spelled here
+ * rather than read out of the live config so a change to that key makes the
+ * matrix below RED — the point of the matrix is that this file and the config
+ * agree, and a self-reading fixture can never disagree with itself.
+ */
+const PROJECT_MARKER = '.artibot/project.md';
+
+/** Create the marker file that opens the per-project half of the gate. */
+function seedProjectMarker(root) {
+  const file = path.join(root, ...PROJECT_MARKER.split('/'));
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '# project\n', 'utf-8');
+  return file;
+}
+
 const SESSION_ID = 'sess-intent-1abcdefg';
 const DEFERRED_TITLE = 'Fix the flaky parser test';
 /** One UTC day. The mission id's date part is `new Date()`-derived, so this is
@@ -356,11 +374,19 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
       readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'),
     );
     liveConfig.runtime.artifactLifecycle.enabled = true;
+    // GATE 2b, THE PER-PROJECT HALF. The global switch alone no longer opens
+    // the gate: `artifact-lifecycle.js#resolveArtifactGate` also demands the
+    // marker file this key names, so that flipping the switch on does not start
+    // writing `.artibot/missions/` into every checkout. Set EXPLICITLY rather
+    // than relied on from the copied live config, so these cases state the
+    // marker path they seed instead of inheriting it silently.
+    liveConfig.runtime.artifactLifecycle.projectMarker = PROJECT_MARKER;
     writeFileSync(
       path.join(pluginRootOverride, 'artibot.config.json'),
       JSON.stringify(liveConfig, null, 2),
       'utf-8',
     );
+    seedProjectMarker(repo);
     previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     process.env.CLAUDE_PLUGIN_ROOT = pluginRootOverride;
     // `loadConfig` memoises by (path, mtime); the in-process case below would
@@ -604,6 +630,122 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
       // on, so a green run is never mistaken for a measured file write.
       expect(typeof APPLY_CAN_WRITE).toBe('boolean');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The per-project gate — the completion criterion, measured on the real hook
+// ---------------------------------------------------------------------------
+
+describe('intent-observe-pre — the per-project gate (a/b/c matrix)', () => {
+  let tmp;
+  let previousPluginRoot;
+
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'artibot-intent-gate-')));
+    previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  });
+
+  afterEach(() => {
+    if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
+    resetConfig();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  /**
+   * One sandbox: its own repo, its own plugin root, its own config. `marker`
+   * chooses what sits at the marker path — nothing, a regular file, or a
+   * DIRECTORY, which is the shape a `!isFile` resolver has to reject.
+   */
+  function sandbox(name, { enabled, marker }) {
+    const home = path.join(tmp, name, 'home');
+    const repo = path.join(tmp, name, 'repo');
+    const root = path.join(tmp, name, 'plugin-root');
+    mkdirSync(path.join(home, '.claude'), { recursive: true });
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
+
+    const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
+    live.runtime.artifactLifecycle.enabled = enabled;
+    live.runtime.artifactLifecycle.projectMarker = PROJECT_MARKER;
+    writeFileSync(path.join(root, 'artibot.config.json'), JSON.stringify(live, null, 2), 'utf-8');
+
+    if (marker === 'file') seedProjectMarker(repo);
+    if (marker === 'dir') {
+      mkdirSync(path.join(repo, ...PROJECT_MARKER.split('/')), { recursive: true });
+    }
+
+    const missionId = sessionFallbackMissionId(SESSION_ID, new Date());
+    expect(appendLedgerEvent(repo, {
+      event: 'mission.candidate_deferred',
+      session_id: SESSION_ID,
+      mission_id: missionId,
+      source: 'hook',
+      data: { reason: 'substantive-gate:deferred', signals: [], title: DEFERRED_TITLE },
+    }).ok).toBe(true);
+
+    return { home, repo, root, missionId };
+  }
+
+  /** Run the hook in that sandbox and report only what the criterion names. */
+  function measure(box) {
+    process.env.CLAUDE_PLUGIN_ROOT = box.root;
+    resetConfig();
+    const r = runHook({
+      cwd: box.repo,
+      hook_event_name: 'PreToolUse',
+      session_id: SESSION_ID,
+      tool_name: 'Write',
+      tool_use_id: 'toolu_gate_1',
+      tool_input: { file_path: path.join(box.repo, 'lib', 'parser.js'), content: 'x\n' },
+    }, box.home);
+    return {
+      status: r.status,
+      stdout: r.stdout,
+      stdoutBytes: r.stdoutBytes,
+      file: existsSync(intentArtifactPath(box.repo, box.missionId)),
+      created: readRunLedger(box.repo).filter((l) => l.event === 'mission.created').length,
+    };
+  }
+
+  it('suppresses the FILE and nothing else: a/b closed, c open', () => {
+    // (a) global false + marker present — the shipped 4.61.0 configuration.
+    // (b) global true  + marker absent  — the case this gate exists for: the
+    //     owner flipped the switch on, and an unmarked project still gets
+    //     nothing. Before the per-project gate this wrote a file.
+    // (c) global true  + marker present — the only combination that writes.
+    const a = measure(sandbox('a', { enabled: false, marker: 'file' }));
+    const b = measure(sandbox('b', { enabled: true, marker: 'none' }));
+    const c = measure(sandbox('c', { enabled: true, marker: 'file' }));
+
+    // Exit status and stdout are IDENTICAL across all three. A PreToolUse hook
+    // that spoke would cancel the user's tool call, so the gate must be
+    // invisible on both channels — asserted as bytes, not as a decoded string.
+    for (const [name, m] of [['a', a], ['b', b], ['c', c]]) {
+      expect(m.status, `${name}: exit`).toBe(0);
+      expect(m.stdoutBytes, `${name}: stdout length`).toBe(0);
+      expect(m.stdout.equals(a.stdout), `${name}: stdout bytes`).toBe(true);
+    }
+
+    // The RECORD happens in all three — ledger writes are Observe-legal.
+    expect([a.created, b.created, c.created]).toEqual([1, 1, 1]);
+
+    // The FILE happens only in (c).
+    expect([a.file, b.file]).toEqual([false, false]);
+    expect(c.file).toBe(APPLY_CAN_WRITE);
+  });
+
+  it('writes nothing when the marker path is a DIRECTORY named project.md', () => {
+    // `existsSync` alone would call this open. The resolver's contract says a
+    // REGULAR FILE, and a directory is the cheapest way a project accidentally
+    // satisfies a laxer check.
+    const m = measure(sandbox('dir', { enabled: true, marker: 'dir' }));
+    expect(m.status).toBe(0);
+    expect(m.stdoutBytes).toBe(0);
+    expect(m.created).toBe(1);
+    expect(m.file).toBe(false);
   });
 });
 

@@ -65,10 +65,10 @@ import {
   DEFAULT_POLICY,
   foldGateState,
   isPlainObject,
-  isRevision,
+  isRevision, normaliseProjectMarker,
 } from './artifact-lifecycle-gates.js';
 import { atomicWriteTextSync, ensureDirSync } from '../core/file.js';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 // The completion gates and the staleness vocabulary live in the sibling module
@@ -521,10 +521,15 @@ export function plan(input) {
  *      despite now reading like a contradiction: it is the flag every current
  *      caller already passes, so its meaning is "I am a caller that knows this
  *      module", not "do not write". Gate 3 is what says whether to write.
- *   2. `options.config` carries {@link APPLY_GATE_PATH} set to `true`. That key
- *      now exists in `artibot.config.json` (added with this writer, measured
- *      2026-09-12), so this gate is open in production — it is the kill switch,
- *      flipped in one place without a deploy.
+ *   2. {@link resolveArtifactGate} reports `open`. That is TWO conditions, not
+ *      one: the global kill switch {@link APPLY_GATE_PATH} set to `true`, AND
+ *      the marker file named by {@link PROJECT_MARKER_PATH} existing under
+ *      `options.projectRoot`. The kill switch alone is a GLOBAL flag — flipping
+ *      it on without the second half would start creating `.artibot/missions/`
+ *      in every project the plugin is installed in, which is why the per-project
+ *      half exists. A closed global gate still throws the original message, so
+ *      the kill switch keeps its meaning; a global-on project without a marker
+ *      throws naming the marker path and the {@link GateReason}.
  *   3. `options.write === true`. Per-call, and the only thing that actually
  *      turns the planner into a writer. Closed, the return value is
  *      byte-identical to the old placeholder's — `{dryRun: true, written: [],
@@ -566,7 +571,14 @@ export function apply(planResult, options = {}) {
         + 'Phase 0 and Observe create zero artifact files.',
     );
   }
-  if (options.config?.runtime?.artifactLifecycle?.enabled !== true) {
+  // Gate 2, both halves, in one place. `projectRoot` is withheld unless gate 3
+  // is open, so the dry-run path below reaches its early return having made
+  // zero filesystem calls — the resolver cannot probe without a root.
+  const gate = resolveArtifactGate({
+    config: options.config,
+    projectRoot: options.write === true ? options.projectRoot : undefined,
+  });
+  if (gate.reason === GateReason.GLOBAL_OFF) {
     throw new Error(
       `artifact-lifecycle: apply() requires config ${APPLY_GATE_PATH} === true. `
         + 'It is the kill switch for the Shadow-stage writer; set it to false '
@@ -592,6 +604,17 @@ export function apply(planResult, options = {}) {
     );
   }
 
+  // Gate 2's per-project half. Reached only with a real `projectRoot`, so the
+  // reason here is about THIS project, never about a missing argument.
+  if (!gate.open) {
+    throw new Error(
+      `artifact-lifecycle: apply({ write: true }) refused (${gate.reason}). `
+        + `This project has not opted in: config ${PROJECT_MARKER_PATH} names a `
+        + 'marker file that must exist under the project root before the writer '
+        + 'creates anything. The global kill switch is open; this project is not.',
+    );
+  }
+
   const written = [];
   const skipped = [];
   const missionsRoot = path.resolve(path.join(options.projectRoot, ...MISSIONS_DIR));
@@ -602,6 +625,96 @@ export function apply(planResult, options = {}) {
   }
 
   return { dryRun: false, written, wouldWrite: [], blocked, skipped };
+}
+
+// Everything below sits AFTER `apply()` on purpose: documents this limb does
+// not own cite this file by line number, so no declaration may be inserted
+// above it. `apply()` calling downward is safe — `resolveArtifactGate` is a
+// hoisted function declaration, and the two `const`s are read at call time.
+
+/** Config path naming the per-project opt-in marker, relative to the project root. */
+export const PROJECT_MARKER_PATH = 'runtime.artifactLifecycle.projectMarker';
+
+/**
+ * Why gate 2 is open or closed. One value, so a caller can log or assert the
+ * cause without re-deriving it — `PROJECT_OFF` and `GLOBAL_OFF` are different
+ * operational situations and must not collapse into one boolean.
+ */
+export const GateReason = Object.freeze({
+  /** Both halves satisfied. The only value that accompanies `open: true`. */
+  OPEN: 'open',
+  /** {@link APPLY_GATE_PATH} is not `=== true`. The kill switch, unchanged. */
+  GLOBAL_OFF: 'global-off',
+  /** No usable `projectRoot`, so the marker cannot be looked for at all. */
+  NO_PROJECT_ROOT: 'no-project-root',
+  /** {@link PROJECT_MARKER_PATH} carries a value that cannot safely be joined. */
+  MARKER_INVALID: 'marker-invalid',
+  /** Global switch on, but THIS project carries no marker file. */
+  PROJECT_OFF: 'project-off',
+});
+
+/** Default marker probe. Any filesystem error is a closed gate, never a throw. */
+function markerIsFile(target) {
+  try {
+    return statSync(target).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is the artifact writer allowed to run, for this config and this project?
+ *
+ * **Never throws**, for anything — a malformed config, a hostile marker value,
+ * a probe that raises `EACCES`. A gate that throws where it meant to close is a
+ * gate that turns "do not write here" into a crashed hook, so every failure
+ * path is a `reason`, not an exception. That is also why the argument is read
+ * defensively rather than destructured in the signature: `resolveArtifactGate(null)`
+ * must answer, not blow up.
+ *
+ * The order is load-bearing:
+ *
+ *   1. `enabled !== true` → `GLOBAL_OFF`, **with zero filesystem access**. This
+ *      is the shipped path (`enabled` ships `false`), and it must stay free —
+ *      four hooks call through here on ordinary tool use.
+ *   2. No usable `projectRoot` → `NO_PROJECT_ROOT`, still without a probe.
+ *      `apply()` withholds the root on its dry-run path precisely to land here.
+ *   3. An unreadable marker path → `MARKER_INVALID`, still without a probe:
+ *      there is nothing safe to join. See `normaliseProjectMarker` for why
+ *      every unreadable value is `null` rather than a best effort.
+ *   4. Only now the filesystem: `projectRoot` + segments must be a REGULAR
+ *      file. A directory of that name, a dangling link, a missing file and a
+ *      raising `stat` are one answer — `PROJECT_OFF`.
+ *
+ * @param {object} [options]
+ * @param {object} [options.config] The merged plugin config.
+ * @param {string} [options.projectRoot] Injected, never derived from `cwd()`.
+ * @param {(target: string) => boolean} [options.isFile] Probe seam for tests.
+ * @returns {{open: boolean, reason: string}}
+ */
+export function resolveArtifactGate(options = {}) {
+  const { config, projectRoot, isFile } = isPlainObject(options) ? options : {};
+  const lifecycle = config?.runtime?.artifactLifecycle;
+  if (lifecycle?.enabled !== true) {
+    return { open: false, reason: GateReason.GLOBAL_OFF };
+  }
+  if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
+    return { open: false, reason: GateReason.NO_PROJECT_ROOT };
+  }
+  const segments = normaliseProjectMarker(lifecycle.projectMarker);
+  if (segments === null) {
+    return { open: false, reason: GateReason.MARKER_INVALID };
+  }
+  const probe = typeof isFile === 'function' ? isFile : markerIsFile;
+  let found;
+  try {
+    found = probe(path.join(projectRoot, ...segments)) === true;
+  } catch {
+    found = false;
+  }
+  return found
+    ? { open: true, reason: GateReason.OPEN }
+    : { open: false, reason: GateReason.PROJECT_OFF };
 }
 
 /**

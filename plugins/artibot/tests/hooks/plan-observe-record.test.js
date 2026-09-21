@@ -167,12 +167,40 @@ function payload(over = {}) {
   };
 }
 
-/** Point `getPluginRoot()` at a sandbox config with the kill switch set. */
-function setKillSwitch(enabled) {
+/**
+ * The per-project marker, relative to the project root.
+ *
+ * The shipped value of `runtime.artifactLifecycle.projectMarker`. Spelled out
+ * rather than read from the live config, so a change to that key turns the
+ * matrix below RED instead of quietly following it.
+ */
+const PROJECT_MARKER = '.artibot/project.md';
+
+/** Create the marker file that opens the per-project half of the gate. */
+function seedProjectMarker(root) {
+  const file = path.join(root, ...PROJECT_MARKER.split('/'));
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '# project\n', 'utf-8');
+  return file;
+}
+
+/**
+ * Point `getPluginRoot()` at a sandbox config with the kill switch set.
+ *
+ * `projectMarker` is written EXPLICITLY. The gate has two halves now —
+ * `artifact-lifecycle.js#resolveArtifactGate` wants the global switch AND the
+ * marker file — and a fixture that inherited the key from the copied live
+ * config would stop stating which marker path its repo seeds.
+ *
+ * @param {boolean} enabled the GLOBAL switch
+ * @param {string} [root] which plugin root to write into
+ */
+function setKillSwitch(enabled, root = pluginRoot) {
   const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
   live.runtime.artifactLifecycle.enabled = enabled;
+  live.runtime.artifactLifecycle.projectMarker = PROJECT_MARKER;
   writeFileSync(
-    path.join(pluginRoot, 'artibot.config.json'), JSON.stringify(live, null, 2), 'utf-8',
+    path.join(root, 'artibot.config.json'), JSON.stringify(live, null, 2), 'utf-8',
   );
 }
 
@@ -204,6 +232,11 @@ beforeEach(() => {
   // resolve to an ancestor — which is how a test writes into a real store.
   execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true });
   missionId = sessionFallbackMissionId(SESSION_ID, new Date());
+  // The per-project half of the gate, held OPEN for the whole file: the global
+  // switch alone no longer authorises a file, and the cases that measure the
+  // writer are measuring the WRITER, not this marker. The marker's own effect
+  // is measured in the a/b/c matrix at the end of this file.
+  seedProjectMarker(repo);
   // SHIPPED VALUE BY DEFAULT (4.61.0 ships `false`). Cases that measure the
   // writer open it explicitly, so a green run is never mistaken for a file the
   // shipped configuration would have produced.
@@ -651,5 +684,110 @@ describe('_plan-observe-record — delegation from intent-observe-pre (child pro
       expect(r.status, `${name}: exit must be 0 (2 would cancel the tool call)`).toBe(0);
       expect(r.stdout.equals(results[0][1].stdout), `${name}: stdout bytes`).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The per-project gate — the completion criterion, on the real hook
+// ---------------------------------------------------------------------------
+
+describe('_plan-observe-record — the per-project gate (a/b/c matrix)', () => {
+  /**
+   * A sandbox of its own: repo, plugin root and config, independent of the
+   * file-level fixture so both halves of the gate can be set per case.
+   * `marker: 'dir'` puts a DIRECTORY at the marker path — the shape a resolver
+   * that only called `existsSync` would wrongly read as open.
+   */
+  function sandbox(name, { enabled, marker }) {
+    const base = path.join(tmp, 'gate', name);
+    const boxHome = path.join(base, 'home');
+    const boxRepo = path.join(base, 'repo');
+    const boxRoot = path.join(base, 'plugin-root');
+    mkdirSync(path.join(boxHome, '.claude'), { recursive: true });
+    mkdirSync(boxRepo, { recursive: true });
+    mkdirSync(boxRoot, { recursive: true });
+    execFileSync('git', ['init'], { cwd: boxRepo, stdio: 'ignore', windowsHide: true });
+    setKillSwitch(enabled, boxRoot);
+    if (marker === 'file') seedProjectMarker(boxRepo);
+    if (marker === 'dir') {
+      mkdirSync(path.join(boxRepo, ...PROJECT_MARKER.split('/')), { recursive: true });
+    }
+
+    const id = sessionFallbackMissionId(SESSION_ID, new Date());
+    expect(appendLedgerEvent(boxRepo, {
+      event: 'mission.created',
+      session_id: SESSION_ID,
+      mission_id: id,
+      source: 'hook',
+      data: { title: MISSION_TITLE, intent_revision: 1 },
+    }).ok).toBe(true);
+    const store = createStateStore({
+      projectRoot: boxRepo,
+      sessionId: SESSION_ID,
+      source: 'hook',
+      appendEvent: (envelope) => appendLedgerEvent(boxRepo, envelope),
+      resolveGitCommonDir: () => resolveGitCommonDir(boxRepo),
+    });
+    expect(store.updateMission(id, missionMutator(id, MISSION_TITLE, 1), {
+      reason: 'mission.created', expectedVersion: store.getState().state_version,
+    }).ok).toBe(true);
+
+    return { home: boxHome, repo: boxRepo, root: boxRoot, missionId: id };
+  }
+
+  /** Spawn the REAL hook against that sandbox and report the criterion. */
+  function measure(box) {
+    const res = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({
+        cwd: box.repo,
+        hook_event_name: 'PreToolUse',
+        session_id: SESSION_ID,
+        tool_name: 'Write',
+        tool_use_id: 'toolu_gate_1',
+        tool_input: { file_path: planPath(box.repo, box.missionId), content: '# plan\n' },
+      }),
+      env: {
+        ...process.env, HOME: box.home, USERPROFILE: box.home, CLAUDE_PLUGIN_ROOT: box.root,
+      },
+      windowsHide: true,
+    });
+    const stdout = res.stdout ?? Buffer.alloc(0);
+    return {
+      status: res.status,
+      stdout,
+      stdoutBytes: stdout.length,
+      file: existsSync(planPath(box.repo, box.missionId)),
+      revised: planLines(box.repo).length,
+    };
+  }
+
+  it('suppresses the FILE and nothing else: a/b closed, c open', () => {
+    // (a) global false + marker present — the shipped 4.61.0 configuration.
+    // (b) global true  + marker absent  — the case the per-project gate exists
+    //     for: the switch is on and an unmarked project still gets no file.
+    // (c) global true  + marker present — the only combination that writes.
+    const a = measure(sandbox('a', { enabled: false, marker: 'file' }));
+    const b = measure(sandbox('b', { enabled: true, marker: 'none' }));
+    const c = measure(sandbox('c', { enabled: true, marker: 'file' }));
+
+    for (const [name, m] of [['a', a], ['b', b], ['c', c]]) {
+      expect(m.status, `${name}: exit`).toBe(0);
+      expect(m.stdoutBytes, `${name}: stdout length`).toBe(0);
+      expect(m.stdout.equals(a.stdout), `${name}: stdout bytes`).toBe(true);
+    }
+
+    // The plan.revised line lands in ALL THREE — the gate suppresses the file
+    // and nothing else (design §7.3).
+    expect([a.revised, b.revised, c.revised]).toEqual([1, 1, 1]);
+
+    expect([a.file, b.file, c.file]).toEqual([false, false, true]);
+  });
+
+  it('writes nothing when the marker path is a DIRECTORY named project.md', () => {
+    const m = measure(sandbox('dir', { enabled: true, marker: 'dir' }));
+    expect(m.status).toBe(0);
+    expect(m.stdoutBytes).toBe(0);
+    expect(m.revised).toBe(1);
+    expect(m.file).toBe(false);
   });
 });

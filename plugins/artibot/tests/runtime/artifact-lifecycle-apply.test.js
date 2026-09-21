@@ -37,9 +37,12 @@ import {
   APPLY_GATE_PATH,
   ARTIFACT_BASENAME,
   ArtifactKind,
+  GateReason,
   MISSIONS_DIR,
   plan,
+  PROJECT_MARKER_PATH,
   RefusalCode,
+  resolveArtifactGate,
   SkipReason,
 } from '../../lib/runtime/artifact-lifecycle.js';
 
@@ -48,7 +51,17 @@ const PKG_ROOT = path.resolve(HERE, '..', '..');
 
 const MISSION_ID = 'M-20260912-001';
 const VID = 'v-9f2c1a';
-const ENABLED_CONFIG = Object.freeze({ runtime: { artifactLifecycle: { enabled: true } } });
+/**
+ * The shipped marker path, as segments. Gate 2 is now TWO conditions, not one:
+ * the global `enabled` flag AND this file existing under the project root, so
+ * every fixture that opens gate 3 has to be a project that opted in.
+ */
+const MARKER_SEGMENTS = Object.freeze(['.artibot', 'project.md']);
+const MARKER_REL = MARKER_SEGMENTS.join('/');
+
+const ENABLED_CONFIG = Object.freeze({
+  runtime: { artifactLifecycle: { enabled: true, projectMarker: MARKER_REL } },
+});
 
 /**
  * Deliberately multibyte and deliberately CRLF: `bytes` must be a byte count,
@@ -60,7 +73,20 @@ let root;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-apply-'));
+  seedMarker(root);
 });
+
+/**
+ * Make `dir` a project that opted into the artifact writer. Seeding, never a
+ * relaxed assertion: the marker is what the gate is now contracted to require,
+ * so a fixture without one is a fixture that must not write.
+ */
+function seedMarker(dir) {
+  const target = path.join(dir, ...MARKER_SEGMENTS);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, '# project\n');
+  return target;
+}
 
 afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
@@ -132,8 +158,23 @@ function runPlan(events, missionState = healthyState()) {
   return plan({ events, missionState, projectRoot: root });
 }
 
-/** Every file under the fixture root, as repo-relative POSIX paths. */
+/**
+ * Every file under the fixture root that the writer could have created, as
+ * root-relative POSIX paths.
+ *
+ * The opt-in marker seeded by `beforeEach` is excluded — it is fixture
+ * scaffolding the test itself wrote, not an artifact, and listing it would
+ * change the meaning of every pre-existing `toEqual([])` from "the writer
+ * created nothing" into "the writer created nothing except the file we put
+ * there". `filesUnderIncludingMarker` keeps the unfiltered view available, and
+ * one test below asserts the marker really is on disk, so the exclusion cannot
+ * hide a fixture that silently stopped being seeded.
+ */
 function filesUnder(dir) {
+  return filesUnderIncludingMarker(dir).filter((rel) => rel !== MARKER_REL);
+}
+
+function filesUnderIncludingMarker(dir) {
   const out = [];
   const walk = (current) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
@@ -528,6 +569,20 @@ describe('gate 2 wiring (artibot.config.json)', () => {
     expect(config.runtime.artifactLifecycle.comment.length).toBeGreaterThan(120);
   });
 
+  it('ships the project marker path, and exactly three keys under the block', () => {
+    expect(config.runtime.artifactLifecycle.projectMarker).toBe('.artibot/project.md');
+    expect(Object.keys(config.runtime.artifactLifecycle).sort()).toEqual([
+      'comment',
+      'enabled',
+      'projectMarker',
+    ]);
+  });
+
+  it('is reachable at the exact dotted path resolveArtifactGate reads', () => {
+    const value = PROJECT_MARKER_PATH.split('.').reduce((node, key) => node?.[key], config);
+    expect(value).toBe('.artibot/project.md');
+  });
+
   it('is reachable at the exact dotted path apply() reads', () => {
     const value = APPLY_GATE_PATH.split('.').reduce((node, key) => node?.[key], config);
     expect(value).toBe(false);
@@ -548,5 +603,255 @@ describe('gate 2 wiring (artibot.config.json)', () => {
     expect(report.dryRun).toBe(true);
     expect(report.written).toEqual([]);
     expect(filesUnder(root)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. The per-project gate (B4) — `enabled` alone no longer opens gate 2
+// ---------------------------------------------------------------------------
+
+describe('resolveArtifactGate — reason table', () => {
+  /** A probe that records every path it was asked about and answers `answer`. */
+  function probe(answer = false) {
+    const calls = [];
+    const isFile = (target) => {
+      calls.push(target);
+      return answer;
+    };
+    isFile.calls = calls;
+    return isFile;
+  }
+
+  it('reports GLOBAL_OFF without touching the filesystem', () => {
+    const isFile = probe(true);
+    for (const enabled of [undefined, false, 'true', 1, {}]) {
+      const gate = resolveArtifactGate({
+        config: { runtime: { artifactLifecycle: { enabled, projectMarker: MARKER_REL } } },
+        projectRoot: root,
+        isFile,
+      });
+      expect(gate).toEqual({ open: false, reason: GateReason.GLOBAL_OFF });
+    }
+    expect(resolveArtifactGate({ projectRoot: root, isFile })).toEqual({
+      open: false,
+      reason: GateReason.GLOBAL_OFF,
+    });
+    expect(isFile.calls).toEqual([]);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['the empty string', ''],
+    ['a number', 1],
+    ['null', null],
+  ])('reports NO_PROJECT_ROOT for %s, without probing', (_label, projectRoot) => {
+    const isFile = probe(true);
+    expect(resolveArtifactGate({ config: ENABLED_CONFIG, projectRoot, isFile })).toEqual({
+      open: false,
+      reason: GateReason.NO_PROJECT_ROOT,
+    });
+    expect(isFile.calls).toEqual([]);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['a traversal', '../outside.md'],
+    ['a backslash path', '.artibot\\project.md'],
+    ['an absolute path', '/etc/passwd'],
+    ['a drive letter', 'C:/project.md'],
+    ['an array', ['.artibot', 'project.md']],
+    ['the empty string', ''],
+  ])('reports MARKER_INVALID when projectMarker is %s, without probing', (_label, marker) => {
+    const isFile = probe(true);
+    const gate = resolveArtifactGate({
+      config: { runtime: { artifactLifecycle: { enabled: true, projectMarker: marker } } },
+      projectRoot: root,
+      isFile,
+    });
+    expect(gate).toEqual({ open: false, reason: GateReason.MARKER_INVALID });
+    expect(isFile.calls).toEqual([]);
+  });
+
+  it('probes the joined path exactly once and opens on a real file', () => {
+    const isFile = probe(true);
+    expect(resolveArtifactGate({ config: ENABLED_CONFIG, projectRoot: root, isFile })).toEqual({
+      open: true,
+      reason: GateReason.OPEN,
+    });
+    expect(isFile.calls).toEqual([path.join(root, ...MARKER_SEGMENTS)]);
+  });
+
+  it('reports PROJECT_OFF when the probe says no', () => {
+    const isFile = probe(false);
+    expect(resolveArtifactGate({ config: ENABLED_CONFIG, projectRoot: root, isFile })).toEqual({
+      open: false,
+      reason: GateReason.PROJECT_OFF,
+    });
+    expect(isFile.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ['a truthy non-true', 'yes'],
+    ['1', 1],
+    ['an object', {}],
+  ])('reports PROJECT_OFF when the probe returns %s, not just falsy', (_label, answer) => {
+    const gate = resolveArtifactGate({
+      config: ENABLED_CONFIG,
+      projectRoot: root,
+      isFile: () => answer,
+    });
+    expect(gate).toEqual({ open: false, reason: GateReason.PROJECT_OFF });
+  });
+
+  it('reports PROJECT_OFF when the probe throws, rather than propagating', () => {
+    const gate = resolveArtifactGate({
+      config: ENABLED_CONFIG,
+      projectRoot: root,
+      isFile: () => {
+        throw new Error('EACCES');
+      },
+    });
+    expect(gate).toEqual({ open: false, reason: GateReason.PROJECT_OFF });
+  });
+
+  it('never throws, whatever it is handed', () => {
+    for (const bad of [undefined, null, 'string', 42, []]) {
+      expect(() => resolveArtifactGate(bad)).not.toThrow();
+      expect(resolveArtifactGate(bad).open).toBe(false);
+    }
+    expect(resolveArtifactGate()).toEqual({ open: false, reason: GateReason.GLOBAL_OFF });
+  });
+
+  it('uses the real filesystem when no probe is injected', () => {
+    // The seeded marker is a regular file, so the default probe opens the gate.
+    expect(fs.statSync(path.join(root, ...MARKER_SEGMENTS)).isFile()).toBe(true);
+    expect(filesUnderIncludingMarker(root)).toEqual([MARKER_REL]);
+    expect(resolveArtifactGate({ config: ENABLED_CONFIG, projectRoot: root })).toEqual({
+      open: true,
+      reason: GateReason.OPEN,
+    });
+  });
+
+  it('reports PROJECT_OFF when the marker path is a DIRECTORY, not a file', () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-marker-dir-'));
+    try {
+      fs.mkdirSync(path.join(other, ...MARKER_SEGMENTS), { recursive: true });
+      expect(resolveArtifactGate({ config: ENABLED_CONFIG, projectRoot: other })).toEqual({
+        open: false,
+        reason: GateReason.PROJECT_OFF,
+      });
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('reports PROJECT_OFF for a project root with no marker at all', () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-no-marker-'));
+    try {
+      expect(resolveArtifactGate({ config: ENABLED_CONFIG, projectRoot: other })).toEqual({
+        open: false,
+        reason: GateReason.PROJECT_OFF,
+      });
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('closes on the LIVE shipped config, because enabled ships false', () => {
+    const shipped = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'artibot.config.json'), 'utf8'));
+    expect(resolveArtifactGate({ config: shipped, projectRoot: root })).toEqual({
+      open: false,
+      reason: GateReason.GLOBAL_OFF,
+    });
+  });
+
+  it('exports a frozen five-member reason vocabulary', () => {
+    expect(Object.isFrozen(GateReason)).toBe(true);
+    expect(Object.values(GateReason).sort()).toEqual([
+      'global-off',
+      'marker-invalid',
+      'no-project-root',
+      'open',
+      'project-off',
+    ]);
+  });
+});
+
+describe('apply() routes gate 2 through the project gate', () => {
+  const writeOptions = (overrides = {}) => ({
+    dryRun: true,
+    config: ENABLED_CONFIG,
+    write: true,
+    projectRoot: root,
+    content: { [ArtifactKind.INTENT]: INTENT_MD },
+    ...overrides,
+  });
+
+  it('writes when the marker is present (the seeded fixture)', () => {
+    const report = apply(runPlan([ev.missionCreated(2)]), writeOptions());
+    expect(report.written).toHaveLength(1);
+    expect(fs.existsSync(expectedPath(ArtifactKind.INTENT))).toBe(true);
+  });
+
+  it('throws and writes nothing when the marker is absent', () => {
+    fs.rmSync(path.join(root, ...MARKER_SEGMENTS), { force: true });
+    expect(() => apply(runPlan([ev.missionCreated(2)]), writeOptions())).toThrow(
+      new RegExp(PROJECT_MARKER_PATH.replace(/\./g, '\\.')),
+    );
+    expect(filesUnder(root)).toEqual([]);
+  });
+
+  it('names the reason in the refusal', () => {
+    fs.rmSync(path.join(root, ...MARKER_SEGMENTS), { force: true });
+    expect(() => apply(runPlan([ev.missionCreated(2)]), writeOptions())).toThrow(
+      new RegExp(GateReason.PROJECT_OFF),
+    );
+  });
+
+  it('throws MARKER_INVALID-flavoured refusal when projectMarker is malformed', () => {
+    const config = { runtime: { artifactLifecycle: { enabled: true, projectMarker: '../x.md' } } };
+    expect(() => apply(runPlan([ev.missionCreated(2)]), writeOptions({ config }))).toThrow(
+      new RegExp(GateReason.MARKER_INVALID),
+    );
+    expect(filesUnder(root)).toEqual([]);
+  });
+
+  it('still throws the ORIGINAL gate-2 message when enabled is not true', () => {
+    const config = { runtime: { artifactLifecycle: { enabled: false, projectMarker: MARKER_REL } } };
+    expect(() => apply(runPlan([ev.missionCreated(2)]), writeOptions({ config }))).toThrow(
+      /requires config/,
+    );
+    expect(filesUnder(root)).toEqual([]);
+  });
+
+  it('keeps the dry-run path free of the filesystem and of projectRoot', () => {
+    const spies = spyOnFsWrites();
+    try {
+      const statSpy = vi.spyOn(fs, 'statSync');
+      const report = apply(runPlan(completionEvents()), {
+        dryRun: true,
+        config: ENABLED_CONFIG,
+      });
+      expect(report.dryRun).toBe(true);
+      expect(report.written).toEqual([]);
+      expect(statSpy).not.toHaveBeenCalled();
+      spies.assertNone();
+    } finally {
+      spies.restore();
+    }
+  });
+
+  it('leaves no direct enabled read inside apply() (static proof)', () => {
+    const source = fs.readFileSync(
+      path.join(PKG_ROOT, 'lib', 'runtime', 'artifact-lifecycle.js'),
+      'utf8',
+    );
+    const applyAt = source.indexOf('export function apply(');
+    const resolverAt = source.indexOf('export function resolveArtifactGate(');
+    expect(applyAt).toBeGreaterThan(0);
+    expect(resolverAt).toBeGreaterThan(applyAt);
+    const applyBody = source.slice(applyAt, resolverAt);
+    expect(applyBody).not.toMatch(/artifactLifecycle\?\.enabled/);
+    expect(applyBody).toContain('resolveArtifactGate(');
   });
 });
