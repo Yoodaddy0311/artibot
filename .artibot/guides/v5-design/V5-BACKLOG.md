@@ -253,7 +253,7 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 
 **정합성**: route.selected 381 = route.bound 381 ✓ · usage.receipt 183 = main 36 + subagent 147 ✓ · receipt_sessions 36 − with_receipts 24 = receipt_only 12 ✓ · verify 46세션 > ended 26 은 writer 착지 시점 차이(ended 09-15~, hook.fired 09-17~)라 모순 아님 · **모순 1건**: §4 ② "09-14 09:10 102행/12" 와 중앙 원장 같은 시각 이전 203행/23 이 동시에 참이려면 §4 계수가 다른 파일(세션 원장 합산 또는 미이관 원장)이었어야 한다 — 그 파일 미확인 · `mission.completed` 16세션 중 5개는 `.artibot/ledger/` 에 없다(worktree 세션 추정, 프로덕션/프로브 출처 미확인 유지).
 
-**오너 결정 대기 3건(권장안 포함)**: (1) 종료 정의 — ① 은 Shadow 이월 확정, ②③ 은 "분모+사유/writer 배선 확보" 로 종료 조건 재정의 후 충족 처리 · (2) ④ 임계 — 95% 유지 + "ended ≥50 에서 재판정" · (3) ② 해석 — 13.9% 는 이탈이 아니라 2티어 정책 적용으로 라벨 확정. 세 키 플립은 오너 결정 전까지 **전부 보류 유지**.
+**오너 결정 3건 — 2026-09-21 16:5x KST 오너 지시 "권장안으로 처리" 에 따라 확정**: (1) 종료 정의 — ① 은 ⑤와 같이 **Shadow 이월 확정**(Observe 종료 판정 축은 ②③④); ②③ 의 종료 조건은 "분모 + 사유/writer 배선 확보" 로 재정의 — ② 는 **충족**(분모 381 · 사유 3종 배선 착지), ③ 은 **미충족**(writer 0, `verify.completed` self_report 0 이 그대로) · (2) ④ 임계 — **95% 유지 + "ended ≥50 에서 재판정"** 표본 조건 추가(현재 26/92.3%, 판정 보류) · (3) ② 해석 — 13.9% 는 이탈이 아니라 **2티어 정책 적용으로 라벨 확정**, 비율은 RouteBench B2 기준선으로만 쓴다. **결과: Observe 종료는 아직 선언하지 않는다**(③ writer · ④ 표본 2건 남음). 세 키 플립은 §4-b 판정대로 **전부 보류 유지**. 다음 웨이브 입력 = ③ writer 배선(OB-06·OB-07, §5 순서 8) + ④ `no-receipts` 2건 원인 조사.
 
 **미확인**: §4 ② 102행 출처 파일 · ① compile 성공률(이벤트 없음) · SH-01 c 실측(untracked missions 가 land/preflight 를 실제 통과하는지; `.gitignore:119` 가 missions/ 를 추적 정본으로 명시) · SH-01 d 해석 문서 · CA-05 정합 핀 테스트 존재 · `save-checkpoint-order.test.js` green 여부(미실행) · CA-03 저널이 `.artibot/runtime`·`.git/artibot` 밖에 있을 가능성 · ④ no-receipts 2건 원인 · outcome-census declared 16 / blocked 16(STATE_ROW_ABSENT 14 · ARTIFACT_ABSENT 2)은 축 아님, 참고.
 
