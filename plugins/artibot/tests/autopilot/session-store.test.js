@@ -2,15 +2,18 @@
  * Unit tests for lib/autopilot/session-store.js
  * Covers newSessionId, save/load roundtrip, listSessions, deleteSession.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   deleteSession, deleteSessionArtifacts,
   getSessionPath,
+  getStoreDir,
   listSessions,
   loadSession,
   newSessionId,
   saveSession,
 } from '../../lib/autopilot/session-store.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
 
 describe('newSessionId', () => {
   it('returns ap-YYYYMMDD-HHMMSS-xxxxxx format with random suffix', () => {
@@ -87,5 +90,57 @@ describe('listSessions / deleteSession', () => {
     saveSession({ sessionId, task: 'del test' });
     expect(deleteSession(sessionId)).toBe(true);
     expect(deleteSession(sessionId)).toBe(false);
+  });
+});
+
+describe('getStoreDir env seam', () => {
+  const VAR = 'ARTIBOT_AUTOPILOT_STORE_DIR';
+  const PAIR = 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT';
+  /** @type {{ dir: string | undefined, root: string | undefined }} */
+  let saved;
+
+  /** Restore one variable to its pre-test value; absent means absent, not ''. */
+  const restore = (name, value) => {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  };
+
+  beforeEach(() => {
+    saved = { dir: process.env[VAR], root: process.env[PAIR] };
+  });
+
+  // Restoring matters beyond tidiness: the global setup turns these two on by
+  // default, so leaking a deleted/rewritten value here would send a later test
+  // in the same worker at the real store.
+  afterEach(() => {
+    restore(VAR, saved.dir);
+    restore(PAIR, saved.root);
+  });
+
+  it('returns the override when its paired root is the plugin root in force', () => {
+    const sandbox = path.join(getPluginRoot(), '.tmp-store-seam', 'autopilot');
+    process.env[VAR] = sandbox;
+    process.env[PAIR] = getPluginRoot();
+    expect(getStoreDir()).toBe(sandbox);
+  });
+
+  it('discards the override when the paired root is absent or a different dir', () => {
+    const fallback = path.join(getPluginRoot(), 'runtime', 'autopilot');
+    process.env[VAR] = path.join(getPluginRoot(), '.tmp-store-seam', 'autopilot');
+
+    delete process.env[PAIR];
+    expect(getStoreDir()).toBe(fallback);
+
+    process.env[PAIR] = path.join(getPluginRoot(), 'some', 'other', 'root');
+    expect(getStoreDir()).toBe(fallback);
+
+    process.env[PAIR] = '';
+    expect(getStoreDir()).toBe(fallback);
+  });
+
+  it('returns the plugin-root path unchanged when neither variable is set', () => {
+    delete process.env[VAR];
+    delete process.env[PAIR];
+    expect(getStoreDir()).toBe(path.join(getPluginRoot(), 'runtime', 'autopilot'));
   });
 });

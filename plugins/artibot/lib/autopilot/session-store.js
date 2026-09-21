@@ -12,7 +12,7 @@ import path from 'node:path';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { renameWithRetry } from '../core/file.js';
-import { getPluginRoot } from '../core/platform.js';
+import { getPluginRoot, sameDirPath } from '../core/platform.js';
 import { resolveRunEventsPath } from '../observability/run-events.js';
 import { migrateV2toV3, SCHEMA_VERSION_V3 } from './migrate-v3.js';
 
@@ -65,10 +65,43 @@ const RENAME_RETRY_OPTS = { attempts: MAX_RENAME_ATTEMPTS, maxBackoffMs: MAX_REN
 /**
  * Resolve the autopilot runtime directory inside the plugin root.
  * Path is constructed via path.join so Korean / spaced paths are preserved.
+ *
+ * `ARTIBOT_AUTOPILOT_STORE_DIR` relocates that directory. It is a path knob,
+ * not a test kill-switch: every read and write still happens, just somewhere
+ * else, so a suite can exercise the real store code without depositing session
+ * files in the shipped `runtime/autopilot`. It is read on EVERY call, because a
+ * value captured at import is already fixed before a test can set it.
+ *
+ * `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT` records the plugin root the override was
+ * minted for, and the override is honored only while that is still the root in
+ * force. Environment variables are inherited by spawned processes, so a test
+ * that isolates a child by handing it `{ ...process.env, CLAUDE_PLUGIN_ROOT:
+ * sandbox }` would otherwise have this override ride along and overrule the
+ * more specific knob the child was actually given — the child would write into
+ * the parent's store instead of its own.
+ *
+ * The pairing is REQUIRED. An override with no recorded root is an override we
+ * cannot place, and "cannot place" must not mean "trust"; that is the fail-open
+ * shape of a denylist. Mirrors `lib/core/config.js#resolveArtibotDir`, whose
+ * `ARTIBOT_STATE_DIR` / `ARTIBOT_STATE_DIR_HOME` pair solves the same problem
+ * for user state. Compared through `sameDirPath` rather than `===` so a
+ * trailing separator or Windows drive-letter case does not read as a different
+ * root and throw the override away — which would put writes back into the real
+ * store, the exact outcome this seam exists to prevent.
+ *
  * @returns {string} absolute directory path
  */
 export function getStoreDir() {
-  return path.join(getPluginRoot(), 'runtime', 'autopilot');
+  const rootDerived = path.join(getPluginRoot(), 'runtime', 'autopilot');
+  const override = process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
+  if (!override) return rootDerived;
+
+  const mintedFor = process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
+  if (!mintedFor) return rootDerived;
+
+  if (!sameDirPath(mintedFor, getPluginRoot())) return rootDerived;
+
+  return override;
 }
 
 /**
