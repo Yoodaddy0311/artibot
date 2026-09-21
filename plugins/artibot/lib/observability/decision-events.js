@@ -66,6 +66,7 @@
  * Public surface:
  *   - ROUTING_CLASSIFIED / WORKFLOW_PLANNED   (the two `type` values written)
  *   - TOPOLOGY_RECOMMENDED / MEMORY_INJECTION_MEASURED  (the T-37 pair)
+ *   - DECISION_STORE_OPTS  (the only option keys the store resolver accepts)
  *   - getDecisionStoreDir({ storeDir, projectRoot, cwd })
  *   - getDecisionEventsPath(runId, { storeDir, projectRoot, cwd })
  *   - readDecisionEvents(runId, { storeDir, projectRoot, cwd, tail, level })
@@ -335,6 +336,57 @@ export function resetDecisionRecorderStats() {
 }
 
 /**
+ * The ONLY option keys {@link getDecisionStoreDir} accepts. An allowlist, not a
+ * denylist: a list of rejected keys fails open for every key invented later.
+ *
+ * Event vocabulary (`ts`, `phase`, `mode`) and reader options (`tail`, `level`)
+ * are deliberately absent. They travel in the SAME object as the store options
+ * at every call site, and are stripped by `record` / `readDecisionEvents`
+ * before the resolver sees them. Teaching the resolver those names instead
+ * would rot this list every time a recorder grows a field — `mode` is the
+ * precedent, added later by `lib/runtime/middleware/workflow-mode.js`.
+ */
+export const DECISION_STORE_OPTS = Object.freeze(['storeDir', 'projectRoot', 'cwd']);
+
+/**
+ * Own enumerable keys of `o` that {@link DECISION_STORE_OPTS} does not admit.
+ *
+ * Sorted so the reported key is stable when several are unknown: the counted
+ * `lastError` names one key, and a name that varies with property order is not
+ * a diagnostic anyone can act on.
+ *
+ * @param {unknown} o
+ * @returns {string[]} sorted unknown keys; empty for a non-object
+ */
+function unknownStoreOptKeys(o) {
+  if (!o || typeof o !== 'object') return [];
+  return Object.keys(o).filter((k) => !DECISION_STORE_OPTS.includes(k)).sort();
+}
+
+/**
+ * Event-vocabulary keys that every recorder forwards in the SAME object as the
+ * store options. They are removed before the store is resolved, which is what
+ * lets {@link DECISION_STORE_OPTS} stay a pure store allowlist.
+ */
+const RECORD_EVENT_OPTS = Object.freeze(['ts', 'phase', 'mode']);
+
+/**
+ * Shallow copy of `opts` without `keys`. A rest-destructure would read better,
+ * but this repo's `no-unused-vars` does not set `ignoreRestSiblings`, so the
+ * discarded bindings would be lint errors.
+ *
+ * @param {unknown} opts
+ * @param {readonly string[]} keys
+ * @returns {object}
+ */
+function withoutKeys(opts, keys) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const out = {};
+  for (const k of Object.keys(o)) if (!keys.includes(k)) out[k] = o[k];
+  return out;
+}
+
+/**
  * Resolve the directory decision events live in.
  *
  * `<projectRoot>/.artibot/runtime/decisions/`, matching the ledger's rule
@@ -356,14 +408,26 @@ export function resetDecisionRecorderStats() {
  * `lib/git/project-root.js#resolveProjectRoot` rather than using `cwd`
  * directly: a hook payload's `cwd` follows the shell, so anchoring on it splits
  * one project's store across every directory the session `cd`s into. That
- * helper always returns a path and never throws, which keeps this function
- * total — an observe-only recorder must not acquire a failure mode.
+ * helper always returns a path and never throws.
+ *
+ * FAIL-CLOSED ON THE OPTION KEYS. An unrecognized key used to be ignored, so
+ * `{ sandboxDir }` — a plausible typo for an isolation option — fell through to
+ * `resolveProjectRoot(undefined)` = `process.cwd()` and wrote into the REAL
+ * store, successfully and silently. Only {@link DECISION_STORE_OPTS} is
+ * accepted now; anything else refuses. This function still NEVER THROWS: the
+ * refusal is a `null` return, not an exception, so an observe-only recorder
+ * acquires no failure mode a caller has to catch. Callers must handle the null
+ * — `getDecisionEventsPath` and `record` do, because
+ * `run-events.js#resolveRunEventsPath` throws a TypeError on a non-string
+ * storeDir.
  *
  * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} [opts]
- * @returns {string}
+ * @returns {string|null} the store directory, or null when `opts` carries a key
+ *   outside {@link DECISION_STORE_OPTS}
  */
 export function getDecisionStoreDir(opts = {}) {
   const o = opts && typeof opts === 'object' ? opts : {};
+  if (unknownStoreOptKeys(o).length > 0) return null;
   if (typeof o.storeDir === 'string' && o.storeDir) return o.storeDir;
   const root = typeof o.projectRoot === 'string' && o.projectRoot
     ? o.projectRoot
@@ -374,19 +438,30 @@ export function getDecisionStoreDir(opts = {}) {
 /**
  * @param {string} runId
  * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} [opts]
- * @returns {string}
+ * @returns {string|null} null when the store was refused (see
+ *   {@link getDecisionStoreDir}); the guard is mandatory because
+ *   `run-events.js#resolveRunEventsPath` throws on a non-string storeDir.
  */
 export function getDecisionEventsPath(runId, opts = {}) {
-  return resolveRunEventsPath(getDecisionStoreDir(opts), runId);
+  const dir = getDecisionStoreDir(opts);
+  if (dir === null) return null;
+  return resolveRunEventsPath(dir, runId);
 }
 
 /**
+ * Read a run's events back. `tail` and `level` are reader options, not store
+ * options, so they are separated out before the store is resolved — see
+ * {@link DECISION_STORE_OPTS}.
+ *
  * @param {string} runId
  * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, tail?: number, level?: 'info'|'warn'|'error' }} [opts]
- * @returns {object[]}
+ * @returns {object[]} the events, or an empty array when the store was refused
  */
 export function readDecisionEvents(runId, opts = {}) {
-  return readRunEvents(getDecisionStoreDir(opts), runId, opts);
+  const { tail, level, ...loc } = (opts && typeof opts === 'object' ? opts : {});
+  const dir = getDecisionStoreDir(loc);
+  if (dir === null) return [];
+  return readRunEvents(dir, runId, { tail, level });
 }
 
 /**
@@ -452,8 +527,12 @@ export function resolveDecisionRunId(source) {
  *
  * @param {string} runId
  * @param {object} event
- * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} opts
+ * @param {{ storeDir?: string, projectRoot?: string, cwd?: string, ts?: string,
+ *   phase?: string, mode?: string }} opts - store options plus the event
+ *   vocabulary the recorders forward in the same object; the latter is stripped
+ *   before the store is resolved (see {@link RECORD_EVENT_OPTS})
  * @returns {object|null} the persisted event, or null when nothing was written
+ *   — an unregistered `type` and an unallowed option key are both counted
  */
 function record(runId, event, opts) {
   // Fail-closed on the vocabulary BEFORE touching the filesystem: a type this
@@ -465,8 +544,19 @@ function record(runId, event, opts) {
     stats.lastError = `type-not-allowed:${String(type)}`;
     return null;
   }
+  // Fail-closed on the OPTION KEYS, for the same reason and in the same shape.
+  // The event vocabulary is stripped first: every recorder forwards one object
+  // carrying both `ts`/`phase`/`mode` and the store options, and the resolver
+  // must not have to learn event field names (see DECISION_STORE_OPTS).
+  const loc = withoutKeys(opts, RECORD_EVENT_OPTS);
+  const dir = getDecisionStoreDir(loc);
+  if (dir === null) {
+    stats.failed += 1;
+    stats.lastError = `store-opts-not-allowed:${unknownStoreOptKeys(loc)[0]}`;
+    return null;
+  }
   try {
-    const persisted = appendRunEvent(getDecisionStoreDir(opts), runId, event);
+    const persisted = appendRunEvent(dir, runId, event);
     stats.recorded += 1;
     return persisted;
   } catch (err) {

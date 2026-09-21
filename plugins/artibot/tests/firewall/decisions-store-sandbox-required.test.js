@@ -2,12 +2,24 @@
  * Firewall — a test that reaches a DECISIONS-STORE writer must isolate the store.
  *
  * The store is `<projectRoot>/.artibot/runtime/decisions/*.events.ndjson`,
- * resolved by `lib/observability/decision-events.js:187` (`getDecisionStoreDir`):
+ * resolved by `lib/observability/decision-events.js#getDecisionStoreDir` (cited
+ * by symbol: the `:187` line citation this header carried until 2026-09-21 had
+ * rotted to `:365` — line numbers in a 1,200-line module do not survive edits):
  * an explicit `storeDir` wins, else an injected `projectRoot`, else
  * `lib/git/project-root.js#resolveProjectRoot(opts.cwd ?? process.cwd())`, which
  * walks UP from the starting directory to the nearest `.git`. A writer called
  * with none of those three pointing into a temp directory therefore appends to
  * the developer's live repo store.
+ *
+ * RESOLVER-SIDE REFUSAL (2026-09-21, `DECISION_STORE_OPTS`). The resolver now
+ * returns null for any option key outside `storeDir` / `projectRoot` / `cwd`,
+ * and `record()` counts that as `store-opts-not-allowed:<key>` instead of
+ * falling through to the process cwd. That closes the mechanism hole a probe
+ * hit on 2026-09-17 (`{ sandboxDir }` wrote 7 lines into the live store); it is
+ * asserted by CALLING in `tests/firewall/decision-store-opts-allowlist.test.js`.
+ * It does NOT retire this scan: a VALID key carrying a live value
+ * (`{ cwd: process.cwd() }`, the production path) still resolves to the real
+ * store, so a test that reaches a writer must still isolate it here.
  *
  * CLAUDE_PLUGIN_ROOT AND `useTrailSandbox` DO NOT ISOLATE THIS STORE. Verified
  * 2026-09-04 by grepping `process.env` in both `lib/git/project-root.js` and
@@ -102,6 +114,12 @@
  *     therefore reads as clean here, correctly.
  *   - **Non-test writers.** Scripts, benchmarks and `tests/**\/*.bench.js` are
  *     out of scope; only `*.test.js` under `tests/` is scanned.
+ *   - **A valid key with a live value.** `cwd-sandboxed` passes on marker
+ *     presence; `tests/hooks/runtime-prompt-command-wiring.test.js` passes
+ *     `cwd: null`, which the resolver reads as "no cwd" and anchors on the
+ *     process cwd — the live store held `sess-cmd-e` / `sess-cmd-g` files from
+ *     it on 2026-09-17. Known, out of scope for the resolver allowlist
+ *     (leader decision decision-store-1); a remaining hole, not a covered one.
  *   - **Sibling stores.** `lib/autopilot/telemetry.js` and
  *     `lib/observability/split-telemetry.js` anchor their OWN stores under
  *     `<pluginRoot>/runtime/`. They are in the ratchet only because they import
@@ -270,14 +288,16 @@ const MECHANISMS = [
   {
     id: 'storeDir-injected',
     why: 'the strongest form — an explicit storeDir short-circuits resolution '
-      + 'before project-root is ever consulted (decision-events.js:189). Matched '
+      + 'before project-root is ever consulted (decision-events.js#getDecisionStoreDir, '
+      + 'first branch). Matched '
       + 'as a bare word because the shorthand `{ storeDir }` has no colon.',
     test: (src) => /\bstoreDir\b/.test(src) && HAS_MKDTEMP.test(src),
   },
   {
     id: 'projectRoot-injected',
     why: 'an injected projectRoot pins the store one level lower than storeDir, '
-      + 'still without touching the real repo (decision-events.js:190-192).',
+      + 'still without touching the real repo (decision-events.js#getDecisionStoreDir, '
+      + 'second branch).',
     test: (src) => /\bprojectRoot\b/.test(src) && HAS_MKDTEMP.test(src),
   },
   {

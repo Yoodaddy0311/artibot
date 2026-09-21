@@ -302,3 +302,30 @@ describe('decision-events — run id resolution', () => {
     expect(id).not.toContain('/');
   });
 });
+
+describe('decision-events — store option allowlist', () => {
+  it('refuses an unknown option key instead of falling through to the real store', () => {
+    // Before the allowlist, `sandboxDir` was ignored and the store resolved
+    // from process.cwd() — a successful, silent write to the developer's repo.
+    resetDecisionRecorderStats();
+    expect(recordRoutingDecision('run-opt-1', CLASSIFICATION, { sandboxDir: storeDir })).toBeNull();
+
+    const stats = getDecisionRecorderStats();
+    expect(stats).toMatchObject({ recorded: 0, failed: 1 });
+    expect(stats.lastError).toBe('store-opts-not-allowed:sandboxDir');
+  });
+
+  it('still records when event vocabulary rides along with the store option', () => {
+    // Regression pin for the strip in `record`: ts/phase are event fields, not
+    // store options, and must not be read as unknown keys.
+    resetDecisionRecorderStats();
+    const ev = recordWorkflowPlanDecision('run-opt-2', PLAN, {
+      storeDir, ts: '2026-09-21T00:00:00.000Z', phase: 'PLAN',
+    });
+
+    expect(ev).not.toBeNull();
+    expect(ev.ts).toBe('2026-09-21T00:00:00.000Z');
+    expect(getDecisionRecorderStats()).toMatchObject({ recorded: 1, failed: 0 });
+    expect(readDecisionEvents('run-opt-2', { storeDir })).toHaveLength(1);
+  });
+});
