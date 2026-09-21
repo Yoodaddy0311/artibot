@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.65.0] — 2026-09-21
+
+`v4.64.0`(`2de81dba`) 이후 84 커밋 = **101 files +20,530/−264**(`git diff --shortstat v4.64.0^{commit} 0aae4393`, 2026-09-21 측정). `/split` **Wave 13 6/6 · Wave 14 8/8 · Wave 15 7/7** 착지분 출하. 커밋 유형 분포: feat 22 · merge 21 · docs 17 · fix 11 · test 7 · chore 5 · refactor 1. 줄기별 상세는 아래 Wave 15 · Wave 14 · Wave 13 착지 절을 그대로 승계한다.
+
+### 행동 변화 고지
+
+**행동 변화 0 이 이 릴리스의 의도다.** 이 릴리스가 신설하거나 만진 기능 게이트는 **전부 기본 OFF** 로 출하되고, Shadow 진입 플립은 이 릴리스에 **없다**(정본 = `V5-BACKLOG.md` §4-b, 2026-09-21 판정 — 세 키 전부 "오늘 플립 안 함").
+
+① **`runtime.artifactLifecycle.enabled` = `false`** — 종전과 같다. 단독 플립은 §4-b 에서 **NO-GO**(소비처 4곳이 플러그인 config 를 읽어 모든 프로젝트에 untracked 파일이 생기고 삭제기가 없다).
+
+② **`runtime.checkpoint.saveOnSave` = `false`** (CA-05) — `/save` checkpoint pass(`lib/checkpoint/save-checkpoint.js` + `commands/save.md` 6단계)는 실려 있으나 canary 가 OFF 라 호출되지 않는다. §4-b 판정은 **GO-with-conditions** 이고 조건 4항은 미충족이다. 그래서 `resume-report.mjs` 라이브 판독의 `resumable` 0/16 은 구조적 결과이며 판독기 결함이 아니다.
+
+③ **`autopilot.recovery.transitionFromVerdict` = `false`** (CA-03) — Wave 13 `ladderFromJournal` 이 `replanAttempts:0` 하드코딩을 해소했지만, Wave 15 `recovery-pause-tick` 의 PushNotification 경로가 **0**(persist 가 queued 를 덮고 호출부가 반환값을 버린다)이라 §4-b 판정은 여전히 **NO-GO** 다.
+
+④ **`routing.canary.actionClasses` = `[]`** (GA-02) — 4티어 canary 는 **결정 게이트**만 실렸다. `reason[]` 에 `canary:<tier>` 를 기록할 뿐 티어를 적용하지 않으며, 작동기(CA-02)는 미착수다.
+
+그 외 이번 릴리스의 신설 계측기·CLI(`scripts/ledger/topology-agreement.mjs` · `route-compare.mjs` · `resume-report.mjs` · `/scorecard --compare` · replay 라벨 생산자 · seeded-defect 러너)는 전부 **판독 전용**이다. 활성화 관측 축은 `activation_data` 키 **8 → 10**(SH-03 hint 축)으로 늘었고, SH-16 의 Context Receipt `transforms`·`cache` **8키는 발행 0 유지**다. 라이브 수치 재계수의 전제는 이 릴리스 + 플러그인 업데이트 + 호스트 재시작이다.
+
 ### Wave 15 착지 (7/7, 배치 1~3, 2026-09-21)
 
 배치 1 master `6d623d8c`(base `18c3d047`) · 배치 2 `845cab37` · 배치 3 `63cce738`. **7줄기 전부 착지**, land 7/7 PASS 7건(리더 실측). 표적 스위트 수치는 **창 보고값**이고 diff 수치는 리더 측정 몫 — **미측정**.

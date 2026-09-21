@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.64.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.65.0-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.64.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.65.0** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.64.0` |
+| `version` | Plugin version | `4.65.0` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.65.0** (2026-09-21) — Ships `/split` Wave 13 (6 limbs), Wave 14 (8 limbs) and Wave 15 (7 limbs) together: 84 commits, 101 files +20,530/−264 since v4.64.0. **Behavior change 0 is the intent** — every feature gate this release adds or touches ships OFF by default (`runtime.artifactLifecycle.enabled` false, `runtime.checkpoint.saveOnSave` false, `autopilot.recovery.transitionFromVerdict` false, `routing.canary.actionClasses` empty), and no Shadow-entry flip is part of this release. New machinery, all inert or read-only until a later deliberate flip: the `/save` checkpoint pass (`lib/checkpoint/save-checkpoint.js`, 6 documented steps, per-mission isolation with an `errored` status, a `derived-from: state@<n>` HANDOFF field) behind the `saveOnSave` canary; a record-only Mission Controller (`lib/mission/controller.js`); the replan ladder derived from the recovery journal (`repair` → `replan` → `propose_ultraplan` → `pause`) while the transition gate stays false; the GA-02 four-tier canary **decision** gate, which records `canary:<tier>` reasons without applying a tier; and a `decisions` store-option allowlist that counts and refuses unknown positional keys instead of throwing. New read-only instruments and CLIs: `scripts/ledger/topology-agreement.mjs` with `/doctor` Check 7, `scripts/ledger/route-compare.mjs` (router recommendation vs served model), `scripts/ledger/resume-report.mjs` (`/resume --contract`), `/scorecard --compare`, the Snapshot Scorecard render in `/save`, the Replay label producer (`EXACT` is structurally 0 — one Action is one execution), the `activation.hint-followed` axis, and a seeded-defect corpus of 30 cases with an offline runner (reviewer catch-rate is unmeasured). Test-hygiene fixes: autopilot tests write to a sandboxed store directory (env seam + firewall) and the temp state directory is cleaned in `afterAll`. Documentation: 24 of 66 constitution checkpoints are restated as `### Self-check` (42 decision-form checkpoints remain, none deleted).
 
 **4.64.0** (2026-09-17) — Ships `/split` Wave 12 (8 limbs): 29 commits, 92 files +8,012/−323 since v4.63.0. Behavior changes: the `hook.fired` ledger row now exists — one row per dispatch across 6 dispatchers, all slots ON by default (narrow with `ledger.hookFired.slots`); `intent.detected` carries a `command` field, so every slash command writes one row; a new `activation-observed` decisions type is written on every UserPromptSubmit (slash axis only); the verdict adapter folds `warn` → `PASS` (observability only — `classify()` results are unchanged); `autopilot.recovery.transitionFromVerdict` ships **false**, so recovery-driven phase transitions stay off until Wave 13 lands the replan counter; the config schema now declares all 21 `team` keys (still non-strict — it catches type typos, not unknown keys). Also: `route.selected` receipts record `canonicalModel` for name/fifo-matched spawns, report-generator emits a `## Recovery Journal` section, autopilot session-store pruning lands as `scripts/dev/prune-autopilot-store.mjs` (dry-run by default), and `isTeamEnabled` becomes the single owner of team-enable semantics.
 
