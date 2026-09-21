@@ -8,7 +8,7 @@ lifecycle: verify
 
 # /verify
 
-Run the full verification pipeline sequentially: lint -> typecheck -> test -> build. Stops on first failure unless `--continue` is set.
+Run the full verification pipeline sequentially: lint -> typecheck -> test -> build -> record. Stops on first failure unless `--continue` is set — the record step still runs.
 
 ## Arguments
 
@@ -21,7 +21,7 @@ Parse $ARGUMENTS:
 
 ## Execution Flow
 
-1. **Parse**: Resolve target, detect project type and available tools
+1. **Parse**: Resolve target, detect project type and available tools. Also resolve the ABSOLUTE project root (the directory holding `.git/`) — Step 5 passes it as `--cwd`, and a record filed from the wrong directory lands in the wrong project's ledger.
 2. **Detect Tools**: Identify available verification tools:
    - Lint: ESLint, Biome, Ruff, Pylint
    - Types: TypeScript (`tsc --noEmit`), mypy, Pyright
@@ -46,14 +46,29 @@ Parse $ARGUMENTS:
    - Run production build
    - Gate: Build succeeds with zero errors
 
-4. **Report**: Output pipeline results with pass/fail per step
+   **Step 5 - Record** (ALWAYS runs — this step is never skipped):
+   - Runs after a stop-on-first-failure (then with `--status FAIL`), with `--continue`, with `--quick`, and with `--step`. There is no mode in which the outcome goes unrecorded.
+   - `--status PASS` only when every step that ran passed; otherwise `--status FAIL`.
+   - For a PARTIAL run (`--step`, `--quick`), say so in the `--command` summary — e.g. `/verify --step lint: PASS`. A bare `--status PASS` reads as the whole pipeline having passed.
+   - Run exactly this, filling in the three placeholders:
+
+```
+REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
+```
+
+   - `<project root>` is the absolute project root resolved in **Parse** (Execution Flow item 1). `$HOME` comes first because `${CLAUDE_PLUGIN_ROOT}` can be empty in a Bash shell, and the bare relative path only resolves inside the source repository.
+   - The session id has two spellings and `CLAUDE_SESSION_ID` is often empty, so the call falls back to `CLAUDE_CODE_SESSION_ID`. If BOTH are empty the script prints `recorded:false` with a session reason and the Record row says NOT RECORDED — pass `--session <id>` explicitly when the id is known.
+   - Read `recorded` from the stdout JSON, not from the exit code: the script exits 0 even when it recorded nothing, and reports the reason in the same line.
+   - **Recording never changes the VERDICT.** A missing script, `recorded:false`, or any other recording failure is REPORTED in the Record row and nowhere else. It never turns a passing pipeline into BLOCKED.
+
+4. **Report**: Output pipeline results with pass/fail per step, including the Record row
 
 ## Pipeline Behavior
 
 - Default: Stop on first failure, report which step failed
 - `--continue`: Run all steps, aggregate all failures
 - `--fix`: Attempt auto-fix for lint/format issues only
-- After the pipeline ends, record the outcome: `node scripts/ledger/record-verify.mjs --status <PASS|FAIL> --command "<one-line summary>" --session "$CLAUDE_SESSION_ID"` (deterministic layer, self-report; exit 0 even if the ledger write fails)
+- Stopping on the first failure does NOT skip Step 5 — the outcome is still recorded, with `--status FAIL`
 
 ## Output Format
 
@@ -69,8 +84,9 @@ Lint .............. [PASS|FAIL] ([n] errors, [n] warnings)
 Typecheck ......... [PASS|FAIL] ([n] errors)
 Test .............. [PASS|FAIL] ([passed/total], coverage: [n]%)
 Build ............. [PASS|FAIL|SKIPPED]
+Record ............ [RECORDED|NOT RECORDED] ([verification_id or reason])
 
-VERDICT: [ALL PASS|BLOCKED]
+VERDICT: [ALL PASS|BLOCKED]   (the Record row never changes this)
 
 FAILURES (if any)
 -----------------

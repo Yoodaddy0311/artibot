@@ -62,6 +62,15 @@
  *  - WHETHER ANY MODEL EVER RUNS THIS. `commands/verify.md` asks for it; no
  *    hook, command or CI step executes it. Its call rate is unmeasured, and a
  *    green run here says only that it works when called.
+ *  - WHETHER THE PROSE PIN CHANGES BEHAVIOUR. The last describe in this file
+ *    pins the WORDING of `commands/verify.md` — that the invocation sits in a
+ *    numbered step, carries `--cwd`, and names flags the real CLI accepts. It
+ *    proves none of: that a model reads the step, that a model runs it, or
+ *    that a model fills the placeholders correctly. A model that skips Step 5
+ *    entirely leaves every assertion in this file green.
+ *  - THE INSTALLED COPY OF THE COMMAND. The pin reads the `commands/verify.md`
+ *    in THIS worktree. `~/.claude/commands/verify.md` and the plugin cache can
+ *    lag a release by any amount, and nothing here notices.
  *  - WHETHER THE `--status` IS TRUE. The script records what it is told; there
  *    is no linter behind it. See the module header.
  *  - THE INSTALLED COPY. These cases run the file in this worktree.
@@ -401,6 +410,126 @@ describe('record-verify: running it twice', () => {
     expect(second.appended).toBe(0);
     expect(second.deduped).toBe(4);
     expect(written).toHaveLength(4);
+  });
+});
+
+/**
+ * The invocation `commands/verify.md` asks a model to run, byte for byte.
+ * A wording change here is the regression this describe exists to catch, so the
+ * string is spelled out rather than built from parts.
+ */
+const DOC_CALL = 'node "$REC" --status <PASS|FAIL> --command "<one-line summary>"'
+  + ' --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"';
+
+/**
+ * The WHOLE fenced line, resolution chain included — `DOC_CALL` alone leaves the
+ * `REC=` chain unpinned, so reverting it to the bare relative path that only
+ * resolves inside this repository would stay green. Measured 2026-09-21: the
+ * host sets `CLAUDE_CODE_SESSION_ID` and leaves `CLAUDE_SESSION_ID` empty, so a
+ * call naming only the first spelling records nothing.
+ */
+const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
+  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs";'
+  + ' [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs";'
+  + ` if [ -f "$REC" ]; then ${DOC_CALL};`
+  + ' else echo "record-verify not found - outcome NOT recorded"; fi';
+
+/** The flags the doc's call is expected to name — the loop's cardinality anchor. */
+const DOC_FLAGS = ['--status', '--command', '--session', '--cwd'];
+
+/** Concrete values for those flags, so the doc's names can be fed to the real CLI. */
+const DOC_FLAG_VALUES = {
+  '--status': 'PASS',
+  '--command': '/verify: doc-pinned invocation',
+  '--session': SID,
+};
+
+/** `commands/verify.md`, newline-normalized (the file is CRLF in the worktree). */
+function verifyDoc() {
+  return readFileSync(path.join(PLUGIN_ROOT, 'commands', 'verify.md'), 'utf-8')
+    .replace(/\r\n/g, '\n');
+}
+
+/** How many times `needle` occurs in `haystack`. */
+function countOf(haystack, needle) {
+  return haystack.split(needle).length - 1;
+}
+
+describe('record-verify: the prose in commands/verify.md', () => {
+  it('spells the invocation exactly once, and only in a numbered step', () => {
+    const doc = verifyDoc();
+
+    // Exactly once: two copies drift, and a model told twice records twice.
+    expect(countOf(doc, DOC_CALL)).toBe(1);
+    // The resolution chain is pinned too. Without this, reverting `REC=` to the
+    // bare relative path — which resolves only inside this repository — passes.
+    expect(countOf(doc, DOC_LINE)).toBe(1);
+    // And no SECOND, differently-worded invocation anywhere. Measured
+    // 2026-09-21: `node ` occurs exactly once in this document, which makes it
+    // a usable discriminator; a future doc that runs some other node script
+    // will need a narrower one.
+    expect(countOf(doc, 'node ')).toBe(1);
+
+    const execution = doc.indexOf('## Execution Flow');
+    const step5 = doc.indexOf('**Step 5 - Record**');
+    const report = doc.indexOf('4. **Report**');
+    const behavior = doc.indexOf('## Pipeline Behavior');
+    const call = doc.indexOf(DOC_CALL);
+    for (const [label, at] of Object.entries({ execution, step5, report, behavior, call })) {
+      expect(at, `${label} must be present in commands/verify.md`).toBeGreaterThan(-1);
+    }
+    // The whole point of the limb: the call is a numbered STEP, not a bullet
+    // under Pipeline Behavior that a model reads as commentary. `report` is the
+    // UPPER bound — without it, moving the call into a paragraph after
+    // `4. **Report**` still precedes Pipeline Behavior and still passes.
+    expect(execution).toBeLessThan(step5);
+    expect(step5).toBeLessThan(call);
+    expect(call).toBeLessThan(report);
+    expect(report).toBeLessThan(behavior);
+  });
+
+  it('leaves no invocation behind in the Pipeline Behavior section', () => {
+    const doc = verifyDoc();
+    const start = doc.indexOf('## Pipeline Behavior');
+    expect(start).toBeGreaterThan(-1);
+    const rest = doc.slice(start + '## Pipeline Behavior'.length);
+    const end = rest.indexOf('\n## ');
+    expect(end, 'Pipeline Behavior must be followed by another section').toBeGreaterThan(-1);
+    const section = rest.slice(0, end);
+
+    // A prose reminder that Step 5 still runs is allowed; a second copy of the
+    // script's name means a second invocation is being described.
+    expect(countOf(section, 'record-verify.mjs')).toBe(0);
+    expect(countOf(section, 'node ')).toBe(0);
+  });
+
+  it('names --cwd, and every flag it names is one the real CLI accepts', () => {
+    const doc = verifyDoc();
+    expect(countOf(doc, DOC_CALL)).toBe(1);
+
+    const flags = DOC_CALL.match(/--[a-z][a-z-]*/g) ?? [];
+    // CARDINALITY ANCHOR. Without this the run below could iterate an empty
+    // flag list and pass while the doc named nothing at all.
+    expect(flags).toEqual(DOC_FLAGS);
+    expect(flags).toContain('--cwd');
+
+    const root = makeRoot('DOC');
+    const args = [];
+    for (const flag of flags) {
+      args.push(flag, flag === '--cwd' ? root : DOC_FLAG_VALUES[flag]);
+    }
+    expect(args).toHaveLength(flags.length * 2);
+
+    const out = runCli(args, root);
+
+    // A flag the doc invented would be rejected as an unknown argument (exit 2),
+    // which is precisely the drift a wording-only pin cannot see.
+    expect(out.stderr).toBe('');
+    expect(out.status).toBe(0);
+    const printed = JSON.parse(out.stdout);
+    expect(printed.recorded).toBe(true);
+    expect(printed.appended).toBe(4);
+    expect(verifyLinesIn(root)).toHaveLength(4);
   });
 });
 
