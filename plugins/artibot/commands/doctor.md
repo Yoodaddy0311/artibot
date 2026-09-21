@@ -294,13 +294,18 @@ Report, from that run:
   spawns=0, spawns=1, spawns>=2, match, mismatch, input_deficit and
   unmeasured;
 - `agreement_rate`, which is `null` and never `0` when no window was
-  measurable, so an empty denominator cannot be read as total disagreement;
+  measurable, so an empty denominator cannot be read as total disagreement.
+  Its denominator is match + mismatch + input_deficit: the input-deficit
+  windows stay in on purpose, because dropping them shrinks the denominator
+  by the observer's own classification and reads higher (measured
+  2026-09-21T01:45Z: 12/15 = 0.800 with them, 12/14 = 0.857 without);
 - both t0 values: the default since-time (the v4.63.0 tag,
   `2026-09-17T00:48:41Z`) and the F04(a) install time `2026-09-14T05:21:00Z`;
 - `open_windows`, the `excluded_files` counts (`diag-`, `cron-`,
   `_unattributed`), `stop_only_ids`, and the reverse-direction line.
 
-Expect the `explicit_slash` / `input_deficit` column to be the first finding:
+Expect the `input_deficit` column (windows the `explicit_slash` flag moved out
+of `mismatch`) to be the first finding:
 every window with two or more spawns measured on 2026-09-17 was an explicit
 `/team` run (10 of 54 windows after the F04(a) install time), i.e. the router
 never saw the slash command — an input deficit, not a routing error.

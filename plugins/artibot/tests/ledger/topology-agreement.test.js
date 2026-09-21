@@ -90,7 +90,7 @@ const STDOUT_KEYS = [
 ];
 
 /** The footnote the human report prints for the synthetic-session counter. */
-const NON_UUID_NOTE = 'non_uuid_sessions        1   (synthetic / test-fixture residue'
+const NON_UUID_NOTE = 'non_uuid_sessions         1   (synthetic / test-fixture residue'
   + ' — still counted; prefixed classes are in excluded_files)';
 
 /** The line the human report must print when no team row exists in range. */
@@ -523,7 +523,7 @@ describe('topology-agreement CLI', () => {
 
     it('says the reverse direction is measured when a team row exists', () => {
       const out = runJson(root);
-      expect(out.reverse_direction).not.toBe('structurally-unobservable');
+      expect(out.reverse_direction).toBe('measured');
       expect(out.modes.team.windows).toBeGreaterThan(0);
     });
 
@@ -618,6 +618,48 @@ describe('topology-agreement CLI', () => {
       ]);
       const out = runJson(root);
       expect(out.stop_only_ids).toBe(1);
+    });
+
+    it('lets a stop-only team-* row flag the window without adding a spawn', () => {
+      // Asymmetric on purpose: the ledger drops starts, so a window whose team
+      // is visible only through its exits must not be charged to the router.
+      // The row flags `explicit_slash` and stays out of the spawn count.
+      writeNdjson(decisionsFile(root, S1), [
+        trRow({ ts: '2026-09-20T10:00:00.000Z', sessionId: S1, mode: 'solo' }),
+      ]);
+      writeNdjson(spawnLedgerPath(root), [
+        spawnRow({
+          ts: '2026-09-20T10:01:00.000Z', sessionId: S1, agentId: 'ateam-a-jjj1', agentType: 'team-a', event: 'stop',
+        }),
+      ]);
+      const out = runJson(root);
+      expect(out.modes.solo['spawns_0']).toBe(1);
+      // A solo recommendation with zero spawns MATCHES, so the flag never
+      // gets to rewrite anything: `explicit_slash` only converts a mismatch.
+      // Measured 2026-09-21 — the review note expected `input_deficit: 1`
+      // here, which this fixture cannot produce for `solo`.
+      expect(out.modes.solo.match).toBe(1);
+      expect(out.modes.solo.input_deficit).toBe(0);
+      expect(out.modes.solo.mismatch).toBe(0);
+      expect(out.stop_only_ids).toBe(1);
+    });
+
+    it('turns a mismatch into input_deficit on a stop-only team-* row', () => {
+      // The same flag, on a window that actually mismatches: a `subagent`
+      // recommendation with no starts at all. This is the path the review
+      // note describes, and it needs a mode whose rule zero spawns can fail.
+      writeNdjson(decisionsFile(root, S1), [
+        trRow({ ts: '2026-09-20T10:00:00.000Z', sessionId: S1, mode: 'subagent' }),
+      ]);
+      writeNdjson(spawnLedgerPath(root), [
+        spawnRow({
+          ts: '2026-09-20T10:01:00.000Z', sessionId: S1, agentId: 'ateam-a-kkk1', agentType: 'team-a', event: 'stop',
+        }),
+      ]);
+      const out = runJson(root);
+      expect(out.modes.subagent['spawns_0']).toBe(1);
+      expect(out.modes.subagent.input_deficit).toBe(1);
+      expect(out.modes.subagent.mismatch).toBe(0);
     });
 
     it('counts two same-agentType team spawns as two, not one', () => {

@@ -927,6 +927,15 @@ describe('commands/doctor.md gained Check 8 and Check 9', () => {
  * plugin-root trail is an informational row, and `cron-` files are counted
  * apart from session files. Checks 1-6 still carry their dc9a4c12 digests.
  *   68a73087845aa9cd -> f9cbd1a65ef3c2cc
+ *
+ * Check 7 was re-frozen a THIRD time on 2026-09-21, for SH-04 — the
+ * "Topology agreement (Shadow, info)" block: a consumer row for the read-only
+ * `scripts/ledger/topology-agreement.mjs` reader (recommended-vs-actual
+ * topology, derived post-hoc from the decisions store and the spawn ledger),
+ * appended INSIDE Check 7 after its "cannot see" list. Status is `info` and
+ * never enters the status table; S3/S4/S5 and every earlier line of the check
+ * are byte-identical. Checks 1-6 still carry their dc9a4c12 digests.
+ *   f9cbd1a65ef3c2cc -> 23a7be708a43666c
  */
 const CHECK_1_7_SHA256 = Object.freeze({
   'Check 1': '68a7994da5db8345',
@@ -935,8 +944,9 @@ const CHECK_1_7_SHA256 = Object.freeze({
   'Check 4': 'b48ec269f024a6d3',
   'Check 5': '76b677614892ac3c',
   'Check 6': '889cb2c477eae694',
-  // Re-frozen 2026-09-03 (store path move) and 2026-09-05 (D9). See the note above.
-  'Check 7': 'f9cbd1a65ef3c2cc',
+  // Re-frozen 2026-09-03 (store path move), 2026-09-05 (D9) and 2026-09-21
+  // (SH-04 topology agreement block). See the note above.
+  'Check 7': '23a7be708a43666c',
 });
 
 // Truncated to 16 hex characters, the same shape `lib/core/skill-hash.js` uses

@@ -45,9 +45,13 @@
  *  | autopilot/autopilot_fast/split| UNMEASURED — the actual lives under the |
  *  |                               | plugin's own runtime dirs, unread in v1 |
  *
- *  `explicit_slash` — any spawn in the window whose `agentType` starts with
- *  `team-` or `split-` — turns a mismatch into `input_deficit` rather than a
- *  router error. Those prefixes mean the human had already chosen the topology
+ *  `explicit_slash` — any spawn row in the window, `start` OR `stop`, whose
+ *  `agentType` starts with `team-` or `split-` — turns a mismatch into
+ *  `input_deficit` rather than a router error. STOP ROWS COUNT ON PURPOSE:
+ *  the ledger drops starts (44 orphan ids live), so requiring a `start` would
+ *  blame the router for a window whose team is visible only through its exits.
+ *  The asymmetry is deliberate — a stop-only `team-` row flags the window
+ *  without adding to `spawns`. Those prefixes mean the human had already chosen the topology
  *  by typing the command; the router never saw that choice, so counting it
  *  against the router's judgement would measure the wrong thing.
  *
@@ -58,6 +62,15 @@
  *  Both appear in the `t0` block of every report because the agreement number
  *  moves with the cutoff, and a reader who sees only one cannot tell which
  *  question was answered.
+ *
+ *  THE RATE'S DENOMINATOR IS `measured_windows` = `match` + `mismatch` +
+ *  `input_deficit`. `input_deficit` is IN the denominator deliberately:
+ *  dropping it would shrink the denominator by an observer's judgement about
+ *  whose fault a window was, and every such drop makes the rate read HIGHER
+ *  (live 2026-09-21T01:45Z: 12/15 = 0.800 with it, 12/14 = 0.857 without).
+ *  Every term is printed per mode and in `totals`, so a reader who wants the
+ *  other denominator can recompute it from the rows rather than trusting this
+ *  choice.
  *
  * -- EXIT CODES, AND WHY ONLY ONE IS NON-ZERO -------------------------------
  *  0  an observation was printed — INCLUDING a missing store, an empty store
@@ -104,6 +117,11 @@
  *    A count of 0 there is a property of the pipeline, never evidence.
  *  - AUTOPILOT AND SPLIT ACTUALS, which live under the plugin's own runtime
  *    directories and are not read in v1.
+ *  - ANYTHING OUTSIDE A WINDOW. A TR row before `--since` is dropped window
+ *    and all, and a spawn row after `--since` that precedes its session's
+ *    FIRST in-range TR row belongs to no window and is counted by nothing in
+ *    the table — it still appears in `sessions_in_spawn_ledger`, which is why
+ *    that number can exceed anything the windows explain.
  *  - DROPPED STARTS. The spawn ledger loses some `start` rows (measured
  *    2026-09-04); `stop_only_ids` counts the visible part of that loss, and
  *    every one of them makes a `solo` window read as agreement when it was not.
@@ -575,7 +593,7 @@ function renderHuman(rep) {
     `sessions_with_tr          ${rep.sessions_with_tr}`,
     `sessions_in_spawn_ledger  ${rep.sessions_in_spawn_ledger}`,
     `sessions_joined           ${rep.sessions_joined}`,
-    `non_uuid_sessions        ${rep.non_uuid_sessions}   (synthetic / test-fixture residue`
+    `non_uuid_sessions         ${rep.non_uuid_sessions}   (synthetic / test-fixture residue`
       + ' — still counted; prefixed classes are in excluded_files)',
     '',
   );
