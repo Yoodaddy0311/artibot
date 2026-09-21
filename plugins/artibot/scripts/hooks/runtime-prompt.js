@@ -237,9 +237,22 @@ export const RECOMMENDATION_HINTS = Object.freeze(['workflow', 'split', 'autopil
  * @returns {string}
  */
 export function buildRecommendationDirective(workflowPlan) {
+  const rec = resolveRecommendHint(workflowPlan);
+  return rec === null ? '' : `[artibot:hint recommend=${rec}]`;
+}
+
+/**
+ * SH-03 — the VALUE behind `buildRecommendationDirective`'s string, and the
+ * sole owner of the "does this plan produce a recommend hint" condition. The
+ * directive builder and the activation record read this one result, so the
+ * hint the user saw and the hint on disk cannot drift apart.
+ *
+ * @param {object|null|undefined} workflowPlan - tasks.meta.workflowPlan
+ * @returns {string|null} a member of `RECOMMENDATION_HINTS`, or null
+ */
+export function resolveRecommendHint(workflowPlan) {
   const rec = workflowPlan?.recommendation;
-  if (!rec || !RECOMMENDATION_HINTS.includes(rec)) return '';
-  return `[artibot:hint recommend=${rec}]`;
+  return typeof rec === 'string' && RECOMMENDATION_HINTS.includes(rec) ? rec : null;
 }
 
 /**
@@ -259,10 +272,24 @@ export function buildRecommendationDirective(workflowPlan) {
  * @returns {string} `[artibot:hint recommend=watch url=<URL>]` or ''.
  */
 export function buildWatchDirective(text) {
-  if (typeof text !== 'string' || !text) return '';
+  const url = matchWatchUrl(text);
+  return url === null ? '' : `[artibot:hint recommend=watch url=${url}]`;
+}
+
+/**
+ * SH-03 — the VALUE behind `buildWatchDirective`'s string and the single owner
+ * of the host contract. The activation record reads this same result to decide
+ * whether a `watch` hint was shown, and stores only the constant `'watch'` —
+ * the URL never reaches disk.
+ *
+ * @param {string} text - The user prompt text.
+ * @returns {string|null} the first matched URL, or null.
+ */
+export function matchWatchUrl(text) {
+  if (typeof text !== 'string' || !text) return null;
   const yt = /https?:\/\/(?:(?:www|m|music)\.)?youtube\.com\/(?:watch\?[\w=&%-]*\bv=|shorts\/|embed\/)[\w-]{11}|https?:\/\/youtu\.be\/[\w-]{11}/i;
   const hit = text.match(yt);
-  return hit ? `[artibot:hint recommend=watch url=${hit[0]}]` : '';
+  return hit ? hit[0] : null;
 }
 
 /**
@@ -624,13 +651,17 @@ function loadLibModule(pluginRoot, ...segments) {
  * would skip the two PRE-EXISTING writers as well (cross-review 2026-09-17).
  *
  * @param {{prompt: string, prepared: object, runtimeConfig: object,
- *   hookData: object, pluginRoot: string, slashCommand: string|null}} params
+ *   hookData: object, pluginRoot: string, slashCommand: string|null,
+ *   hintRecommend: string|null}} params
  *   `slashCommand` — `detectSlashCommand(prompt)` result or null; sibling limb
  *   sh29 appends its command carrier to this same block after this lands.
+ *   `hintRecommend` — the `[artibot:hint recommend=X]` value THIS TURN showed,
+ *   straight from `composePromptParts`, or null. Passed as a value, never read
+ *   back off `output`, which this function still cannot see.
  * @returns {Promise<void>}
  */
 async function recordObserveOnlyDecisions({
-  prompt, prepared, runtimeConfig, hookData, pluginRoot, slashCommand,
+  prompt, prepared, runtimeConfig, hookData, pluginRoot, slashCommand, hintRecommend,
 }) {
   try {
     const { routeTopology } = await loadLibModule(pluginRoot, 'topology', 'topology-router.js');
@@ -654,6 +685,7 @@ async function recordObserveOnlyDecisions({
       recordActivationObserved(runId, buildActivationRecord({
         topology,
         slashCommand,
+        hintRecommend: typeof hintRecommend === 'string' ? hintRecommend : null,
         promptId: typeof hookData?.prompt_id === 'string' ? hookData.prompt_id : null,
       }), store);
     } catch {
@@ -929,7 +961,25 @@ export function buildAdditionalContext(directives, envelopeContext) {
  * @param {object} params
  * @returns {{ user_prompt: string, message: string, hookSpecificOutput?: object }}
  */
-export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
+export function composePromptOutput(params) {
+  return composePromptParts(params).output;
+}
+
+/**
+ * `composePromptOutput` plus the ONE extra fact the observe-only activation
+ * record needs: which `[artibot:hint recommend=X]` this turn actually showed.
+ * `output` IS the stdout document, so `shownHint` rides BESIDE it and the
+ * observe-only writer still never receives `output`. Exported for the wiring
+ * suite only: stdout is composed from `.output` alone.
+ *
+ * Precedence mirrors the emission order of `directives` below: a recommendation
+ * wins over `watch`, and `injectPrompt === false` is null because no directive
+ * reaches either surface, so nothing was shown to anyone.
+ *
+ * @param {object} params
+ * @returns {{ output: object, shownHint: string|null }}
+ */
+export function composePromptParts({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
   const basePrompt = prepared.userPrompt ?? prompt;
   const effortDirective = buildEffortDirective(effortMeta);
   // P2: the pipeline's tasks middleware derives a unified workflow plan
@@ -937,14 +987,17 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
   // runner, surface the team directive on the same leading line so the spawn
   // signal actually reaches the model — without this the plan was built then
   // discarded ("parallel-not-spawned" symptom).
-  const teamDirective = buildTeamDirective(prepared.context?.tasks?.meta?.workflowPlan);
+  const workflowPlan = prepared.context?.tasks?.meta?.workflowPlan;
+  const teamDirective = buildTeamDirective(workflowPlan);
   // P3: surface an ADVISORY runner recommendation (workflow|split|autopilot) at
   // the front door. Same source as buildTeamDirective. This only adds text so the
   // user/model can opt in — it never auto-fires (honors the harness opt-in rule).
-  const recommendationDirective = buildRecommendationDirective(prepared.context?.tasks?.meta?.workflowPlan);
+  const recommendHint = resolveRecommendHint(workflowPlan);
+  const recommendationDirective = buildRecommendationDirective(workflowPlan);
   // P4: deterministic front-door hint — a YouTube link in the prompt suggests the
   // /watch ingest command. Advisory only (the model surfaces it and waits); never
   // auto-fires. Built from the user text, so it's '' for non-YouTube prompts.
+  const watchUrl = matchWatchUrl(basePrompt);
   const watchDirective = buildWatchDirective(basePrompt);
   const directives = [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective, watchDirective];
   const finalUserPrompt = injectPrompt
@@ -968,7 +1021,8 @@ export function composePromptOutput({ prepared, prompt, effortMeta, taskBudgetDi
       additionalContext,
     };
   }
-  return output;
+  const shownHint = injectPrompt ? (recommendHint ?? (watchUrl === null ? null : 'watch')) : null;
+  return { output, shownHint };
 }
 
 /**
@@ -1013,7 +1067,7 @@ export async function handleUserPromptSubmit(hookData) {
     await applyNativeEffortHint(nativeBand ?? effortMeta.effort, pluginRoot);
   }
 
-  const output = composePromptOutput({
+  const { output, shownHint } = composePromptParts({
     prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt,
   });
 
@@ -1025,6 +1079,7 @@ export async function handleUserPromptSubmit(hookData) {
   const slashCommand = detectSlashCommand(prompt);
   await recordObserveOnlyDecisions({
     prompt, prepared, runtimeConfig, hookData, pluginRoot, slashCommand,
+    hintRecommend: shownHint,
   });
 
   // SH-29 part B — the COMMAND carrier, on the same side of `output` and for

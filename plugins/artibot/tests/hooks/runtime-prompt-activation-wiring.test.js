@@ -41,7 +41,7 @@ import {
   readFileSync, rmSync, symlinkSync,
 } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+import { composePromptParts, handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 import {
   ACTIVATION_OBSERVED,
   MEMORY_INJECTION_MEASURED,
@@ -331,11 +331,14 @@ describe('activation-observed reaches <projectRoot>/.artibot/runtime/decisions/'
       pid: 'prompt-act-h1',
     });
     await submit({ prompt: '/split status', sid: 'sess-act-h2', pid: 'prompt-act-h2' });
+    // The HINT path writes a second user-derived value; a YouTube URL is the
+    // one hint input that carries user content, so it rides in this sweep too.
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-act-h3', pid: 'prompt-act-h3' });
 
     const raw = readSandboxLines();
     expect(raw.length).toBeGreaterThan(0);
     for (const line of raw) {
-      for (const secret of ['대규모 변경', '파일별로', 'status', 'oauth']) {
+      for (const secret of ['대규모 변경', '파일별로', 'status', 'oauth', 'youtu', '이 영상']) {
         expect(line).not.toContain(secret);
       }
     }
@@ -419,6 +422,114 @@ describe('activation-observed reaches <projectRoot>/.artibot/runtime/decisions/'
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Minimal `prepared` envelope for the pure half — `composePromptParts` reads
+ * only `userPrompt`, `message` and `context.tasks.meta.workflowPlan`.
+ *
+ * @param {{recommendation?: string|null, userPrompt?: string}} [o]
+ * @returns {object}
+ */
+function preparedWith({ recommendation = null, userPrompt = 'do the thing' } = {}) {
+  return {
+    userPrompt,
+    message: '[runtime] prompt prepared',
+    context: { tasks: { meta: { workflowPlan: recommendation === null ? {} : { recommendation } } } },
+  };
+}
+
+/** @param {object} o @returns {{output: object, shownHint: string|null}} */
+function parts(o) {
+  return composePromptParts({
+    prepared: preparedWith(o),
+    prompt: o.userPrompt ?? 'do the thing',
+    effortMeta: null,
+    taskBudgetDirective: '',
+    injectPrompt: o.injectPrompt !== false,
+  });
+}
+
+const YT = 'https://youtu.be/dQw4w9WgXcQ';
+
+describe('shownHint is the hint the turn ACTUALLY showed (pure half)', () => {
+  // WHY PURE. A `recommendation` reaches the plan only through the tasks
+  // middleware's complexity classification, which no synthetic prompt can pin
+  // deterministically. Injecting the plan is what makes the five-value table
+  // and the precedence rule assertable at all; the two integration cases below
+  // prove the same value survives the real pipeline to disk.
+  for (const rec of ['split', 'autopilot', 'workflow']) {
+    it(`reports ${rec} when the plan recommends it`, () => {
+      const { output, shownHint } = parts({ recommendation: rec });
+      expect(shownHint).toBe(rec);
+      // SINGLE SOURCE: the value handed to the writer and the value the model
+      // read off the directive are the same derivation. String-matching here is
+      // the test's job — the production path never re-parses the directive.
+      expect(output.hookSpecificOutput.additionalContext)
+        .toContain(`[artibot:hint recommend=${rec}]`);
+    });
+  }
+
+  it('reports watch when only a YouTube link is present', () => {
+    const { output, shownHint } = parts({ userPrompt: `이 영상 봐줘 ${YT}` });
+    expect(shownHint).toBe('watch');
+    expect(output.hookSpecificOutput.additionalContext).toContain('recommend=watch');
+  });
+
+  it('prefers the recommendation when a rec and a watch hint both fire', () => {
+    // The key is single-valued and `directives` emits the recommendation first,
+    // so the FIRST hint the reader meets is the one recorded.
+    const { output, shownHint } = parts({ recommendation: 'split', userPrompt: `${YT} 를 쪼개줘` });
+    expect(shownHint).toBe('split');
+    const ctx = output.hookSpecificOutput.additionalContext;
+    expect(ctx).toContain('[artibot:hint recommend=split]');
+    expect(ctx).toContain('recommend=watch');
+    expect(ctx.indexOf('recommend=split')).toBeLessThan(ctx.indexOf('recommend=watch'));
+  });
+
+  it('reports null when injectPrompt is off — nothing was shown to anyone', () => {
+    const { output, shownHint } = parts({ recommendation: 'split', injectPrompt: false });
+    expect(shownHint).toBeNull();
+    expect(output.user_prompt).not.toContain('artibot:hint');
+    expect(output.hookSpecificOutput).toBeUndefined();
+  });
+
+  it('reports null for a plain prompt', () => {
+    expect(parts({}).shownHint).toBeNull();
+  });
+});
+
+describe('the shown hint reaches the activation record', () => {
+  it('writes both hint keys as null for a prompt with no hint', async () => {
+    await submit({ prompt: 'explain how the router works', sid: 'sess-hint-a', pid: 'prompt-hint-a' });
+
+    const [ev] = activationEvents();
+    expect(ev.data.hint_recommend).toBeNull();
+    expect(ev.data.hint_resolved_by).toBeNull();
+  });
+
+  it('records a YouTube prompt as watch/slash-map with the URL nowhere on disk', async () => {
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-hint-b', pid: 'prompt-hint-b' });
+
+    const [ev] = activationEvents();
+    expect(ev.data.hint_recommend).toBe('watch');
+    expect(ev.data.hint_resolved_by).toBe('slash-map');
+    // PRIVACY, on the RAW bytes: the hint value is a constant, and the URL that
+    // produced it stays in memory. A leak into any key of any event is caught.
+    for (const line of readSandboxLines()) {
+      expect(line).not.toContain('youtu');
+      expect(line).not.toContain('dQw4w9WgXcQ');
+    }
+  });
+
+  it('measures the on-disk size of an activation record carrying a hint', async () => {
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-hint-c', pid: 'prompt-hint-c' });
+    const [line] = readSandboxLines().filter((l) => l.includes(`"${ACTIVATION_OBSERVED}"`));
+    // Printed, not gated — same reason as the sibling size case above.
+    // eslint-disable-next-line no-console
+    console.info(`[activation-wiring] one hint-carrying line = ${Buffer.byteLength(line, 'utf-8')} B`);
+    expect(line).toContain('hint_recommend');
   });
 });
 
