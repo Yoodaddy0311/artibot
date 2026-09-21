@@ -44,7 +44,7 @@ Parse $ARGUMENTS:
 
 ### Phase A½: 체크포인트 (§31 순서 · runtime.checkpoint.saveOnSave 가 true 일 때만)
 
-이 단계는 runtime.checkpoint.saveOnSave 가 true 일 때만 실행된다. 이 키는 현재 `artibot.config.json` 에 **없다** — 부재 = false = 이 단계를 통째로 스킵하고 출력 표에 "스킵(config off)" 1행만 남긴다. 되돌리기도 이 config 한 줄이다 (Canary, DESIGN §4). 게이트 판정은 `lib/checkpoint/save-checkpoint.js` 의 `isSaveCheckpointEnabled(config)` 가 단독으로 내린다 (엄격 boolean — `true` 아닌 값은 전부 false).
+이 단계는 runtime.checkpoint.saveOnSave 가 true 일 때만 실행된다. 이 키는 현재 `artibot.config.json` 에 **`false` 로 있다** — false(그리고 부재)는 이 단계를 통째로 스킵하고 출력 표에 "스킵(config off)" 1행만 남긴다. 되돌리기도 이 config 한 줄이다 (Canary, DESIGN §4). 게이트 판정은 `lib/checkpoint/save-checkpoint.js` 의 `isSaveCheckpointEnabled(config)` 가 단독으로 내린다 (엄격 boolean — `true` 아닌 값은 전부 false).
 
 §31 순서대로 8단계이며, 오늘 실제로 도는 것과 부재인 것을 그대로 적는다:
 
@@ -55,11 +55,11 @@ Parse $ARGUMENTS:
 5. **Checkpoint** — `createCheckpointService({ store, appendEvent: null })` (lib/checkpoint/checkpoint-service.js:150) 의 `checkpoint(content, { trigger: '/save' })`. store 는 `createCheckpointStore({ adapter: createFileStoreAdapter({ dir }) })` (checkpoint-store.js:162 · adapters/file-store.js:113), `dir` 는 `resolveStoreLocation({ projectRoot, gitCommonDir }).dir` (lib/project-state/store-location.js:57). `appendEvent` 는 **반드시 null** — 원장 기록은 7단계에서 조립 모듈이 직접 한다 (리더 결정 ca05-2).
 6. **Validate resume** — `buildResumeReport({ latestValid, getMission, getTaskGraph }, { missionId })` (lib/checkpoint/resume-controller.js:542) 를 report-only 로 호출. `resumable` 은 상태를 바꾸지 않고 출력 표에만 쓴다. 오늘 배선은 위 3포트만 주입하므로 report 의 7·8·9단계(lease·ledger reconcile·model)가 unknown 으로 막혀 `resumable` 은 **항상 ✗** 다 — 결함이 아니라 포트 부재의 정직한 값이며, 체크포인트 저장·원장 기록은 그와 무관하게 이뤄진다.
 7. **Ledger** — 조립 모듈이 `appendLedgerEvent(projectRoot, { event:'mission.checkpointed', source:'supervisor', data:{ checkpoint_id, trigger:'/save', resumable } })` (lib/runtime/ledger.js:81) 를 호출한다. `source` 는 allowlist 상 `supervisor` 다 (리더 결정 ca05-1 — `save` 는 allowlist 밖이라 `ledger.rejected` 로 강등된다).
-8. **Snapshot Scorecard** — 이 줄기 밖이다 (OB-19, 별도 줄기). 순서상 자리만 확정해 둔다.
+8. **Snapshot Scorecard** — 원장을 fold 한 세션 카드(§35)를 `/save` 출력 **맨 아래**(`## 권장 첫 프롬프트` 뒤) 한 절로 인쇄한다. 2~7단계와 달리 `buildSaveCheckpoint` 밖의 별도 읽기 사슬이고 세션 범위 읽기 전용 투영이라, 활성 mission 이 0건이어도(2~7단계가 `skip:no-active-mission`) 카드는 그대로 렌더한다. 카드를 스킵하는 사유는 둘뿐이다: config off · session 없음. 읽기 경로는 `/scorecard --session` 과 같은 것 하나이며 포트를 두 번 넘긴다: `lib/runtime/ledger.js#readAllEvents` → `lib/replay/load.js#loadReplay` (`readEvents` 포트 필수 — 빠뜨리면 던진다. 빈 배열 기본값으로 메우면 배선 오류가 "아무 일도 없던 실행"과 같은 출력이 되므로 일부러 fail-closed) → `lib/scorecard/session-scorecard.js#buildSessionScorecard`(replay, `{ session_id }`) → `lib/scorecard/render.js#renderScorecardMarkdown`(card). **카드는 저장하지 않는다** — 재생성 가능한 투영이고 정본은 원장 하나라서 `lib/scorecard/index.js` 헤더가 "이 디렉터리는 파일을 쓰지 않는다"를 계약으로 못박았다. `session_id` 는 아래 본문 규약(훅 payload 1순위 · env 폴백)을 그대로 쓰고, 비어 있으면 `buildSessionScorecard` 가 이유를 적어 던지므로 카드 절에 "스킵(session 없음)" 한 줄만 남긴다 — 범위 없는 카드를 만들어 원장의 모든 세션을 한 세션인 양 접지 않는다. 이 단계도 Phase A½ 안이라 `runtime.checkpoint.saveOnSave` 가 false 면 절 통째로 스킵된다. 분모 0 인 지표는 `unmeasured` 로 렌더되고 `0%` 로 쓰지 않는다.
 
-호출은 하나다: `buildSaveCheckpoint(ports, { sessionId, trigger:'/save' })`. ports 는 `{ listActiveMissionIds, getMission, getTaskGraph, checkpointService, appendEvent }` 이고 `listActiveMissionIds = () => Object.keys(store.getState().active_missions)` — 활성 mission **전부**가 대상이다 (리더 결정 ca05-6(a)). 0건이면 `skip:no-active-mission` 이고 출력 표는 "스킵(활성 mission 없음)". `session_id` 는 훅 payload 가 1순위이고 env 가 폴백이며, 비어 있으면 `skip:session-missing` 이다 — mission_id·session_id 를 지어내지 않는다. 결과 행은 `{ mission_id, status: saved|rejected|skipped, checkpoint_id, resumable, blocked_by, errors, ledger }`.
+2~7단계의 호출은 하나다: `buildSaveCheckpoint(ports, { sessionId, trigger:'/save' })` (8단계는 이 호출 밖의 별도 읽기 사슬이다 — 이 모듈은 scorecard 를 모른다). ports 는 `{ listActiveMissionIds, getMission, getTaskGraph, checkpointService, appendEvent }` 이고 `listActiveMissionIds = () => Object.keys(store.getState().active_missions)` — 활성 mission **전부**가 대상이다 (리더 결정 ca05-6(a)). 0건이면 `skip:no-active-mission` 이고 출력 표는 "스킵(활성 mission 없음)". `session_id` 는 훅 payload 가 1순위이고 env 가 폴백이며, 비어 있으면 `skip:session-missing` 이다 — mission_id·session_id 를 지어내지 않는다. 결과 행은 `{ mission_id, status: saved|rejected|skipped, checkpoint_id, resumable, blocked_by, errors, ledger }`.
 
-체크포인트 결과는 HANDOFF 본문에 넣지 않는다 — `renderHandoffMarkdown` 출력 바이트는 불변이고, 결과는 `/save` 출력 표에만 나타난다.
+체크포인트 결과도 8단계 세션 카드도 HANDOFF 본문에 넣지 않는다 — `renderHandoffMarkdown` 출력 바이트는 불변이고, 결과는 `/save` 출력 표와 출력 맨 끝의 `## 세션 스코어카드` 절에만 나타난다.
 
 스로틀은 없다 (ca05-7 미결). `/save` 를 연타하면 `mission.checkpointed` 가 건마다 남고 scorecard 분자(`lib/scorecard/session-scorecard.js`)가 그만큼 오른다.
 
@@ -169,6 +169,20 @@ Parse $ARGUMENTS:
 2. [prompt 2]
 3. [prompt 3]
 
+## 세션 스코어카드
+
+(8단계 산출. renderScorecardMarkdown 출력을 가공 없이 그대로 붙인다 — 아래 표는 열 모양을 보이는 자리 표시이며 실측 수치가 아니다. 렌더러는 본표 뒤에 `## 근거`·`## 미측정` 절을 항상 이어 내고, 분포가 있으면 본표와 `## 근거` 사이에 `## 분포` 도 낸다 — 잘라내지 말 것.)
+
+# ARTIBOT · SESSION SCORECARD
+
+- **session_id**: `<현재 세션 id>`
+
+| 지표 | 값 | 분모 | 비율 | 미분류 | 상태 |
+|---|---|---|---|---|---|
+| [지표명] | [값 또는 unmeasured] | [분모] | [비율 또는 unmeasured] | [미분류] | [상태] |
+
+> 스킵 시에는 이 절을 통째로 생략하고 "세션 스코어카드: 스킵(config off)" 또는 "스킵(session 없음)" 한 줄만 남긴다.
+
 > 다음 세션: `/resume` 으로 전체 HANDOFF 복원 + 첫 프롬프트 확인.
 ```
 
@@ -194,6 +208,9 @@ Parse $ARGUMENTS:
 - Do NOT 동기화 정상인데도 경고/액션을 출력하지 말 것 — clean 상태면 "✅ 커밋·푸시 동기화 정상" 한 줄로 끝낼 것
 - Do NOT git 추적 아카이브를 제자리 덮어쓰거나 prune 하지 말 것 — `checkHandoffTrackedIntegrity` 의 M/D 가 0/0 이 아니면 그 자체가 결함이며 출력에서 숨기지 말 것
 - Do NOT mission_id·session_id 를 위조해서 체크포인트를 만들지 말 것 — 없으면 스킵 행으로 표기 (MISSION_ID_RE 형식의 가짜 id 금지)
+- Do NOT 세션 카드를 파일로 저장하지 말 것 — 원장을 fold 한 재생성 가능한 투영이며, 저장하면 원장 옆에 두 번째 진실원이 생긴다 (`lib/scorecard/index.js` 헤더 계약)
+- Do NOT `session_id` 없이 카드를 만들지 말 것 — 범위 없는 카드는 전 세션을 한 세션인 양 접는다. 없으면 "스킵(session 없음)" 한 줄
+- Do NOT 분모 0 지표를 `0%` 로 쓰지 말 것 — `unmeasured` 그대로 출력 (측정 안 함 ≠ 측정해서 0)
 - Do NOT 체크포인트 단계가 HANDOFF 본문·handoff-store 추적 보호를 건드리게 하지 말 것 — 체크포인트 결과는 /save 출력 표에만 (DESIGN §31 "HANDOFF 렌더 그대로")
 
 ## Edge Cases
@@ -214,7 +231,9 @@ Parse $ARGUMENTS:
 | git 워크트리인데 `git ls-files` 실패 (인덱스 락·git 없음) | `pruneSkipped: 'git-unknown'` — 덮어쓰기·prune 모두 스킵하고 "추적 확인 불가" 명시 |
 | `--dry-run` | 마크다운 stdout 출력, 디스크 쓰기/마킹 모두 스킵 |
 | `runtime.checkpoint.saveOnSave` 부재/false | Phase A½ 통째 스킵, 표에 "스킵(config off)". 체크포인트·원장 쓰기 0건 |
-| `active_missions` 비어 있음 | `skip:no-active-mission` → 표에 "스킵(활성 mission 없음)", `mission.checkpointed` 0건 |
+| `active_missions` 비어 있음 | `skip:no-active-mission` → 표에 "스킵(활성 mission 없음)", `mission.checkpointed` 0건. 8단계 카드는 세션 범위라 그대로 렌더 |
+| `session_id` 없음 (훅 payload·env 둘 다 빔) | 8단계 카드 절은 "스킵(session 없음)" 한 줄. 전 세션을 접은 카드를 만들지 않음 |
+| 원장이 비어 있음 (설치본 미반영 등) | 카드는 정상 렌더되고 전 지표가 `unmeasured` — 결함이 아니라 분모 0 의 정직한 값 |
 
 ## Next Steps
 
