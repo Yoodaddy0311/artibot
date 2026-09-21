@@ -14,6 +14,7 @@ import {
   renderHandoffMarkdown,
   toProjectSlug,
 } from '../../lib/handoff/handoff-builder.js';
+import { parseHandoffBannerFields } from '../../scripts/hooks/session-start.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -281,7 +282,7 @@ describe('handoff-builder / full render', () => {
   // -------------------------------------------------------------------------
   // Safety #2: frontmatter (machineId + createdAt + branch)
   // -------------------------------------------------------------------------
-  it('renders YAML frontmatter as the very first lines with 5 required fields', async () => {
+  it('renders YAML frontmatter as the very first lines with 6 required fields', async () => {
     const data = await collectHandoffData({
       pluginRoot,
       projectRoot,
@@ -301,6 +302,8 @@ describe('handoff-builder / full render', () => {
     expect(fm).toMatch(/^branch:\s+/m);
     expect(fm).toMatch(/^generator:\s+artibot-handoff/m);
     expect(fm).toMatch(/^schemaVersion:\s+1/m);
+    // §3.3 provenance: no readStateVersion port wired here → unmeasured.
+    expect(fm).toMatch(/^derived-from: state@unmeasured$/m);
     // Body still contains the # HANDOFF heading after frontmatter
     expect(md.slice(second + 5)).toMatch(/^#\s+HANDOFF/m);
     // Meta on the data object exposes the same fields
@@ -333,6 +336,127 @@ describe('handoff-builder / full render', () => {
     };
     const md = renderHandoffMarkdown(synthetic, { now: FROZEN_NOW });
     expect(md).toMatch(/^machineId:\s+(unknown|'')/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 설계 §3.3: derived-from provenance header
+//
+// 파생 렌더 파일은 어떤 state 버전에서 나왔는지 frontmatter 에 남긴다. handoff
+// 는 store 를 직접 열지 않고 `readStateVersion` 포트로만 값을 받는다 — 포트가
+// 없거나 실패하면 숫자를 지어내지 않고 `state@unmeasured` 로 남긴다(위조 금지).
+// ---------------------------------------------------------------------------
+
+describe('handoff frontmatter — derived-from', () => {
+  let pluginRoot;
+  let projectRoot;
+
+  beforeEach(() => {
+    pluginRoot = makeTempRoot();
+    projectRoot = makeTempRoot();
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  async function collect(readStateVersion) {
+    return collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: HAPPY_GIT,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+      ...(readStateVersion === undefined ? {} : { readStateVersion }),
+    });
+  }
+
+  it('stamps state@<n> when the port returns a version number', async () => {
+    const data = await collect(() => 42);
+    expect(data.meta.stateVersion).toBe(42);
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    expect(md).toMatch(/^derived-from: state@42$/m);
+  });
+
+  it('awaits a Promise-returning port', async () => {
+    const data = await collect(() => Promise.resolve(7));
+    expect(data.meta.stateVersion).toBe(7);
+    expect(renderHandoffMarkdown(data, { now: FROZEN_NOW })).toMatch(/^derived-from: state@7$/m);
+  });
+
+  it('treats 0 as a valid version (not falsy-collapsed to unmeasured)', async () => {
+    const data = await collect(() => 0);
+    expect(data.meta.stateVersion).toBe(0);
+    expect(renderHandoffMarkdown(data, { now: FROZEN_NOW })).toMatch(/^derived-from: state@0$/m);
+  });
+
+  const REJECTED = [
+    ['port absent', undefined],
+    ['non-function port', 'not-a-function'],
+    ['returns null', () => null],
+    ['returns undefined', () => undefined],
+    ['throws', () => { throw new Error('store unavailable'); }],
+    ['rejects', () => Promise.reject(new Error('store unavailable'))],
+    ['returns 1.5', () => 1.5],
+    ['returns NaN', () => NaN],
+    ['returns -1', () => -1],
+    ["returns '42'", () => '42'],
+    ['returns an object', () => ({ version: 42 })],
+  ];
+
+  for (const [label, port] of REJECTED) {
+    it(`falls back to state@unmeasured and never throws when the port ${label}`, async () => {
+      const data = await collect(port);
+      expect(data.meta.stateVersion).toBe(null);
+      expect(renderHandoffMarkdown(data, { now: FROZEN_NOW })).toMatch(/^derived-from: state@unmeasured$/m);
+    });
+  }
+
+  it('renders unquoted inside the frontmatter block, leaving the existing 5 keys intact', async () => {
+    const data = await collect(() => 42);
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    const second = md.indexOf('\n---\n', 4);
+    const fm = md.slice(0, second + 5);
+    // `state@42` must NOT be single-quoted — yamlScalar would wrap it because
+    // of `@`/`-`, which would break literal consumers.
+    expect(fm).toContain('\nderived-from: state@42\n');
+    expect(fm).not.toContain("'state@42'");
+    for (const key of ['machineId', 'createdAt', 'branch', 'generator', 'schemaVersion']) {
+      expect(fm).toMatch(new RegExp(`^${key}:\\s+`, 'm'));
+    }
+    expect(fm).toMatch(/^schemaVersion:\s+1$/m);
+    expect(md.slice(second + 5)).toMatch(/^#\s+HANDOFF/m);
+  });
+
+  it('renders from a hand-built meta without going through collectHandoffData', () => {
+    const base = {
+      gitState: { branch: null, shortHash: null, modified: 0, staged: 0, untracked: 0, recentCommits: [], unpushed: null, lockedOut: false },
+      wip: { count: 0, oldestAgeMs: 0, advisory: null },
+      quality: { exists: false, stale: false, ageHours: null, summary: null, warning: null },
+      advisor: [],
+      worklog: { date: null, lines: [] },
+      sessionRecall: [],
+      contextFiles: [],
+      firstPrompts: [],
+    };
+    const good = renderHandoffMarkdown({ ...base, meta: { stateVersion: 9 } }, { now: FROZEN_NOW });
+    expect(good).toMatch(/^derived-from: state@9$/m);
+    const bad = renderHandoffMarkdown({ ...base, meta: { stateVersion: '9' } }, { now: FROZEN_NOW });
+    expect(bad).toMatch(/^derived-from: state@unmeasured$/m);
+  });
+
+  it('round-trips through the /resume banner parser without breaking field extraction', async () => {
+    const data = await collect(() => 42);
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    const fields = parseHandoffBannerFields(md);
+    // The parser strips frontmatter before scanning `## N.` sections — the new
+    // key must not leak into the banner fields.
+    expect(fields).toHaveProperty('p0');
+    expect(typeof fields.unresolved).toBe('number');
+    expect(typeof fields.wip).toBe('number');
+    expect(String(fields.p0 ?? '')).not.toContain('derived-from');
   });
 });
 

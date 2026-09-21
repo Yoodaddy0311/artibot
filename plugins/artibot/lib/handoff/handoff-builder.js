@@ -510,6 +510,32 @@ export function estimateStepDuration(step) {
   return '~30m';
 }
 
+/**
+ * Allow-list a project-state version. Only a non-negative safe integer counts;
+ * everything else (null, NaN, -1, 1.5, '42', objects) degrades to `null` so the
+ * renderer never fabricates a provenance number.
+ * @param {unknown} v
+ * @returns {number|null}
+ */
+function normalizeStateVersion(v) {
+  return Number.isSafeInteger(v) && v >= 0 ? v : null;
+}
+
+/**
+ * Call the optional `readStateVersion` port. Soft-fails to `null` on a missing
+ * port, a throw, or a rejection — same posture as machineId in buildMetaBlock.
+ * @param {unknown} port
+ * @returns {Promise<number|null>}
+ */
+async function readStateVersionSoft(port) {
+  if (typeof port !== 'function') return null;
+  try {
+    return normalizeStateVersion(await port());
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public: collectHandoffData
 // ---------------------------------------------------------------------------
@@ -525,6 +551,9 @@ export function estimateStepDuration(step) {
  * @param {Array<object>} [options.taskList]
  * @param {Array<{ prompt: string, rationale: string, priority: string }>} [options.firstPrompts]
  * @param {() => Date} [options.now]
+ * @param {() => number|Promise<number>} [options.readStateVersion] — optional
+ *   port returning the project-state version this handoff is derived from.
+ *   Sync or async; any failure or non-version value degrades to `null`.
  * @returns {Promise<object>}
  */
 /**
@@ -574,7 +603,8 @@ export async function collectHandoffData(options) {
   const worklog = collectWorklog(projectRoot);
   const sessionRecall = await collectSessionRecall(projectRoot);
   const contextFiles = collectContextFiles(git, cwd);
-  const meta = buildMetaBlock(gitState, now, tsStart);
+  const stateVersion = await readStateVersionSoft(options?.readStateVersion);
+  const meta = { ...buildMetaBlock(gitState, now, tsStart), stateVersion };
 
   return {
     meta,
@@ -773,11 +803,21 @@ function yamlScalar(v) {
  * Build the YAML frontmatter block consumed by /resume and external audit
  * tools. Fields stay schema-stable: bumping anything beyond the documented
  * keys requires a `schemaVersion` increment.
+ *
+ * `derived-from` carries the project-state provenance as `state@<n>`, or
+ * `state@unmeasured` when no version was measured (design §3.3).
  * @param {object} meta
  * @returns {string}
  */
 function renderFrontmatter(meta) {
   const m = meta || {};
+  // Re-validate here: meta may be hand-built and never pass through
+  // collectHandoffData. Rendered as a literal rather than via yamlScalar —
+  // the value domain is closed (`state@` + validated integer, or the fixed
+  // `state@unmeasured`), and yamlScalar would single-quote it because `@`
+  // and `-` are in its YAML-significant set.
+  const sv = normalizeStateVersion(m.stateVersion);
+  const derivedFrom = sv === null ? 'state@unmeasured' : `state@${sv}`;
   return [
     '---',
     `machineId: ${yamlScalar(m.machineId ?? 'unknown')}`,
@@ -785,6 +825,7 @@ function renderFrontmatter(meta) {
     `branch: ${yamlScalar(m.branch ?? null)}`,
     'generator: artibot-handoff',
     `schemaVersion: ${Number.isFinite(m.schemaVersion) ? m.schemaVersion : 1}`,
+    `derived-from: ${derivedFrom}`,
     '---',
     '',
   ].join('\n');
