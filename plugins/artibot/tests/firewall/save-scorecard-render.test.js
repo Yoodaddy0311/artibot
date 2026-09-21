@@ -25,10 +25,15 @@
  *     rather than the file that was written. String indices, so a reordering
  *     edit has to come through this line.
  *   - THE HANDOFF STAYS BYTE-IDENTICAL. `renderHandoffMarkdown`'s output is
- *     unchanged by this limb, and the prose has to keep saying so. A future
- *     edit that "helpfully" folds the card into the handoff body would break
- *     `lib/handoff` output contracts that live in another directory's tests and
- *     would be invisible to every assertion above.
+ *     unchanged by this limb, and the prose has to keep saying so — because
+ *     NOTHING ELSE SAYS IT. No test in this repo pins that renderer's bytes:
+ *     `tests/handoff/` holds no snapshot assertion at all, and
+ *     `tests/handoff/handoff-builder.test.js` pins the eight section headers
+ *     with `toContain`, which a ninth section appended to the body would not
+ *     break (inferred from the assertion kind — not measured by executing the
+ *     mutation). So a future edit that "helpfully" folds the card into the
+ *     handoff body would pass every handoff test, and this sentence pin is the
+ *     only thing standing where a byte contract is usually written.
  *
  * SELF-VERIFICATION. `auditScorecardRender` is a pure function over a string
  * returning `{ pass, reasons }`, and the live assertions and the `the audit
@@ -55,6 +60,10 @@
  *     switches off; today it is `false`. The canary pin belongs to
  *     `save-checkpoint-order.test.js` and is not duplicated here — two files
  *     pinning one config value is two files to edit on the flip.
+ *   - THE HANDOFF BYTES. This gate pins a SENTENCE, not the renderer's output.
+ *     That this limb left those bytes alone holds by diff — `lib/handoff` is
+ *     untouched — and by nothing else. If a later limb does change them, every
+ *     assertion here stays green while the sentence becomes a lie.
  *   - LINE NUMBERS. Citations of the form `file.js:NN` in the edited section are
  *     the repo-wide citation ratchet's subject, not this file's.
  *
