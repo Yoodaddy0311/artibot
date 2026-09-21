@@ -34,9 +34,19 @@
  *     `recovery-record.js#journalRecordFailure` exists). A hostile row degrades
  *     to `applied: false`.
  *
- * Layer: L2. Imports `_engine-helpers.js` and `../core/platform.js` only. It
- * does NOT import `engine-state.js` — that module imports this one — keeping
- * the dependency one-directional.
+ * ── A pause has to announce itself ───────────────────────────────────────
+ * Moving the phase fields is only half of a pause. `engine.js#maybePause` also
+ * archives a lesson, emits a `pause` event and notifies, and a recovery-driven
+ * pause is not a quieter kind of pause — so this module does the same three,
+ * in the same shapes. Each is guarded on its own: a notification that throws
+ * must not un-pause a session the engine has already stopped.
+ *
+ * Layer: L2. Imports `_engine-helpers.js`, `memory.js`, `notification.js` and
+ * `../core/platform.js` only. It does NOT import `engine-state.js` — that module
+ * imports this one — keeping the dependency one-directional. `appendLesson` is
+ * therefore taken straight from `memory.js` rather than through
+ * `engine-state.js#safeAppendLesson`, which would close that loop; the
+ * featureKey guard below is the local equivalent.
  *
  * @module lib/autopilot/recovery-transition
  */
@@ -44,6 +54,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { tick } from './_engine-helpers.js';
+import { appendLesson } from './memory.js';
+import { notifyPause } from './notification.js';
 import { getPluginRoot } from '../core/platform.js';
 
 /**
@@ -105,6 +117,73 @@ export function loadRecoveryTransitionConfig() {
 }
 
 /**
+ * Run a side effect that must never reach the caller. Returns the effect's
+ * value, or `null` when it threw — the announcement steps below are each
+ * wrapped individually so one failure cannot cancel the others or the pause.
+ *
+ * @param {() => any} effect
+ * @returns {any|null}
+ */
+function attempt(effect) {
+  try {
+    return effect();
+  } catch {
+    return null; /* announcement is best-effort; the pause already happened */
+  }
+}
+
+/**
+ * Apply the PAUSED phase fields and archive the lesson — the same four fields
+ * and the same lesson body as `engine.js#maybePause`.
+ *
+ * The field assignments are deliberately NOT guarded: a state that rejects them
+ * (frozen, hostile setters) is a failed transition, and the caller's try/catch
+ * degrades it to `applied: false`. The lesson is guarded, and skipped entirely
+ * before Phase 0 has set `featureKey`.
+ *
+ * @param {object} state - Live session state (mutated).
+ * @param {string} pausedReason
+ * @returns {void}
+ */
+function enterPausedState(state, pausedReason) {
+  if (state.phase && state.phase !== 'PAUSED') state.lastPhase = state.phase;
+  state.phase = 'PAUSED';
+  state.pendingPhase = state.lastPhase || null;
+  state.pausedReason = pausedReason;
+  attempt(() => {
+    if (!state.featureKey) return null;
+    return appendLesson(state.featureKey, {
+      sessionId: state.sessionId,
+      lesson: `Pause at ${state.lastPhase || 'unknown'}: ${pausedReason}`,
+      errorPattern: pausedReason,
+      sourcePhase: state.lastPhase || null,
+    });
+  });
+}
+
+/**
+ * Emit the `pause` event and notify, after the transition is committed.
+ *
+ * The notification result is returned verbatim: night mode and `--no-notify`
+ * are `notification.js#suppressActive`'s decision, and re-deriving them here
+ * would be a second source of truth for "was the operator actually told".
+ *
+ * @param {object} state - Already-paused session state.
+ * @param {string} pausedReason
+ * @returns {object|null} `notifyPause` result, or `null` when it failed.
+ */
+function announcePause(state, pausedReason) {
+  attempt(() => tick(state.sessionId, {
+    phase: state.lastPhase || 'PAUSED',
+    type: 'pause',
+    level: 'warn',
+    message: `Autopilot paused: ${pausedReason}`,
+    data: { reason: pausedReason },
+  }));
+  return attempt(() => notifyPause(state.sessionId, pausedReason)) ?? null;
+}
+
+/**
  * Move `state` to the phase the row recommends, and stamp the row with what
  * actually happened. Mutates `state` and the SAME `row` object (it lives inside
  * `state.recoveryJournal`, so the journal entry updates through the reference).
@@ -114,14 +193,18 @@ export function loadRecoveryTransitionConfig() {
  * @param {object} state - Live session state.
  * @param {object} row - The journal row just recorded.
  * @param {{transitionFromVerdict?: boolean}} [cfg] - {@link loadRecoveryTransitionConfig}.
- * @returns {{applied: boolean, next: ?string, from: ?string, pausedReason: ?string, error?: string}}
+ * @returns {{applied: boolean, next: ?string, from: ?string, pausedReason: ?string,
+ *   notification: ?object, error?: string}} `notification` is the
+ *   `notification.js#notifyPause` result (`{tool, params?, suppressed, queued}`)
+ *   on an applied PAUSED transition, and `null` everywhere else — a phase-
+ *   advancing action, an unapplied gate, an absent row, or a notifier that threw.
  */
 export function applyRecoveryTransition(state, row, cfg) {
   let from = null;
   try { from = row?.fixedNext ?? null; } catch { /* hostile accessor; degraded */ }
   if (!row || cfg?.transitionFromVerdict !== true) {
     return {
-      applied: false, next: null, from, pausedReason: null,
+      applied: false, next: null, from, pausedReason: null, notification: null,
     };
   }
   try {
@@ -138,27 +221,26 @@ export function applyRecoveryTransition(state, row, cfg) {
       },
     };
 
-    if (t.next === 'PAUSED') {
-      if (state.phase && state.phase !== 'PAUSED') state.lastPhase = state.phase;
-      state.phase = 'PAUSED';
-      state.pendingPhase = state.lastPhase || null;
-      state.pausedReason = t.pausedReason;
-    } else {
-      state.pendingPhase = t.next;
-    }
+    const paused = t.next === 'PAUSED';
+    if (paused) enterPausedState(state, t.pausedReason);
+    else state.pendingPhase = t.next;
     row.divergent = false;
     row.appliedNext = t.next;
     row.appliedBy = 'recovery-transition';
 
     tick(state.sessionId, event);
     return {
-      applied: true, next: t.next, from, pausedReason: t.pausedReason,
+      applied: true,
+      next: t.next,
+      from,
+      pausedReason: t.pausedReason,
+      notification: paused ? announcePause(state, t.pausedReason) : null,
     };
   } catch (err) {
     let message = 'unknown';
     try { message = String(err?.message ?? err); } catch { /* degraded */ }
     return {
-      applied: false, next: null, from, pausedReason: null, error: message,
+      applied: false, next: null, from, pausedReason: null, notification: null, error: message,
     };
   }
 }
