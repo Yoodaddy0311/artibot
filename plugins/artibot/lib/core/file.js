@@ -228,6 +228,185 @@ export function atomicWriteTextSync(filePath, content) {
 }
 
 /**
+ * Closed vocabulary of reasons {@link atomicCreateTextSync} can decline to
+ * create. One member today; it is an object rather than a bare string so a
+ * caller can switch on it exhaustively and so a second reason cannot be added
+ * as an unannounced free-form string.
+ *
+ * @type {Readonly<{ALREADY_EXISTS: 'ALREADY_EXISTS'}>}
+ */
+export const CreateSkipReason = Object.freeze({
+  /** A file already occupied the target path. Nothing was written. */
+  ALREADY_EXISTS: 'ALREADY_EXISTS',
+});
+
+/**
+ * `link` failures that mean "this volume cannot give us a hard link", as
+ * opposed to "the link could not be made right now". Only these fall back to
+ * `open(…, 'wx')`; everything else propagates.
+ *
+ * ALLOWLIST, NOT DENYLIST — an unrecognized code throws rather than quietly
+ * taking the weaker path, so a new filesystem's refusal has to be looked at by
+ * a person instead of silently downgrading every caller's guarantee.
+ *
+ *   - `EPERM` — the filesystem refuses hard links at all. The FAT/exFAT and
+ *     container/network-mount attribution is POSIX `link(2)` lore; which code
+ *     Node actually surfaces on a Windows FAT-family volume is UNMEASURED
+ *     here, so treat that parenthetical as the reason the code is listed, not
+ *     as an observation.
+ *   - `ENOTSUP` / `EOPNOTSUPP` — the operation is not implemented here.
+ *   - `EXDEV` — tmp sibling and target landed on different devices. Cannot
+ *     happen for a sibling path today, listed because it is the classic
+ *     link/rename cross-device answer and costs nothing to accept.
+ *   - `EMLINK` — the source already has the maximum number of links. Also
+ *     unreachable as written, for the same kind of reason as EXDEV: the source
+ *     is a tmp file this process just created and it carries exactly one link.
+ *
+ * EPERM IS AMBIGUOUS ON WINDOWS. It is also the errno a transient handle
+ * conflict produces — the same class of interference {@link renameWithRetry}
+ * exists for. This code does not try to tell the two apart, because the
+ * decision does not turn on it: the fallback is itself an exclusive create, so
+ * EXCLUSIVITY HOLDS under either reading. The cost of guessing wrong in the
+ * "transient" direction is narrower — the call gives up the link path's
+ * "never publish a partial file" property for one it did not have to — which
+ * is a crash-safety loss, not a correctness one.
+ *
+ * WHY NO RETRY HERE. A bounded retry would only pay off if transient codes
+ * actually occurred. Measured 2026-09-21 on local NTFS: of 700 real `link`
+ * calls under contention, 590 failed and ALL 590 were EEXIST — zero EPERM,
+ * EBUSY or EACCES. That matches the mechanism described at
+ * {@link TRANSIENT_RENAME_CODES}: the Windows lock is a DESTINATION-handle
+ * problem, and `link` creates its destination rather than replacing one. An
+ * unmeasured need is not a need, so no retry was added. EEXIST is of course
+ * never retried — retrying it is precisely what would break exclusivity.
+ *
+ * NOT measured against a real network share (see {@link atomicCreateTextSync}).
+ * @type {Set<string>}
+ */
+export const NO_HARDLINK_CODES = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK']);
+
+/**
+ * Fallback create for volumes without hard links: `open(…, 'wx')` is itself an
+ * exclusive create, so the "does it exist" question and the creation are still
+ * one operation and two racers still cannot both win.
+ *
+ * WEAKER THAN THE LINK PATH, deliberately: `wx` creates the file EMPTY and
+ * then fills it, so a crash between the two leaves a truncated file at the
+ * target where the link path could only ever publish a complete one. A write
+ * that fails removes the file this call created, but a killed process cannot.
+ *
+ * AND WITHOUT ANY CRASH, two more things are true here that are not true on
+ * the link path:
+ *   - THE EMPTY FILE IS PUBLISHED BEFORE IT IS FILLED. While the winner is
+ *     still writing, anything that looks at the path sees an empty or partial
+ *     file — including a racing caller, which by then has already been handed
+ *     ALREADY_EXISTS and told nothing about the contents being unfinished.
+ *   - A FAILED WRITE CAN LEAVE NOTHING AT ALL. The cleanup below removes the
+ *     file this call created, so a loser can hold an ALREADY_EXISTS verdict
+ *     for a path that no longer has a file. Accepted rather than fixed: no
+ *     existing artifact is ever overwritten, and re-running the caller simply
+ *     creates it, so the outcome is idempotent rather than lossy.
+ *
+ * @param {string} filePath - Absolute target path.
+ * @param {string} content - Exact content to write.
+ * @returns {{created: true}|{created: false, reason: 'ALREADY_EXISTS'}}
+ */
+function createViaExclusiveOpenSync(filePath, content) {
+  let fd;
+  try {
+    fd = fsSync.openSync(filePath, 'wx');
+  } catch (err) {
+    if (err?.code === 'EEXIST') return { created: false, reason: CreateSkipReason.ALREADY_EXISTS };
+    throw err;
+  }
+  try {
+    fsSync.writeFileSync(fd, content, 'utf-8');
+  } catch (err) {
+    try { fsSync.closeSync(fd); } catch { /* best-effort */ }
+    cleanupTmpSync(filePath); // our own partial file — never a pre-existing one
+    throw err;
+  }
+  fsSync.closeSync(fd);
+  return { created: true };
+}
+
+/**
+ * EXCLUSIVE create of a text file. Returns `{created:true}` when this call put
+ * the file there, and `{created:false, reason:'ALREADY_EXISTS'}` when somebody
+ * else already had — never throws for the occupied case, because "someone beat
+ * me to it" is an outcome, not a fault.
+ *
+ * WHY link AND NOT rename. {@link atomicWriteTextSync} finishes with a rename,
+ * and rename REPLACES the destination. That makes it the right primitive for a
+ * state file that must always hold the newest value, and the wrong one for an
+ * artifact that must never be clobbered: a caller that guards it with
+ * `if (existsSync(target))` has a window between the check and the rename in
+ * which a second process can pass the same check, and then both writers report
+ * success while only the later one's bytes survive. `linkSync` closes that
+ * window in the kernel — it fails with EEXIST if the destination exists, and
+ * the destination it creates is a second name for a file that was already
+ * written in full, so ON THE LINK PATH a reader can never observe a partial
+ * artifact. That last guarantee belongs to the link path alone; the fallback
+ * below does not have it (see WHAT THIS FUNCTION DOES NOT DO).
+ *
+ * MEASURED (2026-09-21, Windows 11, node v24.15.0): the `existsSync` then
+ * `atomicWriteTextSync` order, run by N real processes released from one
+ * wall-clock barrier, produced two or more "written" claims in 190 of 200
+ * trials at N=2 and in 193 of 200 at N=8; a negative control that staggered
+ * the second writer by 500ms produced 0 of 25. Only one file can exist at the
+ * path, so every one of those trials destroyed at least one body that its
+ * writer had already reported as written.
+ *
+ * WHAT THIS FUNCTION DOES NOT DO:
+ *   - It closes nothing on its own. No caller uses it yet; adopting it at a
+ *     call site is a separate decision, and until that happens the apply path
+ *     still races.
+ *   - Hard-link atomicity on network filesystems (SMB, NFS) is UNMEASURED
+ *     here. The fallback below is weaker still — see
+ *     {@link createViaExclusiveOpenSync}.
+ *   - ON THE FALLBACK PATH, it does not hide a half-written file, even with
+ *     no crash involved: `wx` publishes the target empty and fills it
+ *     afterwards, so while the winner writes, any reader — including the
+ *     racer that has already been handed ALREADY_EXISTS — can observe an
+ *     empty or partial file.
+ *   - ON THE FALLBACK PATH, it does not guarantee that a file exists just
+ *     because someone was told ALREADY_EXISTS: a winner whose write fails
+ *     deletes the file it created, leaving that verdict pointing at nothing.
+ *     Accepted, not fixed — no pre-existing artifact is ever overwritten and
+ *     re-running the caller just creates it, so this is idempotent, not lossy.
+ *   - It says nothing about content. Two racers writing different bodies is
+ *     resolved by "first one wins", not by comparing them.
+ *
+ * @param {string} filePath - Absolute path to create.
+ * @param {string} content - Exact content to write; no newline is added.
+ * @returns {{created: true}|{created: false, reason: 'ALREADY_EXISTS'}}
+ * @example
+ * const r = atomicCreateTextSync('/path/missions/MISSION.md', body);
+ * if (!r.created) skip(r.reason); // 'ALREADY_EXISTS'
+ */
+export function atomicCreateTextSync(filePath, content) {
+  ensureDirSync(path.dirname(filePath));
+  const tmp = buildAtomicTmpPath(filePath);
+  try {
+    fsSync.writeFileSync(tmp, content, 'utf-8');
+    try {
+      fsSync.linkSync(tmp, filePath);
+    } catch (err) {
+      if (err?.code === 'EEXIST') {
+        return { created: false, reason: CreateSkipReason.ALREADY_EXISTS };
+      }
+      if (!NO_HARDLINK_CODES.has(err?.code)) throw err;
+      return createViaExclusiveOpenSync(filePath, content);
+    }
+    return { created: true };
+  } finally {
+    // The tmp sibling is the source name of a now two-named file on success,
+    // and a dropping on every failure. Either way it must go.
+    cleanupTmpSync(tmp);
+  }
+}
+
+/**
  * Atomic JSON write with temp file + rename. Serializes, appends the
  * conventional trailing newline, and delegates the crash-safe write to
  * `atomicWriteText`.
