@@ -3,10 +3,16 @@
  *
  * The store is `<pluginRoot>/runtime/autopilot`, resolved by
  * `lib/autopilot/session-store.js#getStoreDir` (cited by symbol on purpose: a
- * line number in that module has not survived past edits). Unlike the user
- * state tree this directory is SHIPPED — it lives inside the plugin build — so
- * a test that reaches a writer dirties the working copy. Five writers reach it
- * and all five route through that one resolver: `saveSession`,
+ * line number in that module has not survived past edits). The directory is
+ * git-ignored (`.gitignore` matches `/runtime/`; `git ls-files runtime` was
+ * empty on 2026-09-21), so a stray test write does NOT dirty the working copy —
+ * it shows up in no `git status`, which is what makes it worth a gate. The cost
+ * is that test sessions share a directory with real ones and every reader of
+ * the store population counts them: `session-store.js#listSessions`, and
+ * through it `lib/autopilot/cross-session-learner.js:37`,
+ * `scripts/hooks/bash-risk-guard.js:96` and
+ * `scripts/dev/prune-autopilot-store.mjs:303`. Five writers reach it and all
+ * five route through that one resolver: `saveSession`,
  * `lib/autopilot/telemetry.js`, `lib/autopilot/lock.js`,
  * `lib/autopilot/memory.js` and `lib/autopilot/worktree-manager.js`.
  *
@@ -25,11 +31,24 @@
  * `CLAUDE_PLUGIN_ROOT` would have the parent's override ride along and overrule
  * the more specific knob it was actually given. Case (b) pins the discard.
  *
- * MEASURED 2026-09-21, this worktree. Before and after a full run of the three
- * suites this limb is allowed to run, `runtime/autopilot` held 0 entries. The
- * module scan below covered `lib/` and `scripts/` and found exactly two files
- * that name the store path in code; both are listed in
- * `KNOWN_STORE_PATH_MODULES` with the reason they are there.
+ * THIS FILE RUNS IN THE `main` PROJECT; the suite it protects is the
+ * `autopilot` one. `vitest.config.js` declares `setupFiles` once at the top
+ * level and both projects inherit it through `extends: true`. Drop that
+ * inheritance, or redeclare `setupFiles` inside the autopilot project, and
+ * every live assertion here stays green while `tests/autopilot/**` writes into
+ * the real store. Case (d) pins the config shape for that reason, and
+ * `tests/autopilot/session-store.test.js` carries the one live assertion that
+ * executes inside the autopilot project itself.
+ *
+ * MEASURED 2026-09-21 04:09–04:11Z, this worktree: `npx vitest run --project
+ * autopilot` (71 files, 1832 tests) plus 10 targeted files outside that project
+ * (123 tests) left `runtime/autopilot` at 0 entries before and after, with an
+ * identical listing — while the sandbox picked up real residue from the same
+ * run (`locks/*.lock`, `memory/*.jsonl`, `sess-own.events.ndjson`). The suite
+ * does write; the writes go to tmp. A zero that came from a suite touching
+ * nothing would prove neither. The module scan below covered `lib/` and
+ * `scripts/` and found exactly two files naming the store path in code; both
+ * are listed in `KNOWN_STORE_PATH_MODULES` with the reason they are there.
  *
  * THE RULE IS AN ALLOWLIST on both axes — the module ratchet is an explicit
  * list, not a pattern that happens to match today. A denylist of known-bad
@@ -55,10 +74,25 @@
  *     isolate by injecting a store directory. `.artibot/runtime/decisions` is
  *     gated by `tests/firewall/decisions-store-sandbox-required.test.js`. None
  *     of the three is reachable from here.
+ *   - **Which project the live cases run in.** Cases (a) and (b) execute in
+ *     `main`. Nothing here can observe the autopilot project's own workers; the
+ *     evidence for those is the config assertion in (d) plus the live `it` in
+ *     `tests/autopilot/session-store.test.js`.
  *   - **Comment-stripper fidelity.** The scan strips comments with a small
- *     scanner, not a parser. A template literal containing a nested `${}` with
- *     its own backtick is not modelled; measured 2026-09-21, no such case
- *     exists near a store-path spelling.
+ *     scanner, not a parser. Two known divergences. A template literal
+ *     containing a nested `${}` with its own backtick is not modelled; measured
+ *     2026-09-21, no such case exists near a store-path spelling. And a REGEX
+ *     LITERAL is treated as ordinary code, so a quote, backtick or `/*` inside
+ *     one desynchronizes the scanner for the rest of the file — reviewer
+ *     measurement 2026-09-21 found this happening in 12 files under `lib/` and
+ *     `scripts/` (e.g. `lib/autopilot/safety.js`), with an empty intersection
+ *     against the files that spell the store path. A real parser is the fix if
+ *     that intersection ever stops being empty.
+ *   - **An operator override outside tmp.** Exporting
+ *     `ARTIBOT_AUTOPILOT_STORE_DIR` to somewhere outside `os.tmpdir()` turns
+ *     case (a) red even though the store is isolated. That is deliberate: the
+ *     gate asserts the shape the suite ships with, and failing toward "look at
+ *     this" is the safe direction.
  */
 
 import {
@@ -75,7 +109,7 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const SETUP_FILE = path.join(PLUGIN_ROOT, 'tests', 'setup', 'state-dir.js');
 const VITEST_CONFIG = path.join(PLUGIN_ROOT, 'vitest.config.js');
 
-/** The shipped store this gate keeps test writes out of. */
+/** The real store this gate keeps test writes out of — shared with live runs. */
 function realStoreDir() {
   return path.join(getPluginRoot(), 'runtime', 'autopilot');
 }
@@ -256,14 +290,14 @@ describe('the autopilot store is sandboxed for every test in the suite', () => {
     }
   });
 
-  it('resolves the store into a temp directory, not the shipped one', () => {
+  it('resolves the store into a temp directory, not the real one', () => {
     const dir = getStoreDir();
     expect(isInside(os.tmpdir(), dir)).toBe(true);
     expect(isInside(realStoreDir(), dir)).toBe(false);
     expect(sameDirPath(dir, realStoreDir())).toBe(false);
   });
 
-  it('writes a real session to temp and leaves the shipped store untouched', () => {
+  it('writes a real session to temp and leaves the real store untouched', () => {
     // A resolver assertion alone is a necessary condition, not the claim. This
     // drives the actual writer and then looks at both directories on disk.
     const before = entryCount(realStoreDir());
@@ -314,11 +348,26 @@ describe('the sandbox is set by global setup, not by this file', () => {
     expect(code).toMatch(/process\.env\.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT\s*=/);
   });
 
-  it('registers that setup file with vitest for every project', () => {
-    // Read-only. If `setupFiles` is renamed or the entry dropped, the seam is
-    // off for the whole suite and every live assertion above would go quiet.
+  it('registers that setup file with vitest, once, inherited by every project', () => {
+    // Read-only. This is the only evidence in this FILE that the autopilot
+    // project is covered at all: the live cases above run in `main`, and the
+    // seam reaches `tests/autopilot/**` solely because the top-level
+    // `setupFiles` is inherited through `extends: true`. Drop that inheritance
+    // or redeclare `setupFiles` inside the autopilot project and this gate
+    // would otherwise stay green while the suite it protects goes unprotected.
     const src = stripComments(fsSync.readFileSync(VITEST_CONFIG, 'utf-8'));
     expect(src).toMatch(/setupFiles\s*:\s*\[[^\]]*state-dir\.js/);
+
+    // Exactly one declaration: a second one inside a project would SHADOW the
+    // top-level array rather than add to it, so counting is the assertion.
+    expect(src.match(/setupFiles\s*:/g)).toHaveLength(1);
+
+    // One `extends: true` per project, so every project inherits it. The count
+    // is pinned to the project count rather than hardcoded, which keeps a newly
+    // added project from silently opting out.
+    const projects = src.match(/\bname\s*:\s*['"](?:autopilot|main)['"]/g) ?? [];
+    expect(projects).toHaveLength(2);
+    expect(src.match(/\bextends\s*:\s*true\b/g)).toHaveLength(projects.length);
   });
 });
 

@@ -13,7 +13,7 @@ import {
   newSessionId,
   saveSession,
 } from '../../lib/autopilot/session-store.js';
-import { getPluginRoot } from '../../lib/core/platform.js';
+import { getPluginRoot, sameDirPath } from '../../lib/core/platform.js';
 
 describe('newSessionId', () => {
   it('returns ap-YYYYMMDD-HHMMSS-xxxxxx format with random suffix', () => {
@@ -117,11 +117,55 @@ describe('getStoreDir env seam', () => {
     restore(PAIR, saved.root);
   });
 
+  // The only LIVE assertion that executes inside the `autopilot` vitest project.
+  //
+  // Everything else about this seam is pinned from the `main` project by
+  // `tests/firewall/autopilot-store-sandbox-required.test.js`, and that gate
+  // cannot observe these workers. The autopilot project is a separate entry in
+  // `vitest.config.js` that inherits the global `setupFiles` only through
+  // `extends: true`; if that inheritance is dropped or `setupFiles` is
+  // redeclared inside the project, the firewall stays entirely green while
+  // every file in this directory writes to the real store. This `it` is what
+  // goes red instead.
+  //
+  // It runs BEFORE the cases below touch the environment, and `beforeEach` only
+  // reads while `afterEach` restores, so it observes whatever the global setup
+  // left in place no matter what order the file's tests are run in.
+  it('is redirected away from the real store by global setup (autopilot project)', () => {
+    expect(process.env[VAR]).toBeTruthy();
+    expect(sameDirPath(getStoreDir(), path.join(getPluginRoot(), 'runtime', 'autopilot')))
+      .toBe(false);
+  });
+
   it('returns the override when its paired root is the plugin root in force', () => {
     const sandbox = path.join(getPluginRoot(), '.tmp-store-seam', 'autopilot');
     process.env[VAR] = sandbox;
     process.env[PAIR] = getPluginRoot();
     expect(getStoreDir()).toBe(sandbox);
+  });
+
+  // Regression: an operator spelling the override with forward slashes — the
+  // Git Bash idiom — used to get it back verbatim, while every consumer joined
+  // onto it and got the platform separator. `telemetry.js#getEventsPath` then
+  // produced a path that was genuinely inside the store yet failed a
+  // `startsWith(getStoreDir())` string compare (measured 2026-09-21: that one
+  // assertion red under a slash-spelled override, green under the same
+  // directory spelled with backslashes).
+  it('normalizes the override to an absolute path in the platform spelling', () => {
+    const sandbox = path.join(getPluginRoot(), '.tmp-store-seam', 'autopilot');
+    process.env[PAIR] = getPluginRoot();
+
+    // Identity on POSIX, where the joined form already uses `/`; the separator
+    // swap that matters is win32's. Comparing against the joined form rather
+    // than against the input is what makes the assertion meaningful on both.
+    process.env[VAR] = sandbox.split(path.sep).join('/');
+    expect(getStoreDir()).toBe(sandbox);
+
+    // A relative override resolves against cwd — the same directory fs would
+    // have used anyway, now stated absolutely so consumers can compare paths.
+    process.env[VAR] = path.join('.', '.tmp-store-seam-relative');
+    expect(path.isAbsolute(getStoreDir())).toBe(true);
+    expect(getStoreDir()).toBe(path.resolve('.tmp-store-seam-relative'));
   });
 
   it('discards the override when the paired root is absent or a different dir', () => {
