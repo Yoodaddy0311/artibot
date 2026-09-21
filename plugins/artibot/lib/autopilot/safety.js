@@ -169,6 +169,20 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // with word chars, `.` or `-`), so no input can split two ways and there are
   // no adjacent quantifiers over overlapping classes. The `[+-]` alternative
   // cannot overlap the name run either: the run must start with `\w`.
+  // THAT CLAIM IS ABOUT BRANCHES (d) AND (e) ONLY, not about the whole rule. The
+  // recursive-flag lookahead `-[a-z]*[r][a-z]*` — untouched here, identical on
+  // the base commit, and repeated in rm-rf-broad, rm-rf-path, rm-recursive-path
+  // and the L1 'rm recursive+force (any target)' rule — IS a pair of star runs
+  // over one class around a mandatory letter, and it measured QUADRATIC on
+  // 2026-09-21 (node v24.15.0): payload `rm -` + 'r' x n + `_`, rule-alone
+  // median of 3 = 6.5 / 25.7 / 118.3 / 930.7 ms at n = 2,500 / 5,000 / 10,000 /
+  // 20,000, whole classifyRisk 3,715 ms at 20,000. Neither gate sees it: the
+  // static scanner collects negated classes only, and no scaled payload builds
+  // a run of the flag letter. Not fixed in this change; routed to the follow-up
+  // limb guard-rm-flag-redos.
+  // THE TABLE BELOW IS FROM 2026-09-14 AND WAS NOT RE-MEASURED after the
+  // 2026-09-21 edits, which moved both the tilde and the home-variable branch.
+  // Read it as the pre-edit shape, not as a current measurement.
   // Rule-alone median of 3 at 122,880B (node v24.15.0, Windows):
   // option run 0.47ms, space run 0.65ms, quote-root fill 0.01ms, tilde-paren
   // fill 0.01ms — the same shape as before the edit (option run 0.49ms). The
@@ -176,7 +190,8 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // dense repeating input matches at the first position and never enters the
   // name run at all: `tilde-name run`, `tilde-dot run` and `brace-home
   // near-miss` in tests/autopilot/safety.test.js, growth-ratio at 6x plus a
-  // 10K/20K/40K/120K structural sweep. Re-measure 120KB if either branch moves.
+  // 10K/20K/40K/120K structural sweep. The next change to either branch must
+  // re-measure the 120KB rows and date them.
   {
     id: 'rm-rf-root',
     level: 'danger',
