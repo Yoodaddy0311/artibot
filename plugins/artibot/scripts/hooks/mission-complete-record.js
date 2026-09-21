@@ -8,8 +8,17 @@
  * `mission.completed{accepted: null}` line (owner decision W11-Q4 (a), the WIDE
  * condition). Then, for every mission that now carries such a line, run the
  * completion gates (`lib/runtime/artifact-lifecycle.js#plan`) and report which
- * gate stopped it. Only an unblocked mission, with the kill switch open, gets a
+ * gate stopped it. Only an unblocked mission whose ARTIFACT GATE is open gets a
  * file.
+ *
+ * THE ARTIFACT GATE IS TWO CONDITIONS, NOT ONE, and this hook no longer reads
+ * either of them itself. `lib/runtime/artifact-lifecycle.js#resolveArtifactGate`
+ * is the single resolver: it opens only when the global kill switch
+ * `runtime.artifactLifecycle.enabled` is exactly `true` AND the project opted
+ * in by carrying the marker file named by `runtime.artifactLifecycle.projectMarker`
+ * (shipped `.artibot/artifact-lifecycle.optin`) as a regular file under it.
+ * Turning the global switch on therefore does NOT start seeding
+ * `.artibot/missions/` in every repository a session happens to end in.
  *
  * THE PRODUCT OF THIS HOOK IS A DISTRIBUTION OF BLOCK REASONS, NOT FILES. On
  * the shipped configuration (`runtime.artifactLifecycle.enabled: false`) it
@@ -209,6 +218,9 @@ export async function loadDeps() {
     readAllEvents: ledger.readAllEvents,
     plan: lifecycle.plan,
     apply: lifecycle.apply,
+    // May be `undefined` on a tree where the resolver has not landed. Read
+    // through `artifactGateOpen`, which treats that as a SHUT gate.
+    resolveArtifactGate: lifecycle.resolveArtifactGate,
     ArtifactKind: gates.ArtifactKind,
     BlockCode: gates.BlockCode,
     openMissionStore: tasks.openMissionStore,
@@ -228,7 +240,9 @@ export async function loadDeps() {
 }
 
 /**
- * Read the plugin's config for the THREE keys this file gates on.
+ * Read the plugin's config for the keys this file gates on — the two
+ * `review.verify` policy keys plus the whole `runtime.artifactLifecycle` object,
+ * which is handed to `resolveArtifactGate` rather than picked apart here.
  *
  * The raw file under `getPluginRoot()`, not `lib/core/config.js#loadConfig` —
  * same substitution and same honesty bound as
@@ -560,11 +574,42 @@ function outcomeSections(ctx) {
 }
 
 /**
- * Render and write `outcome.md`, behind the kill switch.
+ * Is the artifact gate open for THIS project? FAIL-CLOSED on every doubt.
  *
- * `apply()` THROWS when the config gate is not exactly `true`, which is why the
- * gate is read BEFORE it is called rather than being allowed to raise — the
- * same shape as `_plan-observe-record.js#recordPlanArtifact`.
+ * The one reader of the gate in this file. `resolveArtifactGate` is contracted
+ * never to throw, and this `catch` is not a second opinion about that: it is
+ * what makes a MISSING binding — a tree where the resolver has not landed, so
+ * `d.resolveArtifactGate` is `undefined` and the call is a TypeError — come out
+ * as a shut gate rather than as an exception escaping `writeOutcome`. Open is
+ * asserted positively (`=== true`), so any other return shape is also shut.
+ *
+ * @param {object} d {@link loadDeps} bindings
+ * @param {object|null} config parsed `artibot.config.json`
+ * @param {string} projectRoot the project the marker is looked for under
+ * @returns {boolean} true only when both halves of the gate said yes
+ */
+function artifactGateOpen(d, config, projectRoot) {
+  try {
+    return d.resolveArtifactGate({ config, projectRoot }).open === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Render and write `outcome.md`, behind the artifact gate.
+ *
+ * `apply()` THROWS when the gate is not open — since B4 that covers the
+ * per-project half too, not only the global kill switch — which is why the gate
+ * is read BEFORE it is called rather than being allowed to raise; the same
+ * shape as `_plan-observe-record.js#recordPlanArtifact`.
+ *
+ * ONE STATUS FOR BOTH HALVES. A globally disabled switch and a project that
+ * never opted in both come out as {@link WriteStatus.WRITE_DISABLED}. The
+ * stderr vocabulary is closed and pinned by this hook's tests; the gate's own
+ * `reason` (`global-off` vs `project-off`) is deliberately not surfaced here,
+ * because a new status string would be a new decision channel for a hook whose
+ * whole contract is that it decides nothing.
  *
  * `assertOutcomeFilePath` runs immediately before the write even though
  * `apply()` builds the path itself and contains it to the missions directory.
@@ -576,7 +621,7 @@ function outcomeSections(ctx) {
  */
 function writeOutcome(d, ctx) {
   const config = ctx.config;
-  if (config?.runtime?.artifactLifecycle?.enabled !== true) return WriteStatus.WRITE_DISABLED;
+  if (!artifactGateOpen(d, config, ctx.projectRoot)) return WriteStatus.WRITE_DISABLED;
 
   const text = d.serializeOutcomeMd({
     missionId: ctx.missionId,

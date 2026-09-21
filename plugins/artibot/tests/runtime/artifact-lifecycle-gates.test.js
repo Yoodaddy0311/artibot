@@ -39,7 +39,10 @@ import {
   LAYER_UNSPECIFIED,
   plan,
 } from '../../lib/runtime/artifact-lifecycle.js';
-import { normaliseRequiredLayers } from '../../lib/runtime/artifact-lifecycle-gates.js';
+import {
+  normaliseProjectMarker,
+  normaliseRequiredLayers,
+} from '../../lib/runtime/artifact-lifecycle-gates.js';
 import { buildVerifyCompletedEvents } from '../../lib/verification/verify-writer.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -356,5 +359,71 @@ describe('config compatibility (the hook injects, this module never reads)', () 
     const src = readFileSync(GATES_PATH, 'utf8');
     expect(src).not.toMatch(/not been made|has not been|placeholder/);
     expect(src).toContain('requiredLayers');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normaliseProjectMarker — the per-project gate's only piece of judgement
+// ---------------------------------------------------------------------------
+
+describe('normaliseProjectMarker (B4 per-project gate)', () => {
+  // The value becomes a filesystem probe under an injected project root, so the
+  // rule is an allowlist and every unreadable value is `null` — which the
+  // caller reads as "gate closed", never as "no marker required".
+  it.each([
+    ['the shipped value', '.artibot/artifact-lifecycle.optin', ['.artibot', 'artifact-lifecycle.optin']],
+    ['a single segment', 'artifact-lifecycle.optin', ['artifact-lifecycle.optin']],
+    ['a dotfile', '.artibot-project', ['.artibot-project']],
+    ['eight segments', 'a/b/c/d/e/f/g/h', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']],
+    ['digits, dash, underscore', 'a-1/b_2.md', ['a-1', 'b_2.md']],
+  ])('accepts %s', (_label, raw, expected) => {
+    expect(normaliseProjectMarker(raw)).toEqual(expected);
+  });
+
+  it.each([
+    ['a parent traversal', '../outside.md'],
+    ['a bare parent segment', '..'],
+    ['a bare dot segment', '.'],
+    ['an interior parent segment', '.artibot/../../x.md'],
+    ['an interior dot segment', '.artibot/./x.md'],
+    ['a backslash separator', '.artibot\\artifact-lifecycle.optin'],
+    ['a POSIX absolute path', '/etc/passwd'],
+    ['a drive letter', 'C:/artifact-lifecycle.optin'],
+    ['a UNC path', '//server/share/x.md'],
+    ['an empty leading segment', '/artifact-lifecycle.optin'],
+    ['an empty trailing segment', '.artibot/'],
+    ['an empty interior segment', '.artibot//artifact-lifecycle.optin'],
+    ['the empty string', ''],
+    ['a space', 'my artifact-lifecycle.optin'],
+    ['nine segments', 'a/b/c/d/e/f/g/h/i'],
+    ['a null byte', 'project\u0000.md'],
+  ])('rejects %s with null', (_label, raw) => {
+    expect(normaliseProjectMarker(raw)).toBeNull();
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 1],
+    ['true', true],
+    ['an array', ['.artibot', 'artifact-lifecycle.optin']],
+    ['an object', { path: '.artibot/artifact-lifecycle.optin' }],
+  ])('rejects %s (non-string) with null', (_label, raw) => {
+    expect(normaliseProjectMarker(raw)).toBeNull();
+  });
+
+  it('accepts 256 characters and rejects 257', () => {
+    const at256 = 'a'.repeat(256);
+    expect(at256).toHaveLength(256);
+    expect(normaliseProjectMarker(at256)).toEqual([at256]);
+    expect(normaliseProjectMarker('a'.repeat(257))).toBeNull();
+  });
+
+  it('returns a fresh array the caller cannot alias into the module', () => {
+    const first = normaliseProjectMarker('.artibot/artifact-lifecycle.optin');
+    const second = normaliseProjectMarker('.artibot/artifact-lifecycle.optin');
+    expect(first).not.toBe(second);
+    first.push('mutated');
+    expect(normaliseProjectMarker('.artibot/artifact-lifecycle.optin')).toEqual(['.artibot', 'artifact-lifecycle.optin']);
   });
 });

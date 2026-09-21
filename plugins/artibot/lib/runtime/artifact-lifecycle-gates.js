@@ -519,3 +519,51 @@ export function blockCodeFor(kind, gate, staleness, policy) {
   }
   return undefined;
 }
+
+/**
+ * Shape a single segment of the project-marker path must match.
+ *
+ * Deliberately narrower than what a filesystem accepts. A separator (`/` is
+ * split on first, `\` never matches), a colon, a space and a null byte are all
+ * outside the class, so a drive letter, a UNC prefix and an absolute path are
+ * rejected by the segment rule rather than by a second pass of path parsing
+ * that would have to know which platform it is on.
+ */
+const PROJECT_MARKER_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Read a project-marker path into path segments, or `null`. Pure.
+ *
+ * `null` is not "no marker is required" — it is "this module was not given a
+ * marker path it can safely join", and the fail-closed answer to that is a
+ * CLOSED gate. The asymmetry is the same one {@link normaliseRequiredLayers}
+ * turns on, pointing the other way because the stake is the other way round: a
+ * wrong `null` here costs a project whose artifacts are not written until the
+ * config is corrected, while reading an unparseable value as "open" would let
+ * the writer create files in a project that never opted in — the exact global
+ * behaviour the marker exists to stop. So EVERY unreadable value returns
+ * `null`: a non-string, the empty string, anything past 256 characters, more
+ * than eight segments, an empty segment (which is how a leading, trailing or
+ * doubled `/` shows up), and any segment outside
+ * {@link PROJECT_MARKER_SEGMENT_PATTERN} (rules §8: allowlist, never a deny
+ * list).
+ *
+ * `.` and `..` are rejected explicitly, because both match the segment pattern
+ * and neither is a name the caller can have meant: a probe is about to join
+ * these under a project root, and `..` is how that probe leaves it. Rejecting
+ * them here means the joining caller needs no containment check of its own.
+ *
+ * @param {unknown} raw
+ * @returns {string[]|null} A fresh array — never aliased, never memoised.
+ */
+export function normaliseProjectMarker(raw) {
+  if (typeof raw !== 'string') return null;
+  if (raw.length === 0 || raw.length > 256) return null;
+  const segments = raw.split('/');
+  if (segments.length === 0 || segments.length > 8) return null;
+  for (const segment of segments) {
+    if (!PROJECT_MARKER_SEGMENT_PATTERN.test(segment)) return null;
+    if (segment === '.' || segment === '..') return null;
+  }
+  return segments;
+}

@@ -11,6 +11,7 @@ import { sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { missionMutator, openMissionStore } from '../../lib/runtime/middleware/tasks.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { parseReviewMd, reviewArtifactPath } from '../../lib/review/review-artifact.js';
+import { planReviewArtifact } from '../../scripts/hooks/_review-stop-record.js';
 
 /**
  * C2 — the SubagentStop hook RECORDS a reviewer's answer as `review.completed`
@@ -61,6 +62,19 @@ const AGENT_ID = 'agent-review-c2';
 const MODEL = 'claude-fable-5-1';
 /** The `mission_id` INSIDE the fixture document — unrelated to the envelope's. */
 const DOC_MISSION = 'M-20260912-001';
+/**
+ * The per-project opt-in marker, relative to the project root — the SECOND half
+ * of the artifact gate (B4). Stated here rather than read from the live config,
+ * so these cases keep meaning the same thing if the shipped default is renamed.
+ *
+ * A DEDICATED FILE WITH NO OTHER MEANING, and that is the point. An earlier
+ * draft used `.artibot/project.md`, which is the v5 project declaration
+ * DOCUMENT — reusing it would have conflated "this project uses Artibot
+ * project-state" with "this project opted in to mission artifacts", and any
+ * future scaffolder of that document would have quietly made the gate global
+ * again. A file whose only job is to say yes cannot be created by accident.
+ */
+const PROJECT_MARKER = '.artibot/artifact-lifecycle.optin';
 
 /**
  * Run the hook the way the dispatcher does: fresh node process, JSON on stdin,
@@ -596,7 +610,17 @@ describe('subagent-handler review.md artifact (child process)', () => {
     mkdirSync(dir, { recursive: true });
     const config = {
       ...live,
-      runtime: { ...live.runtime, artifactLifecycle: { ...live.runtime.artifactLifecycle, enabled } },
+      runtime: {
+        ...live.runtime,
+        artifactLifecycle: {
+          ...live.runtime.artifactLifecycle,
+          enabled,
+          // EXPLICIT, always. The resolver reads the marker's NAME from config;
+          // inheriting it would stop testing the gate the day the live default
+          // is renamed, and these roots are supposed to be independent of that.
+          projectMarker: PROJECT_MARKER,
+        },
+      },
     };
     writeFileSync(path.join(dir, 'artibot.config.json'), JSON.stringify(config, null, 2), 'utf-8');
     return dir;
@@ -647,6 +671,26 @@ describe('subagent-handler review.md artifact (child process)', () => {
       windowsHide: true,
     });
     return { status: res.status, stdout: String(res.stdout || ''), stderr: String(res.stderr || '') };
+  }
+
+  /**
+   * Opt the sandbox repo into artifact writes.
+   *
+   * Idempotent, and re-seeded after every `rmSync` of `.artibot` below: the
+   * marker lives inside that directory, so a case that clears it to reset the
+   * mission tree would silently shut the gate and stop measuring what it says.
+   *
+   * @returns {void}
+   */
+  function seedProjectMarker() {
+    const file = path.join(repo, ...PROJECT_MARKER.split('/'));
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, '# project\n', 'utf-8');
+  }
+
+  /** Remove the opt-in marker, leaving `.artibot` itself alone. @returns {void} */
+  function removeProjectMarker() {
+    rmSync(path.join(repo, ...PROJECT_MARKER.split('/')), { force: true, recursive: true });
   }
 
   /** Give the mission a StateStore row — the tail refuses to write without one. */
@@ -710,6 +754,10 @@ describe('subagent-handler review.md artifact (child process)', () => {
     const live = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
     pluginRoot = writeRoot('plugin-root-open', live, true);
     closedRoot = writeRoot('plugin-root-closed', live, false);
+    // The PROJECT half of the gate is opted in by default, so every case above
+    // keeps measuring the half it names. The B4 cases that mean "this project
+    // never opted in" remove it explicitly.
+    seedProjectMarker();
   });
 
   afterEach(() => {
@@ -868,6 +916,11 @@ describe('subagent-handler review.md artifact (child process)', () => {
     expect(existsSync(artifact())).toBe(true);
 
     rmSync(path.join(repo, '.artibot'), { recursive: true, force: true });
+    // The marker lived in there. Put it back, so this case still measures the
+    // GLOBAL switch refusing — without it the run would be gated for the other
+    // reason and the assertion below would read as if it had proved one thing
+    // while proving another.
+    seedProjectMarker();
     seedMissionRow();
     const gated = runStop(stopPayload({ session_id: `${SID}b` }), closedRoot);
 
@@ -875,6 +928,9 @@ describe('subagent-handler review.md artifact (child process)', () => {
     // and `writeOneArtifact` returns WRITE_FAILED. Chosen over an unwritable
     // directory because file permissions are not portable to Windows.
     rmSync(path.join(repo, '.artibot'), { recursive: true, force: true });
+    // Again: the gate must be OPEN here, or this case would measure a refusal
+    // instead of the WRITE_FAILED path it is named for.
+    seedProjectMarker();
     seedMissionRow();
     mkdirSync(path.join(repo, '.artibot', 'missions'), { recursive: true });
     writeFileSync(path.join(repo, '.artibot', 'missions', missionId), 'not a directory', 'utf-8');
@@ -906,6 +962,148 @@ describe('subagent-handler review.md artifact (child process)', () => {
     // artifact label is deliberately NOT carried into it, because that string
     // is pinned by the ledger-vocabulary firewall.
     expect(reviewLedger()).toBe('review=appended,audit=appended');
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // e2. B4 — the artifact gate's COMPLETION CRITERION, as a matrix.
+  //
+  // The gate is a CONJUNCTION of two independent conditions, so an open switch
+  // and a present marker are not interchangeable evidence. Three runs of the
+  // REAL hook, compared to each other rather than to a remembered expectation:
+  //
+  //   (a) global false + marker present -> no file
+  //   (b) global true  + marker absent  -> no file        <- the B4 behaviour
+  //   (c) global true  + marker present -> review.md
+  //
+  // Asserted across ALL THREE, not only in (c): exit status, stdout BYTES with
+  // the length compared first, and the `review.completed` ledger line. The gate
+  // suppresses a FILE and nothing else — a gate that also swallowed the ledger
+  // half would be a measurement hole, and (b) is where such a hole would open.
+  //
+  // WHAT THIS DOES NOT PROVE (rules §9): that the LIVE configuration opts any
+  // real project in. Every root here is a sandbox, and the shipped global value
+  // is pinned by exactly one other case in this file.
+  // -------------------------------------------------------------------------
+
+  it('writes review.md ONLY when the switch is open AND the project opted in', () => {
+    /**
+     * One cell: a FRESH session id per cell, because the mission id is derived
+     * from it — reusing one would make cell (c) dedupe against (a)'s ledger
+     * line and refuse for a reason that has nothing to do with the gate.
+     *
+     * @param {{sid: string, root: string, marker: boolean}} cell
+     * @returns {{res: object, wrote: boolean, ledgered: boolean}} what came out
+     */
+    function runCell({ sid, root, marker }) {
+      const id = sessionFallbackMissionId({ sessionId: sid, nowMs: Date.now() });
+      openMissionStore(repo, sid, Date.now(), { resolveGitCommonDir })
+        .updateMission(id, missionMutator(id, 'seed', 1), { reason: 'test-seed' });
+      writeTranscript();
+      if (marker) seedProjectMarker(); else removeProjectMarker();
+
+      const res = runStop(stopPayload({ session_id: sid }), root);
+      return {
+        res,
+        // The write is an unawaited tail; `spawnSync` returning means the
+        // child's event loop drained, which is this file's standing invariant.
+        wrote: existsSync(reviewArtifactPath(repo, id)),
+        ledgered: rawLedger().some((l) => l.event === 'review.completed' && l.mission_id === id),
+      };
+    }
+
+    const a = runCell({ sid: `${SID}a`, root: closedRoot, marker: true });
+    expect(a.wrote).toBe(false);
+    const b = runCell({ sid: `${SID}b`, root: pluginRoot, marker: false });
+    expect(b.wrote).toBe(false);
+    const c = runCell({ sid: `${SID}c`, root: pluginRoot, marker: true });
+    expect(c.wrote).toBe(true);
+
+    for (const cell of [a, b, c]) {
+      expect(cell.res.status).toBe(0);
+      // The ledger line is the gate's blind spot BY DESIGN: the verdict is
+      // measured whether or not a file renders it.
+      expect(cell.ledgered).toBe(true);
+    }
+
+    // Exactly one artifact in the whole mission tree, and it is cell (c)'s.
+    expect(missionFiles()).toHaveLength(1);
+
+    // stdout compared as BYTES, length first.
+    const bytes = [a, b, c].map((cell) => Buffer.from(cell.res.stdout, 'utf-8'));
+    expect(bytes[1].length).toBe(bytes[0].length);
+    expect(bytes[2].length).toBe(bytes[0].length);
+    expect(bytes[1].equals(bytes[0])).toBe(true);
+    expect(bytes[2].equals(bytes[0])).toBe(true);
+    expect(JSON.parse(a.res.stdout)).toEqual({ message: EXPECTED_STDOUT });
+  }, 60000);
+
+  /**
+   * WHY THE MATRIX ABOVE IS NOT ENOUGH, stated rather than assumed.
+   *
+   * The child-process cases prove the OUTCOME (no file), and that outcome is
+   * now OVER-DETERMINED: `apply({write: true})` throws on a closed gate too, and
+   * the tail swallows everything, so cell (b) stays green even against a hook
+   * that still read `runtime.artifactLifecycle.enabled` directly. MEASURED
+   * 2026-09-21 by restoring the old direct read and re-running: the review
+   * matrix passed, the outcome matrix failed. A test that cannot go red for
+   * the change it is named after is a test that measures nothing.
+   *
+   * What is unique to the PRE-FLIGHT is its returned status, and that value
+   * never reaches stdout — by design. So it is pinned in-process, which is the
+   * only place it is observable. `getPluginRoot()` re-reads the environment on
+   * every call (`lib/core/platform.js:106`), so pointing `CLAUDE_PLUGIN_ROOT`
+   * at a sandbox root is enough to choose the config the pre-flight reads.
+   */
+  it('refuses IN THE PRE-FLIGHT, with one reason for both halves of the gate', () => {
+    const before = process.env.CLAUDE_PLUGIN_ROOT;
+    // A project root with no StateStore row, so the `scheduled` case's tail
+    // stops at its own fail-closed check instead of writing from this test.
+    const bare = path.join(tmp, 'bare-project');
+    mkdirSync(bare, { recursive: true });
+    const ctx = () => ({
+      outcome: { review: { status: 'appended' }, parsed: { verdict: {} } },
+      ids: { agentType: 'code-reviewer', sessionId: SID, missionId },
+      projectRoot: bare,
+      model: MODEL,
+      findingsRef: `transcript:${AGENT_ID}`,
+    });
+    const marker = path.join(bare, ...PROJECT_MARKER.split('/'));
+
+    try {
+      // (a) global off, marker present.
+      mkdirSync(path.dirname(marker), { recursive: true });
+      writeFileSync(marker, '# project\n', 'utf-8');
+      process.env.CLAUDE_PLUGIN_ROOT = closedRoot;
+      expect(planReviewArtifact(ctx())).toEqual({ status: 'skipped', reason: 'write-disabled' });
+
+      // (b) global ON, marker absent — the B4 case. Same status, same reason:
+      // `global-off` and `project-off` are ONE word here on purpose.
+      rmSync(marker, { force: true });
+      process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+      expect(planReviewArtifact(ctx())).toEqual({ status: 'skipped', reason: 'write-disabled' });
+
+      // (c) both open — the pre-flight proceeds and starts the tail.
+      writeFileSync(marker, '# project\n', 'utf-8');
+      expect(planReviewArtifact(ctx())).toEqual({ status: 'scheduled' });
+    } finally {
+      if (before === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = before;
+    }
+  });
+
+  it('treats a DIRECTORY at the marker path as no marker at all', () => {
+    seedMissionRow();
+    writeTranscript();
+    // A regular file is required, not merely an existing path. `.artibot` is a
+    // directory people create for other reasons, and an existence check alone
+    // would opt a project in for having one.
+    removeProjectMarker();
+    mkdirSync(path.join(repo, ...PROJECT_MARKER.split('/')), { recursive: true });
+
+    expect(runStop(stopPayload(), pluginRoot).status).toBe(0);
+
+    expect(missionFiles()).toEqual([]);
+    expect(lineOf('review.completed')).toBeTruthy();
   }, 60000);
 
   // -------------------------------------------------------------------------

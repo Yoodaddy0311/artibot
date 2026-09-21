@@ -22,6 +22,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -714,6 +715,59 @@ describe('writes zero files', () => {
       ...readFileSync(GATES_PATH, 'utf8').matchAll(/^(?:import|export)[^;]*from\s+'([^']+)'/gm),
     ].map((m) => m[1]);
     expect(gatesEdges).toEqual([]);
+  });
+
+  // POSITIVE CONTROL for the zero-call assertion below, so that a zero means
+  // "the writer stayed away" and not "the spy could not see it".
+  //
+  // Measured 2026-09-21, vitest 4.0.18 / node v24.15.0: with the SAME spy
+  // technique the assertion below uses, and no `syncBuiltinESMExports()`
+  // anywhere, a real write through `apply({write: true})` counted
+  // writeFileSync 1, mkdirSync 2, renameSync 1. So these spies are NOT blind,
+  // and the neighbouring zero is a real measurement.
+  //
+  // Why they work here while a `statSync` spy in the sibling apply suite did
+  // NOT: it turns on import style, not on the spy. `lib/core/file.js:7` does
+  // `import fsSync from 'node:fs'` — a DEFAULT import, which for a builtin is
+  // the very object `vi.spyOn(fs, ...)` patches, so the patch is visible.
+  // `lib/runtime/artifact-lifecycle.js:71` does `import { statSync } from
+  // 'node:fs'` — a NAMED import, whose binding the patch never reaches. The
+  // rule to carry away: a default-import call site is spyable as-is, a
+  // named-import one needs `syncBuiltinESMExports()`.
+  //
+  // If someone converts `lib/core/file.js` to named imports, this control goes
+  // to zero and fails, which is the point of it existing.
+  it('sees a real write through the same spies (positive control)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-dryrun-control-'));
+    const marker = path.join(tmp, '.artibot', 'artifact-lifecycle.optin');
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, 'opt-in');
+    const writeSpy = vi.spyOn(fs, 'writeFileSync');
+    const mkdirSpy = vi.spyOn(fs, 'mkdirSync');
+    try {
+      const result = runPlan(completionEvents(), healthyState(), { projectRoot: tmp });
+      const report = apply(result, {
+        dryRun: true,
+        config: {
+          runtime: {
+            artifactLifecycle: {
+              enabled: true,
+              projectMarker: '.artibot/artifact-lifecycle.optin',
+            },
+          },
+        },
+        write: true,
+        projectRoot: tmp,
+        content: { [ArtifactKind.INTENT]: '# intent\n' },
+      });
+      expect(report.written.length).toBeGreaterThan(0);
+      expect(writeSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(mkdirSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      writeSpy.mockRestore();
+      mkdirSpy.mockRestore();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('calls no fs write entry point during plan() or apply() (dynamic proof)', () => {

@@ -115,6 +115,7 @@ async function loadDeps() {
     serializeIntentMd: artifact.serializeIntentMd,
     apply: lifecycle.apply,
     plan: lifecycle.plan,
+    resolveArtifactGate: lifecycle.resolveArtifactGate,
     missionMutator: tasks.missionMutator,
     openMissionStore: tasks.openMissionStore,
     resolveGitCommonDir: commonDir.resolveGitCommonDir,
@@ -362,6 +363,34 @@ function promote(ctx) {
 }
 
 /**
+ * Is the artifact gate OPEN for this project?
+ *
+ * ONE owner, in `lib/runtime/artifact-lifecycle.js#resolveArtifactGate`: the
+ * global kill switch AND the per-project marker file are both its business, so
+ * this hook no longer reads `runtime.artifactLifecycle.enabled` itself. Turning
+ * the global switch on therefore does NOT start creating `.artibot/missions/`
+ * in every checkout — only in the ones carrying the marker.
+ *
+ * FAIL-CLOSED, and that is the whole point of the try. A resolver that is
+ * missing from the module (shape drift on a partial upgrade) makes the call a
+ * `TypeError`; a resolver that throws is the same event. Either way the answer
+ * is CLOSED, never open — an "open" default would write files into projects
+ * that never asked for them, which is the failure this gate exists to prevent.
+ *
+ * @param {object} deps - {@link loadDeps} bindings
+ * @param {object|undefined} config - merged plugin config, or undefined
+ * @param {string} projectRoot
+ * @returns {boolean} true only on an explicit `{ open: true }`
+ */
+function artifactGateOpen(deps, config, projectRoot) {
+  try {
+    return deps.resolveArtifactGate({ config, projectRoot })?.open === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Write `intent.md` through the artifact lifecycle.
  *
  * Goes through `plan()` + `apply()` rather than `fs.writeFileSync` so the
@@ -445,10 +474,12 @@ export async function observeIntent(hookData) {
     // seek — on every write:
     //   - a session that crossed midnight, whose document sits under the
     //     adopted id (bounded: the second latch catches it from write 2 on);
-    //   - any session at all while `runtime.artifactLifecycle.enabled` is
-    //     false, because then no document is ever written and NO latch can
-    //     fire. Unbounded in the ledger's size, and the reason the read is the
-    //     thing to revisit if the ledger grows (review R1, Suggestion 2).
+    //   - any session at all while the artifact gate is CLOSED — the global
+    //     `runtime.artifactLifecycle.enabled` switch off, OR this project
+    //     missing its marker file — because then no document is ever written
+    //     and NO latch can fire. Unbounded in the ledger's size, and the reason
+    //     the read is the thing to revisit if the ledger grows (review R1,
+    //     Suggestion 2).
     if (derivedId !== null && existsSync(intentArtifactPath(projectRoot, derivedId))) {
       return {
         ok: true, reason: 'already-written', missionId: derivedId, promoted: false, written: 0,
@@ -542,7 +573,12 @@ export async function observeIntent(hookData) {
     // The gate is checked AFTER the records, on purpose: ledger and store
     // writes are Observe-legal, artifact FILES are not, so a closed gate must
     // suppress the file and nothing else (design §7.3).
-    if (config?.runtime?.artifactLifecycle?.enabled !== true) {
+    //
+    // ONE vocabulary for BOTH closed reasons. The resolver distinguishes
+    // global-off from project-off; this return deliberately does not, because
+    // `write-disabled` is pinned by downstream tests and ledger summaries and a
+    // new status string here would be a silent contract change.
+    if (!artifactGateOpen(deps, config, projectRoot)) {
       return { ok: true, reason: 'write-disabled', missionId, promoted, written: 0 };
     }
 

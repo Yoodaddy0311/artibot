@@ -13,6 +13,7 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import * as artifactLifecycle from '../../lib/runtime/artifact-lifecycle.js';
 import { readJsonFileSync } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
@@ -47,21 +48,53 @@ import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 // reads it. It is written by {@link planReviewArtifact}, which DECIDES NOTHING
 // EITHER: it never throws, it is invisible to stdout, and it is entered only
 // when the ledger line was actually APPENDED — so a skipped, refused or
-// deduped verdict produces no file. The write itself is behind
-// `runtime.artifactLifecycle.enabled`, which ships FALSE (4.61.0), so on the
-// shipped configuration this path stops at a config read.
+// deduped verdict produces no file. The write itself is behind the ARTIFACT
+// GATE, whose global half `runtime.artifactLifecycle.enabled` ships FALSE
+// (4.61.0), so on the shipped configuration this path stops at a config read.
 //
 // SYNC PRE-FLIGHT, ASYNC TAIL — and why it has to be that shape.
 // `subagent-handler.js#handleStop` is SYNCHRONOUS and `main()` calls it without
 // `await`, so nothing here can be awaited into the stop's return path. The
-// pre-flight is therefore sync (cheap: object reads and one config read) and
+// pre-flight is therefore sync (cheap: object reads, one config read, and the
+// artifact gate, whose marker stat is only reached when the global switch is
+// already on) and
 // the write is an unawaited async tail. The process outlives
 // the stdout write because the success path has no `process.exit` — the
 // dispatcher waits for the child's `exit` event, which fires when the event
 // loop drains, pending dynamic imports included.
 //
-// NOTHING NEW IS STATICALLY IMPORTED. Every module this path needs is
-// `import()`ed inside the tail.
+// ONE MODULE IS STATICALLY IMPORTED, ON PURPOSE (B4, 2026-09-21):
+// `lib/runtime/artifact-lifecycle.js`, as a NAMESPACE, for `resolveArtifactGate`
+// alone. Everything else this path needs is still `import()`ed inside the tail.
+//
+// WHY IT HAD TO BE STATIC. The artifact gate is now TWO conditions — the global
+// kill switch AND a per-project marker file — and one resolver owns both, so
+// this file may no longer read `runtime.artifactLifecycle.enabled` itself. The
+// gate is consulted in the SYNC pre-flight, and ESM has no synchronous dynamic
+// import. The alternative — deferring the gate into the async tail — would have
+// changed what the pre-flight RETURNS for a closed gate from
+// `{status:'skipped', reason:'write-disabled'}` to `{status:'scheduled'}`, and
+// that vocabulary is pinned by this file's tests and read by the caller's
+// summary. A status string is cheaper to keep than to re-earn.
+//
+// WHY A NAMESPACE IMPORT AND NOT A NAMED ONE. A named import of an export that
+// does not exist is a LINK-TIME SyntaxError, which would take
+// `subagent-handler.js` down with it and break every SubagentStop, reviewer or
+// not. A namespace import leaves the missing member `undefined`, which
+// `gateOpen` below turns into a SHUT gate. Fail-closed beats fail-to-start.
+//
+// WHAT IT COSTS. Re-measured 2026-09-21 with the method below, Windows 11,
+// Node v24.15.0: 1.9 / 2.4 / 2.6 / 3.0 ms over the four warm samples of N=5
+// (the first sample, 55 ms, was a cold OS file cache and is reported, not
+// averaged in). Consistent with the 1.5 – 1.6 ms recorded on 2026-09-14 below.
+// The marginal graph is small because `artifact-lifecycle.js` imports only
+// `artifact-lifecycle-gates.js` (zero imports), `lib/core/file.js` — which THIS
+// file already imported statically — and node builtins.
+//
+// THIS COST IS PAID BY EVERY SubagentStop, including the ~24 agent types that
+// are not reviewers, which is exactly the trade the paragraph below rejects for
+// the tail's modules. It is accepted here and nowhere else because the gate is
+// the only thing on this path that a correct answer cannot defer.
 //
 // MARGINAL LOAD COST — read the CONDITION, not just the number. Reproduce with
 // one fresh process per sample, importing the real hook first so the timed
@@ -88,10 +121,12 @@ import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 // production is in. Reviewer independently reproduced A (14.5 / 1.4 / 0.8 /
 // 0.1, N=1).
 //
-// THE CONCLUSION IS UNCHANGED at either magnitude: a static import is paid by
-// EVERY SubagentStop and the ~24 non-reviewer agent types never reach this
-// code, so even column A's 1.3 ms buys nothing. That is why
-// `review-artifact.js` is dynamic too — and why the `already-exists` check
+// THE CONCLUSION IS UNCHANGED at either magnitude, for every module that the
+// TAIL needs: a static import is paid by EVERY SubagentStop and the ~24
+// non-reviewer agent types never reach this code, so even column A's 1.3 ms
+// buys nothing. (`artifact-lifecycle.js` is the one exception, and it is an
+// exception because its export is needed SYNCHRONOUSLY — see above.) That is
+// why `review-artifact.js` is dynamic too — and why the `already-exists` check
 // lives in the tail rather than in the pre-flight, where it would have needed
 // `reviewArtifactPath` synchronously. The check is worth almost nothing up
 // front anyway: a REDELIVERED stop already stops at `review-not-appended`, so
@@ -315,6 +350,28 @@ function readPluginConfigSync() {
 }
 
 /**
+ * Is the artifact gate open for THIS project? FAIL-CLOSED on every doubt.
+ *
+ * The only reader of the gate in this file — no direct config read survives.
+ * `resolveArtifactGate` is contracted never to throw, and this `catch` is not a
+ * second opinion about that: it is what makes a MISSING binding — a tree where
+ * the resolver has not landed, so the namespace member is `undefined` and the
+ * call is a TypeError — come out as a shut gate. Open is asserted positively,
+ * so any other return shape is shut as well.
+ *
+ * @param {object|null} config parsed `artibot.config.json`
+ * @param {string} projectRoot the project the marker file is looked for under
+ * @returns {boolean} true only when both halves of the gate said yes
+ */
+function gateOpen(config, projectRoot) {
+  try {
+    return artifactLifecycle.resolveArtifactGate({ config, projectRoot }).open === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Decide — synchronously and without throwing — whether to start a `review.md`
  * write, and start it.
  *
@@ -324,7 +381,9 @@ function readPluginConfigSync() {
  * explainable from the summary alone rather than looking like a silent failure.
  *
  * The order of the checks is the order of increasing cost: object reads, then
- * one config read. `review-not-appended` is first and catches the most cases —
+ * one config read, then the artifact gate's marker stat (which the resolver
+ * only reaches when the global switch is on — a global-off gate does no
+ * filesystem work at all). `review-not-appended` is first and catches the most cases —
  * a skipped verdict, a refused one, and a REDELIVERED stop, whose ledger half
  * dedupes to `skipped`. That is why a redelivery cannot even reach the store.
  *
@@ -349,7 +408,12 @@ export function planReviewArtifact(ctx) {
       return { status: 'skipped', reason: 'no-cwd' };
     }
     const config = readPluginConfigSync();
-    if (config?.runtime?.artifactLifecycle?.enabled !== true) {
+    // ONE REASON FOR BOTH HALVES. A globally disabled switch and a project that
+    // never opted in are both `write-disabled` — the gate's own `reason`
+    // (`global-off` vs `project-off`) is deliberately not surfaced, because a
+    // new status string here is a new decision channel on a path whose whole
+    // contract is that it decides nothing, and the caller's summary pins these.
+    if (!gateOpen(config, projectRoot)) {
       return { status: 'skipped', reason: 'write-disabled' };
     }
     // Deliberately NOT awaited: see the module header. The tail cannot reject.
@@ -382,8 +446,10 @@ export function planReviewArtifact(ctx) {
 async function writeReviewArtifact(ctx) {
   try {
     const { ids, projectRoot, missionId, config } = ctx;
-    const [lifecycle, tasks, gitDir, artifact] = await Promise.all([
-      import('../../lib/runtime/artifact-lifecycle.js'),
+    // `artifact-lifecycle.js` is NOT in this list: since B4 it is a static
+    // namespace import (`artifactLifecycle`, see the module header), so
+    // re-importing it here would only re-read the module cache.
+    const [tasks, gitDir, artifact] = await Promise.all([
       import('../../lib/runtime/middleware/tasks.js'),
       import('../../lib/project-state/git-common-dir.js'),
       import('../../lib/review/review-artifact.js'),
@@ -433,7 +499,7 @@ async function writeReviewArtifact(ctx) {
     // statuses, not the line it appended. These are the two `data` keys
     // `REQUIRED_EVENT_DATA['review.completed']` names, plus the id the ledger
     // line also carries, and they come from the same parse the ledger used.
-    const planResult = lifecycle.plan({
+    const planResult = artifactLifecycle.plan({
       events: [{
         event: 'review.completed',
         mission_id: missionId,
@@ -453,7 +519,7 @@ async function writeReviewArtifact(ctx) {
       },
       projectRoot,
     });
-    lifecycle.apply(planResult, {
+    artifactLifecycle.apply(planResult, {
       // `dryRun: true` is the "I know this module" flag, not "do not write";
       // `write: true` is what authorises the filesystem. See `apply`'s doc.
       dryRun: true,

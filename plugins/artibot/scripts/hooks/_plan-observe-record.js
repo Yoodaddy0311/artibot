@@ -149,6 +149,7 @@ async function loadDeps() {
     computeIdempotencyKey: lifecycle.computeIdempotencyKey,
     plan: lifecycle.plan,
     apply: lifecycle.apply,
+    resolveArtifactGate: lifecycle.resolveArtifactGate,
     openMissionStore: tasks.openMissionStore,
     planRevisionMutator: tasks.planRevisionMutator,
     resolveGitCommonDir: commonDir.resolveGitCommonDir,
@@ -158,13 +159,14 @@ async function loadDeps() {
 }
 
 /**
- * Read the plugin's config for the ONE key this file gates on.
+ * Read the plugin's config the gate resolver reads its keys from.
  *
  * The raw file under {@link loadDeps}'s `getPluginRoot`, not
  * `lib/core/config.js#loadConfig`. Same substitution, and the same honesty
  * bound, as `_review-stop-record.js#readPluginConfigSync`: `loadConfig` merges
- * the file over `DEFAULTS`, and `DEFAULTS` has no `runtime` key, so for
- * `runtime.artifactLifecycle.enabled` the raw file and the merged config agree.
+ * the file over `DEFAULTS`, and `DEFAULTS` has no `runtime` key, so under
+ * `runtime.artifactLifecycle` the raw file and the merged config agree — for
+ * the global `enabled` switch and for the `projectMarker` path alike.
  * DEVIATION TO KNOW ABOUT: this skips `loadConfig`'s memoisation and any future
  * default it might grow for that path.
  *
@@ -236,8 +238,11 @@ function bumpPlanRevision(d, store, missionId, revision) {
  *
  * NEVER THROWS. `plan()` is pure and always runs, so the outcome always carries
  * the Shadow counts even when no file may be created; `apply()` THROWS when the
- * config gate is not exactly `true`, which is why the gate is read BEFORE it is
- * called rather than being allowed to raise.
+ * gate is shut — global switch off OR this project missing its marker — which
+ * is why the gate is resolved BEFORE it is called rather than being allowed to
+ * raise. One resolver owns both halves
+ * (`lib/runtime/artifact-lifecycle.js#resolveArtifactGate`), and a resolver
+ * that is missing or throws counts as SHUT.
  *
  * WHOSE BYTES WIN IS NOT DECIDED HERE. On this branch the tool call that
  * triggered us is ITSELF about to write `plan.md`. With the gate OPEN, a first
@@ -247,7 +252,8 @@ function bumpPlanRevision(d, store, missionId, revision) {
  * a Wave-11 decision (the outcome-md emitter owns the successor rule). This
  * module only proves the gated path works; on the SHIPPED configuration
  * (`runtime.artifactLifecycle.enabled: false`, 4.61.0) it writes nothing at all
- * and stops at a config read.
+ * and stops at a config read — as does any project without the marker file,
+ * even once that switch is flipped on.
  *
  * @param {object} ctx `{d, nodePath, projectRoot, missionId, revision, mode,
  *   intentRevision, planArtifact}`
@@ -280,7 +286,19 @@ function recordPlanArtifact(ctx) {
     };
 
     const config = readPluginConfig(d, ctx.nodePath);
-    if (config?.runtime?.artifactLifecycle?.enabled !== true) {
+    // ONE status for BOTH closed reasons. The resolver separates global-off
+    // from project-off; this file deliberately does not, because
+    // `write-disabled` is the vocabulary downstream tests and ledger summaries
+    // pin. FAIL-CLOSED on a resolver that is absent or throws: a missing
+    // binding makes the call a `TypeError`, and the catch below is not the
+    // place to decide that means "write the file anyway".
+    let open = false;
+    try {
+      open = d.resolveArtifactGate({ config, projectRoot })?.open === true;
+    } catch {
+      open = false;
+    }
+    if (!open) {
       artifact.status = 'write-disabled';
       return artifact;
     }
