@@ -194,6 +194,32 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
     expect(state.pausedReason).toBe('recovery:ask_human');
   });
 
+  // B1: a recovery-driven pause announces itself like every other pause. Run
+  // against the real telemetry/notification stack — no featureKey is set on
+  // these states, so the lesson archive is not touched (and not polluted).
+  it('emits a warn-level pause event next to recovery-applied when it pauses', () => {
+    const state = makeState({ verifyResult: { status: 'UNMEASURED' } });
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, ON);
+
+    const types = eventTypes(state.sessionId);
+    expect(types).toContain('recovery-applied');
+    expect(types.filter((t) => t === 'pause')).toHaveLength(1);
+    expect(findEvent(state.sessionId, 'pause')).toMatchObject({
+      phase: 'VERIFY', level: 'warn', data: { reason: 'recovery:ask_human' },
+    });
+    // recovery-applied is written first; the pause event follows the commit.
+    expect(types.indexOf('recovery-applied')).toBeLessThan(types.indexOf('pause'));
+  });
+
+  it('emits no pause event when the verdict only advances the phase', () => {
+    const state = failingState();
+
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+
+    expect(eventTypes(state.sessionId)).not.toContain('pause');
+  });
+
   it('leaves every non-VERIFY phase alone', () => {
     const state = makeState({ phase: 'EXECUTE', verifyResult: { ok: false } });
 
