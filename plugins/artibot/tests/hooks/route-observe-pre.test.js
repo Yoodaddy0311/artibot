@@ -792,4 +792,159 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
     const [line] = readRunLedger(repo);
     expect(line.data.models.current).toBeNull();
   });
+
+  it('stays mute for an Agent call under the SHIPPED empty canary allowlist', () => {
+    // The child process loads the real `artibot.config.json`, so this is the
+    // shipped `routing.canary.actionClasses: []` reaching the hook for real —
+    // not a synthesized one. Read here rather than pinned, so a flip of that
+    // key retires this test's premise instead of leaving it asserting a value
+    // the file no longer has.
+    const shipped = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
+    expect(shipped.routing.canary.actionClasses).toEqual([]);
+
+    const r = runHook(payloadFor({ transcript_path: transcriptFor('fable') }), home);
+    expect(r.status).toBe(0);
+    expect(Buffer.byteLength(r.stdout, 'utf8')).toBe(0);
+    expect(readRunLedger(repo)).toHaveLength(1);
+  });
+});
+
+describe('route-observe-pre — the canary value is forwarded, never interpreted (CA-GA02)', () => {
+  /** The ctx `buildReceipt` takes, with only `config` varying between cases. */
+  const ctxWith = (config) => ({
+    toolUseId: 'toolu_canary_1',
+    sessionId: 'sess-canary-1',
+    missionId: 'M-20260904-Sabcdefgh',
+    agentType: 'artibot:tdd-guide',
+    text: 'Implement the ledger byte cap across three modules and add regression tests',
+    config,
+  });
+
+  /** A config whose `routing.canary` read is counted, so "who touched it" is observable. */
+  function countingConfig(value) {
+    let reads = 0;
+    const routing = {};
+    Object.defineProperty(routing, 'canary', {
+      get() { reads += 1; return value; },
+      enumerable: true,
+    });
+    return { config: { routing }, reads: () => reads };
+  }
+
+  /** The receipt minus the two fields that move between runs. */
+  const stable = (receipt) => {
+    const { route_receipt_id: rid, timestamp, ...rest } = receipt;
+    expect(rid).toMatch(/^rr-toolu_canary_1-/);
+    expect(timestamp).toEqual(expect.any(String));
+    return rest;
+  };
+
+  it('reads config.routing.canary exactly once — one pass-through, no inspection', () => {
+    // EXACTLY ONE read is the hook's whole contract here, and it holds on both
+    // sides of the lib change: the hook hands the value over and never looks at
+    // it again. Zero reads would mean the argument is not being passed at all;
+    // more than one would mean the hook is doing work that belongs in
+    // `adaptive-model-router.js`.
+    const { config, reads } = countingConfig({ actionClasses: [] });
+    expect(buildReceipt(ctxWith(config))).not.toBeNull();
+    expect(reads()).toBe(1);
+  });
+
+  it('does not normalise or mutate the value it forwards', () => {
+    // Interpretation lives in the lib. A hook that lower-cased, de-duplicated or
+    // defaulted this list would be a second, silent vocabulary for the same key.
+    const value = { actionClasses: ['Review', 'review', ''], stray: 1 };
+    buildReceipt(ctxWith({ routing: { canary: value } }));
+    expect(value).toEqual({ actionClasses: ['Review', 'review', ''], stray: 1 });
+  });
+
+  it('is byte-identical across absent routing, empty routing and the shipped empty allowlist', () => {
+    // Same normalisation as the "byte-identical to HEAD" case above: only
+    // `route_receipt_id` and `timestamp` move. `mission_id` is supplied here, so
+    // it does not.
+    const absent = stable(buildReceipt(ctxWith({})));
+    const emptyRouting = stable(buildReceipt(ctxWith({ routing: {} })));
+    const shipped = stable(buildReceipt(ctxWith({ routing: { canary: { actionClasses: [] } } })));
+
+    expect(emptyRouting).toEqual(absent);
+    expect(shipped).toEqual(absent);
+    // The pin that makes the three comparisons mean something: an empty
+    // allowlist applies to nothing, so `selected` stays the policy answer.
+    expect(shipped.models.selected.tier).toBe('opus');
+    expect(shipped.decision.type).toBe('route');
+    expect(shipped.reason.some((c) => c.startsWith('canary:'))).toBe(false);
+  });
+
+  /**
+   * Explicit policy fixture, mirroring the CONFIG in
+   * `tests/routing/adaptive-router.test.js`: `architect` is fable-allowlisted,
+   * so the scorer's recommendation (fable) and the policy answer (opus) DIVERGE.
+   * That divergence is what makes a moved seat observable at all — with the two
+   * tiers equal, a canary that applied and one that never matched look alike in
+   * `models.selected`. Frozen and explicit so an `artibot.config.json` edit
+   * cannot turn this red.
+   */
+  const POLICY_CONFIG = Object.freeze({
+    agents: {
+      modelPolicy: {
+        fable: { enabled: true, allowlist: ['architect'] },
+        high: { model: 'opus', agents: ['architect', 'backend-developer'] },
+        medium: { model: 'opus', agents: [] },
+        phaseRoles: { build: 'opus', review: 'fable' },
+      },
+    },
+  });
+
+  /** The same architect ctx, varying only the allowlist. */
+  const architectCtx = (actionClasses) => ({
+    ...ctxWith({ ...POLICY_CONFIG, routing: { canary: { actionClasses } } }),
+    agentType: 'artibot:architect',
+    text: 'design the module boundary and dependency strategy',
+  });
+
+  it('hands the list to the key routeModel actually reads — the moved seat is the proof', () => {
+    // EFFECT-LEVEL, not read-count. Every other test in this block stays green
+    // if the key at the `routeModel` call is misspelled, because they only
+    // observe that the hook touched `config.routing.canary`. This one observes
+    // the value ARRIVING: a wrong key leaves the list unread and the seat where
+    // policy put it.
+    //
+    // The class is MEASURED, not guessed — ask the receipt what this input
+    // resolved to, then allowlist exactly that.
+    const baseline = buildReceipt(architectCtx([]));
+    const actionClass = baseline.action.type;
+    expect(actionClass).toBe('architecture');
+    expect(baseline.models.recommended.tier).toBe('fable');
+    expect(baseline.models.selected.tier).toBe('opus');
+    expect(baseline.reason.some((c) => c.startsWith('canary:'))).toBe(false);
+
+    const matched = buildReceipt(architectCtx([actionClass]));
+    expect(matched.models.selected.tier).toBe(matched.models.recommended.tier);
+    expect(matched.models.selected.tier).toBe('fable');
+    expect(matched.reason).toContain(`canary:${matched.models.recommended.tier}`);
+    // The policy answer is not erased, only demoted to a reason code — that
+    // counterfactual is what the Phase 0 divergence metric is built on.
+    expect(matched.reason).toContain('policy:opus');
+    // No new receipt key and no new decision vocabulary.
+    expect(matched.decision.type).toBe('route');
+    expect(Object.keys(matched).sort()).toEqual(Object.keys(baseline).sort());
+  });
+
+  it('never throws on a config that cannot carry a canary at all', () => {
+    // `ctx.config` is whatever `loadConfig()` returned, and the hook's own catch
+    // sets it to `undefined` when that read threw — so undefined is a LIVE case,
+    // not a hypothetical one (`scripts/hooks/route-observe-pre.js#observePre`).
+    for (const config of [undefined, null, {}, { routing: null }]) {
+      expect(buildReceipt(ctxWith(config)), String(config)).not.toBeNull();
+    }
+  });
+
+  it('never throws on a canary value of the wrong type, and still returns a receipt', () => {
+    // Rejecting these is the lib's job; the hook's job is to survive them.
+    for (const value of [null, undefined, 42, 'x', [], { actionClasses: 'review' }]) {
+      const receipt = buildReceipt(ctxWith({ routing: { canary: value } }));
+      expect(receipt, JSON.stringify(value ?? null)).not.toBeNull();
+      expect(receipt.action.phase).toBe('build');
+    }
+  });
 });

@@ -3,9 +3,20 @@
  *
  * Produces ONE RouteReceipt per routing decision: the `data` object of the
  * ledger event `route.selected` (`schemas/route-receipt.schema.json`). It
- * recommends; it never applies. `models.selected` is always the `resolveModel`
+ * recommends; it never applies. `models.selected` is normally the `resolveModel`
  * policy result, so the receipt records a recommendation BESIDE what actually
  * ran — the divergence rate between the two is the whole Phase 0 metric.
+ *
+ * ONE EXCEPTION (GA-02, {@link resolveCanaryClasses}): when the caller's canary
+ * allowlist names this action's class, `models.selected` becomes the
+ * RECOMMENDED tier and the policy answer survives only as the reason code
+ * `policy:<tier>`. This does NOT make the router an applier. Nothing turns that
+ * tier into a real spawn: the bind row's `route.bound.selected_model` is
+ * produced by `lib/routing/bind-model-fallback.js#resolveBoundModel` (called
+ * from `scripts/hooks/subagent-handler.js`), which returns either the host's
+ * canonical model or `resolveModel(...)` and never reads `models.selected`
+ * (measured 2026-09-21). A matched receipt therefore records INTENT, not
+ * execution — and the shipped allowlist is empty, so today it records neither.
  *
  * Three structural guarantees, each pinned by a test:
  *
@@ -416,6 +427,133 @@ function buildIdentity(evidence, reason) {
 }
 
 /**
+ * Normalise the GA-02 canary allowlist, FAIL-CLOSED. Anything that is not an
+ * array of non-empty strings yields the empty list, and ONE unusable member
+ * discards the WHOLE list rather than applying the readable half — a partially
+ * applied allowlist would move a seat its author never named.
+ *
+ * A CALLER DOES EXIST: `scripts/hooks/route-observe-pre.js#buildReceipt` — the
+ * site of that file's `routeModel` call, reached from `#observePre` — forwards
+ * `config.routing.canary` on every routed action (measured 2026-09-21). What
+ * keeps the gate inert is not the absence of a caller but the SHIPPED EMPTY
+ * LIST — `artibot.config.json` `routing.canary.actionClasses` is `[]`, pinned
+ * by `tests/firewall/canary-actionclass-gate.test.js` and by
+ * `tests/firewall/v5-config-firewall.test.js`. Filling that one key is all it
+ * takes to arm this path.
+ *
+ * @param {*} canary - `input.canary`, any shape, possibly hostile.
+ * @returns {string[]} Trimmed class names, or [].
+ */
+export function resolveCanaryClasses(canary) {
+  try {
+    const list = canary && typeof canary === 'object' ? canary.actionClasses : null;
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const entry of list) {
+      const name = str(entry);
+      if (name === null) return [];
+      out.push(name);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read `input.canary` without trusting the input object itself. The carrier is
+ * caller-supplied, so the PROPERTY ACCESS is as hostile as the value: a getter
+ * that throws here would otherwise escape through `routeModel`, which promises
+ * never to throw.
+ *
+ * @param {object} src - Router input.
+ * @returns {*} The raw `canary` value, or undefined when it cannot be read.
+ */
+function readCanary(src) {
+  try {
+    return src.canary;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The canary identity for this action, or null when the gate does not apply.
+ *
+ * The only seat the gate can hand out is `top.tier` — the tier `pickRoute`
+ * already chose from `resolveCandidateTiers`, i.e. from inside the policy
+ * ceiling. The gate therefore cannot widen the ceiling, only pick a different
+ * seat within it, and a tier the policy ceiling excludes stays excluded:
+ * `FABLE_DENYLIST` agents keep their opus-only ceiling under a matched canary
+ * (pinned in `tests/routing/adaptive-model-router.test.js`).
+ *
+ * @param {object} src - Router input.
+ * @param {string} actionClass - Resolved action class.
+ * @param {object|null} top - Winning `scoreRoutes` row, or null.
+ * @param {object} catalog - Catalog port.
+ * @returns {object|null} `model_identity` for the canary seat, or null.
+ */
+function resolveCanaryIdentity(src, actionClass, top, catalog) {
+  if (top === null) return null;
+  const classes = resolveCanaryClasses(readCanary(src));
+  if (classes.length === 0 || !classes.includes(actionClass)) return null;
+  return modelIdentity(top.tier, catalog);
+}
+
+/**
+ * Decide what `models.selected` records, and name it in `reason`.
+ *
+ * `resolveModel` is called exactly as it always was and its answer is ALWAYS
+ * the `policy:` reason code, even when the canary moves the seat: that entry
+ * is the counterfactual the whole Phase 0 divergence metric is built on. A
+ * matched canary adds `canary:<tier>` after it — including when the two tiers
+ * already agree, because "the gate applied and changed nothing" and "the gate
+ * never matched" are different facts and only the reason code separates them.
+ *
+ * PRECONDITIONS BEFORE ANYONE FILLS `routing.canary.actionClasses` — each one
+ * is unmet as of 2026-09-21:
+ *  1. NO ACTUATOR. Nothing converts a matched receipt into a spawn; the
+ *     PreToolUse stdout contract is unchanged and design I4/I7 precede CA-02.
+ *     Arming the list changes receipts only.
+ *  2. CONSUMERS READ `models.selected` AS "WHAT RAN" AND WOULD GO SILENTLY
+ *     WRONG. `lib/scorecard/routing-scorecard.js` derives
+ *     `routing.recommendation_divergence`, `routing.avoided_switch` /
+ *     `routing.avoided_switch_pinned` and `routing.selected_tiers` from
+ *     `models.recommended.tier` vs `models.selected.tier`; the RouteBench
+ *     baseline in `scripts/bench/routebench-corpus.mjs` reads
+ *     `models.selected` the same way. Under a matched canary those two tiers
+ *     are EQUAL by construction, so divergence would read as zero while the
+ *     policy answer is still there — in `reason`. Such consumers must key on
+ *     `policy:<tier>` and `canary:<tier>` first.
+ *  3. ONLY opus↔fable IS REACHABLE. With the shipped config every agent's
+ *     ceiling sits inside {opus, fable} because `agents.modelPolicy.low.agents`
+ *     is `[]` (and `loadModelPolicy` normalises only the `high`/`medium`
+ *     buckets). Reaching haiku or sonnet needs that second key too, so "one
+ *     config key" opens opus↔fable moves and nothing wider.
+ *  4. MEMBERS ARE NOT CHECKED AGAINST `ACTION_CLASSES`. A typo is silently
+ *     unmatched — fail-closed, but with no warning anywhere.
+ *
+ * @param {object} src - Router input.
+ * @param {string} actionClass - Resolved action class.
+ * @param {object|null} top - Winning `scoreRoutes` row, or null.
+ * @param {object} catalog - Catalog port.
+ * @param {string[]} reason - Reason accumulator, appended in place.
+ * @returns {{identity: object|null, tier: string|null}} Selected seat.
+ */
+function resolveSelection(src, actionClass, top, catalog, reason) {
+  const role = str(src.role);
+  const policyTier = resolveModel(src.agentType, role === null ? {} : { role }, src.config);
+  const policy = modelIdentity(policyTier, catalog);
+  reason.push(policy === null ? 'policy:unknown-tier' : `policy:${policy.tier}`);
+  if (top !== null && policy !== null && top.tier !== policy.tier) reason.push('divergence');
+
+  const canary = resolveCanaryIdentity(src, actionClass, top, catalog);
+  if (canary === null) return { identity: policy, tier: policyTier };
+  reason.push(`canary:${canary.tier}`);
+  return { identity: canary, tier: canary.tier };
+}
+
+/**
  * Score the allowed candidates and report the winner.
  *
  * @param {object} src - Router input.
@@ -466,6 +604,11 @@ function pickRoute(src, actionClass, catalog) {
  * @param {object} [input.hysteresis] - Pre-computed `evaluateSwitch` result.
  * @param {{resolveEffort?: Function, budgetFor?: Function}} [input.ports] -
  *   Injected effort/budget ports. Nothing is computed when they are absent.
+ * @param {object} [input.canary] - GA-02 canary gate. `canary.actionClasses`
+ *   is an allowlist of action classes whose seat may move onto the RECOMMENDED
+ *   tier instead of the `resolveModel` answer. Fail-closed, and SHIPPED EMPTY —
+ *   see {@link resolveCanaryClasses} for who forwards it and
+ *   {@link resolveSelection} for what must be true before the list is filled.
  * @param {string} [input.epoch] - Routing epoch id (G1: the spawn run_id).
  * @param {object} [input.evidence] - {@link REQUIRED_EVIDENCE} plus optional ids.
  * @returns {object} A RouteReceipt (`schemas/route-receipt.schema.json`).
@@ -492,11 +635,7 @@ export function routeModel(input = {}) {
   const top = pickRoute(src, classified.actionClass, catalog);
   reason.push(top === null ? 'route:no-candidate' : `route:${top.tier}`);
 
-  const role = str(src.role);
-  const selectedTier = resolveModel(src.agentType, role === null ? {} : { role }, src.config);
-  const selected = modelIdentity(selectedTier, catalog);
-  reason.push(selected === null ? 'policy:unknown-tier' : `policy:${selected.tier}`);
-  if (top !== null && selected !== null && top.tier !== selected.tier) reason.push('divergence');
+  const selection = resolveSelection(src, classified.actionClass, top, catalog, reason);
 
   const hysteresis = resolveHysteresis(src, top === null ? null : top.tier, catalog, budgetTokens);
   for (const code of hysteresis.reason ?? []) reason.push(`hysteresis:${code}`);
@@ -515,9 +654,9 @@ export function routeModel(input = {}) {
     models: {
       current: modelIdentity(currentTier, catalog),
       recommended: top === null ? null : modelIdentity(top.tier, catalog),
-      selected,
+      selected: selection.identity,
     },
-    decision: { type: currentTier !== null && currentTier === selectedTier ? 'pin' : 'route' },
+    decision: { type: currentTier !== null && currentTier === selection.tier ? 'pin' : 'route' },
     predicted: buildPredicted(top),
     transition: buildTransition(hysteresis),
     terms: buildTerms(hysteresis.cost),
