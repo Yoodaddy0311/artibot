@@ -71,9 +71,18 @@
  *     -- a second bind line for the same agent that carried no `tool_use_id`
  *     is MALFORMED there and merely a duplicate here -- `conflicts` stays 0
  *     and the class surfaces as `pair-bind-mismatch` beside
- *     `unlabeled.malformed_binds` instead. In that case the LABEL is
- *     order-stable (SIMULATED either way) but the REASON is not: it names
- *     whichever bind won, which is a property of the input order.
+ *     `unlabeled.malformed_binds` instead.
+ *     IN THAT CLASS THE LABEL ITSELF MOVES WITH INPUT ORDER, not just the
+ *     reason. When the Action's own bind would earn a PARTIAL, seeing the
+ *     keyless line first costs it that pair and the row reads SIMULATED /
+ *     `pair-bind-mismatch`; seeing the real line first reads PARTIAL. The
+ *     movement is ONE-DIRECTIONAL and that is the property worth having: a
+ *     lost pair can only DEMOTE (fail-closed). No input order can manufacture
+ *     a PARTIAL for an Action that does not earn one on its own bind, because
+ *     the pair a PARTIAL rests on is always that bind's own. Making the label
+ *     order-invariant would mean mismatching every agent that owns a keyless
+ *     bind; that is a separate change, and until it lands this is a property
+ *     of the INPUT, recorded rather than papered over.
  *  5. AN AGENT ID REUSED ACROSS SESSIONS. This module inherits the assumption
  *     stated in `spawn-outcome.js`'s "TWO LINES, ONE SPAWN, TWO DIFFERENT
  *     KEYS" section: the receipt join is on `agent_id` ALONE and assumes it is

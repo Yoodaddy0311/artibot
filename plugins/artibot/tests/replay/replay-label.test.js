@@ -516,16 +516,60 @@ describe('a pair built from a DIFFERENT bind is not evidence for this Action', (
     expect(out.unlabeled.malformed_binds).toBe(1);
   });
 
-  it('grades the same LABEL when the real bind is seen FIRST', () => {
+  it('grades from the RIGHT bind when the real bind is seen FIRST', () => {
     const out = labelReplay([sel, real, keyless, used]);
     expect(out.rows[0].label).toBe('SIMULATED');
-    // The REASON legitimately differs: here the pair IS this bind's pair, so
-    // the grade comes from the right evidence and the fifo gate is what
-    // excludes it. The LABEL is what must not move with input order.
+    // The REASON differs because the two orders are genuinely different
+    // states: here the pair IS this bind's pair, so the grade comes from the
+    // right evidence and the fifo gate is what excludes it. The label happens
+    // to agree ONLY because this Action's own bind is a fifo guess, i.e. it is
+    // SIMULATED on its own merits -- see the exact-bind probe below for the
+    // case where the label does move.
     expect(out.rows[0].reason).toBe(REPLAY_LABEL_REASONS.FIFO_JOIN);
   });
 
-  it('never grades either order PARTIAL (the fail-open this pins)', () => {
+  it('DOWNGRADES a PARTIAL-eligible Action when the keyless bind wins', () => {
+    // The label is NOT order-invariant, and recording that is the point of
+    // this test. With an exact-confidence real bind the Action qualifies for
+    // PARTIAL on its own evidence, so the two orders disagree on the LABEL,
+    // not merely on the reason.
+    //
+    // The movement is one-directional and that is what makes it tolerable:
+    // losing the pair can only DEMOTE to SIMULATED (fail-closed). No input
+    // order can manufacture a PARTIAL for an Action whose own bind does not
+    // earn one -- the pair used for a PARTIAL is always this bind's own pair.
+    // Making the label order-invariant means sweeping the agents that own a
+    // keyless bind and mismatching them all; that is a separate change.
+    const exactReal = bound({
+      agentId: 'ag-x2', toolUseId: 'toolu_x2', confidence: 'exact', recommended: OPUS,
+    });
+    const exactKeyless = boundWithoutToolUse({
+      agentId: 'ag-x2', toolUseId: 'toolu_x2', confidence: 'exact', recommended: OPUS,
+    });
+    const sel2 = selected({ toolUseId: 'toolu_x2' });
+    const used2 = agentReceipt('ag-x2');
+
+    const keylessFirst = labelReplay([sel2, exactKeyless, exactReal, used2]);
+    expect(keylessFirst.rows[0].label).toBe('SIMULATED');
+    expect(keylessFirst.rows[0].reason).toBe(REPLAY_LABEL_REASONS.PAIR_BIND_MISMATCH);
+
+    const realFirst = labelReplay([sel2, exactReal, exactKeyless, used2]);
+    expect(realFirst.rows[0].label).toBe('PARTIAL');
+    expect(realFirst.rows[0].reason).toBe(REPLAY_LABEL_REASONS.SINGLE_RUN_RESULT);
+
+    // Neither order sees a conflict: route-bind found exactly one usable bind
+    // for this Action, so invariant 1 never broke.
+    for (const out of [keylessFirst, realFirst]) {
+      expect(out.conflicts).toBe(0);
+      expect(out.unlabeled.malformed_binds).toBe(1);
+    }
+  });
+
+  it('never lends a TIER-1 confidence to a fifo Action (the fail-open this pins)', () => {
+    // Scoped deliberately: this says nothing about order-invariance in
+    // general (the probe above shows the label CAN move). It says that the
+    // exact-confidence stranger cannot lift THIS fifo Action into PARTIAL in
+    // either order -- which is the fail-open that was found and closed.
     for (const order of [[sel, keyless, real, used], [sel, real, keyless, used]]) {
       expect(labelReplay(order).by_label.PARTIAL).toBe(0);
       expect(labelReplay(order).by_label.SIMULATED).toBe(1);
