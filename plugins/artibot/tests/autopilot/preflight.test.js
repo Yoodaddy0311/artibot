@@ -6,7 +6,7 @@
  *   - runPreflight aggregation: all-ok, errors-only, warnings-only.
  *   - DI: gitRunner / statfs / lockChecker / telemetry / nodeVersion /
  *     resolveRepoIdentity / listLocks / listAgents / env.
- *   - Hermetic: zero real git / disk / lock / telemetry I/O.
+ *   - Hermetic for git / disk / lock; `runPreflight(OWN, …)` emits REAL telemetry ('sess-own'), sandboxed by tests/setup/state-dir.js.
  *   - repoConcurrency (same repo, different task): fail / warn / pass buckets.
  *   - peerNotice: pass in every branch (the always-pass contract itself is
  *     pinned by tests/firewall/peer-notice-advisory.test.js).

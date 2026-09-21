@@ -12,7 +12,7 @@ import path from 'node:path';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { renameWithRetry } from '../core/file.js';
-import { getPluginRoot } from '../core/platform.js';
+import { getPluginRoot, sameDirPath } from '../core/platform.js';
 import { resolveRunEventsPath } from '../observability/run-events.js';
 import { migrateV2toV3, SCHEMA_VERSION_V3 } from './migrate-v3.js';
 
@@ -65,10 +65,70 @@ const RENAME_RETRY_OPTS = { attempts: MAX_RENAME_ATTEMPTS, maxBackoffMs: MAX_REN
 /**
  * Resolve the autopilot runtime directory inside the plugin root.
  * Path is constructed via path.join so Korean / spaced paths are preserved.
- * @returns {string} absolute directory path
+ *
+ * `ARTIBOT_AUTOPILOT_STORE_DIR` relocates that directory. It is a path knob,
+ * not a test kill-switch: every read and write still happens, just somewhere
+ * else, so a suite can exercise the real store code without depositing session
+ * files among the real ones. The directory is git-ignored (`.gitignore` matches
+ * `/runtime/`, and `git ls-files runtime` is empty as of 2026-09-21), so the
+ * cost of a stray test write is not a dirty working copy — it is that every
+ * reader of the store population counts fixtures as sessions: {@link
+ * listSessions} and, through it, `lib/autopilot/cross-session-learner.js` and
+ * `scripts/hooks/bash-risk-guard.js`; `scripts/dev/prune-autopilot-store.mjs`
+ * enumerates the same directory directly via this function.
+ * It is read on EVERY call, because a value captured at import is already fixed
+ * before a test can set it.
+ *
+ * `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT` records the plugin root the override was
+ * minted for, and the override is honored only while that is still the root in
+ * force. Environment variables are inherited by spawned processes, so a test
+ * that isolates a child by handing it `{ ...process.env, CLAUDE_PLUGIN_ROOT:
+ * sandbox }` would otherwise have this override ride along and overrule the
+ * more specific knob the child was actually given — the child would write into
+ * the parent's store instead of its own.
+ *
+ * The pairing is REQUIRED. An override with no recorded root is an override we
+ * cannot place, and "cannot place" must not mean "trust"; that is the fail-open
+ * shape of a denylist. Mirrors `lib/core/config.js#resolveArtibotDir`, whose
+ * `ARTIBOT_STATE_DIR` / `ARTIBOT_STATE_DIR_HOME` pair solves the same problem
+ * for user state. Compared through `sameDirPath` rather than `===` so a
+ * trailing separator or Windows drive-letter case does not read as a different
+ * root and throw the override away — which would put writes back into the real
+ * store, the exact outcome this seam exists to prevent.
+ *
+ * An honored override is returned through `path.resolve`, so both branches
+ * yield one absolute path in the platform's own separator. This DIVERGES from
+ * `resolveArtibotDir`, which hands its override back verbatim. The reason is
+ * measured: consumers build on the returned directory with `path.join` —
+ * `telemetry.js#getEventsPath` via `lib/observability/run-events.js:74` — which
+ * emits the platform separator regardless of how the directory was spelled. An
+ * override written with forward slashes, the Git Bash idiom on Windows, thus
+ * produced a child path that was genuinely inside the store yet compared
+ * unequal to it as a string (2026-09-21: `telemetry.test.js:40`'s
+ * `startsWith(getStoreDir())` red under `C:/…/ap-probe-ctl4`, green under the
+ * same directory spelled with backslashes). Normalizing at the single point
+ * that mints the value fixes every consumer at once. A relative override
+ * resolves against cwd, which is where fs would have placed it anyway.
+ *
+ * @returns {string} Absolute directory path, in the platform separator, for
+ *   both the plugin-root default and an honored override.
  */
 export function getStoreDir() {
-  return path.join(getPluginRoot(), 'runtime', 'autopilot');
+  // One read of the plugin root, not two: the derived path and the value the
+  // pairing is compared against must come from the same observation, or a
+  // `CLAUDE_PLUGIN_ROOT` changed between the two calls would let an override
+  // minted for root A be honored while the fallback points at root B.
+  const pluginRoot = getPluginRoot();
+  const rootDerived = path.join(pluginRoot, 'runtime', 'autopilot');
+  const override = process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
+  if (!override) return rootDerived;
+
+  const mintedFor = process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
+  if (!mintedFor) return rootDerived;
+
+  if (!sameDirPath(mintedFor, pluginRoot)) return rootDerived;
+
+  return path.resolve(override);
 }
 
 /**

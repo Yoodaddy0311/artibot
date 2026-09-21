@@ -51,12 +51,91 @@
  * this way, with 9 spawn sites carrying the same latent conflict. Hence the
  * `ARTIBOT_STATE_DIR_HOME` pairing below: `resolveArtibotDir()` drops the
  * override whenever the current home is not the one it was minted for.
+ *
+ * ---------------------------------------------------------------------------
+ * THE AUTOPILOT STORE is the second store this file redirects, for the same
+ * reason and on the same terms.
+ *
+ * It is `<pluginRoot>/runtime/autopilot`, resolved by
+ * `lib/autopilot/session-store.js#getStoreDir`. It is NOT tracked — `.gitignore`
+ * matches `/runtime/` and `git ls-files runtime` returned nothing on
+ * 2026-09-21 — so a stray test write leaves the working copy clean and shows up
+ * nowhere in `git status`. That is precisely why it is worth a seam: the damage
+ * is silent. Test sessions land in the same directory as real ones and every
+ * reader of the store POPULATION then counts them —
+ * `session-store.js#listSessions` (which enumerates `*.json` there) and, through
+ * it, `lib/autopilot/cross-session-learner.js:37` and
+ * `scripts/hooks/bash-risk-guard.js:96` (real module, imported at :128);
+ * `scripts/dev/prune-autopilot-store.mjs:303` enumerates the same directory
+ * directly via `getStoreDir()`.
+ *
+ * Five writers reach it and all five go through that one resolver:
+ * `saveSession` itself, `lib/autopilot/telemetry.js` (`<id>.events.ndjson`),
+ * `lib/autopilot/lock.js` (`locks/`), `lib/autopilot/memory.js` (`memory/`) and
+ * `lib/autopilot/worktree-manager.js` (`worktrees/`).
+ *
+ * Default-on, not opt-in, for the reason the checkpoint store is: most files
+ * under `tests/autopilot/` set no override at all, and a guard that only
+ * protects the files written alongside it fails open for every file written
+ * next. Setting it here also means the test files themselves need no edit.
+ *
+ * Its temp directory is its OWN, deliberately not a subdirectory of the state
+ * dir above. Two reasons. Nesting would make the store's cleanup conditional on
+ * a branch it has nothing to do with — an operator running the documented
+ * ad-hoc `ARTIBOT_STATE_DIR=/tmp/x npx vitest` skips that block entirely, so
+ * the nested store would be created with nothing registered to remove it: the
+ * same no-remover shape the 926-directory note at the `rmSync` above records,
+ * though that pile had a different cause. And a store nested inside the state
+ * dir is an extra entry for every test that enumerates or counts the state dir.
+ * One directory per worker per store, each with its own remover, has neither
+ * problem.
+ *
+ * CLEANUP IS `afterAll`, NOT `process.once('exit')`. The exit listener above
+ * does not run in this environment, measured 2026-09-21: a probe that wrote a
+ * marker file as the FIRST statement of the handler produced 0 markers across a
+ * 2-worker run, so the handler is never entered — this is not an `rmSync`
+ * failure. Vitest appears to tear its pool workers down rather than let them
+ * exit normally (mechanism not confirmed). The observable cost had been 23 `artibot-test-autopilot-store-*`
+ * and 32 `artibot-test-state-*` directories left in `os.tmpdir()` (counted
+ * 2026-09-21); the state-dir pile is the same bug and is deliberately left
+ * alone here as out of scope.
+ *
+ * `afterAll` runs per test FILE, so the sandbox is removed between files too.
+ * That is a feature, not a cost: a test that depended on store contents written
+ * by an earlier file would be an order-dependent test, and every writer
+ * recreates its own parents. The guard is strict equality against the path this
+ * worker minted — an operator-supplied directory, or one a test repointed, is
+ * never removed.
+ *
+ * REACH: a spawned child inherits both variables, so a child that is otherwise
+ * unisolated still writes into the sandbox. A child handed a different
+ * `CLAUDE_PLUGIN_ROOT` gets the better outcome automatically: the pair no
+ * longer matches the root in force, `getStoreDir()` discards the inherited
+ * override, and the child lands in its own `<sandbox>/runtime/autopilot`. That
+ * is the hazard the `ARTIBOT_STATE_DIR_HOME` note above describes, already
+ * solved on this store by construction.
+ *
+ * WHAT THIS DOES NOT COVER:
+ *   - **A test that deletes or repoints the override without restoring it.**
+ *     Setup re-runs per test file, so the damage is bounded to the rest of that
+ *     file — but within it, later writes land in the real store.
+ *   - **A child given the real plugin root AND a matching pair explicitly.**
+ *     That is a valid, honored override; nothing here overrules it.
+ *   - **Hardcoded paths.** A writer that joins `runtime/autopilot` itself
+ *     instead of calling `getStoreDir()` is invisible to this seam. That is a
+ *     ratchet in `tests/firewall/autopilot-store-sandbox-required.test.js`,
+ *     not something this file can see.
+ *   - **Sibling stores.** `~/.artibot/queues`, `~/.artibot/failure-memory` and
+ *     `.artibot/runtime/decisions` anchor elsewhere and are out of scope.
+ *   - **A worker killed mid-file.** `afterAll` does not run either, so that
+ *     worker's directory survives — one per killed worker, not one per run.
  */
 
+import { afterAll } from 'vitest';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getHomeDir } from '../../lib/core/platform.js';
+import { getHomeDir, getPluginRoot } from '../../lib/core/platform.js';
 
 if (!process.env.ARTIBOT_STATE_DIR) {
   // Per worker process, not per file: setup runs once per test file but the
@@ -92,3 +171,44 @@ if (!process.env.ARTIBOT_STATE_DIR) {
 // otherwise find their redirect silently ignored. Whatever value is in force
 // when the suite starts is the one this pairs.
 process.env.ARTIBOT_STATE_DIR_HOME = getHomeDir();
+
+// Same per-worker keying as the state dir, and the same not-created-here rule:
+// all five writers make their own parents (`session-store.js#saveSession`
+// mkdirSync recursive, the other four via `ensureDirSync`), so pre-creating
+// would only guarantee an empty directory per worker whether or not a test
+// touched the store.
+//
+// Computed OUTSIDE the assignment below because the remover needs it too. Setup
+// re-runs per test file but the env persists in the worker, so under the
+// autopilot project's `singleFork` the block below is entered by the first file
+// only — a remover registered inside it would fire after file 1 alone, and
+// whatever the remaining files wrote would be left behind.
+const OWN_AUTOPILOT_STORE_DIR = path.join(os.tmpdir(), `artibot-test-autopilot-store-${process.pid}`);
+
+if (!process.env.ARTIBOT_AUTOPILOT_STORE_DIR) {
+  process.env.ARTIBOT_AUTOPILOT_STORE_DIR = OWN_AUTOPILOT_STORE_DIR;
+}
+
+// Registered for every test file, and strict-equality guarded so it can only
+// ever remove the directory THIS worker minted. An operator who exported their
+// own `ARTIBOT_AUTOPILOT_STORE_DIR`, or a test that repointed it and left it
+// repointed, keeps their directory. `force` makes the usual case — nothing was
+// ever written — a no-op rather than an error.
+afterAll(() => {
+  if (process.env.ARTIBOT_AUTOPILOT_STORE_DIR !== OWN_AUTOPILOT_STORE_DIR) return;
+  try {
+    fsSync.rmSync(OWN_AUTOPILOT_STORE_DIR, { recursive: true, force: true });
+  } catch { /* best effort — a locked worktree handle must not fail the suite */ }
+});
+
+// Records the plugin root the override in force belongs to; `getStoreDir()`
+// honors the override only while this still matches `getPluginRoot()`.
+//
+// Stamped unconditionally, for the reason given above the `_HOME` line: the
+// resolver discards an override that carries no recorded root, so an operator
+// who exports only `ARTIBOT_AUTOPILOT_STORE_DIR` would otherwise find their
+// redirect silently ignored and their writes back in the real store. When
+// the operator supplied the pair correctly this is a no-op; when they supplied
+// a stale one it is a correction. The suite runs out of this root, so this is
+// the root any override in force at startup belongs to.
+process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT = getPluginRoot();
