@@ -18,6 +18,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import * as barrel from '../../lib/supervisor/index.js';
 import { HEALTH_STATES } from '../../lib/supervisor/lane-monitor.js';
 import {
   RECONCILE_REASONS,
@@ -204,5 +205,13 @@ describe('reconcile reason vocabulary', () => {
     expect(reconcileLane().blocked_by).toContain('reconcile:ops-state-unknown');
     expect(reconcileLane({ limb: 5, opsState: 7, lane: 'x', gitEvidence: 'y', nowMs: 'z' }).limb).toBe(null);
     expect(reconcileLanes('nope', 'nope', 'nope')).toEqual([]);
+  });
+});
+
+describe('the barrel exports this module', () => {
+  it('re-exports all three names from lib/supervisor/index.js as the same references', () => {
+    expect(barrel.RECONCILE_REASONS).toBe(RECONCILE_REASONS);
+    expect(barrel.reconcileLane).toBe(reconcileLane);
+    expect(barrel.reconcileLanes).toBe(reconcileLanes);
   });
 });
