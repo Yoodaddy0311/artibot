@@ -40,6 +40,8 @@ export {
 
 export { SESSION_KIND, buildSessionScorecard, mergeEventCounts } from './session-scorecard.js';
 
+export { COMPARE_KIND, buildCompareScorecard } from './compare-scorecard.js';
+
 export {
   METRIC_STATE,
   UNMEASURED_TEXT,

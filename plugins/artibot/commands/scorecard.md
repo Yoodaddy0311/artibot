@@ -1,6 +1,6 @@
 ---
 description: (Artibot) 기능 완성도 스코어카드 — 기능 영역을 도출해 file:line 증거와 함께 0~100 채점하고 스냅샷 저장, 작업 전후를 "작업 전·작업 후·상승폭·남은 갭" 표로 비교. 트리거 "기능 완성도", "얼마나 남았", "진행률 스코어카드", "작업 전후 비교", "기능별 점수", "완성도 평가", "feature scorecard"
-argument-hint: '[--baseline|--diff|--areas <n>|--session [id]|--routing]'
+argument-hint: '[--baseline|--diff|--areas <n>|--session [id]|--routing|--compare]'
 allowed-tools: [Read, Bash, Grep, Glob]
 ---
 
@@ -18,6 +18,7 @@ allowed-tools: [Read, Bash, Grep, Glob]
 - `--areas <n>` → 도출할 영역 개수 힌트(기본 3~8 자동).
 - `--session [id]` → **원장 fold** 세션 카드(§35). id 생략 시 현재 세션. 위 세 경로와 엔진·저장소가 다르다 — 아래 "세션/라우팅 카드" 절.
 - `--routing` → **원장 fold** 라우팅 카드(§34 ROUTING). 스냅샷을 저장하지 않는다.
+- `--compare` → **원장 fold** 스폰 비교 카드 — 라우터가 추천한 모델(`route.bound`) 대 실제 서빙 모델(`usage.receipt`). 스냅샷을 저장하지 않는다.
 
 ## 워크플로우 (커맨드가 수행)
 
@@ -79,6 +80,42 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 - 출력은 아래 `## 출력` 절의 TTY 테마 렌더가 **아니다**. 이 경로는 GFM 표 마크다운 **한 형태뿐**이며 TTY 여부로 분기하지 않는다 — 프로세스를 읽는 것은 효과이고 이 엔진은 순수(L2)다.
 - **분모 0 인 지표는 `unmeasured` 로 렌더된다. `0%` 로 쓰지 않는다.** 훅 배선은 착지했으나(`lib/runtime/human-asked-record.js#recordHumanAsked` `human.asked`, `scripts/hooks/subagent-handler.js#observeRoute` `route.selected`, `lib/runtime/middleware/tasks.js#createTasksMiddleware` Mission Contract) **설치본에 반영되기 전까지 원장이 비어 전 지표가 `unmeasured`** 다. 훅은 `${CLAUDE_PLUGIN_ROOT}` 로 등록되므로(`hooks/hooks.json:38·182`) 마켓플레이스 설치본을 쓰는 경우 `npm run sync:local` 전까지 옛 사본이 돈다. 반영 후 스폰·차단·프롬프트부터 채워진다.
 - 카드가 **못 보는 것**(Progress·Status·Elapsed·토큰/비용·Useful/Wasteful Switch·Switch Efficiency·Transition Cost/Time)은 각 모듈 헤더에 이유와 함께 적혀 있다. 지출 합산은 `lib/economics` 의 단일 답이고, 원장 gap 판정은 `/doctor` Check 8 의 일이다 — 여기서 두 번째 답을 만들지 않는다.
+
+#### 스폰 비교 카드 (`--compare`)
+
+`--compare` 는 **라우터가 추천한 모델(`route.bound`) 대 실제 서빙 모델(`usage.receipt`)** 을 접는다. 위 두 카드와 달리 replay 인덱스를 받지 않고 `lib/replay/spawn-outcome.js#joinSpawnOutcomes` 의 출력을 접는다 — 이 비교의 산술은 그 파일 한 곳에 있고, `scripts/ledger/route-compare.mjs` 가 쓰는 fold 와 **같은 것**이라 두 번째 답이 아니다. 이 경로도 **아무것도 저장하지 않는다**.
+
+```
+Bash: node --input-type=module -e "
+const { pathToFileURL } = await import('node:url');
+const path = (await import('node:path')).default;
+const root = process.env.CLAUDE_PLUGIN_ROOT;
+const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
+const { readAllEvents } = await load('lib/runtime/ledger.js');
+const { joinSpawnOutcomes } = await load('lib/replay/index.js');
+const sc = await load('lib/scorecard/index.js');
+const args = process.argv.slice(1);
+const at = args.indexOf('--since');
+let sinceMs = null;
+if (at !== -1) {
+  const text = String(args[at + 1] ?? '').trim();
+  const numeric = /^-?[0-9]+$/.test(text);
+  if (text === '' || (text.startsWith('-') && !numeric)) throw new Error('--since needs a value: ISO timestamp or epoch ms');
+  sinceMs = numeric ? Number(text) : Date.parse(text);
+  if (!Number.isFinite(sinceMs)) throw new Error('--since must be an ISO timestamp or epoch ms, got: ' + text);
+}
+const events = readAllEvents(process.cwd(), sinceMs === null ? {} : { since: sinceMs });
+const since = sinceMs === null ? null : new Date(sinceMs).toISOString();
+const card = sc.buildCompareScorecard(joinSpawnOutcomes(events), { since });
+process.stdout.write(sc.renderScorecardMarkdown(card));
+" -- $ARGUMENTS
+```
+
+- `--since <ISO|epoch ms>` 는 **리더 필터에 epoch ms 로** 걸고(`readAllEvents` 의 `filter.since`) 카드 라벨에는 ISO 로 넘긴다. 파싱할 수 없는 값도, **값이 아예 없는 `--since` 도** 조용히 무시하지 않고 메시지와 함께 중단한다 — 범위를 못 건 실행이 전 기간 실행과 같은 출력이 되면 안 된다. 그래서 분기가 `--since` **플래그의 존재**를 보고 값의 존재를 보지 않는다: 값으로 분기하면 `--compare --since` 가 조용히 전 기간 카드를 내는 fail-open 이 된다(실측 확인 후 수정). 스니펫이 `Date` 를 쓰는 것은 **호출자 쪽**이라 허용된다(순수성은 `lib/scorecard/` 의 계약이다).
+- **비교 가능한 쌍이 0 이면 `unmeasured`** 다. `0%` 로 쓰지 않는다. 가격이 없는 쌍은 0 으로 합산하지 않고 비용 분모에서 빠진다 — 0 원으로 세면 측정된 바닥이 실제보다 낮아진다.
+- `score` 행은 **항상 `unmeasured`**(source 가 null)다 — 원장에 **스폰 키로 점수를 쓰는 기록자가 없다**. 그리고 추천과 서빙이 일치한다는 것은 그 선택이 옳았다는 뜻이 아니다: 일치는 품질이 아니다.
+- `fifo` 처럼 confidence allowlist **밖**에서 묶인 쌍은 비교에서 제외되고 `excluded_fifo` 로 보인다 — 제외는 선택이지 측정이 아니다.
+- 이 카드가 **못 보는 것**은 `lib/replay/spawn-outcome.js` 헤더의 CANNOT SEE 목록이 정본이다(고장인지 정책인지 · fifo 쌍의 정당성 · 멀티모델 런 · 중복 영수증 · 가격 없는 쌍의 비용). 여기에 복제하지 않는다 — 복제하면 두 목록이 갈린다.
 
 ## 출력
 
