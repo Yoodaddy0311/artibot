@@ -44,6 +44,7 @@ const SESS_A = 'sess-a';
 const SESS_B = 'sess-b';
 const OPUS = 'claude-opus-5';
 const FABLE = 'claude-fable-5-1';
+const HAIKU = 'claude-haiku-4-5-20251001';
 
 const SCORE_BLOCK = { source: null, value: null, reason: 'no-spawn-keyed-score-writer' };
 
@@ -82,7 +83,7 @@ function bound(spec) {
       confidence,
       method: 'ledger-tail',
       ...(agentType === undefined ? {} : { agent_type: agentType }),
-      matched_on: 'tool_use_id',
+      matched_on: 'name', // writer enum is name | subagent_type
       ...(selected === undefined ? {} : { selected_model: selected }),
       ...(recommended === undefined ? {} : { recommended_model: recommended }),
       action_class: 'spawn',
@@ -104,8 +105,12 @@ const USAGE = Object.freeze({
 /**
  * A `usage.receipt` row in the live envelope key order.
  *
- * `envelope.model === data.model_identity.model_id` held on 76/76 live
- * subagent rows, so the fixture keeps them equal unless a case says otherwise.
+ * `envelope.model` and `data.model_identity.model_id` disagreed on 0/94 live
+ * rows, so the builder keeps them equal unless `envelopeModel` says otherwise.
+ * `cost.pricing_version` carries 'unresolved' on an unpriced row -- that is the
+ * field the string lives in; `cost.total` is a number or null, never a string.
+ * `thinking_tokens` is OMITTED (not nulled) when unobserved, as the writer
+ * omits it.
  *
  * @param {object} spec - run_id, served model, cost, usage and latency overrides.
  * @returns {object} ledger line.
@@ -113,12 +118,16 @@ const USAGE = Object.freeze({
 function receipt(spec) {
   const {
     runId, session = SESS_A, model = OPUS, cost = 0.5,
-    latencyMs = 1000, usage = {},
+    latencyMs = 1000, usage = {}, omitThinking = false, envelopeModel,
   } = spec;
   seqCounter += 1;
+  const priced = typeof cost === 'number';
+  const metering = { ...USAGE, ...usage };
+  if (omitThinking) delete metering.thinking_tokens;
+  const envelopeKey = envelopeModel === undefined ? model : envelopeModel;
   return {
     v: 1,
-    ts: '2026-09-21T01:05:00.000Z',
+    ts: `2026-09-21T01:05:${String(seqCounter % 60).padStart(2, '0')}.000Z`,
     event: 'usage.receipt',
     session_id: session,
     source: 'hook',
@@ -126,8 +135,8 @@ function receipt(spec) {
     seq: seqCounter,
     mission_id: MISSION,
     run_id: runId,
-    model,
-    idempotency_key: `usage.receipt:${runId}:${model}`,
+    ...(envelopeKey === null ? {} : { model: envelopeKey }),
+    idempotency_key: `usage.receipt:${session}:${runId}:${model}`,
     data: {
       schema_version: 1,
       run_id: runId,
@@ -140,14 +149,14 @@ function receipt(spec) {
         version: '1',
         catalog_version: '5',
       },
-      usage: { ...USAGE, ...usage },
+      usage: metering,
       timing: {
         started_at: '2026-09-21T01:04:00.000Z',
         completed_at: '2026-09-21T01:05:00.000Z',
         latency_ms: latencyMs,
       },
       outcome: { status: 'unknown', accepted: null },
-      cost: { total: cost, pricing_version: 'pv-1' },
+      cost: { total: cost, pricing_version: priced ? 'pv-1' : 'unresolved' },
     },
   };
 }
@@ -190,18 +199,25 @@ function fixture() {
     // -- same, opus, UNPRICED (cost.total null) and unmeasured latency --
     bound({ agentId: 'ag-008', recommended: OPUS, confidence: 'name' }),
     agentReceipt('ag-008', { model: OPUS, cost: null, latencyMs: null }),
-    // -- diverged fable -> opus, UNPRICED (cost.total 'unresolved'), sess-b --
+    // -- diverged fable -> opus, UNPRICED, thinking_tokens key OMITTED, sess-b --
     bound({ agentId: 'ag-009', session: SESS_B, recommended: FABLE }),
     agentReceipt('ag-009', {
-      session: SESS_B, model: OPUS, cost: 'unresolved', usage: { thinking_tokens: null },
+      session: SESS_B, model: OPUS, cost: null, omitThinking: true,
     }),
     // -- multi-model run: two receipts, one per served model, sess-b --
-    bound({ agentId: 'ag-010', session: SESS_B, recommended: OPUS, confidence: 'weird' }),
+    bound({ agentId: 'ag-010', session: SESS_B, recommended: OPUS }),
     agentReceipt('ag-010', { session: SESS_B, model: OPUS, cost: 0.75 }),
     agentReceipt('ag-010', { session: SESS_B, model: FABLE, cost: 1, latencyMs: 2000 }),
     // -- two binds that never produced a receipt --
     bound({ agentId: 'ag-011', recommended: OPUS }),
     bound({ agentId: 'ag-012', recommended: FABLE }),
+    // -- NON-ALLOWLISTED confidence: would AGREE, but is not comparable --
+    bound({ agentId: 'ag-013', recommended: OPUS, confidence: 'weird' }),
+    agentReceipt('ag-013', { model: OPUS, cost: 0.5 }),
+    // -- DOUBLE-WRITTEN receipt: same (run, model) twice, cost/usage doubled --
+    bound({ agentId: 'ag-014', recommended: OPUS }),
+    agentReceipt('ag-014', { model: OPUS, cost: 0.5 }),
+    agentReceipt('ag-014', { model: OPUS, cost: 0.5 }),
     // -- a subagent receipt with no bind --
     agentReceipt('ag-099', { model: OPUS, cost: 0.5 }),
     // -- two MAIN-THREAD receipts: run_id is the session id, no agent- prefix --
@@ -256,6 +272,8 @@ describe('joinSpawnOutcomes() on nothing', () => {
     expect(f.main_thread_receipts).toBe(0);
     expect(f.subagent_receipts).toBe(0);
     expect(f.malformed_receipts).toBe(0);
+    expect(f.model_mismatch).toBe(0);
+    expect(f.duplicate_receipts).toBe(0);
     expect(f.pairs).toEqual([]);
     expect(f.compared).toBe(0);
     expect(f.excluded_fifo).toBe(0);
@@ -316,19 +334,27 @@ describe('joinSpawnOutcomes() on nothing', () => {
 describe('joinSpawnOutcomes() row accounting over the fixture', () => {
   const f = joinSpawnOutcomes(fixtureWithDuplicate());
 
-  it('counts 12 binds, 1 duplicate and 1 malformed bind', () => {
-    expect(f.binds).toBe(12);
+  it('counts 14 binds, 1 duplicate and 1 malformed bind', () => {
+    expect(f.binds).toBe(14);
     expect(f.duplicate_binds).toBe(1);
     expect(f.malformed_binds).toBe(1);
   });
 
   it('splits receipts into subagent, main-thread and malformed', () => {
-    expect(f.receipts).toBe(15);
-    expect(f.subagent_receipts).toBe(12);
+    expect(f.receipts).toBe(18);
+    expect(f.subagent_receipts).toBe(15);
     expect(f.main_thread_receipts).toBe(2);
     expect(f.malformed_receipts).toBe(1);
     expect(f.subagent_receipts + f.main_thread_receipts + f.malformed_receipts)
       .toBe(f.receipts);
+  });
+
+  it('reports the two row-level integrity counters', () => {
+    // Neither excludes anything: the rows they count still participate in full.
+    // The fixture's writer-true rows never disagree on the model, and one pair
+    // carries the same (run, model) receipt twice.
+    expect(f.model_mismatch).toBe(0);
+    expect(f.duplicate_receipts).toBe(1);
   });
 
   it('FIRST BIND WINS in input order: the late repeat does not overwrite', () => {
@@ -353,7 +379,7 @@ describe('joinSpawnOutcomes() pairs and comparison', () => {
   const f = joinSpawnOutcomes(fixtureWithDuplicate());
 
   it('builds one pair per bound agent that has a subagent receipt', () => {
-    expect(f.pairs).toHaveLength(10);
+    expect(f.pairs).toHaveLength(12);
     expect(f.unjoined_binds).toBe(2);
     expect(f.unjoined_receipts).toBe(1);
   });
@@ -362,26 +388,59 @@ describe('joinSpawnOutcomes() pairs and comparison', () => {
     expect(f.pairs.map((p) => `${p.session_id}/${p.agent_id}`)).toEqual([
       'sess-a/ag-001', 'sess-a/ag-002', 'sess-a/ag-003', 'sess-a/ag-004',
       'sess-a/ag-005', 'sess-a/ag-006', 'sess-a/ag-007', 'sess-a/ag-008',
+      'sess-a/ag-013', 'sess-a/ag-014',
       'sess-b/ag-009', 'sess-b/ag-010',
     ]);
   });
 
-  it('compares 8 pairs and excludes fifo and no-recommendation separately', () => {
-    expect(f.compared).toBe(8);
-    expect(f.excluded_fifo).toBe(1);
+  it('compares 9 pairs and excludes fifo and no-recommendation separately', () => {
+    expect(f.compared).toBe(9);
+    expect(f.excluded_fifo).toBe(2);
     expect(f.excluded_no_recommendation).toBe(1);
   });
 
-  it('splits compared pairs 4 same / 4 diverged at rate 0.5', () => {
-    expect(f.by_agreement).toEqual({ same: 4, diverged: 4 });
-    expect(f.agreement_rate).toBe(0.5);
+  it('splits compared pairs 5 same / 4 diverged', () => {
+    expect(f.by_agreement).toEqual({ same: 5, diverged: 4 });
+    expect(f.agreement_rate).toBe(5 / 9);
   });
 
   it('buckets confidence over ALL PAIRS, unknown values under "other"', () => {
     expect(f.by_confidence).toEqual({
-      exact: 5, name: 3, fifo: 1, other: 1,
+      exact: 7, name: 3, fifo: 1, other: 1,
     });
     expect(Object.values(f.by_confidence).reduce((a, b) => a + b, 0)).toBe(f.pairs.length);
+  });
+
+  it('ALLOWLIST: a non-fifo, non-allowlisted confidence is excluded too', () => {
+    // Repo rule section 8: gate on what is permitted. A deny-list of ['fifo']
+    // is fail-OPEN -- a confidence tier added to bindRoute tomorrow would walk
+    // straight into `compared` and move the agreement rate before anyone chose
+    // that. `ag-013` would AGREE if it were compared (recommended opus, served
+    // opus), so its exclusion cannot be an accident of the fixture.
+    const odd = f.pairs.find((p) => p.agent_id === 'ag-013');
+    expect(odd.confidence).toBe('weird');
+    expect(odd.recommended_model).toBe(OPUS);
+    expect(odd.served_models).toEqual([OPUS]);
+    expect(odd.agreement).toBeNull();
+    expect(f.by_confidence.other).toBe(1);
+    // excluded_fifo is named for the live value but counts every
+    // non-allowlisted confidence: ag-006 (fifo) and ag-013 (weird).
+    expect(f.excluded_fifo).toBe(2);
+  });
+
+  it('ALLOWLIST: a missing confidence excludes rather than admits', () => {
+    // The fail-closed direction. A bind with no confidence at all must not be
+    // compared just because it is not spelled 'fifo'.
+    const g = joinSpawnOutcomes([
+      { ...bound({ agentId: 'ag-nc', recommended: OPUS }), data: { tool_use_id: 't', agent_id: 'ag-nc', recommended_model: OPUS } },
+      agentReceipt('ag-nc', { model: OPUS }),
+    ]);
+    expect(g.pairs).toHaveLength(1);
+    expect(g.pairs[0].confidence).toBeNull();
+    expect(g.compared).toBe(0);
+    expect(g.excluded_fifo).toBe(1);
+    expect(g.agreement_rate).toBeNull();
+    expect(g.by_confidence.other).toBe(1);
   });
 
   it('by_confidence counts PAIRS, not binds: an unjoined bind is not in it', () => {
@@ -394,16 +453,31 @@ describe('joinSpawnOutcomes() pairs and comparison', () => {
     expect(f.binds).toBe(f.pairs.length + f.unjoined_binds);
     expect(Object.values(f.by_confidence).reduce((a, b) => a + b, 0))
       .toBe(f.binds - f.unjoined_binds);
-    expect(f.by_confidence.exact).toBe(5);
-    expect(f.by_confidence.exact).not.toBe(7);
+    expect(f.by_confidence.exact).toBe(7);
+    expect(f.by_confidence.exact).not.toBe(9); // 9 = 7 pairs + the 2 unjoined binds
   });
 
   it('counts agreement per served model and divergence per recommended->served', () => {
-    expect(f.agreed_by_model).toEqual({ [FABLE]: 1, [OPUS]: 3 });
+    expect(f.agreed_by_model).toEqual({ [FABLE]: 1, [OPUS]: 4 });
     expect(f.divergence).toEqual({
       [`${FABLE}->${OPUS}`]: 1,
       [`${OPUS}->${FABLE}`]: 3,
     });
+  });
+
+  it('DUPLICATE RECEIPT: a double-written row inflates the pair, and is counted', () => {
+    // `session-end.js#existingReceiptKeys` is the only guard and it FAILS OPEN
+    // on a short or rotated tail. The doubled pair is arithmetically
+    // indistinguishable from a run that cost twice as much, so the fold reports
+    // the condition and does NOT correct the totals -- deciding which of two
+    // identical rows is spurious is not possible from the rows.
+    const dup = f.pairs.find((p) => p.agent_id === 'ag-014');
+    expect(dup.receipts).toBe(2);
+    expect(dup.served_models).toEqual([OPUS]);
+    expect(dup.cost_total).toBe(1);
+    expect(dup.agreement).toBe('same');
+    expect(f.duplicate_receipts).toBe(1);
+    expect(f.multi_model_runs).toBe(1);
   });
 
   it('a MULTI-MODEL run that includes the recommended model is still diverged', () => {
@@ -447,10 +521,27 @@ describe('joinSpawnOutcomes() cost, usage and latency', () => {
   it('sums only PRICED pairs and counts the rest instead of summing them as 0', () => {
     // A null or 'unresolved' cost is UNKNOWN. Adding it as 0 would make the
     // total read as a measured floor when it is nothing of the kind.
-    expect(f.cost.compared).toBe(6);
+    expect(f.cost.compared).toBe(7);
     expect(f.cost.unpriced).toBe(2);
-    expect(f.cost.same).toEqual({ priced: 3, total: 0.5 + 0.25 + 0.125 });
+    expect(f.cost.same).toEqual({ priced: 4, total: 0.5 + 0.25 + 0.125 + 1 });
     expect(f.cost.diverged).toEqual({ priced: 3, total: 1.5 + 2.25 + (0.75 + 1) });
+  });
+
+  it('a non-number cost STRING is unpriced, though the writer never emits one', () => {
+    // Measured 2026-09-21T01:47:41Z over 94 live rows: cost.total was null on
+    // 72 and a number on 22, a string on ZERO. The string 'unresolved' lives in
+    // cost.pricing_version, not in cost.total. The fold gates on
+    // `typeof === 'number'`, so this row is unpriced either way; the case
+    // exists to pin the gate, not to model a shape production produces.
+    const g = joinSpawnOutcomes([
+      bound({ agentId: 'ag-str', recommended: OPUS }),
+      agentReceipt('ag-str', { model: OPUS, cost: 'unresolved' }),
+    ]);
+    expect(g.compared).toBe(1);
+    expect(g.pairs[0].priced).toBe(false);
+    expect(g.pairs[0].cost_total).toBeNull();
+    expect(g.cost.unpriced).toBe(1);
+    expect(g.cost.same).toEqual({ priced: 0, total: null });
   });
 
   it('carries each bucket its OWN priced population beside its total', () => {
@@ -498,6 +589,23 @@ describe('joinSpawnOutcomes() cost, usage and latency', () => {
     expect(g.cost.diverged.total).not.toBe(0);
   });
 
+  it('measures latency INDEPENDENTLY of pricing: an unpriced pair still times', () => {
+    // The two gates are separate: `accumulate` credits latency before it tests
+    // `priced`, so a pair with no resolvable cost still contributes its
+    // duration. Nulling the latency bucket because the COST bucket is empty
+    // would discard a measurement that was actually taken. The CLI reads both
+    // columns off one pair, so this property has an owner here rather than
+    // only in the CLI's suite.
+    const g = joinSpawnOutcomes([
+      bound({ agentId: 'ag-u1', recommended: OPUS }),
+      agentReceipt('ag-u1', { model: FABLE, cost: null, latencyMs: 5250 }),
+    ]);
+    expect(g.by_agreement).toEqual({ same: 0, diverged: 1 });
+    expect(g.cost.diverged).toEqual({ priced: 0, total: null });
+    expect(g.latency.diverged).toEqual({ count: 1, total_ms: 5250 });
+    expect(g.latency.diverged.count).toBe(1);
+  });
+
   it('REGRESSION: a latency bucket with no qualifying pair reports null, not 0', () => {
     // Same class as the cost case. Every diverged pair here has a null
     // latency_ms, so the bucket has nothing to sum; a 0 would read as "these
@@ -517,12 +625,12 @@ describe('joinSpawnOutcomes() cost, usage and latency', () => {
 
   it('sums usage over the receipts of compared pairs and flags non-numeric fields', () => {
     expect(f.usage_totals.same).toEqual({
-      fresh_input_tokens: 400,
-      cached_input_tokens: 800,
-      cache_creation_tokens: 1200,
-      output_tokens: 160,
-      thinking_tokens: 20,
-      requests: 4,
+      fresh_input_tokens: 600,
+      cached_input_tokens: 1200,
+      cache_creation_tokens: 1800,
+      output_tokens: 240,
+      thinking_tokens: 30,
+      requests: 6,
     });
     expect(f.usage_totals.diverged).toEqual({
       fresh_input_tokens: 500,
@@ -532,13 +640,18 @@ describe('joinSpawnOutcomes() cost, usage and latency', () => {
       thinking_tokens: 20,
       requests: 5,
     });
+    // The one non-numeric read is an OMITTED thinking_tokens key on ag-009 --
+    // the writer omits it when no thinking was observed (absent on 8/94 live
+    // rows). This counter is NOT a malformation count; it says "this many
+    // field reads contributed 0", and a legitimate omission looks the same as
+    // a field that should have been there.
     expect(f.usage_totals.non_numeric).toBe(1);
   });
 
   it('counts latency only for pairs whose EVERY receipt reports a number', () => {
     // No mean is emitted: the caller divides, and a caller that sees count 0
     // cannot accidentally divide by it.
-    expect(f.latency.same).toEqual({ count: 3, total_ms: 3000 });
+    expect(f.latency.same).toEqual({ count: 4, total_ms: 5000 });
     expect(f.latency.diverged).toEqual({ count: 4, total_ms: 6000 });
   });
 });
@@ -550,8 +663,12 @@ describe('joinSpawnOutcomes() invariants hold on the fixture', () => {
     expect(f.pairs.length + f.unjoined_binds).toBe(f.binds);
   });
 
-  it('pairs + unjoined_receipts === distinct subagent agent ids', () => {
-    expect(f.pairs.length + f.unjoined_receipts).toBe(11);
+  it('pairs + unjoined_receipts === distinct subagent agent IDS, not rows', () => {
+    // 15 subagent receipt ROWS over 13 distinct agent ids (ag-010 wrote two
+    // models, ag-014 wrote the same model twice). The right-hand side counts
+    // ids: a run that wrote three receipts and never bound is 1, not 3.
+    expect(f.pairs.length + f.unjoined_receipts).toBe(13);
+    expect(f.subagent_receipts).toBe(15);
   });
 
   it('compared + excluded_fifo + excluded_no_recommendation === pairs', () => {
@@ -595,6 +712,32 @@ describe('joinSpawnOutcomes() is order-independent', () => {
     }
   });
 
+  it('sums a multi-receipt pair in SORTED receipt order, not input order', () => {
+    // The receipts of one pair are sorted (served model, then ts) before any
+    // sum is taken. Float addition is not associative, and the order rows sit
+    // in the file is a property of the ledger's write interleaving, not of the
+    // run -- so a reversed input must produce identical bytes, not merely a
+    // close number.
+    // THREE receipts, not two: float addition is COMMUTATIVE (a+b === b+a), so
+    // a two-receipt pair cannot detect a missing sort. It is not ASSOCIATIVE,
+    // and these three costs are chosen so the two orders genuinely differ --
+    // 0.1+0.2+0.3 is 0.6000000000000001 while 0.3+0.2+0.1 is 0.6.
+    expect(0.1 + 0.2 + 0.3).not.toBe(0.3 + 0.2 + 0.1);
+    const bind = bound({ agentId: 'ag-m', recommended: OPUS });
+    const fable = agentReceipt('ag-m', { model: FABLE, cost: 0.1, latencyMs: 300 });
+    const haiku = agentReceipt('ag-m', { model: HAIKU, cost: 0.2, latencyMs: 700 });
+    const opus = agentReceipt('ag-m', { model: OPUS, cost: 0.3, latencyMs: 1000 });
+    const forward = joinSpawnOutcomes([bind, fable, haiku, opus]);
+    const reverse = joinSpawnOutcomes([bind, opus, haiku, fable]);
+    expect(JSON.stringify(reverse)).toBe(JSON.stringify(forward));
+    expect(forward.pairs[0].served_models).toEqual([FABLE, HAIKU, OPUS]);
+    expect(forward.pairs[0].cost_total).toBe(0.1 + 0.2 + 0.3);
+    expect(reverse.pairs[0].cost_total).toBe(forward.pairs[0].cost_total);
+    expect(forward.latency.diverged).toEqual({ count: 1, total_ms: 2000 });
+    expect(forward.multi_model_runs).toBe(1);
+    expect(forward.duplicate_receipts).toBe(0);
+  });
+
   it('a repeat bind keeps the FIRST row in input order, not the earliest ts', () => {
     const first = bound({ agentId: 'ag-x', recommended: OPUS, confidence: 'exact' });
     const second = bound({ agentId: 'ag-x', recommended: FABLE, confidence: 'fifo' });
@@ -636,12 +779,62 @@ describe('joinSpawnOutcomes() negative control: the prefix strip is load-bearing
     expect(f.by_agreement).toEqual({ same: 0, diverged: 1 });
   });
 
-  it('reads the served model id from the envelope, falling back to model_identity', () => {
+  it('strips the agent- prefix ONCE: agent-agent-x does not join bind x', () => {
+    // The strip is single, not greedy. A receipt for the agent literally named
+    // `agent-x` (run_id `agent-agent-x`) belongs to `agent-x`, not to `x`. A
+    // greedy strip would attribute one agent's cost to a different agent.
+    const f = joinSpawnOutcomes([
+      bound({ agentId: 'x', recommended: OPUS }),
+      receipt({ runId: 'agent-agent-x', model: FABLE }),
+    ]);
+    expect(f.subagent_receipts).toBe(1);
+    expect(f.pairs).toEqual([]);
+    expect(f.unjoined_binds).toBe(1);
+    expect(f.unjoined_receipts).toBe(1);
+
+    // ...and the bind for `agent-x` DOES take it, which is the other half.
+    const g = joinSpawnOutcomes([
+      bound({ agentId: 'agent-x', recommended: FABLE }),
+      receipt({ runId: 'agent-agent-x', model: FABLE }),
+    ]);
+    expect(g.pairs).toHaveLength(1);
+    expect(g.pairs[0].agent_id).toBe('agent-x');
+    expect(g.by_agreement).toEqual({ same: 1, diverged: 0 });
+  });
+
+  it('reads the served model from model_identity, falling back to the envelope', () => {
+    // `model_identity.model_id` is the schema-required original;
+    // `envelope.model` is an unvalidated copy. The original wins.
     const row = agentReceipt('ag-001', { model: FABLE });
     delete row.model;
     const f = joinSpawnOutcomes([bound({ agentId: 'ag-001', recommended: FABLE }), row]);
     expect(f.pairs[0].served_models).toEqual([FABLE]);
     expect(f.by_agreement).toEqual({ same: 1, diverged: 0 });
+    expect(f.model_mismatch).toBe(0);
+  });
+
+  it('MISMATCH: model_identity wins over a disagreeing envelope.model, and is counted', () => {
+    // They disagreed on 0/94 live rows, so the precedence is invisible today
+    // and load-bearing the day it is not. Reading the unvalidated copy first
+    // would let it decide the comparison; here it would flip same -> diverged.
+    const f = joinSpawnOutcomes([
+      bound({ agentId: 'ag-001', recommended: FABLE }),
+      agentReceipt('ag-001', { model: FABLE, envelopeModel: OPUS }),
+    ]);
+    expect(f.model_mismatch).toBe(1);
+    expect(f.pairs[0].served_models).toEqual([FABLE]);
+    expect(f.by_agreement).toEqual({ same: 1, diverged: 0 });
+    expect(f.pairs).toHaveLength(1);
+    expect(f.compared).toBe(1);
+  });
+
+  it('counts model_mismatch on a MAIN-THREAD row too: it is a row property', () => {
+    const f = joinSpawnOutcomes([
+      receipt({ runId: SESS_A, model: FABLE, envelopeModel: OPUS }),
+    ]);
+    expect(f.model_mismatch).toBe(1);
+    expect(f.main_thread_receipts).toBe(1);
+    expect(f.pairs).toEqual([]);
   });
 });
 

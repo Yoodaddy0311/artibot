@@ -7,13 +7,20 @@
  * SubagentStart carrying `data.recommended_model`, the MODEL ID the router said
  * this spawn should get. At SessionEnd `lib/economics/receipt-envelope.js`
  * writes a `usage.receipt` line carrying the model that actually served, in
- * `envelope.model` (equal to `data.model_identity.model_id` on 76/76 rows
- * measured 2026-09-21T01:18Z). The two lines do not share a key: the bind is
- * keyed by `data.agent_id`, the receipt by `run_id`, which is `agent-<agentId>`
- * for a subagent run and the bare `session_id` for a main-thread one. This fold
- * strips the prefix and joins on what is left; a receipt with no prefix is a
- * main-thread run and joins NOTHING, so it is in no denominator here, not even
- * the unjoined one.
+ * `data.model_identity.model_id` (the schema-required original, which this fold
+ * reads; `envelope.model` is an unvalidated COPY and is only the fallback --
+ * they disagreed on 0/94 rows measured 2026-09-21T01:47:41Z, and any
+ * disagreement is reported as `model_mismatch`). The two lines do not share a
+ * key: the bind is keyed by `data.agent_id`, the receipt by `run_id`, which is
+ * `agent-<agentId>` for a subagent run and the bare `session_id` for a
+ * main-thread one. This fold strips the prefix ONCE and joins on what is left;
+ * a receipt with no prefix is a main-thread run and joins NOTHING, so it is in
+ * no denominator here, not even the unjoined one.
+ *
+ * The join is on `agent_id` ALONE and ASSUMES IT IS GLOBALLY UNIQUE across
+ * sessions. It does not compare the receipt's `session_id` to the bind's, so a
+ * reused agent id would silently merge two spawns from two sessions into one
+ * pair. The pair reports the BIND's session; the receipt's is never read.
  *
  * WHY THE RAW BIND LINE, AND MODEL IDS ON BOTH SIDES
  * ---------------------------------------------------------------------------
@@ -49,14 +56,29 @@
  *     is `diverged` EVEN IF one served model is the recommended one: "served,
  *     plus something else" is a different claim from "served", and collapsing
  *     them would hide every mid-run model switch.
+ *     Nor can it see A DOUBLE-WRITTEN RECEIPT. The same (run, model) appended
+ *     twice doubles that pair's cost, usage and latency, and is arithmetically
+ *     indistinguishable from a run that genuinely cost twice as much. The only
+ *     guard is `session-end.js#existingReceiptKeys`, which FAILS OPEN: if the
+ *     tail it reads is short, rotated, or unreadable, it finds no prior key and
+ *     appends again. `duplicate_receipts` counts the excess rows
+ *     (receipts minus distinct served models, summed over pairs) so the
+ *     condition is visible, but the totals are NOT corrected for it -- which of
+ *     two identical rows is the spurious one is not decidable from the rows.
+ *     A receipt carrying no readable model id also lands in that count, since
+ *     it too adds a row without adding a distinct model.
  *  4. THE OUTCOME OF THE SPAWN. There is no spawn-keyed score writer in the
  *     ledger today -- `review.completed` and `review.claim_audit` were 0 rows,
  *     `verify.completed` carries no `run_id`, and `usage.receipt`'s
  *     `outcome.accepted` was null on 94/94 rows. `score` is therefore emitted
  *     as an EXPLICIT null block so a reader sees an unmeasured column rather
  *     than a missing one. Agreement is not quality.
- *  5. AN UNPRICED PAIR'S COST. `cost.total` was a number on only 16/76 live
- *     subagent rows; the rest were null or the string 'unresolved'. Unpriced
+ *  5. AN UNPRICED PAIR'S COST. Measured over 94 live `usage.receipt` rows at
+ *     2026-09-21T01:47:41Z, `cost.total` was null on 72 and a number on 22 --
+ *     and a STRING on 0. ('unresolved' is a value of `cost.pricing_version`,
+ *     on 72 rows; it is never `cost.total`. The fold gates on
+ *     `typeof === 'number'`, so it is correct either way, but the claim that a
+ *     total can be that string was wrong and is corrected here.) Unpriced
  *     pairs are COUNTED in `cost.unpriced` and never summed as 0. Each bucket
  *     carries its OWN `priced` population beside its `total`, and `total` is
  *     null -- never 0 -- when that population is empty, because a sum over zero
@@ -69,6 +91,13 @@
  *  6. RETENTION AND WINDOWING. A spawn whose bind rotated out of the window
  *     looks like an unjoined receipt and vice versa; neither is distinguishable
  *     here from a line that was never written.
+ *  7. WHY A USAGE FIELD IS ABSENT. `usage_totals.non_numeric` is NOT a
+ *     malformation counter. It also counts fields the writer legitimately
+ *     omits -- `thinking_tokens` when no thinking was observed (key absent on
+ *     8/94 live rows), `requests` on an estimate-grade usage block -- and this
+ *     fold cannot tell those apart from a field that should have been there.
+ *     A non-zero value means "this many field reads contributed 0", nothing
+ *     more.
  *
  * @module lib/replay/spawn-outcome
  */
@@ -91,8 +120,14 @@ export const SCORE_UNAVAILABLE_REASON = 'no-spawn-keyed-score-writer';
 /** Confidence values `bindRoute` writes; anything else buckets as `other`. */
 const KNOWN_CONFIDENCE = Object.freeze(['exact', 'name', 'fifo']);
 
-/** The guess tier, excluded from `compared`. */
-const CONFIDENCE_FIFO = 'fifo';
+/**
+ * ALLOWLIST of confidences whose pair may be compared (repo rule section 8:
+ * state what is permitted, never what is forbidden). A deny-list of `['fifo']`
+ * would be fail-OPEN -- a confidence tier added to `bindRoute` tomorrow would
+ * silently enter `compared` and move the agreement rate before anyone decided
+ * it should. Anything outside this list is excluded, exactly like `fifo`.
+ */
+const COMPARABLE_CONFIDENCE = Object.freeze(['exact', 'name']);
 
 /** The `usage` fields summed per agreement bucket. */
 const USAGE_FIELDS = Object.freeze([
@@ -165,21 +200,31 @@ function bindOf(e) {
 /**
  * The served model, cost and metering of one `usage.receipt` row.
  *
- * The served id is read from the envelope first and from `model_identity`
- * second; the two agreed on 76/76 live subagent rows, so the fallback is a
- * belt on a brace rather than a reconciliation.
+ * `data.model_identity.model_id` WINS over `envelope.model`. The identity block
+ * is the schema-required original that `receipt-envelope.js` builds and that
+ * `RECEIPT_IDENTITY_FIELDS` validates; the envelope key is a COPY it lifts out
+ * for indexing, and nothing checks the copy against its source. Reading the
+ * copy first would let an un-validated field decide the comparison. They
+ * disagreed on 0/94 live rows (measured 2026-09-21T01:47:41Z), so the
+ * precedence is invisible today and load-bearing the day it is not; `mismatch`
+ * reports the disagreement instead of hiding it behind a silent winner.
  *
  * @param {object} e - screened ledger line.
- * @returns {{model: string|null, cost: unknown, usage: object, latency_ms: unknown}}
+ * @returns {{model: string|null, mismatch: boolean, cost: unknown, usage: object,
+ *   latency_ms: unknown, ts: string}}
  */
 function receiptOf(e) {
   const d = obj(e.data);
   const identity = obj(d.model_identity);
+  const fromIdentity = isStr(identity.model_id) ? identity.model_id : null;
+  const fromEnvelope = isStr(e.model) ? e.model : null;
   return {
-    model: isStr(e.model) ? e.model : (isStr(identity.model_id) ? identity.model_id : null),
+    model: fromIdentity ?? fromEnvelope,
+    mismatch: fromIdentity !== null && fromEnvelope !== null && fromIdentity !== fromEnvelope,
     cost: obj(d.cost).total,
     usage: obj(d.usage),
     latency_ms: obj(d.timing).latency_ms,
+    ts: isStr(e.ts) ? e.ts : '',
   };
 }
 
@@ -199,6 +244,7 @@ function collect(list) {
   const counts = {
     duplicateBinds: 0, malformedBinds: 0, receipts: 0,
     mainThreadReceipts: 0, subagentReceipts: 0, malformedReceipts: 0,
+    modelMismatch: 0,
   };
 
   for (const e of list) {
@@ -218,6 +264,10 @@ function collect(list) {
 
     if (e.event !== SPAWN_OUTCOME_EVENTS.receipt) continue;
     counts.receipts += 1;
+    const record = receiptOf(e);
+    // Over ALL receipt rows, main-thread and malformed included: it is a
+    // property of the ROW's two model fields, not of any join.
+    if (record.mismatch) counts.modelMismatch += 1;
     const d = obj(e.data);
     const runId = isStr(e.run_id) ? e.run_id : (isStr(d.run_id) ? d.run_id : null);
     if (runId === null) {
@@ -231,8 +281,8 @@ function collect(list) {
     counts.subagentReceipts += 1;
     const agentId = runId.slice(AGENT_RUN_PREFIX.length);
     const bucket = byAgent.get(agentId);
-    if (bucket === undefined) byAgent.set(agentId, [receiptOf(e)]);
-    else bucket.push(receiptOf(e));
+    if (bucket === undefined) byAgent.set(agentId, [record]);
+    else bucket.push(record);
   }
 
   return { binds, byAgent, counts };
@@ -245,18 +295,26 @@ function collect(list) {
  * `cost.total`; a partially priced multi-model run is UNKNOWN, not a partial
  * sum, because the missing leg has no upper bound.
  *
+ * The receipts are SORTED (served model, then `ts`) before any sum is taken, so
+ * a multi-receipt total does not depend on the order the rows happened to sit
+ * in the file. Float addition is not associative, and the caller's input order
+ * is a property of the ledger's write interleaving, not of the run.
+ *
  * @param {object} bind - bind record.
- * @param {object[]} receipts - that agent's receipt records.
- * @returns {object} pair record plus the internal receipt list.
+ * @param {object[]} unsorted - that agent's receipt records, in input order.
+ * @returns {{pair: object, receipts: object[]}} the pair and its sorted receipts.
  */
-function pairOf(bind, receipts) {
+function pairOf(bind, unsorted) {
+  const receipts = [...unsorted]
+    .sort((a, b) => cmp(a.model ?? '', b.model ?? '') || cmp(a.ts, b.ts));
   const served = [...new Set(receipts.map((r) => r.model).filter(isStr))].sort(cmp);
   const priced = receipts.length > 0 && receipts.every((r) => typeof r.cost === 'number');
-  const compared = bind.confidence !== CONFIDENCE_FIFO && isStr(bind.recommended_model);
+  const compared = COMPARABLE_CONFIDENCE.includes(bind.confidence)
+    && isStr(bind.recommended_model);
   const agreement = compared
     ? (served.length === 1 && served[0] === bind.recommended_model ? 'same' : 'diverged')
     : null;
-  return {
+  const pair = {
     agent_id: bind.agent_id,
     session_id: bind.session_id,
     tool_use_id: bind.tool_use_id,
@@ -270,6 +328,7 @@ function pairOf(bind, receipts) {
     priced,
     cost_total: priced ? receipts.reduce((sum, r) => sum + r.cost, 0) : null,
   };
+  return { pair, receipts };
 }
 
 /**
@@ -336,6 +395,19 @@ function nullIfEmpty(bucket, popKey, sumKey) {
  *   when their own population is 0 (CANNOT SEE #5). `cost.compared` is
  *   `same.priced + diverged.priced`, and `cost.compared + cost.unpriced`
  *   equals `compared`.
+ *   `multi_model_runs` and `by_confidence` are over ALL pairs, EXCLUDED ONES
+ *   INCLUDED -- they describe the joined population, not the compared one.
+ *   `unjoined_receipts` counts distinct subagent AGENT IDS with no bind, not
+ *   receipt ROWS: a run that wrote three receipts and never bound is 1, not 3.
+ *   `model_mismatch` and `duplicate_receipts` are row-level integrity counters,
+ *   not exclusions -- the rows they count still participate fully.
+ *   `excluded_fifo` is NAMED FOR THE ONLY LIVE NON-ALLOWLISTED VALUE and COVERS
+ *   EVERY CONFIDENCE OUTSIDE THE ALLOWLIST: `compared` is gated on
+ *   `['exact','name'].includes(confidence) && isStr(recommended_model)`, so a
+ *   confidence tier added to `bindRoute` tomorrow lands here rather than
+ *   silently entering the agreement rate. `by_confidence` is unaffected by that
+ *   grouping -- it still buckets each pair by its LITERAL value, so a
+ *   non-allowlisted value shows up as `fifo` or `other` on its own terms.
  */
 export function joinSpawnOutcomes(events) {
   const { binds, byAgent, counts } = collect(Array.isArray(events) ? events : []);
@@ -349,9 +421,9 @@ export function joinSpawnOutcomes(events) {
       unjoinedBinds += 1;
       continue;
     }
-    const pair = pairOf(bind, receipts);
-    pairs.push(pair);
-    receiptsOf.set(pair.agent_id, receipts);
+    const built = pairOf(bind, receipts);
+    pairs.push(built.pair);
+    receiptsOf.set(built.pair.agent_id, built.receipts);
   }
   pairs.sort((a, b) => cmp(a.session_id, b.session_id) || cmp(a.agent_id, b.agent_id));
 
@@ -375,7 +447,10 @@ export function joinSpawnOutcomes(events) {
     if (pair.served_models.length > 1) multiModelRuns += 1;
 
     if (pair.agreement === null) {
-      if (pair.confidence === CONFIDENCE_FIFO) excludedFifo += 1;
+      // Named for the live value, but it covers EVERY non-allowlisted
+      // confidence: the allowlist is the gate, so a new tier lands here
+      // rather than in `compared`.
+      if (!COMPARABLE_CONFIDENCE.includes(pair.confidence)) excludedFifo += 1;
       else excludedNoRecommendation += 1;
       continue;
     }
@@ -402,6 +477,8 @@ export function joinSpawnOutcomes(events) {
     main_thread_receipts: counts.mainThreadReceipts,
     subagent_receipts: counts.subagentReceipts,
     malformed_receipts: counts.malformedReceipts,
+    model_mismatch: counts.modelMismatch,
+    duplicate_receipts: pairs.reduce((n, p) => n + (p.receipts - p.served_models.length), 0),
     pairs,
     compared,
     excluded_fifo: excludedFifo,

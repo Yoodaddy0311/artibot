@@ -77,6 +77,7 @@ import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { ledgerFilePath, sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
 import { buildUsageReceipts } from '../../lib/economics/usage-receipt.js';
 import { toUsageReceiptEnvelopes } from '../../lib/economics/receipt-envelope.js';
+import { joinSpawnOutcomes } from '../../lib/replay/index.js';
 
 // This file spawns child processes. The budget buys headroom for load; nothing
 // here waits on a timer.
@@ -94,6 +95,7 @@ const STDOUT_KEYS = [
   'events', 'measured_at', 'ledger_path', 'since',
   'binds', 'duplicate_binds', 'malformed_binds',
   'receipts', 'main_thread_receipts', 'subagent_receipts', 'malformed_receipts',
+  'model_mismatch', 'duplicate_receipts',
   'pairs', 'compared', 'excluded_fifo', 'excluded_no_recommendation',
   'by_agreement', 'agreement_rate', 'by_confidence',
   'agreed_by_model', 'divergence', 'multi_model_runs',
@@ -128,6 +130,25 @@ function usageOf(runs) {
   return Object.fromEntries(
     Object.entries(perRun).map(([k, v]) => [k, v * 2 * runs]),
   );
+}
+
+/**
+ * A value's KEY STRUCTURE, with leaf values discarded.
+ *
+ * Objects become an ordered list of `[key, shape]` entries, so a deep equality
+ * over two of these compares key ORDER as well as membership — which `toEqual`
+ * on the objects themselves does not. Arrays stay arrays so an array and an
+ * object with numeric keys cannot compare equal.
+ *
+ * @param {unknown} v
+ * @returns {unknown}
+ */
+function keyShape(v) {
+  if (Array.isArray(v)) return v.map(keyShape);
+  if (v !== null && typeof v === 'object') {
+    return Object.entries(v).map(([k, val]) => [k, keyShape(val)]);
+  }
+  return null;
 }
 
 /** @type {string} */
@@ -278,17 +299,23 @@ async function seedReceipts(root, sessionId, agentModels, mainModel, o = {}) {
  * @returns {void}
  */
 function seedBind(root, sessionId, agentId, o) {
+  // KEY ORDER MIRRORS THE WRITER, `subagent-handler.js#bindRoute`: the four
+  // required keys, then agent_type, matched_on, selected_model,
+  // recommended_model, action_class in that order. Nothing validates key order,
+  // so this buys no assertion — it is fixture honesty. A fixture that does not
+  // look like the row it stands in for is the thing a reader trusts and should
+  // not, and the two optional model keys are conditional in the writer too.
   const data = {
     tool_use_id: `toolu_${agentId}`,
     agent_id: agentId,
-    agent_type: 'tdd-guide',
     confidence: o.confidence,
     method: o.method,
+    agent_type: 'tdd-guide',
     matched_on: 'name',
-    action_class: 'implement',
   };
-  if (typeof o.recommended === 'string') data.recommended_model = o.recommended;
   if (typeof o.selected === 'string') data.selected_model = o.selected;
+  if (typeof o.recommended === 'string') data.recommended_model = o.recommended;
+  data.action_class = 'implement';
   const res = appendLedgerEvent(root, {
     event: 'route.bound',
     session_id: sessionId,
@@ -384,6 +411,13 @@ describe('route-compare: a seeded ledger', () => {
     expect(printed.main_thread_receipts).toBe(1);
     expect(printed.subagent_receipts).toBe(4);
     expect(printed.malformed_receipts).toBe(0);
+    // Both are premises of every count below, not incidental zeroes. A
+    // `model_mismatch` means a row's two model spellings disagree, so "which
+    // model served" would be a coin flip; a `duplicate_receipts` means a run
+    // carried more receipts than distinct models, so its tokens are
+    // double-counted. Either one non-zero and this seed is not what it claims.
+    expect(printed.model_mismatch).toBe(0);
+    expect(printed.duplicate_receipts).toBe(0);
 
     expect(printed.pairs).toHaveLength(4);
     // Every bind is either paired or unpaired — there is no third place for one
@@ -679,6 +713,38 @@ describe('route-compare: the read-only contract, in the source', () => {
     // under a junction or a non-ASCII path, which is fail-open in the quietest
     // possible way.
     expect(src).toContain('isMainEntry(import.meta.url)');
+  });
+
+  /**
+   * The error branch's shape, checked against the real thing.
+   *
+   * `emptyJoin()` DUPLICATES the join's empty result instead of calling it,
+   * and that is deliberate: a failure to load the join module is one of the
+   * things that reaches the error branch, so the branch may not depend on it.
+   * Duplication that nothing checks is drift waiting to happen — a field added
+   * to the fold would appear on every successful line and be missing from every
+   * error line, which is precisely the "branch on which keys exist" failure the
+   * fixed key set exists to prevent. This case is the outside check that makes
+   * the duplication safe.
+   *
+   * Order is compared at EVERY level, not just membership: the stdout promise
+   * is a fixed line shape, and two objects with the same keys in a different
+   * order serialize to different lines.
+   */
+  it('builds its error-branch shape identically to the real empty join', async () => {
+    const mod = await import(`file:///${CLI.replace(/\\/g, '/')}`);
+    const real = joinSpawnOutcomes([]);
+
+    // Values first: every empty value must match too, so a 0 where the fold
+    // says null (the misreading this whole tool guards against) fails here.
+    expect(mod.emptyJoin()).toEqual(real);
+    // Then key order, recursively, which toEqual does not check.
+    expect(keyShape(mod.emptyJoin())).toEqual(keyShape(real));
+    // Named explicitly because an array and an object with numeric keys have
+    // the same shape under a careless walk.
+    expect(Array.isArray(mod.emptyJoin().pairs)).toBe(true);
+    expect(mod.emptyJoin().pairs).toEqual([]);
+    expect(real.pairs).toEqual([]);
   });
 
   it('exposes main and writes nothing when imported rather than run', async () => {

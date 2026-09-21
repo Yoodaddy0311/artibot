@@ -196,13 +196,21 @@ function emptyUsage() {
  *
  * Used by the error branch so a caught throw prints the SAME key set as a
  * successful run. A reader that has to branch on which keys exist will
- * eventually branch wrong. Every key is spelled out rather than derived, so
- * this object fails loudly in review if the join grows a field and this file
- * is not updated with it.
+ * eventually branch wrong.
+ *
+ * SPELLED OUT RATHER THAN DERIVED, AND THEREFORE ABLE TO DRIFT. Copying the
+ * join's own empty result would make drift impossible, but it would also make
+ * the error branch depend on the module whose failure to load is one of the
+ * things that reaches this branch. So the duplication is deliberate and the
+ * drift is caught from outside instead: `tests/ledger/route-compare-cli.test.js`
+ * walks this object against `joinSpawnOutcomes([])` recursively and requires
+ * the same keys in the same order at every level. That test is why this
+ * paragraph can promise the shapes match; the export below exists only to let
+ * it look.
  *
  * @returns {object}
  */
-function emptyJoin() {
+export function emptyJoin() {
   return {
     binds: 0,
     duplicate_binds: 0,
@@ -211,6 +219,8 @@ function emptyJoin() {
     main_thread_receipts: 0,
     subagent_receipts: 0,
     malformed_receipts: 0,
+    model_mismatch: 0,
+    duplicate_receipts: 0,
     pairs: [],
     compared: 0,
     excluded_fifo: 0,
@@ -282,6 +292,8 @@ function report(parts) {
     main_thread_receipts: fold.main_thread_receipts,
     subagent_receipts: fold.subagent_receipts,
     malformed_receipts: fold.malformed_receipts,
+    model_mismatch: fold.model_mismatch,
+    duplicate_receipts: fold.duplicate_receipts,
     pairs: fold.pairs,
     compared: fold.compared,
     excluded_fifo: fold.excluded_fifo,
