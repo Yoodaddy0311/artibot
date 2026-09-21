@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://artibot.local/schemas/seeded-defect-corpus-row.json",
+  "title": "Seeded-defect corpus row",
+  "description": "One row of tests/evals/fixtures/seeded-defect/corpus.jsonl: exactly one synthetic defect, expressed as a unified diff against an invented module, plus the single finding a reviewer is expected to produce for it. Draft-07 and not 2020-12 because ajv resolves at 6.x in this repository (package.json devDependencies \"ajv\": \"^6.15.0\") and ajv 6 cannot compile 2020-12 - the same constraint tests/evals/fixtures/routebench/baselines.schema.json records. Every object is closed to additional properties: an open object would let a typo-ed key sit in the corpus asserting nothing, which is the fail-open this schema exists to prevent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "class",
+    "language",
+    "file_hint",
+    "injected_diff",
+    "expected",
+    "severity",
+    "source"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^SD-[0-9]{3}$",
+      "description": "Stable row identity, SD-001..SD-030. A runner joins its input on this, so an id is never reused for a different defect: renumbering silently reassigns every recorded score."
+    },
+    "class": {
+      "type": "string",
+      "description": "Defect taxonomy axis. Seven values, each covered by at least three rows. This is the axis a per-class catch rate is broken down by, so it is deliberately coarse - the finer vocabulary is finding_kind.",
+      "enum": [
+        "logic",
+        "boundary",
+        "concurrency",
+        "security",
+        "resource",
+        "contract",
+        "docs-drift"
+      ]
+    },
+    "language": {
+      "type": "string",
+      "description": "Language of the file the diff applies to. Restricted to the five actually present in the corpus rather than an open string, so a sixth language cannot be added without also being argued for in the README distribution table.",
+      "enum": ["javascript", "typescript", "python", "bash", "markdown"]
+    },
+    "file_hint": {
+      "type": "string",
+      "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+      "description": "Relative POSIX path of the invented file. Not a path in this repository - every module in this corpus is fabricated. The pattern rejects absolute paths, drive letters and backslashes by construction, and the leading lookahead rejects a '..' segment: a corpus row is fed to a reviewer as text, and a path that resolves out of the fixture directory would invite it to go read a real file."
+    },
+    "injected_diff": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Unified diff with '--- a/<path>', '+++ b/<path>' and one '@@' hunk, at most 40 newline-separated lines. Contains defect-unrelated but legitimate changes as well, so that 'every added line is the defect' is not a winning strategy."
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_kind", "location"],
+      "description": "The one finding this row is scored against. One row carries exactly one expectation; a diff that would justify two independent findings belongs in two rows. `also_accept` does not weaken that: it widens the VOCABULARY that names this one defect, not the number of defects.",
+      "properties": {
+        "finding_kind": {
+          "type": "string",
+          "description": "Controlled vocabulary, kebab-case. Enumerates only the kinds some row actually uses - an unused value would be a claim of coverage the corpus does not have. Scoring compares a reviewer's kind to this by exact string equality, so adding a synonym splits the vocabulary rather than widening it.",
+          "enum": [
+            "check-then-act",
+            "command-injection",
+            "empty-collection-unhandled",
+            "error-code-mismatch",
+            "inclusive-exclusive-mismatch",
+            "inverted-condition",
+            "missing-await",
+            "missing-case",
+            "missing-timeout",
+            "off-by-one",
+            "optional-treated-required",
+            "path-traversal",
+            "race-on-shared-state",
+            "resource-leak",
+            "return-shape-mismatch",
+            "secret-in-log",
+            "short-circuit-swallow",
+            "silent-fallback",
+            "stale-comment",
+            "stale-doc",
+            "unbounded-growth",
+            "unvalidated-input",
+            "wrong-operator"
+          ]
+        },
+        "also_accept": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "OPTIONAL near-synonyms of `finding_kind` for THIS row. A scorer counts a finding as caught when its kind is in {finding_kind} union also_accept, and does not charge it as a false positive. It exists because some defects are genuinely nameable two ways - an inclusive/exclusive limit IS an off-by-one, a check-then-act window IS a race - and without it a reviewer that saw the defect correctly would be scored both a miss AND a false positive for choosing the other word, which measures vocabulary agreement rather than review. Use only for true synonyms; a kind that describes a DIFFERENT defect in the same diff means the row has two defects and belongs in two rows. The canonical kind must NOT be repeated here - draft-07 cannot express 'differs from a sibling value', so that is asserted in the corpus test instead.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "check-then-act",
+              "command-injection",
+              "empty-collection-unhandled",
+              "error-code-mismatch",
+              "inclusive-exclusive-mismatch",
+              "inverted-condition",
+              "missing-await",
+              "missing-case",
+              "missing-timeout",
+              "off-by-one",
+              "optional-treated-required",
+              "path-traversal",
+              "race-on-shared-state",
+              "resource-leak",
+              "return-shape-mismatch",
+              "secret-in-log",
+              "short-circuit-swallow",
+              "silent-fallback",
+              "stale-comment",
+              "stale-doc",
+              "unbounded-growth",
+              "unvalidated-input",
+              "wrong-operator"
+            ]
+          }
+        },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "line_range"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+              "description": "Must equal file_hint and the diff's '+++ b/' path. Asserted in the test rather than here: JSON Schema draft-07 cannot compare two sibling values."
+            },
+            "line_range": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "integer", "minimum": 1 },
+              "description": "[start, end] inclusive, numbered in the POST-APPLY (new) file, and required to fall inside the hunk's new range. Post-apply because that is the only numbering a reviewer reading the patched file can produce; pre-apply numbering would score a correct reviewer as wrong on every hunk that adds lines. Some ranges point at a CONTEXT line - a docs-drift row's defect is the unchanged sentence the diff made false."
+            }
+          }
+        }
+      }
+    },
+    "severity": {
+      "type": "string",
+      "description": "Author's judgement of impact if the defect shipped. Present so a runner can weight or filter; no scoring rule in the README currently reads it.",
+      "enum": ["critical", "high", "medium", "low"]
+    },
+    "source": {
+      "const": "synthetic",
+      "description": "Every row is invented. A const rather than an enum: if a row is ever extracted from a real incident it needs its own provenance fields (repository, commit, scrub record), not a second value here."
+    },
+    "design_axis": {
+      "type": "string",
+      "description": "OPTIONAL cross-tag to the seven real-incident axes of .artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md:188. Orthogonal to class: class says what kind of mistake the code makes, design_axis says which historical failure mode of THIS repository it rhymes with. Absent on rows that match no axis - the enum lists all seven, and the README records which of them no row currently exercises, because a silently unused value would otherwise read as coverage.",
+      "enum": [
+        "fail-open",
+        "windows-path-crlf",
+        "shell-injection",
+        "gate-self-destruct",
+        "spec-omission",
+        "over-implementation",
+        "intent-mismatch"
+      ]
+    }
+  }
+}
