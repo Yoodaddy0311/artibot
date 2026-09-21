@@ -13,10 +13,16 @@
  * injected — so what is pinned here is the path an engine actually takes.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { nextTarget, recordPhaseResult } from '../../lib/autopilot/engine-state.js';
-import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
+import {
+  deleteSessionArtifacts, getSessionPath, getStoreDir, saveSession,
+} from '../../lib/autopilot/session-store.js';
 import { readEvents } from '../../lib/autopilot/telemetry.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
 
 const sessions = [];
 
@@ -227,5 +233,138 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
 
     expect(state.recoveryJournal).toBeUndefined();
     expect(eventTypes(state.sessionId)).not.toContain('recovery-applied');
+  });
+});
+
+/**
+ * CA-03 B2 — the pause notification has to survive `recordPhaseResult`'s persist.
+ *
+ * `notification.js#queueOnSession` writes its entry onto the session **on disk**,
+ * and it runs while `applyRecoveryTransition` is still inside the ACK, i.e.
+ * BEFORE `recordPhaseResult` persists the whole in-memory state. A whole-state
+ * write of a state that never learned about the entry erases it, and when no
+ * session file exists yet `queueOnSession` cannot write at all. So the only
+ * assertion that means anything here is one that reads the JSON file back: an
+ * `exit 0`, a truthy return, or the in-memory object alone would all have been
+ * green throughout the window in which the operator was never told.
+ *
+ * The real store is used deliberately — `notification.js` and `session-store.js`
+ * are NOT mocked, because the bug lives precisely in the ordering between their
+ * two writes. The store directory is redirected to a temp dir through
+ * `ARTIBOT_AUTOPILOT_STORE_DIR` (+ the `_ROOT` pairing `getStoreDir()` requires,
+ * without which the override is discarded and the writes land in the real
+ * store). `tests/setup/state-dir.js` already redirects the store for the whole
+ * suite; this block pins its own so the file-level assertions do not depend on
+ * that default staying in place.
+ */
+describe('recordPhaseResult — a recovery pause reaches the persisted queue', () => {
+  const ON = Object.freeze({ transitionFromVerdict: true });
+  const VAR = 'ARTIBOT_AUTOPILOT_STORE_DIR';
+  const PAIR = 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT';
+  const ownDir = path.join(os.tmpdir(), `artibot-ca03-queue-${process.pid}`);
+  /** @type {{dir: string|undefined, root: string|undefined}} */
+  let saved;
+
+  const restore = (name, value) => {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  };
+
+  beforeAll(() => {
+    saved = { dir: process.env[VAR], root: process.env[PAIR] };
+    process.env[VAR] = ownDir;
+    process.env[PAIR] = getPluginRoot();
+  });
+
+  // Removal comes BEFORE the env restore, and that order is load-bearing twice
+  // over: the file-level `afterEach` has already run `deleteSessionArtifacts`
+  // with `ownDir` still in force (an inner `afterAll` fires after the last
+  // test's `afterEach`), and restoring first would leave this block deleting a
+  // directory it no longer owns the pointer to. Without the removal each run
+  // minted a new `artibot-ca03-queue-<pid>` and left it behind — measured at 6
+  // strays before this was added.
+  afterAll(() => {
+    try {
+      rmSync(ownDir, { recursive: true, force: true });
+    } catch { /* best-effort — a locked handle must not fail the suite */ }
+    restore(VAR, saved.dir);
+    restore(PAIR, saved.root);
+  });
+
+  /** Read the queue off the JSON file, never off the live object. */
+  function persistedPauses(sessionId) {
+    const onDisk = JSON.parse(readFileSync(getSessionPath(sessionId), 'utf8'));
+    const queue = Array.isArray(onDisk.queuedQuestions) ? onDisk.queuedQuestions : [];
+    return queue.filter((entry) => entry?.type === 'pause');
+  }
+
+  it('redirects the store, so these assertions read a sandbox file', () => {
+    expect(getStoreDir()).toBe(path.resolve(ownDir));
+  });
+
+  it('persists the queued pause when no session file existed yet', () => {
+    const state = makeState({ verifyResult: { status: 'UNMEASURED' } });
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, ON);
+
+    expect(state.phase).toBe('PAUSED');
+    const pauses = persistedPauses(state.sessionId);
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0]).toMatchObject({ type: 'pause', reason: 'recovery:ask_human' });
+    expect(typeof pauses[0].ts).toBe('string');
+    expect(typeof pauses[0].body).toBe('string');
+  });
+
+  it('persists exactly one queued pause when the session file already existed', () => {
+    // The duplicate risk: `queueOnSession` writes the entry to the file, and the
+    // merge adds it to the in-memory state that is persisted over that file.
+    const state = makeState({ verifyResult: { status: 'UNMEASURED' } });
+    saveSession(state);
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, ON);
+
+    expect(persistedPauses(state.sessionId)).toHaveLength(1);
+  });
+
+  it('keeps the in-memory queue and the persisted queue in agreement', () => {
+    const state = makeState({ verifyResult: { status: 'UNMEASURED' } });
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, ON);
+
+    expect(state.queuedQuestions).toHaveLength(1);
+    expect(stable(state.queuedQuestions)).toBe(stable(
+      JSON.parse(readFileSync(getSessionPath(state.sessionId), 'utf8')).queuedQuestions,
+    ));
+  });
+
+  it('survives a second persist of the same in-memory state', () => {
+    // Announcing after the persist instead of merging would pass the first two
+    // assertions and lose the entry here, because the entry would exist only on
+    // disk and the next whole-state write would overwrite it again.
+    const state = makeState({ verifyResult: { status: 'UNMEASURED' } });
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, ON);
+    recordPhaseResult(state, { phase: 'IMPROVE', status: 'done' }, ON);
+
+    expect(persistedPauses(state.sessionId)).toHaveLength(1);
+  });
+
+  it('adds no queue entry when the verdict only advances the phase', () => {
+    const state = failingState();
+
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+
+    expect(state.pendingPhase).toBe('EXECUTE');
+    expect(persistedPauses(state.sessionId)).toHaveLength(0);
+    expect(state.queuedQuestions).toBeUndefined();
+  });
+
+  it('adds no queue entry with the gate OFF', () => {
+    const state = makeState({ verifyResult: { status: 'UNMEASURED' } });
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, { transitionFromVerdict: false });
+
+    expect(persistedPauses(state.sessionId)).toHaveLength(0);
+    expect(state.queuedQuestions).toBeUndefined();
   });
 });
