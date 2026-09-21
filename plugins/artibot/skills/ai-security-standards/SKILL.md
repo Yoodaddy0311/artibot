@@ -35,7 +35,7 @@ agents:
 tokens: "~3K"
 category: "security"
 whenNotToUse: "Do not apply LLM-specific controls to pure deterministic code paths with no model in the loop (e.g., a config parser, a math utility). When no untrusted text ever reaches a model context and no agent acts on tool output, the classical security-standards skill covers it. Scale up to this skill the moment external text enters a prompt, a RAG store, or a tool result an agent will act on."
-source_hash: 94e13a10
+source_hash: ba3411a8
 ---
 
 # AI Security Standards
@@ -130,7 +130,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 신뢰 경계 식별 확인 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 신뢰 경계 식별 확인 (After Step 1)
 **Context**: 변경이 닿는 신뢰 경계(hook stdin / MCP 결과 / 에이전트 입력)를 식별한 시점. 경계를 잘못 식별하면 이후 모든 방어가 엉뚱한 곳에 적용된다.
 **Ask**: "이 변경이 닿는 신뢰 경계를 식별했습니다. **외부 입력이 모델 컨텍스트로 들어오는 경로가 정확히 어디인가요?**"
 **Options**:
@@ -140,7 +142,7 @@ Progress:
 **Skippable**: No — 경계를 놓치면 인젝션 방어 전체가 무력화됨
 **Freedom**: LOW
 
-### Checkpoint 2: 도구 출력 신뢰경계 검증 (After Step 4)
+### Self-check 2: 도구 출력 신뢰경계 검증 (After Step 4)
 **Context**: MCP/도구 출력이 sink(eval, SQL, shell, 렌더)로 들어가기 전 검증/인코딩 여부가 확인된 시점. 검증되지 않은 도구 출력은 간접 인젝션의 핵심 벡터다.
 **Ask**: "도구 출력 처리 검토가 완료되었습니다. **모든 도구/MCP 출력이 sink에 도달하기 전 검증·인코딩되나요?**"
 **Options**:
@@ -150,7 +152,7 @@ Progress:
 **Skippable**: No — 미검증 도구 출력은 LLM02 취약점
 **Freedom**: LOW
 
-### Checkpoint 3: 과도한 에이전시 검토 (After Step 5)
+### Self-check 3: 과도한 에이전시 검토 (After Step 5)
 **Context**: 에이전트가 미검증 출력에 기반해 되돌릴 수 없는 행동을 하는지 검토된 시점. 자율 에이전트의 과도한 에이전시는 목표 하이재킹으로 이어진다.
 **Ask**: "에이전트 에이전시 검토가 완료되었습니다. **되돌릴 수 없는 행동에 human-in-the-loop 또는 범위 제한이 적용되어 있나요?**"
 **Options**:

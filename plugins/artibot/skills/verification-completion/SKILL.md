@@ -22,7 +22,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "quality"
-source_hash: f84bab90
+source_hash: 9ea41512
 whenNotToUse: "Do not apply full verification protocol to internal planning steps, WIP checkpoints mid-task, or agent-to-agent status messages. Reserve the protocol for final completion claims that a human or downstream agent will act on."
 ---
 
@@ -111,6 +111,8 @@ Verification:
 
 ## Human Checkpoints
 
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
 ### Checkpoint 1: 테스트 결과 수용 여부 (After Step 2)
 **Context**: 관련 테스트를 재실행한 직후입니다. 실패하는 테스트가 있는 상태에서 완료를 주장하는 것은 Iron Law 위반입니다. 이 시점에서 결과를 확정해야 합니다.
 **Ask**: "테스트 결과가 **수용 가능한가요**? 실패한 테스트가 없는지 확인해 주세요."
@@ -121,7 +123,7 @@ Verification:
 **Skippable**: No — 실패한 테스트가 있는 채로 완료를 주장하는 것은 허용되지 않음
 **Freedom**: LOW
 
-### Checkpoint 2: 증거 충분성 승인 (After Step 5)
+### Self-check 2: 증거 충분성 승인 (After Step 5)
 **Context**: 완료 보고서를 작성한 후, 포함된 증거가 실제로 완료를 입증하기에 충분한지 판단하는 시점입니다. "충분한 증거"의 기준은 완료 유형에 따라 다릅니다.
 **Ask**: "완료 보고서에 포함된 **증거가 충분한가요**? 증거 유형과 구체성을 검토해 주세요."
 **Options**:
@@ -131,7 +133,7 @@ Verification:
 **Skippable**: No — 증거 없는 완료 주장은 Iron Law 위반임
 **Freedom**: MEDIUM
 
-### Checkpoint 3: 레드 플래그 표현 최종 점검 (After Step 6)
+### Self-check 3: 레드 플래그 표현 최종 점검 (After Step 6)
 **Context**: 보고서 언어를 자가 점검한 후, "should work", "probably", "I think" 같은 비검증 표현이 남아있는지 최종 확인하는 시점입니다.
 **Ask**: "보고서에 **레드 플래그 표현이 없나요**? 모든 주장이 검증된 사실에 기반하는지 확인해 주세요."
 **Options**:

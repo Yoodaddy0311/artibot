@@ -21,7 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
-source_hash: 2c846133
+source_hash: 55ba5961
 whenNotToUse: "Mid-task execution phases where evaluation would interrupt active work; do not apply when there is no completed task output to score or compare."
 ---
 
@@ -175,7 +175,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 평가 점수 검토 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 평가 점수 검토 (After Step 1)
 **Context**: 4개 차원(정확성·완성도·효율성·만족도)에 따른 자동 채점이 완료된 시점. 가중치 기반 산출이므로 실제 작업 품질과 괴리가 생길 수 있어 사람의 판단이 필요하다.
 **Ask**: "평가 점수가 **실제 작업 품질을 적절히 반영**하고 있나요?"
 **Options**:

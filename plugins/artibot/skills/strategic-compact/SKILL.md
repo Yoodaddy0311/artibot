@@ -20,7 +20,7 @@ agents:
   - "architect"
 tokens: "~2K"
 category: "analysis"
-source_hash: 8c47e655
+source_hash: ffd9aeba
 whenNotToUse: "Do not trigger strategic compaction below the yellow zone (60% context usage) or during active multi-file edits where task state is partially committed. Compacting mid-transaction loses the uncommitted state that the agent needs to complete the current operation."
 ---
 # Strategic Compaction
@@ -143,7 +143,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 컨텍스트 존 평가 확인 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 컨텍스트 존 평가 확인 (After Step 1)
 **Context**: 현재 컨텍스트 사용량이 자동으로 측정되어 존(Green/Yellow/Orange/Red/Critical)이 판단된 시점. 존 판단이 틀리면 너무 이른 압축 또는 너무 늦은 압축으로 이어질 수 있다.
 **Ask**: "현재 **컨텍스트 존 판단이 정확**한가요?"
 **Options**:
@@ -164,7 +166,7 @@ Progress:
 **Skippable**: Yes (skip 시 Approve로 처리)
 **Freedom**: HIGH
 
-### Checkpoint 3: 압축 후 필수 컨텍스트 생존 검증 (After Step 5)
+### Self-check 3: 압축 후 필수 컨텍스트 생존 검증 (After Step 5)
 **Context**: 압축이 완료되어 보존 대상 컨텍스트가 토큰 효율적 형식으로 변환된 시점. 필수 정보가 소실되면 작업을 재개할 수 없으므로 재개 전 반드시 확인해야 한다.
 **Ask**: "압축 후 **작업 재개에 필요한 필수 컨텍스트가 모두 살아있나요**?"
 **Options**:

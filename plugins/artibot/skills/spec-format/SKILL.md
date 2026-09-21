@@ -9,7 +9,7 @@ agents: ["architect"]
 tokens: "~3K"
 category: "workflow"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: e63ca081
+source_hash: 9876d43f
 whenNotToUse: "Do not apply when the request is a quick exploratory spike, a one-liner fix, or when the stakeholder explicitly wants to prototype first and specify later. EARS overhead exceeds value for tasks under 30 minutes of implementation."
 ---
 
@@ -239,7 +239,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 요구사항 의도 검토 (After Step 3)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 요구사항 의도 검토 (After Step 3)
 **Context**: EARS 패턴을 적용하여 요구사항 문장이 작성된 시점. 문법은 맞더라도 원래 비즈니스 의도를 정확히 반영하지 못할 수 있어 검토가 필요하다.
 **Ask**: "작성된 요구사항이 **원래 의도를 정확히 표현**하고 있나요?"
 **Options**:
@@ -249,7 +251,7 @@ Progress:
 **Skippable**: No — 승인 또는 수정을 명시적으로 결정해야 함
 **Freedom**: LOW
 
-### Checkpoint 2: 인수 기준 완성도 확인 (After Step 4)
+### Self-check 2: 인수 기준 완성도 확인 (After Step 4)
 **Context**: Given-When-Then 형식으로 인수 기준이 작성된 시점. 누락된 시나리오(엣지 케이스, 오류 케이스)가 있으면 나중에 테스트 커버리지 갭이 발생한다.
 **Ask**: "인수 기준이 **테스트 가능하고 모든 시나리오를 포함**하고 있나요?"
 **Options**:

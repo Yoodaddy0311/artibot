@@ -21,7 +21,7 @@ agents:
   - "architect"
 tokens: "~3K"
 category: "analysis"
-source_hash: 4e113488
+source_hash: 43e36547
 ---
 
 # Repo Benchmarking
@@ -159,6 +159,8 @@ Progress:
 
 ## Human Checkpoints
 
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
 ### Checkpoint 1: 클론 성공 및 크기 확인 (After Step 3)
 **Context**: 레포지토리 클론이 완료된 직후 시점. 크기 초과나 접근 오류가 있을 경우 이후 분석 전체가 의미 없어지므로 진행 여부를 확인해야 한다.
 **Ask**: "레포 클론이 완료되었습니다. **클론 크기가 500MB 이내이고 주요 파일이 정상적으로 존재하나요?**"
@@ -170,7 +172,7 @@ Progress:
 **Skippable**: No — 클론 실패 상태에서 분석을 진행하면 결과가 무효
 **Freedom**: LOW
 
-### Checkpoint 2: 평가 점수 공정성 승인 (After Step 6)
+### Self-check 2: 평가 점수 공정성 승인 (After Step 6)
 **Context**: 10개 차원 각각에 점수와 근거가 부여된 시점. 점수가 증거 없이 주관적으로 산정되었을 경우 벤치마크 결과 전체의 신뢰도가 떨어진다.
 **Ask**: "10개 차원 점수가 산정되었습니다. **모든 점수에 파일 경로나 코드 예시 같은 구체적인 근거가 있나요?**"
 **Options**:

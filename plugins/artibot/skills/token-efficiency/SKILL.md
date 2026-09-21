@@ -22,7 +22,7 @@ agents:
   - "performance-engineer"
 tokens: "~2K"
 category: "tooling"
-source_hash: 9b99ded5
+source_hash: 0f1624d5
 whenNotToUse: "Short sessions with low context usage where compression would degrade output clarity; do not apply when context is under 60% and no explicit --uc flag is set."
 ---
 
@@ -88,6 +88,8 @@ Progress:
 
 ## Human Checkpoints
 
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
 ### Checkpoint 1: 압축 레벨 적합성 확인 (After Step 2)
 **Context**: 컨텍스트 사용률을 감지한 후 압축 레벨을 선택하는 시점입니다. 잘못된 레벨 선택은 불필요한 정보 손실(과압축) 또는 컨텍스트 초과(미압축)를 초래할 수 있습니다.
 **Ask**: "선택된 압축 레벨이 **현재 상황에 적합한가요**? 컨텍스트 사용률과 작업 복잡도를 고려해 확인해 주세요."
@@ -100,7 +102,7 @@ Progress:
 **Skippable**: Yes (컨텍스트 임계값이 명확하면 자동 선택 가능)
 **Freedom**: LOW
 
-### Checkpoint 2: 압축 결과물 품질 검증 (After Step 6)
+### Self-check 2: 압축 결과물 품질 검증 (After Step 6)
 **Context**: 모든 압축 기법을 적용한 후, 95% 이상의 정보 보존 목표가 달성되었는지 확인하는 최종 시점입니다. 압축이 지나쳐 핵심 내용이 손실되면 전체 작업이 무의미해집니다.
 **Ask**: "압축된 결과물이 **여전히 명확하고 완전한가요**? 중요한 정보가 손실되지 않았는지 검토해 주세요."
 **Options**:

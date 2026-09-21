@@ -35,7 +35,7 @@ tokens: "~3K"
 category: "code-quality"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: 2c99e8ae
+source_hash: ae4b297b
 whenNotToUse: "Do not apply Artibot-specific coding standards to code in vendor directories, generated files, or repositories you do not own. Do not enforce the 50-line function limit on data-heavy configuration objects or lookup tables where density is intentional."
 ---
 
@@ -110,7 +110,9 @@ Progress:
 
 ## Human Checkpoints
 
-### Checkpoint 1: 기존 패턴 확인 (After Step 1)
+> `### Self-check` 항목은 사람에게 묻지 않는다 — 모델이 Ask 문장을 기준으로 스스로 검증하고, 통과하지 못하면 해당 Step 으로 돌아가 고친다. 스스로 해소할 수 없거나(사람만 할 수 있는 조치·예외 인정) 판단에 확신이 없으면 중단하고 사용자에게 보고한다. 사람의 결정이 필요한 것은 `### Checkpoint` 뿐이다.
+
+### Self-check 1: 기존 패턴 확인 (After Step 1)
 **Context**: 코드 수정 전 기존 코드베이스의 컨벤션과 패턴을 파악한 시점. 잘못 식별된 패턴 기반으로 작업하면 일관성이 깨질 수 있다.
 **Ask**: "기존 코드에서 **[식별된 패턴 목록]** 을 확인했습니다. 이 패턴들이 올바르게 파악되었나요?"
 **Options**:
