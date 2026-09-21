@@ -40,6 +40,8 @@ export { SESSION_COVERAGE_EVENTS, foldSessionCoverage } from './session-coverage
 
 export {
   AGENT_RUN_PREFIX,
+  SCORE_EMPTY_DENOMINATOR_REASON,
+  SCORE_NO_JOINED_AUDIT_REASON,
   SCORE_UNAVAILABLE_REASON,
   SPAWN_OUTCOME_EVENTS,
   joinSpawnOutcomes,
