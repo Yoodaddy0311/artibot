@@ -24,7 +24,10 @@
  * Stage: OBSERVE. Nothing here changes a spawn. `artibot.config.json#routing`
  * ships `observe: true` with an EMPTY `canary.actionClasses`, so the caller
  * (T-31) records this result and routes on `lib/core/model-policy.js`
- * `resolveModel` exactly as before.
+ * `resolveModel` exactly as before. GA-02 (Wave 14) adds a canary decision
+ * gate that annotates `reason[]` with `canary:<tier>`; the EMPTY
+ * `actionClasses` above is still what keeps this observe-only, and the
+ * actuator (CA-02) is not landed.
  *
  * Layer: L2 pure. No `fs`, no `process`, no clock, no imports at all. The
  * config object and the schema validator both arrive by injection, which is

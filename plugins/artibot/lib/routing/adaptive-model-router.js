@@ -37,7 +37,9 @@
  *  - The scoring weights are UNCALIBRATED (the `route-scorer.js` tables are
  *    self-declared estimates). A recommendation is an opinion of those tables,
  *    not evidence about which tier is better.
- *  - Zero live receipts exist. Nothing here proves a receipt is ever appended.
+ *  - Live receipts now exist but are thin: Wave 13's route-compare read 326
+ *    binds / 42 joined / 39 compared, once. Nothing here proves a receipt is
+ *    appended on any given spawn.
  *  - `routing_epoch_id` is whatever the caller passed. G1 (epoch = spawn) is
  *    unresolved in code; T-31 is the intended writer.
  *

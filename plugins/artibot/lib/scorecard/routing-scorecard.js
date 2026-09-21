@@ -380,7 +380,8 @@ export function buildRoutingScorecard(replay) {
       label: '티어별 Route 건수',
       source: 'route.selected · data.models.selected.tier',
       note: 'selected 는 실제로 실행된 모델이다. Observe 에서는 항상 resolveModel 정책 결과이지 '
-        + '라우터 추천이 아니다(route-receipt 스키마 models 절).',
+        + '라우터 추천이 아니다(route-receipt 스키마 models 절).'
+        + ' GA-02 canary 게이트는 reason 만 싣고 이 값을 바꾸지 않는다(작동기 CA-02 미착수).',
     }),
     metric({
       key: 'routing.tier_comparability',

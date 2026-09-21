@@ -8,9 +8,11 @@
  *    header that `TIER_QUALITY` and `TIER_LATENCY_INDEX` are estimates with no
  *    benchmark behind them. A green run says fable outranks opus UNDER THOSE
  *    TABLES; it says nothing about which tier is actually better at anything.
- *  - ZERO LIVE RECEIPTS. Nothing here produces or appends a ledger line. There
- *    is no writer and no consumer as of 2026-09-02, so the divergence rate the
- *    Phase 0 metric depends on has a denominator of zero — not a small number.
+ *  - NO RECEIPTS FROM HERE. Nothing in this file produces or appends a ledger
+ *    line. Live receipts do exist now — Wave 13's route-compare read 326 binds
+ *    / 42 joined / 39 compared, once — so the divergence rate the Phase 0
+ *    metric depends on has a thin denominator rather than a zero one. A green
+ *    run here still says nothing about that denominator.
  *  - The schema case is a fixture. Passing ajv proves this receipt conforms,
  *    not that a receipt built from live runtime inputs will.
  *  - `measured: false` is asserted as PRESENT and correct-by-construction. No

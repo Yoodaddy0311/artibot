@@ -114,7 +114,7 @@
       "type": "object",
       "required": ["current", "recommended", "selected"],
       "additionalProperties": false,
-      "description": "Exact model identities (§20). current is explicitly nullable — null when no incumbent can be EVIDENCED, which covers both the first decision of a session and a decision whose incumbent source was unavailable — but the key stays required so 'no incumbent' is recorded rather than omitted. In Observe, recommended and selected differ whenever the router disagrees with policy; that divergence rate is the Phase 0 metric (PRD S3).",
+      "description": "Exact model identities (§20). current is explicitly nullable — null when no incumbent can be EVIDENCED, which covers both the first decision of a session and a decision whose incumbent source was unavailable — but the key stays required so 'no incumbent' is recorded rather than omitted. In Observe, recommended and selected differ whenever the router disagrees with policy; that divergence rate is the Phase 0 metric (PRD S3). Measured once (Wave 13 route-compare: 39 compared, agreement 0.872) — a single live read, not a baseline.",
       "properties": {
         "current": {
           "description": "Model in force before this decision, or null when no incumbent can be evidenced (first decision of a session, or no readable incumbent source).",
@@ -125,7 +125,7 @@
           "$ref": "#/definitions/model_identity"
         },
         "selected": {
-          "description": "What was actually used. In Observe this is always the resolveModel policy result, never the recommendation.",
+          "description": "What was actually used. In Observe this is always the resolveModel policy result, never the recommendation. GA-02's canary gate records a canary:<tier> reason but does not change this value — the actuator (CA-02, routing.canary.actionClasses) is not landed, and that array ships empty.",
           "$ref": "#/definitions/model_identity"
         }
       }

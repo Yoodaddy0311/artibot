@@ -202,6 +202,8 @@ describe('v5 신설 최상위 키 6종 — 형태와 값', () => {
 
   it('routing.canary.actionClasses 는 빈 배열이다 (observe-only 의 정의)', () => {
     // 비어 있지 않으면 그 클래스의 추천이 실제로 적용된다 = 더 이상 기록만이 아니다.
+    // GA-02 결정 게이트(Wave 14)는 reason[] 에 canary:<tier> 를 싣지만 작동기는 아니다 —
+    // 이 배열이 빈 동안 판정은 기록만 한다(작동기 CA-02 미착수).
     expect(config.routing.canary.actionClasses).toEqual([]);
   });
 

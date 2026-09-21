@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 14 착지 (8/8 착지, 배치 1~5, 2026-09-21)
+
+배치 1 master `e579e5a3`(base `5161fd40`) · 배치 2 `bfb14fc5` · 배치 3 `67fedeea` · 배치 4 `57f15175` · 배치 5 `18c3d047`. **8줄기 전부 착지**, rebuilds 0 · land 7/7 PASS 8건. diff 수치는 리더 측정 몫 — **미측정**.
+
+- **ob19-save-scorecard** (`9b08fb10`, 배치 1 `e579e5a3`): OB-19 Snapshot Scorecard `/save` 렌더 — `commands/save.md` 에 스코어카드 렌더 단계가 들어가고 게이트 `tests/firewall/save-scorecard-render.test.js` 가 순서를 핀한다. CA-05 가 정한 `/save` 6단계 위에 얹히며, 종전 "`save.md` 에 checkpoint/렌더 0건" 서술은 이 착지로 낡았다.
+- **claim-audit-join** (`6fe1b228`, 배치 1 `e579e5a3`): OB-06 후속 — `lib/review/claim-audit-join.js`(`joinClaimAudits`)가 `review.claim_audit` 을 스폰 축에 조인한다. 라이브 `claim_audit` **0행**이고 `subject_agent_id` **생산자 0** 이라 값은 아직 비어 있다 — **분모 부재가 정답**이다. 생산자 0 의 원인은 문서다: `agents/auditor.md` 틀에 그 키가 없고 `commands/team.md:338-339` 규약도 `claim_audit.subject_model` 만 지시한다.
+- **sh13-resume-report-cli** (`a282e094`, 배치 2 `bfb14fc5`): SH-13 `/resume --contract` 판독 CLI `scripts/ledger/resume-report.mjs` — report-only 경로가 실행 가능해졌다. 라이브 1회 **16/16 `checkpoint-missing`**, **`resumable` 0/16**. 현 배선에서 `resumable` 은 **구조적 no** 다(체크포인트 생산자가 canary OFF `runtime.checkpoint.saveOnSave:false`) — 판독기 결함이 아니다.
+- **ga02-canary-gate** (`a2500351`, 배치 2 `bfb14fc5`): GA-02 4티어 canary **결정 게이트** — `resolveCanaryClasses` 가 `reason[]` 에 `canary:<tier>` 를 싣고 `tests/firewall/canary-actionclass-gate.test.js` 가 핀한다. **작동기는 아니다**: `routing.canary.actionClasses` 가 빈 배열인 동안 기록만 하며 실제 티어 적용은 CA-02 미착수다.
+- **sh05-compare-scorecard** (`d4a778a0`, 배치 3 `67fedeea`): SH-05 세 번째 카드 `/scorecard --compare` — `lib/scorecard/compare-scorecard.js#buildCompareScorecard(fold, { since })` + `render.js` HEADINGS +1. 라이브 1회(04:32Z): 짝 **61/356** · 일치 **52/58(89.7%)** · score **unmeasured**. 89.7% 는 단일 라이브 판독이며 **기준선이 아니다**.
+- **sh08-defect-corpus** (`531ddb64`, 배치 4 `57f15175`): SH-08 seeded-defect 코퍼스 **N=30**(7 class, `design_axis` 6/7·8행) + 오프라인 러너 `scripts/bench/seeded-defect.mjs` + optional `expected.also_accept`. **리뷰어 실행 0 → catch-rate·FP·위치정확도 전부 미측정** — 코퍼스와 러너가 있다는 것은 잡는다는 것과 다른 진술이다. 오너 결정 C6(목표 catch-rate)은 여전히 선행이다.
+- **ap-store-isolation** (`cb900f51`, 배치 4 `57f15175`): `session-store.js#getStoreDir` 에 env seam(`ARTIBOT_AUTOPILOT_STORE_DIR` + 짝 `_ROOT`) + 테스트 setup 기본 ON + 방화벽 `tests/firewall/autopilot-store-sandbox-required.test.js`. autopilot 71파일 **1834/1834** 에서 실 스토어 **delta 0**. 종전 "`tests/autopilot/` 27/68 이 실 스토어에 쓴다" 는 해소.
+- **sh03-hint-axis** (`9f8c8c69`, 배치 5 `18c3d047`): SH-03 hint 축 — `hint_recommend`·`hint_resolved_by` 2키(`ACTIVATION_DATA_KEYS` 8→10) + `scripts/evals/nl-activation-report.mjs` 의 **4번째 축** `activation.hint-followed`. 그 축은 **슬래시 타이핑 수락의 하한**이다(힌트를 보고 슬래시를 친 경우만 세므로 실제 수락률은 그 이상). 라이브 **0/0 → null** — 설치본 갱신 뒤 재계수. 종전 "hint 축 + SessionEnd flush 는 Wave 13 미착" 중 flush 는 **reader 측 `no_next` 로 대체**됐다.
+
+**설치본 드리프트(리더 실측 2026-09-21)**: 라이브 슬래시 커맨드 본문과 플러그인 캐시는 **4.59.0**(`installed_plugins.json` artibot@artibot = 4.59.0, lastUpdated 2026-09-11; cache 디렉터리는 4.50.0~4.59.0 만 존재)이고 런타임 루트 `~/.claude/artibot/package.json` 만 **4.64.0** 이다. 그래서 캐시 4.59.0 에는 `route-compare.mjs`·`spawn-outcome.js`·`save-checkpoint.js` 가 **없다** — Wave 13·14 판독기의 라이브 수치가 0 이거나 null 인 것은 이 드리프트의 결과이지 코드 결함이 아니다. `commands/verify.md` LF 정규화 sha 로도 갈린다: 4.59.0 = `e8ade674e6`(= cache = `~/.claude/commands/verify.md`) vs 4.64.0 = `6d0ddb4340`. **라이브 훅이 어느 루트에서 도는지는 미확정** — `.in_use` pid 가 cache 4.59.0 에 찍혀 캐시 쪽이 유력하다. 재계수 전제는 `sync:local` + 호스트 재시작이다.
+
 ### Wave 13 착지 (배치 1·2·3, 2026-09-21)
 
 배치 1 master `deb3a7d6`(base `2de81dba`) · 배치 2 master `e8ff8512`(base `deb3a7d6`) · 배치 3 master `82d924df`(base `e8ff8512`). **착지 6줄기, 대기 0.** diff 수치는 리더 측정 몫 — **미측정**.
