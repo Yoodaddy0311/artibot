@@ -73,8 +73,9 @@ const RENAME_RETRY_OPTS = { attempts: MAX_RENAME_ATTEMPTS, maxBackoffMs: MAX_REN
  * `/runtime/`, and `git ls-files runtime` is empty as of 2026-09-21), so the
  * cost of a stray test write is not a dirty working copy — it is that every
  * reader of the store population counts fixtures as sessions: {@link
- * listSessions} and, through it, `lib/autopilot/cross-session-learner.js`,
- * `scripts/hooks/bash-risk-guard.js` and `scripts/dev/prune-autopilot-store.mjs`.
+ * listSessions} and, through it, `lib/autopilot/cross-session-learner.js` and
+ * `scripts/hooks/bash-risk-guard.js`; `scripts/dev/prune-autopilot-store.mjs`
+ * enumerates the same directory directly via this function.
  * It is read on EVERY call, because a value captured at import is already fixed
  * before a test can set it.
  *

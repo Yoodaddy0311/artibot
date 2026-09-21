@@ -64,9 +64,10 @@
  * is silent. Test sessions land in the same directory as real ones and every
  * reader of the store POPULATION then counts them —
  * `session-store.js#listSessions` (which enumerates `*.json` there) and, through
- * it, `lib/autopilot/cross-session-learner.js:37`,
- * `scripts/hooks/bash-risk-guard.js:96` (real module, imported at :128) and
- * `scripts/dev/prune-autopilot-store.mjs:303`.
+ * it, `lib/autopilot/cross-session-learner.js:37` and
+ * `scripts/hooks/bash-risk-guard.js:96` (real module, imported at :128);
+ * `scripts/dev/prune-autopilot-store.mjs:303` enumerates the same directory
+ * directly via `getStoreDir()`.
  *
  * Five writers reach it and all five go through that one resolver:
  * `saveSession` itself, `lib/autopilot/telemetry.js` (`<id>.events.ndjson`),

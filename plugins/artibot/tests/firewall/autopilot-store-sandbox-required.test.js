@@ -9,9 +9,9 @@
  * it shows up in no `git status`, which is what makes it worth a gate. The cost
  * is that test sessions share a directory with real ones and every reader of
  * the store population counts them: `session-store.js#listSessions`, and
- * through it `lib/autopilot/cross-session-learner.js:37`,
- * `scripts/hooks/bash-risk-guard.js:96` and
- * `scripts/dev/prune-autopilot-store.mjs:303`. Five writers reach it and all
+ * through it `lib/autopilot/cross-session-learner.js:37` and
+ * `scripts/hooks/bash-risk-guard.js:96`; `scripts/dev/prune-autopilot-store.mjs:303`
+ * enumerates the same directory directly. Five writers reach it and all
  * five route through that one resolver: `saveSession`,
  * `lib/autopilot/telemetry.js`, `lib/autopilot/lock.js`,
  * `lib/autopilot/memory.js` and `lib/autopilot/worktree-manager.js`.
@@ -40,13 +40,17 @@
  * `tests/autopilot/session-store.test.js` carries the one live assertion that
  * executes inside the autopilot project itself.
  *
- * MEASURED 2026-09-21 04:09–04:11Z, this worktree: `npx vitest run --project
- * autopilot` (71 files, 1832 tests) plus 10 targeted files outside that project
+ * MEASURED 2026-09-21 04:45–04:47Z, this worktree: `npx vitest run --project
+ * autopilot` (71 files, 1834 tests) plus 10 targeted files outside that project
  * (123 tests) left `runtime/autopilot` at 0 entries before and after, with an
- * identical listing — while the sandbox picked up real residue from the same
- * run (`locks/*.lock`, `memory/*.jsonl`, `sess-own.events.ndjson`). The suite
- * does write; the writes go to tmp. A zero that came from a suite touching
- * nothing would prove neither. The module scan below covered `lib/` and
+ * identical listing, and the count of per-worker sandbox directories in
+ * `os.tmpdir()` unchanged (25 → 25 → 25; setup removes its own in `afterAll`).
+ * The positive half: the same project run with an operator-supplied
+ * `ARTIBOT_AUTOPILOT_STORE_DIR` — which setup never removes — left `locks/`,
+ * `memory/`, `worktrees/` and `sess-own.events.ndjson` (18 files) in that
+ * directory while the real store stayed at 0. The suite does write; the writes
+ * go to the sandbox. A zero that came from a suite touching nothing would
+ * prove neither. The module scan below covered `lib/` and
  * `scripts/` and found exactly two files naming the store path in code; both
  * are listed in `KNOWN_STORE_PATH_MODULES` with the reason they are there.
  *
@@ -78,6 +82,10 @@
  *     `main`. Nothing here can observe the autopilot project's own workers; the
  *     evidence for those is the config assertion in (d) plus the live `it` in
  *     `tests/autopilot/session-store.test.js`.
+ *   - **A third vitest project that does not extend.** The config assertion in
+ *     (d) counts the two projects by NAME. A new project declared without
+ *     `extends: true` adds to neither count and stays green here while running
+ *     with no setup at all.
  *   - **Comment-stripper fidelity.** The scan strips comments with a small
  *     scanner, not a parser. Two known divergences. A template literal
  *     containing a nested `${}` with its own backtick is not modelled; measured
@@ -362,9 +370,10 @@ describe('the sandbox is set by global setup, not by this file', () => {
     // top-level array rather than add to it, so counting is the assertion.
     expect(src.match(/setupFiles\s*:/g)).toHaveLength(1);
 
-    // One `extends: true` per project, so every project inherits it. The count
-    // is pinned to the project count rather than hardcoded, which keeps a newly
-    // added project from silently opting out.
+    // One `extends: true` per NAMED project, so both inherit it. The project
+    // match is name-pinned (`autopilot`, `main`): a new project that extends
+    // turns this red and forces an update here, but a new project that does
+    // NOT extend is invisible to this assertion — see WHAT THIS GATE CANNOT SEE.
     const projects = src.match(/\bname\s*:\s*['"](?:autopilot|main)['"]/g) ?? [];
     expect(projects).toHaveLength(2);
     expect(src.match(/\bextends\s*:\s*true\b/g)).toHaveLength(projects.length);
