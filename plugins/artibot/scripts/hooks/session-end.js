@@ -504,6 +504,8 @@ async function resolveReceiptDeps(deps) {
     now: deps.now ?? (() => new Date()),
     buildUsageReceipts: deps.buildUsageReceipts
       ?? (await load('lib', 'economics', 'usage-receipt.js')).buildUsageReceipts,
+    classifyEmptyReceipts: deps.classifyEmptyReceipts
+      ?? (await load('lib', 'economics', 'usage-receipt.js')).classifyEmptyReceipts,
     toUsageReceiptEnvelopes: deps.toUsageReceiptEnvelopes
       ?? (await load('lib', 'economics', 'receipt-envelope.js')).toUsageReceiptEnvelopes,
     appendLedgerEvent: deps.appendLedgerEvent
@@ -628,6 +630,38 @@ function appendReceiptEnvelopes(d, projectRoot, envelopes, seen) {
 }
 
 /**
+ * The `no-receipts` reason, qualified by cause when the fold's counters name
+ * one.
+ *
+ * A bare `no-receipts` row says a session produced nothing and stops there, so
+ * answering "why" means re-reading a transcript that may already be gone. The
+ * suffix puts the answer in the row itself, and the coverage reader
+ * (`lib/replay/session-coverage.js`) needs no change to show it: `by_reason`
+ * keys on the raw string, so a qualified reason simply becomes its own key.
+ *
+ * The classification is NOT made here. `classifyEmptyReceipts` owns the
+ * meaning of the counters it reads, because they are its module's counters.
+ * When it declines — a meta with no counters, or a shape it cannot account for
+ * exactly — the reason stays BARE. Unclassifiable is reported as
+ * unclassifiable; a guessed suffix in a ledger is worse than no suffix,
+ * because it reads as a measurement.
+ *
+ * @param {object} d - Resolved ports.
+ * @param {unknown} meta - `meta` of the zero-receipt fold.
+ * @returns {string} `no-receipts` or `no-receipts:<cause>`; one bounded token.
+ */
+function emptyReceiptsReason(d, meta) {
+  let cause;
+  try {
+    cause = d.classifyEmptyReceipts?.(meta) ?? null;
+  } catch {
+    // A classifier that throws must not cost the session its denominator row.
+    cause = null;
+  }
+  return typeof cause === 'string' && cause.length > 0 ? `no-receipts:${cause}` : 'no-receipts';
+}
+
+/**
  * The whole receipt stage minus the reporting. May throw; its caller may not.
  *
  * @param {object} hookData
@@ -659,7 +693,9 @@ async function collectUsageReceipts(hookData, deps) {
   const receipts = Array.isArray(built?.receipts) ? built.receipts : [];
   const coverage = typeof built?.meta?.coverage === 'number' ? built.meta.coverage : null;
   const unresolved = Object.keys(built?.meta?.unresolvedModels ?? {});
-  if (receipts.length === 0) return receiptOutcome({ reason: 'no-receipts', coverage }, unresolved);
+  if (receipts.length === 0) {
+    return receiptOutcome({ reason: emptyReceiptsReason(d, built?.meta), coverage }, unresolved);
+  }
 
   const envelopes = d.toUsageReceiptEnvelopes(receipts, { sessionId });
   const tally = appendReceiptEnvelopes(

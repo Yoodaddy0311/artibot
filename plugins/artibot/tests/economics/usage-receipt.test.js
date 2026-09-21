@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { PRICING_VERSION } from '../../lib/core/model-catalog.js';
 import {
   buildUsageReceipts,
+  classifyEmptyReceipts,
   emptyResult,
   priceUsage,
   PRICING_VERSION_UNRESOLVED,
@@ -688,4 +689,138 @@ describe('priceReceipts option', () => {
       expect(Number.isFinite(result.receipts[0].cost.total)).toBe(true);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// classifyEmptyReceipts
+//
+// The counters in `meta` are this module's vocabulary, so the reading of them
+// lives here rather than in the hook that prints the reason. Every positive
+// case below is built by the REAL fold, not by a hand-written meta: a
+// classifier tested only against metas the test author invented proves the
+// author and the classifier agree, not that either matches what the module
+// emits.
+// ---------------------------------------------------------------------------
+describe('classifyEmptyReceipts', () => {
+  /** The meta the real fold produces for a transcript, asserted to be empty. */
+  async function emptyMetaFor(files, subagents = []) {
+    const result = await run(files, subagents);
+    // Guard the premise: the classifier only ever sees a zero-receipt fold, so
+    // a fixture that accidentally produced one would test the wrong branch.
+    expect(result.receipts).toHaveLength(0);
+    return result.meta;
+  }
+
+  it('reads an empty transcript as no-entries', async () => {
+    const meta = await emptyMetaFor({ [MAIN]: '' });
+    expect(meta.entries).toBe(0);
+    expect(meta.syntheticEntries).toBe(0);
+    expect(classifyEmptyReceipts(meta)).toBe('no-entries');
+  });
+
+  it('separates a transcript of synthetic entries as all-synthetic', async () => {
+    // Synthetic entries never reach `entries`, so without this branch a
+    // transcript full of them is indistinguishable from an empty file — and
+    // the two call for opposite follow-ups.
+    const meta = await emptyMetaFor({
+      [MAIN]: jsonl([
+        assistantEntry({ model: '<synthetic>', requestId: 'req-a' }),
+        assistantEntry({ model: '<synthetic>', requestId: 'req-b' }),
+      ]),
+    });
+    expect(meta.entries).toBe(0);
+    expect(meta.syntheticEntries).toBe(2);
+    expect(classifyEmptyReceipts(meta)).toBe('all-synthetic');
+  });
+
+  it('reads a transcript whose every entry named an unknown model as all-unresolved', async () => {
+    const meta = await emptyMetaFor({
+      [MAIN]: jsonl([
+        assistantEntry({ model: 'gpt-9-turbo', requestId: 'req-a' }),
+        assistantEntry({ model: 'gpt-9-turbo', requestId: 'req-b' }),
+      ]),
+    });
+    expect(meta.entries).toBe(2);
+    expect(meta.unresolvedModels).toEqual({ 'gpt-9-turbo': 2 });
+    expect(classifyEmptyReceipts(meta)).toBe('all-unresolved');
+  });
+
+  it('reads entries dropped for a missing model as no-usage', async () => {
+    const meta = await emptyMetaFor({
+      [MAIN]: jsonl([
+        assistantEntry({ model: null, requestId: 'req-a' }),
+        assistantEntry({ model: null, requestId: 'req-b' }),
+      ]),
+    });
+    expect(meta.entries).toBe(2);
+    expect(meta.entriesWithoutModel).toBe(2);
+    expect(classifyEmptyReceipts(meta)).toBe('no-usage');
+  });
+
+  it('reads a group skipped for want of a timestamp as no-usage', async () => {
+    const meta = await emptyMetaFor({
+      [MAIN]: jsonl([assistantEntry({ timestamp: null, requestId: 'req-a' })]),
+    });
+    expect(meta.entries).toBe(1);
+    expect(meta.skipped).toHaveLength(1);
+    expect(meta.skipped[0].reason).toBe('no-timestamp');
+    expect(classifyEmptyReceipts(meta)).toBe('no-usage');
+  });
+
+  it('reads a mixed unresolved-plus-skipped fold as no-usage, not all-unresolved', async () => {
+    // `all-unresolved` is a claim about EVERY entry. One entry that reached a
+    // group and was skipped for another reason makes that claim false, so the
+    // exact-accounting branch has to take it.
+    const meta = await emptyMetaFor({
+      [MAIN]: jsonl([
+        assistantEntry({ model: 'gpt-9-turbo', requestId: 'req-a' }),
+        assistantEntry({ timestamp: null, requestId: 'req-b' }),
+      ]),
+    });
+    expect(meta.entries).toBe(2);
+    expect(classifyEmptyReceipts(meta)).toBe('no-usage');
+  });
+
+  // -- Unclassifiable is reported, never guessed ----------------------------
+
+  it.each([
+    ['a meta with no counters at all', { coverage: null }],
+    ['a null meta', null],
+    ['an undefined meta', undefined],
+    ['a non-object meta', 'no-receipts'],
+  ])('returns null for %s', (_label, meta) => {
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it('returns null when the entries counter is not a number', () => {
+    const meta = { ...emptyResult().meta, entries: '2' };
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it('returns null when an unresolved-model tally is not a number', () => {
+    const meta = { ...emptyResult().meta, entries: 2, unresolvedModels: { 'gpt-9': 'two' } };
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it('returns null when a skipped group carries no entry count', () => {
+    const meta = {
+      ...emptyResult().meta,
+      entries: 2,
+      skipped: [{ run_id: 'r', model_id: 'm', reason: 'no-timestamp' }],
+    };
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it('returns null when the misses do not add up to the entries seen', () => {
+    // Three entries, one accounted for. The other two are unexplained, and a
+    // residual bucket would file them under whichever token came last.
+    const meta = { ...emptyResult().meta, entries: 3, entriesWithoutModel: 1 };
+    expect(classifyEmptyReceipts(meta)).toBeNull();
+  });
+
+  it('returns null for a fold that actually produced receipts', async () => {
+    const result = await run({ [MAIN]: jsonl([assistantEntry()]) });
+    expect(result.receipts).toHaveLength(1);
+    expect(classifyEmptyReceipts(result.meta)).toBeNull();
+  });
 });

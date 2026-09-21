@@ -594,6 +594,7 @@ describe('session-end hook - learning pipeline', () => {
       return {
         deps: {
           buildUsageReceipts: usage.buildUsageReceipts,
+          classifyEmptyReceipts: usage.classifyEmptyReceipts,
           toUsageReceiptEnvelopes: envelope.toUsageReceiptEnvelopes,
           appendLedgerEvent: ledger.appendLedgerEvent,
           readAllEvents: ledger.readAllEvents,
@@ -941,7 +942,11 @@ describe('session-end hook - learning pipeline', () => {
       expectOneSummaryLine();
     });
 
-    it('skips with no-receipts when the transcript yields nothing', async () => {
+    it('skips with a BARE no-receipts when the meta carries no counters', async () => {
+      // Deliberately kept bare. This stub reports `{ coverage: null }` and
+      // nothing else, so no cause can be read from it. A suffix here would be
+      // a guess dressed as a measurement — the classifier declines, and the
+      // reason stays the unqualified token it has always been.
       const { deps } = await realDeps();
       const res = await recordUsageReceipts(
         { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
@@ -954,6 +959,68 @@ describe('session-end hook - learning pipeline', () => {
       );
       expect(res.status).toBe('skipped');
       expect(res.reason).toBe('no-receipts');
+    });
+
+    // -----------------------------------------------------------------------
+    // 5b. no-receipts, split by cause
+    //
+    // `no-receipts` alone says a session produced nothing and stops there, so
+    // every such row in the ledger needs a transcript re-read before anyone can
+    // say why. The suffix moves that answer INTO the row. The vocabulary is
+    // fixed and the classification lives in `lib/economics/usage-receipt.js`,
+    // because the counters being read are that module's own.
+    // -----------------------------------------------------------------------
+
+    /** A zero-receipt fold whose meta carries the real module's full key set. */
+    async function reasonForMeta(patch) {
+      const { emptyResult } = await import('../../lib/economics/usage-receipt.js');
+      const { deps } = await realDeps();
+      const res = await recordUsageReceipts(
+        { session_id: 'sess-abcdef01', transcript_path: '/tmp/t.jsonl', cwd: '/tmp/x' },
+        {
+          ...deps,
+          buildUsageReceipts: async () => ({
+            receipts: [],
+            meta: { ...emptyResult().meta, ...patch },
+          }),
+          readAllEvents: () => [],
+          resolveProjectRoot: () => '/tmp/x',
+        },
+      );
+      expect(res.status).toBe('skipped');
+      return res.reason;
+    }
+
+    it('reports no-receipts:no-entries when the transcript held no assistant entry', async () => {
+      expect(await reasonForMeta({})).toBe('no-receipts:no-entries');
+    });
+
+    it('reports no-receipts:all-synthetic when every entry was a synthetic model', async () => {
+      expect(await reasonForMeta({ syntheticEntries: 2 }))
+        .toBe('no-receipts:all-synthetic');
+    });
+
+    it('reports no-receipts:all-unresolved when the catalog rejected every model', async () => {
+      const reason = await reasonForMeta({
+        entries: 2,
+        unresolvedModels: { 'gpt-9-turbo': 2 },
+      });
+      expect(reason).toBe('no-receipts:all-unresolved');
+    });
+
+    it('reports no-receipts:no-usage when entries were seen but none was usable', async () => {
+      const reason = await reasonForMeta({
+        entries: 2,
+        entriesWithoutModel: 1,
+        skipped: [{ run_id: 'r', model_id: 'claude-opus-5', reason: 'no-timestamp', entries: 1 }],
+      });
+      expect(reason).toBe('no-receipts:no-usage');
+    });
+
+    it('keeps the reason a single bounded token with no free text', async () => {
+      const reason = await reasonForMeta({ syntheticEntries: 1 });
+      expect(reason).toMatch(/^no-receipts:[a-z-]+$/);
+      expect(reason.length).toBeLessThanOrEqual(40);
     });
 
     it('skips with no-project-root when root resolution fails', async () => {
@@ -1268,6 +1335,53 @@ describe('session-end hook - learning pipeline', () => {
           source: 'hook',
           idempotency_key: 'session.ended:sess-abcdef01',
         });
+      });
+
+      it('carries the no-receipts cause suffix into the written row', async () => {
+        // The whole point of the suffix is that it survives to the LEDGER,
+        // where the coverage reader keys `by_reason` on it. A suffix visible
+        // only in the returned object would leave every stored row as bare
+        // `no-receipts` and change nothing anyone can read later.
+        //
+        // Built from a real transcript through the real builder, so the meta
+        // being classified is the one the module actually emits.
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+        const sessionId = `sess${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+        const root = path.join(os.tmpdir(), `artibot-synthetic-${sessionId}`);
+        tmpRoots.push(root);
+        mkdirSync(path.join(root, '.git'), { recursive: true });
+        const dir = path.join(root, 'transcripts');
+        mkdirSync(dir, { recursive: true });
+        const transcriptPath = path.join(dir, `${sessionId}.jsonl`);
+        const synthetic = JSON.stringify({
+          type: 'assistant',
+          requestId: 'req-synth-1',
+          timestamp: '2026-09-21T06:00:00.000Z',
+          message: {
+            model: '<synthetic>',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'x' }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          },
+        });
+        writeFileSync(transcriptPath, `${synthetic}\n${synthetic}\n`, 'utf-8');
+
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+        stderrSpy.mockClear();
+        const res = await recordUsageReceipts(
+          { session_id: sessionId, transcript_path: transcriptPath, cwd: root },
+          deps,
+        );
+
+        expect(res.status).toBe('skipped');
+        expect(res.reason).toBe('no-receipts:all-synthetic');
+        expectOneSummaryLine();
+
+        const file = ledgerFilePath(resolveProjectRoot(root));
+        const row = await theEndedRow(file);
+        expect(row.data.reason).toBe('no-receipts:all-synthetic');
+        expect(row.data.receipts).toBe(0);
+        expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
       });
     });
   });
