@@ -24,9 +24,12 @@
  *   - WHETHER A DIVERGENCE IS A FAULT. Serving a different model may be a
  *     correct downgrade (allowlist, denylist, capacity). The fold counts; it
  *     does not judge, and neither does this suite.
- *   - THE SCORE COLUMN. `score` is asserted to be an EXPLICIT null block. That
- *     the ledger genuinely has no spawn-keyed score writer today is a claim
- *     about the writers, not something this suite measures.
+ *   - THE SCORE COLUMN. On a ledger with NO `review.claim_audit` row, `score`
+ *     is asserted to be an EXPLICIT null block. That the ledger genuinely
+ *     carries no such row today is a claim about the writers, not something
+ *     this suite measures; the audit-bearing cases below are hand-built.
+ *   - WHETHER A REFUTED CLAIM WAS WRONGLY REFUTED. `score.value` is a ratio of
+ *     two numbers a reviewer wrote. The fold counts; so does this suite.
  *
  * @module tests/replay/spawn-outcome
  */
@@ -34,7 +37,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_RUN_PREFIX,
+  joinClaimAudits,
   joinSpawnOutcomes,
+  SCORE_EMPTY_DENOMINATOR_REASON,
+  SCORE_NO_JOINED_AUDIT_REASON,
   SCORE_UNAVAILABLE_REASON,
   SPAWN_OUTCOME_EVENTS,
 } from '../../lib/replay/index.js';
@@ -180,6 +186,44 @@ function receipt(spec) {
 /** A subagent receipt: `run_id` is `agent-<agentId>`. */
 function agentReceipt(agentId, spec = {}) {
   return receipt({ runId: `agent-${agentId}`, ...spec });
+}
+
+/**
+ * A `review.claim_audit` row, in the shape `verdict-writer.js#claimAuditData`
+ * produces: the three required counts always, and `subject_agent_id` only when
+ * the caller has one (the key is OMITTED, never nulled — the allowlist types it
+ * `string`, so null is not representable).
+ *
+ * @param {object} spec - subject id and the two counts.
+ * @returns {object} ledger line.
+ */
+function claimAudit(spec) {
+  const {
+    subjectId, total, refuted, agentType = 'tdd-guide', session = SESS_A, data,
+  } = spec;
+  seqCounter += 1;
+  const envelope = {
+    v: 1,
+    ts: '2026-09-21T02:00:00.000Z',
+    event: 'review.claim_audit',
+    session_id: session,
+    source: 'reviewer',
+    pid: 4242,
+    seq: seqCounter,
+    mission_id: MISSION,
+    worker: 'code-reviewer',
+    idempotency_key: `review.claim_audit:${session}:${agentType}:${seqCounter}`,
+  };
+  if (data !== undefined) return { ...envelope, data };
+  return {
+    ...envelope,
+    data: {
+      subject_agent_type: agentType,
+      claims_total: total,
+      claims_refuted: refuted,
+      ...(subjectId === undefined ? {} : { subject_agent_id: subjectId }),
+    },
+  };
 }
 
 /**
@@ -884,5 +928,190 @@ describe('joinSpawnOutcomes() skips malformed lines without throwing', () => {
     expect(f.binds).toBe(0);
     expect(f.agreement_rate).toBeNull();
     expect(f.malformed_binds).toBe(1);
+  });
+});
+
+/**
+ * The FOLD'S TOP-LEVEL KEY SET, in order, as `scripts/ledger/route-compare.mjs#
+ * emptyJoin` duplicates it and `tests/ledger/route-compare-cli.test.js` pins it
+ * recursively (`keyShape(emptyJoin()) toEqual keyShape(joinSpawnOutcomes([]))`).
+ * That CLI suite is not ours to edit, so a new top-level key here is a RED in
+ * another lane's file: every new number goes INSIDE `score`, which is the one
+ * field `report()` forwards whole.
+ */
+const TOP_LEVEL_KEYS = Object.freeze([
+  'binds', 'duplicate_binds', 'malformed_binds', 'receipts', 'main_thread_receipts',
+  'subagent_receipts', 'malformed_receipts', 'model_mismatch', 'duplicate_receipts',
+  'pairs', 'compared', 'excluded_fifo', 'excluded_no_recommendation', 'by_agreement',
+  'agreement_rate', 'by_confidence', 'agreed_by_model', 'divergence', 'multi_model_runs',
+  'cost', 'usage_totals', 'latency', 'unjoined_binds', 'unjoined_receipts', 'score',
+]);
+
+/** The fixture plus 6 audit rows: 3 joined, 2 unjoined, 1 with no subject. */
+function fixtureWithAudits() {
+  return [
+    ...fixture(),
+    claimAudit({ subjectId: 'ag-001', total: 10, refuted: 2 }),
+    claimAudit({ subjectId: 'ag-002', total: 5, refuted: 0 }),
+    claimAudit({ subjectId: 'ag-003', total: 5, refuted: 3 }),
+    // Deliberately huge, so a sum that leaks an unjoined row is visible.
+    claimAudit({ subjectId: 'ag-777', total: 100, refuted: 100 }),
+    claimAudit({ subjectId: 'ag-888', total: 100, refuted: 100 }),
+    claimAudit({ total: 100, refuted: 100 }),
+  ];
+}
+
+describe('joinSpawnOutcomes() score column', () => {
+  it('keeps the unmeasured block, byte for byte, when no audit row exists', () => {
+    // The row-0 shape is pinned OUTSIDE this suite by
+    // `tests/ledger/route-compare-cli.test.js` (empty-ledger stdout, seeded
+    // stdout, and the `emptyJoin()` duplicate), so it is not ours to change.
+    for (const rows of [[], fixture(), fixtureWithDuplicate()]) {
+      const { score } = joinSpawnOutcomes(rows);
+      expect(score).toEqual(SCORE_BLOCK);
+      expect(Object.keys(score)).toEqual(['source', 'value', 'reason']);
+    }
+  });
+
+  it('fills the block from the claim audits once any audit row exists', () => {
+    const f = joinSpawnOutcomes(fixtureWithAudits());
+    expect(f.score.source).toBe('review.claim_audit');
+    // (10 + 5 + 5 - 2 - 0 - 3) / (10 + 5 + 5): the two 100/100 rows join
+    // nothing and are in no sum.
+    expect(f.score.value).toBe(0.75);
+    expect(f.score.reason).toBeNull();
+    expect(f.score.n).toBe(3);
+    expect(f.score.audits).toBe(6);
+    expect(f.score.unjoined_audits).toBe(2);
+    expect(f.score.no_subject_audits).toBe(1);
+    expect(f.score.malformed_audits).toBe(0);
+    // The three legacy keys keep their positions, so a reader that only knows
+    // the old shape still reads the same three fields in the same order.
+    expect(Object.keys(f.score).slice(0, 3)).toEqual(['source', 'value', 'reason']);
+    expect(f.score.audits)
+      .toBe(f.score.n + f.score.unjoined_audits + f.score.no_subject_audits);
+  });
+
+  it('names the reason when audits exist but none joined', () => {
+    // THE STATE THE LIVE LEDGER WILL REACH FIRST: `agents/auditor.md`'s
+    // mandated block carries no `subject_agent_id` key at all, so a conforming
+    // audit lands here rather than in `n`.
+    const rows = [...fixture(), claimAudit({ total: 8, refuted: 1 })];
+    const f = joinSpawnOutcomes(rows);
+    expect(f.score.source).toBe('review.claim_audit');
+    expect(f.score.value).toBeNull();
+    expect(f.score.value).not.toBe(0);
+    expect(f.score.reason).toBe(SCORE_NO_JOINED_AUDIT_REASON);
+    expect(f.score.n).toBe(0);
+    expect(f.score.audits).toBe(1);
+    expect(f.score.no_subject_audits).toBe(1);
+  });
+
+  it('names a distinct reason when the joined rows count zero claims', () => {
+    const rows = [...fixture(), claimAudit({ subjectId: 'ag-001', total: 0, refuted: 0 })];
+    const f = joinSpawnOutcomes(rows);
+    expect(f.score.n).toBe(1);
+    expect(f.score.value).toBeNull();
+    expect(f.score.reason).toBe(SCORE_EMPTY_DENOMINATOR_REASON);
+  });
+
+  it('holds the invariant: a null value always carries a reason', () => {
+    // `route-compare.mjs#emptyJoin` states the rule this pins: "a null score
+    // with no reason reads as a measurement that failed". So value and reason
+    // are exclusive -- exactly one of them is null, in every branch.
+    const ledgers = [
+      [],
+      fixture(),
+      fixtureWithAudits(),
+      [...fixture(), claimAudit({ total: 8, refuted: 1 })],
+      [...fixture(), claimAudit({ subjectId: 'ag-001', total: 0, refuted: 0 })],
+      [...fixture(), claimAudit({ subjectId: 'ag-001', total: 1.5, refuted: 0 })],
+    ];
+    for (const rows of ledgers) {
+      const { score } = joinSpawnOutcomes(rows);
+      expect(score.value === null).toBe(score.reason !== null);
+    }
+  });
+
+  it('counts a malformed audit row into the block without any denominator', () => {
+    const rows = [
+      ...fixture(),
+      claimAudit({ subjectId: 'ag-001', total: 3, refuted: 4 }),
+    ];
+    const f = joinSpawnOutcomes(rows);
+    // A malformed-only ledger must NOT hide behind the row-0 block: "nobody
+    // wrote an audit" and "someone wrote an unreadable one" are different
+    // findings, and only the second one names a broken writer.
+    expect(f.score.source).toBe('review.claim_audit');
+    expect(f.score.audits).toBe(0);
+    expect(f.score.malformed_audits).toBe(1);
+    expect(f.score.n).toBe(0);
+    expect(f.score.value).toBeNull();
+    expect(f.score.reason).toBe(SCORE_NO_JOINED_AUDIT_REASON);
+  });
+
+  it('joins on ITS OWN bind set, not on the route-bind pairs', () => {
+    // This fixture has `route.bound` rows and NO `route.selected` receipts, so
+    // every bind is an orphan to `joinRouteBinds` and `joinClaimAudits` alone
+    // finds nothing to join. The fold injects `binds.keys()` instead, because
+    // "this agent's audit is unjoined" while the same output lists that agent
+    // in `pairs` would be a contradiction inside one line.
+    const rows = [...fixture(), claimAudit({ subjectId: 'ag-001', total: 4, refuted: 1 })];
+    expect(joinClaimAudits(rows).joined).toBe(0);
+    expect(joinClaimAudits(rows).unjoined_audits).toBe(1);
+    const f = joinSpawnOutcomes(rows);
+    expect(f.score.n).toBe(1);
+    expect(f.score.value).toBe(0.75);
+  });
+
+  it('scores an audit of an UNJOINED bind: a score is a spawn outcome, not a pair', () => {
+    // `ag-011` bound and never produced a receipt, so it is in `unjoined_binds`
+    // and in no pair. Its review still happened.
+    const rows = [...fixture(), claimAudit({ subjectId: 'ag-011', total: 2, refuted: 0 })];
+    const f = joinSpawnOutcomes(rows);
+    expect(f.pairs.some((p) => p.agent_id === 'ag-011')).toBe(false);
+    expect(f.unjoined_binds).toBeGreaterThan(0);
+    expect(f.score.n).toBe(1);
+    expect(f.score.value).toBe(1);
+  });
+});
+
+describe('joinSpawnOutcomes() adds no top-level key and moves no other column', () => {
+  it('emits exactly the pinned top-level keys, in order, with and without audits', () => {
+    expect(Object.keys(joinSpawnOutcomes([]))).toEqual([...TOP_LEVEL_KEYS]);
+    expect(Object.keys(joinSpawnOutcomes(fixture()))).toEqual([...TOP_LEVEL_KEYS]);
+    expect(Object.keys(joinSpawnOutcomes(fixtureWithAudits()))).toEqual([...TOP_LEVEL_KEYS]);
+  });
+
+  it('leaves every column but score byte-identical when audit rows are added', () => {
+    const withoutScore = (rows) => {
+      const fold = { ...joinSpawnOutcomes(rows) };
+      delete fold.score;
+      return JSON.stringify(fold);
+    };
+    expect(withoutScore(fixtureWithAudits())).toBe(withoutScore(fixture()));
+  });
+
+  it('serializes a shuffled audit-bearing input identically', () => {
+    const rows = fixtureWithAudits();
+    expect(JSON.stringify(joinSpawnOutcomes(shuffled(rows))))
+      .toBe(JSON.stringify(joinSpawnOutcomes(rows)));
+  });
+
+  it('does not mutate the input', () => {
+    const rows = fixtureWithAudits();
+    const before = JSON.stringify(rows);
+    joinSpawnOutcomes(rows);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it('exports both new reasons through the barrel, and keeps the old one', () => {
+    expect(SCORE_UNAVAILABLE_REASON).toBe('no-spawn-keyed-score-writer');
+    expect(SCORE_NO_JOINED_AUDIT_REASON).toBe('no-joined-claim-audit');
+    expect(SCORE_EMPTY_DENOMINATOR_REASON).toBe('claim-audit-denominator-zero');
+    // Three distinct reasons, or a reader cannot tell the three states apart.
+    expect(new Set([
+      SCORE_UNAVAILABLE_REASON, SCORE_NO_JOINED_AUDIT_REASON, SCORE_EMPTY_DENOMINATOR_REASON,
+    ]).size).toBe(3);
   });
 });
