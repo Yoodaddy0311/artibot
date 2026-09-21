@@ -451,6 +451,17 @@ export function receiptPhase(classified) {
  * `actionsSinceSwitch: 0` plus `residency:unavailable` — the exact shape this
  * hook emitted before it could see either.
  *
+ * `canary` IS FORWARDED, NOT READ. `config.routing.canary` is handed to
+ * `routeModel` exactly as it was loaded — no normalising, no defaulting, no
+ * validating. Whether a list applies is a ROUTING question and it is answered in
+ * `adaptive-model-router.js`; a hook that also had an opinion would be a second,
+ * silent vocabulary for one key. The optional chaining covers the live absent
+ * cases: `ctx.config` is `undefined` whenever `loadConfig()` threw
+ * ({@link observePre}), and `routing` may be missing from any config that is not
+ * this repo's own. With the SHIPPED `routing.canary.actionClasses: []`
+ * (`artibot.config.json` `routing.canary`, read-only here) an empty allowlist
+ * applies to nothing, so the receipt is byte-identical to the pre-canary one.
+ *
  * @param {{toolUseId: string, sessionId: string, missionId: string,
  *   agentType: string|null, text: string, config: object|undefined,
  *   currentTier?: string|null, actionsSinceSwitch?: number|null}} ctx
@@ -468,6 +479,7 @@ export function buildReceipt(ctx) {
     agentType: ctx.agentType ?? undefined,
     epoch: ctx.toolUseId,
     config: ctx.config,
+    canary: ctx.config?.routing?.canary,
     phase,
     input,
     classifierOptions,
