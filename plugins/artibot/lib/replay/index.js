@@ -46,6 +46,11 @@ export {
 } from './spawn-outcome.js';
 
 export {
+  CLAIM_AUDIT_JOIN_EVENTS,
+  joinClaimAudits,
+} from './claim-audit-join.js';
+
+export {
   ROUTE_EVENTS,
   TOOL_USE_SHADOW_PREFIX,
   UNBOUND_ROUTE_LEDGER,
