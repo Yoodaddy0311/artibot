@@ -59,8 +59,11 @@
  *     The order under FAILURE is not measured here.
  *   - STEPS 1, 4 AND 8. Flush artifacts, Epoch and Snapshot Scorecard are pinned
  *     only as words in the markdown. Step 1 lives behind a different config gate,
- *     step 4 is absent by design, and step 8 is another limb entirely. This gate
- *     says nothing about whether any of them work.
+ *     step 4 is absent by design, and step 8's prose — the render path, where the
+ *     card prints, and that it is never persisted — is
+ *     `tests/firewall/save-scorecard-render.test.js`'s subject, not this file's:
+ *     a bold token reads the same whether it opens an instruction or an IOU.
+ *     This gate says nothing about whether any of the three work.
  *   - THE PROSE'S TRUTH. The prose audit checks ORDER and the presence of three
  *     substrings. It does not check that the `file.js:NNN` line numbers cited in
  *     that section still point at the symbols they name.
