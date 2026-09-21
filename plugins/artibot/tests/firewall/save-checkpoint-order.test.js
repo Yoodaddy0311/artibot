@@ -32,8 +32,9 @@
  * `mission.checkpointed` (ca05-1 — `save` is outside the envelope allowlist and
  * would be refused a layer earlier).
  *
- * LANDING = NO BEHAVIOUR CHANGE. `runtime.checkpoint.saveOnSave` is ABSENT from
- * `artibot.config.json` today, and `isSaveCheckpointEnabled` is strict `=== true`,
+ * LANDING = NO BEHAVIOUR CHANGE. `runtime.checkpoint.saveOnSave` is present and
+ * `false` in `artibot.config.json` (Wave 13 leader follow-up 2026-09-21), and
+ * `isSaveCheckpointEnabled` is strict `=== true`,
  * so the whole pass is off. This file pins the RESULT (`false` against the real
  * config file), never the key's presence — the key is the leader's to add, and a
  * gate that demanded it would go red on an untouched tree.

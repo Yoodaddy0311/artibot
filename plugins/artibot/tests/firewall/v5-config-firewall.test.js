@@ -389,6 +389,8 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['agents.modelPolicy.medium.model', 'opus'],
     // CA-03 gate (Wave 12): must stay false until a Wave 13 commit flips it deliberately.
     ['autopilot.recovery.transitionFromVerdict', false],
+    // CA-05 canary (Wave 13): the /save checkpoint gate lands OFF; flipping it is a deliberate commit.
+    ['runtime.checkpoint.saveOnSave', false],
   ])('%s === %j (무변경)', (dotted, value) => {
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });

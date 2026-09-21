@@ -1068,6 +1068,10 @@
     "excludeSelectors": []
   },
   "runtime": {
+    "checkpoint": {
+      "saveOnSave": false,
+      "comment": "CA-05 canary (Wave 13, 2026-09-21) - the gate that lets /save write mission.checkpointed. false = OFF: the landed pass in lib/checkpoint/save-checkpoint.js never runs, and its reader isSaveCheckpointEnabled is strict === true so a string true or a 1 also read OFF. Turning it on is a deliberate decision, not a default: tests/firewall/save-checkpoint-order.test.js pins isSaveCheckpointEnabled(real config) === false, so that single canary pin must be edited on purpose in the same commit that flips this key."
+    },
     "middleware": [
       "lifecycle",
       "router",

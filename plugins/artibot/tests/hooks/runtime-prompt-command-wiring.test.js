@@ -274,7 +274,13 @@ describe('the ledger write cannot move the hook output by one byte', () => {
     // nothing to do with this writer (measured 2026-09-17: the only difference
     // between these two documents). It is normalized out rather than skipped,
     // so the rest of the line is still compared.
-    const normalize = (s) => String(s).replace(/ckpt=\w+/, 'ckpt=<id>');
+    // `lifecycle=teardown(<n>ms)` is wall-clock elapsed time pushed by
+    // `lib/runtime/middleware/lifecycle.js:133`. It drifts 0ms/1ms between the
+    // two invocations on a loaded CI runner (Node 20, run 35184252643 attempt 1),
+    // so it is normalized out for the same reason as `ckpt`.
+    const normalize = (s) => String(s)
+      .replace(/ckpt=\w+/, 'ckpt=<id>')
+      .replace(/teardown\(\d+ms\)/g, 'teardown(<ms>)');
     expect(normalize(withoutWrite.message)).toBe(normalize(withWrite.message));
 
     // Same key set, same order — a new key would escape the two checks above.

@@ -12,9 +12,9 @@
 | Fact | Value |
 |---|---|
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
-| Agent count | 28 (전량 opus — `claude-opus-5`. fable 게이트는 `enabled=false`로 OFF) |
-| Skill count | 113 |
-| Command count | 72 |
+| Agent count | 30 (2티어: 설계·검수 10종 fable / 구현 20종 opus — `artibot.config.json` `agents.modelPolicy.fable.enabled=true` + `fable.allowlist` 10종) |
+| Skill count | 114 |
+| Command count | 79 |
 | Native orchestration | Claude Agent Teams API (`Agent(name=...)`, `SendMessage`, `TaskCreate/Update/List/Get`) |
 | Cross-tool export | `scripts/export-to-tool.mjs` |
 | Graceful-degradation modes | `agent-teams` → `sub-agent` → `direct` (see `artibot.config.json`) |

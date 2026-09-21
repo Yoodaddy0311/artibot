@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 13 착지 (배치 1·2·3, 2026-09-21)
+
+배치 1 master `deb3a7d6`(base `2de81dba`) · 배치 2 master `e8ff8512`(base `deb3a7d6`) · 배치 3 master `82d924df`(base `e8ff8512`). **착지 6줄기, 대기 0.** diff 수치는 리더 측정 몫 — **미측정**.
+
+- **ob10-controller-record** (`3d50c32f`, 배치 1 `deb3a7d6`): OB-10 record-only Mission Controller. `lib/mission/controller.js` 신설 — `buildControllerRecord` · `observeController`(`acquired`|`renewed`|`held`|`expired`) · `composeControllerMutator` · `foldControllerCensus`. 배선은 `lib/runtime/middleware/tasks.js#recordMissionState` **합성 1지점**(stage ① UserPromptSubmit 경로만). **새 원장 어휘 0 · config 0 · 훅 0**.
+- **ca05-save-checkpoint** (`b2617f30`, 배치 1 `deb3a7d6`): CA-05 `/save` = checkpoint. `lib/checkpoint/save-checkpoint.js` 신설 + `commands/save.md` 6단계 산문 + 게이트 `tests/firewall/save-checkpoint-order.test.js`. canary 키 `runtime.checkpoint.saveOnSave:false`(등재는 **리더 후속 커밋**). 3포트 배선에서는 `resumable` 이 항상 `false` 다 — **결함이 아니라 설계**다.
+- **decision-store-opts** (`8d8db11f`, 배치 2 `e8ff8512`): `lib/observability/decision-events.js` 에 `DECISION_STORE_OPTS = ['storeDir','projectRoot','cwd']` 위치 키 allowlist. 미지 키는 리졸버가 `null` 로 처리하고, `record()` 는 `ts`/`phase`/`mode` strip 뒤 남은 미허용 키를 `store-opts-not-allowed:<key>` 로 **계수하며 거부**한다(throw 아님). `readDecisionEvents` 에 `[]` 가드. 새 firewall `tests/firewall/decision-store-opts-allowlist.test.js`. **남는 구멍**: `tests/hooks/runtime-prompt-command-wiring.test.js` 의 `cwd:null` 이 `process.cwd()` 로 폴백한다(`sess-cmd-e`·`sess-cmd-g`).
+- **recovery-replan-ladder** (`a5ec5aed`, 배치 2 `e8ff8512`): CA-03 flip 전제 해소. `lib/autopilot/recovery-record.js#judge` 의 `replanAttempts:0` 리터럴을 제거하고 `ladderFromJournal(journal)` 이 저널 `applied` 행에서 유도하도록 했다(행 스냅샷 2필드 추가). `autopilot.recovery.transitionFromVerdict` 는 **`false` 유지** — flip 은 별 커밋이다. 6틱 실측: `repair` → `replan`×2 → `propose_ultraplan`/`PAUSED` → `pause`.
+- **sh04-topology-actual** (`d357bdc2`, 배치 2 `e8ff8512`): SH-04 topology agreement 계측기. `scripts/ledger/topology-agreement.mjs` 신설(판독 전용) + `commands/doctor.md` **Check 7 "Topology agreement (Shadow, info)"** 블록. 라이브 1회(01:51Z): `v4.63.0` 태그 이후 17창 agreement **0.8000**, F04 t0 이후 65창 **0.5238** — 둘 다 `stop_only_ids` 로 start 가 유실돼 **상한**이다. **Check 7 다이제스트 3차 재동결 `f9cbd1a65ef3c2cc` → `23a7be708a43666c`**(`tests/commands/doctor-checks-8-9.test.js`, 사유 = SH-04 블록 추가).
+- **sh05-spawn-receipt-compare** (`55660978`, 배치 3 `82d924df`): SH-05 라우터 추천 vs 서빙 모델 비교 — `lib/replay/spawn-outcome.js`(신설, `joinSpawnOutcomes` fold: route.bound ↔ usage.receipt 조인, cost/latency 버킷 `{priced|count, total|null}`, `model_mismatch`·`duplicate_receipts` 카운터) + `scripts/ledger/route-compare.mjs`(신설 CLI) + `lib/replay/index.js` export. 라이브 1회(02:06Z): binds 326 / 조인 42 / 비교 39 / 일치 34 · 불일치 5(전부 추천 opus→서빙 fable) agreement 0.872; score 열은 `no-spawn-keyed-score-writer`(후속 claim-audit-join).
+
+**라이브 재계수(4.64.0 재시작 후)**: `route.bound` 의 `selected_model` 결손이 재시작 이후 **0/5** 다 — 단일 세션 표본이라 **일반화 불가**. `activation-observed` 는 라이브 slash **분모 0** 이고, 리포터가 보이는 2/2 는 테스트 픽스처 오염이다.
+
 ## [4.64.0] — 2026-09-17
 
 `v4.63.0`(`b7ac9a55`) 이후 29 커밋 = **92 files +8,012/−323**(`git diff --shortstat v4.63.0^{commit} c10451b4`, 2026-09-17 측정). `/split` **Wave 12 8/8** 착지분 출하. 커밋 유형 분포: merge 9 · feat 8 · docs 5 · fix 3 · refactor 2 · test 1 · chore 1.
