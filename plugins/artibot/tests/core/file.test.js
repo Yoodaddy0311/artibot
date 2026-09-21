@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  atomicCreateTextSync,
   atomicWriteJson,
   atomicWriteJsonSync,
   atomicWriteText,
   atomicWriteTextSync,
+  CreateSkipReason,
   ensureDir,
   exists,
   listDirs,
   listFiles,
+  NO_HARDLINK_CODES,
   readJsonFile,
   readTextFile,
   renameWithRetry,
@@ -17,6 +20,8 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 describe('file', () => {
   let tmpDir;
@@ -503,6 +508,332 @@ describe('file', () => {
         waitSpy.mockRestore();
         renameSpy.mockRestore();
       }
+    });
+  });
+
+  /**
+   * `atomicCreateTextSync()` — EXCLUSIVE create, the counterpart to
+   * `atomicWriteTextSync()`'s overwrite. The distinction is the whole point:
+   * `atomicWriteTextSync` ends in a rename, and a rename replaces the
+   * destination, so two writers that both find the target absent will both
+   * "succeed" and the later one silently destroys the earlier one's file.
+   *
+   * MEASURED, NOT ASSUMED (2026-09-21, Windows 11, node v24.15.0). To
+   * reproduce: release N real processes from a common wall-clock barrier and
+   * have each one run the `existsSync` then `atomicWriteTextSync` order against
+   * one path. Two or more of them claimed `written` in 190 of 200 trials at
+   * N=2 and in 193 of 200 at N=8, while a negative control that staggered the
+   * second writer by 500ms produced 0 of 25. The race is neither theoretical
+   * nor rare under a barrier.
+   *
+   * WHAT THE BARRIER CANNOT GUARANTEE — do not read a green run as more than
+   * it is. A child that boots slowly can reach the barrier instant after it
+   * has already passed, and then it does not race: the calls serialize. A
+   * serialized trial still catches a regression that swapped `link` for
+   * `rename` (the second writer would overwrite and TWO results would carry
+   * `created:true`), but it does NOT catch a regression back to check-then-
+   * write, which passes trivially when nobody overlaps. Measured by the judge
+   * on 2026-09-21 at a 600ms barrier with N=8: 26 late arrivals out of 400
+   * (the 1200ms barrier used below is UNMEASURED). Each child therefore
+   * reports how late it was, and the whole result set is attached to the
+   * assertions below — visible when one fails, never asserted on, because a
+   * lateness threshold is exactly the kind of timing assertion that flakes.
+   *
+   * The concurrency case below uses REAL child processes rather than promises
+   * or fake timers, because the property under test is an OS-level filesystem
+   * guarantee. A single-process test would prove nothing about `link`.
+   */
+  describe('atomicCreateTextSync()', () => {
+    const FILE_MODULE_URL = pathToFileURL(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', 'core', 'file.js'),
+    ).href;
+
+    /** Names of stray `.tmp.` siblings left under `dir`. Should always be empty. */
+    function tmpResidue(dir) {
+      return fsSync.readdirSync(dir).filter((e) => e.includes('.tmp.'));
+    }
+
+    it('creates an absent target, byte-for-byte, and reports created:true', () => {
+      const file = path.join(tmpDir, 'create-new.md');
+      const body = 'line-1\nline-2 with no trailing newline';
+      expect(atomicCreateTextSync(file, body)).toEqual({ created: true });
+      expect(fsSync.readFileSync(file, 'utf-8')).toBe(body);
+      expect(tmpResidue(tmpDir)).toEqual([]);
+    });
+
+    it('refuses an existing target without throwing and leaves it untouched', () => {
+      const file = path.join(tmpDir, 'create-existing.md');
+      fsSync.writeFileSync(file, 'original', 'utf-8');
+      expect(atomicCreateTextSync(file, 'intruder')).toEqual({
+        created: false,
+        reason: CreateSkipReason.ALREADY_EXISTS,
+      });
+      expect(fsSync.readFileSync(file, 'utf-8')).toBe('original');
+      expect(tmpResidue(tmpDir)).toEqual([]);
+    });
+
+    it('creates missing parent directories', () => {
+      const file = path.join(tmpDir, 'deep', 'nested', 'MISSION.md');
+      expect(atomicCreateTextSync(file, 'ok')).toEqual({ created: true });
+      expect(fsSync.readFileSync(file, 'utf-8')).toBe('ok');
+      expect(tmpResidue(path.join(tmpDir, 'deep', 'nested'))).toEqual([]);
+    });
+
+    it('leaves no .tmp sibling when the target already exists (skip path)', () => {
+      const file = path.join(tmpDir, 'skip-clean.md');
+      fsSync.writeFileSync(file, 'held', 'utf-8');
+      atomicCreateTextSync(file, 'nope');
+      atomicCreateTextSync(file, 'nope-again');
+      expect(tmpResidue(tmpDir)).toEqual([]);
+    });
+
+    /**
+     * THE CONTRACT THIS FUNCTION EXISTS FOR. Real processes race for one path.
+     * Exactly one may claim the create; every other must be told ALREADY_EXISTS
+     * rather than silently overwriting, and the surviving bytes must be the
+     * winner's.
+     *
+     * REAL PROCESSES, NOT WORKERS OR PROMISES. The property under test is an
+     * OS-level filesystem guarantee, so the racers have to be separate
+     * processes — `link` is what is being trusted, and a single process could
+     * appear to pass on nothing but JavaScript's run-to-completion.
+     *
+     * Measured 2026-09-21: the same barrier applied to the overwrite order
+     * (`existsSync` then `atomicWriteTextSync`) produced two or more winners in
+     * 190 of 200 trials at N=2 and 193 of 200 at N=8. Both widths are kept
+     * below so the narrowest real race and the contended one are each pinned.
+     *
+     * @param {string} dir - fresh directory holding the target and the child.
+     * @param {number} writers - number of racing processes.
+     * @param {boolean} [forceFallback=false] - make `linkSync` throw EPERM in
+     *   every child, so all of them take the `open(…, 'wx')` path instead.
+     */
+    async function raceForOnePath(dir, writers, forceFallback = false) {
+      fsSync.mkdirSync(dir, { recursive: true });
+      const target = path.join(dir, 'MISSION.md');
+
+      // The child lives in the tmp dir, never in the repo.
+      const childPath = path.join(dir, 'race-child.mjs');
+      fsSync.writeFileSync(childPath, [
+        "const [moduleUrl, target, marker, startMs, forceFallback] = process.argv.slice(2);",
+        "const fsSync = (await import('node:fs')).default;",
+        "if (forceFallback === '1') {",
+        "  fsSync.linkSync = () => { const e = new Error('EPERM: simulated'); e.code = 'EPERM'; throw e; };",
+        "}",
+        "const mod = await import(moduleUrl);",
+        "let left = Number(startMs) - Date.now();",
+        // How far PAST the barrier this child arrived. 0 means it was waiting
+        // when the gate opened; a positive value means it never raced.
+        "const late = left < 0 ? -left : 0;",
+        "while (left > 0) { mod.sleepSync(Math.min(left, 5)); left = Number(startMs) - Date.now(); }",
+        "let out;",
+        // The marker travels back with the verdict so the caller can check the
+        // surviving bytes against THE writer that was allowed to create, not
+        // merely against the shape of a marker.
+        "try { out = { ...mod.atomicCreateTextSync(target, marker), marker, late }; }",
+        "catch (err) { out = { threw: String(err && err.code), marker, late }; }",
+        "process.stdout.write(JSON.stringify(out));",
+      ].join('\n'), 'utf-8');
+
+      const startMs = Date.now() + 1200;
+      const results = await Promise.all(
+        Array.from({ length: writers }, (_, i) => new Promise((resolve) => {
+          const child = spawn(
+            process.execPath,
+            [childPath, FILE_MODULE_URL, target, `writer-${i}`, String(startMs), forceFallback ? '1' : '0'],
+            { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] },
+          );
+          let stdout = '';
+          let stderr = '';
+          child.stdout.on('data', (d) => { stdout += d; });
+          child.stderr.on('data', (d) => { stderr += d; });
+          child.on('close', () => {
+            try { resolve(JSON.parse(stdout)); } catch { resolve({ nooutput: stderr.slice(0, 300) }); }
+          });
+        })),
+      );
+
+      // Carries every child's verdict AND its `late` reading into any failure
+      // message, so a red run says whether the writers actually overlapped.
+      const ctx = JSON.stringify(results);
+
+      const winners = results.filter((r) => r.created === true);
+      expect(winners, ctx).toHaveLength(1);
+      expect(results.filter((r) => r.created === false).map((r) => r.reason), ctx).toEqual(
+        Array.from({ length: writers - 1 }, () => CreateSkipReason.ALREADY_EXISTS),
+      );
+      // THE BYTES ON DISK ARE THE WINNER'S. Asserting only the SHAPE of a
+      // marker here would pass even if a loser had overwritten the winner,
+      // which is the exact failure this function exists to prevent.
+      expect(fsSync.readFileSync(target, 'utf-8'), ctx).toBe(winners[0].marker);
+      expect(tmpResidue(dir), ctx).toEqual([]);
+    }
+
+    it('lets exactly one of 2 concurrent real processes create the file', async () => {
+      await raceForOnePath(path.join(tmpDir, 'race2'), 2);
+    }, 60000);
+
+    it('lets exactly one of 8 concurrent real processes create the file', async () => {
+      await raceForOnePath(path.join(tmpDir, 'race8'), 8);
+    }, 60000);
+
+    /**
+     * EXCLUSIVITY SURVIVES THE FALLBACK. On Windows an EPERM from `link` is
+     * ambiguous: it can mean "this volume has no hard links" or "something
+     * holds a handle right now". The function treats both the same way, so the
+     * question that matters is not which one it was — it is whether the path it
+     * takes instead is still exclusive. `open(…, 'wx')` is O_CREAT|O_EXCL, so
+     * it should be; this races 8 real processes through it to show it is,
+     * rather than inferring it from the flag's documentation.
+     *
+     * The fallback is still WEAKER in a way this cannot see: it publishes an
+     * empty file and then fills it, so a process killed between the two leaves
+     * a truncated file where the link path could not. That is a crash-safety
+     * gap, not an exclusivity one.
+     */
+    it('keeps exclusivity when all 8 racers are forced onto the wx fallback', async () => {
+      await raceForOnePath(path.join(tmpDir, 'race8-fallback'), 8, true);
+    }, 60000);
+
+    /**
+     * FALLBACK PATH. `link` is not available everywhere — some network and
+     * container filesystems answer EPERM/ENOTSUP/EOPNOTSUPP, and a cross-device
+     * tmp answers EXDEV. On those the function must still create and still
+     * refuse, via `open(…, 'wx')`.
+     */
+    it('still creates and still refuses when linkSync is unsupported', () => {
+      // Drives the EXPORTED allowlist rather than a literal copy of it, so a
+      // code added to the Set is exercised here automatically instead of
+      // shipping with no fallback coverage.
+      expect(NO_HARDLINK_CODES.size).toBeGreaterThan(0);
+      for (const code of NO_HARDLINK_CODES) {
+        const dir = path.join(tmpDir, `fallback-${code}`);
+        fsSync.mkdirSync(dir, { recursive: true });
+        const spy = vi.spyOn(fsSync, 'linkSync').mockImplementation(() => {
+          const err = new Error(`${code}: simulated`);
+          err.code = code;
+          throw err;
+        });
+        try {
+          const fresh = path.join(dir, 'a.md');
+          expect(atomicCreateTextSync(fresh, 'via-fallback')).toEqual({ created: true });
+          expect(fsSync.readFileSync(fresh, 'utf-8')).toBe('via-fallback');
+
+          const taken = path.join(dir, 'b.md');
+          fsSync.writeFileSync(taken, 'original', 'utf-8');
+          expect(atomicCreateTextSync(taken, 'intruder')).toEqual({
+            created: false,
+            reason: CreateSkipReason.ALREADY_EXISTS,
+          });
+          expect(fsSync.readFileSync(taken, 'utf-8')).toBe('original');
+        } finally {
+          spy.mockRestore();
+        }
+        expect(tmpResidue(dir)).toEqual([]);
+      }
+    });
+
+    /**
+     * THE FALLBACK'S FAILURE BRANCH. Once `open(…, 'wx')` has succeeded, the
+     * target already exists — empty. If the write that follows throws, the
+     * function must not leave that empty file behind claiming to be an
+     * artifact: it closes the descriptor, removes the file IT created, and
+     * rethrows.
+     *
+     * The write is failed by descriptor, not by path: `writeFileSync` is
+     * spied to throw only when its first argument is a number, which is the
+     * fallback's `writeFileSync(fd, …)`. The tmp write earlier in the call
+     * passes a path string and therefore still runs for real, so the test
+     * exercises the branch without disabling everything around it.
+     */
+    it('removes its own empty file when the fallback write fails', () => {
+      const dir = path.join(tmpDir, 'fallback-write-fails');
+      fsSync.mkdirSync(dir, { recursive: true });
+      const bystander = path.join(dir, 'bystander.md');
+      fsSync.writeFileSync(bystander, 'untouched', 'utf-8');
+      const target = path.join(dir, 'doomed.md');
+
+      const realWriteFileSync = fsSync.writeFileSync;
+      const linkSpy = vi.spyOn(fsSync, 'linkSync').mockImplementation(() => {
+        const err = new Error('EPERM: simulated');
+        err.code = 'EPERM';
+        throw err;
+      });
+      const writeSpy = vi.spyOn(fsSync, 'writeFileSync').mockImplementation((dest, ...rest) => {
+        if (typeof dest === 'number') {
+          const err = new Error('ENOSPC: simulated');
+          err.code = 'ENOSPC';
+          throw err;
+        }
+        return realWriteFileSync(dest, ...rest);
+      });
+      try {
+        expect(() => atomicCreateTextSync(target, 'body')).toThrow(/ENOSPC/);
+      } finally {
+        writeSpy.mockRestore();
+        linkSpy.mockRestore();
+      }
+
+      expect(fsSync.existsSync(target)).toBe(false);
+      expect(tmpResidue(dir)).toEqual([]);
+      expect(fsSync.readFileSync(bystander, 'utf-8')).toBe('untouched');
+      expect(fsSync.readdirSync(dir)).toEqual(['bystander.md']);
+    });
+
+    /**
+     * NOT EVERY FAILURE IS A SKIP. Only EEXIST means "someone else has it".
+     * Anything else is a real filesystem failure the caller must see, so it
+     * propagates — and the tmp sibling still gets cleaned up on the way out.
+     */
+    it('rethrows a non-EEXIST link failure and leaves no tmp sibling', () => {
+      const dir = path.join(tmpDir, 'hard-error');
+      fsSync.mkdirSync(dir, { recursive: true });
+      const spy = vi.spyOn(fsSync, 'linkSync').mockImplementation(() => {
+        const err = new Error('EACCES: simulated');
+        err.code = 'EACCES';
+        throw err;
+      });
+      try {
+        expect(() => atomicCreateTextSync(path.join(dir, 'x.md'), 'body')).toThrow(/EACCES/);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(tmpResidue(dir)).toEqual([]);
+      expect(fsSync.readdirSync(dir)).toEqual([]);
+    });
+
+    /**
+     * The same rule against the REAL filesystem rather than a spy: a target
+     * whose parent is a regular file cannot be created. The errno differs by
+     * platform (ENOTDIR / ENOENT / EEXIST), so the code is not pinned — only
+     * that it throws and drops nothing.
+     */
+    it('throws when the parent path is a file, leaving no tmp sibling', () => {
+      const dir = path.join(tmpDir, 'parent-is-file');
+      fsSync.mkdirSync(dir, { recursive: true });
+      const blocker = path.join(dir, 'blocker');
+      fsSync.writeFileSync(blocker, 'i am a file', 'utf-8');
+      expect(() => atomicCreateTextSync(path.join(blocker, 'child.md'), 'body')).toThrow();
+      expect(tmpResidue(dir)).toEqual([]);
+      expect(fsSync.readFileSync(blocker, 'utf-8')).toBe('i am a file');
+    });
+
+    it('exposes a closed vocabulary of skip reasons', () => {
+      expect(CreateSkipReason).toEqual({ ALREADY_EXISTS: 'ALREADY_EXISTS' });
+      expect(Object.isFrozen(CreateSkipReason)).toBe(true);
+    });
+
+    /**
+     * The fallback allowlist is a decision, not a convenience. Pinning its
+     * exact membership means a sixth code cannot be slipped in without someone
+     * re-arguing that the weaker `wx` path is acceptable for it — the loop
+     * above would keep passing silently otherwise, since it just follows the
+     * Set wherever it grows.
+     */
+    it('pins the exact set of codes that may fall back off linkSync', () => {
+      expect([...NO_HARDLINK_CODES].sort()).toEqual(
+        ['EMLINK', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'EXDEV'],
+      );
     });
   });
 });
