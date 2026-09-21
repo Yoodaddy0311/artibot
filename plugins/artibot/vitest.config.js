@@ -66,8 +66,8 @@ export default defineConfig({
         lines: 80,
       },
     },
-    // Multi-project workspace: pins `tests/autopilot/**` files to a single
-    // fork process. Those tests perform real `git worktree add/remove`
+    // Multi-project workspace: runs `tests/autopilot/**` ONE FILE AT A TIME.
+    // Those tests perform real `git worktree add/remove`
     // against the shared `.git/worktrees/` namespace, and running them
     // across parallel workers races on the index lock — symptom seen in
     // v4.5.8 was `engine.execute-worktree.test.js` case 3 flaking with
@@ -78,14 +78,41 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        // vitest 4: `pool` and `poolOptions` are top-level project options,
-        // not nested under `test:`. See vitest migration guide "pool rework".
-        pool: 'forks',
-        poolOptions: {
-          forks: { singleFork: true },
-        },
         test: {
           name: 'autopilot',
+          // Serial FILES, not one long-lived process: `fileParallelism: false`
+          // forces this project's `maxWorkers` to 1, and each file still gets
+          // a fresh fork. The older `poolOptions.forks.singleFork` spelling
+          // promised a single process and delivered neither.
+          //
+          // Position is load-bearing. A TEST-LEVEL option parked BESIDE
+          // `test:` in a project entry is dropped by vitest 4 without warning.
+          // (Vite-level keys such as `plugins` or `resolve` are a different
+          // case and belong there legitimately: `UserWorkspaceConfig extends
+          // UserConfig$1`.) `pool: 'forks'` and `poolOptions: { forks: {
+          // singleFork: true } }` are test-level, sat in that dead position
+          // from the vitest 4 upgrade until 2026-09-21, and did nothing:
+          // measured that day on vitest 4.0.18 across the 71 autopilot files,
+          // 71 distinct worker pids and up to 31 files in flight at once
+          // (a single run also counted 1333 overlapping file pairs; pair
+          // counts move run to run, the concurrency ceiling does not).
+          // `fileParallelism` is declared on
+          // `InlineConfig` and absent from `NonProjectOptions`, so
+          // `ProjectConfig` keeps it and `test:` is its live home.
+          // Pinned by `tests/firewall/vitest-autopilot-serial.test.js`.
+          //
+          // `isolate` is deliberately left at its default (true). vitest's
+          // `groupSpecs` gives a spec its own trailing sequential group only
+          // when `isolate === true && sequence.groupOrder === 0 &&
+          // maxWorkers === 1`. A spec that misses that branch joins the shared
+          // group, where two projects with different `maxWorkers` at the same
+          // `groupOrder` make vitest throw — so `isolate: false` here would
+          // put every run that also includes `main` at risk.
+          fileParallelism: false,
+          // Explicit rather than implied. `forks` is already vitest 4's
+          // default, but the git-worktree rationale above depends on process
+          // isolation, so the intent is spelled out where it is actually read.
+          pool: 'forks',
           include: ['tests/autopilot/**/*.test.{js,mjs}'],
           // Benchmarks are owned by the `main` project below. Without this,
           // vitest's default benchmark glob
