@@ -17,6 +17,15 @@
  * today — the fixed transition goes to IMPROVE whatever the recommendation is —
  * and exists so the vocabulary is stable before CA-03 starts writing `false`.
  *
+ * 2026-09-21 (Wave 13): `replanAttempts` and `ultraplanProposed` are no longer
+ * hardcoded. {@link ladderFromJournal} derives them from the journal's *applied*
+ * rows (`appliedNext === 'PLAN'`, and `propose_ultraplan` + `appliedNext ===
+ * 'PAUSED'`), so the §35 ladder can reach its ceiling once CA-03 is ON — before
+ * this, a repeated same-class failure re-entered PLAN without a ceiling. An
+ * Observe row never carries `appliedNext` (only `recovery-transition.js` writes
+ * it, and only when the gate is ON), so with the gate OFF the derived pair is
+ * always `0 / false` and the recorded decision is unchanged.
+ *
  * ── Three rules that are not judgement calls ──────────────────────────────
  *  1. **PASS is not recorded.** `failure-classifier.js#classify` names PASS a
  *     caller precondition violation, so a clean VERIFY writes zero rows and
@@ -112,6 +121,38 @@ function intOrZero(value) {
 }
 
 /**
+ * Derive the ladder counters §35 rungs 2 and 3 need from the journal.
+ *
+ * ALLOWLIST of APPLIED rows, not recommendations. A row records what
+ * `decide()` recommended; only `recovery-transition.js#applyRecoveryTransition`
+ * writes `appliedNext`, and only when the CA-03 gate is ON. So a `replan` the
+ * engine never acted on is not a spent replan, and counting `action` instead
+ * would make the gate-OFF journal — the Observe-stage denominator — change the
+ * very decision it exists to measure.
+ *
+ * Exact string equality on both fields: `'plan'`, `'PLANNED'`, a number and
+ * `null` are all ignored rather than coerced. Pure, and never throws — a
+ * hostile or half-written journal must degrade to "no rungs climbed", which is
+ * the conservative end (it repairs/replans again rather than escalating to a
+ * person on garbage).
+ *
+ * @param {unknown} journal - `state.recoveryJournal`, any shape.
+ * @returns {{replanAttempts: number, ultraplanProposed: boolean}} Frozen.
+ */
+export function ladderFromJournal(journal) {
+  let replanAttempts = 0;
+  let ultraplanProposed = false;
+  if (Array.isArray(journal)) {
+    for (const row of journal) {
+      if (row === null || typeof row !== 'object') continue;
+      if (row.appliedNext === 'PLAN') replanAttempts += 1;
+      if (row.action === 'propose_ultraplan' && row.appliedNext === 'PAUSED') ultraplanProposed = true;
+    }
+  }
+  return Object.freeze({ replanAttempts, ultraplanProposed });
+}
+
+/**
  * Append to the journal, creating it when absent or corrupt. Lazy init rather
  * than a `session-store.js#migrateState` backfill: the field is additive, the
  * schema version does not move, and an older session simply grows the array on
@@ -198,7 +239,8 @@ function isCleanVerify(s) {
  * survives on the journal row as `verdictRaw`, so nothing is lost.
  * @param {object} state
  * @param {object} signals - {@link readSignals} output.
- * @returns {{classification: object, decision: object, repairAttempts: number, seen: number}}
+ * @returns {{classification: object, decision: object, repairAttempts: number,
+ *   seen: number, ladder: {replanAttempts: number, ultraplanProposed: boolean}}}
  */
 function judge(state, signals) {
   const classification = classify({
@@ -211,13 +253,21 @@ function judge(state, signals) {
   // The classifier already walked `history` with a broader rule than a naive
   // `row.class` scan; counting again here would be a second, different truth.
   const seen = intOrZero(classification.signals?.priorSameClass) + 1;
+  // Same `history` the classifier just walked, read for a different question:
+  // not "which class" but "which rungs has this session already spent".
+  // `replanLimit` is deliberately not passed — the controller's default of 2 is
+  // the only definition of "multiple replans" and a second one would drift.
+  const ladder = ladderFromJournal(state?.recoveryJournal);
   const decision = decide(classification, {
     onFailure: VERIFY_ON_FAILURE,
     repairAttempts,
-    replanAttempts: 0,
+    replanAttempts: ladder.replanAttempts,
+    ultraplanProposed: ladder.ultraplanProposed,
     sameClassAttempts: seen,
   });
-  return { classification, decision, repairAttempts, seen };
+  return {
+    classification, decision, repairAttempts, seen, ladder,
+  };
 }
 
 /** Row fields mirrored into the event — one list, so the two cannot drift. */
@@ -265,7 +315,7 @@ export function recordRecoveryDecision(state, payload = {}) {
     if (isCleanVerify(signals)) return null;
 
     const {
-      classification, decision, repairAttempts, seen,
+      classification, decision, repairAttempts, seen, ladder,
     } = judge(state, signals);
 
     const row = pushJournal(state, {
@@ -282,6 +332,10 @@ export function recordRecoveryDecision(state, payload = {}) {
       reason: decision.reason,
       repairAttempts,
       sameClassAttempts: seen,
+      // Ladder position this row was judged from, derived from the rows BEFORE
+      // it — this row is not yet applied, so it cannot count itself.
+      replanAttempts: ladder.replanAttempts,
+      ultraplanProposed: ladder.ultraplanProposed,
       // Budget this row was judged against (old rows stay readable after an
       // engine payload change).
       retryLimit: VERIFY_ON_FAILURE.retryLimit,
