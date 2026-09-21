@@ -37,6 +37,11 @@
  * Usage: `node scripts/evals/nl-activation-report.mjs [--project-root <dir>]
  * [--fixture <path>]` — one JSON document on stdout, exit 0.
  *
+ * Live recount: update the INSTALLED plugin and restart the session first (a
+ * running session keeps the old hook), then run the line above and read the
+ * `activation.hint-followed` denominator — it is 0 until the restarted hook has
+ * written activation records carrying a hint.
+ *
  * @module scripts/evals/nl-activation-report
  */
 
@@ -46,7 +51,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
-import { getDecisionStoreDir, readDecisionEvents } from '../../lib/observability/decision-events.js';
+import {
+  ACTIVATION_OBSERVED,
+  getDecisionStoreDir,
+  HINT_SLASH_MAP,
+  readDecisionEvents,
+} from '../../lib/observability/decision-events.js';
 import { parseRunEventsText, RUN_EVENTS_SUFFIX } from '../../lib/observability/run-events.js';
 import { readLedgerCensus } from '../../lib/runtime/ledger.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
@@ -68,6 +78,7 @@ export const AXES = Object.freeze({
   SLASH_AGREEMENT: 'activation.slash-agreement',
   HINT_ACCEPTANCE: 'activation.hint-acceptance',
   DEFERRAL_RATE: 'mission.deferral-rate',
+  HINT_FOLLOWED: 'activation.hint-followed',
 });
 
 export const FIXTURE_WARNING =
@@ -89,6 +100,52 @@ const HINT_NO_PROXY =
   "The decisions store's workflow-planned.data.recommendation and topology-recommended counts " +
   'are a DIFFERENT concept (what the planner proposed, not what a user was shown and took) and ' +
   'must not be used as a proxy denominator.';
+
+/**
+ * What `activation.hint-followed` counts. The key difference from
+ * `activation.hint-acceptance` is WHERE it reads: the writer puts the shown
+ * hint at the top level of `data`, and no writer records an acceptance verdict
+ * anywhere, so the only acceptance signal on disk is what the user typed next.
+ */
+const HINT_FOLLOWED_COUNTS =
+  'Denominator = activation records with a non-empty top-level data.hint_recommend; numerator = ' +
+  'those whose NEXT activation record in the same run carries an activation_observed.slash equal ' +
+  'to the slash map value for that hint. "Next" means append order, not prompt_id order. A ' +
+  'CONSECUTIVE re-record of the same prompt_id (consecutive among activation rows) is collapsed ' +
+  'onto the first of them rather than counted as the following turn; a non-adjacent reappearance ' +
+  'of that prompt_id counts as its own row, and rows with no prompt_id are never collapsed.';
+
+/**
+ * The sentence that keeps this axis from being read as an acceptance rate. It
+ * is not one, and the gap is not small: `recommend=watch` runs with no
+ * confirmation at all, so its acceptances are invisible here by construction.
+ */
+const HINT_FOLLOWED_BOUND =
+  'This is a LOWER BOUND on hint acceptance, NOT an acceptance rate: the surfacing rule is a ' +
+  'natural-language confirmation, and recommend=watch executes immediately without one, so a ' +
+  'genuine acceptance that was never typed as a slash command counts as 0 here — read by_hint to ' +
+  'separate watch from the rest. `unmapped` counts denominator rows whose hint has no own key in ' +
+  'the slash map (there is no /workflow to accept), which can never enter the numerator; ' +
+  '`no_next` counts denominator rows that are the last activation row of their run, and it cannot ' +
+  'tell a finished session from one still in progress at read time (censored). The two overlap. ' +
+  'resolvable_denominator = denominator - no_next, and ratio_resolvable = ' +
+  'numerator / resolvable_denominator, are the CENSORING-EXCLUDED reading — the same count with ' +
+  'the rows that have no following turn dropped. It is NOT an upper bound: a censored row whose ' +
+  'user follows the hint later lands in both halves of the fraction, so the eventual ratio can ' +
+  'exceed it (1/4 with one censored row reads 1/3 here, but resolves to 2/4 if that row follows).';
+
+/** What this axis cannot see even when its denominator is large. */
+const HINT_FOLLOWED_LIMITS =
+  'Known limit: if the N+1 record fails to write, row N is paired with N+2 and the verdict is ' +
+  'silently wrong — a recorder-stats record with failed > 0 in the same run is the detection ' +
+  'signal (not implemented here). Ledger stores carry no run id, so their rows are grouped by ' +
+  'session_id, which is coarser than a run. And the ACCEPTING turn can re-enter the denominator: ' +
+  'if the prompt that types /X still carries the trigger that produced the hint (a YouTube URL ' +
+  'typed again after /watch), the hook shows the hint a second time and that row is counted too — ' +
+  'measured 2026-09-21, one accepted watch hint read denominator 2, numerator 1, no_next 1, raw ' +
+  'ratio 0.5 and ratio_resolvable 1. Do not read the raw ratio alone; read no_next, ' +
+  'ratio_resolvable and ' +
+  'by_hint with it.';
 
 /** The one summing rule every axis in this report obeys. */
 const TOTALS_RULE =
@@ -192,6 +249,100 @@ export function foldActivation(events) {
 }
 
 /**
+ * The activation rows of ONE run, in append order, with a re-record of a prompt
+ * id collapsed onto the row it repeats.
+ *
+ * Two filters, both load-bearing. Rows of other types (topology-recommended,
+ * recorder-stats, …) are skipped rather than ending a pairing: they interleave
+ * freely, and treating one as "the next turn" would read every hint as refused.
+ * A repeat of the same prompt_id is a RE-RECORD of one turn, not the next one,
+ * so it neither doubles the denominator nor stands in as the following row.
+ *
+ * @param {object[]} events
+ * @returns {Array<{promptId: string|null, data: object}>}
+ */
+function activationRows(events) {
+  const rows = [];
+  for (const e of Array.isArray(events) ? events : []) {
+    if (eventName(e) !== ACTIVATION_OBSERVED) continue;
+    const data = e?.data;
+    if (!data || typeof data !== 'object') continue;
+    const id = typeof data.prompt_id === 'string' && data.prompt_id.length > 0 ? data.prompt_id : null;
+    const prev = rows[rows.length - 1];
+    if (id !== null && prev && prev.promptId === id) continue;
+    rows.push({ promptId: id, data });
+  }
+  return rows;
+}
+
+/**
+ * Did the user type the slash command a hint recommended, on the next turn?
+ *
+ * RUN BOUNDED, by argument type: this takes runs, not events, because the
+ * pairing is only meaningful inside one run. A flattened event list would pair
+ * the last row of one run with the first row of the next and report an
+ * agreement that no user ever made.
+ *
+ * `Object.hasOwn`, not `in` — `'constructor' in HINT_SLASH_MAP` is true and
+ * passes the writer's charset, so `in` would resolve a prototype member as a
+ * mapped hint. `by_hint` is built on a null-prototype object for the same
+ * reason: its keys come from disk.
+ *
+ * The writer also puts its own verdict on disk as `hint_resolved_by`, and this
+ * fold DELIBERATELY IGNORES it, re-deriving the mapping from `HINT_SLASH_MAP`.
+ * A stored verdict was computed by whatever version of the hook was installed
+ * when the row was written; recomputing means one vocabulary decides the axis
+ * for old and new rows alike, instead of the measurement inheriting a mapping
+ * that has since changed.
+ *
+ * @param {Array<{runId: string, events: object[]}>} runs
+ * @returns {{numerator: number, denominator: number, unmapped: number,
+ *            no_next: number, by_hint: Record<string, object>}}
+ */
+export function foldHintFollowed(runs) {
+  const byHint = Object.create(null);
+  const out = { numerator: 0, denominator: 0, unmapped: 0, no_next: 0 };
+  for (const run of Array.isArray(runs) ? runs : []) {
+    const rows = activationRows(run?.events);
+    for (let i = 0; i < rows.length; i += 1) {
+      const hint = rows[i].data.hint_recommend;
+      if (typeof hint !== 'string' || hint.length === 0) continue;
+      out.denominator += 1;
+      if (!Object.hasOwn(byHint, hint)) byHint[hint] = { numerator: 0, denominator: 0 };
+      const bucket = byHint[hint];
+      bucket.denominator += 1;
+      const next = rows[i + 1];
+      if (next === undefined) out.no_next += 1;
+      if (!Object.hasOwn(HINT_SLASH_MAP, hint)) { out.unmapped += 1; continue; }
+      if (next !== undefined && next.data?.activation_observed?.slash === HINT_SLASH_MAP[hint]) {
+        out.numerator += 1;
+        bucket.numerator += 1;
+      }
+    }
+  }
+  return { ...out, by_hint: { ...byHint } };
+}
+
+/**
+ * Best-available run boundary for a store that has none. The decisions store
+ * keeps one file per run; a ledger keeps one flat file, so its rows are grouped
+ * by session id — coarser than a run, and declared as such in the axis note.
+ *
+ * @param {object[]} events
+ * @returns {Array<{runId: string, events: object[]}>}
+ */
+export function runsFromEvents(events) {
+  const groups = new Map();
+  for (const e of Array.isArray(events) ? events : []) {
+    const raw = e?.session_id ?? e?.sessionId;
+    const id = typeof raw === 'string' && raw.length > 0 ? raw : '(no-run-id)';
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(e);
+  }
+  return [...groups].map(([runId, runEvents]) => ({ runId, events: runEvents }));
+}
+
+/**
  * @param {object[]} events
  * @returns {{numerator: number, denominator: number}}
  */
@@ -229,8 +380,14 @@ export function collectStores(projectRoot) {
 }
 
 /**
+ * `byRun` is ADDITIVE, not a replacement for `events`. The flattened list is
+ * what every axis but `activation.hint-followed` folds, and other readers take
+ * it; that axis needs the run boundary the flattening destroys, so both shapes
+ * are returned from the one read.
+ *
  * @param {string} projectRoot
- * @returns {{dir: string, runIds: string[], events: object[]}}
+ * @returns {{dir: string, runIds: string[], events: object[],
+ *            byRun: Array<{runId: string, events: object[]}>}}
  */
 function collectDecisions(projectRoot) {
   const dir = getDecisionStoreDir({ projectRoot });
@@ -238,14 +395,14 @@ function collectDecisions(projectRoot) {
   try {
     entries = readdirSync(dir);
   } catch {
-    return { dir, runIds: [], events: [] };
+    return { dir, runIds: [], events: [], byRun: [] };
   }
   const runIds = entries
     .filter((name) => name.endsWith(RUN_EVENTS_SUFFIX))
     .map((name) => name.slice(0, -RUN_EVENTS_SUFFIX.length))
     .filter((id) => id.length > 0);
-  const events = runIds.flatMap((id) => readDecisionEvents(id, { projectRoot }));
-  return { dir, runIds, events };
+  const byRun = runIds.map((id) => ({ runId: id, events: readDecisionEvents(id, { projectRoot }) }));
+  return { dir, runIds, events: byRun.flatMap((r) => r.events), byRun };
 }
 
 /**
@@ -337,6 +494,89 @@ function activationAxis({ axis, pick, unmeasuredNote, measuredNote, ledgers, dec
 }
 
 /**
+ * Same three stores as `activationSources`, and the same summing rule, but run
+ * bounded.
+ *
+ * @param {object} ledgers
+ * @param {object} decisions
+ * @returns {Array<{key: string, runs: Array<object>, counted: boolean}>}
+ */
+function hintFollowedSources(ledgers, decisions) {
+  return [
+    { key: 'canonical', runs: runsFromEvents(ledgers.canonical.events), counted: true },
+    { key: 'fallback', runs: runsFromEvents(ledgers.fallback.events), counted: false },
+    { key: 'decisions', runs: decisions.byRun ?? [], counted: true },
+  ];
+}
+
+/**
+ * Merge one store's per-hint counts into the running total.
+ *
+ * THE KEYS ARE NOT FILTERED. `foldHintFollowed` keeps any command-shaped hint
+ * the writer admitted — `constructor` passes `SLASH_NAME_RE` and can reach disk
+ * — so `into` must be null-prototype AND the lookup must be `Object.hasOwn`. A
+ * plain `{}` with `into[hint] ?? (into[hint] = …)` resolves `into.constructor`
+ * to the `Object` function, does `+=` on it (NaN, and a write onto a shared
+ * global), and drops that hint from the breakdown, so `by_hint`'s denominators
+ * would no longer sum to the axis denominator.
+ *
+ * @param {Record<string, object>} into - null-prototype accumulator
+ * @param {Record<string, object>} from
+ */
+function mergeByHint(into, from) {
+  for (const [hint, counts] of Object.entries(from)) {
+    if (!Object.hasOwn(into, hint)) into[hint] = { numerator: 0, denominator: 0 };
+    into[hint].numerator += counts.numerator;
+    into[hint].denominator += counts.denominator;
+  }
+}
+
+/**
+ * The fourth axis. Shaped like the other three — `by_store` carries the same
+ * `{numerator, denominator}` pair, so one field name means one thing across
+ * rows — plus the four fields a reader needs to qualify the answer:
+ * `unmapped`, `no_next`, `resolvable_denominator`, `ratio_resolvable`.
+ *
+ * `byHint` is null-prototype for the same reason `foldHintFollowed`'s is: its
+ * keys come from disk. `byStore`'s three keys are literals written here.
+ *
+ * @param {object} args
+ * @returns {object}
+ */
+function hintFollowedAxis({ ledgers, decisions, measuredAt }) {
+  const byStore = {};
+  const byHint = Object.create(null);
+  const total = { numerator: 0, denominator: 0, unmapped: 0, no_next: 0 };
+  for (const src of hintFollowedSources(ledgers, decisions)) {
+    const counts = foldHintFollowed(src.runs);
+    byStore[src.key] = { numerator: counts.numerator, denominator: counts.denominator };
+    if (!src.counted) continue;
+    for (const key of Object.keys(total)) total[key] += counts[key];
+    mergeByHint(byHint, counts.by_hint);
+  }
+  const resolvable = total.denominator - total.no_next;
+  return {
+    axis: AXES.HINT_FOLLOWED,
+    numerator: total.numerator,
+    denominator: total.denominator,
+    ratio: ratioOf(total.numerator, total.denominator),
+    resolvable_denominator: resolvable,
+    ratio_resolvable: ratioOf(total.numerator, resolvable),
+    unmapped: total.unmapped,
+    no_next: total.no_next,
+    measured_at: measuredAt,
+    ledger_path: ledgers.canonical.census.file.path,
+    note:
+      (total.denominator === 0
+        ? 'UNMEASURED: no activation record in the counted stores carries a top-level ' +
+          'hint_recommend yet, so denominator 0 is the result, not a defect. '
+        : '') + `${HINT_FOLLOWED_COUNTS} ${HINT_FOLLOWED_BOUND} ${HINT_FOLLOWED_LIMITS} ${TOTALS_RULE}`,
+    by_store: byStore,
+    by_hint: { ...byHint },
+  };
+}
+
+/**
  * @param {object} args
  * @returns {object}
  */
@@ -412,14 +652,17 @@ export function buildReport({ projectRoot, ledgers, decisions, fixture, measured
         axis: AXES.HINT_ACCEPTANCE,
         pick: (f) => f.hint,
         unmeasuredNote:
-          `UNMEASURED: no writer records ${ACTIVATION_FIELDS.observed}.hint_recommend yet — the ` +
-          `runtime-prompt hint goes to stdout only. ${HINT_COUNTS} ${HINT_NO_PROXY}`,
+          'UNMEASURED, and structurally so: the writer records the shown hint at ' +
+          'data.hint_recommend (TOP LEVEL) and records no acceptance verdict at all, while this ' +
+          `axis reads ${ACTIVATION_FIELDS.observed}.hint_recommend (nested) plus hint_accepted — ` +
+          `read ${AXES.HINT_FOLLOWED} instead. ${HINT_COUNTS} ${HINT_NO_PROXY}`,
         measuredNote: `${HINT_COUNTS} ${HINT_NO_PROXY} ${TOTALS_RULE}`,
         ledgers,
         decisions,
         measuredAt,
       }),
       deferralAxis({ ledgers, decisions, measuredAt }),
+      hintFollowedAxis({ ledgers, decisions, measuredAt }),
     ],
     fixture: {
       path: fixture.path,

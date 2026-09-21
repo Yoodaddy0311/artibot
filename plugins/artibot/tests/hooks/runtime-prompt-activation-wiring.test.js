@@ -582,4 +582,63 @@ describe('the NL-activation reporter can read what the hook wrote', () => {
     expect(hint.ratio).toBeNull();
     expect(hint.note).toContain('UNMEASURED');
   });
+
+  /**
+   * Run the reporter as a child process against the sandbox and return the
+   * `activation.hint-followed` row.
+   * @returns {object}
+   */
+  function hintFollowedAxis() {
+    const res = spawnSync(process.execPath, [REPORTER_REL, '--project-root', sandboxRoot], {
+      cwd: PLUGIN_ROOT,
+      encoding: 'utf-8',
+    });
+    expect(res.status).toBe(0);
+    return JSON.parse(res.stdout).axes.find((a) => a.axis === 'activation.hint-followed');
+  }
+
+  it('folds a hint turn followed by its slash turn into hint-followed', async () => {
+    // THE PAIRING THE READER'S HAND-WRITTEN FIXTURES ASSUME. Both turns carry
+    // the SAME session id, which is what puts them in one run file — the
+    // reporter pairs a hint row with the NEXT activation row of the same run
+    // only, so a shared run is the precondition, not an incidental detail.
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-follow', pid: 'prompt-follow-1' });
+    await submit({ prompt: `/watch ${YT}`, sid: 'sess-follow', pid: 'prompt-follow-2' });
+
+    const followed = hintFollowedAxis();
+    // OBSERVED, then pinned. The denominator is 2, not 1: turn ② is a `/watch`
+    // whose own prompt still contains the URL, so the hook shows the watch hint
+    // AGAIN and that second row enters the denominator too. It is the last
+    // activation row of the run, so it also counts in `no_next` and can never
+    // be numerated. Net effect of a slash turn that repeats its own trigger:
+    // the denominator grows while the numerator cannot — read
+    // `ratio_resolvable` (= numerator / (denominator - no_next)) instead.
+    expect(followed.denominator).toBe(2);
+    expect(followed.numerator).toBe(1);
+    expect(followed.no_next).toBe(1);
+    expect(followed.unmapped).toBe(0);
+    expect(followed.by_hint.watch).toEqual({ numerator: 1, denominator: 2 });
+    expect(followed.ratio_resolvable).toBe(1);
+
+    // PRIVACY, on the raw bytes: two hint rows and a slash row, no URL anywhere.
+    for (const line of readSandboxLines()) {
+      expect(line).not.toContain('youtu');
+      expect(line).not.toContain('dQw4w9WgXcQ');
+    }
+  });
+
+  it('counts a hint the user did NOT act on as denominator only', async () => {
+    // NEGATIVE CONTROL for the case above: without it, an axis that numerated
+    // every hint row unconditionally would look identical.
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-ignored', pid: 'prompt-ignored-1' });
+    await submit({ prompt: 'explain how the router works', sid: 'sess-ignored', pid: 'prompt-ignored-2' });
+
+    const followed = hintFollowedAxis();
+    expect(followed.denominator).toBe(1);
+    expect(followed.numerator).toBe(0);
+    // The plain second turn is still an activation row, so the hint row HAS a
+    // next row — the miss is a real miss, not an unresolvable end-of-run.
+    expect(followed.no_next).toBe(0);
+    expect(followed.by_hint.watch).toEqual({ numerator: 0, denominator: 1 });
+  });
 });
