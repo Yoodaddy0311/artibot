@@ -392,6 +392,17 @@ describe('handoff frontmatter — derived-from', () => {
     expect(renderHandoffMarkdown(data, { now: FROZEN_NOW })).toMatch(/^derived-from: state@0$/m);
   });
 
+  it('accepts MAX_SAFE_INTEGER verbatim (no exponent notation, no rounding)', async () => {
+    const data = await collect(() => Number.MAX_SAFE_INTEGER);
+    expect(data.meta.stateVersion).toBe(9007199254740991);
+    expect(renderHandoffMarkdown(data, { now: FROZEN_NOW })).toMatch(/^derived-from: state@9007199254740991$/m);
+  });
+
+  it('normalizes -0 to state@0', async () => {
+    const data = await collect(() => -0);
+    expect(renderHandoffMarkdown(data, { now: FROZEN_NOW })).toMatch(/^derived-from: state@0$/m);
+  });
+
   const REJECTED = [
     ['port absent', undefined],
     ['non-function port', 'not-a-function'],
@@ -404,6 +415,14 @@ describe('handoff frontmatter — derived-from', () => {
     ['returns -1', () => -1],
     ["returns '42'", () => '42'],
     ['returns an object', () => ({ version: 42 })],
+    // Boundary: Infinity and 2**53 are finite-looking but not safe integers;
+    // BigInt / boolean / array all coerce to a number somewhere if the guard
+    // is loosened, so pin them as rejected.
+    ['returns Infinity', () => Infinity],
+    ['returns 2 ** 53 (beyond MAX_SAFE_INTEGER)', () => 2 ** 53],
+    ['returns 42n (BigInt)', () => 42n],
+    ['returns true', () => true],
+    ['returns [42]', () => [42]],
   ];
 
   for (const [label, port] of REJECTED) {
@@ -443,17 +462,24 @@ describe('handoff frontmatter — derived-from', () => {
     };
     const good = renderHandoffMarkdown({ ...base, meta: { stateVersion: 9 } }, { now: FROZEN_NOW });
     expect(good).toMatch(/^derived-from: state@9$/m);
-    const bad = renderHandoffMarkdown({ ...base, meta: { stateVersion: '9' } }, { now: FROZEN_NOW });
-    expect(bad).toMatch(/^derived-from: state@unmeasured$/m);
+    // The renderer re-validates: a hand-built meta cannot smuggle a bad value.
+    for (const bad of ['9', '42', -1, 1.5]) {
+      const md = renderHandoffMarkdown({ ...base, meta: { stateVersion: bad } }, { now: FROZEN_NOW });
+      expect(md).toMatch(/^derived-from: state@unmeasured$/m);
+    }
   });
 
   it('round-trips through the /resume banner parser without breaking field extraction', async () => {
     const data = await collect(() => 42);
     const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    // Differential: the SAME document with the derived-from line removed must
+    // parse identically. Anything else means the new key moved the parser.
+    const without = md.replace(/^derived-from: state@42\n/m, '');
+    expect(without).not.toContain('derived-from');
+    expect(without.length).toBe(md.length - 'derived-from: state@42\n'.length);
+    expect(parseHandoffBannerFields(md)).toEqual(parseHandoffBannerFields(without));
+    // And the parser still produces its documented shape (not an empty stub).
     const fields = parseHandoffBannerFields(md);
-    // The parser strips frontmatter before scanning `## N.` sections — the new
-    // key must not leak into the banner fields.
-    expect(fields).toHaveProperty('p0');
     expect(typeof fields.unresolved).toBe('number');
     expect(typeof fields.wip).toBe('number');
     expect(String(fields.p0 ?? '')).not.toContain('derived-from');

@@ -536,26 +536,6 @@ async function readStateVersionSoft(port) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public: collectHandoffData
-// ---------------------------------------------------------------------------
-
-/**
- * Collect every data source needed to render a handoff doc. All branches
- * fail soft — caller never has to wrap in try/catch.
- *
- * @param {object} options
- * @param {string} options.pluginRoot
- * @param {string} options.projectRoot
- * @param {(args: string[], opts?: object) => string} [options.gitRunner]
- * @param {Array<object>} [options.taskList]
- * @param {Array<{ prompt: string, rationale: string, priority: string }>} [options.firstPrompts]
- * @param {() => Date} [options.now]
- * @param {() => number|Promise<number>} [options.readStateVersion] — optional
- *   port returning the project-state version this handoff is derived from.
- *   Sync or async; any failure or non-version value degrades to `null`.
- * @returns {Promise<object>}
- */
 /**
  * Build the `meta` block emitted into the handoff. Safety #2 stamps a stable
  * `machineId`, an ISO `createdAt`, the current branch, and a `schemaVersion`
@@ -586,6 +566,28 @@ function buildMetaBlock(gitState, now, tsStart) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Public: collectHandoffData
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect every data source needed to render a handoff doc. All branches
+ * fail soft — caller never has to wrap in try/catch.
+ *
+ * @param {object} options
+ * @param {string} options.pluginRoot
+ * @param {string} options.projectRoot
+ * @param {(args: string[], opts?: object) => string} [options.gitRunner]
+ * @param {Array<object>} [options.taskList]
+ * @param {Array<{ prompt: string, rationale: string, priority: string }>} [options.firstPrompts]
+ * @param {() => Date} [options.now]
+ * @param {() => number|Promise<number>} [options.readStateVersion] — optional
+ *   port returning the project-state version this handoff is derived from.
+ *   Sync or async; any failure or non-version value degrades to `null`. The
+ *   port must settle promptly — there is no timeout here, so bounding it is
+ *   the caller's responsibility.
+ * @returns {Promise<object>}
+ */
 export async function collectHandoffData(options) {
   const { pluginRoot, projectRoot } = options ?? {};
   const git = options?.gitRunner ?? DEFAULT_GIT_RUNNER;
@@ -801,8 +803,10 @@ function yamlScalar(v) {
 
 /**
  * Build the YAML frontmatter block consumed by /resume and external audit
- * tools. Fields stay schema-stable: bumping anything beyond the documented
- * keys requires a `schemaVersion` increment.
+ * tools. Documented keys: `machineId`, `createdAt`, `branch`, `generator`,
+ * `schemaVersion`, `derived-from`. Adding a key is additive and keeps the
+ * current `schemaVersion` (document it here); removing, renaming or retyping
+ * an existing key requires a `schemaVersion` increment.
  *
  * `derived-from` carries the project-state provenance as `state@<n>`, or
  * `state@unmeasured` when no version was measured (design §3.3).
