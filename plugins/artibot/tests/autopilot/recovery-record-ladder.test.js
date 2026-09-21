@@ -86,7 +86,7 @@ describe('ladderFromJournal — replanAttempts counts applied PLAN rows only', (
     ['no journal rows', [], 0],
     ['one applied PLAN row', [applied('replan', 'PLAN')], 1],
     ['two applied PLAN rows', [applied('repair', 'EXECUTE'), applied('replan', 'PLAN'), applied('replan', 'PLAN')], 2],
-  ])('reads %s as %i replan(s) spent', (_label, journal, expected) => {
+  ])('counts the replans spent in $0', (_label, journal, expected) => {
     expect(ladderFromJournal(journal).replanAttempts).toBe(expected);
   });
 
@@ -143,7 +143,7 @@ describe('ladderFromJournal — ultraplanProposed needs an applied PAUSED row', 
     ['appliedNext is absent (Observe row)', { class: 'implementation', action: 'propose_ultraplan' }, false],
     ['appliedNext is PLAN, not PAUSED', applied('propose_ultraplan', 'PLAN'), false],
     ['appliedNext is PAUSED', applied('propose_ultraplan', 'PAUSED'), true],
-  ])('reads %s as ultraplanProposed=%s', (_label, row, expected) => {
+  ])('reads $0 as ultraplanProposed=$2', (_label, row, expected) => {
     expect(ladderFromJournal([...AT_ULTRAPLAN_RUNG, row]).ultraplanProposed).toBe(expected);
   });
 
