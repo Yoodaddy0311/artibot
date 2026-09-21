@@ -179,7 +179,23 @@ export const ACTIVATION_OBSERVED = 'activation-observed';
 export const ACTIVATION_DATA_KEYS = Object.freeze([
   'observe_only', 'command_activation', 'activation_observed', 'predicted_mode',
   'predicted_signal', 'predicted_nl_match', 'prompt_id', 'idempotency_key',
+  'hint_recommend', 'hint_resolved_by',
 ]);
+
+/**
+ * Hint axis: a `[artibot:hint recommend=X]` value to the slash command a user
+ * would type to accept it.
+ *
+ * `workflow` is DELIBERATELY ABSENT. There is no `/workflow` command to accept,
+ * so it resolves as `hint_resolved_by: 'unmapped'` rather than being mapped
+ * onto a neighbour — mapping it would manufacture agreement out of a
+ * recommendation nobody could act on.
+ *
+ * OWNED HERE, re-exported by `./activation-observed.js`, for the reason the
+ * block above gives: the recorder needs it, and the recorder must not be able
+ * to be taken down by its own payload builder. Same direction as the other five.
+ */
+export const HINT_SLASH_MAP = Object.freeze({ split: 'split', autopilot: 'autopilot', watch: 'watch' });
 
 /**
  * The signal vocabulary, mirroring the `signal` field
@@ -210,6 +226,38 @@ export const NL_MATCH_ID_RE = /^[a-z0-9-]{1,32}$/;
 
 /** Longest prompt id kept. A bound, not a privacy claim — ids are not text. */
 export const MAX_PROMPT_ID_LENGTH = 128;
+
+/**
+ * Resolve one hint recommendation into the two keys that go on disk.
+ *
+ * ONE FUNCTION, TWO CALLERS, BY CONSTRUCTION. Every other field on this record
+ * is validated twice, in two places, and the comments on `predicted_mode` exist
+ * because those two places drifted. A shared resolver cannot drift, and the
+ * recorder still refuses to trust its caller — it ignores any
+ * `hint_resolved_by` it is handed and recomputes the verdict here.
+ *
+ * THE CHARSET IS THE PRIVACY BOUNDARY, as it is for the observed slash name: a
+ * hint value is a command-shaped token, so a sentence cannot ride in as one. An
+ * unknown-but-command-shaped value is KEPT as `unmapped` — the same
+ * fail-visible trade `predicted_mode` makes, so a hint added to the hook shows
+ * up in the store instead of silently becoming null.
+ *
+ * `Object.hasOwn`, not `in`: `'constructor' in HINT_SLASH_MAP` is true and
+ * `constructor` passes the charset, so `in` would report a prototype member as
+ * a mapped hint.
+ *
+ * @param {unknown} hintRecommend - the `recommend=` value, if any
+ * @returns {{hint_recommend: string|null, hint_resolved_by: 'slash-map'|'unmapped'|null}}
+ */
+export function resolveHint(hintRecommend) {
+  if (typeof hintRecommend !== 'string' || !SLASH_NAME_RE.test(hintRecommend)) {
+    return { hint_recommend: null, hint_resolved_by: null };
+  }
+  return {
+    hint_recommend: hintRecommend,
+    hint_resolved_by: Object.hasOwn(HINT_SLASH_MAP, hintRecommend) ? 'slash-map' : 'unmapped',
+  };
+}
 
 /**
  * Every `type` this store admits, and the ONLY ones. `record` refuses the rest.
@@ -1123,8 +1171,9 @@ function booleanValuesOnly(src) {
 }
 
 /**
- * Record one NL-activation sighting: what the router WOULD have activated, and
- * which slash command the user actually typed.
+ * Record one NL-activation sighting: what the router WOULD have activated,
+ * which slash command the user actually typed, and which `[artibot:hint
+ * recommend=X]` (if any) the hook put in front of the model.
  *
  * Takes a {@link module:lib/observability/activation-observed} record rather
  * than a `routeTopology` result, so the projection stays pure and unit-testable
@@ -1185,6 +1234,15 @@ export function recordActivationObserved(runId, observation, opts = {}) {
   data.idempotency_key = data.prompt_id === null
     ? null
     : `activation:${runId}:${data.prompt_id}`;
+
+  // Both hint keys are RECOMPUTED from the recommendation, never copied. A
+  // caller handing over `{ hint_recommend: 'workflow', hint_resolved_by:
+  // 'slash-map' }` would otherwise record a recommendation no slash command can
+  // accept as though one could — and a reader cannot recover the truth from a
+  // resolution that was asserted rather than derived.
+  const hint = resolveHint(o.hint_recommend);
+  data.hint_recommend = hint.hint_recommend;
+  data.hint_resolved_by = hint.hint_resolved_by;
 
   const predicted = Object.keys(data.command_activation ?? {})
     .filter((k) => data.command_activation[k] === true);

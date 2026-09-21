@@ -41,7 +41,7 @@ import {
   readFileSync, rmSync, symlinkSync,
 } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+import { composePromptParts, handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 import {
   ACTIVATION_OBSERVED,
   MEMORY_INJECTION_MEASURED,
@@ -331,11 +331,14 @@ describe('activation-observed reaches <projectRoot>/.artibot/runtime/decisions/'
       pid: 'prompt-act-h1',
     });
     await submit({ prompt: '/split status', sid: 'sess-act-h2', pid: 'prompt-act-h2' });
+    // The HINT path writes a second user-derived value; a YouTube URL is the
+    // one hint input that carries user content, so it rides in this sweep too.
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-act-h3', pid: 'prompt-act-h3' });
 
     const raw = readSandboxLines();
     expect(raw.length).toBeGreaterThan(0);
     for (const line of raw) {
-      for (const secret of ['대규모 변경', '파일별로', 'status', 'oauth']) {
+      for (const secret of ['대규모 변경', '파일별로', 'status', 'oauth', 'youtu', '이 영상']) {
         expect(line).not.toContain(secret);
       }
     }
@@ -422,6 +425,114 @@ describe('activation-observed reaches <projectRoot>/.artibot/runtime/decisions/'
   });
 });
 
+/**
+ * Minimal `prepared` envelope for the pure half — `composePromptParts` reads
+ * only `userPrompt`, `message` and `context.tasks.meta.workflowPlan`.
+ *
+ * @param {{recommendation?: string|null, userPrompt?: string}} [o]
+ * @returns {object}
+ */
+function preparedWith({ recommendation = null, userPrompt = 'do the thing' } = {}) {
+  return {
+    userPrompt,
+    message: '[runtime] prompt prepared',
+    context: { tasks: { meta: { workflowPlan: recommendation === null ? {} : { recommendation } } } },
+  };
+}
+
+/** @param {object} o @returns {{output: object, shownHint: string|null}} */
+function parts(o) {
+  return composePromptParts({
+    prepared: preparedWith(o),
+    prompt: o.userPrompt ?? 'do the thing',
+    effortMeta: null,
+    taskBudgetDirective: '',
+    injectPrompt: o.injectPrompt !== false,
+  });
+}
+
+const YT = 'https://youtu.be/dQw4w9WgXcQ';
+
+describe('shownHint is the hint the turn ACTUALLY showed (pure half)', () => {
+  // WHY PURE. A `recommendation` reaches the plan only through the tasks
+  // middleware's complexity classification, which no synthetic prompt can pin
+  // deterministically. Injecting the plan is what makes the five-value table
+  // and the precedence rule assertable at all; the two integration cases below
+  // prove the same value survives the real pipeline to disk.
+  for (const rec of ['split', 'autopilot', 'workflow']) {
+    it(`reports ${rec} when the plan recommends it`, () => {
+      const { output, shownHint } = parts({ recommendation: rec });
+      expect(shownHint).toBe(rec);
+      // SINGLE SOURCE: the value handed to the writer and the value the model
+      // read off the directive are the same derivation. String-matching here is
+      // the test's job — the production path never re-parses the directive.
+      expect(output.hookSpecificOutput.additionalContext)
+        .toContain(`[artibot:hint recommend=${rec}]`);
+    });
+  }
+
+  it('reports watch when only a YouTube link is present', () => {
+    const { output, shownHint } = parts({ userPrompt: `이 영상 봐줘 ${YT}` });
+    expect(shownHint).toBe('watch');
+    expect(output.hookSpecificOutput.additionalContext).toContain('recommend=watch');
+  });
+
+  it('prefers the recommendation when a rec and a watch hint both fire', () => {
+    // The key is single-valued and `directives` emits the recommendation first,
+    // so the FIRST hint the reader meets is the one recorded.
+    const { output, shownHint } = parts({ recommendation: 'split', userPrompt: `${YT} 를 쪼개줘` });
+    expect(shownHint).toBe('split');
+    const ctx = output.hookSpecificOutput.additionalContext;
+    expect(ctx).toContain('[artibot:hint recommend=split]');
+    expect(ctx).toContain('recommend=watch');
+    expect(ctx.indexOf('recommend=split')).toBeLessThan(ctx.indexOf('recommend=watch'));
+  });
+
+  it('reports null when injectPrompt is off — nothing was shown to anyone', () => {
+    const { output, shownHint } = parts({ recommendation: 'split', injectPrompt: false });
+    expect(shownHint).toBeNull();
+    expect(output.user_prompt).not.toContain('artibot:hint');
+    expect(output.hookSpecificOutput).toBeUndefined();
+  });
+
+  it('reports null for a plain prompt', () => {
+    expect(parts({}).shownHint).toBeNull();
+  });
+});
+
+describe('the shown hint reaches the activation record', () => {
+  it('writes both hint keys as null for a prompt with no hint', async () => {
+    await submit({ prompt: 'explain how the router works', sid: 'sess-hint-a', pid: 'prompt-hint-a' });
+
+    const [ev] = activationEvents();
+    expect(ev.data.hint_recommend).toBeNull();
+    expect(ev.data.hint_resolved_by).toBeNull();
+  });
+
+  it('records a YouTube prompt as watch/slash-map with the URL nowhere on disk', async () => {
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-hint-b', pid: 'prompt-hint-b' });
+
+    const [ev] = activationEvents();
+    expect(ev.data.hint_recommend).toBe('watch');
+    expect(ev.data.hint_resolved_by).toBe('slash-map');
+    // PRIVACY, on the RAW bytes: the hint value is a constant, and the URL that
+    // produced it stays in memory. A leak into any key of any event is caught.
+    for (const line of readSandboxLines()) {
+      expect(line).not.toContain('youtu');
+      expect(line).not.toContain('dQw4w9WgXcQ');
+    }
+  });
+
+  it('measures the on-disk size of an activation record carrying a hint', async () => {
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-hint-c', pid: 'prompt-hint-c' });
+    const [line] = readSandboxLines().filter((l) => l.includes(`"${ACTIVATION_OBSERVED}"`));
+    // Printed, not gated — same reason as the sibling size case above.
+    // eslint-disable-next-line no-console
+    console.info(`[activation-wiring] one hint-carrying line = ${Buffer.byteLength(line, 'utf-8')} B`);
+    expect(line).toContain('hint_recommend');
+  });
+});
+
 describe('the NL-activation reporter can read what the hook wrote', () => {
   it('folds the four prompts into a measured slash-agreement axis', async () => {
     // END TO END, and the whole point of the limb: before this wiring the axis
@@ -470,5 +581,64 @@ describe('the NL-activation reporter can read what the hook wrote', () => {
     expect(hint.denominator).toBe(0);
     expect(hint.ratio).toBeNull();
     expect(hint.note).toContain('UNMEASURED');
+  });
+
+  /**
+   * Run the reporter as a child process against the sandbox and return the
+   * `activation.hint-followed` row.
+   * @returns {object}
+   */
+  function hintFollowedAxis() {
+    const res = spawnSync(process.execPath, [REPORTER_REL, '--project-root', sandboxRoot], {
+      cwd: PLUGIN_ROOT,
+      encoding: 'utf-8',
+    });
+    expect(res.status).toBe(0);
+    return JSON.parse(res.stdout).axes.find((a) => a.axis === 'activation.hint-followed');
+  }
+
+  it('folds a hint turn followed by its slash turn into hint-followed', async () => {
+    // THE PAIRING THE READER'S HAND-WRITTEN FIXTURES ASSUME. Both turns carry
+    // the SAME session id, which is what puts them in one run file — the
+    // reporter pairs a hint row with the NEXT activation row of the same run
+    // only, so a shared run is the precondition, not an incidental detail.
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-follow', pid: 'prompt-follow-1' });
+    await submit({ prompt: `/watch ${YT}`, sid: 'sess-follow', pid: 'prompt-follow-2' });
+
+    const followed = hintFollowedAxis();
+    // OBSERVED, then pinned. The denominator is 2, not 1: turn ② is a `/watch`
+    // whose own prompt still contains the URL, so the hook shows the watch hint
+    // AGAIN and that second row enters the denominator too. It is the last
+    // activation row of the run, so it also counts in `no_next` and can never
+    // be numerated. Net effect of a slash turn that repeats its own trigger:
+    // the denominator grows while the numerator cannot — read
+    // `ratio_resolvable` (= numerator / (denominator - no_next)) instead.
+    expect(followed.denominator).toBe(2);
+    expect(followed.numerator).toBe(1);
+    expect(followed.no_next).toBe(1);
+    expect(followed.unmapped).toBe(0);
+    expect(followed.by_hint.watch).toEqual({ numerator: 1, denominator: 2 });
+    expect(followed.ratio_resolvable).toBe(1);
+
+    // PRIVACY, on the raw bytes: two hint rows and a slash row, no URL anywhere.
+    for (const line of readSandboxLines()) {
+      expect(line).not.toContain('youtu');
+      expect(line).not.toContain('dQw4w9WgXcQ');
+    }
+  });
+
+  it('counts a hint the user did NOT act on as denominator only', async () => {
+    // NEGATIVE CONTROL for the case above: without it, an axis that numerated
+    // every hint row unconditionally would look identical.
+    await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-ignored', pid: 'prompt-ignored-1' });
+    await submit({ prompt: 'explain how the router works', sid: 'sess-ignored', pid: 'prompt-ignored-2' });
+
+    const followed = hintFollowedAxis();
+    expect(followed.denominator).toBe(1);
+    expect(followed.numerator).toBe(0);
+    // The plain second turn is still an activation row, so the hint row HAS a
+    // next row — the miss is a real miss, not an unresolvable end-of-run.
+    expect(followed.no_next).toBe(0);
+    expect(followed.by_hint.watch).toEqual({ numerator: 0, denominator: 1 });
   });
 });

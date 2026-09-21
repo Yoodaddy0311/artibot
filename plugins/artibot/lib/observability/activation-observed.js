@@ -21,7 +21,7 @@
  * projection, `lib/mission/compiler.js#projectCommandActivation`, rather than
  * recomputed here. Two projections of the same fact would be free to disagree.
  *
- * PRIVACY. No prompt text, ever. Two mechanisms, because the two inputs have
+ * PRIVACY. No prompt text, ever. Two mechanisms, because the inputs have
  * different shapes:
  *   - `reason[]` is never copied wholesale. Only the ID inside an `nl-match:`
  *     literal is extracted, and only when it satisfies a strict id charset — a
@@ -29,7 +29,11 @@
  *   - `slashCommand` is re-validated against the same charset
  *     `lib/mission/mission-id.js#detectSlashCommand` produces, so an argument
  *     tail (`/split please leak`) cannot ride along on the command name.
- * Nothing here spreads an input object.
+ *   - `hintRecommend` is put through the same charset by `resolveHint`, so a
+ *     hint carrying a sentence records as `null` rather than as text.
+ * Nothing here spreads an INPUT object. The one spread below is of a
+ * `resolveHint` result — an object this module's own validator just built,
+ * whose two keys are fixed — not of anything a caller handed in.
  *
  * PURE. No fs, no clock, no config. The recorder owns the run id and the store.
  *
@@ -41,9 +45,11 @@
 import { projectCommandActivation } from '../mission/compiler.js';
 import {
   ACTIVATION_DATA_KEYS,
+  HINT_SLASH_MAP,
   MAX_PROMPT_ID_LENGTH,
   NL_MATCH_ID_RE,
   PREDICTED_SIGNALS,
+  resolveHint,
   SLASH_NAME_RE,
 } from './decision-events.js';
 
@@ -57,9 +63,14 @@ import {
  * not be takeable down by its own payload builder. Re-exported rather than
  * merely imported so a caller of the builder has one import site for the
  * shape and the bounds that go with it.
+ *
+ * `HINT_SLASH_MAP` and `resolveHint` joined them when the recorder gained the
+ * hint axis: the recorder has to resolve a hint too, and importing them from
+ * here would have re-formed exactly the dependency this comment warns about.
  */
 export {
-  ACTIVATION_DATA_KEYS, MAX_PROMPT_ID_LENGTH, NL_MATCH_ID_RE, PREDICTED_SIGNALS, SLASH_NAME_RE,
+  ACTIVATION_DATA_KEYS, HINT_SLASH_MAP, MAX_PROMPT_ID_LENGTH, NL_MATCH_ID_RE, PREDICTED_SIGNALS,
+  resolveHint, SLASH_NAME_RE,
 };
 
 /**
@@ -79,18 +90,6 @@ export const MEASURABLE_ACTIVATION_KEYS = Object.freeze(['autopilot', 'autopilot
  * a reader of the axis must not mistake their absence for "always false".
  */
 export const UNMEASURED_ACTIVATION_KEYS = Object.freeze(['plan', 'ultraplan', 'review']);
-
-/**
- * Wave 13 hint axis: a planner `recommendation` value to the slash command a
- * user would type to accept it.
- *
- * `workflow` is DELIBERATELY ABSENT. There is no `/workflow` command to accept,
- * so Wave 13 must resolve it as `hint_resolved_by: 'unmapped'` with
- * `accepted: false` rather than silently mapping it onto a neighbour. Mapping
- * it would manufacture agreement out of a recommendation nobody could act on.
- * Not consumed in Wave 12 — the slash axis only.
- */
-export const HINT_SLASH_MAP = Object.freeze({ split: 'split', autopilot: 'autopilot', watch: 'watch' });
 
 /** Prefix `decideMode` pushes for a natural-language / flag pattern hit. */
 const NL_MATCH_PREFIX = 'nl-match:';
@@ -168,13 +167,25 @@ export function extractNlMatch(reason) {
  * is pure and has no run id; the recorder, which does, prefixes it to the final
  * `activation:<runId>:<promptId>`. The half-formed key never reaches disk.
  *
+ * THE HINT KEYS ARE TOP-LEVEL, not members of `activation_observed`. That
+ * container holds what the USER did this turn; a hint is what the HOOK said
+ * this turn. Nesting the hint inside the observation would make "the user typed
+ * it" and "we suggested it" indistinguishable to a reader.
+ *
+ * NOTHING HERE PAIRS THE TWO. A hint is accepted on a LATER turn than the one
+ * that emitted it, so whatever pairs a hint with its acceptance is a reader
+ * folding across records, not this record. This function records one turn and
+ * makes no claim about agreement.
+ *
  * @param {object} [input]
  * @param {object} [input.topology] - a `routeTopology` result
  * @param {string} [input.slashCommand] - a `detectSlashCommand` result
  * @param {string} [input.promptId] - correlation id for this prompt
+ * @param {string} [input.hintRecommend] - the `[artibot:hint recommend=X]` value
+ *   the hook emitted for this prompt, if it emitted one
  * @returns {object} exactly the {@link ACTIVATION_DATA_KEYS} keys
  */
-export function buildActivationRecord({ topology, slashCommand, promptId } = {}) {
+export function buildActivationRecord({ topology, slashCommand, promptId, hintRecommend } = {}) {
   const t = topology && typeof topology === 'object' ? topology : {};
   // Charset-bounded, matching the recorder exactly. Builder and recorder must
   // agree: if the builder let an arbitrary sentence through as a mode, the
@@ -205,5 +216,6 @@ export function buildActivationRecord({ topology, slashCommand, promptId } = {})
     predicted_nl_match: extractNlMatch(t.reason),
     prompt_id: promptIdOk ? promptId : null,
     idempotency_key: promptIdOk ? `activation:${promptId}` : null,
+    ...resolveHint(hintRecommend),
   };
 }

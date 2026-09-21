@@ -38,6 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { ACTIVATION_OBSERVED } from '../../lib/observability/decision-events.js';
 import {
   ACTIVATION_FIELDS,
   AXES,
@@ -158,11 +159,11 @@ describe('ratioOf — unmeasured is null, measured zero is 0', () => {
 });
 
 describe('empty project root — every axis is UNMEASURED, not zero', () => {
-  it('reports ratio null and denominator 0 on all three axes', async () => {
+  it('reports ratio null and denominator 0 on all four axes', async () => {
     const report = await reportFor(tmpRoot);
 
     expect(report.schema).toBe('nl-activation-report/v1');
-    expect(report.axes).toHaveLength(3);
+    expect(report.axes).toHaveLength(4);
     for (const a of report.axes) {
       expect(a.denominator, `${a.axis} denominator`).toBe(0);
       expect(a.ratio, `${a.axis} ratio`).toBeNull();
@@ -411,6 +412,20 @@ describe('the fallback store is never summed into any top-level count', () => {
         activation_observed: { slash: 'plan', hint_recommend: 'plan', hint_accepted: true },
       }),
       ledgerLine(2, 'mission.candidate_deferred', {}),
+      // The hint-followed axis reads only activation-typed rows, so the axis
+      // needs its own pair here — otherwise the fallback exclusion would be
+      // asserted on an axis whose denominator is 0 in every store and the check
+      // would pass vacuously.
+      ledgerLine(3, ACTIVATION_OBSERVED, {
+        hint_recommend: 'split',
+        hint_resolved_by: 'slash-map',
+        prompt_id: 'p-1',
+      }),
+      ledgerLine(4, ACTIVATION_OBSERVED, {
+        activation_observed: { slash: 'split' },
+        hint_recommend: null,
+        prompt_id: 'p-2',
+      }),
     ]);
 
     const report = await reportFor(tmpRoot);
@@ -467,7 +482,7 @@ describe('CLI', () => {
 
     const report = JSON.parse(stdout);
     expect(report.schema).toBe('nl-activation-report/v1');
-    expect(report.axes).toHaveLength(3);
+    expect(report.axes).toHaveLength(4);
     expect(report.project_root).toBe(tmpRoot);
     expect(typeof report.measured_at).toBe('string');
   });

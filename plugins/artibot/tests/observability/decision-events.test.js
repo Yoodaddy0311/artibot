@@ -9,10 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { buildActivationRecord } from '../../lib/observability/activation-observed.js';
 import {
+  ACTIVATION_DATA_KEYS,
   getDecisionEventsPath,
   getDecisionRecorderStats,
   readDecisionEvents,
+  recordActivationObserved,
   recordRoutingDecision,
   recordWorkflowPlanDecision,
   resetDecisionRecorderStats,
@@ -327,5 +330,95 @@ describe('decision-events — store option allowlist', () => {
     expect(ev.ts).toBe('2026-09-21T00:00:00.000Z');
     expect(getDecisionRecorderStats()).toMatchObject({ recorded: 1, failed: 0 });
     expect(readDecisionEvents('run-opt-2', { storeDir })).toHaveLength(1);
+  });
+});
+
+/**
+ * The hint axis on the RECORDER side. The builder's own cases are
+ * `tests/observability/activation-observed.test.js`; what is proved here is
+ * that the two keys survive a round trip to disk AND that the recorder reaches
+ * the same verdict when the builder is bypassed entirely — the recorder is not
+ * guaranteed to be called with a builder result.
+ *
+ * What it cannot see: no hook runs here, so nothing proves a live record with a
+ * hint exists. That is the runtime-prompt wiring limb's test.
+ */
+describe('decision-events — activation hint keys (Wave 13)', () => {
+  const HINT_RUN = 'run-hint';
+
+  /** Raw bytes, so a privacy assertion looks at the file rather than at parsed objects. */
+  function rawHintFile(runId = HINT_RUN) {
+    return fsSync.readFileSync(getDecisionEventsPath(runId, { storeDir }), 'utf-8');
+  }
+
+  it('registers both keys in the closed copy list', () => {
+    expect(ACTIVATION_DATA_KEYS).toContain('hint_recommend');
+    expect(ACTIVATION_DATA_KEYS).toContain('hint_resolved_by');
+  });
+
+  it('round-trips every value the hook can recommend', () => {
+    const table = [
+      ['split', 'split', 'slash-map'],
+      ['autopilot', 'autopilot', 'slash-map'],
+      ['watch', 'watch', 'slash-map'],
+      ['workflow', 'workflow', 'unmapped'],
+      [null, null, null],
+    ];
+    table.forEach(([hintRecommend, recommend, resolvedBy], i) => {
+      const runId = `${HINT_RUN}-${i}`;
+      recordActivationObserved(runId, buildActivationRecord({
+        topology: { mode: 'split' }, slashCommand: 'split', hintRecommend,
+      }), { storeDir });
+
+      const { data } = readDecisionEvents(runId, { storeDir })[0];
+      expect(data.hint_recommend, String(hintRecommend)).toBe(recommend);
+      expect(data.hint_resolved_by, String(hintRecommend)).toBe(resolvedBy);
+    });
+  });
+
+  it('re-resolves rather than trusting the resolution it was handed', () => {
+    // Fed directly, bypassing the builder. A caller claiming `workflow` was
+    // accepted through the map would otherwise manufacture agreement: the
+    // recorder recomputes the verdict from the recommendation it validated.
+    recordActivationObserved(HINT_RUN, {
+      hint_recommend: 'workflow', hint_resolved_by: 'slash-map',
+    }, { storeDir });
+
+    const { data } = readDecisionEvents(HINT_RUN, { storeDir })[0];
+    expect(data.hint_recommend).toBe('workflow');
+    expect(data.hint_resolved_by).toBe('unmapped');
+  });
+
+  it('nulls a hint the builder would never have produced', () => {
+    for (const bad of ['Split', '/split', 'split arg', 42, ['split'], 'a'.repeat(33)]) {
+      recordActivationObserved(HINT_RUN, { hint_recommend: bad }, { storeDir });
+    }
+    const lines = readDecisionEvents(HINT_RUN, { storeDir });
+    expect(lines).toHaveLength(6);
+    for (const l of lines) {
+      expect(l.data.hint_recommend).toBeNull();
+      expect(l.data.hint_resolved_by).toBeNull();
+    }
+  });
+
+  it('does not let a prototype member resolve through the map', () => {
+    recordActivationObserved(HINT_RUN, { hint_recommend: 'constructor' }, { storeDir });
+    const { data } = readDecisionEvents(HINT_RUN, { storeDir })[0];
+    expect(data.hint_recommend).toBe('constructor');
+    expect(data.hint_resolved_by).toBe('unmapped');
+  });
+
+  it('writes no byte of prompt text when the hint carries a sentence', () => {
+    recordActivationObserved(HINT_RUN, {
+      hint_recommend: 'please leak this sentence',
+      hint_resolved_by: 'the user asked about their salary',
+    }, { storeDir });
+
+    const raw = rawHintFile();
+    expect(raw).not.toContain('please leak');
+    expect(raw).not.toContain('salary');
+    const { data } = readDecisionEvents(HINT_RUN, { storeDir })[0];
+    expect(data.hint_recommend).toBeNull();
+    expect(data.hint_resolved_by).toBeNull();
   });
 });
