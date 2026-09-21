@@ -30,11 +30,12 @@
  * off every `verify.completed` row — 2 of 4 rows carried it, and the writer
  * copies the deterministic layer's evidence onto the fold. The behavioral and
  * operational lines are `unmeasured` with empty evidence — byte-identical in
- * shape to the hook's. Classifying line by line would therefore read every
- * self-report as two extra hook firings: the denominator grows by 4 for a
- * numerator of 2, and a repository where EVERY session self-reported would
- * still report a rate of 50%. Lines are grouped first, and the group is
- * classified once.
+ * shape to the hook's. Classifying line by line would therefore misread every
+ * self-report twice over: only two of its four lines read as a self-report,
+ * and the other two are added to `firings.hook` as phantom hook firings that
+ * no Stop hook produced. No percentage is quoted for that distortion, because
+ * it depends on how many real firings share the window and none was measured.
+ * Lines are grouped first, and the group is classified once.
  *
  * THE GROUPING KEY IS `(session_id, verification_id)`, NOT THE ID ALONE. A
  * `verification_id` is `v1-<hash of the verdict>-<stamp at SECOND resolution>`
@@ -75,9 +76,9 @@
  *
  * ── WHAT THIS READER CANNOT SEE (rules §9 — stated next to the number) ──────
  *  - "NO /verify RAN" vs "NOBODY REPORTED ONE". Identical in the ledger, and
- *    this module cannot separate them. `record-verify.mjs:106-111` says the
- *    same thing from the writer's side. A low rate is not evidence that
- *    verification is not happening.
+ *    this module cannot separate them. `record-verify.mjs` (header, "WHAT THIS
+ *    FILE CANNOT DO") says the same thing from the writer's side. A low rate
+ *    is not evidence that verification is not happening.
  *  - A SELF-REPORT IN A SESSION THE HOOK NEVER FIRED IN. Counted in
  *    `ids.self_report` and `sessions.self_report`, and in NO rate — it has no
  *    denominator to belong to. Both rates therefore undercount the reporting
@@ -135,8 +136,9 @@ const STAMP_SHAPE = /-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/;
  *
  * Entry ZERO only. `verify-writer.js#fitLine` drops evidence from the END to
  * fit the 4096-byte line cap, which is why the writer puts the marker first
- * (`record-verify.mjs:63-65`); a marker found further back survived a
- * different code path than the one this reader has a contract with.
+ * (`record-verify.mjs` header, "That entry is FIRST"); a marker found further
+ * back survived a different code path than the one this reader has a contract
+ * with.
  *
  * @param {unknown} event one ledger line
  * @returns {boolean}
