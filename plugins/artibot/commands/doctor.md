@@ -267,6 +267,69 @@ is an idle machine.
 - **Anything about the repo working tree.** A fixed repo and a stale install are
   indistinguishable to every step except S4.
 
+**Topology agreement (Shadow, info)**
+
+Status is `info`, FIXED. This row never enters the status table above and
+never produces a warning or a failure — it is a Shadow-stage measurement, not
+a gate. Design canon: Shadow = `topology-actual` derived post-hoc from the
+spawn ledger, the split run records and the session store, with /doctor
+reporting the agreement rate.
+
+Run the reader against the PROJECT root this check resolved in step 1, not
+against the current directory:
+
+```
+node scripts/ledger/topology-agreement.mjs [--cwd <projectRoot>] [--since <iso>] [--json]
+```
+
+`--cwd` matters because the decisions store is per project root and, in a
+linked worktree, per worktree: launched from a linked worktree the reader
+joins against that worktree's own — usually empty — store. Pass the parent
+root explicitly when in doubt. The reader is read-only, exits 0 whenever it
+produced an observation, and exits 2 only on a usage error.
+
+Report, from that run:
+
+- the printed table — one row per recommended topology mode, with windows,
+  spawns=0, spawns=1, spawns>=2, match, mismatch, input_deficit and
+  unmeasured;
+- `agreement_rate`, which is `null` and never `0` when no window was
+  measurable, so an empty denominator cannot be read as total disagreement.
+  Its denominator is match + mismatch + input_deficit: the input-deficit
+  windows stay in on purpose, because dropping them shrinks the denominator
+  by the observer's own classification and reads higher (measured
+  2026-09-21T01:45Z: 12/15 = 0.800 with them, 12/14 = 0.857 without);
+- both t0 values: the default since-time (the v4.63.0 tag,
+  `2026-09-17T00:48:41Z`) and the F04(a) install time `2026-09-14T05:21:00Z`;
+- `open_windows`, the `excluded_files` counts (`diag-`, `cron-`,
+  `_unattributed`), `stop_only_ids`, and the reverse-direction line.
+
+Expect the `input_deficit` column (windows the `explicit_slash` flag moved out
+of `mismatch`) to be the first finding:
+every window with two or more spawns measured on 2026-09-17 was an explicit
+`/team` run (10 of 54 windows after the F04(a) install time), i.e. the router
+never saw the slash command — an input deficit, not a routing error.
+
+**What this row cannot see**
+
+- **Split-window sessions, which sit outside the denominator.** Each window a
+  split opens is its own worktree and its hooks write decisions into that
+  worktree's `.artibot/runtime/decisions/` (`resolveProjectRoot` returns the
+  worktree root), so the `split-*` spawns in the shared spawn ledger have no
+  recommendation row in the parent store to join against (measured 2026-09-17:
+  15 of 16 worktrees held 0 decision files).
+- **The reverse direction — "team recommended, executed solo" — which is
+  structurally 0.** `lib/runtime/middleware/tasks.js#createTasksMiddleware`
+  attaches `workflowPlan` only when the resolved mode is `agentTeam`, and
+  `routeTopology` can answer `team` only when that plan says `runner:'team'`,
+  so a `team` recommendation is downstream of the execution decision. The
+  reader prints "structurally unobservable" when the team row is empty; a 0/0
+  there is not 100% agreement.
+- **`autopilot`, `autopilot_fast` and `split` recommendations, which stay
+  UNMEASURED.** Their executed topology lives under
+  `<pluginRoot>/runtime/{autopilot,split}/`, which v1 of the reader does not
+  open, so those rows carry windows but neither a match nor a mismatch.
+
 ### Check 8: Ledger / State Parity
 
 Read-only, and NOT a `--fix` target (see the note at the end of Check 9).
