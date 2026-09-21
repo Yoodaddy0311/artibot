@@ -149,9 +149,14 @@ describe('privacy — the recorder re-validates rather than trusting its caller'
 
     const { data } = readDecisionEvents(RUN, { storeDir })[0];
     expect(data.activation_observed).toEqual({ slash: 'split' });
+    // The closed key set, pinned so a key added upstream cannot reach disk
+    // unnoticed. The two `hint_*` keys joined it with the Wave 13 hint axis;
+    // their own cases live in `decision-events.test.js` (recorder) and
+    // `activation-observed.test.js` (builder).
     expect(Object.keys(data).sort()).toEqual([
-      'activation_observed', 'command_activation', 'idempotency_key', 'observe_only',
-      'predicted_mode', 'predicted_nl_match', 'predicted_signal', 'prompt_id',
+      'activation_observed', 'command_activation', 'hint_recommend', 'hint_resolved_by',
+      'idempotency_key', 'observe_only', 'predicted_mode', 'predicted_nl_match',
+      'predicted_signal', 'prompt_id',
     ]);
   });
 

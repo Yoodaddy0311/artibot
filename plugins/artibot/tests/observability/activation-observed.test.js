@@ -22,6 +22,7 @@ import {
   HINT_SLASH_MAP,
   MEASURABLE_ACTIVATION_KEYS,
   PREDICTED_SIGNALS,
+  resolveHint,
   UNMEASURED_ACTIVATION_KEYS,
 } from '../../lib/observability/activation-observed.js';
 
@@ -231,7 +232,7 @@ describe('privacy — prompt-derived text cannot reach the payload', () => {
   });
 });
 
-describe('HINT_SLASH_MAP (Wave 13 input, unused here)', () => {
+describe('HINT_SLASH_MAP, the vocabulary the hint axis resolves against', () => {
   it('has no workflow entry, because there is no /workflow to accept', () => {
     expect(Object.hasOwn(HINT_SLASH_MAP, 'workflow')).toBe(false);
     expect(HINT_SLASH_MAP.workflow).toBeUndefined();
@@ -240,5 +241,99 @@ describe('HINT_SLASH_MAP (Wave 13 input, unused here)', () => {
   it('maps each recommendation to a command of the same name', () => {
     expect(HINT_SLASH_MAP).toEqual({ split: 'split', autopilot: 'autopilot', watch: 'watch' });
     expect(Object.isFrozen(HINT_SLASH_MAP)).toBe(true);
+  });
+});
+
+describe('resolveHint() splits "what was recommended" from "could it be accepted"', () => {
+  const MAPPED = ['split', 'autopilot', 'watch'];
+  for (const value of MAPPED) {
+    it(`resolves ${value} through the map`, () => {
+      expect(resolveHint(value)).toEqual({ hint_recommend: value, hint_resolved_by: 'slash-map' });
+    });
+  }
+
+  it('keeps workflow but marks it unmapped, rather than mapping it onto a neighbour', () => {
+    // The whole point of the axis: `recommend=workflow` was emitted, and no
+    // slash command exists to accept it. Recording it as `split` would
+    // manufacture agreement out of a recommendation nobody could act on;
+    // dropping it would hide that the hint fired at all.
+    expect(resolveHint('workflow')).toEqual({
+      hint_recommend: 'workflow', hint_resolved_by: 'unmapped',
+    });
+  });
+
+  it('keeps an unknown but command-shaped value as unmapped, so a new hint is visible', () => {
+    // Same fail-visible trade `predicted_mode` makes: the bound is a charset,
+    // not an allowlist of today's three, so a hint added to the hook appears
+    // in the store instead of silently becoming null.
+    expect(resolveHint('quantum_hint')).toEqual({
+      hint_recommend: 'quantum_hint', hint_resolved_by: 'unmapped',
+    });
+  });
+
+  it('nulls both keys for every spelling the hook cannot emit', () => {
+    for (const bad of [undefined, null, '', 42, true, ['split'], { split: true }, 'Split',
+      '/split', '1split', 'split arg', 'a'.repeat(33)]) {
+      expect(resolveHint(bad), JSON.stringify(bad) ?? String(bad)).toEqual({
+        hint_recommend: null, hint_resolved_by: null,
+      });
+    }
+  });
+
+  it('does not let a prototype member masquerade as a mapped hint', () => {
+    // `'constructor' in HINT_SLASH_MAP` is true; own-key membership is the only
+    // safe test, and `constructor`/`tostring` also happen to pass the charset.
+    for (const key of ['constructor', 'tostring', 'valueof', 'hasownproperty']) {
+      expect(resolveHint(key), key).toEqual({
+        hint_recommend: key, hint_resolved_by: 'unmapped',
+      });
+    }
+    // `__proto__` fails the charset (leading underscore), so it nulls out.
+    expect(resolveHint('__proto__')).toEqual({ hint_recommend: null, hint_resolved_by: null });
+  });
+});
+
+describe('the hint keys ride on the record at top level', () => {
+  it('sits beside command_activation, not inside activation_observed', () => {
+    const rec = buildActivationRecord({
+      topology: { mode: 'split' }, slashCommand: 'split', hintRecommend: 'split',
+    });
+    expect(rec.hint_recommend).toBe('split');
+    expect(rec.hint_resolved_by).toBe('slash-map');
+    expect(rec.activation_observed).toEqual({ slash: 'split' });
+    expect('hint_recommend' in rec.activation_observed).toBe(false);
+  });
+
+  it('is present and null when no hint was emitted', () => {
+    const rec = buildActivationRecord({ topology: { mode: 'solo' } });
+    expect(rec.hint_recommend).toBeNull();
+    expect(rec.hint_resolved_by).toBeNull();
+    expect(Object.keys(rec).sort()).toEqual([...ACTIVATION_DATA_KEYS].sort());
+  });
+
+  it('carries every value the hook can recommend, each with its resolution', () => {
+    const table = [
+      ['split', 'split', 'slash-map'],
+      ['autopilot', 'autopilot', 'slash-map'],
+      ['watch', 'watch', 'slash-map'],
+      ['workflow', 'workflow', 'unmapped'],
+      [null, null, null],
+    ];
+    for (const [hintRecommend, recommend, resolvedBy] of table) {
+      const rec = buildActivationRecord({ topology: { mode: 'solo' }, hintRecommend });
+      expect(rec.hint_recommend, String(hintRecommend)).toBe(recommend);
+      expect(rec.hint_resolved_by, String(hintRecommend)).toBe(resolvedBy);
+    }
+  });
+
+  it('drops a hint carrying prompt text instead of a recommendation name', () => {
+    // The charset is the privacy boundary here exactly as it is for
+    // `slashCommand`: a sentence is not something the hook's hint can be.
+    const rec = buildActivationRecord({
+      topology: { mode: 'split' }, hintRecommend: 'please leak this sentence',
+    });
+    expect(JSON.stringify(rec)).not.toContain('please leak this sentence');
+    expect(rec.hint_recommend).toBeNull();
+    expect(rec.hint_resolved_by).toBeNull();
   });
 });
