@@ -339,7 +339,7 @@ describe('mission.checkpointed declares the data keys its writer emits', () => {
     expect(spec.required).toEqual([]);
   });
 
-  it('accepts resumable true, false and null, and refuses a string', () => {
+  it('accepts resumable true, false and null, and refuses a string or a number', () => {
     // The three accepted shapes are the ones the reporter can produce:
     // `save-checkpoint.js` returns `resumable: null` when the report is
     // missing or threw, and a boolean otherwise.
@@ -347,9 +347,12 @@ describe('mission.checkpointed declares the data keys its writer emits', () => {
       const res = checkpoint({ checkpoint_id: 'ckpt-1', trigger: '/save', resumable });
       expect(res.ok).toBe(true);
     }
-    const bad = checkpoint({ checkpoint_id: 'ckpt-2', trigger: '/save', resumable: 'yes' });
-    expect(bad.ok).toBe(false);
-    expect(bad.reason).toBe('type-violation:resumable');
+    // `1` and `'yes'` are the truthy look-alikes a loose writer would coerce.
+    for (const resumable of ['yes', 1]) {
+      const bad = checkpoint({ checkpoint_id: 'ckpt-2', trigger: '/save', resumable });
+      expect(bad.ok, String(resumable)).toBe(false);
+      expect(bad.reason, String(resumable)).toBe('type-violation:resumable');
+    }
   });
 
   it('lets an UNDECLARED data key through untouched', () => {
