@@ -160,17 +160,21 @@ describe('verify self-report round trip: writer -> file -> reader', () => {
     const root = makeRoot('C');
 
     const rows = selfReportInto(root);
-    // Anchor: exactly TWO of the four real lines carry the marker — the overall
-    // fold and the deterministic layer — and those are the bytes this control
-    // removes. Measured against the real writer 2026-09-21; the header of
-    // `lib/verification/verify-rate.js` says "only the DETERMINISTIC line",
-    // which is one line short of what the writer emits. Nothing downstream
-    // depends on the difference (the reader ORs over a run's lines), but the
-    // number is anchored here so a writer that stopped emitting either copy
-    // fails loudly instead of letting this control pass vacuously.
+    // Anchor: at least one real line carries the marker, and the DETERMINISTIC
+    // line is one of them. That is the whole anti-vacuity requirement — if the
+    // writer stopped emitting the marker, this fails here instead of letting
+    // the control below pass over rows that never had a note to strip.
+    //
+    // Measured 2026-09-21: TWO lines carry it, the deterministic layer AND the
+    // overall fold. The header of `lib/verification/verify-rate.js` says "only
+    // the DETERMINISTIC line", which is one short of what the writer emits.
+    // The count is deliberately NOT pinned: the fold's echo is a
+    // `verify-writer.js` property owned elsewhere and may legitimately change,
+    // and the reader ORs over a run's lines, so the classification is identical
+    // whether one line carries the marker or both.
     const marked = rows.filter((e) => e.data?.evidence?.[0]?.note === SELF_REPORT_NOTE);
-    expect(marked).toHaveLength(2);
-    expect(marked.map((e) => e.data.layer ?? null).sort()).toEqual(['deterministic', null].sort());
+    expect(marked.length).toBeGreaterThanOrEqual(1);
+    expect(marked.map((e) => e.data.layer ?? null)).toContain('deterministic');
 
     const stripped = rows.map((e) => {
       const evidence = (e.data.evidence ?? []).map((entry, i) => {

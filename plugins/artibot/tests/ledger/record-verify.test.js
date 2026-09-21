@@ -419,7 +419,20 @@ describe('record-verify: running it twice', () => {
  * string is spelled out rather than built from parts.
  */
 const DOC_CALL = 'node "$REC" --status <PASS|FAIL> --command "<one-line summary>"'
-  + ' --session "$CLAUDE_SESSION_ID" --cwd "<project root>"';
+  + ' --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"';
+
+/**
+ * The WHOLE fenced line, resolution chain included — `DOC_CALL` alone leaves the
+ * `REC=` chain unpinned, so reverting it to the bare relative path that only
+ * resolves inside this repository would stay green. Measured 2026-09-21: the
+ * host sets `CLAUDE_CODE_SESSION_ID` and leaves `CLAUDE_SESSION_ID` empty, so a
+ * call naming only the first spelling records nothing.
+ */
+const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
+  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs";'
+  + ' [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs";'
+  + ` if [ -f "$REC" ]; then ${DOC_CALL};`
+  + ' else echo "record-verify not found - outcome NOT recorded"; fi';
 
 /** The flags the doc's call is expected to name — the loop's cardinality anchor. */
 const DOC_FLAGS = ['--status', '--command', '--session', '--cwd'];
@@ -448,19 +461,31 @@ describe('record-verify: the prose in commands/verify.md', () => {
 
     // Exactly once: two copies drift, and a model told twice records twice.
     expect(countOf(doc, DOC_CALL)).toBe(1);
+    // The resolution chain is pinned too. Without this, reverting `REC=` to the
+    // bare relative path — which resolves only inside this repository — passes.
+    expect(countOf(doc, DOC_LINE)).toBe(1);
+    // And no SECOND, differently-worded invocation anywhere. Measured
+    // 2026-09-21: `node ` occurs exactly once in this document, which makes it
+    // a usable discriminator; a future doc that runs some other node script
+    // will need a narrower one.
+    expect(countOf(doc, 'node ')).toBe(1);
 
     const execution = doc.indexOf('## Execution Flow');
     const step5 = doc.indexOf('**Step 5 - Record**');
+    const report = doc.indexOf('4. **Report**');
     const behavior = doc.indexOf('## Pipeline Behavior');
     const call = doc.indexOf(DOC_CALL);
-    for (const [label, at] of Object.entries({ execution, step5, behavior, call })) {
+    for (const [label, at] of Object.entries({ execution, step5, report, behavior, call })) {
       expect(at, `${label} must be present in commands/verify.md`).toBeGreaterThan(-1);
     }
     // The whole point of the limb: the call is a numbered STEP, not a bullet
-    // under Pipeline Behavior that a model reads as commentary.
+    // under Pipeline Behavior that a model reads as commentary. `report` is the
+    // UPPER bound — without it, moving the call into a paragraph after
+    // `4. **Report**` still precedes Pipeline Behavior and still passes.
     expect(execution).toBeLessThan(step5);
     expect(step5).toBeLessThan(call);
-    expect(call).toBeLessThan(behavior);
+    expect(call).toBeLessThan(report);
+    expect(report).toBeLessThan(behavior);
   });
 
   it('leaves no invocation behind in the Pipeline Behavior section', () => {
