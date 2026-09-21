@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import nodePath from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { getHeadSha } from '../git/repo-root-cache.js';
+import { executionProfile } from '../routing/execution-profile.js';
 import { buildFastFanoutPlan, normalizeFastProfile } from './fast-profile.js';
 
 function getFastTasks(state) {
@@ -180,6 +181,81 @@ function getPersistedFastProfile(state) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// CA-12 — opt-in mission objective on the fast plan
+// ---------------------------------------------------------------------------
+
+/**
+ * Strict `=== true`, i.e. an allowlist of one value.
+ *
+ * This is a Canary-stage behaviour change whose rollback contract is a single
+ * config key, so a truthy test would be the wrong shape: `"false"`, `0` as a
+ * string, or a stray object would all turn it on, and turning it back off
+ * again would then depend on guessing which falsy spelling the operator used.
+ */
+function wantsFastObjective(limits) {
+  return limits?.applyObjective === true;
+}
+
+/**
+ * Compile the objective a `--fast` mission runs under.
+ *
+ * The token is never spelled in this module: it comes from
+ * `lib/routing/execution-profile.js`. The path taken here is the FLAG adapter
+ * — `FLAG_TO_PRIORITY` maps the `fast` flag straight onto `maximum`, and
+ * `OBJECTIVE_BY_PRIORITY.maximum` supplies the token. `PRIORITY_ALIASES.fast`
+ * is a different door onto the same answer, read only when `intent.md`
+ * frontmatter declares `priority: 'fast'`; this call passes no frontmatter.
+ * A null objective there is the G-1 fail-closed case, so this returns null
+ * too instead of substituting a token of its own.
+ *
+ * `applied` separates "requested" from "in force". A blocked or demoted plan
+ * fans nothing out, so its directives reach no worker — a consumer that reads
+ * only `token` would otherwise report an objective that never ran.
+ *
+ * @param {boolean} enabled Whether the plan actually fans out.
+ * @returns {{token: string, reason: string, directives: object,
+ *   source: string, applied: boolean}|null}
+ */
+function compileFastObjective(enabled) {
+  let compiled;
+  try {
+    compiled = executionProfile({ flags: { fast: true } });
+  } catch {
+    // The compiler's only throw is a schema rejection, which is a routing
+    // concern. Planning fan-out must not fail because the metadata did.
+    return null;
+  }
+  if (typeof compiled?.objective !== 'string' || !compiled.directives) return null;
+  return {
+    token: compiled.objective,
+    reason: compiled.objective_reason,
+    // A plain copy: the compiler deep-freezes its result, and handing the
+    // frozen reference onward would make every downstream write a silent
+    // no-op in sloppy mode and a throw in strict mode.
+    directives: { ...compiled.directives },
+    source: compiled.source,
+    applied: enabled === true,
+  };
+}
+
+/**
+ * Attach or strip the objective block according to the CURRENT flag.
+ *
+ * A persisted profile may carry a block written under a different flag state,
+ * so what was stored never decides what is returned. With the flag off the key
+ * is REMOVED rather than nulled: a plan must stay deep-equal (and
+ * JSON-identical) to what the pre-CA-12 planner produced.
+ */
+function withFastObjective(plan, limits) {
+  const objective = wantsFastObjective(limits) ? compileFastObjective(plan.enabled) : null;
+  if (objective) return { ...plan, objective };
+  if (!Object.hasOwn(plan, 'objective')) return plan;
+  const stripped = { ...plan };
+  delete stripped.objective;
+  return stripped;
+}
+
 /**
  * Resolve host parallelism. `testOptions.cpuCount` exists only as a deterministic
  * test override; production sessions use the OS scheduler's available count.
@@ -249,7 +325,7 @@ export function retainFastIntegrationWorktree(state, worktreePath) {
  */
 export function demoteFastToStandard(fast, reason) {
   if (!fast || fast.enabled !== true) return fast;
-  return {
+  const demoted = {
     ...fast,
     enabled: false,
     fallbackReason: reason,
@@ -257,6 +333,12 @@ export function demoteFastToStandard(fast, reason) {
     waves: [],
     serialReasons: [...new Set([...(fast.serialReasons ?? []), reason])],
   };
+  // The objective was still REQUESTED; it just no longer governs anything.
+  // The block is kept with `applied:false` as a record of that. Measured
+  // 2026-09-21: no reader consumes it yet — `:status` does not surface it —
+  // so this is a written-down fact awaiting a consumer, not a live signal.
+  if (!fast.objective) return demoted;
+  return { ...demoted, objective: { ...fast.objective, applied: false } };
 }
 
 /**
@@ -284,7 +366,7 @@ export function planFastExecution(state, runner, limits = {}, testOptions = {}) 
       ? 'team-disabled'
       : null;
   const persisted = blockedReason ? null : getPersistedFastProfile(state);
-  if (persisted) return persisted;
+  if (persisted) return withFastObjective(persisted, limits);
   const cpuCount = resolveFastCpuCount(testOptions);
   const plan = buildFastFanoutPlan({
     fast: blockedReason === null,
@@ -299,7 +381,7 @@ export function planFastExecution(state, runner, limits = {}, testOptions = {}) 
     ...serial.map((entry) => entry.reason).filter(Boolean),
     ...(fallbackReason ? [fallbackReason] : []),
   ])];
-  return {
+  return withFastObjective({
     ...plan,
     serial,
     cpuCount,
@@ -308,21 +390,14 @@ export function planFastExecution(state, runner, limits = {}, testOptions = {}) 
     serialReasons,
     fallbackReason,
     reused: false,
-  };
+  }, limits);
 }
 
-/**
- * Produce the isolated team instruction for a validated fast execution plan.
- * Worker ids are generated from indexes, never untrusted task IDs.
- * @param {object} state
- * @param {object} fast
- * @returns {object}
- */
-export function buildFastTeamInstruction(state, fast) {
-  const workerPrefix = `${state.sessionId}-fast-worker-`;
+/** Worker ids are generated from indexes, never from untrusted task IDs. */
+function buildFastWorktreePlan(state, fast, workerPrefix) {
   const integration = isStableIntegration(state?.fastIntegration)
     ? state.fastIntegration : { cwd: null, baseSha: null };
-  const worktreePlan = {
+  return {
     required: true,
     cap: fast.limits.maxWorktrees,
     count: fast.worktrees.count,
@@ -339,7 +414,43 @@ export function buildFastTeamInstruction(state, fast) {
       })),
     })),
   };
-  return {
+}
+
+/**
+ * One instruction line, assembled from the directive VALUES rather than from a
+ * sentence written out by hand, so a change in `PERFORMANCE_DIRECTIVES` cannot
+ * leave the prose asserting something the routing no longer does.
+ *
+ * The closing clause is deliberately value-FREE, unlike the rest of the line.
+ * A low cost weight reads as "cost is not a factor", and a driver that took
+ * that as "spend freely" would run past the session budget guard. That guard
+ * is not lifted at ANY weight, so quoting a number there would make the
+ * sentence a claim about one directive value instead of the standing rule it
+ * actually is — and would contradict the line's own first half the moment the
+ * weight changed.
+ */
+function describeFastObjective(objective) {
+  const directives = objective.directives ?? {};
+  return [
+    `Objective ${objective.token} (${objective.reason}).`,
+    `cost weight ${directives.costWeight},`,
+    `effort 하한 ${directives.effortFloor ?? '없음'},`,
+    `downgrade ${directives.downgradeEnabled ? '활성' : '비활성'},`,
+    `accuracy 부목표 ${directives.accuracySecondaryObjective ? '있음' : '없음'}.`,
+    '이 objective 는 예산을 해제하지 않습니다 — 세션 예산 가드와 승인 게이트는 그대로 유효합니다.',
+  ].join(' ');
+}
+
+/**
+ * Produce the isolated team instruction for a validated fast execution plan.
+ * @param {object} state
+ * @param {object} fast
+ * @returns {object}
+ */
+export function buildFastTeamInstruction(state, fast) {
+  const workerPrefix = `${state.sessionId}-fast-worker-`;
+  const worktreePlan = buildFastWorktreePlan(state, fast, workerPrefix);
+  const instruction = {
     type: 'team-create',
     phase: 'EXECUTE',
     sessionId: state.sessionId,
@@ -364,4 +475,8 @@ export function buildFastTeamInstruction(state, fast) {
       waves: worktreePlan.waves,
     },
   };
+  if (!fast.objective) return instruction;
+  instruction.instructions.push(describeFastObjective(fast.objective));
+  instruction.teamHint.objective = fast.objective.token;
+  return instruction;
 }
