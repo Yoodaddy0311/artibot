@@ -19,6 +19,25 @@
  * show a red does not get to be green. On top of the source check, the ledger's
  * bytes, size, mtime and directory listing are captured around a real spawn.
  *
+ * WHAT THIS SCANNER CANNOT SEE (rules §9 — written next to the gate, so the
+ * gate does not become the next illusion):
+ *  - IMPORT FORMS IT DOES NOT PARSE. `importSpecifiers` reads static `import
+ *    … from '…'` and `import '…'` in BOTH quote styles. It does not see a
+ *    dynamic `import()`, `require`/`createRequire`, or a re-export
+ *    (`export … from '…'`). Any of those could reach a writer and scan clean.
+ *  - FS VERBS OUTSIDE THE TOKEN LIST. `WRITER_TOKENS` names five spellings.
+ *    `rmSync`, `renameSync`, `writeFile`, `createWriteStream`, `openSync` and
+ *    `copyFileSync` are all invisible to it. The list is short on purpose —
+ *    the behavioural check below, not this regex, is the real backstop.
+ *  - THE TRANSITIVE GRAPH. "Writer import 0" is a statement about DIRECT
+ *    specifiers only, and two of the three allowed ones reach a writer one
+ *    hop further out: `lib/verification/verify-rate.js` imports
+ *    `verify-writer.js`, and `lib/runtime/ledger.js` imports
+ *    `event-writer.js` (both read 2026-09-21). Neither is CALLED, and nothing
+ *    in this file proves that by static means.
+ *  So the only evidence that the run wrote nothing is behavioural: the ledger
+ *  bytes, size, mtime and directory listing captured around a real spawn.
+ *
  * THE FIXTURES ARE NOT THE LIVE LEDGER (rules §9). Measured by the limb leader
  * on this machine's live ledger 2026-09-21 17:56 KST, 9,591 lines: 11
  * `intent.detected` rows and 4 `tool.used` Skill rows, and NOT ONE of the 15
@@ -268,13 +287,19 @@ const ALLOWED_SPECIFIERS = [
 const WRITER_TOKENS = /appendLedgerEvent|recordVerification|writeFileSync|appendFileSync|mkdirSync/;
 
 /**
- * Every `from '...'` specifier in a source, in order of appearance.
+ * Every static import specifier in a source, in order of appearance.
+ *
+ * BOTH QUOTE STYLES, and a bare side-effect `import '…'` too: a scanner that
+ * only understood single quotes would pass a double-quoted writer import
+ * silently, which is the fail-open direction. What it still cannot see is
+ * listed in this file's header.
  *
  * @param {string} source
  * @returns {string[]}
  */
 function importSpecifiers(source) {
-  return [...source.matchAll(/(?:^|\n)\s*import[^;]*?from\s+'([^']+)'/g)].map((m) => m[1]);
+  const pattern = /(?:^|\n)\s*import\s*(?:[^;'"]*?from\s*)?['"]([^'"]+)['"]/g;
+  return [...source.matchAll(pattern)].map((m) => m[1]);
 }
 
 /**
@@ -316,6 +341,19 @@ describe('verify-call-rate CLI: it imports no writer', () => {
     const findings = readOnlyFindings(fake);
     expect(findings).toContain('unlisted import: ../../lib/runtime/event-writer.js');
     expect(findings).toContain('writer token: appendLedgerEvent');
+  });
+
+  it('SELF-TEST: it reds on a DOUBLE-QUOTED and on a side-effect import too', () => {
+    // A single-quote-only scanner passes both of these, which is fail-open in
+    // the quietest way: the source imports a writer and the gate stays green.
+    const doubleQuoted = 'import { appendLedgerEvent } from "../../lib/runtime/ledger.js";\n';
+    const sideEffect = "import '../../lib/runtime/event-writer.js';\n";
+
+    expect(importSpecifiers(doubleQuoted)).toEqual(['../../lib/runtime/ledger.js']);
+    expect(importSpecifiers(sideEffect)).toEqual(['../../lib/runtime/event-writer.js']);
+    expect(readOnlyFindings(doubleQuoted)).toContain('writer token: appendLedgerEvent');
+    expect(readOnlyFindings(sideEffect))
+      .toContain('unlisted import: ../../lib/runtime/event-writer.js');
   });
 
   it('leaves the ledger byte-identical and creates no sibling file', () => {
@@ -391,14 +429,23 @@ describe('verify-call-rate CLI: a zero denominator is null', () => {
     expect(tool.status).toBe('unmeasured:no-carrier');
   });
 
-  it('never prints NaN, and never prints 0 where the denominator is absent', () => {
+  it('types every rate as null-or-number, which is what NaN would break', () => {
+    // Grepping stdout for "NaN" proves NOTHING: `JSON.stringify(NaN)` is the
+    // string "null", so a NaN rate is INDISTINGUISHABLE from an absent one
+    // once serialised. The property has to be asserted on the parsed value of
+    // the one case that could produce it — an empty denominator.
     const root = makeRoot('N4');
     writeLedger(root, []);
 
-    const out = runCli(['--cwd', root], root);
+    const printed = parseOut(runCli(['--cwd', root], root));
 
-    expect(out.stdout).not.toContain('NaN');
-    expect(out.stdout).not.toContain('null,"status":"measured"');
+    for (const carrier of Object.values(printed.call_rate.carriers)) {
+      expect(carrier.rate === null || typeof carrier.rate === 'number').toBe(true);
+      expect(carrier.rate).toBe(null);
+      // `status` is the field that survives serialisation intact, so it is
+      // what actually separates "no measurement" from "measured zero".
+      expect(carrier.status.startsWith('unmeasured:')).toBe(true);
+    }
   });
 });
 
@@ -449,10 +496,20 @@ describe('verify-call-rate CLI: the two carriers are separate denominators', () 
     const printed = parseOut(runCli(['--cwd', root], root));
     const { intent_command: intent, tool_used_skill: tool } = printed.call_rate.carriers;
 
+    // KEY ORDER, not just key presence: `toEqual` on an object ignores order,
+    // so nothing else in this file would notice a reshuffle. A caller reading
+    // the JSON positionally, or a byte-pin like the sibling's, breaks on one.
     expect(Object.keys(printed.call_rate)).toEqual(['self_report', 'carriers']);
+    expect(Object.keys(printed.call_rate.self_report))
+      .toEqual(['pairs', 'sessions', 'sessionless_pairs']);
     expect(Object.keys(printed.call_rate.carriers))
       .toEqual(['intent_command', 'tool_used_skill']);
     expect(Object.keys(intent)).toEqual(CARRIER_KEYS);
+    expect(Object.keys(tool)).toEqual(CARRIER_KEYS);
+    for (const carrier of [intent, tool]) {
+      expect(Object.keys(carrier.self_report_sessions))
+        .toEqual(['with_verify_call', 'without_verify_call', 'unmeasured:no-carrier']);
+    }
 
     // intent: 4 rows (S1 verify, S2 /verify, S2 verify-something, S3 split).
     // Two of them are verify calls, in S1 and S2; only S1 self-reported.
@@ -551,6 +608,11 @@ describe('verify-call-rate CLI: the two carriers are separate denominators', () 
       expect(carrier.sessions).toBe(0);
       expect(carrier.verify_sessions).toBe(0);
       expect(carrier.rate).toBe(null);
+      // `verify_rows` is 1 and `status` still says no-verify-call. NOT a
+      // contradiction: the denominator is a SESSION count, and a row with no
+      // session joins to nothing. Read the two fields together — a reader who
+      // sees only the status would conclude nobody called `/verify`, when the
+      // truth is that a call was recorded without an identity to attach it to.
       expect(carrier.status).toBe('unmeasured:no-verify-call');
     }
   });

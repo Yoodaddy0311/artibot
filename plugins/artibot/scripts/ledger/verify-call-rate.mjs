@@ -18,9 +18,13 @@
  *                      command, carrying `data.command`.
  *    tool_used_skill — `scripts/hooks/tool-used-record.js` writes one
  *                      `tool.used` row per Skill TOOL call, carrying
- *                      `data.skill`, and that file says in its header that the
- *                      split is deliberate so one activation is not counted
- *                      twice.
+ *                      `data.skill`.
+ *  The split is DELIBERATE, and the sentence saying so lives on the COMMAND
+ *  side, not the skill side: `runtime-prompt.js:704-709` says a Skill-tool
+ *  invocation is "deliberately NOT recorded here" because `tool.used.skill`
+ *  already carries it "and a second row would double-count one activation".
+ *  `tool-used-record.js` says nothing about it (`grep -n "double-count"` there
+ *  returns nothing, read 2026-09-21).
  *  Summing them would therefore double nothing and divide two populations by
  *  each other's totals, so there is NO combined rate here. Each carrier gets
  *  its own `rows`, its own denominator and its own `status`, and a caller that
@@ -35,12 +39,22 @@
  *
  *  ON THE COMMAND SIDE THE COLON BRANCH IS UNREACHABLE, and that is a
  *  correction rather than a guess: `lib/mission/mission-id.js#detectSlashCommand`
- *  matches `^([a-z][a-z0-9_-]{0,31})(?=\s|$)` against the prompt with its
- *  leading `/` removed, and `:` satisfies neither `\s` nor end-of-input, so
- *  `/artibot:verify` returns null and NO `intent.detected` row is written at
- *  all. The same rule is applied to both carriers anyway: a rule that is
+ *  (:142-143) matches `/^([a-z][a-z0-9_-]{0,31})(?=\s|$)/i` — note the `i`
+ *  flag — against the prompt with its leading `/` removed, and LOWERCASES the
+ *  capture before returning it. `:` satisfies neither `\s` nor end-of-input,
+ *  so `/artibot:verify` returns null and NO `intent.detected` row is written
+ *  at all. The same rule is applied to both carriers anyway: a rule that is
  *  correct and inert costs nothing, and a second writer someday emitting a
  *  namespaced command would otherwise be silently missed.
+ *
+ *  THE MATCH IS CASE-SENSITIVE AND NAMESPACE-BLIND. Any prefix is accepted —
+ *  `anything:verify` counts — because this reader has no roster of legitimate
+ *  namespaces to check against, and inventing one would drop a real call the
+ *  day a second plugin ships. `Verify` with a capital is MISSED: the `i` flag
+ *  and `toLowerCase` above are the COMMAND writer's, so an `intent.detected`
+ *  row is already lowercase by the time it lands, but `data.skill` is only
+ *  trimmed by `tool-used-record.js` and reaches this reader as the host spelled
+ *  it.
  *
  * -- ONE READ, AND WHY NO `event` FILTER ------------------------------------
  *  `readLedgerCensus` takes a SINGLE `event` string, so asking it for three
@@ -82,7 +96,12 @@
  *    approximation: a session that called `/verify` as its only command and
  *    whose hook was broken produces no row and is counted in NEITHER
  *    denominator. Both rates therefore describe sessions the carrier was
- *    demonstrably writing in.
+ *    demonstrably writing in. A Skill row that LOST its `skill` key is the
+ *    same blind spot from the other direction: `tool-used-record.js` omits the
+ *    key rather than writing null when the name is unknown, and the envelope's
+ *    byte cap can drop it too, so such a row is not a carrier row here and its
+ *    session can be classified `unmeasured:no-carrier` although the hook did
+ *    fire in it.
  *  - A `/verify` REACHED ANY OTHER WAY. Neither a slash command nor a Skill
  *    tool call — a sub-agent, a script, a direct module import — writes either
  *    carrier, and none of it appears here.
@@ -297,6 +316,12 @@ function collectSelfReport(events) {
  * silence says nothing about `/verify`. A live carrier with no verify call is
  * a finding about `/verify`. Collapsing the two into one `null` rate would
  * hide which of them it was.
+ *
+ * `status` IS JUDGED ON `verify_sessions`, NOT ON `verify_rows`, because the
+ * denominator is a session count. A ledger whose verify rows are ALL
+ * sessionless therefore reads `unmeasured:no-verify-call` while `verify_rows`
+ * is above zero — not a contradiction, but read the two fields together
+ * before concluding nobody called `/verify`.
  *
  * @param {{rows: number, verifySessions: Set<string>}} raw
  * @returns {'measured'|'unmeasured:no-carrier'|'unmeasured:no-verify-call'}
