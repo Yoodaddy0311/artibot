@@ -1,5 +1,6 @@
 /**
- * Supervisor barrel — observe-mode spine (PR-SV01 + PR-SV02).
+ * Supervisor barrel — observe-mode spine (PR-SV01 + PR-SV02, plus the DR02
+ * lane reconcile step consumed by `/resume --contract`).
  *
  * Automation level S0 (design §03): everything here reads, reduces and
  * reports. The only writes are the supervisor's own files
@@ -60,3 +61,9 @@ export {
   opsStateToLaneState,
   readLaneOpsState,
 } from './lane-monitor.js';
+
+export {
+  RECONCILE_REASONS,
+  reconcileLane,
+  reconcileLanes,
+} from './lane-reconcile.js';

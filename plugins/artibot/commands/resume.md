@@ -60,11 +60,23 @@ Parse $ARGUMENTS:
 1. **Resume Contract 보고** — `lib/checkpoint/resume-controller.js#buildResumeReport` 로 Scorecard §51 의 10단계 중 **1~9 단계**(스키마 검증 → `intent_revision`/`plan_revision` 대조 → 아티팩트·커서 확인)를 평가해 단계별 `ok` / `blocked_by` 를 표로 출력한다. 10단계 Resume(실제 재개)는 Canary 라 **이 커맨드의 범위 밖이며 실행하지 않는다**.
 2. **lane reconcile 보고** — `lib/supervisor/lane-reconcile.js#reconcileLanes` 로 리더의 split 런 상태 파일(`run.json`)의 레인 상태를 git 증거와 대조해 레인별 `blocked_by: ['reconcile:<사유>']` 를 출력한다. 허용 목록 밖 상태·state↔git 불일치는 fail-closed 로 사유를 남긴다 (설계 §3.5).
 
+위 두 블록은 산문으로 가리키기만 하지 않고 **실제로 실행해서** 만든다 — Bash 로 `node scripts/checkpoint/resume-report.mjs --all --cwd <projectRoot>` 를 돌리고 그 stdout 을 기본 핸드오프 출력 **뒤에** 그대로 덧붙인다. 이 CLI 도 읽기·계산·출력만 하며(`allowed-tools` 에 Write 가 없다), 실행이 실패하면 아래 실패 규칙대로 그 블록만 `측정 불가:` 한 줄로 대체한다.
+
 출력·실패 규칙:
 
 - 두 블록 모두 **읽기·계산·출력만** 한다. 어느 단계도 파일을 쓰지 않고, 어떤 상태도 전이시키지 않는다.
 - `blocked_by` 가 빈 항목은 `-` 로 표시한다. 빈 배열을 "검증 통과"로 바꿔 쓰지 말 것 — 둘은 다른 진술이다.
 - 모듈 부재·JSON 파싱 실패는 그 블록만 `측정 불가: <사유>` 한 줄로 적고, 기본 핸드오프 출력은 그대로 유지한다 (부분 실패가 `/resume` 본래 기능을 막지 않는다).
+
+### 체크포인트 읽기 순서 (`--contract` 모드에서만)
+
+이 절은 `--contract` 가 있을 때 덧붙는 보고 블록의 입력 순서만 정한다. 기본 모드·`--list`·`--run` 이 읽는 파일과 출력은 종전과 동일하며, 위 "읽는 파일은 `.artibot/HANDOFF.md` 하나뿐이다" 는 그 세 경로에 대한 진술로 그대로 유효하다.
+
+1. `.artibot/HANDOFF.md` 를 먼저 읽어 기본 출력을 낸다. 이 단계는 config 와 무관하게 항상 같다.
+2. `artibot.config.json` 의 `runtime.checkpoint.saveOnSave` 가 `true` 일 때 `/save` 가 체크포인트를 **남긴다** (`lib/checkpoint/save-checkpoint.js#isSaveCheckpointEnabled` 가 단독 판정 — 엄격 boolean 이라 `true` 가 아닌 값(부재·문자열 `"true"`·`1`)은 전부 off). 체크포인트가 남아 있으면 HANDOFF **다음에** 그것을 읽어 Resume Contract 보고의 입력으로 쓴다. 이 키는 **쓰는 쪽의 게이트**이며 읽기를 막지 않는다 — 보고는 config 를 보지 않고 체크포인트 스토어를 그대로 읽는다.
+3. 해당 미션의 체크포인트가 없으면 읽을 것이 없을 뿐, 보고 자체는 그대로 나온다 — 그 미션 행에 `blocked_by: ['reconcile:checkpoint-missing']` (`lib/checkpoint/resume-controller.js#RESUME_BLOCK_REASONS`) 이 찍힌다. 부재는 오류가 아니고, 기본 핸드오프 출력도 영향을 받지 않는다.
+
+체크포인트는 **읽기만** 한다 — `/resume` 은 새 체크포인트를 남기지도, 기존 것을 갱신하지도 않는다. 그 쓰기는 `/save` 의 책임이다 (`/resume` 은 read-only).
 
 ## Output Format
 
