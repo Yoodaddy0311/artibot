@@ -308,6 +308,73 @@ describe('the writer treats it as an allowlist, not a denylist', () => {
   });
 });
 
+describe('mission.checkpointed declares the data keys its writer emits', () => {
+  /**
+   * `mission.checkpointed` lists `supervisor` and `scheduler` as its only
+   * `sources`, so the generic `attempt` helper above (source `hook`) would be
+   * refused with `source-not-allowed` before any field check ran.
+   *
+   * @param {object} data
+   * @returns {object}
+   */
+  function checkpoint(data) {
+    return writeEvent(root, {
+      event: 'mission.checkpointed',
+      session_id: 'sess-vocab-0001',
+      source: 'supervisor',
+      mission_id: 'M-20260902-001',
+      data,
+    });
+  }
+
+  it('declares exactly checkpoint_id, trigger and resumable', () => {
+    // `lib/checkpoint/save-checkpoint.js#announce` puts all three on `data`;
+    // a key the allowlist does not declare is a key nothing type-checks.
+    const spec = getAllowlist().events['mission.checkpointed'];
+    expect(Object.keys(spec.fields).sort())
+      .toEqual(['checkpoint_id', 'resumable', 'trigger']);
+    expect(spec.fields.resumable.type).toEqual(['boolean', 'null']);
+    // `checkpoint-service.js#announce` emits the same event WITHOUT
+    // `resumable`, so declaring it must not make it mandatory.
+    expect(spec.required).toEqual([]);
+  });
+
+  it('accepts resumable true, false and null, and refuses a string or a number', () => {
+    // The three accepted shapes are the ones the reporter can produce:
+    // `save-checkpoint.js` returns `resumable: null` when the report is
+    // missing or threw, and a boolean otherwise.
+    for (const resumable of [true, false, null]) {
+      const res = checkpoint({ checkpoint_id: 'ckpt-1', trigger: '/save', resumable });
+      expect(res.ok).toBe(true);
+    }
+    // `1` and `'yes'` are the truthy look-alikes a loose writer would coerce.
+    for (const resumable of ['yes', 1]) {
+      const bad = checkpoint({ checkpoint_id: 'ckpt-2', trigger: '/save', resumable });
+      expect(bad.ok, String(resumable)).toBe(false);
+      expect(bad.reason, String(resumable)).toBe('type-violation:resumable');
+    }
+  });
+
+  it('lets an UNDECLARED data key through untouched', () => {
+    // A RECORD OF CURRENT BEHAVIOUR, NOT A CLAIM THAT IT IS DESIRABLE.
+    // `lib/runtime/event-writer.js#validateDeclaredFields` iterates
+    // `Object.entries(fields)` — the DECLARED keys — so a key absent from the
+    // allowlist is never type-checked and is written verbatim. Pinning it
+    // means a future switch to a closed object fails here first, loudly,
+    // instead of silently dropping payloads in production.
+    const res = checkpoint({
+      checkpoint_id: 'ckpt-3',
+      trigger: '/save',
+      resumable: true,
+      undeclared_probe: 1,
+    });
+    expect(res.ok).toBe(true);
+    const written = readAllEvents(root);
+    expect(written).toHaveLength(1);
+    expect(written[0].data.undeclared_probe).toBe(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // ajv as the reference oracle for the writer's subset validator
 // ---------------------------------------------------------------------------

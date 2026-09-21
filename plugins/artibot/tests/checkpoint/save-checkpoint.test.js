@@ -33,6 +33,7 @@ import {
 } from '../../lib/checkpoint/save-checkpoint.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { getAllowlist } from '../../lib/runtime/event-writer.js';
 import { validateCheckpoint } from '../../lib/supervisor/contracts.js';
 
 const MID = 'M-20260921-001';
@@ -600,6 +601,13 @@ describe('buildSaveCheckpoint — real store, real file checkpoint store, real l
     expect(lines[0].source).toBe('supervisor');
     expect(lines[0].mission_id).toBe(MID);
     expect(lines[0].data).toMatchObject({ checkpoint_id: row.checkpoint_id, trigger: SAVE_CHECKPOINT_TRIGGER });
+    // EVERY key this path emits is DECLARED. The writer only type-checks keys
+    // the allowlist declares, so an undeclared key is written unvalidated and
+    // no other assertion here would notice: the envelope pin above is on the
+    // fake-ports path, and `toMatchObject` is deliberately lenient. This is
+    // the one place the real emitter and the real vocabulary meet.
+    const declared = Object.keys(getAllowlist().events['mission.checkpointed'].fields);
+    expect(Object.keys(lines[0].data).filter((k) => !declared.includes(k))).toEqual([]);
     expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
   });
 
