@@ -36,6 +36,35 @@
  *     Env `ARTIBOT_CONTEXT_LIFECYCLE_JSON` (a JSON object) overlays those keys —
  *     the test seam and an operator's per-shell override.
  *
+ * ── Context Receipt: what this caller can and cannot supply (SH-16) ─────────
+ *   The receipt was missing ELEVEN leaves. Three of them have a source on
+ *   disk and are now wired: `mission_id` and `based_on.{intent_revision,
+ *   plan_revision}`, read from the project-state store when — and only when —
+ *   exactly one active mission ends in `-S<sid8>` for this session.
+ *
+ *   ELEVEN is the count this caller can never fill on its own, not what a run
+ *   prints. `input_tokens` is a twelfth, CONDITIONAL leaf: it is missing too
+ *   whenever no accepted snapshot supplies `context_window.current_tokens`
+ *   (see `reportReceipt`). So `missing=` moves 11→8 when the host reports that
+ *   key and 12→9 when it does not. A `missing=9` is therefore not a regression,
+ *   and a bare `missing=11` is ambiguous — no mission with the key present, or
+ *   a mission id without usable revisions with the key absent. Read the NAMES
+ *   in `contextReceipt.missing`, never the count.
+ *
+ *   The other EIGHT are the PERMANENT WORKER AXIS:
+ *     transforms.{dedup, tool_compression, history_trim, memory_add,
+ *                 project_knowledge_add}
+ *     cache.{provider, hit_tokens, created_tokens}
+ *   They are not a gap to close from here. This hook reads SIX payload keys —
+ *   `compact_trigger`, `compact_summary`, `hook_event_name`, `source`, `cwd`,
+ *   `session_id` — and none of them carries a transform delta or a cache
+ *   counter; a compaction is the host's, and the numbers belong to whoever
+ *   compiled the context. Zero-filling `transforms.*` would be worse than the
+ *   gap: `0` there reads as "ran, changed nothing".
+ *   RESUME CONDITION — reopen this only when the host payload starts carrying
+ *   them, or when a worker-sourced caller (which the ledger allowlist accepts)
+ *   appears. Until then there is nothing to probe.
+ *
  * Files written (both under `~/.claude`, never in the repo):
  *   `~/.claude/artibot-post-compact.json`            latest run, machine-readable
  *   `~/.claude/artibot/post-compact/<stamp>.md`      the bundle text + full compact_summary
@@ -54,11 +83,25 @@ import { readLatestHandoff } from '../../lib/handoff/handoff-store.js';
 import { buildRehydrationBundle, DEFAULT_MAX_BYTES, reportContextReceipt } from '../../lib/context/rehydration.js';
 import { buildContextPressureEvent, computeContextPressure, estimateTokens } from '../../lib/context/context-pressure.js';
 import { appendEvent } from '../../lib/supervisor/run-store.js';
+import { isMissionId } from '../../lib/mission/mission-id.js';
+import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
+import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'post-compact-rehydrate';
 const ENV_OVERRIDE = 'ARTIBOT_CONTEXT_LIFECYCLE_JSON';
 const MAX_BRIEFS = 2;
+
+/**
+ * What the store's ledger port answers here. A REFUSAL, not a no-op: the store
+ * abandons a write whose event is refused, so an accidental write path fails
+ * closed instead of committing a half-written state.
+ */
+const NO_LEDGER_WRITER = Object.freeze({
+  ok: false,
+  reason: 'post-compact-rehydrate: this hook binds no ledger writer',
+});
+
 const log = (msg) => process.stderr.write(`[artibot:${HOOK_NAME}] ${msg}\n`);
 
 /**
@@ -287,21 +330,139 @@ function emitPressureEvent(pressure, split, sessionId, storeDir) {
 }
 
 /**
+ * `sid8` — the FIRST 8 alphanumerics of a session id, the same extraction
+ * `lib/mission/mission-id.js#sessionFallbackMissionId` uses to MINT an id.
+ * Fewer than 8 yields null: padding would fabricate identity.
+ *
+ * @param {unknown} sessionId
+ * @returns {string|null}
+ */
+export function sessionSuffix(sessionId) {
+  if (typeof sessionId !== 'string') return null;
+  const alnum = sessionId.replace(/[^0-9A-Za-z]/g, '');
+  return alnum.length >= 8 ? alnum.slice(0, 8) : null;
+}
+
+/**
+ * Which mission, if any, this session owns — by SUFFIX ONLY.
+ *
+ * A session id cannot rebuild `M-YYYYMMDD-S<sid8>`: the date part is the issue
+ * date, not today's, so `sessionFallbackMissionId` is deliberately not called
+ * here. What a session id does give is the `-S<sid8>` tail, and the match is
+ * fail-closed — two missions carrying the same tail are indistinguishable, so
+ * NEITHER is reported rather than one being guessed.
+ *
+ * Revisions are read NESTED (`mission.intent.revision`; confirmed against the
+ * live store by `lib/checkpoint/resume-controller.js` and read that way by
+ * `lib/checkpoint/save-checkpoint.js#buildContent`) and passed through as they
+ * are found. Nothing is coerced or defaulted: `lib/context/context-receipt.js`
+ * takes integers >= 1 and records the leaf as missing otherwise, which is the
+ * honest outcome — a forged `1` would be an unrecoverable false measurement.
+ *
+ * Only keys that are valid mission ids are candidates (`isMissionId`): a
+ * snapshot can be hand-edited or half-written, and a key like `x-Sabcdefgh`
+ * carries the right tail without being a mission. Supplying it as `mission_id`
+ * would put a non-id into a receipt whose schema forbids one.
+ *
+ * Total: any argument, including a proxy-shaped snapshot, yields a result.
+ *
+ * @param {unknown} state - A project-state snapshot.
+ * @param {unknown} sessionId
+ * @returns {{ missionId: string|null, basedOn?: { intentRevision: unknown, planRevision: unknown } }}
+ */
+export function selectMissionForSession(state, sessionId) {
+  const none = { missionId: null };
+  const sid8 = sessionSuffix(sessionId);
+  if (!sid8) return none;
+  try {
+    const missions = /** @type {any} */ (state)?.active_missions;
+    if (!missions || typeof missions !== 'object' || Array.isArray(missions)) return none;
+    const tail = `-S${sid8}`;
+    let found = null;
+    for (const id of Object.keys(missions)) {
+      if (!id.endsWith(tail) || !isMissionId(id)) continue;
+      if (found !== null) return none; // two or more — the session cannot disambiguate
+      found = id;
+    }
+    if (found === null) return none;
+    const mission = missions[found];
+    return {
+      missionId: found,
+      basedOn: { intentRevision: mission?.intent?.revision, planRevision: mission?.plan?.revision },
+    };
+  } catch {
+    // The snapshot is parsed JSON in production, but this is the caller-facing
+    // guard and a hook may not die reading somebody else's file.
+    return none;
+  }
+}
+
+/**
+ * Open the project-state store for READING.
+ *
+ * Isomorphic to `scripts/checkpoint/resume-report.mjs#openStores`: opening is a
+ * read (`createStateStore` does path arithmetic only — the directory is created
+ * by `commit`), the projection file is not rendered, and the ledger port
+ * REFUSES rather than no-ops. `resolveGitCommonDir` is the pure-fs resolver, so
+ * no process is spawned inside the hook's budget.
+ *
+ * @param {string} projectRoot
+ * @param {{ appendEvent?: Function }} [ports] - Test seam; production binds the refusal.
+ * @returns {object} A StateStore.
+ */
+export function openMissionStoreReadOnly(projectRoot, ports = {}) {
+  return createStateStore({
+    projectRoot,
+    sessionId: HOOK_NAME,
+    renderProjectionFile: false,
+    resolveGitCommonDir: () => resolveGitCommonDir(projectRoot),
+    appendEvent: ports.appendEvent ?? (() => ({ ...NO_LEDGER_WRITER })),
+  });
+}
+
+/**
+ * The mission context for this compaction, or the empty one. Never throws: a
+ * store that is absent, unopenable or unreadable degrades to exactly the
+ * behaviour this hook had before it read any store at all.
+ *
+ * @param {unknown} projectRoot
+ * @param {unknown} sessionId
+ * @param {(root: string) => object} [openStore] - Test seam.
+ * @returns {{ missionId: string|null, basedOn?: object }}
+ */
+export function readMissionContext(projectRoot, sessionId, openStore = openMissionStoreReadOnly) {
+  if (typeof projectRoot !== 'string' || !projectRoot) return { missionId: null };
+  try {
+    return selectMissionForSession(openStore(projectRoot).getState(), sessionId);
+  } catch {
+    return { missionId: null };
+  }
+}
+
+/**
  * Assemble the Context Receipt and record the gap. `writer: null` is
  * DELIBERATE: measured 2026-09-12, the ledger writer refuses
  * `context.compiled` from `source: 'hook'` and records a `ledger.rejected`
  * line instead, so wiring a port here would write one rejection per
- * compaction and publish nothing. The eleven leaves this caller cannot fill
- * are recorded instead — see `lib/context/context-receipt.js`.
+ * compaction and publish nothing. The leaves this caller cannot fill are
+ * recorded instead — see `lib/context/context-receipt.js`.
+ *
+ * Of the eleven that were missing, `mission_id` and the two `based_on.*`
+ * revisions are now supplied WHEN the store names exactly one mission for this
+ * session; the remaining eight are the permanent worker axis named in the
+ * module header. `input_tokens` is outside that eleven: it goes missing on its
+ * own when the snapshot has no `current_tokens` (12→9 instead of 11→8). A
+ * partial receipt is still never published.
  *
  * @param {object} bundle
  * @param {object|null} snapshot
  * @param {string|null} compactSummary
  * @param {string|null} sessionId
  * @param {string} stamp
+ * @param {{ missionId: string|null, basedOn?: object }} mission - a {@link readMissionContext} result
  * @returns {{ emitted: boolean, reason: string|null, missing: string[] }}
  */
-function reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp) {
+function reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp, mission) {
   // Only a snapshot we accepted may supply the input side, and only from
   // `context_window.current_tokens`. NOT from `tokenEstimate`: the live
   // PreCompact payload carries no `messages`, so that field is saved as 1
@@ -314,7 +475,8 @@ function reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp) {
   const r = reportContextReceipt({
     receiptInput: {
       receiptId: `ctx-${sessionId ? sessionId.slice(0, 8) : 'nosession'}-${stamp}`,
-      missionId: null, // no mission is in scope at a compaction
+      missionId: mission.missionId,
+      basedOn: mission.basedOn,
       inputTokens: measuredInput,
       outputTokens: estimateTokens(compactSummary ?? '') + estimateTokens(bundle.text),
       protectedSections: [],
@@ -391,11 +553,13 @@ function composeBundle(evidence, snapshotPath, plannedMdPath, maxBytes) {
 function measureContext({ evidence, hookData, bundle, sessionId, stamp, storeDir }) {
   const { snapshot, split, compactSummary } = evidence;
   const { pressure, capacitySource } = scorePressure(snapshot, hookData, bundle.identity.ok);
+  // The only store read in the hook, and the only one the receipt needs.
+  const mission = readMissionContext(evidence.projectRoot, sessionId);
   return {
     pressure,
     capacitySource,
     pressureEvent: emitPressureEvent(pressure, split, sessionId, storeDir),
-    contextReceipt: reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp),
+    contextReceipt: reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp, mission),
   };
 }
 
