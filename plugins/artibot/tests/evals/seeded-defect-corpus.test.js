@@ -175,7 +175,7 @@ const EXPECTED_AXIS_COUNTS = Object.freeze({
  * vocabulary widens and `false_positive_rate` stops charging for the extra
  * word. Growth should be an argument in review, not a drift.
  */
-const EXPECTED_ALSO_ACCEPT_ROWS = 5;
+const EXPECTED_ALSO_ACCEPT_ROWS = 6;
 
 /**
  * Rows where the defect does NOT start on the first added line of its hunk.
@@ -203,10 +203,10 @@ const MIN_DEFECT_NOT_FIRST_ADDED = 24;
  * rather than editing the guard.
  */
 const CORPUS_SHA256 = [
-  'c79dec28f206863b',
-  '9bde820b856fe342',
-  '68e97b34312968b8',
-  'd0900586558fd669',
+  '9ec2df32d4aee5d5',
+  'ff5cb602c898a7fd',
+  'f1f174984fd4619f',
+  '1b9021e2466769da',
 ].join('');
 
 /** Longest permitted diff, in newline-separated lines. */

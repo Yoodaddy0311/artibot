@@ -82,7 +82,7 @@ the same one defect**. A scorer treats `{finding_kind} ∪ also_accept` as the
 caught set and charges nothing in that set as a false positive. Without it, a
 reviewer that saw the defect correctly but chose the other word would be scored
 a **miss and a false positive at once** — which measures vocabulary agreement,
-not review. It is deliberately rare: **5 of 30 rows** carry it, and the count is
+not review. It is deliberately rare: **6 of 30 rows** carry it, and the count is
 pinned in the test. It never widens the number of defects in a row; a kind that
 names a *different* problem in the same diff means the row has two defects and
 must be split into two rows.
@@ -216,6 +216,25 @@ so the definition has one home. Input is
   this file, so a raw-byte hash computed on Windows and on Linux would disagree
   about an identical file and a score report would become unreproducible.
 
+### What these metrics do not charge for
+
+Two consequences of the rules above that a reader will otherwise mistake for
+guarantees:
+
+- **Spraying an accepted kind across many lines costs nothing.** A finding
+  whose `kind ∈ ACCEPTED(row)` is never counted as a false positive, whatever
+  line it names, and `location_accuracy` asks only whether **at least one**
+  such finding landed in range. So `location_accuracy = 1.0` means "hit the
+  spot at least once", not "pointed only there". A reviewer that reports the
+  right kind on ten lines of a hunk scores identically to one that reports it
+  on the correct line alone. **Precision within an accepted kind is
+  unmeasured** — a follow-up, and a real gap.
+- **Rows with `also_accept` are easier to catch by construction.** Because the
+  accepted set is wider on those 6 rows, `catch_rate` is only comparable
+  between runs carrying the **same `corpus_sha256`**. A rate from one corpus
+  version against a rate from another is not a comparison, and a report that
+  omits the digest cannot be checked for this.
+
 A note on `false_positive_rate`: with one expected finding per row it measures
 "findings that are not the seeded one", which includes a reviewer correctly
 noticing something else about a fabricated module. It is a comparison metric
@@ -243,10 +262,15 @@ Beyond the word list, and enforced structurally:
   surrounding lines as the interesting ones.
 - **The defect is not the first added line** in 26 of 30 rows, so position is
   not a shortcut.
-- **Comments are not reserved for the answer.** Several rows carry comments
-  that have nothing to do with their defect; a few rows genuinely need a
-  comment to state the spec the defect violates (what "the limit is exclusive"
-  means cannot be inferred from the code alone), and those are the fair kind.
+- **Comments are not reserved for the answer — but mostly they do carry it.**
+  Measured: the corpus contains **6 code comments. 2** have nothing to do with
+  their row's defect, **3** state a spec the defect violates (what "the limit
+  is exclusive" means cannot be inferred from the code alone — that is the fair
+  kind, and unavoidable for those rows), and **1 is itself the defect** on a
+  `stale-comment` row. So "there is a comment" remains a weak signal that the
+  interesting line is nearby. Diluting it further would mean adding inert
+  comments to more rows; that is a known, unfixed weakness rather than a solved
+  one.
 - **This README names no individual row's answer.** The tables above are
   aggregates; the per-row expectation lives only in `corpus.jsonl`, which a
   reviewer under evaluation is not given.
@@ -289,8 +313,10 @@ hidden:
 1. **"1 defect 1 branch, prove the injected string is globally absent" does not
    apply here.** That text describes seeding defects into *real branches of
    this repository*. This corpus uses synthetic diffs carried as JSONL strings
-   (decision W14-6), so there is no branch to create and no repository-wide
-   string to prove absent — the defect text lives in the fixture by design.
+   — one defect per JSONL row, **Wave 14 leader decision W14-6 (2026-09-21)**,
+   which also records that the backlog's "1 defect 1 branch" wording is itself
+   due a correction because a branch-per-defect fixture cannot ship — so there
+   is no branch to create and no repository-wide string to prove absent — the defect text lives in the fixture by design.
    The corresponding guarantee here is different and weaker: the modules are
    invented, so nothing can be confused with real code.
 2. **`design_axis` covers 6 of 7 axes across 8 of 30 rows.** This is an

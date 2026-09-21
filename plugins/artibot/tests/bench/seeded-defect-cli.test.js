@@ -344,7 +344,11 @@ describe('seeded-defect scorer: per_class', () => {
 });
 
 describe('seeded-defect scorer: expected.also_accept', () => {
-  /** The canonical kind, plus two near-synonyms a reviewer might legitimately use. */
+  /**
+   * Two near-synonyms a reviewer might legitimately use for the row's defect.
+   * The canonical kind (`off-by-one`) is NOT a member - the corpus contract
+   * refuses `also_accept` that repeats it, and `acceptedKinds` adds it.
+   */
   const ALSO = ['inclusive-exclusive-mismatch', 'wrong-operator'];
 
   /** A one-row corpus whose single row carries `also_accept`. @returns {string} */
@@ -550,7 +554,15 @@ describe('seeded-defect scorer: fail-closed inputs', () => {
     const notJson = path.join(sandbox, 'bad.jsonl');
     writeFileSync(notJson, '{ nope\n', 'utf-8');
 
-    expectRefusal(['--corpus', path.join(sandbox, 'absent.jsonl'), '--input', input]);
+    // Symmetric with the input-side pin below: the CORPUS read must keep the
+    // absolute path out of stderr too. Measured with a mutant 2026-09-21 -
+    // reverting `readCorpus` to quote `err.message` left all 37 tests green,
+    // because only the input path was pinned.
+    const missingStderr = expectRefusal([
+      '--corpus', path.join(sandbox, 'absent.jsonl'), '--input', input,
+    ]);
+    expect(missingStderr).not.toContain(sandbox);
+    expect(missingStderr).toContain('ENOENT');
     expectRefusal(['--corpus', emptyCorpus, '--input', input]);
     expectRefusal(['--corpus', notJson, '--input', input]);
     expectRefusal(['--corpus', writeCorpus([STUB_ROWS[0], STUB_ROWS[0]]), '--input', input]);
@@ -625,6 +637,11 @@ describe('seeded-defect scorer: fail-closed inputs', () => {
     // Measured 2026-09-21: V8's JSON error quotes the offending SOURCE, so a
     // broken input spanning four lines produced a four-line refusal. One
     // refusal is one line, or a log reader cannot tell one failure from four.
+    //
+    // WHAT THIS CANNOT SEE: it bites only on a runtime whose JSON error embeds
+    // a source snippet (measured on node v24.15.0). On a runtime with a
+    // one-line message format this passes vacuously - it would then assert
+    // nothing about the clamp in `refusalLine`, which is the thing under test.
     expectRefusal(['--corpus', stubCorpus,
       '--input', writeInput('[\n  { "id": "SD-001",\n    "findings": [ }\n  ]\n]\n')]);
   });

@@ -29,15 +29,17 @@
  *      `also_accept` exists because the alternative was worse: a row whose
  *      defect has two accurate names used to charge a correct reviewer TWICE
  *      - a miss on `catch_rate` and a false positive on the same finding.
- *   3. SPRAYING KINDS BUYS NOTHING. Because caught is kind-equality only, a
- *      reviewer that emits every kind at every location catches everything -
- *      and every one of those WRONG-kind findings is charged to
- *      `false_positive_rate`. That rate is the only penalty term, so quoting
- *      `catch_rate` alone is quoting half the result.
- *   3b. SPRAYING THE RIGHT KIND IS UNPENALIZED, AND THAT IS A REAL GAP. The
- *      penalty in 3 reaches wrong-KIND findings only. A reviewer that reports
- *      the expected kind on fifty lines of the file is not charged anything:
- *      those findings match the kind, so none of them is a false positive,
+ *   3. SPRAYING KINDS BUYS NOTHING. Because a catch requires membership in the
+ *      row's accepted set (item 2), a reviewer that emits every kind at every
+ *      location catches everything - and every finding OUTSIDE that set is
+ *      charged to `false_positive_rate`. That rate is the only penalty term
+ *      this runner prints, so quoting `catch_rate` alone is quoting half the
+ *      result. Note what "only penalty term" does not mean: it reaches
+ *      out-of-set findings only, and item 3b is the hole that leaves.
+ *   3b. SPRAYING AN ACCEPTED KIND IS UNPENALIZED, AND THAT IS A REAL GAP. The
+ *      penalty in 3 reaches out-of-set findings only. A reviewer that reports
+ *      an accepted kind on fifty lines of the file is not charged anything:
+ *      those findings are in the set, so none of them is a false positive,
  *      and `location_accuracy` asks only whether ANY of them landed inside
  *      the range - so it scores 1.0. Precision within a kind is therefore
  *      UNMEASURED here, and a `location_accuracy` of 1.0 means "hit the spot
@@ -51,7 +53,6 @@
  *      rate whose denominator is 0 is emitted as null for that reason, and a
  *      consumer that coerces null to 0 reintroduces the flattering wrong
  *      answer this refuses to print.
- *
  *   6. `also_accept` IS NOT A DIFFICULTY SIGNAL. Rows carrying alternatives
  *      are easier to catch than rows that do not, and nothing here records
  *      how many rows carried them. Two corpora with the same 30 defects but
@@ -62,7 +63,8 @@
  *   catch_rate           = caught rows / ALL corpus rows. An id the input
  *                          omits is a MISS, never out of scope.
  *   location_accuracy    = located rows / CAUGHT rows.
- *   false_positive_rate  = kind-mismatched findings / ALL findings in input.
+ *   false_positive_rate  = findings whose kind is OUTSIDE the row's accepted
+ *                          set / ALL findings in input.
  *
  * DETERMINISM. Scoring reads no clock and no randomness, and every count is an
  * integer divided once at the end, so input order - of entries, of findings, of
