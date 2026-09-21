@@ -39,6 +39,13 @@ export { loadReplay } from './load.js';
 export { SESSION_COVERAGE_EVENTS, foldSessionCoverage } from './session-coverage.js';
 
 export {
+  AGENT_RUN_PREFIX,
+  SCORE_UNAVAILABLE_REASON,
+  SPAWN_OUTCOME_EVENTS,
+  joinSpawnOutcomes,
+} from './spawn-outcome.js';
+
+export {
   ROUTE_EVENTS,
   TOOL_USE_SHADOW_PREFIX,
   UNBOUND_ROUTE_LEDGER,
