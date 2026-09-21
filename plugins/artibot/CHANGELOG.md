@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 15 착지 (7/7, 배치 1~3, 2026-09-21)
+
+배치 1 master `6d623d8c`(base `18c3d047`) · 배치 2 `845cab37` · 배치 3 `63cce738`. **7줄기 전부 착지**, land 7/7 PASS 7건(리더 실측). 표적 스위트 수치는 **창 보고값**이고 diff 수치는 리더 측정 몫 — **미측정**.
+
+- **ca05c-mission-isolation** (`f89818cf`, 배치 1 `6d623d8c`): `buildSaveCheckpoint` 의 **미션 루프 격리** — 한 미션이 throw 해도 루프가 죽지 않고 그 미션만 새 status **`errored`** + `reason:'threw:<Ctor>'`(생성자명이 없으면 `|| 'Error'` 폴백)로 기록되며, **앞서 `saved` 된 행은 보존**된다. `commands/save.md` status 어휘 +1. 표적 **108/108**.
+- **recovery-pause-tick** (`0e18a2ca`, 배치 1 `6d623d8c`): `applyRecoveryTransition` 의 PAUSED 전이에 lesson · pause tick · `notifyPause` 를 추가했다. 결과는 **반환값 `notification` 에만** 실린다. **한계**: `notifyPause` 의 queued 상태가 뒤이은 persist(전체 overwrite)에 덮이고 호출부가 반환값을 버려 **PushNotification 경로는 0** 이다 — 따라서 **CA-03 플립(`transitionFromVerdict:true`) 선행 조건은 아직 미충족**이다. 표적 **159/159**.
+- **sh16-receipt-supply** (`e99f450f`, 배치 2 `845cab37`): PostCompact Context Receipt 에 `mission_id`·`based_on` **2키를 스토어에서 공급**한다 — 접미 `-S<sid8>` 매칭이 **정확히 1건일 때만** 채우고 그 외는 `null`. `transforms`·`cache` **8키는 영구 worker 축**이고 발행은 **0 유지**다. 쓰기 0 은 sha256 센서스로 확인했다. **유보**: 이 머신에서 이 훅이 기록을 남긴 적은 **0건**(기록 파일 부재)이고 출하 기본값은 **OFF** 이며, **설치본 설정은 미확인**이다. 표적 **123/123**.
+- **sh09-constitution-b1-b3** (`d25f3e13`, 배치 2 `845cab37`): 헌법 단계 B 의 **B-1**(66 체크포인트 중 **24개를 `### Self-check` 로 재표기**, 결정형 **42개 존속**, **삭제 0**, fail-closed 안내 13파일) + **B-3**(self-evaluation GRPO 절 **은퇴 표기**, 내용 삭제 0) + 게이트 `constitution-stage-b`. **B-2**(Rationalizations 99파일)는 **Wave 16**. **질문 빈도 감소 효과는 미측정**이다.
+- **state-dir-afterall** (`a472a663`, 배치 2 `845cab37`): setup 의 exit remover 를 `if` 밖 상수로 올리고 매 파일 `afterAll` 에 **엄격 동등 가드**를 넣었다. 신설 `state-dir-cleanup.test.js`. tmp 증가 **0**(36→36).
+- **sh26-replay-labels** (`20d3ca61`, 배치 3 `63cce738`): Replay 라벨 생산자 `lib/replay/replay-label.js`(`labelReplay`·`REPLAY_LABELS`). **EXACT 는 구조적 0** 이다(`exact_reachable:false` — 1 Action = 1 실행). 라이브 1회(05:59Z) Action **380** = PARTIAL **72** · SIMULATED **308**(no-usage-receipt 305 · fifo-join 3) · EXACT **0**. 표적 **178/178**.
+- **sh10-derived-from** (`8eaf7d39`, 배치 1 `6d623d8c`): HANDOFF frontmatter 에 `derived-from: state@<n>` 또는 `state@unmeasured`(포트 `readStateVersion`). **`/save` 배선 전이라 라이브 값은 항상 `state@unmeasured`** 다. 표적 **168/168**.
+
 ### Wave 14 착지 (8/8 착지, 배치 1~5, 2026-09-21)
 
 배치 1 master `e579e5a3`(base `5161fd40`) · 배치 2 `bfb14fc5` · 배치 3 `67fedeea` · 배치 4 `57f15175` · 배치 5 `18c3d047`. **8줄기 전부 착지**, rebuilds 0 · land 7/7 PASS 8건. diff 수치는 리더 측정 몫 — **미측정**.
@@ -24,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ap-store-isolation** (`cb900f51`, 배치 4 `57f15175`): `session-store.js#getStoreDir` 에 env seam(`ARTIBOT_AUTOPILOT_STORE_DIR` + 짝 `_ROOT`) + 테스트 setup 기본 ON + 방화벽 `tests/firewall/autopilot-store-sandbox-required.test.js`. autopilot 71파일 **1834/1834** 에서 실 스토어 **delta 0**. 종전 "`tests/autopilot/` 27/68 이 실 스토어에 쓴다" 는 해소.
 - **sh03-hint-axis** (`9f8c8c69`, 배치 5 `18c3d047`): SH-03 hint 축 — `hint_recommend`·`hint_resolved_by` 2키(`ACTIVATION_DATA_KEYS` 8→10) + `scripts/evals/nl-activation-report.mjs` 의 **4번째 축** `activation.hint-followed`. 그 축은 **슬래시 타이핑 수락의 하한**이다(힌트를 보고 슬래시를 친 경우만 세므로 실제 수락률은 그 이상). 라이브 **0/0 → null** — 설치본 갱신 뒤 재계수. 종전 "hint 축 + SessionEnd flush 는 Wave 13 미착" 중 flush 는 **reader 측 `no_next` 로 대체**됐다.
 
-**설치본 드리프트(리더 실측 2026-09-21)**: 라이브 슬래시 커맨드 본문과 플러그인 캐시는 **4.59.0**(`installed_plugins.json` artibot@artibot = 4.59.0, lastUpdated 2026-09-11; cache 디렉터리는 4.50.0~4.59.0 만 존재)이고 런타임 루트 `~/.claude/artibot/package.json` 만 **4.64.0** 이다. 그래서 캐시 4.59.0 에는 `route-compare.mjs`·`spawn-outcome.js`·`save-checkpoint.js` 가 **없다** — Wave 13·14 판독기의 라이브 수치가 0 이거나 null 인 것은 이 드리프트의 결과이지 코드 결함이 아니다. `commands/verify.md` LF 정규화 sha 로도 갈린다: 4.59.0 = `e8ade674e6`(= cache = `~/.claude/commands/verify.md`) vs 4.64.0 = `6d0ddb4340`. **라이브 훅이 어느 루트에서 도는지는 미확정** — `.in_use` pid 가 cache 4.59.0 에 찍혀 캐시 쪽이 유력하다. 재계수 전제는 `sync:local` + 호스트 재시작이다.
+**설치본 드리프트(리더 실측 2026-09-21, 같은 날 재측정으로 정정)**: 설치본은 **혼합 상태**다. installPath `cache/artibot/artibot/4.59.0` 은 `.claude-plugin/plugin.json` 라벨만 4.59.0 이고 같은 디렉터리의 `package.json` 은 4.64.0 이다. 파일별 LF 정규화 sha 를 태그와 대조하면 `hooks/hooks.json`·`hooks/dispatch-table.json`·`artibot.config.json`·`lib/runtime/artifact-lifecycle.js`·`scripts/hooks/subagent-handler.js`·`scripts/ledger/record-verify.mjs` 는 **v4.64.0 과 동일**, `commands/verify.md`·`commands/split.md`·`skills/split/SKILL.md` 는 **v4.59.0 과 동일**이다(`~/.claude/commands/verify.md` 도 v4.59.0, `save.md` 는 v4.64.0). 즉 **훅·lib·scripts·config 는 v4.64.0 으로 라이브**이고 commands·skills 마크다운 일부만 v4.59.0 에 멈춰 있다 — `/verify` 의 record-verify 지시(v4.62.0~)가 라이브에 없는 이유가 이것이다. `route-compare.mjs`·`spawn-outcome.js`·`save-checkpoint.js` 가 설치본에 **없는** 것은 드리프트가 아니라 Wave 13~15 가 **미릴리스**이기 때문이다(v4.64.0 이후 착지). 처음에 `verify.md` 한 파일의 sha 로 "설치본 전체 4.59.0" 이라 적은 것은 오류였다(investigator 가 표본 7파일로 반증). 재계수 전제는 릴리스 + 플러그인 업데이트 + 호스트 재시작이다.
 
 ### Wave 13 착지 (배치 1·2·3, 2026-09-21)
 

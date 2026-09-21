@@ -35,8 +35,10 @@
  *      baseline was replayed against these rows".
  *   3. Live scenario distribution is unmeasured. The design's EXACT / PARTIAL /
  *      SIMULATED replay labels (ARTIBOT-5.0-DESIGN.md section 8.2) exist because
- *      a replay is not a counterfactual; this runner copies `replay_mode`
- *      through untouched and never averages across labels.
+ *      a replay is not a counterfactual. Carrying it is NOT IMPLEMENTED: nothing
+ *      here reads or copies `replay_mode` (only this comment, the fixture rows and
+ *      `scenarios.schema.json` name it; its enum is LOWER-case `exact`/`partial`/
+ *      `simulation`). Producer: lib/replay/replay-label.js, UPPER-case (2026-09-21).
  *   4. B3 and B4 are RECORDED, not validated. That `routeModel` recommends a
  *      tier says nothing about whether that tier would have succeeded.
  *   5. There is deliberately NO composite score, here or in the output

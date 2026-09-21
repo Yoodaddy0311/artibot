@@ -19,9 +19,12 @@
  * (only when the host reports `context_window.current_tokens` — the live
  * 2026-09-11 snapshot carried no such key, so live it is five of ten) and
  * `output_tokens` — six of the ten keys, 11 schema leaves short. It
- * cannot supply `mission_id` (no mission is in scope at a compaction),
- * `based_on.*` (revisions are produced only inside mission artifacts),
- * `transforms.*` (0 of 5 instrumented) or `cache.*` (single writer:
+ * supplies `mission_id` and `based_on.{intent_revision, plan_revision}` only
+ * CONDITIONALLY (SH-16, limb `e99f450f`): the project-state store must name
+ * exactly one active mission whose id ends in `-S<sid8>` for this session, and
+ * the nested revisions must be integers >= 1. Outside that case those leaves
+ * stay missing, so read the NAMES in `missing` rather than its count. It still
+ * cannot supply `transforms.*` (0 of 5 instrumented) or `cache.*` (single writer:
  * `lib/economics/usage-receipt.js`, design §3.6 — this module references
  * those numbers, it never re-measures them).
  *
