@@ -105,13 +105,29 @@ let sandboxCwd;
 let stubCorpus;
 
 /**
+ * Monotonic suffix for scratch filenames.
+ *
+ * A counter rather than `Math.random()`: the sandbox is a fresh mkdtemp per
+ * run, so uniqueness needs no entropy, and a random name makes a failing run
+ * name a file that no rerun can produce. Nothing about ordering is implied -
+ * it only has to differ.
+ */
+let scratchSeq = 0;
+
+/** @param {string} stem @returns {string} an unused path inside the sandbox */
+function scratchPath(stem) {
+  scratchSeq += 1;
+  return path.join(sandbox, `${String(scratchSeq).padStart(3, '0')}-${stem}`);
+}
+
+/**
  * Write a corpus file and return its path.
  *
  * @param {object[]} rows @param {{eol?: string, name?: string}} [opts]
  * @returns {string} absolute path
  */
 function writeCorpus(rows, { eol = '\n', name = `corpus-${rows.length}.jsonl` } = {}) {
-  const file = path.join(sandbox, `${Math.random().toString(36).slice(2)}-${name}`);
+  const file = scratchPath(name);
   writeFileSync(file, rows.map((r) => JSON.stringify(r)).join(eol) + eol, 'utf-8');
   return file;
 }
@@ -123,7 +139,7 @@ function writeCorpus(rows, { eol = '\n', name = `corpus-${rows.length}.jsonl` } 
  * @returns {string} absolute path
  */
 function writeInput(value) {
-  const file = path.join(sandbox, `${Math.random().toString(36).slice(2)}-input.json`);
+  const file = scratchPath('input.json');
   writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value), 'utf-8');
   return file;
 }
@@ -264,6 +280,42 @@ describe('seeded-defect scorer: location boundaries', () => {
     }
   });
 
+  it('applies that normalization ON THE SCORING PATH, not just in the helper', () => {
+    // The helper being correct says nothing about `gradeRow` calling it.
+    // Measured with a mutant 2026-09-21: deleting the `normalizeFindingPath`
+    // call from gradeRow left every other test in this file green, because
+    // every other fixture already spells its path the corpus way.
+    const input = [{
+      id: 'SD-002',
+      findings: [{ kind: 'inclusive-exclusive-mismatch', path: '.\\lib\\b.js', line: 5 }],
+    }];
+    const out = runOk(['--corpus', stubCorpus, '--input', writeInput(input)]);
+    expect(out.location_accuracy).toBe(1);
+    expect(out.false_positive_rate).toBe(0);
+  });
+
+  it('counts a row with several right-kind findings once, and locates it if ANY hits', () => {
+    // Both halves are unpinned without this: `caught` must not become 2, and
+    // the out-of-range twin must not be charged as a false positive, because
+    // its kind matches. Measured with a mutant 2026-09-21: making `matched`
+    // a 0/1 flag rather than a count turns false_positive_rate into 0.5 here
+    // while leaving every other test in this file green.
+    const input = [{
+      id: 'SD-002',
+      findings: [
+        { kind: 'inclusive-exclusive-mismatch', path: 'lib/b.js', line: 99 },
+        { kind: 'inclusive-exclusive-mismatch', path: 'lib/b.js', line: 5 },
+      ],
+    }];
+    const out = runOk(['--corpus', stubCorpus, '--input', writeInput(input)]);
+    expect(out.catch_rate).toBeCloseTo(1 / 3, 12);
+    expect(out.location_accuracy).toBe(1);
+    expect(out.false_positive_rate).toBe(0);
+    expect(out.per_class.boundary).toEqual({
+      n: 1, caught: 1, catch_rate: 1, location_accuracy: 1,
+    });
+  });
+
   it('normalizes backslashes and a leading ./ in the reviewer path, and nothing else', () => {
     expect(normalizeFindingPath('lib\\b.js')).toBe('lib/b.js');
     expect(normalizeFindingPath('./lib/b.js')).toBe('lib/b.js');
@@ -288,6 +340,106 @@ describe('seeded-defect scorer: per_class', () => {
     const out = runOk(['--corpus', stubCorpus, '--input', writeInput(input)]);
     expect(out.per_class.logic)
       .toEqual({ n: 1, caught: 0, catch_rate: 0, location_accuracy: null });
+  });
+});
+
+describe('seeded-defect scorer: expected.also_accept', () => {
+  /** The canonical kind, plus two near-synonyms a reviewer might legitimately use. */
+  const ALSO = ['inclusive-exclusive-mismatch', 'wrong-operator'];
+
+  /** A one-row corpus whose single row carries `also_accept`. @returns {string} */
+  function corpusWithAlso(also = ALSO) {
+    const base = row('SD-001', 'logic', 'off-by-one', 'lib/a.js', [10, 20]);
+    return writeCorpus([{
+      ...base,
+      expected: { ...base.expected, also_accept: also },
+    }]);
+  }
+
+  /** @param {string} kind @param {number} [line] @returns {object[]} */
+  const reportOnly = (kind, line = 10) => [{
+    id: 'SD-001', findings: [{ kind, path: 'lib/a.js', line }],
+  }];
+
+  it('accepts an also_accept kind as a catch, and does not charge it as a false positive', () => {
+    // The defect M1 names: a reviewer that saw the defect and named it with the
+    // corpus's OWN alternative spelling used to score a miss AND a false
+    // positive off one finding - penalised twice for being right.
+    for (const kind of ALSO) {
+      const out = runOk(['--corpus', corpusWithAlso(), '--input', writeInput(reportOnly(kind))]);
+      expect(out.catch_rate, kind).toBe(1);
+      expect(out.false_positive_rate, kind).toBe(0);
+      expect(out.location_accuracy, kind).toBe(1);
+    }
+  });
+
+  it('charges nothing when the canonical and an alternative kind are both reported', () => {
+    const input = [{
+      id: 'SD-001',
+      findings: [
+        { kind: 'off-by-one', path: 'lib/a.js', line: 10 },
+        { kind: 'wrong-operator', path: 'lib/a.js', line: 11 },
+      ],
+    }];
+    const out = runOk(['--corpus', corpusWithAlso(), '--input', writeInput(input)]);
+    // Both are in the accepted set, so both count as matched: the row is caught
+    // ONCE and neither finding reaches the false positive numerator.
+    expect(out.catch_rate).toBe(1);
+    expect(out.false_positive_rate).toBe(0);
+    expect(out.per_class.logic).toEqual({ n: 1, caught: 1, catch_rate: 1, location_accuracy: 1 });
+  });
+
+  it('still charges a kind outside the accepted set', () => {
+    const out = runOk([
+      '--corpus', corpusWithAlso(),
+      '--input', writeInput(reportOnly('stale-comment')),
+    ]);
+    expect(out.catch_rate).toBe(0);
+    expect(out.false_positive_rate).toBe(1);
+    expect(out.location_accuracy).toBeNull();
+  });
+
+  it('locates a row through an also_accept finding, and only inside the range', () => {
+    // `located` must widen with the kind set, or an alternative-kind catch
+    // would report caught with location_accuracy 0 - the half-penalty M1 is
+    // about, moved rather than removed.
+    const inside = runOk([
+      '--corpus', corpusWithAlso(), '--input', writeInput(reportOnly('wrong-operator', 20)),
+    ]);
+    expect(inside.location_accuracy).toBe(1);
+    const outside = runOk([
+      '--corpus', corpusWithAlso(), '--input', writeInput(reportOnly('wrong-operator', 21)),
+    ]);
+    expect(outside.catch_rate).toBe(1);
+    expect(outside.location_accuracy).toBe(0);
+  });
+
+  it('leaves a row with no also_accept scoring exactly as before', () => {
+    // The field is optional, so its absence must not change one number.
+    const out = runOk([
+      '--corpus', stubCorpus,
+      '--input', writeInput(reportOnly('inclusive-exclusive-mismatch')),
+    ]);
+    // SD-001 in the shared stub has NO also_accept: this is a plain FP.
+    expect(out.catch_rate).toBe(0);
+    expect(out.false_positive_rate).toBe(1);
+  });
+
+  it('refuses a malformed also_accept', () => {
+    const input = writeInput([]);
+    const bad = [
+      'inclusive-exclusive-mismatch',          // not an array
+      ['off-by-one'],                          // the canonical kind itself
+      ['wrong-operator', 'wrong-operator'],    // duplicated
+      ['wrong-operator', ''],                  // empty string member
+      ['wrong-operator', 7],                   // non-string member
+      [],                                      // present but empty
+    ];
+    for (const also of bad) {
+      const res = run(['--corpus', corpusWithAlso(also), '--input', input]);
+      expect(res.status, `accepted also_accept ${JSON.stringify(also)}`).toBe(1);
+      expect(res.stdout).toBe('');
+    }
   });
 });
 
@@ -417,6 +569,99 @@ describe('seeded-defect scorer: fail-closed inputs', () => {
     expectRefusal(['--corpus', stubCorpus, '--input', input, '--measured-at', '2026-13-01T00:00:00Z']);
   });
 
+  it('refuses a zone-less or date-only --measured-at that Date.parse accepts', () => {
+    // These are the cases the ISO_INSTANT regex exists for, and the ONLY ones
+    // that reach it: measured 2026-09-21, `Date.parse` returns a number for
+    // both, so the earlier refusals ('yesterday', '2026-13-01T00:00:00Z') were
+    // both caught by the NaN clause and the regex was unpinned. A zone-less
+    // stamp is the dangerous one - it is silently read as LOCAL time, so the
+    // same corpus scored in two timezones would carry two different instants.
+    const input = writeInput([]);
+    for (const stamp of ['2026-09-21T00:00:00', '2026-09-21', '2026-09-21T00:00Z']) {
+      const res = run(['--corpus', stubCorpus, '--input', input, '--measured-at', stamp]);
+      expect(res.status, `accepted ${stamp}`).toBe(1);
+      expect(res.stdout).toBe('');
+    }
+  });
+
+  it('refuses a finding line below 1 instead of scoring it as a miss', () => {
+    // Fail-open direction: a 0 or negative line cannot be inside any 1-based
+    // line_range, so it used to pass validation and then silently reduce
+    // location_accuracy, reporting a reviewer as inaccurate rather than
+    // reporting its output as malformed.
+    for (const line of [0, -1]) {
+      const input = [{ id: 'SD-001', findings: [{ kind: 'off-by-one', path: 'lib/a.js', line }] }];
+      expectRefusal(['--corpus', stubCorpus, '--input', writeInput(input)]);
+    }
+  });
+
+  it('refuses the same flag twice rather than silently taking the last value', () => {
+    // `--input good --input bad` scoring `bad` is a wrong number with no
+    // symptom. Two spellings of one option is always a mistake worth naming.
+    const input = writeInput([]);
+    expectRefusal(['--corpus', stubCorpus, '--input', input, '--input', input]);
+    expectRefusal(['--corpus', stubCorpus, '--corpus', stubCorpus, '--input', input]);
+    expectRefusal(['--corpus', stubCorpus, '--input', input,
+      '--measured-at', STAMP, '--measured-at', STAMP]);
+  });
+
+  it('keeps an absolute path out of the refusal line', () => {
+    // Node's ENOENT message embeds the full path it tried to open. A stderr
+    // line is quoted into tickets and CI logs, and a user-profile absolute
+    // path is both noise and an identifier there - it carries the account
+    // name. Measured 2026-09-21: the message did carry one before this pin.
+    //
+    // Asserted against the sandbox path this run actually created, rather than
+    // against a spelled-out path pattern: the literal form is what the land
+    // citation gate refuses, and a runtime value is the stronger check anyway.
+    const absent = scratchPath('absent.json');
+    const stderr = expectRefusal(['--corpus', stubCorpus, '--input', absent]);
+    expect(stderr).not.toContain(sandbox);
+    expect(stderr).toContain('ENOENT');
+    expect(stderr).toContain(path.basename(absent));
+  });
+
+  it('writes exactly one stderr line for a multi-line malformed input', () => {
+    // Measured 2026-09-21: V8's JSON error quotes the offending SOURCE, so a
+    // broken input spanning four lines produced a four-line refusal. One
+    // refusal is one line, or a log reader cannot tell one failure from four.
+    expectRefusal(['--corpus', stubCorpus,
+      '--input', writeInput('[\n  { "id": "SD-001",\n    "findings": [ }\n  ]\n]\n')]);
+  });
+
+  it('accepts unknown keys on entries and findings', () => {
+    // Deliberate, and the reason the shape check is a check on the THREE keys
+    // scoring reads rather than a closed object schema: a real reviewer emits
+    // `message`, `severity`, `rule_id` and more alongside them. Refusing those
+    // would force every caller to strip its own output before scoring it.
+    const input = [{
+      id: 'SD-001',
+      severity: 'high',
+      findings: [{
+        kind: 'off-by-one', path: 'lib/a.js', line: 10, message: 'x', rule_id: 'R1',
+      }],
+    }];
+    const out = runOk(['--corpus', stubCorpus, '--input', writeInput(input)]);
+    expect(out.catch_rate).toBeCloseTo(1 / 3, 12);
+    expect(out.location_accuracy).toBe(1);
+  });
+
+  it('refuses a corpus location.path that no normalized finding could ever equal', () => {
+    // The comparison normalizes the FINDING side only, so a corpus path
+    // spelled `./lib/a.js` or `lib\a.js` can never be located - the row would
+    // sit in the corpus scoring a permanent 0 with no error anywhere. Zero of
+    // the shipped 30 rows are spelled that way, so this refuses a shape that
+    // does not exist yet rather than changing any current result.
+    const input = writeInput([]);
+    for (const p of ['./lib/a.js', 'lib\\a.js']) {
+      const bad = {
+        ...STUB_ROWS[0],
+        expected: { finding_kind: 'off-by-one', location: { path: p, line_range: [1, 2] } },
+      };
+      expectRefusal(['--corpus', writeCorpus([bad]), '--input', input]);
+    }
+  });
+
   it('parses the arguments it does accept (unit)', () => {
     expect(parseArgs(['--input', 'a.json']).input).toBe('a.json');
     expect(parseArgs(['--help']).help).toBe(true);
@@ -457,6 +702,14 @@ describe('seeded-defect scorer: the shipped corpus', () => {
     // No --corpus: this also pins that the DEFAULT path is the shipped fixture.
     const out = runOk(['--input', writeInput(perfectOutput(rows))]);
     expect(out.n).toBe(30);
+    // Recomputed here rather than trusted: this is the number that makes two
+    // results files comparable, and B1's pin test must agree with it byte for
+    // byte on both a CRLF and an LF checkout.
+    expect(out.corpus_sha256).toBe(
+      createHash('sha256')
+        .update(readFileSync(SHIPPED_CORPUS, 'utf-8').split('\r\n').join('\n'), 'utf-8')
+        .digest('hex'),
+    );
     expect(out.catch_rate).toBe(1);
     expect(out.false_positive_rate).toBe(0);
     expect(out.location_accuracy).toBe(1);

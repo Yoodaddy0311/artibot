@@ -53,7 +53,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["finding_kind", "location"],
-      "description": "The one finding this row is scored against. One row carries exactly one expectation; a diff that would justify two independent findings belongs in two rows.",
+      "description": "The one finding this row is scored against. One row carries exactly one expectation; a diff that would justify two independent findings belongs in two rows. `also_accept` does not weaken that: it widens the VOCABULARY that names this one defect, not the number of defects.",
       "properties": {
         "finding_kind": {
           "type": "string",
@@ -83,6 +83,40 @@
             "unvalidated-input",
             "wrong-operator"
           ]
+        },
+        "also_accept": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "OPTIONAL near-synonyms of `finding_kind` for THIS row. A scorer counts a finding as caught when its kind is in {finding_kind} union also_accept, and does not charge it as a false positive. It exists because some defects are genuinely nameable two ways - an inclusive/exclusive limit IS an off-by-one, a check-then-act window IS a race - and without it a reviewer that saw the defect correctly would be scored both a miss AND a false positive for choosing the other word, which measures vocabulary agreement rather than review. Use only for true synonyms; a kind that describes a DIFFERENT defect in the same diff means the row has two defects and belongs in two rows. The canonical kind must NOT be repeated here - draft-07 cannot express 'differs from a sibling value', so that is asserted in the corpus test instead.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "check-then-act",
+              "command-injection",
+              "empty-collection-unhandled",
+              "error-code-mismatch",
+              "inclusive-exclusive-mismatch",
+              "inverted-condition",
+              "missing-await",
+              "missing-case",
+              "missing-timeout",
+              "off-by-one",
+              "optional-treated-required",
+              "path-traversal",
+              "race-on-shared-state",
+              "resource-leak",
+              "return-shape-mismatch",
+              "secret-in-log",
+              "short-circuit-swallow",
+              "silent-fallback",
+              "stale-comment",
+              "stale-doc",
+              "unbounded-growth",
+              "unvalidated-input",
+              "wrong-operator"
+            ]
+          }
         },
         "location": {
           "type": "object",

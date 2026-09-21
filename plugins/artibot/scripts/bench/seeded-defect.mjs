@@ -17,16 +17,33 @@
  *      no clock read other than the single `measured_at` stamp. The input is a
  *      reviewer's already-written output; producing that file is somebody
  *      else's job, and this file cannot tell a real one from a hand-edited one.
- *   2. KIND IS A STRING COMPARE. `caught` means the reviewer emitted a finding
- *      whose `kind` equals the row's `expected.finding_kind`, byte for byte.
- *      Translating a reviewer's vocabulary into the corpus's belongs in an
- *      ADAPTER upstream of this runner; a reviewer that names the right defect
- *      with a different word scores zero here, and that is not a bug.
+ *   2. KIND IS A STRING COMPARE, over a SET the corpus row names. `caught`
+ *      means the reviewer emitted a finding whose `kind` is the row's
+ *      `expected.finding_kind` or one of its optional
+ *      `expected.also_accept` alternatives - each compared byte for byte.
+ *      There is no fuzzy matching, no stemming and no case folding: widening
+ *      the set is the CORPUS's decision, made per row and visible in the
+ *      fixture, never an inference this runner makes. A reviewer that names
+ *      the right defect with a word the row does not list still scores zero,
+ *      and that remains a vocabulary problem for an ADAPTER upstream of here.
+ *      `also_accept` exists because the alternative was worse: a row whose
+ *      defect has two accurate names used to charge a correct reviewer TWICE
+ *      - a miss on `catch_rate` and a false positive on the same finding.
  *   3. SPRAYING KINDS BUYS NOTHING. Because caught is kind-equality only, a
  *      reviewer that emits every kind at every location catches everything -
- *      and every one of those extra findings is charged to
+ *      and every one of those WRONG-kind findings is charged to
  *      `false_positive_rate`. That rate is the only penalty term, so quoting
  *      `catch_rate` alone is quoting half the result.
+ *   3b. SPRAYING THE RIGHT KIND IS UNPENALIZED, AND THAT IS A REAL GAP. The
+ *      penalty in 3 reaches wrong-KIND findings only. A reviewer that reports
+ *      the expected kind on fifty lines of the file is not charged anything:
+ *      those findings match the kind, so none of them is a false positive,
+ *      and `location_accuracy` asks only whether ANY of them landed inside
+ *      the range - so it scores 1.0. Precision within a kind is therefore
+ *      UNMEASURED here, and a `location_accuracy` of 1.0 means "hit the spot
+ *      at least once", never "pointed only at the spot". A metric that closes
+ *      this (findings-per-row, or a location precision denominator over
+ *      matched findings) is a CONTRACT CHANGE and deliberately not made here.
  *   4. NO SEVERITY, NO DESIGN AXIS. `severity` and `design_axis` are carried by
  *      the corpus and read by nothing here. Nothing is weighted.
  *   5. A ZERO DENOMINATOR IS `null`, NOT 0. A reviewer that emits no findings
@@ -34,6 +51,12 @@
  *      rate whose denominator is 0 is emitted as null for that reason, and a
  *      consumer that coerces null to 0 reintroduces the flattering wrong
  *      answer this refuses to print.
+ *
+ *   6. `also_accept` IS NOT A DIFFICULTY SIGNAL. Rows carrying alternatives
+ *      are easier to catch than rows that do not, and nothing here records
+ *      how many rows carried them. Two corpora with the same 30 defects but
+ *      different `also_accept` coverage produce different catch rates, so a
+ *      catch rate is comparable only against the same `corpus_sha256`.
  *
  * DENOMINATORS, stated once so no caller has to infer them:
  *   catch_rate           = caught rows / ALL corpus rows. An id the input
@@ -52,6 +75,14 @@
  * against the next malformed file somebody writes. Any violation exits 1 with
  * one line on stderr and ZERO bytes on stdout - a partial result is worse than
  * none, since a truncated envelope still parses as JSON.
+ *
+ * That allowlist is over the TYPES OF THE KEYS SCORING READS, not a closed
+ * object schema: UNKNOWN KEYS ARE ACCEPTED on entries and on findings. This is
+ * deliberate - a real reviewer emits `message`, `severity`, `rule_id` and more
+ * beside `kind`/`path`/`line`, and refusing those would make every caller
+ * strip its own output before it could be scored. Full row conformance of the
+ * CORPUS is a different question and belongs to
+ * `tests/evals/seeded-defect-corpus.test.js` and its ajv schema.
  *
  * USAGE
  *   node scripts/bench/seeded-defect.mjs --input <reviewer.json>
@@ -96,6 +127,24 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]
 /** Corpus ids, as the shared row contract spells them. */
 const ROW_ID = /^SD-\d{3}$/;
 
+/**
+ * The errno of a failed read, never its message.
+ *
+ * Node's ENOENT message embeds the FULL path it tried to open, so quoting
+ * `err.message` puts a user-profile absolute path on stderr - noise in a CI
+ * log, an identifier in a ticket (it carries the account name), and
+ * machine-specific in a place people compare across machines. The basename is
+ * already in the caller's message; the code is the part that says what went
+ * wrong.
+ *
+ * @param {unknown} err
+ * @returns {string}
+ */
+function readErrorCode(err) {
+  const code = err?.code;
+  return typeof code === 'string' && code !== '' ? code : 'unreadable';
+}
+
 /** @param {unknown} v @returns {boolean} a non-empty string */
 function isText(v) {
   return typeof v === 'string' && v !== '';
@@ -121,6 +170,53 @@ function isRecord(v) {
  */
 export function normalizeFindingPath(p) {
   return String(p).split('\\').join('/').replace(/^\.\//, '');
+}
+
+/**
+ * Validate the optional `expected.also_accept` list.
+ *
+ * Present-but-empty is REFUSED along with the malformed shapes: an empty list
+ * is indistinguishable in effect from omitting the field, so allowing both
+ * spellings of "no alternatives" would let two corpora differ in bytes while
+ * scoring identically - and a reader would reasonably wonder which one meant
+ * something. Duplicates and the canonical kind are refused for the same
+ * reason: neither changes the accepted SET, so their only effect is to make
+ * the row look like it says more than it does.
+ *
+ * @param {unknown} also @param {string} canonical @param {string} where
+ * @returns {void} throws on violation
+ */
+function validateAlsoAccept(also, canonical, where) {
+  if (also === undefined) return;
+  if (!Array.isArray(also) || also.length === 0) {
+    throw new Error(`${where}: expected.also_accept must be a non-empty array when present`);
+  }
+  if (!also.every(isText)) {
+    throw new Error(`${where}: expected.also_accept members must be non-empty strings`);
+  }
+  if (new Set(also).size !== also.length) {
+    throw new Error(`${where}: expected.also_accept has a duplicate member`);
+  }
+  if (also.includes(canonical)) {
+    throw new Error(
+      `${where}: expected.also_accept must not repeat finding_kind ${JSON.stringify(canonical)}`,
+    );
+  }
+}
+
+/**
+ * Every kind that counts as naming this row's defect: the canonical
+ * `finding_kind` plus any `also_accept` alternatives.
+ *
+ * This widens a SET MEMBERSHIP test; it is not fuzzy matching. Each member is
+ * still compared to `f.kind` by string equality, and a kind the corpus row
+ * does not list is a false positive exactly as before.
+ *
+ * @param {object} row
+ * @returns {Set<string>}
+ */
+function acceptedKinds(row) {
+  return new Set([row.expected.finding_kind, ...(row.expected.also_accept ?? [])]);
 }
 
 /**
@@ -155,6 +251,19 @@ function validateRow(parsed, lineNo) {
   if (!isText(location.path) || !legalRange) {
     throw new Error(`${where}: location.path and an ascending 1-based line_range are required`);
   }
+  // The path comparison normalizes the FINDING side only, so a corpus path
+  // spelled `./lib/a.js` or `lib\a.js` could never be matched by any reviewer
+  // output: the row would score a permanent location miss with nothing
+  // anywhere reporting why. Refused at load instead. Zero of the 30 shipped
+  // rows are spelled that way (measured 2026-09-21), so this changes no
+  // current result - it closes the shape before it can be written.
+  if (location.path !== normalizeFindingPath(location.path)) {
+    throw new Error(
+      `${where}: location.path must be POSIX with no leading "./", got `
+      + `${JSON.stringify(location.path)}`,
+    );
+  }
+  validateAlsoAccept(expected.also_accept, expected.finding_kind, where);
   return parsed;
 }
 
@@ -208,7 +317,8 @@ export function readCorpus(file) {
   try {
     text = readFileSync(file, 'utf-8');
   } catch (err) {
-    throw new Error(`cannot read corpus ${path.basename(file)}: ${err.message}`, { cause: err });
+    throw new Error(`cannot read corpus ${path.basename(file)}: ${readErrorCode(err)}`,
+      { cause: err });
   }
   const normalized = text.split('\r\n').join('\n');
   return {
@@ -228,7 +338,14 @@ function validateFinding(finding, id, index) {
   if (!isRecord(finding)) throw new Error(`${where}: not a JSON object`);
   if (!isText(finding.kind)) throw new Error(`${where}: kind must be a non-empty string`);
   if (!isText(finding.path)) throw new Error(`${where}: path must be a non-empty string`);
-  if (!Number.isInteger(finding.line)) throw new Error(`${where}: line must be an integer`);
+  // `>= 1`, not merely an integer. Line numbers are 1-based, so 0 and negatives
+  // cannot be inside ANY line_range: they used to validate and then quietly
+  // lower location_accuracy, reporting a malformed input as an inaccurate
+  // reviewer. Unknown keys alongside these three are accepted on purpose - see
+  // the FAIL-CLOSED note in the module header.
+  if (!Number.isInteger(finding.line) || finding.line < 1) {
+    throw new Error(`${where}: line must be an integer >= 1`);
+  }
   return finding;
 }
 
@@ -267,8 +384,13 @@ function indexReviewerOutput(reviewerOutput, byId) {
  *   numerator by subtraction.
  */
 function gradeRow(row, findings) {
-  const { finding_kind: kind, location } = row.expected;
-  const matched = findings.filter((f) => f.kind === kind);
+  const { location } = row.expected;
+  // Membership in the ACCEPTED SET, not equality with one string - see
+  // `acceptedKinds`. `caught`, `located` and the false-positive numerator all
+  // read the same set, so a row's alternatives cannot widen one of the three
+  // without widening the other two.
+  const accepted = acceptedKinds(row);
+  const matched = findings.filter((f) => accepted.has(f.kind));
   const [start, end] = location.line_range;
   const located = matched.some((f) => normalizeFindingPath(f.path) === location.path
     && f.line >= start && f.line <= end);
@@ -342,7 +464,8 @@ function readReviewerOutput(file) {
   try {
     text = readFileSync(file, 'utf-8');
   } catch (err) {
-    throw new Error(`cannot read input ${path.basename(file)}: ${err.message}`, { cause: err });
+    throw new Error(`cannot read input ${path.basename(file)}: ${readErrorCode(err)}`,
+      { cause: err });
   }
   try {
     return JSON.parse(text);
@@ -381,13 +504,20 @@ export function runSeededDefect(opts) {
  */
 export function parseArgs(argv) {
   const opts = { input: null, corpus: DEFAULT_CORPUS, measuredAt: null, help: false };
+  // Repeating a flag is refused rather than resolved last-wins: `--input good
+  // --input bad` scoring `bad` is a wrong number with no symptom anywhere.
+  const seen = new Set();
+  const once = (flag) => {
+    if (seen.has(flag)) throw new Error(`argument "${flag}" given more than once`);
+    seen.add(flag);
+  };
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];
     const next = argv[index + 1];
-    if (arg === '--input') { opts.input = next; index += 2; continue; }
-    if (arg === '--corpus') { opts.corpus = next; index += 2; continue; }
-    if (arg === '--measured-at') { opts.measuredAt = next; index += 2; continue; }
+    if (arg === '--input') { once(arg); opts.input = next; index += 2; continue; }
+    if (arg === '--corpus') { once(arg); opts.corpus = next; index += 2; continue; }
+    if (arg === '--measured-at') { once(arg); opts.measuredAt = next; index += 2; continue; }
     if (arg === '--help' || arg === '-h') { opts.help = true; index += 1; continue; }
     throw new Error(`unrecognized argument "${arg}" (try --help)`);
   }
@@ -437,11 +567,28 @@ function main() {
   return 0;
 }
 
+/**
+ * One refusal is ONE line on stderr.
+ *
+ * Not cosmetic. V8's `JSON.parse` error quotes the offending SOURCE, so a
+ * malformed input spanning four lines produced a four-line refusal (measured
+ * 2026-09-21), and a log reader counting refusals by line would have read one
+ * failure as four. Clamped at the single exit point rather than at each throw
+ * site, so a message added later cannot reintroduce it.
+ *
+ * @param {unknown} err
+ * @returns {string} the first line of the message
+ */
+function refusalLine(err) {
+  const message = typeof err?.message === 'string' ? err.message : String(err);
+  return message.split('\n')[0].trim();
+}
+
 if (isMainEntry(import.meta.url)) {
   try {
     process.exitCode = main();
   } catch (err) {
-    console.error(`[seeded-defect] ${err.message}`);
+    console.error(`[seeded-defect] ${refusalLine(err)}`);
     process.exitCode = 1;
   }
 }
