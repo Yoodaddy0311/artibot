@@ -39,6 +39,8 @@ import { UNMEASURED_TEXT } from './metric.js';
 const HEADINGS = Object.freeze({
   session: 'ARTIBOT · SESSION SCORECARD',
   routing: 'ARTIBOT · ROUTING SCORECARD',
+  // The spawn-outcome fold's card (`lib/scorecard/compare-scorecard.js`).
+  compare: 'ARTIBOT · COMPARE SCORECARD',
 });
 
 /** Column headers of the metric table, in render order. */

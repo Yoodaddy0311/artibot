@@ -1,5 +1,5 @@
 /**
- * Gate — `/scorecard` gained two flags and lost nothing.
+ * Gate — `/scorecard` gained three flags and lost nothing.
  *
  * WHY THIS GATE EXISTS
  * ---------------------------------------------------------------------------
@@ -15,10 +15,13 @@
  * the command body, and the two would drift the first time someone updated one.
  *
  * ── WHAT THIS GATE CANNOT SEE ───────────────────────────────────────────────
- *   - WHETHER THE NEW SECTION IS CORRECT. It checks the snippet is present and
- *     names the port handoff. It does not execute it, so an argv-parsing bug or
- *     a wrong path in the Bash block passes here. Nothing in this repo executes
- *     a command body; that gap is the command layer's, not this file's.
+ *   - WHETHER THE NEW SECTION IS CORRECT. It checks the snippet is present,
+ *     names the port handoff, and that every `sc.<name>(` it calls is exported
+ *     as a function by `lib/scorecard/index.js` — EXISTENCE ONLY. It still does
+ *     not execute the snippet, so an argv-parsing bug, a wrong relative path in
+ *     the Bash block, or a card kind the renderer rejects all pass here.
+ *     Nothing in this repo executes a command body; that gap is the command
+ *     layer's, not this file's.
  *   - DRIFT AFTER THIS COMMIT. The baseline is HEAD. Once this change lands,
  *     HEAD contains the new sections and the invariance assertions become
  *     tautological for anything added later — they will still catch DELETION of
@@ -40,6 +43,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as barrel from '../../lib/scorecard/index.js';
 
 const PLUGIN_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
@@ -116,6 +120,27 @@ function firstOutOfOrder(sub, all) {
   return null;
 }
 
+/**
+ * The first fenced block of a section, fences included.
+ *
+ * Needed because the subsequence and section-equality pins above are blind to
+ * INSERTION between two surviving lines: adding a line inside the existing
+ * `--session`/`--routing` snippet deletes nothing and reorders nothing, so both
+ * pass while the command body has changed. Pinning the block as one string is
+ * the only shape that catches it.
+ *
+ * @param {string} section - output of `sectionOf`.
+ * @returns {string} the block from its opening fence to its closing fence.
+ */
+function firstFenceOf(section) {
+  const lines = section.split('\n');
+  const open = lines.findIndex((l) => l.startsWith('```'));
+  expect(open, '펜스 블록이 없다').toBeGreaterThanOrEqual(0);
+  const close = lines.findIndex((l, i) => i > open && l.startsWith('```'));
+  expect(close, '닫는 펜스가 없다').toBeGreaterThan(open);
+  return lines.slice(open, close + 1).join('\n');
+}
+
 // ---------------------------------------------------------------------------
 describe('/scorecard — 기존 본문 무변경', () => {
   it('HEAD 에서 사라진 줄은 교체된 argument-hint 뿐이다', () => {
@@ -154,6 +179,14 @@ describe('/scorecard — 기존 본문 무변경', () => {
     expect(current).toContain('lib/planning/scorecard.js');
   });
 
+  it('기존 세션/라우팅 스니펫이 바이트 그대로다 (줄 삽입도 변경이다)', () => {
+    // 위 6절 핀과 같은 HEAD 기준이라 착지 후에는 항등 green 이 된다 — 그래도
+    // 남기는 이유는 이 절이 HEAD 에 있는 채로 나중 웨이브가 스니펫 삼항 분기
+    // 사이에 한 줄을 끼워 넣는 것을 막는 유일한 단언이라는 것이다.
+    const h = '### 세션/라우팅 카드 (`--session` / `--routing`)';
+    expect(firstFenceOf(sectionOf(current, h))).toBe(firstFenceOf(sectionOf(head, h)));
+  });
+
   it('description 과 allowed-tools 는 손대지 않았다', () => {
     const line = (text, prefix) => text.split('\n').find((l) => l.startsWith(prefix));
     expect(line(current, 'description:')).toBe(line(head, 'description:'));
@@ -165,20 +198,23 @@ describe('/scorecard — 기존 본문 무변경', () => {
 describe('/scorecard — 신규 플래그', () => {
   const hint = current.split('\n').find((l) => l.startsWith('argument-hint:'));
 
-  it('argument-hint 가 기존 3종을 유지한 채 2종을 더 싣는다', () => {
-    for (const flag of ['--baseline', '--diff', '--areas <n>', '--session [id]', '--routing']) {
+  it('argument-hint 가 기존 3종을 유지한 채 3종을 더 싣는다', () => {
+    for (const flag of ['--baseline', '--diff', '--areas <n>', '--session [id]', '--routing', '--compare']) {
       expect(hint, `argument-hint 에 ${flag} 없음`).toContain(flag);
     }
   });
 
-  it('Arguments 절이 기존 세 줄을 그대로 두고 두 줄을 더 싣는다', () => {
-    // 줄 수 증가분을 2 로 못박지 않는 이유는 위 removed 어서션과 같다 — 착지 후
-    // HEAD 에는 이미 다섯 줄이 있어 증가분이 0 이 된다. 고정해야 하는 것은
-    // "기존 세 줄이 순서대로 살아 있고, 새 두 줄이 있다" 이지 산술 차이가 아니다.
+  it('Arguments 절이 기존 세 줄을 그대로 두고 세 줄을 더 싣는다', () => {
+    // 줄 수 증가분을 못박지 않는 이유는 위 removed 어서션과 같다 — 착지 후
+    // HEAD 에는 이미 여섯 줄이 있어 증가분이 0 이 된다. 고정해야 하는 것은
+    // "기존 세 줄이 순서대로 살아 있고, 새 세 줄이 있다" 이지 산술 차이가 아니다.
+    // `before.filter` 가 새 줄머리를 빼는 것도 같은 이유다: 착지 후 HEAD 에는 그
+    // 줄들이 들어 있고, 그때 이 필터가 없으면 "새 줄이 순서대로 있다" 를 두 번
+    // 검사하는 셈이 되어 아래 개별 어서션과 중복된다.
     const before = sectionOf(head, '## Arguments').split('\n');
     const after = sectionOf(current, '## Arguments').split('\n');
     expect(firstOutOfOrder(before.filter((l) => !l.startsWith('- `--session')
-      && !l.startsWith('- `--routing')), after)).toBeNull();
+      && !l.startsWith('- `--routing') && !l.startsWith('- `--compare')), after)).toBeNull();
     // `--baseline` 은 "(없음) 또는 `--baseline` →" 형태라 줄머리가 아니다. 플래그
     // 토큰의 존재만 본다 — 문장 형태를 고정하면 위 무변경 어서션과 중복이다.
     for (const flag of ['`--baseline`', '`--diff`', '`--areas <n>`']) {
@@ -186,6 +222,7 @@ describe('/scorecard — 신규 플래그', () => {
     }
     expect(after.filter((l) => l.startsWith('- `--session [id]`'))).toHaveLength(1);
     expect(after.filter((l) => l.startsWith('- `--routing`'))).toHaveLength(1);
+    expect(after.filter((l) => l.startsWith('- `--compare`'))).toHaveLength(1);
   });
 
   it('신규 절이 포트 주입 두 단계를 이름으로 적는다', () => {
@@ -209,6 +246,47 @@ describe('/scorecard — 신규 플래그', () => {
     const section = sectionOf(current, '### 세션/라우팅 카드 (`--session` / `--routing`)');
     expect(section).toContain('lib/scorecard/');
     expect(section).toContain('.artibot/scorecard.json');
+  });
+
+  it('compare 문단이 fold 출처·저장 없음·unmeasured 규칙을 적는다', () => {
+    // 부모 절(`### 세션/라우팅 카드`)이 아니라 `#### 스폰 비교 카드` 절만 본다.
+    // 부모 절을 보면 아래 needle 중 넷(renderScorecardMarkdown·readAllEvents·
+    // 아무것도 저장하지 않는다·`0%` 로 쓰지 않는다)이 HEAD 본문에 이미 있어서
+    // compare 블록에서 통째로 지워도 green 인 공허 단언이 된다. sectionOf 는
+    // level-4 헤딩이면 다음 level<=4 헤딩(여기서는 `## 출력`)에서 끊는다.
+    const section = sectionOf(current, '#### 스폰 비교 카드 (`--compare`)');
+    for (const needle of [
+      'joinSpawnOutcomes', 'buildCompareScorecard', 'renderScorecardMarkdown', 'readAllEvents',
+    ]) {
+      expect(section, `compare 절에 ${needle} 없음`).toContain(needle);
+    }
+    // replay 인덱스가 아니라 spawn-outcome fold 를 접는다는 것이 이 카드의 계약이다.
+    expect(section).toContain('lib/replay/spawn-outcome.js#joinSpawnOutcomes');
+    expect(section).toContain('scripts/ledger/route-compare.mjs');
+    expect(section).toContain('아무것도 저장하지 않는다');
+    expect(section).toMatch(/비교 가능한 쌍이 0 이면 .*`unmeasured`/);
+    expect(section).toContain('`0%` 로 쓰지 않는다');
+    expect(section).toContain('excluded_fifo');
+    expect(section).toContain('CANNOT SEE');
+    // 비용 행의 분모 서술. 처음 쓴 문장이 "가격 없는 쌍은 비용 분모에서 빠진다"
+    // 였는데 `compare-scorecard.js#costMetric` 의 분모는 `fold.compared` 로
+    // unpriced 를 포함한다 — 빠지는 것은 분자와 버킷 합계다. 코드 키 이름으로
+    // 핀하고, 틀렸던 문구는 음성 단언으로 되돌아오지 못하게 막는다.
+    expect(section).toContain('unpriced');
+    expect(section, '비용 분모 서술이 옛 오기로 되돌아갔다').not.toContain('비용 분모에서 빠진다');
+  });
+
+  it('스니펫이 호출하는 sc.* 가 전부 배럴의 함수로 실존한다', () => {
+    // 문자열 검사만 하는 게이트는 오타난 호출명(`sc.buildComapreScorecard`)을
+    // 통과시킨다. 실행은 여전히 안 하지만 EXPORT 실존은 여기서 볼 수 있다.
+    const section = sectionOf(current, '### 세션/라우팅 카드 (`--session` / `--routing`)');
+    const called = [...new Set([...section.matchAll(/\bsc\.(\w+)\(/g)].map((m) => m[1]))].sort();
+    // 추출 0 건이면 정규식 회귀가 조용한 green 이 된다 — 하한 앵커를 둔다.
+    expect(called.length, `sc.* 호출 추출 실패: ${JSON.stringify(called)}`).toBeGreaterThanOrEqual(3);
+    for (const name of called) {
+      expect(typeof barrel[name], `lib/scorecard/index.js 가 ${name} 를 function 으로 export 하지 않는다`)
+        .toBe('function');
+    }
   });
 });
 
