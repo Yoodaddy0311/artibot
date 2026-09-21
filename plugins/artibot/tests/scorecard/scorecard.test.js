@@ -656,8 +656,11 @@ describe('renderScorecardMarkdown', () => {
   });
 
   it('미측정 절이 분모와 함께 개수를 밝힌다', () => {
+    // 11 → 15: CA-18 이 routing.hold_reasons · hold_reason_coverage ·
+    // residency_counter · residency_counter_coverage 4행을 더했다. 이 수는 완화가 아니라
+    // 행 수의 핀이다 — 행이 더 늘거나 줄면 다시 레드가 된다.
     const out = renderScorecardMarkdown(buildRoutingScorecard(emptyReplay));
-    expect(out).toContain('11 / 11 지표가 분모 0 이다');
+    expect(out).toContain('15 / 15 지표가 분모 0 이다');
   });
 
   it('알 수 없는 kind 는 렌더하지 않고 던진다', () => {

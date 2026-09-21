@@ -29,6 +29,8 @@ export {
   AVOIDED_SWITCH_REASONS,
   COST_TERMS,
   DECISION_TYPES,
+  HOLD_REASON_CODES,
+  RESIDENCY_UNAVAILABLE,
   ROUTING_KIND,
   buildRoutingScorecard,
   classifyAvoidedReason,
@@ -36,6 +38,9 @@ export {
   divergedTier,
   foldAvoidedSwitches,
   foldCostTerms,
+  foldHoldReasons,
+  foldResidencyCounter,
+  hysteresisCodes,
 } from './routing-scorecard.js';
 
 export { SESSION_KIND, buildSessionScorecard, mergeEventCounts } from './session-scorecard.js';
