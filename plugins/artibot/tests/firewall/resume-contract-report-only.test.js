@@ -323,3 +323,237 @@ describe('the audit itself', () => {
     expect(audit.applyTrue).toBe(FIXTURES.length);
   });
 });
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * CA-05 b — `/resume --read-order` pins the ARTIBOT.md read order.
+ *
+ * WHY. Design §159 says `/resume` executes "the ARTIBOT.md read order", and the
+ * canonical order lives in ONE place: the repo-root `ARTIBOT.md` `## Read Order`
+ * list. `commands/resume.md` now carries a COPY of that order so the command
+ * body can be followed without opening another file. Two copies of an ordered
+ * list is exactly the shape that rots silently: someone reorders ARTIBOT.md,
+ * the command keeps reciting the old order, and nothing is red. So the expected
+ * values here are PARSED from ARTIBOT.md on every run — never hardcoded — and
+ * the command's steps are compared position by position.
+ *
+ * The comparison is by DISTINCTIVE TOKEN. Each ARTIBOT item contributes the
+ * tokens that appear in no other item (`project.md`, `state.yaml`, `intent.md`,
+ * `plan.md`, `adr`, `review`/`outcome`), and the command's step at the same
+ * index must use at least one of them. A token shared across items (`artibot`,
+ * `mission`, `landed`) is worth nothing here, which is what makes a swapped
+ * pair go red rather than match by accident.
+ *
+ * ── WHAT THIS GATE CANNOT SEE (rules §9) ───────────────────────────────────
+ *   - WHETHER THE PROSE IS OBEYED. This pins the text of a command document.
+ *     Whether the model actually reads those six paths in that order at run
+ *     time is a LIVE observation and is UNMEASURED here. Document ≠ behavior.
+ *   - WHETHER THE PATHS EXIST. `state.yaml` and the mission artifacts are
+ *     marked `not yet landed` in ARTIBOT.md. Their existence is the business of
+ *     `artibot-entry-parity.test.js`, not this file.
+ *   - WHETHER THE ORDER IS RIGHT. Only that the two copies agree. If ARTIBOT.md
+ *     itself is wrong, this gate is green.
+ *   - THE DEFAULT MODE'S OUTPUT. The "unchanged without the flag" assertion
+ *     below checks that the document SAYS so. Nothing here runs the command.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+const ARTIBOT_MD = readFileSync(new URL('../../../../ARTIBOT.md', import.meta.url), 'utf-8');
+const RESUME_MD = readFileSync(new URL('../../commands/resume.md', import.meta.url), 'utf-8');
+
+/**
+ * The body of the first section whose heading line matches, up to the next
+ * heading of the same or shallower level.
+ *
+ * @param {string} text - Whole markdown document.
+ * @param {RegExp} headingRe - Matches the heading LINE.
+ * @returns {string|null} Section body, or null when the heading is absent.
+ */
+function sectionBody(text, headingRe) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^#+\s/.test(line) && headingRe.test(line));
+  if (start === -1) return null;
+  const level = lines[start].match(/^#+/)[0].length;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^#+\s/.test(line) && line.match(/^#+/)[0].length <= level);
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
+/**
+ * Top-level numbered list items of a section body, in document order.
+ *
+ * @param {string} body - Section body.
+ * @returns {Array<{n: number, text: string}>} Items.
+ */
+function numberedItems(body) {
+  const items = [];
+  for (const line of body.split(/\r?\n/)) {
+    const m = line.match(/^(\d+)\.\s+(\S.*)$/);
+    if (m) items.push({ n: Number(m[1]), text: m[2].trim() });
+  }
+  return items;
+}
+
+/** Lowercase, and drop one trailing plural `s` so `ADRs` and `ADR` agree. */
+const stem = (word) => {
+  const lower = word.toLowerCase();
+  return lower.length > 3 && lower.endsWith('s') ? lower.slice(0, -1) : lower;
+};
+
+/**
+ * Latin word / filename tokens of a line, stemmed and deduped. Korean prose is
+ * deliberately ignored: the identifying part of every step is a path or an
+ * English noun, and matching on Korean particles would match everything.
+ *
+ * @param {string} text - Line text.
+ * @returns {string[]} Tokens.
+ */
+function tokensOf(text) {
+  const raw = text.match(/[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*/g) ?? [];
+  return [...new Set(raw.map(stem))];
+}
+
+/**
+ * Compare a candidate step list against the canonical one, position by
+ * position. Returns reasons rather than throwing so the SAME comparator can be
+ * pointed at a deliberately wrong fixture.
+ *
+ * @param {Array<{n: number, text: string}>} canon - Parsed from ARTIBOT.md.
+ * @param {Array<{n: number, text: string}>} candidate - Parsed from resume.md.
+ * @returns {{pass: boolean, reasons: string[], checked: number}} Verdict.
+ */
+function compareReadOrder(canon, candidate) {
+  const reasons = [];
+  if (canon.length === 0) reasons.push('canonical read order parsed as 0 steps');
+  if (candidate.length !== canon.length) {
+    reasons.push(`step count ${candidate.length} != canonical ${canon.length}`);
+  }
+  const seen = new Map();
+  for (const item of canon) {
+    for (const token of tokensOf(item.text)) seen.set(token, (seen.get(token) ?? 0) + 1);
+  }
+  let checked = 0;
+  for (let i = 0; i < canon.length; i += 1) {
+    const distinctive = tokensOf(canon[i].text).filter((t) => seen.get(t) === 1);
+    if (distinctive.length === 0) {
+      reasons.push(`canonical step ${i + 1} has no distinctive token — comparison would be vacuous`);
+      continue;
+    }
+    const got = candidate[i];
+    if (!got) {
+      reasons.push(`step ${i + 1} missing from candidate`);
+      continue;
+    }
+    checked += 1;
+    const mine = new Set(tokensOf(got.text));
+    if (!distinctive.some((t) => mine.has(t))) {
+      reasons.push(`step ${i + 1} matches none of [${distinctive.join(', ')}]`);
+    }
+  }
+  return { pass: reasons.length === 0, reasons, checked };
+}
+
+const CANON_BODY = sectionBody(ARTIBOT_MD, /Read Order/);
+const CANON_STEPS = CANON_BODY === null ? [] : numberedItems(CANON_BODY);
+const READ_ORDER_BODY = sectionBody(RESUME_MD, /--read-order/);
+const READ_ORDER_STEPS = READ_ORDER_BODY === null ? [] : numberedItems(READ_ORDER_BODY);
+
+describe('/resume --read-order mirrors the canonical ARTIBOT read order', () => {
+  it('parses a non-empty canonical order out of ARTIBOT.md, 6 steps as measured 2026-09-21', () => {
+    expect(CANON_BODY).not.toBeNull();
+    expect(CANON_STEPS.length).toBeGreaterThan(0);
+    expect(CANON_STEPS.length).toBe(6);
+    expect(CANON_STEPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('resume.md carries a --read-order section with the same step count', () => {
+    expect(READ_ORDER_BODY).not.toBeNull();
+    expect(READ_ORDER_STEPS.length).toBe(CANON_STEPS.length);
+    expect(READ_ORDER_STEPS.map((s) => s.n)).toEqual(CANON_STEPS.map((s) => s.n));
+  });
+
+  it(`each of the ${CANON_STEPS.length} steps matches its canonical position`, () => {
+    const result = compareReadOrder(CANON_STEPS, READ_ORDER_STEPS);
+    expect(result.reasons).toEqual([]);
+    expect(result.pass).toBe(true);
+    expect(result.checked).toBe(CANON_STEPS.length);
+  });
+
+  it('names ARTIBOT.md as the single source of the order, so the copy is marked as one', () => {
+    expect(READ_ORDER_BODY).toContain('ARTIBOT.md');
+  });
+});
+
+describe('the read-order comparator itself', () => {
+  it('goes red on a shuffled copy, so a green above is not vacuous', () => {
+    const shuffled = numberedItems([
+      '1. `.artibot/state.yaml`',
+      '2. `.artibot/project.md`',
+      '3. 활성 미션 `plan.md`',
+      '4. 활성 미션 `intent.md`',
+      '5. Review / Outcome',
+      '6. 관련 ADR — `.artibot/adr/`',
+    ].join('\n'));
+    const bad = compareReadOrder(CANON_STEPS, shuffled);
+    expect(bad.pass).toBe(false);
+    expect(bad.reasons.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('goes red on an empty candidate, so the denominator is load-bearing', () => {
+    const bad = compareReadOrder(CANON_STEPS, []);
+    expect(bad.pass).toBe(false);
+    expect(bad.reasons.join(' ')).toContain('step count 0');
+  });
+
+  it('every canonical step really has a distinctive token — the loop is not empty', () => {
+    const seen = new Map();
+    for (const item of CANON_STEPS) {
+      for (const token of tokensOf(item.text)) seen.set(token, (seen.get(token) ?? 0) + 1);
+    }
+    for (const [i, item] of CANON_STEPS.entries()) {
+      const distinctive = tokensOf(item.text).filter((t) => seen.get(t) === 1);
+      expect({ step: i + 1, distinctive: distinctive.length > 0 }).toEqual({ step: i + 1, distinctive: true });
+    }
+  });
+
+  it('the section slicer stops at the next heading of equal or shallower level', () => {
+    const probe = '## A\n1. one\n### A2\n2. two\n## B\n3. three\n';
+    expect(numberedItems(sectionBody(probe, /A2/))).toEqual([{ n: 2, text: 'two' }]);
+    expect(numberedItems(sectionBody(probe, /^## B/)).length).toBe(1);
+    expect(sectionBody(probe, /nope/)).toBeNull();
+  });
+});
+
+describe('--read-order is a fallback-shaped, report-only, opt-in mode', () => {
+  it('HANDOFF appears only outside the numbered steps, as the fallback', () => {
+    for (const step of READ_ORDER_STEPS) {
+      expect({ n: step.n, handoff: step.text.includes('HANDOFF') }).toEqual({ n: step.n, handoff: false });
+    }
+    const prose = READ_ORDER_BODY.split(/\r?\n/).filter((l) => !/^\d+\.\s/.test(l)).join('\n');
+    expect(prose).toContain('HANDOFF.md');
+    expect(prose).toContain('폴백');
+  });
+
+  it('the section states it writes nothing and transitions nothing', () => {
+    expect(READ_ORDER_BODY).toContain('읽기 전용');
+    expect(READ_ORDER_BODY).toContain('전이시키지 않는다');
+  });
+
+  it('frontmatter allowed-tools grants no write tool', () => {
+    const frontmatter = RESUME_MD.split(/\r?\n/).slice(1, 20).join('\n').split(/^---\s*$/m)[0];
+    expect(frontmatter).toContain('allowed-tools');
+    for (const tool of ['Write', 'Edit', 'NotebookEdit']) {
+      expect({ tool, granted: /allowed-tools:.*$/m.exec(frontmatter)?.[0].includes(tool) }).toEqual({ tool, granted: false });
+    }
+  });
+
+  it('the argument list promises an unchanged default output for --read-order', () => {
+    const args = sectionBody(RESUME_MD, /^##\s+Arguments/);
+    const line = args.split(/\r?\n/).find((l) => l.includes('--read-order'));
+    expect(line).toBeDefined();
+    expect(line).toContain('플래그가 없으면 출력은 종전과 완전히 동일');
+  });
+
+  it('the anti-pattern list forbids a --read-order write', () => {
+    const anti = sectionBody(RESUME_MD, /^##\s+Anti-Patterns/);
+    expect(anti.split(/\r?\n/).some((l) => l.includes('--read-order'))).toBe(true);
+  });
+});

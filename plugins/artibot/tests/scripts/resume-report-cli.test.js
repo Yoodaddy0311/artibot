@@ -246,7 +246,7 @@ describe('the Resume Contract block', () => {
     expect(row).toContain('reconcile:model-unknown');
   });
 
-  it('never renders a table cell reading "통과" — resume.md:66 forbids that reading', () => {
+  it('never renders a table cell reading "통과" — resume.md `--contract` 출력·실패 규칙 forbids that reading', () => {
     // Scoped to table rows on purpose: the document's closing note uses the
     // word to say `-` is NOT it, and asserting over the whole document would
     // make this test red for the sentence that states the rule.
