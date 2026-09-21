@@ -50,32 +50,50 @@
  *    is `scripts/split/lane-state.mjs`, and it passes runDir, worker, patch
  *    and now — no ledger port, no store port. The read has no production
  *    caller at all.
- *  - It does not write to the StateStore, and CANNOT today. Three contracts
- *    block it, all of them outside this module and outside `lib/topology`:
- *      1. NO RUN-TO-MISSION BINDING. A store write is addressed by an
+ *  - It does not write to the StateStore, and CANNOT today. Three things
+ *    block it — TWO UNWRITTEN CONTRACTS and ONE UNWIRED CALLER, which are not
+ *    the same kind of obstacle — all of them outside this module and outside
+ *    `lib/topology`:
+ *      1. CONTRACT MISSING — NO RUN-TO-MISSION BINDING. A store write is addressed by an
  *         `M-YYYYMMDD-…` mission id (`lib/project-state/validate.js#MISSION_ID_PATTERN`).
  *         A `/split` run is identified by a run id and a limb name; nothing
  *         maps one to the other, and inventing a mapping here would make this
  *         file the authority on an identity it does not own.
- *      2. NOWHERE TO PUT THE OPS KEYS. A worker row is a five-field
- *         projection of ONE task (`lib/project-state/projection.js#projectWorker`:
+ *      2. CONTRACT MISSING — NOWHERE TO PUT THE OPS KEYS. A worker row is a
+ *         five-field projection of ONE task (`lib/project-state/projection.js#projectWorker`:
  *         status, owns, heartbeat_at, heartbeat_source, blocked_by), and the
- *         task schema closes its object (`schemas/task-graph.schema.json`,
+ *         TASK schema closes its object (`schemas/task-graph.schema.json`,
  *         `additionalProperties: false`). `state`, `since`, `window`, `note`
- *         and `projected_from` have no home there. Measured, not argued: an
- *         extra task key passes the RUNTIME validator and is then dropped by
- *         the projection — see the probe in
- *         `tests/topology/split-state-sources.test.js`.
- *      3. THE CALLER CANNOT BUILD A STORE. `createStateStore` requires an
- *         `appendEvent` port and a `sessionId`, and the one production caller
- *         of the write has neither to give.
+ *         and `projected_from` have no home there, and making one means
+ *         changing TWO places: that task node AND `projectWorker`'s field
+ *         list. Note which place is NOT the obstacle — the `state.yaml`
+ *         worker-row schema is already open (`project-state.schema.json`
+ *         leaves a `worker` entry unrestricted, pinned by
+ *         `tests/schemas/state-task-lease.test.js`), which is why
+ *         `projectWorker` can omit a field rather than emit null.
+ *         Measured, not argued: an extra task key passes the RUNTIME
+ *         validator and PERSISTS in the Task Graph; only the projection drops
+ *         it — see the probe in `tests/topology/split-state-sources.test.js`.
+ *      3. WIRING MISSING (NOT a contract) — THE CALLER BUILDS NO STORE.
+ *         `createStateStore` requires an `appendEvent` port and a `sessionId`,
+ *         and the one production caller of the write,
+ *         `scripts/split/lane-state.mjs`, supplies neither. That contract IS
+ *         written and has a working precedent:
+ *         `lib/runtime/middleware/tasks.js#openMissionStore` binds a real
+ *         ledger append port together with a session id, while
+ *         `scripts/checkpoint/resume-report.mjs` and
+ *         `scripts/hooks/post-compact-rehydrate.js` open read-only stores with
+ *         a constant session id and a deliberately REFUSING port. So this one
+ *         is unwired, not undefined. Whether a `/split` CLI can obtain a
+ *         session id in its own context is unverified here.
  *    Two further traps a future port must handle, both pinned by that test
  *    file: the row KEY is the task's OWNER when that owner holds exactly one
  *    task in the mission (so a lookup by limb name can miss), and the store
  *    refuses a `blocked_by` reason outside the `lane|gate|human|reconcile`
  *    allowlist that `split-state-sources.js#stringList` accepts today.
  *    No `storeWriter` port is added for this: a second zero-consumer
- *    interface guessing at three unwritten contracts is the defect, not the fix.
+ *    interface guessing at contracts nobody has written is the defect, not
+ *    the fix.
  *  - It does not validate the events it hands to `appendEvent`; the writer is
  *    the one validator, and a refusal comes back as `{ok:false}`. The payload
  *    targets `lib/runtime/event-writer.js#writeEvent`, whose `EVENT_RE` takes

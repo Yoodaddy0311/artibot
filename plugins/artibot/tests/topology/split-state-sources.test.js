@@ -32,6 +32,16 @@
  *  - It does not touch the ledger writer, concurrency, or scale. Fixtures hold
  *    one to three workers.
  *
+ * ── COUPLING, stated so a RED here is read correctly ───────────────────────
+ * The T8 cases pin the CURRENT behaviour of code this limb does not own:
+ * `lib/project-state/projection.js#assignWorkerKeys` (the row-key rule),
+ * `#projectWorker` (the five projected fields) and
+ * `lib/project-state/validate.js#BLOCKER_PATTERN` (the blocker allowlist). A
+ * limb that deliberately changes any of those should carry THIS file in its
+ * allowlist and update it in the same commit. A failure here is therefore a
+ * renegotiation signal — "the contract a future store port would have to meet
+ * just moved" — not automatically a regression.
+ *
  * All fixtures live under `os.tmpdir()` and are removed in `afterEach`.
  */
 
@@ -41,6 +51,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { validateTask } from '../../lib/project-state/validate.js';
+import { LANE_STATES } from '../../lib/supervisor/contracts.js';
 import { readWorkerState } from '../../lib/topology/split-state.js';
 import {
   isPlainObject,
@@ -64,19 +75,49 @@ const LIMB = 'sh11-split-state-store-flip';
 const tmpdirs = [];
 
 /**
- * A real StateStore over a fresh tmpdir.
+ * Is `child` inside `parent`? Separator-safe, unlike a `startsWith` on the
+ * raw strings, which also answers yes for a sibling named `<parent>-2`.
+ *
+ * @param {string} parent
+ * @param {string} child
+ * @returns {boolean}
+ */
+function isInside(parent, child) {
+  const rel = path.relative(parent, child);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * A real StateStore over a fresh tmpdir, GUARDED before it can write.
  *
  * `resolveGitCommonDir` is explicitly NOT supplied, so the store takes its
- * reported fallback (`store-location.js#FALLBACK_RELATIVE`) and every file it
- * writes lands under the tmpdir project root. The caller asserts that before
- * writing anything — a store test that resolved a real git common dir would
- * write into this repository's `.git`.
+ * reported fallback (`store-location.js#FALLBACK_RELATIVE`) and every path it
+ * holds lands under the tmpdir project root. The helper's own default
+ * resolver returns a RELATIVE `'.git'`, which `resolveStoreLocation` resolves
+ * against `projectRoot` and which would therefore also stay inside the
+ * tmpdir; only a resolver yielding an ABSOLUTE path could escape it. The
+ * fallback is chosen here because it is the case a `/split` window would hit,
+ * not because the default is unsafe.
+ *
+ * The containment check lives HERE rather than in one test, so every store any
+ * test opens is guarded structurally, before its first write. It throws rather
+ * than asserting: a harness that has already mis-resolved must not proceed to
+ * write and then report a tidy assertion failure.
  *
  * @returns {{ store: object, projectRoot: string, ledger: object }}
  */
 function realStore() {
   const made = makeStore({ storeOptions: { resolveGitCommonDir: undefined } });
   tmpdirs.push(made.projectRoot);
+  const { store, projectRoot } = made;
+  if (store.location.source !== 'project-root-fallback') {
+    throw new Error(`realStore: expected the project-root fallback, got '${store.location.source}'`);
+  }
+  for (const [label, p] of Object.entries(store.paths)) {
+    if (!isInside(projectRoot, p)) {
+      throw new Error(`realStore: store path '${label}' (${p}) is outside the tmpdir project root`);
+    }
+  }
   return made;
 }
 
@@ -101,20 +142,22 @@ afterEach(() => {
 /* ───────────────── T8 — read-path interlock, real StateStore ────────────── */
 
 describe('T8 — real StateStore -> normalizeStore -> readWorkerState', () => {
-  it('writes nothing outside the tmpdir project root', () => {
+  it('resolves every store path inside the tmpdir project root, before any write', () => {
+    // The guard itself lives in `realStore`, which throws, so it covers every
+    // store this file opens rather than only this case. This test documents
+    // it and names the four paths, so the guard is visible and not merely
+    // implied by the absence of stray files.
     const { store, projectRoot } = realStore();
-    // Asserted BEFORE any write: this is the guard, not a comment about one.
     expect(store.location.source).toBe('project-root-fallback');
-    expect(store.location.dir.startsWith(projectRoot)).toBe(true);
-    expect(store.paths.journal.startsWith(projectRoot)).toBe(true);
-    expect(store.paths.snapshot.startsWith(projectRoot)).toBe(true);
-    expect(store.paths.projection.startsWith(projectRoot)).toBe(true);
+    expect(Object.keys(store.paths).sort()).toEqual(['dir', 'journal', 'projection', 'snapshot']);
+    for (const p of Object.values(store.paths)) expect(isInside(projectRoot, p)).toBe(true);
+    // It observes a resolved LOCATION, not the filesystem: no test here walks
+    // the tree afterwards to prove nothing was written elsewhere.
+    expect(isInside(projectRoot, path.join(projectRoot, '..', 'sibling'))).toBe(false);
   });
 
   it('projects a seeded task into a RawWorker keyed by the limb name', () => {
-    const { store, projectRoot } = realStore();
-    expect(store.location.dir.startsWith(projectRoot)).toBe(true);
-
+    const { store } = realStore();
     const out = seed(store, [task(LIMB, {
       status: 'executing',
       owner: LIMB,
@@ -167,7 +210,7 @@ describe('T8 — real StateStore -> normalizeStore -> readWorkerState', () => {
     });
   });
 
-  it('refuses the WHOLE projection object — a port must unwrap the mission first', () => {
+  it('does NOT refuse the WHOLE projection object — it yields a spurious `active_missions` row', () => {
     const { store } = realStore();
     seed(store, [task(LIMB, { status: 'executing', owner: LIMB })]);
     const projection = store.getProjection();
@@ -228,9 +271,11 @@ describe('T8 — real StateStore -> normalizeStore -> readWorkerState', () => {
     const out = seed(store, [task(LIMB, { status: 'blocked', blockers: [free] })]);
     expect(out.ok).toBe(false);
     expect(out.conflict).toBe(false);
-    expect(out.errors).toEqual([
-      `task ${LIMB}: blockers[0]: '${free}' must match lane:|gate:|human:|reconcile: prefix`,
-    ]);
+    // The REFUSAL is the contract; the wording of project-state's error is
+    // not this file's to own. Matched by pattern so a reworded message there
+    // does not turn this red for no reason.
+    expect(out.errors).toHaveLength(1);
+    expect(out.errors[0]).toMatch(/blockers\[0\]/);
 
     // Refused means nothing landed: the store is still at version 0.
     expect(store.getState().state_version).toBe(0);
@@ -245,10 +290,10 @@ describe('T8 — real StateStore -> normalizeStore -> readWorkerState', () => {
       file_ownership: ['plugins/artibot/lib/topology/split-state.js'],
     });
 
-    // Measured, not inferred. The repository ships no JSON-Schema validator,
-    // so `task-graph.schema.json`'s `additionalProperties: false` is a CI
-    // check, not a runtime one, and the runtime validator says nothing about
-    // unknown keys.
+    // Measured, not inferred. The repository ships no RUNTIME JSON-Schema
+    // validator — `ajv` is a devDependency, so `task-graph.schema.json`'s
+    // `additionalProperties: false` is enforced by the schema tests in CI and
+    // by nothing at runtime. `validate.js` says nothing about unknown keys.
     expect(validateTask(withExtra, MISSION_ID, 0)).toEqual([]);
 
     const out = seed(store, [withExtra]);
@@ -506,7 +551,15 @@ describe('T9 — the derived conversion tables', () => {
     }
   });
 
-  it('LANE_STATE_TO_V11 covers eight of the twelve lane words', () => {
+  it('LANE_STATE_TO_V11 maps exactly eight of the twelve lane words and invents no thirteenth', () => {
+    // The mapping test above pins WHICH word goes where. This one pins the
+    // BOUNDARY: that the derived table covers the lane vocabulary and adds
+    // nothing to it — a hole the per-word test cannot see, because it only
+    // looks up words it already names.
+    expect(LANE_STATES).toHaveLength(12);
+    for (const word of Object.keys(LANE_STATE_TO_V11)) expect(LANE_STATES).toContain(word);
     expect(Object.keys(LANE_STATE_TO_V11)).toHaveLength(8);
+    expect(LANE_STATES.filter((s) => !(s in LANE_STATE_TO_V11)))
+      .toEqual(['CLAIMED', 'CHECKPOINTING', 'FIXING', 'FAILED_TERMINAL']);
   });
 });
