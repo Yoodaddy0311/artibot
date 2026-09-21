@@ -150,6 +150,10 @@ describe('record — a refused resolve is counted and writes nothing', () => {
     expect(fileCount(path.join(storeDir, '.artibot', 'runtime', 'decisions'))).toBe(0);
     // ...and above all not the store the old fall-through would have used.
     expect(fileCount(getDecisionStoreDir({ cwd: process.cwd() }))).toBe(before);
+    // A count cannot see an append onto a same-named file that already sits in
+    // a polluted store, so also pin that the file this run would have created
+    // does not exist at all.
+    expect(fsSync.existsSync(getDecisionEventsPath('run-opts-probe', { cwd: process.cwd() }))).toBe(false);
   });
 
   it('names the first unknown key in sorted order, so the message is stable', () => {
