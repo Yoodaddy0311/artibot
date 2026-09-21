@@ -405,6 +405,7 @@ describe('buildRoutingScorecard — 보류 사유·잔류 카운터 행', () => 
   it('routing.hold_reason_coverage 는 9/11 — 코드 없는 영수증이 여기서 보인다', () => {
     const m = rowOf(holdCard, 'routing.hold_reason_coverage');
     expect([m.numerator, m.denominator, m.absent]).toEqual([9, 11, 0]);
+    expect(m.ratio).toBeCloseTo(9 / 11, 10);
   });
 
   it('routing.residency_counter 는 4/5, coverage 행은 5/11 이고 결측 사유를 나눠 싣는다', () => {

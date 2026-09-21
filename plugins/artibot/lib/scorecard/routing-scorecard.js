@@ -504,9 +504,17 @@ export const RESIDENCY_UNAVAILABLE = 'residency:unavailable';
  * pushes `residency:unavailable` onto `reason[]`. So a bare 0 is ambiguous — it
  * is either "no action since the switch" or "never measured" — and only the
  * reason code tells the two apart. A live read (leader, 2026-09-21 19:16 KST,
- * raw lines) found 243 of 414 receipts carrying that code, every one of them
- * with `actionsSinceSwitch: 0`; counting them as measured zeroes put the row at
- * 124/414 instead of 124/171.
+ * raw lines, not deduped by receipt id) found 243 of 414 receipts carrying that
+ * code, every one of them with `actionsSinceSwitch: 0`; counting them as
+ * measured zeroes put the row at 124/414 instead of 124/171.
+ *
+ * WHAT "MEASURED" CANNOT SEE. It means "the writer did not flag the counter as
+ * unavailable", which is weaker than "the counter was read correctly". The hook
+ * `scripts/hooks/route-observe-pre.js#countActionsSinceSwitch` returns 0 when it
+ * cannot read the ledger tail, and that 0 travels WITHOUT `residency:unavailable`
+ * because an incumbent tier was found. So some measured zeroes (47 of the 171
+ * in the read above) may be read failures; this fold cannot tell, and how many
+ * is unmeasured.
  *
  * The path is `data.actionsSinceSwitch`, a top-level required property of
  * `route-receipt.schema.json` (`type: integer`, `minimum: 0`) — the module rule
