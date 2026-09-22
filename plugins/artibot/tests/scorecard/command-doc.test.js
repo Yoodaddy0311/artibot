@@ -291,6 +291,54 @@ describe('/scorecard — 신규 플래그', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('/scorecard --mission — 최종 미션 카드 절', () => {
+  const MISSION_HEADING = '#### 미션 카드 (`--mission <id>`)';
+
+  it('argument-hint 와 Arguments 절이 --mission <id> 를 싣는다', () => {
+    const hint = current.split('\n').find((l) => l.startsWith('argument-hint:'));
+    expect(hint, 'argument-hint 에 --mission <id> 없음').toContain('--mission <id>');
+    const after = sectionOf(current, '## Arguments').split('\n');
+    expect(after.filter((l) => l.startsWith('- `--mission <id>`'))).toHaveLength(1);
+  });
+
+  it('절이 outcome.md 선행 조건과 양성 단언을 명시한다', () => {
+    // 이 절의 유일한 계약이다. "파일이 없으면 스코어카드도 없다" 를 문장으로만 적고
+    // 스니펫이 존재 확인을 안 하면 fail-open 이므로, 둘 다 본다.
+    const section = sectionOf(current, MISSION_HEADING);
+    expect(section).toContain('파일이 없으면 스코어카드도 없다');
+    expect(section).toContain('outcome_present');
+    expect(section).toContain('existsSync');
+    expect(section).toContain('outcomeArtifactPath');
+    expect(section, '리터럴 true 만 받는다는 서술이 없다').toMatch(/리터럴 `true` 만/);
+  });
+
+  it('절이 저장 없음·unmeasured 규칙·라이브 0 이 정답임을 적는다', () => {
+    const section = sectionOf(current, MISSION_HEADING);
+    expect(section).toContain('아무것도 저장하지 않는다');
+    expect(section).toMatch(/\*\*분모 0 인 지표는 `unmeasured`\*\*/);
+    expect(section).toContain('`0%` 로 쓰지 않는다');
+    // 킬스위치가 false 로 출하되므로 라이브 렌더 0 이 정답이라는 것 — 이 문장이
+    // 빠지면 "경로가 섰으니 SH-20 done" 으로 읽힌다.
+    expect(section).toContain('runtime.artifactLifecycle.enabled');
+  });
+
+  it('못 보는 것의 정본을 모듈 헤더로 미루고 여기에 복제하지 않는다', () => {
+    const section = sectionOf(current, MISSION_HEADING);
+    expect(section).toContain('lib/scorecard/mission-scorecard.js');
+    expect(section).toContain('CANNOT SEE');
+  });
+
+  it('스니펫이 호출하는 sc.* 가 배럴의 함수로 실존한다 (미션 절 한정)', () => {
+    // 부모 절 전체를 보는 위 어서션과 달리 이 절만 본다 — 미션 스니펫에서 호출을
+    // 통째로 지워도 부모 절의 다른 호출들 때문에 green 이 되는 공허 단언을 막는다.
+    const section = sectionOf(current, MISSION_HEADING);
+    const called = [...new Set([...section.matchAll(/\bsc\.(\w+)\(/g)].map((m) => m[1]))].sort();
+    expect(called).toEqual(['buildMissionScorecard', 'renderScorecardMarkdown']);
+    for (const name of called) expect(typeof barrel[name]).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('완료 블록은 여전히 렌더되지 않는다 (T-48 경계)', () => {
   it.each([
     ['📊 작업 진행률'],

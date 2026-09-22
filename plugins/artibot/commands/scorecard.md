@@ -1,6 +1,6 @@
 ---
 description: (Artibot) 기능 완성도 스코어카드 — 기능 영역을 도출해 file:line 증거와 함께 0~100 채점하고 스냅샷 저장, 작업 전후를 "작업 전·작업 후·상승폭·남은 갭" 표로 비교. 트리거 "기능 완성도", "얼마나 남았", "진행률 스코어카드", "작업 전후 비교", "기능별 점수", "완성도 평가", "feature scorecard"
-argument-hint: '[--baseline|--diff|--areas <n>|--session [id]|--routing|--compare]'
+argument-hint: '[--baseline|--diff|--areas <n>|--session [id]|--routing|--compare|--mission <id>]'
 allowed-tools: [Read, Bash, Grep, Glob]
 ---
 
@@ -19,6 +19,7 @@ allowed-tools: [Read, Bash, Grep, Glob]
 - `--session [id]` → **원장 fold** 세션 카드(§35). id 생략 시 현재 세션. 위 세 경로와 엔진·저장소가 다르다 — 아래 "세션/라우팅 카드" 절.
 - `--routing` → **원장 fold** 라우팅 카드(§34 ROUTING). 스냅샷을 저장하지 않는다.
 - `--compare` → **원장 fold** 스폰 비교 카드 — 라우터가 추천한 모델(`route.bound`) 대 실제 서빙 모델(`usage.receipt`). 스냅샷을 저장하지 않는다.
+- `--mission <id>` → **원장 fold** 최종 미션 카드(§34). id 필수. **해당 미션의 `outcome.md` 가 실재할 때만** 렌더된다 — 아래 "미션 카드" 절.
 
 ## 워크플로우 (커맨드가 수행)
 
@@ -116,6 +117,40 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 - `score` 행은 **항상 `unmeasured`**(source 가 null)다 — 원장에 **스폰 키로 점수를 쓰는 기록자가 없다**. 그리고 추천과 서빙이 일치한다는 것은 그 선택이 옳았다는 뜻이 아니다: 일치는 품질이 아니다.
 - `fifo` 처럼 confidence allowlist **밖**에서 묶인 쌍은 비교에서 제외되고 `excluded_fifo` 로 보인다 — 제외는 선택이지 측정이 아니다.
 - 이 카드가 **못 보는 것**은 `lib/replay/spawn-outcome.js` 헤더의 CANNOT SEE 목록이 정본이다(고장인지 정책인지 · fifo 쌍의 정당성 · 멀티모델 런 · 중복 영수증 · 가격 없는 쌍의 비용). 여기에 복제하지 않는다 — 복제하면 두 목록이 갈린다.
+
+#### 미션 카드 (`--mission <id>`)
+
+`--mission` 은 **한 미션의 최종 카드(§34)** 를 접는다. 세션 카드(§35)와 축이 다르다 — 한 미션이 여러 세션에 걸칠 수 있고 그 역도 성립한다(§32). 이 경로도 **아무것도 저장하지 않는다**.
+
+**`outcome.md` 가 없으면 카드도 없다.** 설계 §32~§35 가 "Final Scorecard 는 `outcome.md` 생성과 같은 트리거에서 렌더 — 파일이 없으면 스코어카드도 없다" 로 못박는다. `lib/scorecard/` 는 L2 순수라 파일을 볼 수 없으므로 **존재 확인은 호출부의 일**이고, 결과를 `outcome_present` 로 넘긴다. `buildMissionScorecard` 는 **리터럴 `true` 만** 받는다 — 옵션을 빠뜨린 호출은 통과가 아니라 거부다(빠뜨림이 통과가 되면 미완 미션마다 최종 카드가 서는 fail-open 이 된다).
+
+```
+Bash: node --input-type=module -e "
+const { pathToFileURL } = await import('node:url');
+const path = (await import('node:path')).default;
+const { existsSync } = await import('node:fs');
+const root = process.env.CLAUDE_PLUGIN_ROOT;
+const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
+const { readAllEvents } = await load('lib/runtime/ledger.js');
+const { loadReplay } = await load('lib/replay/index.js');
+const { outcomeArtifactPath } = await load('lib/mission/index.js');
+const sc = await load('lib/scorecard/index.js');
+const args = process.argv.slice(1);
+const at = args.indexOf('--mission');
+const id = at === -1 ? '' : String(args[at + 1] ?? '').trim();
+if (id === '' || id.startsWith('-')) throw new Error('--mission needs a mission id');
+const outcome = outcomeArtifactPath(process.cwd(), id);
+if (!existsSync(outcome)) throw new Error('no outcome.md at ' + outcome + ' — 파일이 없으면 스코어카드도 없다');
+const replay = loadReplay(process.cwd(), { readEvents: readAllEvents });
+const card = sc.buildMissionScorecard(replay, { mission_id: id, outcome_present: true });
+process.stdout.write(sc.renderScorecardMarkdown(card));
+" -- $ARGUMENTS
+```
+
+- **분모 0 인 지표는 `unmeasured`** 다. `0%` 로 쓰지 않는다. 그리고 `outcome.md` 생성은 **킬스위치 뒤**에 있다(`runtime.artifactLifecycle.enabled` 가 false 로 출하) — 그래서 지금 라이브에서 이 카드가 서는 횟수가 **0 인 것이 정답**이다. 이 경로가 착지했다는 것과 SH-20 이 done 이라는 것은 다른 진술이다.
+- `--session`/`--routing` 과 달리 id 를 env 에서 폴백하지 않는다. 미션 id 는 `outcome.md` 경로의 일부라 틀린 id 는 조용한 빈 카드가 아니라 **존재 확인에서 멈춘다**.
+- 카드가 **못 보는 것**(Result=`accepted` · Duration · Useful/Wasteful Switch · Switch Efficiency · Transition Cost/Time · Total Cost · Success@1 · CONTEXT 4행)은 `lib/scorecard/mission-scorecard.js` 헤더의 CANNOT SEE 목록이 정본이다. 여기에 복제하지 않는다 — 복제하면 두 목록이 갈린다. 다섯 행은 **카드에서 빠지지 않고** 영구 `unmeasured` 로 남는다: 부재가 "해당 없음"으로 읽히면 안 된다.
+- 존재 확인은 파일이 **있다**는 것만 말한다. 내용이 미션과 맞는지, 비어 있지 않은지는 보지 않는다 — `outcome.md` 판독은 `lib/mission/outcome-artifact.js` 의 일이고 둘을 대조하는 주체는 아직 없다.
 
 ## 출력
 
