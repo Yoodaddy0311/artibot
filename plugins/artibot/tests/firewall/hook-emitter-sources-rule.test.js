@@ -17,12 +17,17 @@
  *       includes `hook`. The compliant case.
  *   (B) a call into `lib/observability/decision-events.js`. The side-channel —
  *       the destination the rule sends a failing case to.
- *   (C) a hook-reachable append that writes a ROLE source (`gate`, `reviewer`,
- *       `human`) instead of `hook`. Left as-is: whether a `source` names a
- *       process or a role is an open design question and this gate does not
- *       pre-empt it. Each one is listed in `EXCEPTIONS` with its reason.
+ *   (C) a hook-reachable append that names the ROLE of the actor it relays
+ *       (`gate`, `reviewer`, `human`) rather than `hook`. This is criterion
+ *       (3) of the rule OBEYED, not an exception to it: `source` is a role,
+ *       decided 2026-09-22 (V5-BACKLOG §4-d (4)). Listed in `ROLE_SOURCED`,
+ *       and each role is re-checked against that event's allowlist `sources`.
  *   (D) a hook that deliberately binds NO ledger writer and records the gap
  *       instead. Listed in `NON_EMITTERS`, and asserted to stay silent.
+ *   (E) an append whose event name or source cannot be read statically at all
+ *       (resolved at runtime, or injected by the caller). Listed in
+ *       `EXCEPTIONS` with the reason the literal is absent. These are limits
+ *       of the SCANNER, not permissions granted to an emitter.
  *
  * WHY AN AST SCAN AND NOT grep. The emitters do not look alike: some build the
  * envelope inline at the `appendLedgerEvent` call, some return it from a
@@ -37,11 +42,17 @@
  * writer-importing module actually pulls in.
  *
  * ── WHAT THIS GATE CANNOT SEE (rules §9) ────────────────────────────────────
- *   - RUNTIME EMISSIONS. This is a static read. An emitter reached only through
- *     a computed specifier, a spawned child process, or a port injected at call
- *     time is invisible here, and its absence from the table below is not
- *     evidence it does not exist. The live distribution is the Existence
- *     Audit's measurement, not this file's.
+ *   - RUNTIME EMISSIONS. This is a static read. Three loader shapes ARE
+ *     resolved: a literal `await import()`, `loadLibModule(root, ...segments)`,
+ *     and a root-join helper (`const load = (...rel) => import(toFileUrl(
+ *     path.join(pluginRoot, ...rel)))`) — the last one added 2026-09-22 after
+ *     `scripts/hooks/session-end.js` was found emitting `session.ended` and
+ *     `usage.receipt` through it, invisible to all three earlier paths. What
+ *     remains invisible: a specifier whose SEGMENTS are computed (pinned by a
+ *     negative control below), a spawned child process, and a port injected at
+ *     call time. Absence from the table below is not evidence an emitter does
+ *     not exist. The live distribution is the Existence Audit's measurement,
+ *     not this file's.
  *   - WHETHER A CLASSIFICATION IS RIGHT. The gate checks that every emission is
  *     classified and that no exception is stale. It cannot tell a correct
  *     `source` from a plausible one — that is what the reason strings, and a
@@ -98,6 +109,37 @@ function resolveSpecifier(fromFile, spec) {
 }
 
 /**
+ * Names of ROOT-JOIN LOADER helpers declared in this module: a function taking
+ * one rest parameter and importing `path.join(<root>, ...rest)`. Two hooks are
+ * written that way, and `scripts/hooks/session-end.js` reaches the ledger
+ * through one — so without this its `session.ended` append, and the
+ * `usage.receipt` envelope it pulls in, were invisible to the scan: a
+ * fail-open, not a known gap. Shape-matched rather than name-matched, because
+ * the helper is a local `const` with no naming convention behind it.
+ */
+function rootJoinLoaderNames(ast) {
+  const names = new Set();
+  walk(ast, (n) => {
+    if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier') return;
+    const fn = n.init;
+    if (!fn || (fn.type !== 'ArrowFunctionExpression' && fn.type !== 'FunctionExpression')) return;
+    const rest = fn.params.length === 1 && fn.params[0].type === 'RestElement'
+      && fn.params[0].argument.type === 'Identifier' ? fn.params[0].argument.name : null;
+    if (!rest) return;
+    let joinsRest = false;
+    walk(fn.body, (m) => {
+      if (m.type !== 'CallExpression') return;
+      if (!(m.callee.type === 'MemberExpression' && m.callee.property.type === 'Identifier'
+        && m.callee.property.name === 'join')) return;
+      if (m.arguments.some((a) => a.type === 'SpreadElement'
+        && a.argument.type === 'Identifier' && a.argument.name === rest)) joinsRest = true;
+    });
+    if (joinsRest) names.add(n.id.name);
+  });
+  return names;
+}
+
+/**
  * Parse one module: its resolvable dependencies and its module-level string
  * constants. Constants matter because almost no emitter writes the event name
  * inline — `TOOL_USED_EVENT`, `LEDGER_SOURCE` and friends are the normal shape.
@@ -106,6 +148,7 @@ function analyzeModule(root, file) {
   const ast = parse(fs.readFileSync(file, 'utf8'), ESPREE_OPTS);
   const deps = new Set();
   const consts = new Map();
+  const loaders = rootJoinLoaderNames(ast);
   walk(ast, (n) => {
     if (n.type === 'ImportDeclaration') {
       const target = resolveSpecifier(file, n.source.value);
@@ -125,13 +168,24 @@ function analyzeModule(root, file) {
         if (fs.existsSync(target) && fs.statSync(target).isFile()) deps.add(target);
       }
     }
+    // Root-join loader call: the segments are joined onto the PACKAGE root, so
+    // they already carry their own leading directory ('lib', 'runtime', ...).
+    // Only all-literal segments resolve; a computed one stays invisible, which
+    // the negative control below pins so the limit is stated rather than assumed.
+    if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && loaders.has(n.callee.name)) {
+      const segments = n.arguments.map((a) => (a.type === 'Literal' ? a.value : null));
+      if (segments.length > 0 && segments.every((s) => typeof s === 'string')) {
+        const target = path.join(root, ...segments);
+        if (fs.existsSync(target) && fs.statSync(target).isFile()) deps.add(target);
+      }
+    }
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init
         && n.init.type === 'Literal' && typeof n.init.value === 'string'
         && !consts.has(n.id.name)) {
       consts.set(n.id.name, n.init.value);
     }
   });
-  return { file, ast, deps, consts };
+  return { file, ast, deps, consts, loaders };
 }
 
 function literalValue(node, consts) {
@@ -245,17 +299,21 @@ function scanHookEmitters(root) {
 // ---------------------------------------------------------------------------
 
 /**
- * (C) Hook-reachable appends that write a ROLE source rather than `hook`.
- * Keyed by `<path>:<line>` so a moved emitter is re-examined rather than
- * inherited. Every entry must match a collected emission — a stale one is RED.
+ * (C) Hook-reachable appends that name the ROLE of the actor being relayed.
+ * Criterion (3) of the rule, applied — NOT a waiver: each `source` here must
+ * also appear in that event's allowlist `sources`, which the test below
+ * re-checks. Keyed by `<path>:<line>` so a moved emitter is re-examined rather
+ * than inherited. Every entry must match a collected emission; a stale one is
+ * RED.
  */
-const EXCEPTIONS = Object.freeze({
+const ROLE_SOURCED = Object.freeze({
   'lib/verification/verify-writer.js:345': {
     event: 'verify.completed',
     source: 'gate',
-    reason: 'The verification gate, not the hook process, is the witness; the '
-      + 'allowlist registers this event with sources:["gate"] only. Whether '
-      + '`gate` is a process identity or a role is the undecided question.',
+    reason: 'The verification gate, not the hook process, is the witness, and '
+      + 'criterion (3) puts the gate\'s ROLE in `source`; the allowlist '
+      + 'registers this event with sources:["gate"] only, which is that same '
+      + 'decision written on the event.',
   },
   'lib/review/verdict-writer.js:187': {
     event: 'review.completed',
@@ -277,6 +335,14 @@ const EXCEPTIONS = Object.freeze({
       + 'which one a reader sees; the paired human.asked IS the hook\'s own '
       + 'observation and stays source:hook.',
   },
+});
+
+/**
+ * (E) Appends whose event name or source is not a literal anywhere in the
+ * source, so the scan cannot read it. These are limits of the SCANNER, and the
+ * reason states what closes each one instead.
+ */
+const EXCEPTIONS = Object.freeze({
   'lib/runtime/middleware/tasks.js:341': {
     event: null,
     source: 'hook',
@@ -313,6 +379,11 @@ const KNOWN_EMITTER_FLOOR = Object.freeze([
   ['plan.revised', 'scripts/hooks/_plan-observe-record.js'],
   ['mission.completed', 'scripts/hooks/mission-complete-record.js'],
   ['verify.completed', 'lib/verification/verify-writer.js'],
+  // Reached ONLY through the root-join loader in session-end.js. Both were
+  // missing from every earlier version of this scan; they are the floor
+  // entries that keep that resolution from being quietly dropped again.
+  ['session.ended', 'scripts/hooks/session-end.js'],
+  ['usage.receipt', 'lib/economics/receipt-envelope.js'],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -335,8 +406,13 @@ describe('scanner self-check — the collector is not blind', () => {
       + `ledger emissions=${scan.ledgerEmissions.length} side-channel calls=${scan.sideChannelCalls.length} `
       + `recorders=${scan.recorders.size}`;
     expect(line).toMatch(/hook entry points=\d+/);
-    // Measured 2026-09-22 at 3da220c8: 64 / 204 / 17 / 6 / 8. Floors, not pins —
-    // the table below is what must stay exact.
+    // Measured 2026-09-22 in this worktree: 64 / 206 / 17 / 6 / 8. The same
+    // scan without the root-join loader resolution gives 204 / 15, so the two
+    // modules and two emissions that resolution adds are exactly session-end.js
+    // and receipt-envelope.js. (An earlier revision of this comment claimed 17
+    // against a scanner that collected 15; the number was right about the code
+    // and wrong about the scanner.) Floors, not pins — the table below is what
+    // must stay exact.
     expect(scan.entries.length).toBeGreaterThanOrEqual(40);
     expect(scan.modules.size).toBeGreaterThanOrEqual(150);
     expect(scan.recorders.size).toBeGreaterThanOrEqual(6);
@@ -368,6 +444,8 @@ describe('scanner self-check — the collector is not blind', () => {
             handlers: [
               { name: 'planted', script: 'planted.js' },
               { name: 'silent', script: 'silent.js' },
+              { name: 'computed', script: 'computed.js' },
+              { name: 'computed-miss', script: 'computed-miss.js' },
             ],
           },
         },
@@ -396,16 +474,43 @@ describe('scanner self-check — the collector is not blind', () => {
         + 'export function run() { return unrelated(); }\n');
       write('scripts/hooks/unrelated.js',
         "export function unrelated() { return { event: 'hook.fired', source: 'hook' }; }\n");
+      // POSITIVE CONTROL for the root-join loader: the writer is reached only
+      // through `load(...)`, the shape session-end.js uses. Before that
+      // resolution existed this emission was collected by nothing at all.
+      write('scripts/hooks/computed.js',
+        "import path from 'node:path';\n"
+        + "const pluginRoot = process.cwd();\n"
+        + "const load = (...rel) => import(toFileUrl(path.join(pluginRoot, ...rel)));\n"
+        + 'export async function run(root) {\n'
+        + "  const { appendLedgerEvent } = await load('lib', 'runtime', 'ledger.js');\n"
+        + "  return appendLedgerEvent(root, { event: 'hook.fired', source: 'scheduler' });\n"
+        + '}\n');
+      // NEGATIVE CONTROL: same helper shape, but a SEGMENT is computed. It must
+      // stay unresolved, so this module is not an appender and its envelope is
+      // not collected. This is the residual blind spot, pinned rather than
+      // described.
+      write('scripts/hooks/computed-miss.js',
+        "import path from 'node:path';\n"
+        + "const load = (...rel) => import(path.join(process.cwd(), ...rel));\n"
+        + "const which = process.env.WHICH;\n"
+        + 'export async function run(root) {\n'
+        + "  const { appendLedgerEvent } = await load('lib', 'runtime', which);\n"
+        + "  return appendLedgerEvent(root, { event: 'tool.used', source: 'worker' });\n"
+        + '}\n');
 
       const planted = scanHookEmitters(root);
       expect(planted.ledgerEmissions).toEqual([
         { site: 'scripts/hooks/planted.js:5', file: 'scripts/hooks/planted.js', event: 'budget.warning', source: 'scheduler' },
+        { site: 'scripts/hooks/computed.js:6', file: 'scripts/hooks/computed.js', event: 'hook.fired', source: 'scheduler' },
       ]);
       // And the classifier calls it out rather than shrugging.
       const unclassified = planted.ledgerEmissions.filter(
-        (e) => !(e.source === 'hook' && hookPermitted(e.event)) && !(e.site in EXCEPTIONS),
+        (e) => !(e.source === 'hook' && hookPermitted(e.event))
+          && !(e.site in EXCEPTIONS) && !(e.site in ROLE_SOURCED),
       );
-      expect(unclassified.map((e) => e.site)).toEqual(['scripts/hooks/planted.js:5']);
+      expect(unclassified.map((e) => e.site)).toEqual([
+        'scripts/hooks/planted.js:5', 'scripts/hooks/computed.js:6',
+      ]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -413,31 +518,47 @@ describe('scanner self-check — the collector is not blind', () => {
 });
 
 describe('hook emitter sources rule', () => {
-  it('classifies every collected ledger emission as (A) or a listed exception', () => {
+  it('classifies every collected ledger emission as (A), (C) or a listed (E)', () => {
     const unclassified = scan.ledgerEmissions
       .filter((e) => !(e.source === 'hook' && hookPermitted(e.event)))
       .filter((e) => !(e.site in EXCEPTIONS))
+      .filter((e) => !(e.site in ROLE_SOURCED))
       .map((e) => `${e.site} event=${e.event} source=${e.source}`);
     expect(unclassified).toEqual([]);
   });
 
   it('holds every (A) emission to source:hook on a hook-permitted event', () => {
-    const compliant = scan.ledgerEmissions.filter((e) => !(e.site in EXCEPTIONS));
-    expect(compliant.length).toBeGreaterThanOrEqual(9);
+    const compliant = scan.ledgerEmissions.filter(
+      (e) => !(e.site in EXCEPTIONS) && !(e.site in ROLE_SOURCED),
+    );
+    expect(compliant.length).toBeGreaterThanOrEqual(11);
     for (const e of compliant) {
       expect(e.source, `${e.site} must declare source:'hook'`).toBe('hook');
       expect(hookPermitted(e.event), `${e.site} emits ${e.event}, which the allowlist does not permit from a hook`).toBe(true);
     }
   });
 
-  it('keeps every exception live, matching, and reasoned', () => {
+  it('keeps every listed site live, matching, and reasoned', () => {
     const bySite = new Map(scan.ledgerEmissions.map((e) => [e.site, e]));
-    for (const [site, entry] of Object.entries(EXCEPTIONS)) {
+    for (const [site, entry] of [...Object.entries(ROLE_SOURCED), ...Object.entries(EXCEPTIONS)]) {
       const found = bySite.get(site);
-      expect(found, `stale exception: no emission at ${site}`).toBeDefined();
+      expect(found, `stale listing: no emission at ${site}`).toBeDefined();
       expect(found.event, `${site} event drifted`).toBe(entry.event);
       expect(found.source, `${site} source drifted`).toBe(entry.source);
       expect(entry.reason.length, `${site} needs a reason`).toBeGreaterThan(40);
+    }
+  });
+
+  it('registers every (C) role in the allowlist sources of its event', () => {
+    // Criterion (3) is only meaningful if the role is a role the event admits.
+    // Without this, ROLE_SOURCED would be a waiver list wearing a new name.
+    for (const [site, entry] of Object.entries(ROLE_SOURCED)) {
+      const spec = allowlist.events?.[entry.event];
+      expect(spec, `${site}: ${entry.event} is not in the allowlist at all`).toBeDefined();
+      expect(
+        spec.sources === null || spec.sources === undefined || spec.sources.includes(entry.source),
+        `${site} writes source:${entry.source}, which ${entry.event} does not register`,
+      ).toBe(true);
     }
   });
 
