@@ -56,6 +56,7 @@ import { sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { missionMutator } from '../../lib/runtime/middleware/tasks.js';
+import { validateController } from '../../lib/project-state/validate.js';
 import { checkSpanConsistency, parseIntentMd, serializeIntentMd } from '../../lib/intent/artifact.js';
 import {
   intentArtifactPath,
@@ -437,6 +438,63 @@ describe('intent-observe-pre — the hook as the host runs it (child process)', 
     expect(mission.title).toBe(DEFERRED_TITLE);
     expect(mission.intent.revision).toBe(1);
     expect(mission.intent.path).toBe(`missions/${missionId}/intent.md`);
+  });
+
+  // -------------------------------------------------------------------------
+  // OB-10 follow-up (b): stage ② opens rows too, so it records a controller.
+  //
+  // Stage ① (`tasks.js#recordMissionState`) has composed the controller onto
+  // its mutator since OB-10. Stage ② wrote the SAME row through the SAME
+  // `missionMutator` and left the slot empty, so which of the two stages opened
+  // a mission decided whether it had a controller at all — a difference the
+  // design §3.1 says must not exist. Both stages now compose, and neither
+  // arbitrates: the record is an observation in both.
+  // -------------------------------------------------------------------------
+
+  it('rides a controller into the row it promotes, on the same single write', () => {
+    expect(seedDeferred().ok).toBe(true);
+
+    const r = runHook(writePayload(), home);
+    expect(r.status).toBe(0);
+    expect(r.stdoutBytes).toBe(0);
+
+    const mission = openStore(repo).getMission(missionId);
+    expect(mission).not.toBeNull();
+    // Stage ② is the one that opened this row, so the claim is this session's.
+    expect(mission.controller).toBeTypeOf('object');
+    expect(mission.controller.session_id).toBe(SESSION_ID);
+    expect(mission.controller.lease.owner).toBe(SESSION_ID);
+    expect(mission.controller.lease.session_id).toBe(SESSION_ID);
+    // The real validator, not a re-spelling of the schema in the test.
+    expect(validateController(mission.controller, missionId)).toEqual([]);
+
+    // THE CONTROLLER RIDES THE EXISTING WRITE. Neither number may move: a
+    // second `state.updated` would mean a second commit bought the field.
+    const ledger = readRunLedger(repo);
+    expect(ledger.filter((l) => l.event === 'mission.created')).toHaveLength(1);
+    expect(ledger.filter((l) => l.event === 'state.updated')).toHaveLength(1);
+  });
+
+  it('pins the lease to ONE instant, not to two reads of the clock', () => {
+    // The store's record `ts` and the lease instants come from the same reading
+    // in stage ①. Stage ② read `Date.now()` inline for the store and would have
+    // read it again for the lease, so the two could straddle any boundary the
+    // scheduler put between them. Asserting they are ordered and close is the
+    // strongest claim a child-process test can make; equality of the two is
+    // pinned structurally by the single `nowMs` the hook now threads.
+    expect(seedDeferred().ok).toBe(true);
+    expect(runHook(writePayload(), home).status).toBe(0);
+
+    const { lease } = openStore(repo).getMission(missionId).controller;
+    const acquired = Date.parse(lease.acquired_at);
+    const heartbeat = Date.parse(lease.heartbeat_at);
+    const expires = Date.parse(lease.expires_at);
+
+    expect(Number.isNaN(acquired)).toBe(false);
+    // A fresh acquisition: all three derive from ONE instant, so the first two
+    // are equal rather than merely near, and the window is ahead of both.
+    expect(heartbeat).toBe(acquired);
+    expect(expires).toBeGreaterThan(acquired);
   });
 
   it('is latched: a second Write in the same session appends no second mission.created', () => {
