@@ -397,6 +397,7 @@ const INVENTORY = {
   'runtime/event-writer.js': x('the run-ledger append primitive. Validates idempotency_key as an optional envelope key and authors no event.'),
   'runtime/ledger.js': x('thin wrapper: appendLedgerEvent forwards to writeEvent and assembles nothing.'),
   'replay/replay.js': x('READER. Its event/session_id/source members are projections off ledger lines it reads back.'),
+  'handoff/state-version-port.js': x('READ-ONLY state-version port, discovered only because createStateStore requires an appendEvent key and this module passes a REFUSING stub for it. It assembles no envelope and owns no store: a grep of the file for the fs write APIs (writeFile, appendFile, mkdir, createWriteStream, rename, unlink) returns 0 hits over 98 lines, measured 2026-09-22, and the paired test hashes a tree before and after the call and asserts the digest unchanged in 2 places - the store directory and the project root (tests/handoff/state-version-port.test.js, hashDir plus the two expect(hashDir(...)).toBe(before) assertions). No key.'),
 
   // --- supervisor and observability stores ----------------------------------
   'supervisor/run-store.js': x('supervisor ndjson. Dedupes on actionId and returns duplicate:true on a repeat - a real idempotency key under a different name.'),
