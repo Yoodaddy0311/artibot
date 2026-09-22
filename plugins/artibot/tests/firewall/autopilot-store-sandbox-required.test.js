@@ -53,6 +53,9 @@
  * prove neither. The module scan below covered `lib/` and
  * `scripts/` and found exactly two files naming the store path in code; both
  * are listed in `KNOWN_STORE_PATH_MODULES` with the reason they are there.
+ * A THIRD was added 2026-09-22 — a read-only census CLI that mirrors the
+ * resolver rather than importing it; see its entry for why. The "two" above is
+ * the 2026-09-21 measurement and is left as measured; the list is the count.
  *
  * THE RULE IS AN ALLOWLIST on both axes — the module ratchet is an explicit
  * list, not a pattern that happens to match today. A denylist of known-bad
@@ -269,6 +272,16 @@ const KNOWN_STORE_PATH_MODULES = [
   // reaches no writer. Listed rather than pattern-excluded: narrowing the
   // pattern to skip it would also skip a real assembler spelled the same way.
   'lib/core/doctor-fix.js',
+  // A READ-ONLY census of `state.recoveryJournal` (V5-BACKLOG §4-b CA-03 b).
+  // It genuinely is a SECOND assembly site and that is the cost being recorded
+  // here, not waived: it cannot import the resolver, because the resolver
+  // lives in the writer module and that reader's paired test enforces a
+  // writer-import allowlist. It mirrors the env PAIR with the same
+  // fail-closed semantics (`tests/ledger/recovery-journal-census.test.js`
+  // pins the unpaired and wrong-root discards), and it opens nothing for
+  // writing — so it can reach no store, sandboxed or real. If the resolver's
+  // pairing rule ever changes, THIS copy is the one that will not notice.
+  'scripts/ledger/recovery-journal-census.mjs',
 ];
 
 /** Repo-relative POSIX paths of `lib/` + `scripts/` sources spelling the path. */
