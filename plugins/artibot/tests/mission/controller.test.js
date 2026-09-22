@@ -34,6 +34,7 @@ import {
   DEFAULT_CONTROLLER_TTL_MS,
   foldControllerCensus,
   observeController,
+  recommendControllerTransition,
 } from '../../lib/mission/controller.js';
 import { observeController as observeViaBarrel } from '../../lib/mission/index.js';
 import { isLeaseExpired } from '../../lib/project-state/lease.js';
@@ -326,5 +327,146 @@ describe('foldControllerCensus', () => {
     expect(census.with_controller).toBe(1);
     expect(census.live).toBe(1);
     expect(census.distinct_sessions).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OB-10 follow-up (a): the observation STOPS BEING DISCARDED.
+//
+// `composeControllerMutator` already computed all four judgements and then
+// dropped three quarters of the answer on the floor — it destructured
+// `{ controller }` and never told anyone WHICH of `acquired`/`renewed`/`held`/
+// `expired` produced it. The caller could therefore see that a controller was
+// recorded but not that it belonged to somebody else, which is the single most
+// interesting thing this module knows.
+//
+// The report rides the MUTATOR, not the return value, because `updateMission`
+// owns the return value and re-runs the mutator on a CAS conflict. A sink the
+// composer hands back would have to be reconciled across those two runs; a
+// property on the function is simply "what it last observed", which is exactly
+// what the committed row reflects.
+// ---------------------------------------------------------------------------
+
+describe('composeControllerMutator — the observation it reports', () => {
+  const base = (current) => ({ ...current, title: 'ship the census' });
+
+  it('reports null until the mutator has actually run', () => {
+    expect(composeControllerMutator(base, { sessionId: 's1', now: T0 }).observation).toBeNull();
+  });
+
+  it.each([
+    ['acquired', null, 's1', T0],
+    ['renewed', { controller: controllerAt('s1', T0) }, 's1', T0 + MINUTE],
+    ['held', { controller: controllerAt('s1', T0) }, 's2', T0 + MINUTE],
+    ['expired', { controller: controllerAt('s1', T0) }, 's2', T0 + 31 * MINUTE],
+  ])('reports %s', (expected, current, sessionId, now) => {
+    const mutator = composeControllerMutator(base, { sessionId, now });
+    mutator(current);
+
+    expect(mutator.observation).toBe(expected);
+    // No new word may enter by this route: whatever is reported has to already
+    // be one of the four the module publishes.
+    expect(CONTROLLER_OBSERVATIONS).toContain(mutator.observation);
+  });
+
+  it('reports the LAST run, which is what a CAS retry re-runs', () => {
+    const mutator = composeControllerMutator(base, { sessionId: 's2', now: T0 + MINUTE });
+
+    mutator(null);
+    expect(mutator.observation).toBe('acquired');
+
+    // The retry sees the row the winner of the race wrote.
+    mutator({ controller: controllerAt('s1', T0) });
+    expect(mutator.observation).toBe('held');
+  });
+
+  it('leaves the report untouched when the base removes the row', () => {
+    // A deletion makes no observation, so there is nothing to report and the
+    // previous answer must not be overwritten with a guess.
+    const mutator = composeControllerMutator(() => null, { sessionId: 's1', now: T0 });
+
+    expect(mutator({})).toBeNull();
+    expect(mutator.observation).toBeNull();
+  });
+
+  it('still leaves a foreign record byte-identical while reporting it', () => {
+    // The whole point of the follow-up is that REPORTING is not TAKING.
+    const current = { controller: controllerAt('s1', T0) };
+    const before = JSON.stringify(current.controller);
+    const mutator = composeControllerMutator(base, { sessionId: 's2', now: T0 + MINUTE });
+
+    const next = mutator(current);
+
+    expect(mutator.observation).toBe('held');
+    expect(next.controller).toBe(current.controller);
+    expect(JSON.stringify(next.controller)).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OB-10 follow-up (b): a RECOMMENDATION, and nothing else.
+//
+// Decision 7 shrank CA-14 and moved reclaim into CA-09, so this stage still may
+// not act. What it may now do is say what a later stage COULD do — and only
+// when the caller explicitly asks. The default answer is `null`, which is the
+// difference between "nothing to reclaim" and "nobody asked".
+// ---------------------------------------------------------------------------
+
+describe('recommendControllerTransition', () => {
+  it('is OFF by default: every observation recommends nothing', () => {
+    for (const observation of CONTROLLER_OBSERVATIONS) {
+      expect(recommendControllerTransition(observation)).toBeNull();
+      expect(recommendControllerTransition(observation, {})).toBeNull();
+      expect(recommendControllerTransition(observation, { enabled: false })).toBeNull();
+    }
+  });
+
+  it('marks only an expired lease reclaimable, once the caller opts in', () => {
+    expect(recommendControllerTransition('expired', { enabled: true }))
+      .toEqual({ observation: 'expired', reclaimable: true });
+
+    for (const observation of ['acquired', 'renewed', 'held']) {
+      expect(recommendControllerTransition(observation, { enabled: true }))
+        .toEqual({ observation, reclaimable: false });
+    }
+  });
+
+  it('introduces no vocabulary of its own', () => {
+    const reported = CONTROLLER_OBSERVATIONS
+      .map((o) => recommendControllerTransition(o, { enabled: true }).observation);
+
+    expect(reported).toEqual([...CONTROLLER_OBSERVATIONS]);
+  });
+
+  it.each([['reclaimed'], ['queued'], ['']])(
+    'answers null for %s, which is not one of the four',
+    (observation) => {
+      expect(recommendControllerTransition(observation, { enabled: true })).toBeNull();
+    },
+  );
+
+  it.each([[null], [undefined], [7], [{}]])(
+    'answers null rather than throwing for a non-observation argument',
+    (observation) => {
+      expect(recommendControllerTransition(observation, { enabled: true })).toBeNull();
+    },
+  );
+
+  it('is pure: frozen result, untouched arguments, same answer twice', () => {
+    const opts = { enabled: true };
+    const first = recommendControllerTransition('expired', opts);
+    const second = recommendControllerTransition('expired', opts);
+
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(first).not.toBe(second);
+    expect(first).toEqual(second);
+    expect(opts).toEqual({ enabled: true });
+  });
+
+  it('only enables on a literal true, never on a truthy value', () => {
+    // A gate that opens on `'no'` or `1` is a gate that opens by accident.
+    for (const enabled of ['yes', 1, {}, []]) {
+      expect(recommendControllerTransition('expired', { enabled })).toBeNull();
+    }
   });
 });

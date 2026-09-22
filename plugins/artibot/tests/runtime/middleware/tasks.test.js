@@ -7,7 +7,7 @@ import { sessionFallbackMissionId } from '../../../lib/runtime/event-writer.js';
 import { appendLedgerEvent, readLedgerCensus } from '../../../lib/runtime/ledger.js';
 import { createStateStore, readJournal } from '../../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../../lib/project-state/git-common-dir.js';
-import { buildControllerRecord } from '../../../lib/mission/controller.js';
+import { buildControllerRecord, CONTROLLER_OBSERVATIONS } from '../../../lib/mission/controller.js';
 import { DEFAULT_STALE_MS } from '../../../lib/project-state/lease.js';
 import { validateController } from '../../../lib/project-state/validate.js';
 import {
@@ -583,6 +583,90 @@ describe('middleware/tasks — StateStore wiring on mission.created', () => {
     expect(eventsNamed('state.updated')).toHaveLength(1);
     expect(upsertsFor(missionId())).toHaveLength(1);
     expect(controllerOf().session_id).toBe(SESSION_ID);
+  });
+
+  // -------------------------------------------------------------------------
+  // OB-10 follow-up (a): the observation reaches the CALLER.
+  //
+  // Before this, `composeControllerMutator` judged the slot four ways and the
+  // middleware kept only the record. A prompt could therefore see that a
+  // controller was stored without seeing that it belonged to somebody else —
+  // the single fact worth reporting. `store.controller_observation` carries it,
+  // and every case below re-asserts that carrying it changed nothing else: the
+  // write count, the ledger vocabulary and the foreign record's bytes all hold.
+  // -------------------------------------------------------------------------
+
+  it('reports acquired on the store record, on the same single write', async () => {
+    const result = await run(SUBSTANTIVE);
+    const store = result.context.tasks.mission.store;
+
+    expect(store.status).toBe('written');
+    expect(store.controller_observation).toBe('acquired');
+    // No word may enter here that the module does not already publish.
+    expect(CONTROLLER_OBSERVATIONS).toContain(store.controller_observation);
+
+    // The report is free: same events, same count, same vocabulary.
+    expect(eventsNamed('mission.created')).toHaveLength(1);
+    expect(eventsNamed('state.updated')).toHaveLength(1);
+    expect(upsertsFor(missionId())).toHaveLength(1);
+  });
+
+  it('reports renewed when the same session prompts again', async () => {
+    const mw = createTasksMiddleware({ now: () => NOW_MS });
+
+    const first = await mw(storeState(SUBSTANTIVE));
+    const second = await mw(storeState(SUBSTANTIVE));
+
+    expect(first.context.tasks.mission.store.controller_observation).toBe('acquired');
+    expect(second.context.tasks.mission.store.controller_observation).toBe('renewed');
+  });
+
+  it.each([
+    ['held', 0],
+    ['expired', DEFAULT_STALE_MS + 60_000],
+  ])('reports %s for another session, leaving its record byte-identical', async (
+    expected, ageMs,
+  ) => {
+    // Staged exactly like the byte-identity case above: session A's controller
+    // is planted under session B's row, and then B prompts.
+    const SESSION_B = 'sess-other';
+    const idB = sessionFallbackMissionId(SESSION_B, new Date(NOW_MS));
+    const planted = buildControllerRecord({ sessionId: SESSION_ID, now: NOW_MS - ageMs });
+
+    const planter = createStateStore({
+      projectRoot,
+      sessionId: SESSION_ID,
+      source: 'hook',
+      now: () => new Date(NOW_MS),
+      appendEvent: (envelope) => appendLedgerEvent(projectRoot, envelope),
+      resolveGitCommonDir: () => resolveGitCommonDir(projectRoot),
+    });
+    expect(planter.updateMission(idB, () => ({
+      title: 'planted by session A',
+      status: 'executing',
+      intent: { path: `missions/${idB}/intent.md`, revision: 1 },
+      plan: { path: `missions/${idB}/plan.md`, revision: 1 },
+      controller: planted,
+    }), { reason: 'test.plant' }).ok).toBe(true);
+
+    const result = await createTasksMiddleware({ now: () => NOW_MS })(
+      storeState(SUBSTANTIVE, { session_id: SESSION_B }),
+    );
+
+    expect(result.context.tasks.mission.store.controller_observation).toBe(expected);
+    // REPORTING IS NOT TAKING. An `expired` reading in particular must not have
+    // tempted anything into reclaiming the slot — that is CA-09's decision.
+    expect(controllerOf(idB)).toEqual(planted);
+  });
+
+  it('reports null rather than a word when nothing was written', async () => {
+    const result = await run(DEFERRED);
+    const store = result.context.tasks.mission.store;
+
+    expect(store.status).toBe('skipped');
+    // `null` and a word are different claims: no observation was made, as
+    // opposed to one that found nothing.
+    expect(store.controller_observation).toBeNull();
   });
 
   it('renews the same session lease on a later prompt, keeping acquired_at fixed', async () => {
