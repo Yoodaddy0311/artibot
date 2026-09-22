@@ -198,38 +198,71 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // run's first character from `\w` to `[A-Za-z_]` and drops the `[+-]`
   // alternative, so it removes alternatives rather than adding any. (f) edits a
   // negative lookahead of fixed width. None of the three adds a quantifier.
-  // THAT CLAIM IS ABOUT BRANCHES (d), (e), (f) AND (g) ONLY, not about the
-  // whole rule. The recursive-flag lookahead `-[a-z]*[r][a-z]*` — untouched in
-  // THIS commit — IS a pair of star runs over one class around a mandatory
-  // letter, and it measured QUADRATIC on 2026-09-21 and again on 2026-09-22
-  // (node v24.15.0): payload `rm -` + 'r' x n + `_`, rule-alone median of 3
-  // 8.8 / 34.6 / 151.1 ms at n = 2,500 / 5,000 / 10,000, whole classifyRisk
-  // 36.8 / 129.7 / 657.8 ms. Neither gate saw it: the static scanner collects
-  // negated classes only, and no scaled payload built a run of the flag letter.
-  // Fixed in the NEXT commit of this limb by a language-preserving token swap;
-  // read the note above the flag lookahead there for the after-numbers.
-  // THE TABLE BELOW IS FROM 2026-09-14 AND WAS NOT RE-MEASURED after the
-  // 2026-09-21 edits, which moved both the tilde and the home-variable branch.
-  // Read it as the pre-edit shape, not as a current measurement.
-  // Rule-alone median of 3 at 122,880B (node v24.15.0, Windows):
-  // option run 0.47ms, space run 0.65ms, quote-root fill 0.01ms, tilde-paren
-  // fill 0.01ms — the same shape as before the edit (option run 0.49ms). The
-  // 2026-09-21 branches are swept by single-run payloads instead, because a
-  // dense repeating input matches at the first position and never enters the
-  // name run at all: `tilde-name run`, `tilde-dot run` and `brace-home
-  // near-miss` in tests/autopilot/safety.test.js, growth-ratio at 6x plus a
-  // 10K/20K/40K/120K structural sweep. The next change to either branch must
-  // re-measure the 120KB rows and date them.
+  // THE FLAG LOOKAHEAD WAS QUADRATIC UNTIL 2026-09-22 (guard-rm-flag-redos).
+  // It read `-[a-z]*[r][a-z]*`: a pair of star runs over ONE class around a
+  // mandatory letter, so a payload made only of that letter splits n ways and
+  // every split is retried. Measured twice (node v24.15.0, payload
+  // `rm -` + 'r' x n + `_`, rule-alone median of 3, n = 2,500 / 5,000 /
+  // 10,000):
+  //   2026-09-21   6.5 /  25.7 / 118.3 ms   (and 930.7 ms at n = 20,000)
+  //   2026-09-22   8.8 /  34.6 / 151.1 ms   whole classifyRisk 36.8 / 129.7 /
+  //                                          657.8 ms
+  // NEITHER EXISTING GATE SAW IT. The static scanner collects negated classes
+  // and `.` only, so a POSITIVE class run is outside it by construction, and no
+  // scaled payload built a run of the flag letter — dense repeating input
+  // matches at the first position and never enters the run.
+  // THE FIX IS A LANGUAGE-PRESERVING TOKEN SWAP, not a narrower language:
+  // `-[a-z]*[r][a-z]*` -> `-[a-qs-z]*r[a-z]*`, and the force twin
+  // `-[a-z]*[f][a-z]*` -> `-[a-eg-z]*f[a-z]*`. Forbidding the letter in the
+  // FIRST run only forces the mandatory letter to bind to its leftmost
+  // occurrence, which every match already had; the set of accepted strings is
+  // unchanged. Under /i the class folds, so `[a-qs-z]` excludes `R` as well as
+  // `r` while the mandatory `r` still matches both — uppercase handling is
+  // preserved, not narrowed. Same token in rm-rf-broad, rm-rf-path,
+  // rm-recursive-path and the L1 rules in lib/core/blocked-patterns.js.
+  // After (same machine, same payloads): rule-alone 0.02 / 0.04 / 0.08 ms,
+  // and 122,880B returns in 0.50 ms. Evidence that the language did not move:
+  // 2,396,736 differential cases with 0 mismatches (flag tokens over
+  // {r,f,x,R,F,9,_,-} at every length 0..5, 8 command templates, 8 rule pairs),
+  // pinned in tests/autopilot/safety.test.js against a FROZEN copy of the old
+  // fragment, plus a 1,967-string corpus whose level and matchedId are
+  // byte-identical before and after.
+  // 122,880B TABLE — RE-MEASURED 2026-09-22 (guard-rm-flag-redos), node
+  // v24.15.0, Windows, median of 3, on the CURRENT shape of every branch. It
+  // replaces the 2026-09-14 table, which carried a "not re-measured" warning
+  // after the 2026-09-21 tilde and home-variable edits.
+  //   payload                    rm-rf-root alone   whole classifyRisk  level
+  //   option run                       0.17 ms            4.75 ms       safe
+  //   space run                        0.04               1.58          safe
+  //   quote-root fill                  0.00               3.82          danger
+  //   tilde-paren fill                 0.00               2.28          danger
+  //   tilde-name run                   0.53               3.10          caution
+  //   tilde-dot run                    0.23               1.11          caution
+  //   brace-home near-miss             0.35               2.54          caution
+  //   rm flag run (r)                  0.45               3.33          safe
+  //   rm force run (reachable)         0.45               2.61          safe
+  //   rm flag run (matching)           0.19               1.08          danger
+  // The last three rows are new: they are the FLAG-token sweep this rule went
+  // without until 2026-09-22. Dense repeating input matches at the first
+  // position and never enters a run, so every branch with a quantifier needs a
+  // LONG SINGLE RUN of its own — that is why `tilde-name run`, `tilde-dot run`
+  // and now the flag rows exist in tests/autopilot/safety.test.js alongside the
+  // 6x growth ratio and the 10K/20K/40K/120K structural sweep.
+  // `rm force run` leads with `-r` on purpose: a payload of bare 'f' never
+  // reaches the force lookahead, because the recursive one is evaluated first
+  // and fails. Measured 2026-09-22 — an all-'f' run was 0.8 ms at 40,962B even
+  // on the quadratic shape, a green that proves nothing.
+  // The next change to any branch must re-measure these rows and date them.
   {
     id: 'rm-rf-root',
     level: 'danger',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:[A-Za-z_][\w.-]*)?(?:\s|$|\/|[;&|()<>"'`])|\$(?:HOME|\{HOME\})(?:\s|$|\/|[;&|()<>"'`]))/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-qs-z]*r[a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:[A-Za-z_][\w.-]*)?(?:\s|$|\/|[;&|()<>"'`])|\$(?:HOME|\{HOME\})(?:\s|$|\/|[;&|()<>"'`]))/i,
     reason: 'rm -rf on root or home',
   },
   {
     id: 'rm-rf-broad',
     level: 'danger',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+\*/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-qs-z]*r[a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+\*/i,
     reason: 'rm -rf with broad glob',
   },
   // Keep after rm-rf-root/rm-rf-broad: those two own the root and glob targets
@@ -251,7 +284,7 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   {
     id: 'rm-rf-path',
     level: 'caution',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-qs-z]*r[a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-eg-z]*f[a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
     reason: 'recursive delete of a scoped path (blocked at PreToolUse by blocked-patterns)',
   },
   // Keep AFTER rm-rf-path. classifyRisk returns the FIRST caution it meets, so
@@ -296,7 +329,7 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   {
     id: 'rm-recursive-path',
     level: 'caution',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-qs-z]*r[a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
     reason: 'recursive delete of a scoped path without a force flag (L1 blocks it inside its 512-char window; this closes the full-stack gap past it)',
   },
   // Owner decision 2026-09-11 ③: L1 (blocked-patterns.js `dd\s+if=`, category

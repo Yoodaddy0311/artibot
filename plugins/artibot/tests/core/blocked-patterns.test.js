@@ -1240,6 +1240,23 @@ describe('blocked-patterns', () => {
       ['unbalanced quote', (size) => `echo "${'a'.repeat(Math.max(0, size - 6))}`.slice(0, size)],
       ['comment run', (size) => filler('# x\n', size)],
       ['backslash continuation run', (size) => filler(`x ${BACKSLASH}\n`, size)],
+      // ── 2026-09-22 (guard-rm-flag-redos) 플래그 런 ────────────────────────
+      // 이 표의 다른 11형은 전부 **전처리·정규화**를 겨냥한다. rm 규칙 4종의
+      // 플래그 토큰 자체를 긴 단일 런으로 미는 형은 하나도 없었고, 그 자리가
+      // 2차식이었다: `-\w*r\w*f` · `-\w*f\w*r` · `-\w*[rf]\w*` ·
+      // `-[a-z]*r[a-z]*`/`-[a-z]*f[a-z]*` 는 모두 같은 클래스 star 런 둘이
+      // 필수 글자를 낀 모양이라, 그 글자로만 채운 입력이 n 갈래로 쪼개진다.
+      // 위 창 경계 쌍은 이것을 못 본다 — 필러가 `a` 라 플래그 토큰은 언제나
+      // 짧은 `-rf` 다. 정적 스캐너도 못 본다(긍정 클래스, regex-scan.js 헤더
+      // 1-b). 수리 전 실측(node v24.15.0, 1회, 규칙 단독 40,962B): 'r' 런에서
+      // `rm -rf with path` 46.9ms(10,000B)→2차식, `rm with wildcard` 46.1ms,
+      // `rm recursive+force` 64.4ms. 수리 후 전부 0.01ms 대.
+      // 꼬리 `_` 는 `\b`/`(?![\w-])` 를 깨서 **모든 갈래가 실패**하게 만든다.
+      ['rm flag run', (size) => `rm -${'r'.repeat(Math.max(0, size - 5))}_`.slice(0, size)],
+      // force 쪽은 앞에 `-r` 을 둬야 도달한다 — 재귀 lookahead 가 먼저
+      // 평가돼 실패하면 force 런은 한 번도 안 읽힌다(실측 2026-09-22:
+      // 바로 'f' 로 채운 런은 수리 전에도 40,962B 0.8ms, 증명력 0).
+      ['rm force run', (size) => `rm -r -${'f'.repeat(Math.max(0, size - 8))}_`.slice(0, size)],
     ];
 
     it.each(PREPROCESS_SHAPES)('builds the %s shape at the exact requested size', (_name, build) => {

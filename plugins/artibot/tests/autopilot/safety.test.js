@@ -519,7 +519,7 @@ describe('classifyRisk — tilde/$HOME targets rm-rf-root does not claim are cau
   // 먼저 깨진다.
   it('keeps the two path rules byte-identical apart from the force lookahead', () => {
     const byId = (id) => DANGEROUS_PATTERNS.find((r) => r.id === id);
-    const forceLookahead = '(?=(?:\\s+--?\\w[\\w-]*)*\\s+(?:--force|-[a-z]*[f][a-z]*)(?![\\w-]))';
+    const forceLookahead = '(?=(?:\\s+--?\\w[\\w-]*)*\\s+(?:--force|-[a-eg-z]*f[a-z]*)(?![\\w-]))';
     expect(byId('rm-rf-path').test.source).toContain(forceLookahead);
     expect(byId('rm-rf-path').test.source.replace(forceLookahead, ''))
       .toBe(byId('rm-recursive-path').test.source);
@@ -1445,6 +1445,27 @@ const SCALED_PAYLOADS = [
   ['tilde-name run', (n) => `rm -rf ~${'a'.repeat(n - 9)}*`],
   ['tilde-dot run', (n) => `rm -rf ~a${'.'.repeat(n - 10)}*`],
   ['brace-home near-miss', (n) => fill('rm -rf ${HOMEDIR} ', n)],
+  // 2026-09-22 (guard-rm-flag-redos) — **플래그 런**. 위 행들이 전부 타깃 쪽
+  // 수량자를 겨냥하는 동안 플래그 토큰은 한 번도 스윕되지 않았고, 그 자리가
+  // 2차식이었다. 왜 종전 행들이 못 봤는지는 regex-scan.js 헤더 1-b 에 있다:
+  // `'rm -rf '` 류 촘촘한 반복은 첫 위치에서 판정이 끝나 플래그 런 안으로
+  // 들어가지 않는다. 그래서 **quantifier 마다 긴 단일 런**이 필요하다.
+  //   `rm -` + 'r'×(n-5) + `_`  — 재귀 lookahead `-[a-z]*[r][a-z]*` 의 두 런이
+  //     같은 문자로 채워져 n 갈래로 쪼개진다. 꼬리 `_` 는 `(?![\w-])` 를 깨서
+  //     **모든 갈래가 실패**하게 만든다 — 이 수량자의 최악형이다.
+  //   `rm -r -` + 'f'×(n-8) + `_`  — force lookahead 전용. **그냥 'f' 로 채우면
+  //     안 된다**: 재귀 lookahead 가 먼저 평가돼 곧장 실패하므로 force 토큰은
+  //     한 번도 안 읽힌다(실측 2026-09-22: 'f'×n 단일 런은 수리 전에도
+  //     40,962B 0.8ms — 아무것도 증명하지 못하는 그린이다). 앞에 `-r` 을 둬
+  //     재귀 쪽을 **통과시켜야** force 런에 도달한다.
+  // 수리 전 실측(node v24.15.0, classifyRisk 전체, 1회): 'r' 런 1,949.8ms
+  // (20,480B) · 7,726.3ms (40,962B) — 위 `< 200ms` smoke 단언이 RED 다. force
+  // 런 452.0ms · 1,758.2ms, 역시 RED. 수리 후 각각 1.03ms · 0.85ms.
+  ['rm flag run (r)', (n) => `rm -${'r'.repeat(n - 5)}_`],
+  ['rm force run (reachable)', (n) => `rm -r -${'f'.repeat(n - 8)}_`],
+  // 양성 대조군 — 실패형만 재면 "안 걸려서 빨랐다"와 구별되지 않는다. 런이
+  // 유효한 플래그 토큰으로 끝나고 타깃이 뒤에 오면 규칙이 실제로 매치한다.
+  ['rm flag run (matching)', (n) => `rm -${'r'.repeat(n - 8)}f /x`],
   // 2026-09-14 ② — sql-delete-no-where 는 종전에 SCAN_ALLOWLIST 에 있어 정적
   // 스캔 밖이었고 여기에도 payload 가 없었다. 즉 **3층 중 어느 층도 이 규칙을
   // 보지 않았다.** 그 상태에서 옛 식은 2차식이었다. 이제 (i) 스캔 대상이고
@@ -1566,6 +1587,10 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
     // 재면 "안 걸려서 빨랐다"와 구별이 안 되므로 양성 대조군을 같이 둔다.
     ['tilde-name run (matching)', (/** @type {number} */ n) => `rm -rf ~${'a'.repeat(n - 8)}`, 'danger'],
     ['brace-home near-miss', (/** @type {number} */ n) => fill('rm -rf ${HOMEDIR} ', n), 'caution'],
+    // 2026-09-22 플래그 런. 실패형 둘 + 양성 대조군 하나.
+    ['rm flag run (r)', (/** @type {number} */ n) => `rm -${'r'.repeat(n - 5)}_`, 'safe'],
+    ['rm force run (reachable)', (/** @type {number} */ n) => `rm -r -${'f'.repeat(n - 8)}_`, 'safe'],
+    ['rm flag run (matching)', (/** @type {number} */ n) => `rm -${'r'.repeat(n - 8)}f /x`, 'danger'],
   ])('terminates on a %s at 10K/20K/40K/120K', (_name, build, level) => {
     for (const size of [10_240, 20_480, 40_962, 122_880]) {
       const payload = build(size);
@@ -1573,6 +1598,124 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
       expect(classifyRisk(payload).level).toBe(level);
     }
   }, 30_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 언어 보존 차분 검증 — 옛 플래그 조각을 **동결 참조**로 둔다 (2026-09-22,
+// guard-rm-flag-redos).
+//
+// 2026-09-22 의 토큰 교체는 성능만 고치고 **받아들이는 문자열 집합은 한 글자도
+// 움직이지 않아야** 한다. 코퍼스 전후표(1,967 문자열, level+matchedId 완전 동일)
+// 는 그것을 코퍼스 안에서만 말한다 — 코퍼스에 없는 플래그 표기는 아무것도
+// 증명하지 못한다. 그래서 코퍼스에 기대지 않는 **전수 열거**를 여기 둔다.
+//
+// 왜 동결 사본인가: 옛 조각을 살아 있는 소스에서 읽어 오면 두 쪽이 같이 바뀌어
+// 대조가 사라진다. 아래 OLD_* 는 의도적으로 손으로 박은 2026-09-21 이전 값이고,
+// **수리해서는 안 되는 문자열**이다.
+//
+// 이 게이트가 못 보는 것: 길이 5 까지의 토큰만 본다. 그보다 긴 토큰에서 갈리는
+// 차이는 여기서 안 잡힌다 — 다만 두 식 모두 그 길이에서 이미 구조가 반복이라
+// 새 분기가 생길 자리가 없다. 그리고 이것은 **언어**만 본다. 성능은 위 성장
+// 비율 게이트가, 판정 등급은 코퍼스 핀이 맡는다.
+const FROZEN_OLD_FLAG_PAIRS = /** @type {[string, RegExp, RegExp][]} */ ([
+  ['rm-rf-root',
+    /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:[A-Za-z_][\w.-]*)?(?:\s|$|\/|[;&|()<>"'`])|\$(?:HOME|\{HOME\})(?:\s|$|\/|[;&|()<>"'`]))/i,
+    DANGEROUS_PATTERNS.find((r) => r.id === 'rm-rf-root').test],
+  ['rm-rf-broad',
+    /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+\*/i,
+    DANGEROUS_PATTERNS.find((r) => r.id === 'rm-rf-broad').test],
+  ['rm-rf-path',
+    /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
+    DANGEROUS_PATTERNS.find((r) => r.id === 'rm-rf-path').test],
+  ['rm-recursive-path',
+    /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
+    DANGEROUS_PATTERNS.find((r) => r.id === 'rm-recursive-path').test],
+  ['L1 rm recursive+force (any target)',
+    /\brm\b(?=(?:\s+-\S+)*\s+(?:-[a-z]*r[a-z]*|--recursive)\b)(?=(?:\s+-\S+)*\s+(?:-[a-z]*f[a-z]*|--force)\b)(?:\s+-\S+)*\s+(?!-)\S+/i,
+    BLOCKED_PATTERNS.find((p) => p.label === 'rm recursive+force (any target)').pattern],
+  ['L1 rm -rf with path',
+    /rm\s+(-\w*r\w*f|--recursive)[^\n]{0,512}\//i,
+    BLOCKED_PATTERNS.find((p) => p.label === 'rm -rf with path').pattern],
+  ['L1 rm -fr with path',
+    /rm\s+-\w*f\w*r[^\n]{0,512}\//i,
+    BLOCKED_PATTERNS.find((p) => p.label === 'rm -fr with path').pattern],
+  ['L1 rm with wildcard',
+    /rm\s+-\w*[rf]\w*\s+\*/i,
+    BLOCKED_PATTERNS.find((p) => p.label === 'rm with wildcard').pattern],
+]);
+
+/** 플래그 토큰 알파벳. 대문자 R/F 가 핵심이다 — `/i` 에서 클래스가 접히므로
+ * `[a-qs-z]` 는 `R` 도 뺀다. 필수 `r` 이 여전히 `R` 을 받는다는 것을 이 알파벳이
+ * 증명한다. 숫자·`_`·`-` 는 `\w` 와 `[a-z]` 의 경계, 그리고 `(?![\w-])` 꼬리를
+ * 건드린다.
+ * @type {readonly string[]} */
+const FLAG_ALPHABET = Object.freeze(['r', 'f', 'x', 'R', 'F', '9', '_', '-']);
+
+/** @type {readonly ((t: string) => string)[]} */
+const FLAG_TEMPLATES = Object.freeze([
+  (t) => `rm -${t}`,
+  (t) => `rm -${t} /`,
+  (t) => `rm -${t} ./build`,
+  (t) => `rm -${t} *`,
+  (t) => `rm -${t} ~user`,
+  (t) => `rm -${t} -q x/y`,
+  (t) => `rm -q -${t} /tmp/x`,
+  (t) => `rm -${t} a/b`,
+]);
+
+describe('flag lookahead — 토큰 교체가 언어를 바꾸지 않는다', () => {
+  /** @type {string[]} */
+  const tokens = [''];
+  let frontier = [''];
+  for (let len = 1; len <= 5; len++) {
+    const next = frontier.flatMap((t) => FLAG_ALPHABET.map((c) => t + c));
+    tokens.push(...next);
+    frontier = next;
+  }
+
+  it('enumerates 37,449 flag tokens (0..5 over 8 characters)', () => {
+    expect(tokens).toHaveLength(37_449);
+  });
+
+  it.each(FROZEN_OLD_FLAG_PAIRS)(
+    '%s: frozen old fragment and current rule agree on every token',
+    (_name, oldRe, currentRe) => {
+      /** @type {string[]} */
+      const mismatches = [];
+      for (const token of tokens) {
+        for (const build of FLAG_TEMPLATES) {
+          const s = build(token);
+          if (oldRe.test(s) !== currentRe.test(s)) mismatches.push(s);
+        }
+      }
+      expect(mismatches).toEqual([]);
+    },
+    30_000,
+  );
+
+  // 양성 대조군 — 위 단언이 "둘 다 아무것도 안 맞아서" 통과하는 것이 아님을
+  // 보인다. 이 행들이 false 로 뒤집히면 위 0-불일치는 아무 의미가 없다.
+  it('keeps the uppercase forms matching under /i', () => {
+    const byLabel = (l) => BLOCKED_PATTERNS.find((p) => p.label === l).pattern;
+    const byId = (i) => DANGEROUS_PATTERNS.find((r) => r.id === i).test;
+    expect(byId('rm-rf-root').test('rm -RF /')).toBe(true);
+    expect(byId('rm-rf-root').test('rm -Rf /')).toBe(true);
+    expect(byId('rm-rf-root').test('rm -rF /')).toBe(true);
+    expect(byId('rm-recursive-path').test('rm -R ./x')).toBe(true);
+    expect(byLabel('rm -rf with path').test('rm -RF /')).toBe(true);
+    expect(byLabel('rm -fr with path').test('rm -FR /x')).toBe(true);
+    expect(byLabel('rm with wildcard').test('rm -R *')).toBe(true);
+    expect(byLabel('rm recursive+force (any target)').test('rm -RF x')).toBe(true);
+  });
+
+  // 동결 사본이 진짜로 옛 모양인지. 이 단언이 없으면 누군가 OLD_* 를 새 값으로
+  // "고쳐" 위 차분을 자기 자신과의 비교로 만들어 버릴 수 있다.
+  it('keeps the frozen references on the OLD shape', () => {
+    for (const [, oldRe, currentRe] of FROZEN_OLD_FLAG_PAIRS) {
+      expect(oldRe.source).not.toBe(currentRe.source);
+      expect(oldRe.source).toMatch(/\[a-z\]\*\[?[rf]\]?\[a-z\]\*|\\w\*[rf]\\w\*|\\w\*\[rf\]\\w\*/);
+    }
+  });
 });
 
 /**
