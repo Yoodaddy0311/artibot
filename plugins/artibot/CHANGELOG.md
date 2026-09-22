@@ -11,6 +11,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.66.0] — 2026-09-22
+
+`v4.65.0`(`aaf30e61`) 이후 62 커밋 = **66 files +9,097/−218**(`git diff --shortstat v4.65.0..38c13a20`, 2026-09-22 측정). `/split` **Wave 16 8/8 · Wave 17 10/10**(착지 9 + `p0-13` 코드 0 판정) 착지분 출하. 커밋 유형 분포: merge 17 · docs 12 · test 10 · fix 10 · feat 9 · chore 3 · perf 1. 줄기별 상세는 아래 Wave 17 · Wave 16 착지 절에 있다. 통합 판정 정본은 `V5-BACKLOG.md` §4-d.
+
+### 행동 변화 고지
+
+**행동 변화 0 은 이번에도 목표지만, 이 릴리스에는 의도된 행동 변화가 두 건 있다** — 세션 id 폴백(③)과 guard L2 위험 등급 상향(④)이다. 그 외 기능 게이트는 전부 기본 OFF 또는 opt-in 으로 남는다. §4-b 세 키(`runtime.artifactLifecycle.enabled` · `runtime.checkpoint.saveOnSave` · `autopilot.recovery.transitionFromVerdict`)는 **전부 `false` 유지**이고 `routing.canary.actionClasses` 는 **빈 배열 유지**다(2026-09-21 판정, 이 릴리스에서 재판정 없음).
+
+① **artifact-lifecycle 게이트가 넓어진 게 아니라 좁아졌다** (SH-01 b). `enabled` 는 그대로 `false` 이고, 이제 전역 스위치를 켜더라도 **주입된 프로젝트 루트**에 마커 파일 `.artibot/artifact-lifecycle.optin` 이 정규 파일로 있어야 쓰기가 일어난다. 판정은 `lib/runtime/artifact-lifecycle.js#resolveArtifactGate` **한 곳**에서만 하고 never-throw 이며 닫힌 이유를 보고한다. 마커는 v5 프로젝트 선언문 `.artibot/project.md` 가 **아닌 전용 마커**다 — 문서를 겸하는 마커는 그 문서를 만드는 스캐폴더가 생기는 순간 게이트를 다시 전역화한다. 소비처 4훅 + `apply()` 게이트 2 까지 직접 config 읽기 **0**. 순 효과는 기능 추가가 아니라 **플립 시 폭발 반경 축소**다. 이 리포를 켜려면 루트에 마커를 추적 파일로 넣는 단계가 별도로 필요하다.
+
+② **opt-in 으로만 켜지는 신규 경로 3종** — 전부 오너 결정으로 기본값 전환이 보류됐다(§4-d 오너 결정 1·2). `/resume --read-order` 는 플래그가 있을 때만 `ARTIBOT.md` 읽기 순서를 따른다(기본 경로 무변경). autopilot fast 의 objective 메타데이터는 **config 키가 아니라 instruction-level** 이며 `limits.applyObjective === true` 일 때만 적용된다(`lib/autopilot/fast-execution.js:197`) — 라우터 수준 소비자가 생길 때 재론. `/scorecard` 의 Switch Efficiency 카드는 **여전히 부재**이고, 이번에 실린 것은 기록된 hold 사유와 residency 카운터의 접기뿐이다.
+
+③ **`verify` 자기보고가 라이브에서 실제로 기록된다** (OB-07). `scripts/ledger/record-verify.mjs` 와 record-human-resolved 가 `CLAUDE_SESSION_ID` 가 비었을 때 **`CLAUDE_CODE_SESSION_ID`** 로 폴백한다 — 호스트가 실제로 주는 변수는 뒤엣것이고, 옛 문구는 충실히 실행해도 `recorded:false, reason "no session_id"` 였다. 새 문구 리터럴 프로브 = `recorded:true, appended:4`. `commands/verify.md` 의 호출은 Pipeline Behavior 불릿에서 **번호 붙은 Step 5** 로 승격되고 `--cwd` 를 받는다. **단, 라이브 `self_report > 0` 은 이 릴리스 + 플러그인 갱신 + 호스트 재시작 뒤에만 가능하다** — 현재 설치본 어디에도 새 `verify.md` 가 없다. 호출률 판독기 `scripts/ledger/verify-call-rate.mjs`(읽기 전용, 반송 분모 2종)의 현재 라이브 값이 `null` 인 것은 분자·분모가 모두 0 이기 때문이며 판독기 결함이 아니다.
+
+④ **guard 의 `rm` 위험 등급이 두 줄기에 걸쳐 바뀐다 — 대부분 상승, 4형은 의도된 하향이다.** 먼저 `guard-l2-residual` 이 `${HOME}` 중괄호 5형과 `~name` 3형·`~+` 를 `caution`/`safe` 에서 **`danger` 로 승급**시켰다(규칙 추가 0, 기존 규칙 확장; 651개 문자열 전수 대조에서 상승 39 / 하락 0, 팀원 실측). 이어서 `guard-rm-flag-redos` 가 플래그 lookahead 의 2차식을 제거하고(언어 보존 토큰 교체) 틸드 선두 차집합을 마저 덮는다 — 이쪽도 대체로 차단이 느는 방향이다. **다만 이 두 줄기의 합성 결과에는 하향 4형이 포함된다**: `~+` · `~-` · `~1` · `~1abc` 가 `danger` → **`caution`** 으로 내려간다. 이는 회귀가 아니라 `.` · `$PWD` 와 같은 등급으로 **정렬한 의도된 조정**이며(커밋 `1b8f8bed` 메시지와 소스 주석에 명시), 직전 상태 `256ef6b0` 대비 하향은 이 **6행이 전부**다(검수 코퍼스 25,483 문자열, code-reviewer 실측 2026-09-22 12:47~12:50 KST). 같은 대조에서 줄기 이전 기준선 `b7924207` 대비로는 **하향 0 / 상승 716** 이다. 순 효과: 기존에 통과하던 다수의 `rm` 명령이 이제 판단을 받고, 위 4형은 차단 대신 주의로 내려간다.
+
+⑤ **`session.ended` 의 `no-receipts` 에 원인 접미가 붙는다**(allowlist 변경 0): `no-receipts:<no-entries|all-synthetic|all-unresolved|no-usage>`. 판독 규칙 하나가 따라온다 — **`transcript_present:true` 는 "payload 에 경로 문자열이 있었다" 일 뿐 파일을 읽었다는 뜻이 아니다.** 접미 없는 bare `no-receipts` 는 "원인 불명" 이 아니라 **"읽지 못한 파일 포함 가능"** 으로 읽어야 한다(`meta.unreadableFiles` 는 원장에 실리지 않는다). 과거 결손 2세션(`cbc731fc` · `b42c1073`)은 소급 갱신되지 않으며 재계수는 미실시다.
+
+신설 판독기·게이트(`verify-call-rate.mjs` · writer 멱등성 인벤토리 게이트 · split state store 읽기 경로 핀)는 전부 **판독 전용이거나 테스트 전용**이다. 진행률 §1 은 **47% → 48%**(`P0-13` 대체 충족 판정, 코드 0).
+
+### Wave 17 착지 (10/10 종결 = 착지 9 + 판정 1, 배치 6~12, 2026-09-21~22)
+
+같은 8창을 `ExitWorktree(keep)` → `EnterWorktree` 로 **재사용**해 롤링했다(8/8 성공). 배치 6 `9600c457` · 7 `20f4e115` · 8 `d1a3524f` · 9 `4be54679` · 10 `b7924207` · 11 `256ef6b0` · 12 `38c13a20`(2026-09-22, `guard-l2-residual` 이 넘긴 후속 줄기). 전 배치 land 7/7 PASS(리더 직접 실행) · CI 전 check-run green · 재빌드 0.
+
+- **ca12-fast-objective-apply** (`f04e6d1c`, 배치 6): fast plan 에 objective 메타데이터를 **instruction-level opt-in** 으로 싣는다(`limits.applyObjective === true`). 기본 OFF 유지가 오너 결정이다. 리뷰 후속 `84b97109` 이 pre-CA-12 키 목록을 핀하고 G6 스캔을 조인다.
+- **ca18-switch-efficiency-kpi** (`4998c874`, 배치 7): 기록된 hold 사유와 residency 카운터를 접는다. **Switch Efficiency 카드 자체는 여전히 부재**다. `fb20ab8b` — writer 가 unavailable 을 표시했으면 residency 0 은 **측정값이 아니다**(결측은 null 이 아니라 정수 `0` + `residency:unavailable` 로 기록된다). `da3fd281` 이 "measured 가 못 보는 것" 을 문서화하고 커버리지 비율 핀을 복원했다. §4-c ② 의 "residency 138/381" 은 `residency:unavailable` 이 아닌 행을 센 값으로 설명된다(381 − 243 = 138; 당시 unavailable 243 여부는 **미확인**).
+- **ca05b-resume-read-order** (`3217a2e7`, 배치 7): `/resume --read-order` opt-in 모드. `7a447cfd` — 여섯 단계를 먼저 읽고 HANDOFF 는 **최대 1회**. `854da33e` 가 재검수에서 나온 플래그 조합 공백을 닫는다. 기본값 전환은 **보류**(오너 결정 2) — opt-in 으로 라이브 관찰 먼저.
+- **sh11-split-state-store-flip** (`ea97cd02`, 배치 8): 읽기 경로를 **실제 `StateStore` 에 대고** 핀했다. 쓰기 플립은 하지 않았고, `40c60457` 이 그 이유를 적는다 — 기록되지 않은 계약 2개와 배선되지 않은 호출부 1개.
+- **session-id-env-fallback** (`34e10802`, 배치 9): ③ 의 폴백 본체. 원장 스냅샷 13,344행 중 해당 UUID 618행(hook.fired 574 · verify.completed 32 · route.selected 6 · route.bound 6)이고 **32행 전부 `source:"gate"`** 라 env 출처 0 → 비순환이다. 즉 분자·분모 조인은 깨지지 않는다. `ec1ad49a` 가 verify-rate 헤더를 "무엇을 쟀는지" 로 고치고 절 단위 앵커를 붙인다.
+- **sh14-writer-idempotency-gate** (`fbb18f1f`, 배치 9): 원장에 append 하는 lib 모듈 인벤토리를 **멱등성 계급별로** 핀하는 방화벽. 검수 2라운드에서 **브리프 인벤토리 10 → 실제 키 부여 6모듈 · 스캐너가 보는 appender 53** 으로 정정됐다(`f10fcc29` 가 appender 발견 범위를 넓히고 `ae9fb121` 이 exempt 사유 3건과 헤더 주장을 고친다). "discovered == INVENTORY green" 과 "미발견" 이 동시에 참이던 것이 **미발견의 증거**였다.
+- **sh02-apply-toctou** (`a0c92175`, 배치 10): 배타 생성 프리미티브 `lib/core/file.js#atomicCreateTextSync`(`linkSync` → `EEXIST` 원자 실패, 미지원 FS 는 `'wx'` 폴백). 2-writer 200회 경합에서 현 코드 **190회 이중 기록 vs 새 함수 0**. **TOCTOU 는 아직 닫히지 않았다** — `artifact-lifecycle.js#writeOneArtifact` 의 호출부 채택(`sh02b-apply-toctou-adopt`)이 남아 있다.
+- **guard-l2-residual** (`7468f72b`, 배치 11): ④ 의 본체. `28e37002` 이 `rm-rf-root` 타이밍 표에 날짜를 박고 선형성 주장의 적용 범위를 좁히며, **측정된 플래그 lookahead 2차식**을 기록한다 — `-[a-z]*[r][a-z]*` 가 `-` + `r`×20,000 에서 L2 `classifyRisk` 전체 **3.7s**(PreToolUse 예산 5s 근접). 정적 스캐너 `findUnboundedRuns` 와 성장비 게이트가 이 형태를 보지 못한다. 그 수리는 후속 줄기 `guard-rm-flag-redos` 로 분리했고 **같은 릴리스의 배치 12 에 들어 있다**(바로 아래).
+- **guard-rm-flag-redos** (`d13f518b`, 배치 12 `38c13a20`): `guard-l2-residual` 이 남긴 두 건을 닫는다. ① **플래그 lookahead 2차식 수리** — `rm` 재귀 플래그 패턴을 **언어 보존 토큰 교체**(`-[a-z]*[r][a-z]*` → `-[a-qs-z]*r[a-z]*`)로 바꿔 같은 명령 집합을 인식하면서 백트래킹을 제거한다(`2fd60072`). ② **틸드 차집합** — `rm-rf-root` 가 주장한 적 없던 틸드·`$HOME` 표적을 등급화한다(`1b8f8bed`). **수리 대상은 L2 4규칙 + L1 4규칙 = 8** 이다 — 브리프의 "L1 1~2규칙" 은 틀렸고 실측 4다. 6파일 +472/−60(`git diff --stat`, 2026-09-22).
+  - **성능**(구현 검증 팀원 재측정, 2026-09-22 12:43~12:50 KST, node v24.15.0, 중앙값 3회): `rm -` + `r`×20,000 + `_` 페이로드에서 `classifyRisk` 전체 **1,986.56ms → 0.83ms**. 40,962B 단일 런은 **15,865ms → 3.0ms**(검수 팀원 1회).
+  - **언어 보존**: 동결한 옛 조각 대 새 조각을 전수 열거한 **2,396,736 케이스에서 불일치 0**(영구 테스트). 검수 팀원의 독립 코퍼스 25,483 문자열에서도 A→B 의 level·matchedId 불일치 **0**.
+  - **게이트**: quantifier 마다 **긴 단일 런 스윕**이다. 촘촘한 반복 입력만 쓰면 인접 quantifier 의 2차식을 보지 못한다 — 정적 스캐너 `findUnboundedRuns` 와 성장비 게이트가 바로 그 형태를 놓쳤던 것이 증거다.
+  - **미수리 잔여**: `git-branch-delete` 규칙(L2·L1 쌍둥이)에 **같은 모양의 2차식이 남아 있다** — d-런 n=2,500/5,000/10,000 에서 7.0/34.0/120.4ms(검수 팀원 실측). `-D` 의 대소문자 비대칭 때문에 같은 토큰 교체가 그대로 듣지 않아 **후속 줄기**로 넘긴다.
+- **p0-13**: 대체 충족으로 **코드 0 판정**(착지 생략). §1 done 47 → 48 의 유일한 전환.
+
+### Wave 16 착지 (8/8, 배치 1~5, 2026-09-21)
+
+배치 1 `e4131c19` · 2 `d1957c8f`(줄기 3개 접힘 — `9794846a`[1/3] · `9e0a5277`[2/3]) · 3 `7ad2ae3e` · 4 `cb41c76a`(`6a373891`[1/2]) · 5 `5ab0dcbe`. 배치별 SHA 정본은 `run.json.landings`.
+
+- **ca05-resumable-allowlist** (`5133bd21`, 배치 1): `mission.checkpointed.resumable` 을 스키마에 선언하고, 선언되지 않은 키의 pass-through 를 핀한다. `a62b4921` 이 교차검수 뒤 **숫자형 `resumable` 도 거부**하도록 조여 CA-05 a 를 닫는다.
+- **sh01-missions-clean-tree** (`23858434`, 배치 2): 미추적 `missions/` 를 clean-tree 게이트에 대고 프로브한다. 실측 결과 preflight `gitClean` 은 **warn(차단 아님)** 이고 split land 에는 **전역 clean-tree 검사가 없다**. 미추적을 차단으로 보는 곳은 1곳뿐이다 — `plugins/artibot-cowork/scripts/release.js#validateGitState`(소스 대조, 실행 **미확인**). 오너 결정 3 으로 missions 는 **추적 유지**(`.gitignore` 규칙 추가 0). `fe5e0291` 이 랜딩 기준선과 실제 리포 porcelain 모양을 핀한다.
+- **ca03-notify-pause-persist** (`34aea387`, 배치 2): recovery-pause 큐 항목이 `recordPhaseResult` 의 persist 를 **넘어 살아남는다**. `d4d1c95b` 이 pause-queue 샌드박스를 청소하고 `mergeQueuedNotification` 의 never-throw 경계를 핀한다. **CA-03 플립은 여전히 NO-GO** 다 — PushNotification 경로는 아직 0.
+- **ob07-verify-call-rate** (`7c61d0d0`, 배치 2): 읽기 전용 CLI `scripts/ledger/verify-call-rate.mjs`, 반송 분모 2종. 라이브는 분자·분모 모두 0 → **`null` 이 정답**이다(`intent.detected` 11행 · `tool.used` 4행 중 verify 0). `fc288cc2` 가 스캐너 사각지대·키 순서 핀·헤더 인용을 고친다.
+- **coverage-no-receipts-probe** (`f8e10bf7`, 배치 3): ⑤ 의 본체 — `session.ended` 를 원인 접미로 쪼갠다. `14ac392a` 가 세션 id 폴백, Step 5 전체 줄의 상한 포함 핀, Parse 교차참조를 더한다.
+- **verify-self-report-writer** (`8ed03764`, 배치 4): `record-verify` 를 번호 붙은 **Step 5** 로 승격하고 `--cwd` 를 받게 하며, 산문을 핀하고 writer↔reader 왕복을 증명한다. §4 ③ 의 원인은 **1개가 아니라 3개**였다 — (a) 호출이 번호 단계가 아닌 불릿 (b) 상대경로 `node scripts/ledger/...` 는 cwd 가 소스 리포의 `plugins/artibot` 일 때만 풀린다 (c) 호스트 변수명이 `CLAUDE_CODE_SESSION_ID` 다.
+- **vitest4-singlefork** (`2dda0674`, 배치 4): 직렬로 돌아야 하는 autopilot 파일을 **vitest 4 철자**로 복원한다.
+- **sh01-b4-project-gate** (`05be7948`, 배치 5): ① 의 본체 — `resolveArtifactGate`(전역 `enabled` AND 프로젝트 마커). `627378d8` 이 전용 opt-in 마커를 분리하고 **실패할 수 없던 테스트 2종**을 닫는다: `vi.spyOn(fs, …)` 는 named import 호출을 보지 못하고(`syncBuiltinESMExports` + 양성 대조군 필요), lib 이 throw 해도 훅이 삼키면 매트릭스가 변이를 검출하지 못한다(상태 어휘 핀 필요).
+
+### 문서·판정
+
+- **Observe 4축 재집계** (`6f71a064` · `d5b70230` · `e82d3bc5`): 축 1 → Shadow, 축 2 충족, 축 3 writer 대기, 축 4 는 `ended >= 50` 필요. 플립 판정은 **전부 유지**(§4-c). §1 진행률 41 → 47 은 Wave 12~15 재계수다.
+- **Wave 16+17 리더 통합** (`d40a0794`): §4-d 신설 — 17줄기 착지 이력, §1 48%, 판정과 후속 목록.
+- **오너 결정 7건 확정** (`3da220c8`): 2026-09-22 오너 지시 "권장사항으로 처리" 에 따라 리더 권장안으로 확정 — (1) `applyObjective` 보류 (2) `/resume` 기본값 전환 보류 (3) missions 추적 유지 (4) `source` = 역할 (5) sh09-b2 "강등" = 헤딩 불변 + 안내 1줄 (6) NEXT-SESSION 현행 유지 (7) CA-14 축소안 · CA-19/CA-17 XS 전처리 선행 · SH-18 emitter 는 UserPromptSubmit. **되돌리려면 `V5-BACKLOG.md` §4-d 의 해당 문단을 고치면 된다.**
+- **브리프 품질 교훈**: planner 의 미검증 목록을 리더가 옮겨 쓴 Wave 17 브리프 8건 중 **7건에서 전제 오류**(틀린 파일 · 틀린 층 · 이미 구현됨 · 오너 결정 위반 소지 · 정의 없는 작업). 창들이 "틀렸으면 보고하고 기본안으로 진행" 규칙으로 전부 교정해 차단은 0 이었다. **다음부터 브리프 앵커는 리더가 직접 열어 확인한 것만 실측으로 적는다.**
+
+### 미확인
+
+- 리포 전체 로컬 vitest — 각 배치의 **CI green 으로만** 확인.
+- 훅 타임아웃 시 guard 의 fail-open 여부 — **문서상 fail-open 으로 확인**(타임아웃된 PreToolUse 훅은 도구 호출을 막지 않는다, investigator 가 공식 문서로 대조). **이 머신 라이브 재현은 미실시**다. 이것이 위 2차식 수리를 성능 개선이 아니라 안전 수리로 읽어야 하는 이유다.
+- `git-branch-delete` 규칙의 잔여 2차식은 **수리되지 않았다** — 후속 줄기 몫이며 위 fail-open 성질이 그대로 적용된다.
+- 라이브 수치 재계수(`self_report` · `activation.hint-followed` · `resumable`)의 전제는 **이 릴리스 + 플러그인 업데이트 + 호스트 재시작**이다.
+- `release.js#validateGitState` 의 미추적 차단은 **소스 대조만** — 실행 미확인.
+- `residency:unavailable` 243 여부(§4-c ②) — 미확인.
+
 ## [4.65.0] — 2026-09-21
 
 `v4.64.0`(`2de81dba`) 이후 84 커밋 = **101 files +20,530/−264**(`git diff --shortstat v4.64.0^{commit} 0aae4393`, 2026-09-21 측정). `/split` **Wave 13 6/6 · Wave 14 8/8 · Wave 15 7/7** 착지분 출하. 커밋 유형 분포: feat 22 · merge 21 · docs 17 · fix 11 · test 7 · chore 5 · refactor 1. 줄기별 상세는 아래 Wave 15 · Wave 14 · Wave 13 착지 절을 그대로 승계한다.
