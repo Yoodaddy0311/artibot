@@ -283,6 +283,22 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 
 **미확인**: 리포 전체 vitest(로컬) — 각 배치의 CI green 으로만 확인 · 네이티브 플러그인 로드(`~/.claude/commands`·`agents` flat copy 제거 뒤 재시작 전) · 위 "추론" 표기 항목 전부.
 
+### §4-e Wave 17 잔여 착지 + v4.66.0 릴리스 (2026-09-22 09:4x~13:2x KST, 리더 artibot-fe, 오너 `/team` 위임 "권장 프롬프트 외 작업도 모두, 66 릴리즈 때 재시작")
+
+**착지**: 배치 12 `38c13a20` = `guard-rm-flag-redos`(줄기 tip `d13f518b`: A `1b8f8bed` 틸드/$HOME 차집합 · B `2fd60072` 플래그 lookahead 선형화 · 주석 정정 `d13f518b`; land 7/7 PASS · CI 7/7 green · 검수 code-reviewer(fable) 라운드 1 REPAIR_REQUIRED minor → 주석 2줄 수정 후 리더 재확인, 재검수 불필요 판정). **릴리스 `e6a42aed` = v4.66.0**(태그 푸시 13:14Z, 12파일 lockstep, release-check exit 0, CHANGELOG 에 의도된 행동 변화 3건 고지). Wave 17 **10/10 종결**(착지 9 + p0-13 판정). run.json `landings` 12건.
+
+**guard-rm-flag-redos 실측**(측정 주체 병기): (a) 언어 보존 — 동결 옛 조각 대 새 조각 전수 열거 2,396,736 케이스 불일치 0(영구 테스트 `FROZEN_OLD_FLAG_PAIRS`), 검수 독립 코퍼스 25,483 A→B level+matchedId 불일치 0, 구현 검증 팀원 독립 코퍼스 66,630 불일치 0 (b) 등급 — `b7924207`(줄기 이전 기준선) 대비 하향 0/상승 716, `256ef6b0` 대비 `~+ ~- ~1 ~1abc` 4형 danger→caution **의도된 하향**(`.`·`$PWD` 정렬) (c) 타이밍 — classifyRisk `rm -`+'r'×20,000 1,986.56ms → 0.83ms(구현 검증, node v24.15.0, 중앙값 3회), 40,962B 15,865ms → 3.0ms(검수 1회) (d) 수리 대상 = L2 4규칙 + **L1 4규칙**(브리프 "1~2규칙" 은 틀림) (e) 브리프 오류 2건 — 기준선 `256ef6b0` 표기(실제 `b7924207`) · L1 규칙 수. **잔여**: `git-branch-delete` 규칙 쌍(L2·L1)이 같은 모양의 2차식(d-런 n=2,500/5,000/10,000 = 7.0/34.0/120.4ms, 검수 실측) — `-D` 대소문자 비대칭(오너 결정 2026-09-11 ④) 때문에 후속 줄기로 보고.
+
+**훅 타임아웃 fail-open — 판정 fail-open(문서 실측 + 코드 실측, 라이브 미재현)**(investigator fable): 공식 hooks 문서 원문 "A timed-out command hook doesn't block the tool call. The call continues through the normal permission flow". PreToolUse:Bash 는 `hooks.json:38-39`·`:50-51` 직접 등록 2훅(pre-bash · bash-risk-guard, 각 timeout 5s), 자체 워치독 0. pre-bash 의 fail-closed(`hook-utils.js#createErrorHandler`)는 JS 예외 경로만 덮고 호스트 kill 에서는 stdout 0B → 결정 없음. 5s 초과 외삽 n ≈ 21,600~22,700자(수리 전, ±15%). 관측 정합: rule-alone 930.7ms × 4규칙 ≈ 전체 3,715ms. **후속 후보(오너 결정)**: pre-bash 에 정규식 전 길이 상한 선차단(CAP 후보 8,192자, 긴 heredoc 차단 트레이드오프) · `pre-bash.js` 헤더에 "호스트 타임아웃 경로 제외" 1줄 · headless `claude -p` + sleep 훅 프로브로 라이브 승격.
+
+**Wave 18**: plan 초안 `plan-wave18-draft.md`(split 상태 디렉터리, planner fable) — 8줄기(sh10-save-port S · sh20-mission-scorecard M · sh30-sources-rule S · ob12-split-task-feeder M · ca03b-recovery-journal-census S · ob10-controller-observation S · review-verdict-revision-passthrough XS · guard 점유 1) + 롤링 2(sh18-question-gate-record는 ob10 착지 뒤 tasks.js 직렬 · sh02b-apply-toctou-adopt), pairwise 겹침 0, 부채 12.5%, **오너 결정 대기로 막히는 줄기 0**(결정 1~7 로 L4·L12·L7·L6 해소). 잔여 결정: L10 SH-12 D11 해석(권장 "heartbeat 는 새 원장 어휘를 추가하지 않는다", 게이트 무수정) · SH-20 done 조건 · CA-08 소비 측 범위 · sh09-b2 파일 분모 99 vs 134. **주의**: 같은 세션의 앞선 `/team` 포크 팀원들이 Wave 18 항목 5건(CA-03b · SH-30 · SH-20 · OB-12/15 · SH-10)을 `worktree-agent-*` 브랜치 5개에 이미 구현(총 +3,661줄, 미검수·미착지, 위임 범위 밖이라 4.66.0 미포함) — 채택(검수 후 plan allowlist 대조) vs 폐기는 오너 결정.
+
+**정리**: Wave 16/17 worktree 9개 + guard + release worktree 제거, merged 브랜치 `-d`. 남은 worktree = `agent-*` 5개. `git worktree remove` 가 `.git/worktrees/<name>` 에서 Permission denied 를 내나 등록 해제는 됨(원인 미확인, 메모리 기록).
+
+**교훈**: 팀원 보고 주소는 리더 세션 이름이 아니라 `to="main"`(전원 거부 후 폴백) · `/team` 재호출은 앞선 포크 팀원과 이중 배치(구현·정리·조사 3건 중복, 결과는 독립 검증으로 수렴) · 브리프 오류 2건은 팀원의 "틀렸으면 보고" 규칙으로 교정됨.
+
+**미확인**: 리포 전체 vitest(로컬) — 표적 11파일 1,377 + firewall 4파일 87 + CI green 만 · release.yml 최종 결론(작성 시점 in_progress) · `agent-*` 브랜치 5개 내용(리더는 diff stat 만) · fail-open 라이브 동작 · 코퍼스 20,920 스냅샷 산출물(픽스처 미커밋, 커밋 메시지가 유일 출처).
+
 ## §5 Shadow 진입 최소 집합 (선행 순서 · 크기 · 소유)
 
 크기 등급: S ≤150줄 · M 150~600 · L >600 (구현+테스트 합, 추정 — 미측정).
