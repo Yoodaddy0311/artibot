@@ -686,12 +686,28 @@ describe('writes zero files', () => {
     const applyAt = source.indexOf('export function apply(');
     expect(applyAt).toBeGreaterThan(0);
 
-    for (const call of ['atomicWriteTextSync(', 'ensureDirSync(', 'existsSync(']) {
+    //
+    // Two lists, because "must be present" and "must be below" are different
+    // claims. REQUIRED_BELOW are the calls the writer actually makes today: a
+    // zero for one of those means the call was renamed out from under this pin
+    // and the position check had quietly become vacuous. FORBIDDEN_ABOVE are
+    // names the module no longer uses — they are not required to appear, but if
+    // one ever comes back it still has to come back below `apply(`.
+    //
+    // `existsSync(` moved from the first list to the second on 2026-09-22, when
+    // `writeOneArtifact` dropped check-then-write for the exclusive create. It
+    // is deliberately still listed: its return here would be the exact shape of
+    // the TOCTOU regression, and a name dropped from both lists is a name
+    // nothing watches.
+    const REQUIRED_BELOW = ['atomicCreateTextSync(', 'statSync('];
+    const FORBIDDEN_ABOVE = ['atomicWriteTextSync(', 'ensureDirSync(', 'existsSync('];
+
+    for (const call of [...REQUIRED_BELOW, ...FORBIDDEN_ABOVE]) {
       const offsets = [];
       for (let at = source.indexOf(call); at !== -1; at = source.indexOf(call, at + 1)) {
         offsets.push(at);
       }
-      expect(offsets.length).toBeGreaterThan(0);
+      if (REQUIRED_BELOW.includes(call)) expect(offsets.length).toBeGreaterThan(0);
       for (const offset of offsets) expect(offset).toBeGreaterThan(applyAt);
     }
   });
