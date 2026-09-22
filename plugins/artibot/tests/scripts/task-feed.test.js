@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { LIMB_LEASE_TTL_MS } from '../../lib/topology/split-task-feed.js';
-import { FEED_REASON, feedLimb, sessionIdFromEnv } from '../../scripts/split/task-feed.mjs';
+import { FEED_REASON, feedLimb, openFeedStore, sessionIdFromEnv } from '../../scripts/split/task-feed.mjs';
 
 const SESSION = 'abcd1234-ef56-7890-1234-567890abcdef';
 const MISSION = 'M-20260921-Sabcd1234';
@@ -105,6 +105,13 @@ describe('feedLimb — the happy path against a real store', () => {
     expect(kinds).toContain('lease.set');
     expect(kinds).toContain('graph.upsert');
     expect(journalKinds().some((x) => x.kind === 'graph.upsert' && x.graph.tasks.length === 2)).toBe(true);
+
+    // COUNTED, not merely contained: a first dispatch costs exactly two
+    // ledger rows under the feed reason — the graph upsert and the claim.
+    // The `toContain` assertions above still pass if a third write creeps in
+    // and makes every `/split dispatch` pay a redundant store round-trip,
+    // which is the regression the unchanged-merge skip further down guards.
+    expect(ledger.filter((e) => e.data?.reason === FEED_REASON)).toHaveLength(2);
   });
 
   it('a limb with no affectedPaths gets an empty ownership list, not a missing key', () => {
@@ -120,6 +127,27 @@ describe('feedLimb — the happy path against a real store', () => {
     ledger.length = 0;
     feedLimb({ parentRoot: root, plan: PLAN, limb: 'auth', sessionId: SESSION }, { openStore: () => store });
     expect(ledger.map((e) => e.data?.reason)).toContain(FEED_REASON);
+  });
+
+  it('a sibling limb costs one feed row, and --dry-run costs none', () => {
+    const store = makeStore();
+    seedMission(store);
+    feedLimb({ parentRoot: root, plan: PLAN, limb: 'auth', sessionId: SESSION }, { openStore: () => store });
+
+    // `auth` already seeded BOTH tasks, so dispatching `billing` changes no
+    // graph field: the merge is unchanged, the graph write is skipped, and
+    // the claim is the only row. Two rows here would mean the feeder rewrites
+    // the whole graph once per limb.
+    ledger.length = 0;
+    feedLimb({ parentRoot: root, plan: PLAN, limb: 'billing', sessionId: SESSION }, { openStore: () => store });
+    expect(ledger.filter((e) => e.data?.reason === FEED_REASON)).toHaveLength(1);
+    expect(store.getTaskGraph(MISSION).tasks.find((t) => t.id === 'billing').status).toBe('claimed');
+
+    // A dry run is not a cheaper write, it is no write: zero rows of ANY
+    // reason, not just zero feed rows.
+    ledger.length = 0;
+    feedLimb({ parentRoot: root, plan: PLAN, limb: 'auth', sessionId: SESSION, dryRun: true }, { openStore: () => store });
+    expect(ledger).toHaveLength(0);
   });
 });
 
@@ -260,6 +288,33 @@ describe('feedLimb — every refusal is a skip, and a skip writes nothing', () =
     expect(r.skipped).toMatch(/^graph-write-refused:/);
     expect(r.missionId).toBe(MISSION);
     expect(good.getTaskGraph(MISSION).tasks).toEqual([]);
+  });
+});
+
+describe('openFeedStore — the DEFAULT port, which every other test above replaces', () => {
+  // Every `feedLimb` test injects `openStore`, so the real port had no
+  // coverage at all (grep over `tests/`, 2026-09-22: 0 hits). What is pinned
+  // here is only what this function decides: that its write actually lands in
+  // the central ledger, and that it renders no projection file.
+  it('writes through to the ledger and renders no state.yaml', () => {
+    const store = openFeedStore(root, SESSION);
+    const r = store.updateMission(MISSION, () => ({
+      status: 'executing',
+      intent: { path: '.artibot/intent.md', revision: 1 },
+      plan: { path: '.artibot/plan.md', revision: 1 },
+    }), { reason: FEED_REASON });
+    expect(r.ok).toBe(true);
+
+    // No git common dir resolves for a bare tmp directory, so the ledger
+    // takes its documented fallback (ADR-011) rather than failing.
+    const ledgerFile = path.join(root, '.artibot', 'runtime', 'ledger.jsonl');
+    expect(fs.existsSync(ledgerFile)).toBe(true);
+    const rows = fs.readFileSync(ledgerFile, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(rows.some((e) => e.session_id === SESSION && e.source === 'supervisor')).toBe(true);
+
+    // `renderProjectionFile: false` is a decision about file ownership, not a
+    // performance tweak: `lib/topology/split-state.js` owns that surface.
+    expect(fs.existsSync(path.join(root, '.artibot', 'state.yaml'))).toBe(false);
   });
 });
 

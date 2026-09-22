@@ -23,7 +23,9 @@
  * neither may evict the other's rows.
  *
  * ── Layer ────────────────────────────────────────────────────────────────
- * L2, like the rest of `lib/topology/`. `ownsFromPlan` is IMPORTED rather
+ * L4, like the rest of `lib/topology/`: `eslint.config.js` registers the
+ * directory in the L4 Cognitive block, so the ceiling this file may import
+ * from is L2 (its own edges reach no higher). `ownsFromPlan` is IMPORTED rather
  * than re-implemented: `scripts/split/land.mjs` already judges limb ownership
  * from that same projection, and a second reading of `affectedPaths` here
  * would let the two drift.
