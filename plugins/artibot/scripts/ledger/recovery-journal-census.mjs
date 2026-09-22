@@ -80,6 +80,13 @@
  *    {"ok","reason","inputPath","measuredAt","rows","divergentTrue",
  *     "divergentFalse","divergentMissing","ratio","status","census"}
  *
+ * -- SESSION-BY-SESSION AND WHOLE-STORE IN ONE RUN --------------------------
+ *  `census.perSession` is `[{sessionId, rows}, …]`, one entry per file that
+ *  carried an array journal, in directory order. Its `rows` sum IS the top
+ *  level `rows` — one read of the store at two grains, so the breakdown can
+ *  never disagree with the total the way two separate runs could. `--session`
+ *  still narrows the whole run to one file when only that file is wanted.
+ *
  * -- EXIT CODES -------------------------------------------------------------
  *  0  a census was printed, OR the store could not be read and stdout says so
  *  2  usage error: the command line itself is wrong, and stdout stays EMPTY
@@ -247,11 +254,19 @@ function listStoreFiles(dir, session) {
  * fresh `[]` on the next record, so such a file is a journal about to be
  * discarded, not a journal of length one.
  *
+ * `perSession` carries one entry per file that HAD an array journal, so its
+ * `rows` sum equals `rows` by construction — the per-session breakdown and the
+ * total are the same measurement read at two grains, never two measurements.
+ * A file with no journal contributes no entry (there is nothing to break down)
+ * rather than a zero row, which would read as "this session recovered nothing"
+ * when the truth is "this session has no journal".
+ *
  * @param {string} dir
  * @param {string[]} files
  * @returns {{rows: number, divergentTrue: number, divergentFalse: number,
  *   divergentMissing: number, filesRead: number, filesUnparsable: number,
- *   filesWithJournal: number, filesNonArray: number, bytes: number}}
+ *   filesWithJournal: number, filesNonArray: number, bytes: number,
+ *   perSession: {sessionId: string, rows: number}[]}}
  */
 function collect(dir, files) {
   const tally = {
@@ -264,6 +279,7 @@ function collect(dir, files) {
     filesWithJournal: 0,
     filesNonArray: 0,
     bytes: 0,
+    perSession: /** @type {{sessionId: string, rows: number}[]} */ ([]),
   };
   for (const name of files) {
     const file = path.join(dir, name);
@@ -285,10 +301,13 @@ function collect(dir, files) {
       continue;
     }
     tally.filesWithJournal += 1;
+    let sessionRows = 0;
     for (const row of journal) {
       tally.rows += 1;
+      sessionRows += 1;
       tally[bucketOf(row)] += 1;
     }
+    tally.perSession.push({ sessionId: name.slice(0, -'.json'.length), rows: sessionRows });
   }
   return tally;
 }
@@ -394,6 +413,7 @@ export function census(opts = {}) {
       filesNonArray: tally.filesNonArray,
       bytesRead: tally.bytes,
       sessionFilter: opts.session ?? null,
+      perSession: tally.perSession,
     },
   };
 }

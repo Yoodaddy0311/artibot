@@ -588,3 +588,142 @@ describe('recovery-journal-census CLI: it is safe to import', () => {
     expect(bucketOf(hostile)).toBe('divergentMissing');
   });
 });
+
+describe('recovery-journal-census CLI: per-session and whole-store in one run', () => {
+  it('gives one entry per journal-carrying file whose rows sum to the total', () => {
+    const dir = makeStore('per-session');
+    writeSession(dir, { sessionId: 'a', recoveryJournal: [{ divergent: true }] }, 'a');
+    writeSession(dir, {
+      sessionId: 'b', recoveryJournal: [{ divergent: false }, { divergent: 'false' }],
+    }, 'b');
+
+    const r = run(['--dir', dir]).json;
+    expect(r.census.perSession).toEqual([{ sessionId: 'a', rows: 1 }, { sessionId: 'b', rows: 2 }]);
+    // The breakdown and the total are ONE read at two grains, so the sum is an
+    // identity rather than a coincidence two separate runs would have to keep.
+    const summed = r.census.perSession.reduce((n, e) => n + e.rows, 0);
+    expect(summed).toBe(r.rows);
+    expect(summed).toBe(3);
+  });
+
+  it('omits a file with no journal instead of reporting it as zero rows', () => {
+    // "This session recorded no recovery decision" and "this session has no
+    // journal to break down" are different findings; a zero row would print
+    // the second as the first.
+    const dir = makeStore('per-session-absent');
+    writeSession(dir, { sessionId: 'a', recoveryJournal: [{ divergent: true }] }, 'a');
+    writeSession(dir, { sessionId: 'b' }, 'b');
+    writeSession(dir, { sessionId: 'c', recoveryJournal: { divergent: true } }, 'c');
+
+    const r = run(['--dir', dir]).json;
+    expect(r.census.perSession).toEqual([{ sessionId: 'a', rows: 1 }]);
+    expect(r.census.filesRead).toBe(3);
+    expect(r.census.filesWithJournal).toBe(1);
+    expect(r.census.filesNonArray).toBe(1);
+  });
+
+  it('an empty journal IS an entry of zero rows, because the file carries one', () => {
+    const dir = makeStore('per-session-empty');
+    writeSession(dir, { sessionId: 'a', recoveryJournal: [] }, 'a');
+    const r = run(['--dir', dir]).json;
+    expect(r.census.perSession).toEqual([{ sessionId: 'a', rows: 0 }]);
+    expect(r.rows).toBe(0);
+  });
+
+  it('--session narrows the breakdown to the one file it narrows the count to', () => {
+    const dir = makeStore('per-session-narrow');
+    writeSession(dir, { sessionId: 'a', recoveryJournal: [{ divergent: true }] }, 'a');
+    writeSession(dir, {
+      sessionId: 'b', recoveryJournal: [{ divergent: false }, { divergent: false }],
+    }, 'b');
+
+    const only = run(['--dir', dir, '--session', 'b']).json;
+    expect(only.census.perSession).toEqual([{ sessionId: 'b', rows: 2 }]);
+    expect(only.rows).toBe(2);
+  });
+});
+
+describe('recovery-journal-census CLI: the mirrored resolver stays in step', () => {
+  // `resolveStoreDir` is a deliberate COPY of
+  // `lib/autopilot/session-store.js#getStoreDir`: the reader may not import the
+  // writer (the allowlist above is what forbids it), so the duplication is the
+  // price of the allowlist. A copy drifts in silence, and the reader would go
+  // on reporting a confident denominator for a directory the writer had left.
+  // These four cases are the whole decision table of the env pair, and each
+  // asserts the two resolvers AGREE before asserting what they agree on, so a
+  // drift stays red even if both halves were moved to some third rule.
+  const KEYS = [
+    'CLAUDE_PLUGIN_ROOT',
+    'ARTIBOT_AUTOPILOT_STORE_DIR',
+    'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT',
+  ];
+  /** @type {Record<string, string|undefined>} */
+  let savedEnv;
+
+  beforeEach(() => {
+    savedEnv = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+  });
+
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  /**
+   * Apply one environment, then read both resolvers under exactly that one.
+   *
+   * @param {Record<string, string|undefined>} env
+   * @returns {Promise<{mirror: string, canonical: string}>}
+   */
+  async function bothUnder(env) {
+    for (const k of KEYS) {
+      if (env[k] === undefined) delete process.env[k];
+      else process.env[k] = env[k];
+    }
+    const { resolveStoreDir } = await import(`file://${CLI.split(path.sep).join('/')}`);
+    const { getStoreDir } = await import('../../lib/autopilot/session-store.js');
+    return { mirror: resolveStoreDir(), canonical: getStoreDir() };
+  }
+
+  it('agrees on the plugin-root default when no override is set', async () => {
+    const root = path.join(tmp, 'pair-root');
+    const { mirror, canonical } = await bothUnder({ CLAUDE_PLUGIN_ROOT: root });
+    expect(mirror).toBe(canonical);
+    expect(mirror).toBe(path.join(root, 'runtime', 'autopilot'));
+  });
+
+  it('agrees on discarding an override with no recorded root', async () => {
+    const root = path.join(tmp, 'pair-root');
+    const { mirror, canonical } = await bothUnder({
+      CLAUDE_PLUGIN_ROOT: root,
+      ARTIBOT_AUTOPILOT_STORE_DIR: path.join(tmp, 'pair-store'),
+    });
+    expect(mirror).toBe(canonical);
+    expect(mirror).toBe(path.join(root, 'runtime', 'autopilot'));
+  });
+
+  it('agrees on honouring an override minted for the root in force', async () => {
+    const root = path.join(tmp, 'pair-root');
+    const store = path.join(tmp, 'pair-store');
+    const { mirror, canonical } = await bothUnder({
+      CLAUDE_PLUGIN_ROOT: root,
+      ARTIBOT_AUTOPILOT_STORE_DIR: store,
+      ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: root,
+    });
+    expect(mirror).toBe(canonical);
+    expect(mirror).toBe(path.resolve(store));
+  });
+
+  it('agrees on discarding an override minted for a different root', async () => {
+    const root = path.join(tmp, 'pair-root');
+    const { mirror, canonical } = await bothUnder({
+      CLAUDE_PLUGIN_ROOT: root,
+      ARTIBOT_AUTOPILOT_STORE_DIR: path.join(tmp, 'pair-store'),
+      ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: path.join(tmp, 'pair-other'),
+    });
+    expect(mirror).toBe(canonical);
+    expect(mirror).toBe(path.join(root, 'runtime', 'autopilot'));
+  });
+});

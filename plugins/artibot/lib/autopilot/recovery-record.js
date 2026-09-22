@@ -10,12 +10,12 @@
  * measured denominator rather than a guess, and this journal is that denominator.
  *
  * ── Who reads this ────────────────────────────────────────────────────────
- * `state.recoveryJournal` is the input CA-03 will read, so the row carries what
+ * `state.recoveryJournal` is the input CA-03 reads, so the row carries what
  * a later transition needs (`class`, `action`, `target`, `reason`) plus what an
  * Observe-stage audit needs (`verdictRaw` beside the adapted `verdict`,
- * `verificationStatus`, `retryLimit`, `fixedNext`). `divergent` is always `true`
- * today — the fixed transition goes to IMPROVE whatever the recommendation is —
- * and exists so the vocabulary is stable before CA-03 starts writing `false`.
+ * `verificationStatus`, `retryLimit`, `fixedNext`). `recovery-transition.js`
+ * writes `divergent: false` when `autopilot.recovery.transitionFromVerdict` is
+ * ON (Wave 12); `scripts/ledger/recovery-journal-census.mjs` reads them.
  *
  * 2026-09-21 (Wave 13): `replanAttempts` and `ultraplanProposed` are no longer
  * hardcoded. {@link ladderFromJournal} derives them from the journal's *applied*
