@@ -99,9 +99,30 @@ const BLOCKED_PATTERNS = Object.freeze([
   // records the gap, it does not bless it. Closing it properly means giving L2 a
   // recursive-only rule (owner routed that to the safety.js stem), not widening
   // this window further on one layer alone.
-  { pattern: /rm\s+(-\w*r\w*f|--recursive)[^\n]{0,512}\//i, label: 'rm -rf with path', category: 'filesystem' },
-  { pattern: /rm\s+-\w*f\w*r[^\n]{0,512}\//i, label: 'rm -fr with path', category: 'filesystem' },
-  { pattern: /rm\s+-\w*[rf]\w*\s+\*/i, label: 'rm with wildcard', category: 'filesystem' },
+  // FLAG-RUN QUADRATIC, FIXED 2026-09-22 (guard-rm-flag-redos). All three read
+  // the combined flag token as `-\w*<letter>\w*`: two star runs over ONE class
+  // around a mandatory letter. A payload made only of that letter splits n ways
+  // and every split is retried. Measured (node v24.15.0, median of 3, payload
+  // `rm -` + letter x n + `_`, n = 2,500 / 5,000 / 10,000, rule alone):
+  //   rm -rf with path      3.44 / 12.03 / 46.86 ms  ->  0.00 / 0.01 / 0.01
+  //   rm -fr with path      2.32 /  9.91 / 52.98 ms  ->  0.00 / 0.01 / 0.01
+  //   rm with wildcard      3.29 / 11.00 / 46.13 ms  ->  0.01 / 0.01 / 0.01
+  // The 2026-09-11 tables above swept the WINDOW with `'rm -rf '` repeats, which
+  // match at the first position and never enter the flag run, so they say
+  // nothing about this axis — a green sweep there was not coverage here.
+  // The fix forbids the mandatory letter in the FIRST run only, which forces it
+  // to bind to its leftmost occurrence. Every match already had that binding, so
+  // the accepted language is unchanged; `rm with wildcard` excludes BOTH letters
+  // because either may satisfy `[rf]`. The classes stay POSITIVE on purpose —
+  // a negated class run is what the static scanner collects, and introducing one
+  // here would turn these rules RED for the wrong reason. Under /i the class
+  // folds, so `[0-9a-qs-z_]` excludes `R` as well as `r` while the mandatory `r`
+  // still matches both; uppercase forms (`rm -RF /`, `rm -FR /x`) are preserved
+  // and pinned. Evidence: 2,396,736 differential cases, 0 mismatches, against a
+  // frozen copy of the old fragment in tests/autopilot/safety.test.js.
+  { pattern: /rm\s+(-[0-9a-qs-z_]*r\w*f|--recursive)[^\n]{0,512}\//i, label: 'rm -rf with path', category: 'filesystem' },
+  { pattern: /rm\s+-[0-9a-eg-z_]*f\w*r[^\n]{0,512}\//i, label: 'rm -fr with path', category: 'filesystem' },
+  { pattern: /rm\s+-[0-9a-eg-qs-z_]*[rf]\w*\s+\*/i, label: 'rm with wildcard', category: 'filesystem' },
   // The three rules above miss two shapes: they all require `/` or `*` in the
   // command, and they read the flags as one combined token. So `rm -rf build`
   // (relative target) and `rm -r -f /tmp/x` (split flags) both walked through.
@@ -110,8 +131,14 @@ const BLOCKED_PATTERNS = Object.freeze([
   // body requires at least one target token that is not an option — any target
   // shape qualifies, including `/`, `*` and `~`. `rm -rf` with no target at all
   // stays unmatched.
+  // Both lookaheads carry the same 2026-09-22 token swap as the three rules
+  // above, and for the same measured reason: this rule alone ran 5.61 / 24.80 /
+  // 64.44 ms on `rm -` + 'r' x n + `_` at n = 2,500 / 5,000 / 10,000 and now
+  // runs 0.01 / 0.02 / 0.02 ms. The L2 twins are rm-rf-root, rm-rf-broad,
+  // rm-rf-path and rm-recursive-path in lib/autopilot/safety.js; they took the
+  // isomorphic edit in the same commit.
   {
-    pattern: /\brm\b(?=(?:\s+-\S+)*\s+(?:-[a-z]*r[a-z]*|--recursive)\b)(?=(?:\s+-\S+)*\s+(?:-[a-z]*f[a-z]*|--force)\b)(?:\s+-\S+)*\s+(?!-)\S+/i,
+    pattern: /\brm\b(?=(?:\s+-\S+)*\s+(?:-[a-qs-z]*r[a-z]*|--recursive)\b)(?=(?:\s+-\S+)*\s+(?:-[a-eg-z]*f[a-z]*|--force)\b)(?:\s+-\S+)*\s+(?!-)\S+/i,
     label: 'rm recursive+force (any target)',
     category: 'filesystem',
   },
