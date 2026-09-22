@@ -169,8 +169,10 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   //       which this catalogue has always graded `caution`. 28e37002 briefly
   //       graded them `danger` as a side effect of (e)'s `\w`-leading name
   //       class. Against THAT commit these three read as a deliberate
-  //       danger -> caution DOWNGRADE; against base 256ef6b0 they are still a
-  //       rise from safe. With (f) in the same commit they land on
+  //       danger -> caution DOWNGRADE; against b7924207 — the pre-limb
+  //       baseline, since 256ef6b0 is the merge that folded guard-l2-residual
+  //       and had already graded them danger — they are still a rise from
+  //       safe. With (f) in the same commit they land on
   //       rm-rf-path / rm-recursive-path, so nothing returns to safe.
   //       DELIBERATE RESIDUAL: a digit-leading user name (`~1abc`) is now
   //       caution rather than danger — the name class starts at a letter or
@@ -225,8 +227,11 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // 2,396,736 differential cases with 0 mismatches (flag tokens over
   // {r,f,x,R,F,9,_,-} at every length 0..5, 8 command templates, 8 rule pairs),
   // pinned in tests/autopilot/safety.test.js against a FROZEN copy of the old
-  // fragment, plus a 1,967-string corpus whose level and matchedId are
-  // byte-identical before and after.
+  // fragment, plus a 20,920-string corpus whose level and matchedId are
+  // byte-identical before and after (961,266 bytes each, 0 differing rows).
+  // That 20,920 is the LANGUAGE corpus of this edit. Do not confuse it with
+  // the 1,967-string corpus quoted for the 2026-09-22 tilde/$HOME edit above,
+  // which measured LEVEL CHANGES and is a different harvest.
   // 122,880B TABLE — RE-MEASURED 2026-09-22 (guard-rm-flag-redos), node
   // v24.15.0, Windows, median of 3, on the CURRENT shape of every branch. It
   // replaces the 2026-09-14 table, which carried a "not re-measured" warning
