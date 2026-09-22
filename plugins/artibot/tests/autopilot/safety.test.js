@@ -387,12 +387,6 @@ describe('classifyRisk — rm-rf-root grades ~name (another user home)', () => {
     'rm -rf -- ~user',
     'rm -rfv ~user',
     'rm -r -f ~user',
-    // dirstack·PWD 형. `~+` = $PWD, `~-` = $OLDPWD, `~1` = 디렉터리 스택.
-    // 홈은 아니지만 **틸드 확장이 디렉터리로 펼쳐지는** 같은 부류이고, 셋 다
-    // 착수 전 L1 block / L2 safe 였다(방향 규칙 위반).
-    'rm -rf ~+',
-    'rm -rf ~-',
-    'rm -rf ~1',
   ])('grades %s as danger via rm-rf-root', (command) => {
     const r = classifyRisk(command);
     expect(r.level).toBe('danger');
@@ -432,6 +426,103 @@ describe('classifyRisk — rm-rf-root grades ~name (another user home)', () => {
     'rm -rf ~$USER',
   ])('leaves %s off rm-rf-root', (command) => {
     expect(classifyRisk(command).matchedId).not.toBe('rm-rf-root');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 차집합 — rm-rf-root 가 **받지 않는** 틸드·$HOME 선두 타깃 (2026-09-22,
+// guard-rm-flag-redos).
+//
+// 두 경로 규칙(rm-rf-path·rm-recursive-path)은 `(?![-/~*]|\$HOME\b)` 로 틸드와
+// $HOME 선두를 통째로 "rm-rf-root 의 일"이라며 제외했는데, rm-rf-root 는 그
+// **일부만** 받았다. 그 차집합은 어느 층에도 닿지 않았다 — 실측 2026-09-22
+// (node v24.15.0, classifyRisk + BLOCKED_PATTERNS 2열):
+//   rm -rf ~user* · ~* · ~$USER · ~.foo · ~+1 · ~-1   L1 block   / L2 safe
+//   rm -rf $HOME* · $HOME.bak · $HOME-old             L1 block   / L2 safe
+//   rm -r  ~$USER · rm -r $HOME*                      L1 approve / L2 safe  <- full-stack
+// 전부 홈의 **형제나 글롭**이지 홈 자체가 아니므로 정직한 등급은 danger 가
+// 아니라 caution 이고, 제외를 `(?![-/*])` 로 줄이면 두 경로 규칙이 그대로 받는다.
+// 기존 danger 는 움직일 수 없다 — classifyRisk 는 첫 danger 에서 반환하고 두
+// 경로 규칙은 caution 이라, 이 편집은 safe 를 올릴 수만 있다.
+describe('classifyRisk — tilde/$HOME targets rm-rf-root does not claim are caution', () => {
+  it.each([
+    ['rm -rf ~user*', 'rm-rf-path'],
+    ['rm -rf ~*', 'rm-rf-path'],
+    ['rm -rf ~$USER', 'rm-rf-path'],
+    ['rm -rf ~.foo', 'rm-rf-path'],
+    ['rm -rf ~+1', 'rm-rf-path'],
+    ['rm -rf ~-1', 'rm-rf-path'],
+    ['rm -rf $HOME*', 'rm-rf-path'],
+    ['rm -rf $HOME.bak', 'rm-rf-path'],
+    ['rm -rf $HOME-old', 'rm-rf-path'],
+    ['rm -rf ${HOME:-/tmp}', 'rm-rf-path'],
+    // force 없는 재귀형 — 착수 전 **어느 층도 보지 않던** 자리.
+    ['rm -r ~$USER', 'rm-recursive-path'],
+    ['rm -r $HOME*', 'rm-recursive-path'],
+  ])('grades %s caution via %s', (command, id) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe(id);
+  });
+
+  // `~+` = $PWD, `~-` = $OLDPWD, `~1` = 디렉터리 스택. 홈이 아니라 **현재
+  // (또는 스택에 쌓인) 디렉터리**이고, 이 카탈로그는 같은 부류인 `.`·`./`·
+  // `$PWD` 를 언제나 caution 으로 매겨 왔다. 28e37002 이 이 셋을 잠깐 danger 로
+  // 올린 것은 `\w` 선두 이름 클래스의 **부작용**이었다. 그 커밋 기준으로는
+  // 의도된 danger→caution 하향이고, 줄기 이전 기준선(b7924207)으로는 safe→
+  // caution 상승이다. safe 로 돌아가는 형은 하나도 없다.
+  it.each([
+    'rm -rf ~+',
+    'rm -rf ~-',
+    'rm -rf ~1',
+    'rm -r ~+',
+    'rm --recursive ~1',
+  ])('aligns the dirstack form %s with . and $PWD at caution', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(['rm-rf-path', 'rm-recursive-path']).toContain(r.matchedId);
+  });
+
+  // 의도된 과소 판정 — 숫자 선두 사용자 이름. 이름 클래스를 `[A-Za-z_]` 선두로
+  // 둔 것은 dirstack 형(`~1`)을 빼내기 위해서이고, 그 대가로 `~1abc` 라는
+  // **실제로 존재할 수 있는** 사용자 홈이 danger 가 아니라 caution 이 된다.
+  // 실사용 빈도는 **미측정**. 조용히 두지 않으려고 여기 핀한다.
+  it('under-grades a digit-leading user name deliberately', () => {
+    const r = classifyRisk('rm -rf ~1abc');
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).toBe('rm-rf-path');
+  });
+
+  // 음성 대조 — 편집이 danger 쪽을 건드리지 않았는지. 이 다섯이 움직이면
+  // 위 행들은 아무것도 증명하지 못한다.
+  it.each([
+    ['rm -rf /', 'rm-rf-root'],
+    ['rm -rf ~', 'rm-rf-root'],
+    ['rm -rf ~/x', 'rm-rf-root'],
+    ['rm -rf ~user', 'rm-rf-root'],
+    ['rm -rf ${HOME}', 'rm-rf-root'],
+  ])('keeps %s at danger via %s', (command, id) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe(id);
+  });
+
+  // 오탐 대조군 — 홈이 **아닌** 변수, 평범한 상대 경로.
+  it('does not turn $HOMEDIR or ./build into something new', () => {
+    expect(classifyRisk('rm -rf $HOMEDIR').matchedId).toBe('rm-rf-path');
+    expect(classifyRisk('rm -rf ./build').matchedId).toBe('rm-rf-path');
+    expect(classifyRisk('rm -rf ${HOMEDIR}').matchedId).toBe('rm-rf-path');
+  });
+
+  // 두 경로 규칙은 **같은 편집**을 받는다. rm-rf-path 에서 force lookahead 만
+  // 지우면 rm-recursive-path 와 바이트 동일해야 한다 — 한쪽만 고치면 여기서
+  // 먼저 깨진다.
+  it('keeps the two path rules byte-identical apart from the force lookahead', () => {
+    const byId = (id) => DANGEROUS_PATTERNS.find((r) => r.id === id);
+    const forceLookahead = '(?=(?:\\s+--?\\w[\\w-]*)*\\s+(?:--force|-[a-z]*[f][a-z]*)(?![\\w-]))';
+    expect(byId('rm-rf-path').test.source).toContain(forceLookahead);
+    expect(byId('rm-rf-path').test.source.replace(forceLookahead, ''))
+      .toBe(byId('rm-recursive-path').test.source);
   });
 });
 
@@ -1465,8 +1556,12 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
   // 것은 SCALED_PAYLOADS 의 성장 비율(임계 18)과 정적 스캔이고, 이 it 은
   // **종료와 판정 안정성**만 맡는다. 게이트 옆에 게이트가 못 보는 것을 적는다.
   it.each([
-    ['tilde-name run', (/** @type {number} */ n) => `rm -rf ~${'a'.repeat(n - 9)}*`, 'safe'],
-    ['tilde-dot run', (/** @type {number} */ n) => `rm -rf ~a${'.'.repeat(n - 10)}*`, 'safe'],
+    // 2026-09-22 기대값 safe → caution. **게이트 완화가 아니다**: 이 두 형이
+    // 재는 것은 rm-rf-root 이름 런의 백트래킹이고, 그 규칙은 여전히 끝까지
+    // 실패한다(`*` 는 터미네이터 집합 밖). 바뀐 것은 그 뒤에 rm-rf-path 가
+    // 틸드 선두 타깃을 더 이상 넘기지 않아 caution 으로 받는다는 것뿐이다.
+    ['tilde-name run', (/** @type {number} */ n) => `rm -rf ~${'a'.repeat(n - 9)}*`, 'caution'],
+    ['tilde-dot run', (/** @type {number} */ n) => `rm -rf ~a${'.'.repeat(n - 10)}*`, 'caution'],
     // 같은 런이 **끝에서 끝나면** 매치한다(터미네이터 = 입력 끝). 실패형만
     // 재면 "안 걸려서 빨랐다"와 구별이 안 되므로 양성 대조군을 같이 둔다.
     ['tilde-name run (matching)', (/** @type {number} */ n) => `rm -rf ~${'a'.repeat(n - 8)}`, 'danger'],

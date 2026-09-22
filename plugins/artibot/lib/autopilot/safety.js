@@ -136,23 +136,50 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   //       measured 2026-09-21). The TERMINATOR SET IS REUSED UNCHANGED, which
   //       is what keeps `${HOME}x` and `${HOME}_old` off this rule — those are
   //       SIBLINGS of home (`/home/userx`), exactly as `$HOMEDIR` is.
-  //   (e) the `~` branch gains an optional bounded name: `~(?:[+-]|\w[\w.-]*)?`
-  //       before the same terminator group. `~user` is a home directory, so it
-  //       belongs to this rule and not to the path rules — and it could reach
-  //       neither, because rm-rf-path and rm-recursive-path both exclude
-  //       tilde-leading targets as "rm-rf-root's job" while this branch demanded
-  //       a terminator immediately after the tilde. The shape fell between all
-  //       three rules: 22 of 22 forms were L2 SAFE (measured 2026-09-21).
+  //   (e) the `~` branch gains an optional bounded USER NAME before the same
+  //       terminator group. `~user` is a home directory, so it belongs to this
+  //       rule and not to the path rules — and it could reach neither, because
+  //       rm-rf-path and rm-recursive-path both excluded tilde-leading targets
+  //       as "rm-rf-root's job" while this branch demanded a terminator
+  //       immediately after the tilde. The shape fell between all three rules:
+  //       22 of 22 forms were L2 SAFE (measured 2026-09-21).
   //       With a force flag L1 blocks them, so that was a direction-rule
   //       violation; the FORCELESS recursive forms (`rm -r ~user`,
   //       `rm --recursive ~user`, `rm -R ~user`) matched no L1 rule either and
-  //       were a FULL-STACK miss. `~+` / `~-` / `~1` (PWD, OLDPWD, dirstack)
-  //       ride the same branch — not home, but the same tilde expansion into a
-  //       directory, and they were L1 block / L2 safe too.
-  // NO NEW RULE OBJECT: the catalogue is still 27 rules and the static
-  // scanner's denominator (95) is untouched. Both branches are graded 'danger',
-  // so the id list in lib/security/human-gates.js (HG-09 `existingCoverage`,
-  // which names ids and holds no copy of this regex) stays true as written.
+  //       were a FULL-STACK miss.
+  //
+  // 2026-09-22 (guard-rm-flag-redos), TWO EDITS, AND THEY ARE A PAIR.
+  //   (f) THE PATH RULES NO LONGER EXCLUDE TILDE AND `$HOME` TARGETS. Their
+  //       shared negative lookahead was `(?![-/~*]|\$HOME\b)` and is now
+  //       `(?![-/*])`. The `~` / `$HOME` half of that exclusion assumed this
+  //       rule claimed every such target, and it never did: the DIFFERENCE SET
+  //       reached no rule on either layer. Measured 2026-09-21/22 (node
+  //       v24.15.0): `~user*`, `~*`, `~$USER`, `~.foo`, `~+1`, `~-1` were L1
+  //       block / L2 SAFE, and `rm -r ~$USER` plus `rm -r $HOME*` were L1
+  //       approve / L2 safe — a FULL-STACK miss, base included. `$HOME*`,
+  //       `$HOME.bak` and `$HOME-old` were L1 block / L2 safe for the same
+  //       reason. They are all SIBLINGS or GLOBS of home rather than home
+  //       itself, so `caution` (not `danger`) is the honest level, and that is
+  //       exactly what the two path rules give them now. Existing `danger`
+  //       verdicts cannot move: classifyRisk returns on the first danger and
+  //       both path rules are `caution`, so this edit can only raise a `safe`.
+  //   (g) `[+-]` AND DIGIT-LEADING NAMES LEAVE THIS RULE. `~+` / `~-` / `~1`
+  //       (PWD, OLDPWD, dirstack) are not home; they are the CURRENT or a
+  //       stacked directory, the same kind of target as `.` / `./` / `$PWD`,
+  //       which this catalogue has always graded `caution`. 28e37002 briefly
+  //       graded them `danger` as a side effect of (e)'s `\w`-leading name
+  //       class. Against THAT commit these three read as a deliberate
+  //       danger -> caution DOWNGRADE; against base 256ef6b0 they are still a
+  //       rise from safe. With (f) in the same commit they land on
+  //       rm-rf-path / rm-recursive-path, so nothing returns to safe.
+  //       DELIBERATE RESIDUAL: a digit-leading user name (`~1abc`) is now
+  //       caution rather than danger — the name class starts at a letter or
+  //       `_` to keep the dirstack forms out. Real-world frequency unmeasured.
+  // NO NEW RULE OBJECT, still true after (f)/(g): the catalogue is 27 rules and
+  // the static scanner's denominator (95) is untouched. Both branches of THIS
+  // rule are graded 'danger', so the id list in lib/security/human-gates.js
+  // (HG-09 `existingCoverage`, which names ids and holds no copy of this regex)
+  // stays true as written.
   // ACCEPTED OVER-MATCH (e): a literal relative path whose name starts with a
   // tilde — `rm -rf ~backup` when no such user exists, so the shell leaves it
   // unexpanded — is graded danger. Same direction and same kind as the quoted
@@ -167,19 +194,20 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // (e) adds exactly ONE — `[\w.-]*` — and it is followed by a class DISJOINT
   // from it (whitespace, `/`, and the seven shell separators share no character
   // with word chars, `.` or `-`), so no input can split two ways and there are
-  // no adjacent quantifiers over overlapping classes. The `[+-]` alternative
-  // cannot overlap the name run either: the run must start with `\w`.
-  // THAT CLAIM IS ABOUT BRANCHES (d) AND (e) ONLY, not about the whole rule. The
-  // recursive-flag lookahead `-[a-z]*[r][a-z]*` — untouched here, identical on
-  // the base commit, and repeated in rm-rf-broad, rm-rf-path, rm-recursive-path
-  // and the L1 'rm recursive+force (any target)' rule — IS a pair of star runs
-  // over one class around a mandatory letter, and it measured QUADRATIC on
-  // 2026-09-21 (node v24.15.0): payload `rm -` + 'r' x n + `_`, rule-alone
-  // median of 3 = 6.5 / 25.7 / 118.3 / 930.7 ms at n = 2,500 / 5,000 / 10,000 /
-  // 20,000, whole classifyRisk 3,715 ms at 20,000. Neither gate sees it: the
-  // static scanner collects negated classes only, and no scaled payload builds
-  // a run of the flag letter. Not fixed in this change; routed to the follow-up
-  // limb guard-rm-flag-redos.
+  // no adjacent quantifiers over overlapping classes. (g) only NARROWS that
+  // run's first character from `\w` to `[A-Za-z_]` and drops the `[+-]`
+  // alternative, so it removes alternatives rather than adding any. (f) edits a
+  // negative lookahead of fixed width. None of the three adds a quantifier.
+  // THAT CLAIM IS ABOUT BRANCHES (d), (e), (f) AND (g) ONLY, not about the
+  // whole rule. The recursive-flag lookahead `-[a-z]*[r][a-z]*` — untouched in
+  // THIS commit — IS a pair of star runs over one class around a mandatory
+  // letter, and it measured QUADRATIC on 2026-09-21 and again on 2026-09-22
+  // (node v24.15.0): payload `rm -` + 'r' x n + `_`, rule-alone median of 3
+  // 8.8 / 34.6 / 151.1 ms at n = 2,500 / 5,000 / 10,000, whole classifyRisk
+  // 36.8 / 129.7 / 657.8 ms. Neither gate saw it: the static scanner collects
+  // negated classes only, and no scaled payload built a run of the flag letter.
+  // Fixed in the NEXT commit of this limb by a language-preserving token swap;
+  // read the note above the flag lookahead there for the after-numbers.
   // THE TABLE BELOW IS FROM 2026-09-14 AND WAS NOT RE-MEASURED after the
   // 2026-09-21 edits, which moved both the tilde and the home-variable branch.
   // Read it as the pre-edit shape, not as a current measurement.
@@ -195,7 +223,7 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   {
     id: 'rm-rf-root',
     level: 'danger',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:[+-]|\w[\w.-]*)?(?:\s|$|\/|[;&|()<>"'`])|\$(?:HOME|\{HOME\})(?:\s|$|\/|[;&|()<>"'`]))/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+["']?(?:\/|~(?:[A-Za-z_][\w.-]*)?(?:\s|$|\/|[;&|()<>"'`])|\$(?:HOME|\{HOME\})(?:\s|$|\/|[;&|()<>"'`]))/i,
     reason: 'rm -rf on root or home',
   },
   {
@@ -204,14 +232,26 @@ export const DANGEROUS_PATTERNS = Object.freeze([
     test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+\*/i,
     reason: 'rm -rf with broad glob',
   },
-  // Keep after rm-rf-root/rm-rf-broad: those two own the root/home/glob targets.
+  // Keep after rm-rf-root/rm-rf-broad: those two own the root and glob targets
+  // and the home targets they actually claim.
   // Two lookaheads demand a recursive flag AND a force flag anywhere in the
   // option run, so combined (-rfv), split (-r -f) and long (--recursive) forms
-  // all land here; the final guard skips root/home/glob targets.
+  // all land here; the final guard skips option tokens, root-leading targets
+  // and globs.
+  // THE FINAL GUARD NO LONGER SKIPS TILDE OR `$HOME` (2026-09-22,
+  // guard-rm-flag-redos). It was `(?![-/~*]|\$HOME\b)`. Both halves of that
+  // deferral were written as "rm-rf-root's job", and rm-rf-root takes only part
+  // of the set — see branch (f) in its comment above for the measured
+  // difference set and why `caution` is the right level for it. Whatever
+  // rm-rf-root DOES claim is `danger` and returns before this rule is reached,
+  // so removing the deferral cannot lower a single existing verdict; it can
+  // only raise a `safe`. Both path rules take the byte-identical edit — a pin
+  // in tests/autopilot/safety.test.js compares the two `.source` strings with
+  // the force lookahead removed, so a one-sided edit fails the suite.
   {
     id: 'rm-rf-path',
     level: 'caution',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/~*]|\$HOME\b)\S+/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?=(?:\s+--?\w[\w-]*)*\s+(?:--force|-[a-z]*[f][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
     reason: 'recursive delete of a scoped path (blocked at PreToolUse by blocked-patterns)',
   },
   // Keep AFTER rm-rf-path. classifyRisk returns the FIRST caution it meets, so
@@ -227,8 +267,9 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   //   force flag in the combined token, and `rm recursive+force (any target)`
   //   needs one too; only the `--recursive` long form reaches L1 at all, and
   //   then only when a `/` sits inside its `[^\n]{0,512}` window.
-  //   L2 `rm-rf-root` needs a `/`-, `~`- or `$HOME`-leading target and
-  //   `rm-rf-path` needs a force flag.
+  //   L2 `rm-rf-root` needed a `/`-, `~`- or `$HOME`-leading target and
+  //   `rm-rf-path` needs a force flag. (That leading set was never the whole
+  //   tilde/home family — see branch (f) above, 2026-09-22.)
   // So before this rule: `rm -r ./build` L1 approve / L2 safe · `rm -R x`
   // approve/safe · `rm --recursive <513 filler>/x` approve/safe. Only
   // `rm --recursive a/b/c` (short path) was caught, and by L1 alone.
@@ -255,7 +296,7 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   {
     id: 'rm-recursive-path',
     level: 'caution',
-    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/~*]|\$HOME\b)\S+/i,
+    test: /\brm\b(?=(?:\s+--?\w[\w-]*)*\s+(?:--recursive|-[a-z]*[r][a-z]*)(?![\w-]))(?:\s+--?\w[\w-]*)*(?:\s+--)?\s+(?![-/*])\S+/i,
     reason: 'recursive delete of a scoped path without a force flag (L1 blocks it inside its 512-char window; this closes the full-stack gap past it)',
   },
   // Owner decision 2026-09-11 ③: L1 (blocked-patterns.js `dd\s+if=`, category

@@ -588,7 +588,7 @@ const PARITY_MATRIX = Object.freeze([
     l2: 'danger',
     l2Id: 'rm-rf-root',
     status: 'agreed',
-    note: '**방향 규칙 위반의 해소.** 종전 L1 block / L2 **safe** 였다 — `~` 분기가 틸드 **바로 뒤**에 터미네이터를 요구했고, rm-rf-path·rm-recursive-path 는 둘 다 `~` 로 시작하는 타깃을 "rm-rf-root 의 일"이라며 제외했다. 세 규칙 사이로 떨어진 자리다(실측 2026-09-21: `~name` 3형 + `~+`·`~-`·`~1` 전부 L2 safe). 수리는 틸드 뒤에 **경계 있는 이름 클래스**(`\\w[\\w.-]*`)를 선택적으로 둔 것이고, 터미네이터 집합은 그대로다. 수용된 과대 판정: 그런 사용자가 없어 셸이 확장하지 않는 리터럴 경로(`rm -rf ~backup`)도 danger 다 — 방향이 차단 쪽이라 받되 safety.test.js 의 전용 it 이 그것을 알고 있다고 기록한다. 발생률은 **미측정**.',
+    note: '**방향 규칙 위반의 해소.** 종전 L1 block / L2 **safe** 였다 — `~` 분기가 틸드 **바로 뒤**에 터미네이터를 요구했고, rm-rf-path·rm-recursive-path 는 둘 다 `~` 로 시작하는 타깃을 "rm-rf-root 의 일"이라며 제외했다(그 제외 자체가 2026-09-22 guard-rm-flag-redos 에서 걷혔다 — 아래 차집합 행 참조). 세 규칙 사이로 떨어진 자리다(실측 2026-09-21: `~name` 3형 + `~+`·`~-`·`~1` 전부 L2 safe). 수리는 틸드 뒤에 **경계 있는 이름 클래스**(`\\w[\\w.-]*`)를 선택적으로 둔 것이고, 터미네이터 집합은 그대로다. 수용된 과대 판정: 그런 사용자가 없어 셸이 확장하지 않는 리터럴 경로(`rm -rf ~backup`)도 danger 다 — 방향이 차단 쪽이라 받되 safety.test.js 의 전용 it 이 그것을 알고 있다고 기록한다. 발생률은 **미측정**.',
   },
   {
     command: 'rm -r ~user',
@@ -597,6 +597,33 @@ const PARITY_MATRIX = Object.freeze([
     l2Id: 'rm-rf-root',
     status: 'owner-decision',
     note: '**이 줄기의 본체 — full-stack 사각이었다.** force 플래그가 없으면 L1 의 세 rm 규칙이 전부 비껴간다(`rm -rf with path`·`rm -fr with path` 는 결합 토큰에 force 를 요구하고, `rm recursive+force (any target)` 도 force 를 요구한다). 그래서 종전 L1 approve + L2 safe 로 **어느 층도 보지 않았다**(실측 2026-09-21, executeChain 2열: `rm -r ~user` · `rm --recursive ~user` · `rm -R ~user` 3형). L2 가 danger 로 받아 사각이 닫혔다. L1 pass 가 남아 있으므로 헤더 방향 규칙상 agreed 가 아니다 — 위 `rm --recursive <513자>/x` 행과 **같은 종류의 owner-decision** 이고, 닫는 방법도 같다: L1 을 넓히는 것이 아니라 L2 가 받는 것. L1 규칙은 이 줄기의 소유 밖이다.',
+  },
+  // ── guard-rm-flag-redos 차집합 (2026-09-22) ───────────────────────────────
+  // rm-rf-root 가 **받지 않는** 틸드·$HOME 선두 타깃. 두 경로 규칙이 그것을
+  // 통째로 "rm-rf-root 의 일"이라며 제외한 탓에 어느 규칙에도 닿지 않았다.
+  {
+    command: 'rm -r ~$USER',
+    l1: 'pass',
+    l2: 'caution',
+    l2Id: 'rm-recursive-path',
+    status: 'owner-decision',
+    note: '**full-stack 사각의 종결.** `~$USER` 는 틸드 뒤가 이름이 아니라 변수라 rm-rf-root 의 이름 클래스에 안 걸리는데, 두 경로 규칙은 `(?![-/~*]|\\$HOME\\b)` 로 틸드 선두를 통째로 넘겼다. force 도 없으니 L1 세 rm 규칙도 전부 비껴간다 — 실측 2026-09-22 L1 approve / L2 **safe**. 위 `rm -r ~user` 행과 같은 종류의 owner-decision 이고 닫는 방법도 같다(L2 가 받는다). 등급이 danger 가 아니라 caution 인 이유: 셸이 `$USER` 를 확장하면 홈의 **형제 디렉터리**가 되지 홈 자체가 아니다.',
+  },
+  {
+    command: 'rm -rf $HOME*',
+    l1: 'block',
+    l2: 'caution',
+    l2Id: 'rm-rf-path',
+    status: 'owner-decision',
+    note: '**glob 형 — 방향 규칙 위반의 해소.** 종전 L1 block / L2 **safe** 였다. rm-rf-root 는 `$HOME` 뒤에 터미네이터를 요구하고 `*` 는 그 집합 밖이며(위 `${HOME}` 행이 말하는 "터미네이터 집합 재사용"의 대가), 두 경로 규칙은 `\\$HOME\\b` 로 제외했다 — `*` 가 비단어 문자라 `\\b` 가 성립한다. 제외를 지우면 rm-rf-path 가 받는다. **터미네이터 집합에 `*` 를 더하지 않은 것은 의도**다: 그러면 `rm -rf ~*` 리터럴이 danger 가 되는데 그것은 홈이 아니라 현재 디렉터리의 `~` 시작 파일들이다. danger 승격은 오너 몫으로 남긴다.',
+  },
+  {
+    command: 'rm -rf ~+',
+    l1: 'block',
+    l2: 'caution',
+    l2Id: 'rm-rf-path',
+    status: 'agreed',
+    note: '**의도된 정렬.** `~+` 는 $PWD 다 — 홈이 아니라 **현재 디렉터리**이고, 이 카탈로그는 같은 부류 `.`·`./`·`$PWD` 를 언제나 caution 으로 매겨 왔다. 28e37002 이 잠깐 danger 로 올린 것은 틸드 이름 클래스를 `\\w` 선두로 둔 부작용이었다(`~1` 도 같이 걸렸다). 그 커밋 기준으로는 danger→caution 하향이고, 줄기 이전 기준선 b7924207 기준으로는 safe→caution **상승**이다(실측 2026-09-22, 두 커밋의 safety.js 를 각각 임포트해 2열 비교). 방향 규칙 block ⇒ ≥caution 을 충족하므로 agreed.',
   },
   // ── guard-l2-followups ② sql-delete-no-where (2026-09-14) ─────────────────
   {
