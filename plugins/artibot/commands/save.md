@@ -59,14 +59,16 @@ Parse $ARGUMENTS:
 
 2~7단계의 호출은 하나다: `buildSaveCheckpoint(ports, { sessionId, trigger:'/save' })` (8단계는 이 호출 밖의 별도 읽기 사슬이다 — 이 모듈은 scorecard 를 모른다). ports 는 `{ listActiveMissionIds, getMission, getTaskGraph, checkpointService, appendEvent }` 이고 `listActiveMissionIds = () => Object.keys(store.getState().active_missions)` — 활성 mission **전부**가 대상이다 (리더 결정 ca05-6(a)). 0건이면 `skip:no-active-mission` 이고 출력 표는 "스킵(활성 mission 없음)". `session_id` 는 훅 payload 가 1순위이고 env 가 폴백이며, 비어 있으면 `skip:session-missing` 이다 — mission_id·session_id 를 지어내지 않는다. 결과 행은 `{ mission_id, status: saved|rejected|skipped|errored, checkpoint_id, resumable, blocked_by, errors, ledger }`.
 
-체크포인트 결과도 8단계 세션 카드도 HANDOFF 본문에 넣지 않는다 — `renderHandoffMarkdown` 출력 바이트는 불변이고, 결과는 `/save` 출력 표와 출력 맨 끝의 `## 세션 스코어카드` 절에만 나타난다.
+체크포인트 결과도 8단계 세션 카드도 HANDOFF 본문에 넣지 않는다 — Phase A½ 에 관한 한 `renderHandoffMarkdown` 출력 바이트는 불변이고, 결과는 `/save` 출력 표와 출력 맨 끝의 `## 세션 스코어카드` 절에만 나타난다.
+
+이 불변의 **범위는 Phase A½ 다**. Phase B 2단계의 `readStateVersion` 포트는 frontmatter `derived-from` 을 `state@unmeasured` 에서 `state@<n>` 으로 바꾸므로 렌더 바이트가 달라지지만, 그것은 이 절의 계약 위반이 아니라 Phase B 가 하는 일이다. 두 문장이 부딪히지 않는 이유는 하나 더 있다: 체크포인트는 `state_version` 을 올리지 않는다 — `lib/checkpoint/*` 어디에도 store writer 가 없어 `/save` 의 체크포인트 저장이 포트가 읽는 값을 움직이지 못한다. 설계 §147 의 "`/save` = checkpoint(state_version++)" 는 아직 미구현이고, 구현되는 날 이 문단을 다시 읽어야 한다.
 
 스로틀은 없다 (ca05-7 미결). `/save` 를 연타하면 `mission.checkpointed` 가 건마다 남고 scorecard 분자(`lib/scorecard/session-scorecard.js`)가 그만큼 오른다.
 
 ### Phase B: 합성 (~0.5s)
 
 1. **첫 프롬프트 후보 생성**: Phase A에서 모은 신호로 `lib/handoff/next-prompt-suggester.js` 의 `suggestFirstPrompts(signals, { max: 3 })` 호출. `signals` 는 실제 시그니처에 맞춰 `{ tasks, recentCommits, wip, gitStatus, unresolved, advisorSignals }` 로 구성 (`tasks`=TaskList 결과, `recentCommits`=git log 10개, `wip`=`{ count, oldestAgeMs }`, `gitStatus`=`{ untracked }`. `unresolved`/`advisorSignals` 는 현재 reserved). 반환 배열 `firstPrompts` = `[{ prompt, rationale, priority }]`.
-2. `lib/handoff/handoff-builder.js` 의 `collectHandoffData({ pluginRoot, projectRoot, gitRunner, taskList, firstPrompts, now })` 호출 — Step 1에서 만든 `firstPrompts` 를 반드시 전달해야 §4·§6 이 채워짐 (생략 시 빈 배열 → "자동 생성됨" placeholder만 출력)
+2. `lib/handoff/handoff-builder.js` 의 `collectHandoffData({ pluginRoot, projectRoot, gitRunner, taskList, firstPrompts, now, readStateVersion })` 호출 — Step 1에서 만든 `firstPrompts` 를 반드시 전달해야 §4·§6 이 채워짐 (생략 시 빈 배열 → "자동 생성됨" placeholder만 출력). `readStateVersion` 은 `lib/handoff/state-version-port.js` 의 `createStateVersionPort({ projectRoot })` 가 만드는 **읽기 전용** 포트이며, 이것을 넘겨야 frontmatter 의 `derived-from` 이 `state@<n>` 실값이 된다 — 생략하면 포트 부재로 **언제나** `state@unmeasured` 다. 포트는 던지지 않고 측정 불능이면 `null` 을 돌려주며(기록 없는 store·`state_version: 0`·per-worktree `project-root-fallback` 위치는 전부 `null`), 그 값은 `state@unmeasured` 로 렌더된다 — `state@0` 은 쓰지 않는다. **Phase B 는 Phase A½ 가 아니다**: `runtime.checkpoint.saveOnSave` 게이트는 Phase A½ 에만 걸리므로, 그 값이 false 여도 이 배선은 그대로 돈다.
 3. 결과를 `renderHandoffMarkdown(data, { now })` 로 GFM 마크다운 변환 (ANSI 금지)
 4. 마크다운에 다음 8개 섹션 포함 (헤더 문자열은 `handoff-builder.js` `renderHandoffMarkdown` 출력과 정확히 일치):
    - `# HANDOFF — <timestamp>` 헤더 + `> 다음 P0: …` 요약 한 줄
