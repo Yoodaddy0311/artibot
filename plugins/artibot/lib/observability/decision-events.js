@@ -63,6 +63,48 @@
  * deriving from the other. Tripwire on that decision:
  * `tests/hooks/runtime-prompt-memory-instrumentation.test.js`.
  *
+ * LEGITIMATE-EMITTER RULE — the general form of the paragraph above, written
+ * out because it was until now only reachable by reading that one case. A hook
+ * process may append an event to the run ledger under `source:'hook'` only when
+ * BOTH of these hold:
+ *   (1) FIRST-HAND WITNESS. The hook is the actor of the fact it records, or
+ *       its direct observer. Relaying a decision another component made does
+ *       not qualify; what the hook did honestly gets its own name instead —
+ *       which is why the T-37 record below is `recommended` and not `selected`.
+ *   (2) HONEST PAYLOAD. The hook can fill every REQUIRED field of that event's
+ *       contract from its own payload, without inventing a value whose declared
+ *       writer is a different module.
+ * Failing either one, the record does NOT go to the ledger under a borrowed
+ * source. It goes to THIS decisions side-channel under a type name of its own.
+ * The allowlist's `sources` lists are the CONSEQUENCE of this rule and not its
+ * statement: an event whose `sources` omits `hook` is one no hook passes (1)+(2)
+ * for. Gate: `tests/firewall/hook-emitter-sources-rule.test.js`, which collects
+ * every ledger emission reachable from a registered hook entry point and
+ * requires each to be `source:'hook'` on a hook-permitted event, a call into
+ * this module, or a listed exception carrying its reason.
+ *
+ * THE T-37 PAIR, JUDGED BY THAT RULE (this is the table the paragraph above
+ * argued case by case):
+ *   `topology.selected` — (1) NO: `routeTopology` recommends, and nothing in
+ *       the prompt path selects a topology. (2) n/a once (1) fails.
+ *       → side-channel, as `topology-recommended`.
+ *   `context.compiled`  — (1) NO: the hook measures an injection, it does not
+ *       compile the context. (2) NO: `data` is delegated whole to
+ *       `context-receipt.schema.json` (`additionalProperties:false`) whose
+ *       required `cache.*` numbers have one declared writer,
+ *       `lib/economics/usage-receipt.js`.
+ *       → side-channel, as `memory-injection-measured`.
+ * Both verdicts are the same one the measurement above reached empirically
+ * (`source-not-allowed:hook` plus a `ledger.rejected` line); the rule explains
+ * why that refusal is correct rather than an obstacle to route around.
+ *
+ * WHAT THIS RULE DOES NOT DECIDE: whether a ledger `source` names a PROCESS
+ * identity (`hook`, `worker`) or a ROLE (`gate`, `reviewer`, `human`). Hooks
+ * today write all five — `verify.completed`/`gate`, `review.*`/`reviewer`,
+ * `human.resolved`/`human` among them. Those emitters are enumerated, with the
+ * reason each one is left alone, in the gate test named above; reconciling the
+ * two readings is a separate decision and no code here presumes its outcome.
+ *
  * Public surface:
  *   - ROUTING_CLASSIFIED / WORKFLOW_PLANNED   (the two `type` values written)
  *   - TOPOLOGY_RECOMMENDED / MEMORY_INJECTION_MEASURED  (the T-37 pair)
