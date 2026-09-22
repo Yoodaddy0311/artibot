@@ -244,16 +244,12 @@ describe('classifyRisk — rm-rf-root reads every shell token terminator', () =>
     expect(r.matchedId).toBe('rm-rf-root');
   });
 
-  // 남은 miss 2형. 고치지 않는다 — 커버리지 확대는 오너 결정이고, 여기서는
-  // **지금 무엇이 통과하는지**를 기록한다. 둘 다 L1 은 block 이므로 방향 규칙
-  // 위반이 남아 있다는 사실도 함께 핀한다(실측 2026-09-14).
-  it('still misses ${HOME} and ~user (documented, out of scope)', () => {
-    // `${HOME}` 은 중괄호 확장이라 `\$HOME` 리터럴에 안 걸린다. rm-rf-path 가
-    // 받아서 caution 이 되므로 완전한 사각은 아니다.
-    expect(classifyRisk('rm -rf ${HOME}').matchedId).toBe('rm-rf-path');
-    // `~user` 는 다른 사용자의 홈이다. `~` 분기가 바로 뒤에 터미네이터를
-    // 요구하므로 안 걸리고, 여기는 여전히 L2 safe = full-stack 방향 위반이다.
-    expect(classifyRisk('rm -rf ~user').level).toBe('safe');
+  // 2026-09-14 에 "범위 밖(오너 결정)"으로 남겼던 `${HOME}`·`~user` 두 형은
+  // 2026-09-21(guard-l2-residual)에 닫혔다. 아래 두 describe 가 그 자리다.
+  // 여기에는 **닫혔다는 사실만** 핀한다 — 형별 분모는 아래에서 센다.
+  it('no longer misses the two shapes the 2026-09-14 comment listed', () => {
+    expect(classifyRisk('rm -rf ${HOME}').level).toBe('danger');
+    expect(classifyRisk('rm -rf ~user').level).toBe('danger');
   });
 
   // 음성 16형. 이 편집은 **터미네이터를 넓히는** 변경이라 원리적으로 과대 판정
@@ -279,6 +275,181 @@ describe('classifyRisk — rm-rf-root reads every shell token terminator', () =>
     'rm -rf "build"',
   ])('leaves %s off rm-rf-root', (command) => {
     expect(classifyRisk(command).matchedId).not.toBe('rm-rf-root');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// rm-rf-root — `${HOME}` 중괄호 형과 `~name` 사용자 홈(2026-09-21,
+// guard-l2-residual). 2026-09-14 주석이 "범위 밖(오너 결정)"으로 남긴 딱 그 두
+// 형이다. 리더가 2026-09-21 에 재개했다.
+//
+// 착수 전 실측(2026-09-21, node v24.15.0, classifyRisk + executeChain 2열):
+//   ${HOME} 5형(맨몸·끝 슬래시·하위경로·큰따옴표·force 없는 재귀)
+//     L1 block(force 있을 때) / L2 **caution**. 평문 `$HOME` 은 danger 이므로
+//     같은 타깃을 가리키는 두 표기가 **등급이 갈렸다** — 방향 규칙 위반은
+//     아니지만 과소 판정이다.
+//   ~name 3형 + `~+`·`~-`·`~1`
+//     L2 **safe**. force 가 붙으면 L1 은 `rm recursive+force (any target)` 로
+//     block 하므로 **L1 block / L2 safe = 방향 규칙 위반**이고,
+//     force 없는 재귀형(`rm -r ~user`·`rm --recursive ~user`)은 L1 도 approve —
+//     **full-stack 사각**이다. 이 둘이 이 줄기의 본체다.
+//
+// 수리는 규칙을 **추가하지 않았다**. `~name` 은 홈 디렉터리이고 `${HOME}` 은
+// `$HOME` 과 같은 값이므로 둘 다 rm-rf-root 의 소관이다. 타깃 분기 두 개만
+// 넓혔고 규칙 수(27)와 정적 스캐너 분모(95)는 무접촉이다.
+//
+// 수용된 과대 판정: 이름이 틸드로 시작하는 **문자 그대로의 상대 경로**
+// (`rm -rf ~backup` — 그런 사용자가 없으면 셸이 확장하지 않고 리터럴로 둔다)도
+// danger 가 된다. 방향은 차단 쪽이고, 2026-09-14 가 받은 따옴표-틸드 과대 판정과
+// 같은 종류다. 실사용 발생률은 **미측정**(트랜스크립트 조사 없음).
+describe('classifyRisk — rm-rf-root grades ${HOME} like $HOME', () => {
+  it.each([
+    'rm -rf ${HOME}',
+    'rm -rf ${HOME}/',
+    'rm -rf ${HOME}/x',
+    'rm -rf "${HOME}"',
+    "rm -rf '${HOME}'",
+    'rm -rf ${HOME};',
+    'rm -rf ${HOME}&',
+    'rm -rf ${HOME}|',
+    'rm -rf ${HOME})',
+    'rm -rf ${HOME}"',
+    'rm -rf -- ${HOME}',
+    'rm -rfv ${HOME}',
+    'rm -r -f ${HOME}',
+    'rm --recursive --force ${HOME}',
+    // force 없는 재귀형. 평문 `$HOME` 쪽과 같이 rm-rf-root 는 force 를
+    // 요구하지 않는다.
+    'rm -r ${HOME}',
+    'rm --recursive ${HOME}',
+    'bash -c "rm -rf ${HOME}"',
+  ])('grades %s as danger via rm-rf-root', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 음성 대조 — **다른 변수**가 사고로 danger 가 되지 않는지. 평문 분기가
+  // `$HOMEDIR` 를 거부하는 것과 정확히 같은 이유로, 중괄호 분기도 `HOME` 다음에
+  // 곧바로 `}` 를 요구한다.
+  it.each([
+    'rm -rf ${HOMEDIR}',
+    'rm -rf ${HOME_DIR}',
+    'rm -rf ${HOMEPAGE}/x',
+    'rm -rf ${HOMEBREW_PREFIX}',
+    'rm -rf ${PROJECT_HOME}',
+    // `}` 뒤에 단어문자가 붙으면 그것은 홈의 **형제**다(`/home/user` + `x`),
+    // 홈이 아니다. 평문 쪽 `$HOMEDIR` 와 같은 판단.
+    'rm -rf ${HOME}x',
+    'rm -rf ${HOME}_old',
+  ])('leaves %s off rm-rf-root', (command) => {
+    expect(classifyRisk(command).matchedId).not.toBe('rm-rf-root');
+  });
+
+  // 치환·기본값 연산자 형. **danger 가 아니라 caution 으로 남긴다** — 이것은
+  // 결정이지 누락이 아니다.
+  //   이유 1(일관성): 평문 분기도 `rm -rf $HOME:-/tmp` 를 danger 로 보지 않는다.
+  //     터미네이터 집합에 `:` 가 없기 때문이고, 중괄호 분기는 리더 조건 ③ 대로
+  //     **같은 터미네이터 규칙**을 쓴다.
+  //   이유 2(비용): `${HOME:-/tmp}` 를 잡으려면 `${…}` 본문 문법으로 들어가야
+  //     하는데, 그러면 `${HOMEBREW_PREFIX:-/usr}` 같은 이웃을 가르는 일을 새
+  //     수량자로 해야 한다. 얻는 것보다 과대 판정 위험이 크다.
+  //   남는 것: 이 3형은 실제로 홈을 지우는데 L2 는 caution 이다. 과소 판정이
+  //     맞고, L1 은 force 가 있으면 block 하므로 full-stack 사각은 아니다.
+  //     **완전한 사각은 force 없는 형**(`rm -r ${HOME:-/tmp}`)이고 그것도
+  //     rm-recursive-path 가 caution 으로 받는다. 미측정: 실사용 발생률.
+  it.each([
+    'rm -rf ${HOME:-/tmp}',
+    'rm -rf ${HOME:?}',
+    'rm -rf ${HOME-x}',
+  ])('leaves the substitution form %s at caution, not danger', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('caution');
+    expect(r.matchedId).not.toBe('rm-rf-root');
+  });
+});
+
+describe('classifyRisk — rm-rf-root grades ~name (another user home)', () => {
+  it.each([
+    'rm -rf ~user',
+    'rm -rf ~user/',
+    'rm -rf ~user/x',
+    'rm -rf ~alice',
+    'rm -rf ~bob/data',
+    'rm -rf ~user-name',
+    'rm -rf ~user.name',
+    'rm -rf ~user_name',
+    'rm -rf ~user;',
+    'rm -rf ~user&',
+    'rm -rf ~user|',
+    'rm -rf ~user)',
+    'rm -rf ~user"',
+    'rm -rf -- ~user',
+    'rm -rfv ~user',
+    'rm -r -f ~user',
+    // dirstack·PWD 형. `~+` = $PWD, `~-` = $OLDPWD, `~1` = 디렉터리 스택.
+    // 홈은 아니지만 **틸드 확장이 디렉터리로 펼쳐지는** 같은 부류이고, 셋 다
+    // 착수 전 L1 block / L2 safe 였다(방향 규칙 위반).
+    'rm -rf ~+',
+    'rm -rf ~-',
+    'rm -rf ~1',
+  ])('grades %s as danger via rm-rf-root', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 이 줄기의 본체 — force 플래그가 없는 재귀 삭제. 착수 전 L1 approve +
+  // L2 safe 로 **full-stack** 이었다(실측 2026-09-21, executeChain 2열).
+  it.each([
+    'rm -r ~user',
+    'rm --recursive ~user',
+    'rm -R ~user',
+  ])('closes the full-stack miss %s at L2', (command) => {
+    const r = classifyRisk(command);
+    expect(r.level).toBe('danger');
+    expect(r.matchedId).toBe('rm-rf-root');
+  });
+
+  // 수용된 과대 판정. 그런 사용자가 없으면 셸은 `~backup` 을 확장하지 않고
+  // 리터럴 상대 경로로 둔다 — 즉 홈이 아니다. 방향이 차단 쪽이라 받되 **조용히
+  // 두지 않는다.** 2026-09-14 의 따옴표-틸드 항목과 같은 종류다.
+  it('accepts the literal tilde-path over-match knowingly', () => {
+    expect(classifyRisk('rm -rf ~backup').matchedId).toBe('rm-rf-root');
+    expect(classifyRisk('rm -rf "~user"').matchedId).toBe('rm-rf-root');
+  });
+
+  // 음성 대조 — 틸드로 시작하지 않는 타깃은 그대로다.
+  it.each([
+    'rm -rf ./build',
+    'rm -rf build',
+    'rm -rf node_modules/.cache',
+    'rm -rf "build"',
+    'rm -f file.txt',
+    // 틸드 **뒤가 이름이 아닌** 형. `~.foo` 는 유효한 사용자 이름이 아니라
+    // 셸도 확장하지 않는다.
+    'rm -rf ~.foo',
+    'rm -rf ~$USER',
+  ])('leaves %s off rm-rf-root', (command) => {
+    expect(classifyRisk(command).matchedId).not.toBe('rm-rf-root');
+  });
+});
+
+// 언급 대조 — 두 신규 형 모두. 터미네이터·이름 클래스를 넓히는 편집은 원리적으로
+// 과대 판정 위험이 있고, 그 위험이 가장 비싸게 드러나는 곳이 "삭제를 말하는 글"이다.
+// 실측 2026-09-21: 신규 거짓 양성 0.
+describe('classifyRisk — the two new shapes stay safe in mention form', () => {
+  it.each([
+    'echo "rm -rf ${HOME}"',
+    'echo "rm -rf ~user"',
+    '# rm -rf ${HOME}',
+    '# rm -rf ~user',
+    'echo rm -rf ${HOME}',
+    'echo rm -rf ~user',
+    "grep -n 'rm -rf ~user' notes.txt",
+    'git commit -m "document rm -rf ${HOME}"',
+  ])('leaves the mention %s safe', (command) => {
+    expect(classifyRisk(command).level).toBe('safe');
   });
 });
 
@@ -1162,6 +1333,27 @@ const SCALED_PAYLOADS = [
   // 터지지 않는다"만 증명한다 — 게이트 옆에 게이트가 못 보는 것을 적는다.
   ['quote-root fill', (n) => fill('rm -rf /" ', n)],
   ['tilde-paren fill', (n) => fill('rm -rf ~) ', n)],
+  // 2026-09-21 (guard-l2-residual) — 이 편집이 **더한 수량자는 하나뿐**이다:
+  // 틸드 분기의 이름 런 `\w[\w.-]*`. 중괄호 분기(`\$\{HOME\}`)는 전부 리터럴이라
+  // 수량자를 더하지 않는다.
+  //
+  // 위 두 행과 달리 이 행들은 **긴 단일 런**이다. 촘촘한 반복 입력은 첫 위치에서
+  // 곧장 매치하거나 곧장 실패해 런 안의 백트래킹을 전혀 건드리지 못한다 —
+  // 2026-09-14 주석이 quote-root/tilde-paren 에 대해 스스로 적어 둔 약점이고,
+  // 같은 약점을 반복하지 않으려고 형을 바꿨다.
+  //   tilde-name run   `rm -rf ~` + 'a'×(n-9) + '*'
+  //     이름 런이 입력 전체를 삼킨 뒤 터미네이터가 `*` 에서 실패한다. `*` 는
+  //     이름 클래스에도 터미네이터 클래스에도 없으므로 **되돌릴 때마다 다시
+  //     실패**한다 — 이 수량자에서 최악에 가장 가까운 형이다.
+  //   tilde-dot run    같은 형, 채움 문자가 `.`
+  //     `.` 은 이름 클래스 안이지만 **첫 문자로는 못 오는**(선두는 `\w`) 문자라
+  //     선두 원자와 꼬리 수량자의 경계를 따로 건드린다.
+  //   brace-home near-miss  `rm -rf ${HOMEDIR} ` 반복
+  //     중괄호 분기가 `HOME` 까지 맞고 `}` 에서 틀어지는 형. 수량자는 없지만
+  //     교대(alternation)가 매 시작 위치에서 두 갈래를 시도하는 비용을 잰다.
+  ['tilde-name run', (n) => `rm -rf ~${'a'.repeat(n - 9)}*`],
+  ['tilde-dot run', (n) => `rm -rf ~a${'.'.repeat(n - 10)}*`],
+  ['brace-home near-miss', (n) => fill('rm -rf ${HOMEDIR} ', n)],
   // 2026-09-14 ② — sql-delete-no-where 는 종전에 SCAN_ALLOWLIST 에 있어 정적
   // 스캔 밖이었고 여기에도 payload 가 없었다. 즉 **3층 중 어느 층도 이 규칙을
   // 보지 않았다.** 그 상태에서 옛 식은 2차식이었다. 이제 (i) 스캔 대상이고
@@ -1262,6 +1454,30 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
       expect(build(122_880)).toHaveLength(122_880);
     }
   });
+
+  // 2026-09-21 — 신규 수량자(`\w[\w.-]*`) 전용 단일-런 스윕.
+  // 10K → 20K → 40K → 120K 를 **구조로** 단언한다: 반환하고, 판정이 예고한
+  // 값이다. 벽시계는 재지 않는다 — 위 성장 비율 행이 그 일을 맡고, 120KB 절대값
+  // 단언은 이 파일의 규약상 금지다(플레이크).
+  //
+  // **이 it 이 증명하지 않는 것**: "빠르다"를 증명하지 않는다. 2차식이어도
+  // 충분히 기다리면 반환하므로 이 단언만으로는 그린이 될 수 있다. 2차식을 잡는
+  // 것은 SCALED_PAYLOADS 의 성장 비율(임계 18)과 정적 스캔이고, 이 it 은
+  // **종료와 판정 안정성**만 맡는다. 게이트 옆에 게이트가 못 보는 것을 적는다.
+  it.each([
+    ['tilde-name run', (/** @type {number} */ n) => `rm -rf ~${'a'.repeat(n - 9)}*`, 'safe'],
+    ['tilde-dot run', (/** @type {number} */ n) => `rm -rf ~a${'.'.repeat(n - 10)}*`, 'safe'],
+    // 같은 런이 **끝에서 끝나면** 매치한다(터미네이터 = 입력 끝). 실패형만
+    // 재면 "안 걸려서 빨랐다"와 구별이 안 되므로 양성 대조군을 같이 둔다.
+    ['tilde-name run (matching)', (/** @type {number} */ n) => `rm -rf ~${'a'.repeat(n - 8)}`, 'danger'],
+    ['brace-home near-miss', (/** @type {number} */ n) => fill('rm -rf ${HOMEDIR} ', n), 'caution'],
+  ])('terminates on a %s at 10K/20K/40K/120K', (_name, build, level) => {
+    for (const size of [10_240, 20_480, 40_962, 122_880]) {
+      const payload = build(size);
+      expect(payload).toHaveLength(size);
+      expect(classifyRisk(payload).level).toBe(level);
+    }
+  }, 30_000);
 });
 
 /**
