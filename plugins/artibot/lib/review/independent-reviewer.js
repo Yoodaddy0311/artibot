@@ -648,6 +648,10 @@ function checkV2Structure(doc) {
  * idempotency key is built from — an inadmissible answer must not be able to
  * hand a writer a key that looks like a recorded verdict.
  *
+ * `intentRevision` and `planRevision` follow that rule too, and are kept as
+ * integers rather than coerced: `0` is a real first revision, so an absent
+ * value is null and never `0`.
+ *
  * @param {object} base partial result
  * @returns {object} normalized result
  */
@@ -659,6 +663,12 @@ function result(base) {
     schemaVersion: base.schemaVersion ?? null,
     foldedVerdict: base.foldedVerdict ?? null,
     sources: base.sources ?? [],
+    intentRevision: base.ok === true && Number.isInteger(base.intentRevision)
+      ? base.intentRevision
+      : null,
+    planRevision: base.ok === true && Number.isInteger(base.planRevision)
+      ? base.planRevision
+      : null,
     verificationId: base.ok === true && isNonEmptyString(base.verificationId)
       ? base.verificationId
       : null,
@@ -714,6 +724,7 @@ function applyValidatorPort(doc, validateSchema, errors) {
  *   optional JSON-Schema validator port for the v2 definition
  * @returns {{ok: boolean, verdict: string|null, errors: object[],
  *   schemaVersion: number|null, foldedVerdict: string|null, sources: string[],
+ *   intentRevision: number|null, planRevision: number|null,
  *   verificationId: string|null, ambiguous?: true, candidates?: string[]}}
  *   parse outcome
  */
@@ -745,6 +756,8 @@ export function parseReviewVerdict(textOrJson, opts = {}) {
     return result({
       ok: true,
       verdict: doc.verdict,
+      intentRevision: doc.intent_revision,
+      planRevision: doc.plan_revision,
       verificationId: doc.verification_id,
       schemaVersion: 2,
       sources: ['v2'],

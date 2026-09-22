@@ -35,8 +35,11 @@
  * later aggregates as if it were a model. `'unknown'` is never written.
  *
  * ── What green tests here do NOT prove ─────────────────────────────────────
- *  1. That any reviewer agent emits either block. No production caller wires
- *     these functions yet.
+ *  1. That any reviewer agent emits either block. A production caller DOES
+ *     exist — `scripts/hooks/_review-stop-record.js:573` calls
+ *     `recordReviewOutcome` on SubagentStop (read 2026-09-22) — so the old
+ *     "no production caller yet" note here was stale. What stays unproven is
+ *     that a real agent hands that caller a parseable block.
  *  2. That `claims_total` was counted by the rule of 설계 §4.4 #2. A
  *     well-formed block with an invented denominator is accepted, exactly as in
  *     `parseClaimAudit`.
@@ -195,6 +198,18 @@ export function buildReviewCompletedEvent(args = {}) {
       data: {
         verdict: parsed.verdict,
         findings_ref: findingsRef,
+        // The revision the verdict was formed against. OMITTED, never null:
+        // these two keys are UNDECLARED for `review.completed` in
+        // `schemas/ledger-events.allowlist.json`, so they ride through
+        // `event-writer.js#validateDeclaredFields` untouched, and a null would
+        // record "absent" as if it were a measured value. `Number.isInteger`
+        // and not a truthiness test, because revision `0` is real.
+        ...(Number.isInteger(parsed.intentRevision)
+          ? { intent_revision: parsed.intentRevision }
+          : {}),
+        ...(Number.isInteger(parsed.planRevision)
+          ? { plan_revision: parsed.planRevision }
+          : {}),
         verification_id: parsed.verificationId,
       },
     },
