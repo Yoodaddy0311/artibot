@@ -12,8 +12,9 @@
  * An expired lease is reclaimable, not reclaimed. Taking the slot here would
  * be cheap and wrong: the record of WHO held it is the only evidence that a
  * second writer ever existed, and overwriting it erases the finding at the
- * exact moment it becomes interesting. Reclaim is CA-14's decision, with its
- * own contention handling. So `held` and `expired` are different WORDS for the
+ * exact moment it becomes interesting. Reclaim is CA-09's decision — decision 7
+ * shrank CA-14 and moved it there — with its own contention handling. So
+ * `held` and `expired` are different WORDS for the
  * same ACTION — return the caller's own object, by reference, untouched.
  * `tests/mission/controller.test.js` pins both the reference and the bytes.
  *
@@ -205,7 +206,9 @@ export function observeController({ current, sessionId, now, ttlMs } = {}) {
  * @param {string} params.sessionId - The observing session.
  * @param {Date|number} params.now - The instant to judge at.
  * @param {number} [params.ttlMs] - Lease lifetime.
- * @returns {Function} A mutator with the same signature as `base`.
+ * @returns {Function} A mutator with the same signature as `base`, carrying an
+ *   `observation` property: `null` until it runs, then the last judgement it
+ *   made — always one of {@link CONTROLLER_OBSERVATIONS}.
  * @throws {TypeError} At COMPOSITION time when `base`, `sessionId` or `now` is
  *   unusable — before any state write is attempted.
  */
@@ -216,14 +219,57 @@ export function composeControllerMutator(base, { sessionId, now, ttlMs } = {}) {
   const owner = assertSessionId(sessionId);
   const at = assertInstant(now);
 
-  return (current) => {
+  // THE JUDGEMENT RIDES THE MUTATOR, not the row it returns. `updateMission`
+  // owns that row and re-runs this function on a CAS conflict, so the caller
+  // needs the reading belonging to the run that actually committed — always the
+  // LAST one. A sink handed back at composition time would have to be reconciled
+  // across both runs; a property is simply "what it last saw".
+  //
+  // It is a REPORT, never an instruction. `held` and `expired` still return the
+  // caller's own record by reference, untouched, exactly as before — naming the
+  // observation is the whole change.
+  const mutator = (current) => {
     const next = base(current);
+    // A removal makes no observation, so the previous report stands rather than
+    // being overwritten with a judgement nobody made.
     if (next === null || next === undefined) return next;
-    const { controller } = observeController({
+    const { observation, controller } = observeController({
       current: current?.controller, sessionId: owner, now: at, ttlMs,
     });
+    mutator.observation = observation;
     return { ...next, controller };
   };
+  mutator.observation = null;
+  return mutator;
+}
+
+/**
+ * Say what a LATER stage could do about an observation. Recommends nothing
+ * unless the caller opts in, and applies nothing in either case.
+ *
+ * OFF BY DEFAULT, and `null` rather than a "no action" record, because the two
+ * are different claims: `null` says nobody asked, while `{reclaimable: false}`
+ * says the question was put and the answer was no. Reclaim itself belongs to
+ * CA-09, so nothing here writes a status, touches a lease or reads a clock —
+ * the arguments are the whole input and a frozen record is the whole output.
+ *
+ * @param {unknown} observation - One of {@link CONTROLLER_OBSERVATIONS}.
+ * @param {object} [options] - Caller opt-in.
+ * @param {boolean} [options.enabled=false] - Literal `true` to get an answer. A
+ *   merely truthy value is not enough: a gate that opens on `'no'` or `1` is a
+ *   gate that opens by accident.
+ * @returns {{observation: string, reclaimable: boolean}|null} A frozen
+ *   recommendation, or `null` when switched off or handed an unknown word.
+ * @example
+ * recommendControllerTransition('expired'); // null — nobody asked
+ * recommendControllerTransition('expired', { enabled: true }).reclaimable; // true
+ */
+export function recommendControllerTransition(observation, { enabled = false } = {}) {
+  if (enabled !== true) return null;
+  if (!CONTROLLER_OBSERVATIONS.includes(observation)) return null;
+  // Only a lapsed claim is reclaimable. `held` deliberately is not: a live lease
+  // is the one case where taking the slot would destroy live evidence.
+  return Object.freeze({ observation, reclaimable: observation === 'expired' });
 }
 
 /**

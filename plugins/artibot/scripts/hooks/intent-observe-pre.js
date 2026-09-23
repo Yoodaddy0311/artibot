@@ -91,7 +91,8 @@ import { isMainEntry } from './_main-entry.js';
  * @returns {Promise<object>} the named bindings, flat
  */
 async function loadDeps() {
-  const [core, git, ledger, writer, missionId, compiler, artifact, lifecycle, tasks, commonDir] =
+  const [core, git, ledger, writer, missionId, compiler, artifact, lifecycle, tasks, commonDir,
+    controller] =
     await Promise.all([
       import('../../lib/core/config.js'),
       import('../../lib/git/project-root.js'),
@@ -103,6 +104,7 @@ async function loadDeps() {
       import('../../lib/runtime/artifact-lifecycle.js'),
       import('../../lib/runtime/middleware/tasks.js'),
       import('../../lib/project-state/git-common-dir.js'),
+      import('../../lib/mission/controller.js'),
     ]);
   return {
     loadConfig: core.loadConfig,
@@ -117,6 +119,7 @@ async function loadDeps() {
     plan: lifecycle.plan,
     resolveArtifactGate: lifecycle.resolveArtifactGate,
     missionMutator: tasks.missionMutator,
+    composeControllerMutator: controller.composeControllerMutator,
     openMissionStore: tasks.openMissionStore,
     resolveGitCommonDir: commonDir.resolveGitCommonDir,
   };
@@ -331,8 +334,17 @@ function compilePromotion(spec) {
  * (`/doctor` Check 8-③, restated in `tasks.js#recordMissionState`), so a failed
  * append must not be followed by a store write that invents one.
  *
+ * THE CONTROLLER RIDES THIS MUTATOR, exactly as it does in stage ①
+ * (`tasks.js#recordMissionState`). Stage ② opens rows too, and a mission whose
+ * controller slot depended on WHICH stage opened it would be a difference the
+ * design does not have. No extra commit buys it: the composition wraps the
+ * mutator this write already runs, and the CAS retry re-runs it as a whole.
+ *
+ * It OBSERVES. A row another live session controls comes back untouched, so
+ * this hook still arbitrates nothing — reclaim is CA-09's.
+ *
  * @param {{deps: object, projectRoot: string, sessionId: string, missionId: string,
- *   title: string, revision: number, store: object}} ctx
+ *   title: string, revision: number, store: object, nowMs: number}} ctx
  * @returns {{ok: boolean, reason?: string}}
  */
 function promote(ctx) {
@@ -347,7 +359,10 @@ function promote(ctx) {
     return { ok: false, reason: `append-failed:${appended?.reason ?? 'unknown'}` };
   }
 
-  const mutator = ctx.deps.missionMutator(ctx.missionId, ctx.title, ctx.revision);
+  const mutator = ctx.deps.composeControllerMutator(
+    ctx.deps.missionMutator(ctx.missionId, ctx.title, ctx.revision),
+    { sessionId: ctx.sessionId, now: ctx.nowMs },
+  );
   const opts = { reason: 'mission.created' };
   let commit = ctx.store.updateMission(ctx.missionId, mutator, {
     ...opts, expectedVersion: ctx.store.getState().state_version,
@@ -513,7 +528,12 @@ export async function observeIntent(hookData) {
     }
 
     const filePath = hookData?.tool_input?.file_path;
-    const store = deps.openMissionStore(projectRoot, sessionId, Date.now(), {
+    // ONE reading for the whole promotion. The store's record `ts` and the
+    // controller lease have to be the SAME instant rather than two reads that
+    // a scheduler may have put a boundary between — the same rule
+    // `tasks.js#recordMissionCompile` states for stage ①.
+    const nowMs = Date.now();
+    const store = deps.openMissionStore(projectRoot, sessionId, nowMs, {
       resolveGitCommonDir: deps.resolveGitCommonDir,
     });
     const existing = store.getMission(missionId);
@@ -556,7 +576,7 @@ export async function observeIntent(hookData) {
           return { ok: false, reason: 'not-substantive' };
         }
         const result = promote({
-          deps, projectRoot, sessionId, missionId, title, revision, store,
+          deps, projectRoot, sessionId, missionId, title, revision, store, nowMs,
         });
         if (result.ok !== true) return { ok: false, reason: result.reason };
         promoted = true;

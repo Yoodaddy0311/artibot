@@ -383,6 +383,10 @@ const MISSION_STORE_REASON = 'mission.created';
  * "this middleware does not do stores", which stopped being true — and a census
  * over the envelope cannot count what is not there.
  *
+ * `controller_observation` is `null` here for the same reason: no mutator ran,
+ * so no judgement was made. That is not the same claim as a judgement that
+ * found nothing, and a census over the envelope must be able to tell them apart.
+ *
  * @param {string} detail why nothing was written
  * @returns {object} the skipped store record
  */
@@ -393,6 +397,7 @@ function skippedMissionStore(detail) {
     state_version: null,
     mission_id: null,
     location: null,
+    controller_observation: null,
     warnings: [],
   };
 }
@@ -405,12 +410,20 @@ function skippedMissionStore(detail) {
  * a rejection means the draft was invalid and retrying it forever would not
  * help. Folding them together would make a permanent defect look like noise.
  *
+ * `observation` is REPORTED, never acted on (OB-10 follow-up a). It is the one
+ * thing the controller composition knows that the row alone does not say: that
+ * the recorded controller is somebody ELSE's live claim rather than this
+ * session's. Carrying it costs no write — it is read off the mutator that the
+ * commit already ran.
+ *
  * @param {object} commit `updateMission()` result
  * @param {string} missionId the mission the write was for
  * @param {string} location `store.location.source`
+ * @param {string|null} observation the composed mutator's last judgement, one of
+ *   `lib/mission/controller.js#CONTROLLER_OBSERVATIONS`
  * @returns {object} the `task.mission.store` value
  */
-function summarizeMissionCommit(commit, missionId, location) {
+function summarizeMissionCommit(commit, missionId, location, observation) {
   const warnings = Array.isArray(commit?.warnings) ? commit.warnings : [];
   if (commit?.ok) {
     return {
@@ -419,6 +432,7 @@ function summarizeMissionCommit(commit, missionId, location) {
       state_version: Number.isInteger(commit.state_version) ? commit.state_version : null,
       mission_id: missionId,
       location,
+      controller_observation: observation ?? null,
       warnings,
     };
   }
@@ -430,6 +444,7 @@ function summarizeMissionCommit(commit, missionId, location) {
     state_version: null,
     mission_id: missionId,
     location,
+    controller_observation: observation ?? null,
     warnings,
   };
 }
@@ -588,7 +603,11 @@ function recordMissionState(state, result, nowMs, identity, deps) {
         ...opts, expectedVersion: store.getState().state_version,
       });
     }
-    return summarizeMissionCommit(commit, missionId, store.location.source);
+    // AFTER the retry, deliberately: the mutator reports its LAST run, which
+    // is the one that committed.
+    return summarizeMissionCommit(
+      commit, missionId, store.location.source, mutator.observation,
+    );
   } catch (err) {
     return {
       status: 'error',
@@ -598,6 +617,7 @@ function recordMissionState(state, result, nowMs, identity, deps) {
       state_version: null,
       mission_id: null,
       location: null,
+      controller_observation: null,
       warnings: [],
     };
   }
