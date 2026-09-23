@@ -133,6 +133,7 @@ MCP 도구는 항상 정규화된 이름 사용: `ServerName:tool_name`
 7. 모델 개선 시 함께 진화하는 최소 아키텍처 지향
 
 ## Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
 
@@ -145,6 +146,7 @@ The following table captures common excuses agents make to skip the discipline o
 | "architectural reduction is refactoring busywork" | fewer, sharper tools measurably improves selection accuracy — it's the highest-leverage refactor you can do |
 
 ## Common Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 | Rationalization | Why it's wrong | What to do instead |
 |---|---|---|

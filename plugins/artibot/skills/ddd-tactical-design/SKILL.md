@@ -165,6 +165,7 @@ interface OrderRepository {
 6. Aggregate는 작게 유지, ID로 참조
 
 ## Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 The following table captures common excuses agents make to skip the rigor of this skill, paired with factual rebuttals.
 
@@ -177,6 +178,7 @@ The following table captures common excuses agents make to skip the rigor of thi
 | "anemic models are fine with services" | service layers without rich models leak invariants everywhere — data and behavior belong together |
 
 ## Common Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 | Rationalization | Why it's wrong | What to do instead |
 |---|---|---|

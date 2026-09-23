@@ -173,6 +173,7 @@ Progress:
 | Mass Assignment | Allowlists, DTOs, schema validation | Medium |
 
 ## Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 The following table captures common excuses agents make to skip critical steps in this skill, paired with factual rebuttals. Use this to catch and resist shortcuts.
 
@@ -187,6 +188,7 @@ The following table captures common excuses agents make to skip critical steps i
 | "Parameterized queries are slower than string concatenation" | The performance delta is measured in microseconds; the SQL injection that string concatenation enables is measured in full database exfiltration. This is not a tradeoff — prepared statements are both safer and cached by the DB planner. |
 
 ## Common Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 | Rationalization | Why it's wrong | What to do instead |
 |---|---|---|

@@ -55,6 +55,7 @@ Five canonical patterns for composing multiple agents. Pick exactly one per work
 | LLM-as-Judge | Quality gate after generation | Two-agent loop with explicit threshold |
 
 ## Common Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 | Excuse | Rebuttal |
 |---|---|
