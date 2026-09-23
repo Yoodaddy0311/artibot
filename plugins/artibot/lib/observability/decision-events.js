@@ -49,8 +49,10 @@
  *
  * WHY THE T-37 PAIR LIVES HERE AND NOT IN THE LEDGER: the run ledger's
  * allowlist restricts `topology.selected` to `sources:["scheduler","supervisor"]`
- * and `context.compiled` to `sources:["worker"]`, while the emitter is a
- * UserPromptSubmit hook whose honest `source` is `hook`. Measured 2026-09-02
+ * and `context.compiled` to `sources:["worker"]`, while the only role this
+ * emitter can honestly name is `hook` — a UserPromptSubmit observer that
+ * neither schedules, supervises, nor does the work those two events record
+ * (`source` is a ROLE, not a process identity; see (3)). Measured 2026-09-02
  * against `lib/runtime/event-writer.js#writeEvent`, both are refused with
  * `source-not-allowed:hook` AND a `ledger.rejected` line is written in their
  * place — so wiring them there would add one rejection per prompt to the ledger
@@ -62,6 +64,55 @@
  * note independently expects the same one, so the two agree rather than one
  * deriving from the other. Tripwire on that decision:
  * `tests/hooks/runtime-prompt-memory-instrumentation.test.js`.
+ *
+ * LEGITIMATE-EMITTER RULE — the general form of the paragraph above, written
+ * out because it was until now only reachable by reading that one case. A hook
+ * process may append an event to the run ledger only when ALL THREE hold:
+ *   (1) FIRST-HAND WITNESS. Some actor authored the fact or observed it
+ *       directly, and the record NAMES that actor. The hook qualifies when it
+ *       did the thing; when it relays another component's decision, that
+ *       component is the witness. No record may borrow a source for somebody
+ *       else's act — which is why the T-37 record below is `recommended`.
+ *   (2) HONEST PAYLOAD. The record can fill every REQUIRED field of that
+ *       event's contract from the payload the hook actually holds, without
+ *       inventing a value whose declared writer is a different module.
+ *   (3) SOURCE = THE WITNESS'S ROLE, never the process identity of whatever ran
+ *       the append (owner decision 2026-09-22, V5-BACKLOG §4-d (4)). `hook`
+ *       is one such role — the observer of the prompt/tool path — so a hook
+ *       relaying a reviewer's verdict writes `reviewer`, the verification gate
+ *       `gate`, and a person's answer `human`, each registered in that event's
+ *       allowlist `sources`. That is the rule OBEYED, not an exception to it.
+ * Failing (1) — nothing authored the fact under that event's name — or failing
+ * (2), the record does NOT go to the ledger under a borrowed source. It goes to
+ * THIS decisions side-channel under a type name of its own. The allowlist's
+ * `sources` lists are the CONSEQUENCE of this rule, not its statement: an event
+ * whose `sources` omits every role a hook could honestly name is one no
+ * hook-reachable append passes for. Gate:
+ * `tests/firewall/hook-emitter-sources-rule.test.js`, which collects every
+ * ledger emission reachable from a registered hook entry point and requires
+ * each to be a role-sourced append the allowlist registers, a call into this
+ * module, or a listed scanner-resolution exception carrying its reason.
+ *
+ * THE T-37 PAIR, JUDGED BY THAT RULE (this is the table the paragraph above
+ * argued case by case):
+ *   `topology.selected` — (1) NO: `routeTopology` recommends, and nothing in
+ *       the prompt path selects a topology. (2) n/a once (1) fails.
+ *       → side-channel, as `topology-recommended`.
+ *   `context.compiled`  — (1) NO: the hook measures an injection, it does not
+ *       compile the context. (2) NO: `data` is delegated whole to
+ *       `context-receipt.schema.json` (`additionalProperties:false`) whose
+ *       required `cache.*` numbers have one declared writer,
+ *       `lib/economics/usage-receipt.js`.
+ *       → side-channel, as `memory-injection-measured`.
+ * Both verdicts are the same one the measurement above reached empirically
+ * (`source-not-allowed:hook` plus a `ledger.rejected` line); the rule explains
+ * why that refusal is correct rather than an obstacle to route around.
+ *
+ * THE ROLE-SOURCED APPENDS, BY (3): `verify.completed`/`gate`,
+ * `review.completed`/`reviewer`, `review.claim_audit`/`reviewer` and
+ * `human.resolved`/`human` relay another actor's work, so each names that
+ * actor's role. The gate lists them under `ROLE_SOURCED` and re-checks each
+ * role against that event's allowlist `sources` rather than excusing it.
  *
  * Public surface:
  *   - ROUTING_CLASSIFIED / WORKFLOW_PLANNED   (the two `type` values written)
