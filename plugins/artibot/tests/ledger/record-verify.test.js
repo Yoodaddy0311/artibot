@@ -102,6 +102,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
+import { evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
 import { verify } from '../../lib/verification/unified-verifier.js';
 import { recordVerification } from '../../lib/verification/verify-writer.js';
 import { SELF_REPORT_NOTE } from '../../scripts/ledger/record-verify.mjs';
@@ -481,6 +482,81 @@ describe('record-verify: running it twice', () => {
     expect(second.appended).toBe(0);
     expect(second.deduped).toBe(4);
     expect(written).toHaveLength(4);
+  });
+});
+
+/** Parsed rows of a root's evidence registry; `[]` when it was never written. */
+function registryRows(root) {
+  const file = evidenceRegistryPath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line));
+}
+
+/**
+ * THE EVIDENCE REGISTRY PORT (sh15). The deterministic line and the overall
+ * fold carry the same entries, so one run with one `--evidence` ref registers
+ * TWO distinct entries (the self-report note and the ref) and no more.
+ *
+ * WHAT THIS CANNOT SEE: a registry module that fails to import. The CLI imports
+ * it statically, exactly as it imports the writer, so a module that throws at
+ * load stops the script before `main` — the same exposure the writer's own
+ * import already has.
+ */
+describe('record-verify: the evidence registry', () => {
+  const ARGS = ['--status', 'PASS', '--command', '/verify: all pass', '--evidence', 'tests/x.test.js:12'];
+
+  it('registers the evidence of the appended lines under --cwd, beside the ledger', () => {
+    const root = makeRoot('R1');
+
+    const out = runCli([...ARGS, '--session', SID, '--cwd', root], root);
+
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).appended).toBe(4);
+    expect(evidenceRegistryPath(root)).toBe(path.join(path.dirname(ledgerFilePath(root)), 'evidence.jsonl'));
+    const rows = registryRows(root);
+    expect(rows.map((r) => r.type).sort()).toEqual(['command', 'file']);
+    const keys = verifyLinesIn(root).map((e) => e.idempotency_key);
+    for (const row of rows) expect(keys).toContain(row.source);
+  });
+
+  it('adds no row when the same evidence is recorded again', () => {
+    const root = makeRoot('R2');
+    const args = [...ARGS, '--session', SID, '--cwd', root];
+
+    runCli(args, root);
+    expect(registryRows(root)).toHaveLength(2);
+    const second = JSON.parse(runCli(args, root).stdout);
+
+    // Whether the second run shares the first run's `verification_id` is a
+    // race (see "running it twice"); either way the CONTENT is the same, so the
+    // registry must not grow.
+    expect(second.appended + second.deduped).toBe(4);
+    expect(registryRows(root)).toHaveLength(2);
+  });
+
+  it('prints the same line and exit when the registry cannot be written', () => {
+    const normalRoot = makeRoot('R3a');
+    const normal = runCli([...ARGS, '--session', SID, '--cwd', normalRoot], normalRoot);
+    // POSITIVE CONTROL: the port fired where it could, so the blocked case
+    // below measures a registry failure rather than an unbound port.
+    expect(registryRows(normalRoot)).toHaveLength(2);
+
+    const root = makeRoot('R3b');
+    // A DIRECTORY where the registry file has to be, so its append fails.
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    const blocked = runCli([...ARGS, '--session', SID, '--cwd', root], root);
+
+    expect(blocked.status).toBe(normal.status);
+    expect(blocked.stderr).toBe('');
+    // `verification_id` embeds the second the run landed in, so it is the one
+    // key allowed to differ between the two roots.
+    const strip = ({ verification_id: _id, ...rest }) => rest;
+    expect(strip(JSON.parse(blocked.stdout))).toEqual(strip(JSON.parse(normal.stdout)));
+    expect(Object.keys(JSON.parse(blocked.stdout)).sort()).toEqual([...STDOUT_KEYS].sort());
+    expect(verifyLinesIn(root)).toHaveLength(4);
   });
 });
 

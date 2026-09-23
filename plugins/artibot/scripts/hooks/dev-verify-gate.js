@@ -313,7 +313,7 @@ function resolveHookEventName(hookData) {
  *
  * WHY THE IMPORTS ARE LAZY. A static `import` of a module that throws while it
  * is evaluated kills the process before `main()` exists, and this hook's ONLY
- * contract is the stdout envelope. Deferring the four `lib/` modules into this
+ * contract is the stdout envelope. Deferring the five `lib/` modules into this
  * function puts an import-time throw inside the caller's catch, the same way
  * `scripts/hooks/intent-observe-pre.js#loadDeps` (:93) does. stdout is then
  * byte-identical whether the ledger write succeeds, is rejected, or never loads.
@@ -342,8 +342,22 @@ function resolveHookEventName(hookData) {
  * p95 1355ms before this function is even called), so it would refuse valid
  * records on a busy machine — losing the denominator it was meant to protect.
  *
+ * THE EVIDENCE REGISTRY IS OPTIONAL, SO ITS IMPORT FAILS ALONE. The registry
+ * port is bound to the SAME `repoRoot` as the ledger append, so a row lands
+ * beside the line it points at. Its module is loaded in the same lazy batch but
+ * its rejection is caught on its own promise: joined bare into `Promise.all`,
+ * a registry that fails to load would reject the whole batch and cost the four
+ * ledger lines — trading the denominator for a side index of it. A caught
+ * import leaves the port absent, and an absent port is the writer's exact
+ * pre-registry path (`verify-writer.js#recordVerification` returns the same
+ * tally shape without it). A port that fails at CALL time never throws out of
+ * the writer, which folds it into `evidence.reason` and leaves the tally alone.
+ * Both failures are therefore invisible on stdout; the import one is logged to
+ * stderr, the same channel as every other failure in this function.
+ *
  * @param {string} repoRoot Ledger root — the writer derives the file from it,
- *   and the vitest result file is resolved against it (R1).
+ *   and the vitest result file is resolved against it (R1). The evidence
+ *   registry is bound to it too.
  * @param {string} pluginRoot Root the edit marker lives under. Passed in rather
  *   than re-resolved so this reads the SAME root `main()` already gated on.
  * @param {object} hookData Raw Stop payload; `session_id` is the join key.
@@ -352,11 +366,15 @@ function resolveHookEventName(hookData) {
  *   `session_id`, which the writer refuses — no id is invented here.
  */
 async function recordVerifyDenominator(repoRoot, pluginRoot, hookData) {
-  const [verifier, writer, ledger, source] = await Promise.all([
+  const [verifier, writer, ledger, source, registry] = await Promise.all([
     import('../../lib/verification/unified-verifier.js'),
     import('../../lib/verification/verify-writer.js'),
     import('../../lib/runtime/ledger.js'),
     import('../../lib/verification/deterministic-source.js'),
+    import('../../lib/verification/evidence-registry.js').catch((err) => {
+      logHookError(HOOK_NAME, 'evidence registry unavailable, recording without it', err);
+      return null;
+    }),
   ]);
 
   const layers = source.readDeterministicLayer(
@@ -391,6 +409,12 @@ async function recordVerifyDenominator(repoRoot, pluginRoot, hookData) {
         }
         return keys;
       },
+      ...(registry === null ? {} : {
+        registerEvidence: (entries, lineKey) => registry.registerEvidence(
+          entries,
+          { projectRoot: repoRoot, source: lineKey },
+        ),
+      }),
     },
   );
 }

@@ -21,8 +21,11 @@
  *
  * OBSERVE CONTRACT (PRD R-03, "no behaviour change"): this script records and
  * nothing else. It applies no gate, blocks no step, and changes no state
- * outside the ledger. Recording is best effort, so a failure to write exits 0
- * and reports itself on stdout rather than failing the caller's step.
+ * outside the ledger and the evidence registry beside it
+ * (`lib/verification/evidence-registry.js`). Recording is best effort, so a
+ * failure to write exits 0 and reports itself on stdout rather than failing
+ * the caller's step. A registry failure is not even reported: the ledger lines
+ * are the record, and the registry only indexes their evidence.
  *
  * USAGE
  *   node scripts/ledger/record-verify.mjs --status <PASS|FAIL> \
@@ -125,6 +128,7 @@ import {
   VERIFY_COMPLETED_EVENT,
 } from '../../lib/verification/verify-writer.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import { registerEvidence } from '../../lib/verification/evidence-registry.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
 /**
@@ -333,9 +337,14 @@ export function main(argv, env) {
     },
   });
 
+  // The registry is bound to the SAME root as the ledger, so a row lands beside
+  // the line its `source` names. Its outcome rides on `result.evidence`, which
+  // the stdout line below deliberately does not read: the key set is fixed, and
+  // a registry failure is not a recording failure.
   const result = recordVerification(verdict, { sessionId: session }, {
     append: (input) => appendLedgerEvent(cwd, input),
     existingKeys: () => existingVerifyKeys(cwd, session),
+    registerEvidence: (entries, lineKey) => registerEvidence(entries, { projectRoot: cwd, source: lineKey }),
   });
 
   process.stdout.write(`${JSON.stringify({

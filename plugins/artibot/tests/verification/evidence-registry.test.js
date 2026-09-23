@@ -1,0 +1,340 @@
+/**
+ * `lib/verification/evidence-registry.js` — the E-nnn evidence registry.
+ *
+ * What this proves: that the same evidence content (in any key order) gets the
+ * same id and appends nothing, within one call and across calls; that new
+ * content gets the next sequential id; that a row carries only
+ * id/type/source/hash/created_at and never the entry's payload; that
+ * `registerEvidence` never throws; that `readEvidenceIds` tells an ABSENT
+ * registry (`[]`, measured-and-empty) from an unreadable one (`null`); and that
+ * id allocation waits on the file lock, measured by a child process that is
+ * held behind a live lock and appends only after it is released.
+ *
+ * Every store here is a mkdtemp root. A root that needs the git branch of the
+ * placement rule gets its own `.git` DIRECTORY, so the real resolver answers
+ * without ever looking at this repository.
+ *
+ * What it cannot prove:
+ *  1. That the lock holds past its own fail-open. `withFileLock` force-takes a
+ *     lock older than 5 s, so a writer stalled longer than that can race.
+ *  2. That the production callers register evidence. The port on
+ *     `recordVerification` is optional; `scripts/hooks/dev-verify-gate.js` and
+ *     `scripts/ledger/record-verify.mjs` bind it, and their own suites measure
+ *     that binding — nothing here does.
+ */
+
+import { spawn } from 'node:child_process';
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  evidenceHash,
+  evidenceRegistryPath,
+  readEvidenceIds,
+  registerEvidence,
+} from '../../lib/verification/evidence-registry.js';
+
+const MODULE_URL = pathToFileURL(path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../lib/verification/evidence-registry.js',
+)).href;
+
+const AT = () => new Date('2026-09-23T03:00:00.000Z');
+const SOURCE = 'verify.completed:sess-er-01:v1-000000000000-20260923T030000Z';
+
+const cmd = (output = 'ok') => ({ kind: 'command', command: 'npx vitest run x', output });
+const file = (line = 12) => ({ kind: 'file', file: 'lib/a.js', line });
+
+let root;
+
+beforeEach(() => {
+  root = mkdtempSync(path.join(tmpdir(), 'artibot-evidence-registry-'));
+  mkdirSync(path.join(root, '.git'));
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+/** Register through the real resolver, into this test's temp root only. */
+function reg(entries, opts = {}) {
+  return registerEvidence(entries, { projectRoot: root, source: SOURCE, now: AT, ...opts });
+}
+
+/** Parsed rows of the temp registry. */
+function rows() {
+  const p = evidenceRegistryPath(root);
+  if (!existsSync(p)) return [];
+  return readFileSync(p, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
+describe('evidenceHash', () => {
+  it('is a sha256 hex digest', () => {
+    expect(evidenceHash(cmd())).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('ignores key order, at every depth', () => {
+    const a = { kind: 'command', command: 'c', output: 'o', note: { x: 1, y: [1, { p: 1, q: 2 }] } };
+    const b = { note: { y: [1, { q: 2, p: 1 }], x: 1 }, output: 'o', command: 'c', kind: 'command' };
+    expect(evidenceHash(a)).toBe(evidenceHash(b));
+  });
+
+  it('separates different content, including array order', () => {
+    expect(evidenceHash(cmd('ok'))).not.toBe(evidenceHash(cmd('ko')));
+    expect(evidenceHash({ kind: 'x', a: [1, 2] })).not.toBe(evidenceHash({ kind: 'x', a: [2, 1] }));
+  });
+
+  it('refuses an entry it cannot serialize instead of hashing a stand-in', () => {
+    const loop = { kind: 'command' };
+    loop.self = loop;
+    expect(() => evidenceHash(loop)).toThrow();
+  });
+});
+
+describe('evidenceRegistryPath', () => {
+  it('places the registry under the git common dir when one resolves', () => {
+    expect(evidenceRegistryPath(root)).toBe(path.join(root, '.git', 'artibot', 'evidence.jsonl'));
+  });
+
+  it('falls back to the per-root runtime dir when no git dir resolves', () => {
+    const bare = mkdtempSync(path.join(tmpdir(), 'artibot-evidence-registry-bare-'));
+    try {
+      expect(evidenceRegistryPath(bare))
+        .toBe(path.join(bare, '.artibot', 'runtime', 'evidence.jsonl'));
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('uses an injected port, and treats a throwing port as unresolved', () => {
+    const common = path.join(root, 'elsewhere', '.git');
+    expect(evidenceRegistryPath(root, { resolveGitCommonDir: () => common }))
+      .toBe(path.join(common, 'artibot', 'evidence.jsonl'));
+    const boom = () => { throw new Error('git gone'); };
+    expect(evidenceRegistryPath(root, { resolveGitCommonDir: boom }))
+      .toBe(path.join(root, '.artibot', 'runtime', 'evidence.jsonl'));
+  });
+});
+
+describe('registerEvidence', () => {
+  it('mints E-001 for the first entry and writes one row', () => {
+    const out = reg([cmd()]);
+    expect(out).toEqual({ ids: ['E-001'], appended: 1, reused: 0 });
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('gives the same content the same id across calls and appends nothing', () => {
+    const first = reg([cmd()]);
+    const again = reg([cmd()]);
+    const reordered = reg([{ output: 'ok', command: 'npx vitest run x', kind: 'command' }]);
+    expect(again).toEqual({ ids: first.ids, appended: 0, reused: 1 });
+    expect(reordered.ids).toEqual(first.ids);
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('gives a repeated entry inside one call one id and one row', () => {
+    const out = reg([cmd(), file(), cmd()]);
+    expect(out).toEqual({ ids: ['E-001', 'E-002', 'E-001'], appended: 2, reused: 1 });
+    expect(rows().map((r) => r.id)).toEqual(['E-001', 'E-002']);
+  });
+
+  it('numbers new content sequentially after what is already there', () => {
+    reg([cmd('a')]);
+    reg([cmd('b')]);
+    const out = reg([cmd('c'), cmd('a')]);
+    expect(out.ids).toEqual(['E-003', 'E-001']);
+    expect(rows().map((r) => r.id)).toEqual(['E-001', 'E-002', 'E-003']);
+  });
+
+  it('pads to three digits and grows past E-999 instead of wrapping', () => {
+    const p = evidenceRegistryPath(root);
+    mkdirSync(path.dirname(p), { recursive: true });
+    writeFileSync(p, `${JSON.stringify({ id: 'E-999', type: 'command', source: 's', hash: 'a'.repeat(64), created_at: 't' })}\n`);
+    expect(reg([cmd()]).ids).toEqual(['E-1000']);
+  });
+
+  it('stores id/type/source/hash/created_at and nothing from the payload', () => {
+    reg([{ kind: 'command', command: 'probe', output: 'PAYLOAD-MARKER-7f3', note: 'NOTE-MARKER-9c1' }]);
+    const [row] = rows();
+    expect(Object.keys(row)).toEqual(['id', 'type', 'source', 'hash', 'created_at']);
+    expect(row).toMatchObject({ id: 'E-001', type: 'command', source: SOURCE, created_at: AT().toISOString() });
+    expect(row.hash).toBe(evidenceHash({ kind: 'command', command: 'probe', output: 'PAYLOAD-MARKER-7f3', note: 'NOTE-MARKER-9c1' }));
+    const raw = readFileSync(evidenceRegistryPath(root), 'utf8');
+    expect(raw).not.toContain('PAYLOAD-MARKER-7f3');
+    expect(raw).not.toContain('NOTE-MARKER-9c1');
+    expect(raw).not.toContain('probe');
+  });
+
+  it('keeps the first source when later content repeats under another source', () => {
+    reg([cmd()]);
+    reg([cmd()], { source: 'verify.completed:other' });
+    expect(rows().map((r) => r.source)).toEqual([SOURCE]);
+  });
+
+  it('writes nothing for an empty list', () => {
+    expect(reg([])).toEqual({ ids: [], appended: 0, reused: 0 });
+    expect(existsSync(evidenceRegistryPath(root))).toBe(false);
+  });
+
+  it('never throws, and a refused call writes nothing and returns no ids', () => {
+    const loop = { kind: 'command' };
+    loop.self = loop;
+    const cases = [
+      ['not an array', () => reg('nope')],
+      ['no source', () => reg([cmd()], { source: '' })],
+      ['entry without kind', () => reg([{ command: 'c', output: 'o' }])],
+      ['entry not an object', () => reg([cmd(), 42])],
+      ['circular entry', () => reg([cmd(), loop])],
+      ['no projectRoot', () => registerEvidence([cmd()], { source: SOURCE })],
+      ['now throws', () => reg([cmd()], { now: () => { throw new Error('clock'); } })],
+    ];
+    for (const [label, run] of cases) {
+      let out;
+      expect(() => { out = run(); }, label).not.toThrow();
+      expect({ label, ids: out.ids, appended: out.appended }).toEqual({ label, ids: [], appended: 0 });
+      expect({ label, reason: typeof out.reason }).toEqual({ label, reason: 'string' });
+    }
+    expect(rows()).toEqual([]);
+  });
+
+  it('reports an unwritable registry as a reason, not an exception', () => {
+    // The registry path is a DIRECTORY, so the append itself fails.
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    let out;
+    expect(() => { out = reg([cmd()]); }).not.toThrow();
+    expect(out.ids).toEqual([]);
+    expect(typeof out.reason).toBe('string');
+  });
+
+  it('appends past a torn last line without gluing onto it', () => {
+    const p = evidenceRegistryPath(root);
+    reg([cmd('a')]);
+    writeFileSync(p, `${readFileSync(p, 'utf8')}{"id":"E-00`, { flag: 'w' });
+    const out = reg([cmd('b')]);
+    expect(out.ids).toEqual(['E-002']);
+    expect(readEvidenceIds(root)).toEqual(['E-001', 'E-002']);
+  });
+});
+
+describe('readEvidenceIds', () => {
+  it('returns [] for an absent registry — measured and empty', () => {
+    expect(readEvidenceIds(root)).toEqual([]);
+  });
+
+  it('returns null when the registry cannot be read — unmeasured', () => {
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    expect(readEvidenceIds(root)).toBeNull();
+  });
+
+  it('returns the ids that were registered, in order', () => {
+    reg([cmd('a'), cmd('b')]);
+    reg([cmd('a'), file()]);
+    expect(readEvidenceIds(root)).toEqual(['E-001', 'E-002', 'E-003']);
+  });
+
+  it('skips torn and foreign lines rather than throwing', () => {
+    const p = evidenceRegistryPath(root);
+    mkdirSync(path.dirname(p), { recursive: true });
+    writeFileSync(p, [
+      '{"id":"E-001","type":"command","source":"s","hash":"h","created_at":"t"}',
+      'not json',
+      '{"id":"X-9"}',
+      '[1,2]',
+      '{"id":"E-002","type":"file","source":"s","hash":"h2","created_at":"t"}',
+      '{"id":"E-0',
+    ].join('\n'));
+    expect(readEvidenceIds(root)).toEqual(['E-001', 'E-002']);
+  });
+
+  it('reads the same place the writer wrote through an injected port', () => {
+    const common = path.join(root, 'shared-common');
+    const port = () => common;
+    registerEvidence([cmd()], { projectRoot: root, source: SOURCE, now: AT, resolveGitCommonDir: port });
+    expect(readEvidenceIds(root, { resolveGitCommonDir: port })).toEqual(['E-001']);
+    expect(readEvidenceIds(root)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency — separate processes, because the lock is a cross-process lock.
+//
+// Only the first test PROVES the lock is taken. With `withFileLock` replaced by
+// a direct call (mutation run 2026-09-23 12:43 KST) it went red while the two
+// race tests stayed green: child start-up on Windows staggers the writers
+// enough that they rarely overlap. The race tests pin the outcome, not the
+// mechanism.
+// ---------------------------------------------------------------------------
+
+const CHILD = [
+  `import { registerEvidence } from ${JSON.stringify(MODULE_URL)};`,
+  'const [root, entryJson] = process.argv.slice(2);',
+  "process.stdout.write('ready\\n');",
+  "const out = registerEvidence([JSON.parse(entryJson)], { projectRoot: root, source: 'child' });",
+  "process.stdout.write(JSON.stringify(out) + '\\n');",
+].join('\n');
+
+/**
+ * Run one registering child. Resolves with its parsed result; `onReady` fires
+ * when the child is about to call `registerEvidence`.
+ */
+function runChild(entry, onReady = () => {}) {
+  const script = path.join(root, 'child.mjs');
+  if (!existsSync(script)) writeFileSync(script, CHILD);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, root, JSON.stringify(entry)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => {
+      out += d;
+      if (out.startsWith('ready\n')) onReady();
+    });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) { reject(new Error(`child exit ${code}: ${err}`)); return; }
+      resolve(JSON.parse(out.split('\n')[1]));
+    });
+  });
+}
+
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+describe('id allocation under the file lock', () => {
+  it('waits for a held lock before appending', async () => {
+    const p = evidenceRegistryPath(root);
+    mkdirSync(path.dirname(p), { recursive: true });
+    const lock = `${p}.lock`;
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
+    let ready = false;
+    const done = runChild(cmd(), () => { ready = true; });
+    while (!ready) await sleep(20);
+    await sleep(400);
+    // Still inside the 5 s stale window, so a writer that honours the lock has
+    // not appended yet.
+    expect(existsSync(p) ? readFileSync(p, 'utf8') : '').toBe('');
+    rmSync(lock, { force: true });
+    const out = await done;
+    expect(out.ids).toEqual(['E-001']);
+    expect(rows()).toHaveLength(1);
+  }, 20000);
+
+  it('two writers registering the same new content mint one id', async () => {
+    const [a, b] = await Promise.all([runChild(cmd()), runChild(cmd())]);
+    expect(a.ids).toEqual(b.ids);
+    expect(rows()).toHaveLength(1);
+    expect(a.appended + b.appended).toBe(1);
+  }, 20000);
+
+  it('four writers registering different content mint four distinct ids', async () => {
+    const outs = await Promise.all([1, 2, 3, 4].map((n) => runChild(cmd(`w${n}`))));
+    const ids = outs.flatMap((o) => o.ids);
+    expect(new Set(ids).size).toBe(4);
+    expect(rows().map((r) => r.id).sort()).toEqual(['E-001', 'E-002', 'E-003', 'E-004']);
+  }, 20000);
+});

@@ -516,6 +516,7 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
       freshRepoRoot = '';
     }
     vi.doUnmock('../../lib/verification/unified-verifier.js');
+    vi.doUnmock('../../lib/verification/evidence-registry.js');
     vi.resetModules();
   });
 
@@ -713,5 +714,84 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
     expect(Buffer.from(mockState.stdoutChunks[0], 'utf-8')
       .equals(Buffer.from(EXPECTED_STDOUT, 'utf-8'))).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // 증거 레지스트리 포트 (sh15). 증거를 가진 줄은 신선한 결과가 있을 때만
+  // 생기므로(미측정 줄은 `evidence: []`) 세 케이스 모두 결과 파일을 심는다.
+  // 레지스트리 모듈은 `vi.doMock` 으로 바꿔 끼운다 — 로드 실패는 케이스 c 와
+  // 같은 이유로 여기서만 잴 수 있다.
+  // -------------------------------------------------------------------------
+
+  /** repoRoot 를 실재 디렉터리로 돌리고 신선한 리포터 산출물을 심는다. */
+  function plantFreshResult() {
+    freshRepoRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-registry-'));
+    mockState.repoRoot = freshRepoRoot;
+    const resultDir = path.join(freshRepoRoot, 'plugins', 'artibot', 'runtime');
+    mkdirSync(resultDir, { recursive: true });
+    writeFileSync(path.join(resultDir, 'last-test-result.json'), JSON.stringify({
+      timestamp: new Date().toISOString(),
+      durationMs: 1, totalTests: 5, passed: 5, failed: 0, skipped: 0, failedFiles: [],
+    }));
+    const marker = path.join(denomRoot, 'runtime', 'last-main-agent-edit.timestamp');
+    const aged = new Date(Date.now() - 10_000);
+    utimesSync(marker, aged, aged);
+  }
+
+  it('레지스트리 포트는 원장과 같은 repoRoot 에, 원장 줄 키를 source 로 묶인다', async () => {
+    plantFreshResult();
+    const calls = [];
+    vi.doMock('../../lib/verification/evidence-registry.js', () => ({
+      registerEvidence: (entries, opts) => {
+        calls.push({ entries, opts });
+        return { ids: [], appended: 0, reused: 0 };
+      },
+    }));
+    const main = await loadMain();
+    await main();
+
+    expect(ledgerMock.appends).toHaveLength(4);
+    const withEvidence = ledgerMock.appends.filter(({ event }) => event.data.evidence.length > 0);
+    expect(withEvidence, 'overall + deterministic 두 줄만 증거를 가진다').toHaveLength(2);
+    expect(calls.map((c) => c.opts.source)).toEqual(
+      withEvidence.map(({ event }) => event.idempotency_key),
+    );
+    for (const { entries, opts } of calls) {
+      expect(opts.projectRoot, '원장 append 와 같은 루트').toBe(mockState.repoRoot);
+      expect(entries[0].file).toBe('plugins/artibot/runtime/last-test-result.json');
+    }
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('레지스트리 모듈이 로드 중 던져도 원장 4줄과 stdout 은 그대로다', async () => {
+    plantFreshResult();
+    vi.doMock('../../lib/verification/evidence-registry.js', () => {
+      throw new Error('injected registry import failure');
+    });
+    const main = await loadMain();
+    await main();
+
+    // 레지스트리는 부가 기록이다 — 그 로드 실패가 분모를 앗아가면 안 된다.
+    expect(ledgerMock.appends).toHaveLength(4);
+    const deterministic = ledgerMock.appends.find(({ event }) => event.data.layer === 'deterministic');
+    expect(deterministic.event.data.result).toBe('pass');
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('registerEvidence 가 던져도 원장 4줄과 stdout 은 그대로다', async () => {
+    plantFreshResult();
+    let called = 0;
+    vi.doMock('../../lib/verification/evidence-registry.js', () => ({
+      registerEvidence: () => {
+        called += 1;
+        throw new Error('injected registry failure');
+      },
+    }));
+    const main = await loadMain();
+    await main();
+
+    expect(called, '던지는 포트가 실제로 불렸어야 이 케이스가 뭔가를 잰다').toBeGreaterThan(0);
+    expect(ledgerMock.appends).toHaveLength(4);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
   });
 });

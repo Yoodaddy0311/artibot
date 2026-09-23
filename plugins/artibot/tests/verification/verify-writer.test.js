@@ -58,6 +58,11 @@ import {
 } from '../../lib/runtime/artifact-lifecycle-gates.js';
 import { LAYERS, verify } from '../../lib/verification/unified-verifier.js';
 import {
+  evidenceRegistryPath,
+  readEvidenceIds,
+  registerEvidence,
+} from '../../lib/verification/evidence-registry.js';
+import {
   buildVerifyCompletedEvents,
   EVIDENCE_TRUNCATION_MARK,
   LEDGER_LINE_MAX_BYTES,
@@ -526,6 +531,96 @@ describe('recordVerification', () => {
       expect(out).toMatchObject({ appended: 0, deduped: 0, rejected: 4, skipped: 0 });
       expect(out.lines.every((l) => l.reason === 'port-threw:existingKeys')).toBe(true);
       expect(rawLines()).toEqual([]);
+    }
+  });
+});
+
+describe('recordVerification with a registerEvidence port', () => {
+  /** The port bound to a REAL registry under this test's temp root. */
+  const registerPort = (entries, source) => registerEvidence(entries, { projectRoot: root, source, now: AT });
+  const ports = () => ({ append, existingKeys, registerEvidence: registerPort });
+
+  it('one verdict with one evidence entry becomes exactly one registry row', () => {
+    // The overall line and the deterministic line both carry the SAME entry
+    // (the overall evidence is the flattened layer evidence), so the second
+    // registration reuses the first id instead of minting another.
+    const out = recordVerification(passVerdict(), { sessionId: SID }, ports());
+    expect(out).toMatchObject({ appended: 4, deduped: 0, rejected: 0, skipped: 0 });
+    expect(readEvidenceIds(root)).toEqual(['E-001']);
+    expect(out.evidence).toEqual({ ids: ['E-001'], appended: 1, reused: 1 });
+  });
+
+  it('points each row at the ledger line that carried it', () => {
+    const out = recordVerification(passVerdict(), { sessionId: SID }, ports());
+    const registry = readFileSync(evidenceRegistryPath(root), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(registry).toHaveLength(1);
+    expect(registry[0].source).toBe(out.lines[0].key);
+    expect(existingKeys()).toContain(registry[0].source);
+  });
+
+  it('adds no row for a deduped verify line', () => {
+    const verdict = passVerdict();
+    recordVerification(verdict, { sessionId: SID }, ports());
+    const second = recordVerification(verdict, { sessionId: SID }, ports());
+    expect(second).toMatchObject({ appended: 0, deduped: 4 });
+    expect(second.evidence).toEqual({ ids: [], appended: 0, reused: 0 });
+    expect(readEvidenceIds(root)).toEqual(['E-001']);
+  });
+
+  it('calls the port only for appended lines that carry evidence, with the line key as source', () => {
+    const calls = [];
+    const spy = (entries, source) => { calls.push({ n: entries.length, source }); return { ids: [], appended: 0, reused: 0 }; };
+    const out = recordVerification(passVerdict(), { sessionId: SID }, { append, existingKeys, registerEvidence: spy });
+    // overall + deterministic carry the entry; the two unrun layers carry none.
+    expect(calls).toEqual([
+      { n: 1, source: out.lines[0].key },
+      { n: 1, source: out.lines[1].key },
+    ]);
+  });
+
+  it('never calls the port for a rejected line', () => {
+    let called = 0;
+    const spy = () => { called += 1; return { ids: [], appended: 0, reused: 0 }; };
+    const refuse = () => ({ ok: false, reason: 'unregistered-event' });
+    const out = recordVerification(passVerdict(), { sessionId: SID }, { append: refuse, registerEvidence: spy });
+    expect(out.rejected).toBe(4);
+    expect(called).toBe(0);
+  });
+
+  it('turns a throwing or malformed port into a reason without touching the tally', () => {
+    const boom = () => { throw new Error('registry gone'); };
+    for (const [port, reason] of [
+      [boom, 'port-threw:registerEvidence'],
+      [() => 42, 'port-invalid:registerEvidence'],
+      [() => ({ ids: [], appended: 0, reused: 0, reason: 'disk full' }), 'disk full'],
+      ['not-a-function', 'port-missing:registerEvidence'],
+    ]) {
+      rmSync(root, { recursive: true, force: true });
+      resetSeq();
+      let out;
+      expect(() => {
+        out = recordVerification(passVerdict(), { sessionId: SID }, { append, existingKeys, registerEvidence: port });
+      }).not.toThrow();
+      expect(out).toMatchObject({ appended: 4, deduped: 0, rejected: 0, skipped: 0 });
+      expect(out.lines.every((l) => l.status === 'appended')).toBe(true);
+      expect(out.evidence.reason).toBe(reason);
+      expect(out.evidence.ids).toEqual([]);
+    }
+  });
+
+  it('leaves the result shape unchanged when no port is supplied', () => {
+    const out = recordVerification(passVerdict(), { sessionId: SID }, { append, existingKeys });
+    expect(Object.keys(out).sort()).toEqual(['appended', 'deduped', 'lines', 'rejected', 'skipped']);
+  });
+
+  it('does not put evidence ids on the ledger line', () => {
+    recordVerification(passVerdict(), { sessionId: SID }, ports());
+    for (const line of rawLines()) {
+      expect(Object.keys(line.data).sort()).toEqual(
+        line.data.layer === undefined
+          ? ['evidence', 'result', 'verification_id']
+          : ['evidence', 'layer', 'result', 'verification_id'],
+      );
     }
   });
 });

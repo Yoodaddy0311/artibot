@@ -507,6 +507,59 @@ function appendOne(append, input) {
 }
 
 /**
+ * Register one APPENDED line's evidence through the optional port.
+ *
+ * The evidence handed over is the line's own `data.evidence`, after the byte cap
+ * shortened it, not the verdict's. So a registry row's hash can be recomputed
+ * from the ledger line its `source` names, and from nothing else. `source` is
+ * that line's idempotency key, which already begins with the event name
+ * (`verify.completed:<session>:<verification_id>[:<layer>]`). The row points at
+ * the line. The line carries no evidence ids: its `data` allowlist and 4 KB cap
+ * belong to the ledger.
+ *
+ * @param {Function} port - `lib/verification/evidence-registry.js#registerEvidence`
+ *   bound to a project root, as `(entries, source) => result`.
+ * @param {object} input - The envelope input that was just appended.
+ * @returns {{ ids: string[], appended: number, reused: number, reason?: string }}
+ */
+function registerLineEvidence(port, input) {
+  const failed = (reason) => ({ ids: [], appended: 0, reused: 0, reason });
+  let res;
+  try {
+    res = port(input.data.evidence, input.idempotency_key);
+  } catch {
+    return failed('port-threw:registerEvidence');
+  }
+  const r = /** @type {any} */ (res);
+  if (!r || typeof r !== 'object' || !Array.isArray(r.ids)
+    || !Number.isInteger(r.appended) || !Number.isInteger(r.reused)) {
+    return failed('port-invalid:registerEvidence');
+  }
+  const ids = r.ids.filter((id) => typeof id === 'string' && id.length > 0);
+  const out = { ids, appended: r.appended, reused: r.reused };
+  return typeof r.reason === 'string' && r.reason ? { ...out, reason: r.reason } : out;
+}
+
+/**
+ * Fold one line's registration into the running result. Each id is kept once:
+ * the overall line and a layer line carry the same entries, so the second
+ * registration answers with ids the first one already reported.
+ *
+ * @param {{ ids: string[], appended: number, reused: number }} acc - Mutated.
+ * @param {Set<string>} reasons - Mutated.
+ * @param {{ ids: string[], appended: number, reused: number, reason?: string }} r
+ * @returns {void}
+ */
+function mergeLineEvidence(acc, reasons, r) {
+  for (const id of r.ids) {
+    if (!acc.ids.includes(id)) acc.ids.push(id);
+  }
+  acc.appended += r.appended;
+  acc.reused += r.reused;
+  if (r.reason) reasons.add(r.reason);
+}
+
+/**
  * Record a verdict as `verify.completed` lines through injected ports.
  *
  * NEVER THROWS. A throwing port becomes a `rejected` line with
@@ -516,13 +569,23 @@ function appendOne(append, input) {
  *
  * @param {object} verdict - A `verify()` result.
  * @param {{ sessionId?: string, missionId?: string, includeOverall?: boolean }} [ctx]
- * @param {{ append?: (input: object) => object, existingKeys?: () => Iterable<string> }} [ports]
+ * @param {{ append?: (input: object) => object, existingKeys?: () => Iterable<string>,
+ *   registerEvidence?: (entries: Array<unknown>, source: string) =>
+ *     { ids: string[], appended: number, reused: number, reason?: string } }} [ports]
  *   `append` is `lib/runtime/ledger.js#appendLedgerEvent` bound to a project
  *   root; `existingKeys` is optional and defaults to "no keys known".
+ *   `registerEvidence` is optional too: `lib/verification/evidence-registry.js#registerEvidence`
+ *   bound to a project root. It is called once per APPENDED line that carries
+ *   evidence (see {@link registerLineEvidence}). A deduped or rejected line
+ *   registers nothing. Its failures never change the tally.
  * @returns {{ appended: number, deduped: number, rejected: number, skipped: number,
  *   reason?: string, lines: Array<{ key: string, layer: string|null,
- *   status: 'appended'|'deduped'|'rejected', reason?: string }> }}
+ *   status: 'appended'|'deduped'|'rejected', reason?: string }>,
+ *   evidence?: { ids: string[], appended: number, reused: number, reason?: string } }}
  *   `skipped: 1` with `lines: []` and a `reason` means nothing was built.
+ *   `evidence` is present only when a `registerEvidence` port was supplied.
+ *   `ids` holds each registry id once. `reason` holds the distinct port failures
+ *   joined with `; `.
  */
 export function recordVerification(verdict, ctx = {}, ports = {}) {
   const built = buildVerifyCompletedEvents(verdict, ctx);
@@ -533,6 +596,10 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
   const seen = readExistingKeys(p.existingKeys);
   const tally = { appended: 0, deduped: 0, rejected: 0, skipped: 0 };
   const lines = [];
+  const wantsEvidence = p.registerEvidence !== undefined && p.registerEvidence !== null;
+  const evidence = { ids: [], appended: 0, reused: 0 };
+  const evidenceReasons = new Set();
+  if (wantsEvidence && typeof p.registerEvidence !== 'function') evidenceReasons.add('port-missing:registerEvidence');
   for (const input of built.inputs) {
     const key = input.idempotency_key;
     const layer = Object.prototype.hasOwnProperty.call(input.data, 'layer') ? input.data.layer : null;
@@ -551,10 +618,16 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
       seen.keys.add(key);
       tally.appended += 1;
       lines.push({ key, layer, status: 'appended' });
+      if (typeof p.registerEvidence === 'function'
+        && Array.isArray(input.data.evidence) && input.data.evidence.length > 0) {
+        mergeLineEvidence(evidence, evidenceReasons, registerLineEvidence(p.registerEvidence, input));
+      }
     } else {
       tally.rejected += 1;
       lines.push({ key, layer, status: 'rejected', reason: outcome.reason });
     }
   }
-  return { ...tally, lines };
+  if (!wantsEvidence) return { ...tally, lines };
+  const reason = [...evidenceReasons].join('; ');
+  return { ...tally, lines, evidence: reason ? { ...evidence, reason } : evidence };
 }
