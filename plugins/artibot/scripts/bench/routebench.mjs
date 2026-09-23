@@ -33,12 +33,9 @@
  *      them: `metrics_measured` stays empty for every pair, and a scored row
  *      means "this baseline picked this tier for this agentType", never "this
  *      baseline was replayed against these rows".
- *   3. Live scenario distribution is unmeasured. The design's EXACT / PARTIAL /
- *      SIMULATED replay labels (ARTIBOT-5.0-DESIGN.md section 8.2) exist because
- *      a replay is not a counterfactual. Carrying it is NOT IMPLEMENTED: nothing
- *      here reads or copies `replay_mode` (only this comment, the fixture rows and
- *      `scenarios.schema.json` name it; its enum is LOWER-case `exact`/`partial`/
- *      `simulation`). Producer: lib/replay/replay-label.js, UPPER-case (2026-09-21).
+ *   3. Row `replay_mode` is the scenario's DECLARATION, never a measurement; the
+ *      envelope's `replay_label.measured` is null by construction, because the
+ *      scrub gate refuses the join keys labelReplay needs (routebench-replay-mode.mjs).
  *   4. B3 and B4 are RECORDED, not validated. That `routeModel` recommends a
  *      tier says nothing about whether that tier would have succeeded.
  *   5. There is deliberately NO composite score, here or in the output
@@ -86,6 +83,7 @@ import { isMainEntry } from '../hooks/_main-entry.js';
 import { loadConfig } from '../../lib/core/config.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { replayLabelBlock, replayModeOf } from './routebench-replay-mode.mjs';
 import { resolveModel } from '../../lib/core/model-policy.js';
 import { routeModel } from '../../lib/routing/adaptive-model-router.js';
 
@@ -418,6 +416,7 @@ function makeRow(scenario, baselineId, outcome, passes) {
   return {
     scenario_id: scenario.id,
     baseline: baselineId,
+    replay_mode: replayModeOf(scenario),
     status: outcome.status,
     reason: outcome.reason ?? null,
     selection: outcome.selection ?? null,
@@ -694,6 +693,7 @@ export async function runRouteBench(opts) {
     policy_source: policySource(config),
     b4_input: B4_INPUT_FIELDS,
     metrics_note: METRICS_NOTE,
+    replay_label: replayLabelBlock(scenarios),
     rows,
     summary: summarize(rows),
   };

@@ -27,12 +27,23 @@
  *     measurement was far larger and nothing here speaks to fold cost.
  *   - WHETHER A DIVERGENCE IS A FAULT, or whether excluding a fifo pair is
  *     generous. The fold counts and this card renders; neither judges.
+ *   - A MEASURED LABEL ROW ON THE MAIN FIXTURES. Fixtures A–D and the main one
+ *     carry no `route.selected` line, so `labelReplay` over them has 0 Actions
+ *     and `compare.replay_label` is `unmeasured` there — true to those inputs,
+ *     not a stand-in. The measured row is fixture E's, built through the real
+ *     `labelReplay`; which grade a given Action earns is
+ *     `tests/replay/replay-label.test.js`'s contract, not this suite's.
  *
  * @module tests/scorecard/compare-scorecard
  */
 
 import { describe, expect, it } from 'vitest';
-import { joinSpawnOutcomes } from '../../lib/replay/index.js';
+import {
+  EXACT_UNREACHABLE_REASON,
+  joinSpawnOutcomes,
+  labelReplay,
+  REPLAY_LABELS,
+} from '../../lib/replay/index.js';
 import { buildCompareScorecard, COMPARE_KIND } from '../../lib/scorecard/compare-scorecard.js';
 import { renderScorecardMarkdown } from '../../lib/scorecard/render.js';
 import * as barrel from '../../lib/scorecard/index.js';
@@ -376,8 +387,73 @@ function shuffled(items, seedValue) {
   return out;
 }
 
+/**
+ * A PreToolUse `route.selected` receipt, in the layout `route-observe-pre.js`
+ * writes (`routing_epoch_id` = `action_id` = the host's `tool_use_id`,
+ * `data.shadow_of` under the `tool_use:` prefix) — the replay-label suite's
+ * `selected` builder, keyed to match this file's `bound` (`toolu_<agentId>`).
+ *
+ * @param {string} toolUseId - the Action key.
+ * @returns {object} ledger line.
+ */
+function routeSelected(toolUseId) {
+  seq += 1;
+  return {
+    v: 1,
+    ts: '2026-09-21T00:59:00.000Z',
+    event: 'route.selected',
+    session_id: SESS,
+    mission_id: MISSION,
+    source: 'hook',
+    pid: 4242,
+    seq,
+    routing_epoch_id: toolUseId,
+    action_id: toolUseId,
+    worker: 'main',
+    data: { shadow_of: `tool_use:${toolUseId}`, action: { type: 'implement' } },
+  };
+}
+
+/**
+ * AUXILIARY fixture E — routed Actions, so the label row HAS a denominator.
+ *
+ * 6 Actions: 3 bound + receipted at confidence `exact` with a recommendation and
+ * transcript usage (PARTIAL), 2 bound with no receipt (SIMULATED
+ * `no-usage-receipt`), 1 receipt that no bind named (SIMULATED
+ * `unbound-receipt`). EXACT is 0 because no input can make it anything else.
+ *
+ * @returns {object[]} ledger lines.
+ */
+function labelFixture() {
+  seq = 0;
+  const out = [];
+  for (let i = 0; i < 3; i += 1) {
+    out.push(routeSelected(`toolu_lf-p${i}`));
+    pushPair(out, { agentId: `lf-p${i}`, recommended: OPUS, served: OPUS });
+  }
+  for (let i = 0; i < 2; i += 1) {
+    out.push(routeSelected(`toolu_lf-s${i}`));
+    out.push(bound({ agentId: `lf-s${i}`, recommended: OPUS }));
+  }
+  out.push(routeSelected('toolu_lf-u0'));
+  return out;
+}
+
+/**
+ * The card over `events`, with both folds taken from the SAME lines — the
+ * wiring `commands/scorecard.md` performs.
+ *
+ * @param {object[]} events - ledger lines.
+ * @param {object} [opts] - extra options (`since`).
+ * @returns {Readonly<object>} card.
+ */
+function cardOf(events, opts = {}) {
+  return buildCompareScorecard(joinSpawnOutcomes(events), { ...opts, replay: labelReplay(events) });
+}
+
 const EVENTS = mainFixture();
 const FOLD = joinSpawnOutcomes(EVENTS);
+const REPLAY = labelReplay(EVENTS);
 
 /** Row keys in render order — the card's shape, asserted as an array. */
 const ROW_KEYS = [
@@ -388,6 +464,7 @@ const ROW_KEYS = [
   'compare.excluded_fifo',
   'compare.unjoined_binds',
   'compare.unjoined_receipts',
+  'compare.replay_label',
   'compare.score',
 ];
 
@@ -414,6 +491,8 @@ const EXPECTED = Object.freeze({
   'compare.unjoined_receipts': {
     denominator: 76, numerator: 34, counts: null, state: 'measured',
   },
+  // No `route.selected` line in the main fixture, so 0 Actions (header).
+  'compare.replay_label': { denominator: 0, numerator: null, counts: null, state: 'unmeasured' },
   'compare.score': { denominator: 0, numerator: null, counts: null, state: 'unmeasured' },
 });
 
@@ -469,7 +548,7 @@ describe('픽스처 자기검증 — 이 fold 가 라이브 형태대로 접혔�
 
 // ---------------------------------------------------------------------------
 describe('buildCompareScorecard — 행 값과 행 순서', () => {
-  const card = buildCompareScorecard(FOLD);
+  const card = buildCompareScorecard(FOLD, { replay: REPLAY });
 
   it('kind 와 scope 를 싣는다', () => {
     expect(COMPARE_KIND).toBe('compare');
@@ -540,12 +619,14 @@ describe('buildCompareScorecard — 행 값과 행 순서', () => {
   });
 
   it('totals 와 unmeasured 가 카드에서 파생된다', () => {
-    expect(card.totals).toEqual({ metrics: 8, measured: 7, unmeasured: 1 });
-    expect(card.unmeasured).toEqual(['compare.score']);
+    expect(card.totals).toEqual({ metrics: 9, measured: 7, unmeasured: 2 });
+    expect(card.unmeasured).toEqual(['compare.replay_label', 'compare.score']);
   });
 
   it('since 라벨을 scope 에 그대로 싣는다 (카드는 필터링하지 않는다)', () => {
-    const scoped = buildCompareScorecard(FOLD, { since: '2026-09-20T00:00:00.000Z' });
+    const scoped = buildCompareScorecard(FOLD, {
+      since: '2026-09-20T00:00:00.000Z', replay: REPLAY,
+    });
     expect(scoped.scope).toEqual({ scope: 'index', since: '2026-09-20T00:00:00.000Z' });
     // The label is a LABEL: the same fold gives the same rows either way.
     expect(scoped.metrics.map((m) => m.numerator)).toEqual(card.metrics.map((m) => m.numerator));
@@ -554,8 +635,9 @@ describe('buildCompareScorecard — 행 값과 행 순서', () => {
 
 // ---------------------------------------------------------------------------
 describe('보조 픽스처 A — 제외 경로 (주 픽스처에 fifo 쌍이 0 이라 따로 덮는다)', () => {
-  const fold = joinSpawnOutcomes(exclusionFixture());
-  const card = buildCompareScorecard(fold);
+  const events = exclusionFixture();
+  const fold = joinSpawnOutcomes(events);
+  const card = buildCompareScorecard(fold, { replay: labelReplay(events) });
   const row = (key) => card.metrics.find((m) => m.key === key);
 
   it('fold 가 11쌍·비교 4·fifo 제외 5·추천없음 2 로 접힌다', () => {
@@ -589,8 +671,9 @@ describe('보조 픽스처 A — 제외 경로 (주 픽스처에 fifo 쌍이 0 �
 
 // ---------------------------------------------------------------------------
 describe('보조 픽스처 B — diverged 가 전부 unpriced 면 합계는 0 이 아니라 unmeasured', () => {
-  const fold = joinSpawnOutcomes(unpricedDivergenceFixture());
-  const card = buildCompareScorecard(fold);
+  const events = unpricedDivergenceFixture();
+  const fold = joinSpawnOutcomes(events);
+  const card = buildCompareScorecard(fold, { replay: labelReplay(events) });
   const cost = card.metrics.find((m) => m.key === 'compare.cost');
 
   it('fold 의 diverged 버킷 합계가 null 이다 (0 이 아니다)', () => {
@@ -616,7 +699,7 @@ describe('보조 픽스처 B — diverged 가 전부 unpriced 면 합계는 0 �
 describe('보조 픽스처 C — 42쌍 혼합 (name confidence·제외·미조인이 한 fold 에)', () => {
   const events = mixedFixture();
   const fold = joinSpawnOutcomes(events);
-  const card = buildCompareScorecard(fold);
+  const card = buildCompareScorecard(fold, { replay: labelReplay(events) });
 
   /** Expected rows. Independently derived from the G1..G7 table. */
   const WANT = Object.freeze({
@@ -627,6 +710,7 @@ describe('보조 픽스처 C — 42쌍 혼합 (name confidence·제외·미조�
     'compare.excluded_fifo': { denominator: 42, numerator: 6 },
     'compare.unjoined_binds': { denominator: 47, numerator: 5 },
     'compare.unjoined_receipts': { denominator: 45, numerator: 3 },
+    'compare.replay_label': { denominator: 0, numerator: null },
     'compare.score': { denominator: 0, numerator: null },
   });
 
@@ -678,7 +762,7 @@ describe('보조 픽스처 C — 42쌍 혼합 (name confidence·제외·미조�
   });
 
   it('섞어도 바이트가 같다', () => {
-    const other = buildCompareScorecard(joinSpawnOutcomes(shuffled(events, 31)));
+    const other = cardOf(shuffled(events, 31));
     expect(JSON.stringify(other)).toBe(JSON.stringify(card));
     expect(renderScorecardMarkdown(other)).toBe(renderScorecardMarkdown(card));
   });
@@ -686,15 +770,15 @@ describe('보조 픽스처 C — 42쌍 혼합 (name confidence·제외·미조�
 
 // ---------------------------------------------------------------------------
 describe('결정성 — 입력을 섞어도 바이트가 같다', () => {
-  const base = buildCompareScorecard(FOLD);
+  const base = buildCompareScorecard(FOLD, { replay: REPLAY });
 
   it.each([1, 7, 20260921])('시드 %i 로 섞은 입력이 같은 JSON 바이트를 낸다', (seedValue) => {
-    const card = buildCompareScorecard(joinSpawnOutcomes(shuffled(EVENTS, seedValue)));
+    const card = cardOf(shuffled(EVENTS, seedValue));
     expect(JSON.stringify(card)).toBe(JSON.stringify(base));
   });
 
   it('섞은 입력이 같은 마크다운 바이트를 낸다', () => {
-    const card = buildCompareScorecard(joinSpawnOutcomes(shuffled(EVENTS, 99)));
+    const card = cardOf(shuffled(EVENTS, 99));
     expect(renderScorecardMarkdown(card)).toBe(renderScorecardMarkdown(base));
   });
 
@@ -712,31 +796,33 @@ describe('결정성 — 입력을 섞어도 바이트가 같다', () => {
 // ---------------------------------------------------------------------------
 describe('렌더 — compare kind 가 인쇄된다', () => {
   it('heading 과 scope 를 찍는다', () => {
-    const out = renderScorecardMarkdown(buildCompareScorecard(FOLD, { since: '2026-09-20' }));
+    const out = renderScorecardMarkdown(buildCompareScorecard(FOLD, {
+      since: '2026-09-20', replay: REPLAY,
+    }));
     expect(out).toContain('# ARTIBOT · COMPARE SCORECARD');
     expect(out).toContain('- **scope**: `index`');
     expect(out).toContain('- **since**: `2026-09-20`');
   });
 
-  it('측정된 행은 퍼센트로, score 행은 unmeasured 로 찍힌다', () => {
-    const out = renderScorecardMarkdown(buildCompareScorecard(FOLD));
+  it('측정된 행은 퍼센트로, score·라벨 행은 unmeasured 로 찍힌다', () => {
+    const out = renderScorecardMarkdown(buildCompareScorecard(FOLD, { replay: REPLAY }));
     expect(out).toContain('88.1%'); // 37/42
     expect(out).toContain('unmeasured');
-    expect(out).toContain('1 / 8 지표가 분모 0 이다');
+    expect(out).toContain('2 / 9 지표가 분모 0 이다');
   });
 
   it('histogram 이 분포 절에 나온다', () => {
-    const out = renderScorecardMarkdown(buildCompareScorecard(FOLD));
+    const out = renderScorecardMarkdown(buildCompareScorecard(FOLD, { replay: REPLAY }));
     expect(out).toContain('## 분포');
     expect(out).toContain('agreed_priced');
   });
 });
 
 // ---------------------------------------------------------------------------
-describe('분모 0 — 빈 원장은 8행 전부 unmeasured 다', () => {
-  const card = buildCompareScorecard(joinSpawnOutcomes([]));
+describe('분모 0 — 빈 원장은 9행 전부 unmeasured 다', () => {
+  const card = cardOf([]);
 
-  it('행 8개가 모두 unmeasured 이고 ratio 가 null 이다', () => {
+  it('행 9개가 모두 unmeasured 이고 ratio 가 null 이다', () => {
     expect(card.metrics.map((m) => m.key)).toEqual(ROW_KEYS);
     for (const m of card.metrics) {
       expect(m.state, `${m.key} 가 measured 다`).toBe('unmeasured');
@@ -745,9 +831,9 @@ describe('분모 0 — 빈 원장은 8행 전부 unmeasured 다', () => {
     }
   });
 
-  it('unmeasured 색인이 8키 전부다', () => {
+  it('unmeasured 색인이 9키 전부다', () => {
     expect(card.unmeasured).toEqual(ROW_KEYS);
-    expect(card.totals).toEqual({ metrics: 8, measured: 0, unmeasured: 8 });
+    expect(card.totals).toEqual({ metrics: 9, measured: 0, unmeasured: 9 });
   });
 
   it('렌더 출력에 퍼센트 수치가 없다', () => {
@@ -757,7 +843,7 @@ describe('분모 0 — 빈 원장은 8행 전부 unmeasured 다', () => {
     // (tests/scorecard/scorecard.test.js '분모 0 인 행은 ... 퍼센트 수치를 찍지 않는다').
     const out = renderScorecardMarkdown(card);
     expect(out).not.toMatch(/\d+\.\d+%/);
-    expect(out).toContain('8 / 8 지표가 분모 0 이다');
+    expect(out).toContain('9 / 9 지표가 분모 0 이다');
   });
 
   it('score 행이 값·비율·상태 세 칸 모두 unmeasured 로 찍힌다', () => {
@@ -781,8 +867,9 @@ describe('분모 0 — 빈 원장은 8행 전부 unmeasured 다', () => {
 
 // ---------------------------------------------------------------------------
 describe('보조 픽스처 D — 쌍은 있는데 비교 가능한 쌍이 0 이면 분모가 행마다 다르다', () => {
-  const fold = joinSpawnOutcomes(allExcludedFixture());
-  const card = buildCompareScorecard(fold);
+  const events = allExcludedFixture();
+  const fold = joinSpawnOutcomes(events);
+  const card = buildCompareScorecard(fold, { replay: labelReplay(events) });
   const row = (key) => card.metrics.find((m) => m.key === key);
 
   it('fold 가 5쌍·비교 0 으로 접힌다', () => {
@@ -817,6 +904,10 @@ describe('보조 픽스처 D — 쌍은 있는데 비교 가능한 쌍이 0 이�
 
 // ---------------------------------------------------------------------------
 describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', () => {
+  // 아래 fold 거부 단언은 전부 유효한 `replay: REPLAY` 를 함께 넘긴다. 빼면
+  // replay 부재로도 던지므로, fold 검사가 사라져도 green 인 공허 단언이 된다.
+  const ok = { replay: REPLAY };
+
   it.each([
     ['null', null],
     ['undefined', undefined],
@@ -824,12 +915,12 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
     ['문자열', 'fold'],
     ['숫자', 0],
   ])('%s 은 fold 가 아니다', (_name, bad) => {
-    expect(() => buildCompareScorecard(bad)).toThrow(TypeError);
+    expect(() => buildCompareScorecard(bad, ok)).toThrow(/joinSpawnOutcomes/);
   });
 
   it('replay 인덱스를 넘기면 던진다 (평탄화 경로가 빈 원장처럼 보이지 않게)', () => {
     const replayShaped = { routes: [], switches: [], bound: [], totals: { indexed: 0 } };
-    expect(() => buildCompareScorecard(replayShaped)).toThrow(/pairs/);
+    expect(() => buildCompareScorecard(replayShaped, ok)).toThrow(/pairs/);
   });
 
   it.each([
@@ -838,7 +929,7 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
   ])('필수 필드 %s 가 없으면 던진다', (field) => {
     const broken = { ...FOLD };
     delete broken[field];
-    expect(() => buildCompareScorecard(broken)).toThrow(TypeError);
+    expect(() => buildCompareScorecard(broken, ok)).toThrow(TypeError);
   });
 
   it.each([
@@ -879,7 +970,7 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
     ['score.source 가 숫자', { score: { source: 5, value: null, reason: 'r' } }],
     ['score.value 가 문자열', { score: { source: null, value: 'x', reason: 'r' } }],
   ])('%s 이면 던진다', (_name, patch) => {
-    expect(() => buildCompareScorecard({ ...FOLD, ...patch })).toThrow(TypeError);
+    expect(() => buildCompareScorecard({ ...FOLD, ...patch }, ok)).toThrow(TypeError);
   });
 
   it.each([
@@ -890,7 +981,7 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
     // value: null` 을 문자로 박는다. writer 가 생긴 뒤에도 통과시키면 카드가
     // 실측된 점수를 unmeasured 라고 찍는다 — 거짓 표기다. 행을 다시 설계하라는
     // 메시지와 함께 거부하는 쪽을 택했다(보고 §I4-2 참조).
-    expect(() => buildCompareScorecard({ ...FOLD, score }))
+    expect(() => buildCompareScorecard({ ...FOLD, score }, ok))
       .toThrow(/denominator is hard-wired to 0|redesign/i);
   });
 
@@ -899,20 +990,21 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
     ['Date 유사 객체', { toISOString: 'nope' }],
     ['배열', ['2026-09-20']],
   ])('since 가 %s 면 던진다', (_name, bad) => {
-    expect(() => buildCompareScorecard(FOLD, { since: bad })).toThrow(TypeError);
+    expect(() => buildCompareScorecard(FOLD, { ...ok, since: bad })).toThrow(/LABEL/);
   });
 
   it('since 는 문자열·null·생략만 받는다', () => {
-    expect(() => buildCompareScorecard(FOLD, { since: null })).not.toThrow();
-    expect(() => buildCompareScorecard(FOLD, {})).not.toThrow();
-    expect(() => buildCompareScorecard(FOLD)).not.toThrow();
+    // 옛 단언은 `(FOLD, {})` 와 `(FOLD)` 도 통과로 봤다. replay 가 필수 포트가 된
+    // 뒤로 그 둘은 replay 부재로 던진다 — 아래 replay fail-closed 절이 그 계약이다.
+    expect(() => buildCompareScorecard(FOLD, { ...ok, since: null })).not.toThrow();
+    expect(() => buildCompareScorecard(FOLD, ok)).not.toThrow();
   });
 });
 
 // ---------------------------------------------------------------------------
 describe('불변 — 카드는 얼고 입력은 그대로다', () => {
   it('카드·scope·metrics·행이 전부 frozen 이다', () => {
-    const card = buildCompareScorecard(FOLD);
+    const card = buildCompareScorecard(FOLD, { replay: REPLAY });
     expect(Object.isFrozen(card)).toBe(true);
     expect(Object.isFrozen(card.scope)).toBe(true);
     expect(Object.isFrozen(card.metrics)).toBe(true);
@@ -920,11 +1012,131 @@ describe('불변 — 카드는 얼고 입력은 그대로다', () => {
     for (const m of card.metrics) expect(Object.isFrozen(m)).toBe(true);
   });
 
-  it('입력 fold 를 변형하지 않는다', () => {
-    const fold = joinSpawnOutcomes(EVENTS);
-    const before = JSON.stringify(fold);
-    buildCompareScorecard(fold, { since: '2026-09-20T00:00:00.000Z' });
-    expect(JSON.stringify(fold)).toBe(before);
+  it('입력 fold 와 replay 를 변형하지 않는다', () => {
+    const events = labelFixture();
+    const fold = joinSpawnOutcomes(events);
+    const replay = labelReplay(events);
+    const before = JSON.stringify([fold, replay]);
+    buildCompareScorecard(fold, { since: '2026-09-20T00:00:00.000Z', replay });
+    expect(JSON.stringify([fold, replay])).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('보조 픽스처 E — replay 라벨 행 (실제 labelReplay 출력을 접는다)', () => {
+  const events = labelFixture();
+  const replay = labelReplay(events);
+  const card = cardOf(events);
+  const row = card.metrics.find((m) => m.key === 'compare.replay_label');
+
+  it('생산자가 6 Action · PARTIAL 3 · SIMULATED 3 · EXACT 0 으로 접는다', () => {
+    // 픽스처 자기검증: route.selected 배선이 틀리면 actions 가 0 이 되어 아래 행
+    // 단언이 전부 unmeasured 분기를 타게 된다. 생산자 형태가 바뀌면 여기가 먼저 레드다.
+    expect(replay.actions).toBe(6);
+    expect(replay.by_label).toEqual({ EXACT: 0, PARTIAL: 3, SIMULATED: 3 });
+    expect(replay.by_reason).toEqual({
+      'no-usage-receipt': 2, 'single-run-result': 3, 'unbound-receipt': 1,
+    });
+    expect(replay.exact_reachable).toBe(false);
+  });
+
+  it('행이 분모 = actions, 분포 = by_label 로 measured 다', () => {
+    expect({
+      denominator: row.denominator, numerator: row.numerator, ratio: row.ratio,
+      counts: row.counts, state: row.state,
+    }).toEqual({
+      denominator: 6, numerator: null, ratio: null,
+      counts: { EXACT: 0, PARTIAL: 3, SIMULATED: 3 }, state: 'measured',
+    });
+    expect(card.totals).toEqual({ metrics: 9, measured: 8, unmeasured: 1 });
+  });
+
+  it('분포 키가 생산자의 REPLAY_LABELS 와 같다 (카드의 사본이 갈리지 않게)', () => {
+    expect(Object.keys(row.counts)).toEqual([...REPLAY_LABELS]);
+  });
+
+  it('EXACT 0 옆에 exact_reachable:false 와 사유 one-action-one-run 을 적는다', () => {
+    expect(row.counts.EXACT).toBe(0);
+    expect(EXACT_UNREACHABLE_REASON).toBe('one-action-one-run');
+    expect(row.note).toContain(`exact_reachable:false · 사유 ${EXACT_UNREACHABLE_REASON}`);
+    expect(row.note).toContain('구조적 0');
+    expect(row.note).toContain('CANNOT SEE #3');
+    // PARTIAL 은 "영수증이 있다" 만이 아니다 — 비교 가능한 바인드까지가 조건이다(review-sc L2).
+    expect(row.note).toContain('측정된(transcript·otlp) 영수증과 비교 가능한 바인드');
+  });
+
+  it('렌더에 라벨 행과 분포가 찍힌다', () => {
+    const out = renderScorecardMarkdown(card);
+    expect(out).toContain(
+      '| Replay 충실도 라벨 (EXACT · PARTIAL · SIMULATED) | 6 | 6 | — | 0 | measured |',
+    );
+    expect(out).toContain('| Replay 충실도 라벨 (EXACT · PARTIAL · SIMULATED) | EXACT | 0 |');
+    expect(out).toContain('| Replay 충실도 라벨 (EXACT · PARTIAL · SIMULATED) | SIMULATED | 3 |');
+  });
+
+  it('actions 0 이면 행은 unmeasured 이고 counts 가 null 이다 (0% 가 아니다)', () => {
+    const empty = cardOf([]).metrics.find((m) => m.key === 'compare.replay_label');
+    expect(empty).toMatchObject({ denominator: 0, counts: null, ratio: null, state: 'unmeasured' });
+    expect(empty.note).toContain('by_label_reason: no-actions');
+  });
+
+  it.each([3, 17, 20260923])('시드 %i 로 섞어도 바이트가 같다', (s) => {
+    const permuted = shuffled(events, s);
+    expect(permuted.map((e) => e.seq)).not.toEqual(events.map((e) => e.seq));
+    expect(JSON.stringify(cardOf(permuted))).toBe(JSON.stringify(card));
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('fail-closed — replay 포트가 없거나 모양이 틀리면 던진다', () => {
+  const REPLAY_E = labelReplay(labelFixture());
+
+  // 세 번째 열은 그 케이스를 거부해야 하는 검사의 메시지 조각이다. 포트 이름
+  // (/labelReplay/)만 보면 어느 검사가 던졌는지 못 핀한다 — 예: actions 카운트 검사를
+  // 지워도 '음수'·'없음' 두 케이스는 뒤의 합 검사가 던져 green 이었다(review-sc L1).
+  it.each([
+    ['생략', {}, /got undefined/],
+    ['null', { replay: null }, /got null/],
+    ['배열', { replay: [] }, /got \[\]/],
+    ['fold 를 잘못 넘김', { replay: FOLD }, /`actions` must be a non-negative integer/],
+  ])('replay %s 이면 던진다', (_name, opts, why) => {
+    expect(() => buildCompareScorecard(FOLD, opts)).toThrow(/labelReplay/);
+    expect(() => buildCompareScorecard(FOLD, opts)).toThrow(why);
+  });
+
+  it.each([
+    ['actions 가 음수', { actions: -1 }, /`actions` must be a non-negative integer/],
+    ['actions 가 없음', { actions: undefined }, /`actions` must be a non-negative integer/],
+    ['by_label 이 없음', { by_label: undefined }, /`by_label` must be an object/],
+    ['by_label 에 SIMULATED 가 없음', { by_label: { EXACT: 0, PARTIAL: 3 } },
+      /`by_label\.SIMULATED` must be a non-negative integer/],
+    ['by_label 합이 actions 와 다름', { by_label: { EXACT: 0, PARTIAL: 3, SIMULATED: 2 } },
+      /sums to 5, not to `actions` 6/],
+    ['actions>0 인데 by_label_reason 이 있음', { by_label_reason: 'no-actions' },
+      /`by_label_reason` must be null when `actions` is non-zero/],
+    ['EXACT 가 0 이 아님', { by_label: { EXACT: 1, PARTIAL: 2, SIMULATED: 3 } },
+      /`by_label\.EXACT` is non-zero/],
+    ['exact_reachable 이 없음', { exact_reachable: undefined },
+      /`exact_reachable` must be the literal false/],
+    ['exact_unreachable_reason 이 빈 문자열', { exact_unreachable_reason: '' },
+      /`exact_unreachable_reason` must be a non-empty string/],
+    ['actions 0 인데 by_label 이 0 세 개', {
+      actions: 0, by_label: { EXACT: 0, PARTIAL: 0, SIMULATED: 0 }, by_label_reason: 'no-actions',
+    }, /`by_label\.EXACT` must be null when `actions` is 0/],
+    ['actions 0 인데 by_label_reason 이 없음', {
+      actions: 0, by_label: { EXACT: null, PARTIAL: null, SIMULATED: null }, by_label_reason: null,
+    }, /`by_label_reason` must name why/],
+  ])('%s 이면 던진다', (_name, patch, why) => {
+    const build = () => buildCompareScorecard(FOLD, { replay: { ...REPLAY_E, ...patch } });
+    expect(build).toThrow(/labelReplay/);
+    expect(build).toThrow(why);
+  });
+
+  it('exact_reachable 이 true 면 카드를 찍지 않고 행 재설계를 요구한다', () => {
+    // note 가 EXACT 를 구조적 0 이라 문자로 박는다. EXACT 가 열린 뒤에도 통과시키면
+    // 측정된 EXACT 를 "불가능" 이라 적은 행이 나온다 — compare.score 의 I4-2 와 같은 선택.
+    expect(() => buildCompareScorecard(FOLD, { replay: { ...REPLAY_E, exact_reachable: true } }))
+      .toThrow(/Redesign that row/);
   });
 });
 

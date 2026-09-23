@@ -38,14 +38,18 @@
  * or more independent spawns; on that day, delete this constant and add the
  * rule.
  *
- * VOCABULARY WARNING -- TWO SPELLINGS, ONE CONCEPT, NO PRODUCER LINK
+ * VOCABULARY WARNING -- TWO SPELLINGS, ONE CONCEPT, ONE PINNED MAPPING
  * ---------------------------------------------------------------------------
  * `tests/evals/fixtures/routebench/scenarios.schema.json` has a `replay_mode`
  * enum spelled in LOWER CASE and with a different third word:
  * `exact | partial | simulation`. That field is a SCENARIO AUTHOR'S
  * DECLARATION about a hand-written fixture; this module produces nothing of the
- * sort and never writes it. The mapping, if a caller ever needs one, is
- * EXACT↔exact, PARTIAL↔partial, SIMULATED↔simulation.
+ * sort and never writes it. The mapping is data, not prose:
+ * `scripts/bench/routebench-replay-mode.mjs#REPLAY_MODE_BY_LABEL`
+ * (EXACT->exact, PARTIAL->partial, SIMULATED->simulation), and
+ * `tests/evals/routebench-replay-mode.test.js` reads {@link REPLAY_LABELS} and
+ * the schema enum and requires a bijection, so renaming a label here is a red
+ * test there.
  *
  * PURITY (design section 1-8, L2). No clock, no filesystem, no randomness; the
  * events array is the injected port. Sibling folds are the only imports. Every
@@ -90,12 +94,17 @@
  *     bind's. A reused id therefore lets ANOTHER session's `usage.receipt`
  *     supply the evidence -- including its `usage.source` -- for this Action's
  *     grade, and nothing here can tell that apart from the right receipt.
- *  6. ITS OWN CONSUMERS. `scripts/bench/routebench.mjs:36-39` describes
- *     `replay_mode` as copied through untouched. Outside this file,
- *     `replay_mode` occurs under `scripts/` and `lib/` on exactly one line --
- *     that comment -- and on ZERO executable lines (reproduce:
- *     `grep -rn replay_mode scripts/ lib/`; measured 2026-09-21). Producing a
- *     label does not put it on a report; that wiring is a separate change.
+ *  6. ITS OWN CONSUMERS. Producing a label does not put it on a report, and
+ *     nothing here can see whether a consumer quotes it faithfully. RouteBench
+ *     (`scripts/bench/routebench-replay-mode.mjs#replayLabelBlock`) carries
+ *     `exact_reachable` and {@link EXACT_UNREACHABLE_REASON} into its results
+ *     envelope and the scenario's DECLARED `replay_mode` onto each row, but it
+ *     never grades a corpus with {@link labelReplay}: its scrub gate refuses
+ *     `routing_epoch_id` and `tool_use_id`, the keys this fold joins on, so its
+ *     measured distribution is null by construction. Count current consumers
+ *     (direct or through the `lib/replay/index.js` barrel) with
+ *     `grep -rlnE "replay-label|labelReplay|REPLAY_LABELS" scripts/ lib/
+ *     commands/` rather than trusting a number written here.
  *
  * ONE LIVE COUNT (2026-09-21T05:48Z, central ledger, 8,367 events)
  * ---------------------------------------------------------------------------
