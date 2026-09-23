@@ -216,6 +216,40 @@ describe('feedLimb — re-dispatch is idempotent and never walks a task backward
   });
 });
 
+describe('feedLimb — a commit between the read and the graph write', () => {
+  it('re-merges on the CAS conflict instead of rewriting the stale graph over a concurrent claim', () => {
+    const seeder = makeStore();
+    seedMission(seeder);
+    const a = makeStore();
+    let raced = null;
+    // B's whole dispatch lands after A has read the graph and before A's first
+    // write reaches the lock — the window a second leader window opens.
+    const racing = {
+      ...a,
+      updateMission: (...args) => {
+        if (raced === null) {
+          raced = feedLimb({ parentRoot: root, plan: PLAN, limb: 'billing', sessionId: SESSION }, { openStore: () => makeStore() });
+        }
+        return a.updateMission(...args);
+      },
+    };
+
+    const r = feedLimb({ parentRoot: root, plan: PLAN, limb: 'auth', sessionId: SESSION }, { openStore: () => racing });
+    expect(raced.claim).toBe('claimed');
+    expect(r.fed).toBe(true);
+    expect(r.claim).toBe('claimed');
+
+    const tasks = makeStore().getTaskGraph(MISSION).tasks;
+    const billing = tasks.find((t) => t.id === 'billing');
+    // Measured RED before the fix: status 'queued', owner null, while the
+    // lease below still named 'billing' — graph and lease disagreeing.
+    expect(billing.status).toBe('claimed');
+    expect(billing.owner).toBe('billing');
+    expect(makeStore().getLease(MISSION, 'billing').owner).toBe('billing');
+    expect(tasks.find((t) => t.id === 'auth').status).toBe('claimed');
+  });
+});
+
 describe('feedLimb — every refusal is a skip, and a skip writes nothing', () => {
   /** No store file may exist after a skip that never opened one. */
   const noStoreFiles = () => expect(fs.existsSync(path.join(root, '.artibot', 'runtime', 'project-state.jsonl'))).toBe(false);

@@ -102,7 +102,14 @@ function skipped(reason) {
 }
 
 /**
- * Write the merged graph, with ONE CAS retry.
+ * Merge the plan into the snapshot's graph and write it, with ONE CAS retry.
+ *
+ * The graph is merged from `state` and the CAS is guarded by THAT snapshot's
+ * `state_version`, so a commit landing between the read and the write is a
+ * conflict. On a conflict the snapshot is re-read and the merge re-run before
+ * the retry — the graph is passed whole as `opts.graph`, not computed inside
+ * the lock, so retrying with a fresh version alone would rewrite the stale
+ * graph over the intervening commit (a concurrent limb's claim, measured).
  *
  * One retry and not a loop, matching `lib/runtime/middleware/tasks.js`: a
  * second conflict means sustained contention, and spinning on a lock would
@@ -113,30 +120,36 @@ function skipped(reason) {
  * the dispatching session's own mission with this script's idea of it.
  *
  * @param {object} store - StateStore.
+ * @param {object} state - The snapshot the mission was selected from.
  * @param {string} missionId - Mission id.
- * @param {object} graph - Merged graph.
- * @returns {object} The commit result.
+ * @param {object|null} plan - Parsed `plan.json`.
+ * @param {string} limb - The dispatched limb.
+ * @returns {{merged: object, commit: object|null}} The last merge, and its commit
+ *   result (null when nothing was written: an unchanged merge, or no `limb` task).
  */
-function writeGraph(store, missionId, graph) {
-  const opts = { reason: FEED_REASON, graph };
-  let commit = store.updateMission(missionId, (cur) => cur, {
-    ...opts, expectedVersion: store.getState().state_version,
-  });
-  if (commit.conflict === true) {
-    commit = store.updateMission(missionId, (cur) => cur, {
-      ...opts, expectedVersion: store.getState().state_version,
+function mergeAndWrite(store, state, missionId, plan, limb) {
+  let snapshot = state;
+  for (let attempt = 0; ; attempt += 1) {
+    const graph = snapshot.task_graphs?.[missionId] ?? null;
+    const merged = mergeLimbTasks({ graph, plan, missionId, now: new Date() });
+    // A limb absent from the merge is skipped by the caller; seed nothing for it.
+    if (merged.unchanged || !merged.graph.tasks.some((t) => t.id === limb)) return { merged, commit: null };
+    const commit = store.updateMission(missionId, (cur) => cur, {
+      reason: FEED_REASON, graph: merged.graph, expectedVersion: snapshot.state_version,
     });
+    if (commit.conflict !== true || attempt >= 1) return { merged, commit };
+    snapshot = store.getState();
   }
-  return commit;
 }
 
 /**
  * Claim the limb's task, or renew the claim this same limb already holds.
  *
- * A live lease held by SOMEONE ELSE is reported, never broken: reclaiming is
- * CA-09's decision and the design puts it behind a Canary. A live lease held
- * by this limb is a re-dispatch of a window that is still working, so the
- * heartbeat is renewed instead.
+ * A lease held by SOMEONE ELSE is reported, never broken — whether or not it
+ * has expired, since `getLease` does not judge expiry and reclaiming is CA-09's
+ * decision, which the design puts behind a Canary. A lease held by this limb
+ * is a re-dispatch of a window that is still working, so the heartbeat is
+ * renewed instead.
  *
  * A task that already reached a TERMINAL status is left alone. `releaseTask`
  * clears the lease when a limb finishes, so without this guard a second
@@ -196,13 +209,12 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId }, 
     // orphan this module must not make.
     if (!missionId || !state.active_missions?.[missionId]) return skipped('no-mission');
 
-    const merged = mergeLimbTasks({ graph: store.getTaskGraph(missionId), plan, missionId, now: new Date() });
+    const { merged, commit } = mergeAndWrite(store, state, missionId, plan, limb);
     const task = merged.graph.tasks.find((t) => t.id === limb);
     if (!task) return skipped('limb-not-in-plan');
 
     let stateVersion = state.state_version;
-    if (!merged.unchanged) {
-      const commit = writeGraph(store, missionId, merged.graph);
+    if (commit) {
       if (!commit.ok) return { ...skipped(`graph-write-refused:${commit.errors?.[0] ?? 'unknown'}`), missionId };
       stateVersion = commit.state_version ?? stateVersion;
     }
