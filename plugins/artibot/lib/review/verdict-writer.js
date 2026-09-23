@@ -314,6 +314,24 @@ function claimAuditData(parsed) {
  * reviewer's. Requiring the reviewer's tier would refuse rows the Observe phase
  * can actually produce.
  *
+ * It budgets the line the way {@link buildReviewCompletedEvent} does, against
+ * {@link LEDGER_LINE_MAX_BYTES} minus {@link ENVELOPE_RESERVE_BYTES}, because
+ * `event-writer.js#foldOversized` keeps `evidence_refs` — the field that
+ * overflows — and drops `nature`, `subject_model` and `subject_agent_id`, the
+ * three §4.1 stratifies by. An input that fits is returned untouched. One that
+ * does not keeps the longest PREFIX of `evidence_refs` that fits together with
+ * one trailing marker, `claim-audit:evidence_refs-truncated=kept<N>/total<M>`
+ * (N kept, marker not counted; M the original count), and every other key.
+ * When even the marker alone does not fit — or there are no refs to cut — the
+ * build is refused as `oversize:line`, which surfaces as `skipped:<reason>`.
+ * `idempotency_key` is always the FULL audit's, so truncating never changes
+ * which delivery a redelivery dedupes against.
+ *
+ * The residual is the precedent's: the budget is measured before `redactDeep`,
+ * which can lengthen a field, and against the default cap, which an operator
+ * can lower. Either can still fold the row; it is then reported `appended`
+ * with reason `ledger-folded`, not silently.
+ *
  * @param {object} [args] build inputs
  * @param {object} [args.parsed] a {@link parseClaimAudit} result
  * @param {string} [args.sessionId] envelope `session_id`
@@ -330,7 +348,7 @@ export function buildClaimAuditEvent(args = {}) {
   }
   if (!isNonEmptyString(sessionId)) return { ok: false, reason: 'missing:sessionId' };
   const mission = envelopeMissionId(missionId);
-  return {
+  const built = {
     ok: true,
     input: {
       event: REVIEW_CLAIM_AUDIT_EVENT,
@@ -343,6 +361,60 @@ export function buildClaimAuditEvent(args = {}) {
       data: claimAuditData(parsed),
     },
   };
+  return fitClaimAuditLine(built);
+}
+
+/**
+ * Serialized byte length of a built input — the quantity both builders budget.
+ *
+ * @param {object} input a builder's `input`
+ * @returns {number} UTF-8 bytes of `JSON.stringify(input)`
+ */
+function inputBytes(input) {
+  return Buffer.byteLength(JSON.stringify(input), 'utf8');
+}
+
+/**
+ * Bring a built `review.claim_audit` input under the line budget, or refuse it.
+ *
+ * The search is binary over the kept count N in `[0, M-1]`: the input with N
+ * refs plus the marker grows strictly with N (each ref adds at least `"",`
+ * and the marker's digits never shrink), so "fits" is monotone. M itself is
+ * not a candidate — all refs plus a marker is longer than the input that
+ * already did not fit. Nothing upstream bounds M (`parseClaimAudit` checks
+ * only that each entry is a string), so the cost is about log2(M) serializations
+ * of an input no larger than the reviewer's answer.
+ *
+ * N = 0 is kept rather than refused: the marker alone still says refs existed
+ * and how many, and the three stratification keys are what the row is for.
+ *
+ * @param {{ok: true, input: object}} built {@link buildClaimAuditEvent}'s draft
+ * @returns {{ok: true, input: object}|{ok: false, reason: string}} build outcome
+ */
+function fitClaimAuditLine(built) {
+  const budget = LEDGER_LINE_MAX_BYTES - ENVELOPE_RESERVE_BYTES;
+  if (inputBytes(built.input) <= budget) return built;
+  const refs = built.input.data.evidence_refs;
+  if (!Array.isArray(refs)) return { ok: false, reason: 'oversize:line' };
+  const keeping = (n) => ({
+    ...built.input,
+    data: {
+      ...built.input.data,
+      evidence_refs: [
+        ...refs.slice(0, n),
+        `claim-audit:evidence_refs-truncated=kept${n}/total${refs.length}`,
+      ],
+    },
+  });
+  if (inputBytes(keeping(0)) > budget) return { ok: false, reason: 'oversize:line' };
+  let lo = 0;
+  let hi = refs.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (inputBytes(keeping(mid)) <= budget) lo = mid;
+    else hi = mid - 1;
+  }
+  return { ok: true, input: keeping(lo) };
 }
 
 /**
@@ -386,10 +458,10 @@ function readExistingReviewKeys(port) {
  *
  * A row the writer FOLDED is still `appended` — it is in the ledger — but
  * carries `reason: 'ledger-folded'`, so the keys it lost are reported rather
- * than read as a clean append. The builder's budget should make this
- * unreachable for `review.completed`; what still reaches it is an
- * operator-lowered cap, a redaction that lengthens a string, and
- * `review.claim_audit`, whose builder has no budget.
+ * than read as a clean append. Both builders budget the line, which makes
+ * this unreachable under the default cap for an input redaction does not
+ * lengthen; what still reaches it is an operator-lowered cap and a redaction
+ * that lengthens a string, since the budget is measured before `redactDeep`.
  *
  * @param {unknown} append `append` port
  * @param {object} input a `build*Event` result's `input`
