@@ -1,5 +1,5 @@
 ---
-description: "(Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on the build tier(`phaseRoles.build`, model-policy 해석, xhigh effort 권장), review phases on the review tier(`phaseRoles.review` — 2026-09-02 2티어 정책: 구현 opus · 검수 fable)"
+description: "(Artibot) Parallel team execution with cross-check — persistent team mode, leader delegates only, implementation on the build tier(`phaseRoles.build`, xhigh effort 권장), review phases on the review tier(`phaseRoles.review`) — 2026-09-23 오너 결정 이후 단일 티어: 두 phase 모두 opus, fable 게이트 off"
 argument-hint: '[task] e.g. "이 기능 구현하고 테스트도 작성해줘"'
 allowed-tools: [Read, Glob, Grep, Bash, Agent, AskUserQuestion, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
@@ -7,7 +7,7 @@ toolset: team
 
 # /team
 
-Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **build tier** (`phaseRoles.build` = opus, model-policy 해석, xhigh effort 권장). Review teammates (Phase 4 cross-check, Phase 4.5 inspection) resolve per agent via `resolveModel(agentName, { role: 'review' })` — the **review tier** (`phaseRoles.review` = fable) for the 10 allowlisted design/review agents, opus for everyone else and for `security-reviewer` (2026-09-02 2티어 정책, `### Teammate Rules & Model Policy` 참조). By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
+Parallel team execution with mandatory cross-check and **persistent team mode**. The leader (YOU) delegates work and receives results ONLY — never does the work yourself. Implementation teammates (Phase 3) run on the **build tier** (`phaseRoles.build` = opus, xhigh effort 권장). Review teammates (Phase 4 cross-check, Phase 4.5 inspection) run on the **review tier** (`phaseRoles.review` = opus). Since the 2026-09-23 owner decision the fleet is single-tier: `fable.enabled=false`, so every agent resolves to opus on both phases — the 2-tier split that put the 10 allowlisted design/review agents on fable (2026-09-02~09-23) is dormant, not deleted. The leader passes each teammate's model explicitly (`### Teammate Rules & Model Policy` 참조). By default, the team **persists** after task completion and awaits the next assignment. Use `--one-shot` to revert to single-task-then-shutdown behavior.
 
 ## Arguments
 
@@ -43,14 +43,16 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 > 가드를 붙일 진입점 자체가 없었다. 두 건 모두 **파일을 한 번 여는 것으로** 방지됐을 오류다.
 
 ### Teammate Rules & Model Policy
-- **Implementation teammates (Phase 3)**: **build 티어**(`phaseRoles.build` = opus, model-policy 해석) — 코드 작성/구현은 최고 품질 필수
-- **Review teammates (Phase 4, 4.5)**: 팀원별 `resolveModel(agentName, { role: 'review' })` 해석 — config `agents.modelPolicy.phaseRoles` = `{ build: opus, review: fable }`(2026-09-02 오너 결정: 검수·설계 = fable, 구현 = opus)를 읽되, **그 에이전트 이름으로 `fable.allowlist`·`FABLE_DENYLIST` 를 대조**한다. 그래서 allowlist 10종(investigator, auditor, code-reviewer, spec-reviewer, quality-reviewer …)만 fable 이고, allowlist 밖 팀원(구현 에이전트)이나 `security-reviewer` 를 Phase 4 에 배정하면 review phase 여도 opus 다. 에이전트 이름 없는 `resolveModelForPhase('review')` 는 kill-switch 만 보므로 팀원 배정 근거로 쓰지 마라. 코드 상수가 아니라 config 가 정본
-- **judge 작업은 allowlist 10종 중 하나에 배정한다** — Phase 1 에서 `nature: judge` 로 태깅한 작업(정합성 판정·반증·결정·감사)은 investigator · auditor · code-reviewer · spec-reviewer · quality-reviewer · architect · planner · llm-architect · repo-benchmarker · orchestrator 중에서 고른다. 이 10개 이름이 fable 을 받을 수 있는 **유일한 집합**이다(2026-09-04 오너 결정 MP-1·MP-3). `nature: process` 작업은 구현 에이전트(build 티어)에 배정한다 — 상세는 §Phase 1 `nature` 절
+- **Implementation teammates (Phase 3)**: **build 티어**(`phaseRoles.build` = opus) — 코드 작성/구현은 최고 품질 필수
+- **Review teammates (Phase 4, 4.5)**: **review 티어**(`phaseRoles.review` = opus — 2026-09-23 오너 결정으로 단일 티어 opus). 팀원별 해석은 `resolveModel(agentName, { role: 'review' })` 이고, 그 에이전트 이름으로 `fable.allowlist`·`FABLE_DENYLIST` 를 대조하는 게이트는 남아 있지만 `fable.enabled=false` 라 **지금은 30종 전부 opus** 다. 에이전트 이름 없는 `resolveModelForPhase('review')` 는 kill-switch 만 보므로 팀원 배정 근거로 쓰지 마라(게이트가 다시 켜지면 allowlist 대조를 건너뛴다). 코드 상수가 아니라 config 가 정본
+- **judge 작업은 allowlist 10종 중 하나에 배정한다** — Phase 1 에서 `nature: judge` 로 태깅한 작업(정합성 판정·반증·결정·감사)은 investigator · auditor · code-reviewer · spec-reviewer · quality-reviewer · architect · planner · llm-architect · repo-benchmarker · orchestrator 중에서 고른다. 지금 이 배정의 근거는 **역할 적합성과 `nature` 측정 분모**이지 모델 차이가 아니다(전원 opus). 이 10개 이름은 fable 게이트가 다시 켜졌을 때 fable 을 받을 수 있는 유일한 집합으로 휴면 보존된다(2026-09-04 오너 결정 MP-1·MP-3). `nature: process` 작업은 구현 에이전트(build 티어)에 배정한다 — 상세는 §Phase 1 `nature` 절
 - **ALL work in parallel** (no blockedBy unless truly sequential dependency)
 - **Each teammate works independently** on their assigned scope
-- After main work: cross-check another teammate's output (review phase-role — allowlist 안의 검수 에이전트면 fable, 그 밖은 opus)
+- After main work: cross-check another teammate's output (review phase-role — 현재 opus)
 
-> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver is `lib/core/model-policy.js#resolveModel(agentName, { role })`, backed by `artibot.config.json#/agents/modelPolicy` (`resolveModelForPhase(role)` is the agent-less variant — it cannot see the allowlist/denylist, so never use it to pick a teammate's tier). The SubagentStart hook (`scripts/hooks/subagent-handler.js`) calls `resolveModel` to flag spawns that drift from policy.
+> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver for the shipped policy is `lib/core/model-policy.js#resolveModel(agentName, { role })`, backed by `artibot.config.json#/agents/modelPolicy` (`resolveModelForPhase(role)` is the agent-less variant — it cannot see the allowlist/denylist, so never use it to pick a teammate's tier). The SubagentStart hook (`scripts/hooks/subagent-handler.js#checkModelPolicy`) computes `canonicalModel` with `resolveModel`, but its drift flag compares it against a requested model read by `#extractRequestedModel` from `model`/`tool_input.model`/`agent_model` — keys the SubagentStart payload does not carry (2.1.260 top-level keys: agent_id, agent_type, cwd, hook_event_name, prompt_id, session_id, transcript_path — the same file's comment above `route.bound`). So the flag cannot fire on a real spawn and is **not** a safety net for a forgotten model parameter: the leader passing `model` (below) is the only path.
+
+> **모델 전달 — 아래 스폰 예시의 `model` 주석이 가리키는 절차.** 리더는 스폰마다 `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve <plugin:name> --role <build|review>` 를 실행하고 그 출력값을 `Agent(model=…)` 에 **실제로 넘긴다**. `<plugin:name>` 은 `artibot:code-reviewer` 같은 플러그인 한정 이름, `--role build` 는 구현·process 스폰, `--role review` 는 크로스체크·최종 검수·judge 스폰이다. config 에 적힌 값은 리더가 넘기지 않으면 스폰에 닿지 않고, 넘기지 않은 스폰은 에이전트 frontmatter `model:` 을 따른다 — 둘 다 **추론**이다(코드·호스트 페이로드 판독, 실행 확인 없음). 넘겼을 때 `Agent(model=…)` 가 플러그인 `subagent_type` 의 frontmatter 보다 우선하는지도 **미확인**이다(2026-09-23 설계 정찰 §3 표 — general-purpose 스폰에서 haiku 반영만 자기보고로 관측). 호스트 페이로드 실측 6행에는 `model` 인자가 한 번도 없었다(`scripts/hooks/route-observe-pre.js#TOOL_INPUT_KEYS` 주석 — 넘긴 시나리오 자체가 없었다). 그 CLI 가 아직 없거나 실패하면 폴백은 `lib/core/model-policy.js#resolveModel(agentName, { role })` 의 값이다(오늘은 전 에이전트 opus).
 
 ### Token Conservation Rule (CRITICAL)
 - **작업 완료 후 팀원을 임의로 셧다운하지 마라** — 재소환 시 토큰이 발생한다
@@ -110,11 +112,11 @@ Break the user's request into independent work units, 각 단위에 **작업 성
 | nature | 뜻 | 배정 티어 | 예시 |
 |---|---|---|---|
 | `process` | 기계적 처리 — grep·측정·계수·구현·테스트 작성. 답이 **명령의 출력**으로 정해진다 | **build 티어**(`phaseRoles.build` = opus) — 구현 에이전트 | "훅 25종의 소비처를 grep 으로 센다" · "이 함수를 구현한다" · "실패를 재현하는 테스트를 쓴다" |
-| `judge` | 정합성 판정·반증·결정·감사. 답이 **판정 문장**이다 | **review 티어**(`phaseRoles.review` = fable) — `fable.allowlist` 10종 중 하나 | "관측치 3건이 함께 성립하는지 판정한다" · "이 주장을 반증한다" · "설계안이 오너 결정과 정합한지 감사한다" |
+| `judge` | 정합성 판정·반증·결정·감사. 답이 **판정 문장**이다 | **review 티어**(`phaseRoles.review` = opus; 2026-09-02~09-23 는 fable) — `fable.allowlist` 10종 중 하나 | "관측치 3건이 함께 성립하는지 판정한다" · "이 주장을 반증한다" · "설계안이 오너 결정과 정합한지 감사한다" |
 
 - **태깅 단위는 작업이 아니라 산출물(판정 문장)이다.** 한 작업 안에 grep 과 판정이 섞이는 것이 정상이다 — 그래서 작업을 쪼개는 대신 **그 팀원의 보고가 판정 문장을 포함하면 그 팀원을 judge 로 태깅**한다.
 - **judge 작업은 `fable.allowlist` 10종 중 하나에 배정한다**: investigator · auditor · code-reviewer · spec-reviewer · quality-reviewer · architect · planner · llm-architect · repo-benchmarker · orchestrator. **`process` 작업은 구현 에이전트(build 티어)** 에 배정한다.
-- **티어를 정하는 것은 에이전트 이름이다.** allowlist 밖 에이전트에게 review 역할을 줘도 게이트가 opus 로 돌린다(§Teammate Rules & Model Policy). judge 를 fable 로 돌리는 방법은 위 10종 중에서 고르는 것 하나뿐이다.
+- **지금은 어느 쪽이든 opus 다**(`fable.enabled=false`, 2026-09-23 오너 결정). 10종 배정은 역할 적합성과 측정 분모를 위한 것이고 모델을 바꾸지 않는다. fable 게이트가 다시 켜지면 **티어를 정하는 것은 에이전트 이름**이 된다 — allowlist 밖 에이전트에게 review 역할을 줘도 게이트가 opus 로 돌리므로, 그때 judge 를 fable 로 돌리는 방법은 위 10종 중에서 고르는 것 하나뿐이다(§Fable opt-in).
 - **태그를 빠뜨려도 악화되지 않는다** — 태그 없는 작업은 현상 유지(태깅 도입 전과 같은 배정)이고, 측정에서 `nature: null` 로 **분모에서 제외**된다. 빈 값을 추측으로 메우지 않는다(`.artibot/guides/v5-design/DESIGN-MODEL-POLICY-role-override.md` §4.4 #4).
 
 ### Auto-Effort Pre-injection (현재 정책 티어 Agentic)
@@ -167,9 +169,9 @@ wins"*. 즉 교차 세션 지시가 **오류 없이** 자기 세션 팀원에게
 Spawn ALL teammates in a single message (parallel):
 ```
 Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{sid}-{role}",
-      /* model: model-policy 해석 — 2티어(2026-09-02 오너 결정). 구현(nature: process) 팀원 = build 티어(opus),
-         검수·판정(nature: judge) 팀원 = resolveModel(agentName, { role: 'review' }) → fable.allowlist 10종만 fable,
-         그 밖(구현 에이전트)과 security-reviewer 는 opus. 상세는 §Teammate Rules & Model Policy */
+      /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:{agent-type} --role <build|review>
+         출력값을 Agent(model=…) 에 넘긴다. 구현(nature: process) 팀원 = --role build, 검수·판정(nature: judge) 팀원 = --role review.
+         현재 두 역할 모두 opus(단일 티어, 2026-09-23 오너 결정). 폴백·상세는 §Teammate Rules & Model Policy */
       prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
 ```
 
@@ -287,11 +289,11 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 > Bash 셸에서 비어있을 수 있으니 쓰지 마라. 헬퍼 호출이 실패하면 즉시 인라인 출력으로 폴백한다.
 
 ### Phase 4: CROSS-CHECK (review 티어)
-After ALL main tasks complete, spawn cross-check agents on the **review 티어** — `resolveModel(agentName, { role: 'review' })` (allowlist 10종이면 fable, 그 밖과 `security-reviewer` 는 opus):
+After ALL main tasks complete, spawn cross-check agents on the **review 티어** — 팀원별 `--role review` 해석(현재 단일 티어라 전원 opus):
 
 ```
 Agent(subagent_type="code-reviewer", name="team-*-checker-{n}",
-     /* model: resolveModel(agentName, { role: 'review' }) — review 티어 */
+     /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent(model=…) 에 넘긴다 — review 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n
      코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.\n\n{보고 계약}")
@@ -306,12 +308,12 @@ Each cross-checker:
 4. Report: APPROVE or REQUEST_CHANGES with specifics
 
 ### Phase 4.5: INSPECTION (review 티어)
-Cross-check 완료 후, **code-reviewer 에이전트(review 티어)가 전체 작업물을 최종 검수**한다 — `resolveModel(agentName, { role: 'review' })` 해석.
+Cross-check 완료 후, **code-reviewer 에이전트(review 티어)가 전체 작업물을 최종 검수**한다 — `--role review` 해석(현재 opus).
 
 팀에 code-reviewer가 없으면 이 단계에서 소환:
 ```
 Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
-     /* model: resolveModel(agentName, { role: 'review' }) — review 티어 */
+     /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent(model=…) 에 넘긴다 — review 티어 */
      prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
 각 팀원의 작업물을 검수해주세요:
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
@@ -484,7 +486,7 @@ When the user gives a new task to a persistent team:
 3. **신규 팀원은 기존 팀에 없는 전문성이 필요할 때만** 추가:
    ```
    Agent(subagent_type="artibot:{new-agent-type}", name="team-*-{role}",
-        /* model: model-policy 해석 — 구현(nature: process) 역할은 build 티어 */
+        /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:{new-agent-type} --role build 출력값을 Agent(model=…) 에 넘긴다 — 구현(nature: process) 역할은 build 티어, judge 면 --role review */
         prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n{보고 계약}")
    ```
 4. **팀원 교체는 다음 작업 배정 시에만** — 현재 작업 완료 후 임의 셧다운 금지 (Token Conservation Rule)
@@ -523,8 +525,8 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 - Sequential execution when parallel is possible
 - Skipping cross-check phase
 - Using balanced/fast 티어 for **implementation** teammates (Phase 3 must be build 티어)
-- **judge 작업(판정·반증·감사)을 allowlist 밖 에이전트에 배정** — 게이트가 opus 로 돌려 review 티어가 적용되지 않는다 (§Phase 1 `nature` 절)
-- Using balanced/fast 티어 for review phases (Phase 4/4.5 — `phaseRoles.review` = fable 이 정책, 2026-09-02 오너 결정)
+- **judge 작업(판정·반증·감사)을 allowlist 밖 에이전트에 배정** — 판정 전용 정의를 벗어나 `nature` 측정 분모가 흐려지고, fable 게이트가 다시 켜지면 opus 로 돌려져 review 티어가 적용되지 않는다 (§Phase 1 `nature` 절)
+- Using balanced/fast 티어 for review phases (Phase 4/4.5 — `phaseRoles.review` 가 정책이고 현재 opus, 2026-09-23 오너 결정)
 - Single teammate for multi-domain work
 - Cross-checker reviewing their own work
 - **작업 완료 후 팀원을 임의로 셧다운** — 재소환 토큰 낭비 (idle 유지가 더 저렴)
@@ -534,9 +536,13 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 
 ## Fable opt-in
 
-**정책 (2026-09-02 오너 결정)**: 2티어 — 설계·검수는 fable, 구현·마케팅은 opus. 게이트는 `artibot.config.json#agents.modelPolicy.fable.enabled` = true 와 `agents.modelPolicy.fable.allowlist`(에이전트 **이름** 10종: orchestrator, architect, planner, code-reviewer, spec-reviewer, quality-reviewer, llm-architect, repo-benchmarker, investigator, auditor) 로 제어한다. 뒤의 둘은 2026-09-04 오너 결정 MP-3 으로 신설된 조사·감사 전용 정의다 — `investigator` 는 조사·측정·정합성 대조(판정까지), `auditor` 는 사후 감사·주장 반증을 맡는다. 구현 에이전트 12종은 opus 이며, `high` 버킷이 `model: fable` 을 선언해도 allowlist 밖이면 게이트가 opus 로 강등한다(의도된 동작). `security-reviewer` 는 `FABLE_DENYLIST` 로 영구 opus. phase-role 은 config `agents.modelPolicy.phaseRoles` = `{ build: opus, review: fable }` 가 정본이다.
+**현재 — 휴면, OFF (2026-09-23 오너 결정 "fable 5.1 은 opus 5.5 로 대체")**: 단일 티어 opus. `artibot.config.json#agents.modelPolicy.fable.enabled` = false, `phaseRoles` = `{ build: opus, review: opus }`, 에이전트 frontmatter 30종 전부 `model: opus` — 게이트가 꺼져 있는 동안 allowlist 와 무관하게 **어떤 에이전트도 fable 로 해석되지 않는다**. 게이트 기계장치(`fable.allowlist` 10종, `high` 버킷의 `model: fable` 선언, `FABLE_DENYLIST`)는 되살리기용으로 지우지 않고 남겨 둔다.
 
-`deep-async`/`frontier` 별칭은 `resolveModel(alias, { agentType })` 로 **호출 에이전트를 넘겨야** allowlist·denylist 대조가 된다 — agentType 없이 부르면 게이트 ON 여부만 본다. 단일 진실원은 `lib/core/model-policy.js#resolveModel`, 되돌리기(단일 티어 opus)는 `fable.enabled=false` + 10개 frontmatter `model: opus` 이며 `scripts/ci/validate-model-policy.js` 가 드리프트 게이트다. 실효 비용 계수는 `lib/core/model-catalog.js#getCostFactor` 를 따른다(문서의 ~2.6× 는 미검증 수치).
+**게이트가 켜졌을 때의 동작 (2026-09-02~09-23 의 2티어가 이랬다)**: 설계·검수는 fable, 구현·마케팅은 opus. allowlist 는 에이전트 **이름** 10종(orchestrator, architect, planner, code-reviewer, spec-reviewer, quality-reviewer, llm-architect, repo-benchmarker, investigator, auditor)이다. 뒤의 둘은 2026-09-04 오너 결정 MP-3 으로 신설된 조사·감사 전용 정의다 — `investigator` 는 조사·측정·정합성 대조(판정까지), `auditor` 는 사후 감사·주장 반증을 맡는다. `high` 버킷이 `model: fable` 을 선언해도 allowlist 밖이면 게이트가 opus 로 강등한다(의도된 동작). `security-reviewer` 는 `FABLE_DENYLIST` 로 영구 opus.
+
+**되살리기**: `fable.enabled=true` + `phaseRoles.review=fable` + 10개 frontmatter `model: fable`(+ `scripts/generate-agent-index.js` 로 `agents/INDEX.md` 재생성). `scripts/ci/validate-model-policy.js` 가 플래그와 frontmatter 사이의 드리프트 게이트다.
+
+`deep-async`/`frontier` 별칭은 `resolveModel(alias, { agentType })` 로 **호출 에이전트를 넘겨야** allowlist·denylist 대조가 된다 — agentType 없이 부르면 게이트 ON 여부만 본다(현재 OFF 라 어느 쪽이든 opus 로 해석된다). 단일 진실원은 `lib/core/model-policy.js#resolveModel`. 실효 비용 계수는 `lib/core/model-catalog.js#getCostFactor` 를 따른다(문서의 ~2.6× 는 미검증 수치).
 
 ## Next Steps
 
