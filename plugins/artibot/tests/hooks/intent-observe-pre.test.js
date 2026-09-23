@@ -294,7 +294,7 @@ describe('intent-observe-pre — mission id', () => {
     // `lib/mission/mission-id.js#sessionFallbackMissionId({sessionId, nowMs})`
     // (object-arg, THROWS under 8 alphanumerics). Stage ① writes its
     // `mission.candidate_deferred` under the event-writer form
-    // (`lib/runtime/middleware/tasks.js#resolveMissionIdentity`), so stage ②
+    // (`lib/runtime/middleware/mission-ledger.js#resolveMissionIdentity`), so stage ②
     // must read under the same one or it looks for a row that is not there.
     const short = 'a-b-c';
     expect(await resolveMissionId({}, short)).toBe(sessionFallbackMissionId(short, new Date()));

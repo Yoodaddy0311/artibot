@@ -898,7 +898,7 @@ plugins/artibot/
 |   +-- utils/
 +-- lib/
 |   +-- core/                    # Core modules (platform, config, cache, playbook-parser, playbook-registry, guard-registry, event-bus, blocked-patterns)
-|   +-- runtime/                 # Runtime pipeline (15 middleware modules; 11-stage default chain: lifecycle, router, memory, skills, tasks, subagents, guardrail, summarization, token-usage, checkpoint, cache-roi)
+|   +-- runtime/                 # Runtime pipeline (17 middleware module files; 11-stage default chain: lifecycle, router, memory, skills, tasks, subagents, guardrail, summarization, token-usage, checkpoint, cache-roi)
 |   +-- visual/                  # Visual validation (SSIM differ, style-fixer, validator)
 |   +-- intent/                  # Intent detection (language, trigger)
 |   +-- context/                 # Context management (session)

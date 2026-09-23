@@ -8,7 +8,7 @@
  *
  * WHY THE ANSWER IS `null`. Measured 2026-09-12 (parent repo) and re-checked
  * 2026-09-14: no writer records either side of that comparison.
- *   - `lib/runtime/middleware/tasks.js#buildMissionLedgerData` writes `title` +
+ *   - `lib/runtime/middleware/mission-ledger.js#buildMissionLedgerData` writes `title` +
  *     `intent_revision` for `mission.created`, and `reason` + `signals`
  *     (+ `title`) for `mission.candidate_deferred`. Neither carries
  *     `command_activation`.

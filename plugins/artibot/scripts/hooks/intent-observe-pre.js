@@ -45,7 +45,7 @@
  *
  * They agree for every session id with 8+ alphanumerics and DISAGREE below
  * that. Stage ① writes its candidate under the event-writer form
- * (`tasks.js#resolveMissionIdentity`), so stage ② reads under the same one —
+ * (`mission-ledger.js#resolveMissionIdentity`), so stage ② reads under the same one —
  * otherwise a short session id makes this hook look for a row that stage ①
  * filed under a different name. `route-observe-pre.js` uses the mission-id.js
  * form; that is correct for it (it writes its own line under its own id) and
@@ -143,7 +143,7 @@ const LEDGER_SOURCE = 'hook';
 
 /**
  * Cap on a title this hook authors. Same number and same reason as
- * `tasks.js#MISSION_TITLE_MAX`: `mission.created` REQUIRES `title`, so the
+ * `mission-ledger.js#MISSION_TITLE_MAX`: `mission.created` REQUIRES `title`, so the
  * writer's oversize fold cannot drop it, and an unbounded string would push the
  * whole line past the ledger's 4 KB cap and get it rejected outright.
  * @type {number}

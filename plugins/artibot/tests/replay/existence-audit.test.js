@@ -8,15 +8,16 @@
  * because nothing spoke. So the assertions here are mostly about which zero is
  * which.
  *
- *   1. A KIND WITH NO CARRIER REPORTS null, NOT 0. Two kinds still have none:
- *      no registered event names a command or a `lib/` module (re-measured
- *      2026-09-15 across the 39 events then in
- *      `schemas/ledger-events.allowlist.json`, 40 once Wave 12 registered
- *      `hook.fired`; it was all four kinds and 36 events on 2026-09-02).
- *      `fired: 0` there would be a number nobody measured. `skills` left that
- *      state in Wave 11 — `tool.used.skill`, written by
- *      `scripts/hooks/tool-used-record.js` — and `hooks` in Wave 12 —
- *      `hook.fired.hooks`, written by `scripts/hooks/_hook-fired-record.js`.
+ *   1. A KIND WITH NO CARRIER REPORTS null, NOT 0. One kind still has none:
+ *      no registered event names a `lib/` module (re-measured 2026-09-23
+ *      across the 41 events in `schemas/ledger-events.allowlist.json`; 39 on
+ *      2026-09-15, 40 once Wave 12 registered `hook.fired`, 41 once SH-18
+ *      registered `adr.question_gate_evaluated`; all four kinds and 36 events
+ *      on 2026-09-02). `fired: 0` there would be a number nobody measured.
+ *      `skills` left that state in Wave 11 — `tool.used.skill`, written by
+ *      `scripts/hooks/tool-used-record.js` — `hooks` in Wave 12 —
+ *      `hook.fired.hooks`, written by `scripts/hooks/_hook-fired-record.js` —
+ *      and `commands` on 2026-09-17 (SH-29 part B) — `intent.detected.command`.
  *      The cases below assert BOTH regimes.
  *   1b. THE HOOKS CARRIER IS MULTI-VALUED. One `hook.fired` row is one
  *      dispatch and names SEVERAL handlers, so the denominator is dispatch

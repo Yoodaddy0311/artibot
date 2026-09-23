@@ -42,8 +42,8 @@
  * (`schemas/ledger-events.allowlist.json`, 36 events). The leader ruled the
  * allowlist canon and logged the §6 wording as a defect in the design §0-2
  * correction table — an event nothing can emit cannot trigger a handler.
- * §6 also lists `adr.accepted`; no `adr.*` event exists either, so ADR is
- * deliberately not implemented (decision B2 open) rather than invented.
+ * §6 also lists `adr.accepted`, which does not exist either (the one `adr.*` event, `adr.question_gate_evaluated`,
+ * records the SH-18 question gate, not an ADR), so ADR is deliberately not implemented (decision B2 open).
  *
  * **Closed vocabulary, not trusted redaction.** §25 forbids secrets reaching
  * artifacts and the ledger; design §7.2 §25 resolves it as reuse with no new

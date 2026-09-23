@@ -461,7 +461,7 @@ export async function observePlanWrite(hookData) {
     // Only when the host gave us one. The key is UNDECLARED in the allowlist
     // (`event-writer.js#validateDeclaredFields` type-checks declared keys only),
     // which is the same pass-through the `mission.candidate_deferred` title
-    // carrier relies on in `tasks.js#buildMissionLedgerData`.
+    // carrier relies on in `mission-ledger.js#buildMissionLedgerData`.
     if (toolUseId !== null) data.tool_use_id = toolUseId;
 
     const appended = d.appendLedgerEvent(projectRoot, {

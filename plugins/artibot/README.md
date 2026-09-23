@@ -51,7 +51,7 @@ setting and prints a hint — it never writes it.
 | 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `effort-resolver.js`, `lib/runtime/middleware/router.js` |
 | 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong-learner.js` |
 | 3 | **Lifelong Learning (RLVR)** — verifiable-reward signals (test-pass / typecheck / no-revisit) feed drift-detector + rule-extractor + skill promotion. *No GRPO/RL optimizer — removed in the 2026-06 lean redesign.* | `lib/learning/` (lifelong-learner, rule-extractor, drift-detector, knowledge-graph, ...) |
-| 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 15 middleware modules) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
+| 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 17 module files) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
 | 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
 | 6 | **Data Sovereignty** — outbound to external DBs is hard-blocked. Memory, learning, swarm all stay on disk | `CLAUDE.md` DATA POLICY + `lib/privacy/` |
 | 7 | **Native Agent Teams API** - named `Agent` spawns / SendMessage / TaskCreate, not one-shot fire-and-forget delegation | `lib/runtime/middleware/subagents.js`, `lib/runtime/middleware/tasks.js` |
@@ -94,7 +94,7 @@ flowchart TD
 
 | # | Layer | Directory | Responsibility |
 |---|---|---|---|
-| 5 | Runtime | `lib/runtime/` | 11-stage default middleware chain (of 15 modules), agent factory |
+| 5 | Runtime | `lib/runtime/` | 11-stage default middleware chain (of 17 module files), agent factory |
 | 4 | Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
 | 3 | Learning | `lib/learning/` | RLVR-signal learning, hierarchical memory, knowledge transfer |
 | 2 | Auxiliary | `lib/{adapters,swarm,privacy,visual,mcp,observability,git,...}/` | Domain services |
