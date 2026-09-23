@@ -432,11 +432,12 @@ function recordQuestionGate(state, nowMs, identity) {
 /**
  * Compile the prompt into a Mission Contract and record it.
  *
- * The question-gate line is NOT recorded when the compile throws. Its
- * denominator is kept equal to the mission events': every
- * `adr.question_gate_evaluated` line then has a mission line beside it under
- * the same `mission_id`, and a compile failure — which writes no mission line —
- * writes no gate line either, instead of a gate line that pairs with nothing.
+ * The question-gate line is recorded only for a prompt whose compile
+ * succeeded, under the same identity the mission append was attempted with.
+ * A compile failure writes no mission line and no gate line. The gate line is
+ * NOT gated on the mission append landing: if the writer refuses the mission
+ * event, the gate line is still written and its neighbour is the writer's
+ * `ledger.rejected` line, not a mission line.
  *
  * @param {object} state
  * @param {() => number} now
