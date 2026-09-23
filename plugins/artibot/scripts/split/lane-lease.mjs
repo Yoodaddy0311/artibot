@@ -9,6 +9,11 @@
  * `terminal:done` guard could not be reached in production. The leader's
  * `lane-state <limb> <state>` is the moment the lane's fate is declared, so
  * this module maps that word onto the lease — {@link LANE_LEASE_ACTIONS}.
+ * A release follows the lane word even over a finished task: a task already
+ * `done` (or `cancelled`) with no lease is rewritten to the failed status by
+ * a lane `failed`. That is intended — the lane word is the operator's
+ * declaration, and failed means retry, as in task-feed's
+ * `TERMINAL_TASK_STATUSES` stance.
  *
  * ── RECORD-ONLY, FAIL-OPEN — the same contract as task-feed ─────────────
  * `syncLaneLease` NEVER throws. No session id, no mission row, no task, a

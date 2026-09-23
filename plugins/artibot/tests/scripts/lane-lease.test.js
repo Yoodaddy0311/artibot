@@ -20,14 +20,14 @@
  * `heartbeat_at`. Both are live observations.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { writeRunJson } from '../../lib/git/split-run-file.js';
 import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
-import { feedLimb } from '../../scripts/split/task-feed.mjs';
+import { feedLimb, openFeedStore } from '../../scripts/split/task-feed.mjs';
 import * as laneState from '../../scripts/split/lane-state.mjs';
 import { LANE_LEASE_ACTIONS, LANE_LEASE_REASON, syncLaneLease } from '../../scripts/split/lane-lease.mjs';
 
@@ -339,13 +339,30 @@ describe('ledger vocabulary', () => {
 });
 
 describe('dispatch path stays unwired', () => {
-  it('setLaneState (what dispatch.mjs calls) never touches the lease', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('setLaneState (what dispatch.mjs calls) never touches the lease, even where the default sync would reach this store', () => {
+    // Without `<root>/.git` and a session id, a sync wrongly placed in
+    // setLaneState would open the empty fallback store, skip no-mission and
+    // leave this green — measured by review (F1, 2026-09-23). Both are set so
+    // the DEFAULT port lands on the store counted below, with its own ledger
+    // under `<root>/.git/artibot/` — inside the mkdtemp root.
+    fs.mkdirSync(path.join(root, '.git'));
+    vi.stubEnv('CLAUDE_CODE_SESSION_ID', SESSION);
+    vi.stubEnv('CLAUDE_SESSION_ID', '');
     const store = makeStore();
+    expect(store.location.source).toBe('git-common-dir');
+    expect(openFeedStore(root, SESSION).paths.snapshot).toBe(store.paths.snapshot);
     seedMission(store);
     feed(store);
-    const before = updates();
-    laneState.setLaneState({ limb: 'auth', state: 'done' }, { cwd: root });
-    expect(updates()).toBe(before);
+    const version = store.getState().state_version;
+    const beat = store.getLease(MISSION, 'auth').heartbeat_at;
+
+    for (const s of ['active', 'done']) laneState.setLaneState({ limb: 'auth', state: s }, { cwd: root });
+
+    expect(store.getState().state_version).toBe(version);
     expect(store.getLease(MISSION, 'auth')?.owner).toBe('auth');
+    expect(store.getLease(MISSION, 'auth').heartbeat_at).toBe(beat);
+    expect(task(store).status).toBe('claimed');
   });
 });
