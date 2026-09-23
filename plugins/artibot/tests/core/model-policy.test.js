@@ -446,7 +446,8 @@ describe('model-policy', () => {
       // Guards the owner's decision "fable 5.1 → opus 5.5" (2026-09-23): the
       // 2-tier fleet (2026-09-02) is reverted to single-tier opus by closing
       // the kill-switch. The allowlist keeps its 10 names on purpose (dormant),
-      // so re-enabling stays one flag + frontmatter re-sync. Opening the gate,
+      // so re-enabling stays small: the flag, phaseRoles.review, and a
+      // frontmatter re-sync (see the kill-switch it below). Opening the gate,
       // or pointing phaseRoles.review back at fable, must fail here first.
       expect(policy.fable.enabled).toBe(false);
       expect(policy.phaseRoles.review).toBe('opus');
@@ -485,7 +486,7 @@ describe('model-policy', () => {
       }
     });
 
-    it('re-enabling is ONE flag: enabled=true on a copy of the shipped config restores fable for the allowlist', () => {
+    it('the kill-switch alone (enabled=true on a copy) restores fable on the default path; review role and frontmatter are separate steps', () => {
       // Only fable.enabled is flipped — phaseRoles.review stays opus. The
       // default (bucket) path reaches fable again for exactly the 10; the review
       // phase additionally needs phaseRoles.review=fable, and the frontmatter
