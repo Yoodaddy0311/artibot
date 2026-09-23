@@ -37,11 +37,53 @@ afterEach(() => {
 });
 
 describe('newQueueId', () => {
-  it('matches q-YYYYMMDD-HHmmss-xxxx pattern', () => {
-    expect(newQueueId()).toMatch(/^q-\d{8}-\d{6}-[a-z0-9]{4}$/);
+  // q-<UTC ymd>-<UTC hms>-<16 lowercase hex>. The hex suffix is 64 random bits.
+  const QUEUE_ID_RE = /^q-\d{8}-\d{6}-[0-9a-f]{16}$/;
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('matches q-YYYYMMDD-HHmmss-<16 hex> pattern', () => {
+    expect(newQueueId()).toMatch(QUEUE_ID_RE);
+  });
+
+  it('keeps the UTC date-time prefix for display and ordering', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-17T10:30:05Z'));
+    expect(newQueueId().startsWith('q-20260517-103005-')).toBe(true);
   });
 
   it('produces unique ids in tight loop', () => {
+    const ids = new Set();
+    for (let i = 0; i < 100; i += 1) ids.add(newQueueId());
+    expect(ids.size).toBe(100);
+  });
+
+  it('produces 10,000 unique ids within one frozen second', () => {
+    // Worst case: every id shares the same prefix, so only the suffix separates
+    // them. Birthday bound for n=10,000 over 2^64: n^2 / 2^65 ≈ 2.7e-12.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-17T10:30:05Z'));
+    const ids = new Set();
+    for (let i = 0; i < 10_000; i += 1) ids.add(newQueueId());
+    expect(ids.size).toBe(10_000);
+    for (const id of ids) expect(id).toMatch(QUEUE_ID_RE);
+    // Both 32-bit halves of the suffix must carry entropy: a narrower source
+    // padded out to 16 chars would still be unique above yet collapse one half
+    // to a constant. Expected collisions per half ≈ n^2 / 2^33 ≈ 0.012, so a
+    // floor of 9,900 distinct values is deterministic in practice.
+    for (const half of [(id) => id.slice(-16, -8), (id) => id.slice(-8)]) {
+      expect(new Set([...ids].map(half)).size).toBeGreaterThan(9_900);
+    }
+  });
+
+  it('stays unique when Math.random is degenerate', () => {
+    // The suffix must come from node:crypto, not Math.random.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-17T10:30:05Z'));
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const ids = new Set();
     for (let i = 0; i < 100; i += 1) ids.add(newQueueId());
     expect(ids.size).toBe(100);
