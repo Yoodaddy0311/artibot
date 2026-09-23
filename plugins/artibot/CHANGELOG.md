@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wave 18 착지 (배치 1·2 = 8줄기, 2026-09-23)
+
+배치 1 `682d36ec`(5줄기) · 배치 2 `b2a4f2d4`(3줄기 + 리더 핀 재고정). 전 배치 land 7/7 · GitHub check-runs 7/7 success. 남은 줄기 `sh18-question-gate-record` 착지 뒤 v4.67.0(결정 D-D). 판정 정본은 `V5-BACKLOG.md` §4-f.
+
+- **sh02b-apply-toctou-adopt** (`76cd0e3a` · `360126e8`, 배치 2): `artifact-lifecycle.js#writeOneArtifact` 가 `atomicCreateTextSync` 를 채택해 **4.66.0 에 적힌 apply TOCTOU 가 닫혔다** — 결정적 경합 200회 중 이중 written 200 → 0(ALREADY_EXISTS 거부 200/200). `existsSync` 재도입은 핀이 RED 로 잡는다(`existsSync as exists` 별칭은 미검출, 주석 명시).
+- **review-verdict-revision-passthrough** (`aa42fc1e` · `3bfb302c`, 배치 2): `review.completed` 가 `intent_revision`·`plan_revision` 을 싣는다(CA-17·CA-19 전처리). 단 `verification_id` 1,846~3,663자에서는 4096B fold 가 이 두 키와 `verification_id` 를 **조용히** 버린다 — 테스트가 두 유실 모드를 모두 핀하고 수리는 후속.
+- **ob12-split-task-feeder** (`adf4d5b1` · `769eafe0` · `97946ac7`, 배치 2): `/split dispatch` 가 줄기를 Task Graph 에 시드·클레임하고 `affectedPaths` 를 `file_ownership` 으로 기록한다(OB-12·OB-15, 기록 전용 — 실패는 `skipped:<사유>`, exit code 무영향). 동시 dispatch 갱신 유실은 스냅샷 버전 CAS + 충돌 시 재독·재merge 1회로 수리.
+- **sh20-mission-scorecard** (`29aa453e`, 배치 1): `lib/scorecard` 4번째 카드 Final Mission Scorecard + `/scorecard --mission`(SH-20). done 판정은 outcome.md 실재 + 라이브 렌더 1회 뒤(결정 D-B2).
+- **sh10-save-port** (`02e96861` · `cb9b7ccd`, 배치 1): `/save` 가 읽기 전용 state-version 포트(`lib/handoff/state-version-port.js`)를 넘겨 HANDOFF `derived-from` 이 `state@<n>` 실값을 가질 수 있다(값 없음은 `state@unmeasured`). 실제 `/save` 1회 확인 전이라 SH-10 은 in-progress.
+- **sh30-sources-rule** (`6a50a730` · `3b512889`, 배치 1): 훅 원장 발행자 규칙 3기준(1차 목격자 · 필수 필드 자급 · source = 역할)을 `decision-events.js` 헤더에 적고 AST 게이트 `hook-emitter-sources-rule.test.js` 로 강제한다 — 발행 17 = 준수 11 + 역할 source 4 + 스캐너 한계 2. `session-end.js` 로더 경유 발행이 스캐너에서 보이지 않던 fail-open 도 닫았다.
+- **ca03b-recovery-journal-census** (`fd26fce1` · `58b17db6`, 배치 1): 읽기 전용 `scripts/ledger/recovery-journal-census.mjs` — 세션 스토어의 recovery journal 행 수와 `divergent` true/false/그 외 비율을 측정 시각과 함께 낸다(CA-03 플립 조건 b 의 계측기, 행 0 → ratio null).
+- **ob10-controller-observation** (`638180fd` · `a27131fc`, 배치 1): Mission Controller 관측값(acquired/renewed/held/expired)을 버리지 않고 `task.mission.store` 에 `controller_observation` 으로 싣고, stage ② 훅도 controller 를 동승시킨다. 새 원장 어휘 0 · store 쓰기 횟수 불변.
+
 ## [4.66.0] — 2026-09-22
 
 `v4.65.0`(`aaf30e61`) 이후 62 커밋 = **66 files +9,097/−218**(`git diff --shortstat v4.65.0..38c13a20`, 2026-09-22 측정). `/split` **Wave 16 8/8 · Wave 17 10/10**(착지 9 + `p0-13` 코드 0 판정) 착지분 출하. 커밋 유형 분포: merge 17 · docs 12 · test 10 · fix 10 · feat 9 · chore 3 · perf 1. 줄기별 상세는 아래 Wave 17 · Wave 16 착지 절에 있다. 통합 판정 정본은 `V5-BACKLOG.md` §4-d.
