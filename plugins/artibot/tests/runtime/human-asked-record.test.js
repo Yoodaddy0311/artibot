@@ -402,3 +402,161 @@ describe('strictestGate', () => {
     expect(strictestGate([{ id: 'X' }, { id: 'Y' }], get)).toBe('X');
   });
 });
+
+/**
+ * SH-14: both events carry a deterministic envelope `idempotency_key`.
+ *
+ * The expected keys are spelled out as literals built from `buildQuestionId`
+ * rather than by calling the key builders, so a builder that drifted would
+ * fail here instead of agreeing with itself.
+ */
+describe('idempotency keys — builders', () => {
+  const QID = 'q-sess1234-0123456789ab';
+
+  it('keys an ask on its session and question id', async () => {
+    const { humanAskedIdempotencyKey } = await loadRecorder();
+
+    expect(humanAskedIdempotencyKey(SID, QID)).toBe(`human.asked:${SID}:${QID}`);
+    expect(humanAskedIdempotencyKey(SID, QID)).toBe(humanAskedIdempotencyKey(SID, QID));
+    expect(humanAskedIdempotencyKey(SID, 'q-sess1234-ba9876543210'))
+      .not.toBe(humanAskedIdempotencyKey(SID, QID));
+    expect(humanAskedIdempotencyKey('otherSession', QID))
+      .not.toBe(humanAskedIdempotencyKey(SID, QID));
+  });
+
+  it('keys a resolve on its session, question id and decision', async () => {
+    const { humanResolvedIdempotencyKey } = await loadRecorder();
+    const key = humanResolvedIdempotencyKey(SID, QID, 'yes, push it');
+
+    expect(key).toMatch(new RegExp(`^human\\.resolved:${SID}:${QID}:[0-9a-f]{12}$`));
+    expect(humanResolvedIdempotencyKey(SID, QID, 'yes, push it')).toBe(key);
+    // A different answer to the same question is a new fact.
+    expect(humanResolvedIdempotencyKey(SID, QID, 'no, keep it')).not.toBe(key);
+  });
+
+  it('never gives an ask and its resolve the same key', async () => {
+    const { humanAskedIdempotencyKey, humanResolvedIdempotencyKey } = await loadRecorder();
+
+    expect(humanResolvedIdempotencyKey(SID, QID, 'yes'))
+      .not.toBe(humanAskedIdempotencyKey(SID, QID));
+  });
+
+  it('bounds the resolve key regardless of the decision length', async () => {
+    const { humanResolvedIdempotencyKey } = await loadRecorder();
+    const long = '결'.repeat(1000);
+
+    const key = humanResolvedIdempotencyKey(SID, QID, long);
+
+    expect(key).not.toContain('결');
+    expect(key.length).toBe(`human.resolved:${SID}:${QID}:`.length + 12);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['an empty string', ''],
+    ['a number', 42],
+  ])('returns null, never an empty string, when the session is %s', async (_label, sid) => {
+    const { humanAskedIdempotencyKey, humanResolvedIdempotencyKey } = await loadRecorder();
+
+    expect(humanAskedIdempotencyKey(sid, QID)).toBeNull();
+    expect(humanResolvedIdempotencyKey(sid, QID, 'yes')).toBeNull();
+  });
+
+  it('returns null when the question id or the decision is missing', async () => {
+    const { humanAskedIdempotencyKey, humanResolvedIdempotencyKey } = await loadRecorder();
+
+    expect(humanAskedIdempotencyKey(SID, '')).toBeNull();
+    expect(humanResolvedIdempotencyKey(SID, '', 'yes')).toBeNull();
+    expect(humanResolvedIdempotencyKey(SID, QID, '')).toBeNull();
+    expect(humanResolvedIdempotencyKey(SID, QID, undefined)).toBeNull();
+  });
+});
+
+describe('idempotency keys — what reaches appendLedgerEvent', () => {
+  const COMMAND = 'git push --force origin main';
+
+  it('puts the ask key on the human.asked envelope', async () => {
+    const { buildQuestionId, recordHumanAsked } = await loadRecorder();
+
+    await recordHumanAsked({ hookData: bashData(COMMAND), tool: 'Bash', reason: 'r' });
+
+    const event = onlyEvent();
+    expect(event.idempotency_key)
+      .toBe(`human.asked:${SID}:${buildQuestionId(SID, 'HG-07', COMMAND)}`);
+    // Envelope, not data: the allowlist says envelope keys are never repeated
+    // inside `data`.
+    expect(Object.prototype.hasOwnProperty.call(event.data, 'idempotency_key')).toBe(false);
+  });
+
+  it('reuses the key when the same block is recorded twice', async () => {
+    const { recordHumanAsked } = await loadRecorder();
+
+    await recordHumanAsked({ hookData: bashData(COMMAND), tool: 'Bash', reason: 'r' });
+    await recordHumanAsked({ hookData: bashData(COMMAND), tool: 'Bash', reason: 'r' });
+
+    expect(mocks.append).toHaveBeenCalledTimes(2);
+    const [first, second] = mocks.append.mock.calls.map((call) => call[1].idempotency_key);
+    expect(typeof first).toBe('string');
+    expect(second).toBe(first);
+  });
+
+  it('gives a different subject a different key', async () => {
+    const { recordHumanAsked } = await loadRecorder();
+
+    await recordHumanAsked({ hookData: writeData('/project/a.env'), tool: 'Write', reason: 'r' });
+    await recordHumanAsked({ hookData: writeData('/project/b.env'), tool: 'Write', reason: 'r' });
+
+    const [a, b] = mocks.append.mock.calls.map((call) => call[1].idempotency_key);
+    expect(a).not.toBe(b);
+  });
+
+  it('omits the key, rather than writing an empty one, when the payload has no session', async () => {
+    const { recordHumanAsked } = await loadRecorder();
+    const hookData = { tool_name: 'Bash', tool_input: { command: COMMAND }, cwd: CWD };
+
+    await recordHumanAsked({ hookData, tool: 'Bash', reason: 'r' });
+
+    // The writer rejects a session-less line as `invalid-envelope:session_id`
+    // either way; the key must not change that reason into a key rejection.
+    expect(Object.prototype.hasOwnProperty.call(onlyEvent(), 'idempotency_key')).toBe(false);
+  });
+
+  it('puts the resolve key on the human.resolved envelope', async () => {
+    const { buildQuestionId, recordHumanResolved } = await loadRecorder();
+    const qid = buildQuestionId(SID, 'HG-07', COMMAND);
+
+    await recordHumanResolved({
+      cwd: CWD, sessionId: SID, tool: 'Bash', subject: COMMAND, decision: 'go ahead',
+    });
+
+    const event = onlyEvent();
+    expect(event.event).toBe('human.resolved');
+    expect(event.idempotency_key).toMatch(
+      new RegExp(`^human\\.resolved:${SID}:${qid}:[0-9a-f]{12}$`),
+    );
+    expect(Object.prototype.hasOwnProperty.call(event.data, 'idempotency_key')).toBe(false);
+  });
+
+  it('keys the ask and the resolve of one question apart, and a repeated resolve alike', async () => {
+    const { recordHumanAsked, recordHumanResolved } = await loadRecorder();
+    const resolve = (decision) => recordHumanResolved({
+      cwd: CWD, sessionId: SID, tool: 'Bash', subject: COMMAND, decision,
+    });
+
+    await recordHumanAsked({ hookData: bashData(COMMAND), tool: 'Bash', reason: 'r' });
+    await resolve('go ahead');
+    await resolve('go ahead');
+    await resolve('do not');
+
+    const events = mocks.append.mock.calls.map((call) => call[1]);
+    expect(events.map((e) => e.event))
+      .toEqual(['human.asked', 'human.resolved', 'human.resolved', 'human.resolved']);
+    const [ask, res1, res2, res3] = events;
+    // One question, so the join key is shared...
+    expect(new Set(events.map((e) => e.data.question_id)).size).toBe(1);
+    // ...but the facts are not.
+    expect(res1.idempotency_key).not.toBe(ask.idempotency_key);
+    expect(res2.idempotency_key).toBe(res1.idempotency_key);
+    expect(res3.idempotency_key).not.toBe(res1.idempotency_key);
+  });
+});

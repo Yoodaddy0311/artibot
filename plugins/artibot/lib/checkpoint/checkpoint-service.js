@@ -44,6 +44,42 @@ import { validateCheckpoint } from '../supervisor/contracts.js';
  * @property {() => string} now
  */
 
+/** Ledger event name for a saved checkpoint. */
+const CHECKPOINTED_EVENT = 'mission.checkpointed';
+
+/**
+ * Idempotency key for one `mission.checkpointed` line.
+ *
+ * The fact a line records is "this stored checkpoint of this mission was
+ * saved", so the key is `<event>:<mission>:<checkpoint>`. The checkpoint id is
+ * the store's record id (`checkpoint-store.js#defaultNewId` builds it from a
+ * clock, a pid and a random salt), and that is allowed here because the id IS
+ * the fact's identity: it is minted once, stored with the record, and every
+ * re-announcement of that record carries the same value. A new save is a new
+ * record with a new id, so it gets a new key.
+ *
+ * Mission, not session, sits beside the id, unlike
+ * `lib/verification/verify-writer.js#verifyCompletedIdempotencyKey`: the store
+ * scopes checkpoints by mission (`latest` and `list` are keyed on it), while a
+ * checkpoint's `session_id` may be an empty string under
+ * `lib/supervisor/contracts.js` and is not part of the record's identity.
+ * Trigger and resume verdict are attributes of the save, not its identity.
+ *
+ * `save-checkpoint.js#announce` emits the same event for the same checkpoint
+ * and uses this builder too, so the fact has one key whichever announcer
+ * writes it.
+ *
+ * @param {unknown} missionId
+ * @param {unknown} checkpointId
+ * @returns {string|null} `null` when either part is not a non-empty string —
+ *   the caller then omits the field, since the envelope refuses a blank key.
+ */
+export function missionCheckpointedIdempotencyKey(missionId, checkpointId) {
+  if (typeof missionId !== 'string' || missionId.length === 0) return null;
+  if (typeof checkpointId !== 'string' || checkpointId.length === 0) return null;
+  return `${CHECKPOINTED_EVENT}:${missionId}:${checkpointId}`;
+}
+
 /**
  * Announce a saved checkpoint through the ledger port. Never throws.
  *
@@ -68,8 +104,15 @@ async function announce(deps, missionId, checkpointId, trigger) {
   // Omitted rather than defaulted: the allowlist marks `trigger` optional, and
   // an invented value would read as a real trigger in the ledger.
   if (typeof trigger === 'string' && trigger.length > 0) data.trigger = trigger;
+  // Omitted, never blank, when the store returned no id: see the builder.
+  const key = missionCheckpointedIdempotencyKey(missionId, checkpointId);
   try {
-    await deps.appendEvent({ event: 'mission.checkpointed', mission_id: missionId, data });
+    await deps.appendEvent({
+      event: CHECKPOINTED_EVENT,
+      mission_id: missionId,
+      ...(key === null ? {} : { idempotency_key: key }),
+      data,
+    });
   } catch {
     /* best-effort: see the note above */
   }

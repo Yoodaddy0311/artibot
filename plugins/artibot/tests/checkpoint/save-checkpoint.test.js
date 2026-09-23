@@ -18,7 +18,10 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createCheckpointService } from '../../lib/checkpoint/checkpoint-service.js';
+import {
+  createCheckpointService,
+  missionCheckpointedIdempotencyKey,
+} from '../../lib/checkpoint/checkpoint-service.js';
 import { createFileStoreAdapter } from '../../lib/checkpoint/adapters/file-store.js';
 import { createCheckpointStore } from '../../lib/checkpoint/checkpoint-store.js';
 import {
@@ -323,6 +326,7 @@ describe('buildSaveCheckpoint — ledger', () => {
       mission_id: MID,
       session_id: SESSION,
       source: SAVE_CHECKPOINT_SOURCE,
+      idempotency_key: `mission.checkpointed:${MID}:cp-1`,
       data: { checkpoint_id: 'cp-1', trigger: SAVE_CHECKPOINT_TRIGGER, resumable: true },
     }]);
   });
@@ -347,6 +351,57 @@ describe('buildSaveCheckpoint — ledger', () => {
     const ports = fakePorts({ appendEvent: () => undefined });
     const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
     expect(out.rows[0].ledger).toEqual({ ok: false, reason: null });
+  });
+});
+
+describe('buildSaveCheckpoint — ledger idempotency key', () => {
+  /**
+   * Ports whose checkpoint service hands out the given ids in order.
+   *
+   * @param {string[]} ids - Checkpoint ids, one per save.
+   * @returns {object} Ports from {@link fakePorts}.
+   */
+  function portsSaving(ids) {
+    const queue = [...ids];
+    return fakePorts({
+      checkpoint: () => ({ ok: true, checkpoint_id: queue.shift(), ts: '2026-09-21T00:00:00Z', errors: [] }),
+    });
+  }
+
+  it('is the checkpoint service key for the same mission and checkpoint', async () => {
+    const ports = portsSaving(['cp-1']);
+    await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(ports.events[0].idempotency_key).toBe(missionCheckpointedIdempotencyKey(MID, 'cp-1'));
+  });
+
+  it('re-announcing the same checkpoint reuses the key, whatever the session, trigger or verdict', async () => {
+    const first = portsSaving(['cp-1']);
+    await buildSaveCheckpoint(first, { sessionId: SESSION });
+    const again = fakePorts({
+      checkpoint: () => ({ ok: true, checkpoint_id: 'cp-1', ts: '2026-09-21T00:00:09Z', errors: [] }),
+      buildResumeReport: () => ({ resumable: false, blocked_by: ['x'] }),
+    });
+    await buildSaveCheckpoint(again, { sessionId: 's-2', trigger: 'model-switch' });
+    expect(first.events[0].idempotency_key).toEqual(expect.any(String));
+    expect(again.events[0].idempotency_key).toBe(first.events[0].idempotency_key);
+  });
+
+  it('a new checkpoint gets a new key, and so does another mission', async () => {
+    const ports = portsSaving(['cp-1', 'cp-2', 'cp-1']);
+    await buildSaveCheckpoint(ports, { sessionId: SESSION, missionIds: [MID, MID, 'M-20260921-002'] });
+    expect(ports.events.map((e) => e.idempotency_key)).toEqual([
+      `mission.checkpointed:${MID}:cp-1`,
+      `mission.checkpointed:${MID}:cp-2`,
+      'mission.checkpointed:M-20260921-002:cp-1',
+    ]);
+  });
+
+  it('omits the key, rather than emitting a blank one, when the save returned no id', async () => {
+    const ports = fakePorts({ checkpoint: () => ({ ok: true, ts: '2026-09-21T00:00:00Z', errors: [] }) });
+    const out = await buildSaveCheckpoint(ports, { sessionId: SESSION });
+    expect(out.rows[0].checkpoint_id).toBeNull();
+    expect(ports.events).toHaveLength(1);
+    expect(Object.keys(ports.events[0])).not.toContain('idempotency_key');
   });
 });
 
@@ -601,6 +656,9 @@ describe('buildSaveCheckpoint — real store, real file checkpoint store, real l
     expect(lines[0].source).toBe('supervisor');
     expect(lines[0].mission_id).toBe(MID);
     expect(lines[0].data).toMatchObject({ checkpoint_id: row.checkpoint_id, trigger: SAVE_CHECKPOINT_TRIGGER });
+    // The key survives the REAL writer's envelope validation and lands on the
+    // written line, not just on the object handed to the port.
+    expect(lines[0].idempotency_key).toBe(missionCheckpointedIdempotencyKey(MID, row.checkpoint_id));
     // EVERY key this path emits is DECLARED. The writer only type-checks keys
     // the allowlist declares, so an undeclared key is written unvalidated and
     // no other assertion here would notice: the envelope pin above is on the

@@ -7,7 +7,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createCheckpointService } from '../../lib/checkpoint/checkpoint-service.js';
+import {
+  createCheckpointService,
+  missionCheckpointedIdempotencyKey,
+} from '../../lib/checkpoint/checkpoint-service.js';
 
 const FULL = Object.freeze({
   mission_id: 'm-1',
@@ -118,6 +121,7 @@ describe('checkpoint() ledger port', () => {
     expect(envelope).toEqual({
       event: 'mission.checkpointed',
       mission_id: 'm-1',
+      idempotency_key: 'mission.checkpointed:m-1:cp-1',
       data: { checkpoint_id: 'cp-1', trigger: 'model-switch' },
     });
     expect(Object.keys(envelope)).not.toContain('source');
@@ -148,6 +152,69 @@ describe('checkpoint() ledger port', () => {
     const appendEvent = vi.fn(() => Promise.reject(new Error('ledger down')));
     const svc = createCheckpointService({ store: fakeStore(), appendEvent, now: NOW });
     await expect(svc.checkpoint(FULL, { trigger: 't' })).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe('missionCheckpointedIdempotencyKey()', () => {
+  it('is <event>:<mission>:<checkpoint> for a valid pair', () => {
+    expect(missionCheckpointedIdempotencyKey('m-1', 'cp-1')).toBe('mission.checkpointed:m-1:cp-1');
+  });
+
+  it('is the same key for the same checkpoint, every time', () => {
+    const a = missionCheckpointedIdempotencyKey('m-1', 'cp-1');
+    const b = missionCheckpointedIdempotencyKey('m-1', 'cp-1');
+    expect(a).toBe(b);
+  });
+
+  it('is a different key for a different checkpoint or a different mission', () => {
+    const base = missionCheckpointedIdempotencyKey('m-1', 'cp-1');
+    expect(missionCheckpointedIdempotencyKey('m-1', 'cp-2')).not.toBe(base);
+    expect(missionCheckpointedIdempotencyKey('m-2', 'cp-1')).not.toBe(base);
+  });
+
+  it.each([
+    ['', 'cp-1'], [null, 'cp-1'], [undefined, 'cp-1'], [7, 'cp-1'],
+    ['m-1', ''], ['m-1', null], ['m-1', undefined], ['m-1', 7],
+  ])('is null, never a blank or partial key, for (%s, %s)', (missionId, checkpointId) => {
+    expect(missionCheckpointedIdempotencyKey(missionId, checkpointId)).toBeNull();
+  });
+});
+
+describe('checkpoint() ledger idempotency key', () => {
+  it('puts the key on the envelope the port receives', async () => {
+    const appendEvent = vi.fn();
+    const svc = createCheckpointService({ store: fakeStore(), appendEvent, now: NOW });
+    await svc.checkpoint(FULL, { trigger: 't' });
+    expect(appendEvent.mock.calls[0][0].idempotency_key).toBe('mission.checkpointed:m-1:cp-1');
+  });
+
+  it('re-announcing the same stored checkpoint reuses the key, whatever the trigger', async () => {
+    const appendEvent = vi.fn();
+    const svc = createCheckpointService({ store: fakeStore(), appendEvent, now: NOW });
+    await svc.checkpoint(FULL, { trigger: 'model-switch' });
+    await svc.checkpoint(FULL);
+    const [first, second] = appendEvent.mock.calls.map((c) => c[0].idempotency_key);
+    expect(first).toEqual(expect.any(String));
+    expect(second).toBe(first);
+  });
+
+  it('a new stored checkpoint of the same mission gets a new key', async () => {
+    const ids = ['cp-1', 'cp-2'];
+    const appendEvent = vi.fn();
+    const store = fakeStore({ save: () => ({ checkpoint_id: ids.shift(), ts: '2026-09-12T00:00:00Z' }) });
+    const svc = createCheckpointService({ store, appendEvent, now: NOW });
+    await svc.checkpoint(FULL);
+    await svc.checkpoint(FULL);
+    const keys = appendEvent.mock.calls.map((c) => c[0].idempotency_key);
+    expect(keys).toEqual(['mission.checkpointed:m-1:cp-1', 'mission.checkpointed:m-1:cp-2']);
+  });
+
+  it('omits the key, rather than emitting a blank one, when the store returns no id', async () => {
+    const appendEvent = vi.fn();
+    const svc = createCheckpointService({ store: fakeStore({ save: () => ({}) }), appendEvent, now: NOW });
+    await svc.checkpoint(FULL);
+    expect(appendEvent).toHaveBeenCalledTimes(1);
+    expect(Object.keys(appendEvent.mock.calls[0][0])).not.toContain('idempotency_key');
   });
 });
 

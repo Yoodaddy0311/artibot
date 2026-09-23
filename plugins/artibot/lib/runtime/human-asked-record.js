@@ -216,6 +216,66 @@ export function buildQuestionId(sessionId, gate, subject) {
   return `${QUESTION_ID_PREFIX}${sid8}-${digest}`;
 }
 
+/** Hex characters of the decision digest in a `human.resolved` key. */
+const DECISION_HASH_CHARS = 12;
+
+/** @param {unknown} value @returns {boolean} */
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+/**
+ * Idempotency key for one `human.asked` line: `human.asked:<session>:<question_id>`.
+ *
+ * Shape mirrors `lib/verification/verify-writer.js#verifyCompletedIdempotencyKey`
+ * (`<event>:<session>:<id>`). The fact an ask records is "this question was
+ * put in this session", and `question_id` already IS that question's identity
+ * — deterministic by design (see `buildQuestionId`). So a re-fired hook and the
+ * same subject blocked again under the same gate reuse the key, exactly as they
+ * reuse the id; that is the module's own definition of "the same question",
+ * not a new one. The full session id is carried, not the 8-character prefix
+ * `question_id` embeds, so two sessions sharing a prefix do not collide.
+ *
+ * `null` when the session or the question id is missing, so the caller omits
+ * the field. A session-less line is rejected as `invalid-envelope:session_id`
+ * anyway; an empty key would only change which rule rejects it.
+ *
+ * @param {string|undefined} sessionId
+ * @param {string} questionId
+ * @returns {string|null}
+ */
+export function humanAskedIdempotencyKey(sessionId, questionId) {
+  if (!isNonEmptyString(sessionId) || !isNonEmptyString(questionId)) return null;
+  return `human.asked:${sessionId}:${questionId}`;
+}
+
+/**
+ * Idempotency key for one `human.resolved` line:
+ * `human.resolved:<session>:<question_id>:<sha256(decision)[:12]>`.
+ *
+ * The event name alone already keeps a resolve apart from the ask it closes.
+ * The decision digest is what keeps two DIFFERENT answers to one question
+ * apart: a person who says "no" and later "yes" gave two answers, and a key of
+ * session and question only would let a reader that keeps the first line
+ * discard the second. A re-run of the same answer hashes the same and reuses
+ * the key. `kind` is NOT hashed — it is the model's label on the answer, not
+ * the answer, so relabelling one decision is not a new fact.
+ *
+ * A digest, not the text: the decision may be 3,072 bytes and is already on the
+ * line once, so the key's size is fixed whatever the answer's length.
+ *
+ * @param {string} sessionId
+ * @param {string} questionId
+ * @param {string} decision
+ * @returns {string|null} `null` when any input is missing
+ */
+export function humanResolvedIdempotencyKey(sessionId, questionId, decision) {
+  if (!isNonEmptyString(sessionId) || !isNonEmptyString(questionId)
+      || !isNonEmptyString(decision)) return null;
+  const digest = createHash('sha256').update(decision).digest('hex').slice(0, DECISION_HASH_CHARS);
+  return `human.resolved:${sessionId}:${questionId}:${digest}`;
+}
+
 /**
  * The `data` key each tool carries its subject in, and nothing else.
  *
@@ -338,7 +398,10 @@ export const HUMAN_RESOLVED_KINDS = Object.freeze(['correction', 'decision', 'ap
  * WHAT THIS DOES NOT COVER — `path`. The Write/Edit subject is copied onto the
  * line as `data.path`, it is caller-supplied, and its length is unbounded. The
  * budget left for it is whatever the cap has after this constant and the
- * envelope, measured at 721 bytes on 2026-09-13. A longer path still overflows
+ * envelope, measured at 721 bytes on 2026-09-13. SH-14's `idempotency_key`
+ * spends part of it: re-measured 2026-09-23 on the same widest shape, 720 → 635
+ * bytes for a 12-character session id and 696 → 587 for a 36-character UUID
+ * (the key carries the session id a second time). A longer path still overflows
  * and still lands as `ledger.rejected`, exactly as before. That case is
  * UNMEASURED by any test here and is a known, open hole — not a solved problem.
  */
@@ -439,10 +502,12 @@ export async function recordHumanAsked(args) {
     if ((tool === 'Write' || tool === 'Edit') && question.subject !== '') {
       data.path = question.subject;
     }
+    const key = humanAskedIdempotencyKey(hookData?.session_id, question.question_id);
     ledger.appendLedgerEvent(root.resolveProjectRoot(cwd), {
       event: 'human.asked',
       session_id: hookData?.session_id,
       source: 'hook',
+      ...(key === null ? {} : { idempotency_key: key }),
       data,
     });
   } catch {
@@ -502,6 +567,8 @@ export async function recordHumanResolved(args) {
     if ((tool === 'Write' || tool === 'Edit') && question.subject !== '') {
       data.path = question.subject;
     }
+    // Never null here: the skip check above already required both.
+    const key = humanResolvedIdempotencyKey(sessionId, question.question_id, decision);
     ledger.appendLedgerEvent(root.resolveProjectRoot(cwd), {
       event: 'human.resolved',
       session_id: sessionId,
@@ -509,6 +576,7 @@ export async function recordHumanResolved(args) {
       // The allowlist permits both spellings, so this line is the only thing
       // that says which one a reader will actually see.
       source: 'human',
+      ...(key === null ? {} : { idempotency_key: key }),
       data,
     });
   } catch {

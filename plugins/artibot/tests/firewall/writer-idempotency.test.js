@@ -67,7 +67,10 @@
  * v3 (this one): 395 files under `lib/` (`.mjs` now scanned), 53 discovered, 6
  * keyed, 47 exempt, of which 13 write the run ledger and 7 of those carry no
  * key. Counts are recorded, never asserted - the SET is asserted, because a
- * count goes red on a rename and green on a swap.
+ * count goes red on a rename and green on a swap. 2026-09-23 (SH-14): five of
+ * those unkeyed run-ledger writers moved to keyed, so 11 rows are `k` now.
+ * `k` means an assignment site exists, not that live lines carry a key: four
+ * of the five are dormant in production today (null or absent ports).
  *
  * WHAT THIS GATE CANNOT SEE:
  *
@@ -106,6 +109,8 @@
  *     TWO keyed modules can emit a null key:
  *     `observability/activation-observed.js` (`promptIdOk ? ... : null`) and
  *     `observability/decision-events.js` (null when `prompt_id` is null).
+ *     The five SH-14 writers OMIT the field when their key material is
+ *     missing (split-state always omits it without a run id).
  *
  *   - KEY UNIQUENESS AND COLLISION, and whether any reader dedupes on the key.
  *     Both need a runtime probe over real lines.
@@ -385,22 +390,22 @@ const k = (why) => ({ cls: 'keyed', why });
 
 const INVENTORY = {
   // --- keyed ---------------------------------------------------------------
+  'checkpoint/checkpoint-service.js': k('run ledger mission.checkpointed; key from missionCheckpointedIdempotencyKey (<event>:<mission_id>:<checkpoint_id>); omitted when the store returns no id. SH-14, 2026-09-23.'),
+  'checkpoint/save-checkpoint.js': k('run ledger mission.checkpointed announce; the SAME builder as checkpoint-service.js, imported, so one checkpoint gets one key from either announcer. SH-14, 2026-09-23.'),
+  'context/rehydration.js': k('run ledger context.compiled; key from contextCompiledIdempotencyKey (<event>:<session>:<receipt_id>:<digest16>); null without a session or receipt id. The caller mints receipt_id from a clock stamp, so a re-fire with a new stamp is a new key. SH-14, 2026-09-23.'),
   'economics/receipt-envelope.js': k('run ledger usage.receipt; key from usageReceiptIdempotencyKey.'),
   'observability/activation-observed.js': k('decisions-store payload; key is null when the prompt id is bad.'),
   'observability/decision-events.js': k('decisions store, not the run ledger; key is null when prompt_id is null.'),
   'review/verdict-writer.js': k('run ledger review.completed and review.claim_audit; two key builders.'),
   'runtime/artifact-lifecycle.js': k('mission-artifact store; computeIdempotencyKey plus a seen-key set.'),
+  'runtime/human-asked-record.js': k('run ledger human.asked (<event>:<session>:<question_id>) and human.resolved (+ a 12-hex digest of the decision, so a changed answer is a new fact); two key builders. SH-14, 2026-09-23.'),
+  'topology/split-state.js': k('run ledger worker.claimed / task.released; key from workerTransitionIdempotencyKey (<event>:<runId>:<worker>:<from-ops>:<to-ops>:<from-since>) - the LEFT state\'s stored since, stable across a retry; omitted without a run id. SH-14, 2026-09-23.'),
   'verification/verify-writer.js': k('run ledger verify.completed; key from verifyCompletedIdempotencyKey.'),
 
   // --- run-ledger writers with no key: defect candidates --------------------
-  'checkpoint/checkpoint-service.js': x('run ledger mission.checkpointed via deps.appendEvent; envelope is event/mission_id/data only. No key. Defect candidate; invisible to v1.'),
-  'checkpoint/save-checkpoint.js': x('run ledger announce carrying data.checkpoint_id as its handle. A different module and function from checkpoint-service.js, which has an announce of its own. No key. Defect candidate.'),
-  'context/rehydration.js': x('run ledger context.compiled via writer.writeEvent, source spelled as shorthand. No key. Defect candidate; invisible to v1.'),
   'project-state/state-manager.js': x('run ledger state.updated, paired 1:1 with a store write and carrying the monotonic data.state_version. No key. Defect candidate.'),
-  'runtime/human-asked-record.js': x('run ledger human.asked and human.resolved, carrying data.question_id. No key. Defect candidate.'),
   'runtime/question-gate-record.js': x('run ledger adr.question_gate_evaluated, one line per compiled prompt (tasks.js#recordQuestionGate), no key. The only dedupe is ledger.js#dedupeKey (session_id, source, pid, seq, ts), and no reader of this event reads idempotency_key, so a re-fired prompt writes a second line. Defect candidate like runtime/middleware/mission-ledger.js.'),
   'runtime/middleware/mission-ledger.js': x('run ledger mission lifecycle events with a dynamic event name; no per-line handle beyond mission_id. Defect candidate. Moved out of tasks.js 2026-09-23 (800-line split) with the append site unchanged.'),
-  'topology/split-state.js': x('run ledger split worker events with a dynamic event name; keyed only by worker. Defect candidate.'),
 
   // --- primitives, wrappers, readers ----------------------------------------
   'runtime/event-writer.js': x('the run-ledger append primitive. Validates idempotency_key as an optional envelope key and authors no event.'),

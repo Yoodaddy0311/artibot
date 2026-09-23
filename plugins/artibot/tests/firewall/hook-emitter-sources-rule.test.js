@@ -327,7 +327,7 @@ const ROLE_SOURCED = Object.freeze({
     reason: 'Same relay as review.completed — the audit is the reviewer\'s claim '
       + 'census, not the hook\'s observation.',
   },
-  'lib/runtime/human-asked-record.js:505': {
+  'lib/runtime/human-asked-record.js:572': {
     event: 'human.resolved',
     source: 'human',
     reason: 'A person answered and the hook is relaying it. The allowlist '

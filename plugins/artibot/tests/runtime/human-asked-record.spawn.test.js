@@ -60,7 +60,7 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildQuestionId } from '../../lib/runtime/human-asked-record.js';
+import { buildQuestionId, recordHumanResolved } from '../../lib/runtime/human-asked-record.js';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 
 // This file spawns ~15 child processes; the budget buys headroom for load, not
@@ -180,6 +180,8 @@ describe('pre-write: human.asked lands in a real ledger', () => {
     expect(event.data.hits).toEqual([]);
     expect(Object.prototype.hasOwnProperty.call(event.data, 'gate')).toBe(false);
     expect(event.data.question_id).toBe(buildQuestionId(sid, null, target));
+    // SH-14: the envelope key survives the real writer, not just the spy.
+    expect(event.idempotency_key).toBe(`human.asked:${sid}:${buildQuestionId(sid, null, target)}`);
     // Tripwire for silent line folding: `foldOversized` keeps only
     // `question_id` and leaves this marker behind. If it ever fires, every
     // other assertion above is measuring a record that production lost.
@@ -403,5 +405,40 @@ describe('pre-write-guard: human.asked lands in a real ledger', () => {
     // which is what distinguishes "no root injected" from "guard did not fire".
     expect(JSON.parse(out.stdout).decision).toBe('block');
     expect(ledgerEvents(root)).toEqual([]);
+  });
+});
+
+/**
+ * SH-14: the ask and the resolve of one question land in a REAL ledger with
+ * different envelope keys. The resolve side has no hook, so it is recorded
+ * in-process here rather than spawned — what this case measures is the writer
+ * accepting the key, not the CLI.
+ */
+describe('idempotency_key: ask and resolve through the real writer', () => {
+  it('lands both lines, joined by question_id and keyed apart', async () => {
+    const root = makeRoot('K');
+    const target = path.join(root, '.env');
+    const sid = 'sessKEYSkkkk';
+
+    const out = runHook(PRE_WRITE, {
+      tool_name: 'Write',
+      tool_input: { file_path: target, content: 'X=1' },
+      session_id: sid,
+      cwd: root,
+    }, root);
+    expect(JSON.parse(out.stdout).decision).toBe('block');
+    await recordHumanResolved({
+      cwd: root, sessionId: sid, tool: 'Write', subject: target, decision: 'leave it',
+    });
+
+    const events = ledgerEvents(root);
+    expect(events.filter((e) => e.event === 'ledger.rejected')).toEqual([]);
+    const [asked] = events.filter((e) => e.event === 'human.asked');
+    const [resolved] = events.filter((e) => e.event === 'human.resolved');
+    const qid = buildQuestionId(sid, null, target);
+    expect(asked.data.question_id).toBe(qid);
+    expect(resolved.data.question_id).toBe(qid);
+    expect(asked.idempotency_key).toBe(`human.asked:${sid}:${qid}`);
+    expect(resolved.idempotency_key).toMatch(new RegExp(`^human\\.resolved:${sid}:${qid}:[0-9a-f]{12}$`));
   });
 });
