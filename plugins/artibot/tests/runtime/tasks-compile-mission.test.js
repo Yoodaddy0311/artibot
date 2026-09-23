@@ -4,7 +4,8 @@
  * WHAT THIS GATE DOES NOT SEE
  * ---------------------------
  *  - COMPILE QUALITY. It asserts that a contract reaches the task envelope and
- *    that one line reaches the ledger. Whether the contract is a good reading
+ *    that the mission line (plus, since SH-18, the question-gate line) reaches
+ *    the ledger. Whether the contract is a good reading
  *    of the prompt is `tests/mission/compiler.test.js`'s question (T-22), and
  *    nothing here would fail if the compiler's extraction regressed.
  *  - THE REAL HOOK PAYLOAD. Every state here is hand-built. The keys are taken
@@ -62,12 +63,36 @@ vi.mock('../../lib/observability/decision-events.js', async (importOriginal) => 
   return { ...actual, recordWorkflowPlanDecision: vi.fn() };
 });
 
+/**
+ * The ledger append port and the question-gate recorder, wrapped so the SH-18
+ * containment tests can make them refuse or throw. Both run their REAL
+ * implementation unless a test swaps it, and `afterEach` swaps it back — every
+ * other test in this file still writes real lines through the real writer.
+ */
+vi.mock('../../lib/runtime/ledger.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, appendLedgerEvent: vi.fn(actual.appendLedgerEvent) };
+});
+vi.mock('../../lib/runtime/question-gate-record.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, appendQuestionGateEvent: vi.fn(actual.appendQuestionGateEvent) };
+});
+
 import { createTasksMiddleware } from '../../lib/runtime/middleware/tasks.js';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
 import {
   getDecisionEventsPath,
   recordWorkflowPlanDecision,
 } from '../../lib/observability/decision-events.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { appendQuestionGateEvent } from '../../lib/runtime/question-gate-record.js';
+import { GATE_CONDITIONS } from '../../lib/planning/question-gate.js';
+
+const realLedger = await vi.importActual('../../lib/runtime/ledger.js');
+const realGateRecord = await vi.importActual('../../lib/runtime/question-gate-record.js');
+
+/** The SH-18 event name, spelled out rather than imported from its emitter. */
+const GATE_EVENT = 'adr.question_gate_evaluated';
 
 const NOW = 1700000000000;
 
@@ -100,6 +125,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(appendLedgerEvent).mockImplementation(realLedger.appendLedgerEvent);
+  vi.mocked(appendQuestionGateEvent).mockImplementation(realGateRecord.appendQuestionGateEvent);
   rmSync(projectRoot, { recursive: true, force: true });
   // Every test asserts the invariant, not just the dedicated one below: no
   // test in this file may add a line to the real decision store.
@@ -201,14 +228,44 @@ describe('T-25 — contract on the task envelope', () => {
 });
 
 describe('T-25 — ledger append', () => {
-  it('writes exactly one line into the injected project root', async () => {
+  it('writes exactly two lines into the injected project root: the mission event, then the question gate', async () => {
+    // RE-PINNED 1 -> 2 by SH-18 (2026-09-23), an intended change: the question
+    // gate's verdict is now recorded beside the mission event, from the same
+    // `recordMissionCompile` call (decision 7). This prompt defers, so neither
+    // line is paired with a store write.
     await runMiddleware();
     const lines = readLedger();
 
-    expect(lines).toHaveLength(1);
-    expect(lines[0].session_id).toBe(SESSION);
-    expect(lines[0].source).toBe('hook');
-    expect(lines[0].ts).toBe(new Date(NOW).toISOString());
+    expect(lines.map((l) => l.event)).toEqual(['mission.candidate_deferred', GATE_EVENT]);
+    for (const line of lines) {
+      expect(line.session_id).toBe(SESSION);
+      expect(line.source).toBe('hook');
+      expect(line.ts).toBe(new Date(NOW).toISOString());
+    }
+    // One mission, one session, one instant — not merely similar values.
+    expect(lines[1].mission_id).toBe(lines[0].mission_id);
+  });
+
+  it('records the four gate conditions, required and the interpretation marker as booleans', async () => {
+    const task = await runMiddleware();
+    const gate = readLedger().find((l) => l.event === GATE_EVENT);
+
+    expect(task.mission.question_gate).toBe('appended');
+    expect(Object.keys(gate.data).sort())
+      .toEqual([...GATE_CONDITIONS, 'required', 'interpretation_present'].sort());
+    for (const value of Object.values(gate.data)) expect(value).toBeTypeOf('boolean');
+    // No `interpretIntent()` output exists on this path (question-gate-record.js
+    // header), and the line must say so rather than read as a full evaluation.
+    expect(gate.data.interpretation_present).toBe(false);
+  });
+
+  it('puts the gate line after the paired state.updated on a substantive prompt', async () => {
+    await runMiddleware({ input: { prompt: '/implement 대시보드를 만들어줘' } });
+    const lines = readLedger();
+
+    expect(lines.map((l) => l.event)).toEqual(['mission.created', 'state.updated', GATE_EVENT]);
+    expect(lines[2].mission_id).toBe(lines[0].mission_id);
+    expect(lines[2].session_id).toBe(lines[0].session_id);
   });
 
   it('writes mission.created for an S5 prompt (explicit /implement)', async () => {
@@ -262,8 +319,8 @@ describe('T-25 — ledger append', () => {
     const lines = readLedger();
 
     expect(task.mission.substantive).toBe(false);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].event).toBe('mission.candidate_deferred');
+    // 1 -> 2 since SH-18: the second line is the question gate's.
+    expect(lines.map((l) => l.event)).toEqual(['mission.candidate_deferred', GATE_EVENT]);
     expect(lines[0].data.reason).toBeTypeOf('string');
     expect(Array.isArray(lines[0].data.signals)).toBe(true);
     // The unregistered spelling must never reach the file.
@@ -286,8 +343,8 @@ describe('T-25 — ledger append', () => {
     const lines = readLedger();
 
     expect(task.mission.substantive).toBe(false);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].event).toBe('mission.candidate_deferred');
+    // 1 -> 2 since SH-18: the second line is the question gate's.
+    expect(lines.map((l) => l.event)).toEqual(['mission.candidate_deferred', GATE_EVENT]);
     expect(lines[0].data.title).toBeTypeOf('string');
     expect(lines[0].data.title.length).toBeGreaterThan(0);
     // The pre-existing two keys are untouched — this is additive.
@@ -313,6 +370,7 @@ describe('T-25 — ledger append', () => {
     });
 
     expect(task.mission.ledger).toBe('skipped:no-project-root');
+    expect(task.mission.question_gate).toBe('skipped:no-project-root');
     expect(task.mission.contract).toBeDefined();
     expect(existsSync(ledgerPath())).toBe(false);
   });
@@ -323,6 +381,7 @@ describe('T-25 — ledger append', () => {
     });
 
     expect(task.mission.ledger).toBe('skipped:no-session-id');
+    expect(task.mission.question_gate).toBe('skipped:no-session-id');
     expect(existsSync(ledgerPath())).toBe(false);
   });
 
@@ -373,8 +432,109 @@ describe('T-25 — failure containment', () => {
     expect(result.context.tasks.mission.ok).toBe(false);
     expect(result.context.tasks.mission.error).toBe('boom');
     expect(result.context.tasks.mission.ledger).toBe('skipped:compile-failed');
+    // No gate line either — see `tasks.js#recordMissionCompile` for why the
+    // gate's denominator follows the mission event's.
+    expect(result.context.tasks.mission.question_gate).toBe('skipped:compile-failed');
     expect(result.messageParts).toContain('task=agentTeam');
     expect(existsSync(ledgerPath())).toBe(false);
+  });
+});
+
+describe('SH-18 — a failing question-gate recorder cannot reach its neighbours', () => {
+  const SUBSTANTIVE = { input: { prompt: '/implement 대시보드를 만들어줘' } };
+
+  /**
+   * Run the substantive prompt in a FRESH project root, so the store starts
+   * at state_version 0 in every run and two runs are comparable field by field.
+   *
+   * @returns {Promise<{result: object, events: string[]}>}
+   */
+  async function runFresh() {
+    const root = mkdtempSync(path.join(tmpdir(), 'artibot-sh18-'));
+    try {
+      const mw = createTasksMiddleware({ now: () => NOW });
+      const result = await mw(makeState({
+        input: { ...SUBSTANTIVE.input, hookData: { session_id: SESSION, cwd: root } },
+      }));
+      const file = path.join(root, '.artibot', 'runtime', 'ledger.jsonl');
+      const events = existsSync(file)
+        ? readFileSync(file, 'utf-8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l).event)
+        : [];
+      return { result, events };
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  /** Everything the middleware returns except the gate status and the random task id. */
+  function comparable({ result }) {
+    const { question_gate: _gate, ...mission } = result.context.tasks.mission;
+    const { id: _id, mission: _m, ...task } = result.context.tasks;
+    return { mission, task, messageParts: result.messageParts, userPrompt: result.userPrompt };
+  }
+
+  /** Make the ledger port misbehave for the gate line ONLY; every other line is real. */
+  function breakGateAppend(behaviour) {
+    vi.mocked(appendLedgerEvent).mockImplementation((root, envelope, opts) => (
+      envelope?.event === GATE_EVENT
+        ? behaviour()
+        : realLedger.appendLedgerEvent(root, envelope, opts)
+    ));
+  }
+
+  it.each([
+    ['rejects the line', () => ({ ok: false, reason: 'probe-refusal' }), 'rejected:probe-refusal'],
+    ['returns nothing', () => undefined, 'rejected:unknown'],
+    ['throws', () => { throw new Error('port-boom'); }, 'error:port-boom'],
+  ])('leaves every other field deep-equal when the append port %s', async (_label, behaviour, status) => {
+    const baseline = await runFresh();
+    expect(baseline.result.context.tasks.mission.question_gate).toBe('appended');
+    expect(baseline.events).toEqual(['mission.created', 'state.updated', GATE_EVENT]);
+
+    breakGateAppend(behaviour);
+    const broken = await runFresh();
+
+    expect(broken.result.context.tasks.mission.question_gate).toBe(status);
+    expect(comparable(broken)).toEqual(comparable(baseline));
+    // The store write and the mission event happened exactly as before.
+    expect(broken.result.context.tasks.mission.store.status).toBe('written');
+    expect(broken.events).toEqual(['mission.created', 'state.updated']);
+  });
+
+  it('leaves every other field deep-equal when the recorder itself throws', async () => {
+    // `appendQuestionGateEvent` promises not to throw. This is the case where
+    // it breaks that promise: without the local catch in
+    // `tasks.js#recordQuestionGate`, the throw would reach recordMissionCompile's
+    // catch and rewrite the whole mission record as a compile failure.
+    const baseline = await runFresh();
+
+    vi.mocked(appendQuestionGateEvent).mockImplementation(() => { throw new Error('recorder-boom'); });
+    const broken = await runFresh();
+
+    expect(broken.result.context.tasks.mission.question_gate).toBe('error:recorder-boom');
+    expect(broken.result.context.tasks.mission.ok).toBe(true);
+    expect(comparable(broken)).toEqual(comparable(baseline));
+    expect(broken.events).toEqual(['mission.created', 'state.updated']);
+  });
+
+  it('reports a real writer failure on the gate line without touching the mission record', async () => {
+    // The unmocked failure path: the ledger directory is a file, so every
+    // append refuses, the gate's included.
+    const blocked = mkdtempSync(path.join(tmpdir(), 'artibot-sh18-blocked-'));
+    try {
+      const { writeFileSync, mkdirSync } = await import('node:fs');
+      mkdirSync(path.join(blocked, '.artibot'), { recursive: true });
+      writeFileSync(path.join(blocked, '.artibot', 'runtime'), 'not a directory');
+      const mw = createTasksMiddleware({ now: () => NOW });
+      const result = await mw(makeState({ input: { hookData: { session_id: SESSION, cwd: blocked } } }));
+      const { mission } = result.context.tasks;
+
+      expect(mission.ok).toBe(true);
+      expect(mission.question_gate).not.toBe('appended');
+      expect(mission.question_gate).toMatch(/^(rejected|error):/);
+    } finally {
+      rmSync(blocked, { recursive: true, force: true });
+    }
   });
 });
 

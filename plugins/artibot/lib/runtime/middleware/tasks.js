@@ -33,6 +33,7 @@ import { planWorkflow, readFollowWorkflowPlan, recordWorkflow, resolveWorkflowMo
 import {
   appendMissionEvent, missionIntentRevision, missionTitle, resolveMissionIdentity,
 } from './mission-ledger.js';
+import { appendQuestionGateEvent, buildQuestionGateData } from '../question-gate-record.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -389,7 +390,53 @@ function recordMissionState(state, result, nowMs, identity, deps) {
 }
 
 /**
+ * Record the question gate's four conditions for this prompt (SH-18), as the
+ * ONE `adr.question_gate_evaluated` line `lib/runtime/question-gate-record.js`
+ * appends. Observe only: nothing reads the verdict back, and the returned
+ * status is surfaced on `task.mission.question_gate` for a census, not for a
+ * branch.
+ *
+ * WRAPPED LOCALLY even though both recorder functions promise not to throw.
+ * This runs inside `recordMissionCompile`'s try, whose catch rewrites the whole
+ * mission record as a compile failure — so a recorder that broke its promise
+ * would take the contract, the ledger status and the store result down with
+ * it. The recorder is the newest and least-exercised code on this path; it is
+ * the one that must not be able to reach its neighbours.
+ *
+ * Takes the SAME `identity` and `nowMs` as the mission append, so the two lines
+ * name one mission and one instant (see `resolveMissionIdentity`).
+ *
+ * ORDER. Called AFTER the store write, so the mission event and its paired
+ * `state.updated` stay adjacent and the gate line is always the last one this
+ * prompt appends. NOT gated on the mission append: the gate is its own
+ * observation, and it skips on exactly the identity the append skips on.
+ *
+ * @param {object} state middleware state
+ * @param {number} nowMs the single epoch-ms reading for this prompt
+ * @param {{projectRoot: string|null, sessionId: string|null, missionId: string|null}} identity
+ * @returns {string} the recorder's status, or `error:<message>` if it threw
+ */
+function recordQuestionGate(state, nowMs, identity) {
+  try {
+    const data = buildQuestionGateData({
+      prompt: String(state.input?.prompt ?? ''),
+      intent: state.context?.intent,
+      classification: state.context?.routing?.classification,
+    });
+    return appendQuestionGateEvent(identity, data, nowMs);
+  } catch (err) {
+    return `error:${err?.message ?? 'question-gate-threw'}`;
+  }
+}
+
+/**
  * Compile the prompt into a Mission Contract and record it.
+ *
+ * The question-gate line is NOT recorded when the compile throws. Its
+ * denominator is kept equal to the mission events': every
+ * `adr.question_gate_evaluated` line then has a mission line beside it under
+ * the same `mission_id`, and a compile failure — which writes no mission line —
+ * writes no gate line either, instead of a gate line that pairs with nothing.
  *
  * @param {object} state
  * @param {() => number} now
@@ -415,6 +462,12 @@ function recordMissionCompile(state, now, deps) {
     });
     const identity = resolveMissionIdentity(state, nowMs);
     const ledger = appendMissionEvent(state, result, nowMs, identity);
+    // Gated on the APPEND, not on the compile. `mission.candidate_deferred`
+    // is a successful append of a non-mission, and a store row for it would
+    // be a mission the ledger never opened.
+    const store = ledger.ok && ledger.event === 'mission.created'
+      ? recordMissionState(state, result, nowMs, identity, deps)
+      : skippedMissionStore('no-mission-created');
     return {
       contract: result.contract,
       mode: result.mode,
@@ -422,12 +475,9 @@ function recordMissionCompile(state, now, deps) {
       substantive: result.substantive,
       deferred: result.deferred,
       ledger: ledger.status,
-      // Gated on the APPEND, not on the compile. `mission.candidate_deferred`
-      // is a successful append of a non-mission, and a store row for it would
-      // be a mission the ledger never opened.
-      store: ledger.ok && ledger.event === 'mission.created'
-        ? recordMissionState(state, result, nowMs, identity, deps)
-        : skippedMissionStore('no-mission-created'),
+      store,
+      // Evaluated last, after the store write — see recordQuestionGate.
+      question_gate: recordQuestionGate(state, nowMs, identity),
       ok: true,
     };
   } catch (err) {
@@ -438,6 +488,7 @@ function recordMissionCompile(state, now, deps) {
       error: err?.message ?? 'compile-failed',
       ledger: 'skipped:compile-failed',
       store: skippedMissionStore('no-mission-created'),
+      question_gate: 'skipped:compile-failed',
     };
   }
 }

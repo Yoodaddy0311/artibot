@@ -384,6 +384,13 @@ const KNOWN_EMITTER_FLOOR = Object.freeze([
   // entries that keep that resolution from being quietly dropped again.
   ['session.ended', 'scripts/hooks/session-end.js'],
   ['usage.receipt', 'lib/economics/receipt-envelope.js'],
+  // Reached only through `tasks.js#recordQuestionGate`, and appended through a
+  // LOCAL ALIAS (`const append = deps.appendLedgerEvent ?? appendLedgerEvent`).
+  // The scan keys on the envelope literal in a writer-importing module, not on
+  // the callee name, so the alias is seen — measured 2026-09-23 by planting
+  // `source: 'scheduler'` there, which turned both classification tests RED at
+  // `lib/runtime/question-gate-record.js:149`. Pinned so that stays true.
+  ['adr.question_gate_evaluated', 'lib/runtime/question-gate-record.js'],
 ]);
 
 // ---------------------------------------------------------------------------

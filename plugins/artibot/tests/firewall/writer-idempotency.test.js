@@ -49,13 +49,14 @@
  * "idempotency" lib` on 2026-09-21 returned ten files; three
  * (`replay/spawn-outcome.js`, `runtime/artifact-lifecycle-gates.js`,
  * `review/independent-reviewer.js`) mention it only in prose, assign no key,
- * and are absent here. On the import side, three modules below statically
+ * and are absent here. On the import side, four modules below statically
  * import from the ledger primitive (`runtime/event-writer.js` or
- * `runtime/ledger.js`): `runtime/ledger.js`, `runtime/middleware/tasks.js` and
- * `runtime/middleware/mission-ledger.js`, the last split out of `tasks.js` on
- * 2026-09-23. A fourth, `runtime/human-asked-record.js`, reaches `ledger.js`
- * through `await import()`, which the earlier "2 of 53" import scan did not
- * count. So 4 of the 55 modules below (re-measured 2026-09-23; the undiscovered
+ * `runtime/ledger.js`): `runtime/ledger.js`, `runtime/middleware/tasks.js`,
+ * `runtime/middleware/mission-ledger.js` (split out of `tasks.js` on
+ * 2026-09-23) and `runtime/question-gate-record.js` (SH-18, same day). A fifth,
+ * `runtime/human-asked-record.js`, reaches `ledger.js` through
+ * `await import()`, which the earlier "2 of 53" import scan did not count. So 5
+ * of the 56 modules below (re-measured 2026-09-23; the undiscovered
  * `runtime/ledger-tail.js` also imports `ledgerFilePath`, a path helper, and
  * appends nothing). Every other appender takes its port by injection.
  *
@@ -395,6 +396,7 @@ const INVENTORY = {
   'context/rehydration.js': x('run ledger context.compiled via writer.writeEvent, source spelled as shorthand. No key. Defect candidate; invisible to v1.'),
   'project-state/state-manager.js': x('run ledger state.updated, paired 1:1 with a store write and carrying the monotonic data.state_version. No key. Defect candidate.'),
   'runtime/human-asked-record.js': x('run ledger human.asked and human.resolved, carrying data.question_id. No key. Defect candidate.'),
+  'runtime/question-gate-record.js': x('run ledger adr.question_gate_evaluated, one line per compiled prompt (tasks.js#recordQuestionGate), no key. The only dedupe is ledger.js#dedupeKey (session_id, source, pid, seq, ts), and no reader of this event reads idempotency_key, so a re-fired prompt writes a second line. Defect candidate like runtime/middleware/mission-ledger.js.'),
   'runtime/middleware/mission-ledger.js': x('run ledger mission lifecycle events with a dynamic event name; no per-line handle beyond mission_id. Defect candidate. Moved out of tasks.js 2026-09-23 (800-line split) with the append site unchanged.'),
   'topology/split-state.js': x('run ledger split worker events with a dynamic event name; keyed only by worker. Defect candidate.'),
 
