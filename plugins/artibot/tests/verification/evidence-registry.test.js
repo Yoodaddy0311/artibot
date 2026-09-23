@@ -15,9 +15,17 @@
  * without ever looking at this repository.
  *
  * What it cannot prove:
- *  1. That the lock holds past its own fail-open. `withFileLock` force-takes a
- *     lock older than 5 s, so a writer stalled longer than that can race.
- *  2. That the production callers register evidence. The port on
+ *  1. That the lock excludes a holder that outlives the stale window. A lock
+ *     file older than `staleMs` (5 s) is taken over by age. A live writer
+ *     stalled that long then shares the critical section with the taker, and
+ *     two takers of one stranded lock can both win in a narrow window. The
+ *     module header says how far that window is narrowed. No test here stalls
+ *     a real holder.
+ *  2. That exclusion holds on a filesystem without atomic O_EXCL create
+ *     (network shares, some FUSE mounts). Every run here is local NTFS or the
+ *     CI runner's disk. The stress test is 8 writers x 3 rounds, far from what
+ *     the scratch driver ran (80 rounds).
+ *  3. That the production callers register evidence. The port on
  *     `recordVerification` is optional; `scripts/hooks/dev-verify-gate.js` and
  *     `scripts/ledger/record-verify.mjs` bind it, and their own suites measure
  *     that binding — nothing here does.
@@ -25,7 +33,7 @@
 
 import { spawn } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -38,6 +46,7 @@ import {
   evidenceRegistryPath,
   readEvidenceIds,
   registerEvidence,
+  releaseLock,
 } from '../../lib/verification/evidence-registry.js';
 
 const MODULE_URL = pathToFileURL(path.resolve(
@@ -264,32 +273,46 @@ describe('readEvidenceIds', () => {
 // ---------------------------------------------------------------------------
 // Concurrency — separate processes, because the lock is a cross-process lock.
 //
-// Only the first test PROVES the lock is taken, and that it covers the READ.
-// With `withFileLock` replaced by a direct call (mutation run 2026-09-23 12:43
-// KST) it went red while the two race tests stayed green: child start-up on
-// Windows staggers the writers enough that they rarely overlap. The race tests
-// pin the outcome, not the mechanism. The foreign row it writes under the held
-// lock is what catches a read taken outside the lock (review F3). Without that
-// row, the read-outside mutation left every test green.
+// "waits for a held lock" PROVES the lock is taken and that it covers the READ.
+// With the lock replaced by a direct call (mutation run 2026-09-23 12:43 KST)
+// it went red while the unsynchronised race tests stayed green: child start-up
+// on Windows staggers the writers enough that they rarely overlap. The foreign
+// row it writes under the held lock is what catches a read taken outside the
+// lock (review F3).
+//
+// The STRESS test closes the other gap. Its children wait on a barrier file and
+// call `registerEvidence` together. Against the earlier `withFileLock` (a plain
+// existsSync-then-writeFileSync, no O_EXCL) the same shape duplicated ids in
+// 44 of 50 rounds of 4 writers and 30 of 30 rounds of 8 (scratch driver,
+// 2026-09-23 13:54 KST). CI had caught it once without a barrier: GitHub run
+// 35819414568 got 3 distinct ids from 4 writers.
 // ---------------------------------------------------------------------------
 
 const CHILD = [
+  "import { existsSync } from 'node:fs';",
+  "import path from 'node:path';",
   `import { registerEvidence } from ${JSON.stringify(MODULE_URL)};`,
-  'const [root, entryJson] = process.argv.slice(2);',
+  'const [projectRoot, entryJson, barrier] = process.argv.slice(2);',
   "process.stdout.write('ready\\n');",
-  "const out = registerEvidence([JSON.parse(entryJson)], { projectRoot: root, source: 'child' });",
+  "if (barrier === '1') {",
+  '  const sab = new Int32Array(new SharedArrayBuffer(4));',
+  "  while (!existsSync(path.join(projectRoot, 'go'))) Atomics.wait(sab, 0, 0, 1);",
+  '}',
+  "const out = registerEvidence([JSON.parse(entryJson)], { projectRoot, source: 'child' });",
   "process.stdout.write(JSON.stringify(out) + '\\n');",
 ].join('\n');
 
 /**
  * Run one registering child. Resolves with its parsed result; `onReady` fires
- * when the child is about to call `registerEvidence`.
+ * when the child is about to call `registerEvidence` (or, with `barrier`, to
+ * wait for `<projectRoot>/go`).
  */
-function runChild(entry, onReady = () => {}) {
+function runChild(entry, onReady = () => {}, { projectRoot = root, barrier = false } = {}) {
   const script = path.join(root, 'child.mjs');
   if (!existsSync(script)) writeFileSync(script, CHILD);
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script, root, JSON.stringify(entry)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const args = [script, projectRoot, JSON.stringify(entry), barrier ? '1' : '0'];
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => {
@@ -343,4 +366,87 @@ describe('id allocation under the file lock', () => {
     expect(new Set(ids).size).toBe(4);
     expect(rows().map((r) => r.id).sort()).toEqual(['E-001', 'E-002', 'E-003', 'E-004']);
   }, 20000);
+
+  it('eight writers released together mint eight distinct ids, three rounds running', async () => {
+    const WRITERS = 8;
+    for (let round = 0; round < 3; round += 1) {
+      const projectRoot = path.join(root, `round-${round}`);
+      mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
+      let ready = 0;
+      const release = () => {
+        ready += 1;
+        if (ready === WRITERS) writeFileSync(path.join(projectRoot, 'go'), '');
+      };
+      const outs = await Promise.all(Array.from({ length: WRITERS }, (_, i) => runChild(
+        cmd(`round${round}-writer${i}`), release, { projectRoot, barrier: true },
+      )));
+      const ids = outs.flatMap((o) => o.ids);
+      const stored = readFileSync(evidenceRegistryPath(projectRoot), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      expect({ round, reasons: outs.filter((o) => o.reason).length, distinct: new Set(ids).size })
+        .toEqual({ round, reasons: 0, distinct: WRITERS });
+      expect({ round, rows: stored.length, distinctRowIds: new Set(stored.map((r) => r.id)).size })
+        .toEqual({ round, rows: WRITERS, distinctRowIds: WRITERS });
+    }
+  }, 60000);
+});
+
+describe('the registry lock', () => {
+  const lockOf = () => `${evidenceRegistryPath(root)}.lock`;
+  const plantLock = (content, ageMs = 0) => {
+    const lock = lockOf();
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(lock, content);
+    if (ageMs > 0) {
+      const then = new Date(Date.now() - ageMs);
+      utimesSync(lock, then, then);
+    }
+    return lock;
+  };
+
+  it('does not steal a FRESH lock whose content is empty or unparseable', () => {
+    // A holder's lock is empty between its create and its write, so an empty
+    // file is what a racing reader sees. Staleness is judged by age alone.
+    for (const content of ['', '{"pid":12', 'not json']) {
+      const lock = plantLock(content);
+      const out = reg([cmd()], { lock: { timeoutMs: 150 } });
+      expect({ content, out }).toEqual({ content, out: { ids: [], appended: 0, reused: 0, reason: 'lock-timeout' } });
+      expect({ content, kept: existsSync(lock) && readFileSync(lock, 'utf8') }).toEqual({ content, kept: content });
+      rmSync(lock, { force: true });
+    }
+    expect(existsSync(evidenceRegistryPath(root))).toBe(false);
+  }, 20000);
+
+  it('fails closed on timeout: no ids, no row, and the holder keeps its lock', () => {
+    const lock = plantLock(JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
+    const started = Date.now();
+    const out = reg([cmd()], { lock: { timeoutMs: 200 } });
+    expect(out).toEqual({ ids: [], appended: 0, reused: 0, reason: 'lock-timeout' });
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(existsSync(evidenceRegistryPath(root))).toBe(false);
+    expect(existsSync(lock)).toBe(true);
+  }, 20000);
+
+  it('takes over a lock whose file is older than the stale window', () => {
+    const lock = plantLock('', 60_000);
+    const out = reg([cmd()], { lock: { timeoutMs: 1000, staleMs: 5000 } });
+    expect(out).toEqual({ ids: ['E-001'], appended: 1, reused: 0 });
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('release removes only a lock that carries its own token', () => {
+    // A holder taken over after `staleMs` must not delete the new holder's lock.
+    const foreign = JSON.stringify({ token: 'foreign-holder-token', pid: 1, timestamp: Date.now() });
+    const lock = plantLock(foreign);
+    releaseLock(lock, 'our-holder-token');
+    expect(existsSync(lock) && readFileSync(lock, 'utf8')).toBe(foreign);
+    // Positive control: the owner's release does remove it.
+    releaseLock(lock, 'foreign-holder-token');
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('leaves nothing but the registry behind after a registration', () => {
+    reg([cmd('a')]);
+    reg([cmd('b')]);
+    expect(readdirSync(path.dirname(evidenceRegistryPath(root)))).toEqual(['evidence.jsonl']);
+  });
 });

@@ -42,7 +42,7 @@
  *     `scripts/` calls `recordVerification` yet.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -580,8 +580,8 @@ describe('recordVerification with a registerEvidence port', () => {
 
   it('attempts every ledger append before the first registration', () => {
     // A held or stranded registry lock can stall a registration for up to the
-    // file lock's 5 s timeout. Registering in a second pass keeps that stall
-    // from delaying the remaining ledger lines.
+    // registry lock's 6 s timeout (5 s stale window). Registering in a second
+    // pass keeps that stall from delaying the remaining ledger lines.
     const order = [];
     const logAppend = (input) => { order.push(`append:${input.idempotency_key}`); return append(input); };
     const logRegister = (entries, source) => { order.push(`register:${source}`); return registerPort(entries, source); };
@@ -595,6 +595,25 @@ describe('recordVerification with a registerEvidence port', () => {
       `register:${out.lines[1].key}`,
     ]);
     expect(out.evidence).toEqual({ ids: ['E-001'], appended: 1, reused: 1 });
+  });
+
+  it('stops registering after the first lock-timeout, so one held lock costs one timeout', () => {
+    // Two lines carry evidence here (overall + deterministic). Without the
+    // short-circuit each would wait out its own timeout, up to 2 x 6 s on the
+    // hook path against an 8 s Stop budget.
+    const lock = `${evidenceRegistryPath(root)}.lock`;
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(lock, JSON.stringify({ token: 'held-elsewhere', pid: 1, timestamp: Date.now() }));
+    let calls = 0;
+    const held = (entries, source) => {
+      calls += 1;
+      return registerEvidence(entries, { projectRoot: root, source, now: AT, lock: { timeoutMs: 100 } });
+    };
+    const out = recordVerification(passVerdict(), { sessionId: SID }, { append, existingKeys, registerEvidence: held });
+    expect(calls).toBe(1);
+    expect(out).toMatchObject({ appended: 4, deduped: 0, rejected: 0, skipped: 0 });
+    expect(out.evidence).toEqual({ ids: [], appended: 0, reused: 0, reason: 'lock-timeout' });
+    expect(rawLines()).toHaveLength(4);
   });
 
   it('never calls the port for a rejected line', () => {

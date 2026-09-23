@@ -41,11 +41,50 @@
  * ── Same hash, same id ──────────────────────────────────────────────────────
  * Registering content that is already present returns its existing id and
  * appends nothing. That holds across calls and inside one call. The first
- * registration's `source` is the one kept. Ids are minted under
- * `lib/core/file-lock.js#withFileLock`, which also covers the read of the
- * existing rows, so two writers cannot both read "highest is E-004" and both
- * mint E-005. That lock is fail-open after 5 s (see its module header). A
- * writer stalled longer than that can still race, and nothing here detects it.
+ * registration's `source` is the one kept. Ids are minted under this module's
+ * own lock (next section), which also covers the read of the existing rows, so
+ * two writers cannot both read "highest is E-004" and both mint E-005.
+ *
+ * ── The lock, and why it is not `lib/core/file-lock.js#withFileLock` ─────────
+ * `withFileLock` is not mutually exclusive. It waits until `existsSync` says
+ * the lock is gone, then creates it with a plain `writeFileSync`. Two waiters
+ * that both see "gone" both proceed. It also unlinks a lock whose JSON does not
+ * parse, which is exactly what a racing reader sees between another holder's
+ * create and its write. Measured 2026-09-23 13:54 KST with 4 and 8 writers
+ * released together: duplicate ids in 44 of 50 and 30 of 30 rounds. CI hit the
+ * same thing unsynchronised once (3 distinct ids from 4 writers). That module is
+ * shared with other stores and not changed here.
+ *
+ * This lock is `<registry>.lock`, the same path, so a writer on the old code
+ * still sees it:
+ *   - ACQUIRE is `openSync(lock, 'wx')`, an atomic create-if-absent, retried
+ *     every `retryMs` on "exists". On Windows a lock still being deleted
+ *     answers EPERM or EBUSY, and those count as "held" too.
+ *   - The holder writes `{token, pid, timestamp}` after creating the file. That
+ *     content is for diagnostics and for release. Staleness NEVER reads it,
+ *     because an empty or half-written lock is a live holder mid-write.
+ *   - STALE means the file's mtime is older than `staleMs`, by age alone. A
+ *     stale lock is renamed aside to a unique name and then unlinked. Two takers
+ *     of one stranded lock race on the rename, and only one wins it. The
+ *     residual: a taker that stat-ed the stale lock, then lost the CPU while
+ *     the other taker replaced it, would rename the NEW, live lock aside. That
+ *     taker re-checks what it moved. If the moved file is fresh, it links it
+ *     back, and that link fails only when a third lock appeared in between.
+ *     That three-way interleaving is the remaining window, and it needs a
+ *     holder stranded for `staleMs` first.
+ *   - TIMEOUT FAILS CLOSED. After `timeoutMs` the call returns
+ *     `reason: 'lock-timeout'` and writes nothing. A missing registration is
+ *     visible to whoever reads the result. A duplicate id is silent corruption.
+ *     This is the same preference `./verify-writer.js` states for the ledger.
+ *   - RELEASE unlinks the lock only if it still carries this holder's token. A
+ *     holder that outlived `staleMs` and was taken over leaves the new holder's
+ *     lock alone.
+ *   - No signal handlers. A process killed mid-hold strands the lock, and the
+ *     stale rule reclaims it after `staleMs`. `timeoutMs` exceeds `staleMs` by
+ *     default, so a waiter can outlast one stranded lock rather than fail
+ *     behind it.
+ * A holder stalled past `staleMs` still shares the critical section with the
+ * writer that took over. Nothing here detects that.
  *
  * ── Never throws on the write path ──────────────────────────────────────────
  * `registerEvidence` and `readEvidenceIds` turn every failure into a value: a
@@ -61,11 +100,11 @@
  * @module lib/verification/evidence-registry
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { withFileLock } from '../core/file-lock.js';
+import { sleepSync } from '../core/file.js';
 import { resolveGitCommonDir as realResolveGitCommonDir } from '../project-state/git-common-dir.js';
 import { resolveStoreLocation } from '../project-state/store-location.js';
 
@@ -77,6 +116,124 @@ const EVIDENCE_ID_RE = /^E-(\d{3,})$/;
 
 /** A row's hash field, the shape `evidenceHash` produces. */
 const HASH_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * Registry lock timings in ms. See "The lock" above. A holder's critical
+ * section is one read plus one append, measured in milliseconds, so `staleMs`
+ * is a strand detector, not a hold budget.
+ */
+export const REGISTRY_LOCK_DEFAULTS = Object.freeze({ timeoutMs: 6000, staleMs: 5000, retryMs: 20 });
+
+/** Create errors that mean "someone holds it", not "this cannot work". */
+const LOCK_HELD_CODES = new Set(['EEXIST', 'EPERM', 'EBUSY']);
+
+/**
+ * @param {unknown} lock - Caller overrides; anything not a positive number falls back.
+ * @returns {{ timeoutMs: number, staleMs: number, retryMs: number }}
+ */
+function lockSettings(lock) {
+  const l = lock && typeof lock === 'object' ? /** @type {Record<string, unknown>} */ (lock) : {};
+  const pick = (k) => {
+    const v = l[k];
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : REGISTRY_LOCK_DEFAULTS[k];
+  };
+  return { timeoutMs: pick('timeoutMs'), staleMs: pick('staleMs'), retryMs: pick('retryMs') };
+}
+
+/**
+ * One atomic create attempt.
+ *
+ * @param {string} lockPath
+ * @param {string} token
+ * @returns {boolean} `true` when this call now holds the lock.
+ */
+function tryCreateLock(lockPath, token) {
+  let fd;
+  try {
+    fd = fs.openSync(lockPath, 'wx');
+  } catch (err) {
+    if (LOCK_HELD_CODES.has(/** @type {NodeJS.ErrnoException} */ (err).code ?? '')) return false;
+    throw err;
+  }
+  try {
+    fs.writeSync(fd, JSON.stringify({ token, pid: process.pid, timestamp: Date.now() }));
+  } catch (err) {
+    // A lock without the token could never be released by its holder, so
+    // it must not be left behind.
+    fs.closeSync(fd);
+    try { fs.unlinkSync(lockPath); } catch { /* best effort */ }
+    throw err;
+  }
+  fs.closeSync(fd);
+  return true;
+}
+
+/**
+ * Take over a lock whose file is older than `staleMs`. The age comes from
+ * mtime alone, never from the content.
+ *
+ * @param {string} lockPath
+ * @param {number} staleMs
+ * @returns {boolean} `true` when a stale lock was removed.
+ */
+function takeOverIfStale(lockPath, staleMs) {
+  let st;
+  try {
+    st = fs.statSync(lockPath);
+  } catch {
+    return false;
+  }
+  if (Date.now() - st.mtimeMs <= staleMs) return false;
+  const aside = `${lockPath}.stale-${randomUUID()}`;
+  try {
+    fs.renameSync(lockPath, aside);
+  } catch {
+    return false;
+  }
+  let movedFresh = false;
+  try {
+    movedFresh = Date.now() - fs.statSync(aside).mtimeMs <= staleMs;
+  } catch { /* already gone */ }
+  if (movedFresh) {
+    // Another taker replaced the stale lock between the stat and the rename,
+    // so the file just moved is a LIVE holder's lock. Put it back.
+    try { fs.linkSync(aside, lockPath); } catch { /* a newer lock exists: the documented residual */ }
+  }
+  try { fs.unlinkSync(aside); } catch { /* best effort */ }
+  return !movedFresh;
+}
+
+/**
+ * @param {string} lockPath
+ * @param {{ timeoutMs: number, staleMs: number, retryMs: number }} settings
+ * @returns {string|null} The holder token, or `null` on timeout.
+ */
+function acquireLock(lockPath, settings) {
+  const token = randomUUID();
+  const deadline = Date.now() + settings.timeoutMs;
+  for (;;) {
+    if (tryCreateLock(lockPath, token)) return token;
+    if (takeOverIfStale(lockPath, settings.staleMs)) continue;
+    if (Date.now() >= deadline) return null;
+    sleepSync(settings.retryMs);
+  }
+}
+
+/**
+ * Unlink the lock only while it still carries this holder's token.
+ *
+ * Exported so the token check is testable on its own: nothing else makes a
+ * holder outlive `staleMs` deterministically.
+ *
+ * @param {string} lockPath
+ * @param {string} token
+ * @returns {void}
+ */
+export function releaseLock(lockPath, token) {
+  try {
+    if (fs.readFileSync(lockPath, 'utf8').includes(token)) fs.unlinkSync(lockPath);
+  } catch { /* gone or unreadable: nothing of ours to remove */ }
+}
 
 /**
  * JSON with object keys sorted at every depth. Arrays keep their order, because
@@ -289,14 +446,18 @@ function allocateLocked(file, planned, source, createdAt) {
  *   `type` on the row is each entry's `kind`.
  * @param {{ projectRoot?: string, source?: string,
  *   resolveGitCommonDir?: (projectRoot: string) => (string|null),
- *   now?: () => Date }} [opts]
+ *   now?: () => Date,
+ *   lock?: { timeoutMs?: number, staleMs?: number, retryMs?: number } }} [opts]
  *   `source` names who registered the entries and is required. `now` defaults to
- *   the wall clock.
+ *   the wall clock. `lock` overrides {@link REGISTRY_LOCK_DEFAULTS} one field at a
+ *   time. It exists so tests can time out in milliseconds.
  * @returns {{ ids: string[], appended: number, reused: number, reason?: string }}
  *   `appended` counts rows written. `reused` counts entries answered by an
- *   existing row, or by an earlier entry of the same call.
+ *   existing row, or by an earlier entry of the same call. `reason:
+ *   'lock-timeout'` means the lock stayed held for `timeoutMs` and nothing was
+ *   written.
  */
-export function registerEvidence(entries, { projectRoot, source, resolveGitCommonDir, now } = {}) {
+export function registerEvidence(entries, { projectRoot, source, resolveGitCommonDir, now, lock } = {}) {
   const none = (reason) => ({ ids: [], appended: 0, reused: 0, reason });
   try {
     const plan = planEntries(entries, source, projectRoot);
@@ -306,7 +467,14 @@ export function registerEvidence(entries, { projectRoot, source, resolveGitCommo
     if (!(at instanceof Date) || Number.isNaN(at.getTime())) return none('now-invalid');
     const file = evidenceRegistryPath(/** @type {string} */ (projectRoot), { resolveGitCommonDir });
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    return withFileLock(file, () => allocateLocked(file, plan.planned, /** @type {string} */ (source), at.toISOString()));
+    const lockPath = `${file}.lock`;
+    const token = acquireLock(lockPath, lockSettings(lock));
+    if (token === null) return none('lock-timeout');
+    try {
+      return allocateLocked(file, plan.planned, /** @type {string} */ (source), at.toISOString());
+    } finally {
+      releaseLock(lockPath, token);
+    }
   } catch (err) {
     const code = /** @type {NodeJS.ErrnoException} */ (err)?.code;
     return none(`registry-io:${typeof code === 'string' ? code : 'error'}`);

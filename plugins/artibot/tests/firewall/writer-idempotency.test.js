@@ -457,7 +457,7 @@ const INVENTORY = {
   'learning/macro-learner.js': x('macro-suggestions.json; observations and suggestions upsert by pattern fingerprint, which dedupes suggestions rather than keying rows.'),
 
   // --- verification stores --------------------------------------------------
-  'verification/evidence-registry.js': x('evidence.jsonl beside the run ledger (SH-15), one {id, type, source, hash, created_at} row per distinct evidence entry. The content sha256 hash is a key under another name: registerEvidence reads the rows under withFileLock and returns the existing E-nnn id instead of appending when the hash is present. No idempotency key is assigned.'),
+  'verification/evidence-registry.js': x('evidence.jsonl beside the run ledger (SH-15), one {id, type, source, hash, created_at} row per distinct evidence entry. The content sha256 hash is a key under another name: registerEvidence reads the rows under its own O_EXCL lock (openSync wx, not core/file-lock.js) and returns the existing E-nnn id instead of appending when the hash is present. No idempotency key is assigned.'),
 };
 
 // ---------------------------------------------------------------------------

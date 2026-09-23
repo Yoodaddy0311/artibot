@@ -610,9 +610,11 @@ function mergeLineEvidence(acc, reasons, r) {
  *   (see {@link registerLineEvidence}). It is called
  *   once per APPENDED line that carries evidence, in line order, in a second
  *   pass AFTER every append has been attempted. A held or stranded registry lock
- *   can stall for up to the file lock's 5 s timeout, and in the second pass that
- *   stall cannot delay a ledger line. A deduped or rejected line registers
- *   nothing. Its failures never change the tally.
+ *   can stall for up to the registry lock's 6 s timeout (5 s stale window;
+ *   `evidence-registry.js#REGISTRY_LOCK_DEFAULTS`), and in the second pass that
+ *   stall cannot delay a ledger line. The first `lock-timeout` ends the pass, so
+ *   one held lock costs one timeout rather than one per line. A deduped or
+ *   rejected line registers nothing. Its failures never change the tally.
  * @returns {{ appended: number, deduped: number, rejected: number, skipped: number,
  *   reason?: string, lines: Array<{ key: string, layer: string|null,
  *   status: 'appended'|'deduped'|'rejected', reason?: string }>,
@@ -666,7 +668,11 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
   for (const input of appendedInputs) {
     if (typeof p.registerEvidence === 'function'
       && Array.isArray(input.data.evidence) && input.data.evidence.length > 0) {
-      mergeLineEvidence(evidence, evidenceReasons, registerLineEvidence(p.registerEvidence, input));
+      const r = registerLineEvidence(p.registerEvidence, input);
+      mergeLineEvidence(evidence, evidenceReasons, r);
+      // The lock is still held, and every later line would wait the full
+      // timeout again. On the hook path that is 6 s per line.
+      if (r.reason === 'lock-timeout') break;
     }
   }
   const reason = [...evidenceReasons].join('; ');
