@@ -186,7 +186,7 @@ describe('dispatch.mjs runDispatch (temp parent root, real template + real comma
     const c = collect();
     expect(await dispatch.main(['auth', '--json'], { cwd: parent, config: null, ...c.io })).toBe(0);
     const parsed = JSON.parse(c.stdout());
-    expect(Object.keys(parsed).sort()).toEqual(['briefPath', 'copied', 'dryRun', 'forkPoint', 'laneState', 'limb', 'pointer', 'promptPath', 'siblings', 'to']);
+    expect(Object.keys(parsed).sort()).toEqual(['briefPath', 'copied', 'dryRun', 'forkPoint', 'laneState', 'limb', 'pointer', 'promptPath', 'siblings', 'taskFeed', 'to']);
     expect(parsed.to).toBe('split-demo-auth-3f');
     expect(parsed.siblings).toEqual([{
       name: 'leader-addendum.md',

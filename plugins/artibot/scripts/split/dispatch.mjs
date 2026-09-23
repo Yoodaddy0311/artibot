@@ -24,6 +24,7 @@
  *   <worktreePath>/.artibot/split/<limb>/prompt.md  rendered prompt
  *   parent run.json                                 lanes[limb] = active (via lane-state.mjs)
  *   parent plan.json                                limbs[].forkPoint, written once
+ *   StateStore task graph                           limb task + lease (record-only, via task-feed.mjs)
  *
  * Exit codes: 0 ok · 1 refused / error (message on stderr, or JSON with --json).
  *
@@ -39,6 +40,7 @@ import { getRepoIdentity, repoShortName } from '../../lib/git/repo-identity.js';
 import { forkPointForLimb, readRunJson, updatePlanJson, windowForLimb } from '../../lib/git/split-run-file.js';
 import { isLaneOpsState } from '../../lib/supervisor/contracts.js';
 import { setLaneState } from './lane-state.mjs';
+import { feedLimb } from './task-feed.mjs';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { limbsFromPlan } from '../../lib/git/split-dispatch.js';
 import { loadConfig } from '../../lib/core/config.js';
@@ -62,7 +64,7 @@ export const HELP = `usage: node scripts/split/dispatch.mjs <limb> [options]
   --gotchas <path>    text for {GOTCHAS_DELTA} (default: .artibot/split/gotchas.md, else "(없음)")
   --budget <n>        {BUDGET} (default: artibot.config.json#split.dispatch.budget, else ${DEFAULT_BUDGET})
   --dry-run           render only; write nothing (prints the prompt with --json)
-  --json              machine output { to, limb, pointer, promptPath, briefPath, siblings, laneState, forkPoint }
+  --json              machine output { to, limb, pointer, promptPath, briefPath, siblings, laneState, forkPoint, taskFeed }
 
 This script NEVER sends. Take \`pointer\` and send it yourself:
   SendMessage(to=<to>, message=<pointer>)
@@ -231,11 +233,12 @@ function recordForkPoint({ parentRoot, plan, worktreePath, limb }) {
  * `recordForkPoint` do (all skipped with `dryRun`).
  *
  * @param {ReturnType<typeof parseArgs>} args
- * @param {{ cwd?: string, config?: object|null, splitMdPath?: string }} [opts] - `config` injectable for tests (null = read via loadConfig)
+ * @param {{ cwd?: string, config?: object|null, splitMdPath?: string, feedLimb?: Function }} [opts] - `config` injectable for tests (null = read via loadConfig); `feedLimb` is the Task Graph port seam
  * @returns {Promise<{ to: string|null, limb: string, pointer: string, promptPath: string|null, briefPath: string, copied: boolean, siblings: Array<{ name: string, copied: boolean, sourcePath: string, destPath: string }>, dryRun: boolean, prompt: string, laneState: { state: string, previous: string|null, previousRaw: string|null, warning: string|null, written: boolean, ledger: string|null }, forkPoint: { value: string|null, recorded: boolean, reason: string|null, ref: string|null } }>}
  *   `laneState.previous` is the recorded word ONLY when it was in the allowlist; `previousRaw` is what was there either way, and `warning` names the gap. `ledger` is `null` on a dry run (nothing was written) — see `setLaneState` for the values.
  *   `forkPoint.ref` is which of {@link INTEGRATION_REFS} answered, `null` when none did or when the value was already recorded.
  *   `forkPoint` is resolved FIRST so `prompt` (`base=`) and `pointer` (`(base: )`) carry it; it falls back to `plan.base` only when nothing is recorded.
+ *   `taskFeed` is RECORD-ONLY (`scripts/split/task-feed.mjs#feedLimb`): `{fed:false, skipped:'<reason>'}` whenever the store, the session id or the mission row is unavailable, and it never affects the exit code or any other key.
  */
 export async function runDispatch(args, opts = {}) {
   if (!args.limb) throw new Error('limb is required (see --help)');
@@ -317,8 +320,17 @@ export async function runDispatch(args, opts = {}) {
   const laneWrite = args.dryRun ? null : setLaneState({ limb: row.limb, state: 'active', window: to ?? null }, { cwd: parentRoot });
   const laneState = { state: 'active', previous, previousRaw, warning, written: !args.dryRun, ledger: laneWrite?.ledger ?? null };
 
+  // OB-12/OB-15: the limb also becomes a Task Graph node, claimed by its own
+  // name. RECORD-ONLY and after every real write above — `feedLimb` never
+  // throws and its answer changes nothing else in this result, so a store that
+  // is absent, unopenable or missing this session's mission leaves dispatch
+  // behaving exactly as it did before the feeder existed.
+  const taskFeed = (opts.feedLimb ?? feedLimb)({
+    parentRoot, plan, limb: row.limb, dryRun: args.dryRun,
+  });
+
   return {
-    to, limb: row.limb, pointer: mat.pointer, promptPath: mat.promptPath, briefPath: mat.briefPath, copied: mat.copied, siblings: mat.siblings, dryRun: args.dryRun, prompt, laneState, forkPoint,
+    to, limb: row.limb, pointer: mat.pointer, promptPath: mat.promptPath, briefPath: mat.briefPath, copied: mat.copied, siblings: mat.siblings, dryRun: args.dryRun, prompt, laneState, forkPoint, taskFeed,
   };
 }
 
