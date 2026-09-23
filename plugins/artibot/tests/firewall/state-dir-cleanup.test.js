@@ -42,7 +42,14 @@
  *     setup file and is gated by the file named above.
  *   - **Whether a writer actually lands in the sandbox.** The fixtures write
  *     there by hand. `resolveArtibotDir()` honouring the override is pinned by
- *     `tests/core/state-dir-home-pairing.test.js`.
+ *     `tests/core/state-dir-home-pairing.test.js`; `getDecisionStoreDir()`
+ *     honouring `ARTIBOT_DECISIONS_STORE_DIR` by
+ *     `tests/observability/decision-events.test.js`.
+ *
+ * The decision-store block (`ARTIBOT_DECISIONS_STORE_DIR` and its `_ROOT`
+ * pair) rides the same two child runs: the fixtures also write into it and
+ * report the stamped root, so its remover and its pairing are measured here by
+ * the same mechanism rather than asserted from source.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -55,6 +62,8 @@ import { fileURLToPath } from 'node:url';
 import {
   afterAll, beforeAll, describe, expect, it,
 } from 'vitest';
+import { sameDirPath } from '../../lib/core/platform.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SETUP_FILE = path.join(PLUGIN_ROOT, 'tests', 'setup', 'state-dir.js');
@@ -86,9 +95,14 @@ function fixtureSource(name) {
     '  const existedBefore = existsSync(dir);',
     '  mkdirSync(dir, { recursive: true });',
     `  writeFileSync(path.join(dir, 'marker-${name}.txt'), '${name}');`,
+    '  const decisionsDir = process.env.ARTIBOT_DECISIONS_STORE_DIR;',
+    '  const decisionsExistedBefore = existsSync(decisionsDir);',
+    '  mkdirSync(decisionsDir, { recursive: true });',
+    `  writeFileSync(path.join(decisionsDir, 'marker-${name}.events.ndjson'), '${name}');`,
+    '  const decisionsRoot = process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT;',
     '  appendFileSync(',
     '    process.env.PROBE_REPORT,',
-    `    \`\${JSON.stringify({ file: '${name}', dir, pid: process.pid, existedBefore })}\\n\`,`,
+    `    \`\${JSON.stringify({ file: '${name}', dir, pid: process.pid, existedBefore, decisionsDir, decisionsExistedBefore, decisionsRoot, cwd: process.cwd() })}\\n\`,`,
     '  );',
     '  expect(existsSync(dir)).toBe(true);',
     '});',
@@ -172,6 +186,10 @@ function runProbeSuite(sandbox, stateDirOverride) {
   const env = { ...process.env, PROBE_REPORT: report };
   delete env.ARTIBOT_STATE_DIR;
   delete env.ARTIBOT_STATE_DIR_HOME;
+  // Same reason for the decision-store pair: inherited, this worker's own
+  // sandbox would suppress the child's mint block and survive its remover.
+  delete env.ARTIBOT_DECISIONS_STORE_DIR;
+  delete env.ARTIBOT_DECISIONS_STORE_DIR_ROOT;
   if (stateDirOverride) env.ARTIBOT_STATE_DIR = stateDirOverride;
 
   const res = spawnSync(process.execPath, [VITEST_BIN, 'run', '--config', configFile], {
@@ -241,5 +259,28 @@ describe('the per-worker state dir is cleaned up by the run that minted it', () 
     expect(minted[1].pid).toBe(minted[0].pid);
     expect(minted[1].dir).toBe(minted[0].dir);
     expect(minted[1].existedBefore).toBe(false);
+  });
+
+  it('mints, removes per file, and pairs the decision-store sandbox the same way', () => {
+    // The third block in the setup file, on the same terms as the state dir:
+    // per-pid name under tmpdir, one path per worker, gone after each file.
+    for (const run of [minted, supplied]) {
+      const { decisionsDir } = run[0];
+      expect(path.basename(decisionsDir)).toMatch(/^artibot-test-decisions-store-\d+$/);
+      expect(path.dirname(path.resolve(decisionsDir))).toBe(path.resolve(os.tmpdir()));
+      expect(run[1].decisionsDir).toBe(decisionsDir);
+      expect(run[1].decisionsExistedBefore).toBe(false);
+      expect(existsSync(decisionsDir)).toBe(false);
+    }
+    // The pair is the worker's RAW cwd — setup cannot resolve it, because it
+    // must not import `lib/git/` (see its header) — and it has to resolve to
+    // the same project root as the location-less fallback IN THAT WORKER, which
+    // is the comparison `getDecisionStoreDir` makes at call time. A stamp that
+    // resolved anywhere else would make the resolver drop the override and
+    // every cwd-less recorder call would write into the real store.
+    for (const r of [...minted, ...supplied]) {
+      expect(sameDirPath(r.decisionsRoot, r.cwd)).toBe(true);
+      expect(sameDirPath(resolveProjectRoot(r.decisionsRoot), resolveProjectRoot(r.cwd))).toBe(true);
+    }
   });
 });

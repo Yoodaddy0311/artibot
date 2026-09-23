@@ -144,6 +144,7 @@
  */
 
 import path from 'node:path';
+import { sameDirPath } from '../core/platform.js';
 import { redactString } from '../core/redaction.js';
 import { resolveProjectRoot } from '../git/project-root.js';
 import { appendRunEvent, readRunEvents, resolveRunEventsPath } from './run-events.js';
@@ -520,6 +521,24 @@ function withoutKeys(opts, keys) {
  * `run-events.js#resolveRunEventsPath` throws a TypeError on a non-string
  * storeDir.
  *
+ * THE ENV SEAM covers exactly one branch: the one where `storeDir`,
+ * `projectRoot` and `cwd` are ALL absent or empty, i.e. the
+ * `resolveProjectRoot(undefined)` = `process.cwd()` fallback. There,
+ * `ARTIBOT_DECISIONS_STORE_DIR` replaces the whole store directory (see
+ * {@link sandboxedFallbackStoreDir}). It is not an option key —
+ * {@link DECISION_STORE_OPTS} is unchanged — and it moves nothing for a caller
+ * that passes any of the three: those resolve to the same path with or without
+ * the env. Production hooks pass the payload's `cwd`, so production is
+ * unaffected. Why it exists: `tests/hooks/runtime-prompt-command-wiring.test.js`
+ * drives the real hook with a payload that carries no `cwd`, and measured
+ * 2026-09-23 that wrote `sess-cmd-e` / `sess-cmd-g` event files (2,643 B each)
+ * into this repository's real store.
+ *
+ * WHAT THE SEAM DOES NOT COVER: a VALID key carrying a live value. A test
+ * calling a recorder with `{ cwd: process.cwd() }` or `{ projectRoot: <repo> }`
+ * still writes into the real store, by design — an explicit location is
+ * honored. Catching that is the firewall scan's job, not this resolver's.
+ *
  * @param {{ storeDir?: string, projectRoot?: string, cwd?: string }} [opts]
  * @returns {string|null} the store directory, or null when `opts` carries a key
  *   outside {@link DECISION_STORE_OPTS}
@@ -528,10 +547,61 @@ export function getDecisionStoreDir(opts = {}) {
   const o = opts && typeof opts === 'object' ? opts : {};
   if (unknownStoreOptKeys(o).length > 0) return null;
   if (typeof o.storeDir === 'string' && o.storeDir) return o.storeDir;
-  const root = typeof o.projectRoot === 'string' && o.projectRoot
-    ? o.projectRoot
-    : resolveProjectRoot(typeof o.cwd === 'string' && o.cwd ? o.cwd : undefined);
-  return path.join(root, ...DECISIONS_REL);
+  if (typeof o.projectRoot === 'string' && o.projectRoot) {
+    return path.join(o.projectRoot, ...DECISIONS_REL);
+  }
+  if (typeof o.cwd === 'string' && o.cwd) {
+    return path.join(resolveProjectRoot(o.cwd), ...DECISIONS_REL);
+  }
+  const fallbackRoot = resolveProjectRoot(undefined);
+  return sandboxedFallbackStoreDir(fallbackRoot) ?? path.join(fallbackRoot, ...DECISIONS_REL);
+}
+
+/**
+ * The `ARTIBOT_DECISIONS_STORE_DIR` override for the no-location fallback, or
+ * null when it must not apply. Same shape as
+ * `lib/autopilot/session-store.js#getStoreDir`'s `ARTIBOT_AUTOPILOT_STORE_DIR`.
+ *
+ * `ARTIBOT_DECISIONS_STORE_DIR_ROOT` records the directory the override was
+ * minted from — `tests/setup/state-dir.js` stamps its raw `process.cwd()` —
+ * and the override is honored only while that directory and the current
+ * fallback resolve to the SAME project root. Environment variables are
+ * inherited by spawned processes, so a child started with a different cwd —
+ * another project, a sandbox repo — would otherwise have the parent's override
+ * ride along and receive the parent's store instead of its own.
+ *
+ * The stamp is resolved HERE, through `resolveProjectRoot`, rather than stored
+ * pre-resolved, for two reasons. Comparing roots rather than raw directories
+ * keeps a child that merely `cd`s into a subdirectory of the same project in
+ * the sandbox, matching how the fallback itself refuses to split one project's
+ * store by directory; and both sides of the comparison then come from one
+ * function. The setup file cannot do that resolution itself: importing
+ * `lib/git/project-root.js` there caches it (and `repo-root-cache.js`) in every
+ * test file's module graph before that file's `vi.mock` of those modules or of
+ * `node:child_process` can apply — measured 2026-09-23, 8 of 11 tests in
+ * `tests/git/` went red. The extra resolution runs only in this branch, i.e.
+ * only when the env is set AND the caller named no location.
+ *
+ * The pairing is REQUIRED: an override with no recorded root cannot be placed,
+ * and "cannot place" must not mean "trust". Compared through `sameDirPath` so a
+ * trailing separator or drive-letter case does not throw a good override away.
+ * Returned through `path.resolve`, one absolute path in the platform separator,
+ * for the reason `getStoreDir` gives. Read on every call, never captured at
+ * import: a value captured then is fixed before a test can set or clear it.
+ * Never throws — `resolveProjectRoot` always returns a path, and `sameDirPath`
+ * returns false on an unusable one.
+ *
+ * @param {string} fallbackRoot - `resolveProjectRoot(undefined)`, computed once
+ *   by the caller so the derived path and the pairing check share one reading.
+ * @returns {string|null}
+ */
+function sandboxedFallbackStoreDir(fallbackRoot) {
+  const override = process.env.ARTIBOT_DECISIONS_STORE_DIR;
+  if (!override) return null;
+  const mintedFrom = process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT;
+  if (!mintedFrom) return null;
+  if (!sameDirPath(resolveProjectRoot(mintedFrom), fallbackRoot)) return null;
+  return path.resolve(override);
 }
 
 /**
