@@ -1345,6 +1345,21 @@ describe('Check 9 item 9 resolves evidence_refs against the registry (SH-15)', (
     expect(result.items.missing_evidence_reference.status).toBe(CheckStatus.UNMEASURED);
   });
 
+  it('fails every non-E ref by name: pointers in frontmatter are never read past (SH-15b)', () => {
+    // The anti-fail-open pin. Scoping item 9 to E-ids would turn a regressed
+    // producer that writes pointers into frontmatter into a silent pass.
+    const pointers = ['ledger:verify.completed:s:v:operational', 'transcript:s'];
+    const result = health(pointers, ['E-001']);
+    expect(result.items.missing_evidence_reference.status).toBe(CheckStatus.FAIL);
+    expect(result.items.missing_evidence_reference.findings.map((f) => f.ref)).toEqual(pointers);
+  });
+
+  it('fails a mixed list on the non-E ref only (SH-15b)', () => {
+    const result = health(['E-001', 'ledger:x'], ['E-001']);
+    expect(result.items.missing_evidence_reference.status).toBe(CheckStatus.FAIL);
+    expect(result.items.missing_evidence_reference.findings.map((f) => f.ref)).toEqual(['ledger:x']);
+  });
+
   describe('the Check 9 prose', () => {
     const nine = () => checkSections(CURRENT).get('Check 9');
 
@@ -1378,18 +1393,41 @@ describe('Check 9 item 9 resolves evidence_refs against the registry (SH-15)', (
       expect(s).toMatch(/A deduped or\s+rejected line registers nothing/);
     });
 
-    it('names the non-E ref namespace the outcome hook writes, and calls its fail a mismatch', () => {
-      // The only production writer of outcome `evidence_refs` emits `ledger:` /
-      // `transcript:` pointers, never an E-id, so item 9 fails every such ref.
-      // Prose that read that fail as "never registered" would send the reader
-      // hunting for evidence that exists under another name.
+    it('calls a non-E ref in evidence_refs a producer regression that fails on purpose (SH-15b)', () => {
+      // The outcome hook now writes only registry ids to frontmatter, and its
+      // `ledger:` / `transcript:` pointers go to the ledger line and the body.
+      // A non-E ref is therefore a regression, and the prose must not excuse it
+      // as a known mismatch carried as a follow-up.
       const s = nine();
       expect(s).toContain('`scripts/hooks/mission-complete-record.js#evidencePointers`');
       expect(s).toContain('`ledger:<key>`');
       expect(s).toContain('`transcript:<sessionId>`');
-      expect(s).toMatch(/namespace mismatch,\s+not missing evidence/);
-      expect(s).toMatch(/`itemMissingEvidence`[\s\S]*outside this\s+check's files/);
+      expect(s).toMatch(/FAILS every other ref on purpose/);
+      expect(s).toMatch(/some producer\s+has regressed/);
+      expect(s).not.toMatch(/namespace mismatch/);
+      expect(s).not.toMatch(/outside this\s+check's files/);
       expect(s).not.toMatch(/says the evidence was\s+never registered/);
+    });
+
+    it('says the hook resolves ids read-only, so a lost registration is an omission (SH-15b)', () => {
+      const s = nine();
+      expect(s).toContain('`scripts/hooks/mission-complete-record.js#registeredEvidenceIds`');
+      expect(s).toContain('`lib/verification/evidence-registry.js#citedEvidenceIds`');
+      expect(s).toContain('`lib/verification/evidence-registry.js#lookupEvidenceIds`');
+      expect(s).toMatch(/omitted from `outcome\.md`, never as a fail/);
+    });
+
+    it('says the verify writer drop marker is registered but never cited (SH-15b)', () => {
+      const s = nine();
+      expect(s).toContain('`command: verify-writer:evidence-bound`');
+      expect(s).toMatch(/is registered but never cited/);
+    });
+
+    it('says [] passes because item 9 is not a presence rule, with a dated live figure (SH-15b)', () => {
+      const s = nine();
+      expect(s).toContain('**An outcome that cites nothing.**');
+      expect(s).toMatch(/judges dangling references, not presence/);
+      expect(s).toMatch(/0 of 23 declared missions carried verify\s+evidence as of 2026-09-23/);
     });
   });
 });

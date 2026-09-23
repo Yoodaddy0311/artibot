@@ -87,7 +87,8 @@
  * writer that took over. Nothing here detects that.
  *
  * ── Never throws on the write path ──────────────────────────────────────────
- * `registerEvidence` and `readEvidenceIds` turn every failure into a value: a
+ * `registerEvidence`, `readEvidenceIds`, `lookupEvidenceIds` and
+ * `citedEvidenceIds` turn every failure into a value: a
  * `reason` string with no ids, or `null` for "could not be read". A refused
  * call writes NOTHING. A partial registration would hand back ids for some
  * entries and silently drop the rest.
@@ -507,4 +508,113 @@ export function readEvidenceIds(projectRoot, { resolveGitCommonDir } = {}) {
     ids.push(id);
   }
   return ids;
+}
+
+/**
+ * The ids of entries that are already registered, found by content hash.
+ * READ-ONLY: it mints nothing and appends nothing, so an unregistered entry is
+ * simply absent from the answer.
+ *
+ * LOCK-FREE BY DESIGN. The writer (`allocateLocked`) only ever appends whole
+ * rows, each in one `appendFileSync`, and never rewrites or truncates. So a read
+ * racing an append sees a prefix of the file: every complete row is final, and
+ * at most the last line is torn. A torn line is a strict prefix of one
+ * `JSON.stringify`d object, which never parses, and `parseRows` skips it. The
+ * race therefore costs an omitted id, never a wrong one. Waiting on the lock
+ * would instead put a 6 s stall on a reader that can live with the omission.
+ *
+ * Each hash answers with the FIRST row's id, the one `allocateLocked` reuses.
+ *
+ * @param {string} projectRoot - Absolute project root.
+ * @param {Array<unknown>} entries - Evidence entries, as the ledger stores them.
+ *   An entry that cannot be hashed is skipped.
+ * @param {{ resolveGitCommonDir?: (projectRoot: string) => (string|null) }} [opts]
+ * @returns {string[]|null} Distinct ids in entry order. `[]` for no entries, an
+ *   absent registry, or no match. `null` when the registry exists but cannot be
+ *   read. Never throws.
+ */
+export function lookupEvidenceIds(projectRoot, entries, { resolveGitCommonDir } = {}) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  let text;
+  try {
+    text = readTextOrEmpty(evidenceRegistryPath(projectRoot, { resolveGitCommonDir }));
+  } catch {
+    return null;
+  }
+  const idByHash = new Map();
+  for (const row of parseRows(text)) {
+    if (typeof row.hash === 'string' && HASH_RE.test(row.hash) && !idByHash.has(row.hash)) {
+      idByHash.set(row.hash, row.id);
+    }
+  }
+  const ids = [];
+  for (const entry of entries) {
+    let hash;
+    try {
+      hash = evidenceHash(entry);
+    } catch {
+      continue;
+    }
+    const id = idByHash.get(hash);
+    if (id !== undefined && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+/** The ledger event whose `data.evidence` the registry holds (`./verify-writer.js#VERIFY_COMPLETED_EVENT`). */
+const VERIFY_EVENT = 'verify.completed';
+
+/**
+ * `command` of the entry `./verify-writer.js#fitLine` puts in place of evidence
+ * it dropped to fit the ledger line cap. That entry is a COUNT of what went, not
+ * evidence, so it is registered like any entry but never cited. Spelled here
+ * rather than imported because the writer does not export it. The test builds a
+ * real trimmed line through the writer and matches this against it.
+ */
+export const EVIDENCE_BOUND_COMMAND = 'verify-writer:evidence-bound';
+
+/**
+ * @param {unknown} entry
+ * @returns {boolean} true for the writer's drop marker
+ */
+function isDropMarker(entry) {
+  const e = /** @type {Record<string, unknown>|null} */ (entry);
+  return e?.kind === 'command' && e.command === EVIDENCE_BOUND_COMMAND;
+}
+
+/**
+ * The registry ids one verification's evidence resolves to: the ids an outcome
+ * cites (§23). Read-only, through {@link lookupEvidenceIds}.
+ *
+ * EVERY `verify.completed` row carrying `verificationId` counts, across all
+ * layers. The last row alone would not do: it is usually the `:operational`
+ * line with `evidence: []`. A row the ledger FOLDED has lost `verification_id`
+ * (`lib/runtime/event-writer.js#foldOversized` keeps only required keys), so its
+ * evidence is omitted rather than cited under a guess. The drop marker is
+ * never cited ({@link EVIDENCE_BOUND_COMMAND}).
+ *
+ * The rows must be the ledger's STORED rows, as `readAllEvents` returns them.
+ * The production ports register the stored, redacted form, so that is the form
+ * whose hash has a row.
+ *
+ * @param {object[]} history - Ledger rows, in ledger order.
+ * @param {string} verificationId
+ * @param {{ projectRoot?: string,
+ *   resolveGitCommonDir?: (projectRoot: string) => (string|null) }} [opts]
+ * @returns {string[]|null} As {@link lookupEvidenceIds}; `[]` for no
+ *   verification id or no evidence. Never throws.
+ */
+export function citedEvidenceIds(history, verificationId, { projectRoot, resolveGitCommonDir } = {}) {
+  if (typeof verificationId !== 'string' || !verificationId.trim() || !Array.isArray(history)) return [];
+  const entries = [];
+  try {
+    for (const row of history) {
+      if (row?.event !== VERIFY_EVENT || row.data?.verification_id !== verificationId) continue;
+      if (!Array.isArray(row.data.evidence)) continue;
+      for (const entry of row.data.evidence) if (!isDropMarker(entry)) entries.push(entry);
+    }
+  } catch {
+    return null;
+  }
+  return lookupEvidenceIds(/** @type {string} */ (projectRoot), entries, { resolveGitCommonDir });
 }

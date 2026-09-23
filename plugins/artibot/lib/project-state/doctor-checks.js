@@ -765,6 +765,7 @@ function itemLedgerStateMismatch(parity) {
 
 /**
  * Item 9 — an `evidence_refs` entry naming an id the registry does not hold.
+ * `[]` passes (a dangling-ref check, not presence); any non-E ref fails; not scoped.
  *
  * @param {object[]} missions - Normalised mission entries.
  * @param {string[]|undefined} evidenceIds - Ids the evidence registry holds.

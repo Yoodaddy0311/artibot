@@ -6,7 +6,8 @@
  * content gets the next sequential id; that a row carries only
  * id/type/source/hash/created_at and never the entry's payload; that
  * `registerEvidence` never throws; that `readEvidenceIds` tells an ABSENT
- * registry (`[]`, measured-and-empty) from an unreadable one (`null`); and that
+ * registry (`[]`, measured-and-empty) from an unreadable one (`null`); that
+ * `lookupEvidenceIds` answers by hash without the lock and without a write; and that
  * id allocation waits on the file lock, measured by a child process that is
  * held behind a live lock and appends only after it is released.
  *
@@ -32,8 +33,10 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -41,11 +44,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import { buildVerifyCompletedEvents, recordVerification } from '../../lib/verification/verify-writer.js';
+import { evidenceRegistryPort } from '../../scripts/ledger/record-verify.mjs';
 import {
+  citedEvidenceIds,
+  EVIDENCE_BOUND_COMMAND,
   evidenceHash,
   evidenceRegistryPath,
+  lookupEvidenceIds,
   readEvidenceIds,
   registerEvidence,
+  REGISTRY_LOCK_DEFAULTS,
   releaseLock,
 } from '../../lib/verification/evidence-registry.js';
 
@@ -267,6 +277,210 @@ describe('readEvidenceIds', () => {
     registerEvidence([cmd()], { projectRoot: root, source: SOURCE, now: AT, resolveGitCommonDir: port });
     expect(readEvidenceIds(root, { resolveGitCommonDir: port })).toEqual(['E-001']);
     expect(readEvidenceIds(root)).toEqual([]);
+  });
+});
+
+describe('lookupEvidenceIds', () => {
+  /** sha256 of the registry file, or 'absent'. */
+  const registrySha = () => {
+    const p = evidenceRegistryPath(root);
+    return existsSync(p) ? createHash('sha256').update(readFileSync(p)).digest('hex') : 'absent';
+  };
+
+  it('returns the id of content that was registered, matched by hash', () => {
+    reg([cmd('a'), file()]);
+    expect(lookupEvidenceIds(root, [file()])).toEqual(['E-002']);
+    // Same content in another key order is the same evidence.
+    expect(lookupEvidenceIds(root, [{ line: 12, file: 'lib/a.js', kind: 'file' }])).toEqual(['E-002']);
+  });
+
+  it('omits content that was never registered', () => {
+    reg([cmd('a')]);
+    expect(lookupEvidenceIds(root, [cmd('never'), cmd('a')])).toEqual(['E-001']);
+    expect(lookupEvidenceIds(root, [cmd('never')])).toEqual([]);
+  });
+
+  it('keeps the FIRST id when two rows share a hash, as the writer does', () => {
+    const p = evidenceRegistryPath(root);
+    mkdirSync(path.dirname(p), { recursive: true });
+    const h = evidenceHash(cmd('dup'));
+    writeFileSync(p, [
+      JSON.stringify({ id: 'E-004', type: 'command', source: 's', hash: h, created_at: 't' }),
+      JSON.stringify({ id: 'E-002', type: 'command', source: 's', hash: h, created_at: 't' }),
+      '',
+    ].join('\n'));
+    expect(lookupEvidenceIds(root, [cmd('dup')])).toEqual(['E-004']);
+    // The writer agrees: registering the same content reuses that first id.
+    expect(reg([cmd('dup')]).ids).toEqual(['E-004']);
+  });
+
+  it('returns [] for an absent registry, and creates nothing', () => {
+    expect(lookupEvidenceIds(root, [cmd()])).toEqual([]);
+    expect(existsSync(evidenceRegistryPath(root))).toBe(false);
+    expect(existsSync(path.dirname(evidenceRegistryPath(root)))).toBe(false);
+  });
+
+  it('returns null when the registry cannot be read, and never throws', () => {
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    expect(lookupEvidenceIds(root, [cmd()])).toBeNull();
+    expect(lookupEvidenceIds('', [cmd()])).toBeNull();
+    expect(lookupEvidenceIds(root, [cmd()], { resolveGitCommonDir: () => { throw new Error('x'); } }))
+      .toEqual([]);
+  });
+
+  it('skips a torn trailing line: a strict prefix of a row never parses', () => {
+    reg([cmd('a')]);
+    const p = evidenceRegistryPath(root);
+    const whole = JSON.stringify({
+      id: 'E-002', type: 'command', source: 's', hash: evidenceHash(cmd('b')), created_at: 't',
+    });
+    // Every strict prefix, the one a reader racing the append can see.
+    for (let cut = 1; cut < whole.length; cut += 1) {
+      writeFileSync(p, `${JSON.stringify({
+        id: 'E-001', type: 'command', source: 's', hash: evidenceHash(cmd('a')), created_at: 't',
+      })}\n${whole.slice(0, cut)}`);
+      expect(lookupEvidenceIds(root, [cmd('a'), cmd('b')])).toEqual(['E-001']);
+    }
+    writeFileSync(p, `${readFileSync(p, 'utf8').split('\n')[0]}\n${whole}\n`);
+    expect(lookupEvidenceIds(root, [cmd('a'), cmd('b')])).toEqual(['E-001', 'E-002']);
+  });
+
+  it('answers in entry order, each id once', () => {
+    reg([cmd('a'), cmd('b')]);
+    expect(lookupEvidenceIds(root, [cmd('b'), cmd('a'), cmd('b'), cmd('a')])).toEqual(['E-002', 'E-001']);
+  });
+
+  it('skips an entry it cannot hash, and a non-array list gives []', () => {
+    reg([cmd('a')]);
+    const loop = { kind: 'command' };
+    loop.self = loop;
+    expect(lookupEvidenceIds(root, [loop, cmd('a')])).toEqual(['E-001']);
+    expect(lookupEvidenceIds(root, undefined)).toEqual([]);
+    expect(lookupEvidenceIds(root, [])).toEqual([]);
+  });
+
+  it('never takes the lock and never writes: the registry bytes do not move', () => {
+    reg([cmd('a')]);
+    const p = evidenceRegistryPath(root);
+    const before = registrySha();
+    const mtime = statSync(p).mtimeMs;
+    expect(lookupEvidenceIds(root, [cmd('a'), cmd('new')])).toEqual(['E-001']);
+    expect(registrySha()).toBe(before);
+    expect(statSync(p).mtimeMs).toBe(mtime);
+    expect(readdirSync(path.dirname(p))).toEqual(['evidence.jsonl']);
+  });
+
+  it('does not wait behind a held lock, and leaves the holder alone', () => {
+    reg([cmd('a')]);
+    const lockPath = `${evidenceRegistryPath(root)}.lock`;
+    writeFileSync(lockPath, JSON.stringify({ token: 'held', pid: 1, timestamp: Date.now() }));
+    const t0 = Date.now();
+    expect(lookupEvidenceIds(root, [cmd('a')])).toEqual(['E-001']);
+    // A reader that queued behind this fresh lock would wait until the stale
+    // window (5 s) let it take the lock over, and then the holder's file would
+    // be gone, so both assertions below discriminate.
+    expect(Date.now() - t0).toBeLessThan(REGISTRY_LOCK_DEFAULTS.staleMs);
+    expect(readFileSync(lockPath, 'utf8')).toContain('held');
+  });
+
+  it('reads the same place the writer wrote through an injected port', () => {
+    const port = () => path.join(root, 'shared-common');
+    registerEvidence([cmd()], { projectRoot: root, source: SOURCE, now: AT, resolveGitCommonDir: port });
+    expect(lookupEvidenceIds(root, [cmd()], { resolveGitCommonDir: port })).toEqual(['E-001']);
+    expect(lookupEvidenceIds(root, [cmd()])).toEqual([]);
+  });
+});
+
+describe('citedEvidenceIds', () => {
+  const VID = 'v1-000000000000-20260923T030000Z';
+  const row = (evidence, over = {}) => ({
+    event: 'verify.completed', data: { layer: 'deterministic', result: 'pass', evidence, verification_id: VID, ...over },
+  });
+  const cite = (history, vid = VID) => citedEvidenceIds(history, vid, { projectRoot: root });
+
+  it('reads EVERY row of the verification, not only the last one', () => {
+    reg([cmd('a'), file()]);
+    // The last row is the operational line with no evidence: the lastOf trap.
+    const history = [row([file()]), row([cmd('a')], { layer: 'behavioral' }), row([], { layer: 'operational' })];
+    expect(cite(history)).toEqual(['E-002', 'E-001']);
+  });
+
+  it('cites only the given verification, and only verify.completed rows', () => {
+    reg([cmd('a'), cmd('b')]);
+    const history = [
+      row([cmd('a')], { verification_id: 'v-other' }),
+      { event: 'review.completed', data: { verification_id: VID, evidence: [cmd('a')] } },
+      row([cmd('b')]),
+    ];
+    expect(cite(history)).toEqual(['E-002']);
+  });
+
+  it('omits a FOLDED row, which has lost its verification_id', () => {
+    reg([cmd('a')]);
+    const folded = row([cmd('a')]);
+    delete folded.data.verification_id;
+    delete folded.data.layer;
+    folded.data.evidence_refs = ['ledger-fold:dropped=layer,verification_id'];
+    expect(cite([folded])).toEqual([]);
+  });
+
+  it('gives [] for no verification id or no history, and null for an unreadable registry', () => {
+    expect(cite([row([cmd()])], null)).toEqual([]);
+    expect(cite([row([cmd()])], '  ')).toEqual([]);
+    expect(cite(undefined)).toEqual([]);
+    expect(cite([row('not an array')])).toEqual([]);
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    expect(cite([row([cmd()])])).toBeNull();
+  });
+
+  /**
+   * Evidence too large for one ledger line, so `verify-writer.js#fitLine`
+   * drops entries from the end and appends its count marker. `command` is an
+   * identity field the writer never shortens, so only dropping can make it fit.
+   */
+  const oversized = () => Array.from({ length: 30 }, (_, i) => ({
+    kind: 'command', command: `npx vitest run tests/case-${i}/${'segment/'.repeat(25)}`,
+  }));
+  const trimmedVerdict = () => ({
+    verification_id: VID, status: 'PASS', evidence: [],
+    layers: [
+      { layer: 'deterministic', status: 'PASS', evidence: oversized() },
+      { layer: 'behavioral', status: 'PASS', evidence: [] },
+      { layer: 'operational', status: 'PASS', evidence: [] },
+    ],
+  });
+
+  it('spells the drop marker exactly as the writer builds it (drift pin)', () => {
+    const built = buildVerifyCompletedEvents(trimmedVerdict(), { sessionId: 'sess-er-01' });
+    expect(built.ok).toBe(true);
+    const evidence = built.inputs.find((i) => i.data.layer === 'deterministic').data.evidence;
+    const markers = evidence.filter((e) => e.command === EVIDENCE_BOUND_COMMAND);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].kind).toBe('command');
+    expect(evidence.at(-1)).toBe(markers[0]);
+    expect(evidence.length).toBeGreaterThan(1);
+    expect(evidence.length).toBeLessThan(31);
+  });
+
+  it('never cites the drop marker, although the production port registers it', () => {
+    const res = recordVerification(trimmedVerdict(), { sessionId: 'sess-er-01' }, {
+      append: (input) => appendLedgerEvent(root, input),
+      registerEvidence: evidenceRegistryPort(root),
+    });
+    expect(res.appended).toBe(4);
+    const history = readAllEvents(root);
+    const stored = history.find((e) => e.data?.layer === 'deterministic').data.evidence;
+    const marker = stored.at(-1);
+    expect(marker.command).toBe(EVIDENCE_BOUND_COMMAND);
+    const [markerId] = lookupEvidenceIds(root, [marker]);
+    // The marker IS registered: one row per stored entry, the marker included.
+    expect(readEvidenceIds(root)).toHaveLength(stored.length);
+    expect(readEvidenceIds(root)).toContain(markerId);
+
+    const cited = citedEvidenceIds(history, VID, { projectRoot: root });
+    expect(cited).toEqual(lookupEvidenceIds(root, stored.slice(0, -1)));
+    expect(cited).toHaveLength(stored.length - 1);
+    expect(cited).not.toContain(markerId);
   });
 });
 

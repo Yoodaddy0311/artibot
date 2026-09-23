@@ -41,9 +41,8 @@
  *    done. The wide condition exists to create a DENOMINATOR; narrowing it to
  *    "review PASS and every question resolved" would have measured zero on the
  *    live ledger (`review.completed` 0 rows, `human.resolved` 0 rows).
- *  ② THE ONLY INPUT IS LEDGER ROWS. There is no self-report channel, no
- *    transcript read, no model call. A mission whose work never reached the
- *    ledger is invisible here and is not a smaller number — it is absent.
+ *  ② THE INPUT IS LEDGER ROWS, plus a read-only evidence-registry lookup. No
+ *    self-report, transcript or model call: unledgered work is absent, not fewer.
  *  ③ `{accepted: null}` IS A TRIGGER, NOT A COMPLETION.
  *    `lib/runtime/ledger.js#currentMission` reads a null `accepted` as an OPEN
  *    mission, which is the intended reading: the 7-day observation window
@@ -197,7 +196,7 @@ export function missionCompletedIdempotencyKey(missionId) {
 export async function loadDeps() {
   const [
     git, ledger, lifecycle, gates, tasks, commonDir, file, platform, outcome, missionIds,
-    planning, review,
+    planning, review, registry,
   ] = await Promise.all([
       import('../../lib/git/project-root.js'),
       import('../../lib/runtime/ledger.js'),
@@ -211,6 +210,7 @@ export async function loadDeps() {
       import('../../lib/mission/mission-id.js'),
       import('../../lib/planning/plan-artifact.js'),
       import('../../lib/review/review-artifact.js'),
+      import('../../lib/verification/evidence-registry.js'),
     ]);
   return {
     resolveProjectRoot: git.resolveProjectRoot,
@@ -236,6 +236,7 @@ export async function loadDeps() {
     reviewArtifactPath: review.reviewArtifactPath,
     parseReviewMd: review.parseReviewMd,
     FIRST_REVIEW_REVISION: review.FIRST_REVIEW_REVISION,
+    citedEvidenceIds: registry.citedEvidenceIds,
   };
 }
 
@@ -279,15 +280,12 @@ export function policyFromConfig(config) {
 }
 
 /**
- * The evidence pointers for one mission's declaration (decision 7 (a)).
- *
- * POINTER STRINGS, NOT A REGISTRY. There is no Evidence Registry writer in the
- * tree, and `human.asked.data.evidence_refs` already carries free-form pointer
- * strings on the live ledger, so this spelling conflicts with nothing. A ref is
- * `ledger:<idempotency_key>` when the row carries one and
- * `ledger:<event>:<mission>` when it does not — the fallback is deliberately
- * ambiguous BY MISSION rather than invented per row, because a fabricated key
- * would resolve to nothing and read as if it did.
+ * The evidence pointers for one mission (decision 7 (a)): POINTER STRINGS for
+ * the `mission.completed` line and outcome.md's `## Changes` body (never empty,
+ * as a section must be), never its frontmatter, which holds §23 ids
+ * ({@link registeredEvidenceIds}). A ref is `ledger:<idempotency_key>` when the
+ * row carries one, else `ledger:<event>:<mission>` — ambiguous BY MISSION on
+ * purpose, because a fabricated per-row key would resolve to nothing.
  *
  * @param {object[]} history full mission history, ledger order
  * @param {string} sessionId
@@ -301,6 +299,13 @@ export function evidencePointers(history, sessionId) {
   if (lastReview !== null) refs.push(pointerFor(lastReview, 'review.completed'));
   refs.push(`transcript:${sessionId}`);
   return refs;
+}
+
+/** §23 ids per `lib/verification/evidence-registry.js#citedEvidenceIds`; `[]` for null or a throw. */
+export function registeredEvidenceIds(d, projectRoot, history, verificationId) {
+  try {
+    return d.citedEvidenceIds(history, verificationId, { projectRoot, resolveGitCommonDir: d.resolveGitCommonDir }) ?? [];
+  } catch { return []; }
 }
 
 /** The last row of `event` in ledger order, or null. */
@@ -564,7 +569,7 @@ function outcomeSections(ctx) {
       'accepted: null — 판정 유예. 완료 선언이지 완료가 아니다',
       '이 줄은 7일 관측 창(design §D3)이 닫힐 때 두 번째 줄로 확정된다',
     ],
-    changes: ctx.evidenceRefs.map((ref) => `evidence: ${ref}`),
+    changes: evidencePointers(ctx.history, ctx.sessionId).map((ref) => `evidence: ${ref}`),
     verification: verificationLines(ctx.planResult),
     review: [
       `last verdict: ${str(ctx.lastVerdict) ?? 'none recorded'}`,
@@ -631,7 +636,7 @@ function writeOutcome(d, ctx) {
       reviewRevision: ctx.missionState.reviewRevision,
     },
     verificationId: ctx.verificationId,
-    evidenceRefs: ctx.evidenceRefs,
+    evidenceRefs: registeredEvidenceIds(d, ctx.projectRoot, ctx.history, lastVerificationId(ctx.history)),
     // Never `supersedes`: the serializer REFUSES it beside `accepted: null`.
     accepted: null,
     actor: ACTOR,
@@ -683,9 +688,9 @@ function processMission(d, ctx) {
     write = classified.wouldWrite
       ? writeOutcome(d, {
         ...ctx,
+        history: full,
         planResult: classified.planResult,
         missionState: classified.missionState,
-        evidenceRefs: evidencePointers(full, ctx.sessionId),
         verificationId: lastVerificationId(full) ?? `${VERIFY_EVENT}:${ctx.missionId}`,
         lastVerdict: verdict,
       })
