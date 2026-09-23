@@ -7,13 +7,14 @@
  * @module lib/autopilot/safety
  */
 
+import { GIT_BRANCH_DELETE_MATCHER } from '../core/blocked-patterns.js';
 import { blankPrinterSegments } from '../core/command-segments.js';
 
 /**
  * Pattern catalogue used by classifyRisk. Each entry has:
  *  - id: unique identifier
  *  - level: 'caution' | 'danger'
- *  - test: RegExp to match against the command/text payload
+ *  - test: RegExp (or a matcher with the same `.test()`) for the payload
  *  - reason: human readable reason
  *
  * lib/core/blocked-patterns.js (L1, PreToolUse) is the canonical block list;
@@ -56,40 +57,16 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   { id: 'git-force-push', level: 'danger', test: /\bgit\s+push\b[^\n;&|]{0,192}--force(?!-with-lease|-if-includes)\b/i, reason: 'Destructive git push --force' },
   { id: 'git-force-push-lease', level: 'caution', test: /\bgit\s+push\b[^\n;&|]{0,192}--force-(?:with-lease|if-includes)\b/i, reason: 'Checked force push (--force-with-lease/--force-if-includes) — allowed at PreToolUse, still rewrites remote history' },
   { id: 'git-force-push-short', level: 'danger', test: /\bgit\s+push\b[^\n;&|]{0,192}\s-f(?![\w-])/i, reason: 'Destructive git push -f' },
-  // Owner decision 2026-09-11 ④: CASE HANDLING IS DELIBERATE AND UNEVEN.
-  // `git` is matched case-insensitively ([gG][iI][tT]) because a shell resolves
-  // `GIT branch` fine; `branch` stays lowercase because git itself rejects
-  // `git BRANCH` ("is not a git command", measured 2026-09-11); `-D` stays
-  // case-sensitive because that single letter is the whole point — `-D`
-  // force-deletes an unmerged branch and `-d` refuses to. The /i flag this rule
-  // used to carry collapsed the last distinction and made the safe everyday
-  // `git branch -d topic` register as danger.
-  // Three shapes count as a force delete:
-  //   1. a short-flag bundle containing uppercase D  (-D, -qD, -Dv, -Df)
-  //   2. a delete flag AND a force flag anywhere     (-fd, -df, -f -d)
-  //   3. --delete together with --force
-  // "anywhere" is literal: the option run also steps over non-option arguments,
-  // so a flag AFTER the branch name counts (`git branch -d topic -f`, which git
-  // really does honour). The run ends at a shell separator (; & |) and at a
-  // NEWLINE, but a BACKSLASH line continuation (`\` + LF, or `\` + CRLF) is
-  // whitespace inside one command, so it keeps the run open.
-  // Without the newline bound a `-f` on a later line of a multi-line script
-  // satisfied the force lookahead and `git branch -d old\nrm -rf build` was
-  // graded danger (measured 2026-09-11, 2 false positives). Since 2026-09-11
-  // guard-registry.js#normalizeCommand preserves bare newlines — it joins
-  // backslash continuations, normalizes CRLF to LF and folds only intra-line
-  // whitespace — so L1 and L2 share this boundary; see the git-branch-delete
-  // comment in lib/core/blocked-patterns.js and the parity matrix row.
-  // Run tokens stay unambiguous: the option branch demands a dash then \w, the
-  // argument branch forbids a leading dash, the continuation branch starts with
-  // a backslash, and each flag token's first run excludes its mandatory letter
-  // (D / d / f, 2026-09-23 swap), so one long flag run is linear. A line of
-  // repeated `git branch ` starts is STILL quadratic (open residual) — numbers
-  // in the git-branch-delete comment of lib/core/blocked-patterns.js.
+  // Owner decision 2026-09-11 ④ (`git` any case, `branch` lowercase, `-D`
+  // case-sensitive) and the three force-delete shapes. Since 2026-09-23 L1 and
+  // L2 share ONE linear scanner object instead of two byte-identical copies of
+  // a regex that went quadratic on repeated `git branch ` starts. Language,
+  // newline/continuation boundary and measurements: the git-branch-delete
+  // comment and the scanner block in lib/core/blocked-patterns.js.
   {
     id: 'git-branch-delete',
     level: 'danger',
-    test: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-CE-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-ce-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-eg-z]*f[a-z]*)(?![\w-])))/,
+    test: GIT_BRANCH_DELETE_MATCHER,
     reason: 'Force-delete git branch (-D / --delete --force)',
   },
   { id: 'git-reset-hard', level: 'danger', test: /\bgit\s+reset\s+--hard\b/i, reason: 'git reset --hard discards work' },

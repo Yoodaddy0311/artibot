@@ -6,7 +6,9 @@
 
 /**
  * @typedef {Object} BlockedPattern
- * @property {RegExp} pattern - Regex to match against command strings
+ * @property {RegExp|{test: (command: string) => boolean}} pattern - Regex to
+ *   match against command strings, or a frozen matcher with the same `.test()`
+ *   contract (GIT_BRANCH_DELETE_MATCHER below — the only one, 2026-09-23)
  * @property {string} label - Human-readable description of the threat
  * @property {string} category - Pattern category for organization
  * @property {RegExp[]} [safeOverrides] - Flags that make THIS rule's match safe
@@ -25,6 +27,199 @@
  *   a genuine per-rule exemption; `tests/core/blocked-patterns.test.js` pins the
  *   zero-consumer state so this paragraph cannot rot silently.
  */
+
+// >>> git-branch-delete scanner
+// Linear hand-written scanner for the `git-branch-delete` rule, shared by L1
+// (BLOCKED_PATTERNS below) and L2 (lib/autopilot/safety.js). It accepts EXACTLY
+// the language of the regex both layers carried until 2026-09-23 (no flags,
+// UTF-16 code units), with S = (?:[^\S\n]|\\\r?\n) and
+// RUN = (?:S+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*:
+//   \b[gG][iI][tT]S+branch\b(?:(?=RUN S+ -[a-zA-CE-Z]*D[a-zA-Z]*(?![\w-]))
+//     |(?=RUN S+ (?:--delete|-[a-ce-z]*d[a-z]*)(?![\w-]))
+//      (?=RUN S+ (?:--force|-[a-eg-z]*f[a-z]*)(?![\w-])))
+// That regex re-scanned the rest of the line from every `git branch` start,
+// so a line of repeated starts was quadratic; this scanner is one pass.
+// How it maps onto the regex:
+//  - Heads: every `\b` + g/G i/I t/T + S+ + `branch` + `\b` injects a start
+//    at the end of `branch`. A head's S run holds only S units and each head
+//    begins with a `g`, so the head scans never overlap.
+//  - The lookahead prefix `RUN S+` is simulated as an NFA over the states
+//    below, one position at a time. Starts that reach the same state merge.
+//  - A flag can begin wherever `RUN S+` has just ended (state SEP) and the
+//    unit there is `-`. A bundle flag needs its MAXIMAL letter run: stopping
+//    earlier leaves a letter next, which is \w and fails (?![\w-]).
+//  - Each state keeps the set of flag histories seen by the paths reaching it
+//    (bit h for h in none=0 / delete=1 / force=2; delete+force is a match).
+//    Tracking the history per path equals "delete reachable AND force
+//    reachable from the same start": a flag position q1 is preceded by a \s
+//    unit, which no token can contain, so every parse reaching a later flag
+//    position of that start passes through q1 in state SEP as well.
+//  - The only parse ambiguity (`\` is both a token character and the start of
+//    a continuation) is kept as two live states, never resolved greedily.
+
+/** NFA states of the option-run prefix `RUN S+`. */
+const GBD_NEED_SEP = 0; // an S unit must come next (start, or right after a token)
+const GBD_SEP = 1; // one or more S units consumed: a flag or a token may start
+const GBD_DASH = 2; // option `-` consumed: `-` or \w next
+const GBD_DASH2 = 3; // option `--` consumed: \w next
+const GBD_TOKEN = 4; // inside a token body; the token may end here
+const GBD_BACKSLASH = 5; // continuation `\` consumed: LF or CR next
+const GBD_BACKSLASH_CR = 6; // continuation `\` CR consumed: LF next
+const GBD_STATE_COUNT = 7;
+
+/** Flag kinds found at one `-` position. DELETE and FORCE double as history bits. */
+const GBD_DELETE = 1;
+const GBD_FORCE = 2;
+const GBD_UPPER_D = 4;
+
+/** JS `\s` for one UTF-16 code unit: ASCII by table, the rest by the engine itself. */
+function gbdIsSpace(code) {
+  if (code < 128) return (code >= 9 && code <= 13) || code === 32;
+  return /\s/.test(String.fromCharCode(code));
+}
+
+/** JS `\w` without the u/i flags: [A-Za-z0-9_]. */
+function gbdIsWord(code) {
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122) || code === 95;
+}
+
+/** `(?![\w-])` at `pos`. */
+function gbdEndsFlag(text, pos) {
+  if (pos >= text.length) return true;
+  const code = text.charCodeAt(pos);
+  return !gbdIsWord(code) && code !== 45;
+}
+
+/** Flag kinds of the token starting at `q` (text[q] is `-`). */
+function gbdFlagsAt(text, q) {
+  let flags = 0;
+  if (text.startsWith('--delete', q) && gbdEndsFlag(text, q + 8)) flags |= GBD_DELETE;
+  if (text.startsWith('--force', q) && gbdEndsFlag(text, q + 7)) flags |= GBD_FORCE;
+  let end = q + 1;
+  let upperD = false;
+  let lowerD = false;
+  let lowerF = false;
+  let allLower = true;
+  for (; end < text.length; end += 1) {
+    const code = text.charCodeAt(end);
+    if (code >= 97 && code <= 122) {
+      if (code === 100) lowerD = true;
+      if (code === 102) lowerF = true;
+    } else if (code >= 65 && code <= 90) {
+      allLower = false;
+      if (code === 68) upperD = true;
+    } else {
+      break;
+    }
+  }
+  if (end === q + 1 || !gbdEndsFlag(text, end)) return flags;
+  if (upperD) flags |= GBD_UPPER_D;
+  if (allLower && lowerD) flags |= GBD_DELETE;
+  if (allLower && lowerF) flags |= GBD_FORCE;
+  return flags;
+}
+
+/** One S unit at `pos`: its length (1 or 2 or 3), or 0 when none starts there. */
+function gbdSepLength(text, pos) {
+  const code = text.charCodeAt(pos);
+  if (code !== 10 && gbdIsSpace(code)) return 1;
+  if (code !== 92) return 0;
+  if (text.charCodeAt(pos + 1) === 10) return 2;
+  return text.charCodeAt(pos + 1) === 13 && text.charCodeAt(pos + 2) === 10 ? 3 : 0;
+}
+
+/** End of `branch` when a head `\b git S+ branch \b` starts at `i`, else -1. */
+function gbdHeadEnd(text, i) {
+  const g = text.charCodeAt(i);
+  const iCode = text.charCodeAt(i + 1);
+  const t = text.charCodeAt(i + 2);
+  if ((g !== 103 && g !== 71) || (iCode !== 105 && iCode !== 73) || (t !== 116 && t !== 84)) return -1;
+  if (i > 0 && gbdIsWord(text.charCodeAt(i - 1))) return -1;
+  let pos = i + 3;
+  for (let len = gbdSepLength(text, pos); len > 0; len = gbdSepLength(text, pos)) pos += len;
+  if (pos === i + 3 || !text.startsWith('branch', pos)) return -1;
+  const end = pos + 6;
+  return end < text.length && gbdIsWord(text.charCodeAt(end)) ? -1 : end;
+}
+
+/** Adds `flags` to every history in `set`; -1 when a history becomes delete+force. */
+function gbdApplyFlags(set, flags) {
+  let next = 0;
+  for (let h = 0; h < 3; h += 1) {
+    if (set & (1 << h)) {
+      const seen = h | flags;
+      if (seen === 3) return -1;
+      next |= 1 << seen;
+    }
+  }
+  return next;
+}
+
+/** Consumes one code unit: fills `next` from `cur`. */
+function gbdStep(cur, next, code) {
+  next.fill(0);
+  const space = gbdIsSpace(code);
+  const tokenChar = !space && code !== 59 && code !== 38 && code !== 124;
+  const open = cur[GBD_NEED_SEP] | cur[GBD_SEP];
+  if (space && code !== 10) next[GBD_SEP] |= open;
+  if (code === 92) next[GBD_BACKSLASH] |= open;
+  if (code === 45) next[GBD_DASH] |= cur[GBD_SEP];
+  else if (tokenChar) next[GBD_TOKEN] |= cur[GBD_SEP];
+  if (code === 45) next[GBD_DASH2] |= cur[GBD_DASH];
+  if (gbdIsWord(code)) next[GBD_TOKEN] |= cur[GBD_DASH] | cur[GBD_DASH2];
+  if (tokenChar) next[GBD_TOKEN] |= cur[GBD_TOKEN];
+  if (code === 10) next[GBD_SEP] |= cur[GBD_BACKSLASH] | cur[GBD_BACKSLASH_CR];
+  if (code === 13) next[GBD_BACKSLASH_CR] |= cur[GBD_BACKSLASH];
+}
+
+/**
+ * True when `command` contains a force delete of a git branch — the exact
+ * language of the regex quoted at the top of this block, in O(n).
+ * @param {string} command
+ * @returns {boolean}
+ */
+export function matchesGitBranchDelete(command) {
+  const text = command;
+  if (text.indexOf('branch') === -1) return false;
+  let cur = new Uint8Array(GBD_STATE_COUNT);
+  let next = new Uint8Array(GBD_STATE_COUNT);
+  // One pending start is enough: heads never overlap, and the next head
+  // begins strictly after this one's end (the `\b` there refuses a `g`).
+  let pendingStart = -1;
+  for (let p = 0; p <= text.length; p += 1) {
+    if (p === pendingStart) cur[GBD_NEED_SEP] |= 1;
+    // A token may end anywhere; the next unit must then be an S unit.
+    cur[GBD_NEED_SEP] |= cur[GBD_TOKEN];
+    if (cur[GBD_SEP] !== 0 && text.charCodeAt(p) === 45) {
+      const flags = gbdFlagsAt(text, p);
+      if (flags & GBD_UPPER_D) return true;
+      const set = gbdApplyFlags(cur[GBD_SEP], flags & (GBD_DELETE | GBD_FORCE));
+      if (set === -1) return true;
+      cur[GBD_SEP] = set;
+    }
+    if (p === text.length) break;
+    const headEnd = gbdHeadEnd(text, p);
+    if (headEnd !== -1) pendingStart = headEnd;
+    gbdStep(cur, next, text.charCodeAt(p));
+    [cur, next] = [next, cur];
+  }
+  return false;
+}
+
+/**
+ * The matcher both layers plug in where a RegExp used to sit. Only `.test()`
+ * is offered — the one method checkDangerousCommand and classifyRisk call;
+ * String() mirrors RegExp.prototype.test's coercion of its argument.
+ */
+export const GIT_BRANCH_DELETE_MATCHER = Object.freeze({
+  kind: 'linear-scanner',
+  id: 'git-branch-delete',
+  test(command) {
+    return matchesGitBranchDelete(String(command));
+  },
+});
+// <<< git-branch-delete scanner
 
 /**
  * All blocked command patterns, organized by category.
@@ -288,9 +483,10 @@ const BLOCKED_PATTERNS = Object.freeze([
   // position on BOTH layers, not loosening this one.
   { pattern: /git\s+checkout\s+(?:--\s+)?\.(?=\s|$)/i, label: 'git checkout . (discard all changes)', category: 'git' },
   { pattern: /git\s+restore\s+(?:--\s+)?\.(?=\s|$)/i, label: 'git restore . (discard all changes)', category: 'git' },
-  // Owner decision 2026-09-11 ④. Kept byte-identical to the `git-branch-delete`
-  // rule in lib/autopilot/safety.js — the two layers judge the same shapes, and
-  // a drift between them is exactly what this decision was cleaning up.
+  // Owner decision 2026-09-11 ④. The `git-branch-delete` rule in
+  // lib/autopilot/safety.js uses the SAME matcher object (since 2026-09-23;
+  // until then a byte-identical regex) — the two layers judge the same shapes,
+  // and a drift between them is exactly what this decision was cleaning up.
   // Case handling is deliberate and uneven: `git` case-insensitive (a shell
   // resolves `GIT branch`), `branch` lowercase (git rejects `git BRANCH` —
   // "is not a git command", measured 2026-09-11), `-D` case-sensitive (that
@@ -305,19 +501,21 @@ const BLOCKED_PATTERNS = Object.freeze([
   // "anywhere" includes after the branch name (`git branch -d topic -f`, which
   // git really does honour). A backslash line continuation (`\` + LF or CRLF)
   // keeps the run open — it is one command.
-  // THE NEWLINE BOUND IN THIS PATTERN NOW REACHES L1 BEHAVIOUR. The pattern
+  // THE NEWLINE BOUND IN THIS MATCHER NOW REACHES L1 BEHAVIOUR. The matcher
   // stops an option run at a bare newline, and normalizeCommand
   // (guard-registry.js#normalizeCommand) preserves that newline: it joins a
   // backslash continuation (`\` + LF or CRLF) into one space, normalizes CRLF
   // to LF, and folds only intra-line whitespace. It used to collapse every \s+
-  // run — including bare newlines — to one space, which made this pattern's
+  // run — including bare newlines — to one space, which made the rule's
   // newline bound invisible on the normalized variant. So L1 and L2 now share
   // the newline boundary: `git branch -d old\necho -f done` is L1 approve /
   // L2 safe, pinned through executeChain in tests/core/guard-registry.test.js
   // and as a row in the parity matrix.
-  // Tokens and separators cannot parse two ways — the option branch demands a
-  // dash then \w, the argument branch forbids a leading dash, the continuation
-  // branch starts with a backslash (never whitespace).
+  // The old regex's tokens were nearly unambiguous — the option branch demands
+  // a dash then \w, the argument branch forbids a leading dash — but NOT fully:
+  // `\` is a legal token character AND the start of a continuation, so
+  // `x\` + LF parses as token `x` + continuation (the other parse dies at the
+  // LF). The scanner keeps both parses alive rather than choosing one.
   // THAT ALONE DID NOT MAKE THE SCAN LINEAR. This comment used to say "120KB
   // adversarial input < 1ms, measured" (and safety.js "< 5ms"); both were
   // measured on shapes that never reach the two quadratics below.
@@ -346,24 +544,40 @@ const BLOCKED_PATTERNS = Object.freeze([
   // 1.23-3.93 ms, classifyRisk 2.18-5.56 ms. Language: 524,286 commands per
   // layer (flag tokens over {d,D,f,F,x,9,_,-} at every length 0..5, 14
   // templates), 0 mismatches against a FROZEN copy of the old rule in
-  // tests/autopilot/safety.test.js, which also pins L1 === L2 byte for byte.
-  // OPEN RESIDUAL — NOT FIXED, PENDING AN OWNER DECISION. A line of repeated
-  // `git branch ` starts is quadratic before AND after the swap: each start
-  // re-scans the rest of the line through the option-run lookaheads. Leader
-  // measurements 2026-09-23 11:21 KST (node v24.15.0, `'git branch '` repeated
-  // to ~2,500 / 5,000 / 10,000 / 20,000B, rounded up to a multiple of 11):
-  // the swap-candidate regex (same source as committed) 4.7 / 22.2 / 92.0 /
-  // 378.7 ms rule alone; the PRE-swap code at 122,880B 15,018 ms rule alone
-  // and 13,143 ms through classifyRisk (the flag tokens do not touch this
-  // shape, so the verdict carries over) — past the 5s PreToolUse budget.
-  // Re-measured on the committed rule, 12:13 KST, same sizes: L2 3.97 / 10.91
-  // / 47.66 / 182.01 ms, L1 4.12 / 10.53 / 38.70 / 156.32 ms. A
-  // timed-out hook does not block (fail-open per the host docs; not reproduced
-  // live, see CHANGELOG). Any fix (a window, an anchor) changes the accepted
-  // language, so it is not part of this swap, and no scaled payload covers the
-  // shape on purpose (it would be RED).
+  // tests/autopilot/safety.test.js, which then also pinned L1 === L2 byte for
+  // byte (now: the same matcher object on both layers).
+  // MANY-START QUADRATIC, FIXED 2026-09-23 (guard-branch-delete-scanner). The
+  // swap left one shape: a line of repeated `git branch ` starts, where each
+  // start re-scanned the rest of the line through the option-run lookaheads.
+  // Measured 2026-09-23 11:21-12:13 KST (node v24.15.0, rule alone, ~2,500 /
+  // 5,000 / 10,000 / 20,000B): L2 3.97 / 10.91 / 47.66 / 182.01 ms, L1 4.12 /
+  // 10.53 / 38.70 / 156.32 ms; the pre-swap code at 122,880B 15,018 ms rule
+  // alone and 13,143 ms through classifyRisk — past the 5s PreToolUse budget,
+  // where a timed-out hook does not block (fail-open per the host docs; not
+  // reproduced live, see CHANGELOG). Owner decision 2026-09-23: no window or
+  // anchor (either changes the accepted language); the regex is replaced by
+  // the linear scanner at the top of this file, which accepts EXACTLY the old
+  // language. Measured 2026-09-23 14:19 KST (node v24.15.0, matcher alone,
+  // distinct payload per run, median of 3; n = 2,500 / 5,000 / 10,000 /
+  // 20,000 / 122,880):
+  //   `'git branch '` repeated to n bytes 1.07 / 0.98 / 1.38 / 2.74 / 6.80 ms
+  //   `git branch -` + d x n + `_`        0.27 / 0.23 / 0.60 / 1.07 / 6.36 ms
+  //   `git branch -` + D x n + `_`        0.21 / 0.18 / 0.33 / 1.17 / 6.82 ms
+  //   `git branch -d -` + f x n + `_`     0.17 / 0.32 / 0.59 / 0.91 / 5.74 ms
+  // Same process, the master regex at 5d6de98a (post-swap; the same source as
+  // FROZEN_SWAPPED_BRANCH_DELETE in tests/autopilot/safety.test.js) on the
+  // first shape up to 20,000B: 3.46 / 12.48 / 73.68 / 370.74 ms. The last cell
+  // is not a payload effect — timed alone at 14:45 KST (median of 9) the same
+  // regex gives 135.6 ms on the same 20,000B payload and 143.4 ms on a plain
+  // 20,480B fill; the prior p1 run gave 244.78 ms. The spread between runs is
+  // not isolated. At ~122,880B classifyRisk 6.65-14.39 ms and
+  // executeChain 18.90-20.14 ms across the four shapes. Language: the scanner
+  // against a copy of the old regex, 0 mismatches — 1,583,040 inputs per seed
+  // (600,000 random over git/branch/flag/separator pieces + every UTF-16 code
+  // unit in 15 slot templates), seeds 20260923 and 1; the pinned comparison
+  // against FROZEN_OLD_BRANCH_DELETE lives in tests/autopilot/safety.test.js.
   {
-    pattern: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-CE-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-ce-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-eg-z]*f[a-z]*)(?![\w-])))/,
+    pattern: GIT_BRANCH_DELETE_MATCHER,
     label: 'git branch -D (force delete)',
     category: 'git',
   },

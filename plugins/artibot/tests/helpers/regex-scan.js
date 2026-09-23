@@ -25,15 +25,17 @@
  * git push 규칙 3종)은 전부 "<단어> <한 줄 아무거나> <토큰>" 모양이었고, 가운데
  * 런이 **공백을 넘어 여러 토큰을 가로지를 수 있어서** 단어가 나올 때마다 줄
  * 끝까지 재스캔했다. 공백을 못 넘는 런은 토큰 하나 안에 갇힌다. 3번 없이
- * 돌리면 git-branch-delete 의 토큰 본체 `[^\s;&|]*` 가 L1·L2 양쪽에서 6건씩
- * RED 가 된다(2026-09-11 12:10 UTC 실측). 그 12건은 **이 조건의 판정 대상으로서**
+ * 돌리면 당시 git-branch-delete 정규식의 토큰 본체 `[^\s;&|]*` 가 L1·L2 양쪽에서
+ * 6건씩 RED 가 됐다(2026-09-11 12:10 UTC 실측). 그 12건은 **이 조건의 판정 대상으로서**
  * 오탐이다 — 토큰 본체 런 하나는 공백을 못 넘는다. 3번의 근거는 그것뿐이다.
  * **철회(2026-09-23)**: 종전 이 자리는 "그 규칙은 120KB 적대 입력에서 선형인
- * 것이 이미 측정돼 있다"를 근거로 들었다. **틀렸다** — 그 규칙은 두 모양에서
- * 2차식이다. (a) 플래그 토큰의 1-b 형(아래 "못 보는 것" 1-b, 이 줄기에서 수리)
- * (b) `'git branch '` 반복의 다중 시작점(아래 3, 미수리). 둘 다 3번이 가린 것이
- * 아니라 다른 기전이다. 선형 주장의 근거가 된 측정은 그 두 모양을 안 밟은
- * 것으로 보인다(추론 — 그 측정의 payload 원문은 이 파일에 없다).
+ * 것이 이미 측정돼 있다"를 근거로 들었다. **틀렸다** — 그 정규식은 두 모양에서
+ * 2차식이었다. (a) 플래그 토큰의 1-b 형(아래 "못 보는 것" 1-b) (b) `'git branch '`
+ * 반복의 다중 시작점(아래 3). 둘 다 3번이 가린 것이 아니라 다른 기전이다. 선형
+ * 주장의 근거가 된 측정은 그 두 모양을 안 밟은 것으로 보인다(추론 — 그 측정의
+ * payload 원문은 이 파일에 없다). **둘 다 해소(2026-09-23)**: (a) 는 토큰 교체,
+ * 이어 (a)(b) 모두 정규식을 **수기 선형 스캐너**로 바꿔서다(아래 3 의 등록 사례).
+ * 그 규칙은 이제 소스가 없어 이 스캐너의 대상이 아니다 — {@link SCANNER_BACKED_RULES}.
  *
  * **룩어헤드 안이라고 면제하지 않는다.** 섹션 G 의 종전 사설 스캐너는 룩어헤드
  * 내부를 지운 뒤 훑었고 근거는 "부정 룩어헤드 안의 런은 한 번만 평가된다"였다.
@@ -74,7 +76,10 @@
  *     736.6ms, 재측정 11:30 KST 15.5 / 61.2 / 254.3 / 1,044.0ms. 꼬리가 `.`·`,`
  *     처럼 `(?![\w-])` 를 곧장 통과시키는 글자면 1.1ms 미만이다 — payload 꼬리가
  *     측정의 일부다. 수리는 rm 과 같은 토큰 교체(`-[a-zA-CE-Z]*D…` ·
- *     `-[a-ce-z]*d…` · `-[a-eg-z]*f…`)다.
+ *     `-[a-ce-z]*d…` · `-[a-eg-z]*f…`)였고, 같은 날 규칙 전체가 수기 선형
+ *     스캐너로 대체됐다(아래 3 의 등록 사례). 두 판의 정규식은 이제
+ *     safety.test.js 의 동결 사본(`FROZEN_OLD_BRANCH_DELETE` ·
+ *     `FROZEN_SWAPPED_BRANCH_DELETE`)으로만 남는다. 스캐너 판 d-런 실측은 3 에 있다.
  *     **검출기(2026-09-23)**: {@link findOverlappingStarPairs} — 인접한
  *     `A{긴 런} M B{긴 런}` 에서 어떤 글자가 A·M·B 셋 모두에 속하면 보고한다.
  *     첫 런이 필수 글자를 빼면(수리형) 분할점이 하나라 그린이다. 세 카탈로그
@@ -109,10 +114,10 @@
  *  3. 그룹에 붙은 수량자 = 중첩 수량자. `(?:\s+--?\w[\w-]*)*` 처럼 rm 규칙군의
  *     **지수식** 위험이 이 모양인데 스캐너는 보지 않는다. safety.test.js 의
  *     `--opt` 프로브가 그 자리를 맡는다.
- *     **등록 사례 — git-branch-delete 다중 시작점(2026-09-23, 미수리).**
- *     `'git branch '.repeat(k)` 는 2차식이다: `git…branch` 시작점마다 그룹
- *     수량자가 붙은 룩어헤드 `(?:(?:[^\S\n]|\\\r?\n)+(?:토큰))*` 가 줄 나머지를
- *     다시 훑는다. 토큰 본체 런 하나는 공백을 못 넘지만(조건 3) **그룹 반복은
+ *     **등록 사례 — git-branch-delete 다중 시작점(2026-09-23, 같은 날 해소).**
+ *     정규식 시절 `'git branch '.repeat(k)` 는 2차식이었다: `git…branch` 시작점마다
+ *     그룹 수량자가 붙은 룩어헤드 `(?:(?:[^\S\n]|\\\r?\n)+(?:토큰))*` 가 줄 나머지를
+ *     다시 훑었다. 토큰 본체 런 하나는 공백을 못 넘지만(조건 3) **그룹 반복은
  *     넘는다**. 실측(node v24.15.0) — 어느 규칙 판에서 쟀는지가 수치의 일부다:
  *       교체 **전** 규칙: 리더 11:21 KST 122,880B 규칙 단독 15,018ms ·
  *         classifyRisk 13,143ms — PreToolUse 예산 5s 초과. 재측정 11:30 KST
@@ -122,9 +127,30 @@
  *         378.7ms.
  *       교체 **커밋 후** 규칙: 리더 12:13 KST 규칙 단독, 같은 모양 약 2.5K~20K B
  *         L2 3.97 / 10.91 / 47.66 / 182.01ms · L1 4.12 / 10.53 / 38.70 /
- *         156.32ms — **여전히 2차식**.
- *     1-b 토큰 교체로는 안 고쳐진다 — 고치려면 규칙 언어가 바뀌므로 리더·오너
- *     결정 몫이다. 이 스캐너와 1-b 검출기는 둘 다 조용하다.
+ *         156.32ms — **여전히 2차식**. 같은 모양을 동결 사본
+ *         (`FROZEN_SWAPPED_BRANCH_DELETE`)으로 14:21 KST 재측정: `'git branch '`
+ *         채움 2,560 / 5,120 / 10,240 / 20,480B = 2.2 / 8.9 / 45.0 / 157.7ms
+ *         (2배마다 4.0~5.1배).
+ *     1-b 토큰 교체로는 안 고쳐졌다. 창으로 언어를 바꾸는 수리는 오너가 기각했고
+ *     (2026-09-23), 대신 **정규식을 수기 선형 스캐너로 교체**했다 — 언어 보존.
+ *     `lib/core/blocked-patterns.js#matchesGitBranchDelete`, 두 층이 같은 객체
+ *     `GIT_BRANCH_DELETE_MATCHER` 를 쓴다. 해소 실측(node v24.15.0, 14:21 KST,
+ *     규칙 단독 = 카탈로그 행의 `.test`, 중앙값 3회, 20,480 / 40,962 / 81,920 /
+ *     122,880B, 두 층 중 느린 값):
+ *       many-start          0.58 / 1.76 / 3.03 / 4.73ms
+ *       many-start + `-d`   1.10 / 2.30 / 2.56 / 7.67ms
+ *       many-start + `-f`   1.01 / 1.98 / 4.01 / 5.79ms
+ *       many-start 매치형   0.99 / 1.92 / 4.52 / 5.50ms
+ *       d-런 · D-런 · -f 뒤 d-런  0.92 / 1.88 / 3.25 / 5.99ms 이하
+ *       force 런(-d 뒤)     1.64 / 2.76 / 5.42 / 6.44ms 이하
+ *     2배당 비율 1.0~3.1(ms 단위 잡음), 6배 구간 3.3~11.9 = 선형. classifyRisk
+ *     전체 122,880B 는 최대 9.17ms 다(교체 전 13,143ms). 언어 보존 근거는 실행형 —
+ *     safety.test.js 의 전수 열거 524,286 × 층 2 · 시드 난수 200,000 × 층 2 에서
+ *     두 동결 사본 대비 불일치 0, 스캐너 변이 9종은 전부 불일치 >0.
+ *     이 스캐너는 그 규칙을 이제 **보지 않는다** — 소스가 없다. 등록은
+ *     {@link SCANNER_BACKED_RULES}, 선형성의 게이트는 safety.test.js 의
+ *     SCALED_PAYLOADS many-start 행과 'git-branch-delete — 규칙 단독으로도
+ *     선형이다' describe 다.
  *  4. 공백을 못 넘는 무제한 런. 토큰 하나가 무한히 길면 O(토큰²) 은 여전히
  *     가능하다. 실측된 사례는 없고, 생기면 성장 비율이 잡아야 한다.
  *  5. 전처리(guard-registry#normalizeCommand)와의 상호작용, 규칙 간 평가 순서,
@@ -518,3 +544,53 @@ export function findOverlappingStarPairs(source, flags = '', ceiling = WINDOW_CE
  * @type {Set<string>}
  */
 export const HG_SCAN_ALLOWLIST = new Set(['HG-11[0]', 'HG-11[1]']);
+
+/**
+ * 정규식이 아니라 **수기 선형 스캐너**로 판정하는 카탈로그 행 (2026-09-23,
+ * guard-branch-delete-scanner). 키는 {@link WINDOW_CEILING_OVERRIDES} 와 같은
+ * `<층>:<식별자>`, 값은 그 행의 matcher 가 들고 있어야 할 스캐너 id 다.
+ *
+ * 왜 등록제인가: 이 모듈의 두 스캐너는 **정규식 소스**를 읽는다. 소스가 없는
+ * matcher 를 조용히 건너뛰면(`undefined` 소스 = hit 0) 어떤 규칙이든 정규식을
+ * 버리는 순간 스캔 밖으로 나가고 그린은 그대로다 — 부정 목록식 fail-open 이다
+ * (규율 §8). 그래서 스캔 대상을 고르는 길은 {@link scanTargetOf} 하나뿐이고,
+ * 여기 없는 비-정규식 행은 throw 로 RED 다.
+ *
+ * 등록된 행의 선형성·언어 근거는 이 스캐너가 아니라 실행형이다 —
+ * tests/autopilot/safety.test.js 의 동결 사본 차분(전수 열거 + 시드 난수)·변이
+ * 대조·스케일 행. 이 목록은 "스캔 면제"가 아니라 "다른 게이트로 이관"의 기록이다.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const SCANNER_BACKED_RULES = Object.freeze({
+  'L1:git branch -D (force delete)': 'git-branch-delete',
+  'L2:git-branch-delete': 'git-branch-delete',
+});
+
+/**
+ * 카탈로그 행의 matcher 를 정적 스캔 입력으로 고른다. **fail-closed**:
+ *   - 등록 안 된 행이 RegExp 면 그대로 돌려준다.
+ *   - 등록 안 된 행이 RegExp 가 아니면 throw — 새 비-정규식 규칙은 등록 전에 RED.
+ *   - 등록된 행이 RegExp 면 throw — 정규식으로 되돌아갔는데 면제가 남은 stale 등록.
+ *   - 등록된 행이 `{ kind: 'linear-scanner', id: <등록 id>, test() }` 이고
+ *     `source` 가 없을 때만 `null`(= 이 스캐너로는 볼 것이 없다)을 돌려준다.
+ * @param {'L1'|'L2'} layer
+ * @param {string} key L1 은 label, L2 는 id
+ * @param {unknown} matcher 행의 `pattern`(L1) 또는 `test`(L2)
+ * @returns {RegExp | null}
+ */
+export function scanTargetOf(layer, key, matcher) {
+  const registered = SCANNER_BACKED_RULES[`${layer}:${key}`];
+  if (registered === undefined) {
+    if (matcher instanceof RegExp) return matcher;
+    throw new TypeError(`${layer}:${key} is not a RegExp and not registered in SCANNER_BACKED_RULES`);
+  }
+  if (matcher instanceof RegExp) {
+    throw new TypeError(`${layer}:${key} is a RegExp again — remove its SCANNER_BACKED_RULES entry`);
+  }
+  const m = /** @type {{ kind?: unknown, id?: unknown, test?: unknown }} */ (matcher);
+  if (m === null || typeof m !== 'object' || m.kind !== 'linear-scanner'
+    || m.id !== registered || typeof m.test !== 'function' || 'source' in m) {
+    throw new TypeError(`${layer}:${key} is registered as scanner '${registered}' but its matcher does not match that shape`);
+  }
+  return null;
+}

@@ -24,6 +24,8 @@ import {
   findOverlappingStarPairs,
   findUnboundedRuns,
   HG_SCAN_ALLOWLIST,
+  SCANNER_BACKED_RULES,
+  scanTargetOf,
   WINDOW_CEILING_DEFAULT,
   WINDOW_CEILING_OVERRIDES,
 } from './regex-scan.js';
@@ -115,6 +117,40 @@ describe('ReDoS 정적 스캔 — 스캐너 자기검증', () => {
     // 그러면 위 'pins the override list to exactly the two L1 rm rules' 가
     // 먼저 RED 가 된다.
     expect(Object.keys(WINDOW_CEILING_OVERRIDES).filter((k) => k.startsWith('HG:'))).toEqual([]);
+  });
+
+  // 스캐너 기반 행 등록(2026-09-23). 스캔 대상을 고르는 유일한 길이 fail-closed
+  // 인지 실행형으로 본다 — 조용한 건너뛰기가 생기면 여기 셋 중 하나가 RED 다.
+  it('pins the scanner-backed registry to the git-branch-delete pair', () => {
+    expect(SCANNER_BACKED_RULES).toEqual({
+      'L1:git branch -D (force delete)': 'git-branch-delete',
+      'L2:git-branch-delete': 'git-branch-delete',
+    });
+    expect(Object.isFrozen(SCANNER_BACKED_RULES)).toBe(true);
+  });
+
+  it('scanTargetOf passes regexes through and rejects everything else it was not told about', () => {
+    const re = /x/i;
+    expect(scanTargetOf('L2', 'not-registered', re)).toBe(re);
+    const scanner = Object.freeze({ kind: 'linear-scanner', id: 'git-branch-delete', test: () => false });
+    // 미등록 비-정규식 — 모양이 완벽해도 등록 없이는 RED.
+    expect(() => scanTargetOf('L2', 'not-registered', scanner)).toThrow(TypeError);
+    expect(() => scanTargetOf('L1', 'not-registered', { test: () => true })).toThrow(TypeError);
+    expect(() => scanTargetOf('L1', 'not-registered', undefined)).toThrow(TypeError);
+    // 등록된 키라도 층이 다르면 등록이 아니다.
+    expect(() => scanTargetOf('L1', 'git-branch-delete', scanner)).toThrow(TypeError);
+  });
+
+  it('scanTargetOf returns null only for a registered row whose matcher has the scanner shape', () => {
+    const scanner = Object.freeze({ kind: 'linear-scanner', id: 'git-branch-delete', test: () => false });
+    expect(scanTargetOf('L2', 'git-branch-delete', scanner)).toBeNull();
+    expect(scanTargetOf('L1', 'git branch -D (force delete)', scanner)).toBeNull();
+    // stale 등록 — 정규식으로 되돌아갔으면 면제가 남아 있으면 안 된다.
+    expect(() => scanTargetOf('L2', 'git-branch-delete', /git/)).toThrow(/RegExp again/);
+    // 모양이 어긋난 matcher 셋: 다른 kind · 다른 id · 소스를 흉내 낸 객체.
+    expect(() => scanTargetOf('L2', 'git-branch-delete', { ...scanner, kind: 'regex' })).toThrow(TypeError);
+    expect(() => scanTargetOf('L2', 'git-branch-delete', { ...scanner, id: 'other' })).toThrow(TypeError);
+    expect(() => scanTargetOf('L2', 'git-branch-delete', { ...scanner, source: 'git' })).toThrow(TypeError);
   });
 
   it('예외 등록처는 하나이고 HG-11 두 건뿐이다', () => {
@@ -252,19 +288,36 @@ describe('ReDoS 정적 스캔 — 1-b 카탈로그 게이트 (L1·L2)', () => {
   // HG 는 human-gate-matrix-selfcheck 섹션 G 가 같은 검출기로 훑는다.
   // 예외 목록은 없다 — 1-b 는 시작 위치 하나 안에서도 2차식이라 HG-11 식의
   // "`^` 앵커면 시작점이 하나" 논거가 성립하지 않는다.
+  // 스캐너 기반 행(SCANNER_BACKED_RULES)은 소스가 없어 이 검출기로 볼 것이 없다.
+  // 건너뛰는 길은 scanTargetOf 하나뿐이고 미등록 비-정규식은 거기서 throw 다.
   it.each(BLOCKED_PATTERNS.map((p) => [`L1:${p.label}`, p.pattern, p.label]))(
     '%s', (_name, pattern, key) => {
-      const hits = findOverlappingStarPairs(pattern.source, pattern.flags, ceilingFor('L1', key));
+      const target = scanTargetOf('L1', key, pattern);
+      if (target === null) return;
+      const hits = findOverlappingStarPairs(target.source, target.flags, ceilingFor('L1', key));
       expect(hits.map((h) => h.snippet)).toEqual([]);
     },
   );
 
   it.each(DANGEROUS_PATTERNS.map((r) => [`L2:${r.id}`, r.test, r.id]))(
     '%s', (_name, pattern, key) => {
-      const hits = findOverlappingStarPairs(pattern.source, pattern.flags, ceilingFor('L2', key));
+      const target = scanTargetOf('L2', key, pattern);
+      if (target === null) return;
+      const hits = findOverlappingStarPairs(target.source, target.flags, ceilingFor('L2', key));
       expect(hits.map((h) => h.snippet)).toEqual([]);
     },
   );
+
+  // 분모 쪽에서 본 스캐너 기반 행. 위 두 it.each 의 `return` 이 몇 행에서
+  // 일어나는지를 고정한다 — 등록 2건이 전부 실제 카탈로그 행이고 그 외는 0.
+  it('스캐너 기반 행은 L1·L2 한 건씩, 등록 목록과 같다', () => {
+    const skipped = [
+      ...BLOCKED_PATTERNS.map((p) => ['L1', p.label, p.pattern]),
+      ...DANGEROUS_PATTERNS.map((r) => ['L2', r.id, r.test]),
+    ].filter(([layer, key, m]) => scanTargetOf(layer, key, m) === null)
+      .map(([layer, key]) => `${layer}:${key}`);
+    expect(skipped.sort()).toEqual(Object.keys(SCANNER_BACKED_RULES).sort());
+  });
 
   // 분모 고정 — it.each 가 "0개를 훑고 통과"하는 공허한 그린이 되지 않도록.
   it('L1 39 · L2 27 패턴을 훑는다', () => {
