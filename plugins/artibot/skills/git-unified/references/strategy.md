@@ -159,6 +159,7 @@ Q4. 릴리즈 버전 관리가 필요한가요?
 - 추천은 팀 상황 기반 — 강요하지 않고 최종 선택은 사용자에게
 
 ## Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 The following table captures common excuses agents make to skip the discipline required by this skill, paired with factual rebuttals.
 

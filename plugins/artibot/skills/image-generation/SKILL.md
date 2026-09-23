@@ -151,6 +151,7 @@ Step 3 완료 후, 대화 컨텍스트에 유지:
 - **`references/image-studio-prompt.md`** -- 7모드 이미지 프롬프트 엔지니어링 시스템. 모드별 페르소나, 워크플로우, 출력 템플릿 포함. (Image Studio v3.1)
 
 ## Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 
 The following table captures common excuses agents make to skip the discipline of this skill, paired with factual rebuttals.
 

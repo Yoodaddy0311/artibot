@@ -85,6 +85,7 @@ Collect → Deduplicate → Cross-reference → Prioritize → Synthesize
 **Full delegation matrix**: See `references/delegation-matrix.md`
 
 ## Common Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 - "한 줄이라 굳이 위임 안 해도 되지" → 위반: 범위가 아닌 복잡도가 기준
 - "내가 더 빨라" → 측정 안 된 추정; 병렬 실행은 항상 직렬보다 빠름
 - "에이전트 세팅이 귀찮아" → 오버헤드 비용 < 직렬 실행 비용 (3+ 파일 기준)

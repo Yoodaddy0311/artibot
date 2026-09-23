@@ -94,6 +94,7 @@ whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfi
 After resolving any quality issue: observe context → compare strategies → rank by success rate → update weights → apply to future similar contexts. Enable via `artibot.config.json` quality pattern logging.
 
 ## Common Rationalizations
+> 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
 - "테스트는 나중에" → 위반: Step 5는 Blocking gate
 - "커버리지 80%면 충분해" → 기준선이지 목표가 아님; 하락 추세가 문제
 - "이번 PR은 작아서 ATLAS 안 해도 돼" → hotfix 제외 모든 PR에 최소 Blocking gates 적용
