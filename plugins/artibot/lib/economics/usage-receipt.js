@@ -125,10 +125,15 @@ const REQUIRED_USAGE_KEYS = Object.freeze(['input_tokens', 'output_tokens']);
 /**
  * Reverse index: exact catalog model id -> Artibot tier alias.
  * Built once from {@link MODELS} so `tier` is never inferred from the id text.
+ * Each tier's `legacyIds` map to the same tier as its current `id`, so a
+ * transcript written before an id change (e.g. `claude-opus-5`) still resolves;
+ * they are exact strings too, never prefixes.
  * @type {Map<string, string>}
  */
 const ID_TO_TIER = new Map(
-  Object.entries(MODELS).map(([tier, spec]) => [spec.id, tier]),
+  Object.entries(MODELS).flatMap(([tier, spec]) =>
+    [spec.id, ...(spec.legacyIds ?? [])].map((id) => [id, tier]),
+  ),
 );
 
 /**

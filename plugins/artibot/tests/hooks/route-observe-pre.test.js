@@ -410,6 +410,25 @@ describe('route-observe-pre — incumbent tier and residency (K1), pure function
     expect(resolveIncumbentTier(writeTranscript([assistant('opus')]))).toBeNull();
   });
 
+  // LITERAL ids on purpose, never `MODELS.opus.id`: a fixture built from the
+  // catalog moves with the catalog, so it could not see the 2026-09-23 id change
+  // strand every transcript that still says `claude-opus-5`.
+  it.each([
+    ['claude-opus-5', 'opus'],
+    ['claude-opus-5[1m]', 'opus'],
+    ['claude-opus-5-5', 'opus'],
+    ['claude-opus-5-5[1m]', 'opus'],
+    ['claude-fable-5-1[1m]', 'fable'],
+  ])('maps the transcript model %s to %s (legacy id and context variant)', (raw, tier) => {
+    expect(resolveIncumbentTier(writeTranscript([assistant(raw)]))).toBe(tier);
+  });
+
+  it('still refuses a near-miss id: stripping qualifiers is not prefix matching', () => {
+    for (const raw of ['claude-opus-5-6', 'claude-opus', 'claude-opus-5-5-x', 'claude-opus-5[1m]x']) {
+      expect(resolveIncumbentTier(writeTranscript([assistant(raw)])), raw).toBeNull();
+    }
+  });
+
   it('reads the LAST assistant record, not the first and not a user record', () => {
     const file = writeTranscript([
       assistant(MODELS.fable.id),
@@ -536,23 +555,24 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
     shadow_of: 'tool_use:toolu_pre_1',
     routing_epoch_id: 'toolu_pre_1',
     action: { type: 'implement', phase: 'build', complexity: 0.14, uncertainty: 0, risk: 0 },
+    // Re-pinned 2026-09-23 (owner decision): catalog opus id -> claude-opus-5-5, CATALOG_VERSION bumped.
     models: {
       current: null,
       recommended: {
         provider: 'anthropic',
         family: 'claude',
         tier: 'opus',
-        model_id: 'claude-opus-5',
-        version: 'claude-opus-5',
-        catalog_version: '2026-09-02',
+        model_id: 'claude-opus-5-5',
+        version: 'claude-opus-5-5',
+        catalog_version: '2026-09-23',
       },
       selected: {
         provider: 'anthropic',
         family: 'claude',
         tier: 'opus',
-        model_id: 'claude-opus-5',
-        version: 'claude-opus-5',
-        catalog_version: '2026-09-02',
+        model_id: 'claude-opus-5-5',
+        version: 'claude-opus-5-5',
+        catalog_version: '2026-09-23',
       },
     },
     decision: { type: 'route' },

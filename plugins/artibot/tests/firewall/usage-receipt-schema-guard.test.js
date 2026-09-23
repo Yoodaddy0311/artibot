@@ -403,7 +403,8 @@ describe('usage receipt — the fields T-16 requires the writer to be honest abo
 
   it('stamps the catalog version the identity was resolved against', async () => {
     const { receipts } = await build(FIXTURES.clean);
-    expect(receipts[0].model_identity.catalog_version).toBe('2026-09-02');
+    // 2026-09-23: CATALOG_VERSION bumped with the opus id change (claude-opus-5-5 + legacyIds).
+    expect(receipts[0].model_identity.catalog_version).toBe('2026-09-23');
   });
 
   it('leaves accepted null, because no acceptance signal is recorded anywhere', async () => {

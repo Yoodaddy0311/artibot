@@ -11,8 +11,8 @@
  *   - Whether the host's Agent `model` parameter accepts a tier alias — the set
  *     is advisory data until a spawn call passes it (lane-2 §4.2-3, unverified).
  *   - Real fable behavior or cost. These are pure config-resolution assertions.
- *   - `resolveModel`'s own byte-identical contract; that is pinned by the
- *     untouched tests/core/model-policy.test.js and
+ *   - `resolveModel`'s own byte-identical contract; that is pinned by
+ *     tests/core/model-policy.test.js and
  *     tests/firewall/v5-config-firewall.test.js, not here.
  */
 
@@ -55,8 +55,26 @@ const ROLE_CASES = [
 const tiersOf = (agent, opts = {}, config = realConfig) =>
   [...allowedTiers(agent, opts, config)].sort();
 
-/** Deep clone of the shipped config for negative and hypothetical cases. */
-const cloneConfig = () => structuredClone(realConfig);
+/**
+ * Deep clone of the shipped config with the fable gate OPEN — the 2-tier fleet
+ * (2026-09-02 .. 2026-09-23) rebuilt by flipping back only the two keys the
+ * single-tier revert touched (owner decision 2026-09-23 "fable 5.1 → opus 5.5":
+ * fable.enabled=false, phaseRoles.review=opus). The ceiling mechanics below run
+ * on this copy: under the shipped closed gate every agent is capped at opus, so
+ * a denylist / allowlist / low-bucket assertion would pass trivially and prove
+ * nothing about the gate.
+ */
+const cloneConfig = () => {
+  const config = structuredClone(realConfig);
+  config.agents.modelPolicy.fable.enabled = true;
+  config.agents.modelPolicy.phaseRoles.review = 'fable';
+  return config;
+};
+/** Shared read-only gate-on instance for assertions that do not mutate. */
+const gateOnConfig = cloneConfig();
+const gateOnPolicy = gateOnConfig.agents.modelPolicy;
+/** {@link tiersOf} against the gate-on copy. */
+const gateOnTiersOf = (agent, opts = {}) => tiersOf(agent, opts, gateOnConfig);
 
 describe('allowedTiers()', () => {
   describe('phase-role vocabulary exports (T-27 anti-drift)', () => {
@@ -69,15 +87,18 @@ describe('allowedTiers()', () => {
       expect([...REVIEW_ROLES].sort()).toEqual(['crosscheck', 'inspect', 'review']);
       // The literals only mean something if resolveModel still routes by them:
       // an allowlisted agent lands on phaseRoles.build for every build role and
-      // on phaseRoles.review for every review role.
+      // on phaseRoles.review for every review role. Checked on the gate-on
+      // copy, where the two sides differ (opus vs fable) — on the shipped
+      // single-tier config both are opus and a swapped mapping would not show.
+      expect(gateOnPolicy.phaseRoles.build).not.toBe(gateOnPolicy.phaseRoles.review);
       for (const role of BUILD_ROLES) {
-        expect(resolveModel('architect', { role }, realConfig)).toBe(
-          policy.phaseRoles.build,
+        expect(resolveModel('architect', { role }, gateOnConfig)).toBe(
+          gateOnPolicy.phaseRoles.build,
         );
       }
       for (const role of REVIEW_ROLES) {
-        expect(resolveModel('architect', { role }, realConfig)).toBe(
-          policy.phaseRoles.review,
+        expect(resolveModel('architect', { role }, gateOnConfig)).toBe(
+          gateOnPolicy.phaseRoles.review,
         );
       }
       // Disjoint, or the build/review mapping above would be ambiguous.
@@ -85,13 +106,15 @@ describe('allowedTiers()', () => {
     });
   });
   describe('superset invariant (all shipped agents)', () => {
-    it('always contains the tier resolveModel picks, for every role', () => {
+    it('always contains the tier resolveModel picks, for every role (shipped and gate-on)', () => {
       const violations = [];
-      for (const agent of allAgents) {
-        for (const opts of ROLE_CASES) {
-          const picked = resolveModel(agent, opts, realConfig);
-          if (!allowedTiers(agent, opts, realConfig).has(picked)) {
-            violations.push(`${agent} ${JSON.stringify(opts)} -> ${picked}`);
+      for (const [label, config] of [['shipped', realConfig], ['gate-on', gateOnConfig]]) {
+        for (const agent of allAgents) {
+          for (const opts of ROLE_CASES) {
+            const picked = resolveModel(agent, opts, config);
+            if (!allowedTiers(agent, opts, config).has(picked)) {
+              violations.push(`${label} ${agent} ${JSON.stringify(opts)} -> ${picked}`);
+            }
           }
         }
       }
@@ -111,25 +134,38 @@ describe('allowedTiers()', () => {
     });
   });
 
-  describe('shipped config — 2-tier fleet', () => {
+  describe('shipped config — single-tier opus (owner 2026-09-23)', () => {
+    it('the kill-switch is off and the review phase is opus', () => {
+      expect(policy.fable.enabled).toBe(false);
+      expect(policy.phaseRoles.review).toBe('opus');
+    });
+
+    it.each(allAgents)('%s ceiling is opus only, under every phase role', (agent) => {
+      for (const opts of ROLE_CASES) {
+        expect(tiersOf(agent, opts)).toEqual(['opus']);
+      }
+    });
+  });
+
+  describe('gate-on copy — 2-tier fleet (dormant allowlist still works when opened)', () => {
     it.each(fableAllowlist)(
       '%s (allowlisted) ceiling is fable + opus',
       (agent) => {
-        expect(tiersOf(agent)).toEqual(['fable', 'opus']);
+        expect(gateOnTiersOf(agent)).toEqual(['fable', 'opus']);
       },
     );
 
     it.each(notAllowlisted)(
       '%s (not allowlisted) ceiling is opus only',
       (agent) => {
-        expect(tiersOf(agent)).toEqual(['opus']);
+        expect(gateOnTiersOf(agent)).toEqual(['opus']);
       },
     );
 
     it('allowlist is the ONLY set that reaches fable, despite high.model=fable', () => {
       expect(policy.high.model).toBe('fable');
       const reachFable = allAgents.filter((a) =>
-        allowedTiers(a, {}, realConfig).has('fable'),
+        allowedTiers(a, {}, gateOnConfig).has('fable'),
       );
       expect(reachFable.sort()).toEqual([...fableAllowlist].sort());
     });
@@ -148,9 +184,10 @@ describe('allowedTiers()', () => {
     const denied = FABLE_DENYLIST.map((n) => n.replace(/^artibot:/, ''));
 
     it.each(denied)(
-      '%s cannot reach fable under the shipped config',
+      '%s cannot reach fable under the shipped config or the gate-on copy',
       (agent) => {
         expect(allowedTiers(agent, {}, realConfig).has('fable')).toBe(false);
+        expect(allowedTiers(agent, {}, gateOnConfig).has('fable')).toBe(false);
       },
     );
 
@@ -165,33 +202,33 @@ describe('allowedTiers()', () => {
       },
     );
 
-    it.each(denied)('%s stays opus-capped under every phase role', (agent) => {
+    it.each(denied)('%s stays opus-capped under every phase role (gate on)', (agent) => {
       for (const opts of ROLE_CASES) {
-        expect(tiersOf(agent, opts)).toEqual(['opus']);
+        expect(gateOnTiersOf(agent, opts)).toEqual(['opus']);
       }
     });
   });
 
-  describe('role changes the default pick, never the ceiling', () => {
+  describe('role changes the default pick, never the ceiling (gate-on copy)', () => {
     it('a non-allowlisted agent in the fable review phase still gets opus only', () => {
-      expect(policy.phaseRoles.review).toBe('fable');
-      expect(tiersOf('backend-developer', { role: 'review' })).toEqual(['opus']);
+      expect(gateOnPolicy.phaseRoles.review).toBe('fable');
+      expect(gateOnTiersOf('backend-developer', { role: 'review' })).toEqual(['opus']);
     });
 
     it('an allowlisted agent keeps its fable ceiling in the opus build phase', () => {
-      expect(policy.phaseRoles.build).toBe('opus');
-      expect(resolveModel('code-reviewer', { role: 'build' }, realConfig)).toBe(
+      expect(gateOnPolicy.phaseRoles.build).toBe('opus');
+      expect(resolveModel('code-reviewer', { role: 'build' }, gateOnConfig)).toBe(
         'opus',
       );
-      expect(tiersOf('code-reviewer', { role: 'build' })).toEqual([
+      expect(gateOnTiersOf('code-reviewer', { role: 'build' })).toEqual([
         'fable',
         'opus',
       ]);
     });
 
     it('an unknown role is ignored, same as no role', () => {
-      expect(tiersOf('architect', { role: 'mystery' })).toEqual(
-        tiersOf('architect', {}),
+      expect(gateOnTiersOf('architect', { role: 'mystery' })).toEqual(
+        gateOnTiersOf('architect', {}),
       );
     });
   });
@@ -235,7 +272,7 @@ describe('allowedTiers()', () => {
     });
 
     it('the SHIPPED config gains nothing from low — the clone is the only widening', () => {
-      expect(tiersOf('architect')).toEqual(['fable', 'opus']);
+      expect(tiersOf('architect')).toEqual(['opus']);
       expect(tiersOf('doc-updater')).toEqual(['opus']);
       // The on-disk config still has the empty-bucket shape the clones mutated.
       expect(realConfig.agents.modelPolicy.low.agents).toEqual([]);
@@ -284,11 +321,11 @@ describe('allowedTiers()', () => {
     );
 
     it('tolerates a missing or malformed opts argument', () => {
-      expect([...allowedTiers('architect', null, realConfig)].sort()).toEqual([
+      expect([...allowedTiers('architect', null, gateOnConfig)].sort()).toEqual([
         'fable',
         'opus',
       ]);
-      expect([...allowedTiers('architect', 'nope', realConfig)].sort()).toEqual([
+      expect([...allowedTiers('architect', 'nope', gateOnConfig)].sort()).toEqual([
         'fable',
         'opus',
       ]);
@@ -300,10 +337,12 @@ describe('allowedTiers()', () => {
     });
 
     it('honors a role alias passed as the agent (kill-switch path)', () => {
-      expect(tiersOf('deep-async')).toEqual(['fable', 'opus']);
+      expect(gateOnTiersOf('deep-async')).toEqual(['fable', 'opus']);
       const off = cloneConfig();
       off.agents.modelPolicy.fable.enabled = false;
       expect(tiersOf('deep-async', {}, off)).toEqual(['opus']);
+      // The shipped config is that closed-gate case.
+      expect(tiersOf('deep-async')).toEqual(['opus']);
     });
   });
 
@@ -313,10 +352,10 @@ describe('allowedTiers()', () => {
     });
 
     it('returns a fresh Set each call — mutating it cannot poison the next', () => {
-      const first = allowedTiers('architect', {}, realConfig);
+      const first = allowedTiers('architect', {}, gateOnConfig);
       first.add('haiku');
       first.delete('opus');
-      expect([...allowedTiers('architect', {}, realConfig)].sort()).toEqual([
+      expect([...allowedTiers('architect', {}, gateOnConfig)].sort()).toEqual([
         'fable',
         'opus',
       ]);
