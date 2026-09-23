@@ -207,9 +207,13 @@ export function claimAuditIdempotencyKey(sessionId, audit) {
  * It also refuses a line the ledger would FOLD: `oversize:verification_id`
  * past {@link VERIFICATION_ID_MAX_LENGTH}, and `oversize:line` when the
  * serialized input leaves less than {@link ENVELOPE_RESERVE_BYTES} under
- * {@link LEDGER_LINE_MAX_BYTES}. A kept row therefore carries every key built
- * here. Both reasons surface as `skipped:<reason>`, the channel the caller
- * already counts (`_review-stop-record.js#reviewLedgerColumn`).
+ * {@link LEDGER_LINE_MAX_BYTES}. Both reasons surface as `skipped:<reason>`,
+ * the channel the caller already counts
+ * (`_review-stop-record.js#reviewLedgerColumn`). A kept row carries every key
+ * built here ONLY under the default cap and when redaction does not lengthen
+ * the input — the budget is measured before `redactDeep`, which can grow a
+ * field (`pwd=abcd` → `password=[REDACTED_SECRET]`). Otherwise the row can
+ * still fold, and is then reported `appended` with reason `ledger-folded`.
  *
  * @param {object} [args] build inputs
  * @param {object} [args.parsed] a {@link parseReviewVerdict} result

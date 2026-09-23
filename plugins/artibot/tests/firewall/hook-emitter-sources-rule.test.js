@@ -315,13 +315,13 @@ const ROLE_SOURCED = Object.freeze({
       + 'registers this event with sources:["gate"] only, which is that same '
       + 'decision written on the event.',
   },
-  'lib/review/verdict-writer.js:241': {
+  'lib/review/verdict-writer.js:245': {
     event: 'review.completed',
     source: 'reviewer',
     reason: 'The reviewer subagent produced the verdict; the SubagentStop hook '
       + 'relays it, so criterion (1) puts the record on the reviewer.',
   },
-  'lib/review/verdict-writer.js:331': {
+  'lib/review/verdict-writer.js:335': {
     event: 'review.claim_audit',
     source: 'reviewer',
     reason: 'Same relay as review.completed — the audit is the reviewer\'s claim '

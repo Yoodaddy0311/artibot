@@ -599,21 +599,24 @@ describe('review.completed never loses a key to the ledger fold', () => {
 
   /**
    * Build with a `findingsRef` padded so the serialized input is `bytes` long.
-   * The id is short, so only the line budget can be what refuses.
+   * With the default id the id is short, so only the line budget can be what
+   * refuses.
    *
    * @param {number} bytes target `JSON.stringify(input)` byte length
+   * @param {{verificationId?: string, prefix?: string}} [opts] the id, and a
+   *   literal the padded `findingsRef` starts with
    * @returns {object} the builder result
    */
-  function buildInputOf(bytes) {
+  function buildInputOf(bytes, { verificationId = 'v1-abc', prefix = '' } = {}) {
     const args = {
-      parsed: parseReviewVerdict(v2Doc({ verification_id: 'v1-abc' })),
+      parsed: parseReviewVerdict(v2Doc({ verification_id: verificationId })),
       sessionId: SID,
       model: MODEL,
       reviewerId: REVIEWER,
     };
-    const probe = buildReviewCompletedEvent({ ...args, findingsRef: 'f' });
+    const probe = buildReviewCompletedEvent({ ...args, findingsRef: `${prefix}f` });
     const pad = bytes - Buffer.byteLength(JSON.stringify(probe.input), 'utf8');
-    return buildReviewCompletedEvent({ ...args, findingsRef: 'f'.repeat(1 + pad) });
+    return buildReviewCompletedEvent({ ...args, findingsRef: `${prefix}${'f'.repeat(1 + pad)}` });
   }
 
   it('lands the largest input the budget admits, unfolded, under the worst envelope', () => {
@@ -629,6 +632,11 @@ describe('review.completed never loses a key to the ledger fold', () => {
     });
     expect(res.ok).toBe(true);
     expect(res.folded).toBe(false);
+    // The worst envelope is exactly 115 B (measured here, 2026-09-23), so
+    // the reserve's 13 B margin is pinned: an envelope key the writer starts
+    // adding shows up as this number moving, not as a fold months later.
+    expect(readFileSync(ledgerFile()).length).toBe(budget + 115);
+    expect(res.bytes).toBe(budget + 115);
     const [row] = rawLines();
     expect(row.data.intent_revision).toBe(3);
     expect(row.data.plan_revision).toBe(1);
@@ -677,6 +685,37 @@ describe('review.completed never loses a key to the ledger fold', () => {
     expect(out.review.reason).toBe('ledger-folded');
     const [row] = rawLines();
     expect(row.data.evidence_refs[0].startsWith('ledger-fold:dropped=')).toBe(true);
+  });
+
+  it('reports ledger-folded under the DEFAULT cap when redaction lengthens a field', () => {
+    // The budget measures the input BEFORE `redactDeep`. Each `pwd=abcd`
+    // becomes `password=[REDACTED_SECRET]` (+18 B, scratch probe 2026-09-23),
+    // so five of them (+90 B) outgrow the reserve's 13 B margin: the builder
+    // admits the input and the writer folds it. The row is not refused — the
+    // builder cannot see redaction — but it is REPORTED, never clean.
+    const verificationId = 'a'.repeat(VERIFICATION_ID_MAX_LENGTH);
+    const budget = LEDGER_LINE_MAX_BYTES - ENVELOPE_RESERVE_BYTES;
+    // The trailing space matters: without it the last value runs into the
+    // padding and the redaction REPLACES the padding, shrinking the line.
+    const built = buildInputOf(budget, {
+      verificationId, prefix: 'pwd=abcd '.repeat(5),
+    });
+    expect(built.ok).toBe(true);
+    const out = recordReviewOutcome(recordArgs({
+      verdictText: answer({ verdict: { verification_id: verificationId }, audit: null }),
+      missionId: undefined,
+      findingsRef: built.input.data.findings_ref,
+    }), livePorts());
+    expect(out.review).toEqual({
+      status: 'appended',
+      key: `review.completed:${SID}:${verificationId}`,
+      reason: 'ledger-folded',
+    });
+    const [row] = rawLines();
+    expect(row.data.findings_ref).toContain('[REDACTED_SECRET]');
+    expect(row.data.intent_revision).toBeUndefined();
+    expect(row.data.evidence_refs)
+      .toEqual(['ledger-fold:dropped=intent_revision,plan_revision,verification_id']);
   });
 });
 
