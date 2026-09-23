@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import os from 'node:os';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -25,6 +26,12 @@ vi.mock('node:fs', async () => {
 // Bypass file lock in tests — pass-through to the callback directly
 vi.mock('../../lib/core/file-lock.js', () => ({
   withFileLock: vi.fn((_path, fn) => fn()),
+}));
+
+// Observe the spawn record without writing a ledger.
+vi.mock('../../lib/learning/ledger/spawn-ledger.js', async () => ({
+  ...(await vi.importActual('../../lib/learning/ledger/spawn-ledger.js')),
+  appendSpawn: vi.fn(() => ({ ok: true })),
 }));
 
 const { readStdin, writeStdout, atomicWriteSync } = await import('../../scripts/utils/index.js');
@@ -365,6 +372,87 @@ describe('subagent-handler hook', () => {
 
       // Neither start nor stop branch executes
       expect(writeStdout).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('team-state lock not acquired', () => {
+    /** Make the next withFileLock call fail the way file-lock.js does, without running fn. */
+    async function lockFailsWith(code) {
+      const { withFileLock } = await import('../../lib/core/file-lock.js');
+      withFileLock.mockImplementationOnce(() => {
+        throw Object.assign(new Error(`lock not acquired (${code})`), { code });
+      });
+    }
+
+    async function spawnRecords() {
+      const { appendSpawn } = await import('../../lib/learning/ledger/spawn-ledger.js');
+      return appendSpawn.mock.calls.map((c) => c[1]);
+    }
+
+    it.each(['ELOCKTIMEOUT', 'ELOCKREENTRANT'])(
+      'stop on %s skips the state write but still records the spawn and deregisters',
+      async (code) => {
+        process.argv = ['node', 'subagent-handler.js', 'stop'];
+        readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', cwd: os.tmpdir() }));
+        await lockFailsWith(code);
+
+        await runHook();
+        await waitForSettle();
+
+        expect(atomicWriteSync).not.toHaveBeenCalled();
+        expect((await spawnRecords()).map((r) => r.event)).toEqual(['stop']);
+        expect(writeStdout).toHaveBeenCalledWith({ message: '[team] Agent deregistered: builder-01' });
+        expect(exitSpy).not.toHaveBeenCalled();
+        const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+        expect(stderrOutput).toContain(`[artibot:subagent-handler] team state not updated: lock not acquired (${code})`);
+      },
+    );
+
+    it('start on ELOCKTIMEOUT skips the state write but still records the spawn and registers', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', role: 'builder', cwd: os.tmpdir() }));
+      await lockFailsWith('ELOCKTIMEOUT');
+
+      await runHook();
+      await waitForSettle();
+
+      expect(atomicWriteSync).not.toHaveBeenCalled();
+      expect((await spawnRecords()).map((r) => r.event)).toEqual(['start']);
+      expect(writeStdout).toHaveBeenCalledWith({ message: '[team] Agent registered: builder-01 (builder)' });
+    });
+
+    it('stop reads the tracked START fields without the lock when the update is skipped', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'stop'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({
+        agents: { 'builder-01': { agentType: 'tracked-type', canonicalModel: 'opus', startedAt: '2026-01-01T00:00:00Z' } },
+      }));
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', agent_type: 'payload-type', cwd: os.tmpdir() }));
+      await lockFailsWith('ELOCKTIMEOUT');
+
+      await runHook();
+      await waitForSettle();
+
+      expect(atomicWriteSync).not.toHaveBeenCalled();
+      const [record] = await spawnRecords();
+      expect(record).toMatchObject({ event: 'stop', agentType: 'tracked-type', canonicalModel: 'opus' });
+      expect(record.durationMs).toBeGreaterThan(0);
+    });
+
+    it('an error thrown under the lock still propagates: no spawn record, no stdout', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'stop'];
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', cwd: os.tmpdir() }));
+      atomicWriteSync.mockImplementationOnce(() => { throw new Error('state write blew up'); });
+
+      await runHook();
+      await waitForSettle();
+
+      expect(await spawnRecords()).toEqual([]);
+      expect(writeStdout).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      expect(stderrOutput).toContain('state write blew up');
+      expect(stderrOutput).not.toContain('team state not updated');
     });
   });
 

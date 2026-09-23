@@ -5,10 +5,8 @@
  * Usage: node subagent-handler.js start|stop
  */
 
-import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
-import { withFileLock } from '../../lib/core/file-lock.js';
 import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
@@ -20,6 +18,7 @@ import { DEFAULT_TAIL_BYTES, readLedgerTail as readLedgerTailWindow } from '../.
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
 import { isReviewerStop, recordReviewFromStop, reviewLedgerColumn } from './_review-stop-record.js';
+import { initTeamContext, loadState, saveState, updateTeamState } from './_team-state.js';
 
 /**
  * Read an explicitly-requested model from the hook payload, if present.
@@ -601,56 +600,6 @@ function spawnDurationMs(tracked, nowMs = Date.now()) {
   return d >= 0 ? d : undefined;
 }
 
-function loadState() {
-  const statePath = getStatePath();
-  if (!existsSync(statePath)) return { agents: {} };
-  try {
-    return JSON.parse(readFileSync(statePath, 'utf-8'));
-  } catch {
-    return { agents: {} };
-  }
-}
-
-function saveState(state) {
-  const statePath = getStatePath();
-  atomicWriteSync(statePath, state);
-}
-
-/**
- * Derive a deterministic teamId from session context. Stable for the
- * duration of one Claude Code session so team-weight rounds aggregate
- * under a single id.
- */
-function deriveTeamId(hookData) {
-  const sessionId = hookData?.session_id || hookData?.sessionId || null;
-  return sessionId ? `team-${sessionId}` : `team-${Date.now()}`;
-}
-
-/**
- * Pick a coarse domain bucket from hook payload. Falls back to the
- * teammate role; finally to `general` so downstream GRPO bucketing has
- * a non-undefined key.
- */
-function deriveDomain(hookData, agentRole) {
-  return hookData?.domain || hookData?.agent_type || agentRole || 'general';
-}
-
-/**
- * Idempotent team-context initializer. Only writes top-level fields
- * (`teamId`, `domain`, `startedAt`) when missing or carrying stale
- * non-numeric `startedAt` left over from a previous session-end snapshot.
- * `startedAt` is stored as numeric ms — team-idle-handler computes
- * `Date.now() - teamState.startedAt`.
- */
-function initTeamContext(loaded, hookData, agentRole) {
-  const teamId = loaded.teamId ?? deriveTeamId(hookData);
-  const domain = loaded.domain ?? deriveDomain(hookData, agentRole);
-  const startedAt = typeof loaded.startedAt === 'number'
-    ? loaded.startedAt
-    : Date.now();
-  return { teamId, domain, startedAt };
-}
-
 /**
  * SubagentStart: register the teammate, observe the routing decision, and
  * append the spawn record. Neither ledger write can affect registration or the
@@ -676,7 +625,7 @@ async function handleStart(hookData, ids) {
   // definition on a named one. `modelMismatch` deliberately stays keyed to the
   // payload's `agent_type` — a name matched no policy key, so nothing contradicts it.
   const boundModel = route.canonicalModel;
-  withFileLock(statePath, () => {
+  updateTeamState(statePath, () => {
     const loaded = loadState();
     saveState({
       ...loaded,
@@ -725,7 +674,7 @@ async function handleStart(hookData, ids) {
 function handleStop(hookData, ids) {
   const { agentId, agentType, statePath } = ids;
   let tracked;
-  withFileLock(statePath, () => {
+  const updated = updateTeamState(statePath, () => {
     const loaded = loadState();
     const existing = (loaded.agents || {})[agentId];
     tracked = existing;
@@ -739,6 +688,9 @@ function handleStop(hookData, ids) {
         }
       : loaded);
   });
+  // No lock, no write — but the stop record still needs the START fields, and an
+  // unlocked read is whole (saveState replaces the file by rename).
+  if (!updated) tracked = (loadState().agents || {})[agentId];
   const taskId = extractTaskId(hookData);
   const sessionId = hookData?.session_id || hookData?.sessionId || null;
   const missionId = resolveMissionId(hookData, sessionId);

@@ -13,8 +13,12 @@
  *   and `cause` (the last create error). `fn` is NOT run and the holder's lock
  *   is NOT touched.
  * - **Lock cannot be created for a non-contention reason** (mkdir fails,
- *   read-only filesystem, …) — the original error is rethrown with its `code`
- *   intact. `fn` is NOT run.
+ *   read-only filesystem, disk full, …) — the original error is rethrown at
+ *   once with its `code` intact. `fn` is NOT run. Exception: EPERM, EACCES and
+ *   EBUSY from the create are treated as contention, because that is how
+ *   Windows reports a name whose previous lock is still delete-pending. So a
+ *   directory that is genuinely unwritable ends as ELOCKTIMEOUT after
+ *   LOCK_WAIT_MS with `cause.code` EACCES/EPERM, not as an immediate rethrow.
  * - **Stale lock** — reclaimed, never stolen: a parseable record is stale when
  *   its owner is on this host and its pid is dead, or its timestamp is older
  *   than LOCK_STALE_MS; an unparseable (empty or half-written) file is stale
@@ -24,7 +28,9 @@
  *   the lock, and unlinks it only if it is byte-for-byte the file that was
  *   judged stale (content + mtime), so a lock that changed hands in between is
  *   left alone. After the unlink the reclaimer re-enters the O_EXCL race like
- *   everyone else; it never assumes ownership.
+ *   everyone else; it never assumes ownership. The guard itself goes stale on
+ *   the same rules as a lock (dead pid on this host, or older than
+ *   LOCK_STALE_MS), so a live reclaimer is never pre-empted inside it.
  * - **Release** — unlinks the lock only while the on-disk token is ours, so a
  *   lock another owner put in place (after judging ours stale) survives.
  * - **Re-entry is refused** — a call for a path this process already holds
@@ -41,9 +47,21 @@
  *   timestamp, so another process can reclaim the lock while `fn` still runs.
  *   Keep locked sections short.
  * - **Check-then-unlink windows.** Release and reclaim read the file, then
- *   unlink it. A lock replaced between those two syscalls is removed. The
- *   window is microseconds and needs a stale judgment (dead pid or a record
- *   older than LOCK_STALE_MS) to open at all.
+ *   unlink it; a lock replaced between the two syscalls is removed.
+ *   - Reclaim does this under the `.reclaim` guard, which another process can
+ *     take over only when the guard's owner is a dead pid on this host or the
+ *     guard is older than LOCK_STALE_MS. So the window opens only for a
+ *     reclaimer that stalls longer than LOCK_STALE_MS between its re-read and
+ *     its unlink, or one on another host. Removing a stale guard is itself a
+ *     read-then-unlink with no further guard.
+ *   - Release has no guard. The window needs our own record to have been
+ *     judged stale first (we held the lock past LOCK_STALE_MS), and is as wide
+ *     as the two syscalls.
+ * - **A release whose read fails.** Release unlinks only after reading our
+ *   token back; if that read fails (EACCES, EBUSY, …) or the unlink fails,
+ *   our lock is left on disk. Other processes wait on it until its pid is dead
+ *   on this host (it is reclaimed at once after we exit) or its timestamp
+ *   passes LOCK_STALE_MS; waiters in the meantime get ELOCKTIMEOUT.
  * - **pid reuse.** A dead owner whose pid was reused on the same host counts
  *   as alive until the timestamp ages past LOCK_STALE_MS.
  * - **Other hosts.** A record from another host (shared/network filesystem)
@@ -113,14 +131,6 @@ const LOCK_STALE_MS = 10000;
  */
 const LOCK_RETRY_MIN_MS = 10;
 const LOCK_RETRY_MAX_MS = 25;
-
-/**
- * Age (ms) past which a `.reclaim` guard is stale. The guarded section is one
- * read plus one unlink, so a guard older than this belongs to a reclaimer that
- * died inside it. Far above the section's cost, far below LOCK_WAIT_MS, so a
- * waiter still gets to reclaim within its own budget.
- */
-const RECLAIM_GUARD_STALE_MS = 1000;
 
 /**
  * Create errors that mean "someone else has (or is removing) the file".
@@ -240,7 +250,15 @@ function isStale(seen, staleMs) {
  * @returns {boolean}
  */
 function unchangedSince(path, seen) {
-  const now = inspect(path);
+  return sameFile(inspect(path), seen);
+}
+
+/**
+ * @param {ReturnType<typeof inspect>} now
+ * @param {{ raw: string|null, mtimeMs: number|null }} seen
+ * @returns {boolean} True when `now` is a readable snapshot identical to `seen`.
+ */
+function sameFile(now, seen) {
   return !now.vanished && now.raw !== null
     && now.raw === seen.raw && now.mtimeMs === seen.mtimeMs;
 }
@@ -263,6 +281,15 @@ function unlinkIfOwned(path, token) {
  * taken in the same turn, so two waiters that both judged it stale do not
  * both go on to create one.
  *
+ * The guard goes stale on the same rules and threshold as a lock
+ * (LOCK_STALE_MS, or a dead pid on this host) — not sooner. A shorter
+ * threshold let a live reclaimer that stalled between its re-read and its
+ * unlink lose the guard to a second reclaimer, which then removed the stale
+ * lock and created its own; the first reclaimer's unlink then removed that
+ * fresh lock, and a third process could co-hold it. The cost is that a
+ * reclaimer that crashed on another host (or whose pid was reused) blocks
+ * reclaim of that one lock for LOCK_STALE_MS.
+ *
  * @param {string} guardPath
  * @returns {string|null} Our guard token, or null when the guard is busy.
  */
@@ -271,7 +298,7 @@ function takeReclaimGuard(guardPath) {
   const record = { pid: process.pid, host: HOST, token, timestamp: Date.now() };
   if (createExclusive(guardPath, record) === null) return token;
   const seen = inspect(guardPath);
-  if (!seen.vanished && isStale(seen, RECLAIM_GUARD_STALE_MS) && unchangedSince(guardPath, seen)) {
+  if (!seen.vanished && isStale(seen, LOCK_STALE_MS) && unchangedSince(guardPath, seen)) {
     try { unlinkSync(guardPath); } catch { /* next turn */ }
   }
   return null;
@@ -282,20 +309,28 @@ function takeReclaimGuard(guardPath) {
  *
  * @param {string} lockPath
  * @param {{ raw: string|null, mtimeMs: number|null }} seen - What was judged stale.
- * @returns {boolean} True when the caller should retry the create at once.
+ * @returns {boolean} True only when the lock is gone (we removed it, or it
+ *   vanished), so an immediate retry can succeed. False — busy guard, a lock
+ *   that changed, or an unlink that failed — sends the caller to its jittered
+ *   sleep, so a stale lock that cannot be removed is polled, not spun on.
  */
 function reclaimStale(lockPath, seen) {
   const guardPath = `${lockPath}.reclaim`;
   const guardToken = takeReclaimGuard(guardPath);
   if (guardToken === null) return false;
   try {
-    if (unchangedSince(lockPath, seen)) {
-      try { unlinkSync(lockPath); } catch { /* holder or another reclaimer won */ }
+    const now = inspect(lockPath);
+    if (now.vanished) return true;
+    if (!sameFile(now, seen)) return false;
+    try {
+      unlinkSync(lockPath);
+      return true;
+    } catch (err) {
+      return err?.code === 'ENOENT';
     }
   } finally {
     unlinkIfOwned(guardPath, guardToken);
   }
-  return true;
 }
 
 /**
@@ -376,10 +411,15 @@ function removeSignalHandlers() {
  * only if ours were the last. A surviving listener catches the re-raise and
  * suppresses the default action, so a handler that neither exits nor re-raises
  * leaves the process alive. `lib/system/keep-awake.js:154-156` registers such a
- * cleanup; nothing imports it and withFileLock into the same process today
- * (keep-awake reaches only lib/autopilot/, withFileLock only the hook scripts
- * and lib/core/rotation.js), so this is a constraint on future wiring rather
- * than a live defect.
+ * cleanup. keep-awake is imported only by lib/autopilot/ (engine.js via
+ * _engine-helpers.js) and lib/system/index.js. withFileLock is reached from
+ * the hook scripts, lib/core/rotation.js, and lib/project-state/state-manager.js
+ * (the StateStore commit), which is itself imported by
+ * lib/runtime/middleware/tasks.js, lib/handoff/state-version-port.js and
+ * several scripts. The direct imports of lib/autopilot/engine.js and
+ * _engine-helpers.js include none of those (checked 2026-09-23); the full
+ * transitive import graph was not traced. Treat this as a constraint on
+ * future wiring rather than a known live defect.
  *
  * @param {string} signal - The signal being handled.
  * @returns {void}
@@ -423,9 +463,12 @@ function installSignalHandlers() {
  * @param {string} filePath - The file being protected
  * @param {() => T} fn - Synchronous function to execute under lock
  * @returns {T} Return value of `fn`
- * @throws {Error} `code: 'ELOCKTIMEOUT'` when contended past LOCK_WAIT_MS;
+ * @throws {Error} `code: 'ELOCKTIMEOUT'` when not acquired within
+ *   LOCK_WAIT_MS — including a create that keeps failing with EPERM, EACCES
+ *   or EBUSY (treated as contention; the last one is `cause`);
  *   `code: 'ELOCKREENTRANT'` when this process already holds the path; the
- *   create error (e.g. EACCES from mkdir, EROFS) otherwise.
+ *   mkdir or create error with its own code (e.g. EACCES from mkdir, EROFS,
+ *   ENOSPC) otherwise, at once.
  * @template T
  */
 export function withFileLock(filePath, fn) {

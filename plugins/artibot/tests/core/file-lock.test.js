@@ -221,19 +221,56 @@ describe('file-lock', () => {
     expect(realFs.existsSync(lockPath)).toBe(false);
   });
 
-  it('waits out a live reclaim guard, then reclaims once the guard is stale (> 1s)', () => {
+  it('does not steal a live reclaim guard younger than LOCK_STALE_MS', () => {
+    const staleLock = JSON.stringify({ pid: deadPid(), host: HOST, token: 'dead', timestamp: Date.now() });
+    seedLock(staleLock);
+    // A live reclaimer (this process's pid) that has held the guard for 3s —
+    // longer than any sane read+unlink, still well inside LOCK_STALE_MS.
+    const guard = JSON.stringify({
+      pid: process.pid, host: HOST, token: 'guard', timestamp: Date.now() - 3000,
+    });
+    realFs.writeFileSync(`${lockPath}.reclaim`, guard);
+    const fn = vi.fn();
+
+    const error = caught(() => withFileLock(target, fn));
+
+    expect(error.code).toBe('ELOCKTIMEOUT');
+    expect(fn).not.toHaveBeenCalled();
+    expect(realFs.readFileSync(`${lockPath}.reclaim`, 'utf-8')).toBe(guard);
+    expect(realFs.readFileSync(lockPath, 'utf-8')).toBe(staleLock);
+  }, 10_000);
+
+  it('clears a reclaim guard older than LOCK_STALE_MS and reclaims', () => {
     seedLock(JSON.stringify({ pid: deadPid(), host: HOST, token: 'dead', timestamp: Date.now() }));
     realFs.writeFileSync(`${lockPath}.reclaim`, JSON.stringify({
-      pid: process.pid, host: HOST, token: 'guard', timestamp: Date.now(),
+      pid: process.pid, host: 'elsewhere', token: 'guard', timestamp: Date.now() - 11_000,
     }));
 
     const { ms, error } = timed(() => withFileLock(target, () => 'ok'));
 
     expect(error).toBeUndefined();
-    expect(ms).toBeGreaterThanOrEqual(900);
-    expect(ms).toBeLessThan(LOCK_WAIT_MS);
+    expect(ms).toBeLessThan(900);
     expect(realFs.existsSync(`${lockPath}.reclaim`)).toBe(false);
+    expect(realFs.existsSync(lockPath)).toBe(false);
   });
+
+  it('polls, rather than spins on, a stale lock it cannot remove', () => {
+    seedLock(JSON.stringify({ pid: deadPid(), host: HOST, token: 'dead', timestamp: Date.now() }));
+    vi.mocked(unlinkSync).mockImplementation((p) => {
+      if (String(p) === lockPath) throw fsError('EPERM');
+      return realFs.unlinkSync(p);
+    });
+
+    const error = caught(() => withFileLock(target, () => 'never'));
+
+    expect(error.code).toBe('ELOCKTIMEOUT');
+    // Every failed reclaim is followed by a sleep of at least 10ms, so 2000ms
+    // admits at most ~200 create attempts. A retry-at-once loop makes
+    // thousands in the same time.
+    const creates = vi.mocked(openSync).mock.calls.filter(([p]) => p === lockPath);
+    expect(creates.length).toBeGreaterThan(5);
+    expect(creates.length).toBeLessThanOrEqual(LOCK_WAIT_MS / 10 + 5);
+  }, 10_000);
 
   it('clears a reclaim guard left by a dead reclaimer without waiting for its age', () => {
     seedLock(JSON.stringify({ pid: deadPid(), host: HOST, token: 'dead', timestamp: Date.now() }));
@@ -387,10 +424,28 @@ describe('file-lock', () => {
     expect(realFs.readFileSync(lockPath, 'utf-8')).toBe(foreign);
   });
 
-  it('swallows an unlink failure during release', () => {
+  it('swallows an unlink failure during release, leaving our own lock behind', () => {
     vi.mocked(unlinkSync).mockImplementationOnce(() => { throw fsError('EPERM'); });
 
     expect(withFileLock(target, () => 'ok')).toBe('ok');
+    // Left for the stale rules to reclaim (dead pid once we exit).
+    const left = JSON.parse(realFs.readFileSync(lockPath, 'utf-8'));
+    expect(left).toMatchObject({ pid: process.pid, host: HOST });
+  });
+
+  it('leaves our own lock behind when release cannot read it back', () => {
+    let token;
+    const result = withFileLock(target, () => {
+      token = JSON.parse(realFs.readFileSync(lockPath, 'utf-8')).token;
+      vi.mocked(readFileSync).mockImplementation((p, ...rest) => {
+        if (String(p) === lockPath) throw fsError('EBUSY');
+        return realFs.readFileSync(p, ...rest);
+      });
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(JSON.parse(realFs.readFileSync(lockPath, 'utf-8')).token).toBe(token);
   });
 
   // ─── Re-entry ──────────────────────────────────────────────────

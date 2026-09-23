@@ -355,15 +355,20 @@ describe('withFileLock lock-file ownership (real processes)', () => {
     expect(fsSync.existsSync(p.lockPath)).toBe(false);
   }, 60_000);
 
+  // Each seed is stale by exactly one rule, so each rule is exercised alone:
+  // a fresh timestamp from this host with a dead pid; an old timestamp from
+  // another host (pid liveness is not consulted); an unparseable file by mtime.
   it.each([
-    ['dead-owner JSON', 'json'],
-    ['empty', ''],
-  ])('reclaims a genuinely stale %s lock well inside the wait budget', async (_label, kind) => {
+    ['dead-owner (this host, fresh timestamp)', async () => JSON.stringify({
+      pid: await deadPid(), host: os.hostname(), token: 'dead', timestamp: Date.now(),
+    })],
+    ['old-timestamp (other host)', async () => JSON.stringify({
+      pid: process.pid, host: 'elsewhere', token: 'old', timestamp: Date.now() - 60_000,
+    })],
+    ['empty (old mtime)', async () => ''],
+  ])('reclaims a genuinely stale %s lock well inside the wait budget', async (_label, makeContent) => {
     const p = probe();
-    const content = kind === 'json'
-      ? JSON.stringify({ pid: await deadPid(), timestamp: Date.now() - 60_000 })
-      : '';
-    seedAgedLock(p.lockPath, content, 60_000);
+    seedAgedLock(p.lockPath, await makeContent(), 60_000);
 
     const result = await p.run().done;
 

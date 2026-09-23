@@ -28,6 +28,9 @@ const LOCK_MODULE = pathToFileURL(
 
 const isWindows = process.platform === 'win32';
 
+/** A child still alive after this is killed and its output reported. */
+const CHILD_DEADLINE_MS = 20_000;
+
 let tmpDir;
 
 beforeEach(async () => {
@@ -74,6 +77,14 @@ function runChild(script, args, opts = {}) {
     child.stdout.on('data', (d) => { stdout += String(d); });
     child.stderr.on('data', (d) => { stderr += String(d); });
 
+    // Watchdog below the 30s test timeout: a hung child fails with its own
+    // output instead of a bare vitest timeout.
+    let timedOut = false;
+    const killer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, CHILD_DEADLINE_MS);
+
     let poll;
     if (opts.readyMarker && opts.onReady) {
       poll = setInterval(() => {
@@ -86,11 +97,22 @@ function runChild(script, args, opts = {}) {
     }
 
     child.on('error', (err) => {
+      clearTimeout(killer);
       if (poll) clearInterval(poll);
       reject(err);
     });
-    child.on('exit', (code, signal) => {
+    // 'close', not 'exit': it fires after stdio has drained, so a timed-out
+    // child's last output is in the message.
+    child.on('close', (code, signal) => {
+      clearTimeout(killer);
       if (poll) clearInterval(poll);
+      if (timedOut) {
+        reject(new Error(
+          `child ${path.basename(script)} still running after ${CHILD_DEADLINE_MS}ms; killed.\n`
+          + `stdout: ${JSON.stringify(stdout)}\nstderr: ${JSON.stringify(stderr)}`,
+        ));
+        return;
+      }
       resolve({ code, signal, stdout, stderr });
     });
   });
