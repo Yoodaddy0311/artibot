@@ -77,8 +77,10 @@
  *  0  an observation was printed — INCLUDING a missing or unreadable ledger,
  *     a missing inventory source, and an unexpected throw (then `error` is
  *     set and `kinds`/`summary` are null).
- *  2  usage error: unknown flag, flag without a value, unparsable `--since`,
- *     or a `--plugin-root` that is not a directory (an audit of a typo would
+ *  2  usage error: unknown flag, flag without a value (an empty or blank
+ *     value counts as none), a `--since` that does not parse or lies outside
+ *     the Date range (|ms| > 8.64e15), or a `--plugin-root` that is not a
+ *     directory (an audit of a typo would
  *     print four `enumerated: false` kinds that read like a finding). One
  *     stderr line prefixed `existence-audit:`, NOTHING on stdout.
  *
@@ -163,6 +165,9 @@ const SOURCE_PATHS = Object.freeze({
 });
 
 const HOOKS_JSON = 'hooks/hooks.json';
+
+/** The largest |epoch ms| a Date can represent (ECMA-262 time value range). */
+const MAX_DATE_MS = 8.64e15;
 const MODULE_FILE = /\.(?:c|m)?js$/;
 
 /**
@@ -187,7 +192,9 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (!VALUE_FLAGS.includes(flag)) return { error: `unknown argument: ${flag}` };
-    if (i + 1 >= argv.length) return { error: `${flag} requires a value` };
+    // An empty or blank value is a missing value: `--cwd ''` must not fall back
+    // to the process cwd and measure a tree nobody named.
+    if (i + 1 >= argv.length || argv[i + 1].trim() === '') return { error: `${flag} requires a value` };
     opts[flag.slice(2)] = argv[i + 1];
     i += 1;
   }
@@ -205,7 +212,9 @@ function toEpochMs(raw) {
   const text = String(raw).trim();
   if (text === '') return null;
   const ms = /^-?\d+$/.test(text) ? Number(text) : Date.parse(text);
-  return Number.isFinite(ms) ? ms : null;
+  // A finite number outside the Date range would make `toISOString` throw
+  // outside the observation try, exiting 0 with nothing printed.
+  return Number.isFinite(ms) && Math.abs(ms) <= MAX_DATE_MS ? ms : null;
 }
 
 /**

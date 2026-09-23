@@ -413,6 +413,41 @@ describe('existence-audit: --since', () => {
     expect(entry(printed, 'hooks', 'quiet-hook').fired).toBe(0);
     expect(printed.summary.census.dropped.selection.filtered_out).toBe(1);
   });
+
+  it('reads an all-digit cutoff as epoch ms, the same instant as its ISO spelling', () => {
+    const project = makeProject('P12');
+    const plugin = makePlugin('plug12');
+    seed(project, 'hook.fired', { slot: 'Stop', hooks: ['quiet-hook'], count: 1 }, { now: () => new Date('2026-09-01T00:00:00Z') });
+    seed(project, 'hook.fired', { slot: 'Stop', hooks: ['memory-tracker'], count: 1 }, { now: () => new Date('2026-09-20T00:00:00Z') });
+    const base = ['--cwd', project, '--plugin-root', plugin, '--since'];
+
+    const iso = parseOne(runCli([...base, '2026-09-10T00:00:00Z'], project));
+    const ms = parseOne(runCli([...base, String(Date.parse('2026-09-10T00:00:00Z'))], project));
+
+    // Date.parse does not read an all-digit string as a stamp, so this is the
+    // case that catches a regression to a bare Date.parse.
+    expect(ms.since).toBe('2026-09-10T00:00:00.000Z');
+    expect(ms.since).toBe(iso.since);
+    expect(ms.summary.eventsReceived).toBe(1);
+    expect(ms.summary.eventsReceived).toBe(iso.summary.eventsReceived);
+  });
+});
+
+describe('existence-audit: --cwd is the ledger root, not the process cwd', () => {
+  it('reads the ledger --cwd names even when spawned inside another project', () => {
+    const bystander = makeProject('P13a');
+    const target = makeProject('P13b');
+    const plugin = makePlugin('plug13');
+    seed(bystander, 'hook.fired', { slot: 'Stop', hooks: ['quiet-hook'], count: 1 });
+    seedLedger(target);
+
+    const printed = parseOne(runCli(['--cwd', target, '--plugin-root', plugin], bystander));
+
+    expect(printed.inputPath).toBe(ledgerFilePath(target));
+    expect(printed.inputPath).not.toBe(ledgerFilePath(bystander));
+    expect(printed.summary.eventsReceived).toBe(5);
+    expect(printed.kinds.hooks.denominator).toBe(2);
+  });
 });
 
 describe('existence-audit: what it refuses to answer', () => {
@@ -421,6 +456,13 @@ describe('existence-audit: what it refuses to answer', () => {
     ['--plugin-root has no value', () => ['--plugin-root']],
     ['--plugin-root is not a directory', () => ['--plugin-root', path.join(tmp, 'nowhere')]],
     ['--since does not parse to a time', () => ['--since', 'nonsense']],
+    // Finite, but past the Date range: toISOString would throw after parsing.
+    ['--since is outside the Date range', () => ['--since', '9999999999999999']],
+    ['--since is negative past the Date range', () => ['--since', '-8640000000000001']],
+    // Empty or blank must not fall back to the process cwd / own plugin root.
+    ['--cwd is empty', () => ['--cwd', '']],
+    ['--cwd is blank', () => ['--cwd', '   ']],
+    ['--plugin-root is empty', () => ['--plugin-root', '']],
   ])('exits 2 with an empty stdout when %s', (_label, args) => {
     const project = makeProject('P11');
 
