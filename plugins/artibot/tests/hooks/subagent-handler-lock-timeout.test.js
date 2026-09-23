@@ -26,8 +26,11 @@ import { ledgerFilePath } from '../../lib/runtime/ledger.js';
  * change, so "unchanged" above is not an artefact of a hook that never writes.
  *
  * WHAT GREEN HERE DOES NOT PROVE:
- *   - The latency bound is one run on this machine against the hooks.json
- *     5 s timeout; it is not a distribution.
+ *   - That a contended hook fits the hooks.json 5 s timeout. The upper bound
+ *     below only proves the hook did not hang: a contended run measured
+ *     2.7-3.6 s on a loaded Windows machine (review, 2026-09-23), 55-72% of
+ *     the 5 s budget, so pinning 5 s here would flake under load. The lower
+ *     bound (>= 1.9 s) is what proves the lock was really contended.
  *   - Contention from more than one holder, or a holder that releases while
  *     the hook is still waiting, is not exercised (file-lock's own suite owns
  *     acquisition behaviour).
@@ -41,8 +44,11 @@ const SID = 'sess-lock-timeout';
 const AGENT_ID = 'agent-lock-timeout';
 const MODEL = 'claude-fable-5-1';
 
-/** SubagentStart/Stop timeout in hooks.json (`"timeout": 5`, seconds). */
-const HOOK_BUDGET_MS = 5000;
+/**
+ * "Did not hang" ceiling for a contended run: the 2 s lock wait plus generous
+ * startup slack. NOT the hooks.json 5 s budget (see the header for why).
+ */
+const HANG_CEILING_MS = 15000;
 
 /** The hook's stdout, which a contended lock must not change (asserted uncontended too). */
 const START_STDOUT = `{"message":"[team] Agent registered: ${AGENT_ID} (code-reviewer)"}`;
@@ -163,7 +169,10 @@ describe('subagent-handler under a held team-state lock (child processes, no moc
   afterEach(async () => {
     if (holder && holder.exitCode === null && holder.signalCode === null) {
       const exited = new Promise((r) => holder.once('exit', r));
-      holder.kill();
+      // SIGKILL, not the default SIGTERM: the holder installed withFileLock's
+      // SIGTERM listener and sits in Atomics.wait, so on POSIX a SIGTERM would
+      // only be handled when the 9 s wait ends.
+      holder.kill('SIGKILL');
       await exited;
     }
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
@@ -181,9 +190,9 @@ describe('subagent-handler under a held team-state lock (child processes, no moc
     expect(readFileSync(statePath, 'utf-8')).toBe(seeded);
     expect(res.stdout.trim()).toBe(START_STDOUT);
     expect(res.stderr).toContain('[artibot:subagent-handler] team state not updated: ');
-    // It waited out the lock (so the lock really was contended) and still fit the hook budget.
+    // It waited out the lock (so the lock really was contended) and did not hang.
     expect(res.elapsedMs).toBeGreaterThanOrEqual(1900);
-    expect(res.elapsedMs).toBeLessThan(HOOK_BUDGET_MS);
+    expect(res.elapsedMs).toBeLessThan(HANG_CEILING_MS);
   });
 
   it('SubagentStop: skips the state update, still writes the stop record and review.completed', async () => {
@@ -207,7 +216,7 @@ describe('subagent-handler under a held team-state lock (child processes, no moc
     expect(res.stdout.trim()).toBe(STOP_STDOUT);
     expect(res.stderr).toContain('[artibot:subagent-handler] team state not updated: ');
     expect(res.elapsedMs).toBeGreaterThanOrEqual(1900);
-    expect(res.elapsedMs).toBeLessThan(HOOK_BUDGET_MS);
+    expect(res.elapsedMs).toBeLessThan(HANG_CEILING_MS);
   });
 
   it('positive control: with no holder the same runs update the state file', () => {
