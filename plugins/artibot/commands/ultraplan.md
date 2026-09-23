@@ -78,11 +78,11 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 > 앞 6자, 또는 `ListAgents` 결과의 자기 세션 `[ref]`. 한 런 안에서는 고정한다.
 
 - `Agent(subagent_type="artibot:planner", name="lens-{sid}-mvp", prompt="[ULTRAPLAN 렌즈: MVP·최단경로] 근거:{ground}\n작업:{task}\n가장 빠르게 가치 내는 단계 계획\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 에이전트 이름 기준 `lib/core/model-policy.js#resolveModel`; 2026-09-02 오너 결정으로 fable 게이트 ON, planner/architect 는 allowlist 8종에 포함 → fable 티어. `deep-async` 별칭을 쓰려면 `resolveModel('deep-async', { agentType })` 로 호출 에이전트를 넘겨야 게이트 대조가 된다(agentType 없이는 게이트 ON 여부만 본다) -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:planner` 출력값을 Agent(model=…) 에 넘긴다 — 렌즈는 phase 역할이 아니라 에이전트 이름으로 해석하므로 `--role` 없이 부른다. 현재 단일 티어 opus(2026-09-23 오너 결정, fable 게이트 off — 2026-09-02~09-23 에는 planner/architect 가 allowlist 로 fable 이었다). CLI 가 없거나 실패하면 `lib/core/model-policy.js#resolveModel('planner')` 값으로 폴백(`commands/team.md` §Teammate Rules & Model Policy). `deep-async` 별칭을 쓰려면 `resolveModel('deep-async', { agentType })` 로 호출 에이전트를 넘겨야 게이트 대조가 된다 -->
 - `Agent(subagent_type="artibot:architect", name="lens-{sid}-risk", prompt="[ULTRAPLAN 렌즈: 위험·견고성 우선] ... 실패모드·롤백·테스트를 최우선으로 한 계획\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 에이전트 이름 기준 `lib/core/model-policy.js#resolveModel`; 2026-09-02 오너 결정으로 fable 게이트 ON, planner/architect 는 allowlist 8종에 포함 → fable 티어. `deep-async` 별칭을 쓰려면 `resolveModel('deep-async', { agentType })` 로 호출 에이전트를 넘겨야 게이트 대조가 된다(agentType 없이는 게이트 ON 여부만 본다) -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:architect` 출력값을 Agent(model=…) 에 넘긴다(렌즈 = 이름 기준, `--role` 없음). 현재 opus — 위 mvp 렌즈 주석과 같은 규칙 -->
 - `Agent(subagent_type="artibot:architect", name="lens-{sid}-arch", prompt="[ULTRAPLAN 렌즈: 장기 아키텍처] ... 2년 뒤 유지보수·확장성·기술부채 최소화 계획\n\n{보고 계약}")`
-  <!-- model: model-policy 해석 — 에이전트 이름 기준 `lib/core/model-policy.js#resolveModel`; 2026-09-02 오너 결정으로 fable 게이트 ON, planner/architect 는 allowlist 8종에 포함 → fable 티어. `deep-async` 별칭을 쓰려면 `resolveModel('deep-async', { agentType })` 로 호출 에이전트를 넘겨야 게이트 대조가 된다(agentType 없이는 게이트 ON 여부만 본다) -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:architect` 출력값을 Agent(model=…) 에 넘긴다(렌즈 = 이름 기준, `--role` 없음). 현재 opus — 위 mvp 렌즈 주석과 같은 규칙 -->
 
 ### Phase 3 — JUDGE & SYNTHESIZE (종합)
 리더가 후보 N개를 비교·채점(가치/위험/비용/장기성)하고 **최선안으로 종합**하되 각 후보의 강점을 접목한다.
@@ -93,7 +93,7 @@ DIVERGE(발산) 엔진을 돌리기 **전에** "이 작업이 진짜 필요한�
 ### Phase 4 — ADVERSARIAL REVIEW (적대적 검증)  ·  `--no-adversarial` 시 스킵
 공격자 관점 검증(`{sid}` 는 Phase 2 와 같은 세션 판별자 — 고정 이름이라 판별자 없이는 두 세션이
 같은 `plan-critic` 을 만든다): `Agent(subagent_type="artibot:code-reviewer", name="plan-{sid}-critic", prompt="[Plan 적대 검증] 이 계획의 순환 의존, 누락된 테스트 단계, 숨은 비용, 2년 뒤 기술부채, 실존하지 않는 파일 참조, 비현실적 의존 순서를 전부 찾아내라\n\n{보고 계약}")`
-<!-- model: model-policy 해석 — 팀원별 `resolveModel('code-reviewer', { role: 'review' })` — config `agents.modelPolicy.phaseRoles.review` = fable(2026-09-02 오너 결정)을 읽되 **그 에이전트 이름으로 `fable.allowlist`·`FABLE_DENYLIST` 를 대조**한다(code-reviewer 는 allowlist 8종에 포함 → fable; critic 을 `security-reviewer` 로 바꾸면 denylist 라 opus). 에이전트 이름 없는 `resolveModelForPhase('review')` 는 kill-switch 만 보므로 배정 근거로 쓰지 마라. 역할 `balanced` 는 쓰지 않는다 — `resolveModel('balanced')` 는 sonnet 으로 해석돼(실측 2026-09-02) 정책과 어긋난다 -->.
+<!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review` 출력값을 Agent(model=…) 에 넘긴다(폴백 `resolveModel('code-reviewer', { role: 'review' })`). config `agents.modelPolicy.phaseRoles.review` = opus(2026-09-23 오너 결정, 단일 티어 — 2026-09-02~09-23 에는 fable 이었다). 에이전트 이름으로 `fable.allowlist`·`FABLE_DENYLIST` 를 대조하는 게이트는 휴면이다(`fable.enabled=false` — 지금은 critic 이 누구든 opus). 에이전트 이름 없는 `resolveModelForPhase('review')` 는 kill-switch 만 보므로 배정 근거로 쓰지 마라. 역할 `balanced` 는 쓰지 않는다 — `resolveModel('balanced')` 는 sonnet 으로 해석돼(실측 2026-09-02, 2026-09-23 재실측 동일) 정책과 어긋난다 -->.
 발견 항목은 종합안에 반영(재조정) 후 통과시킨다.
 
 ### Phase 5 — HARDEN (강화)
