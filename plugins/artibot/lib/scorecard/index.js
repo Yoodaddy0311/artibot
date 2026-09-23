@@ -48,6 +48,12 @@ export { SESSION_KIND, buildSessionScorecard, mergeEventCounts } from './session
 export { COMPARE_KIND, buildCompareScorecard } from './compare-scorecard.js';
 
 export {
+  MISSION_KIND,
+  OUTCOME_PRESENT_ASSERTION,
+  buildMissionScorecard,
+} from './mission-scorecard.js';
+
+export {
   METRIC_STATE,
   UNMEASURED_TEXT,
   countWhere,

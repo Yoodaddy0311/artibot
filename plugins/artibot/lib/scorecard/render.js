@@ -41,6 +41,11 @@ const HEADINGS = Object.freeze({
   routing: 'ARTIBOT · ROUTING SCORECARD',
   // The spawn-outcome fold's card (`lib/scorecard/compare-scorecard.js`).
   compare: 'ARTIBOT · COMPARE SCORECARD',
+  // The §34 final card (`lib/scorecard/mission-scorecard.js`). Registering the
+  // kind here is the whole of the renderer's change: an unregistered kind still
+  // throws, which is what keeps a card that nobody taught the renderer about
+  // from rendering under someone else's heading.
+  mission: 'ARTIBOT · MISSION SCORECARD',
 });
 
 /** Column headers of the metric table, in render order. */
