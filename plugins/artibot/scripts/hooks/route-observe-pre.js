@@ -60,7 +60,7 @@
 
 import { parseJSON, readStdin } from '../utils/index.js';
 import { loadConfig } from '../../lib/core/config.js';
-import { MODELS } from '../../lib/core/model-catalog.js';
+import { resolveModelIdentity } from '../../lib/economics/usage-receipt.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { classifyAction } from '../../lib/routing/action-classifier.js';
 import { routeModel } from '../../lib/routing/adaptive-model-router.js';
@@ -222,12 +222,20 @@ export const RESIDENCY_TAIL_BYTES = 524288;
 const SYNTHETIC_MODEL = '<synthetic>';
 
 /**
- * The tier whose catalog entry has exactly this `id`, or null.
+ * The tier whose catalog entry names this transcript model, or null.
  *
- * EXACT, full-id match only. The catalog field is `id` (`model-catalog.js:140`
- * `MODELS`), and `adaptive-model-router.js#modelIdentity` is what later renames
- * it to `model_id` on the receipt — this reads the catalog, so it reads `id`.
- * No prefix, alias or suffix tolerance: an id the catalog does not name is a
+ * Delegates to `lib/economics/usage-receipt.js#resolveModelIdentity`, the one
+ * transcript-string -> tier resolver, so the hook and the receipt writer cannot
+ * disagree about which tier a session was on. That resolver strips only the
+ * qualifiers the transcript appends — a `[1m]` context variant and a `-YYYYMMDD`
+ * snapshot — and then needs an EXACT match against a catalog `id` or one of its
+ * `legacyIds`. So `claude-opus-5` (legacy since 2026-09-23) and
+ * `claude-fable-5-1[1m]` resolve, while `claude-opus-5-6` and a bare `opus` do
+ * not. Both were needed: on 2026-09-23, across 136 transcripts of this project
+ * modified in the prior 2 days, `claude-opus-5` appeared 5326 times and
+ * `claude-fable-5-1[1m]` 53 times (all `"model"` string occurrences, not only
+ * assistant records), and both resolved to null under the old exact-`id` match.
+ * No prefix, alias or family tolerance: an id the catalog does not name is a
  * tier this repo cannot price, and the router's `models.current` is typed as a
  * priced identity. Measured consequence, same sample: `claude-sonnet-5` appeared
  * on 293/8769 assistant records while the catalog's sonnet entry was still
@@ -236,18 +244,19 @@ const SYNTHETIC_MODEL = '<synthetic>';
  * matcher here would have papered over it in the one place nobody would look.
  * That drift is what owner decision O2 (2026-09-15) closed by moving the
  * catalog's sonnet `id` to `claude-sonnet-5` — the fix went into the catalog,
- * not into this matcher, which is still exact-match only. Prices were left
+ * not into this matcher, which still matches whole ids only. Prices were left
  * alone (unverified, SH-07 I1), so a null here still means "cannot price".
+ *
+ * The tier is all that leaves this function: `models.current` is rebuilt from
+ * the tier by the router, so a legacy `claude-opus-5` turn is reported with the
+ * catalog's CURRENT opus `model_id`, not the id the transcript carried.
  *
  * @param {unknown} modelId - `message.model` off a transcript record
  * @returns {string|null} Tier key ('opus' | 'fable' | …), or null
  */
 function tierForModelId(modelId) {
   if (typeof modelId !== 'string' || modelId.trim() === '') return null;
-  for (const [tier, spec] of Object.entries(MODELS)) {
-    if (spec?.id === modelId) return tier;
-  }
-  return null;
+  return resolveModelIdentity(modelId)?.tier ?? null;
 }
 
 /**

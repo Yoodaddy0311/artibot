@@ -25,10 +25,12 @@ import { resolveBoundModel } from '../../lib/routing/bind-model-fallback.js';
  *   - THAT THE LIVE POLICY SAYS WHAT THE SHIPPED CONFIG SAYS. Named-definition
  *     expectations go through `resolveModel` under the loaded config, so a tier
  *     change moves both sides together. The tier LITERALS that remain (the
- *     `'opus'` DEFAULT_MODEL control, the `'fable'` allowlist answer, and the
- *     security-reviewer denylist pair) are deliberate policy pins in the same
- *     spirit as the FABLE_AGENTS pin: they are MEANT to break when the owner
- *     changes those three rules, so that change is noticed here too.
+ *     `'opus'` DEFAULT_MODEL control, the shipped single-tier `'opus'` answer
+ *     for an allowlisted reviewer, the `'fable'` allowlist answer on the
+ *     gate-on copy, and the security-reviewer denylist pair) are deliberate
+ *     policy pins in the same spirit as the FABLE_AGENTS pin: they are MEANT to
+ *     break when the owner changes those rules, so that change is noticed here
+ *     too.
  */
 describe('resolveBoundModel', () => {
   let config;
@@ -133,19 +135,53 @@ describe('resolveBoundModel', () => {
     });
   });
 
-  it('applies the fable allowlist, so an allowlisted reviewer lands on fable', () => {
+  /**
+   * The loaded config with the fable gate re-opened — the 2-tier fleet
+   * (2026-09-02 .. 2026-09-23) rebuilt by flipping back only the two keys the
+   * single-tier revert touched. Since the owner decision of 2026-09-23 ("fable
+   * 5.1 -> opus 5.5") the shipped gate is OFF, so every definition resolves to
+   * opus there and an allowlist/denylist assertion against it would pass
+   * whether or not the gate works. Gate behavior is pinned on this copy.
+   *
+   * @returns {object}
+   */
+  const gateOnConfig = () => {
+    const copy = structuredClone(config);
+    copy.agents.modelPolicy.fable.enabled = true;
+    copy.agents.modelPolicy.phaseRoles.review = 'fable';
+    return copy;
+  };
+
+  it('shipped config (single-tier opus, owner 2026-09-23): an allowlisted reviewer lands on opus', () => {
+    // Deliberate policy pin: breaks if the kill-switch is re-opened, so that
+    // change is noticed here too. The allowlist still NAMES code-reviewer.
+    expect(config.agents.modelPolicy.fable.enabled).toBe(false);
+    expect(config.agents.modelPolicy.fable.allowlist).toContain('code-reviewer');
     const out = ok({ receiptSubagentType: 'code-reviewer' });
     expect(out).toEqual({ model: resolveModel('code-reviewer', {}, config), source: 'receipt' });
+    expect(out.model).toBe('opus');
+  });
+
+  it('applies the fable allowlist, so an allowlisted reviewer lands on fable (gate-on copy)', () => {
+    const on = gateOnConfig();
+    const out = ok({ receiptSubagentType: 'code-reviewer', config: on });
+    expect(out).toEqual({ model: resolveModel('code-reviewer', {}, on), source: 'receipt' });
     expect(out.model).toBe('fable');
   });
 
-  it('applies the fable denylist, so security-reviewer lands on opus despite its fable bucket', () => {
+  it('applies the fable denylist, so security-reviewer lands on opus despite its fable bucket (gate-on copy)', () => {
     // `security-reviewer` sits in the fable-model `high` bucket; the denylist
     // is what demotes it. Going through the raw bucket instead would record a
-    // tier that never runs.
-    expect(getPolicyModel('security-reviewer', config)).toBe('fable');
-    const out = ok({ receiptSubagentType: 'security-reviewer' });
+    // tier that never runs. Run with the gate OPEN, where an allowlisted
+    // neighbour in the same bucket does reach fable — otherwise the closed
+    // shipped gate, not the denylist, would be what produced opus.
+    const on = gateOnConfig();
+    expect(getPolicyModel('security-reviewer', on)).toBe('fable');
+    expect(ok({ receiptSubagentType: 'code-reviewer', config: on }).model).toBe('fable');
+    const out = ok({ receiptSubagentType: 'security-reviewer', config: on });
     expect(out).toEqual({ model: 'opus', source: 'receipt' });
+    // And on the shipped config too, where it is opus like everyone else.
+    expect(ok({ receiptSubagentType: 'security-reviewer' })).toEqual({ model: 'opus', source: 'receipt' });
   });
 
   it('normalizes an `artibot:`-prefixed definition the way the spawn path does', () => {

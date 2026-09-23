@@ -63,6 +63,21 @@ import { fileURLToPath } from 'node:url';
  */
 const CONFIG = await loadConfig();
 
+/**
+ * The live config with the fable gate re-opened: the 2-tier fleet
+ * (2026-09-02 .. 2026-09-23) rebuilt by flipping back only the two keys the
+ * single-tier revert touched (owner decision 2026-09-23 "fable 5.1 -> opus 5.5":
+ * fable.enabled=false, phaseRoles.review=opus). Under the shipped closed gate
+ * B2 and B4 answer opus for every agent - measured 2026-09-23, identical to the
+ * EMPTY config - so a gate-dependent assertion run only against CONFIG would be
+ * green whether or not the gate works. Those assertions run against this copy,
+ * scored in-process through scoreScenarios/resolveBaseline, which take the
+ * config as an argument (runRouteBench always loads the live file).
+ */
+const GATE_ON_CONFIG = structuredClone(CONFIG);
+GATE_ON_CONFIG.agents.modelPolicy.fable.enabled = true;
+GATE_ON_CONFIG.agents.modelPolicy.phaseRoles.review = 'fable';
+
 /** @returns {string} sha256 of a file's bytes, hex - the runner's own spelling */
 function sha256Of(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
@@ -266,16 +281,29 @@ const SHIPPED_LIVE = Object.freeze({
 });
 
 /** The tier a baseline id picks for an agentType, recomputed. @returns {string} */
-function expectedTier(baselineId, agentType) {
+function expectedTier(baselineId, agentType, config = CONFIG) {
   if (baselineId === 'B0') return 'sonnet';
   if (baselineId === 'B1') return 'opus';
   if (baselineId === 'B5') return 'fable';
-  if (baselineId === 'B2') return resolveModel(agentType, {}, CONFIG);
+  if (baselineId === 'B2') return resolveModel(agentType, {}, config);
   if (baselineId === 'B3') {
     return ACTION_CLASS_TIERS[classifyAction({ agentType }).actionClass];
   }
-  return routeModel({ agentType, config: CONFIG, input: { agentType } })
+  return routeModel({ agentType, config, input: { agentType } })
     .models.recommended?.tier ?? null;
+}
+
+/** @returns {object[]} the shipped scenarios, parsed one per JSONL line */
+function shippedScenarios() {
+  return readFileSync(EXAMPLE_SCENARIOS, 'utf-8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line));
+}
+
+/** @returns {Map<string, object>} scored rows keyed `${scenario_id}/${baseline}` */
+function rowsByKey(rows) {
+  return new Map(rows.map((r) => [`${r.scenario_id}/${r.baseline}`, r]));
 }
 
 describe('routebench runner - shipped fixture', () => {
@@ -314,17 +342,53 @@ describe('routebench runner - shipped fixture', () => {
       }
     }
 
-    // The live set is not degenerate: at least one scenario has the three
-    // policy baselines disagreeing, which is the divergence the benchmark
-    // exists to record. Measured 2026-09-14: investigator is B2 fable, B3
-    // sonnet, B4 opus - three different tiers on one row.
+    // The live set is not degenerate: the static table (B3) still disagrees
+    // with the policy baselines on investigator. Under the shipped single-tier
+    // policy B2 and B4 agree (measured 2026-09-23: B2 opus, B3 sonnet, B4 opus),
+    // so the three-way split measured 2026-09-14 is asserted on the gate-on
+    // copy in the next test, where it still exists.
     const inv = 'live-investigator-explore';
     const tiers = ['B2', 'B3', 'B4'].map((b) => row(report, inv, b).selection.tier);
-    expect(new Set(tiers).size).toBe(3);
+    expect(new Set(tiers).size).toBe(2);
+    expect(row(report, inv, 'B3').selection.tier).not.toBe(row(report, inv, 'B2').selection.tier);
 
     const onDisk = readResults(out, 'scenarios.example');
     expect(onDisk.rows).toEqual(report.rows);
     expect(onDisk.schema_version).toBe(1);
+  });
+
+  it('the single-tier revert moves exactly the policy-gated rows of the shipped fixture', () => {
+    // Same fixture, same baselines, scored twice in-process: once under the
+    // shipped config and once under the gate-on copy. The rows that differ are
+    // the benchmark's whole footprint of the 2026-09-23 revert (measured that
+    // day: 3 of 33). Tiers on both sides are recomputed, never literals.
+    const scenarios = shippedScenarios();
+    const shipped = rowsByKey(scoreScenarios(scenarios, BASELINES, { n: 1, config: CONFIG }));
+    const gateOn = rowsByKey(scoreScenarios(scenarios, BASELINES, { n: 1, config: GATE_ON_CONFIG }));
+    expect(shipped.size).toBe(33);
+    expect([...gateOn.keys()]).toEqual([...shipped.keys()]);
+
+    const changed = [...shipped.keys()]
+      .filter((k) => JSON.stringify(shipped.get(k)) !== JSON.stringify(gateOn.get(k)))
+      .sort();
+    expect(changed).toEqual([
+      'live-code-reviewer-review/B2',
+      'live-code-reviewer-review/B4',
+      'live-investigator-explore/B2',
+    ]);
+    for (const key of changed) {
+      const [id, baselineId] = key.split('/');
+      const { agentType } = SHIPPED_LIVE[id];
+      expect(shipped.get(key).selection.tier).toBe(expectedTier(baselineId, agentType, CONFIG));
+      expect(gateOn.get(key).selection.tier)
+        .toBe(expectedTier(baselineId, agentType, GATE_ON_CONFIG));
+    }
+
+    // With the gate open, investigator shows the three-way split again
+    // (measured 2026-09-14 and 2026-09-23: B2 fable, B3 sonnet, B4 opus).
+    const inv = 'live-investigator-explore';
+    const tiers = ['B2', 'B3', 'B4'].map((b) => gateOn.get(`${inv}/${b}`).selection.tier);
+    expect(new Set(tiers).size).toBe(3);
   });
 
   it('every live corpus on disk passes the scrub gate it is scored under', () => {
@@ -411,20 +475,36 @@ describe('routebench runner - scoring a present fixture', () => {
     // catches that and answers from an EMPTY fable gate. B2 would then be
     // "current v4 policy" in name only. 'planner' is read out of the live
     // allowlist below rather than assumed to be in it.
+    //
+    // Since the single-tier revert (owner 2026-09-23) the shipped policy and
+    // the empty one answer the SAME tier for every agent (both opus), so the
+    // B2 tier of a runRouteBench run can no longer witness that the config was
+    // loaded. Two witnesses replace it: (1) policy_source, which runRouteBench
+    // derives from the config it loaded and which differs from the empty
+    // config's (allowlist_size 10 vs 0); (2) the scoring path itself, fed the
+    // gate-on copy, where loaded and empty DO answer differently.
     const allowlist = CONFIG.agents.modelPolicy.fable.allowlist;
-    expect(CONFIG.agents.modelPolicy.fable.enabled).toBe(true);
+    expect(CONFIG.agents.modelPolicy.fable.enabled).toBe(false);
     expect(allowlist).toContain('planner');
 
-    const loaded = resolveModel('planner', {}, CONFIG);
-    const empty = resolveModel('planner', {}, {});
-    expect(loaded).not.toBe(empty);
-
-    const { scenariosFile } = writeScenario({ id: 'synthetic-gate2', agentType: 'planner' });
+    const { scenariosFile, scenario } = writeScenario({ id: 'synthetic-gate2', agentType: 'planner' });
     const report = await runRouteBench({
       scenarios: scenariosFile, baselines: baselinesPath, out: freshDir('gate2'), n: 1,
     });
-    expect(row(report, 'synthetic-gate2', 'B2').selection.tier).toBe(loaded);
-    expect(row(report, 'synthetic-gate2', 'B2').selection.tier).not.toBe(empty);
+    // (1) the run recorded the LOADED gate, not the empty one.
+    expect(report.policy_source).toEqual({ fable_enabled: false, allowlist_size: allowlist.length });
+    expect(allowlist.length).toBeGreaterThan(0);
+    expect(row(report, 'synthetic-gate2', 'B2').selection.tier)
+      .toBe(resolveModel('planner', {}, CONFIG));
+
+    // (2) the scorer answers from the config it is handed.
+    const loaded = resolveModel('planner', {}, GATE_ON_CONFIG);
+    const empty = resolveModel('planner', {}, {});
+    expect(loaded).not.toBe(empty);
+    const scoredOn = rowsByKey(scoreScenarios([scenario], BASELINES, { n: 1, config: GATE_ON_CONFIG }));
+    const scoredEmpty = rowsByKey(scoreScenarios([scenario], BASELINES, { n: 1, config: {} }));
+    expect(scoredOn.get('synthetic-gate2/B2').selection.tier).toBe(loaded);
+    expect(scoredEmpty.get('synthetic-gate2/B2').selection.tier).toBe(empty);
   });
 
   it('records the policy the run was scored under in the envelope', async () => {
@@ -535,18 +615,28 @@ describe('routebench runner - scoring a present fixture', () => {
 
   it('changes B4s answer: the unsupplied call it replaced scored the default class', () => {
     // Both halves are asserted so the test itself witnesses that the old shape
-    // was RED, not just that the new one is green. The divergence is only
-    // visible while the fable gate is on and planner is allowlisted, so that
-    // precondition is read out of the live config first (gate2 pattern above).
-    expect(CONFIG.agents.modelPolicy.fable.enabled).toBe(true);
-    expect(CONFIG.agents.modelPolicy.fable.allowlist).toContain('planner');
+    // was RED, not just that the new one is green. The TIER divergence is only
+    // visible while the fable gate is on and planner is allowlisted. Since the
+    // single-tier revert (owner 2026-09-23) the shipped gate is off, so the
+    // tier half runs on the gate-on copy; the CLASS half still holds on the
+    // shipped config, because classification does not read the gate.
+    expect(CONFIG.agents.modelPolicy.fable.enabled).toBe(false);
+    expect(GATE_ON_CONFIG.agents.modelPolicy.fable.enabled).toBe(true);
+    expect(GATE_ON_CONFIG.agents.modelPolicy.fable.allowlist).toContain('planner');
 
-    const supplied = b4Receipt('planner');
-    const unsupplied = routeModel({ agentType: 'planner', config: CONFIG });
+    const shippedSupplied = b4Receipt('planner');
+    const shippedUnsupplied = routeModel({ agentType: 'planner', config: CONFIG });
+    expect(shippedUnsupplied.reason).toContain('class:default');
+    expect(shippedSupplied.reason).toContain('class:agent');
+
+    const supplied = routeModel({
+      agentType: 'planner', config: GATE_ON_CONFIG, input: { agentType: 'planner' },
+    });
+    const unsupplied = routeModel({ agentType: 'planner', config: GATE_ON_CONFIG });
     expect(unsupplied.reason).toContain('class:default');
     expect(supplied.reason).toContain('class:agent');
 
-    const scored = resolveBaseline(b4Baseline(), { agentType: 'planner', config: CONFIG });
+    const scored = resolveBaseline(b4Baseline(), { agentType: 'planner', config: GATE_ON_CONFIG });
     expect(scored.selection.tier).toBe(supplied.models.recommended?.tier ?? null);
     expect(scored.selection.tier).not.toBe(unsupplied.models.recommended?.tier ?? null);
   });
@@ -568,6 +658,23 @@ describe('routebench runner - scoring a present fixture', () => {
     // The class on its own would rank a different tier first (that is B3).
     expect(scored.selection.tier)
       .not.toBe(ACTION_CLASS_TIERS[classifyAction({ agentType: 'security-reviewer' }).actionClass]);
+
+    // On the shipped single-tier config (2026-09-23) every agent is capped at
+    // opus by the kill-switch, so the lines above no longer tell the DENYLIST
+    // apart from the closed gate. On the gate-on copy they do: code-reviewer
+    // has the same `review` class and is allowlisted, and B4 lifts it off the
+    // denylisted agent's tier.
+    const reviewClass = classifyAction({ agentType: 'security-reviewer' }).actionClass;
+    expect(classifyAction({ agentType: 'code-reviewer' }).actionClass).toBe(reviewClass);
+    const onSecurity = resolveBaseline(b4Baseline(), {
+      agentType: 'security-reviewer', config: GATE_ON_CONFIG,
+    });
+    const onReviewer = resolveBaseline(b4Baseline(), {
+      agentType: 'code-reviewer', config: GATE_ON_CONFIG,
+    });
+    expect(onSecurity.selection.tier).toBe(resolveModel('security-reviewer', {}, GATE_ON_CONFIG));
+    expect(onReviewer.selection.tier).toBe(resolveModel('code-reviewer', {}, GATE_ON_CONFIG));
+    expect(onSecurity.selection.tier).not.toBe(onReviewer.selection.tier);
   });
 
   it('shows the fable allowlist gate: B2 differs from fixed-fable for a non-allowlisted agent', async () => {
@@ -588,6 +695,20 @@ describe('routebench runner - scoring a present fixture', () => {
     expect(b2).toBe(resolveModel('backend-developer', {}, CONFIG));
     expect(b5).toBe('fable');
     expect(b2).not.toBe(b5);
+
+    // On the shipped config (gate off since 2026-09-23) B2 differs from B5 for
+    // EVERY agent, so the difference above no longer isolates the allowlist.
+    // On the gate-on copy it does: the allowlisted planner meets fixed-fable,
+    // the non-allowlisted backend-developer does not.
+    const b2Baseline = BASELINES.baselines.find((b) => b.id === 'B2');
+    const onBackend = resolveBaseline(b2Baseline, {
+      agentType: 'backend-developer', config: GATE_ON_CONFIG,
+    });
+    const onPlanner = resolveBaseline(b2Baseline, { agentType: 'planner', config: GATE_ON_CONFIG });
+    expect(onBackend.selection.tier).toBe(resolveModel('backend-developer', {}, GATE_ON_CONFIG));
+    expect(onPlanner.selection.tier).toBe(resolveModel('planner', {}, GATE_ON_CONFIG));
+    expect(onBackend.selection.tier).not.toBe(b5);
+    expect(onPlanner.selection.tier).toBe(b5);
   });
 
   it('refuses only the module baselines when the scenario carries no agentType', async () => {
