@@ -687,28 +687,38 @@ describe('writes zero files', () => {
     expect(applyAt).toBeGreaterThan(0);
 
     //
-    // Two lists, because "must be present" and "must be below" are different
-    // claims. REQUIRED_BELOW are the calls the writer actually makes today: a
-    // zero for one of those means the call was renamed out from under this pin
-    // and the position check had quietly become vacuous. FORBIDDEN_ABOVE are
-    // names the module no longer uses — they are not required to appear, but if
-    // one ever comes back it still has to come back below `apply(`.
-    //
-    // `existsSync(` moved from the first list to the second on 2026-09-22, when
-    // `writeOneArtifact` dropped check-then-write for the exclusive create. It
-    // is deliberately still listed: its return here would be the exact shape of
-    // the TOCTOU regression, and a name dropped from both lists is a name
-    // nothing watches.
+    // Two lists, because they make different claims. REQUIRED_BELOW are the
+    // calls the writer actually makes today: each must be present (a zero means
+    // the call was renamed out from under this pin and the position check had
+    // quietly become vacuous) and every occurrence must sit below `apply(`.
     const REQUIRED_BELOW = ['atomicCreateTextSync(', 'statSync('];
-    const FORBIDDEN_ABOVE = ['atomicWriteTextSync(', 'ensureDirSync(', 'existsSync('];
 
-    for (const call of [...REQUIRED_BELOW, ...FORBIDDEN_ABOVE]) {
+    for (const call of REQUIRED_BELOW) {
       const offsets = [];
       for (let at = source.indexOf(call); at !== -1; at = source.indexOf(call, at + 1)) {
         offsets.push(at);
       }
-      if (REQUIRED_BELOW.includes(call)) expect(offsets.length).toBeGreaterThan(0);
+      expect(offsets.length).toBeGreaterThan(0);
       for (const offset of offsets) expect(offset).toBeGreaterThan(applyAt);
+    }
+
+    // RETIRED are the check-then-write calls the exclusive create replaced on
+    // 2026-09-22: `existsSync` + `atomicWriteTextSync` were the racing pair, and
+    // `ensureDirSync` went with them because the helper creates the directory.
+    // The assertion is ZERO call sites anywhere in the file, not a position. A
+    // position check cannot catch this regression: `writeOneArtifact` itself
+    // is defined below `apply(`, so an `existsSync(target)` guard put back
+    // inside it would be "below" and pass. Comments that name these functions
+    // without a call paren are not matched.
+    //
+    // `fs.existsSync(` is matched (the dot is a word boundary). What this cannot
+    // see: a call under an alias (`import { existsSync as exists }`) or by
+    // computed key (`fs['existsSync'](`). The import-edge test below constrains
+    // which modules are imported, not which names.
+    const RETIRED = ['atomicWriteTextSync', 'ensureDirSync', 'existsSync'];
+
+    for (const name of RETIRED) {
+      expect(source).not.toMatch(new RegExp(`\\b${name}\\s*\\(`));
     }
   });
 
