@@ -343,7 +343,7 @@ const ROLE_SOURCED = Object.freeze({
  * reason states what closes each one instead.
  */
 const EXCEPTIONS = Object.freeze({
-  'lib/runtime/middleware/tasks.js:341': {
+  'lib/runtime/middleware/mission-ledger.js:247': {
     event: null,
     source: 'hook',
     reason: 'Event name resolved at runtime through LEDGER_EVENT_BY_COMPILER_NAME. '
@@ -384,6 +384,13 @@ const KNOWN_EMITTER_FLOOR = Object.freeze([
   // entries that keep that resolution from being quietly dropped again.
   ['session.ended', 'scripts/hooks/session-end.js'],
   ['usage.receipt', 'lib/economics/receipt-envelope.js'],
+  // Reached only through `tasks.js#recordQuestionGate`, and appended through a
+  // LOCAL ALIAS (`const append = deps.appendLedgerEvent ?? appendLedgerEvent`).
+  // The scan keys on the envelope literal in a writer-importing module, not on
+  // the callee name, so the alias is seen — measured 2026-09-23 by planting
+  // `source: 'scheduler'` there, which turned both classification tests RED at
+  // `lib/runtime/question-gate-record.js:149`. Pinned so that stays true.
+  ['adr.question_gate_evaluated', 'lib/runtime/question-gate-record.js'],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -563,8 +570,8 @@ describe('hook emitter sources rule', () => {
   });
 
   it('pins the runtime-named events of the table-driven emitter', () => {
-    const entry = EXCEPTIONS['lib/runtime/middleware/tasks.js:341'];
-    const src = fs.readFileSync(path.join(PKG_ROOT, 'lib', 'runtime', 'middleware', 'tasks.js'), 'utf8');
+    const entry = EXCEPTIONS['lib/runtime/middleware/mission-ledger.js:247'];
+    const src = fs.readFileSync(path.join(PKG_ROOT, 'lib', 'runtime', 'middleware', 'mission-ledger.js'), 'utf8');
     const map = src.match(/LEDGER_EVENT_BY_COMPILER_NAME\s*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/);
     expect(map, 'LEDGER_EVENT_BY_COMPILER_NAME moved — re-read the emitter').not.toBeNull();
     const names = [...new Set([...map[1].matchAll(/:\s*'([a-z][a-z0-9.]*_?[a-z0-9_]*)'/g)].map((m) => m[1]))];

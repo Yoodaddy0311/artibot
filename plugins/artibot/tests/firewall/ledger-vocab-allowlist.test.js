@@ -8,10 +8,10 @@
  *     source of truth (Hardening §46 "canonical 1개"). The moment the writer
  *     grows its own list of event names, the two drift and the file stops being
  *     the answer. This suite reads the writer's SOURCE and requires that the
- *     40 names appear nowhere in it (40 registered events measured 2026-09-17
- *     via `Object.keys(allowlist.events).length`; 39 on 2026-09-15, and this
- *     line read 36 when it was written — the count is not asserted anywhere,
- *     the gate iterates whatever the allowlist holds).
+ *     41 names appear nowhere in it (41 registered events measured 2026-09-23
+ *     via `Object.keys(allowlist.events).length`; 40 on 2026-09-17, 39 on
+ *     2026-09-15, and this line read 36 when it was written — the count is not
+ *     asserted anywhere, the gate iterates whatever the allowlist holds).
  *
  *  2. A DENYLIST BY ACCIDENT. A negative list is fail-open for every name
  *     invented after it was written (verification-discipline §8). The direction
@@ -24,9 +24,10 @@
  * that passes while measuring nothing.
  *
  * ── WHAT THIS GATE CANNOT SEE (rules §9) ────────────────────────────────────
- *   - WHETHER THE 40 NAMES ARE THE RIGHT 40 (40 measured 2026-09-17; 39 on
- *     2026-09-15; 36 when this line was written, and the newest is `hook.fired`
- *     — SH-29 / owner O8=a1). Membership is a design decision (lane 6 §5-②).
+ *   - WHETHER THE 41 NAMES ARE THE RIGHT 41 (41 measured 2026-09-23; 40 on
+ *     2026-09-17; 39 on 2026-09-15; 36 when this line was written, and the
+ *     newest is `adr.question_gate_evaluated` — SH-18, the first `adr.*`
+ *     event). Membership is a design decision (lane 6 §5-②).
  *     This checks internal consistency, never adequacy.
  *   - WHETHER ANY EVENT IS EVER EMITTED. Phase 0 has zero callers, so a
  *     registered event with no writer looks identical here to one in daily use.
@@ -64,6 +65,10 @@ import {
   writeEvent,
 } from '../../lib/runtime/event-writer.js';
 import { readAllEvents } from '../../lib/runtime/ledger.js';
+import {
+  buildQuestionGateData,
+  QUESTION_GATE_EVENT,
+} from '../../lib/runtime/question-gate-record.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.join(HERE, '..', '..');
@@ -372,6 +377,69 @@ describe('mission.checkpointed declares the data keys its writer emits', () => {
     const written = readAllEvents(root);
     expect(written).toHaveLength(1);
     expect(written[0].data.undeclared_probe).toBe(1);
+  });
+});
+
+describe('adr.question_gate_evaluated declares every key its recorder emits', () => {
+  /**
+   * The recorder is `lib/runtime/question-gate-record.js`. Its data keys are
+   * the question gate's own condition names (`GATE_CONDITIONS`) plus
+   * `required` and `interpretation_present`, all booleans.
+   */
+  const EVENT = QUESTION_GATE_EVENT;
+
+  /**
+   * @param {object} data
+   * @param {string} [source]
+   * @returns {object}
+   */
+  function record(data, source = 'hook') {
+    return writeEvent(root, {
+      event: EVENT,
+      session_id: 'sess-vocab-0001',
+      source,
+      mission_id: 'M-20260902-001',
+      data,
+    });
+  }
+
+  it('is registered hook-only, with every emitted key typed boolean and required', () => {
+    const spec = getAllowlist().events[EVENT];
+    expect(spec).toBeDefined();
+    expect(spec.sources).toEqual(['hook']);
+    const emitted = Object.keys(buildQuestionGateData({ prompt: 'x' })).sort();
+    expect(Object.keys(spec.fields).sort()).toEqual(emitted);
+    // Required, not merely declared: foldOversized keeps only required keys.
+    expect([...spec.required].sort()).toEqual(emitted);
+    for (const key of emitted) expect(spec.fields[key].type, key).toBe('boolean');
+    // Not a v1.1 example and not a known gap — the six-example pin lives in
+    // tests/schemas/ledger-envelope.test.js.
+    expect(spec.v1_1_example).toBeUndefined();
+    expect(spec.unspecified_required).toBeUndefined();
+  });
+
+  it('accepts a payload the recorder built, and only from a hook', () => {
+    const data = buildQuestionGateData({ prompt: 'which one should we pick for the schema?' });
+    expect(record(data).ok).toBe(true);
+    const refused = record(data, 'worker');
+    expect(refused.ok).toBe(false);
+    expect(refused.reason).toBe('source-not-allowed:worker');
+    expect(readAllEvents(root).map((e) => e.event)).toEqual([EVENT]);
+  });
+
+  it('refuses a truthy look-alike where a boolean belongs', () => {
+    const data = buildQuestionGateData({ prompt: 'x' });
+    const res = record({ ...data, valueJudgmentRequired: 1 });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('type-violation:valueJudgmentRequired');
+  });
+
+  it('refuses a payload missing the interpretation marker', () => {
+    const data = { ...buildQuestionGateData({ prompt: 'x' }) };
+    delete data.interpretation_present;
+    const res = record(data);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('missing-required-data:interpretation_present');
   });
 });
 

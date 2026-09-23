@@ -477,6 +477,40 @@
       ],
       "spec": "lane 6 §5-② #14 requires `decision`. The task brief writes human.resolved{kind}; `kind` is declared with its enum but left OPTIONAL because design §8.4 schedules the 3-way split for Shadow, not Observe. Written by the model right after it receives an AskUserQuestion answer. T-40 measured that human.asked requires question_id while human.resolved did not even declare it, leaving asked/resolved pairs unjoinable; question_id is declared here as OPTIONAL so the join becomes expressible without widening what an existing writer may omit."
     },
+    "adr.question_gate_evaluated": {
+      "required": [
+        "valueJudgmentRequired",
+        "materialDownstreamImpact",
+        "evidenceCannotDecide",
+        "costOfWrongAssumptionMeaningful",
+        "required",
+        "interpretation_present"
+      ],
+      "fields": {
+        "valueJudgmentRequired": {
+          "type": "boolean"
+        },
+        "materialDownstreamImpact": {
+          "type": "boolean"
+        },
+        "evidenceCannotDecide": {
+          "type": "boolean"
+        },
+        "costOfWrongAssumptionMeaningful": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "interpretation_present": {
+          "type": "boolean"
+        }
+      },
+      "sources": [
+        "hook"
+      ],
+      "spec": "ARTIBOT-5.0-DESIGN.md §7.3, §48 item #27 'ADR question gate(4조건 기록)' (Shadow row) + ADDENDUM-HARDENING.md §18 :659-677 (the four conditions); V5-BACKLOG SH-18. One line per prompt, written by lib/runtime/question-gate-record.js#appendQuestionGateEvent, emitter tasks.js#recordMissionCompile on the UserPromptSubmit path. The four condition keys are lib/planning/question-gate.js#GATE_CONDITIONS verbatim (camelCase, the gate's own names); `required` is their conjunction (requiresQuestion). RECORDING ONLY -- no question is asked or suppressed by this line; enforcement is CA-15. LIMITATION: that path has no interpretIntent() output, so the escalating-completion and structural-purpose routes of conditions 2 and 4 are always false there; `interpretation_present` records whether one was supplied, so a false can be read as 'no cue' versus 'input absent'. config.question_gate.force is not forwarded, so a forced value is never recorded as observed. All six keys are required because event-writer.js#foldOversized keeps only required keys above the line cap. No idempotency key."
+    },
     "budget.warning": {
       "required": [
         "used",
