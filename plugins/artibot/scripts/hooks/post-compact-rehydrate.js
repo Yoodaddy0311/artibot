@@ -29,7 +29,8 @@
  *   - never throws; stdout carries nothing but the JSON / bundle
  *   - automation 0: reads, writes its own two files, reports
  *   - wrong branch/worktree snapshot is NOT injected — the bundle says so
- *   - budget 8s (hooks.json); git calls are shell-free with 2s timeouts
+ *   - budget 8s (hooks.json); git calls are shell-free, two in sequence, each
+ *     capped at `gitTimeoutMs` (2000 — 2× must stay under the budget)
  *   - gated by `split.contextLifecycle` (read with defaults, config not edited here):
  *       enabled: false (ships OFF — S0: exit 0 with zero bytes on stdout AND stderr),
  *       postCompactRehydrate: true, maxRehydrateBytes: 10240
@@ -116,14 +117,28 @@ export const LIFECYCLE_DEFAULTS = Object.freeze({
   // a TEST SEAM: production config names no directory, and no new env var was
   // added for it — it rides the one overlay that already exists.
   supervisorStoreDir: null,
+  // Per-call budget of the two identity `git rev-parse` calls. Same standing as
+  // `supervisorStoreDir`: production config names none, so the shipped value
+  // is this one; tests widen it through the overlay because a loaded machine
+  // can outrun 2000ms without the identity itself being in doubt.
+  gitTimeoutMs: 2000,
 });
+
+/**
+ * @param {unknown} value
+ * @param {number} fallback
+ * @returns {number} `value` when it is a positive integer, else `fallback`
+ */
+function positiveIntOr(value, fallback) {
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
 
 /**
  * Resolve the lifecycle settings: defaults ← config ← env overlay. Never throws.
  * @param {object|null} config
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {{ enabled: boolean, postCompactRehydrate: boolean, maxRehydrateBytes: number,
- *            supervisorStoreDir: string|null }}
+ *            supervisorStoreDir: string|null, gitTimeoutMs: number }}
  */
 export function resolveLifecycle(config, env = process.env) {
   const fromConfig = config?.split?.contextLifecycle && typeof config.split.contextLifecycle === 'object'
@@ -137,38 +152,49 @@ export function resolveLifecycle(config, env = process.env) {
   return {
     enabled: merged.enabled === true,
     postCompactRehydrate: merged.postCompactRehydrate !== false,
-    maxRehydrateBytes: Number.isInteger(merged.maxRehydrateBytes) && merged.maxRehydrateBytes > 0
-      ? merged.maxRehydrateBytes : DEFAULT_MAX_BYTES,
+    maxRehydrateBytes: positiveIntOr(merged.maxRehydrateBytes, DEFAULT_MAX_BYTES),
     supervisorStoreDir: typeof merged.supervisorStoreDir === 'string' && merged.supervisorStoreDir
       ? merged.supervisorStoreDir : null,
+    gitTimeoutMs: positiveIntOr(merged.gitTimeoutMs, LIFECYCLE_DEFAULTS.gitTimeoutMs),
   };
 }
 
 /**
- * Shell-free git, 2s budget, never throws.
+ * Shell-free git, never throws. `cause` says why `out` is null: the spawn
+ * error code (`ETIMEDOUT` when the budget ran out, `ENOENT` without git), the
+ * killing signal, `exit <status>`, or `empty` for a blank answer.
  * @param {string[]} args
  * @param {string} cwd
- * @returns {string|null}
+ * @param {number} timeoutMs
+ * @returns {{ out: string|null, cause: string|null }}
  */
-function git(args, cwd) {
+function git(args, cwd, timeoutMs) {
   try {
-    return execFileSync('git', args, {
-      cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true,
-    }).trim() || null;
-  } catch {
-    return null;
+    const out = execFileSync('git', args, {
+      cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: timeoutMs, windowsHide: true,
+    }).trim();
+    return out ? { out, cause: null } : { out: null, cause: 'empty' };
+  } catch (e) {
+    return { out: null, cause: String(e?.code ?? e?.signal ?? `exit ${e?.status}`) };
   }
 }
 
 /**
+ * The tree the hook runs in. `compareIdentity` reads `cwd`/`branch`/`head`
+ * only; `gitTimeoutMs` (the budget the calls actually got) and `gitErrors`
+ * (null per call that answered) are for the record and the refusal line.
  * @param {string} cwd
- * @returns {{ cwd: string, branch: string|null, head: string|null }}
+ * @param {{ timeoutMs?: number }} [opts] - per git call; default {@link LIFECYCLE_DEFAULTS}
+ * @returns {{ cwd: string, branch: string|null, head: string|null, gitTimeoutMs: number,
+ *            gitErrors: { branch: string|null, head: string|null } }}
  */
-export function captureCurrentIdentity(cwd) {
+export function captureCurrentIdentity(cwd, opts = {}) {
+  const timeoutMs = positiveIntOr(opts.timeoutMs, LIFECYCLE_DEFAULTS.gitTimeoutMs);
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd, timeoutMs);
+  const head = git(['rev-parse', '--short=12', 'HEAD'], cwd, timeoutMs);
   return {
-    cwd,
-    branch: git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
-    head: git(['rev-parse', '--short=12', 'HEAD'], cwd),
+    cwd, branch: branch.out, head: head.out,
+    gitTimeoutMs: timeoutMs, gitErrors: { branch: branch.cause, head: head.cause },
   };
 }
 
@@ -495,10 +521,11 @@ function reportReceipt(bundle, snapshot, compactSummary, sessionId, stamp, missi
  * @param {string} cwd
  * @param {string} snapshotPath
  * @param {object} hookData
+ * @param {{ gitTimeoutMs: number }} lifecycle - a {@link resolveLifecycle} result
  * @returns {Promise<{ snapshot: object|null, current: object, projectRoot: string,
  *                     handoff: object|null, split: object, compactSummary: string|null }>}
  */
-async function gatherEvidence(cwd, snapshotPath, hookData) {
+async function gatherEvidence(cwd, snapshotPath, hookData, lifecycle) {
   let projectRoot = cwd;
   try {
     projectRoot = resolveProjectRoot(cwd) || cwd;
@@ -509,7 +536,7 @@ async function gatherEvidence(cwd, snapshotPath, hookData) {
   } catch { /* none */ }
   return {
     snapshot: readJsonSafe(snapshotPath),
-    current: captureCurrentIdentity(cwd),
+    current: captureCurrentIdentity(cwd, { timeoutMs: lifecycle.gitTimeoutMs }),
     projectRoot,
     handoff,
     split: collectSplitEvidence(cwd, projectRoot),
@@ -579,6 +606,10 @@ function buildRecord({ savedAt, event, sessionId, hookData, cwd, evidence, bundl
     cwd,
     projectRoot: evidence.projectRoot,
     identity: bundle.identity,
+    // What the git calls got, read back from the capture — not the setting,
+    // so a broken hand-off to `captureCurrentIdentity` shows up here.
+    gitTimeoutMs: evidence.current.gitTimeoutMs,
+    gitErrors: evidence.current.gitErrors,
     bytes: bundle.bytes,
     maxBytes: bundle.maxBytes,
     truncated: bundle.truncated,
@@ -602,6 +633,21 @@ function formatPressureLine(pressure, pressureEvent, receipt) {
   const event = pressureEvent.appended ? 'appended' : `skipped:${pressureEvent.reason ?? 'error'}`;
   return `pressure=${pressure.score ?? 'null'} level=${pressure.level ?? 'null'} event=${event}`
     + ` receipt=${receipt.reason ?? 'emitted'} missing=${receipt.missing.length}`;
+}
+
+/**
+ * The stderr `identity=` value. A refusal names its reasons, and the git
+ * failure behind an unknown branch when there was one — the temp home a test
+ * writes the record into is gone by the time anyone reads a failure.
+ *
+ * @param {{ ok: boolean, reasons: string[] }} identity
+ * @param {{ branch: string|null }} gitErrors
+ * @returns {string}
+ */
+function formatIdentity(identity, gitErrors) {
+  if (identity.ok) return 'ok';
+  const cause = gitErrors?.branch ? ` git.branch=${gitErrors.branch}` : '';
+  return `refused reasons=${identity.reasons.join('; ')}${cause}`;
 }
 
 /**
@@ -635,7 +681,7 @@ export async function main() {
   const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : process.cwd();
   const claudeDir = getClaudeDir();
   const snapshotPath = path.join(claudeDir, 'artibot-pre-compact.json');
-  const evidence = await gatherEvidence(cwd, snapshotPath, hookData);
+  const evidence = await gatherEvidence(cwd, snapshotPath, hookData, lifecycle);
 
   const savedAt = new Date().toISOString();
   const stamp = savedAt.replace(/[:.]/g, '-');
@@ -650,7 +696,8 @@ export async function main() {
 
   const record = buildRecord({ savedAt, event, sessionId, hookData, cwd, evidence, bundle, measured });
   const written = persist(record, bundle.text, claudeDir);
-  log(`bundle ${bundle.bytes}B/${bundle.maxBytes}B identity=${bundle.identity.ok ? 'ok' : 'refused'}${bundle.truncated ? ' truncated' : ''} → ${written.mdPath ?? 'unsaved'}`);
+  const identity = formatIdentity(bundle.identity, evidence.current.gitErrors);
+  log(`bundle ${bundle.bytes}B/${bundle.maxBytes}B identity=${identity}${bundle.truncated ? ' truncated' : ''} → ${written.mdPath ?? 'unsaved'}`);
   log(formatPressureLine(measured.pressure, measured.pressureEvent, measured.contextReceipt));
 
   if (event === 'SessionStart') {
