@@ -416,11 +416,15 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
     expect(fold.dropped).toContain('plan_revision');
     expect(Object.keys(fold.env.data).sort())
       .toEqual(['evidence_refs', 'findings_ref', 'verdict']);
-    // And the fold does not rescue this event. Its marker costs more bytes
-    // than the three dropped keys save (439 folded against a 431 unfolded
-    // line, measured 2026-09-22), so an oversized `review.completed` is
-    // rejected outright. The loss mode is a MISSING ROW, not a row that
-    // silently lost its revisions.
+    // In THIS fixture the fold does not rescue the line: with a 6-char
+    // verification id the marker costs more bytes than the three dropped keys
+    // save (439 B folded against roughly 420-430 B unfolded, the spread being
+    // pid/seq digits), so under a 400 B cap the row is rejected outright.
+    // That is ONE of two loss modes, not the general one. The verification id
+    // is written twice (`data.verification_id` and inside `idempotency_key`)
+    // and the fold drops only the first, so a long id makes the fold save
+    // more than it costs — the next test pins that a row then SURVIVES
+    // without its revisions.
     const res = appendLedgerEvent(root, built.input, {
       ledgerPath: LEDGER_REL,
       maxLineBytes: 400,
@@ -428,6 +432,39 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
     expect(res.ok).toBe(false);
     expect(res.reason.startsWith('line-too-large:')).toBe(true);
     expect(rejectedLines()).toHaveLength(1);
+  });
+
+  it('keeps an oversized row alive but writes it without its revisions', () => {
+    // The other loss mode, under the default 4096 B cap. A 2,500-char
+    // verification id puts the unfolded line over the cap and the folded one
+    // under it (scratch probe 2026-09-23: rows survive folded for ids of about
+    // 1,850 to 3,660 chars; longer ids are rejected as above). Nothing in the
+    // return value is an error, so a reader sees a normal row that simply
+    // has no revision — this is the silent case.
+    const verificationId = `v1-${'a'.repeat(2497)}`;
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ verification_id: verificationId })),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    const res = append(built.input);
+    expect(res.ok).toBe(true);
+    expect(res.folded).toBe(true);
+    expect(res.dropped).toEqual(['intent_revision', 'plan_revision', 'verification_id']);
+    expect(rejectedLines()).toHaveLength(0);
+    const rows = rawLines().filter((l) => l.event === REVIEW_COMPLETED_EVENT);
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    expect(Object.keys(row.data).sort()).toEqual(['evidence_refs', 'findings_ref', 'verdict']);
+    expect(row.data.verdict).toBe('PASS');
+    expect(row.data.findings_ref).toBe(FINDINGS_REF);
+    expect(row.data.evidence_refs)
+      .toEqual(['ledger-fold:dropped=intent_revision,plan_revision,verification_id']);
+    // The id is gone from `data` but still inside the key, which is why the
+    // fold saved enough bytes to fit.
+    expect(row.idempotency_key)
+      .toBe(`review.completed:${SID}:${verificationId}`);
   });
 
   it('omits mission_id when it does not match the ledger pattern', () => {
