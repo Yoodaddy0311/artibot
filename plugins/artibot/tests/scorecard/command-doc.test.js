@@ -76,6 +76,16 @@ function headVersion() {
 const head = headVersion();
 
 /**
+ * The ONE snippet line SH-26 replaced: the compare call before it took `replay`.
+ *
+ * Exact string, not a prefix — a prefix (`const card = sc.buildCompareScorecard(`)
+ * would also excuse deleting the call's NEW form. Same before/after reasoning as
+ * the argument-hint allowance: before this change lands HEAD holds this line and
+ * `removed` is exactly it; after, HEAD holds the new line and `removed` is [].
+ */
+const COMPARE_CALL_BEFORE = 'const card = sc.buildCompareScorecard(joinSpawnOutcomes(events), { since });';
+
+/**
  * Extract a section: its heading line through to the next heading of the same
  * or a higher level.
  *
@@ -143,20 +153,24 @@ function firstFenceOf(section) {
 
 // ---------------------------------------------------------------------------
 describe('/scorecard — 기존 본문 무변경', () => {
-  it('HEAD 에서 사라진 줄은 교체된 argument-hint 뿐이다', () => {
+  it('HEAD 에서 사라진 줄은 교체된 argument-hint 와 compare 호출 한 줄뿐이다', () => {
     // 이 어서션은 T-42 가 착지하기 전과 후에 모두 그린이어야 한다. 착지 전 HEAD 는
     // 옛 argument-hint 를 갖고 있으므로 removed 는 그 한 줄이고, 착지 후 HEAD 는
     // 새 줄을 갖고 있으므로 removed 는 빈 배열이다. 등식으로 고정하면 이 게이트가
     // 자기 커밋 직후 레드가 되고, 그때 사람이 하는 일은 게이트를 지우는 것이다.
-    // 허용되는 것은 "argument-hint 한 줄의 교체"뿐이고 그 외 삭제는 전부 레드다.
+    // 허용되는 것은 "argument-hint 한 줄의 교체"와 SH-26 의 compare 호출 한 줄
+    // (`COMPARE_CALL_BEFORE`, 정확한 문자열) 교체뿐이고 그 외 삭제는 전부 레드다.
+    // 상한 2 는 그 두 줄의 합이다 — 착지 후에는 둘 다 HEAD 에서 사라져 [] 가 된다.
     const currentLines = new Set(current.split('\n'));
     const removed = head.split('\n').filter((l) => !currentLines.has(l));
-    expect(removed.filter((l) => !l.startsWith('argument-hint:'))).toEqual([]);
-    expect(removed.length).toBeLessThanOrEqual(1);
+    expect(removed.filter((l) => !l.startsWith('argument-hint:') && l !== COMPARE_CALL_BEFORE))
+      .toEqual([]);
+    expect(removed.length).toBeLessThanOrEqual(2);
   });
 
   it('남은 HEAD 줄이 전부 같은 순서로 남아 있다 (재배치도 변경이다)', () => {
-    const kept = head.split('\n').filter((l) => !l.startsWith('argument-hint:'));
+    const kept = head.split('\n')
+      .filter((l) => !l.startsWith('argument-hint:') && l !== COMPARE_CALL_BEFORE);
     const broke = firstOutOfOrder(kept, current.split('\n'));
     expect(broke, `순서가 깨진 첫 줄: ${JSON.stringify(broke)}`).toBeNull();
   });
@@ -274,6 +288,29 @@ describe('/scorecard — 신규 플래그', () => {
     // 핀하고, 틀렸던 문구는 음성 단언으로 되돌아오지 못하게 막는다.
     expect(section).toContain('unpriced');
     expect(section, '비용 분모 서술이 옛 오기로 되돌아갔다').not.toContain('비용 분모에서 빠진다');
+  });
+
+  it('compare 스니펫이 labelReplay 를 같은 events 로 접어 replay 로 넘긴다 (SH-26)', () => {
+    // buildCompareScorecard 는 replay 가 없으면 던진다. 스니펫이 옛 호출로 되돌아가면
+    // 카드가 실행 시점에 깨지므로, 새 호출 한 줄을 정확한 문자열로 못박는다.
+    const section = sectionOf(current, '#### 스폰 비교 카드 (`--compare`)');
+    const lines = section.split('\n');
+    expect(lines).toContain("const { labelReplay } = await load('lib/replay/index.js');");
+    expect(lines).toContain(
+      'const card = sc.buildCompareScorecard(joinSpawnOutcomes(events), '
+      + '{ since, replay: labelReplay(events) });',
+    );
+    expect(lines, '옛 호출이 남아 있다').not.toContain(COMPARE_CALL_BEFORE);
+  });
+
+  it('compare 절이 라벨 행의 구조적 EXACT 0 과 대소문자 매핑을 적는다 (SH-26)', () => {
+    const section = sectionOf(current, '#### 스폰 비교 카드 (`--compare`)');
+    expect(section).toContain('compare.replay_label');
+    expect(section).toContain('lib/replay/replay-label.js#labelReplay');
+    expect(section).toContain('`exact_reachable:false`');
+    expect(section).toContain('`one-action-one-run`');
+    expect(section).toContain('구조적 0');
+    expect(section).toContain('EXACT↔exact · PARTIAL↔partial · SIMULATED↔simulation');
   });
 
   it('스니펫이 호출하는 sc.* 가 전부 배럴의 함수로 실존한다', () => {

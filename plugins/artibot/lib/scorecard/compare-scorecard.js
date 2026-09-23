@@ -4,12 +4,19 @@
  *
  * WHERE THE NUMBERS COME FROM
  * ---------------------------------------------------------------------------
- * ONE place: the OUTPUT of `lib/replay/spawn-outcome.js#joinSpawnOutcomes`. This
- * card does no joining, no filtering and no counting of ledger lines — it picks
- * denominators for figures that fold already computed, and that is all it does.
- * `joinSpawnOutcomes` is NOT called here: the caller runs `readAllEvents →
- * joinSpawnOutcomes → buildCompareScorecard`, so the fold has exactly one call
- * site per render and the card cannot disagree with the fold it is printing.
+ * TWO folds, both computed by the CALLER: the OUTPUT of
+ * `lib/replay/spawn-outcome.js#joinSpawnOutcomes` (every row but one), and the
+ * OUTPUT of `lib/replay/replay-label.js#labelReplay` (the `compare.replay_label`
+ * row, and nothing else). This card does no joining, no filtering and no
+ * counting of ledger lines — it picks denominators for figures those folds
+ * already computed, and that is all it does. Neither fold is called here: the
+ * caller runs `readAllEvents → joinSpawnOutcomes → buildCompareScorecard` and
+ * hands `labelReplay(events)` in as `replay`, so each fold has exactly one call
+ * site per render and the card cannot disagree with the folds it is printing.
+ * `replay` is REQUIRED and validated by the same rule as the fold: an omitted
+ * or mis-shaped `replay` THROWS. Rendering it `unmeasured` instead would make a
+ * caller that forgot the port print the same row as a ledger with no routed
+ * Actions — the fail-open shape the next section describes.
  *
  * WHY THE FOLD AND NOT A REPLAY INDEX
  * ---------------------------------------------------------------------------
@@ -46,8 +53,10 @@
  *     `agreement_rate`, `agreed_by_model`, `divergence`, `usage_totals` and
  *     `latency` are in the fold and NOT on this card — raw row counts,
  *     row-level integrity counters and detail histograms, where the card is
- *     eight rows. A reader who needs them must read the fold, and their absence
- *     here is not evidence they are zero. `agreement_rate` is the one omission
+ *     nine rows. A reader who needs them must read the fold, and their absence
+ *     here is not evidence they are zero. The same holds for the label fold:
+ *     `by_reason`, `rows`, `multi_model_runs`, `conflicts` and `unlabeled` are in
+ *     `labelReplay`'s output and NOT on this card. `agreement_rate` is the one omission
  *     that is not a gap: `compare.agreement` carries the same quotient WITH its
  *     denominator attached, and a bare rate beside it would be the second answer
  *     to one question that `metric()` exists to prevent.
@@ -63,10 +72,27 @@
  *     got the model it was routed to says nothing about whether the routing was
  *     right. The row stays on the card as an explicit hole rather than being
  *     omitted, so its absence cannot be mistaken for "not applicable".
+ *  5. WHETHER THE TWO FOLDS SAW THE SAME LINES, AND WHAT A LABEL MEANS.
+ *     `compare.replay_label` comes from a SECOND fold (`labelReplay`, which
+ *     runs its own `joinSpawnOutcomes` inside) and neither result carries a
+ *     figure the other can be checked against — its `actions` counts
+ *     `route.selected` receipts, a population no other row of this card has. A
+ *     caller that folds two different slices gets a card whose rows disagree
+ *     with nothing visible. Everything `replay-label.js`'s own "WHAT THIS
+ *     MODULE CANNOT SEE" list names is a limit on that row, unchanged and not
+ *     restated here; the one a reader of THIS card meets first is its #3
+ *     WINDOWING: `--since` does not just narrow the row, it CHANGES labels — a
+ *     bind or receipt outside the slice is absent, not late, so its Action
+ *     reads SIMULATED. And EXACT is 0 by construction, not by measurement
+ *     (`exact_reachable: false`, reason `one-action-one-run`); the row's note
+ *     prints that reason from the fold rather than letting an empty bucket
+ *     read as "none seen yet".
  *
  * PURITY (design §1-8, L2). No clock, no filesystem, no randomness, no
- * `process`. The only import is `./metric.js`; the fold arrives as an argument
- * and is READ ONLY. Every histogram is key-sorted by `metric()`, so a shuffled
+ * `process`. The only import is `./metric.js`; both folds arrive as arguments
+ * and are READ ONLY. `lib/replay` is not imported even though L2 → L2 would
+ * allow it: calling `labelReplay` here would give the label fold a second call
+ * site per render. Every histogram is key-sorted by `metric()`, so a shuffled
  * ledger serializes to the same bytes.
  *
  * @module lib/scorecard/compare-scorecard
@@ -88,6 +114,15 @@ const MONEY_DIGITS = 6;
  * applies to `DECISION_TYPES`.
  */
 const CONFIDENCE_BUCKETS = Object.freeze(['exact', 'name', 'fifo', 'other']);
+
+/**
+ * The label vocabulary `labelReplay` emits in `by_label`, required BY NAME.
+ *
+ * A copy of `replay-label.js#REPLAY_LABELS`, for the reason `CONFIDENCE_BUCKETS`
+ * is a copy (this module imports only `./metric.js`), and the fixtures compare
+ * the row's keys to the producer's constant so the copy cannot drift unnoticed.
+ */
+const REPLAY_LABEL_KEYS = Object.freeze(['EXACT', 'PARTIAL', 'SIMULATED']);
 
 /**
  * A histogram ONLY when the row has a denominator.
@@ -227,6 +262,96 @@ function requireFold(fold) {
   requireCostBucket(fold.cost.same, 'cost.same');
   requireCostBucket(fold.cost.diverged, 'cost.diverged');
   requireScore(fold.score);
+}
+
+/**
+ * Reject a `replay` that is not a label fold, naming the port that was expected.
+ *
+ * @param {string} why - what was expected.
+ * @returns {never}
+ * @throws {TypeError} always.
+ */
+function rejectReplay(why) {
+  throw new TypeError(
+    'buildCompareScorecard requires `replay`: the output of '
+    + `lib/replay/replay-label.js#labelReplay — ${why}. Pass { replay: labelReplay(events) } `
+    + 'over the SAME events the fold was built from: rendering a missing label fold as '
+    + '`unmeasured` would make a wiring bug look like a ledger with no routed Actions.',
+  );
+}
+
+/**
+ * `by_label`, validated against `actions` and the producer's stated contract.
+ *
+ * Three contradictions are refused rather than rendered, because each would put
+ * a false sentence on the card: zeros on an empty denominator (the producer
+ * writes three NULLS there — "0 PARTIAL" is a finding), a histogram that does
+ * not sum to its own denominator, and a non-zero EXACT beside a fold that says
+ * EXACT cannot occur.
+ *
+ * @param {object} replay - candidate with `actions` already validated.
+ * @returns {void}
+ */
+function requireByLabel(replay) {
+  const { actions, by_label: byLabel } = replay;
+  if (!isRecord(byLabel)) rejectReplay('`by_label` must be an object');
+  if (actions === 0) {
+    for (const k of REPLAY_LABEL_KEYS) {
+      if (byLabel[k] !== null) {
+        rejectReplay(
+          `\`by_label.${k}\` must be null when \`actions\` is 0 `
+          + '(an empty denominator is unmeasured, not 0)',
+        );
+      }
+    }
+    if (typeof replay.by_label_reason !== 'string' || replay.by_label_reason.length === 0) {
+      rejectReplay('`by_label_reason` must name why `by_label` is null when `actions` is 0');
+    }
+    return;
+  }
+  let sum = 0;
+  for (const k of REPLAY_LABEL_KEYS) {
+    if (!isCount(byLabel[k])) rejectReplay(`\`by_label.${k}\` must be a non-negative integer`);
+    sum += byLabel[k];
+  }
+  if (sum !== actions) rejectReplay(`\`by_label\` sums to ${sum}, not to \`actions\` ${actions}`);
+  if (replay.by_label_reason !== null) {
+    rejectReplay('`by_label_reason` must be null when `actions` is non-zero');
+  }
+  if (byLabel.EXACT !== 0) {
+    rejectReplay('`by_label.EXACT` is non-zero while `exact_reachable` is false');
+  }
+}
+
+/**
+ * ALLOWLIST validation of the label fold — every field the row reads, by name.
+ *
+ * `exact_reachable: true` is REFUSED, not rendered, for `requireScore`'s
+ * reason: this row's note states EXACT is a structural 0 and prints the
+ * unreachability reason as text. The day a writer contract lets one Action
+ * carry two independent results (replay-label.js "EXACT OPENS"), a permissive
+ * check here would print a measured EXACT under a note calling it impossible.
+ *
+ * @param {unknown} replay - candidate label fold.
+ * @returns {void}
+ * @throws {TypeError} naming the first field that is wrong.
+ */
+function requireReplay(replay) {
+  if (!isRecord(replay)) rejectReplay(`got ${JSON.stringify(replay) ?? typeof replay}`);
+  if (!isCount(replay.actions)) rejectReplay('`actions` must be a non-negative integer');
+  if (replay.exact_reachable === true) {
+    rejectReplay(
+      '`exact_reachable` is true, so EXACT can now occur — but `compare.replay_label`\'s note '
+      + 'states EXACT is a structural 0. Redesign that row (and its note) rather than '
+      + 'relaxing this check',
+    );
+  }
+  if (replay.exact_reachable !== false) rejectReplay('`exact_reachable` must be the literal false');
+  if (typeof replay.exact_unreachable_reason !== 'string'
+    || replay.exact_unreachable_reason.length === 0) {
+    rejectReplay('`exact_unreachable_reason` must be a non-empty string');
+  }
+  requireByLabel(replay);
 }
 
 /**
@@ -417,6 +542,45 @@ function residueMetrics(fold, joined) {
 }
 
 /**
+ * The §46 fidelity label distribution over routed Actions.
+ *
+ * A pure histogram (no numerator): the three labels are the row, and no one of
+ * them is "the" rate. EXACT stays in the histogram as a `0` because the note
+ * beside it says why — dropping the key would let a reader assume the fold
+ * never considered it.
+ *
+ * @param {object} replay - validated `labelReplay` output.
+ * @returns {Readonly<object>} metric.
+ */
+function replayLabelMetric(replay) {
+  const { actions, by_label: byLabel } = replay;
+  const counts = {};
+  for (const k of REPLAY_LABEL_KEYS) counts[k] = byLabel[k];
+  const empty = actions === 0
+    ? ` 이 입력은 actions 0 이라 by_label 이 세 null 이다(by_label_reason: ${replay.by_label_reason}).`
+    : '';
+  return metric({
+    key: 'compare.replay_label',
+    label: 'Replay 충실도 라벨 (EXACT · PARTIAL · SIMULATED)',
+    source: 'labelReplay by_label ÷ actions (distinct route.selected tool_use_id)',
+    denominator: actions,
+    counts: countsIfMeasured(actions, counts),
+    note: '분모는 labelReplay 의 actions — PreToolUse route.selected 영수증의 distinct '
+      + 'tool_use_id 수다(Action 하나 = tool_use_id 하나). compare.pairs 의 바인드·짝 '
+      + '모집단과 다르므로 두 행을 같은 분모로 읽으면 안 된다. EXACT 는 측정값이 아니라 '
+      + `구조적 0 이다: exact_reachable:false · 사유 ${replay.exact_unreachable_reason} — `
+      + 'Action 하나는 런 하나에만 묶여 §46 Exact 가 생길 경로가 없다(replay-label.js 헤더). '
+      + 'PARTIAL 은 그 Action 의 스폰에 측정된(transcript·otlp) 영수증과 비교 가능한 바인드 '
+      + '(충돌 없는 자기 짝·confidence allowlist 안·추천 모델과 서빙 모델 존재)가 있다는 '
+      + '뜻이지 대조군이 있다는 뜻이 아니다(조건 사다리는 replay-label.js#gradeBound). 라벨은 생산자의 대문자 어휘이고 RouteBench 시나리오 replay_mode 의 소문자 '
+      + '(exact·partial·simulation)와 다른 필드다. `--since` 로 창을 좁히면 라벨 자체가 '
+      + '바뀐다 — 창 밖 바인드·영수증은 늦은 것이 아니라 없는 것이라 SIMULATED 로 읽힌다'
+      + '(replay-label.js CANNOT SEE #3). 분모 밖(unlabeled)은 이 행에 없다. actions 0 이면 '
+      + `unmeasured 이지 0% 가 아니다.${empty}`,
+  });
+}
+
+/**
  * The permanently unmeasured quality row.
  *
  * @param {object} fold - validated fold.
@@ -442,12 +606,16 @@ function scoreMetric(fold) {
  * @param {object} fold - `joinSpawnOutcomes(events)` output. Read only.
  * @param {object} [opts] - options.
  * @param {string|null} [opts.since] - label of the window the caller filtered to.
+ * @param {object} opts.replay - `labelReplay(events)` output over the SAME
+ *   events as `fold`. Required; read only.
  * @returns {Readonly<object>} `{kind, scope, metrics, unmeasured, totals}`.
- * @throws {TypeError} when the fold is not a fold, or `since` is not a label.
+ * @throws {TypeError} when the fold is not a fold, `since` is not a label, or
+ *   `replay` is absent or not a label fold.
  */
-export function buildCompareScorecard(fold, { since } = {}) {
+export function buildCompareScorecard(fold, { since, replay } = {}) {
   requireFold(fold);
   const label = requireSinceLabel(since);
+  requireReplay(replay);
   const joined = fold.pairs.length;
 
   return freezeCard({
@@ -459,6 +627,7 @@ export function buildCompareScorecard(fold, { since } = {}) {
       confidenceMetric(fold, joined),
       costMetric(fold),
       ...residueMetrics(fold, joined),
+      replayLabelMetric(replay),
       scoreMetric(fold),
     ],
   });

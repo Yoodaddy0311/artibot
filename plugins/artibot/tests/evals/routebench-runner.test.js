@@ -21,8 +21,9 @@
  *
  * What it CANNOT prove
  * --------------------
- *  - That the fixture corpus is representative. It is 2 rows and both are
- *    pending. Live scenario distribution is unmeasured.
+ *  - That the fixture corpus is representative. It is 6 scenarios: 2 still
+ *    `fixture.status: "pending"` and 4 with scrubbed live corpora. Live
+ *    scenario distribution is unmeasured.
  *  - That B3/B4 predict anything. They are recorded, not validated.
  *
  * @module tests/evals/routebench-runner
@@ -42,6 +43,7 @@ import {
 import {
   FORBIDDEN_CORPUS_KEYS as EXTRACTOR_FORBIDDEN_KEYS,
 } from '../../scripts/bench/routebench-corpus.mjs';
+import { replayLabelBlock } from '../../scripts/bench/routebench-replay-mode.mjs';
 import { createHash } from 'node:crypto';
 import { loadConfig } from '../../lib/core/config.js';
 import path from 'node:path';
@@ -1089,6 +1091,105 @@ describe('routebench runner - CLI surface', () => {
     await expect(runRouteBench({
       scenarios: bad, baselines: baselinesPath, out: freshDir('badjson-out'), n: 1,
     })).rejects.toThrow(/line 2/);
+  });
+});
+
+describe('routebench runner - replay_mode surface', () => {
+  /** Row key order, pinned: replay_mode sits with the identity keys. */
+  const ROW_KEYS = Object.freeze([
+    'scenario_id', 'baseline', 'replay_mode', 'status', 'reason', 'selection',
+    'passes', 'metrics_requested', 'metrics_measured',
+  ]);
+
+  it('gives every row the same key order, scored, refused and skipped alike', async () => {
+    const report = await runRouteBench({
+      scenarios: EXAMPLE_SCENARIOS, baselines: baselinesPath, out: freshDir('rm-keys'), n: 1,
+    });
+    const statuses = new Set();
+    for (const r of report.rows) {
+      expect(Object.keys(r)).toEqual([...ROW_KEYS]);
+      statuses.add(r.status);
+    }
+    expect([...statuses].sort()).toEqual(['refused', 'scored']);
+
+    const { scenariosFile } = writeScenario({ id: 'synthetic-rm-skip', agentType: 'planner' });
+    const out = freshDir('rm-keys-skip');
+    await runRouteBench({ scenarios: scenariosFile, baselines: baselinesPath, out, n: 1 });
+    const again = await runRouteBench({ scenarios: scenariosFile, baselines: baselinesPath, out, n: 1 });
+    expect(again.summary.skipped).toBe(6);
+    for (const r of again.rows) expect(Object.keys(r)).toEqual([...ROW_KEYS]);
+  });
+
+  it('copies each shipped scenario declaration onto every one of its rows', async () => {
+    const declared = new Map(readFileSync(EXAMPLE_SCENARIOS, 'utf-8')
+      .split(/\r?\n/).filter((l) => l.trim() !== '').map((l) => JSON.parse(l))
+      .map((s) => [s.id, s.replay_mode]));
+    const report = await runRouteBench({
+      scenarios: EXAMPLE_SCENARIOS, baselines: baselinesPath, out: freshDir('rm-copy'), n: 1,
+    });
+    for (const r of report.rows) expect(r.replay_mode).toBe(declared.get(r.scenario_id));
+    // Pending rows carry their declaration too: refusing to score is not the
+    // same as having no declared mode.
+    expect(row(report, 'seeded-defect-seven-axis-review', 'B0').replay_mode).toBe('exact');
+    expect(row(report, 'split-four-window-fanout', 'B0').replay_mode).toBe('partial');
+  });
+
+  it('carries null, not a default, when the scenario omits replay_mode', async () => {
+    const { scenariosFile } = writeScenario({ id: 'synthetic-rm-none', agentType: 'planner', replay_mode: undefined });
+    const report = await runRouteBench({
+      scenarios: scenariosFile, baselines: baselinesPath, out: freshDir('rm-none'), n: 1,
+    });
+    for (const r of report.rows) expect(r.replay_mode).toBeNull();
+    expect(report.replay_label.declared.undeclared).toBe(1);
+    expect(report.replay_label.declared.scenarios).toBe(1);
+  });
+
+  it('gives a carried row the CURRENT scenario declaration, not the prior file', async () => {
+    // Prior results files predate the field, or were written under a different
+    // declaration. A completed-pair carry takes the selection forward, never
+    // the replay_mode: the declaration belongs to the scenario being run.
+    const { scenariosFile } = writeScenario({ id: 'synthetic-rm-carry', agentType: 'planner' });
+    const out = freshDir('rm-carry');
+    const prior = {
+      schema_version: 1,
+      baselines_sha256: sha256Of(baselinesPath),
+      rows: [
+        {
+          scenario_id: 'synthetic-rm-carry', baseline: 'B0', status: 'scored', reason: null,
+          selection: { tier: 'haiku', resolver: 'constant', source: null }, passes: 1,
+          metrics_requested: ['total_cost'], metrics_measured: [],
+        },
+        {
+          scenario_id: 'synthetic-rm-carry', baseline: 'B1', replay_mode: 'exact', status: 'scored',
+          reason: null, selection: { tier: 'opus', resolver: 'constant', source: null }, passes: 1,
+          metrics_requested: ['total_cost'], metrics_measured: [],
+        },
+      ],
+    };
+    writeFileSync(path.join(out, 'synthetic.results.json'), JSON.stringify(prior), 'utf-8');
+    const report = await runRouteBench({ scenarios: scenariosFile, baselines: baselinesPath, out, n: 1 });
+    for (const baseline of ['B0', 'B1']) {
+      const r = row(report, 'synthetic-rm-carry', baseline);
+      expect(r.status).toBe('skipped');
+      expect(r.replay_mode).toBe('simulation');
+    }
+    expect(row(report, 'synthetic-rm-carry', 'B0').selection.tier).toBe('haiku');
+  });
+
+  it('writes the replay_label block between metrics_note and rows, equal to the pure builder', async () => {
+    const out = freshDir('rm-block');
+    const report = await runRouteBench({
+      scenarios: EXAMPLE_SCENARIOS, baselines: baselinesPath, out, n: 1,
+    });
+    const scenarios = readFileSync(EXAMPLE_SCENARIOS, 'utf-8')
+      .split(/\r?\n/).filter((l) => l.trim() !== '').map((l) => JSON.parse(l));
+    expect(report.replay_label).toEqual(replayLabelBlock(scenarios));
+    expect(report.replay_label.measured).toBeNull();
+    const onDisk = readResults(out, 'scenarios.example');
+    const keys = Object.keys(onDisk);
+    expect(keys.indexOf('replay_label')).toBe(keys.indexOf('metrics_note') + 1);
+    expect(keys.indexOf('rows')).toBe(keys.indexOf('replay_label') + 1);
+    expect(onDisk.replay_label).toEqual(report.replay_label);
   });
 });
 
