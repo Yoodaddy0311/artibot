@@ -30,6 +30,8 @@
  * @module lib/context/rehydration
  */
 
+import { createHash } from 'node:crypto';
+
 import { assembleContextReceipt } from './context-receipt.js';
 
 /** Design §04: initial payload of a fresh context ≤ 10 KB. */
@@ -413,6 +415,51 @@ export function buildRehydrationBundle(input = {}) {
   return { text, bytes: byteLength(text), maxBytes, truncated, sections, identity, warnings };
 }
 
+const CONTEXT_COMPILED_EVENT = 'context.compiled';
+
+/**
+ * JSON with object keys sorted at every level, so the digest depends on the
+ * receipt's content and not on the order a caller built it in.
+ *
+ * @param {unknown} v
+ * @returns {string}
+ */
+function canonicalJson(v) {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const keys = Object.keys(v).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+}
+
+/**
+ * Idempotency key for one `context.compiled` line (SH-14).
+ *
+ * Shape follows `lib/verification/verify-writer.js#verifyCompletedIdempotencyKey`
+ * (`<event>:<session>:<id>`), plus a 16-hex digest of the receipt:
+ * `context_receipt_id` is the receipt's own identity, but the one caller mints
+ * it from a timestamp prefix, and nothing stops two different compilations
+ * from sharing one. The digest makes a different compiled context a different
+ * key even then, while a retry of the same receipt reuses it. No clock, pid or
+ * seq is read: the same `(sessionId, receipt)` always yields the same key.
+ *
+ * Returns null when there is no key material — no session (the writer rejects
+ * that envelope anyway) or no receipt id — and the caller omits the field
+ * rather than emitting an empty string.
+ *
+ * @param {unknown} sessionId
+ * @param {unknown} receipt - an assembled receipt (`data` of the event)
+ * @returns {string|null}
+ */
+export function contextCompiledIdempotencyKey(sessionId, receipt) {
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  const receiptId = receipt && typeof receipt === 'object' ? receipt.context_receipt_id : undefined;
+  if (typeof receiptId !== 'string' || !receiptId) return null;
+  const digest = createHash('sha256').update(canonicalJson(receipt)).digest('hex').slice(0, 16);
+  return `${CONTEXT_COMPILED_EVENT}:${sessionId}:${receiptId}:${digest}`;
+}
+
 /**
  * Assemble a Context Receipt and offer it to an INJECTED writer port
  * (vNext PR-CX02).
@@ -466,13 +513,15 @@ export function reportContextReceipt(args = {}) {
   }
 
   const receipt = assembled.receipt;
+  const key = contextCompiledIdempotencyKey(sessionId, receipt);
   let res;
   try {
     res = writer.writeEvent({
-      event: 'context.compiled',
+      event: CONTEXT_COMPILED_EVENT,
       mission_id: receipt.mission_id,
       session_id: sessionId,
       source,
+      ...(key === null ? {} : { idempotency_key: key }),
       data: receipt,
     });
   } catch {

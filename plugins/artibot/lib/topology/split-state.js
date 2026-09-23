@@ -432,6 +432,50 @@ function ledgerEventNameFor(prevOps, nextOps) {
 }
 
 /**
+ * Idempotency key for the one ledger line a transition owes.
+ *
+ * `<event>:<run>:<worker>:<from-ops>:<to-ops>:<from-since>`, the
+ * `verify-writer.js#verifyCompletedIdempotencyKey` shape with the run in the
+ * session's place. The key names the TRANSITION, so its material is the state
+ * being LEFT, as `run.json` stored it before this write:
+ *
+ *  - `from-since` is that state's stored `since`. `writeWorkerState` moves
+ *    `since` only on a state change, so it is the identity of the state, not a
+ *    reading of the clock. A retry of the same write finds the same prior
+ *    record — the ledger goes first, so a crash or a refusal leaves `run.json`
+ *    where it was — and mints the same key. A re-dispatch after a release
+ *    leaves a different state (`done`, a newer `since`) and mints a new one.
+ *    It goes LAST because an ISO stamp carries colons of its own.
+ *  - The NEW state's `since` is deliberately not used: it is this write's
+ *    `now`, so a retry would carry a new value.
+ *  - `from-ops` as well as `from-since`: two states set in one clock tick
+ *    share a `since`. `to-ops` too: `done` and `failed` both owe
+ *    `task.released`, and leaving one state for each is two facts.
+ *  - `none` marks a lane with no prior record, or no stored `since` (the
+ *    bare-string lane shape). A lane gets a `since` on its first write here,
+ *    so only its first transition can key on `none`.
+ *  - The run id, not the session, scopes it: the same retry from another
+ *    session is still the same transition, while the same limb in another run
+ *    is not. With no run id there is no deterministic scope — a fresh lane in
+ *    one run would collide with a fresh lane of the same name in the next — so
+ *    the result is `null` and the caller omits the key.
+ *
+ * @param {object} p
+ * @param {string|null} p.eventName
+ * @param {unknown} p.runId - `plan.json` / `run.json` `runId`
+ * @param {string} p.worker
+ * @param {string|null} p.prevOps
+ * @param {string|null} p.nextOps
+ * @param {string|null} p.prevSince
+ * @returns {string|null}
+ */
+export function workerTransitionIdempotencyKey({ eventName, runId, worker, prevOps, nextOps, prevSince }) {
+  const parts = [eventName, runId, worker, nextOps];
+  if (parts.some((v) => typeof v !== 'string' || !v)) return null;
+  return `${eventName}:${runId}:${worker}:${prevOps || 'none'}:${nextOps}:${prevSince || 'none'}`;
+}
+
+/**
  * Build the payload for the ledger port, in the shape
  * `lib/runtime/event-writer.js#writeEvent` takes as its `input`.
  *
@@ -453,9 +497,10 @@ function ledgerEventNameFor(prevOps, nextOps) {
  * @param {string} p.worker
  * @param {object} p.ledgerOpts
  * @param {string[]|null} p.owns - plan projection, or `null` when the plan does not list the limb
+ * @param {string|null} p.idempotencyKey - {@link workerTransitionIdempotencyKey}; `null` omits the field
  * @returns {{ ok: true, envelope: object } | { ok: false, missing: string }}
  */
-function buildLedgerPayload({ eventName, worker, ledgerOpts, owns }) {
+function buildLedgerPayload({ eventName, worker, ledgerOpts, owns, idempotencyKey }) {
   const { session_id: sessionId, mission_id: missionId, source = 'supervisor', data: extra } = ledgerOpts;
   if (typeof sessionId !== 'string' || !sessionId) return { ok: false, missing: 'session_id' };
 
@@ -483,6 +528,7 @@ function buildLedgerPayload({ eventName, worker, ledgerOpts, owns }) {
       ...(typeof missionId === 'string' && missionId ? { mission_id: missionId } : {}),
       source,
       worker,
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       data: Object.freeze(isPlainObject(extra) ? { ...extra, ...data } : data),
     }),
   };
@@ -530,14 +576,23 @@ function resolveWriteOps(patch) {
  * @param {string|null} p.eventName
  * @param {object} p.ledgerOpts
  * @param {((event: object) => unknown)} [p.appendEvent]
+ * @param {{ prevOps: string|null, nextOps: string|null, prevSince: string|null, runJsonRunId: unknown }} p.transition - the state being left, as `run.json` stored it before this write
  * @returns {{ refused: boolean, status: string, event: object|null, reason?: string }}
  */
-function runLedgerPhase({ paths, worker, eventName, ledgerOpts, appendEvent }) {
+function runLedgerPhase({ paths, worker, eventName, ledgerOpts, appendEvent, transition }) {
   if (!eventName) return { refused: false, status: 'skipped:no-event', event: null };
 
-  const planOwns = ownsFromPlan(readJsonObjectOrNull(paths.planJsonPath));
+  const plan = readJsonObjectOrNull(paths.planJsonPath);
+  const planOwns = ownsFromPlan(plan);
   const owns = Object.prototype.hasOwnProperty.call(planOwns, worker) ? planOwns[worker] : null;
-  const built = buildLedgerPayload({ eventName, worker, ledgerOpts, owns });
+  // plan.json first, run.json second: `resume-notices.mjs`'s order
+  // (`watch.mjs` reads the reverse; the live run carried one id in both
+  // files on 2026-09-23).
+  const runId = [plan?.runId, transition.runJsonRunId].find((v) => typeof v === 'string' && v) ?? null;
+  const idempotencyKey = workerTransitionIdempotencyKey({
+    eventName, runId, worker, prevOps: transition.prevOps, nextOps: transition.nextOps, prevSince: transition.prevSince,
+  });
+  const built = buildLedgerPayload({ eventName, worker, ledgerOpts, owns, idempotencyKey });
   if (!built.ok) return { refused: false, status: `skipped:missing:${built.missing}`, event: null };
 
   const event = built.envelope;
@@ -648,9 +703,11 @@ export function writeWorkerState({ runDir, worker, patch = {}, appendEvent, ledg
     ? prevRaw
     : (isPlainObject(prevRaw) && typeof prevRaw.state === 'string' ? prevRaw.state : null);
   const nextOps = opsWord ?? prevOps;
+  const prevSince = isPlainObject(prevRaw) && typeof prevRaw.since === 'string' ? prevRaw.since : null;
 
   const phase = runLedgerPhase({
     paths, worker, eventName: ledgerEventNameFor(prevOps, opsWord), ledgerOpts: ledger, appendEvent,
+    transition: { prevOps, nextOps: opsWord, prevSince, runJsonRunId: before?.runId },
   });
   if (phase.refused) {
     return Object.freeze({ ok: false, reason: phase.reason, worker, event: phase.event, ledger: 'refused' });

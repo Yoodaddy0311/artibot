@@ -64,6 +64,7 @@ import {
   PROJECTION_MARK,
   readWorkerState,
   STATE_SOURCES,
+  workerTransitionIdempotencyKey,
   writeWorkerState,
 } from '../../lib/topology/split-state.js';
 import { LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS, V11_STATUSES } from '../../lib/supervisor/contracts.js';
@@ -620,6 +621,133 @@ describe('writeWorkerState — ledger payload matches the event-writer contract'
     const again = writeWorkerState({ runDir, worker: 'alpha', patch: { status: 'claimed' }, ledger: claimLedger, appendEvent: (e) => events.push(e) });
     expect(events).toHaveLength(1);
     expect(again.ledger).toBe('skipped:no-event');
+  });
+});
+
+describe('writeWorkerState — idempotency_key names the transition', () => {
+  const plan = { runId: 'run-7', limbs: [{ limb: 'alpha', affectedPaths: ['lib/a/**'] }] };
+  const claimLedger = { session_id: 's-1', agent_type: 'artibot:backend-developer', model_tier: 'opus' };
+  const at = (iso) => () => new Date(iso);
+
+  /** Write through a port that records what it receives. */
+  function write(runDir, status, events, extra = {}) {
+    return writeWorkerState({
+      runDir, worker: 'alpha', patch: { status }, ledger: claimLedger,
+      appendEvent: (e) => { events.push(e); return { appended: true }; }, ...extra,
+    });
+  }
+
+  it('reaches the envelope the port receives, non-empty, for both events', () => {
+    const runDir = makeRunDir({ plan });
+    const events = [];
+    write(runDir, 'claimed', events, { now: at('2026-09-23T01:00:00.000Z') });
+    write(runDir, 'done', events, { now: at('2026-09-23T02:00:00.000Z') });
+    expect(events.map((e) => e.event)).toEqual(['worker.claimed', 'task.released']);
+    expect(events.map((e) => e.idempotency_key)).toEqual([
+      'worker.claimed:run-7:alpha:none:awaiting-dispatch:none',
+      'task.released:run-7:alpha:awaiting-dispatch:done:2026-09-23T01:00:00.000Z',
+    ]);
+  });
+
+  it('a retry of the same transition reuses the key, whatever the retry clock says', () => {
+    const seed = { lanes: { alpha: { state: 'done', since: '2026-09-22T10:00:00.000Z' } } };
+    const runDir = makeRunDir({ plan, run: seed });
+    const before = fs.readFileSync(path.join(runDir, 'run.json'), 'utf-8');
+    const events = [];
+    // Crash between the two halves: the line is appended, run.json never moves.
+    write(runDir, 'claimed', events, { now: at('2026-09-23T01:00:00.000Z') });
+    fs.writeFileSync(path.join(runDir, 'run.json'), before);
+    write(runDir, 'claimed', events, { now: at('2026-09-23T05:00:00.000Z') });
+    expect(events).toHaveLength(2);
+    expect(events[0].idempotency_key).toMatch(/^worker\.claimed:run-7:alpha:\S+$/);
+    expect(events[1].idempotency_key).toBe(events[0].idempotency_key);
+  });
+
+  it('a retry after a refused append reuses the key', () => {
+    const runDir = makeRunDir({ plan, run: { lanes: { alpha: { state: 'pending', since: '2026-09-22T10:00:00.000Z' } } } });
+    const events = [];
+    const refused = writeWorkerState({
+      runDir, worker: 'alpha', patch: { status: 'claimed' }, ledger: claimLedger,
+      appendEvent: (e) => { events.push(e); return { ok: false, reason: 'busy' }; },
+      now: at('2026-09-23T01:00:00.000Z'),
+    });
+    expect(refused.ok).toBe(false);
+    write(runDir, 'claimed', events, { now: at('2026-09-23T01:00:09.000Z') });
+    expect(events).toHaveLength(2);
+    expect(events[0].idempotency_key).toMatch(/^worker\.claimed:run-7:alpha:\S+$/);
+    expect(events[1].idempotency_key).toBe(events[0].idempotency_key);
+  });
+
+  it('a re-dispatch after a release is a new claim with a new key', () => {
+    const runDir = makeRunDir({ plan });
+    const events = [];
+    write(runDir, 'claimed', events, { now: at('2026-09-23T01:00:00.000Z') });
+    write(runDir, 'executing', events, { now: at('2026-09-23T02:00:00.000Z') });
+    write(runDir, 'done', events, { now: at('2026-09-23T03:00:00.000Z') });
+    write(runDir, 'claimed', events, { now: at('2026-09-23T04:00:00.000Z') });
+    const claims = events.filter((e) => e.event === 'worker.claimed');
+    expect(claims).toHaveLength(2);
+    expect(claims[1].idempotency_key).not.toBe(claims[0].idempotency_key);
+    expect(claims[1].idempotency_key).toBe('worker.claimed:run-7:alpha:done:awaiting-dispatch:2026-09-23T03:00:00.000Z');
+  });
+
+  it('two releases from one state to different ends are different facts', () => {
+    const seed = { lanes: { alpha: { state: 'active', since: '2026-09-22T10:00:00.000Z' } } };
+    const events = [];
+    // `failed` arrives as a v1.1 status, so the ops word is derived, not spelled.
+    for (const status of ['done', 'failed']) write(makeRunDir({ plan, run: seed }), status, events);
+    expect(events.map((e) => e.event)).toEqual(['task.released', 'task.released']);
+    expect(events[1].idempotency_key).not.toBe(events[0].idempotency_key);
+  });
+
+  it('the same limb in another run gets another key', () => {
+    const events = [];
+    write(makeRunDir({ plan }), 'claimed', events);
+    write(makeRunDir({ plan: { ...plan, runId: 'run-8' } }), 'claimed', events);
+    expect(events[1].idempotency_key).not.toBe(events[0].idempotency_key);
+  });
+
+  it('falls back to run.json runId when plan.json has none', () => {
+    const events = [];
+    write(makeRunDir({ plan: { limbs: plan.limbs }, run: { runId: 'run-9' } }), 'claimed', events);
+    expect(events[0].idempotency_key).toBe('worker.claimed:run-9:alpha:none:awaiting-dispatch:none');
+  });
+
+  it('omits the key, never an empty string, when no run id exists anywhere', () => {
+    const events = [];
+    write(makeRunDir({ plan: { limbs: plan.limbs } }), 'claimed', events);
+    expect(events).toHaveLength(1);
+    expect(Object.prototype.hasOwnProperty.call(events[0], 'idempotency_key')).toBe(false);
+  });
+
+  it('keeps the key out of the lane record', () => {
+    const runDir = makeRunDir({ plan });
+    write(runDir, 'claimed', []);
+    expect(readRun(runDir).lanes.alpha.idempotency_key).toBeUndefined();
+  });
+});
+
+describe('workerTransitionIdempotencyKey', () => {
+  const base = { eventName: 'worker.claimed', runId: 'run-7', worker: 'alpha', prevOps: 'done', nextOps: 'awaiting-dispatch', prevSince: '2026-09-23T03:00:00.000Z' };
+
+  it('is deterministic and names every component', () => {
+    expect(workerTransitionIdempotencyKey(base)).toBe(workerTransitionIdempotencyKey({ ...base }));
+    expect(workerTransitionIdempotencyKey(base)).toBe('worker.claimed:run-7:alpha:done:awaiting-dispatch:2026-09-23T03:00:00.000Z');
+  });
+
+  it('changes when any identity component changes', () => {
+    const variants = [
+      { eventName: 'task.released', nextOps: 'done' },
+      { runId: 'run-8' }, { worker: 'beta' }, { prevOps: 'blocked' }, { prevSince: '2026-09-23T03:00:00.001Z' },
+    ];
+    const keys = new Set([base, ...variants.map((v) => ({ ...base, ...v }))].map(workerTransitionIdempotencyKey));
+    expect(keys.size).toBe(variants.length + 1);
+  });
+
+  it('is null — not an empty string — without a run id, event or worker', () => {
+    for (const miss of [{ runId: undefined }, { runId: '' }, { eventName: null }, { worker: '' }, { nextOps: null }]) {
+      expect(workerTransitionIdempotencyKey({ ...base, ...miss }), JSON.stringify(miss)).toBeNull();
+    }
   });
 });
 

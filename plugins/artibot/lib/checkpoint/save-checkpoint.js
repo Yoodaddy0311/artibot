@@ -45,12 +45,15 @@
  *
  * ── Layer ─────────────────────────────────────────────────────────────────
  * L2, pure over its ports. No filesystem, no config read, no import from
- * `lib/runtime` or `lib/project-state`. The one import is the sibling resume
- * controller, used only as the default report port.
+ * `lib/runtime` or `lib/project-state`. Two sibling imports: the resume
+ * controller, used only as the default report port, and the checkpoint
+ * service's idempotency-key builder, so both announcers of
+ * `mission.checkpointed` key the same checkpoint the same way.
  *
  * @module lib/checkpoint/save-checkpoint
  */
 
+import { missionCheckpointedIdempotencyKey } from './checkpoint-service.js';
 import { buildResumeReport as defaultBuildResumeReport } from './resume-controller.js';
 
 /**
@@ -212,12 +215,15 @@ async function judge(ports, missionId) {
  * @returns {Promise<{ok: boolean, reason: string|null}>} Ledger outcome.
  */
 async function announce(ports, row, sessionId, trigger) {
+  // Omitted, never blank, when the save returned no id: see the builder.
+  const key = missionCheckpointedIdempotencyKey(row.mission_id, row.checkpoint_id);
   try {
     const outcome = await ports.appendEvent({
       event: SAVE_CHECKPOINT_EVENT,
       mission_id: row.mission_id,
       session_id: sessionId,
       source: SAVE_CHECKPOINT_SOURCE,
+      ...(key === null ? {} : { idempotency_key: key }),
       data: { checkpoint_id: row.checkpoint_id, trigger, resumable: row.resumable },
     });
     const ok = /** @type {any} */ (outcome)?.ok === true;

@@ -10,7 +10,7 @@
  * hook's contract, not this module's).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,7 @@ import {
   buildRehydrationBundle,
   byteLength,
   compareIdentity,
+  contextCompiledIdempotencyKey,
   DEFAULT_MAX_BYTES,
   reportContextReceipt,
   SECTION_CAPS,
@@ -336,7 +337,7 @@ describe('reportContextReceipt', () => {
     return readFileSync(file, 'utf-8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
   }
 
-  it('exports the seven PR-CX01 names plus reportContextReceipt and nothing else', () => {
+  it('exports the seven PR-CX01 names plus reportContextReceipt and its key builder, nothing else', () => {
     expect(Object.keys(rehydration).sort()).toEqual([
       'DEFAULT_MAX_BYTES',
       'SECTION_CAPS',
@@ -344,6 +345,7 @@ describe('reportContextReceipt', () => {
       'buildRehydrationBundle',
       'byteLength',
       'compareIdentity',
+      'contextCompiledIdempotencyKey',
       'reportContextReceipt',
       'truncateToBytes',
     ].sort());
@@ -436,5 +438,90 @@ describe('reportContextReceipt', () => {
     const lines = readLines(ledgerFilePath(root));
     expect(lines).toHaveLength(1);
     expect(lines[0].event).toBe('context.compiled');
+  });
+
+  // ── SH-14: the envelope idempotency_key ───────────────────────────────────
+  // The key names the FACT "this session published this receipt". A retry or
+  // a re-fired caller with the same receipt must reuse it; a receipt whose
+  // content differs is a different fact, even under a reused receipt id.
+
+  /**
+   * @param {object} [over] receipt-input overrides
+   * @param {string|null} [sessionId]
+   * @returns {object[]} what the port received
+   */
+  function emitOnce(over = {}, sessionId = 'sh14-rehy-sess') {
+    /** @type {object[]} */
+    const calls = [];
+    const writer = { writeEvent: (input) => { calls.push(input); return { ok: true }; } };
+    reportContextReceipt({ receiptInput: completeInput(over), sessionId, source: 'worker', writer });
+    return calls;
+  }
+
+  it('the same receipt re-emitted reaches the port with the same non-null key', () => {
+    const [first] = emitOnce();
+    const [again] = emitOnce();
+    expect(typeof first.idempotency_key).toBe('string');
+    expect(first.idempotency_key.length).toBeGreaterThan(0);
+    expect(again.idempotency_key).toBe(first.idempotency_key);
+    expect(first.idempotency_key).toBe(contextCompiledIdempotencyKey('sh14-rehy-sess', first.data));
+  });
+
+  it('key shape follows <event>:<session>:<receipt id>:<content digest>', () => {
+    const [call] = emitOnce();
+    expect(call.idempotency_key).toMatch(/^context\.compiled:sh14-rehy-sess:ctx-1:[0-9a-f]{16}$/);
+  });
+
+  it('a different compiled context gets a different key, even under a reused receipt id', () => {
+    const base = emitOnce()[0].idempotency_key;
+    const otherTokens = emitOnce({ outputTokens: 113 })[0].idempotency_key;
+    const otherMission = emitOnce({ missionId: 'M-20260902-S87654321' })[0].idempotency_key;
+    const otherId = emitOnce({ receiptId: 'ctx-2' })[0].idempotency_key;
+    const otherSession = emitOnce({}, 'sh14-rehy-sess-b')[0].idempotency_key;
+    const keys = [base, otherTokens, otherMission, otherId, otherSession];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('the key ignores key order in the receipt and the wall clock', () => {
+    const receipt = emitOnce()[0].data;
+    const reordered = Object.fromEntries(Object.entries(receipt).reverse());
+    expect(contextCompiledIdempotencyKey('s', reordered)).toBe(contextCompiledIdempotencyKey('s', receipt));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const early = emitOnce()[0].idempotency_key;
+      vi.setSystemTime(new Date('2027-06-01T12:34:56Z'));
+      expect(emitOnce()[0].idempotency_key).toBe(early);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('without a session there is no key material: the builder returns null and the field is omitted', () => {
+    const receipt = emitOnce()[0].data;
+    for (const sid of [null, undefined, '', 42]) {
+      expect(contextCompiledIdempotencyKey(sid, receipt)).toBe(null);
+      /** @type {object[]} */
+      const calls = [];
+      const writer = { writeEvent: (input) => { calls.push(input); return { ok: true }; } };
+      reportContextReceipt({ receiptInput: completeInput(), sessionId: /** @type {any} */ (sid), source: 'worker', writer });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).not.toHaveProperty('idempotency_key');
+    }
+    expect(contextCompiledIdempotencyKey('s', null)).toBe(null);
+    expect(contextCompiledIdempotencyKey('s', { context_receipt_id: '' })).toBe(null);
+  });
+
+  it('REAL writer: the accepted context.compiled line carries the key', () => {
+    const root = tmpRoot();
+    const writer = { writeEvent: (input) => writeEvent(root, input) };
+    const r = reportContextReceipt({
+      receiptInput: completeInput(), sessionId: 'sh14-rehy-real', source: 'worker', writer,
+    });
+    expect(r.emitted).toBe(true);
+    const lines = readLines(ledgerFilePath(root));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].idempotency_key).toBe(contextCompiledIdempotencyKey('sh14-rehy-real', lines[0].data));
+    expect(lines[0].idempotency_key).toMatch(/^context\.compiled:sh14-rehy-real:ctx-1:[0-9a-f]{16}$/);
   });
 });
