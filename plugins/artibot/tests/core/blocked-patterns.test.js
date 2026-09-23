@@ -1257,12 +1257,38 @@ describe('blocked-patterns', () => {
       // 평가돼 실패하면 force 런은 한 번도 안 읽힌다(실측 2026-09-22:
       // 바로 'f' 로 채운 런은 수리 전에도 40,962B 0.8ms, 증명력 0).
       ['rm force run', (size) => `rm -r -${'f'.repeat(Math.max(0, size - 8))}_`.slice(0, size)],
+      // ── 2026-09-23 (guard-branch-delete-redos) 브랜치 삭제 플래그 런 ──────────
+      // `git branch -D (force delete)` 의 세 토큰이 위 rm 형과 같은 2차식이었다.
+      // 형·수치·잔여(여러 시작점 형)는 lib/core/blocked-patterns.js 의 그 규칙
+      // 주석이 정본이다. force 런은 `-d` 뒤에 둬야 도달한다 — 삭제 lookahead 가
+      // 먼저 실패하면 force 런은 안 읽힌다(바로 'f' 로 채운 런은 수리 전에도 선형).
+      ['branch delete run', (size) => `git branch -${'d'.repeat(Math.max(0, size - 13))}_`.slice(0, size)],
+      ['branch force-delete run', (size) => `git branch -${'D'.repeat(Math.max(0, size - 13))}_`.slice(0, size)],
+      ['branch force run', (size) => `git branch -d -${'f'.repeat(Math.max(0, size - 16))}_`.slice(0, size)],
+      ['branch delete run behind -f', (size) => `git branch -f -${'d'.repeat(Math.max(0, size - 16))}_`.slice(0, size)],
+      // 양성 대조군 — 런이 유효한 번들로 끝나 규칙이 실제로 매치하는 형.
+      ['branch delete run (matching)', (size) => `git branch -${'d'.repeat(Math.max(0, size - 19))}f topic`.slice(0, size)],
+      ['branch force-delete run (matching)', (size) => `git branch -${'D'.repeat(Math.max(0, size - 19))}v topic`.slice(0, size)],
     ];
 
     it.each(PREPROCESS_SHAPES)('builds the %s shape at the exact requested size', (_name, build) => {
       for (const size of [20480, 40962, 122880]) {
         expect(build(size)).toHaveLength(size);
       }
+    });
+
+    // 브랜치 행의 판정 핀 — 실패형이 "빨라서"가 아니라 "규칙이 끝까지 실패해서"
+    // approve 인지, 양성 대조군이 실제로 막히는지. 시간은 아래 두 it.each 가 본다.
+    it.each([
+      ['branch delete run', 'approve'],
+      ['branch force-delete run', 'approve'],
+      ['branch force run', 'approve'],
+      ['branch delete run behind -f', 'approve'],
+      ['branch delete run (matching)', 'block'],
+      ['branch force-delete run (matching)', 'block'],
+    ])('decides %s at 40,962B as %s', (name, decision) => {
+      const build = PREPROCESS_SHAPES.find(([n]) => n === name)[1];
+      expect(runChain(build(40962)).decision).toBe(decision);
     });
 
     it.each(PREPROCESS_SHAPES)('stays under 200ms at 40,962B through executeChain on a %s', (_name, build) => {

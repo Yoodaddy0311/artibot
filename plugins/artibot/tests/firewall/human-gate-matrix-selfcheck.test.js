@@ -60,7 +60,12 @@ import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
 import { DANGEROUS_PATTERNS } from '../../lib/autopilot/safety.js';
 // 섹션 G 의 스캐너(2026-09-14 통합). 종전 사설 판은 삭제됐고,
 // 구현과 HG 예외 목록이 여기 하나로 모였다 — 아래 G 서문 참조.
-import { ceilingFor, findUnboundedRuns, HG_SCAN_ALLOWLIST } from '../helpers/regex-scan.js';
+import {
+  ceilingFor,
+  findOverlappingStarPairs,
+  findUnboundedRuns,
+  HG_SCAN_ALLOWLIST,
+} from '../helpers/regex-scan.js';
 
 /**
  * 행마다 양성 1건 · 음성 1건. 행이 늘면 여기도 늘어야 한다(D 가 강제).
@@ -350,6 +355,8 @@ describe('human-gate matrix — Observe = 기록만 (F)', () => {
  * `tests/helpers/regex-scan.test.js` 의 describe '옛 섹션 G 의 자기검증' 으로
  * 옮겼다. 여기 남은 것은 **HG 표에 대한 구조 핀**뿐이다: 예외를 뺀 전 패턴이
  * 무제한 런 0 · 예외 목록에 유령 항목 0 · HG-07 은 예외가 아니라 바운드로 통과.
+ * 2026-09-23 부터 하나 더: 전 패턴(예외 없이) 1-b 형 0 — 검출기와 그 사각은
+ * 헬퍼 헤더 "못 보는 것" 1-b 에 나란히 있다.
  */
 describe('human-gate matrix — 무제한 런 0 (G)', () => {
   /** `<행 id>[<패턴 인덱스>]` → 정규식. 예외 키를 실물과 대조하는 데 쓴다. */
@@ -367,6 +374,22 @@ describe('human-gate matrix — 무제한 런 0 (G)', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // 1-b 형(같은 클래스 run 쌍이 필수 글자를 낀 모양)은 findUnboundedRuns 가
+  // 구조적으로 못 본다 — 검출기는 헬퍼의 findOverlappingStarPairs 다(2026-09-23).
+  // HG_SCAN_ALLOWLIST 를 적용하지 않는다: 그 면제 근거("`^` 앵커 → 시작점 하나")는
+  // 시작점 수를 줄일 뿐이고, 1-b 는 시작점 하나 안에서 이미 2차식이다.
+  it('1-b 같은 클래스 run 쌍이 없다 — 예외 없이 전 패턴', () => {
+    const offenders = [];
+    for (const [key, pattern] of byKey) {
+      const hits = findOverlappingStarPairs(pattern.source, pattern.flags, ceilingFor('HG', key));
+      if (hits.length > 0) {
+        offenders.push(`${key}: ${hits.map((h) => h.snippet).join(',')} in ${pattern.source}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+    expect(byKey.size).toBe(29);
   });
 
   it('예외 목록은 실재하고, 전부 ^ 앵커이며, 유령 항목이 없다', () => {

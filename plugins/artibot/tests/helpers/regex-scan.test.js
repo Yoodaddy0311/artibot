@@ -10,11 +10,18 @@
  *  - '옛 섹션 G 의 자기검증' 은 tests/firewall/human-gate-matrix-selfcheck.test.js
  *    섹션 G 의 사설 스캐너(`unboundedRunsOutsideLookahead`)가 들고 있던 단언이다.
  *    그 스캐너는 삭제됐고 단언만 헬퍼 기준으로 살아남았다.
+ *
+ * 2026-09-23 에 1-b 검출기(`findOverlappingStarPairs`)의 describe 두 개가 붙었다 —
+ * 자기검증과 L1·L2 카탈로그 게이트. HG 카탈로그 게이트는 human-gate-matrix-selfcheck
+ * 섹션 G 에 있다.
  */
 import { describe, expect, it } from 'vitest';
 import { getGateRow } from '../../lib/security/human-gates.js';
+import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
+import { DANGEROUS_PATTERNS } from '../../lib/autopilot/safety.js';
 import {
   ceilingFor,
+  findOverlappingStarPairs,
   findUnboundedRuns,
   HG_SCAN_ALLOWLIST,
   WINDOW_CEILING_DEFAULT,
@@ -169,5 +176,99 @@ describe('ReDoS 정적 스캔 — 옛 섹션 G 의 자기검증', () => {
     const negatedInsideLookahead = /\bUPDATE\b(?![^\n]*\bWHERE\b)/i;
     expect(findUnboundedRuns(negatedInsideLookahead.source, 'i').map((h) => h.snippet))
       .toEqual(['[^\\n]*']);
+  });
+});
+
+describe('ReDoS 정적 스캔 — 1-b 검출기 자기검증 (findOverlappingStarPairs)', () => {
+  // 양성 대조는 **손으로 붙인 수리 전 리터럴**이다. 라이브 규칙에서 읽으면
+  // 규칙이 고쳐지는 순간 대조군이 사라지고, 검출기가 조용히 아무것도 안 봐도
+  // 이 describe 는 그린이 된다(규율 §10).
+  it.each([
+    // rm 규칙군 — 2026-09-21·22 에 실측된 2차식, 수리 전 모양.
+    ['수리 전 L2 rm 재귀 플래그 (/i)', /-[a-z]*[r][a-z]*/i],
+    ['수리 전 L1 rm 결합 플래그 rf (/i)', /-\w*r\w*f/i],
+    ['수리 전 L1 rm 와일드카드 (/i)', /-\w*[rf]\w*/i],
+    // git-branch-delete — 2026-09-23 실측된 2차식, 수리 전 모양(/i 없음).
+    ['수리 전 git-branch-delete -D 토큰', /-[a-zA-Z]*D[a-zA-Z]*/],
+    ['수리 전 git-branch-delete -d 토큰', /-[a-z]*d[a-z]*/],
+    ['수리 전 git-branch-delete -f 토큰', /-[a-z]*f[a-z]*/],
+    // 수량자 변형 — 같은 기전.
+    ['plus 런 쌍', /\w+r\w+/],
+    ['lazy 런 쌍', /[a-z]*?r[a-z]*?/],
+    ['첫 런이 기본 상한을 넘는 창', /[a-z]{0,193}r[a-z]*/],
+  ])('보고한다 — %s', (_name, re) => {
+    expect(findOverlappingStarPairs(re.source, re.flags).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    // 수리형 — 첫 런에서 필수 글자를 뺐다. 분할점이 하나로 고정돼 선형이다.
+    ['수리된 L2 rm 재귀 플래그 (/i)', /-[a-qs-z]*r[a-z]*/i],
+    ['수리된 L1 rm 결합 플래그 (/i)', /-[0-9a-qs-z_]*r\w*f/i],
+    ['수리된 git-branch-delete -D 토큰', /-[a-zA-CE-Z]*D[a-zA-Z]*/],
+    ['수리된 git-branch-delete -d 토큰', /-[a-ce-z]*d[a-z]*/],
+    ['수리된 git-branch-delete -f 토큰', /-[a-eg-z]*f[a-z]*/],
+    // 평범한 모양.
+    ['런 하나 + 꼬리 글자', /git\s+clean\s+-\w*f/i],
+    ['둘째 런이 필수 글자를 뺀 쌍', /[a-z]*r[a-qs-z]*/],
+    ['필수 글자가 두 런과 서로소', /[a-z]*\d[a-z]*/],
+    ['두 창이 모두 기본 상한 안', /[a-z]{0,192}r[a-z]{0,192}/],
+    ['공백 구분자를 낀 두 런', /\s*:\s*/],
+    ['이스케이프된 클래스와 별표', /-\[a-z\]\*d\[a-z\]\*/],
+    ['바운드 창 뒤의 필수 토큰', /\bgit\s+push\b[^\n;&|]{0,192}--force/i],
+    // 아래 넷은 "못 보는 것" 1-b 의 검출기 사각 (i)~(iii) 그대로다. 통과가 안전을
+    // 뜻하지 않는다 — 넷 다 모양상 같은 기전을 갖는다.
+    ['원자 둘이 끼어 인접하지 않은 쌍 (out of scope)', /\w*rr\w*/],
+    ['그룹 경계가 끼어 인접하지 않은 쌍 (out of scope)', /(?:-[a-z]*)d[a-z]*/],
+    ['교대로 감싼 필수 글자 (out of scope)', /-[a-z]*(?:d|x)[a-z]*/],
+    ['수량자가 붙은 필수 글자 (out of scope)', /[a-z]*r+[a-z]*/],
+  ])('보고하지 않는다 — %s', (_name, re) => {
+    expect(findOverlappingStarPairs(re.source, re.flags)).toEqual([]);
+  });
+
+  it('/i 를 반영한다 — 대문자만 뺀 첫 런은 /i 아래에서 다시 필수 글자를 포함한다', () => {
+    // [a-zA-CE-Z] 는 D 를 빼지만 /i 에서는 소문자 d 가 D 로 접혀 매치된다.
+    expect(findOverlappingStarPairs(/-[a-zA-CE-Z]*D[a-zA-Z]*/.source, '')).toEqual([]);
+    expect(findOverlappingStarPairs(/-[a-zA-CE-Z]*D[a-zA-Z]*/i.source, 'i')).toHaveLength(1);
+    // 반대 방향: [a-qs-z] 는 /i 아래에서도 R 을 뺀다(r 이 없으니 접을 원본이 없다).
+    expect(findOverlappingStarPairs(/-[a-qs-z]*r[a-z]*/i.source, 'i')).toEqual([]);
+  });
+
+  it('위치·조각·공유 글자를 보고한다 — boolean 이 아니다', () => {
+    expect(findOverlappingStarPairs('-[a-z]*d[a-z]*')).toEqual([
+      { index: 1, snippet: '[a-z]*d[a-z]*', shared: ['d'] },
+    ]);
+    expect(findOverlappingStarPairs(/-\w*r\w*f/i.source, 'i')).toEqual([
+      { index: 1, snippet: '\\w*r\\w*', shared: ['R', 'r'] },
+    ]);
+  });
+
+  it('창 상한은 findUnboundedRuns 와 같은 규칙으로 받는다', () => {
+    expect(findOverlappingStarPairs('[a-z]{0,512}r[a-z]{0,512}', '', 512)).toEqual([]);
+    expect(findOverlappingStarPairs('[a-z]{0,513}r[a-z]{0,513}', '', 512)).toHaveLength(1);
+  });
+});
+
+describe('ReDoS 정적 스캔 — 1-b 카탈로그 게이트 (L1·L2)', () => {
+  // HG 는 human-gate-matrix-selfcheck 섹션 G 가 같은 검출기로 훑는다.
+  // 예외 목록은 없다 — 1-b 는 시작 위치 하나 안에서도 2차식이라 HG-11 식의
+  // "`^` 앵커면 시작점이 하나" 논거가 성립하지 않는다.
+  it.each(BLOCKED_PATTERNS.map((p) => [`L1:${p.label}`, p.pattern, p.label]))(
+    '%s', (_name, pattern, key) => {
+      const hits = findOverlappingStarPairs(pattern.source, pattern.flags, ceilingFor('L1', key));
+      expect(hits.map((h) => h.snippet)).toEqual([]);
+    },
+  );
+
+  it.each(DANGEROUS_PATTERNS.map((r) => [`L2:${r.id}`, r.test, r.id]))(
+    '%s', (_name, pattern, key) => {
+      const hits = findOverlappingStarPairs(pattern.source, pattern.flags, ceilingFor('L2', key));
+      expect(hits.map((h) => h.snippet)).toEqual([]);
+    },
+  );
+
+  // 분모 고정 — it.each 가 "0개를 훑고 통과"하는 공허한 그린이 되지 않도록.
+  it('L1 39 · L2 27 패턴을 훑는다', () => {
+    expect(BLOCKED_PATTERNS).toHaveLength(39);
+    expect(DANGEROUS_PATTERNS).toHaveLength(27);
   });
 });

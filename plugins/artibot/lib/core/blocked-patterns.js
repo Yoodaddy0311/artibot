@@ -317,10 +317,53 @@ const BLOCKED_PATTERNS = Object.freeze([
   // and as a row in the parity matrix.
   // Tokens and separators cannot parse two ways — the option branch demands a
   // dash then \w, the argument branch forbids a leading dash, the continuation
-  // branch starts with a backslash (never whitespace) — so the scan is linear
-  // (120KB adversarial input < 1ms, measured).
+  // branch starts with a backslash (never whitespace).
+  // THAT ALONE DID NOT MAKE THE SCAN LINEAR. This comment used to say "120KB
+  // adversarial input < 1ms, measured" (and safety.js "< 5ms"); both were
+  // measured on shapes that never reach the two quadratics below.
+  // FLAG-RUN QUADRATIC, FIXED 2026-09-23 (guard-branch-delete-redos). The flag
+  // tokens were `-[a-zA-Z]*D[a-zA-Z]*`, `-[a-z]*d[a-z]*` and `-[a-z]*f[a-z]*`:
+  // two star runs over one class around a mandatory letter, the shape the rm
+  // rules above had until 2026-09-22. A token made only of that letter with a
+  // failing tail splits n ways and every split is retried. Measured 2026-09-23
+  // 11:19-11:21 KST (node v24.15.0, rule alone, distinct payload per run,
+  // median of 3, n = 2,500 / 5,000 / 10,000 / 20,000):
+  //   `git branch -` + d x n + `_`      L2 14.4 / 44.0 / 190.6 /   736.6 ms
+  //                                     L1 16.2 / 66.0 / 267.6 /   989.8 ms
+  //   `git branch -` + D x n + `_`      L2 13.6 / 53.1 / 211.8 /   810.4 ms
+  //   `git branch -d -` + f x n + `_`   L2 25.4 / 75.2 / 281.0 /   973.2 ms
+  //   `git branch -f -` + d x n + `_`   L2 17.3 / 66.3 / 321.6 / 1,192.8 ms
+  // The force run is reachable only behind a delete flag: `git branch -` + f x n
+  // is linear even unfixed, because the delete lookahead fails first and the
+  // force run is never read — a green on that shape proves nothing.
+  // THE FIX IS A LANGUAGE-PRESERVING TOKEN SWAP: the FIRST run excludes the
+  // mandatory letter (`[a-zA-CE-Z]*D`, `[a-ce-z]*d`, `[a-eg-z]*f`), which binds
+  // it to its leftmost occurrence — every match already had that binding, so
+  // the accepted set is unchanged. There is no /i here, so `D` and `d` are
+  // different letters and each class drops only its own. After (same four
+  // shapes, same method, 2026-09-23 12:10 KST): rule alone <= 0.69 ms at
+  // n = 20,000 on both layers (growth ~2 per doubling); 122,880B rule alone
+  // 1.23-3.93 ms, classifyRisk 2.18-5.56 ms. Language: 524,286 commands per
+  // layer (flag tokens over {d,D,f,F,x,9,_,-} at every length 0..5, 14
+  // templates), 0 mismatches against a FROZEN copy of the old rule in
+  // tests/autopilot/safety.test.js, which also pins L1 === L2 byte for byte.
+  // OPEN RESIDUAL — NOT FIXED, PENDING AN OWNER DECISION. A line of repeated
+  // `git branch ` starts is quadratic before AND after the swap: each start
+  // re-scans the rest of the line through the option-run lookaheads. Leader
+  // measurements 2026-09-23 11:21 KST (node v24.15.0, `'git branch '` repeated
+  // to ~2,500 / 5,000 / 10,000 / 20,000B, rounded up to a multiple of 11):
+  // the swap-candidate regex (same source as committed) 4.7 / 22.2 / 92.0 /
+  // 378.7 ms rule alone; the PRE-swap code at 122,880B 15,018 ms rule alone
+  // and 13,143 ms through classifyRisk (the flag tokens do not touch this
+  // shape, so the verdict carries over) — past the 5s PreToolUse budget.
+  // Re-measured on the committed rule, 12:13 KST, same sizes: L2 3.97 / 10.91
+  // / 47.66 / 182.01 ms, L1 4.12 / 10.53 / 38.70 / 156.32 ms. A
+  // timed-out hook does not block (fail-open per the host docs; not reproduced
+  // live, see CHANGELOG). Any fix (a window, an anchor) changes the accepted
+  // language, so it is not part of this swap, and no scaled payload covers the
+  // shape on purpose (it would be RED).
   {
-    pattern: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-z]*f[a-z]*)(?![\w-])))/,
+    pattern: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-CE-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-ce-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-eg-z]*f[a-z]*)(?![\w-])))/,
     label: 'git branch -D (force delete)',
     category: 'git',
   },
