@@ -38,6 +38,12 @@
  * `--list` prints every plan limb with its current state (`unknown` when the
  * key is absent or outside the allowlist — the same answer the reader gives).
  *
+ * After a successful write, `main` (the CLI only — never `setLaneState`,
+ * which dispatch also calls) hands the transition to
+ * `lane-lease.mjs#syncLaneLease`, which renews or releases the limb's
+ * StateStore lease. RECORD-ONLY: its result is the one `lease` key of
+ * `--json`, and it never changes the exit code or the human line.
+ *
  * @module scripts/split/lane-state
  */
 
@@ -47,6 +53,7 @@ import { isLaneOpsState, LANE_OPS_STATES } from '../../lib/supervisor/contracts.
 import { readRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
 import { writeWorkerState } from '../../lib/topology/split-state.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
+import { syncLaneLease } from './lane-lease.mjs';
 
 export const HELP = `usage: node scripts/split/lane-state.mjs <limb> <state> [--window <session>] [--note <text>] [--json]
        node scripts/split/lane-state.mjs --list [--json]
@@ -178,10 +185,26 @@ function renderTable(rows) {
 }
 
 /**
+ * Run the lease sync without letting it reach the exit code. `syncLaneLease`
+ * is total already; this guards an injected one.
+ *
+ * @param {{ syncLease?: Function }} opts
+ * @param {{ parentRoot: string, limb: string, state: string }} input
+ * @returns {{ outcome: string, missionId: string|null }}
+ */
+function syncLease(opts, input) {
+  try {
+    return (opts.syncLease ?? syncLaneLease)(input);
+  } catch (e) {
+    return { outcome: `skipped:sync-threw:${e?.message ?? 'unknown'}`, missionId: null };
+  }
+}
+
+/**
  * CLI entry. Returns exit code.
  *
  * @param {string[]} argv
- * @param {{ cwd?: string, now?: () => Date, stdout?: (s: string) => void, stderr?: (s: string) => void }} [opts]
+ * @param {{ cwd?: string, now?: () => Date, stdout?: (s: string) => void, stderr?: (s: string) => void, syncLease?: (input: { parentRoot: string, limb: string, state: string }) => { outcome: string, missionId: string|null } }} [opts] - `syncLease` is the test seam for the lease sync.
  * @returns {number}
  */
 export function main(argv, opts = {}) {
@@ -209,7 +232,8 @@ export function main(argv, opts = {}) {
       return 1;
     }
     const r = setLaneState({ limb: args.limb, state: args.state, window: args.window, note: args.note }, opts);
-    if (args.json) out(`${JSON.stringify(r, null, 2)}\n`);
+    const lease = syncLease(opts, { parentRoot: path.resolve(opts.cwd ?? process.cwd()), limb: r.limb, state: r.state });
+    if (args.json) out(`${JSON.stringify({ ...r, lease }, null, 2)}\n`);
     else out(`${r.limb}: ${r.previous ?? 'unknown'} → ${r.state}${r.changed ? '' : ' (unchanged)'} since ${r.since}${r.window ? ` window=${r.window}` : ''}${r.note ? ` note=${r.note}` : ''}\n`);
     return 0;
   } catch (e) {

@@ -248,6 +248,35 @@ describe('feedLimb — a commit between the read and the graph write', () => {
     expect(makeStore().getLease(MISSION, 'billing').owner).toBe('billing');
     expect(tasks.find((t) => t.id === 'auth').status).toBe('claimed');
   });
+
+  it('a mission removed before the retry is skipped as no-mission, and the retry writes nothing', () => {
+    const seeder = makeStore();
+    seedMission(seeder);
+    const a = makeStore();
+    let journalAtRemoval = null;
+    // The row vanishes after A has read it: the removal bumps the version, so
+    // A's first write is a CAS conflict and the retry re-reads a snapshot in
+    // which the mission no longer exists.
+    const racing = {
+      ...a,
+      updateMission: (...args) => {
+        if (journalAtRemoval === null) {
+          expect(makeStore().updateMission(MISSION, () => null, { reason: 'test.remove' }).ok).toBe(true);
+          journalAtRemoval = journalKinds().length;
+        }
+        return a.updateMission(...args);
+      },
+    };
+
+    const r = feedLimb({ parentRoot: root, plan: PLAN, limb: 'auth', sessionId: SESSION }, { openStore: () => racing });
+    expect(r.fed).toBe(false);
+    expect(r.skipped).toBe('no-mission');
+    // Measured RED before the re-check: the retry's `(cur) => cur` returned
+    // null for the vanished row, `updateMission` turned that into a second
+    // `mission.remove`, and the feed reported `fed: true`.
+    expect(journalKinds()).toHaveLength(journalAtRemoval);
+    expect(ledger.filter((e) => e.data?.reason === FEED_REASON)).toHaveLength(0);
+  });
 });
 
 describe('feedLimb — every refusal is a skip, and a skip writes nothing', () => {
