@@ -713,6 +713,12 @@ describe('writeWorkerState — idempotency_key names the transition', () => {
     expect(events[0].idempotency_key).toBe('worker.claimed:run-9:alpha:none:awaiting-dispatch:none');
   });
 
+  it('takes the plan.json runId when run.json names a different one', () => {
+    const events = [];
+    write(makeRunDir({ plan, run: { runId: 'run-other' } }), 'claimed', events);
+    expect(events[0].idempotency_key).toBe('worker.claimed:run-7:alpha:none:awaiting-dispatch:none');
+  });
+
   it('omits the key, never an empty string, when no run id exists anywhere', () => {
     const events = [];
     write(makeRunDir({ plan: { limbs: plan.limbs } }), 'claimed', events);

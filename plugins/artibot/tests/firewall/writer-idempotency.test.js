@@ -67,7 +67,10 @@
  * v3 (this one): 395 files under `lib/` (`.mjs` now scanned), 53 discovered, 6
  * keyed, 47 exempt, of which 13 write the run ledger and 7 of those carry no
  * key. Counts are recorded, never asserted - the SET is asserted, because a
- * count goes red on a rename and green on a swap.
+ * count goes red on a rename and green on a swap. 2026-09-23 (SH-14): five of
+ * those unkeyed run-ledger writers moved to keyed, so 11 rows are `k` now.
+ * `k` means an assignment site exists, not that live lines carry a key: four
+ * of the five are dormant in production today (null or absent ports).
  *
  * WHAT THIS GATE CANNOT SEE:
  *
@@ -106,6 +109,8 @@
  *     TWO keyed modules can emit a null key:
  *     `observability/activation-observed.js` (`promptIdOk ? ... : null`) and
  *     `observability/decision-events.js` (null when `prompt_id` is null).
+ *     The five SH-14 writers OMIT the field when their key material is
+ *     missing (split-state always omits it without a run id).
  *
  *   - KEY UNIQUENESS AND COLLISION, and whether any reader dedupes on the key.
  *     Both need a runtime probe over real lines.

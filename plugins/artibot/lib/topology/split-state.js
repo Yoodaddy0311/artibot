@@ -460,6 +460,12 @@ function ledgerEventNameFor(prevOps, nextOps) {
  *    one run would collide with a fresh lane of the same name in the next — so
  *    the result is `null` and the caller omits the key.
  *
+ * LIMIT: two entries into one state from the same from-state with the same
+ * stored `since` collide — with a frozen clock, active→done→claimed→executing
+ * →done→claimed gives 3 keys for 4 events. Across separate processes on a ms
+ * wall clock that is practically unreachable; an injected or repeated `now`
+ * reaches it. No reader dedupes on this key today (2026-09-23).
+ *
  * @param {object} p
  * @param {string|null} p.eventName
  * @param {unknown} p.runId - `plan.json` / `run.json` `runId`
