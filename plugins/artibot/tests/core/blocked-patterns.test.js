@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { BLOCKED_PATTERNS, CATEGORIES } from '../../lib/core/blocked-patterns.js';
+import {
+  BLOCKED_PATTERNS, CATEGORIES, GIT_BRANCH_DELETE_MATCHER, matchesGitBranchDelete,
+} from '../../lib/core/blocked-patterns.js';
 import { blankPrinterSegments } from '../../lib/core/command-segments.js';
 import {
   executeChain, normalizeCommand, registerBuiltinGuards, resetGuards,
@@ -9,6 +11,29 @@ import {
 const BACKSLASH = String.fromCharCode(92);
 /** 콜론. 포크밤 문자열을 조립해 파일 안에 실행형 리터럴을 남기지 않는다. */
 const COLON = String.fromCharCode(58);
+
+/**
+ * RegExp 가 아닌 matcher 로 판정하는 규칙의 **허용 목록**(라벨 → 기대 객체).
+ * 2026-09-23 `git branch -D` 규칙이 정규식에서 선형 스캐너로 바뀌었다
+ * (lib/core/blocked-patterns.js 의 `>>> git-branch-delete scanner` 블록).
+ * 여기 없는 비-RegExp 항목은 아래 두 곳(항목 형태 단언·창 완결성 단언)에서
+ * RED 다 — 부정 목록이 아니라 허용 목록이라 새 matcher 에 fail-closed.
+ */
+const SCANNER_BACKED = new Map([
+  ['git branch -D (force delete)', GIT_BRANCH_DELETE_MATCHER],
+]);
+
+/**
+ * 정규식 원문을 읽는 단언용. 스캐너 항목은 원문이 없으므로 null(창이 없다),
+ * 허용 목록 밖의 비-RegExp 항목은 throw 한다.
+ * @param {{pattern: unknown, label: string}} entry
+ * @returns {string|null}
+ */
+const regexSourceOf = (entry) => {
+  if (entry.pattern instanceof RegExp) return entry.pattern.source;
+  if (SCANNER_BACKED.get(entry.label) === entry.pattern) return null;
+  throw new Error(`non-RegExp pattern outside SCANNER_BACKED: ${entry.label}`);
+};
 
 /**
  * 벽시계 3회 중앙값(ms). 단일 회차는 Windows 러너에서 회차 간 1.9배까지
@@ -95,7 +120,11 @@ describe('blocked-patterns', () => {
 
     it('should have pattern, label, and category for every entry', () => {
       for (const entry of BLOCKED_PATTERNS) {
-        expect(entry.pattern).toBeInstanceOf(RegExp);
+        if (SCANNER_BACKED.has(entry.label)) {
+          expect(entry.pattern).toBe(SCANNER_BACKED.get(entry.label));
+        } else {
+          expect(entry.pattern, entry.label).toBeInstanceOf(RegExp);
+        }
         expect(typeof entry.label).toBe('string');
         expect(entry.label.length).toBeGreaterThan(0);
         expect(typeof entry.category).toBe('string');
@@ -107,6 +136,30 @@ describe('blocked-patterns', () => {
       expect(() => {
         BLOCKED_PATTERNS.push({ pattern: /test/, label: 'test', category: 'test' });
       }).toThrow();
+    });
+
+    // 허용 목록이 썩지 않게 — 목록의 라벨은 카탈로그에 실제로 있고 같은 객체를
+    // 쓰며, 그 객체는 동결된 `.test()` 전용이다(원문·플래그를 흉내 내지 않는다).
+    it('SCANNER_BACKED names live catalogue entries with frozen test-only matchers', () => {
+      for (const [label, matcher] of SCANNER_BACKED) {
+        const entries = BLOCKED_PATTERNS.filter((p) => p.label === label);
+        expect(entries, label).toHaveLength(1);
+        expect(entries[0].pattern).toBe(matcher);
+        expect(Object.isFrozen(matcher)).toBe(true);
+        expect(typeof matcher.test).toBe('function');
+        expect('source' in matcher).toBe(false);
+        expect('flags' in matcher).toBe(false);
+      }
+      expect(GIT_BRANCH_DELETE_MATCHER.kind).toBe('linear-scanner');
+      expect(GIT_BRANCH_DELETE_MATCHER.id).toBe('git-branch-delete');
+    });
+
+    it('regexSourceOf throws on a non-RegExp entry outside SCANNER_BACKED (fail-closed)', () => {
+      const stranger = { pattern: { test: () => true }, label: 'not allowlisted', category: 'git' };
+      expect(() => regexSourceOf(stranger)).toThrow(/outside SCANNER_BACKED/);
+      // 허용 라벨이어도 객체가 다르면 거부한다.
+      const impostor = { pattern: { test: () => true }, label: 'git branch -D (force delete)', category: 'git' };
+      expect(() => regexSourceOf(impostor)).toThrow(/outside SCANNER_BACKED/);
     });
   });
 
@@ -454,6 +507,74 @@ describe('blocked-patterns', () => {
     });
   });
 
+  // 2026-09-23 `git branch -D` 규칙이 정규식에서 선형 스캐너로 바뀌었다. 언어
+  // 보존의 정본은 tests/autopilot/safety.test.js 의 동결 정규식 대조이고, 여기는
+  // L1 쪽 판정 행 — matcher 단독 + executeChain 전체 경로 — 만 본다.
+  describe('git branch -D linear scanner (L1 side)', () => {
+    beforeEach(() => {
+      resetGuards();
+      registerBuiltinGuards();
+    });
+
+    const decisionFor = (command) => executeChain(
+      'pre', 'Bash', { tool_name: 'Bash', tool_input: { command } },
+    ).decision;
+
+    it('is the L1 rule matcher', () => {
+      const rule = BLOCKED_PATTERNS.find((p) => p.label === 'git branch -D (force delete)');
+      expect(rule.pattern).toBe(GIT_BRANCH_DELETE_MATCHER);
+    });
+
+    it.each([
+      ['git branch -d topic', false, 'approve'],
+      ['git branch -D topic', true, 'block'],
+      ['git branch --delete --force topic', true, 'block'],
+      ['git branch -df topic', true, 'block'],
+      // 소문자 번들 뒤 대문자는 \w 라 삭제 플래그가 아니고, D 도 없다.
+      ['git branch -dF topic', false, 'approve'],
+      ['git branch -d topic -f', true, 'block'],
+      // 맨 줄바꿈과 셸 구분자는 옵션 런을 끝낸다 — 뒤 명령의 -f 는 빌려오지 않는다.
+      ['git branch -d old\necho -f done', false, 'approve'],
+      ['git branch -d x; git branch -f y', false, 'approve'],
+      // 백슬래시 + CRLF 줄 연속은 한 명령이다.
+      [`git branch -d topic ${BACKSLASH}\r\n -f`, true, 'block'],
+    ])('%j: matcher %s, executeChain %s', (command, matches, decision) => {
+      expect(GIT_BRANCH_DELETE_MATCHER.test(command)).toBe(matches);
+      expect(decisionFor(command)).toBe(decision);
+    });
+
+    it('coerces its argument with String() like RegExp.prototype.test', () => {
+      expect(GIT_BRANCH_DELETE_MATCHER.test({ toString: () => 'git branch -D x' })).toBe(true);
+      expect(GIT_BRANCH_DELETE_MATCHER.test(undefined)).toBe(false);
+    });
+
+    // 구분자 S 는 줄바꿈을 뺀 JS `\s` 전부다(`[^\S\n]`). 스캐너는 ASCII 를 표로,
+    // 나머지를 엔진의 `/\s/` 로 판정한다 — 그 경계를 코드 단위 65,536개 전수로 본다.
+    // 오라클은 정의 그대로(`/\s/` && !== LF)이고, 옛 정규식을 복제하지 않는다.
+    it('treats exactly the non-LF JS whitespace code units as a separator', () => {
+      const wrong = [];
+      for (let code = 0; code < 65536; code += 1) {
+        const unit = String.fromCharCode(code);
+        const want = /\s/.test(unit) && code !== 10;
+        if (matchesGitBranchDelete(`git${unit}branch -D x`) !== want) wrong.push(code);
+        if (matchesGitBranchDelete(`git branch${unit}-D x`) !== want) wrong.push(code);
+      }
+      expect(wrong).toEqual([]);
+    });
+
+    // 플래그 꼬리 `(?![\w-])`. ASCII 글자는 번들을 잇고(`-Dx` 도 D 를 품는다),
+    // 숫자·`_`·`-` 는 플래그를 깨며, 그 밖의 모든 코드 단위는 플래그를 끝낸다.
+    it('breaks a -D flag only on a digit, `_` or `-` right after it', () => {
+      const wrong = [];
+      for (let code = 0; code < 65536; code += 1) {
+        const unit = String.fromCharCode(code);
+        const want = !/[0-9_-]/.test(unit);
+        if (matchesGitBranchDelete(`git branch -D${unit}`) !== want) wrong.push(code);
+      }
+      expect(wrong).toEqual([]);
+    });
+  });
+
   describe('git stash destruction', () => {
     // `clear` drops every entry at once, so it is strictly more destructive than
     // `drop`, yet the rule only named `drop` (measured 2026-09-11).
@@ -693,8 +814,12 @@ describe('blocked-patterns', () => {
      * 범위 밖이다(예: lib/security/human-gates.js).
      */
     it('every bounded rule has a boundary-pair entry (no silent new window)', () => {
+      // 스캐너 항목은 원문이 없어 창도 없다(null). 허용 목록 밖 비-RegExp 는 throw.
       const bounded = BLOCKED_PATTERNS
-        .filter((p) => /\[\^[^\]]*\]\{0,\d+\}/.test(p.pattern.source))
+        .filter((p) => {
+          const source = regexSourceOf(p);
+          return source !== null && /\[\^[^\]]*\]\{0,\d+\}/.test(source);
+        })
         .map((p) => p.label)
         .sort();
       const pinned = BOUNDARY.map(([label]) => label).sort();
@@ -1269,6 +1394,13 @@ describe('blocked-patterns', () => {
       // 양성 대조군 — 런이 유효한 번들로 끝나 규칙이 실제로 매치하는 형.
       ['branch delete run (matching)', (size) => `git branch -${'d'.repeat(Math.max(0, size - 19))}f topic`.slice(0, size)],
       ['branch force-delete run (matching)', (size) => `git branch -${'D'.repeat(Math.max(0, size - 19))}v topic`.slice(0, size)],
+      // ── 2026-09-23 (guard-branch-delete-scanner) 여러 시작점 형 ─────────────
+      // `git branch ` 반복 — 정규식 시절에는 시작점마다 줄 끝까지 되훑어 2차식이라
+      // 이 표에 일부러 넣지 않았던 형이다(넣으면 RED). 선형 스캐너로 바뀐 뒤 넣는다.
+      // 수치는 lib/core/blocked-patterns.js 의 그 규칙 주석이 정본이다.
+      ['branch many-start run', (size) => filler('git branch ', size)],
+      // 양성 대조군 — 맨 앞 시작점의 런이 줄 끝의 -D 까지 닿아야 매치한다.
+      ['branch many-start run (matching)', (size) => `${filler('git branch ', size - 5)} -D x`],
     ];
 
     it.each(PREPROCESS_SHAPES)('builds the %s shape at the exact requested size', (_name, build) => {
@@ -1286,6 +1418,8 @@ describe('blocked-patterns', () => {
       ['branch delete run behind -f', 'approve'],
       ['branch delete run (matching)', 'block'],
       ['branch force-delete run (matching)', 'block'],
+      ['branch many-start run', 'approve'],
+      ['branch many-start run (matching)', 'block'],
     ])('decides %s at 40,962B as %s', (name, decision) => {
       const build = PREPROCESS_SHAPES.find(([n]) => n === name)[1];
       expect(runChain(build(40962)).decision).toBe(decision);

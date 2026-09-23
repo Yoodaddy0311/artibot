@@ -16,7 +16,17 @@ import {
 // 훑는다 — 2026-09-14 에 HUMAN_GATE_MATRIX 가 세 번째로 들어왔다(스캐너 헤더
 // "못 보는 것" 7번 = tests/helpers/regex-scan.js 참조). 이 파일은 L1 소스를
 // 편집하지 않는다.
-import { BLOCKED_PATTERNS } from '../../lib/core/blocked-patterns.js';
+// 2026-09-23 — git-branch-delete 는 정규식이 아니라 두 층이 **같은 객체**로 공유하는
+// 수기 스캐너다. 파일 텍스트도 읽는다: 변이 대조가 마커 블록을 떼어 변이시킨다.
+import {
+  BLOCKED_PATTERNS,
+  GIT_BRANCH_DELETE_MATCHER,
+  matchesGitBranchDelete,
+} from '../../lib/core/blocked-patterns.js';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 // 읽기 전용 — 정적 스캔의 **세 번째 카탈로그**(2026-09-14 추가). 같은
 // PreToolUse 경로(probe 'command', tools Bash)를 타면서 두 카탈로그 밖이라
 // 종전 스캔이 못 보던 자리다. 이 파일은 human-gates.js 를 편집하지 않는다.
@@ -28,6 +38,7 @@ import {
   ceilingFor,
   findUnboundedRuns,
   HG_SCAN_ALLOWLIST,
+  scanTargetOf,
 } from '../helpers/regex-scan.js';
 
 describe('classifyRisk', () => {
@@ -1159,9 +1170,18 @@ describe('classifyRisk — sql-delete-no-where reads the WHERE that belongs to i
 const SCAN_ALLOWLIST = new Set();
 
 describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () => {
+  // 2026-09-23: git-branch-delete 는 소스가 없는 수기 스캐너다. 건너뛰는 길은
+  // scanTargetOf(등록제, fail-closed) 하나뿐이다 — 미등록 비-정규식은 throw 로
+  // RED 이고, 등록 행의 선형성은 아래 'git-branch-delete — 스캐너가 정규식
+  // 언어를 그대로 받는다' describe 와 SCALED_PAYLOADS 의 many-start 행이 맡는다.
   it.each(BLOCKED_PATTERNS.map((p, idx) => [`L1[${idx}] ${p.label}`, p.pattern, p.label]))(
     '%s', (_name, pattern, key) => {
-      const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('L1', key));
+      const target = scanTargetOf('L1', key, pattern);
+      if (target === null) {
+        expect(pattern).toBe(GIT_BRANCH_DELETE_MATCHER);
+        return;
+      }
+      const hits = findUnboundedRuns(target.source, target.flags, ceilingFor('L1', key));
       expect(hits.map((h) => h.snippet)).toEqual([]);
     },
   );
@@ -1171,7 +1191,12 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
       .filter((r) => !SCAN_ALLOWLIST.has(r.id))
       .map((r) => [`L2 ${r.id}`, r.test, r.id]),
   )('%s', (_name, pattern, key) => {
-    const hits = findUnboundedRuns(pattern.source, pattern.flags, ceilingFor('L2', key));
+    const target = scanTargetOf('L2', key, pattern);
+    if (target === null) {
+      expect(pattern).toBe(GIT_BRANCH_DELETE_MATCHER);
+      return;
+    }
+    const hits = findUnboundedRuns(target.source, target.flags, ceilingFor('L2', key));
     expect(hits.map((h) => h.snippet)).toEqual([]);
   });
 
@@ -1187,6 +1212,12 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
     const hg = HUMAN_GATE_MATRIX.reduce((n, row) => n + row.patterns.length, 0);
     expect(hg).toBe(29);
     expect(BLOCKED_PATTERNS.length + DANGEROUS_PATTERNS.length + hg).toBe(95);
+    // 2026-09-23: 95 중 2 는 소스가 없는 스캐너 행이라 정규식 스캔은 93 이다.
+    const scannerRows = [
+      ...BLOCKED_PATTERNS.map((p) => scanTargetOf('L1', p.label, p.pattern)),
+      ...DANGEROUS_PATTERNS.map((r) => scanTargetOf('L2', r.id, r.test)),
+    ].filter((t) => t === null);
+    expect(scannerRows).toHaveLength(2);
   });
 
   it('L2 예외는 0건이다', () => {
@@ -1261,6 +1292,19 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
  */
 function fill(unit, bytes) {
   return unit.repeat(Math.ceil(bytes / unit.length)).slice(0, bytes);
+}
+
+/**
+ * `'git branch '` 를 **단어 경계에 맞춰** 반복한 뒤 tail 을 붙여 정확히 bytes 길이를
+ * 만든다. fill 은 끝에서 단어를 자르므로(`… git bra-D x`) tail 이 옵션으로 읽히지
+ * 않는다 — 남는 길이는 앞쪽 공백으로 채운다.
+ * @param {number} bytes @param {string} tail @returns {string}
+ */
+function manyStartThen(bytes, tail) {
+  const unit = 'git branch ';
+  const body = bytes - tail.length;
+  const k = Math.floor(body / unit.length);
+  return `${' '.repeat(body - k * unit.length)}${unit.repeat(k)}${tail}`;
 }
 
 /**
@@ -1481,6 +1525,18 @@ const SCALED_PAYLOADS = [
   // 양성 대조군 — 런이 유효한 번들(`-dd…df`, `-DD…Dv`)로 끝나면 규칙이 매치한다.
   ['branch delete run (matching)', (n) => `git branch -${'d'.repeat(n - 19)}f topic`],
   ['branch force-delete run (matching)', (n) => `git branch -${'D'.repeat(n - 19)}v topic`],
+  // 2026-09-23 (guard-branch-delete-scanner) — **다중 시작점**. 위 행들은 시작점이
+  // 하나라 정규식 시절에도 이 형을 안 밟았고, 그래서 선행 줄기에서는 의도적으로
+  // 빠져 있었다(넣으면 RED — 교체 전 122,880B 규칙 단독 15,018ms). 스캐너 교체로
+  // 들어온다. 시작점마다 런 상태가 합쳐지는지가 이 행들의 대상이다.
+  //   many-start        `git branch ` 반복 — 플래그 없음, 끝까지 safe.
+  //   many-start -d     시작점마다 삭제 이력만 쌓인다 — force 가 없어 safe.
+  //   many-start -f     반대쪽 이력만 — safe.
+  //   many-start (matching)  같은 반복 끝에 `-D x` — 모든 시작점이 매치 후보다.
+  ['branch many-start', (n) => fill('git branch ', n)],
+  ['branch many-start -d', (n) => fill('git branch -d ', n)],
+  ['branch many-start -f', (n) => fill('git branch -f ', n)],
+  ['branch many-start (matching)', (n) => manyStartThen(n, '-D x')],
   // 2026-09-14 ② — sql-delete-no-where 는 종전에 SCAN_ALLOWLIST 에 있어 정적
   // 스캔 밖이었고 여기에도 payload 가 없었다. 즉 **3층 중 어느 층도 이 규칙을
   // 보지 않았다.** 그 상태에서 옛 식은 2차식이었다. 이제 (i) 스캔 대상이고
@@ -1613,12 +1669,86 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
     ['branch delete run behind -f', (/** @type {number} */ n) => `git branch -f -${'d'.repeat(n - 16)}_`, 'safe'],
     ['branch delete run (matching)', (/** @type {number} */ n) => `git branch -${'d'.repeat(n - 19)}f topic`, 'danger'],
     ['branch force-delete run (matching)', (/** @type {number} */ n) => `git branch -${'D'.repeat(n - 19)}v topic`, 'danger'],
+    // 2026-09-23 다중 시작점(스캐너 교체 뒤 첫 등장). 실패형 셋 + 양성 대조군 하나.
+    ['branch many-start', (/** @type {number} */ n) => fill('git branch ', n), 'safe'],
+    ['branch many-start -d', (/** @type {number} */ n) => fill('git branch -d ', n), 'safe'],
+    ['branch many-start -f', (/** @type {number} */ n) => fill('git branch -f ', n), 'safe'],
+    ['branch many-start (matching)', (/** @type {number} */ n) => manyStartThen(n, '-D x'), 'danger'],
   ])('terminates on a %s at 10K/20K/40K/120K', (_name, build, level) => {
     for (const size of [10_240, 20_480, 40_962, 122_880]) {
       const payload = build(size);
       expect(payload).toHaveLength(size);
       expect(classifyRisk(payload).level).toBe(level);
     }
+  }, 30_000);
+});
+
+/**
+ * 규칙 단독 스윕 대상 — git-branch-delete 의 모든 스케일 형. SCALED_PAYLOADS 에서
+ * 이름으로 골라 형이 두 곳에서 갈라지지 않게 한다. 기대값은 규칙 자체의 판정이다.
+ * @type {[string, (n: number) => string, boolean][]}
+ */
+const BRANCH_SCALED_SHAPES = SCALED_PAYLOADS
+  .filter(([name]) => name.startsWith('branch '))
+  .map(([name, build]) => [name, build, name.endsWith('(matching)')]);
+
+describe('git-branch-delete — 규칙 단독으로도 선형이다 (두 층)', () => {
+  // 완료 기준 2. 위 성장 비율 행은 classifyRisk 전체(L2)를 잰다 — 앞 규칙 26개와
+  // 전처리가 섞인다. 여기는 **규칙 하나**만 잰다: L1 은 BLOCKED_PATTERNS 행의
+  // `.pattern.test`(checkDangerousCommand 가 부르는 바로 그 호출), L2 는
+  // DANGEROUS_PATTERNS 행의 `.test.test`. 두 층이 같은 객체라도 층마다 카탈로그에서
+  // 꺼내 부른다 — 배선이 갈라지면 여기서 드러난다.
+  //
+  // 판정 방식은 파일 규약 그대로다: 성장 비율(6배 구간, 임계 18)과 구조·종료 단언.
+  // 122,880B 벽시계는 단언하지 않는다. 실측표는 lib/core/blocked-patterns.js 의
+  // 스캐너 주석과 tests/helpers/regex-scan.js 헤더 3 이 정본이다.
+  const l1 = BLOCKED_PATTERNS.find((p) => p.label === 'git branch -D (force delete)');
+  const l2 = DANGEROUS_PATTERNS.find((r) => r.id === 'git-branch-delete');
+
+  it('covers the many-start, d-run, D-run and force-run shapes', () => {
+    const names = BRANCH_SCALED_SHAPES.map(([name]) => name);
+    for (const name of ['branch many-start', 'branch delete run (d)', 'branch force-delete run (D)',
+      'branch force run (reachable)', 'branch many-start (matching)']) {
+      expect(names).toContain(name);
+    }
+    expect(BRANCH_SCALED_SHAPES.filter(([, , matches]) => matches).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(BRANCH_SCALED_SHAPES)('%s: rule alone t(122,880) < 18 × t(20,480) on L1 and L2', (_name, build, matches) => {
+    // payload 는 재기 **전에** 만든다 — 시간 창 안에는 규칙 호출만 둔다. 같은 문자열을
+    // 3회 재도 되는 것은 스캐너에 결과 캐시가 없어서다(정규식이면 V8 캐시가 2회차를
+    // 0 으로 만든다 — regex-scan.js 헤더 7).
+    const payloads = new Map([10_240, 20_480, 40_962, 122_880].map((size) => [size, build(size)]));
+    for (const run of [(/** @type {string} */ s) => l1.pattern.test(s), (/** @type {string} */ s) => l2.test.test(s)]) {
+      const p20480 = payloads.get(20_480);
+      const p40962 = payloads.get(40_962);
+      const p122880 = payloads.get(122_880);
+      const t20480 = medianMs(() => run(p20480), 3);
+      const t40962 = medianMs(() => run(p40962), 3);
+      expect(t40962).toBeLessThan(200);
+      const t122880 = medianMs(() => run(p122880), 3);
+      expect(growth(t122880, t20480)).toBeLessThan(18);
+    }
+    // 구조·종료 단언 — 판정이 크기에 따라 흔들리지 않는다.
+    for (const [size, payload] of payloads) {
+      expect(payload).toHaveLength(size);
+      expect(l1.pattern.test(payload)).toBe(matches);
+      expect(l2.test.test(payload)).toBe(matches);
+    }
+  }, 30_000);
+
+  // 122,880B many-start — 교체 전 규칙 단독 15,018ms · classifyRisk 13,143ms 였던
+  // 바로 그 형. 두 층 모두 반환하고, 판정이 기대값이다(L2 는 등급까지).
+  it.each([
+    ['many-start', fill('git branch ', 122_880), false, 'safe'],
+    ['many-start (matching)', manyStartThen(122_880, '-D x'), true, 'danger'],
+  ])('122,880B %s passes on both layers', (_name, payload, matches, level) => {
+    expect(payload).toHaveLength(122_880);
+    expect(l1.pattern.test(payload)).toBe(matches);
+    expect(matchesGitBranchDelete(payload)).toBe(matches);
+    const r = classifyRisk(payload);
+    expect(r.level).toBe(level);
+    if (matches) expect(r.matchedId).toBe('git-branch-delete');
   }, 30_000);
 });
 
@@ -1763,6 +1893,15 @@ describe('flag lookahead — 토큰 교체가 언어를 바꾸지 않는다', ()
 const FROZEN_OLD_BRANCH_DELETE =
   /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-z]*f[a-z]*)(?![\w-])))/;
 
+// 두 번째 동결 사본 (2026-09-23, guard-branch-delete-scanner). 토큰 교체 **후**,
+// 스캐너 교체 **전**의 정규식 — master 5d6de98a 의 L1 `pattern` · L2 `test` 를
+// `git show` 출력에서 바이트 그대로 옮겼다(두 층이 그 시점에 바이트 동일). 위
+// 사본과 정확히 세 토큰만 다르다 — 아래 모양 핀이 그 차이를 치환으로 재구성한다.
+// 현행 규칙은 정규식이 아니라 수기 스캐너라 소스가 없다. 그래서 이 두 사본이
+// 언어의 유일한 기준이고, **수리해서는 안 되는 문자열**이다.
+const FROZEN_SWAPPED_BRANCH_DELETE =
+  /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-CE-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-ce-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-eg-z]*f[a-z]*)(?![\w-])))/;
+
 /** 브랜치 플래그 알파벳. `d`/`D` 대소 비대칭, `f`/`F`(F 는 force 가 아니다),
  * 필수 글자가 아닌 글자 `x`, 그리고 `\w`·`[a-zA-Z]` 경계와 `(?![\w-])` 꼬리를
  * 건드리는 `9`·`_`·`-`.
@@ -1790,50 +1929,202 @@ const BRANCH_TEMPLATES = Object.freeze([
   (t) => `git branch -d ${BACKSLASH}\r\n -${t}`,
 ]);
 
-describe('git-branch-delete — 토큰 교체가 언어를 바꾸지 않는다', () => {
+/** 결정적 PRNG(mulberry32). 시드가 같으면 코퍼스가 바이트 단위로 같다 —
+ * 불일치가 나면 시드와 인덱스로 그 문자열을 그대로 재현할 수 있다.
+ * @param {number} seed @returns {() => number} [0, 1) */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 난수 차분의 조각들. 머리(git·branch 변형) · 구분자(S 의 두 갈래와 그 경계에
+ * 걸리는 것 전부 — `\v` `\f` NBSP U+2028 U+3000 은 `\s` 이고, 홀로 선 `\r`·`\n`·
+ * 백슬래시는 S 가 아니다) · 플래그/인수 · 셸 구분자와 잡음.
+ * @type {Readonly<Record<string, readonly string[]>>} */
+const BRANCH_PIECES = Object.freeze({
+  git: ['git', 'GiT', 'gIT', 'xgit', '_git', 'Git'],
+  branch: ['branch', 'branchx', 'BRANCH'],
+  sep: [' ', ' ', ' ', '\t', '\v', '\f', ' ', ' ', '　', '\r', '\n', '\r\n',
+    `${BACKSLASH}\n`, `${BACKSLASH}\r\n`, BACKSLASH, '  '],
+  token: ['-D', '-d', '-f', '-F', '-Df', '-df', '-dF', '-fd', '-xDx', '--delete', '--force',
+    '--delete=x', '--', '-', 'topic', 'x', '9', '_', '-D-', '-d_', '-f9', '-dx', '-Dv'],
+  noise: [';', '&', '|', '=', '.', '"', 'topic', 'x', '9', '_', '-', 'git', 'branch', '&&', 'echo'],
+});
+
+/** 조각으로 짧은 명령 하나를 만든다(평균 약 30자, 최대 약 90자). 시작점 1~2개,
+ * 시작점마다 인수 0~4개. 형이 한쪽으로 쏠리면 0-불일치가 공허해지므로 양성
+ * 비율을 아래 it 이 따로 단언한다.
+ * @param {() => number} rnd @returns {string} */
+function genBranchCommand(rnd) {
+  const pick = (/** @type {readonly string[]} */ arr) => arr[Math.floor(rnd() * arr.length)];
+  let s = '';
+  const starts = 1 + Math.floor(rnd() * 2);
+  for (let k = 0; k < starts; k++) {
+    if (rnd() < 0.3) s += pick(BRANCH_PIECES.noise) + pick(BRANCH_PIECES.sep);
+    s += (rnd() < 0.75 ? 'git' : pick(BRANCH_PIECES.git)) + pick(BRANCH_PIECES.sep);
+    s += rnd() < 0.8 ? 'branch' : pick(BRANCH_PIECES.branch);
+    const args = Math.floor(rnd() * 5);
+    for (let i = 0; i < args; i++) {
+      s += rnd() < 0.85 ? pick(BRANCH_PIECES.sep) : pick(BRANCH_PIECES.noise);
+      s += rnd() < 0.8 ? pick(BRANCH_PIECES.token) : pick(BRANCH_PIECES.noise);
+    }
+  }
+  return s;
+}
+
+const BRANCH_RANDOM_SEED = 20_260_923;
+const BRANCH_RANDOM_N = 200_000;
+
+/**
+ * 동결 사본의 판정을 한 번만 계산해 둔다 — 두 층 · 변이 전부가 같은 기준을 읽는다.
+ * 계산은 첫 호출 때(describe 수집 시점이 아니라 it 안에서) 일어난다.
+ * @returns {{ enumerated: string[], random: string[], oldEnum: Uint8Array,
+ *   swappedEnum: Uint8Array, oldRandom: Uint8Array, swappedRandom: Uint8Array }}
+ */
+const branchReference = (() => {
+  /** @type {ReturnType<typeof build> | null} */
+  let cached = null;
+  function build() {
+    /** @type {string[]} */
+    const tokens = [''];
+    let frontier = [''];
+    for (let len = 1; len <= 5; len++) {
+      const next = frontier.flatMap((t) => BRANCH_FLAG_ALPHABET.map((c) => t + c));
+      tokens.push(...next);
+      frontier = next;
+    }
+    const enumerated = tokens.flatMap((t) => BRANCH_TEMPLATES.map((b) => b(t)));
+    const rnd = mulberry32(BRANCH_RANDOM_SEED);
+    const random = Array.from({ length: BRANCH_RANDOM_N }, () => genBranchCommand(rnd));
+    const judge = (/** @type {RegExp} */ re, /** @type {string[]} */ list) =>
+      Uint8Array.from(list, (s) => (re.test(s) ? 1 : 0));
+    return {
+      enumerated, random,
+      oldEnum: judge(FROZEN_OLD_BRANCH_DELETE, enumerated),
+      swappedEnum: judge(FROZEN_SWAPPED_BRANCH_DELETE, enumerated),
+      oldRandom: judge(FROZEN_OLD_BRANCH_DELETE, random),
+      swappedRandom: judge(FROZEN_SWAPPED_BRANCH_DELETE, random),
+    };
+  }
+  return () => (cached ??= build());
+})();
+
+/**
+ * `judge` 가 기준 배열과 다르게 답한 문자열 수와 앞의 몇 개.
+ * @param {(s: string) => boolean} judge @param {string[]} list @param {Uint8Array} expected
+ * @returns {{ count: number, first: string[] }}
+ */
+function countBranchMismatches(judge, list, expected) {
+  let count = 0;
+  /** @type {string[]} */
+  const first = [];
+  for (let i = 0; i < list.length; i++) {
+    if (judge(list[i]) !== (expected[i] === 1)) {
+      count += 1;
+      if (first.length < 5) first.push(list[i]);
+    }
+  }
+  return { count, first };
+}
+
+/**
+ * `judge` 가 기준 배열과 다르게 답한 **첫** 문자열, 없으면 null. 변이 대조 전용 —
+ * 변이는 불일치가 "있다"만 보이면 되므로 첫 건에서 멈춘다. 0 을 증명해야 하는
+ * 양성 대조는 이것이 아니라 {@link countBranchMismatches} 로 전량을 훑는다.
+ * @param {(s: string) => boolean} judge @param {string[]} list @param {Uint8Array} expected
+ * @returns {string | null}
+ */
+function findBranchMismatch(judge, list, expected) {
+  for (let i = 0; i < list.length; i++) {
+    if (judge(list[i]) !== (expected[i] === 1)) return list[i];
+  }
+  return null;
+}
+
+describe('git-branch-delete — 스캐너가 정규식 언어를 그대로 받는다', () => {
+  // 2026-09-23 (guard-branch-delete-scanner, 오너 결정): 정규식 → 수기 선형 스캐너.
+  // 언어는 한 글자도 움직이지 않아야 한다. 기준은 위 동결 사본 둘이다 — 현행
+  // 규칙에는 소스가 없으므로 소스 모양 핀은 사본 쪽에만 남는다.
   const l2 = DANGEROUS_PATTERNS.find((r) => r.id === 'git-branch-delete');
   const l1 = BLOCKED_PATTERNS.find((p) => p.label === 'git branch -D (force delete)');
 
-  /** @type {string[]} */
-  const tokens = [''];
-  let frontier = [''];
-  for (let len = 1; len <= 5; len++) {
-    const next = frontier.flatMap((t) => BRANCH_FLAG_ALPHABET.map((c) => t + c));
-    tokens.push(...next);
-    frontier = next;
-  }
-
   it('enumerates 37,449 tokens x 14 templates = 524,286 commands per layer', () => {
-    expect(tokens).toHaveLength(37_449);
-    expect(tokens.length * BRANCH_TEMPLATES.length).toBe(524_286);
-  });
+    const { enumerated } = branchReference();
+    expect(enumerated).toHaveLength(524_286);
+    // 케이스 수이지 서로 다른 문자열 수가 아니다 — 템플릿 `-d -${'t'}`·`-f -${'t'}` 와
+    // `-${'t'} -d`·`-${'t'} -f` 가 t ∈ {d, f} 에서 네 번 겹친다(`-d -d` `-d -f` `-f -d` `-f -f`).
+    expect(new Set(enumerated).size).toBe(524_282);
+  }, 30_000);
 
-  // 드리프트 게이트. 포크밤 핀과 같은 이유 — 두 층이 같은 판정을 한다는 것이
-  // 이 규칙의 값이고, 바이트가 갈라지면 아래 차분도 한쪽만 증명하게 된다.
-  it('keeps the L2 and L1 sources byte-identical', () => {
+  // 드리프트 게이트. 바이트 동일 핀의 후계 — 이제 두 층은 **같은 객체**다.
+  // 복사본 둘이면 한쪽만 고쳐지는 길이 다시 열린다.
+  it('shares one scanner object between L2 and L1', () => {
     expect(l2).toBeDefined();
     expect(l1).toBeDefined();
-    expect(l2.test.source).toBe(l1.pattern.source);
-    expect(l2.test.flags).toBe(l1.pattern.flags);
+    expect(l2.test).toBe(l1.pattern);
+    expect(l2.test).toBe(GIT_BRANCH_DELETE_MATCHER);
+    expect(GIT_BRANCH_DELETE_MATCHER.kind).toBe('linear-scanner');
+    expect(GIT_BRANCH_DELETE_MATCHER.id).toBe('git-branch-delete');
+    expect(Object.isFrozen(GIT_BRANCH_DELETE_MATCHER)).toBe(true);
+    expect(GIT_BRANCH_DELETE_MATCHER).not.toBeInstanceOf(RegExp);
+    expect('source' in GIT_BRANCH_DELETE_MATCHER).toBe(false);
+    expect('flags' in GIT_BRANCH_DELETE_MATCHER).toBe(false);
   });
+
+  // 선행 줄기가 증명한 것(두 사본 = 같은 언어)을 이 코퍼스에서 다시 본다. 이것이
+  // 깨지면 아래 "두 사본 대비 0" 은 둘 중 하나에 대해서만 참일 수 있다.
+  it('the two frozen copies agree on every enumerated and random command', () => {
+    const ref = branchReference();
+    expect(ref.oldEnum).toEqual(ref.swappedEnum);
+    expect(ref.oldRandom).toEqual(ref.swappedRandom);
+  }, 60_000);
 
   it.each([
     ['L2 git-branch-delete', () => l2.test],
     ['L1 git branch -D (force delete)', () => l1.pattern],
-  ])('%s: frozen old rule and current rule agree on every command', (_name, current) => {
-    const currentRe = current();
-    /** @type {string[]} */
-    const mismatches = [];
-    for (const token of tokens) {
-      for (const build of BRANCH_TEMPLATES) {
-        const s = build(token);
-        if (FROZEN_OLD_BRANCH_DELETE.test(s) !== currentRe.test(s)) mismatches.push(s);
-      }
-    }
-    expect(mismatches).toEqual([]);
-  }, 30_000);
+  ])('%s: agrees with both frozen copies on all 524,286 enumerated commands', (_name, current) => {
+    const ref = branchReference();
+    const matcher = current();
+    const judge = (/** @type {string} */ s) => matcher.test(s);
+    expect(countBranchMismatches(judge, ref.enumerated, ref.oldEnum)).toEqual({ count: 0, first: [] });
+    expect(countBranchMismatches(judge, ref.enumerated, ref.swappedEnum)).toEqual({ count: 0, first: [] });
+  }, 60_000);
 
-  // 양성·음성 대조군 — 위 0-불일치가 "둘 다 아무것도 안 맞아서"가 아님을 보인다.
+  it.each([
+    ['L2 git-branch-delete', () => l2.test],
+    ['L1 git branch -D (force delete)', () => l1.pattern],
+  ])(`%s: agrees with the swapped copy on ${BRANCH_RANDOM_N} random commands (seed ${BRANCH_RANDOM_SEED})`, (_name, current) => {
+    const ref = branchReference();
+    const matcher = current();
+    const judge = (/** @type {string} */ s) => matcher.test(s);
+    expect(countBranchMismatches(judge, ref.random, ref.swappedRandom)).toEqual({ count: 0, first: [] });
+  }, 60_000);
+
+  // 0-불일치가 공허하지 않다는 증거. 생성기가 거의 전부 음성(또는 양성)을 내면
+  // 어떤 스캐너든 통과한다. 실측 2026-09-23: 열거 39,446 / 524,286 양성(7.5%),
+  // 난수 28,334 / 200,000 양성(14.2%).
+  it('draws a corpus with a real share of both verdicts', () => {
+    const ref = branchReference();
+    const share = (/** @type {Uint8Array} */ v) => v.reduce((n, x) => n + x, 0) / v.length;
+    for (const v of [ref.swappedEnum, ref.swappedRandom]) {
+      expect(share(v)).toBeGreaterThanOrEqual(0.05);
+      expect(share(v)).toBeLessThanOrEqual(0.95);
+    }
+    // 판정을 가르는 갈래마다 양성이 실제로 섞여 있는지(줄 연속 · --delete · 비-ASCII 공백).
+    const positives = ref.random.filter((_s, i) => ref.swappedRandom[i] === 1);
+    expect(positives.some((s) => s.includes(`${BACKSLASH}\r\n`))).toBe(true);
+    expect(positives.some((s) => s.includes('--delete') && !s.includes('-D'))).toBe(true);
+    expect(positives.some((s) => s.includes('　'))).toBe(true);
+  }, 60_000);
+
+  // 양성·음성 대조군 — 두 층의 matcher, classifyRisk 등급, 동결 사본 둘이 모두 같은 답.
+  // 앞 일곱은 선행 줄기 행 그대로, 뒤 셋은 이 줄기가 더한 런 경계 행이다.
   it.each([
     ['git branch -D topic', true],
     ['git branch -d topic', false],
@@ -1842,25 +2133,145 @@ describe('git-branch-delete — 토큰 교체가 언어를 바꾸지 않는다',
     ['git branch -d topic -f', true],
     ['git branch -dF topic', false],
     ['git branch -xDx topic', true],
-  ])('grades %j as %s on both layers and on the frozen copy', (command, expected) => {
+    ['git branch -d x; git branch -f y', false],
+    ['git branch -d old\necho -f done', false],
+    ['git branch -D x; echo ok', true],
+  ])('grades %j as %s on both layers and on both frozen copies', (command, expected) => {
     expect(l2.test.test(command)).toBe(expected);
     expect(l1.pattern.test(command)).toBe(expected);
+    expect(matchesGitBranchDelete(command)).toBe(expected);
     expect(FROZEN_OLD_BRANCH_DELETE.test(command)).toBe(expected);
+    expect(FROZEN_SWAPPED_BRANCH_DELETE.test(command)).toBe(expected);
+    expect(classifyRisk(command).level).toBe(expected ? 'danger' : 'safe');
   });
 
-  // 동결 사본이 진짜 옛 모양인지, 현행이 새 모양인지. 앞의 것이 없으면 누군가
-  // 사본을 새 값으로 "고쳐" 차분을 자기 비교로 만들 수 있다. 뒤의 것은 정적 스캐너가
-  // 구조적으로 못 보는 긍정 클래스 런(regex-scan.js 헤더 1-b)을 소스 모양으로 잠근다.
-  it('keeps the frozen copy on the OLD tokens and the current rule on the NEW ones', () => {
+  // 동결 사본이 진짜 옛 모양인지. 이 핀이 없으면 누군가 사본 하나를 다른 쪽 값으로
+  // "고쳐" 차분을 자기 비교로 만들 수 있다. 두 사본의 차이는 정확히 세 토큰이고,
+  // 그 치환을 옛 사본에 적용하면 교체 사본이 바이트 그대로 나와야 한다.
+  it('keeps the frozen copies on the OLD and SWAPPED tokens respectively', () => {
     const oldTokens = ['-[a-zA-Z]*D[a-zA-Z]*', '-[a-z]*d[a-z]*', '-[a-z]*f[a-z]*'];
     const newTokens = ['-[a-zA-CE-Z]*D[a-zA-Z]*', '-[a-ce-z]*d[a-z]*', '-[a-eg-z]*f[a-z]*'];
-    for (const token of oldTokens) {
-      expect(FROZEN_OLD_BRANCH_DELETE.source).toContain(token);
-      expect(l2.test.source).not.toContain(token);
-    }
-    for (const token of newTokens) expect(l2.test.source).toContain(token);
+    let rebuilt = FROZEN_OLD_BRANCH_DELETE.source;
+    oldTokens.forEach((token, i) => {
+      expect(FROZEN_OLD_BRANCH_DELETE.source.split(token)).toHaveLength(2);
+      expect(FROZEN_SWAPPED_BRANCH_DELETE.source).not.toContain(token);
+      expect(FROZEN_SWAPPED_BRANCH_DELETE.source.split(newTokens[i])).toHaveLength(2);
+      expect(FROZEN_OLD_BRANCH_DELETE.source).not.toContain(newTokens[i]);
+      rebuilt = rebuilt.replace(token, newTokens[i]);
+    });
+    expect(rebuilt).toBe(FROZEN_SWAPPED_BRANCH_DELETE.source);
+    expect(FROZEN_OLD_BRANCH_DELETE.source).not.toBe(FROZEN_SWAPPED_BRANCH_DELETE.source);
     expect(FROZEN_OLD_BRANCH_DELETE.flags).toBe('');
-    expect(FROZEN_OLD_BRANCH_DELETE.source).not.toBe(l2.test.source);
+    expect(FROZEN_SWAPPED_BRANCH_DELETE.flags).toBe('');
+  });
+});
+
+/** 스캐너 블록의 마커 줄. blocked-patterns.js 가 이 두 줄 사이에 자급형으로 둔다. */
+const SCANNER_BLOCK_START = '// >>> git-branch-delete scanner';
+const SCANNER_BLOCK_END = '// <<< git-branch-delete scanner';
+
+/**
+ * 의미 변이 목록 — [이름, 찾을 조각, 바꿀 조각]. 조각은 블록 안에서 **정확히 한 번**
+ * 나와야 한다(아래 it 이 단언). 스캐너 코드를 읽고 고른, 그럴듯한 구현 실수들이다.
+ * 동치 변이는 넣지 않는다 — 2026-09-23 실측으로 "시작점 간 이력 병합"
+ * (`gbdApplyFlags` 가 **살아 있는 상태 하나에 모인** 경로들의 delete·force 이력
+ * 비트를 서로 합치는 변이)은 열거·난수 모두 불일치 0 이었다(검수자 재측정 0 /
+ * 300,012). 이유: 두 시작점이 **둘 다 살아 있는 동안** 앞 시작점의 이력은 뒤
+ * 시작점의 이력을 포함한다 — 플래그 위치 q 앞에는 `\s` 단위가 있고 어떤 토큰도
+ * `\s` 를 품지 못하므로, q 를 지나는 모든 경로는 q 에서 SEP 상태다. 그래서
+ * 살아 있는 상태별 OR 병합은 판정을 안 바꾼다. **앞 시작점의 런이 언제나 뒤
+ * 시작점의 런을 포함하는 것은 아니다** — 앞 런은 뒤 머리 전에 죽을 수 있다
+ * (`git branch -d ;git branch -f`, `git branch -d` + 줄바꿈 + `git branch -f`).
+ * 그래서 **죽은 경로까지** 이력을 합치는 변이는 동치가 아니다(검수자 대조군:
+ * 불일치 395건). 동치 변이는 아무것도 증명하지 않으므로 목록에서 뺐다.
+ * @type {readonly [string, string, string][]}
+ */
+const SCANNER_MUTANTS = Object.freeze([
+  ['newline counted as a run separator',
+    'if (space && code !== 10) next[GBD_SEP] |= open;', 'if (space) next[GBD_SEP] |= open;'],
+  ['newline counted as a head separator',
+    'if (code !== 10 && gbdIsSpace(code)) return 1;', 'if (gbdIsSpace(code)) return 1;'],
+  ['no word boundary before git',
+    'if (i > 0 && gbdIsWord(text.charCodeAt(i - 1))) return -1;', ''],
+  ['-D read case-insensitively',
+    'if (upperD) flags |= GBD_UPPER_D;', 'if (upperD || lowerD) flags |= GBD_UPPER_D;'],
+  ['earlier starts dropped at each new head',
+    'if (headEnd !== -1) pendingStart = headEnd;', 'if (headEnd !== -1) { pendingStart = headEnd; cur.fill(0); }'],
+  ['no CRLF continuation inside the run',
+    'if (code === 13) next[GBD_BACKSLASH_CR] |= cur[GBD_BACKSLASH];', ''],
+  ['uppercase letters allowed in a delete bundle',
+    'if (allLower && lowerD) flags |= GBD_DELETE;', 'if (lowerD) flags |= GBD_DELETE;'],
+  ['a dash allowed right after a flag',
+    'return !gbdIsWord(code) && code !== 45;', 'return !gbdIsWord(code);'],
+  ['semicolon read as a token character',
+    'const tokenChar = !space && code !== 59 && code !== 38 && code !== 124;',
+    'const tokenChar = !space && code !== 38 && code !== 124;'],
+]);
+
+/** blocked-patterns.js 에서 스캐너 블록을 떼어 낸다(CRLF → LF). */
+function readScannerBlock() {
+  const path = fileURLToPath(new URL('../../lib/core/blocked-patterns.js', import.meta.url));
+  const text = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+  expect(text.split(SCANNER_BLOCK_START)).toHaveLength(2);
+  expect(text.split(SCANNER_BLOCK_END)).toHaveLength(2);
+  const start = text.indexOf(SCANNER_BLOCK_START);
+  const end = text.indexOf(SCANNER_BLOCK_END) + SCANNER_BLOCK_END.length;
+  expect(start).toBeLessThan(end);
+  return text.slice(start, end);
+}
+
+let mutantFileSeq = 0;
+
+/**
+ * 코드를 임시 .mjs 로 써서 import 하고 곧바로 지운다. 파일명은 pid·시각·순번으로
+ * 유일하다 — 모듈 캐시가 이전 변이를 돌려주지 않도록.
+ * @param {string} code @returns {Promise<{ matchesGitBranchDelete: (s: string) => boolean }>}
+ */
+async function importScannerBlock(code) {
+  mutantFileSeq += 1;
+  const file = join(tmpdir(), `artibot-gbd-mutant-${process.pid}-${Date.now()}-${mutantFileSeq}.mjs`);
+  writeFileSync(file, code);
+  try {
+    return await import(/* @vite-ignore */ pathToFileURL(file).href);
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
+
+describe('git-branch-delete — 변이 대조: 떼어 낸 스캐너에 버그를 넣으면 차분이 잡는다', () => {
+  // 완료 기준 1 "변이 대조". 위 0-불일치가 "차분이 아무것도 못 봐서"가 아님을
+  // 실행형으로 보인다. 블록은 **파일 텍스트에서** 떼어 오므로 스캐너가 바뀌면 변이도
+  // 새 코드에 적용된다 — 조각이 더는 맞지 않으면 '정확히 한 번' 단언이 RED 로 알린다.
+  // 이 게이트가 못 보는 것: 목록 밖의 변이. 변이 9종은 표본이지 증명이 아니다.
+  it('the extracted block is self-contained and matches the live scanner (positive control)', async () => {
+    const block = readScannerBlock();
+    expect(block).toContain('export function matchesGitBranchDelete');
+    expect(block).not.toMatch(/^\s*import\s/m);
+    const mod = await importScannerBlock(block);
+    const ref = branchReference();
+    expect(countBranchMismatches(mod.matchesGitBranchDelete, ref.enumerated, ref.swappedEnum))
+      .toEqual({ count: 0, first: [] });
+    expect(countBranchMismatches(mod.matchesGitBranchDelete, ref.random, ref.swappedRandom))
+      .toEqual({ count: 0, first: [] });
+  }, 60_000);
+
+  it.each(SCANNER_MUTANTS)('mutant %j disagrees with the frozen copy', async (_name, from, to) => {
+    const block = readScannerBlock();
+    expect(block.split(from)).toHaveLength(2);
+    const mod = await importScannerBlock(block.replace(from, to));
+    const ref = branchReference();
+    // 첫 불일치에서 멈춘다. 난수 코퍼스를 먼저 본다 — 변이 9종 전부가 난수에서
+    // 불일치를 냈고(열거 0 인 변이 셋 포함), 열거는 그다음 안전망이다.
+    const witness = findBranchMismatch(mod.matchesGitBranchDelete, ref.random, ref.swappedRandom)
+      ?? findBranchMismatch(mod.matchesGitBranchDelete, ref.enumerated, ref.swappedEnum);
+    expect(witness).not.toBeNull();
+    // 증인을 동결 사본에 직접 다시 묻는다 — 캐시 배열의 인덱스 착오가 아님을 본다.
+    expect(mod.matchesGitBranchDelete(witness)).not.toBe(FROZEN_SWAPPED_BRANCH_DELETE.test(witness));
+  }, 60_000);
+
+  it('runs at least five mutants', () => {
+    expect(SCANNER_MUTANTS.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(SCANNER_MUTANTS.map(([name]) => name)).size).toBe(SCANNER_MUTANTS.length);
   });
 });
 
@@ -1914,6 +2325,18 @@ function hasBoundedWindow(source) {
   return /\[\^(?:\\.|[^\]\\])*\]\{\d+,\d+\}/.test(source);
 }
 
+/**
+ * L2 규칙이 창을 가졌는가. 소스는 scanTargetOf 로만 고른다 — `r.test.source` 를
+ * 곧장 읽으면 소스 없는 matcher 가 `undefined` → 문자열 "undefined" → false 로
+ * **조용히** 창 없음이 된다(2026-09-23 스캐너 교체 때 실제로 그랬을 경로).
+ * 스캐너 행은 창이 없다(수기 루프, 정규식 창 개념 밖) — 등록된 행만 false 다.
+ * @param {{ id: string, test: unknown }} rule @returns {boolean}
+ */
+function ruleHasBoundedWindow(rule) {
+  const target = scanTargetOf('L2', rule.id, rule.test);
+  return target !== null && hasBoundedWindow(target.source);
+}
+
 describe('ReDoS 창 게이트 — 창을 가진 L2 규칙은 전부 경계 쌍을 갖는다', () => {
   // 세 장치가 **한 게이트**이고 역할이 겹치지 않는다:
   //   정적 스캔  = 상한 허가 (192 초과는 등록된 규칙만)
@@ -1932,7 +2355,7 @@ describe('ReDoS 창 게이트 — 창을 가진 L2 규칙은 전부 경계 쌍�
   // (2026-09-11 기준 A 가 넣는 중 — 이 파일은 L2 만 책임진다).
   it('windowed rule ids === boundary pair ids', () => {
     const windowed = DANGEROUS_PATTERNS
-      .filter((r) => hasBoundedWindow(r.test.source))
+      .filter(ruleHasBoundedWindow)
       .map((r) => r.id)
       .sort();
     expect(windowed).toEqual([...BOUNDARY_PAIR_IDS].sort());
@@ -1943,7 +2366,7 @@ describe('ReDoS 창 게이트 — 창을 가진 L2 규칙은 전부 경계 쌍�
     // 6 -> 7 (2026-09-14): sql-delete-no-where 의 lookahead 가 `.*` 에서
     // `[^;]{0,192}` 로 바뀌면서 창을 **얻었다**. 창을 얻은 규칙은 경계 쌍을
     // 갖는다는 것이 이 게이트의 전부이고, 실제로 그 경로로 걸렸다.
-    const windowed = DANGEROUS_PATTERNS.filter((r) => hasBoundedWindow(r.test.source));
+    const windowed = DANGEROUS_PATTERNS.filter(ruleHasBoundedWindow);
     expect(windowed).toHaveLength(7);
     expect(BOUNDARY_PAIR_IDS).toHaveLength(7);
   });
