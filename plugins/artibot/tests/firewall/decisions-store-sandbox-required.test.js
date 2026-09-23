@@ -73,6 +73,24 @@
  * deliberately. There is no denylist — a list of bad patterns fails open for
  * every future variant.
  *
+ * THE ENV SEAM (2026-09-23) IS NOT A MECHANISM HERE. `tests/setup/state-dir.js`
+ * mints `ARTIBOT_DECISIONS_STORE_DIR` and its pair
+ * `ARTIBOT_DECISIONS_STORE_DIR_ROOT` for every test worker, and the resolver
+ * honors them only when `storeDir`, `projectRoot` and `cwd` are all absent (no
+ * usable value). What that covers: a writer called with no store option, or
+ * with `{ cwd: null }` — the hook's shape when its payload has no cwd. What it
+ * does NOT cover: any call carrying a usable key, above all `{ cwd:
+ * process.cwd() }`, which still resolves to the live store; and a spawned
+ * child whose fallback resolves to a different project root than the pair
+ * records, which drops the override by design
+ * (`lib/observability/decision-events.js#sandboxedFallbackStoreDir`).
+ * Registering the seam in `MECHANISMS` would clear EVERY file, since setup sets
+ * it for every file — a mechanism that is always present is a gate that is
+ * always green. So the allowlist is unchanged, a file that relies on the seam
+ * alone is still red here (pinned below), and the only new pin is that the
+ * setup block exists. The seam's behavior is asserted by calling the resolver
+ * in `tests/firewall/decision-store-opts-allowlist.test.js`.
+ *
  * D9 (2026-09-05) ADDED TWO WRITERS. The decision trail froze and its unique
  * writers moved here: `recordSelfControlDecision` (the four `scripts/cron/`
  * runners) and `recordSkillLevelChanged` (bound by the hook and handed to
@@ -115,11 +133,13 @@
  *   - **Non-test writers.** Scripts, benchmarks and `tests/**\/*.bench.js` are
  *     out of scope; only `*.test.js` under `tests/` is scanned.
  *   - **A valid key with a live value.** `cwd-sandboxed` passes on marker
- *     presence; `tests/hooks/runtime-prompt-command-wiring.test.js` passes
- *     `cwd: null`, which the resolver reads as "no cwd" and anchors on the
- *     process cwd — the live store held `sess-cmd-e` / `sess-cmd-g` files from
- *     it on 2026-09-17. Known, out of scope for the resolver allowlist
- *     (leader decision decision-store-1); a remaining hole, not a covered one.
+ *     presence, not on the value the key carries. The measured instance —
+ *     `tests/hooks/runtime-prompt-command-wiring.test.js` passing `cwd: null`,
+ *     which left `sess-cmd-e` / `sess-cmd-g` in the live store on 2026-09-17
+ *     and again on 2026-09-23 — is now caught by the ENV SEAM above, because
+ *     `null` is no usable value. A key WITH a live value (`cwd: process.cwd()`,
+ *     or a `cwd` that happens to sit inside the repo) is not caught by the seam
+ *     nor by this scan: a remaining hole, not a covered one.
  *   - **Sibling stores.** `lib/autopilot/telemetry.js` and
  *     `lib/observability/split-telemetry.js` anchor their OWN stores under
  *     `<pluginRoot>/runtime/`. They are in the ratchet only because they import
@@ -134,6 +154,23 @@ import { fileURLToPath } from 'node:url';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TESTS_DIR = path.join(PLUGIN_ROOT, 'tests');
+const SETUP_FILE = path.join(TESTS_DIR, 'setup', 'state-dir.js');
+
+/**
+ * True when `src` assigns BOTH seam variables in live code.
+ *
+ * Line-anchored on purpose: a `//` or ` * ` prefix cannot satisfy `^\s*process`,
+ * so a commented-out block reads as absent, which is what it is. `(?!_)` keeps
+ * the pair's line from satisfying the override's assertion, and `=(?!=)` keeps
+ * a line-leading `==` / `===` comparison from reading as an assignment.
+ *
+ * @param {string} src - Setup file contents.
+ * @returns {boolean}
+ */
+function setupMintsDecisionsSeam(src) {
+  return /^\s*process\.env\.ARTIBOT_DECISIONS_STORE_DIR(?!_)\s*=(?!=)/m.test(src)
+    && /^\s*process\.env\.ARTIBOT_DECISIONS_STORE_DIR_ROOT\s*=(?!=)/m.test(src);
+}
 
 /**
  * Modules referencing `appendRunEvent` or `getDecisionStoreDir`. A ratchet, not
@@ -413,6 +450,31 @@ describe('tests reaching a decisions-store writer must isolate the store', () =>
   });
 });
 
+describe('the all-absent fallback is sandboxed by global setup, not by MECHANISMS', () => {
+  it('tests/setup/state-dir.js mints both seam variables', () => {
+    // Setup runs for every worker, so this one source line is the whole
+    // seam; a refactor that drops it must go red somewhere. The live half —
+    // this worker actually carries the pair and the resolver honors it — is
+    // in decision-store-opts-allowlist.test.js.
+    expect(setupMintsDecisionsSeam(fsSync.readFileSync(SETUP_FILE, 'utf-8'))).toBe(true);
+  });
+
+  it('no allowlisted mechanism is satisfied by the seam alone', () => {
+    // The design decision, pinned: a file relying on the seam and nothing else
+    // still has to isolate the store here, because the seam cannot see a call
+    // that carries a usable key.
+    const seamOnly = [
+      "import { recordRoutingDecision } from '../../lib/observability/decision-events.js';",
+      "process.env.ARTIBOT_DECISIONS_STORE_DIR = path.join(os.tmpdir(), 'x');",
+      "process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT = 'root';",
+      "it('x', () => { recordRoutingDecision('run-1', {}, { cwd: process.cwd() }); });",
+    ].join('\n');
+    expect(reachesWriter(seamOnly)).toBe('tier1:recordRoutingDecision');
+    expect(mechanismsIn(seamOnly)).toEqual([]);
+    expect(MECHANISMS.map((m) => m.id).filter((id) => /seam|env/i.test(id))).toEqual([]);
+  });
+});
+
 describe('scanner self-verification (positive controls)', () => {
   // Without these the gate could pass because its matchers are broken rather
   // than because the repo is clean. Each control is a source string, so nothing
@@ -568,6 +630,27 @@ describe('scanner self-verification (positive controls)', () => {
     for (const [id, snippet] of Object.entries(samples)) {
       expect(mechanismsIn(writer + snippet)).toContain(id);
     }
+  });
+
+  it('setupMintsDecisionsSeam goes red when the setup block is missing, partial or commented out', () => {
+    const override = 'if (!process.env.ARTIBOT_DECISIONS_STORE_DIR) {\n'
+      + '  process.env.ARTIBOT_DECISIONS_STORE_DIR = OWN_DECISIONS_STORE_DIR;\n}';
+    const pair = 'process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT = process.cwd();';
+    // Positive: the shape the setup file uses.
+    expect(setupMintsDecisionsSeam(`${override}\n${pair}\n`)).toBe(true);
+    // Negative: each way the block can disappear.
+    expect(setupMintsDecisionsSeam('process.env.ARTIBOT_STATE_DIR = x;\n')).toBe(false);
+    expect(setupMintsDecisionsSeam(`${override}\n`)).toBe(false);
+    expect(setupMintsDecisionsSeam(`${pair}\n`)).toBe(false);
+    expect(setupMintsDecisionsSeam(`// ${override.replace(/\n/g, '\n// ')}\n// ${pair}\n`)).toBe(false);
+    expect(setupMintsDecisionsSeam(` * process.env.ARTIBOT_DECISIONS_STORE_DIR = x;\n * ${pair}\n`)).toBe(false);
+    // Only a READ of the override, as in the `if` guard, is not an assignment.
+    expect(setupMintsDecisionsSeam(`if (!process.env.ARTIBOT_DECISIONS_STORE_DIR) {}\n${pair}\n`)).toBe(false);
+    // Nor is a line-leading comparison, on either variable.
+    const cmpOverride = '  process.env.ARTIBOT_DECISIONS_STORE_DIR === OWN_DECISIONS_STORE_DIR;';
+    const cmpPair = '  process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT == process.cwd();';
+    expect(setupMintsDecisionsSeam(`${cmpOverride}\n${pair}\n`)).toBe(false);
+    expect(setupMintsDecisionsSeam(`${override}\n${cmpPair}\n`)).toBe(false);
   });
 
   it('does not accept a bare temp cwd without a planted .git marker', () => {

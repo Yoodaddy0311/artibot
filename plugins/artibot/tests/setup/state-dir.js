@@ -128,10 +128,50 @@
  *     instead of calling `getStoreDir()` is invisible to this seam. That is a
  *     ratchet in `tests/firewall/autopilot-store-sandbox-required.test.js`,
  *     not something this file can see.
- *   - **Sibling stores.** `~/.artibot/queues`, `~/.artibot/failure-memory` and
- *     `.artibot/runtime/decisions` anchor elsewhere and are out of scope.
+ *   - **Sibling stores.** `~/.artibot/queues` and `~/.artibot/failure-memory`
+ *     anchor elsewhere and are out of scope. The decision store has its own
+ *     block, described next.
  *   - **A worker killed mid-file.** `afterAll` does not run either, so that
  *     worker's directory survives — one per killed worker, not one per run.
+ *
+ * ---------------------------------------------------------------------------
+ * THE DECISION STORE is the third, on the same terms again.
+ *
+ * It is `<projectRoot>/.artibot/runtime/decisions`, resolved by
+ * `lib/observability/decision-events.js#getDecisionStoreDir`. Measured
+ * 2026-09-23: `tests/hooks/runtime-prompt-command-wiring.test.js` drives the
+ * real hook with a payload that has no `cwd` (cases e and g), the resolver fell
+ * back to `resolveProjectRoot(undefined)` = this repository, and the run left
+ * two 2,643 B event files in the repository's real store.
+ *
+ * `ARTIBOT_DECISIONS_STORE_DIR` is honored ONLY in that fallback branch — when
+ * the caller passed none of `storeDir`, `projectRoot`, `cwd`. The pair
+ * `ARTIBOT_DECISIONS_STORE_DIR_ROOT` records this worker's raw `process.cwd()`;
+ * the resolver maps it to a project root itself and drops the override once
+ * the fallback resolves to any other root, so a child spawned into another
+ * repository keeps its own store rather than inheriting this worker's sandbox.
+ *
+ * THIS FILE MUST NOT IMPORT FROM `lib/git/`. It is a setup file: whatever it
+ * imports is evaluated and cached in every test file's module graph BEFORE
+ * that file's `vi.mock` calls can apply. Importing `lib/git/project-root.js`
+ * here to pre-resolve the stamp did exactly that — measured 2026-09-23,
+ * `tests/git/repo-root-cache.test.js` (mocks `node:child_process`) and
+ * `tests/git/project-root-fastpath.test.js` (mocks `repo-root-cache.js`) went
+ * 8 of 11 red, because the modules they mock were already loaded unmocked.
+ * The same hazard holds for any module a test might `vi.mock`, so keep this
+ * file's imports to what it already has. Pinned by
+ * `tests/observability/decision-events.test.js` ("setup imports nothing from
+ * lib/git/").
+ *
+ * WHAT THIS DOES NOT COVER:
+ *   - **A valid key with a live value.** A test that passes
+ *     `{ cwd: process.cwd() }` or `{ projectRoot: <this repo> }` names the real
+ *     store explicitly, and an explicit location is honored. That is why the
+ *     firewall scan over recorder call sites is still required.
+ *   - **A test that deletes or repoints the override without restoring it**,
+ *     for the rest of that file — the same bound as the autopilot store.
+ *   - **Hardcoded paths** that join `.artibot/runtime/decisions` themselves.
+ *   - **A worker killed mid-file** — its directory survives, as above.
  */
 
 import { afterAll } from 'vitest';
@@ -244,3 +284,32 @@ afterAll(() => {
 // a stale one it is a correction. The suite runs out of this root, so this is
 // the root any override in force at startup belongs to.
 process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT = getPluginRoot();
+
+// Same per-worker keying, same not-created-here rule: the decision recorders
+// append through `lib/observability/run-events.js`, which makes its own parents.
+// Computed outside the block for the reason the two constants above give.
+const OWN_DECISIONS_STORE_DIR = path.join(os.tmpdir(), `artibot-test-decisions-store-${process.pid}`);
+
+if (!process.env.ARTIBOT_DECISIONS_STORE_DIR) {
+  process.env.ARTIBOT_DECISIONS_STORE_DIR = OWN_DECISIONS_STORE_DIR;
+}
+
+// Registered for every test file and strict-equality guarded, exactly like the
+// autopilot remover: only the directory THIS worker minted is ever removed.
+afterAll(() => {
+  if (process.env.ARTIBOT_DECISIONS_STORE_DIR !== OWN_DECISIONS_STORE_DIR) return;
+  try {
+    fsSync.rmSync(OWN_DECISIONS_STORE_DIR, { recursive: true, force: true });
+  } catch { /* best effort — a locked worktree handle must not fail the suite */ }
+});
+
+// Records the directory the no-location fallback starts from in this worker.
+// RAW `process.cwd()`, not a resolved project root: resolving here would need
+// `lib/git/project-root.js`, which this file must not import (see the header).
+// `getDecisionStoreDir()` resolves the stamp itself, through the same function
+// its fallback uses, and honors the override only while the two roots match.
+//
+// Stamped unconditionally, for the reason given above the `_HOME` line: an
+// operator who exports only `ARTIBOT_DECISIONS_STORE_DIR` would otherwise have
+// the redirect silently discarded and the writes back in the real store.
+process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT = process.cwd();

@@ -47,7 +47,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync,
 } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -55,6 +55,7 @@ import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 import { ledgerFilePath, readAllEvents } from '../../lib/runtime/ledger.js';
 import { validateEventContract } from '../../lib/runtime/event-writer.js';
 import { CARRIERS, foldFiredCounts } from '../../lib/replay/existence-audit.js';
+import { getDecisionEventsPath } from '../../lib/observability/decision-events.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REAL_CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
@@ -144,6 +145,45 @@ function rows(event) {
   return event ? all.filter((e) => e.event === event) : all;
 }
 
+/**
+ * Bytes of `runId`'s decision-event file in two places: the REAL store, named
+ * explicitly through `cwd: process.cwd()` (an explicit location the env seam
+ * never moves), and wherever the no-location fallback resolves right now.
+ *
+ * A cwd-less payload still reaches the decision recorders — the ledger write
+ * fails closed on it, they do not. Measured 2026-09-23: cases e and g each left
+ * a 2,643 B file in this repository's real store before
+ * `ARTIBOT_DECISIONS_STORE_DIR` was stamped by `tests/setup/state-dir.js`.
+ *
+ * @param {string} runId
+ * @returns {{ real: number, fallback: number }} 0 for an absent file
+ */
+function decisionBytes(runId) {
+  const size = (p) => (existsSync(p) ? statSync(p).size : 0);
+  return {
+    real: size(getDecisionEventsPath(runId, { cwd: process.cwd() })),
+    fallback: size(getDecisionEventsPath(runId)),
+  };
+}
+
+/**
+ * The cwd-less prompt left the real decision store byte-for-byte as it was,
+ * AND its rows landed in the per-worker sandbox. The second half is the
+ * positive control: without it, "the real store did not grow" would also pass
+ * if the recorders had silently stopped running.
+ *
+ * @param {string} runId
+ * @param {{ real: number, fallback: number }} before - `decisionBytes` taken
+ *   just before the cwd-less submit.
+ */
+function expectDecisionsSandboxed(runId, before) {
+  const after = decisionBytes(runId);
+  expect(after.real).toBe(before.real);
+  const seam = path.resolve(process.env.ARTIBOT_DECISIONS_STORE_DIR);
+  expect(getDecisionEventsPath(runId).startsWith(seam)).toBe(true);
+  expect(after.fallback).toBeGreaterThan(before.fallback);
+}
+
 describe('the command sandbox seam', () => {
   it('carries the linked modules and its own git dir', () => {
     // NEGATIVE CONTROL. Without these, "nothing recorded" and "recorder
@@ -214,6 +254,7 @@ describe('intent.detected carries the user-typed slash command', () => {
   });
 
   it('writes nothing when the payload carries no cwd', async () => {
+    const before = decisionBytes('sess-cmd-e');
     const out = await submit({
       prompt: '/split status', sid: 'sess-cmd-e', pid: 'prompt-cmd-e', cwd: null,
     });
@@ -222,6 +263,9 @@ describe('intent.detected carries the user-typed slash command', () => {
     // whichever repository the host launched the dispatcher from — under vitest
     // that is THIS repository, so the fallback would be a live write.
     expect(rows('intent.detected')).toHaveLength(0);
+    // The decision recorders are not fail-closed on a missing cwd; they fall
+    // back to `process.cwd()`, which is exactly the live write described above.
+    expectDecisionsSandboxed('sess-cmd-e', before);
   });
 
   it('measures the on-disk size of one intent.detected row', async () => {
@@ -257,10 +301,12 @@ describe('the ledger write cannot move the hook output by one byte', () => {
     expect(rows('intent.detected')).toHaveLength(1);
     rmSync(ledgerFilePath(sandboxRoot), { force: true });
 
+    const before = decisionBytes('sess-cmd-g');
     const withoutWrite = await submit({
       prompt: '/split status', sid: 'sess-cmd-g', pid: 'prompt-cmd-g', cwd: null,
     });
     expect(rows('intent.detected')).toHaveLength(0);
+    expectDecisionsSandboxed('sess-cmd-g', before);
 
     // THE TWO CHANNELS THE HOST ACTUALLY READS, compared byte for byte.
     expect(withoutWrite.user_prompt).toBe(withWrite.user_prompt);

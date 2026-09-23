@@ -9,11 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildActivationRecord } from '../../lib/observability/activation-observed.js';
+import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import {
   ACTIVATION_DATA_KEYS,
+  DECISION_STORE_OPTS,
   getDecisionEventsPath,
   getDecisionRecorderStats,
+  getDecisionStoreDir,
   readDecisionEvents,
   recordActivationObserved,
   recordRoutingDecision,
@@ -330,6 +334,225 @@ describe('decision-events — store option allowlist', () => {
     expect(ev.ts).toBe('2026-09-21T00:00:00.000Z');
     expect(getDecisionRecorderStats()).toMatchObject({ recorded: 1, failed: 0 });
     expect(readDecisionEvents('run-opt-2', { storeDir })).toHaveLength(1);
+  });
+});
+
+/**
+ * `ARTIBOT_DECISIONS_STORE_DIR` — the env seam for the ONE branch where the
+ * caller names no location, which otherwise resolves from `process.cwd()` and
+ * writes into this repository's real store.
+ *
+ * Every case saves and restores the pair, because `tests/setup/state-dir.js`
+ * stamps it for this worker and the rest of the file runs under it.
+ *
+ * What these cases cannot see: whether any recorder call site passes a valid
+ * key with a live value (`{ cwd: process.cwd() }`). The resolver honors that by
+ * design; catching it is the firewall scan's job.
+ */
+describe('decision-events — ARTIBOT_DECISIONS_STORE_DIR seam', () => {
+  const ENV_KEYS = ['ARTIBOT_DECISIONS_STORE_DIR', 'ARTIBOT_DECISIONS_STORE_DIR_ROOT'];
+  /** @type {Record<string, string|undefined>} */
+  let saved = {};
+  /** Resolved through the helper, not through the module under test. */
+  let fallbackRoot;
+  let realStore;
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) saved[k] = process.env[k];
+    for (const k of ENV_KEYS) delete process.env[k];
+    fallbackRoot = resolveProjectRoot(undefined);
+    realStore = path.join(fallbackRoot, '.artibot', 'runtime', 'decisions');
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    saved = {};
+  });
+
+  /** Point the seam at `dir`, paired with the root the fallback resolves to. */
+  function armSeam(dir, root = fallbackRoot) {
+    process.env.ARTIBOT_DECISIONS_STORE_DIR = dir;
+    process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT = root;
+  }
+
+  it('is in force for this worker, stamped by the global setup', () => {
+    // Read from the SAVED values: the seam the rest of the suite runs under.
+    // If setup stopped stamping the pair, a location-less call here would be a
+    // live write into the real store.
+    expect(saved.ARTIBOT_DECISIONS_STORE_DIR).toBeTruthy();
+    armSeam(saved.ARTIBOT_DECISIONS_STORE_DIR, saved.ARTIBOT_DECISIONS_STORE_DIR_ROOT);
+    expect(getDecisionStoreDir()).toBe(path.resolve(saved.ARTIBOT_DECISIONS_STORE_DIR));
+    expect(getDecisionStoreDir()).not.toBe(realStore);
+  });
+
+  describe('(a) honored when no location is given and the pair matches', () => {
+    it('replaces the whole store directory for every location-less spelling', () => {
+      armSeam(storeDir);
+      // Absent, empty object, and all three keys present but empty/undefined —
+      // the hook forwards `{ cwd: hookData?.cwd }`, i.e. a present-but-undefined key.
+      for (const opts of [undefined, {}, { cwd: undefined }, { storeDir: '', projectRoot: '', cwd: '' }]) {
+        expect(getDecisionStoreDir(opts)).toBe(path.resolve(storeDir));
+      }
+    });
+
+    it('lands a recorder write in the seam and not in the real store', () => {
+      armSeam(storeDir);
+      const runId = `seam-probe-${process.pid}`;
+      const realFile = path.join(realStore, `${runId}.events.ndjson`);
+      try {
+        expect(recordRoutingDecision(runId, CLASSIFICATION, { cwd: undefined })).not.toBeNull();
+        expect(fsSync.existsSync(path.join(storeDir, `${runId}.events.ndjson`))).toBe(true);
+        expect(fsSync.existsSync(realFile)).toBe(false);
+      } finally {
+        // Only reachable with content when the seam is broken; the name is this
+        // test's own, so removing it cannot touch a real record.
+        fsSync.rmSync(realFile, { force: true });
+      }
+    });
+
+    it('tolerates a trailing separator on the recorded root', () => {
+      armSeam(storeDir, `${fallbackRoot}${path.sep}`);
+      expect(getDecisionStoreDir()).toBe(path.resolve(storeDir));
+    });
+
+    it('returns the override through path.resolve (one separator, absolute)', () => {
+      armSeam(storeDir.split(path.sep).join('/'));
+      expect(getDecisionStoreDir()).toBe(path.resolve(storeDir));
+    });
+  });
+
+  describe('(b) ignored when the pair is missing or mismatched', () => {
+    it('ignores an override with no recorded root', () => {
+      process.env.ARTIBOT_DECISIONS_STORE_DIR = storeDir;
+      expect(getDecisionStoreDir()).toBe(realStore);
+    });
+
+    it('ignores an override minted for a different project root', () => {
+      // The inherited-env case: a child whose fallback resolves elsewhere.
+      armSeam(storeDir, path.join(os.tmpdir(), 'some-other-project-root'));
+      expect(getDecisionStoreDir()).toBe(realStore);
+    });
+
+    it('ignores a recorded root with no override', () => {
+      process.env.ARTIBOT_DECISIONS_STORE_DIR_ROOT = fallbackRoot;
+      expect(getDecisionStoreDir()).toBe(realStore);
+    });
+  });
+
+  describe('(c) a caller that names a location resolves exactly as without the env', () => {
+    it('is path-invariant for storeDir, projectRoot and cwd', () => {
+      const inputs = [
+        { storeDir: path.join(os.tmpdir(), 'explicit-store') },
+        { projectRoot: path.join(os.tmpdir(), 'explicit-root') },
+        { cwd: os.tmpdir() },
+        // The valid-key-with-live-value case the seam deliberately does NOT move.
+        { cwd: process.cwd() },
+        { projectRoot: fallbackRoot },
+      ];
+      const without = inputs.map((o) => getDecisionStoreDir(o));
+      armSeam(storeDir);
+      const withEnv = inputs.map((o) => getDecisionStoreDir(o));
+      expect(withEnv).toEqual(without);
+      // And none of them was captured by the seam.
+      for (const p of withEnv) expect(p).not.toBe(path.resolve(storeDir));
+      expect(getDecisionStoreDir({ cwd: process.cwd() })).toBe(realStore);
+    });
+  });
+
+  describe('(d) the option allowlist is untouched by the env', () => {
+    it('still refuses an unknown key with the seam armed', () => {
+      armSeam(storeDir);
+      expect(getDecisionStoreDir({ sandboxDir: storeDir })).toBeNull();
+      expect(getDecisionStoreDir({ cwd: process.cwd(), storeDirr: storeDir })).toBeNull();
+      expect(getDecisionEventsPath('run-x', { sandboxDir: storeDir })).toBeNull();
+    });
+
+    it('keeps DECISION_STORE_OPTS exactly the three location keys', () => {
+      expect([...DECISION_STORE_OPTS]).toEqual(['storeDir', 'projectRoot', 'cwd']);
+    });
+  });
+});
+
+/**
+ * The setup file that stamps the seam must not import from `lib/git/`.
+ *
+ * A setup file's imports are evaluated and cached in every test file's module
+ * graph before that file's `vi.mock` calls apply. Measured 2026-09-23: when
+ * `tests/setup/state-dir.js` imported `lib/git/project-root.js` to pre-resolve
+ * the `_ROOT` stamp, `tests/git/repo-root-cache.test.js` and
+ * `tests/git/project-root-fastpath.test.js` went 8 of 11 red — the modules they
+ * mock were already loaded for real. The stamp is now a raw `process.cwd()` and
+ * `getDecisionStoreDir` resolves it; this pin keeps it that way.
+ *
+ * A static source scan, so it sees what the file says, not what loads at run
+ * time: a transitive import through another module (for example, if
+ * `lib/core/platform.js` ever imported `lib/git/`) is invisible here. The
+ * direct regression it guards is the one that happened.
+ */
+describe('decision-events — setup imports nothing from lib/git/', () => {
+  const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const SETUP_FILE = path.join(PLUGIN_ROOT, 'tests', 'setup', 'state-dir.js');
+  const LIB_GIT = path.join(PLUGIN_ROOT, 'lib', 'git');
+
+  /**
+   * Module specifiers a source imports: static (incl. side-effect and
+   * multi-line), dynamic `import()`, and `export … from`. Comments are
+   * stripped first so prose about imports is not read as one.
+   *
+   * @param {string} src
+   * @returns {string[]}
+   */
+  function importSpecifiers(src) {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const patterns = [
+      /\bimport\s+(?:[^'"();]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+      /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      /\bexport\s+[^'"();]*?\s+from\s+['"]([^'"]+)['"]/g,
+    ];
+    return patterns.flatMap((re) => [...code.matchAll(re)].map((m) => m[1]));
+  }
+
+  /** Specifiers of `src` (as if it lived at SETUP_FILE) that land in lib/git/. */
+  function gitImports(src) {
+    return importSpecifiers(src).filter((spec) => {
+      if (!spec.startsWith('.')) return false;
+      const rel = path.relative(LIB_GIT, path.resolve(path.dirname(SETUP_FILE), spec));
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    });
+  }
+
+  it('finds the imports the setup file really has (the scanner is not blind)', () => {
+    const specs = importSpecifiers(fsSync.readFileSync(SETUP_FILE, 'utf8'));
+    expect(specs).toContain('../../lib/core/platform.js');
+    expect(specs).toContain('vitest');
+  });
+
+  it('flags every import shape that reaches lib/git/ (negative control)', () => {
+    const synthetic = [
+      "import { resolveProjectRoot } from '../../lib/git/project-root.js';",
+      'import {',
+      '  getRepoRoot,',
+      "} from '../../lib/git/repo-root-cache.js';",
+      "import '../../lib/git/side-effect.js';",
+      "const m = await import('../../lib/git/dynamic.js');",
+      "export { x } from '../../lib/git/reexport.js';",
+      "import path from 'node:path';",
+      "// import { nope } from '../../lib/git/commented.js';",
+    ].join('\n');
+    expect(gitImports(synthetic)).toEqual([
+      '../../lib/git/project-root.js',
+      '../../lib/git/repo-root-cache.js',
+      '../../lib/git/side-effect.js',
+      '../../lib/git/dynamic.js',
+      '../../lib/git/reexport.js',
+    ]);
+  });
+
+  it('tests/setup/state-dir.js imports nothing from lib/git/', () => {
+    expect(gitImports(fsSync.readFileSync(SETUP_FILE, 'utf8'))).toEqual([]);
   });
 });
 
