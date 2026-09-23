@@ -21,6 +21,7 @@
  */
 
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -150,7 +151,10 @@ function buildQueue(queueId, now) {
 }
 
 /**
- * Generate a queue id like `q-YYYYMMDD-HHmmss-xxxx`.
+ * Generate a queue id like `q-YYYYMMDD-HHmmss-xxxxxxxxxxxxxxxx`.
+ * The suffix is 16 hex chars (64 bits from node:crypto). The old 4-char
+ * base36 suffix collided in ~0.29% of 100-id bursts within one second; at
+ * 64 bits, 10,000 ids in one second collide with probability ≈ 2.7e-12.
  * @returns {string}
  */
 export function newQueueId() {
@@ -158,7 +162,7 @@ export function newQueueId() {
   const pad = (n) => String(n).padStart(2, '0');
   const ymd = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
   const hms = `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
-  const suffix = Math.random().toString(36).slice(2, 6).padEnd(4, '0');
+  const suffix = randomBytes(8).toString('hex');
   return `q-${ymd}-${hms}-${suffix}`;
 }
 
