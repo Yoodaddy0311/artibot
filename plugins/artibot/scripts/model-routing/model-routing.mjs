@@ -5,8 +5,10 @@
  *
  * WHAT THIS FILE OWNS, AND WHAT IT DOES NOT. Every "which model" answer comes
  * from `lib/core/model-overrides.js#resolveEffectiveModel`; this file only
- * enumerates the two agent rosters, loads the shipped config, reads and writes
- * the user file, and prints. No precedence rule is re-derived here.
+ * parses arguments, loads the shipped config, reads and writes the user file,
+ * diffs, prints and sets exit codes. No precedence rule is re-derived here.
+ * Roster discovery (both `agents/` directories, frontmatter `model:`) and the
+ * `show` table/JSON rendering live in the sibling `model-routing-roster.mjs`.
  *
  * THE SHIPPED CONFIG IS LOADED EXPLICITLY. `<pluginRoot>/artibot.config.json` is
  * read directly and handed to every resolver call. User overrides are NEVER
@@ -38,15 +40,13 @@
  *   0 ok · 1 refused or validation errors (nothing written) · 2 usage error
  *   (unknown subcommand, flag, tier or agent; one stderr line, nothing written).
  *
- * ARTIBOT-COWORK ROSTER DISCOVERY (first hit wins, never guessed)
- *   --cowork-root <dir>/agents, else the dev tree `<pluginRoot>/../artibot-cowork/agents`,
- *   else the plugin cache `<pluginRoot>/../../artibot-cowork/<highest semver>/agents`.
- *   None of them → the cowork rows are `unavailable:roster-not-found`.
+ * ARTIBOT-COWORK ROSTER DISCOVERY — see `model-routing-roster.mjs` for the order;
+ *   when no roster is found the cowork rows are `unavailable:roster-not-found`.
  *
  * @module scripts/model-routing/model-routing
  */
 
-import { copyFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteJson } from '../../lib/core/file.js';
@@ -63,15 +63,11 @@ import {
   setOverride,
   validateOverrides,
 } from '../../lib/core/model-overrides.js';
-import { listTiers } from '../../lib/core/model-catalog.js';
 import { resolveModelForPhase } from '../../lib/core/model-policy.js';
-import { extractFrontmatter } from '../ci/ci-utils.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
+import { loadRosters, renderShowJson, renderShowText } from './model-routing-roster.mjs';
 
 const OWN_PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/** Files under agents/ that are catalogs, not agent definitions. */
-const NON_AGENT_FILES = new Set(['INDEX.md', 'README.md']);
 
 /** CLI phase words → the resolver's phase-role vocabulary. */
 const PHASES = Object.freeze(['build', 'review']);
@@ -128,81 +124,6 @@ function parseFlags(argv, known) {
 }
 
 /**
- * @param {string} dir
- * @returns {boolean}
- */
-function isDirectory(dir) {
-  try {
-    return statSync(dir).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Agent name → frontmatter `model:` for one `agents/` directory. A leading BOM
- * and surrounding quotes are stripped; anything that is not a catalog tier
- * (absent, `inherit`, a typo) is null — unknown, never guessed.
- *
- * @param {string} agentsDir
- * @returns {Map<string, string|null>}
- */
-function readRoster(agentsDir) {
-  const tiers = listTiers();
-  const roster = new Map();
-  const files = readdirSync(agentsDir)
-    .filter((f) => f.endsWith('.md') && !NON_AGENT_FILES.has(f))
-    .sort();
-  for (const file of files) {
-    const text = readFileSync(path.join(agentsDir, file), 'utf8');
-    const fm = extractFrontmatter(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
-    const raw = fm && typeof fm.model === 'string' ? fm.model.trim().replace(/^(["'])(.*)\1$/, '$2') : null;
-    roster.set(path.basename(file, '.md'), tiers.includes(raw) ? raw : null);
-  }
-  return roster;
-}
-
-/**
- * Numeric compare of two `x.y.z` version directory names.
- *
- * @param {string} a
- * @param {string} b
- * @returns {number}
- */
-function compareSemver(a, b) {
-  const pa = a.split('.').map((n) => Number.parseInt(n, 10));
-  const pb = b.split('.').map((n) => Number.parseInt(n, 10));
-  for (let i = 0; i < 3; i += 1) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  }
-  return 0;
-}
-
-/**
- * Locate the artibot-cowork `agents/` directory (see the module header for the
- * order). Returns null when none exists — the caller reports that, never guesses.
- *
- * @param {string} pluginRoot
- * @param {string|undefined} coworkRoot - Explicit `--cowork-root`, exclusive when given.
- * @returns {string|null}
- */
-function findCoworkAgentsDir(pluginRoot, coworkRoot) {
-  if (coworkRoot) {
-    const dir = path.join(path.resolve(coworkRoot), 'agents');
-    return isDirectory(dir) ? dir : null;
-  }
-  const devTree = path.join(pluginRoot, '..', 'artibot-cowork', 'agents');
-  if (isDirectory(devTree)) return path.resolve(devTree);
-  const cacheBase = path.join(pluginRoot, '..', '..', 'artibot-cowork');
-  if (!isDirectory(cacheBase)) return null;
-  const versions = readdirSync(cacheBase)
-    .filter((v) => /^\d+\.\d+\.\d+$/.test(v) && isDirectory(path.join(cacheBase, v, 'agents')))
-    .sort(compareSemver);
-  if (versions.length === 0) return null;
-  return path.resolve(cacheBase, versions[versions.length - 1], 'agents');
-}
-
-/**
  * Everything a subcommand needs: plugin root, SHIPPED config, both rosters, and
  * the user overrides file as loaded (status included, so callers decide how to
  * treat a damaged file).
@@ -219,12 +140,7 @@ function loadContext(flags) {
   } catch (err) {
     throw new Refusal(`cannot read the shipped config ${configPath}: ${err?.message ?? err}`);
   }
-  const artibotDir = path.join(pluginRoot, 'agents');
-  const coworkDir = findCoworkAgentsDir(pluginRoot, flags['cowork-root']);
-  const rosters = {
-    artibot: isDirectory(artibotDir) ? readRoster(artibotDir) : null,
-    'artibot-cowork': coworkDir ? readRoster(coworkDir) : null,
-  };
+  const rosters = loadRosters(pluginRoot, flags['cowork-root']);
   // The cowork shipped value is its frontmatter, and only that: agents without a
   // `model:` line are left out so the resolver reports them as unknown.
   const coworkFrontmatter = Object.fromEntries(
@@ -335,36 +251,6 @@ function parseRole(value) {
 }
 
 /**
- * Plain-text table, column-aligned.
- *
- * @param {string[]} header
- * @param {string[][]} body
- * @returns {string}
- */
-function renderTable(header, body) {
-  const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
-  const line = (cells) => cells.map((c, i) => c.padEnd(widths[i])).join('  ').trimEnd();
-  return [line(header), line(widths.map((w) => '-'.repeat(w))), ...body.map(line)].join('\n');
-}
-
-/**
- * @param {object} row
- * @returns {string[]}
- */
-function rowCells(row) {
-  const why = row.reason ? `${row.source}/${row.reason}` : row.source;
-  return [
-    row.plugin,
-    row.agent,
-    row.frontmatter ?? '(unknown)',
-    row.shipped,
-    row.override ?? '—',
-    `${row.effective ?? '(unknown)'} [${why}]`,
-    row.hostPath,
-  ];
-}
-
-/**
  * `show`: one row per agent plus the artibot phase-role block.
  *
  * @param {string[]} argv
@@ -383,34 +269,9 @@ function cmdShow(argv) {
     shipped: resolveModelForPhase(side, ctx.config),
     override: overrides?.plugins?.artibot?.phaseRoles?.[side] ?? null,
   }));
-  if (flags.json) {
-    const out = {
-      file: ctx.file,
-      overridesStatus: ctx.loaded.status,
-      role,
-      plugins: result,
-      phases,
-    };
-    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-    return 0;
-  }
-  const header = ['plugin', 'agent', 'frontmatter', 'shipped', 'override', 'effective', 'host path'];
-  const body = [];
-  const notes = [];
-  for (const plugin of plugins) {
-    const entry = result[plugin];
-    if (entry.status === 'ok') body.push(...entry.rows.map(rowCells));
-    else notes.push(`${plugin}: unavailable:${entry.reason}`);
-  }
-  const lines = [
-    `overrides: ${ctx.file} (${ctx.loaded.status})${role ? ` · role=${role}` : ''}`,
-    renderTable(header, body),
-    ...notes,
-    'phase roles (artibot): ' +
-      phases.map((p) => `${p.phase}=${p.shipped}${p.override ? ` → user ${p.override}` : ''}`).join(' · '),
-    'needs-spawn-param = the value takes effect only if the leader spawns with Agent(model=<resolve output>).',
-  ];
-  process.stdout.write(`${lines.join('\n')}\n`);
+  // `plugins` keeps the selection order, which is also the text table's row order.
+  const view = { file: ctx.file, overridesStatus: ctx.loaded.status, role, plugins: result, phases };
+  process.stdout.write(flags.json ? renderShowJson(view) : renderShowText(view));
   return 0;
 }
 
