@@ -296,9 +296,9 @@ describe('T-25 — ledger append', () => {
   });
 
   it('caps the deferred title at the same 120 chars mission.created uses', async () => {
-    // One cap, one expression (`tasks.js#missionTitle`). An uncapped goal on a
-    // line the writer must keep under 4 KB is how a required field gets folded
-    // away and the whole envelope rejected.
+    // One cap, one expression (`mission-ledger.js#missionTitle`). An uncapped
+    // goal on a line the writer must keep under 4 KB is how a required field
+    // gets folded away and the whole envelope rejected.
     await runMiddleware({ input: { prompt: '가'.repeat(400) } });
     const lines = readLedger();
 

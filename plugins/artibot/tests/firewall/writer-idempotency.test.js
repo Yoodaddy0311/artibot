@@ -49,10 +49,15 @@
  * "idempotency" lib` on 2026-09-21 returned ten files; three
  * (`replay/spawn-outcome.js`, `runtime/artifact-lifecycle-gates.js`,
  * `review/independent-reviewer.js`) mention it only in prose, assign no key,
- * and are absent here. On the import side, only `runtime/ledger.js` and
- * `runtime/middleware/tasks.js` import anything from the ledger primitive: an
- * import scan finds 2 of the 53 modules below (re-measured 2026-09-21 after the
- * widening). Every other appender takes its port by injection.
+ * and are absent here. On the import side, three modules below statically
+ * import from the ledger primitive (`runtime/event-writer.js` or
+ * `runtime/ledger.js`): `runtime/ledger.js`, `runtime/middleware/tasks.js` and
+ * `runtime/middleware/mission-ledger.js`, the last split out of `tasks.js` on
+ * 2026-09-23. A fourth, `runtime/human-asked-record.js`, reaches `ledger.js`
+ * through `await import()`, which the earlier "2 of 53" import scan did not
+ * count. So 4 of the 55 modules below (re-measured 2026-09-23; the undiscovered
+ * `runtime/ledger-tail.js` also imports `ledgerFilePath`, a path helper, and
+ * appends nothing). Every other appender takes its port by injection.
  *
  * ALLOWLIST, NOT DENYLIST. The scanner discovers, and the discovered set must
  * equal `INVENTORY` exactly. A denylist fails open for every future writer.
@@ -390,12 +395,13 @@ const INVENTORY = {
   'context/rehydration.js': x('run ledger context.compiled via writer.writeEvent, source spelled as shorthand. No key. Defect candidate; invisible to v1.'),
   'project-state/state-manager.js': x('run ledger state.updated, paired 1:1 with a store write and carrying the monotonic data.state_version. No key. Defect candidate.'),
   'runtime/human-asked-record.js': x('run ledger human.asked and human.resolved, carrying data.question_id. No key. Defect candidate.'),
-  'runtime/middleware/tasks.js': x('run ledger mission lifecycle events with a dynamic event name; no per-line handle beyond mission_id. Defect candidate.'),
+  'runtime/middleware/mission-ledger.js': x('run ledger mission lifecycle events with a dynamic event name; no per-line handle beyond mission_id. Defect candidate. Moved out of tasks.js 2026-09-23 (800-line split) with the append site unchanged.'),
   'topology/split-state.js': x('run ledger split worker events with a dynamic event name; keyed only by worker. Defect candidate.'),
 
   // --- primitives, wrappers, readers ----------------------------------------
   'runtime/event-writer.js': x('the run-ledger append primitive. Validates idempotency_key as an optional envelope key and authors no event.'),
   'runtime/ledger.js': x('thin wrapper: appendLedgerEvent forwards to writeEvent and assembles nothing.'),
+  'runtime/middleware/tasks.js': x('assembles no envelope since the 2026-09-23 split: binds appendLedgerEvent as the StateStore appendEvent port in openMissionStore (the state.updated line is authored by project-state/state-manager.js) and calls mission-ledger.js#appendMissionEvent. No key.'),
   'replay/replay.js': x('READER. Its event/session_id/source members are projections off ledger lines it reads back.'),
   'handoff/state-version-port.js': x('READ-ONLY state-version port, discovered only because createStateStore requires an appendEvent key and this module passes a REFUSING stub for it. It assembles no envelope and owns no store: a grep of the file for the fs write APIs (writeFile, appendFile, mkdir, createWriteStream, rename, unlink) returns 0 hits over 98 lines, measured 2026-09-22, and the paired test hashes a tree before and after the call and asserts the digest unchanged in 2 places - the store directory and the project root (tests/handoff/state-version-port.test.js, hashDir plus the two expect(hashDir(...)).toBe(before) assertions). No key.'),
 
