@@ -125,11 +125,17 @@ describe('findModelPolicyDrift', () => {
   });
 });
 
-describe('gate-aware drift check against the shipped repo (2-tier fleet)', () => {
+describe('gate-aware drift check against the shipped repo (single-tier opus, owner 2026-09-23)', () => {
   const agentsDir = path.join(PLUGIN_ROOT, 'agents');
   const agentModels = readAgentModels(agentsDir);
   const policyAgents = collectPolicyAgents(realConfig);
   const allowlist = realConfig.agents.modelPolicy.fable.allowlist;
+  /** The shipped config with ONLY the kill-switch flipped back on. */
+  const gateOn = () => {
+    const config = structuredClone(realConfig);
+    config.agents.modelPolicy.fable.enabled = true;
+    return config;
+  };
 
   it('the live agents/ tree has zero drift against the live config', () => {
     const { errors, warnings } = findModelPolicyDrift({
@@ -141,41 +147,63 @@ describe('gate-aware drift check against the shipped repo (2-tier fleet)', () =>
     expect(warnings).toEqual([]);
   });
 
-  it('frontmatter model: fable is exactly the fable.allowlist (10) and nothing else', () => {
-    const fableFiles = agentModels.filter((a) => a.model === 'fable').map((a) => a.name).sort();
-    expect(fableFiles).toEqual([...allowlist].sort());
-    expect(fableFiles).toHaveLength(10);
+  it('no agent file declares model: fable while the kill-switch is off', () => {
+    expect(realConfig.agents.modelPolicy.fable.enabled).toBe(false);
+    const fableFiles = agentModels.filter((a) => a.model === 'fable').map((a) => a.name);
+    expect(fableFiles).toEqual([]);
+    // Every policy agent's file says opus — the single-tier fleet, counted.
+    const opusFiles = agentModels.filter((a) => a.model === 'opus').map((a) => a.name).sort();
+    expect(opusFiles).toEqual([...policyAgents].sort());
   });
 
-  it('a non-allowlisted high-bucket agent with model: opus is NOT drift (allowlist wins over bucket)', () => {
+  it('the dormant allowlist still names 10 agents that each have a file', () => {
+    expect(allowlist).toHaveLength(10);
+    const fileNames = new Set(agentModels.map((a) => a.name));
+    expect(allowlist.filter((name) => !fileNames.has(name))).toEqual([]);
+  });
+
+  it('a dormant-allowlisted agent left on model: fable IS drift (negative control for the revert)', () => {
+    // One frontmatter line missed during the revert must turn the gate RED.
+    const { errors } = findModelPolicyDrift({
+      agentModels: [{ name: 'code-reviewer', model: 'fable' }],
+      resolvePolicyModel: gateAwareLookup(realConfig),
+      policyAgents: ['code-reviewer'],
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/code-reviewer/);
+    expect(errors[0]).toMatch(/model "fable" ≠ policy "opus"/);
+  });
+
+  it('a non-allowlisted high-bucket agent with model: opus is NOT drift (allowlist wins over bucket, gate on)', () => {
     // backend-developer: high bucket declares fable, gate demotes to opus, file says opus.
     const { errors } = findModelPolicyDrift({
       agentModels: [{ name: 'backend-developer', model: 'opus' }],
-      resolvePolicyModel: gateAwareLookup(realConfig),
+      resolvePolicyModel: gateAwareLookup(gateOn()),
       policyAgents: ['backend-developer'],
     });
     expect(errors).toEqual([]);
   });
 
-  it('a non-allowlisted high-bucket agent with model: fable IS drift', () => {
+  it('a non-allowlisted high-bucket agent with model: fable IS drift (gate on)', () => {
     const { errors } = findModelPolicyDrift({
       agentModels: [{ name: 'backend-developer', model: 'fable' }],
-      resolvePolicyModel: gateAwareLookup(realConfig),
+      resolvePolicyModel: gateAwareLookup(gateOn()),
       policyAgents: ['backend-developer'],
     });
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/model "fable" ≠ policy "opus"/);
   });
 
-  it('flipping the kill-switch off without re-syncing the 8 frontmatter lines is caught as drift', () => {
-    const reverted = structuredClone(realConfig);
-    reverted.agents.modelPolicy.fable.enabled = false;
+  it('flipping the kill-switch back ON without re-syncing the 10 frontmatter lines is caught as drift', () => {
     const { errors } = findModelPolicyDrift({
       agentModels,
-      resolvePolicyModel: gateAwareLookup(reverted),
+      resolvePolicyModel: gateAwareLookup(gateOn()),
       policyAgents,
     });
     expect(errors).toHaveLength(allowlist.length);
-    for (const e of errors) expect(e).toMatch(/model "fable" ≠ policy "opus"/);
+    for (const e of errors) expect(e).toMatch(/model "opus" ≠ policy "fable"/);
+    for (const name of allowlist) {
+      expect(errors.some((e) => e.includes(`agents/${name}.md`))).toBe(true);
+    }
   });
 });

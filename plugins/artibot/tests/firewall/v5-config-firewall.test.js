@@ -162,7 +162,18 @@ const TOPOLOGY_MODES = Object.freeze(['solo', 'subagent', 'team', 'autopilot', '
  */
 const EXPECTED_TOP_LEVEL_COUNT = 32;
 
-/** 정책 버킷이 결정하는 30 에이전트 전건 + 티어 기대값(현행 = 변화 0 기준선). */
+/**
+ * 정책 버킷이 결정하는 30 에이전트 전건. `FABLE_AGENTS` 는 `fable.allowlist` 10종의
+ * 이름 핀이다 — **실효 티어가 아니다**.
+ *
+ * 재핀 2026-09-23 (오너 결정 "fable 5.1 은 opus 5.5 로 대체"): 2티어(설계·검수 fable)를
+ * 문서화된 되돌리기 절차로 단일 티어 opus 로 돌렸다 — `fable.enabled=false` +
+ * `phaseRoles.review=opus` + 10개 frontmatter `model: opus`. allowlist 는 **지우지 않고
+ * 휴면**시켰으므로(재활성 = 플래그 1줄 + frontmatter 재동기화) 이름 10종은 그대로 핀하고,
+ * 기대 해석값만 fable → opus 로 바꿨다. 아래 "무변경" 표의 두 행도 같은 결정으로
+ * 의도적으로 바뀌었다. 게이트를 푼 것이 아니라 기대값을 오너 결정에 맞춰 옮긴 것이며,
+ * 킬스위치나 phaseRoles.review 가 우발적으로 fable 로 되돌아가면 여기서 RED 다.
+ */
 const FABLE_AGENTS = Object.freeze([
   'orchestrator', 'architect', 'planner', 'code-reviewer',
   'spec-reviewer', 'quality-reviewer', 'llm-architect', 'repo-benchmarker',
@@ -361,8 +372,14 @@ describe('agents.modelPolicy.low — 선언만, 실효 라우팅 변화 0', () =
     expect(withIt).toEqual(withoutIt);
   });
 
-  it.each(FABLE_AGENTS)('%s 는 여전히 fable 이다', (agent) => {
-    expect(resolveModel(agent, {}, config)).toBe('fable');
+  it.each(FABLE_AGENTS)('%s 는 allowlist 에 휴면 등재됐지만 opus 로 해석된다 (2026-09-23 단일 티어)', (agent) => {
+    expect(resolveModel(agent, {}, config)).toBe('opus');
+    expect(resolveModel(agent, { role: 'review' }, config)).toBe('opus');
+  });
+
+  it('fable 로 해석되는 에이전트는 0명이다 (킬스위치 off)', () => {
+    const all = [...FABLE_AGENTS, ...OPUS_AGENTS];
+    expect(all.filter((a) => resolveModel(a, {}, config) === 'fable')).toEqual([]);
   });
 
   it.each(OPUS_AGENTS)('%s 는 여전히 opus 이다', (agent) => {
@@ -384,9 +401,10 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['split.maxWindows', 8],
     ['split.minStems', 2],
     ['split.dispatch.budget', 600000],
-    ['agents.modelPolicy.phaseRoles.review', 'fable'],
+    // 2026-09-23 오너 결정(단일 티어 opus)으로 의도적 재핀: review 'fable'→'opus', enabled true→false.
+    ['agents.modelPolicy.phaseRoles.review', 'opus'],
     ['agents.modelPolicy.phaseRoles.build', 'opus'],
-    ['agents.modelPolicy.fable.enabled', true],
+    ['agents.modelPolicy.fable.enabled', false],
     ['agents.modelPolicy.high.model', 'fable'],
     ['agents.modelPolicy.medium.model', 'opus'],
     // CA-03 gate (Wave 12): must stay false until a Wave 13 commit flips it deliberately.
@@ -397,8 +415,15 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });
 
-  it('fable allowlist 는 10종이다 (MP-3: investigator·auditor 2종 추가)', () => {
+  it('fable allowlist 는 10종이다 (MP-3: investigator·auditor 2종 추가; 2026-09-23 부터 휴면)', () => {
     expect(config.agents.modelPolicy.fable.allowlist).toEqual([...FABLE_AGENTS]);
+  });
+
+  it('휴면 allowlist 는 플래그 1줄로 되살아난다 (복사본에서 enabled=true → 10종 fable)', () => {
+    const reEnabled = structuredClone(config);
+    reEnabled.agents.modelPolicy.fable.enabled = true;
+    const all = [...FABLE_AGENTS, ...OPUS_AGENTS];
+    expect(all.filter((a) => resolveModel(a, {}, reEnabled) === 'fable')).toEqual([...FABLE_AGENTS]);
   });
 });
 

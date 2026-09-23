@@ -59,13 +59,16 @@ export const BASELINE_TIER = 'opus';
  * commit that changes any non-price value inside {@link MODELS}; leaving it
  * stale is worse than having no stamp, because consumers trust it.
  *
- * Producer only — no consumer reads it as of 2026-09-02 (the routing/economics
- * modules that will emit it are not written yet). Do not infer from its
- * presence that any record currently carries a catalog version.
+ * Consumers (grep of `lib/`, 2026-09-23): `lib/economics/usage-receipt.js`
+ * stamps it as `model_identity.catalog_version` on every receipt, and
+ * `lib/routing/route-scorer.js#DEFAULT_CATALOG` carries it as `version`.
+ *
+ * 2026-09-23 bump: opus `id` moved to `claude-opus-5-5` and every tier gained
+ * `legacyIds`. No price changed, so {@link PRICING_VERSION} did not move.
  *
  * @type {string}
  */
-export const CATALOG_VERSION = '2026-09-02';
+export const CATALOG_VERSION = '2026-09-23';
 
 /**
  * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
@@ -120,8 +123,18 @@ export const PRICING_SOURCE =
  * against {@link PRICING_SOURCE} on {@link PRICING_VERSION}) and
  * `tokenizerCoeffMeasured` (see {@link getCostFactor} — currently false).
  *
+ * `legacyIds` lists older model ids that must still resolve to the tier, so a
+ * transcript or ledger row written before an id change keeps its tier instead
+ * of falling to "unknown model". It is present on EVERY tier (`[]` when there
+ * is none) so the frozen shape is the same everywhere and readers never branch
+ * on a missing key. It is an exact-string list, not a prefix rule. `id` stays
+ * the one current id: {@link getPricing} reports `id`, never a legacy one. No
+ * id may appear twice across all tiers' `id` + `legacyIds` (pinned in
+ * `tests/core/model-catalog.test.js`).
+ *
  * @type {Readonly<Record<string, Readonly<{
  *   id: string,
+ *   legacyIds: readonly string[],
  *   priceInPerMTok: number,
  *   priceOutPerMTok: number,
  *   priceCacheReadPerMTok: number,
@@ -140,6 +153,7 @@ export const PRICING_SOURCE =
 export const MODELS = deepFreeze({
   haiku: {
     id: 'claude-haiku-4-5',
+    legacyIds: [],
     priceInPerMTok: 1,
     priceOutPerMTok: 5,
     priceCacheReadPerMTok: 0.1,
@@ -157,6 +171,7 @@ export const MODELS = deepFreeze({
   sonnet: {
     // 2026-09-15 O2: id 갱신, 가격 계수는 미검증(I1).
     id: 'claude-sonnet-5',
+    legacyIds: [],
     priceInPerMTok: 3,
     priceOutPerMTok: 15,
     priceCacheReadPerMTok: 0.3,
@@ -172,7 +187,16 @@ export const MODELS = deepFreeze({
     constraints: [],
   },
   opus: {
-    id: 'claude-opus-5',
+    // 2026-09-23: id moved to Opus 5.5; claude-opus-5 stays resolvable as a
+    // legacy id so pre-switch transcripts keep tier opus.
+    id: 'claude-opus-5-5',
+    legacyIds: ['claude-opus-5'],
+    // Prices below are the claude-opus-5 row, NOT Opus 5.5's. Opus 5.5 official
+    // is $4 in / $20 out, cache read $0.20 per MTok (claude-api skill cached
+    // table, 2026-06-24) — deliberately not applied here. opus is BASELINE_TIER,
+    // so moving its input price would shift every getCostFactor at once.
+    // Deferred to follow-up limb catalog-pricing-sync, together with the
+    // sonnet row (Sonnet 5 there is $2 / $10 vs this catalog's 3 / 15).
     priceInPerMTok: 5,
     priceOutPerMTok: 25,
     priceCacheReadPerMTok: 0.5,
@@ -189,6 +213,7 @@ export const MODELS = deepFreeze({
   },
   fable: {
     id: 'claude-fable-5-1',
+    legacyIds: [],
     priceInPerMTok: 10,
     priceOutPerMTok: 50,
     // 0.025x input, NOT the 0.1x every other tier uses — official footnote.
@@ -332,7 +357,9 @@ export function getPricing(roleOrTier) {
 
 /**
  * Effective cost factor of a tier relative to the baseline
- * `MODELS[BASELINE_TIER]` (`claude-opus-5`): the input-price ratio multiplied
+ * `MODELS[BASELINE_TIER]` (the `opus` tier — its id is `claude-opus-5-5` since
+ * 2026-09-23, but its price row is still the `claude-opus-5` one; see the
+ * note on `MODELS.opus`): the input-price ratio multiplied
  * by the tokenizer coefficient (more tokens per unit of content = more spend
  * even at the same per-token price). Unknown tiers and a missing/invalid
  * baseline return 1.0.
@@ -342,7 +369,7 @@ export function getPricing(roleOrTier) {
  * verified; the tokenizer half is not. The official pricing page states that
  * Claude 4.7 and later models use a newer tokenizer producing roughly 30% more
  * tokens, while Sonnet 4.6 and earlier use the previous one — so the baseline
- * `opus` (claude-opus-5) and `fable` (claude-fable-5-1) are on the SAME
+ * `opus` (claude-opus-5-5) and `fable` (claude-fable-5-1) are on the SAME
  * tokenizer, which makes the shipped `fable: 1.3` relative to opus an
  * unverified carry-over and the resulting 2.6 an estimate, not a measurement.
  * Changing the coefficient (and therefore this factor) is an owner decision

@@ -105,8 +105,46 @@ describe('resolveModelIdentity', () => {
       tier: 'fable',
       model_id: 'claude-fable-5-1',
       version: 'claude-fable-5-1',
-      catalog_version: '2026-09-02',
+      // Literal on purpose: a catalog data change must show up here as a
+      // deliberate re-pin (2026-09-23: opus id → claude-opus-5-5 + legacyIds).
+      catalog_version: '2026-09-23',
     });
+  });
+
+  it('resolves the current opus id claude-opus-5-5 to tier opus', () => {
+    expect(resolveModelIdentity('claude-opus-5-5')).toEqual({
+      provider: 'anthropic',
+      family: 'claude',
+      tier: 'opus',
+      model_id: 'claude-opus-5-5',
+      version: 'claude-opus-5-5',
+      catalog_version: '2026-09-23',
+    });
+  });
+
+  it('resolves the legacy opus id claude-opus-5 to tier opus, keeping the observed id', () => {
+    // model_id is what the transcript said, not the catalog's current id:
+    // rewriting it would make a pre-switch receipt claim a model it never ran.
+    const identity = resolveModelIdentity('claude-opus-5');
+    expect(identity.tier).toBe('opus');
+    expect(identity.model_id).toBe('claude-opus-5');
+    expect(identity.version).toBe('claude-opus-5');
+  });
+
+  it.each([
+    ['claude-opus-5-5[1m]', 'claude-opus-5-5'],
+    ['claude-opus-5[1m]', 'claude-opus-5'],
+  ])('strips the context variant of %s before the lookup', (raw, base) => {
+    const identity = resolveModelIdentity(raw);
+    expect(identity.tier).toBe('opus');
+    expect(identity.model_id).toBe(base);
+    expect(identity.version).toBe('1m');
+  });
+
+  it('still refuses near-miss opus ids (no prefix inference from legacyIds)', () => {
+    expect(resolveModelIdentity('claude-opus-5-6')).toBeNull();
+    expect(resolveModelIdentity('claude-opus')).toBeNull();
+    expect(resolveModelIdentity('claude-opus-5-5-x')).toBeNull();
   });
 
   it('strips a dated snapshot suffix and keeps it as the version', () => {
@@ -421,6 +459,24 @@ describe('buildUsageReceipts — subagent files', () => {
     expect(result.receipts).toHaveLength(2);
     expect(result.receipts.every((r) => r.run_id === 'sess-1')).toBe(true);
     expect(result.meta.multiModelRuns).toEqual(['sess-1']);
+  });
+
+  it('prices a run straddling the opus id switch as two opus receipts, none unresolved', async () => {
+    const result = await run({
+      [MAIN]: jsonl([
+        assistantEntry({ requestId: 'req-1', model: 'claude-opus-5' }),
+        assistantEntry({ requestId: 'req-2', model: 'claude-opus-5-5[1m]' }),
+      ]),
+    });
+    expect(result.meta.unresolvedModels).toEqual({});
+    expect(result.receipts.map((r) => r.model_identity.model_id).sort())
+      .toEqual(['claude-opus-5', 'claude-opus-5-5']);
+    for (const receipt of result.receipts) {
+      expect(receipt.model_identity.tier).toBe('opus');
+      expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
+      expect(receipt.cost.total).toBeGreaterThan(0);
+      expect(receipt.cost.total).toBe(priceUsage(receipt.usage, 'opus').total);
+    }
   });
 
   it('records the effort mix per run outside the receipt', async () => {

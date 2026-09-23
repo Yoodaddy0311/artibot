@@ -19,7 +19,7 @@ description: |
   Do NOT use for: writing code, first-pass investigation of an open question
   (use investigator), spec compliance (use spec-reviewer), code quality
   (use quality-reviewer), security audits (use security-reviewer)
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read

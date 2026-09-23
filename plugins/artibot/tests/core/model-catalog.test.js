@@ -29,7 +29,9 @@ const PRICE_TABLE = [
   { tier: 'haiku', id: 'claude-haiku-4-5', input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
   // 2026-09-15 O2: id 갱신, 가격 계수는 미검증(I1) — 가격 6열은 2026-09-12 검증값 그대로다.
   { tier: 'sonnet', id: 'claude-sonnet-5', input: 3, output: 15, cacheRead: 0.3, cacheWrite5m: 3.75, cacheWrite1h: 6 },
-  { tier: 'opus', id: 'claude-opus-5', input: 5, output: 25, cacheRead: 0.5, cacheWrite5m: 6.25, cacheWrite1h: 10 },
+  // 2026-09-23: id 가 claude-opus-5-5 로 바뀌었고 가격 6열은 그대로다 — Opus 5.5 공식가는
+  // 후속 줄기 catalog-pricing-sync 몫(opus 가 BASELINE_TIER 라 모든 getCostFactor 가 움직인다).
+  { tier: 'opus', id: 'claude-opus-5-5', input: 5, output: 25, cacheRead: 0.5, cacheWrite5m: 6.25, cacheWrite1h: 10 },
   { tier: 'fable', id: 'claude-fable-5-1', input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20 },
 ];
 
@@ -57,7 +59,7 @@ describe('model-catalog', () => {
         thinkingMode: 'always-on',
         promptStyle: 'declarative',
       });
-      expect(getModel('opus').id).toBe('claude-opus-5');
+      expect(getModel('opus').id).toBe('claude-opus-5-5');
       expect(getModel('sonnet').id).toBe('claude-sonnet-5');
       expect(getModel('haiku').id).toBe('claude-haiku-4-5');
     });
@@ -141,6 +143,22 @@ describe('model-catalog', () => {
       expect(getCostFactor('sonnet')).toBeCloseTo(0.6, 10);
     });
 
+    it('haiku = (1/5) * 1.0 = 0.2', () => {
+      expect(getCostFactor('haiku')).toBeCloseTo(0.2, 10);
+    });
+
+    it('the opus id change (claude-opus-5 → claude-opus-5-5) moves no factor', () => {
+      // The baseline is a TIER, and the opus price row was not touched, so
+      // every factor must read exactly what it read under claude-opus-5.
+      expect(BASELINE_TIER).toBe('opus');
+      expect(getModel(BASELINE_TIER).priceInPerMTok).toBe(5);
+      const factors = Object.fromEntries(listTiers().map((t) => [t, getCostFactor(t)]));
+      expect(factors.haiku).toBeCloseTo(0.2, 10);
+      expect(factors.sonnet).toBeCloseTo(0.6, 10);
+      expect(factors.opus).toBe(1);
+      expect(factors.fable).toBeCloseTo(2.6, 10);
+    });
+
     it('returns 1.0 for unknown tier / bad input', () => {
       expect(getCostFactor('mythos')).toBe(1.0);
       expect(getCostFactor(null)).toBe(1.0);
@@ -220,7 +238,7 @@ describe('model-catalog', () => {
     it('returns the full pricing shape for a tier', () => {
       expect(getPricing('opus')).toEqual({
         tier: 'opus',
-        id: 'claude-opus-5',
+        id: 'claude-opus-5-5',
         input: 5,
         output: 25,
         cacheRead: 0.5,
@@ -233,7 +251,7 @@ describe('model-catalog', () => {
 
     it('resolves role aliases (frontier → opus, deep-async → fable)', () => {
       expect(getPricing('frontier').tier).toBe('opus');
-      expect(getPricing('frontier').id).toBe('claude-opus-5');
+      expect(getPricing('frontier').id).toBe('claude-opus-5-5');
       expect(getPricing('deep-async').tier).toBe('fable');
     });
 
@@ -264,6 +282,49 @@ describe('model-catalog', () => {
       expect(getPricing(42)).toBeNull();
       expect(getPricing({})).toBeNull();
       expect(getPricing('toString')).toBeNull();
+    });
+  });
+
+  describe('legacyIds (older ids that still resolve to the tier)', () => {
+    it('opus keeps claude-opus-5 as its only legacy id', () => {
+      expect(getModel('opus').legacyIds).toEqual(['claude-opus-5']);
+    });
+
+    it.each(['haiku', 'sonnet', 'fable'])(
+      '%s carries an empty legacyIds array (same shape on every tier)',
+      (tier) => {
+        expect(getModel(tier).legacyIds).toEqual([]);
+      },
+    );
+
+    it('every tier has a frozen legacyIds array of non-empty strings', () => {
+      for (const tier of listTiers()) {
+        const { legacyIds } = getModel(tier);
+        expect(Array.isArray(legacyIds)).toBe(true);
+        expect(Object.isFrozen(legacyIds)).toBe(true);
+        for (const id of legacyIds) {
+          expect(typeof id).toBe('string');
+          expect(id.length).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('no id (current or legacy) names two tiers or repeats inside one tier', () => {
+      // A reverse index built from these would otherwise silently let the
+      // last writer win and hand a receipt the wrong tier's price.
+      const all = listTiers().flatMap((t) => [getModel(t).id, ...getModel(t).legacyIds]);
+      expect(new Set(all).size).toBe(all.length);
+    });
+
+    it('a legacy id is never the current id of its own tier', () => {
+      for (const tier of listTiers()) {
+        const m = getModel(tier);
+        expect(m.legacyIds).not.toContain(m.id);
+      }
+    });
+
+    it('getPricing still names the current id, not a legacy one', () => {
+      expect(getPricing('opus').id).toBe('claude-opus-5-5');
     });
   });
 

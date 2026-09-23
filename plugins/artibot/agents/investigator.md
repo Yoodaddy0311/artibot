@@ -19,7 +19,7 @@ description: |
 
   Do NOT use for: implementing features, editing source files, writing tests,
   relaxing gates, post-hoc audit of another agent's report (use auditor)
-model: fable
+model: opus
 modelTier: premium
 tools:
   - Read
