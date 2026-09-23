@@ -36,9 +36,11 @@
  *     hook-shaped contexts; its own bookkeeping may not take the caller down.
  *
  * ── What this suite does NOT prove ─────────────────────────────────────────
- *  - That a real reviewer agent emits either block. No production caller wires
- *    these functions yet; a sibling bundle builds the CLI. Green here says the
- *    writer accepts what this module builds, not that anything builds it.
+ *  - That a real reviewer agent emits either block. A production caller DOES
+ *    exist now — `scripts/hooks/_review-stop-record.js:573` calls
+ *    `recordReviewOutcome` on SubagentStop (read 2026-09-22) — so the old
+ *    "no production caller yet" line here was stale. Green still says the
+ *    writer accepts what this module builds, not that an agent builds it.
  *  - That `claims_total` was counted by the rule of 설계 §4.4 #2. A well-formed
  *    block with an invented denominator is green, exactly as in
  *    `tests/review/claim-audit.test.js`.
@@ -69,7 +71,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
-import { resetSeq } from '../../lib/runtime/event-writer.js';
+import { foldOversized, getAllowlist, resetSeq } from '../../lib/runtime/event-writer.js';
 import { parseClaimAudit, parseReviewVerdict } from '../../lib/review/independent-reviewer.js';
 import {
   buildClaimAuditEvent,
@@ -256,17 +258,22 @@ describe('parseReviewVerdict exposes verification_id', () => {
     }
   });
 
-  it('exposes exactly these 7 keys and no others on an admissible document', () => {
+  it('exposes exactly these 9 keys and no others on an admissible document', () => {
     // Exactness, not presence: the test above cannot see a key being ADDED, and
     // a new field on the parse result is a decision this writer has to make
     // (hash it into an idempotency key, put it in `data`, or ignore it). Failing
     // here is the intended way for that decision to become visible. `ambiguous`
     // and `candidates` are deliberately out of scope — they appear only on the
     // ambiguous path, which never reaches a builder.
+    // Deliberately raised from 7 to 9 on 2026-09-22: `intentRevision` and
+    // `planRevision` were added to the parse result, and the decision this pin
+    // forces has been made — both go into `data`, see the key list below.
     expect(Object.keys(parseReviewVerdict(v2Doc())).sort()).toEqual([
       'errors',
       'foldedVerdict',
+      'intentRevision',
       'ok',
+      'planRevision',
       'schemaVersion',
       'sources',
       'verdict',
@@ -336,8 +343,128 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
       'idempotency_key', 'event']) {
       expect(Object.prototype.hasOwnProperty.call(built.input.data, key), key).toBe(false);
     }
+    // Deliberately widened from 3 keys to 5 on 2026-09-22. `intent_revision`
+    // and `plan_revision` are UNDECLARED for this event in the allowlist and
+    // ride through untouched, which the firewall suite already pins; they are
+    // recorded, not required, and the fold test below states what that costs.
+    expect(Object.keys(built.input.data).sort())
+      .toEqual(['findings_ref', 'intent_revision', 'plan_revision', 'verdict',
+        'verification_id']);
+  });
+
+  it('records both revisions in the written line without moving the key', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+    const [line] = rawLines();
+    expect(line.data.intent_revision).toBe(3);
+    expect(line.data.plan_revision).toBe(1);
+    // The idempotency key is derived from the verification id alone. Adding
+    // data keys must not move it, or one answer would write two rows.
+    expect(line.idempotency_key).toBe('review.completed:sess-review-writer:v1-abc');
+  });
+
+  it('writes revision 0 as 0 rather than dropping it', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ intent_revision: 0, plan_revision: 0 })),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(built.input.data.intent_revision).toBe(0);
+    expect(built.input.data.plan_revision).toBe(0);
+    expect(append(built.input).ok).toBe(true);
+  });
+
+  it('omits both keys, and never writes null, when the parse carries neither', () => {
+    // A hand-made parse result, not one this parser can produce: the v2 gate
+    // requires both fields. It is here because the builder must not be the
+    // place a null enters the ledger if that ever changes.
+    const built = buildReviewCompletedEvent({
+      parsed: { ok: true, verdict: 'PASS', verificationId: 'v1-abc' },
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(built.ok).toBe(true);
     expect(Object.keys(built.input.data).sort())
       .toEqual(['findings_ref', 'verdict', 'verification_id']);
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+
+  it('accepts that an oversized line loses both revisions', () => {
+    // `foldOversized` keeps only the required data keys plus `evidence_refs`.
+    // `review.completed` requires `verdict` and `findings_ref`, so the two
+    // revisions and the verification id are the first keys dropped.
+    // This suite allows it: the bundle records the numbers, it does not
+    // promise their survival.
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    const fold = foldOversized(built.input, getAllowlist().events[REVIEW_COMPLETED_EVENT]);
+    expect(fold.dropped).toContain('intent_revision');
+    expect(fold.dropped).toContain('plan_revision');
+    expect(Object.keys(fold.env.data).sort())
+      .toEqual(['evidence_refs', 'findings_ref', 'verdict']);
+    // In THIS fixture the fold does not rescue the line: with a 6-char
+    // verification id the marker costs more bytes than the three dropped keys
+    // save (439 B folded against roughly 420-430 B unfolded, the spread being
+    // pid/seq digits), so under a 400 B cap the row is rejected outright.
+    // That is ONE of two loss modes, not the general one. The verification id
+    // is written twice (`data.verification_id` and inside `idempotency_key`)
+    // and the fold drops only the first, so a long id makes the fold save
+    // more than it costs — the next test pins that a row then SURVIVES
+    // without its revisions.
+    const res = appendLedgerEvent(root, built.input, {
+      ledgerPath: LEDGER_REL,
+      maxLineBytes: 400,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.reason.startsWith('line-too-large:')).toBe(true);
+    expect(rejectedLines()).toHaveLength(1);
+  });
+
+  it('keeps an oversized row alive but writes it without its revisions', () => {
+    // The other loss mode, under the default 4096 B cap. A 2,500-char
+    // verification id puts the unfolded line over the cap and the folded one
+    // under it (scratch probe 2026-09-23: rows survive folded for ids of about
+    // 1,850 to 3,660 chars; longer ids are rejected as above). Nothing in the
+    // return value is an error, so a reader sees a normal row that simply
+    // has no revision — this is the silent case.
+    const verificationId = `v1-${'a'.repeat(2497)}`;
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ verification_id: verificationId })),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    const res = append(built.input);
+    expect(res.ok).toBe(true);
+    expect(res.folded).toBe(true);
+    expect(res.dropped).toEqual(['intent_revision', 'plan_revision', 'verification_id']);
+    expect(rejectedLines()).toHaveLength(0);
+    const rows = rawLines().filter((l) => l.event === REVIEW_COMPLETED_EVENT);
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    expect(Object.keys(row.data).sort()).toEqual(['evidence_refs', 'findings_ref', 'verdict']);
+    expect(row.data.verdict).toBe('PASS');
+    expect(row.data.findings_ref).toBe(FINDINGS_REF);
+    expect(row.data.evidence_refs)
+      .toEqual(['ledger-fold:dropped=intent_revision,plan_revision,verification_id']);
+    // The id is gone from `data` but still inside the key, which is why the
+    // fold saved enough bytes to fit.
+    expect(row.idempotency_key)
+      .toBe(`review.completed:${SID}:${verificationId}`);
   });
 
   it('omits mission_id when it does not match the ledger pattern', () => {

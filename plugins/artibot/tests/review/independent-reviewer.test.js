@@ -259,6 +259,39 @@ describe('parseReviewVerdict — v2 is the only admissible shape', () => {
   });
 });
 
+describe('parseReviewVerdict exposes intent_revision and plan_revision', () => {
+  // Both fields were ALREADY validated by `checkV2Structure` (a non-negative
+  // integer) and then thrown away. Exposing them costs nothing at parse time
+  // and is what lets a writer record which revision of the intent a verdict was
+  // formed against — the number that decides whether a verdict is stale.
+
+  it('carries both v2 document values on ok:true', () => {
+    const r = parseReviewVerdict(v2Doc());
+    expect(r.ok).toBe(true);
+    expect(r.intentRevision).toBe(3);
+    expect(r.planRevision).toBe(1);
+  });
+
+  it('keeps 0 as 0 rather than falling back to null', () => {
+    const r = parseReviewVerdict(v2Doc({ intent_revision: 0, plan_revision: 0 }));
+    expect(r.ok).toBe(true);
+    expect(r.intentRevision).toBe(0);
+    expect(r.planRevision).toBe(0);
+  });
+
+  it.each([
+    ['a legacy token', 'APPROVE'],
+    ['free text with no verdict token', 'looks fine to me'],
+    ['null input', null],
+    ['a v2 document that fails the structural gate', v2Doc({ evidence: [] })],
+  ])('is null on %s, the rule verdict already follows', (_label, answer) => {
+    const r = parseReviewVerdict(answer);
+    expect(r.ok).toBe(false);
+    expect(r.intentRevision).toBeNull();
+    expect(r.planRevision).toBeNull();
+  });
+});
+
 describe('parseReviewVerdict — the injected schema validator port', () => {
   it('is consulted and can reject a structurally acceptable document', () => {
     const r = parseReviewVerdict(v2Doc(), {
