@@ -28,6 +28,9 @@ const LOCK_MODULE = pathToFileURL(
 
 const isWindows = process.platform === 'win32';
 
+/** A child still alive after this is killed and its output reported. */
+const CHILD_DEADLINE_MS = 20_000;
+
 let tmpDir;
 
 beforeEach(async () => {
@@ -74,6 +77,14 @@ function runChild(script, args, opts = {}) {
     child.stdout.on('data', (d) => { stdout += String(d); });
     child.stderr.on('data', (d) => { stderr += String(d); });
 
+    // Watchdog below the 30s test timeout: a hung child fails with its own
+    // output instead of a bare vitest timeout.
+    let timedOut = false;
+    const killer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, CHILD_DEADLINE_MS);
+
     let poll;
     if (opts.readyMarker && opts.onReady) {
       poll = setInterval(() => {
@@ -86,11 +97,22 @@ function runChild(script, args, opts = {}) {
     }
 
     child.on('error', (err) => {
+      clearTimeout(killer);
       if (poll) clearInterval(poll);
       reject(err);
     });
-    child.on('exit', (code, signal) => {
+    // 'close', not 'exit': it fires after stdio has drained, so a timed-out
+    // child's last output is in the message.
+    child.on('close', (code, signal) => {
+      clearTimeout(killer);
       if (poll) clearInterval(poll);
+      if (timedOut) {
+        reject(new Error(
+          `child ${path.basename(script)} still running after ${CHILD_DEADLINE_MS}ms; killed.\n`
+          + `stdout: ${JSON.stringify(stdout)}\nstderr: ${JSON.stringify(stderr)}`,
+        ));
+        return;
+      }
       resolve({ code, signal, stdout, stderr });
     });
   });
@@ -168,6 +190,35 @@ console.log('RETURNED-NORMALLY');
     expect(fsSync.existsSync(lockPath)).toBe(false);
     // Whatever the platform maps the re-raise to, it must not be a clean exit.
     expect(result.code).not.toBe(0);
+  }, 30_000);
+
+  it('handler leaves a lock that another owner put in place, and still re-raises', async () => {
+    // Same handler path as above, but by the time the signal lands the lock
+    // file is someone else's (they judged ours stale and took it over). The
+    // handler must check the token rather than unlink whatever is at the path.
+    const target = path.join(tmpDir, 'foreign.json');
+    const lockPath = `${target}.lock`;
+    const foreign = JSON.stringify({ pid: 424242, host: 'elsewhere', token: 'not-ours', timestamp: Date.now() });
+
+    const script = await writeChild('foreign-child.mjs', `
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { withFileLock } from ${JSON.stringify(LOCK_MODULE)};
+
+withFileLock(${JSON.stringify(target)}, () => {
+  unlinkSync(${JSON.stringify(lockPath)});
+  writeFileSync(${JSON.stringify(lockPath)}, ${JSON.stringify(foreign)}, { flag: 'wx' });
+  process.emit('SIGTERM');
+  console.log('HANDLER-DID-NOT-KILL');
+});
+console.log('RETURNED-NORMALLY');
+`);
+
+    const result = await runChild(script, []);
+
+    expect(result.stdout).not.toContain('HANDLER-DID-NOT-KILL');
+    expect(result.stdout).not.toContain('RETURNED-NORMALLY');
+    expect(result.code).not.toBe(0);
+    expect(fsSync.readFileSync(lockPath, 'utf-8')).toBe(foreign);
   }, 30_000);
 
   it('leaves no lock behind on a normal (unsignalled) run', async () => {
