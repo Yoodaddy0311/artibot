@@ -350,9 +350,14 @@ const BLOCKED_PATTERNS = Object.freeze([
   // OPEN RESIDUAL — NOT FIXED, PENDING AN OWNER DECISION. A line of repeated
   // `git branch ` starts is quadratic before AND after the swap: each start
   // re-scans the rest of the line through the option-run lookaheads. Leader
-  // measurement 2026-09-23 (node v24.15.0, after the swap): rule alone 4.7 /
-  // 22.2 / 92.0 / 378.7 ms at n = 2,500..20,000; 122,880B 15,018 ms rule alone
-  // and 13,143 ms through classifyRisk — past the 5s PreToolUse budget, where a
+  // measurements 2026-09-23 11:21 KST (node v24.15.0, `'git branch '` repeated
+  // to ~2,500 / 5,000 / 10,000 / 20,000B, rounded up to a multiple of 11):
+  // the swap-candidate regex (same source as committed) 4.7 / 22.2 / 92.0 /
+  // 378.7 ms rule alone; the PRE-swap code at 122,880B 15,018 ms rule alone
+  // and 13,143 ms through classifyRisk (the flag tokens do not touch this
+  // shape, so the verdict carries over) — past the 5s PreToolUse budget.
+  // Re-measured on the committed rule, 12:13 KST, same sizes: L2 3.97 / 10.91
+  // / 47.66 / 182.01 ms, L1 4.12 / 10.53 / 38.70 / 156.32 ms. A
   // timed-out hook does not block (fail-open per the host docs; not reproduced
   // live, see CHANGELOG). Any fix (a window, an anchor) changes the accepted
   // language, so it is not part of this swap, and no scaled payload covers the
