@@ -9,8 +9,10 @@
  * SessionEnd dispatcher fans children out and a byte there is a decision
  * channel), the exit status must be 0 on every path, and an import-time throw
  * must be caught. None of that is observable from an in-process call. The one
- * exception is the `registeredEvidenceIds` helper's contract (the folded-line
+ * exception is the `registeredEvidenceIds` wrapper's contract (the folded-line
  * and throwing-port cases), which is a function property and is called directly.
+ * How the ids are collected is `citedEvidenceIds`'s, tested in
+ * `tests/verification/evidence-registry.test.js`.
  *
  * THE CHILD IS SPAWNED DIRECTLY, NEVER `_sessionend-dispatcher.js`. That is the
  * `tests/firewall/dispatcher-cwd-sandbox-required.test.js` ratchet: a suite that
@@ -59,7 +61,7 @@ import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { missionMutator } from '../../lib/runtime/middleware/tasks.js';
 import { buildVerifyCompletedEvents, recordVerification } from '../../lib/verification/verify-writer.js';
 import {
-  evidenceRegistryPath, lookupEvidenceIds, readEvidenceIds, registerEvidence,
+  citedEvidenceIds, evidenceRegistryPath, lookupEvidenceIds, readEvidenceIds, registerEvidence,
 } from '../../lib/verification/evidence-registry.js';
 import { checkArtifactHealth, CheckStatus } from '../../lib/project-state/doctor-checks.js';
 import { BlockCode } from '../../lib/runtime/artifact-lifecycle-gates.js';
@@ -790,21 +792,44 @@ describe('evidence_refs — registry ids by content hash (SH-15b)', () => {
     expect(registerEvidence(stored.data.evidence, {
       projectRoot: repo, source: 'folded', ...registryOpts(),
     }).ids).toEqual(['E-001']);
-    const d = { lookupEvidenceIds, resolveGitCommonDir };
+    const d = { citedEvidenceIds, resolveGitCommonDir };
     expect(lookupEvidenceIds(repo, stored.data.evidence, registryOpts())).toEqual(['E-001']);
 
     expect(registeredEvidenceIds(d, repo, history, VERIFICATION_ID)).toEqual([]);
     expect(registeredEvidenceIds(d, repo, history, longId)).toEqual([]);
   });
 
-  it('turns a throwing or malformed lookup, or no verification id, into []', () => {
+  it('(ix) cites evidence the ledger REDACTED: the stored form is what gets registered and found', () => {
+    seedMission();
+    // Built at run time so no scanner reads a credential in this file.
+    const raw = { kind: 'command', command: 'curl -H auth', output: `Authorization: Bearer ${'abcDEF123'.repeat(4)}` };
+    const reg = seedVerifyWithEvidence(missionId, { evidence: [raw] });
+    expect(reg.evidence.ids).toEqual(['E-001']);
+    seedGatesOpen();
+    // Positive control: redaction really changed the entry the ledger stored.
+    const stored = readRunLedger(repo).find((l) => l.data?.layer === 'deterministic').data.evidence[0];
+    expect(stored).not.toEqual(raw);
+    expect(stored.output).toContain('[REDACTED_');
+    expect(stored.output).not.toContain('abcDEF123');
+    // No row hashes the raw form, so nothing confirms what the ledger hid.
+    expect(lookupEvidenceIds(repo, [raw], registryOpts())).toEqual([]);
+    expect(lookupEvidenceIds(repo, [stored], registryOpts())).toEqual(['E-001']);
+
+    expect(runAndParse().parsed.outcome.evidenceRefs).toEqual(['E-001']);
+  });
+
+  it('maps a throwing, null or missing lookup to [] (the hook half of the contract)', () => {
     const history = [{ event: 'verify.completed', data: { verification_id: 'v', evidence: EVIDENCE } }];
-    const throwing = { lookupEvidenceIds: () => { throw new Error('boom'); }, resolveGitCommonDir };
+    const throwing = { citedEvidenceIds: () => { throw new Error('boom'); }, resolveGitCommonDir };
     expect(registeredEvidenceIds(throwing, repo, history, 'v')).toEqual([]);
-    expect(registeredEvidenceIds({ lookupEvidenceIds: () => null }, repo, history, 'v')).toEqual([]);
+    expect(registeredEvidenceIds({ citedEvidenceIds: () => null }, repo, history, 'v')).toEqual([]);
     expect(registeredEvidenceIds({}, repo, history, 'v')).toEqual([]);
-    expect(registeredEvidenceIds({ lookupEvidenceIds }, repo, history, null)).toEqual([]);
-    expect(registeredEvidenceIds({ lookupEvidenceIds }, repo, null, 'v')).toEqual([]);
+    // The call passes the hook's own git port through.
+    const seen = [];
+    registeredEvidenceIds({
+      citedEvidenceIds: (...args) => { seen.push(args); return ['E-009']; }, resolveGitCommonDir,
+    }, repo, history, 'v');
+    expect(seen).toEqual([[history, 'v', { projectRoot: repo, resolveGitCommonDir }]]);
   });
 });
 

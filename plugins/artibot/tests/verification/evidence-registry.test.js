@@ -44,7 +44,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import { buildVerifyCompletedEvents, recordVerification } from '../../lib/verification/verify-writer.js';
+import { evidenceRegistryPort } from '../../scripts/ledger/record-verify.mjs';
 import {
+  citedEvidenceIds,
+  EVIDENCE_BOUND_COMMAND,
   evidenceHash,
   evidenceRegistryPath,
   lookupEvidenceIds,
@@ -383,6 +388,99 @@ describe('lookupEvidenceIds', () => {
     registerEvidence([cmd()], { projectRoot: root, source: SOURCE, now: AT, resolveGitCommonDir: port });
     expect(lookupEvidenceIds(root, [cmd()], { resolveGitCommonDir: port })).toEqual(['E-001']);
     expect(lookupEvidenceIds(root, [cmd()])).toEqual([]);
+  });
+});
+
+describe('citedEvidenceIds', () => {
+  const VID = 'v1-000000000000-20260923T030000Z';
+  const row = (evidence, over = {}) => ({
+    event: 'verify.completed', data: { layer: 'deterministic', result: 'pass', evidence, verification_id: VID, ...over },
+  });
+  const cite = (history, vid = VID) => citedEvidenceIds(history, vid, { projectRoot: root });
+
+  it('reads EVERY row of the verification, not only the last one', () => {
+    reg([cmd('a'), file()]);
+    // The last row is the operational line with no evidence: the lastOf trap.
+    const history = [row([file()]), row([cmd('a')], { layer: 'behavioral' }), row([], { layer: 'operational' })];
+    expect(cite(history)).toEqual(['E-002', 'E-001']);
+  });
+
+  it('cites only the given verification, and only verify.completed rows', () => {
+    reg([cmd('a'), cmd('b')]);
+    const history = [
+      row([cmd('a')], { verification_id: 'v-other' }),
+      { event: 'review.completed', data: { verification_id: VID, evidence: [cmd('a')] } },
+      row([cmd('b')]),
+    ];
+    expect(cite(history)).toEqual(['E-002']);
+  });
+
+  it('omits a FOLDED row, which has lost its verification_id', () => {
+    reg([cmd('a')]);
+    const folded = row([cmd('a')]);
+    delete folded.data.verification_id;
+    delete folded.data.layer;
+    folded.data.evidence_refs = ['ledger-fold:dropped=layer,verification_id'];
+    expect(cite([folded])).toEqual([]);
+  });
+
+  it('gives [] for no verification id or no history, and null for an unreadable registry', () => {
+    expect(cite([row([cmd()])], null)).toEqual([]);
+    expect(cite([row([cmd()])], '  ')).toEqual([]);
+    expect(cite(undefined)).toEqual([]);
+    expect(cite([row('not an array')])).toEqual([]);
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    expect(cite([row([cmd()])])).toBeNull();
+  });
+
+  /**
+   * Evidence too large for one ledger line, so `verify-writer.js#fitLine`
+   * drops entries from the end and appends its count marker. `command` is an
+   * identity field the writer never shortens, so only dropping can make it fit.
+   */
+  const oversized = () => Array.from({ length: 30 }, (_, i) => ({
+    kind: 'command', command: `npx vitest run tests/case-${i}/${'segment/'.repeat(25)}`,
+  }));
+  const trimmedVerdict = () => ({
+    verification_id: VID, status: 'PASS', evidence: [],
+    layers: [
+      { layer: 'deterministic', status: 'PASS', evidence: oversized() },
+      { layer: 'behavioral', status: 'PASS', evidence: [] },
+      { layer: 'operational', status: 'PASS', evidence: [] },
+    ],
+  });
+
+  it('spells the drop marker exactly as the writer builds it (drift pin)', () => {
+    const built = buildVerifyCompletedEvents(trimmedVerdict(), { sessionId: 'sess-er-01' });
+    expect(built.ok).toBe(true);
+    const evidence = built.inputs.find((i) => i.data.layer === 'deterministic').data.evidence;
+    const markers = evidence.filter((e) => e.command === EVIDENCE_BOUND_COMMAND);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].kind).toBe('command');
+    expect(evidence.at(-1)).toBe(markers[0]);
+    expect(evidence.length).toBeGreaterThan(1);
+    expect(evidence.length).toBeLessThan(31);
+  });
+
+  it('never cites the drop marker, although the production port registers it', () => {
+    const res = recordVerification(trimmedVerdict(), { sessionId: 'sess-er-01' }, {
+      append: (input) => appendLedgerEvent(root, input),
+      registerEvidence: evidenceRegistryPort(root),
+    });
+    expect(res.appended).toBe(4);
+    const history = readAllEvents(root);
+    const stored = history.find((e) => e.data?.layer === 'deterministic').data.evidence;
+    const marker = stored.at(-1);
+    expect(marker.command).toBe(EVIDENCE_BOUND_COMMAND);
+    const [markerId] = lookupEvidenceIds(root, [marker]);
+    // The marker IS registered: one row per stored entry, the marker included.
+    expect(readEvidenceIds(root)).toHaveLength(stored.length);
+    expect(readEvidenceIds(root)).toContain(markerId);
+
+    const cited = citedEvidenceIds(history, VID, { projectRoot: root });
+    expect(cited).toEqual(lookupEvidenceIds(root, stored.slice(0, -1)));
+    expect(cited).toHaveLength(stored.length - 1);
+    expect(cited).not.toContain(markerId);
   });
 });
 

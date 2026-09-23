@@ -590,9 +590,13 @@ that a write was lost. Phase 0 is Observe: report, never repair.
   correct verdict for an E-id that does not resolve. The outcome hook never
   writes such a ref: `scripts/hooks/mission-complete-record.js#registeredEvidenceIds`
   resolves ids read-only by content hash
-  (`lib/verification/evidence-registry.js#lookupEvidenceIds`) and mints none.
+  (`lib/verification/evidence-registry.js#citedEvidenceIds`, through
+  `lib/verification/evidence-registry.js#lookupEvidenceIds`) and mints none.
   A registration lost at Stop, a lock timeout for one, shows up as an id
-  omitted from `outcome.md`, never as a fail here.
+  omitted from `outcome.md`, never as a fail here. The count marker the verify
+  writer leaves when it trims evidence to fit a ledger line
+  (`command: verify-writer:evidence-bound`) is registered but never cited,
+  because it records what was dropped and is not evidence.
 - **Refs written in another namespace.** Item 9 resolves refs only against
   E-nnn registry ids, and it FAILS every other ref on purpose. The outcome
   producer writes only registry ids into `evidence_refs`. Its `ledger:<key>`

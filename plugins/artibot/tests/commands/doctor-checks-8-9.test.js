@@ -1412,8 +1412,15 @@ describe('Check 9 item 9 resolves evidence_refs against the registry (SH-15)', (
     it('says the hook resolves ids read-only, so a lost registration is an omission (SH-15b)', () => {
       const s = nine();
       expect(s).toContain('`scripts/hooks/mission-complete-record.js#registeredEvidenceIds`');
+      expect(s).toContain('`lib/verification/evidence-registry.js#citedEvidenceIds`');
       expect(s).toContain('`lib/verification/evidence-registry.js#lookupEvidenceIds`');
       expect(s).toMatch(/omitted from `outcome\.md`, never as a fail/);
+    });
+
+    it('says the verify writer drop marker is registered but never cited (SH-15b)', () => {
+      const s = nine();
+      expect(s).toContain('`command: verify-writer:evidence-bound`');
+      expect(s).toMatch(/is registered but never cited/);
     });
 
     it('says [] passes because item 9 is not a presence rule, with a dated live figure (SH-15b)', () => {
