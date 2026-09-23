@@ -23,8 +23,10 @@
  *
  * **L5, importing L1 only** (design §1-8): `./artifact-lifecycle-gates.js`,
  * which this file layers on top of and which imports nothing itself, plus
- * `../core/file.js` for the crash-safe write primitive — a temp-file + rename
- * that already exists rather than a second copy of it here.
+ * `../core/file.js` for the crash-safe write primitive — an EXCLUSIVE create
+ * (`atomicCreateTextSync`) that already exists rather than a second copy of it
+ * here. Exclusive, not temp-file + rename: an artifact must never be clobbered,
+ * and rename replaces its destination.
  * `lib/runtime/{event-writer,ledger}.js` (T-20) are **not** imported — events
  * arrive as an argument and redaction as a port, so nothing here depends on a
  * sibling still in flight.
@@ -67,8 +69,8 @@ import {
   isPlainObject,
   isRevision, normaliseProjectMarker,
 } from './artifact-lifecycle-gates.js';
-import { atomicWriteTextSync, ensureDirSync } from '../core/file.js';
-import { existsSync, statSync } from 'node:fs';
+import { atomicCreateTextSync, CreateSkipReason } from '../core/file.js';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 
 // The completion gates and the staleness vocabulary live in the sibling module
@@ -755,16 +757,37 @@ function writeOneArtifact(write, missionsRoot, content) {
   if (!isInsideMissionsDir(missionsRoot, target)) {
     return { skipped: { ...write, reason: SkipReason.PATH_OUTSIDE_MISSIONS_DIR } };
   }
-  if (existsSync(target)) {
-    return { skipped: { ...write, reason: SkipReason.ALREADY_EXISTS } };
-  }
-
+  // EXCLUSIVE CREATE, NOT check-then-write. The previous order asked
+  // `existsSync` and then wrote through a rename, and rename replaces its
+  // destination: a second writer that passed the same check in between had its
+  // bytes destroyed while both writers reported success. Measured against this
+  // module on 2026-09-22 with the competitor released inside the window: 200 of
+  // 200 trials produced a `written` report over somebody else's file.
+  // `atomicCreateTextSync` moves the decision into the kernel, so the only way
+  // to be told ALREADY_EXISTS is for a file to really be there.
+  //
+  // The vocabulary is unchanged: its one refusal maps onto the one this module
+  // already had. An unrecognised refusal becomes WRITE_FAILED rather than a
+  // silent success — ALLOWLIST, so a future member of `CreateSkipReason` cannot
+  // fail open into a `written` report it did not earn.
+  let created;
   try {
-    ensureDirSync(path.dirname(target));
-    atomicWriteTextSync(target, body);
+    created = atomicCreateTextSync(target, body);
   } catch (err) {
     return {
       skipped: { ...write, reason: SkipReason.WRITE_FAILED, error: String(err?.message ?? err) },
+    };
+  }
+  if (created.created !== true) {
+    if (created.reason === CreateSkipReason.ALREADY_EXISTS) {
+      return { skipped: { ...write, reason: SkipReason.ALREADY_EXISTS } };
+    }
+    return {
+      skipped: {
+        ...write,
+        reason: SkipReason.WRITE_FAILED,
+        error: `unrecognised create refusal: ${String(created.reason)}`,
+      },
     };
   }
   return { written: { ...write, bytes: Buffer.byteLength(body, 'utf8') } };

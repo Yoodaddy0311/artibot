@@ -33,6 +33,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteTextSync } from '../../lib/core/file.js';
 import {
   apply,
   APPLY_GATE_PATH,
@@ -559,7 +560,7 @@ describe('per-write refusals (reported, never thrown)', () => {
     const result = runPlan([ev.missionCreated(2), ev.planRevised(5)]);
     expect(result.writes).toHaveLength(2);
 
-    // `lib/core/file.js#atomicWriteTextSync` writes through `fsSync.writeFileSync`,
+    // `lib/core/file.js#atomicCreateTextSync` writes through `fsSync.writeFileSync`,
     // so failing that one property is the honest way to simulate a full disk.
     const real = fs.writeFileSync;
     let calls = 0;
@@ -879,7 +880,7 @@ describe('apply() routes gate 2 through the project gate', () => {
   // POSITIVE CONTROL for the assertion below. Measured 2026-09-21: a plain
   // `vi.spyOn(fs, 'statSync')` counted ZERO here, on the path where the marker
   // probe demonstrably stats — because the module under test uses a NAMED
-  // import (`import { existsSync, statSync } from 'node:fs'`) and patching the
+  // import (`import { statSync } from 'node:fs'`) and patching the
   // default export object does not rebind it. The negative assertion was
   // therefore vacuous: it would have stayed green with a stat on the dry-run
   // path. `syncBuiltinESMExports()` republishes the builtin's named exports
@@ -944,4 +945,141 @@ describe('apply() routes gate 2 through the project gate', () => {
     expect(applyBody).not.toMatch(/artifactLifecycle\?\.enabled/);
     expect(applyBody).toContain('resolveArtifactGate(');
   });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Two writers, one path
+// ---------------------------------------------------------------------------
+
+/**
+ * The window this section exists for is between "is the file there?" and "put
+ * the file there". A competitor is released INSIDE it, deterministically: the
+ * writer under test always reaches its own tmp write first, and the hook below
+ * lands the real target at that exact instant. No sleeps, no wall-clock
+ * scheduling, no flake -- the interleaving is constructed rather than hoped for.
+ *
+ * Every per-trial observation is COUNTED and asserted after the loop rather
+ * than asserted inside it. That is deliberate: an inline `expect` aborts on the
+ * first trial, so a regression would be reported as "trial 0 failed" with no
+ * denominator. Counting first makes the same regression report `0 of 200`, and
+ * it is what lets the pre-change run of this file be a measurement.
+ *
+ * `LEGACY CONTROL` runs the old order (`existsSync` then a rename-based write)
+ * through the same hook and is expected to lose every trial. Without it a zero
+ * here would only prove that the harness never fired.
+ */
+describe('two writers racing for one artifact path', () => {
+  const TRIALS = 200;
+  const CONTROL_TRIALS = 25;
+
+  /**
+   * Run `attempt` with a competitor that creates `target` the moment the writer
+   * under test writes its tmp sibling -- i.e. after it has decided to write and
+   * before it publishes. Fires at most once.
+   */
+  function withCompetitorInWindow(target, competitorBody, attempt) {
+    const real = fs.writeFileSync;
+    let fired = false;
+    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation((file, ...rest) => {
+      const out = real.call(fs, file, ...rest);
+      if (
+        !fired &&
+        typeof file === 'string' &&
+        path.resolve(file) !== target &&
+        path.dirname(path.resolve(file)) === path.dirname(target)
+      ) {
+        fired = true;
+        real.call(fs, target, competitorBody, 'utf8');
+      }
+      return out;
+    });
+    try {
+      return { result: attempt(), fired };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  /** A clean mission directory, so every trial reopens the window. */
+  function clearMissions() {
+    fs.rmSync(path.join(root, ...MISSIONS_DIR), { recursive: true, force: true });
+  }
+
+  it('never lets both writers report success, over 200 trials', () => {
+    let fires = 0;
+    let doubleWrites = 0;
+    let explicitRefusals = 0;
+    let competitorBodySurvived = 0;
+    let noTmpLeftBehind = 0;
+
+    const onlyArtifact = (kind) =>
+      [...MISSIONS_DIR, MISSION_ID, ARTIFACT_BASENAME[kind]].join('/');
+
+    for (let trial = 0; trial < TRIALS; trial += 1) {
+      clearMissions();
+      const target = expectedPath(ArtifactKind.INTENT);
+      const competitorBody = `COMPETITOR ${trial}\n`;
+      const planned = runPlan([ev.missionCreated(2)]);
+
+      const { result: report, fired } = withCompetitorInWindow(target, competitorBody, () =>
+        apply(planned, {
+          dryRun: true,
+          config: ENABLED_CONFIG,
+          write: true,
+          projectRoot: root,
+          content: { [ArtifactKind.INTENT]: INTENT_MD },
+        }),
+      );
+
+      if (fired) fires += 1;
+      if (report.written.length > 0) doubleWrites += 1;
+      if (report.skipped.some((s) => s.reason === SkipReason.ALREADY_EXISTS)) {
+        explicitRefusals += 1;
+      }
+      // The competitor's bytes are the ones that survive, every time.
+      if (fs.readFileSync(target, 'utf8') === competitorBody) competitorBodySurvived += 1;
+      // And no tmp sibling is left lying next to it.
+      const seen = filesUnder(root);
+      if (seen.length === 1 && seen[0] === onlyArtifact(ArtifactKind.INTENT)) {
+        noTmpLeftBehind += 1;
+      }
+    }
+
+    // The harness fired in every trial: a zero below is a measurement, not a
+    // window that never opened.
+    expect(fires).toBe(TRIALS);
+    expect(doubleWrites).toBe(0);
+    expect(explicitRefusals).toBe(TRIALS);
+    expect(competitorBodySurvived).toBe(TRIALS);
+    expect(noTmpLeftBehind).toBe(TRIALS);
+  }, 60_000);
+
+  it('LEGACY CONTROL: check-then-write loses the same race every time', () => {
+    let fires = 0;
+    let clobbered = 0;
+
+    for (let trial = 0; trial < CONTROL_TRIALS; trial += 1) {
+      clearMissions();
+      const target = expectedPath(ArtifactKind.INTENT);
+      const competitorBody = `COMPETITOR ${trial}\n`;
+
+      const { result, fired } = withCompetitorInWindow(target, competitorBody, () => {
+        // The order this limb removed, reproduced here and nowhere else.
+        if (fs.existsSync(target)) return { written: false };
+        atomicWriteTextSync(target, INTENT_MD);
+        return { written: true };
+      });
+
+      if (fired) fires += 1;
+      if (result.written && fs.readFileSync(target, 'utf8') !== competitorBody) {
+        clobbered += 1;
+      }
+    }
+
+    // Both writers believed they had written; only one body survived. This is
+    // the failure the exclusive create removes, and it is what makes the zero
+    // in the test above a measurement rather than a silent no-op.
+    expect(fires).toBe(CONTROL_TRIALS);
+    expect(clobbered).toBe(CONTROL_TRIALS);
+  }, 30_000);
 });

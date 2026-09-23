@@ -358,9 +358,11 @@ function createViaExclusiveOpenSync(filePath, content) {
  * writer had already reported as written.
  *
  * WHAT THIS FUNCTION DOES NOT DO:
- *   - It closes nothing on its own. No caller uses it yet; adopting it at a
- *     call site is a separate decision, and until that happens the apply path
- *     still races.
+ *   - It closes nothing on its own. Adopting it at a call site is a separate
+ *     decision, one call site at a time. The apply path did adopt it
+ *     (`lib/runtime/artifact-lifecycle.js#writeOneArtifact`, 2026-09-22) and no
+ *     longer races; any other caller that still guards a rename with
+ *     `existsSync` does.
  *   - Hard-link atomicity on network filesystems (SMB, NFS) is UNMEASURED
  *     here. The fallback below is weaker still — see
  *     {@link createViaExclusiveOpenSync}.
