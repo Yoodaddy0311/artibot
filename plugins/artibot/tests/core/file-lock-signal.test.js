@@ -170,6 +170,35 @@ console.log('RETURNED-NORMALLY');
     expect(result.code).not.toBe(0);
   }, 30_000);
 
+  it('handler leaves a lock that another owner put in place, and still re-raises', async () => {
+    // Same handler path as above, but by the time the signal lands the lock
+    // file is someone else's (they judged ours stale and took it over). The
+    // handler must check the token rather than unlink whatever is at the path.
+    const target = path.join(tmpDir, 'foreign.json');
+    const lockPath = `${target}.lock`;
+    const foreign = JSON.stringify({ pid: 424242, host: 'elsewhere', token: 'not-ours', timestamp: Date.now() });
+
+    const script = await writeChild('foreign-child.mjs', `
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { withFileLock } from ${JSON.stringify(LOCK_MODULE)};
+
+withFileLock(${JSON.stringify(target)}, () => {
+  unlinkSync(${JSON.stringify(lockPath)});
+  writeFileSync(${JSON.stringify(lockPath)}, ${JSON.stringify(foreign)}, { flag: 'wx' });
+  process.emit('SIGTERM');
+  console.log('HANDLER-DID-NOT-KILL');
+});
+console.log('RETURNED-NORMALLY');
+`);
+
+    const result = await runChild(script, []);
+
+    expect(result.stdout).not.toContain('HANDLER-DID-NOT-KILL');
+    expect(result.stdout).not.toContain('RETURNED-NORMALLY');
+    expect(result.code).not.toBe(0);
+    expect(fsSync.readFileSync(lockPath, 'utf-8')).toBe(foreign);
+  }, 30_000);
+
   it('leaves no lock behind on a normal (unsignalled) run', async () => {
     const target = path.join(tmpDir, 'plain.json');
     const script = await writeChild('plain-child.mjs', `
