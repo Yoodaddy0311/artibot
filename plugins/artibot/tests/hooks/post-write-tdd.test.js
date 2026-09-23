@@ -35,8 +35,13 @@ vi.mock('../../lib/core/hook-utils.js', async () => {
   };
 });
 
+// Same indirection as isArtibotRepoMock: `vi.resetModules()` in beforeEach
+// re-runs the factory, so a vi.fn created inside it would be a different
+// instance from the one a test could read. getRepoRoot() spawns git, so the
+// order tests below count its calls.
+let getRepoRootMock = vi.fn(() => '/fake/repo');
 vi.mock('../../lib/git/repo-root-cache.js', () => ({
-  getRepoRoot: vi.fn(() => '/fake/repo'),
+  getRepoRoot: (...args) => getRepoRootMock(...args),
 }));
 
 const { readStdin, writeStdout, getPluginRoot } = await import('../../scripts/utils/index.js');
@@ -168,6 +173,7 @@ describe('post-write-tdd hook', () => {
     existsSync.mockReturnValue(false);
     // Default: assume we're inside the Artibot repo so the gate proceeds.
     isArtibotRepoMock = vi.fn(() => true);
+    getRepoRootMock = vi.fn(() => '/fake/repo');
   });
 
   it('silently skips when not running inside an Artibot repo', async () => {
@@ -181,6 +187,45 @@ describe('post-write-tdd hook', () => {
     // No advisory token emitted in user projects — the lib/ → tests/ mirror
     // convention is Artibot-internal and would be noise elsewhere.
     expect(writeStdout).not.toHaveBeenCalled();
+    // A lib/ path passes the pure checks, so it is the scope guard that stops
+    // it here — not an earlier return that would make this case vacuous.
+    expect(isArtibotRepoMock).toHaveBeenCalledTimes(1);
+  });
+
+  // getRepoRoot() spawns git (cmd.exe + git on Windows) under a 2000ms
+  // dispatcher budget, so a path the pure checks already reject must not pay
+  // for it. Measured on the posttooluse dispatcher suite's own payload, x.js.
+  it.each(['Edit', 'Write'])('does not resolve the repo root for a non-lib %s', async (tool) => {
+    readStdin.mockResolvedValue(makeHookData(tool, 'x.js'));
+
+    await runHook();
+
+    expect(getRepoRootMock).toHaveBeenCalledTimes(0);
+    expect(isArtibotRepoMock).not.toHaveBeenCalled();
+    expect(writeStdout).not.toHaveBeenCalled();
+  });
+
+  // A non-string file_path throws in normalizePath(). Outside the Artibot repo
+  // it used to be dropped by the scope guard first, silently; moving the pure
+  // checks ahead of the guard must not turn it into an error line there.
+  it('stays silent for a non-string file_path outside an Artibot repo', async () => {
+    isArtibotRepoMock = vi.fn(() => false);
+    readStdin.mockResolvedValue(JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: 5 } }));
+
+    await expect(runHook()).resolves.toBeUndefined();
+    expect(isArtibotRepoMock).toHaveBeenCalledTimes(1);
+    expect(writeStdout).not.toHaveBeenCalled();
+  });
+
+  // Positive control for the non-lib pins above: the counted mock is the one the hook
+  // actually calls, so a zero there is a measurement, not a disconnected spy.
+  it('still resolves the repo root once for a lib path', async () => {
+    readStdin.mockResolvedValue(makeHookData('Edit', '/project/lib/foo.js'));
+
+    await runHook();
+
+    expect(getRepoRootMock).toHaveBeenCalledTimes(1);
+    expect(isArtibotRepoMock).toHaveBeenCalledWith('/fake/repo');
   });
 
   it('suggests TDD when lib file has no test mirror', async () => {

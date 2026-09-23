@@ -35,6 +35,20 @@ import { createStateStore } from '../../lib/project-state/state-manager.js';
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'post-compact-rehydrate.js');
 
+/**
+ * The per-call git budget the spawned hook gets here. The shipped 2000ms is
+ * sized for an idle machine inside the 8s hook budget; under CPU contention
+ * one `rev-parse` was measured past it (ETIMEDOUT → branch unknown → refused),
+ * which is a property of the machine, not of the identity check under test.
+ */
+const TEST_GIT_TIMEOUT_MS = 10000;
+/**
+ * Kill budget for a hook child: above the two git calls' worst case
+ * (2 × {@link TEST_GIT_TIMEOUT_MS}) so a slow run still reports its reasons,
+ * and below vitest's 30s `testTimeout`.
+ */
+const SPAWN_TIMEOUT_MS = 25000;
+
 /** @type {string} */ let home = '';
 /** @type {string} */ let repo = '';
 /** @type {string} */ let head = '';
@@ -59,11 +73,11 @@ function runHook(payload, envExtra = {}) {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
-    ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true }),
+    ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true, gitTimeoutMs: TEST_GIT_TIMEOUT_MS }),
     ...envExtra,
   };
   const r = spawnSync(process.execPath, [SCRIPT], {
-    cwd: repo, env, input: JSON.stringify(payload), encoding: 'utf-8', windowsHide: true, timeout: 20000,
+    cwd: repo, env, input: JSON.stringify(payload), encoding: 'utf-8', windowsHide: true, timeout: SPAWN_TIMEOUT_MS,
   });
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
 }
@@ -113,15 +127,41 @@ afterAll(() => {
 
 describe('resolveLifecycle (pure)', () => {
   it('defaults ship OFF; config and env overlay in that order; bad values fall back', () => {
-    // `supervisorStoreDir` is additive (PR-CX02) and ships null; every other
-    // default and every precedence rule below is unchanged.
-    expect(LIFECYCLE_DEFAULTS).toEqual({ enabled: false, postCompactRehydrate: true, maxRehydrateBytes: 10240, supervisorStoreDir: null });
-    expect(resolveLifecycle(null, {})).toEqual({ enabled: false, postCompactRehydrate: true, maxRehydrateBytes: 10240, supervisorStoreDir: null });
+    // `supervisorStoreDir` (PR-CX02, ships null) and `gitTimeoutMs` (ships
+    // 2000, the value the hook hard-coded before it became a key) are
+    // additive; every other default and every precedence rule below is unchanged.
+    const shipped = { enabled: false, postCompactRehydrate: true, maxRehydrateBytes: 10240, supervisorStoreDir: null, gitTimeoutMs: 2000 };
+    expect(LIFECYCLE_DEFAULTS).toEqual(shipped);
+    expect(resolveLifecycle(null, {})).toEqual(shipped);
     expect(resolveLifecycle({ split: { contextLifecycle: { enabled: true, maxRehydrateBytes: 4096 } } }, {}))
-      .toEqual({ enabled: true, postCompactRehydrate: true, maxRehydrateBytes: 4096, supervisorStoreDir: null });
+      .toEqual({ ...shipped, enabled: true, maxRehydrateBytes: 4096 });
     expect(resolveLifecycle({ split: { contextLifecycle: { enabled: true } } }, { ARTIBOT_CONTEXT_LIFECYCLE_JSON: '{"postCompactRehydrate":false}' }).postCompactRehydrate).toBe(false);
     expect(resolveLifecycle(null, { ARTIBOT_CONTEXT_LIFECYCLE_JSON: 'not json' }).enabled).toBe(false);
     expect(resolveLifecycle(null, { ARTIBOT_CONTEXT_LIFECYCLE_JSON: '{"enabled":true,"maxRehydrateBytes":"big"}' }).maxRehydrateBytes).toBe(10240);
+  });
+
+  it('gitTimeoutMs takes positive integers only; anything else is the shipped 2000', () => {
+    const overlay = (v) => resolveLifecycle(null, { ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ gitTimeoutMs: v }) }).gitTimeoutMs;
+    expect(overlay(10000)).toBe(10000);
+    expect(overlay(1)).toBe(1);
+    for (const bad of [0, -1, 1.5, '3000', null, true]) expect(overlay(bad), JSON.stringify(bad)).toBe(2000);
+    expect(resolveLifecycle({ split: { contextLifecycle: { gitTimeoutMs: 3000 } } }, {}).gitTimeoutMs).toBe(3000);
+  });
+
+  it('two git calls at the shipped per-call timeout fit inside the hooks.json budget', () => {
+    // `captureCurrentIdentity` runs `rev-parse` twice, sequentially. If both
+    // ran to their timeout the hook must still finish inside the harness's
+    // own budget (seconds in hooks.json), or the host kills it first.
+    const hooks = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf-8')).hooks;
+    const budgets = Object.values(hooks).flat()
+      .flatMap((group) => group.hooks ?? [])
+      .filter((h) => typeof h.command === 'string' && h.command.includes('post-compact-rehydrate.js'))
+      .map((h) => h.timeout);
+    expect(budgets.length).toBeGreaterThanOrEqual(1);
+    for (const seconds of budgets) {
+      expect(Number.isFinite(seconds)).toBe(true);
+      expect(2 * LIFECYCLE_DEFAULTS.gitTimeoutMs).toBeLessThan(1000 * seconds);
+    }
   });
 });
 
@@ -155,7 +195,9 @@ describe('hook process', () => {
     writeSnapshot({ cwd: repo, branch: 'master', head, hasStatus: false });
     const r = runHook(payload());
     expect(r.status).toBe(0);
-    expect(r.stderr).toContain('identity=ok');
+    // On failure the message is the bundle, whose identity line names the reasons.
+    expect(r.stderr, r.stdout).toContain('identity=ok');
+    expect(r.stderr).not.toContain('reasons=');
     const out = JSON.parse(r.stdout);
     expect(Object.keys(out)).toEqual(['systemMessage']);
     const msg = out.systemMessage;
@@ -183,7 +225,8 @@ describe('hook process', () => {
     writeSnapshot({ cwd: repo, branch: 'feature/other', head, hasStatus: true });
     const r = runHook(payload());
     expect(r.status).toBe(0);
-    expect(r.stderr).toContain('identity=refused');
+    expect(r.stderr).toContain('identity=refused reasons=branch mismatch: snapshot feature/other ≠ current master');
+    expect(r.stderr).not.toContain('git.branch='); // git answered; there is no failure to name
     const msg = JSON.parse(r.stdout).systemMessage;
     expect(msg).toContain('identity: REFUSED');
     expect(msg).toContain('branch mismatch: snapshot feature/other ≠ current master');
@@ -196,6 +239,37 @@ describe('hook process', () => {
     expect(json.sections.find((s) => s.name === 'snapshot-work').status).toBe('refused');
   });
 
+  it('a git failure is named on stderr: a non-git cwd refuses with the reason and the git cause', () => {
+    // Before this, `git()` swallowed every failure into null, so a refusal
+    // caused by git itself (a timeout under load, a missing repo) left no
+    // trace outside the temp home the test deletes.
+    const bare = mkdtempSync(path.join(os.tmpdir(), 'pcr-nogit-'));
+    try {
+      writeSnapshot({ cwd: bare, branch: 'master', head, hasStatus: false });
+      // The ceiling stops git from finding a repository above the temp dir.
+      const r = runHook(payload({ cwd: bare }), { GIT_CEILING_DIRECTORIES: path.dirname(bare) });
+      expect(r.status).toBe(0);
+      expect(r.stderr).toContain('identity=refused');
+      expect(r.stderr).toContain('branch unknown on one side');
+      expect(r.stderr).toMatch(/ git\.branch=exit \d+/);
+      const rec = JSON.parse(readFileSync(path.join(home, '.claude', 'artibot-post-compact.json'), 'utf-8'));
+      expect(rec.gitErrors.branch).toMatch(/^exit \d+$/);
+      expect(rec.gitErrors.head).toMatch(/^exit \d+$/);
+      // The record, not the user-visible channel, carries the cause.
+      expect(JSON.parse(r.stdout).systemMessage).not.toContain('git.branch=');
+    } finally { rmSync(bare, { recursive: true, force: true }); }
+  });
+
+  it('the gitTimeoutMs overlay reaches the git calls and is recorded; a clean run records no git error', () => {
+    writeSnapshot({ cwd: repo, branch: 'master', head, hasStatus: false });
+    const r = runHook(payload());
+    expect(r.status).toBe(0);
+    const rec = JSON.parse(readFileSync(path.join(home, '.claude', 'artibot-post-compact.json'), 'utf-8'));
+    expect(rec.gitTimeoutMs).toBe(TEST_GIT_TIMEOUT_MS);
+    expect(rec.gitErrors).toEqual({ branch: null, head: null });
+    expect(rec.identity.ok, JSON.stringify(rec.identity.reasons)).toBe(true);
+  });
+
   it('snapshot from another worktree (cwd) is refused too', () => {
     writeSnapshot({ cwd: path.join(repo, '..', 'some-other-worktree'), branch: 'master', head, hasStatus: false });
     const msg = JSON.parse(runHook(payload()).stdout).systemMessage;
@@ -205,7 +279,9 @@ describe('hook process', () => {
 
   it('maxRehydrateBytes is honoured and truncation is announced', () => {
     writeSnapshot({ cwd: repo, branch: 'master', head, hasStatus: false });
-    const r = runHook(payload({ compact_summary: 's'.repeat(3000) }), { ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true, maxRehydrateBytes: 1500 }) });
+    const r = runHook(payload({ compact_summary: 's'.repeat(3000) }), {
+      ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true, maxRehydrateBytes: 1500, gitTimeoutMs: TEST_GIT_TIMEOUT_MS }),
+    });
     const msg = JSON.parse(r.stdout).systemMessage;
     expect(Buffer.byteLength(msg, 'utf8')).toBeLessThanOrEqual(1500);
     expect(msg).toContain('TRUNCATED');
@@ -216,8 +292,12 @@ describe('hook process', () => {
 
   it('garbage / empty stdin never throws: exit 0, valid JSON out', () => {
     const r = spawnSync(process.execPath, [SCRIPT], {
-      cwd: repo, env: { ...process.env, HOME: home, USERPROFILE: home, ARTIBOT_CONTEXT_LIFECYCLE_JSON: '{"enabled":true}' },
-      input: 'not json', encoding: 'utf-8', windowsHide: true, timeout: 20000,
+      cwd: repo,
+      env: {
+        ...process.env, HOME: home, USERPROFILE: home,
+        ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true, gitTimeoutMs: TEST_GIT_TIMEOUT_MS }),
+      },
+      input: 'not json', encoding: 'utf-8', windowsHide: true, timeout: SPAWN_TIMEOUT_MS,
     });
     expect(r.status).toBe(0);
     expect(() => JSON.parse(r.stdout)).not.toThrow();
@@ -293,7 +373,11 @@ describe('pressure + receipt (PR-CX02)', () => {
    * @returns {Record<string, string>}
    */
   function lifecycleEnv(over = {}) {
-    return { ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true, supervisorStoreDir: store, ...over }) };
+    return {
+      ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({
+        enabled: true, supervisorStoreDir: store, gitTimeoutMs: TEST_GIT_TIMEOUT_MS, ...over,
+      }),
+    };
   }
 
   /**
@@ -633,9 +717,12 @@ describe('mission store binding (SH-16)', () => {
    * @returns {{ stdout: string, stderr: string, status: number|null }} Outcome.
    */
   function run(body) {
-    const env = { ...process.env, HOME: shome, USERPROFILE: shome, ARTIBOT_CONTEXT_LIFECYCLE_JSON: '{"enabled":true}' };
+    const env = {
+      ...process.env, HOME: shome, USERPROFILE: shome,
+      ARTIBOT_CONTEXT_LIFECYCLE_JSON: JSON.stringify({ enabled: true, gitTimeoutMs: TEST_GIT_TIMEOUT_MS }),
+    };
     const r = spawnSync(process.execPath, [SCRIPT], {
-      cwd: sroot, env, input: JSON.stringify(body), encoding: 'utf-8', windowsHide: true, timeout: 20000,
+      cwd: sroot, env, input: JSON.stringify(body), encoding: 'utf-8', windowsHide: true, timeout: SPAWN_TIMEOUT_MS,
     });
     return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
   }

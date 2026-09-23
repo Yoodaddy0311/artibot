@@ -932,6 +932,37 @@ describe('the clock is a port, and a wrong one is refused', () => {
   });
 });
 
+/** Where {@link visitCounter} stops a runaway walk: four node budgets. */
+const VISIT_CAP = 4 * MAX_REDACT_NODES;
+
+/**
+ * Counts the objects {@link redactDeep} opens, without touching the lib.
+ *
+ * The walk reads an object's keys once per fresh visit (`Object.keys` in
+ * `redactChildren`), and a memo hit or a marker returns before that, so a
+ * Proxy `ownKeys` trap fires exactly once per object walked. That is the
+ * quantity the memo and the node budget each claim to bound, read directly
+ * rather than inferred from a clock that also measures the machine.
+ *
+ * The trap throws past {@link VISIT_CAP}, and the walk does not catch, so a
+ * broken bound fails the test in milliseconds instead of hanging it.
+ *
+ * @returns {{visits: number, wrap: (target: object) => object}}
+ */
+function visitCounter() {
+  const counter = { visits: 0 };
+  counter.wrap = (target) => new Proxy(target, {
+    ownKeys(t) {
+      counter.visits += 1;
+      if (counter.visits > VISIT_CAP) {
+        throw new Error(`redaction opened more than ${VISIT_CAP} objects`);
+      }
+      return Reflect.ownKeys(t);
+    },
+  });
+  return counter;
+}
+
 describe('a shared subtree costs one walk, not one per path', () => {
   /**
    * A DAG where every level points at the SAME child twice. `2*depth+1`
@@ -939,24 +970,29 @@ describe('a shared subtree costs one walk, not one per path', () => {
    * the path-scoped cycle guard exponential. No cycle anywhere in it.
    *
    * @param {number} depth
+   * @param {(o: object) => object} [wrap] applied to every object, for counting
    * @returns {object}
    */
-  function sharedDag(depth) {
-    let node = { leaf: 'x' };
-    for (let i = 0; i < depth; i += 1) node = { a: node, b: node };
+  function sharedDag(depth, wrap = (o) => o) {
+    let node = wrap({ leaf: 'x' });
+    for (let i = 0; i < depth; i += 1) node = wrap({ a: node, b: node });
     return node;
   }
 
-  it('redacts a depth-22 shared subtree well inside a time bound', () => {
-    // Measured 2026-09-03 on this machine: ~1 ms with the result memo,
-    // ~2,700 ms without it (56 ms at depth 16, 626 ms at 20 — about 4x per
-    // level). 200 ms sits two orders of magnitude above the memoized time and
-    // an order below the un-memoized one, so it cannot flake on a slow machine
-    // and cannot pass if the memo is removed.
-    const started = performance.now();
-    const out = redactDeep(sharedDag(22));
-    const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(200);
+  it('redacts a depth-22 shared subtree without re-walking what the memo holds', () => {
+    // This used to be a 200 ms clock bound: ~1 ms with the memo, ~2,700 ms
+    // without (2026-09-03). The node budget that landed the same day bounds
+    // the un-memoized walk too — it stops at MAX_REDACT_NODES fresh visits,
+    // which a no-memo mutant finished in 8.6–11.2 ms (3 runs, 2026-09-23) —
+    // so the clock stopped being able to tell the two apart.
+    //
+    // Visits can. Without the memo every node of the result is a fresh walk,
+    // so a truncated result costs exactly MAX_REDACT_NODES visits. With it,
+    // a reused subtree spends budget WITHOUT being walked, so the count lands
+    // strictly below: 2060 here against the no-memo mutant's 4096 (2026-09-23).
+    const counter = visitCounter();
+    const out = redactDeep(sharedDag(22, counter.wrap));
+    expect(counter.visits).toBeLessThan(MAX_REDACT_NODES);
     // Depth 22 is 2^23 nodes expanded, far past the node budget, so the result
     // is truncated rather than complete. That is the correct answer, and the
     // point of the assertion is that it ARRIVES.
@@ -965,8 +1001,12 @@ describe('a shared subtree costs one walk, not one per path', () => {
 
   it('walks a shared subtree in full when it fits the budget', () => {
     // Depth 10 expands to 2^11-1 = 2047 nodes, inside MAX_REDACT_NODES, so
-    // nothing is truncated and the leaf survives down every branch.
-    const out = redactDeep(sharedDag(10));
+    // nothing is truncated and the leaf survives down every branch. With no
+    // marker anywhere, nothing forfeits the memo, so each of the 11 objects
+    // is opened exactly once — the no-memo mutant opens 2047 (2026-09-23).
+    const counter = visitCounter();
+    const out = redactDeep(sharedDag(10, counter.wrap));
+    expect(counter.visits).toBe(11);
     expect(JSON.stringify(out)).not.toContain(BUDGET_MARKER);
     let node = out;
     for (let i = 0; i < 10; i += 1) node = i % 2 === 0 ? node.a : node.b;
@@ -1187,35 +1227,44 @@ describe('the node budget bounds every shape', () => {
    * this is the shape neither the depth bound nor the memo could bound.
    *
    * @param {number} depth
+   * @param {(o: object) => object} [wrap] applied to every object, for counting
    * @returns {object}
    */
-  function cyclicSharedDag(depth) {
+  function cyclicSharedDag(depth, wrap = (o) => o) {
     const leaf = {};
-    let node = leaf;
-    for (let i = 0; i < depth; i += 1) node = { a: node, b: node };
+    let node = wrap(leaf);
+    for (let i = 0; i < depth; i += 1) node = wrap({ a: node, b: node });
     leaf.up = node;
     return node;
   }
 
-  it('finishes a cyclic shared subtree at depth 24 in tens of milliseconds', () => {
+  it('opens at most MAX_REDACT_NODES objects on a cyclic shared subtree at depth 24', () => {
     // Before the budget: 6 ms at depth 14, 19 ms at 16, about 3x per level —
     // so depth 24 was seconds. The memo does not help here by design, because
     // every subtree carries a cycle marker and is therefore not memoizable.
-    const started = performance.now();
-    const out = redactDeep(cyclicSharedDag(24));
-    const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(50);
+    //
+    // Counted, not timed. The 50 ms clock bound this replaces failed once on a
+    // Windows CI runner at 54.8 ms (2026-09-23) for the same walk that takes a
+    // few ms locally — it measured the runner. The visit count is the same on
+    // every machine, and removing the budget sends it past VISIT_CAP.
+    const counter = visitCounter();
+    const out = redactDeep(cyclicSharedDag(24, counter.wrap));
+    expect(counter.visits).toBeLessThanOrEqual(MAX_REDACT_NODES);
     expect(JSON.stringify(out)).toContain(BUDGET_MARKER);
   });
 
-  it('stays bounded as the shape grows, rather than growing with it', () => {
-    // A bound that only holds at the depth someone tested is not a bound.
-    const timings = [16, 24, 40, 80].map((depth) => {
-      const started = performance.now();
-      redactDeep(cyclicSharedDag(depth));
-      return performance.now() - started;
+  it('opens the same bounded number of objects at every depth, rather than growing', () => {
+    // A bound that only holds at the depth someone tested is not a bound. No
+    // subtree here is memoizable, so every visit spends one node and the walk
+    // stops when the budget does: the count is MAX_REDACT_NODES at each depth
+    // (2026-09-23), and a count that tracked depth would break the equality.
+    const visits = [16, 24, 40, 80].map((depth) => {
+      const counter = visitCounter();
+      redactDeep(cyclicSharedDag(depth, counter.wrap));
+      return counter.visits;
     });
-    for (const elapsed of timings) expect(elapsed).toBeLessThan(50);
+    for (const count of visits) expect(count).toBeLessThanOrEqual(MAX_REDACT_NODES);
+    expect(visits).toEqual(visits.map(() => visits[0]));
   });
 
   it('returns something JSON can still serialize, in bounded time', () => {

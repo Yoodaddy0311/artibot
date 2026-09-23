@@ -74,6 +74,7 @@ import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { ledgerFilePath, sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
 import { buildUsageReceipts } from '../../lib/economics/usage-receipt.js';
 import { toUsageReceiptEnvelopes } from '../../lib/economics/receipt-envelope.js';
+import { spawnSyncRetryDllInit, STATUS_DLL_INIT_FAILED } from '../helpers/spawn-retry.js';
 
 // This file spawns child processes. The budget buys headroom for load; nothing
 // here waits on a timer.
@@ -103,11 +104,18 @@ function makeRoot(name) {
   return root;
 }
 
-/** Run the CLI inside a project root. */
-function runCli(args, root) {
-  const res = spawnSync(process.execPath, [CLI, ...args], {
+/**
+ * Run the CLI inside a project root.
+ *
+ * Through `spawnSyncRetryDllInit`: a child that exits 0xC0000142 with no output
+ * died in the Windows loader before the CLI ran, and gets exactly one more
+ * attempt (see the helper). Every assertion still reads the attempt it gets.
+ * `deps.spawn` exists only for the case that pins this routing.
+ */
+function runCli(args, root, deps = {}) {
+  const res = spawnSyncRetryDllInit(process.execPath, [CLI, ...args], {
     encoding: 'utf-8', windowsHide: true, cwd: root, env: { ...process.env },
-  });
+  }, deps);
   return { status: res.status, stdout: String(res.stdout || ''), stderr: String(res.stderr || '') };
 }
 
@@ -439,6 +447,36 @@ describe('session-coverage: what it refuses to answer', () => {
     expect(printed.census.file.readable).toBe(false);
     expect(printed.ended).toBe(0);
     expect(printed.coverage).toBeNull();
+  });
+});
+
+describe('session-coverage: the spawn itself', () => {
+  it('retries one empty 0xC0000142 exit, and the retry runs the real CLI', () => {
+    const root = makeRoot('L');
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    // First attempt: the loader failure as observed (exit 0xC0000142, 0 bytes
+    // out). Second: the real spawn, so parseOne below checks a real run.
+    const spawn = vi.fn((...call) => (spawn.mock.calls.length === 1
+      ? { status: STATUS_DLL_INIT_FAILED, signal: null, stdout: '', stderr: '' }
+      : spawnSync(...call)));
+
+    let printed;
+    let notices;
+    try {
+      printed = parseOne(runCli(['--cwd', root], root, { spawn }));
+    } finally {
+      // Read before restoring: mockRestore() also clears the recorded calls.
+      notices = stderrSpy.mock.calls.map(([s]) => String(s)).filter((s) => s.startsWith('[spawn-retry]'));
+      stderrSpy.mockRestore();
+    }
+
+    // Two calls means runCli goes through spawnSyncRetryDllInit; a runCli that
+    // called spawnSync directly would never touch the injected function.
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[0][0]).toBe(process.execPath);
+    expect(spawn.mock.calls[0][1][0]).toBe(CLI);
+    expect(printed.ended).toBe(0);
+    expect(notices).toHaveLength(1);
   });
 });
 

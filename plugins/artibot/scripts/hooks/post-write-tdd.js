@@ -94,18 +94,26 @@ export async function main() {
   const filePath = extractFilePath(hookData);
   if (!filePath) return;
 
+  // A non-string file_path throws in normalizePath(). Letting it reach that
+  // only past the scope guard keeps such a payload silent outside the Artibot
+  // repo, as it was before the pure checks below moved ahead of the guard.
+  if (typeof filePath !== 'string' && !isArtibotRepo(getRepoRoot())) return;
+
+  // Pure path checks run before the scope guard: getRepoRoot() spawns git
+  // (cmd.exe + git on Windows) inside a 2000ms dispatcher budget, and most
+  // Edit/Write targets are not lib/ files.
+  const normalized = normalizePath(filePath);
+  if (!isLibSourceFile(normalized)) return;
+
+  const libRelative = extractLibRelative(normalized);
+  if (!libRelative) return;
+
   // Artibot scope guard: this advisory only makes sense inside the Artibot
   // plugin repo (where the lib/ → tests/ mirror convention is enforced).
   // In unrelated user projects, every lib/*.js Edit was emitting noisy
   // [artibot:suggest-tdd ...] tokens against directory layouts that do not
   // follow this convention.
   if (!isArtibotRepo(getRepoRoot())) return;
-
-  const normalized = normalizePath(filePath);
-  if (!isLibSourceFile(normalized)) return;
-
-  const libRelative = extractLibRelative(normalized);
-  if (!libRelative) return;
 
   const testRelative = expectedTestPath(libRelative);
   const absoluteTestPath = resolveFromPluginRoot(testRelative);
