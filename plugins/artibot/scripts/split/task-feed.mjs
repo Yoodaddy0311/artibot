@@ -118,18 +118,23 @@ function skipped(reason) {
  * The mutator is `(cur) => cur` — PRESERVING. `updateMission` writes whatever
  * the mutator returns, so composing a title or an intent here would overwrite
  * the dispatching session's own mission with this script's idea of it.
+ * That same mutator is why the mission is re-checked after the re-read: on a
+ * row removed in between it returns null, and `updateMission` writes null as
+ * a `mission.remove` — a feed write that deletes instead of seeding.
  *
  * @param {object} store - StateStore.
  * @param {object} state - The snapshot the mission was selected from.
  * @param {string} missionId - Mission id.
  * @param {object|null} plan - Parsed `plan.json`.
  * @param {string} limb - The dispatched limb.
- * @returns {{merged: object, commit: object|null}} The last merge, and its commit
+ * @returns {{merged: object|null, commit: object|null}} The last merge, and its commit
  *   result (null when nothing was written: an unchanged merge, or no `limb` task).
+ *   `merged` is null when the mission was gone at the re-read.
  */
 function mergeAndWrite(store, state, missionId, plan, limb) {
   let snapshot = state;
   for (let attempt = 0; ; attempt += 1) {
+    if (!snapshot.active_missions?.[missionId]) return { merged: null, commit: null };
     const graph = snapshot.task_graphs?.[missionId] ?? null;
     const merged = mergeLimbTasks({ graph, plan, missionId, now: new Date() });
     // A limb absent from the merge is skipped by the caller; seed nothing for it.
@@ -210,6 +215,7 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId }, 
     if (!missionId || !state.active_missions?.[missionId]) return skipped('no-mission');
 
     const { merged, commit } = mergeAndWrite(store, state, missionId, plan, limb);
+    if (!merged) return skipped('no-mission');
     const task = merged.graph.tasks.find((t) => t.id === limb);
     if (!task) return skipped('limb-not-in-plan');
 
