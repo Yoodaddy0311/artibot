@@ -81,13 +81,15 @@ export const DANGEROUS_PATTERNS = Object.freeze([
   // whitespace — so L1 and L2 share this boundary; see the git-branch-delete
   // comment in lib/core/blocked-patterns.js and the parity matrix row.
   // Run tokens stay unambiguous: the option branch demands a dash then \w, the
-  // argument branch forbids a leading dash, and the continuation branch starts
-  // with a backslash (never whitespace), so no token or separator can parse two
-  // ways and the scan is linear (120KB adversarial input < 5ms, measured).
+  // argument branch forbids a leading dash, the continuation branch starts with
+  // a backslash, and each flag token's first run excludes its mandatory letter
+  // (D / d / f, 2026-09-23 swap), so one long flag run is linear. A line of
+  // repeated `git branch ` starts is STILL quadratic (open residual) — numbers
+  // in the git-branch-delete comment of lib/core/blocked-patterns.js.
   {
     id: 'git-branch-delete',
     level: 'danger',
-    test: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-z]*f[a-z]*)(?![\w-])))/,
+    test: /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-CE-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-ce-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-eg-z]*f[a-z]*)(?![\w-])))/,
     reason: 'Force-delete git branch (-D / --delete --force)',
   },
   { id: 'git-reset-hard', level: 'danger', test: /\bgit\s+reset\s+--hard\b/i, reason: 'git reset --hard discards work' },

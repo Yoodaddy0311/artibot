@@ -1466,6 +1466,21 @@ const SCALED_PAYLOADS = [
   // 양성 대조군 — 실패형만 재면 "안 걸려서 빨랐다"와 구별되지 않는다. 런이
   // 유효한 플래그 토큰으로 끝나고 타깃이 뒤에 오면 규칙이 실제로 매치한다.
   ['rm flag run (matching)', (n) => `rm -${'r'.repeat(n - 8)}f /x`],
+  // 2026-09-23 (guard-branch-delete-redos) — 같은 모양의 **브랜치 삭제 플래그 런**.
+  // git-branch-delete 의 세 토큰 `-[a-zA-Z]*D[a-zA-Z]*` · `-[a-z]*d[a-z]*` ·
+  // `-[a-z]*f[a-z]*` 가 위 rm 토큰과 같은 "필수 글자를 낀 star 런 둘" 이었다.
+  // 형 선정은 rm 행과 같다 — quantifier 마다 긴 단일 런, 꼬리 `_` 로 모든 갈래 실패.
+  //   force 런은 `-d` 뒤에 둬야 도달한다(삭제 lookahead 가 먼저 평가된다). 그냥
+  //   `git branch -` + 'f'×n 은 수리 전에도 선형이다 — 증명력 0 이라 쓰지 않는다.
+  //   `-f` 뒤의 d 런은 삭제 쪽 런을 force 가 이미 있는 문맥에서 한 번 더 민다.
+  // 수리 전후 수치는 lib/core/blocked-patterns.js 의 git-branch-delete 주석이 정본.
+  ['branch delete run (d)', (n) => `git branch -${'d'.repeat(n - 13)}_`],
+  ['branch force-delete run (D)', (n) => `git branch -${'D'.repeat(n - 13)}_`],
+  ['branch force run (reachable)', (n) => `git branch -d -${'f'.repeat(n - 16)}_`],
+  ['branch delete run behind -f', (n) => `git branch -f -${'d'.repeat(n - 16)}_`],
+  // 양성 대조군 — 런이 유효한 번들(`-dd…df`, `-DD…Dv`)로 끝나면 규칙이 매치한다.
+  ['branch delete run (matching)', (n) => `git branch -${'d'.repeat(n - 19)}f topic`],
+  ['branch force-delete run (matching)', (n) => `git branch -${'D'.repeat(n - 19)}v topic`],
   // 2026-09-14 ② — sql-delete-no-where 는 종전에 SCAN_ALLOWLIST 에 있어 정적
   // 스캔 밖이었고 여기에도 payload 가 없었다. 즉 **3층 중 어느 층도 이 규칙을
   // 보지 않았다.** 그 상태에서 옛 식은 2차식이었다. 이제 (i) 스캔 대상이고
@@ -1591,6 +1606,13 @@ describe('classifyRisk — 크기를 키워도 성장 비율이 선형 범위 �
     ['rm flag run (r)', (/** @type {number} */ n) => `rm -${'r'.repeat(n - 5)}_`, 'safe'],
     ['rm force run (reachable)', (/** @type {number} */ n) => `rm -r -${'f'.repeat(n - 8)}_`, 'safe'],
     ['rm flag run (matching)', (/** @type {number} */ n) => `rm -${'r'.repeat(n - 8)}f /x`, 'danger'],
+    // 2026-09-23 브랜치 삭제 플래그 런. 실패형 넷 + 양성 대조군 둘.
+    ['branch delete run (d)', (/** @type {number} */ n) => `git branch -${'d'.repeat(n - 13)}_`, 'safe'],
+    ['branch force-delete run (D)', (/** @type {number} */ n) => `git branch -${'D'.repeat(n - 13)}_`, 'safe'],
+    ['branch force run (reachable)', (/** @type {number} */ n) => `git branch -d -${'f'.repeat(n - 16)}_`, 'safe'],
+    ['branch delete run behind -f', (/** @type {number} */ n) => `git branch -f -${'d'.repeat(n - 16)}_`, 'safe'],
+    ['branch delete run (matching)', (/** @type {number} */ n) => `git branch -${'d'.repeat(n - 19)}f topic`, 'danger'],
+    ['branch force-delete run (matching)', (/** @type {number} */ n) => `git branch -${'D'.repeat(n - 19)}v topic`, 'danger'],
   ])('terminates on a %s at 10K/20K/40K/120K', (_name, build, level) => {
     for (const size of [10_240, 20_480, 40_962, 122_880]) {
       const payload = build(size);
@@ -1718,6 +1740,124 @@ describe('flag lookahead — 토큰 교체가 언어를 바꾸지 않는다', ()
       expect(oldRe.source).not.toBe(currentRe.source);
       expect(oldRe.source).toMatch(/\[a-z\]\*\[?[rf]\]?\[a-z\]\*|\\w\*[rf]\\w\*|\\w\*\[rf\]\\w\*/);
     }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 언어 보존 차분 검증 — git-branch-delete (2026-09-23, guard-branch-delete-redos).
+//
+// 위 rm 블록과 같은 방법이다. 2026-09-23 교체는 세 토큰의 **첫 런에서 필수 글자만
+// 뺀다** — `-[a-zA-Z]*D` → `-[a-zA-CE-Z]*D`, `-[a-z]*d` → `-[a-ce-z]*d`,
+// `-[a-z]*f` → `-[a-eg-z]*f`. 이 규칙은 /i 가 **없다**(오너 결정 2026-09-11 ④,
+// `-D` 는 일부러 대소문자 구분). 그래서 rm 과 달리 클래스가 접히지 않고, 대문자
+// `D` 와 소문자 `d` 는 서로 다른 글자다 — 알파벳에 둘 다 넣어 그 비대칭을 민다.
+//
+// 동결 사본은 교체 **직전**(2026-09-23, master 200ea54f) 소스를 손으로 박은 것이다.
+// L1 과 L2 가 바이트 동일이므로 사본 하나로 두 층을 대조한다.
+//
+// 이 게이트가 못 보는 것: 길이 5 까지의 토큰, 아래 템플릿 안의 문맥만 본다.
+// 그리고 **언어**만 본다 — 성능은 SCALED_PAYLOADS 의 `branch …` 행이 맡는다.
+const FROZEN_OLD_BRANCH_DELETE =
+  /\b[gG][iI][tT](?:[^\S\n]|\\\r?\n)+branch\b(?:(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+-[a-zA-Z]*D[a-zA-Z]*(?![\w-]))|(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--delete|-[a-z]*d[a-z]*)(?![\w-]))(?=(?:(?:[^\S\n]|\\\r?\n)+(?:--?\w[^\s;&|]*|[^\s;&|-][^\s;&|]*))*(?:[^\S\n]|\\\r?\n)+(?:--force|-[a-z]*f[a-z]*)(?![\w-])))/;
+
+/** 브랜치 플래그 알파벳. `d`/`D` 대소 비대칭, `f`/`F`(F 는 force 가 아니다),
+ * 필수 글자가 아닌 글자 `x`, 그리고 `\w`·`[a-zA-Z]` 경계와 `(?![\w-])` 꼬리를
+ * 건드리는 `9`·`_`·`-`.
+ * @type {readonly string[]} */
+const BRANCH_FLAG_ALPHABET = Object.freeze(['d', 'D', 'f', 'F', 'x', '9', '_', '-']);
+
+/** 토큰 `t` 는 대시 뒤에 붙는다(`-t`). 첫 행들은 토큰이 유일한 플래그인 형,
+ * 그다음은 다른 쪽 필수 플래그가 이미 있는 형(교체한 두 런이 각각 단독으로
+ * 판정을 가르는 자리), 그다음은 런 경계(구분자·줄바꿈·줄 연속) 형이다.
+ * @type {readonly ((t: string) => string)[]} */
+const BRANCH_TEMPLATES = Object.freeze([
+  (t) => `git branch -${t}`,
+  (t) => `git branch -${t} topic`,
+  (t) => `git branch topic -${t}`,
+  (t) => `GIT branch -${t}`,
+  (t) => `git branch -d -${t}`,
+  (t) => `git branch -f -${t}`,
+  (t) => `git branch --delete -${t}`,
+  (t) => `git branch --force -${t}`,
+  (t) => `git branch -${t} -d`,
+  (t) => `git branch -${t} -f`,
+  (t) => `git branch -${t}; echo -f`,
+  (t) => `git branch -${t}\necho -f`,
+  (t) => `git branch -${t} ${BACKSLASH}\n -f`,
+  (t) => `git branch -d ${BACKSLASH}\r\n -${t}`,
+]);
+
+describe('git-branch-delete — 토큰 교체가 언어를 바꾸지 않는다', () => {
+  const l2 = DANGEROUS_PATTERNS.find((r) => r.id === 'git-branch-delete');
+  const l1 = BLOCKED_PATTERNS.find((p) => p.label === 'git branch -D (force delete)');
+
+  /** @type {string[]} */
+  const tokens = [''];
+  let frontier = [''];
+  for (let len = 1; len <= 5; len++) {
+    const next = frontier.flatMap((t) => BRANCH_FLAG_ALPHABET.map((c) => t + c));
+    tokens.push(...next);
+    frontier = next;
+  }
+
+  it('enumerates 37,449 tokens x 14 templates = 524,286 commands per layer', () => {
+    expect(tokens).toHaveLength(37_449);
+    expect(tokens.length * BRANCH_TEMPLATES.length).toBe(524_286);
+  });
+
+  // 드리프트 게이트. 포크밤 핀과 같은 이유 — 두 층이 같은 판정을 한다는 것이
+  // 이 규칙의 값이고, 바이트가 갈라지면 아래 차분도 한쪽만 증명하게 된다.
+  it('keeps the L2 and L1 sources byte-identical', () => {
+    expect(l2).toBeDefined();
+    expect(l1).toBeDefined();
+    expect(l2.test.source).toBe(l1.pattern.source);
+    expect(l2.test.flags).toBe(l1.pattern.flags);
+  });
+
+  it.each([
+    ['L2 git-branch-delete', () => l2.test],
+    ['L1 git branch -D (force delete)', () => l1.pattern],
+  ])('%s: frozen old rule and current rule agree on every command', (_name, current) => {
+    const currentRe = current();
+    /** @type {string[]} */
+    const mismatches = [];
+    for (const token of tokens) {
+      for (const build of BRANCH_TEMPLATES) {
+        const s = build(token);
+        if (FROZEN_OLD_BRANCH_DELETE.test(s) !== currentRe.test(s)) mismatches.push(s);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  }, 30_000);
+
+  // 양성·음성 대조군 — 위 0-불일치가 "둘 다 아무것도 안 맞아서"가 아님을 보인다.
+  it.each([
+    ['git branch -D topic', true],
+    ['git branch -d topic', false],
+    ['git branch --delete --force topic', true],
+    ['git branch -df topic', true],
+    ['git branch -d topic -f', true],
+    ['git branch -dF topic', false],
+    ['git branch -xDx topic', true],
+  ])('grades %j as %s on both layers and on the frozen copy', (command, expected) => {
+    expect(l2.test.test(command)).toBe(expected);
+    expect(l1.pattern.test(command)).toBe(expected);
+    expect(FROZEN_OLD_BRANCH_DELETE.test(command)).toBe(expected);
+  });
+
+  // 동결 사본이 진짜 옛 모양인지, 현행이 새 모양인지. 앞의 것이 없으면 누군가
+  // 사본을 새 값으로 "고쳐" 차분을 자기 비교로 만들 수 있다. 뒤의 것은 정적 스캐너가
+  // 구조적으로 못 보는 긍정 클래스 런(regex-scan.js 헤더 1-b)을 소스 모양으로 잠근다.
+  it('keeps the frozen copy on the OLD tokens and the current rule on the NEW ones', () => {
+    const oldTokens = ['-[a-zA-Z]*D[a-zA-Z]*', '-[a-z]*d[a-z]*', '-[a-z]*f[a-z]*'];
+    const newTokens = ['-[a-zA-CE-Z]*D[a-zA-Z]*', '-[a-ce-z]*d[a-z]*', '-[a-eg-z]*f[a-z]*'];
+    for (const token of oldTokens) {
+      expect(FROZEN_OLD_BRANCH_DELETE.source).toContain(token);
+      expect(l2.test.source).not.toContain(token);
+    }
+    for (const token of newTokens) expect(l2.test.source).toContain(token);
+    expect(FROZEN_OLD_BRANCH_DELETE.flags).toBe('');
+    expect(FROZEN_OLD_BRANCH_DELETE.source).not.toBe(l2.test.source);
   });
 });
 
