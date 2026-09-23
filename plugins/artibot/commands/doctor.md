@@ -515,7 +515,18 @@ order below is the document's. Mission artifacts live at
    it in. It is injected rather than imported by the check module because
    `lib/project-state/` is L2 and may not import the runtime layer, so upward
    calls arrive as ports (design §1-8). Without it, items 2-4 are unmeasured.
-3. Call `checkArtifactHealth` with every input below, passing the Check 8
+3. Read the evidence registry for item 9. Import `readEvidenceIds` from
+   `lib/verification/evidence-registry.js` and call it with the `projectRoot`
+   Check 8 Step 0 resolved (`lib/verification/evidence-registry.js#readEvidenceIds`).
+   The registry follows the same store-location rule as the ledger
+   (`lib/project-state/store-location.js#resolveStoreLocation`):
+   `<git-common-dir>/artibot/evidence.jsonl`, or
+   `.artibot/runtime/evidence.jsonl` only when git cannot answer. Pass the
+   result as `evidenceIds`. **`null` means the registry could not be read:
+   pass `undefined`, never `[]`, so item 9 stays unmeasured.** An absent file
+   already comes back as `[]` — a registry with nothing in it, which is a
+   measurement — and every cited id then reads as fail.
+4. Call `checkArtifactHealth` with every input below, passing the Check 8
    result as `parity`:
 
 ```js
@@ -570,6 +581,26 @@ that a write was lost. Phase 0 is Observe: report, never repair.
   that does not write an outcome is reported as an orphan.
 - **Whether cited evidence is true.** Item 9 resolves ids against the registry
   and never opens the evidence behind them.
+- **Evidence that was never registered.** The registry is written only through
+  the `registerEvidence` port of `lib/verification/verify-writer.js`, and only
+  when `scripts/hooks/dev-verify-gate.js` or `scripts/ledger/record-verify.mjs`
+  newly APPENDS a `verify.completed` line that carries evidence. A deduped or
+  rejected line registers nothing. An E-nnn ref to evidence recorded before
+  this landed, or recorded any other way, therefore reads as fail. That is the
+  correct verdict for an E-id that does not resolve.
+- **Refs written in another namespace.** Item 9 resolves refs only against
+  E-nnn registry ids. The only production writer of outcome `evidence_refs`,
+  `scripts/hooks/mission-complete-record.js#evidencePointers`, emits
+  `ledger:<key>` and `transcript:<sessionId>` pointers and never an E-id, so
+  today every hook-written `outcome.md` fails item 9. A fail on a ref that is
+  not an E-id is a namespace mismatch, not missing evidence — read the
+  finding's `ref` before reading the fail as a lost record. The fix, either the
+  producer emitting E-ids or `itemMissingEvidence` scoping itself to E-ids,
+  lives outside this check's files and is carried as a follow-up.
+- **Evidence registered in another clone.** The registry is local to one git
+  common dir. Every linked worktree of one repository shares it, but a
+  separate clone, or a tree on the `.artibot/runtime/` fallback, holds its own,
+  and an id registered there reads as missing here.
 
 ### Check 10: Route Bind Residue
 

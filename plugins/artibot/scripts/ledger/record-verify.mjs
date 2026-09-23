@@ -21,8 +21,11 @@
  *
  * OBSERVE CONTRACT (PRD R-03, "no behaviour change"): this script records and
  * nothing else. It applies no gate, blocks no step, and changes no state
- * outside the ledger. Recording is best effort, so a failure to write exits 0
- * and reports itself on stdout rather than failing the caller's step.
+ * outside the ledger and the evidence registry beside it
+ * (`lib/verification/evidence-registry.js`). Recording is best effort, so a
+ * failure to write exits 0 and reports itself on stdout rather than failing
+ * the caller's step. A registry failure is not even reported: the ledger lines
+ * are the record, and the registry only indexes their evidence.
  *
  * USAGE
  *   node scripts/ledger/record-verify.mjs --status <PASS|FAIL> \
@@ -125,6 +128,8 @@ import {
   VERIFY_COMPLETED_EVENT,
 } from '../../lib/verification/verify-writer.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import { redactDeep } from '../../lib/runtime/ledger-redaction.js';
+import { registerEvidence } from '../../lib/verification/evidence-registry.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
 /**
@@ -272,6 +277,48 @@ function existingVerifyKeys(cwd, sessionId) {
 }
 
 /**
+ * One appended line's evidence exactly as the ledger line stores it.
+ *
+ * Redacted AT THE ENVELOPE'S OWN POSITION, not as a bare array. The ledger
+ * scrubs secrets before it writes, so hashing the raw entry would keep a hash
+ * of what the ledger removed — an offline oracle for it (review F1). And
+ * `lib/runtime/ledger-redaction.js#walk` counts its depth bound and node budget
+ * from the root it is handed, while `lib/runtime/event-writer.js#assembleAndAppend`
+ * hands it the whole envelope, where evidence sits at `data.evidence` (depth 2)
+ * behind exactly two object nodes. A bare `redactDeep(entries)` cuts a note
+ * nested 61+ levels two levels lower than the ledger does, and the row's hash
+ * then matches nothing that was written. Every other envelope key is a scalar,
+ * which is why this two-level wrapper is the whole of the offset.
+ *
+ * Exported as a test seam, with the same signature as
+ * `scripts/hooks/dev-verify-gate.js#redactAsStored`.
+ *
+ * @param {Array<unknown>} entries
+ * @param {(value: unknown) => unknown} [redact] defaults to `redactDeep`
+ * @returns {Array<unknown>}
+ */
+export function redactAsStored(entries, redact = redactDeep) {
+  return redact({ data: { evidence: entries } }).data.evidence;
+}
+
+/**
+ * The `registerEvidence` port `main` binds, rooted where the ledger is, over
+ * {@link redactAsStored}.
+ *
+ * Exported so the deep-nesting case can be measured on the port itself: no
+ * `--evidence` ref can carry a nested note, since every ref is a string.
+ *
+ * @param {string} cwd the root `appendLedgerEvent` writes under
+ * @returns {(entries: Array<unknown>, lineKey: string) => object}
+ */
+export function evidenceRegistryPort(cwd) {
+  return (entries, lineKey) => registerEvidence(
+    redactAsStored(entries),
+    { projectRoot: cwd, source: lineKey },
+  );
+}
+
+/**
  * Why a run recorded nothing, or `null` when it recorded cleanly.
  *
  * The build-time reason wins over a per-line one: when `recordVerification`
@@ -333,9 +380,14 @@ export function main(argv, env) {
     },
   });
 
+  // The registry is bound to the SAME root as the ledger, so a row lands beside
+  // the line its `source` names. Its outcome rides on `result.evidence`, which
+  // the stdout line below deliberately does not read: the key set is fixed, and
+  // a registry failure is not a recording failure.
   const result = recordVerification(verdict, { sessionId: session }, {
     append: (input) => appendLedgerEvent(cwd, input),
     existingKeys: () => existingVerifyKeys(cwd, session),
+    registerEvidence: evidenceRegistryPort(cwd),
   });
 
   process.stdout.write(`${JSON.stringify({

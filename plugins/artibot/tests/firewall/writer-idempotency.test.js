@@ -56,7 +56,7 @@
  * 2026-09-23) and `runtime/question-gate-record.js` (SH-18, same day). A fifth,
  * `runtime/human-asked-record.js`, reaches `ledger.js` through
  * `await import()`, which the earlier "2 of 53" import scan did not count. So 5
- * of the 56 modules below (re-measured 2026-09-23; the undiscovered
+ * of the 57 modules below (re-measured 2026-09-23; the undiscovered
  * `runtime/ledger-tail.js` also imports `ledgerFilePath`, a path helper, and
  * appends nothing). Every other appender takes its port by injection.
  *
@@ -72,15 +72,17 @@
  * WHAT THIS GATE CANNOT SEE:
  *
  *   - A KEY UNDER ANOTHER NAME, and this is CURRENT, not hypothetical. AT LEAST
- *     seven stores dedupe today without using the word (a lower bound, not a
+ *     eight stores dedupe today without using the word (a lower bound, not a
  *     census): `supervisor/run-store.js` (`actionId`, returns
  *     `duplicate:true`), `autopilot/memory.js` (`taskHash` + lesson text,
  *     compared against the LAST row only), `learning/ledger/store.js`
  *     (per-session watermark cursor plus a whole-line Set),
  *     `learning/memory/episodic.js` (content `hash`),
  *     `autopilot/failure-memory.js` (`signature` upsert),
- *     `learning/macro-learner.js` (pattern `fingerprint` upsert) and
- *     `learning/skill-injector.js` (`ruleHash` set). All read `exempt`.
+ *     `learning/macro-learner.js` (pattern `fingerprint` upsert),
+ *     `learning/skill-injector.js` (`ruleHash` set) and
+ *     `verification/evidence-registry.js` (content `hash`, added 2026-09-23).
+ *     All read `exempt`.
  *
  *   - READ-MODIFY-WRITE STORES NOT NAMED `append*`/`record*`. Family E keys on
  *     a NAMING convention, so a store whose function is `save*` or `push*`
@@ -453,6 +455,9 @@ const INVENTORY = {
   'learning/wakeup-scheduler.js': x('wakeup request and rate-limit JSON; read-modify-write of an entries array, no per-record key.'),
   'learning/kill-switch.js': x('kill-switch state JSON, read-modify-write: recordFailure pushes an {at, error} row onto a failures array and prunes it to a time window. A row stream with no key.'),
   'learning/macro-learner.js': x('macro-suggestions.json; observations and suggestions upsert by pattern fingerprint, which dedupes suggestions rather than keying rows.'),
+
+  // --- verification stores --------------------------------------------------
+  'verification/evidence-registry.js': x('evidence.jsonl beside the run ledger (SH-15), one {id, type, source, hash, created_at} row per distinct evidence entry. The content sha256 hash is a key under another name: registerEvidence reads the rows under its own O_EXCL lock (openSync wx, not core/file-lock.js) and returns the existing E-nnn id instead of appending when the hash is present. No idempotency key is assigned.'),
 };
 
 // ---------------------------------------------------------------------------

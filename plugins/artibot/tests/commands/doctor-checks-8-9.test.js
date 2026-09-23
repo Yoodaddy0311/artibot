@@ -52,6 +52,9 @@ import {
   worstOf,
 } from '../../lib/project-state/doctor-checks.js';
 import { classifyStaleness, StaleState } from '../../lib/runtime/artifact-lifecycle.js';
+import {
+  evidenceRegistryPath, readEvidenceIds, registerEvidence,
+} from '../../lib/verification/evidence-registry.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
@@ -1232,5 +1235,161 @@ describe('W5-b (ADR-011) wording pins — Check 8 / Check 10', () => {
     expect(s).toContain('<git-common-dir>/artibot/ledger.jsonl');
     expect(s).not.toContain('W5-b-6');
     expect(s).not.toContain('stays in THIS tree');
+  });
+});
+
+/**
+ * SH-15 — Check 9 item 9 fed from the evidence registry.
+ *
+ * Before this, nothing in the Check 9 procedure said where `evidenceIds` came
+ * from, so every run left item 9 unmeasured. The executable half below runs the
+ * real registry (`lib/verification/evidence-registry.js`) against a throwaway
+ * store and hands its ids to `checkArtifactHealth`, which is the wiring the
+ * prose now prescribes; the prose half pins that prescription.
+ *
+ * Every store here lives under the OS temp dir. The git common dir is INJECTED
+ * as a path inside that temp dir, so no `git` runs and the real
+ * `<git-common-dir>/artibot/evidence.jsonl` is never opened — the first test
+ * asserts that before anything is written.
+ *
+ * What this CANNOT establish: that `/doctor` follows the new step (the header
+ * blindspot applies unchanged), or anything about a live registry, which only a
+ * newly appended `verify.completed` line carrying evidence ever writes to.
+ */
+describe('Check 9 item 9 resolves evidence_refs against the registry (SH-15)', () => {
+  let tmp = null;
+
+  beforeAll(() => {
+    tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'artibot-sh15-doctor-')));
+  });
+
+  afterAll(() => {
+    if (tmp !== null) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /** A fresh project root whose git common dir is a directory inside it. */
+  const freshStore = (name) => {
+    const projectRoot = path.join(tmp, name);
+    mkdirSync(projectRoot, { recursive: true });
+    const commonDir = path.join(projectRoot, 'git-common');
+    return { projectRoot, opts: { resolveGitCommonDir: () => commonDir } };
+  };
+
+  const EVIDENCE = [
+    { kind: 'file', file: 'lib/project-state/doctor-checks.js', line: 773 },
+    { kind: 'command', command: 'npx vitest run tests/commands', output: '1 passed' },
+  ];
+
+  /** A mission citing `refs` from its outcome, with all ten items measured. */
+  const health = (refs, evidenceIds) => {
+    const m = healthyMission();
+    m.files.outcome.evidence_refs = refs;
+    return checkArtifactHealth({ ...fullyMeasured([m]), evidenceIds });
+  };
+
+  it('aims every read and write below at the temp dir, never the real store', () => {
+    const { projectRoot, opts } = freshStore('guard');
+    const file = evidenceRegistryPath(projectRoot, opts);
+    expect(path.relative(tmp, file).startsWith('..')).toBe(false);
+    expect(path.isAbsolute(path.relative(tmp, file))).toBe(false);
+    expect(path.basename(file)).toBe('evidence.jsonl');
+  });
+
+  it('passes when the cited id is one the registry holds', () => {
+    const { projectRoot, opts } = freshStore('registered');
+    const written = registerEvidence(EVIDENCE, { ...opts, projectRoot, source: 'test' });
+    expect(written.ids).toHaveLength(2);
+    const ids = readEvidenceIds(projectRoot, opts);
+    expect(ids).toEqual(written.ids);
+
+    const result = health([written.ids[1]], ids);
+    expect(result.items.missing_evidence_reference.status).toBe(CheckStatus.PASS);
+    expect(result.items.missing_evidence_reference.findings).toEqual([]);
+  });
+
+  it('fails when the cited id was never registered', () => {
+    const { projectRoot, opts } = freshStore('unregistered');
+    const written = registerEvidence(EVIDENCE.slice(0, 1), { ...opts, projectRoot, source: 'test' });
+    const ids = readEvidenceIds(projectRoot, opts);
+    expect(ids).not.toContain('E-999');
+
+    const result = health([written.ids[0], 'E-999'], ids);
+    expect(result.items.missing_evidence_reference.status).toBe(CheckStatus.FAIL);
+    expect(itemCodes(result, 'missing_evidence_reference')).toEqual(['missing-evidence-reference']);
+    expect(result.items.missing_evidence_reference.findings[0]).toMatchObject({
+      mission_id: MID, kind: 'outcome', ref: 'E-999',
+    });
+  });
+
+  it('measures an absent registry — empty, not unmeasured', () => {
+    const { projectRoot, opts } = freshStore('absent');
+    expect(existsSync(evidenceRegistryPath(projectRoot, opts))).toBe(false);
+    const ids = readEvidenceIds(projectRoot, opts);
+    expect(ids).toEqual([]);
+
+    // Nothing cited: a measured pass. Anything cited: a measured fail — what a
+    // ref to evidence recorded before the registry existed reads as.
+    expect(health([], ids).items.missing_evidence_reference.status).toBe(CheckStatus.PASS);
+    expect(health(['E-001'], ids).items.missing_evidence_reference.status).toBe(CheckStatus.FAIL);
+  });
+
+  it('keeps item 9 unmeasured when the registry cannot be read (null -> undefined)', () => {
+    const { projectRoot, opts } = freshStore('unreadable');
+    // A directory where the file should be: present, but not readable as text.
+    mkdirSync(evidenceRegistryPath(projectRoot, opts), { recursive: true });
+    const ids = readEvidenceIds(projectRoot, opts);
+    expect(ids).toBeNull();
+
+    // The prose rule: `null` is passed as `undefined`, never as `[]`.
+    const result = health(['E-001'], ids ?? undefined);
+    expect(result.items.missing_evidence_reference.status).toBe(CheckStatus.UNMEASURED);
+  });
+
+  describe('the Check 9 prose', () => {
+    const nine = () => checkSections(CURRENT).get('Check 9');
+
+    it('names the reader by symbol, in the module that owns it', () => {
+      // `#symbol`, so `tests/firewall/citation-resolution.test.js` resolves it.
+      expect(nine()).toContain('`lib/verification/evidence-registry.js#readEvidenceIds`');
+    });
+
+    it('reads the registry before the checkArtifactHealth call it feeds', () => {
+      const s = nine();
+      expect(s.indexOf('readEvidenceIds')).toBeGreaterThan(-1);
+      expect(s.indexOf('readEvidenceIds')).toBeLessThan(s.indexOf('checkArtifactHealth({'));
+    });
+
+    it('names the store-location rule and the shared registry path', () => {
+      const s = nine();
+      expect(s).toContain('`lib/project-state/store-location.js#resolveStoreLocation`');
+      expect(s).toContain('<git-common-dir>/artibot/evidence.jsonl');
+    });
+
+    it('states the null -> unmeasured rule, and that an absent file is measured', () => {
+      const s = nine();
+      expect(s).toMatch(/`null` means the registry could not be read:\s+pass `undefined`, never `\[\]`/);
+      expect(s).toMatch(/An absent file\s+already comes back as `\[\]`/);
+    });
+
+    it('says only a newly appended verify.completed line registers evidence', () => {
+      const s = nine();
+      expect(s).toContain('`registerEvidence` port');
+      expect(s).toMatch(/newly APPENDS a `verify\.completed` line/);
+      expect(s).toMatch(/A deduped or\s+rejected line registers nothing/);
+    });
+
+    it('names the non-E ref namespace the outcome hook writes, and calls its fail a mismatch', () => {
+      // The only production writer of outcome `evidence_refs` emits `ledger:` /
+      // `transcript:` pointers, never an E-id, so item 9 fails every such ref.
+      // Prose that read that fail as "never registered" would send the reader
+      // hunting for evidence that exists under another name.
+      const s = nine();
+      expect(s).toContain('`scripts/hooks/mission-complete-record.js#evidencePointers`');
+      expect(s).toContain('`ledger:<key>`');
+      expect(s).toContain('`transcript:<sessionId>`');
+      expect(s).toMatch(/namespace mismatch,\s+not missing evidence/);
+      expect(s).toMatch(/`itemMissingEvidence`[\s\S]*outside this\s+check's files/);
+      expect(s).not.toMatch(/says the evidence was\s+never registered/);
+    });
   });
 });

@@ -507,6 +507,84 @@ function appendOne(append, input) {
 }
 
 /**
+ * Register one APPENDED line's evidence through the optional port.
+ *
+ * The evidence handed over is the line's own `data.evidence`, after the byte cap
+ * shortened it, not the verdict's. It is still PRE-REDACTION: the ledger
+ * redacts inside its own append (`lib/runtime/event-writer.js`, `redactDeep`
+ * over the built envelope, :816 on 2026-09-23), and the append result does not
+ * return the stored envelope. This module cannot import that redaction (L2 may
+ * not import `lib/runtime/`), so the PORT CONTRACT carries the obligation:
+ *
+ *   The bound port MUST register `entries` exactly as the ledger stores them:
+ *   redacted by `lib/runtime/ledger-redaction.js#redactDeep` AT THE ENVELOPE'S
+ *   `data.evidence` POSITION, i.e.
+ *   `redactDeep({ data: { evidence: entries } }).data.evidence`.
+ *
+ * A bare `redactDeep(entries)` is not the same pass. The walk counts
+ * `MAX_REDACT_DEPTH` (64) from the value it is given, and the ledger gives it the
+ * envelope, where the evidence sits two levels down. So a `note` nested 61+ deep
+ * is cut to the depth marker in the ledger and survives a bare call (B3 probe,
+ * 2026-09-23). The node budget (`MAX_REDACT_NODES`) counts object nodes, and
+ * every envelope member walked before `data.evidence` is a scalar, so the
+ * wrapper reproduces that count too. That is read from the code, not measured.
+ *
+ * Two things depend on it. First, the hash would otherwise be a confirmation
+ * oracle for a redacted secret: the ledger shows `[REDACTED_…]`, but anyone
+ * who can guess the secret can hash a candidate entry and match it against the
+ * registry row. Second, only then does a registry row's hash recompute from the
+ * ledger line its `source` names. Otherwise the hash matches the line only when
+ * redaction changed nothing.
+ *
+ * `source` is that line's idempotency key, which already begins with the event
+ * name (`verify.completed:<session>:<verification_id>[:<layer>]`). The row
+ * points at the line. The line carries no evidence ids: its `data` allowlist
+ * and 4 KB cap belong to the ledger.
+ *
+ * @param {Function} port - `lib/verification/evidence-registry.js#registerEvidence`
+ *   bound to a project root, as `(entries, source) => result`, registering
+ *   `entries` redacted at the envelope's `data.evidence` position (see above).
+ * @param {object} input - The envelope input that was just appended.
+ * @returns {{ ids: string[], appended: number, reused: number, reason?: string }}
+ */
+function registerLineEvidence(port, input) {
+  const failed = (reason) => ({ ids: [], appended: 0, reused: 0, reason });
+  let res;
+  try {
+    res = port(input.data.evidence, input.idempotency_key);
+  } catch {
+    return failed('port-threw:registerEvidence');
+  }
+  const r = /** @type {any} */ (res);
+  if (!r || typeof r !== 'object' || !Array.isArray(r.ids)
+    || !Number.isInteger(r.appended) || !Number.isInteger(r.reused)) {
+    return failed('port-invalid:registerEvidence');
+  }
+  const ids = r.ids.filter((id) => typeof id === 'string' && id.length > 0);
+  const out = { ids, appended: r.appended, reused: r.reused };
+  return typeof r.reason === 'string' && r.reason ? { ...out, reason: r.reason } : out;
+}
+
+/**
+ * Fold one line's registration into the running result. Each id is kept once:
+ * the overall line and a layer line carry the same entries, so the second
+ * registration answers with ids the first one already reported.
+ *
+ * @param {{ ids: string[], appended: number, reused: number }} acc - Mutated.
+ * @param {Set<string>} reasons - Mutated.
+ * @param {{ ids: string[], appended: number, reused: number, reason?: string }} r
+ * @returns {void}
+ */
+function mergeLineEvidence(acc, reasons, r) {
+  for (const id of r.ids) {
+    if (!acc.ids.includes(id)) acc.ids.push(id);
+  }
+  acc.appended += r.appended;
+  acc.reused += r.reused;
+  if (r.reason) reasons.add(r.reason);
+}
+
+/**
  * Record a verdict as `verify.completed` lines through injected ports.
  *
  * NEVER THROWS. A throwing port becomes a `rejected` line with
@@ -516,13 +594,35 @@ function appendOne(append, input) {
  *
  * @param {object} verdict - A `verify()` result.
  * @param {{ sessionId?: string, missionId?: string, includeOverall?: boolean }} [ctx]
- * @param {{ append?: (input: object) => object, existingKeys?: () => Iterable<string> }} [ports]
+ * @param {{ append?: (input: object) => object, existingKeys?: () => Iterable<string>,
+ *   registerEvidence?: (entries: Array<unknown>, source: string) =>
+ *     { ids: string[], appended: number, reused: number, reason?: string } }} [ports]
  *   `append` is `lib/runtime/ledger.js#appendLedgerEvent` bound to a project
  *   root; `existingKeys` is optional and defaults to "no keys known".
+ *   `registerEvidence` is optional too: `lib/verification/evidence-registry.js#registerEvidence`
+ *   bound to a project root, and it MUST register `entries` exactly as the ledger
+ *   stores them: `lib/runtime/ledger-redaction.js#redactDeep` applied at the
+ *   envelope's `data.evidence` position,
+ *   `redactDeep({ data: { evidence: entries } }).data.evidence`, not a bare
+ *   `redactDeep(entries)`. `entries` arrive here unredacted. Registered any
+ *   other way, the hash is a confirmation oracle for a secret the ledger
+ *   redacted and no longer recomputes from the stored line
+ *   (see {@link registerLineEvidence}). It is called
+ *   once per APPENDED line that carries evidence, in line order, in a second
+ *   pass AFTER every append has been attempted. A held or stranded registry lock
+ *   can stall for up to the registry lock's 6 s timeout (5 s stale window;
+ *   `evidence-registry.js#REGISTRY_LOCK_DEFAULTS`), and in the second pass that
+ *   stall cannot delay a ledger line. The first `lock-timeout` ends the pass, so
+ *   one held lock costs one timeout rather than one per line. A deduped or
+ *   rejected line registers nothing. Its failures never change the tally.
  * @returns {{ appended: number, deduped: number, rejected: number, skipped: number,
  *   reason?: string, lines: Array<{ key: string, layer: string|null,
- *   status: 'appended'|'deduped'|'rejected', reason?: string }> }}
+ *   status: 'appended'|'deduped'|'rejected', reason?: string }>,
+ *   evidence?: { ids: string[], appended: number, reused: number, reason?: string } }}
  *   `skipped: 1` with `lines: []` and a `reason` means nothing was built.
+ *   `evidence` is present only when a `registerEvidence` port was supplied.
+ *   `ids` holds each registry id once. `reason` holds the distinct port failures
+ *   joined with `; `.
  */
 export function recordVerification(verdict, ctx = {}, ports = {}) {
   const built = buildVerifyCompletedEvents(verdict, ctx);
@@ -533,6 +633,11 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
   const seen = readExistingKeys(p.existingKeys);
   const tally = { appended: 0, deduped: 0, rejected: 0, skipped: 0 };
   const lines = [];
+  const wantsEvidence = p.registerEvidence !== undefined && p.registerEvidence !== null;
+  const evidence = { ids: [], appended: 0, reused: 0 };
+  const evidenceReasons = new Set();
+  const appendedInputs = [];
+  if (wantsEvidence && typeof p.registerEvidence !== 'function') evidenceReasons.add('port-missing:registerEvidence');
   for (const input of built.inputs) {
     const key = input.idempotency_key;
     const layer = Object.prototype.hasOwnProperty.call(input.data, 'layer') ? input.data.layer : null;
@@ -551,10 +656,25 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
       seen.keys.add(key);
       tally.appended += 1;
       lines.push({ key, layer, status: 'appended' });
+      appendedInputs.push(input);
     } else {
       tally.rejected += 1;
       lines.push({ key, layer, status: 'rejected', reason: outcome.reason });
     }
   }
-  return { ...tally, lines };
+  if (!wantsEvidence) return { ...tally, lines };
+  // Second pass: every ledger append is already done, so a slow registry lock
+  // delays only the registration.
+  for (const input of appendedInputs) {
+    if (typeof p.registerEvidence === 'function'
+      && Array.isArray(input.data.evidence) && input.data.evidence.length > 0) {
+      const r = registerLineEvidence(p.registerEvidence, input);
+      mergeLineEvidence(evidence, evidenceReasons, r);
+      // The lock is still held, and every later line would wait the full
+      // timeout again. On the hook path that is 6 s per line.
+      if (r.reason === 'lock-timeout') break;
+    }
+  }
+  const reason = [...evidenceReasons].join('; ');
+  return { ...tally, lines, evidence: reason ? { ...evidence, reason } : evidence };
 }

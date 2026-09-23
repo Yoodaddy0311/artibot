@@ -102,9 +102,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { redactDeep } from '../../lib/runtime/ledger-redaction.js';
+import { evidenceHash, evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
 import { verify } from '../../lib/verification/unified-verifier.js';
 import { recordVerification } from '../../lib/verification/verify-writer.js';
-import { SELF_REPORT_NOTE } from '../../scripts/ledger/record-verify.mjs';
+import {
+  evidenceRegistryPort, redactAsStored, SELF_REPORT_NOTE,
+} from '../../scripts/ledger/record-verify.mjs';
 
 // This file spawns child processes. The budget buys headroom for load; nothing
 // here waits on a timer.
@@ -481,6 +486,169 @@ describe('record-verify: running it twice', () => {
     expect(second.appended).toBe(0);
     expect(second.deduped).toBe(4);
     expect(written).toHaveLength(4);
+  });
+});
+
+/** Parsed rows of a root's evidence registry; `[]` when it was never written. */
+function registryRows(root) {
+  const file = evidenceRegistryPath(root);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf-8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line));
+}
+
+/**
+ * THE EVIDENCE REGISTRY PORT (sh15). The deterministic line and the overall
+ * fold carry the same entries, so one run with one `--evidence` ref registers
+ * TWO distinct entries (the self-report note and the ref) and no more.
+ *
+ * WHAT THIS CANNOT SEE: a registry module that fails to import. The CLI imports
+ * it statically, exactly as it imports the writer, so a module that throws at
+ * load stops the script before `main` — the same exposure the writer's own
+ * import already has.
+ */
+describe('record-verify: the evidence registry', () => {
+  const ARGS = ['--status', 'PASS', '--command', '/verify: all pass', '--evidence', 'tests/x.test.js:12'];
+
+  it('registers the evidence of the appended lines under --cwd, beside the ledger', () => {
+    const root = makeRoot('R1');
+
+    const out = runCli([...ARGS, '--session', SID, '--cwd', root], root);
+
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).appended).toBe(4);
+    expect(evidenceRegistryPath(root)).toBe(path.join(path.dirname(ledgerFilePath(root)), 'evidence.jsonl'));
+    const rows = registryRows(root);
+    expect(rows.map((r) => r.type).sort()).toEqual(['command', 'file']);
+    const keys = verifyLinesIn(root).map((e) => e.idempotency_key);
+    for (const row of rows) expect(keys).toContain(row.source);
+  });
+
+  it('adds no row when the same evidence is recorded again', () => {
+    const root = makeRoot('R2');
+    const args = [...ARGS, '--session', SID, '--cwd', root];
+
+    runCli(args, root);
+    expect(registryRows(root)).toHaveLength(2);
+    const second = JSON.parse(runCli(args, root).stdout);
+
+    // Whether the second run shares the first run's `verification_id` is a
+    // race (see "running it twice"); either way the CONTENT is the same, so the
+    // registry must not grow.
+    expect(second.appended + second.deduped).toBe(4);
+    expect(registryRows(root)).toHaveLength(2);
+  });
+
+  it('prints the same line and exit when the registry cannot be written', () => {
+    const normalRoot = makeRoot('R3a');
+    const normal = runCli([...ARGS, '--session', SID, '--cwd', normalRoot], normalRoot);
+    // POSITIVE CONTROL: the port fired where it could, so the blocked case
+    // below measures a registry failure rather than an unbound port.
+    expect(registryRows(normalRoot)).toHaveLength(2);
+
+    const root = makeRoot('R3b');
+    // A DIRECTORY where the registry file has to be, so its append fails.
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    const blocked = runCli([...ARGS, '--session', SID, '--cwd', root], root);
+
+    expect(blocked.status).toBe(normal.status);
+    expect(blocked.stderr).toBe('');
+    // `verification_id` embeds the second the run landed in, so it is the one
+    // key allowed to differ between the two roots.
+    const strip = ({ verification_id: _id, ...rest }) => rest;
+    expect(strip(JSON.parse(blocked.stdout))).toEqual(strip(JSON.parse(normal.stdout)));
+    expect(Object.keys(JSON.parse(blocked.stdout)).sort()).toEqual([...STDOUT_KEYS].sort());
+    expect(verifyLinesIn(root)).toHaveLength(4);
+  });
+
+  /**
+   * REDACTION PARITY (review F1). The ledger scrubs secrets from every string
+   * before it writes, so a registry that hashed the RAW `--evidence` would keep
+   * a hash of exactly what the ledger removed — an offline oracle for it. Every
+   * row's hash must be the hash of an entry AS STORED on the line its `source`
+   * names. The secret is assembled from parts so this file does not itself look
+   * like a credential.
+   */
+  it('hashes the evidence as the ledger stored it, after redaction', () => {
+    const root = makeRoot('R4');
+    const secretValue = ['abcd', 'efgh'].join('');
+    const secretRef = `curl -u pass${'word'}="${secretValue}" x`;
+
+    const out = runCli([
+      '--status', 'PASS', '--evidence', secretRef, '--session', SID, '--cwd', root,
+    ], root);
+    expect(out.status).toBe(0);
+
+    const lines = verifyLinesIn(root);
+    // POSITIVE CONTROL: the ref reached the evidence and the ledger scrubbed it.
+    const stored = lineFor(lines, 'deterministic').data.evidence;
+    expect(stored[1].command).toContain('[REDACTED');
+    expect(JSON.stringify(lines)).not.toContain(secretValue);
+
+    const rows = registryRows(root);
+    expect(rows.length).toBeGreaterThan(0);
+    const byKey = new Map(lines.map((e) => [e.idempotency_key, e]));
+    for (const row of rows) {
+      const line = byKey.get(row.source);
+      expect(line, `row ${row.id} names a line that is in the ledger`).toBeDefined();
+      expect(line.data.evidence.map((entry) => evidenceHash(entry))).toContain(row.hash);
+    }
+    // And the other direction: every stored entry has its row.
+    const rowHashes = new Set(rows.map((r) => r.hash));
+    for (const line of lines) {
+      for (const entry of line.data.evidence) expect(rowHashes.has(evidenceHash(entry))).toBe(true);
+    }
+    expect(readFileSync(evidenceRegistryPath(root), 'utf-8')).not.toContain(secretValue);
+  });
+
+  /**
+   * DEPTH PARITY, ON THE PORT `main` BINDS. `redactDeep` counts its depth bound
+   * from the root it is handed and the ledger hands it the whole envelope, so a
+   * note nested 61 levels is cut two levels higher on the line than a bare
+   * `redactDeep(entries)` would cut it. No `--evidence` ref can carry a nested
+   * note (every ref is a string), so this drives `evidenceRegistryPort` in
+   * process, against the real ledger writer in a temp root.
+   */
+  it('redactAsStored cuts a 61-deep note where the envelope redaction cuts it', () => {
+    let note = 'leaf';
+    for (let i = 0; i < 61; i += 1) note = { a: note };
+    const entries = [{ kind: 'command', command: 'deep', output: '', note }];
+    // Shaped like `event-writer.js#buildEnvelope`'s output: scalar keys, then data.
+    const envelopeLike = {
+      v: 1, ts: '2026-09-23T03:00:00.000Z', event: 'verify.completed', session_id: SID,
+      source: 'gate', pid: 1, seq: 0, idempotency_key: 'k',
+      data: { layer: 'deterministic', result: 'pass', evidence: entries, verification_id: 'v1-x' },
+    };
+
+    expect(evidenceHash(redactAsStored(entries, redactDeep)[0]))
+      .toBe(evidenceHash(redactDeep(envelopeLike).data.evidence[0]));
+  });
+
+  it('hashes a note nested 61 levels deep as the ledger stored it', () => {
+    const root = makeRoot('R5');
+    let note = 'leaf';
+    for (let i = 0; i < 61; i += 1) note = { a: note };
+    const evidence = [{ kind: 'command', command: 'deep', output: '', note }];
+    const verdict = verify({ layers: { deterministic: { exitCode: 0, reason: 'deep note', evidence } } });
+
+    const result = recordVerification(verdict, { sessionId: SID }, {
+      append: (input) => appendLedgerEvent(root, input),
+      registerEvidence: evidenceRegistryPort(root),
+    });
+    expect(result.appended).toBe(4);
+
+    const lines = verifyLinesIn(root);
+    const stored = lineFor(lines, 'deterministic').data.evidence;
+    // The case discriminates: the bare form hashes differently from the line.
+    expect(evidenceHash(redactDeep(evidence)[0])).not.toBe(evidenceHash(stored[0]));
+
+    const rows = registryRows(root);
+    expect(rows).toHaveLength(1);
+    const line = lines.find((e) => e.idempotency_key === rows[0].source);
+    expect(line, 'the row names a line that is in the ledger').toBeDefined();
+    expect(rows[0].hash).toBe(evidenceHash(line.data.evidence[0]));
   });
 });
 

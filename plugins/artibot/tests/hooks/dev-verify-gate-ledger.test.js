@@ -8,6 +8,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
+import { evidenceHash, evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
 
 /**
  * dev-verify-gate.js — the "unmeasured denominator" ledger wiring (OB-07).
@@ -33,6 +34,11 @@ import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
  *   - case 6 (fresh, failures)      REAL SPAWN
  *   - case 7 (stale / absent)       REAL SPAWN — must equal the pre-numerator
  *     denominator byte for byte, `verification_id` aside
+ *   - case 8 (evidence registry)    REAL SPAWN — the port is bound to the
+ *     ledger's root, dedupes across fires, and an unwritable registry leaves
+ *     stdout and the four lines exactly as they are without one. A registry
+ *     module that fails to IMPORT is unit-tested with `vi.doMock` in
+ *     `dev-verify-gate.test.js`, for the same reason as case 2c.
  *
  * WHAT THESE TESTS CANNOT SEE (rules §9, stated next to the gate): the ledger
  * that PRODUCTION writes (this is a throwaway repo), concurrency with the five
@@ -472,5 +478,143 @@ describe('dev-verify-gate — deterministic numerator from the vitest reporter',
     runHook(box);
     expect(existsSync(path.join(box.repo, 'plugins', 'artibot', 'runtime', 'last-test-result.json')))
       .toBe(false);
+  }, 60_000);
+});
+
+/**
+ * THE EVIDENCE REGISTRY PORT (sh15).
+ *
+ * Only a FRESH vitest result gives a line evidence — every unmeasured line
+ * carries `evidence: []` and the writer calls the port for none of them — so
+ * each case here plants one. The overall line flattens the layer evidence, so
+ * one fire registers ONE entry twice and the registry keeps ONE row.
+ *
+ * WHAT THESE CANNOT SEE: the production registry (this is a throwaway repo),
+ * and a registry module that fails to import — the hook resolves `lib/`
+ * relative to its own file, so that case lives in `dev-verify-gate.test.js`.
+ */
+describe('dev-verify-gate — evidence registry port (real spawn)', () => {
+  /** One payload per case, so two sandboxes carry byte-identical evidence. */
+  function freshResult() {
+    return {
+      timestamp: new Date().toISOString(),
+      durationMs: 1,
+      modules: 3,
+      totalTests: 5,
+      passed: 5,
+      failed: 0,
+      skipped: 0,
+      failedFiles: [],
+    };
+  }
+
+  /**
+   * @param {{repo: string}} box
+   * @returns {object[]}
+   */
+  function registryRows(box) {
+    const file = evidenceRegistryPath(box.repo);
+    if (!existsSync(file)) return [];
+    return readFileSync(file, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l));
+  }
+
+  it('registers the fresh evidence beside the ledger, sourced by the ledger line key', () => {
+    const box = buildSandbox({ testResult: freshResult(), markerAgeMs: 10_000 });
+    const run = runHook(box);
+    expect(run.stdout, `hook stderr: ${run.stderr}`).toBe(EXPECTED_STDOUT);
+
+    // SAME ROOT AS THE LEDGER: the registry sits in the ledger's own directory,
+    // not under the plugin root or the process cwd.
+    expect(evidenceRegistryPath(box.repo)).toBe(path.join(path.dirname(box.ledger), 'evidence.jsonl'));
+    const rows = registryRows(box);
+    expect(rows, `registry: ${evidenceRegistryPath(box.repo)} — stderr: ${run.stderr}`).toHaveLength(1);
+    expect(rows[0].type).toBe('file');
+    const keys = readLedgerLines(box.ledger).map((e) => e.idempotency_key);
+    expect(keys, 'a row must point at a line that is actually in the ledger').toContain(rows[0].source);
+  }, 60_000);
+
+  it('adds no row when a later fire carries the same evidence', async () => {
+    const box = buildSandbox({ testResult: freshResult(), markerAgeMs: 10_000 });
+    expect(runHook(box).stdout).toBe(EXPECTED_STDOUT);
+    expect(registryRows(box)).toHaveLength(1);
+
+    // A different second, so the second fire is a NEW verdict with new ledger
+    // keys — only the evidence content is the same.
+    await new Promise((resolve) => { setTimeout(resolve, 1100); });
+    rmSync(box.cache, { force: true });
+    expect(runHook(box).stdout).toBe(EXPECTED_STDOUT);
+
+    const lines = readLedgerLines(box.ledger);
+    expect(lines).toHaveLength(8);
+    expect(new Set(lines.map((e) => e.data.verification_id)).size).toBe(2);
+    expect(registryRows(box), 'same content, same id — no second row').toHaveLength(1);
+  }, 60_000);
+
+  it('leaves stdout, exit and the four lines unchanged when the registry cannot be written', () => {
+    const result = freshResult();
+    const normalBox = buildSandbox({ testResult: result, markerAgeMs: 10_000 });
+    const normal = runHook(normalBox);
+    // POSITIVE CONTROL: the port fired in the writable sandbox, so the blocked
+    // one below is measuring a failure rather than a port nobody called.
+    expect(registryRows(normalBox)).toHaveLength(1);
+
+    const box = buildSandbox({ testResult: result, markerAgeMs: 10_000 });
+    // A DIRECTORY where the registry file has to be, so its append fails.
+    mkdirSync(evidenceRegistryPath(box.repo), { recursive: true });
+    const blocked = runHook(box);
+
+    expect(
+      Buffer.from(blocked.stdout, 'utf-8').equals(Buffer.from(normal.stdout, 'utf-8')),
+      `normal=${JSON.stringify(normal.stdout)} blocked=${JSON.stringify(blocked.stdout)} `
+      + `stderr=${blocked.stderr}`,
+    ).toBe(true);
+    expect(blocked.status).toBe(normal.status);
+    const lines = readLedgerLines(box.ledger);
+    expect(lines.filter((e) => e.event === 'ledger.rejected')).toEqual([]);
+    expect(denominatorShape(lines)).toEqual(denominatorShape(readLedgerLines(normalBox.ledger)));
+  }, 60_000);
+
+  /**
+   * REDACTION PARITY (review F1). The ledger redacts every string before it
+   * writes; a registry that hashed the RAW entry would keep a hash of the
+   * secret the ledger scrubbed — an offline oracle for it. So every row's hash
+   * must be the hash of an entry AS STORED on the line its `source` names.
+   *
+   * The secret rides in the reporter's `timestamp`: `Date.parse` ignores a
+   * parenthesized comment, so the result stays fresh while `measured_at`
+   * carries the string into the evidence. The value is assembled from parts so
+   * this file does not itself look like a credential.
+   */
+  it('hashes the evidence as the ledger stored it, after redaction', () => {
+    const secretValue = ['abcd', 'efgh'].join('');
+    const result = { ...freshResult(), timestamp: `${new Date().toUTCString()} (pass${'word'}="${secretValue}")` };
+    const box = buildSandbox({ testResult: result, markerAgeMs: 10_000 });
+    const run = runHook(box);
+    expect(run.stdout, `hook stderr: ${run.stderr}`).toBe(EXPECTED_STDOUT);
+
+    const lines = readLedgerLines(box.ledger);
+    const stored = lines.find((e) => e.data.layer === 'deterministic').data.evidence;
+    // POSITIVE CONTROL: the secret reached the evidence and the ledger scrubbed
+    // it. Without this the parity below could pass on a string nobody redacted.
+    expect(stored[0].measured_at).toContain('[REDACTED');
+    expect(JSON.stringify(lines)).not.toContain(secretValue);
+
+    const rows = registryRows(box);
+    expect(rows.length, `registry: ${evidenceRegistryPath(box.repo)}`).toBeGreaterThan(0);
+    const byKey = new Map(lines.map((e) => [e.idempotency_key, e]));
+    for (const row of rows) {
+      const line = byKey.get(row.source);
+      expect(line, `row ${row.id} names a line that is in the ledger`).toBeDefined();
+      expect(line.data.evidence.map((entry) => evidenceHash(entry))).toContain(row.hash);
+    }
+    // And the other direction: every stored entry has its row.
+    const rowHashes = new Set(rows.map((r) => r.hash));
+    for (const line of lines) {
+      for (const entry of line.data.evidence) expect(rowHashes.has(evidenceHash(entry))).toBe(true);
+    }
+    expect(readFileSync(evidenceRegistryPath(box.repo), 'utf-8')).not.toContain(secretValue);
   }, 60_000);
 });
