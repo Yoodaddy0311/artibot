@@ -150,7 +150,11 @@
  *     every entry. This module never proposes a removal.
  *   - THE INVENTORY IS THE CALLER'S WORD. Nothing here enumerates the
  *     filesystem — a caller passing an incomplete inventory gets a complete
- *     looking audit of the wrong set, and this module cannot tell.
+ *     looking audit of the wrong set, and this module cannot tell. The one
+ *     production caller that enumerates is `scripts/ledger/existence-audit.mjs`
+ *     (OB-24, 2026-09-23); its header states the enumeration rule per kind and
+ *     what that enumeration cannot see, and it prints the carrier names no
+ *     inventory entry spells (`unmatched`) beside this module's output.
  *   - THE CARRIER TABLE READS SCHEMAS, NOT WRITERS. It was measured from the
  *     allowlist. A writer smuggling a hook name into `data` under a key the
  *     allowlist does not register is invisible here — and would be unreadable
