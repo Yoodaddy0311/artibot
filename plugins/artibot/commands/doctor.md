@@ -587,16 +587,26 @@ that a write was lost. Phase 0 is Observe: report, never repair.
   newly APPENDS a `verify.completed` line that carries evidence. A deduped or
   rejected line registers nothing. An E-nnn ref to evidence recorded before
   this landed, or recorded any other way, therefore reads as fail. That is the
-  correct verdict for an E-id that does not resolve.
+  correct verdict for an E-id that does not resolve. The outcome hook never
+  writes such a ref: `scripts/hooks/mission-complete-record.js#registeredEvidenceIds`
+  resolves ids read-only by content hash
+  (`lib/verification/evidence-registry.js#lookupEvidenceIds`) and mints none.
+  A registration lost at Stop, a lock timeout for one, shows up as an id
+  omitted from `outcome.md`, never as a fail here.
 - **Refs written in another namespace.** Item 9 resolves refs only against
-  E-nnn registry ids. The only production writer of outcome `evidence_refs`,
-  `scripts/hooks/mission-complete-record.js#evidencePointers`, emits
-  `ledger:<key>` and `transcript:<sessionId>` pointers and never an E-id, so
-  today every hook-written `outcome.md` fails item 9. A fail on a ref that is
-  not an E-id is a namespace mismatch, not missing evidence — read the
-  finding's `ref` before reading the fail as a lost record. The fix, either the
-  producer emitting E-ids or `itemMissingEvidence` scoping itself to E-ids,
-  lives outside this check's files and is carried as a follow-up.
+  E-nnn registry ids, and it FAILS every other ref on purpose. The outcome
+  producer writes only registry ids into `evidence_refs`. Its `ledger:<key>`
+  and `transcript:<sessionId>` pointers
+  (`scripts/hooks/mission-complete-record.js#evidencePointers`) go to the
+  `mission.completed` ledger line and the `## Changes` body, never to
+  frontmatter. A non-E ref in `evidence_refs` therefore means some producer
+  has regressed, and this fail is the alarm for it. Read the finding's `ref`
+  to see which namespace leaked.
+- **An outcome that cites nothing.** `evidence_refs: []` passes item 9,
+  because item 9 judges dangling references, not presence. Whether an outcome
+  must cite evidence is a separate presence rule, and that is a follow-up
+  decision. It is the common case: 0 of 23 declared missions carried verify
+  evidence as of 2026-09-23.
 - **Evidence registered in another clone.** The registry is local to one git
   common dir. Every linked worktree of one repository shares it, but a
   separate clone, or a tree on the `.artibot/runtime/` fallback, holds its own,

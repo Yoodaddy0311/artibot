@@ -3,12 +3,14 @@
  * "this session verified something" into a `mission.completed{accepted: null}`
  * declaration and, behind the kill switch, into `outcome.md`.
  *
- * REAL CHILD PROCESSES, ALWAYS. Every case spawns the hook exactly as the
- * dispatcher does — a fresh `node`, JSON on stdin — because the properties
- * under test are process properties: stdout must stay EMPTY (the SessionEnd
- * dispatcher fans children out and a byte there is a decision channel), the
- * exit status must be 0 on every path, and an import-time throw must be caught.
- * None of that is observable from an in-process call.
+ * REAL CHILD PROCESSES for every property of the hook. Those cases spawn the
+ * hook exactly as the dispatcher does — a fresh `node`, JSON on stdin — because
+ * the properties under test are process properties: stdout must stay EMPTY (the
+ * SessionEnd dispatcher fans children out and a byte there is a decision
+ * channel), the exit status must be 0 on every path, and an import-time throw
+ * must be caught. None of that is observable from an in-process call. The one
+ * exception is the `registeredEvidenceIds` helper's contract (the folded-line
+ * and throwing-port cases), which is a function property and is called directly.
  *
  * THE CHILD IS SPAWNED DIRECTLY, NEVER `_sessionend-dispatcher.js`. That is the
  * `tests/firewall/dispatcher-cwd-sandbox-required.test.js` ratchet: a suite that
@@ -55,13 +57,18 @@ import { sessionFallbackMissionId } from '../../lib/runtime/event-writer.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { missionMutator } from '../../lib/runtime/middleware/tasks.js';
-import { buildVerifyCompletedEvents } from '../../lib/verification/verify-writer.js';
+import { buildVerifyCompletedEvents, recordVerification } from '../../lib/verification/verify-writer.js';
+import {
+  evidenceRegistryPath, lookupEvidenceIds, readEvidenceIds, registerEvidence,
+} from '../../lib/verification/evidence-registry.js';
+import { checkArtifactHealth, CheckStatus } from '../../lib/project-state/doctor-checks.js';
 import { BlockCode } from '../../lib/runtime/artifact-lifecycle-gates.js';
 import { DEFAULT_PLAN_MODE, FIRST_PLAN_REVISION, serializePlanMd } from '../../lib/planning/plan-artifact.js';
 import { FIRST_REVIEW_REVISION, serializeReviewMd } from '../../lib/review/review-artifact.js';
 import { OUTCOME_SECTIONS, parseOutcomeMd } from '../../lib/mission/outcome-artifact.js';
+import { evidenceRegistryPort, redactAsStored } from '../../scripts/ledger/record-verify.mjs';
 import {
-  DECLARATION_STATUSES, HOOK_BLOCK_CODES, WriteStatus,
+  DECLARATION_STATUSES, HOOK_BLOCK_CODES, registeredEvidenceIds, WriteStatus,
 } from '../../scripts/hooks/mission-complete-record.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -579,6 +586,225 @@ describe('B4 artifact gate — the completion criterion matrix', () => {
     expect(res.status).toBe(0);
     expect(existsSync(outcomeFile())).toBe(false);
     expect(fields(res.lines[0]).write).toBe(WriteStatus.WRITE_DISABLED);
+  });
+});
+
+/**
+ * SH-15b — outcome.md `evidence_refs` are §23 registry ids, resolved READ-ONLY
+ * by content hash from the cited verification's `verify.completed` rows.
+ *
+ * Evidence is registered here through the PRODUCTION port
+ * (`scripts/ledger/record-verify.mjs#evidenceRegistryPort`, redacted as the
+ * ledger stores it) into the sandbox repo's own `.git/artibot/evidence.jsonl`.
+ * The `afterAll` isolation proof covers the live ledger; the live registry sits
+ * beside it and no case here resolves a root outside `tmp`.
+ *
+ * WHAT THIS DOES NOT PROVE: that live verifications carry evidence at all. As
+ * of 2026-09-23 no declared mission's verify rows did (the doctor.md figure).
+ */
+describe('evidence_refs — registry ids by content hash (SH-15b)', () => {
+  const EVIDENCE = [{ kind: 'command', command: 'npx vitest run tests/hooks', output: '12 passed' }];
+  const OTHER = [{ kind: 'file', file: 'lib/other.js', line: 7 }];
+  const outcomeFile = () => path.join(repo, '.artibot', 'missions', missionId, 'outcome.md');
+  const registryOpts = () => ({ resolveGitCommonDir: () => resolveGitCommonDir(repo) });
+
+  /**
+   * A PASS verdict whose evidence rides ONLY the deterministic-layer line, so
+   * the last `verify.completed` row is `:operational` with `evidence: []`.
+   */
+  function seedVerifyWithEvidence(id, {
+    evidence = EVIDENCE, register = true, verificationId = VERIFICATION_ID,
+  } = {}) {
+    const res = recordVerification({
+      verification_id: verificationId,
+      status: 'PASS',
+      evidence: [],
+      layers: [
+        { layer: 'deterministic', status: 'PASS', evidence },
+        { layer: 'behavioral', status: 'PASS', evidence: [] },
+        { layer: 'operational', status: 'PASS', evidence: [] },
+      ],
+    }, { sessionId: SESSION_ID, missionId: id }, {
+      append: (input) => appendLedgerEvent(repo, input),
+      ...(register ? { registerEvidence: evidenceRegistryPort(repo) } : {}),
+    });
+    expect(res.appended).toBe(4);
+    return res;
+  }
+
+  function seedGatesOpen() {
+    seedReview();
+    seedArtifacts();
+    writeSandboxConfig({ enabled: true, requiredLayers: ['deterministic'] });
+  }
+
+  /** Run the hook and return the parsed outcome.md plus its raw text. */
+  function runAndParse() {
+    const res = runHook(payload());
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe('');
+    expect(fields(res.lines[0]).write).toBe(WriteStatus.WRITTEN);
+    const text = readFileSync(outcomeFile(), 'utf-8');
+    const parsed = parseOutcomeMd(text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.findings).toEqual([]);
+    return { res, text, parsed };
+  }
+
+  it('(i) cites the registered E-id and keeps the ledger/transcript pointers in the body', () => {
+    seedMission();
+    const reg = seedVerifyWithEvidence(missionId);
+    expect(reg.evidence.ids).toEqual(['E-001']);
+    seedGatesOpen();
+
+    const { text, parsed } = runAndParse();
+
+    expect(parsed.outcome.evidenceRefs).toEqual(['E-001']);
+    const pointers = [
+      `ledger:verify.completed:${SESSION_ID}:${VERIFICATION_ID}:operational`,
+      `ledger:review.completed:${missionId}:1`,
+      `transcript:${SESSION_ID}`,
+    ];
+    for (const pointer of pointers) expect(text).toContain(`- evidence: ${pointer}`);
+    // The declaration line keeps its pointers: frontmatter changed, not the ledger.
+    expect(completedLines()[0].data.evidence_refs).toEqual(pointers);
+  });
+
+  it('(ii) cites [] when the evidence was never registered, and the file still parses clean', () => {
+    seedMission();
+    seedVerifyWithEvidence(missionId, { register: false });
+    seedGatesOpen();
+    expect(existsSync(evidenceRegistryPath(repo, registryOpts()))).toBe(false);
+
+    const { parsed } = runAndParse();
+
+    expect(parsed.outcome.evidenceRefs).toEqual([]);
+  });
+
+  it('(iii) resolves by HASH: a row first registered from another line still answers', () => {
+    seedMission();
+    const earlier = 'verify.completed:sess-earlier:v-earlier:deterministic';
+    expect(registerEvidence(redactAsStored(EVIDENCE), {
+      projectRoot: repo, source: earlier, ...registryOpts(),
+    }).ids).toEqual(['E-001']);
+    seedVerifyWithEvidence(missionId, { register: false });
+    seedGatesOpen();
+
+    const { parsed } = runAndParse();
+
+    expect(parsed.outcome.evidenceRefs).toEqual(['E-001']);
+    // The only row names a source no line of this mission carries.
+    const rows = readFileSync(evidenceRegistryPath(repo, registryOpts()), 'utf-8')
+      .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(rows.map((r) => r.source)).toEqual([earlier]);
+  });
+
+  it('(iv) cites only the cited verification, not another one of the same mission', () => {
+    seedMission();
+    const other = seedVerifyWithEvidence(missionId, { evidence: OTHER, verificationId: 'v1-0ther0000000-7' });
+    expect(other.evidence.ids).toEqual(['E-001']);
+    const cited = seedVerifyWithEvidence(missionId);
+    expect(cited.evidence.ids).toEqual(['E-002']);
+    seedGatesOpen();
+
+    const { parsed } = runAndParse();
+
+    expect(parsed.outcome.verificationId).toBe(VERIFICATION_ID);
+    expect(parsed.outcome.evidenceRefs).toEqual(['E-002']);
+  });
+
+  it('(v) cites [] when the registry cannot be read, and the hook still exits 0 silently', () => {
+    seedMission();
+    seedVerifyWithEvidence(missionId, { register: false });
+    mkdirSync(evidenceRegistryPath(repo, registryOpts()), { recursive: true });
+    seedGatesOpen();
+
+    const { parsed } = runAndParse();
+
+    expect(parsed.outcome.evidenceRefs).toEqual([]);
+  });
+
+  it('(vi) reads EVERY row of the verification, not the last one (the lastOf trap)', () => {
+    seedMission();
+    seedVerifyWithEvidence(missionId);
+    seedGatesOpen();
+    // Precondition: the last verify row is the operational line, carrying no
+    // evidence. A helper that read only that row would cite nothing.
+    const verifies = readRunLedger(repo).filter((l) => l.event === 'verify.completed');
+    expect(verifies.at(-1).data.layer).toBe('operational');
+    expect(verifies.at(-1).data.evidence).toEqual([]);
+
+    expect(runAndParse().parsed.outcome.evidenceRefs).toEqual(['E-001']);
+  });
+
+  it('(vii) end to end: item 9 passes on the written outcome, and fails once the row is gone', () => {
+    seedMission();
+    seedVerifyWithEvidence(missionId);
+    seedGatesOpen();
+    const refs = runAndParse().parsed.outcome.evidenceRefs;
+    expect(refs).toEqual(['E-001']);
+    const item9 = (evidenceIds) => checkArtifactHealth({
+      missionDirs: [{ mission_id: missionId, files: { outcome: { evidence_refs: refs } } }],
+      evidenceIds,
+    }).items.missing_evidence_reference;
+
+    expect(item9(readEvidenceIds(repo, registryOpts()))).toMatchObject({
+      status: CheckStatus.PASS, findings: [],
+    });
+
+    // Positive control: the same outcome against a registry without that row.
+    writeFileSync(evidenceRegistryPath(repo, registryOpts()), '', 'utf-8');
+    const failed = item9(readEvidenceIds(repo, registryOpts()));
+    expect(failed.status).toBe(CheckStatus.FAIL);
+    expect(failed.findings.map((f) => f.ref)).toEqual(['E-001']);
+  });
+
+  it('(viii) a FOLDED verify line keeps its evidence but loses verification_id: omitted, not mis-cited', () => {
+    // `event-writer.js#foldOversized` keeps the event's required data keys
+    // (`result`, `evidence`) and drops `layer` and `verification_id`.
+    const longId = `v1-folded-${'segment-'.repeat(30)}`;
+    const line = (output) => ({
+      event: 'verify.completed', session_id: SESSION_ID, mission_id: missionId, source: 'gate',
+      idempotency_key: `verify.completed:${SESSION_ID}:${longId}:deterministic`,
+      data: {
+        layer: 'deterministic', result: 'pass',
+        evidence: [{ kind: 'command', command: 'npx vitest run', output }], verification_id: longId,
+      },
+    });
+    // Size the output against a scratch root so the real line lands just over the cap.
+    const probe = path.join(tmp, 'probe');
+    mkdirSync(probe, { recursive: true });
+    execFileSync('git', ['init'], { cwd: probe, stdio: 'ignore', windowsHide: true });
+    const small = appendLedgerEvent(probe, line('ok. '));
+    expect(small.folded).toBe(false);
+    const folded = appendLedgerEvent(repo, line('ok. '.repeat(Math.ceil((4096 - small.bytes + 24) / 4) + 1)));
+    expect(folded.ok).toBe(true);
+    expect(folded.folded).toBe(true);
+    expect(folded.dropped).toEqual(['layer', 'verification_id']);
+    seedVerifyWithEvidence(missionId, { evidence: [] });
+
+    const history = readRunLedger(repo).filter((l) => l.mission_id === missionId);
+    const stored = history.find((l) => Array.isArray(l.data?.evidence_refs));
+    expect(stored.data.verification_id).toBeUndefined();
+    // Registered exactly as a production port would have after the append.
+    expect(registerEvidence(stored.data.evidence, {
+      projectRoot: repo, source: 'folded', ...registryOpts(),
+    }).ids).toEqual(['E-001']);
+    const d = { lookupEvidenceIds, resolveGitCommonDir };
+    expect(lookupEvidenceIds(repo, stored.data.evidence, registryOpts())).toEqual(['E-001']);
+
+    expect(registeredEvidenceIds(d, repo, history, VERIFICATION_ID)).toEqual([]);
+    expect(registeredEvidenceIds(d, repo, history, longId)).toEqual([]);
+  });
+
+  it('turns a throwing or malformed lookup, or no verification id, into []', () => {
+    const history = [{ event: 'verify.completed', data: { verification_id: 'v', evidence: EVIDENCE } }];
+    const throwing = { lookupEvidenceIds: () => { throw new Error('boom'); }, resolveGitCommonDir };
+    expect(registeredEvidenceIds(throwing, repo, history, 'v')).toEqual([]);
+    expect(registeredEvidenceIds({ lookupEvidenceIds: () => null }, repo, history, 'v')).toEqual([]);
+    expect(registeredEvidenceIds({}, repo, history, 'v')).toEqual([]);
+    expect(registeredEvidenceIds({ lookupEvidenceIds }, repo, history, null)).toEqual([]);
+    expect(registeredEvidenceIds({ lookupEvidenceIds }, repo, null, 'v')).toEqual([]);
   });
 });
 

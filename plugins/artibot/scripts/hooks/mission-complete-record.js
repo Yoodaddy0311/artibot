@@ -197,7 +197,7 @@ export function missionCompletedIdempotencyKey(missionId) {
 export async function loadDeps() {
   const [
     git, ledger, lifecycle, gates, tasks, commonDir, file, platform, outcome, missionIds,
-    planning, review,
+    planning, review, registry,
   ] = await Promise.all([
       import('../../lib/git/project-root.js'),
       import('../../lib/runtime/ledger.js'),
@@ -211,6 +211,7 @@ export async function loadDeps() {
       import('../../lib/mission/mission-id.js'),
       import('../../lib/planning/plan-artifact.js'),
       import('../../lib/review/review-artifact.js'),
+      import('../../lib/verification/evidence-registry.js'),
     ]);
   return {
     resolveProjectRoot: git.resolveProjectRoot,
@@ -236,6 +237,7 @@ export async function loadDeps() {
     reviewArtifactPath: review.reviewArtifactPath,
     parseReviewMd: review.parseReviewMd,
     FIRST_REVIEW_REVISION: review.FIRST_REVIEW_REVISION,
+    lookupEvidenceIds: registry.lookupEvidenceIds,
   };
 }
 
@@ -279,12 +281,12 @@ export function policyFromConfig(config) {
 }
 
 /**
- * The evidence pointers for one mission's declaration (decision 7 (a)).
+ * The evidence pointers for one mission (decision 7 (a)).
  *
- * POINTER STRINGS, NOT A REGISTRY. There is no Evidence Registry writer in the
- * tree, and `human.asked.data.evidence_refs` already carries free-form pointer
- * strings on the live ledger, so this spelling conflicts with nothing. A ref is
- * `ledger:<idempotency_key>` when the row carries one and
+ * POINTER STRINGS, NOT REGISTRY IDS. They go on the `mission.completed` ledger
+ * line and into outcome.md's `## Changes` body, never into its frontmatter:
+ * there `evidence_refs` holds §23 registry ids ({@link registeredEvidenceIds}).
+ * A ref is `ledger:<idempotency_key>` when the row carries one and
  * `ledger:<event>:<mission>` when it does not — the fallback is deliberately
  * ambiguous BY MISSION rather than invented per row, because a fabricated key
  * would resolve to nothing and read as if it did.
@@ -301,6 +303,36 @@ export function evidencePointers(history, sessionId) {
   if (lastReview !== null) refs.push(pointerFor(lastReview, 'review.completed'));
   refs.push(`transcript:${sessionId}`);
   return refs;
+}
+
+/**
+ * The registry ids (§23, `E-nnn`) of the evidence one verification carried,
+ * resolved READ-ONLY by content hash
+ * (`lib/verification/evidence-registry.js#lookupEvidenceIds`): nothing is minted
+ * here, so evidence whose registration was lost is omitted, never failed.
+ *
+ * EVERY `verify.completed` row of `verificationId`, across all layers, and NOT
+ * `lastOf`: the last row is usually the `:operational` line with `evidence: []`.
+ * A row the ledger FOLDED has lost `verification_id` (`event-writer.js#foldOversized`
+ * keeps only required keys), so its evidence is omitted rather than mis-cited.
+ *
+ * @param {object} d {@link loadDeps} bindings
+ * @param {string} projectRoot
+ * @param {object[]} history full mission history, ledger order
+ * @param {string|null} verificationId
+ * @returns {string[]} distinct ids in entry order; `[]` on any failure
+ */
+export function registeredEvidenceIds(d, projectRoot, history, verificationId) {
+  try {
+    if (str(verificationId) === null) return [];
+    const entries = history
+      .filter((row) => row?.event === VERIFY_EVENT && row.data?.verification_id === verificationId)
+      .flatMap((row) => (Array.isArray(row.data.evidence) ? row.data.evidence : []));
+    const ids = d.lookupEvidenceIds(projectRoot, entries, { resolveGitCommonDir: d.resolveGitCommonDir });
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The last row of `event` in ledger order, or null. */
@@ -564,7 +596,9 @@ function outcomeSections(ctx) {
       'accepted: null — 판정 유예. 완료 선언이지 완료가 아니다',
       '이 줄은 7일 관측 창(design §D3)이 닫힐 때 두 번째 줄로 확정된다',
     ],
-    changes: ctx.evidenceRefs.map((ref) => `evidence: ${ref}`),
+    // The pointers, never the ids: this list is never empty (the transcript
+    // pointer is always there), and the serializer refuses an empty section.
+    changes: evidencePointers(ctx.history, ctx.sessionId).map((ref) => `evidence: ${ref}`),
     verification: verificationLines(ctx.planResult),
     review: [
       `last verdict: ${str(ctx.lastVerdict) ?? 'none recorded'}`,
@@ -631,7 +665,8 @@ function writeOutcome(d, ctx) {
       reviewRevision: ctx.missionState.reviewRevision,
     },
     verificationId: ctx.verificationId,
-    evidenceRefs: ctx.evidenceRefs,
+    // Read only once the gate is open, so a shut gate costs no registry read.
+    evidenceRefs: registeredEvidenceIds(d, ctx.projectRoot, ctx.history, ctx.citedVerificationId),
     // Never `supersedes`: the serializer REFUSES it beside `accepted: null`.
     accepted: null,
     actor: ACTOR,
@@ -680,13 +715,15 @@ function processMission(d, ctx) {
 
   let write = WriteStatus.BLOCKED;
   if (classified.blockCode === null) {
+    const citedVerificationId = lastVerificationId(full);
     write = classified.wouldWrite
       ? writeOutcome(d, {
         ...ctx,
+        history: full,
         planResult: classified.planResult,
         missionState: classified.missionState,
-        evidenceRefs: evidencePointers(full, ctx.sessionId),
-        verificationId: lastVerificationId(full) ?? `${VERIFY_EVENT}:${ctx.missionId}`,
+        citedVerificationId,
+        verificationId: citedVerificationId ?? `${VERIFY_EVENT}:${ctx.missionId}`,
         lastVerdict: verdict,
       })
       : WriteStatus.WOULD_WRITE;

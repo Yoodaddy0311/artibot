@@ -6,7 +6,8 @@
  * content gets the next sequential id; that a row carries only
  * id/type/source/hash/created_at and never the entry's payload; that
  * `registerEvidence` never throws; that `readEvidenceIds` tells an ABSENT
- * registry (`[]`, measured-and-empty) from an unreadable one (`null`); and that
+ * registry (`[]`, measured-and-empty) from an unreadable one (`null`); that
+ * `lookupEvidenceIds` answers by hash without the lock and without a write; and that
  * id allocation waits on the file lock, measured by a child process that is
  * held behind a live lock and appends only after it is released.
  *
@@ -32,8 +33,10 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -44,8 +47,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   evidenceHash,
   evidenceRegistryPath,
+  lookupEvidenceIds,
   readEvidenceIds,
   registerEvidence,
+  REGISTRY_LOCK_DEFAULTS,
   releaseLock,
 } from '../../lib/verification/evidence-registry.js';
 
@@ -267,6 +272,117 @@ describe('readEvidenceIds', () => {
     registerEvidence([cmd()], { projectRoot: root, source: SOURCE, now: AT, resolveGitCommonDir: port });
     expect(readEvidenceIds(root, { resolveGitCommonDir: port })).toEqual(['E-001']);
     expect(readEvidenceIds(root)).toEqual([]);
+  });
+});
+
+describe('lookupEvidenceIds', () => {
+  /** sha256 of the registry file, or 'absent'. */
+  const registrySha = () => {
+    const p = evidenceRegistryPath(root);
+    return existsSync(p) ? createHash('sha256').update(readFileSync(p)).digest('hex') : 'absent';
+  };
+
+  it('returns the id of content that was registered, matched by hash', () => {
+    reg([cmd('a'), file()]);
+    expect(lookupEvidenceIds(root, [file()])).toEqual(['E-002']);
+    // Same content in another key order is the same evidence.
+    expect(lookupEvidenceIds(root, [{ line: 12, file: 'lib/a.js', kind: 'file' }])).toEqual(['E-002']);
+  });
+
+  it('omits content that was never registered', () => {
+    reg([cmd('a')]);
+    expect(lookupEvidenceIds(root, [cmd('never'), cmd('a')])).toEqual(['E-001']);
+    expect(lookupEvidenceIds(root, [cmd('never')])).toEqual([]);
+  });
+
+  it('keeps the FIRST id when two rows share a hash, as the writer does', () => {
+    const p = evidenceRegistryPath(root);
+    mkdirSync(path.dirname(p), { recursive: true });
+    const h = evidenceHash(cmd('dup'));
+    writeFileSync(p, [
+      JSON.stringify({ id: 'E-004', type: 'command', source: 's', hash: h, created_at: 't' }),
+      JSON.stringify({ id: 'E-002', type: 'command', source: 's', hash: h, created_at: 't' }),
+      '',
+    ].join('\n'));
+    expect(lookupEvidenceIds(root, [cmd('dup')])).toEqual(['E-004']);
+    // The writer agrees: registering the same content reuses that first id.
+    expect(reg([cmd('dup')]).ids).toEqual(['E-004']);
+  });
+
+  it('returns [] for an absent registry, and creates nothing', () => {
+    expect(lookupEvidenceIds(root, [cmd()])).toEqual([]);
+    expect(existsSync(evidenceRegistryPath(root))).toBe(false);
+    expect(existsSync(path.dirname(evidenceRegistryPath(root)))).toBe(false);
+  });
+
+  it('returns null when the registry cannot be read, and never throws', () => {
+    mkdirSync(evidenceRegistryPath(root), { recursive: true });
+    expect(lookupEvidenceIds(root, [cmd()])).toBeNull();
+    expect(lookupEvidenceIds('', [cmd()])).toBeNull();
+    expect(lookupEvidenceIds(root, [cmd()], { resolveGitCommonDir: () => { throw new Error('x'); } }))
+      .toEqual([]);
+  });
+
+  it('skips a torn trailing line: a strict prefix of a row never parses', () => {
+    reg([cmd('a')]);
+    const p = evidenceRegistryPath(root);
+    const whole = JSON.stringify({
+      id: 'E-002', type: 'command', source: 's', hash: evidenceHash(cmd('b')), created_at: 't',
+    });
+    // Every strict prefix, the one a reader racing the append can see.
+    for (let cut = 1; cut < whole.length; cut += 1) {
+      writeFileSync(p, `${JSON.stringify({
+        id: 'E-001', type: 'command', source: 's', hash: evidenceHash(cmd('a')), created_at: 't',
+      })}\n${whole.slice(0, cut)}`);
+      expect(lookupEvidenceIds(root, [cmd('a'), cmd('b')])).toEqual(['E-001']);
+    }
+    writeFileSync(p, `${readFileSync(p, 'utf8').split('\n')[0]}\n${whole}\n`);
+    expect(lookupEvidenceIds(root, [cmd('a'), cmd('b')])).toEqual(['E-001', 'E-002']);
+  });
+
+  it('answers in entry order, each id once', () => {
+    reg([cmd('a'), cmd('b')]);
+    expect(lookupEvidenceIds(root, [cmd('b'), cmd('a'), cmd('b'), cmd('a')])).toEqual(['E-002', 'E-001']);
+  });
+
+  it('skips an entry it cannot hash, and a non-array list gives []', () => {
+    reg([cmd('a')]);
+    const loop = { kind: 'command' };
+    loop.self = loop;
+    expect(lookupEvidenceIds(root, [loop, cmd('a')])).toEqual(['E-001']);
+    expect(lookupEvidenceIds(root, undefined)).toEqual([]);
+    expect(lookupEvidenceIds(root, [])).toEqual([]);
+  });
+
+  it('never takes the lock and never writes: the registry bytes do not move', () => {
+    reg([cmd('a')]);
+    const p = evidenceRegistryPath(root);
+    const before = registrySha();
+    const mtime = statSync(p).mtimeMs;
+    expect(lookupEvidenceIds(root, [cmd('a'), cmd('new')])).toEqual(['E-001']);
+    expect(registrySha()).toBe(before);
+    expect(statSync(p).mtimeMs).toBe(mtime);
+    expect(readdirSync(path.dirname(p))).toEqual(['evidence.jsonl']);
+  });
+
+  it('does not wait behind a held lock, and leaves the holder alone', () => {
+    reg([cmd('a')]);
+    const lockPath = `${evidenceRegistryPath(root)}.lock`;
+    writeFileSync(lockPath, JSON.stringify({ token: 'held', pid: 1, timestamp: Date.now() }));
+    const t0 = Date.now();
+    expect(lookupEvidenceIds(root, [cmd('a')])).toEqual(['E-001']);
+    // A reader that queued behind this fresh lock would wait until the stale
+    // window (5 s) let it take the lock over, and then the holder's file would
+    // be gone, so both assertions below discriminate.
+    expect(Date.now() - t0).toBeLessThan(REGISTRY_LOCK_DEFAULTS.staleMs);
+    expect(readFileSync(lockPath, 'utf8')).toContain('held');
+  });
+
+  it('reads the same place the writer wrote through an injected port', () => {
+    const port = () => path.join(root, 'shared-common');
+    registerEvidence([cmd()], { projectRoot: root, source: SOURCE, now: AT, resolveGitCommonDir: port });
+    expect(lookupEvidenceIds(root, [cmd()], { resolveGitCommonDir: port })).toEqual(['E-001']);
+    expect(lookupEvidenceIds(root, [cmd()])).toEqual([]);
   });
 });
 

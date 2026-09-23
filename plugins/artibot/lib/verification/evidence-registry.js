@@ -87,7 +87,8 @@
  * writer that took over. Nothing here detects that.
  *
  * ── Never throws on the write path ──────────────────────────────────────────
- * `registerEvidence` and `readEvidenceIds` turn every failure into a value: a
+ * `registerEvidence`, `readEvidenceIds` and `lookupEvidenceIds` turn every
+ * failure into a value: a
  * `reason` string with no ids, or `null` for "could not be read". A refused
  * call writes NOTHING. A partial registration would hand back ids for some
  * entries and silently drop the rest.
@@ -505,6 +506,57 @@ export function readEvidenceIds(projectRoot, { resolveGitCommonDir } = {}) {
     if (seen.has(id)) continue;
     seen.add(id);
     ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * The ids of entries that are already registered, found by content hash.
+ * READ-ONLY: it mints nothing and appends nothing, so an unregistered entry is
+ * simply absent from the answer.
+ *
+ * LOCK-FREE BY DESIGN. The writer (`allocateLocked`) only ever appends whole
+ * rows, each in one `appendFileSync`, and never rewrites or truncates. So a read
+ * racing an append sees a prefix of the file: every complete row is final, and
+ * at most the last line is torn. A torn line is a strict prefix of one
+ * `JSON.stringify`d object, which never parses, and `parseRows` skips it. The
+ * race therefore costs an omitted id, never a wrong one. Waiting on the lock
+ * would instead put a 6 s stall on a reader that can live with the omission.
+ *
+ * Each hash answers with the FIRST row's id, the one `allocateLocked` reuses.
+ *
+ * @param {string} projectRoot - Absolute project root.
+ * @param {Array<unknown>} entries - Evidence entries, as the ledger stores them.
+ *   An entry that cannot be hashed is skipped.
+ * @param {{ resolveGitCommonDir?: (projectRoot: string) => (string|null) }} [opts]
+ * @returns {string[]|null} Distinct ids in entry order. `[]` for no entries, an
+ *   absent registry, or no match. `null` when the registry exists but cannot be
+ *   read. Never throws.
+ */
+export function lookupEvidenceIds(projectRoot, entries, { resolveGitCommonDir } = {}) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  let text;
+  try {
+    text = readTextOrEmpty(evidenceRegistryPath(projectRoot, { resolveGitCommonDir }));
+  } catch {
+    return null;
+  }
+  const idByHash = new Map();
+  for (const row of parseRows(text)) {
+    if (typeof row.hash === 'string' && HASH_RE.test(row.hash) && !idByHash.has(row.hash)) {
+      idByHash.set(row.hash, row.id);
+    }
+  }
+  const ids = [];
+  for (const entry of entries) {
+    let hash;
+    try {
+      hash = evidenceHash(entry);
+    } catch {
+      continue;
+    }
+    const id = idByHash.get(hash);
+    if (id !== undefined && !ids.includes(id)) ids.push(id);
   }
   return ids;
 }
