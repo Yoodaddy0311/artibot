@@ -78,6 +78,47 @@ export const REVIEW_CLAIM_AUDIT_EVENT = 'review.claim_audit';
 export const REVIEW_LEDGER_SOURCE = 'reviewer';
 
 /**
+ * Longest `verification_id` a `review.completed` line may carry; a longer one
+ * is refused as `oversize:verification_id`.
+ *
+ * WHY A BOUND AT ALL. The id is written twice — `data.verification_id` and
+ * inside `idempotency_key` — and `event-writer.js#foldOversized` drops only the
+ * first, together with the undeclared `intent_revision` / `plan_revision`. An
+ * id of about 1,846..3,663 chars therefore made the fold "succeed": the row
+ * landed with `ok:true` and without the three keys CA-17's intent binding
+ * reads (Wave 18 probe). Refusing is a visible absence; the fold was not.
+ *
+ * WHY 256. The only generator is `unified-verifier.js#buildVerificationId`,
+ * `v1-<12 hex>-<YYYYMMDDTHHMMSSZ>` = 32 chars. Live ledger snapshot
+ * 2026-09-23 12:33 KST (18,630 lines): 980/980 `verify.completed` and 23/23
+ * `mission.completed` ids are exactly 32 chars and match that format;
+ * `review.completed` rows = 0, so the reviewer-side maximum is UNMEASURED.
+ * 256 is 8x the format, room for a longer successor format, and far below
+ * the 1,846 where the fold began. `schemas/review-output.schema.json`
+ * deliberately asserts no pattern, so nothing upstream bounds it.
+ */
+export const VERIFICATION_ID_MAX_LENGTH = 256;
+
+/**
+ * The ledger line cap this writer budgets against — a COPY of
+ * `event-writer.js#DEFAULT_LINE_MAX_BYTES`, because L2 may not import
+ * `lib/runtime/`. `tests/review/verdict-writer.test.js` pins it equal to the
+ * writer's default, the config value and the allowlist limit.
+ */
+export const LEDGER_LINE_MAX_BYTES = 4096;
+
+/**
+ * Bytes `event-writer.js#buildEnvelope` adds around the input, worst case:
+ * `"v":1,` 6 + `"ts":"<24>",` 32 + `"pid":<10 digits>,` 17 +
+ * `"seq":<16 digits>,` 23 + the session-fallback `"mission_id":"<20>",` 36 +
+ * the newline 1 = 115, rounded up to 128. The boundary test appends an input of
+ * exactly `LEDGER_LINE_MAX_BYTES - ENVELOPE_RESERVE_BYTES` with that worst
+ * envelope and asserts it does not fold (mutation probe 2026-09-23: a reserve
+ * of 114 folds, 115 does not — the arithmetic above is exact).
+ */
+export const ENVELOPE_RESERVE_BYTES = 128;
+
+/**
  * The `mission_id` an envelope may carry, or null.
  *
  * A malformed id is OMITTED rather than sent: `event-writer.js` would refuse
@@ -163,6 +204,17 @@ export function claimAuditIdempotencyKey(sessionId, audit) {
  * schema violation can never be read as a pass (design §3.4). `foldedVerdict`
  * is never consulted here — it is an observation, not a verdict.
  *
+ * It also refuses a line the ledger would FOLD: `oversize:verification_id`
+ * past {@link VERIFICATION_ID_MAX_LENGTH}, and `oversize:line` when the
+ * serialized input leaves less than {@link ENVELOPE_RESERVE_BYTES} under
+ * {@link LEDGER_LINE_MAX_BYTES}. Both reasons surface as `skipped:<reason>`,
+ * the channel the caller already counts
+ * (`_review-stop-record.js#reviewLedgerColumn`). A kept row carries every key
+ * built here ONLY under the default cap and when redaction does not lengthen
+ * the input — the budget is measured before `redactDeep`, which can grow a
+ * field (`pwd=abcd` → `password=[REDACTED_SECRET]`). Otherwise the row can
+ * still fold, and is then reported `appended` with reason `ledger-folded`.
+ *
  * @param {object} [args] build inputs
  * @param {object} [args.parsed] a {@link parseReviewVerdict} result
  * @param {string} [args.sessionId] envelope `session_id`
@@ -181,11 +233,14 @@ export function buildReviewCompletedEvent(args = {}) {
   if (!isNonEmptyString(parsed.verificationId)) {
     return { ok: false, reason: 'missing:verification_id' };
   }
+  if (parsed.verificationId.length > VERIFICATION_ID_MAX_LENGTH) {
+    return { ok: false, reason: 'oversize:verification_id' };
+  }
   if (!isNonEmptyString(sessionId)) return { ok: false, reason: 'missing:sessionId' };
   if (!isNonEmptyString(model)) return { ok: false, reason: 'missing:model' };
   if (!isNonEmptyString(findingsRef)) return { ok: false, reason: 'missing:findingsRef' };
   const mission = envelopeMissionId(missionId);
-  return {
+  const built = {
     ok: true,
     input: {
       event: REVIEW_COMPLETED_EVENT,
@@ -214,6 +269,15 @@ export function buildReviewCompletedEvent(args = {}) {
       },
     },
   };
+  // The id bound alone does not keep the line under the cap: `session_id`,
+  // `model`, `worker` and `findings_ref` are unbounded here. Any line that
+  // would reach the fold is refused instead, because the fold keeps only
+  // `verdict` and `findings_ref` and would land the row without the rest.
+  const bytes = Buffer.byteLength(JSON.stringify(built.input), 'utf8');
+  if (bytes > LEDGER_LINE_MAX_BYTES - ENVELOPE_RESERVE_BYTES) {
+    return { ok: false, reason: 'oversize:line' };
+  }
+  return built;
 }
 
 /**
@@ -320,6 +384,13 @@ function readExistingReviewKeys(port) {
 /**
  * Append one built input through the port, and say what happened to it.
  *
+ * A row the writer FOLDED is still `appended` — it is in the ledger — but
+ * carries `reason: 'ledger-folded'`, so the keys it lost are reported rather
+ * than read as a clean append. The builder's budget should make this
+ * unreachable for `review.completed`; what still reaches it is an
+ * operator-lowered cap, a redaction that lengthens a string, and
+ * `review.claim_audit`, whose builder has no budget.
+ *
  * @param {unknown} append `append` port
  * @param {object} input a `build*Event` result's `input`
  * @returns {{status: 'appended'|'rejected', reason?: string}} outcome
@@ -334,7 +405,11 @@ function appendReviewLine(append, input) {
   } catch {
     return { status: 'rejected', reason: 'port-threw:append' };
   }
-  if (res && typeof res === 'object' && res.ok === true) return { status: 'appended' };
+  if (res && typeof res === 'object' && res.ok === true) {
+    return res.folded === true
+      ? { status: 'appended', reason: 'ledger-folded' }
+      : { status: 'appended' };
+  }
   const reason = res && typeof res === 'object' ? res.reason : null;
   return {
     status: 'rejected',
@@ -366,7 +441,9 @@ function recordReviewLine(built, seen, append) {
     // Added to the local set as well as the ledger, so two lines built in one
     // call cannot collide with each other before the port is re-read.
     seen.keys.add(key);
-    return { status: 'appended', key };
+    return outcome.reason === undefined
+      ? { status: 'appended', key }
+      : { status: 'appended', key, reason: outcome.reason };
   }
   return { status: 'rejected', key, reason: outcome.reason };
 }
