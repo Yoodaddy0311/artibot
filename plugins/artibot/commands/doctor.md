@@ -585,10 +585,18 @@ that a write was lost. Phase 0 is Observe: report, never repair.
   the `registerEvidence` port of `lib/verification/verify-writer.js`, and only
   when `scripts/hooks/dev-verify-gate.js` or `scripts/ledger/record-verify.mjs`
   newly APPENDS a `verify.completed` line that carries evidence. A deduped or
-  rejected line registers nothing. A ref to evidence recorded before this
-  landed, or recorded any other way, therefore reads as fail. That is the
-  correct verdict for a ref that does not resolve; it says the evidence was
-  never registered, not that the check is broken.
+  rejected line registers nothing. An E-nnn ref to evidence recorded before
+  this landed, or recorded any other way, therefore reads as fail. That is the
+  correct verdict for an E-id that does not resolve.
+- **Refs written in another namespace.** Item 9 resolves refs only against
+  E-nnn registry ids. The only production writer of outcome `evidence_refs`,
+  `scripts/hooks/mission-complete-record.js#evidencePointers`, emits
+  `ledger:<key>` and `transcript:<sessionId>` pointers and never an E-id, so
+  today every hook-written `outcome.md` fails item 9. A fail on a ref that is
+  not an E-id is a namespace mismatch, not missing evidence — read the
+  finding's `ref` before reading the fail as a lost record. The fix, either the
+  producer emitting E-ids or `itemMissingEvidence` scoping itself to E-ids,
+  lives outside this check's files and is carried as a follow-up.
 - **Evidence registered in another clone.** The registry is local to one git
   common dir. Every linked worktree of one repository shares it, but a
   separate clone, or a tree on the `.artibot/runtime/` fallback, holds its own,

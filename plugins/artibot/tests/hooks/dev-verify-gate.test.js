@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
@@ -517,6 +519,8 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     }
     vi.doUnmock('../../lib/verification/unified-verifier.js');
     vi.doUnmock('../../lib/verification/evidence-registry.js');
+    vi.doUnmock('../../lib/runtime/ledger-redaction.js');
+    vi.doUnmock('../../lib/verification/deterministic-source.js');
     vi.resetModules();
   });
 
@@ -792,6 +796,97 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
 
     expect(called, '던지는 포트가 실제로 불렸어야 이 케이스가 뭔가를 잰다').toBeGreaterThan(0);
     expect(ledgerMock.appends).toHaveLength(4);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  it('원장 redaction 모듈이 로드 중 던지면 포트를 떼고 원장 4줄과 stdout 은 그대로다', async () => {
+    plantFreshResult();
+    let called = 0;
+    vi.doMock('../../lib/verification/evidence-registry.js', () => ({
+      registerEvidence: () => {
+        called += 1;
+        return { ids: [], appended: 0, reused: 0 };
+      },
+    }));
+    vi.doMock('../../lib/runtime/ledger-redaction.js', () => {
+      throw new Error('injected redaction import failure');
+    });
+    const main = await loadMain();
+    await main();
+
+    // 리댁션 없는 레지스트리는 원장이 지운 비밀의 해시를 남긴다(F1) — 그래서
+    // 등록을 통째로 건너뛴다. 원장 쪽은 레지스트리가 없던 때와 같다.
+    expect(called, '가려지지 않은 증거는 등록하지 않는다').toBe(0);
+    expect(ledgerMock.appends).toHaveLength(4);
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+  });
+
+  /**
+   * 깊이 정합(리뷰 F1). `redactDeep` 은 받은 루트에서 깊이 상한을 세고, 원장은
+   * 봉투 전체를 넘긴다 — 증거는 `data.evidence`(깊이 2) 에 있다. 61단 중첩
+   * note 는 맨 배열로 가리면 원장과 두 단 다른 자리에서 잘린다. 실제 훅
+   * 경로로는 중첩 note 를 실을 수 없으므로(결정론 증거의 note 는 문자열)
+   * 결정론 소스를 대역하고, 포트가 받은 증거를 **실제 원장 writer** 로 임시
+   * 루트에 써서 저장된 모양과 비교한다.
+   */
+  it('redactAsStored 는 61단 note 를 봉투 리댁션과 같은 자리에서 자른다', async () => {
+    const { redactAsStored } = await import('../../scripts/hooks/dev-verify-gate.js');
+    const { evidenceHash } = await vi.importActual('../../lib/verification/evidence-registry.js');
+    const { redactDeep } = await vi.importActual('../../lib/runtime/ledger-redaction.js');
+    let note = 'leaf';
+    for (let i = 0; i < 61; i += 1) note = { a: note };
+    const entries = [{ kind: 'command', command: 'deep', output: '', note }];
+    // `event-writer.js#buildEnvelope` 산출과 같은 모양: 스칼라 키들 + data.
+    const envelopeLike = {
+      v: 1, ts: '2026-09-23T03:00:00.000Z', event: 'verify.completed', session_id: SESSION,
+      source: 'gate', pid: 1, seq: 0, idempotency_key: 'k',
+      data: { layer: 'deterministic', result: 'pass', evidence: entries, verification_id: 'v1-x' },
+    };
+
+    expect(evidenceHash(redactAsStored(entries, redactDeep)[0]))
+      .toBe(evidenceHash(redactDeep(envelopeLike).data.evidence[0]));
+  });
+
+  it('61단 중첩 note 도 원장에 저장된 모양 그대로 레지스트리에 넘긴다', async () => {
+    let note = 'leaf';
+    for (let i = 0; i < 61; i += 1) note = { a: note };
+    const evidence = [{ kind: 'command', command: 'deep', output: '', note }];
+    vi.doMock('../../lib/verification/deterministic-source.js', () => ({
+      readDeterministicLayer: () => ({ deterministic: { exitCode: 0, reason: 'deep note', evidence } }),
+    }));
+    const calls = [];
+    vi.doMock('../../lib/verification/evidence-registry.js', () => ({
+      registerEvidence: (entries, opts) => {
+        calls.push({ entries, opts });
+        return { ids: [], appended: 0, reused: 0 };
+      },
+    }));
+    const main = await loadMain();
+    await main();
+    expect(calls, 'overall + deterministic').toHaveLength(2);
+
+    // 같은 입력을 진짜 writer 로 임시 루트에 써서 저장된 바이트를 얻는다.
+    freshRepoRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-deep-'));
+    mkdirSync(path.join(freshRepoRoot, '.git'));
+    const realLedger = await vi.importActual('../../lib/runtime/ledger.js');
+    const { ledgerFilePath } = await vi.importActual('../../lib/runtime/event-writer.js');
+    const { evidenceHash } = await vi.importActual('../../lib/verification/evidence-registry.js');
+    const { redactDeep } = await vi.importActual('../../lib/runtime/ledger-redaction.js');
+    for (const { event } of ledgerMock.appends) {
+      expect(realLedger.appendLedgerEvent(freshRepoRoot, event).ok).toBe(true);
+    }
+    const stored = new Map(readFileSync(ledgerFilePath(freshRepoRoot), 'utf-8')
+      .split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
+      .map((e) => [e.idempotency_key, e]));
+
+    for (const { entries, opts } of calls) {
+      const line = stored.get(opts.source);
+      expect(line, 'source 가 가리키는 줄이 원장에 있다').toBeDefined();
+      expect(entries.map((e) => evidenceHash(e))).toEqual(line.data.evidence.map((e) => evidenceHash(e)));
+    }
+    // 이 케이스가 두 설계를 가른다: 맨 배열 리댁션은 저장본과 해시가 다르다.
+    expect(evidenceHash(redactDeep(evidence)[0]))
+      .not.toBe(evidenceHash(stored.get(calls[0].opts.source).data.evidence[0]));
     expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
   });
 });

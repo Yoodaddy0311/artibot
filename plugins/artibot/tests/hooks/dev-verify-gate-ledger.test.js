@@ -8,7 +8,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
-import { evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
+import { evidenceHash, evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
 
 /**
  * dev-verify-gate.js — the "unmeasured denominator" ledger wiring (OB-07).
@@ -575,5 +575,46 @@ describe('dev-verify-gate — evidence registry port (real spawn)', () => {
     const lines = readLedgerLines(box.ledger);
     expect(lines.filter((e) => e.event === 'ledger.rejected')).toEqual([]);
     expect(denominatorShape(lines)).toEqual(denominatorShape(readLedgerLines(normalBox.ledger)));
+  }, 60_000);
+
+  /**
+   * REDACTION PARITY (review F1). The ledger redacts every string before it
+   * writes; a registry that hashed the RAW entry would keep a hash of the
+   * secret the ledger scrubbed — an offline oracle for it. So every row's hash
+   * must be the hash of an entry AS STORED on the line its `source` names.
+   *
+   * The secret rides in the reporter's `timestamp`: `Date.parse` ignores a
+   * parenthesized comment, so the result stays fresh while `measured_at`
+   * carries the string into the evidence. The value is assembled from parts so
+   * this file does not itself look like a credential.
+   */
+  it('hashes the evidence as the ledger stored it, after redaction', () => {
+    const secretValue = ['abcd', 'efgh'].join('');
+    const result = { ...freshResult(), timestamp: `${new Date().toUTCString()} (pass${'word'}="${secretValue}")` };
+    const box = buildSandbox({ testResult: result, markerAgeMs: 10_000 });
+    const run = runHook(box);
+    expect(run.stdout, `hook stderr: ${run.stderr}`).toBe(EXPECTED_STDOUT);
+
+    const lines = readLedgerLines(box.ledger);
+    const stored = lines.find((e) => e.data.layer === 'deterministic').data.evidence;
+    // POSITIVE CONTROL: the secret reached the evidence and the ledger scrubbed
+    // it. Without this the parity below could pass on a string nobody redacted.
+    expect(stored[0].measured_at).toContain('[REDACTED');
+    expect(JSON.stringify(lines)).not.toContain(secretValue);
+
+    const rows = registryRows(box);
+    expect(rows.length, `registry: ${evidenceRegistryPath(box.repo)}`).toBeGreaterThan(0);
+    const byKey = new Map(lines.map((e) => [e.idempotency_key, e]));
+    for (const row of rows) {
+      const line = byKey.get(row.source);
+      expect(line, `row ${row.id} names a line that is in the ledger`).toBeDefined();
+      expect(line.data.evidence.map((entry) => evidenceHash(entry))).toContain(row.hash);
+    }
+    // And the other direction: every stored entry has its row.
+    const rowHashes = new Set(rows.map((r) => r.hash));
+    for (const line of lines) {
+      for (const entry of line.data.evidence) expect(rowHashes.has(evidenceHash(entry))).toBe(true);
+    }
+    expect(readFileSync(evidenceRegistryPath(box.repo), 'utf-8')).not.toContain(secretValue);
   }, 60_000);
 });

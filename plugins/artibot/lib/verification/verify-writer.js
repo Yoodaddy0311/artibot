@@ -510,15 +510,40 @@ function appendOne(append, input) {
  * Register one APPENDED line's evidence through the optional port.
  *
  * The evidence handed over is the line's own `data.evidence`, after the byte cap
- * shortened it, not the verdict's. So a registry row's hash can be recomputed
- * from the ledger line its `source` names, and from nothing else. `source` is
- * that line's idempotency key, which already begins with the event name
- * (`verify.completed:<session>:<verification_id>[:<layer>]`). The row points at
- * the line. The line carries no evidence ids: its `data` allowlist and 4 KB cap
- * belong to the ledger.
+ * shortened it, not the verdict's. It is still PRE-REDACTION: the ledger
+ * redacts inside its own append (`lib/runtime/event-writer.js`, `redactDeep`
+ * over the built envelope, :816 on 2026-09-23), and the append result does not
+ * return the stored envelope. This module cannot import that redaction (L2 may
+ * not import `lib/runtime/`), so the PORT CONTRACT carries the obligation:
+ *
+ *   The bound port MUST register `entries` exactly as the ledger stores them:
+ *   redacted by `lib/runtime/ledger-redaction.js#redactDeep` AT THE ENVELOPE'S
+ *   `data.evidence` POSITION, i.e.
+ *   `redactDeep({ data: { evidence: entries } }).data.evidence`.
+ *
+ * A bare `redactDeep(entries)` is not the same pass. The walk counts
+ * `MAX_REDACT_DEPTH` (64) from the value it is given, and the ledger gives it the
+ * envelope, where the evidence sits two levels down. So a `note` nested 61+ deep
+ * is cut to the depth marker in the ledger and survives a bare call (B3 probe,
+ * 2026-09-23). The node budget (`MAX_REDACT_NODES`) counts object nodes, and
+ * every envelope member walked before `data.evidence` is a scalar, so the
+ * wrapper reproduces that count too. That is read from the code, not measured.
+ *
+ * Two things depend on it. First, the hash would otherwise be a confirmation
+ * oracle for a redacted secret: the ledger shows `[REDACTED_…]`, but anyone
+ * who can guess the secret can hash a candidate entry and match it against the
+ * registry row. Second, only then does a registry row's hash recompute from the
+ * ledger line its `source` names. Otherwise the hash matches the line only when
+ * redaction changed nothing.
+ *
+ * `source` is that line's idempotency key, which already begins with the event
+ * name (`verify.completed:<session>:<verification_id>[:<layer>]`). The row
+ * points at the line. The line carries no evidence ids: its `data` allowlist
+ * and 4 KB cap belong to the ledger.
  *
  * @param {Function} port - `lib/verification/evidence-registry.js#registerEvidence`
- *   bound to a project root, as `(entries, source) => result`.
+ *   bound to a project root, as `(entries, source) => result`, registering
+ *   `entries` redacted at the envelope's `data.evidence` position (see above).
  * @param {object} input - The envelope input that was just appended.
  * @returns {{ ids: string[], appended: number, reused: number, reason?: string }}
  */
@@ -575,9 +600,19 @@ function mergeLineEvidence(acc, reasons, r) {
  *   `append` is `lib/runtime/ledger.js#appendLedgerEvent` bound to a project
  *   root; `existingKeys` is optional and defaults to "no keys known".
  *   `registerEvidence` is optional too: `lib/verification/evidence-registry.js#registerEvidence`
- *   bound to a project root. It is called once per APPENDED line that carries
- *   evidence (see {@link registerLineEvidence}). A deduped or rejected line
- *   registers nothing. Its failures never change the tally.
+ *   bound to a project root, and it MUST register `entries` exactly as the ledger
+ *   stores them: `lib/runtime/ledger-redaction.js#redactDeep` applied at the
+ *   envelope's `data.evidence` position,
+ *   `redactDeep({ data: { evidence: entries } }).data.evidence`, not a bare
+ *   `redactDeep(entries)`. `entries` arrive here unredacted. Registered any
+ *   other way, the hash is a confirmation oracle for a secret the ledger
+ *   redacted and no longer recomputes from the stored line
+ *   (see {@link registerLineEvidence}). It is called
+ *   once per APPENDED line that carries evidence, in line order, in a second
+ *   pass AFTER every append has been attempted. A held or stranded registry lock
+ *   can stall for up to the file lock's 5 s timeout, and in the second pass that
+ *   stall cannot delay a ledger line. A deduped or rejected line registers
+ *   nothing. Its failures never change the tally.
  * @returns {{ appended: number, deduped: number, rejected: number, skipped: number,
  *   reason?: string, lines: Array<{ key: string, layer: string|null,
  *   status: 'appended'|'deduped'|'rejected', reason?: string }>,
@@ -599,6 +634,7 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
   const wantsEvidence = p.registerEvidence !== undefined && p.registerEvidence !== null;
   const evidence = { ids: [], appended: 0, reused: 0 };
   const evidenceReasons = new Set();
+  const appendedInputs = [];
   if (wantsEvidence && typeof p.registerEvidence !== 'function') evidenceReasons.add('port-missing:registerEvidence');
   for (const input of built.inputs) {
     const key = input.idempotency_key;
@@ -618,16 +654,21 @@ export function recordVerification(verdict, ctx = {}, ports = {}) {
       seen.keys.add(key);
       tally.appended += 1;
       lines.push({ key, layer, status: 'appended' });
-      if (typeof p.registerEvidence === 'function'
-        && Array.isArray(input.data.evidence) && input.data.evidence.length > 0) {
-        mergeLineEvidence(evidence, evidenceReasons, registerLineEvidence(p.registerEvidence, input));
-      }
+      appendedInputs.push(input);
     } else {
       tally.rejected += 1;
       lines.push({ key, layer, status: 'rejected', reason: outcome.reason });
     }
   }
   if (!wantsEvidence) return { ...tally, lines };
+  // Second pass: every ledger append is already done, so a slow registry lock
+  // delays only the registration.
+  for (const input of appendedInputs) {
+    if (typeof p.registerEvidence === 'function'
+      && Array.isArray(input.data.evidence) && input.data.evidence.length > 0) {
+      mergeLineEvidence(evidence, evidenceReasons, registerLineEvidence(p.registerEvidence, input));
+    }
+  }
   const reason = [...evidenceReasons].join('; ');
   return { ...tally, lines, evidence: reason ? { ...evidence, reason } : evidence };
 }

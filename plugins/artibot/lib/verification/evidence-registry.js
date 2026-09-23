@@ -21,7 +21,22 @@
  * evidence. The row stores the hash, not the entry. A command's `output` can
  * carry anything the command printed, and copying it here would give it a
  * second, unredacted home. Anyone holding the entry can recompute the hash and
- * find its id. Nobody holding only the registry can recover the entry.
+ * find its id.
+ *
+ * A hash hides nothing that can be GUESSED. Hash an entry holding a secret, and
+ * anyone who can guess the secret can confirm it by hashing a candidate and
+ * matching the row. That holds even when every other copy of the entry was
+ * redacted. So this module hashes exactly what it is handed, and the CALLER
+ * owns redaction. For evidence that also travels on a ledger line (the
+ * `verify.completed` writer, `./verify-writer.js#recordVerification`), the bound
+ * port must register the entries exactly as the ledger stores them: redacted by
+ * `lib/runtime/ledger-redaction.js#redactDeep` at the envelope's `data.evidence`
+ * position. A bare call on the entries is a different pass, because the depth
+ * limit counts from the root it is given. The exact contract is on that
+ * writer's `registerLineEvidence`. Then no row confirms what the ledger hid,
+ * and a row's hash recomputes from the stored line its `source` names. This module is L2 and
+ * cannot import `lib/runtime/`, so the obligation is on the port, not enforced
+ * here.
  *
  * ── Same hash, same id ──────────────────────────────────────────────────────
  * Registering content that is already present returns its existing id and

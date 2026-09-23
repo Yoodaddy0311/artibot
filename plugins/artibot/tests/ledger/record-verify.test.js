@@ -102,10 +102,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
-import { evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { redactDeep } from '../../lib/runtime/ledger-redaction.js';
+import { evidenceHash, evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
 import { verify } from '../../lib/verification/unified-verifier.js';
 import { recordVerification } from '../../lib/verification/verify-writer.js';
-import { SELF_REPORT_NOTE } from '../../scripts/ledger/record-verify.mjs';
+import {
+  evidenceRegistryPort, redactAsStored, SELF_REPORT_NOTE,
+} from '../../scripts/ledger/record-verify.mjs';
 
 // This file spawns child processes. The budget buys headroom for load; nothing
 // here waits on a timer.
@@ -557,6 +561,94 @@ describe('record-verify: the evidence registry', () => {
     expect(strip(JSON.parse(blocked.stdout))).toEqual(strip(JSON.parse(normal.stdout)));
     expect(Object.keys(JSON.parse(blocked.stdout)).sort()).toEqual([...STDOUT_KEYS].sort());
     expect(verifyLinesIn(root)).toHaveLength(4);
+  });
+
+  /**
+   * REDACTION PARITY (review F1). The ledger scrubs secrets from every string
+   * before it writes, so a registry that hashed the RAW `--evidence` would keep
+   * a hash of exactly what the ledger removed — an offline oracle for it. Every
+   * row's hash must be the hash of an entry AS STORED on the line its `source`
+   * names. The secret is assembled from parts so this file does not itself look
+   * like a credential.
+   */
+  it('hashes the evidence as the ledger stored it, after redaction', () => {
+    const root = makeRoot('R4');
+    const secretValue = ['abcd', 'efgh'].join('');
+    const secretRef = `curl -u pass${'word'}="${secretValue}" x`;
+
+    const out = runCli([
+      '--status', 'PASS', '--evidence', secretRef, '--session', SID, '--cwd', root,
+    ], root);
+    expect(out.status).toBe(0);
+
+    const lines = verifyLinesIn(root);
+    // POSITIVE CONTROL: the ref reached the evidence and the ledger scrubbed it.
+    const stored = lineFor(lines, 'deterministic').data.evidence;
+    expect(stored[1].command).toContain('[REDACTED');
+    expect(JSON.stringify(lines)).not.toContain(secretValue);
+
+    const rows = registryRows(root);
+    expect(rows.length).toBeGreaterThan(0);
+    const byKey = new Map(lines.map((e) => [e.idempotency_key, e]));
+    for (const row of rows) {
+      const line = byKey.get(row.source);
+      expect(line, `row ${row.id} names a line that is in the ledger`).toBeDefined();
+      expect(line.data.evidence.map((entry) => evidenceHash(entry))).toContain(row.hash);
+    }
+    // And the other direction: every stored entry has its row.
+    const rowHashes = new Set(rows.map((r) => r.hash));
+    for (const line of lines) {
+      for (const entry of line.data.evidence) expect(rowHashes.has(evidenceHash(entry))).toBe(true);
+    }
+    expect(readFileSync(evidenceRegistryPath(root), 'utf-8')).not.toContain(secretValue);
+  });
+
+  /**
+   * DEPTH PARITY, ON THE PORT `main` BINDS. `redactDeep` counts its depth bound
+   * from the root it is handed and the ledger hands it the whole envelope, so a
+   * note nested 61 levels is cut two levels higher on the line than a bare
+   * `redactDeep(entries)` would cut it. No `--evidence` ref can carry a nested
+   * note (every ref is a string), so this drives `evidenceRegistryPort` in
+   * process, against the real ledger writer in a temp root.
+   */
+  it('redactAsStored cuts a 61-deep note where the envelope redaction cuts it', () => {
+    let note = 'leaf';
+    for (let i = 0; i < 61; i += 1) note = { a: note };
+    const entries = [{ kind: 'command', command: 'deep', output: '', note }];
+    // Shaped like `event-writer.js#buildEnvelope`'s output: scalar keys, then data.
+    const envelopeLike = {
+      v: 1, ts: '2026-09-23T03:00:00.000Z', event: 'verify.completed', session_id: SID,
+      source: 'gate', pid: 1, seq: 0, idempotency_key: 'k',
+      data: { layer: 'deterministic', result: 'pass', evidence: entries, verification_id: 'v1-x' },
+    };
+
+    expect(evidenceHash(redactAsStored(entries, redactDeep)[0]))
+      .toBe(evidenceHash(redactDeep(envelopeLike).data.evidence[0]));
+  });
+
+  it('hashes a note nested 61 levels deep as the ledger stored it', () => {
+    const root = makeRoot('R5');
+    let note = 'leaf';
+    for (let i = 0; i < 61; i += 1) note = { a: note };
+    const evidence = [{ kind: 'command', command: 'deep', output: '', note }];
+    const verdict = verify({ layers: { deterministic: { exitCode: 0, reason: 'deep note', evidence } } });
+
+    const result = recordVerification(verdict, { sessionId: SID }, {
+      append: (input) => appendLedgerEvent(root, input),
+      registerEvidence: evidenceRegistryPort(root),
+    });
+    expect(result.appended).toBe(4);
+
+    const lines = verifyLinesIn(root);
+    const stored = lineFor(lines, 'deterministic').data.evidence;
+    // The case discriminates: the bare form hashes differently from the line.
+    expect(evidenceHash(redactDeep(evidence)[0])).not.toBe(evidenceHash(stored[0]));
+
+    const rows = registryRows(root);
+    expect(rows).toHaveLength(1);
+    const line = lines.find((e) => e.idempotency_key === rows[0].source);
+    expect(line, 'the row names a line that is in the ledger').toBeDefined();
+    expect(rows[0].hash).toBe(evidenceHash(line.data.evidence[0]));
   });
 });
 

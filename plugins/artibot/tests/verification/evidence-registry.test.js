@@ -264,11 +264,13 @@ describe('readEvidenceIds', () => {
 // ---------------------------------------------------------------------------
 // Concurrency — separate processes, because the lock is a cross-process lock.
 //
-// Only the first test PROVES the lock is taken. With `withFileLock` replaced by
-// a direct call (mutation run 2026-09-23 12:43 KST) it went red while the two
-// race tests stayed green: child start-up on Windows staggers the writers
-// enough that they rarely overlap. The race tests pin the outcome, not the
-// mechanism.
+// Only the first test PROVES the lock is taken, and that it covers the READ.
+// With `withFileLock` replaced by a direct call (mutation run 2026-09-23 12:43
+// KST) it went red while the two race tests stayed green: child start-up on
+// Windows staggers the writers enough that they rarely overlap. The race tests
+// pin the outcome, not the mechanism. The foreign row it writes under the held
+// lock is what catches a read taken outside the lock (review F3). Without that
+// row, the read-outside mutation left every test green.
 // ---------------------------------------------------------------------------
 
 const CHILD = [
@@ -318,10 +320,14 @@ describe('id allocation under the file lock', () => {
     // Still inside the 5 s stale window, so a writer that honours the lock has
     // not appended yet.
     expect(existsSync(p) ? readFileSync(p, 'utf8') : '').toBe('');
+    // Another writer's row lands WHILE the child waits. The lock must cover the
+    // child's READ as well as its append: a child that read the (empty) file
+    // before taking the lock would mint E-001 a second time.
+    writeFileSync(p, `${JSON.stringify({ id: 'E-001', type: 'file', source: 'other', hash: 'b'.repeat(64), created_at: 't' })}\n`);
     rmSync(lock, { force: true });
     const out = await done;
-    expect(out.ids).toEqual(['E-001']);
-    expect(rows()).toHaveLength(1);
+    expect(out.ids).toEqual(['E-002']);
+    expect(rows().map((r) => r.id)).toEqual(['E-001', 'E-002']);
   }, 20000);
 
   it('two writers registering the same new content mint one id', async () => {

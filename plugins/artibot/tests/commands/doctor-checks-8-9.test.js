@@ -1377,5 +1377,19 @@ describe('Check 9 item 9 resolves evidence_refs against the registry (SH-15)', (
       expect(s).toMatch(/newly APPENDS a `verify\.completed` line/);
       expect(s).toMatch(/A deduped or\s+rejected line registers nothing/);
     });
+
+    it('names the non-E ref namespace the outcome hook writes, and calls its fail a mismatch', () => {
+      // The only production writer of outcome `evidence_refs` emits `ledger:` /
+      // `transcript:` pointers, never an E-id, so item 9 fails every such ref.
+      // Prose that read that fail as "never registered" would send the reader
+      // hunting for evidence that exists under another name.
+      const s = nine();
+      expect(s).toContain('`scripts/hooks/mission-complete-record.js#evidencePointers`');
+      expect(s).toContain('`ledger:<key>`');
+      expect(s).toContain('`transcript:<sessionId>`');
+      expect(s).toMatch(/namespace mismatch,\s+not missing evidence/);
+      expect(s).toMatch(/`itemMissingEvidence`[\s\S]*outside this\s+check's files/);
+      expect(s).not.toMatch(/says the evidence was\s+never registered/);
+    });
   });
 });

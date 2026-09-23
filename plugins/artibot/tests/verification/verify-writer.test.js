@@ -578,6 +578,25 @@ describe('recordVerification with a registerEvidence port', () => {
     ]);
   });
 
+  it('attempts every ledger append before the first registration', () => {
+    // A held or stranded registry lock can stall a registration for up to the
+    // file lock's 5 s timeout. Registering in a second pass keeps that stall
+    // from delaying the remaining ledger lines.
+    const order = [];
+    const logAppend = (input) => { order.push(`append:${input.idempotency_key}`); return append(input); };
+    const logRegister = (entries, source) => { order.push(`register:${source}`); return registerPort(entries, source); };
+    const out = recordVerification(passVerdict(), { sessionId: SID }, {
+      append: logAppend, existingKeys, registerEvidence: logRegister,
+    });
+    const firstRegister = order.findIndex((s) => s.startsWith('register:'));
+    expect(order.slice(0, firstRegister)).toEqual(out.lines.map((l) => `append:${l.key}`));
+    expect(order.slice(firstRegister)).toEqual([
+      `register:${out.lines[0].key}`,
+      `register:${out.lines[1].key}`,
+    ]);
+    expect(out.evidence).toEqual({ ids: ['E-001'], appended: 1, reused: 1 });
+  });
+
   it('never calls the port for a rejected line', () => {
     let called = 0;
     const spy = () => { called += 1; return { ids: [], appended: 0, reused: 0 }; };
