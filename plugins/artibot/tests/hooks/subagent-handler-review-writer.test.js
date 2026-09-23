@@ -334,6 +334,22 @@ describe('subagent-handler review-ledger writer (child process)', () => {
   });
 
   // -------------------------------------------------------------------------
+  // 4b. an oversized verification id is refused and COUNTED, never folded
+  // -------------------------------------------------------------------------
+
+  it('counts an oversized verification id in the spawn column and writes no verdict row', () => {
+    // 2,500 chars sat inside the old silent band: the row landed folded,
+    // without intent_revision / plan_revision / verification_id, and the
+    // column read `review=appended`. Now the refusal is the column's value.
+    const text = answer({ verdict: { verification_id: 'a'.repeat(2500) } });
+    writeTranscript({ text });
+    expect(runHook(stopPayload({ last_assistant_message: text }), home).status).toBe(0);
+
+    expect(eventsOf()).toEqual(['review.claim_audit']);
+    expect(reviewLedger()).toBe('review=skipped:oversize:verification_id,audit=appended');
+  });
+
+  // -------------------------------------------------------------------------
   // 5. the transcript fallback
   // -------------------------------------------------------------------------
 

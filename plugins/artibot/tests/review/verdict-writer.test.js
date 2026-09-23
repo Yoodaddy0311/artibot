@@ -63,6 +63,11 @@
  *    still falls out of the stratified denominator. No test is added here: the
  *    cap and the fold are the ledger writer's behaviour, not this module's, and
  *    the allowlist is read-only to us. A test belongs beside `foldOversized`.
+ *    The audit fold is no longer SILENT, though: `recordReviewOutcome` reports
+ *    a folded append as `appended` with `reason: 'ledger-folded'`.
+ *    `review.completed` is different — its builder now refuses any line that
+ *    would reach the fold, and the "never loses a key to the ledger fold"
+ *    block below pins that.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -71,17 +76,28 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
-import { foldOversized, getAllowlist, resetSeq } from '../../lib/runtime/event-writer.js';
+import {
+  buildEnvelope,
+  DEFAULT_LINE_MAX_BYTES,
+  foldOversized,
+  getAllowlist,
+  getLedgerSettings,
+  lineBytes,
+  resetSeq,
+} from '../../lib/runtime/event-writer.js';
 import { parseClaimAudit, parseReviewVerdict } from '../../lib/review/independent-reviewer.js';
 import {
   buildClaimAuditEvent,
   buildReviewCompletedEvent,
   claimAuditIdempotencyKey,
+  ENVELOPE_RESERVE_BYTES,
+  LEDGER_LINE_MAX_BYTES,
   recordReviewOutcome,
   REVIEW_CLAIM_AUDIT_EVENT,
   REVIEW_COMPLETED_EVENT,
   REVIEW_LEDGER_SOURCE,
   reviewCompletedIdempotencyKey,
+  VERIFICATION_ID_MAX_LENGTH,
 } from '../../lib/review/verdict-writer.js';
 
 const LEDGER_REL = 'ledger.jsonl';
@@ -420,11 +436,10 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
     // verification id the marker costs more bytes than the three dropped keys
     // save (439 B folded against roughly 420-430 B unfolded, the spread being
     // pid/seq digits), so under a 400 B cap the row is rejected outright.
-    // That is ONE of two loss modes, not the general one. The verification id
-    // is written twice (`data.verification_id` and inside `idempotency_key`)
-    // and the fold drops only the first, so a long id makes the fold save
-    // more than it costs — the next test pins that a row then SURVIVES
-    // without its revisions.
+    // A caller-lowered cap is not this builder's to guard: the refusal is the
+    // writer's own, and it is counted as a `ledger.rejected` line. The OTHER
+    // loss mode — a row that survives the fold without its revisions — is
+    // what the "never loses a key to the ledger fold" block below closes.
     const res = appendLedgerEvent(root, built.input, {
       ledgerPath: LEDGER_REL,
       maxLineBytes: 400,
@@ -432,39 +447,6 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
     expect(res.ok).toBe(false);
     expect(res.reason.startsWith('line-too-large:')).toBe(true);
     expect(rejectedLines()).toHaveLength(1);
-  });
-
-  it('keeps an oversized row alive but writes it without its revisions', () => {
-    // The other loss mode, under the default 4096 B cap. A 2,500-char
-    // verification id puts the unfolded line over the cap and the folded one
-    // under it (scratch probe 2026-09-23: rows survive folded for ids of about
-    // 1,850 to 3,660 chars; longer ids are rejected as above). Nothing in the
-    // return value is an error, so a reader sees a normal row that simply
-    // has no revision — this is the silent case.
-    const verificationId = `v1-${'a'.repeat(2497)}`;
-    const built = buildReviewCompletedEvent({
-      parsed: parseReviewVerdict(v2Doc({ verification_id: verificationId })),
-      sessionId: SID,
-      model: MODEL,
-      findingsRef: FINDINGS_REF,
-    });
-    const res = append(built.input);
-    expect(res.ok).toBe(true);
-    expect(res.folded).toBe(true);
-    expect(res.dropped).toEqual(['intent_revision', 'plan_revision', 'verification_id']);
-    expect(rejectedLines()).toHaveLength(0);
-    const rows = rawLines().filter((l) => l.event === REVIEW_COMPLETED_EVENT);
-    expect(rows).toHaveLength(1);
-    const [row] = rows;
-    expect(Object.keys(row.data).sort()).toEqual(['evidence_refs', 'findings_ref', 'verdict']);
-    expect(row.data.verdict).toBe('PASS');
-    expect(row.data.findings_ref).toBe(FINDINGS_REF);
-    expect(row.data.evidence_refs)
-      .toEqual(['ledger-fold:dropped=intent_revision,plan_revision,verification_id']);
-    // The id is gone from `data` but still inside the key, which is why the
-    // fold saved enough bytes to fit.
-    expect(row.idempotency_key)
-      .toBe(`review.completed:${SID}:${verificationId}`);
   });
 
   it('omits mission_id when it does not match the ledger pattern', () => {
@@ -533,6 +515,168 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
       ...over,
     });
     expect(built.ok).toBe(false);
+  });
+});
+
+describe('review.completed never loses a key to the ledger fold', () => {
+  // Before the bound, ids of about 1,846..3,663 chars put the unfolded line
+  // over the 4096 B cap and the folded one under it, so the row LANDED without
+  // intent_revision, plan_revision and verification_id and the writer said
+  // `ok:true` (Wave 18 scratch probe). The id is written twice — in `data` and
+  // inside `idempotency_key` — and the fold drops only the first, which is why
+  // a long id is the input that makes the fold "succeed".
+
+  /**
+   * One answer whose verdict carries a verification id of `length` chars and
+   * no audit block, so the review half is the only line in play.
+   *
+   * @param {number} length id length
+   * @returns {{id: string, text: string}} the id and the answer
+   */
+  function answerWithIdOf(length) {
+    const id = 'a'.repeat(length);
+    return { id, text: answer({ verdict: { verification_id: id }, audit: null }) };
+  }
+
+  it('bounds verification_id at 256 characters', () => {
+    expect(VERIFICATION_ID_MAX_LENGTH).toBe(256);
+  });
+
+  it('mirrors the ledger line cap it budgets against', () => {
+    // L2 may not import the runtime writer, so the cap is a copy. A copy is a
+    // thing that drifts; this pin makes the drift RED instead of a fold.
+    expect(LEDGER_LINE_MAX_BYTES).toBe(DEFAULT_LINE_MAX_BYTES);
+    expect(LEDGER_LINE_MAX_BYTES).toBe(getLedgerSettings().maxLineBytes);
+    expect(LEDGER_LINE_MAX_BYTES).toBe(getAllowlist().limits.line_max_bytes);
+  });
+
+  it.each([1, 256, 257, 1845, 1846, 2500, 3663, 3664, 5000])(
+    'L=%i: the row keeps every key, or no row is built and the refusal is reported',
+    (length) => {
+      const { id, text } = answerWithIdOf(length);
+      const results = [];
+      const out = recordReviewOutcome(recordArgs({ verdictText: text }), {
+        append: (input) => {
+          const res = append(input);
+          results.push(res);
+          return res;
+        },
+        existingKeys: () => [],
+      });
+      const rows = rawLines().filter((l) => l.event === REVIEW_COMPLETED_EVENT);
+
+      if (length <= VERIFICATION_ID_MAX_LENGTH) {
+        expect(out.review).toEqual({
+          status: 'appended', key: `review.completed:${SID}:${id}`,
+        });
+        expect(results.map((r) => r.folded)).toEqual([false]);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].data.intent_revision).toBe(3);
+        expect(rows[0].data.plan_revision).toBe(1);
+        expect(rows[0].data.verification_id).toBe(id);
+        expect(rows[0].data.evidence_refs).toBeUndefined();
+      } else {
+        // `skipped` + reason is what `_review-stop-record.js#reviewLedgerColumn`
+        // writes into the spawn record's `review_ledger` column — the channel
+        // every other refusal of this builder is counted through.
+        expect(out.review).toEqual({ status: 'skipped', reason: 'oversize:verification_id' });
+        expect(results).toHaveLength(0);
+        expect(rows).toHaveLength(0);
+      }
+      expect(rejectedLines()).toHaveLength(0);
+    },
+  );
+
+  it('refuses at the builder, before any port is touched', () => {
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ verification_id: 'a'.repeat(257) })),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(built).toEqual({ ok: false, reason: 'oversize:verification_id' });
+  });
+
+  /**
+   * Build with a `findingsRef` padded so the serialized input is `bytes` long.
+   * The id is short, so only the line budget can be what refuses.
+   *
+   * @param {number} bytes target `JSON.stringify(input)` byte length
+   * @returns {object} the builder result
+   */
+  function buildInputOf(bytes) {
+    const args = {
+      parsed: parseReviewVerdict(v2Doc({ verification_id: 'v1-abc' })),
+      sessionId: SID,
+      model: MODEL,
+      reviewerId: REVIEWER,
+    };
+    const probe = buildReviewCompletedEvent({ ...args, findingsRef: 'f' });
+    const pad = bytes - Buffer.byteLength(JSON.stringify(probe.input), 'utf8');
+    return buildReviewCompletedEvent({ ...args, findingsRef: 'f'.repeat(1 + pad) });
+  }
+
+  it('lands the largest input the budget admits, unfolded, under the worst envelope', () => {
+    // Worst case of what the writer adds around the input: no mission_id (so
+    // the session fallback is added), a 10-digit pid and a 16-digit seq. If
+    // ENVELOPE_RESERVE_BYTES were too small, this row would fold.
+    const budget = LEDGER_LINE_MAX_BYTES - ENVELOPE_RESERVE_BYTES;
+    const built = buildInputOf(budget);
+    expect(built.ok).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(built.input), 'utf8')).toBe(budget);
+    const res = appendLedgerEvent(root, built.input, {
+      ledgerPath: LEDGER_REL, pid: 4294967295, seq: Number.MAX_SAFE_INTEGER,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.folded).toBe(false);
+    const [row] = rawLines();
+    expect(row.data.intent_revision).toBe(3);
+    expect(row.data.plan_revision).toBe(1);
+    expect(row.data.verification_id).toBe('v1-abc');
+  });
+
+  it('refuses one byte over the budget as oversize:line, whatever field made it long', () => {
+    const budget = LEDGER_LINE_MAX_BYTES - ENVELOPE_RESERVE_BYTES;
+    expect(buildInputOf(budget + 1)).toEqual({ ok: false, reason: 'oversize:line' });
+    const out = recordReviewOutcome(recordArgs({
+      verdictText: answer({ audit: null }),
+      findingsRef: 'f'.repeat(LEDGER_LINE_MAX_BYTES),
+    }), livePorts());
+    expect(out.review).toEqual({ status: 'skipped', reason: 'oversize:line' });
+    expect(rawLines()).toHaveLength(0);
+  });
+
+  it('reports ledger-folded when the writer folds anyway under a lowered cap', () => {
+    // The residual this builder cannot see: an operator-lowered cap, or a
+    // redaction that lengthens a string. The row still lands, so the outcome
+    // must SAY it was folded rather than read as a clean append.
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ verification_id: 'a'.repeat(256) })),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    const opts = { pid: 1234, seq: 1, now: () => new Date('2026-09-23T00:00:00.000Z') };
+    const env = buildEnvelope(built.input, opts);
+    const unfolded = lineBytes(env);
+    const folded = lineBytes(foldOversized(env, getAllowlist().events[REVIEW_COMPLETED_EVENT]).env);
+    expect(folded).toBeLessThan(unfolded);
+    const cap = Math.floor((unfolded + folded) / 2);
+
+    const out = recordReviewOutcome(recordArgs({
+      verdictText: answer({ verdict: { verification_id: 'a'.repeat(256) }, audit: null }),
+      missionId: undefined,
+      reviewerId: undefined,
+    }), {
+      append: (input) => appendLedgerEvent(root, input, {
+        ...opts, ledgerPath: LEDGER_REL, maxLineBytes: cap,
+      }),
+      existingKeys: () => [],
+    });
+    expect(out.review.status).toBe('appended');
+    expect(out.review.reason).toBe('ledger-folded');
+    const [row] = rawLines();
+    expect(row.data.evidence_refs[0].startsWith('ledger-fold:dropped=')).toBe(true);
   });
 });
 
@@ -648,6 +792,22 @@ describe('idempotency keys', () => {
   it('spells review.completed as event:session:verification_id', () => {
     expect(reviewCompletedIdempotencyKey(SID, 'v1-abc'))
       .toBe('review.completed:sess-review-writer:v1-abc');
+  });
+
+  it('keeps the key byte-identical for a canonical verifier id after the size bound', () => {
+    // The id format `unified-verifier.js#buildVerificationId` emits. The
+    // bound refuses long ids; it must not respell the ones it admits, or
+    // every already-written row would stop deduping against its redelivery.
+    const id = 'v1-3f9a2b1c8d04-20260902T071530Z';
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ verification_id: id })),
+      sessionId: SID,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+    });
+    expect(built.ok).toBe(true);
+    expect(built.input.idempotency_key)
+      .toBe('review.completed:sess-review-writer:v1-3f9a2b1c8d04-20260902T071530Z');
   });
 
   it('spells claim_audit as event:session:subject_agent_type:12 hex', () => {
