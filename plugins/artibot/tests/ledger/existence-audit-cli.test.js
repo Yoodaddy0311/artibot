@@ -57,7 +57,8 @@ const CLI = path.join(PLUGIN_ROOT, 'scripts', 'ledger', 'existence-audit.mjs');
 /** The exact key set the script header promises. */
 const STDOUT_KEYS = [
   'measuredAt', 'inputPath', 'since', 'pluginRoot', 'sources',
-  'hooksOutsideCarrier', 'unmatched', 'kinds', 'summary',
+  'hooksOutsideCarrier', 'unmatched', 'skillCarrierCommands', 'aliasesFolded',
+  'kinds', 'summary',
 ];
 
 /** @type {string} */
@@ -116,6 +117,7 @@ const HOOKS_JSON = {
  */
 function makePlugin(name) {
   const root = path.join(tmp, name);
+  put(root, '.claude-plugin/plugin.json', `${JSON.stringify({ name: 'artibot', version: '0.0.0' })}\n`);
   put(root, 'commands/split.md', '# split\n');
   put(root, 'commands/Team.md', '# Team\n');
   put(root, 'commands/notes.txt', 'not a command\n');
@@ -360,6 +362,166 @@ describe('existence-audit: an absent source is not an empty one', () => {
 
     expect(printed.sources.commands.status).toBe('malformed');
     expect(printed.kinds.commands.enumerated).toBe(false);
+  });
+});
+
+/**
+ * The fold fixture: `save` is a command only, `split` and `team` are both a
+ * command and a skill, `alpha` and `beta` are skills only.
+ */
+function makeFoldPlugin(name) {
+  const root = makePlugin(name);
+  put(root, 'commands/save.md', '# save\n');
+  put(root, 'skills/split/SKILL.md', '---\nname: split\n---\n');
+  put(root, 'skills/team/SKILL.md', '---\nname: team\n---\n');
+  return root;
+}
+
+/** One Skill tool row, shaped as `scripts/hooks/tool-used-record.js` writes it. */
+function seedSkill(root, skill) {
+  const data = { tool: 'Skill', ok: true, duration_ms: 7 };
+  seed(root, 'tool.used', skill === undefined ? { ...data, tool: 'Bash' } : { ...data, skill });
+}
+
+/**
+ * Every spelling the fold has to tell apart.
+ *   tool.used (11 rows)   artibot:split x2, split, artibot:alpha,
+ *                         artibot-cowork:beta, artibot:save x2, save,
+ *                         `artibot:` alone, claude-api, one Bash row (no skill)
+ *   intent.detected (3)   artibot:team, split, artibot:ghost
+ */
+function seedFoldLedger(root) {
+  for (const skill of [
+    'artibot:split', 'artibot:split', 'split', 'artibot:alpha', 'artibot-cowork:beta',
+    'artibot:save', 'artibot:save', 'save', 'artibot:', 'claude-api', undefined,
+  ]) seedSkill(root, skill);
+  for (const command of ['artibot:team', 'split', 'artibot:ghost']) {
+    seed(root, 'intent.detected', { type: 'slash-command', confidence: 1, command });
+  }
+}
+
+describe('existence-audit: the own-plugin namespace fold', () => {
+  it('counts namespaced and bare spellings as one name, and says which it folded', () => {
+    const project = makeProject('F1');
+    const plugin = makeFoldPlugin('fold1');
+    seedFoldLedger(project);
+    expect(ledgerLines(project).filter((e) => e.event === 'ledger.rejected')).toEqual([]);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.kinds.skills.denominator).toBe(11);
+    expect(entry(printed, 'skills', 'split')).toMatchObject({ fired: 3, measured: true });
+    expect(entry(printed, 'skills', 'alpha').fired).toBe(1);
+    // Another plugin's `beta` is not this plugin's `beta`.
+    expect(entry(printed, 'skills', 'beta')).toMatchObject({ fired: 0, measured: true });
+    expect(entry(printed, 'skills', 'team').fired).toBe(0);
+    expect(printed.kinds.commands.denominator).toBe(3);
+    expect(entry(printed, 'commands', 'team').fired).toBe(1);
+    expect(entry(printed, 'commands', 'split').fired).toBe(1);
+    // Skill-tool `save` calls are NOT added to the typed-command count.
+    expect(entry(printed, 'commands', 'save')).toMatchObject({ fired: 0, measured: true });
+
+    expect(printed.unmatched.skills).toEqual({ 'artibot-cowork:beta': 1, 'artibot:': 1, 'claude-api': 1 });
+    expect(printed.unmatched.commands).toEqual({ ghost: 1 });
+    expect(printed.skillCarrierCommands).toEqual({ save: 3 });
+    expect(printed.aliasesFolded).toEqual({
+      foldPrefix: { value: 'artibot:', source: '.claude-plugin/plugin.json', status: 'resolved' },
+      skills: {
+        'artibot:alpha': { to: 'alpha', count: 1 },
+        'artibot:save': { to: 'save', count: 2 },
+        'artibot:split': { to: 'split', count: 2 },
+      },
+      commands: {
+        'artibot:ghost': { to: 'ghost', count: 1 },
+        'artibot:team': { to: 'team', count: 1 },
+      },
+    });
+    // The census is the reader's, not the fold's.
+    expect(printed.summary.census.survivors).toBe(14);
+    expect(printed.summary.eventsReceived).toBe(14);
+  });
+
+  it('writes nothing: the ledger still holds the original spellings, byte for byte', () => {
+    const project = makeProject('F2');
+    const plugin = makeFoldPlugin('fold2');
+    seedFoldLedger(project);
+    const file = ledgerFilePath(project);
+    const before = sha256(file);
+
+    parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(sha256(file)).toBe(before);
+    expect(ledgerLines(project).filter((e) => e.data?.skill === 'artibot:split')).toHaveLength(2);
+  });
+
+  it('folds only the audited plugin\'s own prefix', () => {
+    const project = makeProject('F3');
+    const plugin = makeFoldPlugin('fold3');
+    put(plugin, '.claude-plugin/plugin.json', `${JSON.stringify({ name: 'artibot-cowork' })}\n`);
+    seedFoldLedger(project);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.aliasesFolded.foldPrefix.value).toBe('artibot-cowork:');
+    expect(printed.aliasesFolded.skills).toEqual({ 'artibot-cowork:beta': { to: 'beta', count: 1 } });
+    expect(entry(printed, 'skills', 'beta').fired).toBe(1);
+    expect(entry(printed, 'skills', 'split').fired).toBe(1);
+    expect(printed.unmatched.skills['artibot:split']).toBe(2);
+  });
+
+  it.each([
+    ['missing', null, 'absent'],
+    ['not JSON', '{ nope', 'malformed'],
+    ['without a string name', JSON.stringify({ name: 42 }), 'malformed'],
+    ['with a blank name', JSON.stringify({ name: '  ' }), 'malformed'],
+    // Trimming would fold a prefix the manifest does not spell.
+    ['with whitespace around the name', JSON.stringify({ name: ' artibot' }), 'malformed'],
+  ])('folds nothing and says why when the manifest is %s', (_label, text, status) => {
+    const project = makeProject('F4');
+    const plugin = makeFoldPlugin('fold4');
+    const manifest = path.join(plugin, '.claude-plugin', 'plugin.json');
+    if (text === null) rmSync(manifest);
+    else writeFileSync(manifest, text, 'utf-8');
+    seedFoldLedger(project);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.aliasesFolded.foldPrefix).toMatchObject({
+      value: null, source: '.claude-plugin/plugin.json', status,
+    });
+    expect(printed.aliasesFolded.skills).toBeNull();
+    expect(printed.aliasesFolded.commands).toBeNull();
+    // Unfolded: only the bare row counts, the namespaced ones stay visible.
+    expect(entry(printed, 'skills', 'split').fired).toBe(1);
+    expect(printed.unmatched.skills).toMatchObject({ 'artibot:split': 2, 'artibot:save': 2 });
+    expect(printed.unmatched.commands).toEqual({ 'artibot:team': 1, 'artibot:ghost': 1 });
+    expect(printed.skillCarrierCommands).toEqual({ save: 1 });
+  });
+
+  it('strips the prefix once, never repeatedly', () => {
+    const project = makeProject('F6');
+    const plugin = makeFoldPlugin('fold6');
+    seedSkill(project, 'artibot:artibot:alpha');
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.aliasesFolded.skills).toEqual({
+      'artibot:artibot:alpha': { to: 'artibot:alpha', count: 1 },
+    });
+    expect(printed.unmatched.skills).toEqual({ 'artibot:alpha': 1 });
+    expect(entry(printed, 'skills', 'alpha')).toMatchObject({ fired: 0, measured: true });
+  });
+
+  it('does not guess "command only" without a commands inventory', () => {
+    const project = makeProject('F5');
+    const plugin = makeFoldPlugin('fold5');
+    rmSync(path.join(plugin, 'commands'), { recursive: true, force: true });
+    seedFoldLedger(project);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.skillCarrierCommands).toBeNull();
+    expect(printed.unmatched.skills.save).toBe(3);
   });
 });
 

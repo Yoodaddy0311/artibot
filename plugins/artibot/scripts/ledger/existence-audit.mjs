@@ -52,12 +52,49 @@
  *            `unmeasured:no-event-carries-module` instead of the kind simply
  *            vanishing from the output. Symlinks are not followed.
  *
+ *  `.claude-plugin/plugin.json#name` is read too, for ONE purpose: it is the
+ *  namespace prefix the carrier rows are folded against (next section).
+ *
  *  A source that is MISSING leaves its inventory key OUT, so the audit says
  *  `enumerated: false`; a source that EXISTS with zero items passes `[]`, so it
  *  says `enumerated: true` with no entries. Unreadable and malformed sources
  *  are also left out. `sources.<kind>.status` names which of those four
  *  (`enumerated` | `absent` | `unreadable` | `malformed`) it was, so
  *  `enumerated: false` never has to be guessed at.
+ *
+ * -- THE NAMESPACE FOLD (READ SIDE ONLY) ----------------------------------
+ *  The Skill tool rows are spelled both ways — measured on the central
+ *  ledger at 2026-09-23T05:26:58Z: 8 `tool.used` rows with `skill`, 5
+ *  namespaced (`artibot:save` 2, `artibot:split` 2, `artibot:team` 1) and 3
+ *  bare (`claude-api` 2, `split` 1). The inventory is bare, so unfolded every
+ *  namespaced call read as a FALSE ZERO: the pre-fold CLI (HEAD 5d6de98a, run
+ *  on that ledger) printed 1 of 114 skills with `fired > 0`, this one prints
+ *  2 of 114. Owner decision 2026-09-23: this reader folds; the ledger is not
+ *  touched.
+ *  - ONLY `<name>:` folds, `<name>` being the AUDITED plugin's own
+ *    `.claude-plugin/plugin.json#name`. Another plugin's prefix
+ *    (`artibot-cowork:x` under an `artibot` root) is NOT folded and stays in
+ *    `unmatched`: folding it would credit another plugin's call to the
+ *    same-named artifact here. The prefix is stripped once, and a name that
+ *    is only the prefix is left as it is.
+ *  - FAIL-CLOSED: a manifest that is missing, unreadable, not JSON, or has no
+ *    non-empty string `name` without surrounding whitespace folds NOTHING,
+ *    and `aliasesFolded.foldPrefix` says why. The name is never guessed from
+ *    the directory, and never trimmed into one.
+ *  - ONLY the `skills` and `commands` carriers fold (their event and field
+ *    come from the fold's `CARRIERS`). Hooks and modules do not. The commands
+ *    fold is DEFENSIVE: the current writer never records a `:` —
+ *    `lib/mission/mission-id.js#detectSlashCommand` does not match a
+ *    namespaced slash — so the live `aliasesFolded.commands` is `{}`.
+ *  - The fold works on SHALLOW COPIES of the matching rows with only the
+ *    carrier field rewritten; the rows read, `summary.census` and the ledger
+ *    are left exactly as they were.
+ *  - A Skill-carrier name that, after folding, is a COMMAND ONLY (listed in
+ *    `commands`, not in `skills` — `save`) is counted in NEITHER kind. It
+ *    leaves `unmatched.skills` for `skillCarrierCommands`. The commands
+ *    carrier counts user-typed slash prompts and the Skill rows are
+ *    model-invoked; adding one to the other could count one invocation twice.
+ *    A name listed in both (`split`, `team`) is a skill.
  *
  * -- WHY `--cwd` MAY DEFAULT TO `process.cwd()`, AND THE TRAP --------------
  *  Same rationale and trap as `session-coverage.mjs`: running the INSTALLED
@@ -87,8 +124,10 @@
  * -- STDOUT ---------------------------------------------------------------
  *  ONE line of JSON with a FIXED key set:
  *    {"measuredAt","inputPath","since","pluginRoot","sources",
- *     "hooksOutsideCarrier","unmatched","kinds","summary"}
- *  plus `error` only when a throw was caught. `kinds` and `summary` are the
+ *     "hooksOutsideCarrier","unmatched","skillCarrierCommands",
+ *     "aliasesFolded","kinds","summary"}
+ *  plus `error` only when a throw was caught (then `inputPath` and every key
+ *  after `pluginRoot` are null). `kinds` and `summary` are the
  *  fold's own output, passed through whole: per-kind `enumerated`,
  *  `denominator`, `carrier`, `carrierNote` and entries with `fired` /
  *  `reason`; `summary.eventsReceived` (survivors handed in) and
@@ -100,19 +139,35 @@
  *  An entry's `fired: 0` next to a non-empty `unmatched` means the rows may
  *  name it in a spelling the inventory does not use. It is computed with the
  *  fold's own exported `foldFiredCounts` and `CARRIERS`, not a second count.
- *  `null` when the kind was not enumerated or has no carrier.
+ *  `null` when the kind was not enumerated or has no carrier. It holds the
+ *  names left AFTER the namespace fold and after `skillCarrierCommands`.
+ *
+ *  `skillCarrierCommands` is Skill-carrier name -> count for the command-only
+ *  names moved out of `unmatched.skills`; `null` unless both `skills` and
+ *  `commands` were enumerated (without both lists "command only" is a guess).
+ *
+ *  `aliasesFolded` is `{foldPrefix, skills, commands}`: `foldPrefix` is
+ *  `{value, source, status}` (`value` null unless `status` is `resolved`,
+ *  plus `error` when the manifest could not be used); `skills` / `commands`
+ *  map each ORIGINAL spelling that was folded to `{to, count}` (rows), and
+ *  are null when no prefix was resolved. The original spellings of a name in
+ *  `kinds`, `unmatched` or `skillCarrierCommands` are traced here.
  *
  * -- WHAT THIS CANNOT SEE -------------------------------------------------
- *  - SKILL ROWS ARE SPELLED BOTH WAYS, AND NOT ONLY FOR SKILLS. Measured
- *    2026-09-23 on the central ledger: 6 `tool.used` rows with `skill`, 5
- *    namespaced (`artibot:save` 2, `artibot:split` 2, `artibot:team` 1) and 1
- *    bare (`split`). `save` is a COMMAND (`commands/save.md`, no
- *    `skills/save/`), so the Skill tool carries commands too. The bare
- *    directory names enumerated here therefore read `fired: 0, measured:
- *    true` for namespaced calls — a FALSE ZERO — and those calls land in
- *    `unmatched.skills`. No normalisation is attempted: stripping a prefix
- *    would merge `artibot-cowork:x` into `x` and fold command calls into
- *    skill counts, which is a naming decision, not a reader's.
+ *  - SKILL ROWS ARE SPELLED BOTH WAYS, AND NOT ONLY FOR SKILLS — folded here,
+ *    not fixed at the source. The own-plugin prefix is stripped on read (THE
+ *    NAMESPACE FOLD above), so `artibot:split` and `split` both count for the
+ *    `split` skill, and `aliasesFolded` keeps the original spellings. The
+ *    Skill tool carries commands too (`save`: `commands/save.md`, no
+ *    `skills/save/`); those go to `skillCarrierCommands`, not to a count.
+ *  - WHAT THE FOLD CANNOT SEE. (i) Whether a Skill-tool call of a name that is
+ *    both a skill and a command (`split`, `team`) ran the skill or the
+ *    command: it is counted as the skill. (ii) Other plugins' prefixes are
+ *    left unmatched, never attributed — including a plugin that ships the
+ *    same name. (iii) A plugin RENAMED since the rows were written: the
+ *    prefix is today's manifest name, so rows under the old name stay
+ *    unmatched. (iv) A `skillCarrierCommands` name is not a command firing:
+ *    the commands kind still counts only user-typed slash prompts.
  *  - HOOKS REGISTERED DIRECTLY IN `hooks/hooks.json` ARE NOT IN THE INVENTORY.
  *    No dispatcher runs them, so no `hook.fired` row can name them, and
  *    listing them would print a false `fired: 0`. They are COUNTED instead,
@@ -165,6 +220,12 @@ const SOURCE_PATHS = Object.freeze({
 });
 
 const HOOKS_JSON = 'hooks/hooks.json';
+
+/** The manifest whose `name` is the only namespace prefix folded. */
+const PLUGIN_MANIFEST = '.claude-plugin/plugin.json';
+
+/** Kinds whose carrier names are folded. Hooks and modules are not. */
+const FOLDED_KINDS = Object.freeze(['skills', 'commands']);
 
 /** The largest |epoch ms| a Date can represent (ECMA-262 time value range). */
 const MAX_DATE_MS = 8.64e15;
@@ -463,6 +524,82 @@ function unmatchedNames(events, inventory) {
 }
 
 /**
+ * The namespace prefix to fold: the audited plugin's own manifest name plus
+ * `:`. Fail-closed — anything short of a non-empty string name folds nothing.
+ *
+ * @param {string} root plugin root
+ * @returns {{value: string|null, source: string, status: string, error?: string}}
+ */
+function resolveFoldPrefix(root) {
+  const read = readJson(path.join(root, PLUGIN_MANIFEST));
+  const unresolved = (status, error) => ({
+    value: null, source: PLUGIN_MANIFEST, status, ...(error ? { error } : {}),
+  });
+  if (read.status !== 'ok') return unresolved(read.status, read.error);
+  const name = read.value?.name;
+  if (typeof name !== 'string' || name.trim() === '') {
+    return unresolved('malformed', 'name is not a non-empty string');
+  }
+  // Trimming would make a prefix the manifest does not spell.
+  if (name.trim() !== name) return unresolved('malformed', 'name has surrounding whitespace');
+  return { value: `${name}:`, source: PLUGIN_MANIFEST, status: 'resolved' };
+}
+
+/**
+ * Strip `prefix` from the skills and commands carrier fields, on COPIES.
+ * A row that is not rewritten is handed on as the same object; a rewritten
+ * one is a shallow copy whose `data` is a copy with only the field changed.
+ *
+ * @param {object[]} events ledger survivors (never mutated)
+ * @param {string|null} prefix from `resolveFoldPrefix`, null folds nothing
+ * @returns {{events: object[], aliases: Record<string, Record<string, {to: string,
+ *   count: number}>|null>}} per folded kind, original spelling -> {to, count}
+ */
+function foldNamespaces(events, prefix) {
+  if (prefix === null) {
+    return { events, aliases: Object.fromEntries(FOLDED_KINDS.map((k) => [k, null])) };
+  }
+  const tallies = Object.fromEntries(FOLDED_KINDS.map((k) => [k, new Map()]));
+  const folded = events.map((row) => {
+    for (const kind of FOLDED_KINDS) {
+      const carrier = CARRIERS[kind] ?? null;
+      if (carrier === null || carrier.multi === true || row?.event !== carrier.event) continue;
+      const name = row?.data?.[carrier.field];
+      if (typeof name !== 'string' || !name.startsWith(prefix) || name.length === prefix.length) continue;
+      const to = name.slice(prefix.length);
+      tallies[kind].set(name, { to, count: (tallies[kind].get(name)?.count ?? 0) + 1 });
+      return { ...row, data: { ...row.data, [carrier.field]: to } };
+    }
+    return row;
+  });
+  const aliases = Object.fromEntries(FOLDED_KINDS.map((k) => [
+    k, Object.fromEntries([...tallies[k]].sort(([a], [b]) => (a < b ? -1 : 1))),
+  ]));
+  return { events: folded, aliases };
+}
+
+/**
+ * Move command-only Skill-carrier names out of `unmatched.skills`.
+ *
+ * @param {Record<string, Record<string, number>|null>} unmatched from `unmatchedNames`
+ * @param {object} inventory the inventory handed to the audit
+ * @returns {{unmatched: object, skillCarrierCommands: Record<string, number>|null}}
+ */
+function splitSkillCarrierCommands(unmatched, inventory) {
+  if (unmatched.skills === null || !Object.hasOwn(inventory, 'commands')) {
+    return { unmatched, skillCarrierCommands: null };
+  }
+  // `unmatched.skills` already excludes every skills-inventory name, so a
+  // name here that the commands inventory lists is a command ONLY.
+  const commands = new Set(inventory.commands);
+  const rows = Object.entries(unmatched.skills);
+  return {
+    unmatched: { ...unmatched, skills: Object.fromEntries(rows.filter(([n]) => !commands.has(n))) },
+    skillCarrierCommands: Object.fromEntries(rows.filter(([n]) => commands.has(n))),
+  };
+}
+
+/**
  * Build the stdout object with its fixed key set.
  *
  * @param {object} parts
@@ -478,11 +615,43 @@ function report(parts) {
     sources: parts.sources,
     hooksOutsideCarrier: parts.outside,
     unmatched: parts.unmatched,
+    skillCarrierCommands: parts.skillCarrierCommands,
+    aliasesFolded: parts.aliasesFolded,
     kinds: parts.kinds,
     summary: parts.summary,
   };
   if (parts.error !== undefined) out.error = parts.error;
   return out;
+}
+
+/**
+ * Enumerate, read, fold and audit. Throws are the caller's to print.
+ *
+ * @param {{pluginRoot: string, cwd: string, sinceMs: number|null, since: string|null}} args
+ * @returns {object} the stdout object
+ */
+function observe({ pluginRoot, cwd, sinceMs, since }) {
+  const { inventory, sources, outside } = enumerate(pluginRoot);
+  const foldPrefix = resolveFoldPrefix(pluginRoot);
+  const { events, census } = readLedgerCensus(cwd, sinceMs === null ? {} : { since: sinceMs });
+  // Every count below reads the folded copies; `census` stays the reader's.
+  const folded = foldNamespaces(events, foldPrefix.value);
+  const { kinds, summary } = buildExistenceAudit(folded.events, { inventory, census });
+  const { unmatched, skillCarrierCommands } = splitSkillCarrierCommands(
+    unmatchedNames(folded.events, inventory), inventory,
+  );
+  return report({
+    inputPath: census.file.path,
+    since,
+    pluginRoot,
+    sources,
+    outside,
+    unmatched,
+    skillCarrierCommands,
+    aliasesFolded: { foldPrefix, ...folded.aliases },
+    kinds,
+    summary,
+  });
 }
 
 /**
@@ -508,13 +677,7 @@ export function main(argv) {
 
   let line;
   try {
-    const { inventory, sources, outside } = enumerate(pluginRoot);
-    const { events, census } = readLedgerCensus(cwd, sinceMs === null ? {} : { since: sinceMs });
-    const { kinds, summary } = buildExistenceAudit(events, { inventory, census });
-    const unmatched = unmatchedNames(events, inventory);
-    line = report({
-      inputPath: census.file.path, since, pluginRoot, sources, outside, unmatched, kinds, summary,
-    });
+    line = observe({ pluginRoot, cwd, sinceMs, since });
   } catch (err) {
     line = report({
       inputPath: null,
@@ -523,6 +686,8 @@ export function main(argv) {
       sources: null,
       outside: null,
       unmatched: null,
+      skillCarrierCommands: null,
+      aliasesFolded: null,
       kinds: null,
       summary: null,
       error: err?.message ?? String(err),
