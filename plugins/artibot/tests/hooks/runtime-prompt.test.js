@@ -1,9 +1,13 @@
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { buildAdditionalContext, handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+import {
+  buildAdditionalContext, handleUserPromptSubmit, PROTECTED_BLOCK_MARKERS, stripRouterWrapper,
+} from '../../scripts/hooks/runtime-prompt.js';
 
 /**
  * runtime-prompt hook — in-process contract test.
@@ -49,23 +53,29 @@ const LINKED_DIRS = ['lib', 'commands', 'skills', 'agents'];
 let sandboxRoot = '';
 let savedEnv;
 
-beforeAll(() => {
-  sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-runtime-prompt-'));
+/** @returns {string} a fresh sandbox plugin root (see the block comment above) */
+function makeSandbox() {
+  const root = mkdtempSync(path.join(tmpdir(), 'artibot-runtime-prompt-'));
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
   for (const dir of LINKED_DIRS) {
-    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(sandboxRoot, dir), linkType);
+    symlinkSync(path.join(PLUGIN_ROOT, dir), path.join(root, dir), linkType);
   }
   copyFileSync(
     path.join(PLUGIN_ROOT, 'artibot.config.json'),
-    path.join(sandboxRoot, 'artibot.config.json'),
+    path.join(root, 'artibot.config.json'),
   );
-  mkdirSync(path.join(sandboxRoot, 'runtime'), { recursive: true });
+  mkdirSync(path.join(root, 'runtime'), { recursive: true });
   // The decision store is anchored on the PROJECT root, not CLAUDE_PLUGIN_ROOT
   // (`decision-events.js#getDecisionStoreDir`), so redirecting the plugin root
   // alone no longer keeps this suite out of the real store. A `.git` marker
   // makes `lib/git/project-root.js#resolveProjectRoot` stop at the sandbox, and
   // the payloads below carry `cwd: sandboxRoot` so the hook resolves from here.
-  mkdirSync(path.join(sandboxRoot, '.git'), { recursive: true });
+  mkdirSync(path.join(root, '.git'), { recursive: true });
+  return root;
+}
+
+beforeAll(() => {
+  sandboxRoot = makeSandbox();
 });
 
 afterAll(() => {
@@ -222,5 +232,121 @@ describe('buildAdditionalContext — 8 KB cap', () => {
     // never needed cutting.
     const body = '\u{1F680}'.repeat(10);
     expect(buildAdditionalContext([], body)).toBe(body);
+  });
+});
+
+/**
+ * Directive blocks the pipeline appends after the prompt body — the CA-15
+ * question-gate (`tasks.js#applyQuestionGateDirective`) and the agentTeam
+ * Execution contract (`tasks.js#createTasksMiddleware`). Copied from those
+ * appends; the last describe below cross-pins them against the real output.
+ */
+const WRAP = 'System 2 mode: deliberate\nOriginal request:\n';
+const ROUTE = '[artibot:route system2] deliberate';
+const EXEC = '\n\nExecution contract:\n- Create a plan first.\n- Execute in clear phases.\n- Validate before final answer.';
+const GATE = [
+  '\n\n[artibot:question-gate required kind=product_decision at=adr_start]',
+  'This is a product decision the evidence cannot settle, and a wrong assumption is costly.',
+  'Do not assume an answer: ASK the user, in ONE batch of questions, before starting the work.',
+].join('\n');
+const MEMORY = '\n\nRelevant memory context:\n- ';
+const GUARD = '\n\n⚠️ Guardrail: tools denied by policy — Bash';
+
+describe('stripRouterWrapper — directive blocks on the unrecoverable-body path', () => {
+  // The body does not match `originalPrompt`, so the recovery anchors on the
+  // appended-block markers. Before the fix these had no memory/guardrail
+  // marker to anchor on and the whole tail was dropped ('').
+  it.each([
+    ['the question-gate block', GATE],
+    ['the Execution contract block', EXEC],
+    ['both blocks, in pipeline order', EXEC + GATE],
+    ['both blocks, ahead of a guardrail block', EXEC + GATE + GUARD],
+  ])('keeps %s and still drops the prompt text', (_name, blocks) => {
+    const env = stripRouterWrapper(`${WRAP}rewritten body${blocks}`, 'not the body');
+    expect(env).toBe(`${ROUTE}${blocks}`);
+  });
+
+  it('is unchanged for a tail with no directive block (byte invariance)', () => {
+    expect(stripRouterWrapper(`${WRAP}rewritten body`, 'x')).toBe(ROUTE);
+    expect(stripRouterWrapper(`${WRAP}rewritten body${GUARD}`, 'x')).toBe(`${ROUTE}${GUARD}`);
+    expect(stripRouterWrapper(`${WRAP}body${MEMORY}m${GUARD}`, 'x')).toBe(`${ROUTE}${MEMORY}m${GUARD}`);
+  });
+});
+
+describe('buildAdditionalContext — the cap cuts memory, not directive blocks', () => {
+  const HEAD = '[artibot:effort level=high]';
+
+  it('keeps the directive blocks whole and cuts the memory block past 8 KB', () => {
+    const env = `${ROUTE}${MEMORY}${'m'.repeat(9000)}${EXEC}${GATE}`;
+    expect(Buffer.byteLength(env, 'utf-8'), 'fixture must trip the cap').toBeGreaterThan(CAP_BYTES);
+
+    const ctx = buildAdditionalContext([HEAD], env);
+
+    expect(Buffer.byteLength(ctx, 'utf-8')).toBeLessThanOrEqual(CAP_BYTES);
+    expect(ctx.endsWith(`m${EXEC}${GATE}`)).toBe(true);
+    expect(ctx.startsWith(`${HEAD}\n\n${ROUTE}${MEMORY}mmm`)).toBe(true);
+    expect(ctx.isWellFormed()).toBe(true);
+  });
+
+  it('keeps the surrogate repair on the cut memory block', () => {
+    // Same odd-offset construction as the astral regression above, moved into
+    // the memory block so the cut lands there and not in the kept tail.
+    const env = `${ROUTE}${MEMORY}${'\u{1F680}'.repeat(2100)}a${GATE}`;
+    const ctx = buildAdditionalContext([], env);
+
+    expect(Buffer.byteLength(ctx, 'utf-8')).toBeLessThanOrEqual(CAP_BYTES);
+    expect(ctx.endsWith(GATE)).toBe(true);
+    expect(ctx.isWellFormed()).toBe(true);
+    expect(JSON.parse(JSON.stringify(ctx))).toBe(ctx);
+  });
+
+  it('still cuts from the end when no directive block is present (byte invariance)', () => {
+    const env = `${ROUTE}${MEMORY}${'m'.repeat(9000)}${GUARD}`;
+    const joined = `${HEAD}\n\n${env}`;
+    const ctx = buildAdditionalContext([HEAD], env);
+    // The pre-fix algorithm: strip 64 code units at a time off the end.
+    let expected = joined;
+    while (Buffer.byteLength(expected, 'utf-8') > CAP_BYTES) expected = expected.slice(0, -64);
+    expect(ctx).toBe(expected);
+  });
+});
+
+describe('directive markers — cross-pin against the real pipeline output', () => {
+  /** Carries a cue for all four question-gate conditions (tasks-compile-mission.test.js). */
+  const ALL_FOUR = 'Which should we pick for the public API contract? It is a '
+    + 'product decision with no right answer, and a wrong call is costly rework.';
+  const COMPLEX = 'analyze security vulnerabilities, then refactor auth flow, then deploy to production';
+  let gateRoot = '';
+
+  beforeAll(() => {
+    gateRoot = makeSandbox();
+    const cfgPath = path.join(gateRoot, 'artibot.config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+    cfg.runtime = { ...cfg.runtime, questionGate: { enforce: true } };
+    writeFileSync(cfgPath, JSON.stringify(cfg));
+  });
+
+  afterAll(() => {
+    if (gateRoot) rmSync(gateRoot, { recursive: true, force: true });
+  });
+
+  it('every marker is the head of a block the pipeline really appends', async () => {
+    process.env.CLAUDE_PLUGIN_ROOT = gateRoot;
+    // ALL_FOUR fires the gate; the multi-step prompt routes agentTeam (Execution contract).
+    // Sequential: the hook writes runtime/current-effort.json before it reads it.
+    const outputs = [];
+    for (const user_prompt of [ALL_FOUR, COMPLEX]) {
+      outputs.push(await handleUserPromptSubmit({ user_prompt, event: 'UserPromptSubmit', cwd: gateRoot }));
+    }
+
+    for (const marker of PROTECTED_BLOCK_MARKERS) {
+      const output = outputs.find((o) => o.user_prompt.includes(marker));
+      expect(output, `pipeline output lacks ${JSON.stringify(marker)}`).toBeDefined();
+      const envelope = output.user_prompt;
+      const ctx = output.hookSpecificOutput?.additionalContext ?? '';
+      // The block (marker to the next blank line) reaches the host channel verbatim.
+      const block = envelope.slice(envelope.indexOf(marker)).split('\n\n')[1];
+      expect(ctx).toContain(`\n\n${block}`);
+    }
   });
 });

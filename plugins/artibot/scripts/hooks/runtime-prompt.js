@@ -843,16 +843,35 @@ const ADDITIONAL_CONTEXT_MAX_BYTES = 8000;
 const ROUTER_WRAPPER_RE = /^System ([12]) mode: ([^\n]*)\nOriginal request:\n/;
 
 /**
+ * Heads of the DIRECTIVE blocks `lib/runtime/middleware/tasks.js` appends after
+ * the memory block: the agentTeam Execution contract and the CA-15
+ * question-gate (`#applyQuestionGateDirective`). tasks.js exports neither
+ * string; `tests/hooks/runtime-prompt.test.js` cross-pins them to its output.
+ */
+export const PROTECTED_BLOCK_MARKERS = Object.freeze([
+  '\n\nExecution contract:',
+  '\n\n[artibot:question-gate',
+]);
+
+/**
  * Blocks the pipeline appends AFTER the prompt body, in the order the
  * middlewares run. Used only as the recovery anchor when the prompt body is not
  * byte-recoverable. Heads, not full text:
- * `lib/runtime/middleware/memory.js#attachMemoryContextToPrompt` and
- * `lib/runtime/middleware/guardrail.js` (`denied.length > 0` branch).
+ * `lib/runtime/middleware/memory.js#attachMemoryContextToPrompt`, the
+ * directive blocks above, and `lib/runtime/middleware/guardrail.js`
+ * (`denied.length > 0` branch).
  */
 const APPENDED_BLOCK_MARKERS = Object.freeze([
   '\n\nRelevant memory context:',
+  ...PROTECTED_BLOCK_MARKERS,
   '\n\n⚠️ Guardrail:',
 ]);
+
+/** @returns {number} offset of the earliest `marks` hit in `text`, or -1 */
+function firstMarkIndex(text, marks) {
+  const hits = marks.map((mark) => text.indexOf(mark)).filter((i) => i >= 0);
+  return hits.length > 0 ? Math.min(...hits) : -1;
+}
 
 /**
  * Turn the pipeline's rewritten prompt into hook CONTEXT.
@@ -899,10 +918,8 @@ export function stripRouterWrapper(basePrompt, originalPrompt) {
     // The body is not recoverable byte-for-byte, so anchor on the appended
     // blocks instead of guessing where the prompt ends. Anything not matched is
     // DROPPED — echoing prompt text back costs more than losing a block.
-    const marks = APPENDED_BLOCK_MARKERS
-      .map((mark) => afterWrapper.indexOf(mark))
-      .filter((i) => i >= 0);
-    tail = marks.length > 0 ? afterWrapper.slice(Math.min(...marks)) : '';
+    const at = firstMarkIndex(afterWrapper, APPENDED_BLOCK_MARKERS);
+    tail = at >= 0 ? afterWrapper.slice(at) : '';
   }
   return `${routeLine}${tail}`.trimEnd();
 }
@@ -916,8 +933,11 @@ export function stripRouterWrapper(basePrompt, originalPrompt) {
  * The 8 KB cap exists because the host spills a hook's stdout to a file and
  * falls back to a truncated form past 10,000 B (`lnr=1e4`). HOW it truncates
  * is UNVERIFIED (design §4.3-3), so the envelope is trimmed here — from the
- * END, which drops the memory block first and keeps the directives, matching
- * the design's truncation priority (E6 → E7 → E5 → directives last).
+ * END of everything before the first PROTECTED_BLOCK_MARKERS block. The
+ * pipeline appends those after the memory block, so the memory block is cut
+ * first; the protected blocks and whatever follows them (delegation contract,
+ * guardrail) stay whole, and the directive head too while it still fits. With
+ * no protected block (or one that alone exceeds the cap) the cut is from the END.
  *
  * @param {string[]} directives
  * @param {string} envelopeContext
@@ -925,13 +945,17 @@ export function stripRouterWrapper(basePrompt, originalPrompt) {
  */
 export function buildAdditionalContext(directives, envelopeContext) {
   const head = directives.filter((d) => typeof d === 'string' && d.length > 0).join('');
-  const parts = [head, String(envelopeContext || '')].filter((p) => p.length > 0);
-  const joined = parts.join('\n\n');
+  const envelope = String(envelopeContext || '');
+  const joined = [head, envelope].filter((p) => p.length > 0).join('\n\n');
   if (Buffer.byteLength(joined, 'utf-8') <= ADDITIONAL_CONTEXT_MAX_BYTES) return joined;
+  const at = firstMarkIndex(envelope, PROTECTED_BLOCK_MARKERS);
+  const tail = at >= 0 ? envelope.slice(at) : '';
+  const kept = Buffer.byteLength(tail, 'utf-8') < ADDITIONAL_CONTEXT_MAX_BYTES ? tail : '';
+  const cap = ADDITIONAL_CONTEXT_MAX_BYTES - Buffer.byteLength(kept, 'utf-8');
   // Trim on a CODE-UNIT boundary, then re-check by bytes: cutting at a byte
   // offset would split a multi-byte UTF-8 sequence outright.
-  let cut = joined;
-  while (cut.length > 0 && Buffer.byteLength(cut, 'utf-8') > ADDITIONAL_CONTEXT_MAX_BYTES) {
+  let cut = joined.slice(0, joined.length - kept.length);
+  while (cut.length > 0 && Buffer.byteLength(cut, 'utf-8') > cap) {
     cut = cut.slice(0, Math.max(0, cut.length - 64));
   }
   // SURROGATE REPAIR. A code-unit boundary is not a character boundary: JS
@@ -943,7 +967,7 @@ export function buildAdditionalContext(directives, envelopeContext) {
   // assertions above cannot see, because a lone surrogate still encodes to a
   // 3-byte replacement and the size check passes.
   if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  return cut;
+  return cut + kept;
 }
 
 /**
