@@ -29,11 +29,21 @@
  * has checked out would move that worktree's HEAD under it.
  *
  * ── Ported from `.github/workflows/release.yml` (ff mode) ────────────────────
- * `waitForGreen` is a line-for-line port of the `wait_for_green()` bash
- * function there (40 attempts × 15s = 10 min ceiling; green = every check run
- * completed and none concluded outside success/neutral/skipped; deliberately
+ * `waitForGreen` ports the `wait_for_green()` bash function there (green =
+ * every check run completed and none concluded outside success/neutral/skipped;
+ * a failed conclusion is an immediate red; deliberately
  * NOT a copy of the required-context list — branch protection stays the
- * authority and simply rejects the push if the set is unmet). The
+ * authority and simply rejects the push if the set is unmet). It is NOT a
+ * line-for-line port, in two places:
+ *   - **The ceiling.** release.yml keeps 40 × 15s = 10 min, sized 2026-08-15 at
+ *     ~3× a 3m33s Node matrix. This repo's Windows job alone now runs ~11 min,
+ *     so a 10-minute wait reported `not-green` for batches whose checks were
+ *     still running. The ceiling here is 20 min (`WAIT_FOR_GREEN_ATTEMPTS`,
+ *     where the measurement is cited); release.yml is untouched.
+ *   - **No zero-poll exit.** release.yml returns early (rc 2) after 8
+ *     consecutive `total_count == 0` polls; here a zero payload is only "not
+ *     yet" and runs to the ceiling.
+ * The
  * push(`--force-with-lease`) → wait → ff → (moved? fetch, rebuild, push
  * (`--force-with-lease`), wait, ff)
  * → give-up sequence is the same shape as `release.yml` § "Land badge sync via
@@ -92,16 +102,53 @@ import {
 import {
   acquireLandingLock,
   buildLandingLockKey,
+  DEFAULT_STALE_MS,
   releaseLandingLock,
 } from './landing-lock.js';
 import { getRepoIdentity } from './repo-identity.js';
 
 export const INTEGRATION_BRANCH_PREFIX = 'ci/split-';
-/** 40 × 15s = 10 min — the ceiling measured in release.yml against PR #100. */
-export const WAIT_FOR_GREEN_ATTEMPTS = 40;
+/**
+ * 80 × 15s = 20 min. Not release.yml's 40 (10 min): that ceiling predates the
+ * Windows job. Measured 2026-09-28 over push runs of the `CI` workflow on
+ * master and ci/** from 2026-09-21 to 2026-09-28 (`gh run list --workflow CI
+ * --limit 100` + `gh run view <id> --json jobs`):
+ *   - `Validate (Node 22) on Windows`, started→completed: 98 jobs, p50 9.10,
+ *     p90 10.57, max 11.25 min.
+ *   - Run created→last job completed, first attempts only: 94 runs, p90 10.58,
+ *     max 11.32 min. (Four second attempts reached 21.33; a rerun follows a
+ *     red first attempt, which `waitForGreen` has already returned on.)
+ * Batch landings that day ran out of polls once at 40 and reached 39 and 30 on
+ * the next two. 20 min is ~1.8× the slowest first attempt. Callers can still
+ * pass `wait.attempts` to `landBatch`.
+ */
+export const WAIT_FOR_GREEN_ATTEMPTS = 80;
 export const WAIT_FOR_GREEN_POLL_MS = 15_000;
 /** Exactly one rebuild when master moves; the next writer is a human. */
 export const MAX_REBUILDS = 1;
+
+/**
+ * TTL for the landing lock: 3 × the longest a landing can legitimately hold
+ * it, i.e. (1 + maxRebuilds) green waits at the effective ceiling, never below
+ * `DEFAULT_STALE_MS`. 120 min with the defaults.
+ *
+ * The lock is not refreshed while held, and staleness is judged by the NEXT
+ * acquirer against its own `staleMs`; the 30-minute default is shorter than the
+ * 40-minute worst case of two 20-minute waits, so a second landing could take
+ * the lock from a live one mid-wait. On the same host a dead holder pid is
+ * still reclaimed at once — the longer TTL only lengthens the wait after a
+ * crash on another host. An older `landBatch` acquiring with the default is
+ * not covered: the TTL lives in the acquirer, not in the record.
+ *
+ * @param {{attempts?:number, pollMs?:number}} [wait]  - Same shape as `landBatch`'s `p.wait`
+ * @param {number} [maxRebuilds=MAX_REBUILDS]
+ * @returns {number} milliseconds
+ */
+export function landingLockStaleMs(wait = {}, maxRebuilds = MAX_REBUILDS) {
+  const attempts = Number.isFinite(wait?.attempts) ? wait.attempts : WAIT_FOR_GREEN_ATTEMPTS;
+  const pollMs = Number.isFinite(wait?.pollMs) ? wait.pollMs : WAIT_FOR_GREEN_POLL_MS;
+  return Math.max(DEFAULT_STALE_MS, 3 * (1 + maxRebuilds) * attempts * pollMs);
+}
 
 const GREEN_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
@@ -363,7 +410,7 @@ export async function landBatch(p) {
     return result('error', { reason: 'repository identity unresolved (no remote, no root commit?) — refusing to lock on a guess' });
   }
   const key = buildLandingLockKey(identity, base);
-  const lock = acquireLandingLock(key, { lockDir, sessionId });
+  const lock = acquireLandingLock(key, { lockDir, sessionId, staleMs: landingLockStaleMs(wait, maxRebuilds) });
   if (!lock.ok) {
     log.push(`lock ${key} held by pid=${lock.holder?.pid ?? '?'} host=${lock.holder?.host ?? '?'}`);
     return result('locked', { reason: `another landing holds ${key}`, holder: lock.holder });
