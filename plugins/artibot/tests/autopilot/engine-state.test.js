@@ -46,10 +46,13 @@ import {
   recordRiskEvent,
   recordSecretLeak,
 } from '../../lib/autopilot/engine-state.js';
-import { mergeQueuedNotification } from '../../lib/autopilot/_engine-helpers.js';
+import {
+  buildCostWarningInstruction, checkBudgetGate, mergeQueuedNotification, notePhaseCost, persist,
+} from '../../lib/autopilot/_engine-helpers.js';
+import { checkBudgetThreshold } from '../../lib/autopilot/cost-tracker.js';
 import { openPhaseAttempt } from '../../lib/autopilot/phase-attempt.js';
-import { shouldPause } from '../../lib/autopilot/safety.js';
-import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
+import { pauseReason, shouldPause } from '../../lib/autopilot/safety.js';
+import { deleteSessionArtifacts, loadSession } from '../../lib/autopilot/session-store.js';
 
 /** Temp plugin root for this file; created in beforeAll, removed in afterAll. */
 let sandboxRoot = null;
@@ -290,6 +293,130 @@ describe('recordCheckpoint', () => {
     const state = makeState();
     recordCheckpoint(state, {});
     expect(state.checkpoints[0]).toMatchObject({ sha: null, label: null });
+  });
+});
+
+describe('recorded usage survives a later whole-state save (AP-N2)', () => {
+  // `notePhaseCost` writes usage through its own load of the session file, and
+  // `recordCheckpoint` / `recordPhaseResult` rewrite that file from the object
+  // the driver holds. These cases drive the exact functions engine.js exposes,
+  // on ONE state object, and read the result back from disk.
+  const sessions = [];
+  const budgetState = () => {
+    const state = makeState({ phase: 'EXECUTE', options: { budgetTokens: 100 } });
+    sessions.push(state.sessionId);
+    persist(state);
+    return state;
+  };
+
+  afterEach(() => {
+    while (sessions.length) {
+      try {
+        deleteSessionArtifacts(sessions.pop());
+      } catch { /* best-effort */ }
+    }
+  });
+
+  it('keeps usage 101 on disk after a checkpoint and a phase result, so the next dispatch pauses', () => {
+    const state = budgetState();
+    expect(notePhaseCost(state, 'EXECUTE', { tokensIn: 101 })).toMatchObject({ tokensIn: 101 });
+
+    recordCheckpoint(state, { sha: 'abc123', label: 'post-execute' });
+    recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' });
+
+    const loaded = loadSession(state.sessionId);
+    expect(loaded.usage?.totals?.tokensIn).toBe(101);
+    // `maybePause` in engine.js asks exactly this before handing out a phase.
+    expect(shouldPause(loaded)).toBe(true);
+    expect(pauseReason(loaded)).toBe('budget-exceeded');
+  });
+
+  it('reflects the recorded usage on the state object it was given', () => {
+    const state = budgetState();
+    notePhaseCost(state, 'EXECUTE', { tokensIn: 101 });
+    expect(state.usage?.totals?.tokensIn).toBe(101);
+    expect(shouldPause(state)).toBe(true);
+  });
+
+  it('does not let the budget gate erase recorded usage with its unknown-usage write', () => {
+    // A stale object reads as "usage unknown", and the gate's once-per-session
+    // warning then persists `usage = { unknownWarnedAt }` over the real totals.
+    const state = budgetState();
+    notePhaseCost(state, 'EXECUTE', { tokensIn: 101 });
+
+    const status = checkBudgetGate(state, 'ack', { appendEvent: () => {} });
+
+    const loaded = loadSession(state.sessionId);
+    expect(loaded.usage?.totals?.tokensIn).toBe(101);
+    expect(shouldPause(loaded)).toBe(true);
+    expect(status.usageKnown).toBe(true);
+    expect(status.tokens.exceeded).toBe(true);
+  });
+
+  it('mirrors the disk usage when the receipt was already recorded elsewhere', () => {
+    const state = budgetState();
+    const other = loadSession(state.sessionId);
+    expect(notePhaseCost(other, 'EXECUTE', { tokensIn: 101, receiptId: 'rcpt-1' })).not.toBeNull();
+
+    // Duplicate: nothing is written, but the disk already holds this usage.
+    expect(notePhaseCost(state, 'EXECUTE', { tokensIn: 101, receiptId: 'rcpt-1' })).toBeNull();
+    expect(state.usage?.totals?.tokensIn).toBe(101);
+    expect(state.usage?.receipts).toEqual(['rcpt-1']);
+
+    recordCheckpoint(state, { sha: 'def456' });
+    expect(loadSession(state.sessionId).usage?.totals?.tokensIn).toBe(101);
+  });
+
+  it('mirrors nothing when the usage write fails', () => {
+    const state = budgetState();
+    const saveSession = () => { throw new Error('disk full'); };
+
+    expect(notePhaseCost(state, 'EXECUTE', { tokensIn: 101 }, { saveSession })).toBeNull();
+
+    expect(state.usage).toBeUndefined();
+    expect(loadSession(state.sessionId).usage).toBeUndefined();
+  });
+
+  it('mirrors nothing when recording throws after the delta was applied but before any write', () => {
+    // `normalizeUsage` shares `phases` by reference, so the delta lands in the
+    // loaded copy before `recordPhaseUsage` assigns `usage` back — and here that
+    // assignment throws. The disk never changed; mirroring would adopt usage
+    // that was never saved.
+    const state = budgetState();
+    const raw = { totals: { tokensIn: 0, tokensOut: 0, costUsd: 0 }, phases: {} };
+    const hostileLoad = () => ({
+      sessionId: state.sessionId,
+      get usage() { return raw; },
+      set usage(_v) { throw new Error('rejected'); },
+    });
+
+    expect(notePhaseCost(state, 'EXECUTE', { tokensIn: 101 }, { loadSession: hostileLoad })).toBeNull();
+
+    expect(raw.phases.EXECUTE?.tokensIn).toBe(101); // the unsaved delta exists…
+    expect(state.usage).toBeUndefined(); // …and was not adopted
+  });
+
+  it('fires the 95% danger notice once across phases, not on every checkpoint', () => {
+    // Driver contract (commands/autopilot.md): per phase, report the result,
+    // note the cost, check the threshold, warn on a 95% crossing, checkpoint.
+    // `checkBudgetThreshold` records the fired line on the file only, so the
+    // live object's next persist must not erase it.
+    const state = budgetState();
+    let dangerCalls = 0;
+    const deps = { notifyDanger: () => { dangerCalls += 1; return {}; }, notifyPause: () => ({}) };
+    const crossed = [];
+    for (const tokensIn of [96, 1, 1, 1]) {
+      recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' });
+      notePhaseCost(state, 'EXECUTE', { tokensIn });
+      const threshold = checkBudgetThreshold(state.sessionId);
+      crossed.push(threshold.crossed);
+      if (threshold.crossed === 95) buildCostWarningInstruction(state, threshold, deps);
+      recordCheckpoint(state, { sha: `cycle-${crossed.length}` });
+    }
+
+    expect(crossed).toEqual([95, null, null, null]);
+    expect(dangerCalls).toBe(1);
+    expect(loadSession(state.sessionId).usage?.thresholdsFired?.tokens).toEqual([50, 80, 95]);
   });
 });
 
