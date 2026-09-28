@@ -84,7 +84,10 @@
  *     되돌아가는 형은 worktree 조각 직후 `..` 만 본다, 스크립트 파일 실행. glob·brace 는
  *     마지막 세그먼트만 본다 — 디렉터리 세그먼트 glob(`~/.cla*` + `/settings.json`,
  *     `~/.claude/*` + `/hooks.json`)은 놓친다. `~/.claude.json`(호스트 전역 설정)은 보호
- *     집합 밖이다.
+ *     집합 밖이다. 디렉터리 단위 쓰기는 `.claude` 자체가 토큰일 때만 본다 — `.claude` 하위
+ *     (설치 캐시 포함)·pluginRoot·상위 디렉터리로의 복사·추출·이동은 놓친다(예 `cp
+ *     artibot.config.json <캐시>/`, `tar -xf p.tar -C <캐시>`, `cp -r evil/. ~` — 테스트가 현재
+ *     동작 pass 를 "못 보는 것" 핀으로 고정한다; 후속 수리 시 뒤집힐 표식).
  *  2. HG-07 정규식 3종 밖의 외부 쓰기: wget --post-*, httpie, python requests, `gh api -X POST`,
  *     `curl -d`(-X 없는 암묵 POST), `-X` 가 curl 뒤 192자를 넘는 형 — 매트릭스 적중이
  *     필요조건이므로 여기서도 안 보인다.
@@ -95,8 +98,11 @@
  *     `\\?\` 확장 경로 접두, UNC·정션. msys `/c/…` 만 접는다. 파일시스템 조회 없이는 풀 수 없다.
  *  6. HG-13 의 다른 우회: `git commit -n`, git 긴 옵션 약어(`--no-verif`·`--no-ver` — git 은
  *     유일 접두 약어를 받는다), `HUSKY=0`, `core.hooksPath` 변경 — 매트릭스·플래그 매처 밖.
- *  7. 거짓 양성(강제 시 ask/deny): 커밋 메시지 속 `--no-verify`, curl `-o out.json` 이 아닌
- *     위치의 파일명·본문 속 도메인 모양 문자열, `.claude/` 를 읽고 다른 곳에 쓰는 체인.
+ *  7. 거짓 양성(강제 시 ask/deny): 커밋 메시지 속 `--no-verify`; loopback curl 이라도 증명
+ *     allowlist 밖이면 전부 보호 — 목록 밖 무해 옵션(`--max-time 5`, `-L`), 따옴표 없는 `?`·`&`
+ *     가 든 URL, 파이프·체인(`curl … | jq`), 옵션 아닌 여분 단어; `.claude/` 를 읽고 다른 곳에
+ *     쓰는 체인; B6 디렉터리 가드(`git add .claude`, `mkdir -p .claude`); B4 glob 가드
+ *     (`cp x ~/.claude/commands/*.md` 는 보호 basename 이 아닌데도 HG-12·HG-13).
  *  8. HG-13[2] 대체 매처는 구분자 17자 이상(`bypassPrePushHooks` 와 `true` 사이 공백·따옴표·
  *     콜론 등)을 놓친다 — 원본은 잡는다(테스트가 이 차이를 핀). 이 모듈의 ReDoS 스윕은
  *     대체 매처와 전체 경로를 재고, 원본 행의 2차식은 재지 않는다(측정값은 (8) 참조).

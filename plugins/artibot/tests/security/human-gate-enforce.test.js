@@ -30,7 +30,6 @@ import {
   validateEnforceConfig,
 } from '../../lib/security/human-gate-enforce.js';
 import { classify, getGateRow, HUMAN_GATE_MATRIX } from '../../lib/security/human-gates.js';
-import { curlProvenLoopbackOnly, shellWords } from '../../lib/security/human-gate-curl.js';
 
 // ── 픽스처 경로 ────────────────────────────────────────────────────────────
 // Windows 경로는 조각으로 조립한다(land 인용 게이트가 드라이브+사용자 폴더 리터럴을 거부).
@@ -175,6 +174,27 @@ describe('decideHumanGate — HG-12 권한 상승 표', () => {
     expect(['pass', 'record']).toContain(decide({ tool: 'Bash', command }).decision);
   });
 
+  // review2 라운드 2 — 디렉터리 단위 쓰기는 `.claude` 자체가 토큰일 때만 본다. 아래는 현재
+  // 동작(pass)을 고정하는 "못 보는 것" 표식이다: 후속 줄기가 고치면 이 핀이 뒤집혀야 한다.
+  it.each([
+    ['설치 캐시 디렉터리로 설정 파일 복사', `cp artibot.config.json ${CACHE_ROOT}\\`],
+    ['설치 캐시로 tar 추출', `tar -xf p.tar -C ${CACHE_ROOT}`],
+    ['홈으로 재귀 복사 (.claude 를 품는 상위)', 'cp -r evil/. ~'],
+  ])('못 보는 것 핀(현재 pass): %s', (_label, command) => {
+    expect(decide({ tool: 'Bash', command }).decision).toBe('pass');
+  });
+
+  // 헤더 "못 보는 것 7" 의 알려진 거짓 양성 — B6 디렉터리 가드·B4 glob 가드가 보호 방향으로 넓다.
+  it.each([
+    ['git add .claude', 'git add .claude', ['HG-12']],
+    ['mkdir -p .claude', 'mkdir -p .claude', ['HG-12']],
+    ['보호 basename 이 아닌 glob', 'cp x ~/.claude/commands/*.md', ['HG-12', 'HG-13']],
+  ])('알려진 거짓 양성 핀(현재 ask): %s', (_label, command, gates) => {
+    const result = decide({ tool: 'Bash', command });
+    expect(result.decision).toBe('ask');
+    expect(hitIds(result)).toEqual(gates);
+  });
+
   it('못 보는 것 핀: cd 와 맨 이름 사이가 192자 창을 넘으면 놓친다', () => {
     const command = `cd ~/.claude && echo ${'x'.repeat(200)} && cp p settings.json`;
     expect(['pass', 'record']).toContain(decide({ tool: 'Bash', command }).decision);
@@ -220,50 +240,9 @@ describe('decideHumanGate — HG-07 외부 시스템 쓰기 표', () => {
   });
 });
 
-describe('human-gate-curl — loopback 증명 (allowlist, fail-closed)', () => {
-  it.each([
-    ['기본', 'curl -X POST http://127.0.0.1'],
-    ['https + 포트 + 경로', 'curl -X POST https://localhost:8443/a/b'],
-    ['[::1] 따옴표', "curl -X POST 'http://[::1]:8080/x'"],
-    ['맨 호스트:포트', 'curl -X POST 127.0.0.1:3000/hook'],
-    ['값 옵션 값 건너뛰기(따옴표 속 @·공백)', `curl -X POST -H 'Authorization: Bearer a@b' -d "x y" http://127.0.0.1/`],
-    ['플래그 묶음 + 긴 플래그', 'curl -sSk --fail --show-headers -X POST http://127.0.0.1/'],
-  ])('증명됨: %s', (_label, command) => {
-    expect(curlProvenLoopbackOnly(command)).toBe(true);
-  });
-
-  it.each([
-    ['대상 없음', 'curl -X POST'],
-    ['curl 아님', 'wget http://127.0.0.1'],
-    ['앞에 환경변수', 'FOO=1 curl -X POST http://127.0.0.1'],
-    ['인식 못 한 비옵션 단어', 'curl http://127.0.0.1 foo'],
-    ['미지 옵션', 'curl --connect-to a:1:b:2 http://127.0.0.1'],
-    ['userinfo', 'curl http://u@127.0.0.1'],
-    ['스킴 ftp', 'curl ftp://127.0.0.1'],
-    ['포트 비숫자', 'curl http://127.0.0.1:8o/'],
-    ['옥텟 256', 'curl http://127.0.0.256/'],
-    ['0.0.0.0', 'curl http://0.0.0.0/'],
-    ['localhost.', 'curl http://localhost./'],
-    ['큰따옴표 속 $', 'curl "http://127.0.0.1/$X"'],
-    ['짝 없는 따옴표', "curl 'http://127.0.0.1"],
-    ['따옴표 밖 &', 'curl http://127.0.0.1/?a=1&b=2'],
-    ['비문자열', 42],
-    ['-L 리다이렉트 추종 (307/308 이 POST 를 외부로 재전송 가능)', 'curl -L -X POST http://127.0.0.1/'],
-    ['--location 긴 형', 'curl --location -X POST http://127.0.0.1/'],
-    ['--include (curl 8.19 도움말에 없음)', 'curl --include -X POST http://127.0.0.1/'],
-  ])('증명 실패: %s', (_label, command) => {
-    expect(curlProvenLoopbackOnly(command)).toBe(false);
-  });
-
-  it('shellWords — 따옴표 결합·작은따옴표 속 특수문자는 글자, 증명 불가 글자는 null', () => {
-    expect(shellWords(`a"b c"'d$e' f`)).toEqual(['ab cd$e', 'f']);
-    expect(shellWords("''")).toEqual(['']);
-    expect(shellWords('a\\b')).toBeNull();
-    expect(shellWords('a;b')).toBeNull();
-    expect(shellWords('a\nb')).toBeNull();
-    expect(shellWords('a*')).toBeNull();
-  });
-});
+// human-gate-curl.js 를 직접 겨냥한 표(증명됨/증명 실패·shellWords·순수성)는
+// tests/security/human-gate-curl.test.js 로 이관했다(2026-09-28, Stop 게이트 stem 규칙).
+// 여기에는 decideHumanGate 를 거친 HG-07 판정 표만 남는다.
 
 describe('Bash 면제 allowlist — 면제를 좁히는 조건', () => {
   it.each([
@@ -667,18 +646,13 @@ const scanPurity = (source) => {
 };
 
 describe('순수성 핀 — I/O·env·시계·난수·node 내장 로딩 0', () => {
+  // human-gate-curl.js 의 순수성 핀은 tests/security/human-gate-curl.test.js 로 이관했다.
   it.each([
     ['human-gate-enforce.js'],
-    ['human-gate-curl.js'],
   ])('%s 소스(주석 제거 후)에 금지 토큰이 없다', (file) => {
     const source = readFileSync(new URL(`../../lib/security/${file}`, import.meta.url), 'utf8');
     expect(source.length).toBeGreaterThan(1000);
     expect(scanPurity(source)).toEqual([]);
-  });
-
-  it('human-gate-curl.js 는 아무것도 import 하지 않는다', () => {
-    const source = readFileSync(new URL('../../lib/security/human-gate-curl.js', import.meta.url), 'utf8');
-    expect(stripComments(source)).not.toMatch(/^\s*import\b/m);
   });
 
   it('스캐너 자기검증 — 깨진 합성 소스에서 각 금지 토큰을 잡는다', () => {

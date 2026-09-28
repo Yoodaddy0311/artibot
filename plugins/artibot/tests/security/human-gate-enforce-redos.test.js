@@ -78,7 +78,8 @@ function growth(numerator, denominator) {
  * 길이를 그대로 둔 채 회차 표식을 **꼬리에** 박는다(V8 의 같은 (regex, string) 결과 캐시 회피).
  * human-gates.test.js 는 머리에 박지만, 여기서는 머리 단어(`bypassPreCommitHooks`)와 `^` 앵커
  * 시작 위치를 보존해야 2차식 형이 살아 있으므로 꼬리다. 표식은 슬래시·별표 형이 아니라 `#i#` —
- * 슬래시 표식이 `a:/` 필러 꼬리와 붙어 `://` 를 만들어 URL_AUTHORITY 를 매치시켰다(실측 RED).
+ * 슬래시 표식이 `a:/` 필러 꼬리와 붙어 `://` 를 만들어 당시 카탈로그의 URL_AUTHORITY 를
+ * 매치시켰다(2026-09-28 이 스윕의 RED 로 관측; URL_AUTHORITY 는 review2 수리 라운드 1 에서 제거).
  * @param {(n: number) => string} build @param {number} n @param {number} i
  */
 function tagged(build, n, i) {
