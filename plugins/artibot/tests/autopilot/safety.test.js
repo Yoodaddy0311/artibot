@@ -14,8 +14,8 @@ import {
 // 읽기 전용 — 두 곳이 쓴다. (1) 포크밤 드리프트 게이트가 L1 원본과 바이트를
 // 대조한다. (2) 아래 ReDoS 정적 스캔이 **세 카탈로그**(L1 · L2 · HG)를 한 번에
 // 훑는다 — 2026-09-14 에 HUMAN_GATE_MATRIX 가 세 번째로 들어왔다(스캐너 헤더
-// "못 보는 것" 7번 = tests/helpers/regex-scan.js 참조). 이 파일은 L1 소스를
-// 편집하지 않는다.
+// "못 보는 것" 7번 = tests/helpers/regex-scan.js 참조). 2026-09-28 에 네 번째(HGE =
+// human-gate-enforce ENFORCE_PATTERNS)가 들어왔다. 이 파일은 L1 소스를 편집하지 않는다.
 // 2026-09-23 — git-branch-delete 는 정규식이 아니라 두 층이 **같은 객체**로 공유하는
 // 수기 스캐너다. 파일 텍스트도 읽는다: 변이 대조가 마커 블록을 떼어 변이시킨다.
 import {
@@ -31,14 +31,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // PreToolUse 경로(probe 'command', tools Bash)를 타면서 두 카탈로그 밖이라
 // 종전 스캔이 못 보던 자리다. 이 파일은 human-gates.js 를 편집하지 않는다.
 import { HUMAN_GATE_MATRIX } from '../../lib/security/human-gates.js';
+// 읽기 전용 — **네 번째 카탈로그**(2026-09-28, 층 이름 HGE). 사람 게이트 강제 판정
+// 코어의 정규식 전부다. 이 파일은 human-gate-enforce.js 를 편집하지 않는다.
+import { ENFORCE_PATTERNS } from '../../lib/security/human-gate-enforce.js';
 // 정적 스캐너의 유일한 구현(2026-09-14 추출). 종전에는 이 파일과
 // tests/firewall/human-gate-matrix-selfcheck.test.js 섹션 G 가 같은 HG 29패턴을
 // 서로 다른 규칙으로 두 번 훑었고 HG-11 예외도 두 곳에 있었다.
 import {
   ceilingFor,
+  findOverlappingStarPairs,
   findUnboundedRuns,
   HG_SCAN_ALLOWLIST,
   scanTargetOf,
+  WINDOW_CEILING_OVERRIDES,
 } from '../helpers/regex-scan.js';
 
 describe('classifyRisk', () => {
@@ -1135,8 +1140,8 @@ describe('classifyRisk — sql-delete-no-where reads the WHERE that belongs to i
 //
 // 스캐너 구현과 그 교리(무제한 런의 정의 3조건 · 창 상한 허가 목록 · **못 보는 것**
 // 8국)은 2026-09-14 부터 `tests/helpers/regex-scan.js` 에 있다. 거기가 정본이고
-// 이 파일은 그것을 **세 카탈로그에 적용**하는 자리다. 호출 파일은 둘이다 —
-// 이 파일(L1 · L2 · HG 카탈로그 스캔)와
+// 이 파일은 그것을 **네 카탈로그에 적용**하는 자리다. 호출 파일은 둘이다 —
+// 이 파일(L1 · L2 · HG · HGE 카탈로그 스캔)와
 // `tests/firewall/human-gate-matrix-selfcheck.test.js` 섹션 G(HG 구조 핀).
 // 스캐너 자체의 자기검증은 `tests/helpers/regex-scan.test.js` 로 같이 옮겼다.
 //
@@ -1283,6 +1288,47 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
     expect(pattern.flags).not.toContain('m');
     // 면제가 사소하지 않다는 반증 — 앵커를 빼면 스캐너가 실제로 잡는다.
     expect(findUnboundedRuns(pattern.source.slice(1), pattern.flags).length).toBeGreaterThan(0);
+  });
+
+  // ── 네 번째 카탈로그 HGE (2026-09-28, ca04-gate-core) ─────────────────────
+  // lib/security/human-gate-enforce.js#ENFORCE_PATTERNS. 키 = 항목 id. 창은 전부
+  // 192 이하라 WINDOW_CEILING_OVERRIDES 등록 0건, HG_SCAN_ALLOWLIST 같은 무게이트
+  // 예외도 0건이다. 1-b 검출기도 여기서 건다(L1·L2 는 regex-scan.test.js, HG 는
+  // selfcheck 섹션 G). 긍정 클래스 런·lookbehind 결합은 두 스캐너 모두 못 보므로
+  // 아래 'ENFORCE_PATTERNS — 규칙 단독 긴 단일 런 스윕' describe 가 유일한 증거다.
+  it.each(ENFORCE_PATTERNS.map((e) => [`HGE ${e.id}`, e.pattern, e.id]))('%s', (_name, pattern, key) => {
+    expect(pattern).toBeInstanceOf(RegExp);
+    // g·y 가 없어야 한다 — 공유 lastIndex 가 있으면 같은 입력의 판정이 호출마다 갈린다.
+    expect(pattern.global || pattern.sticky).toBe(false);
+    const ceiling = ceilingFor('HGE', key);
+    expect(findUnboundedRuns(pattern.source, pattern.flags, ceiling).map((h) => h.snippet)).toEqual([]);
+    expect(findOverlappingStarPairs(pattern.source, pattern.flags, ceiling).map((h) => h.snippet)).toEqual([]);
+  });
+
+  // 분모 고정 — 위 it.each 가 "0개를 훑고 통과"하지 않게. 위 95 핀(세 카탈로그)은 그대로다.
+  it('scans all 12 enforce patterns (HGE) with no window override', () => {
+    expect(ENFORCE_PATTERNS.map((e) => e.id).sort()).toEqual([
+      'BARE_HOST', 'BARE_IPV6_HOST', 'BASH_HG12_PATH', 'BASH_HG13_PATH', 'BYPASS_HOOKS_TRUE',
+      'IPV4_LOOPBACK', 'NO_VERIFY_FLAG', 'SHELL_CHAIN_META', 'SKIP_PERMISSIONS_FLAG',
+      'TOKEN_SEPARATOR', 'URL_AUTHORITY', 'WHITESPACE',
+    ]);
+    expect(Object.keys(WINDOW_CEILING_OVERRIDES).filter((k) => k.startsWith('HGE:'))).toEqual([]);
+    expect(ENFORCE_PATTERNS.map((e) => ceilingFor('HGE', e.id))).toEqual(Array(12).fill(192));
+  });
+
+  // 양성 대조 — 이 카탈로그의 실제 소스를 **테스트 안에서만** 넓힌 변이에 두 스캐너가
+  // RED 를 낸다(프로덕션 파일은 건드리지 않는다). 그린이 "못 봐서"가 아니라는 증거다.
+  it('HGE 양성 대조: 창을 넓힌 변이는 두 스캐너가 잡는다', () => {
+    const base = ENFORCE_PATTERNS.find((e) => e.id === 'BASH_HG12_PATH').pattern;
+    const star = base.source.replace('{0,192}', '*');
+    const wide = base.source.replace('{0,192}', '{0,193}');
+    expect(star).not.toBe(base.source);
+    expect(findUnboundedRuns(star, base.flags, ceilingFor('HGE', 'BASH_HG12_PATH'))
+      .map((h) => h.kind)).toEqual(['unbounded']);
+    expect(findUnboundedRuns(wide, base.flags, ceilingFor('HGE', 'BASH_HG12_PATH'))
+      .map((h) => h.kind)).toEqual(['wide-window']);
+    // 1-b: 필수 글자를 낀 긴 긍정 클래스 런 쌍(합성 로컬 상수).
+    expect(findOverlappingStarPairs('--[a-z]*y[a-z]*(?![\\w-])', 'i').length).toBeGreaterThan(0);
   });
 });
 
@@ -1749,6 +1795,153 @@ describe('git-branch-delete — 규칙 단독으로도 선형이다 (두 층)', 
     const r = classifyRisk(payload);
     expect(r.level).toBe(level);
     if (matches) expect(r.matchedId).toBe('git-branch-delete');
+  }, 30_000);
+});
+
+// ── ENFORCE_PATTERNS(HGE) 긴 단일 런 스윕 (2026-09-28, ca04-gate-core) ─────────
+// 가변 수량자마다 그 수량자를 최대로 늘리는 필러. 규칙 **단독**(`pattern.test`)만 잰다 —
+// decideHumanGate 전체 경로는 매트릭스(classify)를 태우고, HG-13[2] 의 미수리 2차식
+// (regex-scan.js 못 보는 것 1-b(vi))을 여기로 끌어오지 않기 위해서다.
+// 판정은 파일 규약: 성장 비율(6배 구간, 임계 18) + 40KB smoke(<200ms) + 구조·종료 단언.
+// 회차마다 꼬리 salt 로 payload 를 바꾼다 — V8 (regex, string) 결과 캐시 회피. 머리 표식을
+// 쓰지 않는 것은 `^` 앵커 패턴(BARE_* · IPV4_LOOPBACK)의 시작 위치를 깨지 않기 위해서다.
+//
+// 실측(node v24.15.0, Windows, 2026-09-28 15:03 KST, 규칙 단독 3회 중앙값,
+// 20,480 / 40,960 / 122,880B): BASH_HG12/13 `.claude/` 반복 2.10 / 4.02 / 12.57 ·
+// 2.25 / 4.69 / 14.45ms(growth 2.71 · 2.95), URL_AUTHORITY 스킴 런 0.84 / 2.75 / 8.09ms
+// (2.50), 나머지 전 행 120KB 0.57ms 이하. 창을 `*` 로 넓힌 BASH_HG12 변이는 같은 필러에서
+// 62.5 / 190.6 / 2,329.8ms(growth 35.1) — 아래 양성 대조의 근거.
+//
+// 못 보는 것: URL_AUTHORITY 의 authority 런 `{1,192}` 은 한 글자만 먹으면 그룹이 끝나
+// 매치하므로 **근접-미스로 최대화할 수 없다** — 매치형과 빈 authority 형만 있다.
+// 모듈 코드(경로 세그먼트 분해·토큰 순회)의 비용은 이 스윕 밖이다.
+const HGE_SALTS = Object.freeze(['~', '%', '!']);
+const HGE_SWEEP_SIZES = Object.freeze([20_480, 40_960, 122_880]);
+
+/** @param {string} unit @param {number} n @param {string} tail @returns {string} */
+const withTail = (unit, n, tail) => `${fill(unit, n - tail.length)}${tail}`;
+
+/**
+ * [id, 겨냥 수량자(소스 원문), 형 이름, build(n, salt), 기대 판정]. 수량자 열은 아래
+ * 커버리지 it 이 소스에서 뽑은 가변 수량자 집합과 대조한다 — 새 수량자는 형 없이는 RED.
+ * @type {[string, string, string, (n: number, s: string) => string, boolean][]}
+ */
+const HGE_SWEEP_SHAPES = [
+  ['BASH_HG12_PATH', '[^\\n]{0,192}', 'claude-dir repeat', (n, s) => withTail('.claude/', n, s), false],
+  ['BASH_HG12_PATH', '[^\\n]{0,192}', 'lookahead near-miss', (n, s) => withTail('.claude/settings.jsonx ', n, s), false],
+  ['BASH_HG12_PATH', '[^\\n]{0,192}', 'lookbehind near-miss', (n, s) => withTail('.claude/xsettings.json ', n, s), false],
+  ['BASH_HG12_PATH', '[^\\n]{0,192}', 'single start, long near-miss body',
+    (n, s) => `.claude/${fill('settings.json.', n - 9)}${s}`, false],
+  ['BASH_HG12_PATH', '[^\\n]{0,192}', 'claude-dir repeat (matching)', (n, s) => withTail('.claude/', n, `${s}/settings.json`), true],
+  ['BASH_HG13_PATH', '[^\\n]{0,192}', 'claude-dir repeat', (n, s) => withTail('.claude/', n, s), false],
+  ['BASH_HG13_PATH', '[^\\n]{0,192}', 'lookahead near-miss', (n, s) => withTail('.claude/artibot.config.jsonx ', n, s), false],
+  ['BASH_HG13_PATH', '[^\\n]{0,192}', 'lookbehind near-miss', (n, s) => withTail('.claude/xartibot.config.json ', n, s), false],
+  ['BASH_HG13_PATH', '[^\\n]{0,192}', 'claude-dir repeat (matching)',
+    (n, s) => withTail('.claude/', n, `${s}/artibot.config.json`), true],
+  ['BYPASS_HOOKS_TRUE', '["\':=\\s]{1,16}', 'max separator near-miss',
+    (n, s) => withTail(`bypassPrePushHooks${' '.repeat(16)}tru `, n, s), false],
+  ['BYPASS_HOOKS_TRUE', '["\':=\\s]{1,16}', 'long separator run', (n, s) => `bypassPreCommitHooks${' '.repeat(n - 21)}${s}`, false],
+  ['BYPASS_HOOKS_TRUE', '["\':=\\s]{1,16}', 'max separator (matching)',
+    (n, s) => withTail(`bypassPrePushHooks${' '.repeat(16)}tru `, n, `${s}bypassPrePushHooks${' '.repeat(16)}true`), true],
+  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'scheme run', (n, s) => withTail('ab.', n, s), false],
+  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'max scheme near-miss', (n, s) => withTail(`a${'b'.repeat(31)}:/ `, n, s), false],
+  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'a:/ repeat', (n, s) => withTail('a:/', n, s), false],
+  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'a:// repeat (matching)', (n, s) => withTail('a://', n, s), true],
+  // salt 를 머리에 둔다 — 꼬리에 두면 잘린 단위 `a://` 뒤 salt 가 authority 한 글자로 매치한다.
+  ['URL_AUTHORITY', '[^\\s/?#\'"<>\\\\]{1,192}', 'empty authority repeat', (n, s) => `${s}${fill('a:///', n - 1)}`, false],
+  ['URL_AUTHORITY', '[^\\s/?#\'"<>\\\\]{1,192}', 'authority run (matching)', (n, s) => `${s}a://${'x'.repeat(n - 5)}`, true],
+  ['BARE_HOST', '[a-z0-9-]{1,63}', 'long host label', (n, s) => `${'a'.repeat(n - 1)}${s}`, false],
+  ['BARE_HOST', '[a-z0-9.-]{1,192}', 'dotted rest run', (n, s) => `a.${fill('a.', n - 3)}${s}`, false],
+  ['BARE_HOST', '[a-z0-9.-]{1,192}', 'hyphen rest run', (n, s) => `a.${'-'.repeat(n - 3)}${s}`, false],
+  ['BARE_HOST', '[a-z0-9.-]{1,192}', 'rest run (matching)', (n, s) => `a.${'b'.repeat(150)}/${'x'.repeat(n - 154)}${s}`, true],
+  ['BARE_HOST', '\\d{1,5}', 'port digit run', (n, s) => `a.b:${'1'.repeat(n - 5)}${s}`, false],
+  ['BARE_IPV6_HOST', '[0-9a-f:.]{2,64}', 'colon body run', (n, s) => `[${':'.repeat(n - 2)}${s}`, false],
+  ['BARE_IPV6_HOST', '[0-9a-f:.]{2,64}', 'body (matching)', (n, s) => `[::1]/${'x'.repeat(n - 7)}${s}`, true],
+  ['BARE_IPV6_HOST', '\\d{1,5}', 'port digit run', (n, s) => `[::1]:${'1'.repeat(n - 7)}${s}`, false],
+  ['IPV4_LOOPBACK', '\\d{1,3}', 'last octet run', (n, s) => `127.1.1.${'1'.repeat(n - 9)}${s}`, false],
+  ['IPV4_LOOPBACK', '\\d{1,3}', 'dotted octet run', (n, s) => `127.${fill('1.', n - 5)}${s}`, false],
+];
+
+/**
+ * 소스의 가변 수량자 원문 집합(`X{m,n}` · `X{m,}` · `X*` · `X+`, X = 클래스·이스케이프·
+ * 글자). 고정 횟수 `{n}` 와 `?` 는 가변 런이 아니라 뺀다. 그룹에 붙은 수량자는 X 가
+ * `)` 라 안 잡힌다 — 이 카탈로그에는 없고, 생기면 아래 커버리지 it 이 아니라 정적
+ * 스캔(못 보는 것 3)과 새 형이 맡아야 한다.
+ * @param {string} source @returns {string[]}
+ */
+function variableQuantifiers(source) {
+  // 원자를 빠짐없이 차례로 먹는다 — 건너뛰면 `\[` 의 `[` 에서 가짜 클래스가 시작된다.
+  const atoms = source.matchAll(/(\[(?:\\.|[^\]\\])*\]|\\.|[^\\])(\{\d+,\d*\}|[*+])?/g);
+  const found = [...atoms].filter(([, atom, q]) => q !== undefined && !'()|'.includes(atom)).map(([whole]) => whole);
+  return [...new Set(found)].sort();
+}
+
+/**
+ * 한 형을 규칙 단독으로 잰다. payload 는 재기 **전에** 만든다(문자열 생성비 제외).
+ * @param {RegExp} re @param {(n: number, s: string) => string} build
+ * @param {ReadonlyArray<number>} sizes 잴 사이즈들(성장 비율은 호출처가 6배 쌍으로 계산)
+ * @returns {number[]} 사이즈별 중앙값(ms)
+ */
+function hgeSweepTimes(re, build, sizes) {
+  return sizes.map((n) => {
+    const payloads = HGE_SALTS.map((s) => build(n, s));
+    let cursor = 0;
+    return medianMs(() => {
+      re.test(payloads[cursor]);
+      cursor += 1;
+    }, payloads.length);
+  });
+}
+
+describe('ENFORCE_PATTERNS — 규칙 단독 긴 단일 런 스윕 (HGE)', () => {
+  const patternOf = (/** @type {string} */ id) => ENFORCE_PATTERNS.find((e) => e.id === id).pattern;
+
+  it('가변 수량자마다 형이 있고, 수량자 없는 패턴에는 형이 없다', () => {
+    for (const { id, pattern } of ENFORCE_PATTERNS) {
+      const covered = [...new Set(HGE_SWEEP_SHAPES.filter(([sid]) => sid === id).map(([, q]) => q))].sort();
+      expect([id, covered]).toEqual([id, variableQuantifiers(pattern.source)]);
+    }
+    // 수량자 없는 5종은 고정 길이 리터럴·단일 클래스라 스윕할 런이 없다.
+    expect(ENFORCE_PATTERNS.filter((e) => variableQuantifiers(e.pattern.source).length === 0).map((e) => e.id).sort())
+      .toEqual(['NO_VERIFY_FLAG', 'SHELL_CHAIN_META', 'SKIP_PERMISSIONS_FLAG', 'TOKEN_SEPARATOR', 'WHITESPACE']);
+    // 매치형(양성 대조)이 실패형만 잰 "안 걸려서 빨랐다"를 가른다.
+    expect(HGE_SWEEP_SHAPES.filter(([, , , , matches]) => matches).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('커버리지 자기검증: 형 없는 새 수량자를 추출기가 드러낸다', () => {
+    const source = `${patternOf('BASH_HG12_PATH').source}[a-z]{1,8}x+`;
+    expect(variableQuantifiers(source)).toEqual(['[^\\n]{0,192}', '[a-z]{1,8}', 'x+']);
+    expect(variableQuantifiers('a{3}b?(?:cd)*')).toEqual([]);
+  });
+
+  it.each(HGE_SWEEP_SHAPES)('%s %s %s: t(122,880) < 18 × t(20,480)', (id, _q, _name, build, matches) => {
+    const re = patternOf(id);
+    const [t20480, t40960, t122880] = hgeSweepTimes(re, build, HGE_SWEEP_SIZES);
+    expect(t40960).toBeLessThan(200);
+    expect(growth(t122880, t20480)).toBeLessThan(18);
+    // 구조·종료 단언 — 주장한 길이이고, 판정이 크기·salt 에 따라 흔들리지 않는다.
+    for (const n of HGE_SWEEP_SIZES) {
+      for (const s of HGE_SALTS) {
+        const payload = build(n, s);
+        expect(payload).toHaveLength(n);
+        expect(re.test(payload)).toBe(matches);
+      }
+    }
+  }, 30_000);
+
+  // 양성 대조 — 같은 하네스(hgeSweepTimes · growth)가 2차식을 실제로 RED 로 판정한다.
+  // 창을 `*` 로 넓힌 BASH_HG12 변이(테스트 로컬)에 `.claude/` 반복을 댄다. 대조만 **10배 쌍**
+  // 8,192 / 81,920B 를 쓴다(2차식 기대 100 · 선형 10 — 임계 18 은 여전히 둘 사이다). 게이트의
+  // 6배 쌍은 2차식 기대가 36 이라 임계 대비 여유가 2배를 못 넘는다(실측 16,384 / 98,304B
+  // 5회 최소 28.6 = 1.6배). 10배 쌍 실측(node v24.15.0, Windows, 2026-09-28 15:21 KST,
+  // 5회): growth 75.5~82.1, 최소 75.5 = 임계의 4.2배, 회당 3.4~3.8s. 8배 쌍 12,288 / 98,304B
+  // 는 최소 53.2(2.96배)라 버렸다. 게이트 임계(6배 쌍 < 18)는 바꾸지 않는다.
+  it('스윕 양성 대조: 창을 넓힌 변이는 성장 비율 18 을 넘는다', () => {
+    const base = patternOf('BASH_HG12_PATH');
+    const mutant = new RegExp(base.source.replace('{0,192}', '*'), base.flags);
+    const build = HGE_SWEEP_SHAPES[0][3];
+    const [small, large] = hgeSweepTimes(mutant, build, [8_192, 81_920]);
+    expect(growth(large, small)).toBeGreaterThan(18);
   }, 30_000);
 });
 

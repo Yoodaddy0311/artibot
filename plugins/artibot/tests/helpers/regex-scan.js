@@ -82,9 +82,10 @@
  *     `FROZEN_SWAPPED_BRANCH_DELETE`)으로만 남는다. 스캐너 판 d-런 실측은 3 에 있다.
  *     **검출기(2026-09-23)**: {@link findOverlappingStarPairs} — 인접한
  *     `A{긴 런} M B{긴 런}` 에서 어떤 글자가 A·M·B 셋 모두에 속하면 보고한다.
- *     첫 런이 필수 글자를 빼면(수리형) 분할점이 하나라 그린이다. 세 카탈로그
+ *     첫 런이 필수 글자를 빼면(수리형) 분할점이 하나라 그린이다. 네 카탈로그
  *     전부에 예외 없이 걸린다(L1·L2 는 regex-scan.test.js, HG 는
- *     human-gate-matrix-selfcheck 섹션 G). **이 검출기가 못 보는 것**:
+ *     human-gate-matrix-selfcheck 섹션 G, HGE 는 safety.test.js — 2026-09-28).
+ *     **이 검출기가 못 보는 것**:
  *       (i)   인접하지 않은 쌍 — 사이에 원자가 둘 이상 끼면 안 본다.
  *             `\w*rr\w*` 처럼 끼인 글자가 전부 두 런에 들어도 마찬가지다.
  *       (ii)  그룹 경계 · 교대 — `(?:-[a-z]*)d[a-z]*`, `-[a-z]*(?:d|x)[a-z]*`.
@@ -156,12 +157,17 @@
  *  5. 전처리(guard-registry#normalizeCommand)와의 상호작용, 규칙 간 평가 순서,
  *     classifyRisk 전체 경로의 합산 비용.
  *  6. `[]]` 같은 JS 문자클래스 극단 문법(파싱 실패 시 fail-closed 로 보고한다).
- *  7. **스캔 밖에 있는 리포의 나머지 정규식.** 이 스캔이 훑는 것은 세 카탈로그뿐
+ *  7. **스캔 밖에 있는 리포의 나머지 정규식.** 이 스캔이 훑는 것은 네 카탈로그뿐
  *     이다 — BLOCKED_PATTERNS(L1 39) · DANGEROUS_PATTERNS(L2 27) ·
- *     HUMAN_GATE_MATRIX(HG 13행 29패턴) = 95패턴(2026-09-14 실측 분모).
- *     네 번째 카탈로그를 늘릴지 2026-09-14 에 census 로 판정했고, 답은
- *     **늘리지 않는다**였다: 후보 10건을 현행 조건에 넣으면 RED 6건이 전부
- *     오탐이고 진양성이 0 이다. 대신 밖에 있는 것들의 안전 근거를 여기에 적는다.
+ *     HUMAN_GATE_MATRIX(HG 13행 29패턴) = 95패턴(2026-09-14 실측 분모) +
+ *     ENFORCE_PATTERNS(HGE 12, 2026-09-28) = 107패턴. 분모 핀은 따로다 —
+ *     safety.test.js 의 95 핀(세 카탈로그)과 HGE 12 핀.
+ *     2026-09-14 census 는 당시 스캔 밖 후보 10건을 네 번째 카탈로그로 들일지
+ *     판정했고 답은 **늘리지 않는다**였다: 현행 조건에 넣으면 RED 6건이 전부
+ *     오탐이고 진양성이 0 이다. HGE 는 그 후보가 아니라 **태어날 때 등록한** 새
+ *     모듈이다(창 전부 192 이하, 예외 0건). 긍정 클래스 런이 많아(1번) 스캐너만으로는
+ *     근거가 안 되므로 safety.test.js 의 HGE 긴 단일 런 스윕이 수량자마다 함께 선다.
+ *     그 밖에 있는 것들의 안전 근거를 여기에 적는다.
  *     근거는 모양이 아니라 **실측 수치와 캡 상수**다(아래 전부 node v24.15.0,
  *     Windows, 중앙값 3회, 타이밍마다 서로 다른 payload — 같은 문자열을 반복
  *     측정하면 V8 정규식 결과 캐시가 2회차부터 0 을 돌려준다, 2026-09-14 실측).
@@ -253,7 +259,7 @@ export const WINDOW_CEILING_DEFAULT = 192;
 
 /**
  * 192 를 넘도록 **허가된** 규칙 목록. 키는 `<층>:<식별자>` 로, L1 은 label,
- * L2 는 id 를 쓴다(2026-09-14 현재 L2·HG 예외 0건).
+ * L2 는 id 를 쓴다(2026-09-14 현재 L2·HG 예외 0건, 2026-09-28 HGE 도 0건).
  *
  * 층 접두가 붙은 이유: 접두 없이 label 과 id 를 한 객체에 섞으면 **네임스페이스가
  * 겹친다.** 지금은 충돌이 없지만, 미래에 L2 id 가 L1 label 과 같은 문자열이 되면
@@ -284,9 +290,11 @@ export const WINDOW_CEILING_OVERRIDES = Object.freeze({
 
 /**
  * 규칙 하나에 적용할 상한을 고른다.
- * @param {'L1'|'L2'|'HG'} layer 카탈로그 — L1 = blocked-patterns,
- *   L2 = safety, HG = security/human-gates (2026-09-14 추가)
- * @param {string} key L1 은 label, L2 는 id, HG 는 `<행 id>[<패턴 인덱스>]`
+ * @param {'L1'|'L2'|'HG'|'HGE'} layer 카탈로그 — L1 = blocked-patterns,
+ *   L2 = safety, HG = security/human-gates (2026-09-14 추가),
+ *   HGE = security/human-gate-enforce 의 ENFORCE_PATTERNS (2026-09-28 추가)
+ * @param {string} key L1 은 label, L2 는 id, HG 는 `<행 id>[<패턴 인덱스>]`,
+ *   HGE 는 항목 id
  * @returns {number}
  */
 export function ceilingFor(layer, key) {

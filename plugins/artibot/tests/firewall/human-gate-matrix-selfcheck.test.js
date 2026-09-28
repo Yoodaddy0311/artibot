@@ -22,6 +22,12 @@
  *     명시 등록된 예외뿐이다. 값싼 **구조 핀**이고, 전체 스캐너는
  *     `tests/autopilot/safety.test.js` 쪽에 있다(HUMAN_GATE_MATRIX 를 세 번째
  *     카탈로그로 그리 배선하는 것은 별도 작업 소유).
+ *  H. **강제 설정 기본값(CA-04 L1).** `lib/security/human-gate-enforce.js` 의
+ *     `ENFORCE_DEFAULTS.gates` 는 매트릭스 id 이면서 판정 대상(ENFORCEABLE_GATE_IDS)의
+ *     부분집합이고, 정확히 `['HG-12','HG-13']` 이다(HG-07 은 오너 결정 O2 대기).
+ *     `validateEnforceConfig` 가 기본값을 통과시키고, **일부러 깨뜨린 합성 설정**은
+ *     거부하는지 본다(스캐너 자기검증). `ENFORCE_PATTERNS` 는 구조만 핀한다 — 창·성장비
+ *     스캔은 `tests/autopilot/safety.test.js` 소유다.
  *
  * ── 이 게이트가 못 보는 것 (검증 규율 §9 · PRD R-05) ────────────────────────
  *
@@ -45,6 +51,10 @@
  *     의도일 수 있다. 문자열 대조는 필요조건이지 충분조건이 아니다.
  *  6. **HG-10.** 제품·비즈니스 선택은 패턴화 불가로 선언돼 D 에서 면제된다.
  *     그 행이 실제로 사람에게 도달하는지는 이 게이트가 전혀 보지 못한다.
+ *  7. **H 의 강제 동작.** H 는 기본값과 설정 검증의 형태만 본다. 판정 코어는 호출자
+ *     0(L2 배선 전)이고, 출하 `artibot.config.json` 에는 enforce 키가 없다(부재 = 꺼짐).
+ *     실제 강제 여부·판정 표는 `tests/security/human-gate-enforce.test.js` 가 보고,
+ *     호스트가 ask 를 존중하는 권한 모드 집합은 미확인이다(L0 프로브 몫).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -66,6 +76,13 @@ import {
   findUnboundedRuns,
   HG_SCAN_ALLOWLIST,
 } from '../helpers/regex-scan.js';
+// 섹션 H — 강제 판정 코어의 기본값·설정 검증·정규식 카탈로그 구조.
+import {
+  ENFORCE_DEFAULTS,
+  ENFORCE_PATTERNS,
+  ENFORCEABLE_GATE_IDS,
+  validateEnforceConfig,
+} from '../../lib/security/human-gate-enforce.js';
 
 /**
  * 행마다 양성 1건 · 음성 1건. 행이 늘면 여기도 늘어야 한다(D 가 강제).
@@ -419,5 +436,57 @@ describe('human-gate matrix — 무제한 런 0 (G)', () => {
     // 분모 고정. 위 it.each 아닌 루프들이 "0개를 돌고 통과"하지 않도록.
     expect(byKey.size).toBe(29);
     expect(HUMAN_GATE_MATRIX).toHaveLength(13);
+  });
+});
+
+describe('human-gate matrix — 강제 설정 기본값 (H)', () => {
+  const matrixIds = HUMAN_GATE_MATRIX.map((row) => row.id);
+
+  it('ENFORCE_DEFAULTS.gates ⊆ 매트릭스 id ∩ ENFORCEABLE_GATE_IDS', () => {
+    expect(ENFORCE_DEFAULTS.gates.length).toBeGreaterThan(0);
+    for (const id of ENFORCE_DEFAULTS.gates) {
+      expect(matrixIds, `gate not in matrix: ${id}`).toContain(id);
+      expect(ENFORCEABLE_GATE_IDS, `gate not enforceable: ${id}`).toContain(id);
+    }
+    for (const id of ENFORCEABLE_GATE_IDS) expect(matrixIds, `enforceable id not in matrix: ${id}`).toContain(id);
+  });
+
+  it("gates 정확 집합 ['HG-12','HG-13'] — HG-07 은 오너 결정 O2 대기라 없다", () => {
+    expect([...ENFORCE_DEFAULTS.gates].sort()).toEqual(['HG-12', 'HG-13']);
+    expect(ENFORCE_DEFAULTS.gates).not.toContain('HG-07');
+  });
+
+  it('기본값은 꺼짐이고 깊게 동결돼 있으며 validateEnforceConfig 를 통과한다', () => {
+    expect(ENFORCE_DEFAULTS.enabled).toBe(false);
+    expect(Object.isFrozen(ENFORCE_DEFAULTS)).toBe(true);
+    expect(Object.isFrozen(ENFORCE_DEFAULTS.gates)).toBe(true);
+    expect(Object.isFrozen(ENFORCE_DEFAULTS.askHonoredModes)).toBe(true);
+    expect(validateEnforceConfig(ENFORCE_DEFAULTS)).toEqual([]);
+  });
+
+  // 스캐너 자기검증 — 일부러 깨뜨린 합성 설정마다 거부가 실제로 나오고, 오류가 그 값을 짚는다.
+  it.each([
+    ['미지 게이트 id', { ...ENFORCE_DEFAULTS, gates: ['HG-99'] }, 'HG-99'],
+    ['매트릭스엔 있으나 판정 대상 밖', { ...ENFORCE_DEFAULTS, gates: ['HG-09'] }, 'HG-09'],
+    ['미지 mode', { ...ENFORCE_DEFAULTS, mode: 'audit' }, 'audit'],
+    ['비불리언 enabled', { ...ENFORCE_DEFAULTS, enabled: 'true' }, 'enabled'],
+    ['미지 키(오타)', { ...ENFORCE_DEFAULTS, enfroce: true }, 'enfroce'],
+  ])('깨진 합성 설정 거부: %s', (_label, enforce, needle) => {
+    const errors = validateEnforceConfig(enforce);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.join('\n')).toContain(needle);
+  });
+
+  it('ENFORCE_PATTERNS 구조 — 동결 배열, id 유일, pattern 은 RegExp, g·y 플래그 없음', () => {
+    expect(Object.isFrozen(ENFORCE_PATTERNS)).toBe(true);
+    expect(ENFORCE_PATTERNS.length).toBeGreaterThan(0);
+    const ids = ENFORCE_PATTERNS.map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const entry of ENFORCE_PATTERNS) {
+      expect(typeof entry.id, 'id must be a string').toBe('string');
+      expect(entry.pattern, `pattern must be a RegExp: ${entry.id}`).toBeInstanceOf(RegExp);
+      expect(entry.pattern.global, `global flag: ${entry.id}`).toBe(false);
+      expect(entry.pattern.sticky, `sticky flag: ${entry.id}`).toBe(false);
+    }
   });
 });
