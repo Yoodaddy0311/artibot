@@ -1306,14 +1306,17 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
   });
 
   // 분모 고정 — 위 it.each 가 "0개를 훑고 통과"하지 않게. 위 95 핀(세 카탈로그)은 그대로다.
-  it('scans all 12 enforce patterns (HGE) with no window override', () => {
+  // 2026-09-28 저녁 12 → 8: URL_AUTHORITY · BARE_HOST · BARE_IPV6_HOST · IPV4_LOOPBACK 은
+  // 정규식 자체가 사라졌다(curl loopback 판정이 lib/security/human-gate-curl.js 의 문자열
+  // 상태기계로 이관, 정규식 0개). 그 선형성 증거는 tests/security/human-gate-enforce-redos.test.js
+  // 가 갖는다 — 여기서 뺀 것은 스캔 완화가 아니라 스캔 대상 소멸이다.
+  it('scans all 8 enforce patterns (HGE) with no window override', () => {
     expect(ENFORCE_PATTERNS.map((e) => e.id).sort()).toEqual([
-      'BARE_HOST', 'BARE_IPV6_HOST', 'BASH_HG12_PATH', 'BASH_HG13_PATH', 'BYPASS_HOOKS_TRUE',
-      'IPV4_LOOPBACK', 'NO_VERIFY_FLAG', 'SHELL_CHAIN_META', 'SKIP_PERMISSIONS_FLAG',
-      'TOKEN_SEPARATOR', 'URL_AUTHORITY', 'WHITESPACE',
+      'BASH_HG12_PATH', 'BASH_HG13_PATH', 'BYPASS_HOOKS_TRUE', 'NO_VERIFY_FLAG',
+      'SHELL_CHAIN_META', 'SKIP_PERMISSIONS_FLAG', 'TOKEN_SEPARATOR', 'WHITESPACE',
     ]);
     expect(Object.keys(WINDOW_CEILING_OVERRIDES).filter((k) => k.startsWith('HGE:'))).toEqual([]);
-    expect(ENFORCE_PATTERNS.map((e) => ceilingFor('HGE', e.id))).toEqual(Array(12).fill(192));
+    expect(ENFORCE_PATTERNS.map((e) => ceilingFor('HGE', e.id))).toEqual(Array(8).fill(192));
   });
 
   // 양성 대조 — 이 카탈로그의 실제 소스를 **테스트 안에서만** 넓힌 변이에 두 스캐너가
@@ -1803,18 +1806,19 @@ describe('git-branch-delete — 규칙 단독으로도 선형이다 (두 층)', 
 // decideHumanGate 전체 경로는 매트릭스(classify)를 태우고, HG-13[2] 의 미수리 2차식
 // (regex-scan.js 못 보는 것 1-b(vi))을 여기로 끌어오지 않기 위해서다.
 // 판정은 파일 규약: 성장 비율(6배 구간, 임계 18) + 40KB smoke(<200ms) + 구조·종료 단언.
-// 회차마다 꼬리 salt 로 payload 를 바꾼다 — V8 (regex, string) 결과 캐시 회피. 머리 표식을
-// 쓰지 않는 것은 `^` 앵커 패턴(BARE_* · IPV4_LOOPBACK)의 시작 위치를 깨지 않기 위해서다.
+// 회차마다 꼬리 salt 로 payload 를 바꾼다 — V8 (regex, string) 결과 캐시 회피(머리 표식은
+// 시작 위치를 옮길 수 있어 쓰지 않는다).
 //
-// 실측(node v24.15.0, Windows, 2026-09-28 15:03 KST, 규칙 단독 3회 중앙값,
-// 20,480 / 40,960 / 122,880B): BASH_HG12/13 `.claude/` 반복 2.10 / 4.02 / 12.57 ·
-// 2.25 / 4.69 / 14.45ms(growth 2.71 · 2.95), URL_AUTHORITY 스킴 런 0.84 / 2.75 / 8.09ms
-// (2.50), 나머지 전 행 120KB 0.57ms 이하. 창을 `*` 로 넓힌 BASH_HG12 변이는 같은 필러에서
-// 62.5 / 190.6 / 2,329.8ms(growth 35.1) — 아래 양성 대조의 근거.
+// 실측(node v24.15.0, Windows, 2026-09-28 15:03 KST, B5 이전 `\.claude\/` 소스, 규칙 단독
+// 3회 중앙값, 20,480 / 40,960 / 122,880B): BASH_HG12/13 `.claude/` 반복 2.10 / 4.02 / 12.57 ·
+// 2.25 / 4.69 / 14.45ms(growth 2.71 · 2.95), BYPASS 전 행 120KB 0.20ms 이하. 창을 `*` 로
+// 넓힌 BASH_HG12 변이는 같은 필러에서 62.5 / 190.6 / 2,329.8ms(growth 35.1). B5 이후 수치는
+// 2026-09-28 20시대 재측정 — 줄기 보고에 있다.
 //
-// 못 보는 것: URL_AUTHORITY 의 authority 런 `{1,192}` 은 한 글자만 먹으면 그룹이 끝나
-// 매치하므로 **근접-미스로 최대화할 수 없다** — 매치형과 빈 authority 형만 있다.
-// 모듈 코드(경로 세그먼트 분해·토큰 순회)의 비용은 이 스윕 밖이다.
+// 2026-09-28 저녁 URL_AUTHORITY · BARE_HOST · BARE_IPV6_HOST · IPV4_LOOPBACK 형 16행을
+// 뺐다 — 정규식이 카탈로그에서 사라졌고(human-gate-curl.js 상태기계로 이관) 그 선형성
+// 증거는 tests/security/human-gate-enforce-redos.test.js 가 갖는다.
+// 못 보는 것: 모듈 코드(경로 세그먼트 분해·토큰 순회·curl 상태기계)의 비용은 이 스윕 밖이다.
 const HGE_SALTS = Object.freeze(['~', '%', '!']);
 const HGE_SWEEP_SIZES = Object.freeze([20_480, 40_960, 122_880]);
 
@@ -1833,7 +1837,11 @@ const HGE_SWEEP_SHAPES = [
   ['BASH_HG12_PATH', '[^\\n]{0,192}', 'single start, long near-miss body',
     (n, s) => `.claude/${fill('settings.json.', n - 9)}${s}`, false],
   ['BASH_HG12_PATH', '[^\\n]{0,192}', 'claude-dir repeat (matching)', (n, s) => withTail('.claude/', n, `${s}/settings.json`), true],
+  // 시작 조건이 `\.claude\/` → `\.claude(?![\w.-])` 로 바뀌어(B5) 슬래시 없는 `.claude ` 도
+  // 시작점이다. 새로 열린 시작 알파벳을 반복으로 채운 형.
+  ['BASH_HG12_PATH', '[^\\n]{0,192}', 'bare claude-dir repeat', (n, s) => withTail('.claude ', n, s), false],
   ['BASH_HG13_PATH', '[^\\n]{0,192}', 'claude-dir repeat', (n, s) => withTail('.claude/', n, s), false],
+  ['BASH_HG13_PATH', '[^\\n]{0,192}', 'bare claude-dir repeat', (n, s) => withTail('.claude ', n, s), false],
   ['BASH_HG13_PATH', '[^\\n]{0,192}', 'lookahead near-miss', (n, s) => withTail('.claude/artibot.config.jsonx ', n, s), false],
   ['BASH_HG13_PATH', '[^\\n]{0,192}', 'lookbehind near-miss', (n, s) => withTail('.claude/xartibot.config.json ', n, s), false],
   ['BASH_HG13_PATH', '[^\\n]{0,192}', 'claude-dir repeat (matching)',
@@ -1843,23 +1851,6 @@ const HGE_SWEEP_SHAPES = [
   ['BYPASS_HOOKS_TRUE', '["\':=\\s]{1,16}', 'long separator run', (n, s) => `bypassPreCommitHooks${' '.repeat(n - 21)}${s}`, false],
   ['BYPASS_HOOKS_TRUE', '["\':=\\s]{1,16}', 'max separator (matching)',
     (n, s) => withTail(`bypassPrePushHooks${' '.repeat(16)}tru `, n, `${s}bypassPrePushHooks${' '.repeat(16)}true`), true],
-  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'scheme run', (n, s) => withTail('ab.', n, s), false],
-  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'max scheme near-miss', (n, s) => withTail(`a${'b'.repeat(31)}:/ `, n, s), false],
-  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'a:/ repeat', (n, s) => withTail('a:/', n, s), false],
-  ['URL_AUTHORITY', '[a-z0-9+.-]{0,31}', 'a:// repeat (matching)', (n, s) => withTail('a://', n, s), true],
-  // salt 를 머리에 둔다 — 꼬리에 두면 잘린 단위 `a://` 뒤 salt 가 authority 한 글자로 매치한다.
-  ['URL_AUTHORITY', '[^\\s/?#\'"<>\\\\]{1,192}', 'empty authority repeat', (n, s) => `${s}${fill('a:///', n - 1)}`, false],
-  ['URL_AUTHORITY', '[^\\s/?#\'"<>\\\\]{1,192}', 'authority run (matching)', (n, s) => `${s}a://${'x'.repeat(n - 5)}`, true],
-  ['BARE_HOST', '[a-z0-9-]{1,63}', 'long host label', (n, s) => `${'a'.repeat(n - 1)}${s}`, false],
-  ['BARE_HOST', '[a-z0-9.-]{1,192}', 'dotted rest run', (n, s) => `a.${fill('a.', n - 3)}${s}`, false],
-  ['BARE_HOST', '[a-z0-9.-]{1,192}', 'hyphen rest run', (n, s) => `a.${'-'.repeat(n - 3)}${s}`, false],
-  ['BARE_HOST', '[a-z0-9.-]{1,192}', 'rest run (matching)', (n, s) => `a.${'b'.repeat(150)}/${'x'.repeat(n - 154)}${s}`, true],
-  ['BARE_HOST', '\\d{1,5}', 'port digit run', (n, s) => `a.b:${'1'.repeat(n - 5)}${s}`, false],
-  ['BARE_IPV6_HOST', '[0-9a-f:.]{2,64}', 'colon body run', (n, s) => `[${':'.repeat(n - 2)}${s}`, false],
-  ['BARE_IPV6_HOST', '[0-9a-f:.]{2,64}', 'body (matching)', (n, s) => `[::1]/${'x'.repeat(n - 7)}${s}`, true],
-  ['BARE_IPV6_HOST', '\\d{1,5}', 'port digit run', (n, s) => `[::1]:${'1'.repeat(n - 7)}${s}`, false],
-  ['IPV4_LOOPBACK', '\\d{1,3}', 'last octet run', (n, s) => `127.1.1.${'1'.repeat(n - 9)}${s}`, false],
-  ['IPV4_LOOPBACK', '\\d{1,3}', 'dotted octet run', (n, s) => `127.${fill('1.', n - 5)}${s}`, false],
 ];
 
 /**
@@ -1904,8 +1895,12 @@ describe('ENFORCE_PATTERNS — 규칙 단독 긴 단일 런 스윕 (HGE)', () =>
     // 수량자 없는 5종은 고정 길이 리터럴·단일 클래스라 스윕할 런이 없다.
     expect(ENFORCE_PATTERNS.filter((e) => variableQuantifiers(e.pattern.source).length === 0).map((e) => e.id).sort())
       .toEqual(['NO_VERIFY_FLAG', 'SHELL_CHAIN_META', 'SKIP_PERMISSIONS_FLAG', 'TOKEN_SEPARATOR', 'WHITESPACE']);
-    // 매치형(양성 대조)이 실패형만 잰 "안 걸려서 빨랐다"를 가른다.
-    expect(HGE_SWEEP_SHAPES.filter(([, , , , matches]) => matches).length).toBeGreaterThanOrEqual(6);
+    // 매치형(양성 대조)이 실패형만 잰 "안 걸려서 빨랐다"를 가른다 — 수량자 있는 패턴마다 하나 이상.
+    const withRuns = ENFORCE_PATTERNS.filter((e) => variableQuantifiers(e.pattern.source).length > 0).map((e) => e.id);
+    expect(withRuns.sort()).toEqual(['BASH_HG12_PATH', 'BASH_HG13_PATH', 'BYPASS_HOOKS_TRUE']);
+    for (const id of withRuns) {
+      expect([id, HGE_SWEEP_SHAPES.some(([sid, , , , matches]) => sid === id && matches)]).toEqual([id, true]);
+    }
   });
 
   it('커버리지 자기검증: 형 없는 새 수량자를 추출기가 드러낸다', () => {

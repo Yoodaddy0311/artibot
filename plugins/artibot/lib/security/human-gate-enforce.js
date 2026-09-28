@@ -40,21 +40,26 @@
  *      감수한다. msys 형 `/c/…` 는 `c:/…` 로 접는다.
  *  (3) Bash 경로 행은 `$` 앵커 행 패턴 대신 두 탐지의 합이다: (a) 명령 토큰마다
  *      isClaudeConfigPath, (b) worktree 접두를 벗긴 명령에 비앵커·창 제한(192) 매치
- *      `.claude/ … <보호 basename>`(cd 뒤 상대 이름 같은 형을 잡으려고 토큰을 넘는다).
+ *      `.claude<경계> … <보호 basename>`(cd 뒤 상대 이름 같은 형을 잡으려고 토큰을 넘는다;
+ *      worktree 조각 뒤가 `..` 면 벗기지 않는다), (c) 세그먼트 규칙(review2 B4·B6): 선두
+ *      동사가 DIR_READ_VERBS 가 아닌 세그먼트에서 `.claude` 디렉터리 자체인 토큰 → HG-12,
+ *      `.claude` 아래 마지막 세그먼트가 glob·brace(`*?[{`)인 토큰 → HG-12·HG-13.
  *  (4) Bash 면제는 allowlist: 단일 세그먼트(셸 체인·치환·리다이렉트 문자 없음) ∧ 선두 동사
  *      ∈ EXEMPT_LEAD_VERBS 또는 git 하위명령 ∈ EXEMPT_GIT_SUBCOMMANDS(전역 옵션도 allowlist)
  *      ∧ `tee`·`-i…`·`--output…`·`--pre…` 없음. 면제는 HG-07/12/13 에 똑같이 적용된다
  *      (`grep "gh pr merge" docs` 같은 인용을 기록만 하게). echo·printf 는 리다이렉트 없이는
- *      아무것도 쓰지 않으므로 읽기 전용 목록에 더했다.
+ *      아무것도 쓰지 않으므로 읽기 전용 목록에 더했다. 선두 동사는 경로 구분자 없는 bare
+ *      이름만 인정한다(`./cat`·`/usr/bin/cat` 비면제 — review2 N1).
  *  (5) 플래그 행(HG-12 `--dangerously-skip-permissions`, HG-13 `--no-verify`·
  *      `bypassPre(Commit|Push)Hooks true`)의 보호 범위 = "면제가 아닌 모든 Bash". git 동사
  *      문맥 allowlist 로 좁히면 모르는 래퍼(`bash -c`, npm 스크립트, 별칭)에서 fail-open 이라
  *      택하지 않았다. 대가: `git commit -m "… --no-verify …"` 는 거짓 양성이다.
- *  (6) HG-07: `gh pr merge`·`git push … main` 은 항상 보호. curl 행은 명령 안의 **모든**
- *      대상 호스트가 loopback(127.0.0.0/8 · localhost · ::1)일 때만 비보호. 대상 = 스킴 URL 의
- *      호스트 ∪ 호스트 모양 맨 토큰. 대상이 없으면 loopback 을 증명 못 하므로 보호. 값이
- *      대상이 아닌 curl 옵션(CURL_VALUE_OPTIONS)의 인자만 건너뛴다 — `--proxy`·`--connect-to`
- *      등 나머지 옵션 인자는 대상으로 본다(fail-closed).
+ *  (6) HG-07: `gh pr merge`·`git push … main` 은 항상 보호. curl 행은 loopback 이 **증명**될
+ *      때만 비보호(review2 B1~B3 — 인식 못 한 것을 무시하던 부정 목록을 뒤집었다). 증명은
+ *      lib/security/human-gate-curl.js#curlProvenLoopbackOnly 가 한다: 단일 `curl` 호출이고
+ *      값 옵션의 값을 뺀 모든 단어가 알려진 무인자 플래그이거나 loopback 대상일 때만 참 —
+ *      인식 못 한 단어·옵션(--connect-to·-x·-K …)·userinfo·점 없는 호스트는 전부 보호.
+ *      규칙과 그 모듈의 못 보는 것(.curlrc·프록시 환경변수·터널)은 그 파일 헤더에 있다.
  *  (7) pluginRoot 는 절대 경로일 때만 쓴다(상대면 무시). 설치 캐시는 `.claude` 세그먼트로
  *      이미 보호된다. pluginRoot 가 worktree 소스 자신이면 그 소스의 보호 basename 은 보호다.
  *  (8) 이 경로는 `classify` 를 부르지 않는다. 매트릭스 행은 evaluateMatrix 가 같은 규칙으로
@@ -64,8 +69,8 @@
  *      모듈 전체 경로 실측(2026-09-28 14:58, `bypassPreCommitHooks`+공백×n, 3회 중앙값):
  *      n=2,500/5,000/10,000/20,000 → 6.7/21.1/117.5/375.4ms. **같은 호출에서 classify 도 부르는
  *      호출자(L2 기록 경로 등)는 그 2차식 비용을 그대로 물려받는다** — 원본 행 수리는 후속.
- *  (9) 입력 길이·토큰 수 상한은 두지 않는다. 경로 정규화·토큰화·worktree 조각 제거·URL
- *      추출은 전부 입력에 선형이다(세그먼트 최대화 필러 스윕이 테스트에서 핀). 캡을 두면 캡을
+ *  (9) 입력 길이·토큰 수 상한은 두지 않는다. 경로 정규화·토큰화·worktree 조각 제거·셸
+ *      단어화·loopback 증명은 전부 입력에 선형이다(세그먼트 최대화 필러 스윕이 테스트에서 핀). 캡을 두면 캡을
  *      넘긴 토큰이 조용히 비보호가 되는 fail-open 이 되고, 캡 초과를 보호로 간주하면 긴
  *      정상 명령이 거짓 양성이 된다 — 선형이 증명된 동안은 어느 쪽 비용도 살 이유가 없다.
  *      2026-09-28 toPathSegments 가 reduce+spread 로 세그먼트 수에 2차식이었다(122,880B
@@ -74,15 +79,22 @@
  * ── 이 설계가 못 보는 것 ────────────────────────────────────────────────────
  *  1. Bash 간접 쓰기: 변수 확장(`$P/settings.json`, `$CLAUDE_CONFIG_DIR/…`), `node -e`·
  *     python·perl 이 파일을 쓰는 형, 심볼릭 링크·정션, 인코딩·이스케이프 우회(base64 | sh 등),
- *     cwd 가 `.claude/` 안일 때의 맨 이름(`cd` 가 같은 명령에 없으면), 스크립트 파일 실행.
+ *     cwd 가 `.claude/` 안일 때의 맨 이름(`cd` 가 같은 명령에 없거나, `cd` 와 맨 이름 사이가
+ *     192자 창을 넘으면 — 테스트 핀), cd 상태 추적은 문자열 창 근사라 `..` 로 `.claude` 에
+ *     되돌아가는 형은 worktree 조각 직후 `..` 만 본다, 스크립트 파일 실행. glob·brace 는
+ *     마지막 세그먼트만 본다 — 디렉터리 세그먼트 glob(`~/.cla*` + `/settings.json`,
+ *     `~/.claude/*` + `/hooks.json`)은 놓친다. `~/.claude.json`(호스트 전역 설정)은 보호
+ *     집합 밖이다.
  *  2. HG-07 정규식 3종 밖의 외부 쓰기: wget --post-*, httpie, python requests, `gh api -X POST`,
  *     `curl -d`(-X 없는 암묵 POST), `-X` 가 curl 뒤 192자를 넘는 형 — 매트릭스 적중이
  *     필요조건이므로 여기서도 안 보인다.
  *  3. 관리형(managed) settings 경로 [미확인] — OS 별 정책 경로는 보호 집합에 없다.
  *  4. 상대 경로의 pluginRoot 소속 판정 — 순수 함수라 cwd 를 모른다.
- *  5. 8.3 단축형과 긴 이름의 동일성 — 경로에 `.claude` 세그먼트가 없고 pluginRoot 와 표기가
- *     다르면(HEECHA~1 대 긴 이름) 놓친다. 파일시스템 조회 없이는 풀 수 없다.
- *  6. HG-13 의 다른 우회: `git commit -n`, `HUSKY=0`, `core.hooksPath` 변경 — 매트릭스 밖.
+ *  5. 경로 표기 차이 일반 — 경로에 `.claude` 세그먼트가 없고 pluginRoot 와 표기가 다르면
+ *     놓친다: 8.3 단축형(HEECHA~1 대 긴 이름), WSL `/mnt/c/…`, cygwin `/cygdrive/c/…`,
+ *     `\\?\` 확장 경로 접두, UNC·정션. msys `/c/…` 만 접는다. 파일시스템 조회 없이는 풀 수 없다.
+ *  6. HG-13 의 다른 우회: `git commit -n`, git 긴 옵션 약어(`--no-verif`·`--no-ver` — git 은
+ *     유일 접두 약어를 받는다), `HUSKY=0`, `core.hooksPath` 변경 — 매트릭스·플래그 매처 밖.
  *  7. 거짓 양성(강제 시 ask/deny): 커밋 메시지 속 `--no-verify`, curl `-o out.json` 이 아닌
  *     위치의 파일명·본문 속 도메인 모양 문자열, `.claude/` 를 읽고 다른 곳에 쓰는 체인.
  *  8. HG-13[2] 대체 매처는 구분자 17자 이상(`bypassPrePushHooks` 와 `true` 사이 공백·따옴표·
@@ -93,6 +105,7 @@
  */
 
 import { getGateRow, HUMAN_GATE_MATRIX } from './human-gates.js';
+import { curlProvenLoopbackOnly } from './human-gate-curl.js';
 
 /** 결정 어휘. 뒤로 갈수록 강하다(pass < record < ask < deny). */
 export const ENFORCE_DECISIONS = Object.freeze(['pass', 'record', 'ask', 'deny']);
@@ -144,11 +157,9 @@ export const EXEMPT_GIT_SUBCOMMANDS = Object.freeze(['show', 'diff', 'log']);
 /** git 면제 판정에서 건너뛰어도 되는 전역 옵션(`-C <path>` 는 인자를 하나 먹는다). `-c` 는 설정 주입이라 없다. */
 export const EXEMPT_GIT_GLOBAL_OPTIONS = Object.freeze(['--no-pager', '-P', '--no-optional-locks']);
 
-/** 값이 전송 대상이 아닌 curl 옵션 — 다음 토큰을 대상 후보에서 뺀다. 목록 밖 옵션 인자는 대상으로 본다. */
-export const CURL_VALUE_OPTIONS = Object.freeze([
-  '-X', '--request', '-H', '--header', '-d', '--data', '--data-raw', '--data-binary',
-  '--data-urlencode', '--json', '-F', '--form', '-o', '--output', '-u', '--user',
-  '-A', '--user-agent', '-w', '--write-out',
+/** B6 — `.claude` 디렉터리 자체가 인자여도 쓰지 않는 세그먼트 선두 동사(bare 이름만). */
+export const DIR_READ_VERBS = Object.freeze([
+  'cd', 'pushd', 'ls', 'stat', 'du', 'tree', 'cat', 'head', 'tail', 'grep', 'rg', 'echo', 'printf',
 ]);
 
 /** HG-07 patterns 중 loopback 완화를 받는 curl 행의 인덱스(테스트가 결합을 핀한다). */
@@ -169,23 +180,21 @@ export const ENFORCE_DEFAULTS = Object.freeze({
 
 /**
  * 이 모듈의 정규식 전부(ReDoS 카탈로그 등록 대상). 가변 길이 런은 전부 192 이하로 창
- * 제한이고, g·y 플래그가 없다(공유 lastIndex 상태 없음). BARE_* · IPV4_LOOPBACK 은 `^`
- * 앵커라 시작 위치가 하나다. BASH_* 는 슬래시로 정규화·소문자화한 명령에 댄다.
+ * 제한이고, g·y 플래그가 없다(공유 lastIndex 상태 없음). BASH_* 는 슬래시로 정규화·소문자화한
+ * 명령에 대고, `.claude` 뒤는 `/` 가 아니라 세그먼트 경계면 된다(`cd ~/.claude && cp p
+ * settings.json` — review2 B5). curl loopback 증명은 정규식이 아니라 human-gate-curl.js 의
+ * 문자열 상태기계다(카탈로그 밖 — 성능 증거는 human-gate-enforce-redos.test.js).
  * 내부 참조용 이름표이고, 외부 계약은 아래 ENFORCE_PATTERNS 배열이다.
  */
 const RE = Object.freeze({
-  BASH_HG12_PATH: /\.claude\/[^\n]{0,192}(?<![\w.-])(?:settings(?:\.local)?|hooks|dispatch-table)\.json(?![\w.-])/i,
-  BASH_HG13_PATH: /\.claude\/[^\n]{0,192}(?<![\w.-])artibot\.config\.json(?![\w.-])/i,
+  BASH_HG12_PATH: /\.claude(?![\w.-])[^\n]{0,192}(?<![\w.-])(?:settings(?:\.local)?|hooks|dispatch-table)\.json(?![\w.-])/i,
+  BASH_HG13_PATH: /\.claude(?![\w.-])[^\n]{0,192}(?<![\w.-])artibot\.config\.json(?![\w.-])/i,
   SKIP_PERMISSIONS_FLAG: /(?<![\w-])--dangerously-skip-permissions(?![\w-])/i,
   NO_VERIFY_FLAG: /(?<![\w-])--no-verify(?![\w-])/i,
   BYPASS_HOOKS_TRUE: /\bbypassPre(?:Commit|Push)Hooks["':=\s]{1,16}true\b/i,
   SHELL_CHAIN_META: /[;&|\n\r`>]|\$\(|<\(/,
   TOKEN_SEPARATOR: /[\s=<>|;&()'"`,]/,
   WHITESPACE: /\s/,
-  URL_AUTHORITY: /\b[a-z][a-z0-9+.-]{0,31}:\/\/([^\s/?#'"<>\\]{1,192})/i,
-  BARE_HOST: /^(?:localhost|[a-z0-9-]{1,63}\.[a-z0-9.-]{1,192})(?::\d{1,5})?(?:[/?#]|$)/i,
-  BARE_IPV6_HOST: /^\[[0-9a-f:.]{2,64}\](?::\d{1,5})?(?:[/?#]|$)/i,
-  IPV4_LOOPBACK: /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
 });
 
 /**
@@ -292,9 +301,9 @@ function gateIdChecker(matrixIds) {
  * @returns {string[]} 위반 목록. 빈 배열이면 통과
  */
 export function validateEnforceConfig(enforce, matrix = HUMAN_GATE_MATRIX) {
-  if (enforce === undefined) return [];
+  if (enforce === undefined) return Object.freeze([]);
   if (enforce === null || typeof enforce !== 'object' || Array.isArray(enforce)) {
-    return ['enforce: must be an object'];
+    return Object.freeze(['enforce: must be an object']);
   }
   const matrixIds = Array.isArray(matrix) ? matrix.map((row) => (row ? row.id : undefined)) : [];
   const gateErrors = Object.hasOwn(enforce, 'gates')
@@ -303,7 +312,7 @@ export function validateEnforceConfig(enforce, matrix = HUMAN_GATE_MATRIX) {
   const modeErrors = Object.hasOwn(enforce, 'askHonoredModes')
     ? checkStringList('enforce.askHonoredModes', enforce.askHonoredModes, () => null)
     : [];
-  return [...checkEnforceKeys(enforce), ...checkEnforceScalars(enforce), ...gateErrors, ...modeErrors];
+  return Object.freeze([...checkEnforceKeys(enforce), ...checkEnforceScalars(enforce), ...gateErrors, ...modeErrors]);
 }
 
 /**
@@ -433,6 +442,7 @@ function endsWorktreeName(ch) {
 
 /**
  * 정규화된 명령 문자열에서 `.claude/worktrees/<name>/` 조각을 지운다(선형 1회 순회).
+ * 조각 바로 뒤가 `..` 면 지우지 않는다 — `.claude/worktrees/x/../..` 는 `.claude` 로 되돌아간다(B5).
  * @param {string} text - 슬래시 정규화·소문자화된 명령
  * @returns {string}
  */
@@ -441,14 +451,46 @@ function stripWorktreeSpans(text) {
   let from = 0;
   let at = text.indexOf(WORKTREE_MARKER, from);
   while (at !== -1) {
-    parts.push(text.slice(from, at));
     let end = at + WORKTREE_MARKER.length;
     while (end < text.length && !endsWorktreeName(text[end])) end += 1;
-    from = text[end] === '/' ? end + 1 : end;
+    const next = text[end] === '/' ? end + 1 : end;
+    parts.push(text.slice(from, at), text.startsWith('..', next) ? text.slice(at, next) : '');
+    from = next;
     at = text.indexOf(WORKTREE_MARKER, from);
   }
   parts.push(text.slice(from));
   return parts.join('');
+}
+
+/** @param {string} word @returns {string} 경로 구분자 없는 소문자 동사, 구분자가 있으면 '' (N1) */
+function bareVerb(word) {
+  return word === undefined || word.includes('/') || word.includes('\\') ? '' : word.toLowerCase();
+}
+
+/** B6 — 토큰이 `.claude` 디렉터리 자체인가(`~/.claude`, `.claude/`, `.claude/.`). */
+function isClaudeDirToken(token) {
+  const segs = toPathSegments(token);
+  return segs[segs.length - 1] === '.claude';
+}
+
+/** B4 — 마지막 세그먼트가 glob·brace 이고 그 위에 `.claude` 가 있는가(보호 basename 으로 펼쳐질 수 있음). */
+function isClaudeGlobToken(token) {
+  const segs = toPathSegments(token);
+  const base = segs[segs.length - 1];
+  if (base === undefined || ![...'*?[{'].some((ch) => base.includes(ch))) return false;
+  return stripWorktreePrefix(segs).slice(0, -1).includes('.claude');
+}
+
+/** 세그먼트(셸 체인·리다이렉트 경계)마다 디렉터리·glob 규칙. 선두 동사가 DIR_READ_VERBS 면 건너뛴다. */
+function segmentGateIds(command) {
+  return command.split(RE.SHELL_CHAIN_META).flatMap((segment) => {
+    const words = segment.split(RE.WHITESPACE).filter((word) => word !== '');
+    if (words.length === 0 || DIR_READ_VERBS.includes(bareVerb(words[0]))) return [];
+    const tokens = commandTokens(segment);
+    const dirIds = tokens.some(isClaudeDirToken) ? ['HG-12'] : [];
+    const globIds = tokens.some(isClaudeGlobToken) ? ['HG-12', 'HG-13'] : [];
+    return [...dirIds, ...globIds];
+  });
 }
 
 /** @param {string} command @param {string|undefined} pluginRoot @returns {Set<string>} */
@@ -460,7 +502,7 @@ function bashPathGateIds(command, pluginRoot) {
   const windowIds = [['HG-12', RE.BASH_HG12_PATH], ['HG-13', RE.BASH_HG13_PATH]]
     .filter(([, re]) => re.test(stripped))
     .map(([id]) => id);
-  return new Set([...tokenIds, ...windowIds]);
+  return new Set([...tokenIds, ...windowIds, ...segmentGateIds(command)]);
 }
 
 /** @param {string} command @returns {Set<string>} */
@@ -503,8 +545,7 @@ function isInertBashCommand(command) {
   if (text === '' || RE.SHELL_CHAIN_META.test(text)) return false;
   const words = text.split(RE.WHITESPACE).filter((word) => word !== '');
   if (words.some(isWriteLeaningWord)) return false;
-  const leadSegs = words[0].split('\\').join('/').split('/');
-  const verb = leadSegs[leadSegs.length - 1].toLowerCase();
+  const verb = bareVerb(words[0]);
   if (verb === 'git') return EXEMPT_GIT_SUBCOMMANDS.includes(gitSubcommand(words.slice(1)));
   return EXEMPT_LEAD_VERBS.includes(verb);
 }
@@ -523,60 +564,12 @@ function analyzeBash(command, pluginRoot) {
 
 // ── HG-07 loopback ─────────────────────────────────────────────────────────
 
-/** @param {string} authority - `userinfo@host:port` @returns {string} 소문자 호스트 */
-function hostOfAuthority(authority) {
-  const hostPort = authority.slice(authority.lastIndexOf('@') + 1).toLowerCase();
-  if (hostPort.startsWith('[')) {
-    const close = hostPort.indexOf(']');
-    return close === -1 ? hostPort : hostPort.slice(1, close);
-  }
-  const colons = hostPort.split(':').length - 1;
-  return colons > 1 ? hostPort : hostPort.split(':')[0];
-}
-
-/** @param {string} token @returns {string[]} 토큰 안 스킴 URL 들의 authority */
-function urlAuthorities(token) {
-  const found = [];
-  let rest = token;
-  let match = RE.URL_AUTHORITY.exec(rest);
-  while (match !== null) {
-    found.push(match[1]);
-    rest = rest.slice(match.index + match[0].length);
-    match = RE.URL_AUTHORITY.exec(rest);
-  }
-  return found;
-}
-
-/** @param {string} token @returns {string[]} 이 토큰이 가리키는 대상 호스트 */
-function hostsInToken(token) {
-  const authorities = urlAuthorities(token);
-  if (authorities.length > 0) return authorities.map(hostOfAuthority);
-  if (!RE.BARE_HOST.test(token) && !RE.BARE_IPV6_HOST.test(token)) return [];
-  const cut = [...token].findIndex((ch) => ch === '/' || ch === '?' || ch === '#');
-  return [hostOfAuthority(cut === -1 ? token : token.slice(0, cut))];
-}
-
-/** @param {string} host @returns {boolean} */
-function isLoopbackHost(host) {
-  if (host === 'localhost' || host === '::1') return true;
-  return RE.IPV4_LOOPBACK.test(host) && host.split('.').every((octet) => Number(octet) <= 255);
-}
-
-/** @param {string} command @returns {boolean} 대상이 하나 이상이고 전부 loopback */
-function allTargetsLoopback(command) {
-  const tokens = commandTokens(command);
-  const hosts = tokens.flatMap((token, index) => (
-    index > 0 && CURL_VALUE_OPTIONS.includes(tokens[index - 1]) ? [] : hostsInToken(token)
-  ));
-  return hosts.length > 0 && hosts.every(isLoopbackHost);
-}
-
 /** @param {string} command @returns {boolean} */
 function hg07InScope(command) {
   const patterns = getGateRow('HG-07').patterns;
   const alwaysProtected = patterns.filter((_, index) => index !== HG07_CURL_PATTERN_INDEX);
   if (alwaysProtected.some((re) => re.test(command))) return true;
-  return !allTargetsLoopback(command);
+  return !curlProvenLoopbackOnly(command);
 }
 
 // ── 판정 ───────────────────────────────────────────────────────────────────
@@ -624,19 +617,19 @@ function rowPatterns(row) {
  * 그 2차식을 차단 경로로 물려받지 않기 위해서다. 정상 입력에서 classify 와의 동치는 테스트가 핀.
  *
  * @param {{tool?: string, command?: string, path?: string}} [input]
- * @returns {string[]}
+ * @returns {ReadonlyArray<string>} frozen
  */
 export function evaluateMatrix(input) {
-  if (input === null || typeof input !== 'object') return [];
+  if (input === null || typeof input !== 'object') return Object.freeze([]);
   const tool = isNonEmptyString(input.tool) ? input.tool : null;
   const request = { command: stringOrUndefined(input.command), path: stringOrUndefined(input.path) };
-  return HUMAN_GATE_MATRIX
+  return Object.freeze(HUMAN_GATE_MATRIX
     .filter((row) => row.patterns.length > 0 && (tool === null || row.tools.includes(tool)))
     .filter((row) => {
       const probes = rowProbes(row, request);
       return rowPatterns(row).some((pattern) => probes.some((probe) => pattern.test(probe)));
     })
-    .map((row) => row.id);
+    .map((row) => row.id));
 }
 
 /** 매트릭스 적중 ∪ Bash 토큰 탐지를 매트릭스 순서로. */
