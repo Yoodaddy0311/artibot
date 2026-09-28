@@ -64,15 +64,20 @@
  * - Whether `tests/autopilot/**` is still the set of files that touch git
  *   worktrees. A worktree-touching test written outside that glob is invisible
  *   here.
- * - Runs that never load this config at all. The repository root carries its
- *   own delegating `vitest.config.js` with `test.root: 'plugins/artibot'`,
- *   `test.include: ['tests/**\/*.test.js']` and NO `projects` array (read
- *   2026-09-21), so a bare `npx vitest` from the root collects the autopilot
- *   files with no autopilot project and none of this serialisation. CI is
- *   unaffected because it runs with `working-directory: plugins/artibot`.
+ * - Runs that load neither config. The repository root has its own
+ *   `vitest.config.js`, which vitest picks when started there (including
+ *   `npm --prefix plugins/artibot exec -- vitest`, since npm exec keeps the
+ *   caller's cwd). Until 2026-09-28 that file was a hand-written copy with NO
+ *   `projects` array, so root-started runs collected the autopilot files with
+ *   none of this serialisation. It now re-exports this config with an absolute
+ *   `test.root`, and the real-config pin below runs against it too; that it
+ *   resolves to the same projects is `tests/firewall/vitest-root-config.test.js`.
+ *   A run given another `--config` is invisible here. CI runs with
+ *   `working-directory: plugins/artibot`.
  */
 import { describe, expect, it } from 'vitest';
 
+import rootVitestConfig from '../../../../vitest.config.js';
 import vitestConfig from '../../vitest.config.js';
 
 /**
@@ -144,6 +149,10 @@ export function findAutopilotSerialViolations(config) {
 describe('vitest autopilot project runs files serially', () => {
   it('pins the live spelling in the real config', () => {
     expect(findAutopilotSerialViolations(vitestConfig)).toEqual([]);
+  });
+
+  it('pins the same spelling in the repo-root config', () => {
+    expect(findAutopilotSerialViolations(rootVitestConfig)).toEqual([]);
   });
 
   it('keeps the autopilot glob pointed at the worktree-touching suite', () => {
