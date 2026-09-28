@@ -88,6 +88,21 @@ function normalizeThresholds(src) {
 }
 
 /**
+ * Union two `thresholdsFired` values per unit. A fired line is never un-fired
+ * — `checkBudgetThreshold` is the only writer and only adds — so the union is
+ * what both copies agree has already been announced.
+ * @param {unknown} a
+ * @param {unknown} b
+ * @returns {{tokens:number[], usd:number[]}}
+ */
+export function unionThresholdsFired(a, b) {
+  const x = normalizeThresholds(a);
+  const y = normalizeThresholds(b);
+  const merge = (p, q) => [...new Set([...p, ...q])].sort((m, n) => m - n);
+  return { tokens: merge(x.tokens, y.tokens), usd: merge(x.usd, y.usd) };
+}
+
+/**
  * Return a normalized state.usage container, creating empty defaults when
  * absent or malformed. Never mutates the input.
  * @param {object|null|undefined} state

@@ -11,7 +11,7 @@
  * @module lib/autopilot/_engine-helpers
  */
 
-import { newSessionId, saveSession } from './session-store.js';
+import { loadSession, newSessionId, saveSession } from './session-store.js';
 import { observePreIntake } from './auto-wire.js';
 import { findUnterminatedPhases } from './replay.js';
 import { reconcileAttemptOnResume } from './phase-attempt.js';
@@ -67,7 +67,7 @@ export async function releaseSessionKeepAwake(sessionId) {
   try { await handle.release(); } catch { /* best-effort */ }
 }
 import { shouldActivateTui } from './tui.js';
-import { recordPhaseUsage } from './cost-tracker.js';
+import { recordPhaseUsage, unionThresholdsFired } from './cost-tracker.js';
 import { budgetStatus, normalizeBudget } from './safety.js';
 
 /**
@@ -210,13 +210,39 @@ export function recordPhase(state, phase) {
 
 /**
  * Persist a state mutation safely. Returns the saved state.
+ *
+ * Carries the disk's `usage.thresholdsFired` into the write (AP-N2).
+ * `checkBudgetThreshold(sessionId)` records a fired line on the FILE only, so
+ * a whole-state write from the live object erased it and the 95% danger
+ * notice fired again on every phase. The union is safe because a fired line
+ * is never un-fired; nothing else in `usage` is merged.
+ *
  * @param {object} state
  * @returns {object}
  */
 export function persist(state) {
   state.updatedAt = new Date().toISOString();
+  keepFiredThresholds(state);
   saveSession(state);
   return state;
+}
+
+/**
+ * Union the on-disk `usage.thresholdsFired` into the live state. Only when the
+ * live state already holds `usage`; best-effort, never throws.
+ * @param {object} state - live session state (mutated)
+ * @returns {void}
+ */
+function keepFiredThresholds(state) {
+  try {
+    if (!state.usage || typeof state.usage !== 'object') return;
+    const onDisk = loadSession(state.sessionId)?.usage?.thresholdsFired;
+    if (!onDisk) return;
+    state.usage = {
+      ...state.usage,
+      thresholdsFired: unionThresholdsFired(state.usage.thresholdsFired, onDisk),
+    };
+  } catch { /* a missed merge must never block the save itself */ }
 }
 
 /**
@@ -293,15 +319,52 @@ export function notePhaseProgress(state, fromPhase, toPhase, durationMs = null) 
  * Silent no-op on invalid input or persistence failure — cost tracking is
  * advisory and must never block the engine.
  *
+ * Mutates `state.usage` (AP-N2). `recordPhaseUsage` writes through its own
+ * load of the session file, and the caller keeps persisting the object it
+ * holds — `recordCheckpoint`, `recordPhaseResult`, `checkBudgetGate` all
+ * rewrite the whole file from it. Left stale, the first such write erased the
+ * usage just recorded, and a budget-exhausted session was handed its next
+ * EXECUTE. So the live object takes the disk's usage whenever the disk is
+ * known to hold it: after a successful write, and on a duplicate receipt
+ * (nothing written, but the disk already carries that receipt's usage). A
+ * failed write — or any throw between the load and the write — mirrors
+ * nothing, since the disk never changed.
+ *
+ * Limitation of this contract: only the object passed here is refreshed. A
+ * driver that persists a different copy of the session is not protected.
+ *
  * @param {object} state - live session state (must expose sessionId)
  * @param {string} phase - canonical phase label (e.g. 'EXECUTE')
- * @param {{tokensIn?:number, tokensOut?:number, costUsd?:number, model?:string}} usage
+ * @param {{tokensIn?:number, tokensOut?:number, costUsd?:number, model?:string,
+ *          receiptId?:string}} usage
+ * @param {{loadSession?:Function, saveSession?:Function}} [deps] - test seam
  * @returns {object|null} delta applied or null on failure
  */
-export function notePhaseCost(state, phase, usage) {
+export function notePhaseCost(state, phase, usage, deps = {}) {
   try {
     if (!state || typeof state !== 'object' || !state.sessionId) return null;
-    return recordPhaseUsage(state.sessionId, phase, usage);
+    const load = typeof deps.loadSession === 'function' ? deps.loadSession : loadSession;
+    const save = typeof deps.saveSession === 'function' ? deps.saveSession : saveSession;
+    const receiptId = typeof usage?.receiptId === 'string' && usage.receiptId.length > 0
+      ? usage.receiptId : null;
+    let loaded = null;
+    let duplicate = false;
+    let saveAttempted = false;
+    let saved = false;
+    const delta = recordPhaseUsage(state.sessionId, phase, usage, {
+      loadSession: (id) => {
+        loaded = load(id);
+        const receipts = loaded?.usage?.receipts;
+        duplicate = receiptId !== null && Array.isArray(receipts) && receipts.includes(receiptId);
+        return loaded;
+      },
+      saveSession: (s) => { saveAttempted = true; save(s); saved = true; },
+    });
+    if ((saved || (duplicate && !saveAttempted))
+      && loaded?.usage && typeof loaded.usage === 'object') {
+      state.usage = loaded.usage;
+    }
+    return delta;
   } catch {
     return null;
   }
