@@ -75,8 +75,8 @@ import path from 'node:path';
 import {
   CATALOG_VERSION,
   getPricing,
-  MODELS,
   PRICING_VERSION,
+  tierForModelId,
 } from '../core/model-catalog.js';
 
 /**
@@ -121,20 +121,6 @@ const SYNTHETIC_MODEL = '<synthetic>';
  * @type {readonly string[]}
  */
 const REQUIRED_USAGE_KEYS = Object.freeze(['input_tokens', 'output_tokens']);
-
-/**
- * Reverse index: exact catalog model id -> Artibot tier alias.
- * Built once from {@link MODELS} so `tier` is never inferred from the id text.
- * Each tier's `legacyIds` map to the same tier as its current `id`, so a
- * transcript written before an id change (e.g. `claude-opus-5`) still resolves;
- * they are exact strings too, never prefixes.
- * @type {Map<string, string>}
- */
-const ID_TO_TIER = new Map(
-  Object.entries(MODELS).flatMap(([tier, spec]) =>
-    [spec.id, ...(spec.legacyIds ?? [])].map((id) => [id, tier]),
-  ),
-);
 
 /**
  * Empty result. Returned whenever nothing readable was found, so a caller can
@@ -320,12 +306,14 @@ function splitModelId(raw) {
 /**
  * Resolve a transcript model string to a schema-valid `model_identity`.
  *
- * `tier` comes from a reverse lookup against the catalog, never from parsing
- * the id text, so a model the catalog does not know yields null rather than a
- * plausible-looking guess. `version` is the qualifier observed in the
- * transcript (snapshot date and/or context variant, joined with `+`); when the
- * transcript carries no qualifier the id itself is the only version pointer
- * that exists, so it is repeated there rather than invented.
+ * `tier` comes from the catalog's exact-id lookup (`tierForModelId`: a tier's
+ * `id` or one of its `legacyIds`, so a pre-switch `claude-opus-5` still
+ * resolves), never from parsing the id text, so a model the catalog does not
+ * know yields null rather than a plausible-looking guess. `version` is the
+ * qualifier observed in the transcript (snapshot date and/or context variant,
+ * joined with `+`); when the transcript carries no qualifier the id itself is
+ * the only version pointer that exists, so it is repeated there rather than
+ * invented.
  *
  * @param {unknown} rawModelId - `message.model`.
  * @returns {{provider: string, family: string, tier: string, model_id: string,
@@ -335,7 +323,7 @@ export function resolveModelIdentity(rawModelId) {
   if (typeof rawModelId !== 'string' || rawModelId.length === 0) return null;
 
   const { base, qualifiers } = splitModelId(rawModelId);
-  const tier = ID_TO_TIER.get(base);
+  const tier = tierForModelId(base);
   if (!tier) return null;
 
   return {
@@ -793,7 +781,7 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
         latency_ms: group.maxTs - group.minTs,
       },
       outcome: normaliseOutcome(outcomes[group.runId]),
-      // Identity came from the exact-id reverse index, so `tier` is a catalog
+      // Identity came from the catalog's exact-id lookup, so `tier` is a catalog
       // key or the group would not exist — priceUsage's unknown-tier branch is
       // unreachable from here, and is kept for direct callers.
       // Allowlist-of-one on the OPT-OUT side: only the literal `false` skips

@@ -4,7 +4,8 @@
  * `lib/core/model-catalog.js` is the single price table. Three modules read it
  * and each one reshapes the numbers on the way out:
  *
- *   - `lib/runtime/middleware/cache-roi.js`   per-MTok, substring model match
+ *   - `lib/runtime/middleware/cache-roi.js`   per-MTok, exact id, else unpriced
+ *                                             claude-*, else substring
  *   - `lib/economics/usage-receipt.js`        per-MTok, exact-id reverse index
  *   - `lib/routing/route-hysteresis.js`       per-TOKEN (per-MTok / 1e6)
  *
@@ -179,19 +180,18 @@ describe('pricing parity: same input -> same tier', () => {
     }
   });
 
-  it('they diverge ONLY off-catalog, by design: ledger fails closed, roll-up fails open', () => {
-    // A retired id. The receipt is the ledger writer: an unknown id yields no
-    // identity at all rather than a plausible guess, so no ledger row can carry
-    // a price nobody verified. cache-roi is a session roll-up: it matches the
-    // substring and keeps accounting. Both behaviours are correct FOR THEIR
-    // MODULE — this `it` exists so a reader does not "fix" one to match the
-    // other. See cache-roi.js#resolvePricing JSDoc.
+  it('both refuse to price an off-catalog claude id; they diverge only on non-claude strings', () => {
+    // A retired id. Neither reader guesses its price from the current tier
+    // row. The receipt (ledger writer) yields no identity at all; cache-roi
+    // (session roll-up) returns unpriced (null), and its session counts the
+    // request in unpricedRequestCount instead of adding dollars.
+    // See cache-roi.js#resolvePricing JSDoc.
     expect(resolveModelIdentity('claude-opus-4-8')).toBeNull();
-    expect(_resolvePricing('claude-opus-4-8').tier).toBe('opus');
+    expect(_resolvePricing('claude-opus-4-8')).toBeNull();
 
-    // A non-Anthropic id: the receipt still refuses, cache-roi falls back to
-    // UNKNOWN_FALLBACK_TIER ('sonnet'). The fallback picks a TIER; it never
-    // invents a price, because the price still comes from the catalog row.
+    // A non-Anthropic id: the receipt still refuses, while cache-roi keeps its
+    // substring match and falls back to UNKNOWN_FALLBACK_TIER ('sonnet'). The
+    // fallback picks a TIER; the price still comes from the catalog row.
     expect(resolveModelIdentity('gpt-4')).toBeNull();
     expect(_resolvePricing('gpt-4').tier).toBe('sonnet');
   });

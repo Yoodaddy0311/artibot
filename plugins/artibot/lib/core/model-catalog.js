@@ -68,7 +68,9 @@ export const BASELINE_TIER = 'opus';
  *
  * 2026-09-28 bump: opus `thinkingMode` moved from `adaptive` to `always-on`
  * (Opus 5.5 thinking cannot be disabled). Prices changed the same day and are
- * stamped separately by {@link PRICING_VERSION}.
+ * stamped separately by {@link PRICING_VERSION}. Same day, same stamp: haiku
+ * `thinkingMode` moved to `extended` (budget_tokens only, no adaptive) and
+ * sonnet `outLimit` moved from 64_000 to 128_000, both per the claude-api skill.
  *
  * @type {string}
  */
@@ -144,6 +146,12 @@ export const PRICING_SOURCE =
  * id may appear twice across all tiers' `id` + `legacyIds` (pinned in
  * `tests/core/model-catalog.test.js`).
  *
+ * `thinkingMode` names the request shape a tier accepts: `adaptive` =
+ * `{type:'adaptive'}` and thinking can be disabled; `always-on` = adaptive
+ * only, disabling and `budget_tokens` are rejected; `extended` =
+ * `{type:'enabled', budget_tokens}` only, no adaptive. The set is pinned in
+ * `tests/core/model-catalog.test.js`.
+ *
  * @type {Readonly<Record<string, Readonly<{
  *   id: string,
  *   legacyIds: readonly string[],
@@ -157,7 +165,7 @@ export const PRICING_SOURCE =
  *   tokenizerCoeffMeasured: boolean,
  *   ctxLimit: number,
  *   outLimit: number,
- *   thinkingMode: 'adaptive'|'always-on',
+ *   thinkingMode: 'adaptive'|'always-on'|'extended',
  *   promptStyle: 'prescriptive'|'declarative',
  *   constraints: readonly string[]
  * }>>>}
@@ -176,7 +184,9 @@ export const MODELS = deepFreeze({
     tokenizerCoeffMeasured: false,
     ctxLimit: 200_000,
     outLimit: 64_000,
-    thinkingMode: 'adaptive',
+    // Haiku 4.5 has no adaptive thinking: {type:'enabled', budget_tokens} only
+    // (claude-api skill, Thinking & Effort).
+    thinkingMode: 'extended',
     promptStyle: 'prescriptive',
     constraints: [],
   },
@@ -197,7 +207,8 @@ export const MODELS = deepFreeze({
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
-    outLimit: 64_000,
+    // 128K max output (claude-api skill shared/models.md, Sonnet 5 row).
+    outLimit: 128_000,
     thinkingMode: 'adaptive',
     promptStyle: 'prescriptive',
     constraints: [],

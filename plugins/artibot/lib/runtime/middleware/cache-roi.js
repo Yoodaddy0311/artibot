@@ -41,12 +41,17 @@ import { emit } from '../../core/event-bus.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Tier whose prices are used when a model string matches no known tier.
+ * Tier whose prices are used when a NON-claude model string matches no known
+ * tier (a role alias like `frontier`, a backend id, `gpt-4`, empty input).
  *
  * Chosen as `sonnet` because the deleted table's `unknown` row was numerically
  * identical to its `sonnet` row, so unknown models keep their prior relative
- * behaviour. The catalog is guaranteed to carry this tier; a null here would
- * be a catalog bug, and failing loudly beats silently pricing at zero.
+ * behaviour. The catalog is expected to carry this tier. If it ever did not,
+ * the fallback would NOT throw: it would surface as unpriced, i.e. a rising
+ * `unpricedRequestCount` — never as a $0 price.
+ *
+ * An off-catalog `claude-*` id never reaches this fallback: it is unpriced
+ * (see {@link resolvePricing}).
  */
 export const UNKNOWN_FALLBACK_TIER = 'sonnet';
 
@@ -62,38 +67,43 @@ function bareModelId(model) {
 }
 
 /**
- * Resolve catalog prices for an arbitrary model string: EXACT catalog id
- * first, then SUBSTRING match on the tier name.
+ * Resolve catalog prices for an arbitrary model string, in three steps:
  *
- * Exact id first (2026-09-28): one tier can hold ids with different official
- * prices — `claude-opus-5` (legacy, Claude Opus 5 row) and `claude-opus-5-5`
- * (current, Opus 5.5 tier row) both contain `opus`. After stripping `[1m]` /
- * a snapshot date, a string that is a catalog model id (current or legacy,
- * `model-catalog.js#tierForModelId`) prices at that id's row via `getPricing`.
- * Tier names and role aliases are not model ids and skip this step, so they
- * resolve exactly as before.
+ *   1. EXACT catalog id. After {@link bareModelId} strips `[1m]` / a snapshot
+ *      date and lower-cases, a current or legacy catalog id
+ *      (`model-catalog.js#tierForModelId`) prices at that id's own row via
+ *      `getPricing`. One tier can hold ids with different official prices —
+ *      `claude-opus-5` (legacy, Claude Opus 5 row) vs `claude-opus-5-5`
+ *      (current, Opus 5.5 tier row) — so the id, not the tier, picks the row.
+ *   2. UNPRICED. A bare id matching `/^claude-/` that step 1 did not find
+ *      (e.g. `claude-opus-4-8`, `claude-sonnet-4-6`) returns null. It is an
+ *      Anthropic model with an official price this catalog does not carry;
+ *      the current tier row would be a guess, and for older ids a low one.
+ *      Callers keep the request in the counts and out of the dollar sums.
+ *   3. Anything else is not a model id — a tier alias (`opus`), a role alias
+ *      (`frontier`), a backend id, another vendor's id — and keeps the
+ *      SUBSTRING match on the tier name, then {@link UNKNOWN_FALLBACK_TIER}.
  *
- * Why substring stays as the fallback: the inputs are heterogeneous. The
- * model string reaching this middleware comes from `resolveModel` below, whose
- * best source is `state.context.backend.selected` — that can be a tier alias
- * (`opus`), a current catalog id (`claude-opus-5-5`), or an older id the
- * catalog no longer lists (`claude-opus-4-8`). An exact-id lookup alone would
- * drop the third case onto the fallback row.
+ * Where the string comes from: {@link resolveModel}. Its first source,
+ * `state.context.backend.selected`, is a BACKEND id, not a model id —
+ * `create-artibot-agent.js` sets it to `selectedBackend?.id || 'local'`, after
+ * this middleware's phase has run. The only paths by which a model id arrives
+ * are `state.config.modelPolicy.default` and `state.response.model`.
  *
- * This asymmetry with `lib/economics/usage-receipt.js` is deliberate, not an
- * oversight: that module is the LEDGER writer and fails CLOSED through an
- * exact-id reverse index, because a ledger row must never carry a guessed
- * price. This one is best-effort accounting for a session roll-up and fails
- * OPEN to {@link UNKNOWN_FALLBACK_TIER}. Now that both read the same catalog,
- * the asymmetry only decides WHICH tier is picked — never what a tier costs.
+ * `lib/economics/usage-receipt.js` is the LEDGER writer and fails closed for
+ * every id outside its exact-id index. This roll-up now fails closed for
+ * off-catalog claude ids too, and stays best-effort (step 3) only for strings
+ * that are not model ids at all.
  *
  * @param {string} model - Model id, tier alias, or anything at all.
- * @returns {object} Frozen catalog pricing row (see model-catalog#getPricing).
+ * @returns {object|null} Frozen catalog pricing row (see
+ *   model-catalog#getPricing), or null for an unpriced claude id.
  */
 function resolvePricing(model) {
   if (!model || typeof model !== 'string') return getPricing(UNKNOWN_FALLBACK_TIER);
   const bare = bareModelId(model);
   if (tierForModelId(bare) !== null) return getPricing(bare);
+  if (/^claude-/.test(bare)) return null;
   const lower = model.toLowerCase();
   if (lower.includes('fable')) return getPricing('fable');
   if (lower.includes('opus')) return getPricing('opus');
@@ -160,19 +170,23 @@ export function computeCacheMetrics(usage, model, nowFn = Date.now) {
   const hitRate = totalInputSide > 0 ? cacheReadTokens / totalInputSide : 0;
   const pricing = resolvePricing(model);
 
-  const savedCostUsd =
-    (cacheReadTokens / 1_000_000) * (pricing.input - pricing.cacheRead);
+  // Unpriced model: token counts and hitRate stand, every dollar field and
+  // the version stamp are null — a stamp would claim a table priced it.
+  const savedCostUsd = pricing
+    ? (cacheReadTokens / 1_000_000) * (pricing.input - pricing.cacheRead)
+    : null;
   // `cache_creation_input_tokens` is priced at the 5-MINUTE write rate. The
   // Anthropic usage payload does not distinguish 1-hour writes from 5-minute
   // ones through this single counter, and the 1-hour rate is higher (catalog
   // `cacheWrite1h` = 2x input vs `cacheWrite5m` = 1.25x input, so 1.6x the
   // 5-minute rate). `spentCostUsd` is therefore a LOWER BOUND whenever a
   // 1-hour TTL is in play, not an exact charge.
-  const spentCostUsd =
-    (cacheReadTokens / 1_000_000) * pricing.cacheRead +
-    (cacheCreationTokens / 1_000_000) * pricing.cacheWrite5m +
-    (inputTokens / 1_000_000) * pricing.input +
-    (outputTokens / 1_000_000) * pricing.output;
+  const spentCostUsd = pricing
+    ? (cacheReadTokens / 1_000_000) * pricing.cacheRead +
+      (cacheCreationTokens / 1_000_000) * pricing.cacheWrite5m +
+      (inputTokens / 1_000_000) * pricing.input +
+      (outputTokens / 1_000_000) * pricing.output
+    : null;
 
   return Object.freeze({
     cacheReadTokens,
@@ -185,8 +199,8 @@ export function computeCacheMetrics(usage, model, nowFn = Date.now) {
     savedCostUsd,
     spentCostUsd,
     model: model || 'unknown',
-    pricingTier: pricing.tier,
-    pricingVersion: PRICING_VERSION,
+    pricingTier: pricing ? pricing.tier : null,
+    pricingVersion: pricing ? PRICING_VERSION : null,
     timestamp: new Date(nowFn()).toISOString(),
   });
 }
@@ -206,11 +220,18 @@ export function createEmptySession() {
     cumulativeSpentUsd: 0,
     hitRate: 0,
     requestCount: 0,
+    unpricedRequestCount: 0,
     updatedAt: new Date(0).toISOString(),
   });
 }
 
+/**
+ * Fold one metric into the session. An unpriced metric (null dollars) counts
+ * in `requestCount`, the token totals and `unpricedRequestCount`, and adds
+ * nothing to the dollar sums — `0 + null` would silently add it as $0.
+ */
 export function foldMetrics(session, metrics) {
+  const priced = metrics.spentCostUsd !== null;
   const totalCacheReadTokens = session.totalCacheReadTokens + metrics.cacheReadTokens;
   const totalCacheCreationTokens = session.totalCacheCreationTokens + metrics.cacheCreationTokens;
   const totalInputTokens = session.totalInputTokens + metrics.inputTokens;
@@ -224,10 +245,11 @@ export function foldMetrics(session, metrics) {
     totalInputTokens,
     totalOutputTokens,
     totalThinkingTokens,
-    cumulativeSavedUsd: session.cumulativeSavedUsd + metrics.savedCostUsd,
-    cumulativeSpentUsd: session.cumulativeSpentUsd + metrics.spentCostUsd,
+    cumulativeSavedUsd: session.cumulativeSavedUsd + (priced ? metrics.savedCostUsd : 0),
+    cumulativeSpentUsd: session.cumulativeSpentUsd + (priced ? metrics.spentCostUsd : 0),
     hitRate: denom > 0 ? totalCacheReadTokens / denom : 0,
     requestCount: session.requestCount + 1,
+    unpricedRequestCount: (session.unpricedRequestCount ?? 0) + (priced ? 0 : 1),
     updatedAt: metrics.timestamp,
   });
 }
@@ -326,8 +348,11 @@ export function createCacheRoiMiddleware(options = {}) {
       state.messageParts.push(`cache=${(metrics.hitRate * 100).toFixed(0)}%`);
     }
 
+    const saved = metrics.savedCostUsd === null
+      ? 'unpriced'
+      : `$${metrics.savedCostUsd.toFixed(4)}`;
     emit('feature:cache-roi', {
-      detail: `hit=${(metrics.hitRate * 100).toFixed(0)}% saved=$${metrics.savedCostUsd.toFixed(4)}`,
+      detail: `hit=${(metrics.hitRate * 100).toFixed(0)}% saved=${saved}`,
     });
 
     return state;

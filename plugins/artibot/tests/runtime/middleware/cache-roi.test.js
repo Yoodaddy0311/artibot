@@ -1,5 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getLastEvent } from '../../../lib/core/event-bus.js';
 import { getPricing, PRICING_VERSION } from '../../../lib/core/model-catalog.js';
 import {
   _extractUsage,
@@ -94,9 +97,10 @@ describe('cache-roi pricing source', () => {
 // ---------------------------------------------------------------------------
 
 describe('_resolvePricing', () => {
-  it('matches fable / opus / sonnet / haiku by substring when no exact id matches', () => {
-    expect(_resolvePricing('claude-fable-5')).toEqual(getPricing('fable'));
-    expect(_resolvePricing('claude-opus-x')).toEqual(getPricing('opus'));
+  it('never sends a claude-* id to the substring step: exact ids resolve, off-catalog ones are unpriced', () => {
+    // Off-catalog claude-* ids no longer reach the substring step: unpriced.
+    expect(_resolvePricing('claude-fable-5')).toBeNull();
+    expect(_resolvePricing('claude-opus-x')).toBeNull();
     expect(_resolvePricing('claude-sonnet-5')).toEqual(getPricing('sonnet'));
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('haiku'));
   });
@@ -129,12 +133,9 @@ describe('_resolvePricing', () => {
     expect(_resolvePricing('opus')).toEqual(getPricing('opus'));
   });
 
-  it('resolves older IDs the catalog does not list, e.g. claude-opus-4-8', () => {
-    const p = _resolvePricing('claude-opus-4-8');
-    expect(p.tier).toBe('opus');
-    expect(p.input).toBe(getPricing('opus').input);
-    expect(p.output).toBe(getPricing('opus').output);
-    expect(_resolvePricing('claude-opus-4-7').tier).toBe('opus');
+  it('leaves older IDs the catalog does not list unpriced, e.g. claude-opus-4-8', () => {
+    expect(_resolvePricing('claude-opus-4-8')).toBeNull();
+    expect(_resolvePricing('claude-opus-4-7')).toBeNull();
   });
 
   it('prices fable input at 2.5x opus and fable cache read at only 1.25x opus (0.025x vs 0.05x rules)', () => {
@@ -161,7 +162,8 @@ describe('_resolvePricing', () => {
   });
 
   it('is case-insensitive', () => {
-    expect(_resolvePricing('CLAUDE-OPUS-X')).toEqual(getPricing('opus'));
+    expect(_resolvePricing('CLAUDE-OPUS-X')).toBeNull();
+    expect(_resolvePricing('CLAUDE-OPUS-5-5')).toEqual(getPricing('opus'));
   });
 
   it('exposes a derived _PRICING compat view keyed by tier plus unknown', () => {
@@ -176,6 +178,36 @@ describe('_resolvePricing', () => {
     expect(_PRICING.opus.input).toBe(4);
     expect(_PRICING.haiku.cacheWrite).toBe(1.25);
     expect(Object.isFrozen(_PRICING)).toBe(true);
+  });
+});
+
+// An off-catalog claude-* id has an official price this module does not know.
+// Estimating it from the current tier row under-bills it (claude-opus-4-8 at
+// the Opus 5.5 row), so it resolves to no price at all. Everything else —
+// exact catalog ids and non-claude strings — must resolve exactly as before.
+describe('_resolvePricing: off-catalog claude-* ids are unpriced', () => {
+  it.each([
+    'claude-opus-4-8',
+    'claude-sonnet-4-6',
+    'CLAUDE-OPUS-4-8[1m]',
+    'claude-opus-4-8-20250101',
+  ])('%s resolves to null, not a tier row', (model) => {
+    expect(_resolvePricing(model)).toBeNull();
+  });
+
+  it.each([
+    ['claude-opus-5-5', 'opus'],
+    ['claude-opus-5-5[1m]', 'opus'],
+    ['claude-opus-5-5-20260101', 'opus'],
+    ['claude-opus-5', 'claude-opus-5'],
+    ['opus', 'opus'],
+    ['frontier', 'sonnet'],
+    ['my-opus-proxy', 'opus'],
+    ['gpt-4', 'sonnet'],
+    ['', 'sonnet'],
+    [null, 'sonnet'],
+  ])('%s keeps its catalog row (%s)', (model, key) => {
+    expect(_resolvePricing(model)).toEqual(getPricing(key));
   });
 });
 
@@ -240,6 +272,17 @@ describe('computeCacheMetrics', () => {
     expect(blank.pricingTier).toBe('sonnet');
     expect(blank.model).toBe('unknown');
     expect(blank.spentCostUsd).toBeCloseTo(14.7, 6);
+  });
+
+  it('leaves an off-catalog claude id unpriced: tokens counted, dollars and stamp null', () => {
+    const m = computeCacheMetrics(ONE_M_EACH, 'claude-opus-4-8', nowFn);
+    expect(m.savedCostUsd).toBeNull();
+    expect(m.spentCostUsd).toBeNull();
+    expect(m.pricingTier).toBeNull();
+    expect(m.pricingVersion).toBeNull();
+    expect(m.cacheReadTokens).toBe(1_000_000);
+    expect(m.hitRate).toBeCloseTo(1 / 3, 10);
+    expect(m.model).toBe('claude-opus-4-8');
   });
 
   it('stamps the catalog pricing version on every metric', () => {
@@ -312,8 +355,29 @@ describe('foldMetrics', () => {
       'totalInputTokens',
       'totalOutputTokens',
       'totalThinkingTokens',
+      'unpricedRequestCount',
       'updatedAt',
     ]);
+  });
+
+  it('counts an unpriced metric and keeps it out of the dollar sums', () => {
+    const unpriced = { ...sample, savedCostUsd: null, spentCostUsd: null };
+    const s1 = foldMetrics(foldMetrics(createEmptySession(), sample), unpriced);
+    expect(s1.requestCount).toBe(2);
+    expect(s1.unpricedRequestCount).toBe(1);
+    expect(s1.totalCacheReadTokens).toBe(200);
+    // Exactly the priced sample's dollars, never NaN or null. The unpriced
+    // request shows up in unpricedRequestCount, not as a $0 entry.
+    expect(s1.cumulativeSavedUsd).toBe(sample.savedCostUsd);
+    expect(s1.cumulativeSpentUsd).toBe(sample.spentCostUsd);
+  });
+
+  it('treats a session persisted before unpricedRequestCount existed as 0', () => {
+    const { unpricedRequestCount, ...legacy } = createEmptySession();
+    expect(unpricedRequestCount).toBe(0);
+    const unpriced = { ...sample, savedCostUsd: null, spentCostUsd: null };
+    expect(foldMetrics(legacy, unpriced).unpricedRequestCount).toBe(1);
+    expect(foldMetrics(legacy, sample).unpricedRequestCount).toBe(0);
   });
 
   it('hitRate stays 0 when denominator is 0', () => {
@@ -344,16 +408,23 @@ describe('resolveSessionPath', () => {
 });
 
 describe('persistSession', () => {
+  // Every write goes under a fresh OS temp dir. process.cwd() is the repo root
+  // under `npm --prefix <plugin> exec`, where runtime/cache-roi-session.json is
+  // a tracked file, and '/tmp/...' is C:\tmp on Windows — both leaked.
+  let sandbox;
+  beforeEach(() => { sandbox = mkdtempSync(path.join(os.tmpdir(), 'cache-roi-')); });
+  afterEach(() => { rmSync(sandbox, { recursive: true, force: true }); });
+
   it('returns true for a writable path (best-effort)', async () => {
-    const root = process.cwd();
-    const ok = await persistSession(createEmptySession(), root);
+    const ok = await persistSession(createEmptySession(), sandbox);
     expect(typeof ok).toBe('boolean');
+    expect(existsSync(resolveSessionPath(sandbox))).toBe(true);
   });
 
   it('never throws on filesystem errors — returns a boolean', async () => {
     // atomicWriteJson auto-creates parents, so we cannot force a `false` return
     // portably across platforms. The contract is "never throws"; verify shape.
-    const ok = await persistSession(createEmptySession(), '/tmp/cache-roi-test-xyz');
+    const ok = await persistSession(createEmptySession(), path.join(sandbox, 'nested', 'root'));
     expect(typeof ok).toBe('boolean');
   });
 });
@@ -483,6 +554,24 @@ describe('createCacheRoiMiddleware', () => {
     await mw(state);
     expect(state.messageParts).toBeUndefined();
     expect(state.context.cacheRoi.current).toBeDefined();
+  });
+
+  it('folds an unpriced response into the session without dollars or a throw', async () => {
+    const persist = vi.fn().mockResolvedValue();
+    const mw = createCacheRoiMiddleware({ enabled: true, persist });
+    const state = {
+      context: {},
+      response: { model: 'claude-sonnet-4-6', usage: { input_tokens: 10, output_tokens: 5 } },
+      messageParts: [],
+    };
+    await mw(state);
+    expect(state.context.cacheRoi.current.spentCostUsd).toBeNull();
+    expect(state.context.cacheRoi.session.unpricedRequestCount).toBe(1);
+    expect(state.context.cacheRoi.session.requestCount).toBe(1);
+    expect(state.context.cacheRoi.session.cumulativeSpentUsd).toBe(0);
+    expect(persist).toHaveBeenCalledOnce();
+    expect(state.messageParts).toEqual(['cache=0%']);
+    expect(getLastEvent('feature:cache-roi').detail).toBe('hit=0% saved=unpriced');
   });
 
   it('returns state even when context is missing', async () => {

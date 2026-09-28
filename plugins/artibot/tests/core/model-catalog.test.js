@@ -74,6 +74,18 @@ describe('model-catalog', () => {
       expect(getModel('sonnet').thinkingMode).toBe('adaptive');
     });
 
+    it('marks Haiku 4.5 thinking as extended (budget_tokens only, no adaptive)', () => {
+      // claude-api skill, "Thinking & Effort": adaptive on every current model
+      // except Haiku 4.5, which still takes {type:'enabled', budget_tokens}.
+      expect(getModel('haiku').thinkingMode).toBe('extended');
+    });
+
+    it('pins official output limits: Sonnet 5 128K, Haiku 4.5 64K', () => {
+      // claude-api skill shared/models.md (Sonnet 5 row: 128K; Haiku 4.5 row: 64K).
+      expect(getModel('sonnet').outLimit).toBe(128_000);
+      expect(getModel('haiku').outLimit).toBe(64_000);
+    });
+
     it('returns null for an unknown tier', () => {
       expect(getModel('mythos')).toBeNull();
     });
@@ -495,6 +507,19 @@ describe('model-catalog', () => {
       // stored without a scheme on purpose.
       const urlLiterals = catalogSrc.match(/https?:\/\//g) ?? [];
       expect(urlLiterals).toEqual([]);
+    });
+
+    it('(f) every thinkingMode is in the typedef vocabulary (allowlist, fail-closed)', () => {
+      const THINKING_MODES = ['adaptive', 'always-on', 'extended'];
+      for (const tier of listTiers()) {
+        expect(THINKING_MODES).toContain(getModel(tier).thinkingMode);
+      }
+      // The JSDoc typedef must name the same set, so a new value lands in both.
+      const typedef = catalogSrc.match(/^\s*\*\s+thinkingMode: ('[^']+'(?:\|'[^']+')*),$/m);
+      expect(typedef).not.toBeNull();
+      expect(typedef[1].split('|').map((s) => s.slice(1, -1)).sort()).toEqual(
+        [...THINKING_MODES].sort(),
+      );
     });
   });
 });
