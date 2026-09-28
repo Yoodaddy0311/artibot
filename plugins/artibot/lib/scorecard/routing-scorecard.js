@@ -698,11 +698,11 @@ export function buildRoutingScorecard(replay) {
     }),
     histogramMetric(routes, (e) => readPath(e, ['data', 'models', 'selected', 'tier']), {
       key: 'routing.selected_tiers',
-      label: '티어별 Route 건수',
+      label: '티어별 Route 건수(정책 예측)',
       source: 'route.selected · data.models.selected.tier',
-      note: 'selected 는 실제로 실행된 모델이다. Observe 에서는 항상 resolveModel 정책 결과이지 '
-        + '라우터 추천이 아니다(route-receipt 스키마 models 절).'
-        + ' GA-02 canary 게이트는 reason 만 싣고 이 값을 바꾸지 않는다(작동기 CA-02 미착수).',
+      note: 'selected 는 PreToolUse 시점의 정책 예측(resolveModel 결과)이지 서빙 관측이 아니다 — '
+        + 'requested_model 도 아니다. 서빙 모델은 usage.receipt(transcript usage)로만 본다(route.bound 는 조인 키).'
+        + ' canary 목록이 이 class 와 매칭되면 추천 티어로 바뀌어도 여전히 예측이다(출하 목록 [] 에선 항상 정책 결과).',
     }),
     metric({
       key: 'routing.tier_comparability',

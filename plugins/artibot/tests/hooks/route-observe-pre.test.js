@@ -608,6 +608,9 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
       'residency:unavailable',
     ],
     source: 'shadow',
+    // Added 2026-09-28 (receipt-task-model): additive request keys, appended after `source`.
+    requested_model: null,
+    requested_task: { class: 'complex-debug', source: 'text' },
   };
 
   /** A transcript file whose last assistant record names `tier`'s model. */

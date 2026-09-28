@@ -146,6 +146,53 @@ function str(value) {
 }
 
 /**
+ * Longest `tool_input.model` value copied into `requested_model`. Mirrors the
+ * schema's `maxLength`; the ledger writer does not run `maxLength`, so this
+ * slice is what actually holds the bound on a live row.
+ * @type {number}
+ */
+const REQUESTED_MODEL_MAX = 128;
+
+/**
+ * `tool_input.model` as the caller passed it — trimmed, capped — or null.
+ *
+ * A REQUEST, NEVER EVIDENCE. The host decides what serves; the served identity
+ * comes ONLY from `usage.receipt` (transcript usage). The `route.bound` row
+ * supplies the `agent_id` join key and nothing more — its `selected_model` is a
+ * policy value too (`bind-model-fallback.js#resolveBoundModel`). This value is
+ * recorded so intent can be compared against the served identity, not
+ * substituted for it.
+ *
+ * @param {unknown} value - `tool_input.model`
+ * @returns {string|null}
+ */
+function requestedModel(value) {
+  const model = str(value);
+  return model === null ? null : model.trim().slice(0, REQUESTED_MODEL_MAX);
+}
+
+/**
+ * The class the request TEXT names on its own, without the agent table.
+ *
+ * `action.type` is decided agent-table-first, so a `doc-updater` spawn asked to
+ * "review" still records `edit-routine` there. This asks the classifier the
+ * text-only question — no `agentType`, no complexity port — and reports it only
+ * when the text actually matched (`factors.source === 'text'`). Anything else is
+ * the classifier's fallback class, not an observation, and is `unmeasured`.
+ * There is no explicit-task key on the Agent `tool_input` (see
+ * {@link TOOL_INPUT_KEYS}), so there is no third `source` value.
+ *
+ * @param {string} text - The action text {@link extractActionText} chose
+ * @returns {{class: string|null, source: 'text'|'unmeasured'}}
+ */
+export function requestedTask(text) {
+  const classified = classifyAction({ text }, {});
+  return classified?.factors?.source === 'text'
+    ? { class: classified.actionClass, source: 'text' }
+    : { class: null, source: 'unmeasured' };
+}
+
+/**
  * How much of `transcript_path` is read to find the incumbent model — 256 KB.
  *
  * MEASURED, not guessed (21 transcripts of this project, 2026-09-15). The
@@ -445,11 +492,12 @@ export function receiptPhase(classified) {
  * `models.selected` is the `resolveModel(subagent_type)` policy answer — which
  * in Observe is what `subagent-handler.js` independently computes as
  * `canonicalModel` at spawn time. The design sketched a separate
- * `predicted_selected` key for it; `route-receipt.schema.json` is
- * `additionalProperties:false` and this limb does not own that schema, so the
- * prediction stays in `models.selected` and the bind row records the actual
+ * `predicted_selected` key for it; none was made, because changing what
+ * `models.selected` means is out of scope — only its label says POLICY
+ * PREDICTION (`route-receipt.schema.json`). The bind row records the same
  * `canonicalModel` beside it. The two are comparable because they are the same
- * function of the same input.
+ * function of the same input — and for the same reason neither is a
+ * measurement of what served.
  *
  * ONE EXCEPTION, AND IT IS THE CANARY'S. When `routing.canary.actionClasses`
  * names the class this spawn resolved to, `adaptive-model-router.js#
@@ -458,11 +506,13 @@ export function receiptPhase(classified) {
  * `canary:<tier>` after it. The paragraph above stops holding there: the two are
  * no longer the same function of the same input. THE BIND ROW IS UNAFFECTED —
  * `subagent-handler.js#bindRoute` derives `selected_model` from
- * `resolveBoundModel`, which is `resolveModel` on the definition name
- * (`bind-model-fallback.js:92`), and nothing in this repo applies a canary tier
- * to the spawn that actually runs. So a matched receipt records INTENT while the
- * bind row records EXECUTION; they legitimately disagree, and the bind row is
- * the truth about what ran. Unreachable while the shipped list is `[]`.
+ * `resolveBoundModel`, which is `canonicalModel` or `resolveModel` on the
+ * definition name (`bind-model-fallback.js#resolveBoundModel`), and nothing in
+ * this repo applies a canary tier to the spawn that actually runs. So a matched
+ * receipt records the RECOMMENDED tier (intent) while the bind row records the
+ * POLICY answer; they legitimately disagree, and NEITHER is an observation of
+ * what served — that comes only from `usage.receipt` (transcript usage), joined
+ * on the bind row's `agent_id`. Unreachable while the shipped list is `[]`.
  *
  * `currentTier` and `actionsSinceSwitch` go in TOGETHER OR NOT AT ALL, as two
  * TOP-LEVEL `routeModel` keys — not inside `input`, which is the classifier's
@@ -484,9 +534,17 @@ export function receiptPhase(classified) {
  * (`artibot.config.json` `routing.canary`, read-only here) an empty allowlist
  * applies to nothing, so the receipt is byte-identical to the pre-canary one.
  *
+ * `requested_model` AND `requested_task` ARE APPENDED AFTER `routeModel`
+ * RETURNS — last, after `source`, so every pre-existing key keeps its position.
+ * `ctx.requestedModel` is never part of the `routeModel` argument: what the
+ * caller asked for must not move the prediction, the decision or any reason
+ * code (`tests/hooks/route-observe-pre-request.test.js` pins that byte for
+ * byte). `models.selected` stays the POLICY PREDICTION described above.
+ *
  * @param {{toolUseId: string, sessionId: string, missionId: string,
  *   agentType: string|null, text: string, config: object|undefined,
  *   currentTier?: string|null, actionsSinceSwitch?: number|null,
+ *   requestedModel?: unknown,
  *   catalog?: object}} ctx - `catalog` is a pinned price port for tests; absent, routeModel uses the live catalog
  * @returns {object|null} Receipt, or null when it would be structurally
  *   incomplete (the append is then skipped rather than fabricated)
@@ -527,7 +585,11 @@ export function buildReceipt(ctx) {
   });
   if (typeof receipt?.action?.complexity !== 'number') return null;
   if (typeof receipt?.action?.phase !== 'string') return null;
-  return receipt;
+  return {
+    ...receipt,
+    requested_model: requestedModel(ctx.requestedModel),
+    requested_task: requestedTask(ctx.text),
+  };
 }
 
 /**
@@ -589,6 +651,7 @@ export async function observePre(hookData) {
       config,
       currentTier,
       actionsSinceSwitch,
+      requestedModel: toolInput.model,
     });
     if (receipt === null) return { ok: false, reason: 'no-receipt' };
 
