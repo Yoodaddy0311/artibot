@@ -381,6 +381,49 @@ export function inertTaskKeys(overrides) {
 }
 
 /**
+ * Effective-diff rows for task settings under an EXPLICIT task context. The
+ * per-agent rows resolve each agent under its DEFAULT task only, so a changed
+ * pick for a class no agent defaults to (`status`, `classify`) would diff as
+ * none although `resolve --task <class>` changes. For every class whose stored
+ * value differs between `before` and `after` in a plugin, each roster agent
+ * whose default task is NOT that class (those are already in the per-agent
+ * rows) is resolved with `--task <class>` under every role. An agent whose role
+ * variants changed identically counts once; otherwise per changed role, as the
+ * per-agent rows do. One row per plugin, class and outcome, counted over those
+ * agents, e.g. `  artibot [task=status]: opus → haiku for 30 of 30 agent(s) not
+ * defaulting to status`. A re-set value or a pick every agent override shadows
+ * gives no row.
+ *
+ * @param {object} ctx
+ * @param {object} before
+ * @param {object} after
+ * @param {ReadonlyArray<string|null>} roles - The role variants the per-agent rows diff.
+ * @param {(plugin: string, agent: string, role: string|null, overrides: object, task: string) => string|null} resolve
+ * @returns {string[]}
+ */
+export function taskContextDiff(ctx, before, after, roles, resolve) {
+  const storedTask = (doc, plugin, task) => doc?.plugins?.[plugin]?.tasks?.[task] ?? null;
+  return PLUGIN_NAMES.filter((plugin) => ctx.rosters[plugin]).flatMap((plugin) =>
+    ACTION_CLASSES.filter((task) => storedTask(before, plugin, task) !== storedTask(after, plugin, task)).flatMap((task) => {
+      const agents = [...ctx.rosters[plugin].keys()].filter((a) => rowTask(`${plugin}:${a}`) !== task);
+      const counts = new Map();
+      for (const agent of agents) {
+        const changes = roles
+          .map((role) => ({ role, from: resolve(plugin, agent, role, before, task), to: resolve(plugin, agent, role, after, task) }))
+          .filter((c) => c.from !== c.to);
+        const uniform =
+          changes.length === roles.length && changes.every((c) => c.from === changes[0].from && c.to === changes[0].to);
+        const keys = uniform
+          ? [`[task=${task}]: ${changes[0].from} → ${changes[0].to}`]
+          : changes.map((c) => `[task=${task} role=${c.role ?? 'none'}]: ${c.from} → ${c.to}`);
+        for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      return [...counts].map(([key, n]) => `  ${plugin} ${key} for ${n} of ${agents.length} agent(s) not defaulting to ${task}`);
+    }),
+  );
+}
+
+/**
  * `show` top-level `tasks`: per class, the agents (of the selected plugins)
  * whose DEFAULT task it is, and each plugin's stored override for it.
  *

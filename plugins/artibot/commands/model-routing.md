@@ -41,11 +41,13 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 | `reset agent <plugin:name> \| task <class> [--plugin …] \| phase <build\|review> \| plugin <name> \| --all [--dry-run]` | override 제거 |
 | `apply <file.json> [--dry-run]` | 여러 변경을 한 번에(메뉴가 쓴다, 형식은 §8 ④). 전부 검증한 뒤 한 번만 쓴다 — 하나라도 틀리면 아무것도 안 쓰고 exit 1, stderr 에 틀린 change 마다 `change <i>: <why>` 한 줄 |
 | `validate [--json]` | 파일 스키마 · 미지 에이전트 · 강등되는 설정 · `needs-spawn-param` 목록 |
+| `validate --live [--since <epoch-ms\|ISO 시각>] [--cwd <리포 루트>] [--json]` | 설정이 실제 스폰에 쓰였는지 원장으로 관측한다(원장은 읽기만 한다). `route.bound` 와 `usage.receipt` 를 짝지어 에이전트마다 기대 티어(지금의 출하 config·override 로 계산)와 실제로 서빙된 티어를 비교해 `honored`·`unhonored`·`unmeasured` 로 센다. 텍스트 출력은 읽은 원장(`ledger:` 줄, 없으면 `ledger absent: <경로> — nothing to judge`) · 분모 · 비율 표(`n/d`, 분모 0 이면 `null (denominator 0)`) · 판정과 미측정 사유 집계 · `unhonored` 행마다 한 줄 · `caveat:` 3줄이다. `--json` 은 같은 보고를 행별 `rows[]` 까지 준다. `--since` 는 숫자만이면 epoch 밀리초, 아니면 `Z`·`±HH:MM` 이 붙은 ISO 시각만 받는다(날짜만이면 exit 2). `--cwd`(기본 현재 디렉터리)에는 리포 루트를 넘긴다. `--since`·`--cwd` 는 `--live` 전용이다(없이 쓰면 exit 2). 원장이 없거나 `unhonored` 가 있어도 exit 0 — 관측이지 검증 실패가 아니다 |
 | `resolve <plugin:name> [--role build\|review] [--task <class>]` | stdout 에 티어 한 단어만 — 리더가 스폰에 붙일 값. `--task` 가 없으면 그 에이전트의 기본 작업 종류(§7)를 쓰고, 기본 작업 종류가 없는 에이전트는 task 층을 건너뛴다. 명시한 `--task` 는 기본 작업 종류가 없는 에이전트에도 적용된다 |
 
 - `<tier>` 는 `haiku|sonnet|opus`. 별칭(`deep-async` 등)은 받지 않는다. `<class>` 는 §7 의 8개뿐이다 — 그 밖은 `unknown task: <x> (expected …)` (exit 2).
 - `set`/`reset` 의 `--plugin` 은 `task` 스코프에서만 받는다. `set agent`·`set phase`·`set plugin`(과 같은 `reset`)에 붙이면 `unknown flag: --plugin` (exit 2). `show --plugin` 은 표 범위를 고르는 별개 플래그다.
 - 우선순위: 사용자 agent > 사용자 task > 사용자 phase(artibot 만) > 사용자 plugin 기본값 > 출하값. 작업 종류 단의 출처 이름은 `override-task`. 작업 종류 설정이 있으면 같은 에이전트의 단계(구현/검수) 설정은 가려진다. 마지막에 fable 게이트와 `FABLE_DENYLIST` 가 적용돼 어떤 사용자 설정도 그것을 넘지 못한다.
+- `validate --live` 판정 한계: 기대 티어는 원장 행의 `action_class` 가 아니라 **에이전트의 기본 작업 종류(§7)** 로, 단계(role) 없이 계산한다 — `resolve --task` 로 다른 종류를 넘겼거나 `--role` 로 단계 설정을 받아 스폰한 행은 `unhonored` 로 읽힐 수 있다(출력의 세 번째 `caveat:` 줄).
 - 모든 서브커맨드는 `--plugin-root <dir>` · `--cowork-root <dir>` 도 받는다(다른 설치본을 볼 때만).
 - 종료 코드: `0` 성공 · `1` 거부/검증 오류(아무것도 안 씀) · `2` 사용법 오류(미지 서브커맨드·플래그·티어·에이전트·작업 종류; stderr 한 줄, 아무것도 안 씀). `--help` 는 없다(`unknown subcommand: --help`, exit 2) — 사용법은 이 표와 CLI 파일 머리 주석에 있다.
 - 0 이 아니면 stderr 를 **그대로** 보여 준다. 추측한 인자로 재시도하지 마라.
@@ -68,6 +70,8 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 /model-routing reset task review
 /model-routing reset --all
 /model-routing validate
+/model-routing validate --live          ← 설정이 실제 스폰에 쓰였는지 원장으로 관측(읽기만)
+/model-routing validate --live --since 2026-09-28T00:00:00+09:00 --json
 /model-routing resolve artibot:code-reviewer --role review
 /model-routing resolve artibot:doc-updater --task review
 ```
@@ -99,7 +103,7 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 
 - 파일: `~/.claude/artibot/model-routing.json` (Windows `%USERPROFILE%\.claude\artibot\model-routing.json`). CLI 출력의 `overrides:` / `written:` 줄이 실제 경로다 — 그것을 믿어라. 작업 종류 값은 `plugins.<plugin>.tasks` 에 저장된다(이 키가 없는 기존 파일도 그대로 읽힌다).
 - 플러그인의 `artibot.config.json` 은 건드리지 않는다. 그 파일은 설치·업그레이드마다 덮이므로 사용자 설정은 이 별도 파일에 있어야 살아남는다.
-- `set`/`reset`/`apply` 는 before→after **실효값** 차이(`effective changes (N):`)를 찍고, 기존 파일을 `.bak` 으로 복사한 뒤 원자적으로 쓴다(`written: <경로>`). `apply` 는 변경이 여러 개여도 `.bak` 과 쓰기가 한 번이다. 파일이 없을 때 `reset` 은 `nothing to reset` 으로 끝난다.
+- `set`/`reset`/`apply` 는 before→after **실효값** 차이(`effective changes (N):`)를 찍는다. 줄은 에이전트마다 `  <plugin:agent>: <전> → <후>`(역할마다 다르면 `[role=<none|build|review>]`)이고, 저장된 작업 종류 값이 바뀐 종류에는 `  <plugin> [task=<class>]: <전> → <후> for <n> of <m> agent(s) not defaulting to <class>` 가 붙는다 — 그 종류가 기본이 아닌 에이전트 m명을 `resolve --task <class>` 로 풀었을 때의 변화이며(역할마다 다르면 `[task=<class> role=<none|build|review>]`), 기본인 에이전트가 없는 `status`·`classify` 설정은 이 줄로만 보인다. 그다음 기존 파일을 `.bak` 으로 복사한 뒤 원자적으로 쓴다(`written: <경로>`). `apply` 는 변경이 여러 개여도 `.bak` 과 쓰기가 한 번이다. 파일이 없을 때 `reset` 은 `nothing to reset` 으로 끝난다.
 - `--dry-run` 은 같은 차이를 찍고 `dry-run: nothing written (<경로>)` 로 끝난다 — 파일을 만들지도 바꾸지도 않는다. 여러 에이전트가 바뀌는 `set task`·`set phase`·`set plugin` 은 먼저 `--dry-run` 으로 보여 주기를 권한다.
 - 파일이 손상되면(JSON 오류·스키마 위반) `show`/`resolve` 는 stderr 에 `... IGNORED, shipped values shown` 경고를 내고 출하값으로 답한다(`resolve` 는 exit 0 이므로 **경고를 꼭 전달**한다). `set`/`reset`(`--all` 포함)은 `refusing to write ... Fix or remove it by hand; nothing was changed.` 로 거부한다(exit 1). **파일을 대신 지우거나 고치지 마라** — 경로와 오류를 보여 주고 사용자가 직접 고치거나 지우게 한다(직전 쓰기 이전 내용은 `.bak` 에 있다).
 
@@ -167,7 +171,7 @@ Other 입력: "현재 보기"·"show" → `show` 출력을 보여 주고 끝. "�
 - `scope: plugin` — `key` 는 생략(값이 있으면 거부). `plugin` ∈ `artibot|artibot-cowork`(필수, `all` 불가).
 - `tier` = `haiku|sonnet|opus`, `null` 은 reset. 에이전트별에서 두 플러그인을 다 바꾸면 한정 이름이 다르므로 change 가 자연히 둘로 나뉜다(§3).
 
-`apply <파일> --dry-run` 을 돌려 stdout(`effective changes (N):` …)을 그대로 보여 준다. exit 가 0 이 아니면 stderr 를 그대로 보여 주고 멈춘다 — exit 1 이면 `change <i>: <why>` 줄들(틀린 change 마다 한 줄, 아무것도 쓰지 않음)이다. 추측으로 고쳐 다시 돌리지 마라. `apply <파일>` 본실행이 exit 1 이어도 같다. dry-run 결과가 `effective changes (none):` 이면 확인 질문 없이 "실효값 변화 없음" 으로 끝낸다. 그 밖이면 확인을 묻는다:
+`apply <파일> --dry-run` 을 돌려 stdout(`effective changes (N):` …)을 그대로 보여 준다. exit 가 0 이 아니면 stderr 를 그대로 보여 주고 멈춘다 — exit 1 이면 `change <i>: <why>` 줄들(틀린 change 마다 한 줄, 아무것도 쓰지 않음)이다. 추측으로 고쳐 다시 돌리지 마라. `apply <파일>` 본실행이 exit 1 이어도 같다. dry-run 결과가 `effective changes (none):` 이면(에이전트 줄도 `[task=…]` 줄도 없다 — 같은 값을 다시 골랐거나, 지금 실효값과 같은 티어를 골랐거나, 에이전트별 설정이 해당 에이전트를 전부 가렸다 — 각 에이전트의 기본 작업 종류 문맥과 저장값이 바뀐 작업 종류 문맥에서 실효값이 바뀌지 않는다) 확인 질문 없이 "실효값 변화 없음" 으로 끝낸다. `[task=…]` 줄도 N 에 들어가므로 `status`·`classify` 선택은 확인 질문으로 간다(예: `  artibot [task=status]: opus → haiku for 30 of 30 agent(s) not defaulting to status`). 그 밖이면 확인을 묻는다:
 
 ```
 AskUserQuestion(

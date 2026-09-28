@@ -639,3 +639,95 @@ describe('CLI: apply', () => {
     expect(fingerprint(stateFile)).toBe(sha);
   });
 });
+
+describe('CLI: effective changes under an explicit task context (MR1)', () => {
+  /** @param {string} stdout @returns {{ header: string, lines: string[] }} the diff block (header + indented rows) */
+  function diffOf(stdout) {
+    const [header, ...rest] = stdout.split('\n');
+    return { header, lines: rest.filter((l) => l.startsWith('  ')) };
+  }
+
+  /** @param {string} cls @param {string} [plugin] @returns {string} an apply file with one task change to haiku */
+  const taskApply = (cls, plugin = 'all') => applyFile({ changes: [{ scope: 'task', plugin, key: cls, tier: 'haiku' }] });
+
+  /** @returns {string[]} every artibot roster agent, from `show --json` */
+  const artibotRoster = () => showJson('--plugin', 'artibot').plugins.artibot.rows.map((r) => r.agent);
+
+  it.each(['status', 'classify'])('a %s pick no agent defaults to is not "none": one [task=] row per plugin, N = row count', (cls) => {
+    const n = artibotRoster().length;
+    const r = run('apply', taskApply(cls), '--dry-run');
+    expect(r.code, r.stderr).toBe(0);
+    const { header, lines } = diffOf(r.stdout);
+    expect(lines).toEqual([
+      `  artibot [task=${cls}]: opus → haiku for ${n} of ${n} agent(s) not defaulting to ${cls}`,
+      // case-study-writer is haiku already: 1 of the 2 fixture agents changes.
+      `  artibot-cowork [task=${cls}]: sonnet → haiku for 1 of 2 agent(s) not defaulting to ${cls}`,
+    ]);
+    expect(header).toBe(`effective changes (${lines.length}):`);
+    expect(existsSync(stateFile)).toBe(false);
+  }, TIMEOUT);
+
+  it('set task / reset task go through the same diff (dry-run and real write)', { timeout: TIMEOUT }, () => {
+    const viaApply = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
+    expect(diffOf(run('set', 'task', 'status', 'haiku', '--dry-run').stdout)).toEqual(viaApply);
+    expect(diffOf(run('set', 'task', 'status', 'haiku').stdout)).toEqual(viaApply);
+    const reset = diffOf(run('reset', 'task', 'status', '--plugin', 'artibot').stdout);
+    expect(reset.lines).toEqual([expect.stringMatching(/^ {2}artibot \[task=status\]: haiku → opus for (\d+) of \1 agent\(s\) not defaulting to status$/)]);
+    expect(reset.header).toBe('effective changes (1):');
+  });
+
+  it('re-setting the stored value is still none (setting unchanged)', { timeout: TIMEOUT }, () => {
+    writeOverrides({
+      artibot: { default: null, agents: {}, phaseRoles: {}, tasks: { status: 'haiku' } },
+      'artibot-cowork': { default: null, agents: {}, tasks: { status: 'haiku' } },
+    });
+    expect(run('apply', taskApply('status'), '--dry-run').stdout).toMatch(/^effective changes \(none\):\ndry-run: nothing written/);
+    // Positive control: a different stored value makes the same apply a change.
+    writeOverrides({ artibot: { default: null, agents: {}, phaseRoles: {}, tasks: { status: 'sonnet' } } });
+    expect(diffOf(run('apply', taskApply('status', 'artibot'), '--dry-run').stdout).lines).toEqual([
+      expect.stringMatching(/^ {2}artibot \[task=status\]: sonnet → haiku for (\d+) of \1 agent\(s\) not defaulting to status$/),
+    ]);
+  });
+
+  it('a task pick every agent override shadows (agent > task) is none; unshadow one agent and it shows', { timeout: TIMEOUT }, () => {
+    const roster = artibotRoster();
+    const pinned = (names) => Object.fromEntries(names.map((a) => [a, 'sonnet']));
+    const cowork = { default: null, agents: { planner: 'sonnet', 'case-study-writer': 'sonnet' } };
+    writeOverrides({ artibot: { default: null, agents: pinned(roster), phaseRoles: {} }, 'artibot-cowork': cowork });
+    expect(run('apply', taskApply('status'), '--dry-run').stdout).toMatch(/^effective changes \(none\):\n/);
+    writeOverrides({ artibot: { default: null, agents: pinned(roster.slice(1)), phaseRoles: {} }, 'artibot-cowork': cowork });
+    const { header, lines } = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
+    expect(lines).toEqual([`  artibot [task=status]: opus → haiku for 1 of ${roster.length} agent(s) not defaulting to status`]);
+    expect(header).toBe('effective changes (1):');
+  });
+
+  it('adds no row for agents whose DEFAULT task is the class — the per-agent rows already show them', { timeout: TIMEOUT }, () => {
+    const json = showJson('--plugin', 'artibot');
+    const defaulters = json.tasks.find((t) => t.task === 'review').agents;
+    expect(defaulters).toContain('artibot:code-reviewer');
+    const others = json.plugins.artibot.rows.length - defaulters.length;
+    const r = run('set', 'task', 'review', 'haiku', '--plugin', 'artibot', '--dry-run');
+    const { header, lines } = diffOf(r.stdout);
+    expect(lines.filter((l) => l.includes('[task='))).toEqual([
+      `  artibot [task=review]: opus → haiku for ${others} of ${others} agent(s) not defaulting to review`,
+    ]);
+    for (const name of defaulters) {
+      expect(lines).toContain(`  ${name}: opus → haiku`);
+      expect(r.stdout).not.toContain(`${name} [task=`);
+    }
+    expect(lines).toHaveLength(defaulters.length + 1);
+    expect(header).toBe(`effective changes (${lines.length}):`);
+  });
+
+  it('role variants that differ print per role, like the per-agent rows', { timeout: TIMEOUT }, () => {
+    writeOverrides({ artibot: { default: null, agents: {}, phaseRoles: { build: 'sonnet' } } });
+    const n = artibotRoster().length;
+    const { header, lines } = diffOf(run('set', 'task', 'status', 'haiku', '--plugin', 'artibot', '--dry-run').stdout);
+    expect(lines).toEqual([
+      `  artibot [task=status role=none]: opus → haiku for ${n} of ${n} agent(s) not defaulting to status`,
+      `  artibot [task=status role=build]: sonnet → haiku for ${n} of ${n} agent(s) not defaulting to status`,
+      `  artibot [task=status role=review]: opus → haiku for ${n} of ${n} agent(s) not defaulting to status`,
+    ]);
+    expect(header).toBe('effective changes (3):');
+  });
+});
