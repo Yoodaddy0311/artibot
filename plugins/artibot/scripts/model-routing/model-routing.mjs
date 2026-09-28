@@ -106,6 +106,7 @@ import {
   requireTask,
   rowTask,
   selectPlugins,
+  taskContextDiff,
   taskSummary,
   UsageError,
 } from './model-routing-task.mjs';
@@ -332,7 +333,8 @@ function cmdShow(argv) {
 
 /**
  * Before→after EFFECTIVE values across every agent and role. A qualified name
- * whose three role variants changed identically prints once.
+ * whose three role variants changed identically prints once. Changed task
+ * settings add `[task=<class>]` rows under an explicit task ({@link taskContextDiff}).
  *
  * @param {object} ctx
  * @param {object} before
@@ -362,7 +364,8 @@ function effectiveDiff(ctx, before, after) {
       }
     }
   }
-  return lines;
+  const byTask = (p, a, role, overrides, task) => resolveRow(ctx, p, a, role, overrides, task).model;
+  return [...lines, ...taskContextDiff(ctx, before, after, DIFF_ROLES, byTask)];
 }
 
 /**
