@@ -228,6 +228,49 @@ describe('dispatch — 멱등·부작용 0', () => {
     expect(one).toBe(two);
     expect(one).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
+
+  // SP-01, 2026-09-28: 일괄 경로(resolveDispatch)가 입력 행을 정규화하면서
+  // promptPath·forkPoint 를 버려 buildLimbMessage 가 두 필드를 못 봤다. 있으면
+  // 행 끝에 붙고 본문까지 가야 하며, 없으면 행·본문 모두 예전과 바이트까지 같다.
+  const WITH_EXTRAS = deepFreeze({
+    ...PLAN,
+    limbs: [
+      { ...PLAN.limbs[0], promptPath: path.join(PLAN.limbs[0].worktreePath, '.artibot', 'split', 'auth', 'prompt.md'), forkPoint: 'c732eaa9' },
+      { ...PLAN.limbs[1], promptPath: '', forkPoint: null },
+    ],
+  });
+
+  it('입력 행의 promptPath·forkPoint 가 messages[].body 까지 간다 — 빈 값은 없는 것과 같다', () => {
+    const r = resolveDispatch({ plan: WITH_EXTRAS, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(r.status).toBe('ready');
+    expect(r.messages[0].body).toBe(buildLimbMessage(PLAN, WITH_EXTRAS.limbs[0]));
+    expect(r.messages[0].body).toContain(`프롬프트: ${WITH_EXTRAS.limbs[0].promptPath}`);
+    expect(r.messages[0].body).toContain('(base: c732eaa9)');
+    expect(r.messages[1].body).toBe(buildLimbMessage(PLAN, PLAN.limbs[1]));
+  });
+
+  it('필드가 있을 때만 행 끝에 붙는다 — 없거나 빈 값이면 키 순서 핀 그대로', () => {
+    const r = resolveDispatch({ plan: WITH_EXTRAS, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    const base = [
+      'limb', 'worktreePath', 'branch', 'worktreeExists', 'branchMatches',
+      'branchRelocatedByHook', 'sessions', 'windowOpen', 'excluded',
+    ];
+    expect(Object.keys(r.limbs[0])).toEqual([...base, 'promptPath', 'forkPoint']);
+    expect(Object.keys(r.limbs[1])).toEqual(base);
+    const plain = resolveDispatch({ plan: PLAN, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(r.limbs[1]).toEqual(plain.limbs[1]);
+    expect(r.messages[1]).toEqual(plain.messages[1]);
+  });
+
+  it('promptPath·forkPoint 가 든 입력도 두 번 판정하면 deep-equal 이고 입력이 변하지 않는다', () => {
+    const before = snapshot(WITH_EXTRAS);
+    const a = resolveDispatch({ plan: WITH_EXTRAS, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    const b = resolveDispatch({ plan: WITH_EXTRAS, worktrees: WORKTREES, sessions: SESSIONS, messaging: OK });
+    expect(a).toEqual(b);
+    expect(a.messages.map((m) => m.body)).toEqual(b.messages.map((m) => m.body));
+    expect(snapshot(WITH_EXTRAS)).toBe(before);
+    expect(Object.isFrozen(a.limbs[0])).toBe(true);
+  });
 });
 
 describe('dispatch — fail-closed: 거부', () => {
