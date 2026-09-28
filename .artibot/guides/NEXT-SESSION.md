@@ -1,6 +1,27 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-28 KST 갱신, master = `0dddb6ac` = **v4.67.0** · Wave 18~23 착지 · 모델 정책 = opus 단일 티어 + fable 휴면 · `/model-routing` 신설 · v5.0 진행률 52/100)
+
+> 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## Wave 18~23 착지 + v4.67.0 (2026-09-23 ~ 09-28 KST, master = `0dddb6ac`)
+
+**한 줄**: Wave 18 잔여(sh18) + Wave 19~23 이 run `split-wave19-20260923` 하나로 **25줄기 착지**(first-parent merge 25건, `89bb0cde`..`45baf6c5`), 릴리스 `0dddb6ac` = **v4.67.0**(태그 `v4.67.0` = `0dddb6ac`, 2026-09-28 문서 작성자 `git tag --points-at` 확인). 줄기 목록·웨이브 귀속·비율·재측정 수치의 정본은 `V5-BACKLOG.md` **§4-g**, 줄기별 내용은 CHANGELOG [4.67.0]. Wave 13~17 경과는 이 파일에 절이 없다 — `V5-BACKLOG.md` §4-b~§4-e 가 정본이고, Wave 18 본체는 §4-f.
+
+**진행률**(`V5-BACKLOG.md` §1, 2026-09-28): done **52/100**(직전 48). 이번 전환 = OB-15 · OB-17 · SH-18 · SH-10 → done, SH-15 todo → in-progress. SH-12 는 lease heartbeat 갱신 0 으로 유지.
+
+**모델 정책(현행 — 오너 결정 2026-09-23, `37b3f156`)**: **opus 단일 티어**. `agents.modelPolicy.fable.enabled=false`, `phaseRoles` build·review 모두 opus, agents frontmatter 30/30 opus. **fable 은 휴면** — 카탈로그 `fable` 항목 · allowlist 10 · `FABLE_DENYLIST` 는 남아 있으나 게이트가 꺼져 전부 opus 로 해석된다. 이 파일 아래 절들의 "Fable 2티어"(build opus / review fable) 서술은 **당시 정책 기록**이며 현행이 아니다. 단일 진실원 = `lib/core/model-policy.js#resolveModel` + `artibot.config.json#/agents/modelPolicy`.
+
+**`/model-routing` 신설**(Wave 22~23): `commands/model-routing.md` + `scripts/model-routing/model-routing.mjs`. 해석 = `lib/core/model-overrides.js#resolveEffectiveModel`(agent > task > phase > plugin > 출하값, 그 뒤 fable 게이트), task 층 어휘 = `lib/routing/action-classifier.js#ACTION_CLASSES` 8종. 리더가 `resolve` 결과를 Agent 호출 `model` 파라미터로 넘기는 방식이라 **강제 훅이 없다** — 사후 판정 `lib/replay/routing-honor.js#foldRoutingHonor`(`validate --live`)의 판정률은 0.5%(joined 190 중 measured 1 — 비측정 189 는 전부 `unqualified-agent-type`; bind 565 중 join 안 된 375 는 원인 미확인; 출처 `.artibot/split/followups-wave19-20260928.md` 항목 6).
+
+**다음 순서**:
+1. **정본 통합**(2026-09-28 이번 작업) — V5-BACKLOG §1·§2·§4-g, 이 파일, 설계 문서 산문 드리프트.
+2. **Wave 24 plan** — CA-15(선행 SH-18 해소) · CA-04 + routing-honor 부채(판정률 0.5%). **부채 25% 상한**(오너 2026-09-11)을 지켜라 — 이번 run 은 초과했다(§4-g).
+3. **오너 결정 묶음** — GA-02 재정의(fable 휴면에서 "4티어 전면" 의 의미 + `/model-routing` task 층을 CA-02 작동기로 인정할지) · 정리 항목.
+
+**미확인**: 설치본 버전·호스트 재시작 상태(이 문서 작성 시 재측정 안 함) · 리포 전체 vitest · `0dddb6ac` check-runs.
+
+---
 
 ## Wave 12 — 8/8 착지 (2026-09-17 KST, 세션 artibot-e8, master = `6b472785`)
 
@@ -28,7 +49,7 @@
 - ① `route.bound` `selected_model` 결손율(`rb-census.mjs`, 원장 `.git/artibot/ledger.jsonl`): **재시작 이후 5행 중 결손 0(0.0%)**, 00:33Z 기준 — 단 5행 전부 이 세션의 `team-*` named 스폰(prompt_id+name 매치)이라 **결손 해소를 일반화할 수 없다**. 설치(05:19Z)~재시작 구간 스폰 0 이라 since=install 과 since=t0 결과가 같다. 옛 코드 프로파일 확인: 기준선~설치 사이 298행 중 missing 291, 전부 `matched_on=name`/undefined(subagent_type 매치는 100% present). 결손의 주범이던 `split-artibot-*` named 스폰은 설치 이후 표본 0 → **미검증**. 산출: 세션 스크래치패드 `rb-census-2026-09-21T00-10-19Z.out.txt`.
 - ② `activation-observed` slash 분모(`scripts/evals/nl-activation-report.mjs --project-root <repo>`): reporter 는 **2/2 (ratio 1)** 를 내지만 두 행은 `tests/hooks/runtime-prompt-command-wiring.test.js:218/255/261` 의 `/split status` 픽스처(sid `sess-cmd-e`/`sess-cmd-g`, `cwd:null`)가 2026-09-17 04:30Z 통합 게이트 vitest 때 `process.cwd()` 폴백으로 라이브 스토어 `.artibot/runtime/decisions/` 에 남긴 **테스트 오염**이다. **라이브 분모 0/0**(since install·since t0 동일). 이 세션의 `/resume`·`/team` 프롬프트는 행을 남겼으나(2/2 도달) `SPLIT_PATTERNS`(`lib/topology/topology-router.js`: `/split` 토큰 + 한국어 4구) 미매치라 분모 자격 없음. **남은 행동 1건: 리포 cwd 세션에서 `/split status` 를 한 번 입력** → 첫 라이브 분모 행. 부수 결함(보고만): activation writer 는 훅 페이로드에 cwd 가 없으면 `resolveProjectRoot(undefined)` 로 라이브 스토어에 쓴다 — ledger 카운터(`runtime-prompt.js` fail-closed)와 정책 불일치. `decision-store-dir-strict-options` 줄기의 권장 allowlist(storeDir/projectRoot/cwd)는 이 누수를 막지 못한다(cwd 는 허용 키).
 - 오너 정리 상태: **미실행**(00:31Z 실측) — 등록 worktree 8개 locked(pid 8/8 사망, dirty 0, 전부 merged), 미등록 디렉터리 9개(≈530MB 합산 17개), 로컬 브랜치 4개(`ob17-models-current` 패치 동등 · `artibot/*` 2개는 `archive/*-20260519` 태그 동일 SHA · **`ci/split-wave12-20260916` 추가 발견**), 원격 `ci/*` 5개 전부 master 조상, 고아 메타 `.git/worktrees/agent-aed3d2675a58b2bfd`(`git worktree prune` 대상). **Wave 13 `/split plan` 을 막지 않는다**(plan 은 worktree 미조회). `/split open` 은 새 limb 이름이 기존 `worktree-split-artibot-<limb>` 브랜치와 같을 때만 막힌다 — Wave 13 후보 7건 이름은 전부 다르다.
-- 후속 후보 3건 처분: (a) goal-queue `newQueueId` — **defer**: c10451b4 RED 의 실제 원인은 `tests/firewall/git-hooks-install.test.js` 30s 타임아웃(Windows Node 22 잡, informational)이고 두 실패 런 로그에서 goal-queue 는 전부 ✓. 접미 엔트로피 20.7비트, 100회 충돌 ≈0.29%/실행(이론), 관측 0건. (b) sh29 wiring Node 20 — **fix-now 테스트 1파일**: 실제 diff `lifecycle=teardown(1ms)` vs `(0ms)`, `lib/runtime/middleware/lifecycle.js` teardown 의 durationMs 를 테스트 `:277` normalize 가 치환하지 않음. (c) AGENTS.md §1 — **fix-now docs 1파일**: `:15-17` 표 28/113/72 → 30/114/79(`:4`·CLAUDE.md·plugin.json 과 일치), 같은 `:15` 의 "fable 게이트 OFF" 도 config `fable.enabled=true` 와 모순. marketplace.json 에는 카운트 필드 없음. 신규 (d) Windows git-hooks-install 30s 타임아웃 실 RED 1건 — Wave 13 후보 여부 리더 결정.
+- 후속 후보 3건 처분: (a) goal-queue `newQueueId` — **defer**: c10451b4 RED 의 실제 원인은 `tests/firewall/git-hooks-install.test.js` 30s 타임아웃(Windows Node 22 잡, informational)이고 두 실패 런 로그에서 goal-queue 는 전부 ✓. 접미 엔트로피 20.7비트, 100회 충돌 ≈0.29%/실행(이론), 관측 0건. (b) sh29 wiring Node 20 — **fix-now 테스트 1파일**: 실제 diff `lifecycle=teardown(1ms)` vs `(0ms)`, `lib/runtime/middleware/lifecycle.js` teardown 의 durationMs 를 테스트 `:277` normalize 가 치환하지 않음. (c) AGENTS.md §1 — **fix-now docs 1파일**: `:15-17` 표 28/113/72 → 30/114/79(`:4`·CLAUDE.md·plugin.json 과 일치), 같은 `:15` 의 "fable 게이트 OFF" 도 config `fable.enabled=true` 와 모순. *(2026-09-28 주: 이 모순 판정은 09-21 config 기준이다 — 오너 결정 2026-09-23 이후 현행 config 는 `fable.enabled=false`(opus 단일 티어, 맨 위 절).)* marketplace.json 에는 카운트 필드 없음. 신규 (d) Windows git-hooks-install 30s 타임아웃 실 RED 1건 — Wave 13 후보 여부 리더 결정.
 - Wave 13 초안 7건 auditor 감사(00:31~00:36Z, master 2de81dba): 작성 시점 오류 반증 **1건**(ob10 "direct-run-guard 게이트 부재" — 창 주석이 이미 정정), 시효 반증 10건(전부 09-17 수치가 오늘과 다름: autopilot 실 스토어 12,664→16 항목·누수 0, tests/autopilot 68→70, DECISION_EVENT_TYPES 7→8 등 — 착수 시 재측정). 소유 파일 쌍별 겹침 **21쌍 중 확정 0, 조건부 1**(ca05 결정 ④ 채택 시 `artibot.config.json` ↔ recovery-judge-replan-counter). 부채 2/7 확정(`autopilot-test-store-isolation` · `decision-store-dir-strict-options`). run.json `backlogCorrections` 4항목은 master 에 이미 반영 — plan 에서 중복 통합 금지. plan 전 리더 결정: ca05 ①②④⑥ · decision-store 신규 1건(sess-cmd-e 누수 범위) · sh04 일치 정의표(줄기 내 첫 항목 가능). limb 이름 7건 중 5건이 26자 초과 → plan 시 단축. `/split plan` 은 `run.json`·`plan.json` 을 검사 없이 덮어쓰므로 **먼저 `plan-split-wave12-20260916.archived.json` · `run-split-wave12-20260916.json` 으로 복사**(이전 웨이브 관례).
 
 **다음 할 일**: ① ~~배치 4 착지~~ 완료(`6b472785`) + 리더 통합 문서 커밋(`ci/wave12-docs`) ② **4.64.0 릴리스 판단** — 위 전체 게이트 기준 차단 0 ③ 릴리스 + `sync:local` + 호스트 재시작 뒤 라이브 재계수 2건 — `route.bound` 결손율(`rb-census.mjs`, 착지 전 271/276 = 98.2%)과 `activation-observed` slash 분모(현재 0) → **완료 2026-09-21, 위 "라이브 재계수" 블록 참조** ④ Wave 13 plan 편성(초안 7건 + 위 순서 제약 + 부채 2/7).
@@ -683,7 +704,7 @@ Check 8 후속 결정(오너): worktree 원장을 합산해 판정할지(Check 8
 - 오너 요청 3건: Fable 5.1 활용 감사(제안) · 상위 커맨드 8종 점검(제안 + 문서 오기 정정) · /split 업그레이드(구현). 이후 2차 라운드: Fable 2티어 적용(설계·검수 8종만) · PostCompact 재주입(기본 OFF) · blindspot 후속(lane-state) · 설계 정합성 점검.
 - 커밋: f0157141 /save 추적 보호+슬러그 · 219ab8b3 split 1단계 · 1d895903 커맨드 문서 정정 · (2차 커밋은 이 파일과 같은 묶음).
 - 보고서(아티팩트) 에 운영자 관점 "어제까지 → 이제" 표와 설계안 대비 구축률(PR 14개 중 구현 4·부분 2·미착수 8)이 있다.
-- 확정 결정: 완료 판정은 first-parent 최신 트레일러(ADDENDUM §1, 되돌리지 말 것) · Fable 은 allowlist 8종 + phaseRoles(build opus/review fable) · PostCompact 는 기본 OFF.
+- 확정 결정: 완료 판정은 first-parent 최신 트레일러(ADDENDUM §1, 되돌리지 말 것) · Fable 은 allowlist 8종 + phaseRoles(build opus/review fable) · PostCompact 는 기본 OFF. *(2026-09-28 주: Fable 2티어 결정은 오너 결정 2026-09-23 으로 대체 — 현행 opus 단일 티어 + fable 휴면, 맨 위 절.)*
 
 ## 이전 갱신 (2026-08-31, /ultrareview 라운드 — origin/master 에서 병합)
 
