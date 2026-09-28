@@ -84,6 +84,9 @@ export const MESSAGING_SOCKET_ENV = 'CLAUDE_CODE_MESSAGING_SOCKET';
  */
 const AUTOPILOT_RELOCATION_PREFIX = 'artibot/';
 
+/** Same "recorded" test buildLimbMessage applies: a non-empty string. */
+const nonEmpty = (v) => typeof v === 'string' && v !== '';
+
 /**
  * Normalise a filesystem path for equality: resolved, forward slashes, no
  * trailing slash, lower-cased on case-insensitive platforms. `platform` is a
@@ -309,7 +312,7 @@ export function buildLimbMessage(plan, limb) {
  * Resolve a dispatch decision from pre-collected observations. Pure.
  *
  * @param {object} input
- * @param {{ runId: string, base: string, limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string }> }} input.plan
+ * @param {{ runId: string, base: string, limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, promptPath?: string|null, forkPoint?: string|null }> }} input.plan - `promptPath`/`forkPoint` are optional and reach {@link buildLimbMessage} (prompt pointer line; `base = forkPoint || plan.base`); null/empty = not recorded
  * @param {ReadonlyArray<{ path: string, branch?: string|null }>} input.worktrees - from {@link parseWorktreePorcelain}
  * @param {ReadonlyArray<{ name: string }>|null} input.sessions - from {@link parseListAgents}; `null` = tool absent
  * @param {{ listAgentsAvailable: boolean, socket: string|null }} input.messaging - from {@link messagingFromEnv}
@@ -320,7 +323,7 @@ export function buildLimbMessage(plan, limb) {
  * @returns {Readonly<{
  *   status: 'ready'|'refused'|'unavailable',
  *   reasons: ReadonlyArray<string>,
- *   limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, worktreeExists: boolean, branchMatches: boolean|null, branchRelocatedByHook: boolean|null, sessions: ReadonlyArray<string>, windowOpen: boolean, excluded: boolean }>,
+ *   limbs: ReadonlyArray<{ limb: string, worktreePath: string, branch: string, worktreeExists: boolean, branchMatches: boolean|null, branchRelocatedByHook: boolean|null, sessions: ReadonlyArray<string>, windowOpen: boolean, excluded: boolean, promptPath?: string, forkPoint?: string }>,
  *   missingWorktrees: ReadonlyArray<string>,
  *   unopenedWindows: ReadonlyArray<string>,
  *   ambiguousWindows: ReadonlyArray<string>,
@@ -367,6 +370,12 @@ export function resolveDispatch({
       // Boolean, not three-valued like branchMatches: exclusion is an INPUT, so
       // "not observed" cannot happen — a limb is on the list or it is not.
       excluded: excludeSet.has(String(l?.limb ?? '')),
+      // Carried through only when non-empty, appended last: `bodyFor` hands
+      // this row to buildLimbMessage, which dropped both on the bulk path
+      // until 2026-09-28 (SP-01). Absent → the row keeps its pinned key order
+      // and the body stays byte-identical; a `null` default would change both.
+      ...(nonEmpty(l?.promptPath) ? { promptPath: l.promptPath } : {}),
+      ...(nonEmpty(l?.forkPoint) ? { forkPoint: l.forkPoint } : {}),
     });
   });
 
