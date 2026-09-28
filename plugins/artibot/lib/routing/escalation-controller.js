@@ -51,7 +51,8 @@
  *
  * Mirrors the key order of `lib/core/model-catalog.js#MODELS` (measured
  * 2026-09-02: haiku, sonnet, opus, fable), which is also ascending
- * `priceInPerMTok` (1, 3, 5, 10). Duplicated rather than imported to keep this
+ * `priceInPerMTok` (1, 3, 5, 10; re-measured 2026-09-28 after the catalog
+ * pricing sync, opus 5→4 and sonnet 3→2: same order, 1, 2, 4, 10). Duplicated rather than imported to keep this
  * module a zero-import port; inject `opts.ladder` to override. If the catalog
  * gains a tier, this constant and its test are what must change.
  * @type {readonly string[]}

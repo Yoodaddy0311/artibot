@@ -544,7 +544,7 @@ This runs the original flow: Phase 1 through 6, with automatic shutdown after re
 
 **되살리기**: `fable.enabled=true` + `phaseRoles.review=fable` + 10개 frontmatter `model: fable`(+ `scripts/generate-agent-index.js` 로 `agents/INDEX.md` 재생성). `scripts/ci/validate-model-policy.js` 가 플래그와 frontmatter 사이의 드리프트 게이트다.
 
-`deep-async`/`frontier` 별칭은 `resolveModel(alias, { agentType })` 로 **호출 에이전트를 넘겨야** allowlist·denylist 대조가 된다 — agentType 없이 부르면 게이트 ON 여부만 본다(현재 OFF 라 어느 쪽이든 opus 로 해석된다). 단일 진실원은 `lib/core/model-policy.js#resolveModel`. 실효 비용 계수는 `lib/core/model-catalog.js#getCostFactor` 를 따른다(문서의 ~2.6× 는 미검증 수치).
+`deep-async`/`frontier` 별칭은 `resolveModel(alias, { agentType })` 로 **호출 에이전트를 넘겨야** allowlist·denylist 대조가 된다 — agentType 없이 부르면 게이트 ON 여부만 본다(현재 OFF 라 어느 쪽이든 opus 로 해석된다). 단일 진실원은 `lib/core/model-policy.js#resolveModel`. 실효 비용 계수는 `lib/core/model-catalog.js#getCostFactor` 를 따른다(fable 값은 토크나이저 계수가 미측정인 추정치 — 문서에 수치를 옮겨 적지 않는다).
 
 ## Next Steps
 

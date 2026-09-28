@@ -12,7 +12,7 @@
 | Fact | Value |
 |---|---|
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
-| Agent count | 30 (2티어: 설계·검수 10종 fable / 구현 20종 opus — `artibot.config.json` `agents.modelPolicy.fable.enabled=true` + `fable.allowlist` 10종) |
+| Agent count | 30 (단일 티어: 전부 opus — `artibot.config.json` `agents.modelPolicy.fable.enabled=false`, 2026-09-23 오너 결정. `fable.allowlist` 10종은 되살리기용 휴면. 2026-09-02~09-23 에는 설계·검수 10종 fable 의 2티어였다) |
 | Skill count | 114 |
 | Command count | 80 |
 | Native orchestration | Claude Agent Teams API (`Agent(name=...)`, `SendMessage`, `TaskCreate/Update/List/Get`) |

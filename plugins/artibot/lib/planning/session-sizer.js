@@ -80,7 +80,7 @@ export const MAX_BUDGET_TOKENS = 2000000;
 const DEFAULT_TYPE = 'other';
 const DEFAULT_COMPLEXITY = 'medium';
 
-/** Default tokenizer coefficient (baseline = Opus 4.8 tokens-per-content). */
+/** Default tokenizer coefficient (baseline = opus tier, `model-catalog.js#BASELINE_TIER`, tokens-per-content). */
 const DEFAULT_TOKENIZER_COEFF = 1.0;
 
 // ---------------------------------------------------------------------------

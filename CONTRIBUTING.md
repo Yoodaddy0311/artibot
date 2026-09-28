@@ -105,11 +105,18 @@ description: >
 
 ### Model tier policy
 
-The fleet currently runs **two tiers**: of the 30 agents, 10 resolve to `fable`
-and the other 20 resolve to `opus`. The 10 are exactly the design/review roles
-listed in `artibot.config.json#/agents/modelPolicy/fable/allowlist` (owner
-decision, 2026-09-02). Default for a new agent is `model: opus`; write
-`model: fable` only for a design/review role that is on that allowlist.
+The fleet currently runs **one tier**: all 30 agents resolve to `opus` (owner
+decision, 2026-09-23 — the `fable` tier is dormant, `fable.enabled=false`, and
+`phaseRoles` is `{ build: opus, review: opus }`). From 2026-09-02 to 2026-09-23
+the fleet ran two tiers: the 10 design/review roles listed in
+`artibot.config.json#/agents/modelPolicy/fable/allowlist` resolved to `fable`.
+That allowlist, the `high` bucket's `fable` declaration and `FABLE_DENYLIST` are
+kept for re-enabling, not deleted. Default for a new agent is `model: opus`.
+
+**Re-enabling fable** (owner decision only): `fable.enabled=true` +
+`phaseRoles.review=fable` + the 10 allowlisted agents' frontmatter back to
+`model: fable` + regenerate `agents/INDEX.md` — all in one change, because
+`scripts/ci/validate-model-policy.js` fails on any partial flip.
 
 Tiers are named by tier, never by model ID. The tier → model ID mapping lives in
 `plugins/artibot/lib/core/model-catalog.js#MODELS`; do not hardcode a model ID in
@@ -117,15 +124,15 @@ docs, prompts, or agent files.
 
 | Bucket | Declared tier | Effective tier | Agents |
 |--------|---------------|----------------|--------|
-| `high` | `fable` | `fable` (allowlisted 10) / `opus` (rest) | 23 |
+| `high` | `fable` | `opus` (gate off; allowlisted 10 would be `fable` if re-enabled) | 23 |
 | `medium` | `opus` | `opus` | 7 |
 
 **Declared vs effective.** The whole `high` bucket *declares* `fable`, but the
-opt-in gate `artibot.config.json#/agents/modelPolicy/fable/enabled` is `true`
-and only the 10 agents on `fable.allowlist` resolve to `fable`; every other
-`fable` declaration in that bucket is demoted to `opus`. Effective tier is
-therefore `fable` for the 10 allowlisted agents and `opus` for the other 20.
-Read the effective value with
+opt-in gate `artibot.config.json#/agents/modelPolicy/fable/enabled` is `false`,
+so every `fable` declaration is demoted to `opus`. Effective tier is therefore
+`opus` for all 30 agents. (While the gate was `true`, 2026-09-02 to 2026-09-23,
+only the 10 agents on `fable.allowlist` resolved to `fable` and the other 20 to
+`opus`.) Read the effective value with
 `lib/core/model-policy.js#resolveModel` — the single source of truth — not from
 the bucket's declared `model` field (`getPolicyModel(name, config)` returns the
 *declared* tier and will say `fable` — and it needs that hydrated config as its
@@ -156,7 +163,7 @@ field against the effective tier — `resolveModel(name, {}, config)`, guarded b
 `getPolicyModel(name, config) === null` so an agent in no policy bucket is
 reported as unlisted rather than silently compared against a default. It exits
 non-zero on a mismatch. Re-enabling `fable.enabled` therefore requires updating
-the 20 allowlisted agents' frontmatter in the same change, or the gate fails.
+the 10 allowlisted agents' frontmatter in the same change, or the gate fails.
 (`security-reviewer` is excluded from the allowlist and hard-pinned to `opus` by
 `FABLE_DENYLIST`, because fable's refusal classifier false-positives on
 legitimate security work.)

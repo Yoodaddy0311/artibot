@@ -15,7 +15,7 @@
 | # | 결정 | 내용 |
 |---|---|---|
 | OD-1 | NL 자동 활성화 | **단계적 전환** Observe → Shadow → Canary(저위험만 자동) → GA. 커맨드는 고급 오버라이드로 유지. 파괴·배포·외부쓰기·제품결정은 단계와 무관하게 항상 사람 게이트 |
-| OD-2 | 모델 플릿 | **4티어 어휘**(Haiku/Sonnet/Opus/Fable)로 확장하되 Haiku·Sonnet 배정은 shadow 측정 후. 그전 실효 티어는 2티어(설계·검수 fable / 나머지 opus, v4.52.0) |
+| OD-2 | 모델 플릿 | **4티어 어휘**(Haiku/Sonnet/Opus/Fable)로 확장하되 Haiku·Sonnet 배정은 shadow 측정 후. 그전 실효 티어는 2티어(설계·검수 fable / 나머지 opus, v4.52.0) (2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus) |
 | OD-3 | 문서 거버넌스 | **설계 정본은 git 추적, 실행 산출물은 로컬 + 보존기간 규칙.** 사본 금지, 포인터 우선 |
 | OD-4 | 상태 저장소(2차 결정, 15:1x) | **권고안 채택** — F1 = JSONL 이벤트 + 파생 스냅샷 + 파일락 + CAS 를 `StateStore` 인터페이스 뒤에(`node:sqlite` 는 인터페이스 호환만, 나중), F3 = 위치는 worktree 가 공유하는 `git rev-parse --git-common-dir` 아래. → Replay Store·Checkpoint Store(§8)도 **같은 백엔드·같은 위치** |
 | OD-5 | "사람에게 묻기"(2차 결정, 15:1x) | **대화형 승인 = `AskUserQuestion`** (오너 표현 "questionUserAnswer" 는 설계 문서 명칭, 실제 도구는 `AskUserQuestion` — 레인 1 실측). 훅은 묻지 못하므로: 훅 `block + human-gate:HG-nn` → 모델이 **반드시 `AskUserQuestion`(권장 옵션 첫째 + "(권장)")** 으로 사람에게 묻고 답을 받은 뒤에만 진행. 비대화형 실행(autopilot·split 창)은 `PAUSE` + 원장 `human.asked` + 사람이 돌아와 답할 때까지 정지. C1 확정 |
@@ -335,7 +335,7 @@ v1.1 이 정한 것(정본 1개·파생 금지 7패턴·제자리 revision·아�
 ## 6. 미확인 (레인 표기 그대로 전파 — 요약하면서 삭제하지 않음)
 
 - **호스트 계약**: Agent 도구 `model` 파라미터가 tier alias 를 받는지(§3.2 Canary 전제) · 실행 중 서브에이전트 모델 전환 지원 여부 · CLAUDE.md 파일 include 지원 · 훅 페이로드에 미션 상관 id 부재(문서 근거만) · AskUserQuestion 발생을 잡는 훅 경로 · `message.usage` 필드 집합의 버전 간 안정성 · OTLP 메트릭 속성(수신기 없어 실측 불가).
-- **가격·모델**: 가격표 둘 중 어느 것이 현행인지(둘 다 틀렸을 가능성 포함) · Sonnet 5 정확한 ID · haiku `claude-haiku-4-5` vs `…-20251001` 관계 · `execution_profile.performance` 허용값 목록(04 예시는 `maximum` 1개만) · 5.1 tokenizerCoeff·비용 계수 2.6×.
+- **가격·모델**: 가격표 둘 중 어느 것이 현행인지(둘 다 틀렸을 가능성 포함) · Sonnet 5 정확한 ID · haiku `claude-haiku-4-5` vs `…-20251001` 관계 · `execution_profile.performance` 허용값 목록(04 예시는 `maximum` 1개만) · 5.1 tokenizerCoeff·비용 계수 2.6×. (2026-09-28 기준 `getCostFactor('fable')` 는 opus 가격 변경으로 3.25 추정치, tokenizerCoeff 는 여전히 미측정 · 2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus)
 - **라이브 발생률 전부**: system1/system2 분포(`agentTeam` 배제 비율) · §3.4 오판 경로 A~F 가 실런에서 밟힌 횟수 · `state.crossCheck.verdict="fail"` 이 실제 기록된 세션 존재 여부 · 훅 42·스킬 114·커맨드 79 의 발화·활성 횟수 · Human Checkpoints 가 AskUserQuestion 을 유발한 빈도 · `autopilot-nlu-trigger` 와 plan 힌트 동시 발화 빈도 · 라이브 split/compact 0회.
 - **원장·상태**: decision-events 디렉터리 미생성 원인(emitter 미배선 vs 발화 조건) · decision-trail 08-25 이후 공백 원인 · cache-roi 전부 0 원인 · `.artibot/ledger/*.jsonl` 내용(스키마 한 줄도 안 열음 — C1 샤딩 판정은 파일명 추론) · 정책 trail 5종 writer/보존 · 표류 원장이 1회인지 재발 중인지 · state.yaml 추적 시 diff 잡음 크기 · Windows `'a'` 플래그 단일 write 원자성(게이트로 고정 전까지 추론) · `lane-state.mjs` 쓰기 본문(레인 5 는 헤더·파서만 열람) · Ontology 자유형 파일 목록(오전 `ls` 1회).
 - **코드 미열람**: `lib/cognitive/router.js` 792줄 중 `classifyComplexity` 외 · `lib/planning/` 4파일 내용 · `commands/plan.md·ultraplan.md·sc.md` 본문(`/sc` 가 이미 NL→커맨드 매핑이면 §3.1 과 중복 가능) · `lib/autopilot/{cost-tracker,cost-predictor,goal-budget-aggregator}.js` 가 pause 로 이어지는지 · `cost-tracker` 의 `usage.costUsd` 원천 · `summarization.js` 실제 실행 여부 · `agent-evaluator` 점수의 학습 가중치 · `collectExperience` 하류 · `runtime/autopilot/` 12,089 파일 전수 잔재 판정(샘플링 기반, 리더는 파일 수만) · `reports/AUTOPILOT` 3,061 실세션 비율 · 플러그인 `docs/adr` 이동 시 깨지는 인용 수 · NR11 메모리 승격 게이트 실행 여부 · Ontology 리포 진입 파일 구성.
@@ -1055,7 +1055,7 @@ ts **`2026-09-03T09:23:47.193Z`**(= 18:23:47 KST), 내용 `recorder-stats 4 skip
 
 | ID | 질문(설계안 원문 요지) | 오너 결정 (2026-09-04 23:1x 확정) | 재결정 조건 |
 |---|---|---|---|
-| MP-1 | "조사" 어휘를 process(opus)/judge(fable) 로 분리하는가 | **분리.** 태깅은 작업 단위가 아니라 **산출물(판정 문장) 단위** | 없음 — 확정 |
+| MP-1 | "조사" 어휘를 process(opus)/judge(fable) 로 분리하는가 | **분리.** 태깅은 작업 단위가 아니라 **산출물(판정 문장) 단위** (2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus, judge 도 opus. 분리 태깅 자체는 유지) | 없음 — 확정 |
 | MP-2 | A안(역할이 이름을 이긴다) 허용 | **아니오, 지금은 불허.** D안으로 이름 축 안에서 달성 | 설계안 §4 측정이 "D 로도 부족"을 보이면 재상정. 임계는 오너 미특정 — `미확인` |
 | MP-3 | D안 신설(investigator·auditor 2종, allowlist 8→10, 로스터 28→30) | **예.** 단 §4 측정 계획과 함께 착수 | 없음 — 확정 |
 | MP-4 | 측정 저장소 어휘 `review.claim_audit` +1 | **예.** L2 D1 착지 선행 | 없음 — 확정 |

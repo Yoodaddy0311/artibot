@@ -207,7 +207,7 @@ INTAKE 가 `domains[] = [{ id, scopePaths[], rationale }]` 를 선언했을 때,
 **근거가 약한 이유** (없는 것을 고치지 않는다):
 1. 병목 측정치 0. `runtime/autopilot/` 에서 PLAN phase 소요 시간·planner 턴 수 분포를 잰 기록이 없다(세션 JSON `phases[]` 에 duration 은 있으나 v5 세션 1건뿐이고 `runtime/autopilot/` 은 vitest 잔재로 오염 — `ARTIBOT-5.0-DESIGN.md:209` "autopilot 기준선은 오염").
 2. n=1 실측(§1.5)에서 단일 planner 는 52 작업을 처리했고 적격 작업 간 충돌 0. 계획이 느려서 병렬이 막힌 것이 아니다.
-3. 비용은 확실히 오른다: planner 는 fable 티어(`config:65-78`), N 영역 = N 배 + 병합 라운드. 계수 2.6× 는 미검증(agent-coordination 규칙).
+3. 비용은 확실히 오른다: planner 는 fable 티어(`config:65-78`), N 영역 = N 배 + 병합 라운드. 계수 2.6× 는 미검증(agent-coordination 규칙). (2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus라 planner 도 opus)
 4. planner 가 `Agent` 도구가 없어(§1.1) 스폰은 리더가 해야 하고, 리더 컨텍스트 소모는 `/split` 실측에서 이미 사고 원인이었다(`skills/split/references/operations.md:24` "리더가 2.5KB 프롬프트를 창마다 복제").
 
 **그래도 남겨 둘 접합점** (①·③ 착지 후 Observe 수치로 켤 수 있게):
@@ -297,6 +297,6 @@ S1 만으로 완결되는 산출: "선언이 지켜졌는가" 의 **분모 있�
 
 - "보고서 §5" 의 원 문서 — `CHANGELOG.md:104` 외 출처 미발견.
 - PLAN phase 소요 시간·planner 턴 수의 라이브 분포 — `runtime/autopilot/` 오염(설계 `:209`)으로 측정 안 함. ② 판단의 전제 수치가 **없다**.
-- fable 티어 비용 계수(2.6×) — 미검증(agent-coordination 규칙 그대로).
+- fable 티어 비용 계수(2.6×) — 미검증(agent-coordination 규칙 그대로). (2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus. 2026-09-28 기준 `getCostFactor('fable')` 는 3.25 추정치)
 - Windows 대소문자 무시 FS 에서 B3 오탐이 실제로 난 적이 있는지 — 사례 0건 확인, 없다는 뜻은 아님.
 - `session-store.js` 가 `state.intake` 같은 신규 키를 resume 마이그레이션에서 보존하는지 — `:133-134` `schemaVersion` 스탬프만 확인, 마이그레이션 함수 본문 미열람.

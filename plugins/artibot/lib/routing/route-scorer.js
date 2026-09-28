@@ -16,7 +16,7 @@
  * `reliability`, `latency` and `quality` are constants and report
  * `measured:false`. `cost` is `measured:false` even though it is computed,
  * because the price table it derives from is itself unverified
- * (`model-catalog.js` fable factor 2.6 is explicitly an unmeasured estimate).
+ * (`model-catalog.js#getCostFactor('fable')` is explicitly an unmeasured estimate).
  * Do not read a scored route as evidence about a model.
  *
  * LAYER: L2 (auxiliary). The only import is `lib/core/model-catalog.js` (L1),
@@ -63,9 +63,11 @@ const TIER_ORDER = Object.freeze(['haiku', 'sonnet', 'opus', 'fable']);
 /**
  * Relative capability score per tier, 0..1.
  *
- * ESTIMATE, not a benchmark. Grounded only in the repo's own two-tier policy
- * (fable for design and inspection, opus for implementation —
- * `rules/artibot/agent-coordination.md`) and the catalog's price ordering.
+ * ESTIMATE, not a benchmark. Calibrated against the repo's two-tier policy in
+ * force before 2026-09-23 (fable for design and inspection, opus for
+ * implementation; since the 2026-09-23 owner decision the fleet is single-tier
+ * opus with fable dormant — `rules/artibot/agent-coordination.md`) and the
+ * catalog's price ordering. The values were not re-derived for that change.
  * Replace with eval results before anyone treats these as measurements.
  *
  * @type {Readonly<Record<string, number>>}

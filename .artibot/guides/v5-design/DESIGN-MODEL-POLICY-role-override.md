@@ -3,7 +3,7 @@
 > **오너 승인 전 구현 금지.** 설계안이다. 코드·테스트·config·에이전트 frontmatter 무변경. 이 파일 1개만 신설했다.
 > 작성: architect (team-handoff-9d6dc2, fable), 2026-09-04 13:5x KST · 기준 master @ `ca013e2c` (v4.54.0) · 경로는 `plugins/artibot/` 기준. 줄번호는 13:4x 워킹트리 측정값.
 > 계기: 오너 12:0x 제기 — "처리는 opus, 사고·판단·결정은 fable". 정본 `ARTIBOT-5.0-DESIGN.md` 부록 0-2 후속(2)(`:899~`)와 2차 plan `.artibot/split/next-batch-plan.md` (D)-4 → 오너 13:3x "설계안 작성 지시".
-> 상위 정본: `ARTIBOT-5.0-DESIGN.md` §0 OD-2(4티어 어휘, 실효 2티어) · §1-6(정책과 선택의 분리) · §3.2(라우팅 5개념) · 오너 결정 2026-09-02 "구현·테스트 = opus, 검수·설계 = fable"(`~/.claude/rules/artibot/agent-coordination.md`). `FABLE_DENYLIST`(security-reviewer)는 **이 설계의 범위 밖 — 건드리지 않는다.**
+> 상위 정본: `ARTIBOT-5.0-DESIGN.md` §0 OD-2(4티어 어휘, 실효 2티어) · §1-6(정책과 선택의 분리) · §3.2(라우팅 5개념) · 오너 결정 2026-09-02 "구현·테스트 = opus, 검수·설계 = fable"(`~/.claude/rules/artibot/agent-coordination.md`) (2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus). `FABLE_DENYLIST`(security-reviewer)는 **이 설계의 범위 밖 — 건드리지 않는다.**
 
 ---
 
@@ -135,7 +135,7 @@ frontmatter(`agents/*.md` 28 + INDEX): `model: fable` **8**(allowlist 와 정확
 | 4 | 측정 저장소 (iii) `review.claim_audit` 어휘 +1 승인 | **예(권장)** | v5 단일 원장 원칙(§3.6). L2 D1 착지가 선행 |
 | 5 | fable 스폰 **예산 상한**을 두는가(run 당 judge 스폰 수 또는 토큰) | 제안: 상한은 두지 않고 **집계만**(Observe). Canary 진입 시 재론 | 상한 근거 수치가 없다 — 없는 수치로 게이트를 만들면 다음 착시 |
 
-**이미 결정된 것(묻지 않음)**: 2티어 정책 자체(2026-09-02) · `FABLE_DENYLIST` 유지(refusal 오탐률 미측정 전 해제 금지) · 4티어 어휘 도입은 shadow 측정 후(OD-2) · 비용 계수 2.6× 는 미검증 표기 유지.
+**이미 결정된 것(묻지 않음)**: 2티어 정책 자체(2026-09-02) · `FABLE_DENYLIST` 유지(refusal 오탐률 미측정 전 해제 금지) · 4티어 어휘 도입은 shadow 측정 후(OD-2) · 비용 계수 2.6× 는 미검증 표기 유지. (2026-09-23 오너 결정으로 fable 휴면 — 현행은 단일 티어 opus. 2026-09-28 기준 `getCostFactor('fable')` 는 opus 가격 변경으로 3.25 추정치)
 
 ---
 
