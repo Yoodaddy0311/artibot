@@ -217,6 +217,21 @@ describe('appendMissionEvent — the compiler-name allowlist map', () => {
     expect(line.data.title).toBe('build the dashboard');
   });
 
+  it.each([
+    ['mission.created', 'mission.created'],
+    ['mission-candidate-deferred', 'mission.candidate_deferred'],
+    ['mission.candidate_deferred', 'mission.candidate_deferred'],
+  ])('lands the compiler name %s on its own literal envelope as %s', (compilerName, eventName) => {
+    // One row per map key: since SH-30 the name on disk comes from the literal
+    // branch of missionLedgerEnvelope, not from the map value passed through.
+    const status = append(makeState(), {
+      meta: { ledgerEvent: compilerName }, contract: { goal: 'g' }, deferred: true,
+    });
+    expect(status).toEqual({ ok: true, status: 'appended', event: eventName });
+    const lines = readLedger();
+    expect(lines.map((l) => [l.event, l.source])).toEqual([[eventName, 'hook']]);
+  });
+
   it('records a non-substantive candidate with its own reason and no signals list', () => {
     append(makeState(), { meta: { ledgerEvent: 'mission-candidate-deferred' }, deferred: false });
     const [line] = readLedger();
@@ -393,5 +408,83 @@ describe('appendMissionEvent — idempotency_key', () => {
     const line = JSON.parse(raw);
     expect(line.idempotency_key).toMatch(/^mission\.candidate_deferred:/);
     expect(line.data).not.toHaveProperty('evidence_refs');
+  });
+});
+
+/**
+ * SH-30 characterization: the exact bytes each mission event puts on disk.
+ *
+ * Written BEFORE the emitter was reshaped for the hook-emitter scanner, and
+ * green on the code it characterizes, so a rewrite has to reproduce these
+ * lines byte for byte rather than satisfy a looser matcher. Key ORDER is part
+ * of the pin — a whole-file string compare, not a deep-equal.
+ *
+ * ONE field is masked: `pid`, which is `process.pid`. It is asserted to BE
+ * this process's pid before it is replaced, so the mask cannot hide a wrong
+ * value. `ts` is fixed by NOW and `seq` by `resetSeq()` in `beforeEach`, so
+ * both are compared as written. The SH-14 `idempotency_key` is compared in
+ * full, digest included.
+ */
+describe('appendMissionEvent — emitted bytes (SH-30 characterization)', () => {
+  /** @returns {string} the whole ledger file with this process's pid masked */
+  function maskedLedger() {
+    const raw = readFileSync(ledgerPath(), 'utf-8');
+    for (const line of raw.split('\n').filter((l) => l.trim())) {
+      expect(JSON.parse(line).pid).toBe(process.pid);
+    }
+    return raw.replaceAll(`"pid":${process.pid},`, '"pid":"<pid>",');
+  }
+
+  /** The envelope head every line shares, up to and including `mission_id`. */
+  const head = (event) => `{"v":1,"ts":"2023-11-14T22:13:20.000Z","event":"${event}",`
+    + '"session_id":"sess-mledger-0001","source":"hook","pid":"<pid>","seq":0,'
+    + '"mission_id":"M-20231114-Ssessmled",';
+  const deferredLine = head('mission.candidate_deferred')
+    + '"idempotency_key":"mission.candidate_deferred:M-20231114-Ssessmled:'
+    + 'a6bf2474-77cd-4b1b-a4dc-a2d3ef6029a5:e1aa4bfcbd4b5370",'
+    + '"data":{"reason":"substantive-gate:deferred","signals":["s1","s2"],'
+    + '"title":"build the dashboard"}}\n';
+
+  it.each([
+    [
+      'mission.created, keyed',
+      makePromptState,
+      { meta: { ledgerEvent: 'mission.created' }, contract: { goal: 'ship it', intent_revision: 2 } },
+      head('mission.created')
+        + '"idempotency_key":"mission.created:M-20231114-Ssessmled:'
+        + 'a6bf2474-77cd-4b1b-a4dc-a2d3ef6029a5:b667c27b44feb9e3",'
+        + '"data":{"title":"ship it","intent_revision":2}}\n',
+    ],
+    [
+      'mission.created, keyless (no prompt id)',
+      () => makeState(),
+      { meta: { ledgerEvent: 'mission.created' }, contract: { goal: 'ship it', intent_revision: 2 } },
+      head('mission.created') + '"data":{"title":"ship it","intent_revision":2}}\n',
+    ],
+    [
+      'mission.candidate_deferred from the hyphenated compiler spelling',
+      makePromptState,
+      { meta: { ledgerEvent: 'mission-candidate-deferred' }, deferred: true, signals: ['s1', 's2'] },
+      deferredLine,
+    ],
+    [
+      'mission.candidate_deferred from the allowlist spelling',
+      makePromptState,
+      { meta: { ledgerEvent: 'mission.candidate_deferred' }, deferred: true, signals: ['s1', 's2'] },
+      deferredLine,
+    ],
+    [
+      'mission.candidate_deferred, not substantive',
+      makePromptState,
+      { meta: { ledgerEvent: 'mission-candidate-deferred' }, deferred: false },
+      head('mission.candidate_deferred')
+        + '"idempotency_key":"mission.candidate_deferred:M-20231114-Ssessmled:'
+        + 'a6bf2474-77cd-4b1b-a4dc-a2d3ef6029a5:f4a93dcdca09e31f",'
+        + '"data":{"reason":"substantive-gate:not-substantive","signals":[],'
+        + '"title":"build the dashboard"}}\n',
+    ],
+  ])('writes %s byte for byte', (_label, stateOf, result, expected) => {
+    expect(append(stateOf(PROMPT_ID), result).status).toBe('appended');
+    expect(maskedLedger()).toBe(expected);
   });
 });

@@ -118,6 +118,20 @@ export const PROJECTION_RELATIVE = path.join('.artibot', 'state.yaml');
  */
 export const CAS_SKIPPED_WARNING = 'cas:skipped';
 
+/**
+ * The `source` values a store may stamp on its `state.updated` events.
+ *
+ * An ALLOWLIST, checked at construction: `'hook'` is what
+ * `lib/runtime/middleware/tasks.js#openMissionStore` passes from inside the
+ * UserPromptSubmit pipeline, and `'supervisor'` is the default the `/split`
+ * task feed spells out. Each value has its own literal envelope in
+ * {@link stateUpdatedEnvelope}, which is what lets the hook-emitter gate read
+ * this emitter's source statically instead of listing it as a scanner
+ * exception (SH-30). A value added here without a branch there is refused at
+ * emit time rather than written under a source nobody classified.
+ */
+export const STATE_UPDATED_SOURCES = Object.freeze(['hook', 'supervisor']);
+
 /** Hex characters of the planned-records digest in a `state.updated` key. */
 const RECORDS_HASH_CHARS = 12;
 
@@ -190,7 +204,8 @@ export {
  *   "unresolved", which selects the reported fallback.
  * @property {string} [project] - Project name; defaults to the basename of `projectRoot`.
  * @property {() => Date} [now] - Clock port.
- * @property {string} [source='supervisor'] - Ledger envelope `source`.
+ * @property {string} [source='supervisor'] - Ledger envelope `source`; one of
+ *   {@link STATE_UPDATED_SOURCES}, anything else throws.
  * @property {boolean} [renderProjectionFile=true] - Write `.artibot/state.yaml` after commits.
  */
 
@@ -220,6 +235,11 @@ export function createStateStore(options) {
   }
   if (typeof sessionId !== 'string' || sessionId === '') {
     throw new TypeError('createStateStore: sessionId is required — ledger envelopes require session_id');
+  }
+  if (!STATE_UPDATED_SOURCES.includes(source)) {
+    throw new TypeError(
+      `createStateStore: source must be one of ${STATE_UPDATED_SOURCES.join(', ')} — got ${JSON.stringify(source)}`,
+    );
   }
 
   const gitCommonDir = typeof resolveGitCommonDir === 'function' ? safeResolveGitDir(resolveGitCommonDir) : null;
@@ -357,6 +377,49 @@ function commitLocked(ctx, { missionId, reason, expectedVersion, plan }) {
 }
 
 /**
+ * The `state.updated` envelope, written as one literal per allowed source.
+ *
+ * ONE COMPLETE LITERAL OBJECT PER VALUE of {@link STATE_UPDATED_SOURCES}, so
+ * the hook-emitter gate reads the event name and the source of each branch
+ * statically (SH-30). Complete rather than a shared head spread into both: the
+ * key order below — event, mission_id, session_id, source, ts, then
+ * idempotency_key before data — is what the port receives, and the SH-30
+ * characterization block in `tests/project-state/state-manager.test.js` pins it
+ * as a string. Any other source gets `null`, never a fallback envelope.
+ *
+ * @param {string} source - The store's `ctx.source`.
+ * @param {{missionId: string, sessionId: string, ts: string, key: string|null, data: object}} parts
+ * @returns {object|null} The envelope, or `null` for a source with no branch.
+ */
+function stateUpdatedEnvelope(source, { missionId, sessionId, ts, key, data }) {
+  // Omitted, never blank, when the key material is unusable: see the builder.
+  const keyed = key === null ? {} : { idempotency_key: key };
+  if (source === 'hook') {
+    return {
+      event: 'state.updated',
+      mission_id: missionId,
+      session_id: sessionId,
+      source: 'hook',
+      ts,
+      ...keyed,
+      data,
+    };
+  }
+  if (source === 'supervisor') {
+    return {
+      event: 'state.updated',
+      mission_id: missionId,
+      session_id: sessionId,
+      source: 'supervisor',
+      ts,
+      ...keyed,
+      data,
+    };
+  }
+  return null;
+}
+
+/**
  * Append the `state.updated` event that pairs 1:1 with this store write.
  *
  * @param {object} ctx - Store context.
@@ -371,17 +434,20 @@ function emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior, reaso
   const status = draft.active_missions[missionId]?.status
     ?? prior.active_missions[missionId]?.status
     ?? 'queued';
-  // Omitted, never blank, when the key material is unusable: see the builder.
   const key = stateUpdatedIdempotencyKey(missionId, nextVersion, records);
-  const envelope = {
-    event: 'state.updated',
-    mission_id: missionId,
-    session_id: ctx.sessionId,
-    source: ctx.source,
-    ts,
-    ...(key === null ? {} : { idempotency_key: key }),
+  const envelope = stateUpdatedEnvelope(ctx.source, {
+    missionId, sessionId: ctx.sessionId, ts, key,
     data: { state_version: nextVersion, status, reason },
-  };
+  });
+  if (envelope === null) {
+    return {
+      ok: false,
+      errors: [
+        `state.updated{state_version:${nextVersion}} has no envelope for source ${JSON.stringify(ctx.source)}`,
+        'store write abandoned — a write with no paired event breaks lost-update detection',
+      ],
+    };
+  }
   let outcome;
   try {
     outcome = ctx.appendEvent(envelope);
