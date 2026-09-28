@@ -186,6 +186,293 @@ describe('renderModelPolicy', () => {
   });
 });
 
+describe('renderModelPolicy — effective values injected by the caller', () => {
+  // 목표: dispatch 가 명시적으로 해석기를 넘길 때만 실효값(+override 출처)을 보인다.
+  // 기본 경로는 사용자 파일을 읽지 않는다 — 창 프롬프트가 머신 상태에 의존하면 안 된다.
+  //
+  // 이 절이 못 보는 것: 주입된 해석기가 사용자 override 를 올바르게 계산하는지
+  // (그건 해석기 소유 모듈의 테스트 몫), 그리고 dispatch 가 실제로 주입하는지.
+  const FAILED = '(model policy 미해석)';
+  const SHIPPED_HEADER = '[모델 운용 정책 — artibot.config.json#/agents/modelPolicy 를 resolveModel 로 해석한 값이다]';
+  const TAIL = '- 창(터미널) 메인 세션 모델은 창이 못 바꾼다 — 오너가 그 터미널에서 /model 로 조정한다.';
+  const row = (label, pairs) => `- ${label}: Agent 호출 시 model 을 명시한다 (${pairs})`;
+  const BUILD = '구현·테스트·게이트 실행 서브에이전트';
+  const REVIEW = '검수(교차 검수·최종 inspection)';
+  const DESIGN = '설계(브리프·아키텍처)';
+
+  /** Today's algorithm, verbatim — the oracle the no-injection path must keep matching. */
+  const legacyRender = (config) => {
+    try {
+      const rows = [
+        [BUILD, ['tdd-guide', 'backend-developer']],
+        [REVIEW, ['code-reviewer']],
+        [DESIGN, ['architect']],
+      ].map(([label, agents]) => row(label, agents.map((a) => {
+        const tier = resolveModel(a, {}, config);
+        if (typeof tier !== 'string' || !tier) throw new Error('unresolved');
+        return `${a}→${tier}`;
+      }).join(', ')));
+      return [SHIPPED_HEADER, ...rows, TAIL].join('\n');
+    } catch {
+      return FAILED;
+    }
+  };
+
+  const SYNTHETIC = Object.freeze({
+    fableTwoTier: {
+      agents: {
+        modelPolicy: {
+          high: { model: 'fable', agents: ['tdd-guide', 'backend-developer', 'code-reviewer', 'architect'] },
+          fable: { enabled: true, allowlist: ['code-reviewer', 'architect'] },
+          phaseRoles: { build: 'opus', review: 'fable' },
+        },
+      },
+    },
+    mediumSonnet: { agents: { modelPolicy: { high: { model: 'opus', agents: [] }, medium: { model: 'sonnet', agents: ['tdd-guide'] } } } },
+    empty: {},
+  });
+
+  /** Captured from the pre-change module (base b3be03f5) for the configs above. */
+  const PINNED = Object.freeze({
+    fableTwoTier: [SHIPPED_HEADER, row(BUILD, 'tdd-guide→opus, backend-developer→opus'),
+      row(REVIEW, 'code-reviewer→fable'), row(DESIGN, 'architect→fable'), TAIL].join('\n'),
+    mediumSonnet: [SHIPPED_HEADER, row(BUILD, 'tdd-guide→sonnet, backend-developer→opus'),
+      row(REVIEW, 'code-reviewer→opus'), row(DESIGN, 'architect→opus'), TAIL].join('\n'),
+    empty: [SHIPPED_HEADER, row(BUILD, 'tdd-guide→opus, backend-developer→opus'),
+      row(REVIEW, 'code-reviewer→opus'), row(DESIGN, 'architect→opus'), TAIL].join('\n'),
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  describe('no injection — byte-identical to the pre-change output', () => {
+    it('matches the pinned text for every synthetic config, with and without an empty opts', () => {
+      for (const [name, cfg] of Object.entries(SYNTHETIC)) {
+        expect(renderModelPolicy(cfg), name).toBe(PINNED[name]);
+        expect(renderModelPolicy(cfg, {}), name).toBe(PINNED[name]);
+        expect(renderModelPolicy(cfg, undefined), name).toBe(PINNED[name]);
+        expect(renderModelPolicy(cfg, { resolveEffective: undefined }), name).toBe(PINNED[name]);
+        expect(legacyRender(cfg), `oracle ${name}`).toBe(PINNED[name]);
+      }
+    });
+
+    it('matches the legacy algorithm for the shipped config', async () => {
+      const config = await loadConfig();
+      const expected = legacyRender(config);
+      expect(expected).not.toBe(FAILED);
+      expect(renderModelPolicy(config)).toBe(expected);
+      expect(renderModelPolicy(config, {})).toBe(expected);
+    });
+
+    it('never reads the user model-routing file, even when one sits in every state-dir seam', async () => {
+      const home = mkTmp();
+      const stateDir = path.join(home, 'state');
+      const overrides = JSON.stringify({
+        schemaVersion: 1,
+        plugins: {
+          artibot: {
+            default: 'haiku',
+            agents: { 'tdd-guide': 'haiku', 'backend-developer': 'haiku', 'code-reviewer': 'haiku', architect: 'haiku' },
+            phaseRoles: { build: 'haiku', review: 'haiku' },
+          },
+        },
+      });
+      for (const dir of [path.join(home, '.claude', 'artibot'), stateDir]) {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'model-routing.json'), overrides);
+      }
+      vi.stubEnv('HOME', home);
+      vi.stubEnv('USERPROFILE', home);
+      vi.stubEnv('ARTIBOT_STATE_DIR', stateDir);
+      vi.stubEnv('ARTIBOT_STATE_DIR_HOME', home);
+      vi.resetModules();
+      const fresh = await import('../../lib/git/split-brief.js');
+      const freshConfig = await import('../../lib/core/config.js');
+
+      for (const [name, cfg] of Object.entries(SYNTHETIC)) {
+        const out = fresh.renderModelPolicy(cfg);
+        expect(out, name).toBe(PINNED[name]);
+        expect(out, name).not.toContain('haiku');
+      }
+
+      // Positive control: the planted file is exactly where a reader would look,
+      // and consuming it DOES change the block — so the equality above is not vacuous.
+      const planted = path.join(freshConfig.resolveArtibotDir(), 'model-routing.json');
+      expect(fs.existsSync(planted)).toBe(true);
+      const readsFile = (qualified) => ({
+        model: JSON.parse(fs.readFileSync(planted, 'utf-8')).plugins.artibot.agents[qualified.split(':')[1]],
+        source: 'user agent',
+      });
+      const injected = fresh.renderModelPolicy(SYNTHETIC.empty, { resolveEffective: readsFile });
+      expect(injected).toContain('code-reviewer→haiku (source: user agent)');
+    });
+  });
+
+  describe('injection — effective values with override provenance', () => {
+    const CALLS = [
+      ['artibot:tdd-guide', 'build'],
+      ['artibot:backend-developer', 'build'],
+      ['artibot:code-reviewer', 'review'],
+      ['artibot:architect', undefined],
+    ];
+
+    it('calls the resolver once per representative agent with the qualified name and phase role', () => {
+      const seen = [];
+      renderModelPolicy(SYNTHETIC.empty, {
+        resolveEffective: (agent, ctx) => { seen.push([agent, ctx]); return 'tier-x'; },
+      });
+      expect(seen.map(([a]) => a)).toEqual(CALLS.map(([a]) => a));
+      for (const [i, [, role]] of CALLS.entries()) {
+        expect(seen[i][1]).toBeTypeOf('object');
+        expect(seen[i][1].role).toBe(role);
+      }
+    });
+
+    it('prints the resolver values (not resolveModel) and switches the header to "effective incl. overrides"', () => {
+      const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a) => `eff-${a.split(':')[1]}` });
+      const lines = out.split('\n');
+      expect(lines).toHaveLength(5);
+      expect(lines[0]).not.toBe(SHIPPED_HEADER);
+      expect(lines[0]).toMatch(/^\[모델 운용 정책 — .*실효값.*\]$/);
+      expect(lines[0]).toMatch(/override/);
+      expect(lines[1]).toBe(row(BUILD, 'tdd-guide→eff-tdd-guide, backend-developer→eff-backend-developer'));
+      expect(lines[2]).toBe(row(REVIEW, 'code-reviewer→eff-code-reviewer'));
+      expect(lines[3]).toBe(row(DESIGN, 'architect→eff-architect'));
+      expect(lines[4]).toBe(TAIL);
+    });
+
+    it('pins the resolveEffectiveModel shape { model, source, reason }: model plus "(source: s; reason)"', () => {
+      const results = {
+        'artibot:tdd-guide': { model: 'sonnet', source: 'user-agent', reason: 'plugins.artibot.agents' },
+        'artibot:backend-developer': { model: 'opus', source: 'user-phase', reason: 'phaseRoles.build' },
+        'artibot:code-reviewer': { model: 'sonnet', source: 'user-agent', reason: 'plugins.artibot.agents' },
+        'artibot:architect': { model: 'opus', source: 'shipped-policy', reason: '' },
+      };
+      const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a) => results[a] });
+      const lines = out.split('\n');
+      expect(lines[1]).toBe(row(BUILD,
+        'tdd-guide→sonnet (source: user-agent; plugins.artibot.agents), backend-developer→opus (source: user-phase; phaseRoles.build)'));
+      expect(lines[2]).toBe(row(REVIEW, 'code-reviewer→sonnet (source: user-agent; plugins.artibot.agents)'));
+      expect(lines[3]).toBe(row(DESIGN, 'architect→opus (source: shipped-policy)'));
+    });
+
+    it('pins the landed 5-field shape { model, source, reason, requested, scope }: extra fields of any type are ignored', () => {
+      const base = { model: 'sonnet', source: 'user-agent', reason: 'plugins.artibot.agents' };
+      const results = {
+        'artibot:tdd-guide': { model: 'sonnet', source: 'user-agent', reason: 'plugins.artibot.agents', requested: 'sonnet', scope: 'agent' },
+        'artibot:backend-developer': { model: 'opus', source: 'shipped', reason: '', requested: null, scope: { plugin: 'artibot' } },
+        'artibot:code-reviewer': { ...base, requested: ['sonnet', 'opus'], scope: [] },
+        'artibot:architect': { ...base, requested: 42, scope: () => 'agent' },
+      };
+      const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a) => results[a] });
+      const expected = (a) => `${a}→sonnet (source: user-agent; plugins.artibot.agents)`;
+      const lines = out.split('\n');
+      expect(out).not.toBe(FAILED);
+      expect(lines[1]).toBe(row(BUILD, `${expected('tdd-guide')}, backend-developer→opus (source: shipped)`));
+      expect(lines[2]).toBe(row(REVIEW, expected('code-reviewer')));
+      expect(lines[3]).toBe(row(DESIGN, expected('architect')));
+    });
+
+    it('stays tolerant: tier for model, reason alone, no provenance at all', () => {
+      const results = {
+        'artibot:tdd-guide': { tier: 'sonnet', source: 'user agent' },
+        'artibot:backend-developer': { tier: 'opus', reason: 'user phase' },
+        'artibot:code-reviewer': 'sonnet',
+        'artibot:architect': { tier: 'opus' },
+      };
+      const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a) => results[a] });
+      const lines = out.split('\n');
+      expect(lines[1]).toBe(row(BUILD, 'tdd-guide→sonnet (source: user agent), backend-developer→opus (reason: user phase)'));
+      expect(lines[2]).toBe(row(REVIEW, 'code-reviewer→sonnet'));
+      expect(lines[3]).toBe(row(DESIGN, 'architect→opus'));
+    });
+
+    it('renders every source label — none is special-cased as "the shipped one"', () => {
+      const results = {
+        'artibot:tdd-guide': { model: 'opus', source: 'shipped' },
+        'artibot:backend-developer': { model: 'opus', source: 'default' },
+        'artibot:code-reviewer': { model: 'opus', source: '', reason: '' },
+        'artibot:architect': { model: 'opus', source: null, reason: null },
+      };
+      const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a) => results[a] });
+      const lines = out.split('\n');
+      expect(lines[1]).toBe(row(BUILD, 'tdd-guide→opus (source: shipped), backend-developer→opus (source: default)'));
+      expect(lines[2]).toBe(row(REVIEW, 'code-reviewer→opus'));
+      expect(lines[3]).toBe(row(DESIGN, 'architect→opus'));
+    });
+
+    it('ignores config when injected — the resolver owns resolution', () => {
+      const poison = new Proxy({}, { get() { throw new Error('boom'); } });
+      const out = renderModelPolicy(poison, { resolveEffective: () => 'tier-x' });
+      expect(out).not.toBe(FAILED);
+      expect(out).toContain('code-reviewer→tier-x');
+    });
+  });
+
+  describe('injection — fail-closed, never a silent fallback to shipped values', () => {
+    const bad = {
+      throws: () => { throw new Error('resolver down'); },
+      emptyString: () => '',
+      nullResult: () => null,
+      undefinedResult: () => undefined,
+      numberResult: () => 3,
+      emptyObject: () => ({}),
+      emptyModel: () => ({ model: '' }),
+      whitespaceTier: () => ({ tier: 'op us' }),
+      nonStringSource: () => ({ model: 'opus', source: 5 }),
+      multilineSource: () => ({ model: 'opus', source: 'user\nagent' }),
+      nonStringReason: () => ({ model: 'opus', source: 'user-agent', reason: { why: 'x' } }),
+      multilineReason: () => ({ model: 'opus', source: 'user-agent', reason: 'a\r\nb' }),
+      promise: () => Promise.resolve('opus'),
+    };
+    for (const [name, fn] of Object.entries(bad)) {
+      it(`returns "${FAILED}" when the resolver result is invalid: ${name}`, () => {
+        expect(renderModelPolicy(SYNTHETIC.empty, { resolveEffective: fn })).toBe(FAILED);
+      });
+    }
+
+    /** Render with `resolveEffective`, then wait a macrotask and return any unhandled rejections. */
+    const renderAndCollectLeaks = async (resolveEffective) => {
+      const leaked = [];
+      const onLeak = (reason) => leaked.push(reason);
+      process.on('unhandledRejection', onLeak);
+      try {
+        const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { out, leaked };
+      } finally {
+        process.off('unhandledRejection', onLeak);
+      }
+    };
+
+    it('fails closed on a rejecting async resolver without leaking an unhandled rejection', async () => {
+      const { out, leaked } = await renderAndCollectLeaks(async () => { throw new Error('async-boom'); });
+      expect(out).toBe(FAILED);
+      expect(leaked).toEqual([]);
+    });
+
+    it('fails closed when the result is a thenable whose then accessor throws, without a leak', async () => {
+      const hostile = Object.defineProperty({}, 'then', { get() { throw new Error('hostile then'); } });
+      const { out, leaked } = await renderAndCollectLeaks(() => hostile);
+      expect(out).toBe(FAILED);
+      expect(leaked).toEqual([]);
+    });
+
+    it('fails the whole block when only one agent is invalid (no partial block)', () => {
+      const fn = (a) => (a === 'artibot:architect' ? '' : 'opus');
+      expect(renderModelPolicy(SYNTHETIC.empty, { resolveEffective: fn })).toBe(FAILED);
+    });
+
+    for (const [name, value] of Object.entries({ nullValue: null, stringValue: 'opus', objectValue: {}, numberValue: 1 })) {
+      it(`returns "${FAILED}" when resolveEffective is present but not a function: ${name}`, () => {
+        expect(renderModelPolicy(SYNTHETIC.empty, { resolveEffective: value })).toBe(FAILED);
+      });
+    }
+  });
+});
+
 describe('missingSections', () => {
   it('defaults to 소유/allowlist and 완료', () => {
     expect(DEFAULT_REQUIRED_SECTIONS).toHaveLength(2);

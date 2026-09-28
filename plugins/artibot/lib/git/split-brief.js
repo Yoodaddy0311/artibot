@@ -105,32 +105,109 @@ export function extractReportContract(splitMdText) {
   return m[1].replace(/\r\n/g, '\n').trim();
 }
 
-/** Representative agents per role; the tier text comes from `resolveModel`, never from here. */
+/**
+ * Representative agents per role; the tier text comes from the resolver, never from here.
+ * The third element is the phase role an injected `resolveEffective` receives
+ * (the design row has none); the default path does not pass it to `resolveModel`.
+ */
 const POLICY_ROLES = Object.freeze([
-  ['구현·테스트·게이트 실행 서브에이전트', ['tdd-guide', 'backend-developer']],
-  ['검수(교차 검수·최종 inspection)', ['code-reviewer']],
-  ['설계(브리프·아키텍처)', ['architect']],
+  ['구현·테스트·게이트 실행 서브에이전트', ['tdd-guide', 'backend-developer'], 'build'],
+  ['검수(교차 검수·최종 inspection)', ['code-reviewer'], 'review'],
+  ['설계(브리프·아키텍처)', ['architect'], undefined],
 ]);
 
+const SHIPPED_HEADER = '[모델 운용 정책 — artibot.config.json#/agents/modelPolicy 를 resolveModel 로 해석한 값이다]';
+const EFFECTIVE_HEADER = '[모델 운용 정책 — 사용자 override 를 포함한 실효값이다 (호출자가 주입한 resolveEffective 로 해석, 괄호 = 해석 출처(source; reason))]';
+
+/** Optional printable text field: absent/null/'' → '', a one-line string → trimmed, anything else throws. */
+function provenanceText(agent, key, value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string' || /[\r\n]/.test(value)) {
+    throw new Error(`resolveEffective(artibot:${agent}) returned an unprintable ${key}`);
+  }
+  return value.trim();
+}
+
+/** Shipped value for one agent — the pre-injection behavior, unchanged. */
+function shippedEntry(agent, config) {
+  const tier = resolveModel(agent, {}, config);
+  if (typeof tier !== 'string' || !tier) throw new Error(`resolveModel(${agent}) returned ${JSON.stringify(tier)}`);
+  return `${agent}→${tier}`;
+}
+
 /**
- * Render the model-operating-policy block for a window prompt from
- * `lib/core/model-policy.js#resolveModel`. No model IDs or tiers are written
- * in this file: flip `artibot.config.json#/agents/modelPolicy` and the text
- * follows. Returns `(model policy 미해석)` when resolution fails, so a broken
- * policy shows up in the prompt instead of a stale guess.
+ * Effective value for one agent from the caller's resolver. Throws on any
+ * result it cannot render faithfully, so the block degrades as a whole.
+ */
+function effectiveEntry(agent, role, resolveEffective) {
+  const result = resolveEffective(`artibot:${agent}`, { role });
+  const obj = result !== null && typeof result === 'object' ? result : null;
+  const tier = typeof result === 'string' ? result : (obj?.model ?? obj?.tier);
+  if (typeof tier !== 'string' || !/^\S+$/.test(tier)) {
+    // An async resolver hands back a Promise; if it rejects, nobody else holds it,
+    // and an unhandled rejection can crash the dispatching process. Promise.resolve
+    // adopts any thenable and turns a throwing `then` accessor into a rejection.
+    if (result !== null && (typeof result === 'object' || typeof result === 'function')) {
+      Promise.resolve(result).catch(() => {});
+    }
+    throw new Error(`resolveEffective(artibot:${agent}) returned no usable tier`);
+  }
+  const source = provenanceText(agent, 'source', obj?.source);
+  const reason = provenanceText(agent, 'reason', obj?.reason);
+  if (source) return `${agent}→${tier} (source: ${source}${reason ? `; ${reason}` : ''})`;
+  return reason ? `${agent}→${tier} (reason: ${reason})` : `${agent}→${tier}`;
+}
+
+/**
+ * Render the model-operating-policy block for a window prompt. No model IDs
+ * or tiers are written in this file: the values come from a resolver.
+ *
+ * - Default (no `opts.resolveEffective`): `lib/core/model-policy.js#resolveModel`
+ *   over `config`, byte-identical to the pre-injection output. Flip
+ *   `artibot.config.json#/agents/modelPolicy` and the text follows. No user
+ *   file is read — a window prompt must not depend on the dispatching
+ *   machine's state unless the caller says so.
+ * - Injected: `opts.resolveEffective(qualifiedAgent, { role })` is called per
+ *   representative agent with the QUALIFIED name `artibot:<name>` (never the
+ *   bare name) and `role` = `build` (구현 row), `review` (검수 row) or
+ *   `undefined` (설계 row); `config` is not consulted.
+ *   The resolver returns either a non-empty tier/model string, rendered with no
+ *   parentheses, or an object — the user-override resolver `resolveEffectiveModel`
+ *   returns `{ model, source, reason, requested, scope }`. Only `model` (or
+ *   `tier`), `source` and `reason` are read; every other field, of any type, is
+ *   ignored and never fails the block. A
+ *   non-empty `source` is always rendered, whatever its label (no label is
+ *   treated as "the shipped one"): `name→tier (source: <source>)`, or
+ *   `(source: <source>; <reason>)` when `reason` is non-empty too; a `reason`
+ *   without a `source` renders as `(reason: <reason>)`. The header says the
+ *   values are effective ones including user overrides. A synchronous
+ *   resolver is required — a Promise has no tier and fails (a rejection is
+ *   absorbed, so it cannot surface as an unhandled rejection).
+ *   Adapter details: when both `model` and `tier` are present, `model` wins;
+ *   a whitespace-only `source`/`reason` counts as absent (no parentheses);
+ *   `source`/`reason` are rendered verbatim, not escaped; and `model` is not
+ *   checked against tier names — a resolver returning a model ID shows it
+ *   as-is, so the adapter owns what it returns.
+ *
+ * Returns `(model policy 미해석)` when resolution fails — including a present
+ * but non-function `resolveEffective`, a throwing resolver, or any result that
+ * is not one of the two shapes above — so a broken policy shows up in the
+ * prompt instead of a stale guess, and an injected run never falls back to
+ * shipped values while claiming overrides were applied.
  *
  * @param {object|null|undefined} config - loaded `artibot.config.json` (passed through to `resolveModel`)
+ * @param {{ resolveEffective?: (qualifiedAgent: string, ctx: { role: ('build'|'review'|undefined) }) => (string|{ model?: string, tier?: string, source?: string|null, reason?: string|null }) }} [opts]
  * @returns {string}
  */
-export function renderModelPolicy(config) {
+export function renderModelPolicy(config, opts = {}) {
   try {
-    const lines = ['[모델 운용 정책 — artibot.config.json#/agents/modelPolicy 를 resolveModel 로 해석한 값이다]'];
-    for (const [label, agents] of POLICY_ROLES) {
-      const tiers = agents.map((a) => {
-        const tier = resolveModel(a, {}, config);
-        if (typeof tier !== 'string' || !tier) throw new Error(`resolveModel(${a}) returned ${JSON.stringify(tier)}`);
-        return `${a}→${tier}`;
-      });
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const { resolveEffective } = options;
+    const injected = resolveEffective !== undefined;
+    if (injected && typeof resolveEffective !== 'function') throw new TypeError('resolveEffective must be a function');
+    const lines = [injected ? EFFECTIVE_HEADER : SHIPPED_HEADER];
+    for (const [label, agents, role] of POLICY_ROLES) {
+      const tiers = agents.map((a) => (injected ? effectiveEntry(a, role, resolveEffective) : shippedEntry(a, config)));
       lines.push(`- ${label}: Agent 호출 시 model 을 명시한다 (${tiers.join(', ')})`);
     }
     lines.push('- 창(터미널) 메인 세션 모델은 창이 못 바꾼다 — 오너가 그 터미널에서 /model 로 조정한다.');
