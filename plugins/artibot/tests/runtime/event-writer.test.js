@@ -1306,3 +1306,189 @@ describe('the node budget bounds every shape', () => {
       .toBeGreaterThan(DEFAULT_LINE_MAX_BYTES);
   });
 });
+
+describe('review.claim_audit at the redacted byte boundary', () => {
+  // The cap is judged on the REDACTED line, so these fixtures are sized by the
+  // line the writer actually appends, read back from the file — not by the
+  // caller's input. `pwd=abcd` and a self-reference are the two ways redaction
+  // lengthens a line; `pwd-abcd` is the same length and is left alone.
+  const DECLARED = Object.keys(getAllowlist().events['review.claim_audit'].fields);
+  const OPTS = { seq: 7, pid: 4242 };
+
+  /** @returns {object[]} evidence_refs tail for one growth kind */
+  function tail(kind) {
+    if (kind === 'secret') return ['pwd=abcd', 'pwd=abcd', 'pwd=abcd'];
+    if (kind === 'control') return ['pwd-abcd', 'pwd-abcd', 'pwd-abcd'];
+    if (kind === 'circular') {
+      const self = { note: 'n' };
+      self.self = self;
+      return [self];
+    }
+    return [];
+  }
+
+  /** @returns {object} a claim_audit input carrying every declared key */
+  function claimAudit(kind, filler) {
+    return ev({
+      event: 'review.claim_audit',
+      source: 'reviewer',
+      ts: '2026-09-28T00:00:00.000Z',
+      data: {
+        subject_agent_type: 'tdd-guide',
+        claims_total: 10,
+        claims_refuted: 2,
+        nature: 'process',
+        subject_model: 'model-under-review',
+        subject_agent_id: 'agent-0123456789',
+        evidence_refs: [`src/a.js:${'x'.repeat(filler)}`, ...tail(kind)],
+      },
+    });
+  }
+
+  /** Bytes of the line writeEvent appends with no effective cap, read from disk. */
+  function unfoldedBytes(input) {
+    const calib = mkdtempSync(path.join(root, 'calib-'));
+    writeEvent(calib, input, { ...OPTS, maxLineBytes: 1_000_000 });
+    const raw = readFileSync(ledgerFilePath(calib), 'utf-8');
+    return Buffer.byteLength(raw, 'utf8');
+  }
+
+  /** The input whose redacted line is exactly `DEFAULT_LINE_MAX_BYTES + delta`. */
+  function atBoundary(kind, delta) {
+    const base = unfoldedBytes(claimAudit(kind, 0));
+    return claimAudit(kind, DEFAULT_LINE_MAX_BYTES + delta - base);
+  }
+
+  /**
+   * (a) every declared key kept · (b) each lost key named in `dropped` AND the
+   * fold marker · (c) refused with a counted reason · (d) silent loss.
+   */
+  function outcome(input, res) {
+    const written = lines();
+    if (!res.ok) {
+      return written.some((l) => l.event === REJECTED_EVENT && l.data.reason === res.reason)
+        ? 'c' : 'd';
+    }
+    const line = written.find((l) => l.event === 'review.claim_audit');
+    const lost = DECLARED.filter((k) => k in input.data && !(k in line.data));
+    if (lost.length === 0) return 'a';
+    const marker = line.data.evidence_refs.find((r) => String(r).startsWith('ledger-fold:'));
+    const named = String(marker ?? '').replace('ledger-fold:dropped=', '').split(',');
+    return lost.every((k) => res.dropped.includes(k) && named.includes(k)) ? 'b' : 'd';
+  }
+
+  it('grows the line for the secret and circular fixtures, not for the control', () => {
+    const control = unfoldedBytes(claimAudit('control', 100));
+    expect(unfoldedBytes(claimAudit('secret', 100))).toBeGreaterThan(control);
+    expect(unfoldedBytes(claimAudit('none', 100))).toBeLessThan(control);
+    const circular = mkdtempSync(path.join(root, 'circ-'));
+    writeEvent(circular, claimAudit('circular', 0), OPTS);
+    expect(readFileSync(ledgerFilePath(circular), 'utf-8')).toContain(CIRCULAR_MARKER);
+  });
+
+  for (const kind of ['none', 'control', 'secret', 'circular']) {
+    for (const delta of [-1, 0, 1]) {
+      it(`${kind} at cap${delta < 0 ? '' : '+'}${delta}B: sized as claimed, never silent`, () => {
+        const input = atBoundary(kind, delta);
+        expect(unfoldedBytes(input)).toBe(DEFAULT_LINE_MAX_BYTES + delta);
+        const res = writeEvent(root, input, OPTS);
+        expect(outcome(input, res)).toBe('a');
+        expect(res.folded).toBe(delta > 0);
+      });
+    }
+  }
+
+  it('cuts the overflow array from its tail and says how much, keeping every declared key', () => {
+    // One byte over. Each redacted `pwd=abcd` costs 29 B on the line and the
+    // marker 51 B, so cutting one ref leaves it 23 B over and cutting two fits.
+    const res = writeEvent(root, atBoundary('secret', 1), OPTS);
+    expect(res.truncated).toEqual({ field: 'evidence_refs', kept: 2, total: 4 });
+    expect(res.dropped).toEqual([]);
+    expect(lines()[0].data.evidence_refs.at(-1))
+      .toBe('ledger-fold:evidence_refs-truncated=kept2/total4');
+    expect(res.bytes).toBe(DEFAULT_LINE_MAX_BYTES + 1 - 2 * 29 + 51);
+  });
+
+  it('keeps a builder-budgeted audit whose redaction outgrew the cap', () => {
+    // 200 x `pwd=abcd` fits the writer-side budget at 2.5 KB and becomes a
+    // 6.2 KB line after redaction. Dropping the optional keys could not save
+    // it (measured `line-too-large:6216` before stage 1 existed).
+    const input = claimAudit('none', 0);
+    input.data.evidence_refs = Array.from({ length: 200 }, () => 'pwd=abcd');
+    const res = writeEvent(root, input, OPTS);
+    expect(outcome(input, res)).toBe('a');
+    expect(res.bytes).toBeLessThanOrEqual(DEFAULT_LINE_MAX_BYTES);
+    expect(res.truncated.total).toBe(200);
+  });
+
+  it('drops long undeclared keys before any declared one', () => {
+    // Measured before the stages existed: the fold dropped all seven keys and
+    // its 180-char marker cut off the three declared names (outcome d).
+    const input = claimAudit('none', 0);
+    const long = Object.fromEntries([0, 1, 2, 3]
+      .map((i) => [`undeclared_${String(i).repeat(40)}`, i === 0 ? 'v'.repeat(5000) : 'v']));
+    input.data = { ...long, ...input.data, evidence_refs: [] };
+    const res = writeEvent(root, input, OPTS);
+    expect(outcome(input, res)).toBe('a');
+    expect(res.dropped).toEqual(Object.keys(long));
+    expect(res.truncated).toBeNull();
+  });
+
+  it('keeps a builder\'s own truncation marker, so the original total survives', () => {
+    // A builder already cut the array to 9 of 40 refs and said so in its last
+    // element. The writer cuts again from the tail; that element is not cut.
+    const builderMarker = 'claim-audit:evidence_refs-truncated=kept9/total40';
+    const input = claimAudit('none', 0);
+    input.data.evidence_refs = [
+      ...Array.from({ length: 9 }, (_, i) => `src/f${i}.js:${'y'.repeat(430)} pwd=abcd`),
+      builderMarker,
+    ];
+    const res = writeEvent(root, input, OPTS);
+    expect(outcome(input, res)).toBe('a');
+    const refs = lines()[0].data.evidence_refs;
+    expect(refs.at(-2)).toBe(builderMarker);
+    expect(refs.at(-1)).toBe(`ledger-fold:evidence_refs-truncated=kept${res.truncated.kept}/total9`);
+    expect(res.truncated.kept).toBeLessThan(9);
+  });
+});
+
+describe('fold priority: declared keys, then evidence_refs, then undeclared keys', () => {
+  it('drops an undeclared stdout before it cuts a single reference', () => {
+    // Either loss alone would fit: 3 KB of stdout, or 40 references. The
+    // undeclared key goes; the references (§3.6 "초과분은 evidence_refs 로")
+    // survive whole.
+    const refs = Array.from({ length: 40 }, (_, i) => `raw://capture/${i}/${'r'.repeat(20)}`);
+    const res = writeEvent(root, ev({
+      event: 'tool.used',
+      data: { tool: 'Bash', ok: true, duration_ms: 4, stdout: 'y'.repeat(3000), evidence_refs: refs },
+    }));
+    expect(res.ok).toBe(true);
+    expect(res.dropped).toEqual(['stdout']);
+    expect(res.truncated).toBeNull();
+    expect(lines()[0].data.evidence_refs).toEqual([...refs, 'ledger-fold:dropped=stdout']);
+  });
+});
+
+describe('human.asked at the cap: declared gate kept, undeclared keys counted', () => {
+  // The only event folded in the live ledger (22 of 31,135 lines, all
+  // human.asked, measured 2026-09-28). It carries no evidence_refs, so only
+  // stage 1 can apply: `gate` is declared and now survives the fold.
+  it('keeps question_id and gate and names the four undeclared keys', () => {
+    const res = writeEvent(root, ev({
+      event: 'human.asked',
+      data: {
+        question_id: 'q-1', hits: ['a', 'b'], reason: 'r'.repeat(5000),
+        decision: 'block', tool: 'Bash', gate: 'pre-bash',
+      },
+    }));
+    expect(res.ok).toBe(true);
+    expect(res.dropped).toEqual(['hits', 'reason', 'decision', 'tool']);
+    expect(res.truncated).toBeNull();
+    const [line] = lines();
+    expect(line.data).toEqual({
+      question_id: 'q-1',
+      gate: 'pre-bash',
+      evidence_refs: ['ledger-fold:dropped=hits,reason,decision,tool'],
+    });
+  });
+});
