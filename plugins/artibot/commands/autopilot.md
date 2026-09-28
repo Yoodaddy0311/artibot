@@ -320,6 +320,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 #### Phase 0 — INTAKE (PRD 생성)
 - `Agent(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준\n\n{보고 계약}")`
   <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:planner` 출력값을 Agent 호출의 model 파라미터에 넘긴다(계획 작성 = 이름 기준, `--role` 없음; 현재 opus). CLI 가 없거나 실패하면 `lib/core/model-policy.js#resolveModel('planner')` 로 폴백 — `commands/team.md` §Teammate Rules & Model Policy -->
+  <!-- 작업 종류(이 파일의 모든 스폰 공통): `resolve` 는 `--task` 없이 부르면 에이전트 기본 작업 종류(`lib/routing/action-classifier.js#AGENT_ACTION_CLASS` — planner=architecture, spec-reviewer=review, doc-updater=edit-routine)를 자동 반영한다(맵에 없는 에이전트는 기본 종류가 없어 `--task` 를 줄 때만 적용). 실제 작업이 그 기본과 다르면 `--task <class>`(`ACTION_CLASSES` 8개: classify · status · explore · edit-routine · implement · complex-debug · architecture · review)를 붙인다 -->
 - `mode === 'plan'`: PRD 경로 보고 후 종료. `:resume <sessionId>` 안내.
 
 #### Phase 1 — PLAN
