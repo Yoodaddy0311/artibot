@@ -38,6 +38,7 @@ import { getRepoIdentity } from '../git/repo-identity.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
 import { isAttemptArmed, journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
+import { gateReportOnVerify } from './report-verify-gate.js';
 
 /**
  * Check if the session should freeze; returns a pause instruction when true.
@@ -556,6 +557,7 @@ export function runPhase6Report(state) {
   tick(state.sessionId, { phase: 'REPORT', type: 'phase-start', level: 'info', message: 'Phase 6 REPORT 시작' });
   const paused = maybePause(state);
   if (paused) return paused;
+  const verifyGate = gateReportOnVerify(state); if (verifyGate) return verifyGate;
   state.completedAt = new Date().toISOString();
   const { filePath } = generateReport(state.sessionId, { projectRoot: state.options?.projectRoot });
   state.reportPath = filePath;
