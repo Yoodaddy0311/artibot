@@ -1,39 +1,48 @@
 /**
- * Root-level vitest config that delegates to plugins/artibot/.
+ * Root-level vitest config: the canonical plugins/artibot/vitest.config.js,
+ * re-exported with an absolute `test.root`.
  *
  * Prefer `npm test` from the repo root — it runs the workspace's own pinned
- * runner. This file only takes effect for a bare `npx vitest` here, and this
- * package declares no dependencies, so that invocation resolves no local
- * binary: npm runs whatever version its _npx cache happens to hold (measured
- * 2026-08-23: 4.1.11, against a declared 4.0.18). CI is unaffected — it runs
- * with `working-directory: plugins/artibot` (.github/workflows/ci.yml).
+ * runner. This file takes effect whenever vitest is STARTED here: a bare
+ * `npx vitest`, and also `npm --prefix plugins/artibot exec -- vitest`, because
+ * npm exec keeps the caller's cwd and vitest looks for its config there. For a
+ * bare `npx vitest` this package declares no dependencies, so that invocation
+ * resolves no local binary: npm runs whatever version its _npx cache happens to
+ * hold (measured 2026-08-23: 4.1.11, against a declared 4.0.18). That is not
+ * fixed here. CI is unaffected — it runs with
+ * `working-directory: plugins/artibot` (.github/workflows/ci.yml).
  *
- * The strip-shebang plugin is needed because hook scripts start with
- * #!/usr/bin/env node which vitest's VM evaluator cannot parse.
+ * Why re-export instead of a copy: until 2026-09-28 this file was a
+ * hand-written subset (shebang stripping only under `scripts/hooks`, a
+ * `.js`-only include, no `setupFiles`, no `projects`). Root-started runs then
+ * failed on any test importing a shebang `.mjs` script, ran without the
+ * state-dir sandbox, and ran `tests/autopilot/**` without its file-serial
+ * project. Importing the canonical file leaves `root` as the only setting the
+ * two can disagree on, and the gate named below pins that one.
+ *
+ * Why `root` is overridden: the canonical `root: '.'` is resolved against the
+ * process cwd, which here is the repository root, and `setupFiles`, the
+ * project includes and the coverage paths are resolved against `root`.
+ * Absolute, so the result does not depend on where vitest was started. The
+ * `extends: true` projects inherit it (measured 2026-09-28: root-started runs
+ * label `tests/autopilot/**` as `autopilot`, and `--coverage` reports `lib/`
+ * into plugins/artibot/coverage).
+ *
+ * The canonical file's `vitest/config` import resolves from its own directory
+ * (plugins/artibot/node_modules); nothing here needs a root `node_modules`.
+ * Pinned by plugins/artibot/tests/firewall/vitest-root-config.test.js.
  */
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import pluginConfig from './plugins/artibot/vitest.config.js';
+
+const PLUGIN_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'plugins', 'artibot');
+
 export default {
-  plugins: [
-    {
-      name: 'strip-shebang',
-      transform(code, id) {
-        if (id.includes('scripts/hooks') && code.startsWith('#!')) {
-          return { code: code.replace(/^#![^\n]*\n/, ''), map: null };
-        }
-      },
-    },
-  ],
+  ...pluginConfig,
   test: {
-    root: 'plugins/artibot',
-    include: ['tests/**/*.test.js'],
-    // Must match plugins/artibot/vitest.config.js — that file is the canonical
-    // config and states the reason (Windows child-process cold start blows past
-    // vitest's 5s default). Delegating `root` does NOT inherit its settings, so
-    // omitting these silently gave the same suite two different ceilings
-    // depending on the directory `vitest` was invoked from. Observed 2026-08-23:
-    // cowork-plugin-zip-drift's pack-and-compare takes ~5.4s, so it passed from
-    // plugins/artibot and timed out from here — and the timeout was misread as
-    // a byte-drift failure. Keep the two files in lockstep.
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
+    ...pluginConfig.test,
+    root: PLUGIN_ROOT,
   },
 };
