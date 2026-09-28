@@ -551,6 +551,9 @@ function bindRoute(ctx) {
       method: match.method,
     };
     if (typeof ctx.agentType === 'string' && ctx.agentType !== '') data.agent_type = ctx.agentType;
+    // The caller's `subagent_type`, verbatim: on a named spawn `agent_type` is the teammate name.
+    const callerType = match.receipt.subagentType;
+    if (typeof callerType === 'string' && callerType !== '') data.subagent_type = callerType;
     // WHICH of the two identity spellings matched. Without it, `confidence:
     // 'exact'` cannot be audited against the host behaviour it assumes.
     if (match.matchedOn !== null) data.matched_on = match.matchedOn;

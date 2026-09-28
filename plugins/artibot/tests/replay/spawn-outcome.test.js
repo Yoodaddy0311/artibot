@@ -80,7 +80,7 @@ const METHOD_BY_CONFIDENCE = Object.freeze({
  */
 function bound(spec) {
   const {
-    agentId, session = SESS_A, confidence = 'exact', agentType,
+    agentId, session = SESS_A, confidence = 'exact', agentType, subagentType,
     recommended, selected, toolUseId = `toolu_${agentId}`,
   } = spec;
   seqCounter += 1;
@@ -105,6 +105,7 @@ function bound(spec) {
       // fallback is arbitrary and only keeps the key present.
       method: METHOD_BY_CONFIDENCE[confidence] ?? 'name-only',
       ...(agentType === undefined ? {} : { agent_type: agentType }),
+      ...(subagentType === undefined ? {} : { subagent_type: subagentType }),
       matched_on: 'name', // writer enum is name | subagent_type
       ...(selected === undefined ? {} : { selected_model: selected }),
       ...(recommended === undefined ? {} : { recommended_model: recommended }),
@@ -575,6 +576,27 @@ describe('joinSpawnOutcomes() pairs and comparison', () => {
     expect(noRec.recommended_model).toBeNull();
     expect(noRec.agreement).toBeNull();
     expect(noRec.agent_type).toBeNull();
+  });
+});
+
+describe('joinSpawnOutcomes() carries the caller subagent_type', () => {
+  const f = joinSpawnOutcomes([
+    bound({ agentId: 'st-1', agentType: 'split-x-impl', subagentType: 'artibot:tdd-guide' }),
+    agentReceipt('st-1'),
+    bound({ agentId: 'st-2', agentType: 'probe-x', subagentType: 'Explore', confidence: 'fifo' }),
+    agentReceipt('st-2'),
+    bound({ agentId: 'st-3', agentType: 'code-reviewer' }),
+    agentReceipt('st-3'),
+  ]);
+  const pairOfId = (id) => f.pairs.find((p) => p.agent_id === id);
+
+  it('passes the bind\'s subagent_type to the pair verbatim, on every confidence', () => {
+    expect(pairOfId('st-1')).toMatchObject({ agent_type: 'split-x-impl', subagent_type: 'artibot:tdd-guide' });
+    expect(pairOfId('st-2')).toMatchObject({ confidence: 'fifo', subagent_type: 'Explore' });
+  });
+
+  it('is null, not absent, when the bind carries none', () => {
+    expect(pairOfId('st-3')).toHaveProperty('subagent_type', null);
   });
 });
 
