@@ -24,9 +24,11 @@ import { describe, expect, it } from 'vitest';
 import {
   assertIndependence,
   assertIntentBinding,
+  bindIntentRevision,
   buildReviewRequest,
   CANONICAL_VERDICTS,
   foldLegacyToken,
+  INTENT_BINDING_STATUSES,
   parseFrontMatterScalars,
   parseReviewVerdict,
   REVIEW_REQUEST_INPUT_KEYS,
@@ -292,6 +294,29 @@ describe('parseReviewVerdict exposes intent_revision and plan_revision', () => {
   });
 });
 
+describe('parseReviewVerdict exposes mission_id as missionId', () => {
+  it.each([
+    ['N-form', 'M-20260902-001'],
+    ['S-form', 'M-20260928-Sa1B2c3D4'],
+  ])('carries the %s id on ok:true', (_label, id) => {
+    const r = parseReviewVerdict(v2Doc({ mission_id: id }));
+    expect(r.ok).toBe(true);
+    expect(r.missionId).toBe(id);
+  });
+
+  it.each([
+    ['a legacy token', 'APPROVE'],
+    ['a legacy document that carries a mission_id', { verdict: 'APPROVE', mission_id: 'M-20260902-001' }],
+    ['null input', null],
+    ['a v2 document that fails the structural gate', v2Doc({ evidence: [] })],
+    ['a v2 document with a malformed mission_id', v2Doc({ mission_id: 'nope' })],
+  ])('is null on %s', (_label, answer) => {
+    const r = parseReviewVerdict(answer);
+    expect(r.ok).toBe(false);
+    expect(r.missionId).toBeNull();
+  });
+});
+
 describe('parseReviewVerdict — the injected schema validator port', () => {
   it('is consulted and can reject a structurally acceptable document', () => {
     const r = parseReviewVerdict(v2Doc(), {
@@ -457,5 +482,120 @@ describe('assertIntentBinding', () => {
     [undefined],
   ])('fails closed on incomplete input: %p', async (args) => {
     expect((await assertIntentBinding(args)).ok).toBe(false);
+  });
+});
+
+describe('assertIntentBinding — output parity pinned before the sync split', () => {
+  const UNREADABLE = 'canonical intent unreadable at review completion: ';
+  const at = (text) => async () => text;
+
+  it.each([
+    ['mismatch', { reviewedRevision: 3, readFile: at(intentMd({ intent_revision: 4 })) },
+      { ok: false, reason: 'intent was revised during review: reviewed r3, on disk r4. The verdict is void.', currentRevision: 4, reviewedRevision: 3 }],
+    ['read throws', { reviewedRevision: 3, readFile: readFilePort({}).port },
+      { ok: false, reason: `${UNREADABLE}intent_unreadable`, currentRevision: null, reviewedRevision: 3 }],
+    ['empty file', { reviewedRevision: 3, readFile: at('  \n') },
+      { ok: false, reason: `${UNREADABLE}intent_unreadable`, currentRevision: null, reviewedRevision: 3 }],
+    ['no front matter', { reviewedRevision: 3, readFile: at('plain text') },
+      { ok: false, reason: `${UNREADABLE}intent_frontmatter_invalid`, currentRevision: null, reviewedRevision: 3 }],
+    ['bad intent_revision', { reviewedRevision: 3, readFile: at(intentMd({ intent_revision: 'x' })) },
+      { ok: false, reason: `${UNREADABLE}intent_frontmatter_invalid`, currentRevision: null, reviewedRevision: 3 }],
+    ['string reviewedRevision is coerced', { reviewedRevision: '3', readFile: at(intentMd()) },
+      { ok: true, reason: null, currentRevision: 3, reviewedRevision: 3 }],
+    ['missing missionDir', { missionDir: '', reviewedRevision: 3, readFile: at(intentMd()) },
+      { ok: false, reason: 'missionDir is required', currentRevision: null, reviewedRevision: 3 }],
+    ['missing readFile', { readFile: undefined, reviewedRevision: 3 },
+      { ok: false, reason: 'readFile port is required', currentRevision: null, reviewedRevision: 3 }],
+  ])('%s', async (_name, args, expected) => {
+    await expect(assertIntentBinding({ missionDir: MISSION_DIR, ...args })).resolves.toEqual(expected);
+  });
+
+  it('does not read intent.md when reviewedRevision is unusable', async () => {
+    const { port, calls } = readFilePort({ [INTENT_PATH]: intentMd() });
+    await expect(assertIntentBinding({ missionDir: MISSION_DIR, reviewedRevision: -1, readFile: port }))
+      .resolves.toEqual({
+        ok: false,
+        reason: 'reviewedRevision is missing or not a non-negative integer',
+        currentRevision: null,
+        reviewedRevision: null,
+      });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('bindIntentRevision — synchronous, IO-free binding verdict', () => {
+  const readErr = (code) => Object.assign(new Error(`${code}: intent.md`), { code });
+  const FIXTURES = [
+    ['match', { intentText: intentMd(), reviewedRevision: 3 }],
+    ['mismatch', { intentText: intentMd({ intent_revision: 4 }), reviewedRevision: 3 }],
+    ['input_absent', { intentText: intentMd(), reviewedRevision: null }],
+    ['input_absent', { intentText: intentMd() }],
+    ['input_absent', { intentText: intentMd(), reviewedRevision: -1 }],
+    ['input_absent', { intentText: intentMd(), reviewedRevision: 1.5 }],
+    ['input_absent', { intentText: intentMd(), reviewedRevision: '3' }],
+    ['input_absent', { reviewedRevision: 3 }],
+    ['input_absent', { intentText: '  \n', reviewedRevision: 3 }],
+    ['input_absent', { readError: readErr('ENOENT'), reviewedRevision: 3 }],
+    ['error', { intentText: 'plain text, no front matter', reviewedRevision: 3 }],
+    ['error', { intentText: intentMd({ intent_revision: 'x' }), reviewedRevision: 3 }],
+    ['error', { intentText: intentMd({ mission_id: 'not-a-mission' }), reviewedRevision: 3 }],
+    ['error', { readError: readErr('EACCES'), reviewedRevision: 3 }],
+    ['error', { readError: { get code() { throw new Error('boom'); } }, reviewedRevision: 3 }],
+    ['match', { intentText: intentMd(), reviewedRevision: 3, expectedMissionId: 'M-20260902-001' }],
+    ['mismatch', { intentText: intentMd({ intent_revision: 4 }), reviewedRevision: 3, expectedMissionId: 'M-20260902-001' }],
+    ['error', { intentText: intentMd(), reviewedRevision: 3, expectedMissionId: 'M-20260902-002' }],
+    ['error', { intentText: intentMd({ intent_revision: 4 }), reviewedRevision: 3, expectedMissionId: 'M-20260902-002' }],
+    ['input_absent', { intentText: intentMd(), reviewedRevision: null, expectedMissionId: 'M-20260902-002' }],
+    ['match', { intentText: intentMd(), reviewedRevision: 3, expectedMissionId: 20260902001 }],
+    ['match', { intentText: intentMd(), reviewedRevision: 3, expectedMissionId: null }],
+    ['match', { intentText: intentMd(), reviewedRevision: 3, expectedMissionId: { id: 'M-20260902-002' } }],
+  ];
+
+  it.each(FIXTURES)('%s (fixture #%#)', (status, input) => {
+    expect(bindIntentRevision(input).status).toBe(status);
+  });
+
+  it('carries both revisions: match and mismatch', () => {
+    expect(bindIntentRevision({ intentText: intentMd(), reviewedRevision: 3 }))
+      .toEqual({ status: 'match', currentRevision: 3, reviewedRevision: 3, reason: null });
+    expect(bindIntentRevision({ intentText: intentMd({ intent_revision: 4 }), reviewedRevision: 3 }))
+      .toEqual({
+        status: 'mismatch',
+        currentRevision: 4,
+        reviewedRevision: 3,
+        reason: 'intent was revised during review: reviewed r3, on disk r4. The verdict is void.',
+      });
+  });
+
+  it('voids on a mission identity mismatch, carrying both revisions, before the revision compare', () => {
+    const reason = 'canonical intent unreadable at review completion: intent_mission_mismatch';
+    expect(bindIntentRevision({ intentText: intentMd(), reviewedRevision: 3, expectedMissionId: 'M-20260902-002' }))
+      .toEqual({ status: 'error', currentRevision: 3, reviewedRevision: 3, reason });
+    expect(bindIntentRevision({
+      intentText: intentMd({ intent_revision: 4 }), reviewedRevision: 3, expectedMissionId: 'M-20260902-002',
+    })).toEqual({ status: 'error', currentRevision: 4, reviewedRevision: 3, reason });
+  });
+
+  it('checks front matter before mission identity', () => {
+    expect(bindIntentRevision({
+      intentText: intentMd({ intent_revision: 'x' }), reviewedRevision: 3, expectedMissionId: 'M-20260902-002',
+    }).reason).toBe('canonical intent unreadable at review completion: intent_frontmatter_invalid');
+  });
+
+  it('is pure, frozen, and never leaves the status allowlist', () => {
+    expect(Object.isFrozen(INTENT_BINDING_STATUSES)).toBe(true);
+    expect(INTENT_BINDING_STATUSES).toEqual(['match', 'mismatch', 'input_absent', 'error']);
+    for (const [, input] of FIXTURES) {
+      const first = bindIntentRevision(input);
+      expect(bindIntentRevision(input)).toEqual(first);
+      expect(Object.isFrozen(first)).toBe(true);
+      expect(INTENT_BINDING_STATUSES).toContain(first.status);
+      expect(Object.keys(first).sort()).toEqual(['currentRevision', 'reason', 'reviewedRevision', 'status']);
+    }
+  });
+
+  it('needs no injection and never throws on a missing argument', () => {
+    expect(bindIntentRevision().status).toBe('input_absent');
+    expect(bindIntentRevision(null).status).toBe('input_absent');
   });
 });

@@ -10,13 +10,18 @@
  * @module scripts/hooks/_review-stop-record
  */
 
-import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import * as artifactLifecycle from '../../lib/runtime/artifact-lifecycle.js';
 import { readJsonFileSync } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import {
+  bindIntentRevision,
+  MISSION_ID_PATTERN,
+  parseReviewVerdict,
+} from '../../lib/review/independent-reviewer.js';
 import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 
 // ---------------------------------------------------------------------------
@@ -533,6 +538,102 @@ async function writeReviewArtifact(ctx) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// CA-17 intent binding (method A) — RECORD ONLY, like everything above.
+//
+// The status lands in `data.intent_binding` of the `review.completed` row and
+// nowhere else: not in the summary this file returns, not in stdout, not in
+// the spawn column. A `mismatch` voids nothing here; the ledger measures it.
+//
+// `independent-reviewer.js` is imported statically because `verdict-writer.js`
+// already is, and imports it: the module is in this graph either way, so the
+// import costs nothing and a missing export fails loudly at link time in the
+// tests rather than as a silent `error` on every stop.
+// ---------------------------------------------------------------------------
+
+/**
+ * The session fallback id `M-YYYYMMDD-S<sid8>` — the S-form of
+ * {@link MISSION_ID_PATTERN}. `subagent-handler.js#resolveMissionId` falls
+ * back to it whenever the payload declares no mission (`:225` reads
+ * `hookData?.mission_id ?? hookData?.missionId`), and the host is not measured
+ * to send one. Such an id names the stop's session, not the reviewed mission,
+ * so it is never a CROSS-CHECK: it can neither confirm nor contradict the
+ * verdict's own `mission_id`.
+ * @type {RegExp}
+ */
+const FALLBACK_MISSION_ID = /^M-\d{8}-S[0-9A-Za-z]{8}$/;
+
+/**
+ * The default binder port: read `<missionDir>/intent.md` synchronously and let
+ * {@link bindIntentRevision} judge it. A read error is PASSED, not thrown —
+ * ENOENT is `input_absent` and anything else is `error`, and that split is the
+ * binder's decision, not this file's. So is `expectedMissionId`: an intent.md
+ * whose front matter names another mission is the binder's `error`.
+ *
+ * @param {{missionDir: string, reviewedRevision: unknown,
+ *   expectedMissionId: string}} input where, what, and whose
+ * @returns {{status: string}} the binder's judgement
+ */
+function readIntentBinding({ missionDir, reviewedRevision, expectedMissionId }) {
+  const basename = artifactLifecycle.ARTIFACT_BASENAME[artifactLifecycle.ArtifactKind.INTENT];
+  let intentText;
+  let readError;
+  try {
+    intentText = readFileSync(path.join(missionDir, basename), 'utf8');
+  } catch (err) {
+    readError = err;
+  }
+  return bindIntentRevision({ intentText, readError, reviewedRevision, expectedMissionId });
+}
+
+/**
+ * The `intentBinding` to hand the writer, computed before the row is built.
+ *
+ * NEVER THROWS, AND NEVER RETURNS "NOTHING" FOR A ROW THAT WILL BE WRITTEN: a
+ * throwing or shapeless binder is `'error'`, because an omitted key would read
+ * as "no binding was attempted". `undefined` is returned only for an
+ * inadmissible verdict, which gets no row to carry the key.
+ *
+ * THE KEY IS THE VERDICT'S `mission_id`, not the stop's. The verdict names
+ * the mission it reviewed and is required to; `intent.md` is written into
+ * that mission's folder, S-form included (`intent-observe-pre.js`
+ * `#resolveMissionId`), so an S-form verdict id is read like any other. The
+ * id is re-checked against {@link MISSION_ID_PATTERN} before it becomes a path
+ * segment — it is reviewer-supplied text.
+ *
+ * The stop's own id is a CROSS-CHECK only: when the payload DECLARED a
+ * non-fallback mission and it differs from the verdict's, the two disagree
+ * about which mission this is, and the answer is `'input_absent'` without a
+ * read. A fallback or absent stop id is no evidence either way.
+ *
+ * @param {string} verdictText the reviewer's answer
+ * @param {unknown} stopMissionId `ids.missionId` — declared or session fallback
+ * @param {string} projectRoot the project the mission folder lives under
+ * @param {Function} bindIntent binder port, {@link readIntentBinding} by default
+ * @returns {string|undefined} a status for the writer to allowlist
+ */
+function resolveIntentBinding(verdictText, stopMissionId, projectRoot, bindIntent) {
+  try {
+    const parsed = parseReviewVerdict(verdictText);
+    if (parsed.ok !== true) return undefined;
+    const verdictMissionId = parsed.missionId;
+    if (typeof verdictMissionId !== 'string' || !MISSION_ID_PATTERN.test(verdictMissionId)) {
+      return 'input_absent';
+    }
+    const declared = typeof stopMissionId === 'string' && MISSION_ID_PATTERN.test(stopMissionId)
+      && !FALLBACK_MISSION_ID.test(stopMissionId);
+    if (declared && stopMissionId !== verdictMissionId) return 'input_absent';
+    const result = bindIntent({
+      missionDir: path.join(projectRoot, ...artifactLifecycle.MISSIONS_DIR, verdictMissionId),
+      reviewedRevision: parsed.intentRevision,
+      expectedMissionId: verdictMissionId,
+    });
+    return typeof result?.status === 'string' ? result.status : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
 /**
  * Record a reviewer's answer as up to two ledger lines.
  *
@@ -554,9 +655,11 @@ async function writeReviewArtifact(ctx) {
  * @param {{agentId: string, agentType: string, sessionId: string|null,
  *   missionId: string|null}} ids identity of this stop
  * @param {string|null} projectRoot root from `subagent-handler.js#payloadProjectRoot`
+ * @param {{bindIntent?: Function}} [ports] test seam; `bindIntent` replaces
+ *   {@link readIntentBinding}
  * @returns {object} compact summary of what happened to each half
  */
-export function recordReviewFromStop(hookData, ids, projectRoot) {
+export function recordReviewFromStop(hookData, ids, projectRoot, ports = {}) {
   try {
     const { sessionId } = ids;
     if (typeof sessionId !== 'string' || sessionId === '') return reviewSkipped('no-session');
@@ -569,6 +672,8 @@ export function recordReviewFromStop(hookData, ids, projectRoot) {
     // Leader decision 2026-09-12: the agent id, never the transcript PATH — a
     // path carries a home directory and a session id into a tracked ledger.
     const findingsRef = `transcript:${ids.agentId}`;
+    const intentBinding = resolveIntentBinding(verdictText, ids.missionId, projectRoot,
+      typeof ports?.bindIntent === 'function' ? ports.bindIntent : readIntentBinding);
 
     const outcome = recordReviewOutcome({
       verdictText,
@@ -579,6 +684,7 @@ export function recordReviewFromStop(hookData, ids, projectRoot) {
       model,
       findingsRef,
       reviewerId: ids.agentType,
+      intentBinding,
     }, {
       append: (input) => appendLedgerEvent(projectRoot, input),
       existingKeys: () => readAllEvents(projectRoot, { session_id: sessionId })
@@ -593,7 +699,8 @@ export function recordReviewFromStop(hookData, ids, projectRoot) {
       claimAuditReason: outcome.claimAudit.reason ?? null,
       // NOT carried into `reviewLedgerColumn`: the spawn column is a summary of
       // what the LEDGER recorded, and widening its grammar would change a
-      // string the vocabulary firewall pins. The label is for callers/tests.
+      // string `tests/hooks/subagent-handler-review-writer.test.js` pins.
+      // The label is for callers/tests.
       artifact: planReviewArtifact({
         outcome, ids, projectRoot, model, findingsRef,
       }),

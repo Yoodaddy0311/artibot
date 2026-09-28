@@ -308,6 +308,19 @@ async function readCanonicalIntent(missionDir, readFile) {
       { intentPath, cause: err instanceof Error ? err.message : String(err) },
     );
   }
+  return parseCanonicalIntent(intent, intentPath);
+}
+
+/**
+ * The synchronous half of {@link readCanonicalIntent}: validate text already read.
+ *
+ * @param {unknown} intent contents of intent.md
+ * @param {string} intentPath path, for messages only
+ * @returns {{intent: string, missionId: string, intentRevision: number, intentPath: string}}
+ *   the canonical intent and its identity fields
+ * @throws {ReviewContractError} as {@link readCanonicalIntent}, minus the read
+ */
+function parseCanonicalIntent(intent, intentPath) {
   if (typeof intent !== 'string' || intent.trim() === '') {
     throw new ReviewContractError(
       'intent_unreadable',
@@ -650,7 +663,8 @@ function checkV2Structure(doc) {
  *
  * `intentRevision` and `planRevision` follow that rule too, and are kept as
  * integers rather than coerced: `0` is a real first revision, so an absent
- * value is null and never `0`.
+ * value is null and never `0`. So does `missionId` (the document's
+ * `mission_id`); no legacy path is ok:true, so a legacy id never surfaces.
  *
  * @param {object} base partial result
  * @returns {object} normalized result
@@ -672,6 +686,7 @@ function result(base) {
     verificationId: base.ok === true && isNonEmptyString(base.verificationId)
       ? base.verificationId
       : null,
+    missionId: base.ok === true && isNonEmptyString(base.missionId) ? base.missionId : null,
   };
   if (base.ambiguous === true) {
     out.ambiguous = true;
@@ -725,7 +740,8 @@ function applyValidatorPort(doc, validateSchema, errors) {
  * @returns {{ok: boolean, verdict: string|null, errors: object[],
  *   schemaVersion: number|null, foldedVerdict: string|null, sources: string[],
  *   intentRevision: number|null, planRevision: number|null,
- *   verificationId: string|null, ambiguous?: true, candidates?: string[]}}
+ *   verificationId: string|null, missionId: string|null, ambiguous?: true,
+ *   candidates?: string[]}}
  *   parse outcome
  */
 export function parseReviewVerdict(textOrJson, opts = {}) {
@@ -759,6 +775,7 @@ export function parseReviewVerdict(textOrJson, opts = {}) {
       intentRevision: doc.intent_revision,
       planRevision: doc.plan_revision,
       verificationId: doc.verification_id,
+      missionId: doc.mission_id,
       schemaVersion: 2,
       sources: ['v2'],
     });
@@ -1108,6 +1125,71 @@ export function assertIndependence({ builderId, reviewerId } = {}) {
   return { ok: true, reason: null };
 }
 
+/** Every status {@link bindIntentRevision} can return — the allowlist callers switch on. */
+export const INTENT_BINDING_STATUSES = Object.freeze(['match', 'mismatch', 'input_absent', 'error']);
+
+const UNREADABLE_AT_COMPLETION = 'canonical intent unreadable at review completion: ';
+
+/**
+ * @param {string} status one of {@link INTENT_BINDING_STATUSES}
+ * @param {string|null} reason human-readable cause, null on match
+ * @param {number|null} currentRevision revision on disk
+ * @param {number|null} reviewedRevision revision the verdict was formed against
+ * @returns {Readonly<object>} a frozen binding result
+ */
+function binding(status, reason, currentRevision, reviewedRevision) {
+  return Object.freeze({ status, currentRevision, reviewedRevision, reason });
+}
+
+/**
+ * The IO-free core of {@link assertIntentBinding}: compare intent.md text the
+ * caller already read against the revision the verdict was formed against.
+ * Synchronous so a sync hook can decide before it appends; never throws.
+ *
+ * `input_absent` = no usable reviewedRevision (integers only, no coercion), or
+ * intent.md missing/empty. `error` = front matter invalid, its `mission_id` is
+ * not a string `expectedMissionId`, a non-ENOENT read error, or any unexpected
+ * throw. Only `match` means the verdict still binds.
+ *
+ * @param {object} [input] binding inputs
+ * @param {unknown} [input.intentText] contents of intent.md, undefined when not read
+ * @param {unknown} [input.readError] what the read threw, if it did
+ * @param {unknown} [input.reviewedRevision] `intent_revision` the verdict was formed against
+ * @param {unknown} [input.expectedMissionId] mission the intent must belong to; ignored unless a string
+ * @returns {Readonly<{status: string, currentRevision: number|null,
+ *   reviewedRevision: number|null, reason: string|null}>} frozen binding judgement
+ */
+export function bindIntentRevision(input) {
+  let reviewed = null;
+  try {
+    const { intentText, readError, reviewedRevision, expectedMissionId } = input ?? {};
+    if (!Number.isInteger(reviewedRevision) || reviewedRevision < 0) {
+      return binding('input_absent', 'reviewedRevision is missing or not a non-negative integer', null, null);
+    }
+    reviewed = reviewedRevision;
+    const unreadable = `${UNREADABLE_AT_COMPLETION}intent_unreadable`;
+    if (readError !== undefined && readError !== null) {
+      return binding(readError.code === 'ENOENT' ? 'input_absent' : 'error', unreadable, null, reviewed);
+    }
+    if (intentText === undefined || intentText === null
+      || (typeof intentText === 'string' && intentText.trim() === '')) {
+      return binding('input_absent', unreadable, null, reviewed);
+    }
+    const { missionId, intentRevision: current } = parseCanonicalIntent(intentText, 'intent.md');
+    if (typeof expectedMissionId === 'string' && missionId !== expectedMissionId) {
+      return binding('error', `${UNREADABLE_AT_COMPLETION}intent_mission_mismatch`, current, reviewed);
+    }
+    if (current !== reviewed) {
+      return binding('mismatch', `intent was revised during review: reviewed r${reviewed}, on disk r${current}. `
+        + 'The verdict is void.', current, reviewed);
+    }
+    return binding('match', null, current, reviewed);
+  } catch (err) {
+    const cause = err instanceof ReviewContractError ? err.code : 'unexpected_throw';
+    return binding('error', `${UNREADABLE_AT_COMPLETION}${cause}`, null, reviewed);
+  }
+}
+
 /**
  * Re-check, at review completion, that the intent has not moved underneath the
  * review.
@@ -1115,6 +1197,7 @@ export function assertIndependence({ builderId, reviewerId } = {}) {
  * A verdict is formed against one revision of `intent.md`. If the file was
  * revised while the review ran, the verdict answers a question nobody is asking
  * any more, and it is void — not a `PASS`, not a `REPAIR_REQUIRED`.
+ * Async wrapper: reads through the port, then defers to {@link bindIntentRevision}.
  *
  * @param {object} [args] binding inputs
  * @param {string} [args.missionDir] mission folder
@@ -1141,35 +1224,20 @@ export async function assertIntentBinding({ missionDir, reviewedRevision, readFi
       reviewedRevision: reviewed,
     };
   }
-  if (reviewed === null) {
-    return {
-      ok: false,
-      reason: 'reviewedRevision is missing or not a non-negative integer',
-      currentRevision: null,
-      reviewedRevision: null,
-    };
+  let intentText;
+  let readError;
+  if (reviewed !== null) {
+    try {
+      intentText = await readFile(path.join(missionDir, 'intent.md'));
+    } catch (err) {
+      readError = err;
+    }
   }
-  let current;
-  try {
-    current = (await readCanonicalIntent(missionDir, readFile)).intentRevision;
-  } catch (err) {
-    return {
-      ok: false,
-      reason: err instanceof ReviewContractError
-        ? `canonical intent unreadable at review completion: ${err.code}`
-        : `canonical intent unreadable at review completion: ${String(err)}`,
-      currentRevision: null,
-      reviewedRevision: reviewed,
-    };
-  }
-  if (current !== reviewed) {
-    return {
-      ok: false,
-      reason: `intent was revised during review: reviewed r${reviewed}, on disk r${current}. `
-        + 'The verdict is void.',
-      currentRevision: current,
-      reviewedRevision: reviewed,
-    };
-  }
-  return { ok: true, reason: null, currentRevision: current, reviewedRevision: reviewed };
+  const b = bindIntentRevision({ intentText, readError, reviewedRevision: reviewed });
+  return {
+    ok: b.status === 'match',
+    reason: b.reason,
+    currentRevision: b.currentRevision,
+    reviewedRevision: b.reviewedRevision,
+  };
 }
