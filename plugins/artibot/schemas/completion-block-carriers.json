@@ -18,7 +18,7 @@
       "split.md"
     ],
     "grepDerivedBeyondDesignNamed": [],
-    "measuredAt": "2026-09-02T07:25:22Z",
+    "measuredAt": "2026-09-28T06:11:46Z",
     "denominator": 80,
     "denominatorScope": "plugins/artibot/commands/*.md",
     "markerScan": {
@@ -117,7 +117,7 @@
       "sc.md",
       "split.md"
     ],
-    "measuredAt": "2026-09-02T07:25:22Z"
+    "measuredAt": "2026-09-28T06:11:46Z"
   },
   "renderer": {
     "path": "scripts/render-progress.js",

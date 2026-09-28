@@ -20,7 +20,7 @@ agents:
 tokens: "~3K"
 category: "meta"
 whenNotToUse: "Editing a skill's body content when the frontmatter is already correct and the change is a minor prose fix. Do not apply the full pressure-test loop for trivial description typos."
-source_hash: 55d21838
+source_hash: 9af2e94d
 ---
 
 # Skill Authoring (Meta-Skill)
@@ -53,19 +53,19 @@ The lint gate `scripts/ci/lint-skill-descriptions.js` enforces this automaticall
 
 Run locally: `node scripts/ci/lint-skill-descriptions.js` (exits non-zero on new violations). CI runs `npm run skill:check`.
 
-## 3. Trigger Design
+## 3. Activation Design (`description`) and the `triggers:` List
 
-Triggers are what the model matches against incoming user utterances to decide whether to load this skill at all.
+The host decides whether to load a skill by matching the user's request against the frontmatter `description` (plus `when_to_use`). Those two fields are the only activation surface; every activation phrase below belongs in `description`.
 
 **`triggers:` is not a host activation field.** The host activates a skill from its `description` (plus `when_to_use`); it never reads the `triggers:` key. Measured 2026-09-11 on claude 2.1.268: trigger phrases rendered 0 times across 3 runs, and the binary's recognised-key array does not list `triggers` — the render count is measured, while "that array is the complete set of recognised keys" is inference and the official documentation was not read. Every consumer of `triggers:` in this repo is Artibot's own tooling (`scripts/gen-skill-docs.js`, `scripts/hooks/skill-validation-check.js`, `lib/core/skill-exporter.js`, `lib/adapters/adapter-utils.js`, `lib/sdk/artibot-sdk.js`). The practical consequence for the rules below: vocabulary you cut from `description` to keep it short is **not** preserved for host activation by moving it into `triggers:`. If a phrase has to make the skill fire, it belongs in `description`.
 
-**Rules**:
+**Rules (for the `description` text)**:
 - Include ≥3 real user utterances, at least one in Korean.
 - Cover implicit signals (not just explicit requests) — a user asking "how do I structure this?" while editing a SKILL.md is an implicit trigger.
 - Match on intent, not keywords. "새 스킬 추가" and "SKILL.md 만들어줘" express the same intent differently.
 - When the trigger fires: act immediately. Do not ask "are you sure you want me to create a skill?" — that violates the auto-invoke principle.
 
-**Format**: YAML array under `triggers:` key. Each item is a string, quoted if it contains colons or special chars.
+**`triggers:` list**: ignored by the host, required by Artibot CI (`scripts/gen-skill-docs.js` lists it in `REQUIRED_FIELDS`). A YAML string array consumed only by Artibot tooling (gen-skill-docs, the skill-validation-check hook, skill-exporter, adapters, SDK); quote an item if it contains colons or special chars. Mirror the description's utterances there for export and docs — it does not change what the host loads.
 
 ## 4. @-Link Prohibition
 
@@ -86,7 +86,7 @@ If a step in this skill is skipped, state explicitly: which step, why it was blo
 | "The description already has enough triggers, no need to count" | R1 is a hard count — fewer than 3 activation signals fails CI regardless of gut feel |
 | "The body explains the workflow, so the description summary is fine" | CSO fires before the body loads; the description summary becomes the only guidance the model acts on |
 | "This skill is simple enough to skip the pressure test" | Skipping the pressure test is how skills end up doing nothing in adversarial conditions |
-| "I'll add triggers later when the skill is more mature" | A skill with weak triggers is invisible to the model — it never fires, so it never matures |
+| "I'll add triggers later when the skill is more mature" | A skill whose `description` carries no real utterances is invisible to the model — it never fires, so it never matures |
 | "@-links make the skill self-contained and easy to use" | Self-contained at the cost of context window is a net loss; reference by name, load on demand |
 
 ## 6. Failure-Mode Diagnostic Vocabulary
@@ -114,7 +114,7 @@ Anchor behavior with single words the model already has compressed meaning for f
 | `name` | Yes | Must match directory name exactly (CI enforces) |
 | `description` | Yes | CSO-compliant: triggers only, ≥3 signals, no workflow prose |
 | `context` | Yes | One of: `fork`, `forked`, `native`, `shared` |
-| `triggers` | Yes | Non-empty array of activation utterances (≥3, include Korean) |
+| `triggers` | Yes (Artibot CI) | String array mirrored from the description's utterances (≥3, include Korean); gen-skill-docs, the exporter and adapters read it — the host does not |
 | `platforms` | Recommended | Array from valid list (claude-code, gemini-cli, codex-cli, cursor) |
 | `level` | Recommended | 1–5 integer |
 | `category` | Recommended | One of the valid categories in gen-skill-docs.js |
@@ -129,4 +129,4 @@ Anchor behavior with single words the model already has compressed meaning for f
 1. Run `node scripts/ci/lint-skill-descriptions.js` — must show no NEW violations for `skill-authoring`.
 2. Run `npm run skill:check` — exits 0.
 3. Read the description aloud: does it answer "when does this fire?" and nothing else? If you find yourself describing steps, rewrite.
-4. Count triggers in the `triggers:` array — at least 3, at least 1 Korean utterance.
+4. Count activation utterances in `description` — at least 3 (R1), at least 1 Korean; keep `triggers:` in sync for the exporters.
