@@ -224,6 +224,9 @@ describe('VERIFY queued → crash → resume', () => {
     // span includes the downtime, so it is not reported as a measured duration.
     expect(verifyRows[0].durationMs).toBeNull();
     expect(renderTimelineTable(summarizeSession(sessionId))).not.toContain('진행중');
+    // Whichever phase ranks top, the footer must quote a measured row, never
+    // the unmeasured abandoned one ("(-, 0% of total)").
+    expect(renderTimelineTable(summarizeSession(sessionId))).not.toMatch(/Top bottleneck: .*\(-,/);
   });
 
   it('should advance to IMPROVE with zero re-runs when the result arrives before any crash', async () => {
@@ -322,6 +325,24 @@ describe('findUnterminatedPhases — a re-run supersedes the abandoned window', 
 
     expect(rows.map((p) => p.unterminated)).toEqual([false, false]);
     expect(rows.map((p) => p.durationMs)).toEqual([null, 59_000]);
+  });
+
+  it('should quote the measured re-run row, not the abandoned one, in the bottleneck footer', () => {
+    // Deterministic form of the reviewer's probe: VERIFY ranks top (60s vs
+    // CROSS_CHECK's 10s) while its first same-named row is the abandoned one.
+    const events = [
+      { type: 'phase-start', phase: 'CROSS_CHECK', ts: '2026-09-28T00:00:00Z' },
+      { type: 'phase-end', phase: 'CROSS_CHECK', ts: '2026-09-28T00:00:10Z' },
+      { type: 'phase-start', phase: 'VERIFY', ts: '2026-09-28T00:00:10Z' },
+      { type: 'attempt-started', phase: 'VERIFY', ts: '2026-09-28T00:00:11Z' },
+      { type: 'attempt-rerun', phase: 'VERIFY', ts: '2026-09-28T00:05:00Z' },
+      { type: 'phase-start', phase: 'VERIFY', ts: '2026-09-28T00:05:01Z' },
+      { type: 'phase-end', phase: 'VERIFY', ts: '2026-09-28T00:06:01Z' },
+    ];
+    const summary = summarizeEvents('ap-unit', events);
+
+    expect(summary.topBottleneck).toBe('VERIFY');
+    expect(renderTimelineTable(summary)).toContain('Top bottleneck: **VERIFY** (1m 00s, 17% of total)');
   });
 
   it('should not let a re-run of one phase close another phase', () => {

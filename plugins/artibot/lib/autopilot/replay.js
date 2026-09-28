@@ -351,7 +351,12 @@ export function renderTimelineTable(summary) {
   const total = Number.isFinite(s.totalDurationMs) ? s.totalDurationMs : 0;
   let footer = '';
   if (s.topBottleneck && total > 0) {
-    const top = phases.find((p) => p.phase === s.topBottleneck);
+    // A phase can own several rows (a re-run leaves an unmeasured, abandoned
+    // row first), so quote the longest measured row of that phase — the one
+    // summarizeEvents ranked — not the first row carrying the name.
+    const top = phases
+      .filter((p) => p.phase === s.topBottleneck && Number.isFinite(p.durationMs))
+      .reduce((best, p) => (!best || p.durationMs > best.durationMs ? p : best), null);
     if (top) {
       const pct = Math.round((top.durationMs / total) * 100);
       footer = `\n\nTop bottleneck: **${s.topBottleneck}** (${fmtDuration(top.durationMs)}, ${pct}% of total)`;
