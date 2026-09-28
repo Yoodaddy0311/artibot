@@ -7,7 +7,9 @@ import {
   areAffectedPathsConflicting,
   buildFastFanoutPlan,
   FAST_PROFILE_DEFAULTS,
+  inspectAffectedPaths,
   normalizeFastProfile,
+  normalizeTaskId,
 } from '../../lib/autopilot/fast-profile.js';
 import { buildFastFanoutPlan as buildFromPublicApi } from '../../lib/autopilot/index.js';
 
@@ -496,5 +498,81 @@ describe('buildFastFanoutPlan partition invariant', () => {
     expect(() => expectPartition({ ...plan, serial: overlap }, tasks)).toThrow();
     expect(() => expectPartition({ ...plan, waves: [...plan.waves].reverse() }, tasks)).toThrow();
     expect(() => expectPartition({ ...plan, requestedTaskCount: 3 }, tasks)).toThrow();
+  });
+});
+
+describe('normalizeTaskId', () => {
+  it('trims a padded id and keeps the inner text as-is', () => {
+    expect(normalizeTaskId(' T1')).toBe('T1');
+    expect(normalizeTaskId('T1 ')).toBe('T1');
+    expect(normalizeTaskId('\tT1\n')).toBe('T1');
+    expect(normalizeTaskId('T 1')).toBe('T 1');
+    expect(normalizeTaskId('T1')).toBe('T1');
+  });
+
+  it.each([[''], ['   '], [null], [undefined], [1], [{}], [['T1']]])('returns null for %j', (value) => {
+    expect(normalizeTaskId(value)).toBeNull();
+  });
+
+  it('is the id rule the planner applies: padded duplicates collide', () => {
+    const plan = buildFastFanoutPlan({
+      fast: true,
+      cpuCount: 8,
+      tasks: [task(' dup', ['src/a.js']), task('dup ', ['src/b.js']), task('ok-one', ['src/c.js']), task('ok-two', ['src/d.js'])],
+    });
+    expect(plan.serial).toEqual([
+      { taskId: 'dup', reason: 'duplicate-id' },
+      { taskId: 'dup', reason: 'duplicate-id' },
+    ]);
+  });
+});
+
+describe('Windows name aliases in affected paths', () => {
+  // Windows drops trailing dots and spaces from every path segment, so
+  // `foo.js.` and `foo.js` open the same file. Case is already folded
+  // (`areAffectedPathsConflicting` test above pins `SRC\\API\\Client.js`).
+  it.each([
+    ['foo.js', 'foo.js.'],
+    ['foo.js', 'foo.js...'],
+    ['foo.js', 'foo.js '],
+    ['foo.js', 'foo.js. .'],
+    ['dir/x.js', 'dir./x.js'],
+    ['dir/x.js', 'dir /x.js'],
+    ['dir/x.js', 'DIR. /X.JS'],
+    ['dir/', 'dir.'],
+  ])('%j and %j are the same file', (left, right) => {
+    expect(areAffectedPathsConflicting([left], [right])).toBe(true);
+    expect(areAffectedPathsConflicting([right], [left])).toBe(true);
+  });
+
+  it.each([
+    ['foo.js', 'foo.jsx'],
+    ['foo.js', 'foo..js'],
+    ['gitignore', '.gitignore'],
+    ['a/b.js', 'a/ b.js'],
+  ])('negative control: %j and %j stay distinct (leading and inner dots/spaces are part of the name)', (left, right) => {
+    expect(areAffectedPathsConflicting([left], [right])).toBe(false);
+  });
+
+  it.each([['...'], ['src/.../x.js'], ['src/ /x.js'], ['src/.. /x.js'], ['src/. /x.js']])(
+    'a segment that is empty after stripping (%j) is unsafe, not dropped',
+    (value) => {
+      expect(inspectAffectedPaths([value]).unsafe).toBe(true);
+    },
+  );
+
+  it('keeps the existing root-only and traversal rules: `.`/`./` dropped, `..` unsafe', () => {
+    expect(inspectAffectedPaths(['.'])).toEqual({ paths: [], unsafe: false });
+    expect(inspectAffectedPaths(['./'])).toEqual({ paths: [], unsafe: false });
+    expect(inspectAffectedPaths(['src/../x.js']).unsafe).toBe(true);
+  });
+
+  it('the planner never co-locates two tasks that name one file through an alias', () => {
+    const plan = buildFastFanoutPlan({
+      fast: true,
+      cpuCount: 8,
+      tasks: [task('plain', ['src/foo.js']), task('dotted', ['src/foo.js.']), task('other', ['src/other.js'])],
+    });
+    expect(coLocated(plan, 'plain', 'dotted')).toBe(false);
   });
 });

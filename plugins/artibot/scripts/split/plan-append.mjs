@@ -26,7 +26,9 @@
  * `affectedPaths` are missing or unusable by the same rule (ownership
  * unknown); ownership overlap
  * (`lib/autopilot/fast-profile.js#areAffectedPathsConflicting`) or a shared
- * task id with any limb that is not landed. LANDED means `readLaneOpsState(run.json, limb) === 'done'`
+ * task id with any limb that is not landed (ids compared and stored through
+ * `lib/autopilot/fast-profile.js#normalizeTaskId`, the rule next-wave counts
+ * with; existing rows are read normalised, never rewritten). LANDED means `readLaneOpsState(run.json, limb) === 'done'`
  * (the `lane-state.mjs` record) — a `Split-Limb: done` trailer alone does NOT
  * count (leader decision 2026-09-28, fail-closed, no override flag). A missing
  * run.json means no limb is landed.
@@ -42,7 +44,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { areAffectedPathsConflicting, inspectAffectedPaths } from '../../lib/autopilot/fast-profile.js';
+import { areAffectedPathsConflicting, inspectAffectedPaths, normalizeTaskId } from '../../lib/autopilot/fast-profile.js';
 import { atomicWriteJsonSync } from '../../lib/core/file.js';
 import { getRepoIdentity, repoShortName } from '../../lib/git/repo-identity.js';
 import { limbsFromPlan } from '../../lib/git/split-dispatch.js';
@@ -68,7 +70,7 @@ export const HELP = `usage: node scripts/split/plan-append.mjs --limb <name> --p
   --json             machine output { ok, planPath, backupPath, added, warnings, dryRun } / { ok: false, error }
 
 Writes plan.json.bak first, then plan.json atomically (tmp + rename).
-Refuses duplicates, unusable paths (absolute, .., ~, drive, bare .), ownership overlap and
+Refuses duplicates, unusable paths (absolute, .., ~, drive, bare ., a segment of only dots/spaces), ownership overlap and
 double-assigned task ids with any limb whose lane state is not 'done'.`;
 
 /**
@@ -124,7 +126,8 @@ function specShapeError(spec) {
  * Why a path list cannot serve as an ownership claim, or `null`.
  *
  * Every entry must name a concrete repo-relative path. `inspectAffectedPaths`
- * flags absolute / `~` / drive / `..` / `:` / non-string entries as unsafe and
+ * flags absolute / `~` / drive / `..` / `:` / non-string entries, and any
+ * segment made only of dots and spaces (`...`, `.. `), as unsafe and
  * silently drops absent or root-only ones (`null`, `.`, `./`);
  * `areAffectedPathsConflicting` drops all of them, so any such entry would
  * slip past the overlap check (fail-open — `--path .` passed an active limb).
@@ -142,8 +145,15 @@ function pathClaimError(values) {
   return bad.length ? `unusable affectedPaths ${JSON.stringify(bad)}` : null;
 }
 
-/** Task ids of a row, as next-wave counts them (`[limb]` when absent). */
-const rowTaskIds = (row) => (Array.isArray(row?.taskIds) && row.taskIds.length ? row.taskIds : [row?.limb]);
+/**
+ * Task ids of a row, as next-wave counts them: each id through
+ * `normalizeTaskId`, blanks dropped, `[limb]` when none is left. An old row's
+ * `" T1"` therefore blocks a new `"T1"`; the row itself is not rewritten.
+ */
+const rowTaskIds = (row) => {
+  const ids = (Array.isArray(row?.taskIds) ? row.taskIds : []).map(normalizeTaskId).filter((id) => id !== null);
+  return ids.length ? ids : [row?.limb];
+};
 
 /**
  * Ownership and assignment check of one spec against every limb that is NOT
@@ -214,9 +224,11 @@ export function appendLimbs(plan, run, specs, ctx) {
   const known = new Set(existing.map((r) => r?.limb).filter(Boolean));
   const added = [];
   const warnings = [];
-  for (const spec of specs) {
-    const shape = specShapeError(spec);
+  for (const raw of specs) {
+    const shape = specShapeError(raw);
     if (shape) return { ok: false, reason: shape };
+    // Compared AND stored normalised: a padded id names the same task.
+    const spec = { ...raw, taskIds: raw.taskIds.map(normalizeTaskId) };
     const claim = pathClaimError(spec.affectedPaths);
     if (claim) return { ok: false, reason: `limb ${spec.limb}: ${claim} — every --path must be a repo-relative file or directory` };
     if (known.has(spec.limb)) return { ok: false, reason: `limb ${spec.limb} already exists in plan.json` };

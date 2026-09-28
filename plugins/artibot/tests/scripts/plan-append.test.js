@@ -20,6 +20,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { appendLimbs, main, parseArgs, runAppend } from '../../scripts/split/plan-append.mjs';
+import { computeNextWave } from '../../scripts/split/next-wave.mjs';
+import { normalizeTaskId } from '../../lib/autopilot/fast-profile.js';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'split', 'plan-append.mjs');
 
@@ -261,6 +263,100 @@ describe('task ids are not assigned twice', () => {
   });
   it('allows re-using the task id of a landed limb', () => {
     expect(appendLimbs(plan, { lanes: { alpha: 'done' } }, [spec], ctx).ok).toBe(true);
+  });
+});
+
+describe('task ids are compared and stored normalised (normalizeTaskId)', () => {
+  const ctx = { parentRoot: '/repo', repoShort: 'demo' };
+  const t1Row = (taskIds) => ({ ...oldRow('alpha', ['src/alpha/']), taskIds });
+  const spec = (taskIds, over = {}) => ({ limb: 'gamma', taskIds, affectedPaths: ['src/gamma.js'], wave: 25, rolling: true, ...over });
+  const active = { lanes: { alpha: 'active' } };
+
+  it.each([[' T1'], ['T1 '], ['\tT1\n']])('refuses %j when an un-landed limb holds T1', (padded) => {
+    const r = appendLimbs({ limbs: [t1Row(['T1'])] }, active, [spec([padded])], ctx);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/task T1 is already assigned to limb alpha \(lane state active/);
+  });
+
+  it('old plan: an un-landed row holding " T1" blocks a new "T1"', () => {
+    const r = appendLimbs({ limbs: [t1Row([' T1'])] }, active, [spec(['T1'])], ctx);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/task T1 is already assigned to limb alpha/);
+  });
+
+  it('old plan: a row whose taskIds are all blank counts as its limb name (next-wave rule)', () => {
+    const r = appendLimbs({ limbs: [t1Row(['  '])] }, active, [spec(['alpha'])], ctx);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/task alpha is already assigned to limb alpha/);
+  });
+
+  it('stores the trimmed id on the new row', () => {
+    const r = appendLimbs({ limbs: [] }, null, [spec([' g1 ', 'g2'])], ctx);
+    expect(r.ok).toBe(true);
+    expect(r.added[0].taskIds).toEqual(['g1', 'g2']);
+  });
+
+  it('two new specs in one call collide on a padded id', () => {
+    const r = appendLimbs({ limbs: [] }, null, [spec(['T1']), spec([' T1'], { limb: 'delta', affectedPaths: ['src/delta.js'] })], ctx);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/limb delta task T1 is already assigned to limb gamma/);
+  });
+
+  it('a landed row holding " T1" does not block "T1"', () => {
+    expect(appendLimbs({ limbs: [t1Row([' T1'])] }, { lanes: { alpha: 'done' } }, [spec(['T1'])], ctx).ok).toBe(true);
+  });
+
+  it('CLI: --task " T1" / "T1 " against an active T1 exits 1, plan.json byte-identical, no .bak', () => {
+    const plan = { runId: 'split-demo', repoShort: 'demo', limbs: [t1Row(['T1'])] };
+    for (const padded of [' T1', 'T1 ']) {
+      const parent = seed({ planText: `${JSON.stringify(plan, null, 2)}\n`, lanes: { alpha: { state: 'active' } } });
+      const before = fs.readFileSync(planFile(parent));
+      const c = collect();
+      expect(main(['--parent', parent, '--limb', 'gamma', '--task', padded, '--path', 'src/gamma.js', '--wave', '27'], c.io)).toBe(1);
+      expect(c.stderr()).toMatch(/^plan-append refused: limb gamma task T1 is already assigned to limb alpha \(lane state active/);
+      expect(fs.readFileSync(planFile(parent)).equals(before)).toBe(true);
+      expect(fs.existsSync(bakFile(parent))).toBe(false);
+    }
+  });
+
+  it('existing rows are not rewritten: an unrelated append keeps " T1" byte-for-byte', () => {
+    const plan = { runId: 'split-demo', repoShort: 'demo', limbs: [t1Row([' T1'])] };
+    const parent = seed({ planText: JSON.stringify(plan), lanes: { alpha: { state: 'active' } } });
+    runAppend(args(parent, ['--task', ' g1']));
+    const after = JSON.parse(fs.readFileSync(planFile(parent), 'utf-8'));
+    expect(after.limbs[0].taskIds).toEqual([' T1']);
+    expect(after.limbs[1].taskIds).toEqual(['g1']);
+  });
+});
+
+describe('Windows name aliases are the same owned file (fast-profile inspectPath)', () => {
+  const ctx = { parentRoot: '/repo', repoShort: 'demo' };
+  const plan = { limbs: [oldRow('alpha', ['src/foo.js'])] };
+  const spec = (p) => ({ limb: 'gamma', taskIds: ['gamma'], affectedPaths: [p], wave: 27, rolling: true });
+
+  it.each([['src/foo.js.'], ['src/foo.js '], ['SRC/Foo.JS'], ['src./foo.js'], ['src /foo.js']])('%j overlaps an active limb owning src/foo.js', (alias) => {
+    const r = appendLimbs(plan, { lanes: { alpha: 'active' } }, [spec(alias)], ctx);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/gamma overlaps owned paths of limb alpha \(lane state active/);
+  });
+
+  it('a segment of only dots is an unusable claim, not a dropped one', () => {
+    const r = appendLimbs(plan, { lanes: { alpha: 'active' } }, [spec('src/.../x.js')], ctx);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('unusable affectedPaths ["src/.../x.js"]');
+  });
+});
+
+describe('one normalisation for both scripts', () => {
+  const RAW = [' T1', 'T1 ', '\tT2\n', 'T 3', 'T4'];
+
+  it('plan-append stores and next-wave counts exactly normalizeTaskId(raw)', () => {
+    const expected = RAW.map(normalizeTaskId);
+    const stored = RAW.map((raw, i) => appendLimbs({ limbs: [] }, null, [{ limb: `l${i}`, taskIds: [raw], affectedPaths: [`src/l${i}.js`], wave: 1, rolling: false }], { parentRoot: '/repo', repoShort: 'demo' }).added[0].taskIds[0]);
+    const counted = computeNextWave({ limbs: RAW.map((raw, i) => ({ limb: `l${i}`, taskIds: [raw] })) }, null).remaining.map((r) => r.taskId);
+    expect(stored).toEqual(expected);
+    expect(counted).toEqual(['T1', 'T2', 'T 3', 'T4']);
+    expect(new Set(stored)).toEqual(new Set(counted));
   });
 });
 

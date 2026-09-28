@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { computeNextWave, main, parseArgs } from '../../scripts/split/next-wave.mjs';
+import { normalizeTaskId } from '../../lib/autopilot/fast-profile.js';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'split', 'next-wave.mjs');
 
@@ -171,6 +172,21 @@ describe('old-run compatibility', () => {
     const r = computeNextWave(plan, { runId: 'x', stage: 'dispatched' });
     expect(r).toMatchObject({ runId: null, requested: 1, completed: 0 });
     expect(r.notes.join('\n')).toMatch(/alpha has no taskIds/);
+  });
+
+  it('padded ids in an old plan count as one task (" T1" in a limb, "T1 " in a saved wave)', () => {
+    const plan = { limbs: [row('alpha', [' T1'])], plan: { requestedTaskCount: 1, waves: [{ taskIds: ['T1 '] }], serial: [{ taskId: '\tT1' }] } };
+    const r = computeNextWave(plan, null);
+    expect(r).toMatchObject({ requested: 1, completed: 0 });
+    expect(r.remaining).toEqual([{ taskId: 'T1', status: 'in-flight', planWaveIndex: 0, limb: 'alpha' }]);
+    expect(computeNextWave(plan, lanes({ alpha: 'done' }))).toMatchObject({ requested: 1, completed: 1, remaining: [], complete: true });
+  });
+
+  it('uses the shared normalizeTaskId (a row whose ids are all blank falls back to the limb name)', () => {
+    const r = computeNextWave({ limbs: [row('alpha', ['  ', null, 7])], plan: { waves: [{ taskIds: ['alpha'] }], serial: [] } }, null);
+    expect(r.requested).toBe(1);
+    expect(r.notes.join('\n')).toMatch(/alpha has no taskIds/);
+    expect([' alpha', 'alpha\n', '', null].map(normalizeTaskId)).toEqual(['alpha', 'alpha', null, null]);
   });
 
   it('tolerates garbage input without throwing', () => {

@@ -10,6 +10,7 @@
  *   - normalizeFastProfile(limits)
  *   - areAffectedPathsConflicting(left, right)
  *   - inspectAffectedPaths(values)
+ *   - normalizeTaskId(value)
  *   - buildFastFanoutPlan(options)
  *
  * @module lib/autopilot/fast-profile
@@ -76,10 +77,31 @@ function inspectPath(value) {
   // serialization, which is the conservative answer when ownership is unknown.
   if (typeof value !== 'string' || !value.trim()) return { path: null, unsafe: true };
   const slashed = value.trim().replaceAll('\\', '/');
+  // Order matters: the `..` check runs on the raw segments FIRST, then `''` and
+  // `.` are dropped as before, and only the remaining segments are stripped.
   if (isUnsafeRepoPath(slashed)) return { path: null, unsafe: true };
-  const path = slashed.split('/').filter((segment) => segment && segment !== '.')
-    .join('/').toLowerCase();
+  const segments = slashed.split('/').filter((segment) => segment && segment !== '.')
+    .map(windowsSegmentName);
+  if (segments.includes('')) return { path: null, unsafe: true };
+  const path = segments.join('/').toLowerCase();
   return { path: path || null, unsafe: false };
+}
+
+/**
+ * Win32 path normalisation (cmd, PowerShell, most tools) drops trailing dots and
+ * spaces from every segment, so there `foo.js.`, `foo.js ` and `dir./x` alias
+ * `foo.js` and `dir/x`; Node's `\\?\` fs skips that step and can create both.
+ * Treating them as one owner is the conservative answer under either reading
+ * (case is folded by the caller). A segment that is ONLY dots and spaces
+ * (`...`, ` `, `.. `) becomes `''` here; the caller marks it unsafe rather than
+ * dropping it — what Windows resolves it to is not something to guess.
+ * A scan, not `/[. ]+$/`: that regex is quadratic on a long dot/space run
+ * followed by another character.
+ */
+function windowsSegmentName(segment) {
+  let end = segment.length;
+  while (end > 0 && (segment[end - 1] === '.' || segment[end - 1] === ' ')) end -= 1;
+  return segment.slice(0, end);
 }
 
 function normalizePath(value) {
@@ -118,8 +140,20 @@ export function areAffectedPathsConflicting(left, right) {
   return leftPaths.some((leftPath) => rightPaths.some((rightPath) => pathsOverlap(leftPath, rightPath)));
 }
 
+/**
+ * The one task-id rule: a string with surrounding whitespace trimmed, or
+ * `null` when there is no id left. The planner applies it here, and the
+ * `/split` scripts (`plan-append.mjs`, `next-wave.mjs`) import it so that a
+ * padded `" T1"` is the same task everywhere.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+export function normalizeTaskId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function taskId(task, index) {
-  return typeof task?.id === 'string' && task.id.trim() ? task.id.trim() : `task-${index + 1}`;
+  return normalizeTaskId(task?.id) ?? `task-${index + 1}`;
 }
 
 function taskDependencies(task) {
@@ -134,7 +168,9 @@ function taskDependencies(task) {
 
 /**
  * Normalized repo-relative paths plus an `unsafe` flag for anything that is not
- * a plain relative path (absolute, `~`, drive, `..`, `:`, non-string). Absent
+ * a plain relative path (absolute, `~`, drive, `..`, `:`, non-string, a
+ * segment of only dots and spaces). Trailing dots/spaces of each segment are
+ * stripped (Windows name aliases, `windowsSegmentName`). Absent
  * or root-only entries (`null`, `.`) are dropped from `paths` without being
  * unsafe — callers that need every entry to name a path must check that too.
  * @param {unknown} values
@@ -169,9 +205,8 @@ function assessTask(task, index, duplicateIds, profile) {
 function duplicateTaskIds(tasks) {
   const counts = new Map();
   for (const task of tasks) {
-    if (typeof task?.id !== 'string' || !task.id.trim()) continue;
-    const id = task.id.trim();
-    counts.set(id, (counts.get(id) || 0) + 1);
+    const id = normalizeTaskId(task?.id);
+    if (id !== null) counts.set(id, (counts.get(id) || 0) + 1);
   }
   return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
 }
@@ -223,8 +258,7 @@ function settleBlockedDependencies(tasks, knownIds) {
 function assessTasks(tasks, profile) {
   const list = Array.isArray(tasks) ? tasks : [];
   const duplicateIds = duplicateTaskIds(list);
-  const knownIds = new Set(list.flatMap((task) => typeof task?.id === 'string' && task.id.trim()
-    ? [task.id.trim()] : []));
+  const knownIds = new Set(list.map((task) => normalizeTaskId(task?.id)).filter((id) => id !== null));
   const assessed = list.map((task, index) => assessTask(task, index, duplicateIds, profile));
   const resolved = settleBlockedDependencies(assessed, knownIds);
   return settleBlockedDependencies(markDependencyCycles(resolved), knownIds);
