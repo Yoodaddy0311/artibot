@@ -39,6 +39,10 @@
  *         boolean 을 넘길 때만 반영하고 이 config 를 읽지 않으며,
  *         `lib/runtime/artifact-lifecycle-gates.js` 는 자기 frozen 기본값을
  *         쓴다. 즉 선언 2개이고 이 게이트는 선언만 본다.
+ *         **정정 2026-09-28(CA-13)**: `review.verify.*` 는 소비자가 있다 —
+ *         `scripts/hooks/mission-complete-record.js#policyFromConfig` 가 읽어 gates 에
+ *         policy 로 넘기고 `scripts/ledger/outcome-census.mjs` 도 같은 함수를 부른다
+ *         (Wave 11 `6d612dbf`). 소비자 0 은 `review.independent` 쪽만 참이다.
  *       - `missions` — `lib/` 런타임 소비자 **0**. 술어는
  *         `lib/mission/mission-id.js#judgeSubstantive` 가 **자체 하드코딩 표**로
  *         갖고 있고 이 config 를 읽지 않는다. 즉 config 와 코드는 **독립 선언 2개**이고,
@@ -79,6 +83,10 @@ import {
   QUESTION_GATE_ENFORCE_CONFIG_PATH,
   readQuestionGateEnforce,
 } from '../../lib/planning/question-gate.js';
+import {
+  readReportVerifyGateEnforce,
+  REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH,
+} from '../../lib/autopilot/report-verify-gate.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
@@ -417,6 +425,8 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['runtime.checkpoint.saveOnSave', false],
     // CA-15 kill switch: question-gate enforcement lands OFF; flipping it is an owner decision.
     ['runtime.questionGate.enforce', false],
+    // CA-13 kill switch: the REPORT verify-evidence gate lands OFF (observe only); flipping it is an owner decision.
+    ['autopilot.reportVerifyGate.enforce', false],
   ])('%s === %j (무변경)', (dotted, value) => {
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });
@@ -498,5 +508,34 @@ describe('runtime.questionGate.enforce — CA-15 킬스위치의 등재값', () 
   it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
     expect(QUESTION_GATE_ENFORCE_CONFIG_PATH).toBe('runtime.questionGate.enforce');
     expect(resolveDotPath(config, QUESTION_GATE_ENFORCE_CONFIG_PATH)).toBe(false);
+  });
+});
+
+/**
+ * CA-13 `autopilot.reportVerifyGate.enforce` — 킬스위치 등재값 고정.
+ *
+ * CA-15 와 같은 이유로 여기서 소유한다: `autopilot` 은 신설 6키 allowlist 사정권
+ * 밖이고 JSON 스키마는 비-strict 라 값을 못 본다. 소비자
+ * `lib/autopilot/report-verify-gate.js#readReportVerifyGateEnforce` 가 `=== true`
+ * 리터럴 비교라 문자열 `"false"` 도 OFF 로 읽히므로 타입을 따로 단언한다.
+ *
+ * 이 게이트가 못 보는 것(rules §9):
+ *  - ON 일 때의 동작. 판정과 PAUSE 는 `tests/autopilot/report-verify-gate.test.js` 가 본다.
+ *  - 게이트의 도달 범위. 게이트는 `engine.js#runPhase6Report` 안에서만 돈다 — 드라이버가
+ *    `recordPhaseResult` 로 REPORT 를 기록하는 경로는 이 키와 무관하게 게이트를 거치지 않는다.
+ */
+describe('autopilot.reportVerifyGate.enforce — CA-13 킬스위치의 등재값', () => {
+  it('키가 등재돼 있고 boolean false 다 (문자열 "false" 거부)', () => {
+    expect(resolveDotPath(config, 'autopilot.reportVerifyGate.enforce')).toBe(false);
+    expect(typeof config.autopilot.reportVerifyGate.enforce).toBe('boolean');
+  });
+
+  it('등재가 소비자를 켜지 않는다 — readReportVerifyGateEnforce 가 false 를 준다', () => {
+    expect(readReportVerifyGateEnforce(config)).toBe(false);
+  });
+
+  it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
+    expect(REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH).toBe('autopilot.reportVerifyGate.enforce');
+    expect(resolveDotPath(config, REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH)).toBe(false);
   });
 });
