@@ -4,7 +4,7 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 ## Stack
 
-Claude Native Agent Teams API (named `Agent` spawns into the session's single implicit team + SendMessage + TaskCreate family) + 30 agents + 114 skills + 79 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
+Claude Native Agent Teams API (named `Agent` spawns into the session's single implicit team + SendMessage + TaskCreate family) + 30 agents + 114 skills + 80 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
 > **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from the **17 module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; of the other six, four (aci-constraint, context-reset, otel-middleware, skill-trigger) are wired by other entry points or opt-in, and two (workflow-mode, mission-ledger) are helpers imported by `tasks.js`, not stages.
 

@@ -19,7 +19,7 @@
     ],
     "grepDerivedBeyondDesignNamed": [],
     "measuredAt": "2026-09-02T07:25:22Z",
-    "denominator": 79,
+    "denominator": 80,
     "denominatorScope": "plugins/artibot/commands/*.md",
     "markerScan": {
       "M1_📊_작업_진행률": [

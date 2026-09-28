@@ -434,7 +434,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | **토큰 비용** | 1x | ~5x |
 | **적합 작업** | 단일 파일 분석, 검색, 빠른 위임 | 복잡한 기능 구현, 멀티 에이전트 협업 |
 
-### 79개 슬래시 커맨드
+### 80개 슬래시 커맨드
 
 - `/sc`로 자연어 의도를 분석하여 최적 커맨드로 자동 라우팅
 - 개발, 분석, 품질, 테스트, 문서화, 배포, 마케팅 전 영역 커버
@@ -1597,7 +1597,7 @@ plugins/artibot/
 ├── agents/                      # 30개 에이전트 정의 (orchestrator 1 + 팀원 29)
 │   ├── orchestrator.md          #   CTO / 팀 리더 (Agent Teams API)
 │   └── [29개 전문 에이전트].md    #   팀원 (SendMessage + TaskUpdate)
-├── commands/                    # 79개 슬래시 커맨드
+├── commands/                    # 80개 슬래시 커맨드
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (네임드 Agent 스폰)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
