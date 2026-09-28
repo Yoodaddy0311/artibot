@@ -25,8 +25,31 @@
  * What this file does NOT cover: SIGKILL/crash mid-section (see
  * file-lock-signal.test.js for signals), network filesystems, and the
  * ELOCKTIMEOUT path for a live holder that never releases (file-lock.test.js
- * owns that). Contention is measured at N=4; a larger N or longer sections
- * can push a waiter past LOCK_WAIT_MS, which this file does not probe.
+ * owns that), and sustained hot re-locking. The lib keeps no wait queue (its
+ * header, "Fairness"), so a process that releases and re-locks at once
+ * usually wins again: N contenders each re-locking R times back to back push
+ * the last waiter to about (N-1) x R x S of waiting (S = one section), past
+ * LOCK_WAIT_MS on a slow run. Before this file yielded, one contender took
+ * all 15 rounds in a row in each of 214 measured no-load runs (2026-09-28),
+ * and a resulting ELOCKTIMEOUT surfaced as a child's stderr. Production does
+ * not re-lock like that: each caller locks once per hook run, or a few times
+ * in a row at most (a CAS write, one retry, then a lease claim:
+ * recordMissionState in lib/runtime/middleware/tasks.js, feedLimb in
+ * scripts/split/task-feed.mjs).
+ * So contenders in the contention case sleep 10-25ms (the lib's own poll
+ * jitter) outside the lock between rounds, and this file does not probe that
+ * pattern. That removes the monopoly and the wait budget it used: in 150
+ * no-load runs per arm, the longest same-pid streak went from p50 15 to 4 and
+ * the longest successful wait from 1,627 to 1,211ms. It does not make the
+ * wait budget safe under sustained machine overload: with 32 CPU spinners
+ * both arms failed every run, since each section itself slows down, and that
+ * can still push a waiter past LOCK_WAIT_MS. The yield also strengthens the
+ * mutual-exclusion check: without it the lock changed hands between
+ * processes about 6 times per run (1,263 in 214 runs), with it about 47
+ * (7,066 in the 150 no-load yield runs; at most N x R - 1 = 59). The case pins
+ * the yield by asserting no process took all R rounds in a row, which every
+ * one of those 214 runs did; in the 150 no-load yield runs the longest
+ * same-pid streak never exceeded 11.
  *
  * Why no wall-clock spans: an earlier version compared Date.now() [enter,
  * exit] spans across processes. On Windows each process anchors Date.now()
@@ -71,6 +94,15 @@ const BARRIER_DEADLINE_MS = 20_000;
 const SCENARIO_DEADLINE_MS = 40_000;
 
 /**
+ * Between-round yield bounds (ms) for the contention case: the lib's own poll
+ * jitter, LOCK_RETRY_MIN_MS / LOCK_RETRY_MAX_MS at
+ * lib/core/file-lock.js:132-133, copied here because the lib does not export
+ * them.
+ */
+const YIELD_MIN_MS = 10;
+const YIELD_MAX_MS = 25;
+
+/**
  * Contender: waits at the barrier, then runs `rounds` locked
  * read-increment-write cycles on the counter. Inside the section it claims an
  * O_EXCL marker; finding the marker already present means another process is
@@ -78,6 +110,9 @@ const SCENARIO_DEADLINE_MS = 40_000;
  * act of the section to a shared O_APPEND ledger. Prints one JSON line with
  * its own tallies.
  *
+ * cfg.jitter ([min, max] ms, optional): before every round but the first,
+ * sleep a uniform time in that range outside the lock (see the file header).
+ * The wait measured for maxWaitMs starts after that sleep.
  * cfg.noLock (positive control only): run the section with no lock at all.
  * cfg.arriveDir (positive control only): after claiming the marker, wait until
  * cfg.processes contenders are inside, so the breach is certain, not likely.
@@ -101,6 +136,7 @@ while (!existsSync(cfg.goPath)) {
 
 const tally = { overlaps: 0, badReads: 0, writeErrors: 0, maxWaitMs: 0 };
 for (let i = 0; i < cfg.rounds; i++) {
+  if (i > 0 && cfg.jitter) sleep(cfg.jitter[0] + Math.random() * (cfg.jitter[1] - cfg.jitter[0]));
   const asked = Date.now();
   withFileLock(cfg.counterPath, () => {
     appendFileSync(cfg.ledgerPath, 'E ' + process.pid + '\\n');
@@ -272,6 +308,27 @@ function ledgerViolations(lines) {
 }
 
 /**
+ * Longest stretch of consecutive entries by one pid: how many sections in a
+ * row one process took without the lock changing hands.
+ *
+ * @param {string[]} lines ledger lines without their trailing newline
+ * @returns {number}
+ */
+function ledgerLongestRun(lines) {
+  let last = null;
+  let run = 0;
+  let longest = 0;
+  for (const line of lines) {
+    const [kind, pid] = line.split(' ');
+    if (kind !== 'E') continue;
+    run = pid === last ? run + 1 : 1;
+    last = pid;
+    longest = Math.max(longest, run);
+  }
+  return longest;
+}
+
+/**
  * Split a ledger file into lines; a missing file is an empty ledger.
  *
  * @param {string} ledgerPath
@@ -289,10 +346,13 @@ function readLedger(ledgerPath) {
  * `noLock` + `inSectionBarrier` turn the run into a positive control: no lock,
  * and every contender waits inside the section until all of them are there.
  *
- * @param {{ processes: number, rounds: number, holdMs: number, seedLock?: (lockPath: string) => void, noLock?: boolean, inSectionBarrier?: boolean }} opts
- * @returns {Promise<{ counter: number, expected: number, overlaps: number, badReads: number, writeErrors: number, exits: Array<number|null>, stderr: string[], lockLeft: boolean, ledgerLines: number, ledgerViolations: number, maxWaitMs: number }>}
+ * `jitter` ([min, max] ms) makes each contender yield outside the lock between
+ * rounds.
+ *
+ * @param {{ processes: number, rounds: number, holdMs: number, jitter?: [number, number]|null, seedLock?: (lockPath: string) => void, noLock?: boolean, inSectionBarrier?: boolean }} opts
+ * @returns {Promise<{ counter: number, expected: number, overlaps: number, badReads: number, writeErrors: number, exits: Array<number|null>, stderr: string[], lockLeft: boolean, ledgerLines: number, ledgerViolations: number, ledgerLongestRun: number, maxWaitMs: number }>}
  */
-async function runContention({ processes, rounds, holdMs, seedLock, noLock = false, inSectionBarrier = false }) {
+async function runContention({ processes, rounds, holdMs, jitter = null, seedLock, noLock = false, inSectionBarrier = false }) {
   const script = path.join(tmpDir, 'contender.mjs');
   await fs.writeFile(script, CONTENDER_SOURCE, 'utf-8');
   const counterPath = path.join(tmpDir, 'counter.txt');
@@ -314,6 +374,7 @@ async function runContention({ processes, rounds, holdMs, seedLock, noLock = fal
       goPath,
       rounds,
       holdMs,
+      jitter,
       barrierDeadlineMs: BARRIER_DEADLINE_MS,
       noLock,
       arriveDir,
@@ -343,6 +404,7 @@ async function runContention({ processes, rounds, holdMs, seedLock, noLock = fal
     lockLeft: fsSync.existsSync(lockPath),
     ledgerLines: ledger.length,
     ledgerViolations: ledgerViolations(ledger),
+    ledgerLongestRun: ledgerLongestRun(ledger),
     maxWaitMs: Math.max(0, ...tallies.map((t) => t.maxWaitMs ?? 0)),
   };
 }
@@ -436,11 +498,19 @@ describe('overlap analyzers (no processes)', () => {
     expect(ledgerViolations(['E A', 'X', 'E B', 'X B'])).toBeGreaterThan(0);
     expect(ledgerViolations(['E A', 'garbage', 'X A'])).toBe(1);
   });
+
+  it('measures the longest stretch of sections one pid took in a row', () => {
+    expect(ledgerLongestRun(['E A', 'X A', 'E A', 'X A', 'E A', 'X A', 'E B', 'X B'])).toBe(3);
+    expect(ledgerLongestRun(['E A', 'X A', 'E B', 'X B', 'E B', 'X B', 'E A', 'X A'])).toBe(2);
+    expect(ledgerLongestRun(['E A', 'X A', 'E B', 'X B', 'E A', 'X A'])).toBe(1);
+  });
 });
 
 describe('withFileLock mutual exclusion (real processes)', () => {
   it('N processes x R rounds lose no counter updates and never overlap', async () => {
-    const r = await runContention({ processes: 4, rounds: 15, holdMs: 2 });
+    const r = await runContention({
+      processes: 4, rounds: 15, holdMs: 2, jitter: [YIELD_MIN_MS, YIELD_MAX_MS],
+    });
 
     // stderr first: an ELOCKTIMEOUT in a child shows up here with its message.
     expect(r.stderr).toEqual([]);
@@ -450,6 +520,10 @@ describe('withFileLock mutual exclusion (real processes)', () => {
     expect(r.overlaps).toBe(0);
     expect(r.ledgerLines).toBe(2 * r.expected);
     expect(r.ledgerViolations).toBe(0);
+    // Without the between-round yield the first process took all R rounds in
+    // a row in every measured run; with it, that needs R-1 straight wins over
+    // polling waiters. See the header.
+    expect(r.ledgerLongestRun).toBeLessThan(15);
     expect(r.counter).toBe(r.expected);
     expect(r.lockLeft).toBe(false);
   }, 60_000);
