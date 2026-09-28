@@ -135,6 +135,19 @@ describe('routing-scorecard — 라이브 모양 영수증', () => {
     expect(JSON.stringify(buildRoutingScorecard(replay)))
       .toBe(JSON.stringify(buildRoutingScorecard(buildReplay([...LIVE_LINES].reverse()))));
   });
+
+  it('selected_tiers 는 정책 예측으로 읽히고 "실제 실행된 모델" 주장이 없다 (Codex R6)', () => {
+    const row = buildRoutingScorecard(buildReplay(LIVE_LINES)).metrics
+      .find((m) => m.key === 'routing.selected_tiers');
+    expect(row.label).toContain('정책 예측');
+    expect(row.note).toContain('정책 예측');
+    expect(`${row.label} ${row.note}`).not.toMatch(/실제로 실행된|actually (ran|used|executed)/);
+    // Served identity is usage.receipt only: route.bound carries a policy value
+    // (bind-model-fallback.js#resolveBoundModel), and a matched canary DOES move
+    // selected (adaptive-model-router.js#resolveSelection).
+    expect(row.note).toContain('usage.receipt');
+    expect(row.note).not.toMatch(/bind 행으로|이 값을 바꾸지 않는다/);
+  });
 });
 
 // ---------------------------------------------------------------------------
