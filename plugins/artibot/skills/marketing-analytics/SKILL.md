@@ -16,7 +16,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "marketing"
-source_hash: 142ec718
+source_hash: 86f70cf6
 whenNotToUse: "Product telemetry, infrastructure monitoring, or engineering performance metrics — use observability or data-analysis skill instead when the domain is not marketing spend and campaign ROI."
 ---
 

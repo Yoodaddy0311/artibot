@@ -20,7 +20,7 @@ agents: []
 argument-hint: "[language|environment] e.g., korean, english, reset"
 tokens: 2000
 category: setup
-source_hash: 2c90d31d
+source_hash: b576956b
 whenNotToUse: "Already-configured projects where Artibot is operational; do not re-run the setup wizard during normal development sessions unless resetting configuration."
 ---
 

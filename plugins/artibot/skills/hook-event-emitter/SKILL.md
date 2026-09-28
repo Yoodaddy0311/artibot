@@ -30,7 +30,7 @@ whenNotToUse: "Cloud or remote telemetry pipelines, external monitoring services
 risk: safe
 version: "0.5.0"
 lastVerified: "2026-04-23"
-source_hash: f49b715d
+source_hash: 5cb1f098
 ---
 
 # Hook Event Emitter (Local Observability)

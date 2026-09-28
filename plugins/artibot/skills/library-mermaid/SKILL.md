@@ -9,7 +9,7 @@ agents: ["architect", "doc-updater"]
 tokens: "~3K"
 category: "library"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 170822f6
+source_hash: 5086e4c1
 whenNotToUse: "Interactive UI prototypes, pixel-level design mockups, or any visual output that requires rendering beyond text-based Mermaid syntax in Markdown."
 ---
 

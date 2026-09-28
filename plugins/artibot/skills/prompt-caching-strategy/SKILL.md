@@ -28,7 +28,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
-source_hash: 4787da02
+source_hash: eecf587c
 whenNotToUse: "Platforms that do not support prompt caching (e.g., non-Anthropic APIs) or single-turn tasks where prompt structure changes every request and no static prefix exists to cache."
 ---
 

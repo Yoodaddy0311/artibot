@@ -28,7 +28,7 @@ category: "infrastructure"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: 82209682
+source_hash: f2bd224b
 whenNotToUse: "Non-GitHub CI systems (GitLab CI, Jenkins, CircleCI) or local dev scripts — this skill focuses specifically on GitHub Actions patterns and composable workflow design."
 ---
 

@@ -24,7 +24,7 @@ agents:
   - "refactor-cleaner"
 tokens: "~3K"
 category: "code-quality"
-source_hash: 06378357
+source_hash: 4a16b9e5
 whenNotToUse: "Throwaway scripts, one-off data migrations, or prototype spikes explicitly scoped to be discarded — applying SOLID/DRY overhead to code with no maintenance lifecycle adds friction without benefit."
 ---
 

@@ -23,7 +23,7 @@ agents:
   - "frontend-developer"
 tokens: "~5K"
 category: "design"
-source_hash: c99592e7
+source_hash: ace79130
 ---
 
 # Image Generation

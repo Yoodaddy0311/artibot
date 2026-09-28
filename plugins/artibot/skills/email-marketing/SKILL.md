@@ -16,7 +16,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
-source_hash: b6ebf44a
+source_hash: cc9ab0f4
 whenNotToUse: "Internal team communications, transactional system notifications, or developer-facing alerts that are not part of a marketing or nurture campaign."
 ---
 

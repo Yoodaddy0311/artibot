@@ -9,16 +9,16 @@
  * hash went unnoticed. This gate closes that.
  *
  * ── Ratchet, not a full pin ─────────────────────────────────────────────────
- * 107 of 114 primary-root SKILL.md files are stale today (measured
- * 2026-09-28T06:24Z): cf556052 (SH-09 B-2, 2026-09-23) added one or two body
- * lines to 108 SKILL.md files without refreshing their hashes; self-evaluation has
- * since been refreshed. Those paths are frozen in {@link FROZEN_STALE}.
+ * 107 of 114 primary-root SKILL.md files were stale at 2026-09-28T06:24Z:
+ * cf556052 (SH-09 B-2, 2026-09-23) added one or two body lines to 108 SKILL.md
+ * files without refreshing their hashes (self-evaluation was refreshed first).
+ * All were refreshed in bulk (skill-hash-refresh), so {@link FROZEN_STALE} is empty.
  * The gate is RED in both directions:
  *   1. a SKILL.md outside the set is stale  → new staleness, refresh its hash;
  *   2. a SKILL.md inside the set now matches → remove it from the set;
  *   3. a set entry no longer exists on disk → remove it from the set.
  * (2) and (3) keep the set from rotting: it can only shrink, and a bulk refresh
- * leaves it as `[]` with this file otherwise unchanged.
+ * leaves it as `[]` (plus the dated history above, as skill-hash-refresh did).
  * A NEW SKILL.md must carry a matching `source_hash` too (a missing one counts
  * as stale). Compute it with `computeHash(extractSkillBody(text))` and edit
  * that one line; `scripts/inject-source-hash.js` rewrites every file as LF.
@@ -58,115 +58,7 @@ import { listAllSkillFiles, PRIMARY_ROOT } from '../../scripts/ci/skill-scan-roo
 const MIN_PRIMARY_SKILLS = 114;
 
 /** Primary-root SKILL.md paths whose `source_hash` is known stale. Shrink only. */
-const FROZEN_STALE = Object.freeze([
-  'skills/ab-testing/SKILL.md',
-  'skills/adr-format/SKILL.md',
-  'skills/adversarial-review/SKILL.md',
-  'skills/advertising/SKILL.md',
-  'skills/advisor-strategy/SKILL.md',
-  'skills/agent-memory-snapshot/SKILL.md',
-  'skills/ai-security-standards/SKILL.md',
-  'skills/brand-guidelines/SKILL.md',
-  'skills/campaign-planning/SKILL.md',
-  'skills/ci-cd-pipelines/SKILL.md',
-  'skills/clarify/SKILL.md',
-  'skills/code-slop-reviewer/SKILL.md',
-  'skills/codex-integration/SKILL.md',
-  'skills/coding-standards/SKILL.md',
-  'skills/cognitive-routing/SKILL.md',
-  'skills/compaction-survival/SKILL.md',
-  'skills/competitive-intelligence/SKILL.md',
-  'skills/content-seo/SKILL.md',
-  'skills/context-degradation/SKILL.md',
-  'skills/continuous-learning/SKILL.md',
-  'skills/copywriting/SKILL.md',
-  'skills/cro-forms/SKILL.md',
-  'skills/cro-funnel/SKILL.md',
-  'skills/cro-page/SKILL.md',
-  'skills/customer-journey/SKILL.md',
-  'skills/daily/SKILL.md',
-  'skills/data-analysis/SKILL.md',
-  'skills/data-visualization/SKILL.md',
-  'skills/ddd-strategic-design/SKILL.md',
-  'skills/ddd-tactical-design/SKILL.md',
-  'skills/delegation/SKILL.md',
-  'skills/design-system-reference/SKILL.md',
-  'skills/email-marketing/SKILL.md',
-  'skills/fp-refactor/SKILL.md',
-  'skills/git-unified/SKILL.md',
-  'skills/guardrails/SKILL.md',
-  'skills/hook-event-emitter/SKILL.md',
-  'skills/hook-feedback-merge/SKILL.md',
-  'skills/image-generation/SKILL.md',
-  'skills/lang-reference/SKILL.md',
-  'skills/lead-management/SKILL.md',
-  'skills/library-mermaid/SKILL.md',
-  'skills/library-shadcn/SKILL.md',
-  'skills/lifelong-learning/SKILL.md',
-  'skills/load-testing/SKILL.md',
-  'skills/marketing-analytics/SKILL.md',
-  'skills/marketing-strategy/SKILL.md',
-  'skills/mcp-context7/SKILL.md',
-  'skills/mcp-coordination/SKILL.md',
-  'skills/mcp-playwright/SKILL.md',
-  'skills/memory-management/SKILL.md',
-  'skills/memory-safety-patterns/SKILL.md',
-  'skills/multi-agent-patterns/SKILL.md',
-  'skills/observability/SKILL.md',
-  'skills/orchestration-patterns/SKILL.md',
-  'skills/persona-analyzer/SKILL.md',
-  'skills/persona-architect/SKILL.md',
-  'skills/persona-backend/SKILL.md',
-  'skills/persona-devops/SKILL.md',
-  'skills/persona-distill/SKILL.md',
-  'skills/persona-frontend/SKILL.md',
-  'skills/persona-mentor/SKILL.md',
-  'skills/persona-performance/SKILL.md',
-  'skills/persona-qa/SKILL.md',
-  'skills/persona-refactorer/SKILL.md',
-  'skills/persona-scribe/SKILL.md',
-  'skills/persona-security/SKILL.md',
-  'skills/platform-auth/SKILL.md',
-  'skills/platform-database-cloud/SKILL.md',
-  'skills/platform-deployment/SKILL.md',
-  'skills/polish/SKILL.md',
-  'skills/presentation-design/SKILL.md',
-  'skills/principles/SKILL.md',
-  'skills/problem-validation/SKILL.md',
-  'skills/production-code-audit/SKILL.md',
-  'skills/prompt-caching-strategy/SKILL.md',
-  'skills/prompt-engineering/SKILL.md',
-  'skills/quality-framework/SKILL.md',
-  'skills/quickstart/SKILL.md',
-  'skills/repo-benchmarking/SKILL.md',
-  'skills/report-generation/SKILL.md',
-  'skills/scheduled-learning/SKILL.md',
-  'skills/security-standards/SKILL.md',
-  'skills/segmentation/SKILL.md',
-  'skills/self-learning/SKILL.md',
-  'skills/seo-strategy/SKILL.md',
-  'skills/session-worklog/SKILL.md',
-  'skills/setup/SKILL.md',
-  'skills/social-media/SKILL.md',
-  'skills/source-driven-development/SKILL.md',
-  'skills/spec-format/SKILL.md',
-  'skills/split/SKILL.md',
-  'skills/strategic-compact/SKILL.md',
-  'skills/swarm-intelligence/SKILL.md',
-  'skills/systematic-debugging/SKILL.md',
-  'skills/tdd-workflow/SKILL.md',
-  'skills/team/SKILL.md',
-  'skills/technical-seo/SKILL.md',
-  'skills/testing-standards/SKILL.md',
-  'skills/token-efficiency/SKILL.md',
-  'skills/tool-approval/SKILL.md',
-  'skills/tool-design/SKILL.md',
-  'skills/verification-completion/SKILL.md',
-  'skills/vibe-coding/SKILL.md',
-  'skills/visual-validation/SKILL.md',
-  'skills/yes-md/SKILL.md',
-  'skills/zero-downtime-migration/SKILL.md',
-]);
+const FROZEN_STALE = Object.freeze([]);
 
 /**
  * Hash-check each SKILL.md.

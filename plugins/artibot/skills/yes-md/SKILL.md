@@ -29,7 +29,7 @@ category: "quality"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-06-08"
-source_hash: b605c119
+source_hash: 1035c35c
 whenNotToUse: "Routine code generation or refactoring tasks where all claims are grounded in immediate tool output; do not add governance overhead to trivially verifiable single-step actions."
 ---
 

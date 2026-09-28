@@ -16,7 +16,7 @@ agents:
   - "code-reviewer"
 tokens: "~4K"
 category: "marketing"
-source_hash: 6fca323b
+source_hash: 2b3a0db7
 whenNotToUse: "Single-page or single-step conversions with no multi-step flow to analyze; also not applicable when traffic data is unavailable and drop-off points cannot be measured."
 ---
 

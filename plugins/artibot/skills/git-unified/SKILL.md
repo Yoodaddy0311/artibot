@@ -88,7 +88,7 @@ category: "workflow"
 whenNotToUse: "Non-Git version control systems (SVN, Mercurial) or tasks with no repository context where Git workflow guidance is irrelevant."
 level1_tokens: 200
 level2_tokens: 1200
-source_hash: 8c8013b0
+source_hash: 39600d8c
 ---
 
 # Git Unified Workflow Hub

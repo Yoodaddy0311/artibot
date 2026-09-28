@@ -18,7 +18,7 @@ category: orchestration
 tokens: 2500
 agents: [orchestrator, planner]
 whenNotToUse: "Work that fits in one window — fewer than two stems with disjoint file ownership (use /team), a single dependency chain (sequential is faster), tasks that all touch one shared file or one dev-server port, or when the user cannot open a second terminal. Not the session sizer's `sequence` recommendation (that splits one task across consecutive sessions, not concurrent windows)."
-source_hash: ac722a69
+source_hash: 290d33e9
 ---
 
 # /split

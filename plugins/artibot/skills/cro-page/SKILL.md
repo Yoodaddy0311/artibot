@@ -16,7 +16,7 @@ agents:
   - "performance-engineer"
 tokens: "~3K"
 category: "marketing"
-source_hash: 69eb51e1
+source_hash: e805aecf
 whenNotToUse: "Internal dashboards, admin panels, or developer tooling where conversion-rate optimization and persuasion heuristics are not relevant goals."
 ---
 

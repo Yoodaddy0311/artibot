@@ -15,7 +15,7 @@ tokens: "~500"
 category: "workflow"
 agents: [orchestrator, doc-updater]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 73e31a3d
+source_hash: e7a544e3
 whenNotToUse: "Mid-task execution where logging would interrupt flow; do not invoke during active problem-solving — reserve for session boundaries and natural breakpoints."
 ---
 

@@ -9,7 +9,7 @@ agents: ["devops-engineer", "backend-developer"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 2a4a26be
+source_hash: 48c533cc
 whenNotToUse: "Local development environment setup, manual one-off deploys, or hobby projects without a repeatable pipeline; also not applicable when the target platform is not covered (e.g., bare-metal, on-premise)."
 ---
 

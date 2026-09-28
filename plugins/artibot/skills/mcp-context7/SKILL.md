@@ -24,7 +24,7 @@ sources:
   - "https://modelcontextprotocol.io/introduction"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: c6df7ccd
+source_hash: 2141edda
 ---
 # MCP: Context7
 

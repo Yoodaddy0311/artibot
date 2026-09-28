@@ -17,7 +17,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
-source_hash: bbeb1e8e
+source_hash: 1650cd44
 whenNotToUse: "Long-form written documents, reports, or technical documentation where narrative slide structure and visual hierarchy are not the required output format."
 ---
 

@@ -22,7 +22,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 version: "1.0.0"
-source_hash: ac80733d
+source_hash: 8feae06d
 whenNotToUse: "Single-agent tasks with no context handoff needed; do not apply when there is no sub-agent spawn or cross-session context transfer requirement."
 ---
 

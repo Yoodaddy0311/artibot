@@ -27,7 +27,7 @@ tokens: "~2K"
 category: "workflow"
 agents: [orchestrator, code-reviewer]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: dd232174
+source_hash: 87255089
 whenNotToUse: "Non-coding requests (documentation, analysis, design discussion) where the DEV decompose-execute-verify loop is not applicable."
 ---
 

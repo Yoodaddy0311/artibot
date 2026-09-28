@@ -32,7 +32,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "security"
-source_hash: dbd2aff4
+source_hash: 668fa43a
 whenNotToUse: "Do not apply the full security checklist to internal CLI tools with no network exposure, local-only scripts, or test fixtures. When the attack surface is zero (no external input, no network, no persistence), scale down to secret-check only."
 ---
 

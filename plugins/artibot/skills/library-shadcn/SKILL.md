@@ -14,7 +14,7 @@ sources:
   - "https://www.radix-ui.com/primitives/docs/overview/introduction"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: ab45ed51
+source_hash: 4dcfbe9a
 whenNotToUse: "Non-React frontend stacks (Vue, Svelte, Angular) or projects that do not use Tailwind CSS, where shadcn/ui component patterns cannot be directly applied."
 ---
 

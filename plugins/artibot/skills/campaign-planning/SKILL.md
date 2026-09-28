@@ -15,7 +15,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "marketing"
-source_hash: e10b1cd2
+source_hash: b5db6975
 whenNotToUse: "Single-channel tactical execution (e.g., writing one email or one ad) where cross-channel orchestration and budget allocation are not needed."
 ---
 

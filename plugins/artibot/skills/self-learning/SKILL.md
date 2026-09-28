@@ -23,7 +23,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "learning"
-source_hash: ddd46bf1
+source_hash: ae9ca156
 whenNotToUse: "Situations where tool choice is unambiguous and no historical failure pattern exists; do not apply overhead when only one valid tool exists for the task."
 ---
 

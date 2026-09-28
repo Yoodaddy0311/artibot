@@ -26,7 +26,7 @@ agents:
   - "backend-developer"
 tokens: "~3K"
 category: "testing"
-source_hash: 9d93f0fb
+source_hash: 8caacb5e
 whenNotToUse: "Do not apply the 80% unit coverage threshold to infrastructure glue code (Docker entrypoints, CI YAML, config loaders with no logic). Do not require E2E tests for backend-only APIs with no user-facing journey — integration tests suffice there."
 ---
 

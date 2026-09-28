@@ -30,7 +30,7 @@ category: "development"
 version: "1.0.0"
 risk: safe
 lastVerified: "2026-06-08"
-source_hash: c440f725
+source_hash: ada880b6
 whenNotToUse: "Managed-memory languages (JavaScript, Python, Java, Go) where GC handles lifetime automatically and RAII/ownership patterns are not applicable constructs."
 ---
 
