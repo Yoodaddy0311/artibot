@@ -115,6 +115,7 @@ export function toAttributeValue(value) {
 
 /**
  * Convert a plain object into OTLP `KeyValue[]`.
+ * null/undefined values are dropped: an absent attribute, not `stringValue: ''`.
  * @param {Record<string, unknown>} attrs
  * @returns {Array<{key:string,value:object}>}
  */
@@ -122,7 +123,7 @@ export function toAttributes(attrs) {
   if (!attrs || typeof attrs !== 'object') return [];
   const out = [];
   for (const [key, value] of Object.entries(attrs)) {
-    if (value === undefined) continue;
+    if (value === null || value === undefined) continue;
     out.push({ key, value: toAttributeValue(value) });
   }
   return out;

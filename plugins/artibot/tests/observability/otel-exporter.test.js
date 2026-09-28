@@ -149,6 +149,24 @@ describe('otel/toAttributes', () => {
     expect(attrs[0].key).toBe('a');
   });
 
+  it('null 값도 제거 — 빈 stringValue 로 내보내지 않는다', () => {
+    const attrs = toAttributes({ a: 1, b: null });
+    expect(attrs).toEqual([{ key: 'a', value: { intValue: '1' } }]);
+  });
+
+  it('span·counter·gauge·resource 모두 null 속성을 싣지 않는다', () => {
+    const lists = [
+      buildSpan({ name: 's', startTimeMs: 1, endTimeMs: 2, attributes: { a: null, k: 'v' } }).attributes,
+      buildCounterMetric('c', 1, 1000, { a: null, k: 'v' }).sum.dataPoints[0].attributes,
+      buildGaugeMetric('g', 1, 1000, { a: null, k: 'v' }).gauge.dataPoints[0].attributes,
+      buildResource('artibot', { a: null }).attributes,
+    ];
+    for (const list of lists) {
+      expect(list.map((kv) => kv.key)).not.toContain('a');
+      expect(list.filter((kv) => kv.value.stringValue === '')).toEqual([]);
+    }
+  });
+
   it('non-object → 빈 배열', () => {
     expect(toAttributes(null)).toEqual([]);
     expect(toAttributes('x')).toEqual([]);

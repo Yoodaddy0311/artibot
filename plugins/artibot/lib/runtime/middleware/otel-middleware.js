@@ -93,6 +93,14 @@ function resolveOperation(state) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {boolean} false for null/undefined
+ */
+function isPresent(value) {
+  return value !== null && value !== undefined;
+}
+
+/**
  * Build a pipeline-scope span capturing the full middleware pass.
  *
  * @param {object} state
@@ -123,11 +131,19 @@ export function buildPipelineSpan(state, timing, exporter, rngFn) {
     attrs['artibot.session.total_tokens'] = tokenUsage.session.totalTokens;
     attrs['artibot.session.request_count'] = tokenUsage.session.requestCount;
   }
+  // An unpriced request carries null dollar fields (cache-roi). Null means
+  // "no price", so the attribute is left out — never sent as '' or 0.
   if (cacheRoi?.enabled && cacheRoi.current) {
-    attrs['artibot.cache.hit_rate'] = Number(cacheRoi.current.hitRate?.toFixed?.(4) ?? cacheRoi.current.hitRate);
-    attrs['artibot.cache.saved_usd'] = cacheRoi.current.savedCostUsd;
-    attrs['artibot.cache.spent_usd'] = cacheRoi.current.spentCostUsd;
+    const { hitRate, savedCostUsd, spentCostUsd } = cacheRoi.current;
+    if (isPresent(hitRate)) attrs['artibot.cache.hit_rate'] = Number(hitRate.toFixed?.(4) ?? hitRate);
+    if (isPresent(savedCostUsd)) attrs['artibot.cache.saved_usd'] = savedCostUsd;
+    if (isPresent(spentCostUsd)) attrs['artibot.cache.spent_usd'] = spentCostUsd;
   }
+  // Session cumulative count of unpriced requests. cache-roi fills it on every
+  // fold; it can only be missing on the no-usage path with an older-shaped
+  // initial session — then absent, not a false 0.
+  const unpricedRequestCount = cacheRoi?.enabled ? cacheRoi.session?.unpricedRequestCount : undefined;
+  if (isPresent(unpricedRequestCount)) attrs['artibot.cache.unpriced_request_count'] = unpricedRequestCount;
   return exporter.buildSpan({
     name: 'artibot.pipeline',
     startTimeMs: timing.startMs,
