@@ -11,7 +11,8 @@
  * `setupFiles`, no `projects`, `.js`-only include):
  *   - `tests/evals/routebench-replay-mode.test.js`, which imports the
  *     shebang-bearing `scripts/bench/routebench.mjs`, failed with
- *     `SyntaxError: Invalid or unexpected token` and 0 tests;
+ *     `SyntaxError: Invalid or unexpected token` and 0 tests (on Windows, in
+ *     a `core.autocrlf=true` checkout — see WHAT THE STRIP PLUGIN BLOCKS);
  *   - the summary read `setup 0ms` — the state-dir sandbox never ran, so
  *     anything reaching a user-state writer touched the real `~/.claude`;
  *   - `tests/autopilot/**` was collected with no project name, i.e. with none
@@ -41,10 +42,27 @@
  *      `lib/`, counted 2026-09-28), and
  *      `tests/firewall/autopilot-store-sandbox-required.test.js`, whose
  *      "resolves the store into a temp directory" case is red unless the
- *      sandbox setup ran IN THAT CHILD. Two positive controls repeat the run
- *      through a copy of the root config derived in memory and handed over
- *      with `--config` — one without the strip-shebang plugin, one without
- *      `setupFiles` — and each must go red on its own file.
+ *      sandbox setup ran IN THAT CHILD. Positive controls use copies of the
+ *      root config derived in memory and handed over with `--config`. Minus
+ *      `setupFiles`, the sandbox file must go red. The strip-shebang pair runs
+ *      over fixtures this file writes byte for byte (a CRLF and an LF hashbang
+ *      module, each imported by a probe test in a temp root), through the
+ *      root config's own plugins and then through the same list minus
+ *      strip-shebang: all green with it, the CRLF probe red without it.
+ *
+ * WHAT THE STRIP PLUGIN BLOCKS. Not every hashbang: vite 7.3.2's
+ * `ssrTransform` skips a leading `/^#!.*\n/` before hoisting its import and
+ * export bindings, and `.` does not match `\r`. For a CRLF first line the
+ * skip matches nothing, the hoisted code lands AHEAD of `#!`, and the module
+ * fails to evaluate. Measured 2026-09-28 on Windows, Node 24.15.0, without
+ * the plugin: `moduleRunnerTransform` put `__vite_ssr_exportName__(…)` before
+ * the CRLF hashbang and after the LF one; CRLF `.mjs`, CRLF-throughout `.mjs`
+ * and CRLF `.js` modules with an export failed with `SyntaxError: Invalid or
+ * unexpected token`, while LF `.mjs`, LF `.js` and a CRLF module with no
+ * import or export passed. So the plugin is what keeps a CRLF checkout —
+ * this repository under `core.autocrlf=true` — importing shebang scripts; an
+ * LF checkout (CI) imports them without it. That is why the negative control
+ * cannot use the checkout's own script: on CI it passed without the plugin.
  *
  * EVERY CHILD GETS A SCRUBBED ENV. This file runs inside a vitest worker whose
  * env carries what the setup file assigned (read from its source below, so a
@@ -55,8 +73,8 @@
  * Inherited, the setup's pair makes a child look sandboxed whether or not ITS
  * config ran the setup. Measured 2026-09-28: the minus-`setupFiles` control
  * was GREEN under the inherited env (1 passed, 12 filtered) and red once
- * scrubbed; the real-config run, the minus-strip control and layer 2 gave the
- * same verdict under both envs.
+ * scrubbed; the real-config run and layer 2 gave the same verdict under both
+ * envs.
  *
  * The autopilot project's serial spelling is pinned on the root config too, by
  * `tests/firewall/vitest-autopilot-serial.test.js`.
@@ -77,8 +95,16 @@
  *     resolver alone. That every project inherits the setup is
  *     `tests/firewall/autopilot-store-sandbox-required.test.js` against the
  *     canonical config, plus layer 1's equality.
- *   - **Other shebang shapes.** One static import of one `scripts/hooks`
- *     `.mjs` is run; a dynamic `import()` or a shebang `.js` module is not.
+ *   - **The plugin through the checkout's own scripts, on an LF checkout.**
+ *     There the real run passes with or without the plugin; only the
+ *     byte-controlled pair exercises it. The pair runs from a temp root with
+ *     no `setupFiles` or `projects`, so it proves the root config's plugin
+ *     list, not the rest of the root config.
+ *   - **Other shebang shapes.** Static imports of `.mjs` modules only; a
+ *     dynamic `import()` or a shebang `.js` module is not run here. The
+ *     mechanism above is read off vite 7.3.2; a vite that skips a CRLF
+ *     hashbang itself would turn the negative control green and this gate
+ *     red — re-measure then rather than dropping the control.
  *   - **An injected key outside the scrub.** A later runner that injects a
  *     new variable passes it to the child. The minus-`setupFiles` control
  *     turns the gate red if that variable masks the autopilot-store resolver;
@@ -94,7 +120,7 @@
 
 import { spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -239,9 +265,13 @@ describe('vitest run started in the repo root executes through the root config',
   /** @type {{status: number|null, files: Array<object>}} */
   let real;
   /** @type {{status: number|null, files: Array<object>}} */
+  let withStrip;
+  /** @type {{status: number|null, files: Array<object>}} */
   let noStrip;
   /** @type {{status: number|null, files: Array<object>}} */
   let noSetup;
+  /** @type {string} */
+  let crlfBytes;
 
   /**
    * One child `vitest run` from the repo root with a JSON report. A missing
@@ -281,14 +311,52 @@ describe('vitest run started in the repo root executes through the root config',
   /** @param {{files: Array<{name: string}>}} run @param {string} rel */
   const fileOf = (run, rel) => run.files.find((f) => norm(f.name) === norm(path.join(PLUGIN_ROOT, rel)));
 
+  /** @param {{files: Array<{name: string}>}} run @param {string} base */
+  const probeOf = (run, base) => run.files.find((f) => path.basename(f.name) === base);
+
+  /**
+   * Hashbang modules with fixed line endings, each imported by a probe test,
+   * under `<scratch>/hashbang` — bytes this file controls, whatever the
+   * checkout's `core.autocrlf` did to `scripts/`.
+   * @returns {string} The probe root, forward-slashed for config source.
+   */
+  const writeHashbangProbes = () => {
+    const dir = path.join(realpathSync.native(scratch), 'hashbang');
+    mkdirSync(dir);
+    for (const [name, eol] of [['crlf', '\r\n'], ['lf', '\n']]) {
+      writeFileSync(path.join(dir, `${name}.mjs`), `#!/usr/bin/env node${eol}export const x = 1;${eol}`);
+      writeFileSync(
+        path.join(dir, `${name}.probe.test.mjs`),
+        `import { expect, it } from 'vitest';\nimport { x } from './${name}.mjs';\n`
+        + `it('imports ${name}', () => { expect(x).toBe(1); });\n`,
+      );
+    }
+    crlfBytes = readFileSync(path.join(dir, 'crlf.mjs'), 'latin1');
+    return dir.split(path.sep).join('/');
+  };
+
+  /**
+   * The root config's plugins (optionally filtered) over the probe root only.
+   * @param {string} probeRoot @param {string} plugins - Expression over `c`.
+   * @returns {string} Config body.
+   */
+  const probeConfig = (probeRoot, plugins) => {
+    const root = JSON.stringify(probeRoot);
+    return `{ ...c, plugins: ${plugins}, test: { root: ${root}, include: ['*.probe.test.mjs'] },`
+      + ` server: { fs: { allow: [${root}] } } }`;
+  };
+
   beforeAll(() => {
     scratch = mkdtempSync(path.join(os.tmpdir(), 'vitest-root-config-'));
     // No `--config`: config discovery from the cwd is the subject.
     real = runChild('real', [SHEBANG_PROBE, SANDBOX_PROBE]);
+    const probeRoot = writeHashbangProbes();
+    withStrip = runChild('with-strip', [
+      '--config', derivedConfig('with-strip', probeConfig(probeRoot, 'c.plugins')),
+    ]);
     noStrip = runChild('no-strip', [
       '--config',
-      derivedConfig('no-strip', "{ ...c, plugins: c.plugins.filter((p) => p?.name !== 'strip-shebang') }"),
-      SHEBANG_PROBE,
+      derivedConfig('no-strip', probeConfig(probeRoot, "c.plugins.filter((p) => p?.name !== 'strip-shebang')")),
     ]);
     // Filtered to the resolver case: the file's other cases write a real
     // session, and without the sandbox that write would land in the real store.
@@ -314,9 +382,13 @@ describe('vitest run started in the repo root executes through the root config',
     }
   });
 
-  it('imports a shebang .mjs, and fails to without the strip-shebang plugin', () => {
-    expect(fileOf(real, SHEBANG_PROBE)?.status).toBe('passed');
-    const bare = fileOf(noStrip, SHEBANG_PROBE);
+  it('imports a CRLF hashbang .mjs, and fails to without the strip-shebang plugin', () => {
+    expect(crlfBytes.startsWith('#!/usr/bin/env node\r\n')).toBe(true);
+    expect(withStrip.status).toBe(0);
+    for (const base of ['crlf.probe.test.mjs', 'lf.probe.test.mjs']) {
+      expect(probeOf(withStrip, base)?.status, base).toBe('passed');
+    }
+    const bare = probeOf(noStrip, 'crlf.probe.test.mjs');
     expect(noStrip.status).not.toBe(0);
     expect(bare?.status).toBe('failed');
     expect(bare.message).toMatch(/Invalid or unexpected token/);
