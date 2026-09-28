@@ -350,12 +350,14 @@ const ROLE_SOURCED = Object.freeze({
   'lib/project-state/state-manager.js:409': {
     event: 'state.updated',
     source: 'supervisor',
-    reason: 'Hook-reachable only because lib/runtime/middleware/tasks.js imports '
-      + 'the store module; the hook path (tasks.js#openMissionStore) opens its '
-      + 'store with source:hook and takes the other branch, collected as (A). '
-      + 'The only writer-bound caller that takes THIS branch is the /split task '
-      + 'feed (scripts/split/task-feed.mjs), a supervisor process, not a hook. '
-      + 'state.updated registers sources:null, so the role is admitted.',
+    reason: 'Collected because lib/runtime/middleware/tasks.js (an appender) imports '
+      + 'the store module directly; the hook path (tasks.js#openMissionStore) opens '
+      + 'its store with source:hook and takes the other branch, collected as (A). '
+      + 'scripts/hooks/post-compact-rehydrate.js also reaches this branch by default '
+      + 'but binds a refusing ledger port, so it writes nothing. The only '
+      + 'writer-bound caller that takes THIS branch is the /split task feed '
+      + '(scripts/split/task-feed.mjs), a supervisor process, not a hook. '
+      + 'state.updated declares no sources list, so the role is admitted.',
   },
 });
 
