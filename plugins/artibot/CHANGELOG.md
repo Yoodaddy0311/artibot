@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 기록 정정
+
+- **4.67.0 "미수리·후속" 중 셋은 수리됨**(`catalog-hygiene` `f8b49049`, 배치 fold `16f44ae2`): Sonnet 5 `outLimit` 64,000 → **128,000**, haiku `thinkingMode` `'adaptive'` → **`'extended'`**(`budget_tokens` 전용), `cache-roi#resolvePricing` 은 카탈로그에 없는 `claude-*` id(예 `claude-opus-4-8`)를 싸게 매기지 않고 **미가격(null)** 으로 두어 `unpricedRequestCount` 에 센다. 부분문자열 + sonnet 폴백은 모델 id 가 아닌 문자열(티어·역할 별칭, 백엔드 id, 타사 id)에만 남는다.
+- **같은 줄의 "`PRICING_VERSION` 이력 부재" 도 닫힘**(`pricing-version-history` `988858af`, 배치 fold `cc6eb803`): 새 `lib/core/pricing-history.js` 가 발행된 스탬프 목록(`PRICING_VERSIONS` = `2026-09-12` · `2026-09-28`)과 스탬프별 가격 행(`PRICING_HISTORY`, 과거 행은 git 에서 동결, 현재 행은 카탈로그에서 파생)을 두고, `getPricingAt(version, key)` · `pricingForReceipt(receipt)` 로 영수증을 자기 스탬프 가격으로 다시 매긴다. `'unresolved'` · 모르는 스탬프는 null 이고 현재 가격으로 폴백하지 않는다. `tests/core/pricing-history.test.js` 가 스탬프 bump 와 동결 행 추가를 한 커밋에 묶는다. **보증하지 않는 것**: 공식 가격 페이지와의 일치(git 과의 내부 일치만), cache-roi 가 스탬프별로 매긴 id(영수증 리졸버만 반영), `'unresolved'` 영수증의 재가격(`988858af` 커밋 본문의 원장 스냅샷 07:53Z, `usage.receipt` 280행 중 72행). 2026-09-28 기준 `lib/`·`scripts/`·`commands/`·`hooks/` 에 이 모듈의 런타임 호출부는 0 이다. 재현 경로는 생겼지만 아직 어떤 리포트도 쓰지 않는다.
+- **4.9.0 Track B 의 "`_engine-helpers.js`에서 phase 종료 시 자동 호출" 은 사실이 아니다.** `notePhaseCost` 는 `lib/autopilot/_engine-helpers.js` 에 정의되고 `engine.js`·`index.js` 가 재노출할 뿐, `lib/`·`scripts/`·`hooks/` 안에 호출부가 0 이다. phase 종료 시 기록은 `commands/autopilot.md` 가 오케스트레이터에게 `engine.notePhaseCost(...)` 를 부르라고 지시하는 문서 계약이며, 같은 4.9.0 절 "Slash-command auto-integration" 의 "자동 통합 블록 … 매 phase 종료 시 자동 호출" 도 이 지시를 뜻한다(2026-09-28 grep 기준).
+
 ## [4.67.0] — 2026-09-28
 
 `v4.66.0`(`e6a42aed`) 이후 99 커밋 = **313 files +26,559/−1,439**(`git diff --shortstat v4.66.0..45baf6c5`, 2026-09-28 측정. 99 에는 릴리스 봇 커밋 `0b93d9c8` 1건 포함). `/split` **Wave 18 8/8** 과 run `split-wave19-20260923` 배치 1~20 = **25줄기**(Wave 19 5 · Wave 20 5 · Wave 21 8 · Wave 22 5 · Wave 23 2, 웨이브 귀속은 줄기 브리프 머리줄 기준) 착지분 출하. 배치 1~15 는 2026-09-23, 배치 16~20 은 2026-09-28 착지(`run.json.landings`, 전 배치 rebuilds 0). 커밋 유형 분포: merge 33 · feat 22 · fix 17 · test 11 · docs 11 · refactor 3 · chore 2. 줄기별 상세는 아래 Wave 23 → 18 착지 절에 있다.

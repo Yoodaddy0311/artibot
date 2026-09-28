@@ -4,10 +4,16 @@
  * This module writes a judgement about a failed VERIFY and nothing else. It
  * does not touch `state.phase`, `state.pendingPhase`, `state.phases` or any
  * instruction, so the fixed `VERIFY -> IMPROVE` transition
- * (`engine.js#runPhase4Verify`, `engine-state.js#nextPhaseAfter`) is exactly as
+ * (`engine-state.js#recordPhaseResult`, `#nextPhaseAfter`) is exactly as
  * it was. Flipping that transition to the recommendation recorded here is
  * CA-03's job, deliberately separate: the switch should be made against a
  * measured denominator rather than a guess, and this journal is that denominator.
+ *
+ * Since AP-N1 (`e1e97dfa`) `engine.js#runPhase4Verify` no longer closes VERIFY
+ * at hand-off: it opens a VERIFY attempt, and the result ACK in
+ * `recordPhaseResult` sets `pendingPhase` and then calls this recorder. A VERIFY
+ * that never reports a result is re-run once, then paused (`phase-attempt.js`)
+ * — it has no verdict, so it writes no row here and never takes the transition.
  *
  * ── Who reads this ────────────────────────────────────────────────────────
  * `state.recoveryJournal` is the input CA-03 reads, so the row carries what
