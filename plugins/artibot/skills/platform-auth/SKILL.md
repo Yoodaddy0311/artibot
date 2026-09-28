@@ -15,7 +15,7 @@ sources:
   - "https://datatracker.ietf.org/doc/html/rfc6749"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: 2684ddeb
+source_hash: e749c70b
 whenNotToUse: "Public read-only routes or internal tooling with no access control requirements; do not apply when the feature has no authentication or permission boundary."
 ---
 

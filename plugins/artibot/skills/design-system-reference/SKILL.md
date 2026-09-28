@@ -24,7 +24,7 @@ agents:
   - "presentation-designer"
 tokens: "~4K"
 category: "design"
-source_hash: 7540d882
+source_hash: cd88645f
 ---
 
 # Design System Reference

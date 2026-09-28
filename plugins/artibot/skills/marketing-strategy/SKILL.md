@@ -15,7 +15,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "marketing"
-source_hash: aa9c559e
+source_hash: 4ef83334
 whenNotToUse: "Tactical campaign execution, individual ad copy, or channel-specific optimization where high-level market sizing and positioning frameworks are not needed."
 ---
 

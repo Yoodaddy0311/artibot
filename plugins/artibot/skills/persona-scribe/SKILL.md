@@ -18,7 +18,7 @@ agents:
   - "doc-updater"
 tokens: "~4K"
 category: "persona"
-source_hash: 5fb1509d
+source_hash: 273d9551
 whenNotToUse: "Marketing copy, persuasive content, or non-technical prose where conversion or engagement is the goal rather than clarity and technical accuracy."
 ---
 # Persona: Scribe

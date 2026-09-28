@@ -35,7 +35,7 @@ tokens: "~3K"
 category: "code-quality"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: ae4b297b
+source_hash: 1485b174
 whenNotToUse: "Do not apply Artibot-specific coding standards to code in vendor directories, generated files, or repositories you do not own. Do not enforce the 50-line function limit on data-heavy configuration objects or lookup tables where density is intentional."
 ---
 

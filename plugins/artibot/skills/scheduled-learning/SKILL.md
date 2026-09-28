@@ -19,7 +19,7 @@ agents:
   - "orchestrator"
 tokens: "~1K"
 category: "learning"
-source_hash: 7f6d35af
+source_hash: f289ce7f
 whenNotToUse: "Non-Claude Code environments or sessions where CronCreate is not available; also not applicable for on-demand, single-run learning triggers."
 ---
 

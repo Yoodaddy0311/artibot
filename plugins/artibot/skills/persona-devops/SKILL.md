@@ -19,7 +19,7 @@ agents:
   - "devops-engineer"
 tokens: "~3K"
 category: "persona"
-source_hash: 3cca81ad
+source_hash: 79a49d7b
 whenNotToUse: "Application-level feature development, API design, or frontend work that does not involve deployment pipelines, containerization, or infrastructure concerns."
 ---
 # Persona: DevOps

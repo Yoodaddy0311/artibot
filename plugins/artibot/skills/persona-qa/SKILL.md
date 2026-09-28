@@ -20,7 +20,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "persona"
-source_hash: 8e67a95d
+source_hash: d3750c84
 whenNotToUse: "Exploratory spiking or prototype code not intended for production, where writing tests before establishing the correct design would add friction without value."
 ---
 # Persona: QA

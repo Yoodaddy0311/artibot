@@ -18,7 +18,7 @@ agents:
   - "code-reviewer"
 tokens: "~4K"
 category: "marketing"
-source_hash: fa392769
+source_hash: 436bf936
 whenNotToUse: "Product analytics or user retention work that does not involve a sales pipeline, CRM handoff, or lead qualification stage — use data-analysis or marketing-analytics instead."
 ---
 

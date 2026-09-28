@@ -17,7 +17,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "marketing"
-source_hash: 55492f78
+source_hash: 643797cb
 whenNotToUse: "Content strategy, keyword research, or link-building tasks — technical SEO covers infrastructure and crawlability only, not content quality or off-page signals."
 ---
 

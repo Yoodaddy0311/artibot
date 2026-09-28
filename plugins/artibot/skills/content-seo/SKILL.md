@@ -15,7 +15,7 @@ agents:
   - "doc-updater"
 tokens: "~3K"
 category: "marketing"
-source_hash: f13d3ddc
+source_hash: 23581c3e
 whenNotToUse: "Internal documentation, developer-facing references, or private content not intended for search engine indexing where ranking signals are irrelevant."
 ---
 

@@ -18,7 +18,7 @@ triggers:
   - 오늘 뭐 했지
   - retrospective
   - daily report
-source_hash: 057eb7d4
+source_hash: 6b228e3e
 whenNotToUse: "Mid-session task execution or detailed technical investigation — the daily skill is for end-of-day retrospective summaries, not real-time work tracking."
 ---
 

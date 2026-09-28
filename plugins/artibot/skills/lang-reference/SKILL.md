@@ -206,7 +206,7 @@ category: "language"
 whenNotToUse: "Architecture decisions, infrastructure configuration, or non-language-specific tasks where language idiom patterns and framework conventions are not the subject."
 level1_tokens: 200
 level2_tokens: 1200
-source_hash: b25de159
+source_hash: e9791253
 ---
 
 # Language Patterns Reference Hub

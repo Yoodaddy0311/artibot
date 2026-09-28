@@ -16,7 +16,7 @@ agents:
   - "architect"
 tokens: "~4K"
 category: "marketing"
-source_hash: 8b28fdd9
+source_hash: 5855a842
 whenNotToUse: "Internal product decisions, technical architecture, or feature prioritization that are not driven by external competitive positioning or market landscape."
 ---
 

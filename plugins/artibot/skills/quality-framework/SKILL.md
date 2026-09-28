@@ -33,7 +33,7 @@ agents:
 tokens: "~3K"
 category: "code-quality"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 4e28376d
+source_hash: 8c9c4dec
 whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfix. For single-file changes under 50 lines, run only the blocking gates (Steps 1, 2, 4, 5). Reserve full cycle execution for release candidates and architecture-level changes."
 ---
 

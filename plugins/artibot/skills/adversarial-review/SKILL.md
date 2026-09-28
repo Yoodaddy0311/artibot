@@ -24,7 +24,7 @@ level1_tokens: 200
 level2_tokens: 3000
 category: "quality"
 risk: safe
-source_hash: 09587907
+source_hash: ceb97a06
 whenNotToUse: "Green-field feature development with no existing code to review, or general functional code review where adversarial attack-surface thinking is not the primary lens."
 ---
 

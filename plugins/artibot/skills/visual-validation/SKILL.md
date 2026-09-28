@@ -28,7 +28,7 @@ agents:
   - "frontend-developer"
 tokens: "~4K"
 category: "testing"
-source_hash: 059d9376
+source_hash: 89156f3e
 whenNotToUse: "Non-UI code paths (APIs, business logic, CLI tools) or environments without browser/screenshot capabilities where visual regression comparison is not feasible."
 ---
 

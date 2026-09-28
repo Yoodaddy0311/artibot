@@ -18,7 +18,7 @@ agents:
   - "performance-engineer"
 tokens: "~4K"
 category: "analysis"
-source_hash: fd7e2af1
+source_hash: 63c3c8e1
 whenNotToUse: "Qualitative research, code review, or system design tasks where numerical data, metrics, or statistical analysis are not the primary deliverable."
 ---
 

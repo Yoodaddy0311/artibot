@@ -17,7 +17,7 @@ agents:
   - "code-reviewer"
 tokens: "~3K"
 category: "analysis"
-source_hash: df38d037
+source_hash: 9f59e7cc
 whenNotToUse: "Raw data analysis or statistical modeling tasks where the output is numerical conclusions rather than a chart, graph, or visual dashboard."
 ---
 

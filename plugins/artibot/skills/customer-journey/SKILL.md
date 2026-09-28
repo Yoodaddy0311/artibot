@@ -16,7 +16,7 @@ agents:
   - "frontend-developer"
 tokens: "~4K"
 category: "marketing"
-source_hash: c1894955
+source_hash: 7afcef25
 whenNotToUse: "Internal employee workflows, developer tooling UX, or B2B SaaS admin interfaces where customer lifecycle and marketing touchpoints are not the subject of analysis."
 ---
 

@@ -20,7 +20,7 @@ agents:
   - "planner"
 tokens: "~2K"
 category: "learning"
-source_hash: d5a5a1f0
+source_hash: 765f038d
 whenNotToUse: "One-off tasks or throwaway experiments where no routing pattern or user preference is worth persisting; do not trigger during active task execution."
 ---
 

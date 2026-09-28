@@ -16,7 +16,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "marketing"
-source_hash: fcb87289
+source_hash: ff4dd6e5
 whenNotToUse: "Backend data-entry or admin forms where UX friction reduction is not the goal; do not apply to forms used solely by internal operators or developers."
 ---
 

@@ -9,7 +9,7 @@ agents: ["backend-developer", "architect"]
 tokens: "~4K"
 category: "platform"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 0befe53d
+source_hash: caa7e22b
 whenNotToUse: "Self-hosted or on-premise database setups (PostgreSQL bare metal, MySQL on EC2) where cloud-specific connection pooling and serverless cold-start concerns do not apply."
 ---
 
