@@ -20,9 +20,9 @@
  * WHY. `foldOversized` alone drops every non-required key to keep the
  * overflow array whole, and rejects the line when the array is the large part.
  * Redaction lengthens strings after the writer-side budgets ran, which is how
- * builder-budgeted claim audits reached it: a 700-input grid measured 34 rows
- * losing declared keys and 93 rejected, 0 of either after these stages
- * (2026-09-28).
+ * builder-budgeted claim audits reached it and lost their declared keys or the
+ * whole row. The cap-boundary and redaction-growth fixtures in
+ * `tests/runtime/event-writer.test.js` pin that neither happens now.
  *
  * EARLIER TRUNCATION MARKERS SURVIVE. An element that already reads
  * `…truncated=kept<N>/total<M>` — a builder that cut the array before the
