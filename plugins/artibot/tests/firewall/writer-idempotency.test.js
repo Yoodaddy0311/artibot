@@ -68,7 +68,9 @@
  * keyed, 47 exempt, of which 13 write the run ledger and 7 of those carry no
  * key. Counts are recorded, never asserted - the SET is asserted, because a
  * count goes red on a rename and green on a swap. 2026-09-23 (SH-14): five of
- * those unkeyed run-ledger writers moved to keyed, so 11 rows are `k` now.
+ * those unkeyed run-ledger writers moved to keyed, so 11 rows were `k`.
+ * 2026-09-28 (SH-14): the last two (`project-state/state-manager.js`,
+ * `runtime/middleware/mission-ledger.js`) moved too, so 13 rows are `k` now.
  * `k` means an assignment site exists, not that live lines carry a key: four
  * of the five are dormant in production today (null or absent ports).
  *
@@ -135,7 +137,9 @@
  *     a parser: no JSX, no nested template substitutions.
  *
  * OPEN DEFECT CANDIDATES, recorded rather than repaired. Seven run-ledger
- * writers append with no idempotency key; each is marked below. Two of them
+ * writers appended with no idempotency key at v3 (2026-09-21); SH-14 keyed
+ * all seven (five 2026-09-23, two 2026-09-28), and the rows that remain under
+ * "no key" below are not among those seven. Two of the seven
  * (`context/rehydration.js`, `checkpoint/checkpoint-service.js`) were invisible
  * to v1. Whether any is wrong is an allowlist question, and
  * `schemas/ledger-events.allowlist.json` declares no machine-readable
@@ -396,16 +400,16 @@ const INVENTORY = {
   'economics/receipt-envelope.js': k('run ledger usage.receipt; key from usageReceiptIdempotencyKey.'),
   'observability/activation-observed.js': k('decisions-store payload; key is null when the prompt id is bad.'),
   'observability/decision-events.js': k('decisions store, not the run ledger; key is null when prompt_id is null.'),
+  'project-state/state-manager.js': k('run ledger state.updated, paired 1:1 with a store write; key from stateUpdatedIdempotencyKey (<event>:<mission_id>:<state_version>:<sha256(planned records)[:12]>) - the digest keeps two different writes that race to one version apart, and the commit stamp is not key material, so a retry of the same planned records reuses the key (a clock value inside the records, such as a lease time, is part of the write and makes a later retry a new key). The writer never refuses a repeated key. Omitted when the mission id or version is unusable. SH-14, 2026-09-28.'),
   'review/verdict-writer.js': k('run ledger review.completed and review.claim_audit; two key builders.'),
   'runtime/artifact-lifecycle.js': k('mission-artifact store; computeIdempotencyKey plus a seen-key set.'),
   'runtime/human-asked-record.js': k('run ledger human.asked (<event>:<session>:<question_id>) and human.resolved (+ a 12-hex digest of the decision, so a changed answer is a new fact); two key builders. SH-14, 2026-09-23.'),
+  'runtime/middleware/mission-ledger.js': k('run ledger mission.created / mission.candidate_deferred (event name resolved at runtime via LEDGER_EVENT_BY_COMPILER_NAME); key from missionEventIdempotencyKey (<event>:<mission_id>:<prompt_id>:<digest16 of data>) - the host prompt_id separates two prompts of one session-day mission and repeats on a hook re-fire; omitted without a usable prompt_id (absent, empty, non-string or over 128 chars). SH-14, 2026-09-28.'),
   'topology/split-state.js': k('run ledger worker.claimed / task.released; key from workerTransitionIdempotencyKey (<event>:<runId>:<worker>:<from-ops>:<to-ops>:<from-since>) - the LEFT state\'s stored since, stable across a retry; omitted without a run id. SH-14, 2026-09-23.'),
   'verification/verify-writer.js': k('run ledger verify.completed; key from verifyCompletedIdempotencyKey.'),
 
   // --- run-ledger writers with no key: defect candidates --------------------
-  'project-state/state-manager.js': x('run ledger state.updated, paired 1:1 with a store write and carrying the monotonic data.state_version. No key. Defect candidate.'),
   'runtime/question-gate-record.js': x('run ledger adr.question_gate_evaluated, one line per compiled prompt (tasks.js#recordQuestionGate), no key. The only dedupe is ledger.js#dedupeKey (session_id, source, pid, seq, ts), and no reader of this event reads idempotency_key, so a re-fired prompt writes a second line. Defect candidate like runtime/middleware/mission-ledger.js.'),
-  'runtime/middleware/mission-ledger.js': x('run ledger mission lifecycle events with a dynamic event name; no per-line handle beyond mission_id. Defect candidate. Moved out of tasks.js 2026-09-23 (800-line split) with the append site unchanged.'),
 
   // --- primitives, wrappers, readers ----------------------------------------
   'runtime/event-writer.js': x('the run-ledger append primitive. Validates idempotency_key as an optional envelope key and authors no event.'),

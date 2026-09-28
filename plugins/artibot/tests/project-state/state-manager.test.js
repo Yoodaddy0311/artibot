@@ -9,7 +9,10 @@ import {
   readJournal,
   reduceProjectState,
   resolveStoreLocation,
+  stateUpdatedIdempotencyKey,
 } from '../../lib/project-state/state-manager.js';
+import { checkLedgerStateParity } from '../../lib/project-state/doctor-checks.js';
+import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
 import {
   cleanup, graph, makeStore, mission, MISSION_ID, seed, T0, task,
 } from './helpers.js';
@@ -544,5 +547,129 @@ describe('reconcile', () => {
     seed(store);
     seed(store);
     expect(store.reconcile().gaps).toEqual([]);
+  });
+});
+
+describe('state.updated idempotency key (SH-14)', () => {
+  const planned = [{ kind: 'mission.upsert', mission_id: MISSION_ID, mission: mission() }];
+  const base = () => stateUpdatedIdempotencyKey(MISSION_ID, 3, planned);
+
+  /** The committed records with the fields the commit stamps removed. */
+  const unstamped = (records) => records.map(({ v: _v, ts: _ts, state_version: _sv, ...r }) => r);
+
+  /** Every `state.updated` line the real writer put on disk. */
+  const ledgerLines = (projectRoot) => readFileSync(ledgerFilePath(projectRoot), 'utf-8')
+    .trim().split('\n').map((l) => JSON.parse(l))
+    .filter((l) => l.event === 'state.updated');
+
+  it('builds <event>:<mission>:<state_version>:<12-hex digest of the planned records>', () => {
+    expect(base()).toMatch(/^state\.updated:M-20260902-001:3:[0-9a-f]{12}$/);
+  });
+
+  it('is deterministic: the same write yields the same key', () => {
+    expect(stateUpdatedIdempotencyKey(MISSION_ID, 3, structuredClone(planned))).toBe(base());
+  });
+
+  it('gives a different state_version, mission or write a different key', () => {
+    const other = [{ ...planned[0], mission: mission({ status: 'reviewing' }) }];
+    // Each varied key is pinned as a string first: a null would also differ.
+    const varied = [
+      [stateUpdatedIdempotencyKey(MISSION_ID, 4, planned), /^state\.updated:M-20260902-001:4:[0-9a-f]{12}$/],
+      [stateUpdatedIdempotencyKey('M-20260902-002', 3, planned), /^state\.updated:M-20260902-002:3:[0-9a-f]{12}$/],
+      [stateUpdatedIdempotencyKey(MISSION_ID, 3, other), /^state\.updated:M-20260902-001:3:[0-9a-f]{12}$/],
+    ];
+    for (const [key, shape] of varied) {
+      expect(key).toMatch(shape);
+      expect(key).not.toBe(base());
+    }
+  });
+
+  it.each([
+    ['an empty mission id', '', 3, planned],
+    ['a missing mission id', undefined, 3, planned],
+    ['version 0, below the first commit', MISSION_ID, 0, planned],
+    ['a fractional version', MISSION_ID, 1.5, planned],
+    ['a string version', MISSION_ID, '3', planned],
+    ['records that are not an array', MISSION_ID, 3, null],
+  ])('returns null for %s, so the caller omits the field', (_label, id, version, records) => {
+    expect(stateUpdatedIdempotencyKey(id, version, records)).toBeNull();
+  });
+
+  it('stamps the key on the emitted envelope, computed from the committed write', () => {
+    const { store, ledger } = store$();
+    const out = seed(store);
+    expect(ledger.events[0].idempotency_key)
+      .toBe(stateUpdatedIdempotencyKey(MISSION_ID, 1, unstamped(out.records)));
+  });
+
+  it('keeps the key when the same write lands at a later instant — the clock is not key material', () => {
+    const a = store$();
+    const b = store$();
+    b.clock.advance(3_600_000);
+    seed(a.store);
+    seed(b.store);
+    expect(a.ledger.events[0].ts).not.toBe(b.ledger.events[0].ts);
+    // Pinned as a string first: two absent keys would also compare equal.
+    expect(a.ledger.events[0].idempotency_key).toMatch(/^state\.updated:M-20260902-001:1:/);
+    expect(a.ledger.events[0].idempotency_key).toBe(b.ledger.events[0].idempotency_key);
+  });
+
+  it('keeps two different writes that reach the same state_version apart', () => {
+    // The fail-open lock with no CAS lets two writers both commit version 1.
+    // One key for both would let a key-deduping reader erase the lost update.
+    const a = store$();
+    const b = store$();
+    seed(a.store);
+    seed(b.store, [], { status: 'reviewing' });
+    expect(a.ledger.events[0].data.state_version).toBe(b.ledger.events[0].data.state_version);
+    expect(a.ledger.events[0].idempotency_key).not.toBe(b.ledger.events[0].idempotency_key);
+  });
+
+  it('a retry after the ledger landed but the store did not reuses the key, and the real writer accepts it', () => {
+    // A duplicate key must never be a refusal: a refused state.updated abandons
+    // the store write, so the retry would fail forever at the same version.
+    const { projectRoot } = store$();
+    let crashAfterAppend = true;
+    const store = createStateStore({
+      projectRoot,
+      sessionId: 'sess-real',
+      project: 'artibot',
+      resolveGitCommonDir: () => '.git',
+      now: () => new Date('2026-09-03T00:00:00.000Z'),
+      appendEvent: (envelope) => {
+        const res = writeEvent(projectRoot, envelope);
+        if (crashAfterAppend) throw new Error('crash after the ledger append');
+        return res;
+      },
+    });
+    expect(seed(store).ok).toBe(false);
+    crashAfterAppend = false;
+    const retry = seed(store);
+
+    expect(retry).toMatchObject({ ok: true, state_version: 1 });
+    const lines = ledgerLines(projectRoot);
+    expect(lines.map((l) => l.data.state_version)).toEqual([1, 1]);
+    expect(lines[0].idempotency_key).toMatch(/^state\.updated:M-20260902-001:1:/);
+    expect(lines[1].idempotency_key).toBe(lines[0].idempotency_key);
+  });
+
+  it('Check 8 and the real writer still take a legacy line that carries no key', () => {
+    const { store, ledger, projectRoot } = store$();
+    seed(store);
+    seed(store);
+    const legacy = { ...ledger.events[0] };
+    delete legacy.idempotency_key;
+    const input = {
+      journal: readJournal(store.paths.journal).records,
+      projection: store.renderProjection(),
+      project: 'artibot',
+    };
+
+    expect(writeEvent(projectRoot, legacy).ok).toBe(true);
+    const mixed = checkLedgerStateParity({ ...input, events: [legacy, ledger.events[1]] });
+    expect(mixed.status).toBe('pass');
+    // Control: the reader is not vacuous — drop version 2 and it is caught.
+    expect(checkLedgerStateParity({ ...input, events: [legacy] }).findings.map((f) => f.code))
+      .toContain('ledger-subset-violation');
   });
 });

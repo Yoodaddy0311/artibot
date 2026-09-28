@@ -343,7 +343,7 @@ const ROLE_SOURCED = Object.freeze({
  * reason states what closes each one instead.
  */
 const EXCEPTIONS = Object.freeze({
-  'lib/runtime/middleware/mission-ledger.js:247': {
+  'lib/runtime/middleware/mission-ledger.js:303': {
     event: null,
     source: 'hook',
     reason: 'Event name resolved at runtime through LEDGER_EVENT_BY_COMPILER_NAME. '
@@ -351,7 +351,7 @@ const EXCEPTIONS = Object.freeze({
       + 'below in `RUNTIME_NAMED_EVENTS` so a name added to that map is checked.',
     runtimeNamedEvents: ['mission.created', 'mission.candidate_deferred'],
   },
-  'lib/project-state/state-manager.js:333': {
+  'lib/project-state/state-manager.js:376': {
     event: 'state.updated',
     source: null,
     reason: 'Source is injected by the caller (`ctx.source`), and the allowlist '
@@ -570,7 +570,7 @@ describe('hook emitter sources rule', () => {
   });
 
   it('pins the runtime-named events of the table-driven emitter', () => {
-    const entry = EXCEPTIONS['lib/runtime/middleware/mission-ledger.js:247'];
+    const entry = EXCEPTIONS['lib/runtime/middleware/mission-ledger.js:303'];
     const src = fs.readFileSync(path.join(PKG_ROOT, 'lib', 'runtime', 'middleware', 'mission-ledger.js'), 'utf8');
     const map = src.match(/LEDGER_EVENT_BY_COMPILER_NAME\s*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/);
     expect(map, 'LEDGER_EVENT_BY_COMPILER_NAME moved — re-read the emitter').not.toBeNull();
