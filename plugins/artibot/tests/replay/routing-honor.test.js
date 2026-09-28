@@ -51,11 +51,14 @@ let seqCounter = 0;
 /**
  * A `route.bound` row in the live envelope key order (see spawn-outcome.test.js).
  *
- * @param {object} spec - agentId, session, confidence and the optional agentType.
+ * @param {object} spec - agentId, session, confidence and the optional agentType /
+ *   subagentType / matchedOn (default 'name'; null omits the key, as a fifo bind does).
  * @returns {object} ledger line.
  */
 function bound(spec) {
-  const { agentId, session = SESS_A, confidence = 'exact', agentType } = spec;
+  const {
+    agentId, session = SESS_A, confidence = 'exact', agentType, subagentType, matchedOn = 'name',
+  } = spec;
   seqCounter += 1;
   return {
     v: 1,
@@ -75,7 +78,8 @@ function bound(spec) {
       confidence,
       method: confidence === 'fifo' ? 'prompt_id+fifo' : 'prompt_id+name',
       ...(agentType === undefined ? {} : { agent_type: agentType }),
-      matched_on: 'name',
+      ...(subagentType === undefined ? {} : { subagent_type: subagentType }),
+      ...(matchedOn === null ? {} : { matched_on: matchedOn }),
       recommended_model: OPUS,
       action_class: 'implement',
     },
@@ -340,6 +344,148 @@ describe('the roster is checked before the resolver is asked', () => {
   });
 });
 
+/** A teammate name, as the host reports it on a named spawn. */
+const TEAMMATE = 'split-x-impl';
+
+/**
+ * Fold one named spawn through the REAL join: its bind and one receipt.
+ *
+ * @param {object} spec - `bound()` spec; `served` is the receipt's model.
+ * @returns {{row: object, calls: string[]}} the spawn's row and the resolver calls.
+ */
+function judgeNamed(spec) {
+  const { served = OPUS, ...bind } = spec;
+  const { ports, calls } = fakePorts();
+  const r = foldRoutingHonor(joinSpawnOutcomes([bound(bind), receipt(`agent-${bind.agentId}`, served)]), ports);
+  return { row: rowOf(r, bind.agentId), calls };
+}
+
+describe('named spawns: judged on the caller subagent_type when the host agent_type is not qualified', () => {
+  it('teammate name + artibot:doc-updater + exact bind is measured, through the real join', () => {
+    const { row, calls } = judgeNamed({
+      agentId: 'n1', agentType: TEAMMATE, subagentType: 'artibot:doc-updater', served: SONNET,
+    });
+    expect(row).toMatchObject({
+      agent_type: TEAMMATE, subagent_type: 'artibot:doc-updater',
+      judged_agent: 'artibot:doc-updater', judged_on: 'subagent_type',
+      served_tier: 'sonnet', expected_tier: 'sonnet', verdict: 'honored', reason: null,
+    });
+    expect(calls).toEqual(['artibot:doc-updater']);
+  });
+
+  it('a name-confidence bind is judged the same way', () => {
+    const { row } = judgeNamed({
+      agentId: 'n2', agentType: TEAMMATE, subagentType: 'artibot-cowork:planner', confidence: 'name',
+    });
+    expect(row).toMatchObject({ judged_agent: 'artibot-cowork:planner', expected_tier: 'sonnet', verdict: 'unhonored' });
+  });
+
+  it('a bare host definition name matched to a qualified receipt is judged on the receipt', () => {
+    // Matched on the caller's `name` (the teammate path): the receipt is this spawn's.
+    const { row } = judgeNamed({
+      agentId: 'n3', agentType: 'code-reviewer', subagentType: 'artibot:code-reviewer', confidence: 'name',
+    });
+    expect(row).toMatchObject({ judged_agent: 'artibot:code-reviewer', judged_on: 'subagent_type', verdict: 'honored' });
+  });
+
+  it('a bare host matched on subagent_type is NOT judged on the receipt (cross-bind guard)', () => {
+    // `matchReceipt` compares identities past the prefix, so a user-level
+    // `code-reviewer` spawned beside `artibot:code-reviewer` in one prompt can
+    // take the plugin spawn's receipt with confidence exact. A direct spawn of
+    // the plugin agent reports the qualified name itself, so this combination
+    // is the mis-bind, never the normal path.
+    const { row, calls } = judgeNamed({
+      agentId: 'n3b', agentType: 'code-reviewer', subagentType: 'artibot:code-reviewer', matchedOn: 'subagent_type',
+    });
+    expect(row).toMatchObject({
+      judged_agent: 'code-reviewer', judged_on: 'agent_type',
+      verdict: 'unmeasured', reason: UNMEASURED_REASONS.unqualifiedAgentType,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('a bind with no matched_on (written before that column) falls back to the host value', () => {
+    const { row, calls } = judgeNamed({
+      agentId: 'n3c', agentType: TEAMMATE, subagentType: 'artibot:doc-updater', matchedOn: null,
+    });
+    expect(row).toMatchObject({ judged_agent: TEAMMATE, judged_on: 'agent_type', reason: UNMEASURED_REASONS.unqualifiedAgentType });
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ['an unprefixed subagent_type', 'doc-updater'],
+    ['a built-in subagent_type', 'Explore'],
+    ['general-purpose', 'general-purpose'],
+  ])('%s is judged as written and stays unqualified-agent-type', (_label, subagentType) => {
+    const { row, calls } = judgeNamed({ agentId: 'n4', agentType: TEAMMATE, subagentType });
+    expect(row).toMatchObject({
+      judged_agent: subagentType, judged_on: 'subagent_type',
+      verdict: 'unmeasured', reason: UNMEASURED_REASONS.unqualifiedAgentType,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('a qualified subagent_type off the roster is agent-not-in-roster', () => {
+    const { row, calls } = judgeNamed({ agentId: 'n5', agentType: TEAMMATE, subagentType: 'artibot:ghost' });
+    expect(row).toMatchObject({ judged_agent: 'artibot:ghost', reason: UNMEASURED_REASONS.notInRoster });
+    expect(calls).toEqual([]);
+  });
+
+  it('a qualified host agent_type wins over the subagent_type', () => {
+    const { row, calls } = judgeNamed({
+      agentId: 'n6', agentType: 'artibot:planner', subagentType: 'artibot:doc-updater',
+    });
+    expect(row).toMatchObject({ judged_agent: 'artibot:planner', judged_on: 'agent_type', verdict: 'honored' });
+    expect(calls).toEqual(['artibot:planner']);
+  });
+
+  it.each([
+    ['fifo', 'fifo'],
+    ['no confidence', null],
+  ])('a %s bind never lends its subagent_type: unqualified, resolver not called', (_label, confidence) => {
+    const { row, calls } = judgeNamed({
+      agentId: 'n7', agentType: TEAMMATE, subagentType: 'artibot:doc-updater', confidence,
+    });
+    expect(row).toMatchObject({
+      judged_agent: TEAMMATE, judged_on: 'agent_type',
+      verdict: 'unmeasured', reason: UNMEASURED_REASONS.unqualifiedAgentType,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('a bind written before the column existed is judged on the host value', () => {
+    const { row } = judgeNamed({ agentId: 'n8', agentType: TEAMMATE });
+    expect(row).toMatchObject({ subagent_type: null, judged_agent: TEAMMATE, reason: UNMEASURED_REASONS.unqualifiedAgentType });
+  });
+
+  it('a foreign-prefixed host agent_type is not overridden', () => {
+    const { row } = judgeNamed({
+      agentId: 'n9', agentType: 'other-plugin:reviewer', subagentType: 'artibot:code-reviewer',
+    });
+    expect(row).toMatchObject({ judged_agent: 'other-plugin:reviewer', reason: UNMEASURED_REASONS.unqualifiedAgentType });
+  });
+
+  it('no host agent_type on a fifo bind stays no-agent-type', () => {
+    // The live shape: with no agent_type the writer's identity tier cannot fire,
+    // so such a bind is always fifo.
+    const { row } = judgeNamed({ agentId: 'n10', subagentType: 'artibot:doc-updater', confidence: 'fifo' });
+    expect(row).toMatchObject({ judged_agent: null, judged_on: null, reason: UNMEASURED_REASONS.noAgentType });
+  });
+
+  it('named rows keep the fold byte-deterministic under shuffling', () => {
+    const lines = [
+      ...fixture(),
+      bound({ agentId: 'n11', agentType: TEAMMATE, subagentType: 'artibot:doc-updater' }),
+      receipt('agent-n11', SONNET),
+      bound({ agentId: 'n12', agentType: 'team-y', subagentType: 'Explore', confidence: 'fifo' }),
+      receipt('agent-n12', OPUS),
+    ];
+    const expected = JSON.stringify(foldRoutingHonor(joinSpawnOutcomes(lines), fakePorts().ports));
+    expect(JSON.stringify(foldRoutingHonor(joinSpawnOutcomes(shuffled(lines)), fakePorts().ports))).toBe(expected);
+    expect(JSON.stringify(foldRoutingHonor(joinSpawnOutcomes([...lines].reverse()), fakePorts().ports))).toBe(expected);
+  });
+});
+
 describe('CLI-shaped wiring: real resolveEffectiveModel + resolveModelIdentity', () => {
   it('an override-sourced expectation is honored or unhonored against the catalog tier', () => {
     const withCowork = setOverride(emptyOverrides(), {
@@ -381,6 +527,12 @@ describe('producer shape and determinism', () => {
     }
     expect(Number.isInteger(fold.binds)).toBe(true);
     expect(Number.isInteger(fold.unjoined_receipts)).toBe(true);
+  });
+
+  it('joinSpawnOutcomes emits subagent_type on every pair, the fallback column this fold reads', () => {
+    for (const pair of joinSpawnOutcomes(fixture()).pairs) {
+      expect(Object.keys(pair)).toEqual(expect.arrayContaining(['subagent_type']));
+    }
   });
 
   it('a shuffled ledger serializes to the same bytes', () => {

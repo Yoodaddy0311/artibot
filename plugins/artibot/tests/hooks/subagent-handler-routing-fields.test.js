@@ -449,6 +449,76 @@ describe('subagent-handler v5 routing fields (child process)', () => {
   });
 
   // -------------------------------------------------------------------------
+  // `subagent_type`: the caller's definition, beside the host's `agent_type`
+  // -------------------------------------------------------------------------
+
+  it('a named spawn records the receipt\'s subagent_type beside the host agent_type', () => {
+    // The host's `agent_type` is the teammate name here, which routing-honor
+    // cannot judge; the definition the caller asked for is on the receipt.
+    expect(runPre(prePayload({
+      tool_input: { subagent_type: 'artibot:tdd-guide', name: 'split-x-impl' },
+    }), home).status).toBe(0);
+    expect(runHook(basePayload({ agent_type: 'split-x-impl' }), 'start', home).status).toBe(0);
+
+    const { data } = boundLine(repo);
+    expect(data.confidence).toBe('exact');
+    expect(data.agent_type).toBe('split-x-impl');
+    expect(data.subagent_type).toBe('artibot:tdd-guide');
+  });
+
+  it('subagent_type is the caller\'s literal: no prefix added to a bare name', () => {
+    expect(runPre(prePayload({
+      tool_input: { subagent_type: 'tdd-guide', name: 'split-x-impl' },
+    }), home).status).toBe(0);
+    expect(runHook(basePayload({ agent_type: 'split-x-impl' }), 'start', home).status).toBe(0);
+    expect(boundLine(repo).data.subagent_type).toBe('tdd-guide');
+  });
+
+  it('a bare host agent_type stays as observed beside the qualified subagent_type', () => {
+    expect(runPre(prePayload({
+      tool_input: { subagent_type: 'artibot:code-reviewer', name: undefined },
+    }), home).status).toBe(0);
+    expect(runHook(basePayload({ agent_type: 'code-reviewer' }), 'start', home).status).toBe(0);
+    const { data } = boundLine(repo);
+    expect(data.agent_type).toBe('code-reviewer');
+    expect(data.subagent_type).toBe('artibot:code-reviewer');
+  });
+
+  it('a built-in subagent_type is recorded as written', () => {
+    expect(runPre(prePayload({
+      tool_input: { subagent_type: 'Explore', name: 'probe-x' },
+    }), home).status).toBe(0);
+    expect(runHook(basePayload({ agent_type: 'probe-x' }), 'start', home).status).toBe(0);
+    expect(boundLine(repo).data.subagent_type).toBe('Explore');
+  });
+
+  it('a FIFO bind carries the receipt\'s subagent_type under its fifo label', () => {
+    // Recorded as observed; `confidence` is what tells a reader not to trust it.
+    const pre = prePayload({ tool_input: { subagent_type: 'code-reviewer' } });
+    delete pre.prompt_id;
+    delete pre.tool_input.name;
+    expect(runPre(pre, home).status).toBe(0);
+    const start = basePayload({ agent_type: 'teammate' });
+    delete start.prompt_id;
+    expect(runHook(start, 'start', home).status).toBe(0);
+
+    const { data } = boundLine(repo);
+    expect(data.confidence).toBe('fifo');
+    expect(data.subagent_type).toBe('code-reviewer');
+  });
+
+  it('omits subagent_type when the receipt carries none', () => {
+    const pre = prePayload();
+    delete pre.tool_input.subagent_type;
+    expect(runPre(pre, home).status).toBe(0);
+    expect(runHook(basePayload(), 'start', home).status).toBe(0);
+
+    const bound = boundLine(repo);
+    expect(bound).toBeDefined();
+    expect(bound.data).not.toHaveProperty('subagent_type');
+  });
+
+  // -------------------------------------------------------------------------
   // Unbound is a first-class, correct outcome
   // -------------------------------------------------------------------------
 
