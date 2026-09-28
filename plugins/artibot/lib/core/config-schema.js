@@ -312,9 +312,9 @@ export const configSchema = {
         comment: { type: 'string' },
       },
     },
-    // Owner decisions 2026-09-03 (review.independent, C4). Same grade as the
-    // five above: a DECLARATION with no lib/ reader, whose shipped values
-    // encode current behavior.
+    // Owner decisions 2026-09-03 (review.independent, C4); shipped values encode
+    // current behavior. No lib/ reader, but review.verify is read under scripts/
+    // by hooks/mission-complete-record.js#policyFromConfig and ledger/outcome-census.mjs.
     review: {
       type: 'object',
       properties: {

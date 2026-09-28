@@ -628,8 +628,8 @@ describe('state.updated idempotency key (SH-14)', () => {
   });
 
   it('keeps two different writes that reach the same state_version apart', () => {
-    // The fail-open lock with no CAS lets two writers both commit version 1.
-    // One key for both would let a key-deduping reader erase the lost update.
+    // Two stores stand in for two writes at one version (e.g. a version reused after a
+    // failed store write). One key for both would let a key-deduping reader erase one.
     const a = store$();
     const b = store$();
     seed(a.store);

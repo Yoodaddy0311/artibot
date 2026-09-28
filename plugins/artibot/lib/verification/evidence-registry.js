@@ -46,14 +46,14 @@
  * two writers cannot both read "highest is E-004" and both mint E-005.
  *
  * ── The lock, and why it is not `lib/core/file-lock.js#withFileLock` ─────────
- * `withFileLock` is not mutually exclusive. It waits until `existsSync` says
- * the lock is gone, then creates it with a plain `writeFileSync`. Two waiters
- * that both see "gone" both proceed. It also unlinks a lock whose JSON does not
- * parse, which is exactly what a racing reader sees between another holder's
- * create and its write. Measured 2026-09-23 13:54 KST with 4 and 8 writers
- * released together: duplicate ids in 44 of 50 and 30 of 30 rounds. CI hit the
- * same thing unsynchronised once (3 distinct ids from 4 writers). That module is
- * shared with other stores and not changed here.
+ * This lock was written when `withFileLock` was not mutually exclusive: it
+ * waited for `existsSync` to say the lock was gone, then created it with a plain
+ * `writeFileSync`, and unlinked a lock whose JSON did not parse. Measured
+ * 2026-09-23 13:54 KST with 4 and 8 writers released together: duplicate ids in
+ * 44 of 50 and 30 of 30 rounds; unsynchronised CI once got 3 distinct ids from 4.
+ * `withFileLock` has since moved to an O_EXCL create and fails closed (see its
+ * header), so that reason is now history. This module still uses its own lock,
+ * whose timeout returns `lock-timeout` rather than throwing.
  *
  * This lock is `<registry>.lock`, the same path, so a writer on the old code
  * still sees it:

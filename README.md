@@ -56,7 +56,7 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 - **Loop Detection** -- Circular buffer-based agent loop detection with fingerprint matching, automatic warn/block on repeated tool calls
 - **Clean State Enforcement** -- TaskCompleted hook ensures lint+test verification at feature completion boundaries
 - **28 Hook Registrations** (`hooks.json` matcher entries) -- Across 16 event types: cognitive routing, lifelong learning, session lifecycle, dangerous command blocking, auto-formatting, team tracking, loop detection, clean state checks, HTTP webhook notifications, git autopilot. Two entries fan out to two scripts each, so 29 hook commands run in total
-- **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-open pattern prevents workflow blocking
+- **Advisory File Locking** -- Spin-lock based file locking for concurrent hook state access, fail-closed (a timed-out wait throws instead of writing without the lock)
 - **DEV Protocol** -- Mandatory Decompose-Execute-Verify workflow with zero-skip policy for all code changes
 - **Vibe Coding Support** -- Natural language request handling with read-first, verify-after, evidence-based completion
 - **Visual Validation Pipeline** -- SSIM-based screenshot comparison, auto-fix suggestion, iterative correction loop via Playwright MCP

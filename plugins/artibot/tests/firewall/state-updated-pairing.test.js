@@ -14,7 +14,7 @@
  * the next false-confidence signal:
  *
  *  - **Real concurrency.** Every case below is single-process and
- *    single-threaded. `withFileLock` is advisory and fail-OPEN, so contention
+ *    single-threaded. `withFileLock` is exclusive and fails closed, but contention
  *    behaviour under N real processes is NOT measured here. The sibling gate
  *    `ledger-append-survival.test.js` (T-20) owns the multi-process append
  *    measurement (3 and 8 processes x 20 lines, fallback and git-common-dir
