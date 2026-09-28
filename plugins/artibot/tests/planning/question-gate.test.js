@@ -26,6 +26,7 @@ import {
   WORK_PURPOSES,
 } from '../../lib/intent/interpreter.js';
 import {
+  decideQuestionGateEnforcement,
   ESCALATING_COMPLETIONS,
   ESCALATION_FLOOR,
   evaluateConditions,
@@ -36,6 +37,8 @@ import {
   planQuestionBatch,
   PRODUCT_DECISION,
   QUESTION_BATCH_POINT,
+  QUESTION_GATE_ENFORCE_CONFIG_PATH,
+  readQuestionGateEnforce,
   requiresQuestion,
   STRUCTURAL_PURPOSES,
 } from '../../lib/planning/question-gate.js';
@@ -329,5 +332,196 @@ describe('purity', () => {
   it('returns deep-equal verdicts for equal inputs', () => {
     const input = { prompt: '스키마를 어느 쪽으로 결정할지 비즈니스 리스크가 큽니다' };
     expect(evaluateQuestionGate(input)).toEqual(evaluateQuestionGate(input));
+  });
+});
+
+/** All sixteen condition rows, mask bit i = GATE_CONDITIONS[i]. */
+function truthTable() {
+  return Array.from({ length: 16 }, (_, mask) => ({
+    mask,
+    conditions: Object.fromEntries(
+      GATE_CONDITIONS.map((key, i) => [key, Boolean(mask & (1 << i))]),
+    ),
+  }));
+}
+
+const ALL_FOUR = Object.freeze(Object.fromEntries(GATE_CONDITIONS.map((k) => [k, true])));
+const NONE = Object.freeze(Object.fromEntries(GATE_CONDITIONS.map((k) => [k, false])));
+
+describe('readQuestionGateEnforce — the CA-15 kill switch reader', () => {
+  it('names the path it walks', () => {
+    expect(QUESTION_GATE_ENFORCE_CONFIG_PATH).toBe('runtime.questionGate.enforce');
+  });
+
+  it('is ON only for the literal boolean true', () => {
+    expect(readQuestionGateEnforce({ runtime: { questionGate: { enforce: true } } })).toBe(true);
+  });
+
+  it.each([
+    ['string "true"', { runtime: { questionGate: { enforce: 'true' } } }],
+    ['number 1', { runtime: { questionGate: { enforce: 1 } } }],
+    ['null', { runtime: { questionGate: { enforce: null } } }],
+    ['false', { runtime: { questionGate: { enforce: false } } }],
+    ['missing leaf', { runtime: { questionGate: {} } }],
+    ['missing questionGate', { runtime: {} }],
+    ['missing runtime', {}],
+    ['null cfg', null],
+    ['undefined cfg', undefined],
+    ['string cfg', 'runtime.questionGate.enforce'],
+    ['number cfg', 1],
+    ['runtime is a string', { runtime: 'questionGate' }],
+  ])('reads %s as OFF', (_label, cfg) => {
+    expect(readQuestionGateEnforce(cfg)).toBe(false);
+  });
+});
+
+describe('decideQuestionGateEnforcement — switch off', () => {
+  it.each(truthTable())('mask $mask never blocks while enforce is off', ({ conditions }) => {
+    const out = decideQuestionGateEnforcement({ conditions, enforce: false, interpretationPresent: true });
+    expect(out).toEqual({
+      enforce: false,
+      block: false,
+      kind: null,
+      at: QUESTION_BATCH_POINT,
+      reason: 'switch-off',
+      inputs_absent: [],
+    });
+  });
+
+  it.each([['string "true"', 'true'], ['number 1', 1], ['undefined', undefined]])(
+    'treats enforce=%s as off even with all four conditions',
+    (_label, enforce) => {
+      const out = decideQuestionGateEnforcement({ conditions: ALL_FOUR, enforce, interpretationPresent: true });
+      expect(out.enforce).toBe(false);
+      expect(out.block).toBe(false);
+      expect(out.reason).toBe('switch-off');
+    },
+  );
+
+  it('still records absent inputs while off', () => {
+    const out = decideQuestionGateEnforcement({ conditions: NONE, enforce: false, interpretationPresent: false });
+    expect(out.inputs_absent).toEqual(['interpretation']);
+  });
+});
+
+describe('decideQuestionGateEnforcement — switch on', () => {
+  it.each(truthTable())('mask $mask blocks exactly when requiresQuestion does', ({ mask, conditions }) => {
+    const out = decideQuestionGateEnforcement({ conditions, enforce: true, interpretationPresent: true });
+    expect(out.enforce).toBe(true);
+    expect(out.block).toBe(requiresQuestion(conditions));
+    expect(out.block).toBe(mask === 15);
+    expect(out.kind).toBe(mask === 15 ? PRODUCT_DECISION : null);
+    expect(out.at).toBe(QUESTION_BATCH_POINT);
+    expect(out.reason).toBe(mask === 15 ? 'all-conditions' : 'conditions-not-met');
+    expect(out.inputs_absent).toEqual([]);
+  });
+
+  it('blocks on 1 of the 16 rows', () => {
+    const blocked = truthTable().filter(({ conditions }) =>
+      decideQuestionGateEnforcement({ conditions, enforce: true, interpretationPresent: true }).block);
+    expect(blocked.map((r) => r.mask)).toEqual([15]);
+  });
+
+  it('truthy-but-not-true condition values do not block', () => {
+    const ones = Object.fromEntries(GATE_CONDITIONS.map((k) => [k, 1]));
+    expect(decideQuestionGateEnforcement({ conditions: ones, enforce: true, interpretationPresent: true }).block)
+      .toBe(false);
+  });
+});
+
+describe('decideQuestionGateEnforcement — absent interpretation is provenance only', () => {
+  it('does not prevent a real block when all four conditions hold', () => {
+    const out = decideQuestionGateEnforcement({ conditions: ALL_FOUR, enforce: true, interpretationPresent: false });
+    expect(out.block).toBe(true);
+    expect(out.kind).toBe(PRODUCT_DECISION);
+    expect(out.inputs_absent).toEqual(['interpretation']);
+  });
+
+  it.each(truthTable().filter((r) => r.mask !== 15))(
+    'never causes a block on mask $mask',
+    ({ conditions }) => {
+      const out = decideQuestionGateEnforcement({ conditions, enforce: true, interpretationPresent: false });
+      expect(out.block).toBe(false);
+      expect(out.kind).toBeNull();
+      expect(out.inputs_absent).toEqual(['interpretation']);
+    },
+  );
+
+  it.each([['undefined', undefined], ['string "true"', 'true'], ['number 1', 1]])(
+    'treats interpretationPresent=%s as absent',
+    (_label, interpretationPresent) => {
+      const out = decideQuestionGateEnforcement({ conditions: NONE, enforce: true, interpretationPresent });
+      expect(out.inputs_absent).toEqual(['interpretation']);
+      expect(out.block).toBe(false);
+    },
+  );
+});
+
+describe('decideQuestionGateEnforcement — missing conditions fail open', () => {
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['string', 'yes'],
+    ['number', 15],
+    ['array', [true, true, true, true]],
+  ])('%s conditions → no-conditions, no block', (_label, conditions) => {
+    const out = decideQuestionGateEnforcement({ conditions, enforce: true, interpretationPresent: true });
+    expect(out).toEqual({
+      enforce: true,
+      block: false,
+      kind: null,
+      at: QUESTION_BATCH_POINT,
+      reason: 'no-conditions',
+      inputs_absent: [],
+    });
+  });
+
+  it('does not throw on no input at all', () => {
+    expect(() => decideQuestionGateEnforcement()).not.toThrow();
+    expect(decideQuestionGateEnforcement().block).toBe(false);
+    expect(decideQuestionGateEnforcement(null).block).toBe(false);
+  });
+});
+
+describe('decideQuestionGateEnforcement — contract shape', () => {
+  it('returns a frozen object with exactly the six contract keys', () => {
+    const out = decideQuestionGateEnforcement({ conditions: ALL_FOUR, enforce: true, interpretationPresent: false });
+    expect(Object.isFrozen(out)).toBe(true);
+    expect(Object.keys(out).sort()).toEqual(['at', 'block', 'enforce', 'inputs_absent', 'kind', 'reason']);
+  });
+
+  it('freezes inputs_absent too, so a caller cannot rewrite provenance', () => {
+    const out = decideQuestionGateEnforcement({ conditions: NONE, enforce: true, interpretationPresent: false });
+    expect(Object.isFrozen(out.inputs_absent)).toBe(true);
+  });
+
+  it('does not mutate the conditions it was given', () => {
+    const conditions = { ...ALL_FOUR };
+    decideQuestionGateEnforcement({ conditions, enforce: true, interpretationPresent: true });
+    expect(conditions).toEqual(ALL_FOUR);
+  });
+
+  it('ignores question_gate.force wherever it is passed — it takes no config', () => {
+    const forceAllTrue = { question_gate: { force: { ...ALL_FOUR } } };
+    const out = decideQuestionGateEnforcement({
+      conditions: { ...NONE, ...forceAllTrue },
+      enforce: true,
+      interpretationPresent: true,
+      config: forceAllTrue,
+      ...forceAllTrue,
+    });
+    expect(out.block).toBe(false);
+    expect(out.reason).toBe('conditions-not-met');
+  });
+
+  it('decides from the recorded conditions, not from a prompt', () => {
+    // A prompt that would fire all four is ignored — conditions are not re-evaluated.
+    const out = decideQuestionGateEnforcement({
+      conditions: NONE,
+      enforce: true,
+      interpretationPresent: true,
+      prompt: '이 스키마를 어느 쪽으로 갈지 결정해야 하는데 비즈니스 방향에 따라 되돌리기 어렵습니다',
+    });
+    expect(out.block).toBe(false);
   });
 });

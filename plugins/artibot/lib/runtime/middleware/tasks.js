@@ -33,7 +33,10 @@ import { planWorkflow, readFollowWorkflowPlan, recordWorkflow, resolveWorkflowMo
 import {
   appendMissionEvent, missionIntentRevision, missionTitle, resolveMissionIdentity,
 } from './mission-ledger.js';
-import { appendQuestionGateEvent, buildQuestionGateData } from '../question-gate-record.js';
+import {
+  appendQuestionGateEvent, buildQuestionGateData, INTERPRETATION_PRESENT_KEY,
+} from '../question-gate-record.js';
+import { decideQuestionGateEnforcement, readQuestionGateEnforce } from '../../planning/question-gate.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -384,9 +387,10 @@ function recordMissionState(state, result, nowMs, identity, deps) {
 /**
  * Record the question gate's four conditions for this prompt (SH-18), as the
  * ONE `adr.question_gate_evaluated` line `lib/runtime/question-gate-record.js`
- * appends. Observe only: nothing reads the verdict back, and the returned
- * status is surfaced on `task.mission.question_gate` for a census, not for a
- * branch.
+ * appends. The status is surfaced on `task.mission.question_gate` for a census;
+ * the evaluated data comes back beside it so the CA-15 switch
+ * ({@link questionGateFields}) decides from the SAME verdict instead
+ * of evaluating the prompt a second time. With the switch off nothing reads it.
  *
  * WRAPPED LOCALLY even though both recorder functions promise not to throw.
  * This runs inside `recordMissionCompile`'s try, whose catch rewrites the whole
@@ -403,22 +407,78 @@ function recordMissionState(state, result, nowMs, identity, deps) {
  * prompt appends. NOT gated on the mission append: the gate is its own
  * observation, and it skips on exactly the identity the append skips on.
  *
+ * `data` is returned even when the append was skipped, refused or threw: the
+ * verdict was evaluated on this prompt whether or not the disk took the line,
+ * and enforcement follows the verdict, not the ledger.
+ *
  * @param {object} state middleware state
  * @param {number} nowMs the single epoch-ms reading for this prompt
  * @param {{projectRoot: string|null, sessionId: string|null, missionId: string|null}} identity
- * @returns {string} the recorder's status, or `error:<message>` if it threw
+ * @returns {{status: string, data: Record<string, boolean>|null}} the recorder's
+ *   status (`error:<message>` if it threw) and the evaluated data, or `null`
  */
 function recordQuestionGate(state, nowMs, identity) {
+  let data = null;
   try {
-    const data = buildQuestionGateData({
+    data = buildQuestionGateData({
       prompt: String(state.input?.prompt ?? ''),
       intent: state.context?.intent,
       classification: state.context?.routing?.classification,
     });
-    return appendQuestionGateEvent(identity, data, nowMs);
+    return { status: appendQuestionGateEvent(identity, data, nowMs), data };
   } catch (err) {
-    return `error:${err?.message ?? 'question-gate-threw'}`;
+    return { status: `error:${err?.message ?? 'question-gate-threw'}`, data };
   }
+}
+
+/**
+ * The question-gate fields of `task.mission`, spread into both of
+ * `recordMissionCompile`'s return shapes: the `question_gate` status string,
+ * unchanged, and — only with the CA-15 switch on — `question_gate_enforcement`.
+ *
+ * OFF adds no key, so the mission record is byte-identical to a build without
+ * CA-15. ON always adds it — a compile failure passes `null` data and records
+ * `block: false` — so the mission key set does not depend on which path ran.
+ *
+ * @param {{status: string, data: Record<string, boolean>|null}} gate
+ * @param {boolean} enforce the switch, from `readTeamGateInputs`
+ * @returns {{question_gate: string, question_gate_enforcement?: object}}
+ */
+function questionGateFields({ status, data }, enforce) {
+  if (enforce !== true) return { question_gate: status };
+  return {
+    question_gate: status,
+    question_gate_enforcement: decideQuestionGateEnforcement({
+      conditions: data,
+      enforce: true,
+      interpretationPresent: data?.[INTERPRETATION_PRESENT_KEY] === true,
+    }),
+  };
+}
+
+/**
+ * Append the advisory directive for a blocking verdict.
+ *
+ * ADVISORY, NOT A HALT: the pipeline has no halt contract
+ * (`create-artibot-agent.js#runMiddleware` swallows a throw and continues), so
+ * "block" is text next to the prompt — the same shape as the "Execution
+ * contract" append below and `scripts/hooks/ambiguity-guard.js#formatReminder`.
+ *
+ * Appends only on `block: true`, which needs the switch on AND all four
+ * conditions; otherwise `state` is left exactly as it was.
+ *
+ * @param {object} state middleware state (`userPrompt`, `messageParts`)
+ * @param {{block?: boolean, kind?: string|null, at?: string}|undefined} decision
+ * @returns {void}
+ */
+function applyQuestionGateDirective(state, decision) {
+  if (decision?.block !== true) return;
+  state.userPrompt += [
+    `\n\n[artibot:question-gate required kind=${decision.kind} at=${decision.at}]`,
+    'This is a product decision the evidence cannot settle, and a wrong assumption is costly.',
+    'Do not assume an answer: ASK the user, in ONE batch of questions, before starting the work.',
+  ].join('\n');
+  state.messageParts.push('question-gate=block');
 }
 
 /**
@@ -434,9 +494,10 @@ function recordQuestionGate(state, nowMs, identity) {
  * @param {object} state
  * @param {() => number} now
  * @param {{resolveGitCommonDir: (root: string) => string|null}} deps injected ports
+ * @param {boolean} [questionGateEnforce] the CA-15 switch; anything but `true` is off
  * @returns {object} the value for `task.mission`
  */
-function recordMissionCompile(state, now, deps) {
+function recordMissionCompile(state, now, deps, questionGateEnforce = false) {
   try {
     // ONE reading of the clock for the whole mission record, threaded through
     // the compile, the append and the store write. `now` is a PORT: nothing
@@ -470,7 +531,7 @@ function recordMissionCompile(state, now, deps) {
       ledger: ledger.status,
       store,
       // Evaluated last, after the store write — see recordQuestionGate.
-      question_gate: recordQuestionGate(state, nowMs, identity),
+      ...questionGateFields(recordQuestionGate(state, nowMs, identity), questionGateEnforce),
       ok: true,
     };
   } catch (err) {
@@ -481,7 +542,7 @@ function recordMissionCompile(state, now, deps) {
       error: err?.message ?? 'compile-failed',
       ledger: 'skipped:compile-failed',
       store: skippedMissionStore('no-mission-created'),
-      question_gate: 'skipped:compile-failed',
+      ...questionGateFields({ status: 'skipped:compile-failed', data: null }, questionGateEnforce),
     };
   }
 }
@@ -507,11 +568,12 @@ export { FOLLOW_WORKFLOW_PLAN_CONFIG_KEY } from './workflow-mode.js';
  *
  * `followWorkflowPlan` is resolved by `workflow-mode.js#readFollowWorkflowPlan`
  * rather than read inline, so the key's name, its default and the gate that
- * uses it stay in one module.
+ * uses it stay in one module. `questionGateEnforce` (CA-15) rides the same
+ * read for the same reason, resolved by `question-gate.js#readQuestionGateEnforce`.
  *
  * @param {object} state middleware state
  * @returns {{ pluginRoot: string|undefined, cfg: object, optOut: boolean,
- *   teamEnabled: boolean, followWorkflowPlan: boolean }}
+ *   teamEnabled: boolean, followWorkflowPlan: boolean, questionGateEnforce: boolean }}
  */
 function readTeamGateInputs(state) {
   const pluginRoot = state.input?.pluginRoot
@@ -524,6 +586,7 @@ function readTeamGateInputs(state) {
     optOut: NO_TEAM_FLAG.test(extractUserPromptFlagSurface(state.input?.hookData)),
     teamEnabled: isTeamEnabled(cfg.team),
     followWorkflowPlan: readFollowWorkflowPlan(cfg),
+    questionGateEnforce: readQuestionGateEnforce(cfg),
   };
 }
 
@@ -550,7 +613,7 @@ export function createTasksMiddleware(options = {}) {
     const intent = state.context.intent || {};
 
     const {
-      pluginRoot, cfg, optOut, teamEnabled, followWorkflowPlan,
+      pluginRoot, cfg, optOut, teamEnabled, followWorkflowPlan, questionGateEnforce,
     } = readTeamGateInputs(state);
 
     // P3-10: automatically attach effort/taskBudget meta when the prior
@@ -623,7 +686,7 @@ export function createTasksMiddleware(options = {}) {
     // outside the `agentTeam` branch above on purpose (§3.5). Recorded on
     // `task.mission`, a sibling of `task.meta` — see the deviation note in the
     // module header for why not `task.meta.missionContract`.
-    task.mission = recordMissionCompile(state, now, missionDeps);
+    task.mission = recordMissionCompile(state, now, missionDeps, questionGateEnforce);
 
     state.context.tasks = task;
     state.messageParts.push(`task=${mode}`);
@@ -631,6 +694,9 @@ export function createTasksMiddleware(options = {}) {
     if (mode === 'agentTeam') {
       state.userPrompt += '\n\nExecution contract:\n- Create a plan first.\n- Execute in clear phases.\n- Validate before final answer.';
     }
+
+    // CA-15: LAST, so a blocking prompt's output is the switch-off output plus a suffix.
+    applyQuestionGateDirective(state, task.mission.question_gate_enforcement);
 
     return state;
   };

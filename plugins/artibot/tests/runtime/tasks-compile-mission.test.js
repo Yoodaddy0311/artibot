@@ -31,7 +31,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+// `writeFileSync` is aliased: two pre-existing tests destructure it locally.
+import {
+  existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync as writeFile,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -606,5 +609,198 @@ describe('T-25 — no behavior change', () => {
     expect(Object.keys(withoutLedger).sort()).toEqual(Object.keys(withLedger).sort());
     expect(Object.keys(withoutLedger.mission).sort())
       .toEqual(Object.keys(withLedger.mission).sort());
+  });
+});
+
+/**
+ * CA-15 — the question-gate enforcement kill switch
+ * (`runtime.questionGate.enforce`, read by `tasks.js#readTeamGateInputs`).
+ *
+ * OFF must be byte-identical: every OFF variant below is compared as ONE JSON
+ * string against the key-absent run. ON adds `task.mission.question_gate_enforcement`
+ * on every path and, only when all four recorded conditions hold, appends one
+ * advisory directive to `userPrompt` and `question-gate=block` to messageParts.
+ *
+ * WHAT THIS CANNOT SEE: whether the model obeys the directive. It is advisory
+ * text next to the prompt — the pipeline has no halt contract — so this pins
+ * the text reaching `userPrompt`, not a question reaching the user.
+ */
+describe('CA-15 — question-gate enforcement switch', () => {
+  /** Carries a cue for all four conditions (question-gate-record.test.js). */
+  const ALL_FOUR = 'Which should we pick for the public API contract? It is a '
+    + 'product decision with no right answer, and a wrong call is costly rework.';
+  const TAG = '[artibot:question-gate required kind=product_decision at=adr_start]';
+  const TEAM = {
+    enabled: true,
+    autoApplyTriggers: { logic: 'OR', minSubtasks: 2, minFiles: 2, minComplexity: 'high' },
+  };
+  /** The mission keys that existed before CA-15, in emission order. */
+  const MISSION_KEYS_OFF = [
+    'contract', 'mode', 'signals', 'substantive', 'deferred', 'ledger', 'store', 'question_gate', 'ok',
+  ];
+
+  const tempDirs = [];
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * A temp plugin root whose config carries `runtime.questionGate` only when
+   * `questionGate` is given, so "key absent" is a real absence.
+   * @param {object} [questionGate]
+   * @returns {string}
+   */
+  function pluginRootWith(questionGate) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'artibot-ca15-plugin-'));
+    tempDirs.push(dir);
+    const cfg = questionGate === undefined ? { team: TEAM } : { team: TEAM, runtime: { questionGate } };
+    writeFile(path.join(dir, 'artibot.config.json'), JSON.stringify(cfg));
+    return dir;
+  }
+
+  /**
+   * Run the middleware in a FRESH project root and return everything it
+   * produces except the random task id.
+   * @param {{prompt?: string, pluginRoot?: string, context?: object, cwd?: boolean}} [opts]
+   * @returns {Promise<{userPrompt: string, messageParts: string[], task: object}>}
+   */
+  async function runCa15({ prompt = ALL_FOUR, pluginRoot, context, cwd = true } = {}) {
+    const root = mkdtempSync(path.join(tmpdir(), 'artibot-ca15-'));
+    tempDirs.push(root);
+    const hookData = cwd ? { session_id: SESSION, cwd: root } : { session_id: SESSION };
+    const mw = createTasksMiddleware({ now: () => NOW });
+    const result = await mw(makeState({
+      input: { prompt, hookData, ...(pluginRoot ? { pluginRoot } : {}) },
+      ...(context ? { context } : {}),
+    }));
+    const { id: _id, ...task } = result.context.tasks;
+    return { userPrompt: result.userPrompt, messageParts: result.messageParts, task };
+  }
+
+  /** @param {object} run @returns {string} the run as one comparable string */
+  const snap = (run) => JSON.stringify(run);
+
+  const SYSTEM1 = { routing: { system: 'system1', score: 0.2 }, intent: {} };
+  const PROMPTS = [ALL_FOUR, '대시보드를 만들어줘', '/implement 대시보드를 만들어줘'];
+
+  describe('OFF — byte-identical to the key-absent run', () => {
+    const OFF_VARIANTS = [
+      ['enforce:false', { enforce: false }],
+      ['an empty questionGate block', {}],
+      ["the string 'true'", { enforce: 'true' }],
+      ['the number 1', { enforce: 1 }],
+    ];
+
+    for (const prompt of PROMPTS) {
+      for (const context of [undefined, SYSTEM1]) {
+        const label = `${prompt.slice(0, 24)} / ${context ? 'system1' : 'system2'}`;
+        it.each(OFF_VARIANTS)(`${label}: %s changes nothing`, async (_name, questionGate) => {
+          const baseline = await runCa15({ prompt, context, pluginRoot: pluginRootWith() });
+          const variant = await runCa15({ prompt, context, pluginRoot: pluginRootWith(questionGate) });
+
+          expect(snap(variant)).toBe(snap(baseline));
+          expect(Object.keys(variant.task.mission)).toEqual(MISSION_KEYS_OFF);
+          expect(variant.userPrompt).not.toContain('[artibot:question-gate');
+          expect(variant.messageParts).not.toContain('question-gate=block');
+        });
+      }
+    }
+
+    it('adds nothing without a pluginRoot either (the ambient config path)', async () => {
+      const run = await runCa15();
+
+      expect(Object.keys(run.task.mission)).toEqual(MISSION_KEYS_OFF);
+      expect(run.userPrompt).not.toContain('[artibot:question-gate');
+      expect(run.messageParts).not.toContain('question-gate=block');
+    });
+  });
+
+  describe('ON — all four recorded conditions hold', () => {
+    it.each([['system2', undefined], ['system1', SYSTEM1]])(
+      'appends the directive and question-gate=block on %s, and changes nothing else',
+      async (_name, context) => {
+        const off = await runCa15({ context, pluginRoot: pluginRootWith() });
+        const on = await runCa15({ context, pluginRoot: pluginRootWith({ enforce: true }) });
+
+        expect(on.task.mission.question_gate_enforcement).toEqual({
+          enforce: true,
+          block: true,
+          kind: 'product_decision',
+          at: 'adr_start',
+          reason: 'all-conditions',
+          inputs_absent: ['interpretation'],
+        });
+        // The status stays the SAME string — tests above pin it with toBe.
+        expect(on.task.mission.question_gate).toBe('appended');
+        // Suffix only: everything OFF produced is still there, first.
+        expect(on.userPrompt.startsWith(off.userPrompt)).toBe(true);
+        expect(on.userPrompt.slice(off.userPrompt.length)).toMatch(
+          new RegExp(`^\\n\\n${TAG.replace(/[[\]]/g, '\\$&')}\\n\\S`),
+        );
+        expect(on.userPrompt.split(TAG)).toHaveLength(2);
+        expect(on.messageParts).toEqual([...off.messageParts, 'question-gate=block']);
+        const { question_gate_enforcement: _e, ...mission } = on.task.mission;
+        expect(snap({ ...on.task, mission })).toBe(snap(off.task));
+      },
+    );
+
+    it('blocks from the evaluated conditions even when the ledger line is skipped', async () => {
+      // No cwd: the append skips, but the four conditions were still evaluated
+      // on this prompt. Enforcement follows the verdict, not the disk.
+      const on = await runCa15({ cwd: false, pluginRoot: pluginRootWith({ enforce: true }) });
+
+      expect(on.task.mission.question_gate).toBe('skipped:no-project-root');
+      expect(on.task.mission.question_gate_enforcement.block).toBe(true);
+      expect(on.userPrompt).toContain(TAG);
+    });
+  });
+
+  describe('ON — fewer than four conditions', () => {
+    it.each(['대시보드를 만들어줘', 'fix the typo in the README heading'])(
+      'records block:false and leaves userPrompt and messageParts untouched: %s',
+      async (prompt) => {
+        const off = await runCa15({ prompt, pluginRoot: pluginRootWith() });
+        const on = await runCa15({ prompt, pluginRoot: pluginRootWith({ enforce: true }) });
+
+        expect(on.task.mission.question_gate_enforcement).toEqual({
+          enforce: true,
+          block: false,
+          kind: null,
+          at: 'adr_start',
+          reason: 'conditions-not-met',
+          // Interpretation is absent on this path today; provenance only.
+          inputs_absent: ['interpretation'],
+        });
+        expect(on.userPrompt).toBe(off.userPrompt);
+        expect(on.messageParts).toEqual(off.messageParts);
+      },
+    );
+
+    it('records block:false with no-conditions on a compile failure', async () => {
+      const mw = createTasksMiddleware({ now: () => NOW });
+      const state = makeState({ input: { pluginRoot: pluginRootWith({ enforce: true }) } });
+      state.input.prompt = { toString() { throw new Error('boom'); } };
+      const result = await mw(state);
+      const { mission } = result.context.tasks;
+
+      expect(mission.ok).toBe(false);
+      expect(mission.question_gate).toBe('skipped:compile-failed');
+      expect(mission.question_gate_enforcement).toMatchObject({
+        enforce: true, block: false, kind: null, reason: 'no-conditions',
+      });
+      expect(result.userPrompt).not.toContain(TAG);
+      expect(result.messageParts).not.toContain('question-gate=block');
+    });
+
+    it('keeps one mission key set whether or not the ledger was written', async () => {
+      const pluginRoot = pluginRootWith({ enforce: true });
+      const withLedger = await runCa15({ prompt: '대시보드를 만들어줘', pluginRoot });
+      const withoutLedger = await runCa15({ prompt: '대시보드를 만들어줘', pluginRoot, cwd: false });
+
+      expect(Object.keys(withLedger.task.mission)).toEqual([
+        ...MISSION_KEYS_OFF.slice(0, -1), 'question_gate_enforcement', 'ok',
+      ]);
+      expect(Object.keys(withoutLedger.task.mission)).toEqual(Object.keys(withLedger.task.mission));
+    });
   });
 });

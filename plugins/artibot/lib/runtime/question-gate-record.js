@@ -23,16 +23,19 @@
  *  the I/O lives here, one layer up, where the writer is a sibling.
  *
  * ── OBSERVE CONTRACT (PRD R-03 "행동 변화 0") ────────────────────────────────
- *  This is RECORDING ONLY. It does not ask a question, does not decide whether
- *  one is asked, does not block, and does not touch stdout or the prompt. No
- *  runtime caller acts on the gate's verdict today — `evaluateQuestionGate`
- *  and `lib/intent/confidence.js` have no caller under lib/, scripts/, hooks/
- *  or bin/ (grep, 2026-09-23) — so there is no decision here for a failed
- *  record to disturb, and enforcement is a later row (CA-15, Canary).
+ *  This module is RECORDING ONLY. It does not ask a question, does not decide
+ *  whether one is asked, does not block, and does not touch stdout or the
+ *  prompt. Enforcement (CA-15) lives in the CALLER, behind the
+ *  `runtime.questionGate.enforce` kill switch (default off):
+ *  `tasks.js#recordQuestionGate` returns the {@link buildQuestionGateData}
+ *  object it recorded, and with the switch on `tasks.js` hands that same
+ *  object to `question-gate.js#decideQuestionGateEnforcement` and, when it
+ *  blocks, appends an ADVISORY directive to the prompt. Nothing about the
+ *  decision is written back here or to the ledger.
  *  A failed record must stay that way: {@link buildQuestionGateData} returns
  *  `null` instead of throwing and {@link appendQuestionGateEvent} returns a
- *  status string instead of throwing. Neither returns anything a caller
- *  should branch on beyond logging the status.
+ *  status string instead of throwing. A `null` or a failure status is only
+ *  logged; the one thing a caller branches on is a recorded data object.
  *
  * ── THE INTERPRETATION LIMITATION, RECORDED IN THE DATA ─────────────────────
  *  `evaluateConditions` lets an `interpretIntent()` output make conditions 2
@@ -57,8 +60,9 @@
  *  a pinned value is an operator override, not an observation of the prompt,
  *  and recording it under the same keys would mix the two in the measured
  *  distribution. The key is also unreachable today — no shipped config file
- *  declares `question_gate` (grep over *.json, 2026-09-23), and
- *  `recordMissionCompile` receives no config at all.
+ *  declares `question_gate` (grep over *.json, 2026-09-23). Since CA-15
+ *  `recordMissionCompile` receives ONE config-derived value, the enforce
+ *  switch boolean, and it goes to the enforcement decision, not here.
  *
  * ── NO IDEMPOTENCY KEY ──────────────────────────────────────────────────────
  *  The line carries no `idempotency_key`. The reader dedupes on
