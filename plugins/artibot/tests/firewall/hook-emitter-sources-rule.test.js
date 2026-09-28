@@ -321,7 +321,7 @@ const ROLE_SOURCED = Object.freeze({
     reason: 'The reviewer subagent produced the verdict; the SubagentStop hook '
       + 'relays it, so criterion (1) puts the record on the reviewer.',
   },
-  'lib/review/verdict-writer.js:335': {
+  'lib/review/verdict-writer.js:353': {
     event: 'review.claim_audit',
     source: 'reviewer',
     reason: 'Same relay as review.completed — the audit is the reviewer\'s claim '

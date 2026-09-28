@@ -350,6 +350,39 @@ describe('subagent-handler review-ledger writer (child process)', () => {
   });
 
   // -------------------------------------------------------------------------
+  // 4c. a long evidence_refs is truncated and RECORDED, never folded
+  // -------------------------------------------------------------------------
+
+  it('keeps an audit\'s declared keys when its evidence_refs outgrow the line', () => {
+    // 300 refs of ~60 B put the audit near 18 KB. The ledger fold used to keep
+    // the refs and drop `nature` / `subject_*` — or, this far over, reject the
+    // line outright. Now the builder keeps a prefix and says so in a marker.
+    const refs = Array.from({ length: 300 }, (_, i) => `scripts/hooks/subagent-handler.js:${i}${'w'.repeat(24)}`);
+    const text = answer({
+      audit: { subject_model: 'claude-opus-5', subject_agent_id: 'ag-c2-77', evidence_refs: refs },
+    });
+    writeTranscript({ text });
+    expect(runHook(stopPayload({ last_assistant_message: text }), home).status).toBe(0);
+
+    expect(eventsOf()).toEqual(['review.completed', 'review.claim_audit']);
+    const { data } = lineOf('review.claim_audit');
+    expect(data).toMatchObject({
+      subject_agent_type: 'tdd-guide',
+      nature: 'process',
+      subject_model: 'claude-opus-5',
+      subject_agent_id: 'ag-c2-77',
+      claims_total: 9,
+      claims_refuted: 2,
+    });
+    const marker = data.evidence_refs[data.evidence_refs.length - 1];
+    const match = /^claim-audit:evidence_refs-truncated=kept(\d+)\/total300$/.exec(marker);
+    expect(match).not.toBeNull();
+    expect(data.evidence_refs.slice(0, -1)).toEqual(refs.slice(0, Number(match[1])));
+    expect(data.evidence_refs.some((r) => r.startsWith('ledger-fold:'))).toBe(false);
+    expect(reviewLedger()).toBe('review=appended,audit=appended');
+  });
+
+  // -------------------------------------------------------------------------
   // 5. the transcript fallback
   // -------------------------------------------------------------------------
 
