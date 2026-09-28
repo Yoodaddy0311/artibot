@@ -935,9 +935,9 @@ export function stripRouterWrapper(basePrompt, originalPrompt) {
  * is UNVERIFIED (design §4.3-3), so the envelope is trimmed here — from the
  * END of everything before the first PROTECTED_BLOCK_MARKERS block. The
  * pipeline appends those after the memory block, so the memory block is cut
- * first while the directive head, the protected blocks and whatever follows
- * them (delegation contract, guardrail) stay whole. With no protected block
- * (or one that alone exceeds the cap) the cut is from the very END, as before.
+ * first; the protected blocks and whatever follows them (delegation contract,
+ * guardrail) stay whole, and the directive head too while it still fits. With
+ * no protected block (or one that alone exceeds the cap) the cut is from the END.
  *
  * @param {string[]} directives
  * @param {string} envelopeContext
