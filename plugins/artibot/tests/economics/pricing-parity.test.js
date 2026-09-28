@@ -165,6 +165,20 @@ describe('pricing parity: same input -> same tier', () => {
     expect(conflicts).toEqual([]);
   });
 
+  it('a legacy id with its own price row prices at THAT row in cache-roi and the receipt', () => {
+    // claude-opus-5 resolves to tier opus but bills at the Claude Opus 5 row,
+    // not the Opus 5.5 tier row. Both readers must agree on the row, not only
+    // on the tier — otherwise the roll-up and the ledger disagree on dollars.
+    const id = 'claude-opus-5';
+    const row = getPricing(id);
+    expect(row.id).toBe(id);
+    expect(row.input).not.toBe(getPricing('opus').input);
+    expect(_resolvePricing(id)).toEqual(row);
+    for (const [counter, column] of Object.entries(RECEIPT_COLUMN_BY_COUNTER)) {
+      expect(priceUsage({ [counter]: ONE_MTOK }, 'opus', id).total).toBe(row[column]);
+    }
+  });
+
   it('they diverge ONLY off-catalog, by design: ledger fails closed, roll-up fails open', () => {
     // A retired id. The receipt is the ledger writer: an unknown id yields no
     // identity at all rather than a plausible guess, so no ledger row can carry
@@ -232,9 +246,10 @@ describe('pricing parity: version stamp', () => {
     expect(receipts).toHaveLength(1);
     expect(receipts[0].cost.pricing_version).toBe(PRICING_VERSION);
     expect(Number.isFinite(receipts[0].cost.total)).toBe(true);
-    expect(receipts[0].cost.total).toBe(
-      priceUsage(receipts[0].usage, receipts[0].model_identity.tier).total,
-    );
+    // The fixture model is the legacy id claude-opus-5, which has its own
+    // per-id price row — so the receipt must be priced with the id, not the tier.
+    const { tier, model_id: modelId } = receipts[0].model_identity;
+    expect(receipts[0].cost.total).toBe(priceUsage(receipts[0].usage, tier, modelId).total);
   });
 
   it('priceReceipts:false stays "unresolved", never a date', async () => {
@@ -252,25 +267,26 @@ describe('pricing parity: version stamp', () => {
 });
 
 describe('pricing parity: the two cost axes are different questions', () => {
-  it('price ratio 2.0 (per-token, usage axis) and cost factor 2.6 (prediction axis) are not the same number', () => {
-    // AXIS 1 — USAGE. 2.0 is the fable/opus ratio of an already-counted token.
-    // True wherever tokens are counted after the fact: cache-roi's
-    // savedCostUsd/spentCostUsd and the receipt's cost.total. MEASURED.
-    expect(getPricing('fable').input / getPricing('opus').input).toBe(2);
+  it('price ratio 2.5 (per-token, usage axis) and cost factor 3.25 (prediction axis) are not the same number', () => {
+    // AXIS 1 — USAGE. 2.5 is the fable/opus ratio of an already-counted token
+    // ($10 / $4, official pricing 2026-09-28). True wherever tokens are
+    // counted after the fact: cache-roi's savedCostUsd/spentCostUsd and the
+    // receipt's cost.total. MEASURED.
+    expect(getPricing('fable').input / getPricing('opus').input).toBe(2.5);
 
-    // AXIS 2 — PREDICTION. 2.6 multiplies a CONTENT-SIZE estimate made BEFORE
+    // AXIS 2 — PREDICTION. 3.25 multiplies a CONTENT-SIZE estimate made BEFORE
     // tokenization, so it folds in a tokenizer coefficient on top of the price
     // ratio. True in route-scorer#predictedCost and anywhere getCostFactor is
     // used to forecast spend. It is NOT the ratio of two invoices.
-    expect(getCostFactor('fable')).toBeCloseTo(2.6, 10);
-    expect(getCostFactor('fable')).toBe(2 * getTokenizerCoeff('fable'));
+    expect(getCostFactor('fable')).toBeCloseTo(3.25, 10);
+    expect(getCostFactor('fable')).toBe(2.5 * getTokenizerCoeff('fable'));
 
     // And the tokenizer half is UNMEASURED. opus and fable are documented as
     // sharing a tokenizer, which makes the shipped fable coefficient 1.3 a
-    // carry-over — so 2.6 is an estimate pending the Wave 9
+    // carry-over — so 3.25 is an estimate pending the Wave 9
     // `tokenizer-rebaseline` measurement. This assertion is the tripwire: when
     // someone measures it and flips the flag, this line fails and forces the
-    // 2.6 comments above to be revisited in the same commit.
+    // 3.25 comments above to be revisited in the same commit.
     for (const tier of TIERS) {
       expect(MODELS[tier].tokenizerCoeffMeasured).toBe(false);
     }

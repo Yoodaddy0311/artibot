@@ -15,13 +15,13 @@
 | Tier | Claude API ID | Context | Max output | Price in/out (per MTok) | tokenizerCoeff | Thinking |
 |---|---|---|---|---|---|---|
 | `fable` ⭐ | `claude-fable-5-1` | 1M | 128K | $10 / $50 | 1.3 | always-on |
-| `opus` | `claude-opus-5-5` | 1M | 128K | $5 / $25 | 1 | adaptive |
-| `sonnet` | `claude-sonnet-5` | 1M | 64K | $3 / $15 | 1 | adaptive |
+| `opus` | `claude-opus-5-5` | 1M | 128K | $4 / $20 | 1 | always-on |
+| `sonnet` | `claude-sonnet-5` | 1M | 64K | $2 / $10 | 1 | adaptive |
 | `haiku` | `claude-haiku-4-5` | 200K | 64K | $1 / $5 | 1 | adaptive |
 
 ⭐ = most capable widely released model.
 
-`tokenizerCoeff` is tokens-per-content relative to the Opus 4.8 baseline (1.0). A coefficient > 1.0 means the same text costs more tokens — re-baseline `max_tokens`/budgets accordingly.
+`tokenizerCoeff` is tokens-per-content relative to the `opus` baseline, `claude-opus-5-5`, which is 1.0. A coefficient > 1.0 means the same text costs more tokens — re-baseline `max_tokens`/budgets accordingly.
 
 ---
 
@@ -34,11 +34,11 @@ Most capable widely released model. Behavioral constraints Artibot must honor wh
 - **No prefill:** assistant-message prefill is not supported.
 - **30-day data retention** required; not available under zero-data-retention.
 - **Task Budgets minimum 20k** tokens.
-- **Tokenizer coefficient 1.3:** same content yields ~30% more tokens than the Opus 4.8 baseline.
+- **Tokenizer coefficient 1.3:** same content yields ~30% more tokens than the `opus` baseline, `claude-opus-5-5`.
 
 Constraint keys (from `model-catalog.js`): `refusal-classifier`, `no-prefill`, `retention-30d`, `task-budget-min-20k`, `opt-in-only`.
 
-Effective cost vs Opus 4.8: **~2.6×** (price 2× × tokenizer 1.3×).
+Effective cost vs the `opus` baseline, `claude-opus-5-5`: **~3.25×** (price 2.5× × tokenizer 1.3×).
 
 ---
 
@@ -48,10 +48,10 @@ The Claude Code Agent/Task `model` enum now includes `fable` (`sonnet | opus | h
 
 **Artibot policy, however, keeps Fable as explicit opt-in (allowlist) only:**
 
-- Default routing stays **Opus** (`opus` tier, the Opus 4.8 baseline in the cost math) for every agent that is not allowlisted — the implementation, test, and marketing agents.
+- Default routing stays **Opus** (the `opus` baseline, `claude-opus-5-5`, in the cost math) for every agent that is not allowlisted — the implementation, test, and marketing agents.
 - `fable` is selectable only when an agent is explicitly allowlisted for it (`artibot.config.json#/agents/modelPolicy/fable.allowlist`, the design + review roles); it is never the default. The allowlist wins over the `high` bucket declaration — a high-bucket agent outside it still resolves to `opus`.
 - Security-class agents (denylist) must NOT route to `fable`.
-- **Cost warning:** effective spend is ~2.6× Opus 4.8 (price 2× × tokenizer 1.3×) — budget before opting in.
+- **Cost warning:** effective spend is ~3.25× the `opus` baseline, `claude-opus-5-5` (price 2.5× × tokenizer 1.3×) — budget before opting in.
 
 Tier → role aliases live in `model-catalog.js#ROLE_ALIASES` (`frontier→opus`, `deep-async→fable`, `balanced→sonnet`, `fast→haiku`).
 

@@ -361,6 +361,24 @@ function counter(usage, key) {
 }
 
 /**
+ * The catalog price row for a receipt: the model id's row when the id is a
+ * catalog id of THAT tier, the tier's row otherwise. An id of another tier, a
+ * tier/role name passed as an id, or an unknown id is ignored rather than
+ * trusted — the tier the identity resolved to stays the authority. Returns
+ * null for a missing tier (the caller turns that into an unresolved total).
+ *
+ * @param {unknown} tier - Catalog tier alias.
+ * @param {unknown} modelId - Exact catalog model id, or anything.
+ * @returns {object|null} Frozen `getPricing` row, or null.
+ */
+function resolveReceiptPricing(tier, modelId) {
+  if (typeof tier !== 'string' || tier.length === 0) return null;
+  const byId = typeof modelId === 'string' ? getPricing(modelId) : null;
+  if (byId !== null && byId.tier === tier && byId.id === modelId) return byId;
+  return getPricing(tier);
+}
+
+/**
  * Price one receipt `usage` block against the catalog, in USD.
  *
  * FORMULA (fixed here; every rate is USD per million tokens, from
@@ -396,16 +414,21 @@ function counter(usage, key) {
  * the same statement the `priceReceipts: false` opt-out makes, because an unverified rate
  * wearing a version stamp is exactly what this module refuses to emit.
  *
+ * WHICH ROW: the model id's own price row first, the tier row otherwise (see
+ * {@link resolveReceiptPricing}). One tier can carry ids with different
+ * official prices — `claude-opus-5` (legacy) and `claude-opus-5-5` are both
+ * tier `opus` — so pricing by tier alone would bill a pre-switch transcript at
+ * its successor's rate.
+ *
  * @param {object} usage - Receipt `usage` block: `fresh_input_tokens`,
  *   `cached_input_tokens`, `cache_creation_tokens`, `output_tokens`, and
  *   optionally `thinking_tokens` (ignored, see above).
  * @param {string} tier - Catalog tier alias (`haiku|sonnet|opus|fable`).
+ * @param {string} [modelId] - Exact catalog model id (`model_identity.model_id`).
  * @returns {{total: number|null, pricing_version: string}}
  */
-export function priceUsage(usage, tier) {
-  const pricing = typeof tier === 'string' && tier.length > 0
-    ? getPricing(tier)
-    : null;
+export function priceUsage(usage, tier, modelId) {
+  const pricing = resolveReceiptPricing(tier, modelId);
   if (pricing?.measured !== true) {
     return { total: null, pricing_version: PRICING_VERSION_UNRESOLVED };
   }
@@ -779,7 +802,7 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
       // unpriced row is indistinguishable downstream from a free attempt.
       cost: priceReceipts === false
         ? { total: null, pricing_version: PRICING_VERSION_UNRESOLVED }
-        : priceUsage(usage, group.identity.tier),
+        : priceUsage(usage, group.identity.tier, group.identity.model_id),
     },
     reason: null,
     source,

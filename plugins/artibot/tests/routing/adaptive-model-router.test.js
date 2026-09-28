@@ -46,6 +46,45 @@ const CONFIG = Object.freeze({
   },
 });
 
+/**
+ * Pinned price port, mirroring `adaptive-router.test.js` (kept inline there
+ * and here: a shared fixture module would be a new file). The canary gate is a
+ * MECHANISM — it needs the recommendation (fable) to diverge from policy
+ * (opus) — and that divergence comes from the scorer tables AND the price
+ * table. Pinning prices here, like CONFIG pins policy, keeps a catalog re-price
+ * from turning these red (2026-09-28 did: at Opus 5.5's $4 input opus
+ * outranks fable, the divergence disappears and the seat has nowhere to move).
+ *
+ * The in/out numbers are the 2026-09-12 table the assertions were written
+ * against — FIXTURE values, not current prices (those live in
+ * `lib/core/model-catalog.js`). Ids, limits, tokenizer coefficients and the
+ * catalog version stay the real catalog's. The fable lead over opus under this
+ * table is thin (utility 0.7940 vs 0.7867, measured 2026-09-28).
+ */
+const PINNED_PRICES = Object.freeze({
+  haiku: Object.freeze({ in: 1, out: 5 }),
+  sonnet: Object.freeze({ in: 3, out: 15 }),
+  opus: Object.freeze({ in: 5, out: 25 }),
+  fable: Object.freeze({ in: 10, out: 50 }),
+});
+
+/** Real spec with the fixture in/out prices laid over it; null stays null. */
+function pinnedModel(tier) {
+  const spec = DEFAULT_CATALOG.getModel(tier);
+  const price = spec && Object.hasOwn(PINNED_PRICES, tier) ? PINNED_PRICES[tier] : null;
+  return price ? { ...spec, priceInPerMTok: price.in, priceOutPerMTok: price.out } : spec;
+}
+
+const PINNED_CATALOG = Object.freeze({
+  getModel: pinnedModel,
+  // Same formula as model-catalog.js#getCostFactor, over the pinned input price.
+  getCostFactor: (tier) => {
+    const model = pinnedModel(tier);
+    return model ? (model.priceInPerMTok / PINNED_PRICES.opus.in) * model.tokenizerCoeff : 1;
+  },
+  version: DEFAULT_CATALOG.version,
+});
+
 /** Identity a caller must supply; fixed so two receipts compare by value. */
 const EVIDENCE = Object.freeze({
   route_receipt_id: 'rr-1',
@@ -69,7 +108,7 @@ function canaryInput(over = {}) {
     actionClass: 'architecture',
     input: { text: 'design the module boundary', phase: 'build' },
     config: CONFIG,
-    catalog: DEFAULT_CATALOG,
+    catalog: PINNED_CATALOG,
     currentTier: 'opus',
     actionsSinceSwitch: 9,
     epoch: 'run-1',
@@ -179,6 +218,11 @@ describe('canary allowlist gate — unmatched is inert', () => {
   it('the baseline it compares against really does carry a divergence', () => {
     // Without this the inertness assertion above could pass on a receipt where
     // recommendation and policy agree, i.e. where a leak would be invisible.
+    // The divergence is a property of the PINNED price fixture, not of the
+    // live catalog — fail loudly if the fixture ever falls back to it.
+    expect(canaryInput().catalog).toBe(PINNED_CATALOG);
+    expect(PINNED_CATALOG.getCostFactor('fable'))
+      .not.toBeCloseTo(DEFAULT_CATALOG.getCostFactor('fable'), 10);
     const baseline = routeModel(canaryInput());
     expect(baseline.reason).toContain('divergence');
     expect(baseline.models.recommended.tier).toBe('fable');

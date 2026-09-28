@@ -78,6 +78,45 @@ const CONFIG = Object.freeze({
   },
 });
 
+/**
+ * Pinned price port, fixed for the same reason CONFIG is: the ranking these
+ * tests lean on (fable outranks opus for `architecture`) comes from the scorer
+ * tables AND the price table, and this file pins the ROUTER MECHANISM —
+ * ceiling, divergence, pin/route — not today's prices. A catalog re-price must
+ * not turn it red (2026-09-28 did: at Opus 5.5's $4 input opus outranks fable).
+ *
+ * The in/out numbers are the 2026-09-12 table the assertions were written
+ * against. They are FIXTURE values, not current prices — those live in
+ * `lib/core/model-catalog.js` and are pinned in tests/core/model-catalog.test.js.
+ * Ids, limits, tokenizer coefficients and the catalog version still come from
+ * the real catalog, so every identity in a receipt stays real. Under this
+ * table fable leads opus over {opus, fable} by a thin margin (utility 0.7940 vs
+ * 0.7867, measured 2026-09-28), so a scorer-table edit can still flip it.
+ */
+const PINNED_PRICES = Object.freeze({
+  haiku: Object.freeze({ in: 1, out: 5 }),
+  sonnet: Object.freeze({ in: 3, out: 15 }),
+  opus: Object.freeze({ in: 5, out: 25 }),
+  fable: Object.freeze({ in: 10, out: 50 }),
+});
+
+/** Real spec with the fixture in/out prices laid over it; null stays null. */
+function pinnedModel(tier) {
+  const spec = DEFAULT_CATALOG.getModel(tier);
+  const price = spec && Object.hasOwn(PINNED_PRICES, tier) ? PINNED_PRICES[tier] : null;
+  return price ? { ...spec, priceInPerMTok: price.in, priceOutPerMTok: price.out } : spec;
+}
+
+const PINNED_CATALOG = Object.freeze({
+  getModel: pinnedModel,
+  // Same formula as model-catalog.js#getCostFactor, over the pinned input price.
+  getCostFactor: (tier) => {
+    const model = pinnedModel(tier);
+    return model ? (model.priceInPerMTok / PINNED_PRICES.opus.in) * model.tokenizerCoeff : 1;
+  },
+  version: DEFAULT_CATALOG.version,
+});
+
 /** Complexity port, so `action.complexity` is filled rather than null. */
 const COMPLEXITY_PORT = {
   classifyComplexity: () => ({ score: 0.7, factors: { uncertainty: 0.4, risk: 0.2 } }),
@@ -106,7 +145,7 @@ function completeInput(over = {}) {
     input: { text: 'design the module boundary and dependency strategy', phase: 'build' },
     classifierOptions: COMPLEXITY_PORT,
     config: CONFIG,
-    catalog: DEFAULT_CATALOG,
+    catalog: PINNED_CATALOG,
     currentTier: 'opus',
     actionsSinceSwitch: 9,
     epoch: 'run-1',
@@ -201,6 +240,44 @@ describe('receipt shape', () => {
   it('returns no identity for a tier the catalog cannot name', () => {
     expect(modelIdentity('gpt-9', DEFAULT_CATALOG)).toBeNull();
     expect(modelIdentity(null, DEFAULT_CATALOG)).toBeNull();
+  });
+});
+
+describe('pinned price fixture', () => {
+  it('routes the fixture on PINNED_CATALOG, whose prices are not the live ones', () => {
+    // Tripwire for the fixture itself: if completeInput fell back to the live
+    // catalog, the ranking tests below would silently depend on today's prices
+    // again. The factor differs from the live one on purpose (2.6 vs 3.25).
+    expect(completeInput().catalog).toBe(PINNED_CATALOG);
+    expect(PINNED_CATALOG.getCostFactor('fable')).toBeCloseTo(2.6, 10);
+    expect(PINNED_CATALOG.getCostFactor('fable'))
+      .not.toBeCloseTo(DEFAULT_CATALOG.getCostFactor('fable'), 10);
+    // Identity fields stay the real catalog's.
+    expect(PINNED_CATALOG.getModel('opus').id).toBe(MODELS.opus.id);
+    expect(PINNED_CATALOG.version).toBe(DEFAULT_CATALOG.version);
+    expect(PINNED_CATALOG.getModel('gpt-9')).toBeNull();
+  });
+});
+
+describe('live prices (PRICING_VERSION 2026-09-28) — behaviour pin, not a mechanism test', () => {
+  it('recommends opus, not fable, for architecture under an [opus, fable] ceiling — if fable is revived, architecture/review recommendations go to opus; re-calibrating the fable anchor is an owner backlog item', () => {
+    // Deliberately on DEFAULT_CATALOG (the real price table), unlike every
+    // other ranking test in this file. At Opus 5.5's $4 input the fable cost
+    // factor is 3.25 (was 2.6 at $5), and over {opus, fable} the scorer ranks
+    // opus 0.7867 > fable 0.7825 (was fable 0.7940 > opus 0.7867, measured
+    // 2026-09-28). The shipped config has fable.enabled=false, so live routing
+    // is unaffected today; this pin makes the flip visible the day fable is
+    // re-enabled, instead of leaving it hidden behind the pinned fixture.
+    const input = completeInput({ actionClass: 'architecture', catalog: DEFAULT_CATALOG });
+    expect(resolveCandidateTiers(input)).toEqual(['opus', 'fable']);
+    const receipt = routeModel(input);
+    expect(receipt.models.recommended.tier).toBe('opus');
+    expect(receipt.models.selected.tier).toBe('opus');
+    expect(receipt.reason).not.toContain('divergence');
+    // The same input on the pinned fixture still diverges — the difference is
+    // the price table and nothing else.
+    expect(routeModel({ ...input, catalog: PINNED_CATALOG }).models.recommended.tier)
+      .toBe('fable');
   });
 });
 

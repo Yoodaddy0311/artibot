@@ -17,7 +17,7 @@
  */
 
 import path from 'node:path';
-import { getPricing, PRICING_VERSION } from '../../core/model-catalog.js';
+import { getPricing, PRICING_VERSION, tierForModelId } from '../../core/model-catalog.js';
 import { atomicWriteJson } from '../../core/file.js';
 import { getPluginRoot } from '../../core/platform.js';
 import { emit } from '../../core/event-bus.js';
@@ -51,14 +51,34 @@ import { emit } from '../../core/event-bus.js';
 export const UNKNOWN_FALLBACK_TIER = 'sonnet';
 
 /**
- * Resolve catalog prices for an arbitrary model string by SUBSTRING match.
+ * Strip a trailing context variant (`[1m]`) and snapshot date (`-20251001`)
+ * and lower-case, so a transcript-shaped string can hit an exact catalog id.
  *
- * Why substring, and why it stays here: the inputs are heterogeneous. The
+ * @param {string} model - Raw model string.
+ * @returns {string} Bare lower-case id candidate.
+ */
+function bareModelId(model) {
+  return model.toLowerCase().replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '');
+}
+
+/**
+ * Resolve catalog prices for an arbitrary model string: EXACT catalog id
+ * first, then SUBSTRING match on the tier name.
+ *
+ * Exact id first (2026-09-28): one tier can hold ids with different official
+ * prices — `claude-opus-5` (legacy, Claude Opus 5 row) and `claude-opus-5-5`
+ * (current, Opus 5.5 tier row) both contain `opus`. After stripping `[1m]` /
+ * a snapshot date, a string that is a catalog model id (current or legacy,
+ * `model-catalog.js#tierForModelId`) prices at that id's row via `getPricing`.
+ * Tier names and role aliases are not model ids and skip this step, so they
+ * resolve exactly as before.
+ *
+ * Why substring stays as the fallback: the inputs are heterogeneous. The
  * model string reaching this middleware comes from `resolveModel` below, whose
  * best source is `state.context.backend.selected` — that can be a tier alias
- * (`opus`), a current catalog id (`claude-opus-5`), or an older id the catalog
- * no longer lists (`claude-opus-4-8`). An exact-id lookup would drop the third
- * case onto the fallback row.
+ * (`opus`), a current catalog id (`claude-opus-5-5`), or an older id the
+ * catalog no longer lists (`claude-opus-4-8`). An exact-id lookup alone would
+ * drop the third case onto the fallback row.
  *
  * This asymmetry with `lib/economics/usage-receipt.js` is deliberate, not an
  * oversight: that module is the LEDGER writer and fails CLOSED through an
@@ -72,6 +92,8 @@ export const UNKNOWN_FALLBACK_TIER = 'sonnet';
  */
 function resolvePricing(model) {
   if (!model || typeof model !== 'string') return getPricing(UNKNOWN_FALLBACK_TIER);
+  const bare = bareModelId(model);
+  if (tierForModelId(bare) !== null) return getPricing(bare);
   const lower = model.toLowerCase();
   if (lower.includes('fable')) return getPricing('fable');
   if (lower.includes('opus')) return getPricing('opus');

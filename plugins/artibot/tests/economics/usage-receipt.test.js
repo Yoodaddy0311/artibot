@@ -106,8 +106,9 @@ describe('resolveModelIdentity', () => {
       model_id: 'claude-fable-5-1',
       version: 'claude-fable-5-1',
       // Literal on purpose: a catalog data change must show up here as a
-      // deliberate re-pin (2026-09-23: opus id → claude-opus-5-5 + legacyIds).
-      catalog_version: '2026-09-23',
+      // deliberate re-pin (2026-09-23: opus id → claude-opus-5-5 + legacyIds;
+      // 2026-09-28: opus thinkingMode → always-on).
+      catalog_version: '2026-09-28',
     });
   });
 
@@ -118,7 +119,7 @@ describe('resolveModelIdentity', () => {
       tier: 'opus',
       model_id: 'claude-opus-5-5',
       version: 'claude-opus-5-5',
-      catalog_version: '2026-09-23',
+      catalog_version: '2026-09-28',
     });
   });
 
@@ -241,7 +242,11 @@ describe('buildUsageReceipts — clean fold', () => {
     const result = await run({ [MAIN]: jsonl([assistantEntry()]) });
     const receipt = result.receipts[0];
     expect(receipt.cost).toEqual({
-      total: priceUsage(receipt.usage, receipt.model_identity.tier).total,
+      total: priceUsage(
+        receipt.usage,
+        receipt.model_identity.tier,
+        receipt.model_identity.model_id,
+      ).total,
       pricing_version: PRICING_VERSION,
     });
     expect(Number.isFinite(receipt.cost.total)).toBe(true);
@@ -475,8 +480,36 @@ describe('buildUsageReceipts — subagent files', () => {
       expect(receipt.model_identity.tier).toBe('opus');
       expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
       expect(receipt.cost.total).toBeGreaterThan(0);
-      expect(receipt.cost.total).toBe(priceUsage(receipt.usage, 'opus').total);
+      // Same tier, different price: each receipt prices at its OWN id's row.
+      expect(receipt.cost.total)
+        .toBe(priceUsage(receipt.usage, 'opus', receipt.model_identity.model_id).total);
     }
+  });
+
+  // Positive controls for the per-id price rows (D2-a, 2026-09-28). Same usage
+  // (assistantEntry defaults: 100 fresh / 900 cache read / 50 cache write /
+  // 20 out), two ids of ONE tier, two different official rows. The expected
+  // totals are written from the literal price rows, not read back from the
+  // catalog, so a receipt that fell back to the tier row would fail here.
+  it.each([
+    // official Claude Opus 5 row: 5 in / 25 out / 0.5 cache read / 6.25 5m write
+    ['claude-opus-5', (100 * 5 + 900 * 0.5 + 50 * 6.25 + 20 * 25) / 1e6],
+    // official Claude Opus 5.5 row: 4 in / 20 out / 0.2 cache read / 5 5m write
+    ['claude-opus-5-5', (100 * 4 + 900 * 0.2 + 50 * 5 + 20 * 20) / 1e6],
+  ])('prices a %s receipt at that id\'s own official row', async (model, expected) => {
+    const result = await run({ [MAIN]: jsonl([assistantEntry({ model })]) });
+    const [receipt] = result.receipts;
+    expect(receipt.model_identity.tier).toBe('opus');
+    expect(receipt.model_identity.model_id).toBe(model);
+    expect(receipt.cost.total).toBeCloseTo(expected, 12);
+    expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
+  });
+
+  it('bills the legacy opus id above the current one for the same usage', async () => {
+    const legacy = await run({ [MAIN]: jsonl([assistantEntry({ model: 'claude-opus-5' })]) });
+    const current = await run({ [MAIN]: jsonl([assistantEntry({ model: 'claude-opus-5-5' })]) });
+    expect(legacy.receipts[0].cost.total).toBeCloseTo(0.0017625, 12);
+    expect(current.receipts[0].cost.total).toBeCloseTo(0.00123, 12);
   });
 
   it('records the effort mix per run outside the receipt', async () => {
@@ -562,13 +595,30 @@ describe('priceUsage', () => {
   // Expected = input + cacheRead + cacheWrite5m + output, one MTok of each.
   // Sourced from the catalog's own table, NOT restated from a price page here:
   // a second hand-typed copy of the rates is the two-table problem again.
+  // (opus / sonnet rows follow the catalog's 2026-09-28 PRICING_VERSION.)
   it.each([
     ['fable', 10 + 0.25 + 12.5 + 50],
-    ['opus', 5 + 0.5 + 6.25 + 25],
+    ['opus', 4 + 0.2 + 5 + 20],
     ['haiku', 1 + 0.1 + 1.25 + 5],
-    ['sonnet', 3 + 0.3 + 3.75 + 15],
+    ['sonnet', 2 + 0.2 + 2.5 + 10],
   ])('prices one MTok of each counter for %s', (tier, expected) => {
     const priced = priceUsage(ONE_MTOK_EACH, tier);
+    expect(priced.total).toBeCloseTo(expected, 9);
+    expect(priced.pricing_version).toBe(PRICING_VERSION);
+  });
+
+  it.each([
+    // id with its own row (official Claude Opus 5): 5 + 0.5 + 6.25 + 25
+    ['opus', 'claude-opus-5', 5 + 0.5 + 6.25 + 25],
+    // current id: the tier row (official Opus 5.5): 4 + 0.2 + 5 + 20
+    ['opus', 'claude-opus-5-5', 4 + 0.2 + 5 + 20],
+    // unknown or absent id: the tier row, never null
+    ['opus', 'claude-opus-9', 4 + 0.2 + 5 + 20],
+    ['opus', undefined, 4 + 0.2 + 5 + 20],
+    // an id of ANOTHER tier is ignored: the tier the caller named wins
+    ['haiku', 'claude-opus-5', 1 + 0.1 + 1.25 + 5],
+  ])('prices tier %s with model id %p at the id row first, else the tier row', (tier, id, expected) => {
+    const priced = priceUsage(ONE_MTOK_EACH, tier, id);
     expect(priced.total).toBeCloseTo(expected, 9);
     expect(priced.pricing_version).toBe(PRICING_VERSION);
   });
@@ -627,8 +677,8 @@ describe('priceUsage', () => {
       },
       'opus',
     );
-    // Only the one valid counter contributes: 1 MTok output at 25/MTok.
-    expect(priced.total).toBeCloseTo(25, 9);
+    // Only the one valid counter contributes: 1 MTok output at 20/MTok.
+    expect(priced.total).toBeCloseTo(20, 9);
   });
 
   it('never throws on any input shape', () => {
@@ -671,7 +721,11 @@ describe('priceReceipts option', () => {
 
     expect(result.receipts).toHaveLength(2);
     for (const receipt of result.receipts) {
-      const expected = priceUsage(receipt.usage, receipt.model_identity.tier);
+      const expected = priceUsage(
+        receipt.usage,
+        receipt.model_identity.tier,
+        receipt.model_identity.model_id,
+      );
       expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
       expect(Number.isFinite(receipt.cost.total)).toBe(true);
       expect(receipt.cost.total).toBeGreaterThanOrEqual(0);

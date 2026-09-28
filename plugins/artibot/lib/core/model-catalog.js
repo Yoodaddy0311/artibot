@@ -66,9 +66,13 @@ export const BASELINE_TIER = 'opus';
  * 2026-09-23 bump: opus `id` moved to `claude-opus-5-5` and every tier gained
  * `legacyIds`. No price changed, so {@link PRICING_VERSION} did not move.
  *
+ * 2026-09-28 bump: opus `thinkingMode` moved from `adaptive` to `always-on`
+ * (Opus 5.5 thinking cannot be disabled). Prices changed the same day and are
+ * stamped separately by {@link PRICING_VERSION}.
+ *
  * @type {string}
  */
-export const CATALOG_VERSION = '2026-09-23';
+export const CATALOG_VERSION = '2026-09-28';
 
 /**
  * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
@@ -86,9 +90,15 @@ export const CATALOG_VERSION = '2026-09-23';
  * than no stamp, because consumers trust it. Nothing machine-enforces that
  * coupling today (see `tests/core/model-catalog-version.test.js` header).
  *
+ * 2026-09-28 bump: opus and sonnet rows moved to the Opus 5.5 / Sonnet 5
+ * official prices (read off {@link PRICING_SOURCE} that day). haiku and fable
+ * were re-read the same day and already matched, so their values did not move.
+ * The same read added the per-id row in {@link ID_PRICES} (Claude Opus 5).
+ * {@link CATALOG_VERSION} moved that day too, for a non-price edit of its own.
+ *
  * @type {string}
  */
-export const PRICING_VERSION = '2026-09-12';
+export const PRICING_VERSION = '2026-09-28';
 
 /**
  * Where the price columns came from: the official Anthropic pricing page.
@@ -111,17 +121,19 @@ export const PRICING_SOURCE =
  * mapped to its current underlying model ID and verified specs.
  *
  * **Cache prices are stored as literals, never derived.** The official page
- * footnotes that cache hits and refreshes on Claude Fable 5.1 are priced at
- * 0.025x the base input price while all other models use the standard 0.1x
- * multiplier — so a single "10% of input" rule would overcharge fable cache
- * reads by 4x. Write-price multipliers (1.25x for the 5-minute TTL, 2x for the
- * 1-hour TTL) are uniform today, but they are pinned as literals too so a
- * future per-model exception lands as a value edit, not a formula rewrite.
+ * footnotes two cache-read exceptions: Claude Fable 5.1 is priced at 0.025x
+ * the base input price, and Claude Opus 5.5 at 0.05x; the other catalog
+ * models use the standard 0.1x multiplier. A single "10% of input" rule would
+ * overcharge fable cache reads by 4x and opus cache reads by 2x. Write-price
+ * multipliers (1.25x for the 5-minute TTL, 2x for the 1-hour TTL) are uniform
+ * today, but they are pinned as literals too so a future per-model exception
+ * lands as a value edit, not a formula rewrite.
  *
  * Two measurement flags travel with the data so consumers can tell a verified
- * number from an estimate: `priceMeasured` (the five price columns, checked
- * against {@link PRICING_SOURCE} on {@link PRICING_VERSION}) and
- * `tokenizerCoeffMeasured` (see {@link getCostFactor} — currently false).
+ * number from an estimate: `priceMeasured` (true = all five price columns of
+ * that row were compared against {@link PRICING_SOURCE} on
+ * {@link PRICING_VERSION} and match it) and `tokenizerCoeffMeasured` (see
+ * {@link getCostFactor} — currently false).
  *
  * `legacyIds` lists older model ids that must still resolve to the tier, so a
  * transcript or ledger row written before an id change keeps its tier instead
@@ -169,14 +181,18 @@ export const MODELS = deepFreeze({
     constraints: [],
   },
   sonnet: {
-    // 2026-09-15 O2: id 갱신, 가격 계수는 미검증(I1).
+    // 2026-09-15 O2: id 갱신.
     id: 'claude-sonnet-5',
     legacyIds: [],
-    priceInPerMTok: 3,
-    priceOutPerMTok: 15,
-    priceCacheReadPerMTok: 0.3,
-    priceCacheWrite5mPerMTok: 3.75,
-    priceCacheWrite1hPerMTok: 6,
+    // Sonnet 5 official pricing page row, fetched 2026-09-28 KST. The page
+    // footnotes $2 / $10 as the confirmed standard price (the increase that
+    // had been scheduled for 9/1 was cancelled). Cache read is the standard
+    // 0.1x of input.
+    priceInPerMTok: 2,
+    priceOutPerMTok: 10,
+    priceCacheReadPerMTok: 0.2,
+    priceCacheWrite5mPerMTok: 2.5,
+    priceCacheWrite1hPerMTok: 4,
     priceMeasured: true,
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
@@ -191,23 +207,24 @@ export const MODELS = deepFreeze({
     // legacy id so pre-switch transcripts keep tier opus.
     id: 'claude-opus-5-5',
     legacyIds: ['claude-opus-5'],
-    // Prices below are the claude-opus-5 row, NOT Opus 5.5's. Opus 5.5 official
-    // is $4 in / $20 out, cache read $0.20 per MTok (claude-api skill cached
-    // table, 2026-06-24) — deliberately not applied here. opus is BASELINE_TIER,
-    // so moving its input price would shift every getCostFactor at once.
-    // Deferred to follow-up limb catalog-pricing-sync, together with the
-    // sonnet row (Sonnet 5 there is $2 / $10 vs this catalog's 3 / 15).
-    priceInPerMTok: 5,
-    priceOutPerMTok: 25,
-    priceCacheReadPerMTok: 0.5,
-    priceCacheWrite5mPerMTok: 6.25,
-    priceCacheWrite1hPerMTok: 10,
+    // Opus 5.5 official pricing page row, fetched 2026-09-28 KST (replaces
+    // the claude-opus-5 row 5 / 25 / 0.5 / 6.25 / 10). opus is BASELINE_TIER,
+    // so this input price is the divisor of every getCostFactor.
+    priceInPerMTok: 4,
+    priceOutPerMTok: 20,
+    // 0.05x input, NOT the standard 0.1x — official footnote.
+    priceCacheReadPerMTok: 0.2,
+    priceCacheWrite5mPerMTok: 5,
+    priceCacheWrite1hPerMTok: 8,
     priceMeasured: true,
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
     outLimit: 128_000,
-    thinkingMode: 'adaptive',
+    // Opus 5.5: thinking cannot be disabled — {type:'disabled'} and
+    // budget_tokens return 400 at every effort (claude-api skill, Migrating to
+    // Claude Opus 5.5, cached 2026-06-24).
+    thinkingMode: 'always-on',
     promptStyle: 'prescriptive',
     constraints: [],
   },
@@ -216,7 +233,8 @@ export const MODELS = deepFreeze({
     legacyIds: [],
     priceInPerMTok: 10,
     priceOutPerMTok: 50,
-    // 0.025x input, NOT the 0.1x every other tier uses — official footnote.
+    // 0.025x input, NOT the standard 0.1x (opus is the other exception, at
+    // 0.05x) — official footnote.
     priceCacheReadPerMTok: 0.25,
     priceCacheWrite5mPerMTok: 12.5,
     priceCacheWrite1hPerMTok: 20,
@@ -248,6 +266,42 @@ export const ROLE_ALIASES = deepFreeze({
   'deep-async': 'fable',
   balanced: 'sonnet',
   fast: 'haiku',
+});
+
+/**
+ * Per-MODEL-ID price rows, for a legacy id whose official price differs from
+ * the current row of the tier it resolves to. {@link getPricing} reads a row
+ * here before the tier row, so a transcript line written against an older id
+ * is billed at the price that id actually had — not at its successor's.
+ *
+ * Only PRICES live here. Which tier an id belongs to stays in
+ * `MODELS[tier].legacyIds` (the tier resolution and its "no id in two tiers"
+ * rule are untouched); every key here must be one of those legacy ids, never a
+ * current `id` (that would be a second price for the tier's own row) and never
+ * an id no tier resolves. Same five price columns and `priceMeasured` flag as
+ * {@link MODELS}, same {@link PRICING_VERSION} stamp. Both rules are pinned in
+ * `tests/core/model-catalog.test.js`.
+ *
+ * @type {Readonly<Record<string, Readonly<{
+ *   priceInPerMTok: number,
+ *   priceOutPerMTok: number,
+ *   priceCacheReadPerMTok: number,
+ *   priceCacheWrite5mPerMTok: number,
+ *   priceCacheWrite1hPerMTok: number,
+ *   priceMeasured: boolean
+ * }>>>}
+ */
+export const ID_PRICES = deepFreeze({
+  'claude-opus-5': {
+    // Official pricing page row (Claude Opus 5), fetched 2026-09-28 KST. The
+    // opus tier row moved to Opus 5.5 the same day; this id keeps its own.
+    priceInPerMTok: 5,
+    priceOutPerMTok: 25,
+    priceCacheReadPerMTok: 0.5,
+    priceCacheWrite5mPerMTok: 6.25,
+    priceCacheWrite1hPerMTok: 10,
+    priceMeasured: true,
+  },
 });
 
 /**
@@ -320,14 +374,39 @@ export function getTokenizerCoeff(tier) {
 }
 
 /**
- * Per-MTok pricing for a role or tier, in one flat shape for cost math. The
- * single lookup every price consumer should use — reading `MODELS[tier]`
- * fields directly spreads the field names across modules.
+ * Tier of an exact model id — a tier's current `id` or one of its
+ * `legacyIds`. Tier names and role aliases are NOT model ids and return null,
+ * as do near-misses: there is no prefix, qualifier or case tolerance (callers
+ * strip `[1m]` / snapshot suffixes themselves). Never throws.
  *
- * Resolves through {@link resolveRole}, so `'frontier'` and `'opus'` both
- * work. Returns null (never throws) for unknown or non-string input.
+ * @param {string} modelId - Exact model id, e.g. 'claude-opus-5'.
+ * @returns {string|null} Tier key, or null.
  *
- * @param {string} roleOrTier - A ROLE_ALIASES key or a tier key.
+ * @example
+ * tierForModelId('claude-opus-5'); // 'opus'  (legacy id)
+ * tierForModelId('opus'); // null  (a tier name, not an id)
+ */
+export function tierForModelId(modelId) {
+  if (typeof modelId !== 'string' || modelId.length === 0) return null;
+  for (const [tier, spec] of Object.entries(MODELS)) {
+    if (spec.id === modelId || spec.legacyIds.includes(modelId)) return tier;
+  }
+  return null;
+}
+
+/**
+ * Per-MTok pricing for a role, tier or model id, in one flat shape for cost
+ * math. The single lookup every price consumer should use — reading
+ * `MODELS[tier]` fields directly spreads the field names across modules.
+ *
+ * A role or tier resolves through {@link resolveRole} (`'frontier'` and
+ * `'opus'` both work) and reports the tier's current `id`, exactly as before
+ * per-id rows existed. A model id resolves through {@link tierForModelId}; it
+ * prices at its own {@link ID_PRICES} row when it has one, else at its tier's
+ * row, and `id` is the id that was asked for. Returns null (never throws) for
+ * unknown or non-string input.
+ *
+ * @param {string} key - A ROLE_ALIASES key, a tier key, or an exact model id.
  * @returns {Readonly<{
  *   tier: string, id: string, input: number, output: number,
  *   cacheRead: number, cacheWrite5m: number, cacheWrite1h: number,
@@ -335,34 +414,37 @@ export function getTokenizerCoeff(tier) {
  * }>|null} Frozen pricing record, or null if unresolvable.
  *
  * @example
- * getPricing('frontier'); // { tier: 'opus', input: 5, cacheRead: 0.5, ... }
+ * getPricing('frontier'); // { tier: 'opus', id: 'claude-opus-5-5', input: 4, cacheRead: 0.2, ... }
+ * getPricing('claude-opus-5'); // { tier: 'opus', id: 'claude-opus-5', input: 5, cacheRead: 0.5, ... }
  * getPricing('nope'); // null
  */
-export function getPricing(roleOrTier) {
-  const tier = resolveRole(roleOrTier);
+export function getPricing(key) {
+  const roleTier = resolveRole(key);
+  const tier = roleTier ?? tierForModelId(key);
   const spec = getModel(tier);
   if (!spec) return null;
+  const id = roleTier === null ? key : spec.id;
+  const row = Object.prototype.hasOwnProperty.call(ID_PRICES, id) ? ID_PRICES[id] : spec;
   return Object.freeze({
     tier,
-    id: spec.id,
-    input: spec.priceInPerMTok,
-    output: spec.priceOutPerMTok,
-    cacheRead: spec.priceCacheReadPerMTok,
-    cacheWrite5m: spec.priceCacheWrite5mPerMTok,
-    cacheWrite1h: spec.priceCacheWrite1hPerMTok,
-    measured: spec.priceMeasured,
+    id,
+    input: row.priceInPerMTok,
+    output: row.priceOutPerMTok,
+    cacheRead: row.priceCacheReadPerMTok,
+    cacheWrite5m: row.priceCacheWrite5mPerMTok,
+    cacheWrite1h: row.priceCacheWrite1hPerMTok,
+    measured: row.priceMeasured,
     version: PRICING_VERSION,
   });
 }
 
 /**
  * Effective cost factor of a tier relative to the baseline
- * `MODELS[BASELINE_TIER]` (the `opus` tier — its id is `claude-opus-5-5` since
- * 2026-09-23, but its price row is still the `claude-opus-5` one; see the
- * note on `MODELS.opus`): the input-price ratio multiplied
- * by the tokenizer coefficient (more tokens per unit of content = more spend
- * even at the same per-token price). Unknown tiers and a missing/invalid
- * baseline return 1.0.
+ * `MODELS[BASELINE_TIER]` (the `opus` tier — `claude-opus-5-5`, priced at the
+ * Opus 5.5 official row since {@link PRICING_VERSION} 2026-09-28): the
+ * input-price ratio multiplied by the tokenizer coefficient (more tokens per
+ * unit of content = more spend even at the same per-token price). Unknown
+ * tiers and a missing/invalid baseline return 1.0.
  *
  * **The factor is UNMEASURED while `tokenizerCoeffMeasured` is false on the
  * tiers involved — which is every tier today.** The price ratio half is
@@ -371,15 +453,16 @@ export function getPricing(roleOrTier) {
  * tokens, while Sonnet 4.6 and earlier use the previous one — so the baseline
  * `opus` (claude-opus-5-5) and `fable` (claude-fable-5-1) are on the SAME
  * tokenizer, which makes the shipped `fable: 1.3` relative to opus an
- * unverified carry-over and the resulting 2.6 an estimate, not a measurement.
+ * unverified carry-over and the resulting 3.25 an estimate, not a measurement.
  * Changing the coefficient (and therefore this factor) is an owner decision
  * pending a real token-count measurement; this note flags it only.
  *
  * @param {string} tier - Tier alias.
- * @returns {number} Cost factor; e.g. fable = (10/5) * 1.3 = 2.6 (estimate).
+ * @returns {number} Cost factor; e.g. fable = (10/4) * 1.3 = 3.25 (estimate).
  *
  * @example
- * getCostFactor('fable'); // 2.6
+ * getCostFactor('fable'); // 3.25
+ * getCostFactor('sonnet'); // 0.5
  * getCostFactor('opus'); // 1
  * getCostFactor('unknown'); // 1.0
  */

@@ -371,9 +371,15 @@ describe('routebench runner - shipped fixture', () => {
     const changed = [...shipped.keys()]
       .filter((k) => JSON.stringify(shipped.get(k)) !== JSON.stringify(gateOn.get(k)))
       .sort();
+    // 3 -> 2 on 2026-09-28 (catalog-pricing-sync): 'live-code-reviewer-review/B4'
+    // no longer moves. Under the gate-on copy B4 used to recommend fable for
+    // code-reviewer's `review` class; at Opus 5.5's $4 input the fable cost
+    // factor rose 2.6 -> 3.25 and the scorer now ranks opus first over
+    // {opus, fable}, so gate-on B4 answers opus - the same as the shipped
+    // closed gate. The two B2 rows are policy (resolveModel), not price, and
+    // still move. Fable-anchor re-calibration is an owner backlog item.
     expect(changed).toEqual([
       'live-code-reviewer-review/B2',
-      'live-code-reviewer-review/B4',
       'live-investigator-explore/B2',
     ]);
     for (const key of changed) {
@@ -638,7 +644,15 @@ describe('routebench runner - scoring a present fixture', () => {
 
     const scored = resolveBaseline(b4Baseline(), { agentType: 'planner', config: GATE_ON_CONFIG });
     expect(scored.selection.tier).toBe(supplied.models.recommended?.tier ?? null);
-    expect(scored.selection.tier).not.toBe(unsupplied.models.recommended?.tier ?? null);
+    // Re-pinned 2026-09-28 (catalog-pricing-sync): the TIER half no longer
+    // tells the two calls apart. Gate-on B4 for planner's supplied class used
+    // to be fable (unsupplied/default: opus); at Opus 5.5 prices (fable cost
+    // factor 2.6 -> 3.25) the scorer ranks opus first over {opus, fable}, so
+    // both calls now answer opus. The class half above (class:agent vs
+    // class:default) is what still witnesses the supply. Fable-anchor
+    // re-calibration is an owner backlog item.
+    expect(supplied.models.recommended?.tier).toBe('opus');
+    expect(scored.selection.tier).toBe(unsupplied.models.recommended?.tier ?? null);
   });
 
   it('keeps the policy ceiling above the class for B4: security-reviewer stays at its B2 tier', () => {
@@ -673,8 +687,18 @@ describe('routebench runner - scoring a present fixture', () => {
       agentType: 'code-reviewer', config: GATE_ON_CONFIG,
     });
     expect(onSecurity.selection.tier).toBe(resolveModel('security-reviewer', {}, GATE_ON_CONFIG));
-    expect(onReviewer.selection.tier).toBe(resolveModel('code-reviewer', {}, GATE_ON_CONFIG));
-    expect(onSecurity.selection.tier).not.toBe(onReviewer.selection.tier);
+    // Re-pinned 2026-09-28 (catalog-pricing-sync): B4 no longer lifts
+    // code-reviewer off the denylisted agent's tier. Its candidate set is
+    // still {opus, fable} (allowlisted, so B2 answers fable), but at Opus 5.5
+    // prices (fable cost factor 2.6 -> 3.25) the scorer ranks opus first for
+    // the `review` class, so B4 answers opus - the same tier as
+    // security-reviewer. The ceiling half of this test (security-reviewer
+    // pinned at its B2 tier) is unchanged; only the contrast with an
+    // allowlisted reviewer disappeared. Fable-anchor re-calibration is an
+    // owner backlog item.
+    expect(resolveModel('code-reviewer', {}, GATE_ON_CONFIG)).toBe('fable');
+    expect(onReviewer.selection.tier).toBe('opus');
+    expect(onReviewer.selection.tier).toBe(onSecurity.selection.tier);
   });
 
   it('shows the fable allowlist gate: B2 differs from fixed-fable for a non-allowlisted agent', async () => {

@@ -39,6 +39,19 @@ const catalog = { getModel };
 /** Inputs that clear the §30 residency barrier, so band logic is reachable. */
 const resident = { actionsSinceSwitch: 10, catalog };
 
+/**
+ * Per-TOKEN rates (per-MTok / 1e6) read off the same real catalog the port
+ * injects. The expected USD figures below are built from these, so they check
+ * the switch FORMULAS; a re-price moves them in lockstep instead of leaving a
+ * second copy of the price page here. The literal price pins live in
+ * tests/core/model-catalog.test.js (PRICING_VERSION 2026-09-28: opus 4 in /
+ * 20 out, fable 10 in / 50 out).
+ */
+const OPUS_IN = MODELS.opus.priceInPerMTok / 1e6;
+const OPUS_OUT = MODELS.opus.priceOutPerMTok / 1e6;
+const FABLE_IN = MODELS.fable.priceInPerMTok / 1e6;
+const FABLE_OUT = MODELS.fable.priceOutPerMTok / 1e6;
+
 describe('exported contract', () => {
   it('names the seven §28 cost terms exactly as route-receipt.schema.json does', () => {
     expect([...COST_TERMS]).toEqual([
@@ -93,9 +106,9 @@ describe('exported contract', () => {
 
 describe('catalog port', () => {
   it('prices per token from the injected catalog, not an import', () => {
-    // opus priceInPerMTok 5 -> 5e-6 USD/token; priceOutPerMTok 25 -> 2.5e-5.
-    expect(freshInputPrice(catalog, 'opus')).toBeCloseTo(5e-6, 12);
-    expect(outputPrice(catalog, 'opus')).toBeCloseTo(2.5e-5, 12);
+    // opus priceInPerMTok 4 -> 4e-6 USD/token; priceOutPerMTok 20 -> 2e-5.
+    expect(freshInputPrice(catalog, 'opus')).toBeCloseTo(OPUS_IN, 12);
+    expect(outputPrice(catalog, 'opus')).toBeCloseTo(OPUS_OUT, 12);
   });
 
   it('accepts a stub catalog, proving no hidden dependency on lib/core', () => {
@@ -280,8 +293,8 @@ describe('evaluateSwitch — cache loss', () => {
     const r = evaluateSwitch({
       from: 'fable', to: 'opus', contextTokens: 100000, handoffTokens: 0, ...resident,
     });
-    // 100000 tokens x 5e-6 USD/token (opus fresh input) = 0.5 USD.
-    expect(r.cost.cacheLoss.value).toBeCloseTo(0.5, 9);
+    // 100000 tokens x OPUS_IN (4e-6 USD/token, opus fresh input) = 0.4 USD.
+    expect(r.cost.cacheLoss.value).toBeCloseTo(100000 * OPUS_IN, 9);
     expect(r.cost.cacheLoss.measured).toBe(false);
   });
 
@@ -294,7 +307,9 @@ describe('evaluateSwitch — cache loss', () => {
       usageSource: 'transcript',
       ...resident,
     });
-    expect(r.cost.cacheLoss.value).toBeCloseTo(0.2, 9);
+    // The 40000 receipt cache-read tokens, not the 100000 context:
+    // 40000 x OPUS_IN = 0.16 USD.
+    expect(r.cost.cacheLoss.value).toBeCloseTo(40000 * OPUS_IN, 9);
     expect(r.cost.cacheLoss.measured).toBe(true);
   });
 
@@ -320,8 +335,8 @@ describe('evaluateSwitch — cache loss', () => {
       cacheCreation: { '1h': 10000, '5m': 5000 },
       ...resident,
     });
-    // 15000 x 5e-6 = 0.075 — the creation total, not the 100000 context bound.
-    expect(r.cost.cacheLoss.value).toBeCloseTo(0.075, 9);
+    // 15000 x OPUS_IN = 0.06 — the creation total, not the 100000 context bound.
+    expect(r.cost.cacheLoss.value).toBeCloseTo(15000 * OPUS_IN, 9);
     expect(r.cost.cacheLoss.measured).toBe(false);
   });
 
@@ -339,13 +354,15 @@ describe('evaluateSwitch — utility', () => {
       handoffTokens: 2000,
       ...resident,
     });
-    // serialization 2000 x 5e-5 (fable out) = 0.10
-    // rebuild      8000 x 5e-6 (opus in)   = 0.04
-    // cacheLoss   10000 x 5e-6             = 0.05
-    // handoff      2000 x 5e-6             = 0.01
-    expect(r.switchCostUsd).toBeCloseTo(0.2, 9);
+    // serialization 2000 x FABLE_OUT (5e-5, fable out) = 0.10
+    // rebuild      8000 x OPUS_IN   (4e-6, opus in)   = 0.032
+    // cacheLoss   10000 x OPUS_IN                     = 0.04
+    // handoff      2000 x OPUS_IN                     = 0.008
+    //                                          total  = 0.18
+    const expected = 2000 * FABLE_OUT + 8000 * OPUS_IN + 10000 * OPUS_IN + 2000 * OPUS_IN;
+    expect(r.switchCostUsd).toBeCloseTo(expected, 9);
     expect(r.switchBenefitUsd).toBe(0);
-    expect(r.switchUtility).toBeCloseTo(-0.2, 9);
+    expect(r.switchUtility).toBeCloseTo(-expected, 9);
   });
 
   it('excludes the two unpriced terms from the sum by name', () => {
@@ -354,8 +371,8 @@ describe('evaluateSwitch — utility', () => {
 
   it('prices the from-side at zero when there is no incumbent model', () => {
     const r = evaluateSwitch({ from: null, to: 'opus', handoffTokens: 2000, ...resident });
-    // Only the to-side input charge applies: 2000 x 5e-6 = 0.01.
-    expect(r.switchCostUsd).toBeCloseTo(0.01, 9);
+    // Only the to-side input charge applies: 2000 x OPUS_IN = 0.008.
+    expect(r.switchCostUsd).toBeCloseTo(2000 * OPUS_IN, 9);
   });
 });
 
@@ -379,8 +396,8 @@ describe('evaluateSwitch — benefit', () => {
       profile: { performance: 'balanced' },
       ...resident,
     });
-    // 200000 x (1e-5 fable - 5e-6 opus) = 1.0 USD saved.
-    expect(r.benefit.futureCost.value).toBeCloseTo(1, 9);
+    // 200000 x (FABLE_IN 1e-5 - OPUS_IN 4e-6) = 1.2 USD saved.
+    expect(r.benefit.futureCost.value).toBeCloseTo(200000 * (FABLE_IN - OPUS_IN), 9);
     expect(r.benefit.futureCost.measured).toBe(false);
   });
 
@@ -406,7 +423,7 @@ describe('evaluateSwitch — benefit', () => {
     const r = evaluateSwitch({
       from: 'fable', to: 'opus', expectedRemainingTokens: 200000, ...resident,
     });
-    expect(r.benefit.futureCost.value).toBeCloseTo(1, 9);
+    expect(r.benefit.futureCost.value).toBeCloseTo(200000 * (FABLE_IN - OPUS_IN), 9);
   });
 });
 
@@ -427,7 +444,7 @@ describe('execution-profile directives (T-26) as an injected port', () => {
       profile: { performance: 'maximum' },
       directives: PERFORMANCE_DIRECTIVES.balanced,
     });
-    expect(r.benefit.futureCost.value).toBeCloseTo(1, 9);
+    expect(r.benefit.futureCost.value).toBeCloseTo(200000 * (FABLE_IN - OPUS_IN), 9);
   });
 
   it('agrees with every directive in the T-26 table', () => {

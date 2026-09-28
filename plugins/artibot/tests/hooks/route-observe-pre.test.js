@@ -42,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { MODELS } from '../../lib/core/model-catalog.js';
 
 import { ledgerFilePath } from '../../lib/runtime/ledger.js';
+import { DEFAULT_CATALOG } from '../../lib/routing/route-scorer.js';
 import {
   AGENT_TOOL,
   buildReceipt,
@@ -556,6 +557,7 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
     routing_epoch_id: 'toolu_pre_1',
     action: { type: 'implement', phase: 'build', complexity: 0.14, uncertainty: 0, risk: 0 },
     // Re-pinned 2026-09-23 (owner decision): catalog opus id -> claude-opus-5-5, CATALOG_VERSION bumped.
+    // Re-pinned 2026-09-28: CATALOG_VERSION bumped with opus thinkingMode -> always-on.
     models: {
       current: null,
       recommended: {
@@ -564,7 +566,7 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
         tier: 'opus',
         model_id: 'claude-opus-5-5',
         version: 'claude-opus-5-5',
-        catalog_version: '2026-09-23',
+        catalog_version: '2026-09-28',
       },
       selected: {
         provider: 'anthropic',
@@ -572,7 +574,7 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
         tier: 'opus',
         model_id: 'claude-opus-5-5',
         version: 'claude-opus-5-5',
-        catalog_version: '2026-09-23',
+        catalog_version: '2026-09-28',
       },
     },
     decision: { type: 'route' },
@@ -915,11 +917,60 @@ describe('route-observe-pre — the canary value is forwarded, never interpreted
     },
   });
 
-  /** The same architect ctx, varying only the allowlist. */
+  /**
+   * Pinned price port (mirrors `tests/routing/adaptive-router.test.js`; inline
+   * because a shared fixture module would be a new file). The divergence this
+   * block needs — recommendation fable vs policy opus — comes from the scorer
+   * tables AND the price table, and at the live 2026-09-28 prices (Opus 5.5,
+   * $4 input) opus outranks fable, so the seat would have nowhere to move. The
+   * in/out numbers are the 2026-09-12 table: FIXTURE values, not current
+   * prices. Ids, limits, tokenizer coefficients and the catalog version stay
+   * the real catalog's. The live-price behaviour itself is pinned in
+   * `tests/routing/adaptive-router.test.js` ("live prices" describe).
+   */
+  const PINNED_PRICES = Object.freeze({
+    haiku: Object.freeze({ in: 1, out: 5 }),
+    sonnet: Object.freeze({ in: 3, out: 15 }),
+    opus: Object.freeze({ in: 5, out: 25 }),
+    fable: Object.freeze({ in: 10, out: 50 }),
+  });
+  const pinnedModel = (tier) => {
+    const spec = DEFAULT_CATALOG.getModel(tier);
+    const price = spec && Object.hasOwn(PINNED_PRICES, tier) ? PINNED_PRICES[tier] : null;
+    return price ? { ...spec, priceInPerMTok: price.in, priceOutPerMTok: price.out } : spec;
+  };
+  const PINNED_CATALOG = Object.freeze({
+    getModel: pinnedModel,
+    getCostFactor: (tier) => {
+      const model = pinnedModel(tier);
+      return model ? (model.priceInPerMTok / PINNED_PRICES.opus.in) * model.tokenizerCoeff : 1;
+    },
+    version: DEFAULT_CATALOG.version,
+  });
+
+  /** The same architect ctx, varying only the allowlist; priced on the pinned port. */
   const architectCtx = (actionClasses) => ({
     ...ctxWith({ ...POLICY_CONFIG, routing: { canary: { actionClasses } } }),
     agentType: 'artibot:architect',
     text: 'design the module boundary and dependency strategy',
+    catalog: PINNED_CATALOG,
+  });
+
+  it('leaves a receipt built without ctx.catalog byte-identical to one on the live catalog', () => {
+    // The only production change for the pinned port is buildReceipt forwarding
+    // `ctx.catalog`. Absent, routeModel's resolveCatalog falls back to the live
+    // DEFAULT_CATALOG — so the hook as the host runs it (no catalog key at all)
+    // must emit exactly what an explicit live catalog emits. JSON.stringify,
+    // not toEqual: key order is part of byte identity.
+    const { catalog: _pinned, ...liveCtx } = architectCtx([]);
+    expect(Object.keys(liveCtx)).not.toContain('catalog');
+    const absent = stable(buildReceipt(liveCtx));
+    const explicit = stable(buildReceipt({ ...liveCtx, catalog: DEFAULT_CATALOG }));
+    expect(JSON.stringify(absent)).toBe(JSON.stringify(explicit));
+    // And the pinned port really is different input: same ctx, other catalog,
+    // other recommendation. Without this the identity above could be vacuous.
+    expect(buildReceipt(architectCtx([])).models.recommended.tier)
+      .not.toBe(absent.models.recommended.tier);
   });
 
   it('hands the list to the key routeModel actually reads — the moved seat is the proof', () => {
