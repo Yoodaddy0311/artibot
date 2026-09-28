@@ -51,11 +51,14 @@ let seqCounter = 0;
 /**
  * A `route.bound` row in the live envelope key order (see spawn-outcome.test.js).
  *
- * @param {object} spec - agentId, session, confidence and the optional agentType / subagentType.
+ * @param {object} spec - agentId, session, confidence and the optional agentType /
+ *   subagentType / matchedOn (default 'name'; null omits the key, as a fifo bind does).
  * @returns {object} ledger line.
  */
 function bound(spec) {
-  const { agentId, session = SESS_A, confidence = 'exact', agentType, subagentType } = spec;
+  const {
+    agentId, session = SESS_A, confidence = 'exact', agentType, subagentType, matchedOn = 'name',
+  } = spec;
   seqCounter += 1;
   return {
     v: 1,
@@ -76,7 +79,7 @@ function bound(spec) {
       method: confidence === 'fifo' ? 'prompt_id+fifo' : 'prompt_id+name',
       ...(agentType === undefined ? {} : { agent_type: agentType }),
       ...(subagentType === undefined ? {} : { subagent_type: subagentType }),
-      matched_on: 'name',
+      ...(matchedOn === null ? {} : { matched_on: matchedOn }),
       recommended_model: OPUS,
       action_class: 'implement',
     },
@@ -378,11 +381,35 @@ describe('named spawns: judged on the caller subagent_type when the host agent_t
   });
 
   it('a bare host definition name matched to a qualified receipt is judged on the receipt', () => {
-    // The caller named the plugin definition explicitly; the host reported it bare.
+    // Matched on the caller's `name` (the teammate path): the receipt is this spawn's.
     const { row } = judgeNamed({
       agentId: 'n3', agentType: 'code-reviewer', subagentType: 'artibot:code-reviewer', confidence: 'name',
     });
     expect(row).toMatchObject({ judged_agent: 'artibot:code-reviewer', judged_on: 'subagent_type', verdict: 'honored' });
+  });
+
+  it('a bare host matched on subagent_type is NOT judged on the receipt (cross-bind guard)', () => {
+    // `matchReceipt` compares identities past the prefix, so a user-level
+    // `code-reviewer` spawned beside `artibot:code-reviewer` in one prompt can
+    // take the plugin spawn's receipt with confidence exact. A direct spawn of
+    // the plugin agent reports the qualified name itself, so this combination
+    // is the mis-bind, never the normal path.
+    const { row, calls } = judgeNamed({
+      agentId: 'n3b', agentType: 'code-reviewer', subagentType: 'artibot:code-reviewer', matchedOn: 'subagent_type',
+    });
+    expect(row).toMatchObject({
+      judged_agent: 'code-reviewer', judged_on: 'agent_type',
+      verdict: 'unmeasured', reason: UNMEASURED_REASONS.unqualifiedAgentType,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('a bind with no matched_on (written before that column) falls back to the host value', () => {
+    const { row, calls } = judgeNamed({
+      agentId: 'n3c', agentType: TEAMMATE, subagentType: 'artibot:doc-updater', matchedOn: null,
+    });
+    expect(row).toMatchObject({ judged_agent: TEAMMATE, judged_on: 'agent_type', reason: UNMEASURED_REASONS.unqualifiedAgentType });
+    expect(calls).toEqual([]);
   });
 
   it.each([

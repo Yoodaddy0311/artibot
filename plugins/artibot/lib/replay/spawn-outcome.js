@@ -36,6 +36,8 @@
  * `subagent_type`, the caller's Agent `subagent_type` copied verbatim off the
  * router receipt (null on binds written before the column): on a named spawn
  * `agent_type` is the teammate name, and `routing-honor.js` reads this instead.
+ * `matched_on` (`name` | `subagent_type`; null on a fifo bind, which omits it)
+ * rides beside it so that reader can tell a teammate bind from a cross-bind.
  *
  * PURITY (design section 1-8, L2). No clock, no filesystem, no randomness. The
  * events array is the injected port: the caller passes `lib/runtime/ledger.js`'s
@@ -246,6 +248,7 @@ function bindOf(e) {
     confidence: isStr(d.confidence) ? d.confidence : null,
     agent_type: isStr(d.agent_type) ? d.agent_type : null,
     subagent_type: isStr(d.subagent_type) ? d.subagent_type : null,
+    matched_on: isStr(d.matched_on) ? d.matched_on : null,
     recommended_model: isStr(d.recommended_model) ? d.recommended_model : null,
     selected_model: isStr(d.selected_model) ? d.selected_model : null,
   };
@@ -375,6 +378,7 @@ function pairOf(bind, unsorted) {
     confidence: bind.confidence,
     agent_type: bind.agent_type,
     subagent_type: bind.subagent_type,
+    matched_on: bind.matched_on,
     recommended_model: bind.recommended_model,
     selected_model: bind.selected_model,
     served_models: served,

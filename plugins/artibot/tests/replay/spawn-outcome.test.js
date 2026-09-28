@@ -598,6 +598,21 @@ describe('joinSpawnOutcomes() carries the caller subagent_type', () => {
   it('is null, not absent, when the bind carries none', () => {
     expect(pairOfId('st-3')).toHaveProperty('subagent_type', null);
   });
+
+  it('passes matched_on through beside it, null when the bind has none', () => {
+    const g = joinSpawnOutcomes([
+      bound({ agentId: 'mo-1', agentType: 'code-reviewer', subagentType: 'artibot:code-reviewer' }),
+      agentReceipt('mo-1'),
+    ]);
+    expect(g.pairs[0]).toHaveProperty('matched_on', 'name');
+    // The fixture writes `matched_on: 'name'` on every bind; strip it to get the
+    // fifo shape, where the writer omits the key.
+    const fifo = bound({ agentId: 'mo-2', confidence: 'fifo' });
+    const fifoData = { ...fifo.data };
+    delete fifoData.matched_on;
+    const h = joinSpawnOutcomes([{ ...fifo, data: fifoData }, agentReceipt('mo-2')]);
+    expect(h.pairs[0]).toHaveProperty('matched_on', null);
+  });
 });
 
 describe('joinSpawnOutcomes() cost, usage and latency', () => {

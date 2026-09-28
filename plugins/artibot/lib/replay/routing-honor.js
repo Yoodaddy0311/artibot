@@ -7,8 +7,10 @@
  * per spawn whose `route.bound` line joined its `usage.receipt` -- and asks two
  * injected ports per pair:
  *
- *   resolve(agentType)          -> { model, source, reason } | null
- *     the expected tier, counting the user's overrides. The CLI passes a
+ *   resolve(judgedAgent)        -> { model, source, reason } | null
+ *     the expected tier of the row's `judged_agent` (the host `agent_type`,
+ *     or on a named spawn the caller's `subagent_type`; CANNOT SEE #2),
+ *     counting the user's overrides. The CLI passes a
  *     closure over `lib/core/model-overrides.js#resolveEffectiveModel`.
  *   tierOfServedModel(modelId)  -> tier | null
  *     the served id's tier. The CLI builds it from the catalog; the canonical
@@ -45,8 +47,9 @@
  * `measured_by_confidence` so a reader can recompute without them.
  * THE ONE PLACE IT IS A GATE: the named-spawn fallback (CANNOT SEE #2) reads
  * `subagent_type`, which IS a router-receipt column, so there a fifo bind
- * would put the guess into the verdict. That fallback needs `exact` or `name`;
- * a row judged through it says `judged_on: 'subagent_type'`.
+ * would put the guess into the verdict. That fallback needs `exact` or `name`
+ * AND `matched_on: 'name'`; a row judged through it says
+ * `judged_on: 'subagent_type'`.
  *
  * DENOMINATORS -- `binds` is the primary one. A bind is a spawn the router saw,
  * and the question is "of the spawns, how many can we judge". `joined / binds`
@@ -77,16 +80,18 @@
  *     TEAMMATE NAME, not the definition (`subagent-handler.js#bindRoute`
  *     comment). The definition is the caller's Agent `subagent_type`, which
  *     the bind copies verbatim off the router receipt as `subagent_type`. When
- *     the host value has no colon and the bind matched on identity
- *     (`exact`/`name`, never `fifo`), that column names the agent, as written
- *     (`judged_agent`, `judged_on`). A teammate name left in place is
- *     `unqualified-agent-type`, and so is a bare definition name
- *     (`code-reviewer`) in either column: the host qualifies
+ *     the host value has no colon and the bind matched on the caller's NAME
+ *     (`matched_on: 'name'`, confidence `exact`/`name`, never `fifo`), that
+ *     column names the agent, as written (`judged_agent`, `judged_on`). A bind
+ *     that matched on `subagent_type` keeps the host value: the identity match
+ *     drops the prefix, so there the receipt may be a sibling spawn's. A
+ *     teammate name left in place is `unqualified-agent-type`, and so is a
+ *     bare name that ends up judged, from either column: the host qualifies
  *     plugin agents (`artibot:doc-updater`), so a bare name is a built-in
  *     (`Explore`), a user-level agent file, or a teammate -- and a user-level
  *     copy may carry a different `model:` than the plugin's. Treating it as
- *     `artibot:` would be a guess. Binds written before the column existed
- *     carry no `subagent_type` and stay unqualified. Measured on the shared
+ *     `artibot:` would be a guess. A bind with no `subagent_type` (written
+ *     before the column) or no `matched_on` keeps the host value. Measured on the shared
  *     ledger at 2026-09-23T07:40Z: 1 of 190 joined pairs had a qualified
  *     `agent_type`.
  *  3. SPAWNS THAT NEVER BOUND. `bindRoute` writes `route.bound` only when a
@@ -196,21 +201,29 @@ function isQualified(value) {
  * The name the verdict is about, and which pair column it came from:
  *   1. a qualified host `agent_type` -- the host observed the definition;
  *   2. else, when the bind matched on identity ({@link DETERMINISTIC_CONFIDENCE})
- *      and the host value has no colon (a teammate name, a built-in, a bare
- *      name), the caller's `subagent_type`, as written -- a bare or built-in
- *      value then fails the qualification check like any other;
+ *      BY THE CALLER'S NAME (`matched_on === 'name'`, the teammate path) and
+ *      the host value has no colon (a teammate name, a built-in, a bare name),
+ *      the caller's `subagent_type`, as written -- a bare or built-in value
+ *      then fails the qualification check like any other;
  *   3. else the host value. A foreign-prefixed host value (`x:y`) is never
- *      replaced: the host said which plugin's agent ran.
+ *      replaced: the host said which plugin's agent ran. Nor is a bind that
+ *      matched on `subagent_type`: identity matching drops the prefix, so a
+ *      user-level `code-reviewer` can take an `artibot:code-reviewer` receipt
+ *      from the same prompt, while a direct spawn of the plugin agent reports
+ *      the qualified name itself and never reaches this branch.
  * See the module header, CANNOT SEE #2.
  *
- * @param {object} pair - `agent_type`, `subagent_type`, `confidence` are read.
+ * @param {object} pair - `agent_type`, `subagent_type`, `confidence`, `matched_on` are read.
  * @returns {{name: string|null, on: string|null}}
  */
 function judgedAgent(pair) {
-  const { agent_type: agentType, subagent_type: callerType, confidence } = pair;
+  const {
+    agent_type: agentType, subagent_type: callerType, confidence, matched_on: matchedOn,
+  } = pair;
   if (isQualified(agentType)) return { name: agentType, on: 'agent_type' };
   const hostHasPlugin = isStr(agentType) && agentType.includes(':');
-  if (!hostHasPlugin && isStr(callerType) && DETERMINISTIC_CONFIDENCE.includes(confidence)) {
+  const byCallerName = matchedOn === 'name' && DETERMINISTIC_CONFIDENCE.includes(confidence);
+  if (!hostHasPlugin && isStr(callerType) && byCallerName) {
     return { name: callerType, on: 'subagent_type' };
   }
   return isStr(agentType) ? { name: agentType, on: 'agent_type' } : { name: null, on: null };
@@ -372,7 +385,7 @@ function tally(rows) {
  *
  * @param {object} fold - the return value of `joinSpawnOutcomes(events)`; read
  *   fields: `binds`, `unjoined_receipts`, `pairs[]` (`agent_id`, `session_id`,
- *   `agent_type`, `subagent_type`, `confidence`, `served_models`).
+ *   `agent_type`, `subagent_type`, `matched_on`, `confidence`, `served_models`).
  * @param {{resolve: Function, tierOfServedModel: Function, roster: Iterable<string>}} ports
  * @returns {object} `{ denominators, rates, verdicts, unmeasured_by_reason,
  *   by_expected_source, measured_by_confidence, unhonored_by_transition, rows }`.
