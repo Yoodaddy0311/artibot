@@ -9,9 +9,11 @@
  * imports. Docs (`scripts/gen-model-catalog-docs.js`) and any cost/budget math
  * derive from here so the numbers live in exactly one place.
  *
- * Price readers (no second price table may exist anywhere else):
+ * Price readers (no second table of CURRENT prices may exist anywhere else):
  *   - `lib/runtime/middleware/cache-roi.js` — cache read/write break-even math
  *   - `lib/economics/usage-receipt.js` — per-call cost stamped onto receipts
+ *   - `lib/core/pricing-history.js` — rows of PAST {@link PRICING_VERSION}
+ *     stamps, frozen from git; its current row is read from here
  * Routing readers (specs + cost factor, not the cache columns):
  *   - `lib/routing/route-scorer.js`
  *   - `lib/routing/route-hysteresis.js`
@@ -89,8 +91,10 @@ export const CATALOG_VERSION = '2026-09-28';
  * Date-shaped (`YYYY-MM-DD`), not semver — it answers "when were the numbers
  * last verified", which is the question a replayed cost record actually asks.
  * **Bump it in the same commit as any price change.** A stale stamp is worse
- * than no stamp, because consumers trust it. Nothing machine-enforces that
- * coupling today (see `tests/core/model-catalog-version.test.js` header).
+ * than no stamp, because consumers trust it. `tests/core/pricing-history.test.js`
+ * enforces the coupling: a bump without a `lib/core/pricing-history.js` entry,
+ * or a price edit that keeps the stamp, goes red there (limits in that file's
+ * header).
  *
  * 2026-09-28 bump: opus and sonnet rows moved to the Opus 5.5 / Sonnet 5
  * official prices (read off {@link PRICING_SOURCE} that day). haiku and fable
