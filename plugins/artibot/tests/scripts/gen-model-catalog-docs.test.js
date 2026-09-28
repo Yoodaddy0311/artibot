@@ -56,6 +56,15 @@ describe('gen-model-catalog-docs', () => {
       expect(lines.length).toBe(2 + catalog.listTiers().length);
     });
 
+    it('renders each tier row with its catalog thinkingMode (opus is always-on since 2026-09-28)', () => {
+      const lines = specTable(catalog);
+      for (const tier of catalog.listTiers()) {
+        const row = lines.find((l) => l.startsWith(`| \`${tier}\``));
+        expect(row).toMatch(new RegExp(`\\| ${catalog.getModel(tier).thinkingMode} \\|$`));
+      }
+      expect(lines.find((l) => l.startsWith('| `opus`'))).toMatch(/\| always-on \|$/);
+    });
+
     it('includes every tier id from the catalog', () => {
       const body = specTable(catalog).join('\n');
       for (const tier of catalog.listTiers()) {
@@ -85,9 +94,35 @@ describe('gen-model-catalog-docs', () => {
       expect(doc).toContain(`~${catalog.getCostFactor('fable')}×`);
     });
 
+    it('every "price × tokenizer" breakdown multiplies back to getCostFactor(fable)', () => {
+      // The headline factor above was catalog-derived while its breakdown was
+      // typed by hand ("price 2×"), so after the 2026-09-28 re-price the doc
+      // read "~3.25× (price 2× × tokenizer 1.3×)" — a sum that does not add
+      // up. Pin the breakdown to the same catalog numbers as the headline.
+      const baseline = catalog.getModel(catalog.BASELINE_TIER);
+      const fable = catalog.getModel('fable');
+      const parts = [...doc.matchAll(/price ([\d.]+)× × tokenizer ([\d.]+)×/g)];
+      expect(parts.length).toBe(2); // fable section + routing cost warning
+      for (const [, price, tokenizer] of parts) {
+        expect(Number(price)).toBe(fable.priceInPerMTok / baseline.priceInPerMTok);
+        expect(Number(tokenizer)).toBe(fable.tokenizerCoeff);
+        expect(Number(price) * Number(tokenizer))
+          .toBeCloseTo(catalog.getCostFactor('fable'), 10);
+      }
+    });
+
+    it('names the baseline from the catalog, never a retired model name', () => {
+      const id = catalog.getModel(catalog.BASELINE_TIER).id;
+      expect(doc).toContain(`the \`${catalog.BASELINE_TIER}\` baseline, \`${id}\``);
+      expect(doc).not.toContain('Opus 4.8');
+      // The label is set off by commas, not a parenthesis, so it never nests
+      // inside the parentheses the prose already opens around it.
+      expect(doc).not.toContain(`baseline (\`${id}\`)`);
+    });
+
     it('states the routing policy: fable is opt-in, default stays opus', () => {
       expect(doc).toContain('opt-in');
-      expect(doc).toContain('Opus 4.8');
+      expect(doc).toContain('Default routing stays **Opus**');
       expect(doc).toContain('deep-async→fable');
     });
 

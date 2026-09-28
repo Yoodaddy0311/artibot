@@ -45,6 +45,11 @@ describe('CATALOG_VERSION', () => {
     expect(parsed.toISOString().slice(0, 10)).toBe(CATALOG_VERSION);
   });
 
+  it('2026-09-28 비가격 변경(opus thinkingMode always-on)을 도장으로 남긴다', () => {
+    // 리터럴 핀: MODELS 의 비가격 값을 바꾸면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
+    expect(CATALOG_VERSION).toBe('2026-09-28');
+  });
+
   it('카탈로그가 비어 있지 않다 (버전이 도장 찍을 대상이 실재하는 분모)', () => {
     // 버전만 있고 MODELS 가 비면 도장은 아무것도 증명하지 않는다.
     expect(Object.keys(MODELS).length).toBeGreaterThanOrEqual(4);
@@ -84,6 +89,12 @@ describe('PRICING_VERSION', () => {
     const parsed = new Date(`${PRICING_VERSION}T00:00:00Z`);
     expect(Number.isNaN(parsed.getTime())).toBe(false);
     expect(parsed.toISOString().slice(0, 10)).toBe(PRICING_VERSION);
+  });
+
+  it('2026-09-28 공식표 대조(opus·sonnet 가격 갱신)를 도장으로 남긴다', () => {
+    // 리터럴 핀: 가격을 다시 대조하면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
+    // 날짜만 바꾸고 값은 안 본 커밋을 막지는 못한다 — 위 "못 보는 것" 1 참고.
+    expect(PRICING_VERSION).toBe('2026-09-28');
   });
 
   it('도장 찍을 가격 열이 실재한다 (분모)', () => {

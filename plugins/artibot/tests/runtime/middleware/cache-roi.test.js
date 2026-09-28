@@ -94,12 +94,39 @@ describe('cache-roi pricing source', () => {
 // ---------------------------------------------------------------------------
 
 describe('_resolvePricing', () => {
-  it('matches fable / opus / sonnet / haiku by substring', () => {
+  it('matches fable / opus / sonnet / haiku by substring when no exact id matches', () => {
     expect(_resolvePricing('claude-fable-5')).toEqual(getPricing('fable'));
-    // claude-opus-5 is the shipped `opus` tier ID (model-catalog.js#MODELS).
-    expect(_resolvePricing('claude-opus-5')).toEqual(getPricing('opus'));
+    expect(_resolvePricing('claude-opus-x')).toEqual(getPricing('opus'));
     expect(_resolvePricing('claude-sonnet-5')).toEqual(getPricing('sonnet'));
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('haiku'));
+  });
+
+  it('resolves an exact catalog id before any substring, so a legacy id keeps its own row', () => {
+    // claude-opus-5 is a LEGACY opus id with its own official price row
+    // (Claude Opus 5: 5 / 25 / 0.5 / 6.25). Substring 'opus' alone would bill
+    // it at the Opus 5.5 tier row (4 / 20 / 0.2 / 5) instead.
+    const legacy = _resolvePricing('claude-opus-5');
+    expect(legacy).toEqual(getPricing('claude-opus-5'));
+    expect(legacy.tier).toBe('opus');
+    expect(legacy.id).toBe('claude-opus-5');
+    expect(legacy.input).toBe(5);
+    expect(legacy.cacheRead).toBe(0.5);
+    // The current id is the tier row.
+    expect(_resolvePricing('claude-opus-5-5')).toEqual(getPricing('opus'));
+    expect(_resolvePricing('claude-opus-5-5').input).toBe(4);
+  });
+
+  it('strips a context variant and a snapshot date before the exact-id lookup', () => {
+    expect(_resolvePricing('claude-opus-5[1m]')).toEqual(getPricing('claude-opus-5'));
+    expect(_resolvePricing('claude-opus-5-5[1m]')).toEqual(getPricing('opus'));
+    expect(_resolvePricing('CLAUDE-OPUS-5')).toEqual(getPricing('claude-opus-5'));
+  });
+
+  it('never exact-matches a role alias: it keeps the old unknown -> sonnet fallback', () => {
+    // 'frontier' contains no tier substring, so it priced as sonnet before the
+    // exact-id step existed; the exact step accepts model ids only.
+    expect(_resolvePricing('frontier')).toEqual(getPricing('sonnet'));
+    expect(_resolvePricing('opus')).toEqual(getPricing('opus'));
   });
 
   it('resolves older IDs the catalog does not list, e.g. claude-opus-4-8', () => {
@@ -110,15 +137,18 @@ describe('_resolvePricing', () => {
     expect(_resolvePricing('claude-opus-4-7').tier).toBe('opus');
   });
 
-  it('prices fable input at 2x opus and fable cache read at 0.5x opus (0.025x rule)', () => {
+  it('prices fable input at 2.5x opus and fable cache read at only 1.25x opus (0.025x vs 0.05x rules)', () => {
     const fable = getPricing('fable');
     const opus = getPricing('opus');
-    expect(fable.input).toBe(opus.input * 2);
-    expect(fable.output).toBe(opus.output * 2);
-    // Official fable cache read is 0.025x input (0.25), not 10% (1.00), so it
-    // lands BELOW opus cache read even though fable input is twice as costly.
-    expect(fable.cacheRead).toBeCloseTo(opus.cacheRead * 0.5, 10);
+    expect(fable.input).toBe(opus.input * 2.5);
+    expect(fable.output).toBe(opus.output * 2.5);
+    // Both cache reads are official footnote exceptions to the standard 0.1x:
+    // fable 0.025x of $10 (0.25) and opus 0.05x of $4 (0.20). So fable's cache
+    // read sits ABOVE opus's, but only 1.25x, while its input is 2.5x — the
+    // gap a single "10% of input" rule would erase (it would give 1.00 vs 0.40).
+    expect(fable.cacheRead).toBeCloseTo(opus.cacheRead * 1.25, 10);
     expect(fable.cacheRead).toBe(0.25);
+    expect(opus.cacheRead).toBe(0.2);
   });
 
   it('falls back to the sonnet row for invalid / unrecognized models', () => {
@@ -143,7 +173,7 @@ describe('_resolvePricing', () => {
       cacheWrite: sonnet.cacheWrite5m,
     });
     expect(_PRICING.unknown).toEqual(_PRICING.sonnet);
-    expect(_PRICING.opus.input).toBe(5);
+    expect(_PRICING.opus.input).toBe(4);
     expect(_PRICING.haiku.cacheWrite).toBe(1.25);
     expect(Object.isFrozen(_PRICING)).toBe(true);
   });
@@ -191,8 +221,11 @@ describe('computeCacheMetrics', () => {
   // the literal per-MTok price, so a price drift shows up as a failed assert.
   it.each([
     ['claude-fable-5-1', 'fable', 9.75, 72.75],
+    // opus / sonnet rows: PRICING_VERSION 2026-09-28 official prices.
+    ['claude-opus-5-5', 'opus', 3.8, 29.2],
+    // Legacy id, own official Claude Opus 5 row: saved 5 - 0.5, spent 5+0.5+6.25+25.
     ['claude-opus-5', 'opus', 4.5, 36.75],
-    ['claude-sonnet-5', 'sonnet', 2.7, 22.05],
+    ['claude-sonnet-5', 'sonnet', 1.8, 14.7],
     ['claude-haiku-4-5', 'haiku', 0.9, 7.35],
   ])('prices 1M tokens per bucket for %s', (model, tier, saved, spent) => {
     const m = computeCacheMetrics(ONE_M_EACH, model, nowFn);
@@ -206,7 +239,7 @@ describe('computeCacheMetrics', () => {
     const blank = computeCacheMetrics(ONE_M_EACH, '', nowFn);
     expect(blank.pricingTier).toBe('sonnet');
     expect(blank.model).toBe('unknown');
-    expect(blank.spentCostUsd).toBeCloseTo(22.05, 6);
+    expect(blank.spentCostUsd).toBeCloseTo(14.7, 6);
   });
 
   it('stamps the catalog pricing version on every metric', () => {

@@ -8,30 +8,32 @@ import {
   getModel,
   getPricing,
   getTokenizerCoeff,
+  ID_PRICES,
   listTiers,
   MODELS,
   PRICING_VERSION,
   resolveRole,
   ROLE_ALIASES,
+  tierForModelId,
 } from '../../lib/core/model-catalog.js';
 
 // Harness model enum whitelist — the tiers Claude Code Agent/Task `model` accepts.
 const ENUM_WHITELIST = ['sonnet', 'opus', 'haiku', 'fable'];
 
 /**
- * Official per-MTok price table (platform.claude.com pricing page, verified
- * 2026-09-12). Literal pins: these numbers are copied from the page, NOT
- * derived from each other, so a future "simplification" that computes cache
- * prices from a single multiplier breaks here instead of silently mispricing
- * fable (whose cache multiplier is 0.025x, not the usual 0.1x).
+ * Official per-MTok price table (platform.claude.com pricing page; haiku and
+ * fable verified 2026-09-12, opus and sonnet re-verified 2026-09-28). Literal
+ * pins: these numbers are copied from the page, NOT derived from each other,
+ * so a future "simplification" that computes cache prices from a single
+ * multiplier breaks here instead of silently mispricing fable (0.025x) or
+ * opus (0.05x), whose cache-read multipliers are not the usual 0.1x.
  */
 const PRICE_TABLE = [
   { tier: 'haiku', id: 'claude-haiku-4-5', input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
-  // 2026-09-15 O2: id 갱신, 가격 계수는 미검증(I1) — 가격 6열은 2026-09-12 검증값 그대로다.
-  { tier: 'sonnet', id: 'claude-sonnet-5', input: 3, output: 15, cacheRead: 0.3, cacheWrite5m: 3.75, cacheWrite1h: 6 },
-  // 2026-09-23: id 가 claude-opus-5-5 로 바뀌었고 가격 6열은 그대로다 — Opus 5.5 공식가는
-  // 후속 줄기 catalog-pricing-sync 몫(opus 가 BASELINE_TIER 라 모든 getCostFactor 가 움직인다).
-  { tier: 'opus', id: 'claude-opus-5-5', input: 5, output: 25, cacheRead: 0.5, cacheWrite5m: 6.25, cacheWrite1h: 10 },
+  // 2026-09-28: Sonnet 5 공식가. 2/10 이 표준가로 확정(9/1 예정 인상 취소 — 공식 각주).
+  { tier: 'sonnet', id: 'claude-sonnet-5', input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
+  // 2026-09-28: Opus 5.5 공식가. cache read 0.2 는 0.05x base input(공식 각주), 0.1x 아님.
+  { tier: 'opus', id: 'claude-opus-5-5', input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 },
   { tier: 'fable', id: 'claude-fable-5-1', input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20 },
 ];
 
@@ -62,6 +64,14 @@ describe('model-catalog', () => {
       expect(getModel('opus').id).toBe('claude-opus-5-5');
       expect(getModel('sonnet').id).toBe('claude-sonnet-5');
       expect(getModel('haiku').id).toBe('claude-haiku-4-5');
+    });
+
+    it('marks Opus 5.5 thinking as always-on (it cannot be disabled), prompt style unchanged', () => {
+      // 2026-09-28 (D3): {type:'disabled'} and budget_tokens return 400 on
+      // Opus 5.5 at every effort, so 'adaptive' overstated what a caller can do.
+      expect(getModel('opus').thinkingMode).toBe('always-on');
+      expect(getModel('opus').promptStyle).toBe('prescriptive');
+      expect(getModel('sonnet').thinkingMode).toBe('adaptive');
     });
 
     it('returns null for an unknown tier', () => {
@@ -135,28 +145,28 @@ describe('model-catalog', () => {
       expect(getCostFactor(BASELINE_TIER)).toBe(1);
     });
 
-    it('fable = (10/5) * 1.3 = 2.6', () => {
-      expect(getCostFactor('fable')).toBeCloseTo(2.6, 10);
+    it('fable = (10/4) * 1.3 = 3.25', () => {
+      expect(getCostFactor('fable')).toBeCloseTo(3.25, 10);
     });
 
-    it('sonnet = (3/5) * 1.0 = 0.6', () => {
-      expect(getCostFactor('sonnet')).toBeCloseTo(0.6, 10);
+    it('sonnet = (2/4) * 1.0 = 0.5', () => {
+      expect(getCostFactor('sonnet')).toBeCloseTo(0.5, 10);
     });
 
-    it('haiku = (1/5) * 1.0 = 0.2', () => {
-      expect(getCostFactor('haiku')).toBeCloseTo(0.2, 10);
+    it('haiku = (1/4) * 1.0 = 0.25', () => {
+      expect(getCostFactor('haiku')).toBeCloseTo(0.25, 10);
     });
 
-    it('the opus id change (claude-opus-5 → claude-opus-5-5) moves no factor', () => {
-      // The baseline is a TIER, and the opus price row was not touched, so
-      // every factor must read exactly what it read under claude-opus-5.
+    it('every factor divides by the Opus 5.5 input price (4), not the old claude-opus-5 row (5)', () => {
+      // 2026-09-28: the opus row moved to Opus 5.5 official pricing. opus is
+      // the baseline TIER, so that one edit moved every other tier's factor.
       expect(BASELINE_TIER).toBe('opus');
-      expect(getModel(BASELINE_TIER).priceInPerMTok).toBe(5);
+      expect(getModel(BASELINE_TIER).priceInPerMTok).toBe(4);
       const factors = Object.fromEntries(listTiers().map((t) => [t, getCostFactor(t)]));
-      expect(factors.haiku).toBeCloseTo(0.2, 10);
-      expect(factors.sonnet).toBeCloseTo(0.6, 10);
+      expect(factors.haiku).toBeCloseTo(0.25, 10);
+      expect(factors.sonnet).toBeCloseTo(0.5, 10);
       expect(factors.opus).toBe(1);
-      expect(factors.fable).toBeCloseTo(2.6, 10);
+      expect(factors.fable).toBeCloseTo(3.25, 10);
     });
 
     it('returns 1.0 for unknown tier / bad input', () => {
@@ -165,7 +175,7 @@ describe('model-catalog', () => {
     });
   });
 
-  describe('price table (verified against PRICING_SOURCE 2026-09-12)', () => {
+  describe('price table (verified against PRICING_SOURCE, PRICING_VERSION 2026-09-28)', () => {
     it.each(PRICE_TABLE)(
       '$tier pins all five price columns',
       ({ tier, id, input, output, cacheRead, cacheWrite5m, cacheWrite1h }) => {
@@ -195,7 +205,22 @@ describe('model-catalog', () => {
       );
     });
 
-    it.each(['haiku', 'sonnet', 'opus'])(
+    it('opus cache reads are 0.05x input, NOT the usual 0.1x', () => {
+      // Official footnote on the Opus 5.5 row: cache read $0.20 = 0.05x the
+      // $4 base input. A "fix" to the standard 0.1x would double it to 0.4.
+      const opus = getModel('opus');
+      expect(opus.priceCacheReadPerMTok).toBe(0.2);
+      expect(opus.priceCacheReadPerMTok).toBeCloseTo(
+        0.05 * opus.priceInPerMTok,
+        10,
+      );
+      expect(opus.priceCacheReadPerMTok).not.toBeCloseTo(
+        0.1 * opus.priceInPerMTok,
+        10,
+      );
+    });
+
+    it.each(['haiku', 'sonnet'])(
       '%s cache reads are the standard 0.1x of input',
       (tier) => {
         const m = getModel(tier);
@@ -228,7 +253,7 @@ describe('model-catalog', () => {
         // Not a defect to fix here: the official page says Claude 4.7+ share a
         // newer tokenizer, so fable and the opus baseline plausibly tokenize
         // alike and the shipped fable 1.3 is unverified. Flag only — changing
-        // it (and getCostFactor's 2.6) is an owner decision.
+        // it (and getCostFactor's 3.25) is an owner decision.
         expect(getModel(tier).tokenizerCoeffMeasured).toBe(false);
       },
     );
@@ -239,11 +264,11 @@ describe('model-catalog', () => {
       expect(getPricing('opus')).toEqual({
         tier: 'opus',
         id: 'claude-opus-5-5',
-        input: 5,
-        output: 25,
-        cacheRead: 0.5,
-        cacheWrite5m: 6.25,
-        cacheWrite1h: 10,
+        input: 4,
+        output: 20,
+        cacheRead: 0.2,
+        cacheWrite5m: 5,
+        cacheWrite1h: 8,
         measured: true,
         version: PRICING_VERSION,
       });
@@ -325,6 +350,77 @@ describe('model-catalog', () => {
 
     it('getPricing still names the current id, not a legacy one', () => {
       expect(getPricing('opus').id).toBe('claude-opus-5-5');
+    });
+  });
+
+  describe('per-id price rows (ID_PRICES)', () => {
+    it('prices the legacy id claude-opus-5 at the official Claude Opus 5 row', () => {
+      // Literal pin (official pricing page row, fetched 2026-09-28 KST). The
+      // opus TIER moved to Opus 5.5; this id keeps the price it was billed at.
+      expect(getPricing('claude-opus-5')).toEqual({
+        tier: 'opus',
+        id: 'claude-opus-5',
+        input: 5,
+        output: 25,
+        cacheRead: 0.5,
+        cacheWrite5m: 6.25,
+        cacheWrite1h: 10,
+        measured: true,
+        version: PRICING_VERSION,
+      });
+    });
+
+    it('prices a current id at its tier row and reports the id that was asked for', () => {
+      for (const tier of listTiers()) {
+        const { id } = getModel(tier);
+        expect(getPricing(id)).toEqual(getPricing(tier));
+      }
+      expect(getPricing('claude-opus-5-5').input).toBe(4);
+    });
+
+    it('leaves every tier and role lookup exactly as before (no id row leaks in)', () => {
+      expect(getPricing('opus').id).toBe('claude-opus-5-5');
+      expect(getPricing('opus').input).toBe(4);
+      expect(getPricing('frontier')).toEqual(getPricing('opus'));
+    });
+
+    it('keys ID_PRICES only by legacy ids, so tier resolution stays in legacyIds', () => {
+      // A row for a CURRENT id would be a second price for the tier's own id;
+      // a row for an unknown id would price something no tier resolves.
+      const legacy = listTiers().flatMap((t) => getModel(t).legacyIds);
+      for (const id of Object.keys(ID_PRICES)) {
+        expect(legacy).toContain(id);
+      }
+      expect(Object.keys(ID_PRICES)).toEqual(['claude-opus-5']);
+    });
+
+    it('is deep-frozen and every row is measured with five finite prices', () => {
+      expect(Object.isFrozen(ID_PRICES)).toBe(true);
+      for (const row of Object.values(ID_PRICES)) {
+        expect(Object.isFrozen(row)).toBe(true);
+        expect(row.priceMeasured).toBe(true);
+        for (const field of [
+          'priceInPerMTok',
+          'priceOutPerMTok',
+          'priceCacheReadPerMTok',
+          'priceCacheWrite5mPerMTok',
+          'priceCacheWrite1hPerMTok',
+        ]) {
+          expect(Number.isFinite(row[field]) && row[field] > 0).toBe(true);
+        }
+      }
+    });
+
+    it('resolves exact model ids (current or legacy) to a tier, and nothing else', () => {
+      expect(tierForModelId('claude-opus-5-5')).toBe('opus');
+      expect(tierForModelId('claude-opus-5')).toBe('opus');
+      expect(tierForModelId('claude-fable-5-1')).toBe('fable');
+      // Tier and role names are not model ids; near-misses do not prefix-match.
+      for (const bad of ['opus', 'frontier', 'claude-opus-5-6', 'claude-opus-5[1m]',
+        'toString', '', null, 42]) {
+        expect(tierForModelId(bad)).toBeNull();
+      }
+      expect(getPricing('claude-opus-5-6')).toBeNull();
     });
   });
 

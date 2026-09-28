@@ -486,7 +486,8 @@ export function receiptPhase(classified) {
  *
  * @param {{toolUseId: string, sessionId: string, missionId: string,
  *   agentType: string|null, text: string, config: object|undefined,
- *   currentTier?: string|null, actionsSinceSwitch?: number|null}} ctx
+ *   currentTier?: string|null, actionsSinceSwitch?: number|null,
+ *   catalog?: object}} ctx - `catalog` is a pinned price port for tests; absent, routeModel uses the live catalog
  * @returns {object|null} Receipt, or null when it would be structurally
  *   incomplete (the append is then skipped rather than fabricated)
  */
@@ -501,6 +502,7 @@ export function buildReceipt(ctx) {
     agentType: ctx.agentType ?? undefined,
     epoch: ctx.toolUseId,
     config: ctx.config,
+    catalog: ctx.catalog,
     canary: ctx.config?.routing?.canary,
     phase,
     input,

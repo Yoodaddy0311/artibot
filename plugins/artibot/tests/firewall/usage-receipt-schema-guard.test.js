@@ -391,20 +391,22 @@ describe('usage receipt — the fields T-16 requires the writer to be honest abo
     );
 
     // The writer's number is priceUsage's number, not a second formula.
-    const tier = receipt.model_identity.tier;
-    expect(receipt.cost.total).toBe(priceUsage(receipt.usage, tier).total);
+    // Tier AND id: an id with its own price row (claude-opus-5) prices there.
+    const { tier, model_id: modelId } = receipt.model_identity;
+    expect(receipt.cost.total).toBe(priceUsage(receipt.usage, tier, modelId).total);
 
     // And priceUsage has no thinking term: deleting the key must not move it.
     const withoutThinking = { ...receipt.usage };
     delete withoutThinking.thinking_tokens;
-    expect(priceUsage(withoutThinking, tier).total)
-      .toBe(priceUsage(receipt.usage, tier).total);
+    expect(priceUsage(withoutThinking, tier, modelId).total)
+      .toBe(priceUsage(receipt.usage, tier, modelId).total);
   });
 
   it('stamps the catalog version the identity was resolved against', async () => {
     const { receipts } = await build(FIXTURES.clean);
     // 2026-09-23: CATALOG_VERSION bumped with the opus id change (claude-opus-5-5 + legacyIds).
-    expect(receipts[0].model_identity.catalog_version).toBe('2026-09-23');
+    // 2026-09-28: bumped again with opus thinkingMode → always-on.
+    expect(receipts[0].model_identity.catalog_version).toBe('2026-09-28');
   });
 
   it('leaves accepted null, because no acceptance signal is recorded anywhere', async () => {
