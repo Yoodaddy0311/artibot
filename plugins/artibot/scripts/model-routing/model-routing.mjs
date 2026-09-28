@@ -615,7 +615,7 @@ function renderLiveText(report) {
       .filter((r) => r.verdict === 'unhonored')
       .map(
         (r) =>
-          `unhonored ${r.agent_type}: expected ${r.expected_tier} [${r.expected_source}${r.expected_gate ? `/${r.expected_gate}` : ''}] served ${r.served_tier} (${r.served_model}) · ${r.session_id}/${r.agent_id}`,
+          `unhonored ${r.agent_type} (judged ${r.judged_agent}): expected ${r.expected_tier} [${r.expected_source}${r.expected_gate ? `/${r.expected_gate}` : ''}] served ${r.served_tier} (${r.served_model}) · ${r.session_id}/${r.agent_id}`,
       ),
     ...LIVE_CAVEATS.map((c) => `caveat: ${c}`),
   ];
