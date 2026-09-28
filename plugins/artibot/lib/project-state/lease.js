@@ -232,17 +232,52 @@ export function createLease({ owner, now, ttlMs = DEFAULT_STALE_MS, token, sessi
 }
 
 /**
+ * The lifetime a lease was granted at its last grant instant.
+ *
+ * `createLease` and `renewLease` both write `heartbeat_at` at the instant they
+ * set `expires_at`, so `expires_at - heartbeat_at` is the same number after
+ * every default renewal (an explicit `ttlMs` sets a new grant, which later
+ * default renewals then keep). Measuring from `acquired_at` instead would add the time
+ * already elapsed to each renewal and grow the lease without bound.
+ *
+ * A record that cannot answer — `heartbeat_at` absent, unparseable, or not
+ * before `expires_at` — falls back to `expires_at - acquired_at`, the span
+ * this function used before the fix. That keeps an old or damaged record
+ * renewable instead of throwing: both callers that rely on this default
+ * (`state-manager.js#heartbeatWorker`, `mission/controller.js#observeController`)
+ * would otherwise fail every renewal of that record, and the renewal itself
+ * rewrites `heartbeat_at`, so the next one measures cleanly.
+ *
+ * @param {object} lease - A schema-shaped lease.
+ * @returns {number} Span in milliseconds.
+ * @throws {TypeError} When `expires_at` or `acquired_at` is unparseable.
+ */
+function grantedSpan(lease) {
+  const expiresMs = toEpoch(lease.expires_at, 'expires_at');
+  const acquiredMs = toEpoch(lease.acquired_at, 'acquired_at');
+  const beatMs = typeof lease.heartbeat_at === 'string' ? Date.parse(lease.heartbeat_at) : Number.NaN;
+  const span = expiresMs - beatMs;
+  return span > 0 ? span : expiresMs - acquiredMs;
+}
+
+/**
  * Renew a lease, moving both the heartbeat and the expiry forward.
+ *
+ * `acquired_at` is kept: it records when the claim began, not when it was
+ * last extended. Without `ttlMs` the renewed lease gets the lifetime it was
+ * granted last time (see {@link grantedSpan}), so a 24h lease renewed at any
+ * instant expires 24h after that instant — never 24h plus the time held.
  *
  * @param {object} lease - The lease to renew.
  * @param {object} params - Renewal parameters.
  * @param {Date|number} params.now - Renewal instant.
- * @param {number} [params.ttlMs] - New lifetime; defaults to the lease's own.
+ * @param {number} [params.ttlMs] - New lifetime; defaults to the span granted
+ *   at the last grant, `expires_at - heartbeat_at`.
  * @returns {object} A new lease; the input is not mutated.
  */
 export function renewLease(lease, { now, ttlMs }) {
   const nowMs = now instanceof Date ? now.getTime() : now;
-  const span = ttlMs ?? (toEpoch(lease.expires_at, 'expires_at') - toEpoch(lease.acquired_at, 'acquired_at'));
+  const span = ttlMs ?? grantedSpan(lease);
   return {
     ...lease,
     heartbeat_at: toIso(nowMs, 'now'),
