@@ -33,10 +33,11 @@ vi.mock('../../../lib/runtime/ledger.js', async (importOriginal) => {
   return { ...actual, appendLedgerEvent: vi.fn(actual.appendLedgerEvent) };
 });
 
-const { appendLedgerEvent } = await import('../../../lib/runtime/ledger.js');
+const { appendLedgerEvent, readAllEvents } = await import('../../../lib/runtime/ledger.js');
 const { resetSeq } = await import('../../../lib/runtime/event-writer.js');
 const {
   appendMissionEvent,
+  missionEventIdempotencyKey,
   missionIntentRevision,
   missionTitle,
   resolveMissionIdentity,
@@ -267,5 +268,130 @@ describe('appendMissionEvent — refusal statuses', () => {
     vi.mocked(appendLedgerEvent).mockImplementationOnce(() => { throw new Error('boom'); });
     expect(append(makeState(), created))
       .toEqual({ ok: false, status: 'error:boom', event: 'mission.created' });
+  });
+});
+
+/** A host prompt id, UUID-shaped like the live UserPromptSubmit payload's. */
+const PROMPT_ID = 'a6bf2474-77cd-4b1b-a4dc-a2d3ef6029a5';
+
+/**
+ * @param {unknown} promptId the payload's `prompt_id`
+ * @returns {object} {@link makeState} with that prompt id in the hook payload
+ */
+function makePromptState(promptId) {
+  return makeState({ hookData: { session_id: SESSION, cwd: projectRoot, prompt_id: promptId } });
+}
+
+describe('missionEventIdempotencyKey', () => {
+  const data = { title: 'ship it', intent_revision: 1 };
+  const key = (over = {}) => {
+    const a = { event: 'mission.created', mission: MISSION_ID, prompt: PROMPT_ID, data, ...over };
+    return missionEventIdempotencyKey(a.event, a.mission, a.prompt, a.data);
+  };
+
+  it('is <event>:<mission_id>:<prompt_id>:<16-hex digest of data>', () => {
+    expect(key()).toMatch(
+      new RegExp(`^mission\\.created:${MISSION_ID}:${PROMPT_ID}:[0-9a-f]{16}$`),
+    );
+  });
+
+  it('gives the same inputs the same key — no clock, pid or seq is read', () => {
+    expect(key()).toBe(key());
+    expect(key({ data: { ...data } })).toBe(key());
+  });
+
+  it.each([
+    ['event', { event: 'mission.candidate_deferred' }],
+    ['mission id', { mission: 'M-20231115-Ssessmled' }],
+    ['prompt id', { prompt: 'b9eb2211-2671-44be-8a37-cd3dda94b1d6' }],
+    ['intent revision', { data: { ...data, intent_revision: 2 } }],
+    ['title', { data: { ...data, title: 'ship it now' } }],
+  ])('gives a different %s a different key', (_label, over) => {
+    // Keyed first: a builder that returned null for the varied input would
+    // otherwise pass the inequality below.
+    expect(key(over)).toMatch(/^mission\.[a-z_]+:M-\d{8}-S[A-Za-z0-9]+:[^:]+:[0-9a-f]{16}$/);
+    expect(key(over)).not.toBe(key());
+  });
+
+  it.each([
+    ['no prompt id', { prompt: undefined }],
+    ['an empty prompt id', { prompt: '' }],
+    ['a non-string prompt id', { prompt: 42 }],
+    ['a prompt id over 128 characters', { prompt: 'p'.repeat(129) }],
+    ['no mission id', { mission: null }],
+    ['no event', { event: '' }],
+  ])('returns null on %s, so the caller omits the field', (_label, over) => {
+    expect(key(over)).toBeNull();
+  });
+
+  it('keys a prompt id of exactly 128 characters', () => {
+    expect(key({ prompt: 'p'.repeat(128) })).toMatch(/^mission\.created:/);
+  });
+});
+
+describe('appendMissionEvent — idempotency_key', () => {
+  const created = { meta: { ledgerEvent: 'mission.created' }, contract: { goal: 'ship it' } };
+  const deferred = { meta: { ledgerEvent: 'mission-candidate-deferred' }, deferred: true, signals: ['s1'] };
+
+  it.each([
+    ['mission.created', created],
+    ['mission.candidate_deferred', deferred],
+  ])('writes %s with the key built from the line it appends', (eventName, result) => {
+    expect(append(makePromptState(PROMPT_ID), result).status).toBe('appended');
+    const [line] = readLedger();
+    expect(line.event).toBe(eventName);
+    expect(line.idempotency_key)
+      .toBe(missionEventIdempotencyKey(eventName, MISSION_ID, PROMPT_ID, line.data));
+  });
+
+  it('keys a re-fired prompt identically, even at a later instant of the same UTC day', () => {
+    const state = makePromptState(PROMPT_ID);
+    appendMissionEvent(state, created, NOW, resolveMissionIdentity(state, NOW));
+    const later = NOW + 60_000;
+    appendMissionEvent(state, created, later, resolveMissionIdentity(state, later));
+    const [first, second] = readLedger();
+    expect(second.ts).not.toBe(first.ts);
+    expect(first.idempotency_key).toMatch(/^mission\.created:/);
+    expect(second.idempotency_key).toBe(first.idempotency_key);
+  });
+
+  it('keys a new prompt differently even when its text is the same', () => {
+    append(makePromptState(PROMPT_ID), created);
+    append(makePromptState('b9eb2211-2671-44be-8a37-cd3dda94b1d6'), created);
+    const [first, second] = readLedger();
+    expect(second.data).toEqual(first.data);
+    expect(second.idempotency_key).not.toBe(first.idempotency_key);
+  });
+
+  it('omits the key, never blanks it, when the payload has no prompt id', () => {
+    for (const promptId of [undefined, '', 'p'.repeat(129)]) {
+      expect(append(makePromptState(promptId), created).status).toBe('appended');
+    }
+    const lines = readLedger();
+    expect(lines).toHaveLength(3);
+    for (const line of lines) expect(line).not.toHaveProperty('idempotency_key');
+  });
+
+  it('keeps a legacy keyless line readable beside a keyed one', () => {
+    append(makeState(), deferred);
+    append(makePromptState(PROMPT_ID), created);
+    const events = readAllEvents(projectRoot, { session_id: SESSION });
+    expect(events.map((e) => [e.event, e.mission_id, 'idempotency_key' in e])).toEqual([
+      ['mission.candidate_deferred', MISSION_ID, false],
+      ['mission.created', MISSION_ID, true],
+    ]);
+  });
+
+  it('keeps a worst-case keyed line under the 4 KB cap without folding it', () => {
+    const state = makeState({
+      prompt: '가'.repeat(400),
+      hookData: { session_id: SESSION, cwd: projectRoot, prompt_id: 'p'.repeat(128) },
+    });
+    append(state, { ...deferred, signals: Array.from({ length: 30 }, (_, i) => `signal-${i}`) });
+    const raw = readFileSync(ledgerPath(), 'utf-8').split('\n')[0];
+    expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(4096);
+    const line = JSON.parse(raw);
+    expect(line.idempotency_key).toMatch(/^mission\.candidate_deferred:/);
+    expect(line.data).not.toHaveProperty('evidence_refs');
   });
 });

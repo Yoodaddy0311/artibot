@@ -24,6 +24,7 @@
  * @module lib/runtime/middleware/mission-ledger
  */
 
+import { createHash } from 'node:crypto';
 import { appendLedgerEvent } from '../ledger.js';
 import { sessionFallbackMissionId } from '../event-writer.js';
 
@@ -59,6 +60,17 @@ const MISSION_TITLE_MAX = 120;
 
 /** Cap on recorded signals, so a long signal list cannot crowd the same line. */
 const MISSION_SIGNALS_MAX = 20;
+
+/**
+ * Longest host `prompt_id` a key is built from — the bound
+ * `lib/observability/decision-events.js#MAX_PROMPT_ID_LENGTH` applies to the
+ * same payload field. A longer one gets no key rather than a line pushed
+ * toward the 4 KB cap by an id nobody bounded.
+ */
+const PROMPT_ID_MAX = 128;
+
+/** Hex characters of the `data` digest in a mission event key. */
+const DATA_DIGEST_CHARS = 16;
 
 /**
  * The project root the ledger is written under.
@@ -215,6 +227,45 @@ function buildMissionLedgerData(eventName, result, prompt) {
 }
 
 /**
+ * Idempotency key for one mission lifecycle line (SH-14).
+ *
+ * Shape follows `lib/context/rehydration.js#contextCompiledIdempotencyKey`
+ * (`<event>:<scope>:<id>:<digest16>`), with the mission in the scope slot as
+ * `lib/checkpoint/checkpoint-service.js#missionCheckpointedIdempotencyKey` has
+ * it: the line's identity is the mission it opens or defers.
+ *
+ * THE ID IS THE HOST'S `prompt_id`, because nothing else on the line tells two
+ * prompts apart. `mission_id` is one per session per UTC day, and Phase 0 has
+ * no revision source, so two different prompts in one session-day would share
+ * `<event>:<mission>:r1` — two facts collapsed into one key. The prompt id is
+ * minted once per prompt, so a re-fired hook for the same prompt carries it
+ * again and a new prompt (even with the same text) does not. No clock is read:
+ * a clock-derived part would make every re-fire a new key.
+ *
+ * The digest is over the `data` actually appended, so the same prompt compiled
+ * into a different line is a different key. `JSON.stringify` is canonical
+ * enough here: {@link buildMissionLedgerData} is the one builder of `data` and
+ * writes its keys in a fixed order.
+ *
+ * @param {unknown} eventName resolved allowlist event name
+ * @param {unknown} missionId
+ * @param {unknown} promptId the hook payload's `prompt_id`
+ * @param {object} data the line's `data`
+ * @returns {string|null} `null` without a usable part — the caller then omits
+ *   the field, since the envelope refuses a blank key.
+ */
+export function missionEventIdempotencyKey(eventName, missionId, promptId, data) {
+  const parts = [eventName, missionId, promptId];
+  if (parts.some((p) => typeof p !== 'string' || p.length === 0)) return null;
+  if (promptId.length > PROMPT_ID_MAX) return null;
+  const digest = createHash('sha256')
+    .update(JSON.stringify(data ?? null))
+    .digest('hex')
+    .slice(0, DATA_DIGEST_CHARS);
+  return `${eventName}:${missionId}:${promptId}:${digest}`;
+}
+
+/**
  * Append the one mission event for this prompt.
  *
  * Never throws and never affects the middleware result: every refusal becomes
@@ -244,6 +295,11 @@ export function appendMissionEvent(state, result, nowMs, identity) {
   if (!sessionId || !missionId) return { ok: false, status: 'skipped:no-session-id' };
 
   try {
+    const data = buildMissionLedgerData(eventName, result, String(state.input?.prompt ?? ''));
+    // Omitted, never blank, without a usable prompt id: see the builder.
+    const key = missionEventIdempotencyKey(
+      eventName, missionId, state.input?.hookData?.prompt_id, data,
+    );
     const written = appendLedgerEvent(projectRoot, {
       event: eventName,
       // PASSED EXPLICITLY rather than left to the writer's fallback.
@@ -257,7 +313,8 @@ export function appendMissionEvent(state, result, nowMs, identity) {
       // inside the UserPromptSubmit hook pipeline, so 'hook' is accurate as
       // well as the only permitted value.
       source: 'hook',
-      data: buildMissionLedgerData(eventName, result, String(state.input?.prompt ?? '')),
+      ...(key === null ? {} : { idempotency_key: key }),
+      data,
     }, { now: () => new Date(nowMs) });
     return written?.ok
       ? { ok: true, status: 'appended', event: eventName }

@@ -88,6 +88,7 @@
  */
 
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { readClock } from '../core/clock.js';
 import { atomicWriteTextSync, ensureDirSync, readJsonFileSync } from '../core/file.js';
@@ -116,6 +117,46 @@ export const PROJECTION_RELATIVE = path.join('.artibot', 'state.yaml');
  * so `/doctor` can count unguarded writes rather than assume there are none.
  */
 export const CAS_SKIPPED_WARNING = 'cas:skipped';
+
+/** Hex characters of the planned-records digest in a `state.updated` key. */
+const RECORDS_HASH_CHARS = 12;
+
+/**
+ * Idempotency key for one `state.updated` line:
+ * `state.updated:<mission_id>:<state_version>:<sha256(records)[:12]>`.
+ *
+ * Mission, not session, sits beside the version, as in
+ * `lib/checkpoint/checkpoint-service.js#missionCheckpointedIdempotencyKey`:
+ * the store is shared by every session and worktree of a project, so the
+ * session is not part of the write's identity.
+ *
+ * The version alone does NOT identify the write. `withFileLock` is fail-open
+ * and CAS is opt-in, so two writers can both commit the same version, and a
+ * ledger append whose store write then fails leaves a version that the next,
+ * possibly different, write reuses. The digest of the PLANNED records (before
+ * the commit stamps `ts`) keeps two different writes apart, as the decision
+ * digest does in `lib/runtime/human-asked-record.js#humanResolvedIdempotencyKey`,
+ * while a retry of the same records reuses the key. The commit's `ts` is not key
+ * material, but a clock value inside the records (lease times) is: a later retry gets a new key.
+ *
+ * The writer never refuses a repeated key (`event-writer.js` only checks that
+ * the key is a non-empty string), so a retry cannot be turned into a ledger
+ * refusal that abandons its store write.
+ *
+ * @param {unknown} missionId - Mission the write belongs to.
+ * @param {unknown} stateVersion - The version this write commits.
+ * @param {unknown} records - The planned store records, unstamped.
+ * @returns {string|null} `null` when any part is unusable — the caller then
+ *   omits the field, since the envelope refuses a blank key.
+ */
+export function stateUpdatedIdempotencyKey(missionId, stateVersion, records) {
+  if (typeof missionId !== 'string' || missionId.length === 0) return null;
+  if (!Number.isInteger(stateVersion) || stateVersion < 1) return null;
+  if (!Array.isArray(records)) return null;
+  const digest = createHash('sha256').update(JSON.stringify(records)).digest('hex')
+    .slice(0, RECORDS_HASH_CHARS);
+  return `state.updated:${missionId}:${stateVersion}:${digest}`;
+}
 
 // Re-exported so a consumer of the store needs one import, not two, and so the
 // existing `resolveStoreLocation` import sites keep working. The definitions
@@ -301,7 +342,7 @@ function commitLocked(ctx, { missionId, reason, expectedVersion, plan }) {
   const errors = validateSnapshot(draft);
   if (errors.length > 0) return { ok: false, conflict: false, errors, warnings: [...warnings, ...applyWarnings] };
 
-  const ledger = emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior: snapshot, reason });
+  const ledger = emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior: snapshot, reason, records });
   if (!ledger.ok) return { ok: false, conflict: false, errors: ledger.errors, warnings };
 
   // Journal first, then the snapshot: the journal is the record, the snapshot
@@ -322,7 +363,7 @@ function commitLocked(ctx, { missionId, reason, expectedVersion, plan }) {
  * @param {object} params - Event inputs.
  * @returns {{ok: boolean, errors?: string[]}} Whether the ledger accepted the event.
  */
-function emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior, reason }) {
+function emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior, reason, records }) {
   // A removed mission has left active_missions, so its status is read from
   // the pre-write snapshot. Defaulting to 'failed' would have logged an
   // archived, completed mission as a failure — the event would be a lie about
@@ -330,12 +371,15 @@ function emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior, reaso
   const status = draft.active_missions[missionId]?.status
     ?? prior.active_missions[missionId]?.status
     ?? 'queued';
+  // Omitted, never blank, when the key material is unusable: see the builder.
+  const key = stateUpdatedIdempotencyKey(missionId, nextVersion, records);
   const envelope = {
     event: 'state.updated',
     mission_id: missionId,
     session_id: ctx.sessionId,
     source: ctx.source,
     ts,
+    ...(key === null ? {} : { idempotency_key: key }),
     data: { state_version: nextVersion, status, reason },
   };
   let outcome;
