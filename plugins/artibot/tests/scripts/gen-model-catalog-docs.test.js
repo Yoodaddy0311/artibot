@@ -63,6 +63,12 @@ describe('gen-model-catalog-docs', () => {
         expect(row).toMatch(new RegExp(`\\| ${catalog.getModel(tier).thinkingMode} \\|$`));
       }
       expect(lines.find((l) => l.startsWith('| `opus`'))).toMatch(/\| always-on \|$/);
+      expect(lines.find((l) => l.startsWith('| `haiku`'))).toMatch(/\| extended \|$/);
+    });
+
+    it('renders the Max output column from catalog outLimit (Sonnet 5 = 128K)', () => {
+      const sonnet = specTable(catalog).find((l) => l.startsWith('| `sonnet`'));
+      expect(sonnet.split(' | ')[3]).toBe('128K');
     });
 
     it('includes every tier id from the catalog', () => {

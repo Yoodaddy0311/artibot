@@ -20,7 +20,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { PRICING_VERSION } from '../../lib/core/model-catalog.js';
+import {
+  CATALOG_VERSION,
+  getPricing,
+  listTiers,
+  MODELS,
+  PRICING_VERSION,
+  ROLE_ALIASES,
+} from '../../lib/core/model-catalog.js';
 import {
   buildUsageReceipts,
   classifyEmptyReceipts,
@@ -173,6 +180,109 @@ describe('resolveModelIdentity', () => {
     expect(resolveModelIdentity('gpt-9')).toBeNull();
     expect(resolveModelIdentity('')).toBeNull();
     expect(resolveModelIdentity(undefined)).toBeNull();
+  });
+});
+
+describe('resolveModelIdentity — parity with the retired module-local reverse index', () => {
+  // The writer once kept its own `id -> tier` Map built from MODELS; it now
+  // asks `model-catalog.js#tierForModelId`. This oracle is that old Map plus
+  // the qualifier split it was fed, kept verbatim so the comparison survives
+  // the removal. Any divergence — case, prefix, alias or qualifier tolerance
+  // creeping into the shared resolver — shows up as a byte difference here.
+  const OLD_ID_TO_TIER = new Map(
+    Object.entries(MODELS).flatMap(([tier, spec]) =>
+      [spec.id, ...(spec.legacyIds ?? [])].map((id) => [id, tier]),
+    ),
+  );
+
+  function oldResolveModelIdentity(raw) {
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    const qualifiers = [];
+    let base = raw;
+    const variant = base.match(/\[([^\]]+)\]$/);
+    if (variant) {
+      qualifiers.push(variant[1]);
+      base = base.slice(0, variant.index);
+    }
+    const snapshot = base.match(/-(\d{8})$/);
+    if (snapshot) {
+      qualifiers.unshift(snapshot[1]);
+      base = base.slice(0, snapshot.index);
+    }
+    const tier = OLD_ID_TO_TIER.get(base);
+    if (!tier) return null;
+    return {
+      provider: 'anthropic',
+      family: 'claude',
+      tier,
+      model_id: base,
+      version: qualifiers.length > 0 ? qualifiers.join('+') : base,
+      catalog_version: CATALOG_VERSION,
+    };
+  }
+
+  const catalogIds = [...OLD_ID_TO_TIER.keys()];
+  const qualified = catalogIds.flatMap((id) => [
+    `${id}[1m]`,
+    `${id}-20260101`,
+    `${id}-20260101[1m]`,
+  ]);
+  // Mostly non-ids (tier names, role aliases, near-misses, case, whitespace,
+  // bare qualifiers, prototype keys); a dated sonnet id is kept as a resolver.
+  const probes = [
+    ...listTiers(),
+    ...Object.keys(ROLE_ALIASES),
+    'claude-opus-4-8',
+    'claude-opus-5-6',
+    'CLAUDE-OPUS-5-5',
+    'Claude-Opus-5',
+    ' claude-opus-5-5',
+    'claude-opus-5-5 ',
+    'claude-sonnet-5-20260101',
+    'claude-sonnet-5-2026010',
+    'claude-opus-5-5[1m][1m]',
+    '[1m]',
+    '-20251001',
+    '',
+    '__proto__',
+    'constructor',
+    'toString',
+  ];
+  const candidates = [...catalogIds, ...qualified, ...probes];
+
+  it('covers every catalog id and legacy id, and resolves some but not all candidates', () => {
+    // Positive control: a candidate set that resolved nothing (or everything)
+    // would make the parity below agree vacuously.
+    expect(catalogIds).toEqual(
+      listTiers().flatMap((t) => [MODELS[t].id, ...MODELS[t].legacyIds]),
+    );
+    const resolved = candidates.filter((c) => oldResolveModelIdentity(c) !== null);
+    expect(resolved.length).toBeGreaterThanOrEqual(catalogIds.length * 4);
+    expect(resolved.length).toBeLessThan(candidates.length);
+  });
+
+  it.each(candidates.map((c) => [c]))('matches the old reverse index byte-for-byte for %j', (raw) => {
+    expect(JSON.stringify(resolveModelIdentity(raw)))
+      .toBe(JSON.stringify(oldResolveModelIdentity(raw)));
+  });
+
+  it.each([[undefined], [null], [42], [{}], [['claude-opus-5-5']]])(
+    'returns null for non-string input %j, as the old path did',
+    (raw) => {
+      expect(resolveModelIdentity(raw)).toBeNull();
+      expect(oldResolveModelIdentity(raw)).toBeNull();
+    },
+  );
+
+  it('only ever yields a catalog tier key, never a role alias', () => {
+    // This is why priceUsage's role-alias branch (pinned below) is not reached
+    // from buildUsageReceipts: the tier it passes comes from here.
+    for (const raw of candidates) {
+      const tier = resolveModelIdentity(raw)?.tier;
+      if (tier === undefined) continue;
+      expect(listTiers()).toContain(tier);
+      expect(Object.keys(ROLE_ALIASES)).not.toContain(tier);
+    }
   });
 });
 
@@ -621,6 +731,25 @@ describe('priceUsage', () => {
     const priced = priceUsage(ONE_MTOK_EACH, tier, id);
     expect(priced.total).toBeCloseTo(expected, 9);
     expect(priced.pricing_version).toBe(PRICING_VERSION);
+  });
+
+  it('ignores the model id row when the tier is a role alias (current behaviour, pinned)', () => {
+    // The id row is kept only when `getPricing(modelId).tier === tier`, and a
+    // role alias never equals a tier key — so 'frontier' + the legacy opus id
+    // bills at the opus TIER row, not the id's own row. Not reached from
+    // buildUsageReceipts (its tier comes from resolveModelIdentity, a tier key
+    // only). Pinned so a change here is a deliberate decision, not drift.
+    const tierRow = priceUsage(ONE_MTOK_EACH, 'opus').total;
+    const idRow = priceUsage(ONE_MTOK_EACH, 'opus', 'claude-opus-5').total;
+    expect(getPricing('claude-opus-5').tier).toBe('opus');
+    expect(ROLE_ALIASES.frontier).toBe('opus');
+    expect(idRow).not.toBe(tierRow);
+    expect(priceUsage(ONE_MTOK_EACH, 'frontier', 'claude-opus-5')).toEqual({
+      total: tierRow,
+      pricing_version: PRICING_VERSION,
+    });
+    expect(priceUsage(ONE_MTOK_EACH, 'frontier', 'claude-opus-5-5').total).toBe(tierRow);
+    expect(priceUsage(ONE_MTOK_EACH, 'frontier').total).toBe(tierRow);
   });
 
   it('charges cache reads at the cache-read rate, not the fresh input rate', () => {
