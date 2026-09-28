@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FOLLOW_WORKFLOW_PLAN_CONFIG_KEY,
+  planWorkflow,
   readFollowWorkflowPlan,
   resolveWorkflowMode,
 } from '../../../lib/runtime/middleware/workflow-mode.js';
@@ -236,5 +237,77 @@ describe('resolveWorkflowMode', () => {
     expect(a.reasons).not.toBe(b.reasons);
     a.reasons.push('mutated');
     expect(b.reasons).toEqual(['team-disabled']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R3 — one accepted parent effort. `tasks.js` reads the identity-gated effort
+// record (native band already applied) BEFORE planning and hands it here, so
+// `task.meta.effort` and `workflowPlan.effort` cannot disagree. Teammates keep
+// their own per-command resolution and are clamped to the new parent band.
+// ---------------------------------------------------------------------------
+describe('planWorkflow — accepted parent effort context (R3)', () => {
+  const BUDGETS = { low: 16000, medium: 32000, high: 64000, xhigh: 128000, max: 200000 };
+  const CFG = Object.freeze({
+    team: { autoApplyTriggers: { logic: 'OR', minSubtasks: 3, minFiles: 3, minComplexity: 'high' } },
+    runtime: { effort: { budgetMap: BUDGETS } },
+  });
+  /** /implement parent; teammates alternate /implement, /code-review. */
+  const INTENT = Object.freeze({
+    intents: ['action:r0', 'action:r1', 'action:r2'],
+    recommendations: [0, 1, 2].map((i) => ({
+      intent: `action:r${i}`, agents: [`agent-${i}`], commands: [i % 2 === 0 ? '/implement' : '/code-review'],
+    })),
+    best: { intent: 'action:implement', commands: ['/implement'], agents: ['planner'] },
+  });
+  const stateAt = (score) => ({ context: { routing: { score, classification: { factors: {} } } }, input: {} });
+
+  it('CONTROL: without a context the parent is the static /implement band', () => {
+    const plan = planWorkflow(stateAt(0.8), CFG, INTENT, false);
+    expect(plan.runner).toBe('team');
+    expect(plan.effort).toBe('xhigh');
+    expect(plan.teammates.map((t) => t.effort)).toEqual(['xhigh', 'high', 'xhigh']);
+  });
+
+  it('an explicit null context is byte-identical to no fifth argument', () => {
+    expect(JSON.stringify(planWorkflow(stateAt(0.8), CFG, INTENT, false, null)))
+      .toBe(JSON.stringify(planWorkflow(stateAt(0.8), CFG, INTENT, false)));
+  });
+
+  it('the accepted band becomes the parent effort, and the budgets follow it', () => {
+    const plan = planWorkflow(stateAt(0.8), CFG, INTENT, false, { effort: 'max', reason: 'native-effort' });
+    expect(plan.effort).toBe('max');
+    expect(plan.perAgentBudget).toBe(Math.floor(BUDGETS.max / 3));
+    // Teammates: static per-command band, clamped to [xhigh, max]. /code-review
+    // (high) is floored to xhigh — the clamp moving with its parent, not a
+    // teammate being handed the parent's band.
+    expect(plan.teammates.map((t) => t.effort)).toEqual(['xhigh', 'xhigh', 'xhigh']);
+    expect(plan.teammates.map((t) => t.budget)).toEqual([BUDGETS.xhigh, BUDGETS.xhigh, BUDGETS.xhigh]);
+  });
+
+  it('a lower accepted band caps every teammate at it', () => {
+    const plan = planWorkflow(stateAt(0.8), CFG, INTENT, false, { effort: 'low', reason: 'native-effort' });
+    expect(plan.effort).toBe('low');
+    expect(plan.perAgentBudget).toBe(Math.floor(BUDGETS.low / 3));
+    expect(plan.teammates.map((t) => t.effort)).toEqual(['low', 'low', 'low']);
+  });
+
+  it('an inline plan carries the accepted band too', () => {
+    const one = { ...INTENT, recommendations: INTENT.recommendations.slice(0, 1) };
+    const plan = planWorkflow(stateAt(0.1), CFG, one, false, { effort: 'max', reason: 'native-effort' });
+    expect(plan.runner).toBe('inline');
+    expect(plan.effort).toBe('max');
+  });
+
+  it.each([
+    ['an unknown band', { effort: 'ultra' }],
+    ['an upper-case band', { effort: 'MAX' }],
+    ['an empty band', { effort: '' }],
+    ['a non-string band', { effort: 4 }],
+    ['a context with no effort', { reason: 'native-effort' }],
+    ['a bare string', 'max'],
+  ])('ignores %s — the plan is the no-context plan', (_label, ctx) => {
+    expect(JSON.stringify(planWorkflow(stateAt(0.8), CFG, INTENT, false, ctx)))
+      .toBe(JSON.stringify(planWorkflow(stateAt(0.8), CFG, INTENT, false)));
   });
 });

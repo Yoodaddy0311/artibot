@@ -278,7 +278,10 @@ export function deriveTeammateEfforts(subObjectives, parentEffort, resolveFn) {
  * @param {object} intent - live intent ({ intents, recommendations, best, ... }).
  * @param {object} config - artibot.config.json object.
  * @param {object} [deps] - injected ports.
- * @param {(command: string, signals?: object) => ({effort:string}|string)} [deps.resolveEffort]
+ * @param {(command: string, signals?: object) => ({effort:string}|string|null)} [deps.resolveEffort]
+ *   `signals` is `{ score, role }`, `role` being `'parent'` for the one parent
+ *   call and `'teammate'` for each sub-objective. Returning null falls through
+ *   to the static map for that call only.
  * @param {(effort: string) => number} [deps.budgetResolver]
  * @param {boolean} [deps.optOut] - `--no-team` was present on the prompt's flag
  *   surface. Passed in rather than parsed here: this module is pure L4 and has
@@ -290,12 +293,18 @@ export function deriveTeammateEfforts(subObjectives, parentEffort, resolveFn) {
  * Build the resolveEffort port: P1's score-aware resolver if injected, else the
  * static EFFORT_POLICY map. Normalizes the resolver's return ({effort}|string)
  * to a plain band string.
- * @param {object} deps @param {object} cls @returns {(cmd:string)=>string}
+ *
+ * `role` tells the port WHICH call this is. R3 (2026-09-28): the L5 caller holds
+ * one accepted parent effort (native band included) and must answer the parent
+ * call with it while teammates keep their own per-command band — a port that
+ * could not tell the calls apart would hand every teammate the parent's band.
+ * @param {object} deps @param {object} cls
+ * @returns {(cmd:string, role?:'parent'|'teammate')=>string}
  */
 function makeResolveFn(deps, cls) {
   if (typeof deps.resolveEffort !== 'function') return (cmd) => getEffortForCommand(cmd);
-  return (cmd) => {
-    const r = deps.resolveEffort(cmd, { score: cls.score });
+  return (cmd, role = 'teammate') => {
+    const r = deps.resolveEffort(cmd, { score: cls.score, role });
     if (r && typeof r === 'object' && r.effort) return r.effort;
     return typeof r === 'string' ? r : getEffortForCommand(cmd);
   };
@@ -310,7 +319,7 @@ export function buildWorkflowPlan(classification, intent, config, deps = {}) {
   const budgetResolver = typeof deps.budgetResolver === 'function' ? deps.budgetResolver : () => 0;
 
   const parentCmd = parentCommand(safeIntent);
-  const parentEffort = resolveFn(parentCmd);
+  const parentEffort = resolveFn(parentCmd, 'parent');
   const evaluated = evaluateTrigger(cls, safeIntent, triggers);
 
   // OFF GATE. The thresholds are not the only input any more: an explicit

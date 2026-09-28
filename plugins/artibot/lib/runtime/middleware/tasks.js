@@ -24,7 +24,7 @@ import { readJsonFileSync } from '../../core/file.js';
 import { isTeamEnabled } from '../../cognitive/workflow-plan.js';
 import { compileMission } from '../../mission/compiler.js';
 import { composeControllerMutator } from '../../mission/controller.js';
-import { readEffortRecord } from '../task-budget.js';
+import { readEffortSnapshot } from '../task-budget.js';
 import { appendLedgerEvent } from '../ledger.js';
 import { createStateStore } from '../../project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../project-state/git-common-dir.js';
@@ -49,42 +49,34 @@ function makeTaskId(nowFn) {
  * applies the identity + expiry gate — a record left by ANOTHER session or by an
  * OLDER prompt is refused rather than propagated into this task. Records written
  * before F05 carry no identity and are honoured unchanged. The five-key mapping
- * below is deliberately not extended (see this module's header).
+ * (now in `readEffortSnapshot`) is deliberately not extended (see this module's
+ * header).
  *
  * `nowMs` is the MIDDLEWARE's clock, not `Date.now()`: this middleware already
  * takes an injected `now` for the task id and `createdAt`, and an expiry judged
  * on wall-clock while everything else runs on a fixed clock is untestable — a
  * fixture record would be expired or fresh depending on when the suite ran.
  *
+ * R2b: the budget is RECOMPUTED from the accepted record's effort
+ * (`task-budget.js#readEffortSnapshot`), never read from the shared
+ * `runtime/current-task-budget.json`. That file has no identity, so reading it
+ * paired this session's effort with whichever session wrote the budget last.
+ * `cfg` is the config this middleware already read once for the plan, so the
+ * meta budget and the plan's `budgetResolver` use one budget map.
+ *
  * @param {string|undefined} pluginRoot
  * @param {{ sessionId?: string|null, promptId?: string|null }} [identity]
  * @param {number} [nowMs] - epoch ms; omitted means the reader uses `Date.now()`.
+ * @param {object} [cfg] - the already-read `artibot.config.json` object.
  * @returns {{ effort: string|null, taskBudget: number|null, command: string|null }|null}
  */
-function readEffortMeta(pluginRoot, identity = {}, nowMs = undefined) {
+function readEffortMeta(pluginRoot, identity = {}, nowMs = undefined, cfg = {}) {
   if (!pluginRoot) return null;
-  const runtimeDir = path.join(pluginRoot, 'runtime');
-  const effortRaw = readEffortRecord(pluginRoot, {
+  return readEffortSnapshot(pluginRoot, {
     sessionId: identity.sessionId ?? null,
     promptId: identity.promptId ?? null,
     now: nowMs,
-  });
-  if (!effortRaw) return null;
-
-  const meta = {
-    effort: effortRaw.effort || null,
-    command: effortRaw.command || null,
-    taskBudget: null,
-    shift: typeof effortRaw.shift === 'number' ? effortRaw.shift : null,
-    reason: effortRaw.reason || null,
-  };
-
-  const budgetRaw = readJsonFileSync(path.join(runtimeDir, 'current-task-budget.json'));
-  if (budgetRaw && typeof budgetRaw.budget === 'number' && budgetRaw.budget > 0) {
-    meta.taskBudget = budgetRaw.budget;
-  }
-
-  return meta;
+  }, cfg);
 }
 
 // ---------------------------------------------------------------------------
@@ -561,10 +553,27 @@ export function createTasksMiddleware(options = {}) {
       pluginRoot, cfg, optOut, teamEnabled, followWorkflowPlan,
     } = readTeamGateInputs(state);
 
+    // P3-10: automatically attach effort/taskBudget meta when the prior
+    // UserPromptSubmit hook (runtime-prompt.js) persisted them. This lets
+    // /team orchestrator propagate `[artibot:effort=X][artibot:task-budget=Y]`
+    // to each teammate without an explicit re-derive step.
+    //
+    // Read BEFORE the plan (R3): the plan's per-teammate effort resolves from
+    // this accepted parent effort, so task meta and `workflowPlan.effort` come
+    // from one record. The read is side-effect free — it only moves this
+    // prompt's clock reading ahead of the task id's.
+    const effortMeta = readEffortMeta(pluginRoot, {
+      sessionId: state.input?.hookData?.session_id ?? state.input?.sessionId ?? null,
+      promptId: state.input?.hookData?.prompt_id ?? null,
+    }, now(), cfg);
+    const effortContext = effortMeta?.effort
+      ? { effort: effortMeta.effort, reason: effortMeta.reason ?? null }
+      : null;
+
     // PLAN -> MODE -> RECORD. F04(b) derives the mode FROM the plan when the
     // key is on, so the plan has to be built first; the record then needs the
     // mode that was actually run, which is why it comes last.
-    const plan = planWorkflow(state, cfg, intent, optOut);
+    const plan = planWorkflow(state, cfg, intent, optOut, effortContext);
     const { mode } = resolveWorkflowMode({
       routingSystem, teamEnabled, optOut, followWorkflowPlan, plan,
     });
@@ -586,14 +595,6 @@ export function createTasksMiddleware(options = {}) {
       createdAt: new Date(now()).toISOString(),
     };
 
-    // P3-10: automatically attach effort/taskBudget meta when the prior
-    // UserPromptSubmit hook (runtime-prompt.js) persisted them. This lets
-    // /team orchestrator propagate `[artibot:effort=X][artibot:task-budget=Y]`
-    // to each teammate without an explicit re-derive step.
-    const effortMeta = readEffortMeta(pluginRoot, {
-      sessionId: state.input?.hookData?.session_id ?? state.input?.sessionId ?? null,
-      promptId: state.input?.hookData?.prompt_id ?? null,
-    }, now());
     if (effortMeta && effortMeta.effort) {
       task.meta = {
         effort: effortMeta.effort,

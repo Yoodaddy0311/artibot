@@ -43,7 +43,7 @@
  * @module lib/runtime/middleware/workflow-mode
  */
 
-import { buildWorkflowPlan } from '../../cognitive/workflow-plan.js';
+import { buildWorkflowPlan, EFFORT_LADDER } from '../../cognitive/workflow-plan.js';
 import { getTaskBudgetForEffort } from '../task-budget.js';
 import { recordWorkflowPlanDecision, resolveDecisionRunId } from '../../observability/decision-events.js';
 
@@ -186,20 +186,35 @@ export function resolveWorkflowMode({
  * ORDER (2026-09-15): plan BEFORE mode, record AFTER it. This used to take
  * `mode` as an argument — see `workflow-mode.js` for why that order was wrong.
  *
+ * ONE PARENT EFFORT (R3, 2026-09-28). `effortContext` is the identity-gated
+ * effort record `tasks.js` already accepted for this prompt — the native
+ * `$CLAUDE_EFFORT` band applied by `runtime-prompt.js#resolveEffortMeta`
+ * included. Without it the plan re-derived the parent from the static command
+ * map, so `task.meta.effort` could say `max` while `workflowPlan.effort` said
+ * `xhigh`. It goes through the planner's existing `resolveEffort` port and
+ * answers the PARENT call only: teammate calls return null, which the planner
+ * resolves on the static map exactly as it does with no port, so each
+ * teammate's own band is unchanged and only the [parent−1, parent] clamp moves
+ * with the parent. A missing or unrecognised band injects no port at all —
+ * byte-identical to the four-argument call.
+ *
  * @param {object} state middleware state
  * @param {object} cfg the already-read `artibot.config.json` object
  * @param {object} intent `state.context.intent`, already defaulted by the caller
  * @param {boolean} optOut `--no-team` was on the prompt's flag surface
+ * @param {{ effort: string, reason?: string }|null} [effortContext]
  * @returns {object} the `buildWorkflowPlan` result
  */
-export function planWorkflow(state, cfg, intent, optOut) {
+export function planWorkflow(state, cfg, intent, optOut, effortContext = null) {
   const classification = {
     score: state.context.routing?.score ?? 0,
     factors: state.context.routing?.classification?.factors,
   };
+  const accepted = EFFORT_LADDER.includes(effortContext?.effort) ? effortContext.effort : null;
   return buildWorkflowPlan(classification, intent, cfg, {
     budgetResolver: (e) => getTaskBudgetForEffort(e, cfg) || 0,
     optOut,
+    ...(accepted && { resolveEffort: (_cmd, signals) => (signals?.role === 'parent' ? accepted : null) }),
   });
 }
 

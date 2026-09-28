@@ -10,9 +10,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   buildEffortRecord,
   buildTaskBudgetDirective,
@@ -24,7 +26,11 @@ import {
   persistEffortRecord,
   persistTaskBudget,
   readEffortRecord,
+  readEffortSnapshot,
+  runSnapshotCli,
 } from '../../lib/runtime/task-budget.js';
+
+const TASK_BUDGET_SCRIPT = fileURLToPath(new URL('../../lib/runtime/task-budget.js', import.meta.url));
 
 describe('getTaskBudgetForEffort', () => {
   const config = {
@@ -377,5 +383,158 @@ describe('F05 effort records', () => {
     expect(result.kept).toBe(2);
     expect(result.removed).toBe(3);
     expect(readdirSync(dir).length).toBe(2);
+  });
+});
+
+// R2b — effort and budget from ONE accepted record. The shared
+// `current-task-budget.json` is written below with a DIFFERENT session's budget
+// in every case, so a reader that still consulted it would fail here.
+describe('readEffortSnapshot', () => {
+  const T0 = Date.parse('2026-09-28T00:00:00.000Z');
+  const A = { command: 'implement', effort: 'max', baseline: 'xhigh', shift: 1, reason: 'score>=0.7 (+1)' };
+  const B = { command: 'daily', effort: 'low', baseline: 'medium', shift: -1, reason: 'score<=0.25 (-1)' };
+  let tmpRoot;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-snapshot-'));
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  function writeAthenB(now = T0) {
+    persistEffortRecord(A, tmpRoot, { sessionId: 'sA', promptId: 'pA', now });
+    persistTaskBudget({ command: A.command, effort: A.effort, budget: 200000 }, tmpRoot);
+    persistEffortRecord(B, tmpRoot, { sessionId: 'sB', promptId: 'pB', now });
+    persistTaskBudget({ command: B.command, effort: B.effort, budget: 16000 }, tmpRoot);
+  }
+
+  it('returns null when no record is accepted', () => {
+    expect(readEffortSnapshot(tmpRoot, { sessionId: 'sA', now: T0 })).toBeNull();
+    expect(readEffortSnapshot('', { sessionId: 'sA', now: T0 })).toBeNull();
+  });
+
+  it('recomputes the budget from the accepted effort, ignoring the shared budget file', () => {
+    writeAthenB();
+
+    expect(readEffortSnapshot(tmpRoot, { sessionId: 'sA', promptId: 'pA', now: T0 + 1 })).toEqual({
+      effort: 'max', command: 'implement', shift: 1, reason: 'score>=0.7 (+1)', taskBudget: 200000,
+    });
+    expect(readEffortSnapshot(tmpRoot, { sessionId: 'sB', promptId: 'pB', now: T0 + 1 }).taskBudget)
+      .toBe(16000);
+  });
+
+  it('uses the budget map of the config it is given', () => {
+    writeAthenB();
+    const config = { runtime: { effort: { budgetMap: { max: 150000, low: 12000 } } } };
+
+    const snap = readEffortSnapshot(tmpRoot, { sessionId: 'sA', promptId: 'pA', now: T0 + 1 }, config);
+
+    expect(snap.taskBudget).toBe(getTaskBudgetForEffort('max', config));
+    expect(snap.taskBudget).toBe(150000);
+  });
+
+  it('inherits the identity gate: another prompt of the same session is refused', () => {
+    writeAthenB();
+    expect(readEffortSnapshot(tmpRoot, { sessionId: 'sA', promptId: 'pOther', now: T0 + 1 })).toBeNull();
+  });
+
+  it('inherits the expiry gate', () => {
+    writeAthenB();
+    expect(readEffortSnapshot(tmpRoot, {
+      sessionId: 'sA', promptId: 'pA', now: T0 + EFFORT_RECORD_TTL_MS,
+    })).toBeNull();
+  });
+
+  it('yields a null budget for an effort the map does not know', () => {
+    persistEffortRecord({ command: 'x', effort: 'turbo' }, tmpRoot, { sessionId: 'sA', now: T0 });
+    expect(readEffortSnapshot(tmpRoot, { sessionId: 'sA', now: T0 + 1 })).toEqual({
+      effort: 'turbo', command: 'x', shift: null, reason: null, taskBudget: null,
+    });
+  });
+});
+
+describe('task-budget CLI (snapshot)', () => {
+  let tmpRoot;
+  let homeDir;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-snapshot-cli-'));
+    homeDir = mkdtempSync(path.join(os.tmpdir(), 'artibot-snapshot-home-'));
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
+    try { rmSync(homeDir, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  /** Spawn the real file as a CLI. Throws on a non-zero exit, which is the assertion. */
+  function runCli(args) {
+    const env = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+    delete env.CLAUDE_SESSION_ID;
+    delete env.CLAUDE_CODE_SESSION_ID;
+    return execFileSync(process.execPath, [TASK_BUDGET_SCRIPT, ...args], { env, encoding: 'utf8' });
+  }
+
+  it('prints this session\'s snapshot as one JSON line and exits 0', () => {
+    // Real clock: the CLI reads records against Date.now(), so the fixture must
+    // be fresh on it too (TTL 10 min).
+    persistEffortRecord(
+      { command: 'implement', effort: 'max', shift: 1, reason: 'r' }, tmpRoot, { sessionId: 'sA', promptId: 'pA' },
+    );
+    persistTaskBudget({ command: 'implement', effort: 'max', budget: 200000 }, tmpRoot);
+    persistEffortRecord({ command: 'daily', effort: 'low' }, tmpRoot, { sessionId: 'sB', promptId: 'pB' });
+    persistTaskBudget({ command: 'daily', effort: 'low', budget: 16000 }, tmpRoot);
+
+    const out = runCli(['snapshot', '--session', 'sA', '--prompt', 'pA', '--plugin-root', tmpRoot]);
+
+    expect(out.endsWith('\n')).toBe(true);
+    expect(out.trim().split('\n')).toHaveLength(1);
+    expect(JSON.parse(out)).toEqual({
+      effort: 'max', command: 'implement', shift: 1, reason: 'r', taskBudget: 200000,
+    });
+  });
+
+  it('prints null for a session with no accepted record, still exiting 0', () => {
+    persistEffortRecord({ command: 'daily', effort: 'low' }, tmpRoot, { sessionId: 'sB', promptId: 'pB' });
+
+    expect(runCli(['snapshot', '--session', 'sA', '--plugin-root', tmpRoot])).toBe('null\n');
+  });
+
+  it('reads the budget map from <plugin-root>/artibot.config.json', () => {
+    const config = { runtime: { effort: { budgetMap: { max: 150000 } } } };
+    writeFileSync(path.join(tmpRoot, 'artibot.config.json'), JSON.stringify(config));
+    persistEffortRecord({ command: 'implement', effort: 'max' }, tmpRoot, { sessionId: 'sA' });
+
+    expect(JSON.parse(runCli(['snapshot', '--session', 'sA', '--plugin-root', tmpRoot])).taskBudget)
+      .toBe(150000);
+  });
+
+  // Fail-closed: a reader with no session id skips the per-session file and is
+  // honoured by ANY legacy record (readEffortRecord's legacy contract), so an
+  // unset `$CLAUDE_CODE_SESSION_ID` would hand this caller another session's
+  // effort. The CLI is a new surface with no legacy contract to keep.
+  it.each([
+    ['missing', []],
+    ['valueless', ['--session']],
+    ['empty', ['--session', '']],
+    ['blank', ['--session', '   ']],
+  ])('answers null when --session is %s, even over a legacy record', (_label, sessionArgs) => {
+    persistEffortRecord({ command: 'daily', effort: 'low' }, tmpRoot, { sessionId: 'sB', promptId: 'pB' });
+    expect(runSnapshotCli(['snapshot', '--plugin-root', tmpRoot, ...sessionArgs])).toBe('null');
+
+    persistEffortRecord({ command: 'daily', effort: 'low' }, tmpRoot, {});
+    expect(runSnapshotCli(['snapshot', '--plugin-root', tmpRoot, ...sessionArgs])).toBe('null');
+  });
+
+  it('answers null from the real process when the session is empty', () => {
+    persistEffortRecord({ command: 'daily', effort: 'low' }, tmpRoot, {});
+    expect(runCli(['snapshot', '--session', '', '--plugin-root', tmpRoot])).toBe('null\n');
+  });
+
+  it('answers null for an unknown subcommand', () => {
+    expect(runSnapshotCli(['bogus'])).toBe('null');
+    expect(runSnapshotCli([])).toBe('null');
   });
 });
