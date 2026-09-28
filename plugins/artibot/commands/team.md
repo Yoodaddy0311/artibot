@@ -52,7 +52,7 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 
 > **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver for the shipped policy is `lib/core/model-policy.js#resolveModel(agentName, { role })`, backed by `artibot.config.json#/agents/modelPolicy` (`resolveModelForPhase(role)` is the agent-less variant — it cannot see the allowlist/denylist, so never use it to pick a teammate's tier). The SubagentStart hook (`scripts/hooks/subagent-handler.js#checkModelPolicy`) computes `canonicalModel` with `resolveModel`, but its drift flag compares it against a requested model read by `#extractRequestedModel` from `model`/`tool_input.model`/`agent_model` — keys the SubagentStart payload does not carry (2.1.260 top-level keys: agent_id, agent_type, cwd, hook_event_name, prompt_id, session_id, transcript_path — the same file's comment above `route.bound`). So the flag cannot fire on a real spawn and is **not** a safety net for a forgotten model parameter: the leader passing `model` (below) is the only path.
 
-> **모델 전달 — 아래 스폰 예시의 `model` 주석이 가리키는 절차.** 리더는 스폰마다 `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve <plugin:name> --role <build|review>` 를 실행하고 그 출력값을 `Agent(model=…)` 에 **실제로 넘긴다**. `<plugin:name>` 은 `artibot:code-reviewer` 같은 플러그인 한정 이름, `--role build` 는 구현·process 스폰, `--role review` 는 크로스체크·최종 검수·judge 스폰이다. config 에 적힌 값은 리더가 넘기지 않으면 스폰에 닿지 않고, 넘기지 않은 스폰은 에이전트 frontmatter `model:` 을 따른다 — 둘 다 **추론**이다(코드·호스트 페이로드 판독, 실행 확인 없음). 넘겼을 때 `Agent(model=…)` 가 플러그인 `subagent_type` 의 frontmatter 보다 우선하는지도 **미확인**이다(2026-09-23 설계 정찰 §3 표 — general-purpose 스폰에서 haiku 반영만 자기보고로 관측). 호스트 페이로드 실측 6행에는 `model` 인자가 한 번도 없었다(`scripts/hooks/route-observe-pre.js#TOOL_INPUT_KEYS` 주석 — 넘긴 시나리오 자체가 없었다). 그 CLI 가 아직 없거나 실패하면 폴백은 `lib/core/model-policy.js#resolveModel(agentName, { role })` 의 값이다(오늘은 전 에이전트 opus).
+> **모델 전달 — 아래 스폰 예시의 `model` 주석이 가리키는 절차.** 리더는 스폰마다 `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve <plugin:name> --role <build|review>` 를 실행하고 그 출력값을 Agent 호출의 `model` 파라미터에 **실제로 넘긴다**. `<plugin:name>` 은 `artibot:code-reviewer` 같은 플러그인 한정 이름, `--role build` 는 구현·process 스폰, `--role review` 는 크로스체크·최종 검수·judge 스폰이다. config 에 적힌 값은 리더가 넘기지 않으면 스폰에 닿지 않고, 넘기지 않은 스폰은 에이전트 frontmatter `model:` 을 따른다 — 둘 다 **추론**이다(코드·호스트 페이로드 판독, 실행 확인 없음). 넘겼을 때 Agent 호출의 `model` 파라미터가 플러그인 `subagent_type` 의 frontmatter 보다 우선하는지도 **미확인**이다(2026-09-23 설계 정찰 §3 표 — general-purpose 스폰에서 haiku 반영만 자기보고로 관측). 호스트 페이로드 실측 6행에는 `model` 인자가 한 번도 없었다(`scripts/hooks/route-observe-pre.js#TOOL_INPUT_KEYS` 주석 — 넘긴 시나리오 자체가 없었다). 그 CLI 가 아직 없거나 실패하면 폴백은 `lib/core/model-policy.js#resolveModel(agentName, { role })` 의 값이다(오늘은 전 에이전트 opus).
 
 ### Token Conservation Rule (CRITICAL)
 - **작업 완료 후 팀원을 임의로 셧다운하지 마라** — 재소환 시 토큰이 발생한다
@@ -170,7 +170,7 @@ Spawn ALL teammates in a single message (parallel):
 ```
 Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{sid}-{role}",
       /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:{agent-type} --role <build|review>
-         출력값을 Agent(model=…) 에 넘긴다. 구현(nature: process) 팀원 = --role build, 검수·판정(nature: judge) 팀원 = --role review.
+         출력값을 Agent 호출의 model 파라미터에 넘긴다. 구현(nature: process) 팀원 = --role build, 검수·판정(nature: judge) 팀원 = --role review.
          현재 두 역할 모두 opus(단일 티어, 2026-09-23 오너 결정). 폴백·상세는 §Teammate Rules & Model Policy */
       prompt="[DEV Protocol 준수]\n\n작업:\n{specific work unit}\n\n{보고 계약}")
 ```
@@ -293,7 +293,7 @@ After ALL main tasks complete, spawn cross-check agents on the **review 티어**
 
 ```
 Agent(subagent_type="code-reviewer", name="team-*-checker-{n}",
-     /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent(model=…) 에 넘긴다 — review 티어 */
+     /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent 호출의 model 파라미터에 넘긴다 — review 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n
      코드 동작, 테스트 통과, 리그레션 없음, 프로젝트 패턴 준수 여부 확인 후 APPROVE 또는 REQUEST_CHANGES 보고.\n\n{보고 계약}")
@@ -313,7 +313,7 @@ Cross-check 완료 후, **code-reviewer 에이전트(review 티어)가 전체 �
 팀에 code-reviewer가 없으면 이 단계에서 소환:
 ```
 Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
-     /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent(model=…) 에 넘긴다 — review 티어 */
+     /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent 호출의 model 파라미터에 넘긴다 — review 티어 */
      prompt="[Inspection Mode 활성화]\n\n원본 요청: {original user request}\n\n
 각 팀원의 작업물을 검수해주세요:
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
@@ -486,7 +486,7 @@ When the user gives a new task to a persistent team:
 3. **신규 팀원은 기존 팀에 없는 전문성이 필요할 때만** 추가:
    ```
    Agent(subagent_type="artibot:{new-agent-type}", name="team-*-{role}",
-        /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:{new-agent-type} --role build 출력값을 Agent(model=…) 에 넘긴다 — 구현(nature: process) 역할은 build 티어, judge 면 --role review */
+        /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:{new-agent-type} --role build 출력값을 Agent 호출의 model 파라미터에 넘긴다 — 구현(nature: process) 역할은 build 티어, judge 면 --role review */
         prompt="[DEV Protocol 준수]\n\n작업:\n{new work unit}\n\n{보고 계약}")
    ```
 4. **팀원 교체는 다음 작업 배정 시에만** — 현재 작업 완료 후 임의 셧다운 금지 (Token Conservation Rule)

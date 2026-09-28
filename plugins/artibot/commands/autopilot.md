@@ -319,12 +319,12 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 #### Phase 0 — INTAKE (PRD 생성)
 - `Agent(subagent_type="artibot:planner", prompt="[Autopilot Phase 0] 사용자 요청: {task}\n\n\`docs/PRD/<feature>-<sessionId>.md\` 작성. PRD 템플릿: 배경/목표/비목표/시나리오/설계/산출물/실행계획/위험/수락기준\n\n{보고 계약}")`
-  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:planner` 출력값을 Agent(model=…) 에 넘긴다(계획 작성 = 이름 기준, `--role` 없음; 현재 opus). CLI 가 없거나 실패하면 `lib/core/model-policy.js#resolveModel('planner')` 로 폴백 — `commands/team.md` §Teammate Rules & Model Policy -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:planner` 출력값을 Agent 호출의 model 파라미터에 넘긴다(계획 작성 = 이름 기준, `--role` 없음; 현재 opus). CLI 가 없거나 실패하면 `lib/core/model-policy.js#resolveModel('planner')` 로 폴백 — `commands/team.md` §Teammate Rules & Model Policy -->
 - `mode === 'plan'`: PRD 경로 보고 후 종료. `:resume <sessionId>` 안내.
 
 #### Phase 1 — PLAN
 - `Agent(subagent_type="artibot:planner", prompt="[Autopilot Phase 1] PRD: {prdPath}\n\n분해 + 위험 식별 + 병렬 팀 구성 제안\n\n{보고 계약}")`
-  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:planner` 출력값을 Agent(model=…) 에 넘긴다(Phase 0 과 같은 규칙; 현재 opus) -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:planner` 출력값을 Agent 호출의 model 파라미터에 넘긴다(Phase 0 과 같은 규칙; 현재 opus) -->
 - `options.fast === true`면, planner 결과를 `state.fastTasks` (또는 `options.fastTasks`)로 저장한다. 각 작업은 stable ID, `dependsOn`/`dependencies`, `independent: true`, non-empty repo-relative `affectedPaths`, `risk`, `worktreeEligible`를 가져야 한다. 엔진은 dependency를 위상 wave로 해석한다. metadata가 불완전하거나 경로가 unsafe하면 fast 실행을 추측하지 말고 사유와 함께 직렬화한다.
 
 #### Phase 2 — PARALLEL EXECUTE
@@ -342,7 +342,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 #### Phase 3 — CROSS_CHECK
 - 팀원 간 원형 검증 (A→B→C→A). 추가로 `Agent(subagent_type="artibot:spec-reviewer")` 소환.
-  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:spec-reviewer --role review` 출력값을 Agent(model=…) 에 넘긴다 — review phase-role. 현재 `phaseRoles.review` = opus(2026-09-23 오너 결정, 단일 티어; 2026-09-02~09-23 에는 fable) -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:spec-reviewer --role review` 출력값을 Agent 호출의 model 파라미터에 넘긴다 — review phase-role. 현재 `phaseRoles.review` = opus(2026-09-23 오너 결정, 단일 티어; 2026-09-02~09-23 에는 fable) -->
 
 #### Phase 4 — VERIFY
 - `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**. pause 로 가기 전에 `recordPhaseResult(state, { phase: 'VERIFY', status: 'failed' })` 를 먼저 호출한다(Step 3 SH-06 규약). `autopilot.recovery.transitionFromVerdict` 가 `true` 면 다음 phase 는 저널 행의 `action` 을 따른다(`repair` → EXECUTE, `replan` → PLAN, 그 외 → PAUSED) — `false`(기본)면 현행대로 IMPROVE 고정. 그 외 → PAUSED 로 간 경우 Step 3 불릿과 같이 `state.phase`/`state.pausedReason` 을 직접 확인해 Step 4 로 넘긴다.
@@ -370,7 +370,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 #### Phase 6 — REPORT
 - `Agent(subagent_type="artibot:doc-updater", prompt="[Autopilot Phase 6] reports/AUTOPILOT/{sessionId}.md 작성. 템플릿: PRD §13.5 (요약/PRD링크/Phase표/커밋SHA/Cross-check/검증/개선/미래/큐/Next)\n\n{보고 계약}")`
-  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:doc-updater --role build` 출력값을 Agent(model=…) 에 넘긴다 — 문서 작성 = build 티어(현재 opus; doc-updater 는 fable 게이트가 켜져 있던 때에도 allowlist 밖이라 opus) -->
+  <!-- model: `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:doc-updater --role build` 출력값을 Agent 호출의 model 파라미터에 넘긴다 — 문서 작성 = build 티어(현재 opus; doc-updater 는 fable 게이트가 켜져 있던 때에도 allowlist 밖이라 opus) -->
 - 템플릿에 `복구 저널` 토큰이 포함된다(2026-09-17): dev 프로필은 `## Recovery Journal ({{recoveryJournalCount}})` + `{{recoveryJournalTable}}`(`lib/autopilot/profiles/dev.md`), 레거시 렌더러는 `## 6b. 복구 판정 저널` 절을 **행이 있을 때만** 덧붙인다(0행이면 산출 바이트 동일). 원본은 `state.recoveryJournal[]`.
 - `engine.notifyCompletion(sessionId)` 호출 (`--no-notify` 시 skip, `night` 모드는 PushNotification 차단).
 
