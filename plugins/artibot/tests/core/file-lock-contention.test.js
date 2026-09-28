@@ -7,8 +7,12 @@
  * temp dir and observes the outcome:
  *
  *  - contention: N processes x R read-increment-write rounds on one counter
- *    file. Any lost update or any overlap (a second process finding the
- *    in-section marker already present) is a mutual-exclusion failure.
+ *    file. Any lost update or any overlap is a mutual-exclusion failure.
+ *    Overlap is judged two ways, neither by clock: a second process finding
+ *    the O_EXCL in-section marker already present, and a break in the strict
+ *    E/X alternation of an O_APPEND ledger each holder writes on entry and
+ *    exit. A positive control runs the same harness with no lock and asserts
+ *    both checks fire.
  *  - a FRESH lock file that is empty or half-written belongs to a holder that
  *    has created it but not finished writing it; a contender must wait.
  *  - a genuinely stale lock (old mtime, old timestamp, dead owner pid) is
@@ -23,6 +27,24 @@
  * ELOCKTIMEOUT path for a live holder that never releases (file-lock.test.js
  * owns that). Contention is measured at N=4; a larger N or longer sections
  * can push a waiter past LOCK_WAIT_MS, which this file does not probe.
+ *
+ * Why no wall-clock spans: an earlier version compared Date.now() [enter,
+ * exit] spans across processes. On Windows each process anchors Date.now()
+ * at its own start, so processes disagree by a few ms, and a serial handoff
+ * can read as an overlap (CI saw overlappingSpans=1 with marker overlaps=0).
+ * `wallClockOverlaps` survives only to pin that in a no-process test.
+ *
+ * What the ledger check cannot see: it assumes each appendFileSync of one
+ * short line lands whole and in order on Windows as on POSIX; that is guarded
+ * only by the exact line-count assertion (2 x N x R) and by counting any
+ * malformed line as a violation, not proven. Under a working lock the appends
+ * never race (both are inside the section), so the green path does not rest
+ * on that assumption; only a breach or the no-lock control does, and there a
+ * torn or lost line turns the check red. The ledger shows order, not
+ * duration: E is written after the lock is taken and X before it is released,
+ * so an overlap confined to the lock's own acquire/release code is outside
+ * it (the marker has the same limit). CI runner timer granularity and clock
+ * spread were not measured; this file no longer depends on either.
  *
  * Bounding: children spin on a start barrier with their own deadline, the
  * parent kills any child still alive when a case ends, and each case carries
@@ -52,13 +74,22 @@ const SCENARIO_DEADLINE_MS = 40_000;
  * Contender: waits at the barrier, then runs `rounds` locked
  * read-increment-write cycles on the counter. Inside the section it claims an
  * O_EXCL marker; finding the marker already present means another process is
- * inside too. Prints one JSON line with its own tallies.
+ * inside too. It also appends `E <pid>` as the first and `X <pid>` as the last
+ * act of the section to a shared O_APPEND ledger. Prints one JSON line with
+ * its own tallies.
+ *
+ * cfg.noLock (positive control only): run the section with no lock at all.
+ * cfg.arriveDir (positive control only): after claiming the marker, wait until
+ * cfg.processes contenders are inside, so the breach is certain, not likely.
  */
 const CONTENDER_SOURCE = `
-import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { withFileLock } from ${JSON.stringify(LOCK_MODULE)};
+import { appendFileSync, closeSync, existsSync, openSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const cfg = JSON.parse(process.argv[2]);
+const { withFileLock } = cfg.noLock
+  ? { withFileLock: (_p, fn) => fn() }
+  : await import(${JSON.stringify(LOCK_MODULE)});
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 writeFileSync(cfg.readyPath, String(process.pid));
@@ -68,14 +99,22 @@ while (!existsSync(cfg.goPath)) {
   sleep(1);
 }
 
-const tally = { overlaps: 0, badReads: 0, writeErrors: 0, maxWaitMs: 0, spans: [] };
+const tally = { overlaps: 0, badReads: 0, writeErrors: 0, maxWaitMs: 0 };
 for (let i = 0; i < cfg.rounds; i++) {
   const asked = Date.now();
   withFileLock(cfg.counterPath, () => {
+    appendFileSync(cfg.ledgerPath, 'E ' + process.pid + '\\n');
     const enter = Date.now();
     tally.maxWaitMs = Math.max(tally.maxWaitMs, enter - asked);
     let marker = null;
     try { marker = openSync(cfg.markerPath, 'wx'); } catch { tally.overlaps++; }
+    if (cfg.arriveDir) {
+      writeFileSync(join(cfg.arriveDir, String(process.pid)), '');
+      while (readdirSync(cfg.arriveDir).length < cfg.processes) {
+        if (Date.now() > deadline) process.exit(97);
+        sleep(1);
+      }
+    }
     let n = NaN;
     try { n = Number.parseInt(readFileSync(cfg.counterPath, 'utf-8'), 10); } catch { /* counted below */ }
     if (!Number.isFinite(n)) {
@@ -88,7 +127,7 @@ for (let i = 0; i < cfg.rounds; i++) {
       closeSync(marker);
       try { unlinkSync(cfg.markerPath); } catch { /* next claimant reports it */ }
     }
-    tally.spans.push([enter, Date.now()]);
+    appendFileSync(cfg.ledgerPath, 'X ' + process.pid + '\\n');
   });
 }
 process.stdout.write(JSON.stringify(tally));
@@ -183,18 +222,86 @@ async function waitFor(predicate, timeoutMs) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Run `processes` contenders against one counter, released together.
+ * The retired wall-clock check: a span starting strictly before the latest
+ * end seen so far overlaps it. Kept only so a test can pin why it was
+ * retired — spans from different processes carry different clocks.
  *
- * @param {{ processes: number, rounds: number, holdMs: number, seedLock?: (lockPath: string) => void }} opts
- * @returns {Promise<{ counter: number, expected: number, overlaps: number, badReads: number, writeErrors: number, exits: Array<number|null>, stderr: string[], lockLeft: boolean, overlappingSpans: number, maxWaitMs: number }>}
+ * @param {Array<[number, number]>} spans [enter, exit] Date.now() pairs
+ * @returns {number}
  */
-async function runContention({ processes, rounds, holdMs, seedLock }) {
+function wallClockOverlaps(spans) {
+  const sorted = [...spans].sort((x, y) => x[0] - y[0]);
+  let overlapping = 0;
+  let latestEnd = -Infinity;
+  for (const [enter, exit] of sorted) {
+    if (enter < latestEnd) overlapping++;
+    latestEnd = Math.max(latestEnd, exit);
+  }
+  return overlapping;
+}
+
+/**
+ * Count breaks in strict alternation `E p, X p, E q, X q, ...` of the section
+ * ledger: an entry while another holder is inside, an exit by a pid that is
+ * not the open holder, an exit with nothing open, a line that is neither, and
+ * a holder still open at the end. The order is the file's append order, so no
+ * clock is involved.
+ *
+ * @param {string[]} lines ledger lines without their trailing newline
+ * @returns {number}
+ */
+function ledgerViolations(lines) {
+  let open = null;
+  let violations = 0;
+  for (const line of lines) {
+    const [kind, pid, extra] = line.split(' ');
+    if (!pid || extra !== undefined) {
+      violations++;
+    } else if (kind === 'E') {
+      if (open !== null) violations++;
+      open = pid;
+    } else if (kind === 'X') {
+      if (open !== pid) violations++;
+      open = null;
+    } else {
+      violations++;
+    }
+  }
+  if (open !== null) violations++;
+  return violations;
+}
+
+/**
+ * Split a ledger file into lines; a missing file is an empty ledger.
+ *
+ * @param {string} ledgerPath
+ * @returns {string[]}
+ */
+function readLedger(ledgerPath) {
+  if (!fsSync.existsSync(ledgerPath)) return [];
+  const lines = fsSync.readFileSync(ledgerPath, 'utf-8').split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  return lines;
+}
+
+/**
+ * Run `processes` contenders against one counter, released together.
+ * `noLock` + `inSectionBarrier` turn the run into a positive control: no lock,
+ * and every contender waits inside the section until all of them are there.
+ *
+ * @param {{ processes: number, rounds: number, holdMs: number, seedLock?: (lockPath: string) => void, noLock?: boolean, inSectionBarrier?: boolean }} opts
+ * @returns {Promise<{ counter: number, expected: number, overlaps: number, badReads: number, writeErrors: number, exits: Array<number|null>, stderr: string[], lockLeft: boolean, ledgerLines: number, ledgerViolations: number, maxWaitMs: number }>}
+ */
+async function runContention({ processes, rounds, holdMs, seedLock, noLock = false, inSectionBarrier = false }) {
   const script = path.join(tmpDir, 'contender.mjs');
   await fs.writeFile(script, CONTENDER_SOURCE, 'utf-8');
   const counterPath = path.join(tmpDir, 'counter.txt');
   const lockPath = `${counterPath}.lock`;
   const goPath = path.join(tmpDir, 'go');
+  const ledgerPath = path.join(tmpDir, 'section.ledger');
+  const arriveDir = inSectionBarrier ? path.join(tmpDir, 'arrived') : null;
   await fs.writeFile(counterPath, '0', 'utf-8');
+  if (arriveDir) await fs.mkdir(arriveDir);
   if (seedLock) seedLock(lockPath);
 
   const runs = [];
@@ -202,11 +309,15 @@ async function runContention({ processes, rounds, holdMs, seedLock }) {
     runs.push(spawnChild(script, {
       counterPath,
       markerPath: path.join(tmpDir, 'inside.marker'),
+      ledgerPath,
       readyPath: path.join(tmpDir, `ready-${i}`),
       goPath,
       rounds,
       holdMs,
       barrierDeadlineMs: BARRIER_DEADLINE_MS,
+      noLock,
+      arriveDir,
+      processes,
     }));
   }
   await waitFor(
@@ -217,19 +328,9 @@ async function runContention({ processes, rounds, holdMs, seedLock }) {
   const results = await Promise.all(runs.map((r) => r.done));
 
   const tallies = results.map((r) => {
-    try { return JSON.parse(r.stdout); } catch { return { overlaps: 0, badReads: 0, writeErrors: 0, spans: [] }; }
+    try { return JSON.parse(r.stdout); } catch { return { overlaps: 0, badReads: 0, writeErrors: 0 }; }
   });
-  const spans = tallies.flatMap((t) => t.spans.map(([a, b]) => ({ a, b })));
-  spans.sort((x, y) => x.a - y.a);
-  // A span starting strictly before the latest end seen so far overlaps it
-  // (one process's spans are sequential, so the other side is another owner).
-  // Same-millisecond boundaries are not evidence of overlap.
-  let overlappingSpans = 0;
-  let latestEnd = -Infinity;
-  for (const span of spans) {
-    if (span.a < latestEnd) overlappingSpans++;
-    latestEnd = Math.max(latestEnd, span.b);
-  }
+  const ledger = readLedger(ledgerPath);
 
   return {
     counter: Number.parseInt(fsSync.readFileSync(counterPath, 'utf-8'), 10),
@@ -240,7 +341,8 @@ async function runContention({ processes, rounds, holdMs, seedLock }) {
     exits: results.map((r) => r.code),
     stderr: results.map((r) => r.stderr.trim()).filter(Boolean),
     lockLeft: fsSync.existsSync(lockPath),
-    overlappingSpans,
+    ledgerLines: ledger.length,
+    ledgerViolations: ledgerViolations(ledger),
     maxWaitMs: Math.max(0, ...tallies.map((t) => t.maxWaitMs ?? 0)),
   };
 }
@@ -271,6 +373,71 @@ function seedAgedLock(lockPath, content, ageMs) {
   fsSync.utimesSync(lockPath, when, when);
 }
 
+describe('overlap analyzers (no processes)', () => {
+  /**
+   * Strictly serial holders in true time, each stamped by its own clock.
+   *
+   * @param {string[]} pids round-robin order of holders
+   * @param {number} rounds
+   * @param {number} holdMs true time each holder spends inside
+   * @param {Record<string, number>} offsetMs per-process Date.now() offset
+   * @returns {{ spans: Array<[number, number]>, lines: string[] }}
+   */
+  function serialHolders(pids, rounds, holdMs, offsetMs) {
+    const spans = [];
+    const lines = [];
+    let t = 1000;
+    for (let r = 0; r < rounds; r++) {
+      for (const pid of pids) {
+        spans.push([t + offsetMs[pid], t + holdMs + offsetMs[pid]]);
+        lines.push(`E ${pid}`, `X ${pid}`);
+        t += holdMs;
+      }
+    }
+    return { spans, lines };
+  }
+
+  it('CI signature: skewed clocks make the wall-clock check red, the ledger stays green', () => {
+    // B entered after A left, but B's clock runs 1ms behind A's.
+    expect(wallClockOverlaps([[100, 103], [102, 106]])).toBe(1);
+    expect(ledgerViolations(['E A', 'X A', 'E B', 'X B'])).toBe(0);
+  });
+
+  it('per-process clock offsets alone produce wall-clock "overlaps" on a serial run', () => {
+    const pids = ['A', 'B', 'C', 'D'];
+    const same = serialHolders(pids, 15, 3, { A: 0, B: 0, C: 0, D: 0 });
+    const skewed = serialHolders(pids, 15, 3, { A: 0, B: 5, C: 2, D: 7 });
+
+    expect(wallClockOverlaps(same.spans)).toBe(0);
+    expect(wallClockOverlaps(skewed.spans)).toBeGreaterThan(0);
+    expect(ledgerViolations(skewed.lines)).toBe(0);
+  });
+
+  it('counts an entry while another holder is inside', () => {
+    // E B while A open, X A while B open, X B with nothing open.
+    expect(ledgerViolations(['E A', 'E B', 'X A', 'X B'])).toBe(3);
+  });
+
+  it('counts an exit by a pid that is not the open holder', () => {
+    expect(ledgerViolations(['E A', 'X B'])).toBe(1);
+  });
+
+  it('counts an exit with nothing open', () => {
+    expect(ledgerViolations(['X A'])).toBe(1);
+    expect(ledgerViolations(['E A', 'X A', 'X A'])).toBe(1);
+  });
+
+  it('counts a holder still open at the end (truncated ledger)', () => {
+    // The line-count assertion in the harness catches this too (3 != 4).
+    expect(ledgerViolations(['E A', 'X A', 'E B'])).toBe(1);
+  });
+
+  it('counts a line that is neither an entry nor an exit (torn append)', () => {
+    expect(ledgerViolations(['E A', 'X', 'E B', 'X B'])).toBeGreaterThan(0);
+    expect(ledgerViolations(['E A', 'garbage', 'X A'])).toBe(1);
+  });
+});
+
 describe('withFileLock mutual exclusion (real processes)', () => {
   it('N processes x R rounds lose no counter updates and never overlap', async () => {
     const r = await runContention({ processes: 4, rounds: 15, holdMs: 2 });
@@ -281,9 +448,28 @@ describe('withFileLock mutual exclusion (real processes)', () => {
     expect(r.badReads).toBe(0);
     expect(r.writeErrors).toBe(0);
     expect(r.overlaps).toBe(0);
-    expect(r.overlappingSpans).toBe(0);
+    expect(r.ledgerLines).toBe(2 * r.expected);
+    expect(r.ledgerViolations).toBe(0);
     expect(r.counter).toBe(r.expected);
     expect(r.lockLeft).toBe(false);
+  }, 60_000);
+
+  it('positive control: with no lock, both overlap checks catch contenders inside together', async () => {
+    // Every contender claims the marker, then waits in the section until all
+    // four are there (bounded by BARRIER_DEADLINE_MS, exit 97 past it). So all
+    // four E lines precede every X line, and the three non-first claimants
+    // each find the marker held.
+    const r = await runContention({
+      processes: 4, rounds: 1, holdMs: 0, noLock: true, inSectionBarrier: true,
+    });
+
+    expect(r.stderr).toEqual([]);
+    expect(r.exits).toEqual([0, 0, 0, 0]);
+    expect(r.ledgerLines).toBe(2 * r.expected);
+    // Four E lines before any X: 3 entries-while-open, then every X after the
+    // first finds nothing open (3), plus 1 if the first X is not the last E's pid.
+    expect(r.ledgerViolations).toBeGreaterThanOrEqual(6);
+    expect(r.overlaps).toBe(3);
   }, 60_000);
 
   it('racing reclaim of one stale lock admits one contender at a time', async () => {
@@ -301,7 +487,8 @@ describe('withFileLock mutual exclusion (real processes)', () => {
 
     expect(r.exits).toEqual([0, 0, 0, 0]);
     expect(r.overlaps).toBe(0);
-    expect(r.overlappingSpans).toBe(0);
+    expect(r.ledgerLines).toBe(2 * r.expected);
+    expect(r.ledgerViolations).toBe(0);
     expect(r.counter).toBe(4);
     expect(r.lockLeft).toBe(false);
   }, 60_000);
