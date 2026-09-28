@@ -366,8 +366,8 @@ describe('buildReviewCompletedEvent — the real writer accepts the input', () =
       expect(Object.prototype.hasOwnProperty.call(built.input.data, key), key).toBe(false);
     }
     // Deliberately widened from 3 keys to 5 on 2026-09-22. `intent_revision`
-    // and `plan_revision` are UNDECLARED for this event in the allowlist and
-    // ride through untouched, which the firewall suite already pins; they are
+    // and `plan_revision` are declared `type: integer` for this event in the
+    // allowlist (2026-09-28), which the firewall suite pins; they are
     // recorded, not required, and the fold test below states what that costs.
     expect(Object.keys(built.input.data).sort())
       .toEqual(['findings_ref', 'intent_revision', 'plan_revision', 'verdict',
@@ -1417,5 +1417,106 @@ describe('data.intent_binding — CA-17 method A', () => {
     recordReviewOutcome(recordArgs(), livePorts());
     const review = rawLines().find((l) => l.event === 'review.completed');
     expect(Object.prototype.hasOwnProperty.call(review.data, 'intent_binding')).toBe(false);
+  });
+});
+
+describe('a folded row says whether it lost keys: ledger-truncated vs ledger-folded', () => {
+  // `ledger-truncated` = the writer cut only the overflow array (`dropped: []`),
+  // so every key is still on the row. Anything else folded — keys dropped, or a
+  // result that does not say (`dropped` missing / not an array) — stays
+  // `ledger-folded`, because an unknown fold must be read as a loss.
+
+  /**
+   * Record through the given append port and keep the writer results.
+   * @param {object} args recordArgs overrides
+   * @param {(input: object) => object} port append port
+   * @returns {{out: object, results: object[]}}
+   */
+  function recordVia(args, port) {
+    const results = [];
+    const out = recordReviewOutcome(recordArgs(args), {
+      append: (input) => {
+        const res = port(input);
+        results.push(res);
+        return res;
+      },
+      existingKeys: () => [],
+    });
+    return { out, results };
+  }
+
+  it('reports ledger-truncated when redaction growth makes the writer cut only refs', () => {
+    // The builder budgets BEFORE `redactDeep`; each `pwd=abcd ` then grows by
+    // 18 B, so the admitted line is over the cap again and the writer's stage 2
+    // cuts refs. Every claim_audit key is declared, so stage 1 drops nothing.
+    const block = auditBlock({
+      subject_model: 'claude-opus-5',
+      subject_agent_id: 'agent-0123',
+      evidence_refs: Array.from({ length: 200 }, (_, i) => `pwd=abcd lib/f-${i}.js:1`),
+    });
+    const text = ['```json', JSON.stringify({ claim_audit: block }), '```', ''].join('\n');
+    const { out, results } = recordVia({ verdictText: text }, append);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ ok: true, folded: true, dropped: [] });
+    expect(results[0].truncated).toMatchObject({ field: 'evidence_refs' });
+    expect(out.claimAudit.status).toBe('appended');
+    expect(out.claimAudit.reason).toBe('ledger-truncated');
+    const [row] = rawLines();
+    expect(row.data).toMatchObject({
+      nature: 'judge', subject_model: 'claude-opus-5', subject_agent_id: 'agent-0123',
+    });
+    expect(row.data.evidence_refs.some((r) => r.startsWith('ledger-fold:evidence_refs-truncated=')))
+      .toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+  });
+
+  it('reports ledger-folded when the real writer drops keys from review.completed', () => {
+    // A cap between the unfolded and the folded line, as in the lowered-cap
+    // case above: every key is declared, so stages 1-2 have nothing to do and
+    // `foldOversized` drops the optional keys.
+    const verificationId = 'a'.repeat(VERIFICATION_ID_MAX_LENGTH);
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc({ verification_id: verificationId })),
+      sessionId: SID, missionId: MISSION, model: MODEL, findingsRef: FINDINGS_REF,
+      reviewerId: REVIEWER, intentBinding: 'match',
+    });
+    const opts = { pid: 1234, seq: 1, now: () => new Date('2026-09-23T00:00:00.000Z') };
+    const env = buildEnvelope(built.input, opts);
+    const folded = foldOversized(env, getAllowlist().events[REVIEW_COMPLETED_EVENT]).env;
+    const cap = Math.floor((lineBytes(env) + lineBytes(folded)) / 2);
+    const { out, results } = recordVia(
+      {
+        verdictText: answer({ verdict: { verification_id: verificationId }, audit: null }),
+        intentBinding: 'match',
+      },
+      (input) => appendLedgerEvent(root, input, { ...opts, ledgerPath: LEDGER_REL, maxLineBytes: cap }),
+    );
+    expect(results[0].ok).toBe(true);
+    expect(results[0].folded).toBe(true);
+    expect(results[0].dropped).toEqual(
+      ['intent_revision', 'plan_revision', 'intent_binding', 'verification_id'],
+    );
+    expect(out.review.status).toBe('appended');
+    expect(out.review.reason).toBe('ledger-folded');
+  });
+
+  it.each([
+    ['the old shape, no dropped', { ok: true, folded: true }],
+    // Empty, so only the Array.isArray check can tell it from `[]`.
+    ['dropped that is an empty string, not an array', { ok: true, folded: true, dropped: '' }],
+    ['dropped that is non-empty', { ok: true, folded: true, dropped: ['nature'] }],
+  ])('reports ledger-folded for %s', (_label, res) => {
+    const { out } = recordVia({ verdictText: answer({ audit: null }) }, () => res);
+    expect(out.review.status).toBe('appended');
+    expect(out.review.reason).toBe('ledger-folded');
+  });
+
+  it('reports a clean append when nothing was folded, whatever dropped says', () => {
+    const { out } = recordVia(
+      { verdictText: answer({ audit: null }) },
+      () => ({ ok: true, folded: false, dropped: [] }),
+    );
+    expect(out.review.status).toBe('appended');
+    expect(out.review.reason).toBeUndefined();
   });
 });

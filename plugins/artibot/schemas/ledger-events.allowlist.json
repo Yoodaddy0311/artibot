@@ -36,6 +36,12 @@
       "INTENT_REVIEW_REQUIRED",
       "BLOCK"
     ],
+    "review_intent_binding": [
+      "match",
+      "mismatch",
+      "input_absent",
+      "error"
+    ],
     "claim_nature": [
       "process",
       "judge"
@@ -87,6 +93,7 @@
     "topology_mode": "run-ledger.schema.yaml:17 (6종, verbatim).",
     "plan_mode": "lane 6 §5-② row 3.",
     "review_verdict": "design §3.4 'verdict 스키마 v2 = PASS|REPAIR_REQUIRED|REPLAN_REQUIRED|INTENT_REVIEW_REQUIRED|BLOCK (Hardening §15 로 확정)'. The vocabulary and the adapter from the 4 legacy vocabularies are owned by T-17; this file only records which values a ledger line may carry.",
+    "review_intent_binding": "lib/review/independent-reviewer.js#INTENT_BINDING_STATUSES (CA-17 method A), verbatim: the outcome of binding a verdict to the canonical intent revision. lib/review/verdict-writer.js#intentBindingValue writes one of these four or OMITS the key -- a caller that never attempted a binding is not recorded as `input_absent`, and any other caller value is written as `error`. Pinned equal to the exported constant by tests/firewall/ledger-vocab-allowlist.test.js, so the two cannot drift.",
     "claim_nature": "DESIGN-MODEL-POLICY-role-override.md §4.1 stratifies the refutation measurement by '작업 성격(process/judge)'. Fixed by owner decision MP-1 (ARTIBOT-5.0-DESIGN.md 부록 0-2 후속(3), 2026-09-04): '분리. 태깅은 작업 단위가 아니라 산출물(판정 문장) 단위' -- so one worker's report is `judge` because it CONTAINS a judgement, not because the assignment was called judgement work. A report can therefore be tagged only after it exists, which is why `nature` is optional on the event rather than required. `process` is mechanical grep / measurement; `judge` is consistency ruling, refutation, decision. The two values are the whole vocabulary: there is deliberately no `unknown` member, because an untagged report must be DROPPED from the denominator (§4.4 #4 '빈 값은 null 로 남기고 분모에서 뺀다') and a third enum value would let it be counted as its own stratum instead.",
     "verify_result": "run-ledger.schema.yaml:41 gives pass|fail. `unmeasured` is added from design §3.4 'unified-verifier status: PASS|FAIL|UNMEASURED, UNMEASURED 가 1급 상태 -- 재지 못한 층을 PASS 라 부르지 않는다'. Without it an unmeasured layer has no representable value and would have to be written as a false pass or dropped.",
     "mission_status": "package-v1.1/16_STATE_SCHEMA.yaml:27-35 (7종). Distinct from the Task Graph's 8 states (v1.1 7 + cancelled, Hardening §7-8), which T-14 owns.",
@@ -175,6 +182,7 @@
         "tool_use_id": { "type": "string" },
         "agent_id": { "type": "string" },
         "agent_type": { "type": "string" },
+        "subagent_type": { "type": "string" },
         "confidence": { "enum_ref": "route_bind_confidence" },
         "method": { "enum_ref": "route_bind_method" },
         "matched_on": { "enum_ref": "route_bind_matched_on" },
@@ -367,6 +375,15 @@
         },
         "verification_id": {
           "type": "string"
+        },
+        "intent_revision": {
+          "type": "integer"
+        },
+        "plan_revision": {
+          "type": "integer"
+        },
+        "intent_binding": {
+          "enum_ref": "review_intent_binding"
         }
       },
       "sources": [

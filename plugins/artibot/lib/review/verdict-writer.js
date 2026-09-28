@@ -84,7 +84,7 @@ export const REVIEW_LEDGER_SOURCE = 'reviewer';
  *
  * WHY A BOUND AT ALL. The id is written twice — `data.verification_id` and
  * inside `idempotency_key` — and `event-writer.js#foldOversized` drops only the
- * first, together with the undeclared `intent_revision` / `plan_revision`. An
+ * first, together with the optional `intent_revision` / `plan_revision`. An
  * id of about 1,846..3,663 chars therefore made the fold "succeed": the row
  * landed with `ok:true` and without the three keys CA-17's intent binding
  * reads (Wave 18 probe). Refusing is a visible absence; the fold was not.
@@ -280,18 +280,18 @@ export function buildReviewCompletedEvent(args = {}) {
         verdict: parsed.verdict,
         findings_ref: findingsRef,
         // The revision the verdict was formed against. OMITTED, never null:
-        // these two keys are UNDECLARED for `review.completed` in
-        // `schemas/ledger-events.allowlist.json`, so they ride through
-        // `event-writer.js#validateDeclaredFields` untouched, and a null would
-        // record "absent" as if it were a measured value. `Number.isInteger`
-        // and not a truthiness test, because revision `0` is real.
+        // both keys are declared `type: integer` for `review.completed` in
+        // `schemas/ledger-events.allowlist.json`, so a null would be refused by
+        // `event-writer.js#validateDeclaredFields` — and would record "absent"
+        // as if measured. `Number.isInteger` and not a truthiness test, because
+        // revision `0` is real.
         ...(Number.isInteger(parsed.intentRevision)
           ? { intent_revision: parsed.intentRevision }
           : {}),
         ...(Number.isInteger(parsed.planRevision)
           ? { plan_revision: parsed.planRevision }
           : {}),
-        // Undeclared too, for the same reason; a fold drops it and names it.
+        // Declared too (enum `review_intent_binding`); a fold drops it, named.
         ...(binding === null ? {} : { intent_binding: binding }),
         verification_id: parsed.verificationId,
       },
@@ -343,22 +343,22 @@ function claimAuditData(parsed) {
  * can actually produce.
  *
  * It budgets the line the way {@link buildReviewCompletedEvent} does, against
- * {@link LEDGER_LINE_MAX_BYTES} minus {@link ENVELOPE_RESERVE_BYTES}, because
- * `event-writer.js#foldOversized` keeps `evidence_refs` — the field that
- * overflows — and drops `nature`, `subject_model` and `subject_agent_id`, the
- * three §4.1 stratifies by. An input that fits is returned untouched. One that
- * does not keeps the longest PREFIX of `evidence_refs` that fits together with
- * one trailing marker, `claim-audit:evidence_refs-truncated=kept<N>/total<M>`
- * (N kept, marker not counted; M the original count), and every other key.
- * When even the marker alone does not fit — or there are no refs to cut — the
- * build is refused as `oversize:line`, which surfaces as `skipped:<reason>`.
- * `idempotency_key` is always the FULL audit's, so truncating never changes
- * which delivery a redelivery dedupes against.
+ * {@link LEDGER_LINE_MAX_BYTES} minus {@link ENVELOPE_RESERVE_BYTES}. An input
+ * that fits is returned untouched. One that does not keeps the longest PREFIX
+ * of `evidence_refs` that fits with one trailing marker,
+ * `claim-audit:evidence_refs-truncated=kept<N>/total<M>` (N kept, marker not
+ * counted; M the original count), and every other key. When even the marker
+ * alone does not fit — or there are no refs to cut — the build is refused as
+ * `oversize:line`, which surfaces as `skipped:<reason>`. `idempotency_key` is
+ * always the FULL audit's, so truncating never changes which delivery a
+ * redelivery dedupes against. (The writer's own fold no longer costs keys here:
+ * `ledger-fold.js` stage 2 cuts refs and keeps every declared key; only its last
+ * resort, `event-writer.js#foldOversized`, drops the three §4.1 stratifies by.)
  *
  * The residual is the precedent's: the budget is measured before `redactDeep`,
  * which can lengthen a field, and against the default cap, which an operator
- * can lower. Either can still fold the row; it is then reported `appended`
- * with reason `ledger-folded`, not silently.
+ * can lower. Either can still fold the row, reported `appended` with reason
+ * `ledger-truncated` (refs cut, no key lost) or `ledger-folded` — never silently.
  *
  * @param {object} [args] build inputs
  * @param {object} [args.parsed] a {@link parseClaimAudit} result
@@ -486,9 +486,13 @@ function readExistingReviewKeys(port) {
  *
  * A row the writer FOLDED is still `appended` — it is in the ledger — but
  * carries `reason: 'ledger-folded'`, so the keys it lost are reported rather
- * than read as a clean append. Both builders budget the line, which makes
- * this unreachable under the default cap for an input redaction does not
- * lengthen; what still reaches it is an operator-lowered cap and a redaction
+ * than read as a clean append. The one exception is `reason:
+ * 'ledger-truncated'`: the writer says `dropped: []`, i.e. it only cut the
+ * overflow array (`ledger-fold.js` stage 2) and ZERO keys were lost. A fold
+ * result that does not say — `dropped` missing or not an array — is read as a
+ * loss, `ledger-folded`. Both builders budget the line, which makes either
+ * unreachable under the default cap for an input redaction does not
+ * lengthen; what still reaches them is an operator-lowered cap and a redaction
  * that lengthens a string, since the budget is measured before `redactDeep`.
  *
  * @param {unknown} append `append` port
@@ -506,9 +510,9 @@ function appendReviewLine(append, input) {
     return { status: 'rejected', reason: 'port-threw:append' };
   }
   if (res && typeof res === 'object' && res.ok === true) {
-    return res.folded === true
-      ? { status: 'appended', reason: 'ledger-folded' }
-      : { status: 'appended' };
+    if (res.folded !== true) return { status: 'appended' };
+    const keysKept = Array.isArray(res.dropped) && res.dropped.length === 0;
+    return { status: 'appended', reason: keysKept ? 'ledger-truncated' : 'ledger-folded' };
   }
   const reason = res && typeof res === 'object' ? res.reason : null;
   return {

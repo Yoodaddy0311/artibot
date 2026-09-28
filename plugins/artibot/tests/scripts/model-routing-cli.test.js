@@ -477,8 +477,8 @@ describe('validate --live (reads the ledger, never writes it)', () => {
   let project;
   let ledger;
 
-  /** @returns {object} a `route.bound` line */
-  function bound(agentId, agentType, ts = '2026-09-21T01:00:00.000Z') {
+  /** @returns {object} a `route.bound` line; `extra` overrides `data` columns (e.g. `subagent_type`) */
+  function bound(agentId, agentType, ts = '2026-09-21T01:00:00.000Z', extra = {}) {
     seq += 1;
     return {
       v: 1, ts, event: 'route.bound', session_id: SESSION, source: 'hook', pid: 4242, seq,
@@ -487,6 +487,7 @@ describe('validate --live (reads the ledger, never writes it)', () => {
         tool_use_id: `toolu_${agentId}`, agent_id: agentId, confidence: 'exact', method: 'prompt_id+name',
         ...(agentType === null ? {} : { agent_type: agentType }),
         matched_on: 'name', recommended_model: OPUS_ID, action_class: 'implement',
+        ...extra,
       },
     };
   }
@@ -580,7 +581,7 @@ describe('validate --live (reads the ledger, never writes it)', () => {
     expect(r.stdout).toContain('denominators: binds 5 · joined 4 · subagent_runs 5 · measured 3');
     expect(r.stdout).toMatch(/honored_of_measured\s+2\/3\s+66\.7%/);
     expect(r.stdout).toContain('verdicts: honored 2 · unhonored 1 · unmeasured 1');
-    expect(r.stdout).toContain('unhonored artibot:architect: expected opus [shipped] served sonnet (claude-sonnet-5)');
+    expect(r.stdout).toContain('unhonored artibot:architect (judged artibot:architect): expected opus [shipped] served sonnet (claude-sonnet-5)');
     expect(r.stdout.match(/^caveat: /gm)).toHaveLength(3);
     expect(run(['validate', '--live', '--cwd', project]).stdout).toBe(r.stdout);
   });
@@ -658,6 +659,29 @@ describe('validate --live (reads the ledger, never writes it)', () => {
     const cwd = run(['validate', '--cwd', project]);
     expect(cwd.code).toBe(2);
     expect(cwd.stderr).toContain('--cwd is only valid with --live');
+  });
+
+  it('names the judged agent per row: a named spawn on its subagent_type, a plain spawn on its agent_type', { timeout: TIMEOUT }, () => {
+    // a6: teammate spawn, bind matched by the caller's NAME -> judged on subagent_type.
+    // a7: same shape but matched on subagent_type -> no fallback, judged on the bare host value.
+    const named = { subagent_type: 'artibot:architect', matched_on: 'name' };
+    writeLedger([
+      ...baseLines(),
+      bound('a6', 'impl-a', undefined, named), receipt('agent-a6', SONNET_ID),
+      bound('a7', 'code-reviewer', undefined, { subagent_type: 'artibot:code-reviewer', matched_on: 'subagent_type' }),
+      receipt('agent-a7', SONNET_ID),
+    ]);
+    const { json } = live('--json');
+    expect(json.overridesFile.startsWith(root)).toBe(true);
+    const byId = Object.fromEntries(json.rows.map((r) => [r.agent_id, [r.judged_agent, r.judged_on, r.verdict]]));
+    expect(byId.a2).toEqual(['artibot:architect', 'agent_type', 'unhonored']);
+    expect(byId.a6).toEqual(['artibot:architect', 'subagent_type', 'unhonored']);
+    expect(byId.a7).toEqual(['code-reviewer', 'agent_type', 'unmeasured']);
+    expect(json.rows.every((r) => Object.hasOwn(r, 'judged_agent'))).toBe(true);
+    const text = live().stdout;
+    expect(text).toContain('unhonored artibot:architect (judged artibot:architect): expected opus');
+    expect(text).toContain('unhonored impl-a (judged artibot:architect): expected opus [shipped] served sonnet');
+    expect(text.match(/^unhonored /gm)).toHaveLength(2);
   });
 
   it("judges each spawn under its agent's DEFAULT task override", { timeout: TIMEOUT }, () => {

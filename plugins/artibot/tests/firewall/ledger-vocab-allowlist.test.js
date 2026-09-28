@@ -55,6 +55,7 @@ import { SOURCES } from '../../lib/supervisor/event-types.js';
 import {
   EVENT_RE,
   getAllowlist,
+  lineBytes,
   MISSION_ID_RE,
   OPTIONAL_ENVELOPE_KEYS,
   REJECTED_EVENT,
@@ -64,11 +65,17 @@ import {
   validateAgainstSchema,
   writeEvent,
 } from '../../lib/runtime/event-writer.js';
+import { shrinkToFit } from '../../lib/runtime/ledger-fold.js';
 import { readAllEvents } from '../../lib/runtime/ledger.js';
 import {
   buildQuestionGateData,
   QUESTION_GATE_EVENT,
 } from '../../lib/runtime/question-gate-record.js';
+import {
+  INTENT_BINDING_STATUSES,
+  parseReviewVerdict,
+} from '../../lib/review/independent-reviewer.js';
+import { buildReviewCompletedEvent } from '../../lib/review/verdict-writer.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.join(HERE, '..', '..');
@@ -440,6 +447,197 @@ describe('adr.question_gate_evaluated declares every key its recorder emits', ()
     const res = record(data);
     expect(res.ok).toBe(false);
     expect(res.reason).toBe('missing-required-data:interpretation_present');
+  });
+});
+
+describe('route.bound and review.completed declare every optional key their writers emit', () => {
+  // WHAT DECLARING BUYS, AND WHAT IT DOES NOT. A declared key is type- and
+  // enum-checked, and fold stage 1 (`ledger-fold.js#shrinkToFit`) keeps it
+  // while it drops undeclared ones. That is ALL. Neither event has an overflow
+  // array, so stage 2 has nothing to cut; and once every key these writers
+  // emit is declared, stage 1 has nothing to drop either. An oversized line of
+  // either event therefore ends in `event-writer.js#foldOversized`, which keeps
+  // REQUIRED keys only — declared or not. End-to-end preservation holds only
+  // when dropping the undeclared keys alone brings the line under the cap;
+  // if declared keys are large too, all non-required keys go (pinned both ways).
+  const BINDING = 'review_intent_binding';
+
+  /**
+   * A route.bound input shaped like `subagent-handler.js#bindRoute`'s output.
+   * @param {object} [data] data overrides
+   * @returns {object}
+   */
+  function routeBound(data = {}) {
+    return {
+      event: 'route.bound',
+      session_id: 'sess-vocab-0001',
+      mission_id: 'M-20260902-001',
+      routing_epoch_id: 'agent-abc123',
+      run_id: 'agent-abc123',
+      action_id: 'toolu_01',
+      source: 'hook',
+      data: {
+        tool_use_id: 'toolu_01',
+        agent_id: 'agent-abc123',
+        confidence: 'exact',
+        method: 'prompt_id+name',
+        agent_type: 'implB',
+        subagent_type: 'artibot:tdd-guide',
+        matched_on: 'name',
+        selected_model: 'opus',
+        action_class: 'implement',
+        ...data,
+      },
+    };
+  }
+
+  /**
+   * A review.completed input from the REAL builder.
+   * @param {object} [over] v2 document overrides
+   * @param {string} [intentBinding]
+   * @returns {object}
+   */
+  function reviewCompleted(over = {}, intentBinding = undefined) {
+    const doc = {
+      schema_version: 2,
+      verdict: 'PASS',
+      findings: [],
+      evidence: [{ kind: 'file', file: 'lib/review/independent-reviewer.js', line: 1 }],
+      recommended_action: 'proceed',
+      mission_id: 'M-20260902-001',
+      intent_revision: 3,
+      plan_revision: 1,
+      diff_ref: 'HEAD~1..HEAD',
+      test_evidence: [{ kind: 'command', command: 'npx vitest run', output: 'ok' }],
+      regression_evidence: [{ kind: 'command', command: 'npx vitest run', output: 'ok' }],
+      verification_id: 'v1-abc',
+      next_steps: [],
+      ...over,
+    };
+    const built = buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(doc),
+      sessionId: 'sess-vocab-0001',
+      missionId: 'M-20260902-001',
+      model: 'claude-opus-5-5',
+      findingsRef: 'review.md',
+      intentBinding,
+    });
+    expect(built.ok).toBe(true);
+    return built.input;
+  }
+
+  /** @param {object} input @param {object} data @returns {object} */
+  const withData = (input, data) => ({ ...input, data: { ...input.data, ...data } });
+
+  /** @param {object} spec @param {string} key @returns {object} spec minus one field */
+  function undeclare(spec, key) {
+    const fields = { ...spec.fields };
+    delete fields[key];
+    return { ...spec, fields };
+  }
+
+  it('keeps the review_intent_binding enum equal to the reviewer vocabulary', () => {
+    expect(getAllowlist().enums[BINDING]).toEqual([...INTENT_BINDING_STATUSES]);
+    expect(INTENT_BINDING_STATUSES.length).toBeGreaterThan(0);
+  });
+
+  it.each(INTENT_BINDING_STATUSES)('accepts a real review.completed built with intent_binding %s', (s) => {
+    const input = reviewCompleted({}, s);
+    expect(input.data).toMatchObject({ intent_revision: 3, plan_revision: 1, intent_binding: s });
+    expect(writeEvent(root, input).ok).toBe(true);
+    expect(readAllEvents(root)[0].data.intent_binding).toBe(s);
+  });
+
+  it('accepts revision 0, which is a real revision', () => {
+    const input = reviewCompleted({ intent_revision: 0, plan_revision: 0 });
+    expect(input.data).toMatchObject({ intent_revision: 0, plan_revision: 0 });
+    expect(writeEvent(root, input).ok).toBe(true);
+  });
+
+  it('accepts a route.bound shaped like bindRoute output, subagent_type included', () => {
+    expect(writeEvent(root, routeBound()).ok).toBe(true);
+    expect(readAllEvents(root)[0].data.subagent_type).toBe('artibot:tdd-guide');
+  });
+
+  it.each([
+    ['intent_binding outside the vocabulary', () => withData(reviewCompleted(), { intent_binding: 'bogus' }),
+      'enum-violation:intent_binding'],
+    ['intent_revision as a string', () => withData(reviewCompleted(), { intent_revision: '3' }),
+      'type-violation:intent_revision'],
+    ['plan_revision as a fraction', () => withData(reviewCompleted(), { plan_revision: 1.5 }),
+      'type-violation:plan_revision'],
+    ['subagent_type as a number', () => routeBound({ subagent_type: 5 }),
+      'type-violation:subagent_type'],
+  ])('refuses %s, and records the refusal', (_label, make, reason) => {
+    const res = writeEvent(root, make());
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe(reason);
+    const rejected = readAllEvents(root, { includeRejected: true });
+    expect(rejected.map((e) => e.data.reason)).toEqual([reason]);
+    expect(readAllEvents(root)).toHaveLength(0);
+  });
+
+  it('negative control: a raw out-of-vocabulary intent_binding is refused, not appended', () => {
+    const res = writeEvent(root, withData(reviewCompleted(), { intent_binding: 'unknown' }));
+    expect(res).toMatchObject({ ok: false, reason: 'enum-violation:intent_binding' });
+    expect(readAllEvents(root)).toHaveLength(0);
+  });
+
+  it('the CA-17 builder demotes an unknown raw binding to error, and the line is accepted', () => {
+    // `verdict-writer.js#intentBindingValue` maps anything outside the
+    // vocabulary to 'error'. Without that demotion the enum above would turn a
+    // failed binding into a refused, unrecorded verdict.
+    const input = reviewCompleted({}, 'unknown');
+    expect(input.data.intent_binding).toBe('error');
+    expect(writeEvent(root, input).ok).toBe(true);
+    const lines = readAllEvents(root, { includeRejected: true });
+    expect(lines.map((e) => e.event)).toEqual(['review.completed']);
+    expect(lines[0].data.intent_binding).toBe('error');
+  });
+
+  describe('fold stage 1 keeps the declared keys and drops an undeclared filler', () => {
+    const CASES = [
+      ['review.completed', () => reviewCompleted({}, 'mismatch'),
+        ['intent_revision', 'plan_revision', 'intent_binding']],
+      ['route.bound', () => routeBound(), ['subagent_type']],
+    ];
+    const opts = { maxLineBytes: 4096, overflowField: 'evidence_refs', measure: lineBytes };
+
+    it.each(CASES)('%s: declared keys survive, the filler goes', (event, make, keys) => {
+      const input = withData(make(), { filler_undeclared: 'x'.repeat(5000) });
+      const res = shrinkToFit(input, getAllowlist().events[event], opts);
+      expect(res.folded).toBe(true);
+      expect(res.dropped).toEqual(['filler_undeclared']);
+      for (const k of keys) expect(res.env.data[k], k).toEqual(input.data[k]);
+    });
+
+    it.each(CASES)('%s positive control: each key is dropped once undeclared', (event, make, keys) => {
+      const input = withData(make(), { filler_undeclared: 'x'.repeat(5000) });
+      for (const k of keys) {
+        const res = shrinkToFit(input, undeclare(getAllowlist().events[event], k), opts);
+        expect(res.dropped, k).toEqual([k, 'filler_undeclared']);
+        expect(Object.hasOwn(res.env.data, k), k).toBe(false);
+      }
+    });
+
+    it.each(CASES)('%s end to end: the real writer keeps them past a long filler', (event, make, keys) => {
+      const input = withData(make(), { filler_undeclared: 'x'.repeat(5000) });
+      const res = writeEvent(root, input);
+      expect(res).toMatchObject({ ok: true, folded: true, dropped: ['filler_undeclared'] });
+      const [line] = readAllEvents(root);
+      for (const k of keys) expect(line.data[k], k).toEqual(input.data[k]);
+    });
+  });
+
+  it('does NOT keep them when a declared key is what overflows (foldOversized)', () => {
+    // A RECORD OF CURRENT BEHAVIOUR: nothing to drop in stage 1, nothing to cut
+    // in stage 2, so the last-resort fold keeps `verdict` and `findings_ref`.
+    const input = withData(reviewCompleted({}, 'match'), { verification_id: 'v'.repeat(5000) });
+    const res = writeEvent(root, input);
+    expect(res.ok).toBe(true);
+    expect(res.dropped).toEqual(['intent_revision', 'plan_revision', 'intent_binding', 'verification_id']);
+    expect(Object.keys(readAllEvents(root)[0].data).sort())
+      .toEqual(['evidence_refs', 'findings_ref', 'verdict']);
   });
 });
 

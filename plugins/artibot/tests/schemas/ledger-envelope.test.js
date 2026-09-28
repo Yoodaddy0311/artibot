@@ -421,6 +421,38 @@ describe('event vocabulary — the allowlist is the single source of truth', () 
     });
     expect(checkAgainstAllowlist(settled).ok).toBe(true);
   });
+
+  it('declares the optional keys route.bound and review.completed writers emit', () => {
+    // subagent-handler.js#bindRoute writes subagent_type; verdict-writer.js
+    // #buildReviewCompletedEvent writes intent_revision, plan_revision and
+    // intent_binding. Each is present or OMITTED, never null, so no spec
+    // admits null. Declared, not required: every writer omits them sometimes.
+    const bound = allowlist.events['route.bound'];
+    expect(bound.fields.subagent_type).toEqual({ type: 'string' });
+    expect(bound.required).not.toContain('subagent_type');
+    const review = allowlist.events['review.completed'];
+    expect(review.fields.intent_revision).toEqual({ type: 'integer' });
+    expect(review.fields.plan_revision).toEqual({ type: 'integer' });
+    expect(review.fields.intent_binding).toEqual({ enum_ref: 'review_intent_binding' });
+    expect(review.required).toEqual(['verdict', 'findings_ref']);
+    expect(allowlist.enums.review_intent_binding)
+      .toEqual(['match', 'mismatch', 'input_absent', 'error']);
+  });
+
+  it('rejects a review.completed intent_binding outside its vocabulary', () => {
+    const line = (intentBinding) => baseEnvelope({
+      event: 'review.completed',
+      source: 'reviewer',
+      model: 'claude-opus-5-5',
+      data: { verdict: 'PASS', findings_ref: 'review.md', intent_binding: intentBinding },
+    });
+    expect(checkAgainstAllowlist(line('bogus'))).toEqual({
+      ok: false,
+      reason: 'bad_enum_value',
+      key: 'intent_binding',
+    });
+    expect(checkAgainstAllowlist(line('input_absent')).ok).toBe(true);
+  });
 });
 
 describe('data_schema — the receipt schema validates the event data', () => {
