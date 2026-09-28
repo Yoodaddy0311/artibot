@@ -171,3 +171,53 @@ describe('createLease / renewLease', () => {
     expect(renewLease(lease, { now: T0 }).expires_at).toBe(lease.expires_at);
   });
 });
+
+describe('renewLease — the default lifetime is fixed, not cumulative', () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  const iso = (ms) => new Date(ms).toISOString();
+
+  it('grants exactly the original 24h at every link of a renewal chain', () => {
+    let lease = createLease({ owner: 'w1', now: T0, ttlMs: DAY });
+    for (const at of [T0 + HOUR, T0 + 2 * HOUR, T0 + 3 * HOUR]) {
+      lease = renewLease(lease, { now: at });
+      expect(lease.expires_at).toBe(iso(at + DAY));
+      expect(Date.parse(lease.expires_at) - Date.parse(lease.heartbeat_at)).toBe(DAY);
+    }
+    expect(lease.acquired_at).toBe(iso(T0));
+  });
+
+  it('honours an explicit ttlMs, and later default renewals keep that grant', () => {
+    const lease = createLease({ owner: 'w1', now: T0, ttlMs: DAY });
+    const shortened = renewLease(lease, { now: T0 + HOUR, ttlMs: 5 * 60_000 });
+    expect(shortened.expires_at).toBe(iso(T0 + HOUR + 5 * 60_000));
+    expect(renewLease(shortened, { now: T0 + 2 * HOUR }).expires_at).toBe(iso(T0 + 2 * HOUR + 5 * 60_000));
+  });
+
+  it('renews an old lease with no heartbeat_at by its original lifetime', () => {
+    const { heartbeat_at: _dropped, ...old } = createLease({ owner: 'w1', now: T0, ttlMs: DAY });
+    expect(renewLease(old, { now: T0 + HOUR }).expires_at).toBe(iso(T0 + HOUR + DAY));
+  });
+
+  it('renews a never-renewed lease (heartbeat_at == acquired_at) by its original lifetime', () => {
+    const lease = createLease({ owner: 'w1', now: T0, ttlMs: DAY });
+    expect(lease.heartbeat_at).toBe(lease.acquired_at);
+    expect(renewLease(lease, { now: T0 + HOUR }).expires_at).toBe(iso(T0 + HOUR + DAY));
+  });
+
+  it.each([
+    ['heartbeat_at at expires_at', iso(T0 + DAY)],
+    ['heartbeat_at after expires_at', iso(T0 + 2 * DAY)],
+    ['an unparseable heartbeat_at', 'not-a-date'],
+  ])('falls back to expires_at - acquired_at on %s, and the renewal heals the record', (_label, beat) => {
+    const damaged = { ...createLease({ owner: 'w1', now: T0, ttlMs: DAY }), heartbeat_at: beat };
+    const renewed = renewLease(damaged, { now: T0 + HOUR });
+    expect(renewed.expires_at).toBe(iso(T0 + HOUR + DAY));
+    expect(renewLease(renewed, { now: T0 + 2 * HOUR }).expires_at).toBe(iso(T0 + 2 * HOUR + DAY));
+  });
+
+  it('still throws on an unparseable acquired_at, as before', () => {
+    const lease = { ...createLease({ owner: 'w1', now: T0, ttlMs: DAY }), acquired_at: 'nope' };
+    expect(() => renewLease(lease, { now: T0 + HOUR })).toThrow(/acquired_at is not a parseable/);
+  });
+});
