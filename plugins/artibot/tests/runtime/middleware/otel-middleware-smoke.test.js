@@ -5,6 +5,8 @@ import {
   createOtelMiddleware,
   resolveOtelConfig,
 } from '../../../lib/runtime/middleware/otel-middleware.js';
+import { createCacheRoiMiddleware } from '../../../lib/runtime/middleware/cache-roi.js';
+import { createOtelExporter } from '../../../lib/observability/otel-exporter.js';
 
 describe('otel-middleware (smoke)', () => {
   it('resolveOtelConfig returns object with enabled flag', () => {
@@ -100,5 +102,88 @@ describe('otel-middleware (smoke)', () => {
     expect(built.length).toBeGreaterThan(0);
     expect(built[0]['artibot.agent_id']).toBe('backend-developer');
     expect(built[0]['artibot.parent_agent_id']).toBe('orchestrator');
+  });
+});
+
+// Real path: cache-roi middleware → otel middleware → exporter payload.
+// Only the HTTP transport is stubbed; the span is read from the posted body.
+async function exportPipelineSpan(model) {
+  const posts = [];
+  const exporter = createOtelExporter({
+    enabled: true,
+    endpoint: 'http://127.0.0.1:4318',
+    httpPost: async (url, payload) => {
+      posts.push({ url, payload });
+      return { ok: true, status: 200, body: '' };
+    },
+    warn: () => {},
+  });
+  const cacheRoi = createCacheRoiMiddleware({ enabled: true, persist: async () => {} });
+  const otel = createOtelMiddleware({ exporter, now: () => 1_700_000_000_000 });
+  const state = {
+    context: { backend: { selected: model } },
+    response: {
+      usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 300, cache_creation_input_tokens: 0 },
+    },
+  };
+  await cacheRoi(state);
+  await otel(state);
+  const trace = posts.find((p) => p.url.endsWith('/v1/traces'));
+  return { span: trace.payload.resourceSpans[0].scopeSpans[0].spans[0], cacheRoi: state.context.cacheRoi };
+}
+
+function attrValue(span, key) {
+  return span.attributes.find((kv) => kv.key === key)?.value;
+}
+
+describe('otel-middleware — unpriced cache attributes', () => {
+  it('omits null dollar attributes from the exported span instead of sending empty strings', async () => {
+    const { span, cacheRoi } = await exportPipelineSpan('claude-opus-x');
+    expect(cacheRoi.current.savedCostUsd).toBeNull();
+    expect(cacheRoi.current.spentCostUsd).toBeNull();
+    const keys = span.attributes.map((kv) => kv.key);
+    expect(keys).not.toContain('artibot.cache.saved_usd');
+    expect(keys).not.toContain('artibot.cache.spent_usd');
+    expect(span.attributes.filter((kv) => kv.value.stringValue === '')).toEqual([]);
+  });
+
+  it('exports the session unpriced request count as an int attribute', async () => {
+    const { span } = await exportPipelineSpan('claude-opus-x');
+    expect(attrValue(span, 'artibot.cache.unpriced_request_count')).toEqual({ intValue: '1' });
+  });
+
+  it('keeps the priced cache attributes and values as before', async () => {
+    const { span, cacheRoi } = await exportPipelineSpan('claude-opus-5-5');
+    expect(attrValue(span, 'artibot.cache.hit_rate')).toEqual({ doubleValue: 0.75 });
+    expect(attrValue(span, 'artibot.cache.saved_usd')).toEqual({ doubleValue: cacheRoi.current.savedCostUsd });
+    expect(attrValue(span, 'artibot.cache.spent_usd')).toEqual({ doubleValue: cacheRoi.current.spentCostUsd });
+    expect(cacheRoi.current.savedCostUsd).toBeGreaterThan(0);
+  });
+
+  it('reports a zero unpriced count for a priced session', async () => {
+    const { span } = await exportPipelineSpan('claude-opus-5-5');
+    expect(attrValue(span, 'artibot.cache.unpriced_request_count')).toEqual({ intValue: '0' });
+  });
+
+  it('does not set null cache values on the attribute object handed to buildSpan', () => {
+    let captured = null;
+    const fakeExporter = {
+      buildSpan: (args) => { captured = args; return {}; },
+    };
+    const state = {
+      context: {
+        cacheRoi: {
+          enabled: true,
+          current: { hitRate: null, savedCostUsd: null, spentCostUsd: null },
+          session: {},
+        },
+      },
+    };
+    buildPipelineSpan(state, { startMs: 0, endMs: 1 }, fakeExporter, () => 0.5);
+    expect(captured.attributes).not.toHaveProperty('artibot.cache.hit_rate');
+    expect(captured.attributes).not.toHaveProperty('artibot.cache.saved_usd');
+    expect(captured.attributes).not.toHaveProperty('artibot.cache.spent_usd');
+    // A session persisted before the counter existed has no count — absent, not 0.
+    expect(captured.attributes).not.toHaveProperty('artibot.cache.unpriced_request_count');
   });
 });
