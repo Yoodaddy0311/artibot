@@ -36,7 +36,7 @@
  *
  * ── What green tests here do NOT prove ─────────────────────────────────────
  *  1. That any reviewer agent emits either block. A production caller DOES
- *     exist — `scripts/hooks/_review-stop-record.js:573` calls
+ *     exist — `scripts/hooks/_review-stop-record.js#recordReviewFromStop` calls
  *     `recordReviewOutcome` on SubagentStop (read 2026-09-22) — so the old
  *     "no production caller yet" note here was stale. What stays unproven is
  *     that a real agent hands that caller a parseable block.
@@ -53,6 +53,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  INTENT_BINDING_STATUSES,
   isNonEmptyArray,
   isNonEmptyString,
   MISSION_ID_PATTERN,
@@ -153,6 +154,28 @@ export function reviewCompletedIdempotencyKey(sessionId, verificationId) {
 }
 
 /**
+ * The `data.intent_binding` value for a caller's binding status, or null to
+ * omit the key.
+ *
+ * `undefined` OMITS, and that is not the same as `'input_absent'`. The status
+ * says "a binding was attempted and had no input to compare"; a caller that
+ * never attempted one (every caller but the SubagentStop hook, today) must not
+ * be recorded as having tried. It also keeps the row byte-identical for those
+ * callers.
+ *
+ * Anything else outside {@link INTENT_BINDING_STATUSES} is written as `'error'`
+ * rather than dropped or thrown: a caller that meant to bind and handed over
+ * garbage is a failed binding, and a missing key would read as "never tried".
+ *
+ * @param {unknown} status caller-supplied binding status
+ * @returns {string|null} an allowlisted status, or null when none was given
+ */
+function intentBindingValue(status) {
+  if (status === undefined) return null;
+  return INTENT_BINDING_STATUSES.includes(/** @type {string} */ (status)) ? status : 'error';
+}
+
+/**
  * Idempotency key for one `review.claim_audit` line.
  *
  * An audit block has no id of its own, so the identity is a digest of the
@@ -222,11 +245,14 @@ export function claimAuditIdempotencyKey(sessionId, audit) {
  * @param {string} [args.model] envelope `model`; REQUIRED by the allowlist here
  * @param {string} [args.findingsRef] path of the findings document
  * @param {string} [args.reviewerId] envelope `worker`; omitted when absent
+ * @param {string} [args.intentBinding] CA-17 binding status, written as
+ *   `data.intent_binding`; see {@link intentBindingValue}
  * @returns {{ok: true, input: object}|{ok: false, reason: string}} build outcome
  */
 export function buildReviewCompletedEvent(args = {}) {
   const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
   const { parsed, sessionId, missionId, model, findingsRef, reviewerId } = a;
+  const binding = intentBindingValue(a.intentBinding);
   if (!parsed || typeof parsed !== 'object' || parsed.ok !== true) {
     return { ok: false, reason: 'verdict-not-admissible' };
   }
@@ -265,6 +291,8 @@ export function buildReviewCompletedEvent(args = {}) {
         ...(Number.isInteger(parsed.planRevision)
           ? { plan_revision: parsed.planRevision }
           : {}),
+        // Undeclared too, for the same reason; a fold drops it and names it.
+        ...(binding === null ? {} : { intent_binding: binding }),
         verification_id: parsed.verificationId,
       },
     },
@@ -542,6 +570,8 @@ function recordReviewLine(built, seen, append) {
  * @param {string} [args.reviewerId] envelope `worker`
  * @param {Function} [args.validateSchema] optional validator port, forwarded to
  *   {@link parseReviewVerdict}
+ * @param {string} [args.intentBinding] forwarded to
+ *   {@link buildReviewCompletedEvent}; the audit line never carries it
  * @param {object} [ports] I/O ports
  * @param {(input: object) => object} [ports.append] `appendLedgerEvent` bound
  *   to a project root
@@ -567,6 +597,7 @@ export function recordReviewOutcome(args, ports) {
     model: a.model,
     findingsRef: a.findingsRef,
     reviewerId: a.reviewerId,
+    intentBinding: a.intentBinding,
   });
   const claimAudit = buildClaimAuditEvent({
     parsed: parsed.claimAudit,

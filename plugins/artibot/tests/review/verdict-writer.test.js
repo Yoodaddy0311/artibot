@@ -37,7 +37,7 @@
  *
  * ── What this suite does NOT prove ─────────────────────────────────────────
  *  - That a real reviewer agent emits either block. A production caller DOES
- *    exist now — `scripts/hooks/_review-stop-record.js:573` calls
+ *    exist now — `scripts/hooks/_review-stop-record.js#recordReviewFromStop` calls
  *    `recordReviewOutcome` on SubagentStop (read 2026-09-22) — so the old
  *    "no production caller yet" line here was stale. Green still says the
  *    writer accepts what this module builds, not that an agent builds it.
@@ -275,7 +275,7 @@ describe('parseReviewVerdict exposes verification_id', () => {
     }
   });
 
-  it('exposes exactly these 9 keys and no others on an admissible document', () => {
+  it('exposes exactly these 10 keys and no others on an admissible document', () => {
     // Exactness, not presence: the test above cannot see a key being ADDED, and
     // a new field on the parse result is a decision this writer has to make
     // (hash it into an idempotency key, put it in `data`, or ignore it). Failing
@@ -285,10 +285,15 @@ describe('parseReviewVerdict exposes verification_id', () => {
     // Deliberately raised from 7 to 9 on 2026-09-22: `intentRevision` and
     // `planRevision` were added to the parse result, and the decision this pin
     // forces has been made — both go into `data`, see the key list below.
+    // Raised from 9 to 10 on 2026-09-28 (CA-17, leader-approved): `missionId`
+    // was added, and this writer does NOT put it into `data`: the SubagentStop
+    // hook reads it only to key the intent binding (`_review-stop-record.js`).
+    // The envelope `mission_id` stays the stop's own id.
     expect(Object.keys(parseReviewVerdict(v2Doc())).sort()).toEqual([
       'errors',
       'foldedVerdict',
       'intentRevision',
+      'missionId',
       'ok',
       'planRevision',
       'schemaVersion',
@@ -1328,5 +1333,89 @@ describe('recordReviewOutcome — never throws', () => {
     expect(out.review.status).toBe('deduped');
     expect(out.claimAudit.status).toBe('appended');
     expect(rawLines()).toHaveLength(1);
+  });
+});
+
+describe('data.intent_binding — CA-17 method A', () => {
+  // The vocabulary is spelled out here rather than imported, so that a change
+  // to `independent-reviewer.js#INTENT_BINDING_STATUSES` fails this pin
+  // instead of silently redefining what the writer is tested against.
+  const STATUSES = ['match', 'mismatch', 'input_absent', 'error'];
+
+  /**
+   * @param {object} [over] extra build arguments
+   * @returns {object} a `buildReviewCompletedEvent` result
+   */
+  function build(over = {}) {
+    return buildReviewCompletedEvent({
+      parsed: parseReviewVerdict(v2Doc()),
+      sessionId: SID,
+      missionId: MISSION,
+      model: MODEL,
+      findingsRef: FINDINGS_REF,
+      ...over,
+    });
+  }
+
+  it.each(STATUSES)('writes %s verbatim and the real writer accepts it', (status) => {
+    const built = build({ intentBinding: status });
+    expect(built.ok).toBe(true);
+    expect(built.input.data.intent_binding).toBe(status);
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+    const lines = rawLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0].data.intent_binding).toBe(status);
+  });
+
+  it('omits the key when no binding is given, leaving the pinned key set as it was', () => {
+    const built = build();
+    expect(Object.prototype.hasOwnProperty.call(built.input.data, 'intent_binding')).toBe(false);
+    expect(Object.keys(built.input.data).sort())
+      .toEqual(['findings_ref', 'intent_revision', 'plan_revision', 'verdict',
+        'verification_id']);
+  });
+
+  it.each([
+    ['an unknown word', 'bogus'],
+    ['a case variant', 'MATCH'],
+    ['an empty string', ''],
+    ['null', null],
+    ['a number', 1],
+    ['the binder result object instead of its status', { status: 'match' }],
+  ])('downgrades %s to error and still writes the row', (_label, value) => {
+    const built = build({ intentBinding: value });
+    expect(built.ok).toBe(true);
+    expect(built.input.data.intent_binding).toBe('error');
+    expect(append(built.input).ok).toBe(true);
+    expect(rejectedLines()).toHaveLength(0);
+    expect(rawLines()[0].data.intent_binding).toBe('error');
+  });
+
+  it('does not move the idempotency key', () => {
+    const keys = [undefined, ...STATUSES].map((s) => build({ intentBinding: s }).input.idempotency_key);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it('writes no review.completed row for an inadmissible verdict, binding or not', () => {
+    const built = build({ parsed: parseReviewVerdict('APPROVE'), intentBinding: 'match' });
+    expect(built).toEqual({ ok: false, reason: 'verdict-not-admissible' });
+  });
+
+  it('is forwarded by recordReviewOutcome onto the verdict row only', () => {
+    const out = recordReviewOutcome(recordArgs({ intentBinding: 'mismatch' }), livePorts());
+    expect(out.review.status).toBe('appended');
+    expect(out.claimAudit.status).toBe('appended');
+    expect(rejectedLines()).toHaveLength(0);
+    const review = rawLines().find((l) => l.event === 'review.completed');
+    const audit = rawLines().find((l) => l.event === 'review.claim_audit');
+    expect(review.data.intent_binding).toBe('mismatch');
+    expect(Object.prototype.hasOwnProperty.call(audit.data, 'intent_binding')).toBe(false);
+  });
+
+  it('is absent from the row recordReviewOutcome writes without one', () => {
+    recordReviewOutcome(recordArgs(), livePorts());
+    const review = rawLines().find((l) => l.event === 'review.completed');
+    expect(Object.prototype.hasOwnProperty.call(review.data, 'intent_binding')).toBe(false);
   });
 });
