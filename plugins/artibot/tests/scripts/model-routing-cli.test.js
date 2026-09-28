@@ -466,3 +466,197 @@ describe('usage errors (exit 2, one stderr line, nothing written)', () => {
     expectUsage(['frobnicate']);
   });
 });
+
+describe('validate --live (reads the ledger, never writes it)', () => {
+  // Line shapes copied from tests/replay/spawn-outcome.test.js (`bound`,
+  // `receipt`): the live envelope keys, trimmed of columns this fold never reads.
+  const SESSION = 'sess-live-1';
+  const OPUS_ID = 'claude-opus-5-5';
+  const SONNET_ID = 'claude-sonnet-5';
+  let seq = 0;
+  let project;
+  let ledger;
+
+  /** @returns {object} a `route.bound` line */
+  function bound(agentId, agentType, ts = '2026-09-21T01:00:00.000Z') {
+    seq += 1;
+    return {
+      v: 1, ts, event: 'route.bound', session_id: SESSION, source: 'hook', pid: 4242, seq,
+      routing_epoch_id: agentId, run_id: agentId, action_id: `toolu_${agentId}`,
+      data: {
+        tool_use_id: `toolu_${agentId}`, agent_id: agentId, confidence: 'exact', method: 'prompt_id+name',
+        ...(agentType === null ? {} : { agent_type: agentType }),
+        matched_on: 'name', recommended_model: OPUS_ID, action_class: 'implement',
+      },
+    };
+  }
+
+  /** @returns {object} a `usage.receipt` line */
+  function receipt(runId, model, ts = '2026-09-21T01:05:00.000Z') {
+    seq += 1;
+    return {
+      v: 1, ts, event: 'usage.receipt', session_id: SESSION, source: 'hook', pid: 4242, seq,
+      run_id: runId, model, idempotency_key: `usage.receipt:${SESSION}:${runId}:${model}`,
+      data: {
+        schema_version: 1, run_id: runId,
+        model_identity: { provider: 'anthropic', family: 'claude', tier: 'high', model_id: model, version: '1', catalog_version: '5' },
+        usage: { source: 'transcript', fresh_input_tokens: 1, output_tokens: 1, requests: 1 },
+        outcome: { status: 'unknown', accepted: null },
+        cost: { total: null, pricing_version: 'unresolved' },
+      },
+    };
+  }
+
+  /** The base ledger: 2 honored, 1 unhonored, 1 unmeasured, 1 unjoined bind, 1 unjoined receipt. */
+  function baseLines() {
+    return [
+      bound('a1', 'artibot:planner'), receipt('agent-a1', OPUS_ID),
+      bound('a2', 'artibot:architect'), receipt('agent-a2', SONNET_ID),
+      bound('a3', 'Explore'), receipt('agent-a3', OPUS_ID),
+      bound('a4', 'artibot-cowork:planner'), receipt('agent-a4', SONNET_ID),
+      bound('a5', 'artibot:doc-updater'),
+      receipt('agent-a9', OPUS_ID),
+      receipt(SESSION, OPUS_ID), // main thread: in no denominator
+    ];
+  }
+
+  /** @param {object[]} lines */
+  function writeLedger(lines) {
+    mkdirSync(path.dirname(ledger), { recursive: true });
+    writeFileSync(ledger, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`, 'utf8');
+  }
+
+  /** @returns {{ code: number|null, stdout: string, stderr: string, json?: object }} */
+  function live(...args) {
+    const r = run(['validate', '--live', '--cwd', project, ...args]);
+    return args.includes('--json') && r.code === 0 ? { ...r, json: JSON.parse(r.stdout) } : r;
+  }
+
+  beforeEach(() => {
+    seq = 0;
+    // No `.git` here, so the ledger path is `<project>/.artibot/runtime/ledger.jsonl`
+    // (lib/runtime/event-writer.js#ledgerFilePath, the no-common-dir branch).
+    project = path.join(root, 'project');
+    ledger = path.join(project, '.artibot', 'runtime', 'ledger.jsonl');
+    writeLedger(baseLines());
+  });
+
+  it('--json: denominators, rates, verdicts and breakdowns from the fold', { timeout: TIMEOUT }, () => {
+    const { code, json, stderr } = live('--json');
+    expect(code, stderr).toBe(0);
+    expect(json.inputPath).toBe(ledger);
+    expect(json.since).toBeNull();
+    expect(json.pluginRoot).toBe(PLUGIN_ROOT);
+    expect(json.configPath).toBe(path.join(PLUGIN_ROOT, 'artibot.config.json'));
+    expect(json.coworkAgentsDir).toBe(path.join(coworkRoot, 'agents'));
+    expect(json.census.file).toMatchObject({ present: true, readable: true, path: ledger });
+    expect(json.overridesStatus).toBe('absent');
+    expect(json.denominators).toEqual({ binds: 5, joined: 4, subagent_runs: 5, measured: 3 });
+    expect(json.rates).toEqual({
+      join_of_binds: 0.8,
+      join_of_subagent_runs: 0.8,
+      measured_of_joined: 0.75,
+      honored_of_measured: 2 / 3,
+    });
+    expect(json.verdicts).toEqual({ honored: 2, unhonored: 1, unmeasured: 1 });
+    expect(json.unmeasured_by_reason['unqualified-agent-type']).toBe(1);
+    expect(json.by_expected_source).toEqual({
+      honored: { 'cowork-frontmatter': 1, shipped: 1 },
+      unhonored: { shipped: 1 },
+    });
+    expect(json.unhonored_by_transition).toEqual({ 'opus->sonnet': 1 });
+    expect(json.rows.map((r) => [r.agent_id, r.verdict])).toEqual([
+      ['a1', 'honored'], ['a2', 'unhonored'], ['a3', 'unmeasured'], ['a4', 'honored'],
+    ]);
+    expect(json.caveats).toHaveLength(2);
+  });
+
+  it('text: census line, rates, verdicts, the unhonored row and both caveats', { timeout: TIMEOUT }, () => {
+    const r = live();
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`ledger: ${ledger} (`);
+    expect(r.stdout).toContain(`judged against: plugin root ${PLUGIN_ROOT} · config ${path.join(PLUGIN_ROOT, 'artibot.config.json')}`);
+    expect(r.stdout).toContain('--plugin-root');
+    expect(r.stdout).toContain('denominators: binds 5 · joined 4 · subagent_runs 5 · measured 3');
+    expect(r.stdout).toMatch(/honored_of_measured\s+2\/3\s+66\.7%/);
+    expect(r.stdout).toContain('verdicts: honored 2 · unhonored 1 · unmeasured 1');
+    expect(r.stdout).toContain('unhonored artibot:architect: expected opus [shipped] served sonnet (claude-sonnet-5)');
+    expect(r.stdout.match(/^caveat: /gm)).toHaveLength(2);
+    expect(run(['validate', '--live', '--cwd', project]).stdout).toBe(r.stdout);
+  });
+
+  it('never writes the ledger: sha256 and the directory listing are unchanged', { timeout: TIMEOUT }, () => {
+    const before = fingerprint(ledger);
+    const listing = readdirSync(path.dirname(ledger));
+    expect(live('--json').code).toBe(0);
+    expect(live().code).toBe(0);
+    expect(fingerprint(ledger)).toBe(before);
+    expect(readdirSync(path.dirname(ledger))).toEqual(listing);
+  });
+
+  it('judges against the user overrides', { timeout: TIMEOUT }, () => {
+    expect(run(['set', 'agent', 'artibot:architect', 'sonnet']).code).toBe(0);
+    const { json } = live('--json');
+    expect(json.overridesStatus).toBe('ok');
+    expect(json.verdicts).toEqual({ honored: 3, unhonored: 0, unmeasured: 1 });
+    expect(json.by_expected_source.honored).toEqual({ 'cowork-frontmatter': 1, 'override-agent': 1, shipped: 1 });
+  });
+
+  it('a damaged overrides file warns and falls back to the shipped values', { timeout: TIMEOUT }, () => {
+    mkdirSync(path.dirname(stateFile), { recursive: true });
+    writeFileSync(stateFile, 'not json', 'utf8');
+    const r = live('--json');
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/warning: .*malformed.*IGNORED/);
+    expect(r.json.verdicts).toEqual({ honored: 2, unhonored: 1, unmeasured: 1 });
+  });
+
+  it('without a cowork roster the cowork spawn is not-in-roster, never guessed', { timeout: TIMEOUT }, () => {
+    const r = run(['validate', '--live', '--cwd', project, '--json'], { cowork: path.join(root, 'no-such-cowork') });
+    const json = JSON.parse(r.stdout);
+    expect(json.unmeasured_by_reason['agent-not-in-roster']).toBe(1);
+    expect(json.verdicts).toEqual({ honored: 1, unhonored: 1, unmeasured: 2 });
+  });
+
+  it('--since windows the ledger, as ISO or as epoch milliseconds', { timeout: TIMEOUT }, () => {
+    const old = '2026-09-01T00:00:00.000Z';
+    writeLedger([bound('a0', 'artibot:tdd-guide', old), receipt('agent-a0', OPUS_ID, old), ...baseLines()]);
+    expect(live('--json').json.denominators.binds).toBe(6);
+    const iso = live('--json', '--since', '2026-09-10T00:00:00Z');
+    expect(iso.json.since).toBe('2026-09-10T00:00:00.000Z');
+    expect(iso.json.denominators).toEqual({ binds: 5, joined: 4, subagent_runs: 5, measured: 3 });
+    expect(iso.json.census.dropped.selection.filtered_out).toBe(2);
+    const ms = live('--json', '--since', String(Date.parse('2026-09-10T00:00:00Z')));
+    expect(ms.json.denominators).toEqual(iso.json.denominators);
+    const offset = live('--json', '--since', '2026-09-10T09:00+09:00');
+    expect(offset.json.since).toBe('2026-09-10T00:00:00.000Z');
+  });
+
+  it('a missing ledger exits 0, says so, and reports null rates (not 0)', { timeout: TIMEOUT }, () => {
+    rmSync(ledger);
+    const text = live();
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(`ledger absent: ${ledger}`);
+    expect(text.stdout).toContain('null (denominator 0)');
+    const { code, json } = live('--json');
+    expect(code).toBe(0);
+    expect(json.census.file.present).toBe(false);
+    expect(json.denominators).toEqual({ binds: 0, joined: 0, subagent_runs: 0, measured: 0 });
+    expect(Object.values(json.rates)).toEqual([null, null, null, null]);
+    expect(existsSync(ledger)).toBe(false);
+  });
+
+  it('usage errors exit 2: bad --since, and --since/--cwd without --live', { timeout: TIMEOUT }, () => {
+    // V8's Date.parse accepts every one of these; the CLI must not.
+    const lenient = ['-1', '123 ', '2026-09-23T07:40', '2026-09-23', '2026-02-31T00:00:00Z', '2026-09-23T24:00:00Z'];
+    for (const bad of ['yesterday', '99999999999999999999', ...lenient]) {
+      const r = live('--since', bad);
+      expect(r.code, bad).toBe(2);
+      expect(r.stderr).toContain('unparseable --since');
+    }
+    expect(run(['validate', '--since', '2026-09-10']).code).toBe(2);
+    const cwd = run(['validate', '--cwd', project]);
+    expect(cwd.code).toBe(2);
+    expect(cwd.stderr).toContain('--cwd is only valid with --live');
+  });
+});
