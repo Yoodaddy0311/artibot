@@ -217,6 +217,21 @@ describe('appendMissionEvent — the compiler-name allowlist map', () => {
     expect(line.data.title).toBe('build the dashboard');
   });
 
+  it.each([
+    ['mission.created', 'mission.created'],
+    ['mission-candidate-deferred', 'mission.candidate_deferred'],
+    ['mission.candidate_deferred', 'mission.candidate_deferred'],
+  ])('lands the compiler name %s on its own literal envelope as %s', (compilerName, eventName) => {
+    // One row per map key: since SH-30 the name on disk comes from the literal
+    // branch of missionLedgerEnvelope, not from the map value passed through.
+    const status = append(makeState(), {
+      meta: { ledgerEvent: compilerName }, contract: { goal: 'g' }, deferred: true,
+    });
+    expect(status).toEqual({ ok: true, status: 'appended', event: eventName });
+    const lines = readLedger();
+    expect(lines.map((l) => [l.event, l.source])).toEqual([[eventName, 'hook']]);
+  });
+
   it('records a non-substantive candidate with its own reason and no signals list', () => {
     append(makeState(), { meta: { ledgerEvent: 'mission-candidate-deferred' }, deferred: false });
     const [line] = readLedger();

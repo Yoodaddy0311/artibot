@@ -266,6 +266,60 @@ export function missionEventIdempotencyKey(eventName, missionId, promptId, data)
 }
 
 /**
+ * The envelope for one mission ledger line, written as a literal per event.
+ *
+ * ONE LITERAL OBJECT PER ALLOWLIST NAME, and nothing for any other name. The
+ * event name and `source` are inline string literals so
+ * `tests/firewall/hook-emitter-sources-rule.test.js` can read both statically
+ * instead of carrying this emitter as a scanner exception (SH-30). A name
+ * outside the two branches gets `null`, never a fallback envelope: an `else`
+ * here would fail OPEN for every event name added to
+ * {@link LEDGER_EVENT_BY_COMPILER_NAME} later without a branch of its own.
+ *
+ * Key order is the order the writer's extra keys land on disk in —
+ * `idempotency_key` before `data` — and is pinned byte for byte by the SH-30
+ * characterization block in `tests/runtime/middleware/mission-ledger.test.js`.
+ *
+ * @param {string} eventName resolved allowlist event name
+ * @param {{missionId: string, sessionId: string, key: string|null, data: object}} parts
+ * @returns {object|null} the envelope, or `null` for a name with no branch
+ */
+export function missionLedgerEnvelope(eventName, { missionId, sessionId, key, data }) {
+  // Omitted, never blank, without a usable key: see missionEventIdempotencyKey.
+  const keyed = key === null ? {} : { idempotency_key: key };
+  // `mission_id` is PASSED EXPLICITLY rather than left to the writer's
+  // fallback. `event-writer.js#buildEnvelope` prefers a non-empty
+  // `src.mission_id` and only otherwise derives one from `(session_id, ts)` —
+  // so handing it the id computed here is what makes this event and the paired
+  // `state.updated` name the same mission across a UTC midnight.
+  //
+  // Both events are registered `sources: ["hook"]`. This middleware runs
+  // inside the UserPromptSubmit hook pipeline, so 'hook' is accurate as well
+  // as the only permitted value.
+  if (eventName === 'mission.created') {
+    return {
+      event: 'mission.created',
+      mission_id: missionId,
+      session_id: sessionId,
+      source: 'hook',
+      ...keyed,
+      data,
+    };
+  }
+  if (eventName === 'mission.candidate_deferred') {
+    return {
+      event: 'mission.candidate_deferred',
+      mission_id: missionId,
+      session_id: sessionId,
+      source: 'hook',
+      ...keyed,
+      data,
+    };
+  }
+  return null;
+}
+
+/**
  * Append the one mission event for this prompt.
  *
  * Never throws and never affects the middleware result: every refusal becomes
@@ -300,22 +354,14 @@ export function appendMissionEvent(state, result, nowMs, identity) {
     const key = missionEventIdempotencyKey(
       eventName, missionId, state.input?.hookData?.prompt_id, data,
     );
-    const written = appendLedgerEvent(projectRoot, {
-      event: eventName,
-      // PASSED EXPLICITLY rather than left to the writer's fallback.
-      // `event-writer.js#buildEnvelope` prefers a non-empty `src.mission_id`
-      // and only otherwise derives one from `(session_id, ts)` — so handing it
-      // the id computed here is what makes this event and the paired
-      // `state.updated` name the same mission across a UTC midnight.
-      mission_id: missionId,
-      session_id: sessionId,
-      // Both events are registered `sources: ["hook"]`. This middleware runs
-      // inside the UserPromptSubmit hook pipeline, so 'hook' is accurate as
-      // well as the only permitted value.
-      source: 'hook',
-      ...(key === null ? {} : { idempotency_key: key }),
-      data,
-    }, { now: () => new Date(nowMs) });
+    const envelope = missionLedgerEnvelope(eventName, { missionId, sessionId, key, data });
+    // Statically unreachable today: every value of LEDGER_EVENT_BY_COMPILER_NAME
+    // has a branch, and the hook-emitter gate pins that the map's values and
+    // the envelope literals are the same set. Kept as the fail-closed answer
+    // for a map entry added without a branch — the same skip as an unknown
+    // compiler name, so no new status word exists for it.
+    if (envelope === null) return { ok: false, status: `skipped:unknown-event:${compilerName}` };
+    const written = appendLedgerEvent(projectRoot, envelope, { now: () => new Date(nowMs) });
     return written?.ok
       ? { ok: true, status: 'appended', event: eventName }
       : { ok: false, status: `rejected:${written?.reason ?? 'unknown'}`, event: eventName };

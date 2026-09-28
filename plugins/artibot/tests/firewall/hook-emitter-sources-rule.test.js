@@ -11,23 +11,28 @@
  * the gate on that rule, so the rule stops being a paragraph one module's
  * author happened to read.
  *
- * FOUR PATTERNS EXIST TODAY, and the point of the gate is that every collected
+ * FIVE PATTERNS ARE DEFINED, and the point of the gate is that every collected
  * emission falls into one of them by NAME rather than by a reader's judgement:
  *   (A) ledger append, `source:'hook'`, on an event whose allowlist `sources`
  *       includes `hook`. The compliant case.
  *   (B) a call into `lib/observability/decision-events.js`. The side-channel —
  *       the destination the rule sends a failing case to.
  *   (C) a hook-reachable append that names the ROLE of the actor it relays
- *       (`gate`, `reviewer`, `human`) rather than `hook`. This is criterion
+ *       (`gate`, `reviewer`, `human`, `supervisor`) rather than `hook`. This is criterion
  *       (3) of the rule OBEYED, not an exception to it: `source` is a role,
  *       decided 2026-09-22 (V5-BACKLOG §4-d (4)). Listed in `ROLE_SOURCED`,
  *       and each role is re-checked against that event's allowlist `sources`.
  *   (D) a hook that deliberately binds NO ledger writer and records the gap
  *       instead. Listed in `NON_EMITTERS`, and asserted to stay silent.
  *   (E) an append whose event name or source cannot be read statically at all
- *       (resolved at runtime, or injected by the caller). Listed in
- *       `EXCEPTIONS` with the reason the literal is absent. These are limits
- *       of the SCANNER, not permissions granted to an emitter.
+ *       (resolved at runtime, or injected by the caller). `EXCEPTIONS` is the
+ *       table for these, and it is EMPTY and pinned empty since SH-30
+ *       (2026-09-28): the last two entries, `mission-ledger.js` (event name
+ *       through a lookup map) and `state-manager.js` (caller-injected source),
+ *       were rewritten as one literal envelope per value. A new non-literal
+ *       emitter is made literal first; listing it here is not the fix. What
+ *       still keeps those two honest is pinned below: the map's values and the
+ *       allowed-source list must equal the literals the scan collects.
  *
  * WHY AN AST SCAN AND NOT grep. The emitters do not look alike: some build the
  * envelope inline at the `appendLedgerEvent` call, some return it from a
@@ -62,6 +67,13 @@
  *     the append would be missed; none exists today (verified by the known-
  *     emitter floor below), and a new one would surface as an unclassified
  *     append in the importer rather than silently.
+ *   - SCOPE OF A NAMED CONSTANT. `analyzeModule` keeps the FIRST string
+ *     declaration of a name anywhere in the module, ignoring scope, so a
+ *     block-local `const` that shadows an earlier one would be read as the
+ *     earlier value. The SH-30 emitters write their event names and sources as
+ *     inline literals for that reason. Making the lookup scope-aware (or
+ *     treating a redeclared name as unreadable) is a recorded follow-up, not
+ *     done here.
  *   - espree's AVAILABILITY. The parser resolves in this checkout only as an
  *     eslint transitive and is declared in no package.json — the same footing
  *     as ajv in `ledger-vocab-allowlist.test.js`. If eslint drops it this file
@@ -335,30 +347,26 @@ const ROLE_SOURCED = Object.freeze({
       + 'which one a reader sees; the paired human.asked IS the hook\'s own '
       + 'observation and stays source:hook.',
   },
+  'lib/project-state/state-manager.js:409': {
+    event: 'state.updated',
+    source: 'supervisor',
+    reason: 'Hook-reachable only because lib/runtime/middleware/tasks.js imports '
+      + 'the store module; the hook path (tasks.js#openMissionStore) opens its '
+      + 'store with source:hook and takes the other branch, collected as (A). '
+      + 'The only writer-bound caller that takes THIS branch is the /split task '
+      + 'feed (scripts/split/task-feed.mjs), a supervisor process, not a hook. '
+      + 'state.updated registers sources:null, so the role is admitted.',
+  },
 });
 
 /**
  * (E) Appends whose event name or source is not a literal anywhere in the
- * source, so the scan cannot read it. These are limits of the SCANNER, and the
- * reason states what closes each one instead.
+ * source, so the scan cannot read it. EMPTY, and pinned empty below: the fix
+ * for a non-literal emitter is to write it as literals (SH-30), not to list it.
+ * Kept as a table so the classifier reads the same way if an entry is ever
+ * argued for — which then has to get past that pin first.
  */
-const EXCEPTIONS = Object.freeze({
-  'lib/runtime/middleware/mission-ledger.js:303': {
-    event: null,
-    source: 'hook',
-    reason: 'Event name resolved at runtime through LEDGER_EVENT_BY_COMPILER_NAME. '
-      + 'The source is hook and both reachable names are hook-permitted — pinned '
-      + 'below in `RUNTIME_NAMED_EVENTS` so a name added to that map is checked.',
-    runtimeNamedEvents: ['mission.created', 'mission.candidate_deferred'],
-  },
-  'lib/project-state/state-manager.js:376': {
-    event: 'state.updated',
-    source: null,
-    reason: 'Source is injected by the caller (`ctx.source`), and the allowlist '
-      + 'registers state.updated with `sources: null` — unrestricted by design, '
-      + 'because the paired write can come from any writer of project state.',
-  },
-});
+const EXCEPTIONS = Object.freeze({});
 
 /** (D) Hooks that deliberately bind no ledger writer. Asserted to stay silent. */
 const NON_EMITTERS = Object.freeze({
@@ -391,6 +399,11 @@ const KNOWN_EMITTER_FLOOR = Object.freeze([
   // `source: 'scheduler'` there, which turned both classification tests RED at
   // `lib/runtime/question-gate-record.js:149`. Pinned so that stays true.
   ['adr.question_gate_evaluated', 'lib/runtime/question-gate-record.js'],
+  // The two SH-30 emitters, readable only since they were written as literal
+  // envelopes. Losing them here would put them back where EXCEPTIONS used to.
+  ['mission.created', 'lib/runtime/middleware/mission-ledger.js'],
+  ['mission.candidate_deferred', 'lib/runtime/middleware/mission-ledger.js'],
+  ['state.updated', 'lib/project-state/state-manager.js'],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -405,6 +418,47 @@ function hookPermitted(eventName) {
   if (!spec) return false;
   // `sources: null` means unrestricted, not "no source allowed".
   return spec.sources === null || spec.sources === undefined || spec.sources.includes('hook');
+}
+
+const MISSION_LEDGER_REL = 'lib/runtime/middleware/mission-ledger.js';
+const STATE_MANAGER_REL = 'lib/project-state/state-manager.js';
+
+/**
+ * The values of `const <name> = Object.freeze({...})` or `Object.freeze([...])`,
+ * read off the AST of a scanned module.
+ *
+ * @returns {Array<string|null>|null|undefined} `undefined` when no such
+ *   declaration exists, `null` when it is not a frozen object/array literal,
+ *   and otherwise one entry per value — `null` for any value that is not a
+ *   string literal, so the caller can refuse it.
+ */
+function frozenLiteralValues(relFile, name) {
+  const info = scan.modules.get(path.join(PKG_ROOT, ...relFile.split('/')));
+  if (!info) return undefined;
+  let found;
+  walk(info.ast, (n) => {
+    if (found !== undefined || n.type !== 'VariableDeclarator') return;
+    if (n.id.type !== 'Identifier' || n.id.name !== name) return;
+    const init = n.init;
+    const arg = init?.type === 'CallExpression' && init.callee.type === 'MemberExpression'
+      && init.callee.object.type === 'Identifier' && init.callee.object.name === 'Object'
+      && init.callee.property.type === 'Identifier' && init.callee.property.name === 'freeze'
+      ? init.arguments[0] : null;
+    const str = (v) => (v?.type === 'Literal' && typeof v.value === 'string' ? v.value : null);
+    if (arg?.type === 'ObjectExpression') {
+      found = arg.properties.map((p) => (p.type === 'Property' ? str(p.value) : null));
+    } else if (arg?.type === 'ArrayExpression') {
+      found = arg.elements.map(str);
+    } else {
+      found = null;
+    }
+  });
+  return found;
+}
+
+/** Sorted, de-duplicated values of one field over the emissions collected in one file. */
+function collectedIn(relFile, field) {
+  return [...new Set(scan.ledgerEmissions.filter((e) => e.file === relFile).map((e) => e[field]))].sort();
 }
 
 describe('scanner self-check — the collector is not blind', () => {
@@ -522,6 +576,105 @@ describe('scanner self-check — the collector is not blind', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('reads the SH-30 literals out of the REAL emitter text, and turns a planted source RED', () => {
+    // The two emitters are copied verbatim into a scratch root behind one
+    // appender hook, then re-scanned after single-token text mutations. This is
+    // the scanner self-check for the literalization: were the literals ever
+    // read as null (the pre-SH-30 shape), a mutated source would pass unseen.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-emitter-sh30-'));
+    const realText = (rel) => fs.readFileSync(path.join(PKG_ROOT, ...rel.split('/')), 'utf8');
+    try {
+      const write = (rel, body) => {
+        const dest = path.join(root, ...rel.split('/'));
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, body, 'utf8');
+      };
+      write('hooks/dispatch-table.json', JSON.stringify({
+        slots: {
+          Stop: {
+            handlers: [
+              { name: 'appender', script: 'appender.js' },
+              { name: 'ternary', script: 'ternary.js' },
+            ],
+          },
+        },
+      }));
+      write('hooks/hooks.json', JSON.stringify({ hooks: {} }));
+      write('lib/runtime/event-writer.js', 'export function writeEvent() { return { ok: true }; }\n');
+      write('lib/runtime/ledger.js',
+        "import { writeEvent } from './event-writer.js';\n"
+        + 'export function appendLedgerEvent(root, ev) { return writeEvent(root, ev); }\n');
+      write('lib/observability/decision-events.js', 'export function recordSomething() { return null; }\n');
+      write('scripts/hooks/appender.js',
+        "import { appendLedgerEvent } from '../../lib/runtime/ledger.js';\n"
+        + "import { appendMissionEvent } from '../../lib/runtime/middleware/mission-ledger.js';\n"
+        + "import { createStateStore } from '../../lib/project-state/state-manager.js';\n"
+        + 'export { appendLedgerEvent, appendMissionEvent, createStateStore };\n');
+      // NEGATIVE CONTROL: the shape SH-30 removed — an event name chosen at
+      // runtime. It must be collected with event null, and so stay unclassified.
+      write('scripts/hooks/ternary.js',
+        "import { appendLedgerEvent } from '../../lib/runtime/ledger.js';\n"
+        + 'export function run(root, flag) {\n'
+        + "  return appendLedgerEvent(root, { event: flag ? 'mission.created' : 'mission.candidate_deferred', source: 'hook' });\n"
+        + '}\n');
+
+      const unclassifiedOf = (rows) => rows.filter(
+        (e) => !(e.source === 'hook' && hookPermitted(e.event))
+          && !(e.site in EXCEPTIONS) && !(e.site in ROLE_SOURCED),
+      ).map((e) => e.site);
+      // Sorted by site: collection order follows module traversal order, which
+      // differs between the repository graph and this one-hook scratch graph.
+      const rowsOf = (result) => result.ledgerEmissions.filter(
+        (e) => e.file === MISSION_LEDGER_REL || e.file === STATE_MANAGER_REL,
+      ).sort((a, b) => a.site.localeCompare(b.site));
+      const realRows = rowsOf(scan);
+      const siteOf = (file, event, source) => realRows
+        .find((e) => e.file === file && e.event === event && e.source === source)?.site;
+      const deferredSite = siteOf(MISSION_LEDGER_REL, 'mission.candidate_deferred', 'hook');
+      const storeHookSite = siteOf(STATE_MANAGER_REL, 'state.updated', 'hook');
+      expect(deferredSite).toMatch(/^lib\/runtime\/middleware\/mission-ledger\.js:\d+$/);
+      expect(storeHookSite).toMatch(/^lib\/project-state\/state-manager\.js:\d+$/);
+
+      // POSITIVE CONTROL: the unmutated text yields the same four literal rows
+      // the repository scan does, all classified.
+      write(MISSION_LEDGER_REL, realText(MISSION_LEDGER_REL));
+      write(STATE_MANAGER_REL, realText(STATE_MANAGER_REL));
+      const original = scanHookEmitters(root);
+      expect(rowsOf(original)).toEqual(realRows);
+      expect(realRows.map((e) => `${e.event}/${e.source}`).sort()).toEqual([
+        'mission.candidate_deferred/hook', 'mission.created/hook',
+        'state.updated/hook', 'state.updated/supervisor',
+      ]);
+      expect(unclassifiedOf(rowsOf(original))).toEqual([]);
+      const ternary = original.ledgerEmissions.filter((e) => e.file === 'scripts/hooks/ternary.js');
+      expect(ternary).toEqual([
+        { site: 'scripts/hooks/ternary.js:3', file: 'scripts/hooks/ternary.js', event: null, source: 'hook' },
+      ]);
+      expect(unclassifiedOf(ternary)).toEqual(['scripts/hooks/ternary.js:3']);
+
+      /** Replace the `source` literal of exactly one envelope; RED unless it matched once. */
+      const mutate = (text, event, from, to) => {
+        const pattern = new RegExp(
+          `(event: '${event.replace(/\./g, '\\.')}',\\s+mission_id: missionId,\\s+session_id: sessionId,\\s+source: )'${from}'`,
+          'g',
+        );
+        expect(text.match(pattern), `${event} source:'${from}' must occur exactly once`).toHaveLength(1);
+        return text.replace(pattern, `$1'${to}'`);
+      };
+
+      // MUTATION 1: the deferred branch borrows a source its event does not admit.
+      write(MISSION_LEDGER_REL, mutate(realText(MISSION_LEDGER_REL), 'mission.candidate_deferred', 'hook', 'scheduler'));
+      expect(unclassifiedOf(rowsOf(scanHookEmitters(root)))).toEqual([deferredSite]);
+      write(MISSION_LEDGER_REL, realText(MISSION_LEDGER_REL));
+
+      // MUTATION 2: the store's hook branch is relabelled with an unlisted role.
+      write(STATE_MANAGER_REL, mutate(realText(STATE_MANAGER_REL), 'state.updated', 'hook', 'worker'));
+      expect(unclassifiedOf(rowsOf(scanHookEmitters(root)))).toEqual([storeHookSite]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('hook emitter sources rule', () => {
@@ -569,14 +722,35 @@ describe('hook emitter sources rule', () => {
     }
   });
 
-  it('pins the runtime-named events of the table-driven emitter', () => {
-    const entry = EXCEPTIONS['lib/runtime/middleware/mission-ledger.js:303'];
-    const src = fs.readFileSync(path.join(PKG_ROOT, 'lib', 'runtime', 'middleware', 'mission-ledger.js'), 'utf8');
-    const map = src.match(/LEDGER_EVENT_BY_COMPILER_NAME\s*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/);
-    expect(map, 'LEDGER_EVENT_BY_COMPILER_NAME moved — re-read the emitter').not.toBeNull();
-    const names = [...new Set([...map[1].matchAll(/:\s*'([a-z][a-z0-9.]*_?[a-z0-9_]*)'/g)].map((m) => m[1]))];
-    expect(names.sort()).toEqual([...entry.runtimeNamedEvents].sort());
-    for (const name of names) expect(hookPermitted(name), `${name} is not hook-permitted`).toBe(true);
+  it('keeps EXCEPTIONS empty', () => {
+    expect(
+      Object.keys(EXCEPTIONS),
+      'a new non-literal emitter is made literal first (SH-30) — do not list it here',
+    ).toEqual([]);
+  });
+
+  it('matches every mapped event name of mission-ledger.js to a literal envelope, and back', () => {
+    // The map normalizes compiler spellings; the envelope literals are what the
+    // scan can read. A map value with no branch would be skipped at runtime by
+    // the null return and never seen here; a branch with no map value would be
+    // dead. Both directions are RED.
+    const values = frozenLiteralValues(MISSION_LEDGER_REL, 'LEDGER_EVENT_BY_COMPILER_NAME');
+    expect(values, 'LEDGER_EVENT_BY_COMPILER_NAME moved — re-read the emitter').toBeDefined();
+    expect(values, 'LEDGER_EVENT_BY_COMPILER_NAME is no longer an Object.freeze({...}) literal').not.toBeNull();
+    expect(values, 'every mapped event name must be a string literal').not.toContain(null);
+    const mapped = [...new Set(values)].sort();
+    expect(collectedIn(MISSION_LEDGER_REL, 'event')).toEqual(mapped);
+    expect(collectedIn(MISSION_LEDGER_REL, 'source')).toEqual(['hook']);
+    for (const name of mapped) expect(hookPermitted(name), `${name} is not hook-permitted`).toBe(true);
+  });
+
+  it('matches STATE_UPDATED_SOURCES in state-manager.js to its literal envelopes, and back', () => {
+    const values = frozenLiteralValues(STATE_MANAGER_REL, 'STATE_UPDATED_SOURCES');
+    expect(values, 'STATE_UPDATED_SOURCES moved — re-read the emitter').toBeDefined();
+    expect(values, 'STATE_UPDATED_SOURCES is no longer an Object.freeze([...]) literal').not.toBeNull();
+    expect(values, 'every allowed source must be a string literal').not.toContain(null);
+    expect(collectedIn(STATE_MANAGER_REL, 'source')).toEqual([...new Set(values)].sort());
+    expect(collectedIn(STATE_MANAGER_REL, 'event')).toEqual(['state.updated']);
   });
 
   it('keeps the (D) non-emitters silent', () => {

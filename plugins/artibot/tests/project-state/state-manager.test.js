@@ -9,6 +9,7 @@ import {
   readJournal,
   reduceProjectState,
   resolveStoreLocation,
+  STATE_UPDATED_SOURCES,
   stateUpdatedIdempotencyKey,
 } from '../../lib/project-state/state-manager.js';
 import { checkLedgerStateParity } from '../../lib/project-state/doctor-checks.js';
@@ -77,6 +78,18 @@ describe('construction', () => {
   it('requires a sessionId, because the ledger envelope requires one', () => {
     expect(() => createStateStore({ projectRoot: '/repo', appendEvent: () => {} }))
       .toThrow(/sessionId is required/);
+  });
+
+  it.each([
+    ['an unlisted role', 'worker'],
+    ['an empty string', ''],
+    ['a role another event admits', 'gate'],
+  ])('refuses %s as the state.updated source (SH-30)', (_label, source) => {
+    // Each allowed source has its own literal envelope; anything else would be
+    // written under a source the hook-emitter gate never classified.
+    expect(() => createStateStore({ projectRoot: '/repo', sessionId: 's', appendEvent: () => {}, source }))
+      .toThrow(new TypeError(`createStateStore: source must be one of hook, supervisor — got ${JSON.stringify(source)}`));
+    expect(STATE_UPDATED_SOURCES).toEqual(['hook', 'supervisor']);
   });
 
   it('starts at state_version 0, below the projection floor of 1', () => {
