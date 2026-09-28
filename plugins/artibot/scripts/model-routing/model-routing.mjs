@@ -8,7 +8,9 @@
  * parses arguments, loads the shipped config, reads and writes the user file,
  * diffs, prints and sets exit codes. No precedence rule is re-derived here.
  * Roster discovery (both `agents/` directories, frontmatter `model:`) and the
- * `show` table/JSON rendering live in the sibling `model-routing-roster.mjs`.
+ * `show` table/JSON rendering live in the sibling `model-routing-roster.mjs`;
+ * argument validation for set/reset/apply and the TASK (action-class) scope live
+ * in `model-routing-task.mjs`.
  *
  * THE SHIPPED CONFIG IS LOADED EXPLICITLY. `<pluginRoot>/artibot.config.json` is
  * read directly and handed to every resolver call. User overrides are NEVER
@@ -34,22 +36,26 @@
  * of those are printed as caveats: the expected tier is TODAY's config and
  * overrides of THIS plugin root (`pluginRoot`/`configPath` in the report; window
  * with `--since`, judge the installed copy with `--plugin-root`), and `honored` mostly means the frontmatter
- * default was served. `--cwd` is the LEDGER root and must be the REPOSITORY
+ * default was served. A third caveat: the expected tier uses each agent's
+ * DEFAULT task, since a bind records no task. `--cwd` is the LEDGER root and must be the REPOSITORY
  * ROOT: the path resolver does not walk upward, so a subdirectory such as the
  * plugin root reads `<cwd>/.artibot/runtime/ledger.jsonl`, usually absent (the
  * `scripts/ledger/existence-audit.mjs` trap). `inputPath` names the file read.
  *
  * USAGE
  *   node scripts/model-routing/model-routing.mjs <subcommand> [...]
- *     show [--plugin artibot|artibot-cowork|all] [--role build|review] [--json]
+ *     show [--plugin artibot|artibot-cowork|all] [--role build|review] [--task <class>] [--json]
+ *       (--task resolves EVERY row as if spawned for that task, like --role)
  *     set agent <plugin:name> <tier> [--dry-run]
+ *     set task <class> <tier> [--plugin artibot|artibot-cowork|all] [--dry-run]   (--plugin defaults to all)
  *     set phase <build|review> <tier> [--dry-run]
  *     set plugin <artibot|artibot-cowork> <tier> [--dry-run]
- *     reset agent <plugin:name> | phase <build|review> | plugin <name> | --all  [--dry-run]
+ *     reset agent <plugin:name> | task <class> [--plugin …] | phase <build|review> | plugin <name> | --all  [--dry-run]
+ *     apply <file.json> [--dry-run]   { "changes": [{ scope, plugin, key, tier|null }] } — all validated, one write
  *     validate [--json]
  *     validate --live [--since <iso-with-Z-or-offset|epoch-ms>] [--cwd <projectRoot>] [--json]
  *       (all-digit --since is EPOCH MILLISECONDS, never a year; date-only is refused)
- *     resolve <plugin:name> [--role build|review]
+ *     resolve <plugin:name> [--role build|review] [--task <class>]   (no --task = the agent's default task)
  *   Every subcommand also takes --plugin-root <dir> and --cowork-root <dir>.
  *
  * EXIT CODES
@@ -70,30 +76,41 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteJson } from '../../lib/core/file.js';
 import {
-  allowedTiersFor,
   clearAll,
-  clearOverride,
   emptyOverrides,
   loadOverrides,
   overridesPath,
   PLUGIN_NAMES,
-  qualifyAgent,
   resolveEffectiveModel,
-  setOverride,
   validateOverrides,
 } from '../../lib/core/model-overrides.js';
 import { resolveModelForPhase } from '../../lib/core/model-policy.js';
+import { ACTION_CLASSES } from '../../lib/routing/action-classifier.js';
 import { resolveModelIdentity } from '../../lib/economics/usage-receipt.js';
 import { foldRoutingHonor } from '../../lib/replay/routing-honor.js';
 import { joinSpawnOutcomes } from '../../lib/replay/spawn-outcome.js';
 import { readLedgerCensus } from '../../lib/runtime/ledger.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { findCoworkAgentsDir, loadRosters, renderShowJson, renderShowText, renderTable } from './model-routing-roster.mjs';
+import {
+  applySpecs,
+  inertTaskKeys,
+  parseApplyChanges,
+  parseResetSpec,
+  parseSetSpec,
+  PHASES,
+  readApplyDocument,
+  Refusal,
+  requireKnownAgent,
+  requireQualified,
+  requireTask,
+  rowTask,
+  selectPlugins,
+  taskSummary,
+  UsageError,
+} from './model-routing-task.mjs';
 
 const OWN_PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/** CLI phase words → the resolver's phase-role vocabulary. */
-const PHASES = Object.freeze(['build', 'review']);
 
 /** Roles every write diffs against: no role, then each phase. */
 const DIFF_ROLES = Object.freeze([null, 'build', 'review']);
@@ -101,18 +118,14 @@ const DIFF_ROLES = Object.freeze([null, 'build', 'review']);
 /** Flags each subcommand accepts; `true` = takes a value. Anything else is exit 2. */
 const COMMON_FLAGS = { 'plugin-root': true, 'cowork-root': true };
 const FLAGS = Object.freeze({
-  show: { ...COMMON_FLAGS, plugin: true, role: true, json: false },
+  show: { ...COMMON_FLAGS, plugin: true, role: true, task: true, json: false },
+  // `--plugin` is added for the task scope only — see {@link scopeFlags}.
   set: { ...COMMON_FLAGS, 'dry-run': false },
   reset: { ...COMMON_FLAGS, 'dry-run': false, all: false },
+  apply: { ...COMMON_FLAGS, 'dry-run': false },
   validate: { ...COMMON_FLAGS, json: false, live: false, since: true, cwd: true },
-  resolve: { ...COMMON_FLAGS, role: true },
+  resolve: { ...COMMON_FLAGS, role: true, task: true },
 });
-
-/** A usage error: one stderr line, exit 2, nothing written. */
-class UsageError extends Error {}
-
-/** A refusal: one or more stderr lines, exit 1, nothing written. */
-class Refusal extends Error {}
 
 /**
  * Split argv into positionals and flags, rejecting flags the subcommand does not
@@ -144,6 +157,25 @@ function parseFlags(argv, known) {
     flags[name] = value;
   }
   return { positionals, flags };
+}
+
+/**
+ * The flag table for a `set`/`reset` line: `--plugin` joins it only when the
+ * scope (first positional) is `task`, so on every other scope `--plugin` — with
+ * or without a value — stays exactly the unknown-flag error it always was.
+ *
+ * @param {string[]} argv - Arguments after the subcommand.
+ * @param {Record<string, boolean>} base
+ * @returns {Record<string, boolean>}
+ */
+function scopeFlags(argv, base) {
+  const withPlugin = { ...base, plugin: true };
+  let i = 0;
+  while (i < argv.length && argv[i].startsWith('--')) {
+    const takesValue = withPlugin[argv[i].slice(2)] === true;
+    i += takesValue ? 2 : 1;
+  }
+  return argv[i] === 'task' ? withPlugin : base;
 }
 
 /**
@@ -194,11 +226,17 @@ function effectiveOverrides(ctx) {
 }
 
 /**
+ * Resolver options for one spawn. The core resolver derives no default task, so
+ * the agent's default is filled in here — without it the task layer is skipped.
+ *
+ * @param {string} name - `<plugin:name>`.
  * @param {string|null} role - 'build'|'review'|null
+ * @param {string|null} [task] - Explicit action class; null = the agent's default.
  * @returns {object}
  */
-function roleOpts(role) {
-  return role ? { role } : {};
+function callOpts(name, role, task = null) {
+  const picked = rowTask(name, task);
+  return { ...(role ? { role } : {}), ...(picked ? { task: picked } : {}) };
 }
 
 /**
@@ -209,10 +247,11 @@ function roleOpts(role) {
  * @param {string} agent
  * @param {string|null} role
  * @param {object} overrides
+ * @param {string|null} [task] - Explicit task; null = the agent's default task.
  * @returns {{ model: string, source: string, reason: string|null }}
  */
-function resolveRow(ctx, plugin, agent, role, overrides) {
-  return resolveEffectiveModel(`${plugin}:${agent}`, roleOpts(role), {
+function resolveRow(ctx, plugin, agent, role, overrides, task = null) {
+  return resolveEffectiveModel(`${plugin}:${agent}`, callOpts(`${plugin}:${agent}`, role, task), {
     config: ctx.config,
     overrides,
     coworkFrontmatter: ctx.coworkFrontmatter,
@@ -226,15 +265,16 @@ function resolveRow(ctx, plugin, agent, role, overrides) {
  * @param {string} plugin
  * @param {string|null} role
  * @param {object} overrides
+ * @param {string|null} task - Explicit `--task`, or null for each agent's default.
  * @returns {{ status: string, reason?: string, rows?: object[] }}
  */
-function pluginRows(ctx, plugin, role, overrides) {
+function pluginRows(ctx, plugin, role, overrides, task) {
   const roster = ctx.rosters[plugin];
   if (!roster) return { status: 'unavailable', reason: 'roster-not-found' };
   const shippedLayer = emptyOverrides();
   const rows = [...roster].map(([agent, frontmatter]) => {
-    const shipped = resolveRow(ctx, plugin, agent, role, shippedLayer);
-    const effective = resolveRow(ctx, plugin, agent, role, overrides);
+    const shipped = resolveRow(ctx, plugin, agent, role, shippedLayer, task);
+    const effective = resolveRow(ctx, plugin, agent, role, overrides, task);
     return {
       plugin,
       agent,
@@ -246,21 +286,11 @@ function pluginRows(ctx, plugin, role, overrides) {
       source: effective.source,
       reason: effective.reason ?? null,
       hostPath: effective.model === frontmatter ? 'frontmatter' : 'needs-spawn-param',
+      // The task this row was resolved under (null = the agent has no task layer).
+      task: rowTask(`${plugin}:${agent}`, task),
     };
   });
   return { status: 'ok', rows };
-}
-
-/**
- * Validate a `--plugin` value and expand `all`.
- *
- * @param {string|true|undefined} value
- * @returns {string[]}
- */
-function selectPlugins(value) {
-  if (value === undefined || value === 'all') return [...PLUGIN_NAMES];
-  if (PLUGIN_NAMES.includes(value)) return [value];
-  throw new UsageError(`unknown plugin: ${value} (expected ${PLUGIN_NAMES.join('|')}|all)`);
 }
 
 /**
@@ -284,141 +314,20 @@ function cmdShow(argv) {
   if (positionals.length > 0) throw new UsageError(`show takes no arguments, got: ${positionals[0]}`);
   const plugins = selectPlugins(flags.plugin);
   const role = parseRole(flags.role);
+  const task = flags.task === undefined ? null : requireTask(flags.task);
   const ctx = loadContext(flags);
   const overrides = effectiveOverrides(ctx);
-  const result = Object.fromEntries(plugins.map((p) => [p, pluginRows(ctx, p, role, overrides)]));
+  const result = Object.fromEntries(plugins.map((p) => [p, pluginRows(ctx, p, role, overrides, task)]));
   const phases = PHASES.map((side) => ({
     phase: side,
     shipped: resolveModelForPhase(side, ctx.config),
     override: overrides?.plugins?.artibot?.phaseRoles?.[side] ?? null,
   }));
+  const tasks = taskSummary(ctx, plugins, overrides);
   // `plugins` keeps the selection order, which is also the text table's row order.
-  const view = { file: ctx.file, overridesStatus: ctx.loaded.status, role, plugins: result, phases };
+  const view = { file: ctx.file, overridesStatus: ctx.loaded.status, role, task, plugins: result, phases, tasks };
   process.stdout.write(flags.json ? renderShowJson(view) : renderShowText(view));
   return 0;
-}
-
-/**
- * Parse `<plugin:name>`, rejecting a bare name. The message names both plugins
- * when the bare name exists in both rosters, so the user sees why it matters.
- *
- * @param {object} ctx
- * @param {string|undefined} raw
- * @returns {{ plugin: string, agent: string, qualified: string }}
- */
-function requireQualified(ctx, raw) {
-  if (!raw) throw new UsageError('missing agent name (expected <plugin:name>)');
-  const q = qualifyAgent(raw);
-  if (q === null) throw new UsageError(`not an agent name: '${raw}' (expected <plugin:name>)`);
-  if (q.qualified) return { plugin: q.plugin, agent: q.agent, qualified: `${q.plugin}:${q.agent}` };
-  const owners = PLUGIN_NAMES.filter((p) => ctx.rosters[p]?.has(q.agent));
-  if (owners.length > 1) {
-    throw new UsageError(
-      `ambiguous agent name '${raw}': it exists in ${owners.join(' and ')} — use ${owners
-        .map((p) => `${p}:${q.agent}`)
-        .join(' or ')}`,
-    );
-  }
-  const hint = owners.length === 1 ? ` — use ${owners[0]}:${q.agent}` : '';
-  throw new UsageError(`agent name must be qualified as <plugin:name>, got '${raw}'${hint}`);
-}
-
-/**
- * Reject an agent the plugin's roster does not list (or cannot be read).
- *
- * @param {object} ctx
- * @param {{ plugin: string, agent: string, qualified: string }} q
- */
-function requireKnownAgent(ctx, q) {
-  const roster = ctx.rosters[q.plugin];
-  if (!roster) throw new UsageError(`cannot verify ${q.qualified}: ${q.plugin} roster not found`);
-  if (!roster.has(q.agent)) throw new UsageError(`unknown agent: ${q.qualified}`);
-}
-
-/**
- * A tier the user may set now (core `allowedTiersFor`: fable only while the
- * shipped gate is on). Aliases are never accepted.
- *
- * @param {object} config
- * @param {string|undefined} tier
- * @returns {string}
- */
-function requireTier(config, tier) {
-  const allowed = allowedTiersFor(config);
-  if (!tier) throw new UsageError(`missing tier (expected ${allowed.join('|')})`);
-  if (!allowed.includes(tier)) {
-    const why = tier === 'fable' ? ' — the fable gate is off in the shipped config' : '';
-    throw new UsageError(`unknown tier: ${tier} (expected ${allowed.join('|')})${why}`);
-  }
-  return tier;
-}
-
-/**
- * @param {string|undefined} phase
- * @returns {string}
- */
-function requirePhase(phase) {
-  if (!PHASES.includes(phase)) throw new UsageError(`unknown phase: ${phase} (expected ${PHASES.join('|')})`);
-  return phase;
-}
-
-/**
- * @param {string|undefined} plugin
- * @returns {string}
- */
-function requirePlugin(plugin) {
-  if (!PLUGIN_NAMES.includes(plugin)) {
-    throw new UsageError(`unknown plugin: ${plugin} (expected ${PLUGIN_NAMES.join('|')})`);
-  }
-  return plugin;
-}
-
-/**
- * Turn a `set` command line into a setOverride spec.
- *
- * @param {object} ctx
- * @param {string[]} positionals
- * @returns {object}
- */
-function parseSetSpec(ctx, positionals) {
-  const [scope, target, tier, extra] = positionals;
-  if (extra !== undefined) throw new UsageError(`unexpected argument: ${extra}`);
-  if (scope === 'agent') {
-    const q = requireQualified(ctx, target);
-    requireKnownAgent(ctx, q);
-    return { scope, plugin: q.plugin, key: q.agent, tier: requireTier(ctx.config, tier) };
-  }
-  if (scope === 'phase') {
-    return { scope, plugin: 'artibot', key: requirePhase(target), tier: requireTier(ctx.config, tier) };
-  }
-  if (scope === 'plugin') {
-    return { scope, plugin: requirePlugin(target), tier: requireTier(ctx.config, tier) };
-  }
-  throw new UsageError(`unknown set scope: ${scope} (expected agent|phase|plugin)`);
-}
-
-/**
- * Turn a `reset` command line into a clear spec, or `{ all: true }`.
- *
- * @param {object} ctx
- * @param {string[]} positionals
- * @param {Record<string, string|true>} flags
- * @returns {object}
- */
-function parseResetSpec(ctx, positionals, flags) {
-  if (flags.all) {
-    if (positionals.length > 0) throw new UsageError('reset --all takes no other arguments');
-    return { all: true };
-  }
-  const [scope, target, extra] = positionals;
-  if (extra !== undefined) throw new UsageError(`unexpected argument: ${extra}`);
-  if (scope === 'agent') {
-    const q = requireQualified(ctx, target);
-    return { scope, plugin: q.plugin, key: q.agent };
-  }
-  if (scope === 'phase') return { scope, plugin: 'artibot', key: requirePhase(target) };
-  if (scope === 'plugin') return { scope, plugin: requirePlugin(target) };
-  throw new UsageError(`unknown reset scope: ${scope} (expected agent|phase|plugin|--all)`);
 }
 
 /**
@@ -457,7 +366,7 @@ function effectiveDiff(ctx, before, after) {
 }
 
 /**
- * Shared write path for `set`/`reset`: refuse a damaged file, diff, then (unless
+ * Shared write path for `set`/`reset`/`apply`: refuse a damaged file, diff, then (unless
  * `--dry-run`) back up the previous file to `.bak` and write atomically.
  *
  * @param {object} ctx
@@ -506,14 +415,10 @@ async function applyWrite(ctx, change, dryRun) {
  * @returns {Promise<number>}
  */
 async function cmdSet(argv) {
-  const { positionals, flags } = parseFlags(argv, FLAGS.set);
+  const { positionals, flags } = parseFlags(argv, scopeFlags(argv, FLAGS.set));
   const ctx = loadContext(flags);
-  const spec = parseSetSpec(ctx, positionals);
-  return applyWrite(
-    ctx,
-    (current) => setOverride(current, { ...spec, config: ctx.config }),
-    flags['dry-run'] === true,
-  );
+  const specs = parseSetSpec(ctx, positionals, flags);
+  return applyWrite(ctx, (current) => applySpecs(current, specs, ctx.config), flags['dry-run'] === true);
 }
 
 /**
@@ -521,20 +426,40 @@ async function cmdSet(argv) {
  * @returns {Promise<number>}
  */
 async function cmdReset(argv) {
-  const { positionals, flags } = parseFlags(argv, FLAGS.reset);
+  const { positionals, flags } = parseFlags(argv, scopeFlags(argv, FLAGS.reset));
   const ctx = loadContext(flags);
   const spec = parseResetSpec(ctx, positionals, flags);
   if (ctx.loaded.status === 'absent') {
     process.stdout.write(`no overrides file (${ctx.file}); nothing to reset\n`);
     return 0;
   }
-  const change = spec.all ? () => clearAll() : (current) => clearOverride(current, spec);
+  const change = spec.all ? () => clearAll() : (current) => applySpecs(current, spec, ctx.config);
   return applyWrite(ctx, change, flags['dry-run'] === true);
 }
 
 /**
+ * `apply <file.json>`: every change is validated first (a bad one → exit 1,
+ * naming each bad change by 1-based index, nothing written), then ONE write.
+ *
+ * @param {string[]} argv
+ * @returns {Promise<number>}
+ */
+async function cmdApply(argv) {
+  const { positionals, flags } = parseFlags(argv, FLAGS.apply);
+  if (positionals.length !== 1) throw new UsageError('apply takes exactly one <file.json>');
+  const file = path.resolve(positionals[0]);
+  const doc = readApplyDocument(file);
+  const ctx = loadContext(flags);
+  const specs = parseApplyChanges(ctx, doc, file);
+  return applyWrite(ctx, (current) => applySpecs(current, specs, ctx.config), flags['dry-run'] === true);
+}
+
+/**
  * Findings for a cleanly loaded file (the schema already passed in `load`):
- * unknown agents, settings a gate demotes, and rows that need the spawn parameter.
+ * unknown agents, settings a gate demotes (per agent under its default task,
+ * plus every stored task override under an explicit task), stored task keys
+ * that are not action classes (core accepts any well-shaped key and never
+ * applies it), and rows that need the spawn parameter.
  *
  * @param {object} ctx
  * @returns {{ errors: string[], warnings: string[], needsSpawnParam: string[] }}
@@ -544,6 +469,7 @@ function collectFindings(ctx) {
   const errors = [];
   const warnings = [];
   const needsSpawnParam = [];
+  warnings.push(...inertTaskKeys(overrides));
   for (const plugin of PLUGIN_NAMES) {
     const roster = ctx.rosters[plugin];
     const named = Object.keys(overrides?.plugins?.[plugin]?.agents ?? {});
@@ -564,14 +490,47 @@ function collectFindings(ctx) {
         }
       }
     }
+    warnings.push(...storedTaskDemotions(ctx, plugin, overrides));
   }
   return { errors, warnings, needsSpawnParam };
 }
 
-/** The two CANNOT SEE items of `routing-honor.js` every live report repeats. */
+/**
+ * Gate demotions of every STORED task override of one plugin, resolved with an
+ * explicit `--task` for each roster agent. The per-agent lines above only see
+ * each agent's DEFAULT task, so a pick for a class no agent defaults to
+ * (`status`, `classify`) would otherwise demote silently on `resolve --task`.
+ * One line per class and outcome, counted over the roster.
+ *
+ * @param {object} ctx
+ * @param {string} plugin
+ * @param {object} overrides
+ * @returns {string[]}
+ */
+function storedTaskDemotions(ctx, plugin, overrides) {
+  const roster = [...ctx.rosters[plugin].keys()];
+  const stored = Object.keys(overrides?.plugins?.[plugin]?.tasks ?? {}).filter((t) => ACTION_CLASSES.includes(t));
+  return stored.flatMap((task) => {
+    const counts = new Map();
+    for (const agent of roster) {
+      const r = resolveRow(ctx, plugin, agent, null, overrides, task);
+      if (r.scope !== 'task' || !r.reason) continue;
+      const key = `${r.requested} demoted to ${r.model} (${r.reason})`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts].map(([what, n]) => `${plugin} [task=${task}]: ${what} for ${n} of ${roster.length} agent(s) with --task ${task}`);
+  });
+}
+
+/**
+ * The two CANNOT SEE items of `routing-honor.js` every live report repeats, plus
+ * the task layer's own blind spot: a bind carries no task, so the expected side
+ * uses each agent's DEFAULT task.
+ */
 const LIVE_CAVEATS = Object.freeze([
   "expected tier = TODAY's config, rosters and overrides as read from the plugin root above, which may differ from the installed plugin that served the spawns — pass --plugin-root (and --cowork-root) to judge against the installed copy; a spawn from before the last change is judged against them — window with --since",
   'honored mostly means the frontmatter default was served; only an override-* row whose override differs from the frontmatter says anything about an override',
+  "expected tier uses each agent's DEFAULT task, not the task the spawn was resolved with (e.g. `resolve --task`); a spawn routed for another task can read as unhonored",
 ]);
 
 /** Each rate of the fold → [numerator, denominator] as `denominators`/`verdicts` keys. */
@@ -677,7 +636,8 @@ function cmdValidateLive(flags) {
   const roster = PLUGIN_NAMES.flatMap((p) => [...(ctx.rosters[p]?.keys() ?? [])].map((a) => `${p}:${a}`));
   const { events, census } = readLedgerCensus(path.resolve(flags.cwd ?? process.cwd()), since === null ? {} : { since });
   const fold = foldRoutingHonor(joinSpawnOutcomes(events), {
-    resolve: (name) => resolveEffectiveModel(name, {}, opts),
+    // Each agent's DEFAULT task, like every other resolve here (the fold passes a name only).
+    resolve: (name) => resolveEffectiveModel(name, callOpts(name, null), opts),
     tierOfServedModel: (id) => resolveModelIdentity(id)?.tier ?? null,
     roster,
   });
@@ -744,11 +704,12 @@ function cmdResolve(argv) {
   const { positionals, flags } = parseFlags(argv, FLAGS.resolve);
   if (positionals.length !== 1) throw new UsageError('resolve takes exactly one <plugin:name>');
   const role = parseRole(flags.role);
+  const task = flags.task === undefined ? null : requireTask(flags.task);
   const ctx = loadContext(flags);
   const q = requireQualified(ctx, positionals[0]);
   requireKnownAgent(ctx, q);
   const overrides = effectiveOverrides(ctx);
-  const { model, source } = resolveRow(ctx, q.plugin, q.agent, role, overrides);
+  const { model, source } = resolveRow(ctx, q.plugin, q.agent, role, overrides, task);
   if (typeof model !== 'string') throw new Refusal(`cannot resolve ${q.qualified}: ${source}`);
   process.stdout.write(`${model}\n`);
   return 0;
@@ -758,6 +719,7 @@ const COMMANDS = Object.freeze({
   show: cmdShow,
   set: cmdSet,
   reset: cmdReset,
+  apply: cmdApply,
   validate: cmdValidate,
   resolve: cmdResolve,
 });

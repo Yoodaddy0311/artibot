@@ -568,7 +568,7 @@ describe('validate --live (reads the ledger, never writes it)', () => {
     expect(json.rows.map((r) => [r.agent_id, r.verdict])).toEqual([
       ['a1', 'honored'], ['a2', 'unhonored'], ['a3', 'unmeasured'], ['a4', 'honored'],
     ]);
-    expect(json.caveats).toHaveLength(2);
+    expect(json.caveats).toHaveLength(3);
   });
 
   it('text: census line, rates, verdicts, the unhonored row and both caveats', { timeout: TIMEOUT }, () => {
@@ -581,7 +581,7 @@ describe('validate --live (reads the ledger, never writes it)', () => {
     expect(r.stdout).toMatch(/honored_of_measured\s+2\/3\s+66\.7%/);
     expect(r.stdout).toContain('verdicts: honored 2 · unhonored 1 · unmeasured 1');
     expect(r.stdout).toContain('unhonored artibot:architect: expected opus [shipped] served sonnet (claude-sonnet-5)');
-    expect(r.stdout.match(/^caveat: /gm)).toHaveLength(2);
+    expect(r.stdout.match(/^caveat: /gm)).toHaveLength(3);
     expect(run(['validate', '--live', '--cwd', project]).stdout).toBe(r.stdout);
   });
 
@@ -658,5 +658,33 @@ describe('validate --live (reads the ledger, never writes it)', () => {
     const cwd = run(['validate', '--cwd', project]);
     expect(cwd.code).toBe(2);
     expect(cwd.stderr).toContain('--cwd is only valid with --live');
+  });
+
+  it("judges each spawn under its agent's DEFAULT task override", { timeout: TIMEOUT }, () => {
+    // artibot:architect AND artibot:planner default to `architecture`: the a2
+    // spawn (architect, served sonnet) turns honored, a1 (planner, served opus)
+    // turns unhonored — both judged against the task override.
+    expect(run(['set', 'task', 'architecture', 'sonnet', '--plugin', 'artibot']).code).toBe(0);
+    const { json } = live('--json');
+    expect(json.verdicts).toEqual({ honored: 2, unhonored: 1, unmeasured: 1 });
+    const byId = Object.fromEntries(json.rows.map((r) => [r.agent_id, [r.verdict, r.expected_tier, r.expected_source]]));
+    expect(byId.a1).toEqual(['unhonored', 'sonnet', 'override-task']);
+    expect(byId.a2).toEqual(['honored', 'sonnet', 'override-task']);
+  });
+});
+
+describe('task layer on an existing v1 file (additive, no schema bump)', () => {
+  it('a file without a tasks key loads, and every row carries its default task', { timeout: TIMEOUT }, () => {
+    mkdirSync(path.dirname(stateFile), { recursive: true });
+    const doc = { schemaVersion: 1, plugins: { artibot: { default: null, agents: { planner: 'sonnet' }, phaseRoles: {} } } };
+    writeFileSync(stateFile, JSON.stringify(doc), 'utf8');
+    const r = run(['show', '--json']);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+    const json = JSON.parse(r.stdout);
+    expect(json.overridesStatus).toBe('ok');
+    expect(row(json, 'artibot', 'planner')).toMatchObject({ task: 'architecture', effective: 'sonnet', source: 'override-agent' });
+    expect(row(json, 'artibot', 'code-reviewer').task).toBe('review');
+    expect(json.tasks.every((t) => t.overrides.artibot === null && t.overrides['artibot-cowork'] === null)).toBe(true);
   });
 });

@@ -17,6 +17,8 @@
  *      catalog knows.
  *   5. Observe metrics mixing: while an override is on, user-chosen spawns land
  *      unlabeled in the same match-rate rows as policy-chosen ones.
+ *   6. Callers that omit opts.task get no task layer (fail-safe). The model-routing
+ *      CLI and split-brief (the agent's default task) pass it; any other caller must.
  */
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -41,6 +43,7 @@ import {
   validateOverrides,
 } from '../../lib/core/model-overrides.js';
 import { resolveModel } from '../../lib/core/model-policy.js';
+import { ACTION_CLASSES } from '../../lib/routing/action-classifier.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.join(__dirname, '..', '..');
@@ -526,5 +529,268 @@ describe('loadOverrides (tmp dir only)', () => {
     expect(res.status).toBe('unreadable');
     expect(res.overrides).toBeNull();
     expect(res.errors).toHaveLength(1);
+  });
+});
+
+// Task layer (per-plugin `tasks`, applied only when opts.task is given). Core
+// checks task keys for SHAPE only; the vocabulary (ACTION_CLASSES) and each
+// agent's default task are the CLI's job, so by design a library call without
+// opts.task never sees a stored task override (fail-safe).
+
+/** Tiers per layer. Shipped for code-reviewer is opus; cowork frontmatter is opus. */
+const LAYER_TIER = Object.freeze({ agent: 'haiku', task: 'sonnet', phase: 'haiku', plugin: 'sonnet' });
+const CORE_AGENT = 'code-reviewer';
+const COWORK_AGENT = 'case-study-writer';
+const TASK_FM = Object.freeze({ [COWORK_AGENT]: 'opus' });
+const TASK_OPTS = Object.freeze({ role: 'review', task: 'review' });
+
+/** Chosen layers set in BOTH plugins via the public setters (phase: artibot only). */
+function layered({ agent, task, phase, plugin }) {
+  let ov = null;
+  for (const p of PLUGIN_NAMES) {
+    if (agent) ov = setOverride(ov, { scope: 'agent', plugin: p, key: p === 'artibot' ? CORE_AGENT : COWORK_AGENT, tier: LAYER_TIER.agent });
+    if (task) ov = setOverride(ov, { scope: 'task', plugin: p, key: 'review', tier: LAYER_TIER.task });
+    if (plugin) ov = setOverride(ov, { scope: 'plugin', plugin: p, tier: LAYER_TIER.plugin });
+  }
+  if (phase) ov = setOverride(ov, { scope: 'phase', plugin: 'artibot', key: 'review', tier: LAYER_TIER.phase });
+  return ov;
+}
+
+/** Expected result for a winning layer (null = shipped / cowork frontmatter). */
+function expectedFor(layer, side) {
+  if (layer === null) return side === 'artibot' ? SHIPPED('opus') : R('opus', 'cowork-frontmatter', { requested: 'opus' });
+  const tier = LAYER_TIER[layer];
+  return R(tier, `override-${layer}`, { requested: tier, scope: layer });
+}
+
+describe('task layer — 16-row precedence matrix (agent > task > phase > plugin > shipped)', () => {
+  // [agent, task, phase, plugin] present? → winning layer for artibot:code-reviewer
+  // and for artibot-cowork:case-study-writer (no phase layer on cowork).
+  const MATRIX = [
+    [0, 0, 0, 0, null, null], /*        */ [0, 0, 0, 1, 'plugin', 'plugin'],
+    [0, 0, 1, 0, 'phase', null], /*     */ [0, 0, 1, 1, 'phase', 'plugin'],
+    [0, 1, 0, 0, 'task', 'task'], /*    */ [0, 1, 0, 1, 'task', 'task'],
+    [0, 1, 1, 0, 'task', 'task'], /*    */ [0, 1, 1, 1, 'task', 'task'],
+    [1, 0, 0, 0, 'agent', 'agent'], /*  */ [1, 0, 0, 1, 'agent', 'agent'],
+    [1, 0, 1, 0, 'agent', 'agent'], /*  */ [1, 0, 1, 1, 'agent', 'agent'],
+    [1, 1, 0, 0, 'agent', 'agent'], /*  */ [1, 1, 0, 1, 'agent', 'agent'],
+    [1, 1, 1, 0, 'agent', 'agent'], /*  */ [1, 1, 1, 1, 'agent', 'agent'],
+  ];
+
+  it('the table is complete: 16 distinct rows', () => {
+    expect(MATRIX).toHaveLength(16);
+    expect(new Set(MATRIX.map((r) => r.slice(0, 4).join(''))).size).toBe(16);
+  });
+
+  for (const [a, t, p, d, core, cowork] of MATRIX) {
+    it(`agent=${a} task=${t} phase=${p} plugin=${d} → ${core ?? 'shipped'} / ${cowork ?? 'frontmatter'}`, () => {
+      const ctx = { config: shippedConfig, overrides: layered({ agent: a, task: t, phase: p, plugin: d }), coworkFrontmatter: TASK_FM };
+      expect(resolveEffectiveModel(`artibot:${CORE_AGENT}`, TASK_OPTS, ctx)).toEqual(expectedFor(core, 'artibot'));
+      expect(resolveEffectiveModel(`artibot-cowork:${COWORK_AGENT}`, TASK_OPTS, ctx)).toEqual(expectedFor(cowork, 'artibot-cowork'));
+    });
+  }
+
+  it('positive control: clearing each layer in turn changes the answer', () => {
+    const steps = [[null, 'agent'], [{ scope: 'agent', key: CORE_AGENT }, 'task'], [{ scope: 'task', key: 'review' }, 'phase'],
+      [{ scope: 'phase', key: 'review' }, 'plugin'], [{ scope: 'plugin' }, null]];
+    let ov = layered({ agent: 1, task: 1, phase: 1, plugin: 1 });
+    let previous = null;
+    for (const [clear, winner] of steps) {
+      if (clear) ov = clearOverride(ov, { ...clear, plugin: 'artibot' });
+      const got = resolveEffectiveModel(`artibot:${CORE_AGENT}`, TASK_OPTS, { config: shippedConfig, overrides: ov });
+      expect(got, `after clearing ${clear?.scope}`).toEqual(expectedFor(winner, 'artibot'));
+      expect(got).not.toEqual(previous);
+      previous = got;
+    }
+  });
+});
+
+describe('task layer — 2×2: opts.task given/absent × mapped/unmapped agent', () => {
+  // Only a `review` task override, both plugins. Core consults no agent→task map.
+  const ov = deepFreeze(PLUGIN_NAMES.reduce((acc, p) => setOverride(acc, { scope: 'task', plugin: p, key: 'review', tier: 'haiku' }), null));
+  const ctx = { config: shippedConfig, overrides: ov, coworkFrontmatter: TASK_FM };
+  const TASK_HIT = R('haiku', 'override-task', { requested: 'haiku', scope: 'task' });
+  const CELLS = [
+    ['given', `artibot:${CORE_AGENT}`, { task: 'review' }, TASK_HIT],
+    ['given', `artibot-cowork:${COWORK_AGENT}`, { task: 'review' }, TASK_HIT],
+    ['absent', `artibot:${CORE_AGENT}`, {}, SHIPPED('opus')],
+    ['absent', `artibot-cowork:${COWORK_AGENT}`, {}, R('opus', 'cowork-frontmatter', { requested: 'opus' })],
+  ];
+
+  for (const [mode, name, opts, expected] of CELLS) it(`opts.task ${mode}, ${name}`, () => expect(resolveEffectiveModel(name, opts, ctx)).toEqual(expected));
+
+  it('fail-safe: a direct call without opts.task ignores a stored task override (role alone does not select it)', () => {
+    expect(resolveEffectiveModel(CORE_AGENT, { role: 'review' }, ctx)).toEqual(SHIPPED(resolveModel(CORE_AGENT, { role: 'review' }, shippedConfig)));
+  });
+
+  it('empty, miscased, unknown and non-string opts.task fall through to the next layer', () => {
+    for (const task of ['', 'Review', ' review', 'deploy', 42, null, ['review']]) {
+      expect(resolveEffectiveModel(`artibot:${CORE_AGENT}`, { task }, ctx), JSON.stringify(task)).toEqual(SHIPPED('opus'));
+    }
+  });
+});
+
+describe('task layer — isolation, gates, shipped identity', () => {
+  it('a cowork task override never reaches artibot, and vice versa', () => {
+    const cowork = setOverride(null, { scope: 'task', plugin: 'artibot-cowork', key: 'review', tier: 'haiku' });
+    const core = setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'haiku' });
+    const opts = { task: 'review' };
+    expect(resolveEffectiveModel(`artibot:${CORE_AGENT}`, opts, { config: shippedConfig, overrides: cowork })).toEqual(SHIPPED('opus'));
+    expect(resolveEffectiveModel(`artibot-cowork:${COWORK_AGENT}`, opts, { config: shippedConfig, overrides: cowork, coworkFrontmatter: TASK_FM }).source).toBe('override-task');
+    expect(resolveEffectiveModel(`artibot-cowork:${COWORK_AGENT}`, opts, { config: shippedConfig, overrides: core, coworkFrontmatter: TASK_FM }))
+      .toEqual(R('opus', 'cowork-frontmatter', { requested: 'opus' }));
+    expect(resolveEffectiveModel(`artibot:${CORE_AGENT}`, opts, { config: shippedConfig, overrides: core }).source).toBe('override-task');
+  });
+
+  it('the fable gate and denylist still win after a task pick', () => {
+    const ov = setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'fable', config: gateOnConfig });
+    const coworkOv = setOverride(null, { scope: 'task', plugin: 'artibot-cowork', key: 'review', tier: 'fable', config: gateOnConfig });
+    const opts = { task: 'review' };
+    for (const config of [shippedConfig, gateOnConfig]) {
+      expect(resolveEffectiveModel('artibot:security-reviewer', opts, { config, overrides: ov }))
+        .toEqual(R('opus', 'override-task', { reason: 'denylist', requested: 'fable', scope: 'task' }));
+    }
+    expect(resolveEffectiveModel('architect', opts, { config: gateOnConfig, overrides: ov }))
+      .toEqual(R('fable', 'override-task', { requested: 'fable', scope: 'task' }));
+    expect(resolveEffectiveModel('architect', opts, { config: shippedConfig, overrides: ov }))
+      .toEqual(R('opus', 'override-task', { reason: 'fable-gate', requested: 'fable', scope: 'task' }));
+    expect(resolveEffectiveModel('artibot-cowork:planner', opts, { config: gateOnConfig, overrides: coworkOv, coworkFrontmatter: COWORK_FM }))
+      .toEqual(R('opus', 'override-task', { reason: 'fable-gate', requested: 'fable', scope: 'task' }));
+  });
+
+  it('with no override for the task, opts.task leaves every shipped answer byte-identical', () => {
+    const other = setOverride(null, { scope: 'task', plugin: 'artibot', key: 'implement', tier: 'haiku' });
+    let checked = 0;
+    for (const overrides of [null, emptyOverrides(), other]) {
+      for (const agent of AGENTS) {
+        for (const role of ROLE_OPTS) {
+          for (const task of ACTION_CLASSES) {
+            if (overrides === other && task === 'implement') continue;
+            const got = resolveEffectiveModel(`artibot:${agent}`, { ...role, task }, { config: shippedConfig, overrides });
+            expect(got, `${agent} ${JSON.stringify(role)} ${task}`).toEqual(SHIPPED(resolveModel(`artibot:${agent}`, role, shippedConfig)));
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBe(30 * 3 * 8 * 3 - 30 * 3);
+  });
+
+  it('role aliases keep their fast path even with opts.task and a matching task override', () => {
+    const ov = setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'haiku' });
+    for (const alias of ['deep-async', 'frontier', 'opus']) {
+      expect(resolveEffectiveModel(alias, { task: 'review' }, { config: shippedConfig, overrides: ov }))
+        .toEqual(SHIPPED(resolveModel(alias, {}, shippedConfig)));
+    }
+  });
+});
+
+describe('task layer — setters and schema', () => {
+  it('every action class is a valid task key (vocabulary ⊂ core key shape)', () => {
+    expect(ACTION_CLASSES).toHaveLength(8);
+    for (const task of ACTION_CLASSES) {
+      const ov = setOverride(null, { scope: 'task', plugin: 'artibot-cowork', key: task, tier: 'sonnet' });
+      expect(ov.plugins['artibot-cowork'].tasks).toEqual({ [task]: 'sonnet' });
+      expect(validateOverrides(ov, { config: shippedConfig })).toEqual({ ok: true, errors: [] });
+    }
+  });
+
+  it('setOverride rejects a malformed task key with TypeError "must be a lowercase slug"', () => {
+    for (const key of ['Review', '', ' review', '1review', 'code_review', '__proto__', 'artibot:review', undefined, 42]) {
+      expect(() => setOverride(null, { scope: 'task', plugin: 'artibot', key, tier: 'opus' }), JSON.stringify(key))
+        .toThrow(/task key .* must be a lowercase slug/);
+      expect(() => clearOverride(null, { scope: 'task', plugin: 'artibot', key }), JSON.stringify(key)).toThrow(TypeError);
+    }
+  });
+
+  it('a well-formed key core does not know is accepted (vocabulary is the caller\'s check)', () => {
+    expect(setOverride(null, { scope: 'task', plugin: 'artibot', key: 'deploy', tier: 'opus' }).plugins.artibot.tasks).toEqual({ deploy: 'opus' });
+  });
+
+  it('fable on a task is refused while the gate is off, by the same allowedTiersFor path as agents', () => {
+    for (const config of [shippedConfig, undefined]) {
+      expect(() => setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'fable', config }))
+        .toThrow(/^tier "fable" is not one of haiku\|sonnet\|opus$/);
+    }
+    expect(setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'fable', config: gateOnConfig }).plugins.artibot.tasks)
+      .toEqual({ review: 'fable' });
+  });
+
+  it('tasks appears only when set, and clearing the last one restores the v1 shape', () => {
+    const agentOnly = setOverride(null, { scope: 'agent', plugin: 'artibot', key: 'planner', tier: 'haiku' });
+    expect(Object.hasOwn(agentOnly.plugins.artibot, 'tasks')).toBe(false);
+    const roundTrip = clearOverride(setOverride(agentOnly, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'sonnet' }), { scope: 'task', plugin: 'artibot', key: 'review' });
+    expect(JSON.stringify(roundTrip, null, 2)).toBe(JSON.stringify(agentOnly, null, 2)); // set → reset = never-tasked bytes
+    const frozen = deepFreeze(setOverride(setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'haiku' }),
+      { scope: 'task', plugin: 'artibot', key: 'implement', tier: 'sonnet' }));
+    const snapshot = JSON.stringify(frozen);
+    const one = clearOverride(frozen, { scope: 'task', plugin: 'artibot', key: 'review' });
+    expect(one.plugins.artibot.tasks).toEqual({ implement: 'sonnet' });
+    const none = clearOverride(one, { scope: 'task', plugin: 'artibot', key: 'implement' });
+    expect(none).toEqual(emptyOverrides());
+    expect(Object.hasOwn(none.plugins.artibot, 'tasks')).toBe(false);
+    expect(clearOverride(null, { scope: 'task', plugin: 'artibot-cowork', key: 'review' })).toEqual(emptyOverrides());
+    expect(JSON.stringify(frozen)).toBe(snapshot);
+  });
+
+  it('validateOverrides: tasks accepted on both plugins; bad keys, tiers and shapes rejected in both modes', () => {
+    const doc = (tasks) => ({ schemaVersion: 1, plugins: { artibot: { tasks }, 'artibot-cowork': { tasks } } });
+    expect(validateOverrides(doc({ review: 'haiku', 'complex-debug': 'opus' }), { config: shippedConfig })).toEqual({ ok: true, errors: [] });
+    for (const mode of ['write', 'load']) {
+      for (const [tasks, pattern] of [
+        [{ Review: 'opus' }, /task key "Review" must be a lowercase slug/],
+        [JSON.parse('{"__proto__":"opus"}'), /lowercase slug/],
+        [{ review: 'Opus' }, /tier "Opus"/],
+        [{ review: 'deep-async' }, /tier "deep-async"/],
+        [['review'], /tasks: must be an object/],
+        ['review', /tasks: must be an object/],
+      ]) {
+        const res = validateOverrides(doc(tasks), { config: shippedConfig, mode });
+        expect(res.ok, `${mode} ${JSON.stringify(tasks)}`).toBe(false);
+        expect(res.errors.join('\n')).toMatch(pattern);
+      }
+    }
+  });
+
+  it('validateOverrides: fable in tasks fails write with the gate off, passes load (demoted at resolve)', () => {
+    const doc = { schemaVersion: 1, plugins: { artibot: { tasks: { review: 'fable' } } } };
+    expect(validateOverrides(doc, { config: shippedConfig }).errors.join('\n')).toMatch(/plugins\.artibot\.tasks\.review: tier "fable"/);
+    expect(validateOverrides(doc, { config: gateOnConfig }).ok).toBe(true);
+    expect(validateOverrides(doc, { mode: 'load' })).toEqual({ ok: true, errors: [] });
+  });
+});
+
+describe('task layer — loadOverrides (tmp dir only)', () => {
+  it('a v1 file without tasks loads unchanged and gets no tasks key', () => {
+    const dir = tmpDir();
+    const doc = { schemaVersion: 1, plugins: { artibot: { default: 'sonnet', agents: { planner: 'haiku' }, phaseRoles: { review: 'opus' } }, 'artibot-cowork': { default: null, agents: {} } } };
+    writeFileSync(path.join(dir, OVERRIDES_FILENAME), JSON.stringify(doc));
+    const res = loadOverrides({ dir });
+    expect(res).toEqual({ status: 'ok', overrides: doc, path: path.resolve(dir, OVERRIDES_FILENAME), errors: [] });
+    expect(Object.hasOwn(res.overrides.plugins.artibot, 'tasks')).toBe(false);
+    expect(resolveEffectiveModel('architect', { task: 'review' }, { config: shippedConfig, overrides: res.overrides }))
+      .toEqual(R('sonnet', 'override-plugin', { requested: 'sonnet', scope: 'plugin' }));
+  });
+
+  it('an unknown but well-formed task key loads, stays inert, and keeps its neighbours', () => {
+    const dir = tmpDir();
+    const doc = { schemaVersion: 1, plugins: { artibot: { agents: { planner: 'haiku' }, tasks: { 'not-a-class': 'sonnet', review: 'fable' } } } };
+    writeFileSync(path.join(dir, OVERRIDES_FILENAME), JSON.stringify(doc));
+    const res = loadOverrides({ dir });
+    expect(res.status).toBe('ok');
+    const ctx = { config: shippedConfig, overrides: res.overrides };
+    expect(resolveEffectiveModel('planner', { task: 'review' }, ctx)).toEqual(R('haiku', 'override-agent', { requested: 'haiku', scope: 'agent' }));
+    expect(resolveEffectiveModel('architect', { task: 'implement' }, ctx)).toEqual(SHIPPED('opus'));
+    expect(resolveEffectiveModel('architect', { task: 'review' }, ctx))
+      .toEqual(R('opus', 'override-task', { reason: 'fable-gate', requested: 'fable', scope: 'task' }));
+  });
+
+  it('a structurally bad task entry makes the file malformed (same policy as a bad agent entry)', () => {
+    const dir = tmpDir();
+    writeFileSync(path.join(dir, OVERRIDES_FILENAME), JSON.stringify({ schemaVersion: 1, plugins: { artibot: { agents: { planner: 'haiku' }, tasks: { Review: 'opus' } } } }));
+    const res = loadOverrides({ dir });
+    expect(res.status).toBe('malformed');
+    expect(res.overrides).toBeNull();
+    expect(res.errors.join('\n')).toMatch(/task key "Review"/);
   });
 });
