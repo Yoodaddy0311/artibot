@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CAS_SKIPPED_WARNING,
   createStateStore,
@@ -12,7 +12,7 @@ import {
   stateUpdatedIdempotencyKey,
 } from '../../lib/project-state/state-manager.js';
 import { checkLedgerStateParity } from '../../lib/project-state/doctor-checks.js';
-import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
+import { ledgerFilePath, resetSeq, writeEvent } from '../../lib/runtime/event-writer.js';
 import {
   cleanup, graph, makeStore, mission, MISSION_ID, seed, T0, task,
 } from './helpers.js';
@@ -671,5 +671,75 @@ describe('state.updated idempotency key (SH-14)', () => {
     // Control: the reader is not vacuous — drop version 2 and it is caught.
     expect(checkLedgerStateParity({ ...input, events: [legacy] }).findings.map((f) => f.code))
       .toContain('ledger-subset-violation');
+  });
+});
+
+/**
+ * SH-30 characterization: the exact `state.updated` the store hands its port,
+ * and the exact line the real writer puts on disk for it.
+ *
+ * Written BEFORE the emitter was reshaped for the hook-emitter scanner, and
+ * green on the code it characterizes. Both sources the shipped callers pass are
+ * covered: the `'supervisor'` default (`scripts/split/task-feed.mjs` spells it
+ * out) and `'hook'` (`lib/runtime/middleware/tasks.js#openMissionStore`).
+ * Compared as strings, so key ORDER is part of the pin.
+ *
+ * ONE field is masked, on the disk line only: `pid`, which is `process.pid`.
+ * It is asserted to BE this process's pid before it is replaced. `ts` comes
+ * from the injected clock and `seq` from `resetSeq()`, so both are compared as
+ * written. The SH-14 `idempotency_key` is compared in full, digest included.
+ */
+describe('state.updated emitted bytes (SH-30 characterization)', () => {
+  beforeEach(() => resetSeq());
+
+  /**
+   * @param {string|undefined} source the store option; undefined takes the default
+   * @returns {{handed: string, onDisk: string}} the port's envelope as JSON, and
+   *   the ledger file with this process's pid masked
+   */
+  function emitOnce(source) {
+    const { projectRoot } = store$();
+    const handed = [];
+    const store = createStateStore({
+      projectRoot,
+      sessionId: 'sess-sh30',
+      project: 'artibot',
+      resolveGitCommonDir: () => '.git',
+      now: () => new Date('2026-09-03T00:00:00.000Z'),
+      ...(source === undefined ? {} : { source }),
+      appendEvent: (envelope) => {
+        handed.push(JSON.stringify(envelope));
+        return writeEvent(projectRoot, envelope);
+      },
+    });
+    expect(seed(store).ok).toBe(true);
+    expect(handed).toHaveLength(1);
+    const raw = readFileSync(ledgerFilePath(projectRoot), 'utf-8');
+    const lines = raw.split('\n').filter((l) => l.trim());
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).pid).toBe(process.pid);
+    return { handed: handed[0], onDisk: raw.replaceAll(`"pid":${process.pid},`, '"pid":"<pid>",') };
+  }
+
+  /** The port envelope; only `source` differs between the two callers. */
+  const handedLine = (source) => '{"event":"state.updated","mission_id":"M-20260902-001",'
+    + `"session_id":"sess-sh30","source":"${source}","ts":"2026-09-03T00:00:00.000Z",`
+    + '"idempotency_key":"state.updated:M-20260902-001:1:a78f5530a201",'
+    + '"data":{"state_version":1,"status":"executing","reason":"seed"}}';
+
+  /** The disk line: the writer reorders the envelope and adds v/pid/seq. */
+  const diskLine = (source) => '{"v":1,"ts":"2026-09-03T00:00:00.000Z","event":"state.updated",'
+    + `"session_id":"sess-sh30","source":"${source}","pid":"<pid>","seq":0,`
+    + '"mission_id":"M-20260902-001",'
+    + '"idempotency_key":"state.updated:M-20260902-001:1:a78f5530a201",'
+    + '"data":{"state_version":1,"status":"executing","reason":"seed"}}\n';
+
+  it.each([
+    ['the supervisor default', undefined, handedLine('supervisor'), diskLine('supervisor')],
+    ['source hook, as tasks.js opens it', 'hook', handedLine('hook'), diskLine('hook')],
+  ])('emits %s byte for byte', (_label, source, handed, onDisk) => {
+    const out = emitOnce(source);
+    expect(out.handed).toBe(handed);
+    expect(out.onDisk).toBe(onDisk);
   });
 });
