@@ -11,6 +11,9 @@ import { buildControllerRecord, CONTROLLER_OBSERVATIONS } from '../../../lib/mis
 import { DEFAULT_STALE_MS } from '../../../lib/project-state/lease.js';
 import { validateController } from '../../../lib/project-state/validate.js';
 import {
+  getTaskBudgetForEffort, persistEffortRecord, persistTaskBudget,
+} from '../../../lib/runtime/task-budget.js';
+import {
   readDecisionEvents,
   WORKFLOW_PLANNED,
 } from '../../../lib/observability/decision-events.js';
@@ -178,6 +181,13 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     writeFileSync(path.join(dir, `${sessionId}.json`), JSON.stringify(meta) + '\n');
   }
 
+  // No fixture in this suite writes `current-task-budget.json` or a config, so
+  // `taskBudget` is the budget RECOMPUTED from the accepted effort under the
+  // default map (R2b). It used to read `null` here only because the shared
+  // budget file was absent — the pairing R2b removed.
+  const DEFAULT_MAX_BUDGET = getTaskBudgetForEffort('max', {});
+  const DEFAULT_HIGH_BUDGET = getTaskBudgetForEffort('high', {});
+
   it('propagates shift + reason from current-effort.json into task.meta', async () => {
     writeEffortFixture({
       command: 'implement', effort: 'max', baseline: 'xhigh',
@@ -188,7 +198,7 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     const result = await mw(state);
 
     expect(result.context.tasks.meta).toEqual({
-      effort: 'max', command: 'implement', taskBudget: null,
+      effort: 'max', command: 'implement', taskBudget: DEFAULT_MAX_BUDGET,
       shift: 1, reason: 'score>=0.7 (+1)',
     });
   });
@@ -239,7 +249,7 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     const result = await mw(state);
 
     expect(result.context.tasks.meta).toEqual({
-      effort: 'max', command: 'implement', taskBudget: null, shift: 1, reason: 'own-session',
+      effort: 'max', command: 'implement', taskBudget: DEFAULT_MAX_BUDGET, shift: 1, reason: 'own-session',
     });
   });
 
@@ -286,7 +296,7 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     const result = await mw(state);
 
     expect(result.context.tasks.meta).toEqual({
-      effort: 'max', command: 'implement', taskBudget: null, shift: 1, reason: 'own-session',
+      effort: 'max', command: 'implement', taskBudget: DEFAULT_MAX_BUDGET, shift: 1, reason: 'own-session',
     });
   });
 
@@ -299,8 +309,129 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     const result = await mw(state);
 
     expect(result.context.tasks.meta).toEqual({
-      effort: 'high', command: 'implement', taskBudget: null, shift: 0, reason: 'baseline',
+      effort: 'high', command: 'implement', taskBudget: DEFAULT_HIGH_BUDGET, shift: 0, reason: 'baseline',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2b — effort AND budget come from the one record the identity gate accepted.
+//
+// The budget used to be read from `runtime/current-task-budget.json`, a single
+// file every session under one plugin root overwrites, while the effort went
+// through `readEffortRecord`'s session/prompt/expiry gate. Two sessions writing
+// in turn therefore handed the first one ITS effort with the OTHER's budget.
+//
+// The fixtures below are written by the PRODUCTION writers, in production
+// order — `runtime-prompt.js#resolveEffortMeta` persists the effort record,
+// then `#resolveTaskBudgetDirective` persists the budget — so the global file
+// holds exactly what a real second prompt would leave there. Each case first
+// asserts that precondition: a fixture that did not reproduce the overwrite
+// could not show the fix doing anything.
+// ---------------------------------------------------------------------------
+
+describe('middleware/tasks — effort and budget from one accepted record (R2b)', () => {
+  const NOW = 1700000000000;
+  const A = {
+    sessionId: 'sess-A',
+    promptId: 'prompt-A',
+    meta: { command: 'implement', effort: 'max', baseline: 'xhigh', shift: 1, reason: 'score>=0.7 (+1)' },
+  };
+  const B = {
+    sessionId: 'sess-B',
+    promptId: 'prompt-B',
+    meta: { command: 'daily', effort: 'low', baseline: 'medium', shift: -1, reason: 'score<=0.25 (-1)' },
+  };
+  let pluginRoot;
+  let projectRoot;
+
+  beforeEach(() => {
+    pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-r2b-'));
+    // Sandbox for the session-scoped decision/ledger writes (see the effort
+    // meta suite above for why a session id without a `cwd` is unsafe).
+    projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-r2b-proj-'));
+    mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  function writePrompt(p, cfg = {}) {
+    persistEffortRecord(p.meta, pluginRoot, { sessionId: p.sessionId, promptId: p.promptId, now: NOW });
+    persistTaskBudget({
+      command: p.meta.command,
+      effort: p.meta.effort,
+      budget: getTaskBudgetForEffort(p.meta.effort, cfg),
+    }, pluginRoot);
+  }
+
+  function globalBudget() {
+    const raw = readFileSync(path.join(pluginRoot, 'runtime', 'current-task-budget.json'), 'utf8');
+    return JSON.parse(raw).budget;
+  }
+
+  function expectedMeta(p, cfg = {}) {
+    return {
+      effort: p.meta.effort,
+      command: p.meta.command,
+      taskBudget: getTaskBudgetForEffort(p.meta.effort, cfg),
+      shift: p.meta.shift,
+      reason: p.meta.reason,
+    };
+  }
+
+  async function metaFor(p) {
+    const mw = createTasksMiddleware({ now: () => NOW });
+    const state = makeState({
+      input: {
+        prompt: 'x',
+        pluginRoot,
+        hookData: { cwd: projectRoot, session_id: p.sessionId, prompt_id: p.promptId },
+      },
+    });
+    return (await mw(state)).context.tasks.meta;
+  }
+
+  it('A then B: A keeps its own max budget, not the 16000 B left in the global file', async () => {
+    writePrompt(A);
+    writePrompt(B);
+    expect(globalBudget()).toBe(16000);
+
+    const meta = await metaFor(A);
+
+    expect(meta).toEqual(expectedMeta(A));
+    expect(meta.taskBudget).toBe(200000);
+  });
+
+  it('B then A: each session reads its own budget whichever wrote last', async () => {
+    writePrompt(B);
+    writePrompt(A);
+    expect(globalBudget()).toBe(200000);
+
+    expect(await metaFor(B)).toEqual(expectedMeta(B));
+    expect((await metaFor(B)).taskBudget).toBe(16000);
+    expect(await metaFor(A)).toEqual(expectedMeta(A));
+  });
+
+  it('recomputes the budget from the config the middleware reads, not the default map', async () => {
+    const cfg = {
+      runtime: {
+        effort: {
+          budgetMap: { max: 150000, xhigh: 100000, high: 50000, medium: 25000, low: 12000 },
+        },
+      },
+    };
+    writeFileSync(path.join(pluginRoot, 'artibot.config.json'), JSON.stringify(cfg));
+    writePrompt(A, cfg);
+    writePrompt(B, cfg);
+    expect(globalBudget()).toBe(12000);
+
+    const meta = await metaFor(A);
+
+    expect(meta).toEqual(expectedMeta(A, cfg));
+    expect(meta.taskBudget).toBe(150000);
   });
 });
 

@@ -76,7 +76,7 @@ effort 레벨은 **max / xhigh / high / medium / low** 다 (기본 `high`). `/te
 
 주의: 하드 캡이 아니라 권고다. 요청별 상한(`max_tokens`)과는 역할이 다르다.
 
-> **두 값이 팀원에게 닿는 경로는 오케스트레이터(모델)가 쓰는 프롬프트 디렉티브뿐이다.** `Agent` 도구에는 effort·budget 파라미터가 **없다** — 아래 "Auto-Effort Pre-injection" 대로 오케스트레이터가 `[artibot:effort level=…][artibot:task-budget max_tokens=…]` 를 팀원 프롬프트 맨 앞에 **직접 써 넣는다**(값의 출처는 `runtime/current-effort.json`·`runtime/current-task-budget.json`; 파일이 없으면 기본값 xhigh/128000 이 쓰이므로 **설치본에 파일이 있어야 측정값이 반영된다**). 훅(`scripts/hooks/runtime-prompt.js`)은 이 값을 **리더 세션**에는 `UserPromptSubmit` 의 `hookSpecificOutput.additionalContext` 로 알릴 뿐이고, 팀원 프롬프트를 직접 만들지 않는다 — 호스트는 훅이 프롬프트를 치환하는 것을 허용하지 않는다(공식 hooks 문서 "UserPromptSubmit: can’t replace the prompt", 2.1.259 실측 `.artibot/guides/v5-design/PROBE-effort-directive-delivery.md`). 실측 근거는 `lib/cognitive/effort-policy.js:20-30`("HOW THIS MAPPING ACTUALLY REACHES THE MODEL" 주석, 2026-09-02 측정) — "플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 설정하는 곳도 없다". 이 자리에 있던 SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다(설계 §3.7 R7). SDK·API 를 직접 호출하는 경우의 파라미터 형태는 이 문서의 범위가 아니다 — 필요하면 공식 API 문서를 보라.
+> **두 값이 팀원에게 닿는 경로는 오케스트레이터(모델)가 쓰는 프롬프트 디렉티브뿐이다.** `Agent` 도구에는 effort·budget 파라미터가 **없다** — 아래 "Auto-Effort Pre-injection" 대로 오케스트레이터가 `[artibot:effort level=…][artibot:task-budget max_tokens=…]` 를 팀원 프롬프트 맨 앞에 **직접 써 넣는다**(값의 출처는 **이 세션의 수락된 effort 레코드 하나**다 — 아래 절 1번. 전역 `runtime/current-effort.json`·`runtime/current-task-budget.json` 은 모든 세션이 덮어쓰는 대시보드·statusline 용 사본이라 **직접 Read 하지 않는다**(budget 파일은 reader 도 읽지 않고, effort 파일은 세션 레코드가 없을 때 reader 가 신원·만료 게이트를 거친 폴백으로만 읽는다); reader 가 `null` 이면 기본값 xhigh/128000 이 쓰이므로 **설치본 훅이 세션 레코드를 남겨야 측정값이 반영된다**). 훅(`scripts/hooks/runtime-prompt.js`)은 이 값을 **리더 세션**에는 `UserPromptSubmit` 의 `hookSpecificOutput.additionalContext` 로 알릴 뿐이고, 팀원 프롬프트를 직접 만들지 않는다 — 호스트는 훅이 프롬프트를 치환하는 것을 허용하지 않는다(공식 hooks 문서 "UserPromptSubmit: can’t replace the prompt", 2.1.259 실측 `.artibot/guides/v5-design/PROBE-effort-directive-delivery.md`). 실측 근거는 `lib/cognitive/effort-policy.js:20-30`("HOW THIS MAPPING ACTUALLY REACHES THE MODEL" 주석, 2026-09-02 측정) — "플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 설정하는 곳도 없다". 이 자리에 있던 SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다(설계 §3.7 R7). SDK·API 를 직접 호출하는 경우의 파라미터 형태는 이 문서의 범위가 아니다 — 필요하면 공식 API 문서를 보라.
 
 ## Execution Flow
 
@@ -124,13 +124,16 @@ Break the user's request into independent work units, 각 단위에 **작업 성
 ### Auto-Effort Pre-injection (현재 정책 티어 Agentic)
 
 Before spawning teammates, `scripts/hooks/runtime-prompt.js` has already written:
-- `runtime/current-effort.json` — 현재 커맨드의 effort level (max/xhigh/high/medium/low)
-- `runtime/current-task-budget.json` — 해당 effort에 매핑된 max_tokens budget
-- `runtime/effort/<session_id>.json` — 세션 범위 기록(`sessionId`·`promptId`·`expiresAt`, TTL 10분, GC 는 최신 32개만 남김). 미들웨어가 **이 파일을 먼저** 읽으므로 동시에 도는 두 세션이 서로의 effort 를 덮어쓰지 않는다. `runtime/current-effort.json` 은 대시보드·statusline 용으로 매 프롬프트 계속 기록된다.
+- `runtime/current-effort.json` — 현재 커맨드의 effort level (max/xhigh/high/medium/low). 전역 단일 파일이라 **마지막으로 쓴 세션의 값**이다 — 대시보드·statusline 용이고 판단 입력이 아니다.
+- `runtime/current-task-budget.json` — 해당 effort에 매핑된 max_tokens budget. 역시 전역 단일 파일, 판단 입력이 아니다.
+- `runtime/effort/<session_id>.json` — 세션 범위 기록(`sessionId`·`promptId`·`expiresAt`, TTL 10분, GC 는 최신 32개만 남김). reader `lib/runtime/task-budget.js#readEffortSnapshot` 이 신원·만료 게이트(`readEffortRecord`)로 **이 파일을 먼저** 읽고 budget 은 그 effort 에서 `getTaskBudgetForEffort` 로 재계산하므로, 동시에 도는 두 세션이 서로의 effort·budget 을 덮어쓰지 않는다.
 - 설정 키 `team.followWorkflowPlan` 은 이제 **소비처가 있다**(F04(b)) — `lib/runtime/middleware/workflow-mode.js` 의 `resolveWorkflowMode` 가 tasks 미들웨어를 통해 읽는다. **`artibot.config.json` 의 `team` 블록에 등재돼 있고 기본값은 false 다**(2026-09-15 등재; 그 전에는 코드 기본값 false 였고 등재 전후로 동작은 같다 — 소비자가 리터럴 `true` 만 ON 으로 읽는다) — 켜면 `routing.system` 대신 plan 의 `runner` 가 mode 를 정하고, 양방향으로 따른다(system1 + `runner=team` → agentTeam, system2 + `runner=inline` → subAgent). **OFF(`team.enabled`·`team.autoApply` false, `--no-team`)가 이 키보다 항상 우선**한다. 켜면 `plan`↔`mode` 불일치가 정의상 0 이 되어 SH-04 의 분모가 사라지므로, 키 false 상태의 데이터를 한 릴리스 모으기 전에는 끈 채로 둔다(`workflow-planned` 라인의 `data.mode` 가 그 기록이다).
 
 The orchestrator MUST:
-1. Phase 1 시작 직후 앞 두 파일(`current-effort.json`·`current-task-budget.json`)을 Read (없으면 effort=xhigh, budget=128000 기본값 적용)
+1. Phase 1 시작 직후 effort·budget 을 **이 세션의 레코드 하나에서** 정한다(전역 두 파일은 Read 하지 않는다):
+   - 1차 — 이번 프롬프트의 훅 컨텍스트에 이미 있는 `[artibot:effort level=… command=…][artibot:task-budget max_tokens=…]`. 훅(`scripts/hooks/runtime-prompt.js`)이 같은 프롬프트의 세션 레코드를 쓰면서 같은 값으로 만든 디렉티브라 도구 호출이 필요 없다.
+   - 2차 — 디렉티브가 없을 때(슬래시 커맨드 없이 자동 발동된 팀 — 훅은 커맨드가 있을 때만 레코드·디렉티브를 만든다, `runtime.effort.injectPrompt=false`, 압축으로 유실 등): `node <pluginRoot>/lib/runtime/task-budget.js snapshot --session "$CLAUDE_CODE_SESSION_ID"` — stdout 은 JSON 한 줄(`effort`·`taskBudget`)이나 `null`, 항상 exit 0. `CLAUDE_SESSION_ID` 는 Bash 에서 빈 값이라 쓰지 않는다. 세션 id 가 비어 있으면 CLI 는 `null` 을 낸다(신원 없는 조회는 거부) → 기본값. CLI 는 prompt id 없이 부르므로 같은 세션의 **직전 슬래시 프롬프트** 레코드(만료 전)를 돌려줄 수 있다 — 이번 프롬프트의 값은 1차 디렉티브만 보장한다.
+   - reader 가 `null` 이면(레코드 없음·만료·다른 세션 것) effort=xhigh, budget=128000 기본값을 적용한다.
 2. 각 팀원의 초기 프롬프트 맨 앞에 아래 디렉티브를 포함:
    ```
    [artibot:effort level={effort} command=team][artibot:task-budget max_tokens={budget}]
@@ -139,7 +142,7 @@ The orchestrator MUST:
    ```
 3. **Lower-only override allowed mid-team** — 예: Phase 4 review 팀원은 `high` 또는 `medium`로 하향 가능
 4. **Up-escalate requires user approval** — 팀원이 기본값보다 더 높은 effort/budget를 요청하면 유저 확인 필요
-5. `lib/runtime/middleware/tasks.js`는 위 파일을 자동 Read해 `task.meta.effort`, `task.meta.taskBudget`을 채워주므로, TaskCreate 시 meta를 그대로 넘기면 된다
+5. `lib/runtime/middleware/tasks.js#readEffortMeta` 도 같은 reader(`readEffortSnapshot`)로 `task.meta.effort`, `task.meta.taskBudget`을 채우므로(전역 파일을 읽지 않는다 — 1번과 출처가 같다), TaskCreate 시 meta를 그대로 넘기면 된다
 
 ### Phase 2: TEAM SETUP (Leader only)
 

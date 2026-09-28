@@ -11,8 +11,11 @@
 
 import path from 'node:path';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
+import { readJsonFileSync } from '../core/file.js';
 import { getTokenizerCoeff } from '../core/model-catalog.js';
+import { isMainEntry } from '../../scripts/hooks/_main-entry.js';
 
 const DEFAULT_BUDGET_MAP = Object.freeze({
   max: 200000,
@@ -183,9 +186,11 @@ export function persistTaskBudget(meta, pluginRoot) {
 //
 // The fix adds identity (`sessionId`, `promptId`) and an expiry (`expiresAt`) to
 // the record, plus a per-session file at `runtime/effort/<sid>.json`. The legacy
-// file is STILL written on every persist with the same payload, because three
-// consumers read it by literal path: `lib/tui/dashboard.js`,
-// `scripts/hooks/statusline.sh`, and the `commands/team.md` prose pinned by
+// file is STILL written on every persist with the same payload, because two
+// consumers read it by literal path for display: `lib/tui/dashboard.js` and
+// `scripts/hooks/statusline.sh`. `commands/team.md` does NOT read it as a
+// decision input — it uses {@link readEffortSnapshot} via the CLI below; the
+// path survives there only as prose about that display copy, pinned by
 // `tests/firewall/constitution-stage-a-commands.test.js`.
 // ---------------------------------------------------------------------------
 
@@ -397,6 +402,42 @@ export function readEffortRecord(pluginRoot, opts = {}) {
 }
 
 /**
+ * The effort hand-off as ONE snapshot: the record {@link readEffortRecord}
+ * accepted for this reader, plus the budget RECOMPUTED from that record's
+ * effort with {@link getTaskBudgetForEffort}.
+ *
+ * R2b: the budget is deliberately NOT read from `runtime/current-task-budget.json`.
+ * That file is a single slot every session under this plugin root overwrites and
+ * carries no identity, so pairing it with a gated effort handed session A its
+ * own `max` with session B's `low` budget. Recomputing from the accepted effort
+ * makes the two halves share one identity gate by construction. The file is
+ * still WRITTEN (`persistTaskBudget`) for the dashboard and statusline, which
+ * display it; it is no longer a decision input.
+ *
+ * `config` must be the config the writer used, so the recomputed number equals
+ * the one `scripts/hooks/runtime-prompt.js` injected into the prompt. Overlay and
+ * tokenizer opts are not applied because that writer applies neither.
+ *
+ * @param {string} pluginRoot
+ * @param {{ sessionId?: string|null, promptId?: string|null, now?: number|Date }} [opts]
+ * @param {object} [config] - artibot.config.json object (optional).
+ * @returns {{ effort: string|null, command: string|null, shift: number|null,
+ *   reason: string|null, taskBudget: number|null }|null} null when no record is accepted.
+ */
+export function readEffortSnapshot(pluginRoot, opts = {}, config = {}) {
+  const record = readEffortRecord(pluginRoot, opts);
+  if (!record) return null;
+  const effort = record.effort || null;
+  return {
+    effort,
+    command: record.command || null,
+    shift: typeof record.shift === 'number' ? record.shift : null,
+    reason: record.reason || null,
+    taskBudget: getTaskBudgetForEffort(effort, config),
+  };
+}
+
+/**
  * @param {string} filePath
  * @returns {boolean} true when the file is gone after the call.
  */
@@ -464,4 +505,70 @@ export function gcEffortRecords(dir, opts = {}) {
     if (removeRecordFile(entry.filePath)) overflowRemoved += 1;
   }
   return { removed: removed + overflowRemoved, kept: survivors.length - overflowRemoved };
+}
+
+// ---------------------------------------------------------------------------
+// CLI — the reader for prose consumers (`commands/team.md`), so a command file
+// takes effort + budget from the same gate as the tasks middleware instead of
+// reading the two shared runtime files by hand.
+//
+//   node <pluginRoot>/lib/runtime/task-budget.js snapshot --session <id> [--prompt <id>]
+//
+// stdout: one line, the {@link readEffortSnapshot} JSON or `null`. Always exits
+// 0 — the hand-off is advisory and a caller must treat `null` as "no effort".
+// A missing, empty or blank `--session` answers `null` without reading.
+// `--plugin-root <dir>` overrides the plugin root (default: this file's plugin).
+// The config is read exactly as `middleware/tasks.js#readTeamGateInputs` reads
+// it, so the CLI and the middleware recompute the same budget.
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT_FLAGS = Object.freeze({
+  '--session': 'sessionId',
+  '--prompt': 'promptId',
+  '--plugin-root': 'pluginRoot',
+});
+
+/**
+ * @param {string[]} args - argv AFTER the subcommand.
+ * @returns {{ sessionId: string|null, promptId: string|null, pluginRoot: string|null }}
+ */
+function parseSnapshotArgs(args) {
+  const parsed = { sessionId: null, promptId: null, pluginRoot: null };
+  for (let i = 0; i < args.length; i += 1) {
+    const key = SNAPSHOT_FLAGS[args[i]];
+    if (key && i + 1 < args.length) {
+      parsed[key] = args[i + 1];
+      i += 1;
+    }
+  }
+  return parsed;
+}
+
+/**
+ * @param {string[]} args - CLI arguments without the node binary and script path.
+ * @returns {string} the stdout line (without the trailing newline).
+ */
+export function runSnapshotCli(args) {
+  try {
+    if (args[0] !== 'snapshot') return 'null';
+    const parsed = parseSnapshotArgs(args.slice(1));
+    // Fail-closed: a reader with no session id is honoured by ANY legacy record,
+    // so an unset `$CLAUDE_CODE_SESSION_ID` would return another session's
+    // effort. The library keeps its legacy contract; this new surface does not.
+    if (!trimmedOrNull(parsed.sessionId)) return 'null';
+    const pluginRoot = parsed.pluginRoot
+      || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const config = readJsonFileSync(path.join(pluginRoot, 'artibot.config.json')) || {};
+    const snapshot = readEffortSnapshot(pluginRoot, {
+      sessionId: parsed.sessionId,
+      promptId: parsed.promptId,
+    }, config);
+    return JSON.stringify(snapshot);
+  } catch {
+    return 'null';
+  }
+}
+
+if (isMainEntry(import.meta.url)) {
+  process.stdout.write(`${runSnapshotCli(process.argv.slice(2))}\n`);
 }

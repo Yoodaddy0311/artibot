@@ -346,6 +346,7 @@ function loadRuntimeConfig(pluginRoot) {
         injectPrompt: true,
         nativeApi: false,
         budgetMap: {
+          max: 200000,
           xhigh: 128000,
           high: 64000,
           medium: 32000,

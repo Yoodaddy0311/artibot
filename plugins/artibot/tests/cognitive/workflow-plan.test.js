@@ -175,6 +175,33 @@ describe('buildWorkflowPlan() — per-teammate effort & budget', () => {
   });
 });
 
+// --- resolveEffort port: parent vs teammate role (R3) ---------------------
+
+describe('buildWorkflowPlan() — resolveEffort port carries the call role', () => {
+  it('marks the parent call role:parent and every teammate call role:teammate', () => {
+    const calls = [];
+    buildWorkflowPlan({ score: 0.8 }, intentWith(3), CONFIG, {
+      resolveEffort: (cmd, signals) => { calls.push({ cmd, ...signals }); return null; },
+    });
+    expect(calls[0]).toEqual({ cmd: '/implement', score: 0.8, role: 'parent' });
+    expect(calls.slice(1).map((c) => c.role)).toEqual(['teammate', 'teammate', 'teammate']);
+  });
+
+  it('a port that answers only the parent leaves teammates on the static map, clamped to the new band', () => {
+    // The seam R3 needs: one accepted parent effort, teammates resolved exactly
+    // as they are without a port (static /implement xhigh, /code-review high),
+    // then clamped to [parent−1, parent]. A null answer is the fall-through.
+    const plan = buildWorkflowPlan({ score: 0.8 }, intentWith(3), CONFIG, {
+      resolveEffort: (_cmd, s) => (s?.role === 'parent' ? 'max' : null),
+    });
+    expect(plan.effort).toBe('max');
+    expect(plan.teammates.map((t) => t.effort)).toEqual(
+      deriveTeammateEfforts(plan.teammates, 'max', (cmd) => ({ '/implement': 'xhigh', '/code-review': 'high' }[cmd])),
+    );
+    expect(plan.teammates.map((t) => t.effort)).toEqual(['xhigh', 'xhigh', 'xhigh']);
+  });
+});
+
 // --- deriveTeammateEfforts -----------------------------------------------
 
 describe('deriveTeammateEfforts()', () => {
