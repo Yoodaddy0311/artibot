@@ -47,10 +47,9 @@
  *
  *  3. BYTE CAP — `Buffer.byteLength(line, 'utf8')` measured BEFORE the append.
  *     JSON Schema cannot measure the serialized length of the document
- *     validating against it, which is why the cap lives here. Over the cap the
- *     non-required `data` keys are folded away behind an `evidence_refs`
- *     marker (§3.6); a line that still does not fit is rejected. The cap also
- *     protects the concurrency guarantee below.
+ *     validating against it, which is why the cap lives here. An oversized line
+ *     is folded (§3.6; stages in `./ledger-fold.js`, then {@link foldOversized})
+ *     and rejected if it still does not fit. The cap also protects concurrency.
  *
  *  4. REDACTION — every STRING FIELD is scrubbed before serialization, never
  *     the serialized line, and the walk carries cycle and depth guards so
@@ -88,6 +87,7 @@ import { readClock } from '../core/clock.js';
 import { resolveGitCommonDir } from '../project-state/git-common-dir.js';
 import { resolveStoreLocation } from '../project-state/store-location.js';
 import { SOURCES } from '../supervisor/event-types.js';
+import { FOLD_MARKER_MAX, shrinkToFit } from './ledger-fold.js';
 import { redactDeep, UNSAFE_KEYS } from './ledger-redaction.js';
 import {
   foldDeclaredEnums,
@@ -636,8 +636,8 @@ export function lineBytes(env) {
   return Buffer.byteLength(serializeLine(env), 'utf8');
 }
 
-/** Cap on the fold marker so the marker itself cannot overflow the line. */
-const FOLD_MARKER_MAX = 180;
+// The fold marker cap, FOLD_MARKER_MAX, is imported from `./ledger-fold.js`:
+// the stages that run before this last-resort fold own it and share it here.
 
 /**
  * Fold an oversized line: drop every `data` key the event does not require and
@@ -739,8 +739,9 @@ function writeRejection(file, env, reason, maxLineBytes) {
 }
 
 /**
- * Append the validated envelope, folding once if it does not fit and rejecting
- * when even the folded line is over the cap.
+ * Append the validated envelope. Over the cap it first tries the stages in
+ * `./ledger-fold.js`, then {@link foldOversized} on the ORIGINAL envelope, and
+ * rejects when even that line is over the cap.
  *
  * @param {string} file
  * @param {object} env validated, redacted envelope
@@ -748,16 +749,11 @@ function writeRejection(file, env, reason, maxLineBytes) {
  * @returns {object} same result shape as {@link writeEvent}
  */
 function appendWithinCap(file, env, maxLineBytes) {
-  const spec = getAllowlist().events[env.event];
-  let candidate = env;
-  let folded = false;
-  let dropped = [];
-  if (lineBytes(candidate) > maxLineBytes) {
-    const result = foldOversized(candidate, spec);
-    candidate = result.env;
-    folded = result.folded;
-    dropped = result.dropped;
-  }
+  const { events, limits } = getAllowlist();
+  const spec = events[env.event];
+  const { env: candidate, folded, dropped, truncated = null } = shrinkToFit(env, spec, {
+    maxLineBytes, overflowField: limits.overflow_field, measure: lineBytes,
+  }) ?? foldOversized(env, spec);
   const bytes = lineBytes(candidate);
   if (bytes > maxLineBytes) {
     return { ...writeRejection(file, env, `line-too-large:${bytes}`, maxLineBytes), path: file };
@@ -765,7 +761,7 @@ function appendWithinCap(file, env, maxLineBytes) {
   const wrote = appendLine(file, serializeLine(candidate));
   if (!wrote.ok) return { ok: false, reason: wrote.reason, path: file };
   return {
-    ok: true, path: file, event: candidate.event, seq: candidate.seq, bytes, folded, dropped,
+    ok: true, path: file, event: candidate.event, seq: candidate.seq, bytes, folded, dropped, truncated,
   };
 }
 
@@ -781,7 +777,7 @@ function appendWithinCap(file, env, maxLineBytes) {
  * @param {{now?: () => Date, seq?: number, pid?: number, ledgerPath?: string,
  *          maxLineBytes?: number}} [opts]
  * @returns {{ok: true, path: string, event: string, seq: number, bytes: number,
- *            folded: boolean, dropped: string[]}
+ *            folded: boolean, dropped: string[], truncated: object|null}
  *          | {ok: false, reason: string, rejected?: boolean, recorded?: boolean,
  *             path?: string}}
  */
