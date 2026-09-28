@@ -1,7 +1,7 @@
 # AGENTS.md — Cross-Tool Parity Seed
 
 **Scope:** Artibot plugin (`plugins/artibot/`)
-**Purpose:** make Artibot's 30 agents + 114 skills + 79 commands usable not just from Claude Code but also from Cursor, Codex CLI, OpenCode, Windsurf, and Antigravity.
+**Purpose:** make Artibot's 30 agents + 114 skills + 80 commands usable not just from Claude Code but also from Cursor, Codex CLI, OpenCode, Windsurf, and Antigravity.
 
 `AGENTS.md` is a cross-tool convention adopted by `everything-claude-code` and similar ecosystems. Each consumer tool reads this file (directly or via export) to register agents locally. Artibot's source of truth remains `plugins/artibot/agents/*.md` with Claude Code–style frontmatter; everything else is a projection of that.
 
@@ -14,7 +14,7 @@
 | Source of truth | `plugins/artibot/agents/*.md` (YAML frontmatter + body) |
 | Agent count | 30 (2티어: 설계·검수 10종 fable / 구현 20종 opus — `artibot.config.json` `agents.modelPolicy.fable.enabled=true` + `fable.allowlist` 10종) |
 | Skill count | 114 |
-| Command count | 79 |
+| Command count | 80 |
 | Native orchestration | Claude Agent Teams API (`Agent(name=...)`, `SendMessage`, `TaskCreate/Update/List/Get`) |
 | Cross-tool export | `scripts/export-to-tool.mjs` |
 | Graceful-degradation modes | `agent-teams` → `sub-agent` → `direct` (see `artibot.config.json`) |
