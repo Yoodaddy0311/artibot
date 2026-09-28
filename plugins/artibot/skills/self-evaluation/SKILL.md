@@ -6,7 +6,7 @@ description: |
   Self-Rewarding + GRPO hybrid evaluation system for autonomous quality assessment, optimization, and improvement.
   Combines Meta Self-Rewarding patterns with Group Relative Policy Optimization (GRPO) for rule-based self-learning without judge AI.
   Auto-activates when: task completed, quality review needed, performance trends requested, team optimization needed.
-  Triggers: evaluate, self-assess, quality, improve, performance, trend, score, feedback, grpo, optimize, candidates, compare
+  Triggers: evaluate, self-assess, quality, improve, performance, trend, score, feedback, optimize, candidates, compare
 lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
@@ -21,7 +21,7 @@ agents:
   - "orchestrator"
 tokens: "~2K"
 category: "learning"
-source_hash: 6b2de433
+source_hash: d44b0f60
 whenNotToUse: "Mid-task execution phases where evaluation would interrupt active work; do not apply when there is no completed task output to score or compare."
 ---
 
