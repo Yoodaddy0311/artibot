@@ -48,21 +48,21 @@
  * firewall gate asserts.
  *
  * ── Concurrency: what protects a write, and what does not ─────────────────
- * `lib/core/file-lock.js` is advisory and deliberately fail-OPEN: on timeout
- * it proceeds without the lock. It is a contention optimisation, not a
- * correctness guarantee.
+ * `lib/core/file-lock.js#withFileLock` is exclusive (short of a holder slower
+ * than LOCK_STALE_MS; see the key digest below) and fails closed: a commit that
+ * cannot take it throws and writes nothing. Read, plan, ledger, journal, rename: all locked.
  *
- * The real guard is the `state_version` CAS — and it is **opt-in**. Read the
- * two cases as different contracts, because they are:
+ * What the lock cannot see is a caller's earlier read; the `state_version`
+ * CAS can — and it is **opt-in**. Read the two cases as different contracts:
  *
  *   - **`expectedVersion` passed** — the version is re-read INSIDE the lock
  *     and compared. A lost race becomes a returned
  *     `{ok:false, conflict:true, currentVersion}` for the caller to retry.
- *     Nothing is overwritten.
+ *     Nothing is overwritten (short of that stale-lock reclaim, where both pass).
  *   - **`expectedVersion` omitted** — no comparison happens, so the write is
- *     **last-writer-wins**: a concurrent update made between this call's read
- *     and its rename is overwritten. The result's `warnings[]` carries
- *     `'cas:skipped'` so the outcome is at least not silent.
+ *     **last-writer-wins**: it applies to whatever the store holds once the
+ *     lock is taken, over any update made since the caller last read. The
+ *     result's `warnings[]` carries `'cas:skipped'` so it is not silent.
  *
  * Opt-in is deliberate for Phase 0 (Observe): callers do not yet track a
  * version to pass, and a mandatory CAS would reject every first write. It is
@@ -144,10 +144,10 @@ const RECORDS_HASH_CHARS = 12;
  * the store is shared by every session and worktree of a project, so the
  * session is not part of the write's identity.
  *
- * The version alone does NOT identify the write. `withFileLock` is fail-open
- * and CAS is opt-in, so two writers can both commit the same version, and a
- * ledger append whose store write then fails leaves a version that the next,
- * possibly different, write reuses. The digest of the PLANNED records (before
+ * The version alone does NOT identify the write. A ledger append whose store
+ * write then fails leaves a version that the next, possibly different, write
+ * reuses; and a lock holder slower than LOCK_STALE_MS can be reclaimed and race
+ * its successor to one version. The digest of the PLANNED records (before
  * the commit stamps `ts`) keeps two different writes apart, as the decision
  * digest does in `lib/runtime/human-asked-record.js#humanResolvedIdempotencyKey`,
  * while a retry of the same records reuses the key. The commit's `ts` is not key

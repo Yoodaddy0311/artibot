@@ -494,7 +494,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 - 16개 이벤트에 28개 훅 등록 (HTTP webhook 알림 포함) — `hooks/hooks.json`의 매처 엔트리 기준. 이 중 2개(SubagentStart·TeammateIdle)는 스크립트를 2개씩 실행하므로 실제 실행 커맨드는 29개
 - **Guard Registry**: 중앙 집중식 가드 파이프라인 (`registerGuard()`/`executeChain()` API), 6개 내장 가드, 훅 코드 75% 감소
-- **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-open)
+- **Advisory File Lock**: 동시 훅 실행 시 상태 파일 경합 방지 (spin-lock, fail-closed — 대기 시간 초과 시 락 없이 쓰지 않고 오류)
 - 위험 명령 차단, 민감 파일 보호, 자동 포맷, PR 감지, 팀원 생명주기 추적
 - HTTP webhook 지원: Slack/Discord/generic 형식으로 세션 이벤트 외부 알림
 

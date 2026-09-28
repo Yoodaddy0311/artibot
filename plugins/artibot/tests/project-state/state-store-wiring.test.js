@@ -27,7 +27,7 @@
  * Written here so the gate does not become the next false-confidence signal:
  *
  *  - **Single process, single thread.** One middleware call, one commit. The
- *    store's file lock is advisory and fail-OPEN, so nothing here measures
+ *    store's file lock is exclusive and fails closed, but nothing here measures
  *    what two writers do to each other.
  *  - **Real concurrency.** No contention is generated. A lost update under
  *    load would not show up in any assertion below.
