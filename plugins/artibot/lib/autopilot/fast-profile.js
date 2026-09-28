@@ -9,6 +9,7 @@
  *   - FAST_PROFILE_DEFAULTS
  *   - normalizeFastProfile(limits)
  *   - areAffectedPathsConflicting(left, right)
+ *   - inspectAffectedPaths(values)
  *   - buildFastFanoutPlan(options)
  *
  * @module lib/autopilot/fast-profile
@@ -131,7 +132,15 @@ function taskDependencies(task) {
   return { dependencies, malformed };
 }
 
-function inspectAffectedPaths(values) {
+/**
+ * Normalized repo-relative paths plus an `unsafe` flag for anything that is not
+ * a plain relative path (absolute, `~`, drive, `..`, `:`, non-string). Absent
+ * or root-only entries (`null`, `.`) are dropped from `paths` without being
+ * unsafe — callers that need every entry to name a path must check that too.
+ * @param {unknown} values
+ * @returns {{ paths: string[], unsafe: boolean }}
+ */
+export function inspectAffectedPaths(values) {
   const inspected = Array.isArray(values) ? values.map(inspectPath) : [];
   return {
     paths: inspected.map((entry) => entry.path).filter(Boolean),

@@ -368,3 +368,133 @@ describe('buildFastFanoutPlan', () => {
     ]);
   });
 });
+
+/**
+ * Partition invariant: every requested task lands in exactly one wave slot or
+ * one serial entry — never both, never neither — and a wave task runs strictly
+ * after every dependency. Fixtures must use unique string ids; duplicate ids
+ * are serialized once per entry and would legitimately repeat here.
+ * @param {object} plan
+ * @param {Array<{id: string, dependsOn?: string[]}>} tasks
+ */
+function expectPartition(plan, tasks) {
+  const requested = tasks.map((entry) => entry.id);
+  const waveIds = plan.waves.flatMap((wave) => wave.taskIds);
+  const serialIds = plan.serial.map((entry) => entry.taskId);
+  const placed = [...waveIds, ...serialIds];
+
+  expect(waveIds.filter((id) => serialIds.includes(id)), 'waves and serial overlap').toEqual([]);
+  expect(new Set(placed).size, 'a task id is placed more than once').toBe(placed.length);
+  expect([...placed].sort(), 'placed ids differ from requested ids').toEqual([...requested].sort());
+  expect(plan.requestedTaskCount).toBe(requested.length);
+
+  const waveOf = new Map(plan.waves.flatMap((wave, index) => wave.taskIds.map((id) => [id, index])));
+  for (const entry of tasks.filter((candidate) => waveOf.has(candidate.id))) {
+    for (const dependency of entry.dependsOn || []) {
+      expect(waveOf.has(dependency), `${entry.id} runs in a wave but ${dependency} does not`).toBe(true);
+      expect(waveOf.get(dependency)).toBeLessThan(waveOf.get(entry.id));
+    }
+  }
+}
+
+describe('buildFastFanoutPlan partition invariant', () => {
+  // Capacity 2 on purpose: every fixture needs more than one wave, so a
+  // planner that stopped after the first wave would drop tasks here.
+  const capped = (tasks) => buildFastFanoutPlan({
+    fast: true,
+    cpuCount: 8,
+    limits: { maxWorktrees: 2, hardMaxAgents: 2 },
+    tasks,
+  });
+
+  it('keeps the overflow wave when independent tasks exceed capacity', () => {
+    const tasks = [
+      task('alpha', ['src/alpha.js']),
+      task('beta', ['src/beta.js']),
+      task('gamma', ['src/gamma.js']),
+    ];
+    const plan = capped(tasks);
+
+    expect(plan.profile).toBe('fast');
+    expect(plan.waves.map((wave) => wave.taskIds)).toEqual([['alpha', 'beta'], ['gamma']]);
+    expect(plan.serial).toEqual([]);
+    expectPartition(plan, tasks);
+  });
+
+  it('keeps a dependent follow-up wave after its dependency', () => {
+    const tasks = [
+      task('alpha', ['src/alpha.js']),
+      task('beta', ['src/beta.js']),
+      task('gamma', ['src/gamma.js'], { dependsOn: ['alpha'] }),
+    ];
+    const plan = capped(tasks);
+
+    expect(plan.waves.map((wave) => wave.taskIds)).toEqual([['alpha', 'beta'], ['gamma']]);
+    expect(plan.serial).toEqual([]);
+    expectPartition(plan, tasks);
+  });
+
+  it('preserves serial entries with reasons alongside intact later waves', () => {
+    const tasks = [
+      task('alpha', ['src/alpha.js']),
+      task('beta', ['src/beta.js']),
+      task('gamma', ['src/gamma.js'], { dependsOn: ['alpha'] }),
+      task('delta', ['src/delta.js'], { worktreeEligible: false }),
+      task('eps', ['src/eps.js'], { dependsOn: ['delta'] }),
+    ];
+    const plan = capped(tasks);
+
+    expect(plan.waves.map((wave) => wave.taskIds)).toEqual([['alpha', 'beta'], ['gamma']]);
+    expect(plan.serial).toEqual([
+      { taskId: 'delta', reason: 'worktree-ineligible' },
+      { taskId: 'eps', reason: 'dependency-not-fast' },
+    ]);
+    expectPartition(plan, tasks);
+  });
+
+  it('routes cycles and unknown dependencies to serial without dropping waves', () => {
+    // loop-tail sits inside the loop-a/loop-b cycle (loop-b -> loop-a ->
+    // loop-tail -> loop-b) but the DFS reaches it through an already-visited
+    // node, so it is not marked as a cycle member. It must still leave the
+    // waves via its blocked dependency rather than stall the scheduler.
+    const tasks = [
+      task('alpha', ['src/alpha.js']),
+      task('beta', ['src/beta.js']),
+      task('gamma', ['src/gamma.js'], { dependsOn: ['alpha'] }),
+      task('loop-a', ['src/loop-a.js'], { dependsOn: ['loop-b', 'loop-tail'] }),
+      task('loop-b', ['src/loop-b.js'], { dependsOn: ['loop-a'] }),
+      task('loop-tail', ['src/loop-tail.js'], { dependsOn: ['loop-b'] }),
+      task('orphan', ['src/orphan.js'], { dependsOn: ['ghost'] }),
+    ];
+    const plan = capped(tasks);
+
+    expect(plan.waves.map((wave) => wave.taskIds)).toEqual([['alpha', 'beta'], ['gamma']]);
+    expect(plan.serial).toEqual([
+      { taskId: 'loop-a', reason: 'dependency-cycle' },
+      { taskId: 'loop-b', reason: 'dependency-cycle' },
+      { taskId: 'loop-tail', reason: 'dependency-not-fast' },
+      { taskId: 'orphan', reason: 'unresolved-dependency' },
+    ]);
+    expectPartition(plan, tasks);
+  });
+
+  it('expectPartition rejects a lost wave / emptied serial / overlap / reversed order / wrong count', () => {
+    // Self-check: the helper must go red on each real loss shape, or the
+    // green cases above prove nothing.
+    const tasks = [
+      task('alpha', ['src/alpha.js']),
+      task('beta', ['src/beta.js']),
+      task('gamma', ['src/gamma.js'], { dependsOn: ['alpha'] }),
+      task('delta', ['src/delta.js'], { worktreeEligible: false }),
+    ];
+    const plan = capped(tasks);
+    const overlap = [...plan.serial, { taskId: 'gamma', reason: 'worktree-ineligible' }];
+
+    expect(() => expectPartition(plan, tasks)).not.toThrow();
+    expect(() => expectPartition({ ...plan, waves: plan.waves.slice(0, 1) }, tasks)).toThrow();
+    expect(() => expectPartition({ ...plan, serial: [] }, tasks)).toThrow();
+    expect(() => expectPartition({ ...plan, serial: overlap }, tasks)).toThrow();
+    expect(() => expectPartition({ ...plan, waves: [...plan.waves].reverse() }, tasks)).toThrow();
+    expect(() => expectPartition({ ...plan, requestedTaskCount: 3 }, tasks)).toThrow();
+  });
+});
