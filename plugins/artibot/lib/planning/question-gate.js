@@ -392,3 +392,83 @@ export function planQuestionBatch(verdicts = []) {
     kinds: [...new Set(firing.map((v) => v.kind).filter(Boolean))],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Enforcement (CA-15)
+// ---------------------------------------------------------------------------
+
+/**
+ * Config path of the CA-15 kill switch. Read by the CALLER — this module never
+ * touches a config file, and exports the path so the firewall pin and the
+ * reader share one spelling.
+ * @type {string}
+ */
+export const QUESTION_GATE_ENFORCE_CONFIG_PATH = 'runtime.questionGate.enforce';
+
+/**
+ * Resolve the CA-15 kill switch from an already-read config object.
+ *
+ * Walks {@link QUESTION_GATE_ENFORCE_CONFIG_PATH} as a path rather than
+ * re-typing it, so the constant and the read cannot drift apart.
+ *
+ * @param {unknown} cfg - Parsed `artibot.config.json`, or anything at all.
+ * @returns {boolean} `true` only for the literal `true` at that path. `'true'`,
+ *   `1`, an absent key or a non-object config all read OFF, so a value that
+ *   failed to parse cannot switch enforcement on.
+ */
+export function readQuestionGateEnforce(cfg) {
+  return QUESTION_GATE_ENFORCE_CONFIG_PATH
+    .split('.')
+    .reduce((node, key) => /** @type {any} */ (node)?.[key], cfg) === true;
+}
+
+/**
+ * @typedef {object} EnforcementDecision
+ * @property {boolean} enforce - Whether the switch was on.
+ * @property {boolean} block - True only when the switch is on AND all four
+ *   recorded conditions hold.
+ * @property {'product_decision'|null} kind - {@link PRODUCT_DECISION} when blocking.
+ * @property {string} at - Always {@link QUESTION_BATCH_POINT}.
+ * @property {string} reason - `switch-off`, `no-conditions`, `all-conditions`
+ *   or `conditions-not-met`.
+ * @property {readonly string[]} inputs_absent - Inputs the conditions were
+ *   evaluated without. Provenance only.
+ */
+
+/**
+ * Decide whether an already-recorded verdict should be enforced.
+ *
+ * Decides from the conditions it is handed and never re-evaluates them — so it
+ * takes no config, and `config.question_gate.force` (read by
+ * {@link evaluateConditions}) has no path into this decision.
+ *
+ * `inputs_absent` cannot turn `block` true: a missing interpretation only ever
+ * LOWERS conditions 2 and 4 (it raises them when present), so its absence can
+ * produce a false negative, never a false positive. It is recorded so a reader
+ * can tell a quiet gate from an under-informed one.
+ *
+ * Fails open: a switch that is not the literal `true`, or conditions that are
+ * not a plain object, yield `block: false`. Pure — no I/O, never throws.
+ *
+ * @param {{ conditions?: object|null, enforce?: boolean, interpretationPresent?: boolean }} [input]
+ * @returns {Readonly<EnforcementDecision>}
+ */
+export function decideQuestionGateEnforcement(input) {
+  const { conditions = null, enforce = false, interpretationPresent = false } = input ?? {};
+  const inputsAbsent = Object.freeze(interpretationPresent === true ? [] : ['interpretation']);
+  const decide = (on, block, reason) => Object.freeze({
+    enforce: on,
+    block,
+    kind: block ? PRODUCT_DECISION : null,
+    at: QUESTION_BATCH_POINT,
+    reason,
+    inputs_absent: inputsAbsent,
+  });
+
+  if (enforce !== true) return decide(false, false, 'switch-off');
+  if (conditions === null || typeof conditions !== 'object' || Array.isArray(conditions)) {
+    return decide(true, false, 'no-conditions');
+  }
+  const block = requiresQuestion(conditions);
+  return decide(true, block, block ? 'all-conditions' : 'conditions-not-met');
+}

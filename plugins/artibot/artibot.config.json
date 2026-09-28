@@ -1072,6 +1072,10 @@
       "saveOnSave": false,
       "comment": "CA-05 canary (Wave 13, 2026-09-21) - the gate that lets /save write mission.checkpointed. false = OFF: the landed pass in lib/checkpoint/save-checkpoint.js never runs, and its reader isSaveCheckpointEnabled is strict === true so a string true or a 1 also read OFF. Turning it on is a deliberate decision, not a default: tests/firewall/save-checkpoint-order.test.js pins isSaveCheckpointEnabled(real config) === false, so that single canary pin must be edited on purpose in the same commit that flips this key."
     },
+    "questionGate": {
+      "enforce": false,
+      "comment": "CA-15 kill switch - when true, the question-gate enforcement is an advisory directive appended to the prompt only when all four recorded question-gate conditions hold (lib/planning/question-gate.js#decideQuestionGateEnforcement). Ships false and its reader readQuestionGateEnforce is strict === true; flipping it is an owner decision, and tests/firewall/v5-config-firewall.test.js pins the shipped value false so that pin must be edited in the same commit."
+    },
     "middleware": [
       "lifecycle",
       "router",

@@ -41,6 +41,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  decideQuestionGateEnforcement,
   evaluateConditions,
   GATE_CONDITIONS,
   requiresQuestion,
@@ -210,6 +211,24 @@ describe('buildQuestionGateData — the interpretation-absent marker', () => {
     });
     expect(without.materialDownstreamImpact).toBe(false);
     expect(withIt.materialDownstreamImpact).toBe(true);
+  });
+});
+
+describe('buildQuestionGateData — the record is the enforcement input (CA-15)', () => {
+  it('blocks exactly where the record says required, and the interpretation marker feeds provenance only', () => {
+    // `tasks.js` hands this very object to the decision as `conditions`, extra
+    // keys included, instead of re-evaluating the prompt.
+    for (const { name, input } of FIXTURES) {
+      const data = buildQuestionGateData(input);
+      const decision = decideQuestionGateEnforcement({
+        conditions: data,
+        enforce: true,
+        interpretationPresent: data[INTERPRETATION_PRESENT_KEY] === true,
+      });
+      expect(decision.block, name).toBe(data.required);
+      expect(decision.inputs_absent, name)
+        .toEqual(data[INTERPRETATION_PRESENT_KEY] ? [] : ['interpretation']);
+    }
   });
 });
 

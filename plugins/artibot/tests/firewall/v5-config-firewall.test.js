@@ -75,6 +75,10 @@ import {
   FOLLOW_WORKFLOW_PLAN_CONFIG_KEY,
   readFollowWorkflowPlan,
 } from '../../lib/runtime/middleware/workflow-mode.js';
+import {
+  QUESTION_GATE_ENFORCE_CONFIG_PATH,
+  readQuestionGateEnforce,
+} from '../../lib/planning/question-gate.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
@@ -411,6 +415,8 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['autopilot.recovery.transitionFromVerdict', false],
     // CA-05 canary (Wave 13): the /save checkpoint gate lands OFF; flipping it is a deliberate commit.
     ['runtime.checkpoint.saveOnSave', false],
+    // CA-15 kill switch: question-gate enforcement lands OFF; flipping it is an owner decision.
+    ['runtime.questionGate.enforce', false],
   ])('%s === %j (무변경)', (dotted, value) => {
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });
@@ -462,5 +468,35 @@ describe('team.followWorkflowPlan — F04(b) 전환 키의 등재값', () => {
   it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
     expect(FOLLOW_WORKFLOW_PLAN_CONFIG_KEY).toBe('team.followWorkflowPlan');
     expect(resolveDotPath(config, FOLLOW_WORKFLOW_PLAN_CONFIG_KEY)).toBe(false);
+  });
+});
+
+/**
+ * CA-15 `runtime.questionGate.enforce` — 킬스위치 등재값 고정.
+ *
+ * `team.followWorkflowPlan` 과 같은 이유로 여기서 소유한다: `runtime` 은 신설 6키
+ * allowlist 사정권 밖이고 JSON 스키마는 비-strict 라 값을 못 본다. 소비자
+ * `lib/planning/question-gate.js#readQuestionGateEnforce` 가 `=== true` 리터럴
+ * 비교라 문자열 `"false"` 도 OFF 로 읽히므로 타입을 따로 단언한다.
+ *
+ * 이 게이트가 못 보는 것(rules §9):
+ *  - ON 일 때의 동작. 판정은 `tests/planning/question-gate.test.js` 가,
+ *    프롬프트 주입은 tasks 미들웨어 쪽 테스트가 본다.
+ *  - 스키마 선언. `runtime.questionGate` 가 `lib/core/config-schema.js` 에
+ *    선언돼 있는지는 여기서 보지 않는다.
+ */
+describe('runtime.questionGate.enforce — CA-15 킬스위치의 등재값', () => {
+  it('키가 등재돼 있고 boolean false 다 (문자열 "false" 거부)', () => {
+    expect(resolveDotPath(config, 'runtime.questionGate.enforce')).toBe(false);
+    expect(typeof config.runtime.questionGate.enforce).toBe('boolean');
+  });
+
+  it('등재가 소비자를 켜지 않는다 — readQuestionGateEnforce 가 false 를 준다', () => {
+    expect(readQuestionGateEnforce(config)).toBe(false);
+  });
+
+  it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
+    expect(QUESTION_GATE_ENFORCE_CONFIG_PATH).toBe('runtime.questionGate.enforce');
+    expect(resolveDotPath(config, QUESTION_GATE_ENFORCE_CONFIG_PATH)).toBe(false);
   });
 });
