@@ -229,6 +229,34 @@ describe('show rendering', () => {
     expect(lines).toHaveLength(9);
   });
 
+  it('renders a tierless (inherit) cowork agent as (unknown) instead of throwing', () => {
+    // The row pluginRows builds for `model: inherit`: nothing resolves, so every
+    // model column is null (measured from `show --json`).
+    const tierless = {
+      plugin: 'artibot-cowork',
+      agent: 'odd',
+      frontmatter: null,
+      shipped: null,
+      override: null,
+      effective: null,
+      source: 'cowork-frontmatter-unknown',
+      reason: null,
+      hostPath: 'frontmatter',
+    };
+    const tierlessView = { ...view, plugins: { 'artibot-cowork': { status: 'ok', rows: [tierless] } } };
+    expect(() => renderShowText(tierlessView)).not.toThrow();
+    expect(rowCells(tierless)).toEqual([
+      'artibot-cowork',
+      'odd',
+      '(unknown)',
+      '(unknown)',
+      '—',
+      '(unknown) [cowork-frontmatter-unknown]',
+      'frontmatter',
+    ]);
+    expect(renderShowText(tierlessView).split('\n')[3].split(/\s{2,}/)).toEqual(rowCells(tierless));
+  });
+
   it('omits the role suffix when no role is selected', () => {
     expect(renderShowText({ ...view, role: null }).split('\n')[0]).toBe('overrides: /state/model-routing.json (ok)');
   });

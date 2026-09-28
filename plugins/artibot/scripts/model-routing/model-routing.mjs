@@ -21,9 +21,23 @@
  * frontmatter says `needs-spawn-param`: the value is real only if the leader
  * spawns with `Agent(model=<resolve output>)`.
  *
- * FAIL-CLOSED ON A DAMAGED USER FILE. `show` and `resolve` warn on stderr and
- * fall back to the shipped values; `set` and `reset` refuse and leave the file
- * byte-identical — a corrupt file is never overwritten silently.
+ * FAIL-CLOSED ON A DAMAGED USER FILE. `show`, `resolve` and `validate --live`
+ * warn on stderr and fall back to the shipped values; `set` and `reset` refuse
+ * and leave the file byte-identical — a corrupt file is never overwritten silently.
+ *
+ * `validate --live` — WAS THE EFFECTIVE ROUTING SERVED? It reads the central
+ * ledger READ-ONLY (`lib/runtime/ledger.js#readLedgerCensus` is the only ledger
+ * function imported; `appendLedgerEvent` deliberately is not), joins
+ * `route.bound` to `usage.receipt` (`lib/replay/spawn-outcome.js`) and hands the
+ * pairs to `lib/replay/routing-honor.js#foldRoutingHonor`, which owns every
+ * verdict, reason and denominator — its CANNOT SEE list applies unchanged. Two
+ * of those are printed as caveats: the expected tier is TODAY's config and
+ * overrides of THIS plugin root (`pluginRoot`/`configPath` in the report; window
+ * with `--since`, judge the installed copy with `--plugin-root`), and `honored` mostly means the frontmatter
+ * default was served. `--cwd` is the LEDGER root and must be the REPOSITORY
+ * ROOT: the path resolver does not walk upward, so a subdirectory such as the
+ * plugin root reads `<cwd>/.artibot/runtime/ledger.jsonl`, usually absent (the
+ * `scripts/ledger/existence-audit.mjs` trap). `inputPath` names the file read.
  *
  * USAGE
  *   node scripts/model-routing/model-routing.mjs <subcommand> [...]
@@ -33,12 +47,17 @@
  *     set plugin <artibot|artibot-cowork> <tier> [--dry-run]
  *     reset agent <plugin:name> | phase <build|review> | plugin <name> | --all  [--dry-run]
  *     validate [--json]
+ *     validate --live [--since <iso-with-Z-or-offset|epoch-ms>] [--cwd <projectRoot>] [--json]
+ *       (all-digit --since is EPOCH MILLISECONDS, never a year; date-only is refused)
  *     resolve <plugin:name> [--role build|review]
  *   Every subcommand also takes --plugin-root <dir> and --cowork-root <dir>.
  *
  * EXIT CODES
  *   0 ok · 1 refused or validation errors (nothing written) · 2 usage error
  *   (unknown subcommand, flag, tier or agent; one stderr line, nothing written).
+ *   `validate --live` is an observation: 0 whenever it printed, INCLUDING
+ *   unhonored rows and a missing or unreadable ledger (they are data, not a
+ *   CLI failure); 2 on a usage error such as an unparseable `--since`.
  *
  * ARTIBOT-COWORK ROSTER DISCOVERY — see `model-routing-roster.mjs` for the order;
  *   when no roster is found the cowork rows are `unavailable:roster-not-found`.
@@ -64,8 +83,12 @@ import {
   validateOverrides,
 } from '../../lib/core/model-overrides.js';
 import { resolveModelForPhase } from '../../lib/core/model-policy.js';
+import { resolveModelIdentity } from '../../lib/economics/usage-receipt.js';
+import { foldRoutingHonor } from '../../lib/replay/routing-honor.js';
+import { joinSpawnOutcomes } from '../../lib/replay/spawn-outcome.js';
+import { readLedgerCensus } from '../../lib/runtime/ledger.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
-import { loadRosters, renderShowJson, renderShowText } from './model-routing-roster.mjs';
+import { findCoworkAgentsDir, loadRosters, renderShowJson, renderShowText, renderTable } from './model-routing-roster.mjs';
 
 const OWN_PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -81,7 +104,7 @@ const FLAGS = Object.freeze({
   show: { ...COMMON_FLAGS, plugin: true, role: true, json: false },
   set: { ...COMMON_FLAGS, 'dry-run': false },
   reset: { ...COMMON_FLAGS, 'dry-run': false, all: false },
-  validate: { ...COMMON_FLAGS, json: false },
+  validate: { ...COMMON_FLAGS, json: false, live: false, since: true, cwd: true },
   resolve: { ...COMMON_FLAGS, role: true },
 });
 
@@ -147,7 +170,7 @@ function loadContext(flags) {
     [...(rosters['artibot-cowork'] ?? [])].filter(([, model]) => model !== null),
   );
   const loaded = loadOverrides();
-  return { pluginRoot, config, rosters, coworkFrontmatter, loaded, file: overridesPath() };
+  return { pluginRoot, configPath, config, rosters, coworkFrontmatter, loaded, file: overridesPath() };
 }
 
 /**
@@ -545,8 +568,139 @@ function collectFindings(ctx) {
   return { errors, warnings, needsSpawnParam };
 }
 
+/** The two CANNOT SEE items of `routing-honor.js` every live report repeats. */
+const LIVE_CAVEATS = Object.freeze([
+  "expected tier = TODAY's config, rosters and overrides as read from the plugin root above, which may differ from the installed plugin that served the spawns — pass --plugin-root (and --cowork-root) to judge against the installed copy; a spawn from before the last change is judged against them — window with --since",
+  'honored mostly means the frontmatter default was served; only an override-* row whose override differs from the frontmatter says anything about an override',
+]);
+
+/** Each rate of the fold → [numerator, denominator] as `denominators`/`verdicts` keys. */
+const RATE_TERMS = Object.freeze({
+  join_of_binds: ['joined', 'binds'],
+  join_of_subagent_runs: ['joined', 'subagent_runs'],
+  measured_of_joined: ['measured', 'joined'],
+  honored_of_measured: ['honored', 'measured'],
+});
+
+/** ISO-8601 date-time with an EXPLICIT zone; date-only and zone-less forms are refused. */
+const ISO_WITH_ZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 /**
- * `validate`: exit 1 when the file is damaged or has errors.
+ * `--since` → epoch milliseconds. ALLOWLIST: all digits = epoch ms (never a
+ * year), or {@link ISO_WITH_ZONE}. Everything else is a usage error — V8's
+ * `Date.parse` alone would take `-1`, `123 ` and a zone-less time read as LOCAL
+ * (9 h off in KST), and rolls `02-31`/`24:00` over; a date-only value is refused
+ * rather than guessed as UTC or local midnight. An out-of-range ms, which the
+ * ledger reader would silently ignore, is refused too.
+ *
+ * @param {string|true|undefined} value
+ * @returns {number|null}
+ */
+function parseSince(value) {
+  if (value === undefined) return null;
+  const iso = ISO_WITH_ZONE.exec(value);
+  const ms = /^\d+$/.test(value) ? Number(value) : iso ? Date.parse(value) : Number.NaN;
+  const [, y, mo, d, h, mi] = iso ?? [];
+  const wall = iso ? new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi)) : null;
+  const calendar = !iso || (wall.getUTCMonth() === +mo - 1 && wall.getUTCDate() === +d && wall.getUTCHours() === +h);
+  if (!Number.isFinite(ms) || Number.isNaN(new Date(ms).getTime()) || !calendar) {
+    throw new UsageError(`unparseable --since: ${value} (expected epoch milliseconds or an ISO date-time with Z or ±HH:MM)`);
+  }
+  return ms;
+}
+
+/**
+ * The census line: which file was read, or why nothing was.
+ *
+ * @param {object} census - `readLedgerCensus().census`.
+ * @returns {string}
+ */
+function ledgerLine(census) {
+  const { file, lines, survivors, dropped_total: dropped } = census;
+  if (!file.present) return `ledger absent: ${file.path ?? '(no path)'} — nothing to judge`;
+  if (!file.readable) return `ledger unreadable: ${file.path} — nothing to judge`;
+  return `ledger: ${file.path} (${file.bytes} bytes · ${lines.nonblank} lines · ${survivors} read · loss ${dropped.loss} · selected out ${dropped.selection})`;
+}
+
+/**
+ * `validate --live` text: census, denominators, rates, verdicts, breakdowns,
+ * every unhonored row, then the caveats. No clock — same ledger, same bytes.
+ *
+ * @param {object} report - `{ inputPath, since, census, overridesFile, overridesStatus, ...fold }`.
+ * @returns {string}
+ */
+function renderLiveText(report) {
+  const { denominators: den, rates, verdicts } = report;
+  const terms = { ...den, ...verdicts };
+  const rateRows = Object.entries(RATE_TERMS).map(([name, [num, of]]) => [
+    name,
+    `${terms[num]}/${terms[of]}`,
+    rates[name] === null ? 'null (denominator 0)' : `${(rates[name] * 100).toFixed(1)}%`,
+  ]);
+  const counts = (obj) => Object.entries(obj).map(([k, n]) => `${k} ${n}`).join(' · ') || '(none)';
+  const lines = [
+    ledgerLine(report.census),
+    `since: ${report.since ?? '(whole ledger)'}`,
+    `judged against: plugin root ${report.pluginRoot} · config ${report.configPath} · cowork roster ${report.coworkAgentsDir ?? '(not found)'}`,
+    `overrides: ${report.overridesFile} (${report.overridesStatus})`,
+    `denominators: ${counts(den)}`,
+    renderTable(['rate', 'n/d', 'value'], rateRows),
+    `verdicts: ${counts(verdicts)}`,
+    `unmeasured_by_reason: ${counts(report.unmeasured_by_reason)}`,
+    `by_expected_source honored: ${counts(report.by_expected_source.honored)}`,
+    `by_expected_source unhonored: ${counts(report.by_expected_source.unhonored)}`,
+    ...report.rows
+      .filter((r) => r.verdict === 'unhonored')
+      .map(
+        (r) =>
+          `unhonored ${r.agent_type}: expected ${r.expected_tier} [${r.expected_source}${r.expected_gate ? `/${r.expected_gate}` : ''}] served ${r.served_tier} (${r.served_model}) · ${r.session_id}/${r.agent_id}`,
+      ),
+    ...LIVE_CAVEATS.map((c) => `caveat: ${c}`),
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * `validate --live`: read the ledger (never write it), join, fold, print. Exit 0
+ * whenever it printed — unhonored rows and a missing ledger are data.
+ *
+ * @param {Record<string, string|true>} flags
+ * @returns {number}
+ */
+function cmdValidateLive(flags) {
+  const since = parseSince(flags.since);
+  const ctx = loadContext(flags);
+  const overrides = effectiveOverrides(ctx);
+  const opts = { config: ctx.config, overrides, coworkFrontmatter: ctx.coworkFrontmatter };
+  // Only the rosters that loaded: a missing cowork roster leaves its names out,
+  // so those spawns read `agent-not-in-roster`, never a guessed verdict.
+  const roster = PLUGIN_NAMES.flatMap((p) => [...(ctx.rosters[p]?.keys() ?? [])].map((a) => `${p}:${a}`));
+  const { events, census } = readLedgerCensus(path.resolve(flags.cwd ?? process.cwd()), since === null ? {} : { since });
+  const fold = foldRoutingHonor(joinSpawnOutcomes(events), {
+    resolve: (name) => resolveEffectiveModel(name, {}, opts),
+    tierOfServedModel: (id) => resolveModelIdentity(id)?.tier ?? null,
+    roster,
+  });
+  const report = {
+    inputPath: census.file.path,
+    since: since === null ? null : new Date(since).toISOString(),
+    // What the expected side was read from — not necessarily the installed plugin.
+    pluginRoot: ctx.pluginRoot,
+    configPath: ctx.configPath,
+    coworkAgentsDir: findCoworkAgentsDir(ctx.pluginRoot, flags['cowork-root']),
+    census,
+    overridesFile: ctx.file,
+    overridesStatus: ctx.loaded.status,
+    caveats: LIVE_CAVEATS,
+    ...fold,
+  };
+  process.stdout.write(flags.json ? `${JSON.stringify(report, null, 2)}\n` : renderLiveText(report));
+  return 0;
+}
+
+/**
+ * `validate`: exit 1 when the file is damaged or has errors. `--live` is the
+ * served-routing report instead; `--since`/`--cwd` belong to it alone.
  *
  * @param {string[]} argv
  * @returns {number}
@@ -554,6 +708,9 @@ function collectFindings(ctx) {
 function cmdValidate(argv) {
   const { positionals, flags } = parseFlags(argv, FLAGS.validate);
   if (positionals.length > 0) throw new UsageError(`validate takes no arguments, got: ${positionals[0]}`);
+  if (flags.live) return cmdValidateLive(flags);
+  const stray = ['since', 'cwd'].find((f) => flags[f] !== undefined);
+  if (stray) throw new UsageError(`--${stray} is only valid with --live`);
   const ctx = loadContext(flags);
   const { status } = ctx.loaded;
   let findings = { errors: [], warnings: [], needsSpawnParam: [] };

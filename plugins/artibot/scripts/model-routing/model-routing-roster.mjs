@@ -37,24 +37,38 @@ export function isDirectory(dir) {
 }
 
 /**
- * Agent name → frontmatter `model:` for one `agents/` directory. A leading BOM
- * and surrounding quotes are stripped; anything that is not a catalog tier
- * (absent, `inherit`, a typo) is null — unknown, never guessed.
+ * One agent file's frontmatter `model:` exactly as the roster reads it. A
+ * leading BOM and one MATCHED pair of surrounding quotes are stripped — nothing
+ * else: a trailing `# comment` or an unbalanced quote stays in `raw` and makes
+ * `tier` null. `tests/firewall/cowork-model-frontmatter.test.js` judges with this
+ * function, so the gate cannot pass a value this reader reads as unknown.
+ *
+ * @param {string} text - the whole agent file.
+ * @returns {{ raw: string|null, tier: string|null }} `raw` is null when there is
+ *   no inline `model:` value; `tier` is null unless `raw` is a catalog tier.
+ */
+export function readFrontmatterModel(text) {
+  const fm = extractFrontmatter(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  const raw = fm && typeof fm.model === 'string' ? fm.model.trim().replace(/^(["'])(.*)\1$/, '$2') : null;
+  return { raw, tier: listTiers().includes(raw) ? raw : null };
+}
+
+/**
+ * Agent name → frontmatter `model:` for one `agents/` directory, read by
+ * {@link readFrontmatterModel}; anything that is not a catalog tier (absent,
+ * `inherit`, a typo, a trailing comment) is null — unknown, never guessed.
  *
  * @param {string} agentsDir
  * @returns {Map<string, string|null>}
  */
 export function readRoster(agentsDir) {
-  const tiers = listTiers();
   const roster = new Map();
   const files = readdirSync(agentsDir)
     .filter((f) => f.endsWith('.md') && !NON_AGENT_FILES.has(f))
     .sort();
   for (const file of files) {
-    const text = readFileSync(path.join(agentsDir, file), 'utf8');
-    const fm = extractFrontmatter(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
-    const raw = fm && typeof fm.model === 'string' ? fm.model.trim().replace(/^(["'])(.*)\1$/, '$2') : null;
-    roster.set(path.basename(file, '.md'), tiers.includes(raw) ? raw : null);
+    const { tier } = readFrontmatterModel(readFileSync(path.join(agentsDir, file), 'utf8'));
+    roster.set(path.basename(file, '.md'), tier);
   }
   return roster;
 }
@@ -129,6 +143,9 @@ export function renderTable(header, body) {
 }
 
 /**
+ * Table cells for one row. Every model column may be null (a tierless cowork
+ * agent resolves to nothing) and renders `(unknown)`, never a crash.
+ *
  * @param {object} row
  * @returns {string[]}
  */
@@ -138,7 +155,7 @@ export function rowCells(row) {
     row.plugin,
     row.agent,
     row.frontmatter ?? '(unknown)',
-    row.shipped,
+    row.shipped ?? '(unknown)',
     row.override ?? '—',
     `${row.effective ?? '(unknown)'} [${why}]`,
     row.hostPath,
