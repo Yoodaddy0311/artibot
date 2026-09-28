@@ -37,7 +37,7 @@ import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { getRepoIdentity } from '../git/repo-identity.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
-import { journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
+import { isAttemptArmed, journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
 
 /**
  * Check if the session should freeze; returns a pause instruction when true.
@@ -483,8 +483,14 @@ export function runPhase4Verify(state) {
   const paused = maybePause(state);
   if (paused) return paused;
   recordPhase(state, { name: 'VERIFY', status: 'queued' });
+  // Armed: same contract as runPhase2Execute — the result ACK, not this
+  // hand-off, writes `phase-end`, so a crash before the result re-runs VERIFY.
+  const attempt = isAttemptArmed('VERIFY') ? openPhaseAttempt(state, { phase: 'VERIFY' }) : null;
   persist(state);
-  tick(state.sessionId, { phase: 'VERIFY', type: 'phase-end', level: 'info', message: 'Phase 4 VERIFY 위임 완료' });
+  tick(state.sessionId, attempt
+    ? { phase: 'VERIFY', type: 'attempt-started', level: 'info', message: 'Phase 4 VERIFY 위임 — 완료 보고 대기',
+      data: { attemptId: attempt.attemptId, checkpointSha: attempt.checkpointSha } }
+    : { phase: 'VERIFY', type: 'phase-end', level: 'info', message: 'Phase 4 VERIFY 위임 완료' });
   notePhaseProgress(state, 'CROSS_CHECK', 'VERIFY');
   const instruction = {
     type: 'verify',
@@ -502,6 +508,7 @@ export function runPhase4Verify(state) {
       'Bash 로 npm run ci 실행. 결과(lint/typecheck/test/build) 를 state.verifyResult 에 기록.',
       '실패 시 build-error-resolver 호출. 3회 재시도 후에도 실패면 pause.',
       '실패할 때마다 state.counters.buildFailures 또는 testFailures 증가.',
+      "끝나면 결과를 반드시 recordPhaseResult(state, { phase: 'VERIFY', status }) 로 보고. 누락하면 resume 이 VERIFY 를 재실행하고, 두 번째에는 pause.",
     ],
   };
   if (state.options?.mcpVerify) {
@@ -846,8 +853,8 @@ function settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt) {
     state.activePhaseAttempt = null;
     // Name the re-run explicitly. Deriving it would give nextPhaseAfter(phase),
     // i.e. the phase AFTER the one we just decided to redo — a "rerun" that
-    // never reran. Unreachable today (only EXECUTE arms an attempt, and EXECUTE
-    // is not on the allowlist) but wrong the moment another phase is armed.
+    // never reran. Reached by VERIFY, which is both armed and allowlisted
+    // (EXECUTE is armed but not allowlisted, so it pauses instead).
     state.pendingPhase = reconciled.attempt.phase;
     journalAttempt(state, { ...journalRow(reconciled), event: 'rerun' });
     persist(state);
