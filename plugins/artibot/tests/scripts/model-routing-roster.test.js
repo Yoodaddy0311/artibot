@@ -18,6 +18,7 @@ import {
   renderShowJson,
   renderShowText,
   renderTable,
+  renderTaskLine,
   rowCells,
 } from '../../scripts/model-routing/model-routing-roster.mjs';
 
@@ -268,5 +269,34 @@ describe('show rendering', () => {
     expect(Object.keys(parsed)).toEqual(['file', 'overridesStatus', 'role', 'plugins', 'phases']);
     expect(parsed.plugins['artibot-cowork']).toEqual({ status: 'unavailable', reason: 'roster-not-found' });
     expect(text).toBe(`${JSON.stringify(view, null, 2)}\n`);
+  });
+
+  describe('task layer', () => {
+    const taskRows = [{ ...rows[0], task: 'architecture' }, { ...rows[1], task: null }];
+    const tasks = [
+      { task: 'review', agents: [], overrides: { artibot: 'haiku', 'artibot-cowork': null } },
+      { task: 'status', agents: [], overrides: { artibot: null, 'artibot-cowork': null } },
+      { task: 'explore', agents: [], overrides: { artibot: 'sonnet', 'artibot-cowork': 'sonnet' } },
+    ];
+    const taskView = { ...view, task: 'review', plugins: { artibot: { status: 'ok', rows: taskRows } }, tasks };
+
+    it('appends the task cell last, — for an agent without a task', () => {
+      expect(rowCells(taskRows[0])).toEqual([...rowCells(rows[0]), 'architecture']);
+      expect(rowCells(taskRows[1]).at(-1)).toBe('—');
+      expect(rowCells(rows[0])).toHaveLength(7);
+    });
+
+    it('renders the task header, the task suffix and the task overrides line', () => {
+      const lines = renderShowText(taskView).split('\n');
+      expect(lines[0]).toBe('overrides: /state/model-routing.json (ok) · role=build · task=review');
+      expect(lines[1].split(/\s{2,}/).at(-1)).toBe('task');
+      expect(lines[3].split(/\s{2,}/)).toEqual(rowCells(taskRows[0]));
+      expect(lines[6]).toBe('task overrides: review=artibot haiku · explore=artibot sonnet, artibot-cowork sonnet');
+    });
+
+    it('says (none) when no task override is stored', () => {
+      expect(renderTaskLine([tasks[1]])).toBe('task overrides: (none)');
+      expect(renderTaskLine([])).toBe('task overrides: (none)');
+    });
   });
 });

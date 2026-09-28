@@ -23,6 +23,7 @@ import path from 'node:path';
 import { buildLimbMessage } from './split-dispatch.js';
 import { renameWithRetry } from '../core/file.js';
 import { resolveModel } from '../core/model-policy.js';
+import { getActionClassForAgent } from '../routing/action-classifier.js';
 
 /** Placeholders `renderPrompt` accepts. Anything else in `{UPPER_SNAKE}` form is an error. */
 export const PROMPT_PLACEHOLDERS = Object.freeze([
@@ -140,7 +141,7 @@ function shippedEntry(agent, config) {
  * result it cannot render faithfully, so the block degrades as a whole.
  */
 function effectiveEntry(agent, role, resolveEffective) {
-  const result = resolveEffective(`artibot:${agent}`, { role });
+  const result = resolveEffective(`artibot:${agent}`, { role, task: getActionClassForAgent(agent) ?? undefined });
   const obj = result !== null && typeof result === 'object' ? result : null;
   const tier = typeof result === 'string' ? result : (obj?.model ?? obj?.tier);
   if (typeof tier !== 'string' || !/^\S+$/.test(tier)) {
@@ -167,10 +168,13 @@ function effectiveEntry(agent, role, resolveEffective) {
  *   `artibot.config.json#/agents/modelPolicy` and the text follows. No user
  *   file is read — a window prompt must not depend on the dispatching
  *   machine's state unless the caller says so.
- * - Injected: `opts.resolveEffective(qualifiedAgent, { role })` is called per
+ * - Injected: `opts.resolveEffective(qualifiedAgent, { role, task })` is called per
  *   representative agent with the QUALIFIED name `artibot:<name>` (never the
  *   bare name) and `role` = `build` (구현 row), `review` (검수 row) or
- *   `undefined` (설계 row); `config` is not consulted.
+ *   `undefined` (설계 row); `config` is not consulted. `task` is the agent's
+ *   default action class (`lib/routing/action-classifier.js#getActionClassForAgent`),
+ *   or `undefined` for an unmapped agent, so `resolveEffectiveModel` can apply
+ *   the user's task overrides; a resolver that ignores `task` behaves as before.
  *   The resolver returns either a non-empty tier/model string, rendered with no
  *   parentheses, or an object — the user-override resolver `resolveEffectiveModel`
  *   returns `{ model, source, reason, requested, scope }`. Only `model` (or
@@ -196,7 +200,7 @@ function effectiveEntry(agent, role, resolveEffective) {
  * shipped values while claiming overrides were applied.
  *
  * @param {object|null|undefined} config - loaded `artibot.config.json` (passed through to `resolveModel`)
- * @param {{ resolveEffective?: (qualifiedAgent: string, ctx: { role: ('build'|'review'|undefined) }) => (string|{ model?: string, tier?: string, source?: string|null, reason?: string|null }) }} [opts]
+ * @param {{ resolveEffective?: (qualifiedAgent: string, ctx: { role: ('build'|'review'|undefined), task: (string|undefined) }) => (string|{ model?: string, tier?: string, source?: string|null, reason?: string|null }) }} [opts]
  * @returns {string}
  */
 export function renderModelPolicy(config, opts = {}) {

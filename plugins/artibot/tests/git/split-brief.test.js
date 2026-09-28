@@ -25,6 +25,7 @@ import {
 import { buildLimbMessage } from '../../lib/git/split-dispatch.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveModel } from '../../lib/core/model-policy.js';
+import { resolveEffectiveModel, setOverride } from '../../lib/core/model-overrides.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const readMd = (rel) => fs.readFileSync(path.join(PLUGIN_ROOT, rel), 'utf-8');
@@ -328,6 +329,20 @@ describe('renderModelPolicy — effective values injected by the caller', () => 
         expect(seen[i][1]).toBeTypeOf('object');
         expect(seen[i][1].role).toBe(role);
       }
+    });
+
+    it('passes each agent\'s default task, so an injected resolveEffectiveModel shows task overrides', () => {
+      const tasks = [];
+      renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a, ctx) => { tasks.push(ctx.task); return 'tier-x'; } });
+      expect(tasks).toEqual(['implement', 'implement', 'review', 'architecture']);
+      // Positive control: without `task` in ctx, this review-task override would not show.
+      const config = JSON.parse(readMd('artibot.config.json'));
+      const overrides = setOverride(null, { scope: 'task', plugin: 'artibot', key: 'review', tier: 'haiku' });
+      const out = renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a, ctx) => resolveEffectiveModel(a, ctx, { config, overrides }) });
+      expect(out).toContain('code-reviewer→haiku (source: override-task)');
+      expect(out).toContain('architect→opus (source: shipped)');
+      expect(renderModelPolicy(SYNTHETIC.empty, { resolveEffective: (a, { role }) => resolveEffectiveModel(a, { role }, { config, overrides }) }))
+        .toContain('code-reviewer→opus (source: shipped)');
     });
 
     it('prints the resolver values (not resolveModel) and switches the header to "effective incl. overrides"', () => {

@@ -143,8 +143,21 @@ export function renderTable(header, body) {
 }
 
 /**
+ * True when a row carries the task layer (`task` key, even when null). The
+ * task column is rendered for such rows only, LAST, so a view built without
+ * the task layer keeps its seven columns byte for byte.
+ *
+ * @param {object} row
+ * @returns {boolean}
+ */
+function hasTask(row) {
+  return Object.hasOwn(row, 'task');
+}
+
+/**
  * Table cells for one row. Every model column may be null (a tierless cowork
- * agent resolves to nothing) and renders `(unknown)`, never a crash.
+ * agent resolves to nothing) and renders `(unknown)`, never a crash. A row with
+ * a `task` key gains an eighth cell: the task, or `—` when the agent has none.
  *
  * @param {object} row
  * @returns {string[]}
@@ -159,7 +172,24 @@ export function rowCells(row) {
     row.override ?? '—',
     `${row.effective ?? '(unknown)'} [${why}]`,
     row.hostPath,
+    ...(hasTask(row) ? [row.task ?? '—'] : []),
   ];
+}
+
+/**
+ * The `task overrides:` line: each class a user override names, per plugin.
+ *
+ * @param {{ task: string, overrides: Record<string, string|null> }[]} tasks
+ * @returns {string}
+ */
+export function renderTaskLine(tasks) {
+  const set = tasks
+    .map(({ task, overrides }) => {
+      const picks = Object.entries(overrides).filter(([, tier]) => tier !== null);
+      return picks.length === 0 ? null : `${task}=${picks.map(([p, tier]) => `${p} ${tier}`).join(', ')}`;
+    })
+    .filter((s) => s !== null);
+  return `task overrides: ${set.length === 0 ? '(none)' : set.join(' · ')}`;
 }
 
 /**
@@ -174,15 +204,18 @@ export function renderShowJson(view) {
 
 /**
  * `show` text output: header line, one table row per agent in plugin order, an
- * `unavailable:` note per missing roster, the artibot phase-role line and the
+ * `unavailable:` note per missing roster, the artibot phase-role line, the
+ * `task overrides:` line when the view carries `tasks`, and the
  * needs-spawn-param footnote.
  *
- * @param {{ file: string, overridesStatus: string, role: string|null, plugins: object, phases: object[] }} view
+ * @param {{ file: string, overridesStatus: string, role: string|null, task?: string|null, plugins: object, phases: object[], tasks?: object[] }} view
  * @returns {string} The text plus a trailing newline.
  */
 export function renderShowText(view) {
-  const { file, overridesStatus, role, plugins, phases } = view;
+  const { file, overridesStatus, role, task, plugins, phases, tasks } = view;
+  const rows = Object.values(plugins).flatMap((entry) => (entry.status === 'ok' ? entry.rows : []));
   const header = ['plugin', 'agent', 'frontmatter', 'shipped', 'override', 'effective', 'host path'];
+  if (rows.some(hasTask)) header.push('task');
   const body = [];
   const notes = [];
   for (const [plugin, entry] of Object.entries(plugins)) {
@@ -190,11 +223,12 @@ export function renderShowText(view) {
     else notes.push(`${plugin}: unavailable:${entry.reason}`);
   }
   const lines = [
-    `overrides: ${file} (${overridesStatus})${role ? ` · role=${role}` : ''}`,
+    `overrides: ${file} (${overridesStatus})${role ? ` · role=${role}` : ''}${task ? ` · task=${task}` : ''}`,
     renderTable(header, body),
     ...notes,
     'phase roles (artibot): ' +
       phases.map((p) => `${p.phase}=${p.shipped}${p.override ? ` → user ${p.override}` : ''}`).join(' · '),
+    ...(Array.isArray(tasks) ? [renderTaskLine(tasks)] : []),
     'needs-spawn-param = the value takes effect only if the leader spawns with Agent(model=<resolve output>).',
   ];
   return `${lines.join('\n')}\n`;

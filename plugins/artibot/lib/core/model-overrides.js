@@ -9,17 +9,25 @@
  * plugins never share a key:
  *
  *   { schemaVersion: 1,
- *     plugins: { artibot:          { default, agents: {}, phaseRoles: {} },
- *                'artibot-cowork': { default, agents: {} } },
+ *     plugins: { artibot:          { default, agents: {}, phaseRoles: {}, tasks?: {} },
+ *                'artibot-cowork': { default, agents: {}, tasks?: {} } },
  *     updatedAt? }
+ *
+ * `tasks` (task = action class, e.g. `review`) is an optional additive key, so
+ * a file without it is a valid v1 file and the version stays 1. Core checks a
+ * task key's SHAPE only: the task vocabulary and each agent's default task are
+ * the caller's (CLI) responsibility, because they live in `lib/routing/`, which
+ * lib/core may not import. Without `opts.task` there is no task layer — a
+ * caller that forgets it gets the other layers (fail-safe, never a wider tier).
  *
  * The file is NEVER merged into `loadConfig()`: CI drift checks and replay
  * baselines read the shipped config, and a developer machine's override must not
  * leak into them. Callers inject the overrides explicitly.
  *
  * {@link resolveEffectiveModel} is the one answer to "which model for this
- * spawn, counting the user's choice". Precedence: user agent > user phase
- * (artibot only) > user plugin default > shipped. The fable gate and
+ * spawn, counting the user's choice". Precedence: user agent > user task
+ * (only with `opts.task`) > user phase (artibot only) > user plugin default >
+ * shipped. The fable gate and
  * `FABLE_DENYLIST` are applied LAST, so no user setting can lift them. With no
  * override in play the artibot answer is `resolveModel(...)` unchanged.
  *
@@ -82,12 +90,19 @@ const PHASE_KEYS = Object.freeze(['build', 'review']);
 /** Known keys per level — everything else is an error (allowlist). */
 const TOP_LEVEL_KEYS = Object.freeze(['schemaVersion', 'plugins', 'updatedAt']);
 const PLUGIN_KEYS = Object.freeze({
-  artibot: Object.freeze(['default', 'agents', 'phaseRoles']),
-  'artibot-cowork': Object.freeze(['default', 'agents']),
+  artibot: Object.freeze(['default', 'agents', 'phaseRoles', 'tasks']),
+  'artibot-cowork': Object.freeze(['default', 'agents', 'tasks']),
 });
 
 /** Scopes accepted by {@link setOverride} / {@link clearOverride}. */
-const SCOPES = Object.freeze(['agent', 'phase', 'plugin']);
+const SCOPES = Object.freeze(['agent', 'task', 'phase', 'plugin']);
+
+/**
+ * Shape of a stored task key: a lowercase slug. Shape only — core does not
+ * know the task vocabulary, so a well-formed key no caller ever names is kept
+ * and stays inert. Also keeps `__proto__`-style keys out of the file.
+ */
+const TASK_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /**
  * Shape of a stored agent key: lowercase, no plugin prefix. Also keeps
@@ -260,6 +275,30 @@ function checkPhases(phases, where, allowed, errors) {
 }
 
 /**
+ * Validate the `tasks` map of one plugin. Keys are checked for shape only
+ * (see {@link TASK_KEY_PATTERN}); a malformed key or tier is an error in both
+ * modes, like a malformed agent key.
+ *
+ * @param {*} tasks
+ * @param {string} where
+ * @param {string[]} allowed
+ * @param {string[]} errors
+ */
+function checkTasks(tasks, where, allowed, errors) {
+  if (!isPlainObject(tasks)) {
+    errors.push(`${where}: must be an object`);
+    return;
+  }
+  for (const [key, tier] of Object.entries(tasks)) {
+    if (!TASK_KEY_PATTERN.test(key)) {
+      errors.push(`${where}: task key ${JSON.stringify(key)} must be a lowercase slug`);
+      continue;
+    }
+    checkTier(tier, `${where}.${key}`, allowed, errors);
+  }
+}
+
+/**
  * Validate one plugin block.
  *
  * @param {string} plugin
@@ -285,6 +324,7 @@ function checkPlugin(plugin, block, rules, errors) {
   if (Object.hasOwn(block, 'phaseRoles') && PLUGIN_KEYS[plugin].includes('phaseRoles')) {
     checkPhases(block.phaseRoles, `${where}.phaseRoles`, rules.allowed, errors);
   }
+  if (Object.hasOwn(block, 'tasks')) checkTasks(block.tasks, `${where}.tasks`, rules.allowed, errors);
 }
 
 /**
@@ -384,7 +424,9 @@ export function loadOverrides({ dir } = {}) {
 
 /**
  * Deep copy of the known fields into the full shape (both plugins, every key).
- * Input is assumed validated; unknown fields are dropped.
+ * Input is assumed validated; unknown fields are dropped. `tasks` is copied
+ * only when it holds at least one entry, so a document with no task override
+ * keeps the plain v1 shape (older readers reject a `tasks` key).
  *
  * @param {object|null} overrides
  * @returns {object}
@@ -400,6 +442,7 @@ function cloneOverrides(overrides) {
     dst.default = typeof src.default === 'string' ? src.default : null;
     if (isPlainObject(src.agents)) dst.agents = { ...src.agents };
     if ('phaseRoles' in dst && isPlainObject(src.phaseRoles)) dst.phaseRoles = { ...src.phaseRoles };
+    if (isPlainObject(src.tasks) && Object.keys(src.tasks).length > 0) dst.tasks = { ...src.tasks };
   }
   return out;
 }
@@ -410,7 +453,7 @@ function cloneOverrides(overrides) {
  * @param {string} scope
  * @param {string} plugin
  * @param {*} key
- * @returns {string|null} Agent key, phase key, or null for plugin scope.
+ * @returns {string|null} Agent key, task key, phase key, or null for plugin scope.
  */
 function checkTarget(scope, plugin, key) {
   if (!SCOPES.includes(scope)) {
@@ -420,6 +463,12 @@ function checkTarget(scope, plugin, key) {
     throw new TypeError(`unknown plugin ${JSON.stringify(plugin)} (allowed: ${PLUGIN_NAMES.join('|')})`);
   }
   if (scope === 'plugin') return null;
+  if (scope === 'task') {
+    if (typeof key !== 'string' || !TASK_KEY_PATTERN.test(key)) {
+      throw new TypeError(`task key ${JSON.stringify(key)} must be a lowercase slug`);
+    }
+    return key;
+  }
   if (scope === 'phase') {
     if (plugin !== 'artibot') throw new TypeError(`phase overrides exist only for plugin "artibot", not ${JSON.stringify(plugin)}`);
     if (!PHASE_KEYS.includes(key)) throw new TypeError(`unknown phase ${JSON.stringify(key)} (allowed: ${PHASE_KEYS.join('|')})`);
@@ -436,12 +485,13 @@ function checkTarget(scope, plugin, key) {
  * Return a NEW document with one override set. Never mutates `overrides`.
  *
  * @param {object|null} overrides - Current document (null = empty).
- * @param {{ scope: 'agent'|'phase'|'plugin', plugin: string, key?: string, tier: string, config?: object }} target
+ * @param {{ scope: 'agent'|'task'|'phase'|'plugin', plugin: string, key?: string, tier: string, config?: object }} target
  *   `config` is the shipped config; fable is accepted only when it is given and
- *   its kill-switch is on.
+ *   its kill-switch is on. A task `key` is checked for shape only; whether it
+ *   names a real task is the caller's check.
  * @returns {object}
- * @throws {TypeError} Unknown scope/plugin/phase, malformed agent key, disallowed
- *   tier, or fable on a denylisted agent.
+ * @throws {TypeError} Unknown scope/plugin/phase, malformed agent or task key,
+ *   disallowed tier, or fable on a denylisted agent.
  */
 export function setOverride(overrides, { scope, plugin, key, tier, config } = {}) {
   const target = checkTarget(scope, plugin, key);
@@ -456,18 +506,20 @@ export function setOverride(overrides, { scope, plugin, key, tier, config } = {}
   const block = out.plugins[plugin];
   if (scope === 'plugin') block.default = tier;
   else if (scope === 'phase') block.phaseRoles = { ...block.phaseRoles, [target]: tier };
+  else if (scope === 'task') block.tasks = { ...block.tasks, [target]: tier };
   else block.agents = { ...block.agents, [target]: tier };
   return out;
 }
 
 /**
  * Return a NEW document with one override removed. Never mutates `overrides`.
- * Clearing something that is not set is a no-op copy.
+ * Clearing something that is not set is a no-op copy. Clearing the last task
+ * override drops the `tasks` key, returning the plugin block to the v1 shape.
  *
  * @param {object|null} overrides
- * @param {{ scope: 'agent'|'phase'|'plugin', plugin: string, key?: string }} target
+ * @param {{ scope: 'agent'|'task'|'phase'|'plugin', plugin: string, key?: string }} target
  * @returns {object}
- * @throws {TypeError} Unknown scope/plugin/phase or malformed agent key.
+ * @throws {TypeError} Unknown scope/plugin/phase or malformed agent or task key.
  */
 export function clearOverride(overrides, { scope, plugin, key } = {}) {
   const target = checkTarget(scope, plugin, key);
@@ -475,6 +527,12 @@ export function clearOverride(overrides, { scope, plugin, key } = {}) {
   const block = out.plugins[plugin];
   if (scope === 'plugin') {
     block.default = null;
+    return out;
+  }
+  if (scope === 'task') {
+    const { tasks = {}, ...rest } = block;
+    const kept = Object.fromEntries(Object.entries(tasks).filter(([k]) => k !== target));
+    out.plugins[plugin] = Object.keys(kept).length > 0 ? { ...rest, tasks: kept } : rest;
     return out;
   }
   const field = scope === 'phase' ? 'phaseRoles' : 'agents';
@@ -534,6 +592,8 @@ function pickOverride(overrides, plugin, agent, opts) {
   if (!isPlainObject(block)) return null;
   const byAgent = lookupTier(block.agents, agent);
   if (byAgent !== null) return { model: byAgent, source: 'override-agent', scope: 'agent' };
+  const byTask = typeof opts.task === 'string' && opts.task !== '' ? lookupTier(block.tasks, opts.task) : null;
+  if (byTask !== null) return { model: byTask, source: 'override-task', scope: 'task' };
   if (plugin === 'artibot') {
     const phase = phaseKeyFor(opts.role);
     const byPhase = phase === null ? null : lookupTier(block.phaseRoles, phase);
@@ -564,11 +624,22 @@ function applyGates(model, plugin, agent, config) {
 /**
  * Effective model for one spawn, counting the user's overrides.
  *
- * Precedence: user agent > user phase (artibot only; `opts.role` mapped via
+ * Precedence: user agent > user task (both plugins; only when `opts.task` is a
+ * non-empty string) > user phase (artibot only; `opts.role` mapped via
  * BUILD_ROLES / REVIEW_ROLES) > user plugin default > shipped. Shipped for
- * artibot is `resolveModel(qualifiedName, opts, config)` unchanged; shipped for
+ * artibot is `resolveModel(qualifiedName, opts, config)` with `opts.task`
+ * removed, so the shipped answer cannot depend on it; shipped for
  * artibot-cowork is its frontmatter value, never the core policy. The fable gate
  * and FABLE_DENYLIST are applied last.
+ *
+ * Core derives no default task: with `opts.task` absent the task layer is
+ * skipped even when a task override is stored. A given `opts.task` is used
+ * as-is for any agent, mapped or not; one that matches no stored key (unknown,
+ * miscased, malformed) simply falls through to the next layer. Callers that
+ * omit it therefore get no task layer: the model-routing CLI passes it (rows
+ * and its `--live` resolve closure), and `lib/git/split-brief.js` hands an
+ * injected resolver `{ role, task }` with the agent's default task (undefined
+ * for an unmapped agent, which then gets no task layer).
  *
  * A bare name is treated as `artibot:<name>`. On the artibot side, names the
  * catalog reads as a role alias or tier (`deep-async`, `opus`) and names
@@ -581,21 +652,24 @@ function applyGates(model, plugin, agent, config) {
  * warns. Never throws on well-typed input.
  *
  * @param {string} qualifiedName - `artibot:x`, `artibot-cowork:x` or bare `x`.
- * @param {object} [opts] - Same options as `resolveModel` (`role`, `advisor`, `agentType`).
+ * @param {object} [opts] - Same options as `resolveModel` (`role`, `advisor`,
+ *   `agentType`), plus `task` (string) — the task the caller identified.
  * @param {{ config?: object, overrides?: object|null, coworkFrontmatter?: Record<string,string>|null }} [ctx]
  * @returns {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }}
- *   `source` ∈ override-agent | override-phase | override-plugin | shipped |
- *   cowork-frontmatter | cowork-frontmatter-unknown; `reason` ∈ null |
- *   fable-gate | denylist; `requested` = the picked value before the gates
- *   (override or cowork frontmatter; null for shipped/unknown); `scope` ∈
- *   agent | phase | plugin | null (null unless an override was picked).
+ *   `source` ∈ override-agent | override-task | override-phase |
+ *   override-plugin | shipped | cowork-frontmatter | cowork-frontmatter-unknown;
+ *   `reason` ∈ null | fable-gate | denylist; `requested` = the picked value
+ *   before the gates (override or cowork frontmatter; null for
+ *   shipped/unknown); `scope` ∈ agent | task | phase | plugin | null (null
+ *   unless an override was picked).
  */
 export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overrides = null, coworkFrontmatter = null } = {}) {
   const options = isPlainObject(opts) ? opts : {};
+  const shippedOpts = withoutTask(opts);
   const q = qualifyAgent(qualifiedName);
   const plugin = q === null ? pluginOfUnparsed(qualifiedName) : (q.plugin ?? 'artibot');
   if (plugin === 'artibot' && (q === null || resolveRole(q.agent) !== null)) {
-    return shippedResult(resolveModel(qualifiedName, opts, config));
+    return shippedResult(resolveModel(qualifiedName, shippedOpts, config));
   }
   if (q === null) return { ...UNKNOWN_COWORK };
   const picked = pickOverride(overrides, plugin, q.agent, options);
@@ -603,7 +677,7 @@ export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overri
     const gated = applyGates(picked.model, plugin, q.agent, config);
     return { ...gated, source: picked.source, requested: picked.model, scope: picked.scope };
   }
-  if (plugin === 'artibot') return shippedResult(resolveModel(qualifiedName, opts, config));
+  if (plugin === 'artibot') return shippedResult(resolveModel(qualifiedName, shippedOpts, config));
   const shipped = lookupTier(coworkFrontmatter, q.agent);
   if (shipped === null) return { ...UNKNOWN_COWORK };
   const gated = applyGates(shipped, plugin, q.agent, config);
@@ -625,6 +699,18 @@ const UNKNOWN_COWORK = Object.freeze({
  */
 function shippedResult(model) {
   return { model, source: 'shipped', reason: null, requested: null, scope: null };
+}
+
+/**
+ * `opts` without its `task` key, for `resolveModel`. Anything else — including
+ * a non-object `opts` — is passed through untouched, as before the task layer.
+ *
+ * @param {*} opts
+ * @returns {*}
+ */
+function withoutTask(opts) {
+  if (!isPlainObject(opts) || !Object.hasOwn(opts, 'task')) return opts;
+  return Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'task'));
 }
 
 /**
