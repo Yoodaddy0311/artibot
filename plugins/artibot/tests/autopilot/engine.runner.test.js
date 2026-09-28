@@ -788,7 +788,8 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
   it.each([
     ['PLAN', runPhase1Plan, 'EXECUTE'],
     ['CROSS_CHECK', runPhase3CrossCheck, 'VERIFY'],
-    ['VERIFY', runPhase4Verify, 'IMPROVE'],
+    // VERIFY is the matrix's fourth phase but arms a durable attempt, so a
+    // crash re-runs it instead of landing on IMPROVE — its own case follows.
     ['IMPROVE', runPhase5Improve, 'EVALUATE'],
   ])('should land on the successor exactly once after a crash during %s', async (label, runner, successor) => {
     // "Crash" = the runner ran and persisted, then the process vanished. The
@@ -813,6 +814,40 @@ describe('runPhase2Execute — runner branching (ADR-003 Stage 1)', () => {
     expect(resumed.status).toBe('ok');
     expect(resumed.phase).toBe(successor);
     expect(resumed.instruction.phase).toBe(successor);
+  });
+
+  it('should re-run VERIFY after a crash, then land on IMPROVE exactly once after its ACK', async () => {
+    // The crash matrix's VERIFY case. It used to expect IMPROVE straight away,
+    // which is how a session reached COMPLETED with `verifyResult: null` (AP-N1).
+    const r = await start({
+      task: 'runner test crash point VERIFY',
+      mode: 'default',
+      options: { cpuCount: 2 },
+      sessionId: uniqueId('crash-VERIFY'),
+    });
+    track(r.sessionId);
+    runPhase4Verify(loadSession(r.sessionId));
+
+    const restarted = loadSession(r.sessionId);
+    expect(restarted.phase).toBe('VERIFY');
+    expect(restarted.activePhaseAttempt).toMatchObject({ phase: 'VERIFY', status: 'started' });
+
+    const resumed = await resumeAutopilot(r.sessionId);
+    expect(resumed.status).toBe('ok');
+    expect(resumed.phase).toBe('VERIFY');
+    expect(resumed.instruction.phase).toBe('VERIFY');
+    const rerun = loadSession(r.sessionId);
+    expect(rerun.attemptJournal.filter((e) => e.event === 'rerun' && e.phase === 'VERIFY')).toHaveLength(1);
+
+    recordPhaseResult(rerun, { phase: 'VERIFY', status: 'done' });
+    const improve = await resumeAutopilot(r.sessionId);
+    expect(improve.phase).toBe('IMPROVE');
+    expect(improve.instruction.phase).toBe('IMPROVE');
+    const next = await resumeAutopilot(r.sessionId);
+    expect(next.phase).not.toBe('IMPROVE');
+    const final = loadSession(r.sessionId);
+    expect(final.phases.filter((p) => p.name === 'IMPROVE' && p.status === 'queued')).toHaveLength(1);
+    expect(final.attemptJournal.filter((e) => e.event === 'rerun')).toHaveLength(1);
   });
 
   it('should produce no recovery note when the session completed its phase normally', async () => {

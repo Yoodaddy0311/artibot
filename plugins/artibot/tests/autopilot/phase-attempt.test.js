@@ -132,6 +132,65 @@ describe('reconcileAttemptOnResume — allowlist, not deny-list', () => {
     expect(isAttemptArmed('EXECUTE')).toBe(true);
   });
 
+  it('arms VERIFY, and re-runs it because it is allowlisted (AP-N1)', () => {
+    // Armed without the allowlist, VERIFY would pause every crashed session;
+    // allowlisted without being armed, it was never re-run at all.
+    expect(isAttemptArmed('VERIFY')).toBe(true);
+    expect(ATTEMPT_RERUN_ALLOWLIST.has('VERIFY')).toBe(true);
+    const state = stateWith();
+    openPhaseAttempt(state, { phase: 'VERIFY' });
+    expect(reconcileAttemptOnResume(state).action).toBe('rerun');
+  });
+
+  describe('re-run cap — one unattended re-run per unacknowledged streak', () => {
+    /** Crash → re-run → crash again, the shape an ACK-less driver produces. */
+    function crashedTwice(phase) {
+      const state = stateWith();
+      const first = openPhaseAttempt(state, { phase });
+      journalAttempt(state, { attemptId: first.attemptId, phase, event: 'rerun', from: phase, to: phase });
+      openPhaseAttempt(state, { phase });
+      return state;
+    }
+
+    it('pauses the second unacknowledged VERIFY crash instead of re-running again', () => {
+      const result = reconcileAttemptOnResume(crashedTwice('VERIFY'));
+
+      expect(result.action).toBe('pause');
+      expect(result.note).toContain('자동 재실행하지 않습니다');
+      expect(result.note).toContain('recordPhaseResult');
+      expect(result.note).toContain('ackOutstandingAttempt');
+      expect(result.note).toContain('/autopilot:abort');
+      // The EXECUTE reason (re-committing landed work) is not VERIFY's reason.
+      expect(result.note).not.toContain('다시 커밋');
+    });
+
+    it('allows a fresh re-run once the previous streak was acknowledged', () => {
+      const state = crashedTwice('VERIFY');
+      ackPhaseAttempt(state, { phase: 'VERIFY', status: 'done' });
+      openPhaseAttempt(state, { phase: 'VERIFY' });
+
+      expect(reconcileAttemptOnResume(state).action).toBe('rerun');
+    });
+
+    it('counts re-runs per phase — a CROSS_CHECK re-run does not spend VERIFY\'s', () => {
+      // CROSS_CHECK's re-run row is never acknowledged; only VERIFY's own
+      // journal rows may count against VERIFY.
+      const state = stateWith();
+      const cc = openPhaseAttempt(state, { phase: 'CROSS_CHECK' });
+      journalAttempt(state, { attemptId: cc.attemptId, phase: 'CROSS_CHECK', event: 'rerun' });
+      openPhaseAttempt(state, { phase: 'VERIFY' });
+
+      expect(reconcileAttemptOnResume(state).action).toBe('rerun');
+    });
+
+    it('leaves the EXECUTE pause note unchanged', () => {
+      const state = stateWith();
+      openPhaseAttempt(state, { phase: 'EXECUTE' });
+
+      expect(reconcileAttemptOnResume(state).note).toContain('다시 커밋');
+    });
+  });
+
   it('pauses on an unknown phase rather than re-running it', () => {
     // The fail-closed property: a phase nobody has classified yet gets the
     // cautious branch. A deny-list would have auto-re-run it.

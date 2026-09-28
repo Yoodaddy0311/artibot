@@ -114,8 +114,15 @@ function popMatchingPhase(open, phase) {
  *
  * Pairing is LIFO by phase name (a `phase-end` closes the most recent open
  * window of the same phase), which preserves the previous detector's nesting
- * behaviour. Production never nests phases — each `runPhaseN` emits its start
- * and end in one call — so LIFO vs. flat only matters for hand-built input.
+ * behaviour. Production never nests phases — an unarmed `runPhaseN` emits its
+ * start and end in one call, and an armed one's end comes from the result ACK —
+ * so LIFO vs. flat only matters for hand-built input.
+ *
+ * An `attempt-rerun` event (`engine.js#settleOutstandingAttempt`) also closes
+ * the most recent window of its phase: that window's work was abandoned by a
+ * crash and is superseded by the re-run, which opens its own `phase-start`.
+ * Without this, the result ACK would close only the re-run's window and the
+ * abandoned one would read as a crash forever after.
  *
  * Note this is deliberately NOT {@link groupByPhase}: that one slices events
  * into windows for the report table and emits a row for every window whether
@@ -135,7 +142,7 @@ export function findUnterminatedPhases(events) {
     if (!phase) continue;
     if (ev.type === 'phase-start') {
       open.push({ phase, startedAt: typeof ev.ts === 'string' ? ev.ts : null });
-    } else if (ev.type === 'phase-end') {
+    } else if (ev.type === 'phase-end' || ev.type === 'attempt-rerun') {
       popMatchingPhase(open, phase);
     }
   }
@@ -159,6 +166,14 @@ function groupByPhase(events) {
       groups.push(current);
     }
     current.events.push(ev);
+    if (ev.type === 'attempt-rerun') {
+      // Same rule as findUnterminatedPhases: the re-run supersedes the most
+      // recent open window of its phase. Its span includes the downtime before
+      // the resume, so it is marked abandoned and left unmeasured.
+      const open = groups.findLast((g) => g.phase === phase && g.opened && !g.closed);
+      if (open) Object.assign(open, { closed: true, abandoned: true });
+      current = null;
+    }
     if (ev.type === 'phase-end') {
       // close the window so subsequent same-phase events start a new group
       current.closed = true;
@@ -197,7 +212,8 @@ function buildPhaseEntry(group) {
   // `null`, not `0`: an unclosed window has no end to subtract, and an
   // unparseable timestamp has nothing to subtract from. Only a window with two
   // real instants yields a number — which may legitimately be 0.
-  const durationMs = !unterminated && Number.isFinite(startMs) && Number.isFinite(endMs)
+  const durationMs = !unterminated && group.abandoned !== true
+    && Number.isFinite(startMs) && Number.isFinite(endMs)
     ? Math.max(0, endMs - startMs)
     : null;
   return {
@@ -335,7 +351,12 @@ export function renderTimelineTable(summary) {
   const total = Number.isFinite(s.totalDurationMs) ? s.totalDurationMs : 0;
   let footer = '';
   if (s.topBottleneck && total > 0) {
-    const top = phases.find((p) => p.phase === s.topBottleneck);
+    // A phase can own several rows (a re-run leaves an unmeasured, abandoned
+    // row first), so quote the longest measured row of that phase — the one
+    // summarizeEvents ranked — not the first row carrying the name.
+    const top = phases
+      .filter((p) => p.phase === s.topBottleneck && Number.isFinite(p.durationMs))
+      .reduce((best, p) => (!best || p.durationMs > best.durationMs ? p : best), null);
     if (top) {
       const pct = Math.round((top.durationMs / total) * 100);
       footer = `\n\nTop bottleneck: **${s.topBottleneck}** (${fmtDuration(top.durationMs)}, ${pct}% of total)`;
