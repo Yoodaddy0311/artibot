@@ -181,6 +181,28 @@ export function applyDesiredToRoot(rootManifest, desired) {
   return { next, edits };
 }
 
+/**
+ * Write `data` as 2-space JSON with a trailing newline, keeping the line ending
+ * the file already uses. Both manifests are CRLF in a Windows working tree
+ * (`i/lf w/crlf`); writing LF there left the release tree dirty and v4.67.0 had
+ * to restore CRLF by hand. An LF (or missing) original stays LF.
+ * Skips the write when the bytes would not change.
+ * @returns {boolean} true when the file was written
+ */
+export function writeJsonPreservingEol(file, data) {
+  let original = null;
+  try {
+    original = readFileSync(file, 'utf-8');
+  } catch {
+    // missing/unreadable original → default to LF
+  }
+  const eol = original?.includes('\r\n') ? '\r\n' : '\n';
+  const text = `${JSON.stringify(data, null, 2)}\n`.replace(/\n/g, eol);
+  if (text === original) return false;
+  writeFileSync(file, text);
+  return true;
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const manifestPath = path.join(PLUGIN_ROOT, 'marketplace.json');
@@ -250,12 +272,12 @@ function main() {
     process.exit(1);
   }
 
-  // Preserve trailing newline (the files end with one).
+  // Preserve trailing newline and each file's own line ending.
   if (edits.length > 0) {
-    writeFileSync(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
+    writeJsonPreservingEol(manifestPath, next);
   }
   if (rootEdits.length > 0) {
-    writeFileSync(rootManifestPath, `${JSON.stringify(rootNext, null, 2)}\n`);
+    writeJsonPreservingEol(rootManifestPath, rootNext);
   }
   console.log(`${GREEN}marketplace.json metadata synced to sources of truth.${NC}`);
   process.exit(0);

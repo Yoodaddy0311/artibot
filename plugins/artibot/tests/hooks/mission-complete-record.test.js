@@ -23,8 +23,8 @@
  * the shape `tests/hooks/plan-observe-record.test.js` established. Nothing here
  * may reach the worktree's `.artibot/` or `.git/artibot/ledger.jsonl`: a test
  * that appended a `mission.completed` line to the live ledger would corrupt the
- * very measurement this hook exists to produce. The last case hashes both
- * before and after the suite and asserts they did not move.
+ * very measurement this hook exists to produce. `afterAll` asserts the live
+ * ledger holds no row carrying a fixture id, and the missions dir did not move.
  *
  * WHAT THIS FILE DOES NOT PROVE (rules §9 — write it next to the gate):
  *   - THAT THE HOST FIRES SessionEnd, or that `hooks/dispatch-table.json` lists
@@ -45,9 +45,8 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
-  appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
+  appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
   rmSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -77,6 +76,8 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'mission-complete-record.js');
 const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 
+// CONTRACT: every ledger row this file writes carries SESSION_ID or `sess-filler-*`
+// — `fixtureRowsIn` (the afterAll isolation proof) sees only those ids.
 const SESSION_ID = 'sess-outcome-1abcdefg';
 const MISSION_TITLE = 'Declare completion at SessionEnd';
 const VERIFICATION_ID = 'v1-83866286c2d8-42';
@@ -280,19 +281,32 @@ function fields(line) {
   };
 }
 
-/** sha256 of a file, or `'absent'`. Used for the real-store isolation proof. */
-function digest(file) {
-  if (!existsSync(file)) return 'absent';
-  return createHash('sha256').update(readFileSync(file)).digest('hex');
+/** `-S<sid8>`: the tail every `sessionFallbackMissionId(SESSION_ID, …)` carries, any day. */
+const FIXTURE_MISSION_TAIL = sessionFallbackMissionId(SESSION_ID, new Date(0)).replace(/^M-\d{8}/, '');
+
+/**
+ * Lines of `file` carrying an id only these fixtures write — the isolation
+ * proof's target. NOT a byte digest: a host session appends to the live ledger
+ * while this suite runs. Matched on id FIELDS, so a live row whose text merely
+ * quotes a fixture string is not a leak; a torn line falls back to the raw text.
+ * A missing file is zero lines (the digest's `'absent'` compared equal).
+ */
+function fixtureRowsIn(file) {
+  if (!existsSync(file)) return [];
+  const isFixture = (r) => r.session_id === SESSION_ID || /^sess-filler-/.test(r.session_id)
+    || String(r.mission_id).endsWith(FIXTURE_MISSION_TAIL) || r.data?.verification_id === VERIFICATION_ID;
+  return readFileSync(file, 'utf-8').split('\n').filter(Boolean).filter((line) => {
+    try { return isFixture(JSON.parse(line)); } catch { return /sess-outcome-|sess-filler-/.test(line); }
+  });
 }
 
-const LIVE_LEDGER = path.join(REPO_ROOT, '.git', 'artibot', 'ledger.jsonl');
+// Resolved as production resolves it: in a git WORKTREE `REPO_ROOT/.git` is a
+// file, and a hand-joined `.git/artibot/...` path never exists there.
+const LIVE_LEDGER = ledgerFilePath(REPO_ROOT);
 const LIVE_MISSIONS = path.join(PLUGIN_ROOT, '.artibot', 'missions');
-let liveLedgerBefore;
 let liveMissionsBefore;
 
 beforeAll(() => {
-  liveLedgerBefore = digest(LIVE_LEDGER);
   liveMissionsBefore = existsSync(LIVE_MISSIONS);
 });
 
@@ -1039,11 +1053,35 @@ describe('refusals and throws — the failure modes a green fixture hides', () =
   });
 });
 
+describe('the isolation proof can see a leak — `fixtureRowsIn` on a ledger COPY', () => {
+  it('ignores what a host session appends, and flags every row shape a fixture can leak', () => {
+    const copy = path.join(tmp, 'ledger-copy.jsonl');
+    expect(fixtureRowsIn(copy)).toEqual([]);
+    if (existsSync(LIVE_LEDGER)) copyFileSync(LIVE_LEDGER, copy);
+    const host = { event: 'human.asked', session_id: 'host-5e8d85a8', mission_id: 'M-20260928-001', data: {} };
+    appendFileSync(copy, `${JSON.stringify(host)}\n`, 'utf-8');
+    expect(fixtureRowsIn(copy)).toEqual([]);
+
+    // Positive control: EVERY row this suite really writes, one row per id field
+    // alone (a HOST session id is the env-inheritance shape), and a torn line.
+    seedMission();
+    seedVerify();
+    const own = readRunLedger(repo).length;
+    const leaks = [{ ...host, session_id: SESSION_ID }, { ...host, session_id: 'sess-filler-3' },
+      { ...host, mission_id: missionId }, { ...host, data: { verification_id: VERIFICATION_ID } },
+    ].map((r) => `${JSON.stringify(r)}\n`).join('');
+    appendFileSync(copy, `${readFileSync(ledgerFilePath(repo), 'utf-8')}${leaks}`
+      + `${JSON.stringify({ session_id: SESSION_ID }).slice(0, -1)}\n`, 'utf-8');
+    expect(own).toBeGreaterThanOrEqual(5);
+    expect(fixtureRowsIn(copy)).toHaveLength(own + 5);
+  });
+});
+
 afterAll(() => {
   // THE ISOLATION PROOF. Not a tidiness check: a single leaked append into the
   // repository's own ledger would become a data point in the very distribution
   // this hook is built to measure, and nothing downstream could tell it apart
   // from a real one.
-  expect(digest(LIVE_LEDGER)).toBe(liveLedgerBefore);
+  expect(fixtureRowsIn(LIVE_LEDGER)).toEqual([]);
   expect(existsSync(LIVE_MISSIONS)).toBe(liveMissionsBefore);
 });
