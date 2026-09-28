@@ -36,7 +36,7 @@
  *      `--config`, over two real suite files, must pass both:
  *      `tests/scripts/nightly-session-rollup-smoke.test.js` imports the
  *      shebang-bearing `scripts/hooks/nightly-session-rollup.mjs` through the
- *      vite transform pipeline (43 lines, the smallest of the 38 test files
+ *      vite transform pipeline (42 lines, the smallest of the 38 test files
  *      that import one of the 45 shebang `.mjs` files under `scripts/` and
  *      `lib/`, counted 2026-09-28), and
  *      `tests/firewall/autopilot-store-sandbox-required.test.js`, whose
@@ -83,6 +83,9 @@
  *     new variable passes it to the child. The minus-`setupFiles` control
  *     turns the gate red if that variable masks the autopilot-store resolver;
  *     masking of anything else is invisible.
+ *   - **A setup variable assigned in another spelling.** The name extraction
+ *     reads `process.env.NAME =` only; `process.env['NAME'] =` or
+ *     `Object.assign(process.env, …)` in the setup file is not scrubbed.
  *   - **Coverage from the root.** `coverage` is compared as an object and its
  *     relative paths share the absolute `root`; no coverage run is made.
  *   - **Runtime serialism.** Project membership is observed, not whether two
@@ -218,7 +221,9 @@ describe('child env scrub', () => {
   it('reads the setup variables from the setup file itself', () => {
     // A regex that stopped matching would scrub nothing and fail open.
     expect(SETUP_ENV_KEYS).toEqual(expect.arrayContaining([
-      'ARTIBOT_STATE_DIR', 'ARTIBOT_AUTOPILOT_STORE_DIR', 'ARTIBOT_DECISIONS_STORE_DIR',
+      'ARTIBOT_STATE_DIR', 'ARTIBOT_STATE_DIR_HOME',
+      'ARTIBOT_AUTOPILOT_STORE_DIR', 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT',
+      'ARTIBOT_DECISIONS_STORE_DIR', 'ARTIBOT_DECISIONS_STORE_DIR_ROOT',
     ]));
   });
 

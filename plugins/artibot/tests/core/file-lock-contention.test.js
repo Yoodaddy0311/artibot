@@ -53,7 +53,10 @@
  * entry records whether another contender's marker was there. In ledger
  * order, an entry by a different pid is a handoff, and an entry by the
  * previous holder while someone was waiting is a retake; a re-entry nobody was
- * waiting for is neither. The case asserts retakes < handoffs. The earlier
+ * waiting for is neither. The case asserts retakes < handoffs AND that no
+ * single pid made R - 1 retakes: the ratio alone misses one contender that
+ * re-locks all R rounds straight (R - 1 = 14 retakes) while the other three
+ * yield and hand off about 45 times. The earlier
  * pin, "no pid took all R rounds in a row", could not tell a monopoly from a
  * contender that had not asked yet: with the yield one process runs its R
  * rounds in about 300ms, so a 300ms stall of the other three after the
@@ -70,6 +73,12 @@
  * handoffs (50-59 above). This was reasoned, not measured under load. The
  * marker check runs after the lock is taken, so a contender that asked just
  * after the holder got in also counts as waiting (more retakes, toward red).
+ * The marker I/O throws rather than being swallowed. A swallowed failed write
+ * would hide a waiter (fewer retakes, toward green); a swallowed failed unlink
+ * would leave a stale marker that reads as a waiter (toward red). Either way
+ * the crash lands in the child's stderr. Its cost: an antivirus or indexer
+ * holding a marker on Windows can raise EPERM/EBUSY and fail a run with no
+ * lock fault; that rate was not measured (none in the 50 runs above).
  *
  * Why no wall-clock spans: an earlier version compared Date.now() [enter,
  * exit] spans across processes. On Windows each process anchors Date.now()
@@ -121,6 +130,9 @@ const SCENARIO_DEADLINE_MS = 40_000;
  */
 const YIELD_MIN_MS = 10;
 const YIELD_MAX_MS = 25;
+
+/** Rounds per contender (R) in the contention case; the yield pin derives its cap from it. */
+const CONTENTION_ROUNDS = 15;
 
 /**
  * Contender: waits at the barrier, then runs `rounds` locked
@@ -346,10 +358,11 @@ function ledgerViolations(lines) {
  * @param {Record<string, boolean[]>} contestedByPid per pid, one flag per
  *   entry of that pid in order: was another contender waiting when it got in.
  *   A missing flag counts as waiting, toward a retake.
- * @returns {{ handoffs: number, retakes: number }}
+ * @returns {{ handoffs: number, retakes: number, retakesByPid: Record<string, number> }}
  */
 function ledgerHandoffs(lines, contestedByPid) {
   const entriesSeen = {};
+  const retakesByPid = {};
   let last = null;
   let handoffs = 0;
   let retakes = 0;
@@ -358,11 +371,29 @@ function ledgerHandoffs(lines, contestedByPid) {
     if (kind !== 'E') continue;
     const k = entriesSeen[pid] ?? 0;
     entriesSeen[pid] = k + 1;
-    if (last !== null && pid !== last) handoffs++;
-    else if (pid === last && (contestedByPid[pid]?.[k] ?? true)) retakes++;
+    if (last !== null && pid !== last) {
+      handoffs++;
+    } else if (pid === last && (contestedByPid[pid]?.[k] ?? true)) {
+      retakes++;
+      retakesByPid[pid] = (retakesByPid[pid] ?? 0) + 1;
+    }
     last = pid;
   }
-  return { handoffs, retakes };
+  return { handoffs, retakes, retakesByPid };
+}
+
+/**
+ * The yield pin: the lock changed hands more often than holders re-took it
+ * over a waiter, and no one pid re-took it R - 1 times — what a single
+ * contender re-locking all R rounds straight over waiters would do.
+ *
+ * @param {{ handoffs: number, retakes: number, retakesByPid: Record<string, number> }} turns
+ * @param {number} rounds R, rounds per contender
+ * @returns {boolean}
+ */
+function yieldHandsOn(turns, rounds) {
+  const worstPid = Math.max(0, ...Object.values(turns.retakesByPid));
+  return turns.retakes < turns.handoffs && worstPid < rounds - 1;
 }
 
 /**
@@ -387,7 +418,7 @@ function readLedger(ledgerPath) {
  * rounds.
  *
  * @param {{ processes: number, rounds: number, holdMs: number, jitter?: [number, number]|null, seedLock?: (lockPath: string) => void, noLock?: boolean, inSectionBarrier?: boolean }} opts
- * @returns {Promise<{ counter: number, expected: number, overlaps: number, badReads: number, writeErrors: number, exits: Array<number|null>, stderr: string[], lockLeft: boolean, ledgerLines: number, ledgerViolations: number, ledgerHandoffs: number, ledgerRetakes: number, maxWaitMs: number }>}
+ * @returns {Promise<{ counter: number, expected: number, overlaps: number, badReads: number, writeErrors: number, exits: Array<number|null>, stderr: string[], lockLeft: boolean, ledgerLines: number, ledgerViolations: number, ledgerTurns: ReturnType<typeof ledgerHandoffs>, maxWaitMs: number }>}
  */
 async function runContention({ processes, rounds, holdMs, jitter = null, seedLock, noLock = false, inSectionBarrier = false }) {
   const script = path.join(tmpDir, 'contender.mjs');
@@ -445,8 +476,7 @@ async function runContention({ processes, rounds, holdMs, jitter = null, seedLoc
     lockLeft: fsSync.existsSync(lockPath),
     ledgerLines: ledger.length,
     ledgerViolations: ledgerViolations(ledger),
-    ledgerHandoffs: turns.handoffs,
-    ledgerRetakes: turns.retakes,
+    ledgerTurns: turns,
     maxWaitMs: Math.max(0, ...tallies.map((t) => t.maxWaitMs ?? 0)),
   };
 }
@@ -545,25 +575,43 @@ describe('overlap analyzers (no processes)', () => {
     const lines = ['E A', 'X A', 'E A', 'X A', 'E B', 'X B', 'E B', 'X B', 'E A', 'X A'];
     // A's second entry had a waiter, B's second did not.
     expect(ledgerHandoffs(lines, { A: [false, true, true], B: [true, false] }))
-      .toEqual({ handoffs: 2, retakes: 1 });
+      .toEqual({ handoffs: 2, retakes: 1, retakesByPid: { A: 1 } });
   });
 
   it('does not count a holder that runs alone as a monopoly', () => {
     // A takes all its rounds before anyone else asks: the stall signature.
-    const lines = ['E A', 'X A', 'E A', 'X A', 'E A', 'X A', 'E B', 'X B'];
-    expect(ledgerHandoffs(lines, { A: [false, false, false], B: [false] }))
-      .toEqual({ handoffs: 1, retakes: 0 });
+    const R = CONTENTION_ROUNDS;
+    const lines = [...Array.from({ length: R }, () => ['E A', 'X A']).flat(), 'E B', 'X B'];
+    const turns = ledgerHandoffs(lines, { A: Array(R).fill(false), B: [false] });
+    expect(turns).toEqual({ handoffs: 1, retakes: 0, retakesByPid: {} });
+    expect(yieldHandsOn(turns, R)).toBe(true);
+  });
+
+  it('catches one contender re-locking all R rounds over waiters while the rest hand off', () => {
+    // A never yields: R entries straight, waiters present from its second on.
+    // B, C, D then take turns, one handoff per entry.
+    const R = CONTENTION_ROUNDS;
+    const straight = Array.from({ length: R }, () => ['E A', 'X A']).flat();
+    const rotating = Array.from({ length: R }, () => ['B', 'C', 'D'].map((p) => [`E ${p}`, `X ${p}`]).flat()).flat();
+    const turns = ledgerHandoffs([...straight, ...rotating], {
+      A: [false, ...Array(R - 1).fill(true)], B: Array(R).fill(true), C: Array(R).fill(true), D: Array(R).fill(true),
+    });
+    expect(turns).toEqual({ handoffs: 3 * R, retakes: R - 1, retakesByPid: { A: R - 1 } });
+    // The ratio alone passes it; the per-pid cap does not.
+    expect(turns.retakes).toBeLessThan(turns.handoffs);
+    expect(yieldHandsOn(turns, R)).toBe(false);
   });
 
   it('counts a re-entry with no recorded flag as a retake', () => {
-    expect(ledgerHandoffs(['E A', 'X A', 'E A', 'X A'], {})).toEqual({ handoffs: 0, retakes: 1 });
+    expect(ledgerHandoffs(['E A', 'X A', 'E A', 'X A'], {}))
+      .toEqual({ handoffs: 0, retakes: 1, retakesByPid: { A: 1 } });
   });
 });
 
 describe('withFileLock mutual exclusion (real processes)', () => {
   it('N processes x R rounds lose no counter updates and never overlap', async () => {
     const r = await runContention({
-      processes: 4, rounds: 15, holdMs: 2, jitter: [YIELD_MIN_MS, YIELD_MAX_MS],
+      processes: 4, rounds: CONTENTION_ROUNDS, holdMs: 2, jitter: [YIELD_MIN_MS, YIELD_MAX_MS],
     });
 
     // stderr first: an ELOCKTIMEOUT in a child shows up here with its message.
@@ -574,10 +622,10 @@ describe('withFileLock mutual exclusion (real processes)', () => {
     expect(r.overlaps).toBe(0);
     expect(r.ledgerLines).toBe(2 * r.expected);
     expect(r.ledgerViolations).toBe(0);
-    // The yield hands the lock on: a holder re-took it over a waiting
-    // contender less often than it changed hands. Without the yield it is the
-    // other way round in every measured run. See the header.
-    expect(r.ledgerRetakes).toBeLessThan(r.ledgerHandoffs);
+    // The yield hands the lock on: holders re-took it over a waiting contender
+    // less often than it changed hands, and no one pid re-took it R - 1 times.
+    // Without the yield both fail in every measured run. See the header.
+    expect(yieldHandsOn(r.ledgerTurns, CONTENTION_ROUNDS), JSON.stringify(r.ledgerTurns)).toBe(true);
     expect(r.counter).toBe(r.expected);
     expect(r.lockLeft).toBe(false);
   }, 60_000);
