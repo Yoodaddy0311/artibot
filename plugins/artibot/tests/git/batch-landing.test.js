@@ -41,7 +41,21 @@ import { execFileSync } from 'node:child_process';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { integrationBranchName, landBatch, MAX_REBUILDS } from '../../lib/git/batch-landing.js';
+import {
+  integrationBranchName,
+  landBatch,
+  landingLockStaleMs,
+  MAX_REBUILDS,
+  WAIT_FOR_GREEN_ATTEMPTS,
+  WAIT_FOR_GREEN_POLL_MS,
+  waitForGreen,
+} from '../../lib/git/batch-landing.js';
+import {
+  acquireLandingLock,
+  buildLandingLockKey,
+  DEFAULT_STALE_MS,
+  releaseLandingLock,
+} from '../../lib/git/landing-lock.js';
 import { runGit } from '../../lib/git/merge-preflight.js';
 
 let root = '';
@@ -225,6 +239,140 @@ describe('integration branch naming', () => {
     expect(() => integrationBranchName('split-')).toThrow(TypeError);
     expect(() => integrationBranchName('///')).toThrow(TypeError);
     expect(() => integrationBranchName('')).toThrow(TypeError);
+  });
+});
+
+/**
+ * The green-wait ceiling. The 10-minute ceiling inherited from release.yml was
+ * too short for this repo's Windows job: a batch whose checks finished after
+ * poll 40 came back `not-green` although nothing failed. The fixture turns
+ * green at poll 42 — past the old ceiling, inside the new one — and the same
+ * fetcher with `attempts: 40` is the positive control that the old ceiling
+ * really misses it. `sleep` is injected and records its argument, so the wait
+ * is instant and still shows that the default poll interval was used.
+ */
+describe('waitForGreen ceiling', () => {
+  const PENDING = { total_count: 1, check_runs: [{ status: 'in_progress', conclusion: null }] };
+  const GREEN_AT = 42;
+
+  function lateGreen(box) {
+    return async () => {
+      box.fetches += 1;
+      return box.fetches >= GREEN_AT ? GREEN : PENDING;
+    };
+  }
+
+  function recordingSleep(box) {
+    return async (ms) => {
+      box.sleeps.push(ms);
+    };
+  }
+
+  it('the default ceiling is 80 polls x 15s = 20 min', () => {
+    expect(WAIT_FOR_GREEN_ATTEMPTS).toBe(80);
+    expect(WAIT_FOR_GREEN_POLL_MS).toBe(15_000);
+    expect((WAIT_FOR_GREEN_ATTEMPTS * WAIT_FOR_GREEN_POLL_MS) / 60_000).toBe(20);
+  });
+
+  it('turns green at poll 42 under the default ceiling', async () => {
+    const box = { fetches: 0, sleeps: [] };
+    const r = await waitForGreen('x', { fetchCheckRuns: lateGreen(box), sleep: recordingSleep(box) });
+    expect(r.green).toBe(true);
+    expect(r.polls).toBe(GREEN_AT);
+    expect(box.fetches).toBe(GREEN_AT);
+    expect(box.sleeps).toHaveLength(GREEN_AT);
+    expect(box.sleeps.every((ms) => ms === WAIT_FOR_GREEN_POLL_MS)).toBe(true);
+  });
+
+  it('positive control: the old 40-poll ceiling misses the same run', async () => {
+    const box = { fetches: 0, sleeps: [] };
+    const r = await waitForGreen('x', { fetchCheckRuns: lateGreen(box), sleep: recordingSleep(box), attempts: 40 });
+    expect(r.green).toBe(false);
+    expect(r.reason).toBe('not green within 40 polls');
+    expect(r.polls).toBe(40);
+    expect(box.fetches).toBe(40);
+  });
+
+  it('a failed check still stops at once under the raised ceiling', async () => {
+    const box = { fetches: 0, sleeps: [] };
+    const r = await waitForGreen('x', {
+      fetchCheckRuns: async () => {
+        box.fetches += 1;
+        return box.fetches < 3
+          ? PENDING
+          : { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'failure' }] };
+      },
+      sleep: recordingSleep(box),
+    });
+    expect(r.green).toBe(false);
+    expect(r.reason).toBe('1 check run(s) failed');
+    expect(r.polls).toBe(3);
+    expect(box.fetches).toBe(3);
+  });
+
+  // The wait itself is instant (injected sleep), but this case still takes
+  // seconds: ~4.8s measured 2026-09-28, all of it git processes against the
+  // bare remote (fetch, merge-tree, push). The four cases above are the
+  // sub-second ones.
+  it('landBatch without wait.attempts lands a batch whose checks finish at poll 42', async () => {
+    const box = { fetches: 0, sleeps: [] };
+    const r = await landBatch({
+      ...common(),
+      runId: 'late-green',
+      wait: { sleep: recordingSleep(box) },
+      fetchCheckRuns: lateGreen(box),
+    });
+    expect(r.status).toBe('landed');
+    expect(r.log).toContain(`wait_for_green: all check runs completed green (polls=${GREEN_AT})`);
+    expect(originTip('main')).toBe(r.sha);
+  });
+});
+
+/**
+ * The landing lock must outlive the longest landing. Staleness is judged by
+ * the NEXT acquirer against its own `staleMs`, and nothing refreshes the lock
+ * while it is held, so a TTL shorter than 1 + maxRebuilds green waits lets a
+ * second landing reclaim a live one mid-wait. With the 20-minute ceiling that
+ * worst case is 40 min — past the 30-minute DEFAULT_STALE_MS.
+ */
+describe('landing lock staleMs', () => {
+  const MIN = 60_000;
+
+  it('is 3 x (1 + maxRebuilds) x the effective ceiling: 120 min by default', () => {
+    expect(landingLockStaleMs()).toBe(120 * MIN);
+    expect(landingLockStaleMs({}, MAX_REBUILDS)).toBe(3 * (1 + MAX_REBUILDS) * WAIT_FOR_GREEN_ATTEMPTS * WAIT_FOR_GREEN_POLL_MS);
+  });
+
+  it('follows the wait the caller actually passes', () => {
+    expect(landingLockStaleMs({ attempts: 200 })).toBe(3 * 2 * 200 * 15_000);
+    expect(landingLockStaleMs({ pollMs: 30_000 })).toBe(3 * 2 * 80 * 30_000);
+    expect(landingLockStaleMs({}, 0)).toBe(60 * MIN);
+  });
+
+  it('never drops below DEFAULT_STALE_MS', () => {
+    expect(landingLockStaleMs({ attempts: 2, pollMs: 0 })).toBe(DEFAULT_STALE_MS);
+    expect(landingLockStaleMs({ attempts: 1, pollMs: 15_000 }, 0)).toBe(DEFAULT_STALE_MS);
+  });
+
+  // The holder is this very process (live pid, same host), stamped 45 minutes
+  // ago: past the old 30-minute TTL, inside the new 120-minute one. RED before
+  // the fix (2026-09-28): landBatch reclaimed it and came back `landed`.
+  it('landBatch does not reclaim a live holder that is 45 minutes into its landing', async () => {
+    const key = buildLandingLockKey('owner/repo', 'main');
+    const held = acquireLandingLock(key, { lockDir, sessionId: 'long-landing', now: () => Date.now() - 45 * MIN });
+    expect(held.ok).toBe(true);
+    try {
+      const r = await landBatch({
+        ...common(),
+        runId: 'stale-45',
+        wait: { sleep: async () => {} },
+      });
+      expect(r.status).toBe('locked');
+      expect(r.holder?.sessionId).toBe('long-landing');
+      expect(originTip('ci/split-stale-45')).toBeNull();
+    } finally {
+      releaseLandingLock(key, { lockDir, token: held.token });
+    }
   });
 });
 
