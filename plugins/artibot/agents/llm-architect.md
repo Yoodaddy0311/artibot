@@ -59,7 +59,7 @@ category: expert
 | Use Case | Recommended Model | Rationale |
 |-----------|-------------------|-----------|
 | Highest-capability reasoning (design · review) | fable tier (`lib/core/model-catalog.js#MODELS.fable`) | Most capable widely released model; always-on thinking + effort. **Effective cost vs opus is `lib/core/model-catalog.js#getCostFactor('fable')` — an unmeasured estimate (tokenizer coefficient unverified); refusal→fallback contract applies.** **Dormant in Artibot**: since the 2026-09-23 owner decision the fable gate is `enabled=false`, so no agent — this one included — resolves to fable. The 10-agent `fable.allowlist` and `security-reviewer`'s denylisting are kept for re-enabling only (2-tier fleet 2026-09-02~09-23). |
-| Complex reasoning (all agents today) | opus tier (`MODELS.opus`) | 2026-09-23 오너 결정 이후 30종 전 에이전트의 라우팅 티어(`phaseRoles { build: opus, review: opus }`). 1M context + adaptive thinking(기본 ON) + xhigh/max effort. `thinking:{type:"disabled"}`는 effort `xhigh`/`max`에서 400 |
+| Complex reasoning (all agents today) | opus tier (`MODELS.opus`) | 2026-09-23 오너 결정 이후 30종 전 에이전트의 라우팅 티어(`phaseRoles { build: opus, review: opus }`). 1M context + adaptive thinking(끌 수 없음) + effort `low`~`max`(기본 `medium` — Opus 5 의 `high` 가 아니므로 명시 설정). `thinking:{type:"disabled"}`·`budget_tokens` 는 **모든** effort 에서 400 — 깊이는 API 파라미터로는 effort 로만 조절(프롬프트 지시로 보조 조절 가능) |
 | General coding | claude-sonnet-5 | Best balance of speed and capability |
 | High-throughput | claude-sonnet-5 | Quality-first approach |
 | Embeddings | text-embedding-3-small | Cost-effective for most use cases |

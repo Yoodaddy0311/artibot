@@ -216,8 +216,10 @@ describe('buildRecoveryNote — attempt-aware (ADR-005 2단)', () => {
   });
 
   it('says an allowlisted phase WILL be redone automatically', () => {
-    // CROSS_CHECK/VERIFY are read-and-report passes; redoing them is free, so
-    // reconcileAttemptOnResume returns `rerun` and the banner must agree.
+    // Allowlisted means "safe to redo unattended", not "free": CROSS_CHECK reads
+    // and reports, VERIFY re-runs ci and may repair (see ATTEMPT_RERUN_ALLOWLIST).
+    // On the first unacknowledged crash reconcileAttemptOnResume returns `rerun`
+    // (a second one in the same streak pauses) and the banner must agree.
     const phase = [...ATTEMPT_RERUN_ALLOWLIST][0];
     const state = { ...SESSION, activePhaseAttempt: openAttempt(phase) };
     const note = buildRecoveryNote(state, { events: [{ type: 'phase-start', phase, ts: '2026-08-23T00:30:16.290Z' }] });

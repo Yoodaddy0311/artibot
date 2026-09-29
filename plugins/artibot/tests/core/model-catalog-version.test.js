@@ -71,7 +71,12 @@ describe('CATALOG_VERSION', () => {
  *  1. **날짜의 진위.** 형식·실재 달력 날짜만 본다. 그 날 실제로 공식 페이지와
  *     대조했는지는 기계가 알 수 없다.
  *  2. **신선도.** 가격을 고치고 PRICING_VERSION 을 안 올린 커밋은 이 파일을
- *     통과한다. 값↔버전을 묶는 해시 검사는 없다.
+ *     통과한다. 값↔버전 결합은 `tests/core/pricing-history.test.js`
+ *     describe('pricing history gate') 가 본다 — 해시가 아니라 git 에서 옮긴
+ *     가격표 EXPECTED 와의 대조다. 도장을 유지한 가격 편집, PRICING_VERSIONS 에
+ *     새 도장을 안 붙인 bump, 나가는 행을 얼리지 않은 bump 는 거기서 red.
+ *     그 게이트도 가격 편집과 함께 EXPECTED 의 현재 행을 제자리에서 고친 커밋은
+ *     못 본다(그 파일 헤더 (b)).
  *  3. **출처의 유효성.** PRICING_SOURCE 가 스킴 없는 비어 있지 않은 문자열인지만
  *     본다. 그 경로가 실재하는지는 확인하지 않는다(아웃바운드 금지 — 의도된 한계).
  */
