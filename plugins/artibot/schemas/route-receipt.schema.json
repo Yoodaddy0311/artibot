@@ -304,6 +304,12 @@
           "else": { "properties": { "class": { "type": "string" } } }
         }
       ]
+    },
+    "caller_agent_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Optional (additive, 2026-09-29, SH-19; receipts written before it stay valid). The agent_id on the PreToolUse(Agent) payload: the subagent that CALLED the Agent tool, trimmed and capped at 128 characters; null = the payload carried no agent_id, which the host's payload schema documents as the main thread (host 2.1.284, R7 recon). That is documentation, not a measurement: no Agent call made from inside a subagent was ever captured, so a non-null value is unmeasured live. The REQUESTER of this spawn, NOT the spawned agent - the spawned agent's id is route.bound data.agent_id, joined on tool_use_id. This value never feeds models.selected, decision or reason[]. maxLength is enforced by ajv only: the ledger writer's subset validator (lib/runtime/ledger-schema.js) does not run it, so the hook's own slice holds the bound on live rows."
     }
   },
   "additionalProperties": false,
