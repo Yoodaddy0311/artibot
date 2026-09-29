@@ -855,11 +855,12 @@ describe('pre-write-guard hook', () => {
 
     const toBackslashes = (p) => p.replace(/\//g, '\\');
 
-    // A drive that exists wherever this runs: exempt rows are followed to the
-    // filesystem, which needs a real root to stop at. Only the lexical rules
-    // care about the letter itself (rows below also cover lower case).
-    const DRIVE = process.platform === 'win32' ? process.cwd().slice(0, 2) : 'C:';
-    const drive = DRIVE.toLowerCase();
+    // Windows-style fixtures interpolate the drive letter: the landing gate
+    // (lib/git/limb-landing-check.js) refuses a literal drive-letter Users path in
+    // added lines, and a fixture is not a reason to tempt it. Any letter works
+    // here because the filesystem is stubbed (see the beforeEach below).
+    const DRIVE = 'C:';
+    const drive = 'c:';
 
     /** Paths that MUST stay exempt: [path, why]. */
     const EXEMPT = [
@@ -889,6 +890,9 @@ describe('pre-write-guard hook', () => {
       ['/repo/.claude/skills/tdd/SKILL.md', 'skills'],
       ['/repo/.claude/skills/tdd/scripts/run.js', 'skills, nested'],
       ['.claude/rules/x.md', 'relative rules path'],
+      [`${DRIVE}\\Users\\me\\.claude\\rules\\artibot\\dev-protocol.md`, 'global rules, Windows'],
+      [`${DRIVE}\\Users\\me\\.claude\\projects\\C--Users-me-Desktop-AI-Artibot\\memory\\MEMORY.md`, 'auto memory, the real slug shape'],
+      [`${DRIVE}\\Users\\me\\Desktop\\AI\\Artibot\\.claude\\worktrees\\agent-aea30c7a065bd19ab\\plugins\\artibot\\scripts\\hooks\\pre-write-guard.js`, 'the path shape a limb window edits this very hook at'],
     ];
 
     /** Paths that must NOT be exempt: [path, why]. */
@@ -902,6 +906,10 @@ describe('pre-write-guard hook', () => {
       ['/repo/.claude/worktrees/x/.claude/settings.local.json', "a worktree's OWN settings are still settings"],
       ['/repo/.claude/worktrees/x/plugins/artibot/.claude/settings.json', 'settings nested in a worktree source tree'],
       ['C:\\repo\\.claude\\worktrees\\x\\.claude\\settings.local.json', 'same, Windows separators'],
+      // The real host settings paths.
+      [`${DRIVE}\\Users\\me\\.claude\\settings.json`, 'host settings, Windows'],
+      [`${DRIVE}/Users/me/.claude/settings.local.json`, 'host local settings, forward slashes'],
+      [`${DRIVE}\\Users\\me\\.claude.json`, 'host global config: a name that merely starts with .claude'],
       // Under .claude/ but outside the allowlist.
       ['/repo/.claude/plans/p.md', 'not on the allowlist'],
       ['/repo/.claude/foo/bar.txt', 'not on the allowlist'],
@@ -918,6 +926,9 @@ describe('pre-write-guard hook', () => {
         [`/repo/.claude/skills/s/${name}`, 'protected basename in skills'],
         [`/repo/.claude/agents/${name.toUpperCase()}`, 'protected basename, other case'],
       ]),
+      // Windows reads a trailing dot or space away, so these ARE the protected names.
+      ['/repo/.claude/rules/settings.json.', 'trailing dot on a protected basename'],
+      ['/repo/.claude/rules/settings.json ', 'trailing space on a protected basename'],
       // A segment, not a substring.
       ['/repo/not.claude/settings.json', 'substring match was the old bug'],
       ['/repo/x.claude/rules/y.md', 'substring match was the old bug'],
@@ -947,6 +958,8 @@ describe('pre-write-guard hook', () => {
       ['/repo/.claude/worktrees/.claude/settings.json', 'the worktree "name" is itself .claude'],
       ['/repo/.claude/worktrees/x/.claude/worktrees/y/.claude/settings.json', 'settings below two worktrees'],
       ['/repo/.claude/rules/.claude/settings.json', 'a second .claude below a prose directory'],
+      ['/repo/.claude/rules/.claude/x.md', 'the same, with a name that is not a config name'],
+      ['/repo/.claude/skills/s/.CLAUDE/y.md', 'the same, other case'],
     ];
 
     /** Inputs no exemption can be derived from: [input, why]. */
@@ -965,11 +978,26 @@ describe('pre-write-guard hook', () => {
       ['../.claude/rules/x.md', 'relative path that climbs out'],
       ['../../CLAUDE.md', 'a context file name does not rescue an unresolvable path'],
       ['/../.claude/rules/x.md', 'climbs above the root'],
+      ['/repo/.claude/worktrees/x/.../a.js', 'a name of only dots'],
+      ['/repo/.claude/worktrees/x/. /a.js', 'a dot and a space: Windows trims it to nothing'],
+      ['/repo/.claude/worktrees/x/.. /a.js', 'two dots and a space: Windows trims it to nothing'],
+      [`/${DRIVE}/repo/.claude/rules/x.md`, 'URL-style drive: a colon in a name'],
     ];
 
     let isWhitelisted;
     beforeEach(async () => {
+      // A filesystem with no links, no aliases and nothing missing: every path is
+      // its own landing place. The verdicts below then depend on the STRING alone,
+      // not on which directories this machine happens to have, and a lexical rule
+      // cannot be propped up by the filesystem check that runs after it. (Measured:
+      // with the real filesystem here, dropping the ".." resolution or the NUL
+      // check changed nothing, because realpath refused those paths anyway.)
+      // Real-filesystem behaviour has its own describe further down.
+      realpathSync.native.mockImplementation((p) => p);
       ({ isWhitelisted } = await import('../../scripts/hooks/pre-write-guard.js'));
+    });
+    afterEach(() => {
+      realpathSync.native.mockReset();
     });
 
     it.each(EXEMPT)('exempts %j (%s)', (p) => {
@@ -1051,34 +1079,61 @@ describe('pre-write-guard hook', () => {
       const names = [...PROTECTED_CONFIG_BASENAMES, 'settings.JSON', 'Hooks.json', 'a.md', 'a.js', 'CLAUDE.md'];
       let exempt = 0;
       let protectedByGate = 0;
+      let generated = 0;
       const disagreements = [];
+      const widened = [];
       for (const prefix of prefixes) {
         for (const area of areas) {
           for (const name of names) {
             const p = `${prefix}${area}${name}`;
             const gate = isClaudeConfigPath(p);
             const skip = isWhitelisted(p);
+            generated += 1;
             if (gate) protectedByGate += 1;
             if (skip) exempt += 1;
             if (gate && skip) disagreements.push(p);
+            // The allowlist only narrows: nothing here is exempt that the old rule refused.
+            if (skip && !legacyIsWhitelisted(p)) widened.push(p);
           }
         }
       }
+      expect(generated).toBe(prefixes.length * areas.length * names.length);
+      expect(widened).toEqual([]);
       expect(disagreements).toEqual([]);
       // Both sides of the implication were actually exercised.
       expect(exempt).toBeGreaterThan(50);
       expect(protectedByGate).toBeGreaterThan(50);
     });
 
-    it('refuses a path longer than any real filesystem takes, without scanning it', () => {
+    it('refuses a path longer than any real filesystem takes, without scanning it or touching the disk', () => {
       const tooLong = `/repo/.claude/worktrees/x/${'a/'.repeat(3000)}f.js`;
       expect(tooLong.length).toBeGreaterThan(4096);
       // The old rule exempted it. Refusing is the safe direction for a cap:
       // it can only remove an exemption, never grant one.
       expect(legacyIsWhitelisted(tooLong)).toBe(true);
+      realpathSync.native.mockClear();
       expect(isWhitelisted(tooLong)).toBe(false);
       expect(isWhitelisted('/'.repeat(300_000))).toBe(false);
       expect(isWhitelisted(`/repo/.claude/rules/${'a/'.repeat(300_000)}x.md`)).toBe(false);
+      // "Refused before the filesystem" is what the cap is FOR: without it these
+      // would still come out false, but only after up to 65 failed lookups.
+      expect(realpathSync.native).not.toHaveBeenCalled();
+    });
+
+    it('never throws: an unexpected failure means not exempt, and says so on stderr', () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      // The one lookup answers with something that is not a path at all, which
+      // makes the landing check throw from inside (not from a caught fs error).
+      realpathSync.native.mockImplementationOnce(() => 42);
+      try {
+        expect(isWhitelisted('/repo/.claude/rules/x.md')).toBe(false);
+        expect(stderr).toHaveBeenCalledTimes(1);
+        expect(stderr.mock.calls[0][0]).toContain('exemption check failed');
+      } finally {
+        stderr.mockRestore();
+      }
+      // Control: with the odd answer spent, the same path is exempt again.
+      expect(isWhitelisted('/repo/.claude/rules/x.md')).toBe(true);
     });
 
     it('stays linear on degenerate shapes just under the cap', () => {
@@ -1122,8 +1177,12 @@ describe('pre-write-guard hook', () => {
       process.env.ARTIBOT_WRITE_GUARD_MODE = 'block';
       existsSync.mockImplementation(() => true);
       readFileSync.mockReturnValue('[]');
+      // /workspace does not exist: let every path be its own landing place (the
+      // real-filesystem cases are in the describe below).
+      realpathSync.native.mockImplementation((p) => p);
     });
     afterEach(() => {
+      realpathSync.native.mockReset();
       for (const key of ENV_KEYS) {
         if (savedEnv[key] === undefined) delete process.env[key];
         else process.env[key] = savedEnv[key];
@@ -1213,7 +1272,9 @@ describe('pre-write-guard hook', () => {
       // call it armed cannot leak its failure into the next case.
       realpathSync.native.mockReset();
       lstatSync.mockReset();
-      rmSync(box, { recursive: true, force: true });
+      // Retries: a scanner or indexer can hold a freshly written file for a moment
+      // on Windows, and a cleanup failure must not read as a test failure.
+      rmSync(box, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     });
 
     it('control: an ordinary worktree path is exempt, existing or not', () => {
@@ -1303,8 +1364,19 @@ describe('pre-write-guard hook', () => {
       expect(isWhitelisted(target)).toBe(true);
     });
 
+    it('does not exempt when where the write would land cannot be parsed (a network target)', () => {
+      const target = path.join(wt, 'src', 'a.js');
+      realpathSync.native.mockImplementationOnce(() => '\\\\server\\share\\repo\\x.md');
+      expect(isWhitelisted(target)).toBe(false);
+      // Control: the same path with an ordinary answer.
+      expect(isWhitelisted(target)).toBe(true);
+    });
+
     it('does not consult the filesystem for a path the lexical rules already refuse', () => {
+      // Identity, not the real call: if a regression let the UNC path through, the
+      // real lookup would go out to the network. The spy still records the attempt.
       realpathSync.native.mockClear();
+      realpathSync.native.mockImplementation((p) => p);
       lstatSync.mockClear();
       expect(isWhitelisted(path.join(box, 'repo', '.claude', 'settings.local.json'))).toBe(false);
       expect(isWhitelisted('\\\\server\\share\\repo\\.claude\\rules\\x.md')).toBe(false);

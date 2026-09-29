@@ -50,8 +50,9 @@ let exitHookInstalled = false;
 // `isWhitelisted` answers one question: may this write skip the prior-Read
 // check? It is NOT an approval. Nothing here gets a write past any other gate,
 // and it decides nothing for files this hook never looks at (`shouldEnforceGuard`
-// stands aside outside the Artibot repo and outside cwd and the plugin root, so
-// `~/.claude/settings.json` from a project cwd never reaches it).
+// stands aside outside the Artibot repo, and for paths outside cwd, the plugin
+// root and any `plugins/artibot/` tree, so `~/.claude/settings.json` from a
+// project cwd never reaches it).
 //
 // It used to say yes to any path CONTAINING `.claude/`. That put settings*.json,
 // hooks.json, dispatch-table.json and artibot.config.json on a "needs no Read"
@@ -93,9 +94,13 @@ let exitHookInstalled = false;
 // What this does NOT see: a hard link; a bind or network mount; a target swapped
 // between this check and the write; the host's own path normalisation if it
 // differs from Node's; a relative path's real landing (Write/Edit send absolute
-// paths, so a relative one is judged by its spelling alone); and the gate itself:
-// WBR is not a human gate (a Read satisfies it, one retry lifts it). Enforcement
-// for HG-12/HG-13 is CA-04 L2.
+// paths, so a relative one is judged by its spelling alone); `CLAUDE_PLUGIN_ROOT`
+// as a protected location (the gate core also protects config basenames under it,
+// which matters for a `--plugin-dir` dev install running its hooks.json from a
+// worktree; this function does not read the environment, so there that worktree's
+// own hooks.json stays exempt HERE, and only here); and the gate itself: WBR is
+// not a human gate (a Read satisfies it, one retry lifts it). Enforcement for
+// HG-12/HG-13 is CA-04 L2.
 
 /** `.claude` subdirectories holding prose the model edits routinely. */
 const CLAUDE_PROSE_DIRS = new Set(['rules', 'agents', 'commands', 'skills']);

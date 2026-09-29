@@ -60,11 +60,16 @@
  *    parent reads stdout and kills the process, the line is lost. These runs
  *    wait for exit, so that window is never observed here.
  *
- * TIMEOUT BUDGET — this file spawns 28 child processes, so it overruns the 30s
- * per-test cap under the parallel firewall run (T-41 observation, 2026-09-02;
- * 20.4s standalone). The budget below buys headroom for load, not for a slow
- * assertion: nothing here waits on a timer, so a run that approaches it is a
- * signal to look at the machine, not to raise the number again.
+ * TIMEOUT BUDGET — the first test in this file spawns 28 child processes, so it
+ * overruns the 30s per-test cap under the parallel firewall run (T-41
+ * observation, 2026-09-02; 20.4s standalone). The budget below buys headroom for
+ * load, not for a slow assertion: nothing here waits on a timer, so a run that
+ * approaches it is a signal to look at the machine, not to raise the number again.
+ *
+ * A SECOND SUITE at the end of this file (CA-04 L4) is about a different hook and
+ * a different property: the write-before-read exemption decisions of
+ * pre-write-guard. It spawns that hook once per case, each in its own test, and
+ * carries its own "cannot see" list.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -477,6 +482,7 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
     { label: 'worktree: rules markdown', checkout: 'wt', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
     { label: 'worktree: CLAUDE.md', checkout: 'wt', below: ['CLAUDE.md'], expectation: 'approve', tool: 'Edit' },
     { label: 'main checkout: rules markdown', checkout: 'proj', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
+    { label: 'main-checkout window edits a file inside a worktree', checkout: 'proj', below: ['.claude', 'worktrees', 'limb-a', 'src', 'a.js'], expectation: 'approve', tool: 'Write' },
     // ── what the narrowing removes ──────────────────────────────────────────
     { label: 'worktree: its own .claude/settings.local.json', checkout: 'wt', below: ['.claude', 'settings.local.json'], expectation: 'block', tool: 'Write' },
     { label: 'worktree: file behind a junction into .claude config', checkout: 'wt', below: ['lnk', 'settings.local.json'], expectation: 'block', tool: 'Edit' },
@@ -493,14 +499,6 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
     const out = runGuard({ cwd, target, tool }, `${label}-${tool}`);
     expect(out.status).toBe(0);
     expect(out.stdout).toBe(expectation === 'approve' ? APPROVE : blockStdout(tool, target));
-  });
-
-  it('measures the same worktree file as exempt AND as guarded, depending only on its location', () => {
-    const { proj, wt } = makeSplitSandbox();
-    const inWorktree = path.join(wt, 'src', 'a.js');
-    const lookAlike = path.join(proj, 'worktrees', 'limb-a', 'src', 'a.js');
-    expect(runGuard({ cwd: wt, target: inWorktree }, 'pair-a').stdout).toBe(APPROVE);
-    expect(runGuard({ cwd: proj, target: lookAlike }, 'pair-b').stdout).toBe(blockStdout('Write', lookAlike));
   });
 
   describe.runIf(process.platform === 'win32')('Windows: NTFS is case-insensitive', () => {
