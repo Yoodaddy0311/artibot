@@ -16,14 +16,16 @@
  *
  * Contract (first-parent, newest-first — decided by the FIRST commit that
  * carries any `Split-Limb` trailer):
- *   - no branch          → not complete (`reason: 'no-branch'`)
+ *   - no branch          → not complete (`reason: 'no-branch'`) — only when
+ *                          `rev-parse --verify --quiet` exits 1 printing nothing
  *   - branch, no commits → not complete (`reason: 'no-commits'`) — "커밋 없으면 완료 아님"
  *   - no `Split-Limb` trailer on any first-parent commit in range
  *                        → not complete (`reason: 'no-trailer'`)
  *   - newest trailer is not `done` (e.g. `wip` after an earlier `done`)
  *                        → not complete (`reason: 'superseded'`, `lastTrailer` = that value)
  *   - newest trailer is `done` → complete (`doneCommit` = that commit)
- *   - git failed / too old for `%(trailers:key=…)` → not complete (`reason: 'git-error'`)
+ *   - git failed / too old for `%(trailers:key=…)` → not complete (`reason: 'git-error'`);
+ *     a failure other than exit 1 (timeout kill, signal, fatal) is retried once first
  *
  * Why `--first-parent` (measured 3× in the 2026-09 live run, reproduced in
  * `tests/firewall/split-completion-evidence.test.js` "머지 커밋 함정"):
@@ -76,14 +78,16 @@ const LOG_FORMAT = `%H${FS}%(trailers:key=${SPLIT_LIMB_TRAILER},valueonly)${FS}%
 const SLUG = /^[a-z0-9][a-z0-9-]{1,30}$/;
 
 /**
- * Run git with argv (shell-free). Returns `{ ok, out }`; never throws.
+ * Run git with argv (shell-free). Never throws. `status` is the exit code, or
+ * null when git never exited on its own (timeout kill, signal, spawn failure).
  * @param {string[]} args
  * @param {string} cwd
- * @returns {{ ok: boolean, out: string }}
+ * @param {typeof execFileSync} execFile
+ * @returns {{ ok: boolean, out: string, status: number|null }}
  */
-function git(args, cwd) {
+function gitOnce(args, cwd, execFile) {
   try {
-    const out = execFileSync('git', args, {
+    const out = execFile('git', args, {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -91,10 +95,27 @@ function git(args, cwd) {
       windowsHide: true,
       maxBuffer: 8 * 1024 * 1024,
     });
-    return { ok: true, out: String(out) };
-  } catch {
-    return { ok: false, out: '' };
+    return { ok: true, out: String(out), status: 0 };
+  } catch (err) {
+    return { ok: false, out: String(err?.stdout ?? ''), status: Number.isInteger(err?.status) ? err.status : null };
   }
+}
+
+/**
+ * {@link gitOnce}, run a second time when the first answer is not a clean one:
+ * anything but success or exit 1. Exit 1 is git's own "no" (`rev-parse
+ * --verify --quiet` on an absent ref); a timeout kill under load, a signal or
+ * a fatal 128 says nothing about the ref, and one of them used to surface as
+ * `no-branch` for a branch that existed (2026-09-28, a load batch running
+ * alongside the reader).
+ * @param {string[]} args
+ * @param {string} cwd
+ * @param {typeof execFileSync} execFile
+ * @returns {{ ok: boolean, out: string, status: number|null }}
+ */
+function git(args, cwd, execFile) {
+  const first = gitOnce(args, cwd, execFile);
+  return first.ok || first.status === 1 ? first : gitOnce(args, cwd, execFile);
 }
 
 /**
@@ -207,6 +228,8 @@ export function decideFromTrailers(commits) {
  * @param {string} opts.branch - Limb branch name (e.g. from {@link limbNames}).
  * @param {string} [opts.base] - Integration base (e.g. `master`).
  * @param {number} [opts.maxCount=500] - Cap when no base range is available.
+ * @param {typeof execFileSync} [opts.execFile] - Test seam for injecting a git
+ *   failure; defaults to `execFileSync`.
  * @returns {Readonly<{
  *   branch: string, base: string|null, complete: boolean,
  *   reason: 'done'|'no-branch'|'no-commits'|'no-trailer'|'superseded'|'git-error'|'bad-input',
@@ -216,7 +239,7 @@ export function decideFromTrailers(commits) {
  * }>} `commitCount` counts first-parent commits only. `lastTrailer` is the
  *   decisive commit's newest `Split-Limb` value (`done`, `wip`, …) or null.
  */
-export function readLimbCompletion({ cwd, branch, base, maxCount = 500 } = {}) {
+export function readLimbCompletion({ cwd, branch, base, maxCount = 500, execFile = execFileSync } = {}) {
   const result = (reason, extra = {}) => Object.freeze({
     branch: typeof branch === 'string' ? branch : '',
     base: typeof base === 'string' && base ? base : null,
@@ -233,19 +256,22 @@ export function readLimbCompletion({ cwd, branch, base, maxCount = 500 } = {}) {
   }
   const cwdAbs = path.resolve(cwd);
 
-  const ref = git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], cwdAbs);
-  if (!ref.ok || !ref.out.trim()) return result('no-branch');
+  // Only git's own "no" — exit 1 with nothing printed — means the branch is
+  // absent. Every other failure is an unread answer, reported as `git-error`.
+  const ref = git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], cwdAbs, execFile);
+  if (!ref.ok && ref.status === 1 && !ref.out.trim()) return result('no-branch');
+  if (!ref.ok || !ref.out.trim()) return result('git-error');
 
   let range;
   if (typeof base === 'string' && base) {
-    const baseRef = git(['rev-parse', '--verify', '--quiet', `${base}^{commit}`], cwdAbs);
+    const baseRef = git(['rev-parse', '--verify', '--quiet', `${base}^{commit}`], cwdAbs, execFile);
     if (!baseRef.ok || !baseRef.out.trim()) return result('git-error');
     range = [`${base}..refs/heads/${branch}`];
   } else {
     range = [`--max-count=${Math.max(1, Number(maxCount) || 500)}`, `refs/heads/${branch}`];
   }
 
-  const log = git(['log', '--first-parent', `--format=${LOG_FORMAT}`, ...range, '--'], cwdAbs);
+  const log = git(['log', '--first-parent', `--format=${LOG_FORMAT}`, ...range, '--'], cwdAbs, execFile);
   if (!log.ok) return result('git-error');
 
   const commits = parseLimbLog(log.out);

@@ -1,10 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   acquireLandingLock,
   buildLandingLockKey,
+  DEFAULT_STALE_MS,
   getLandingLockPath,
   readLandingLock,
   releaseLandingLock,
@@ -147,5 +148,85 @@ describe('a lock file that cannot be parsed is a holder mid-write, not an absent
     expect(reclaimed.ok).toBe(true);
     expect(reclaimed.reclaimed).toBe(true);
     releaseLandingLock(key, { lockDir, token: reclaimed.token });
+  });
+});
+
+/**
+ * The TTL travels in the record. Staleness used to be judged by the acquirer's
+ * `staleMs` alone, so an acquirer on the 30-minute default could evict a live
+ * `landBatch` holder that had asked for 120 minutes. The record now carries the
+ * holder's `staleMs` and age is judged against the longer of the two; a record
+ * written before the field existed keeps the old rule (acquirer only).
+ *
+ * The clock is injected (`now`), the pid is always alive, and the host is this
+ * one, so the only way to reclaim in these cases is age.
+ */
+describe('the holder record carries its own staleMs', () => {
+  const ALIVE = { isPidAlive: () => true };
+  const T0 = 10_000_000;
+
+  it('writes the staleMs it acquired with, and DEFAULT_STALE_MS when none was given', () => {
+    const key = buildLandingLockKey('owner/ttl-written', 'master');
+    const a = acquireLandingLock(key, { lockDir, staleMs: 7_200_000 });
+    expect(readLandingLock(key, { lockDir })?.staleMs).toBe(7_200_000);
+    releaseLandingLock(key, { lockDir, token: a.token });
+
+    const b = acquireLandingLock(key, { lockDir });
+    expect(readLandingLock(key, { lockDir })?.staleMs).toBe(DEFAULT_STALE_MS);
+    releaseLandingLock(key, { lockDir, token: b.token });
+  });
+
+  it('an old record without staleMs is judged by the acquirer staleMs alone, as before', () => {
+    const key = buildLandingLockKey('owner/ttl-legacy', 'master');
+    plant(key, JSON.stringify({
+      key, token: 'legacy-token', pid: process.pid, host: hostname(), sessionId: 'legacy', acquiredAt: T0,
+    }));
+
+    expect(acquireLandingLock(key, { lockDir, now: () => T0 + 999, staleMs: 1000, ...ALIVE }).ok).toBe(false);
+    const r = acquireLandingLock(key, { lockDir, now: () => T0 + 1001, staleMs: 1000, ...ALIVE });
+    expect(r.ok).toBe(true);
+    expect(r.reclaimed).toBe(true);
+    releaseLandingLock(key, { lockDir, token: r.token });
+  });
+
+  it('record staleMs longer than the acquirer: the record wins (holder 3000, acquirer 1000)', () => {
+    const key = buildLandingLockKey('owner/ttl-record-longer', 'master');
+    const held = acquireLandingLock(key, { lockDir, now: () => T0, staleMs: 3000, ...ALIVE });
+    expect(held.ok).toBe(true);
+
+    // Past the acquirer's 1000, inside the holder's 3000: refused.
+    const early = acquireLandingLock(key, { lockDir, now: () => T0 + 2000, staleMs: 1000, ...ALIVE });
+    expect(early.ok).toBe(false);
+    expect(early.holder?.token).toBe(held.token);
+
+    const late = acquireLandingLock(key, { lockDir, now: () => T0 + 3001, staleMs: 1000, ...ALIVE });
+    expect(late.ok).toBe(true);
+    expect(late.reclaimed).toBe(true);
+    releaseLandingLock(key, { lockDir, token: late.token });
+  });
+
+  it('acquirer staleMs longer than the record: the acquirer wins (holder 1000, acquirer 3000)', () => {
+    const key = buildLandingLockKey('owner/ttl-acquirer-longer', 'master');
+    const held = acquireLandingLock(key, { lockDir, now: () => T0, staleMs: 1000, ...ALIVE });
+    expect(held.ok).toBe(true);
+
+    // Past the record's 1000, inside the acquirer's 3000: refused.
+    expect(acquireLandingLock(key, { lockDir, now: () => T0 + 2000, staleMs: 3000, ...ALIVE }).ok).toBe(false);
+
+    const late = acquireLandingLock(key, { lockDir, now: () => T0 + 3001, staleMs: 3000, ...ALIVE });
+    expect(late.ok).toBe(true);
+    expect(late.reclaimed).toBe(true);
+    releaseLandingLock(key, { lockDir, token: late.token });
+  });
+
+  it('a same-host dead pid is still reclaimed at once, however long the record TTL', () => {
+    const key = buildLandingLockKey('owner/ttl-dead-pid', 'master');
+    const held = acquireLandingLock(key, { lockDir, now: () => T0, staleMs: DAY_MS, ...ALIVE });
+    expect(held.ok).toBe(true);
+
+    const r = acquireLandingLock(key, { lockDir, now: () => T0 + 1, staleMs: 1000, isPidAlive: () => false });
+    expect(r.ok).toBe(true);
+    expect(r.reclaimed).toBe(true);
+    releaseLandingLock(key, { lockDir, token: r.token });
   });
 });

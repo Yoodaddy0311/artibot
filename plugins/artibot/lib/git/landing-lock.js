@@ -4,9 +4,9 @@
  * Why a separate lock and not `lib/autopilot/lock.js`: that lock's staleness
  * rule is bound to autopilot sessions (`isHolderSessionInactive` reclaims a
  * lock whose session file is missing after 60s). A landing has no autopilot
- * session and legitimately holds its lock for up to the CI wait ceiling
- * (10 min, `batch-landing.js`), so it would be stolen mid-wait. This module
- * keeps the same O_EXCL mechanics and none of the session coupling.
+ * session and legitimately holds its lock across CI green waits (20 min each,
+ * up to two per landing, `batch-landing.js`), so it would be stolen mid-wait.
+ * This module keeps the same O_EXCL mechanics and none of the session coupling.
  *
  * ── Key ──────────────────────────────────────────────────────────────────────
  * A single string `${repoIdentity}__${branch}` composed by
@@ -30,8 +30,18 @@
  *
  * ── Staleness ────────────────────────────────────────────────────────────────
  * A holder is stale when its PID is dead (same host) or when the record is
- * older than `staleMs` (default 30 min = 3× the CI wait ceiling). Reclaim is
- * unlink + fresh O_EXCL; if two reclaimers race, exactly one `wx` succeeds.
+ * older than `staleMs`. `DEFAULT_STALE_MS` (30 min) applies only when the
+ * caller passes none; `landBatch` passes `landingLockStaleMs()` (120 min with
+ * the defaults, `batch-landing.js`). Reclaim is unlink + fresh O_EXCL; if two
+ * reclaimers race, exactly one `wx` succeeds.
+ *
+ * The TTL travels in the record: a holder writes the `staleMs` it acquired
+ * with, and a competitor judges age against `max(record.staleMs, own
+ * staleMs)`. Only the holder knows how long its own landing can run, so an
+ * acquirer with a shorter default (an older caller, a script, a test) can no
+ * longer evict a live holder mid-wait. A record without `staleMs` (written
+ * before the field existed) is judged by the acquirer's `staleMs` alone, as
+ * before. The dead-pid rule does not read the TTL at all.
  *
  * An EMPTY or HALF-WRITTEN lock file is a holder mid-write, not an absent one:
  * `tryCreateExclusive` creates the file and writes the record as two steps, so
@@ -66,7 +76,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { composeScopedKey, sanitizeSegment } from './repo-identity.js';
 
-/** 3× the 10-minute CI wait ceiling in `batch-landing.js`. */
+/**
+ * Fallback TTL for a caller that passes no `staleMs`. Sized as 3× the old
+ * 10-minute CI wait; the ceiling is now 20 min, and `landBatch` passes the
+ * longer `batch-landing.js#landingLockStaleMs()`, which never goes below this.
+ */
 export const DEFAULT_STALE_MS = 30 * 60 * 1000;
 
 /**
@@ -193,7 +207,8 @@ export function readLandingLock(key, opts) {
  * @param {Object} opts
  * @param {string} opts.lockDir
  * @param {string} [opts.sessionId]
- * @param {number} [opts.staleMs]
+ * @param {number} [opts.staleMs]  - Written into the record; a competitor
+ *   waits for the longer of this and its own before reclaiming by age
  * @param {() => number} [opts.now]
  * @param {(pid:number) => boolean} [opts.isPidAlive]
  * @returns {AcquireResult}
@@ -213,6 +228,7 @@ export function acquireLandingLock(key, opts) {
     host: os.hostname(),
     sessionId: opts?.sessionId ?? null,
     acquiredAt: now(),
+    staleMs,
   };
 
   if (tryCreateExclusive(lockPath, record)) return { ok: true, lockPath, token };
@@ -224,8 +240,11 @@ export function acquireLandingLock(key, opts) {
   const ageMs = existing
     ? now() - (existing.acquiredAt ?? 0)
     : (fileAgeMs(lockPath) ?? Infinity);
+  // The holder's own TTL wins when it is longer; a record without one (or with
+  // a non-finite one) leaves the acquirer's as the only TTL.
+  const ttlMs = Number.isFinite(existing?.staleMs) ? Math.max(existing.staleMs, staleMs) : staleMs;
   const sameHost = existing?.host === record.host;
-  const stale = ageMs > staleMs || (existing !== null && sameHost && !isPidAlive(existing.pid));
+  const stale = ageMs > ttlMs || (existing !== null && sameHost && !isPidAlive(existing.pid));
   if (stale) {
     try { unlinkSync(lockPath); } catch { /* a concurrent reclaimer may have won; O_EXCL below decides */ }
     if (tryCreateExclusive(lockPath, record)) return { ok: true, lockPath, token, reclaimed: true };
