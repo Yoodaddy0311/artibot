@@ -56,7 +56,9 @@
  * A REPORT that reaches neither entry point — code that writes `state.phases`
  * or `state.phase` directly — is not judged. And the rule reads the attempt
  * journal only: it cannot tell whether the verification it accepts was a
- * meaningful one.
+ * meaningful one. Nor can it stop a driver that ignores the PAUSED it gets back
+ * from `recordPhaseResult(state, { phase: 'REPORT', ... })` and reports the work
+ * complete anyway: a refusal refuses the record, not the report.
  *
  * ## Kill switch
  *
@@ -305,17 +307,25 @@ function pauseRecordedReport(state, result, claimedStatus) {
  *   - Switch OFF: returns false before evaluating anything. No tick, no write.
  *   - Evidence OK: one `report-verify-gate` tick (the engine path's pass trace,
  *     plus `via`), returns false, and the caller records as before.
- *   - No evidence, session already PAUSED (any reason): nothing changes — the
- *     pause and its reason stand — and one `kept` tick records the refusal.
- *     A REPORT claim is therefore never what lifts a pause while the switch is on.
- *   - No evidence otherwise: pauses back to VERIFY ({@link pauseRecordedReport}).
+ *   - No evidence, session in a live phase (one of `livePhases`): pauses back to
+ *     VERIFY ({@link pauseRecordedReport}).
+ *   - No evidence, any other state — PAUSED (any reason), COMPLETED, ABORTED or
+ *     an unknown value: nothing changes and one `kept` tick records the refusal.
+ *     An allowlist, so a state added later is kept rather than paused: a REPORT
+ *     claim never lifts a pause and never revives a finished session (resume's
+ *     terminal no-op in `engine.js#resumeAutopilot` depends on that).
+ *
+ * `livePhases` is `engine-state.js#PHASES`, passed in by the caller because this
+ * module cannot import engine-state.js (that module imports this one). Omitted,
+ * it is empty and every refusal is `kept` — fail-closed: refused, never paused.
  *
  * @param {object} state - Live session state (mutated only when pausing).
  * @param {{status?: unknown}} [payload] - The REPORT result being recorded.
  * @param {{enforce?: boolean}} [config] - The switch, injected by the caller.
+ * @param {readonly string[]} [livePhases] - Phases a refusal may pause from.
  * @returns {boolean}
  */
-export function refuseRecordedReport(state, payload, config) {
+export function refuseRecordedReport(state, payload, config, livePhases = []) {
   if (config?.enforce !== true) return false;
   const result = evaluateReportVerifyEvidence(state);
   if (result.ok) {
@@ -328,16 +338,16 @@ export function refuseRecordedReport(state, payload, config) {
     });
     return false;
   }
-  if (state.phase === 'PAUSED') {
-    tick(state.sessionId, {
-      phase: 'REPORT',
-      type: 'report-verify-gate',
-      level: 'warn',
-      message: `REPORT 기록 거부 — 일시정지 유지 (${result.code})`,
-      data: { code: result.code, kept: true },
-    });
+  if (livePhases.includes(state.phase)) {
+    pauseRecordedReport(state, result, payload?.status);
     return true;
   }
-  pauseRecordedReport(state, result, payload?.status);
+  tick(state.sessionId, {
+    phase: 'REPORT',
+    type: 'report-verify-gate',
+    level: 'warn',
+    message: `REPORT 기록 거부 — ${state.phase} 상태 유지 (${result.code})`,
+    data: { code: result.code, kept: true },
+  });
   return true;
 }

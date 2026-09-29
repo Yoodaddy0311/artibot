@@ -616,6 +616,19 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
     expect(findUnterminatedPhases(readEvents(state.sessionId))).toEqual([]);
   });
 
+  it.each(['COMPLETED', 'ABORTED', 'NOT_A_PHASE'])('(F1) should not revive a %s session: fields kept, one kept tick', (phase) => {
+    const state = seeded(`drv-on-terminal-${phase}`, { phase, lastPhase: 'REPORT' });
+    const before = JSON.stringify(state);
+    const diskBefore = readFileSync(getSessionPath(state.sessionId), 'utf8');
+
+    const { returned, events } = recordReport(state, true);
+
+    expect(returned).toBe(state);
+    expect(JSON.stringify(state)).toBe(before);
+    expect(readFileSync(getSessionPath(state.sessionId), 'utf8')).toBe(diskBefore);
+    expect(events.map((e) => [e.type, e.level, e.data?.kept])).toEqual([['report-verify-gate', 'warn', true]]);
+  });
+
   it.each([
     ['an open VERIFY slot', {
       attemptJournal: [...EVIDENCE],

@@ -622,8 +622,9 @@ export function detectInterruptedPhase(state, opts = {}) {
  * owner for the text. Duplicating the sentences is how the two drifted apart
  * in the first place.
  *
- * A REPORT verify-gate pause (`report-verify-gate.js#pauseForVerify`) is the
- * third answer: no crash, no attempt, yet resume runs VERIFY because
+ * A REPORT verify-gate pause (`report-verify-gate.js#pauseForVerify` on the
+ * engine path, `#pauseRecordedReport` on the driver's `recordPhaseResult`
+ * path — same shape from both) is the third answer: no crash, no attempt, yet resume runs VERIFY because
  * `pendingPhase` names it (`engine-state.js#nextTarget`). It is checked after
  * the attempt and before phase pairing — an older open window in the log is not
  * what resume will run.

@@ -138,9 +138,10 @@ export function safeAppendLesson(state, payload) {
  *
  * **And it is the driver-path REPORT gate** (`report-verify-gate.js#refuseRecordedReport`):
  * a driver that records REPORT itself never enters `runPhase6Report`. With
- * `autopilot.reportVerifyGate.enforce` OFF (the default) nothing is read or
- * written; ON, a REPORT without VERIFY evidence is refused before anything is
- * recorded, and the returned state is paused back to VERIFY (or left paused).
+ * `autopilot.reportVerifyGate.enforce` OFF (the default) only the switch itself
+ * is read; nothing is evaluated, ticked or written. ON, a REPORT without VERIFY
+ * evidence is refused before anything is recorded: a session in one of
+ * {@link PHASES} is paused back to VERIFY, any other state is left as it was.
  *
  * @param {object} state
  * @param {{ phase: string, status: string, [k: string]: any }} payload
@@ -155,7 +156,7 @@ export function recordPhaseResult(state, payload = {}, config = undefined) {
   const { phase, status, ...rest } = payload;
   // The switch is read here, through this module's own import, so only REPORT
   // pays the config read and a test can inject it by mocking the loader.
-  if (phase === 'REPORT' && refuseRecordedReport(state, payload, loadReportVerifyGateConfig())) return state;
+  if (phase === 'REPORT' && refuseRecordedReport(state, payload, loadReportVerifyGateConfig(), PHASES)) return state;
   recordPhase(state, { name: phase, status, ...rest });
   const acked = ackPhaseAttempt(state, { phase, status });
   if (acked) {
