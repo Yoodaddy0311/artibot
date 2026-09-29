@@ -322,17 +322,28 @@ describe('model-catalog', () => {
     });
   });
 
-  describe('legacyIds (older ids that still resolve to the tier)', () => {
+  describe('legacyIds (extra exact ids that still resolve to the tier)', () => {
     it('opus keeps claude-opus-5 as its only legacy id', () => {
       expect(getModel('opus').legacyIds).toEqual(['claude-opus-5']);
     });
 
-    it.each(['haiku', 'sonnet', 'fable'])(
+    it.each(['haiku', 'fable'])(
       '%s carries an empty legacyIds array (same shape on every tier)',
       (tier) => {
         expect(getModel(tier).legacyIds).toEqual([]);
       },
     );
+
+    it('sonnet lists claude-sonnet-5-5, the id the host serves, as its only extra id', () => {
+      // 2026-09-29: the host serves `claude-sonnet-5-5` for the sonnet tier and
+      // that id was dropped as an unresolved model, so its usage never became a
+      // receipt. It resolves through this list and does NOT replace `id`: the
+      // tier's current id stays `claude-sonnet-5`, because promoting 5.5 to `id`
+      // would make getPricing('claude-sonnet-5') differ from getPricing('sonnet'),
+      // which tests/runtime/middleware/cache-roi.test.js pins as equal.
+      expect(getModel('sonnet').legacyIds).toEqual(['claude-sonnet-5-5']);
+      expect(getModel('sonnet').id).toBe('claude-sonnet-5');
+    });
 
     it('every tier has a frozen legacyIds array of non-empty strings', () => {
       for (const tier of listTiers()) {
@@ -433,6 +444,48 @@ describe('model-catalog', () => {
         expect(tierForModelId(bad)).toBeNull();
       }
       expect(getPricing('claude-opus-5-6')).toBeNull();
+    });
+  });
+
+  describe('claude-sonnet-5-5 (the id the host serves for sonnet)', () => {
+    it('resolves to the sonnet tier, and the pre-5.5 id still does', () => {
+      expect(tierForModelId('claude-sonnet-5-5')).toBe('sonnet');
+      // Old receipt rows and transcripts written against claude-sonnet-5 keep
+      // their tier.
+      expect(tierForModelId('claude-sonnet-5')).toBe('sonnet');
+    });
+
+    it('does not prefix-, qualifier- or case-match near misses', () => {
+      // Exact-string lookup: the receipt layer strips `[1m]` and 8-digit
+      // snapshots itself before asking, so the catalog must not tolerate them.
+      for (const bad of [
+        'claude-sonnet-5-6', 'claude-sonnet-5-50', 'claude-sonnet-55',
+        'claude-sonnet-5-5[1m]', 'claude-sonnet-5-5-20260929',
+        'CLAUDE-SONNET-5-5', 'sonnet-5-5', 'claude-sonnet-5-5 ',
+      ]) {
+        expect(tierForModelId(bad), bad).toBeNull();
+      }
+      expect(getPricing('claude-sonnet-5-6')).toBeNull();
+    });
+
+    it('is billed at the sonnet tier row and reports the id that was asked for', () => {
+      // WHAT THIS PINS: how 5.5 is billed today (no per-id row, so the tier
+      // row). It does NOT say the number is confirmed for 5.5. The row was read
+      // off PRICING_SOURCE for Sonnet 5 on 2026-09-28; nobody has compared it
+      // with the Sonnet 5.5 row. When that comparison happens and the rows
+      // differ, this test goes red on purpose: add an ID_PRICES row or move
+      // the tier, bump PRICING_VERSION, and freeze the outgoing row.
+      expect(getPricing('claude-sonnet-5-5')).toEqual({
+        ...getPricing('sonnet'),
+        id: 'claude-sonnet-5-5',
+      });
+      expect(getPricing('claude-sonnet-5-5').tier).toBe('sonnet');
+    });
+
+    it('leaves the pre-5.5 id and the tier alias exactly as they were', () => {
+      expect(getPricing('sonnet').id).toBe('claude-sonnet-5');
+      expect(getPricing('claude-sonnet-5')).toEqual(getPricing('sonnet'));
+      expect(getPricing('balanced')).toEqual(getPricing('sonnet'));
     });
   });
 
