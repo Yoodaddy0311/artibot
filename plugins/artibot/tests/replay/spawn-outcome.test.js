@@ -27,7 +27,13 @@
  *   - THE SCORE COLUMN. On a ledger with NO `review.claim_audit` row, `score`
  *     is asserted to be an EXPLICIT null block. That the ledger genuinely
  *     carries no such row today is a claim about the writers, not something
- *     this suite measures; the audit-bearing cases below are hand-built.
+ *     this suite measures (0 `review.*` rows of any kind at 2026-09-29T04:24Z,
+ *     41,356 ledger lines); the audit-bearing cases below are hand-built, apart
+ *     from one that runs the real parser and writer over the auditor template.
+ *   - WHAT THE SCORE MEANS. The "says what the score IS" cases pin that the
+ *     output carries its own definition (`score.basis`): a reviewer's claim-audit
+ *     pass rate, not a spawn outcome. They pin the STRING, not the truth of it;
+ *     whether a pass rate tracks quality is not something a fixture can show.
  *   - WHETHER A REFUTED CLAIM WAS WRONGLY REFUTED. `score.value` is a ratio of
  *     two numbers a reviewer wrote. The fold counts; so does this suite.
  *
@@ -44,6 +50,8 @@ import {
   SCORE_UNAVAILABLE_REASON,
   SPAWN_OUTCOME_EVENTS,
 } from '../../lib/replay/index.js';
+import { parseClaimAudit } from '../../lib/review/independent-reviewer.js';
+import { buildClaimAuditEvent } from '../../lib/review/verdict-writer.js';
 
 const MISSION = 'M-20260921-001';
 const SESS_A = 'sess-a';
@@ -52,7 +60,11 @@ const OPUS = 'claude-opus-5';
 const FABLE = 'claude-fable-5-1';
 const HAIKU = 'claude-haiku-4-5-20251001';
 
-const SCORE_BLOCK = { source: null, value: null, reason: 'no-spawn-keyed-score-writer' };
+// The row-0 block: the three legacy keys, then `basis` -- the one key both score
+// shapes share. The string itself is pinned in "says what the score IS".
+const SCORE_BLOCK = {
+  source: null, value: null, reason: 'no-spawn-keyed-score-writer', basis: expect.any(String),
+};
 
 let seqCounter = 0;
 
@@ -999,14 +1011,15 @@ function fixtureWithAudits() {
 }
 
 describe('joinSpawnOutcomes() score column', () => {
-  it('keeps the unmeasured block, byte for byte, when no audit row exists', () => {
-    // The row-0 shape is pinned OUTSIDE this suite by
-    // `tests/ledger/route-compare-cli.test.js` (empty-ledger stdout, seeded
-    // stdout, and the `emptyJoin()` duplicate), so it is not ours to change.
+  it('keeps the unmeasured block, key for key, when no audit row exists', () => {
+    // The row-0 shape is also pinned by `tests/ledger/route-compare-cli.test.js`
+    // (empty-ledger stdout, seeded stdout, and the `emptyJoin()` duplicate) and
+    // is what the scorecard accepts (`source` and `value` null, `reason` a
+    // string). The three legacy keys keep their order; `basis` follows them.
     for (const rows of [[], fixture(), fixtureWithDuplicate()]) {
       const { score } = joinSpawnOutcomes(rows);
       expect(score).toEqual(SCORE_BLOCK);
-      expect(Object.keys(score)).toEqual(['source', 'value', 'reason']);
+      expect(Object.keys(score)).toEqual(['source', 'value', 'reason', 'basis']);
     }
   });
 
@@ -1030,9 +1043,11 @@ describe('joinSpawnOutcomes() score column', () => {
   });
 
   it('names the reason when audits exist but none joined', () => {
-    // THE STATE THE LIVE LEDGER WILL REACH FIRST: `agents/auditor.md`'s
-    // mandated block carries no `subject_agent_id` key at all, so a conforming
-    // audit lands here rather than in `n`.
+    // THE STATE THE LIVE LEDGER IS EXPECTED TO REACH FIRST. `agents/auditor.md`
+    // and `commands/team.md` now ask for `subject_agent_id`, but they also say to
+    // OMIT the key when the reviewer was not handed the spawn's ledger id, and an
+    // inspection that covered several builders has no single subject. Both are
+    // conforming audits, and both land here rather than in `n`.
     const rows = [...fixture(), claimAudit({ total: 8, refuted: 1 })];
     const f = joinSpawnOutcomes(rows);
     expect(f.score.source).toBe('review.claim_audit');
@@ -1110,6 +1125,100 @@ describe('joinSpawnOutcomes() score column', () => {
     expect(f.unjoined_binds).toBeGreaterThan(0);
     expect(f.score.n).toBe(1);
     expect(f.score.value).toBe(1);
+  });
+});
+
+describe('joinSpawnOutcomes() says what the score IS', () => {
+  // SH-05's "evaluation score" half has ONE operational definition: the pass
+  // rate of a REVIEWER's claim audit, joined on `subject_agent_id`. The output
+  // carries that definition beside the number (`score.basis`) so a reader of the
+  // JSON line cannot take the ratio for a task-success rate. The definition does
+  // not ride in `score.source`: on the zero-row block `source` must stay null (a
+  // non-null one makes `compare-scorecard.js#requireScore` throw, and the CLI
+  // suite pins it null), so `basis` is a sibling key and `source` stays the bare
+  // event name wherever it is set.
+  const auditBearing = () => [
+    fixtureWithAudits(), // joined + unjoined + no subject
+    [...fixture(), claimAudit({ total: 8, refuted: 1 })], // audits, none joined
+    [...fixture(), claimAudit({ subjectId: 'ag-001', total: 0, refuted: 0 })], // zero claims
+    [...fixture(), claimAudit({ subjectId: 'ag-001', total: 3, refuted: 4 })], // malformed only
+  ];
+
+  it('prints the same definition in every audit-bearing branch', () => {
+    // Four ledgers reaching three different `reason`s (null, no-joined-claim-audit
+    // twice, claim-audit-denominator-zero); the definition must not depend on
+    // which branch the ledger happened to reach.
+    const blocks = auditBearing().map((rows) => joinSpawnOutcomes(rows).score);
+    expect(blocks).toHaveLength(4);
+    expect(new Set(blocks.map((b) => b.reason)).size).toBe(3);
+    const bases = blocks.map((b) => b.basis);
+    for (const basis of bases) expect(typeof basis).toBe('string');
+    expect(new Set(bases).size).toBe(1);
+  });
+
+  it('the definition names the reviewer, the formula, the join key and who asserts it', () => {
+    const { basis } = joinSpawnOutcomes(fixtureWithAudits()).score;
+    expect(basis).toContain('reviewer verdict');
+    expect(basis).toContain('not a spawn outcome');
+    expect(basis).toContain('(claims_total - claims_refuted) / claims_total');
+    expect(basis).toContain('review.claim_audit');
+    expect(basis).toContain('data.subject_agent_id');
+    expect(basis).toContain('route.bound');
+    expect(basis).toContain('data.agent_id');
+    // The id is a claim made by the leader that spawned the reviewer; nothing
+    // in the ledger observed it.
+    expect(basis).toContain('asserted');
+  });
+
+  it('keeps `source` the bare event name and puts the definition in `basis`', () => {
+    const { score } = joinSpawnOutcomes(fixtureWithAudits());
+    expect(score.source).toBe('review.claim_audit');
+    expect(score.basis).not.toBe(score.source);
+    // The three legacy keys keep their positions; `basis` is the fourth.
+    expect(Object.keys(score)).toEqual([
+      'source', 'value', 'reason', 'basis',
+      'n', 'audits', 'unjoined_audits', 'no_subject_audits', 'malformed_audits',
+    ]);
+  });
+
+  it('prints the SAME definition on the row-0 block: a null score already says what it will mean', () => {
+    // Without this the live ledger (0 audit rows at 2026-09-29T04:24Z) would print
+    // an opaque null until the first audit row landed, and the definition would
+    // appear only after someone had a number to misread.
+    const measured = joinSpawnOutcomes(fixtureWithAudits()).score.basis;
+    for (const rows of [[], fixture(), fixtureWithDuplicate()]) {
+      const { score } = joinSpawnOutcomes(rows);
+      expect(score.basis).toBe(measured);
+      // ...while staying the null block the scorecard accepts.
+      expect(score.source).toBeNull();
+      expect(score.value).toBeNull();
+      expect(score.reason).toBe(SCORE_UNAVAILABLE_REASON);
+    }
+  });
+
+  it('scores a spawn from an audit the real parser and writer produced', () => {
+    // Not hand-typed: a block with the keys the auditor template names, parsed by
+    // `parseClaimAudit` and built by `buildClaimAuditEvent`, is the row the
+    // instruction is meant to produce. The fold must count it against its spawn.
+    const parsed = parseClaimAudit({
+      claim_audit: {
+        subject_agent_type: 'tdd-guide',
+        subject_agent_id: 'ag-001',
+        claims_total: 4,
+        claims_refuted: 1,
+        evidence_refs: ['lib/replay/spawn-outcome.js#joinSpawnOutcomes'],
+      },
+    });
+    expect(parsed.ok, JSON.stringify(parsed.errors)).toBe(true);
+    const built = buildClaimAuditEvent({ parsed, sessionId: SESS_A });
+    expect(built.ok).toBe(true);
+
+    const f = joinSpawnOutcomes([...fixture(), built.input]);
+    expect(f.score.n).toBe(1);
+    expect(f.score.value).toBe(0.75);
+    expect(f.score.reason).toBeNull();
+    expect(f.score.no_subject_audits).toBe(0);
+    expect(f.score.unjoined_audits).toBe(0);
   });
 });
 

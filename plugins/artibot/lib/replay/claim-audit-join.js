@@ -44,16 +44,24 @@
  * bytes.
  *
  * ── WHAT THIS MODULE CANNOT SEE (repo rule §9: write it next to the gate) ────
- *  1. WHAT A `subject_agent_id` LOOKS LIKE. `review.claim_audit` was 0 rows on
- *     the central ledger at 2026-09-21T03:46Z, so there is NO sample of the
- *     value this join keys on. The join is therefore EXACT STRING EQUALITY with
- *     no normalization: no prefix strip, no case fold, no trim. Any such rule
+ *  1. WHAT A REVIEWER ACTUALLY WRITES IN `subject_agent_id`. `review.claim_audit`
+ *     was 0 rows on the central ledger at 2026-09-21T03:46Z and STILL was at
+ *     2026-09-29T04:24Z (41,356 lines from 2026-09-03; no `review.*` event of
+ *     any kind), so there is no sample of a reviewer-written value. What exists
+ *     is the INSTRUCTION: `agents/auditor.md` ("claim_audit Block") and
+ *     `commands/team.md` (Phase 4.5) ask for the reviewed spawn's ledger id,
+ *     verbatim, and ask to OMIT the key when the reviewer was not handed one.
+ *     The join is therefore EXACT STRING EQUALITY with no normalization: no
+ *     prefix strip, no case fold, no trim, no name-to-id bridge. Any such rule
  *     would be a guess that manufactures joins, and a manufactured join moves
  *     `pass_rate` — the one number this fold exists to produce. In particular
  *     `spawn-outcome.js#AGENT_RUN_PREFIX` ('agent-') is NOT applied: that is a
- *     `usage.receipt.run_id` spelling rule, not a `route.bound.agent_id` one
- *     (live bind ids look like `a4cda8fad92aab420` or `asplit-…-<hex>`). The
- *     day live rows exist, measure the value and revisit this decision here.
+ *     `usage.receipt.run_id` spelling rule, not a `route.bound.agent_id` one.
+ *     The bind ids to be matched, measured 2026-09-29T04:12Z over the 705
+ *     `route.bound` rows that carry a string `agent_id`: 30 of the form `a` +
+ *     16 hex, 546 `asplit-…`, 129 `a<name>-<16 hex>` (named spawns). A later
+ *     pass at 04:45Z (709 rows) found no id outside those three shapes.
+ *     The day live rows exist, measure the value and revisit this decision here.
  *  2. WHETHER A REFUTED CLAIM WAS WRONGLY REFUTED. `pass_rate` is a ratio of
  *     two numbers a reviewer wrote about itself-adjacent work. 설계 §4.4 #2's
  *     counting rule (one citation = 1 claim, one number = 1 claim, one
@@ -86,6 +94,21 @@
  *     window is indistinguishable here from an audit of a spawn that never
  *     bound, and both are indistinguishable from a bind line that was never
  *     written.
+ *  7. WHETHER THE ID IS THE REAL BUILDER'S, AND WHICH SPELLING A LEADER CAN
+ *     GIVE. The id is ASSERTED: the leader writes it into the reviewer's prompt
+ *     and the reviewer copies it back, so this fold proves only that the id
+ *     names a bound spawn (`independent-reviewer.js#assertIndependence` says the
+ *     same of its `builderId`: caller-asserted, because the ledger has no
+ *     artifact-to-spawn key). And a leader is not shown one spelling for every
+ *     spawn. Measured 2026-09-29T04:21Z on the leader's own transcript, one
+ *     sample each: a subagent spawn result reads `agentId: <id>`, equal to that
+ *     bind's `agent_id`; an in-process teammate's result reads
+ *     `agent_id: <name>@<team>`, which equals NO bind id (the ledger id is
+ *     `a<name>-<16 hex>` and the hex is not in the result). An audit keyed by the
+ *     second spelling is an `unjoined_audits` row here, correctly, by the rule
+ *     in #1. A bridge (bind `agent_type` equal to the name, same session) would
+ *     be a design decision for whoever owns the score axis, not something to
+ *     slip into a fold.
  *
  * @module lib/replay/claim-audit-join
  */

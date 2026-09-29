@@ -45,6 +45,33 @@
  * import (L2 to L5 is forbidden). Every array and every record key in the
  * result is sorted, so a shuffled input serializes to the same bytes.
  *
+ * THE SCORE AXIS -- ONE OPERATIONAL DEFINITION (SH-05)
+ * ---------------------------------------------------------------------------
+ * SH-05 compares a recommended spawn on TWO axes: the RECEIPT axis (what the
+ * router recommended against what served: `agreement_rate` and the cost, usage
+ * and latency columns) and an EVALUATION-SCORE axis. `score` is the second, and
+ * this is its only definition: `score.value` is the pass rate of a REVIEWER'S
+ * CLAIM AUDIT,
+ *
+ *     (claims_total - claims_refuted) / claims_total
+ *
+ * summed over the `review.claim_audit` rows whose `data.subject_agent_id` equals
+ * the `data.agent_id` of a `route.bound` row (`claim-audit-join.js`). So the
+ * "evaluation score" IS a review verdict about the spawn's REPORT, and nothing
+ * else feeds it: it is not what the spawn achieved, not a test result, and not a
+ * number the spawn reported about itself. The definition is printed beside the
+ * number as `score.basis`, so a reader of the JSON line cannot take the ratio for
+ * a task-success rate. The definition is NOT carried in `score.source`: on the
+ * zero-row block `source` must stay null -- a non-null one would make
+ * `compare-scorecard.js#requireScore` throw, and the CLI suite pins it null --
+ * so `basis` is a sibling key and `source` stays the bare event name wherever it
+ * is set. The verdict ENUM (`review.completed` `data.verdict`: PASS,
+ * REPAIR_REQUIRED, ...) is NOT this score: the allowlist declares no spawn id on
+ * that event, so it cannot be keyed to a spawn, and this module does not pretend
+ * otherwise. `basis` rides on EVERY `score` block, the row-0 block (no audit row
+ * at all) included, so a null score already says what the number will mean --
+ * see {@link scoreOf}.
+ *
  * -- WHAT THIS MODULE CANNOT SEE (repo rule section 9: write it next to the
  * gate) --------------------------------------------------------------------
  *  1. WHETHER A DIVERGENCE IS A FAULT. An allowlist demotion, `FABLE_DENYLIST`
@@ -76,25 +103,47 @@
  *     two identical rows is the spurious one is not decidable from the rows.
  *     A receipt carrying no readable model id also lands in that count, since
  *     it too adds a row without adding a distinct model.
- *  4. THE OUTCOME OF THE SPAWN, WHILE NO AUDIT NAMES ONE. `score` now reads
- *     `review.claim_audit` through `claim-audit-join.js`, but that event was 0
- *     rows on the central ledger at 2026-09-21T03:46Z, and the writer path
- *     (`lib/review/verdict-writer.js#buildClaimAuditEvent`) is only half a
- *     producer: the join key is `data.subject_agent_id`, and the block
- *     `agents/auditor.md` orders a reviewer to emit (its "claim_audit Block"
- *     section -- the repo's canonical template, "수정 금지") CARRIES NO SUCH KEY
- *     (measured 2026-09-21T04:02Z: `subject_agent_id` appears in 0 files under
- *     `agents/`, `commands/`, `skills/` and `scripts/`; the only tracked
- *     mentions outside `lib/review`, `lib/replay`, `schemas/` and their tests
- *     are design prose). So a conforming audit is
- *     expected to land in `no_subject_audits`, and `score.n` is expected to
- *     stay 0 until a producer starts writing the id. That is a WRITER-SIDE
- *     gap, named here rather than hidden: `n` separates "nobody was reviewed"
- *     from "reviews happened and none could be attributed to a spawn".
- *     The other candidates remain unusable: `verify.completed` carries no
- *     `run_id` and `usage.receipt`'s `outcome.accepted` was null on 94/94 rows.
- *     Agreement is still not quality, and a `pass_rate` is the reviewer's
- *     arithmetic, not an outcome the spawn itself reported.
+ *  4. WHETHER THE SCORE EXISTS YET, AND WHETHER IT IS ANY GOOD. `score` reads
+ *     `review.claim_audit` through `claim-audit-join.js` (definition above).
+ *     a. THE PRODUCER IS INSTRUCTED, NOT YET OBSERVED. `agents/auditor.md` (the
+ *        canonical "claim_audit Block" template and key table) and
+ *        `commands/team.md` (Phase 4.5) now tell a reviewer to put the reviewed
+ *        spawn's ledger id in `subject_agent_id`, and to OMIT the key when it
+ *        was not handed one. Before that, the key was in neither document
+ *        (measured 2026-09-21T04:02Z: 0 files under `agents/`, `commands/`,
+ *        `skills/` and `scripts/`). Measured 2026-09-29T04:24Z on the central
+ *        ledger (41,356 lines, first ts 2026-09-03): 0 rows of ANY `review.*`
+ *        event, so `score.n` is 0 and there is no sample of what a reviewer
+ *        really writes. The transcripts say why the chain is empty beyond the
+ *        missing key: the recorder (`scripts/hooks/_review-stop-record.js`) reads
+ *        the reviewer's FINAL assistant text only, and none of the six historical
+ *        `-inspector` transcripts examined (2026-09-29T04:25Z) carried a
+ *        `claim_audit` block there -- the latest sent a YAML-shaped one through
+ *        SendMessage, a channel the recorder never sees.
+ *     b. THE KEY IS ASSERTED, NOT OBSERVED. `subject_agent_id` is what the
+ *        leader wrote into the reviewer's prompt and the reviewer copied back.
+ *        The fold can show the id names a bound spawn, not that this spawn
+ *        produced the audited report.
+ *     c. WHICH SPELLING A LEADER IS SHOWN. Measured 2026-09-29T04:21Z on the
+ *        leader's own transcript (one pair each): a subagent spawn result reads
+ *        `agentId: <id>`, the same string as that bind's `agent_id`; an
+ *        in-process teammate's result reads `agent_id: <name>@<team>`, which is
+ *        NOT its bind id (`a<name>-<16 hex>`; the hex is not in the result). The
+ *        join is exact string equality (`claim-audit-join.js` CANNOT SEE #1), so
+ *        a teammate audit keyed by what the leader saw lands in
+ *        `unjoined_audits`.
+ *     d. ONE ANSWER, ONE BLOCK. The recorder refuses an answer that carries two
+ *        different `claim_audit` blocks (`ambiguous_claim_audit`), so an
+ *        inspection that covered several builders is one aggregate row with no
+ *        single subject: `no_subject_audits` is the correct place for it.
+ *     e. QUALITY. A pass rate is the reviewer's arithmetic about a report.
+ *        Agreement is still not quality, and neither is this. The other
+ *        candidates remain unusable: `verify.completed` carries no `run_id` and
+ *        `usage.receipt`'s `outcome.accepted` was null on 94/94 rows
+ *        (2026-09-21T01:47:41Z).
+ *     `n` separates "nobody was reviewed" from "reviews happened and none could
+ *     be attributed to a spawn", which is the state a live ledger is expected to
+ *     reach first.
  *  5. AN UNPRICED PAIR'S COST. Measured over 94 live `usage.receipt` rows at
  *     2026-09-21T01:47:41Z, `cost.total` was null on 72 and a number on 22 --
  *     and a STRING on 0. ('unresolved' is a value of `cost.pricing_version`,
@@ -144,8 +193,10 @@ export const AGENT_RUN_PREFIX = 'agent-';
  * The spelling is load-bearing outside this module:
  * `scripts/ledger/route-compare.mjs#emptyJoin` repeats this exact block for its
  * error branch and `tests/ledger/route-compare-cli.test.js` compares the two,
- * so this string and the three-key shape it sits in are a contract, not a
- * private detail.
+ * so this string and the block it sits in (`source`, `value`, `reason`, `basis`)
+ * are a contract, not a private detail. The name says "no writer" and means "no
+ * `review.claim_audit` row of any kind is in the input": a writer path now exists
+ * on paper (CANNOT SEE #4a), and the string is kept because other suites compare it.
  */
 export const SCORE_UNAVAILABLE_REASON = 'no-spawn-keyed-score-writer';
 
@@ -171,6 +222,22 @@ export const SCORE_NO_JOINED_AUDIT_REASON = 'no-joined-claim-audit';
  * failure nor a 0% pass rate; it is an empty denominator with a known cause.
  */
 export const SCORE_EMPTY_DENOMINATOR_REASON = 'claim-audit-denominator-zero';
+
+/**
+ * What `score.value` IS, printed beside it (see "THE SCORE AXIS" above).
+ *
+ * A string and not a code: the reader is a person or a model looking at one JSON
+ * line, and the misreading this exists to stop is "0.75 means the spawn did 75%
+ * of its task". Every clause is load-bearing -- `reviewer verdict` and
+ * `not a spawn outcome` name the kind of number, the formula and the two keys
+ * name how it was computed, and `asserted` names who vouches for the join key.
+ * `tests/replay/spawn-outcome.test.js` pins those tokens, not the whole sentence,
+ * so a rewording that keeps them is free.
+ */
+const SCORE_BASIS = 'reviewer verdict, not a spawn outcome: '
+  + '(claims_total - claims_refuted) / claims_total over review.claim_audit rows '
+  + 'whose data.subject_agent_id equals a route.bound data.agent_id; '
+  + 'the id is asserted by the leader that spawned the reviewer, not observed';
 
 /** Confidence values `bindRoute` writes; anything else buckets as `other`. */
 const KNOWN_CONFIDENCE = Object.freeze(['exact', 'name', 'fifo']);
@@ -443,17 +510,31 @@ function nullIfEmpty(bucket, popKey, sumKey) {
  * The `score` column, read from `review.claim_audit` rows.
  *
  * TWO SHAPES, AND THAT IS A KNOWN DEFECT. With no audit row the block is the
- * legacy three keys, BYTE FOR BYTE: `scripts/ledger/route-compare.mjs#emptyJoin`
+ * legacy three keys plus `basis`: `scripts/ledger/route-compare.mjs#emptyJoin`
  * duplicates that literal and `tests/ledger/route-compare-cli.test.js` pins it
- * three ways -- the empty-ledger stdout (`score` toEqual the three keys), the
+ * three ways -- the empty-ledger stdout (`score` toEqual the four keys), the
  * seeded stdout (`score.source`/`score.value` toBeNull) and a recursive
  * key-ORDER comparison of `emptyJoin()` against `joinSpawnOutcomes([])`. So in
  * that branch THE 0/0 COUNTS ARE NOT PRINTED AT ALL; read them from
  * `claim-audit-join.js#joinClaimAudits` instead, which reports them
  * unconditionally. Branching the SHAPE on whether a row exists is exactly the
- * "which keys exist" failure that CLI suite warns about, and unifying it means
- * editing `emptyJoin` and that suite -- neither of which is this module's to
- * edit. The defect is recorded here rather than worked around silently.
+ * "which keys exist" failure that CLI suite warns about. `basis` is the ONE key
+ * both shapes share (added by SH-05 so the live ledger's null score already says
+ * what the number will mean, instead of the definition appearing only after the
+ * first audit row); the counts stay audit-bearing only, because putting them in
+ * the row-0 block is a wider change than a definition and nothing has asked for
+ * it. The remaining defect is recorded here rather than worked around silently.
+ *
+ * THE SCORECARD REFUSES THE AUDIT-BEARING SHAPE. `lib/scorecard/compare-scorecard.js
+ * #requireScore` throws on any block whose `source` or `value` is non-null (its
+ * tests pin that as "redesign the row, do not relax the check"). The audit-bearing
+ * block has `source: 'review.claim_audit'` from the FIRST audit row of ANY kind
+ * -- joined, subject-less or malformed -- so `buildCompareScorecard` throws on
+ * any fold whose ledger carries one. Measured 2026-09-29T04:36Z with a real call
+ * per case, on this fold and on the pre-SH-05 code alike: no audit row builds a
+ * card; a joined, a subject-less and a malformed-only row each throw. That
+ * module is not this one's to edit. The collision is PENDING, not live: the
+ * central ledger held 0 audit rows at 2026-09-29T04:24Z (CANNOT SEE #4a).
  *
  * THE BRANCH IS ON ROWS READ, NOT ON ROWS JOINED: `audits + malformed_audits`.
  * A ledger carrying only malformed audits must not report the "nobody wrote
@@ -478,7 +559,9 @@ function nullIfEmpty(bucket, popKey, sumKey) {
 function scoreOf(events, binds) {
   const audit = joinClaimAudits(events, { agentIds: binds.keys() });
   if (audit.audits + audit.malformed_audits === 0) {
-    return { source: null, value: null, reason: SCORE_UNAVAILABLE_REASON };
+    return {
+      source: null, value: null, reason: SCORE_UNAVAILABLE_REASON, basis: SCORE_BASIS,
+    };
   }
   return {
     source: CLAIM_AUDIT_JOIN_EVENTS.audit,
@@ -486,6 +569,7 @@ function scoreOf(events, binds) {
     reason: audit.joined === 0
       ? SCORE_NO_JOINED_AUDIT_REASON
       : (audit.pass_rate === null ? SCORE_EMPTY_DENOMINATOR_REASON : null),
+    basis: SCORE_BASIS,
     n: audit.joined,
     audits: audit.audits,
     unjoined_audits: audit.unjoined_audits,

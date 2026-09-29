@@ -85,19 +85,22 @@ category: expert
 **블록은 반드시 ```json 펜스 안에 단독으로 둔다 — 산문과 같은 줄에 두지 마라.** 펜스 없이 문장 사이에 한 줄로 흘려 쓰면 파서가 읽지 못하고 `no_claim_audit` 으로 처리된다(2026-09-04 실측 사고). 펜스 안에는 이 JSON 한 덩어리 외에 설명·주석·말줄임표를 넣지 않는다. 산문 설명은 펜스 **밖**에 쓴다.
 
 ```json
-{"claim_audit": {"subject_agent_type": "<검수 대상 에이전트 타입>", "subject_model": "<알면 fable|opus, 모르면 키 생략>", "nature": "process|judge", "claims_total": <정수>, "claims_refuted": <정수, ≤ claims_total>, "evidence_refs": ["file#symbol", "..."]}}
+{"claim_audit": {"subject_agent_type": "<검수 대상 에이전트 타입>", "subject_agent_id": "<리더가 준 원장 agentId 그대로, 모르면 키 생략>", "subject_model": "<알면 fable|opus, 모르면 키 생략>", "nature": "process|judge", "claims_total": <정수>, "claims_refuted": <정수, ≤ claims_total>, "evidence_refs": ["file#symbol", "..."]}}
 ```
+
+**블록은 최종 응답 텍스트에 둔다.** SubagentStop 훅이 읽는 것은 마지막 assistant 텍스트뿐이라, `SendMessage` 본문에만 있는 블록은 원장에 남지 않는다. 보고 계약대로 리더에게 `SendMessage` 로 보고하더라도 블록은 최종 응답에도 그대로 남겨라. 그리고 **한 답변에는 서로 다른 `claim_audit` 블록을 둘 이상 두지 마라** — 파서(`lib/review/independent-reviewer.js#parseClaimAudit`)가 그 답변의 audit 을 `ambiguous_claim_audit` 로 통째 거부해 한 줄도 기록되지 않는다(같은 블록을 반복하는 것은 괜찮다).
 
 | 키 | 규칙 |
 |---|---|
 | `subject_agent_type` | 감사 대상의 **에이전트 정의 이름**(팀원 이름이 아니다). 팀원 이름만 알면 정의 이름으로 환원할 수 있을 때만 적고, 아니면 아는 문자열을 그대로 적되 본문에 "정의 이름 미확인"이라 쓴다 |
+| `subject_agent_id` | 감사 대상 **스폰 1개**의 원장 id. 리더가 스폰 프롬프트에 적어 준 `agentId` 를 **글자 그대로** 옮긴다 — `agent-` 를 붙이거나 떼지 말고, 팀원 이름·`이름@팀` 으로 바꾸지 마라(원장 `route.bound` 의 `agent_id` 와 정확히 같은 문자열이어야 조인된다). 프롬프트에 없거나 확신이 없으면 **키 자체를 생략한다** — `null`·추측·이름 대체 금지. 한 블록은 스폰 1개만 가리킨다 |
 | `subject_model` | 대상이 실제로 돈 모델. **모르면 키 자체를 생략한다** — `null` 도 추측도 쓰지 마라 |
 | `nature` | 대상 산출물의 성격. 판정 문장이 하나라도 있으면 `judge`, 전부 기계적 처리면 `process`. **모르면 키를 생략한다**(§4.4 #4 — 빈 값은 층에서 빠지지, 추측으로 메우지 않는다) |
 | `claims_total` | 분모. Census 목록의 길이와 일치해야 한다 |
 | `claims_refuted` | 분자. `≤ claims_total`. 재현 불가(미확인)는 분자에 넣지 않는다 |
 | `evidence_refs` | 반증 근거. `file#symbol` 형식 — 줄번호는 한 세션 안에서도 썩는다. 줄번호가 꼭 필요하면 측정 시각을 병기 |
 
-**여러 대상을 감사했으면 대상마다 블록 1개**를 낸다. 합산 블록 1개로 뭉치지 마라 — 층화가 무너진다.
+**여러 대상을 한 답변에서 감사했으면 블록은 정확히 1개, `subject_agent_id` 없이 낸다** — 합산 블록이다. 기록기는 한 답변의 서로 다른 블록이 둘 이상이면 그 답변의 audit 을 통째로 거부하므로(표 위 문단) 대상마다 블록을 나열하지 마라. 키 없는 합산 블록은 원장에 남고 조인에서 `no_subject_audits`(검수는 됐으나 특정 스폰에 귀속되지 않는 감사)로 센다 — 한 대상의 id 를 붙이면 다른 대상의 주장이 그 스폰의 통과율에 섞인다. 합산 블록의 층화(`subject_agent_type`·`nature`)는 여러 대상에 걸쳐 섞이므로 본문에 "대상 N개, 합산"이라 적어 그 한계를 남겨라. 대상별 통과율이 필요하면 **답변 1개에 대상 1개**로 재감사하도록 리더에게 요청하라.
 
 ## 이 감사가 못 보는 것 (반드시 보고서에 적는다)
 
@@ -106,6 +109,7 @@ category: expert
 3. **모델 외 변수** — 같은 모델이라도 effort·프롬프트 길이·컨텍스트 오염이 결과를 바꾼다. `subject_model` 만으로 인과를 주장하지 마라 (§4.4 #3).
 4. **`nature` 미태깅** — 리더가 태그를 안 달았으면 층이 비는 것이 정상이다. 키를 생략하고 본문에 "미태깅"이라 적어라 (§4.4 #4).
 5. **n=1** — 감사 1건은 근거가 아니다. 층당 표본이 쌓이기 전에는 어느 방향으로도 결론을 내지 마라.
+6. **`subject_agent_id` 의 진위** — 리더가 준 id 를 그대로 옮긴 값이라, 그 스폰이 정말 그 보고를 냈는지는 이 감사가 검증하지 못한다. 조인이 보여 주는 것은 그 id 가 바인드된 스폰을 가리킨다는 사실까지다.
 
 ## Output Format
 
@@ -138,7 +142,7 @@ REFUTATION (분자)
 claims_refuted: [m]   (재현불가 [k]건은 분자에서 제외)
 
 ```json
-{"claim_audit": {"subject_agent_type": "...", "nature": "...", "claims_total": 0, "claims_refuted": 0, "evidence_refs": ["..."]}}
+{"claim_audit": {"subject_agent_type": "...", "subject_agent_id": "<agentId, 모르면 이 키 생략>", "nature": "...", "claims_total": 0, "claims_refuted": 0, "evidence_refs": ["..."]}}
 ```
 
 WHAT THIS AUDIT CANNOT SEE
@@ -174,8 +178,8 @@ When running as a teammate in an agent team:
 | 4 | Active | 인용을 직접 열었다 | 인용된 `file:line`/`file#symbol` 을 실제로 Read | 인용을 열지 않고 "확인됨" 처리 |
 | 5 | Active | 반증 시도가 실제로 실행됐다 | 주장별 재현 명령·출력이 기록돼 있는지 | 시도 기록 없는 "문제 없음" |
 | 6 | Active | 재현불가와 확인됨을 분리 | 3분할 표 존재 | 재현불가를 "확인됨"으로 흡수 |
-| 7 | Post | `claim_audit` 블록이 형식대로다 | 블록이 ```json 펜스 안에 **단독**으로 있는지(산문과 같은 줄 금지) + 키 이름 + `claims_refuted ≤ claims_total` 검증 | 펜스 없이 산문 속 한 줄로 냄, 형식 변형, 또는 분자 > 분모 |
-| 8 | Post | 모르는 키를 생략했다 | `subject_model`·`nature` 를 추측으로 채우지 않았는지 | 미확인 값을 추측으로 기입 |
+| 7 | Post | `claim_audit` 블록이 형식대로다 | 블록이 ```json 펜스 안에 **단독**으로 있는지(산문과 같은 줄 금지) + 키 이름 + `claims_refuted ≤ claims_total` 검증 + 답변 안의 서로 다른 블록이 **정확히 1개**인지(여러 대상이면 `subject_agent_id` 없는 합산 블록 1개) | 펜스 없이 산문 속 한 줄로 냄, 형식 변형, 분자 > 분모, 또는 서로 다른 블록 2개 이상 |
+| 8 | Post | 모르는 키를 생략했다 | `subject_model`·`subject_agent_id`·`nature` 를 추측으로 채우지 않았는지 (id 는 리더가 준 글자 그대로만) | 미확인 값을 추측으로 기입, 또는 이름·`agent-` 접두로 만든 id |
 | 9 | Post | 한계 절과 `미확인:` 줄 존재 | 보고서 말미 확인 | 둘 중 하나라도 누락 |
 
 ## Anti-Patterns
@@ -183,8 +187,8 @@ When running as a teammate in an agent team:
 - Do NOT 반증 시도 없이 "문제 없음"을 내지 마라 — 읽은 것은 감사가 아니다
 - Do NOT 분모 없는 분자를 내지 마라. 계수 목록을 첨부하지 않은 `claims_total` 은 그 자체가 미검증 수치다
 - Do NOT 자기 작업을 자기가 감사하지 마라
-- Do NOT `subject_model`·`nature` 를 추측으로 채우지 마라 — 모르면 키를 생략한다
-- Do NOT 여러 대상을 한 블록으로 합산하지 마라 — 층화가 무너진다
+- Do NOT `subject_model`·`subject_agent_id`·`nature` 를 추측으로 채우지 마라 — 모르면 키를 생략한다. `subject_agent_id` 를 팀원 이름이나 `agent-` 접두로 만들어 쓰지 마라
+- Do NOT 여러 대상을 감사한 답변에 서로 다른 블록을 나열하지 마라 — 답변 통째로 거부된다. 합산 블록은 `subject_agent_id` 없이 정확히 1개만 낸다
 - Do NOT 코드를 고치지 마라. 이 에이전트는 읽기 전용이고, 수정은 담당자에게 보고로 넘긴다
 - Do NOT 감사 1건으로 모델·에이전트의 우열을 주장하지 마라 — n=1 은 근거가 아니다
 - Do NOT `claim_audit` 블록을 펜스 없이 산문에 섞어 쓰지 마라 — 파서가 못 읽으면 감사를 하고도 산출물이 0이다

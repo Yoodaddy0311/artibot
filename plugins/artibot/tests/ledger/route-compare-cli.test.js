@@ -78,6 +78,8 @@ import { ledgerFilePath, sessionFallbackMissionId } from '../../lib/runtime/even
 import { buildUsageReceipts } from '../../lib/economics/usage-receipt.js';
 import { toUsageReceiptEnvelopes } from '../../lib/economics/receipt-envelope.js';
 import { joinSpawnOutcomes } from '../../lib/replay/index.js';
+import { parseClaimAudit } from '../../lib/review/independent-reviewer.js';
+import { buildClaimAuditEvent } from '../../lib/review/verdict-writer.js';
 
 // This file spawns child processes. The budget buys headroom for load; nothing
 // here waits on a timer.
@@ -328,6 +330,30 @@ function seedBind(root, sessionId, agentId, o) {
   expect(res.ok).toBe(true);
 }
 
+/**
+ * Append one `review.claim_audit` row, built the way production builds it.
+ *
+ * The block goes through `parseClaimAudit` and `buildClaimAuditEvent` rather than
+ * being typed as a ledger line: the writer validates the event against the
+ * allowlist, so a hand-shaped row that it refuses would land as `ledger.rejected`
+ * and the score this case reads would be measured over a file that does not hold
+ * what the test thinks it seeded. The caller's `seededLines` asserts zero
+ * rejections for exactly that reason.
+ *
+ * @param {string} root
+ * @param {string} sessionId
+ * @param {object} block - the `claim_audit` object a reviewer would emit.
+ * @returns {void}
+ */
+function seedAudit(root, sessionId, block) {
+  const parsed = parseClaimAudit({ claim_audit: block });
+  expect(parsed.ok, JSON.stringify(parsed.errors)).toBe(true);
+  const built = buildClaimAuditEvent({ parsed, sessionId });
+  expect(built.ok).toBe(true);
+  const res = appendLedgerEvent(root, built.input);
+  expect(res.ok, JSON.stringify(res)).toBe(true);
+}
+
 const OPUS = 'claude-opus-5';
 const FABLE = 'claude-fable-5-1';
 const SESSION = 'sessSpawn0001';
@@ -377,9 +403,15 @@ describe('route-compare: a project with no ledger', () => {
     expect(printed.agreement_rate).not.toBe(0);
     expect(printed.by_agreement).toEqual({ same: 0, diverged: 0 });
     expect(printed.pairs).toEqual([]);
+    // The null block still says what the number WILL mean: `basis` rides on every
+    // score block, so the live ledger's null already carries the definition.
     expect(printed.score).toEqual({
-      source: null, value: null, reason: 'no-spawn-keyed-score-writer',
+      source: null,
+      value: null,
+      reason: 'no-spawn-keyed-score-writer',
+      basis: expect.stringContaining('reviewer verdict'),
     });
+    expect(Object.keys(printed.score)).toEqual(['source', 'value', 'reason', 'basis']);
     expect(printed.census.file.present).toBe(false);
     expect(printed.census.file.readable).toBe(false);
     expect(printed.ledger_path).toBe(file);
@@ -597,6 +629,68 @@ describe('route-compare: a seeded ledger', () => {
 
     expect(printed.binds).toBe(5);
     expect(printed.ledger_path).toBe(ledgerFilePath(root));
+  });
+});
+
+describe('route-compare: a ledger that carries reviewer audits', () => {
+  // SH-05's evaluation-score half. `score` is the pass rate of a REVIEWER's claim
+  // audit, joined on the audit's `subject_agent_id` against a bind's `agent_id`;
+  // the printed line carries that definition (`score.basis`) beside the number.
+
+  it('prints the joined score and its definition, through the real writer and process', async () => {
+    const root = makeRoot('S');
+    await seedLedger(root);
+    const block = { subject_agent_type: 'tdd-guide', claims_total: 8, claims_refuted: 2 };
+    seedAudit(root, SESSION, { ...block, subject_agent_id: 'sp1' });
+    seedAudit(root, SESSION, {
+      ...block, subject_agent_id: 'sp-never-bound', claims_total: 5, claims_refuted: 5,
+    });
+    seedAudit(root, SESSION, { ...block, claims_total: 3, claims_refuted: 0 });
+    // Zero `ledger.rejected` first: the allowlist accepted all three rows.
+    const lines = seededLines(root);
+    expect(lines.filter((e) => e.event === 'review.claim_audit')).toHaveLength(3);
+
+    const printed = parseOne(runCli(['--cwd', root], root));
+
+    expect(Object.keys(printed)).toEqual(STDOUT_KEYS);
+    expect(printed.score.source).toBe('review.claim_audit');
+    // (8 - 2) / 8: the audit of the never-bound id and the subject-less audit
+    // are in no sum, however large their counts.
+    expect(printed.score.value).toBe(0.75);
+    expect(printed.score.reason).toBeNull();
+    expect(printed.score.n).toBe(1);
+    expect(printed.score.audits).toBe(3);
+    expect(printed.score.unjoined_audits).toBe(1);
+    expect(printed.score.no_subject_audits).toBe(1);
+    expect(printed.score.malformed_audits).toBe(0);
+    // The number never travels without its meaning.
+    expect(printed.score.basis).toContain('reviewer verdict');
+    expect(printed.score.basis).toContain('not a spawn outcome');
+    expect(printed.score.basis).toContain('data.subject_agent_id');
+    // The receipt half is untouched by the audits.
+    expect(printed.compared).toBe(3);
+    expect(printed.by_agreement).toEqual({ same: 2, diverged: 1 });
+  });
+
+  it('names the state a reviewer without the id leaves: audits exist, none joined', async () => {
+    // The state the omit-when-unknown rule makes NORMAL: the reviewer was not
+    // handed the spawn's ledger id, so it left the key out. The line must say
+    // "audits exist and none could be attributed", not "nobody reviewed".
+    const root = makeRoot('T');
+    await seedLedger(root);
+    seedAudit(root, SESSION, { subject_agent_type: 'tdd-guide', claims_total: 6, claims_refuted: 1 });
+    seededLines(root);
+
+    const printed = parseOne(runCli(['--cwd', root], root));
+
+    expect(printed.score.source).toBe('review.claim_audit');
+    expect(printed.score.value).toBeNull();
+    expect(printed.score.value).not.toBe(0);
+    expect(printed.score.reason).toBe('no-joined-claim-audit');
+    expect(printed.score.n).toBe(0);
+    expect(printed.score.audits).toBe(1);
+    expect(printed.score.no_subject_audits).toBe(1);
+    expect(printed.score.basis).toContain('reviewer verdict');
   });
 });
 

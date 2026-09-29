@@ -17,6 +17,19 @@
  *   - THE WRITERS. That a Phase 4.5 reviewer emits an audit block at all, and
  *     that `subagent-handler.js#bindRoute` fires on every spawn, is those
  *     suites' business. This suite pins arithmetic over a given array.
+ *   - THE DOC PINS ARE PHRASE PINS. The "producer instruction" cases at the end
+ *     read `agents/auditor.md` and `commands/team.md` and assert that the
+ *     `subject_agent_id` instruction is PRESENT, with its omit-when-unknown and
+ *     exact-spelling rules, and that a block filled from the auditor template
+ *     survives parser -> writer -> this join. A green means the sentences exist
+ *     and agree with the code; it does not mean any reviewer ever followed them.
+ *     Live `review.claim_audit` rows were still 0 at 2026-09-29T04:24Z (41,356
+ *     ledger lines, no `review.*` event of any kind).
+ *   - WHICH SPELLING A LEADER CAN SEE. The teammate-spelling case is built from
+ *     ONE measured pair (2026-09-29T04:21Z, the leader's own transcript): an
+ *     in-process teammate's spawn result shows `agent_id: m0-census@session-ed8452d7`
+ *     while its `route.bound` row carries `am0-census-9da70ce2ac7343bb`. One
+ *     pair says the two spellings CAN differ; it does not say how often.
  *   - FIXTURE SCALE. 3 binds and 6 audit rows. Live was 306 bind rows and 0
  *     audits at the measurement, so nothing here says anything about the fold
  *     at ledger size or about read cost.
@@ -33,11 +46,16 @@
  * @module tests/replay/claim-audit-join
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   CLAIM_AUDIT_JOIN_EVENTS,
   joinClaimAudits,
 } from '../../lib/replay/index.js';
+import { parseClaimAudit } from '../../lib/review/independent-reviewer.js';
+import { buildClaimAuditEvent } from '../../lib/review/verdict-writer.js';
 
 const MISSION = 'M-20260921-001';
 const SESS_A = 'sess-a';
@@ -331,6 +349,35 @@ describe('joinClaimAudits() joins on the exact string only', () => {
     expect(f.by_agent).toEqual([]);
   });
 
+  it('does not join the spellings a leader is shown for an in-process teammate', () => {
+    // MEASURED 2026-09-29T04:21Z on the leader's own transcript: the spawn result
+    // of an in-process teammate reads `agent_id: m0-census@session-ed8452d7`, and
+    // the ledger's `route.bound` row for that teammate carries
+    // `am0-census-9da70ce2ac7343bb` (`a<name>-<16 hex>`; the hex is not in the
+    // result). The join has no bridge between the two and this case pins that on
+    // purpose: a bridge would be a guess that manufactures joins, and the day
+    // one is wanted it belongs to a decision on the record, not to this fold.
+    const LEDGER_ID = 'am0-census-9da70ce2ac7343bb';
+    const rows = [
+      ...spawn(LEDGER_ID),
+      audit({ subjectId: 'm0-census@session-ed8452d7', total: 3, refuted: 0 }),
+      audit({ subjectId: 'm0-census', total: 3, refuted: 0 }),
+    ];
+    const f = joinClaimAudits(rows);
+    expect(f.joined).toBe(0);
+    expect(f.unjoined_audits).toBe(2);
+    expect(f.pass_rate).toBeNull();
+
+    // Positive control: the ledger's own spelling joins, so the two zeroes above
+    // are the spelling and not a broken fixture.
+    const control = joinClaimAudits([
+      ...rows, audit({ subjectId: LEDGER_ID, total: 4, refuted: 1 }),
+    ]);
+    expect(control.joined).toBe(1);
+    expect(control.unjoined_audits).toBe(2);
+    expect(control.pass_rate).toBe(0.75);
+  });
+
   it('leaves every subjected audit unjoined when the ledger has no bind', () => {
     const rows = fixture().filter((e) => e.event === CLAIM_AUDIT_JOIN_EVENTS.audit);
     const f = joinClaimAudits(rows);
@@ -414,5 +461,244 @@ describe('the replay barrel', () => {
     expect(typeof joinClaimAudits).toBe('function');
     expect(CLAIM_AUDIT_JOIN_EVENTS).toEqual({ bind: 'route.bound', audit: 'review.claim_audit' });
     expect(Object.isFrozen(CLAIM_AUDIT_JOIN_EVENTS)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE PRODUCER INSTRUCTION (SH-05 / W1-8).
+//
+// The join keys on `data.subject_agent_id`, and until this section nothing that
+// tells a reviewer what to write had that key: `agents/auditor.md`'s canonical
+// template and `commands/team.md` Phase 4.5 both stopped at `subject_model`. The
+// cases below read the two documents as text, so an edit that drops the key or
+// the rules around it turns this file red instead of silently emptying the score.
+// ---------------------------------------------------------------------------
+
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** A plugin document as text, CRLF normalized (the working tree is CRLF here). */
+function readDoc(rel) {
+  return readFileSync(path.join(PLUGIN_ROOT, rel), 'utf-8').replace(/\r\n/g, '\n');
+}
+
+/**
+ * The text after `start` up to the next `stopAt`, or to the end.
+ *
+ * Throws (does not `expect`) on a missing `start`: this runs at collection time,
+ * and a document that lost its heading must fail the suite, not select nothing.
+ *
+ * @param {string} text - the document.
+ * @param {string} start - the heading that opens the section.
+ * @param {string} [stopAt] - the marker that closes it.
+ * @returns {string} the section body.
+ */
+function between(text, start, stopAt) {
+  const at = text.indexOf(start);
+  if (at === -1) throw new Error(`section not found: ${start}`);
+  const rest = text.slice(at + start.length);
+  const end = stopAt === undefined ? -1 : rest.indexOf(stopAt);
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Every `"key":` in a one-line JSON template, in order. */
+function keysOf(line) {
+  return [...line.matchAll(/"([a-z_]+)":/g)].map((m) => m[1]);
+}
+
+/** A ```json fence around one document, the way a reviewer's answer carries it. */
+function fenced(doc) {
+  return `\`\`\`json\n${JSON.stringify(doc)}\n\`\`\``;
+}
+
+/** A sample value per template key. A key with no sample here fails the suite. */
+const SAMPLE = Object.freeze({
+  subject_agent_type: 'tdd-guide',
+  subject_agent_id: AG1,
+  subject_model: 'claude-opus-5',
+  nature: 'process',
+  claims_total: 4,
+  claims_refuted: 1,
+  evidence_refs: ['lib/replay/claim-audit-join.js#joinClaimAudits'],
+});
+
+/**
+ * A block filled in from a template line: exactly the keys the template names.
+ *
+ * @param {string} templateLine - a `{"claim_audit": {...}}` line from the doc.
+ * @returns {{claim_audit: object}} the filled block.
+ */
+function filledFrom(templateLine) {
+  const keys = keysOf(templateLine).filter((k) => k !== 'claim_audit');
+  const unsampled = keys.filter((k) => !(k in SAMPLE));
+  if (unsampled.length > 0) {
+    throw new Error(`the template names keys this suite has no sample for: ${unsampled}`);
+  }
+  return { claim_audit: Object.fromEntries(keys.map((k) => [k, SAMPLE[k]])) };
+}
+
+const AUDITOR_MD = readDoc('agents/auditor.md');
+const BLOCK_SECTION = between(AUDITOR_MD, '## claim_audit Block', '\n## ');
+const TEMPLATE_LINES = AUDITOR_MD.split('\n').filter((l) => l.startsWith('{"claim_audit"'));
+const TEAM_MD = readDoc('commands/team.md');
+const PHASE_45 = between(TEAM_MD, '### Phase 4.5: INSPECTION', '\n### 중계 계약');
+
+describe('agents/auditor.md carries the join key', () => {
+  it('has exactly two claim_audit JSON lines (template and Output Format), and both name the key', () => {
+    // The count is the denominator for the loop: a third line, or a template
+    // that lost its `{"claim_audit"` prefix, must not turn the loop into a no-op.
+    expect(TEMPLATE_LINES).toHaveLength(2);
+    for (const line of TEMPLATE_LINES) expect(keysOf(line)).toContain('subject_agent_id');
+  });
+
+  it('places subject_agent_id right after subject_agent_type in the canonical template', () => {
+    expect(keysOf(TEMPLATE_LINES[0])).toEqual([
+      'claim_audit', 'subject_agent_type', 'subject_agent_id', 'subject_model',
+      'nature', 'claims_total', 'claims_refuted', 'evidence_refs',
+    ]);
+  });
+
+  it('documents the value and the omit rule in the key table', () => {
+    const row = BLOCK_SECTION.split('\n').find((l) => l.startsWith('| `subject_agent_id` |'));
+    expect(row, 'no `subject_agent_id` row in the key table').toBeDefined();
+    // The value is the ledger spelling, taken from the leader's spawn result...
+    expect(row).toContain('agentId');
+    expect(row).toContain('글자 그대로');
+    // ...never a name, never a prefixed/derived spelling...
+    expect(row).toContain('팀원 이름');
+    expect(row).toContain('agent-');
+    // ...and unknown means the key is ABSENT (the allowlist types it `string`).
+    expect(row).toContain('키 자체를 생략');
+    expect(row).toContain('null');
+  });
+
+  it('says the block belongs in the FINAL text and that one answer carries one block', () => {
+    // `_review-stop-record.js` reads the reviewer's last assistant text only; a
+    // block that went out through SendMessage alone never reaches the ledger.
+    expect(BLOCK_SECTION).toContain('SendMessage');
+    expect(BLOCK_SECTION).toContain('최종 응답');
+    // The parser refuses two DIFFERENT blocks in one answer.
+    expect(BLOCK_SECTION).toContain('ambiguous_claim_audit');
+  });
+
+  it('keeps the checklist row and the anti-pattern in step with the new key', () => {
+    const checklist = AUDITOR_MD.split('\n').find((l) => l.startsWith('| 8 | Post |'));
+    expect(checklist, 'checklist row 8 not found').toBeDefined();
+    expect(checklist).toContain('subject_agent_id');
+    const anti = AUDITOR_MD.split('\n')
+      .find((l) => l.startsWith('- Do NOT `subject_model`'));
+    expect(anti, 'the subject_model anti-pattern line not found').toBeDefined();
+    expect(anti).toContain('subject_agent_id');
+  });
+
+  it('tells a multi-subject audit to emit ONE aggregate block WITHOUT the key, and to re-audit for per-subject rates', () => {
+    // `commands/team.md` Phase 4.5 and `spawn-outcome.js` CANNOT SEE #4d say the
+    // same thing: an aggregate block without `subject_agent_id` stays in the
+    // ledger and counts as "reviewed but not attributable" (`no_subject_audits`);
+    // per-subject pass rates need one subject per answer. The two documents gave
+    // opposite instructions before this case existed (drop the block vs keep it).
+    const para = BLOCK_SECTION.split('\n').find((l) => l.startsWith('**여러 대상을'));
+    expect(para, 'multi-subject paragraph not found').toBeDefined();
+    expect(para).toContain('정확히 1개');
+    expect(para).toContain('subject_agent_id');
+    expect(para).toContain('no_subject_audits');
+    expect(para).toContain('재감사');
+    expect(para).toContain('답변 1개에 대상 1개');
+    // The opposite instruction is gone: nothing tells the auditor to drop the block.
+    expect(AUDITOR_MD).not.toContain('블록 미기록');
+    expect(AUDITOR_MD).not.toContain('대상마다 블록 1개');
+  });
+
+  it('keeps checklist row 7 and the anti-pattern list consistent with the aggregate rule', () => {
+    const row7 = AUDITOR_MD.split('\n').find((l) => l.startsWith('| 7 | Post |'));
+    expect(row7, 'checklist row 7 not found').toBeDefined();
+    // Row 7 is the block-format check, so it also checks the COUNT: distinct
+    // blocks in one answer must be exactly one, keyless when it spans subjects.
+    expect(row7).toContain('정확히 1개');
+    expect(row7).toContain('subject_agent_id');
+    // The old "never aggregate" anti-pattern would contradict the paragraph above.
+    expect(AUDITOR_MD).not.toContain('한 블록으로 합산하지 마라');
+  });
+});
+
+describe('a block filled from the auditor template reaches the join', () => {
+  it('parses, and the parser keeps the id verbatim', () => {
+    const parsed = parseClaimAudit(fenced(filledFrom(TEMPLATE_LINES[0])));
+    expect(parsed.ok, JSON.stringify(parsed.errors)).toBe(true);
+    expect(parsed.subject_agent_id).toBe(AG1);
+    expect(parsed.claims_total).toBe(4);
+  });
+
+  it('survives the writer and joins the spawn it names', () => {
+    const parsed = parseClaimAudit(fenced(filledFrom(TEMPLATE_LINES[0])));
+    const built = buildClaimAuditEvent({ parsed, sessionId: SESS_A });
+    expect(built.ok).toBe(true);
+    expect(built.input.event).toBe(CLAIM_AUDIT_JOIN_EVENTS.audit);
+    expect(built.input.data.subject_agent_id).toBe(AG1);
+
+    const f = joinClaimAudits([...spawn(AG1), built.input]);
+    expect(f.audits).toBe(1);
+    expect(f.joined).toBe(1);
+    expect(f.no_subject_audits).toBe(0);
+    expect(f.by_agent).toEqual([
+      { agent_id: AG1, audits: 1, claims_total: 4, claims_refuted: 1, pass_rate: 0.75 },
+    ]);
+  });
+
+  it('the same block WITHOUT the key is a normal row that lands in no_subject_audits', () => {
+    // The omit-when-unknown rule end to end: a reviewer that did not know the id
+    // writes a valid block, and the join counts it apart from an unjoined one.
+    const block = filledFrom(TEMPLATE_LINES[0]);
+    delete block.claim_audit.subject_agent_id;
+    const parsed = parseClaimAudit(fenced(block));
+    expect(parsed.ok, JSON.stringify(parsed.errors)).toBe(true);
+    expect(parsed.subject_agent_id).toBeNull();
+    const built = buildClaimAuditEvent({ parsed, sessionId: SESS_A });
+    expect(built.ok).toBe(true);
+    expect('subject_agent_id' in built.input.data).toBe(false);
+
+    const f = joinClaimAudits([...spawn(AG1), built.input]);
+    expect(f.audits).toBe(1);
+    expect(f.joined).toBe(0);
+    expect(f.unjoined_audits).toBe(0);
+    expect(f.no_subject_audits).toBe(1);
+  });
+});
+
+describe('commands/team.md Phase 4.5 hands the reviewer the key', () => {
+  it('names subject_agent_id and where its value comes from', () => {
+    expect(PHASE_45).toContain('subject_agent_id');
+    // The subagent spawn result line that carries the ledger spelling.
+    expect(PHASE_45).toContain('agentId:');
+    // The teammate spelling that is NOT the ledger id, and the derived spellings.
+    expect(PHASE_45).toContain('{이름}@{팀}');
+    expect(PHASE_45).toContain('agent-');
+  });
+
+  it('keeps the omit rule for BOTH optional keys, not only subject_model', () => {
+    expect(PHASE_45).toContain('`claim_audit.subject_model` 은 모르면 **키 자체를 쓰지 마라**');
+    const line = PHASE_45.split('\n').find((l) => l.includes('subject_agent_id') && l.includes('키 자체를 쓰지 마라'));
+    expect(line, 'no line pairs subject_agent_id with the omit rule').toBeDefined();
+  });
+
+  it('says one block names one spawn, and why several builders cannot share it', () => {
+    expect(PHASE_45).toContain('ambiguous_claim_audit');
+    expect(PHASE_45).toContain('빌더 여럿');
+  });
+
+  it('says the blocks go in the final text, and points at the single template source', () => {
+    expect(PHASE_45).toContain('SendMessage');
+    expect(PHASE_45).toContain('마지막');
+    expect(PHASE_45).toContain('agents/auditor.md');
+  });
+
+  it('agrees with agents/auditor.md on the multi-subject case', () => {
+    // Same outcome for the aggregate block, same remedy for per-subject rates.
+    const para = BLOCK_SECTION.split('\n').find((l) => l.startsWith('**여러 대상을'));
+    expect(para, 'auditor.md multi-subject paragraph not found').toBeDefined();
+    expect(PHASE_45).toContain('no_subject_audits');
+    expect(para).toContain('no_subject_audits');
+    expect(PHASE_45).toContain('검수를 따로');
+    expect(para).toContain('답변 1개에 대상 1개');
+    expect(para).toContain('재감사');
   });
 });

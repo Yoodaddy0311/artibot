@@ -115,9 +115,16 @@
  *    self-report copied onto the bind by the hook; nothing re-derives it.
  *  - WHY a divergence happened. `divergence` says which recommendation was not
  *    honoured, never whether a fallback, a hard cap or an outage caused it.
- *  - A QUALITY VERDICT. `score` is fixed at null with the reason
- *    `no-spawn-keyed-score-writer`: no writer keys a quality score by spawn, so
- *    "the cheaper model was served" cannot be read here as "and it was worse".
+ *  - A QUALITY VERDICT. `score` is a REVIEWER'S verdict about a spawn's report,
+ *    never a measure of what the spawn achieved, and `score.basis` on the line
+ *    says so (definition: `lib/replay/spawn-outcome.js`, "THE SCORE AXIS").
+ *    While the ledger holds no `review.claim_audit` row of any kind the block
+ *    is null with the reason `no-spawn-keyed-score-writer`; once one exists it
+ *    carries the claim-audit pass rate of the audits whose `subject_agent_id`
+ *    names a bound spawn, plus the counts that show how many did not. The key is
+ *    asserted by the leader, not observed, and the central ledger held 0 audit
+ *    rows at 2026-09-29T04:24Z, so "the cheaper model was served" still cannot
+ *    be read here as "and it was worse".
  *  - WHAT A `ledger.rejected` LINE REPLACED. Those lines are excluded by the
  *    reader's default and counted in `census.dropped.selection`.
  *  - THE INSTALLED COPY. This file measures the ledger, not itself.
@@ -275,9 +282,21 @@ export function emptyJoin() {
     },
     unjoined_binds: 0,
     unjoined_receipts: 0,
-    // Verbatim, including the reason: a null score with no reason reads as a
-    // measurement that failed, rather than as one no writer produces.
-    score: { source: null, value: null, reason: 'no-spawn-keyed-score-writer' },
+    // Verbatim, including the reason and the definition: a null score with no
+    // reason reads as a measurement that failed rather than as one no reviewer
+    // has written, and a score with no definition reads as a task-success rate.
+    // `basis` is the same sentence as `spawn-outcome.js#SCORE_BASIS`; the
+    // recursive comparison in `tests/ledger/route-compare-cli.test.js` is what
+    // stops the two copies from drifting apart.
+    score: {
+      source: null,
+      value: null,
+      reason: 'no-spawn-keyed-score-writer',
+      basis: 'reviewer verdict, not a spawn outcome: '
+        + '(claims_total - claims_refuted) / claims_total over review.claim_audit rows '
+        + 'whose data.subject_agent_id equals a route.bound data.agent_id; '
+        + 'the id is asserted by the leader that spawned the reviewer, not observed',
+    },
   };
 }
 
