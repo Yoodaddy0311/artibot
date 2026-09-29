@@ -223,9 +223,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('approves Edit to a file that was previously Read', async () => {
@@ -242,9 +240,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -313,9 +309,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('approves Write when no tracking file exists (new file)', async () => {
@@ -328,9 +322,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -346,9 +338,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('handles null hookData gracefully', async () => {
@@ -393,9 +383,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -415,9 +403,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('approves Write to CLAUDE.local.md without prior Read', async () => {
@@ -434,9 +420,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('approves Write to .claude/rules files without prior Read', async () => {
@@ -459,9 +443,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -507,9 +489,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('enforces write-before-read in a real Artibot repo (positive control)', async () => {
@@ -575,9 +555,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
       // Advisory path must NOT persist a block fingerprint.
       const fpPath = path.join('/plugin-root', 'runtime', 'last-pre-write-block.txt');
       expect(writtenFiles[fpPath]).toBeUndefined();
@@ -607,9 +585,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('still blocks when config writeGuardMode=block (default preserved)', async () => {
@@ -703,10 +679,8 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      // Second attempt: same fingerprint → approve, loop broken.
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      // Second attempt: same fingerprint → pass, loop broken.
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
   // -------------------------------------------------------------------------
@@ -780,9 +754,7 @@ describe('pre-write-guard hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
       expect(ledger.append).not.toHaveBeenCalled();
     });
 
@@ -1262,9 +1234,9 @@ describe('pre-write-guard hook', () => {
       '/workspace/.claude/rules/x.md',
       '/workspace/CLAUDE.md',
       '/workspace/.claude/projects/slug/memory/MEMORY.md',
-    ])('approves an existing, unread %s with the exact legacy stdout', async (filePath) => {
-      expect(await stdoutFor(filePath)).toEqual([{ decision: 'approve' }]);
-      expect(JSON.stringify(writeStdout.mock.calls[0][0])).toBe('{"decision":"approve"}');
+    ])('passes an existing, unread %s through with no stdout at all', async (filePath) => {
+      expect(await stdoutFor(filePath)).toEqual([]);
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1295,7 +1267,7 @@ describe('pre-write-guard hook', () => {
         String(file).includes('last-pre-write-block.txt') ? fingerprint : '[]'
       ));
       writeStdout.mockClear();
-      expect(await stdoutFor(filePath)).toEqual([{ decision: 'approve' }]);
+      expect(await stdoutFor(filePath)).toEqual([]);
     });
   });
 

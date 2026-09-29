@@ -11,10 +11,19 @@
  * ── OBSERVE CONTRACT (PRD R-03 "행동 변화 0") ────────────────────────────────
  *  T-39 adds recording only, at the single block point in `handleWriteGuard`.
  *  No new block, no lifted block, no changed `reason` byte; the append runs
- *  AFTER `writeStdout`. The approve, advisory, loop-guard, degraded and
+ *  AFTER `writeStdout`. The pass, advisory, loop-guard, degraded and
  *  read-tracking paths record NOTHING — Observe is scoped to blocks. Canonical
  *  statement of the contract, the cwd rule, and the never-throw guarantee lives
  *  in the recorder: `lib/runtime/human-asked-record.js`.
+ *
+ * ── PASS IS PASSTHROUGH, NOT APPROVAL (CA-04, security) ─────────────────────
+ *  This hook only ever writes a BLOCK. Every other path (new file, already read,
+ *  exempt, external project, advisory, degraded, loop guard, Read tracking) writes
+ *  zero bytes and exits 0, so the host's own permission flow decides. It used to
+ *  print `{decision:'approve'}` on all of them, and the host reads that as `allow`
+ *  and skips the permission prompt (measured on host 2.1.284, in default,
+ *  acceptEdits and dontAsk mode). The contract and its ratchet live in
+ *  `tests/hooks/pretooluse-passthrough.test.js`.
  */
 
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
@@ -48,7 +57,9 @@ let exitHookInstalled = false;
 // Write-before-read EXEMPTIONS — an allowlist (CA-04 L4)
 // ---------------------------------------------------------------------------
 // `isWhitelisted` answers one question: may this write skip the prior-Read
-// check? It is NOT an approval. Nothing here gets a write past any other gate,
+// check? It is NOT an approval. Nothing here gets a write past any other gate
+// (until CA-04 the exempt path printed a legacy approve, which the host reads as
+// allow and which did skip the host's permission prompt; it now prints nothing),
 // and it decides nothing for files this hook never looks at (`shouldEnforceGuard`
 // stands aside outside the Artibot repo, and for paths outside cwd, the plugin
 // root and any `plugins/artibot/` tree, so `~/.claude/settings.json` from a
@@ -345,7 +356,7 @@ export function isWhitelisted(filePath) {
  * plugin root OR inside the cwd (case-insensitive on Windows), to avoid
  * tracking writes that escape the project boundary.
  *
- * External projects without an Artibot marker are always approved silently.
+ * External projects without an Artibot marker always pass through silently.
  *
  * @param {string} filePath
  * @returns {boolean}
@@ -433,7 +444,7 @@ function resolveWriteGuardMode() {
  * Build a fingerprint that uniquely identifies a (sessionId, toolName,
  * filePath) attempt. Two consecutive attempts with the same fingerprint
  * indicate the model is retrying the same blocked operation — feed the
- * second attempt through as approve to break the loop.
+ * second attempt through as a pass to break the loop.
  *
  * Pattern mirrors dev-verify-gate.js:151-156 (sha1-truncated fingerprint
  * cached on disk between hook invocations).
@@ -582,7 +593,6 @@ function handleReadTracking(hookData) {
   const sessionId = hookData?.session_id || 'default';
   const filePath = extractFilePath(hookData);
   if (!filePath) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
@@ -593,15 +603,14 @@ function handleReadTracking(hookData) {
   } catch (err) {
     process.stderr.write(`[artibot:pre-write-guard] Track failed: ${err.message}\n`);
   }
-  // Always approve Read operations (tracking is best-effort)
-  writeStdout({ decision: 'approve' });
+  // Read operations are never decided here (tracking is best-effort): PASSTHROUGH.
 }
 
 /**
  * Handle PreToolUse for Write/Edit: check if the file was read first.
  *
  * `async` only so the single block point can await the ledger append after its
- * decision is already on stdout. Every approve path still returns without ever
+ * decision is already on stdout. Every pass path still returns without ever
  * suspending, so the decision itself is produced on the same synchronous path
  * as before.
  *
@@ -613,7 +622,6 @@ async function handleWriteGuard(hookData) {
   const filePath = extractFilePath(hookData);
 
   if (!filePath) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
@@ -621,19 +629,16 @@ async function handleWriteGuard(hookData) {
 
   // Allow whitelisted files (Claude config) without Read requirement
   if (isWhitelisted(filePath)) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
   // Skip guard for external projects (no artibot.config.json in CWD)
   if (!shouldEnforceGuard(filePath)) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
   // Allow new file creation (file does not exist yet)
   if (!existsSync(filePath)) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
@@ -643,21 +648,19 @@ async function handleWriteGuard(hookData) {
   const readSet = getOrLoadSessionSet(sessionId, trackingPath);
 
   if (readSet.has(normalized)) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
   // Degraded mode: if tracking file is missing AND cache is empty,
-  // we have no signal at all — approve with warning. (When cache has
+  // we have no signal at all — pass through with a warning. (When cache has
   // entries but disk is gone, we trust the in-memory state.)
   if (readSet.size === 0 && !existsSync(trackingPath)) {
     process.stderr.write(`[artibot:pre-write-guard] Warning: tracking file missing, approving ${toolName} for "${filePath}" in degraded mode\n`);
-    writeStdout({ decision: 'approve' });
     return;
   }
 
   // Loop guard: when the model retries the same blocked Write/Edit (same
-  // sessionId + toolName + filePath), downgrade the second block to approve.
+  // sessionId + toolName + filePath), downgrade the second block to a pass.
   // This breaks the user-reported "block → retry → block → ... must end
   // session" loop. Fingerprint persists across hook invocations on disk so
   // separate Node child-processes can share the bypass signal. Pattern
@@ -667,12 +670,11 @@ async function handleWriteGuard(hookData) {
     process.stderr.write(
       `[pre-write-guard] duplicate block bypassed (loop guard) — file: ${filePath}\n`,
     );
-    writeStdout({ decision: 'approve' });
     return;
   }
 
   // Advisory mode (config devProtocol.writeGuardMode='advisory' or env
-  // ARTIBOT_WRITE_GUARD_MODE='advisory'): warn but approve. Friendlier for
+  // ARTIBOT_WRITE_GUARD_MODE='advisory'): warn but pass through. Friendlier for
   // non-developer/vibe-coding users — surfaces the read-before-write reminder
   // without blocking the edit. Default 'block' preserves strict DEV protocol.
   const mode = resolveWriteGuardMode();
@@ -681,7 +683,6 @@ async function handleWriteGuard(hookData) {
       + 'file exists but was not Read in this session. '
       + 'Reading first is recommended to avoid blind modifications.';
     process.stderr.write(`[artibot:pre-write-guard] (advisory) ${warning}\n`);
-    writeStdout({ decision: 'approve' });
     return;
   }
 
@@ -722,8 +723,7 @@ export async function main() {
     return;
   }
 
-  // Fallback: approve unknown combinations
-  writeStdout({ decision: 'approve' });
+  // Fallback: an unknown combination passes through (no decision).
 }
 
 /**

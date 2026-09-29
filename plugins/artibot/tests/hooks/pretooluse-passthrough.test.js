@@ -47,7 +47,6 @@
  *   - Hooks from the user's own settings or from other plugins.
  *   - Payload realism. Payloads carry the key set the probe observed but are
  *     hand-built.
- *   - `pre-write-guard.js` (see KNOWN_PENDING).
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -69,22 +68,14 @@ const HOOKS_DIR = path.join(PLUGIN_ROOT, 'scripts', 'hooks');
 const HOOKS_JSON = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
 const hookPath = (name) => path.join(HOOKS_DIR, name);
 
-const CONVERTED = Object.freeze(['pre-bash.js', 'pre-write.js', 'pre-write-checkpoint.js']);
+const CONVERTED = Object.freeze(['pre-bash.js', 'pre-write.js', 'pre-write-checkpoint.js', 'pre-write-guard.js']);
 
 /**
- * PreToolUse scripts that STILL grant. Each entry is a debt, not an exemption:
- * the ratchet below fails when an entry no longer grants (delete the entry) and
- * when a script outside this map grants (fix the script).
- *
- * `pre-write-guard.js` prints the same legacy approve on eleven Write/Edit
- * paths. It was being edited by another limb (ca04-c3-whitelist) when this gate
- * landed, so it is converted as the follow-up once that limb is integrated. Until
- * then the host still skips the Write/Edit prompt: converting the three hooks
- * above closes Bash completely and Write/Edit only in part.
+ * PreToolUse scripts that STILL grant. Empty since pre-write-guard.js was converted.
+ * An entry is a debt, not an exemption: the ratchet below fails when an entry no
+ * longer grants (delete it) and when a script outside this map grants (fix it).
  */
-const KNOWN_PENDING = Object.freeze({
-  'pre-write-guard.js': 'eleven approve paths; converted after the ca04-c3-whitelist limb is integrated',
-});
+const KNOWN_PENDING = Object.freeze({});
 
 // ---------------------------------------------------------------------------
 // Scanner

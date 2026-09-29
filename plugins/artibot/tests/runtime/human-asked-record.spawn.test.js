@@ -216,7 +216,7 @@ describe('pre-write: human.asked lands in a real ledger', () => {
     expect(JSON.stringify(asked[0])).not.toContain(fakeAwsKey());
   });
 
-  it('writes nothing on the approve path', () => {
+  it('writes nothing on the pass path', () => {
     const root = makeRoot('A');
     const target = path.join(root, 'src', 'a.js');
 
@@ -227,7 +227,9 @@ describe('pre-write: human.asked lands in a real ledger', () => {
       cwd: root,
     }, root);
 
-    expect(JSON.parse(out.stdout)).toEqual({ decision: 'approve' });
+    // Passthrough (CA-04): pre-write.js grants nothing on a call it does not block.
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe('');
     expect(ledgerEvents(root)).toEqual([]);
   });
 
@@ -385,7 +387,9 @@ describe('pre-write-guard: human.asked lands in a real ledger', () => {
       cwd: root,
     }, root, env);
 
-    expect(JSON.parse(out.stdout)).toEqual({ decision: 'approve' });
+    // Passthrough (CA-04): the guard grants nothing for a file that was already read.
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe('');
     expect(ledgerEvents(root)).toEqual([]);
   });
 

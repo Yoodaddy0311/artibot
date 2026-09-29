@@ -222,12 +222,13 @@ describe('pre-bash hook: decision invariance under ledger conditions', () => {
     ]);
   });
 
-  it('still approves the safe commands and blocks the dangerous ones', () => {
+  it('passes the safe commands through (no decision) and blocks the dangerous ones', () => {
     const { cwd } = condition('A');
     for (const command of APPROVED) {
       const out = runHook({ tool_name: 'Bash', tool_input: { command }, cwd, session_id: SESSION_ID });
-      expect(JSON.parse(out.stdout), `expected approve for: ${command}`)
-        .toEqual({ decision: 'approve' });
+      // Passthrough (CA-04): a command no guard blocks is not GRANTED, so stdout is zero bytes.
+      expect(out.status, `exit code for: ${command}`).toBe(0);
+      expect(out.stdout, `expected zero bytes for: ${command}`).toBe('');
     }
     for (const { command } of BLOCKED) {
       const parsed = JSON.parse(runHook({
@@ -349,9 +350,9 @@ describe('human.asked question_id format', () => {
  * the actual hook (it reads stdin; it cannot be exercised in-process) against a
  * sandbox shaped like a split repository and pins the stdout BYTES:
  *
- *   - every ordinary worktree file  → `{"decision":"approve"}`, exactly as before;
+ *   - every ordinary worktree file  → zero bytes on stdout (a pass, no decision);
  *   - the same situation elsewhere  → the guard's block, exactly as before
- *     (this is what makes the approve above mean "exempt" and not "guard idle");
+ *     (this is what makes the pass above mean "exempt" and not "guard idle");
  *   - config that used to ride in on the substring → now the guard's block;
  *   - a junction to a project root reaches the REAL .mcp.json / artibot.config.json /
  *     hooks.json → the guard's block, while the same names as the worktree's OWN
@@ -359,7 +360,7 @@ describe('human.asked question_id format', () => {
  *   - a relative spelling → no exemption, so the guard's ordinary check applies.
  *
  * A case counts only when the file EXISTS and the tracking file is empty: a new
- * file is approved before the exemption is consulted, and a missing tracking
+ * file passes before the exemption is consulted, and a missing tracking
  * file takes the guard's degraded branch, so either would make every row pass.
  *
  * ── WHAT THIS GATE CANNOT SEE ───────────────────────────────────────────────
@@ -382,7 +383,7 @@ describe('human.asked question_id format', () => {
  *    rules and never reach the filesystem here.
  */
 describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)', () => {
-  const APPROVE = '{"decision":"approve"}';
+  const PASS = '';
   /** @type {string} */
   let box;
   /** @type {string[]} */
@@ -453,11 +454,11 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
    * @returns {{stdout: string, status: number|null}}
    */
   function runGuard({ cwd, target, tool = 'Write' }, tag) {
-    // Unique per case (the loop guard downgrades a repeated block to approve) and
+    // Unique per case (the loop guard downgrades a repeated block to a pass) and
     // a legal file name: the tracking file is named after it.
     const sid = `wbr-l4-${process.pid}-${String(tag).replace(/[^A-Za-z0-9]+/g, '-')}`;
     const tracking = path.join(os.tmpdir(), `artibot-read-tracking-${sid}.json`);
-    // Exists and empty: without it the guard takes its degraded branch and approves.
+    // Exists and empty: without it the guard takes its degraded branch and passes.
     writeFileSync(tracking, '[]', 'utf-8');
     trackingFiles.push(tracking);
     const res = spawnSync(process.execPath, [GUARD_HOOK], {
@@ -495,19 +496,19 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
   /** `checkout`: 'wt' = the split worktree (also the hook's cwd), 'proj' = the main checkout. */
   const ROWS = [
     // ── the split invariant: unchanged bytes ────────────────────────────────
-    { label: 'worktree: ordinary source file', checkout: 'wt', below: ['src', 'a.js'], expectation: 'approve', tool: 'Write' },
-    { label: 'worktree: ordinary source file', checkout: 'wt', below: ['src', 'a.js'], expectation: 'approve', tool: 'Edit' },
-    { label: 'worktree: plugin source file', checkout: 'wt', below: ['plugins', 'artibot', 'lib', 'x.js'], expectation: 'approve', tool: 'Write' },
-    { label: 'worktree: file behind the node_modules junction', checkout: 'wt', below: ['plugins', 'artibot', 'node_modules', 'pkg', 'index.js'], expectation: 'approve', tool: 'Edit' },
-    { label: 'worktree: rules markdown', checkout: 'wt', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
-    { label: 'worktree: CLAUDE.md', checkout: 'wt', below: ['CLAUDE.md'], expectation: 'approve', tool: 'Edit' },
-    { label: 'main checkout: rules markdown', checkout: 'proj', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
-    { label: 'main-checkout window edits a file inside a worktree', checkout: 'proj', below: ['.claude', 'worktrees', 'limb-a', 'src', 'a.js'], expectation: 'approve', tool: 'Write' },
+    { label: 'worktree: ordinary source file', checkout: 'wt', below: ['src', 'a.js'], expectation: 'pass', tool: 'Write' },
+    { label: 'worktree: ordinary source file', checkout: 'wt', below: ['src', 'a.js'], expectation: 'pass', tool: 'Edit' },
+    { label: 'worktree: plugin source file', checkout: 'wt', below: ['plugins', 'artibot', 'lib', 'x.js'], expectation: 'pass', tool: 'Write' },
+    { label: 'worktree: file behind the node_modules junction', checkout: 'wt', below: ['plugins', 'artibot', 'node_modules', 'pkg', 'index.js'], expectation: 'pass', tool: 'Edit' },
+    { label: 'worktree: rules markdown', checkout: 'wt', below: ['.claude', 'rules', 'r.md'], expectation: 'pass', tool: 'Write' },
+    { label: 'worktree: CLAUDE.md', checkout: 'wt', below: ['CLAUDE.md'], expectation: 'pass', tool: 'Edit' },
+    { label: 'main checkout: rules markdown', checkout: 'proj', below: ['.claude', 'rules', 'r.md'], expectation: 'pass', tool: 'Write' },
+    { label: 'main-checkout window edits a file inside a worktree', checkout: 'proj', below: ['.claude', 'worktrees', 'limb-a', 'src', 'a.js'], expectation: 'pass', tool: 'Write' },
     // A worktree's own copy of the plugin config is SOURCE, not the running config.
-    { label: 'worktree: its own plugins/artibot/artibot.config.json (source copy)', checkout: 'wt', below: ['plugins', 'artibot', 'artibot.config.json'], expectation: 'approve', tool: 'Edit' },
-    { label: 'worktree: its own plugins/artibot/hooks/hooks.json (source copy)', checkout: 'wt', below: ['plugins', 'artibot', 'hooks', 'hooks.json'], expectation: 'approve', tool: 'Write' },
+    { label: 'worktree: its own plugins/artibot/artibot.config.json (source copy)', checkout: 'wt', below: ['plugins', 'artibot', 'artibot.config.json'], expectation: 'pass', tool: 'Edit' },
+    { label: 'worktree: its own plugins/artibot/hooks/hooks.json (source copy)', checkout: 'wt', below: ['plugins', 'artibot', 'hooks', 'hooks.json'], expectation: 'pass', tool: 'Write' },
     // A junction to a project root keeps the old exemption for ordinary files (as node_modules does)...
-    { label: 'worktree: ordinary file behind a junction to a project root', checkout: 'wt', below: ['jRoot', 'src', 'a.js'], expectation: 'approve', tool: 'Write' },
+    { label: 'worktree: ordinary file behind a junction to a project root', checkout: 'wt', below: ['jRoot', 'src', 'a.js'], expectation: 'pass', tool: 'Write' },
     // ── what the narrowing removes ──────────────────────────────────────────
     { label: 'worktree: its own .claude/settings.local.json', checkout: 'wt', below: ['.claude', 'settings.local.json'], expectation: 'block', tool: 'Write' },
     { label: 'worktree: file behind a junction into .claude config', checkout: 'wt', below: ['lnk', 'settings.local.json'], expectation: 'block', tool: 'Edit' },
@@ -532,7 +533,7 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
     const target = relative ? below.join('/') : path.join(cwd, ...below);
     const out = runGuard({ cwd, target, tool }, `${label}-${tool}`);
     expect(out.status).toBe(0);
-    expect(out.stdout).toBe(expectation === 'approve' ? APPROVE : blockStdout(tool, target));
+    expect(out.stdout).toBe(expectation === 'pass' ? PASS : blockStdout(tool, target));
   });
 
   describe.runIf(process.platform === 'win32')('Windows: NTFS is case-insensitive', () => {
