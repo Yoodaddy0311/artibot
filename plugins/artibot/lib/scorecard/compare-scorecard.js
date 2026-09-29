@@ -29,6 +29,34 @@
  * were no spawns". So the fold is the port, and a fold-shaped object missing a
  * required field THROWS rather than defaulting to zero.
  *
+ * THE SCORE ROW READS ONE BLOCK AND PRINTS IT IN ONE OF THREE SHAPES (SH-05)
+ * ---------------------------------------------------------------------------
+ * `compare.score` is the only row that reads `fold.score`. What that block MEANS
+ * is defined once, in `spawn-outcome.js` ("THE SCORE AXIS"): a REVIEWER'S
+ * claim-audit pass rate joined on `subject_agent_id`, never what the spawn
+ * achieved. The row prints that definition (`score.basis`) beside the number and
+ * takes its denominator from the block (`score.n`, the joined audits).
+ * `readScore` reads a block, by allowlist, into exactly one of:
+ *   null        `source` and `value` null, `reason` a non-empty string (no
+ *               `review.claim_audit` row of any kind in the input): the legacy
+ *               row BYTE FOR BYTE, no `basis`. Before the axis was defined it was
+ *               the only block this card rendered at all.
+ *   audit       `source` is `review.claim_audit` and the producer's documented
+ *               fields are present and coherent (integer counts that add up,
+ *               `value` in [0, 1] exactly when `n` > 0 and `reason` is null, a
+ *               one-line `basis`). Scored: denominator `n`, rate in the note.
+ *               Unscored: denominator 0, `unmeasured`, the reason and join split.
+ *   unreadable  any other block: `측정 불가` and why, no figure, the other eight
+ *               rows untouched.
+ * An unreadable block does NOT throw. The card used to throw on any non-null
+ * `source`/`value` ("axis not defined yet"); the producer sets `source` on the
+ * FIRST audit row of any kind, so a reviewer's first audit would have killed
+ * `/scorecard --compare` with all nine rows. A `score` that is not a block at
+ * all (absent, null, array, string) still throws — no field to name, and a
+ * missing port is a wiring bug like a missing `replay`. The rate sits in the
+ * note, not the ratio column, as `compare.cost` does with its sums: its
+ * denominator is CLAIMS, which the block lacks, while `n` counts AUDITS.
+ *
  * SCOPE IS THE WHOLE FOLD, AND `since` IS A LABEL
  * ---------------------------------------------------------------------------
  * `since` is not a filter. Narrowing is the CALLER's, through the `filter` it
@@ -66,12 +94,12 @@
  *     that population and are never divided by anything. A null total prints
  *     `unmeasured`, never 0 — a 0 would read as "the divergences were free",
  *     the exact misreading measured on the live run at 2026-09-21T01:31:59Z.
- *  4. QUALITY. `compare.score` has a denominator fixed at 0 and is therefore
- *     permanently `unmeasured`, because no spawn-keyed score writer exists
- *     (fold CANNOT SEE #4). AGREEMENT IS NOT QUALITY: a card where every spawn
- *     got the model it was routed to says nothing about whether the routing was
- *     right. The row stays on the card as an explicit hole rather than being
- *     omitted, so its absence cannot be mistaken for "not applicable".
+ *  4. QUALITY. AGREEMENT IS NOT QUALITY: a card where every spawn got the model
+ *     it was routed to says nothing about whether the routing was right. Nor is
+ *     `compare.score`: a reviewer's claim-audit pass rate about a spawn's REPORT,
+ *     keyed by an id the leader asserted (fold CANNOT SEE #4). While no audit is
+ *     joined it is `unmeasured`; the row stays on the card in every shape, so its
+ *     absence cannot be mistaken for "not applicable".
  *  5. WHETHER THE TWO FOLDS SAW THE SAME LINES, AND WHAT A LABEL MEANS.
  *     `compare.replay_label` comes from a SECOND fold (`labelReplay`, which
  *     runs its own `joinSpawnOutcomes` inside) and neither result carries a
@@ -184,43 +212,107 @@ function requireCostBucket(bucket, name) {
 }
 
 /**
- * Validate the explicit null score block, AND refuse a populated one.
- *
- * WHY A REAL SCORE IS REJECTED RATHER THAN RENDERED. `scoreMetric`'s denominator
- * is hard-wired to 0 and its note writes `source: null · value: null` as TEXT,
- * because no spawn-keyed score writer exists (fold CANNOT SEE #4). The day one
- * lands, a permissive check here would let the card render a MEASURED score as
- * `unmeasured` with a note asserting it was null — a false statement produced by
- * a card that passed validation. The row cannot be fixed by interpolating the
- * value either: a real score needs a real DENOMINATOR (how many pairs carry
- * one), and `fold.score` is a single block with no population in it, so the fix
- * belongs in the fold and then in this row's design. Failing loudly names that
- * work; rendering quietly hides it. This is the same fail-closed choice
- * `metric.js` makes for a malformed denominator.
+ * The `source` of an audit-bearing block (`CLAIM_AUDIT_JOIN_EVENTS.audit`). A copy,
+ * like `CONFIDENCE_BUCKETS`; the fixtures use the real fold, so a rename shows at once.
+ */
+const SCORE_AUDIT_SOURCE = 'review.claim_audit';
+
+/**
+ * Refuse a `score` that is not a block at all — and ONLY that. What a block
+ * CONTAINS becomes a `측정 불가` row, not a throw ({@link readScore}, header).
  *
  * @param {unknown} score - `fold.score`.
  * @returns {void}
+ * @throws {TypeError} when `score` is not a plain object.
  */
-function requireScore(score) {
+function requireScoreBlock(score) {
   if (!isRecord(score)) reject('`score` must be an explicit block, not absent and not null');
-  if (score.source !== null && typeof score.source !== 'string') {
-    reject('`score.source` must be a string or null');
+}
+
+/** A non-empty ONE-LINE string: a break would split the table row it is printed in. */
+function isLine(v) {
+  return typeof v === 'string' && v.length > 0 && !/[\r\n]/.test(v);
+}
+
+/**
+ * The first fault in the COUNTS of an audit-bearing block, or null: integers,
+ * `audits` equal to the producer's exhaustive split, and at least one row read
+ * (with none read `scoreOf` returns the null block).
+ *
+ * @param {object} score - candidate block.
+ * @returns {string|null} the fault, in the card's vocabulary.
+ */
+function auditCountsFault(score) {
+  for (const f of ['n', 'audits', 'unjoined_audits', 'no_subject_audits', 'malformed_audits']) {
+    if (!isCount(score[f])) return `\`score.${f}\` 가 0 이상의 정수가 아니다`;
   }
-  if (score.value !== null && typeof score.value !== 'number') {
-    reject('`score.value` must be a number or null');
+  const split = score.n + score.unjoined_audits + score.no_subject_audits;
+  if (score.audits !== split) {
+    return `\`score.audits\` ${score.audits} 가 n + unjoined_audits + no_subject_audits ${split} 와 다르다`;
   }
-  if (score.source !== null || score.value !== null) {
-    reject(
-      '`score` carries a real measurement, so a spawn-keyed score writer now exists — '
-      + "but `compare.score`'s denominator is hard-wired to 0 and its note states "
-      + '`source: null · value: null` as text, so this card would render a measured '
-      + 'score as `unmeasured`. Redesign that row with a real denominator (and update '
-      + 'its note) rather than relaxing this check',
-    );
+  if (score.audits + score.malformed_audits === 0) {
+    return '읽은 audit 행이 0 인데 source 가 review.claim_audit 다 — 그 경우 생산자는 source 가 null 인 블록을 낸다';
   }
-  if (typeof score.reason !== 'string' || score.reason.length === 0) {
-    reject('`score.reason` must be a non-empty string saying why the score is null');
+  return null;
+}
+
+/**
+ * The first fault in VALUE / REASON / BASIS of an audit-bearing block, or null:
+ * exactly one of `value`/`reason` is null, a `value` lies in [0, 1] with a joined
+ * audit behind it, and a `basis` is present — a number is never printed without
+ * its definition.
+ *
+ * @param {object} score - candidate block, counts already checked.
+ * @returns {string|null} the fault, in the card's vocabulary.
+ */
+function auditValueFault(score) {
+  const { value, reason, n, basis } = score;
+  const scored = value !== null;
+  if (scored && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) {
+    return '`score.value` 가 null 도 0 이상 1 이하의 유한한 수도 아니다';
   }
+  if (scored && n === 0) return '`score.value` 가 있는데 조인된 audit `score.n` 이 0 이다';
+  if (scored ? reason !== null : !isLine(reason)) {
+    return '`score.value` 와 `score.reason` 중 정확히 하나만 null 이어야 하고 reason 은 한 줄 문자열이다';
+  }
+  return isLine(basis) ? null : '`score.basis` 가 비어 있지 않은 한 줄 문자열이 아니다 — 정의 없는 수치는 싣지 않는다';
+}
+
+/**
+ * The first fault keeping a non-null-shape block from being a sound audit block.
+ *
+ * @param {object} score - a block that failed the null-shape test.
+ * @returns {string|null} the fault, in the card's vocabulary.
+ */
+function scoreFault(score) {
+  if (score.source === null) {
+    return score.value === null
+      ? '`score.reason` 가 비어 있지 않은 문자열이 아니다 — source·value 가 null 인 블록은 사유를 적어야 한다'
+      : '`score.source` 가 null 인데 `score.value` 가 null 이 아니다 — 출처 없는 수치는 싣지 않는다';
+  }
+  if (score.source !== SCORE_AUDIT_SOURCE) {
+    // Named without echoing it, and without a call that can throw (`JSON.stringify`
+    // does on a BigInt): this is the path that exists so a bad block does not.
+    const seen = typeof score.source === 'string' ? JSON.stringify(score.source.slice(0, 40)) : typeof score.source;
+    return `\`score.source\` 가 null 도 "${SCORE_AUDIT_SOURCE}" 도 아니다(${seen})`;
+  }
+  return auditCountsFault(score) ?? auditValueFault(score);
+}
+
+/**
+ * Read a block into one of the header's three shapes — ALLOWLIST: a shape the
+ * producer adds tomorrow prints as `측정 불가` until this card learns it.
+ *
+ * @param {object} score - `fold.score`, already known to be a plain object.
+ * @returns {{shape: 'null'|'audit'}|{shape: 'unreadable', why: string}} the reading.
+ */
+function readScore(score) {
+  if (score.source === null && score.value === null
+    && typeof score.reason === 'string' && score.reason.length > 0) {
+    return { shape: 'null' };
+  }
+  const why = scoreFault(score);
+  return why === null ? { shape: 'audit' } : { shape: 'unreadable', why };
 }
 
 /**
@@ -261,7 +353,7 @@ function requireFold(fold) {
   }
   requireCostBucket(fold.cost.same, 'cost.same');
   requireCostBucket(fold.cost.diverged, 'cost.diverged');
-  requireScore(fold.score);
+  requireScoreBlock(fold.score);
 }
 
 /**
@@ -326,11 +418,11 @@ function requireByLabel(replay) {
 /**
  * ALLOWLIST validation of the label fold — every field the row reads, by name.
  *
- * `exact_reachable: true` is REFUSED, not rendered, for `requireScore`'s
- * reason: this row's note states EXACT is a structural 0 and prints the
- * unreachability reason as text. The day a writer contract lets one Action
- * carry two independent results (replay-label.js "EXACT OPENS"), a permissive
- * check here would print a measured EXACT under a note calling it impossible.
+ * `exact_reachable: true` is REFUSED, not rendered: this row's note states
+ * EXACT is a structural 0 and prints the unreachability reason as text. The day
+ * a writer contract lets one Action carry two independent results
+ * (replay-label.js "EXACT OPENS"), a permissive check here would print a
+ * measured EXACT under a note calling it impossible.
  *
  * @param {unknown} replay - candidate label fold.
  * @returns {void}
@@ -581,23 +673,96 @@ function replayLabelMetric(replay) {
 }
 
 /**
- * The permanently unmeasured quality row.
+ * The legacy score row (`source` and `value` null): BYTE FOR BYTE what this card
+ * printed before the axis was defined, no `basis` — the test file pins every string
+ * against a literal captured from the previous code. (Its label "스폰 결과 점수" is
+ * the reading the axis definition rules out; renaming it is an output change for
+ * this card's owner, not a side effect of this redesign.)
  *
- * @param {object} fold - validated fold.
+ * @param {object} score - `fold.score`, read as the null shape.
  * @returns {Readonly<object>} metric.
  */
-function scoreMetric(fold) {
+function nullScoreMetric(score) {
   return metric({
     key: 'compare.score',
     label: '스폰 결과 점수 (측정자 없음)',
     source: 'spawn-outcome score.source · score.value · score.reason',
     denominator: 0,
-    note: `source: null · value: null · reason: ${fold.score.reason}. 분모를 0 으로 고정해 `
+    note: `source: null · value: null · reason: ${score.reason}. 분모를 0 으로 고정해 `
       + '영구 unmeasured 다 — 원장에 스폰-키 점수 writer 가 없다(spawn-outcome.js CANNOT SEE '
       + '#4). 합의는 품질이 아니다: compare.agreement 가 높아도 라우팅이 옳았다는 뜻이 '
       + '아니다. 행을 빼지 않고 남겨 둔 이유는 부재가 "해당 없음"으로 읽히지 않게 하려는 '
       + '것이다.',
   });
+}
+
+/**
+ * The score row for an audit-bearing block. Scored: denominator `n` (the joined
+ * audits, NOT claims or spawns), the rate in the note to six fixed digits (the
+ * `money` rule) with `basis` verbatim. Unscored: denominator 0 — `unmeasured` and
+ * listed as such — and the producer's reason instead of a figure, never a 0.
+ * Either way the note says how many audits did NOT feed the rate.
+ *
+ * @param {object} score - `fold.score`, read as the audit shape.
+ * @returns {Readonly<object>} metric.
+ */
+function auditScoreMetric(score) {
+  const scored = score.value !== null;
+  const read = `읽은 audit ${score.audits}건 = joined ${score.n} + unjoined ${score.unjoined_audits} `
+    + `+ no_subject ${score.no_subject_audits}, 이 밖에 읽지 못한 malformed ${score.malformed_audits}건`;
+  const body = scored
+    ? `통과율 ${score.value.toFixed(6)} (claim 단위) — 스폰 키(subject_agent_id)로 조인된 `
+      + `review.claim_audit n=${score.n}건의 (claims_total − claims_refuted) ÷ claims_total 이다. `
+      + `분모(n=${score.n})는 조인된 audit 행 수이지 claim 수도 스폰 수도 아니다 — claim 수는 `
+      + 'score 블록에 없고, 같은 스폰의 audit 가 둘이면 둘로 센다(claim-audit-join.js CANNOT '
+      + `SEE #3). ${read} — 통과율은 joined 만으로 계산된다.`
+    : `통과율 unmeasured — reason: ${score.reason}. 조인된 audit n=${score.n}: 조인된 audit 가 `
+      + '없거나 있어도 claims_total 이 모두 0 이라 분모가 비어 있다 — 0 이 아니라 unmeasured '
+      + `다(0 은 "모든 claim 이 반박됐다"는 발견으로 읽힌다). ${read}.`;
+  return metric({
+    key: 'compare.score',
+    label: '리뷰어 claim_audit 통과율 (스폰 결과 아님)',
+    source: 'spawn-outcome score.value · score.n ← review.claim_audit{data.subject_agent_id} '
+      + '⋈ route.bound{data.agent_id}',
+    denominator: scored ? score.n : 0,
+    note: `${body} 정의(basis): ${score.basis}. 리뷰어가 보고서를 두고 낸 판정이지 스폰이 이룬 `
+      + '결과가 아니다: compare.agreement 와 다른 축이며 둘 다 높아도 라우팅이 옳았다는 뜻은 '
+      + '아니다(spawn-outcome.js CANNOT SEE #4).',
+  });
+}
+
+/**
+ * The score row for a block this card cannot read: `측정 불가`, no figure, and the
+ * rule it broke. Its label and note differ from the legacy row on purpose — a
+ * producer or wiring fault must not print as the ordinary empty ledger.
+ *
+ * @param {string} why - the first fault {@link readScore} found.
+ * @returns {Readonly<object>} metric.
+ */
+function unreadableScoreMetric(why) {
+  return metric({
+    key: 'compare.score',
+    label: '스폰 점수 (측정 불가)',
+    source: 'spawn-outcome score (형식 검증 실패)',
+    denominator: 0,
+    note: '측정 불가: fold.score 가 알려진 두 모양(source·value 가 null 인 블록 · '
+      + `review.claim_audit 블록) 어느 쪽도 아니라 싣지 않는다 — ${why}. 값을 추정하지도 0 으로 `
+      + '메우지도 않는다. 이 행의 unmeasured 는 "아직 audit 가 없다"가 아니라 "읽을 수 없었다"다 '
+      + '— spawn-outcome.js 헤더의 THE SCORE AXIS 와 fold.score 를 대조하라.',
+  });
+}
+
+/**
+ * The `compare.score` row: read the block once, then print the shape it is.
+ *
+ * @param {object} fold - validated fold (`fold.score` is a plain object).
+ * @returns {Readonly<object>} metric.
+ */
+function scoreMetric(fold) {
+  const reading = readScore(fold.score);
+  if (reading.shape === 'null') return nullScoreMetric(fold.score);
+  if (reading.shape === 'audit') return auditScoreMetric(fold.score);
+  return unreadableScoreMetric(reading.why);
 }
 
 /**
