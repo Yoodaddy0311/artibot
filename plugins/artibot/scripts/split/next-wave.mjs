@@ -39,6 +39,7 @@
  */
 
 import path from 'node:path';
+import { normalizeTaskId } from '../../lib/autopilot/fast-profile.js';
 import { planJsonPath, readPlanJson, readRunJson } from '../../lib/git/split-run-file.js';
 import { readLaneOpsState } from '../../lib/supervisor/lane-monitor.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
@@ -69,8 +70,9 @@ export function parseArgs(argv) {
   return out;
 }
 
+/** Ids through the shared `normalizeTaskId` (plan-append compares with it too), blanks dropped. */
 const cleanIds = (list) => (Array.isArray(list) ? list : [])
-  .filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim());
+  .map(normalizeTaskId).filter((id) => id !== null);
 
 /**
  * Saved-plan task ids. `measured` is false when either list is missing.
