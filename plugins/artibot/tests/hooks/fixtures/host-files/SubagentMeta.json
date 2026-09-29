@@ -1,0 +1,50 @@
+{
+  "_note": "FROZEN FIXTURE - key names of a host-written FILE, not of a hook payload. Contains NO values: no ids, no paths, no descriptions, no names. Captured by a read-only census of the agent meta files the host writes under ~/.claude/projects on one machine (the census script stayed in the session scratchpad and was not committed; it parsed each file, recorded key names and two shape checks, and printed no field value). Do not edit it to make a test pass: when a newer host renames or drops a key, re-run the census and commit a new capture - the diff is the record that the host contract changed.",
+  "fixture_format": "sibling of tests/hooks/fixtures/host-payloads/ (INCIDENT-2026-09-03 section 6.1 item 1: key names only, frozen, measured on a live host). It lives in host-files/ and not in host-payloads/ on purpose: a meta file is a FILE the host writes beside a subagent transcript, not a hook payload, and probe-hook-keys.test.js requires every host-payloads/*.json to declare extraction_method 'live probe via --settings, key names only', which this census is not.",
+  "file_shape": "<projects>/<slug>/<session-id>/subagents/agent-<id>.meta.json, written beside agent-<id>.jsonl (the subagent transcript). UNDOCUMENTED host file: nothing in the public hook contract promises it, so the reader treats every failure to read it as 'no value'.",
+  "measured_at_utc": "2026-09-29T05:33:47Z",
+  "measured_scope": "one Windows machine; every project slug under ~/.claude/projects (131 slug dirs, 244 session dirs); newest meta file mtime 2026-09-29T05:26:34Z",
+  "host_version": "mixed - not recorded per file (the meta files carry no version key), so no single semver is claimed",
+  "census": {
+    "meta_files": 1441,
+    "unparsable": 0,
+    "non_object": 0,
+    "with_sibling_transcript": 1407,
+    "distinct_key_sets": 20
+  },
+  "keys_observed": [
+    "agentType",
+    "color",
+    "customAgentType",
+    "description",
+    "isFork",
+    "model",
+    "name",
+    "parentAgentId",
+    "permissionMode",
+    "planModeRequired",
+    "requestNonInteractive",
+    "requestShape",
+    "spawnDepth",
+    "spawnedWithWorktree",
+    "taskKind",
+    "teamName",
+    "toolUseId",
+    "worktreeBranch",
+    "worktreePath"
+  ],
+  "keys_consumed": ["spawnDepth", "parentAgentId"],
+  "consumed_key_presence": {
+    "spawnDepth": "1441/1441 non-negative integer (depth 0: 1164, depth 1: 263, depth 2: 14)",
+    "parentAgentId": "129/1441 non-empty string (newest file carrying it: mtime 2026-09-23T00:47:22Z)"
+  },
+  "unit_note": "spawnDepth counts from 0 for an in-process teammate (taskKind in_process_teammate on 1180 files) and 1 for its child. ARTIBOT-5.0-DESIGN.md section 7.2 (max_depth row) counts the teammate as 1. The reader records the host's number UNCHANGED and labels it depth_source 'host-meta'; converting units is an owner decision and is not made here.",
+  "verdict": "consumed-keys-present",
+  "missing": [],
+  "not_measured": [
+    "the value shape of agent_transcript_path on a captured SubagentStop payload - the reader ASSUMES it names agent-<id>.jsonl beside the meta file (the same layout lib/economics/usage-receipt.js documents for subagent transcripts); no Stop payload was captured for this fixture",
+    "whether the meta file exists at SubagentStop for every spawn - the R7 recon saw it appear about one second AFTER SubagentStart on 3/3 spawns, which is why only the Stop row reads it",
+    "parentAgentId on the current host: the newest file carrying it is dated 2026-09-23, so no nested spawn sample from a later host version exists",
+    "which host version wrote which file (no version key in the file)"
+  ]
+}

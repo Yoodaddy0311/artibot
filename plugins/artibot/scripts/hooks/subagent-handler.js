@@ -5,6 +5,7 @@
  * Usage: node subagent-handler.js start|stop
  */
 
+import { readFileSync, statSync } from 'node:fs';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
@@ -193,6 +194,65 @@ function extractDepth(hookData) {
     if (Number.isInteger(candidate) && candidate >= 0) return candidate;
   }
   return null;
+}
+
+/**
+ * `depth_source` of a depth read from the host's meta file. The host counts an
+ * in-process teammate as 0, the design canon (section 7.2, max_depth row) as 1:
+ * the number is recorded UNCHANGED and this label says whose it is.
+ * @type {string}
+ */
+export const HOST_META_SOURCE = 'host-meta';
+
+/** A meta file is a few hundred bytes; a larger one is not read. @type {number} */
+export const HOST_META_MAX_BYTES = 65536;
+
+/**
+ * Depth and parent from the host-written `agent-<id>.meta.json` beside the
+ * subagent transcript (`agent_transcript_path` is `agent-<id>.jsonl`). An
+ * UNDOCUMENTED file, so every failure is "no value": missing or oversize, garbled
+ * or non-object JSON, renamed keys, wrong types. Only `spawnDepth` and
+ * `parentAgentId` leave this function, by name (frozen key names:
+ * `tests/hooks/fixtures/host-files/SubagentMeta.json`). The file appears ~1 s
+ * AFTER SubagentStart (R7 recon, 3/3), so only Stop reads it. Never throws.
+ * @param {unknown} transcriptPath - `agent_transcript_path` of a SubagentStop payload
+ * @returns {{depth: number|null, parentAgentId: string|null}}
+ */
+export function readHostSubagentMeta(transcriptPath) {
+  const none = { depth: null, parentAgentId: null };
+  try {
+    if (typeof transcriptPath !== 'string' || !transcriptPath.endsWith('.jsonl')) return none;
+    const file = `${transcriptPath.slice(0, -'.jsonl'.length)}.meta.json`;
+    const stat = statSync(file);
+    if (!stat.isFile() || stat.size > HOST_META_MAX_BYTES) return none;
+    const meta = JSON.parse(readFileSync(file, 'utf-8'));
+    if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return none;
+    const parent = typeof meta.parentAgentId === 'string' ? meta.parentAgentId.trim() : '';
+    return {
+      depth: Number.isInteger(meta.spawnDepth) && meta.spawnDepth >= 0 ? meta.spawnDepth : null,
+      parentAgentId: parent === '' ? null : parent.slice(0, 128),
+    };
+  } catch {
+    return none;
+  }
+}
+
+/**
+ * The depth columns of a STOP row. A depth the payload itself carries wins and
+ * stays unlabelled (its unit is unknown); otherwise the meta file's depth is used,
+ * labelled {@link HOST_META_SOURCE}. An explicit null means "read, found nothing".
+ * @param {object} hookData - Parsed SubagentStop payload
+ * @returns {{depth: number|null, parent_agent_id: string|null, depth_source: string|null}}
+ */
+export function stopDepthFields(hookData) {
+  const fromPayload = extractDepth(hookData);
+  const meta = readHostSubagentMeta(hookData?.agent_transcript_path);
+  const fromMeta = fromPayload === null && meta.depth !== null;
+  return {
+    depth: fromMeta ? meta.depth : fromPayload,
+    parent_agent_id: meta.parentAgentId,
+    depth_source: fromMeta ? HOST_META_SOURCE : null,
+  };
 }
 
 /**
@@ -715,7 +775,7 @@ function handleStop(hookData, ids) {
     recommendedModel: tracked?.recommendedModel ?? null,
     actionClass: tracked?.actionClass ?? null,
     routing_epoch_id: agentId,
-    depth: extractDepth(hookData),
+    ...stopDepthFields(hookData),
     mission_id: missionId,
     ...(taskId === null ? {} : { task_id: taskId }),
     ...(review === null ? {} : { review_ledger: reviewLedgerColumn(review) }),
