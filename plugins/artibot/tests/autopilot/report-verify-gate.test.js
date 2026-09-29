@@ -255,9 +255,13 @@ const gateTicks = (sessionId) => readEvents(sessionId).filter((e) => e.type === 
 
 /**
  * The Phase Timeline REPORT row that `replay.js#renderTimelineTable` prints for
- * one run's events, minus its clock-time and duration columns:
- * [phase, events, warn, error, retry, bottleneck]. Read from the renderer, not
- * the report file: the dev report template carries no Phase Timeline at all.
+ * one run's events, minus every column derived from the wall clock:
+ * [phase, events, warn, error, retry]. Dropped: start time and duration, and the
+ * bottleneck mark, which `summarizeEvents` sets on the longest phase — two runs
+ * of the same events can differ there by timing alone (batch 20 CI, Node 24:
+ * '⚠' vs '-'). The event count, the column a leaked OFF tick would move, stays.
+ * Read from the renderer, not the report file: the dev report template carries
+ * no Phase Timeline at all.
  * @param {object[]} events
  * @returns {string[]}
  */
@@ -265,7 +269,7 @@ function reportTimelineRow(events) {
   const table = renderTimelineTable(summarizeEvents('run', events));
   const line = table.split('\n').find((l) => l.startsWith('| REPORT |'));
   const cells = line.split('|').slice(1, -1).map((c) => c.trim());
-  return [cells[0], ...cells.slice(3)];
+  return [cells[0], ...cells.slice(3, -1)];
 }
 
 /**
@@ -305,6 +309,8 @@ describe('runPhase6Report — switch OFF (shipped)', () => {
     // The Phase Timeline REPORT row — the '이벤트' column above all.
     expect.soft(gated.timelineRow).toEqual(baseline.timelineRow);
     expect(baseline.timelineRow[0]).toBe('REPORT');
+    // Five cells or the slice above silently dropped the event count.
+    expect(baseline.timelineRow).toHaveLength(5);
 
   });
 
