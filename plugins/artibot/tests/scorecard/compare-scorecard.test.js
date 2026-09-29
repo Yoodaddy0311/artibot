@@ -33,17 +33,32 @@
  *     not a stand-in. The measured row is fixture E's, built through the real
  *     `labelReplay`; which grade a given Action earns is
  *     `tests/replay/replay-label.test.js`'s contract, not this suite's.
+ *   - A LIVE `review.claim_audit` ROW. None exists to copy a shape from: W1-8
+ *     (8ae56c77) measured 0 `review.*` rows on the central ledger at
+ *     2026-09-29T04:24Z, and this suite did not re-measure it. The audit rows of
+ *     fixtures F and G go through the PRODUCTION writer
+ *     (`verdict-writer.js#buildClaimAuditEvent`), so their `data` keys are
+ *     writer-true, but every count and every id is synthetic: nothing here says
+ *     what a reviewer really writes or what a live pass rate is. Which audits
+ *     join and what the rate is stays `tests/replay/spawn-outcome.test.js` and
+ *     `claim-audit-join.test.js`'s contract; this suite pins how the CARD prints
+ *     a score block the fold has already made.
  *
  * @module tests/scorecard/compare-scorecard
  */
 
 import { describe, expect, it } from 'vitest';
 import {
+  CLAIM_AUDIT_JOIN_EVENTS,
   EXACT_UNREACHABLE_REASON,
   joinSpawnOutcomes,
   labelReplay,
   REPLAY_LABELS,
+  SCORE_EMPTY_DENOMINATOR_REASON,
+  SCORE_NO_JOINED_AUDIT_REASON,
+  SCORE_UNAVAILABLE_REASON,
 } from '../../lib/replay/index.js';
+import { buildClaimAuditEvent } from '../../lib/review/verdict-writer.js';
 import { buildCompareScorecard, COMPARE_KIND } from '../../lib/scorecard/compare-scorecard.js';
 import { renderScorecardMarkdown } from '../../lib/scorecard/render.js';
 import * as barrel from '../../lib/scorecard/index.js';
@@ -440,6 +455,137 @@ function labelFixture() {
 }
 
 /**
+ * A `review.claim_audit` ledger line built through the PRODUCTION writer.
+ *
+ * `buildClaimAuditEvent` decides which `data` keys exist (the optional
+ * `subject_agent_id` is OMITTED, never null), so the audit fixtures below cannot
+ * carry a key shape no writer produces. The envelope keys the writer does not
+ * own (`v`, `ts`, `pid`, `seq`) are filled in the way the other builders do.
+ *
+ * @param {object} spec - `total` and `refuted` counts; `subjectId` is optional.
+ * @returns {object} ledger line.
+ */
+function auditRow(spec) {
+  const { subjectId, total, refuted } = spec;
+  const built = buildClaimAuditEvent({
+    parsed: {
+      ok: true,
+      subject_agent_type: 'tdd-guide',
+      claims_total: total,
+      claims_refuted: refuted,
+      ...(subjectId === undefined ? {} : { subject_agent_id: subjectId }),
+    },
+    sessionId: SESS,
+  });
+  if (!built.ok) throw new Error(`fixture: buildClaimAuditEvent refused: ${built.reason}`);
+  seq += 1;
+  return { v: 1, ts: '2026-09-21T02:00:00.000Z', pid: 4242, seq, ...built.input };
+}
+
+/**
+ * A `review.claim_audit` row the parser would have refused, assembled by hand
+ * (`claims_total` is not an integer) — the only way such a line reaches the
+ * fold, which counts it as `malformed_audits` and in no denominator.
+ *
+ * @returns {object} ledger line.
+ */
+function malformedAuditRow() {
+  seq += 1;
+  return {
+    v: 1,
+    ts: '2026-09-21T02:00:00.000Z',
+    event: 'review.claim_audit',
+    session_id: SESS,
+    source: 'reviewer',
+    pid: 4242,
+    seq,
+    data: { subject_agent_type: 'tdd-guide', claims_total: 'many', claims_refuted: 0 },
+  };
+}
+
+/**
+ * AUXILIARY fixture F — three bound, receipted spawns and NO audit row.
+ *
+ * Every audit fixture starts from these lines, so `fold.score` is the null
+ * block here and the same card without any audit is the baseline the audit
+ * fixtures are compared against: the eight rows that do not read `fold.score`
+ * must come out identical whatever the score block is.
+ *
+ * @returns {object[]} ledger lines.
+ */
+function auditedSpawns() {
+  seq = 0;
+  const out = [];
+  for (const agentId of ['au-01', 'au-02', 'au-03']) {
+    pushPair(out, { agentId, recommended: OPUS, served: OPUS });
+  }
+  return out;
+}
+
+/**
+ * AUXILIARY fixture G — fixture F plus reviewer audits of every kind.
+ *
+ * | rows | what | lands in |
+ * |---|---|---|
+ * | 3 | au-01 10/2 · au-02 5/0 · au-03 5/3 | joined: (20 − 5) ÷ 20 = 0.75 |
+ * | 2 | subject ids no spawn bound, 100/100 each | `unjoined_audits` |
+ * | 1 | no `subject_agent_id`, 100/100 | `no_subject_audits` |
+ * | 1 | hand-assembled, `claims_total` not an integer | `malformed_audits` |
+ *
+ * The three rows that must NOT reach the rate carry 100/100 on purpose: a sum
+ * that leaked them would move 0.75 to a value nobody would mistake for it.
+ *
+ * @returns {object[]} ledger lines.
+ */
+function scoredFixture() {
+  const out = auditedSpawns();
+  out.push(
+    auditRow({ subjectId: 'au-01', total: 10, refuted: 2 }),
+    auditRow({ subjectId: 'au-02', total: 5, refuted: 0 }),
+    auditRow({ subjectId: 'au-03', total: 5, refuted: 3 }),
+    auditRow({ subjectId: 'au-never-1', total: 100, refuted: 100 }),
+    auditRow({ subjectId: 'au-never-2', total: 100, refuted: 100 }),
+    auditRow({ total: 100, refuted: 100 }),
+    malformedAuditRow(),
+  );
+  return out;
+}
+
+/**
+ * Fixture F plus exactly ONE audit row, by kind. Each of the five is a state
+ * the pre-follow-up card threw on (probed with real calls at 2026-09-29T04:58Z).
+ */
+const SINGLE_AUDIT_KINDS = Object.freeze({
+  joined: () => [...auditedSpawns(), auditRow({ subjectId: 'au-01', total: 10, refuted: 2 })],
+  'no-subject': () => [...auditedSpawns(), auditRow({ total: 10, refuted: 2 })],
+  unjoined: () => [
+    ...auditedSpawns(), auditRow({ subjectId: 'au-never-1', total: 10, refuted: 2 }),
+  ],
+  malformed: () => [...auditedSpawns(), malformedAuditRow()],
+  'zero-claims': () => [...auditedSpawns(), auditRow({ subjectId: 'au-01', total: 0, refuted: 0 })],
+});
+
+/**
+ * Memoise a builder so that a build which THROWS fails the `it` that asked for
+ * it, instead of failing the whole `describe` at collection time (which would
+ * hide which case broke).
+ *
+ * @param {() => *} build - builder.
+ * @returns {() => *} memoised getter.
+ */
+function lazily(build) {
+  let done = false;
+  let value;
+  return () => {
+    if (!done) {
+      value = build();
+      done = true;
+    }
+    return value;
+  };
+}
+
+/**
  * The card over `events`, with both folds taken from the SAME lines — the
  * wiring `commands/scorecard.md` performs.
  *
@@ -450,6 +596,12 @@ function labelFixture() {
 function cardOf(events, opts = {}) {
   return buildCompareScorecard(joinSpawnOutcomes(events), { ...opts, replay: labelReplay(events) });
 }
+
+/** The `compare.score` row of a card — the ONE row the SH-05 follow-up changes. */
+const scoreRowOf = (card) => card.metrics.find((m) => m.key === 'compare.score');
+
+/** The eight rows that do not read `fold.score`: they must not depend on it. */
+const otherRowsOf = (card) => card.metrics.filter((m) => m.key !== 'compare.score');
 
 const EVENTS = mainFixture();
 const FOLD = joinSpawnOutcomes(EVENTS);
@@ -946,8 +1098,13 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
         diverged: { priced: 0, total: null },
       },
     }],
+    // 블록 자체가 없거나 객체가 아닌 것은 "형식이 틀린 블록"이 아니라 배선 오류다 —
+    // 어느 필드가 틀렸는지 말할 대상이 없다. 이 던짐은 그대로 남긴다(SH-05 후속은
+    // 블록 "안"의 내용만 던지지 않고 표기한다; 아래 '측정 불가' 절).
     ['score 가 null', { score: null }],
-    ['score.reason 이 빈 문자열', { score: { source: null, value: null, reason: '' } }],
+    ['score 가 undefined', { score: undefined }],
+    ['score 가 배열', { score: [] }],
+    ['score 가 문자열', { score: 'x' }],
     // I4-1: by_confidence 의 네 키를 이름으로 요구한다. 부분 fold 가 통과하면
     // 카드가 exact 만 있는 분포를 전 쌍 분포라고 찍는다.
     ['by_confidence 가 빈 객체', { by_confidence: {} }],
@@ -967,22 +1124,17 @@ describe('fail-closed — 배선 오류가 빈 카드로 보이지 않는다', (
       },
     }],
     ['by_agreement.diverged 가 문자열', { by_agreement: { same: 0, diverged: 'x' } }],
-    ['score.source 가 숫자', { score: { source: 5, value: null, reason: 'r' } }],
-    ['score.value 가 문자열', { score: { source: null, value: 'x', reason: 'r' } }],
   ])('%s 이면 던진다', (_name, patch) => {
     expect(() => buildCompareScorecard({ ...FOLD, ...patch }, ok)).toThrow(TypeError);
   });
 
-  it.each([
-    ['source 가 실제 writer 이름', { source: 'review.completed', value: null, reason: 'r' }],
-    ['value 가 실제 점수', { source: null, value: 0.82, reason: 'r' }],
-  ])('점수 writer 가 생겨 %s 면 카드를 찍지 않고 던진다 (I4-2)', (_name, score) => {
-    // compare.score 의 분모는 0 으로 하드와이어돼 있고 note 는 `source: null ·
-    // value: null` 을 문자로 박는다. writer 가 생긴 뒤에도 통과시키면 카드가
-    // 실측된 점수를 unmeasured 라고 찍는다 — 거짓 표기다. 행을 다시 설계하라는
-    // 메시지와 함께 거부하는 쪽을 택했다(보고 §I4-2 참조).
-    expect(() => buildCompareScorecard({ ...FOLD, score }, ok))
-      .toThrow(/denominator is hard-wired to 0|redesign/i);
+  it('score 블록이 없으면 던지는 메시지가 그 이유를 적는다', () => {
+    // 옛 I4-2 두 케이스(source 가 실제 writer 이름 · value 가 실제 점수)는 여기서 빠졌다.
+    // 그 단언은 "점수 축이 아직 정의되지 않았다"의 자리표시자였다("행을 재설계하라, 검사를
+    // 풀지 마라"). 축은 8ae56c77 에서 정의됐고 재설계가 SH-05 후속이다 — 새 계약은 아래
+    // 'score 행' 그룹들이 잡는다. 블록이 아예 없는 배선 오류만 여기서 던진다.
+    expect(() => buildCompareScorecard({ ...FOLD, score: null }, ok))
+      .toThrow(/`score` must be an explicit block, not absent and not null/);
   });
 
   it.each([
@@ -1134,9 +1286,424 @@ describe('fail-closed — replay 포트가 없거나 모양이 틀리면 던진�
 
   it('exact_reachable 이 true 면 카드를 찍지 않고 행 재설계를 요구한다', () => {
     // note 가 EXACT 를 구조적 0 이라 문자로 박는다. EXACT 가 열린 뒤에도 통과시키면
-    // 측정된 EXACT 를 "불가능" 이라 적은 행이 나온다 — compare.score 의 I4-2 와 같은 선택.
+    // 측정된 EXACT 를 "불가능" 이라 적은 행이 나온다 — 그래서 거부하고 재설계를 요구한다.
+    // (compare.score 도 한때 같은 이유로 거부했다가 SH-05 후속에서 재설계됐다. 이 행은
+    // 아직 재설계 전이라 거부가 그대로 남는다.)
     expect(() => buildCompareScorecard(FOLD, { replay: { ...REPLAY_E, exact_reachable: true } }))
       .toThrow(/Redesign that row/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SH-05 후속 — `compare.score` 행의 새 계약.
+//
+// 옛 계약은 `requireScore` 의 단언이었다: score.source 나 score.value 가 null 이 아니면
+// 카드를 던진다("행을 재설계하라, 검사를 풀지 마라"). 그건 "점수 축이 아직 정의되지 않았다"의
+// 자리표시자였고, 축은 8ae56c77 에서 정의됐다(spawn-outcome.js "THE SCORE AXIS": 값은 리뷰어
+// claim_audit 통과율이고, 그 정의가 score.basis 로 값 옆에 찍힌다). 아래 다섯 그룹이 새
+// 계약이다 — (1) audit 행이 있어도 카드는 던지지 않는다 (2) 조인된 audit 가 있으면 basis 와
+// 분모와 함께 찍는다 (3) 조인된 게 없으면 unmeasured 다 (4) null 블록은 옛 출력과 바이트가
+// 같다 (5) 형식이 틀린 블록은 던지지 않고 "측정 불가" 로 표기한다.
+
+/** 조인된 audit 가 있을 때의 행 이름 — 값이 스폰의 결과가 아니라는 말이 이름에 들어 있다. */
+const AUDIT_LABEL = '리뷰어 claim_audit 통과율 (스폰 결과 아님)';
+
+/** 블록을 읽을 수 없을 때의 행 이름 — 화면에서 보이는 표지다. */
+const UNREADABLE_LABEL = '스폰 점수 (측정 불가)';
+
+describe('score 행 (1) — audit 행이 하나라도 있으면 카드가 던지던 결함', () => {
+  // 결함: `requireScore` 는 score.source 나 score.value 가 null 이 아니면 던졌다. 생산자는
+  // audit 행을 "종류 불문" 처음 읽는 순간부터 source 를 채운다(조인된 행이든, subject 없는
+  // 행이든, 깨진 행이든). 그래서 원장에 review.claim_audit 이 한 줄만 생겨도
+  // `/scorecard --compare` 전체가 TypeError 였다 — 2026-09-29T04:58Z 실호출로 5종 전부 재현.
+  const spawnsOnly = lazily(() => cardOf(auditedSpawns()));
+
+  it('픽스처 자기검증: 스폰만 있는 원장의 score 는 null 블록이다', () => {
+    expect(joinSpawnOutcomes(auditedSpawns()).score).toMatchObject({ source: null, value: null });
+  });
+
+  it.each(Object.keys(SINGLE_AUDIT_KINDS))('audit 1건(%s)이 있어도 카드를 찍고 렌더한다', (kind) => {
+    const events = SINGLE_AUDIT_KINDS[kind]();
+    // 자기검증: 생산자가 audit-bearing 블록을 냈다. 아니면 이 케이스는 옛 경로를 재는 공허 단언이다.
+    expect(joinSpawnOutcomes(events).score.source).toBe(CLAIM_AUDIT_JOIN_EVENTS.audit);
+    const card = cardOf(events);
+    expect(card.metrics.map((m) => m.key)).toEqual(ROW_KEYS);
+    expect(() => renderScorecardMarkdown(card)).not.toThrow();
+    // score 행이 무엇을 찍든 나머지 8행은 audit 가 없는 카드와 같다.
+    expect(otherRowsOf(card)).toEqual(otherRowsOf(spawnsOnly()));
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('score 행 (2) — 조인된 audit 가 있으면 basis 와 분모 n 을 붙여 찍는다', () => {
+  const events = lazily(() => scoredFixture());
+  const fold = lazily(() => joinSpawnOutcomes(events()));
+  const card = lazily(() => cardOf(events()));
+  const row = () => scoreRowOf(card());
+
+  it('픽스처 자기검증: 생산자가 3건 조인 · 통과율 0.75 · 조인 못 한 2 · subject 없는 1 · malformed 1 로 접는다', () => {
+    const { score } = fold();
+    expect(score).toMatchObject({
+      source: CLAIM_AUDIT_JOIN_EVENTS.audit,
+      value: 0.75,
+      reason: null,
+      n: 3,
+      audits: 6,
+      unjoined_audits: 2,
+      no_subject_audits: 1,
+      malformed_audits: 1,
+    });
+    // 생산자가 문서화한 분할: audits = joined + unjoined + no_subject (malformed 는 밖).
+    expect(score.audits).toBe(score.n + score.unjoined_audits + score.no_subject_audits);
+    expect(typeof score.basis).toBe('string');
+  });
+
+  it('행이 measured 이고 분모가 n(조인된 audit 행 수)이다', () => {
+    expect(row()).toMatchObject({
+      key: 'compare.score',
+      denominator: 3,
+      numerator: null,
+      ratio: null,
+      counts: null,
+      absent: 0,
+      measured: true,
+      state: 'measured',
+    });
+  });
+
+  it('행 이름이 "스폰 결과 점수" 가 아니라 리뷰어 통과율이다', () => {
+    expect(row().label).toBe(AUDIT_LABEL);
+    expect(row().label).not.toContain('측정자 없음');
+    expect(row().source).toContain('review.claim_audit');
+    expect(row().source).toContain('route.bound');
+  });
+
+  it('note 가 통과율을 고정 자릿수로 적는다', () => {
+    expect(row().note).toContain('통과율 0.750000');
+  });
+
+  it('note 가 basis 를 글자 그대로 싣는다 (정의 없는 수치를 찍지 않는다)', () => {
+    expect(row().note).toContain(fold().score.basis);
+  });
+
+  it('note 가 분모 n 의 뜻과 조인 못 한 audit 의 수를 함께 적는다', () => {
+    const { note } = row();
+    expect(note).toContain('n=3');
+    expect(note).toContain('claim 수도 스폰 수도 아니다');
+    for (const token of ['joined 3', 'unjoined 2', 'no_subject 1', 'malformed 1']) {
+      expect(note, token).toContain(token);
+    }
+  });
+
+  it('note 에 null 블록의 문장이 남아 있지 않다 (측정된 점수를 null 이라 적지 않는다)', () => {
+    for (const stale of ['source: null', 'value: null', '영구 unmeasured', SCORE_UNAVAILABLE_REASON]) {
+      expect(row().note, stale).not.toContain(stale);
+    }
+  });
+
+  it('score 행 밖의 8행은 audit 가 없는 카드와 같다', () => {
+    expect(otherRowsOf(card())).toEqual(otherRowsOf(cardOf(auditedSpawns())));
+  });
+
+  it('measured 라 unmeasured 색인에서 빠지고 totals 가 카드에서 파생된다', () => {
+    expect(card().unmeasured).toEqual(['compare.replay_label']);
+    expect(card().totals).toEqual({ metrics: 9, measured: 8, unmeasured: 1 });
+  });
+
+  it('렌더: 표 행은 값·비율 칸이 — 이고 통과율은 근거 절에 있다', () => {
+    const out = renderScorecardMarkdown(card());
+    expect(out).toContain(`| ${AUDIT_LABEL} | — | 3 | — | 0 | measured |`);
+    const evidence = out.split('\n').find((l) => l.startsWith(`| ${AUDIT_LABEL} | spawn-outcome`));
+    expect(evidence, '근거 절에 score 행이 없다').toContain('통과율 0.750000');
+  });
+
+  it.each([3, 17, 20260923])('시드 %i 로 섞어도 카드와 마크다운 바이트가 같다', (seedValue) => {
+    const permuted = shuffled(events(), seedValue);
+    expect(permuted.map((e) => e.seq)).not.toEqual(events().map((e) => e.seq));
+    expect(JSON.stringify(cardOf(permuted))).toBe(JSON.stringify(card()));
+    expect(renderScorecardMarkdown(cardOf(permuted))).toBe(renderScorecardMarkdown(card()));
+  });
+
+  it('행이 얼고 입력 fold·replay 는 변하지 않는다', () => {
+    const inputFold = joinSpawnOutcomes(events());
+    const inputReplay = labelReplay(events());
+    const before = JSON.stringify([inputFold, inputReplay]);
+    const built = buildCompareScorecard(inputFold, { replay: inputReplay });
+    expect(JSON.stringify([inputFold, inputReplay])).toBe(before);
+    expect(Object.isFrozen(scoreRowOf(built))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('score 행 (3) — audit 를 읽었지만 점수가 없으면 unmeasured 다 (0 이 아니다)', () => {
+  // 표의 세 번째 열은 조인 결과(note 가 적어야 하는 분포)다. 종류 이름은 SINGLE_AUDIT_KINDS 의 키.
+  it.each([
+    ['no-subject', SCORE_NO_JOINED_AUDIT_REASON, ['joined 0', 'unjoined 0', 'no_subject 1', 'malformed 0']],
+    ['unjoined', SCORE_NO_JOINED_AUDIT_REASON, ['joined 0', 'unjoined 1', 'no_subject 0', 'malformed 0']],
+    ['malformed', SCORE_NO_JOINED_AUDIT_REASON, ['joined 0', 'unjoined 0', 'no_subject 0', 'malformed 1']],
+    ['zero-claims', SCORE_EMPTY_DENOMINATOR_REASON, ['joined 1', 'unjoined 0', 'no_subject 0', 'malformed 0']],
+  ])('audit 1건(%s): 분모 0 · unmeasured · 사유와 분포를 적는다', (kind, reason, tokens) => {
+    const events = SINGLE_AUDIT_KINDS[kind]();
+    const fold = joinSpawnOutcomes(events);
+    expect(fold.score.reason).toBe(reason); // 자기검증: 이 케이스가 노리는 분기다
+    const card = cardOf(events);
+    const row = scoreRowOf(card);
+    expect(row).toMatchObject({
+      label: AUDIT_LABEL,
+      denominator: 0,
+      numerator: null,
+      ratio: null,
+      counts: null,
+      measured: false,
+      state: 'unmeasured',
+    });
+    expect(card.unmeasured).toContain('compare.score');
+    expect(row.note).toContain(`reason: ${reason}`);
+    expect(row.note).toContain('통과율 unmeasured');
+    expect(row.note).toContain(fold.score.basis);
+    for (const token of tokens) expect(row.note, token).toContain(token);
+    // 숫자 통과율이 새어 나오지 않는다 — 0 이든 다른 값이든.
+    expect(row.note).not.toMatch(/통과율 \d/);
+    expect(renderScorecardMarkdown(card)).toContain(
+      `| ${AUDIT_LABEL} | unmeasured | 0 | unmeasured | 0 | unmeasured |`,
+    );
+  });
+
+  it('조인됐지만 claim 이 0 인 audit 는 n 을 적되 분모는 0 이다', () => {
+    const row = scoreRowOf(cardOf(SINGLE_AUDIT_KINDS['zero-claims']()));
+    expect(row.note).toContain('n=1');
+    expect(row.denominator).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('score 행 — 생산자가 낼 수 있는 audit 조합은 전부 읽힌다 (측정 불가가 나오면 카드 버그)', () => {
+  // 실제 생산자(joinSpawnOutcomes)가 낸 블록이 "측정 불가" 로 찍히면 카드의 검증이 생산자보다
+  // 엄격하다는 뜻이고, 리뷰어의 첫 audit 이 이 행을 잘못 지운다. 조인 0~2 × 조인 못 함 0~1 ×
+  // subject 없음 0~1 × 깨진 행 0~1 × (claim 이 있는/없는 조인 audit) = 48개 원장 전부를 본다.
+  const combos = [];
+  for (const joined of [0, 1, 2]) {
+    for (const unjoined of [0, 1]) {
+      for (const noSubject of [0, 1]) {
+        for (const malformed of [0, 1]) {
+          for (const claimless of [false, true]) {
+            combos.push({ joined, unjoined, noSubject, malformed, claimless });
+          }
+        }
+      }
+    }
+  }
+
+  /** 조합대로 원장을 만든다. 조인된 audit 는 au-01(10/2)·au-02(5/1), claimless 면 0/0. */
+  function ledgerOf(c) {
+    const out = auditedSpawns();
+    const joinedRows = [
+      { subjectId: 'au-01', total: c.claimless ? 0 : 10, refuted: c.claimless ? 0 : 2 },
+      { subjectId: 'au-02', total: c.claimless ? 0 : 5, refuted: c.claimless ? 0 : 1 },
+    ];
+    for (const spec of joinedRows.slice(0, c.joined)) out.push(auditRow(spec));
+    if (c.unjoined) out.push(auditRow({ subjectId: 'au-never-1', total: 7, refuted: 7 }));
+    if (c.noSubject) out.push(auditRow({ total: 7, refuted: 7 }));
+    if (c.malformed) out.push(malformedAuditRow());
+    return out;
+  }
+
+  it('조합이 48개이고 서로 다르다 (자기검증)', () => {
+    expect(combos).toHaveLength(48);
+    expect(new Set(combos.map((c) => JSON.stringify(c))).size).toBe(48);
+  });
+
+  it.each(combos.map((c) => [JSON.stringify(c), c]))('%s', (_name, c) => {
+    const events = ledgerOf(c);
+    const fold = joinSpawnOutcomes(events);
+    const card = cardOf(events);
+    const row = scoreRowOf(card);
+    const rows = c.joined + c.unjoined + c.noSubject + c.malformed;
+    expect(row.label).not.toBe(UNREADABLE_LABEL);
+    if (rows === 0) {
+      // audit 행이 하나도 없으면 null 블록 — 옛 행이다.
+      expect(fold.score.source).toBeNull();
+      expect(row.label).toBe('스폰 결과 점수 (측정자 없음)');
+      return;
+    }
+    expect(row.label).toBe(AUDIT_LABEL);
+    if (c.joined > 0 && !c.claimless) {
+      const total = c.joined === 2 ? 15 : 10;
+      const refuted = c.joined === 2 ? 3 : 2;
+      expect(row).toMatchObject({ denominator: c.joined, measured: true, state: 'measured' });
+      expect(row.note).toContain(`통과율 ${((total - refuted) / total).toFixed(6)}`);
+      expect(card.unmeasured).not.toContain('compare.score');
+    } else {
+      expect(row).toMatchObject({ denominator: 0, measured: false, state: 'unmeasured' });
+      expect(row.note).toContain('통과율 unmeasured');
+      expect(card.unmeasured).toContain('compare.score');
+    }
+    // 노트가 적은 분포는 생산자의 카운트와 같다.
+    expect(row.note).toContain(`joined ${c.joined} + unjoined ${c.unjoined} + no_subject ${c.noSubject}`);
+    expect(row.note).toContain(`malformed ${c.malformed}건`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('score 행 (4) — null 블록은 이전 출력과 바이트가 같다', () => {
+  // 옛 카드가 만들던 행을 변경 전 코드(8ae56c77)에서 그대로 떠 온 리터럴이다 — 빈 원장, 즉
+  // reason `no-spawn-keyed-score-writer`. 이 그룹은 특성화(characterization) 단언이라 변경
+  // 전 코드에서도 green 이어야 한다: 새 코드가 옛 출력을 한 바이트도 바꾸지 않았다는 증명이
+  // 그 성질이다. 옛 코드에서 출력이 있던 입력은 정확히 이 null 블록뿐이다(나머지는 전부 던졌다).
+  const NULL_SCORE_ROW = Object.freeze({
+    key: 'compare.score',
+    label: '스폰 결과 점수 (측정자 없음)',
+    source: 'spawn-outcome score.source · score.value · score.reason',
+    denominator: 0,
+    numerator: null,
+    ratio: null,
+    counts: null,
+    absent: 0,
+    measured: false,
+    state: 'unmeasured',
+    note: 'source: null · value: null · reason: no-spawn-keyed-score-writer. 분모를 0 으로 고정해 영구 unmeasured 다 — 원장에 스폰-키 점수 writer 가 없다(spawn-outcome.js CANNOT SEE #4). 합의는 품질이 아니다: compare.agreement 가 높아도 라우팅이 옳았다는 뜻이 아니다. 행을 빼지 않고 남겨 둔 이유는 부재가 "해당 없음"으로 읽히지 않게 하려는 것이다.',
+  });
+
+  it('리터럴의 사유가 생산자의 row-0 사유와 같다 (골든이 생산자와 갈라지지 않는다)', () => {
+    expect(SCORE_UNAVAILABLE_REASON).toBe('no-spawn-keyed-score-writer');
+    expect(FOLD.score.reason).toBe(SCORE_UNAVAILABLE_REASON);
+    expect(joinSpawnOutcomes([]).score.reason).toBe(SCORE_UNAVAILABLE_REASON);
+  });
+
+  it('빈 원장의 score 행이 옛 행과 같다', () => {
+    expect(scoreRowOf(cardOf([]))).toEqual(NULL_SCORE_ROW);
+  });
+
+  it('스폰은 있고 audit 는 없는 원장(생산자의 row-0 블록)도 같은 행이다', () => {
+    expect(scoreRowOf(buildCompareScorecard(FOLD, { replay: REPLAY }))).toEqual(NULL_SCORE_ROW);
+  });
+
+  it.each([
+    ['옛 세 키 블록', { source: null, value: null, reason: 'no-spawn-keyed-score-writer' }],
+    ['여분 키가 붙은 블록', { ...FOLD.score, n: 0, audits: 0, extra: 'x' }],
+  ])('%s 도 같은 행이다', (_name, score) => {
+    const built = buildCompareScorecard({ ...FOLD, score }, { replay: REPLAY });
+    expect(scoreRowOf(built)).toEqual(NULL_SCORE_ROW);
+  });
+
+  it('reason 만 바뀌면 note 의 그 자리만 바뀐다', () => {
+    const built = buildCompareScorecard(
+      { ...FOLD, score: { source: null, value: null, reason: 'r' } },
+      { replay: REPLAY },
+    );
+    expect(scoreRowOf(built)).toEqual({
+      ...NULL_SCORE_ROW,
+      note: NULL_SCORE_ROW.note.replace('no-spawn-keyed-score-writer', 'r'),
+    });
+  });
+
+  it('basis 는 null 블록 행에 찍지 않는다 (출력 무변경이 우선이다)', () => {
+    const { basis } = FOLD.score;
+    expect(typeof basis, '자기검증: 생산자의 null 블록은 basis 를 갖는다').toBe('string');
+    const built = buildCompareScorecard(FOLD, { replay: REPLAY });
+    expect(JSON.stringify(scoreRowOf(built))).not.toContain(basis);
+    expect(renderScorecardMarkdown(built)).not.toContain(basis);
+  });
+
+  it('렌더: 표 행과 근거 행이 옛 바이트와 같다', () => {
+    const out = renderScorecardMarkdown(cardOf([]));
+    expect(out).toContain('| 스폰 결과 점수 (측정자 없음) | unmeasured | 0 | unmeasured | 0 | unmeasured |');
+    expect(out).toContain(`| ${NULL_SCORE_ROW.label} | ${NULL_SCORE_ROW.source} | ${NULL_SCORE_ROW.note} |`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('score 행 (5) — 형식이 틀린 블록은 던지지 않고 "측정 불가" 로 표기한다', () => {
+  // 생산자가 만든 audit-bearing 블록을 한 필드씩 망가뜨린 사본으로 본다. 블록이 알려진 두
+  // 모양(source·value 가 null 인 블록 / review.claim_audit 블록) 어느 쪽도 아니면 카드 전체가
+  // 아니라 그 행만 표기를 바꾼다 — 던지면 나머지 8행도 같이 사라지고, 조용히 점수를 실으면
+  // 검증되지 않은 수치가 측정값으로 읽힌다.
+  const PRODUCED = joinSpawnOutcomes(scoredFixture()).score;
+  const dropped = (key) => Object.fromEntries(Object.entries(PRODUCED).filter(([k]) => k !== key));
+  const NO_ROWS = {
+    n: 0, audits: 0, unjoined_audits: 0, no_subject_audits: 0, malformed_audits: 0,
+  };
+  const cardWith = (score) => buildCompareScorecard(
+    { ...joinSpawnOutcomes(scoredFixture()), score },
+    { replay: labelReplay(scoredFixture()) },
+  );
+
+  // [이름, score 블록, 표기 note 가 이름으로 짚어야 하는 필드]
+  const MALFORMED = [
+    ['source 가 숫자', { source: 5, value: null, reason: 'r' }, 'score.source'],
+    ['source 가 BigInt', { source: 10n, value: null, reason: 'r' }, 'score.source'],
+    ['source 가 알려지지 않은 이벤트 이름', { source: 'review.completed', value: null, reason: 'r' }, 'score.source'],
+    ['source 없이 value 만 있음', { source: null, value: 0.82, reason: 'r' }, 'score.value'],
+    ['null 블록의 value 가 문자열', { source: null, value: 'x', reason: 'r' }, 'score.value'],
+    ['null 블록의 reason 이 빈 문자열', { source: null, value: null, reason: '' }, 'score.reason'],
+    ['null 블록에 reason 이 없음', { source: null, value: null }, 'score.reason'],
+    ['빈 객체', {}, 'score.source'],
+    ['value 가 1 을 넘음', { ...PRODUCED, value: 1.5 }, 'score.value'],
+    ['value 가 음수', { ...PRODUCED, value: -0.1 }, 'score.value'],
+    ['value 가 NaN', { ...PRODUCED, value: Number.NaN }, 'score.value'],
+    ['value 가 Infinity', { ...PRODUCED, value: Number.POSITIVE_INFINITY }, 'score.value'],
+    ['value 가 문자열', { ...PRODUCED, value: '0.75' }, 'score.value'],
+    ['value 와 reason 이 둘 다 있음', { ...PRODUCED, reason: 'why' }, 'score.reason'],
+    ['value 와 reason 이 둘 다 null', { ...PRODUCED, value: null, reason: null }, 'score.reason'],
+    ['value 가 있는데 조인된 audit n 이 0', { ...PRODUCED, n: 0, unjoined_audits: 5 }, 'score.n'],
+    ['basis 가 없음', dropped('basis'), 'score.basis'],
+    ['basis 가 빈 문자열', { ...PRODUCED, basis: '' }, 'score.basis'],
+    ['basis 가 여러 줄', { ...PRODUCED, basis: 'a\nb' }, 'score.basis'],
+    ['basis 가 숫자', { ...PRODUCED, basis: 7 }, 'score.basis'],
+    ['n 이 소수', { ...PRODUCED, n: 1.5 }, 'score.n'],
+    ['audits 가 문자열', { ...PRODUCED, audits: '6' }, 'score.audits'],
+    ['malformed_audits 가 음수', { ...PRODUCED, malformed_audits: -1 }, 'score.malformed_audits'],
+    ['unjoined_audits 가 없음', dropped('unjoined_audits'), 'score.unjoined_audits'],
+    ['audits 가 n + unjoined + no_subject 와 다름', { ...PRODUCED, audits: 7 }, 'score.audits'],
+    ['audit 행을 하나도 안 읽었는데 source 가 audit', { ...PRODUCED, ...NO_ROWS, value: null, reason: 'r' }, '읽은 audit 행이 0'],
+  ];
+
+  it('픽스처 자기검증: 망가뜨리기 전의 생산자 블록은 정상 행으로 찍힌다', () => {
+    expect(PRODUCED.source).toBe(CLAIM_AUDIT_JOIN_EVENTS.audit);
+    expect(scoreRowOf(cardWith(PRODUCED)).label).toBe(AUDIT_LABEL);
+  });
+
+  it.each(MALFORMED)('%s → 던지지 않고 측정 불가 행이 된다', (_name, score, field) => {
+    const card = cardWith(score);
+    const row = scoreRowOf(card);
+    expect(row.label).toBe(UNREADABLE_LABEL);
+    expect(row).toMatchObject({
+      denominator: 0, numerator: null, ratio: null, counts: null, measured: false, state: 'unmeasured',
+    });
+    expect(row.note).toContain('측정 불가');
+    expect(row.note, `note 가 ${field} 를 짚지 않는다`).toContain(field);
+    // 조용히 점수를 싣지 않는다: 수치도, 그 블록이 들고 온 값도 행에 없다.
+    expect(row.note).not.toMatch(/\d\.\d{2,}/);
+    if (typeof score.value === 'number' && Number.isFinite(score.value)) {
+      expect(JSON.stringify(row)).not.toContain(String(score.value));
+    }
+    expect(card.unmeasured).toContain('compare.score');
+    expect(card.metrics.map((m) => m.key)).toEqual(ROW_KEYS);
+    expect(otherRowsOf(card)).toEqual(otherRowsOf(cardWith(PRODUCED)));
+    expect(renderScorecardMarkdown(card)).toContain(
+      `| ${UNREADABLE_LABEL} | unmeasured | 0 | unmeasured | 0 | unmeasured |`,
+    );
+  });
+
+  it('표기는 한 줄이다 — 값에 개행·파이프가 있어도 표가 갈라지지 않는다', () => {
+    const forged = cardWith({ source: 'a\nb | c', value: null, reason: 'r' });
+    expect(scoreRowOf(forged).note).not.toMatch(/[\r\n]/);
+    const lines = (card) => renderScorecardMarkdown(card).split('\n').length;
+    expect(lines(forged)).toBe(lines(cardOf(auditedSpawns())));
+  });
+
+  it('측정 불가 행은 null 블록 행과 다른 행이다 (빈 원장으로 읽히지 않는다)', () => {
+    const bad = scoreRowOf(cardWith({ source: 5, value: null, reason: 'r' }));
+    const empty = scoreRowOf(cardOf(auditedSpawns()));
+    expect(bad.label).not.toBe(empty.label);
+    expect(bad.note).not.toContain('no-spawn-keyed-score-writer');
+    expect(bad.note).not.toContain('영구 unmeasured');
+  });
+
+  it('얼려 들어온 블록을 변형하지 않고 카드와 행은 frozen 이다', () => {
+    const built = cardWith(Object.freeze({ ...PRODUCED, value: 1.5 }));
+    expect(Object.isFrozen(built)).toBe(true);
+    expect(Object.isFrozen(scoreRowOf(built))).toBe(true);
   });
 });
 

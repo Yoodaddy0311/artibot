@@ -43,6 +43,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { joinSpawnOutcomes, labelReplay } from '../../lib/replay/index.js';
 import * as barrel from '../../lib/scorecard/index.js';
 
 const PLUGIN_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -311,6 +312,41 @@ describe('/scorecard — 신규 플래그', () => {
     expect(section).toContain('`one-action-one-run`');
     expect(section).toContain('구조적 0');
     expect(section).toContain('EXACT↔exact · PARTIAL↔partial · SIMULATED↔simulation');
+  });
+
+  it('compare 절이 score 행의 세 모양과 그 행 이름을 코드와 같게 적는다 (SH-05 후속)', () => {
+    const section = sectionOf(current, '#### 스폰 비교 카드 (`--compare`)');
+    // 옛 문장("score 행은 항상 unmeasured … 스폰 키로 점수를 쓰는 기록자가 없다")은 점수 축이
+    // 정의되고(spawn-outcome.js "THE SCORE AXIS") 카드가 audit 행을 읽게 된 뒤로 거짓이다.
+    // 돌아오지 못하게 음성 단언으로 막는다.
+    expect(section, '옛 문장이 돌아왔다').not.toContain('**항상 `unmeasured`**');
+    expect(section, '옛 문장이 돌아왔다').not.toContain('스폰 키로 점수를 쓰는 기록자가 없다');
+    for (const needle of [
+      '스폰 결과 점수가 아니라 리뷰어의 `claim_audit` 통과율',
+      'THE SCORE AXIS', '`score.basis`', '`score.n`', '`subject_agent_id`',
+      '블록 자체가 없으면(absent · null) 여전히 던진다',
+    ]) {
+      expect(section, `compare 절에 ${needle} 없음`).toContain(needle);
+    }
+    // 문서가 적은 세 행 이름은 카드가 실제로 찍는 이름이어야 한다 — 이름이 바뀌면 여기가 먼저 레드다.
+    const fold = joinSpawnOutcomes([]);
+    const audit = {
+      source: 'review.claim_audit',
+      value: null,
+      reason: 'no-joined-claim-audit',
+      basis: 'b',
+      n: 0,
+      audits: 1,
+      unjoined_audits: 1,
+      no_subject_audits: 0,
+      malformed_audits: 0,
+    };
+    const labelOf = (score) => barrel
+      .buildCompareScorecard({ ...fold, score }, { replay: labelReplay([]) })
+      .metrics.find((m) => m.key === 'compare.score').label;
+    const labels = [fold.score, audit, {}].map(labelOf);
+    expect(new Set(labels).size, '세 모양의 행 이름이 서로 달라야 한다').toBe(3);
+    for (const label of labels) expect(section, `compare 절에 행 이름 ${label} 없음`).toContain(label);
   });
 
   it('스니펫이 호출하는 sc.* 가 전부 배럴의 함수로 실존한다', () => {

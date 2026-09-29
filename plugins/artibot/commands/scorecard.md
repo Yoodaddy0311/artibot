@@ -115,7 +115,11 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 
 - `--since <ISO|epoch ms>` 는 **리더 필터에 epoch ms 로** 걸고(`readAllEvents` 의 `filter.since`) 카드 라벨에는 ISO 로 넘긴다. 파싱할 수 없는 값도, **값이 아예 없는 `--since` 도** 조용히 무시하지 않고 메시지와 함께 중단한다 — 범위를 못 건 실행이 전 기간 실행과 같은 출력이 되면 안 된다. 그래서 분기가 `--since` **플래그의 존재**를 보고 값의 존재를 보지 않는다: 값으로 분기하면 `--compare --since` 가 조용히 전 기간 카드를 내는 fail-open 이 된다(실측 확인 후 수정). 스니펫이 `Date` 를 쓰는 것은 **호출자 쪽**이라 허용된다(순수성은 `lib/scorecard/` 의 계약이다).
 - **비교 가능한 쌍이 0 이면 `unmeasured`** 다. `0%` 로 쓰지 않는다. 가격이 없는 쌍은 0 으로 합산하지 않는다 — `compare.cost` 의 **분모(비교된 쌍)에는 남고**, 분자(priced)와 버킷 합계에서만 빠져 `unpriced` 로 세어진다. 0 원으로 세면 측정된 바닥이 실제보다 낮아진다.
-- `score` 행은 **항상 `unmeasured`**(source 가 null)다 — 원장에 **스폰 키로 점수를 쓰는 기록자가 없다**. 그리고 추천과 서빙이 일치한다는 것은 그 선택이 옳았다는 뜻이 아니다: 일치는 품질이 아니다.
+- `compare.score` 행은 **스폰 결과 점수가 아니라 리뷰어의 `claim_audit` 통과율**이다 — 정의는 `lib/replay/spawn-outcome.js` 헤더 "THE SCORE AXIS" 가 정본이고, 값 옆에 `score.basis` 로 찍힌다. 세 모양 중 하나로 찍힌다.
+  - `review.claim_audit` 행이 원장에 하나도 없으면(`score.source` 가 null) 예전 그대로 **`unmeasured`**(`스폰 결과 점수 (측정자 없음)`, 분모 0)다.
+  - audit 행이 있으면 행 이름이 `리뷰어 claim_audit 통과율 (스폰 결과 아님)` 이 된다. 스폰 키(`subject_agent_id`)로 조인된 audit 가 있으면 그 건수 `score.n` 이 **분모**이고, 통과율은 `basis` 와 조인 못 한 audit 수(unjoined · no_subject · malformed)와 함께 근거 절 주의 열에 적힌다 — 분모는 claim 수도 스폰 수도 아니다. 조인된 audit 가 없으면 분모 0 이라 다시 `unmeasured` 다(`0%` 가 아니다).
+  - `score` 블록이 이 두 모양 어느 쪽도 아니면 카드를 던지지 않고 그 행만 `스폰 점수 (측정 불가)` 로 표기한다 — 나머지 8행은 그대로다. 블록 자체가 없으면(absent · null) 여전히 던진다.
+- 추천과 서빙이 일치한다는 것은 그 선택이 옳았다는 뜻이 아니다: 일치는 품질이 아니다.
 - `fifo` 처럼 confidence allowlist **밖**에서 묶인 쌍은 비교에서 제외되고 `excluded_fifo` 로 보인다 — 제외는 선택이지 측정이 아니다.
 - `compare.replay_label` 행은 `lib/replay/replay-label.js#labelReplay` 의 §46 충실도 라벨 분포(EXACT·PARTIAL·SIMULATED)다. 분모는 `actions`(PreToolUse `route.selected` 의 distinct `tool_use_id`)라 짝 모집단과 다르고, fold 와 **같은 `events`** 에서 접어 `replay:` 로 넘긴다 — 빠뜨리면 `buildCompareScorecard` 가 **던진다**(빠진 포트가 "라우팅된 Action 0" 과 같은 출력이 되면 안 된다). **EXACT 는 측정값이 아니라 구조적 0** 이다: `exact_reachable:false`, 사유 `one-action-one-run` — Action 하나는 런 하나에만 묶인다. `actions` 가 0 이면 `unmeasured` 다. 라벨은 생산자의 **대문자** 어휘이고 RouteBench 시나리오 `replay_mode` 의 소문자와 다른 필드다(EXACT↔exact · PARTIAL↔partial · SIMULATED↔simulation). `--since` 로 창을 좁히면 라벨 자체가 바뀐다 — 창 밖 바인드·영수증은 없는 것으로 읽혀 SIMULATED 가 된다(`replay-label.js` CANNOT SEE #3).
 - 이 카드가 **못 보는 것**은 `lib/replay/spawn-outcome.js` 헤더의 CANNOT SEE 목록이 정본이다(고장인지 정책인지 · fifo 쌍의 정당성 · 멀티모델 런 · 중복 영수증 · 가격 없는 쌍의 비용). 여기에 복제하지 않는다 — 복제하면 두 목록이 갈린다.
