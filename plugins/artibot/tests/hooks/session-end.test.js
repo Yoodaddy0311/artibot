@@ -1017,6 +1017,57 @@ describe('session-end hook - learning pipeline', () => {
       expect(reason).toBe('no-receipts:no-usage');
     });
 
+    // -----------------------------------------------------------------------
+    // 5c. no-receipts:unreadable
+    //
+    // `foldFile` counts a file whose read threw in `meta.unreadableFiles` and
+    // nowhere else, so a missing transcript is shaped exactly like an empty one
+    // and the classifier DECLINES (it will not call an unread file
+    // `no-entries`). That decline used to leave the row bare, which the
+    // coverage reader could only describe as "may include an unreadable file".
+    // The counter is positive, so the row can say so.
+    //
+    // The predicate is POSITIVE (a strictly positive integer), never a residual:
+    // a bare row that is unclassifiable for any OTHER reason must stay bare, or
+    // `unreadable` would become a bucket that files unmeasured shapes under a
+    // measured-looking name.
+    // -----------------------------------------------------------------------
+
+    it('reports no-receipts:unreadable when a transcript file could not be read', async () => {
+      expect(await reasonForMeta({ unreadableFiles: 1 })).toBe('no-receipts:unreadable');
+    });
+
+    it('reports no-receipts:unreadable when only a subagent file failed to read', async () => {
+      // The main transcript folded fine (4 entries, none with a model) and one
+      // sibling file did not. The classifier refuses to account for a session
+      // it only partly read, and the row says why.
+      const reason = await reasonForMeta({
+        files: 3, unreadableFiles: 1, entries: 4, entriesWithoutModel: 4,
+      });
+      expect(reason).toBe('no-receipts:unreadable');
+    });
+
+    it('keeps the unreadable reason a single bounded token with no free text', async () => {
+      const reason = await reasonForMeta({ unreadableFiles: 2 });
+      expect(reason).toMatch(/^no-receipts:[a-z-]+$/);
+      expect(reason.length).toBeLessThanOrEqual(40);
+    });
+
+    it.each([
+      ['a zero count whose accounting does not balance', { unreadableFiles: 0, entries: 5 }],
+      ['a numeric string', { unreadableFiles: '1' }],
+      ['a fraction', { unreadableFiles: 1.5 }],
+      ['a negative count', { unreadableFiles: -1 }],
+      ['NaN', { unreadableFiles: Number.NaN }],
+      ['Infinity', { unreadableFiles: Number.POSITIVE_INFINITY }],
+      ['null', { unreadableFiles: null }],
+      ['a missing key', { unreadableFiles: undefined }],
+    ])('NEGATIVE CONTROL: keeps the reason BARE for %s', async (_label, patch) => {
+      // Unclassifiable for a reason other than a counted unreadable file. A
+      // guessed `unreadable` here would read as a measurement nobody took.
+      expect(await reasonForMeta(patch)).toBe('no-receipts');
+    });
+
     it('falls back to the bare reason when the classifier throws', async () => {
       // Instrumentation must never be the reason a session cannot end. A
       // classifier that blows up costs the row its suffix, not its existence.
@@ -1410,6 +1461,73 @@ describe('session-end hook - learning pipeline', () => {
         expect(row.data.reason).toBe('no-receipts:all-synthetic');
         expect(row.data.receipts).toBe(0);
         expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+      });
+
+      /**
+       * A throwaway project whose transcript path points into a directory that
+       * exists. The file itself is created only when `content` is a string.
+       */
+      async function projectWithTranscript(prefix, content) {
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+        const sessionId = `sess${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+        const root = path.join(os.tmpdir(), `${prefix}-${sessionId}`);
+        tmpRoots.push(root);
+        mkdirSync(path.join(root, '.git'), { recursive: true });
+        const dir = path.join(root, 'transcripts');
+        mkdirSync(dir, { recursive: true });
+        const transcriptPath = path.join(dir, `${sessionId}.jsonl`);
+        if (typeof content === 'string') writeFileSync(transcriptPath, content, 'utf-8');
+        return { root, sessionId, transcriptPath };
+      }
+
+      it('records no-receipts:unreadable for a transcript path whose file does not exist', async () => {
+        // The live shape behind six ledger rows on 2026-09-29: `claude -p` with
+        // empty input reaches SessionEnd with a `transcript_path` string whose
+        // file was never created. `transcript_present` is true (it only says a
+        // path string arrived) and the real builder counts the missing file as
+        // unreadable. Everything here is the REAL chain, no stubbed meta, so the
+        // counter being read is the one the builder actually emits.
+        const { root, sessionId, transcriptPath } = await projectWithTranscript('artibot-unreadable');
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+
+        stderrSpy.mockClear();
+        const res = await recordUsageReceipts(
+          { session_id: sessionId, transcript_path: transcriptPath, cwd: root },
+          deps,
+        );
+
+        expect(res.status).toBe('skipped');
+        expect(res.reason).toBe('no-receipts:unreadable');
+        expectOneSummaryLine();
+
+        const file = ledgerFilePath(resolveProjectRoot(root));
+        const row = await theEndedRow(file);
+        expect(row.data.reason).toBe('no-receipts:unreadable');
+        expect(row.data.receipt_status).toBe('skipped');
+        expect(row.data.transcript_present).toBe(true);
+        expect(row.data.receipts).toBe(0);
+        // The writer accepts the new token: `session.ended.reason` has no enum,
+        // so no allowlist change is involved. A refusal would show up here.
+        expect(await ledgerLines(file, 'ledger.rejected')).toHaveLength(0);
+      });
+
+      it('NEGATIVE CONTROL: an empty but readable transcript stays no-receipts:no-entries', async () => {
+        // Same project shape, same missing-receipts outcome, but the file was
+        // READ. If `unreadable` were a residual bucket this row would move into
+        // it; it must not, because nothing here failed to read.
+        const { root, sessionId, transcriptPath } = await projectWithTranscript('artibot-emptyfile', '');
+        const { deps, ledgerFilePath, resolveProjectRoot } = await realDeps();
+
+        stderrSpy.mockClear();
+        const res = await recordUsageReceipts(
+          { session_id: sessionId, transcript_path: transcriptPath, cwd: root },
+          deps,
+        );
+
+        expect(res.status).toBe('skipped');
+        expect(res.reason).toBe('no-receipts:no-entries');
+        const row = await theEndedRow(ledgerFilePath(resolveProjectRoot(root)));
+        expect(row.data.reason).toBe('no-receipts:no-entries');
       });
     });
   });

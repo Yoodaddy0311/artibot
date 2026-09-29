@@ -646,6 +646,13 @@ function appendReceiptEnvelopes(d, projectRoot, envelopes, seen) {
  * unclassifiable; a guessed suffix in a ledger is worse than no suffix,
  * because it reads as a measurement.
  *
+ * ONE POSITIVE EXCEPTION, {@link unreadableCause}: the classifier declines every
+ * fold that counted an unreadable file (a missing transcript is shaped like an
+ * empty one, so it refuses to call it `no-entries`), and that refusal used to
+ * be indistinguishable from every other refusal. A strictly positive
+ * `unreadableFiles` is a measured fact rather than a guess, so the row says
+ * `no-receipts:unreadable`. Every OTHER decline stays bare.
+ *
  * @param {object} d - Resolved ports.
  * @param {unknown} meta - `meta` of the zero-receipt fold.
  * @returns {string} `no-receipts` or `no-receipts:<cause>`; one bounded token.
@@ -658,7 +665,35 @@ function emptyReceiptsReason(d, meta) {
     // A classifier that throws must not cost the session its denominator row.
     cause = null;
   }
-  return typeof cause === 'string' && cause.length > 0 ? `no-receipts:${cause}` : 'no-receipts';
+  if (typeof cause !== 'string' || cause.length === 0) cause = unreadableCause(meta);
+  return cause === null ? 'no-receipts' : `no-receipts:${cause}`;
+}
+
+/**
+ * Cause token `unreadable`, or null: did the fold count a transcript file
+ * (main or subagent) whose read failed?
+ *
+ * A POSITIVE PREDICATE, NEVER A RESIDUAL. Only a strictly positive integer
+ * counts. A string, a fraction, a negative, NaN, a missing key or zero all
+ * yield null and leave the reason bare: those are folds this hook cannot
+ * explain, and filing them under `unreadable` would put an unmeasured shape
+ * behind a measured-looking name (the classifier's own rule for its branches).
+ *
+ * The token means "at least one transcript file failed to read"; it does not
+ * claim that was the only thing wrong with the session, and the row's
+ * `unresolved_models` still carries whatever the catalog rejected.
+ *
+ * @param {unknown} meta - `meta` of the zero-receipt fold.
+ * @returns {'unreadable'|null}
+ */
+function unreadableCause(meta) {
+  try {
+    const count = meta?.unreadableFiles;
+    return Number.isInteger(count) && count > 0 ? 'unreadable' : null;
+  } catch {
+    // A meta whose getter throws is unclassifiable, which is what bare says.
+    return null;
+  }
 }
 
 /**
