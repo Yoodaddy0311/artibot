@@ -11,6 +11,12 @@
  *      Timeline row; with it ON, missing evidence closes the REPORT window and
  *      pauses back to VERIFY, resume goes there, and real evidence completes
  *      REPORT.
+ *   4. The driver path — `engine-state.js#recordPhaseResult` recording REPORT
+ *      with the switch OFF, pinned as literal strings (state, disk, return,
+ *      events) so any byte the gate adds there turns the pin red.
+ *   5. The driver path with the switch ON — a REPORT without evidence is
+ *      refused and pauses back to VERIFY, a pause of any kind is kept, and a
+ *      re-run VERIFY is what lets REPORT through.
  *
  * The engine layer swaps the gate through `vi.mock` rather than `vi.spyOn`: the
  * engine holds a named import, which a spy on the module namespace never sees.
@@ -26,7 +32,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const gateMode = vi.hoisted(() => ({ bypass: false, config: { enforce: false } }));
+const gateMode = vi.hoisted(() => ({ bypass: false, config: { enforce: false }, loads: 0 }));
 
 vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
   const real = await importOriginal();
@@ -35,6 +41,12 @@ vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
     gateReportOnVerify: (state, config) => (gateMode.bypass
       ? null
       : real.gateReportOnVerify(state, config ?? gateMode.config)),
+    // A caller that reads the switch itself (the driver path, section 4) sees
+    // the injected value instead of the plugin root's artibot.config.json.
+    loadReportVerifyGateConfig: () => {
+      gateMode.loads += 1;
+      return gateMode.config;
+    },
   };
 });
 
@@ -53,7 +65,9 @@ const {
   startAutopilot,
 } = await import('../../lib/autopilot/index.js');
 const { recordPhaseResult } = await import('../../lib/autopilot/engine-state.js');
-const { deleteSessionArtifacts, getSessionPath, loadSession } = await import('../../lib/autopilot/session-store.js');
+const {
+  deleteSessionArtifacts, getSessionPath, loadSession, saveSession,
+} = await import('../../lib/autopilot/session-store.js');
 const { readEvents } = await import('../../lib/autopilot/telemetry.js');
 const { findUnterminatedPhases, renderTimelineTable, summarizeEvents } = await import('../../lib/autopilot/replay.js');
 
@@ -241,9 +255,13 @@ const gateTicks = (sessionId) => readEvents(sessionId).filter((e) => e.type === 
 
 /**
  * The Phase Timeline REPORT row that `replay.js#renderTimelineTable` prints for
- * one run's events, minus its clock-time and duration columns:
- * [phase, events, warn, error, retry, bottleneck]. Read from the renderer, not
- * the report file: the dev report template carries no Phase Timeline at all.
+ * one run's events, minus every column derived from the wall clock:
+ * [phase, events, warn, error, retry]. Dropped: start time and duration, and the
+ * bottleneck mark, which `summarizeEvents` sets on the longest phase — two runs
+ * of the same events can differ there by timing alone (batch 20 CI, Node 24:
+ * '⚠' vs '-'). The event count, the column a leaked OFF tick would move, stays.
+ * Read from the renderer, not the report file: the dev report template carries
+ * no Phase Timeline at all.
  * @param {object[]} events
  * @returns {string[]}
  */
@@ -251,7 +269,7 @@ function reportTimelineRow(events) {
   const table = renderTimelineTable(summarizeEvents('run', events));
   const line = table.split('\n').find((l) => l.startsWith('| REPORT |'));
   const cells = line.split('|').slice(1, -1).map((c) => c.trim());
-  return [cells[0], ...cells.slice(3)];
+  return [cells[0], ...cells.slice(3, -1)];
 }
 
 /**
@@ -291,6 +309,8 @@ describe('runPhase6Report — switch OFF (shipped)', () => {
     // The Phase Timeline REPORT row — the '이벤트' column above all.
     expect.soft(gated.timelineRow).toEqual(baseline.timelineRow);
     expect(baseline.timelineRow[0]).toBe('REPORT');
+    // Five cells or the slice above silently dropped the event count.
+    expect(baseline.timelineRow).toHaveLength(5);
 
   });
 
@@ -413,3 +433,359 @@ describe('runPhase6Report — switch ON', () => {
     expect(runPhase6Report(state)).toMatchObject({ type: 'pause', code: 'VERIFY_NOT_DONE' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4. Driver path — recordPhaseResult(REPORT), switch OFF
+// ---------------------------------------------------------------------------
+
+/**
+ * One string per observable surface, so a pin names the surface it moved.
+ * Masked: every ISO-8601 instant (`phases[].ts`, `updatedAt`) becomes `<ts>`,
+ * and the session id — unique per test, it carries pid and clock — becomes
+ * `<sid>`. Nothing else is masked.
+ * @param {unknown} value
+ * @param {string} sessionId
+ * @returns {string}
+ */
+const pin = (value, sessionId) => JSON.stringify(value).replaceAll(sessionId, '<sid>').replace(ISO, '<ts>');
+
+/**
+ * Record REPORT the way a driver does when it bypasses runPhase6Report (the
+ * path the gate module header's "What this gate cannot see" names), with the
+ * switch injected OFF. The one place the injection is spelled.
+ * @returns {{returned: object, state: string, disk: string, events: string, same: boolean}}
+ */
+function recordReportOff(state, payload) {
+  gateMode.config = { enforce: false };
+  sessionsToClean.add(state.sessionId);
+  const before = readEvents(state.sessionId).length;
+  const returned = recordPhaseResult(state, payload);
+  return {
+    returned,
+    state: pin(state, state.sessionId),
+    disk: pin(loadSession(state.sessionId), state.sessionId),
+    events: pin(readEvents(state.sessionId).slice(before), state.sessionId),
+    same: returned === state,
+  };
+}
+
+const EVIDENCE = [
+  started('e1', 'EXECUTE'), acked('e1', 'EXECUTE'),
+  started('v1', 'VERIFY'), acked('v1', 'VERIFY'),
+];
+
+describe('recordPhaseResult(REPORT) — switch OFF, driver path (characterization)', () => {
+  it('(a) no VERIFY evidence: records REPORT and nothing else', () => {
+    const state = {
+      sessionId: uniqueId('drv-off-none'), phase: 'REPORT', lastPhase: 'EVALUATE', pendingPhase: null,
+      phases: [], attemptJournal: [], activePhaseAttempt: null,
+    };
+
+    const r = recordReportOff(state, { phase: 'REPORT', status: 'done' });
+
+    const expected = '{"sessionId":"<sid>","phase":"REPORT","lastPhase":"EVALUATE","pendingPhase":null,'
+      + '"phases":[{"ts":"<ts>","name":"REPORT","status":"done"}],"attemptJournal":[],'
+      + '"activePhaseAttempt":null,"updatedAt":"<ts>","schemaVersion":3}';
+    expect.soft(r.state).toBe(expected);
+    expect.soft(r.disk).toBe(expected);
+    expect.soft(r.events).toBe('[]');
+    expect(r.same).toBe(true);
+  });
+
+  it('(b) VERIFY evidence and a verifyResult present: the same REPORT record, the evidence untouched', () => {
+    const state = {
+      sessionId: uniqueId('drv-off-evidence'), phase: 'REPORT', lastPhase: 'EVALUATE', pendingPhase: null,
+      phases: [], attemptJournal: [...EVIDENCE], activePhaseAttempt: null,
+      verifyResult: { status: 'PASS' }, crossCheck: { verdict: 'pass' },
+    };
+
+    const r = recordReportOff(state, { phase: 'REPORT', status: 'done' });
+
+    const journal = JSON.stringify(EVIDENCE).replace(ISO, '<ts>');
+    const expected = '{"sessionId":"<sid>","phase":"REPORT","lastPhase":"EVALUATE","pendingPhase":null,'
+      + `"phases":[{"ts":"<ts>","name":"REPORT","status":"done"}],"attemptJournal":${journal},`
+      + '"activePhaseAttempt":null,"verifyResult":{"status":"PASS"},"crossCheck":{"verdict":"pass"},'
+      + '"updatedAt":"<ts>","schemaVersion":3}';
+    expect.soft(r.state).toBe(expected);
+    expect.soft(r.disk).toBe(expected);
+    expect.soft(r.events).toBe('[]');
+    expect(r.same).toBe(true);
+  });
+
+  it('(c) OFF only: a REPORT result lifts a gate pause (PAUSED + lastPhase REPORT) and keeps pausedReason', () => {
+    // Today's behaviour, pinned under OFF alone: the PAUSED + lastPhase branch of
+    // recordPhaseResult lifts the pause for a REPORT result. The switch-ON
+    // behaviour for the same input is a separate test, not a change to this one.
+    const state = {
+      sessionId: uniqueId('drv-off-paused'), phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY',
+      pausedReason: 'report-verify-evidence-missing:NO_VERIFY_ATTEMPT',
+      phases: [], attemptJournal: [], activePhaseAttempt: null,
+    };
+
+    const r = recordReportOff(state, { phase: 'REPORT', status: 'done' });
+
+    const expected = '{"sessionId":"<sid>","phase":"REPORT","lastPhase":"REPORT","pendingPhase":null,'
+      + '"pausedReason":"report-verify-evidence-missing:NO_VERIFY_ATTEMPT",'
+      + '"phases":[{"ts":"<ts>","name":"REPORT","status":"done"}],"attemptJournal":[],'
+      + '"activePhaseAttempt":null,"updatedAt":"<ts>","schemaVersion":3}';
+    expect.soft(r.state).toBe(expected);
+    expect.soft(r.disk).toBe(expected);
+    expect.soft(r.events).toBe('[]');
+    expect(r.same).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Driver path — recordPhaseResult(REPORT), switch ON
+// ---------------------------------------------------------------------------
+
+const GATE_REASON = 'report-verify-evidence-missing:NO_VERIFY_ATTEMPT';
+
+/**
+ * A driver-path session already on disk, so the pause notifier's file queue has
+ * something to write into — the case where a later persist would erase it.
+ * @param {string} label
+ * @param {object} fields
+ * @returns {object}
+ */
+function seeded(label, fields) {
+  const state = {
+    sessionId: uniqueId(label), phase: 'REPORT', lastPhase: 'EVALUATE', pendingPhase: null,
+    phases: [], attemptJournal: [], activePhaseAttempt: null, ...fields,
+  };
+  sessionsToClean.add(state.sessionId);
+  saveSession(state);
+  return state;
+}
+
+/** Record REPORT with the switch injected; returns the events it added. */
+function recordReport(state, enforce, status = 'done') {
+  gateMode.config = { enforce };
+  const before = readEvents(state.sessionId).length;
+  const returned = recordPhaseResult(state, { phase: 'REPORT', status });
+  return { returned, events: readEvents(state.sessionId).slice(before) };
+}
+
+describe('recordPhaseResult(REPORT) — switch OFF evaluates nothing', () => {
+  /**
+   * Count reads of `attemptJournal`, the evidence the rule walks. The getter is
+   * non-enumerable so the persist's JSON.stringify never counts as a read.
+   */
+  function countingState(label) {
+    const state = seeded(label, {});
+    const probe = { reads: 0 };
+    Object.defineProperty(state, 'attemptJournal', {
+      enumerable: false, configurable: true, get: () => { probe.reads += 1; return []; },
+    });
+    return { state, probe };
+  }
+
+  it('should never read the evidence with the switch OFF', () => {
+    const { state, probe } = countingState('drv-off-count');
+    recordReport(state, false);
+    expect(probe.reads).toBe(0);
+  });
+
+  it('control: the same probe does see the evaluation with the switch ON', () => {
+    const { state, probe } = countingState('drv-on-count');
+    recordReport(state, true);
+    expect(probe.reads).toBeGreaterThan(0);
+  });
+});
+
+describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
+  it('(ii) should refuse a REPORT without evidence and pause back to VERIFY', () => {
+    const state = seeded('drv-on-refuse', {});
+
+    const { returned, events } = recordReport(state, true);
+
+    expect(returned).toBe(state);
+    const expectedPause = {
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY', pausedReason: GATE_REASON,
+    };
+    expect(state).toMatchObject(expectedPause);
+    expect(state.phases).toEqual([]);
+    const disk = loadSession(state.sessionId);
+    expect(disk).toMatchObject(expectedPause);
+    expect(disk.phases).toEqual([]);
+    // The notifier queued onto the file; the persist after it kept the entry.
+    expect(disk.queuedQuestions).toHaveLength(1);
+    expect(disk.queuedQuestions[0]).toMatchObject({ type: 'pause', reason: GATE_REASON });
+
+    expect(events.filter((e) => e.type === 'pause')).toHaveLength(1);
+    expect(events.find((e) => e.type === 'pause')).toMatchObject({
+      phase: 'REPORT', level: 'warn',
+      data: { code: 'NO_VERIFY_ATTEMPT', attemptId: null, claimedStatus: 'done' },
+    });
+    // No REPORT phase-start exists on this path, so no phase-end either.
+    expect(events.filter((e) => e.type === 'phase-end')).toEqual([]);
+    expect(findUnterminatedPhases(readEvents(state.sessionId))).toEqual([]);
+  });
+
+  it.each(['COMPLETED', 'ABORTED', 'NOT_A_PHASE'])('(F1) should not revive a %s session: fields kept, one kept tick', (phase) => {
+    const state = seeded(`drv-on-terminal-${phase}`, { phase, lastPhase: 'REPORT' });
+    const before = JSON.stringify(state);
+    const diskBefore = readFileSync(getSessionPath(state.sessionId), 'utf8');
+
+    const { returned, events } = recordReport(state, true);
+
+    expect(returned).toBe(state);
+    expect(JSON.stringify(state)).toBe(before);
+    expect(readFileSync(getSessionPath(state.sessionId), 'utf8')).toBe(diskBefore);
+    expect(events.map((e) => [e.type, e.level, e.data?.kept])).toEqual([['report-verify-gate', 'warn', true]]);
+  });
+
+  it.each([
+    ['an open VERIFY slot', {
+      attemptJournal: [...EVIDENCE],
+      activePhaseAttempt: { attemptId: 'v2', phase: 'VERIFY', status: 'started', checkpointSha: null },
+    }, 'VERIFY_NOT_ACKED'],
+    ['an operator-only acknowledgement', {
+      attemptJournal: [started('v1', 'VERIFY'), acked('v1', 'VERIFY', 'acknowledged-on-resume')],
+    }, 'VERIFY_NOT_DONE'],
+    ['a VERIFY older than the last EXECUTE', {
+      attemptJournal: [...EVIDENCE, started('e2', 'EXECUTE'), acked('e2', 'EXECUTE')],
+    }, 'STALE_BEFORE_EXECUTE'],
+  ])('(R5) should refuse on %s under its own code', (_label, fields, code) => {
+    const state = seeded('drv-on-code', fields);
+
+    const { events } = recordReport(state, true);
+
+    expect(state).toMatchObject({
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY', pausedReason: `report-verify-evidence-missing:${code}`,
+    });
+    expect(state.phases).toEqual([]);
+    expect(events.find((e) => e.type === 'pause')?.data?.code).toBe(code);
+  });
+
+  it.each(['VERIFY', 'EXECUTE', 'PLAN'])('(R6) should not read the switch when recording %s', (phase) => {
+    const state = seeded(`drv-noread-${phase}`, { phase });
+    const before = gateMode.loads;
+
+    recordPhaseResult(state, { phase, status: 'done' }, { transitionFromVerdict: false });
+
+    expect(gateMode.loads).toBe(before);
+  });
+
+  it('(R6) control: recording REPORT reads the switch exactly once', () => {
+    const state = seeded('drv-read-report', {});
+    const before = gateMode.loads;
+    recordReport(state, false);
+    expect(gateMode.loads).toBe(before + 1);
+  });
+
+  it('(R7) should lift a gate pause once its open VERIFY attempt is acknowledged done', () => {
+    const state = seeded('drv-on-verify-ack', {
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY', pausedReason: GATE_REASON,
+      activePhaseAttempt: { attemptId: 'v9', phase: 'VERIFY', status: 'started', checkpointSha: null },
+    });
+    gateMode.config = { enforce: true };
+
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' }, { transitionFromVerdict: false });
+
+    expect(state).toMatchObject({ phase: 'VERIFY', pendingPhase: 'IMPROVE', activePhaseAttempt: null });
+  });
+
+  it('(iii) should record a REPORT with evidence exactly as OFF does, plus one gate tick', () => {
+    const fields = { attemptJournal: [...EVIDENCE], verifyResult: { status: 'PASS' } };
+    const off = seeded('drv-on-pass-off', fields);
+    const on = seeded('drv-on-pass-on', fields);
+
+    const offRun = recordReport(off, false);
+    const onRun = recordReport(on, true);
+
+    expect(pin(on, on.sessionId)).toBe(pin(off, off.sessionId));
+    expect(pin(loadSession(on.sessionId), on.sessionId)).toBe(pin(loadSession(off.sessionId), off.sessionId));
+    expect(offRun.events).toEqual([]);
+    expect(onRun.events).toHaveLength(1);
+    expect(onRun.events[0]).toMatchObject({
+      phase: 'REPORT', type: 'report-verify-gate', level: 'info',
+      data: { code: 'ok', attemptId: 'v1', enforced: true, via: 'recordPhaseResult' },
+    });
+  });
+
+  it('(iv) should keep a gate pause: no field changes, one kept tick', () => {
+    const state = seeded('drv-on-keep-gate', {
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY', pausedReason: GATE_REASON,
+    });
+    const before = JSON.stringify(state);
+    const diskBefore = readFileSync(getSessionPath(state.sessionId), 'utf8');
+
+    const { returned, events } = recordReport(state, true);
+
+    expect(returned).toBe(state);
+    expect(JSON.stringify(state)).toBe(before);
+    expect(readFileSync(getSessionPath(state.sessionId), 'utf8')).toBe(diskBefore);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      phase: 'REPORT', type: 'report-verify-gate', level: 'warn', data: { code: 'NO_VERIFY_ATTEMPT', kept: true },
+    });
+  });
+
+  // R3: the maybePause shape (lastPhase === pendingPhase) with a non-gate reason.
+  describe('(v) a pause for another reason', () => {
+    const otherPause = { phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'REPORT', pausedReason: 'budget-danger' };
+
+    it('should be kept, fields untouched, when there is no evidence', () => {
+      const state = seeded('drv-on-keep-other', otherPause);
+      const before = JSON.stringify(state);
+
+      const { events } = recordReport(state, true);
+
+      expect(JSON.stringify(state)).toBe(before);
+      expect(state).toMatchObject({ phase: 'PAUSED', pausedReason: 'budget-danger' });
+      expect(events.map((e) => [e.type, e.data?.kept])).toEqual([['report-verify-gate', true]]);
+    });
+
+    it('should lift exactly as before when the evidence is there', () => {
+      const state = seeded('drv-on-lift-other', { ...otherPause, attemptJournal: [...EVIDENCE] });
+
+      const { events } = recordReport(state, true);
+
+      expect(state).toMatchObject({ phase: 'REPORT', pendingPhase: null, pausedReason: 'budget-danger' });
+      expect(state.phases).toMatchObject([{ name: 'REPORT', status: 'done' }]);
+      expect(events.map((e) => [e.type, e.data?.code])).toEqual([['report-verify-gate', 'ok']]);
+    });
+
+    it('should lift exactly as before with the switch OFF, evidence or not', () => {
+      const state = seeded('drv-off-lift-other', otherPause);
+
+      const { events } = recordReport(state, false);
+
+      expect(state).toMatchObject({ phase: 'REPORT', pendingPhase: null, pausedReason: 'budget-danger' });
+      expect(events).toEqual([]);
+    });
+  });
+
+  it('(vi) should let REPORT through only after a re-run VERIFY is acknowledged done', async () => {
+    const sessionId = await start('drv-on-verify-lift');
+    const state = loadSession(sessionId);
+    enterStateAt(state, 'EVALUATE');
+    recordReport(state, true);
+    expect(loadSession(sessionId)).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+
+    // A second REPORT claim does not get past the pause either.
+    recordReport(loadSession(sessionId), true);
+    expect(loadSession(sessionId).phase).toBe('PAUSED');
+
+    const resumed = await resumeAutopilot(sessionId);
+    expect(resumed.phase).toBe('VERIFY');
+    expect(resumed.instruction.type).toBe('verify');
+    expect(loadSession(sessionId).activePhaseAttempt).toMatchObject({ phase: 'VERIFY', status: 'started' });
+    gateMode.config = { enforce: true };
+    recordPhaseResult(loadSession(sessionId), { phase: 'VERIFY', status: 'done' });
+    expect(loadSession(sessionId)).toMatchObject({ phase: 'VERIFY', pendingPhase: 'IMPROVE' });
+
+    const after = loadSession(sessionId);
+    const { events } = recordReport(after, true);
+    expect(after.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
+    expect(events.map((e) => [e.type, e.data?.code])).toEqual([['report-verify-gate', 'ok']]);
+  });
+});
+
+/** Put a started session where a driver would stand just before REPORT. */
+function enterStateAt(state, phase) {
+  state.phase = phase;
+  state.pendingPhase = null;
+  saveSession(state);
+}
