@@ -21,12 +21,10 @@
  * `depth_source: 'host-meta'`; no conversion happens anywhere in this path.
  *
  * WHAT THIS FILE DOES NOT PROVE (rules section 9 - the gate's blind spots):
- *   - THAT `parent_agent_id` AND `depth_source` REACH DISK. At this base
- *     `lib/learning/ledger/spawn-ledger.js#OPTIONAL_FIELDS` lists neither, and
- *     `appendSpawn` drops unknown keys, so only `depth` is persisted. The
- *     persisted-row assertions for those two columns belong to the change that
- *     widens that writer; here they are asserted at the hook's own boundary
- *     (`stopDepthFields`), which is exactly what the writer is handed.
+ *   - THE WRITER'S OWN COLUMN RULES. That `parent_agent_id` and `depth_source`
+ *     are accepted, scrubbed, nulled on a bad type, and that unknown keys are
+ *     still dropped is pinned in `subagent-spawn-ledger.test.js` (SH-19). Here
+ *     the columns are read back from the row the real hook wrote.
  *   - THAT A REAL SubagentStop `agent_transcript_path` NAMES `agent-<id>.jsonl`.
  *     No Stop payload was captured for the fixture; the layout is the one
  *     `lib/economics/usage-receipt.js` documents for subagent transcripts.
@@ -330,11 +328,11 @@ describe('subagent-handler stop/start (child process)', () => {
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
-  it('POSITIVE CONTROL: a stop with a readable meta file records the host depth on the stop row', () => {
+  it('POSITIVE CONTROL: a stop with a readable meta file records depth, parent and source on the stop row', () => {
     putMeta(metaOf({ spawnDepth: 1, description: 'SENTINEL-DESC-SH19', worktreePath: 'SENTINEL-PATH-SH19' }));
     const r = run(stopPayload(), 'stop');
     expect(r.status).toBe(0);
-    expect(lastStop().depth).toBe(1);
+    expect(lastStop()).toMatchObject({ depth: 1, parent_agent_id: 'agent-parent-synth', depth_source: 'host-meta' });
 
     // Nothing else from the meta file crosses into the ledger, stdout or stderr.
     const rawLedger = readFileSync(spawnLedgerPath(repo), 'utf-8');
@@ -345,7 +343,8 @@ describe('subagent-handler stop/start (child process)', () => {
     const { parentAgentId: _dropped, ...noParent } = metaOf({ spawnDepth: 0 });
     putMeta(noParent);
     expect(run(stopPayload(), 'stop').status).toBe(0);
-    expect(lastStop().depth).toBe(0);
+    // Unconverted host unit, labelled: the design canon counts a teammate as 1.
+    expect(lastStop()).toMatchObject({ depth: 0, parent_agent_id: null, depth_source: 'host-meta' });
   });
 
   it('stdout and exit code are byte-identical with and without the meta file (record only)', () => {
@@ -356,6 +355,7 @@ describe('subagent-handler stop/start (child process)', () => {
     expect(withMeta.stdout).toBe(without.stdout);
     expect(withMeta.stderr).toBe(without.stderr);
     expect(rows('stop').map((r) => r.depth)).toEqual([null, 2]);
+    expect(rows('stop').map((r) => r.depth_source)).toEqual([null, 'host-meta']);
   });
 
   describe.each([
@@ -373,14 +373,15 @@ describe('subagent-handler stop/start (child process)', () => {
       expect(r.status).toBe(0);
       expect(r.stdout).toBe(control.stdout);
       expect(r.stderr).toBe('');
-      expect(lastStop().depth).toBeNull();
+      // Explicit nulls, keys present: "read it, found nothing" is not "not produced".
+      expect(lastStop()).toMatchObject({ depth: null, parent_agent_id: null, depth_source: null });
     });
   });
 
   it('a stop payload with no agent_transcript_path at all still records depth null', () => {
     putMeta(metaOf({ spawnDepth: 1 }));
     expect(run(stopPayload({ agent_transcript_path: undefined }), 'stop').status).toBe(0);
-    expect(lastStop().depth).toBeNull();
+    expect(lastStop()).toMatchObject({ depth: null, parent_agent_id: null, depth_source: null });
   });
 
   it('the START row is untouched: it never reads the meta file and gains no column', () => {
