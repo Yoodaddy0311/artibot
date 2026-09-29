@@ -38,12 +38,15 @@
  * ── OPT-IN, AND OFF MEANS SILENT ───────────────────────────────────────────
  * The switch is `runtime.resume.staleGuard`, strict `=== true`, shipped `false`.
  * With anything else — a string, a number, an absent key, an absent or
- * unparseable config file — this prints NOTHING and exits 0, before it reads a
- * single artifact or opens the store. The command document then follows steps 4
- * and 6 exactly as written, so the OFF output is byte-identical to what it was
- * before this file existed. The write-side gates are not parameterised by this
- * key and never will be: a switch that could open them would be a way to turn
- * the gate off.
+ * unparseable config file — this prints NOTHING and exits 0, before it parses
+ * its arguments, reads a single artifact or opens the store; a malformed
+ * command line is as silent as a good one. The switch is read first on purpose:
+ * the command document reads every non-zero exit as `측정 불가`, so an OFF that
+ * could exit 2 would not be a no-op. The document then follows steps 4 and 6
+ * exactly as written, so the OFF output is byte-identical to what it was before
+ * this file existed. The write-side gates are not parameterised by this key and
+ * never will be: a switch that could open them would be a way to turn the gate
+ * off.
  *
  * ── REPORT ONLY, AND HOW THAT IS STRUCTURAL ────────────────────────────────
  * This calls no filesystem call that creates, changes or removes anything; it
@@ -56,11 +59,12 @@
  * `createStateStore` does path arithmetic only.
  *
  * ── EXIT CODES ─────────────────────────────────────────────────────────────
- *   0  the guard is OFF (empty stdout), or a report was produced — INCLUDING
- *      when everything in it is a reason line
+ *   0  the guard is OFF (empty stdout, whatever the arguments), or a report was
+ *      produced — INCLUDING when everything in it is a reason line
  *   1  an unexpected failure escaped `main` (a bug here, not a finding about
  *      the project): the message goes to stderr and NO document is printed
- *   2  usage error: the command line is wrong and nothing was read
+ *   2  usage error while the guard is ON: the command line is wrong and nothing
+ *      was read (OFF never parses the command line, so it cannot report this)
  * The command document turns a non-zero exit into `측정 불가` for steps 4 and 6,
  * so a crash can never read as "the guard is off".
  *
@@ -76,8 +80,14 @@
  *     and outcome, which declare plan 5, do flip). Widening that is a change to
  *     the classifier, not to this guard.
  *   - THE ARTIFACT'S CONTENT. Only edges are judged. A CURRENT review can hold a
- *     FAIL verdict and a CURRENT outcome can hold `accepted: false`; those print
- *     as they are.
+ *     verdict other than PASS and a CURRENT outcome can hold `accepted: false`
+ *     (or `null`, deferred); the body is printed either way. Those two
+ *     frontmatter values are not in the excerpt, so they ride on the CURRENT
+ *     line (` · verdict …`, ` · accepted …`) — see {@link factsDetail}.
+ *   - THE REST OF THE FRONTMATTER. It is dropped from the excerpt and shown
+ *     nowhere else: ids (`verification_id`, `findings_ref`), timestamps, the
+ *     actor, `evidence_refs`, `supersedes`, a reviewer's identity and a plan's
+ *     `mode`. A CURRENT artifact can be read directly if one of them matters.
  *   - THE STORE THIS CHECKOUT WOULD NOT OPEN. The live revisions come from the
  *     store `createStateStore` resolves for `--cwd`. A mission folder copied
  *     between worktrees is judged against whichever store answers there.
@@ -323,9 +333,13 @@ function failedEdges(errors) {
  * shape `classifyStaleness` takes. The parsers return camelCase; the mapping is
  * the same one `mission-complete-record.js#buildMissionState` makes.
  *
+ * `facts` carries the two frontmatter values the excerpt would otherwise lose
+ * and the body does not have to repeat: a review's `verdict` and an outcome's
+ * `accepted`. They are read from the PARSED document, never from the body.
+ *
  * @param {string} kind - `plan`, `review` or `outcome`.
  * @param {string} text - File text.
- * @returns {{ok: boolean, revision: number|null, basedOn: object|null, codes?: string[]}} Edges.
+ * @returns {{ok: boolean, revision: number|null, basedOn: object|null, facts?: object, codes?: string[]}} Edges.
  */
 function parseEdges(kind, text) {
   try {
@@ -341,6 +355,7 @@ function parseEdges(kind, text) {
         ok: true,
         revision: r.review.revision,
         basedOn: { intent_revision: r.review.basedOn.intentRevision, plan_revision: r.review.basedOn.planRevision },
+        facts: { verdict: r.review.verdict },
       };
     }
     const r = parseOutcomeMd(text);
@@ -353,6 +368,7 @@ function parseEdges(kind, text) {
         plan_revision: r.outcome.basedOn.planRevision,
         review_revision: r.outcome.basedOn.reviewRevision,
       },
+      facts: { accepted: r.outcome.accepted },
     };
   } catch {
     return failedEdges([{ code: 'PARSE_THREW' }]);
@@ -392,6 +408,29 @@ function currentDetail(edges, current) {
   return Object.keys(edges.basedOn)
     .map((member) => `${member} ${shown(edges.basedOn[member], '없음')} = 현재 ${shown(current[LIVE_KEY_OF[member]], '미확인')}`)
     .join(', ');
+}
+
+/**
+ * What the frontmatter says that the excerpt drops and the body need not repeat:
+ * a review's `verdict` and an outcome's `accepted` flag (true, false, or null for
+ * a deferred outcome). A CURRENT outcome whose `accepted` is false has fresh
+ * edges and a printable body, and nothing in that body says it was not
+ * accepted — so this rides on the CURRENT line, where the model reads it before
+ * it summarises. Printed only as tokens: a value that is not one of the expected
+ * shapes reads `미상`, never itself, so document text cannot reach the line.
+ * A plan has neither field.
+ *
+ * @param {string} kind - Artifact kind.
+ * @param {{verdict?: unknown, accepted?: unknown}|null|undefined} facts - Parsed frontmatter values.
+ * @returns {string} ` · verdict PASS`, ` · accepted false`, or the empty string.
+ */
+export function factsDetail(kind, facts) {
+  if (kind === ArtifactKind.REVIEW) return ` · verdict ${safeToken(facts?.verdict, '미상')}`;
+  if (kind === ArtifactKind.OUTCOME) {
+    const flag = facts?.accepted;
+    return ` · accepted ${flag === true || flag === false || flag === null ? String(flag) : '미상'}`;
+  }
+  return '';
 }
 
 /**
@@ -445,7 +484,8 @@ function judge({ kind, edges, current, live, classify }) {
   if (state === StaleState.CURRENT) {
     // A CURRENT verdict for a document that did not parse is a contradiction.
     if (!edges.ok) return unmeasured(label, '판정과 판독이 어긋남');
-    return { presentable: true, state, line: `CURRENT: ${label} — ${currentDetail(edges, current)}` };
+    const line = `CURRENT: ${label} — ${currentDetail(edges, current)}${factsDetail(kind, edges.facts)}`;
+    return { presentable: true, state, line };
   }
   if (!NON_CURRENT.has(state)) return unmeasured(label, '판정 결과를 해석할 수 없음');
   const note = live?.ok === false ? ` · 스토어: ${safeToken(live.why, 'unknown')}` : '';
@@ -454,9 +494,15 @@ function judge({ kind, edges, current, live, classify }) {
 
 /**
  * The body of a CURRENT artifact for the model to summarise: frontmatter
- * removed (its content is in the provenance line), LF endings, and capped at the
- * last line boundary inside the limit (a hard cut only when the first line alone
- * exceeds it), with the size of what was left out.
+ * removed, LF endings, and capped at the last line boundary inside the limit (a
+ * hard cut only when the first line alone exceeds it), with the size of what was
+ * left out.
+ *
+ * The frontmatter is NOT all carried elsewhere. The `based_on` edges, a
+ * review's `verdict` and an outcome's `accepted` flag are on the CURRENT line
+ * ({@link currentDetail}, {@link factsDetail}); every other key — ids,
+ * timestamps, actor, evidence and finding refs, `supersedes`, a plan's `mode` —
+ * is dropped here and appears nowhere in the output.
  *
  * @param {string} text - File text.
  * @returns {string} Excerpt.
@@ -578,13 +624,19 @@ function readPluginConfig() {
  * @returns {number} Process exit code.
  */
 export function main(argv) {
+  // The switch is read FIRST, before the arguments are even parsed. OFF must be
+  // a pure no-op for ANY argv: were a malformed command line reported as a usage
+  // error (exit 2) while OFF, `commands/resume.md` — which reads every non-zero
+  // exit as 측정 불가 for steps 4 and 6 — would break the very path the switch
+  // exists to leave alone. So OFF returns 0 with zero bytes, and touches no
+  // argument, no artifact and no store.
+  if (!readStaleGuardEnabled(readPluginConfig())) return 0;
+
   const parsed = parseArgs(argv);
   if ('error' in parsed) {
     process.stderr.write(`read-order-guard: ${parsed.error} | ${USAGE}\n`);
     return 2;
   }
-  // OFF is silent and reads nothing: no artifact, no store.
-  if (!readStaleGuardEnabled(readPluginConfig())) return 0;
 
   const { mission, cwd } = parsed.opts;
   const projectRoot = path.resolve(typeof cwd === 'string' && cwd !== '' ? cwd : process.cwd());

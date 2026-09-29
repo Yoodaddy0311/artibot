@@ -170,6 +170,18 @@ describe('the guard paragraph', () => {
     expect(block).toContain('요약하지 않는다');
   });
 
+  it('tells the model to carry the CURRENT line\'s verdict and accepted flag into its summary', () => {
+    // Those two values live only in the frontmatter, which the excerpt drops; a
+    // summary that omitted them would present a rejected outcome as an accepted
+    // one. The CLI puts them on the CURRENT line and this sentence is what makes
+    // the model relay them.
+    const block = guardBlock();
+    expect(block).toContain('verdict');
+    expect(block).toContain('accepted');
+    expect(block).toContain('frontmatter');
+    expect(block).toContain('요지에 그대로 옮긴다');
+  });
+
   it('is fail-closed on a failing CLI: non-zero exit -> 측정 불가, bodies unread', () => {
     const block = guardBlock();
     expect(block).toContain('종료 코드가 0 이 아니면');

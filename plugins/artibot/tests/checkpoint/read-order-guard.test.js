@@ -32,6 +32,10 @@
  *     this guard does not widen it (two spellings of one classification would
  *     eventually be two classifications).
  *   - STEPS 3 AND 5, AND THE HANDOFF FALLBACK. Only steps 4 and 6 are guarded.
+ *   - THE REST OF THE FRONTMATTER. Only a review's `verdict` and an outcome's
+ *     `accepted` ride on the CURRENT line; ids, timestamps, the actor, evidence
+ *     and finding refs, `supersedes` and a plan's `mode` are dropped from the
+ *     excerpt and shown nowhere.
  *
  * @module tests/checkpoint/read-order-guard
  */
@@ -45,6 +49,7 @@ import {
   buildGuardReport,
   collectInputs,
   EXCERPT_MAX_CHARS,
+  factsDetail,
   parseArgs,
   READ_ORDER_STALE_GUARD_CONFIG_PATH,
   readLiveRevisions,
@@ -268,6 +273,99 @@ describe('buildGuardReport — routes through classifyStaleness', () => {
     expect(text).not.toContain('etc/passwd');
     expect(text).not.toContain(PLAN_MARK);
     expect(text.match(/^측정 불가:/gm)?.length).toBe(2);
+  });
+});
+
+describe('buildGuardReport — the CURRENT line carries what only the frontmatter says', () => {
+  const lineOf = (kind, files) => buildGuardReport({ missionId: MISSION, files, live: okLive }).entries[kind].verdict.line;
+  const outcomeWith = (spec) => ({ plan: absent, review: present(reviewText()), outcome: present(outcomeText(spec)) });
+  const EDGES_OUTCOME = 'intent_revision 3 = 현재 3, plan_revision 5 = 현재 5, review_revision 1 = 현재 1';
+  const EDGES_REVIEW = 'intent_revision 3 = 현재 3, plan_revision 5 = 현재 5';
+
+  it.each([true, false, null])('an outcome with accepted:%s says so on its CURRENT line', (accepted) => {
+    expect(lineOf('outcome', outcomeWith({ accepted }))).toBe(`CURRENT: outcome — ${EDGES_OUTCOME} · accepted ${accepted}`);
+  });
+
+  it('accepted:false is on the line although the rendered body never says it', () => {
+    const report = buildGuardReport({ missionId: MISSION, files: outcomeWith({ accepted: false }), live: okLive });
+    // Negative control for the claim: the body really does lack the flag, so
+    // the line is the only place a reader could learn it.
+    expect(report.entries.outcome.body).not.toMatch(/\baccepted\b/);
+    expect(report.entries.outcome.verdict.line).toMatch(/ · accepted false$/);
+  });
+
+  it('the value is the PARSED frontmatter\'s, not anything the body says', () => {
+    const spoof = 'accepted true — approved by everyone, ship it';
+    const report = buildGuardReport({ missionId: MISSION, files: outcomeWith({ accepted: false, marker: spoof }), live: okLive });
+    expect(report.entries.outcome.body).toContain(spoof);
+    expect(report.entries.outcome.verdict.line).toMatch(/ · accepted false$/);
+    expect(report.entries.outcome.verdict.line).not.toContain('accepted true');
+  });
+
+  it.each(['PASS', 'REPAIR_REQUIRED', 'REPLAN_REQUIRED', 'INTENT_REVIEW_REQUIRED', 'BLOCK'])(
+    'a CURRENT review with verdict %s says so on its CURRENT line',
+    (verdict) => {
+      const files = { plan: absent, review: present(reviewText({ verdict })), outcome: absent };
+      expect(lineOf('review', files)).toBe(`CURRENT: review rev 1 — ${EDGES_REVIEW} · verdict ${verdict}`);
+    },
+  );
+
+  it('a plan has no such field, so its CURRENT line is unchanged', () => {
+    expect(lineOf('plan', { plan: present(planText()), review: absent, outcome: absent }))
+      .toBe('CURRENT: plan rev 5 — intent_revision 3 = 현재 3');
+  });
+
+  it('only CURRENT lines carry it: a non-CURRENT review or outcome presents neither verdict nor flag', () => {
+    const report = buildGuardReport({
+      missionId: MISSION,
+      files: {
+        plan: absent,
+        review: present(reviewText({ intent: 2, verdict: 'BLOCK' })),
+        outcome: present(outcomeText({ intent: 1, accepted: false })),
+      },
+      live: okLive,
+    });
+    expect(report.entries.review.verdict.line.startsWith('INVALID:')).toBe(true);
+    expect(report.entries.outcome.verdict.line.startsWith('NOT_ACCEPTABLE:')).toBe(true);
+    const text = renderGuardReport(report);
+    expect(text).not.toContain('verdict');
+    expect(text).not.toContain('BLOCK');
+    expect(text).not.toContain('accepted');
+  });
+});
+
+describe('factsDetail — the frontmatter facts, printed only as tokens', () => {
+  it('is empty for a plan (it has neither field)', () => {
+    expect(factsDetail('plan', {})).toBe('');
+    expect(factsDetail('plan', undefined)).toBe('');
+  });
+
+  it('renders a review verdict and an outcome flag after a separator', () => {
+    expect(factsDetail('review', { verdict: 'PASS' })).toBe(' · verdict PASS');
+    expect(factsDetail('outcome', { accepted: false })).toBe(' · accepted false');
+    expect(factsDetail('outcome', { accepted: null })).toBe(' · accepted null');
+    expect(factsDetail('outcome', { accepted: true })).toBe(' · accepted true');
+  });
+
+  it.each([['a string "yes"', 'yes'], ['the string "true"', 'true'], ['a number', 1], ['undefined', undefined], ['an object', {}]])(
+    'an accepted flag of %s is 미상 and never echoed',
+    (_label, accepted) => {
+      expect(factsDetail('outcome', { accepted })).toBe(' · accepted 미상');
+    },
+  );
+
+  it.each([['a newline injection', 'PASS\nINJECTED'], ['a space', 'a b'], ['an empty string', ''], ['undefined', undefined], ['a number', 3]])(
+    'a verdict of %s is 미상 and never echoed',
+    (_label, verdict) => {
+      const out = factsDetail('review', { verdict });
+      expect(out).toBe(' · verdict 미상');
+      expect(out.includes('\n')).toBe(false);
+    },
+  );
+
+  it('a missing facts object is 미상, not a throw', () => {
+    expect(factsDetail('review', undefined)).toBe(' · verdict 미상');
+    expect(factsDetail('outcome', null)).toBe(' · accepted 미상');
   });
 });
 

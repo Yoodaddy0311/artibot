@@ -87,13 +87,13 @@ export function planText({ revision = 5, intent = 3, marker = PLAN_MARK, lines =
 /**
  * Render a `review.md`. `plan: null` omits the plan edge entirely.
  *
- * @param {{revision?: number, intent?: number, plan?: number|null}} [spec] - Overrides.
+ * @param {{revision?: number, intent?: number, plan?: number|null, verdict?: string}} [spec] - Overrides.
  * @returns {string} File text.
  */
-export function reviewText({ revision = 1, intent = 3, plan = 5 } = {}) {
+export function reviewText({ revision = 1, intent = 3, plan = 5, verdict = 'PASS' } = {}) {
   return serializeReviewMd({
     missionId: MISSION,
-    verdict: 'PASS',
+    verdict,
     findingsRef: 'transcript:fixture',
     verificationId: 'v-fixture-1',
     revision,
@@ -103,18 +103,20 @@ export function reviewText({ revision = 1, intent = 3, plan = 5 } = {}) {
 }
 
 /**
- * Render an `outcome.md`.
+ * Render an `outcome.md`. `accepted` is the three-valued frontmatter flag
+ * (`true`, `false`, or `null` for a deferred outcome); the rendered BODY never
+ * spells it out, which is what makes it a fact only the frontmatter carries.
  *
- * @param {{intent?: number, plan?: number, review?: number, marker?: string}} [spec] - Overrides.
+ * @param {{intent?: number, plan?: number, review?: number, marker?: string, accepted?: boolean|null}} [spec] - Overrides.
  * @returns {string} File text.
  */
-export function outcomeText({ intent = 3, plan = 5, review = 1, marker = OUTCOME_MARK } = {}) {
+export function outcomeText({ intent = 3, plan = 5, review = 1, marker = OUTCOME_MARK, accepted = true } = {}) {
   return serializeOutcomeMd({
     missionId: MISSION,
     basedOn: { intentRevision: intent, planRevision: plan, reviewRevision: review },
     verificationId: 'v-fixture-1',
     evidenceRefs: [],
-    accepted: true,
+    accepted,
     actor: ACTOR,
     ts: TS,
     sections: { accepted_result: marker },

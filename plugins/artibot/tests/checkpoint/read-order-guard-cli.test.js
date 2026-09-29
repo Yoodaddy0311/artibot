@@ -7,9 +7,12 @@
  *      but the literal `true` — the shipped `false`, a string, a number, an
  *      absent key, an absent or unparseable config file — the CLI prints ZERO
  *      bytes, on stdout and on stderr, and exits 0, for a CURRENT project and a
- *      STALE one alike. An empty stdout is the only output that cannot differ
- *      from the pre-change document; that is the "byte-identical" pin. The
- *      sibling `resume-report.mjs` is pinned unchanged by the key as well.
+ *      STALE one alike, and for a MALFORMED COMMAND LINE too: the switch is read
+ *      before the arguments are parsed, because a usage error's exit 2 is what
+ *      `commands/resume.md` turns into `측정 불가` for steps 4 and 6, and OFF must
+ *      never do that. An empty stdout is the only output that cannot differ from
+ *      the pre-change document; that is the "byte-identical" pin. The sibling
+ *      `resume-report.mjs` is pinned unchanged by the key as well.
  *   2. KEY TRUE -> STALE / INVALID / NOT_ACCEPTABLE / BROKEN print ONE reason
  *      line and the body is absent from stdout. The body markers are unique
  *      sentinels that exist only inside a rendered body, and every scenario has
@@ -91,6 +94,15 @@ beforeAll(() => {
     live: { intent: 3, plan: 5 },
     files: { 'plan.md': 'this is not a plan artifact\n', 'review.md': reviewText({ plan: null }), 'outcome.md': outcomeText() },
   });
+  // Fresh edges, but the review did not pass and the outcome was not accepted.
+  projects.rejected = makeProject({
+    live: { intent: 3, plan: 5 },
+    files: {
+      'plan.md': planText(),
+      'review.md': reviewText({ verdict: 'REPAIR_REQUIRED' }),
+      'outcome.md': outcomeText({ accepted: false }),
+    },
+  });
   // Artifacts on disk, but the store has never heard of the mission.
   projects.noRow = makeProject({ live: null, files: all });
   projects.empty = makeProject({ live: { intent: 3, plan: 5 } });
@@ -138,11 +150,43 @@ describe('KEY FALSE — the CLI prints nothing, whatever the project holds', () 
     expect(census(projects.intentMoved)).toEqual(before);
   });
 
-  it('a malformed command line is still a usage error when OFF (a doc bug must be loud)', () => {
-    const res = run(['--cwd', projects.current]);
+  // The switch is read BEFORE the arguments are parsed. If it were the other way
+  // round, OFF + a typo'd flag would exit 2, the command document would read the
+  // non-zero exit as 측정 불가 for steps 4 and 6, and OFF would not be a no-op.
+  it.each([
+    ['no arguments', []],
+    ['a typo\'d flag', ['--mision', MISSION]],
+    ['an unknown flag beside a good one', ['--mission', MISSION, '--nope']],
+    ['--mission with no value', ['--mission']],
+    ['--mission followed by another flag', ['--mission', '--cwd', '/x']],
+    ['a bare positional', [MISSION]],
+    ['--cwd with no value', ['--mission', MISSION, '--cwd']],
+  ])('OFF is a pure no-op even for a malformed command line (%s): exit 0, 0 bytes on both streams', (_label, args) => {
+    const res = run(args);
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toBe('');
+  });
+
+  it('...and the same holds for an explicit false, a string "true" and a broken config file', () => {
+    for (const [label, root] of [
+      ['explicit false', makePluginRoot({ runtime: { resume: { staleGuard: false } } })],
+      ['string "true"', makePluginRoot({ runtime: { resume: { staleGuard: 'true' } } })],
+      ['unparseable config', makePluginRoot(undefined, { raw: '{ not json' })],
+    ]) {
+      const res = run(['--mision', MISSION], { pluginRoot: root });
+      expect({ label, status: res.status, stdout: res.stdout, stderr: res.stderr })
+        .toEqual({ label, status: 0, stdout: '', stderr: '' });
+    }
+  });
+
+  it('negative control: the SAME typo\'d command line is a usage error once the key is ON', () => {
+    // Without this the two tests above would pass for a CLI that never reports
+    // a usage error at all.
+    const res = run(['--mision', MISSION], { pluginRoot: onRoot });
     expect(res.status).toBe(2);
     expect(res.stdout).toBe('');
-    expect(res.stderr).toContain('usage: read-order-guard.mjs');
+    expect(res.stderr).toContain('unknown argument: --mision');
   });
 });
 
@@ -155,15 +199,28 @@ describe('KEY TRUE — a CURRENT project prints as the doc has always described'
     expect(out).toContain(`[6/6] ${REL('review.md')}`);
     expect(out).toContain(`[6/6] ${REL('outcome.md')}`);
     expect(lineOf(out, 'CURRENT: plan')).toBe('CURRENT: plan rev 5 — intent_revision 3 = 현재 3');
-    expect(lineOf(out, 'CURRENT: review')).toBe('CURRENT: review rev 1 — intent_revision 3 = 현재 3, plan_revision 5 = 현재 5');
+    expect(lineOf(out, 'CURRENT: review')).toBe(
+      'CURRENT: review rev 1 — intent_revision 3 = 현재 3, plan_revision 5 = 현재 5 · verdict PASS',
+    );
     expect(lineOf(out, 'CURRENT: outcome')).toBe(
-      'CURRENT: outcome — intent_revision 3 = 현재 3, plan_revision 5 = 현재 5, review_revision 1 = 현재 1',
+      'CURRENT: outcome — intent_revision 3 = 현재 3, plan_revision 5 = 현재 5, review_revision 1 = 현재 1 · accepted true',
     );
     expect(out).toContain(PLAN_MARK);
     expect(out).toContain(OUTCOME_MARK);
     for (const word of ['STALE:', 'INVALID:', 'NOT_ACCEPTABLE:', 'BROKEN:', '측정 불가:', '부재:']) {
       expect(out, word).not.toContain(word);
     }
+  });
+
+  it('a CURRENT review that did not pass and a CURRENT outcome that was not accepted are not presented as if they had', () => {
+    const out = run(['--mission', MISSION, '--cwd', projects.rejected], { pluginRoot: onRoot }).stdout;
+    expect(lineOf(out, 'CURRENT: review')).toMatch(/ · verdict REPAIR_REQUIRED$/);
+    expect(lineOf(out, 'CURRENT: outcome')).toMatch(/ · accepted false$/);
+    // Both are CURRENT (their edges are fresh) and their bodies ARE printed, so
+    // the CURRENT line is the only place the frontmatter's answer appears: the
+    // lowercase word occurs exactly once in the whole output.
+    expect(out).toContain(OUTCOME_MARK);
+    expect(out.match(/\baccepted\b/g)?.length).toBe(1);
   });
 
   it('steps come out in order: 4 before 6, review before outcome', () => {
@@ -330,9 +387,12 @@ describe('KEY TRUE — absence, ids and encodings', () => {
   });
 });
 
-describe('usage errors exit 2 and print nothing on stdout', () => {
+// Every case below runs with the key ON: OFF never parses its arguments (see the
+// KEY FALSE block), so a usage error can only be reported by a guard that is on.
+describe('KEY TRUE — usage errors exit 2 and print nothing on stdout', () => {
   for (const [name, args] of [
     ['no arguments at all', []],
+    ['a typo\'d flag', ['--mision', MISSION]],
     ['an unknown flag', ['--mission', MISSION, '--nope']],
     ['--mission with no value', ['--mission']],
     ['a bare positional', [MISSION]],
