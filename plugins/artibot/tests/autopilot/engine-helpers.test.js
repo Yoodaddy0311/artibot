@@ -9,11 +9,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPreflightInstruction,
+  buildRecoveryNote,
   makeInitialState,
   renderPreflightSummary,
 } from '../../lib/autopilot/_engine-helpers.js';
+import { recordPhaseResult } from '../../lib/autopilot/engine-state.js';
+import { ATTEMPT_STATUS } from '../../lib/autopilot/phase-attempt.js';
+import { gateReportOnVerify } from '../../lib/autopilot/report-verify-gate.js';
 import { deleteSessionArtifacts } from '../../lib/autopilot/session-store.js';
 import { readEvents as readSessionEvents } from '../../lib/autopilot/telemetry.js';
+
+// The driver path (`engine-state.js#recordPhaseResult`) reads the REPORT gate's
+// switch through `loadReportVerifyGateConfig`, a named import a spy cannot
+// reach. Same injection as report-verify-gate.test.js; OFF unless a test opts in.
+const gateMode = vi.hoisted(() => ({ config: { enforce: false } }));
+
+vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  loadReportVerifyGateConfig: () => gateMode.config,
+}));
 
 const noHistoryDeps = {
   listSessions: vi.fn(() => []),
@@ -38,6 +52,7 @@ function makeTracked(args) {
 }
 
 afterEach(() => {
+  gateMode.config = { enforce: false };
   for (const id of helperIds) {
     try { deleteSessionArtifacts(id); } catch { /* best-effort cleanup */ }
   }
@@ -164,5 +179,96 @@ describe('renderPreflightSummary', () => {
     expect(out).toMatch(/no checks/);
     const out2 = renderPreflightSummary(null);
     expect(out2).toMatch(/no checks/);
+  });
+});
+
+/**
+ * The REPORT verify-evidence gate pauses a session back to VERIFY
+ * (`report-verify-gate.js#pauseForVerify`): PAUSED, lastPhase REPORT,
+ * pendingPhase VERIFY, and the REPORT window closed with a phase-end. Resume
+ * then runs VERIFY (`engine-state.js#nextTarget`). Before this banner branch the
+ * driver's pre-resume note was null for that pause — or, with an older window
+ * still open in the log, named a phase resume would not run.
+ *
+ * The pause is produced by the real gate, not hand-built, so a change to the
+ * gate's pause shape turns these red instead of leaving a stale fixture green.
+ */
+describe('buildRecoveryNote — REPORT verify-gate pause', () => {
+  /** A fresh session paused by the enforced gate (no VERIFY attempt at all). */
+  function gatePaused() {
+    const state = makeTracked({ task: 'report gate pause banner' });
+    const pause = gateReportOnVerify(state, { enforce: true });
+    expect(pause?.type).toBe('pause');
+    return state;
+  }
+
+  it('announces VERIFY re-entry for a gate pause', () => {
+    const state = gatePaused();
+    expect(state).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+
+    const note = buildRecoveryNote(state);
+
+    expect(note).toBeTypeOf('string');
+    expect(note).toContain('VERIFY 재진입');
+    expect(note).toContain(state.pausedReason);
+    expect(note).not.toContain('REPORT 재진입');
+  });
+
+  it('announces VERIFY re-entry after the driver path refuses a REPORT record', () => {
+    // A driver recording REPORT itself never enters runPhase6Report; the
+    // refusal happens inside recordPhaseResult and must leave the same shape.
+    gateMode.config = { enforce: true };
+    const state = makeTracked({ task: 'driver-path report refusal banner' });
+    expect(state.phase).not.toBe('PAUSED');
+
+    recordPhaseResult(state, { phase: 'REPORT', status: 'done' });
+    expect(state).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+    expect(state.pausedReason).toMatch(/^report-verify-evidence-missing:/);
+
+    const note = buildRecoveryNote(state);
+
+    expect(note).toContain('VERIFY 재진입');
+    expect(note).toContain(state.pausedReason);
+  });
+
+  it('names VERIFY, not an older open window, because VERIFY is what resume runs', () => {
+    const state = gatePaused();
+    const events = [{ type: 'phase-start', phase: 'EXECUTE', ts: '2026-09-28T00:00:00Z' }];
+
+    const note = buildRecoveryNote(state, { events });
+
+    expect(note).toContain('VERIFY 재진입');
+    expect(note).not.toContain('EXECUTE 재진입');
+  });
+
+  it('lets an outstanding attempt outrank the gate pause (ADR-005 order kept)', () => {
+    const state = gatePaused();
+    state.activePhaseAttempt = {
+      attemptId: 'b3c1f0de-0000-4000-8000-000000000001',
+      phase: 'EXECUTE',
+      runner: 'team-create',
+      status: ATTEMPT_STATUS.STARTED,
+      checkpointSha: null,
+      startedAt: '2026-09-28T00:00:00Z',
+    };
+
+    const note = buildRecoveryNote(state);
+
+    expect(note).toContain('자동 재실행하지 않습니다');
+    expect(note).not.toContain('VERIFY 재진입');
+  });
+
+  it('leaves a non-gate pause on VERIFY to the existing banner', () => {
+    // Negative control: a recovery pause re-targets VERIFY with lastPhase
+    // VERIFY. It is not the gate's shape, so nothing here changes for it.
+    const state = {
+      sessionId: 'ap-helpers-non-gate',
+      phase: 'PAUSED',
+      lastPhase: 'VERIFY',
+      pendingPhase: 'VERIFY',
+      pausedReason: 'recovery:pause',
+    };
+
+    expect(buildRecoveryNote(state, { events: [] })).toBeNull();
   });
 });

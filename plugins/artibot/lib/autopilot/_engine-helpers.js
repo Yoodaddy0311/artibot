@@ -622,8 +622,15 @@ export function detectInterruptedPhase(state, opts = {}) {
  * owner for the text. Duplicating the sentences is how the two drifted apart
  * in the first place.
  *
- * @param {object} state - Live session state; `sessionId` and
- *   `activePhaseAttempt` are read.
+ * A REPORT verify-gate pause (`report-verify-gate.js#pauseForVerify`) is the
+ * third answer: no crash, no attempt, yet resume runs VERIFY because
+ * `pendingPhase` names it (`engine-state.js#nextTarget`). It is checked after
+ * the attempt and before phase pairing — an older open window in the log is not
+ * what resume will run.
+ *
+ * @param {object} state - Live session state; `sessionId`,
+ *   `activePhaseAttempt`, `phase`, `lastPhase`, `pendingPhase` and
+ *   `pausedReason` are read.
  * @param {{events?: object[]}} [opts] - Forwarded to
  *   {@link detectInterruptedPhase}; unit-test seam only.
  * @returns {string|null}
@@ -636,6 +643,14 @@ export function buildRecoveryNote(state, opts = {}) {
     // resume will pause or redo it.
     const reconciled = reconcileAttemptOnResume(state);
     if (reconciled.action !== 'none') return reconciled.note;
+
+    // The gate's pause shape, matched on its fields rather than on the
+    // `pausedReason` spelling: lastPhase stays REPORT while pendingPhase is
+    // VERIFY, and no other pause writer produces that pair.
+    if (state?.phase === 'PAUSED' && state.lastPhase === 'REPORT' && state.pendingPhase === 'VERIFY') {
+      const why = typeof state.pausedReason === 'string' ? ` (${state.pausedReason})` : '';
+      return `이전 세션이 REPORT 직전에 VERIFY 완료 근거 부족으로 일시정지됨${why}. 자동으로 VERIFY 재진입합니다.`;
+    }
 
     const result = detectInterruptedPhase(state, opts);
     if (!result.interrupted) return null;

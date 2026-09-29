@@ -37,14 +37,26 @@
  * block every session. The cost: this gate cannot see whether IMPROVE changed
  * code after VERIFY passed.
  *
+ * ## Two entry points
+ *
+ * The engine path is `engine.js#runPhase6Report` → {@link gateReportOnVerify}.
+ * The driver path is `engine-state.js#recordPhaseResult` → {@link refuseRecordedReport}:
+ * a driver that records REPORT itself never enters runPhase6Report, and that
+ * is most of the traffic — of 28 sessions that reached REPORT, only 1 went
+ * through runPhase6Report (snapshot 2026-09-28T10:02Z). Both apply the same
+ * rule and leave the same pause shape (PAUSED, lastPhase REPORT, pendingPhase
+ * VERIFY).
+ *
+ * ON-only exception: on the driver path a REPORT without evidence lifts NO
+ * pause, whatever its reason — the pause and its `pausedReason` stand. OFF keeps
+ * the old lift (`engine-state.js#recordPhaseResult`, the PAUSED + lastPhase branch).
+ *
  * ## What this gate cannot see (rules §9)
  *
- * It runs only inside `engine.js#runPhase6Report`. A driver that records REPORT
- * itself with `recordPhaseResult(state, { phase: 'REPORT', ... })` never enters
- * that function, so it bypasses this gate entirely. Live: of 28 sessions that
- * reached REPORT, only 1 went through runPhase6Report (snapshot
- * 2026-09-28T10:02Z) — a driver-recorded REPORT bypasses this gate, so with the
- * switch on it governs the engine-driven path only.
+ * A REPORT that reaches neither entry point — code that writes `state.phases`
+ * or `state.phase` directly — is not judged. And the rule reads the attempt
+ * journal only: it cannot tell whether the verification it accepts was a
+ * meaningful one.
  *
  * ## Kill switch
  *
@@ -60,7 +72,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
-import { persist, tick } from './_engine-helpers.js';
+import { mergeQueuedNotification, persist, tick } from './_engine-helpers.js';
 import { notifyPause } from './notification.js';
 
 /**
@@ -245,4 +257,87 @@ export function gateReportOnVerify(state, config = undefined) {
     data: { code: result.code, attemptId: result.attemptId, enforced: true },
   });
   return null;
+}
+
+/**
+ * Pause a driver-recorded REPORT back to VERIFY. The same four fields as
+ * {@link pauseForVerify}, so the resume banner reads both paths alike — but no
+ * `phase-end`: the driver path opens no REPORT window, so there is none to close.
+ *
+ * The notifier queues onto the session FILE, which the persist below rewrites
+ * from this object; merging its payload into the live state first is what keeps
+ * the entry (the same trap `engine-state.js#recordPhaseResult` closes for CA-03).
+ *
+ * @param {object} state - Live session state (mutated).
+ * @param {{code: string, attemptId: string|null}} result
+ * @param {unknown} claimedStatus - The status the driver reported for REPORT.
+ */
+function pauseRecordedReport(state, result, claimedStatus) {
+  const reason = `report-verify-evidence-missing:${result.code}`;
+  state.phase = 'PAUSED';
+  state.lastPhase = 'REPORT';
+  state.pendingPhase = 'VERIFY';
+  state.pausedReason = reason;
+  tick(state.sessionId, {
+    phase: 'REPORT',
+    type: 'pause',
+    level: 'warn',
+    message: `Autopilot paused: ${reason}`,
+    data: {
+      code: result.code,
+      attemptId: result.attemptId,
+      claimedStatus: typeof claimedStatus === 'string' ? claimedStatus : null,
+    },
+  });
+  let note = null;
+  try {
+    note = notifyPause(state.sessionId, reason);
+  } catch { /* the pause stands without its announcement */ }
+  mergeQueuedNotification(state, note);
+  persist(state);
+}
+
+/**
+ * The driver-path gate, called by `engine-state.js#recordPhaseResult` before a
+ * REPORT result is recorded. Returns true when the REPORT was refused — the
+ * caller then records nothing and returns.
+ *
+ *   - Switch OFF: returns false before evaluating anything. No tick, no write.
+ *   - Evidence OK: one `report-verify-gate` tick (the engine path's pass trace,
+ *     plus `via`), returns false, and the caller records as before.
+ *   - No evidence, session already PAUSED (any reason): nothing changes — the
+ *     pause and its reason stand — and one `kept` tick records the refusal.
+ *     A REPORT claim is therefore never what lifts a pause while the switch is on.
+ *   - No evidence otherwise: pauses back to VERIFY ({@link pauseRecordedReport}).
+ *
+ * @param {object} state - Live session state (mutated only when pausing).
+ * @param {{status?: unknown}} [payload] - The REPORT result being recorded.
+ * @param {{enforce?: boolean}} [config] - The switch, injected by the caller.
+ * @returns {boolean}
+ */
+export function refuseRecordedReport(state, payload, config) {
+  if (config?.enforce !== true) return false;
+  const result = evaluateReportVerifyEvidence(state);
+  if (result.ok) {
+    tick(state?.sessionId, {
+      phase: 'REPORT',
+      type: 'report-verify-gate',
+      level: 'info',
+      message: `REPORT verify evidence: ${result.code}`,
+      data: { code: result.code, attemptId: result.attemptId, enforced: true, via: 'recordPhaseResult' },
+    });
+    return false;
+  }
+  if (state.phase === 'PAUSED') {
+    tick(state.sessionId, {
+      phase: 'REPORT',
+      type: 'report-verify-gate',
+      level: 'warn',
+      message: `REPORT 기록 거부 — 일시정지 유지 (${result.code})`,
+      data: { code: result.code, kept: true },
+    });
+    return true;
+  }
+  pauseRecordedReport(state, result, payload?.status);
+  return true;
 }
