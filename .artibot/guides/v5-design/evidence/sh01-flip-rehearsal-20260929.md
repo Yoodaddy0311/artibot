@@ -8,8 +8,8 @@
 | 위임 | 웨이브 2 W2-5 `sh01-flip-rehearsal` · 결정 R2-7 "리허설 브랜치는 절대 착지하지 않는다, D3 는 a-④ 전까지 보류" |
 | 기준 | master 스냅샷 `d13470d220a21e4c28113fac1b05f8b943b76aba`(W1-2 EC-01 · W1-4 포함) + CA-08 팁 `5203dec423967cc89fa966da25c916f3f4992133`(W1-4 `245fc47c` 위에 선 브랜치 `worktree-agent-ad549a863a4e6f7a7` — `git branch --contains 5203dec4` 가 그 브랜치와 이 리허설 브랜치만 낸다: 로컬 master 에는 아직 없다. 반대로 `d13470d2` 는 로컬 master 의 조상이다(`git merge-base --is-ancestor`)) |
 | 리허설 커밋 | `ae341393`(CA-08 병합) → `f1c21d58`(플립 1/2: config + 마커) → `1ff09844`(플립 2/2: 핀 4파일). 전부 `Split-Limb: wip`. 전체 SHA: `ae34139380d9b90277191a293364a45ab3ddd0ca` · `f1c21d58d665992123a13613b7a50dd58eced428` · `1ff09844ad4c8761998c453063756a95b702f139` |
-| 증거 브랜치 | `w2-5-evidence` = `d13470d2` + 이 문서 1커밋. 리허설 커밋 0, CA-08 병합 0 |
-| 측정 창 | 2026-09-29 15:59–17:00 KST(06:59–08:00Z) · win32 · node v24.15.0 · npm 11.12.1 · git 2.54.0.windows.1. 아래 수치는 전부 §1 의 명령이 낸 출력이다 |
+| 증거 브랜치 | `w2-5-evidence`(와 같은 커밋을 가리키는 worktree 자신의 브랜치 `worktree-agent-a8d22639c241078a6`) = `d13470d2` 위에 **이 문서만** 얹은 커밋. 리허설 커밋 0, CA-08 병합 0 |
+| 측정 창 | 2026-09-29 15:59–17:00 KST(06:59–08:00Z) · win32 · node v24.15.0 · npm 11.12.1 · git 2.54.0.windows.1. 아래 수치는 전부 §1·§3 의 명령과 §4 의 드라이버가 낸 출력이다 |
 | 경로 표기 | 랜딩 게이트(금지 인용)가 절대 사용자 경로를 거부하므로 `<WT>` = 이 줄기의 worktree, `<S>` = 작성자 스크래치, `<user-path>` = 스크럽된 사용자 경로. 스크래치 원출력은 세션 종료 시 사라질 수 있으니 인용 수치는 이 문서가 정본이다 |
 
 ## 0. 판정 (먼저)
@@ -43,7 +43,7 @@ grep -rn "cited_line" plugins/artibot/schemas/
 grep -rnE "['\"`][a-zA-Z0-9_./-]+\.(m?js|md|json):[0-9]+" plugins/artibot/tests/firewall
 ```
 
-**순서 주(의도적 편차)**: 지시문은 "병합한 뒤 그 지점에 브랜치"였다. 브랜치를 먼저 만들고 그 위에서 병합해 **worktree 자신의 브랜치(`worktree-agent-a8d22639c241078a6`)가 CA-08 병합을 갖지 않게** 했다 — 그 브랜치를 배치 fold 가 집으면 리허설 병합이 딸려 들어갈 수 있다. 결과 그래프는 같다. 확인: `git branch -vv` 에서 `worktree-agent-a8d22639c241078a6` = `d13470d2`, `w2-5-evidence` = `d13470d2`(+이 문서 1커밋), `rehearsal/sh01-flip-20260929` = `1ff09844`.
+**순서 주(의도적 편차)**: 지시문은 "병합한 뒤 그 지점에 브랜치"였다. 브랜치를 먼저 만들고 그 위에서 병합해 **worktree 자신의 브랜치(`worktree-agent-a8d22639c241078a6`)가 CA-08 병합을 갖지 않게** 했다 — 그 브랜치를 배치 fold 가 집으면 리허설 병합이 딸려 들어갈 수 있다. 결과 그래프는 같다. 문서 커밋 직전 `git branch -vv` 확인: `worktree-agent-a8d22639c241078a6` = `d13470d2`(리허설 커밋 0), `rehearsal/sh01-flip-20260929` = `1ff09844`, 업스트림 없음. 문서 커밋은 `git switch -c w2-5-evidence d13470d2` 위에 만들었고(`reset --hard` 없이), 그 뒤 worktree 자신의 브랜치를 `git merge --ff-only w2-5-evidence` 로 같은 커밋에 맞췄다.
 
 - 플립 1/2(`f1c21d58`): `plugins/artibot/artibot.config.json` `enabled` false→true + `comment` 끝 2문장, 루트 `.artibot/artifact-lifecycle.optin`(추적 마커) 신규.
 - **핀은 일부러 뒤로 미뤘다**: 플립 1/2 만 커밋한 상태에서 표적 4파일을 돌려 RED 목록을 뽑고(§2), 그다음 플립 2/2(`1ff09844`)에서 핀을 고쳤다.
@@ -124,7 +124,7 @@ grep -rnE "['\"`][a-zA-Z0-9_./-]+\.(m?js|md|json):[0-9]+" plugins/artibot/tests/
 
 일회용 `git init` 리포를 `<S>` 아래 만들고, **리허설 팁의 실제 훅 스크립트**를 호스트 모양 payload 로 자식 프로세스에 태웠다(`CLAUDE_PLUGIN_ROOT` = 리허설 팁 config 의 바이트 복사본 — 즉 출하 config `enabled:true`; HOME/USERPROFILE 은 스크래치로 리다이렉트, 호스트 세션 id env 제거). 리포는 루트 `.gitignore` 를 바이트 그대로 복사하고 추적 파일 `.artibot/project.md` 와 추적 마커 `.artibot/artifact-lifecycle.optin` 을 가진 `init` 커밋 1개로 시작한다.
 
-생애주기(드라이버 `<S>/c-sim.mjs`, 인자 `<WT> <S>/c-sim-run6`, 재실행 가능):
+생애주기(드라이버 `<S>/c-sim.mjs`, 호출 `node <S>/c-sim.mjs <WT> <S>/c-sim-run6`). 드라이버는 리포에 커밋하지 않았다(지시: 착지분은 이 문서 하나) — 아래 6단계를 그대로 다시 짜면 재현되고, 스크래치 원본은 세션 동안만 남는다:
 
 | 단계 | 실제로 한 것 |
 |---|---|
@@ -197,6 +197,7 @@ land 의 6행(trailer · ownership · binary · citations · merge-dry-run · be
 - **ExitWorktree/EnterWorktree(하네스)의 미추적 파일 처리**는 실행하지 않았다.
 - **GitHub check-runs** — 리허설 브랜치는 푸시하지 않았다.
 - `update-git.js` stash, `watch.mjs`, `lib/handoff/*`, `auto-commit-runner.js` 는 실행하지 않았다(§4.4 마지막 단락).
+- **X2 의 경로 우회와 잔여물** — 스크래치 경로가 길어 `git worktree add` 가 `fatal: '$GIT_DIR' too big` 으로 실패했다(run 3 에서 실측). 그래서 X2 의 autopilot 저장소만 짧은 임시 경로에 두었다(문서화된 env seam `ARTIBOT_AUTOPILOT_STORE_DIR` + `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT`). `reapWorktree` 가 미션 있는 쪽을 보존했으므로 그 worktree 디렉터리 2개(run 4·run 6 각 1개)가 시스템 임시 디렉터리의 `w25ap/worktrees/` 아래 남아 있다 — 일회용 리포에만 등록된 무해한 잔여물이며, 재귀 삭제 가드 때문에 이 줄기가 지우지 않았다.
 - 시계: 이 문서의 시각은 콘솔 시계(`date` = +0900)를 UTC 로 환산한 것이다.
 
 ## 7. 리더가 이 증거로 할 수 있는 결정 (권고이며 확정 아님)
