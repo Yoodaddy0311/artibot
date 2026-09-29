@@ -59,6 +59,10 @@ async function main() {
 if (isMainEntry(import.meta.url)) {
   main().catch(createErrorHandler('pre-write-checkpoint', {
     writeStdout,
+    // createErrorHandler prints {"decision":"block","reason":<blockReason>} when
+    // main() rejects, so this hook fails CLOSED (it blocks; it does not approve).
+    // The wording below says the opposite; the runtime string is left byte-identical
+    // here (comments-only change, CA-04 / F1 docs follow-up).
     blockReason: 'File checkpoint hook error. Approving by default.',
   }));
 }

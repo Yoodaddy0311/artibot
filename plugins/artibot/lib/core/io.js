@@ -52,7 +52,7 @@ export function readStdin() {
  * @param {object} data - Object to serialize and write to stdout.
  * @returns {void}
  * @example
- * writeJSON({ decision: 'approve' });
+ * // Block a tool call. To allow, write nothing: legacy 'approve' skips the permission prompt.
  * writeJSON({ decision: 'block', reason: 'Destructive command detected' });
  */
 export function writeJSON(data) {
@@ -87,20 +87,23 @@ export function writeError(message) {
 
 /**
  * Write a hook result with optional blocking.
- * Used by PreToolUse hooks to approve or block operations.
+ * Used by PreToolUse hooks to block operations.
  *
- * @param {'approve'|'block'|'info'} decision - Hook decision type.
+ * Only 'block' is a safe value to pass. To allow, write NOTHING and exit 0: the host
+ * reads the legacy `decision:"approve"` as `permissionDecision:"allow"` and skips the
+ * permission prompt (PreToolUse on the Bash tool, measured on host 2.1.284; evidence:
+ * .artibot/guides/v5-design/evidence/ca04-host-ask-probe.md, section 3.1). The legacy
+ * `decision` field takes only `approve` and `block`, so 'info' is not a host value
+ * either. This helper forwards `decision` unvalidated and would write 'approve' or
+ * 'info' as given; do not pass them. As of 2026-09-29 nothing in lib/ or scripts/
+ * calls it (grep of the whole repo: only the lib/core/index.js re-export and tests).
+ *
+ * @param {'approve'|'block'|'info'} decision - Hook decision type; pass 'block'.
  * @param {string} [reason] - Optional reason for the decision (displayed to user on block).
  * @returns {void}
  * @example
- * // Approve an operation
- * writeHookResult('approve');
- *
  * // Block a dangerous command
  * writeHookResult('block', 'rm -rf is not allowed in this context');
- *
- * // Informational note
- * writeHookResult('info', 'Consider running tests after this edit');
  */
 export function writeHookResult(decision, reason) {
   const result = { decision };
