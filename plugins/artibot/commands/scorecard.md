@@ -117,7 +117,7 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 - **비교 가능한 쌍이 0 이면 `unmeasured`** 다. `0%` 로 쓰지 않는다. 가격이 없는 쌍은 0 으로 합산하지 않는다 — `compare.cost` 의 **분모(비교된 쌍)에는 남고**, 분자(priced)와 버킷 합계에서만 빠져 `unpriced` 로 세어진다. 0 원으로 세면 측정된 바닥이 실제보다 낮아진다.
 - `compare.score` 행은 **스폰 결과 점수가 아니라 리뷰어의 `claim_audit` 통과율**이다 — 정의는 `lib/replay/spawn-outcome.js` 헤더 "THE SCORE AXIS" 가 정본이고, 값 옆에 `score.basis` 로 찍힌다. 세 모양 중 하나로 찍힌다.
   - `review.claim_audit` 행이 원장에 하나도 없으면(`score.source` 가 null) 예전 그대로 **`unmeasured`**(`스폰 결과 점수 (측정자 없음)`, 분모 0)다.
-  - audit 행이 있으면 행 이름이 `리뷰어 claim_audit 통과율 (스폰 결과 아님)` 이 된다. 스폰 키(`subject_agent_id`)로 조인된 audit 가 있으면 그 건수 `score.n` 이 **분모**이고, 통과율은 `basis` 와 조인 못 한 audit 수(unjoined · no_subject · malformed)와 함께 근거 절 주의 열에 적힌다 — 분모는 claim 수도 스폰 수도 아니다. 조인된 audit 가 없으면 분모 0 이라 다시 `unmeasured` 다(`0%` 가 아니다).
+  - audit 행이 있으면 행 이름이 `리뷰어 claim_audit 통과율 (스폰 결과 아님)` 이 된다. 스폰 키(`subject_agent_id`)로 조인된 audit 로 통과율이 나왔으면(`score.value` 가 수) 그 건수 `score.n` 이 **분모**이고, 통과율은 `basis` 와 조인 못 한 audit 수(unjoined · no_subject · malformed)와 함께 근거 절 주의 열에 적힌다 — 분모는 claim 수도 스폰 수도 아니다. 통과율이 없으면(조인된 audit 가 없거나 조인된 audit 의 claim 이 모두 0) 분모 0 이라 다시 `unmeasured` 다(`0%` 가 아니다).
   - `score` 블록이 이 두 모양 어느 쪽도 아니면 카드를 던지지 않고 그 행만 `스폰 점수 (측정 불가)` 로 표기한다 — 나머지 8행은 그대로다. 블록 자체가 없으면(absent · null) 여전히 던진다.
 - 추천과 서빙이 일치한다는 것은 그 선택이 옳았다는 뜻이 아니다: 일치는 품질이 아니다.
 - `fifo` 처럼 confidence allowlist **밖**에서 묶인 쌍은 비교에서 제외되고 `excluded_fifo` 로 보인다 — 제외는 선택이지 측정이 아니다.

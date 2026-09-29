@@ -62,8 +62,9 @@
  * number the spawn reported about itself. The definition is printed beside the
  * number as `score.basis`, so a reader of the JSON line cannot take the ratio for
  * a task-success rate. The definition is NOT carried in `score.source`: on the
- * zero-row block `source` must stay null -- a non-null one would make
- * `compare-scorecard.js#requireScore` throw, and the CLI suite pins it null --
+ * zero-row block `source` must stay null -- the CLI suite pins it null, and
+ * `compare-scorecard.js#readScore` prints the legacy row only when `source` and
+ * `value` are both null (a non-null `source` there prints the UNREADABLE row) --
  * so `basis` is a sibling key and `source` stays the bare event name wherever it
  * is set. The verdict ENUM (`review.completed` `data.verdict`: PASS,
  * REPAIR_REQUIRED, ...) is NOT this score: the allowlist declares no spawn id on
@@ -525,16 +526,20 @@ function nullIfEmpty(bucket, popKey, sumKey) {
  * the row-0 block is a wider change than a definition and nothing has asked for
  * it. The remaining defect is recorded here rather than worked around silently.
  *
- * THE SCORECARD REFUSES THE AUDIT-BEARING SHAPE. `lib/scorecard/compare-scorecard.js
- * #requireScore` throws on any block whose `source` or `value` is non-null (its
- * tests pin that as "redesign the row, do not relax the check"). The audit-bearing
- * block has `source: 'review.claim_audit'` from the FIRST audit row of ANY kind
- * -- joined, subject-less or malformed -- so `buildCompareScorecard` throws on
- * any fold whose ledger carries one. Measured 2026-09-29T04:36Z with a real call
- * per case, on this fold and on the pre-SH-05 code alike: no audit row builds a
- * card; a joined, a subject-less and a malformed-only row each throw. That
- * module is not this one's to edit. The collision is PENDING, not live: the
- * central ledger held 0 audit rows at 2026-09-29T04:24Z (CANNOT SEE #4a).
+ * THE SCORECARD READS EVERY SHAPE THIS FUNCTION RETURNS. Since the SH-05
+ * follow-up (96d54508) `lib/scorecard/compare-scorecard.js#readScore` reads the
+ * block by allowlist into one of three rows: the row-0 block (`source` and
+ * `value` null, a non-empty `reason`) prints the legacy `unmeasured` row byte for
+ * byte, without `basis`; an audit-bearing block whose counts are integers with
+ * `audits = n + unjoined_audits + no_subject_audits` prints `value` beside
+ * `basis` over denominator `n`, or `unmeasured` with `reason` when `value` is
+ * null; any other block prints an UNREADABLE score row and leaves the card's
+ * other eight rows alone. Only a `score` that is not a plain object still throws
+ * there. So renaming a key or changing that split here does not crash the card
+ * -- it turns its score row UNREADABLE; change both modules together. Before
+ * 96d54508 the card threw on the first audit row of any kind (measured
+ * 2026-09-29T04:36Z); the central ledger held 0 audit rows at
+ * 2026-09-29T04:24Z (CANNOT SEE #4a).
  *
  * THE BRANCH IS ON ROWS READ, NOT ON ROWS JOINED: `audits + malformed_audits`.
  * A ledger carrying only malformed audits must not report the "nobody wrote
