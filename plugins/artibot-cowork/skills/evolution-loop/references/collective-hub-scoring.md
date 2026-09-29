@@ -6,7 +6,7 @@ Reference document for the pattern scoring system used in Artibot's evolution lo
 
 ## Overview
 
-Before a pattern is included in GRPO training or uploaded to the swarm, it must pass through the Collective Hub Scorer. The scorer computes a weighted quality score (0.0–1.0) from four dimensions. Only patterns scoring ≥ 0.75 proceed.
+Before a pattern is uploaded to the swarm (formerly also: included in GRPO training — retired 2026-06-20), it must pass through the Collective Hub Scorer. The scorer computes a weighted quality score (0.0–1.0) from four dimensions. Only patterns scoring ≥ 0.75 proceed.
 
 ---
 
@@ -34,7 +34,7 @@ score = (frequency × 0.30)
 
 | Gate | Threshold | Action on Fail |
 |------|-----------|----------------|
-| Minimum score | ≥ 0.75 | Discard — not promoted to GRPO or swarm |
+| Minimum score | ≥ 0.75 | Discard — not promoted to swarm (GRPO training: retired) |
 | Minimum samples | n ≥ 5 | Discard — insufficient statistical basis |
 | Rejection window | 30 days | Skip if pattern was rejected in the last 30 days |
 | Duplicate check | similarity < 0.85 | Merge with existing pattern instead of creating new |
