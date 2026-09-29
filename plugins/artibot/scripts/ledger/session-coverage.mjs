@@ -18,17 +18,38 @@
  * change the number, and a measuring tool that appends to the stream it measures
  * is its own next data point.
  *
- * THE ARITHMETIC IS NOT HERE. `foldSessionCoverage` (`lib/replay/session-coverage.js`,
- * re-exported from `lib/replay/index.js`) owns every count, and everything in
- * `lib/replay` is pure — no clock, no filesystem. This file is the impure shell:
- * it reads the file, reads the clock once for `measured_at`, and serializes. A
+ * THE ARITHMETIC IS NOT HERE. `foldSessionCoverage` and `foldCoverageViews`
+ * (`lib/replay/session-coverage.js`; the barrel `lib/replay/index.js` re-exports
+ * only the first) own every count, and everything in `lib/replay` is pure — no
+ * clock, no filesystem. This file is the impure shell: it reads the ledger and
+ * the exclusion list, reads the clock once for `measured_at`, and serializes. A
  * count computed here would be a second answer to a question that already has
  * one, and the two would eventually disagree.
  *
  * USAGE
  *   node scripts/ledger/session-coverage.mjs [--cwd <projectRoot>] [--since <iso-or-ms>]
+ *                                            [--exclude-sessions <list-file | id,id,...>]
  *   An all-digit `--since` is read as EPOCH MILLISECONDS, never as a year:
  *   `--since 2026` cuts at 1970-01-01T00:00:02.026Z, so spell a year as ISO.
+ *
+ *   `--exclude-sessions` takes a plain list file (one session id per line;
+ *   markdown bullets, backticks, blank lines and `#` lines are tolerated, and
+ *   prose lines are counted as ignored) or a comma-separated id list. A value
+ *   with a comma is a list; otherwise an existing regular file is read, a
+ *   value that looks like a path (a separator, or a `.ext` suffix) but does not
+ *   exist is an error, and anything else is a list of one id. A relative file
+ *   path resolves against the PROCESS cwd, not `--cwd`. To force list mode for
+ *   an id that ends in `.ext`, add a trailing comma. NO IDS ARE BUILT IN: an
+ *   exclusion exists only because the caller named it on this command line.
+ *
+ * -- WHY AN EXCLUSION CAN NEVER BE THE ONLY THING PRINTED ---------------------
+ *  Excluding sessions (say, empty `claude -p` runs that made no model call)
+ *  changes the ratio, and a ratio that can be reported with its flattering half
+ *  removed gets reported that way. So the top-level fields below are ALWAYS the
+ *  raw view of the requested window, exactly as they were before this flag
+ *  existed, and every view that an exclusion or a `--since` produces is printed
+ *  in `views`, side by side (see STDOUT). There is no invocation whose output
+ *  carries the excluded numbers without the raw ones next to them.
  *
  * -- WHY `--cwd` MAY DEFAULT TO `process.cwd()`, AND THE TRAP ----------------
  *  Same rationale and same trap as `scripts/ledger/record-verify.mjs`: the
@@ -46,8 +67,13 @@
  *     ledger" is a finding about the project, not a failure of this script, and
  *     the JSON says which: `census.file.present` / `census.file.readable`.
  *  2  usage error: the command line itself is wrong (unknown flag, flag without
- *     a value, `--since` that does not parse to a finite time). One line on
- *     stderr prefixed `session-coverage:`, NOTHING on stdout.
+ *     a value, `--since` that does not parse to a finite time, or an
+ *     `--exclude-sessions` list that cannot be used: blank, a missing or
+ *     non-regular or over-large file, or no session id in it). One line on
+ *     stderr prefixed `session-coverage:`, NOTHING on stdout. An exclusion that
+ *     cannot be honoured is refused rather than skipped: printing the
+ *     un-excluded numbers under a command that asked for exclusion would answer
+ *     a question nobody asked.
  *
  *  Exit 2 is a DEVIATION from the task brief, which called for exit 0 always.
  *  It follows the precedent of `record-verify.mjs`: a misspelled flag means the
@@ -60,10 +86,43 @@
  *    {"event","measured_at","ledger_path","since","ended","with_receipts",
  *     "coverage","fallback_sessions","by_status","by_reason","disagree",
  *     "receipt_only_sessions","receipt_sessions","duplicate_ended_rows",
- *     "malformed_ended","census"}
+ *     "malformed_ended","census","exclude_sessions","views"}
  *  `error` is the ONE optional key: present only when an unexpected throw was
  *  caught, in which case the fold fields carry their empty values
  *  (`ended:0`, `coverage:null`) and `census` is null.
+ *
+ *  Everything from `ended` to `census` is the RAW view (nothing excluded) of
+ *  the requested window, unchanged in meaning since before `--exclude-sessions`.
+ *
+ *  `exclude_sessions` is null unless the flag was given, and otherwise echoes
+ *  the request: `{source: "file"|"list", path, requested, ignored}`. `requested`
+ *  is the number of unique ids read; `ignored` counts entries that were not
+ *  ids (prose in a note, a mistyped id), so a request that silently lost part
+ *  of itself shows up here.
+ *
+ *  `views` holds two scopes, `window` (what `--since` cut; the whole ledger when
+ *  there is no `--since`) and `history` (the whole ledger, always), each
+ *  `{unexcluded, excluded, exclusion}`. Without `--since` the two scopes are
+ *  identical. `excluded` and `exclusion` are null unless ids were excluded.
+ *  A view carries `{ended, with_receipts, skipped, coverage, skipped_by_cause,
+ *  unresolved_models}` and ALWAYS `ended = with_receipts + skipped`, with the
+ *  values of `skipped_by_cause` summing to `skipped`:
+ *    - `skipped` is the JOIN's count (an ended session with no readable
+ *      `usage.receipt` row), not `by_status.skipped`, the hook's own claim.
+ *    - `skipped_by_cause` columns are the hook's reasons: `no-receipts` is the
+ *      BARE reason (the hook could not classify the miss), `no-receipts:<cause>`
+ *      one column per suffix, plus `null`, `other` and the plain-word head of
+ *      any other reason. Rows are never rewritten, so a row written BEFORE the
+ *      hook learned `no-receipts:unreadable` is bare even if a file was
+ *      unreadable: read bare as "may include an unreadable file", never as
+ *      "cause unknown to the session".
+ *    - `unresolved_models` is the catalog-drift column: `sessions` (covered or
+ *      skipped) whose row named a model the catalog rejected, of which
+ *      `skipped_sessions` are skipped, and `by_model` sessions per model.
+ *  `exclusion` accounts for one scope: `requested`, `matched_ended` (listed
+ *  ids with a `session.ended` row in that scope), `unmatched` (the rest, e.g.
+ *  outside the window) and `with_receipts` (listed ids that DID produce a
+ *  receipt; an exclusion list should hold sessions that produced none).
  *
  *  `malformed_ended` is a DEVIATION from the task brief's key list, added
  *  because omitting it hides a denominator loss. It counts `session.ended` rows
@@ -95,31 +154,61 @@
  *    the row; nothing re-derives it. `by_status` counts claims, and the
  *    `disagree` lists exist precisely because a claim and the receipt rows can
  *    contradict each other.
- *  - THE LIVE ANSWER TODAY IS `null`. Measured 2026-09-14T05:15Z against this
- *    machine's parent ledger: `session.ended` 0 rows, `usage.receipt` 72 rows
- *    over 12 sessions. So every ended session is invisible and `coverage:null`
- *    is the correct output, not a bug in this script — the installed SessionEnd
- *    hook has not written a denominator row yet. A non-null number here means
- *    the hook started firing; that is the signal to watch for.
+ *  - THE LIVE ANSWER WAS `null` ONCE, AND IS NOT NOW. Measured
+ *    2026-09-14T05:15Z against this machine's parent ledger: `session.ended` 0
+ *    rows, `usage.receipt` 72 rows over 12 sessions, so `coverage:null` was the
+ *    correct output, not a bug in this script — the installed SessionEnd hook
+ *    had not written a denominator row yet. The first `session.ended` row landed
+ *    2026-09-15 (V5-BACKLOG §4-c); a null on a ledger that HAS such rows would
+ *    now be the anomaly. `null` still means exactly "nothing ended in this read".
  *  - WHAT A `ledger.rejected` LINE REPLACED. Those lines are excluded by the
  *    reader's default and counted in `census.dropped.selection`; a session
  *    whose rows were all rejected is simply absent from both sides.
  *  - THE INSTALLED COPY. This file measures the ledger, not itself.
+ *  - WHY A LISTED SESSION MADE NO MODEL CALL. The list is the caller's word;
+ *    `exclusion.with_receipts` catches the one contradiction the ledger can
+ *    show, a listed session that has receipts.
+ *  - TWO READS, NOT ONE, WITH `--since`. The window and the full history are
+ *    read one after the other (window first, so the history can only be the
+ *    larger). A session that ends between the two reads can appear in the
+ *    history alone. Neither read is a snapshot of an appending file.
+ *  - A WINDOW EDGE THAT SPLITS A SESSION. `--since` cuts rows by their own
+ *    timestamp, so a cutoff that falls between a session's receipts and its
+ *    `session.ended` row leaves an ended row with no receipt and reads it as
+ *    SKIPPED. The full history has no such edge, which is one reason it is
+ *    always printed.
  *
  * @module scripts/ledger/session-coverage
  */
 
+import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { readLedgerCensus } from '../../lib/runtime/ledger.js';
-import { foldSessionCoverage } from '../../lib/replay/index.js';
+import {
+  emptyCoverageFold,
+  foldCoverageViews,
+  parseSessionIdList,
+} from '../../lib/replay/session-coverage.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
 /** The event whose rows are the denominator; echoed on stdout as `event`. */
 const COVERAGE_EVENT = 'session.ended';
 
 /** Flags that take a value. Anything else on the command line is an error. */
-const VALUE_FLAGS = ['--cwd', '--since'];
+const VALUE_FLAGS = ['--cwd', '--since', '--exclude-sessions'];
 
-const USAGE = 'usage: session-coverage.mjs [--cwd <projectRoot>] [--since <iso | epoch-ms (all digits)>]';
+const USAGE = 'usage: session-coverage.mjs [--cwd <projectRoot>] [--since <iso | epoch-ms (all digits)>] [--exclude-sessions <list-file | id,id,...>]';
+
+/** A list file larger than this is not a list of session ids. */
+const MAX_LIST_BYTES = 1024 * 1024;
+
+/**
+ * A value that names a file rather than an id: it has a path separator or ends
+ * in a short `.ext`. Session ids are UUIDs or `session-<ms>`-shaped, so neither
+ * appears in one; a value that looks like a path and is not there is an error
+ * instead of a list of one strange id.
+ */
+const PATH_LIKE = /[\\/]|\.[A-Za-z0-9]{1,8}$/;
 
 /**
  * Report a usage error on ONE line and nothing else.
@@ -175,31 +264,50 @@ function toEpochMs(raw) {
 }
 
 /**
- * The fold's fields at their empty values.
+ * The views of a scope that was never measured: the empty fold, nothing
+ * excluded.
  *
  * Used by the error branch so a caught throw prints the SAME key set as a
  * successful run. A reader that has to branch on which keys exist will
- * eventually branch wrong.
+ * eventually branch wrong. The empty fold comes from the lib as a literal (a
+ * test pins it to `foldSessionCoverage([])`) rather than from a second call to
+ * the fold: the handler that needs it is running because that fold, or the
+ * read in front of it, has just thrown.
  *
+ * @returns {{unexcluded: object, excluded: null, exclusion: null}}
+ */
+function emptyViews() {
+  return { unexcluded: emptyCoverageFold(), excluded: null, exclusion: null };
+}
+
+/**
+ * One view as stdout carries it, picked BY NAME.
+ *
+ * @param {object} fold
  * @returns {object}
  */
-function emptyFold() {
+function viewOf(fold) {
   return {
-    ended: 0,
-    with_receipts: 0,
-    coverage: null,
-    fallback_sessions: 0,
-    by_status: {},
-    by_reason: {},
-    disagree: {
-      status_appended_no_receipt: [],
-      receipt_but_status_not_appended: [],
-      count: 0,
-    },
-    receipt_only_sessions: [],
-    receipt_sessions: 0,
-    duplicate_ended_rows: 0,
-    malformed_ended: 0,
+    ended: fold.ended,
+    with_receipts: fold.with_receipts,
+    skipped: fold.skipped,
+    coverage: fold.coverage,
+    skipped_by_cause: fold.skipped_by_cause,
+    unresolved_models: fold.unresolved_models,
+  };
+}
+
+/**
+ * One scope (`window` or `history`) as stdout carries it.
+ *
+ * @param {{unexcluded: object, excluded: object|null, exclusion: object|null}} views
+ * @returns {{unexcluded: object, excluded: object|null, exclusion: object|null}}
+ */
+function scopeOf(views) {
+  return {
+    unexcluded: viewOf(views.unexcluded),
+    excluded: views.excluded === null ? null : viewOf(views.excluded),
+    exclusion: views.exclusion,
   };
 }
 
@@ -210,12 +318,17 @@ function emptyFold() {
  * may grow a field, while this script's stdout contract promises a fixed key
  * set. A spread would quietly break that promise on someone else's commit.
  *
- * @param {{since: string|null, ledgerPath: string|null, fold: object,
- *          census: object|null, error?: string}} parts
+ * The top-level fold fields come from `window.unexcluded`, never from an
+ * excluded view: see "WHY AN EXCLUSION CAN NEVER BE THE ONLY THING PRINTED".
+ *
+ * @param {{since: string|null, ledgerPath: string|null,
+ *          window: {unexcluded: object, excluded: object|null, exclusion: object|null},
+ *          history: {unexcluded: object, excluded: object|null, exclusion: object|null},
+ *          census: object|null, exclusion: object|null, error?: string}} parts
  * @returns {object}
  */
 function report(parts) {
-  const { fold } = parts;
+  const fold = parts.window.unexcluded;
   const out = {
     event: COVERAGE_EVENT,
     // The one clock read in this pipeline. The fold is pure and may not read a
@@ -235,9 +348,97 @@ function report(parts) {
     duplicate_ended_rows: fold.duplicate_ended_rows,
     malformed_ended: fold.malformed_ended,
     census: parts.census,
+    exclude_sessions: parts.exclusion,
+    views: { window: scopeOf(parts.window), history: scopeOf(parts.history) },
   };
   if (parts.error !== undefined) out.error = parts.error;
   return out;
+}
+
+/**
+ * The stat of a path, or null when there is nothing there to stat.
+ *
+ * @param {string} target
+ * @returns {import('node:fs').Stats|null}
+ */
+function statOrNull(target) {
+  try {
+    return statSync(target);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turn the `--exclude-sessions` value into the ids to exclude, or into a usage
+ * error message. The text is parsed by the lib; this function only decides
+ * WHERE the text comes from and refuses what it cannot honour.
+ *
+ * @param {string} raw - the flag's value
+ * @returns {{request: {ids: string[], echo: object}}|{error: string}}
+ */
+function loadExclusion(raw) {
+  const value = String(raw).trim();
+  if (value === '') return { error: '--exclude-sessions is blank (give a list file or comma-separated session ids)' };
+
+  let text = value;
+  let format = 'csv';
+  let source = 'list';
+  let filePath = null;
+
+  if (!value.includes(',')) {
+    const abs = path.resolve(value);
+    const stat = statOrNull(abs);
+    if (stat !== null) {
+      if (!stat.isFile()) return { error: `--exclude-sessions is not a regular file: ${abs}` };
+      if (stat.size > MAX_LIST_BYTES) {
+        return { error: `--exclude-sessions file is too large (${stat.size} bytes, limit ${MAX_LIST_BYTES}): ${abs}` };
+      }
+      try {
+        text = readFileSync(abs, 'utf-8');
+      } catch (err) {
+        return { error: `--exclude-sessions file could not be read: ${abs} (${err?.code ?? err?.message ?? err})` };
+      }
+      format = 'lines';
+      source = 'file';
+      filePath = abs;
+    } else if (PATH_LIKE.test(value)) {
+      return { error: `--exclude-sessions file not found: ${abs}` };
+    }
+  }
+
+  const { ids, ignored } = parseSessionIdList(text, format);
+  if (ids.length === 0) {
+    return { error: `--exclude-sessions holds no session ids (${filePath ?? 'list'}; ${ignored} entries ignored)` };
+  }
+  return { request: { ids, echo: { source, path: filePath, requested: ids.length, ignored } } };
+}
+
+/**
+ * Read the ledger and fold it into the views `report` prints. Throws whatever
+ * the read or the fold throws; the caller turns that into a printed line.
+ *
+ * The window is read FIRST and the whole ledger second, so a row appended
+ * between the two reads can only make the history the larger of the two. With
+ * no `--since` the window IS the whole ledger and is read once.
+ *
+ * @param {{cwd: string, sinceMs: number|null, ids: string[],
+ *          readLedger: typeof readLedgerCensus}} input
+ * @returns {{ledgerPath: string|null, census: object,
+ *            window: object, history: object}} the `report` parts it computes
+ */
+function measure({ cwd, sinceMs, ids, readLedger }) {
+  const windowRead = readLedger(cwd, sinceMs === null ? {} : { since: sinceMs });
+  const historyRead = sinceMs === null ? windowRead : readLedger(cwd, {});
+  const options = { excludeSessions: ids };
+  const window = foldCoverageViews(windowRead.events, options);
+  const history = sinceMs === null ? window : foldCoverageViews(historyRead.events, options);
+  return {
+    ledgerPath: windowRead.census.file.path,
+    census: windowRead.census,
+    window,
+    history,
+  };
 }
 
 /**
@@ -247,10 +448,15 @@ function report(parts) {
  * environment fallback to read, and a dead parameter would suggest one exists.
  * A DEVIATION from the brief's `main(argv, env)` signature.
  *
+ * `deps.readLedger` is the one injection seam, `readLedgerCensus`-shaped, and
+ * exists so a test can make the read throw and see the error branch print the
+ * same key set. Nothing else reaches it.
+ *
  * @param {string[]} argv arguments after the script path
+ * @param {{readLedger?: typeof readLedgerCensus}} [deps]
  * @returns {number} process exit code
  */
-export function main(argv) {
+export function main(argv, deps = {}) {
   const parsed = parseArgs(argv);
   if (parsed.error !== undefined) return fail(parsed.error);
   const { opts } = parsed;
@@ -263,12 +469,27 @@ export function main(argv) {
     }
   }
   const since = sinceMs === null ? null : new Date(sinceMs).toISOString();
+
+  // Refused BEFORE any read: a list that cannot be honoured is a malformed
+  // request, and answering it with the un-excluded numbers would report a
+  // measurement nobody asked for.
+  let exclusion = null;
+  if (opts['exclude-sessions'] !== undefined) {
+    const loaded = loadExclusion(opts['exclude-sessions']);
+    if (loaded.error !== undefined) return fail(loaded.error);
+    exclusion = loaded.request;
+  }
+
   const cwd = opts.cwd || process.cwd();
+  const readLedger = deps.readLedger ?? readLedgerCensus;
+  const echo = exclusion === null ? null : exclusion.echo;
 
   let line;
   try {
-    const { events, census } = readLedgerCensus(cwd, sinceMs === null ? {} : { since: sinceMs });
-    line = report({ since, ledgerPath: census.file.path, fold: foldSessionCoverage(events), census });
+    const measured = measure({
+      cwd, sinceMs, ids: exclusion === null ? [] : exclusion.ids, readLedger,
+    });
+    line = report({ since, exclusion: echo, ...measured });
   } catch (err) {
     // An unexpected throw is still an observation outcome, not a usage error:
     // the caller asked a well-formed question and deserves a parseable answer
@@ -276,8 +497,10 @@ export function main(argv) {
     line = report({
       since,
       ledgerPath: null,
-      fold: emptyFold(),
       census: null,
+      exclusion: echo,
+      window: emptyViews(),
+      history: emptyViews(),
       error: err?.message ?? String(err),
     });
   }

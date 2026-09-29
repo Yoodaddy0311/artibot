@@ -58,6 +58,18 @@
  *    one", so this file stays green if the fold refines which bucket a row
  *    lands in. The bucket rules belong to the fold's own suite.
  *  - THE INSTALLED COPY, and any ledger larger than a handful of rows.
+ *  - THE LIVE MIX. The exclusion cases seed 7 sessions and the `--since` cases 3.
+ *    They prove the flag prints every view and that the identities hold; they do
+ *    not prove what the live ledger's numbers are (that is a run against it).
+ *  - WHY A LISTED SESSION MADE NO MODEL CALL. The CLI takes the list as given.
+ *    What it can show is a listed session that HAS a receipt
+ *    (`exclusion.with_receipts`), and that is all these cases pin.
+ *  - A RACE BETWEEN THE TWO `--since` READS. Window and history are read one
+ *    after the other from a ledger nothing appends to here; whether a row can
+ *    land between them on a live ledger is not something this file exercises.
+ *  - A WINDOW EDGE THAT SPLITS A SESSION. The `--since` seeds hold skipped
+ *    sessions only, on purpose: a receipt row stamped "now" beside an ended row
+ *    stamped in the past would build exactly that edge and test the artifact.
  *
  * @module tests/ledger/session-coverage-cli
  */
@@ -90,6 +102,24 @@ const STDOUT_KEYS = [
   'by_status', 'by_reason', 'disagree',
   'receipt_only_sessions', 'receipt_sessions', 'duplicate_ended_rows',
   'malformed_ended', 'census',
+  'exclude_sessions', 'views',
+];
+
+/** Every view carries these, and only these. */
+const VIEW_KEYS = ['coverage', 'ended', 'skipped', 'skipped_by_cause', 'unresolved_models', 'with_receipts'];
+
+/**
+ * The six sessions `ledger-exclusions-20260929.md` names. They appear here only
+ * as DATA a ledger may contain: the CLI must never know them, so a run without
+ * `--exclude-sessions` has to count all of them.
+ */
+const DOC_EXCLUDED_IDS = [
+  '3eb8466c-6df6-4193-b880-a30529776aa0',
+  'fd7bc579-aa62-4bc6-a93d-cfc93ef2d2e5',
+  'b5369386-eee6-4a70-b486-cdf0876149bf',
+  '65a342a1-c4f1-4746-b5b4-f7a57dccbc99',
+  '860c8b93-6e48-4b16-8725-6801dfe42355',
+  'a5d7a7b8-bc73-4f41-aceb-f0747c13c1a0',
 ];
 
 /** @type {string} */
@@ -217,7 +247,8 @@ async function seedReceipt(root, sessionId, stem) {
  *
  * @param {string} root
  * @param {string} sessionId
- * @param {{status: string, reason?: string|null, fallback?: boolean, now?: () => Date}} o
+ * @param {{status: string, reason?: string|null, fallback?: boolean,
+ *   unresolved?: string[], now?: () => Date}} o
  * @returns {void}
  */
 function seedEnded(root, sessionId, o) {
@@ -234,7 +265,7 @@ function seedEnded(root, sessionId, o) {
       deduped: 0,
       coverage: null,
       reason: o.reason ?? null,
-      unresolved_models: [],
+      unresolved_models: o.unresolved ?? [],
       transcript_present: true,
       session_fallback: o.fallback === true,
     },
@@ -410,6 +441,419 @@ describe('session-coverage: --since', () => {
     // this case is the one that catches a regression to a bare Date.parse.
     expect(printed.since).toBe('2026-09-10T00:00:00.000Z');
     expect(printed.ended).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Instrumentation for the ④ census: exclusion, cause columns, full history.
+// No threshold moves here; what is pinned is that no number can be quoted
+// without its counterpart.
+// ---------------------------------------------------------------------------
+
+/** ended = with_receipts + skipped, the causes partition skipped, coverage is the ratio. */
+function expectIdentity(view, tag) {
+  expect(view.ended, tag).toBe(view.with_receipts + view.skipped);
+  const causeTotal = Object.values(view.skipped_by_cause).reduce((a, b) => a + b, 0);
+  expect(causeTotal, tag).toBe(view.skipped);
+  expect(view.coverage, tag).toBe(view.ended === 0 ? null : view.with_receipts / view.ended);
+}
+
+/** Every non-null view a printed report carries, tagged `<scope>.<kind>`. */
+function allViews(printed) {
+  const out = [];
+  for (const scope of ['window', 'history']) {
+    for (const kind of ['unexcluded', 'excluded']) {
+      const view = printed.views[scope][kind];
+      if (view !== null) out.push([`${scope}.${kind}`, view]);
+    }
+  }
+  return out;
+}
+
+/** The printed report minus everything that legitimately differs between two runs. */
+function rawFields(printed) {
+  const copy = { ...printed };
+  delete copy.measured_at;
+  delete copy.exclude_sessions;
+  delete copy.views;
+  return copy;
+}
+
+/**
+ * Seven ended sessions, arranged so every column has a value that is not zero
+ * by accident and the excluded view differs from the raw one:
+ *   sessCov0001..3          appended, receipt present               -> covered
+ *   sessEmptyA01, B02       skipped, bare no-receipts               -> the empty `claude -p` shape
+ *   sessDrift0001           skipped, bare, unresolved opus-5-5      -> catalog drift
+ *   sessUnread001           skipped, no-receipts:unreadable         -> a suffixed cause
+ * raw: ended 7 / with_receipts 3 / skipped 4. Without the two empties: 5 / 3 / 2.
+ */
+async function seedMix(root) {
+  for (const [i, sid] of ['sessCov0001', 'sessCov0002', 'sessCov0003'].entries()) {
+    seedEnded(root, sid, { status: 'appended' });
+    await seedReceipt(root, sid, `runMix${i}`);
+  }
+  seedEnded(root, 'sessEmptyA01', { status: 'skipped', reason: 'no-receipts' });
+  seedEnded(root, 'sessEmptyB02', { status: 'skipped', reason: 'no-receipts' });
+  seedEnded(root, 'sessDrift0001', {
+    status: 'skipped', reason: 'no-receipts', unresolved: ['claude-opus-5-5'],
+  });
+  seedEnded(root, 'sessUnread001', { status: 'skipped', reason: 'no-receipts:unreadable' });
+}
+
+const EMPTIES_LIST = [
+  '# Empty claude -p runs (no model call)',
+  '',
+  'These carry no receipts because nothing ran.',
+  '',
+  '- sessEmptyA01',
+  '- `sessEmptyB02`',
+  '',
+].join('\n');
+
+describe('session-coverage: --exclude-sessions', () => {
+  it('prints the raw view and the excluded view side by side', async () => {
+    const root = makeRoot('X1');
+    await seedMix(root);
+    const list = path.join(root, 'empties.md');
+    writeFileSync(list, EMPTIES_LIST, 'utf-8');
+    expect(seededLines(root).filter((e) => e.event === 'session.ended')).toHaveLength(7);
+
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', list], root));
+
+    // The request is echoed, with what it could not read: one prose line.
+    expect(printed.exclude_sessions).toEqual({ source: 'file', path: list, requested: 2, ignored: 1 });
+
+    const { unexcluded, excluded, exclusion } = printed.views.window;
+    expect(unexcluded).toMatchObject({ ended: 7, with_receipts: 3, skipped: 4 });
+    expect(unexcluded.coverage).toBe(3 / 7);
+    expect(excluded).toMatchObject({ ended: 5, with_receipts: 3, skipped: 2 });
+    expect(excluded.coverage).toBe(3 / 5);
+    expect(exclusion).toEqual({ requested: 2, matched_ended: 2, unmatched: [], with_receipts: [] });
+
+    // The top-level fields are the RAW view. They never turn into the excluded one.
+    expect(printed.ended).toBe(7);
+    expect(printed.with_receipts).toBe(3);
+    expect(printed.coverage).toBe(3 / 7);
+    expect(printed.ended).toBe(unexcluded.ended);
+  });
+
+  it('holds ended = with_receipts + skipped in every view it prints', async () => {
+    const root = makeRoot('X2');
+    await seedMix(root);
+
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'sessEmptyA01,sessEmptyB02'], root));
+
+    const views = allViews(printed);
+    expect(views.map(([tag]) => tag)).toEqual([
+      'window.unexcluded', 'window.excluded', 'history.unexcluded', 'history.excluded',
+    ]);
+    for (const [tag, view] of views) {
+      expect(Object.keys(view).sort(), tag).toEqual(VIEW_KEYS);
+      expectIdentity(view, tag);
+    }
+  });
+
+  it('CONTROL: the identity helper is able to fail', () => {
+    const good = { ended: 5, with_receipts: 3, skipped: 2, coverage: 3 / 5, skipped_by_cause: { a: 2 } };
+    expect(() => expectIdentity(good, 'good')).not.toThrow();
+    expect(() => expectIdentity({ ...good, skipped: 3 }, 'tampered skipped')).toThrow();
+    expect(() => expectIdentity({ ...good, skipped_by_cause: { a: 1 } }, 'tampered causes')).toThrow();
+    expect(() => expectIdentity({ ...good, coverage: 1 }, 'tampered ratio')).toThrow();
+  });
+
+  it('splits the skipped sessions by cause and keeps catalog drift in its own column', async () => {
+    const root = makeRoot('X3');
+    await seedMix(root);
+
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'sessEmptyA01,sessEmptyB02'], root));
+
+    const { unexcluded, excluded } = printed.views.window;
+    expect(unexcluded.skipped_by_cause).toEqual({ 'no-receipts': 3, 'no-receipts:unreadable': 1 });
+    expect(excluded.skipped_by_cause).toEqual({ 'no-receipts': 1, 'no-receipts:unreadable': 1 });
+    // Excluding two empty runs must not touch the drift evidence.
+    for (const view of [unexcluded, excluded]) {
+      expect(view.unresolved_models).toEqual({
+        sessions: 1, skipped_sessions: 1, by_model: { 'claude-opus-5-5': 1 },
+      });
+    }
+  });
+
+  it('gives the same views for a comma-separated list as for a list file', async () => {
+    const root = makeRoot('X4');
+    await seedMix(root);
+    const list = path.join(root, 'empties.md');
+    writeFileSync(list, EMPTIES_LIST, 'utf-8');
+
+    const fromFile = parseOne(runCli(['--cwd', root, '--exclude-sessions', list], root));
+    const fromCsv = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'sessEmptyA01, sessEmptyB02'], root));
+
+    expect(fromCsv.views).toEqual(fromFile.views);
+    expect(fromCsv.exclude_sessions).toEqual({ source: 'list', path: null, requested: 2, ignored: 0 });
+  });
+
+  it('resolves a relative list path against the process cwd', async () => {
+    const root = makeRoot('X5');
+    await seedMix(root);
+    writeFileSync(path.join(root, 'empties.md'), EMPTIES_LIST, 'utf-8');
+
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'empties.md'], root));
+
+    expect(printed.exclude_sessions.source).toBe('file');
+    expect(printed.exclude_sessions.path).toBe(path.join(root, 'empties.md'));
+    expect(printed.views.window.excluded.ended).toBe(5);
+  });
+
+  it('leaves every raw number exactly as a run without the flag prints it', async () => {
+    const root = makeRoot('X6');
+    await seedMix(root);
+
+    const plain = parseOne(runCli(['--cwd', root], root));
+    const flagged = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'sessEmptyA01,sessEmptyB02'], root));
+
+    expect(rawFields(flagged)).toEqual(rawFields(plain));
+    expect(flagged.views.window.unexcluded).toEqual(plain.views.window.unexcluded);
+    expect(flagged.views.history.unexcluded).toEqual(plain.views.history.unexcluded);
+    // ...and the flag is what made the difference, not chance:
+    expect(flagged.views.window.excluded).not.toEqual(flagged.views.window.unexcluded);
+  });
+
+  it('NEGATIVE CONTROL: knows no ids of its own — without the flag it counts the documented six', () => {
+    const root = makeRoot('X7');
+    for (const sid of DOC_EXCLUDED_IDS) seedEnded(root, sid, { status: 'skipped', reason: 'no-receipts' });
+    seedEnded(root, 'sessReal00001', { status: 'skipped', reason: 'no-receipts' });
+
+    const plain = parseOne(runCli(['--cwd', root], root));
+
+    expect(plain.ended).toBe(7);
+    expect(plain.exclude_sessions).toBeNull();
+    for (const scope of ['window', 'history']) {
+      expect(plain.views[scope].unexcluded.ended).toBe(7);
+      expect(plain.views[scope].excluded).toBeNull();
+      expect(plain.views[scope].exclusion).toBeNull();
+    }
+
+    // POSITIVE CONTROL: the same ledger, told to exclude them, does.
+    const flagged = parseOne(runCli(['--cwd', root, '--exclude-sessions', DOC_EXCLUDED_IDS.join(',')], root));
+    expect(flagged.views.window.excluded.ended).toBe(1);
+    expect(flagged.views.window.exclusion.matched_ended).toBe(6);
+  });
+
+  it('FLAGS an excluded session that has a receipt instead of quietly dropping it', async () => {
+    const root = makeRoot('X8');
+    await seedMix(root);
+
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'sessCov0001,sessEmptyA01'], root));
+
+    // A covered session on the list lowers numerator and denominator together;
+    // the report has to make that visible.
+    expect(printed.views.window.exclusion.with_receipts).toEqual(['sessCov0001']);
+    expect(printed.views.window.excluded).toMatchObject({ ended: 5, with_receipts: 2, skipped: 3 });
+  });
+
+  it('names an id the ledger has no session.ended row for, and changes nothing for it', async () => {
+    const root = makeRoot('X9');
+    await seedMix(root);
+
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'ghost-1'], root));
+
+    expect(printed.exclude_sessions).toEqual({ source: 'list', path: null, requested: 1, ignored: 0 });
+    expect(printed.views.window.exclusion).toEqual({
+      requested: 1, matched_ended: 0, unmatched: ['ghost-1'], with_receipts: [],
+    });
+    expect(printed.views.window.excluded).toEqual(printed.views.window.unexcluded);
+  });
+
+  it('leaves the ledger byte-for-byte the same length', async () => {
+    const root = makeRoot('X10');
+    await seedMix(root);
+    const file = ledgerFilePath(root);
+    const before = statSync(file).size;
+
+    // parseOne first: a run that exits 2 before reading anything also leaves the
+    // file untouched, and would make this assertion pass for the wrong reason.
+    const printed = parseOne(runCli([
+      '--cwd', root, '--since', '2026-01-01T00:00:00Z', '--exclude-sessions', 'sessEmptyA01',
+    ], root));
+
+    expect(printed.views.window.excluded.ended).toBe(6);
+    expect(statSync(file).size).toBe(before);
+  });
+});
+
+describe('session-coverage: the window and the full history', () => {
+  /** Two sessions inside the window, one before it. */
+  function seedAcrossCutoff(root) {
+    seedEnded(root, 'sessOldEmpty01', {
+      status: 'skipped', reason: 'no-receipts', now: () => new Date('2026-09-01T00:00:00Z'),
+    });
+    seedEnded(root, 'sessNewEmpty02', {
+      status: 'skipped', reason: 'no-receipts', now: () => new Date('2026-09-13T00:00:00Z'),
+    });
+    seedEnded(root, 'sessNewDrift03', {
+      status: 'skipped', reason: 'no-receipts', unresolved: ['claude-opus-5-5'],
+      now: () => new Date('2026-09-13T00:00:00Z'),
+    });
+  }
+
+  it('prints the full-history views next to the window', () => {
+    const root = makeRoot('H1');
+    seedAcrossCutoff(root);
+
+    const printed = parseOne(runCli([
+      '--cwd', root, '--since', '2026-09-10T00:00:00Z',
+      '--exclude-sessions', 'sessOldEmpty01,sessNewEmpty02',
+    ], root));
+
+    expect(printed.since).toBe('2026-09-10T00:00:00.000Z');
+    // Top level is still the RAW WINDOW, as before this flag existed.
+    expect(printed.ended).toBe(2);
+    expect(printed.census.dropped.selection.filtered_out).toBe(1);
+
+    const { window: win, history } = printed.views;
+    expect(win.unexcluded.ended).toBe(2);
+    expect(history.unexcluded.ended).toBe(3);
+    expect(win.excluded.ended).toBe(1);
+    expect(history.excluded.ended).toBe(1);
+    // The old empty session is outside the window, so the window cannot match
+    // it; the history can. Each scope reports its own account.
+    expect(win.exclusion).toEqual({
+      requested: 2, matched_ended: 1, unmatched: ['sessOldEmpty01'], with_receipts: [],
+    });
+    expect(history.exclusion).toEqual({
+      requested: 2, matched_ended: 2, unmatched: [], with_receipts: [],
+    });
+    for (const [tag, view] of allViews(printed)) expectIdentity(view, tag);
+  });
+
+  it('never reports a history smaller than its window', () => {
+    const root = makeRoot('H2');
+    seedAcrossCutoff(root);
+
+    const printed = parseOne(runCli(['--cwd', root, '--since', '2026-09-10T00:00:00Z'], root));
+
+    expect(printed.views.history.unexcluded.ended).toBeGreaterThanOrEqual(printed.views.window.unexcluded.ended);
+    expect(printed.views.history.unexcluded.skipped).toBeGreaterThanOrEqual(printed.views.window.unexcluded.skipped);
+    expect(printed.views.window.excluded).toBeNull();
+    expect(printed.views.history.excluded).toBeNull();
+  });
+
+  it('prints an identical history when there is no --since', () => {
+    const root = makeRoot('H3');
+    seedAcrossCutoff(root);
+
+    const printed = parseOne(runCli(['--cwd', root], root));
+
+    expect(printed.since).toBeNull();
+    expect(printed.views.history).toEqual(printed.views.window);
+    expect(printed.views.history.unexcluded.ended).toBe(3);
+  });
+});
+
+describe('session-coverage: --exclude-sessions is refused when it cannot be honoured', () => {
+  /**
+   * Exit 2, empty stdout, ONE stderr line naming the flag AND the specific
+   * problem, no ledger created.
+   *
+   * The `problem` text is what makes each case discriminating. Before the flag
+   * existed, every one of these passed for the WRONG reason: an unknown
+   * argument also exits 2 with the flag name in its message. Only the specific
+   * wording tells "refused because the list cannot be used" from "refused
+   * because the flag is not understood".
+   */
+  function expectUsageError(args, root, problem) {
+    const out = runCli(args, root);
+    expect(out.status).toBe(2);
+    expect(out.stdout).toBe('');
+    expect(out.stderr.trim().split('\n')).toHaveLength(1);
+    expect(out.stderr.startsWith('session-coverage:')).toBe(true);
+    expect(out.stderr).toContain('--exclude-sessions');
+    expect(out.stderr).toContain(problem);
+    expect(out.stderr).not.toContain('unknown argument');
+    expect(existsSync(ledgerFilePath(root))).toBe(false);
+  }
+
+  it.each([
+    ['has no value', ['--exclude-sessions'], 'requires a value'],
+    ['is blank', ['--exclude-sessions', '   '], 'is blank'],
+    ['names a file that does not exist', ['--exclude-sessions', 'no-such-list.txt'], 'file not found'],
+    ['names a nested path that does not exist', ['--exclude-sessions', 'missing/dir/list.md'], 'file not found'],
+    ['is a comma list with no valid id', ['--exclude-sessions', ',,'], 'no session ids'],
+  ])('exits 2 when the flag %s', (_label, args, problem) => {
+    expectUsageError(args, makeRoot('U1'), problem);
+  });
+
+  it('exits 2 when the value is a directory', () => {
+    const root = makeRoot('U2');
+    mkdirSync(path.join(root, 'a-directory'), { recursive: true });
+    expectUsageError(['--exclude-sessions', 'a-directory'], root, 'not a regular file');
+  });
+
+  it('exits 2 when the file holds no session id at all', () => {
+    const root = makeRoot('U3');
+    writeFileSync(path.join(root, 'prose.md'), '# notes\n\nnothing to see here, really.\n', 'utf-8');
+    expectUsageError(['--exclude-sessions', 'prose.md'], root, 'no session ids');
+  });
+
+  it('exits 2 when the file is larger than a list has any reason to be', () => {
+    const root = makeRoot('U4');
+    // Every line is a valid id: it is the SIZE that must refuse it.
+    writeFileSync(path.join(root, 'huge.txt'), 'sess-x\n'.repeat(200_000), 'utf-8');
+    expectUsageError(['--exclude-sessions', 'huge.txt'], root, 'too large');
+  });
+
+  it('CONTROL: a list that CAN be honoured is not refused', () => {
+    // Same root shape, same flag, a usable list: the refusals above are about
+    // the list, not about the flag.
+    const root = makeRoot('U6');
+    writeFileSync(path.join(root, 'ok.txt'), 'sess-x\n', 'utf-8');
+    const printed = parseOne(runCli(['--cwd', root, '--exclude-sessions', 'ok.txt'], root));
+    expect(printed.exclude_sessions).toMatchObject({ source: 'file', requested: 1 });
+  });
+
+  it('names the flag in the usage line of an unknown-argument error', () => {
+    const out = runCli(['--oops'], makeRoot('U5'));
+    expect(out.status).toBe(2);
+    expect(out.stderr).toContain('--exclude-sessions');
+  });
+});
+
+describe('session-coverage: an unexpected throw still prints the same key set', () => {
+  it('prints empty views, the request it could echo, and the error', async () => {
+    const root = makeRoot('T1');
+    const mod = await import(`file:///${CLI.replace(/\\/g, '/')}`);
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    let code;
+    let written;
+    try {
+      code = mod.main(
+        ['--cwd', root, '--since', '2026-09-10T00:00:00Z', '--exclude-sessions', 'a,b'],
+        { readLedger: () => { throw new Error('boom'); } },
+      );
+    } finally {
+      // Read before restoring: mockRestore() also clears the recorded calls.
+      written = write.mock.calls.map(([s]) => String(s));
+      write.mockRestore();
+    }
+
+    expect(code).toBe(0);
+    expect(written).toHaveLength(1);
+    const printed = JSON.parse(written[0]);
+    expect(Object.keys(printed).sort()).toEqual([...STDOUT_KEYS, 'error'].sort());
+    expect(printed.error).toBe('boom');
+    expect(printed.ended).toBe(0);
+    expect(printed.coverage).toBeNull();
+    expect(printed.census).toBeNull();
+    expect(printed.ledger_path).toBeNull();
+    expect(printed.exclude_sessions).toEqual({ source: 'list', path: null, requested: 2, ignored: 0 });
+    for (const scope of ['window', 'history']) {
+      expect(Object.keys(printed.views[scope].unexcluded).sort()).toEqual(VIEW_KEYS);
+      expect(printed.views[scope].unexcluded.coverage).toBeNull();
+      expect(printed.views[scope].unexcluded.skipped).toBe(0);
+      // Nothing was measured, so nothing was excluded: null, not an empty account.
+      expect(printed.views[scope].excluded).toBeNull();
+      expect(printed.views[scope].exclusion).toBeNull();
+    }
   });
 });
 
