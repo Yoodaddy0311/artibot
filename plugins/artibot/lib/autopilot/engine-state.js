@@ -12,7 +12,11 @@ import { mergeQueuedNotification, persist, recordPhase, tick } from './_engine-h
 import { appendLesson } from './memory.js';
 import { ackPhaseAttempt } from './phase-attempt.js';
 import { recordRecoveryDecision } from './recovery-record.js';
-import { applyRecoveryTransition, loadRecoveryTransitionConfig } from './recovery-transition.js';
+import {
+  applyRecoveryTransition,
+  loadRecoveryTransitionConfig,
+  settleRecoveryTransitions,
+} from './recovery-transition.js';
 import { loadReportVerifyGateConfig, refuseRecordedReport } from './report-verify-gate.js';
 
 /**
@@ -57,12 +61,20 @@ export function nextPhaseAfter(current) {
  * `pendingPhase` override: the override existed to redirect the runner that is
  * now running, so keeping it would redirect the *next* one as well.
  *
+ * Every runner enters here before its dispatch gate, so this is also where a
+ * recovery route that an EARLIER runner satisfied gets settled (AP-N4,
+ * `recovery-transition.js#settleRecoveryTransitions`) — and where a session
+ * that is still paused at the routed phase is seen, before the fields below
+ * overwrite that pause. The pass writes only journal rows, is a no-op for a
+ * state with no open route, and never throws.
+ *
  * @param {object} state - Live session state (mutated).
  * @param {string} phase
  * @returns {object} mutated state
  */
 export function enterPhase(state, phase) {
   if (!state) throw new TypeError('state required');
+  settleRecoveryTransitions(state);
   state.phase = phase;
   state.pendingPhase = null;
   return state;
@@ -136,6 +148,18 @@ export function safeAppendLesson(state, payload) {
  * at that call for why the merge, and not a later announcement, is what makes
  * the entry durable.
  *
+ * **Every call also settles the recovery routes earlier ACKs left open** (AP-N4,
+ * first statement below). A phase-advancing verdict only ROUTES: it rewrites
+ * `pendingPhase` and stamps the journal row `routed`. The row becomes `applied`
+ * — `appliedNext`, `appliedBy`, `divergent: false` — when the engine has handed
+ * the routed phase out, and that hand-out can only be seen by a LATER call. It
+ * is done first so the VERIFY judgement below reads a ladder in which every
+ * replan that really went out is already counted, and every one that did not is
+ * not. `state.phase` is not advanced here for a phase that no runner entered:
+ * that is `resumeAutopilot`'s job (see the driver's "next phase comes from the
+ * engine" rule in `commands/autopilot.md`), and a route only ever completes
+ * through a runner.
+ *
  * **And it is the driver-path REPORT gate** (`report-verify-gate.js#refuseRecordedReport`):
  * a driver that records REPORT itself never enters `runPhase6Report`. With
  * `autopilot.reportVerifyGate.enforce` OFF (the default) only the switch itself
@@ -154,6 +178,10 @@ export function safeAppendLesson(state, payload) {
 export function recordPhaseResult(state, payload = {}, config = undefined) {
   if (!state) throw new TypeError('state required');
   const { phase, status, ...rest } = payload;
+  // AP-N4: settle routes earlier ACKs left open BEFORE anything below reads the
+  // journal (the VERIFY judgement's ladder) or moves the phase fields (the pause
+  // reading). No-op unless a `routed` / `blocked-before-dispatch` row exists.
+  settleRecoveryTransitions(state);
   // The switch is read here, through this module's own import, so only REPORT
   // pays the config read and a test can inject it by mocking the loader.
   if (phase === 'REPORT' && refuseRecordedReport(state, payload, loadReportVerifyGateConfig(), PHASES)) return state;
@@ -201,8 +229,9 @@ export function recordPhaseResult(state, payload = {}, config = undefined) {
   // moment the engine knows whether verification succeeded, so it is where the
   // recovery judgement is journalled. The recorder never throws into this ACK.
   // With the CA-03 gate OFF (default) this stays recording-only and the fixed
-  // transition above is untouched; with it ON, `applyRecoveryTransition` moves
-  // `pendingPhase` (or pauses) right after the row is written.
+  // transition above is untouched; with it ON, `applyRecoveryTransition` routes
+  // `pendingPhase` (or pauses) right after the row is written. A route is not an
+  // assignment: the row reads `applied` only after a runner hands the phase out.
   if (phase === 'VERIFY') {
     const row = recordRecoveryDecision(state, { ...rest, phase, status, fixedNext: nextPhaseAfter(phase) });
     // CA-03: only a journalled failure can steer the transition, and only when

@@ -172,6 +172,31 @@ describe('enterPhase', () => {
   it('throws when state is missing', () => {
     expect(() => enterPhase(null, 'PLAN')).toThrow(TypeError);
   });
+
+  // AP-N4: enterPhase also runs the recovery settlement pass (a route becomes
+  // applied when its phase went out). That pass must be invisible for every
+  // state that has nothing to settle — which is nearly all of them.
+  it('changes only the phase fields of a state that has no recovery journal', () => {
+    const state = makeState({
+      phase: 'EVALUATE', pendingPhase: 'EXECUTE', phases: [{ name: 'PLAN', status: 'queued' }],
+    });
+    const before = JSON.parse(JSON.stringify(state));
+
+    enterPhase(state, 'EXECUTE');
+
+    expect(state).toEqual({ ...before, phase: 'EXECUTE', pendingPhase: null });
+  });
+
+  it('survives a recovery journal of junk without throwing or changing it', () => {
+    const journal = [null, 7, 'x', [], { applyStatus: 'routed' }, { applyStatus: 'routed', routedNext: 'PLAN' }];
+    const state = makeState({ recoveryJournal: journal });
+    const before = JSON.stringify(journal);
+
+    expect(() => enterPhase(state, 'PLAN')).not.toThrow();
+
+    expect(state.phase).toBe('PLAN');
+    expect(JSON.stringify(state.recoveryJournal)).toBe(before);
+  });
 });
 
 describe('recordPhaseResult', () => {
@@ -216,6 +241,16 @@ describe('recordPhaseResult', () => {
     const state = makeState({ phase: 'EVALUATE', pendingPhase: 'EXECUTE' });
     recordPhaseResult(state, { phase: 'EVALUATE', status: 'done' });
     expect(state.pendingPhase).toBe('EXECUTE');
+  });
+
+  it('still records and persists the result when the recovery journal is junk (AP-N4 pass never breaks the ACK)', () => {
+    const state = makeState({
+      recoveryJournal: [null, 7, { applyStatus: 'routed', routedNext: 'PLAN', phasesAtRoute: 'NaN' }],
+    });
+
+    expect(() => recordPhaseResult(state, { phase: 'PLAN', status: 'done' })).not.toThrow();
+
+    expect(state.phases.some((p) => p.name === 'PLAN' && p.status === 'done')).toBe(true);
   });
 
   it('tolerates IMPROVE payload with improvements/futurePlans arrays', () => {
