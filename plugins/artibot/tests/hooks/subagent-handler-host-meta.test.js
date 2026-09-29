@@ -135,6 +135,16 @@ describe('readHostSubagentMeta', () => {
     expect(JSON.stringify(result)).not.toContain('SENTINEL');
   });
 
+  it('caps a parentAgentId at 128 characters - the only length bound on the live stop row', () => {
+    // `spawn-ledger.js` scrubs its string columns but caps none of them, so the slice in
+    // `readHostSubagentMeta` is what keeps `parent_agent_id` bounded. Removing it left every
+    // other test green (review mutant, SH-19), which is why this case exists.
+    putMeta('long', metaOf({ parentAgentId: 'p'.repeat(200) }));
+    const { parentAgentId } = readHostSubagentMeta(transcript('long'));
+    expect(parentAgentId).toHaveLength(128);
+    expect(parentAgentId).toBe('p'.repeat(128));
+  });
+
   describe('NEGATIVE CONTROLS - every failure is "no value", never a throw', () => {
     it('meta file missing', () => {
       expect(readHostSubagentMeta(transcript('missing'))).toEqual(NONE);
