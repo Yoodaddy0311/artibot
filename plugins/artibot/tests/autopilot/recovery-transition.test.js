@@ -587,7 +587,8 @@ describe('applyRecoveryTransition — a newer decision supersedes routes still w
  * AP-N4 — the settlement pass. `engine-state.js` runs it at every phase entry and
  * every phase result; it is what turns a `routed` row into `applied` (or says why
  * it did not). Evidence of a hand-out is a `state.phases` record with status
- * `queued`: every runner writes exactly that AFTER its dispatch gate passes.
+ * `queued`: the PLAN / EXECUTE / CROSS_CHECK / VERIFY / IMPROVE runners write
+ * exactly that AFTER their dispatch gate passes (INTAKE and REPORT write `done`).
  */
 describe('settleRecoveryTransitions — a route becomes applied only after the hand-out', () => {
   /** A row exactly as `applyRecoveryTransition` leaves a route. */

@@ -258,12 +258,13 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
  * engine has ACTUALLY ASSIGNED the phase, and a route the dispatch gate refused
  * is told apart from one that went out.
  *
- * Every runner in `engine.js` does `enterPhase` -> dispatch gate (`maybePause`)
- * -> `recordPhase(<phase> queued)`. Only that last record proves a phase was
- * handed to the driver, so it is the evidence the settlement pass reads. This
- * block drives the contract with `handOut` (the runner sequence, minus its
- * side effects); the block after it pins the SAME contract against the real
- * runners so the two cannot drift apart.
+ * Every runner in `engine.js` starts with `enterPhase`. The PLAN / EXECUTE /
+ * CROSS_CHECK / VERIFY / IMPROVE ones then pass the dispatch gate (`maybePause`)
+ * and write `recordPhase(<phase> queued)` (INTAKE and REPORT write `done`).
+ * Only that last record proves a phase was handed to the driver, so it is the
+ * evidence the settlement pass reads. This block drives the contract with
+ * `handOut` (the runner sequence, minus its side effects); the block after it
+ * pins the SAME contract against the real runners so the two cannot drift apart.
  */
 describe('recordPhaseResult — CA-03 ON: a route is applied only after the engine hands the phase out (AP-N4)', () => {
   const ON = Object.freeze({ transitionFromVerdict: true });

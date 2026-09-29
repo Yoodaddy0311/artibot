@@ -47,8 +47,13 @@
  * touched here, and `ladderFromJournal` keeps reading `appliedNext` alone.
  *
  * The evidence of a hand-out is a `state.phases` record with `status: 'queued'`
- * at an index >= `row.phasesAtRoute`: every runner writes it right after its
- * dispatch gate passes, and nothing else writes that status. The FIRST such
+ * at an index >= `row.phasesAtRoute`. The PLAN / EXECUTE / CROSS_CHECK / VERIFY /
+ * IMPROVE runners write it right after their dispatch gate passes (INTAKE and
+ * REPORT write `done`, EVALUATE `skipped` / `done` / `iterate`), so on the engine
+ * path only those runners write that status. `recordPhaseResult` however
+ * records a driver's status as-is, so a driver that reports `queued` is read as
+ * a hand-out too: an over-count (a false `applied`), in the direction that
+ * reaches the ladder's ceiling sooner rather than looping. The FIRST `queued`
  * record decides — the routed phase means applied, any other phase means
  * superseded — so one hand-out can never settle two rows. `engine-state.js` runs
  * the pass at every phase entry (`enterPhase`) and every phase result
@@ -277,9 +282,13 @@ function phaseRecordCount(state) {
 
 /**
  * The first hand-out recorded at or after `mark`: a `state.phases` record with
- * `status: 'queued'`, which every runner in `engine.js` writes right after its
- * dispatch gate passed. Anything else in `phases` — a driver's own result
- * report, a `done`/`failed` line, junk — is not a hand-out.
+ * `status: 'queued'`, which the PLAN / EXECUTE / CROSS_CHECK / VERIFY / IMPROVE
+ * runners in `engine.js` write right after their dispatch gate passed (the
+ * INTAKE and REPORT runners write `done`). Anything else in `phases` — a
+ * driver's own `done` / `failed` report, junk — is not a hand-out. A driver that
+ * reports `queued` itself IS read as one, because `recordPhaseResult` records
+ * its status as-is: an over-count, in the direction that reaches the ladder's
+ * ceiling sooner.
  * @param {object} state
  * @param {number} mark - `row.phasesAtRoute`.
  * @returns {{name: string, status: 'queued'}|null}
