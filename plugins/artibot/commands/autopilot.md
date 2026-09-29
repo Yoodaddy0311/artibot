@@ -352,7 +352,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 **VERIFY 마감 — 원장 기록 (번호 단계).** `npm run ci` 의 최종 결과가 정해지면 — 통과했든 3회 재시도 뒤에도 실패했든 — 아래 1~4 를 이 순서로 전부 실행한다. 결과를 `recordPhaseResult(state, { phase: 'VERIFY', status })` 로 보고하기 **전에** 끝낸다: 그 호출이 PAUSED 로 이어지면 Step 4 로 넘어가므로, 뒤에 두면 실패 경로에서 이 단계가 통째로 빠진다. 로컬 원장과 증거 레지스트리에만 쓰고 외부로는 아무것도 보내지 않는다.
 
 1. **상태와 근거를 정한다.** `--status PASS` 는 이번 VERIFY 에서 실제로 돌린 검증(`npm run ci`, `--mcp-verify` 면 그 호출 포함)이 전부 통과했을 때만이고, 그 밖에는 `--status FAIL` 이다. `--evidence` 에는 **실제로 돌린 명령**(예: `npm run ci`) 또는 **직접 연 `path:line`** 을 1개 이상 적는다 — 같은 플래그를 반복해 여러 개를 줄 수 있다. 돌리지 않은 명령이나 열지 않은 줄번호는 적지 마라: 이 값은 측정이 아니라 주장이다. VERIFY 가 결과 없이 끝났다면(시작 전 중단 등) 기록할 결과가 없으니 이 단계 전체를 건너뛰고 PASS·FAIL 을 지어내지 않는다.
-2. **아래 한 줄을 그대로 실행한다**(`Bash`). 바꿀 곳은 자리표시자 네 개 — `<PASS|FAIL>` · `<one-line summary>` · `<path:line|command>` · `<project root>` — 뿐이다:
+2. **아래 한 줄을 그대로 실행한다**(`Bash`). 바꿀 곳은 자리표시자 네 개 — `<PASS|FAIL>` · `<one-line summary>` · `<path:line|command>` · `<project root>` — 뿐이다(`--evidence` 반복 추가는 예외):
 
    ```
    REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
@@ -360,7 +360,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
    - `<one-line summary>` 는 한 줄이다(예: `npm run ci: PASS` · `npm run ci: FAIL after 3 retries`). 출력 전문을 붙이지 마라.
    - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로를 `$HOME` 아래부터 찾는 이유: Bash 셸에서 `${CLAUDE_PLUGIN_ROOT}` 는 비어 있을 수 있고 맨 상대경로는 소스 리포 안에서만 풀린다.
-   - 세션 id 는 철자가 둘이다. Bash 에서 `CLAUDE_SESSION_ID` 는 빈 값이고 호스트는 `CLAUDE_CODE_SESSION_ID` 를 주므로 위 줄이 뒤의 것으로 폴백한다. 둘 다 비면 스크립트가 `recorded:false` 와 세션 사유를 낸다 — id 를 알면 `--session <id>` 를 직접 준다.
+   - 세션 id 는 철자가 둘이고 `CLAUDE_SESSION_ID` 는 자주 비어 있다. 이 호스트(Windows) 실측(2026-09-21 · 09-29)에서는 빈 값이고 `CLAUDE_CODE_SESSION_ID` 가 채워져 있었다 — 다른 호스트는 미측정이다. 그래서 위 줄이 뒤의 것으로 폴백한다. 둘 다 비면 스크립트가 `recorded:false` 와 세션 사유를 낸다 — id 를 알면 `--session <id>` 를 직접 준다.
 3. **stdout JSON 의 `recorded` 를 읽는다** — exit code 가 아니다. 스크립트는 아무것도 기록하지 못했을 때도 exit 0 이고, 사유는 같은 줄의 `reason` 에 있다.
 4. **결과를 한 줄로 남긴다**: `RECORDED <verification_id>` 또는 `NOT RECORDED <reason>`(스크립트 부재 포함). 사용자에게 나가는 다음 보고 — Step 4 의 PAUSED 알림 또는 Step 5 의 완료 보고 — 에 그 한 줄을 싣는다.
 

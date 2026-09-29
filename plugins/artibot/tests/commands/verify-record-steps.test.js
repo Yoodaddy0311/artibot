@@ -42,7 +42,17 @@
  *  - that the step is ordered before the thing it must not be skipped by;
  *  - that every flag the line names is one the REAL CLI accepts, and that the
  *    resulting rows are counted by the real reader as one self-report with an
- *    evidence-registry row behind it.
+ *    evidence-registry row behind it;
+ *  - THE MANIPULATION GUARD: the status is the result of the verification
+ *    COMMANDS that ran, never a verdict, and when nothing was verified the
+ *    whole step is skipped and PASS/FAIL is never invented. Each sentence is
+ *    pinned in both files; the skip rule also by position (it must come before
+ *    the command is handed over); and no sentence of the step may tie a
+ *    verdict-like signal to PASS/FAIL;
+ *  - the exception clause that reconciles "only the four placeholders change"
+ *    with the repeatable `--evidence`;
+ *  - that the empty `CLAUDE_SESSION_ID` is presented as one host's measurement
+ *    (Windows), not as a fact about every host.
  *
  * ── WHAT THIS FILE CANNOT SEE (rules §9 — written beside the gate) ──────────
  *  - WHETHER ANY MODEL RUNS THE STEP. This pins wording. A model that skips a
@@ -54,9 +64,16 @@
  *    semantics that nothing here exercises.
  *  - THE INSTALLED COPIES. This reads the commands in THIS worktree.
  *    `~/.claude/commands` and the plugin cache can lag by releases.
- *  - THE PROSE RULES. Only the load-bearing sentences are pinned. What counts
- *    as PASS, what counts as evidence and the skip-when-nothing-ran rule are
- *    prose; a reworded rule stays green.
+ *  - THE REST OF THE PROSE. Only the load-bearing sentences are pinned. What
+ *    counts as evidence and the wording around the pinned sentences are prose;
+ *    a reworded rule stays green.
+ *  - PARAPHRASES OF THE GUARD. The exact-sentence pins are the primary guard.
+ *    The net for an ADDED sentence ("APPROVE => PASS") is an English token list
+ *    plus a sentence split on newline and ". ", so a Korean-only paraphrase, or
+ *    a rule reflowed across lines, evades it. A mutant that keeps every pinned
+ *    sentence and adds such a paraphrase survives.
+ *  - WHETHER A MODEL OBEYS THE SKIP RULE. Its wording and position are pinned;
+ *    its effect is not.
  *  - WHETHER `--status PASS` IS TRUE. Nothing behind the flag ran a linter.
  *  - OTHER COMMANDS THAT VERIFY. `/go`, `/implement`, `/orchestrate` and the
  *    rest are outside this limb and are not inventoried here.
@@ -123,10 +140,26 @@ const CHAIN = [
 ];
 
 /**
+ * The shared tail of the skip sentence: what "nothing was verified" must lead
+ * to. Both halves matter — skipping without forbidding an invented result, or
+ * forbidding without skipping, each leaves a way to file a made-up PASS.
+ */
+const SKIP_TAIL = '기록할 결과가 없으니 이 단계 전체를 건너뛰고 PASS·FAIL 을 지어내지 않는다';
+
+/** The clause that reconciles "only the four placeholders change" with a repeatable `--evidence`. */
+const EVIDENCE_EXCEPTION = '`--evidence` 반복 추가는 예외';
+
+/**
  * The two verifying workflows. `verifyStart`/`verifyStop` bound the section that
  * does the verifying; `stepStart` is where the record step begins INSIDE it;
  * `before` is the sentence shape that orders the step ahead of what it must not
  * be skipped by.
+ *
+ * The manipulation guard: `statusRule` is the sentence that says where
+ * `--status` comes from, `skipWhen` is the trigger of the skip rule, and
+ * `verdictTokens` are the words of the verdict-like signal each workflow
+ * could be tempted to derive the status from (the inspector's verdict in
+ * `/team`, the cross-check verdict in `/autopilot`).
  */
 const CARRIERS = [
   {
@@ -137,6 +170,9 @@ const CARRIERS = [
     // The record step must precede `recordPhaseResult(VERIFY)`: that call can
     // end in PAUSED, and a step placed after it vanishes on the failure path.
     before: /recordPhaseResult[\s\S]{0,80}\*\*전에\*\*/,
+    statusRule: '`--status PASS` 는 이번 VERIFY 에서 실제로 돌린 검증',
+    skipWhen: 'VERIFY 가 결과 없이 끝났다면',
+    verdictTokens: /crossCheck|cross-check|CROSS_CHECK/,
   },
   {
     file: 'team.md',
@@ -145,6 +181,9 @@ const CARRIERS = [
     stepStart: '#### Phase 4.5 마감 — 검증 기록 (Leader only, 번호 단계)',
     // The record step must precede whatever the verdict sets in motion.
     before: /\*\*전에\*\*/,
+    statusRule: '상태는 인스펙터 판정이 아니라 **검증 명령의 결과**다',
+    skipWhen: '돌린 검증 명령이 하나도 없으면',
+    verdictTokens: /\b(?:APPROVE|REQUEST_CHANGES|REJECT)\b/,
   },
 ];
 
@@ -182,6 +221,26 @@ function numberedItems(text) {
 /** The lines of `doc` that hold the invocation. */
 function callLines(doc) {
   return doc.split('\n').filter((line) => line.includes('node "$REC"'));
+}
+
+/**
+ * Sentences of `text`, split at a newline or at a terminator followed by
+ * whitespace. A `.` inside `4.5)` or `.git/` is not followed by whitespace, so
+ * it does not split.
+ */
+function sentencesOf(text) {
+  return text
+    .split(/\n|(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
+
+/** The last column-0 numbered item above the call: the one that hands the line over. */
+function introItem(block) {
+  const callAt = block.indexOf('node "$REC"');
+  if (callAt === -1) return undefined;
+  const items = block.slice(0, callAt).split('\n').filter((line) => /^\d+\.\s/.test(line));
+  return items[items.length - 1];
 }
 
 /** @type {string} */
@@ -316,6 +375,79 @@ describe.each(CARRIERS)('verify record step: $file', (carrier) => {
     const firstItem = block.search(/^1\.\s/m);
     expect(firstItem, `${file}: the numbered list has a first item`).toBeGreaterThan(-1);
     expect(block.slice(0, firstItem)).toMatch(carrier.before);
+  });
+
+  it('takes the status from the commands that ran, and never from a verdict', () => {
+    const block = stepBlock(read(file), carrier);
+    expect(block, `${file}: record step block not found`).not.toBeNull();
+
+    // The sentence itself. Rewriting the rule ("APPROVE => PASS") removes it.
+    expect(block, `${file}: the sentence that says where --status comes from`)
+      .toContain(carrier.statusRule);
+
+    // The additive form: the sentence stays and a second one re-ties the status
+    // to a verdict-like signal. No sentence of the step may name such a signal
+    // and PASS/FAIL together. English tokens only — see the header.
+    const tied = sentencesOf(block).filter(
+      (sentence) => carrier.verdictTokens.test(sentence) && /\b(?:PASS|FAIL)\b/.test(sentence),
+    );
+    expect(tied, `${file}: sentences that tie PASS/FAIL to a verdict`).toEqual([]);
+  });
+
+  it('skips the whole step, and never invents PASS/FAIL, when nothing was verified', () => {
+    const block = stepBlock(read(file), carrier);
+    expect(block, `${file}: record step block not found`).not.toBeNull();
+
+    // Both halves, so keeping the trigger while dropping the prohibition (or the
+    // reverse) is caught as well as deleting the whole sentence.
+    expect(block, `${file}: the skip trigger`).toContain(carrier.skipWhen);
+    expect(block, `${file}: the skip consequence`).toContain(SKIP_TAIL);
+
+    // The decision is stated in step 1, BEFORE the model is handed a command to
+    // run: a skip rule that only appears after the call cannot stop the call.
+    const firstItem = block.search(/^1\.\s/m);
+    const skipAt = block.indexOf(SKIP_TAIL);
+    const callAt = block.indexOf('node "$REC"');
+    expect(firstItem).toBeGreaterThan(-1);
+    expect(skipAt, `${file}: the skip rule sits inside the numbered list`).toBeGreaterThan(firstItem);
+    expect(skipAt, `${file}: the skip rule comes before the call`).toBeLessThan(callAt);
+  });
+
+  it('reconciles "only the placeholders change" with the repeatable --evidence', () => {
+    const block = stepBlock(read(file), carrier);
+    expect(block, `${file}: record step block not found`).not.toBeNull();
+
+    const intro = introItem(block);
+    expect(intro, `${file}: the numbered item that hands the line over`).toBeDefined();
+    // The claim that would otherwise contradict step 1 ...
+    expect(intro).toContain('자리표시자 네 개');
+    // ... and the exception that step 1 forces.
+    expect(intro).toContain(EVIDENCE_EXCEPTION);
+    // Step 1 is what allows the repetition; if it stops doing so, the exception
+    // is dead text and this pin should be reviewed with it.
+    expect(block.slice(0, block.indexOf('node "$REC"')))
+      .toContain('같은 플래그를 반복해 여러 개를 줄 수 있다');
+  });
+
+  it('presents the empty CLAUDE_SESSION_ID as one host measurement, not as a fact about every host', () => {
+    const block = stepBlock(read(file), carrier);
+    expect(block, `${file}: record step block not found`).not.toBeNull();
+
+    const bullets = block.split('\n').filter((line) => line.trim().startsWith('- 세션 id'));
+    // CARDINALITY ANCHOR: exactly one session bullet to inspect.
+    expect(bullets, `${file}: the session-id bullet`).toHaveLength(1);
+    const [bullet] = bullets;
+
+    // Aligned with record-verify.mjs ("Measured ... on Windows ... Other hosts
+    // are unmeasured") and with verify.md Step 5 ("often empty").
+    expect(bullet).toContain('자주 비어 있다');
+    expect(bullet).toContain('이 호스트(Windows) 실측');
+    expect(bullet).toContain('다른 호스트는 미측정');
+    // Both spellings are still named, because the fallback is explained by them.
+    expect(bullet).toContain('`CLAUDE_SESSION_ID`');
+    expect(bullet).toContain('`CLAUDE_CODE_SESSION_ID`');
+    // The unqualified wording this replaced must not come back anywhere in the step.
+    expect(block).not.toContain('Bash 에서 `CLAUDE_SESSION_ID` 는 빈 값이고');
   });
 
   it('feeds every flag the doc names to the real CLI, and the reader counts one self-report', () => {
