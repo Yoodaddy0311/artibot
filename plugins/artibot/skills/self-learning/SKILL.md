@@ -21,11 +21,13 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "learning"
-source_hash: ae9ca156
+source_hash: b8f14400
 whenNotToUse: "Situations where tool choice is unambiguous and no historical failure pattern exists; do not apply overhead when only one valid tool exists for the task."
 ---
 
 # Self-Learning Tool Selection (Toolformer + GRPO)
+
+> **Status (2026-09-29)** — 이 스킬에서 코드가 남아 있는 것은 Toolformer 층뿐이다(`lib/learning/tool-learner.js` 의 `recordUsage` · `suggestTool` · `getToolStats` · `pruneOldRecords` · `buildContextKey` 등). GRPO 층의 4개 API — `suggestToolCandidates` · `recordGroupComparison` · `getGrpoHistory` · `getGrpoScores` — 는 4.27.0(2026-06-21, `CHANGELOG.md` "Dead GRPO comparison API (#78)")에서 삭제됐다. 아래 GRPO 표기 절은 **역사 기록으로 보존**하며 실행 지침이 아니다.
 
 ## Contents
 - [When This Skill Applies](#when-this-skill-applies)
@@ -65,6 +67,8 @@ for which context pattern and surfaces that as a recommendation.
 
 ### GRPO Layer: Group Relative Policy Optimization
 
+> **Retired (4.27.0, 2026-06-21)** — 이 절이 서술하는 그룹 비교 층은 구현이 삭제됐다. `lib/learning/tool-learner.js` 는 `suggestToolCandidates` · `recordGroupComparison` · `getGrpoHistory` · `getGrpoScores` 를 export 하지 않고, `createEmptyHistory()` 의 v2 스키마에는 `grpoGroups` · `grpoScores` 필드가 없다(부재는 `tests/learning/tool-learner.test.js` · `tool-history.test.js` 가 핀). 아래 도식·점수식은 **역사 기록으로 보존**하며 실행 지침이 아니다. 라이브로 도는 GRPO 랭킹은 lifelong-learning 스킬의 배치 학습 그룹 내 랭킹(`lib/learning/pattern-analyzer.js#grpoRankGroup`)이며, 이 절의 도구 비교와는 별개다.
+
 On top of individual Toolformer tracking, GRPO compares **groups of tools**
 that attempted the same task and ranks them relative to each other:
 
@@ -97,6 +101,8 @@ tool-history.json (~/.claude/artibot/)
   |
   +--> suggestToolCandidates(context, count) -> Combined Toolformer+GRPO ranking
 ```
+
+> 위 도식의 `recordGroupComparison(...)` · `suggestToolCandidates(...)` 두 갈래는 은퇴(4.27.0) — 두 함수 모두 export 되지 않는다. 남는 갈래는 `suggestTool(context)` 하나다. 기록 쪽 라이브 경로는 `scripts/hooks/tool-tracker.js` 의 `recordUsage` 호출이며, `suggestTool()` 은 export 되지만 프로덕션 호출자는 없다(2026-09-29 기준 리포 전역에서 정의·barrel·테스트·문서뿐).
 
 ### Context Key Format
 
@@ -167,40 +173,50 @@ Returns aggregate statistics for tools.
 
 ### `suggestToolCandidates(context, count?)`
 
+> **Retired (4.27.0)** — `tool-learner.js` 가 export 하지 않는다. 아래는 역사 기록이며 실행할 수 없다.
+
 Returns combined Toolformer + GRPO ranked candidates (default: 5).
 Blends both signals: GRPO 60% + Toolformer 40% when both are available.
 
 ```javascript
-import { suggestToolCandidates } from '../lib/learning/tool-learner.js';
-
-const candidates = await suggestToolCandidates('search:typescript:module', 5);
-// [{ tool: "Grep", combinedScore: 0.88, grpoScore: 0.85, toolformerScore: 0.92, ... }]
+// Historical — retired 4.27.0, not exported (this import would fail to link).
+// import { suggestToolCandidates } from '../lib/learning/tool-learner.js';
+//
+// const candidates = await suggestToolCandidates('search:typescript:module', 5);
+// // [{ tool: "Grep", combinedScore: 0.88, grpoScore: 0.85, toolformerScore: 0.92, ... }]
 ```
 
 ### `recordGroupComparison(context, results[])`
 
+> **Retired (4.27.0)** — `tool-learner.js` 가 export 하지 않는다. 아래는 역사 기록이며 실행할 수 없다.
+
 Record a GRPO group comparison. Each result needs: tool, success, durationMs, accuracy, brevity.
 
 ```javascript
-import { recordGroupComparison } from '../lib/learning/tool-learner.js';
-
-const group = await recordGroupComparison('find:recent:file', [
-  { tool: 'find -mtime', success: true, durationMs: 150, accuracy: 0.9, brevity: 0.6 },
-  { tool: 'git log --diff-filter', success: true, durationMs: 80, accuracy: 0.95, brevity: 0.4 },
-  { tool: 'ls -lt', success: true, durationMs: 30, accuracy: 0.7, brevity: 0.9 },
-]);
-// group.rankings: [{ tool: "git log...", rank: 1, compositeScore: 0.82, relativeAdvantage: 0.05 }, ...]
+// Historical — retired 4.27.0, not exported (this import would fail to link).
+// import { recordGroupComparison } from '../lib/learning/tool-learner.js';
+//
+// const group = await recordGroupComparison('find:recent:file', [
+//   { tool: 'find -mtime', success: true, durationMs: 150, accuracy: 0.9, brevity: 0.6 },
+//   { tool: 'git log --diff-filter', success: true, durationMs: 80, accuracy: 0.95, brevity: 0.4 },
+//   { tool: 'ls -lt', success: true, durationMs: 30, accuracy: 0.7, brevity: 0.9 },
+// ]);
+// // group.rankings: [{ tool: "git log...", rank: 1, compositeScore: 0.82, relativeAdvantage: 0.05 }, ...]
 ```
 
 ### `getGrpoHistory(context, limit?)` / `getGrpoScores(context)`
+
+> **Retired (4.27.0)** — 두 함수 모두 export 되지 않으며, 조회하던 `grpoGroups` · `grpoScores` 는 `tool-history.json` 에 더 이상 쓰이지 않는다. 아래 한 줄은 역사 기록이다.
 
 Inspect GRPO comparison history and cumulative scores.
 
 ### `pruneOldRecords(retentionMs?)`
 
-Cleans up records and GRPO groups older than retention period (default: 90 days).
+Cleans up records older than the retention period (default: 90 days). (GRPO groups: 은퇴 — 정리할 그룹 저장소가 없다.)
 
 ## GRPO Scoring Criteria
+
+> **Retired (4.27.0)** — 아래 4요인 가중치와 "GRPO Learning Dynamics" 의 누적 점수 갱신식(학습률 0.1)은 삭제된 tool-learner 그룹 비교 층(`recordGroupComparison`)의 것이다. 이 스킬에 남는 점수 모델은 위 Scoring Model 의 시간 감쇠 성공률뿐이다. (lifelong-learning 의 라이브 랭킹 `pattern-analyzer.js#grpoRankGroup` 은 별개 구현이며 누적 점수 갱신이 없다.)
 
 | Factor | Weight | Signal | Source |
 |--------|--------|--------|--------|
@@ -223,9 +239,9 @@ Cleans up records and GRPO groups older than retention period (default: 90 days)
 - **Location**: `~/.claude/artibot/tool-history.json`
 - **Retention**: 90 days default, configurable
 - **Toolformer cap**: 200 records per context key (FIFO eviction)
-- **GRPO cap**: 50 comparison groups per context key
-- **Persistence**: Written on every recordUsage() and recordGroupComparison() call
-- **Schema version**: 2 (v1->v2 auto-migration for GRPO fields)
+- ~~**GRPO cap**: 50 comparison groups per context key~~ — 은퇴(4.27.0): 그룹 저장소가 삭제되어 `tool-history.json` 에 `grpoGroups` 가 없다
+- **Persistence**: Written after `recordUsage()` calls, debounced — dirty 표시 뒤 5초(`FLUSH_INTERVAL_MS`) 또는 `flushToDisk()` 때 디스크에 쓴다 (`recordGroupComparison()` 은 은퇴)
+- **Schema version**: 2 (`createEmptyHistory()` 가 `version: 2` 를 쓴다). ~~v1->v2 auto-migration for GRPO fields~~ — 은퇴: `loadHistory()` 는 `version` 이 없거나 1 미만일 때만 빈 이력으로 초기화하며 GRPO 필드 마이그레이션은 없다
 
 ## Integration Points
 
@@ -243,8 +259,8 @@ Progress:
 - [ ] Step 1: Record tool usage via PostToolUse hook (tool, context, score)
 - [ ] Step 2: Build context key (operation:target:scope)
 - [ ] Step 3: Query suggestTool() for ranked recommendations
-- [ ] Step 4: If comparing tools — record group comparison via GRPO
-- [ ] Step 5: Update GRPO scores (learning rate 0.1, relative advantage)
+- [ ] Step 4: If comparing tools — record group comparison via GRPO (retired 4.27.0 — skip)
+- [ ] Step 5: Update GRPO scores (learning rate 0.1, relative advantage) (retired 4.27.0 — skip)
 - [ ] Step 6: Prune old records (90-day retention, 200 records/context cap)
 ```
 
@@ -263,6 +279,8 @@ Progress:
 **Freedom**: MEDIUM
 
 ### Checkpoint 2: GRPO 그룹 비교 조건 검증 (After Step 4)
+> **Retired (4.27.0)** — 이 체크포인트가 게이트하던 그룹 비교 기록 기능이 삭제돼 현재 발동 조건이 없다. Step 4~5 를 건너뛰면 도달하지 않는다. 아래 본문은 역사 기록으로 보존한다.
+
 **Context**: 동일 작업에 대해 여러 도구를 비교하는 GRPO 그룹 비교를 기록하려는 시점. 비교 조건이 동등하지 않으면 학습 데이터가 오염된다.
 **Ask**: "이번 그룹 비교가 **동일 작업·통제된 조건**에서 수행되었나요?"
 **Options**:
@@ -293,6 +311,8 @@ Progress:
 | Update scores | LOW | Formula and learning rate are defined |
 | Prune old records | LOW | Retention period and caps are configured |
 
+> 위 표의 `Record GRPO comparison` · `Update scores` 2행은 은퇴한 GRPO 층의 단계라 현재 적용되지 않는다(역사 기록). 나머지 4행은 Toolformer 층의 단계로 남는다(`suggestTool` 은 프로덕션 호출자가 없다 — 위 Architecture 주석).
+
 ## Anti-Patterns
 
 - Do NOT use suggestions as hard rules (always allow tool override)
@@ -317,6 +337,6 @@ The following table captures common excuses agents make to skip the discipline o
 |--------|----------|
 | "tool selection is obvious" | obvious today is stale tomorrow — tool landscape shifts and learned success rates track it |
 | "Toolformer-style learning needs huge datasets" | even 50 rollouts per tool produces usable success-rate estimates; the dataset excuse is folklore |
-| "GRPO is research, not production" | GRPO is just group-relative scoring; the math fits on a napkin and runs in <1ms |
+| "GRPO is research, not production" | (역사: 이 스킬의 tool-selection GRPO 층은 4.27.0 에서 삭제돼 건너뛸 단계가 없다.) GRPO is just group-relative scoring; the math fits on a napkin and runs in <1ms |
 | "context-aware tool choice is over-engineering" | generic tool choice wastes 30%+ of calls on wrong tools; context-awareness is the ROI move |
 | "I'll hardcode the tool policy" | hardcoded policies can't adapt; learned policies improve with every session |

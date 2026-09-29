@@ -1490,8 +1490,8 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `quickstart` | 인터랙티브 첫 실행 온보딩 가이드, 프로젝트 타입 감지 |
 | `repo-benchmarking` | 외부 git 레포 클론 + 10차원 정량 벤치마킹, 채택 권고 |
 | `scheduled-learning` | 야간 학습 파이프라인/드리프트 체크 CronCreate 스케줄링 |
-| `self-evaluation` | Self-Rewarding + GRPO 하이브리드 자기 평가 시스템 |
-| `self-learning` | Toolformer + GRPO 도구 선택 자기학습, 성공률 기반 랭킹 |
+| `self-evaluation` | Self-Rewarding 자기 평가 시스템 (규칙 기반, 외부 judge AI 없음) |
+| `self-learning` | Toolformer 도구 선택 자기학습, 성공률 기반 랭킹 |
 | `session-worklog` | 세션 작업 자동 일지 (auto-memory) — 태스크·결정·미완료 항목 기록 |
 | `setup` | Artibot 초기 설정 인터랙티브 위저드 (언어, MCP, 권한, Git 자동화) |
 | `skill-authoring` | SKILL.md 신규 작성/편집 지원 |

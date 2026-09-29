@@ -20,7 +20,7 @@ agents:
   - "planner"
 tokens: "~2K"
 category: "learning"
-source_hash: 765f038d
+source_hash: fff183d4
 whenNotToUse: "One-off tasks or throwaway experiments where no routing pattern or user preference is worth persisting; do not trigger during active task execution."
 ---
 
@@ -74,6 +74,8 @@ Session Experiences
 +------------------+
 ```
 
+> 위 도식에서 실제로 도는 구간은 Experience Collector → Batch Learner(`lib/learning/lifelong-learner.js#batchLearn`) → Knowledge Transfer(`lib/learning/knowledge-demotion.js#hotSwap`) 이며, 진입점은 SessionEnd 훅(`scripts/hooks/session-end.js` → `lib/learning/pipeline.js#shutdownLearning`)이다. Batch Learner 의 GRPO 는 그룹 내 규칙 기반 **랭킹**(`lib/learning/pattern-analyzer.js#grpoRankGroup`)이며 라우팅 정책 최적화가 아니다. 도식 문구 중 "Collect routing decisions + outcomes" · "batches (size: 50)" 는 현재 코드와 맞지 않는다 — §2·§3 참조.
+
 ### 2. Experience Collection
 
 Each routing decision is recorded as an experience entry:
@@ -88,9 +90,15 @@ Each routing decision is recorded as an experience entry:
 | `confidence` | number | Router confidence at decision time |
 | `timestamp` | string | ISO timestamp |
 
+> 위 표는 실제 스키마가 아니다. 수집기가 쓰는 것은 라우팅 결정이 아니라 `{ id, type, category, data, timestamp, sessionId, model }` 모양의 경험이며 `type` 은 `tool` · `agent` · `success` · `error` · `team` · `self-evaluation` 이다(`lib/learning/lifelong-learner.js#collectExperience` · `collectDailyExperiences`; 호출처는 `scripts/hooks/tool-tracker.js` · `scripts/hooks/agent-evaluator.js` · `lib/learning/pipeline.js`). 표의 `routed_to` 는 이 스킬 밖의 리포 전역(2026-09-29 grep, node_modules 제외)에서 나오지 않는다. 역사 기록으로 보존한다.
+
 ### 3. GRPO (Group Relative Policy Optimization)
 
-Batch learning algorithm that groups similar experiences and optimizes routing thresholds:
+> **Live vs Retired (2026-09-29)** — **라이브**는 그룹 내 랭킹이다: 세션 종료 시 `batchLearn()` 이 경험을 `type::category` 로 묶고(그룹 최소 크기 `MIN_GROUP_SIZE = 2`), `grpoRankGroup()` 이 경험마다 규칙 기반 4차원 점수(success 0.35 · speed 0.25 · reliability 0.25 · resource efficiency 0.15)로 `composite` 를 내 내림차순으로 정렬하고 각 항목에 `relativeAdvantage = composite − 그룹 평균` 을 붙인다. 이어 `extractPattern()` 이 최고 항목을 기준으로 패턴을 뽑아(신호가 부족하면 null) `~/.claude/artibot/patterns/<type>-patterns.json` 에 병합하고, `learning-log.json` 에 한 줄(`groupsProcessed` · `patternsExtracted`)을 남긴다. 이 과정은 라우팅 임계값을 건드리지 않는다.
+>
+> **Retired** — 아래 4단계 중 **라우팅 임계값 갱신**(3·4단계)과 System 1 vs System 2 비교(2b·2c)는 실행되지 않는다. `lib/cognitive/router.js#adaptThreshold` 의 프로덕션 호출자가 0 이다(리포 전역 grep 2026-09-29: 정의와 JSDoc 예시 밖에서는 `tests/` · `_design/` 에만 나온다). 라우터는 임계값을 디스크에 저장·로드하지 않으므로(`router.js` 는 fs 를 쓰지 않는다) "갱신된 임계값을 세션 시작 시 로드" 하는 경로도 없다. 삭제 경위는 `artibot.config.json` 의 `learning.grpoRouting.comment`(2026-06-20). 아래 원문은 **역사 기록으로 보존**한다.
+
+Batch learning algorithm that groups similar experiences and optimizes routing thresholds (역사 — 위 Retired 표기 참조):
 
 ```
 1. Group experiences by domain + complexity range (group size: 5)
@@ -108,6 +116,8 @@ Batch learning algorithm that groups similar experiences and optimizes routing t
 |-----------|---------|-------------|
 | `batchSize` | 50 | Experiences per batch |
 | `grpoGroupSize` | 5 | Experiences per comparison group |
+
+> `batchSize` · `grpoGroupSize` 는 `artibot.config.json` · `lib/core/config-schema.js` 에 선언만 돼 있고 이를 읽는 코드가 없다(grep 2026-09-29: `grpoGroupSize` 는 설정·스키마·스키마 테스트 픽스처·문서에만 나오고, `batchSize` 는 `lib/` · `scripts/` · `hooks/` 에서 `config-schema.js` 선언 외에 나오지 않는다 — `learning.lifelong` 을 읽는 코드가 없다). `batchLearn()` 은 디스크의 경험(최대 1000건, `MAX_EXPERIENCES`)을 한 번에 처리하고, 그룹 하한은 상수 `MIN_GROUP_SIZE = 2` 다.
 
 ### 4. Knowledge Transfer
 
@@ -157,7 +167,7 @@ Learning state is saved to `~/.claude/artibot/`:
 ### 7. Integration with Cognitive Routing
 
 The lifelong learning system feeds back into the cognitive router:
-- Updated thresholds are loaded at session start
+- ~~Updated thresholds are loaded at session start~~ — 은퇴: 학습이 라우터 임계값을 갱신·저장하지 않는다(§3 Retired 참조)
 - Promoted patterns are available to System 1 immediately
 - Demoted patterns are flagged for System 2 re-evaluation
 - Transfer history informs meta-cognitive monitoring
@@ -188,11 +198,11 @@ Copy this checklist and track progress:
 
 ```
 Progress:
-- [ ] Step 1: Collect routing experiences during session
-- [ ] Step 2: Batch experiences (size: 50) for GRPO processing
-- [ ] Step 3: Group by domain + complexity range (group size: 5)
-- [ ] Step 4: Compare System 1 vs System 2 outcomes per group
-- [ ] Step 5: Update routing threshold (adaptRate * advantage)
+- [ ] Step 1: Collect routing experiences during session (실제: 라우팅 결정이 아니라 tool·agent·success·error·team·self-evaluation 경험 — §2 참조)
+- [ ] Step 2: Batch experiences (size: 50) for GRPO processing (실제: 디스크의 경험 전체를 한 번에 처리 — batchSize 를 읽는 코드 없음)
+- [ ] Step 3: Group by domain + complexity range (group size: 5) (실제 그룹 키: type::category, 최소 크기 2)
+- [ ] Step 4: Compare System 1 vs System 2 outcomes per group (실제: 그룹 내 composite 랭킹 — System 1 vs 2 비교는 은퇴)
+- [ ] Step 5: Update routing threshold (adaptRate * advantage) (retired — skip: adaptThreshold 프로덕션 호출자 0)
 - [ ] Step 6: Transfer knowledge — promote/demote between caches
 - [ ] Step 7: Persist updated caches to disk
 ```
@@ -200,6 +210,8 @@ Progress:
 ## Human Checkpoints
 
 ### Checkpoint 1: GRPO 비교 결과 검토 (After Step 4)
+> Step 4 의 라이브 형태는 그룹 내 composite 랭킹이다. 아래 Context·Ask 의 "System 1과 System 2의 성공률 비교" 는 은퇴한 설계의 문구이므로, 라이브에서는 그룹별 순위와 `relativeAdvantage` 가 합리적인지로 읽는다(§3 참조). Options 1 의 "Step 5 임계값 조정으로 진행" 은 Step 5 가 은퇴했으므로 Step 6(지식 이전)으로 진행한다.
+
 **Context**: System 1과 System 2의 성공률 비교가 완료된 시점. 그룹별 결과가 합리적인지 확인해야 라우팅 임계값 조정의 신뢰성이 보장된다.
 **Ask**: "Step 4 GRPO 그룹 비교 결과를 확인했습니다. **각 그룹의 성공률 차이가 합리적으로 보이나요?**"
 **Options**:
@@ -210,6 +222,8 @@ Progress:
 **Freedom**: LOW
 
 ### Checkpoint 2: 임계값 조정 방향 확인 (After Step 5)
+> **Retired** — 이 체크포인트가 게이트하던 임계값 조정(Step 5)이 은퇴해(`adaptThreshold` 프로덕션 호출자 0) 현재 발동 조건이 없다. Step 5 를 건너뛰면 도달하지 않는다. 아래 본문은 역사 기록으로 보존한다.
+
 **Context**: adaptRate * advantage 공식으로 라우팅 임계값이 조정된 시점. 조정 방향(올리기/내리기)이 실제 관찰된 패턴과 일치하는지 검증이 필요하다.
 **Ask**: "라우팅 임계값이 조정되었습니다. **조정 방향(System 2 비중 증가/감소)이 세션에서 관찰된 패턴과 맞나요?**"
 **Options**:
@@ -241,6 +255,8 @@ Progress:
 | Update threshold | LOW | Formula is defined, clamped to [-0.1, 0.1] |
 | Knowledge transfer | LOW | Promotion (3x) and demotion (2x) thresholds are fixed |
 | Persist to disk | LOW | File paths and formats are defined |
+
+> 위 표의 `Update threshold` 행은 은퇴한 단계다(역사 기록). `Group by domain` 은 실제로 `type::category` 그룹이고, `Compare outcomes` 는 라이브에서 그룹 내 composite 랭킹이며 System 1 vs 2 비교가 아니다. `Batch processing` 의 "Batch size (50) and group size (5) are configured" 는 §3 표 아래 주석대로 읽는 코드가 없다.
 
 ## Quick Reference
 

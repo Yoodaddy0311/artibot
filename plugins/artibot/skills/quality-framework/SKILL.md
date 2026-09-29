@@ -33,7 +33,7 @@ agents:
 tokens: "~3K"
 category: "code-quality"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 8c9c4dec
+source_hash: 84c2bf46
 whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfix. For single-file changes under 50 lines, run only the blocking gates (Steps 1, 2, 4, 5). Reserve full cycle execution for release candidates and architecture-level changes."
 ---
 
@@ -91,7 +91,9 @@ whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfi
 
 ## GRPO Quality Loop
 
-After resolving any quality issue: observe context → compare strategies → rank by success rate → update weights → apply to future similar contexts. Enable via `artibot.config.json` quality pattern logging.
+> **Retired (2026-06-20)** — 이 절의 루프는 "update weights" 로 끝나는데 그 쓰기 쪽(`lib/learning/grpo-optimizer.js` · `lib/learning/grpo/` · `lib/cognitive/grpo-bridge.js`)이 삭제됐다(삭제 경위는 `artibot.config.json` 의 `learning.grpoRouting.comment`). 활성화하라던 "quality pattern logging" 은 설정으로 존재하지 않는다: 그 문구는 리포 전역 grep(2026-09-29)에서 이 파일에만 나오고, `artibot.config.json` 의 `quality` 항목(`packs.quality` · `selfBenchmark.dimensions`)은 패턴 로깅 설정이 아니며 `lib/core/config-schema.js` 에는 `quality` 키 자체가 없다. 따라서 품질 문제를 해결한 뒤 따라 할 실행 단계가 없다 — 아래 원문은 **역사 기록으로 보존**한다. 실제 게이트는 위 8-Step Validation Cycle 이다.
+
+~~After resolving any quality issue: observe context → compare strategies → rank by success rate → update weights → apply to future similar contexts. Enable via `artibot.config.json` quality pattern logging.~~
 
 ## Common Rationalizations
 > 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.
