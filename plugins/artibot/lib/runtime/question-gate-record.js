@@ -37,22 +37,40 @@
  *  status string instead of throwing. A `null` or a failure status is only
  *  logged; the one thing a caller branches on is a recorded data object.
  *
- * ── THE INTERPRETATION LIMITATION, RECORDED IN THE DATA ─────────────────────
+ * ── THE INTERPRETATION INPUT, RECORDED IN THE DATA ──────────────────────────
  *  `evaluateConditions` lets an `interpretIntent()` output make conditions 2
  *  (material downstream impact) and 4 (cost of a wrong assumption) true on its
  *  own — an escalating completion expectation (commit or beyond) or a
- *  structural work purpose (design / migrate / release). On the
- *  UserPromptSubmit path NO interpretation exists: nothing under lib/ or
- *  scripts/ calls `interpretIntent`, and no middleware puts one on
- *  `state.context` (grep, 2026-09-23). On that path those two routes are
- *  therefore ALWAYS false, and conditions 2 and 4 can only come from prompt
- *  cues (plus, for 4, the classifier's `factors.risk`).
+ *  structural work purpose (design / migrate / release). Condition 4 also reads
+ *  the classifier: `factors.risk >= 0.5` makes it true.
  *
- *  A reader of the line must be able to tell "false because the prompt had no
- *  cue" from "false because the input that could have made it true was never
+ *  HISTORY, kept because it explains every row written before CA-15. On the
+ *  UserPromptSubmit path NO interpretation existed: nothing under lib/ or
+ *  scripts/ called `interpretIntent`, and no middleware put one on
+ *  `state.context` (grep, 2026-09-23). Nor did the classification arrive: the
+ *  caller read `state.context.routing.classification`, but `router.js` spreads
+ *  the classification INTO `routing`, so that key was always undefined
+ *  (measured 2026-09-29 on the real router: a prompt with `factors.risk` 0.6
+ *  recorded condition 4 false, and every row said `interpretation_present:
+ *  false`). Those rows can read conditions 2 and 4 from prompt cues alone.
+ *
+ *  NOW (CA-15, 2026-09-29). `tasks.js#recordQuestionGate` makes ONE
+ *  `interpretIntent({ prompt, intent, classification })` call per prompt (an
+ *  L5 -> L2 edge, so downward) and reads the classification from `routing`
+ *  itself. The call lives in the caller, not here: this module stays a
+ *  recorder that takes what it is handed. For a reader of the ledger that means
+ *  conditions 2 and 4 are true on prompts they were false on before, so rows
+ *  before and after that change are NOT comparable (the SH-18 distribution
+ *  shifts at that SHA), and `interpretation_present` is true on every row whose
+ *  interpretation was produced.
+ *
+ *  A reader of the line must still be able to tell "false because the prompt had
+ *  no cue" from "false because the input that could have made it true was never
  *  supplied". So every line carries `interpretation_present`, and it is a
  *  REQUIRED key: the writer's oversized-line fold keeps only required keys, and
- *  a line that lost the marker would read as a complete evaluation.
+ *  a line that lost the marker would read as a complete evaluation. It is now
+ *  false only when a caller supplied none (`tasks.js#interpretForGate` returns
+ *  `null` if the interpreter throws).
  *
  * ── WHY config IS NOT FORWARDED ─────────────────────────────────────────────
  *  `evaluateConditions` honours `config.question_gate.force`, which pins a

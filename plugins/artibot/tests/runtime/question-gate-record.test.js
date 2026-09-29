@@ -8,9 +8,10 @@
  *    must agree. Hardcoded expectations sit beside that differential so a gate
  *    change that flips a fixture is visible here as a changed fixture, not only
  *    as an agreeing pair.
- *  - **The interpretation limitation is in the DATA.** On the UserPromptSubmit
- *    path no `interpretIntent()` output exists, so conditions 2 and 4 lose their
- *    escalating/structural routes. `interpretation_present` is what lets a
+ *  - **The absent-input marker is in the DATA.** Since CA-15 the UserPromptSubmit
+ *    path feeds `interpretIntent()` (and the router's classification), so
+ *    `interpretation_present:false` now means only that a caller supplied none;
+ *    rows written before CA-15 are always false. The marker is what lets a
  *    reader of the line tell "false because the prompt had no cue" from "false
  *    because the input that could have made it true was never supplied".
  *  - **Data keys ⊆ declared allowlist fields, and required ⊆ emitted.** The
@@ -27,6 +28,11 @@
  *    `lib/runtime/middleware/tasks.js#recordQuestionGate` (wired 2026-09-23);
  *    that wiring, its failure containment and the two-line ledger it produces
  *    are pinned in `tests/runtime/tasks-compile-mission.test.js`, not here.
+ *  - WHETHER THE CALLER SUPPLIES THE INPUTS. Fixtures below hand `classification`
+ *    and `interpretation` straight to the builder, which is how CA-15's two
+ *    dead inputs (no `interpretIntent` caller; `routing.classification` always
+ *    undefined on the router's real output) stayed green. The production shape,
+ *    through the real router, is `tests/runtime/tasks-question-gate-inputs.test.js`.
  *  - WHETHER THE HOOK SCANNER CLASSIFIES THE CALL AS (A). That is
  *    `tests/firewall/hook-emitter-sources-rule.test.js`'s question; since the
  *    wiring made this module reachable from a hook entry point, its
@@ -182,9 +188,9 @@ describe('buildQuestionGateData — the four booleans and required', () => {
 
 describe('buildQuestionGateData — the interpretation-absent marker', () => {
   it('records interpretation_present:false when no interpretation is supplied', () => {
-    // The UserPromptSubmit path: tasks.js#recordMissionCompile has prompt,
-    // intent and classification, and no interpretIntent() output.
-    const data = buildQuestionGateData({ prompt: ALL_FOUR_PROMPT, intent: {}, classification: null });
+    // A caller that supplies none. Since CA-15 `tasks.js#recordQuestionGate`
+    // does so only when its own interpretIntent() call fails.
+    const data =buildQuestionGateData({ prompt: ALL_FOUR_PROMPT, intent: {}, classification: null });
     expect(data[INTERPRETATION_PRESENT_KEY]).toBe(false);
   });
 
