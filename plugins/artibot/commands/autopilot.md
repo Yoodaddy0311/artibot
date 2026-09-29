@@ -349,6 +349,23 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 - `Bash("npm run ci")` 실행. 실패 시 `engine.classifyFailure(error)` → `build-error-resolver` 자동 소환. **3회 재시도 후에도 실패하면 PAUSED**. pause 로 가기 전에 `recordPhaseResult(state, { phase: 'VERIFY', status: 'failed' })` 를 먼저 호출한다(Step 3 SH-06 규약). `autopilot.recovery.transitionFromVerdict` 가 `true` 면 다음 phase 는 저널 행의 `action` 을 따른다(`repair` → EXECUTE, `replan` → PLAN, 그 외 → PAUSED) — `false`(기본)면 현행대로 IMPROVE 고정. 그 외 → PAUSED 로 간 경우 Step 3 불릿과 같이 `state.phase`/`state.pausedReason` 을 직접 확인해 Step 4 로 넘긴다.
 - VERIFY 는 attempt 무장 phase 다(`lib/autopilot/engine.js#runPhase4Verify`): 엔진은 VERIFY 를 `queued` 로 기록하고 attempt 를 연 뒤 `attempt-started` 이벤트만 남긴다 — `phase-end` 는 결과 보고 때 기록된다. 성공이든 실패든 **결과는 반드시 `recordPhaseResult(state, { phase: 'VERIFY', status })` 로 보고한다.** 누락하면 다음 resume 이 VERIFY 를 1회 자동 재실행하고, 재실행분도 누락되면 두 번째에는 PAUSE 한다(Step 3 ADR-005 2단 주석).
 
+**VERIFY 마감 — 원장 기록 (번호 단계).** `npm run ci` 의 최종 결과가 정해지면 — 통과했든 3회 재시도 뒤에도 실패했든 — 아래 1~4 를 이 순서로 전부 실행한다. 결과를 `recordPhaseResult(state, { phase: 'VERIFY', status })` 로 보고하기 **전에** 끝낸다: 그 호출이 PAUSED 로 이어지면 Step 4 로 넘어가므로, 뒤에 두면 실패 경로에서 이 단계가 통째로 빠진다. 로컬 원장과 증거 레지스트리에만 쓰고 외부로는 아무것도 보내지 않는다.
+
+1. **상태와 근거를 정한다.** `--status PASS` 는 이번 VERIFY 에서 실제로 돌린 검증(`npm run ci`, `--mcp-verify` 면 그 호출 포함)이 전부 통과했을 때만이고, 그 밖에는 `--status FAIL` 이다. `--evidence` 에는 **실제로 돌린 명령**(예: `npm run ci`) 또는 **직접 연 `path:line`** 을 1개 이상 적는다 — 같은 플래그를 반복해 여러 개를 줄 수 있다. 돌리지 않은 명령이나 열지 않은 줄번호는 적지 마라: 이 값은 측정이 아니라 주장이다. VERIFY 가 결과 없이 끝났다면(시작 전 중단 등) 기록할 결과가 없으니 이 단계 전체를 건너뛰고 PASS·FAIL 을 지어내지 않는다.
+2. **아래 한 줄을 그대로 실행한다**(`Bash`). 바꿀 곳은 자리표시자 네 개 — `<PASS|FAIL>` · `<one-line summary>` · `<path:line|command>` · `<project root>` — 뿐이다:
+
+   ```
+   REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
+   ```
+
+   - `<one-line summary>` 는 한 줄이다(예: `npm run ci: PASS` · `npm run ci: FAIL after 3 retries`). 출력 전문을 붙이지 마라.
+   - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로를 `$HOME` 아래부터 찾는 이유: Bash 셸에서 `${CLAUDE_PLUGIN_ROOT}` 는 비어 있을 수 있고 맨 상대경로는 소스 리포 안에서만 풀린다.
+   - 세션 id 는 철자가 둘이다. Bash 에서 `CLAUDE_SESSION_ID` 는 빈 값이고 호스트는 `CLAUDE_CODE_SESSION_ID` 를 주므로 위 줄이 뒤의 것으로 폴백한다. 둘 다 비면 스크립트가 `recorded:false` 와 세션 사유를 낸다 — id 를 알면 `--session <id>` 를 직접 준다.
+3. **stdout JSON 의 `recorded` 를 읽는다** — exit code 가 아니다. 스크립트는 아무것도 기록하지 못했을 때도 exit 0 이고, 사유는 같은 줄의 `reason` 에 있다.
+4. **결과를 한 줄로 남긴다**: `RECORDED <verification_id>` 또는 `NOT RECORDED <reason>`(스크립트 부재 포함). 사용자에게 나가는 다음 보고 — Step 4 의 PAUSED 알림 또는 Step 5 의 완료 보고 — 에 그 한 줄을 싣는다.
+
+**Recording never changes the VERDICT.** 스크립트 부재·`recorded:false`·셸 오류 같은 기록 실패는 위 4번의 한 줄에만 적는다. `recordPhaseResult` 에 넘기는 `status`, `state.verifyResult`, 재시도, PAUSE 여부는 `npm run ci` 의 결과만으로 정하며 이 단계의 결과는 그 어느 것도 바꾸지 못한다. 이 기록은 VERIFY attempt 를 ACK 하지 않고 REPORT 검증 증거 게이트(Phase 6)의 근거도 아니다 — 결과 보고는 여전히 `recordPhaseResult` 의 몫이다.
+
 #### Phase 5 — IMPROVE
 - 병렬 소환: `Agent(subagent_type="artibot:refactor-cleaner")` + `Agent(subagent_type="artibot:performance-engineer")`. 결과는 보고서 §7~8.
 
