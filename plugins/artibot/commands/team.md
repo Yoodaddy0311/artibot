@@ -348,6 +348,25 @@ Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
 - **한 답변 = 블록 1개 = 스폰 1개** — 위 예시처럼 인스펙터 1명이 빌더 여럿을 한 답변에서 감사하면 그 블록은 스폰 1개를 가리키지 않으므로 `subject_agent_id` 를 쓰지 않는다(이 기본형의 audit 은 조인에서 `no_subject_audits` 로 센다). 게다가 파서는 한 답변의 **서로 다른** `claim_audit` 블록 2개를 `ambiguous_claim_audit` 로 답변 통째 거부한다(`lib/review/independent-reviewer.js#parseClaimAudit`). 스폰별 통과율이 필요하면 빌더마다 검수를 따로 띄워라 — 이름이 `-inspector` 로 끝나야 훅이 검수로 기록한다(`scripts/hooks/_review-stop-record.js#isReviewerStop`).
 - **블록은 마지막 텍스트에** — SubagentStop 훅은 인스펙터의 **마지막 assistant 텍스트**만 읽고 도구 호출(`SendMessage`) 본문은 읽지 않는다. 보고 계약대로 `SendMessage` 로 리더에게 보내는 것과 별개로, 두 블록은 마지막 답변에도 그대로 싣는다. `claim_audit` 형식은 `agents/auditor.md` 의 "claim_audit Block" 절이 정본이다 — 리더는 그 절의 JSON 한 줄과 키 표를 스폰 프롬프트에 붙여 준다(형식 없이 이름만 적으면 모델이 임의 형식을 지어낸다). 실측(2026-09-29): 이 리포 인스펙터 transcript 6건 중 마지막 텍스트에 `claim_audit` 블록이 있던 건 0건이고, 원장 41,356줄(2026-09-03~09-29)에 `review.*` 행은 0건이다.
 
+#### Phase 4.5 마감 — 검증 기록 (Leader only, 번호 단계)
+
+인스펙터 판정을 받으면 — APPROVE 든 REQUEST_CHANGES·REJECT 든 — 그 판정이 움직이는 다음 행동(Phase 5 진행 · 수정 지시 · 유저 보고) **전에** 아래 1~4 를 이 순서로 전부 실행한다. 재검수 라운드마다 판정이 새로 나므로 그때마다 다시 실행한다. `commands/verify.md` Step 5 를 옮긴 것이다: /team 만 실행한 리더는 verify.md 를 읽지 않으므로 여기 없으면 그 세션에는 이 단계가 없는 것이다. 로컬 원장과 증거 레지스트리에만 쓰고 외부로는 아무것도 보내지 않는다.
+
+1. **상태와 근거를 정한다.** 상태는 인스펙터 판정이 아니라 **검증 명령의 결과**다(판정은 검수 문서의 몫이다). 이번 라운드(Phase 4·4.5)에서 실제로 돌린 검증 명령(테스트·린트 등)이 전부 통과했을 때만 `--status PASS`, 하나라도 실패했으면 `--status FAIL` 이다. 일부만 돌렸으면 `--command` 요약에 그렇게 적는다(예: `unit tests only: PASS`) — 맨 `PASS` 는 전체 통과로 읽힌다. 누가 돌렸는지(리더 또는 팀원 이름)도 요약에 적는다. `--evidence` 에는 **실제로 돌린 명령** 또는 **리더가 직접 연 `path:line`** 을 1개 이상 적는다 — 같은 플래그를 반복해 여러 개를 줄 수 있다. 돌리지 않은 명령이나 직접 열지 않은 줄번호(팀원 보고에서 옮긴 것)는 적지 마라: 이 값은 측정이 아니라 주장이다. 인스펙터 보고에 돌린 명령이 없으면 리더가 직접 돌려도 된다(검증은 구현이 아니다). 그래도 돌린 검증 명령이 하나도 없으면(문서만 바뀐 작업 등) 기록할 결과가 없으니 이 단계 전체를 건너뛰고 PASS·FAIL 을 지어내지 않는다.
+2. **아래 한 줄을 그대로 실행한다**(`Bash`). 바꿀 곳은 자리표시자 네 개 — `<PASS|FAIL>` · `<one-line summary>` · `<path:line|command>` · `<project root>` — 뿐이다(`--evidence` 반복 추가는 예외):
+
+   ```
+   REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
+   ```
+
+   - `<one-line summary>` 는 한 줄이다(예: `unit tests only: PASS` · `npm test: FAIL`). 출력 전문을 붙이지 마라.
+   - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로를 `$HOME` 아래부터 찾는 이유: Bash 셸에서 `${CLAUDE_PLUGIN_ROOT}` 는 비어 있을 수 있고 맨 상대경로는 소스 리포 안에서만 풀린다.
+   - 세션 id 는 철자가 둘이고 `CLAUDE_SESSION_ID` 는 자주 비어 있다. 이 호스트(Windows) 실측(2026-09-21 · 09-29)에서는 빈 값이고 `CLAUDE_CODE_SESSION_ID` 가 채워져 있었다 — 다른 호스트는 미측정이다. 그래서 위 줄이 뒤의 것으로 폴백한다. 둘 다 비면 스크립트가 `recorded:false` 와 세션 사유를 낸다 — id 를 알면 `--session <id>` 를 직접 준다.
+3. **stdout JSON 의 `recorded` 를 읽는다** — exit code 가 아니다. 스크립트는 아무것도 기록하지 못했을 때도 exit 0 이고, 사유는 같은 줄의 `reason` 에 있다.
+4. **결과를 한 줄로 남긴다**: `RECORDED <verification_id>` 또는 `NOT RECORDED <reason>`(스크립트 부재 포함). Phase 5 보고에 그 한 줄을 싣는다 — 라운드가 여럿이면 라운드마다 한 줄이다.
+
+**Recording never changes the VERDICT.** 스크립트 부재·`recorded:false`·셸 오류 같은 기록 실패는 위 4번의 한 줄에만 적는다. 인스펙터 판정, 재검수 여부, Phase 5 진행 여부는 검수 결과만으로 정하며 이 단계의 결과는 그 어느 것도 바꾸지 못한다. 기록도 판정을 따라가지 않는다 — 상태는 위 1번의 검증 명령 결과다.
+
 ### 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
 
 `[보고 계약]` 이 **팀원→리더** 방향을 규율한다면, 아래는 **리더→사용자** 방향의 대칭 계약이다.
