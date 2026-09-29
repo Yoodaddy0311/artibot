@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * PostToolUse(`Skill`) — the `tool.used` WRITER, and the first one there has
- * ever been.
+ * PostToolUse(`Skill`, `AskUserQuestion`) — the `tool.used` WRITER, and the
+ * first one there has ever been. `Skill` since Wave 11 (SH-29); the second
+ * tool, `AskUserQuestion`, since SH-09 (2026-09-29) — see the SH-09 section.
  *
  * WHY THIS FILE EXISTS. `tool.used` has been a REGISTERED EVENT WITH NO
  * EMITTER. Measured 2026-09-15 ~10:5x KST: the live ledger held 0 `tool.used`
@@ -69,10 +70,70 @@
  * `[artibot:tool-used-record]`, `process.exitCode` is pinned to 0, and `main()`
  * cannot throw.
  *
- * `tool_name !== 'Skill'` RETURNS ON THE FIRST CHECK. The dispatch-table row
- * already routes only `Skill` here (`hooks/dispatch-table.json`, PostToolUse
- * slot), so this second guard is what makes a mis-scoped route cost nothing —
- * the same defence-in-depth `route-observe-pre.js` uses for `Agent`.
+ * A TOOL OUTSIDE `RECORDED_TOOLS` RETURNS ON THE FIRST CHECK. The dispatch-table
+ * row already routes only `Skill` and `AskUserQuestion` here
+ * (`hooks/dispatch-table.json`, PostToolUse slot), so this second guard is what
+ * makes a mis-scoped route cost nothing — the same defence-in-depth
+ * `route-observe-pre.js` uses for `Agent`. It is an ALLOWLIST matched by exact
+ * string (no case fold, no prefix), so a new tool is a deliberate two-place edit
+ * (the list and the route), never a side effect.
+ *
+ * SH-09 (2026-09-29): THE SECOND RECORDED TOOL, `AskUserQuestion`.
+ *
+ * WHY. V5-BACKLOG SH-09 exists to learn whether the constitution stage B change
+ * lowered how often the model asks the owner questions, and that EFFECT had no
+ * carrier meant for it. `human.asked` is not one: its allowlist spec says it is
+ * "Written by the HOOK at the point it blocks ... not by the model"
+ * (`schemas/ledger-events.allowlist.json`, event `human.asked`), so it counts
+ * guard BLOCKS, not questions. One `tool.used` row per AskUserQuestion call is
+ * the carrier:
+ *
+ *   { event:'tool.used', session_id, mission_id, action_id:<tool_use_id>,
+ *     source:'hook',
+ *     data:{ tool:'AskUserQuestion', ok, duration_ms } }
+ *
+ * IT WAS ALREADY COUNTABLE, AS A SIDE EFFECT, AND THAT IS WHY THIS ROW STILL
+ * EXISTS. `hook.fired` (SH-29) is written by the PostToolUse dispatcher for every
+ * dispatch and carries `data.tool`; `tool-tracker` is universal; so every
+ * AskUserQuestion dispatch has left a `hook.fired{slot:'PostToolUse',
+ * tool:'AskUserQuestion', hooks:['tool-tracker']}` row since Wave 12. MEASURED
+ * 2026-09-29T05:44Z on the central ledger: 11 such rows in 5 sessions, of 34,533
+ * PostToolUse `hook.fired` rows in 60 sessions. But that is the dispatch record
+ * of the BUSIEST slot, and `artibot.config.json#/ledger/hookFired/slots` (O8-i)
+ * exists so the owner can switch exactly that slot off, which would silently end
+ * the question count. A `tool.used` row does not depend on that switch, and it
+ * adds `ok` and `duration_ms`, which `hook.fired` does not carry.
+ *
+ * IT FITS THE EXISTING VOCABULARY. `tool`, `ok` and `duration_ms` are exactly the
+ * `required` keys of `tool.used`, and `skill`, its only optional field, is left
+ * out because a question is not a skill, so `schemas/ledger-events.allowlist.json`
+ * is unchanged.
+ *
+ * CONTENT-FREE, AND THEREFORE SIZE-FREE. No question text, option label, header
+ * or answer is read, and neither is the question COUNT: the unit is one tool
+ * CALL (one call can carry several questions), which is also the unit of a
+ * transcript census of `tool_use` blocks. A question is the user's own words and
+ * a ledger other tools read and copy is the wrong place for them. Reading none
+ * of it also makes the row's size independent of the question, so the byte-cap
+ * fold cannot be what shortens it.
+ *
+ * `ok` FOLLOWS THE SAME RULE AS FOR Skill: the host's `tool_response.success`
+ * boolean when it sent one, else true. The documented AskUserQuestion response
+ * has no such key, so a normal row reads `ok:true`, meaning "PostToolUse fired
+ * and the host said nothing about failure". It does NOT mean the user chose an
+ * option. (For Skill the KEY is a live measurement; for AskUserQuestion it is
+ * not, and only the default is exercised.)
+ *
+ * THE PAYLOAD BEHIND THIS IS DOCUMENT-BASED, NOT LIVE-CAPTURED (문서 기반, 라이브
+ * 미캡처). PostToolUse(AskUserQuestion) fires only after a human answers, so no
+ * unattended probe could freeze it
+ * (`tests/hooks/fixtures/askuser/PostToolUse.AskUserQuestion.json` says so in
+ * its own `_note`). The writer therefore reads only keys the Skill probe
+ * measured on the PostToolUse ENVELOPE (`tool_name`, `session_id`, `cwd`,
+ * `tool_use_id`, `duration_ms`) plus the optional `tool_response.success`, and
+ * nothing that depends on the unmeasured AskUserQuestion `tool_input` or
+ * `tool_response` shape. That the envelope is the same for this tool is an
+ * assumption: the live probe registered Skill only.
  *
  * WHAT THIS HOOK CANNOT SEE (rules §9 — write it next to the gate):
  *   - WHETHER `tool_input.skill` SURVIVES THE NEXT HOST. It is a MEASURED key
@@ -98,6 +159,29 @@
  *     a skill without a tool call, and produces no row. A `fired: 0` here means
  *     "never invoked through the tool", not "never used".
  *   - WHETHER THE SKILL DID ANY GOOD. This records an invocation.
+ *   - (SH-09) A DECLINED OR INTERRUPTED QUESTION. Whether it reaches PostToolUse
+ *     at all, or diverts to PostToolUseFailure (registered in `hooks.json`, not
+ *     routed here), is unmeasured. Until it is, the rows count ANSWERED calls at
+ *     best and are not comparable one-to-one with a transcript census of every
+ *     `tool_use` block.
+ *   - (SH-09) WHO ASKED. The PostToolUse payload measured live carries no agent
+ *     id, so a question asked inside a subagent, if that can happen, cannot be
+ *     told from one asked by the main thread. Unmeasured, and a comparability
+ *     caveat against a main-thread-only census.
+ *   - (SH-09) WHAT WAS ASKED, HOW MANY QUESTIONS A CALL CARRIED, AND WHAT THE USER
+ *     ANSWERED. None of it is recorded, on purpose.
+ *
+ * KNOWN LIMITATION (existence audit; the remedy belongs to R1, ob24-direct-hook-carrier).
+ * `lib/replay/existence-audit.js#CARRIERS.skills` is `{event:'tool.used',
+ * field:'skill'}` and its fold filters on the EVENT ONLY. So every AskUserQuestion
+ * row lands in the skills fold's `absent` bucket AND counts toward its
+ * `denominator`, and a ledger holding question rows but no Skill row reads every
+ * skill as `measured: true, fired: 0` where it used to read `unmeasured` -- the
+ * false zero that module's own header warns about. Per-skill `fired` counts are
+ * NOT affected: a row with no `skill` credits nobody. Measured by
+ * `tests/hooks/tool-used-record.test.js` ("interplay with the existence audit").
+ * The remedy is a `tool === 'Skill'` scope on that carrier; it is not made here
+ * because that module is not this limb's.
  *
  * @module scripts/hooks/tool-used-record
  */
@@ -108,8 +192,21 @@ import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry } from './_main-entry.js';
 
-/** The one tool this hook answers to. Compared with `===`, never a prefix. */
+/** The Skill tool: the first tool this writer recorded (Wave 11, SH-29). */
 export const SKILL_TOOL = 'Skill';
+
+/** The question tool: the second, added for SH-09 (2026-09-29). */
+export const ASK_USER_QUESTION_TOOL = 'AskUserQuestion';
+
+/**
+ * The tools this writer records: an ALLOWLIST matched by exact string, never a
+ * prefix, a case fold or a wildcard. Frozen so nothing can widen it at runtime;
+ * widening it is a reviewed edit here AND to the `tools` list of the
+ * `tool-used-record` row in `hooks/dispatch-table.json`.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+export const RECORDED_TOOLS = Object.freeze([SKILL_TOOL, ASK_USER_QUESTION_TOOL]);
 
 /** The registered event this hook writes. */
 export const TOOL_USED_EVENT = 'tool.used';
@@ -163,6 +260,10 @@ function durationMs(value) {
  * non-boolean `success` means the host said nothing about failure, which is
  * not the same statement as a failure and must not be spelled like one.
  *
+ * For AskUserQuestion (SH-09) the key itself is NOT measured -- the documented
+ * response has none -- so a normal row lands on this default. `true` there says
+ * only that PostToolUse fired, not that anything was answered.
+ *
  * @param {unknown} toolResponse `payload.tool_response`
  * @returns {boolean}
  */
@@ -194,7 +295,8 @@ export function resolveMissionId(hookData, sessionId) {
 }
 
 /**
- * Build the ledger envelope for one Skill tool call. PURE: no I/O, no append.
+ * Build the ledger envelope for one call of a recorded tool (`RECORDED_TOOLS`:
+ * Skill, AskUserQuestion). PURE: no I/O, no append.
  *
  * Returns null — rather than a half-envelope — whenever the payload cannot
  * produce a row the writer would accept, so the caller has one branch instead
@@ -207,7 +309,7 @@ export function buildToolUsedEnvelope(hookData) {
   if (!hookData || typeof hookData !== 'object' || Array.isArray(hookData)) return null;
   // `tool` is the legacy alias; tool-tracker.js reads both and so does this.
   const toolName = str(hookData.tool_name) ?? str(hookData.tool);
-  if (toolName !== SKILL_TOOL) return null;
+  if (toolName === null || !RECORDED_TOOLS.includes(toolName)) return null;
 
   const sessionId = str(hookData.session_id) ?? str(hookData.sessionId);
   if (sessionId === null) return null;
@@ -220,7 +322,7 @@ export function buildToolUsedEnvelope(hookData) {
     mission_id: missionId,
     source: LEDGER_SOURCE,
     data: {
-      tool: SKILL_TOOL,
+      tool: toolName,
       ok: okFlag(hookData.tool_response),
       duration_ms: durationMs(hookData.duration_ms),
     },
@@ -230,8 +332,12 @@ export function buildToolUsedEnvelope(hookData) {
   // rather than losing the whole row to a correlation key it never had.
   const actionId = str(hookData.tool_use_id);
   if (actionId !== null) envelope.action_id = actionId;
-  const skill = str(hookData.tool_input?.skill);
-  if (skill !== null) envelope.data.skill = skill.trim();
+  // ONLY A SKILL CALL HAS A SKILL TO NAME. A `tool_input.skill` on a question
+  // payload (crafted, or a host quirk) must not mint a skill firing.
+  if (toolName === SKILL_TOOL) {
+    const skill = str(hookData.tool_input?.skill);
+    if (skill !== null) envelope.data.skill = skill.trim();
+  }
   return envelope;
 }
 
