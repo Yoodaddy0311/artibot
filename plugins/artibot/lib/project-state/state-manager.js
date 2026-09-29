@@ -123,12 +123,12 @@ export const CAS_SKIPPED_WARNING = 'cas:skipped';
  *
  * An ALLOWLIST, checked at construction: `'hook'` is what
  * `lib/runtime/middleware/tasks.js#openMissionStore` passes from inside the
- * UserPromptSubmit pipeline, and `'supervisor'` is the default the `/split`
- * task feed spells out. Each value has its own literal envelope in
- * {@link stateUpdatedEnvelope}, which is what lets the hook-emitter gate read
- * this emitter's source statically instead of listing it as a scanner
- * exception (SH-30). A value added here without a branch there is refused at
- * emit time rather than written under a source nobody classified.
+ * UserPromptSubmit pipeline; `'supervisor'` is what a store gets when its
+ * opener names NO source (the `/split` task feed spells it out). A HOOK must
+ * never take that default — it would be recorded as a supervisor — so the
+ * hook-emitter gate pins every hook-reachable opener to `source: 'hook'`.
+ * Each value has its own literal envelope in {@link stateUpdatedEnvelope} (SH-30):
+ * one added here without a branch there is refused at emit time, not written.
  */
 export const STATE_UPDATED_SOURCES = Object.freeze(['hook', 'supervisor']);
 
@@ -204,8 +204,8 @@ export {
  *   "unresolved", which selects the reported fallback.
  * @property {string} [project] - Project name; defaults to the basename of `projectRoot`.
  * @property {() => Date} [now] - Clock port.
- * @property {string} [source='supervisor'] - Ledger envelope `source`; one of
- *   {@link STATE_UPDATED_SOURCES}, anything else throws.
+ * @property {string} [source='supervisor'] - Ledger envelope `source`, one of {@link STATE_UPDATED_SOURCES}
+ *   (anything else throws). The default is NOT for hooks: a hook opener passes `'hook'`.
  * @property {boolean} [renderProjectionFile=true] - Write `.artibot/state.yaml` after commits.
  */
 
