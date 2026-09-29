@@ -132,13 +132,18 @@ export const MAX_REBUILDS = 1;
  * it, i.e. (1 + maxRebuilds) green waits at the effective ceiling, never below
  * `DEFAULT_STALE_MS`. 120 min with the defaults.
  *
- * The lock is not refreshed while held, and staleness is judged by the NEXT
- * acquirer against its own `staleMs`; the 30-minute default is shorter than the
- * 40-minute worst case of two 20-minute waits, so a second landing could take
- * the lock from a live one mid-wait. On the same host a dead holder pid is
- * still reclaimed at once — the longer TTL only lengthens the wait after a
- * crash on another host. An older `landBatch` acquiring with the default is
- * not covered: the TTL lives in the acquirer, not in the record.
+ * The lock is not refreshed while held; the NEXT acquirer judges its age
+ * against the longer of its own `staleMs` and the one this value writes into
+ * the record (`landing-lock.js#acquireLandingLock`). The 30-minute default is
+ * shorter than the 40-minute worst case of two 20-minute waits, so without the
+ * record's TTL a second landing could take the lock from a live one mid-wait.
+ * Because the TTL travels in the record, an acquirer that runs THIS
+ * `landing-lock.js` is held off even when it passes the default (a script, a
+ * caller without `wait`). An older plugin copy is not: it imports its own older
+ * `landing-lock.js`, which ignores `record.staleMs` and judges by its own TTL
+ * alone — as does this module for a record written before the field existed.
+ * On the same host a dead holder pid is still reclaimed at once — the longer
+ * TTL only lengthens the wait after a crash on another host.
  *
  * @param {{attempts?:number, pollMs?:number}} [wait]  - Same shape as `landBatch`'s `p.wait`
  * @param {number} [maxRebuilds=MAX_REBUILDS]
@@ -323,20 +328,35 @@ export async function waitForGreen(sha, opts) {
 }
 
 /**
+ * Kill budget for one `gh api …/check-runs` call. `spawnSync` blocks the whole
+ * process, so without a bound one hung `gh` (network stall, auth prompt) held
+ * the landing — and its lock — forever. Below the 15s poll interval, so a
+ * hung call costs at most one extra interval; far above one REST GET plus `gh`
+ * start-up. A timeout reads as a failed fetch: null, the next poll. Every
+ * call hanging stretches one default wait to 80 × (15s + 10s) ≈ 33 min, still
+ * inside `landingLockStaleMs()` (120 min for two waits).
+ */
+export const GH_CHECK_RUNS_TIMEOUT_MS = 10_000;
+
+/**
  * Default check-run source: `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`.
  * Untested against the live API in this module's own suite — the suite injects
- * a fake fetcher. Returns null on any failure so `waitForGreen` keeps polling.
+ * a fake fetcher, or a fake `spawn` here. Returns null on any failure,
+ * including a timeout, so `waitForGreen` keeps polling and never reads a killed
+ * call as green.
  *
- * @param {{repo: string, cwd?: string}} p  - `repo` as `owner/name`
+ * @param {{repo: string, cwd?: string, spawn?: typeof spawnSync, timeoutMs?: number}} p
+ *   `repo` as `owner/name`; `spawn` and `timeoutMs` are test seams
  * @returns {(sha:string) => Promise<object|null>}
  */
-export function makeGhCheckRunsFetcher({ repo, cwd }) {
+export function makeGhCheckRunsFetcher({ repo, cwd, spawn = spawnSync, timeoutMs = GH_CHECK_RUNS_TIMEOUT_MS }) {
   return async (sha) => {
-    const r = spawnSync('gh', ['api', `repos/${repo}/commits/${sha}/check-runs`], {
+    const r = spawn('gh', ['api', `repos/${repo}/commits/${sha}/check-runs`], {
       cwd,
       encoding: 'utf-8',
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
+      timeout: timeoutMs,
     });
     if (r.error || r.status !== 0) return null;
     try {

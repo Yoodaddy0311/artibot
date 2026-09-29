@@ -27,7 +27,7 @@
  *     contexts are branch-protection behaviour on the live remote; a bare
  *     local remote accepts any fast-forward. The `gh api` check-run fetcher
  *     (`makeGhCheckRunsFetcher`) is never called here.
- *   - **The 10-minute ceiling as wall-clock.** `pollMs:0` and an injected
+ *   - **The 20-minute ceiling as wall-clock.** `pollMs:0` and an injected
  *     `sleep` make the loop instant; only the attempt count is exercised.
  *   - **PID liveness across hosts.** Stale reclaim by dead PID is only
  *     attempted for a holder on the same hostname; a foreign-host record is
@@ -361,7 +361,7 @@ describe('waitForGreen (port of release.yml wait_for_green)', () => {
 //       the global 30_000.
 //
 // What these tests prove is serialization and rebase correctness; the
-// 10-minute poll ceiling is explicitly NOT wall-clock here (`pollMs: 0` +
+// 20-minute poll ceiling is explicitly NOT wall-clock here (`pollMs: 0` +
 // injected `sleep`, see the module header). No assertion is weakened and the
 // global `testTimeout` in vitest.config.js stays at 30_000 — only the deadline
 // for this suite's process spawning moves.

@@ -24,7 +24,8 @@
  * ── What this suite cannot see (rules §9) ───────────────────────────────────
  *   - **A real remote.** A bare local remote has no branch protection, no
  *     `strict:true`, no required contexts; it accepts any fast-forward. CI is
- *     an injected fake, `makeGhCheckRunsFetcher` is never called.
+ *     an injected fake. `makeGhCheckRunsFetcher` is called only with a fake
+ *     `spawn`; the real `gh` is never started.
  *   - **A real concurrent writer.** Case (c) simulates the race by moving the
  *     remote ref from inside an `exec` wrapper, in-process and strictly ordered
  *     between our tip read and our push. It proves the lease *value* is
@@ -37,14 +38,16 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  GH_CHECK_RUNS_TIMEOUT_MS,
   integrationBranchName,
   landBatch,
   landingLockStaleMs,
+  makeGhCheckRunsFetcher,
   MAX_REBUILDS,
   WAIT_FOR_GREEN_ATTEMPTS,
   WAIT_FOR_GREEN_POLL_MS,
@@ -329,11 +332,12 @@ describe('waitForGreen ceiling', () => {
 });
 
 /**
- * The landing lock must outlive the longest landing. Staleness is judged by
- * the NEXT acquirer against its own `staleMs`, and nothing refreshes the lock
+ * The landing lock must outlive the longest landing. Nothing refreshes the lock
  * while it is held, so a TTL shorter than 1 + maxRebuilds green waits lets a
  * second landing reclaim a live one mid-wait. With the 20-minute ceiling that
- * worst case is 40 min — past the 30-minute DEFAULT_STALE_MS.
+ * worst case is 40 min — past the 30-minute DEFAULT_STALE_MS. The NEXT acquirer
+ * judges age against the longer of its own `staleMs` and the holder's, which
+ * the record carries (`landing-lock.js`).
  */
 describe('landing lock staleMs', () => {
   const MIN = 60_000;
@@ -374,6 +378,103 @@ describe('landing lock staleMs', () => {
       releaseLandingLock(key, { lockDir, token: held.token });
     }
   });
+
+  // The reverse direction: the HOLDER is a landBatch (120-minute TTL in its
+  // record) and the acquirer is on the 30-minute default — a script, or any
+  // caller of THIS landing-lock.js that passes no staleMs (an older plugin copy
+  // runs its own landing-lock.js and is not covered). Before the TTL travelled
+  // in the record this reclaimed.
+  it('an acquirer on DEFAULT_STALE_MS does not reclaim a landBatch holder 45 minutes in', () => {
+    const key = buildLandingLockKey('owner/record-ttl', 'main');
+    const held = acquireLandingLock(key, {
+      lockDir, sessionId: 'landbatch-holder', staleMs: landingLockStaleMs(), now: () => Date.now() - 45 * MIN,
+    });
+    expect(held.ok).toBe(true);
+    try {
+      const r = acquireLandingLock(key, { lockDir, sessionId: 'default-acquirer' });
+      expect(r.ok).toBe(false);
+      expect(r.holder?.sessionId).toBe('landbatch-holder');
+      expect(r.holder?.staleMs).toBe(120 * MIN);
+    } finally {
+      releaseLandingLock(key, { lockDir, token: held.token });
+    }
+  });
+});
+
+/**
+ * `makeGhCheckRunsFetcher` — the `gh` call is bounded, and a bounded-out call
+ * is never green. `spawnSync` blocks the process, so a hung `gh` without a
+ * timeout held the landing (and its lock) indefinitely. The real `gh` is never
+ * started here: `spawn` is a fake, or it runs `node` in place of `gh`.
+ */
+describe('makeGhCheckRunsFetcher timeout', () => {
+  const GREEN_JSON = JSON.stringify(GREEN);
+
+  it('passes a timeout below the poll interval to spawn', async () => {
+    const calls = [];
+    const fetcher = makeGhCheckRunsFetcher({
+      repo: 'owner/repo',
+      spawn: (cmd, args, opts) => {
+        calls.push({ cmd, args, opts });
+        return { status: 0, stdout: GREEN_JSON, stderr: '' };
+      },
+    });
+    expect(await fetcher('abc')).toEqual(GREEN);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe('gh');
+    expect(calls[0].args).toEqual(['api', 'repos/owner/repo/commits/abc/check-runs']);
+    expect(calls[0].opts.timeout).toBe(GH_CHECK_RUNS_TIMEOUT_MS);
+    expect(GH_CHECK_RUNS_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(GH_CHECK_RUNS_TIMEOUT_MS).toBeLessThan(WAIT_FOR_GREEN_POLL_MS);
+  });
+
+  // The shape Node returns for a timed-out spawnSync (measured on Node 24.15
+  // with a hanging child): error.code ETIMEDOUT, status null, signal SIGTERM.
+  // Output the child printed before the kill is still in stdout — a green
+  // payload there must not be read.
+  it('a timed-out call is null (not green), even with a green payload already in stdout', async () => {
+    const timedOut = {
+      error: Object.assign(new Error('spawnSync gh ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      status: null,
+      signal: 'SIGTERM',
+      stdout: GREEN_JSON,
+      stderr: '',
+    };
+    const fetcher = makeGhCheckRunsFetcher({ repo: 'owner/repo', spawn: () => timedOut });
+    expect(await fetcher('abc')).toBeNull();
+  });
+
+  it('waitForGreen reads every timed-out poll as "not yet" and ends not-green', async () => {
+    let spawns = 0;
+    const fetcher = makeGhCheckRunsFetcher({
+      repo: 'owner/repo',
+      spawn: () => {
+        spawns += 1;
+        return { error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }), status: null, signal: 'SIGTERM', stdout: '' };
+      },
+    });
+    const r = await waitForGreen('abc', { fetchCheckRuns: fetcher, attempts: 3, pollMs: 0, sleep: async () => {} });
+    expect(r).toMatchObject({ green: false, reason: 'not green within 3 polls', polls: 3, last: null });
+    expect(spawns).toBe(3);
+  });
+
+  // A real stalled child, killed by the real spawnSync timeout. `node` stands in
+  // for `gh` (the fake spawn swaps the command and keeps the fetcher's options),
+  // and timeoutMs is 300. The child prints a GREEN payload and exits on its own
+  // after 15s, so a fetcher without a timeout fails here in bounded time (green,
+  // and slow) instead of hanging the suite — `spawnSync` blocks the worker, so
+  // vitest's own test timeout could not fire.
+  it('a real stalled child is killed at timeoutMs and reads as null, not its late green', async () => {
+    const stalledGreen = `setTimeout(() => process.stdout.write(${JSON.stringify(GREEN_JSON)}), 15000)`;
+    const fetcher = makeGhCheckRunsFetcher({
+      repo: 'owner/repo',
+      timeoutMs: 300,
+      spawn: (_cmd, _args, opts) => spawnSync(process.execPath, ['-e', stalledGreen], opts),
+    });
+    const t0 = Date.now();
+    expect(await fetcher('abc')).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  }, 30_000);
 });
 
 describe('landBatch integration branch', () => {
