@@ -352,7 +352,11 @@ describe('human.asked question_id format', () => {
  *   - every ordinary worktree file  → `{"decision":"approve"}`, exactly as before;
  *   - the same situation elsewhere  → the guard's block, exactly as before
  *     (this is what makes the approve above mean "exempt" and not "guard idle");
- *   - config that used to ride in on the substring → now the guard's block.
+ *   - config that used to ride in on the substring → now the guard's block;
+ *   - a junction to a project root reaches the REAL .mcp.json / artibot.config.json /
+ *     hooks.json → the guard's block, while the same names as the worktree's OWN
+ *     copy (source) and ordinary files behind that junction still approve;
+ *   - a relative spelling → no exemption, so the guard's ordinary check applies.
  *
  * A case counts only when the file EXISTS and the tracking file is empty: a new
  * file is approved before the exemption is consulted, and a missing tracking
@@ -363,6 +367,9 @@ describe('human.asked question_id format', () => {
  *    host spells a Windows path in a real payload (drive-letter case, short
  *    names, slash direction) is not observed; the lexical table in
  *    tests/hooks/pre-write-guard.test.js covers the spellings, not their origin.
+ *    The RELATIVE rows are constructed to pin the contract, not observed traffic:
+ *    all 47 Write/Edit block records in the central ledger (2026-09-10..29) were
+ *    absolute drive paths, and that ledger only sees blocks.
  *  - **Skipped is not passed.** The case-alias and 8.3-alias rows run on Windows
  *    only, and the 8.3 row skips itself when the volume has short names off.
  *  - **Out-of-scope paths.** A file outside cwd and the plugin root never reaches
@@ -412,13 +419,26 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
       put(path.join(root, 'plugins', 'artibot', 'lib', 'x.js'));
       put(path.join(root, '.claude', 'settings.local.json'));
       put(path.join(root, '.claude', 'rules', 'r.md'));
+      // A checkout's own plugin config: SOURCE inside a worktree, the running config in the main one.
+      put(path.join(root, 'plugins', 'artibot', 'artibot.config.json'));
+      put(path.join(root, 'plugins', 'artibot', 'hooks', 'hooks.json'));
     }
     put(path.join(proj, 'worktrees', 'limb-a', 'src', 'a.js'));
     put(path.join(shared, '.claude', 'settings.local.json'));
     put(path.join(shared, 'node_modules', 'pkg', 'index.js'));
-    // Two junctions out of the worktree. `lnk` lands INSIDE .claude config;
-    // node_modules is the shape scripts/split/worktree-setup.mjs creates.
+    // A project root elsewhere, with the real config names in it.
+    put(path.join(shared, 'root', '.mcp.json'));
+    put(path.join(shared, 'root', 'artibot.config.json'));
+    put(path.join(shared, 'root', 'plugins', 'artibot', 'hooks', 'hooks.json'));
+    put(path.join(shared, 'root', 'src', 'a.js'));
+    // Junctions out of the worktree. `lnk` and `jx` land INSIDE .claude config (`jx` sits
+    // under plugins/artibot/ so a RELATIVE spelling of it is in the guard's scope);
+    // node_modules is the shape scripts/split/worktree-setup.mjs creates; `jRoot`
+    // lands on a project root, so its .mcp.json / artibot.config.json / hooks.json
+    // are the real ones under a path that looks like worktree source.
     symlinkSync(path.join(shared, '.claude'), path.join(wt, 'lnk'), 'junction');
+    symlinkSync(path.join(shared, '.claude'), path.join(wt, 'plugins', 'artibot', 'jx'), 'junction');
+    symlinkSync(path.join(shared, 'root'), path.join(wt, 'jRoot'), 'junction');
     symlinkSync(
       path.join(shared, 'node_modules'),
       path.join(wt, 'plugins', 'artibot', 'node_modules'),
@@ -483,19 +503,33 @@ describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)
     { label: 'worktree: CLAUDE.md', checkout: 'wt', below: ['CLAUDE.md'], expectation: 'approve', tool: 'Edit' },
     { label: 'main checkout: rules markdown', checkout: 'proj', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
     { label: 'main-checkout window edits a file inside a worktree', checkout: 'proj', below: ['.claude', 'worktrees', 'limb-a', 'src', 'a.js'], expectation: 'approve', tool: 'Write' },
+    // A worktree's own copy of the plugin config is SOURCE, not the running config.
+    { label: 'worktree: its own plugins/artibot/artibot.config.json (source copy)', checkout: 'wt', below: ['plugins', 'artibot', 'artibot.config.json'], expectation: 'approve', tool: 'Edit' },
+    { label: 'worktree: its own plugins/artibot/hooks/hooks.json (source copy)', checkout: 'wt', below: ['plugins', 'artibot', 'hooks', 'hooks.json'], expectation: 'approve', tool: 'Write' },
+    // A junction to a project root keeps the old exemption for ordinary files (as node_modules does)...
+    { label: 'worktree: ordinary file behind a junction to a project root', checkout: 'wt', below: ['jRoot', 'src', 'a.js'], expectation: 'approve', tool: 'Write' },
     // ── what the narrowing removes ──────────────────────────────────────────
     { label: 'worktree: its own .claude/settings.local.json', checkout: 'wt', below: ['.claude', 'settings.local.json'], expectation: 'block', tool: 'Write' },
     { label: 'worktree: file behind a junction into .claude config', checkout: 'wt', below: ['lnk', 'settings.local.json'], expectation: 'block', tool: 'Edit' },
     { label: 'main checkout: .claude/settings.local.json', checkout: 'proj', below: ['.claude', 'settings.local.json'], expectation: 'block', tool: 'Write' },
+    // ...but not for the names it protects (review m2).
+    { label: 'worktree: .mcp.json behind a junction to a project root', checkout: 'wt', below: ['jRoot', '.mcp.json'], expectation: 'block', tool: 'Edit' },
+    { label: 'worktree: artibot.config.json behind a junction to a project root', checkout: 'wt', below: ['jRoot', 'artibot.config.json'], expectation: 'block', tool: 'Write' },
+    { label: 'worktree: hooks.json behind a junction to a project root', checkout: 'wt', below: ['jRoot', 'plugins', 'artibot', 'hooks', 'hooks.json'], expectation: 'block', tool: 'Edit' },
+    // Relative spellings get no exemption (review m1). They reach the guard's scope through
+    // `plugins/artibot/`, and the hook's cwd resolves them to real files.
+    { label: 'relative spelling: settings behind a junction', checkout: 'proj', relative: true, below: ['.claude', 'worktrees', 'limb-a', 'plugins', 'artibot', 'jx', 'settings.local.json'], expectation: 'block', tool: 'Edit' },
+    { label: 'relative spelling: an ordinary worktree file', checkout: 'proj', relative: true, below: ['.claude', 'worktrees', 'limb-a', 'plugins', 'artibot', 'lib', 'x.js'], expectation: 'block', tool: 'Write' },
     // ── controls: the guard is live, and the exemption is specific ──────────
     { label: 'CONTROL main checkout: ordinary source file', checkout: 'proj', below: ['src', 'a.js'], expectation: 'block', tool: 'Write' },
     { label: 'CONTROL look-alike worktree outside .claude/', checkout: 'proj', below: ['worktrees', 'limb-a', 'src', 'a.js'], expectation: 'block', tool: 'Edit' },
   ];
 
-  it.each(ROWS)('$label → $expectation ($tool)', ({ label, checkout, below, expectation, tool }) => {
+  it.each(ROWS)('$label → $expectation ($tool)', ({ label, checkout, below, expectation, tool, relative = false }) => {
     const { proj, wt } = makeSplitSandbox();
     const cwd = checkout === 'wt' ? wt : proj;
-    const target = path.join(cwd, ...below);
+    // A `relative` row sends the path the way a model could write it: no drive, no root.
+    const target = relative ? below.join('/') : path.join(cwd, ...below);
     const out = runGuard({ cwd, target, tool }, `${label}-${tool}`);
     expect(out.status).toBe(0);
     expect(out.stdout).toBe(expectation === 'approve' ? APPROVE : blockStdout(tool, target));

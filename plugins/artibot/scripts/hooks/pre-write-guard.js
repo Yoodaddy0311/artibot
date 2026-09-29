@@ -70,15 +70,22 @@ let exitHookInstalled = false;
 //
 // The protected basenames mirror `PROTECTED_CONFIG_BASENAMES` in
 // lib/security/human-gate-enforce.js so the gate core and this exemption agree on
-// what a config file is. tests/hooks/pre-write-guard.test.js pins the safe
+// what a config file is, plus `.mcp.json` (MCP servers are code that runs; the gate
+// core does not list it). tests/hooks/pre-write-guard.test.js pins the safe
 // direction: nothing the gate protects is ever exempt here. It walks the gate's
 // own list, so a name added there is covered without touching the test. (A name
-// listed only here would merely be stricter.) They are repeated rather than
-// imported because this hook runs on every Write/Edit and Read and stays free of
-// the gate core's module graph.
+// listed only here is merely stricter.) They are repeated rather than imported
+// because this hook runs on every Write/Edit and Read and stays free of the gate
+// core's module graph.
 //
 // FAIL CLOSED means one thing here: when in doubt there is NO exemption, and the
 // file gets the ordinary check (which a Read satisfies and one retry lifts).
+//   - Only an ABSOLUTE path can be exempt. The host's Write/Edit take an absolute
+//     file_path (all 47 Write/Edit block records in this repo's central ledger,
+//     2026-09-10..29, are absolute drive paths). A relative or drive-relative
+//     (`C:foo`) path would have to be resolved against a working directory this
+//     function cannot vouch for, so it gets none, in any spelling; nor does a
+//     Windows spelling on a POSIX host, where it is a relative filename.
 //   - Grants match EXACT lower-case names. Denial matches liberally: `.CLAUDE`,
 //     `.claude.` and `.claude ` count as `.claude` (NTFS is case-insensitive and
 //     Windows drops trailing dots and spaces), so a spelling variant can only
@@ -89,25 +96,36 @@ let exitHookInstalled = false;
 //     accepts is not exempt. A cap can only remove an exemption, never add one.
 //   - A lexical grant is re-checked against where the write would really land
 //     (see `landsInDeniedArea`): junctions, symlinks, 8.3 short names and the
-//     on-disk case are resolved by the filesystem itself.
+//     on-disk case are resolved by the filesystem itself. A landing in a `.claude`
+//     area off the allowlist, or on a protected name outside every worktree (a
+//     junction to the project root puts the real .mcp.json, artibot.config.json or
+//     hooks.json under a worktree-looking path), revokes the grant.
 //
 // What this does NOT see: a hard link; a bind or network mount; a target swapped
 // between this check and the write; the host's own path normalisation if it
-// differs from Node's; a relative path's real landing (Write/Edit send absolute
-// paths, so a relative one is judged by its spelling alone); `CLAUDE_PLUGIN_ROOT`
-// as a protected location (the gate core also protects config basenames under it,
-// which matters for a `--plugin-dir` dev install running its hooks.json from a
-// worktree; this function does not read the environment, so there that worktree's
-// own hooks.json stays exempt HERE, and only here); and the gate itself: WBR is
-// not a human gate (a Read satisfies it, one retry lifts it). Enforcement for
+// differs from Node's; a Windows path with a root but no drive (`\x`, `/x`),
+// which Node calls absolute and which is resolved against the hook's current
+// drive (the host sends drive-qualified paths, 47 of 47 in that ledger; requiring
+// a drive would be one line here but flips every POSIX-spelled fixture on
+// Windows); `CLAUDE_PLUGIN_ROOT` as a protected location (the gate
+// core also protects config basenames under it, which matters for a
+// `--plugin-dir` dev install running its hooks.json from a worktree; this
+// function does not read the environment, so there that worktree's own
+// hooks.json stays exempt HERE, and only here); and the gate itself: WBR is not a
+// human gate (a Read satisfies it, one retry lifts it). Enforcement for
 // HG-12/HG-13 is CA-04 L2.
 
 /** `.claude` subdirectories holding prose the model edits routinely. */
 const CLAUDE_PROSE_DIRS = new Set(['rules', 'agents', 'commands', 'skills']);
 
-/** Config basenames (lower case) that never ride in on a prose directory. */
+/**
+ * Config basenames (lower case) that never ride in on a prose directory and that a
+ * redirect may not land on (see `landsInDeniedArea`): the gate core's five, plus
+ * `.mcp.json`, which defines MCP servers (code that runs) and is not in its list.
+ */
 const CLAUDE_CONFIG_BASENAMES = new Set([
   'settings.json', 'settings.local.json', 'hooks.json', 'dispatch-table.json', 'artibot.config.json',
+  '.mcp.json',
 ]);
 
 /** Longest path considered (Linux PATH_MAX). Longer is simply not exempt. */
@@ -240,14 +258,14 @@ function entryExistsOrUnknown(name) {
  * Where a write to `filePath` would really land, as the filesystem resolves it:
  * junctions and symlinks followed, 8.3 short names expanded, on-disk case. A path
  * that does not exist yet is resolved through its nearest existing ancestor.
+ * Only ever called with an absolute path: `isWhitelisted` refuses every other
+ * spelling first, so nothing here is resolved against the hook's working directory.
  *
- * @param {string} filePath
- * @returns {string|null|undefined} the landing path; `null` when it cannot be
- *   established (unexpected error, dangling link, too many missing components);
- *   `undefined` when there is nothing to resolve against (a relative path)
+ * @param {string} filePath - absolute
+ * @returns {string|null} the landing path; `null` when it cannot be established
+ *   (unexpected error, dangling link, too many missing components)
  */
 function resolveLandingPath(filePath) {
-  if (!path.isAbsolute(filePath)) return undefined;
   const missing = [];
   let head = filePath;
   while (missing.length <= MAX_MISSING_COMPONENTS) {
@@ -268,17 +286,27 @@ function resolveLandingPath(filePath) {
 
 /**
  * True when the write would land somewhere the allowlist does not exempt, or
- * where it lands cannot be established. Only a landing in a `.claude` area off
- * the allowlist counts: a junction that leaves the worktree WITHOUT entering
- * `.claude` (worktree-setup.mjs links node_modules that way) keeps its exemption,
- * which is what the old rule gave it.
+ * where it lands cannot be established. Two landings revoke a lexical grant:
+ *   - inside a `.claude` area off the allowlist (DENIED); and
+ *   - on a protected config name in a place that is neither a worktree nor an
+ *     allowed area (PLAIN). A junction to the project root is how a path that
+ *     looks like worktree source reaches the real .mcp.json, artibot.config.json
+ *     or hooks.json. A worktree's OWN copy of those names lands inside the
+ *     worktree (EXEMPT), is source, and keeps its exemption.
+ * Any other landing keeps the grant: a junction that leaves the worktree without
+ * entering `.claude` (worktree-setup.mjs links node_modules that way) is what the
+ * old rule exempted too. (Consequence, fail-closed: a worktree directory whose
+ * REAL location is outside `.claude/worktrees/` loses the exemption for the
+ * protected names, and only those.)
  */
 function landsInDeniedArea(filePath) {
   const landing = resolveLandingPath(filePath);
-  if (landing === undefined) return false;
   if (landing === null) return true;
   const segments = toSegments(landing);
-  return segments === null || verdictFor(landing, segments) === DENIED;
+  if (segments === null || segments.length === 0) return true;
+  const verdict = verdictFor(landing, segments);
+  if (verdict === DENIED) return true;
+  return verdict === PLAIN && CLAUDE_CONFIG_BASENAMES.has(comparable(segments[segments.length - 1]));
 }
 
 /**
@@ -291,6 +319,9 @@ function landsInDeniedArea(filePath) {
 export function isWhitelisted(filePath) {
   try {
     if (typeof filePath !== 'string' || filePath === '') return false;
+    // Only an absolute path can be exempt. A relative or drive-relative one (`C:foo`)
+    // would be resolved against a working directory this function cannot vouch for.
+    if (!path.isAbsolute(filePath)) return false;
     const segments = toSegments(filePath);
     if (segments === null || verdictFor(filePath, segments) !== EXEMPT) return false;
     return !landsInDeniedArea(filePath);

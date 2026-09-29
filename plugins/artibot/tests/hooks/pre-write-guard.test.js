@@ -866,7 +866,6 @@ describe('pre-write-guard hook', () => {
     const EXEMPT = [
       ['/project/CLAUDE.md', 'context file, any directory'],
       ['/project/CLAUDE.local.md', 'context file, any directory'],
-      ['CLAUDE.md', 'context file, relative'],
       ['/repo/.claude/CLAUDE.md', 'a context file wins even under .claude/'],
       ['/repo/.claude/worktrees/x/src/a.js', 'split worktree interior'],
       ['/repo/.claude/worktrees/x/plugins/artibot/lib/a.js', 'split worktree interior, plugin source'],
@@ -889,7 +888,6 @@ describe('pre-write-guard hook', () => {
       ['/repo/.claude/commands/go.md', 'commands'],
       ['/repo/.claude/skills/tdd/SKILL.md', 'skills'],
       ['/repo/.claude/skills/tdd/scripts/run.js', 'skills, nested'],
-      ['.claude/rules/x.md', 'relative rules path'],
       [`${DRIVE}\\Users\\me\\.claude\\rules\\artibot\\dev-protocol.md`, 'global rules, Windows'],
       [`${DRIVE}\\Users\\me\\.claude\\projects\\C--Users-me-Desktop-AI-Artibot\\memory\\MEMORY.md`, 'auto memory, the real slug shape'],
       [`${DRIVE}\\Users\\me\\Desktop\\AI\\Artibot\\.claude\\worktrees\\agent-aea30c7a065bd19ab\\plugins\\artibot\\scripts\\hooks\\pre-write-guard.js`, 'the path shape a limb window edits this very hook at'],
@@ -920,8 +918,10 @@ describe('pre-write-guard hook', () => {
       ['/repo/.claude/worktrees/x', 'the worktree directory itself, nothing inside it'],
       ['/repo/.claude/worktrees', 'no worktree name'],
       ['/repo/.claude/rules', 'the prose directory itself'],
-      // A protected basename never rides in on a prose directory.
-      ...PROTECTED_CONFIG_BASENAMES.flatMap((name) => [
+      // A protected basename never rides in on a prose directory. `.mcp.json` is not
+      // in the gate core's list; it defines MCP servers (code that runs), so this
+      // exemption protects it as well.
+      ...[...PROTECTED_CONFIG_BASENAMES, '.mcp.json'].flatMap((name) => [
         [`/repo/.claude/rules/${name}`, 'protected basename in rules'],
         [`/repo/.claude/skills/s/${name}`, 'protected basename in skills'],
         [`/repo/.claude/agents/${name.toUpperCase()}`, 'protected basename, other case'],
@@ -984,6 +984,34 @@ describe('pre-write-guard hook', () => {
       [`/${DRIVE}/repo/.claude/rules/x.md`, 'URL-style drive: a colon in a name'],
     ];
 
+    /**
+     * Not absolute on ANY host, so there is nothing to grant and no cwd-independent
+     * place to resolve a landing against: no exemption. The host's Write/Edit take
+     * an absolute file_path, and every Write/Edit block record in this repo's
+     * central ledger (47 of 47, measured 2026-09-29) is an absolute drive path. A
+     * relative one would have to be resolved against a working directory this
+     * function cannot vouch for; the drive-relative form (`C:foo`) depends on a
+     * per-drive current directory besides.
+     */
+    const NOT_ABSOLUTE = [
+      ['CLAUDE.md', 'a bare context-file name'],
+      ['./CLAUDE.md', 'a dotted context-file name'],
+      ['.claude/rules/x.md', 'relative rules path'],
+      ['src/a.js', 'an ordinary relative path'],
+      ['.claude/worktrees/wt/jPC/settings.local.json', 'relative, through a worktree marker (a junction inside it can lead anywhere)'],
+      ['.claude\\worktrees\\wt\\jPC\\settings.local.json', 'the same with backslashes'],
+      [`${DRIVE}.claude\\worktrees\\wt\\jPC\\settings.local.json`, 'drive-relative: the current directory of a drive, not a fixed place'],
+      [`${DRIVE}CLAUDE.md`, 'drive-relative context file'],
+      ['../repo/.claude/rules/x.md', 'relative, climbing out first'],
+      ['~/.claude/rules/x.md', 'home shorthand, which the host does not expand'],
+    ];
+
+    // A path spelled the Windows way (a drive letter or a backslash) is absolute
+    // only on a Windows host. On POSIX it is a relative filename, and gets no
+    // exemption; the rows that say so run on both kinds of host below.
+    const windowsSpelled = (p) => typeof p === 'string' && (p.includes('\\') || /^[A-Za-z]:/.test(p));
+    const onThisHost = (rows) => rows.filter(([p]) => process.platform === 'win32' || !windowsSpelled(p));
+
     let isWhitelisted;
     beforeEach(async () => {
       // A filesystem with no links, no aliases and nothing missing: every path is
@@ -1000,16 +1028,40 @@ describe('pre-write-guard hook', () => {
       realpathSync.native.mockReset();
     });
 
-    it.each(EXEMPT)('exempts %j (%s)', (p) => {
+    it.each(onThisHost(EXEMPT))('exempts %j (%s)', (p) => {
       expect(isWhitelisted(p)).toBe(true);
     });
 
-    it.each(NOT_EXEMPT)('does not exempt %j (%s)', (p) => {
+    it.each(onThisHost(NOT_EXEMPT))('does not exempt %j (%s)', (p) => {
       expect(isWhitelisted(p)).toBe(false);
     });
 
-    it.each(UNPARSEABLE)('fails closed on %j (%s)', (p) => {
+    it.each(onThisHost(UNPARSEABLE))('fails closed on %j (%s)', (p) => {
       expect(isWhitelisted(p)).toBe(false);
+    });
+
+    it.each(NOT_ABSOLUTE)('grants no exemption to the non-absolute %j (%s)', (p) => {
+      expect(isWhitelisted(p)).toBe(false);
+    });
+
+    it('resolves a non-absolute path against nothing: no filesystem lookup for any of them', () => {
+      realpathSync.native.mockClear();
+      lstatSync.mockClear();
+      for (const [p] of NOT_ABSOLUTE) isWhitelisted(p);
+      expect(realpathSync.native).not.toHaveBeenCalled();
+      expect(lstatSync).not.toHaveBeenCalled();
+    });
+
+    it('the non-absolute table is not vacuous: the old rule exempted most of it', () => {
+      expect(NOT_ABSOLUTE.filter(([p]) => legacyIsWhitelisted(p)).length).toBeGreaterThanOrEqual(6);
+    });
+
+    it('a Windows-spelled path is exempt only on a host that can resolve it', () => {
+      const windowsRows = EXEMPT.filter(([p]) => windowsSpelled(p));
+      expect(windowsRows.length).toBeGreaterThan(5);
+      for (const [p] of windowsRows) {
+        expect(isWhitelisted(p), p).toBe(process.platform === 'win32');
+      }
     });
 
     // One-element rows: it.each would otherwise spread the array value into arguments.
@@ -1021,7 +1073,7 @@ describe('pre-write-guard hook', () => {
     );
 
     it('NEVER exempts anything the old rule did not (the allowlist only narrows)', () => {
-      const everything = [...EXEMPT, ...NOT_EXEMPT, ...UNPARSEABLE].map(([p]) => p);
+      const everything = [...EXEMPT, ...NOT_EXEMPT, ...UNPARSEABLE, ...NOT_ABSOLUTE].map(([p]) => p);
       const widened = everything.filter((p) => isWhitelisted(p) && !legacyIsWhitelisted(p));
       expect(widened).toEqual([]);
     });
@@ -1051,17 +1103,22 @@ describe('pre-write-guard hook', () => {
         'plugins/artibot/node_modules/pkg/index.js', '.gitignore', '.github/workflows/ci.yml',
         'tests/x.test.js', 'docs/한글 문서.md', 'CLAUDE.md', '.artibot/project.md',
       ];
-      const corpus = [];
+      const everySpelling = [];
       for (const prefix of prefixes) {
         for (const name of names) {
           for (const file of files) {
             const p = `${prefix}/.claude/worktrees/${name}/${file}`;
-            corpus.push(p, toBackslashes(p));
+            everySpelling.push(p, toBackslashes(p));
           }
         }
       }
+      // A Windows spelling (drive letter or backslash) is absolute only on a Windows
+      // host; there the whole corpus applies, elsewhere the two POSIX prefixes do.
+      const windowsHost = process.platform === 'win32';
+      const corpus = everySpelling.filter((p) => windowsHost || !windowsSpelled(p));
       // Non-vacuity: the corpus is large, and the OLD rule exempted all of it.
-      expect(corpus.length).toBe(6 * 6 * 13 * 2);
+      expect(everySpelling.length).toBe(6 * 6 * 13 * 2);
+      expect(corpus.length).toBe(windowsHost ? 6 * 6 * 13 * 2 : 2 * 6 * 13);
       expect(corpus.filter((p) => !legacyIsWhitelisted(p))).toEqual([]);
       expect(corpus.filter((p) => !isWhitelisted(p))).toEqual([]);
     });
@@ -1157,6 +1214,9 @@ describe('pre-write-guard hook', () => {
       expect(note).not.toContain('무조건 승인');
       expect(note).toContain('isWhitelisted');
       expect(note).toContain('WBR');
+      // The scope clause has to match shouldEnforceGuard's Tier 2, which also
+      // takes any path containing `plugins/artibot/` (not only cwd / plugin root).
+      expect(note).toContain('plugins/artibot/');
     });
   });
 
@@ -1384,10 +1444,83 @@ describe('pre-write-guard hook', () => {
       expect(lstatSync).not.toHaveBeenCalled();
     });
 
-    it('does not follow a relative path to the filesystem (no cwd to resolve it against)', () => {
+    it('grants a non-absolute path no exemption, and does not resolve it against the hook cwd', () => {
       realpathSync.native.mockClear();
-      expect(isWhitelisted('.claude/rules/x.md')).toBe(true);
+      expect(isWhitelisted('.claude/rules/x.md')).toBe(false);
+      expect(isWhitelisted('CLAUDE.md')).toBe(false);
       expect(realpathSync.native).not.toHaveBeenCalled();
+    });
+
+    it('review m1: a relative and a drive-relative spelling of a junction into .claude config are not exempt either', () => {
+      const link = path.join(wt, 'jPC');
+      symlinkSync(path.join(shared, '.claude'), link, 'junction');
+      const repo = path.join(box, 'repo');
+      const relative = path.join('.claude', 'worktrees', 'x', 'jPC', 'settings.local.json');
+      const before = process.cwd();
+      process.chdir(repo);
+      try {
+        // The repro is real: from this cwd the relative spelling lands in the config file.
+        expect(realpathSync.native(relative))
+          .toBe(realpathSync.native(path.join(shared, '.claude', 'settings.local.json')));
+        // One file, three spellings, one answer.
+        expect(isWhitelisted(path.join(link, 'settings.local.json'))).toBe(false);
+        expect(isWhitelisted(relative)).toBe(false);
+        if (process.platform === 'win32') {
+          expect(isWhitelisted(`${path.parse(repo).root.slice(0, 2)}${relative}`)).toBe(false);
+        }
+      } finally {
+        process.chdir(before);
+      }
+    });
+
+    // A junction that leaves the worktree WITHOUT entering `.claude` keeps the old
+    // exemption (the node_modules case above). Except when it lands on a name the
+    // allowlist protects: a junction to the project root puts the real .mcp.json,
+    // artibot.config.json or hooks.json under a path that looks like worktree source.
+    describe('review m2: a junction out of the worktree that lands on a protected name', () => {
+      const PROTECTED = [...PROTECTED_CONFIG_BASENAMES, '.mcp.json'];
+      let jump;
+
+      beforeEach(() => {
+        const projectRoot = path.join(box, 'project');
+        mkdirSync(path.join(projectRoot, 'plugins', 'artibot', 'hooks'), { recursive: true });
+        mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+        writeFileSync(path.join(projectRoot, 'src', 'a.js'), '//\n');
+        writeFileSync(path.join(projectRoot, 'plugins', 'artibot', 'hooks', 'hooks.json'), '{}\n');
+        for (const name of PROTECTED) writeFileSync(path.join(projectRoot, name), '{}\n');
+        jump = path.join(wt, 'jP');
+        symlinkSync(projectRoot, jump, 'junction');
+      });
+
+      it.each(PROTECTED)('does not exempt %s behind a junction to the project root', (name) => {
+        expect(isWhitelisted(path.join(jump, name))).toBe(false);
+        // Created through the junction later: the landing name is the same.
+        expect(isWhitelisted(path.join(jump, 'made', 'later', name))).toBe(false);
+      });
+
+      it('does not exempt plugins/artibot/hooks/hooks.json behind the junction', () => {
+        expect(isWhitelisted(path.join(jump, 'plugins', 'artibot', 'hooks', 'hooks.json'))).toBe(false);
+      });
+
+      it('control: an ordinary file behind the same junction keeps the exemption', () => {
+        expect(isWhitelisted(path.join(jump, 'src', 'a.js'))).toBe(true);
+        expect(isWhitelisted(path.join(jump, 'src', 'not', 'yet.js'))).toBe(true);
+      });
+
+      it("control: a worktree's OWN copy of the same names is source and stays exempt", () => {
+        mkdirSync(path.join(wt, 'plugins', 'artibot', 'hooks'), { recursive: true });
+        writeFileSync(path.join(wt, 'plugins', 'artibot', 'hooks', 'hooks.json'), '{}\n');
+        for (const name of PROTECTED) {
+          writeFileSync(path.join(wt, name), '{}\n');
+          expect(isWhitelisted(path.join(wt, name)), name).toBe(true);
+        }
+        expect(isWhitelisted(path.join(wt, 'plugins', 'artibot', 'hooks', 'hooks.json'))).toBe(true);
+      });
+
+      it('a landing with no name at all (the root) is not exempt', () => {
+        realpathSync.native.mockImplementationOnce(() => path.parse(wt).root);
+        expect(isWhitelisted(path.join(wt, 'src', 'a.js'))).toBe(false);
+      });
     });
 
     describe.runIf(process.platform === 'win32')('Windows aliases (NTFS is case-insensitive; 8.3 names)', () => {
