@@ -257,9 +257,9 @@ describe('T-25 — ledger append', () => {
     expect(Object.keys(gate.data).sort())
       .toEqual([...GATE_CONDITIONS, 'required', 'interpretation_present'].sort());
     for (const value of Object.values(gate.data)) expect(value).toBeTypeOf('boolean');
-    // No `interpretIntent()` output exists on this path (question-gate-record.js
-    // header), and the line must say so rather than read as a full evaluation.
-    expect(gate.data.interpretation_present).toBe(false);
+    // RE-PINNED false -> true by CA-15 (intended): `recordQuestionGate` now feeds
+    // `interpretIntent()`; the real-router wiring is tasks-question-gate-inputs.test.js.
+    expect(gate.data.interpretation_present).toBe(true);
   });
 
   it('puts the gate line after the paired state.updated on a substantive prompt', async () => {
@@ -728,7 +728,7 @@ describe('CA-15 — question-gate enforcement switch', () => {
           kind: 'product_decision',
           at: 'adr_start',
           reason: 'all-conditions',
-          inputs_absent: ['interpretation'],
+          inputs_absent: [], // RE-PINNED from ['interpretation'] by CA-15: it is fed
         });
         // The status stays the SAME string — tests above pin it with toBe.
         expect(on.task.mission.question_gate).toBe('appended');
@@ -768,8 +768,8 @@ describe('CA-15 — question-gate enforcement switch', () => {
           kind: null,
           at: 'adr_start',
           reason: 'conditions-not-met',
-          // Interpretation is absent on this path today; provenance only.
-          inputs_absent: ['interpretation'],
+          // RE-PINNED by CA-15: the interpretation is fed now; provenance only.
+          inputs_absent: [],
         });
         expect(on.userPrompt).toBe(off.userPrompt);
         expect(on.messageParts).toEqual(off.messageParts);

@@ -37,6 +37,7 @@ import {
   appendQuestionGateEvent, buildQuestionGateData, INTERPRETATION_PRESENT_KEY,
 } from '../question-gate-record.js';
 import { decideQuestionGateEnforcement, readQuestionGateEnforce } from '../../planning/question-gate.js';
+import { interpretIntent } from '../../intent/interpreter.js';
 
 function makeTaskId(nowFn) {
   const now = nowFn();
@@ -385,12 +386,49 @@ function recordMissionState(state, result, nowMs, identity, deps) {
 }
 
 /**
+ * The `interpretIntent()` output for the question gate, or `null` when none
+ * could be produced.
+ *
+ * Guarded on its own rather than left to {@link recordQuestionGate}'s catch,
+ * which would drop the whole gate line, and a lost line is a hole in the SH-18
+ * denominator. `null` degrades to the record made before CA-15 fed the
+ * interpretation: `interpretation_present:false`, the honest statement that the
+ * input was not supplied, and, with the switch on, `inputs_absent:
+ * ['interpretation']`. An absent interpretation can only LOWER conditions 2 and
+ * 4, so this can never turn a block on. `interpretIntent` is pure, so this is
+ * containment (an `intent.intents` that is not iterable would throw inside it),
+ * not an expected path.
+ *
+ * @param {{prompt: string, intent: object|undefined, classification: object|undefined}} input
+ * @returns {object|null}
+ */
+function interpretForGate(input) {
+  try {
+    return interpretIntent(input);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Record the question gate's four conditions for this prompt (SH-18), as the
  * ONE `adr.question_gate_evaluated` line `lib/runtime/question-gate-record.js`
  * appends. The status is surfaced on `task.mission.question_gate` for a census;
  * the evaluated data comes back beside it so the CA-15 switch
  * ({@link questionGateFields}) decides from the SAME verdict instead
  * of evaluating the prompt a second time. With the switch off nothing reads it.
+ *
+ * INPUTS (CA-15). Two of the gate's inputs used to be missing in production
+ * (measured 2026-09-29 on the real router output). The classification is
+ * `state.context.routing` ITSELF: `router.js` spreads it in
+ * (`{ ...classification, system }`), so `routing.classification` is always
+ * undefined and the `factors.risk >= 0.5` route of condition 4 was dead. The
+ * interpretation is one `interpretIntent()` call made here, once per prompt,
+ * because nothing else in production makes it. `routing.system` is the string
+ * `'system2'`, not the number the interpreter's depth floor checks, so that
+ * floor never fires from here; depth is not a gate input. No config is passed
+ * (`question-gate-record.js`, "WHY config IS NOT FORWARDED"). Rows written
+ * before this change and rows after it are not comparable.
  *
  * WRAPPED LOCALLY even though both recorder functions promise not to throw.
  * This runs inside `recordMissionCompile`'s try, whose catch rewrites the whole
@@ -420,10 +458,14 @@ function recordMissionState(state, result, nowMs, identity, deps) {
 function recordQuestionGate(state, nowMs, identity) {
   let data = null;
   try {
+    const prompt = String(state.input?.prompt ?? '');
+    const intent = state.context?.intent;
+    const classification = state.context?.routing;
     data = buildQuestionGateData({
-      prompt: String(state.input?.prompt ?? ''),
-      intent: state.context?.intent,
-      classification: state.context?.routing?.classification,
+      prompt,
+      intent,
+      classification,
+      interpretation: interpretForGate({ prompt, intent, classification }),
     });
     return { status: appendQuestionGateEvent(identity, data, nowMs), data };
   } catch (err) {
