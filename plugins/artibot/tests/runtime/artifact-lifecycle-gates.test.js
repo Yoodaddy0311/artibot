@@ -4,9 +4,12 @@
  *
  * The other half — `unmeasuredBlocksOutcome` — is pinned in
  * `tests/runtime/artifact-lifecycle-dryrun.test.js` (the `unmeasuredBlocksOutcome
- * policy` block) and is NOT re-tested here. This file owns one question: when the
+ * policy` block) and is NOT re-tested here. This file owns two questions: when the
  * caller names which layers are required, which `verify.completed` rows may stop
- * an `outcome.md`.
+ * an `outcome.md`; and, since EC-01 (V5-BACKLOG §4-b g, 2026-09-28), WHICH RUN's
+ * rows those are - the gate judges the latest `verification_id` only, so a
+ * re-run that measured the layer reopens the gate while an UNMEASURED row inside
+ * that same run still closes it. Section 4b pins both directions.
  *
  * ── WHY THE FIXTURES COME FROM THE WRITER ──────────────────────────────────
  * The blocking rule is only as true as the row shape it reads, and the row shape
@@ -40,6 +43,7 @@ import {
   plan,
 } from '../../lib/runtime/artifact-lifecycle.js';
 import {
+  foldGateState,
   normaliseProjectMarker,
   normaliseRequiredLayers,
 } from '../../lib/runtime/artifact-lifecycle-gates.js';
@@ -77,10 +81,10 @@ function envelope(event, data, seq = 0) {
  * then one per `LAYERS` member. Statuses are the writer's UPPERCASE vocabulary
  * (`VERIFY_RESULT_BY_STATUS` :53-57).
  */
-function writerRows(statusByLayer, overallStatus) {
+function writerRows(statusByLayer, overallStatus, verificationId = VID) {
   const built = buildVerifyCompletedEvents(
     {
-      verification_id: VID,
+      verification_id: verificationId,
       status: overallStatus,
       evidence: ['E-001'],
       layers: LANDED_LAYERS.map((layer) => ({
@@ -99,13 +103,15 @@ function writerRows(statusByLayer, overallStatus) {
  * One hand-built `verify.completed`, for the shapes the writer cannot produce —
  * it always emits all three `LAYERS` rows, so "this layer was never measured"
  * has no writer spelling. Data shape copied from `verifyEventInput` :340-344.
+ * `verificationId === null` leaves the key OFF the row (a row that names no
+ * run); a string, including `''`, is written as given.
  */
-function verifyRow(result, layer) {
+function verifyRow(result, layer, verificationId = VID) {
   const data = {};
   if (layer !== undefined) data.layer = layer;
   data.result = result;
   data.evidence = ['E-001'];
-  data.verification_id = VID;
+  if (verificationId !== null) data.verification_id = verificationId;
   return envelope('verify.completed', data);
 }
 
@@ -330,6 +336,123 @@ describe('requiredLayers interaction with the rest of the policy', () => {
     const closed = runPlan(missionEvents(MIXED()));
     expect(open.findings).toEqual(closed.findings);
     expect(open.findings.map((f) => f.layer)).toEqual([LAYER_UNSPECIFIED, ...LANDED_LAYERS]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4b. EC-01 (V5-BACKLOG §4-b g) - the UNMEASURED gate judges the LATEST run
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY BOTH POLICIES ARE RUN THROUGH THE SAME CASES. The gate had TWO places that
+ * remembered an UNMEASURED row for good: the boolean `sawUnmeasured` (read when
+ * `requiredLayers` is null) and the whole-history per-layer tally (read when it
+ * is a list - which is the SHIPPED state, `artibot.config.json#review.verify`).
+ * A fix of the first alone leaves the shipped configuration exactly as stuck as
+ * before, and the null-policy cases would still pass, so every case here runs
+ * against both.
+ *
+ * WHAT THIS BLOCK CANNOT SEE: whether a live mission ever carries two ids. The
+ * ids here are hand-chosen; the id shape the writers really produce
+ * (`v1-<verdict hash>-<second stamp>`) is not re-derived.
+ */
+describe('EC-01 - the UNMEASURED gate judges the latest verification_id only', () => {
+  const EARLIER = 'v-0b1c2d';
+  const ALL = (status) => ({ deterministic: status, behavioral: status, operational: status });
+  /** One whole run, through the writer, under `verificationId` (default: the id review/mission carry). */
+  const run = (status, verificationId = VID) => writerRows(ALL(status), status, verificationId);
+
+  describe.each([
+    ['requiredLayers null (every layer counts)', {}],
+    ['requiredLayers [deterministic] (the shipped config)', { requiredLayers: ['deterministic'] }],
+  ])('%s', (_label, policy) => {
+    it('stops blocking on an earlier run\'s UNMEASURED rows once a later run measured', () => {
+      const events = missionEvents([...run('UNMEASURED', EARLIER), ...run('PASS')]);
+      expect(outcomeBlock(events, policy)).toBeUndefined();
+    });
+
+    it('still blocks on an UNMEASURED row inside the latest run, though a PASS follows it', () => {
+      // Same id on both rows: nothing supersedes the UNMEASURED one (design A27's
+      // "no green by re-running" survives WITHIN one verification).
+      const rows = [verifyRow('unmeasured', 'deterministic'), verifyRow('pass', 'deterministic')];
+      expect(outcomeBlock(missionEvents(rows), policy)).toBe(BlockCode.UNMEASURED_VERIFICATION);
+    });
+
+    it('is not hidden by an earlier measured run - the newest run decides', () => {
+      const events = missionEvents([...run('PASS', EARLIER), ...run('UNMEASURED')]);
+      expect(outcomeBlock(events, policy)).toBe(BlockCode.UNMEASURED_VERIFICATION);
+    });
+
+    it('keeps a row that names no run in scope - it cannot be shown to be superseded', () => {
+      const events = missionEvents([verifyRow('unmeasured', 'deterministic', null), ...run('PASS')]);
+      expect(outcomeBlock(events, policy)).toBe(BlockCode.UNMEASURED_VERIFICATION);
+    });
+
+    it('reads an empty-string id as no id at all', () => {
+      const events = missionEvents([verifyRow('unmeasured', 'deterministic', ''), ...run('PASS')]);
+      expect(outcomeBlock(events, policy)).toBe(BlockCode.UNMEASURED_VERIFICATION);
+    });
+
+    it('takes "latest" from append order: an earlier id appended again becomes the latest', () => {
+      const events = missionEvents([
+        ...run('UNMEASURED', EARLIER),
+        ...run('PASS'),
+        verifyRow('pass', 'deterministic', EARLIER),
+      ]);
+      expect(outcomeBlock(events, policy)).toBe(BlockCode.UNMEASURED_VERIFICATION);
+    });
+
+    it('lets unmeasuredBlocksOutcome: false keep precedence over the scoping', () => {
+      const events = missionEvents([...run('PASS', EARLIER), ...run('UNMEASURED')]);
+      expect(outcomeBlock(events, { ...policy, unmeasuredBlocksOutcome: false })).toBeUndefined();
+    });
+  });
+
+  it('opens on the live-shaped newest run (only deterministic measured) whatever came before', () => {
+    const events = missionEvents([...run('UNMEASURED', EARLIER), ...MIXED()]);
+    expect(outcomeBlock(events, { requiredLayers: ['deterministic'] })).toBeUndefined();
+    // The null policy has no required list, so the newest run's OWN UNMEASURED rows stop it.
+    expect(outcomeBlock(events, {})).toBe(BlockCode.UNMEASURED_VERIFICATION);
+  });
+
+  it('blocks a required layer the newest run did not record, though an earlier run measured it', () => {
+    // "Look only at the latest run" cuts both ways: an earlier PASS no longer
+    // stands in for a layer the newest run left out.
+    const newest = [verifyRow('pass', 'behavioral'), verifyRow('pass', 'operational')];
+    const events = missionEvents([...run('PASS', EARLIER), ...newest]);
+    expect(outcomeBlock(events, { requiredLayers: ['deterministic'] }))
+      .toBe(BlockCode.UNMEASURED_VERIFICATION);
+  });
+
+  it('keeps the observations whole-history: findings and sawUnmeasured still count every run', () => {
+    const events = missionEvents([...run('UNMEASURED', EARLIER), ...run('PASS')]);
+    const gate = foldGateState(events);
+    expect(gate.sawUnmeasured).toBe(true);
+    expect(gate.layers.get('deterministic')).toMatchObject({ pass: 1, unmeasured: 1 });
+
+    const { findings } = runPlan(events, { policy: { requiredLayers: ['deterministic'] } });
+    expect(findings.find((f) => f.layer === 'deterministic'))
+      .toMatchObject({ counts: { pass: 1, unmeasured: 1 }, total: 2 });
+  });
+
+  it('exposes which run the gate judged, with that run\'s own tally', () => {
+    const gate = foldGateState(missionEvents([...run('UNMEASURED', EARLIER), ...MIXED()]));
+    expect(gate.latestVerification.verificationId).toBe(VID);
+    expect(gate.latestVerification.layers.get('deterministic')).toMatchObject({ pass: 1, unmeasured: 0 });
+    expect(gate.latestVerification.layers.get('behavioral')).toMatchObject({ pass: 0, unmeasured: 1 });
+  });
+
+  it('judges every row when none names a run - the pre-EC-01 rule, unchanged', () => {
+    const rows = [verifyRow('unmeasured', 'deterministic', null), verifyRow('pass', 'deterministic', null)];
+    const gate = foldGateState(missionEvents(rows));
+    expect(gate.latestVerification.verificationId).toBeNull();
+    expect(gate.latestVerification.layers.get('deterministic')).toMatchObject({ pass: 1, unmeasured: 1 });
+  });
+
+  it('writes the blind spot next to the gate (rules §9)', () => {
+    const src = readFileSync(GATES_PATH, 'utf8');
+    expect(src).toMatch(/WHAT THIS GATE CANNOT SEE/);
+    expect(src).toMatch(/A ROW THAT NAMES NO RUN/);
   });
 });
 

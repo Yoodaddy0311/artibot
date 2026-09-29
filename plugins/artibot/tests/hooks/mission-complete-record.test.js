@@ -139,10 +139,13 @@ function seedMission(id = missionId, { withRow = true } = {}) {
  * WRITER. Hand-rolled envelopes would drift from the bytes production writes —
  * the overall line carries no `layer` key at all, which is exactly the fact the
  * UNMEASURED gate's per-layer rule turns on.
+ *
+ * `verificationId` defaults to the id `seedReview`/`seedArtifacts` carry; a
+ * different one seeds a run the review does not point at (EC-01 cases).
  */
-function seedVerify(id = missionId, status = 'UNMEASURED') {
+function seedVerify(id = missionId, status = 'UNMEASURED', verificationId = VERIFICATION_ID) {
   const built = buildVerifyCompletedEvents({
-    verification_id: VERIFICATION_ID,
+    verification_id: verificationId,
     status,
     evidence: [],
     layers: ['deterministic', 'behavioral', 'operational'].map((layer) => ({
@@ -483,6 +486,62 @@ describe('the write path, with the kill switch open', () => {
 
     expect(f.block).toBe('none');
     expect(f.write).toBe(WriteStatus.WRITE_DISABLED);
+    expect(existsSync(path.join(repo, '.artibot', 'missions', missionId, 'outcome.md'))).toBe(false);
+  });
+});
+
+/**
+ * EC-01 (V5-BACKLOG §4-b g, SH-02) — the UNMEASURED gate judges the LATEST
+ * verification_id, end to end through the REAL hook and the SHIPPED policy
+ * (`requiredLayers: ['deterministic']`, read by `policyFromConfig` from the
+ * sandbox config copy - not injected into `plan()` by the test).
+ *
+ * One mission, two verification runs in ledger order. The LATER run carries
+ * `VERIFICATION_ID`, which is what `review.completed`, `review.md` and the
+ * derived `mission.completed` all carry, so the three-carrier join agrees and
+ * only the UNMEASURED gate is in question. The unit matrix - both policies, ids
+ * that are missing, empty or interleaved - is in
+ * `tests/runtime/artifact-lifecycle-gates.test.js` section 4b.
+ *
+ * WHAT THIS DOES NOT PROVE (rules §9): that a LIVE mission is opened by it. The
+ * two runs here are seeded through the writer with ids chosen by hand; whether
+ * live missions carry a second, measured run is a ledger question this suite
+ * cannot answer.
+ */
+describe('EC-01 - the completion gate judges the latest verification, not the mission history', () => {
+  const EARLIER_VERIFICATION_ID = 'v1-83866286c2d8-41';
+
+  /** Two runs of ONE mission, `earlier` first; everything else passes. */
+  function seedTwoRuns(earlier, latest) {
+    seedMission();
+    seedVerify(missionId, earlier, EARLIER_VERIFICATION_ID);
+    seedVerify(missionId, latest);
+    seedReview();
+    seedArtifacts();
+    writeSandboxConfig({ enabled: true, requiredLayers: ['deterministic'] });
+  }
+
+  it('writes outcome.md after a measured re-run although an earlier run was UNMEASURED', () => {
+    seedTwoRuns('UNMEASURED', 'PASS');
+
+    const res = runHook(payload());
+
+    expect(res.status).toBe(0);
+    expect(fields(res.lines[0])).toMatchObject({
+      declared: 'new', block: 'none', write: WriteStatus.WRITTEN,
+    });
+    // The declaration carries the NEWEST id, which is the one the gate judged.
+    expect(completedLines()[0].data.verification_id).toBe(VERIFICATION_ID);
+    expect(existsSync(path.join(repo, '.artibot', 'missions', missionId, 'outcome.md'))).toBe(true);
+  });
+
+  it('still blocks when the NEWEST run is the UNMEASURED one', () => {
+    seedTwoRuns('PASS', 'UNMEASURED');
+
+    const res = runHook(payload());
+
+    expect(res.status).toBe(0);
+    expect(fields(res.lines[0]).block).toBe(BlockCode.UNMEASURED_VERIFICATION);
     expect(existsSync(path.join(repo, '.artibot', 'missions', missionId, 'outcome.md'))).toBe(false);
   });
 });
