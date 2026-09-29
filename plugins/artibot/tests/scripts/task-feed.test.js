@@ -22,7 +22,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { LIMB_LEASE_TTL_MS } from '../../lib/topology/split-task-feed.js';
-import { FEED_REASON, feedLimb, openFeedStore, sessionIdFromEnv } from '../../scripts/split/task-feed.mjs';
+import { selectMissionForSession } from '../../scripts/hooks/post-compact-rehydrate.js';
+import {
+  FEED_REASON, feedLimb, openFeedStore, resolveRunMission, selectLegacyMission, sessionIdFromEnv,
+} from '../../scripts/split/task-feed.mjs';
 
 const SESSION = 'abcd1234-ef56-7890-1234-567890abcdef';
 const MISSION = 'M-20260921-Sabcd1234';
@@ -390,5 +393,328 @@ describe('sessionIdFromEnv', () => {
     expect(sessionIdFromEnv({ CLAUDE_CODE_SESSION_ID: '' , CLAUDE_SESSION_ID: 'b' })).toBe('b');
     expect(sessionIdFromEnv({})).toBe(null);
     expect(sessionIdFromEnv(null)).toBe(null);
+  });
+});
+
+/* ══════════ SH-11 — the run-to-mission binding decides the mission, not the dispatching session ══════════
+ *
+ * Every store is a REAL `createStateStore` under the tmp root; `plan.json` and
+ * `run.json` are real files beside it. The session ids are explicit arguments
+ * throughout: the host's own id leaks into `process.env` here (measured
+ * 2026-09-21), and a test that resolved through the environment would measure
+ * whichever session runs it.
+ *
+ * WHAT THIS BLOCK CANNOT SEE: two PROCESSES racing to bind (the race below is
+ * two commits interleaved in one), and any live run — none has been bound yet.
+ */
+
+const RUN = 'split-t';
+const PLAN_RUN = { runId: RUN, ...PLAN };
+const SESSION_B = 'wxyz5678-aaaa-bbbb-cccc-dddddddddddd';
+const MISSION_B = 'M-20260921-Swxyz5678';
+const T_NOW = '2026-09-29T05:00:00.000Z';
+const T_LANE = '2026-09-29T03:00:00.000Z';
+const nowPort = () => new Date(T_NOW);
+const bindingOf = (missionId, over = {}) => ({ mission_id: missionId, run_id: RUN, generation: 1, bound_at: '2026-09-29T04:00:00.000Z', bound_by_session: SESSION, ...over });
+
+/** plan.json + run.json under the tmp root, in the canonical layout the tooling reads. */
+function seedRunFiles({ plan = PLAN_RUN, run = { runId: RUN }, binding = null } = {}) {
+  const dir = path.join(root, '.artibot', 'split');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'plan.json'), JSON.stringify({ ...plan, ...(binding ? { missionBinding: binding } : {}) }));
+  fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify(run));
+  return dir;
+}
+const planOnDisk = () => JSON.parse(fs.readFileSync(path.join(root, '.artibot', 'split', 'plan.json'), 'utf-8'));
+const bytesOf = (name) => fs.readFileSync(path.join(root, '.artibot', 'split', name));
+const nodeIn = (store, missionId, limb) => store.getTaskGraph(missionId)?.tasks.find((t) => t.id === limb);
+const feed = (store, limb, over = {}) => feedLimb(
+  { parentRoot: root, plan: PLAN_RUN, limb, sessionId: SESSION, ...over },
+  { openStore: () => store, now: nowPort },
+);
+
+describe('SH-11 T1 — two dispatches from different sessions of ONE run seed only the bound mission', () => {
+  it('binds the first dispatching session\'s mission once, and the second session reuses it', () => {
+    seedRunFiles();
+    const storeA = makeStore(SESSION);
+    seedMission(storeA, MISSION); // session A's own mission
+    seedMission(storeA, MISSION_B); // session B's own mission, present the whole time
+    const untouchedB = storeA.getTaskGraph(MISSION_B);
+
+    const a = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION, bind: true }, { openStore: () => storeA, now: nowPort });
+    expect(a).toMatchObject({ fed: true, skipped: null, missionId: MISSION, taskId: 'auth', claim: 'bound:node' });
+    expect(a.binding).toEqual({
+      status: 'created', mission_id: MISSION, run_id: RUN, generation: 1, env: { ARTIBOT_MISSION_ID: MISSION },
+    });
+    expect(planOnDisk().missionBinding).toEqual(bindingOf(MISSION, { bound_at: T_NOW }));
+
+    const storeB = makeStore(SESSION_B);
+    const b = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'billing', sessionId: SESSION_B, bind: true }, { openStore: () => storeB, now: nowPort });
+    expect(b).toMatchObject({ fed: true, missionId: MISSION, taskId: 'billing' });
+    expect(b.binding.status).toBe('reused');
+
+    // Session B's mission — the one the per-session join would have chosen — never moved.
+    expect(storeB.getTaskGraph(MISSION_B)).toEqual(untouchedB);
+    expect(storeB.getTaskGraph(MISSION_B).tasks).toEqual([]);
+    expect(storeB.getTaskGraph(MISSION).tasks.map((t) => t.id).sort()).toEqual(['auth', 'billing']);
+    // The binding record itself was not rewritten by the second session.
+    expect(planOnDisk().missionBinding.bound_by_session).toBe(SESSION);
+  });
+
+  it('I2: every limb node of the run carries the same run_id, and none was claimed', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    feed(store, 'auth', { bind: true });
+    for (const limb of ['auth', 'billing']) {
+      expect(nodeIn(store, MISSION, limb).ops.run_id).toBe(RUN);
+      expect(nodeIn(store, MISSION, limb)).toMatchObject({ status: 'queued', owner: null });
+    }
+    expect(store.getLease(MISSION, 'auth')).toBe(null);
+    expect(store.getState().task_leases[MISSION] ?? {}).toEqual({});
+  });
+
+  it('CONTROL — without a binding the SAME store still resolves through the session (F1: today\'s path, byte-identical)', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION_B);
+    seedMission(store, MISSION);
+    seedMission(store, MISSION_B);
+    const r = feed(store, 'auth', { sessionId: SESSION_B }); // no bind flag, no binding
+    expect(r).toMatchObject({ fed: true, missionId: MISSION_B, claim: 'claimed' });
+    expect(Object.hasOwn(r, 'binding')).toBe(false);
+    expect(store.getTaskGraph(MISSION).tasks).toEqual([]);
+    expect(planOnDisk().missionBinding).toBeUndefined();
+  });
+});
+
+describe('SH-11 T2 — two dated missions carrying ONE session tail resolve through the binding', () => {
+  const D1 = 'M-20260928-Sabcd1234';
+  const D2 = 'M-20260929-Sabcd1234';
+
+  it('the session selector is ambiguous for this store, and the bound feed does not care', () => {
+    seedRunFiles({ binding: bindingOf(D2) });
+    const store = makeStore(SESSION);
+    seedMission(store, D1);
+    seedMission(store, D2);
+    expect(selectMissionForSession(store.getState(), SESSION)).toEqual({ missionId: null }); // the midnight failure, reproduced
+
+    const r = feed(store, 'auth');
+    expect(r).toMatchObject({ fed: true, missionId: D2 });
+    expect(nodeIn(store, D2, 'auth').ops.run_id).toBe(RUN);
+    expect(store.getTaskGraph(D1).tasks).toEqual([]);
+  });
+
+  it('CONTROL — the same store WITHOUT a binding is refused as no-mission (the legacy fail-closed answer)', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store, D1);
+    seedMission(store, D2);
+    expect(feed(store, 'auth')).toMatchObject({ fed: false, skipped: 'no-mission' });
+    expect(feed(store, 'auth', { bind: true })).toMatchObject({ fed: false, skipped: 'no-mission' });
+    expect(planOnDisk().missionBinding).toBeUndefined();
+  });
+});
+
+describe('SH-11 T3 — a dangling binding is refused, and the feed does not fall back to the session', () => {
+  it('skips as binding-dangling even though the dispatching session owns a live mission; nothing is written', () => {
+    const GONE = 'M-20260923-Sd31ad7c0';
+    seedRunFiles({ binding: bindingOf(GONE) });
+    const store = makeStore(SESSION);
+    seedMission(store, MISSION); // the session's own live mission — the per-session join would take it
+    const version = store.getState().state_version;
+    const runBefore = bytesOf('run.json');
+
+    const r = feed(store, 'auth', { bind: true });
+    expect(r).toMatchObject({ fed: false, skipped: 'binding-dangling', missionId: GONE, claim: null });
+    expect(store.getState().state_version).toBe(version);
+    expect(store.getTaskGraph(MISSION).tasks).toEqual([]);
+    expect(bytesOf('run.json')).toEqual(runBefore);
+    expect(planOnDisk().missionBinding.mission_id).toBe(GONE);
+  });
+
+  it('a damaged binding is refused the same way, naming the field', () => {
+    seedRunFiles({ binding: bindingOf(MISSION, { generation: 0 }) });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    expect(feed(store, 'auth')).toMatchObject({ fed: false, skipped: 'binding-invalid:generation' });
+    expect(store.getTaskGraph(MISSION).tasks).toEqual([]);
+  });
+});
+
+describe('SH-11 T8 — the bound feed backfills ops from run.json once, and a repeat writes nothing', () => {
+  const lanes = { auth: { state: 'active', since: T_LANE, window: 'w-a', note: 'n-a' } };
+
+  it('attaches ops to every plan limb: the lane word wins for auth (since preserved), billing becomes pending', () => {
+    seedRunFiles({ run: { runId: RUN, lanes } });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const r = feed(store, 'auth', { bind: true });
+    expect(r.opsAttached).toEqual(['auth', 'billing']);
+    const auth = nodeIn(store, MISSION, 'auth');
+    expect(auth).toMatchObject({ status: 'executing', owner: 'auth', file_ownership: ['lib/auth/**', 'tests/auth/**'] });
+    expect(auth.ops).toEqual({ state: 'active', since: T_LANE, run_id: RUN, window: 'w-a', note: 'n-a' });
+    expect(nodeIn(store, MISSION, 'billing')).toMatchObject({ status: 'queued', ops: { state: 'pending', since: T_NOW, run_id: RUN } });
+  });
+
+  it('a second feed is idempotent: nothing added, nothing attached, no store version, no ledger row', () => {
+    seedRunFiles({ run: { runId: RUN, lanes } });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    feed(store, 'auth', { bind: true });
+    const version = store.getState().state_version;
+    const rows = ledger.length;
+
+    const again = feed(store, 'auth', { bind: true });
+    expect(again).toMatchObject({ fed: true, added: [], refreshed: [], opsAttached: [], claim: 'bound:node' });
+    expect(again.binding.status).toBe('reused');
+    expect(store.getState().state_version).toBe(version);
+    expect(ledger.length).toBe(rows);
+
+    // ...and run.json changing afterwards does NOT re-derive ops: it is a one-time backfill.
+    fs.writeFileSync(path.join(root, '.artibot', 'split', 'run.json'), JSON.stringify({ runId: RUN, lanes: { auth: { state: 'done', since: T_NOW } } }));
+    feed(store, 'auth');
+    expect(nodeIn(store, MISSION, 'auth').ops.state).toBe('active');
+    expect(store.getState().state_version).toBe(version);
+  });
+
+  it('a legacy-claimed node with no lane word is reported, not guessed at', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    expect(feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION }, { openStore: () => store }).claim).toBe('claimed'); // the legacy feed claims it
+    const r = feed(store, 'auth', { bind: true });
+    expect(r.opsSkipped).toEqual([{ limb: 'auth', reason: 'no-lane-word' }]);
+    expect(r.opsAttached).toEqual(['billing']);
+    expect(nodeIn(store, MISSION, 'auth').ops).toBeUndefined();
+    expect(nodeIn(store, MISSION, 'auth').status).toBe('claimed');
+  });
+});
+
+describe('SH-11 — when a run may be bound, and what the feed does about a limb another run owns', () => {
+  it('bind is opt-in per call: the default feed never writes a binding', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const r = feed(store, 'auth');
+    expect(r.claim).toBe('claimed');
+    expect(planOnDisk().missionBinding).toBeUndefined();
+  });
+
+  it('a request that cannot be honoured falls back to the legacy feed and says why', () => {
+    const cases = [
+      [{ plan: { limbs: PLAN.limbs } }, 'plan-run-id-missing'],
+      [{ run: { runId: 'split-zzz' } }, 'run-id-mismatch'],
+    ];
+    for (const [files, reason] of cases) {
+      fs.rmSync(path.join(root, '.artibot'), { recursive: true, force: true });
+      seedRunFiles(files);
+      const store = makeStore(SESSION);
+      seedMission(store);
+      const r = feed(store, 'auth', { bind: true, plan: files.plan ?? PLAN_RUN });
+      expect(r, reason).toMatchObject({ fed: true, claim: 'claimed', binding: { status: 'unbound', reason } });
+      expect(planOnDisk().missionBinding, reason).toBeUndefined();
+    }
+  });
+
+  it('no mission means no binding: the run is simply not flipped', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    const r = feed(store, 'auth', { bind: true });
+    expect(r).toMatchObject({ fed: false, skipped: 'no-mission' });
+    expect(planOnDisk().missionBinding).toBeUndefined();
+    expect(store.getState().active_missions).toEqual({}); // and no mission row was invented
+  });
+
+  /** A mission whose graph already holds `auth`, owned by ANOTHER run. */
+  function foreignWorld({ binding = null } = {}) {
+    const foreign = {
+      schema_version: 1, mission_id: MISSION,
+      tasks: [{ id: 'auth', mission_id: MISSION, status: 'done', owner: null, file_ownership: ['old/**'], ops: { state: 'done', since: T_LANE, run_id: 'split-other' } }],
+    };
+    seedRunFiles({ binding });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    expect(store.updateMission(MISSION, (cur) => cur, { graph: foreign, reason: 'test.foreign' }).ok).toBe(true);
+    return store;
+  }
+
+  it('I2: a run whose dispatched limb another run owns in that mission is NOT bound to it', () => {
+    const store = foreignWorld();
+    const r = feed(store, 'auth', { bind: true });
+    expect(r.binding).toEqual({ status: 'unbound', reason: 'task-run-mismatch' });
+    expect(planOnDisk().missionBinding).toBeUndefined();
+  });
+
+  it('I2: a bound run refuses that limb, and the other run\'s node is not touched', () => {
+    const store = foreignWorld({ binding: bindingOf(MISSION) });
+    const before = store.getState().state_version;
+    expect(feed(store, 'auth')).toMatchObject({ fed: false, skipped: 'task-run-mismatch', missionId: MISSION });
+    expect(store.getState().state_version).toBe(before);
+    expect(nodeIn(store, MISSION, 'auth')).toMatchObject({ status: 'done', file_ownership: ['old/**'] });
+    expect(nodeIn(store, MISSION, 'auth').ops.run_id).toBe('split-other');
+  });
+
+  it('F5: a commit landing between the read and the graph write is re-merged once, on the bound path too', () => {
+    seedRunFiles({ binding: bindingOf(MISSION) });
+    const seeder = makeStore(SESSION);
+    seedMission(seeder);
+    const a = makeStore(SESSION);
+    let raced = 0;
+    const racing = {
+      ...a,
+      updateMission: (...args) => {
+        raced += 1;
+        if (raced === 1) seeder.updateMission(MISSION, (cur) => cur, { reason: 'test.race' });
+        return a.updateMission(...args);
+      },
+    };
+    const r = feed(racing, 'auth');
+    expect(raced).toBe(2);
+    expect(r).toMatchObject({ fed: true, claim: 'bound:node' });
+    expect(nodeIn(seeder, MISSION, 'auth').ops.run_id).toBe(RUN);
+  });
+
+  it('a bound run\'s dry run and its guards are the legacy ones', () => {
+    seedRunFiles({ binding: bindingOf(MISSION) });
+    const boom = { openStore: () => { throw new Error('must not open'); } };
+    expect(feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION, dryRun: true }, boom).skipped).toBe('dry-run');
+    expect(feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: '', sessionId: SESSION }, boom).skipped).toBe('no-limb');
+  });
+});
+
+describe('SH-11 — resolveRunMission and selectLegacyMission (the one place the session selector is called)', () => {
+  it('an unbound run resolves through the session selector, exactly as before', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const state = store.getState();
+    expect(resolveRunMission({ parentRoot: root, state, sessionId: SESSION })).toEqual({ mode: 'legacy', missionId: MISSION });
+    expect(resolveRunMission({ parentRoot: root, state, sessionId: SESSION_B })).toEqual({ mode: 'legacy', missionId: null });
+    expect(selectLegacyMission(state, SESSION)).toEqual(selectMissionForSession(state, SESSION));
+  });
+
+  it('a bound run resolves to the bound mission whatever the session', () => {
+    seedRunFiles({ binding: bindingOf(MISSION_B) });
+    const store = makeStore(SESSION);
+    seedMission(store, MISSION);
+    seedMission(store, MISSION_B);
+    const state = store.getState();
+    for (const sid of [SESSION, SESSION_B, 'x', null]) {
+      const r = resolveRunMission({ parentRoot: root, state, sessionId: sid });
+      expect(r, String(sid)).toMatchObject({ mode: 'bound', missionId: MISSION_B });
+      expect(r.binding.generation).toBe(1);
+    }
+  });
+
+  it('a binding that is dangling or damaged is rejected — never legacy', () => {
+    seedRunFiles({ binding: bindingOf('M-20260901-001') });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    expect(resolveRunMission({ parentRoot: root, state: store.getState(), sessionId: SESSION }))
+      .toEqual({ mode: 'rejected', reason: 'binding-dangling', missionId: 'M-20260901-001' });
+
+    seedRunFiles({ binding: bindingOf(MISSION, { bound_at: 'yesterday' }) });
+    expect(resolveRunMission({ parentRoot: root, state: store.getState(), sessionId: SESSION }))
+      .toEqual({ mode: 'rejected', reason: 'binding-invalid:bound_at', missionId: null });
   });
 });

@@ -35,11 +35,22 @@
  * the limb, which already renews a held lease. Syncing inside `setLaneState`
  * would renew it twice per dispatch, so only `lane-state.mjs#main` calls this.
  *
+ * ── A BOUND run (SH-11) ─────────────────────────────────────────────────
+ * The mission comes from the run's binding (`task-feed.mjs#resolveRunMission`),
+ * never from the session, and a binding that cannot be honoured is a
+ * `skipped:<reason>` — not a fall back to the session. The lane write of a
+ * bound run is already ONE store commit that carries the heartbeat stamp and
+ * the release of `status`/`owner` (`lib/topology/split-state.js`), so this sync
+ * adds no second write for it: the node is already in the state a release
+ * would produce (`unchanged`), and a working state finds no lease to renew
+ * (`skipped:no-lease`, because the bound feeder never claims). What is left is
+ * hygiene — a lease taken BEFORE the run was bound is still renewed and
+ * released here, on the same terms as before.
+ *
  * @module scripts/split/lane-lease
  */
 
-import { selectMissionForSession } from '../hooks/post-compact-rehydrate.js';
-import { openFeedStore, sessionIdFromEnv } from './task-feed.mjs';
+import { openFeedStore, resolveRunMission, sessionIdFromEnv } from './task-feed.mjs';
 
 /** Ledger/journal `reason` for the store writes this module makes. */
 export const LANE_LEASE_REASON = 'split.lane-lease';
@@ -105,7 +116,9 @@ export function syncLaneLease(input, ports = {}) {
 
     const store = (ports.openStore ?? openFeedStore)(parentRoot, sid);
     const snapshot = store.getState();
-    const { missionId } = selectMissionForSession(snapshot, sid);
+    const resolved = resolveRunMission({ parentRoot, state: snapshot, sessionId: sid });
+    if (resolved.mode === 'rejected') return result(`skipped:${resolved.reason}`, resolved.missionId);
+    const { missionId } = resolved;
     // Re-checked, not trusted — see task-feed: creating the row here is the orphan.
     if (!missionId || !snapshot.active_missions?.[missionId]) return result('skipped:no-mission');
     const task = snapshot.task_graphs?.[missionId]?.tasks?.find((t) => t?.id === limb);

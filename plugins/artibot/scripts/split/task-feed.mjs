@@ -30,7 +30,16 @@
  * exists" is FALSE, which is why the row is re-checked rather than assumed.
  *
  * ── Which mission ────────────────────────────────────────────────────────
- * The one the DISPATCHING session owns, by the `-S<sid8>` tail that
+ * A run that carries a binding (`plan.json.missionBinding`, SH-11) uses the
+ * mission the binding names, whichever session dispatches — that is the whole
+ * point of the record: the per-session join seeded ONE run into two leader
+ * missions (measured 2026-09-28, 23 + 25 tasks with contradictory states) and
+ * fails outright when a session tail matches two dated missions. A binding
+ * that cannot be honoured (the mission is gone, the record is damaged) is a
+ * REJECTION — never a quiet fall back to the session.
+ *
+ * A run with NO binding is the legacy case and is unchanged: the mission the
+ * DISPATCHING session owns, by the `-S<sid8>` tail that
  * `post-compact-rehydrate.js#selectMissionForSession` already resolves
  * fail-closed (two candidates -> neither). That function is imported, not
  * re-derived: a second suffix rule would let the hook and this script disagree
@@ -38,12 +47,33 @@
  * for sessions that passed UserPromptSubmit, so a `/split` WINDOW generally has
  * none — the leader session running `dispatch` is the one that does.
  *
+ * {@link selectLegacyMission} is the ONE call site of that selector in the
+ * split tooling, and `tests/firewall/split-state-binding.test.js` pins it: the
+ * canonical (binding) code paths import it 0 times.
+ *
+ * ── Binding, and what a bound feed does differently ──────────────────────
+ * `bind: true` (`dispatch` passes it) lets the FIRST feed of a run write the
+ * binding — to the mission the legacy rule just found, and only when that mission
+ * exists (the row is a precondition, never a side effect). From then on the run
+ * is bound. A bound feed differs from a legacy one in three ways, all stated
+ * because each is a decision:
+ *  - it backfills `ops` on the run's nodes from `run.json.lanes` (once), so the
+ *    node can be the canonical "now" (`lib/topology/split-state-sources.js#attachRunOps`);
+ *  - it does NOT claim: `claimTask` sets `status: claimed` over the node's own
+ *    ops state, and the node is now the record of who holds the limb;
+ *  - it leaves a limb another run owns in that mission alone (I2) and refuses
+ *    to dispatch it (`task-run-mismatch`).
+ *
  * @module scripts/split/task-feed
  */
 
+import path from 'node:path';
+import { readRunJson } from '../../lib/git/split-run-file.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { bindRunToMission, readMissionBinding } from '../../lib/topology/split-state.js';
+import { attachRunOps, foreignRunLimbs, missionEnvFromBinding, ownsFromPlan } from '../../lib/topology/split-state-sources.js';
 import { LIMB_LEASE_TTL_MS, mergeLimbTasks } from '../../lib/topology/split-task-feed.js';
 import { TERMINAL_TASK_STATUSES } from '../../lib/project-state/validate.js';
 import { selectMissionForSession } from '../hooks/post-compact-rehydrate.js';
@@ -94,6 +124,45 @@ export function openFeedStore(projectRoot, sessionId) {
     appendEvent: (envelope) => appendLedgerEvent(projectRoot, envelope),
     resolveGitCommonDir: () => resolveGitCommonDir(projectRoot),
   });
+}
+
+/**
+ * The legacy, per-SESSION mission rule: the one mission this session owns by
+ * its `-S<sid8>` tail (two candidates -> none). Kept as a named function so it
+ * has exactly ONE call site of `selectMissionForSession` in the split tooling
+ * — `tests/firewall/split-state-binding.test.js` pins that, and pins that no
+ * canonical (binding) path imports the selector at all.
+ *
+ * @param {object} state - A StateStore snapshot.
+ * @param {string} sessionId - The dispatching session id.
+ * @returns {{ missionId: string|null, basedOn?: object }} The selector's own answer.
+ */
+export function selectLegacyMission(state, sessionId) {
+  return selectMissionForSession(state, sessionId);
+}
+
+/**
+ * Which mission a run's Task Graph writes go to.
+ *
+ *  - `bound`    the run carries a binding and its mission is in the store
+ *  - `legacy`   the run carries none: the per-session rule, unchanged
+ *  - `rejected` the run carries a binding this call cannot honour (damaged, or
+ *               its mission is gone): the caller must NOT fall back to the
+ *               session, which is exactly the join this replaces
+ *
+ * Reads plan.json / run.json (through `readMissionBinding`), so a corrupt
+ * file throws — callers are record-only and turn that into a skip.
+ *
+ * @param {{ parentRoot: string, state: object, sessionId: unknown }} p
+ * @returns {{ mode: 'bound', missionId: string, binding: Readonly<object> } | { mode: 'legacy', missionId: string|null } | { mode: 'rejected', reason: string, missionId: string|null }}
+ */
+export function resolveRunMission({ parentRoot, state, sessionId }) {
+  const probe = readMissionBinding({ runDir: path.join(parentRoot, '.artibot', 'split') });
+  if (probe.status === 'none') return { mode: 'legacy', missionId: selectLegacyMission(state, sessionId).missionId ?? null };
+  if (probe.status === 'invalid') return { mode: 'rejected', reason: probe.reason, missionId: null };
+  const missionId = probe.binding.mission_id;
+  if (!state?.active_missions?.[missionId]) return { mode: 'rejected', reason: 'binding-dangling', missionId };
+  return { mode: 'bound', missionId, binding: probe.binding };
 }
 
 /** @param {string} reason @returns {object} The skip result shape. */
@@ -184,7 +253,109 @@ function claimLimb(store, missionId, limb, task) {
 }
 
 /**
+ * The bound variant of {@link mergeAndWrite}: the same CAS-guarded merge with
+ * ONE retry, plus the backfill of `ops` on the run's own nodes.
+ *
+ * Limbs another run already owns in this mission (`ops.run_id` of a different
+ * run) are filtered OUT of the plan before the merge, so their
+ * `file_ownership` is not rewritten under them (I2), and are reported in
+ * `foreign`. A repeat feed changes nothing: the merge is unchanged and every
+ * node already has its ops, so no store commit — and no ledger row — is made.
+ *
+ * @param {object} store - StateStore.
+ * @param {object} state - The snapshot the mission was resolved from.
+ * @param {string} missionId - The bound mission.
+ * @param {object|null} plan - Parsed `plan.json`.
+ * @param {string} limb - The dispatched limb.
+ * @param {{ runId: string, lanes: unknown, now: () => Date }} run - The run's id, its run.json lanes, the clock port.
+ * @returns {{merged: object|null, attached?: object, foreign?: string[], graph?: object, commit?: object|null}}
+ *   `merged` is null when the mission was gone at the re-read.
+ */
+function mergeAndWriteBound(store, state, missionId, plan, limb, { runId, lanes, now }) {
+  const limbs = Object.keys(ownsFromPlan(plan));
+  let snapshot = state;
+  for (let attempt = 0; ; attempt += 1) {
+    if (!snapshot.active_missions?.[missionId]) return { merged: null };
+    const graph = snapshot.task_graphs?.[missionId] ?? null;
+    const foreign = foreignRunLimbs(graph, { runId, limbs });
+    const mergeable = foreign.length === 0 ? plan : { ...plan, limbs: plan.limbs.filter((l) => !foreign.includes(l?.limb)) };
+    const at = now();
+    const merged = mergeLimbTasks({ graph, plan: mergeable, missionId, now: at });
+    const attached = attachRunOps(merged.graph, { runId, limbs, lanes, nowIso: at.toISOString() });
+    const done = { merged, attached, foreign, graph: attached.graph, commit: null };
+    if (foreign.includes(limb) || (merged.unchanged && !attached.changed) || !attached.graph.tasks.some((t) => t.id === limb)) return done;
+    const commit = store.updateMission(missionId, (cur) => cur, {
+      reason: FEED_REASON, graph: attached.graph, expectedVersion: snapshot.state_version,
+    });
+    if (commit.conflict !== true || attempt >= 1) return { ...done, commit };
+    snapshot = store.getState();
+  }
+}
+
+/**
+ * First feed of a run that asked to be bound: write the binding, or say why not.
+ *
+ * Refuses to bind a run to a mission whose graph already holds the dispatched
+ * limb for ANOTHER run — the run could never write that limb there (I2), and a
+ * binding is for keeps. Everything else (`plan-run-id-missing`,
+ * `run-id-mismatch`, `plan-missing`, …) is the binder's own reason.
+ *
+ * @returns {{ record: Readonly<object>, created: boolean } | { reason: string }}
+ */
+function tryBind({ parentRoot, plan, limb, state, missionId, sid, store, now }) {
+  const runId = typeof plan?.runId === 'string' ? plan.runId : null;
+  if (runId && foreignRunLimbs(state.task_graphs?.[missionId], { runId, limbs: [limb] }).length > 0) return { reason: 'task-run-mismatch' };
+  const res = bindRunToMission({ runDir: path.join(parentRoot, '.artibot', 'split'), missionId, sessionId: sid, now, store });
+  return res.ok ? { record: res.binding, created: res.bound } : { reason: res.reason };
+}
+
+/**
+ * Feed one limb of a BOUND run: merge the plan into the bound mission's graph,
+ * attach `ops`, and stop there — there is deliberately no claim (see the
+ * module header). Returns the same result shape as the legacy feed, with
+ * `claim: 'bound:node'` and three extra keys: `binding`, `opsAttached` and,
+ * when non-empty, `opsSkipped`.
+ */
+function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, now }) {
+  const runId = binding.record.run_id;
+  const out = mergeAndWriteBound(store, state, missionId, plan, limb, { runId, lanes: readRunJson(parentRoot)?.lanes, now });
+  if (!out.merged) return { ...skipped('no-mission'), missionId };
+  if (out.foreign.includes(limb)) return { ...skipped('task-run-mismatch'), missionId };
+  if (!out.graph.tasks.some((t) => t.id === limb)) return skipped('limb-not-in-plan');
+
+  let stateVersion = state.state_version;
+  if (out.commit) {
+    if (!out.commit.ok) return { ...skipped(`graph-write-refused:${out.commit.errors?.[0] ?? 'unknown'}`), missionId };
+    stateVersion = out.commit.state_version ?? stateVersion;
+  }
+  return {
+    fed: true,
+    skipped: null,
+    missionId,
+    taskId: limb,
+    added: out.merged.added,
+    refreshed: out.merged.refreshed,
+    claim: 'bound:node',
+    stateVersion: store.getState().state_version ?? stateVersion,
+    location: store.location?.source ?? null,
+    binding: {
+      status: binding.created ? 'created' : 'reused',
+      mission_id: missionId,
+      run_id: runId,
+      generation: binding.record.generation,
+      env: missionEnvFromBinding(binding.record),
+    },
+    opsAttached: out.attached.attached,
+    ...(out.attached.skipped.length > 0 ? { opsSkipped: out.attached.skipped } : {}),
+  };
+}
+
+/**
  * Seed and claim one dispatched limb. Total — returns a result for every input.
+ *
+ * A run that carries a binding is fed through {@link feedBound} instead (no
+ * claim; see the module header). `bind: true` lets this call write the binding
+ * when the run has none and the legacy rule finds a live mission for the session.
  *
  * @param {object} params - Feed inputs.
  * @param {string} params.parentRoot - Parent (main checkout) root.
@@ -192,13 +363,15 @@ function claimLimb(store, missionId, limb, task) {
  * @param {string} params.limb - The limb being dispatched.
  * @param {boolean} [params.dryRun=false] - True writes NOTHING and opens no store.
  * @param {string|null} [params.sessionId] - Override; defaults to the host env.
- * @param {{ openStore?: Function }} [ports] - Test seam.
+ * @param {boolean} [params.bind=false] - Bind an unbound run to the mission the session owns. Off by default: only `dispatch` asks.
+ * @param {{ openStore?: Function, now?: () => Date }} [ports] - Test seam.
  * @returns {{fed: boolean, skipped: string|null, missionId: string|null, taskId: string|null,
- *   added: string[], refreshed: string[], claim: string|null, stateVersion?: number, location?: string}}
+ *   added: string[], refreshed: string[], claim: string|null, stateVersion?: number, location?: string,
+ *   binding?: object, opsAttached?: string[], opsSkipped?: object[]}} `binding` appears on a bound feed, and on a legacy feed that asked to bind and could not (`{status:'unbound', reason}`).
  * @example
  * feedLimb({ parentRoot, plan, limb: 'auth' }); // { fed: true, claim: 'claimed', ... }
  */
-export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId }, ports = {}) {
+export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId, bind = false }, ports = {}) {
   try {
     if (dryRun) return skipped('dry-run');
     if (typeof parentRoot !== 'string' || parentRoot === '') return skipped('no-project-root');
@@ -208,11 +381,23 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId }, 
 
     const store = (ports.openStore ?? openFeedStore)(parentRoot, sid);
     const state = store.getState();
-    const { missionId } = selectMissionForSession(state, sid);
+    const resolved = resolveRunMission({ parentRoot, state, sessionId: sid });
+    if (resolved.mode === 'rejected') return { ...skipped(resolved.reason), missionId: resolved.missionId };
+    const { missionId } = resolved;
     // Re-checked against the snapshot rather than trusted: the selector's
     // contract is "a mission this session owns", and creating one here is the
     // orphan this module must not make.
     if (!missionId || !state.active_missions?.[missionId]) return skipped('no-mission');
+
+    const now = ports.now ?? (() => new Date());
+    let binding = resolved.mode === 'bound' ? { record: resolved.binding, created: false } : null;
+    let unbound = null;
+    if (binding === null && bind) {
+      const attempt = tryBind({ parentRoot, plan, limb, state, missionId, sid, store, now });
+      if (attempt.record) binding = attempt;
+      else unbound = { status: 'unbound', reason: attempt.reason };
+    }
+    if (binding !== null) return feedBound({ store, state, parentRoot, plan, limb, missionId, binding, now });
 
     const { merged, commit } = mergeAndWrite(store, state, missionId, plan, limb);
     if (!merged) return skipped('no-mission');
@@ -236,6 +421,7 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId }, 
       claim,
       stateVersion: store.getState().state_version ?? stateVersion,
       location: store.location?.source ?? null,
+      ...(unbound ? { binding: unbound } : {}),
     };
   } catch (err) {
     // Including the store constructor's TypeErrors. A dispatch must not fail

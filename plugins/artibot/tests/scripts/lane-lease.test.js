@@ -27,6 +27,7 @@ import path from 'node:path';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { writeRunJson } from '../../lib/git/split-run-file.js';
 import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
+import { HEARTBEAT_OPS_STATES } from '../../lib/topology/split-state-sources.js';
 import { feedLimb, openFeedStore } from '../../scripts/split/task-feed.mjs';
 import * as laneState from '../../scripts/split/lane-state.mjs';
 import { LANE_LEASE_ACTIONS, LANE_LEASE_REASON, syncLaneLease } from '../../scripts/split/lane-lease.mjs';
@@ -364,5 +365,109 @@ describe('dispatch path stays unwired', () => {
     expect(store.getLease(MISSION, 'auth')?.owner).toBe('auth');
     expect(store.getLease(MISSION, 'auth').heartbeat_at).toBe(beat);
     expect(task(store).status).toBe('claimed');
+  });
+});
+
+/* ══════════ SH-11 — a BOUND run: the sync follows the binding and adds no second store write ══════════
+ *
+ * In a bound run the lane write is ONE store commit that already carries what
+ * the sync used to write (the heartbeat stamp, the release of `status`/`owner`),
+ * so the sync's remaining job is lease-RECORD hygiene: release a lease that was
+ * taken before the run was bound. The bound feeder never claims (`claimTask`
+ * would set `status: claimed` over the node's own ops state).
+ *
+ * WHAT THIS CANNOT SEE: a live leader session — none has run a bound lane yet.
+ */
+describe('SH-11 bound run — lease sync', () => {
+  const BOUND = { mission_id: MISSION, run_id: 'split-t', generation: 1, bound_at: '2026-09-23T00:00:00.000Z', bound_by_session: SESSION };
+  const bindPlan = (binding = BOUND) => fs.writeFileSync(path.join(root, '.artibot', 'split', 'plan.json'), JSON.stringify({ ...PLAN, missionBinding: binding }));
+  const boundCli = (store, argv) => {
+    const c = collect();
+    const code = laneState.main(argv, {
+      cwd: root, ...c.io, now: () => clock, openStore: () => store, sessionId: SESSION,
+      syncLease: (input) => syncLaneLease({ ...input, sessionId: SESSION }, { openStore: () => store }),
+    });
+    return { code, ...c };
+  };
+  const reasons = () => ledger.map((e) => e.data?.reason);
+
+  it('a lane write and its lease sync cost ONE store commit, not two', () => {
+    const store = makeStore();
+    seedMission(store);
+    bindPlan();
+    const before = updates();
+
+    const r = boundCli(store, ['auth', 'done', '--json']);
+
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout());
+    expect(out.lease).toEqual({ outcome: 'unchanged', missionId: MISSION });
+    expect(out).toMatchObject({ source: 'store', missionId: MISSION });
+    expect(updates()).toBe(before + 1);
+    expect(reasons().filter((x) => x === LANE_LEASE_REASON)).toEqual([]);
+    expect(reasons().at(-1)).toBe('split.lane-state');
+    expect(task(store)).toMatchObject({ status: 'done', owner: null });
+  });
+
+  it('a working state stamps the node in that same commit; with no lease the sync has nothing to renew', () => {
+    const store = makeStore();
+    seedMission(store);
+    bindPlan();
+    clock = new Date('2026-09-23T03:00:00.000Z');
+    const before = updates();
+
+    const r = boundCli(store, ['auth', 'active', '--json']);
+
+    expect(JSON.parse(r.stdout()).lease).toEqual({ outcome: 'skipped:no-lease', missionId: MISSION });
+    expect(updates()).toBe(before + 1);
+    expect(task(store)).toMatchObject({ status: 'executing', owner: 'auth', heartbeat_at: '2026-09-23T03:00:00.000Z', heartbeat_source: 'lane-heartbeat' });
+    expect(store.getLease(MISSION, 'auth')).toBe(null);
+  });
+
+  it('T2: two dated missions carrying the session tail still resolve, through the binding', () => {
+    const OLDER = 'M-20260922-Sabcd1234';
+    const store = makeStore();
+    seedMission(store);
+    expect(store.updateMission(OLDER, () => ({ status: 'executing', intent: { path: 'i.md', revision: 1 }, plan: { path: 'p.md', revision: 1 } }), { reason: 'test.seed' }).ok).toBe(true);
+    bindPlan();
+    expect(boundCli(store, ['auth', 'done']).code).toBe(0);
+
+    expect(sync(store, 'done')).toEqual({ outcome: 'unchanged', missionId: MISSION });
+    expect(store.getTaskGraph(OLDER).tasks).toEqual([]);
+
+    // CONTROL — the same store with the binding removed is the legacy ambiguity.
+    fs.writeFileSync(path.join(root, '.artibot', 'split', 'plan.json'), JSON.stringify(PLAN));
+    expect(sync(store, 'done')).toEqual({ outcome: 'skipped:no-mission', missionId: null });
+  });
+
+  it('T3: a dangling binding is skipped — never re-resolved through the session — and nothing is written', () => {
+    const GONE = 'M-20260901-001';
+    bindPlan({ ...BOUND, mission_id: GONE });
+    const store = makeStore();
+    seedMission(store); // the session's own live mission, which the per-session join would have used
+    const version = store.getState().state_version;
+    expect(sync(store, 'done')).toEqual({ outcome: 'skipped:binding-dangling', missionId: GONE });
+    expect(sync(store, 'active')).toEqual({ outcome: 'skipped:binding-dangling', missionId: GONE });
+    expect(store.getState().state_version).toBe(version);
+  });
+
+  it('hygiene: a lease taken BEFORE the run was bound is still released at done', () => {
+    const store = makeStore();
+    seedMission(store);
+    expect(feed(store).claim).toBe('claimed'); // the legacy feed: lease held, status claimed, no ops
+    bindPlan();
+    expect(store.getLease(MISSION, 'auth')?.owner).toBe('auth');
+
+    const r = boundCli(store, ['auth', 'done', '--json']);
+
+    expect(JSON.parse(r.stdout()).lease).toEqual({ outcome: 'released:done', missionId: MISSION });
+    expect(store.getLease(MISSION, 'auth')).toBe(null);
+    expect(task(store)).toMatchObject({ status: 'done', owner: null });
+    expect(task(store).ops.state).toBe('done');
+  });
+
+  it('HEARTBEAT_OPS_STATES (the writer\'s list) is the same set of words LANE_LEASE_ACTIONS calls heartbeat', () => {
+    const heartbeat = Object.keys(LANE_LEASE_ACTIONS).filter((s) => LANE_LEASE_ACTIONS[s] === 'heartbeat');
+    expect([...HEARTBEAT_OPS_STATES].sort()).toEqual(heartbeat.sort());
   });
 });

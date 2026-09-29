@@ -405,7 +405,7 @@ const INVENTORY = {
   'runtime/artifact-lifecycle.js': k('mission-artifact store; computeIdempotencyKey plus a seen-key set.'),
   'runtime/human-asked-record.js': k('run ledger human.asked (<event>:<session>:<question_id>) and human.resolved (+ a 12-hex digest of the decision, so a changed answer is a new fact); two key builders. SH-14, 2026-09-23.'),
   'runtime/middleware/mission-ledger.js': k('run ledger mission.created / mission.candidate_deferred (event name resolved at runtime via LEDGER_EVENT_BY_COMPILER_NAME); key from missionEventIdempotencyKey (<event>:<mission_id>:<prompt_id>:<digest16 of data>) - the host prompt_id separates two prompts of one session-day mission and repeats on a hook re-fire; omitted without a usable prompt_id (absent, empty, non-string or over 128 chars). SH-14, 2026-09-28.'),
-  'topology/split-state.js': k('run ledger worker.claimed / task.released; key from workerTransitionIdempotencyKey (<event>:<runId>:<worker>:<from-ops>:<to-ops>:<from-since>) - the LEFT state\'s stored since, stable across a retry; omitted without a run id. SH-14, 2026-09-23.'),
+  'topology/split-state.js': k('run ledger worker.claimed / task.released; key from workerTransitionIdempotencyKey (<event>:<runId>:<worker>:<from-ops>:<to-ops>:<from-since>) - the LEFT state\'s stored since (run.json lanes[w].since for an unbound run, the node\'s task.ops.since for a bound one), stable across a retry; omitted without a run id. SH-14, 2026-09-23; bound source SH-11, 2026-09-29.'),
   'verification/verify-writer.js': k('run ledger verify.completed; key from verifyCompletedIdempotencyKey.'),
 
   // --- run-ledger writers with no key: defect candidates --------------------

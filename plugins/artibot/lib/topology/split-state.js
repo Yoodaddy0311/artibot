@@ -9,11 +9,11 @@
  *      It EXISTS (`lib/project-state/state-manager.js#createStateStore`, with
  *      production consumers in `lib/runtime/middleware/tasks.js`,
  *      `scripts/checkpoint/resume-report.mjs` and
- *      `scripts/hooks/post-compact-rehydrate.js`). What does not exist is a
- *      route from HERE to it: it is reached only through an injected port and
- *      no production caller injects one, so this source contributes nothing
- *      today. Read-path evidence against a real store lives in
- *      `tests/topology/split-state-sources.test.js`.
+ *      `scripts/hooks/post-compact-rehydrate.js`). It is reached from here
+ *      only through an injected port, and only for a run that carries a
+ *      `missionBinding` (SH-11, below); for every other run this source
+ *      contributes nothing, exactly as before. Read-path evidence against a
+ *      real store lives in `tests/topology/split-state-sources.test.js`.
  *   2. `<runDir>/run.json.lanes[limb]`      — the leader's operational state,
  *      written by `scripts/split/lane-state.mjs` in the ops vocabulary.
  *   3. the supervisor event stream          — `{runId}.state.json` lanes, a
@@ -25,14 +25,29 @@
  * and records disagreements instead of hiding them. `conflicts[]` is evidence,
  * never a verdict — this module never decides which source is right.
  *
- * Writing is narrower than reading: {@link writeWorkerState} writes exactly
- * ONE place, `run.json.lanes[worker]`, stamped `projected_from: 'run.json'`.
- * The design has the write target eventually flipping to the StateStore, with
- * `run.json.lanes` becoming the projection — the direction reverses, the
- * "exactly one writer" rule does not. That flip is BLOCKED today, on three
- * prerequisites none of which live in this file; they are listed under "WHAT
- * THIS MODULE DOES NOT DO" below so the next planner does not re-issue it as
- * though it were a local change.
+ * Writing is narrower than reading: {@link writeWorkerState} has exactly ONE
+ * canonical destination per run. An UNBOUND run writes `run.json.lanes[worker]`,
+ * stamped `projected_from: 'run.json'`. A BOUND run — one whose `plan.json`
+ * carries a `missionBinding` — writes the limb's Task Graph node in the bound
+ * mission and only then rewrites `run.json.lanes[worker]` from it, stamped
+ * `projected_from: 'store'`: the direction the design asked for
+ * (`run.json.lanes` becomes the projection), with the "exactly one writer" rule
+ * intact.
+ *
+ * ── SH-11: the flip, per run, opt-in by a record ────────────────────────────
+ * Three things blocked the flip; none lives here, and each is now written:
+ *  1. the run-to-mission BINDING — `plan.json.missionBinding`
+ *     ({@link bindRunToMission}, {@link readMissionBinding}); the invariants
+ *     I1–I4 are listed above `probeBinding`;
+ *  2. a home for the ops keys — the closed `ops` object on the Task Graph node
+ *     (`schemas/task-graph.schema.json`), with `ops.state` ↔ `status` (B1),
+ *     the blocked-reason rules (B2) and `ops.since` (B3) enforced by
+ *     `planBoundNode` in the sibling module;
+ *  3. the caller wiring — `scripts/split/lane-state.mjs` and `dispatch.mjs`
+ *     open a store (`task-feed.mjs#openFeedStore`) and inject it.
+ * A run with no binding is not touched: {@link writeWorkerState} takes exactly
+ * the code it took before. A run whose binding cannot be honoured is REFUSED
+ * (`{ok:false, reason}`), never quietly written to `run.json`.
  *
  * The record vocabulary is v1.1's (`V11_STATUSES`: the seven worker statuses
  * plus `failed`); ops and lane words are converted on the way in through the
@@ -44,56 +59,35 @@
  *
  * ── WHAT THIS MODULE DOES NOT DO (write it next to the gate, rules §9) ─────
  *  - It does not talk to the StateStore, the event log, or git. All three are
- *    injected ports. Nothing here proves those readers work in production;
- *    today exactly zero production callers pass any of them — this module is
- *    written ahead of its consumers. The one production caller of the write
- *    is `scripts/split/lane-state.mjs`, and it passes runDir, worker, patch
- *    and now — no ledger port, no store port. The read has no production
- *    caller at all.
- *  - It does not write to the StateStore, and CANNOT today. Three things
- *    block it — TWO UNWRITTEN CONTRACTS and ONE UNWIRED CALLER, which are not
- *    the same kind of obstacle — all of them outside this module and outside
- *    `lib/topology`:
- *      1. CONTRACT MISSING — NO RUN-TO-MISSION BINDING. A store write is addressed by an
- *         `M-YYYYMMDD-…` mission id (`lib/project-state/validate.js#MISSION_ID_PATTERN`).
- *         A `/split` run is identified by a run id and a limb name; nothing
- *         maps one to the other, and inventing a mapping here would make this
- *         file the authority on an identity it does not own.
- *      2. CONTRACT MISSING — NOWHERE TO PUT THE OPS KEYS. A worker row is a
- *         five-field projection of ONE task (`lib/project-state/projection.js#projectWorker`:
- *         status, owns, heartbeat_at, heartbeat_source, blocked_by), and the
- *         TASK schema closes its object (`schemas/task-graph.schema.json`,
- *         `additionalProperties: false`). `state`, `since`, `window`, `note`
- *         and `projected_from` have no home there, and making one means
- *         changing TWO places: that task node AND `projectWorker`'s field
- *         list. Note which place is NOT the obstacle — the `state.yaml`
- *         worker-row schema is already open (`project-state.schema.json`
- *         leaves a `worker` entry unrestricted, pinned by
- *         `tests/schemas/state-task-lease.test.js`), which is why
- *         `projectWorker` can omit a field rather than emit null.
- *         Measured, not argued: an extra task key passes the RUNTIME
- *         validator and PERSISTS in the Task Graph; only the projection drops
- *         it — see the probe in `tests/topology/split-state-sources.test.js`.
- *      3. WIRING MISSING (NOT a contract) — THE CALLER BUILDS NO STORE.
- *         `createStateStore` requires an `appendEvent` port and a `sessionId`,
- *         and the one production caller of the write,
- *         `scripts/split/lane-state.mjs`, supplies neither. That contract IS
- *         written and has a working precedent:
- *         `lib/runtime/middleware/tasks.js#openMissionStore` binds a real
- *         ledger append port together with a session id, while
- *         `scripts/checkpoint/resume-report.mjs` and
- *         `scripts/hooks/post-compact-rehydrate.js` open read-only stores with
- *         a constant session id and a deliberately REFUSING port. So this one
- *         is unwired, not undefined. Whether a `/split` CLI can obtain a
- *         session id in its own context is unverified here.
- *    Two further traps a future port must handle, both pinned by that test
- *    file: the row KEY is the task's OWNER when that owner holds exactly one
- *    task in the mission (so a lookup by limb name can miss), and the store
- *    refuses a `blocked_by` reason outside the `lane|gate|human|reconcile`
- *    allowlist that `split-state-sources.js#stringList` accepts today.
- *    No `storeWriter` port is added for this: a second zero-consumer
- *    interface guessing at contracts nobody has written is the defect, not
- *    the fix.
+ *    injected ports (`store` / `openStore`, `appendEvent`, `commitReader`).
+ *    The write's production caller is `scripts/split/lane-state.mjs`
+ *    (`dispatch.mjs` through it); it injects a store, lazily, and no ledger
+ *    port — a bound write's `worker.claimed` / `task.released` therefore still
+ *    skips as `skipped:no-port` / `skipped:missing:<key>`, and the store's own
+ *    `state.updated` is the only line a bound lane write adds to the ledger.
+ *    The read has no production caller at all: no CLI, hook or middleware calls
+ *    `readWorkerState`, so "canonical reads take the store from the binding" is
+ *    measured by `tests/topology/split-state.test.js`, not by live traffic.
+ *    Whether the leader's `lane-state` child process sees the session id the
+ *    store needs is a host fact — measured for a Bash tool call on 2026-09-21
+ *    (Wave 16), not re-measured for this path.
+ *  - It does not create a mission row, ever. A bound run whose mission is gone
+ *    is refused (`binding-dangling`); there is no implicit reseed into another
+ *    mission. The HANDOFF the binding's invariant I4 reserves `generation` for
+ *    (an explicit write: copy the run's limb nodes into a new mission, bump the
+ *    generation, leave `blockers: ['reconcile:run-moved']` on the old mission)
+ *    is NOT implemented: `generation` is 1 for every binding this module writes.
+ *    Until it exists, the way out of a mission that is gone is a deliberate,
+ *    human act — remove `missionBinding` from plan.json, which returns the run
+ *    to the legacy path.
+ *  - It does not clean up the residue of the per-session join (one run's limbs
+ *    sitting in two missions with different states). It reports it: a limb
+ *    present in another mission's graph in a different state is a
+ *    `conflicts[]` entry of a bound read (`store:<mission>`), never a write.
+ *  - Its bound write does not create, renew or release a LEASE record
+ *    (`task_leases`): the node carries `heartbeat_at` / `owner` / `status`, in
+ *    the same single commit. `claimTask` would set `status: claimed` over the
+ *    node's own ops state, so the bound feeder does not call it.
  *  - It does not validate the events it hands to `appendEvent`; the writer is
  *    the one validator, and a refusal comes back as `{ok:false}`. The payload
  *    targets `lib/runtime/event-writer.js#writeEvent`, whose `EVENT_RE` takes
@@ -114,7 +108,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { atomicWriteJsonSync } from '../core/file.js';
-import { readRunJson, updateRunJson } from '../git/split-run-file.js';
+import { readRunJson, updatePlanJson, updateRunJson } from '../git/split-run-file.js';
+import { MISSION_ID_PATTERN } from '../project-state/validate.js';
 import { isLaneOpsState, isV11Status, LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS } from '../supervisor/contracts.js';
 // The `now` port contract has ONE judge, and it is not this file: rather than
 // keep a second copy of the same nine lines, L4 imports the definition, which
@@ -125,10 +120,15 @@ import { isLaneOpsState, isV11Status, LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS } 
 import { readClock } from '../core/clock.js';
 import {
   isPlainObject,
+  MISSION_BINDING_KEY,
   normalizeEvents,
   normalizeRunJson,
   normalizeStore,
+  normalizeTaskGraph,
   ownsFromPlan,
+  parseMissionBinding,
+  planBoundNode,
+  readLaneEntry,
   stringList,
   V11_TO_OPS_WORDS,
 } from './split-state-sources.js';
@@ -141,8 +141,14 @@ import {
  */
 export const STATE_SOURCES = Object.freeze(['store', 'run.json', 'events']);
 
-/** Value of the `projected_from` stamp {@link writeWorkerState} writes. */
+/** Value of the `projected_from` stamp {@link writeWorkerState} writes for an UNBOUND run. */
 export const PROJECTION_MARK = 'run.json';
+
+/** `projected_from` of a lane written for a BOUND run: `run.json.lanes[limb]` is then a projection of the store node. */
+export const STORE_PROJECTION_MARK = 'store';
+
+/** Ledger `reason` on the store commit of a bound lane write (`state.updated{reason}`). */
+export const BOUND_WRITE_REASON = 'split.lane-state';
 
 /**
  * @typedef {object} WorkerRecord
@@ -236,6 +242,135 @@ function updateRunJsonAt(paths, fn) {
   return out;
 }
 
+/**
+ * `plan.json` read-modify-write, the twin of {@link updateRunJsonAt}. Used by
+ * exactly one caller shape: recording the run-to-mission binding.
+ *
+ * @param {ReturnType<typeof resolveRunDir>} paths
+ * @param {(current: object) => object|undefined} fn
+ * @returns {object}
+ */
+function updatePlanJsonAt(paths, fn) {
+  if (paths.parentRoot) return updatePlanJson(paths.parentRoot, fn);
+  const current = readJsonObjectOrNull(paths.planJsonPath) ?? {};
+  const next = fn(current);
+  const out = next === undefined ? current : next;
+  atomicWriteJsonSync(paths.planJsonPath, out);
+  return out;
+}
+
+/* ─────────────────────── the run-to-mission binding (SH-11) ──────────────────────
+ *
+ * A `/split` run is identified by `plan.runId`; the StateStore is addressed by
+ * a mission id. Until SH-11 the join was per-SESSION (the `-S<sid8>` tail of a
+ * mission id, resolved from whichever session happened to dispatch), which
+ * broke across sessions (one run seeded two missions with contradictory
+ * states) and across midnight (a tail with two dated missions resolves to
+ * none). The join is now a record the RUN carries: `plan.json.missionBinding`.
+ *
+ *  I1  one run_id -> exactly one mission           (the writer never overwrites)
+ *  I2  every limb node of the run carries the same `ops.run_id`
+ *  I3  canonical reads and writes take the mission from THIS record only
+ *  I4  `generation` never decreases                (only a handoff raises it)
+ *
+ * WHAT THE RECORD DOES NOT DO: it does not create a mission row (a row without
+ * a `mission.created` event is `/doctor` Check 8-3's orphan), it does not say
+ * the mission is still alive (a fact about the store, judged per call), and it
+ * is not a lock — two windows binding the same run at the same instant are
+ * decided by plan.json's last atomic rename, unmeasured under real contention.
+ */
+
+/**
+ * Judge the binding a plan carries.
+ *
+ * @param {ReturnType<typeof resolveRunDir>} paths
+ * @param {object|null} plan - parsed plan.json
+ * @returns {{ status: 'none' } | { status: 'invalid', reason: string } | { status: 'bound', binding: Readonly<object>, runId: string }}
+ */
+function probeBinding(paths, plan) {
+  if (!isPlainObject(plan) || !Object.hasOwn(plan, MISSION_BINDING_KEY)) return { status: 'none' };
+  const parsed = parseMissionBinding(plan[MISSION_BINDING_KEY]);
+  if (!parsed.ok) return { status: 'invalid', reason: parsed.reason };
+  const planRunId = typeof plan.runId === 'string' && plan.runId !== '' ? plan.runId : null;
+  if (planRunId === null || parsed.binding.run_id !== planRunId) return { status: 'invalid', reason: 'binding-run-mismatch' };
+  // F3: the two run files must name the same run. A copy of one run's
+  // plan.json next to another run's run.json is the shape this catches.
+  const run = readRunJsonAt(paths);
+  if (typeof run?.runId === 'string' && run.runId !== '' && run.runId !== planRunId) return { status: 'invalid', reason: 'run-id-mismatch' };
+  return { status: 'bound', binding: parsed.binding, runId: planRunId };
+}
+
+/**
+ * Whether (and to what) a run is bound. `none` is the legacy answer: nothing
+ * in this module changes for such a run. Every other status is a statement the
+ * caller must act on — `invalid` is NOT `none`, so a damaged binding can never
+ * quietly send a write back to `run.json`.
+ *
+ * A missing plan.json reads as `none`; an unreadable one throws (a damaged
+ * plan must never read as "unbound").
+ *
+ * @param {object} p
+ * @param {string} p.runDir
+ * @returns {{ status: 'none' } | { status: 'invalid', reason: string } | { status: 'bound', binding: Readonly<object>, runId: string }}
+ */
+export function readMissionBinding({ runDir } = {}) {
+  const paths = resolveRunDir(runDir, 'readMissionBinding');
+  return probeBinding(paths, readJsonObjectOrNull(paths.planJsonPath));
+}
+
+/**
+ * Bind a run to a mission, ONCE (I1). Reuses the record that is already there,
+ * whichever mission the caller now names — a second session must not re-home a
+ * run, which is the defect being fixed.
+ *
+ * Never creates a mission row: with a `store` port it REFUSES when the row is
+ * absent (`mission-missing`); without one the caller vouches for the row.
+ * Never overwrites a damaged binding — that is reported, and repaired by a
+ * person or a handoff.
+ *
+ * @param {object} p
+ * @param {string} p.runDir
+ * @param {string} p.missionId - `M-YYYYMMDD-…` (either accepted form)
+ * @param {string} p.sessionId - the binding session, recorded as `bound_by_session` (an audit fact, never a key)
+ * @param {() => Date} [p.now] - clock port (strict, like every writer here)
+ * @param {{ getState: () => object }} [p.store] - optional StateStore port, used only to check the mission row exists
+ * @returns {{ ok: true, bound: boolean, binding: Readonly<object> } | { ok: false, reason: string }}
+ */
+export function bindRunToMission({ runDir, missionId, sessionId, now, store } = {}) {
+  const paths = resolveRunDir(runDir, 'bindRunToMission');
+  if (typeof missionId !== 'string' || !MISSION_ID_PATTERN.test(missionId)) return { ok: false, reason: 'binding-invalid:mission_id' };
+  if (typeof sessionId !== 'string' || sessionId === '') return { ok: false, reason: 'binding-invalid:bound_by_session' };
+  const ts = readClock(now, 'bindRunToMission');
+
+  const plan = readJsonObjectOrNull(paths.planJsonPath);
+  if (plan === null) return { ok: false, reason: 'plan-missing' };
+  const existing = probeBinding(paths, plan);
+  if (existing.status === 'bound') return { ok: true, bound: false, binding: existing.binding };
+  if (existing.status === 'invalid') return { ok: false, reason: existing.reason };
+
+  if (typeof plan.runId !== 'string' || plan.runId === '') return { ok: false, reason: 'plan-run-id-missing' };
+  const run = readRunJsonAt(paths);
+  if (typeof run?.runId === 'string' && run.runId !== '' && run.runId !== plan.runId) return { ok: false, reason: 'run-id-mismatch' };
+  if (store && !store.getState()?.active_missions?.[missionId]) return { ok: false, reason: 'mission-missing' };
+
+  const binding = Object.freeze({ mission_id: missionId, run_id: plan.runId, generation: 1, bound_at: ts, bound_by_session: sessionId });
+  let lostRace = false;
+  updatePlanJsonAt(paths, (current) => {
+    // Re-checked inside the read-modify-write: a binding that appeared since
+    // the probe above wins, so the run keeps one mission.
+    if (Object.hasOwn(current, MISSION_BINDING_KEY)) {
+      lostRace = true;
+      return current;
+    }
+    return { ...current, [MISSION_BINDING_KEY]: binding };
+  });
+  if (lostRace) {
+    const winner = probeBinding(paths, readJsonObjectOrNull(paths.planJsonPath));
+    return winner.status === 'bound' ? { ok: true, bound: false, binding: winner.binding } : { ok: false, reason: winner.reason ?? 'binding-invalid' };
+  }
+  return { ok: true, bound: true, binding };
+}
+
 /* ──────────────────────────────── helpers ───────────────────────────────── */
 
 /** @param {unknown} v @returns {number} epoch ms, or `NaN` */
@@ -270,20 +405,36 @@ function isoMs(v) {
  * but yields no value is a gap, not a disagreement, and is not recorded —
  * otherwise every unmapped lane word would masquerade as a conflict.
  *
+ * ── A BOUND run (SH-11) reads its store layer differently ──────────────────
+ * When `plan.json` carries a `missionBinding`, the `store` layer is the bound
+ * mission's Task Graph NODES (`normalizeTaskGraph`), taken through the `store`
+ * port and through the binding only — a caller-supplied `storeReader` is
+ * IGNORED for such a run, because two "store" answers is the defect being
+ * removed. The result then carries a `binding` report (`bound` · `unread` when
+ * no `store` port came · `dangling` when the mission is gone · `invalid`);
+ * an unbound run's result has no such key. Three kinds of evidence join
+ * `conflicts[]` for a bound run and none of them is ever a winner: a node whose
+ * `ops.state` and `status` disagree at rest (`store:ops`), and the same limb
+ * sitting in ANOTHER mission's graph in a different state (`store:<mission>`,
+ * the residue of the per-session join).
+ *
  * @param {object} p
  * @param {string} p.runDir - the `/split` run directory (holds `plan.json`, `run.json`)
- * @param {(ctx: { runDir: string }) => unknown} [p.storeReader] - StateStore port; absent -> that source contributes nothing
+ * @param {(ctx: { runDir: string }) => unknown} [p.storeReader] - StateStore port for an UNBOUND run; absent -> that source contributes nothing
+ * @param {{ getState: () => object }} [p.store] - StateStore for a BOUND run (read via `getState()` only)
  * @param {(ctx: { runDir: string }) => unknown} [p.eventsReader] - reduced supervisor state port; absent -> no-op
  * @param {(worker: string, ctx: { runDir: string }) => (string|null|undefined)} [p.commitReader] - git `%cI` port; absent -> no commit component
- * @returns {{ workers: Readonly<Record<string, WorkerRecord>>, source: string|null, conflicts: ReadonlyArray<StateConflict> }}
+ * @returns {{ workers: Readonly<Record<string, WorkerRecord>>, source: string|null, conflicts: ReadonlyArray<StateConflict>, binding?: object }}
  */
-export function readWorkerState({ runDir, storeReader, eventsReader, commitReader } = {}) {
+export function readWorkerState({ runDir, storeReader, store, eventsReader, commitReader } = {}) {
   const paths = resolveRunDir(runDir, 'readWorkerState');
   const ctx = Object.freeze({ runDir: paths.dir });
-  const planOwns = ownsFromPlan(readJsonObjectOrNull(paths.planJsonPath));
+  const plan = readJsonObjectOrNull(paths.planJsonPath);
+  const planOwns = ownsFromPlan(plan);
+  const bound = readBoundStoreLayer({ paths, plan, store, limbs: Object.keys(planOwns) });
 
   const layers = [
-    { source: 'store', workers: normalizeStore(typeof storeReader === 'function' ? storeReader(ctx) : null) },
+    { source: 'store', workers: bound ? bound.workers : normalizeStore(typeof storeReader === 'function' ? storeReader(ctx) : null) },
     { source: 'run.json', workers: normalizeRunJson(readRunJsonAt(paths)) },
     { source: 'events', workers: normalizeEvents(typeof eventsReader === 'function' ? eventsReader(ctx) : null) },
   ];
@@ -321,9 +472,12 @@ export function readWorkerState({ runDir, storeReader, eventsReader, commitReade
       source: winner.source,
     });
 
-    collectConflict(conflicts, name, 'status', present
-      .filter((l) => typeof l.workers[name].status === 'string')
-      .map((l) => ({ source: l.source, value: l.workers[name].status })));
+    collectConflict(conflicts, name, 'status', [
+      ...present
+        .filter((l) => typeof l.workers[name].status === 'string')
+        .map((l) => ({ source: l.source, value: l.workers[name].status })),
+      ...(bound ? (bound.evidence[name] ?? []) : []),
+    ]);
 
     const ownsClaims = present
       .filter((l) => l.workers[name].owns.length > 0)
@@ -339,7 +493,54 @@ export function readWorkerState({ runDir, storeReader, eventsReader, commitReade
     workers: Object.freeze(workers),
     source: primary ? primary.source : null,
     conflicts: Object.freeze(conflicts),
+    ...(bound ? { binding: Object.freeze(bound.binding) } : {}),
   });
+}
+
+/**
+ * The `store` layer of a BOUND run, or `null` for an unbound one (the caller
+ * then keeps the legacy `storeReader` path untouched).
+ *
+ * `evidence` maps a limb to extra status claims that join `conflicts[]` and
+ * never win: the node's own `ops.state` projection when it disagrees with the
+ * node's `status`, and the same limb's status in every OTHER mission graph the
+ * snapshot holds. Only the plan's limbs are looked up in other missions — the
+ * run's own declared names, not a scan of everything.
+ *
+ * @param {object} p
+ * @param {ReturnType<typeof resolveRunDir>} p.paths
+ * @param {object|null} p.plan
+ * @param {{ getState: () => object }|undefined} p.store
+ * @param {string[]} p.limbs - the plan's limb names
+ * @returns {{ workers: Record<string, object>, evidence: Record<string, Array<{ source: string, value: string }>>, binding: object }|null}
+ */
+function readBoundStoreLayer({ paths, plan, store, limbs }) {
+  const probe = probeBinding(paths, plan);
+  if (probe.status === 'none') return null;
+  if (probe.status === 'invalid') return { workers: {}, evidence: {}, binding: { status: 'invalid', reason: probe.reason } };
+
+  const { binding } = probe;
+  const head = { mission_id: binding.mission_id, run_id: binding.run_id, generation: binding.generation };
+  if (!store || typeof store.getState !== 'function') return { workers: {}, evidence: {}, binding: { status: 'unread', ...head } };
+  const snapshot = store.getState();
+  if (!snapshot?.active_missions?.[binding.mission_id]) return { workers: {}, evidence: {}, binding: { status: 'dangling', ...head } };
+
+  const workers = normalizeTaskGraph(snapshot.task_graphs?.[binding.mission_id], { runId: binding.run_id });
+  /** @type {Record<string, Array<{ source: string, value: string }>>} */ const evidence = {};
+  const claim = (name, source, value) => {
+    if (typeof value === 'string') (evidence[name] ??= []).push({ source, value });
+  };
+  for (const [name, w] of Object.entries(workers)) {
+    const implied = LANE_OPS_TO_V11_STATUS[w.extra.ops_state];
+    if (implied && implied !== w.status) claim(name, 'store:ops', implied);
+  }
+  for (const [missionId, graph] of Object.entries(snapshot.task_graphs ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (missionId === binding.mission_id || !Array.isArray(graph?.tasks)) continue;
+    for (const task of graph.tasks) {
+      if (limbs.includes(task?.id)) claim(task.id, `store:${missionId}`, task.status);
+    }
+  }
+  return { workers, evidence, binding: { status: 'bound', ...head } };
 }
 
 /**
@@ -437,7 +638,9 @@ function ledgerEventNameFor(prevOps, nextOps) {
  * `<event>:<run>:<worker>:<from-ops>:<to-ops>:<from-since>`, the
  * `verify-writer.js#verifyCompletedIdempotencyKey` shape with the run in the
  * session's place. The key names the TRANSITION, so its material is the state
- * being LEFT, as `run.json` stored it before this write:
+ * being LEFT, as `run.json` stored it before this write — or, for a BOUND run,
+ * as the limb's node stored it (`task.ops.state` / `task.ops.since`; the
+ * `run.json` lane stands in only until the node has an `ops`, the backfill):
  *
  *  - `from-since` is that state's stored `since`. `writeWorkerState` moves
  *    `since` only on a state change, so it is the identity of the state, not a
@@ -641,6 +844,195 @@ function ledgerRefusal(outcome) {
   return typeof stated === 'string' && stated ? stated : 'no reason given';
 }
 
+/* ───────────────────────── the BOUND write (SH-11) ─────────────────────────
+ *
+ * The order is the one `state-manager.js` documents, with the store as the
+ * write and `run.json` as the view:
+ *
+ *   ledger event (worker.claimed / task.released, if a port is injected)
+ *     -> ONE store commit of the limb's node   (CAS on state_version, one retry)
+ *       -> run.json.lanes[limb] rewritten from that node, `projected_from:'store'`
+ *
+ * A refusal at any step before the commit leaves run.json byte-identical. A
+ * failure AFTER the commit does not undo it: the store is the truth, the
+ * result says `projection: 'failed:<why>'`, and the next read answers from the
+ * store with the disagreement in `conflicts[]` until a write heals the view.
+ *
+ * WHAT THIS DOES NOT DO: no lease record is created, renewed or released here.
+ * The node carries the liveness (`heartbeat_at`, `owner`, `status`) in the one
+ * commit, which is what "fold the lane-lease write" means for a bound run; the
+ * store's `claimTask` would set `status: claimed` over the node's own ops state
+ * (a B1 violation by construction), so the bound feeder does not call it.
+ */
+
+/** @returns {Readonly<object>} the `{ok:false}` result of a bound write refused before any effect. */
+function rejectBound(worker, reason, detail) {
+  return Object.freeze({ ok: false, reason, detail, worker, event: null, ledger: 'not-attempted' });
+}
+
+/**
+ * The StateStore a bound write goes through. Never throws: a store that cannot
+ * be opened is a refusal to report, and the caller (a CLI) turns it into exit 1.
+ *
+ * @param {{ store?: object|null, openStore?: (() => (object|null)) }} p
+ * @returns {{ store: object } | { store?: undefined, reason: string, detail: string }}
+ */
+function acquireStore({ store, openStore }) {
+  try {
+    const got = store ?? (typeof openStore === 'function' ? openStore() : null);
+    if (got && typeof got.getState === 'function' && typeof got.updateMission === 'function') return { store: got };
+    return {
+      reason: 'store-unavailable',
+      detail: 'a bound run writes the StateStore and none was supplied (no store port, or the opener returned none — usually no session id) — run.json left unchanged',
+    };
+  } catch (err) {
+    return { reason: 'store-unavailable', detail: `opening the StateStore threw: ${err?.message ?? err} — run.json left unchanged` };
+  }
+}
+
+/** `updateMission` mutator: keep the mission row exactly as it is (a null row would be written as a removal). */
+function keepMission(current) {
+  if (current === null) throw new Error('the bound mission vanished between the snapshot and the commit');
+  return current;
+}
+
+/**
+ * The graph to commit: the snapshot's graph with `node` replaced (or appended).
+ * Every other task is carried by reference, untouched — a `/team` node, another
+ * run's node, a sibling limb.
+ */
+function graphWithNode(snapshot, missionId, node, ts) {
+  const graph = snapshot.task_graphs?.[missionId];
+  const tasks = Array.isArray(graph?.tasks) ? graph.tasks : [];
+  const at = tasks.findIndex((t) => t?.id === node.id);
+  return {
+    schema_version: Number.isInteger(graph?.schema_version) && graph.schema_version >= 1 ? graph.schema_version : 1,
+    mission_id: missionId,
+    updated_at: ts,
+    tasks: at >= 0 ? tasks.map((t, i) => (i === at ? node : t)) : [...tasks, node],
+  };
+}
+
+/**
+ * Plan the node, run the ledger half, commit — with ONE retry on a CAS
+ * conflict. The plan is re-derived from the fresh snapshot on the retry (the
+ * competing writer may have moved this very limb); the ledger half is not
+ * repeated (its key names the transition, so a re-run mints the same one).
+ * UNMEASURED under real contention: if the competing commit moved THIS limb,
+ * the ledger line already appended names the transition from the state read
+ * first, and the retry commits from the state it re-read.
+ *
+ * @returns {{ ok: true, planned: object, commit: object, phase: object } | { ok: false, result: Readonly<object> }}
+ */
+function commitBoundWrite({ paths, plan, binding, store, worker, opsWord, blockedBy, rest, ts, appendEvent, ledger }) {
+  const missionId = binding.mission_id;
+  const dangling = () => ({
+    ok: false,
+    result: rejectBound(worker, 'binding-dangling', `mission ${missionId} is not in the StateStore (archived or removed?) — run.json left unchanged; hand the run off to a live mission, or remove ${MISSION_BINDING_KEY} from plan.json to use the legacy path`),
+  });
+  let snapshot = store.getState();
+  if (!snapshot?.active_missions?.[missionId]) return dangling();
+
+  const before = readRunJsonAt(paths);
+  const lane = readLaneEntry(isPlainObject(before?.lanes) ? before.lanes[worker] : undefined);
+  const ownsList = ownsFromPlan(plan)[worker] ?? [];
+  let phase = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const node = snapshot.task_graphs?.[missionId]?.tasks?.find((t) => t?.id === worker) ?? null;
+    const planned = planBoundNode({ node, lane, worker, missionId, runId: binding.run_id, opsWord, blockedBy, rest, ts, ownsList });
+    if (!planned.ok) return { ok: false, result: rejectBound(worker, planned.reason, planned.detail) };
+    if (phase === null) {
+      phase = runLedgerPhase({
+        paths, worker, eventName: ledgerEventNameFor(planned.prev.state, opsWord), ledgerOpts: ledger, appendEvent,
+        transition: { prevOps: planned.prev.state, nextOps: opsWord, prevSince: planned.prev.since, runJsonRunId: before?.runId },
+      });
+      if (phase.refused) return { ok: false, result: Object.freeze({ ok: false, reason: phase.reason, worker, event: phase.event, ledger: 'refused' }) };
+    }
+    let commit;
+    try {
+      commit = store.updateMission(missionId, keepMission, {
+        graph: graphWithNode(snapshot, missionId, planned.node, ts), expectedVersion: snapshot.state_version, reason: BOUND_WRITE_REASON,
+      });
+    } catch (err) {
+      return { ok: false, result: rejectBound(worker, 'store-threw', `the StateStore threw on the commit: ${err?.message ?? err} — run.json left unchanged`) };
+    }
+    if (commit.ok) return { ok: true, planned, commit, phase };
+    if (commit.conflict !== true) return { ok: false, result: rejectBound(worker, 'store-refused', String(commit.errors?.[0] ?? 'the store refused the commit')) };
+    if (attempt === 1) break;
+    snapshot = store.getState();
+    if (!snapshot?.active_missions?.[missionId]) return dangling();
+  }
+  return { ok: false, result: rejectBound(worker, 'cas-conflict', 'the store moved under this write twice (CAS conflict, retried once) — run.json left unchanged') };
+}
+
+/**
+ * The `run.json.lanes[limb]` record for a committed node: the shape the legacy
+ * writer stamps (`state`, `since`, `window`, `note`, `blocked_by`,
+ * `projected_from`, `updated_at`), read FROM the node, with every other key of
+ * the existing lane entry and of the patch carried as before.
+ */
+function projectedLane(atWrite, rest, node, ts) {
+  const base = { ...atWrite, ...rest };
+  delete base.blocked_by; // the node's blockers are the truth; a stale list must not outlive them
+  const { ops } = node;
+  return {
+    ...base,
+    state: ops.state,
+    since: ops.since,
+    ...(Array.isArray(node.blockers) ? { blocked_by: [...node.blockers] } : {}),
+    ...(ops.window ? { window: ops.window } : {}),
+    ...(ops.note ? { note: ops.note } : {}),
+    projected_from: STORE_PROJECTION_MARK,
+    updated_at: ts,
+  };
+}
+
+/** Write one worker of a BOUND run. See the section comment above. */
+function writeBound({ paths, plan, probe, worker, opsWord, blockedBy, rest, ts, appendEvent, ledger, store, openStore, projectRunJson }) {
+  if (probe.status !== 'bound') {
+    return rejectBound(worker, probe.reason, `plan.json ${MISSION_BINDING_KEY} is unusable (${probe.reason}) — run.json left unchanged; repair the record, or remove it to use the legacy path`);
+  }
+  const acquired = acquireStore({ store, openStore });
+  if (!acquired.store) return rejectBound(worker, acquired.reason, acquired.detail);
+
+  const done = commitBoundWrite({ paths, plan, binding: probe.binding, store: acquired.store, worker, opsWord, blockedBy, rest, ts, appendEvent, ledger });
+  if (!done.ok) return done.result;
+  const { planned, commit, phase } = done;
+
+  const project = typeof projectRunJson === 'function' ? projectRunJson : (mutate) => updateRunJsonAt(paths, mutate);
+  let record = projectedLane({}, rest, planned.node, ts);
+  let projection = 'written';
+  try {
+    project((current) => {
+      const lanes = isPlainObject(current.lanes) ? { ...current.lanes } : {};
+      const raw = lanes[worker];
+      const atWrite = typeof raw === 'string' ? { state: raw } : (isPlainObject(raw) ? raw : {});
+      record = projectedLane(atWrite, rest, planned.node, ts);
+      lanes[worker] = record;
+      return { ...current, lanes };
+    });
+  } catch (err) {
+    projection = `failed:${err?.message ?? err}`;
+  }
+  return Object.freeze({
+    ok: true,
+    path: paths.runJsonPath,
+    worker,
+    opsState: planned.node.ops.state,
+    status: planned.node.status,
+    record: Object.freeze(record),
+    event: phase.event,
+    ledger: phase.status,
+    source: 'store',
+    missionId: probe.binding.mission_id,
+    stateVersion: commit.state_version,
+    previousOps: planned.prev.state,
+    previousSince: planned.prev.since,
+    changed: planned.changed,
+    projection,
+  });
+}
+
 /**
  * Write one worker's state. ONE destination: `run.json.lanes[worker]`.
  *
@@ -689,9 +1081,12 @@ function ledgerRefusal(outcome) {
  * @param {(event: object) => unknown} [p.appendEvent] - ledger port, called with a `writeEvent` input envelope. Injected, never imported: `lib/topology` is L4 and `lib/runtime` is L5.
  * @param {object} [p.ledger] - what the event contract needs and this module cannot derive: `{ session_id, mission_id?, source?, agent_type?, model_tier?, owner?, data? }`. `source` defaults to `'supervisor'`, which is the one value the allowlist accepts for BOTH events.
  * @param {() => Date} [p.now] - clock port. Omit for the wall clock; present-but-wrong throws (`core/clock.js#readClock`, the same judge `state-manager` uses).
- * @returns {{ ok: true, path: string, worker: string, opsState: string|null, status: string|null, record: object, event: object|null, ledger: string } | { ok: false, reason: string, worker: string, event: object, ledger: 'refused' }}
+ * @param {{ getState: Function, updateMission: Function }} [p.store] - StateStore port. Used ONLY when the run is bound; an unbound run never touches it.
+ * @param {() => (object|null)} [p.openStore] - lazy alternative to `store`, called only for a bound run, so an unbound write pays nothing (a session id is needed to open a store).
+ * @param {(mutate: (current: object) => object) => unknown} [p.projectRunJson] - replaces the run.json read-modify-write of a bound run's projection (a test seam and a rewire point).
+ * @returns {{ ok: true, path: string, worker: string, opsState: string|null, status: string|null, record: object, event: object|null, ledger: string } | { ok: false, reason: string, worker: string, event: object, ledger: 'refused' }} A bound run adds, on success: `source: 'store'`, `missionId`, `stateVersion`, `previousOps`, `previousSince`, `changed`, `projection`; and a third failure shape `{ ok: false, reason, detail, worker, event: null, ledger: 'not-attempted' }` — see the section above.
  */
-export function writeWorkerState({ runDir, worker, patch = {}, appendEvent, ledger = {}, now } = {}) {
+export function writeWorkerState({ runDir, worker, patch = {}, appendEvent, ledger = {}, now, store, openStore, projectRunJson } = {}) {
   const paths = resolveRunDir(runDir, 'writeWorkerState');
   if (typeof worker !== 'string' || !worker.trim()) throw new TypeError('writeWorkerState: worker is required');
   if (!isPlainObject(patch)) throw new TypeError('writeWorkerState: patch must be a plain object');
@@ -699,6 +1094,16 @@ export function writeWorkerState({ runDir, worker, patch = {}, appendEvent, ledg
 
   const { opsWord, blockedBy, rest } = resolveWriteOps(patch);
   const ts = readClock(now, 'writeWorkerState');
+
+  // SH-11: a run that carries a binding is written through its StateStore and
+  // NEVER through the legacy branch below — not on a damaged binding, not on a
+  // missing store. `none` is the only answer that reaches the code that
+  // follows, which is why that code is unchanged.
+  const plan = readJsonObjectOrNull(paths.planJsonPath);
+  const probe = probeBinding(paths, plan);
+  if (probe.status !== 'none') {
+    return writeBound({ paths, plan, probe, worker, opsWord, blockedBy, rest, ts, appendEvent, ledger, store, openStore, projectRunJson });
+  }
 
   // The previous ops word decides whether an event is owed, and the ledger
   // goes first, so `run.json` is read before it is written. The two reads are

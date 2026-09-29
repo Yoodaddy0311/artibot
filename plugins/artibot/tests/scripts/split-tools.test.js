@@ -28,6 +28,7 @@ import * as resume from '../../scripts/split/resume-notices.mjs';
 import * as suspend from '../../scripts/split/suspend.mjs';
 import * as wts from '../../scripts/split/worktree-setup.mjs';
 import { forkPointForLimb, readPlanJson, readRunJson, writeRunJson } from '../../lib/git/split-run-file.js';
+import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
 import { readLaneOpsState } from '../../lib/supervisor/lane-monitor.js';
 
@@ -897,5 +898,101 @@ describe('lane-state.mjs (writer for run.json.lanes[limb] — the reader is lib/
     const h = collect();
     expect(laneState.main(['--help'], { ...h.io })).toBe(0);
     for (const s of LANE_OPS_STATES) expect(h.stdout()).toContain(s);
+  });
+});
+
+// ── SH-11: dispatching a run that is bound to a mission ─────────────────────
+
+/**
+ * The seams `runDispatch` forwards (`sessionId`, `openStore`) stand in for the
+ * host environment: production passes neither, and a suite run INSIDE a host
+ * session would otherwise measure whichever session runs it. Every store is a
+ * real `createStateStore` under the tmp parent.
+ *
+ * What this block cannot see: two dispatch PROCESSES binding at once, and a live
+ * leader session whose environment may or may not carry the session id.
+ */
+describe('dispatch.mjs runDispatch — the run-to-mission binding (SH-11)', () => {
+  const SID_A = 'abcd1234-ef56-7890-1234-567890abcdef';
+  const SID_B = 'wxyz5678-aaaa-bbbb-cccc-dddddddddddd';
+  const MA = 'M-20260929-Sabcd1234';
+  const MB = 'M-20260929-Swxyz5678';
+  const RUN_ID = 'split-abc123';
+  const storeFor = (parent, sid) => createStateStore({ projectRoot: parent, sessionId: sid, renderProjectionFile: false, appendEvent: () => ({ ok: true }) });
+  const openStore = (root, sid) => storeFor(root, sid);
+  const dispatchAs = (parent, limb, sid, extra = []) => dispatch.runDispatch(dispatch.parseArgs([limb, ...extra]), { cwd: parent, config: null, sessionId: sid, openStore });
+  const runPathOf = (parent) => path.join(parent, '.artibot', 'split', 'run.json');
+
+  /** A parent with two limbs and one mission row per id (the rows are the dispatching sessions' own). */
+  function boundWorld(missions = [MA, MB]) {
+    const { parent } = seedParent({ limbs: ['auth', 'billing'] });
+    const store = storeFor(parent, SID_A);
+    for (const id of missions) {
+      expect(store.updateMission(id, () => ({ status: 'executing', intent: { path: 'i.md', revision: 1 }, plan: { path: 'p.md', revision: 1 } }), { reason: 'test.seed' }).ok).toBe(true);
+    }
+    return { parent, store };
+  }
+
+  it('T1: the first dispatch binds the run; a second from ANOTHER session reuses the binding and writes only that mission', async () => {
+    const { parent, store } = boundWorld();
+
+    const a = await dispatchAs(parent, 'auth', SID_A);
+    expect(a.taskFeed).toMatchObject({ fed: true, missionId: MA, claim: 'bound:node', binding: { status: 'created', generation: 1, run_id: RUN_ID } });
+    expect(readPlanJson(parent).missionBinding).toMatchObject({ mission_id: MA, run_id: RUN_ID, generation: 1, bound_by_session: SID_A });
+    // The first lane write happened before the binding existed, so it is a run.json write...
+    expect(readRunJson(parent).lanes.auth.projected_from).toBe('run.json');
+    // ...and the feed that bound the run backfilled it into the node, `since` preserved.
+    const authNode = store.getTaskGraph(MA).tasks.find((t) => t.id === 'auth');
+    expect(authNode).toMatchObject({ status: 'executing', owner: 'auth' });
+    expect(authNode.ops).toMatchObject({ state: 'active', run_id: RUN_ID, since: readRunJson(parent).lanes.auth.since });
+
+    const b = await dispatchAs(parent, 'billing', SID_B);
+    expect(b.taskFeed).toMatchObject({ fed: true, missionId: MA, binding: { status: 'reused' } });
+    expect(readRunJson(parent).lanes.billing).toMatchObject({ state: 'active', projected_from: 'store' });
+    expect(store.getTaskGraph(MA).tasks.map((t) => [t.id, t.status, t.ops.run_id]).sort()).toEqual([
+      ['auth', 'executing', RUN_ID], ['billing', 'executing', RUN_ID],
+    ]);
+    // Session B's own mission — the one the per-session join would have chosen — was never touched.
+    expect(store.getTaskGraph(MB).tasks).toEqual([]);
+    expect(readPlanJson(parent).missionBinding.bound_by_session).toBe(SID_A);
+  });
+
+  it('T3: a bound run whose mission is gone REFUSES the dispatch — exit 1, the reason in the JSON, run.json byte-identical', async () => {
+    const { parent, store } = boundWorld();
+    await dispatchAs(parent, 'auth', SID_A);
+    expect(store.updateMission(MA, () => null, { reason: 'test.archive' }).ok).toBe(true);
+    const before = fs.readFileSync(runPathOf(parent));
+
+    await expect(dispatchAs(parent, 'auth', SID_B)).rejects.toThrow(/^binding-dangling: /);
+    const c = collect();
+    const code = await dispatch.main(['auth', '--json'], { cwd: parent, config: null, ...c.io, sessionId: SID_B, openStore });
+    expect(code).toBe(1);
+    expect(JSON.parse(c.stdout()).error).toMatch(/^binding-dangling: /);
+    expect(fs.readFileSync(runPathOf(parent))).toEqual(before);
+  });
+
+  it('a dispatch with no mission row for the session binds nothing, and a --dry-run never binds', async () => {
+    const { parent } = boundWorld([]);
+    const r = await dispatchAs(parent, 'auth', SID_A);
+    expect(r.taskFeed).toMatchObject({ fed: false, skipped: 'no-mission' });
+    expect(readPlanJson(parent).missionBinding).toBeUndefined();
+    expect(readRunJson(parent).lanes.auth.projected_from).toBe('run.json');
+
+    const w = boundWorld([MA]);
+    const dry = await dispatchAs(w.parent, 'auth', SID_A, ['--dry-run']);
+    expect(dry.taskFeed).toMatchObject({ fed: false, skipped: 'dry-run' });
+    expect(readPlanJson(w.parent).missionBinding).toBeUndefined();
+  });
+
+  it('asks the feeder to bind, and forwards the seams — the only caller that does', async () => {
+    const { parent } = seedParent();
+    /** @type {any} */ let seen = null;
+    /** @type {any} */ let ports = null;
+    await dispatch.runDispatch(dispatch.parseArgs(['auth']), {
+      cwd: parent, config: null, sessionId: SID_A, openStore,
+      feedLimb: (a, p) => { seen = a; ports = p; return { fed: false, skipped: 'x' }; },
+    });
+    expect(seen).toMatchObject({ parentRoot: parent, limb: 'auth', dryRun: false, bind: true, sessionId: SID_A });
+    expect(ports).toEqual({ openStore });
   });
 });
