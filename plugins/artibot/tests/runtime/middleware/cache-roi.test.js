@@ -101,7 +101,15 @@ describe('_resolvePricing', () => {
     // Off-catalog claude-* ids no longer reach the substring step: unpriced.
     expect(_resolvePricing('claude-fable-5')).toBeNull();
     expect(_resolvePricing('claude-opus-x')).toBeNull();
-    expect(_resolvePricing('claude-sonnet-5')).toEqual(getPricing('sonnet'));
+    // 2026-09-29: the sonnet tier id is claude-sonnet-5-5, so the tier row is
+    // the current id's row. claude-sonnet-5 is a legacy id: same five price
+    // columns (no ID_PRICES row), reporting the id that was asked for - the
+    // same shape as claude-opus-5 below, just without a price of its own.
+    expect(_resolvePricing('claude-sonnet-5-5')).toEqual(getPricing('sonnet'));
+    expect(_resolvePricing('claude-sonnet-5')).toEqual({
+      ...getPricing('sonnet'),
+      id: 'claude-sonnet-5',
+    });
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('haiku'));
   });
 
@@ -257,6 +265,8 @@ describe('computeCacheMetrics', () => {
     ['claude-opus-5-5', 'opus', 3.8, 29.2],
     // Legacy id, own official Claude Opus 5 row: saved 5 - 0.5, spent 5+0.5+6.25+25.
     ['claude-opus-5', 'opus', 4.5, 36.75],
+    // 2026-09-29: current sonnet id, then the legacy one at the same numbers.
+    ['claude-sonnet-5-5', 'sonnet', 1.8, 14.7],
     ['claude-sonnet-5', 'sonnet', 1.8, 14.7],
     ['claude-haiku-4-5', 'haiku', 0.9, 7.35],
   ])('prices 1M tokens per bucket for %s', (model, tier, saved, spent) => {

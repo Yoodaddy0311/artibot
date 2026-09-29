@@ -31,7 +31,11 @@ const ENUM_WHITELIST = ['sonnet', 'opus', 'haiku', 'fable'];
 const PRICE_TABLE = [
   { tier: 'haiku', id: 'claude-haiku-4-5', input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
   // 2026-09-28: Sonnet 5 공식가. 2/10 이 표준가로 확정(9/1 예정 인상 취소 — 공식 각주).
-  { tier: 'sonnet', id: 'claude-sonnet-5', input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
+  // 2026-09-29: the tier id is now Sonnet 5.5 (claude-sonnet-5 is its legacy id). Its
+  // input / output / cache read are the claude-api skill price table (cached
+  // 2026-09-25): 2 / 10 / 0.2, identical to Sonnet 5. That table does not list cache
+  // writes, so 2.5 / 4 are the standard 1.25x / 2x of input (multiplier-derived).
+  { tier: 'sonnet', id: 'claude-sonnet-5-5', input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
   // 2026-09-28: Opus 5.5 공식가. cache read 0.2 는 0.05x base input(공식 각주), 0.1x 아님.
   { tier: 'opus', id: 'claude-opus-5-5', input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 },
   { tier: 'fable', id: 'claude-fable-5-1', input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20 },
@@ -62,7 +66,7 @@ describe('model-catalog', () => {
         promptStyle: 'declarative',
       });
       expect(getModel('opus').id).toBe('claude-opus-5-5');
-      expect(getModel('sonnet').id).toBe('claude-sonnet-5');
+      expect(getModel('sonnet').id).toBe('claude-sonnet-5-5');
       expect(getModel('haiku').id).toBe('claude-haiku-4-5');
     });
 
@@ -82,6 +86,8 @@ describe('model-catalog', () => {
 
     it('pins official output limits: Sonnet 5 128K, Haiku 4.5 64K', () => {
       // claude-api skill shared/models.md (Sonnet 5 row: 128K; Haiku 4.5 row: 64K).
+      // 2026-09-29: the tier id moved to Sonnet 5.5 and this limit was carried
+      // over as is. The row cited is Sonnet 5's; nobody re-read it for 5.5.
       expect(getModel('sonnet').outLimit).toBe(128_000);
       expect(getModel('haiku').outLimit).toBe(64_000);
     });
@@ -322,17 +328,28 @@ describe('model-catalog', () => {
     });
   });
 
-  describe('legacyIds (older ids that still resolve to the tier)', () => {
+  describe('legacyIds (extra exact ids that still resolve to the tier)', () => {
     it('opus keeps claude-opus-5 as its only legacy id', () => {
       expect(getModel('opus').legacyIds).toEqual(['claude-opus-5']);
     });
 
-    it.each(['haiku', 'sonnet', 'fable'])(
+    it.each(['haiku', 'fable'])(
       '%s carries an empty legacyIds array (same shape on every tier)',
       (tier) => {
         expect(getModel(tier).legacyIds).toEqual([]);
       },
     );
+
+    it('sonnet keeps claude-sonnet-5 as its only legacy id; claude-sonnet-5-5 is the current id', () => {
+      // 2026-09-29: the host serves `claude-sonnet-5-5` for the sonnet tier and
+      // that id was dropped as an unresolved model, so its usage never became a
+      // receipt. An earlier edit of the same day made it resolve as a legacy
+      // id; this promotes it to `id`, the way opus moved to claude-opus-5-5 on
+      // 2026-09-23. The pre-5.5 id stays in the list so old transcripts and
+      // ledger rows keep tier sonnet.
+      expect(getModel('sonnet').id).toBe('claude-sonnet-5-5');
+      expect(getModel('sonnet').legacyIds).toEqual(['claude-sonnet-5']);
+    });
 
     it('every tier has a frozen legacyIds array of non-empty strings', () => {
       for (const tier of listTiers()) {
@@ -362,6 +379,7 @@ describe('model-catalog', () => {
 
     it('getPricing still names the current id, not a legacy one', () => {
       expect(getPricing('opus').id).toBe('claude-opus-5-5');
+      expect(getPricing('sonnet').id).toBe('claude-sonnet-5-5');
     });
   });
 
@@ -382,12 +400,35 @@ describe('model-catalog', () => {
       });
     });
 
+    it('prices the legacy id claude-sonnet-5 at the literal Sonnet 5 row, which today equals the tier row', () => {
+      // Literal pin (Sonnet 5 row, official pricing page, fetched 2026-09-28
+      // KST). The sonnet TIER moved to Sonnet 5.5 on 2026-09-29 with identical
+      // numbers, so this id needs no ID_PRICES row today (the keys pin below
+      // lists the rows that exist). It is priced by the tier row, which means
+      // a later edit of that row would silently reprice every old
+      // claude-sonnet-5 receipt: if this pin goes red, add an ID_PRICES row
+      // for the id (the claude-opus-5 pattern) instead of editing the numbers
+      // here.
+      expect(getPricing('claude-sonnet-5')).toEqual({
+        tier: 'sonnet',
+        id: 'claude-sonnet-5',
+        input: 2,
+        output: 10,
+        cacheRead: 0.2,
+        cacheWrite5m: 2.5,
+        cacheWrite1h: 4,
+        measured: true,
+        version: PRICING_VERSION,
+      });
+    });
+
     it('prices a current id at its tier row and reports the id that was asked for', () => {
       for (const tier of listTiers()) {
         const { id } = getModel(tier);
         expect(getPricing(id)).toEqual(getPricing(tier));
       }
       expect(getPricing('claude-opus-5-5').input).toBe(4);
+      expect(getPricing('claude-sonnet-5-5').input).toBe(2);
     });
 
     it('leaves every tier and role lookup exactly as before (no id row leaks in)', () => {
@@ -433,6 +474,59 @@ describe('model-catalog', () => {
         expect(tierForModelId(bad)).toBeNull();
       }
       expect(getPricing('claude-opus-5-6')).toBeNull();
+    });
+  });
+
+  describe('claude-sonnet-5-5 (the current sonnet id, the one the host serves)', () => {
+    it('resolves to the sonnet tier, and the pre-5.5 id still does', () => {
+      expect(tierForModelId('claude-sonnet-5-5')).toBe('sonnet');
+      // Old receipt rows and transcripts written against claude-sonnet-5 keep
+      // their tier.
+      expect(tierForModelId('claude-sonnet-5')).toBe('sonnet');
+    });
+
+    it('does not prefix-, qualifier- or case-match near misses', () => {
+      // Exact-string lookup: the receipt layer strips `[1m]` and 8-digit
+      // snapshots itself before asking, so the catalog must not tolerate them.
+      for (const bad of [
+        'claude-sonnet-5-6', 'claude-sonnet-5-50', 'claude-sonnet-55',
+        'claude-sonnet-5-5[1m]', 'claude-sonnet-5-5-20260929',
+        'CLAUDE-SONNET-5-5', 'sonnet-5-5', 'claude-sonnet-5-5 ',
+      ]) {
+        expect(tierForModelId(bad), bad).toBeNull();
+      }
+      expect(getPricing('claude-sonnet-5-6')).toBeNull();
+    });
+
+    it('is the sonnet tier row itself, and the row carries the Sonnet 5.5 numbers', () => {
+      // WHAT THIS PINS: the tier row is the one Sonnet 5.5 is billed at. Where
+      // the numbers come from: input 2 / output 10 / cache read 0.2 are the
+      // claude-api skill price table (cached 2026-09-25), identical to the
+      // Sonnet 5 row read off PRICING_SOURCE on 2026-09-28. That table does not
+      // list cache writes, so 2.5 / 4 are the standard 1.25x / 2x of input
+      // (multiplier-derived, not read for 5.5). A real difference between the
+      // two models later goes red here on purpose: move the tier, bump
+      // PRICING_VERSION, freeze the outgoing row, and give claude-sonnet-5 its
+      // own ID_PRICES row.
+      expect(getPricing('claude-sonnet-5-5')).toEqual(getPricing('sonnet'));
+      expect(getPricing('claude-sonnet-5-5')).toMatchObject({
+        tier: 'sonnet',
+        id: 'claude-sonnet-5-5',
+        input: 2,
+        output: 10,
+        cacheRead: 0.2,
+        cacheWrite5m: 2.5,
+        cacheWrite1h: 4,
+        measured: true,
+      });
+    });
+
+    it('keeps the pre-5.5 id priced at the same numbers, reporting the id that was asked for', () => {
+      expect(getPricing('claude-sonnet-5')).toEqual({
+        ...getPricing('sonnet'),
+        id: 'claude-sonnet-5',
+      });
+      expect(getPricing('balanced')).toEqual(getPricing('sonnet'));
     });
   });
 

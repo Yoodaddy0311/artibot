@@ -82,9 +82,13 @@ const EXPECTED = {
       opus: row(4, 20, 0.2, 5, 8),
       fable: row(10, 50, 0.25, 12.5, 20),
     },
+    // claude-sonnet-5-5 joined this id map on 2026-09-29 with no price edit
+    // (the tier rows above are untouched), so the stamp did not move. It is
+    // the id the host serves for sonnet; receipts for it did not exist before.
     ids: {
       'claude-haiku-4-5': 'haiku',
       'claude-sonnet-5': 'sonnet',
+      'claude-sonnet-5-5': 'sonnet',
       'claude-opus-5-5': 'opus',
       'claude-opus-5': 'opus',
       'claude-fable-5-1': 'fable',
@@ -99,7 +103,7 @@ const EXPECTED = {
 const LOOKUP_KEYS = [
   'haiku', 'sonnet', 'opus', 'fable',
   'frontier', 'deep-async', 'balanced', 'fast',
-  'claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-opus-5',
+  'claude-haiku-4-5', 'claude-sonnet-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5',
   'claude-fable-5-1', 'claude-sonnet-4-6', 'claude-opus-4-8', 'gpt-4',
   '', 'toString', '__proto__', null, undefined, 42, {},
 ];
@@ -254,7 +258,10 @@ describe('getPricingAt()', () => {
   });
 
   it('returns null for a key the stamp did not know', () => {
-    for (const key of ['claude-opus-4-8', 'gpt-4', 'mystery', '', 'toString', null, 42]) {
+    // claude-sonnet-5-5 is in the CURRENT row's id map; the frozen 2026-09-12
+    // row must not learn it (that would price a receipt no one wrote at a rate
+    // no one billed).
+    for (const key of ['claude-opus-4-8', 'claude-sonnet-5-5', 'gpt-4', 'mystery', '', 'toString', null, 42]) {
       expect(getPricingAt('2026-09-12', key), String(key)).toBeNull();
     }
   });
@@ -363,6 +370,46 @@ describe('pricingForReceipt()', () => {
     const [built] = receipts;
     const replayed = pricingForReceipt(built);
     expect(replayed).toStrictEqual(getPricing('claude-opus-5'));
+    const recomputed =
+      built.usage.fresh_input_tokens * replayed.input / 1e6
+      + built.usage.cached_input_tokens * replayed.cacheRead / 1e6
+      + built.usage.cache_creation_tokens * replayed.cacheWrite5m / 1e6
+      + built.usage.output_tokens * replayed.output / 1e6;
+    expect(recomputed).toBe(built.cost.total);
+  });
+
+  it('replays a freshly built claude-sonnet-5-5 receipt to the row that priced it', async () => {
+    const main = '/fake/projects/slug/sess-history-sonnet55.jsonl';
+    const usage = {
+      input_tokens: 100,
+      cache_read_input_tokens: 900,
+      cache_creation_input_tokens: 50,
+      output_tokens: 20,
+    };
+    const { receipts, meta } = await buildUsageReceipts({
+      transcriptPath: main,
+      missionId: 'm-history-sonnet55',
+      readTranscript: (p) => {
+        if (p !== main) throw new Error(`ENOENT ${p}`);
+        return JSON.stringify({
+          type: 'assistant',
+          requestId: 'req-history-sonnet55',
+          timestamp: '2026-09-29T00:00:00.000Z',
+          message: { model: 'claude-sonnet-5-5', role: 'assistant', content: [], usage },
+        });
+      },
+      listSubagentTranscripts: () => [],
+    });
+
+    // Before the id resolved, this entry produced no receipt and was tallied
+    // in meta.unresolvedModels instead (live: session.ended 8ce16014).
+    expect(meta.unresolvedModels).toEqual({});
+    expect(receipts).toHaveLength(1);
+    const [built] = receipts;
+    expect(built.model_identity).toMatchObject({ tier: 'sonnet', model_id: 'claude-sonnet-5-5' });
+    expect(built.cost.pricing_version).toBe(PRICING_VERSION);
+    const replayed = pricingForReceipt(built);
+    expect(replayed).toStrictEqual(getPricing('claude-sonnet-5-5'));
     const recomputed =
       built.usage.fresh_input_tokens * replayed.input / 1e6
       + built.usage.cached_input_tokens * replayed.cacheRead / 1e6

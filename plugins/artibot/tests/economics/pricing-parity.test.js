@@ -180,6 +180,43 @@ describe('pricing parity: same input -> same tier', () => {
     }
   });
 
+  it('the served sonnet id claude-sonnet-5-5 resolves to the same tier and row in cache-roi and the receipt', () => {
+    // Before 2026-09-29 the catalog did not know this id: the receipt found no
+    // identity and dropped the entry, and cache-roi returned unpriced. Both
+    // readers must now agree on the tier AND on the row, or the session roll-up
+    // and the ledger disagree on dollars for the id the host actually serves.
+    // Since the promotion the id IS the sonnet tier id, so `row` is the sonnet
+    // tier row itself (see tests/core/model-catalog.test.js for where its
+    // numbers come from and which of them are multiplier-derived).
+    const id = 'claude-sonnet-5-5';
+    const row = getPricing(id);
+    expect(row, id).not.toBeNull();
+    expect(row.tier).toBe('sonnet');
+    expect(row).toEqual(getPricing('sonnet'));
+    expect(resolveModelIdentity(id)?.tier).toBe('sonnet');
+    expect(_resolvePricing(id)).toEqual(row);
+    for (const [counter, column] of Object.entries(RECEIPT_COLUMN_BY_COUNTER)) {
+      expect(priceUsage({ [counter]: ONE_MTOK }, 'sonnet', id).total).toBe(row[column]);
+    }
+  });
+
+  it('the pre-5.5 sonnet id claude-sonnet-5 keeps its tier and one row in cache-roi and the receipt', () => {
+    // A legacy id since 2026-09-29, but old transcripts and ledger rows still
+    // carry it, so both readers must keep resolving it and must agree on the
+    // row they price it at, whichever row that is: today the sonnet tier row
+    // (no ID_PRICES row); the numbers themselves are pinned as literals in
+    // tests/core/model-catalog.test.js.
+    const id = 'claude-sonnet-5';
+    const row = getPricing(id);
+    expect(row.id).toBe(id);
+    expect(row.tier).toBe('sonnet');
+    expect(resolveModelIdentity(id)?.tier).toBe('sonnet');
+    expect(_resolvePricing(id)).toEqual(row);
+    for (const [counter, column] of Object.entries(RECEIPT_COLUMN_BY_COUNTER)) {
+      expect(priceUsage({ [counter]: ONE_MTOK }, 'sonnet', id).total).toBe(row[column]);
+    }
+  });
+
   it('both refuse to price an off-catalog claude id; they diverge only on non-claude strings', () => {
     // A retired id. Neither reader guesses its price from the current tier
     // row. The receipt (ledger writer) yields no identity at all; cache-roi
@@ -290,6 +327,90 @@ describe('pricing parity: the two cost axes are different questions', () => {
     for (const tier of TIERS) {
       expect(MODELS[tier].tokenizerCoeffMeasured).toBe(false);
     }
+  });
+});
+
+describe('pricing parity: the served sonnet id reaches the ledger', () => {
+  const main = '/fake/projects/slug/sess-served-sonnet.jsonl';
+  const usage = {
+    input_tokens: 100,
+    cache_read_input_tokens: 900,
+    cache_creation_input_tokens: 50,
+    output_tokens: 20,
+  };
+
+  /** One assistant entry per model in `models`, folded by the real receipt builder. */
+  const buildFor = (...models) => buildUsageReceipts({
+    transcriptPath: main,
+    missionId: 'm-served-sonnet',
+    readTranscript: (p) => {
+      if (p !== main) throw new Error(`ENOENT ${p}`);
+      return models
+        .map((model, i) => JSON.stringify({
+          type: 'assistant',
+          requestId: `req-served-sonnet-${i}`,
+          timestamp: '2026-09-29T00:00:00.000Z',
+          message: { model, role: 'assistant', content: [{ type: 'text', text: 'x' }], usage },
+        }))
+        .join('\n');
+    },
+    listSubagentTranscripts: () => [],
+  });
+
+  it('turns a claude-sonnet-5-5 entry into a receipt instead of counting it unresolved', async () => {
+    // Positive control for the live loss: session.ended 8ce16014 reported
+    // unresolved_models ["claude-sonnet-5-5"] and its usage never reached the
+    // ledger. Before the catalog knew the id this fold yielded 0 receipts.
+    const { receipts, meta } = await buildFor('claude-sonnet-5-5');
+
+    expect(meta.unresolvedModels).toEqual({});
+    expect(receipts).toHaveLength(1);
+    const [built] = receipts;
+    expect(built.model_identity).toMatchObject({
+      tier: 'sonnet',
+      model_id: 'claude-sonnet-5-5',
+      version: 'claude-sonnet-5-5',
+    });
+    expect(built.cost.pricing_version).toBe(PRICING_VERSION);
+    expect(built.cost.total).toBe(priceUsage(built.usage, 'sonnet', 'claude-sonnet-5-5').total);
+    expect(Number.isFinite(built.cost.total)).toBe(true);
+  });
+
+  it.each([
+    ['claude-sonnet-5-5[1m]', '1m'],
+    ['claude-sonnet-5-5-20260929', '20260929'],
+  ])('resolves the qualified form %s and keeps the qualifier as the version', async (raw, version) => {
+    const { receipts, meta } = await buildFor(raw);
+
+    expect(meta.unresolvedModels).toEqual({});
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].model_identity).toMatchObject({
+      tier: 'sonnet',
+      model_id: 'claude-sonnet-5-5',
+      version,
+    });
+  });
+
+  it('keeps claude-sonnet-5 and claude-sonnet-5-5 entries of one run as two receipts, one per id', async () => {
+    // Old rows stay interpretable next to new ones: the leader may still hold a
+    // Sonnet 5 sub-agent while a 5.5 one runs in the same session.
+    const { receipts, meta } = await buildFor('claude-sonnet-5', 'claude-sonnet-5-5');
+
+    expect(meta.unresolvedModels).toEqual({});
+    expect(receipts.map((r) => r.model_identity.model_id).sort()).toEqual([
+      'claude-sonnet-5',
+      'claude-sonnet-5-5',
+    ]);
+    for (const r of receipts) expect(r.model_identity.tier).toBe('sonnet');
+  });
+
+  it('still drops an id the catalog does not know (negative control)', async () => {
+    // A resolver that accepted every claude-sonnet-* string would pass the tests
+    // above; this one fails it. The near-miss is tallied, not billed.
+    const { receipts, meta } = await buildFor('claude-sonnet-5-6');
+
+    expect(receipts).toHaveLength(0);
+    expect(meta.unresolvedModels).toEqual({ 'claude-sonnet-5-6': 1 });
   });
 });
 

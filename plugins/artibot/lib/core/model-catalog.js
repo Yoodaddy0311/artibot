@@ -74,9 +74,16 @@ export const BASELINE_TIER = 'opus';
  * `thinkingMode` moved to `extended` (budget_tokens only, no adaptive) and
  * sonnet `outLimit` moved from 64_000 to 128_000, both per the claude-api skill.
  *
+ * 2026-09-29 bump: sonnet `id` moved to `claude-sonnet-5-5`, the id the host
+ * serves, and `claude-sonnet-5` became its legacy id - the move opus made on
+ * 2026-09-23. The first edit of that day only listed `claude-sonnet-5-5` as a
+ * legacy id and left this stamp alone; this bump covers both. No price
+ * changed (the Sonnet 5.5 input / output / cache read figures equal Sonnet
+ * 5's), so {@link PRICING_VERSION} did not move.
+ *
  * @type {string}
  */
-export const CATALOG_VERSION = '2026-09-28';
+export const CATALOG_VERSION = '2026-09-29';
 
 /**
  * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
@@ -101,6 +108,12 @@ export const CATALOG_VERSION = '2026-09-28';
  * were re-read the same day and already matched, so their values did not move.
  * The same read added the per-id row in {@link ID_PRICES} (Claude Opus 5).
  * {@link CATALOG_VERSION} moved that day too, for a non-price edit of its own.
+ *
+ * 2026-09-29, NO bump: the sonnet tier id moved to Sonnet 5.5. Its input,
+ * output and cache-read figures were compared with the claude-api skill price
+ * table (cached 2026-09-25, not {@link PRICING_SOURCE}) and equal the Sonnet 5
+ * row, so no price moved. That table lists no cache-write prices, so the sonnet
+ * row's 2.5 / 4 stay the standard 1.25x / 2x of input and were not read for 5.5.
  *
  * @type {string}
  */
@@ -195,13 +208,26 @@ export const MODELS = deepFreeze({
     constraints: [],
   },
   sonnet: {
-    // 2026-09-15 O2: id 갱신.
-    id: 'claude-sonnet-5',
-    legacyIds: [],
-    // Sonnet 5 official pricing page row, fetched 2026-09-28 KST. The page
-    // footnotes $2 / $10 as the confirmed standard price (the increase that
-    // had been scheduled for 9/1 was cancelled). Cache read is the standard
-    // 0.1x of input.
+    // 2026-09-29: id moved to Sonnet 5.5, the id the host serves for this tier
+    // (it was `claude-sonnet-5` since 2026-09-15, O2). Until the catalog knew
+    // it, every such transcript entry was tallied as an unresolved model and
+    // dropped (live: session.ended 8ce16014), so sonnet usage never reached
+    // the ledger. claude-sonnet-5 stays resolvable as a legacy id so pre-switch
+    // transcripts and ledger rows keep tier sonnet.
+    id: 'claude-sonnet-5-5',
+    legacyIds: ['claude-sonnet-5'],
+    // Where the price columns come from. Sonnet 5 official pricing page row,
+    // fetched 2026-09-28 KST: the page footnotes $2 / $10 as the confirmed
+    // standard price (the increase that had been scheduled for 9/1 was
+    // cancelled); cache read is the standard 0.1x of input.
+    // Sonnet 5.5: input $2 / output $10 / cache read $0.20 per MTok are the
+    // claude-api skill price table (cached 2026-09-25) - identical to Sonnet 5,
+    // so this one row prices both ids and claude-sonnet-5 needs no ID_PRICES
+    // row (a pin in tests/core/model-catalog.test.js goes red if the two ever
+    // differ). That table does not list cache writes: 2.5 / 4 are the standard
+    // 1.25x / 2x multiples of input, derived and not read for 5.5.
+    // `priceMeasured` therefore means: compared with PRICING_SOURCE for Sonnet
+    // 5, and with the skill table (not the page) for Sonnet 5.5.
     priceInPerMTok: 2,
     priceOutPerMTok: 10,
     priceCacheReadPerMTok: 0.2,
@@ -210,6 +236,10 @@ export const MODELS = deepFreeze({
     priceMeasured: true,
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
+    // ctxLimit, outLimit, thinkingMode and promptStyle are the values the
+    // catalog carried for Sonnet 5 (outLimit per the claude-api skill,
+    // 2026-09-28). They were carried over when the id moved to 5.5; nobody
+    // re-read them for 5.5.
     ctxLimit: 1_000_000,
     // 128K max output (claude-api skill shared/models.md, Sonnet 5 row).
     outLimit: 128_000,

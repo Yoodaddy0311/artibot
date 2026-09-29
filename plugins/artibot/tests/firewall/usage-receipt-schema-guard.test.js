@@ -406,7 +406,8 @@ describe('usage receipt — the fields T-16 requires the writer to be honest abo
     const { receipts } = await build(FIXTURES.clean);
     // 2026-09-23: CATALOG_VERSION bumped with the opus id change (claude-opus-5-5 + legacyIds).
     // 2026-09-28: bumped again with opus thinkingMode → always-on.
-    expect(receipts[0].model_identity.catalog_version).toBe('2026-09-28');
+    // 2026-09-29: bumped again with the sonnet id → claude-sonnet-5-5 (+ legacyIds).
+    expect(receipts[0].model_identity.catalog_version).toBe('2026-09-29');
   });
 
   it('leaves accepted null, because no acceptance signal is recorded anywhere', async () => {

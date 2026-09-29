@@ -114,8 +114,9 @@ describe('resolveModelIdentity', () => {
       version: 'claude-fable-5-1',
       // Literal on purpose: a catalog data change must show up here as a
       // deliberate re-pin (2026-09-23: opus id → claude-opus-5-5 + legacyIds;
-      // 2026-09-28: opus thinkingMode → always-on).
-      catalog_version: '2026-09-28',
+      // 2026-09-28: opus thinkingMode → always-on; 2026-09-29: sonnet id →
+      // claude-sonnet-5-5 + legacyIds).
+      catalog_version: '2026-09-29',
     });
   });
 
@@ -126,8 +127,28 @@ describe('resolveModelIdentity', () => {
       tier: 'opus',
       model_id: 'claude-opus-5-5',
       version: 'claude-opus-5-5',
-      catalog_version: '2026-09-28',
+      catalog_version: '2026-09-29',
     });
+  });
+
+  it('resolves the current sonnet id claude-sonnet-5-5 to tier sonnet', () => {
+    expect(resolveModelIdentity('claude-sonnet-5-5')).toEqual({
+      provider: 'anthropic',
+      family: 'claude',
+      tier: 'sonnet',
+      model_id: 'claude-sonnet-5-5',
+      version: 'claude-sonnet-5-5',
+      catalog_version: '2026-09-29',
+    });
+  });
+
+  it('resolves the legacy sonnet id claude-sonnet-5 to tier sonnet, keeping the observed id', () => {
+    // Same rule as the legacy opus id above: a receipt row written against
+    // claude-sonnet-5 must not be rewritten to claim the newer model.
+    const identity = resolveModelIdentity('claude-sonnet-5');
+    expect(identity.tier).toBe('sonnet');
+    expect(identity.model_id).toBe('claude-sonnet-5');
+    expect(identity.version).toBe('claude-sonnet-5');
   });
 
   it('resolves the legacy opus id claude-opus-5 to tier opus, keeping the observed id', () => {
