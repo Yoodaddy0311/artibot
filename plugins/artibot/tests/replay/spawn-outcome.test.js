@@ -1132,8 +1132,11 @@ describe('joinSpawnOutcomes() says what the score IS', () => {
   // SH-05's "evaluation score" half has ONE operational definition: the pass
   // rate of a REVIEWER's claim audit, joined on `subject_agent_id`. The output
   // carries that definition beside the number (`score.basis`) so a reader of the
-  // JSON line cannot take the ratio for a task-success rate. `score.source`
-  // stays the bare event name because consumers compare it.
+  // JSON line cannot take the ratio for a task-success rate. The definition does
+  // not ride in `score.source`: on the zero-row block `source` must stay null (a
+  // non-null one makes `compare-scorecard.js#requireScore` throw, and the CLI
+  // suite pins it null), so `basis` is a sibling key and `source` stays the bare
+  // event name wherever it is set.
   const auditBearing = () => [
     fixtureWithAudits(), // joined + unjoined + no subject
     [...fixture(), claimAudit({ total: 8, refuted: 1 })], // audits, none joined

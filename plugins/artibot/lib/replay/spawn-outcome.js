@@ -61,8 +61,11 @@
  * else feeds it: it is not what the spawn achieved, not a test result, and not a
  * number the spawn reported about itself. The definition is printed beside the
  * number as `score.basis`, so a reader of the JSON line cannot take the ratio for
- * a task-success rate; `score.source` stays the bare event name because callers
- * compare it. The verdict ENUM (`review.completed` `data.verdict`: PASS,
+ * a task-success rate. The definition is NOT carried in `score.source`: on the
+ * zero-row block `source` must stay null -- a non-null one would make
+ * `compare-scorecard.js#requireScore` throw, and the CLI suite pins it null --
+ * so `basis` is a sibling key and `source` stays the bare event name wherever it
+ * is set. The verdict ENUM (`review.completed` `data.verdict`: PASS,
  * REPAIR_REQUIRED, ...) is NOT this score: the allowlist declares no spawn id on
  * that event, so it cannot be keyed to a spawn, and this module does not pretend
  * otherwise. `basis` rides on EVERY `score` block, the row-0 block (no audit row

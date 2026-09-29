@@ -589,6 +589,35 @@ describe('agents/auditor.md carries the join key', () => {
     expect(anti, 'the subject_model anti-pattern line not found').toBeDefined();
     expect(anti).toContain('subject_agent_id');
   });
+
+  it('tells a multi-subject audit to emit ONE aggregate block WITHOUT the key, and to re-audit for per-subject rates', () => {
+    // `commands/team.md` Phase 4.5 and `spawn-outcome.js` CANNOT SEE #4d say the
+    // same thing: an aggregate block without `subject_agent_id` stays in the
+    // ledger and counts as "reviewed but not attributable" (`no_subject_audits`);
+    // per-subject pass rates need one subject per answer. The two documents gave
+    // opposite instructions before this case existed (drop the block vs keep it).
+    const para = BLOCK_SECTION.split('\n').find((l) => l.startsWith('**여러 대상을'));
+    expect(para, 'multi-subject paragraph not found').toBeDefined();
+    expect(para).toContain('정확히 1개');
+    expect(para).toContain('subject_agent_id');
+    expect(para).toContain('no_subject_audits');
+    expect(para).toContain('재감사');
+    expect(para).toContain('답변 1개에 대상 1개');
+    // The opposite instruction is gone: nothing tells the auditor to drop the block.
+    expect(AUDITOR_MD).not.toContain('블록 미기록');
+    expect(AUDITOR_MD).not.toContain('대상마다 블록 1개');
+  });
+
+  it('keeps checklist row 7 and the anti-pattern list consistent with the aggregate rule', () => {
+    const row7 = AUDITOR_MD.split('\n').find((l) => l.startsWith('| 7 | Post |'));
+    expect(row7, 'checklist row 7 not found').toBeDefined();
+    // Row 7 is the block-format check, so it also checks the COUNT: distinct
+    // blocks in one answer must be exactly one, keyless when it spans subjects.
+    expect(row7).toContain('정확히 1개');
+    expect(row7).toContain('subject_agent_id');
+    // The old "never aggregate" anti-pattern would contradict the paragraph above.
+    expect(AUDITOR_MD).not.toContain('한 블록으로 합산하지 마라');
+  });
 });
 
 describe('a block filled from the auditor template reaches the join', () => {
@@ -660,5 +689,16 @@ describe('commands/team.md Phase 4.5 hands the reviewer the key', () => {
     expect(PHASE_45).toContain('SendMessage');
     expect(PHASE_45).toContain('마지막');
     expect(PHASE_45).toContain('agents/auditor.md');
+  });
+
+  it('agrees with agents/auditor.md on the multi-subject case', () => {
+    // Same outcome for the aggregate block, same remedy for per-subject rates.
+    const para = BLOCK_SECTION.split('\n').find((l) => l.startsWith('**여러 대상을'));
+    expect(para, 'auditor.md multi-subject paragraph not found').toBeDefined();
+    expect(PHASE_45).toContain('no_subject_audits');
+    expect(para).toContain('no_subject_audits');
+    expect(PHASE_45).toContain('검수를 따로');
+    expect(para).toContain('답변 1개에 대상 1개');
+    expect(para).toContain('재감사');
   });
 });
