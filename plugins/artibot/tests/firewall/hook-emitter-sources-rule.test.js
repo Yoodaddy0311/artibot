@@ -34,6 +34,18 @@
  *       still keeps those two honest is pinned below: the map's values and the
  *       allowed-source list must equal the literals the scan collects.
  *
+ * THE STORE-OPENER CENSUS (SH-30 N2) pins the CALLER of the one emitter above
+ * that takes its source from outside. `createStateStore` defaults `source` to
+ * 'supervisor', a role this table admits, so a hook that opened a store and
+ * forgot `source` was recorded as a supervisor while every check above stayed
+ * green. Every hook-reachable `createStateStore` call must therefore spell
+ * `source: 'hook'`, bar the openers in `READ_ONLY_OPENERS`, which bind a
+ * refusing ledger port and are DRIVEN by a test to prove they cannot commit.
+ * What the census cannot read (an alias, a spread, a computed source) is a
+ * fault, never a skip. The default itself stays: 3 shipped read-only openers
+ * and 13 test call sites in 8 files omit `source` or spread options over it
+ * (measured 2026-09-29, 27 `createStateStore(` call sites in plugins/artibot).
+ *
  * WHY AN AST SCAN AND NOT grep. The emitters do not look alike: some build the
  * envelope inline at the `appendLedgerEvent` call, some return it from a
  * builder in another module (`verify-writer.js` never imports the writer at
@@ -67,13 +79,18 @@
  *     the append would be missed; none exists today (verified by the known-
  *     emitter floor below), and a new one would surface as an unclassified
  *     append in the importer rather than silently.
- *   - SCOPE OF A NAMED CONSTANT. `analyzeModule` keeps the FIRST string
- *     declaration of a name anywhere in the module, ignoring scope, so a
- *     block-local `const` that shadows an earlier one would be read as the
- *     earlier value. The SH-30 emitters write their event names and sources as
- *     inline literals for that reason. Making the lookup scope-aware (or
- *     treating a redeclared name as unreadable) is a recorded follow-up, not
- *     done here.
+ *   - SCOPE OF A NAMED CONSTANT. There is no scope analysis, so a name is read
+ *     only when its module binds it exactly ONCE (any scope, any binding form)
+ *     as `const NAME = '<literal>'`. A second binding, a parameter, a `let` or
+ *     an imported name is unreadable and leaves the emission unclassified —
+ *     deliberately over-strict, instead of a guess about which binding a use
+ *     site sees. A constant imported from another module is not followed.
+ *   - STORE OPENERS OUTSIDE THE HOOK GRAPH, AND NAME-BLIND ACCESS. The census
+ *     reads `createStateStore` by name inside the hook-reachable graph only.
+ *     The /split task feed, `resume-report.mjs` and `state-version-port.js` sit
+ *     outside it (measured 2026-09-29) and are not pinned here; a factory
+ *     reached as `ns['createStateStore']` or through a computed specifier is as
+ *     invisible as any other emitter under "RUNTIME EMISSIONS".
  *   - espree's AVAILABILITY. The parser resolves in this checkout only as an
  *     eslint transitive and is declared in no package.json — the same footing
  *     as ajv in `ledger-vocab-allowlist.test.js`. If eslint drops it this file
@@ -85,8 +102,9 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse } from 'espree';
+import { createStateStore } from '../../lib/project-state/state-manager.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -151,6 +169,64 @@ function rootJoinLoaderNames(ast) {
   return names;
 }
 
+/** The store factory whose openers the census pins, by export name. */
+const STORE_FACTORY = 'createStateStore';
+/** A `createStateStore` call whose options name no `source` at all: the store takes its own default. */
+const ABSENT = '<absent>';
+/** A `source` (or a call shape) the scan cannot read down to one string. */
+const OPAQUE = '<opaque>';
+
+/** Every name a binding pattern introduces: `a`, `{ a, b: c, ...d }`, `[a, ...r]`, `a = 1`. */
+function patternNames(pattern, out = []) {
+  if (!pattern) return out;
+  if (pattern.type === 'Identifier') out.push(pattern.name);
+  else if (pattern.type === 'ObjectPattern') {
+    for (const p of pattern.properties) patternNames(p.type === 'Property' ? p.value : p, out);
+  } else if (pattern.type === 'ArrayPattern') pattern.elements.forEach((e) => patternNames(e, out));
+  else if (pattern.type === 'AssignmentPattern') patternNames(pattern.left, out);
+  else if (pattern.type === 'RestElement') patternNames(pattern.argument, out);
+  return out;
+}
+
+const FUNCTION_NODES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+const IMPORT_BINDINGS = new Set(['ImportSpecifier', 'ImportDefaultSpecifier', 'ImportNamespaceSpecifier']);
+
+/**
+ * A module's string constants that the scan may TRUST, and how often it binds
+ * each name. A name is readable only when the module binds it exactly once — in
+ * ANY scope, by ANY form (declaration, parameter, destructuring, catch binding,
+ * import, function or class name) — and that one binding is
+ * `const NAME = '<string literal>'`. A second binding might be the one a use
+ * site sees, and a `let`/`var` might have been reassigned, so both are read as
+ * unreadable (null): the emission then stays unclassified and the gate is RED.
+ * Deliberately conservative — the scan has no scope analysis to say which
+ * binding a given use resolves to, and guessing "the first" was the fail-open.
+ *
+ * @returns {{ consts: Map<string, string>, bound: Map<string, number> }}
+ */
+function trustedStringConsts(ast) {
+  const bound = new Map();
+  const literals = new Map();
+  const bind = (pattern) => {
+    for (const name of patternNames(pattern)) bound.set(name, (bound.get(name) ?? 0) + 1);
+  };
+  walk(ast, (n) => {
+    if (n.type === 'VariableDeclaration') {
+      for (const d of n.declarations) {
+        bind(d.id);
+        if (n.kind === 'const' && d.id.type === 'Identifier' && d.init?.type === 'Literal'
+            && typeof d.init.value === 'string') literals.set(d.id.name, d.init.value);
+      }
+    } else if (FUNCTION_NODES.has(n.type)) {
+      n.params.forEach(bind);
+      if (n.id) bind(n.id);
+    } else if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id) bind(n.id);
+    else if (n.type === 'CatchClause' && n.param) bind(n.param);
+    else if (IMPORT_BINDINGS.has(n.type)) bind(n.local);
+  });
+  return { consts: new Map([...literals].filter(([name]) => bound.get(name) === 1)), bound };
+}
+
 /**
  * Parse one module: its resolvable dependencies and its module-level string
  * constants. Constants matter because almost no emitter writes the event name
@@ -159,7 +235,7 @@ function rootJoinLoaderNames(ast) {
 function analyzeModule(root, file) {
   const ast = parse(fs.readFileSync(file, 'utf8'), ESPREE_OPTS);
   const deps = new Set();
-  const consts = new Map();
+  const { consts, bound } = trustedStringConsts(ast);
   const loaders = rootJoinLoaderNames(ast);
   walk(ast, (n) => {
     if (n.type === 'ImportDeclaration') {
@@ -191,13 +267,8 @@ function analyzeModule(root, file) {
         if (fs.existsSync(target) && fs.statSync(target).isFile()) deps.add(target);
       }
     }
-    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init
-        && n.init.type === 'Literal' && typeof n.init.value === 'string'
-        && !consts.has(n.id.name)) {
-      consts.set(n.id.name, n.init.value);
-    }
   });
-  return { file, ast, deps, consts, loaders };
+  return { file, ast, deps, consts, bound, loaders };
 }
 
 function literalValue(node, consts) {
@@ -216,6 +287,73 @@ function callName(node) {
     return node.callee.property.name;
   }
   return null;
+}
+
+/**
+ * The `source` an options literal hands `createStateStore`: the string it names,
+ * {@link ABSENT} when it names none (the store then takes its own default), or
+ * {@link OPAQUE} for anything the scan cannot read to one string — options that
+ * are not built in place, a spread or computed key (either may carry `source`),
+ * or a value that is not a trusted literal.
+ */
+function storeSourceOf(arg, consts) {
+  if (arg?.type !== 'ObjectExpression') return OPAQUE;
+  let source = ABSENT;
+  for (const prop of arg.properties) {
+    if (prop.type !== 'Property' || prop.computed) source = OPAQUE;
+    else if ((prop.key.type === 'Identifier' ? prop.key.name : prop.key.value) === 'source') {
+      source = literalValue(prop.value, consts) ?? OPAQUE;
+    }
+  }
+  return source;
+}
+
+/**
+ * Every place one module reaches `createStateStore`, read by NAME. A direct
+ * call (`createStateStore({...})`, `ns.createStateStore({...})`) yields the
+ * `source` it names. The import specifier and a plain destructured binding are
+ * only bindings and yield nothing. EVERY OTHER mention — an `as` rename, an
+ * alias, a `new`, a re-export, a computed call — yields an {@link OPAQUE}
+ * opener, because a store opened through it could name any source unseen.
+ * `fn` is the nearest enclosing named function, so a listing can be tied to the
+ * exact function that was proven read-only.
+ *
+ * @returns {Array<{site: string, file: string, fn: string, source: string}>}
+ */
+function storeOpenersOf(info, rel) {
+  const found = new Map();
+  const record = (node, fn, source) => {
+    const key = `${node.loc.start.line}:${node.loc.start.column}`;
+    if (!found.has(key)) found.set(key, { site: `${rel}:${node.loc.start.line}`, file: rel, fn, source });
+  };
+  const callOf = (call, callee) => (call?.type === 'CallExpression' && call.callee === callee ? call : null);
+  const read = (id, parent, grand, fn) => {
+    const direct = callOf(parent, id);
+    const member = parent.type === 'MemberExpression' && parent.property === id && !parent.computed
+      ? callOf(grand, parent) : null;
+    const call = direct ?? member;
+    if (call) record(call, fn, storeSourceOf(call.arguments[0], info.consts));
+    else if (parent.type === 'ImportSpecifier' && parent.local.name === STORE_FACTORY) return;
+    else if (parent.type === 'Property' && grand?.type === 'ObjectPattern'
+        && parent.value.type === 'Identifier' && parent.value.name === STORE_FACTORY) return;
+    else record(id, fn, OPAQUE);
+  };
+  const visit = (node, parent, grand, fn) => {
+    if (!node || typeof node.type !== 'string') return;
+    let scope = fn;
+    if (node.type === 'FunctionDeclaration' && node.id) scope = node.id.name;
+    else if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier'
+        && FUNCTION_NODES.has(node.init?.type)) scope = node.id.name;
+    if (node.type === 'Identifier' && node.name === STORE_FACTORY) read(node, parent, grand, scope);
+    for (const key of Object.keys(node)) {
+      if (key === 'loc' || key === 'range') continue;
+      const value = node[key];
+      if (Array.isArray(value)) for (const child of value) visit(child, node, parent, scope);
+      else if (value) visit(value, node, parent, scope);
+    }
+  };
+  visit(info.ast, null, null, '<module>');
+  return [...found.values()];
 }
 
 /** Registered hook entry points — from the two config files, never from `ls`. */
@@ -277,8 +415,13 @@ function scanHookEmitters(root) {
 
   const ledgerEmissions = [];
   const sideChannelCalls = [];
+  const storeOpeners = [];
+  const stateManager = path.join(root, 'lib', 'project-state', 'state-manager.js');
   for (const [file, info] of modules) {
     const rel = path.relative(root, file).replace(/\\/g, '/');
+    // The factory's own module DEFINES `createStateStore`; every other module
+    // that mentions it is an opener the census must read.
+    if (file !== stateManager) storeOpeners.push(...storeOpenersOf(info, rel));
     if (surfaces.has(file)) {
       walk(info.ast, (n) => {
         if (n.type !== 'ObjectExpression') return;
@@ -302,7 +445,7 @@ function scanHookEmitters(root) {
       });
     }
   }
-  return { entries, modules, ledgerEmissions, sideChannelCalls, recorders };
+  return { root, entries, modules, ledgerEmissions, sideChannelCalls, storeOpeners, recorders };
 }
 
 // ---------------------------------------------------------------------------
@@ -353,10 +496,13 @@ const ROLE_SOURCED = Object.freeze({
     reason: 'Collected because lib/runtime/middleware/tasks.js (an appender) imports '
       + 'the store module directly; the hook path (tasks.js#openMissionStore) opens '
       + 'its store with source:hook and takes the other branch, collected as (A). '
-      + 'scripts/hooks/post-compact-rehydrate.js also reaches this branch by default '
-      + 'but binds a refusing ledger port, so it writes nothing. The only '
-      + 'writer-bound caller that takes THIS branch is the /split task feed '
-      + '(scripts/split/task-feed.mjs), a supervisor process, not a hook. '
+      + 'A store whose opener names no source lands HERE, so a hook that forgot one '
+      + 'would stay classified: the store-opener census below closes that at the '
+      + 'caller (every hook-reachable opener spells source:hook, bar the read-only '
+      + 'post-compact-rehydrate opener, which is driven and must refuse a commit). '
+      + 'The writer-bound caller that takes THIS branch on purpose is the /split task '
+      + 'feed (scripts/split/task-feed.mjs), a supervisor process outside the hook '
+      + 'graph and not pinned by this gate. '
       + 'state.updated declares no sources list, so the role is admitted.',
   },
 });
@@ -379,6 +525,36 @@ const NON_EMITTERS = Object.freeze({
       + 'declared writer.',
   },
 });
+
+/**
+ * Hook-reachable `createStateStore` openers that may omit `source` because the
+ * ledger port they bind REFUSES every event, so nothing they open can commit.
+ * Keyed by file; `fn` is the exported function the opener lives in, and the
+ * test below DRIVES that function and requires a refused commit — the claim is
+ * proven by behaviour, not read off a comment. Every other hook-reachable opener
+ * must spell `source: 'hook'`. Empty is a valid state: an opener that spells
+ * `source: 'hook'` needs no entry, and an entry with no opener behind it is RED.
+ */
+const READ_ONLY_OPENERS = Object.freeze({
+  'scripts/hooks/post-compact-rehydrate.js': {
+    fn: 'openMissionStoreReadOnly',
+    reason: 'The PostCompact hook only READS the mission store, for its Context Receipt. '
+      + 'It names no source, so the store would default it to supervisor, but the port it '
+      + 'binds (NO_LEDGER_WRITER) refuses every event: no commit can happen, so no '
+      + 'state.updated is ever written under any source. The test below drives this '
+      + "export and requires a refused commit. Spelling source:'hook' there would make "
+      + 'this entry unnecessary.',
+  },
+});
+
+/** Why a hook-reachable StateStore opener is not acceptable, or `null` when it is. */
+function storeOpenerFault(o) {
+  if (o.source === 'hook') return null;
+  const listed = Object.hasOwn(READ_ONLY_OPENERS, o.file) ? READ_ONLY_OPENERS[o.file] : null;
+  if (listed && o.fn === listed.fn && o.source === ABSENT) return null;
+  return `${o.site} (${o.fn}) opens the StateStore with source ${o.source} — spell source:'hook', `
+    + 'or list a read-only opener that binds a refusing ledger port';
+}
 
 /** Floor for the scanner self-check: emitters that must be found, or the scan is blind. */
 const KNOWN_EMITTER_FLOOR = Object.freeze([
@@ -430,13 +606,15 @@ const STATE_MANAGER_REL = 'lib/project-state/state-manager.js';
  * read off the AST of a scanned module.
  *
  * @returns {Array<string|null>|null|undefined} `undefined` when no such
- *   declaration exists, `null` when it is not a frozen object/array literal,
+ *   declaration exists, `null` when it is not a frozen object/array literal or
+ *   the module binds the name more than once (no single declaration to trust),
  *   and otherwise one entry per value — `null` for any value that is not a
  *   string literal, so the caller can refuse it.
  */
-function frozenLiteralValues(relFile, name) {
-  const info = scan.modules.get(path.join(PKG_ROOT, ...relFile.split('/')));
+function frozenLiteralValues(relFile, name, from = scan) {
+  const info = from.modules.get(path.join(from.root, ...relFile.split('/')));
   if (!info) return undefined;
+  if ((info.bound.get(name) ?? 0) > 1) return null;
   let found;
   walk(info.ast, (n) => {
     if (found !== undefined || n.type !== 'VariableDeclarator') return;
@@ -461,6 +639,49 @@ function frozenLiteralValues(relFile, name) {
 /** Sorted, de-duplicated values of one field over the emissions collected in one file. */
 function collectedIn(relFile, field) {
   return [...new Set(scan.ledgerEmissions.filter((e) => e.file === relFile).map((e) => e[field]))].sort();
+}
+
+/**
+ * A scratch package root holding the least a hook scan needs — the dispatch
+ * table, stubs for the writer, its facade, the side-channel and the store module
+ * — plus the given hook scripts, each registered as a handler. `files` adds or
+ * replaces any other path (e.g. the real `state-manager.js` text).
+ *
+ * @param {Record<string, string>} hooks - script name → source
+ * @param {Record<string, string>} [files] - root-relative path → source
+ * @returns {string} the root; the caller removes it
+ */
+function plantHookRoot(hooks, files = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-emitter-plant-'));
+  const put = {
+    'hooks/dispatch-table.json': JSON.stringify({
+      slots: { Stop: { handlers: Object.keys(hooks).map((script) => ({ name: script, script })) } },
+    }),
+    'hooks/hooks.json': JSON.stringify({ hooks: {} }),
+    'lib/runtime/event-writer.js': 'export function writeEvent() { return { ok: true }; }\n',
+    'lib/runtime/ledger.js': "import { writeEvent } from './event-writer.js';\n"
+      + 'export function appendLedgerEvent(root, ev) { return writeEvent(root, ev); }\n',
+    'lib/observability/decision-events.js': 'export function recordSomething() { return null; }\n',
+    'lib/project-state/state-manager.js': 'export function createStateStore() { return {}; }\n',
+    ...Object.fromEntries(Object.entries(hooks).map(([script, body]) => [`scripts/hooks/${script}`, body])),
+    ...files,
+  };
+  for (const [rel, body] of Object.entries(put)) {
+    const dest = path.join(root, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, body, 'utf8');
+  }
+  return root;
+}
+
+/** Scan a planted root and always remove it. */
+function scanPlanted(hooks, files) {
+  const root = plantHookRoot(hooks, files);
+  try {
+    return scanHookEmitters(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 describe('scanner self-check — the collector is not blind', () => {
@@ -675,6 +896,201 @@ describe('scanner self-check — the collector is not blind', () => {
       expect(unclassifiedOf(rowsOf(scanHookEmitters(root)))).toEqual([storeHookSite]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('scanner named constants — read only when the module binds the name once (SH-30 residual)', () => {
+  // The scan used to keep the FIRST string declaration of a name anywhere in the
+  // module, ignoring scope. A second binding of the name (an inner const, a
+  // parameter, a destructured local, a catch binding) or a `let` that can be
+  // reassigned was therefore read as the first value: the emission looked
+  // compliant while the code sent something else. Every case below was read as
+  // 'hook' / 'tool.used' before the fix; each must now be unreadable (null),
+  // which leaves the emission unclassified and the gate RED.
+  const HEAD = "import { appendLedgerEvent } from '../../lib/runtime/ledger.js';\n";
+  const send = (fields) => `appendLedgerEvent(root, { ${fields} })`;
+  const bySrc = "event: 'tool.used', source: SRC";
+  /** The `field` of every emission a one-hook scratch graph yields, in source order. */
+  const read = (body, field = 'source') => scanPlanted({ 'planted.js': HEAD + body })
+    .ledgerEmissions.map((e) => e[field]);
+
+  it('still reads a constant that is bound exactly once (positive control)', () => {
+    expect(read(`const SRC = 'hook';\nexport const run = (root) => ${send(bySrc)};\n`)).toEqual(['hook']);
+    expect(read(`const EVT = 'tool.used';\nexport const run = (root) => ${send("event: EVT, source: 'hook'")};\n`, 'event'))
+      .toEqual(['tool.used']);
+  });
+
+  it.each([
+    ['an inner const of the same name', 'source', [null],
+      `const SRC = 'hook';\nexport function run(root) {\n  const SRC = 'scheduler';\n  return ${send(bySrc)};\n}\n`],
+    ['two functions each declaring the same name', 'source', [null, null],
+      `export function a(root) {\n  const SRC = 'hook';\n  return ${send(bySrc)};\n}\n`
+      + `export function b(root) {\n  const SRC = 'scheduler';\n  return ${send(bySrc)};\n}\n`],
+    ['a parameter that shadows the constant', 'source', [null],
+      `const SRC = 'hook';\nexport function run(root, SRC) {\n  return ${send(bySrc)};\n}\n`],
+    ['a destructured local that shadows the constant', 'source', [null],
+      `const SRC = 'hook';\nexport function run(root, opts) {\n  const { SRC } = opts;\n  return ${send(bySrc)};\n}\n`],
+    ['a catch binding that shadows the constant', 'source', [null],
+      `const SRC = 'hook';\nexport function run(root) {\n  try {\n    return null;\n  } catch (SRC) {\n    return ${send(bySrc)};\n  }\n}\n`],
+    ['a let that is reassigned', 'source', [null],
+      `let SRC = 'hook';\nSRC = process.env.WHO;\nexport function run(root) {\n  return ${send(bySrc)};\n}\n`],
+    ['a shadowed event-name constant', 'event', [null],
+      `const EVT = 'tool.used';\nexport function run(root) {\n  const EVT = 'mission.created';\n  return ${send("event: EVT, source: 'hook'")};\n}\n`],
+  ])('reads %s as unreadable, leaving the emission unclassified', (_label, field, expected, body) => {
+    expect(read(body, field)).toEqual(expected);
+  });
+
+  it('reads a frozen list only from a name bound once, so a shadow turns the pin RED', () => {
+    // `frozenLiteralValues` had the same first-declaration reading: a parameter
+    // named STATE_UPDATED_SOURCES inside the store module left the gate comparing
+    // the emitted sources with a list the code no longer uses.
+    const realText = fs.readFileSync(path.join(PKG_ROOT, ...STATE_MANAGER_REL.split('/')), 'utf8');
+    const appender = "import { createStateStore } from '../../lib/project-state/state-manager.js';\n"
+      + 'export { createStateStore };\n';
+    const shadow = '\nexport function shadow(STATE_UPDATED_SOURCES) { return STATE_UPDATED_SOURCES; }\n';
+    const named = (text) => frozenLiteralValues(
+      STATE_MANAGER_REL, 'STATE_UPDATED_SOURCES',
+      scanPlanted({ 'appender.js': appender }, { [STATE_MANAGER_REL]: text }),
+    );
+    expect(named(realText)).toEqual(['hook', 'supervisor']);
+    expect(named(realText + shadow)).toBeNull();
+  });
+});
+
+describe('hook-reachable StateStore openers name their source (SH-30 N2)', () => {
+  // WHY THIS EXISTS. `createStateStore` defaults `source` to 'supervisor'. A hook
+  // that opens a store and forgets `source` was therefore recorded as a
+  // supervisor, which lands on the one `state.updated` branch this file already
+  // classifies as legitimate (ROLE_SOURCED): the emission classification stayed
+  // green for exactly the mistake the rule exists to catch. The default cannot
+  // simply be removed — 3 shipped read-only openers and 13 test call sites omit
+  // `source` (measured 2026-09-29) — so the rule is pinned at the CALLER instead.
+  const STORE = "import { createStateStore } from '../../lib/project-state/state-manager.js';\n";
+  const opts = (fields) => `{ projectRoot: root, sessionId: 's', appendEvent: () => ({ ok: true })${fields} }`;
+  const openersOf = (body) => scanPlanted({ 'planted.js': body }).storeOpeners;
+  const faultsOf = (body) => openersOf(body).map(storeOpenerFault).filter(Boolean);
+  const dynamic = (call) => 'export async function open(root) {\n'
+    + "  const { createStateStore } = await import('../../lib/project-state/state-manager.js');\n"
+    + `  return ${call};\n}\n`;
+  const namespaced = (call) => "import * as sm from '../../lib/project-state/state-manager.js';\n"
+    + `export const open = (root) => sm.${call};\n`;
+
+  it('finds the openers it is meant to pin (the census is not blind)', () => {
+    const seen = scan.storeOpeners.map((o) => `${o.file}#${o.fn}=${o.source}`);
+    expect(seen).toContain('lib/runtime/middleware/tasks.js#openMissionStore=hook');
+    expect(seen).toContain('scripts/hooks/post-compact-rehydrate.js#openMissionStoreReadOnly=<absent>');
+  });
+
+  it('holds every hook-reachable opener to source:hook, bar a listed read-only one', () => {
+    expect(scan.storeOpeners.map(storeOpenerFault).filter(Boolean)).toEqual([]);
+  });
+
+  it.each([
+    ['spells source:hook', `${STORE}export const open = (root) => createStateStore(${opts(", source: 'hook'")});\n`],
+    ['spells source:hook on a namespace import', namespaced(`createStateStore(${opts(", source: 'hook'")})`)],
+    ['spells source:hook on a dynamically imported binding', dynamic(`createStateStore(${opts(", source: 'hook'")})`)],
+    ['spells source:hook through a constant bound once',
+      `${STORE}const WHO = 'hook';\nexport const open = (root) => createStateStore(${opts(', source: WHO')});\n`],
+  ])('accepts an opener that %s (positive control)', (_label, body) => {
+    expect(openersOf(body)).toHaveLength(1);
+    expect(faultsOf(body)).toEqual([]);
+  });
+
+  it.each([
+    ['omits source, so the store defaults it to supervisor', `${STORE}export const open = (root) => createStateStore(${opts('')});\n`, '<absent>'],
+    ['omits source on a namespace import', namespaced(`createStateStore(${opts('')})`), '<absent>'],
+    ['omits source on a dynamically imported binding', dynamic(`createStateStore(${opts('')})`), '<absent>'],
+    ['spells source:supervisor', `${STORE}export const open = (root) => createStateStore(${opts(", source: 'supervisor'")});\n`, 'supervisor'],
+    ['computes its source', `${STORE}export const open = (root) => createStateStore(${opts(', source: process.env.WHO')});\n`, '<opaque>'],
+    ['spreads options that may carry the source',
+      `${STORE}export const open = (root, extra) => createStateStore({ ...extra, projectRoot: root, sessionId: 's', appendEvent: () => ({ ok: true }) });\n`, '<opaque>'],
+    ['passes options it does not build in place', `${STORE}export const open = (root, options) => createStateStore(options);\n`, '<opaque>'],
+    ['names a source constant that a parameter shadows',
+      `${STORE}const WHO = 'hook';\nexport const open = (root, WHO) => createStateStore(${opts(', source: WHO')});\n`, '<opaque>'],
+    ['aliases the factory', `${STORE}const open = createStateStore;\nexport const run = (root) => open(${opts(", source: 'hook'")});\n`, '<opaque>'],
+    ['constructs the factory', `${STORE}export const open = (root) => new createStateStore(${opts(", source: 'hook'")});\n`, '<opaque>'],
+    ['re-exports the factory', "export { createStateStore } from '../../lib/project-state/state-manager.js';\n", '<opaque>'],
+  ])('flags an opener that %s', (_label, body, source) => {
+    const faults = faultsOf(body);
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toContain(`with source ${source}`);
+  });
+
+  it('ties a read-only listing to its file, its function and an omitted source (it is not a waiver)', () => {
+    for (const [file, entry] of Object.entries(READ_ONLY_OPENERS)) {
+      const at = { file, fn: entry.fn, site: `${file}:1` };
+      expect(storeOpenerFault({ ...at, source: ABSENT })).toBeNull();
+      for (const other of [
+        { fn: 'anotherOpener', source: ABSENT },
+        { source: 'supervisor' },
+        { source: OPAQUE },
+        { file: 'scripts/hooks/other.js', source: ABSENT },
+      ]) expect(storeOpenerFault({ ...at, ...other })).toContain('opens the StateStore');
+    }
+  });
+
+  it('flags an omitting hook that the emission classification alone waves through (the N2 defect)', () => {
+    // The store module is the REAL text, so its two `state.updated` literals are
+    // collected exactly as in the repository scan; the hook binds a live writer.
+    const realText = fs.readFileSync(path.join(PKG_ROOT, ...STATE_MANAGER_REL.split('/')), 'utf8');
+    const hook = "import { appendLedgerEvent } from '../../lib/runtime/ledger.js';\n"
+      + `${STORE}export const open = (root, sid) => createStateStore({ projectRoot: root, sessionId: sid,\n`
+      + '  appendEvent: (event) => appendLedgerEvent(root, event) });\n';
+    const planted = scanPlanted({ 'planted.js': hook }, { [STATE_MANAGER_REL]: realText });
+    expect(planted.ledgerEmissions.filter((e) => e.file === STATE_MANAGER_REL)).toHaveLength(2);
+    // Emission side: every literal the store can write is classified — GREEN.
+    expect(planted.ledgerEmissions.filter(
+      (e) => !(e.source === 'hook' && hookPermitted(e.event)) && !(e.site in ROLE_SOURCED),
+    )).toEqual([]);
+    // Caller side: the hook never said which role it is — RED.
+    expect(planted.storeOpeners.map(storeOpenerFault).filter(Boolean)).toHaveLength(1);
+  });
+
+  it('lists only read-only openers that are live and cannot commit', async () => {
+    const probeId = 'M-20260929-001';
+    const probe = () => ({
+      title: 'gate-probe',
+      status: 'executing',
+      intent: { path: `missions/${probeId}/intent.md`, revision: 1 },
+      plan: { path: `missions/${probeId}/plan.md`, revision: 1 },
+    });
+    const commit = (store) => store.updateMission(probeId, probe, { reason: 'gate-probe' });
+    const inTmp = async (run) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'read-only-opener-'));
+      try {
+        return await run(root);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    // POSITIVE CONTROL: the probe mission commits through an accepting port, so a
+    // refusal below can only come from the port the listed opener itself binds.
+    await inTmp((root) => {
+      const store = createStateStore({
+        projectRoot: root, sessionId: 'gate-probe', source: 'hook', renderProjectionFile: false,
+        appendEvent: () => ({ ok: true }),
+      });
+      expect(commit(store).ok).toBe(true);
+    });
+
+    for (const [file, entry] of Object.entries(READ_ONLY_OPENERS)) {
+      expect(
+        scan.storeOpeners.some((o) => o.file === file && o.fn === entry.fn),
+        `stale listing: no StateStore opener in ${file}#${entry.fn}`,
+      ).toBe(true);
+      expect(entry.reason.length, `${file} needs a reason`).toBeGreaterThan(40);
+      const mod = await import(pathToFileURL(path.join(PKG_ROOT, ...file.split('/'))).href);
+      expect(typeof mod[entry.fn], `${file} must export ${entry.fn} for this gate to drive it`).toBe('function');
+      await inTmp((root) => {
+        const store = mod[entry.fn](root);
+        const out = commit(store);
+        expect(out.ok, `${file}#${entry.fn} committed a write`).toBe(false);
+        expect(out.errors.join(' ')).toMatch(/ledger refused state\.updated/);
+        expect(fs.existsSync(store.paths.journal), `${file}#${entry.fn} wrote a journal`).toBe(false);
+        expect(fs.existsSync(store.paths.snapshot), `${file}#${entry.fn} wrote a snapshot`).toBe(false);
+      });
     }
   });
 });
