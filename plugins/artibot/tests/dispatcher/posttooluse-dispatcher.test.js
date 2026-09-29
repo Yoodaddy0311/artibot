@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -70,6 +70,17 @@ const PLUGIN_ROOT = path.resolve(
   '..', '..',
 );
 const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_posttooluse-dispatcher.js');
+
+/**
+ * SH-09: the AskUserQuestion payload. DOCUMENT-BASED, NOT LIVE-CAPTURED
+ * (문서 기반, 라이브 미캡처) -- the fixture's own `_note` says why: the real
+ * PostToolUse fires only after a human answers, so no unattended probe froze it.
+ * Its `cwd` is a placeholder; every case below overwrites it with a sandbox repo.
+ */
+const ASK_FIXTURE = JSON.parse(readFileSync(
+  path.join(PLUGIN_ROOT, 'tests', 'hooks', 'fixtures', 'askuser', 'PostToolUse.AskUserQuestion.json'),
+  'utf-8',
+));
 
 /** Throwaway home and working directory for the spawned dispatcher. */
 let sandboxHome;
@@ -324,6 +335,14 @@ describe('_posttooluse-dispatcher (integration)', () => {
     }
   });
 
+  // SH-09. Two handlers, in table order: the universal tracker (which skips this
+  // tool itself, SKIP_TOOLS) and the ledger writer. Nothing else may ride along.
+  it('selectHooks() routes AskUserQuestion to tool-tracker + tool-used-record only (SH-09)', async () => {
+    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
+    expect(mod.selectHooks('AskUserQuestion').map((h) => h.name))
+      .toEqual(['tool-tracker', 'tool-used-record']);
+  });
+
   /**
    * END-TO-END for the `tool.used` writer: the row must survive the REAL
    * dispatcher's spawn, not merely exist when the module is imported.
@@ -371,6 +390,57 @@ describe('_posttooluse-dispatcher (integration)', () => {
     expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
     expect(fired[0].action_id).toBe('toolu_posttooluse_skill_1');
     expect(fired[0].source).toBe('hook');
+  });
+
+  /**
+   * END-TO-END for the SH-09 AskUserQuestion carrier: the row must survive the
+   * REAL dispatcher's spawn, not merely exist when the module is imported.
+   *
+   * SH-09's purpose is the question-frequency EFFECT of the constitution stage B
+   * change, and that had no live carrier: `human.asked` rows are guard blocks,
+   * not questions. One `tool.used` row per question call is the carrier.
+   *
+   * MUTE: the dispatcher merges every child's stdout into hook output the host
+   * acts on, so stdout is asserted EMPTY, not merely valid JSON. A REJECTION IS
+   * ALSO A WRITTEN LINE, so `ledger.rejected` is asserted empty on its own.
+   *
+   * WHAT THIS DOES NOT PROVE: the payload is the DOCUMENT-BASED fixture, so it
+   * shows the pipeline works for the documented shape, not that the host sends it.
+   */
+  it('writes one accepted tool.used row through the real dispatcher (AskUserQuestion route, SH-09)', () => {
+    const repo = makeLedgerRepo('ask-e2e');
+    const { stdout, status } = runDispatcher({ ...structuredClone(ASK_FIXTURE.payload), cwd: repo });
+    expect(status).toBe(0);
+    expect(stdout).toBe('');
+
+    const lines = readLedger(repo);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    const used = lines.filter((l) => l.event === 'tool.used');
+    expect(used).toHaveLength(1);
+    expect(used[0].data).toEqual({ tool: 'AskUserQuestion', ok: true, duration_ms: 15234 });
+    expect(used[0].source).toBe('hook');
+    expect(used[0].action_id).toBe(ASK_FIXTURE.payload.tool_use_id);
+
+    // The two carriers COEXIST on one dispatch and describe different things:
+    // `tool.used` names the tool the host ran, `hook.fired` names the handlers
+    // Artibot ran because of it.
+    const fired = lines.filter((l) => l.event === 'hook.fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.tool).toBe('AskUserQuestion');
+    expect(fired[0].data.hooks).toEqual(['tool-tracker', 'tool-used-record']);
+    expect(fired[0].data.failed).toEqual([]);
+    expect(fired[0].data.count).toBe(2);
+  });
+
+  // FAIL OPEN, through the dispatcher. A recording failure must not surface as a
+  // non-zero exit or as stdout, whichever child hit it.
+  it('exits 0 and stays silent through the dispatcher when the ledger cannot be written (SH-09)', () => {
+    const blocked = makeLedgerRepo('ask-blocked');
+    writeFileSync(path.dirname(ledgerFilePath(blocked)), 'not a dir', 'utf-8');
+    const { stdout, status } = runDispatcher({ ...structuredClone(ASK_FIXTURE.payload), cwd: blocked });
+    expect(status).toBe(0);
+    expect(stdout).toBe('');
+    expect(existsSync(ledgerFilePath(blocked))).toBe(false);
   });
 
   /**

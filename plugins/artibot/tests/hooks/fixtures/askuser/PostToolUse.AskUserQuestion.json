@@ -1,0 +1,92 @@
+{
+  "_note": "문서 기반, 라이브 미캡처 (DOCUMENT-BASED, NOT LIVE-CAPTURED). This is NOT a host payload. PostToolUse(AskUserQuestion) fires only after a human answers the question, so it cannot be captured by an unattended session (claude -p); no owner was present when SH-09 W2-2 was built. The `payload` below is a SYNTHETIC composition of (1) the PostToolUse envelope keys that WERE measured live on host 2.1.272 for the Skill tool (../host-payloads/PostToolUse.Skill.json) and (2) the documented AskUserQuestion tool input shape. Every value is synthetic (ids, question text, labels); there is no user data in this file. When a real capture exists, freeze it as ../host-payloads/PostToolUse.AskUserQuestion.json and diff it against this file; do not edit this one to match.",
+  "label_ko": "문서 기반, 라이브 미캡처",
+  "provenance": "document-based-not-live-captured",
+  "live_captured": false,
+  "used_by": "tests/hooks/tool-used-record.test.js and tests/dispatcher/posttooluse-dispatcher.test.js (SH-09 permanent carrier, limb sh09-askuser-carrier)",
+  "shape_sources": {
+    "envelope": {
+      "keys": ["cwd", "duration_ms", "effort", "hook_event_name", "permission_mode", "prompt_id", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path"],
+      "status": "MEASURED LIVE for tool_name=Skill (host 2.1.272, 2 PostToolUse rows); ASSUMED tool-independent for AskUserQuestion",
+      "source": "tests/hooks/fixtures/host-payloads/PostToolUse.Skill.json"
+    },
+    "tool_input": {
+      "keys": ["questions"],
+      "question_item_keys": ["question", "header", "options", "multiSelect"],
+      "option_item_keys": ["label", "description"],
+      "status": "DOCUMENTED (Claude Code / Agent SDK AskUserQuestion tool input); NOT observed on this repository's host"
+    },
+    "tool_response": {
+      "keys": ["questions", "answers"],
+      "status": "UNVERIFIED. No documented PostToolUse tool_response for AskUserQuestion was found. The shape mirrors the SDK's documented answer object (question text mapped to the selected label). The writer reads NOTHING from it except an optional boolean `success`, so a wrong guess here cannot change what is recorded.",
+      "success_key": "absent in this synthetic response on purpose: the documented shape has none, so the writer's default (ok true) is what the tests exercise"
+    }
+  },
+  "not_measured": [
+    "the real PostToolUse payload for AskUserQuestion (keys, types, and whether tool_response carries a success boolean)",
+    "whether PostToolUse fires when the user declines or interrupts the question, or PostToolUseFailure fires instead (a declined call is then not counted by the carrier)",
+    "whether duration_ms is present on AskUserQuestion rows and whether it includes the human's thinking time",
+    "AskUserQuestion issued from inside a subagent, and whether the payload then carries an agent id key",
+    "keys inside the effort object"
+  ],
+  "payload": {
+    "hook_event_name": "PostToolUse",
+    "session_id": "sess-askuser-fixture-0001",
+    "transcript_path": "<synthetic-transcript-path>",
+    "cwd": "<replaced-by-each-test-with-its-own-sandbox-repo>",
+    "permission_mode": "default",
+    "prompt_id": "pid-askuser-fixture-0001",
+    "effort": {},
+    "tool_name": "AskUserQuestion",
+    "tool_use_id": "toolu_01AskUserFixture0001",
+    "tool_input": {
+      "questions": [
+        {
+          "question": "SYNTHETIC-QUESTION-ALPHA which output format should be used?",
+          "header": "SYNTHETIC-HDR-A",
+          "options": [
+            { "label": "SYNTHETIC-OPTION-SUMMARY", "description": "SYNTHETIC-DESCRIPTION-BRIEF" },
+            { "label": "SYNTHETIC-OPTION-DETAILED", "description": "SYNTHETIC-DESCRIPTION-FULL" }
+          ],
+          "multiSelect": false
+        },
+        {
+          "question": "SYNTHETIC-QUESTION-BRAVO which checks should run?",
+          "header": "SYNTHETIC-HDR-B",
+          "options": [
+            { "label": "SYNTHETIC-OPTION-LINT", "description": "SYNTHETIC-DESCRIPTION-LINT" },
+            { "label": "SYNTHETIC-OPTION-TESTS", "description": "SYNTHETIC-DESCRIPTION-TESTS" }
+          ],
+          "multiSelect": true
+        }
+      ]
+    },
+    "tool_response": {
+      "questions": [
+        {
+          "question": "SYNTHETIC-QUESTION-ALPHA which output format should be used?",
+          "header": "SYNTHETIC-HDR-A",
+          "options": [
+            { "label": "SYNTHETIC-OPTION-SUMMARY", "description": "SYNTHETIC-DESCRIPTION-BRIEF" },
+            { "label": "SYNTHETIC-OPTION-DETAILED", "description": "SYNTHETIC-DESCRIPTION-FULL" }
+          ],
+          "multiSelect": false
+        },
+        {
+          "question": "SYNTHETIC-QUESTION-BRAVO which checks should run?",
+          "header": "SYNTHETIC-HDR-B",
+          "options": [
+            { "label": "SYNTHETIC-OPTION-LINT", "description": "SYNTHETIC-DESCRIPTION-LINT" },
+            { "label": "SYNTHETIC-OPTION-TESTS", "description": "SYNTHETIC-DESCRIPTION-TESTS" }
+          ],
+          "multiSelect": true
+        }
+      ],
+      "answers": {
+        "SYNTHETIC-QUESTION-ALPHA which output format should be used?": "SYNTHETIC-OPTION-SUMMARY",
+        "SYNTHETIC-QUESTION-BRAVO which checks should run?": "SYNTHETIC-OPTION-LINT, SYNTHETIC-OPTION-TESTS"
+      }
+    },
+    "duration_ms": 15234
+  }
+}

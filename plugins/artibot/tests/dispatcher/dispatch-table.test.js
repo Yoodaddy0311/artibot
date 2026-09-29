@@ -43,6 +43,9 @@ const EXPECTED_HANDLER_COUNTS = {
   // SH-29). `tool.used` was a registered event with NO writer — 0 rows of
   // 1,052 in the live ledger, measured 2026-09-15 — so
   // lib/replay/existence-audit.js could not count per-skill firings at all.
+  // 12 stays 12 for SH-09 (2026-09-29): the AskUserQuestion carrier rides the
+  // EXISTING tool-used-record handler (its `tools` list was widened, see the
+  // routing pin below), not a 13th spawn.
   PostToolUse: 12,
   // 8 → 6: blindspot-check.js + teach-back.js left the Stop slot when the
   // post-work passes were converted to on-demand slash commands
@@ -155,6 +158,25 @@ describe('handler validation', () => {
       expect(Array.isArray(h.tools)).toBe(true);
       for (const t of h.tools) expect(typeof t).toBe('string');
     }
+  });
+});
+
+describe('tool-used-record routing (SH-09 AskUserQuestion carrier)', () => {
+  // ALLOWLIST, NOT A DENY LIST. The writer answers to exactly these tools. A
+  // wildcard, or a third tool added without editing this line, would broaden a
+  // ledger writer whose only contract is "one row per call of a named tool".
+  // `tool-tracker` is the only handler that is allowed to be universal.
+  it('routes exactly Skill and AskUserQuestion, with no wildcard', () => {
+    const handler = loadDispatchTable('PostToolUse').find((h) => h.name === 'tool-used-record');
+    expect(handler).toBeDefined();
+    expect(handler.tools).toEqual(['Skill', 'AskUserQuestion']);
+    expect(handler.tools).not.toContain('*');
+  });
+
+  it('still runs as ONE handler entry: the carrier did not add a second spawn', () => {
+    const entries = loadDispatchTable('PostToolUse')
+      .filter((h) => h.script.endsWith(`${path.sep}tool-used-record.js`));
+    expect(entries).toHaveLength(1);
   });
 });
 
