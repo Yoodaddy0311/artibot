@@ -1,9 +1,12 @@
 /**
  * REPORT verify-evidence gate (CA-13 / AP-N1 residual).
  *
- * Three layers:
+ * Layers:
  *   1. The evidence rule itself — `evaluateReportVerifyEvidence` over
  *      hand-built journals, one case per code plus the supersede/stale traps.
+ *      1b. Rule 6, the driver's own `state.verifyResult`: which shapes read as
+ *      a FAIL, which blind spots pass on purpose, the precedence over the other
+ *      codes, and parity with `recovery-record.js#foldVerify`.
  *   2. The kill switch — `readReportVerifyGateEnforce` accepts only the literal
  *      `true`, and the shipped config reads OFF.
  *   3. The engine — `runPhase6Report` with the switch OFF must match a run with
@@ -16,12 +19,21 @@
  *      events) so any byte the gate adds there turns the pin red.
  *   5. The driver path with the switch ON — a REPORT without evidence is
  *      refused and pauses back to VERIFY, a pause of any kind is kept, and a
- *      re-run VERIFY is what lets REPORT through.
+ *      re-run VERIFY is what lets REPORT through; `refuseRecordedReport`'s
+ *      `livePhases` argument only counts when it is a real array.
+ *   6. Sessions with no VERIFY row in their journal (stored before the journal,
+ *      run before VERIFY was armed, or hand-driven), switch ON: pinned as today's
+ *      behaviour, one pause and one VERIFY re-run.
+ *   7. The shipped switch driven with NOTHING injected, plus controls that turn
+ *      the same harness ON through a temp plugin root.
+ *   8. `loadReportVerifyGateConfig` against real files, including the silent OFF
+ *      of an unreadable config.
  *
  * The engine layer swaps the gate through `vi.mock` rather than `vi.spyOn`: the
  * engine holds a named import, which a spy on the module namespace never sees.
- * `gateMode.bypass` stands in for "the call line is not there" and
- * `gateMode.config` injects the switch without touching artibot.config.json.
+ * `gateMode.bypass` stands in for "the call line is not there",
+ * `gateMode.config` injects the switch without touching artibot.config.json, and
+ * `gateMode.shipped` removes that injection so the real reader runs.
  *
  * Isolation: the autopilot store (session JSON + events.ndjson) is sandboxed by
  * `tests/setup/state-dir.js` (ARTIBOT_AUTOPILOT_STORE_DIR); PRD and report
@@ -32,20 +44,24 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const gateMode = vi.hoisted(() => ({ bypass: false, config: { enforce: false }, loads: 0 }));
+const gateMode = vi.hoisted(() => ({
+  bypass: false, config: { enforce: false }, loads: 0, shipped: false,
+}));
 
 vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
   const real = await importOriginal();
   return {
     ...real,
+    // `shipped` injects nothing: the real reader runs against whatever
+    // artibot.config.json the plugin root holds (section 7).
     gateReportOnVerify: (state, config) => (gateMode.bypass
       ? null
-      : real.gateReportOnVerify(state, config ?? gateMode.config)),
+      : real.gateReportOnVerify(state, gateMode.shipped ? config : (config ?? gateMode.config))),
     // A caller that reads the switch itself (the driver path, section 4) sees
     // the injected value instead of the plugin root's artibot.config.json.
     loadReportVerifyGateConfig: () => {
       gateMode.loads += 1;
-      return gateMode.config;
+      return gateMode.shipped ? real.loadReportVerifyGateConfig() : gateMode.config;
     },
   };
 });
@@ -56,6 +72,7 @@ const {
   evaluateReportVerifyEvidence,
   loadReportVerifyGateConfig,
   readReportVerifyGateEnforce,
+  refuseRecordedReport,
 } = await vi.importActual('../../lib/autopilot/report-verify-gate.js');
 const { gateReportOnVerify } = await import('../../lib/autopilot/report-verify-gate.js');
 const {
@@ -64,7 +81,8 @@ const {
   runPhase6Report,
   startAutopilot,
 } = await import('../../lib/autopilot/index.js');
-const { recordPhaseResult } = await import('../../lib/autopilot/engine-state.js');
+const { PHASES, recordPhaseResult } = await import('../../lib/autopilot/engine-state.js');
+const { foldVerify } = await import('../../lib/autopilot/recovery-record.js');
 const {
   deleteSessionArtifacts, getSessionPath, loadSession, saveSession,
 } = await import('../../lib/autopilot/session-store.js');
@@ -85,6 +103,7 @@ const sessionsToClean = new Set();
 afterEach(async () => {
   gateMode.bypass = false;
   gateMode.config = { enforce: false };
+  gateMode.shipped = false;
   for (const id of sessionsToClean) {
     try { await abortAutopilot(id, { graceful: false }); } catch { /* ignore */ }
     try { deleteSessionArtifacts(id); } catch { /* ignore */ }
@@ -119,6 +138,11 @@ const row = (attemptId, phase, event, reason = null) => ({
 const started = (id, phase) => row(id, phase, 'started');
 const acked = (id, phase, reason = 'done') => row(id, phase, 'acknowledged', reason);
 const stateOf = (attemptJournal, activePhaseAttempt = null) => ({ attemptJournal, activePhaseAttempt });
+/** A journal that passes rule B: an EXECUTE, then a VERIFY acknowledged `done`. */
+const EVIDENCE = [
+  started('e1', 'EXECUTE'), acked('e1', 'EXECUTE'),
+  started('v1', 'VERIFY'), acked('v1', 'VERIFY'),
+];
 
 describe('evaluateReportVerifyEvidence — rule B', () => {
   it('should pass when the last VERIFY after the last EXECUTE was acknowledged done', () => {
@@ -214,8 +238,91 @@ describe('evaluateReportVerifyEvidence — rule B', () => {
   it('should only ever answer from the closed, frozen code vocabulary', () => {
     expect(Object.isFrozen(REPORT_VERIFY_CODES)).toBe(true);
     expect(Object.values(REPORT_VERIFY_CODES).sort()).toEqual([
-      'NO_VERIFY_ATTEMPT', 'STALE_BEFORE_EXECUTE', 'VERIFY_NOT_ACKED', 'VERIFY_NOT_DONE', 'ok',
+      'NO_VERIFY_ATTEMPT', 'STALE_BEFORE_EXECUTE', 'VERIFY_NOT_ACKED', 'VERIFY_NOT_DONE',
+      'VERIFY_RESULT_FAILED', 'ok',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Evidence rule — the driver's own `state.verifyResult` (W29 #15)
+// ---------------------------------------------------------------------------
+
+/** Rule B's evidence, with the driver-written result object beside it. */
+const withResult = (verifyResult, journal = EVIDENCE, slot = null) => ({ ...stateOf(journal, slot), verifyResult });
+
+describe('evaluateReportVerifyEvidence — an explicit FAIL in state.verifyResult', () => {
+  it.each([
+    ['status FAIL', { status: 'FAIL' }],
+    ['ok false', { ok: false }],
+    ['passed false', { passed: false }],
+    ['all three shapes FAIL', { status: 'FAIL', ok: false, passed: false }],
+    // foldVerify reads these three as UNMEASURED (a contradiction is not a
+    // measurement). A gate still cannot let a FAIL through because a PASS sits
+    // beside it in the same object, e.g. `{...old, ok: false}` over a stale PASS.
+    ['a FAIL beside a PASS status', { status: 'PASS', ok: false }],
+    ['a FAIL status beside ok true', { status: 'FAIL', ok: true }],
+    ['a FAIL beside UNMEASURED', { status: 'UNMEASURED', passed: false }],
+  ])('should return VERIFY_RESULT_FAILED for a done acknowledgement beside %s', (_label, verifyResult) => {
+    expect(evaluateReportVerifyEvidence(withResult(verifyResult))).toEqual({
+      ok: false, code: 'VERIFY_RESULT_FAILED', attemptId: 'v1', checkpointSha: null,
+    });
+  });
+
+  // The blind spots, pinned so widening one is a decision and not a drift. The
+  // gate refuses only the explicit shapes autopilot.md tells a driver to write.
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['status PASS', { status: 'PASS' }],
+    ['ok true', { ok: true }],
+    ['passed true', { passed: true }],
+    ['status UNMEASURED', { status: 'UNMEASURED' }],
+    ['an empty object', {}],
+    ['free-form prose', { lint: 'ok', test: '3 failed' }],
+    ['a lowercase status', { status: 'fail' }],
+    ['ok spelled as a string', { ok: 'false' }],
+    ['a nested layer result', { mcp: { ok: false, violations: ['x'] } }],
+    ['a bare string', 'FAIL'],
+    ['an array', [{ status: 'FAIL' }]],
+  ])('should not read %s as a FAIL', (_label, verifyResult) => {
+    expect(evaluateReportVerifyEvidence(withResult(verifyResult))).toMatchObject({ ok: true, code: 'ok' });
+  });
+
+  it.each([
+    ['NO_VERIFY_ATTEMPT', 'an empty journal', stateOf([])],
+    ['VERIFY_NOT_ACKED', 'an unacknowledged VERIFY', stateOf([started('v1', 'VERIFY')])],
+    ['VERIFY_NOT_DONE', 'a failed acknowledgement', stateOf([started('v1', 'VERIFY'), acked('v1', 'VERIFY', 'failed')])],
+    ['STALE_BEFORE_EXECUTE', 'a VERIFY older than the last EXECUTE', stateOf([...EVIDENCE, started('e2', 'EXECUTE')])],
+    ['VERIFY_NOT_ACKED', 'an open VERIFY slot', stateOf(EVIDENCE, { attemptId: 'v2', phase: 'VERIFY', status: 'started', checkpointSha: null })],
+  ])('should still answer %s for %s when the result object is a FAIL too', (code, _label, s) => {
+    expect(evaluateReportVerifyEvidence({ ...s, verifyResult: { status: 'FAIL' } }).code).toBe(code);
+  });
+
+  it('should agree with foldVerify on every shape where the fold is not a contradiction', () => {
+    const shapes = [
+      undefined, null, 'FAIL', [], {}, { status: 'PASS' }, { status: 'FAIL' }, { status: 'UNMEASURED' },
+      { ok: true }, { ok: false }, { passed: true }, { passed: false }, { status: 'fail' }, { ok: 'false' },
+      { lint: 'x' }, { mcp: { ok: false } }, { status: 'FAIL', ok: false }, { ok: true, passed: true },
+    ];
+    for (const shape of shapes) {
+      const refused = evaluateReportVerifyEvidence(withResult(shape)).code === 'VERIFY_RESULT_FAILED';
+      expect(refused, JSON.stringify(shape)).toBe(foldVerify(shape) === 'FAIL');
+    }
+  });
+
+  it('should refuse the contradictions that foldVerify reads as UNMEASURED (the one deliberate difference)', () => {
+    for (const shape of [{ status: 'PASS', ok: false }, { status: 'FAIL', ok: true }, { status: 'UNMEASURED', passed: false }]) {
+      expect(foldVerify(shape), 'precondition: the fold calls a contradiction UNMEASURED').toBe('UNMEASURED');
+      expect(evaluateReportVerifyEvidence(withResult(shape)).code).toBe('VERIFY_RESULT_FAILED');
+    }
+  });
+
+  it('should read the state without changing it', () => {
+    const s = withResult({ status: 'FAIL' });
+    const before = JSON.stringify(s);
+    evaluateReportVerifyEvidence(s);
+    expect(JSON.stringify(s)).toBe(before);
   });
 });
 
@@ -320,6 +427,7 @@ describe('runPhase6Report — switch OFF (shipped)', () => {
       stateOf([started('v1', 'VERIFY')]),
       stateOf([started('v1', 'VERIFY'), acked('v1', 'VERIFY', 'failed')]),
       stateOf([started('v1', 'VERIFY'), acked('v1', 'VERIFY'), started('e2', 'EXECUTE')]),
+      withResult({ status: 'FAIL' }),
     ];
     for (const s of cases) {
       const state = { ...s, sessionId: uniqueId('off-direct'), phase: 'REPORT' };
@@ -432,6 +540,28 @@ describe('runPhase6Report — switch ON', () => {
 
     expect(runPhase6Report(state)).toMatchObject({ type: 'pause', code: 'VERIFY_NOT_DONE' });
   });
+
+  it('should pause when the VERIFY was acknowledged done but its verifyResult is an explicit FAIL', async () => {
+    const sessionId = await start('on-result-failed');
+    gateMode.config = { enforce: true };
+    const state = loadSession(sessionId);
+    state.attemptJournal = [...EVIDENCE];
+    state.verifyResult = { status: 'FAIL' };
+
+    const result = runPhase6Report(state);
+
+    expect(result).toMatchObject({
+      type: 'pause',
+      reason: 'report-verify-evidence-missing:VERIFY_RESULT_FAILED',
+      code: 'VERIFY_RESULT_FAILED',
+      attemptId: 'v1',
+    });
+    expect(loadSession(sessionId)).toMatchObject({
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY',
+      pausedReason: 'report-verify-evidence-missing:VERIFY_RESULT_FAILED',
+    });
+    expect(gateTicks(sessionId)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -468,11 +598,6 @@ function recordReportOff(state, payload) {
     same: returned === state,
   };
 }
-
-const EVIDENCE = [
-  started('e1', 'EXECUTE'), acked('e1', 'EXECUTE'),
-  started('v1', 'VERIFY'), acked('v1', 'VERIFY'),
-];
 
 describe('recordPhaseResult(REPORT) — switch OFF, driver path (characterization)', () => {
   it('(a) no VERIFY evidence: records REPORT and nothing else', () => {
@@ -528,6 +653,26 @@ describe('recordPhaseResult(REPORT) — switch OFF, driver path (characterizatio
       + '"pausedReason":"report-verify-evidence-missing:NO_VERIFY_ATTEMPT",'
       + '"phases":[{"ts":"<ts>","name":"REPORT","status":"done"}],"attemptJournal":[],'
       + '"activePhaseAttempt":null,"updatedAt":"<ts>","schemaVersion":3}';
+    expect.soft(r.state).toBe(expected);
+    expect.soft(r.disk).toBe(expected);
+    expect.soft(r.events).toBe('[]');
+    expect(r.same).toBe(true);
+  });
+
+  it('(d) an explicit FAIL verifyResult beside done evidence: still the same REPORT record, no tick', () => {
+    // The FAIL rule lives behind the switch. OFF, the result object is not read.
+    const state = {
+      sessionId: uniqueId('drv-off-failed'), phase: 'REPORT', lastPhase: 'EVALUATE', pendingPhase: null,
+      phases: [], attemptJournal: [...EVIDENCE], activePhaseAttempt: null,
+      verifyResult: { status: 'FAIL' },
+    };
+
+    const r = recordReportOff(state, { phase: 'REPORT', status: 'done' });
+
+    const journal = JSON.stringify(EVIDENCE).replace(ISO, '<ts>');
+    const expected = '{"sessionId":"<sid>","phase":"REPORT","lastPhase":"EVALUATE","pendingPhase":null,'
+      + `"phases":[{"ts":"<ts>","name":"REPORT","status":"done"}],"attemptJournal":${journal},`
+      + '"activePhaseAttempt":null,"verifyResult":{"status":"FAIL"},"updatedAt":"<ts>","schemaVersion":3}';
     expect.soft(r.state).toBe(expected);
     expect.soft(r.disk).toBe(expected);
     expect.soft(r.events).toBe('[]');
@@ -646,6 +791,9 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
     ['a VERIFY older than the last EXECUTE', {
       attemptJournal: [...EVIDENCE, started('e2', 'EXECUTE'), acked('e2', 'EXECUTE')],
     }, 'STALE_BEFORE_EXECUTE'],
+    ['a done acknowledgement beside an explicit FAIL verifyResult', {
+      attemptJournal: [...EVIDENCE], verifyResult: { status: 'FAIL' },
+    }, 'VERIFY_RESULT_FAILED'],
   ])('(R5) should refuse on %s under its own code', (_label, fields, code) => {
     const state = seeded('drv-on-code', fields);
 
@@ -780,6 +928,324 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
     const { events } = recordReport(after, true);
     expect(after.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
     expect(events.map((e) => [e.type, e.data?.code])).toEqual([['report-verify-gate', 'ok']]);
+  });
+
+  /**
+   * A session that reached REPORT with VERIFY acknowledged done beside an explicit
+   * FAIL result, refused once; then VERIFY is re-run and acknowledged done.
+   * `verifyResultAfterRerun` is what the driver leaves in `state.verifyResult`.
+   */
+  async function refusedThenRerun(label, verifyResultAfterRerun) {
+    const sessionId = await start(label);
+    const seeded0 = loadSession(sessionId);
+    seeded0.attemptJournal = [...EVIDENCE];
+    seeded0.verifyResult = { status: 'FAIL' };
+    enterStateAt(seeded0, 'EVALUATE');
+    recordReport(loadSession(sessionId), true);
+    expect(loadSession(sessionId)).toMatchObject({
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY',
+      pausedReason: 'report-verify-evidence-missing:VERIFY_RESULT_FAILED',
+    });
+
+    expect((await resumeAutopilot(sessionId)).phase).toBe('VERIFY');
+    const rerun = loadSession(sessionId);
+    rerun.verifyResult = verifyResultAfterRerun;
+    gateMode.config = { enforce: true };
+    recordPhaseResult(rerun, { phase: 'VERIFY', status: 'done' });
+    return sessionId;
+  }
+
+  it('(vii) should let REPORT through once the re-run VERIFY overwrites the FAIL result', async () => {
+    const sessionId = await refusedThenRerun('drv-on-failed-lift', { status: 'PASS' });
+
+    const after = loadSession(sessionId);
+    const { events } = recordReport(after, true);
+
+    expect(after.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
+    expect(events.map((e) => [e.type, e.data?.code])).toEqual([['report-verify-gate', 'ok']]);
+  });
+
+  it('(viii) should keep refusing while a FAIL is left in verifyResult, even after a done re-run', async () => {
+    // verifyResult is not attempt-scoped: the driver has to overwrite it. This is
+    // the fail-closed side of that, and the reason autopilot.md says to.
+    const sessionId = await refusedThenRerun('drv-on-failed-stays', { status: 'FAIL' });
+
+    const after = loadSession(sessionId);
+    recordReport(after, true);
+
+    expect(after.phases.map((p) => p.name)).not.toContain('REPORT');
+    expect(loadSession(sessionId)).toMatchObject({
+      phase: 'PAUSED', pausedReason: 'report-verify-evidence-missing:VERIFY_RESULT_FAILED',
+    });
+  });
+});
+
+describe('refuseRecordedReport — the livePhases argument', () => {
+  const fresh = (label) => {
+    const state = {
+      sessionId: uniqueId(label), phase: 'REPORT', lastPhase: 'EVALUATE', pendingPhase: null,
+      phases: [], attemptJournal: [], activePhaseAttempt: null,
+    };
+    sessionsToClean.add(state.sessionId);
+    return state;
+  };
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'REPORT'],
+    ['a number', 42],
+    ['a plain object', { REPORT: true }],
+    ['a Set', new Set(['REPORT'])],
+  ])('should refuse without pausing, and without throwing, when livePhases is %s', (_label, live) => {
+    const state = fresh('live-bad');
+    const before = JSON.stringify(state);
+    let refused;
+
+    expect(() => { refused = refuseRecordedReport(state, { status: 'done' }, { enforce: true }, live); }).not.toThrow();
+
+    expect(refused).toBe(true);
+    expect(JSON.stringify(state)).toBe(before);
+    expect(readEvents(state.sessionId).map((e) => [e.type, e.level, e.data?.kept])).toEqual([
+      ['report-verify-gate', 'warn', true],
+    ]);
+  });
+
+  it('should treat an omitted livePhases the same way', () => {
+    const state = fresh('live-omitted');
+    expect(refuseRecordedReport(state, { status: 'done' }, { enforce: true })).toBe(true);
+    expect(state.phase).toBe('REPORT');
+  });
+
+  it('control: a real phase list is what turns the same refusal into a pause', () => {
+    const state = fresh('live-real');
+    expect(refuseRecordedReport(state, { status: 'done' }, { enforce: true }, PHASES)).toBe(true);
+    expect(state).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. A session with no VERIFY row in its attempt journal, switch ON
+// ---------------------------------------------------------------------------
+
+/**
+ * Sessions stored before the attempt journal existed (session v3, e0565e46) have
+ * no `attemptJournal`; sessions whose VERIFY ran before VERIFY was armed (AP-N1,
+ * e1e97dfa) have a journal with no VERIFY row. Rule B has nothing to read in
+ * either, and the gate does not fall back to the `state.phases` rows those
+ * sessions do carry. This pins today's behaviour so it is documented and
+ * deliberate: switching the gate ON costs each such session one VERIFY re-run.
+ */
+async function legacySession(label) {
+  const sessionId = await start(label);
+  const stored = loadSession(sessionId);
+  const legacy = {
+    ...stored,
+    schemaVersion: 2,
+    phase: 'IMPROVE',
+    phases: [...(stored.phases ?? []), { ts: '2026-08-10T00:00:00.000Z', name: 'VERIFY', status: 'DONE' }],
+  };
+  for (const key of ['attemptJournal', 'activePhaseAttempt', 'pendingPhase', 'subCheckpoints']) delete legacy[key];
+  writeFileSync(getSessionPath(sessionId), JSON.stringify(legacy));
+  return sessionId;
+}
+
+describe('a session with no VERIFY row in its attempt journal — switch ON', () => {
+  it.each(['done', 'DONE'])('should not take a state.phases VERIFY row (%s) as evidence', (status) => {
+    const phases = [{ name: 'EXECUTE', status: 'done' }, { name: 'VERIFY', status }];
+    for (const legacy of [
+      { schemaVersion: 2, phase: 'IMPROVE', phases },
+      { schemaVersion: 3, phase: 'IMPROVE', phases, attemptJournal: [] },
+      { schemaVersion: 3, phase: 'IMPROVE', phases, attemptJournal: [started('e1', 'EXECUTE'), acked('e1', 'EXECUTE')] },
+    ]) {
+      expect(evaluateReportVerifyEvidence(legacy)).toMatchObject({ ok: false, code: 'NO_VERIFY_ATTEMPT', attemptId: null });
+    }
+  });
+
+  it('should load with an empty journal and pause once with NO_VERIFY_ATTEMPT', async () => {
+    const sessionId = await legacySession('legacy-on');
+    const loaded = loadSession(sessionId);
+    expect(loaded).toMatchObject({ schemaVersion: 3, attemptJournal: [] }); // the migration's backfill
+    gateMode.config = { enforce: true };
+
+    expect(runPhase6Report(loaded)).toMatchObject({ type: 'pause', code: 'NO_VERIFY_ATTEMPT', attemptId: null });
+    expect(loadSession(sessionId)).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+  });
+
+  it('should cost such a session one VERIFY re-run: resume into VERIFY, acknowledge done, then REPORT', async () => {
+    const sessionId = await legacySession('legacy-rerun');
+    gateMode.config = { enforce: true };
+    runPhase6Report(loadSession(sessionId));
+
+    expect((await resumeAutopilot(sessionId)).phase).toBe('VERIFY');
+    recordPhaseResult(loadSession(sessionId), { phase: 'VERIFY', status: 'done' });
+    const result = runPhase6Report(loadSession(sessionId));
+
+    expect(result.type).toBe('phase-result');
+    expect(loadSession(sessionId).phase).toBe('COMPLETED');
+    expect(gateTicks(sessionId).map((e) => e.data.code)).toEqual(['ok']);
+  });
+
+  it('should refuse the same session on the driver path with the same code', async () => {
+    const sessionId = await legacySession('legacy-drv');
+
+    const { events } = recordReport(loadSession(sessionId), true);
+
+    expect(loadSession(sessionId)).toMatchObject({
+      phase: 'PAUSED', pendingPhase: 'VERIFY', pausedReason: 'report-verify-evidence-missing:NO_VERIFY_ATTEMPT',
+    });
+    expect(events.find((e) => e.type === 'pause')?.data?.code).toBe('NO_VERIFY_ATTEMPT');
+  });
+
+  it('should complete untouched with the switch OFF', async () => {
+    const sessionId = await legacySession('legacy-off');
+    gateMode.config = { enforce: false };
+
+    expect(runPhase6Report(loadSession(sessionId)).type).toBe('phase-result');
+    expect(gateTicks(sessionId)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. The shipped switch, driven with nothing injected (W29 #15)
+// ---------------------------------------------------------------------------
+
+const SHIPPED_CONFIG = JSON.parse(readFileSync(new URL('../../artibot.config.json', import.meta.url), 'utf8'));
+
+/**
+ * Run `fn` with `CLAUDE_PLUGIN_ROOT` pointing at a temp directory whose
+ * artibot.config.json is `configText` (omitted: no file at all). The reader
+ * resolves the file from the plugin root on every call, so this is the only
+ * seam a test has to make the REAL reader see a different config. The session
+ * store follows the root too, so create every session inside `fn`.
+ * @param {string|undefined} configText
+ * @param {(root: string) => any} fn
+ */
+function withPluginRoot(configText, fn) {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'artibot-report-verify-root-'));
+  if (configText !== undefined) writeFileSync(path.join(root, 'artibot.config.json'), configText);
+  const previous = process.env.CLAUDE_PLUGIN_ROOT;
+  process.env.CLAUDE_PLUGIN_ROOT = root;
+  try {
+    return fn(root);
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = previous;
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+/** The shipped config with only the CA-13 switch set to `enforce`. */
+const shippedWith = (enforce) => JSON.stringify({
+  ...SHIPPED_CONFIG,
+  autopilot: {
+    ...SHIPPED_CONFIG.autopilot,
+    reportVerifyGate: { ...SHIPPED_CONFIG.autopilot.reportVerifyGate, enforce },
+  },
+});
+
+describe('the shipped switch, with nothing injected', () => {
+  // Sections 3-5 inject the switch, so none of them runs what a user actually
+  // gets: the engine's own default argument plus the reader against the config
+  // this checkout ships. `gateMode.shipped` removes the injection.
+  const failed = { attemptJournal: [...EVIDENCE], verifyResult: { status: 'FAIL' } };
+
+  it('should read OFF from the config this checkout ships', () => {
+    expect(SHIPPED_CONFIG.autopilot.reportVerifyGate.enforce).toBe(false);
+    expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+  });
+
+  it.each([
+    ['no evidence', {}],
+    ['an explicit FAIL result', failed],
+  ])('engine path: runPhase6Report completes with %s, and the gate leaves no trace', async (_label, fields) => {
+    const sessionId = await start('shipped-engine');
+    const state = { ...loadSession(sessionId), ...fields };
+    saveSession(state);
+    gateMode.shipped = true;
+
+    const result = runPhase6Report(loadSession(sessionId));
+
+    expect(result.type).toBe('phase-result');
+    expect(loadSession(sessionId).phase).toBe('COMPLETED');
+    expect(gateTicks(sessionId)).toEqual([]);
+    expect(readEvents(sessionId).filter((e) => e.type === 'pause')).toEqual([]);
+  });
+
+  it.each([
+    ['no evidence', {}],
+    ['an explicit FAIL result', failed],
+  ])('driver path: recordPhaseResult(REPORT) records it with %s and emits nothing', (_label, fields) => {
+    const state = seeded('shipped-drv', fields);
+    gateMode.shipped = true;
+    const before = readEvents(state.sessionId).length;
+
+    recordPhaseResult(state, { phase: 'REPORT', status: 'done' });
+
+    expect(state).toMatchObject({ phase: 'REPORT', pendingPhase: null });
+    expect(state.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
+    expect(readEvents(state.sessionId).slice(before)).toEqual([]);
+  });
+
+  // Without these the two blocks above could pass for the wrong reason (an
+  // injected OFF that never reaches the real reader). Same calls, same
+  // harness, a plugin root whose config is ON: both must now refuse.
+  it('control: gateReportOnVerify pauses when the plugin root config is ON', () => {
+    withPluginRoot(shippedWith(true), () => {
+      gateMode.shipped = true;
+      const state = { sessionId: uniqueId('shipped-on-gate'), phase: 'REPORT', attemptJournal: [], activePhaseAttempt: null };
+
+      expect(gateReportOnVerify(state)).toMatchObject({ type: 'pause', code: 'NO_VERIFY_ATTEMPT' });
+    });
+  });
+
+  it('control: recordPhaseResult(REPORT) refuses when the plugin root config is ON', () => {
+    withPluginRoot(shippedWith(true), () => {
+      gateMode.shipped = true;
+      const state = seeded('shipped-on-drv', {});
+
+      recordPhaseResult(state, { phase: 'REPORT', status: 'done' });
+
+      expect(state).toMatchObject({ phase: 'PAUSED', pendingPhase: 'VERIFY' });
+      expect(state.phases).toEqual([]);
+    });
+  });
+
+  it('control: the ON copy differs from the shipped config in that one key only', () => {
+    const on = JSON.parse(shippedWith(true));
+    on.autopilot.reportVerifyGate.enforce = false;
+    expect(on).toEqual(SHIPPED_CONFIG);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. The reader against real files
+// ---------------------------------------------------------------------------
+
+describe('loadReportVerifyGateConfig — the config file at the plugin root', () => {
+  it.each([
+    ['the literal true', { autopilot: { reportVerifyGate: { enforce: true } } }, true],
+    ['the string "true"', { autopilot: { reportVerifyGate: { enforce: 'true' } } }, false],
+    ['the key under the wrong parent', { reportVerifyGate: { enforce: true } }, false],
+    ['a config without the key', { autopilot: {} }, false],
+  ])('should read %s', (_label, cfg, expected) => {
+    withPluginRoot(JSON.stringify(cfg), () => {
+      expect(loadReportVerifyGateConfig()).toEqual({ enforce: expected });
+    });
+  });
+
+  // The other half of "never throws": OFF is what a broken file reads as, with no
+  // tick and no warning. A corrupted artibot.config.json silently disables the gate.
+  it('should read OFF, without a trace, from a config that does not parse', () => {
+    withPluginRoot('{ "autopilot": ', () => {
+      expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+    });
+  });
+
+  it('should read OFF when the plugin root holds no config at all', () => {
+    withPluginRoot(undefined, () => {
+      expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+    });
   });
 });
 

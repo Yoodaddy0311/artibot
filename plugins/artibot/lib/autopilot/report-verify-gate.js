@@ -14,7 +14,9 @@
  * `phase-attempt.js#journalAttempt`: attemptId, phase, event, reason, at),
  * walked in ARRAY order — the order rows were appended — never by `at`, because
  * two rows written in the same millisecond carry equal timestamps and a clock
- * step would reorder them. REPORT has evidence only when all of these hold:
+ * step would reorder them. Rule 6 alone reads a second field, the driver's own
+ * `state.verifyResult`. REPORT has evidence only when all of these hold, and the
+ * first that fails names the code (the order below is the precedence):
  *
  *   1. vS = the LAST `{phase: 'VERIFY', event: 'started'}` row exists.
  *      None → `NO_VERIFY_ATTEMPT`.
@@ -31,11 +33,57 @@
  *      (goal-loop's corrective EXECUTE is the usual path) → `STALE_BEFORE_EXECUTE`.
  *   5. `state.activePhaseAttempt` is not a VERIFY slot. An occupied slot means a
  *      VERIFY hand-off is still outstanding → `VERIFY_NOT_ACKED`.
+ *   6. `state.verifyResult` states no failure: none of `status: 'FAIL'`,
+ *      `ok: false`, `passed: false` (the shapes `commands/autopilot.md` tells a
+ *      driver to write). Any one → `VERIFY_RESULT_FAILED`. Rules 1-5 only see the
+ *      status the driver passed to `recordPhaseResult`, so `status: 'done'` beside
+ *      `verifyResult: {status: 'FAIL'}` passed them all. Last on purpose: a stale
+ *      or unacknowledged VERIFY is reported as that, not as its result.
+ *
+ * ### Why rule 3 has no case-fold (decided 2026-09-29)
+ *
+ * A driver that records `'DONE'` is refused (`VERIFY_NOT_DONE`), and the
+ * allowlist stays one entry long. The uppercase VERIFY rows found in stored
+ * sessions (9 of the 22 driver-recorded VERIFY results in `state.phases`, in 8 of
+ * the 21 sessions that have one; 46 distinct session ids in the
+ * `runtime/autopilot` stores of the installed plugin caches and of this
+ * checkout, 2026-09-29T04:13Z) all belong to sessions dated 2026-07-15..2026-08-10:
+ * before the attempt journal (`e0565e46`, 2026-09-14) and before the lowercase
+ * convention reached `commands/autopilot.md` (`fabee5cc`, 2026-09-15), so none of
+ * those rows was ever an ACK this rule read. The 4 later sessions that have a
+ * VERIFY result all recorded lowercase `done`. And
+ * `recovery-record.js#isCleanVerify` requires `status === 'done'` exactly:
+ * accepting `'DONE'` here alone would pass a VERIFY the recorder journals as
+ * unclean. The likely source of the spelling is documentary — the Phase table in
+ * that document prints `DONE` as a display label (inference, not observed) — so
+ * the fix is in that document, not in this allowlist. If a post-AP-N1 session
+ * shows an uppercase ACK anyway, widen by exactly that one entry, with the
+ * measurement.
  *
  * IMPROVE is deliberately NOT a staleness trigger. It always runs after VERIFY
  * in the normal flow (`engine-state.js#PHASES`), so treating it as one would
  * block every session. The cost: this gate cannot see whether IMPROVE changed
  * code after VERIFY passed.
+ *
+ * ### Sessions with no VERIFY row (decided 2026-09-29, pinned by tests)
+ *
+ * An attempt is opened only by the engine's own phase runners
+ * (`engine.js#runPhase4Verify`, `#runPhase2Execute`), never by
+ * `recordPhaseResult`. So a session whose VERIFY was recorded without the engine
+ * having handed it out has no VERIFY row, on any build. Three ways to get there:
+ * a session stored before the attempt journal has no `attemptJournal` at all (the
+ * loader backfills `[]`); one whose VERIFY ran before VERIFY was armed (AP-N1,
+ * `e1e97dfa`, 2026-09-28) has a journal without a VERIFY row; and a driver that
+ * writes phase results by hand has neither. All read `NO_VERIFY_ATTEMPT` and,
+ * ON, pause once at REPORT. The gate does NOT fall back to the `state.phases`
+ * VERIFY rows such sessions carry: that would be a second evidence source with
+ * its own spelling problem (above) and no attempt id. The cost of switching ON
+ * is one VERIFY re-run per such session (resume, acknowledge `done`, REPORT).
+ * Measured in the same stores and at the same time: 20 sessions show REPORT
+ * reached (a REPORT row, COMPLETED, or lastPhase REPORT) and 0 of those 20 hold
+ * a non-empty attempt journal, including one dated 2026-09-29 that recorded
+ * EXECUTE, VERIFY and REPORT `done` with no attempt. Which build ran that
+ * session is not established here.
  *
  * ## Two entry points
  *
@@ -55,10 +103,23 @@
  *
  * A REPORT that reaches neither entry point — code that writes `state.phases`
  * or `state.phase` directly — is not judged. And the rule reads the attempt
- * journal only: it cannot tell whether the verification it accepts was a
- * meaningful one. Nor can it stop a driver that ignores the PAUSED it gets back
- * from `recordPhaseResult(state, { phase: 'REPORT', ... })` and reports the work
- * complete anyway: a refusal refuses the record, not the report.
+ * journal (plus, for rule 6, one result object): it cannot tell whether the
+ * verification it accepts was a meaningful one. Nor can it stop a driver that
+ * ignores the PAUSED it gets back from
+ * `recordPhaseResult(state, { phase: 'REPORT', ... })` and reports the work
+ * complete anyway: a refusal refuses the record, not the report. Rule 6 in
+ * particular:
+ *
+ *   - It sees only the three explicit shapes. An absent `verifyResult`,
+ *     `UNMEASURED`, free-form prose (`{lint: 'ok', test: '3 failed'}`), a
+ *     lowercase `'fail'`, `ok: 'false'`, a nested layer result
+ *     (`verifyResult.mcp.ok`) and a non-object all pass. How often a driver
+ *     writes no explicit signal is the SH-06 recorder's measurement, not
+ *     something this gate enforces.
+ *   - `verifyResult` is not attempt-scoped: it is one slot. A FAIL left in it
+ *     refuses the next REPORT even after a re-run VERIFY is acknowledged `done`
+ *     (fail-closed; the driver must overwrite it — `commands/autopilot.md`), and a
+ *     PASS left over from an earlier attempt cannot be told from this attempt's.
  *
  * ## Kill switch
  *
@@ -67,6 +128,12 @@
  * byte as before. ON, missing evidence pauses the session back to VERIFY.
  * Observation without enforcement is done offline, by running
  * {@link evaluateReportVerifyEvidence} over stored session states.
+ *
+ * The switch is read from `<pluginRoot>/artibot.config.json` on every call, and
+ * an unreadable file (missing, or JSON that does not parse) reads OFF with no
+ * tick and no warning — see {@link loadReportVerifyGateConfig}. A corrupted
+ * config therefore disables enforcement silently; nothing here can tell that
+ * from a deliberate OFF.
  *
  * @module lib/autopilot/report-verify-gate
  */
@@ -88,7 +155,8 @@ export const REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH = 'autopilot.reportVerifyGat
  * The closed vocabulary of {@link evaluateReportVerifyEvidence} codes.
  * @type {Readonly<{OK: 'ok', NO_VERIFY_ATTEMPT: 'NO_VERIFY_ATTEMPT',
  *   VERIFY_NOT_ACKED: 'VERIFY_NOT_ACKED', VERIFY_NOT_DONE: 'VERIFY_NOT_DONE',
- *   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE'}>}
+ *   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE',
+ *   VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED'}>}
  */
 export const REPORT_VERIFY_CODES = Object.freeze({
   OK: 'ok',
@@ -96,10 +164,33 @@ export const REPORT_VERIFY_CODES = Object.freeze({
   VERIFY_NOT_ACKED: 'VERIFY_NOT_ACKED',
   VERIFY_NOT_DONE: 'VERIFY_NOT_DONE',
   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE',
+  VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED',
 });
 
 /** The one result status that counts as a completed verification. */
 const DONE_REASON = 'done';
+
+/**
+ * True when the driver's own result object states a failure in one of the three
+ * explicit shapes `commands/autopilot.md` tells it to write and
+ * `recovery-record.js#foldVerify` reads: `status: 'FAIL'`, `ok: false`,
+ * `passed: false`. ANY one is enough. Strict equality on each, so `'fail'`,
+ * `'false'`, prose and a nested layer result (`verifyResult.mcp.ok`) are not
+ * failures here — the same allowlist of shapes, not a guess at intent.
+ *
+ * Where the two differ on purpose: `foldVerify` calls a contradiction
+ * (`{status: 'PASS', ok: false}`) UNMEASURED, because a contradiction is not a
+ * measurement. A gate has a different question — is there any explicit statement
+ * that the verification failed? — and a PASS beside a FAIL does not retract it.
+ *
+ * @param {unknown} verifyResult - `state.verifyResult`, any shape.
+ * @returns {boolean}
+ */
+function hasExplicitVerifyFail(verifyResult) {
+  if (verifyResult === null || typeof verifyResult !== 'object' || Array.isArray(verifyResult)) return false;
+  const r = /** @type {Record<string, unknown>} */ (verifyResult);
+  return r.status === 'FAIL' || r.ok === false || r.passed === false;
+}
 
 /**
  * Resolve the kill switch from an already-read config object. Only the literal
@@ -118,7 +209,8 @@ export function readReportVerifyGateEnforce(cfg) {
 /**
  * Read the kill switch straight off `<pluginRoot>/artibot.config.json`
  * (precedent: `recovery-transition.js#loadRecoveryTransitionConfig`). A missing
- * file or broken JSON reads OFF. Never throws.
+ * file or broken JSON reads OFF — silently, with no tick and no warning, so a
+ * corrupted config file disables enforcement without a trace. Never throws.
  *
  * @returns {{enforce: boolean}}
  */
@@ -150,7 +242,8 @@ function verdict(code, started = null, slot = null) {
 
 /**
  * Decide whether the session holds VERIFY evidence for the work being reported.
- * Pure: reads `state`, never mutates it. The rule is in the module header.
+ * Pure: reads `state` (`attemptJournal`, `activePhaseAttempt` and, for rule 6,
+ * `verifyResult`), never mutates it. The rule is in the module header.
  *
  * @param {object} state
  * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null}}
@@ -172,6 +265,7 @@ export function evaluateReportVerifyEvidence(state) {
   const eIdx = journal.findLastIndex((row) => row?.phase === 'EXECUTE' && row?.event === 'started');
   if (vIdx < eIdx) return verdict(REPORT_VERIFY_CODES.STALE_BEFORE_EXECUTE, started, slot);
   if (slot) return verdict(REPORT_VERIFY_CODES.VERIFY_NOT_ACKED, started, slot);
+  if (hasExplicitVerifyFail(state?.verifyResult)) return verdict(REPORT_VERIFY_CODES.VERIFY_RESULT_FAILED, started);
   return verdict(REPORT_VERIFY_CODES.OK, started);
 }
 
@@ -316,8 +410,10 @@ function pauseRecordedReport(state, result, claimedStatus) {
  *     terminal no-op in `engine.js#resumeAutopilot` depends on that).
  *
  * `livePhases` is `engine-state.js#PHASES`, passed in by the caller because this
- * module cannot import engine-state.js (that module imports this one). Omitted,
- * it is empty and every refusal is `kept` — fail-closed: refused, never paused.
+ * module cannot import engine-state.js (that module imports this one). Omitted —
+ * or anything but a real array (null, a string, a Set) — it is treated as empty
+ * and every refusal is `kept`: fail-closed, refused and never paused. Only an
+ * array counts; a string would answer `includes` by substring.
  *
  * @param {object} state - Live session state (mutated only when pausing).
  * @param {{status?: unknown}} [payload] - The REPORT result being recorded.
@@ -338,7 +434,8 @@ export function refuseRecordedReport(state, payload, config, livePhases = []) {
     });
     return false;
   }
-  if (livePhases.includes(state.phase)) {
+  // Only a real array is a phase list (see the doc above).
+  if (Array.isArray(livePhases) && livePhases.includes(state.phase)) {
     pauseRecordedReport(state, result, payload?.status);
     return true;
   }
