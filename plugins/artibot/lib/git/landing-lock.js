@@ -38,10 +38,12 @@
  * The TTL travels in the record: a holder writes the `staleMs` it acquired
  * with, and a competitor judges age against `max(record.staleMs, own
  * staleMs)`. Only the holder knows how long its own landing can run, so an
- * acquirer with a shorter default (an older caller, a script, a test) can no
- * longer evict a live holder mid-wait. A record without `staleMs` (written
- * before the field existed) is judged by the acquirer's `staleMs` alone, as
- * before. The dead-pid rule does not read the TTL at all.
+ * acquirer with a shorter TTL (a caller that passes no `staleMs`, a script, a
+ * test) can no longer evict a live holder mid-wait — provided it runs this
+ * module; an older plugin copy's own `landing-lock.js` never reads the field.
+ * A record without `staleMs` (written before the field existed) is judged by
+ * the acquirer's `staleMs` alone, as before. The dead-pid rule does not read
+ * the TTL at all.
  *
  * An EMPTY or HALF-WRITTEN lock file is a holder mid-write, not an absent one:
  * `tryCreateExclusive` creates the file and writes the record as two steps, so

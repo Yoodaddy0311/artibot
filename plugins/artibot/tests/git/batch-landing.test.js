@@ -380,8 +380,10 @@ describe('landing lock staleMs', () => {
   });
 
   // The reverse direction: the HOLDER is a landBatch (120-minute TTL in its
-  // record) and the acquirer is on the 30-minute default — an older landBatch
-  // or a script. Before the TTL travelled in the record this reclaimed.
+  // record) and the acquirer is on the 30-minute default — a script, or any
+  // caller of THIS landing-lock.js that passes no staleMs (an older plugin copy
+  // runs its own landing-lock.js and is not covered). Before the TTL travelled
+  // in the record this reclaimed.
   it('an acquirer on DEFAULT_STALE_MS does not reclaim a landBatch holder 45 minutes in', () => {
     const key = buildLandingLockKey('owner/record-ttl', 'main');
     const held = acquireLandingLock(key, {

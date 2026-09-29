@@ -137,11 +137,13 @@ export const MAX_REBUILDS = 1;
  * the record (`landing-lock.js#acquireLandingLock`). The 30-minute default is
  * shorter than the 40-minute worst case of two 20-minute waits, so without the
  * record's TTL a second landing could take the lock from a live one mid-wait.
- * Because the TTL travels in the record, an acquirer still on the default (an
- * older `landBatch`, a script) is held off too — except by a record written
- * before the field existed, which is judged by the acquirer's TTL alone. On the
- * same host a dead holder pid is still reclaimed at once — the longer TTL only
- * lengthens the wait after a crash on another host.
+ * Because the TTL travels in the record, an acquirer that runs THIS
+ * `landing-lock.js` is held off even when it passes the default (a script, a
+ * caller without `wait`). An older plugin copy is not: it imports its own older
+ * `landing-lock.js`, which ignores `record.staleMs` and judges by its own TTL
+ * alone — as does this module for a record written before the field existed.
+ * On the same host a dead holder pid is still reclaimed at once — the longer
+ * TTL only lengthens the wait after a crash on another host.
  *
  * @param {{attempts?:number, pollMs?:number}} [wait]  - Same shape as `landBatch`'s `p.wait`
  * @param {number} [maxRebuilds=MAX_REBUILDS]
