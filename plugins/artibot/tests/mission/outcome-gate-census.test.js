@@ -8,9 +8,9 @@
  *   1. **An empty denominator is `null`, never 0.** A `blocked_ratio` of 0 reads
  *      as "nothing was blocked" — a measurement. `null` reads as "nothing was
  *      measured". Same rule, same reason as
- *      `lib/replay/session-coverage.js:218` (`coverage: ended.size === 0 ? null
- *      : …`), whose header spells out why a measuring tool must not report an
- *      absent observation as a zero.
+ *      `lib/replay/session-coverage.js#foldSessionCoverage`
+ *      (`coverage: ended.size === 0 ? null : …`), whose header spells out why a
+ *      measuring tool must not report an absent observation as a zero.
  *   2. **The block-code vocabulary does not drift, and is not closed.** The
  *      module deliberately does NOT import `BlockCode` (L2 must not import L5),
  *      and since the leader ruling of 2026-09-15 it does not check the value

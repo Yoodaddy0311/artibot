@@ -149,8 +149,9 @@ function readEntry(raw, index, seen) {
  * `blocked_ratio` is `null` — never `0` — when `declared` is 0. A zero reads as
  * "nothing was blocked", which is a measurement; `null` reads as "nothing was
  * measured", which is the truth when nobody declared completion. Same rule as
- * `lib/replay/session-coverage.js:218`, whose header explains why a measuring
- * tool must not report an absent observation as a value.
+ * `lib/replay/session-coverage.js#foldSessionCoverage` (its `coverage` field),
+ * whose header explains why a measuring tool must not report an absent
+ * observation as a value.
  *
  * `by_block_code` carries only codes actually seen, with SORTED keys, so two
  * runs with the same counts serialize to the same bytes and a diff of two
