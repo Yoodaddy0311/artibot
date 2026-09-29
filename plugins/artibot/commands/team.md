@@ -324,7 +324,7 @@ Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
 1. {teammate-1}: {작업 내용} — 변경 파일: {files}
 2. {teammate-2}: {작업 내용} — 변경 파일: {files}
 
-검수 체크리스트 5개 항목 전부 확인 후 INSPECTION REPORT 제출.\n\n{보고 계약}")
+검수 체크리스트 5개 항목 전부 확인 후 INSPECTION REPORT 제출. 검수 문서와 claim_audit 블록은 마지막 답변에도 싣는다 — {claim_audit 형식: 아래 '블록은 마지막 텍스트에' 항목}.\n\n{보고 계약}")
 ```
 
 **검수 체크리스트 (5개 항목 — 하나도 건너뛰지 마라):**
@@ -344,6 +344,9 @@ Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
 
 - **검수 문서 형식** — 인스펙터의 최종 답변에는 `schema_version: 2` 검수 문서(정규 verdict `PASS`|`REPAIR_REQUIRED`|`REPLAN_REQUIRED`|`INTENT_REVIEW_REQUIRED`|`BLOCK` 와 `verification_id` 포함)와 `claim_audit` 블록을 함께 싣는다 — 두 블록은 한 답변 안에 나란히 놓는다(v2 스키마가 `additionalProperties: false` 라 verdict 안에 audit 을 넣으면 그 verdict 가 무효가 된다). `claim_audit.subject_model` 은 모르면 **키 자체를 쓰지 마라** — `null` 을 쓰면 파서가 블록 전체를 거부해 audit 줄이 남지 않는다.
 - **기록되는 경로** — SubagentStop 훅이 그 두 블록을 `review.completed` / `review.claim_audit` 원장 줄로 기록한다. 위 `APPROVE`/`REQUEST_CHANGES`/`REJECT` 만 담긴 레거시 답변은 측정용으로 접히기만 하고 **기록되지 않는다** — 판정이 원장에 남기를 원하면 v2 문서를 함께 실어라.
+- **스폰 귀속 키 (`claim_audit.subject_agent_id`)** — 이 감사가 **빌더 1명**의 작업을 대상으로 하면 그 빌더 스폰의 원장 id 를 `subject_agent_id` 로 적는다. 이 키가 있어야 `review.claim_audit` 줄이 `route.bound` 의 스폰에 조인되어 스폰별 검수 통과율이 나온다(`lib/replay/claim-audit-join.js#joinClaimAudits`). 값은 원장 `route.bound` 줄의 `data.agent_id` 와 **글자 그대로** 같아야 하므로 리더가 **직접 본 문자열만** 옮긴다: `Agent` 호출 결과의 `agentId:` 줄이 그것이다(서브에이전트 스폰 실측 1건, 2026-09-29: 결과의 `agentId` 와 원장 bind 의 `agent_id` 가 일치). 팀 소속 팀원 스폰 결과의 `agent_id: {이름}@{팀}` 은 원장 id 가 **아니다**(원장 id 는 `a{이름}-{16자 hex}` 형태인데 그 결과에는 hex 가 없다) — 팀원 이름, `{이름}@{팀}`, 이름에 `agent-` 를 붙이거나 접두를 떼서 **만든 값은 쓰지 마라**. 리더는 그 빌더 1명만 검수하는 스폰 프롬프트에 그 agentId 를 적어 주고(못 봤으면 적지 않는다), 인스펙터는 받은 값만 옮긴다. 값이 없거나 확신이 없으면 `subject_model` 과 같은 규칙이다 — `subject_agent_id` **키 자체를 쓰지 마라**(`null`·추측 금지. 키 없는 audit 은 정상 줄이고 조인에서 `no_subject_audits` 로 따로 센다). 이 id 는 사용자 대상 응답에 옮기지 않는다. 리더가 단언하는 값이라 훅도 조인도 그 스폰이 정말 그 결과물을 냈는지는 검증하지 못한다.
+- **한 답변 = 블록 1개 = 스폰 1개** — 위 예시처럼 인스펙터 1명이 빌더 여럿을 한 답변에서 감사하면 그 블록은 스폰 1개를 가리키지 않으므로 `subject_agent_id` 를 쓰지 않는다(이 기본형의 audit 은 조인에서 `no_subject_audits` 로 센다). 게다가 파서는 한 답변의 **서로 다른** `claim_audit` 블록 2개를 `ambiguous_claim_audit` 로 답변 통째 거부한다(`lib/review/independent-reviewer.js#parseClaimAudit`). 스폰별 통과율이 필요하면 빌더마다 검수를 따로 띄워라 — 이름이 `-inspector` 로 끝나야 훅이 검수로 기록한다(`scripts/hooks/_review-stop-record.js#isReviewerStop`).
+- **블록은 마지막 텍스트에** — SubagentStop 훅은 인스펙터의 **마지막 assistant 텍스트**만 읽고 도구 호출(`SendMessage`) 본문은 읽지 않는다. 보고 계약대로 `SendMessage` 로 리더에게 보내는 것과 별개로, 두 블록은 마지막 답변에도 그대로 싣는다. `claim_audit` 형식은 `agents/auditor.md` 의 "claim_audit Block" 절이 정본이다 — 리더는 그 절의 JSON 한 줄과 키 표를 스폰 프롬프트에 붙여 준다(형식 없이 이름만 적으면 모델이 임의 형식을 지어낸다). 실측(2026-09-29): 이 리포 인스펙터 transcript 6건 중 마지막 텍스트에 `claim_audit` 블록이 있던 건 0건이고, 원장 41,356줄(2026-09-03~09-29)에 `review.*` 행은 0건이다.
 
 ### 중계 계약 (MANDATORY — 리더가 사용자에게 보고할 때)
 
