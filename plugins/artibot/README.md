@@ -329,9 +329,9 @@ Full guide: [CONTRIBUTING.md](./CONTRIBUTING.md).
 ## Privacy & Data Policy
 
 Artibot is **local-first by design**. All operational data — including learned
-patterns, GRPO policy weights, hierarchical memory, swarm telemetry, command
-history, hook checkpoints, and benchmark artifacts — is read from and written
-to your own filesystem under the plugin root or `~/.claude/artibot/`. The
+patterns, GRPO policy weights (retired 2026-06; no longer written), hierarchical memory, swarm telemetry,
+command history, hook checkpoints, and benchmark artifacts — is read from and written to your own
+filesystem under the plugin root or `~/.claude/artibot/`. The
 plugin never establishes outbound network connections to third-party telemetry,
 analytics, or remote storage backends. The only network traffic Claude Code
 itself makes is the Anthropic API calls you initiate; Artibot does not add to
@@ -1617,7 +1617,7 @@ plugins/artibot/
 │   ├── core/                    # 코어: platform, config, cache, lifecycle, extension, error-codes, hook-utils, quickstart, guard-registry, file-lock, event-bus, blocked-patterns 등
 │   ├── runtime/                 # 런타임: create-artibot-agent, evaluator, middleware/ (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization, lifecycle 등)
 │   ├── cognitive/               # 인지 엔진 (8): router, system1, system2 (core+strategies), sandbox, loop-detector
-│   ├── learning/                # 학습 (15): memory, grpo, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
+│   ├── learning/                # 학습 (15): memory, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
 │   ├── swarm/                   # 연합 지능 (6): swarm-client, pattern-packager, sync-scheduler, swarm-persistence, swarm-config
 │   ├── intent/                  # 의도 감지 (4): language, trigger, ambiguity

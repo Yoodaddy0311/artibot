@@ -20,7 +20,7 @@ agents:
   - "planner"
 tokens: "~2K"
 category: "learning"
-source_hash: fff183d4
+source_hash: 8912c664
 whenNotToUse: "One-off tasks or throwaway experiments where no routing pattern or user preference is worth persisting; do not trigger during active task execution."
 ---
 
@@ -90,7 +90,7 @@ Each routing decision is recorded as an experience entry:
 | `confidence` | number | Router confidence at decision time |
 | `timestamp` | string | ISO timestamp |
 
-> 위 표는 실제 스키마가 아니다. 수집기가 쓰는 것은 라우팅 결정이 아니라 `{ id, type, category, data, timestamp, sessionId, model }` 모양의 경험이며 `type` 은 `tool` · `agent` · `success` · `error` · `team` · `self-evaluation` 이다(`lib/learning/lifelong-learner.js#collectExperience` · `collectDailyExperiences`; 호출처는 `scripts/hooks/tool-tracker.js` · `scripts/hooks/agent-evaluator.js` · `lib/learning/pipeline.js`). 표의 `routed_to` 는 이 스킬 밖의 리포 전역(2026-09-29 grep, node_modules 제외)에서 나오지 않는다. 역사 기록으로 보존한다.
+> 위 표는 실제 스키마가 아니다. 수집기가 쓰는 것은 라우팅 결정이 아니라 `{ id, type, category, data, timestamp, sessionId, model }` 모양의 경험이며 `type` 은 `tool` · `agent` · `success` · `error` · `team` · `self-evaluation` 이다(`lib/learning/lifelong-learner.js#collectExperience` · `collectDailyExperiences`; 호출처는 `scripts/hooks/tool-tracker.js` · `scripts/hooks/agent-evaluator.js` · `lib/learning/pipeline.js`, 그리고 사람이 `/learning review approve` 로 승인할 때 대화 코퍼스를 `success` / `ledger-corpus` 경험으로 승격하는 `lib/learning/ledger/review-queue.js#approve`(진입점 `scripts/ledger-review.js`)). 표의 `routed_to` 는 이 스킬 밖의 리포 전역(2026-09-29 grep, node_modules 제외)에서 나오지 않는다. 역사 기록으로 보존한다.
 
 ### 3. GRPO (Group Relative Policy Optimization)
 
