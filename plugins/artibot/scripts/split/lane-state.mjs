@@ -53,6 +53,18 @@
  * is deliberate: remove `missionBinding` from plan.json. A run WITHOUT one is
  * written exactly as before and opens no store.
  *
+ * ── The canary switch (SH-11) ────────────────────────────────────────────
+ * All of the above happens only while `artibot.config.json#
+ * split.missionBinding.enabled` is a literal `true` (`task-feed.mjs#
+ * missionBindingEnabled`; shipped `false`). With the key off, a run that
+ * carries a record is written by the LEGACY path — `run.json` only, no store
+ * opened — and the result adds `binding: { status: 'disabled' }`. That is the
+ * revert: `split.missionBinding.enabled: false`, nothing else to undo. Turning
+ * the key back on is guarded: a lane the legacy path wrote after the node last
+ * changed (a later stamp, or a different word than `ops.state` written after
+ * `ops.since`) refuses as `binding-stale` (the node's `ops` is behind
+ * `run.json`).
+ *
  * After a successful write, `main` (the CLI only — never `setLaneState`,
  * which dispatch also calls) hands the transition to
  * `lane-lease.mjs#syncLaneLease`, which renews or releases the limb's
@@ -69,7 +81,7 @@ import { readRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
 import { writeWorkerState } from '../../lib/topology/split-state.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { syncLaneLease } from './lane-lease.mjs';
-import { openFeedStore, sessionIdFromEnv } from './task-feed.mjs';
+import { missionBindingEnabled, openFeedStore, sessionIdFromEnv } from './task-feed.mjs';
 
 export const HELP = `usage: node scripts/split/lane-state.mjs <limb> <state> [--window <session>] [--note <text>] [--json]
        node scripts/split/lane-state.mjs --list [--json]
@@ -82,7 +94,7 @@ export const HELP = `usage: node scripts/split/lane-state.mjs <limb> <state> [--
 
 Writes run.json.lanes[<limb>] = { state, since, window?, note?, projected_from, updated_at } atomically; every other run.json key is preserved.
 Refuses a state outside the allowlist and a limb not in plan.json (no --force).
-A run whose plan.json carries a missionBinding is written through that mission's Task Graph first (run.json is then its projection); a binding that cannot be honoured refuses with exit 1 and run.json untouched.`;
+A run whose plan.json carries a missionBinding is written through that mission's Task Graph first (run.json is then its projection) while artibot.config.json#split.missionBinding.enabled is true; a binding that cannot be honoured refuses with exit 1 and run.json untouched. With the key off (the shipped default) the binding is ignored: run.json is written directly and the result says binding.status "disabled".`;
 
 /**
  * @param {string[]} argv
@@ -159,8 +171,8 @@ function openBoundStore(parentRoot, opts) {
  * `cas-conflict`, …) throw with the reason first and leave `run.json` as it was.
  *
  * @param {{ limb: string, state: string, window?: string|null, note?: string|null }} input
- * @param {{ cwd?: string, now?: () => Date, sessionId?: string|null, openStore?: (root: string, sid: string) => object }} [opts] - `sessionId` / `openStore` matter for a bound run only.
- * @returns {{ limb: string, state: string, previous: string|null, since: string, window: string|null, note: string|null, changed: boolean, ledger: string, source?: 'store', missionId?: string, stateVersion?: number, projection?: string }} - `ledger` is what the event half did: `appended`, `skipped:no-event` (this transition owes none), `skipped:no-port` (no ledger injected — this CLI injects none) or `skipped:missing:<key>`. A skip is a real hole in `ledger ⊇ store` and this return is its only signal. The last four keys appear for a BOUND run only, and `previous` / `changed` are then the STORE's answer, not run.json's.
+ * @param {{ cwd?: string, now?: () => Date, sessionId?: string|null, openStore?: (root: string, sid: string) => object, config?: object|null }} [opts] - `sessionId` / `openStore` matter for a bound run only. `config`: the parsed artibot.config.json the canary key is read from (`null` = no config = off; absent = read the shipped file).
+ * @returns {{ limb: string, state: string, previous: string|null, since: string, window: string|null, note: string|null, changed: boolean, ledger: string, source?: 'store', missionId?: string, stateVersion?: number, projection?: string, binding?: {status: 'disabled'} }} - `ledger` is what the event half did: `appended`, `skipped:no-event` (this transition owes none), `skipped:no-port` (no ledger injected — this CLI injects none) or `skipped:missing:<key>`. A skip is a real hole in `ledger ⊇ store` and this return is its only signal. The four keys after `ledger` appear for a BOUND run only, and `previous` / `changed` are then the STORE's answer, not run.json's. `binding` appears only when the run carries a record the canary switch is not honouring.
  */
 export function setLaneState({ limb, state, window = null, note = null }, opts = {}) {
   const parentRoot = path.resolve(opts.cwd ?? process.cwd());
@@ -185,6 +197,9 @@ export function setLaneState({ limb, state, window = null, note = null }, opts =
     patch: { ops_state: state, ...(win ? { window: win } : {}), ...(noteOut ? { note: noteOut } : {}) },
     now: opts.now,
     openStore: () => openBoundStore(parentRoot, opts),
+    // The canary key, asked lazily and only for a run that carries a record —
+    // `lib/topology` is L4 and reads no config.
+    honorBinding: () => missionBindingEnabled(opts),
   });
   // A bound run's refusal is an exception, like every other refusal here: the
   // CLI exits 1 with the reason and `run.json` is exactly what it was.
@@ -200,6 +215,7 @@ export function setLaneState({ limb, state, window = null, note = null }, opts =
     changed: bound ? written.changed : prev.state !== state,
     ledger: written.ledger,
     ...(bound ? { source: 'store', missionId: written.missionId, stateVersion: written.stateVersion, projection: written.projection } : {}),
+    ...(written.binding ? { binding: written.binding } : {}),
   };
 }
 
@@ -229,15 +245,16 @@ function renderTable(rows) {
 
 /**
  * Run the lease sync without letting it reach the exit code. `syncLaneLease`
- * is total already; this guards an injected one.
+ * is total already; this guards an injected one. The sync gets the same
+ * `config` the write did, so both halves read ONE answer for the canary key.
  *
- * @param {{ syncLease?: Function }} opts
+ * @param {{ syncLease?: Function, config?: object|null }} opts
  * @param {{ parentRoot: string, limb: string, state: string }} input
- * @returns {{ outcome: string, missionId: string|null }}
+ * @returns {{ outcome: string, missionId: string|null, binding?: {status: 'disabled'} }}
  */
 function syncLease(opts, input) {
   try {
-    return (opts.syncLease ?? syncLaneLease)(input);
+    return (opts.syncLease ?? syncLaneLease)(input, { config: opts.config });
   } catch (e) {
     return { outcome: `skipped:sync-threw:${e?.message ?? 'unknown'}`, missionId: null };
   }
@@ -247,7 +264,7 @@ function syncLease(opts, input) {
  * CLI entry. Returns exit code.
  *
  * @param {string[]} argv
- * @param {{ cwd?: string, now?: () => Date, sessionId?: string|null, openStore?: (root: string, sid: string) => object, stdout?: (s: string) => void, stderr?: (s: string) => void, syncLease?: (input: { parentRoot: string, limb: string, state: string }) => { outcome: string, missionId: string|null } }} [opts] - `syncLease` is the test seam for the lease sync; `sessionId` / `openStore` are the seams for a bound run's store.
+ * @param {{ cwd?: string, now?: () => Date, sessionId?: string|null, openStore?: (root: string, sid: string) => object, config?: object|null, stdout?: (s: string) => void, stderr?: (s: string) => void, syncLease?: (input: { parentRoot: string, limb: string, state: string }, ports: { config?: object|null }) => { outcome: string, missionId: string|null } }} [opts] - `syncLease` is the test seam for the lease sync; `sessionId` / `openStore` are the seams for a bound run's store; `config` is the parsed artibot.config.json the canary key is read from (forwarded to the sync; absent = the shipped file).
  * @returns {number}
  */
 export function main(argv, opts = {}) {

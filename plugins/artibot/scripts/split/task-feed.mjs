@@ -52,7 +52,8 @@
  * canonical (binding) code paths import it 0 times.
  *
  * ── Binding, and what a bound feed does differently ──────────────────────
- * `bind: true` (`dispatch` passes it) lets the FIRST feed of a run write the
+ * `bind: true` (`dispatch` passes it, and only with the canary key on — see
+ * below) lets the FIRST feed of a run write the
  * binding — to the mission the legacy rule just found, and only when that mission
  * exists (the row is a precondition, never a side effect). From then on the run
  * is bound. A bound feed differs from a legacy one in three ways, all stated
@@ -64,22 +65,79 @@
  *  - it leaves a limb another run owns in that mission alone (I2) and refuses
  *    to dispatch it (`task-run-mismatch`).
  *
+ * ── The canary switch ────────────────────────────────────────────────────
+ * Binding a run and making the StateStore its canonical lane state is a
+ * BEHAVIOUR change, so it ships behind ONE key: `artibot.config.json#
+ * split.missionBinding.enabled`, shipped `false` (design canon: SH-11 is
+ * Shadow, "split integration" is Canary, one config key back).
+ * {@link missionBindingEnabled} reads it — only a literal `true` is on. OFF
+ * means two things: `bind: true` binds nothing, and a run that ALREADY carries
+ * a record is fed by the legacy rule as if it did not. Such a result carries
+ * `binding: { status: 'disabled' }`, so the off period is visible in the
+ * output instead of silent. `lib/topology` is L4 and never reads config, so
+ * the key reaches it as the `honorBinding` port of {@link resolveRunMission}.
+ *
  * @module scripts/split/task-feed
  */
 
 import path from 'node:path';
+import { readJsonFileSync } from '../../lib/core/file.js';
+import { getPluginRoot } from '../../lib/core/platform.js';
 import { readRunJson } from '../../lib/git/split-run-file.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { bindRunToMission, readMissionBinding } from '../../lib/topology/split-state.js';
-import { attachRunOps, foreignRunLimbs, missionEnvFromBinding, ownsFromPlan } from '../../lib/topology/split-state-sources.js';
+import {
+  attachRunOps,
+  BINDING_DISABLED,
+  foreignRunLimbs,
+  honorsBinding,
+  missionEnvFromBinding,
+  ownsFromPlan,
+  readMissionBindingEnabled,
+} from '../../lib/topology/split-state-sources.js';
 import { LIMB_LEASE_TTL_MS, mergeLimbTasks } from '../../lib/topology/split-task-feed.js';
 import { TERMINAL_TASK_STATUSES } from '../../lib/project-state/validate.js';
 import { selectMissionForSession } from '../hooks/post-compact-rehydrate.js';
 
 /** Ledger/journal `reason` for the graph write this module makes. */
 export const FEED_REASON = 'split.task-feed';
+
+/**
+ * The shipped `artibot.config.json`, read synchronously — the same file
+ * `loadConfig()` reads (`<pluginRoot>/artibot.config.json`; `lib/core/config.js`
+ * merges it over defaults that carry no `split` key, so for the canary key the
+ * two agree). Synchronous because `lane-state` / `lane-lease` are synchronous
+ * writers. Anything that goes wrong — no file, malformed JSON, an unresolvable
+ * plugin root — is `null`, and `null` means the key is OFF.
+ *
+ * @returns {object|null}
+ */
+export function readShippedConfigSync() {
+  try {
+    return readJsonFileSync(path.join(getPluginRoot(), 'artibot.config.json'), null);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the SH-11 canary key (`split.missionBinding.enabled`) is on. The one
+ * reader the split tooling shares; only a literal `true` counts.
+ *
+ * `ports.config` wins when it is given at all — `null` there means "no config"
+ * and is OFF, it never falls through to the file (a test that injects `null`
+ * must not be handed the host's real configuration). Only an ABSENT `config`
+ * reads the shipped file.
+ *
+ * @param {{ config?: object|null }} [ports]
+ * @returns {boolean}
+ */
+export function missionBindingEnabled(ports = {}) {
+  const config = ports?.config === undefined ? readShippedConfigSync() : ports.config;
+  return readMissionBindingEnabled(config);
+}
 
 /**
  * The session id, from the host env.
@@ -145,20 +203,29 @@ export function selectLegacyMission(state, sessionId) {
  * Which mission a run's Task Graph writes go to.
  *
  *  - `bound`    the run carries a binding and its mission is in the store
- *  - `legacy`   the run carries none: the per-session rule, unchanged
+ *  - `legacy`   the run carries none: the per-session rule, unchanged. Also the
+ *               answer for a run that DOES carry a record while the canary
+ *               switch is off — then the result adds `binding: {status:'disabled'}`
+ *               and the record is neither judged nor deleted
  *  - `rejected` the run carries a binding this call cannot honour (damaged, or
  *               its mission is gone): the caller must NOT fall back to the
  *               session, which is exactly the join this replaces
  *
+ * `honorBinding` is the canary switch as a port (`true`, or a function
+ * returning `true`; anything else — absent included — is OFF, see
+ * `split-state-sources.js#honorsBinding`). It is asked only when the run
+ * carries a record, so a legacy run never reaches the config.
+ *
  * Reads plan.json / run.json (through `readMissionBinding`), so a corrupt
  * file throws — callers are record-only and turn that into a skip.
  *
- * @param {{ parentRoot: string, state: object, sessionId: unknown }} p
- * @returns {{ mode: 'bound', missionId: string, binding: Readonly<object> } | { mode: 'legacy', missionId: string|null } | { mode: 'rejected', reason: string, missionId: string|null }}
+ * @param {{ parentRoot: string, state: object, sessionId: unknown, honorBinding?: boolean|(() => boolean) }} p
+ * @returns {{ mode: 'bound', missionId: string, binding: Readonly<object> } | { mode: 'legacy', missionId: string|null, binding?: Readonly<{status: 'disabled'}> } | { mode: 'rejected', reason: string, missionId: string|null }}
  */
-export function resolveRunMission({ parentRoot, state, sessionId }) {
+export function resolveRunMission({ parentRoot, state, sessionId, honorBinding }) {
   const probe = readMissionBinding({ runDir: path.join(parentRoot, '.artibot', 'split') });
   if (probe.status === 'none') return { mode: 'legacy', missionId: selectLegacyMission(state, sessionId).missionId ?? null };
+  if (!honorsBinding(honorBinding)) return { mode: 'legacy', missionId: selectLegacyMission(state, sessionId).missionId ?? null, binding: BINDING_DISABLED };
   if (probe.status === 'invalid') return { mode: 'rejected', reason: probe.reason, missionId: null };
   const missionId = probe.binding.mission_id;
   if (!state?.active_missions?.[missionId]) return { mode: 'rejected', reason: 'binding-dangling', missionId };
@@ -356,6 +423,8 @@ function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, n
  * A run that carries a binding is fed through {@link feedBound} instead (no
  * claim; see the module header). `bind: true` lets this call write the binding
  * when the run has none and the legacy rule finds a live mission for the session.
+ * Both are subject to the canary key ({@link missionBindingEnabled}): with it
+ * off, `bind: true` binds nothing and a record already on disk is not honoured.
  *
  * @param {object} params - Feed inputs.
  * @param {string} params.parentRoot - Parent (main checkout) root.
@@ -363,11 +432,11 @@ function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, n
  * @param {string} params.limb - The limb being dispatched.
  * @param {boolean} [params.dryRun=false] - True writes NOTHING and opens no store.
  * @param {string|null} [params.sessionId] - Override; defaults to the host env.
- * @param {boolean} [params.bind=false] - Bind an unbound run to the mission the session owns. Off by default: only `dispatch` asks.
- * @param {{ openStore?: Function, now?: () => Date }} [ports] - Test seam.
+ * @param {boolean} [params.bind=false] - Bind an unbound run to the mission the session owns. Off by default: only `dispatch` asks, and only with the canary key on (this function asks the key again).
+ * @param {{ openStore?: Function, now?: () => Date, config?: object|null }} [ports] - Test seam. `config`: the parsed artibot.config.json the canary key is read from; `null` is "no config" (off); absent reads the shipped file.
  * @returns {{fed: boolean, skipped: string|null, missionId: string|null, taskId: string|null,
  *   added: string[], refreshed: string[], claim: string|null, stateVersion?: number, location?: string,
- *   binding?: object, opsAttached?: string[], opsSkipped?: object[]}} `binding` appears on a bound feed, and on a legacy feed that asked to bind and could not (`{status:'unbound', reason}`).
+ *   binding?: object, opsAttached?: string[], opsSkipped?: object[]}} `binding` appears on a bound feed, on a legacy feed that asked to bind and could not (`{status:'unbound', reason}`), and on any legacy result of a run whose record the switch is not honouring (`{status:'disabled'}`).
  * @example
  * feedLimb({ parentRoot, plan, limb: 'auth' }); // { fed: true, claim: 'claimed', ... }
  */
@@ -381,18 +450,27 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId, bi
 
     const store = (ports.openStore ?? openFeedStore)(parentRoot, sid);
     const state = store.getState();
-    const resolved = resolveRunMission({ parentRoot, state, sessionId: sid });
+    // The canary key, asked lazily and at most once: a run with no record that
+    // does not ask to bind never reads the config file.
+    let enabled = null;
+    const honorBinding = () => {
+      if (enabled === null) enabled = missionBindingEnabled(ports);
+      return enabled;
+    };
+    const resolved = resolveRunMission({ parentRoot, state, sessionId: sid, honorBinding });
     if (resolved.mode === 'rejected') return { ...skipped(resolved.reason), missionId: resolved.missionId };
     const { missionId } = resolved;
+    // A legacy result of a run whose record the switch is not honouring says so.
+    const disabled = resolved.mode === 'legacy' && resolved.binding ? { binding: resolved.binding } : {};
     // Re-checked against the snapshot rather than trusted: the selector's
     // contract is "a mission this session owns", and creating one here is the
     // orphan this module must not make.
-    if (!missionId || !state.active_missions?.[missionId]) return skipped('no-mission');
+    if (!missionId || !state.active_missions?.[missionId]) return { ...skipped('no-mission'), ...disabled };
 
     const now = ports.now ?? (() => new Date());
     let binding = resolved.mode === 'bound' ? { record: resolved.binding, created: false } : null;
     let unbound = null;
-    if (binding === null && bind) {
+    if (binding === null && bind && honorBinding()) {
       const attempt = tryBind({ parentRoot, plan, limb, state, missionId, sid, store, now });
       if (attempt.record) binding = attempt;
       else unbound = { status: 'unbound', reason: attempt.reason };
@@ -400,13 +478,13 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId, bi
     if (binding !== null) return feedBound({ store, state, parentRoot, plan, limb, missionId, binding, now });
 
     const { merged, commit } = mergeAndWrite(store, state, missionId, plan, limb);
-    if (!merged) return skipped('no-mission');
+    if (!merged) return { ...skipped('no-mission'), ...disabled };
     const task = merged.graph.tasks.find((t) => t.id === limb);
-    if (!task) return skipped('limb-not-in-plan');
+    if (!task) return { ...skipped('limb-not-in-plan'), ...disabled };
 
     let stateVersion = state.state_version;
     if (commit) {
-      if (!commit.ok) return { ...skipped(`graph-write-refused:${commit.errors?.[0] ?? 'unknown'}`), missionId };
+      if (!commit.ok) return { ...skipped(`graph-write-refused:${commit.errors?.[0] ?? 'unknown'}`), missionId, ...disabled };
       stateVersion = commit.state_version ?? stateVersion;
     }
 
@@ -422,6 +500,7 @@ export function feedLimb({ parentRoot, plan, limb, dryRun = false, sessionId, bi
       stateVersion: store.getState().state_version ?? stateVersion,
       location: store.location?.source ?? null,
       ...(unbound ? { binding: unbound } : {}),
+      ...disabled,
     };
   } catch (err) {
     // Including the store constructor's TypeErrors. A dispatch must not fail

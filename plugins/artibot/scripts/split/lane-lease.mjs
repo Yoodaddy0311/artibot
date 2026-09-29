@@ -47,10 +47,16 @@
  * hygiene — a lease taken BEFORE the run was bound is still renewed and
  * released here, on the same terms as before.
  *
+ * With the canary key off (`split.missionBinding.enabled`, shipped `false`;
+ * `task-feed.mjs#missionBindingEnabled`) a run that carries a record is
+ * synced by the LEGACY rule — the session's own mission, ordinary lease
+ * semantics — and every result after the mission is resolved adds
+ * `binding: { status: 'disabled' }`.
+ *
  * @module scripts/split/lane-lease
  */
 
-import { openFeedStore, resolveRunMission, sessionIdFromEnv } from './task-feed.mjs';
+import { missionBindingEnabled, openFeedStore, resolveRunMission, sessionIdFromEnv } from './task-feed.mjs';
 
 /** Ledger/journal `reason` for the store writes this module makes. */
 export const LANE_LEASE_REASON = 'split.lane-lease';
@@ -80,9 +86,14 @@ export const LANE_LEASE_ACTIONS = Object.freeze({
   failed: 'release',
 });
 
-/** @param {string} outcome @param {string|null} [missionId] @returns {{outcome: string, missionId: string|null}} */
-function result(outcome, missionId = null) {
-  return { outcome, missionId };
+/**
+ * @param {string} outcome
+ * @param {string|null} [missionId]
+ * @param {{ binding?: object }} [note] - `{binding: {status:'disabled'}}` when the canary switch is not honouring the run's record
+ * @returns {{outcome: string, missionId: string|null, binding?: object}}
+ */
+function result(outcome, missionId = null, note = {}) {
+  return { outcome, missionId, ...note };
 }
 
 /** @param {object} commit - A store commit result. @param {string} ok - Outcome on success. @returns {string} */
@@ -98,9 +109,10 @@ function commitOutcome(commit, ok) {
  * @param {string} input.limb - Limb; also the task id and the lease owner, as in task-feed.
  * @param {string} input.state - The ops state just written.
  * @param {string|null} [input.sessionId] - Override; defaults to the host env.
- * @param {{ openStore?: Function }} [ports] - Test seam.
- * @returns {{outcome: string, missionId: string|null}} `outcome` is one of `renewed` |
+ * @param {{ openStore?: Function, config?: object|null }} [ports] - Test seam. `config`: the parsed artibot.config.json the canary key is read from (`null` = no config = off; absent = read the shipped file).
+ * @returns {{outcome: string, missionId: string|null, binding?: {status: 'disabled'}}} `outcome` is one of `renewed` |
  *   `released:<status>` | `unchanged` | `held-by:<owner>` | `refused:<msg>` | `skipped:<reason>`.
+ *   `binding` is present only when the run carries a record the switch is not honouring.
  * @example
  * syncLaneLease({ parentRoot, limb: 'auth', state: 'done' }); // { outcome: 'released:done', missionId: 'M-…' }
  */
@@ -116,30 +128,33 @@ export function syncLaneLease(input, ports = {}) {
 
     const store = (ports.openStore ?? openFeedStore)(parentRoot, sid);
     const snapshot = store.getState();
-    const resolved = resolveRunMission({ parentRoot, state: snapshot, sessionId: sid });
+    const resolved = resolveRunMission({ parentRoot, state: snapshot, sessionId: sid, honorBinding: () => missionBindingEnabled(ports) });
     if (resolved.mode === 'rejected') return result(`skipped:${resolved.reason}`, resolved.missionId);
     const { missionId } = resolved;
+    // A run whose record the canary switch is not honouring is synced by the
+    // legacy rule, and every result from here on says so.
+    const note = resolved.mode === 'legacy' && resolved.binding ? { binding: resolved.binding } : {};
     // Re-checked, not trusted — see task-feed: creating the row here is the orphan.
-    if (!missionId || !snapshot.active_missions?.[missionId]) return result('skipped:no-mission');
+    if (!missionId || !snapshot.active_missions?.[missionId]) return result('skipped:no-mission', null, note);
     const task = snapshot.task_graphs?.[missionId]?.tasks?.find((t) => t?.id === limb);
-    if (!task) return result('skipped:no-task', missionId);
+    if (!task) return result('skipped:no-task', missionId, note);
 
     // Pre-checked for a readable outcome; the store re-checks the owner inside
     // its lock, so a lease taken between this read and the write is still refused.
     const held = snapshot.task_leases?.[missionId]?.[limb] ?? null;
-    if (held && held.owner !== limb) return result(`held-by:${held.owner}`, missionId);
+    if (held && held.owner !== limb) return result(`held-by:${held.owner}`, missionId, note);
 
     if (action === 'heartbeat') {
-      if (!held) return result('skipped:no-lease', missionId);
+      if (!held) return result('skipped:no-lease', missionId, note);
       const beat = store.heartbeatWorker({ missionId, taskId: limb, owner: limb, reason: LANE_LEASE_REASON });
-      return result(commitOutcome(beat, 'renewed'), missionId);
+      return result(commitOutcome(beat, 'renewed'), missionId, note);
     }
     // `releaseTask` commits even when nothing would change, so a re-asserted
     // `done` would add a `state.updated` per run. Nothing held and the status
     // already there is the state the release would produce.
-    if (!held && task.status === state) return result('unchanged', missionId);
+    if (!held && task.status === state) return result('unchanged', missionId, note);
     const released = store.releaseTask({ missionId, taskId: limb, owner: limb, status: state, reason: LANE_LEASE_REASON });
-    return result(commitOutcome(released, `released:${state}`), missionId);
+    return result(commitOutcome(released, `released:${state}`), missionId, note);
   } catch (err) {
     // Including the store constructor's TypeErrors. A lane write must not
     // fail because bookkeeping did.

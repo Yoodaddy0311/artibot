@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { normalizeFastProfile } from '../../lib/autopilot/fast-profile.js';
+import { MISSION_BINDING_ENABLED_CONFIG_PATH, readMissionBindingEnabled } from '../../lib/topology/split-state-sources.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -67,8 +68,13 @@ const EXPECTED_SPLIT = Object.freeze({
  *   - `dispatch`      — `scripts/split/dispatch.mjs` 의 `{BUDGET}`·템플릿 경로
  *   - `worktreeSetup` — `scripts/split/worktree-setup.mjs` 의 junction·복사·레인 env
  * 어느 키도 행동을 켜지 않고, 사용자 settings.json 의 cross-session 키와 무관하다(아래 스캔이 지킨다).
+ *
+ * 2026-09-29 등록(SH-11): `missionBinding` — 켜면 행동이 바뀌는 카나리 게이트다(설계 정본
+ * :406 "#22 split 통합 … config 1키 되돌림"). 그래서 위 문장의 예외이고, `enabled:false` 로
+ * 출하한다. 등록은 형태만 허용하는 것이지 켜는 것이 아니다 — 출하값은 아래 "SH-11" 핀이
+ * 지키고, 켜는 것은 편집이 아니라 결정이다.
  */
-const ADDITIVE_OBJECT_KEYS = Object.freeze(['supervisor', 'dispatch', 'worktreeSetup', 'contextLifecycle']);
+const ADDITIVE_OBJECT_KEYS = Object.freeze(['supervisor', 'dispatch', 'worktreeSetup', 'contextLifecycle', 'missionBinding']);
 
 /** `split` 아래에 있어도 되는 키 — allowlist. `comment` 는 이 config 의 관례다. */
 const ALLOWED_KEYS = new Set([...Object.keys(EXPECTED_SPLIT), ...ADDITIVE_OBJECT_KEYS, 'comment']);
@@ -206,5 +212,58 @@ describe('사용자 소유 cross-session 설정 — 무접촉 래칫(0)', () => 
     const { offenders } = scanPluginTree();
     const detail = offenders.map((o) => `${o.file}:${o.line} ${o.key} — ${o.text}`).join('\n');
     expect(detail).toBe('');
+  });
+});
+
+/**
+ * SH-11 `split.missionBinding.enabled` — 카나리 게이트의 등재값 고정.
+ *
+ * run↔mission 바인딩을 쓰고 StateStore 를 lane 상태의 정본으로 삼는 것은 **행동 변경**이다
+ * (설계 정본 :256 은 이 어댑터를 Shadow 행에, :406 은 "#22 split 통합" 을 Canary "config 1키
+ * 되돌림" 행에 적는다). 그래서 키 뒤에 있고 꺼진 채 출하한다. 소비자는 `=== true` 리터럴
+ * 비교라 문자열 "false" 도 OFF 로 읽히므로 타입을 따로 단언한다 — `v5-config-firewall` 의
+ * CA-15·CA-13 킬스위치 핀과 같은 이유, 같은 모양.
+ *
+ * 이 게이트가 못 보는 것(rules §9):
+ *  - ON 일 때의 동작. `tests/scripts/{task-feed,lane-state,lane-lease,split-tools}.test.js` 와
+ *    `tests/topology/split-state*.test.js` 가 양방향을 본다.
+ *  - 세 CLI 와 dispatch 가 실제로 이 키를 읽는지. 소비자 배선은 위 스크립트 테스트와
+ *    `split-state-binding.test.js` 의 텍스트 게이트가 본다 — 여기서는 경로 상수가 키 경로와 같은지만 본다.
+ *  - 설치본의 값. 이 파일은 저장소의 `artibot.config.json` 을 읽는다.
+ */
+describe('artibot.config.json#split.missionBinding — SH-11 카나리 게이트의 등재값', () => {
+  it('키가 등재돼 있고 boolean false 다 (문자열 "false" 거부) — 출하는 꺼진 채다', () => {
+    expect(config.split.missionBinding, 'config.split.missionBinding 이 없다').toBeDefined();
+    expect(config.split.missionBinding.enabled).toBe(false);
+    expect(typeof config.split.missionBinding.enabled).toBe('boolean');
+  });
+
+  it('하위 키는 enabled 와 comment 뿐이고, comment 는 되돌리는 법을 말한다', () => {
+    expect(Object.keys(config.split.missionBinding).sort()).toEqual(['comment', 'enabled']);
+    expect(config.split.missionBinding.comment).toMatch(/Kill-switch: set false/);
+  });
+
+  it('최상위 키가 아니라 split 아래에 있다 (최상위 키 수 기준선을 움직이지 않는다)', () => {
+    expect(Object.hasOwn(config, 'missionBinding')).toBe(false);
+  });
+
+  it('등재가 소비자를 켜지 않는다 — readMissionBindingEnabled 가 false 를 준다', () => {
+    expect(readMissionBindingEnabled(config)).toBe(false);
+  });
+
+  it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
+    expect(MISSION_BINDING_ENABLED_CONFIG_PATH).toBe('split.missionBinding.enabled');
+    expect(MISSION_BINDING_ENABLED_CONFIG_PATH.split('.').reduce((node, key) => node?.[key], config)).toBe(false);
+  });
+
+  it('켜는 것은 리터럴 true 뿐이다 — 복사본에서 true 로 바꿔야 소비자가 켜지고, "true"·1 은 켜지 못한다', () => {
+    const on = structuredClone(config);
+    on.split.missionBinding.enabled = true;
+    expect(readMissionBindingEnabled(on)).toBe(true);
+    for (const v of ['true', 1, 'on']) {
+      const other = structuredClone(config);
+      other.split.missionBinding.enabled = v;
+      expect(readMissionBindingEnabled(other), JSON.stringify(v)).toBe(false);
+    }
   });
 });

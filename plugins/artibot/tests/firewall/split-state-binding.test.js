@@ -23,13 +23,22 @@
  *    exception, and only for the legacy rule (an unbound run), through the single
  *    function `selectLegacyMission`;
  *  - the env carrier is derived FROM the binding, never the other way: no
- *    canonical source reads `ARTIBOT_MISSION_ID` from `process.env`.
+ *    canonical source reads `ARTIBOT_MISSION_ID` from `process.env`;
+ *  - THE CANARY SWITCH (`artibot.config.json#split.missionBinding.enabled`):
+ *    the production call sites of `writeWorkerState` / `readWorkerState` /
+ *    `resolveRunMission` are pinned BY LIST and each passes an `honorBinding`
+ *    port, no script hardcodes the switch on (`honorBinding: true`, `bind: true`),
+ *    `dispatch.mjs` derives `bind` from the shared reader, no script reads the key
+ *    by hand, and the two SH-11 library modules never read config (L4 receives
+ *    the answer, it does not fetch it). The SHIPPED value of the key is pinned in
+ *    `split-config-firewall.test.js`, next to the config allowlist it belongs to.
  *
  * THE SCANNER IS TESTED (rules §10). A gate that reads "0 hits" is only worth
- * something if it can say "1 hit": the last block mutates real sources —
- * an import, an aliased import, a dynamic import, a call, a re-export — and
- * demands each go red, checks the comment stripper on the inputs it is most
- * likely to get wrong, and demands the real legacy site be FOUND.
+ * something if it can say "1 hit": the last blocks mutate real sources —
+ * an import, an aliased import, a dynamic import, a call, a re-export, a call
+ * without the port, a hardcoded switch, a config read in the library — and
+ * demand each go red, check the comment stripper on the inputs it is most
+ * likely to get wrong, and demand the real legacy site be FOUND.
  *
  * WHAT THIS GATE CANNOT SEE (written next to the gate, so the gate does not
  * become the next illusion):
@@ -48,6 +57,14 @@
  *  - THE COMMENT STRIPPER IS A SCANNER, NOT A PARSER. It understands strings,
  *    template literals and both comment forms; it does not understand regex
  *    literals that contain a quote character. None of the scanned files has one.
+ *  - WHAT THE SWITCH DOES. The switch block reads text: that a call site PASSES a
+ *    port says nothing about what the port answers, and a call built by name
+ *    (`mod[name](...)`) is invisible. That `false` really reverts a bound run, that
+ *    only a literal `true` turns it on, and that a stale lane is refused are
+ *    measured by `tests/topology/split-state{,-sources}.test.js` and
+ *    `tests/scripts/{lane-state,lane-lease,task-feed,split-tools}.test.js`.
+ *  - CALL SITES OUTSIDE `lib/` AND `scripts/` (hooks live under `scripts/`, so they
+ *    are covered; a test, a doc or `commands/*.md` is not code and is not scanned).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -268,5 +285,271 @@ describe('SH-11 I3 gate — the scanner can say "1 hit" (a mutated copy goes RED
     expect(functionBody(src, 'a')).toBe('{ if (x) { return 1; } return 2; }');
     expect(functionBody(src, 'b')).toBe('{ return 3; }');
     expect(functionBody(src, 'c')).toBeNull();
+  });
+});
+
+/* ══════════ SH-11 canary switch — every path that honours a binding asks the key ══════════
+ *
+ * `artibot.config.json#split.missionBinding.enabled` ships `false`. This block
+ * pins the WIRING, by text: who may call the three entry points, that each call
+ * passes the port, that nothing hardcodes the switch on, and that the library
+ * fetches nothing. The shipped value is pinned in `split-config-firewall.test.js`;
+ * what the switch DOES is measured by the behavioural suites (see the header).
+ */
+
+/** Directories holding production code that could call the SH-11 entry points. `commands/*.md`, docs and tests are not code. */
+const PRODUCTION_ROOTS = Object.freeze(['lib', 'scripts']);
+
+/**
+ * The entry points that honour (or ignore) a binding, and the ONLY production
+ * files that call each. Pinned BY LIST (allowlist): a new caller is a decision,
+ * and it must pass the switch — a caller that forgets the port would be OFF
+ * (fail-closed) and never canonical, which is silent.
+ */
+const SWITCHED_CALLS = Object.freeze({
+  writeWorkerState: Object.freeze(['scripts/split/lane-state.mjs']),
+  readWorkerState: Object.freeze([]),
+  resolveRunMission: Object.freeze(['scripts/split/lane-lease.mjs', 'scripts/split/task-feed.mjs']),
+});
+
+/** The two library modules of the SH-11 adapter: they RECEIVE the switch, they never fetch it (L4). */
+const SWITCH_LIBRARY = Object.freeze(['lib/topology/split-state.js', 'lib/topology/split-state-sources.js']);
+
+/** Every source file under a directory (recursive), repo-relative and sorted; `node_modules` is skipped. */
+function sourcesUnder(rel) {
+  const out = [];
+  const visit = (dirRel) => {
+    for (const entry of fs.readdirSync(path.join(PLUGIN_ROOT, dirRel), { withFileTypes: true })) {
+      const child = `${dirRel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules') visit(child);
+      } else if (/\.(?:js|mjs|cjs)$/.test(entry.name)) out.push(child);
+    }
+  };
+  visit(rel);
+  return out.sort();
+}
+
+/**
+ * Call sites of `name(...)` on comment-stripped code. A declaration
+ * (`function name(`) is not a call; a namespace call (`ns.name(`) is. `args` is
+ * the text between the parentheses, matched by depth — a parenthesis inside a
+ * string among the arguments would confuse it (none of the real call sites has
+ * one).
+ *
+ * @param {string} src
+ * @param {string} name
+ * @returns {Array<{ line: number, args: string }>}
+ */
+function callSites(src, name) {
+  const code = stripComments(src);
+  const sites = [];
+  const re = new RegExp(`(?<![\\w$])${name}\\s*\\(`, 'g');
+  for (let m = re.exec(code); m !== null; m = re.exec(code)) {
+    const before = code.slice(0, m.index);
+    if (/\bfunction\s*\*?\s*$/.test(before)) continue;
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close = code.length - 1;
+    for (let i = open; i < code.length; i += 1) {
+      if (code[i] === '(') depth += 1;
+      else if (code[i] === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+      }
+    }
+    sites.push({ line: before.split('\n').length, args: code.slice(open + 1, close) });
+  }
+  return sites;
+}
+
+/** Production files that call `name(`, with their sites. The raw text is pre-filtered so only candidates are comment-stripped. */
+function productionCallers(name) {
+  const found = {};
+  for (const rel of PRODUCTION_ROOTS.flatMap(sourcesUnder)) {
+    const raw = read(rel);
+    if (!raw.includes(name)) continue;
+    const sites = callSites(raw, name);
+    if (sites.length > 0) found[rel] = sites;
+  }
+  return found;
+}
+
+/** `honorBinding: true` / `bind: true` written into code — the switch hardcoded ON. */
+function hardcodedSwitches(src) {
+  const hits = [];
+  stripComments(src).split('\n').forEach((text, at) => {
+    if (/\b(?:honorBinding|bind)\s*:\s*true\b/.test(text)) hits.push({ line: at + 1, text: text.trim() });
+  });
+  return hits;
+}
+
+/** The library fetching config itself, instead of receiving the answer. */
+function configReads(src) {
+  const hits = [];
+  stripComments(src).split('\n').forEach((text, at) => {
+    if (/\b(?:loadConfig|getConfig|getPluginRoot|readJsonFileSync)\b|artibot\.config/.test(text)) hits.push({ line: at + 1, text: text.trim() });
+  });
+  return hits;
+}
+
+/**
+ * Comment-stripped source with the CONTENT of every string and template literal
+ * blanked (quotes and newlines kept). A message that names the key — a `--help`
+ * text, an error — is prose, not a read of it. Template `${…}` expressions are
+ * blanked with the rest (a scanner, not a parser).
+ *
+ * @param {string} src
+ * @returns {string}
+ */
+function codeOnly(src) {
+  const code = stripComments(src);
+  let out = '';
+  let i = 0;
+  const n = code.length;
+  while (i < n) {
+    const c = code[i];
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < n && code[j] !== c) j += code[j] === '\\' ? 2 : 1;
+      out += c + code.slice(i + 1, Math.min(j, n)).replace(/[^\n]/g, ' ') + (j < n ? c : '');
+      i = j + 1;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * A hand-rolled read of the key — a property chain ending in `.enabled`, or a
+ * string-indexed access on `missionBinding` — instead of the shared reader.
+ * Only CODE counts: the prose of a help text is blanked first. WHAT IT MISSES: a
+ * second copy of the path as a string handed to a generic getter.
+ */
+function handRolledKeyReads(src) {
+  const hits = [];
+  codeOnly(src).split('\n').forEach((text, at) => {
+    if (/missionBinding\s*(?:\?\.|\.)\s*enabled|missionBinding\s*\[\s*['"`]/.test(text)) hits.push({ line: at + 1, text: text.trim() });
+  });
+  return hits;
+}
+
+describe('SH-11 switch — the wiring is pinned by list and every call passes the port', () => {
+  for (const [name, allowed] of Object.entries(SWITCHED_CALLS)) {
+    it(`${name}( has ${allowed.length === 0 ? 'no production caller' : `exactly ${allowed.join(' + ')} as callers`}, and every call passes honorBinding`, () => {
+      const found = productionCallers(name);
+      expect(Object.keys(found).sort(), `a new caller of ${name} is a decision: register it in SWITCHED_CALLS, with its port`).toEqual([...allowed].sort());
+      for (const [rel, sites] of Object.entries(found)) {
+        for (const site of sites) expect(site.args, `${rel}:${site.line} calls ${name}( without honorBinding`).toMatch(/\bhonorBinding\b/);
+      }
+    });
+  }
+
+  it('no script or library hardcodes the switch on (honorBinding: true, bind: true)', () => {
+    for (const rel of SCANNED_DIRS.flatMap(filesOf)) expect(hardcodedSwitches(read(rel)), rel).toEqual([]);
+  });
+
+  it('dispatch.mjs derives `bind` from the shared reader, never from a literal', () => {
+    const code = stripComments(read('scripts/split/dispatch.mjs'));
+    expect(code).toMatch(/\bconst\s+bindingOn\s*=\s*readMissionBindingEnabled\(\s*config\s*\)/);
+    expect(code).toMatch(/\bbind\s*:\s*bindingOn\b/);
+    expect(code).not.toMatch(/\bbind\s*:\s*(?:true|false)\b/);
+  });
+
+  it('the CLIs hand the key on as a LAZY port; the feeder also gates tryBind on it', () => {
+    expect(stripComments(read('scripts/split/lane-state.mjs'))).toMatch(/honorBinding\s*:\s*\(\)\s*=>\s*missionBindingEnabled\(\s*opts\s*\)/);
+    expect(stripComments(read('scripts/split/lane-lease.mjs'))).toMatch(/honorBinding\s*:\s*\(\)\s*=>\s*missionBindingEnabled\(\s*ports\s*\)/);
+    const feed = stripComments(read('scripts/split/task-feed.mjs'));
+    expect(feed).toMatch(/const\s+honorBinding\s*=\s*\(\)\s*=>/);
+    expect(feed).toMatch(/enabled\s*=\s*missionBindingEnabled\(\s*ports\s*\)/);
+    expect(feed).toMatch(/\bbind\s*&&\s*honorBinding\(\)/);
+  });
+
+  it('no script reads the key by hand: it goes through readMissionBindingEnabled', () => {
+    for (const rel of filesOf({ dir: 'scripts/split', ext: /\.mjs$/ })) expect(handRolledKeyReads(read(rel)), rel).toEqual([]);
+  });
+
+  it('the SH-11 library modules never read config — the answer arrives as the honorBinding port', () => {
+    for (const rel of SWITCH_LIBRARY) {
+      expect(fs.existsSync(path.join(PLUGIN_ROOT, rel)), `${rel} must exist`).toBe(true);
+      expect(configReads(read(rel)), rel).toEqual([]);
+    }
+  });
+});
+
+describe('SH-11 switch gate — the scanners can say "1 hit" (a mutated copy goes RED)', () => {
+  it('positive control: the real call sites are FOUND, and they carry the port', () => {
+    const write = callSites(read('scripts/split/lane-state.mjs'), 'writeWorkerState');
+    expect(write).toHaveLength(1);
+    expect(write[0].args).toMatch(/\bhonorBinding\b/);
+    // The declaration in task-feed.mjs is not a call, so exactly the one real call remains.
+    expect(callSites(read('scripts/split/task-feed.mjs'), 'resolveRunMission')).toHaveLength(1);
+    expect(callSites(read('scripts/split/lane-lease.mjs'), 'resolveRunMission')).toHaveLength(1);
+  });
+
+  it('a call without the port is reported: the port removed from the real lane-state call', () => {
+    const src = read('scripts/split/lane-state.mjs');
+    const mutated = src.replace(/honorBinding: \(\) => missionBindingEnabled\(opts\),/, '');
+    expect(mutated).not.toBe(src);
+    const [site] = callSites(mutated, 'writeWorkerState');
+    expect(site.args).not.toMatch(/\bhonorBinding\b/);
+  });
+
+  it('a fourth caller is reported by the list: a namespace call in a new file is a call', () => {
+    expect(callSites('import * as s from "./x.js";\ns.writeWorkerState({ runDir });', 'writeWorkerState')).toHaveLength(1);
+  });
+
+  it('the call scanner: declarations, comments and longer identifiers are not calls; the arguments are matched by depth', () => {
+    expect(callSites('export function writeWorkerState({ a }) { return 1; }', 'writeWorkerState')).toEqual([]);
+    expect(callSites('// writeWorkerState({})\n/* resolveRunMission({}) */\n', 'writeWorkerState')).toEqual([]);
+    expect(callSites('writeWorkerStateLater({ a: 1 });', 'writeWorkerState')).toEqual([]);
+    const [site] = callSites('const x = 1;\nwriteWorkerState({ a: f(1), b: [g(2)] }, 2); other(3);', 'writeWorkerState');
+    expect(site).toEqual({ line: 2, args: '{ a: f(1), b: [g(2)] }, 2' });
+  });
+
+  it('a hardcoded switch is reported in both spellings, and prose or a derived value is not one', () => {
+    expect(hardcodedSwitches('resolveRunMission({ honorBinding: true });')).toHaveLength(1);
+    expect(hardcodedSwitches('feedLimb({ bind: true }, {});')).toHaveLength(1);
+    expect(hardcodedSwitches('// bind: true is what it used to say\nconst x = { bind: bindingOn };')).toEqual([]);
+    expect(hardcodedSwitches('const o = { honorBinding: () => missionBindingEnabled(opts) };')).toEqual([]);
+  });
+
+  it('the real dispatch.mjs mutated to `bind: true` is caught by the literal scan AND the derivation pin', () => {
+    const src = read('scripts/split/dispatch.mjs');
+    const mutated = src.replace(/\bbind: bindingOn\b/, 'bind: true');
+    expect(mutated).not.toBe(src);
+    expect(hardcodedSwitches(mutated).length).toBeGreaterThan(0);
+    expect(stripComments(mutated)).not.toMatch(/\bbind\s*:\s*bindingOn\b/);
+  });
+
+  it('a config read in the library is reported, and a comment about one is not', () => {
+    const src = read('lib/topology/split-state.js');
+    for (const line of ["import { loadConfig } from '../core/config.js';", 'const root = getPluginRoot();', "const t = readJsonFileSync('artibot.config.json');"]) {
+      expect(configReads(`${line}\n${src}`).length, line).toBeGreaterThan(0);
+    }
+    expect(configReads('// loadConfig() is what the CLI calls\nconst ok = 1;')).toEqual([]);
+  });
+
+  it('a hand-rolled read of the key is reported in each code spelling; prose, comments and the plan-side record are not one', () => {
+    expect(handRolledKeyReads('const on = config?.split?.missionBinding?.enabled === true;')).toHaveLength(1);
+    expect(handRolledKeyReads('const on = config.split.missionBinding.enabled;')).toHaveLength(1);
+    expect(handRolledKeyReads("const on = config.split.missionBinding['enabled'];")).toHaveLength(1);
+    expect(handRolledKeyReads('const plan = { missionBinding: binding };\nconst b = plan.missionBinding;')).toEqual([]);
+    expect(handRolledKeyReads('// config.split.missionBinding.enabled is read by the shared reader\nconst ok = 1;')).toEqual([]);
+    // A help text or an error message may name the key.
+    expect(handRolledKeyReads('const HELP = `while artibot.config.json#split.missionBinding.enabled is true`;')).toEqual([]);
+    expect(handRolledKeyReads("throw new Error('set split.missionBinding.enabled first');")).toEqual([]);
+  });
+
+  it('codeOnly blanks string content, keeps quotes and newlines, and survives an unterminated string', () => {
+    // (a line comment is dropped, not padded — the stripper keeps only the newline)
+    expect(codeOnly("const a = 'x.y'; // c\nconst b = `t\nu`;")).toBe("const a = '   '; \nconst b = ` \n `;");
+    expect(codeOnly("const q = 'a\\'b'; z")).toBe("const q = '    '; z");
+    expect(() => codeOnly("const open = 'never closed")).not.toThrow();
   });
 });

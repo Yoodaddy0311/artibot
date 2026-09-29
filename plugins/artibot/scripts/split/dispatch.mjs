@@ -23,9 +23,14 @@
  *   <worktreePath>/.artibot/split/<limb>/brief.md   byte-exact copy
  *   <worktreePath>/.artibot/split/<limb>/prompt.md  rendered prompt
  *   parent run.json                                 lanes[limb] = active (via lane-state.mjs)
- *   parent plan.json                                limbs[].forkPoint, written once; missionBinding, written once (SH-11)
+ *   parent plan.json                                limbs[].forkPoint, written once; missionBinding, written once (SH-11, and
+ *                                                   only with artibot.config.json#split.missionBinding.enabled === true)
  *   StateStore task graph                           limb task + lease (record-only, via task-feed.mjs); a BOUND run's node
  *                                                   is written by the lane write itself and the feed adds ops, no claim
+ *
+ * The SH-11 canary key `split.missionBinding.enabled` ships `false`: with it off
+ * dispatch binds nothing and a run that already carries a record is dispatched
+ * by the legacy path (its results say `binding: { status: 'disabled' }`).
  *
  * Exit codes: 0 ok · 1 refused / error (message on stderr, or JSON with --json).
  *
@@ -45,6 +50,7 @@ import { feedLimb } from './task-feed.mjs';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { limbsFromPlan } from '../../lib/git/split-dispatch.js';
 import { loadConfig } from '../../lib/core/config.js';
+import { readMissionBindingEnabled } from '../../lib/topology/split-state-sources.js';
 import { toProjectSlug } from '../../lib/handoff/handoff-builder.js';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -234,7 +240,7 @@ function recordForkPoint({ parentRoot, plan, worktreePath, limb }) {
  * `recordForkPoint` do (all skipped with `dryRun`).
  *
  * @param {ReturnType<typeof parseArgs>} args
- * @param {{ cwd?: string, config?: object|null, splitMdPath?: string, feedLimb?: Function, openStore?: (root: string, sid: string) => object, sessionId?: string|null }} [opts] - `config` injectable for tests (null = read via loadConfig); `feedLimb` is the Task Graph port seam; `openStore` / `sessionId` are the seams for the StateStore a bound run (and the feed) uses — production passes neither (the host env supplies the session id)
+ * @param {{ cwd?: string, config?: object|null, splitMdPath?: string, feedLimb?: Function, openStore?: (root: string, sid: string) => object, sessionId?: string|null }} [opts] - `config` injectable for tests (an ABSENT `config` is read via loadConfig; an injected `null` is "no config" and stays `null`); it is also where the SH-11 canary key is read from, and it is forwarded to the lane write and the feed so all three read ONE answer. `feedLimb` is the Task Graph port seam; `openStore` / `sessionId` are the seams for the StateStore a bound run (and the feed) uses — production passes neither (the host env supplies the session id)
  * @returns {Promise<{ to: string|null, limb: string, pointer: string, promptPath: string|null, briefPath: string, copied: boolean, siblings: Array<{ name: string, copied: boolean, sourcePath: string, destPath: string }>, dryRun: boolean, prompt: string, laneState: { state: string, previous: string|null, previousRaw: string|null, warning: string|null, written: boolean, ledger: string|null }, forkPoint: { value: string|null, recorded: boolean, reason: string|null, ref: string|null } }>}
  *   `laneState.previous` is the recorded word ONLY when it was in the allowlist; `previousRaw` is what was there either way, and `warning` names the gap. `ledger` is `null` on a dry run (nothing was written) — see `setLaneState` for the values.
  *   `forkPoint.ref` is which of {@link INTEGRATION_REFS} answered, `null` when none did or when the value was already recorded.
@@ -318,16 +324,24 @@ export async function runDispatch(args, opts = {}) {
   const warning = previousRaw !== null && previous === null
     ? `run.json lanes[${row.limb}].state '${previousRaw}' 는 allowlist 밖 — readLaneOpsState 가 null 로 읽어 excludeLimbs 선제외 0건 처리됐다, 이번 기록으로 'active' 로 교체됨`
     : null;
-  // A run that carries a `missionBinding` (SH-11) is written through its
-  // mission's Task Graph, and a binding that cannot be honoured makes this call
-  // THROW (`binding-dangling`, `store-unavailable`, ...): dispatch exits 1 with
-  // the reason and run.json as it was. That is deliberate — the alternative is
-  // the legacy write, i.e. the per-session join the binding replaces. The brief
-  // and prompt written above are idempotent, so the leader fixes the binding
-  // and re-runs dispatch.
+  // The SH-11 canary key (`split.missionBinding.enabled`, shipped `false`).
+  // Only a literal `true` turns it on; a config that could not be loaded is
+  // `null` here, which is off. The lane write and the feed below are handed the
+  // SAME `config`, so the three readers cannot disagree about it.
+  const bindingOn = readMissionBindingEnabled(config);
+
+  // With the key ON, a run that carries a `missionBinding` (SH-11) is written
+  // through its mission's Task Graph, and a binding that cannot be honoured
+  // makes this call THROW (`binding-dangling`, `binding-stale`,
+  // `store-unavailable`, ...): dispatch exits 1 with the reason and run.json as
+  // it was. That is deliberate — the alternative is the legacy write, i.e. the
+  // per-session join the binding replaces. The brief and prompt written above
+  // are idempotent, so the leader fixes the binding and re-runs dispatch. With
+  // the key OFF the record is not honoured at all: the legacy write, and no
+  // refusal for a mission that is gone.
   const laneWrite = args.dryRun ? null : setLaneState(
     { limb: row.limb, state: 'active', window: to ?? null },
-    { cwd: parentRoot, ...(opts.openStore ? { openStore: opts.openStore } : {}), ...(opts.sessionId ? { sessionId: opts.sessionId } : {}) },
+    { cwd: parentRoot, config, ...(opts.openStore ? { openStore: opts.openStore } : {}), ...(opts.sessionId ? { sessionId: opts.sessionId } : {}) },
   );
   const laneState = { state: 'active', previous, previousRaw, warning, written: !args.dryRun, ledger: laneWrite?.ledger ?? null };
 
@@ -337,14 +351,15 @@ export async function runDispatch(args, opts = {}) {
   // missing this session's mission leaves dispatch behaving exactly as it did
   // before the feeder existed.
   //
-  // `bind: true` lets the FIRST dispatch of a run write its `missionBinding` —
-  // to the mission the dispatching session owns, and only when that mission
-  // exists. This is the one caller that asks: `lane-state` and the lease sync
-  // read a binding, they never create one. For a bound run the feed backfills
-  // `ops` from run.json, does not claim, and reports `binding` in `taskFeed`.
+  // `bind` lets the FIRST dispatch of a run write its `missionBinding` — to the
+  // mission the dispatching session owns, and only when that mission exists —
+  // and it is the canary key itself, so a shipped install binds nothing. This
+  // is the one caller that asks: `lane-state` and the lease sync read a
+  // binding, they never create one. For a bound run the feed backfills `ops`
+  // from run.json, does not claim, and reports `binding` in `taskFeed`.
   const taskFeed = (opts.feedLimb ?? feedLimb)({
-    parentRoot, plan, limb: row.limb, dryRun: args.dryRun, bind: true, ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
-  }, opts.openStore ? { openStore: opts.openStore } : {});
+    parentRoot, plan, limb: row.limb, dryRun: args.dryRun, bind: bindingOn, ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+  }, { config, ...(opts.openStore ? { openStore: opts.openStore } : {}) });
 
   return {
     to, limb: row.limb, pointer: mat.pointer, promptPath: mat.promptPath, briefPath: mat.briefPath, copied: mat.copied, siblings: mat.siblings, dryRun: args.dryRun, prompt, laneState, forkPoint, taskFeed,

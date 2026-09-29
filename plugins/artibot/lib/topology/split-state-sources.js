@@ -335,6 +335,69 @@ export function missionEnvFromBinding(binding) {
  */
 export const HEARTBEAT_OPS_STATES = Object.freeze(['active', 'review', 'serial-gate', 'closing']);
 
+/* ─────────────────── the canary switch: split.missionBinding.enabled ───────────────────
+ *
+ * Binding a run and making the store the canonical lane state is a BEHAVIOUR
+ * change (design canon: the adapter is a Shadow item, "#22 split integration" a
+ * Canary item — "config 1키 되돌림"), so it ships behind one key, OFF. The key
+ * gates two things: whether `dispatch` may WRITE a binding, and whether a
+ * binding that is ALREADY on disk is HONOURED — with the key off, a bound run
+ * is written and read exactly as an unbound one.
+ *
+ * `lib/topology` is L4 and never reads config. The callers do, and hand the
+ * answer in as a PORT: `honorBinding`, `true` or a function returning `true`.
+ * The port is FAIL-CLOSED — absent, `'true'`, `1` and a port that throws all
+ * mean "off" — so a caller that forgets it gets the legacy behaviour, never a
+ * silent store write.
+ */
+
+/**
+ * Config path of the SH-11 switch. Read by the CALLERS (`scripts/split/*`);
+ * exported so the firewall pin and the readers share one spelling.
+ * @type {string}
+ */
+export const MISSION_BINDING_ENABLED_CONFIG_PATH = 'split.missionBinding.enabled';
+
+/**
+ * Resolve the switch from an already-read config object.
+ *
+ * @param {unknown} cfg - Parsed `artibot.config.json`, or anything at all.
+ * @returns {boolean} `true` only for the literal `true` at
+ *   {@link MISSION_BINDING_ENABLED_CONFIG_PATH}. `'true'`, `1`, an absent key
+ *   and a non-object config all read OFF, so a value that failed to parse
+ *   cannot switch the feature on.
+ */
+export function readMissionBindingEnabled(cfg) {
+  return MISSION_BINDING_ENABLED_CONFIG_PATH
+    .split('.')
+    .reduce((node, key) => /** @type {any} */ (node)?.[key], cfg) === true;
+}
+
+/**
+ * Whether a caller's `honorBinding` port says a binding is to be honoured.
+ * A function is called (once) and must return the literal `true`; a throw is
+ * "off".
+ *
+ * @param {unknown} port
+ * @returns {boolean}
+ */
+export function honorsBinding(port) {
+  if (typeof port === 'function') {
+    try {
+      return port() === true;
+    } catch {
+      return false;
+    }
+  }
+  return port === true;
+}
+
+/**
+ * The result annotation for a run that carries a binding while the switch is
+ * off: "there is a record, and it was not consulted". Frozen, shared.
+ */
+export const BINDING_DISABLED = Object.freeze({ status: 'disabled' });
+
 /**
  * One `run.json.lanes[limb]` entry, in either live shape (a bare word, or the
  * `{state, since, window, note, blocked_by}` object). Everything that cannot be
@@ -453,6 +516,15 @@ function blockersFor({ state, status, blockedBy, node, lane, own, changed }) {
  * Returns `{ok:false}` for the one refusal that is a fact about the graph and
  * not a caller error — the node belongs to ANOTHER run (I2): overwriting it
  * would erase that run's record. Everything else that is wrong throws.
+ *
+ * WHAT THIS DOES NOT SEPARATE (M2): a node with the limb's id and NO `ops` is
+ * taken as this run's own — its status, owner and blockers are rewritten from
+ * the ops word. That absorbs a same-id node another feeder wrote (a `/team`
+ * TaskCreate node, say), exactly as `split-task-feed.js#mergeLimbTasks` already
+ * carries such a node through and refreshes its `file_ownership`. The two were
+ * never disjoint on task id and this does not make them so: `ops.run_id`
+ * separates one RUN's nodes from another RUN's (I2), not a run's nodes from a
+ * stranger's.
  *
  * @param {object} p
  * @param {object|null} p.node - the current node, or `null` when the graph has none
@@ -604,6 +676,10 @@ function nodeWithOps(task, { state, since, runId, lane, nowIso }) {
  * no lane word) is REPORTED in `skipped`, not guessed at. A node that already
  * has `ops` is never touched, so a second application is a no-op — which is
  * what makes the backfill safe to run from every feed.
+ *
+ * A node with a plan limb's id and no `ops` is taken as this run's own even if
+ * something else wrote it (M2) — the same absorption `mergeLimbTasks` already
+ * performs on a same-id node; see {@link planBoundNode}.
  *
  * @param {object|null} graph
  * @param {{ runId: string, limbs: ReadonlyArray<string>, lanes: unknown, nowIso: string }} p

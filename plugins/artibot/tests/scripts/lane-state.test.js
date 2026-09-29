@@ -20,11 +20,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { main, setLaneState } from '../../scripts/split/lane-state.mjs';
 import { readRunJson, writeRunJson } from '../../lib/git/split-run-file.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { readLaneOpsState } from '../../lib/supervisor/lane-monitor.js';
+
+/** This repository's plugin root — the directory whose artibot.config.json is the SHIPPED config. */
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const tmpDirs = [];
 afterEach(() => {
@@ -140,6 +144,9 @@ describe('setLaneState / main on a BOUND run', () => {
   const MISSION = 'M-20260929-Sabcd1234';
   const T1 = () => new Date('2026-09-29T05:00:00.000Z');
   const T2 = () => new Date('2026-09-29T06:00:00.000Z');
+  // The SH-11 canary switch (split.missionBinding.enabled): only a literal true honours a binding.
+  const ON = { split: { missionBinding: { enabled: true } } };
+  const OFF = { split: { missionBinding: { enabled: false } } };
   const collect = () => {
     const out = []; const err = [];
     return { io: { stdout: (s) => out.push(s), stderr: (s) => err.push(s) }, stdout: () => out.join(''), stderr: () => err.join('') };
@@ -160,7 +167,7 @@ describe('setLaneState / main on a BOUND run', () => {
 
   it('writes the bound mission\'s node and projects the lane; previous and changed are the STORE\'s answer', () => {
     const { parent, store } = boundParent();
-    const first = setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: T1, sessionId: SID, openStore: () => store });
+    const first = setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: T1, sessionId: SID, config: ON, openStore: () => store });
     expect(first).toMatchObject({
       limb: 'auth', state: 'active', previous: null, since: '2026-09-29T05:00:00.000Z', window: 'w-a', changed: true,
       source: 'store', missionId: MISSION, projection: 'written',
@@ -173,9 +180,9 @@ describe('setLaneState / main on a BOUND run', () => {
     expect(run.windowReuse).toEqual({ auth: 'w-a @ /p' });
     expect(run.metrics).toEqual({ n: 1 });
 
-    const same = setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: T2, sessionId: SID, openStore: () => store });
+    const same = setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: T2, sessionId: SID, config: ON, openStore: () => store });
     expect(same).toMatchObject({ previous: 'active', changed: false, since: '2026-09-29T05:00:00.000Z' });
-    const moved = setLaneState({ limb: 'auth', state: 'review' }, { cwd: parent, now: T2, sessionId: SID, openStore: () => store });
+    const moved = setLaneState({ limb: 'auth', state: 'review' }, { cwd: parent, now: T2, sessionId: SID, config: ON, openStore: () => store });
     expect(moved).toMatchObject({ previous: 'active', changed: true, since: '2026-09-29T06:00:00.000Z' });
     expect(readLaneOpsState(readRunJson(parent), 'auth')).toBe('review');
   });
@@ -184,7 +191,7 @@ describe('setLaneState / main on a BOUND run', () => {
     const { parent, store, runBytes } = boundParent({ missionRow: false });
     const before = runBytes();
     let synced = 0;
-    const opts = { cwd: parent, now: T1, sessionId: SID, openStore: () => store, syncLease: () => { synced += 1; } };
+    const opts = { cwd: parent, now: T1, sessionId: SID, config: ON, openStore: () => store, syncLease: () => { synced += 1; } };
 
     expect(() => setLaneState({ limb: 'auth', state: 'active' }, opts)).toThrow(/^binding-dangling: mission M-20260929-Sabcd1234 is not in the StateStore/);
 
@@ -202,14 +209,14 @@ describe('setLaneState / main on a BOUND run', () => {
   it('with no session id to open a store, a bound run refuses instead of writing run.json', () => {
     const { parent, runBytes } = boundParent();
     const before = runBytes();
-    expect(() => setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, sessionId: '' })).toThrow(/^store-unavailable: /);
+    expect(() => setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, sessionId: '', config: ON })).toThrow(/^store-unavailable: /);
     expect(runBytes()).toEqual(before);
   });
 
   it('a bound run\'s --json keeps every pre-sync key and gains the four store keys', () => {
     const { parent, store } = boundParent();
     const c = collect();
-    expect(main(['auth', 'done', '--json'], { cwd: parent, now: T1, sessionId: SID, openStore: () => store, syncLease: () => ({ outcome: 'unchanged', missionId: MISSION }), ...c.io })).toBe(0);
+    expect(main(['auth', 'done', '--json'], { cwd: parent, now: T1, sessionId: SID, config: ON, openStore: () => store, syncLease: () => ({ outcome: 'unchanged', missionId: MISSION }), ...c.io })).toBe(0);
     const keys = Object.keys(JSON.parse(c.stdout())).sort();
     expect(keys).toEqual(['changed', 'ledger', 'lease', 'limb', 'missionId', 'note', 'previous', 'projection', 'since', 'source', 'stateVersion', 'state', 'window'].sort());
   });
@@ -221,5 +228,74 @@ describe('setLaneState / main on a BOUND run', () => {
     expect(opened).toBe(0);
     expect(r).toEqual({ limb: 'auth', state: 'active', previous: null, since: '2026-09-29T05:00:00.000Z', window: 'w-a', note: null, changed: true, ledger: 'skipped:no-event' });
     expect(readRunJson(parent).lanes.auth.projected_from).toBe('run.json');
+  });
+
+  // ── the canary switch (③): split.missionBinding.enabled ─────────────────────
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('③ with the key OFF a bound run is written by the LEGACY path: run.json only, no store opened, and the result says disabled', () => {
+    const { parent, store } = boundParent();
+    let opened = 0;
+    const r = setLaneState({ limb: 'auth', state: 'active' }, {
+      cwd: parent, now: T1, sessionId: SID, config: OFF, openStore: () => { opened += 1; return store; },
+    });
+    expect(opened).toBe(0);
+    expect(r).toEqual({
+      limb: 'auth', state: 'active', previous: null, since: '2026-09-29T05:00:00.000Z', window: 'w-a', note: null,
+      changed: true, ledger: 'skipped:no-event', binding: { status: 'disabled' },
+    });
+    expect(readRunJson(parent).lanes.auth).toMatchObject({ state: 'active', projected_from: 'run.json' });
+    expect(store.getTaskGraph(MISSION).tasks).toEqual([]);
+  });
+
+  it('③ a dangling binding does not refuse while the key is off — and refuses (exit 1, run.json unchanged) with the key on', () => {
+    const { parent, store, runBytes } = boundParent({ missionRow: false });
+    const seams = { cwd: parent, sessionId: SID, openStore: () => store };
+    expect(setLaneState({ limb: 'auth', state: 'active' }, { ...seams, now: T1, config: OFF })).toMatchObject({ binding: { status: 'disabled' } });
+    const before = runBytes();
+    expect(() => setLaneState({ limb: 'auth', state: 'review' }, { ...seams, now: T2, config: ON })).toThrow(/^binding-dangling: /);
+    expect(runBytes()).toEqual(before);
+  });
+
+  it('③ main hands its config to the lease sync, so the sync reads the same key the write did', () => {
+    const { parent, store } = boundParent();
+    let ports = null;
+    const c = collect();
+    expect(main(['auth', 'active'], {
+      cwd: parent, now: T1, sessionId: SID, config: OFF, openStore: () => store, ...c.io,
+      syncLease: (_input, p) => { ports = p; return { outcome: 'skipped:test', missionId: null }; },
+    })).toBe(0);
+    expect(ports).toEqual({ config: OFF });
+  });
+
+  it('③ with nothing injected the tooling reads the SHIPPED config: this repository ships the key off, so a bound run reverts', () => {
+    const { parent, store } = boundParent();
+    vi.stubEnv('CLAUDE_PLUGIN_ROOT', PLUGIN_ROOT);
+    const r = setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: T1, sessionId: SID, openStore: () => store });
+    expect(r.binding).toEqual({ status: 'disabled' });
+    expect(readRunJson(parent).lanes.auth.projected_from).toBe('run.json');
+  });
+
+  it('③ ...and a config file at the plugin root that says the literal true honours the binding', () => {
+    const { parent, store } = boundParent();
+    const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-state-plugin-'));
+    tmpDirs.push(pluginRoot);
+    fs.writeFileSync(path.join(pluginRoot, 'artibot.config.json'), JSON.stringify(ON));
+    vi.stubEnv('CLAUDE_PLUGIN_ROOT', pluginRoot);
+    const r = setLaneState({ limb: 'auth', state: 'active' }, { cwd: parent, now: T1, sessionId: SID, openStore: () => store });
+    expect(r).toMatchObject({ source: 'store', missionId: MISSION });
+    expect(readRunJson(parent).lanes.auth.projected_from).toBe('store');
+  });
+
+  it('④ the stale guard reaches the CLI: after an off period the next ON write exits 1 with binding-stale and run.json unchanged', () => {
+    const { parent, store, runBytes } = boundParent();
+    const seams = { cwd: parent, sessionId: SID, openStore: () => store };
+    setLaneState({ limb: 'auth', state: 'active' }, { ...seams, now: T1, config: ON });
+    setLaneState({ limb: 'auth', state: 'review' }, { ...seams, now: T2, config: OFF });
+    const before = runBytes();
+    const c = collect();
+    expect(main(['auth', 'done'], { ...seams, now: () => new Date('2026-09-29T07:00:00.000Z'), config: ON, syncLease: () => { throw new Error('not reached'); }, ...c.io })).toBe(1);
+    expect(c.stderr()).toMatch(/^lane-state refused: binding-stale: /);
+    expect(runBytes()).toEqual(before);
   });
 });

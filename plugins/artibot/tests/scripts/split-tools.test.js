@@ -920,7 +920,11 @@ describe('dispatch.mjs runDispatch — the run-to-mission binding (SH-11)', () =
   const RUN_ID = 'split-abc123';
   const storeFor = (parent, sid) => createStateStore({ projectRoot: parent, sessionId: sid, renderProjectionFile: false, appendEvent: () => ({ ok: true }) });
   const openStore = (root, sid) => storeFor(root, sid);
-  const dispatchAs = (parent, limb, sid, extra = []) => dispatch.runDispatch(dispatch.parseArgs([limb, ...extra]), { cwd: parent, config: null, sessionId: sid, openStore });
+  // The SH-11 canary switch (split.missionBinding.enabled). Only a literal true turns it on;
+  // `config: null` is what most of this file passes for "no config", i.e. off.
+  const ON = { split: { missionBinding: { enabled: true } } };
+  const OFF = { split: { missionBinding: { enabled: false } } };
+  const dispatchAs = (parent, limb, sid, extra = [], config = ON) => dispatch.runDispatch(dispatch.parseArgs([limb, ...extra]), { cwd: parent, config, sessionId: sid, openStore });
   const runPathOf = (parent) => path.join(parent, '.artibot', 'split', 'run.json');
 
   /** A parent with two limbs and one mission row per id (the rows are the dispatching sessions' own). */
@@ -965,7 +969,7 @@ describe('dispatch.mjs runDispatch — the run-to-mission binding (SH-11)', () =
 
     await expect(dispatchAs(parent, 'auth', SID_B)).rejects.toThrow(/^binding-dangling: /);
     const c = collect();
-    const code = await dispatch.main(['auth', '--json'], { cwd: parent, config: null, ...c.io, sessionId: SID_B, openStore });
+    const code = await dispatch.main(['auth', '--json'], { cwd: parent, config: ON, ...c.io, sessionId: SID_B, openStore });
     expect(code).toBe(1);
     expect(JSON.parse(c.stdout()).error).toMatch(/^binding-dangling: /);
     expect(fs.readFileSync(runPathOf(parent))).toEqual(before);
@@ -984,15 +988,51 @@ describe('dispatch.mjs runDispatch — the run-to-mission binding (SH-11)', () =
     expect(readPlanJson(w.parent).missionBinding).toBeUndefined();
   });
 
-  it('asks the feeder to bind, and forwards the seams — the only caller that does', async () => {
+  it('①② asks the feeder to bind ONLY with the key on (a literal true), and forwards the config and the seams', async () => {
     const { parent } = seedParent();
-    /** @type {any} */ let seen = null;
-    /** @type {any} */ let ports = null;
-    await dispatch.runDispatch(dispatch.parseArgs(['auth']), {
-      cwd: parent, config: null, sessionId: SID_A, openStore,
-      feedLimb: (a, p) => { seen = a; ports = p; return { fed: false, skipped: 'x' }; },
-    });
-    expect(seen).toMatchObject({ parentRoot: parent, limb: 'auth', dryRun: false, bind: true, sessionId: SID_A });
-    expect(ports).toEqual({ openStore });
+    for (const [config, bind] of [[ON, true], [OFF, false], [null, false], [{ split: { missionBinding: { enabled: 'true' } } }, false], [{}, false]]) {
+      /** @type {any} */ let seen = null;
+      /** @type {any} */ let ports = null;
+      await dispatch.runDispatch(dispatch.parseArgs(['auth']), {
+        cwd: parent, config, sessionId: SID_A, openStore,
+        feedLimb: (a, p) => { seen = a; ports = p; return { fed: false, skipped: 'x' }; },
+      });
+      expect(seen, JSON.stringify(config)).toMatchObject({ parentRoot: parent, limb: 'auth', dryRun: false, bind, sessionId: SID_A });
+      expect(ports, JSON.stringify(config)).toEqual({ config, openStore });
+    }
+  });
+
+  it('①② the key OFF binds nothing: the first dispatch is the legacy dispatch — a run.json lane, a claim, no binding anywhere', async () => {
+    for (const config of [OFF, null]) {
+      const { parent, store } = boundWorld();
+      const r = await dispatchAs(parent, 'auth', SID_A, [], config);
+      expect(r.taskFeed, JSON.stringify(config)).toMatchObject({ fed: true, missionId: MA, claim: 'claimed' });
+      expect(Object.hasOwn(r.taskFeed, 'binding')).toBe(false);
+      expect(readPlanJson(parent).missionBinding).toBeUndefined();
+      expect(readRunJson(parent).lanes.auth.projected_from).toBe('run.json');
+      expect(store.getTaskGraph(MA).tasks.find((t) => t.id === 'auth').ops).toBeUndefined();
+    }
+  });
+
+  it('③ the key OFF reverts a run that is already bound: the legacy lane write and the per-session feed, annotated disabled, and no refusal for a gone mission', async () => {
+    const { parent, store } = boundWorld();
+    await dispatchAs(parent, 'auth', SID_A); // ON: binds to MA
+    expect(readPlanJson(parent).missionBinding.mission_id).toBe(MA);
+    expect(store.updateMission(MA, () => null, { reason: 'test.archive' }).ok).toBe(true); // the bound mission is now gone
+
+    const r = await dispatchAs(parent, 'billing', SID_B, [], OFF);
+    expect(r.taskFeed).toMatchObject({ fed: true, missionId: MB, claim: 'claimed', binding: { status: 'disabled' } });
+    expect(readRunJson(parent).lanes.billing).toMatchObject({ state: 'active', projected_from: 'run.json' });
+    expect(readPlanJson(parent).missionBinding.mission_id).toBe(MA); // the record is left exactly as it was
+  });
+
+  it('④ off -> on: the ON dispatch after an off period refuses with binding-stale, and run.json is byte-identical', async () => {
+    const { parent } = boundWorld();
+    await dispatchAs(parent, 'auth', SID_A); // ON: binds, seeds both limbs (billing pending)
+    await dispatchAs(parent, 'billing', SID_B, [], OFF); // OFF: billing goes to run.json only
+    const before = fs.readFileSync(runPathOf(parent));
+
+    await expect(dispatchAs(parent, 'billing', SID_B)).rejects.toThrow(/^binding-stale: /);
+    expect(fs.readFileSync(runPathOf(parent))).toEqual(before);
   });
 });

@@ -64,11 +64,14 @@ import {
   assertBlockersForState,
   assertOpsStatusAgree,
   attachRunOps,
+  BINDING_DISABLED,
   foreignRunLimbs,
   HEARTBEAT_OPS_STATES,
+  honorsBinding,
   isIsoInstant,
   isPlainObject,
   LANE_STATE_TO_V11,
+  MISSION_BINDING_ENABLED_CONFIG_PATH,
   MISSION_BINDING_KEY,
   MISSION_BINDING_KEYS,
   missionEnvFromBinding,
@@ -81,6 +84,7 @@ import {
   parseMissionBinding,
   planBoundNode,
   readLaneEntry,
+  readMissionBindingEnabled,
   stringList,
   V11_TO_OPS_WORDS,
 } from '../../lib/topology/split-state-sources.js';
@@ -1142,5 +1146,50 @@ describe('SH-11 — PROBE: the `ops` key survives in the Task Graph and the proj
     // The nodes carry it, and the canonical normalizer reads it from there.
     const direct = normalizeTaskGraph(store.getTaskGraph(MISSION_ID), { runId: RUN });
     expect(direct[LIMB].extra).toEqual({ ops_state: 'active', since: NOW });
+  });
+});
+
+describe('SH-11 canary switch — readMissionBindingEnabled and honorsBinding', () => {
+  it('names its config path, and the read walks that path (the constant and the read cannot drift)', () => {
+    expect(MISSION_BINDING_ENABLED_CONFIG_PATH).toBe('split.missionBinding.enabled');
+    expect(readMissionBindingEnabled({ split: { missionBinding: { enabled: true } } })).toBe(true);
+    // A config that spells the path differently is not on.
+    expect(readMissionBindingEnabled({ missionBinding: { enabled: true } })).toBe(false);
+    expect(readMissionBindingEnabled({ split: { enabled: true } })).toBe(false);
+  });
+
+  it('is on only for the LITERAL true at that path — a string, a number, an absent key or a broken config read off', () => {
+    const at = (enabled) => ({ split: { missionBinding: { enabled } } });
+    expect(readMissionBindingEnabled(at(true))).toBe(true);
+    for (const v of [false, 'true', 'yes', 1, {}, [], null, undefined]) expect(readMissionBindingEnabled(at(v)), JSON.stringify(v)).toBe(false);
+    for (const cfg of [null, undefined, 'split', 7, [], {}, { split: null }, { split: { missionBinding: null } }, { split: { missionBinding: {} } }]) {
+      expect(readMissionBindingEnabled(cfg), JSON.stringify(cfg)).toBe(false);
+    }
+  });
+
+  it('honorsBinding: only a literal true, or a function that returns a literal true, honours a binding', () => {
+    expect(honorsBinding(true)).toBe(true);
+    expect(honorsBinding(() => true)).toBe(true);
+    for (const v of [false, undefined, null, 'true', 1, {}, [], () => false, () => 'true', () => 1, () => undefined]) {
+      expect(honorsBinding(v), String(v)).toBe(false);
+    }
+  });
+
+  it('honorsBinding: a port that throws is not a yes', () => {
+    expect(honorsBinding(() => { throw new Error('config unreadable'); })).toBe(false);
+  });
+
+  it('honorsBinding: a function port is called once per question, and not at all for a non-function', () => {
+    let calls = 0;
+    honorsBinding(() => { calls += 1; return true; });
+    expect(calls).toBe(1);
+    honorsBinding(true);
+    honorsBinding(false);
+    expect(calls).toBe(1);
+  });
+
+  it('BINDING_DISABLED is the frozen result annotation, `disabled` and nothing else', () => {
+    expect(BINDING_DISABLED).toEqual({ status: 'disabled' });
+    expect(Object.isFrozen(BINDING_DISABLED)).toBe(true);
   });
 });

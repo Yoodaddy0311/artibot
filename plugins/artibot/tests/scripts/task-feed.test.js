@@ -16,15 +16,17 @@
  * observations.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { LIMB_LEASE_TTL_MS } from '../../lib/topology/split-task-feed.js';
 import { selectMissionForSession } from '../../scripts/hooks/post-compact-rehydrate.js';
 import {
-  FEED_REASON, feedLimb, openFeedStore, resolveRunMission, selectLegacyMission, sessionIdFromEnv,
+  FEED_REASON, feedLimb, missionBindingEnabled, openFeedStore, readShippedConfigSync, resolveRunMission,
+  selectLegacyMission, sessionIdFromEnv,
 } from '../../scripts/split/task-feed.mjs';
 
 const SESSION = 'abcd1234-ef56-7890-1234-567890abcdef';
@@ -415,6 +417,9 @@ const MISSION_B = 'M-20260921-Swxyz5678';
 const T_NOW = '2026-09-29T05:00:00.000Z';
 const T_LANE = '2026-09-29T03:00:00.000Z';
 const nowPort = () => new Date(T_NOW);
+// The SH-11 canary switch (split.missionBinding.enabled). Only a literal true turns it on.
+const ON = { split: { missionBinding: { enabled: true } } };
+const OFF = { split: { missionBinding: { enabled: false } } };
 const bindingOf = (missionId, over = {}) => ({ mission_id: missionId, run_id: RUN, generation: 1, bound_at: '2026-09-29T04:00:00.000Z', bound_by_session: SESSION, ...over });
 
 /** plan.json + run.json under the tmp root, in the canonical layout the tooling reads. */
@@ -428,9 +433,9 @@ function seedRunFiles({ plan = PLAN_RUN, run = { runId: RUN }, binding = null } 
 const planOnDisk = () => JSON.parse(fs.readFileSync(path.join(root, '.artibot', 'split', 'plan.json'), 'utf-8'));
 const bytesOf = (name) => fs.readFileSync(path.join(root, '.artibot', 'split', name));
 const nodeIn = (store, missionId, limb) => store.getTaskGraph(missionId)?.tasks.find((t) => t.id === limb);
-const feed = (store, limb, over = {}) => feedLimb(
+const feed = (store, limb, over = {}, ports = {}) => feedLimb(
   { parentRoot: root, plan: PLAN_RUN, limb, sessionId: SESSION, ...over },
-  { openStore: () => store, now: nowPort },
+  { openStore: () => store, now: nowPort, config: ON, ...ports },
 );
 
 describe('SH-11 T1 — two dispatches from different sessions of ONE run seed only the bound mission', () => {
@@ -441,7 +446,7 @@ describe('SH-11 T1 — two dispatches from different sessions of ONE run seed on
     seedMission(storeA, MISSION_B); // session B's own mission, present the whole time
     const untouchedB = storeA.getTaskGraph(MISSION_B);
 
-    const a = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION, bind: true }, { openStore: () => storeA, now: nowPort });
+    const a = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION, bind: true }, { openStore: () => storeA, now: nowPort, config: ON });
     expect(a).toMatchObject({ fed: true, skipped: null, missionId: MISSION, taskId: 'auth', claim: 'bound:node' });
     expect(a.binding).toEqual({
       status: 'created', mission_id: MISSION, run_id: RUN, generation: 1, env: { ARTIBOT_MISSION_ID: MISSION },
@@ -449,7 +454,7 @@ describe('SH-11 T1 — two dispatches from different sessions of ONE run seed on
     expect(planOnDisk().missionBinding).toEqual(bindingOf(MISSION, { bound_at: T_NOW }));
 
     const storeB = makeStore(SESSION_B);
-    const b = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'billing', sessionId: SESSION_B, bind: true }, { openStore: () => storeB, now: nowPort });
+    const b = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'billing', sessionId: SESSION_B, bind: true }, { openStore: () => storeB, now: nowPort, config: ON });
     expect(b).toMatchObject({ fed: true, missionId: MISSION, taskId: 'billing' });
     expect(b.binding.status).toBe('reused');
 
@@ -600,20 +605,19 @@ describe('SH-11 — when a run may be bound, and what the feed does about a limb
     expect(planOnDisk().missionBinding).toBeUndefined();
   });
 
-  it('a request that cannot be honoured falls back to the legacy feed and says why', () => {
-    const cases = [
-      [{ plan: { limbs: PLAN.limbs } }, 'plan-run-id-missing'],
-      [{ run: { runId: 'split-zzz' } }, 'run-id-mismatch'],
-    ];
-    for (const [files, reason] of cases) {
-      fs.rmSync(path.join(root, '.artibot'), { recursive: true, force: true });
-      seedRunFiles(files);
-      const store = makeStore(SESSION);
-      seedMission(store);
-      const r = feed(store, 'auth', { bind: true, plan: files.plan ?? PLAN_RUN });
-      expect(r, reason).toMatchObject({ fed: true, claim: 'claimed', binding: { status: 'unbound', reason } });
-      expect(planOnDisk().missionBinding, reason).toBeUndefined();
-    }
+  // One test per case, each in the fresh tmp root `beforeEach` makes — a loop that
+  // deleted and re-created `.artibot` under one root was intermittently red under
+  // load on Windows (a directory just removed is not always creatable again).
+  it.each([
+    ['plan-run-id-missing', { plan: { limbs: PLAN.limbs } }],
+    ['run-id-mismatch', { run: { runId: 'split-zzz' } }],
+  ])('a request that cannot be honoured falls back to the legacy feed and says why: %s', (reason, files) => {
+    seedRunFiles(files);
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const r = feed(store, 'auth', { bind: true, plan: files.plan ?? PLAN_RUN });
+    expect(r, reason).toMatchObject({ fed: true, claim: 'claimed', binding: { status: 'unbound', reason } });
+    expect(planOnDisk().missionBinding, reason).toBeUndefined();
   });
 
   it('no mission means no binding: the run is simply not flipped', () => {
@@ -700,7 +704,7 @@ describe('SH-11 — resolveRunMission and selectLegacyMission (the one place the
     seedMission(store, MISSION_B);
     const state = store.getState();
     for (const sid of [SESSION, SESSION_B, 'x', null]) {
-      const r = resolveRunMission({ parentRoot: root, state, sessionId: sid });
+      const r = resolveRunMission({ parentRoot: root, state, sessionId: sid, honorBinding: true });
       expect(r, String(sid)).toMatchObject({ mode: 'bound', missionId: MISSION_B });
       expect(r.binding.generation).toBe(1);
     }
@@ -710,11 +714,201 @@ describe('SH-11 — resolveRunMission and selectLegacyMission (the one place the
     seedRunFiles({ binding: bindingOf('M-20260901-001') });
     const store = makeStore(SESSION);
     seedMission(store);
-    expect(resolveRunMission({ parentRoot: root, state: store.getState(), sessionId: SESSION }))
+    expect(resolveRunMission({ parentRoot: root, state: store.getState(), sessionId: SESSION, honorBinding: true }))
       .toEqual({ mode: 'rejected', reason: 'binding-dangling', missionId: 'M-20260901-001' });
 
     seedRunFiles({ binding: bindingOf(MISSION, { bound_at: 'yesterday' }) });
-    expect(resolveRunMission({ parentRoot: root, state: store.getState(), sessionId: SESSION }))
+    expect(resolveRunMission({ parentRoot: root, state: store.getState(), sessionId: SESSION, honorBinding: true }))
       .toEqual({ mode: 'rejected', reason: 'binding-invalid:bound_at', missionId: null });
+  });
+});
+
+/* ══════════ SH-11 canary switch — artibot.config.json#split.missionBinding.enabled ══════════
+ *
+ * Binding a run and writing the StateStore as its canonical lane state is a
+ * BEHAVIOUR change (design canon: the adapter is a Shadow item, "#22 split
+ * integration" is a Canary item — "config 1키 되돌림"). So it ships behind one
+ * key, OFF: the key decides whether `dispatch` may bind (①②) and whether a
+ * record that is ALREADY on disk is honoured (③). Every seam below is the
+ * `config` port; production passes nothing and the tooling reads the shipped
+ * file. WHAT THIS BLOCK CANNOT SEE: the shipped value (split-config-firewall
+ * pins it) and a live host's CLAUDE_PLUGIN_ROOT.
+ */
+describe('SH-11 switch (①②) — the key OFF binds nothing', () => {
+  it('bind:true with the key off writes no binding and runs the legacy feed (a claim, no binding key)', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const r = feed(store, 'auth', { bind: true }, { config: OFF });
+    expect(r).toMatchObject({ fed: true, missionId: MISSION, claim: 'claimed' });
+    expect(Object.hasOwn(r, 'binding')).toBe(false);
+    expect(planOnDisk().missionBinding).toBeUndefined();
+    expect(store.getLease(MISSION, 'auth')?.owner).toBe('auth');
+    expect(nodeIn(store, MISSION, 'auth').ops).toBeUndefined();
+  });
+
+  // One test per config, each in the fresh tmp root `beforeEach` makes (see the note on the
+  // sibling test above: re-creating `.artibot` under one root was intermittently red under load).
+  it.each([
+    [{ split: { missionBinding: { enabled: 'true' } } }],
+    [{ split: { missionBinding: { enabled: 1 } } }],
+    [{ split: { missionBinding: {} } }],
+    [{ split: {} }],
+    [{}],
+    [null],
+  ])('only a LITERAL true turns it on: this config binds nothing: %j', (config) => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const r = feed(store, 'auth', { bind: true }, { config });
+    expect(r.claim, `${JSON.stringify(config)} -> ${JSON.stringify(r)}`).toBe('claimed');
+    expect(planOnDisk().missionBinding, JSON.stringify(config)).toBeUndefined();
+  });
+
+  it('CONTROL — the key ON is today\'s behaviour: the same call binds', () => {
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const r = feed(store, 'auth', { bind: true }, { config: ON });
+    expect(r).toMatchObject({ fed: true, claim: 'bound:node', binding: { status: 'created' } });
+    expect(planOnDisk().missionBinding.mission_id).toBe(MISSION);
+  });
+});
+
+describe('SH-11 switch (③) — the key OFF reverts a run that is already bound', () => {
+  it('feeds by the legacy rule (the session\'s own mission, a claim), leaves the record and the bound mission alone, and says disabled', () => {
+    seedRunFiles({ binding: bindingOf(MISSION_B) });
+    const store = makeStore(SESSION);
+    seedMission(store, MISSION);
+    seedMission(store, MISSION_B);
+    const r = feed(store, 'auth', { bind: true }, { config: OFF });
+    expect(r).toMatchObject({ fed: true, missionId: MISSION, claim: 'claimed', binding: { status: 'disabled' } });
+    expect(store.getTaskGraph(MISSION_B).tasks).toEqual([]);
+    expect(nodeIn(store, MISSION, 'auth').ops).toBeUndefined();
+    expect(planOnDisk().missionBinding.mission_id).toBe(MISSION_B);
+  });
+
+  it('a dangling binding is not rejected while the key is off — the legacy rule answers; with it on the same files reject', () => {
+    seedRunFiles({ binding: bindingOf('M-20260923-Sd31ad7c0') });
+    const store = makeStore(SESSION);
+    seedMission(store, MISSION);
+    expect(feed(store, 'auth', {}, { config: OFF })).toMatchObject({ fed: true, missionId: MISSION, binding: { status: 'disabled' } });
+    expect(feed(store, 'billing', {}, { config: ON })).toMatchObject({ fed: false, skipped: 'binding-dangling' });
+  });
+
+  it('a damaged binding is not rejected while the key is off either', () => {
+    seedRunFiles({ binding: bindingOf(MISSION, { generation: 0 }) });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    expect(feed(store, 'auth', {}, { config: OFF })).toMatchObject({ fed: true, claim: 'claimed', binding: { status: 'disabled' } });
+    expect(feed(store, 'billing', {}, { config: ON })).toMatchObject({ fed: false, skipped: 'binding-invalid:generation' });
+  });
+
+  it('the legacy skips carry the annotation too: no mission for the session is no-mission, disabled', () => {
+    seedRunFiles({ binding: bindingOf(MISSION_B) });
+    const store = makeStore(SESSION);
+    seedMission(store, MISSION_B);
+    expect(feed(store, 'auth', {}, { config: OFF })).toMatchObject({ fed: false, skipped: 'no-mission', binding: { status: 'disabled' } });
+  });
+
+  it('turning the key back ON restores the bound feed for the same files — nothing was left behind by the off period', () => {
+    seedRunFiles({ binding: bindingOf(MISSION) });
+    const store = makeStore(SESSION);
+    seedMission(store);
+    expect(feed(store, 'auth', {}, { config: ON })).toMatchObject({ claim: 'bound:node', binding: { status: 'reused' } });
+    expect(feed(store, 'billing', {}, { config: OFF })).toMatchObject({ claim: 'claimed', binding: { status: 'disabled' } });
+    expect(feed(store, 'auth', {}, { config: ON })).toMatchObject({ claim: 'bound:node', binding: { status: 'reused' } });
+    expect(planOnDisk().missionBinding).toEqual(bindingOf(MISSION));
+  });
+
+  it('a dry run is a dry run whatever the key says, and opens no store', () => {
+    seedRunFiles({ binding: bindingOf(MISSION) });
+    const boom = { openStore: () => { throw new Error('must not open'); }, config: OFF };
+    expect(feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION, dryRun: true }, boom).skipped).toBe('dry-run');
+  });
+});
+
+describe('SH-11 switch — how the tooling reads the key', () => {
+  const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const made = [];
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    while (made.length) fs.rmSync(made.pop(), { recursive: true, force: true });
+  });
+  /** A directory that plays the plugin root: reached through CLAUDE_PLUGIN_ROOT, the variable loadConfig() honours. */
+  function pluginRootWith(configText) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-plugin-root-'));
+    made.push(dir);
+    if (configText !== null) fs.writeFileSync(path.join(dir, 'artibot.config.json'), configText);
+    vi.stubEnv('CLAUDE_PLUGIN_ROOT', dir);
+    return dir;
+  }
+
+  it('an injected config wins — null means "no config" (off) and never falls through to the file', () => {
+    pluginRootWith(JSON.stringify(ON));
+    expect(missionBindingEnabled({ config: ON })).toBe(true);
+    expect(missionBindingEnabled({ config: OFF })).toBe(false);
+    expect(missionBindingEnabled({ config: null })).toBe(false);
+    expect(missionBindingEnabled({ config: { split: { missionBinding: { enabled: 'true' } } } })).toBe(false);
+  });
+
+  it('with nothing injected it reads <pluginRoot>/artibot.config.json: a literal true is on, everything else — unreadable included — is off', () => {
+    pluginRootWith(JSON.stringify(ON));
+    expect(missionBindingEnabled()).toBe(true);
+    expect(missionBindingEnabled({})).toBe(true);
+    pluginRootWith(JSON.stringify(OFF));
+    expect(missionBindingEnabled({})).toBe(false);
+    pluginRootWith(JSON.stringify({ split: {} }));
+    expect(missionBindingEnabled({})).toBe(false);
+    pluginRootWith('{ this is not json');
+    expect(missionBindingEnabled({})).toBe(false);
+    pluginRootWith(null);
+    expect(missionBindingEnabled({})).toBe(false);
+  });
+
+  it('readShippedConfigSync returns the parsed file, or null when it cannot', () => {
+    pluginRootWith(JSON.stringify({ a: 1 }));
+    expect(readShippedConfigSync()).toEqual({ a: 1 });
+    pluginRootWith('{ nope');
+    expect(readShippedConfigSync()).toBeNull();
+    pluginRootWith(null);
+    expect(readShippedConfigSync()).toBeNull();
+  });
+
+  it('THIS repository\'s shipped config is off — the default the leader gets until someone flips the key', () => {
+    vi.stubEnv('CLAUDE_PLUGIN_ROOT', PLUGIN_ROOT);
+    expect(readShippedConfigSync().split.missionBinding.enabled).toBe(false);
+    expect(missionBindingEnabled({})).toBe(false);
+  });
+
+  it('resolveRunMission: no port, false and non-literals are off; true and a function returning true are on', () => {
+    seedRunFiles({ binding: bindingOf(MISSION_B) });
+    const store = makeStore(SESSION);
+    seedMission(store, MISSION);
+    seedMission(store, MISSION_B);
+    const state = store.getState();
+    const args = { parentRoot: root, state, sessionId: SESSION };
+    for (const port of [undefined, false, 'true', 1, () => false, () => { throw new Error('config unreadable'); }]) {
+      expect(resolveRunMission({ ...args, honorBinding: port }), String(port)).toEqual({ mode: 'legacy', missionId: MISSION, binding: { status: 'disabled' } });
+    }
+    for (const port of [true, () => true]) {
+      expect(resolveRunMission({ ...args, honorBinding: port }), String(port)).toMatchObject({ mode: 'bound', missionId: MISSION_B });
+    }
+  });
+
+  it('resolveRunMission: the port is asked only when the run carries a binding, and a damaged one is legacy while off, rejected while on', () => {
+    let asked = 0;
+    const port = () => { asked += 1; return false; };
+    seedRunFiles();
+    const store = makeStore(SESSION);
+    seedMission(store);
+    const state = store.getState();
+    expect(resolveRunMission({ parentRoot: root, state, sessionId: SESSION, honorBinding: port })).toEqual({ mode: 'legacy', missionId: MISSION });
+    expect(asked).toBe(0);
+
+    seedRunFiles({ binding: bindingOf(MISSION, { generation: 0 }) });
+    expect(resolveRunMission({ parentRoot: root, state, sessionId: SESSION, honorBinding: port })).toEqual({ mode: 'legacy', missionId: MISSION, binding: { status: 'disabled' } });
+    expect(asked).toBe(1);
+    expect(resolveRunMission({ parentRoot: root, state, sessionId: SESSION, honorBinding: true })).toEqual({ mode: 'rejected', reason: 'binding-invalid:generation', missionId: null });
   });
 });

@@ -836,6 +836,10 @@
       "maxRehydrateBytes": 10240,
       "comment": "vNext PR-CX01 (S0). enabled=false ships the PostCompact hook (scripts/hooks/post-compact-rehydrate.js) silent; set true to have it read the PreCompact snapshot (~/.claude/artibot-pre-compact.json), refuse it when cwd/branch differ, and report a <= maxRehydrateBytes bundle (lib/context/rehydration.js) via systemMessage + ~/.claude/artibot/post-compact/<stamp>.md. Observe-only: no automatic action, never blocks compaction. Live-verified 0 times as of 2026-09-02."
     },
+    "missionBinding": {
+      "enabled": false,
+      "comment": "SH-11 canary (design canon :256 SH-11 = Shadow; :406 '#22 split integration' = Canary, one config key back). enabled=false ships the run-to-mission binding OFF: scripts/split/dispatch.mjs binds no run (plan.json gets no missionBinding), and lane-state / lane-lease / task-feed write a run that ALREADY carries a missionBinding by the legacy path (run.json lanes stamped projected_from 'run.json', the per-session mission rule), reporting binding.status 'disabled'. Set true to bind a run on its first dispatch and make the bound mission's Task Graph node the canonical lane state (run.json.lanes then becomes its projection, projected_from 'store'). Kill-switch: set false again; nothing else to undo, the record stays in plan.json and is honoured again on the next true. Turning it back on after an off period refuses a lane the legacy path wrote later than its node (binding-stale) until it is reconciled. Only a literal true counts: a string, 1 or a missing key is off. Read by scripts/split/task-feed.mjs#missionBindingEnabled and dispatch.mjs; lib/topology never reads config (it receives the answer as the honorBinding port). Do not flip before the SH-11 pre-flip follow-ups land (lease records alongside for SH-12, a single-node updateTask API, a bind race lock)."
+    },
     "worktreeSetup": {
       "linkDirs": ["plugins/artibot/node_modules"],
       "copyFiles": [".env.local"],
