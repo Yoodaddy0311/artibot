@@ -3,8 +3,8 @@ context: fork
 user-invocable: false
 name: self-evaluation
 description: |
-  Self-Rewarding + GRPO hybrid evaluation system for autonomous quality assessment, optimization, and improvement.
-  Combines Meta Self-Rewarding patterns with Group Relative Policy Optimization (GRPO) for rule-based self-learning without judge AI.
+  Self-Rewarding evaluation system for autonomous quality assessment, optimization, and improvement.
+  Applies Meta Self-Rewarding patterns for rule-based self-learning without judge AI.
   Auto-activates when: task completed, quality review needed, performance trends requested, team optimization needed.
   Triggers: evaluate, self-assess, quality, improve, performance, trend, score, feedback, optimize, candidates, compare
 lang: [en]
