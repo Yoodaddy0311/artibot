@@ -16,10 +16,10 @@
 
 | 조건 | 판정 | 등급 |
 |---|---|---|
-| **e** 핀 + config 주석 동반 수정 | **충족 — 플립 발자국은 정확히 6 파일 +49/−26. 핀 파일은 백로그가 적은 3곳이 아니라 4곳이다**(CA-08 이 4번째를 들여왔다). 핀만 안 고친 상태(커밋 `f1c21d58`)에서 표적 4파일이 7 테스트 RED, 고친 뒤 200/200 GREEN | 실측 |
+| **e** 핀 + config 주석 동반 수정 | **리허설 브랜치에서 실증(본번 미충족) — 플립 발자국은 정확히 6 파일 +49/−26. 핀 파일은 백로그가 적은 3곳이 아니라 4곳이다**(CA-08 이 4번째를 들여왔다). 핀만 안 고친 상태(커밋 `f1c21d58`)에서 표적 4파일이 7 테스트 RED, 고친 뒤 200/200 GREEN | 실측 |
 | **f** 같은 릴리스의 배치 CI green | **플립이 원인인 실패는 0. 그러나 전체가 그린이었다고는 말하지 않는다** — `npm run ci` 1회차는 23,231 테스트 중 1건 RED(로드 타임아웃), 단독 재실행은 통과. 체인이 그 RED 에서 멈춰 마지막 단계 `eval:runtime:check` 는 별도 실행으로 통과 | 실측 + 추론(플레이크 판정, §3.3) |
 | **c** 미추적 missions 가 clean-tree 게이트를 견디는가 | **요청 범위(split land · autopilot preflight)는 충족** — land 7행이 미션 유무와 무관하게 동일 PASS, preflight `gitClean` 은 warn(차단 아님)·전체 `ok:true`. 그러나 **추가 소비처 3곳에서 플립이 실제로 걸린다**: cowork 릴리스 `--dry-run` exit 1, autopilot reaper `preserved: missions-present`, `git worktree remove` 거부. 그리고 autopilot Stop 훅은 허용 리포에서 미션 4파일을 커밋으로 쓸어 담는다 | 실측 |
-| **D3** | **보류 유지.** 이 리허설이 바꾸는 것은 e·f·c 의 증거 상태뿐이다. a-④(시간)가 D3 를 막는 유일한 항목으로 남는다 | — |
+| **D3** | **보류 유지.** 이 리허설이 바꾸는 것은 e·f·c 의 증거 상태뿐이다. 이 문서는 e·c 의 리허설 증거와 f 의 사전 증거를 더할 뿐이다. e·f 는 플립 본번 커밋과 그 배치 CI 에서 다시 충족돼야 하고, c 는 요청 밖 소비처 X1–X4 가 남는다. a-④ 는 86.8% < 95% 로 미달이다. | — |
 
 ### 계획서·백로그와 다른 점 (교정)
 
@@ -176,7 +176,7 @@ land 의 6행(trailer · ownership · binary · citations · merge-dry-run · be
 
 **X4 의 도달성**: 이 리포는 기본 allowlist 로 허용이다 — `isAutopilotAllowed(<이 체크아웃>)` 를 실행하면 `remote: https://github.com/Yoodaddy0311/artibot.git`, `normalized: Yoodaddy0311/artibot`, 온디스크 override 파일(`~/.claude/artibot/autopilot-allowlist.json`) 부재, `DEFAULT_ALLOWLIST.repos` 에 포함 → **`true`**(실측). 남은 미확인은 Stop 훅이 라이브에서 `phase` 를 받는가(autopilot 런타임이 넣는 값이다)다. 레인(`/split`) 세션은 autopilot 엔진이 아니라 `phase` 가 없어 이 경로를 타지 않는다고 **추론**한다 — 미측정.
 
-**소스만 읽고 실행하지 않은 `git add -A` 소비처**(전수 grep, `plugins/artibot/{lib,scripts,hooks}` + `plugins/artibot-cowork/scripts`): `git-autopilot-save.js`(`commitStrategy: "interval"` 일 때만), `git-autopilot-close.js` `interval` 경로(`closeOnStop: true` 일 때만), `scripts/cron/auto-commit-runner.js`(`cwd` 가 플러그인 루트, 위험 분류·첫 N회 관측 전용 게이트 뒤), `scripts/swarm-init.js`·`lib/swarm/git-backend.js`(스웜 클론 디렉터리). 그 밖의 status 파서: `scripts/update-git.js`(`stash push --include-untracked`, 플러그인 업데이트 흐름), `scripts/split/watch.mjs`, `lib/handoff/*`. 이들의 라이브 활성 여부는 미확인이다.
+**소스만 읽고 실행하지 않은 `git add -A` 소비처**(전수 grep, `plugins/artibot/{lib,scripts,hooks}` + `plugins/artibot-cowork/scripts`): `git-autopilot-save.js`(`commitStrategy: "interval"` 일 때만), `git-autopilot-close.js` `interval` 경로(`closeOnStop: true` 일 때만 — 같은 파일의 semantic 경로 `commitSemantic` 안 258행의 `git add -A` 는 X4 로 실행했으므로 이 소스-전용 목록에 없다), `scripts/cron/auto-commit-runner.js`(`cwd` 가 플러그인 루트, 위험 분류·첫 N회 관측 전용 게이트 뒤), `scripts/swarm-init.js`·`lib/swarm/git-backend.js`(스웜 클론 디렉터리). 그 밖의 status 파서: `scripts/update-git.js`(`stash push --include-untracked`, 플러그인 업데이트 흐름), `scripts/split/watch.mjs`, `lib/handoff/*`. 이들의 라이브 활성 여부는 미확인이다.
 
 ## 5. 관측치 간 정합성 점검 (규율 §5)
 
@@ -203,7 +203,7 @@ land 의 6행(trailer · ownership · binary · citations · merge-dry-run · be
 ## 7. 리더가 이 증거로 할 수 있는 결정 (권고이며 확정 아님)
 
 1. **플립 커밋의 실제 발자국은 위 6파일(CA-08 미착지 시 5파일)이다.** 착지 시점에 CA-08 이 master 에 있는지에 따라 `resume-read-order-guard-doc` 핀이 포함/제외된다.
-2. **미션 추적/무시 정책이 플립 뒤 남는 실제 결정으로 보인다.** 현 `.gitignore` 는 missions 를 추적 정본 경로로 두고 규칙이 없다. 그 상태(미추적으로 놓인 미션)에서 X1–X3 이 걸리고, X4(허용 리포 + `phase` 전이)는 미션을 autopilot 커밋에 쓸어 담는다 — 추적을 정본으로 삼는 정책이라면 그것이 의도된 경로일 수 있으나 레인 `ownership` 검사와는 충돌한다(E). `.gitignore` 에 무시 규칙을 넣는 안은 X1–X3 을 없애겠지만, `.gitignore` 주석이 "missions 무시 규칙을 넣으면 gitignore-boundary 의 TRACKED_PATHS 핀 `.artibot/missions/m-0001.md` 가 red" 라 적어 둔 점은 이 문서가 재현하지 않았다(주석 인용). 정책 결정은 오너 몫이라 이 문서는 어느 쪽도 권하지 않는다.
+2. **추적 유지(오너 결정 (3), 2026-09-22) 전제에서, 훅이 만든 미추적 미션을 누가·언제 커밋/보존하는가. 설계 §161 B4(autopilot 자동 생성 mission)의 미결 항목에 해당.** 근거 두 곳. 백로그(`.artibot/guides/v5-design/V5-BACKLOG.md` §4-d "오너 결정 7건 — 2026-09-22" 의 (3)): "missions — 추적 유지(현 .gitignore:118-120 정본 그대로, 규칙 추가 0)" — 코디네이터가 전달한 줄번호는 318, `d13470d2` 트리에서는 317이다(줄번호는 편집에 취약하니 § 와 문구로 찾을 것). 설계(`.artibot/guides/v5-design/ARTIBOT-5.0-DESIGN.md` 161행): "결정 필요 = autopilot 자동 생성 mission(B4)". 같은 설계 문서 284행의 B4 행은 질문을 "autopilot/split 자동 생성 mission 추적 여부"로, 권장을 "사람 mission 추적, 자동 생성은 로컬 + outcome 만 승격"으로 적는데, 오너 결정 (3) 의 "규칙 추가 0" 과 문언이 같지 않다 — 어느 쪽이 B4 를 닫는지는 이 문서가 판정하지 않는다(미확인). 이 리허설이 더한 것은 그 미결 항목의 결과다: 미션이 미추적으로 놓이면 X1–X3 이 걸리고, X4(허용 리포 + `phase` 전이)는 미션을 autopilot 커밋에 쓸어 담는다 — 추적을 정본으로 삼는 정책에서는 그것이 의도된 경로일 수 있으나 레인 `ownership` 검사와는 충돌한다(E). 리더가 이를 권장안으로 기록했다(코디네이터 전달, 2026-09-29 — `d13470d2` 트리의 백로그에는 아직 없다): 추적을 유지하고 커밋 주체를 하나로 정한다 — 메인 체크아웃이 명시 경로로 missions 를 커밋하고, 레인의 미션은 worktree 제거 전에 밖으로 복사하며, 릴리스는 `release.js`(X1) 전에 missions 를 커밋한다 — 그리고 이를 플립 전 선행 줄기로 둔다. 이 문서는 그 권장안을 재현하거나 검증하지 않았다.
 3. 플립 본번의 CI(f)는 그 배치의 GitHub check-runs 로 다시 판정해야 한다. 이 리허설은 "플립이 만드는 새 RED 가 없다"까지만 사전 증명한다.
 
 ## 8. 미확인
@@ -215,5 +215,7 @@ land 의 6행(trailer · ownership · binary · citations · merge-dry-run · be
 - GitHub check-runs 결과(브랜치 미푸시).
 - a-④ 수치(78.0% raw / 86.8% 제외 후, n=59/53)의 재현 — 지시문 인용이며 미재측정.
 - `update-git.js`·`watch.mjs`·`handoff`·`auto-commit-runner` 의 실제 동작.
+- 오너 결정 (3) "규칙 추가 0" 과 설계 284행 B4 권장("자동 생성은 로컬 + outcome 만 승격")의 관계 — 어느 쪽이 B4 를 닫는지(§7-2).
+- 리더의 커밋 주체 권장안(§7-2)의 원문 — 코디네이터 전달이며 `d13470d2` 트리의 백로그에는 없다.
 
 SH-02 는 이 문서로 status 가 바뀌지 않는다 — 플립 전까지 in-progress 유지(웨이브 2 계획서 §6, "D3 조건 d·c·e·f 는 조건 증거이지 행 전환이 아니다").
