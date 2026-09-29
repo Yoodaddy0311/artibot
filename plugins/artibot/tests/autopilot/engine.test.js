@@ -11,6 +11,7 @@ import {
   resumeAutopilot,
   runPhase0Intake,
   runPhase1Plan,
+  runPhase4Verify,
   runPhase6Report,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
@@ -253,6 +254,44 @@ describe('Phase runner functions return instruction objects', () => {
     expect(inst).toBeTruthy();
     expect(inst.type).toBe('phase-result');
     expect(typeof inst.reportPath).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CA-13 flip item 2 (W2-7): what the VERIFY hand-out tells the driver to write
+// ---------------------------------------------------------------------------
+describe('runPhase4Verify — the driver instruction', () => {
+  // The instruction used to say "record" and pass `status` with no vocabulary, so a
+  // driver had nothing to read the spelling from (uppercase `DONE` turns up in
+  // stored driver results: the measurement is in report-verify-gate.js, "Why rule 3
+  // has no case-fold") and nothing saying the result slot is rewritten per attempt.
+  // Both are what the REPORT verify gate reads once it is switched on.
+  async function verifyInstruction(label) {
+    const r = await start({ task: `verify instruction ${label}`, mode: 'plan' });
+    track(r.sessionId);
+    return runPhase4Verify(loadSession(r.sessionId)).instructions.join('\n');
+  }
+
+  it("states the status vocabulary: exactly lowercase 'done' or 'failed', case-sensitive", async () => {
+    const text = await verifyInstruction('vocabulary');
+
+    expect(text).toContain("'done'");
+    expect(text).toContain("'failed'");
+    expect(text).toMatch(/대소문자/);
+  });
+
+  it('says state.verifyResult is overwritten for each attempt, not added to', async () => {
+    const text = await verifyInstruction('overwrite');
+
+    expect(text).toContain('state.verifyResult');
+    expect(text).toMatch(/덮어/);
+  });
+
+  it('keeps the recordPhaseResult hand-back and the pause warning', async () => {
+    const text = await verifyInstruction('handback');
+
+    expect(text).toContain("recordPhaseResult(state, { phase: 'VERIFY'");
+    expect(text).toContain('pause');
   });
 });
 

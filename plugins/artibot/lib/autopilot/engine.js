@@ -38,7 +38,7 @@ import { getRepoIdentity } from '../git/repo-identity.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
 import { isAttemptArmed, journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
-import { gateReportOnVerify } from './report-verify-gate.js';
+import { gateReportOnVerify, scopeVerifyResultToAttempt } from './report-verify-gate.js';
 
 /**
  * Check if the session should freeze; returns a pause instruction when true.
@@ -487,6 +487,10 @@ export function runPhase4Verify(state) {
   // Armed: same contract as runPhase2Execute — the result ACK, not this
   // hand-off, writes `phase-end`, so a crash before the result re-runs VERIFY.
   const attempt = isAttemptArmed('VERIFY') ? openPhaseAttempt(state, { phase: 'VERIFY' }) : null;
+  // CA-13: the previous attempt's verifyResult is sealed, not inherited. Keep this
+  // above attachMcpVerify, which fills verifyResult.mcp: sealing after it would
+  // archive that fresh slot. A no-op unless the REPORT gate is ON.
+  if (attempt) scopeVerifyResultToAttempt(state, attempt);
   persist(state);
   tick(state.sessionId, attempt
     ? { phase: 'VERIFY', type: 'attempt-started', level: 'info', message: 'Phase 4 VERIFY 위임 — 완료 보고 대기',
@@ -506,10 +510,10 @@ export function runPhase4Verify(state) {
     },
     instructions: [
       `Autopilot 세션 ${state.sessionId} Phase 4.`,
-      'Bash 로 npm run ci 실행. 결과(lint/typecheck/test/build) 를 state.verifyResult 에 기록.',
+      'Bash 로 npm run ci 실행. 결과(lint/typecheck/test/build) 를 state.verifyResult 에 기록하되, 이번 attempt 의 결과로 통째로 덮어쓴다 — 이전 attempt 의 결과 위에 필드만 얹지 않는다. status: PASS|FAIL|UNMEASURED 또는 ok/passed 불리언으로 명시 신호를 남긴다.',
       '실패 시 build-error-resolver 호출. 3회 재시도 후에도 실패면 pause.',
       '실패할 때마다 state.counters.buildFailures 또는 testFailures 증가.',
-      "끝나면 결과를 반드시 recordPhaseResult(state, { phase: 'VERIFY', status }) 로 보고. 누락하면 resume 이 VERIFY 를 재실행하고, 두 번째에는 pause.",
+      "끝나면 결과를 반드시 recordPhaseResult(state, { phase: 'VERIFY', status }) 로 보고. status 는 대소문자를 구분해 정확히 'done'(완료) 또는 'failed'(3회 재시도 뒤에도 실패) — 'DONE' 등 다른 철자는 REPORT 게이트가 켜져 있으면 VERIFY_NOT_DONE 으로 거부된다. 누락하면 resume 이 VERIFY 를 재실행하고, 두 번째에는 pause.",
     ],
   };
   if (state.options?.mcpVerify) {

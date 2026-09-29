@@ -21,9 +21,14 @@
  *      refused and pauses back to VERIFY, a pause of any kind is kept, and a
  *      re-run VERIFY is what lets REPORT through; `refuseRecordedReport`'s
  *      `livePhases` argument only counts when it is a real array.
+ *   5b. The attempt scope of `state.verifyResult` (W2-7): a VERIFY hand-out seals the
+ *      previous result (archived, not deleted) and stamps the new attempt, switch ON
+ *      only; the gate itself never dismisses a result by its stamp (fail closed);
+ *      driven through `resumeAutopilot` so the engine call is what is measured.
  *   6. Sessions with no VERIFY row in their journal (stored before the journal,
  *      run before VERIFY was armed, or hand-driven), switch ON: pinned as today's
  *      behaviour, one pause and one VERIFY re-run.
+ *   6b. The read-only census of how many stored sessions that pause would reach.
  *   7. The shipped switch driven with NOTHING injected, plus controls that turn
  *      the same harness ON through a temp plugin root.
  *   8. `loadReportVerifyGateConfig` against real files, including the silent OFF
@@ -57,6 +62,10 @@ vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
     gateReportOnVerify: (state, config) => (gateMode.bypass
       ? null
       : real.gateReportOnVerify(state, gateMode.shipped ? config : (config ?? gateMode.config))),
+    // The VERIFY hand-out (engine.js#runPhase4Verify) reads the same switch through
+    // this export, so it takes the same injection as the REPORT gate.
+    scopeVerifyResultToAttempt: (state, attempt, config) => real.scopeVerifyResultToAttempt(
+      state, attempt, gateMode.shipped ? config : (config ?? gateMode.config)),
     // A caller that reads the switch itself (the driver path, section 4) sees
     // the injected value instead of the plugin root's artibot.config.json.
     loadReportVerifyGateConfig: () => {
@@ -69,10 +78,12 @@ vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
 const {
   REPORT_VERIFY_CODES,
   REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH,
+  censusReportVerifyEvidence,
   evaluateReportVerifyEvidence,
   loadReportVerifyGateConfig,
   readReportVerifyGateEnforce,
   refuseRecordedReport,
+  scopeVerifyResultToAttempt,
 } = await vi.importActual('../../lib/autopilot/report-verify-gate.js');
 const { gateReportOnVerify } = await import('../../lib/autopilot/report-verify-gate.js');
 const {
@@ -81,7 +92,7 @@ const {
   runPhase6Report,
   startAutopilot,
 } = await import('../../lib/autopilot/index.js');
-const { PHASES, recordPhaseResult } = await import('../../lib/autopilot/engine-state.js');
+const { PHASES, nextTarget, recordPhaseResult } = await import('../../lib/autopilot/engine-state.js');
 const { foldVerify } = await import('../../lib/autopilot/recovery-record.js');
 const {
   deleteSessionArtifacts, getSessionPath, loadSession, saveSession,
@@ -711,6 +722,13 @@ function recordReport(state, enforce, status = 'done') {
   return { returned, events: readEvents(state.sessionId).slice(before) };
 }
 
+/**
+ * "The driver writes nothing into `state.verifyResult` during a VERIFY re-run".
+ * A sentinel, not `undefined`: assigning `undefined` is a write, and would erase a
+ * stale FAIL the engine had left in place, hiding exactly the defect under test.
+ */
+const NO_WRITE = Symbol('no verifyResult write');
+
 describe('recordPhaseResult(REPORT) — switch OFF evaluates nothing', () => {
   /**
    * Count reads of `attemptJournal`, the evidence the rule walks. The getter is
@@ -933,7 +951,8 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
   /**
    * A session that reached REPORT with VERIFY acknowledged done beside an explicit
    * FAIL result, refused once; then VERIFY is re-run and acknowledged done.
-   * `verifyResultAfterRerun` is what the driver leaves in `state.verifyResult`.
+   * `verifyResultAfterRerun` is what the driver writes into `state.verifyResult`
+   * during the re-run; {@link NO_WRITE} is a driver that writes nothing at all.
    */
   async function refusedThenRerun(label, verifyResultAfterRerun) {
     const sessionId = await start(label);
@@ -949,7 +968,7 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
 
     expect((await resumeAutopilot(sessionId)).phase).toBe('VERIFY');
     const rerun = loadSession(sessionId);
-    rerun.verifyResult = verifyResultAfterRerun;
+    if (verifyResultAfterRerun !== NO_WRITE) rerun.verifyResult = verifyResultAfterRerun;
     gateMode.config = { enforce: true };
     recordPhaseResult(rerun, { phase: 'VERIFY', status: 'done' });
     return sessionId;
@@ -965,9 +984,10 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
     expect(events.map((e) => [e.type, e.data?.code])).toEqual([['report-verify-gate', 'ok']]);
   });
 
-  it('(viii) should keep refusing while a FAIL is left in verifyResult, even after a done re-run', async () => {
-    // verifyResult is not attempt-scoped: the driver has to overwrite it. This is
-    // the fail-closed side of that, and the reason autopilot.md says to.
+  it('(viii) should refuse again when the re-run VERIFY itself leaves a FAIL in verifyResult', async () => {
+    // A FAIL the driver writes AFTER the re-run was handed out belongs to the
+    // re-run attempt: the hand-out emptied the slot first (W2-7), so nothing in it
+    // can be a leftover. This is the fail-closed side of the attempt scope.
     const sessionId = await refusedThenRerun('drv-on-failed-stays', { status: 'FAIL' });
 
     const after = loadSession(sessionId);
@@ -977,6 +997,44 @@ describe('recordPhaseResult(REPORT) — switch ON, driver path', () => {
     expect(loadSession(sessionId)).toMatchObject({
       phase: 'PAUSED', pausedReason: 'report-verify-evidence-missing:VERIFY_RESULT_FAILED',
     });
+  });
+
+  it('(ix) should let REPORT through when the re-run is acknowledged done and the driver writes no new result', async () => {
+    // The stale-FAIL defect (W2-7): the previous attempt's FAIL used to stay in the
+    // one slot, so a done re-run that did not overwrite it was refused with the
+    // same code forever. The hand-out now seals it (archived, not deleted), so the
+    // slot holds only what this attempt wrote: here, nothing.
+    const sessionId = await refusedThenRerun('drv-on-stale-fail', NO_WRITE);
+
+    const after = loadSession(sessionId);
+    expect(after.verifyResult ?? null).toBeNull();
+    const { events } = recordReport(after, true);
+
+    expect(after.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
+    expect(events.map((e) => [e.type, e.data?.code])).toEqual([['report-verify-gate', 'ok']]);
+  });
+
+  it('(ix-b) should let the engine path complete in the same situation', async () => {
+    const sessionId = await refusedThenRerun('eng-on-stale-fail', NO_WRITE);
+
+    const result = runPhase6Report(loadSession(sessionId));
+
+    expect(result.type).toBe('phase-result');
+    expect(loadSession(sessionId).phase).toBe('COMPLETED');
+    expect(gateTicks(sessionId).map((e) => e.data.code)).toEqual(['ok']);
+  });
+
+  it('(x) should keep the sealed FAIL as evidence: archived under the hand-out that superseded it', async () => {
+    const sessionId = await refusedThenRerun('drv-on-archive', NO_WRITE);
+
+    const after = loadSession(sessionId);
+    const verifyAcks = after.attemptJournal.filter((r) => r.phase === 'VERIFY' && r.event === 'acknowledged');
+    const rerunId = verifyAcks.at(-1).attemptId;
+    expect(rerunId).not.toBe('v1');
+    expect(after.verifyResultScope).toEqual({ attemptId: rerunId });
+    expect(after.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL' }, supersededBy: rerunId },
+    ]);
   });
 });
 
@@ -1021,6 +1079,295 @@ describe('refuseRecordedReport — the livePhases argument', () => {
     const state = fresh('live-real');
     expect(refuseRecordedReport(state, { status: 'done' }, { enforce: true }, PHASES)).toBe(true);
     expect(state).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5b. Attempt scope of state.verifyResult (W2-7 / CA-13 flip item 1)
+// ---------------------------------------------------------------------------
+
+/** The attempt object `openPhaseAttempt` hands the engine, reduced to what the seal reads. */
+const attemptOf = (attemptId) => ({ attemptId, phase: 'VERIFY', status: 'started' });
+const ON = { enforce: true };
+const OFF = { enforce: false };
+
+describe('scopeVerifyResultToAttempt — a VERIFY hand-out seals the previous result', () => {
+  it('should archive the previous result, empty the slot and stamp the new attempt', () => {
+    const state = { verifyResult: { status: 'FAIL', lint: 'x' } };
+
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'), ON)).toBe(true);
+
+    expect(state.verifyResult).toBeNull();
+    expect(state.verifyResultScope).toEqual({ attemptId: 'v2' });
+    expect(state.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL', lint: 'x' }, supersededBy: 'v2' },
+    ]);
+  });
+
+  it('should name the attempt that owned the slot, and keep every sealed result in order', () => {
+    const state = { verifyResult: null };
+    scopeVerifyResultToAttempt(state, attemptOf('v1'), ON);
+    state.verifyResult = { status: 'FAIL' }; // what the driver wrote for v1
+    scopeVerifyResultToAttempt(state, attemptOf('v2'), ON);
+    state.verifyResult = { status: 'PASS' }; // what it wrote for v2
+    scopeVerifyResultToAttempt(state, attemptOf('v3'), ON);
+
+    expect(state.verifyResultHistory).toEqual([
+      { attemptId: 'v1', verifyResult: { status: 'FAIL' }, supersededBy: 'v2' },
+      { attemptId: 'v2', verifyResult: { status: 'PASS' }, supersededBy: 'v3' },
+    ]);
+    expect(state.verifyResultScope).toEqual({ attemptId: 'v3' });
+    expect(state.verifyResult).toBeNull();
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+  ])('should only stamp when the slot is %s: there is nothing to archive', (_label, slot) => {
+    const state = slot === undefined ? {} : { verifyResult: slot };
+
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v1'), ON)).toBe(true);
+
+    expect(state.verifyResultScope).toEqual({ attemptId: 'v1' });
+    expect('verifyResultHistory' in state).toBe(false);
+  });
+
+  it('should not archive a result the SAME attempt wrote when it is called twice for that attempt', () => {
+    const state = { verifyResult: { status: 'FAIL' } };
+    scopeVerifyResultToAttempt(state, attemptOf('v2'), ON);
+    state.verifyResult = { status: 'PASS' }; // written for v2, after its hand-out
+
+    scopeVerifyResultToAttempt(state, attemptOf('v2'), ON);
+
+    expect(state.verifyResult).toEqual({ status: 'PASS' });
+    expect(state.verifyResultHistory).toHaveLength(1);
+  });
+
+  it.each([
+    ['the literal false', OFF],
+    ['the string "true"', { enforce: 'true' }],
+    ['the number 1', { enforce: 1 }],
+    ['a config without the key', {}],
+  ])('should touch nothing when the switch is %s', (_label, config) => {
+    const state = { verifyResult: { status: 'FAIL' }, verifyResultScope: { attemptId: 'v1' } };
+    const before = JSON.stringify(state);
+
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'), config)).toBe(false);
+
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it('should read the shipped switch (OFF) when no config is passed', () => {
+    const state = { verifyResult: { status: 'FAIL' } };
+    const before = JSON.stringify(state);
+
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(false);
+
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it.each([
+    ['no attempt', undefined],
+    ['a null attempt', null],
+    ['an attempt without an id', {}],
+    ['an empty id', { attemptId: '' }],
+    ['a numeric id', { attemptId: 7 }],
+  ])('should keep the slot when it cannot bind it to an attempt: %s (fail closed)', (_label, attempt) => {
+    const state = { verifyResult: { status: 'FAIL' } };
+    const before = JSON.stringify(state);
+
+    expect(scopeVerifyResultToAttempt(state, attempt, ON)).toBe(false);
+
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it.each([[null], [undefined], ['x'], [42]])('should not throw on a non-object state (%j)', (state) => {
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v1'), ON)).toBe(false);
+  });
+
+  it.each([
+    ['a string', 'nope'],
+    ['an object', { a: 1 }],
+    ['null', null],
+  ])('should replace a malformed history (%s) rather than throw', (_label, junk) => {
+    const state = { verifyResult: { status: 'FAIL' }, verifyResultHistory: junk };
+
+    expect(() => scopeVerifyResultToAttempt(state, attemptOf('v2'), ON)).not.toThrow();
+
+    expect(state.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL' }, supersededBy: 'v2' },
+    ]);
+  });
+
+  it('should not modify the object it archives', () => {
+    const prior = Object.freeze({ status: 'FAIL', nested: Object.freeze({ a: 1 }) });
+    const state = { verifyResult: prior };
+
+    expect(() => scopeVerifyResultToAttempt(state, attemptOf('v2'), ON)).not.toThrow();
+
+    expect(state.verifyResultHistory[0].verifyResult).toEqual({ status: 'FAIL', nested: { a: 1 } });
+  });
+});
+
+describe('evaluateReportVerifyEvidence — the scope stamp never dismisses a result (fail closed)', () => {
+  // The stamp is provenance, not an input to the verdict. A label cannot prove a
+  // result stale: a stale in-memory copy saved back over the hand-out, or a
+  // hand-out made by a build that does not scope, leaves a label naming the wrong
+  // attempt beside a result that may well be current. Only the seal emptying the
+  // slot can. So a slot that still holds an explicit FAIL is refused whatever the
+  // label says about who owns it.
+  it.each([
+    ['no stamp (unbound: a legacy or hand-driven session)', undefined],
+    ['a stamp naming the latest attempt', { attemptId: 'v1' }],
+    ['a stamp naming an earlier attempt', { attemptId: 'v0' }],
+    ['a stamp naming an attempt that is not in the journal', { attemptId: 'zzz' }],
+    ['a stamp that is a bare string', 'v1'],
+    ['an empty stamp', {}],
+    ['a null stamp', null],
+    ['a stamp with a numeric id', { attemptId: 1 }],
+  ])('should still refuse an explicit FAIL under %s', (_label, scope) => {
+    const state = { ...withResult({ status: 'FAIL' }), ...(scope === undefined ? {} : { verifyResultScope: scope }) };
+
+    expect(evaluateReportVerifyEvidence(state)).toEqual({
+      ok: false, code: 'VERIFY_RESULT_FAILED', attemptId: 'v1', checkpointSha: null,
+    });
+  });
+
+  it('should never read the sealed history: a FAIL archived there is not this attempt\'s result', () => {
+    const history = [{ attemptId: 'v0', verifyResult: { status: 'FAIL' }, supersededBy: 'v1' }];
+    for (const slot of [null, undefined, { status: 'PASS' }, {}]) {
+      const state = { ...withResult(slot), verifyResultScope: { attemptId: 'v1' }, verifyResultHistory: history };
+
+      expect(evaluateReportVerifyEvidence(state), JSON.stringify(slot)).toMatchObject({ ok: true, code: 'ok' });
+    }
+  });
+
+  it('should refuse a FAIL written for the latest attempt after its seal (scoped and current)', () => {
+    const state = { ...withResult({ status: 'FAIL' }), verifyResultScope: { attemptId: 'v1' }, verifyResultHistory: [] };
+
+    expect(evaluateReportVerifyEvidence(state).code).toBe('VERIFY_RESULT_FAILED');
+  });
+
+  it('should read the state without changing it, stamp and history included', () => {
+    const s = {
+      ...withResult({ status: 'FAIL' }),
+      verifyResultScope: { attemptId: 'v1' },
+      verifyResultHistory: [{ attemptId: null, verifyResult: { status: 'FAIL' }, supersededBy: 'v1' }],
+    };
+    const before = JSON.stringify(s);
+
+    evaluateReportVerifyEvidence(s);
+
+    expect(JSON.stringify(s)).toBe(before);
+  });
+});
+
+describe('a VERIFY hand-out through the engine (resumeAutopilot → runPhase4Verify)', () => {
+  /**
+   * A stored session that resumes into VERIFY (its phase is CROSS_CHECK, so the
+   * engine's next target is VERIFY), carrying `fields`.
+   * @param {string} label
+   * @param {object} [fields]
+   * @param {object} [options] - extra `startAutopilot` options
+   * @returns {Promise<string>} session id
+   */
+  async function readyForVerify(label, fields = {}, options = {}) {
+    const r = await startAutopilot({
+      task: `report verify gate ${label}`,
+      mode: 'default',
+      options: { cpuCount: 2, projectRoot: artifactRoot, ...options },
+      sessionId: uniqueId(label),
+    });
+    sessionsToClean.add(r.sessionId);
+    saveSession({ ...loadSession(r.sessionId), phase: 'CROSS_CHECK', pendingPhase: null, ...fields });
+    return r.sessionId;
+  }
+
+  it('should seal a stale FAIL, stamp the attempt it opened, and keep the FAIL in the history (switch ON)', async () => {
+    gateMode.config = ON;
+    const sessionId = await readyForVerify('scope-on', { verifyResult: { status: 'FAIL', lint: 'red' } });
+
+    const resumed = await resumeAutopilot(sessionId);
+
+    expect(resumed).toMatchObject({ phase: 'VERIFY', status: 'ok' });
+    expect(resumed.instruction.type).toBe('verify');
+    const after = loadSession(sessionId);
+    const { attemptId } = after.activePhaseAttempt;
+    expect(after.verifyResult).toBeNull();
+    expect(after.verifyResultScope).toEqual({ attemptId });
+    expect(after.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL', lint: 'red' }, supersededBy: attemptId },
+    ]);
+  });
+
+  it('should touch nothing with the switch OFF: the stale FAIL stays, no stamp, no history', async () => {
+    gateMode.config = OFF;
+    const stale = { status: 'FAIL', lint: 'red' };
+    const sessionId = await readyForVerify('scope-off', { verifyResult: stale });
+
+    await resumeAutopilot(sessionId);
+
+    const after = loadSession(sessionId);
+    expect(after.verifyResult).toEqual(stale);
+    expect('verifyResultScope' in after).toBe(false);
+    expect('verifyResultHistory' in after).toBe(false);
+  });
+
+  it('should touch nothing with the shipped switch and nothing injected', async () => {
+    gateMode.shipped = true; // the real reader, against the artibot.config.json this checkout ships (OFF)
+    const sessionId = await readyForVerify('scope-shipped', { verifyResult: { status: 'FAIL' } });
+
+    await resumeAutopilot(sessionId);
+
+    const after = loadSession(sessionId);
+    expect(after.verifyResult).toEqual({ status: 'FAIL' });
+    expect('verifyResultScope' in after).toBe(false);
+    expect('verifyResultHistory' in after).toBe(false);
+  });
+
+  it('should seal at the crash re-run too, archiving the first hand-out\'s result under that hand-out', async () => {
+    gateMode.config = ON;
+    const sessionId = await readyForVerify('scope-rerun');
+    await resumeAutopilot(sessionId); // v1 handed out, slot empty
+    const first = loadSession(sessionId);
+    const v1 = first.activePhaseAttempt.attemptId;
+    first.verifyResult = { status: 'FAIL' }; // written for v1, never acknowledged
+    saveSession(first);
+
+    const resumed = await resumeAutopilot(sessionId); // crash: the engine re-runs VERIFY
+
+    expect(resumed.phase).toBe('VERIFY');
+    const after = loadSession(sessionId);
+    const v2 = after.activePhaseAttempt.attemptId;
+    expect(v2).not.toBe(v1);
+    expect(after.verifyResult).toBeNull();
+    expect(after.verifyResultScope).toEqual({ attemptId: v2 });
+    expect(after.verifyResultHistory).toEqual([
+      { attemptId: v1, verifyResult: { status: 'FAIL' }, supersededBy: v2 },
+    ]);
+  });
+
+  it('should build the mcp slot AFTER the seal: fresh, never the previous attempt\'s layer result', async () => {
+    gateMode.config = ON;
+    const old = { status: 'FAIL', mcp: { ok: false, violations: ['old'] } };
+    const sessionId = await readyForVerify('scope-mcp', { verifyResult: old }, { mcpVerify: true });
+
+    const resumed = await resumeAutopilot(sessionId);
+
+    expect(resumed.instruction.mcp?.enabled).toBe(true);
+    const after = loadSession(sessionId);
+    expect(after.verifyResult).toEqual({ mcp: { ok: null, violations: [] } });
+    expect(after.verifyResultHistory[0].verifyResult).toEqual(old);
+  });
+
+  it('control: with the switch OFF the mcp slot keeps the previous attempt\'s layer result', async () => {
+    gateMode.config = OFF;
+    const old = { status: 'FAIL', mcp: { ok: false, violations: ['old'] } };
+    const sessionId = await readyForVerify('scope-mcp-off', { verifyResult: old }, { mcpVerify: true });
+
+    await resumeAutopilot(sessionId);
+
+    expect(loadSession(sessionId).verifyResult).toEqual(old);
   });
 });
 
@@ -1103,6 +1450,146 @@ describe('a session with no VERIFY row in its attempt journal — switch ON', ()
 
     expect(runPhase6Report(loadSession(sessionId)).type).toBe('phase-result');
     expect(gateTicks(sessionId)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6b. Census: how many stored sessions the gate would refuse (R2-9, read-only)
+// ---------------------------------------------------------------------------
+
+/** A stored session as the pre-journal era wrote it: no attemptJournal, so rule B has nothing to read. */
+const preJournal = (phase, extra = {}) => ({ sessionId: `pre-${phase}`, schemaVersion: 2, phase, ...extra });
+/** A session with rule-B evidence: an EXECUTE, then a VERIFY acknowledged `done`. */
+const evidenced = (phase, extra = {}) => ({
+  sessionId: `ev-${phase}`, schemaVersion: 3, phase, attemptJournal: [...EVIDENCE], activePhaseAttempt: null, ...extra,
+});
+/** The two things the census cannot import (engine-state.js imports the gate): passed in, as `livePhases` is. */
+const SEAMS = { nextTarget, phases: PHASES };
+const ZERO_CODES = Object.fromEntries(Object.values(REPORT_VERIFY_CODES).map((code) => [code, 0]));
+const deepFreeze = (value) => {
+  if (value !== null && typeof value === 'object') Object.values(value).forEach(deepFreeze);
+  return Object.freeze(value);
+};
+
+describe('censusReportVerifyEvidence', () => {
+  /** Twelve pre-journal sessions and one evidenced one, placed at every kind of position. */
+  const store = () => [
+    preJournal('COMPLETED'), preJournal('ABORTED'), // terminal: resume is a no-op, the gate cannot fire
+    preJournal('INTAKE'), preJournal('PLAN'), preJournal('EXECUTE'), preJournal('CROSS_CHECK'), // VERIFY still ahead
+    preJournal('PAUSED', { lastPhase: 'REPORT', pendingPhase: 'VERIFY' }), // a gate pause: resume runs VERIFY
+    preJournal('VERIFY'), preJournal('IMPROVE'), preJournal('EVALUATE'), preJournal('REPORT'), // past the hand-out
+    preJournal('PAUSED', { sessionId: 'pre-PAUSED-improve', lastPhase: 'IMPROVE', pendingPhase: 'IMPROVE' }),
+    evidenced('IMPROVE'),
+  ];
+
+  it('should zero every code of the closed vocabulary on an empty store, and measure pauseAtReport as 0', () => {
+    expect(censusReportVerifyEvidence([], SEAMS)).toEqual({
+      total: 0, unreadable: 0, byCode: ZERO_CODES, terminal: 0, live: 0, liveWithoutEvidence: 0, pauseAtReport: 0,
+    });
+  });
+
+  it('should split a store by code, by terminal/live, and by who would really be paused at REPORT', () => {
+    const c = censusReportVerifyEvidence(store(), SEAMS);
+
+    expect(c).toEqual({
+      total: 13,
+      unreadable: 0,
+      byCode: { ...ZERO_CODES, NO_VERIFY_ATTEMPT: 12, ok: 1 },
+      terminal: 2, // COMPLETED, ABORTED
+      live: 11,
+      liveWithoutEvidence: 10, // the 11 live sessions minus the evidenced one
+      // VERIFY, IMPROVE, EVALUATE, REPORT and the pause routed to IMPROVE reach REPORT
+      // without another hand-out. The four sessions before VERIFY and the gate pause
+      // pending VERIFY will be handed a VERIFY attempt by the engine first.
+      pauseAtReport: 5,
+    });
+  });
+
+  it('should keep the partitions exhaustive: codes and terminal/live each sum to the total', () => {
+    const c = censusReportVerifyEvidence(store(), SEAMS);
+
+    expect(Object.values(c.byCode).reduce((a, b) => a + b, 0)).toBe(c.total);
+    expect(c.terminal + c.live).toBe(c.total);
+    expect(c.liveWithoutEvidence).toBeLessThanOrEqual(c.live);
+    expect(c.pauseAtReport).toBeLessThanOrEqual(c.liveWithoutEvidence);
+  });
+
+  it('should report pauseAtReport as null, not a guess, when the seams are not given', () => {
+    const withoutSeams = censusReportVerifyEvidence(store());
+    expect(withoutSeams.pauseAtReport).toBeNull();
+    expect(withoutSeams).toMatchObject({ total: 13, terminal: 2, live: 11, liveWithoutEvidence: 10 });
+
+    expect(censusReportVerifyEvidence(store(), { nextTarget }).pauseAtReport).toBeNull();
+    expect(censusReportVerifyEvidence(store(), { phases: PHASES }).pauseAtReport).toBeNull();
+  });
+
+  it.each([
+    ['a phase name the list does not know', () => 'NOT_A_PHASE'],
+    ['null', () => null],
+    ['a non-string', () => 42],
+    ['a throw', () => { throw new Error('boom'); }],
+  ])('should count a live session whose resume target is unknown (%s): toward the warning, not away', (_label, target) => {
+    const c = censusReportVerifyEvidence([preJournal('INTAKE')], { nextTarget: target, phases: PHASES });
+
+    expect(c.pauseAtReport).toBe(1);
+  });
+
+  it('should count every non-ok code in byCode, not only NO_VERIFY_ATTEMPT', () => {
+    const c = censusReportVerifyEvidence([
+      evidenced('REPORT'),
+      { phase: 'REPORT', attemptJournal: [started('v1', 'VERIFY')], activePhaseAttempt: null },
+      { phase: 'REPORT', attemptJournal: [started('v1', 'VERIFY'), acked('v1', 'VERIFY', 'failed')] },
+      { phase: 'REPORT', attemptJournal: [...EVIDENCE, started('e2', 'EXECUTE')] },
+      { phase: 'REPORT', attemptJournal: [...EVIDENCE], verifyResult: { status: 'FAIL' } },
+    ], SEAMS);
+
+    expect(c.byCode).toEqual({
+      ok: 1, NO_VERIFY_ATTEMPT: 0, VERIFY_NOT_ACKED: 1, VERIFY_NOT_DONE: 1, STALE_BEFORE_EXECUTE: 1, VERIFY_RESULT_FAILED: 1,
+    });
+    expect(c.pauseAtReport).toBe(4);
+  });
+
+  it('should exempt no pre-journal shape: every phase and every phases[] VERIFY spelling is counted (R2-9)', () => {
+    const shapes = [];
+    for (const phase of [...PHASES, 'PAUSED', 'COMPLETED', 'ABORTED']) {
+      for (const status of [undefined, 'done', 'DONE']) {
+        const phases = status ? [{ name: 'VERIFY', status }] : [];
+        shapes.push(preJournal(phase, { phases }));
+        shapes.push({ ...preJournal(phase, { phases }), schemaVersion: 3, attemptJournal: [] });
+      }
+    }
+
+    const c = censusReportVerifyEvidence(shapes, SEAMS);
+
+    expect(c.total).toBe(shapes.length);
+    expect(c.byCode.ok).toBe(0);
+    expect(c.byCode.NO_VERIFY_ATTEMPT).toBe(shapes.length);
+  });
+
+  it('should count entries that are not session objects as unreadable, and never as a session', () => {
+    const c = censusReportVerifyEvidence([null, undefined, 'x', 7, [], preJournal('INTAKE')], SEAMS);
+
+    expect(c).toMatchObject({ total: 1, unreadable: 5 });
+    expect(c.byCode.NO_VERIFY_ATTEMPT).toBe(1);
+  });
+
+  it.each([[null], [undefined], [{}], [42], ['abc']])('should throw on input that is not an iterable of sessions (%j)', (input) => {
+    expect(() => censusReportVerifyEvidence(input, SEAMS)).toThrow(TypeError);
+  });
+
+  it('should accept any iterable of sessions: a Set, a Map\'s values, a generator', () => {
+    const list = store();
+    const expected = censusReportVerifyEvidence(list, SEAMS);
+
+    expect(censusReportVerifyEvidence(new Set(list), SEAMS)).toEqual(expected);
+    expect(censusReportVerifyEvidence(new Map(list.map((s) => [s.sessionId, s])).values(), SEAMS)).toEqual(expected);
+    expect(censusReportVerifyEvidence((function* gen() { yield* list; })(), SEAMS)).toEqual(expected);
+  });
+
+  it('should be read-only: deep-frozen sessions go through untouched', () => {
+    const frozen = deepFreeze(store());
+
+    expect(() => censusReportVerifyEvidence(frozen, SEAMS)).not.toThrow();
   });
 });
 
@@ -1208,6 +1695,19 @@ describe('the shipped switch, with nothing injected', () => {
 
       expect(state).toMatchObject({ phase: 'PAUSED', pendingPhase: 'VERIFY' });
       expect(state.phases).toEqual([]);
+    });
+  });
+
+  it('control: the VERIFY hand-out seal takes the switch from the plugin root config too', () => {
+    // The engine passes the seal no config, so the real reader is the only source.
+    // ON here, OFF in 'should read the shipped switch (OFF) when no config is passed'.
+    withPluginRoot(shippedWith(true), () => {
+      const state = { verifyResult: { status: 'FAIL' } };
+
+      expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(true);
+
+      expect(state.verifyResult).toBeNull();
+      expect(state.verifyResultHistory).toHaveLength(1);
     });
   });
 
