@@ -9,10 +9,20 @@
  *  one, and does not touch the bytes on stdout: `decision` and `reason` are
  *  produced exactly where and how they were before, and the ledger append
  *  happens AFTER `writeStdout` so the decision cannot be delayed, reordered, or
- *  altered by bookkeeping. The approve path records NOTHING.
+ *  altered by bookkeeping. The pass path (nothing on stdout) records NOTHING.
  *  `tests/firewall/hook-decision-invariance.test.js` fixes that as a
  *  measurement — identical stdout bytes whether the ledger lands, fails, or is
  *  never attempted.
+ *
+ * ── PASS IS PASSTHROUGH, NOT APPROVAL (CA-04, security) ─────────────────────
+ *  This hook only ever writes a BLOCK. A call the guard chain does not block
+ *  writes zero bytes and exits 0, so the host's own permission flow decides.
+ *  It used to print `{decision:'approve'}` for every such call, and the host
+ *  reads that as `allow` and skips the permission prompt (measured on host
+ *  2.1.284, in default, acceptEdits and dontAsk mode). A guard that cannot say
+ *  "no" has no business saying "yes" on the user's behalf. The contract, the
+ *  host facts and the ratchet that keeps every PreToolUse hook to it live in
+ *  `tests/hooks/pretooluse-passthrough.test.js` — not copied here.
  *
  * ── WHERE THE RECORDING CONTRACT LIVES ──────────────────────────────────────
  *  The recorder moved to `lib/runtime/human-asked-record.js` when the write
@@ -56,7 +66,7 @@ const HOOK_ERROR_REASON = 'Safety check failed due to hook error. Blocking by de
 let lastHookData = null;
 
 /**
- * Read the payload, run the guard chain, write the decision.
+ * Read the payload, run the guard chain, write a decision ONLY when it blocks.
  * @returns {Promise<void>}
  */
 export async function main() {
@@ -74,9 +84,8 @@ export async function main() {
   if (result.decision === 'block') {
     writeStdout({ decision: 'block', reason: result.reason });
     await recordHumanAsked({ hookData, tool: 'Bash', reason: result.reason });
-  } else {
-    writeStdout({ decision: 'approve' });
   }
+  // Not blocked: PASSTHROUGH. Nothing is written (see the header).
 }
 
 /**

@@ -68,7 +68,13 @@ describe('pre-bash hook', () => {
     vi.resetModules();
   });
 
-  describe('approve safe commands', () => {
+  // PASS PATH = PASSTHROUGH (CA-04, security). A command no guard blocks must not
+  // be GRANTED: the host reads a legacy `{decision:'approve'}` as "allow" and
+  // skips the permission prompt, so the pass path writes NOTHING and the host's
+  // own permission flow decides. `writeStdout` never being called is the
+  // strongest form of that — it also rules out any permission-granting field.
+  // The real-process bytes are pinned in tests/hooks/pretooluse-passthrough.test.js.
+  describe('pass safe commands through (no decision emitted)', () => {
     it.each([
       'git status',
       'npm install',
@@ -79,18 +85,16 @@ describe('pre-bash hook', () => {
       'git push origin main',
       'curl https://api.example.com/data',
       'python script.py',
-    ])('approves: %s', async (command) => {
+    ])('passes through: %s', async (command) => {
       readStdin.mockResolvedValue(makeHookData(command));
 
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
-    it('approves when command is empty', async () => {
+    it('passes through when command is empty', async () => {
       readStdin.mockResolvedValue(JSON.stringify({
         tool_name: 'Bash',
         tool_input: { command: '' },
@@ -99,12 +103,10 @@ describe('pre-bash hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
-    it('approves when tool_input is missing', async () => {
+    it('passes through when tool_input is missing', async () => {
       readStdin.mockResolvedValue(JSON.stringify({
         tool_name: 'Bash',
         tool_input: {},
@@ -113,9 +115,7 @@ describe('pre-bash hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -300,15 +300,14 @@ describe('pre-bash hook', () => {
         .toBe(writeStdout.mock.calls[0][0].reason);
     });
 
-    it('appends nothing on the approve path', async () => {
+    it('appends nothing on the pass path', async () => {
       readStdin.mockResolvedValue(makeHookData('git status', { cwd: CWD, sessionId: SID }));
 
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      // No decision on stdout AND no record: the pass path is silent both ways.
+      expect(writeStdout).not.toHaveBeenCalled();
       expect(ledger.append).not.toHaveBeenCalled();
     });
 

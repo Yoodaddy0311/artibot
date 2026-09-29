@@ -25,14 +25,22 @@ export function resolveSessionId(hookData) {
     || 'default';
 }
 
+/**
+ * PASS IS PASSTHROUGH, NOT APPROVAL (CA-04, security). This hook takes a
+ * snapshot and decides NOTHING: it writes zero bytes to stdout and exits 0, so
+ * the host's own permission flow decides. It used to print
+ * `{decision:'approve'}` after every snapshot, and the host reads that as
+ * `allow` and skips the permission prompt (measured on host 2.1.284, in default,
+ * acceptEdits and dontAsk mode). The contract and its ratchet live in
+ * `tests/hooks/pretooluse-passthrough.test.js`.
+ */
 async function main() {
   const raw = await readStdin();
   const hookData = parseJSON(raw);
 
   const toolName = extractToolName(hookData) || '';
   if (toolName !== 'Write' && toolName !== 'Edit') {
-    writeStdout({ decision: 'approve' });
-    return;
+    return; // PASSTHROUGH: not this hook's tool, no decision.
   }
 
   const filePath = hookData?.tool_input?.file_path
@@ -52,11 +60,14 @@ async function main() {
       );
     }
   }
-
-  writeStdout({ decision: 'approve' });
+  // PASSTHROUGH: the snapshot is the whole job; no decision is written.
 }
 
 if (isMainEntry(import.meta.url)) {
+  // NOTE: `createErrorHandler` prints a BLOCK whenever it is given a
+  // `blockReason`, so this tail fails closed even though the wording below says
+  // "Approving". Both the behaviour and the string are unchanged by CA-04 and
+  // pinned byte-for-byte in tests/hooks/pretooluse-passthrough.test.js.
   main().catch(createErrorHandler('pre-write-checkpoint', {
     writeStdout,
     blockReason: 'File checkpoint hook error. Approving by default.',

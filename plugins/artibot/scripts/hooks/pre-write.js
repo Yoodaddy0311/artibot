@@ -7,9 +7,17 @@
  * ── OBSERVE CONTRACT (PRD R-03 "행동 변화 0") ────────────────────────────────
  *  Recording only. No new block, no lifted block, no changed `reason` byte; the
  *  append runs AFTER `writeStdout` so bookkeeping cannot delay or alter the
- *  decision, and the approve path records nothing. Canonical statement of the
- *  contract, the cwd rule, and the never-throw guarantee lives in the recorder:
- *  `lib/runtime/human-asked-record.js`.
+ *  decision, and the pass path (nothing on stdout) records nothing. Canonical
+ *  statement of the contract, the cwd rule, and the never-throw guarantee lives
+ *  in the recorder: `lib/runtime/human-asked-record.js`.
+ *
+ * ── PASS IS PASSTHROUGH, NOT APPROVAL (CA-04, security) ─────────────────────
+ *  This hook only ever writes a BLOCK. A call it does not block — including a
+ *  tool it does not own — writes zero bytes and exits 0, so the host's own
+ *  permission flow decides. It used to print `{decision:'approve'}` on every such
+ *  path, and the host reads that as `allow` and skips the permission prompt
+ *  (measured on host 2.1.284, in default, acceptEdits and dontAsk mode). The
+ *  contract and its ratchet live in `tests/hooks/pretooluse-passthrough.test.js`.
  *
  * @module scripts/hooks/pre-write
  */
@@ -46,15 +54,15 @@ export async function main() {
 
   const toolName = extractToolName(hookData) || '';
 
-  // Only process Write/Edit — other tools should not be handled by this hook
+  // Only process Write/Edit — other tools should not be handled by this hook.
+  // PASSTHROUGH: a tool this hook does not own gets no decision from it.
   if (toolName !== 'Write' && toolName !== 'Edit') {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
-  // If hookData has a bash command field, this is a misdirected Bash tool call
+  // If hookData has a bash command field, this is a misdirected Bash tool call.
+  // PASSTHROUGH again: the Bash hooks own that payload, not this one.
   if (hookData?.tool_input?.command) {
-    writeStdout({ decision: 'approve' });
     return;
   }
 
@@ -65,9 +73,8 @@ export async function main() {
   if (result.decision === 'block') {
     writeStdout({ decision: 'block', reason: result.reason });
     await recordHumanAsked({ hookData, tool: toolName, reason: result.reason });
-  } else {
-    writeStdout({ decision: 'approve' });
   }
+  // Not blocked: PASSTHROUGH. Nothing is written (see the header).
 }
 
 /**
