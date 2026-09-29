@@ -383,7 +383,7 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     action: '권한 상승 (설정·훅·디스패치 자기수정)',
     default: 'human',
     enforcement: 'none',
-    enforcementNote: '오히려 화이트리스트다 — scripts/hooks/pre-write-guard.js 의 isWhitelisted 가 .claude/ 를 포함한 경로를 무조건 승인한다',
+    enforcementNote: '강제하는 훅 없음. scripts/hooks/pre-write-guard.js 의 isWhitelisted 는 WBR(쓰기 전 읽기) 면제 allowlist 일 뿐 승인이 아니다 — CA-04 L4 뒤 CLAUDE.md·줄기 worktree 안쪽·자동 메모리·.claude/{rules,agents,commands,skills} 만 면제하고 .claude/ 아래 settings*.json·hooks.json·dispatch-table.json·artibot.config.json 은 면제하지 않는다. 그래도 WBR 은 Artibot 리포 안에서 cwd·플러그인 루트 아래이거나 plugins/artibot/ 를 포함한 경로만 보고, 읽은 파일이면 통과하며 같은 재시도는 풀리므로 사람 게이트가 아니다',
     policyRef: null,
     probe: 'both',
     tools: Object.freeze(['Bash', 'Write', 'Edit']),
