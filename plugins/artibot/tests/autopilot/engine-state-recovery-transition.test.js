@@ -11,13 +11,23 @@
  * The ON cases are driven through `recordPhaseResult` with real inputs — the
  * recommendation is computed by `recovery-record.js#recordRecoveryDecision`, not
  * injected — so what is pinned here is the path an engine actually takes.
+ *
+ * AP-N4 (2026-09-29): for `repair` / `replan` the ACK only ROUTES — the journal
+ * row is `routed`, `divergent` stays true, `appliedNext` is absent — and the row
+ * becomes `applied` when a runner hands the phase out. The last two AP-N4 blocks
+ * below drive the contract with a hand-out helper and with the REAL runners
+ * (`runPhase1Plan` / `runPhase2Execute`), including the one dispatch-gate
+ * refusal a default config reaches: three build failures, which the controller
+ * answers with `replan` and `safety.js#shouldPause` then refuses to dispatch.
  */
 
 import { readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { nextTarget, recordPhaseResult } from '../../lib/autopilot/engine-state.js';
+import { recordPhase } from '../../lib/autopilot/_engine-helpers.js';
+import { runPhase1Plan, runPhase2Execute } from '../../lib/autopilot/engine.js';
+import { enterPhase, nextTarget, recordPhaseResult } from '../../lib/autopilot/engine-state.js';
 import {
   deleteSessionArtifacts, getSessionPath, getStoreDir, saveSession,
 } from '../../lib/autopilot/session-store.js';
@@ -123,7 +133,7 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
     expect(eventTypes(state.sessionId)).not.toContain('recovery-applied');
   });
 
-  it('sends a first implementation failure back to EXECUTE (repair)', () => {
+  it('routes a first implementation failure back to EXECUTE (repair), without claiming it applied', () => {
     const state = failingState();
 
     recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
@@ -131,26 +141,32 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
     const row = state.recoveryJournal[0];
     expect(row.class).toBe('implementation');
     expect(row.action).toBe('repair');
-    expect(row).toMatchObject({ divergent: false, appliedNext: 'EXECUTE', appliedBy: 'recovery-transition' });
+    // AP-N4: at the ACK the engine has only ROUTED — nothing was handed out yet.
+    expect(row).toMatchObject({ divergent: true, applyStatus: 'routed', routedNext: 'EXECUTE' });
+    expect(row.appliedNext).toBeUndefined();
+    expect(row.appliedBy).toBeUndefined();
     expect(state.phase).toBe('VERIFY');
     expect(state.pendingPhase).toBe('EXECUTE');
     expect(nextTarget(state)).toBe('EXECUTE');
-    expect(findEvent(state.sessionId, 'recovery-applied')).toMatchObject({
-      data: { action: 'repair', from: 'IMPROVE', to: 'EXECUTE', pausedReason: null, divergent: false },
+    expect(findEvent(state.sessionId, 'recovery-routed')).toMatchObject({
+      data: { action: 'repair', from: 'IMPROVE', to: 'EXECUTE', pausedReason: null, divergent: true },
     });
+    expect(eventTypes(state.sessionId)).not.toContain('recovery-applied');
   });
 
-  it('sends a spent repair budget to PLAN (replan)', () => {
+  it('routes a spent repair budget to PLAN (replan), without claiming it applied', () => {
     const state = failingState({ counters: { buildFailures: 3, testFailures: 0 } });
 
     recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
 
     const row = state.recoveryJournal[0];
     expect(row.action).toBe('replan');
-    expect(row).toMatchObject({ divergent: false, appliedNext: 'PLAN' });
+    expect(row).toMatchObject({ divergent: true, applyStatus: 'routed', routedNext: 'PLAN' });
+    expect(row.appliedNext).toBeUndefined();
     expect(state.phase).toBe('VERIFY');
     expect(nextTarget(state)).toBe('PLAN');
-    expect(findEvent(state.sessionId, 'recovery-applied').data.to).toBe('PLAN');
+    expect(findEvent(state.sessionId, 'recovery-routed').data.to).toBe('PLAN');
+    expect(eventTypes(state.sessionId)).not.toContain('recovery-applied');
   });
 
   it('sends a repeat of the same class to PLAN even with the budget unspent', () => {
@@ -174,7 +190,8 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
     const row = state.recoveryJournal[0];
     expect(row.class).toBe('unknown');
     expect(row.action).toBe('ask_human');
-    expect(row).toMatchObject({ divergent: false, appliedNext: 'PAUSED' });
+    // A pause needs no hand-out: the session is stopped once the ACK returns.
+    expect(row).toMatchObject({ divergent: false, appliedNext: 'PAUSED', applyStatus: 'applied' });
     expect(state.phase).toBe('PAUSED');
     expect(state.lastPhase).toBe('VERIFY');
     expect(state.pendingPhase).toBe('VERIFY');
@@ -233,6 +250,196 @@ describe('recordPhaseResult — CA-03 gate ON', () => {
 
     expect(state.recoveryJournal).toBeUndefined();
     expect(eventTypes(state.sessionId)).not.toContain('recovery-applied');
+  });
+});
+
+/**
+ * AP-N4 (Codex AUDIT 2026-09-28) — `appliedNext` is written only after the
+ * engine has ACTUALLY ASSIGNED the phase, and a route the dispatch gate refused
+ * is told apart from one that went out.
+ *
+ * Every runner in `engine.js` does `enterPhase` -> dispatch gate (`maybePause`)
+ * -> `recordPhase(<phase> queued)`. Only that last record proves a phase was
+ * handed to the driver, so it is the evidence the settlement pass reads. This
+ * block drives the contract with `handOut` (the runner sequence, minus its
+ * side effects); the block after it pins the SAME contract against the real
+ * runners so the two cannot drift apart.
+ */
+describe('recordPhaseResult — CA-03 ON: a route is applied only after the engine hands the phase out (AP-N4)', () => {
+  const ON = Object.freeze({ transitionFromVerdict: true });
+
+  /** What a runner leaves behind once its dispatch gate passed. */
+  function handOut(state, phase) {
+    enterPhase(state, phase);
+    recordPhase(state, { name: phase, status: 'queued' });
+  }
+
+  it('applies a repair route at the next ACK once EXECUTE went out', () => {
+    const state = failingState();
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+    const row = state.recoveryJournal[0];
+    expect(row.applyStatus).toBe('routed');
+
+    handOut(state, 'EXECUTE');
+    recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' }, ON);
+
+    expect(row).toMatchObject({
+      applyStatus: 'applied', appliedNext: 'EXECUTE', appliedBy: 'recovery-transition', divergent: false,
+    });
+    const types = eventTypes(state.sessionId);
+    expect(types.filter((t) => t === 'recovery-applied')).toHaveLength(1);
+    expect(types.indexOf('recovery-decided')).toBeLessThan(types.indexOf('recovery-routed'));
+    expect(types.indexOf('recovery-routed')).toBeLessThan(types.indexOf('recovery-applied'));
+    expect(findEvent(state.sessionId, 'recovery-applied')).toMatchObject({
+      data: { action: 'repair', from: 'IMPROVE', to: 'EXECUTE', pausedReason: null, divergent: false },
+    });
+  });
+
+  it('applies a route when the NEXT phase is entered, without any result report in between', () => {
+    const state = failingState({ counters: { buildFailures: 3, testFailures: 0 } });
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+    handOut(state, 'PLAN');
+    expect(state.recoveryJournal[0].applyStatus).toBe('routed');
+
+    enterPhase(state, 'EXECUTE');
+
+    expect(state.recoveryJournal[0]).toMatchObject({ applyStatus: 'applied', appliedNext: 'PLAN' });
+  });
+
+  it('keeps a route open for a driver that reports results but never resumes the engine', () => {
+    // The driver performs PLAN itself and only calls recordPhaseResult. The
+    // engine never ran its PLAN runner, so it never assigned anything: the
+    // journal must not say it did.
+    const state = failingState({ counters: { buildFailures: 3, testFailures: 0 } });
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+
+    recordPhaseResult(state, { phase: 'PLAN', status: 'done' }, ON);
+    recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' }, ON);
+
+    const row = state.recoveryJournal[0];
+    expect(row).toMatchObject({ applyStatus: 'routed', divergent: true });
+    expect(row.appliedNext).toBeUndefined();
+    expect(nextTarget(state)).toBe('PLAN');
+    expect(eventTypes(state.sessionId)).not.toContain('recovery-applied');
+  });
+
+  it('records a dispatch-gate refusal as blocked-before-dispatch, never as applied', () => {
+    const state = failingState({ counters: { buildFailures: 3, testFailures: 0 } });
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+
+    // engine.js#maybePause after enterPhase('PLAN'): the phase is refused.
+    enterPhase(state, 'PLAN');
+    state.lastPhase = 'PLAN';
+    state.phase = 'PAUSED';
+    state.pendingPhase = 'PLAN';
+    state.pausedReason = 'build-failures-threshold';
+
+    // The next touchpoint that still sees the pause: a resume re-entering PLAN.
+    enterPhase(state, 'PLAN');
+
+    const row = state.recoveryJournal[0];
+    expect(row).toMatchObject({ applyStatus: 'blocked-before-dispatch', divergent: true });
+    expect(row.appliedNext).toBeUndefined();
+    expect(findEvent(state.sessionId, 'recovery-blocked')).toMatchObject({
+      level: 'warn', data: { to: 'PLAN', reason: 'build-failures-threshold' },
+    });
+  });
+
+  it('does not let a row that never went out count as a spent replan', () => {
+    const state = failingState({ counters: { buildFailures: 3, testFailures: 0 } });
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+
+    // The route is never handed out; the next VERIFY fails again.
+    state.phase = 'VERIFY';
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+
+    expect(state.recoveryJournal[1]).toMatchObject({ replanAttempts: 0, ultraplanProposed: false });
+    // The first route was replaced by the second, which now owns pendingPhase.
+    expect(state.recoveryJournal[0].applyStatus).toBe('superseded');
+    expect(state.recoveryJournal[1].applyStatus).toBe('routed');
+  });
+
+  it('changes nothing but phase and pendingPhase when no route is open (gate OFF journal)', () => {
+    const state = failingState();
+    recordPhaseResult(state, { ...FAILED_VERIFY }, { transitionFromVerdict: false });
+    const before = JSON.parse(JSON.stringify(state));
+    const eventsBefore = eventTypes(state.sessionId);
+
+    enterPhase(state, 'IMPROVE');
+
+    expect(stable(state)).toBe(stable({ ...before, phase: 'IMPROVE', pendingPhase: null }));
+    expect(eventTypes(state.sessionId)).toEqual(eventsBefore);
+    expect(state.recoveryJournal[0].applyStatus).toBeUndefined();
+    expect(state.recoveryJournal[0].divergent).toBe(true);
+  });
+});
+
+/**
+ * The same contract against the REAL runners. If a runner ever stops writing the
+ * `queued` record (or writes it before its dispatch gate), these go red instead
+ * of the ladder silently never counting a replan.
+ */
+describe('recordPhaseResult — CA-03 ON against the real engine runners (AP-N4)', () => {
+  const ON = Object.freeze({ transitionFromVerdict: true });
+
+  it('applies a replan route once runPhase1Plan really hands PLAN out', () => {
+    const state = failingState({ counters: { buildFailures: 2, testFailures: 1 } });
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+    const row = state.recoveryJournal[0];
+    expect(row).toMatchObject({ action: 'replan', applyStatus: 'routed' });
+
+    const instruction = runPhase1Plan(state);
+
+    expect(instruction.type).toBe('delegate');
+    recordPhaseResult(state, { phase: 'PLAN', status: 'done' }, ON);
+    expect(row).toMatchObject({
+      applyStatus: 'applied', appliedNext: 'PLAN', appliedBy: 'recovery-transition', divergent: false,
+    });
+  });
+
+  it('applies a repair route once runPhase2Execute really hands EXECUTE out', () => {
+    const state = failingState();
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+    const row = state.recoveryJournal[0];
+    expect(row).toMatchObject({ action: 'repair', applyStatus: 'routed' });
+
+    const instruction = runPhase2Execute(state);
+
+    expect(['team-create', 'dynamic-run']).toContain(instruction.type);
+    recordPhaseResult(state, { phase: 'EXECUTE', status: 'done' }, ON);
+    expect(row).toMatchObject({ applyStatus: 'applied', appliedNext: 'EXECUTE', divergent: false });
+  });
+
+  it('turns three build failures into a replan the dispatch gate then refuses, and says so', () => {
+    // buildFailures >= 3 is BOTH the spent-repair-budget signal that makes the
+    // controller say `replan` AND `safety.js#shouldPause`'s build-failure
+    // trigger — so the PLAN the row is routed to hits `maybePause` first. Before
+    // AP-N4 the ACK stamped `appliedNext: 'PLAN'` for a PLAN that never went out.
+    const state = failingState({ counters: { buildFailures: 3, testFailures: 0 } });
+    recordPhaseResult(state, { ...FAILED_VERIFY }, ON);
+    const row = state.recoveryJournal[0];
+    expect(row.action).toBe('replan');
+
+    const refused = runPhase1Plan(state);
+    expect(refused).toMatchObject({ type: 'pause', reason: 'build-failures-threshold' });
+    expect(state.phase).toBe('PAUSED');
+    expect(state.lastPhase).toBe('PLAN');
+    expect(state.phases.some((p) => p.name === 'PLAN' && p.status === 'queued')).toBe(false);
+
+    // A resume that hits the same gate again: the pass sees the pause first.
+    runPhase1Plan(state);
+    expect(row.applyStatus).toBe('blocked-before-dispatch');
+    expect(row.appliedNext).toBeUndefined();
+    expect(row.divergent).toBe(true);
+    expect(findEvent(state.sessionId, 'recovery-blocked').data.reason).toBe('build-failures-threshold');
+
+    // The operator clears the trigger; the retry goes out and the row applies.
+    state.counters.buildFailures = 0;
+    const handedOut = runPhase1Plan(state);
+    expect(handedOut.type).toBe('delegate');
+    recordPhaseResult(state, { phase: 'PLAN', status: 'done' }, ON);
+    expect(row).toMatchObject({ applyStatus: 'applied', appliedNext: 'PLAN', divergent: false });
+    expect(eventTypes(state.sessionId).filter((t) => t === 'recovery-applied')).toHaveLength(1);
   });
 });
 

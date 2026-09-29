@@ -1,13 +1,17 @@
 /**
- * Recovery decision RECORDER — Observe stage, zero behavior change (SH-06).
+ * Recovery decision RECORDER (SH-06) — writes a judgement and moves nothing.
  *
  * This module writes a judgement about a failed VERIFY and nothing else. It
  * does not touch `state.phase`, `state.pendingPhase`, `state.phases` or any
  * instruction, so the fixed `VERIFY -> IMPROVE` transition
  * (`engine-state.js#recordPhaseResult`, `#nextPhaseAfter`) is exactly as
- * it was. Flipping that transition to the recommendation recorded here is
- * CA-03's job, deliberately separate: the switch should be made against a
- * measured denominator rather than a guess, and this journal is that denominator.
+ * it was. The switch that lets this judgement steer the transition instead is
+ * built — CA-03, `recovery-transition.js#applyRecoveryTransition`, called from
+ * the same ACK — but it is a separate module behind the config key
+ * `autopilot.recovery.transitionFromVerdict`, and that key ships OFF. Turning
+ * it on is a separate commit, made against a measured denominator rather than a
+ * guess, and this journal is that denominator. With the key OFF the path is
+ * Observe-only end to end.
  *
  * Since AP-N1 (`e1e97dfa`) `engine.js#runPhase4Verify` no longer closes VERIFY
  * at hand-off: it opens a VERIFY attempt, and the result ACK in
@@ -19,9 +23,12 @@
  * `state.recoveryJournal` is the input CA-03 reads, so the row carries what
  * a later transition needs (`class`, `action`, `target`, `reason`) plus what an
  * Observe-stage audit needs (`verdictRaw` beside the adapted `verdict`,
- * `verificationStatus`, `retryLimit`, `fixedNext`). `recovery-transition.js`
- * writes `divergent: false` when `autopilot.recovery.transitionFromVerdict` is
- * ON (Wave 12); `scripts/ledger/recovery-journal-census.mjs` reads them.
+ * `verificationStatus`, `retryLimit`, `fixedNext`). When
+ * `autopilot.recovery.transitionFromVerdict` is ON, `recovery-transition.js`
+ * stamps the row further — `divergent: false`, `appliedNext`, `appliedBy` — but
+ * only once the recommendation has actually been carried out (a pause at once, a
+ * routed phase when the engine hands it out; `applyStatus` says which stage a
+ * row is in). `scripts/ledger/recovery-journal-census.mjs` reads `divergent`.
  *
  * 2026-09-21 (Wave 13): `replanAttempts` and `ultraplanProposed` are no longer
  * hardcoded. {@link ladderFromJournal} derives them from the journal's *applied*
@@ -31,6 +38,17 @@
  * Observe row never carries `appliedNext` (only `recovery-transition.js` writes
  * it, and only when the gate is ON), so with the gate OFF the derived pair is
  * always `0 / false` and the recorded decision is unchanged.
+ *
+ * 2026-09-29 (AP-N4): "applied" now means the engine ACTUALLY ASSIGNED the
+ * phase. `appliedNext` used to be stamped at the ACK, so a PLAN the dispatch
+ * gate then refused still counted as a spent replan — and that is not rare:
+ * three build failures make the controller say `replan` AND trip
+ * `safety.js#shouldPause`. It is now written only when the routed phase went out
+ * (`recovery-transition.js#settleRecoveryTransitions`), so a route that is still
+ * waiting, was blocked before dispatch, or was superseded is not a spent rung.
+ * {@link ladderFromJournal} did not change for this: it still reads
+ * `appliedNext` alone, and a row written before AP-N4 (`appliedNext`, no
+ * `applyStatus`) keeps counting.
  *
  * ── Three rules that are not judgement calls ──────────────────────────────
  *  1. **PASS is not recorded.** `failure-classifier.js#classify` names PASS a
@@ -130,11 +148,19 @@ function intOrZero(value) {
  * Derive the ladder counters §35 rungs 2 and 3 need from the journal.
  *
  * ALLOWLIST of APPLIED rows, not recommendations. A row records what
- * `decide()` recommended; only `recovery-transition.js#applyRecoveryTransition`
- * writes `appliedNext`, and only when the CA-03 gate is ON. So a `replan` the
- * engine never acted on is not a spent replan, and counting `action` instead
- * would make the gate-OFF journal — the Observe-stage denominator — change the
- * very decision it exists to measure.
+ * `decide()` recommended; `appliedNext` is written only by
+ * `recovery-transition.js`, only when the CA-03 gate is ON, and (AP-N4) only once
+ * the routed phase was actually handed out (a pause: at once). So a `replan` the
+ * engine never acted on is not a spent replan — neither is one it routed and the
+ * dispatch gate refused, or one something else replaced — and counting `action`
+ * instead would make the gate-OFF journal, the Observe-stage denominator,
+ * change the very decision it exists to measure.
+ *
+ * What this cannot see: a session whose driver never resumes the engine has no
+ * hand-out to settle a route with, so its replans are never counted and the
+ * ladder does not climb (the recommendation stays `replan`). That is the
+ * intended reading — nothing was assigned — see `recovery-transition.js`
+ * "What this cannot see".
  *
  * Exact string equality on both fields: `'plan'`, `'PLANNED'`, a number and
  * `null` are all ignored rather than coerced. Pure, and never throws — a
@@ -346,8 +372,11 @@ export function recordRecoveryDecision(state, payload = {}) {
       // engine payload change).
       retryLimit: VERIFY_ON_FAILURE.retryLimit,
       fixedNext: signals.fixedNext,
-      // Always true at the Observe stage: the fixed transition ignores the
-      // recommendation. CA-03 is what makes `false` possible.
+      // True when the row is written: nothing has been carried out yet, and with
+      // the CA-03 gate OFF the fixed transition ignores the recommendation for
+      // good. `recovery-transition.js` writes `false` only once the
+      // recommendation was really carried out (a pause at once, a routed phase
+      // when the engine hands it out — AP-N4).
       divergent: true,
       recordedBy: 'recovery-record',
     });

@@ -14,6 +14,15 @@
  *     emit telemetry. That is asserted on serialised snapshots plus a tick spy,
  *     not by eyeballing a few fields.
  *
+ * A third property arrived with AP-N4 (2026-09-29): 3. **A route is not an
+ *     assignment.** A phase-advancing action only rewrites `pendingPhase` and
+ *     stamps the row `routed`; `appliedNext` / `divergent: false` appear when
+ *     `settleRecoveryTransitions` sees the routed phase handed out (a `queued`
+ *     record in `state.phases`). A pause is applied at once. The blocks from
+ *     "ROUTED, not applied" down pin the row lifecycle, and what the pass must
+ *     never touch: Observe rows, legacy rows (`appliedNext` without
+ *     `applyStatus`) and every settled row.
+ *
  * Pure by construction: `tick` and `getPluginRoot` are mocked, so no session
  * artifacts are written and no session-store cleanup is needed.
  */
@@ -58,10 +67,12 @@ vi.mock('../../lib/core/platform.js', async (importOriginal) => {
 });
 
 const {
+  APPLY_STATUS,
   TRANSITION_BY_ACTION,
   applyRecoveryTransition,
   loadRecoveryTransitionConfig,
   phaseForRecovery,
+  settleRecoveryTransitions,
 } = await import('../../lib/autopilot/recovery-transition.js');
 
 const ON = Object.freeze({ transitionFromVerdict: true });
@@ -304,22 +315,65 @@ describe('applyRecoveryTransition — OFF gate is a no-op', () => {
   });
 });
 
-describe('applyRecoveryTransition — ON, phase-advancing actions', () => {
+describe('APPLY_STATUS — the allowlist of row lifecycle values (AP-N4)', () => {
+  it('holds exactly the four statuses a row can be in', () => {
+    expect(Object.values(APPLY_STATUS).sort())
+      .toEqual(['applied', 'blocked-before-dispatch', 'routed', 'superseded']);
+  });
+
+  it('is frozen so a caller cannot widen the allowlist at runtime', () => {
+    expect(Object.isFrozen(APPLY_STATUS)).toBe(true);
+  });
+});
+
+describe('applyRecoveryTransition — ON, phase-advancing actions are ROUTED, not applied (AP-N4)', () => {
   it('routes repair to EXECUTE through pendingPhase, leaving phase untouched', () => {
     const row = makeRow({ action: 'repair' });
     const state = makeState(row);
 
     const result = applyRecoveryTransition(state, row, ON);
 
+    // `applied` means the transition took effect. A route has not: no phase has
+    // been handed out yet, so the result says `routed` and nothing more.
     expect(result).toEqual({
-      applied: true, next: 'EXECUTE', from: 'IMPROVE', pausedReason: null, notification: null,
+      applied: false, routed: true, next: 'EXECUTE', from: 'IMPROVE', pausedReason: null, notification: null,
     });
     expect(state.pendingPhase).toBe('EXECUTE');
     expect(state.phase).toBe('VERIFY');
     expect(state.pausedReason).toBeNull();
-    expect(row.divergent).toBe(false);
-    expect(row.appliedNext).toBe('EXECUTE');
-    expect(row.appliedBy).toBe('recovery-transition');
+  });
+
+  it('does not claim the assignment on the row: no appliedNext, no appliedBy, divergent stays true', () => {
+    const row = makeRow({ action: 'repair' });
+    const state = makeState(row);
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(row.divergent).toBe(true);
+    expect(row.appliedNext).toBeUndefined();
+    expect(row.appliedBy).toBeUndefined();
+    expect(row).toMatchObject({ applyStatus: APPLY_STATUS.ROUTED, routedNext: 'EXECUTE' });
+  });
+
+  it('records how many phase records existed at the route, so a later hand-out can be told apart', () => {
+    const row = makeRow({ action: 'replan' });
+    const state = makeState(row, {
+      phases: [{ name: 'PLAN', status: 'queued' }, { name: 'VERIFY', status: 'failed' }],
+    });
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(row.phasesAtRoute).toBe(2);
+  });
+
+  it('counts zero phase records when the state has no phases array yet', () => {
+    const row = makeRow({ action: 'replan' });
+    const state = makeState(row);
+    expect(state.phases).toBeUndefined();
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(row.phasesAtRoute).toBe(0);
   });
 
   it('routes replan to PLAN', () => {
@@ -329,9 +383,10 @@ describe('applyRecoveryTransition — ON, phase-advancing actions', () => {
     expect(applyRecoveryTransition(state, row, ON).next).toBe('PLAN');
     expect(state.pendingPhase).toBe('PLAN');
     expect(state.phase).toBe('VERIFY');
+    expect(row.routedNext).toBe('PLAN');
   });
 
-  it('emits one recovery-applied event carrying the before/after pair', () => {
+  it('emits one recovery-routed event, and no recovery-applied, carrying the before/after pair', () => {
     const row = makeRow({ action: 'repair' });
     const state = makeState(row);
 
@@ -342,14 +397,15 @@ describe('applyRecoveryTransition — ON, phase-advancing actions', () => {
     expect(sessionId).toBe('test-recovery-transition');
     expect(event).toMatchObject({
       phase: 'VERIFY',
-      type: 'recovery-applied',
+      type: 'recovery-routed',
       level: 'info',
       data: {
-        action: 'repair', from: 'IMPROVE', to: 'EXECUTE', pausedReason: null, divergent: false,
+        action: 'repair', from: 'IMPROVE', to: 'EXECUTE', pausedReason: null, divergent: true,
       },
     });
     expect(event.message).toContain('repair');
     expect(event.message).toContain('EXECUTE');
+    expect(mocks.tick.mock.calls.some(([, e]) => e?.type === 'recovery-applied')).toBe(false);
   });
 
   it('renders n/a in the event when the row has no fixedNext', () => {
@@ -361,6 +417,18 @@ describe('applyRecoveryTransition — ON, phase-advancing actions', () => {
     expect(result.from).toBeNull();
     expect(mocks.tick.mock.calls[0][1].message).toContain('n/a');
     expect(mocks.tick.mock.calls[0][1].data.from).toBeNull();
+  });
+
+  it('leaves the row unstamped when the state rejects the route (frozen state)', () => {
+    const row = makeRow({ action: 'replan' });
+    const state = Object.freeze(makeState(row));
+
+    const result = applyRecoveryTransition(state, row, ON);
+
+    expect(result).toMatchObject({ applied: false, routed: false, next: null });
+    expect(row.applyStatus).toBeUndefined();
+    expect(row.routedNext).toBeUndefined();
+    expect(mocks.tick).not.toHaveBeenCalled();
   });
 });
 
@@ -377,14 +445,17 @@ describe('applyRecoveryTransition — ON, pausing actions', () => {
 
     // `notification` is whatever the (stubbed) notifier returned, passed through.
     expect(result).toEqual({
-      applied: true, next: 'PAUSED', from: 'IMPROVE', pausedReason, notification: makeNote(),
+      applied: true, routed: false, next: 'PAUSED', from: 'IMPROVE', pausedReason, notification: makeNote(),
     });
     expect(state.phase).toBe('PAUSED');
     expect(state.lastPhase).toBe('VERIFY');
     expect(state.pendingPhase).toBe('VERIFY');
     expect(state.pausedReason).toBe(pausedReason);
+    // A pause has no hand-out to wait for: the session IS stopped once the state
+    // moved, so the row is applied at once (unlike a phase-advancing route).
     expect(row.divergent).toBe(false);
     expect(row.appliedNext).toBe('PAUSED');
+    expect(row.applyStatus).toBe(APPLY_STATUS.APPLIED);
   });
 
   it('does not overwrite lastPhase when the state is already PAUSED', () => {
@@ -419,9 +490,472 @@ describe('applyRecoveryTransition — journal identity', () => {
 
     applyRecoveryTransition(state, state.recoveryJournal[0], ON);
 
-    expect(state.recoveryJournal[0].divergent).toBe(false);
-    expect(state.recoveryJournal[0].appliedNext).toBe('EXECUTE');
+    expect(state.recoveryJournal[0].applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(state.recoveryJournal[0].routedNext).toBe('EXECUTE');
     expect(state.recoveryJournal).toHaveLength(1);
+  });
+
+  it('writes the applied stamp through the same reference when a pause applies at once', () => {
+    const row = makeRow({ action: 'ask_human' });
+    const state = makeState(row);
+
+    applyRecoveryTransition(state, state.recoveryJournal[0], ON);
+
+    expect(state.recoveryJournal[0].divergent).toBe(false);
+    expect(state.recoveryJournal[0].appliedNext).toBe('PAUSED');
+  });
+});
+
+/**
+ * AP-N4 — a newer decision takes over `pendingPhase` (or pauses the session), so
+ * an earlier route that was still waiting for its hand-out can no longer be
+ * carried out. Left `routed`, it would match the NEXT hand-out of that phase and
+ * be counted as a second spent rung for one dispatch.
+ */
+describe('applyRecoveryTransition — a newer decision supersedes routes still waiting', () => {
+  const openRow = (status, overrides = {}) => makeRow({
+    action: 'replan', applyStatus: status, routedNext: 'PLAN', phasesAtRoute: 0, ...overrides,
+  });
+
+  it.each([
+    [APPLY_STATUS.ROUTED],
+    [APPLY_STATUS.BLOCKED],
+  ])('supersedes an earlier %s row when a new route is written', (status) => {
+    const earlier = openRow(status);
+    const row = makeRow({ action: 'repair' });
+    const state = makeState(earlier);
+    state.recoveryJournal.push(row);
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(earlier.applyStatus).toBe(APPLY_STATUS.SUPERSEDED);
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(earlier.appliedNext).toBeUndefined();
+  });
+
+  it('supersedes an earlier open row when the new decision is a pause', () => {
+    const earlier = openRow(APPLY_STATUS.ROUTED);
+    const row = makeRow({ action: 'ask_human' });
+    const state = makeState(earlier);
+    state.recoveryJournal.push(row);
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(earlier.applyStatus).toBe(APPLY_STATUS.SUPERSEDED);
+    expect(row.applyStatus).toBe(APPLY_STATUS.APPLIED);
+  });
+
+  it('settles an earlier row whose hand-out already happened instead of superseding it', () => {
+    const earlier = openRow(APPLY_STATUS.ROUTED);
+    const row = makeRow({ action: 'repair' });
+    const state = makeState(earlier, { phases: [{ name: 'PLAN', status: 'queued' }] });
+    state.recoveryJournal.push(row);
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(earlier.applyStatus).toBe(APPLY_STATUS.APPLIED);
+    expect(earlier.appliedNext).toBe('PLAN');
+  });
+
+  it('leaves applied, superseded, legacy and observe rows alone', () => {
+    const applied = makeRow({ action: 'replan', applyStatus: APPLY_STATUS.APPLIED, appliedNext: 'PLAN', divergent: false });
+    const superseded = openRow(APPLY_STATUS.SUPERSEDED);
+    const legacy = makeRow({ action: 'replan', appliedNext: 'PLAN', appliedBy: 'recovery-transition', divergent: false });
+    const observe = makeRow({ action: 'replan' });
+    const row = makeRow({ action: 'repair' });
+    const state = makeState(null, { recoveryJournal: [applied, superseded, legacy, observe, row] });
+    const before = JSON.stringify([applied, superseded, legacy, observe]);
+
+    applyRecoveryTransition(state, row, ON);
+
+    expect(JSON.stringify([applied, superseded, legacy, observe])).toBe(before);
+  });
+
+  it('does not touch other rows when the gate is OFF', () => {
+    const earlier = openRow(APPLY_STATUS.ROUTED);
+    const row = makeRow({ action: 'repair' });
+    const state = makeState(earlier);
+    state.recoveryJournal.push(row);
+
+    applyRecoveryTransition(state, row, { transitionFromVerdict: false });
+
+    expect(earlier.applyStatus).toBe(APPLY_STATUS.ROUTED);
+  });
+});
+
+/**
+ * AP-N4 — the settlement pass. `engine-state.js` runs it at every phase entry and
+ * every phase result; it is what turns a `routed` row into `applied` (or says why
+ * it did not). Evidence of a hand-out is a `state.phases` record with status
+ * `queued`: every runner writes exactly that AFTER its dispatch gate passes.
+ */
+describe('settleRecoveryTransitions — a route becomes applied only after the hand-out', () => {
+  /** A row exactly as `applyRecoveryTransition` leaves a route. */
+  const routedRow = (overrides = {}) => makeRow({
+    action: 'replan',
+    applyStatus: APPLY_STATUS.ROUTED,
+    routedNext: 'PLAN',
+    phasesAtRoute: 2,
+    ...overrides,
+  });
+
+  /** A state that has recorded two phase records (…, VERIFY result) at the route. */
+  const stateAfterRoute = (row, overrides = {}) => makeState(row, {
+    phases: [{ name: 'PLAN', status: 'queued' }, { name: 'VERIFY', status: 'failed' }],
+    pendingPhase: 'PLAN',
+    ...overrides,
+  });
+
+  const handOut = (state, name) => state.phases.push({ name, status: 'queued' });
+  const ticksOf = (type) => mocks.tick.mock.calls.filter(([, e]) => e?.type === type);
+
+  it('applies the row once the routed phase is handed out', () => {
+    const row = routedRow();
+    const state = stateAfterRoute(row);
+    handOut(state, 'PLAN');
+
+    const settled = settleRecoveryTransitions(state);
+
+    expect(settled).toBe(1);
+    expect(row).toMatchObject({
+      applyStatus: APPLY_STATUS.APPLIED,
+      appliedNext: 'PLAN',
+      appliedBy: 'recovery-transition',
+      divergent: false,
+    });
+  });
+
+  it('emits one recovery-applied event when it applies, and none on a second pass', () => {
+    const row = routedRow();
+    const state = stateAfterRoute(row);
+    handOut(state, 'PLAN');
+
+    settleRecoveryTransitions(state);
+    const again = settleRecoveryTransitions(state);
+
+    expect(again).toBe(0);
+    const applied = ticksOf('recovery-applied');
+    expect(applied).toHaveLength(1);
+    expect(applied[0][0]).toBe('test-recovery-transition');
+    expect(applied[0][1]).toMatchObject({
+      phase: 'VERIFY',
+      level: 'info',
+      data: {
+        action: 'replan', from: 'IMPROVE', to: 'PLAN', pausedReason: null, divergent: false,
+      },
+    });
+  });
+
+  it('keeps the row routed while nothing has been handed out', () => {
+    const row = routedRow();
+    const state = stateAfterRoute(row);
+
+    expect(settleRecoveryTransitions(state)).toBe(0);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(row.divergent).toBe(true);
+    expect(row.appliedNext).toBeUndefined();
+    expect(mocks.tick).not.toHaveBeenCalled();
+  });
+
+  it('ignores a queued record written BEFORE the route (an earlier hand-out is not this one)', () => {
+    const row = routedRow({ phasesAtRoute: 2 });
+    // index 0 is a queued PLAN, but it predates the route (phasesAtRoute = 2).
+    const state = stateAfterRoute(row);
+
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(row.appliedNext).toBeUndefined();
+  });
+
+  it('ignores records that are not hand-outs, such as the driver reporting the phase done', () => {
+    const row = routedRow();
+    const state = stateAfterRoute(row);
+    state.phases.push({ name: 'PLAN', status: 'done' }, { name: 'PLAN', status: 'failed' });
+
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(row.appliedNext).toBeUndefined();
+  });
+
+  it('supersedes the row when a DIFFERENT phase was handed out first, for good', () => {
+    const row = routedRow();
+    const state = stateAfterRoute(row);
+    handOut(state, 'EXECUTE');
+
+    settleRecoveryTransitions(state);
+    expect(row.applyStatus).toBe(APPLY_STATUS.SUPERSEDED);
+
+    // A later PLAN hand-out belongs to whatever routed it, not to this row.
+    handOut(state, 'PLAN');
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.SUPERSEDED);
+    expect(row.appliedNext).toBeUndefined();
+    expect(row.divergent).toBe(true);
+    expect(ticksOf('recovery-applied')).toHaveLength(0);
+  });
+
+  it('only the FIRST hand-out after the route decides', () => {
+    const row = routedRow();
+    const state = stateAfterRoute(row);
+    handOut(state, 'PLAN');
+    handOut(state, 'EXECUTE');
+
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.APPLIED);
+    expect(row.appliedNext).toBe('PLAN');
+  });
+
+  it('applies a repair route when EXECUTE is handed out', () => {
+    const row = routedRow({ action: 'repair', routedNext: 'EXECUTE' });
+    const state = stateAfterRoute(row, { pendingPhase: 'EXECUTE' });
+    handOut(state, 'EXECUTE');
+
+    settleRecoveryTransitions(state);
+
+    expect(row).toMatchObject({ applyStatus: APPLY_STATUS.APPLIED, appliedNext: 'EXECUTE', divergent: false });
+  });
+});
+
+describe('settleRecoveryTransitions — blocked before dispatch is its own status (AP-N4)', () => {
+  const routedRow = (overrides = {}) => makeRow({
+    action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 1, ...overrides,
+  });
+  /** What `engine.js#maybePause` leaves behind when the dispatch gate refuses PLAN. */
+  const pausedAtPlan = (row, overrides = {}) => makeState(row, {
+    phase: 'PAUSED',
+    lastPhase: 'PLAN',
+    pendingPhase: 'PLAN',
+    pausedReason: 'budget-exceeded',
+    phases: [{ name: 'VERIFY', status: 'failed' }],
+    ...overrides,
+  });
+  const ticksOf = (type) => mocks.tick.mock.calls.filter(([, e]) => e?.type === type);
+
+  it('marks the row blocked-before-dispatch, and still not applied', () => {
+    const row = routedRow();
+    const state = pausedAtPlan(row);
+
+    expect(settleRecoveryTransitions(state)).toBe(1);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.BLOCKED);
+    expect(row.appliedNext).toBeUndefined();
+    expect(row.appliedBy).toBeUndefined();
+    expect(row.divergent).toBe(true);
+  });
+
+  it('says why in one warn event, and does not repeat it on a second pass', () => {
+    const row = routedRow();
+    const state = pausedAtPlan(row);
+
+    settleRecoveryTransitions(state);
+    expect(settleRecoveryTransitions(state)).toBe(0);
+
+    const blocked = ticksOf('recovery-blocked');
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0][1]).toMatchObject({
+      phase: 'VERIFY',
+      level: 'warn',
+      data: { action: 'replan', to: 'PLAN', reason: 'budget-exceeded' },
+    });
+  });
+
+  it('is not blocked when the session is paused at a DIFFERENT phase', () => {
+    const row = routedRow();
+    const state = pausedAtPlan(row, { lastPhase: 'VERIFY', pendingPhase: 'VERIFY' });
+
+    expect(settleRecoveryTransitions(state)).toBe(0);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+  });
+
+  it('is not blocked when the session is not paused at all', () => {
+    const row = routedRow();
+    const state = pausedAtPlan(row, { phase: 'PLAN', lastPhase: null, pendingPhase: null });
+
+    expect(settleRecoveryTransitions(state)).toBe(0);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+  });
+
+  it('becomes applied when the retry is handed out after the pause lifts', () => {
+    const row = routedRow();
+    const state = pausedAtPlan(row);
+    settleRecoveryTransitions(state);
+    expect(row.applyStatus).toBe(APPLY_STATUS.BLOCKED);
+
+    state.phase = 'PLAN';
+    state.pendingPhase = null;
+    state.phases.push({ name: 'PLAN', status: 'queued' });
+    settleRecoveryTransitions(state);
+
+    expect(row).toMatchObject({ applyStatus: APPLY_STATUS.APPLIED, appliedNext: 'PLAN', divergent: false });
+    expect(ticksOf('recovery-applied')).toHaveLength(1);
+  });
+
+  it('prefers the hand-out over the paused reading: a later pause does not un-apply', () => {
+    // PLAN went out, THEN something else paused the session at PLAN (a secret
+    // leak freezes on the current phase). The hand-out already happened.
+    const row = routedRow();
+    const state = pausedAtPlan(row);
+    state.phases.push({ name: 'PLAN', status: 'queued' });
+
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.APPLIED);
+    expect(ticksOf('recovery-blocked')).toHaveLength(0);
+  });
+
+  it('is superseded, not applied, when another phase goes out after a block', () => {
+    const row = routedRow();
+    const state = pausedAtPlan(row);
+    settleRecoveryTransitions(state);
+
+    state.phase = 'EXECUTE';
+    state.phases.push({ name: 'EXECUTE', status: 'queued' });
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.SUPERSEDED);
+    expect(row.appliedNext).toBeUndefined();
+  });
+});
+
+describe('settleRecoveryTransitions — rows it must not touch, and inputs it must survive', () => {
+  const ticksOf = (type) => mocks.tick.mock.calls.filter(([, e]) => e?.type === type);
+
+  it('leaves observe rows, legacy applied rows, applied, superseded and unknown statuses alone', () => {
+    const rows = [
+      makeRow({ action: 'replan' }),
+      makeRow({ action: 'replan', appliedNext: 'PLAN', appliedBy: 'recovery-transition', divergent: false }),
+      makeRow({ action: 'replan', applyStatus: APPLY_STATUS.APPLIED, appliedNext: 'PLAN', divergent: false }),
+      makeRow({ action: 'replan', applyStatus: APPLY_STATUS.SUPERSEDED, routedNext: 'PLAN', phasesAtRoute: 0 }),
+      makeRow({ action: 'replan', applyStatus: 'ROUTED', routedNext: 'PLAN', phasesAtRoute: 0 }),
+      makeRow({ action: 'replan', applyStatus: 'whatever', routedNext: 'PLAN', phasesAtRoute: 0 }),
+    ];
+    const state = makeState(null, {
+      recoveryJournal: rows,
+      phases: [{ name: 'PLAN', status: 'queued' }],
+      phase: 'PAUSED',
+      lastPhase: 'PLAN',
+    });
+    const before = JSON.stringify(rows);
+
+    expect(settleRecoveryTransitions(state)).toBe(0);
+
+    expect(JSON.stringify(rows)).toBe(before);
+    expect(mocks.tick).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['routedNext missing', { routedNext: undefined }],
+    ['routedNext not a string', { routedNext: 3 }],
+    ['phasesAtRoute missing', { phasesAtRoute: undefined }],
+    ['phasesAtRoute negative', { phasesAtRoute: -1 }],
+    ['phasesAtRoute fractional', { phasesAtRoute: 0.5 }],
+    ['phasesAtRoute a numeric string', { phasesAtRoute: '0' }],
+  ])('leaves a routed row alone when %s', (_label, overrides) => {
+    const row = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0, ...overrides,
+    });
+    const state = makeState(row, { phases: [{ name: 'PLAN', status: 'queued' }] });
+
+    expect(settleRecoveryTransitions(state)).toBe(0);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(row.appliedNext).toBeUndefined();
+  });
+
+  it.each([
+    ['no state', undefined],
+    ['a null state', null],
+    ['a state without a journal', {}],
+    ['a journal that is not an array', { recoveryJournal: { 0: { applyStatus: 'routed' } } }],
+    ['a journal of junk', { recoveryJournal: [null, undefined, 7, 'x', [], () => 1] }],
+  ])('returns 0 and throws nothing for %s', (_label, state) => {
+    expect(() => settleRecoveryTransitions(state)).not.toThrow();
+    expect(settleRecoveryTransitions(state)).toBe(0);
+  });
+
+  it('treats a state whose phases is not an array as "nothing handed out"', () => {
+    const row = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    });
+    const state = makeState(row, { phases: 'oops' });
+
+    expect(() => settleRecoveryTransitions(state)).not.toThrow();
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+  });
+
+  it('skips junk phase records instead of throwing on them', () => {
+    const row = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    });
+    const state = makeState(row, { phases: [null, 7, 'PLAN', [], { status: 'queued' }, { name: 'PLAN', status: 'queued' }] });
+
+    settleRecoveryTransitions(state);
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.APPLIED);
+  });
+
+  it('one hostile row does not stop the rows after it', () => {
+    const hostile = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    });
+    Object.defineProperty(hostile, 'phasesAtRoute', { get() { throw new Error('hostile accessor'); } });
+    const healthy = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    });
+    const state = makeState(hostile, { phases: [{ name: 'PLAN', status: 'queued' }] });
+    state.recoveryJournal.push(healthy);
+
+    expect(() => settleRecoveryTransitions(state)).not.toThrow();
+
+    expect(healthy.applyStatus).toBe(APPLY_STATUS.APPLIED);
+  });
+
+  it('a frozen routed row cannot be stamped: no claim, no event, no throw', () => {
+    const row = Object.freeze(makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    }));
+    const state = makeState(row, { phases: [{ name: 'PLAN', status: 'queued' }] });
+
+    expect(() => settleRecoveryTransitions(state)).not.toThrow();
+
+    expect(row.applyStatus).toBe(APPLY_STATUS.ROUTED);
+    expect(row.appliedNext).toBeUndefined();
+    expect(ticksOf('recovery-applied')).toHaveLength(0);
+  });
+
+  it('a telemetry failure never undoes the stamp', () => {
+    mocks.tick.mockImplementation(() => { throw new Error('telemetry down'); });
+    const row = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    });
+    const state = makeState(row, { phases: [{ name: 'PLAN', status: 'queued' }] });
+
+    expect(() => settleRecoveryTransitions(state)).not.toThrow();
+
+    expect(row).toMatchObject({ applyStatus: APPLY_STATUS.APPLIED, appliedNext: 'PLAN', divergent: false });
+  });
+
+  it('does not mutate the state outside the journal', () => {
+    const row = makeRow({
+      action: 'replan', applyStatus: APPLY_STATUS.ROUTED, routedNext: 'PLAN', phasesAtRoute: 0,
+    });
+    const state = makeState(row, {
+      phase: 'PAUSED', lastPhase: 'PLAN', pendingPhase: 'PLAN', pausedReason: 'budget-exceeded', phases: [],
+    });
+    // The journal is where the pass is allowed to write; everything else is not.
+    const outsideJournal = (s) => JSON.stringify({ ...s, recoveryJournal: undefined });
+    const before = outsideJournal(state);
+
+    settleRecoveryTransitions(state);
+
+    expect(outsideJournal(state)).toBe(before);
   });
 });
 
@@ -674,7 +1208,10 @@ describe('applyRecoveryTransition — announcement failures never undo the pause
     expect(state.pendingPhase).toBe('VERIFY');
     expect(state.pausedReason).toBe('recovery:pause');
     expect(row).toMatchObject({
-      divergent: false, appliedNext: 'PAUSED', appliedBy: 'recovery-transition',
+      divergent: false,
+      appliedNext: 'PAUSED',
+      appliedBy: 'recovery-transition',
+      applyStatus: APPLY_STATUS.APPLIED,
     });
   }
 
