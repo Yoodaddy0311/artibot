@@ -62,6 +62,11 @@
  *    own suite.
  *  - THE INSTALLED COPY, and any ledger larger than a handful of rows.
  *
+ * SPLIT: the `--since` cases and the refusals (malformed request, unreadable ledger path)
+ * live in `route-compare-cli-args.test.js`, moved verbatim to keep this file under the
+ * 800-line standard (V5-BACKLOG section 3). What stays here is what other files cite by
+ * name: the empty-ledger and seeded stdout, and the `emptyJoin()` key-order check.
+ *
  * @module tests/ledger/route-compare-cli
  */
 
@@ -691,102 +696,6 @@ describe('route-compare: a ledger that carries reviewer audits', () => {
     expect(printed.score.audits).toBe(1);
     expect(printed.score.no_subject_audits).toBe(1);
     expect(printed.score.basis).toContain('reviewer verdict');
-  });
-});
-
-describe('route-compare: --since', () => {
-  it('excludes rows written before the cutoff and says so in the census', () => {
-    const root = makeRoot('G');
-    seedBind(root, SESSION, 'old1', {
-      confidence: 'exact', method: 'prompt_id+name', recommended: OPUS,
-      now: () => new Date('2026-09-01T00:00:00Z'),
-    });
-    seedBind(root, SESSION, 'new2', {
-      confidence: 'exact', method: 'prompt_id+name', recommended: OPUS,
-      now: () => new Date('2026-09-13T00:00:00Z'),
-    });
-
-    const all = parseOne(runCli(['--cwd', root], root));
-    const recent = parseOne(runCli(['--cwd', root, '--since', '2026-09-10T00:00:00Z'], root));
-
-    expect(all.binds).toBe(2);
-    expect(all.since).toBeNull();
-    expect(recent.binds).toBe(1);
-    // The cutoff is echoed as the RESOLVED instant, so a reader never has to
-    // re-parse the argument to know what was actually cut at.
-    expect(recent.since).toBe('2026-09-10T00:00:00.000Z');
-    // A filtered row is SELECTION, not loss: a rate built from survivors alone
-    // cannot tell the two apart.
-    expect(recent.census.dropped.selection.filtered_out).toBe(1);
-    expect(recent.census.dropped_total.loss).toBe(0);
-  });
-
-  it('accepts epoch milliseconds and cuts at the same instant as the ISO form', () => {
-    const root = makeRoot('H');
-    seedBind(root, SESSION, 'old1', {
-      confidence: 'exact', method: 'prompt_id+name', recommended: OPUS,
-      now: () => new Date('2026-09-01T00:00:00Z'),
-    });
-    seedBind(root, SESSION, 'new2', {
-      confidence: 'exact', method: 'prompt_id+name', recommended: OPUS,
-      now: () => new Date('2026-09-13T00:00:00Z'),
-    });
-
-    const iso = parseOne(runCli(['--cwd', root, '--since', '2026-09-10T00:00:00Z'], root));
-    const epoch = parseOne(runCli([
-      '--cwd', root, '--since', String(Date.parse('2026-09-10T00:00:00Z')),
-    ], root));
-
-    // Date.parse reads an all-digit string as something other than a stamp, so
-    // this case is the one that catches a regression to a bare Date.parse.
-    expect(epoch.since).toBe(iso.since);
-    expect(epoch.since).toBe('2026-09-10T00:00:00.000Z');
-    expect(epoch.binds).toBe(1);
-    expect(epoch.binds).toBe(iso.binds);
-  });
-});
-
-describe('route-compare: what it refuses to answer', () => {
-  it.each([
-    ['an unknown flag is passed', ['--oops']],
-    ['a flag has no value', ['--cwd']],
-    ['--since has no value', ['--since']],
-    ['--since does not parse to a time', ['--since', 'nonsense']],
-    ['--since is empty', ['--since', '   ']],
-  ])('exits 2 with an empty stdout when %s', (_label, args) => {
-    const root = makeRoot('I');
-
-    const out = runCli(args, root);
-
-    // A malformed request is not an observation. Exiting 0 here would report a
-    // measurement that was never taken, so a typo could read as success.
-    expect(out.status).toBe(2);
-    expect(out.stdout).toBe('');
-    expect(out.stderr.trim().split('\n')).toHaveLength(1);
-    expect(out.stderr.startsWith('route-compare:')).toBe(true);
-    expect(existsSync(ledgerFilePath(root))).toBe(false);
-  });
-
-  it('still exits 0 when the ledger path is not a readable file', () => {
-    const root = makeRoot('J');
-    // A DIRECTORY where the ledger file belongs: present, not readable as text.
-    mkdirSync(ledgerFilePath(root), { recursive: true });
-
-    const printed = parseOne(runCli(['--cwd', root], root));
-
-    // "The ledger cannot be read" is a finding about the project, not a failure
-    // of this script — and the JSON is what says which of the two it was.
-    expect(printed.census.file.present).toBe(true);
-    expect(printed.census.file.readable).toBe(false);
-    expect(printed.binds).toBe(0);
-    expect(printed.receipts).toBe(0);
-    expect(printed.agreement_rate).toBeNull();
-    // The reader swallows an unreadable path and reports it in the census, so
-    // this branch is NOT the `error` branch: `error` is reserved for a throw
-    // that escaped the reader. A test that expected `error` here would be
-    // asserting a shape this repo's reader never produces.
-    expect(printed.error).toBeUndefined();
-    expect(Object.keys(printed)).toEqual(STDOUT_KEYS);
   });
 });
 
