@@ -17,6 +17,8 @@ blog-artibot-intro.md
 # /watch ingest artifacts (video keyframes/transcripts) — local-only, never commit
 .artibot/media/
 /docs/
+# Local audit/comparison reports — kept on disk, never committed (owner decision D11, 2026-09-28)
+/_reports/
 plugins/artibot/_reports/
 plugins/artibot/_Benchmarks/
 # Internal development docs — plugin surface is plugins/artibot/README.md only
