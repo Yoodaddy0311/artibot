@@ -161,6 +161,21 @@ function stringLeaves(value, out = []) {
   return out;
 }
 
+/**
+ * The strings a content leak from `asked` would have to contain: every string in
+ * its tool_input and tool_response that carries the SYNTHETIC- marker. A text
+ * value WITHOUT the marker is invisible to the scan built on this.
+ */
+function contentMarkers(asked) {
+  return stringLeaves([asked.tool_input, asked.tool_response]).filter((s) => s.includes('SYNTHETIC-'));
+}
+
+/** The content markers found anywhere in the serialised envelope. Empty means the row leaks nothing the scan can see. */
+function leakedMarkers(env, asked) {
+  const serialised = JSON.stringify(env);
+  return contentMarkers(asked).filter((marker) => serialised.includes(marker));
+}
+
 /** Write `n` AskUserQuestion rows through the real `record()`, each with its own tool_use_id. */
 function recordAskRows(n) {
   for (let i = 1; i <= n; i += 1) {
@@ -539,14 +554,52 @@ describe('AskUserQuestion carrier (SH-09): envelope', () => {
   // that other tools read and copy.
   it('never carries question, option, header or answer text from the payload', () => {
     const asked = askPayload();
-    const markers = stringLeaves([asked.tool_input, asked.tool_response])
-      .filter((s) => s.includes('SYNTHETIC-'));
-    // Scanner self-check: a fixture that lost its markers would make the loop below vacuous.
-    expect(markers.length).toBeGreaterThanOrEqual(20);
+    // Scanner self-check: a fixture that lost its markers would make the scan below vacuous.
+    expect(contentMarkers(asked).length).toBeGreaterThanOrEqual(20);
     const env = buildToolUsedEnvelope(asked);
     expect(env).not.toBeNull();
-    const serialised = JSON.stringify(env);
-    for (const marker of markers) expect(serialised).not.toContain(marker);
+    expect(leakedMarkers(env, asked)).toEqual([]);
+  });
+
+  // THE SCAN SEES ONLY MARKED TEXT, so an unmarked value is a blind spot. The
+  // header was one ("Format"/"Checks"): a mutant that leaked it into the row
+  // passed the scan above and was caught only by the three-key pins.
+  it('marks every text value in the fixture, so the privacy scan can see all of it', () => {
+    const unmarked = [];
+    const visit = (value, where) => {
+      if (typeof value === 'string') {
+        if (!value.includes('SYNTHETIC-')) unmarked.push(`${where} = ${JSON.stringify(value)}`);
+      } else if (Array.isArray(value)) {
+        value.forEach((item, i) => visit(item, `${where}[${i}]`));
+      } else if (value !== null && typeof value === 'object') {
+        for (const [key, item] of Object.entries(value)) visit(item, `${where}.${key}`);
+      }
+    };
+    const { tool_input: input, tool_response: response } = ASK_FIXTURE.payload;
+    visit(input, 'tool_input');
+    visit(response, 'tool_response');
+    // `answers` is keyed by the question text itself, so its KEYS are user text too.
+    for (const key of Object.keys(response.answers)) {
+      if (!key.includes('SYNTHETIC-')) unmarked.push(`tool_response.answers key ${JSON.stringify(key)}`);
+    }
+    expect(unmarked).toEqual([]);
+  });
+
+  // NEGATIVE CONTROL for the scan itself: each text category is planted into a
+  // copy of a real row and must be flagged, and the untouched row must be clean.
+  it.each([
+    ['question text', (asked) => asked.tool_input.questions[0].question],
+    ['header', (asked) => asked.tool_input.questions[0].header],
+    ['option label', (asked) => asked.tool_input.questions[0].options[0].label],
+    ['option description', (asked) => asked.tool_input.questions[0].options[0].description],
+    ['answer', (asked) => Object.values(asked.tool_response.answers)[0]],
+  ])('the privacy scan flags a leaked %s', (_label, pick) => {
+    const asked = askPayload();
+    const env = buildToolUsedEnvelope(asked);
+    expect(env).not.toBeNull();
+    expect(leakedMarkers(env, asked)).toEqual([]);
+    const leaked = { ...env, data: { ...env.data, leak: pick(asked) } };
+    expect(leakedMarkers(leaked, asked)).toContain(pick(asked));
   });
 
   it('omits skill even when a crafted tool_input names one', () => {

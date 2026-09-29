@@ -43,7 +43,7 @@
       "questions": [
         {
           "question": "SYNTHETIC-QUESTION-ALPHA which output format should be used?",
-          "header": "Format",
+          "header": "SYNTHETIC-HDR-A",
           "options": [
             { "label": "SYNTHETIC-OPTION-SUMMARY", "description": "SYNTHETIC-DESCRIPTION-BRIEF" },
             { "label": "SYNTHETIC-OPTION-DETAILED", "description": "SYNTHETIC-DESCRIPTION-FULL" }
@@ -52,7 +52,7 @@
         },
         {
           "question": "SYNTHETIC-QUESTION-BRAVO which checks should run?",
-          "header": "Checks",
+          "header": "SYNTHETIC-HDR-B",
           "options": [
             { "label": "SYNTHETIC-OPTION-LINT", "description": "SYNTHETIC-DESCRIPTION-LINT" },
             { "label": "SYNTHETIC-OPTION-TESTS", "description": "SYNTHETIC-DESCRIPTION-TESTS" }
@@ -65,7 +65,7 @@
       "questions": [
         {
           "question": "SYNTHETIC-QUESTION-ALPHA which output format should be used?",
-          "header": "Format",
+          "header": "SYNTHETIC-HDR-A",
           "options": [
             { "label": "SYNTHETIC-OPTION-SUMMARY", "description": "SYNTHETIC-DESCRIPTION-BRIEF" },
             { "label": "SYNTHETIC-OPTION-DETAILED", "description": "SYNTHETIC-DESCRIPTION-FULL" }
@@ -74,7 +74,7 @@
         },
         {
           "question": "SYNTHETIC-QUESTION-BRAVO which checks should run?",
-          "header": "Checks",
+          "header": "SYNTHETIC-HDR-B",
           "options": [
             { "label": "SYNTHETIC-OPTION-LINT", "description": "SYNTHETIC-DESCRIPTION-LINT" },
             { "label": "SYNTHETIC-OPTION-TESTS", "description": "SYNTHETIC-DESCRIPTION-TESTS" }
