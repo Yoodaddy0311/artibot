@@ -68,7 +68,7 @@ import { classifyComplexity } from '../../lib/cognitive/router.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { readLedgerTail, readNdjsonTail } from '../../lib/runtime/ledger-tail.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** The one tool this hook answers to. Everything else returns immediately. */
 export const AGENT_TOOL = 'Agent';
@@ -696,7 +696,7 @@ export async function main() {
     const raw = await readStdin();
     // parseJSON returns null on malformed input; observePre then falls out at
     // its first check. Non-JSON stdin is a no-op, not an error.
-    return await observePre(parseJSON(raw));
+    return await observePre(tapDirectFiring(import.meta.url, parseJSON(raw)));
   } catch (err) {
     return { ok: false, reason: err?.message || 'main-failed' };
   }

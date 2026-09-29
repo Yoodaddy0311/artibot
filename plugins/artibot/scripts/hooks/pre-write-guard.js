@@ -391,7 +391,7 @@ function shouldEnforceGuard(filePath) {
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
 import { recordHumanAsked } from '../../lib/runtime/human-asked-record.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const BLOCK_FINGERPRINT_FILE = 'last-pre-write-block.txt';
 
@@ -705,7 +705,7 @@ async function handleWriteGuard(hookData) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
   lastHookData = hookData;
   if (!hookData) return;
 

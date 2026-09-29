@@ -14,7 +14,7 @@ import { getPluginRoot, parseJSON, readStdin, resolveConfigPath, writeStdout } f
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createErrorHandler, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /**
  * Validate that essential plugin directories and files exist.
@@ -54,7 +54,7 @@ function loadVersion() {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   // Extract instruction source info from hook data
   const source = hookData?.source || hookData?.file || 'unknown';

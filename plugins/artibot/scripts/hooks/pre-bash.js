@@ -39,7 +39,7 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
 import { recordHumanAsked } from '../../lib/runtime/human-asked-record.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /**
  * Re-exported, not reimplemented: `question_id` keeps ONE definition repo-wide
@@ -71,7 +71,7 @@ let lastHookData = null;
  */
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
   lastHookData = hookData;
 
   resetGuards();

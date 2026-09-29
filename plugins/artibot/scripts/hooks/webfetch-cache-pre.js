@@ -21,7 +21,7 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const HOOK_NAME = 'webfetch-cache-pre';
 
@@ -97,7 +97,7 @@ export function buildOutput({ url, key, meta }) {
 
 async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw) ?? {};
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) ?? {};
   const url = hookData?.tool_input?.url || hookData?.url || '';
   if (!url) {
     writeStdout({ continue: true });

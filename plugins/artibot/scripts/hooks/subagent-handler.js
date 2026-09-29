@@ -16,7 +16,7 @@ import { resolveBoundModel } from '../../lib/routing/bind-model-fallback.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { DEFAULT_TAIL_BYTES, readLedgerTail as readLedgerTailWindow } from '../../lib/runtime/ledger-tail.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 import { isReviewerStop, recordReviewFromStop, reviewLedgerColumn } from './_review-stop-record.js';
 import { initTeamContext, loadState, saveState, updateTeamState } from './_team-state.js';
 
@@ -726,7 +726,7 @@ function handleStop(hookData, ids) {
 export async function main() {
   const action = process.argv[2]; // 'start' or 'stop'
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   const agentId = extractAgentId(hookData);
   const agentRole = extractAgentRole(hookData);

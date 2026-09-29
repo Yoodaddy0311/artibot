@@ -87,7 +87,7 @@ import { appendEvent } from '../../lib/supervisor/run-store.js';
 import { isMissionId } from '../../lib/mission/mission-id.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const HOOK_NAME = 'post-compact-rehydrate';
 const ENV_OVERRIDE = 'ARTIBOT_CONTEXT_LIFECYCLE_JSON';
@@ -668,7 +668,7 @@ async function loadConfigSafe() {
  */
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw) ?? {};
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) ?? {};
   const event = typeof hookData.hook_event_name === 'string' ? hookData.hook_event_name : 'PostCompact';
   if (event === 'SessionStart' && hookData.source !== 'compact') return; // not our moment; stay silent
 

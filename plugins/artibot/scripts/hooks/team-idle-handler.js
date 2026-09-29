@@ -14,7 +14,7 @@ import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout }
 import { existsSync, readFileSync } from 'node:fs';
 import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** Maximum consecutive idle events before auto-stop (0 = disabled). */
 const DEFAULT_MAX_IDLE_COUNT = 0;
@@ -55,7 +55,7 @@ function trackIdleCount(agentId, state) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   const agentId = extractAgentId(hookData);
   const agentRole = extractAgentRole(hookData, '');

@@ -12,6 +12,25 @@
  * `hook.fired.hooks`, and `commands`, through `intent.detected.command` — and
  * still answers `unmeasured` for `modules` alone.
  *
+ * WHAT CHANGED (2026-09-29, R1 / OB-24)
+ * ---------------------------------------------------------------------------
+ * Two changes, both to what a `fired: 0` can honestly mean.
+ *
+ * (1) `hook.fired` has a SECOND WRITER. The 21 scripts behind the 24 commands
+ * that `hooks/hooks.json` registers directly now write one row per firing
+ * (`scripts/hooks/_hook-fired-record.js#recordDirectHookFired`, reached from
+ * `_main-entry.js#tapDirectFiring`), in the same row shape the six dispatchers
+ * write. Before this, the audit had no way to hear those hooks at all; the CLI
+ * kept them out of the inventory and counted them in `hooksOutsideCarrier` so
+ * that it would not print a false zero. The fold is unchanged: it counts names
+ * inside `data.hooks`, and a direct row simply has one.
+ *
+ * (2) `CARRIERS.skills` is SCOPED to `tool.used` rows whose `data.tool` is
+ * `Skill` (the `where` field, see `CARRIERS`). `tool.used` also carries
+ * AskUserQuestion since SH-09 (2e44461d); those rows name no skill, and
+ * counting them widened the denominator and turned a questions-only ledger
+ * into `measured: true, fired: 0` for every skill.
+ *
  * WHAT CHANGED (2026-09-17, Wave 12 / SH-29 part B)
  * ---------------------------------------------------------------------------
  * A third writer, `scripts/hooks/runtime-prompt.js#recordSlashCommandInvoked`,
@@ -159,17 +178,37 @@
  *     allowlist. A writer smuggling a hook name into `data` under a key the
  *     allowlist does not register is invisible here — and would be unreadable
  *     by anything else too, which is the actual defect in that case.
- *   - THE HOOKS CARRIER SEES ONLY THE SIX DISPATCHER SLOTS. `hook.fired` is
- *     written by the dispatchers, so it covers the 44 handler entries of
- *     `hooks/dispatch-table.json` (42 distinct names — `memory-tracker` and
- *     `session-ledger` each sit in two slots; measured 2026-09-17). The 24
- *     hooks registered DIRECTLY in `hooks/hooks.json`, outside any dispatcher,
- *     emit no row and are invisible to this fold: PreToolUse 9,
+ *   - THE HOOKS CARRIER IS TWO WRITERS, AND THE SECOND IS ONLY AS OLD AS ITS
+ *     RELEASE. `hook.fired` is written by the six dispatchers, which cover the
+ *     44 handler entries of `hooks/dispatch-table.json` (42 distinct names —
+ *     `memory-tracker` and `session-ledger` each sit in two slots; measured
+ *     2026-09-17), and, since R1 / OB-24 (2026-09-29), by the 21 scripts behind
+ *     the 24 commands that `hooks/hooks.json` registers directly: PreToolUse 9,
  *     PostToolUseFailure 3, SubagentStart 2, TeammateIdle 2, TaskCompleted 2,
  *     Notification 2, PermissionRequest 1, InstructionsLoaded 1, PreCompact 1,
  *     PostCompact 1 (measured 2026-09-15 from hooks.json, re-measured
- *     2026-09-17). An inventory listing those 24 gets `fired: 0, measured:
- *     true` — a FALSE ZERO, the exact shape that reads as removal evidence.
+ *     2026-09-17 and 2026-09-29). What that does NOT undo:
+ *       (i) NOTHING BEFORE THE RELEASE THAT SHIPPED IT. A row cannot be written
+ *           after the fact, so over any window that predates the release an
+ *           inventory listing a direct hook still gets `fired: 0, measured:
+ *           true` — the FALSE ZERO that used to be a difference of KIND is now a
+ *           difference of TIME. Compare a direct hook only from a `--since`
+ *           after the release that carries the tap.
+ *       (ii) A DIRECT HOOK OUTSIDE A GIT WORK TREE writes no row: the direct
+ *           path never spawns `git rev-parse`, so a cwd with no `.git` above it
+ *           is skipped. Nor does one whose `hook_event_name` is missing or not
+ *           one of the ten direct events, one that a fail-open `exit(0)` tail
+ *           cut off before its row landed, or a machine that set
+ *           `ARTIBOT_HOOK_FIRED_DIRECT=off`.
+ *       (iii) THE DENOMINATOR CHANGED MEANING. It is rows of the carrier event,
+ *           which is now dispatcher dispatches PLUS direct firings, so
+ *           `fired / denominator` is a share of all `hook.fired` rows and is
+ *           not comparable with a value read before the release.
+ *       (iv) THE CLI INVENTORY. `scripts/ledger/existence-audit.mjs` builds its
+ *           hooks inventory from `dispatch-table.json` only, so the direct
+ *           hooks' rows show up under its `unmatched.hooks`, not in
+ *           `kinds.hooks`, until it enumerates them too. Five of them share a
+ *           name with a dispatcher handler and are already counted together.
  *     The row also says nothing about how long a handler ran or what it did.
  *   - THE COMMANDS CARRIER SEES ONLY WHAT THE USER TYPED, AND ONLY BARE NAMES.
  *     `intent.detected.command` is written from `detectSlashCommand`
@@ -249,11 +288,27 @@ export const EXEMPT_CONTRACTS = Object.freeze([
  * one dispatch and names every handler that dispatch fanned out to. The flag is
  * on the carrier and not inferred from the data on purpose — inferring it would
  * let a single malformed row silently switch counting modes.
+ *
+ * `where` scopes a carrier to the rows that can NAME its artifact (2026-09-29,
+ * R1 / OB-24). It is a `{ dataField: scalar }` map, strict `===` on `row.data`,
+ * and a row that fails it is not a row OF THIS CARRIER: it is neither counted
+ * nor `absent`, and it is not in the denominator. `skills` is the only user:
+ * `tool.used` also carries AskUserQuestion since SH-09 (2e44461d), and those
+ * rows have no `skill` to name. Without the scope every question row landed in
+ * `absent` and widened the denominator, and a ledger holding question rows but
+ * no Skill row read every skill as `measured: true, fired: 0` where it used to
+ * read `unmeasured` — the false zero this module's own header warns about. The
+ * scope is on the carrier and read from the row's own `data.tool`, so past rows
+ * are corrected retroactively: they carry it.
  */
 export const CARRIERS = Object.freeze({
   hooks: Object.freeze({ event: 'hook.fired', field: 'hooks', multi: true }),
   commands: Object.freeze({ event: 'intent.detected', field: 'command' }),
-  skills: Object.freeze({ event: 'tool.used', field: 'skill' }),
+  skills: Object.freeze({
+    event: 'tool.used',
+    field: 'skill',
+    where: Object.freeze({ tool: 'Skill' }),
+  }),
   modules: null,
 });
 
@@ -264,17 +319,20 @@ export const CARRIERS = Object.freeze({
  */
 export const CARRIER_NOTES = Object.freeze({
   hooks:
-    'hook.fired.hooks (written by scripts/hooks/_hook-fired-record.js from the 6 '
-    + 'dispatchers since Wave 12, 2026-09-17) carries handler NAMES as an ARRAY, one row '
-    + 'per dispatch, so the fold is MULTI-VALUED: the denominator is dispatch rows and a '
-    + "name's `fired` is the number of rows whose array contains it. Rows whose field is "
-    + 'not an array count as `absent`. CANNOT SEE: the 24 hooks registered directly in '
-    + 'hooks/hooks.json outside the dispatchers (PreToolUse 9, PostToolUseFailure 3, '
-    + 'SubagentStart 2, TeammateIdle 2, TaskCompleted 2, Notification 2, '
-    + 'PermissionRequest 1, InstructionsLoaded 1, PreCompact 1, PostCompact 1 — measured '
-    + '2026-09-15 from hooks.json), which therefore read as a false `fired: 0`; also not '
-    + 'handler duration and not what the handler did. The envelope source enum still only '
-    + 'says "hook" (ledger-envelope.schema.json:45-57), 1 of 8 emitter categories.',
+    'hook.fired.hooks carries handler NAMES as an ARRAY, so the fold is MULTI-VALUED: the '
+    + "denominator is hook.fired rows and a name's `fired` is the number of rows whose array "
+    + 'contains it. Rows whose field is not an array count as `absent`. TWO WRITERS, ONE ROW '
+    + 'SHAPE (scripts/hooks/_hook-fired-record.js): the 6 dispatchers write one row per '
+    + 'dispatch (recordHookFired, since Wave 12, 2026-09-17), and the 24 commands registered '
+    + 'directly in hooks/hooks.json outside the dispatchers write one row per firing '
+    + '(recordDirectHookFired, since R1 / OB-24, 2026-09-29), so the denominator is '
+    + 'dispatches PLUS direct firings. CANNOT SEE: any direct-hook firing from before the '
+    + 'release that shipped R1 (no row exists, so an inventory naming such a hook reads a '
+    + 'false `fired: 0` for that window -- compare only from after that release); a direct '
+    + 'hook run outside a git work tree (skipped, not recorded); a row cut off by an exit(0) '
+    + 'tail; a machine with ARTIBOT_HOOK_FIRED_DIRECT=off; also not handler duration and not '
+    + 'what the handler did. The envelope source enum still only says "hook" '
+    + '(ledger-envelope.schema.json:45-57), 1 of 8 emitter categories.',
   commands:
     'intent.detected.command (written by scripts/hooks/runtime-prompt.js'
     + '#recordSlashCommandInvoked since Wave 12, 2026-09-17) carries the command NAME for a '
@@ -291,9 +349,13 @@ export const CARRIER_NOTES = Object.freeze({
     + 'and phase.*.segment is a phase name; neither is a command identity.',
   skills:
     'tool.used.skill (written by scripts/hooks/tool-used-record.js since Wave 11, '
-    + '2026-09-15) carries the skill name for tool=Skill; rows without the key count as '
-    + '`absent`. The sibling field tool.used.tool carries only the TOOL name ("Bash", '
-    + '"Skill") and loses the skill identity, which is why a second field was needed.',
+    + '2026-09-15) carries the skill name for tool=Skill. The carrier is SCOPED with '
+    + "`where: { tool: 'Skill' }` (R1 / OB-24, 2026-09-29): tool.used also carries "
+    + 'AskUserQuestion (SH-09) and those rows can name no skill, so they are neither '
+    + 'counted, nor `absent`, nor in the denominator -- a ledger holding only question rows '
+    + 'is unmeasured for skills, not a measured zero. A Skill row without the key counts as '
+    + '`absent`. The sibling field tool.used.tool carries only the TOOL name ("Skill") and '
+    + 'loses the skill identity, which is why a second field was needed.',
   modules:
     'no registered event references a lib/ module path or module name in data.',
 });
@@ -355,12 +417,16 @@ export function noCarrierReason(kind) {
  * `Object.hasOwn` for the same reason.
  *
  * @param {object[]} events - ledger lines, already ordered and deduped by the caller.
- * @param {?{event: string, field: string, multi?: boolean}} carrier - carrier
- *   declaration, or null. `multi: true` selects the array-valued fold above.
+ * @param {?{event: string, field: string, multi?: boolean,
+ *   where?: Record<string, string|number|boolean>}} carrier - carrier
+ *   declaration, or null. `multi: true` selects the array-valued fold above;
+ *   `where` scopes the carrier to the rows whose `data` matches (see `CARRIERS`).
  * @returns {?{counts: Record<string, number>, absent: number, denominator: number}}
  *   null when there is no carrier — an explicit "not measurable", never a zero.
- *   `denominator` is rows OF THE CARRIER EVENT, not all events handed in, and
- *   in multi mode it is rows and not the number of names those rows carry.
+ *   `denominator` is rows OF THE CARRIER EVENT that satisfy its `where` (all of
+ *   them when it has none), not all events handed in, and in multi mode it is
+ *   rows and not the number of names those rows carry.
+ * @throws {TypeError} when `where` is present and not a non-empty scalar map.
  */
 export function foldFiredCounts(events, carrier) {
   assertEvents(events);
@@ -368,7 +434,8 @@ export function foldFiredCounts(events, carrier) {
   if (!isNonEmptyString(carrier.event) || !isNonEmptyString(carrier.field)) {
     throw new TypeError('foldFiredCounts: carrier needs non-empty { event, field }');
   }
-  const rows = events.filter((e) => e && e.event === carrier.event);
+  assertWhere(carrier.where);
+  const rows = events.filter((e) => e && e.event === carrier.event && matchesWhere(e, carrier.where));
   if (carrier.multi !== true) {
     const { counts, absent, total } = countBy(rows, (e) => e?.data?.[carrier.field]);
     return { counts, absent, denominator: total };
@@ -591,6 +658,42 @@ function summarize(kinds, eventsReceived, census) {
 function byName(a, b) {
   if (a.name < b.name) return -1;
   return a.name > b.name ? 1 : 0;
+}
+
+/**
+ * Refuse a malformed carrier `where`. Absent is fine (no scope); anything else
+ * must be a non-empty plain object of scalars. A scope that silently matched
+ * nothing — or everything — would move every count without a sound.
+ *
+ * @param {unknown} where - the carrier's `where`, or undefined.
+ * @throws {TypeError} when present and not a non-empty `{ field: scalar }` map.
+ */
+function assertWhere(where) {
+  if (where === undefined) return;
+  const ok = where !== null
+    && typeof where === 'object'
+    && !Array.isArray(where)
+    && Object.keys(where).length > 0
+    && Object.values(where).every((v) => ['string', 'number', 'boolean'].includes(typeof v));
+  if (!ok) {
+    throw new TypeError('foldFiredCounts: carrier.where must be a non-empty { dataField: scalar } map');
+  }
+}
+
+/**
+ * Does `row` satisfy a carrier's `where` scope? Strict, case-sensitive `===`
+ * on OWN `data` fields; a row without `data`, or without the field, does not.
+ * No `where` means every row of the carrier's event belongs.
+ *
+ * @param {object} row - ledger line of the carrier's event.
+ * @param {Record<string, string|number|boolean>|undefined} where - validated scope.
+ * @returns {boolean}
+ */
+function matchesWhere(row, where) {
+  if (where === undefined) return true;
+  const data = row.data;
+  if (data === null || typeof data !== 'object') return false;
+  return Object.entries(where).every(([field, value]) => Object.hasOwn(data, field) && data[field] === value);
 }
 
 /**

@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -171,7 +171,7 @@ export function buildStatusMessage(current, max, delta) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   // Pass-through: always output the original input
   if (hookData) {

@@ -14,8 +14,8 @@
  * skill at all. A silence nobody was listening for is not evidence of disuse,
  * which is exactly why nothing was allowed to be deleted for it. This hook
  * makes the sound audible: one ledger line per Skill tool call, carrying the
- * skill name, so `CARRIERS.skills = { event: 'tool.used', field: 'skill' }`
- * starts returning numbers.
+ * skill name, so `CARRIERS.skills` (`{ event: 'tool.used', field: 'skill' }`,
+ * scoped to `where: { tool: 'Skill' }` since R1 / OB-24) starts returning numbers.
  *
  * THE SHAPE, AND THE TWO DECISIONS INSIDE IT (owner, 2026-09-15, W11-Q3 (a)):
  *
@@ -170,18 +170,6 @@
  *     caveat against a main-thread-only census.
  *   - (SH-09) WHAT WAS ASKED, HOW MANY QUESTIONS A CALL CARRIED, AND WHAT THE USER
  *     ANSWERED. None of it is recorded, on purpose.
- *
- * KNOWN LIMITATION (existence audit; the remedy belongs to R1, ob24-direct-hook-carrier).
- * `lib/replay/existence-audit.js#CARRIERS.skills` is `{event:'tool.used',
- * field:'skill'}` and its fold filters on the EVENT ONLY. So every AskUserQuestion
- * row lands in the skills fold's `absent` bucket AND counts toward its
- * `denominator`, and a ledger holding question rows but no Skill row reads every
- * skill as `measured: true, fired: 0` where it used to read `unmeasured` -- the
- * false zero that module's own header warns about. Per-skill `fired` counts are
- * NOT affected: a row with no `skill` credits nobody. Measured by
- * `tests/hooks/tool-used-record.test.js` ("interplay with the existence audit").
- * The remedy is a `tool === 'Skill'` scope on that carrier; it is not made here
- * because that module is not this limb's.
  *
  * @module scripts/hooks/tool-used-record
  */
