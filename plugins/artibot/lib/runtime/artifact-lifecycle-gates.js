@@ -27,6 +27,60 @@
  * requested one may proceed. Refusals (unknown event, malformed envelope) are
  * the parent's business; blocks are this module's.
  *
+ * ## Which rows the UNMEASURED gate reads: the LATEST verification (EC-01)
+ *
+ * The gate reads the `verify.completed` rows of ONE run — the latest — and not
+ * the mission's whole history. A "run" is the `verification_id` its rows carry
+ * (`verify-writer.js#buildVerifyCompletedEvents` gives the overall row and each
+ * layer row the same id, or writes none of them). "Latest" is the id of the
+ * last-APPENDED row that names one: ledger order, never a clock and never a
+ * comparison of ids. V5-BACKLOG §4-b g (Codex EC-01, 2026-09-28) asked for this:
+ * before it, one UNMEASURED row stayed in the tally for good and a later PASS
+ * could not clear it, so a mission that had ever been unmeasured never opened.
+ *
+ * This REVERSES the reading design §5 memo A27 (2026-09-15) gave the old
+ * behaviour ("a later pass does not erase it — intended"). What A27 wanted
+ * survives INSIDE one run: an UNMEASURED row and a PASS row that carry the SAME
+ * id do not cancel, and the gate still blocks. What is gone is "re-running
+ * cannot make it green": a re-run has a new id and is judged on its own rows.
+ *
+ * Two tallies used to hold that memory, and both are scoped now: the boolean
+ * read when `requiredLayers` is null, and the per-layer counts read when it is
+ * a list. The shipped configuration names a list, so scoping the boolean alone
+ * would have changed nothing there. `findings` ({@link buildFindings}) and
+ * `sawUnmeasured` are deliberately NOT scoped: they observe the whole mission
+ * history (Observe counts, it does not act), so an outcome whose gate passed can
+ * still report an earlier run's UNMEASURED rows.
+ *
+ * ## WHAT THIS GATE CANNOT SEE (rules §9 — written next to the gate)
+ *
+ *  ① A ROW THAT NAMES NO RUN. A `verify.completed` with no `verification_id`, or
+ *    an empty one, cannot be shown to belong to an EARLIER run, so it stays in
+ *    scope and is judged together with the latest run: such rows behave exactly
+ *    as they did before EC-01. The allowlist requires only `result` and
+ *    `evidence`, and a line the ledger had to fold can lose its id (the writer
+ *    itself refuses to write one without it). This is the fail-closed reading,
+ *    and it means one such UNMEASURED row can hold a mission blocked for good.
+ *  ② "LATEST" IS APPEND ORDER. An earlier id that is appended to again becomes
+ *    the latest, and its older rows come with it. No `ts` is read.
+ *  ③ TWO RUNS CAN SHARE ONE ID. An id is `v1-<hash of the verdict>-<stamp at
+ *    second resolution>` and a Stop-hook run that measured nothing hashes a
+ *    constant verdict (`verify-rate.js` header, measured 2026-09-14), so two such
+ *    runs in the same second collide and are judged as one: an UNMEASURED row in
+ *    either blocks. That errs toward blocking.
+ *  ④ WHETHER THE LATEST RUN IS THE ONE THAT MATTERS. A run appended after a
+ *    measured `/verify` becomes the latest and can block a mission the earlier
+ *    run would have opened. The join gate ({@link BlockCode.VERIFICATION_ID_MISMATCH})
+ *    is what ties the run to the review and the declaration; this gate only
+ *    reads the newest.
+ *  ⑤ LIVE REACH IS A LEDGER COUNT, NOT A PROPERTY OF THIS CODE. The tests use
+ *    hand-chosen ids. Counted on the central ledger at 2026-09-29T04:23Z (a
+ *    throwaway probe over `verify.completed` rows grouped by `mission_id`): 69 of
+ *    80 missions carried two or more ids, and under `requiredLayers:
+ *    ["deterministic"]` this rule opens 2 of those 80 that the whole-history rule
+ *    blocked — the two whose LAST run measured the deterministic layer. It opens
+ *    THIS gate only; the review-verdict gate follows it.
+ *
  * @module lib/runtime/artifact-lifecycle-gates
  */
 
@@ -97,9 +151,11 @@ const VERIFY_RESULTS = Object.freeze(['pass', 'fail', VERIFY_RESULT_UNMEASURED])
  * `requiredLayers` is the decision's OTHER half — which layers are required and
  * which are optional — landed 2026-09-15 (limb `outcome-md-emitter`, decision
  * C4 (i)). It is a list of layer names, or `null`. **`null` is the default and
- * means today's behaviour byte for byte: ANY `unmeasured` row blocks.** A list
- * narrows that to the named layers; see {@link normaliseRequiredLayers} for what
- * counts as a readable list and {@link requiredLayerIsUnmeasured} for the rule.
+ * means the strict rule: ANY `unmeasured` row of the latest verification blocks**
+ * (which run is judged is EC-01's, see the header; what blocks inside it is
+ * unchanged). A list narrows that to the named layers; see
+ * {@link normaliseRequiredLayers} for what counts as a readable list and
+ * {@link requiredLayerIsUnmeasured} for the rule.
  *
  * THIS MODULE STILL READS NO CONFIG. The value lives at
  * `artibot.config.json#/review/verify/requiredLayers` (`["deterministic"]`),
@@ -332,7 +388,57 @@ export function buildFindings(gate, redact) {
   return findings;
 }
 
-/** Fold the events this module cares about into one gate-input snapshot. */
+/**
+ * The id a `verify.completed` row names, or `null` when it names none. The empty
+ * string is none: it can be joined to nothing, so it must never become "the
+ * latest run".
+ */
+function verificationIdOf(data) {
+  const id = data.verification_id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/**
+ * The rows the UNMEASURED gate judges (EC-01): those of the LATEST run, plus the
+ * rows that name no run — those cannot be shown to be superseded, so they stay in
+ * scope (header, "cannot see" ①). Pure. The tally is {@link tallyLayer}'s, so a
+ * row lands in the same layer bucket here as in the whole-history tally.
+ *
+ * @param {Array<{id: string|null, data: object}>} verifyRows Ledger order.
+ * @returns {{verificationId: string|null, layers: Map<string, Record<string, number>>}}
+ *   `verificationId` is `null` when no row names a run; every row is then judged.
+ */
+function judgedVerification(verifyRows) {
+  let verificationId = null;
+  for (const row of verifyRows) {
+    if (row.id !== null) verificationId = row.id;
+  }
+  const layers = new Map();
+  for (const row of verifyRows) {
+    if (row.id === null || row.id === verificationId) tallyLayer(layers, row.data);
+  }
+  return { verificationId, layers };
+}
+
+/** Fold one `verify.completed` into the whole-history tally and the row list. */
+function foldVerifyRow(gate, verifyRows, data) {
+  if (typeof data.verification_id === 'string') {
+    gate.verifierVerificationId = data.verification_id;
+  }
+  if (data.result === VERIFY_RESULT_UNMEASURED) gate.sawUnmeasured = true;
+  tallyLayer(gate.layers, data);
+  verifyRows.push({ id: verificationIdOf(data), data });
+}
+
+/**
+ * Fold the events this module cares about into one gate-input snapshot.
+ *
+ * `sawUnmeasured` and `layers` are WHOLE-HISTORY observations: every
+ * `verify.completed` of the mission, whatever run it belongs to. `findings`
+ * reads `layers`, and `tests/verification/verify-writer.test.js` pins both. The
+ * UNMEASURED gate does NOT read them (EC-01); it reads `latestVerification`,
+ * which is the same tally restricted to the latest run — see the header.
+ */
 export function foldGateState(events) {
   const gate = {
     askedOrder: [],
@@ -346,7 +452,10 @@ export function foldGateState(events) {
     sawUnmeasured: false,
     // Insertion-ordered so `findings` comes out in ledger order, not hash order.
     layers: new Map(),
+    // Set after the loop, once "latest" is known.
+    latestVerification: undefined,
   };
+  const verifyRows = [];
 
   for (const { event, data } of events) {
     if (event === 'review.completed') {
@@ -362,11 +471,7 @@ export function foldGateState(events) {
         gate.missionVerificationId = data.verification_id;
       }
     } else if (event === 'verify.completed') {
-      if (typeof data.verification_id === 'string') {
-        gate.verifierVerificationId = data.verification_id;
-      }
-      if (data.result === VERIFY_RESULT_UNMEASURED) gate.sawUnmeasured = true;
-      tallyLayer(gate.layers, data);
+      foldVerifyRow(gate, verifyRows, data);
     } else if (event === 'human.asked') {
       gate.askedOrder.push(data.question_id);
     } else if (event === 'human.resolved') {
@@ -376,6 +481,7 @@ export function foldGateState(events) {
     }
   }
 
+  gate.latestVerification = judgedVerification(verifyRows);
   return gate;
 }
 
@@ -413,7 +519,21 @@ function verificationIdCarriers(gate) {
 }
 
 /**
- * Does some REQUIRED layer fail to show a measurement? Pure, non-throwing.
+ * Does any row of the judged run carry `unmeasured`? Every row lands in exactly
+ * one layer bucket ({@link tallyLayer}), so the buckets' counts are the rows.
+ *
+ * @param {Map<string, Record<string, number>>} layers The judged run's tally.
+ */
+function anyLayerUnmeasured(layers) {
+  for (const counts of layers.values()) {
+    if (counts[VERIFY_RESULT_UNMEASURED] > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Does some REQUIRED layer fail to show a measurement in the JUDGED run? Pure,
+ * non-throwing.
  *
  * Two different facts block, and treating them as one is the point: a layer with
  * an `unmeasured` row was not measured, and a layer with NO row was not measured
@@ -421,7 +541,9 @@ function verificationIdCarriers(gate) {
  * smaller denominator rather than as a gap, which is exactly the failure
  * `verify-writer.js` refuses at the writing end ("all-or-nothing", :24-28). A
  * layer the caller called required and nobody recorded is the strongest case for
- * blocking, not an exemption.
+ * blocking, not an exemption. "Recorded" is judged in the latest run (EC-01,
+ * header): a layer an EARLIER run measured does not stand in for one the latest
+ * run left out.
  *
  * A required layer whose rows are `pass`, `fail`, or `other` does NOT block
  * here. This gate asks "was it measured", and a FAIL is a measurement; the
@@ -430,12 +552,13 @@ function verificationIdCarriers(gate) {
  * Layers outside the required list are never consulted — they are still counted
  * in `findings`, which is what "optional" means under decision C4.
  *
- * @param {{layers: Map<string, Record<string, number>>}} gate
+ * @param {Map<string, Record<string, number>>} layers The judged run's tally
+ *   (`gate.latestVerification.layers`), not the whole-history `gate.layers`.
  * @param {string[]} required Already normalised; never empty.
  */
-function requiredLayerIsUnmeasured(gate, required) {
+function requiredLayerIsUnmeasured(layers, required) {
   for (const layer of required) {
-    const counts = gate.layers.get(layer);
+    const counts = layers.get(layer);
     if (counts === undefined) return true;
     if (counts[VERIFY_RESULT_UNMEASURED] > 0) return true;
   }
@@ -460,19 +583,26 @@ function requiredLayerIsUnmeasured(gate, required) {
  * sentinel buckets are counted and never blocking once a required list is
  * given: a row that names no readable layer cannot be attributed to a required
  * one, and this gate only judges layers it was told to judge.
+ *
+ * BOTH BRANCHES READ THE SAME SCOPE: `gate.latestVerification.layers`, the rows
+ * of the latest run (EC-01, header). Neither reads the whole-history
+ * `gate.sawUnmeasured` / `gate.layers`, which would keep an earlier run's
+ * UNMEASURED row blocking for good.
  */
 function unmeasuredGateBlocks(gate, policy) {
   if (!policy.unmeasuredBlocksOutcome) return false;
+  const judged = gate.latestVerification.layers;
   const required = normaliseRequiredLayers(policy.requiredLayers);
-  if (required === null) return gate.sawUnmeasured;
-  return requiredLayerIsUnmeasured(gate, required);
+  if (required === null) return anyLayerUnmeasured(judged);
+  return requiredLayerIsUnmeasured(judged, required);
 }
 
 /**
  * Gates that stand between `mission.completed` and `outcome.md`.
  *
  * The UNMEASURED gate is the one that answers to policy — both halves of owner
- * decision C4, see {@link DEFAULT_POLICY} and {@link unmeasuredGateBlocks}. With
+ * decision C4, see {@link DEFAULT_POLICY} and {@link unmeasuredGateBlocks} — and
+ * it judges the latest verification only (EC-01, header). With
  * `unmeasuredBlocksOutcome: false`, or with a layer left out of
  * `requiredLayers`, the layer counts are still recorded in `findings`; only the
  * block is withheld. Every other gate here rests on a settled decision and takes
