@@ -185,11 +185,30 @@ describe('pricing parity: same input -> same tier', () => {
     // identity and dropped the entry, and cache-roi returned unpriced. Both
     // readers must now agree on the tier AND on the row, or the session roll-up
     // and the ledger disagree on dollars for the id the host actually serves.
-    // (The row is the sonnet tier row; see tests/core/model-catalog.test.js for
-    // what that does and does not confirm.)
+    // Since the promotion the id IS the sonnet tier id, so `row` is the sonnet
+    // tier row itself (see tests/core/model-catalog.test.js for where its
+    // numbers come from and which of them are multiplier-derived).
     const id = 'claude-sonnet-5-5';
     const row = getPricing(id);
     expect(row, id).not.toBeNull();
+    expect(row.tier).toBe('sonnet');
+    expect(row).toEqual(getPricing('sonnet'));
+    expect(resolveModelIdentity(id)?.tier).toBe('sonnet');
+    expect(_resolvePricing(id)).toEqual(row);
+    for (const [counter, column] of Object.entries(RECEIPT_COLUMN_BY_COUNTER)) {
+      expect(priceUsage({ [counter]: ONE_MTOK }, 'sonnet', id).total).toBe(row[column]);
+    }
+  });
+
+  it('the pre-5.5 sonnet id claude-sonnet-5 keeps its tier and one row in cache-roi and the receipt', () => {
+    // A legacy id since 2026-09-29, but old transcripts and ledger rows still
+    // carry it, so both readers must keep resolving it and must agree on the
+    // row they price it at, whichever row that is: today the sonnet tier row
+    // (no ID_PRICES row); the numbers themselves are pinned as literals in
+    // tests/core/model-catalog.test.js.
+    const id = 'claude-sonnet-5';
+    const row = getPricing(id);
+    expect(row.id).toBe(id);
     expect(row.tier).toBe('sonnet');
     expect(resolveModelIdentity(id)?.tier).toBe('sonnet');
     expect(_resolvePricing(id)).toEqual(row);
