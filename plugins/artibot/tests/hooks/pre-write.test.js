@@ -109,7 +109,13 @@ describe('pre-write hook', () => {
     vi.resetModules();
   });
 
-  describe('approve safe files', () => {
+  // PASS PATH = PASSTHROUGH (CA-04, security). A write no guard blocks must not
+  // be GRANTED: the host reads a legacy `{decision:'approve'}` as "allow" and
+  // skips the permission prompt, so the pass path writes NOTHING and the host's
+  // own permission flow decides. `writeStdout` never being called is the
+  // strongest form of that — it also rules out any permission-granting field.
+  // The real-process bytes are pinned in tests/hooks/pretooluse-passthrough.test.js.
+  describe('pass safe files through (no decision emitted)', () => {
     it.each([
       '/project/src/app.js',
       '/project/src/utils/helpers.ts',
@@ -117,18 +123,16 @@ describe('pre-write hook', () => {
       '/project/package.json',
       '/project/config/settings.json',
       '/project/src/styles/main.css',
-    ])('approves writing to: %s', async (filePath) => {
+    ])('passes through writing to: %s', async (filePath) => {
       readStdin.mockResolvedValue(makeHookData(filePath, 'const x = 1;'));
 
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
-    it('approves when file_path is empty', async () => {
+    it('passes through when file_path is empty', async () => {
       readStdin.mockResolvedValue(JSON.stringify({
         tool_name: 'Write',
         tool_input: {},
@@ -137,9 +141,31 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
+    });
+
+    it('passes through a tool this hook does not own (no Write/Edit)', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        tool_name: 'Read',
+        tool_input: { file_path: '/project/src/app.js' },
+      }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).not.toHaveBeenCalled();
+    });
+
+    it('passes through a misdirected Bash payload (carries a command field)', async () => {
+      readStdin.mockResolvedValue(JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { command: 'ls -la', file_path: '/project/src/app.js' },
+      }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -282,8 +308,8 @@ describe('pre-write hook', () => {
     });
   });
 
-  describe('approve safe content', () => {
-    it('approves code without secrets', async () => {
+  describe('pass safe content through (no decision emitted)', () => {
+    it('passes through code without secrets', async () => {
       readStdin.mockResolvedValue(
         makeHookData('/project/src/app.js', 'function add(a, b) {\n  return a + b;\n}'),
       );
@@ -291,9 +317,7 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('ignores secret patterns in // comments', async () => {
@@ -305,9 +329,7 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
     it('ignores secret patterns in # comments', async () => {
@@ -319,12 +341,10 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
 
-    it('approves env reference without literal secret', async () => {
+    it('passes through an env reference without a literal secret', async () => {
       readStdin.mockResolvedValue(
         makeHookData('/project/src/config.js', 'const key = process.env.API_KEY;'),
       );
@@ -332,9 +352,7 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      expect(writeStdout).not.toHaveBeenCalled();
     });
   });
 
@@ -454,7 +472,7 @@ describe('pre-write hook', () => {
       expect(Object.prototype.hasOwnProperty.call(data, 'gate')).toBe(false);
     });
 
-    it('records nothing for a gate-matching path the chain approves', async () => {
+    it('records nothing for a gate-matching path the chain passes', async () => {
       const configPath = '/project/artibot.config.json';
       readStdin.mockResolvedValue(
         makeHookData(configPath, 'x'.repeat(10), 'Edit', { cwd: CWD, sessionId: SID }),
@@ -463,16 +481,14 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      // This payload is APPROVED by the guard chain, so nothing is recorded —
-      // which is the point: the record follows the block, not the gate matrix.
-      // A gate hit alone never produces a line.
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      // This payload PASSES the guard chain (no decision is emitted), so nothing
+      // is recorded — which is the point: the record follows the block, not the
+      // gate matrix. A gate hit alone never produces a line.
+      expect(writeStdout).not.toHaveBeenCalled();
       expect(ledger.append).not.toHaveBeenCalled();
     });
 
-    it('appends nothing on the approve path', async () => {
+    it('appends nothing on the pass path', async () => {
       readStdin.mockResolvedValue(
         makeHookData('/project/src/app.js', 'const x = 1;', 'Write', { cwd: CWD, sessionId: SID }),
       );
@@ -480,9 +496,8 @@ describe('pre-write hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(writeStdout).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'approve' }),
-      );
+      // No decision on stdout AND no record: the pass path is silent both ways.
+      expect(writeStdout).not.toHaveBeenCalled();
       expect(ledger.append).not.toHaveBeenCalled();
     });
 
