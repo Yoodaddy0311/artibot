@@ -17,7 +17,7 @@
  *  in the recorder: `lib/runtime/human-asked-record.js`.
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -44,16 +44,255 @@ let debounceTimer = null;
 const FLUSH_DEBOUNCE_MS = 200;
 let exitHookInstalled = false;
 
+// ---------------------------------------------------------------------------
+// Write-before-read EXEMPTIONS — an allowlist (CA-04 L4)
+// ---------------------------------------------------------------------------
+// `isWhitelisted` answers one question: may this write skip the prior-Read
+// check? It is NOT an approval. Nothing here gets a write past any other gate,
+// and it decides nothing for files this hook never looks at (`shouldEnforceGuard`
+// stands aside outside the Artibot repo and outside cwd and the plugin root, so
+// `~/.claude/settings.json` from a project cwd never reaches it).
+//
+// It used to say yes to any path CONTAINING `.claude/`. That put settings*.json,
+// hooks.json, dispatch-table.json and artibot.config.json on a "needs no Read"
+// list and matched `not.claude/` besides. Now only four families are exempt;
+// anything else is checked like any other file:
+//
+//   1. CLAUDE.md / CLAUDE.local.md in any directory (unchanged).
+//   2. The interior of a split worktree, `.claude/worktrees/<name>/...`. /split
+//      relies on this, so it is kept exactly: a limb window edits its own files
+//      there with no Read check on each. Only a `.claude` area INSIDE the
+//      worktree is judged again, by 3-4: a worktree's own settings are settings.
+//   3. Auto-memory notes, `.claude/projects/<slug>/memory/<note>.md`.
+//   4. Prose directories, `.claude/{rules,agents,commands,skills}/**`, except
+//      that a protected config basename is never exempt there.
+//
+// The protected basenames mirror `PROTECTED_CONFIG_BASENAMES` in
+// lib/security/human-gate-enforce.js so the gate core and this exemption agree on
+// what a config file is. tests/hooks/pre-write-guard.test.js pins the safe
+// direction: nothing the gate protects is ever exempt here. It walks the gate's
+// own list, so a name added there is covered without touching the test. (A name
+// listed only here would merely be stricter.) They are repeated rather than
+// imported because this hook runs on every Write/Edit and Read and stays free of
+// the gate core's module graph.
+//
+// FAIL CLOSED means one thing here: when in doubt there is NO exemption, and the
+// file gets the ordinary check (which a Read satisfies and one retry lifts).
+//   - Grants match EXACT lower-case names. Denial matches liberally: `.CLAUDE`,
+//     `.claude.` and `.claude ` count as `.claude` (NTFS is case-insensitive and
+//     Windows drops trailing dots and spaces), so a spelling variant can only
+//     lose an exemption, never gain one.
+//   - `..` is resolved BEFORE anything is granted. A path that climbs above its
+//     own start, holds a control character, a `:` in a name (alternate data
+//     stream), a `\\?\` / `\\.\` / UNC prefix, or is longer than any filesystem
+//     accepts is not exempt. A cap can only remove an exemption, never add one.
+//   - A lexical grant is re-checked against where the write would really land
+//     (see `landsInDeniedArea`): junctions, symlinks, 8.3 short names and the
+//     on-disk case are resolved by the filesystem itself.
+//
+// What this does NOT see: a hard link; a bind or network mount; a target swapped
+// between this check and the write; the host's own path normalisation if it
+// differs from Node's; a relative path's real landing (Write/Edit send absolute
+// paths, so a relative one is judged by its spelling alone); and the gate itself:
+// WBR is not a human gate (a Read satisfies it, one retry lifts it). Enforcement
+// for HG-12/HG-13 is CA-04 L2.
+
+/** `.claude` subdirectories holding prose the model edits routinely. */
+const CLAUDE_PROSE_DIRS = new Set(['rules', 'agents', 'commands', 'skills']);
+
+/** Config basenames (lower case) that never ride in on a prose directory. */
+const CLAUDE_CONFIG_BASENAMES = new Set([
+  'settings.json', 'settings.local.json', 'hooks.json', 'dispatch-table.json', 'artibot.config.json',
+]);
+
+/** Longest path considered (Linux PATH_MAX). Longer is simply not exempt. */
+const MAX_EXEMPT_PATH_CHARS = 4096;
+
+/** Most missing trailing components searched past when resolving a not-yet-created path. */
+const MAX_MISSING_COMPONENTS = 64;
+
+const EXEMPT = 'exempt';
+const DENIED = 'denied';
+const PLAIN = 'plain';
+
+/** Windows drops trailing dots and spaces from a name (`.claude.` names `.claude`). */
+function trimDotsAndSpaces(name) {
+  let end = name.length;
+  while (end > 0 && (name[end - 1] === '.' || name[end - 1] === ' ')) end -= 1;
+  return name.slice(0, end);
+}
+
+/** A name for comparison only: as Windows and a case-insensitive disk would read it. */
+function comparable(name) {
+  return trimDotsAndSpaces(name).toLowerCase();
+}
+
+/** True for `.claude` in any spelling the filesystem could read as `.claude`. */
+function looksLikeClaudeDir(name) {
+  return comparable(name) === '.claude';
+}
+
 /**
- * Check if a file path matches the whitelist (Claude config files).
+ * Split a path into name segments with `.` and `..` resolved, or `null` when no
+ * exemption can be derived from it (see the header: control characters, `:` in a
+ * name, device / extended / UNC prefixes, a climb above the start, over-long).
+ * A leading drive designator (`C:`) is dropped; only the names matter here.
+ *
  * @param {string} filePath
+ * @returns {string[]|null}
+ */
+function toSegments(filePath) {
+  if (filePath.length > MAX_EXEMPT_PATH_CHARS) return null;
+  for (let i = 0; i < filePath.length; i += 1) {
+    const code = filePath.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return null;
+  }
+  const slashed = filePath.replace(/\\/g, '/');
+  if (slashed.startsWith('//')) return null;
+  const segments = [];
+  for (const raw of slashed.replace(/^[A-Za-z]:/, '').split('/')) {
+    if (raw === '' || raw === '.') continue;
+    if (raw === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    // `:` names a stream or a drive-relative form; a name made only of dots and
+    // spaces is `.`, `..` or nothing once Windows has trimmed it.
+    if (raw.includes(':') || trimDotsAndSpaces(raw) === '') return null;
+    segments.push(raw);
+  }
+  return segments;
+}
+
+/** @returns {number} index of the first segment at or after `from` that reads as `.claude`, or -1 */
+function indexOfClaudeDir(segments, from) {
+  for (let i = from; i < segments.length; i += 1) {
+    if (looksLikeClaudeDir(segments[i])) return i;
+  }
+  return -1;
+}
+
+/**
+ * Verdict for the segment that follows an exact `.claude` (`kindAt` indexes it).
+ * @returns {'exempt'|'denied'}
+ */
+function claudeAreaVerdict(segments, kindAt) {
+  const kind = segments[kindAt];
+  const last = segments.length - 1;
+  // A second .claude further down is not a shape any allowlist entry describes.
+  if (indexOfClaudeDir(segments, kindAt + 1) !== -1) return DENIED;
+  if (CLAUDE_PROSE_DIRS.has(kind)) {
+    return last > kindAt && !CLAUDE_CONFIG_BASENAMES.has(comparable(segments[last])) ? EXEMPT : DENIED;
+  }
+  const isMemoryNote = kind === 'projects' && last === kindAt + 3
+    && segments[kindAt + 2] === 'memory' && segments[last].endsWith('.md');
+  return isMemoryNote ? EXEMPT : DENIED;
+}
+
+/**
+ * Judge a path by its `.claude` structure alone. Stepping through a worktree
+ * marker (`.claude/worktrees/<name>/` with something inside) makes the rest a
+ * worktree interior: exempt unless a `.claude` area inside it says otherwise.
+ * @returns {'exempt'|'denied'|'plain'} `plain`: no `.claude` anywhere, nothing to grant
+ */
+function claudeVerdict(segments) {
+  let from = 0;
+  let insideWorktree = false;
+  for (;;) {
+    const at = indexOfClaudeDir(segments, from);
+    if (at === -1) return insideWorktree ? EXEMPT : PLAIN;
+    // An aliased spelling (`.CLAUDE`, `.claude.`) never earns an exemption.
+    if (segments[at] !== '.claude') return DENIED;
+    const stepsIntoWorktree = segments[at + 1] === 'worktrees' && at + 3 < segments.length
+      && !looksLikeClaudeDir(segments[at + 2]);
+    if (!stepsIntoWorktree) return claudeAreaVerdict(segments, at + 1);
+    insideWorktree = true;
+    from = at + 3;
+  }
+}
+
+/** Rule 1 (context file anywhere), else the `.claude` structure. */
+function verdictFor(filePath, segments) {
+  if (WHITELIST_BASENAMES.has(path.basename(filePath))) return EXEMPT;
+  return claudeVerdict(segments);
+}
+
+/**
+ * True when `name` exists as an entry that `realpath` could not follow (a link
+ * whose target is gone) or cannot be told apart from one.
+ */
+function entryExistsOrUnknown(name) {
+  try {
+    lstatSync(name);
+    return true;
+  } catch (err) {
+    return err?.code !== 'ENOENT' && err?.code !== 'ENOTDIR';
+  }
+}
+
+/**
+ * Where a write to `filePath` would really land, as the filesystem resolves it:
+ * junctions and symlinks followed, 8.3 short names expanded, on-disk case. A path
+ * that does not exist yet is resolved through its nearest existing ancestor.
+ *
+ * @param {string} filePath
+ * @returns {string|null|undefined} the landing path; `null` when it cannot be
+ *   established (unexpected error, dangling link, too many missing components);
+ *   `undefined` when there is nothing to resolve against (a relative path)
+ */
+function resolveLandingPath(filePath) {
+  if (!path.isAbsolute(filePath)) return undefined;
+  const missing = [];
+  let head = filePath;
+  while (missing.length <= MAX_MISSING_COMPONENTS) {
+    try {
+      const real = realpathSync.native(head);
+      return missing.length === 0 ? real : path.join(real, ...missing.reverse());
+    } catch (err) {
+      const notThere = err?.code === 'ENOENT' || err?.code === 'ENOTDIR';
+      if (!notThere || entryExistsOrUnknown(head)) return null;
+    }
+    const parent = path.dirname(head);
+    if (parent === head) return null;
+    missing.push(path.basename(head));
+    head = parent;
+  }
+  return null;
+}
+
+/**
+ * True when the write would land somewhere the allowlist does not exempt, or
+ * where it lands cannot be established. Only a landing in a `.claude` area off
+ * the allowlist counts: a junction that leaves the worktree WITHOUT entering
+ * `.claude` (worktree-setup.mjs links node_modules that way) keeps its exemption,
+ * which is what the old rule gave it.
+ */
+function landsInDeniedArea(filePath) {
+  const landing = resolveLandingPath(filePath);
+  if (landing === undefined) return false;
+  if (landing === null) return true;
+  const segments = toSegments(landing);
+  return segments === null || verdictFor(landing, segments) === DENIED;
+}
+
+/**
+ * May this write skip the write-before-read check? An allowlist, see the header.
+ * Never throws: any surprise means "not exempt".
+ *
+ * @param {*} filePath
  * @returns {boolean}
  */
-function isWhitelisted(filePath) {
-  if (!filePath) return false;
-  if (WHITELIST_BASENAMES.has(path.basename(filePath))) return true;
-  const normalized = filePath.replace(/\\/g, '/');
-  return normalized.includes('.claude/');
+export function isWhitelisted(filePath) {
+  try {
+    if (typeof filePath !== 'string' || filePath === '') return false;
+    const segments = toSegments(filePath);
+    if (segments === null || verdictFor(filePath, segments) !== EXEMPT) return false;
+    return !landsInDeniedArea(filePath);
+  } catch (err) {
+    process.stderr.write(`[artibot:pre-write-guard] exemption check failed, treating as not exempt: ${err?.message}\n`);
+    return false;
+  }
 }
 
 /**

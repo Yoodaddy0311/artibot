@@ -68,7 +68,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -82,6 +84,7 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'pre-bash.js');
+const GUARD_HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'pre-write-guard.js');
 
 /** Commands whose decision this gate pins, with the record each must produce. */
 const APPROVED = ['ls -la', 'git status', 'echo hello'];
@@ -328,5 +331,185 @@ describe('human.asked question_id format', () => {
     // being absent entirely.
     expect(buildQuestionId(undefined, null, 'x')).toMatch(/^q-nosess-[0-9a-f]{12}$/);
     expect(buildQuestionId('', null, 'x')).toBe(buildQuestionId(undefined, null, 'x'));
+  });
+});
+
+/**
+ * CA-04 L4 — the write-before-read exemption, decided by the REAL pre-write-guard.
+ *
+ * `isWhitelisted` (scripts/hooks/pre-write-guard.js) was narrowed from "any path
+ * containing `.claude/`" to an allowlist. The one consumer that must not notice
+ * is /split: a limb window edits files under `<repo>/.claude/worktrees/<name>/`
+ * and has always done so without a prior-Read check on each. So this suite runs
+ * the actual hook (it reads stdin; it cannot be exercised in-process) against a
+ * sandbox shaped like a split repository and pins the stdout BYTES:
+ *
+ *   - every ordinary worktree file  → `{"decision":"approve"}`, exactly as before;
+ *   - the same situation elsewhere  → the guard's block, exactly as before
+ *     (this is what makes the approve above mean "exempt" and not "guard idle");
+ *   - config that used to ride in on the substring → now the guard's block.
+ *
+ * A case counts only when the file EXISTS and the tracking file is empty: a new
+ * file is approved before the exemption is consulted, and a missing tracking
+ * file takes the guard's degraded branch, so either would make every row pass.
+ *
+ * ── WHAT THIS GATE CANNOT SEE ───────────────────────────────────────────────
+ *  - **The live host payload.** `file_path` here is `path.join` output. How the
+ *    host spells a Windows path in a real payload (drive-letter case, short
+ *    names, slash direction) is not observed; the lexical table in
+ *    tests/hooks/pre-write-guard.test.js covers the spellings, not their origin.
+ *  - **Skipped is not passed.** The case-alias and 8.3-alias rows run on Windows
+ *    only, and the 8.3 row skips itself when the volume has short names off.
+ *  - **Out-of-scope paths.** A file outside cwd and the plugin root never reaches
+ *    the guard's exemption at all (Tier 2), e.g. `~/.claude/settings.json` from a
+ *    project cwd. Nothing here says anything about those; the human gate for them
+ *    is a different layer (CA-04 L2).
+ *  - **A race.** The junction target is resolved when the hook runs; a target
+ *    swapped between the hook and the write is not observed.
+ *  - **Network paths.** UNC and `\\?\` spellings are refused by the lexical
+ *    rules and never reach the filesystem here.
+ */
+describe('pre-write-guard hook: write-before-read exemption decisions (CA-04 L4)', () => {
+  const APPROVE = '{"decision":"approve"}';
+  /** @type {string} */
+  let box;
+  /** @type {string[]} */
+  let trackingFiles = [];
+
+  /** The guard's block stdout for one tool and path, byte for byte. */
+  function blockStdout(tool, target) {
+    return JSON.stringify({
+      decision: 'block',
+      reason: `[WRITE-BEFORE-READ] ${tool} blocked for "${target}". `
+        + 'File exists but was not Read in this session. '
+        + `Read the file first to understand its contents before modifying, then retry the same ${tool}.`,
+    });
+  }
+
+  /**
+   * A repository with one split worktree. Every file a case targets is created,
+   * because the guard only acts on files that exist. Both checkouts carry the
+   * `artibot.config.json` marker the guard's Tier 1 looks for.
+   */
+  function makeSplitSandbox() {
+    const proj = path.join(box, 'proj');
+    const wt = path.join(proj, '.claude', 'worktrees', 'limb-a');
+    const shared = path.join(box, 'shared');
+    const put = (file) => {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, '// fixture\n', 'utf-8');
+    };
+    for (const root of [proj, wt]) {
+      mkdirSync(path.join(root, '.git'), { recursive: true });
+      writeFileSync(path.join(root, 'artibot.config.json'), '{}\n', 'utf-8');
+      put(path.join(root, 'CLAUDE.md'));
+      put(path.join(root, 'src', 'a.js'));
+      put(path.join(root, 'plugins', 'artibot', 'lib', 'x.js'));
+      put(path.join(root, '.claude', 'settings.local.json'));
+      put(path.join(root, '.claude', 'rules', 'r.md'));
+    }
+    put(path.join(proj, 'worktrees', 'limb-a', 'src', 'a.js'));
+    put(path.join(shared, '.claude', 'settings.local.json'));
+    put(path.join(shared, 'node_modules', 'pkg', 'index.js'));
+    // Two junctions out of the worktree. `lnk` lands INSIDE .claude config;
+    // node_modules is the shape scripts/split/worktree-setup.mjs creates.
+    symlinkSync(path.join(shared, '.claude'), path.join(wt, 'lnk'), 'junction');
+    symlinkSync(
+      path.join(shared, 'node_modules'),
+      path.join(wt, 'plugins', 'artibot', 'node_modules'),
+      'junction',
+    );
+    return { proj, wt };
+  }
+
+  /**
+   * Spawn the real guard for one Write/Edit of `target`, with `cwd` as the
+   * process cwd — which is what puts the file in the guard's scope.
+   * @returns {{stdout: string, status: number|null}}
+   */
+  function runGuard({ cwd, target, tool = 'Write' }, tag) {
+    // Unique per case (the loop guard downgrades a repeated block to approve) and
+    // a legal file name: the tracking file is named after it.
+    const sid = `wbr-l4-${process.pid}-${String(tag).replace(/[^A-Za-z0-9]+/g, '-')}`;
+    const tracking = path.join(os.tmpdir(), `artibot-read-tracking-${sid}.json`);
+    // Exists and empty: without it the guard takes its degraded branch and approves.
+    writeFileSync(tracking, '[]', 'utf-8');
+    trackingFiles.push(tracking);
+    const res = spawnSync(process.execPath, [GUARD_HOOK], {
+      input: JSON.stringify({
+        hook_event_name: 'PreToolUse',
+        tool_name: tool,
+        tool_input: { file_path: target },
+        session_id: sid,
+      }),
+      encoding: 'utf-8',
+      windowsHide: true,
+      cwd,
+      env: {
+        ...process.env,
+        // Keep the block fingerprint out of the real plugin `runtime/` dir, and
+        // pin block mode so a host env var cannot turn the block into a warning.
+        CLAUDE_PLUGIN_ROOT: path.join(box, 'plugin'),
+        ARTIBOT_WRITE_GUARD_MODE: 'block',
+      },
+    });
+    return { stdout: String(res.stdout || ''), status: res.status };
+  }
+
+  beforeEach(() => {
+    box = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'artibot-hook-inv-wbr-')));
+  });
+  afterEach(() => {
+    for (const file of trackingFiles) {
+      try { rmSync(file, { force: true }); } catch { /* noop */ }
+    }
+    trackingFiles = [];
+    try { rmSync(box, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  /** `checkout`: 'wt' = the split worktree (also the hook's cwd), 'proj' = the main checkout. */
+  const ROWS = [
+    // ── the split invariant: unchanged bytes ────────────────────────────────
+    { label: 'worktree: ordinary source file', checkout: 'wt', below: ['src', 'a.js'], expectation: 'approve', tool: 'Write' },
+    { label: 'worktree: ordinary source file', checkout: 'wt', below: ['src', 'a.js'], expectation: 'approve', tool: 'Edit' },
+    { label: 'worktree: plugin source file', checkout: 'wt', below: ['plugins', 'artibot', 'lib', 'x.js'], expectation: 'approve', tool: 'Write' },
+    { label: 'worktree: file behind the node_modules junction', checkout: 'wt', below: ['plugins', 'artibot', 'node_modules', 'pkg', 'index.js'], expectation: 'approve', tool: 'Edit' },
+    { label: 'worktree: rules markdown', checkout: 'wt', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
+    { label: 'worktree: CLAUDE.md', checkout: 'wt', below: ['CLAUDE.md'], expectation: 'approve', tool: 'Edit' },
+    { label: 'main checkout: rules markdown', checkout: 'proj', below: ['.claude', 'rules', 'r.md'], expectation: 'approve', tool: 'Write' },
+    // ── what the narrowing removes ──────────────────────────────────────────
+    { label: 'worktree: its own .claude/settings.local.json', checkout: 'wt', below: ['.claude', 'settings.local.json'], expectation: 'block', tool: 'Write' },
+    { label: 'worktree: file behind a junction into .claude config', checkout: 'wt', below: ['lnk', 'settings.local.json'], expectation: 'block', tool: 'Edit' },
+    { label: 'main checkout: .claude/settings.local.json', checkout: 'proj', below: ['.claude', 'settings.local.json'], expectation: 'block', tool: 'Write' },
+    // ── controls: the guard is live, and the exemption is specific ──────────
+    { label: 'CONTROL main checkout: ordinary source file', checkout: 'proj', below: ['src', 'a.js'], expectation: 'block', tool: 'Write' },
+    { label: 'CONTROL look-alike worktree outside .claude/', checkout: 'proj', below: ['worktrees', 'limb-a', 'src', 'a.js'], expectation: 'block', tool: 'Edit' },
+  ];
+
+  it.each(ROWS)('$label → $expectation ($tool)', ({ label, checkout, below, expectation, tool }) => {
+    const { proj, wt } = makeSplitSandbox();
+    const cwd = checkout === 'wt' ? wt : proj;
+    const target = path.join(cwd, ...below);
+    const out = runGuard({ cwd, target, tool }, `${label}-${tool}`);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe(expectation === 'approve' ? APPROVE : blockStdout(tool, target));
+  });
+
+  it('measures the same worktree file as exempt AND as guarded, depending only on its location', () => {
+    const { proj, wt } = makeSplitSandbox();
+    const inWorktree = path.join(wt, 'src', 'a.js');
+    const lookAlike = path.join(proj, 'worktrees', 'limb-a', 'src', 'a.js');
+    expect(runGuard({ cwd: wt, target: inWorktree }, 'pair-a').stdout).toBe(APPROVE);
+    expect(runGuard({ cwd: proj, target: lookAlike }, 'pair-b').stdout).toBe(blockStdout('Write', lookAlike));
+  });
+
+  describe.runIf(process.platform === 'win32')('Windows: NTFS is case-insensitive', () => {
+    it('does not exempt a case-aliased .CLAUDE directory inside the worktree', () => {
+      const { wt } = makeSplitSandbox();
+      const target = path.join(wt, '.CLAUDE', 'settings.local.json');
+      // Same file to NTFS, so the guard sees an existing unread file and blocks.
+      const out = runGuard({ cwd: wt, target }, 'alias-case');
+      expect(out.stdout).toBe(blockStdout('Write', target));
+    });
   });
 });
