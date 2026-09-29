@@ -117,13 +117,23 @@ const input = JSON.parse(readFileSync('/dev/stdin', 'utf8'));
 // Available input fields depend on the event type.
 // See hooks/hooks.json for examples.
 
-const result = {
-  decision: 'approve',
-  reason: 'Custom hook: {name} — no issues found',
-};
+// Output contract: block = print {"decision":"block","reason":"..."} and exit 0;
+// allow = print nothing and exit 0. Never print {"decision":"approve"}: the host
+// reads it as permissionDecision "allow" and skips the permission prompt.
+const blockReason = null; // TODO: set a reason string when this hook must block the call
 
-process.stdout.write(JSON.stringify(result));
+if (blockReason) {
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: blockReason }));
+}
 ```
+
+**Hook output contract** (the scaffold follows it): to block a call, print
+`{"decision":"block","reason":"..."}` and exit 0; to allow, print nothing and exit 0.
+Never scaffold `{"decision":"approve"}`: the host reads the legacy `approve` as
+`permissionDecision: "allow"` and skips the permission prompt (PreToolUse on the Bash
+tool, measured on host 2.1.284; evidence:
+`.artibot/guides/v5-design/evidence/ca04-host-ask-probe.md`, section 3.1). The legacy
+`decision` field takes only `approve` and `block`; `allow` and `warn` are not decisions.
 
 ### create-middleware
 

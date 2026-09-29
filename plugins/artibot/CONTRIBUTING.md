@@ -401,13 +401,18 @@ const filePath = toolInput.file_path ?? '';
 
 const blocked = dangerousPatterns.some(p => filePath.endsWith(p));
 
-const output = {
-  decision: blocked ? 'block' : 'approve',
-  reason: blocked ? `Blocked write to sensitive file: ${filePath}` : undefined,
-};
-
-process.stdout.write(JSON.stringify(output));
+// Block = print {"decision":"block","reason":...}. Allow = print nothing, exit 0.
+if (blocked) {
+  process.stdout.write(JSON.stringify({
+    decision: 'block',
+    reason: `Blocked write to sensitive file: ${filePath}`,
+  }));
+}
 ```
+
+**Output contract**: to block, write `{"decision":"block","reason":"..."}` to stdout; to allow, write **nothing** and exit 0 (passthrough). Never write `{"decision":"approve"}` to allow: the host reads the legacy `approve` as `permissionDecision: "allow"` and skips the permission prompt (PreToolUse on the Bash tool, measured on host 2.1.284; evidence: `.artibot/guides/v5-design/evidence/ca04-host-ask-probe.md`, section 3.1). The legacy `decision` field takes only `approve` and `block`; `allow`, `warn` and upper-case `BLOCK` are schema violations (`CHANGELOG.md` 2.1.1 fixed hooks that emitted `ALLOW`/`BLOCK`).
+
+**한국어**: 차단은 stdout 에 `{"decision":"block","reason":"..."}` 를 쓰고, 허용은 **아무것도 출력하지 않고** exit 0 한다(passthrough). 허용하려고 `{"decision":"approve"}` 를 쓰지 마라 — 호스트가 구식 `approve` 를 `permissionDecision: "allow"` 로 읽어 권한 프롬프트를 건너뛴다(PreToolUse·Bash 도구, 호스트 2.1.284 실측, 위 증거 문서 3.1절). `decision` 에는 `approve` 와 `block` 만 쓸 수 있다.
 
 **Example: Prompt hook (injecting context)**
 

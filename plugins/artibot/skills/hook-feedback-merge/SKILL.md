@@ -22,7 +22,7 @@ tokens: "~1.5K"
 category: "infrastructure"
 agents: [devops-engineer, backend-developer]
 version: "1.0.0"
-source_hash: 32335e1c
+source_hash: ba191989
 whenNotToUse: "Business logic, UI components, or any code that does not interact with the Claude Code hook system; this skill is exclusively for hook pipeline and tool result flow."
 ---
 # Hook Feedback Merge Pattern
@@ -49,11 +49,12 @@ Tool Call (e.g., Edit)
 
 Hooks communicate by writing a single JSON object to stdout:
 
-### Allow / Approve (no interference)
-```json
-{}
-```
-Or simply produce no output.
+### Allow (passthrough -- no interference)
+Print nothing and exit 0. Do not print `{"decision":"approve"}` to allow: the host
+reads the legacy `approve` as `permissionDecision: "allow"` and skips the permission
+prompt (PreToolUse on the Bash tool, measured on host 2.1.284 with `claude -p`;
+evidence: `.artibot/guides/v5-design/evidence/ca04-host-ask-probe.md`, section 3.1).
+Other tools and events are unmeasured, so print nothing there as well.
 
 ### Block (prevent tool execution)
 ```json
@@ -73,7 +74,7 @@ Or simply produce no output.
 ### Structured Feedback (rich metadata)
 ```json
 {
-  "decision": "BLOCK",
+  "decision": "block",
   "reason": "Review gate found 2 issue(s):\n  - Bracket mismatch\n  - Missing tests",
   "issues": ["...", "..."],
   "changedFiles": ["src/foo.js"],
@@ -90,7 +91,7 @@ available to the model as additional context.
 |------|-------|------------|
 | `pre-write-guard.js` | PreToolUse | `decision`, `reason` (block on unread files) |
 | `pre-bash.js` | PreToolUse | `decision`, `reason` (block dangerous commands) |
-| `quality-gate.js` | PostToolUse | `warnings[]`, `decision` (warn on quality issues) |
+| `quality-gate.js` | PostToolUse | `decision`, `reason` (block); `hookSpecificOutput.additionalContext` (warnings) |
 | `stop-review-gate.js` | Stop | `decision`, `reason`, `issues[]`, `changedFiles[]` |
 | `pre-compact.js` | PreCompact | `message`, `summary`, `tokenEstimate` |
 
@@ -99,7 +100,11 @@ available to the model as additional context.
 ### For Hook Authors
 
 1. **Always use `writeStdout()`** (or `writeJSON()`) from `scripts/utils/index.js`
-2. **Use `decision` field** for actionable outcomes: `"block"`, `"allow"`, `"warn"`
+2. **Use `decision` only to block**: `"block"` plus `reason`. The legacy field takes
+   just `"approve"` and `"block"`; anything else (`"allow"`, `"warn"`, `"BLOCK"`) is a
+   schema violation (`CHANGELOG.md` 2.1.1 fixed hooks that emitted `"ALLOW"`/`"BLOCK"`).
+   Never emit `"approve"` (on PreToolUse it skips the permission prompt); to allow on
+   any event, print nothing
 3. **Include `reason`** with human-readable text -- the model reads this
 4. **Add structured data** alongside reason for programmatic consumers
 5. **Keep output small** -- hook output adds to the tool result token cost
@@ -110,10 +115,8 @@ available to the model as additional context.
 // Block pattern
 writeStdout({ decision: 'block', reason: 'File not read before write' });
 
-// Allow pattern (explicit)
-writeStdout({ decision: 'approve' });
-
-// Allow pattern (implicit -- no output means allow)
+// Allow pattern: write nothing and exit 0. Do NOT writeStdout({ decision: 'approve' })
+// -- the host turns it into permissionDecision "allow" and skips the permission prompt.
 ```
 
 ### For Post-Phase Hooks (PostToolUse)
@@ -129,13 +132,15 @@ writeStdout({ decision: 'block', reason: 'Hardcoded secret detected' });
 ### For Stop Hooks
 
 ```js
-// Review result
-writeStdout({
-  decision: issues.length > 0 ? 'BLOCK' : 'ALLOW',
-  reason: 'Review gate summary...',
-  issues,
-  changedFiles,
-});
+// Review result: block only when there are issues, otherwise write nothing
+if (issues.length > 0) {
+  writeStdout({
+    decision: 'block',
+    reason: 'Review gate summary...',
+    issues,
+    changedFiles,
+  });
+}
 ```
 
 ## Best Practices
