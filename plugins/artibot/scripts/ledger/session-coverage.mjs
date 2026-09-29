@@ -18,10 +18,11 @@
  * change the number, and a measuring tool that appends to the stream it measures
  * is its own next data point.
  *
- * THE ARITHMETIC IS NOT HERE. `foldSessionCoverage` (`lib/replay/session-coverage.js`,
- * re-exported from `lib/replay/index.js`) owns every count, and everything in
- * `lib/replay` is pure — no clock, no filesystem. This file is the impure shell:
- * it reads the file, reads the clock once for `measured_at`, and serializes. A
+ * THE ARITHMETIC IS NOT HERE. `foldSessionCoverage` and `foldCoverageViews`
+ * (`lib/replay/session-coverage.js`; the barrel `lib/replay/index.js` re-exports
+ * only the first) own every count, and everything in `lib/replay` is pure — no
+ * clock, no filesystem. This file is the impure shell: it reads the ledger and
+ * the exclusion list, reads the clock once for `measured_at`, and serializes. A
  * count computed here would be a second answer to a question that already has
  * one, and the two would eventually disagree.
  *
@@ -153,12 +154,13 @@
  *    the row; nothing re-derives it. `by_status` counts claims, and the
  *    `disagree` lists exist precisely because a claim and the receipt rows can
  *    contradict each other.
- *  - THE LIVE ANSWER TODAY IS `null`. Measured 2026-09-14T05:15Z against this
- *    machine's parent ledger: `session.ended` 0 rows, `usage.receipt` 72 rows
- *    over 12 sessions. So every ended session is invisible and `coverage:null`
- *    is the correct output, not a bug in this script — the installed SessionEnd
- *    hook has not written a denominator row yet. A non-null number here means
- *    the hook started firing; that is the signal to watch for.
+ *  - THE LIVE ANSWER WAS `null` ONCE, AND IS NOT NOW. Measured
+ *    2026-09-14T05:15Z against this machine's parent ledger: `session.ended` 0
+ *    rows, `usage.receipt` 72 rows over 12 sessions, so `coverage:null` was the
+ *    correct output, not a bug in this script — the installed SessionEnd hook
+ *    had not written a denominator row yet. The first `session.ended` row landed
+ *    2026-09-15 (V5-BACKLOG §4-c); a null on a ledger that HAS such rows would
+ *    now be the anomaly. `null` still means exactly "nothing ended in this read".
  *  - WHAT A `ledger.rejected` LINE REPLACED. Those lines are excluded by the
  *    reader's default and counted in `census.dropped.selection`; a session
  *    whose rows were all rejected is simply absent from both sides.
@@ -413,6 +415,33 @@ function loadExclusion(raw) {
 }
 
 /**
+ * Read the ledger and fold it into the views `report` prints. Throws whatever
+ * the read or the fold throws; the caller turns that into a printed line.
+ *
+ * The window is read FIRST and the whole ledger second, so a row appended
+ * between the two reads can only make the history the larger of the two. With
+ * no `--since` the window IS the whole ledger and is read once.
+ *
+ * @param {{cwd: string, sinceMs: number|null, ids: string[],
+ *          readLedger: typeof readLedgerCensus}} input
+ * @returns {{ledgerPath: string|null, census: object,
+ *            window: object, history: object}} the `report` parts it computes
+ */
+function measure({ cwd, sinceMs, ids, readLedger }) {
+  const windowRead = readLedger(cwd, sinceMs === null ? {} : { since: sinceMs });
+  const historyRead = sinceMs === null ? windowRead : readLedger(cwd, {});
+  const options = { excludeSessions: ids };
+  const window = foldCoverageViews(windowRead.events, options);
+  const history = sinceMs === null ? window : foldCoverageViews(historyRead.events, options);
+  return {
+    ledgerPath: windowRead.census.file.path,
+    census: windowRead.census,
+    window,
+    history,
+  };
+}
+
+/**
  * Run the script.
  *
  * `env` is not a parameter here — unlike `record-verify.mjs` this script has no
@@ -457,23 +486,10 @@ export function main(argv, deps = {}) {
 
   let line;
   try {
-    // The window is read FIRST and the whole ledger second, so a row appended
-    // between the two reads can only make the history the larger of the two.
-    const windowRead = readLedger(cwd, sinceMs === null ? {} : { since: sinceMs });
-    const historyRead = sinceMs === null ? windowRead : readLedger(cwd, {});
-    const options = { excludeSessions: exclusion === null ? [] : exclusion.ids };
-    const windowViews = foldCoverageViews(windowRead.events, options);
-    const historyViews = sinceMs === null
-      ? windowViews
-      : foldCoverageViews(historyRead.events, options);
-    line = report({
-      since,
-      ledgerPath: windowRead.census.file.path,
-      census: windowRead.census,
-      exclusion: echo,
-      window: windowViews,
-      history: historyViews,
+    const measured = measure({
+      cwd, sinceMs, ids: exclusion === null ? [] : exclusion.ids, readLedger,
     });
+    line = report({ since, exclusion: echo, ...measured });
   } catch (err) {
     // An unexpected throw is still an observation outcome, not a usage error:
     // the caller asked a well-formed question and deserves a parseable answer

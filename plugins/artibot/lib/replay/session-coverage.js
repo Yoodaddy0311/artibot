@@ -267,6 +267,61 @@ function collect(list) {
 }
 
 /**
+ * Count every ended session against the receipts, once.
+ *
+ * `with_receipts` and `skipped` are two counters on the two arms of one test,
+ * NOT `ended - with_receipts`: the identity the report promises
+ * (`ended = with_receipts + skipped`) is then a property of the code, and a
+ * test can fail it. The cause column and the drift column are filled in the
+ * same walk, so they cannot describe a different set of sessions than the ratio.
+ *
+ * @param {Map<string, {status: string, reason: string, fallback: boolean,
+ *   unresolved: string[]}>} ended - `collect`'s ended sessions
+ * @param {Set<string>} receiptSessions - sessions with a readable receipt row
+ * @returns {{byStatus: Map<string, number>, byReason: Map<string, number>,
+ *   byCause: Map<string, number>, byModel: Map<string, number>,
+ *   appendedNoReceipt: string[], receiptNotAppended: string[],
+ *   withReceipts: number, skipped: number, fallbackSessions: number,
+ *   driftSessions: number, driftSkipped: number}}
+ */
+function tallySessions(ended, receiptSessions) {
+  const t = {
+    byStatus: new Map(),
+    byReason: new Map(),
+    byCause: new Map(),
+    byModel: new Map(),
+    appendedNoReceipt: [],
+    receiptNotAppended: [],
+    withReceipts: 0,
+    skipped: 0,
+    fallbackSessions: 0,
+    driftSessions: 0,
+    driftSkipped: 0,
+  };
+
+  for (const [sid, report] of ended) {
+    bump(t.byStatus, report.status);
+    bump(t.byReason, report.reason);
+    if (report.fallback) t.fallbackSessions += 1;
+    const joined = receiptSessions.has(sid);
+    if (joined) {
+      t.withReceipts += 1;
+    } else {
+      t.skipped += 1;
+      bump(t.byCause, causeOf(report.reason));
+    }
+    if (report.unresolved.length > 0) {
+      t.driftSessions += 1;
+      if (!joined) t.driftSkipped += 1;
+      for (const model of report.unresolved) bump(t.byModel, model);
+    }
+    if (report.status === STATUS_APPENDED && !joined) t.appendedNoReceipt.push(sid);
+    if (joined && report.status !== STATUS_APPENDED) t.receiptNotAppended.push(sid);
+  }
+  return t;
+}
+
+/**
  * Fold ledger lines into Observe's session-coverage numbers.
  *
  * @param {object[]} events - ledger lines in file order; a non-array reads as
@@ -299,62 +354,27 @@ export function foldSessionCoverage(events) {
   const { ended, receiptSessions, malformedEnded, duplicateEndedRows } = collect(
     Array.isArray(events) ? events : [],
   );
-
-  const byStatus = new Map();
-  const byReason = new Map();
-  const byCause = new Map();
-  const byModel = new Map();
-  const appendedNoReceipt = [];
-  const receiptNotAppended = [];
-  let withReceipts = 0;
-  let skipped = 0;
-  let fallbackSessions = 0;
-  let driftSessions = 0;
-  let driftSkipped = 0;
-
-  for (const [sid, report] of ended) {
-    bump(byStatus, report.status);
-    bump(byReason, report.reason);
-    if (report.fallback) fallbackSessions += 1;
-    const joined = receiptSessions.has(sid);
-    // Two counters on the two arms of one test, not `ended - with_receipts`:
-    // the identity the report promises is then a property of the code and a
-    // test can fail it.
-    if (joined) {
-      withReceipts += 1;
-    } else {
-      skipped += 1;
-      bump(byCause, causeOf(report.reason));
-    }
-    if (report.unresolved.length > 0) {
-      driftSessions += 1;
-      if (!joined) driftSkipped += 1;
-      for (const model of report.unresolved) bump(byModel, model);
-    }
-    if (report.status === STATUS_APPENDED && !joined) appendedNoReceipt.push(sid);
-    if (joined && report.status !== STATUS_APPENDED) receiptNotAppended.push(sid);
-  }
-
+  const t = tallySessions(ended, receiptSessions);
   const receiptOnly = [...receiptSessions].filter((sid) => !ended.has(sid)).sort(cmp);
 
   return {
     ended: ended.size,
-    with_receipts: withReceipts,
-    coverage: ended.size === 0 ? null : withReceipts / ended.size,
-    skipped,
-    skipped_by_cause: sortedCounts(byCause),
+    with_receipts: t.withReceipts,
+    coverage: ended.size === 0 ? null : t.withReceipts / ended.size,
+    skipped: t.skipped,
+    skipped_by_cause: sortedCounts(t.byCause),
     unresolved_models: {
-      sessions: driftSessions,
-      skipped_sessions: driftSkipped,
-      by_model: sortedCounts(byModel),
+      sessions: t.driftSessions,
+      skipped_sessions: t.driftSkipped,
+      by_model: sortedCounts(t.byModel),
     },
-    fallback_sessions: fallbackSessions,
-    by_status: sortedCounts(byStatus),
-    by_reason: sortedCounts(byReason),
+    fallback_sessions: t.fallbackSessions,
+    by_status: sortedCounts(t.byStatus),
+    by_reason: sortedCounts(t.byReason),
     disagree: {
-      status_appended_no_receipt: appendedNoReceipt.sort(cmp),
-      receipt_but_status_not_appended: receiptNotAppended.sort(cmp),
-      count: appendedNoReceipt.length + receiptNotAppended.length,
+      status_appended_no_receipt: t.appendedNoReceipt.sort(cmp),
+      receipt_but_status_not_appended: t.receiptNotAppended.sort(cmp),
+      count: t.appendedNoReceipt.length + t.receiptNotAppended.length,
     },
     receipt_only_sessions: receiptOnly,
     receipt_sessions: receiptSessions.size,

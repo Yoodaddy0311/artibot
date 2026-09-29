@@ -58,6 +58,18 @@
  *    one", so this file stays green if the fold refines which bucket a row
  *    lands in. The bucket rules belong to the fold's own suite.
  *  - THE INSTALLED COPY, and any ledger larger than a handful of rows.
+ *  - THE LIVE MIX. The exclusion cases seed 7 sessions and the `--since` cases 3.
+ *    They prove the flag prints every view and that the identities hold; they do
+ *    not prove what the live ledger's numbers are (that is a run against it).
+ *  - WHY A LISTED SESSION MADE NO MODEL CALL. The CLI takes the list as given.
+ *    What it can show is a listed session that HAS a receipt
+ *    (`exclusion.with_receipts`), and that is all these cases pin.
+ *  - A RACE BETWEEN THE TWO `--since` READS. Window and history are read one
+ *    after the other from a ledger nothing appends to here; whether a row can
+ *    land between them on a live ledger is not something this file exercises.
+ *  - A WINDOW EDGE THAT SPLITS A SESSION. The `--since` seeds hold skipped
+ *    sessions only, on purpose: a receipt row stamped "now" beside an ended row
+ *    stamped in the past would build exactly that edge and test the artifact.
  *
  * @module tests/ledger/session-coverage-cli
  */
