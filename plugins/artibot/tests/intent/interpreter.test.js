@@ -310,6 +310,15 @@ describe('cueMatches', () => {
 // (the tier is missed, which under-serves) instead of failing open. The
 // POSITIVE tables are what keep that from being satisfied by deleting the
 // cues altogether.
+//
+// The review of that follow-up (2026-09-30) found the allowlist still let two
+// kinds of phrase through, and narrowed both the same way. A sequencing word
+// alone ("and commit", "then commit") and a bare determiner ("commit the",
+// "commit all") open the decision idiom ("decide and commit to a plan", "commit
+// all our effort to it"), and the verb stem "이전하" is also 이전 (previous) plus
+// the particle 하고 ("이전하고 비교해줘"). What is listed now is the verb WITH
+// its object, and only the inflections the particle cannot be. So an
+// object-less "... then commit." or "이전하고" is MISSED by design.
 // ---------------------------------------------------------------------------
 describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () => {
   /** @param {string} prompt @returns {string[]} every completion tier with a cue */
@@ -326,6 +335,16 @@ describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () =>
       ['check in with people', 'Please check in with the team about the schedule.'],
       ['check in on a status', 'Can you check in on the status of the build?'],
       ['a commit mentioned as a noun', 'What does the last commit do?'],
+      // Review of the follow-up: the first three are the reviewer's own
+      // sentences, and each was read as a commit by a different phrase
+      // ("and commit", "then commit", "commit all"). The next three are the same
+      // idiom through the sibling phrases that were narrowed with them.
+      ['"and commit" opening a decision idiom', "Let's discuss the options and commit to a plan."],
+      ['"then commit" opening a decision idiom', 'Weigh both, then commit to one.'],
+      ['committing effort, not files ("commit all")', 'commit all our effort to the redesign'],
+      ['a stock decision phrase with no object', 'Both are fine, so pick one and commit.'],
+      ['committing a team, not a change ("commit the")', 'We should commit the team to a firm deadline.'],
+      ['"commit and" followed by a non-git verb', 'A team should commit and deliver on its promises.'],
     ])('does not read %s as a commit request', (_label, prompt) => {
       expect(completionTiers(prompt)).not.toContain('commit');
       expect(interpretIntent({ prompt }).completion_expectation).not.toBe('commit');
@@ -333,7 +352,9 @@ describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () =>
 
     it.each([
       'Fix the typo and commit it.',
-      'Implement the parser, run the tests, then commit.',
+      // Was "... then commit." — an object-less sequencing phrase is no longer a
+      // cue (it is the shape of "then commit to one"), so the request names its object.
+      'Implement the parser, run the tests, then commit it.',
       'Please commit the changes when you are done.',
       'commit these files and push',
       'git commit the fix after review',
@@ -341,6 +362,18 @@ describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () =>
       'Check in the changes once the build is green.',
       'README 오타 고치고 커밋까지 해줘',
       '구현하고 커밋해줘',
+      // One per object phrase that replaced a bare "commit the" / "commit all" /
+      // "commit and" / "and commit" / "then commit".
+      'It is a coin flip, so decide and commit the change.',
+      'Please commit the code.',
+      'Review the diff, then commit the fix.',
+      'Please commit the file.',
+      'Please commit the files.',
+      'Commit all changes.',
+      'Stage everything and commit all the changes.',
+      'Commit all files.',
+      'Commit all the files.',
+      'Refactor the module, then commit and push.',
     ])('still reads %j as a commit request', (prompt) => {
       expect(completionTiers(prompt)).toContain('commit');
     });
@@ -363,6 +396,12 @@ describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () =>
       ['a revert to a previous version', '이전 버전으로 되돌려줘'],
       ['a generic improvement (English)', 'Please upgrade the split command'],
       ['a cosmetic upgrade (English)', 'upgrade the UI so it looks nicer'],
+      // Review of the follow-up: "이전하고" is 이전 (previous) + the particle 하고
+      // ("with"), so it is not the verb "migrate, and". The third row puts an
+      // object particle in front of it and is still a comparison.
+      ['"이전하고" as 이전 + the particle 하고 (compare)', '이전하고 비교해줘'],
+      ['"이전하고" opening a question about the previous state', '이전하고 뭐가 달라졌어?'],
+      ['an object particle before "이전하고" (compare with the previous)', '이번 결과를 이전하고 비교해줘'],
     ])('does not read %s as a migration', (_label, prompt) => {
       expect(purposes(prompt)).not.toContain('migrate');
       expect(interpretIntent({ prompt }).work_purpose).not.toBe('migrate');
@@ -377,6 +416,13 @@ describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () =>
       '데이터베이스 이전 작업을 계획해줘',
       '서버 이전 계획을 세워줘',
       '데이터를 새 저장소로 이전했다',
+      // The verb inflections that replaced the bare stem "이전하": none of them
+      // can be read as 이전 + the particle 하고.
+      '서버를 이전하려고 해',
+      '서버를 이전하는 절차가 필요해',
+      'DB 를 이전할 계획이야',
+      '서버를 이전하면 다운타임이 얼마나 생겨?',
+      '서버를 이전하기 전에 백업해줘',
       'postgres 로 마이그레이션 해줘',
       'upgrade to node 22',
       'upgrade the dependencies to the latest major version',
@@ -388,11 +434,14 @@ describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () =>
   });
 
   it('records the allowlisted phrase, not a bare word, as the evidence cue', () => {
-    const { evidence } = interpretIntent({ prompt: '서버를 새 리전으로 이전해줘 그리고 커밋해줘 then commit' });
+    const { evidence } = interpretIntent({ prompt: '서버를 새 리전으로 이전해줘 그리고 커밋해줘 then commit the change' });
     const cues = evidence.filter((e) => e.value === 'migrate' || e.value === 'commit').map((e) => e.cue);
     expect(cues).toContain('이전해');
-    expect(cues).toContain('then commit');
+    expect(cues).toContain('commit the change');
     expect(cues).not.toContain('이전');
     expect(cues).not.toContain('commit');
+    // Neither the sequencing word nor the bare determiner is a cue on its own.
+    expect(cues).not.toContain('then commit');
+    expect(cues).not.toContain('commit the');
   });
 });

@@ -81,12 +81,18 @@
  *  carry. So every line now also carries `interpretation_status`, a closed
  *  vocabulary ({@link INTERPRETATION_STATUSES}: `ok` | `threw` | `absent`) and
  *  a REQUIRED key for the same reason as the marker: a row that lost it would
- *  read as one written before CA-15. A row from before this change has NO such
- *  key at all, and that absence is what marks it. `threw` is reported by the
- *  caller (`input.interpretationThrew`), because only the caller can see the
- *  throw; the recorder maps the fact onto the vocabulary and never sees the
- *  error. `interpretation_present` is kept as it was (readers of SH-18 and the
- *  Q2-O1 flip criteria count it), and is true exactly when the status is `ok`.
+ *  read as one written before this change. A row from before this change has NO
+ *  such key at all, and that absence is what marks it. That is wider than
+ *  "before CA-15": the CA-15 input fold (b6a152cf) already shipped in v4.69.0, so
+ *  an install of that release wrote rows that carry a real interpretation
+ *  (`interpretation_present:true`) or a throw (`false`) and still have no status
+ *  key. A throw from that stretch and a row from before CA-15 both read `false`
+ *  without the key, so telling them apart still takes `ts` against the CA-15
+ *  landing. `threw` is reported by the caller (`input.interpretationThrew`),
+ *  because only the caller can see the throw; the recorder maps the fact onto
+ *  the vocabulary and never sees the error. `interpretation_present` is kept as
+ *  it was (readers of SH-18 and the Q2-O1 flip criteria count it), and is true
+ *  exactly when the status is `ok`.
  *
  * ── WHY config IS NOT FORWARDED ─────────────────────────────────────────────
  *  `evaluateConditions` honours `config.question_gate.force`, which pins a

@@ -456,7 +456,8 @@ describe('CA-15 gate inputs — the interpreter cannot reach its neighbours', ()
     expect(run.mission.question_gate).toBe('appended');
     expect(run.gate.interpretation_present).toBe(false);
     // The throw is recorded as one, not as a caller that supplied none, and not
-    // as a row written before CA-15 (which has no status key at all).
+    // as a row written before this key existed (no status key at all: every
+    // pre-CA-15 row, and every row v4.69.0 wrote after the CA-15 input fold).
     expect(run.gate.interpretation_status).toBe('threw');
     expect(flags(run.gate)).toEqual([false, false, false, false]);
     expect(run.prepared.userPrompt).toBe(`${S1}${COMMIT_PROMPT}`);

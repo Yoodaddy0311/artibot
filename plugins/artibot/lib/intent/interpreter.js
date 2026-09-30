@@ -228,6 +228,11 @@ export const WORK_PURPOSE_CUES = Object.freeze({
   // dependency or relocation signal. A phrasing that is not listed is MISSED
   // rather than guessed at (fails toward doing less; e.g. "18 로 업그레이드해줘"
   // is not a cue). Both directions are pinned in tests/intent/interpreter.test.js.
+  // The verb stem "이전하" is not a cue either (review of that follow-up): "이전하고"
+  // is "migrate, and" but also 이전 (previous) + the particle 하고 ("with"), so
+  // "이전하고 비교해줘" read as a migration. Only the inflections the particle
+  // cannot be are listed (이전 + 해 / 했 / 하려 / 하는 / 할 / 하면 / 하기);
+  // "이전하고" itself is MISSED.
   migrate: Object.freeze([
     'migrate', 'migration', 'port to', 'backfill', 'cutover',
     'upgrade to', 'upgrade from', 'version upgrade', 'major upgrade',
@@ -235,7 +240,7 @@ export const WORK_PURPOSE_CUES = Object.freeze({
     '마이그레이션', '이관',
     '버전 업그레이드', '버전을 업그레이드', '버전으로 업그레이드', '버전업', '메이저 업그레이드',
     '의존성 업그레이드', '패키지 업그레이드', '라이브러리 업그레이드', '프레임워크 업그레이드',
-    '이전하', '이전해', '이전했',
+    '이전해', '이전했', '이전하려', '이전하는', '이전할', '이전하면', '이전하기',
     '서버 이전', '데이터 이전', '데이터베이스 이전', 'db 이전', '도메인 이전',
     '리전 이전', '클라우드 이전',
   ]),
@@ -306,19 +311,30 @@ export const COMPLETION_CUES = Object.freeze({
     '테스트', '검증', '커버리지',
   ]),
   // ALLOWLIST OF PHRASES for the English cues (CA-15 follow-up a, measured
-  // 2026-09-30). A bare "commit" read "so commit to it" (a decision idiom), "commit
-  // to memory" and "what does the last commit do?" as a request to commit, and a
-  // bare "check in" read "check in with the team". `commit` is an ESCALATING tier
-  // (question-gate.js#ESCALATING_COMPLETIONS), so each false positive made gate
-  // conditions 2 and 4 true. What is listed is the verb with an object or a
-  // sequencing word ("commit the", "then commit") or an unambiguous git target
-  // ("commit to main"). An unlisted phrasing ("please commit.") is MISSED, which
-  // fails toward doing less. Korean "커밋" is unchanged. Both directions are
+  // 2026-09-30; narrowed again in its review). A bare "commit" read "so commit to
+  // it" (a decision idiom), "commit to memory" and "what does the last commit
+  // do?" as a request to commit, and a bare "check in" read "check in with the
+  // team". `commit` is an ESCALATING tier (question-gate.js#ESCALATING_COMPLETIONS),
+  // so each false positive made gate conditions 2 and 4 true. What is listed is
+  // the verb WITH what it commits: a pronoun ("commit it"), "the" / "all" plus a
+  // noun a commit holds (change, code, fix, file), or an unambiguous git target
+  // ("commit to main", "commit and push"). A sequencing word alone is not enough,
+  // and neither is a bare determiner: "decide and commit to a plan", "weigh both,
+  // then commit to one", "commit the team to a deadline" and "commit all our
+  // effort to it" are the decision idiom, not git. An unlisted phrasing ("please
+  // commit.", "then commit.", "commit the typo fix") is MISSED, which fails toward
+  // doing less. Three shapes still read as a commit, because no phrase list can
+  // tell them from the real thing: a pronoun object ("commit it to memory"), the
+  // temporal "commit when / after / once", and the command merely named ("what
+  // does git commit do?"). Korean "커밋" is unchanged. Both directions are
   // pinned in tests/intent/interpreter.test.js.
   commit: Object.freeze([
-    'git commit', 'commit it', 'commit this', 'commit these', 'commit them', 'commit the',
-    'commit all', 'commit everything', 'commit changes', 'commit and', 'and commit',
-    'then commit', 'commit when', 'commit after', 'commit once',
+    'git commit', 'commit it', 'commit this', 'commit these', 'commit them',
+    'commit the change', 'commit the changes', 'commit the code', 'commit the fix',
+    'commit the file', 'commit the files',
+    'commit all changes', 'commit all the changes', 'commit all files',
+    'commit all the files', 'commit everything', 'commit changes', 'commit and push',
+    'commit when', 'commit after', 'commit once',
     'make a commit', 'create a commit',
     'commit to git', 'commit to main', 'commit to master',
     'check in the changes', 'check in your changes', 'check in the code',
