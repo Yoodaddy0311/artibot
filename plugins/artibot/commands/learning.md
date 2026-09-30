@@ -72,7 +72,7 @@ background/SessionEnd auto-enqueue (privacy-sensitive promotion stays explicit).
 dashboard. Pass everything AFTER the `review` token to the review script:
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -f "$PLUGIN_ROOT/scripts/ledger-review.js" ] || PLUGIN_ROOT="$HOME/.claude/artibot"
 node "${PLUGIN_ROOT}/scripts/ledger-review.js" $ARGUMENTS
 ```
 
@@ -86,7 +86,7 @@ the user they can `approve`/`reject` by id (the output already prints the hint).
 1. Run the diagnostic script via Bash:
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -f "$PLUGIN_ROOT/scripts/learning-diag.js" ] || PLUGIN_ROOT="$HOME/.claude/artibot"
 node "${PLUGIN_ROOT}/scripts/learning-diag.js" $ARGUMENTS
 ```
 

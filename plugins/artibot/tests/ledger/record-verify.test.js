@@ -668,7 +668,7 @@ const DOC_CALL = 'node "$REC" --status <PASS|FAIL> --command "<one-line summary>
  * call naming only the first spelling records nothing.
  */
 const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
-  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs";'
+  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/record-verify.mjs";'
   + ' [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs";'
   + ` if [ -f "$REC" ]; then ${DOC_CALL};`
   + ' else echo "record-verify not found - outcome NOT recorded"; fi';

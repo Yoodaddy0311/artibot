@@ -16,12 +16,18 @@
  *     dispatch-table.json, carries the script path in double quotes. (The regex in
  *     tests/hooks-schema-shape.test.js pins the same shape for hooks.json; this file
  *     adds the dispatch table, whose copies must equal hooks.json's.)
- *  2. Behaviour: each distinct command is rendered with the token replaced by a real
+ *  2. Behaviour: a representative set of commands (one per argument shape, one
+ *     dispatcher, and the two dispatch-table commands; a guard requires it to cover
+ *     every shape that occurs) is rendered with the token replaced by a real
  *     directory whose name holds a space and a parenthesis, then RUN under bash and
- *     under the platform's default shell (`cmd.exe` on Windows, `sh` elsewhere). A
- *     stub script at that path reports the arguments it received, so the test
- *     proves the script was found AND the arguments (`start`, `teammate-update`)
- *     survived the quoting.
+ *     under the platform's default shell (`cmd.exe` on Windows, `sh` elsewhere),
+ *     chained into one shell each to keep the process count down. A stub script at
+ *     that path reports the arguments it received, so the test proves the script was
+ *     found AND the arguments (`start`, `teammate-update`) survived the quoting.
+ *     Why a set and not all 30: the spelling check in (1) already pins every command
+ *     to one shape, and node start-up (~0.5 s loaded) made the exhaustive run time
+ *     out in a parallel full run. The exhaustive run against the REAL scripts was a
+ *     one-off measurement (30 of 30 fail unquoted, 0 of 30 quoted, 2026-09-30).
  *  3. A negative control: the same commands with the quotes removed FAIL under the
  *     same shells. Without it, "the quoted form runs" would also be true if the
  *     directory name did not exercise the problem at all.
@@ -131,42 +137,94 @@ describe('hook commands: they run from a plugin root with a space and a parenthe
     return stripQuotes ? line.replaceAll('"', '') : line;
   };
 
-  /** Run one rendered command; `viaBash` picks bash, otherwise the platform default shell. */
-  const run = (line, viaBash) => {
-    const opts = { encoding: 'utf-8', timeout: 20000, cwd: base };
+  /** Run one rendered line; `viaBash` picks bash, otherwise the platform default shell. */
+  const run = (line, viaBash, timeout = 30000) => {
+    const opts = { encoding: 'utf-8', timeout, cwd: base };
     return viaBash ? spawnSync('bash', ['-c', line], opts) : spawnSync(line, { ...opts, shell: true });
   };
 
-  /** Commands whose run did not exit 0 with exactly their own arguments on stdout. */
-  const failures = (commands, viaBash, stripQuotes) => commands.flatMap((command) => {
-    const r = run(rendered(command, stripQuotes), viaBash);
-    const ok = r.status === 0 && r.stdout === JSON.stringify(parts(command).args);
-    return ok ? [] : [`${command} -> exit ${r.status}, stdout ${JSON.stringify(r.stdout)}`];
+  // Spawn budget. Starting a shell and a node per command for all 26 distinct commands made ~70
+  // process trees in series; on a loaded Windows machine node start-up alone is ~0.5 s, and both
+  // exhaustive cases timed out (37-62 s) in a parallel full run while passing alone. The runtime
+  // proof only has to cover each SHAPE of command, because the static checks above already pin
+  // that all 30 commands share one spelling. So the commands that RUN are a representative set,
+  // chained with `&&` into ONE shell per shell type (the chain only reaches the end if every
+  // command found its script and exited 0, and stdout is the concatenation of each stub's own
+  // arguments). The exhaustive proof against the real scripts was a one-off measurement, not
+  // this test. The timeouts are sized for a loaded Windows runner, not for one machine.
+  const CHAIN_TIMEOUT_MS = 120000;
+  const CASE_TIMEOUT_MS = 150000;
+
+  const shapeOf = (command) => parts(command).args.length;
+  const REPRESENTATIVE = [...new Set([
+    DISTINCT.find((command) => shapeOf(command) === 0),
+    DISTINCT.find((command) => shapeOf(command) > 0),
+    DISTINCT.find((command) => /^node "[^"]*\/_[a-z]+-dispatcher\.js"$/.test(command)),
+    ...SINGLE_COMMANDS,
+  ])];
+
+  const chain = (commands) => commands.map((command) => rendered(command)).join(' && ');
+  const expectedStdout = (commands) => commands.map((command) => JSON.stringify(parts(command).args)).join('');
+
+  /** Run a chain in one shell; when it falls short, name the first command that did not report. */
+  function runChain(commands, viaBash) {
+    const r = run(chain(commands), viaBash, CHAIN_TIMEOUT_MS);
+    const stdout = String(r.stdout ?? '');
+    let consumed = 0;
+    let reported = 0;
+    for (const command of commands) {
+      const next = JSON.stringify(parts(command).args);
+      if (!stdout.startsWith(next, consumed)) break;
+      consumed += next.length;
+      reported += 1;
+    }
+    return {
+      status: r.status,
+      ok: r.status === 0 && stdout === expectedStdout(commands),
+      stoppedBefore: reported < commands.length ? commands[reported] : null,
+    };
+  }
+
+  /** The unquoted spelling of a command run on its own: did it fail, as it must? */
+  const failsUnquoted = (command, viaBash) => {
+    const r = run(rendered(command, true), viaBash);
+    return r.status !== 0 || String(r.stdout ?? '') !== JSON.stringify(parts(command).args);
+  };
+
+  // The negative controls run the first three representatives, one command at a time.
+  const SAMPLE = REPRESENTATIVE.slice(0, 3);
+
+  it('the representative set covers every argument shape of every hook command, and is far smaller', () => {
+    const shapes = (commands) => [...new Set(commands.map(shapeOf))].sort();
+    expect(shapes(REPRESENTATIVE)).toEqual(shapes(DISTINCT));
+    expect(shapes(REPRESENTATIVE).length).toBeGreaterThanOrEqual(2);
+    expect(REPRESENTATIVE.every((command) => DISTINCT.includes(command))).toBe(true);
+    expect(REPRESENTATIVE.length).toBeLessThan(DISTINCT.length / 2);
+    expect(SAMPLE.some((command) => shapeOf(command) === 0) && SAMPLE.some((command) => shapeOf(command) > 0)).toBe(true);
   });
 
-  // The negative controls run a sample (every command that carries arguments, plus every
-  // sixth one) to keep the spawn count down; the positive runs below cover them all.
-  const SAMPLE = DISTINCT.filter((command, i) => i % 6 === 0 || parts(command).args.length > 0);
+  it('the chain check reports where it stopped (self-check on a chain that breaks on purpose)', () => {
+    const broken = [DISTINCT[0], `node "${TOKEN}/scripts/hooks/not-there.js"`, DISTINCT[1]];
+    const r = runChain(broken, false);
+    expect(r.ok).toBe(false);
+    expect(r.stoppedBefore).toBe(broken[1]);
+  }, CASE_TIMEOUT_MS);
 
-  it('the negative-control sample is a real sample (it includes commands with arguments)', () => {
-    expect(SAMPLE.length).toBeGreaterThanOrEqual(5);
-    expect(SAMPLE.some((command) => parts(command).args.length > 0)).toBe(true);
-    expect(SAMPLE.length).toBeLessThan(DISTINCT.length);
-  });
+  it.skipIf(!bash.ok)('the representative commands run under bash (one shell, chained with &&)', () => {
+    const r = runChain(REPRESENTATIVE, true);
+    expect(r.ok, `chain stopped before: ${r.stoppedBefore} (exit ${r.status})`).toBe(true);
+  }, CASE_TIMEOUT_MS);
 
-  it.skipIf(!bash.ok)('every distinct command runs under bash', () => {
-    expect(failures(DISTINCT, true, false)).toEqual([]);
-  });
+  it('the representative commands run under the platform default shell (one shell, chained with &&)', () => {
+    const r = runChain(REPRESENTATIVE, false);
+    expect(r.ok, `chain stopped before: ${r.stoppedBefore} (exit ${r.status})`).toBe(true);
+  }, CASE_TIMEOUT_MS);
 
-  it('every distinct command runs under the platform default shell', () => {
-    expect(failures(DISTINCT, false, false)).toEqual([]);
-  });
+  it.skipIf(!bash.ok)('negative control: the sampled commands WITHOUT quotes all fail under bash', () => {
+    expect(SAMPLE.filter((command) => !failsUnquoted(command, true))).toEqual([]);
+  }, CASE_TIMEOUT_MS);
 
-  it.skipIf(!bash.ok)('negative control: the same commands WITHOUT quotes all fail under bash', () => {
-    expect(failures(SAMPLE, true, true).length).toBe(SAMPLE.length);
-  });
-
-  it('negative control: the same commands WITHOUT quotes all fail under the platform default shell', () => {
-    expect(failures(SAMPLE, false, true).length).toBe(SAMPLE.length);
-  });
+  it('negative control: the sampled commands WITHOUT quotes all fail under the platform default shell', () => {
+    expect(SAMPLE.filter((command) => !failsUnquoted(command, false))).toEqual([]);
+  }, CASE_TIMEOUT_MS);
 });

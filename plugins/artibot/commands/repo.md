@@ -118,7 +118,7 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 
    ```bash
    F="lib/git/repo-acquire.js"; R=""; P="$HOME/.claude/plugins"
-   for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+   for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
    [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
    [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
    [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
@@ -127,10 +127,10 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
    Then acquire each URL. The module is loaded through a `file://` URL built from `<pluginRoot>` (a bare absolute path fails to import on Windows):
 
    ```bash
-   node --input-type=module -e "import path from 'node:path'; import { pathToFileURL } from 'node:url'; const{acquireRepo,formatSourceStamp}=await import(pathToFileURL(path.join(process.argv[1],'lib/git/repo-acquire.js')).href);const r=acquireRepo(process.argv[2],{deep:process.argv[3]==='deep'});console.log(JSON.stringify(r,null,2));console.log(formatSourceStamp(r));" "<pluginRoot>" "https://github.com/owner/repo"
+   node --input-type=module -e "import path from 'node:path'; import { pathToFileURL } from 'node:url'; const{acquireRepo,formatSourceStamp}=await import(pathToFileURL(path.join(process.argv[1],'lib/git/repo-acquire.js')).href);const r=acquireRepo(process.argv[2],{deep:['deep','--deep'].includes(process.argv[3])});console.log(JSON.stringify(r,null,2));console.log(formatSourceStamp(r));" "<pluginRoot>" "https://github.com/owner/repo"
    ```
 
-   Pass `--deep` through as the third argument for full history, and `{skipClone:true}` for `--compare-only` / `--skip-clone`. **Hand every teammate its `localPath` *and* `sourceSha`.** `sourceSha` is the commit each `file:line` in the report was read against — without it the citations are unverifiable a week later, so it goes in the report header (`formatSourceStamp`). A `RepoInputError` or `RepoAcquireError` for one URL drops that URL from the batch; report the code and continue with the rest.
+   Pass `deep` (or `--deep`) as the third argument for full history, and `{skipClone:true}` for `--compare-only` / `--skip-clone`. **Hand every teammate its `localPath` *and* `sourceSha`.** `sourceSha` is the commit each `file:line` in the report was read against — without it the citations are unverifiable a week later, so it goes in the report header (`formatSourceStamp`). A `RepoInputError` or `RepoAcquireError` for one URL drops that URL from the batch; report the code and continue with the rest.
 3. **Structure Scan** — count agents/commands/skills/hooks/lib/tests per repo
 4. **Delegate**:
    - If 1 URL → single `repo-benchmarker` agent

@@ -122,7 +122,7 @@ const EVIDENCE_ARG = ' --evidence "<path:line|command>"';
  * edit; the parity test at the bottom ties it back to `verify.md`.
  */
 const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
-  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs";'
+  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/record-verify.mjs";'
   + ' [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs";'
   + ' if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>"'
   + EVIDENCE_ARG
@@ -135,7 +135,7 @@ const DOC_FLAGS = ['--status', '--command', '--evidence', '--session', '--cwd'];
 /** The three places the script may live, in the order the chain must try them. */
 const CHAIN = [
   '$HOME/.claude/artibot/scripts/ledger/record-verify.mjs',
-  '${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs',
+  '${CLAUDE_PLUGIN_ROOT}/scripts/ledger/record-verify.mjs',
   'plugins/artibot/scripts/ledger/record-verify.mjs',
 ];
 
@@ -324,8 +324,10 @@ describe.each(CARRIERS)('verify record step: $file', (carrier) => {
     expect(lines, `${file} must hold the invocation on exactly one line`).toHaveLength(1);
     const [line] = lines;
 
-    // Cause (b): all three locations, and in this order — `$HOME` first because
-    // `${CLAUDE_PLUGIN_ROOT}` can be empty in a Bash shell.
+    // Cause (b): all three locations, and in this order — `$HOME` first because the
+    // CLAUDE_PLUGIN_ROOT environment variable can be empty in a Bash shell. The second
+    // location is the exact braced token, which the HOST replaces inline with the plugin
+    // path when the command loads (measured 2026-09-30); the `:-` spelling is not replaced.
     const at = CHAIN.map((part) => line.indexOf(part));
     expect(at.every((i) => i > -1), `every REC location present: ${JSON.stringify(at)}`).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);

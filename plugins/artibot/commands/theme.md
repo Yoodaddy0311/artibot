@@ -32,12 +32,12 @@ Parse `$ARGUMENTS`:
 
 ### `/theme` 또는 `/theme list`
 ```
-Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
+Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
 ```
 출력을 그대로 사용자에게 보여주고, "적용하려면 `/theme neon-city`" 안내. (엔진 미발견 안내가 나오면 그대로 사용자에게 전달.)
 
 ### `/theme <name>` (적용)
-1. 다음 실행: `Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" <name>; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi`
+1. 다음 실행: `Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" <name>; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi`
 2. 엔진 출력(적용된 표면)을 사용자에게 보여준다. (엔진 미발견 안내가 나오면 그대로 전달.)
 3. **반드시 사용자에게 다음 3가지를 안내**:
    - statusLine/색상은 **화면 갱신 또는 Claude Code 재시작 시** 완전 반영
@@ -46,7 +46,7 @@ Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] ||
 
 ### `/theme reset` (원복)
 ```
-Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" reset; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
+Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" reset; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
 ```
 + "output-style은 엔진이 이전 값(또는 기본)으로 **자동 복원**한다 — 별도 명령 불필요" 안내.
 

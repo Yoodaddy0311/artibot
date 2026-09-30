@@ -447,7 +447,7 @@ function readHookCommands(root) {
   for (const [event, groups] of Object.entries(events)) {
     for (const group of Array.isArray(groups) ? groups : []) {
       for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) {
-        const command = typeof hook?.command === 'string' ? hook.command.trim().replaceAll('"', '') : ''; // the path is quoted in hooks.json
+        const command = typeof hook?.command === 'string' ? hook.command.trim().replace(/"([^"]*\.(?:c|m)?js)"/, '$1') : ''; // unwrap only the quoted script path
         // The script basename plus its arguments, e.g. `workflow-status.js notification`.
         const tail = command.match(/[^\s/\\]+\.(?:c|m)?js\b.*$/)?.[0] ?? command;
         commands.push({ event, tail, script: tail.split(/\s/)[0] });

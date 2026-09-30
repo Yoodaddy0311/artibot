@@ -65,8 +65,8 @@ function directEntries() {
   for (const [event, groups] of Object.entries(HOOKS_JSON.hooks)) {
     for (const group of groups) {
       for (const hook of group.hooks) {
-        // The script path is quoted in hooks.json; drop the quotes so `script` is the bare basename.
-        const tail = hook.command.trim().replaceAll('"', '').match(/[^\s/\\]+\.(?:c|m)?js\b.*$/)?.[0];
+        // The script path is quoted in hooks.json; unwrap just that path so `script` is the bare basename.
+        const tail = hook.command.trim().replace(/"([^"]*\.(?:c|m)?js)"/, '$1').match(/[^\s/\\]+\.(?:c|m)?js\b.*$/)?.[0];
         const [script, ...args] = tail.split(/\s+/);
         if (DISPATCHER_SCRIPTS.has(script)) continue;
         out.push({

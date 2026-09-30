@@ -35,7 +35,7 @@ Parse $ARGUMENTS:
 
 ```bash
 F="scripts/ledger/topology-agreement.mjs"; R=""; P="$HOME/.claude/plugins"
-for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
 [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
 [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
 [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"

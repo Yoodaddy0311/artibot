@@ -474,6 +474,26 @@ describe('existence-audit: hooks registered directly in hooks.json (OB-24)', () 
     expect(b.hooksOutsideCarrier.entries).toEqual(['SessionEnd stray-a.js', 'UserPromptSubmit stray-b.mjs arg']);
   });
 
+  it('unwraps only the quoted script path: a quoted ARGUMENT keeps its quotes', () => {
+    const project = makeProject('D6');
+    const plugin = makePlugin('dplug6');
+    const entryFor = (script, args = '') => ({
+      hooks: [{ type: 'command', command: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${script}"${args}` }],
+    });
+    put(plugin, 'hooks/hooks.json', `${JSON.stringify({
+      hooks: {
+        SessionStart: [entryFor('_sessionstart-dispatcher.js')],
+        Stop: [entryFor('_stop-dispatcher.js')],
+        SessionEnd: [entryFor('stray-c.js', ' "two words"')],
+      },
+    })}\n`);
+    seedLedger(project);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.hooksOutsideCarrier.entries).toEqual(['SessionEnd stray-c.js "two words"']);
+  });
+
   it.each([
     ['absent', null, 'absent'],
     ['not JSON', '{ nope', 'malformed'],

@@ -80,7 +80,7 @@ const HEADING = '모델별 사용량·비용 (자동 — 생략 금지)';
  */
 const CHAIN = 'SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}";'
   + ' USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs";'
-  + ' [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs";'
+  + ' [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/usage-cost-table.mjs";'
   + ' [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs";'
   + ' if [ -f "$USG" ]; then node "$USG"';
 
@@ -89,7 +89,7 @@ const TAIL = '; else echo "usage-cost-table not found - 표 생략"; fi';
 /** The three places, in the order the chain must try them. */
 const CHAIN_ORDER = [
   '$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs',
-  '${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs',
+  '${CLAUDE_PLUGIN_ROOT}/scripts/ledger/usage-cost-table.mjs',
   'plugins/artibot/scripts/ledger/usage-cost-table.mjs',
 ];
 

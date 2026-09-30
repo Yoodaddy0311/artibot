@@ -53,10 +53,10 @@ Parse $ARGUMENTS:
    - Run exactly this, filling in the three placeholders:
 
 ```
-REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
+REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
 ```
 
-   - `<project root>` is the absolute project root resolved in **Parse** (Execution Flow item 1). `$HOME` comes first because `${CLAUDE_PLUGIN_ROOT}` can be empty in a Bash shell, and the bare relative path only resolves inside the source repository.
+   - `<project root>` is the absolute project root resolved in **Parse** (Execution Flow item 1). `$HOME` comes first because the `CLAUDE_PLUGIN_ROOT` environment variable can be empty in a Bash shell (the second location works anyway: the host writes the plugin path into this command text itself), and the bare relative path only resolves inside the source repository.
    - The session id has two spellings and `CLAUDE_SESSION_ID` is often empty, so the call falls back to `CLAUDE_CODE_SESSION_ID`. If BOTH are empty the script prints `recorded:false` with a session reason and the Record row says NOT RECORDED — pass `--session <id>` explicitly when the id is known.
    - Read `recorded` from the stdout JSON, not from the exit code: the script exits 0 even when it recorded nothing, and reports the reason in the same line.
    - **Recording never changes the VERDICT.** A missing script, `recorded:false`, or any other recording failure is REPORTED in the Record row and nowhere else. It never turns a passing pipeline into BLOCKED.

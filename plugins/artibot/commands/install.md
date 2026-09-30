@@ -84,7 +84,9 @@ const toFileUrl = (p) => {
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 
-const root = process.env.CLAUDE_PLUGIN_ROOT; // plugin root
+// plugin root: the env var is often empty in Bash, so the literal below is the fallback — the host
+// writes the plugin's absolute path into this command text when it loads.
+const root = process.env.CLAUDE_PLUGIN_ROOT || '${CLAUDE_PLUGIN_ROOT}';
 const { listPacks, resolvePack, applyPack } = await import(
   toFileUrl(path.join(root, 'lib', 'core', 'preset-packs.js'))
 );

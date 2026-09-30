@@ -290,7 +290,7 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 >
 > 선택(자동화): 일관된 바 계산이 필요하면 헬퍼를 호출해 그 출력을 그대로 표시해도 된다.
 > 설치본 경로(모든 머신 공통): `node "$HOME/.claude/artibot/scripts/render-progress.js" <done> <total> "<phaseLabel>"`.
-> (소스 레포에선 `node plugins/artibot/scripts/render-progress.js ...`.) `${CLAUDE_PLUGIN_ROOT}`는
+> (소스 레포에선 `node plugins/artibot/scripts/render-progress.js ...`.) `CLAUDE_PLUGIN_ROOT` 환경변수는
 > Bash 셸에서 비어있을 수 있으니 쓰지 마라. 헬퍼 호출이 실패하면 즉시 인라인 출력으로 폴백한다.
 
 ### Phase 4: CROSS-CHECK (review 티어)
@@ -356,11 +356,11 @@ Agent(subagent_type="artibot:code-reviewer", name="team-*-inspector",
 2. **아래 한 줄을 그대로 실행한다**(`Bash`). 바꿀 곳은 자리표시자 네 개 — `<PASS|FAIL>` · `<one-line summary>` · `<path:line|command>` · `<project root>` — 뿐이다(`--evidence` 반복 추가는 예외):
 
    ```
-   REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
+   REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
    ```
 
    - `<one-line summary>` 는 한 줄이다(예: `unit tests only: PASS` · `npm test: FAIL`). 출력 전문을 붙이지 마라.
-   - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로를 `$HOME` 아래부터 찾는 이유: Bash 셸에서 `${CLAUDE_PLUGIN_ROOT}` 는 비어 있을 수 있고 맨 상대경로는 소스 리포 안에서만 풀린다.
+   - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로를 `$HOME` 아래부터 찾는 이유: Bash 셸에서 `CLAUDE_PLUGIN_ROOT` 환경변수는 비어 있을 수 있고(두 번째 위치는 환경변수가 아니라 호스트가 이 커맨드 본문에 직접 써 넣는 플러그인 경로라 그래도 풀린다) 맨 상대경로는 소스 리포 안에서만 풀린다.
    - 세션 id 는 철자가 둘이고 `CLAUDE_SESSION_ID` 는 자주 비어 있다. 이 호스트(Windows) 실측(2026-09-21 · 09-29)에서는 빈 값이고 `CLAUDE_CODE_SESSION_ID` 가 채워져 있었다 — 다른 호스트는 미측정이다. 그래서 위 줄이 뒤의 것으로 폴백한다. 둘 다 비면 스크립트가 `recorded:false` 와 세션 사유를 낸다 — id 를 알면 `--session <id>` 를 직접 준다.
 3. **stdout JSON 의 `recorded` 를 읽는다** — exit code 가 아니다. 스크립트는 아무것도 기록하지 못했을 때도 exit 0 이고, 사유는 같은 줄의 `reason` 에 있다.
 4. **결과를 한 줄로 남긴다**: `RECORDED <verification_id>` 또는 `NOT RECORDED <reason>`(스크립트 부재 포함). Phase 5 보고에 그 한 줄을 싣는다 — 라운드가 여럿이면 라운드마다 한 줄이다.
@@ -418,7 +418,7 @@ Collect all results, cross-check findings, and **inspection report**, then repor
 보고 끝에 모델별 사용량·비용 표를 붙인다. 숫자를 손으로 쓰지 않는다 — 아래 한 줄을 `Bash` 로 실행해 **출력 전문을 그대로** 싣는다(바꿀 곳은 `<project root>` 하나 — 프로젝트 절대 루트):
 
 ```
-SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}"; USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs"; if [ -f "$USG" ]; then node "$USG" --session "$SID" --live-session "$SID" --cwd "<project root>"; else echo "usage-cost-table not found - 표 생략"; fi
+SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}"; USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs"; if [ -f "$USG" ]; then node "$USG" --session "$SID" --live-session "$SID" --cwd "<project root>"; else echo "usage-cost-table not found - 표 생략"; fi
 ```
 
 - 실제로 서빙한 모델별 세션·스폰·토큰(입력·출력·캐시 읽기·캐시 쓰기)·비용 표다. 읽기 전용이라 원장에 쓰지 않는다.

@@ -31,7 +31,7 @@ allowed-tools: [Read, Bash]
 아래 스니펫은 `$HOME` 경로를 우선하고 없으면 `$CLAUDE_PLUGIN_ROOT`로 폴백하며, 두 경로 모두 없으면 안내 문구를 낸다.
 
 ```
-Bash: ENGINE="$HOME/.claude/artibot/scripts/media/watch-ingest.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/media/watch-ingest.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" "<youtube-url>" [--frames] [--max-frames N]; else echo "watch engine not found — run the full install (bash install.sh) to use /watch"; fi
+Bash: ENGINE="$HOME/.claude/artibot/scripts/media/watch-ingest.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/scripts/media/watch-ingest.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" "<youtube-url>" [--frames] [--max-frames N]; else echo "watch engine not found — run the full install (bash install.sh) to use /watch"; fi
 ```
 
 ## 판독 흐름 (커맨드가 수행)
