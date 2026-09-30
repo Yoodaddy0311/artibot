@@ -1,12 +1,13 @@
 /**
- * Firewall — the GA-02 canary allowlist (`input.canary.actionClasses`) is
- * SHIPPED EMPTY, and an empty list changes nothing.
+ * Firewall — the GA-02 canary allowlist (`input.canary.actionClasses`): an EMPTY
+ * or unusable list changes nothing, and only the two CA-02 classes ship armed.
  *
  * ── Why a firewall file ────────────────────────────────────────────────────
  *  `lib/routing/adaptive-model-router.js#resolveCanaryClasses` is the only
  *  thing that can move `models.selected` off the `resolveModel` answer. Phase 0
- *  is observe-only, so the shipped allowlist is `[]` and the mechanism must be
- *  provably inert. `tests/routing/adaptive-model-router.test.js` pins the
+ *  was observe-only, so the shipped allowlist was `[]` and the mechanism had to
+ *  be provably inert; CA-02 (2026-09-30) armed it for classify/status, which is
+ *  what D and D2 below pin. `tests/routing/adaptive-model-router.test.js` pins the
  *  helper's semantics on a handful of inputs; this file pins the SYSTEM
  *  property — across a fixture table spanning the action-class vocabulary, both
  *  roles and both incumbent states, the receipt is BYTE-identical with and
@@ -20,13 +21,17 @@
  *     the counterfactual.
  *  C. An unusable list (non-array, non-string members) collapses to the empty
  *     list — fail-closed, never partially applied.
- *  D. The SHIPPED `artibot.config.json` still declares `routing.canary
- *     .actionClasses: []`. This DUPLICATES `v5-config-firewall.test.js`
- *     ("routing.canary.actionClasses 는 빈 배열이다") on purpose: that file owns
- *     the six new top-level config keys as a group, this one owns the canary
- *     mechanism end to end, and the two must not be able to drift apart
- *     silently. The file is read with `fs`, never through a loader that merges
- *     defaults — the pin is about what ships, not about an effective value.
+ *  D. The SHIPPED `artibot.config.json` declares the CA-02 canary:
+ *     `routing.canary.actionClasses: ['classify','status']` + `tier: 'sonnet'`.
+ *     This DUPLICATES `v5-config-firewall.test.js` ("routing.canary 는 CA-02
+ *     출하값이다") on purpose: that file owns the six new top-level config keys as
+ *     a group, this one owns the canary mechanism end to end, and the two must not
+ *     be able to drift apart silently. The file is read with `fs`, never through a
+ *     loader that merges defaults — the pin is about what ships, not about an
+ *     effective value.
+ *  D2. What the SHIPPED carrier does to the router: only classify/status receipts
+ *     gain `canary:<tier>` (and select the recommended tier); every other fixture
+ *     receipt is BYTE-identical, and the extra `tier` key is invisible to the router.
  *  E. A MATCHED receipt is still a WRITABLE ledger line. Validated through the
  *     PRODUCTION gate `lib/runtime/event-writer.js#validateEventContract`, the
  *     one the writer itself runs (it resolves the allowlist's
@@ -43,14 +48,17 @@
  *  2. **The writer.** `scripts/hooks/route-observe-pre.js#buildReceipt` — the
  *     site of that file's `routeModel` call, reached from `#observePre` — DOES
  *     forward `config.routing.canary` into `routeModel` (measured 2026-09-21),
- *     so the carrier is live — what keeps the mechanism inert is D, the empty
- *     LIST, not the absence of a caller. The day that list is filled, A and C
- *     keep passing while the property they assert stops being interesting:
- *     inertness would then depend on the config value, and only D watches it.
+ *     so the carrier is live. CA-02 filled that list on 2026-09-30: A and C now
+ *     assert the mechanism on SYNTHETIC input only, D2 pins what the shipped
+ *     list changes, and only D watches the value itself.
  *  3. **Application.** Even a matched canary only changes a RECEIPT. Nothing
  *     applies `models.selected` to an actual spawn — `routeModel` is an
  *     observer and the route-observe hook appends a shadow line beside the
- *     production one. "The gate fired" is not "a different model ran".
+ *     production one. "The gate fired" is not "a different model ran". The
+ *     actuator is a DIFFERENT reader of the same key —
+ *     `lib/core/model-overrides.js#resolveEffectiveModel`, behind
+ *     `/model-routing resolve --task` (`tests/core/model-overrides-canary.test.js`)
+ *     — and it never reads `models.selected`.
  *  4. **Calibration.** Every `recommended` tier below is an opinion of the
  *     uncalibrated `route-scorer.js` tables. B proves the seat MOVED, never
  *     that it moved somewhere better.
@@ -248,15 +256,45 @@ describe('canary action-class gate — a matched class moves the seat', () => {
   });
 });
 
-describe('canary action-class gate — the shipped config declares an empty list', () => {
+describe('canary action-class gate — the shipped config declares the CA-02 list', () => {
   // Deliberate duplicate of v5-config-firewall.test.js: that file owns the six
   // new top-level keys as a group, this one owns the canary mechanism, and the
   // two must not drift apart without one of them going red.
   const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
 
-  it('routing.canary.actionClasses ships as an empty array', () => {
+  it('routing.canary.actionClasses ships as classify + status, tier sonnet', () => {
     expect(Array.isArray(config.routing.canary.actionClasses)).toBe(true);
-    expect(config.routing.canary.actionClasses).toEqual([]);
+    expect(config.routing.canary.actionClasses).toEqual(['classify', 'status']);
+    expect(config.routing.canary.tier).toBe('sonnet');
+  });
+
+  // D2 — what the SHIPPED carrier does to the router, over the whole fixture table.
+  const shippedCanary = config.routing.canary;
+  const armed = new Set(shippedCanary.actionClasses);
+
+  it('the shipped carrier moves ONLY the receipts of a named class (positive and negative controls)', () => {
+    const matched = FIXTURES.filter((x) => armed.has(x.actionClass));
+    const other = FIXTURES.filter((x) => !armed.has(x.actionClass));
+    // Both sides must be non-empty, or "only" would hold vacuously.
+    expect(matched.length).toBeGreaterThanOrEqual(2);
+    expect(other.length).toBeGreaterThanOrEqual(10);
+    for (const x of other) expect(receipt({ ...x, canary: shippedCanary })).toBe(receipt(x));
+    for (const x of matched) {
+      const before = routeModel(x);
+      const after = routeModel({ ...x, canary: shippedCanary });
+      const tier = after.models.recommended.tier;
+      expect(after.reason).toContain(`canary:${tier}`);
+      expect(after.models.selected.tier).toBe(tier);
+      // The policy answer is still on the receipt — as the counterfactual reason code.
+      expect(after.reason).toContain(`policy:${before.models.selected.tier}`);
+      expect(before.reason.some((c) => c.startsWith('canary:'))).toBe(false);
+    }
+  });
+
+  it('the extra `tier` key is invisible to the router: the list alone decides', () => {
+    for (const x of FIXTURES) {
+      expect(receipt({ ...x, canary: shippedCanary })).toBe(receipt({ ...x, canary: { actionClasses: shippedCanary.actionClasses } }));
+    }
   });
 });
 
@@ -318,6 +356,15 @@ describe('canary action-class gate — a matched receipt is still appendable', (
   it('passes the production ledger validator with zero rejections', () => {
     const matched = routeModel(matchedInput);
     // null === accepted; anything else is the writer's rejection reason.
+    expect(validateEnvelope(envelope(matched))).toBeNull();
+    expect(validateEventContract(envelope(matched))).toBeNull();
+  });
+
+  it('CA-02: the SHIPPED carrier (list + tier) yields a receipt the production validator accepts too', () => {
+    const shippedCanary = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')).routing.canary;
+    const matched = routeModel({ ...matchedInput, canary: shippedCanary });
+    // classify is one of the two shipped classes, so this is a real match, not a pass-through.
+    expect(matched.reason.some((c) => c.startsWith('canary:'))).toBe(true);
     expect(validateEnvelope(envelope(matched))).toBeNull();
     expect(validateEventContract(envelope(matched))).toBeNull();
   });

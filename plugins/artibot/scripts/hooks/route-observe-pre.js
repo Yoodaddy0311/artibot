@@ -544,7 +544,9 @@ export function receiptPhase(classified) {
  * receipt records the RECOMMENDED tier (intent) while the bind row records the
  * POLICY answer; they legitimately disagree, and NEITHER is an observation of
  * what served — that comes only from `usage.receipt` (transcript usage), joined
- * on the bind row's `agent_id`. Unreachable while the shipped list is `[]`.
+ * on the bind row's `agent_id`. Reachable since CA-02 (2026-09-30) for classify
+ * and status receipts only; the spawn itself is answered by another reader of the
+ * same key, `lib/core/model-canary.js` (behind `/model-routing resolve --task`).
  *
  * `currentTier` and `actionsSinceSwitch` go in TOGETHER OR NOT AT ALL, as two
  * TOP-LEVEL `routeModel` keys — not inside `input`, which is the classifier's
@@ -562,9 +564,10 @@ export function receiptPhase(classified) {
  * silent vocabulary for one key. The optional chaining covers the live absent
  * cases: `ctx.config` is `undefined` whenever `loadConfig()` threw
  * ({@link observePre}), and `routing` may be missing from any config that is not
- * this repo's own. With the SHIPPED `routing.canary.actionClasses: []`
- * (`artibot.config.json` `routing.canary`, read-only here) an empty allowlist
- * applies to nothing, so the receipt is byte-identical to the pre-canary one.
+ * this repo's own. An empty allowlist applies to nothing, and with the SHIPPED
+ * `routing.canary` (`['classify','status']` since CA-02; read-only here) a receipt
+ * of any OTHER class is byte-identical to the pre-canary one — pinned by
+ * `tests/firewall/canary-actionclass-gate.test.js`, case D2.
  *
  * `requested_model` AND `requested_task` ARE APPENDED AFTER `routeModel`
  * RETURNS — last, after `source`, so every pre-existing key keeps its position.

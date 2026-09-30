@@ -653,13 +653,18 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
   /** @returns {string[]} every artibot roster agent, from `show --json` */
   const artibotRoster = () => showJson('--plugin', 'artibot').plugins.artibot.rows.map((r) => r.agent);
 
-  it.each(['status', 'classify'])('a %s pick no agent defaults to is not "none": one [task=] row per plugin, N = row count', (cls) => {
+  // CA-02: `status` and `classify` are the two classes the shipped canary lowers, so their
+  // "before" is sonnet (29 agents) / opus (the FABLE_DENYLIST agent the canary skips) — not
+  // the opus every class had before 2026-09-30. Fixture cowork: planner sonnet (equals the
+  // canary), case-study-writer haiku (below it — a canary never raises it).
+  it.each(['status', 'classify'])('a %s pick no agent defaults to is not "none": one [task=] row per plugin and outcome, N = row count', (cls) => {
     const n = artibotRoster().length;
     const r = run('apply', taskApply(cls), '--dry-run');
     expect(r.code, r.stderr).toBe(0);
     const { header, lines } = diffOf(r.stdout);
     expect(lines).toEqual([
-      `  artibot [task=${cls}]: opus → haiku for ${n} of ${n} agent(s) not defaulting to ${cls}`,
+      `  artibot [task=${cls}]: sonnet → haiku for ${n - 1} of ${n} agent(s) not defaulting to ${cls}`,
+      `  artibot [task=${cls}]: opus → haiku for 1 of ${n} agent(s) not defaulting to ${cls}`,
       // case-study-writer is haiku already: 1 of the 2 fixture agents changes.
       `  artibot-cowork [task=${cls}]: sonnet → haiku for 1 of 2 agent(s) not defaulting to ${cls}`,
     ]);
@@ -672,8 +677,12 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
     expect(diffOf(run('set', 'task', 'status', 'haiku', '--dry-run').stdout)).toEqual(viaApply);
     expect(diffOf(run('set', 'task', 'status', 'haiku').stdout)).toEqual(viaApply);
     const reset = diffOf(run('reset', 'task', 'status', '--plugin', 'artibot').stdout);
-    expect(reset.lines).toEqual([expect.stringMatching(/^ {2}artibot \[task=status\]: haiku → opus for (\d+) of \1 agent\(s\) not defaulting to status$/)]);
-    expect(reset.header).toBe('effective changes (1):');
+    // reset returns to the SHIPPED value, which for `status` is now the canary (sonnet), not opus.
+    expect(reset.lines).toEqual([
+      expect.stringMatching(/^ {2}artibot \[task=status\]: haiku → sonnet for (\d+) of \d+ agent\(s\) not defaulting to status$/),
+      expect.stringMatching(/^ {2}artibot \[task=status\]: haiku → opus for 1 of \d+ agent\(s\) not defaulting to status$/),
+    ]);
+    expect(reset.header).toBe('effective changes (2):');
   });
 
   it('re-setting the stored value is still none (setting unchanged)', { timeout: TIMEOUT }, () => {
@@ -697,7 +706,8 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
     expect(run('apply', taskApply('status'), '--dry-run').stdout).toMatch(/^effective changes \(none\):\n/);
     writeOverrides({ artibot: { default: null, agents: pinned(roster.slice(1)), phaseRoles: {} }, 'artibot-cowork': cowork });
     const { header, lines } = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
-    expect(lines).toEqual([`  artibot [task=status]: opus → haiku for 1 of ${roster.length} agent(s) not defaulting to status`]);
+    // The unshadowed agent (first in the roster) is not the denylisted one, so its "before" is the canary's sonnet.
+    expect(lines).toEqual([`  artibot [task=status]: sonnet → haiku for 1 of ${roster.length} agent(s) not defaulting to status`]);
     expect(header).toBe('effective changes (1):');
   });
 
@@ -720,13 +730,16 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
   });
 
   it('role variants that differ print per role, like the per-agent rows', { timeout: TIMEOUT }, () => {
-    writeOverrides({ artibot: { default: null, agents: {}, phaseRoles: { build: 'sonnet' } } });
+    // CA-02: the roles differ because a USER phase pick (build=opus) beats the canary, which answers
+    // sonnet for the other two roles. The denylisted agent is pinned by an agent override so this
+    // stays a test of role variants; its carve-out is pinned in model-routing-canary.test.js.
+    writeOverrides({ artibot: { default: null, agents: { 'security-reviewer': 'sonnet' }, phaseRoles: { build: 'opus' } } });
     const n = artibotRoster().length;
     const { header, lines } = diffOf(run('set', 'task', 'status', 'haiku', '--plugin', 'artibot', '--dry-run').stdout);
     expect(lines).toEqual([
-      `  artibot [task=status role=none]: opus → haiku for ${n} of ${n} agent(s) not defaulting to status`,
-      `  artibot [task=status role=build]: sonnet → haiku for ${n} of ${n} agent(s) not defaulting to status`,
-      `  artibot [task=status role=review]: opus → haiku for ${n} of ${n} agent(s) not defaulting to status`,
+      `  artibot [task=status role=none]: sonnet → haiku for ${n - 1} of ${n} agent(s) not defaulting to status`,
+      `  artibot [task=status role=build]: opus → haiku for ${n - 1} of ${n} agent(s) not defaulting to status`,
+      `  artibot [task=status role=review]: sonnet → haiku for ${n - 1} of ${n} agent(s) not defaulting to status`,
     ]);
     expect(header).toBe('effective changes (3):');
   });

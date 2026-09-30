@@ -42,11 +42,11 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 | `apply <file.json> [--dry-run]` | 여러 변경을 한 번에(메뉴가 쓴다, 형식은 §8 ④). 전부 검증한 뒤 한 번만 쓴다 — 하나라도 틀리면 아무것도 안 쓰고 exit 1, stderr 에 틀린 change 마다 `change <i>: <why>` 한 줄 |
 | `validate [--json]` | 파일 스키마 · 미지 에이전트 · 강등되는 설정 · `needs-spawn-param` 목록 |
 | `validate --live [--since <epoch-ms\|ISO 시각>] [--cwd <리포 루트>] [--json]` | 설정이 실제 스폰에 쓰였는지 원장으로 관측한다(원장은 읽기만 한다). `route.bound` 와 `usage.receipt` 를 짝지어 에이전트마다 기대 티어(지금의 출하 config·override 로 계산)와 실제로 서빙된 티어를 비교해 `honored`·`unhonored`·`unmeasured` 로 센다. 텍스트 출력은 읽은 원장(`ledger:` 줄, 없으면 `ledger absent: <경로> — nothing to judge`) · 분모 · 비율 표(`n/d`, 분모 0 이면 `null (denominator 0)`) · 판정과 미측정 사유 집계 · `unhonored` 행마다 한 줄 · `caveat:` 3줄이다. `--json` 은 같은 보고를 행별 `rows[]` 까지 준다. `--since` 는 숫자만이면 epoch 밀리초, 아니면 `Z`·`±HH:MM` 이 붙은 ISO 시각만 받는다(날짜만이면 exit 2). `--cwd`(기본 현재 디렉터리)에는 리포 루트를 넘긴다. `--since`·`--cwd` 는 `--live` 전용이다(없이 쓰면 exit 2). 원장이 없거나 `unhonored` 가 있어도 exit 0 — 관측이지 검증 실패가 아니다 |
-| `resolve <plugin:name> [--role build\|review] [--task <class>]` | stdout 에 티어 한 단어만 — 리더가 스폰에 붙일 값. `--task` 가 없으면 그 에이전트의 기본 작업 종류(§7)를 쓰고, 기본 작업 종류가 없는 에이전트는 task 층을 건너뛴다. 명시한 `--task` 는 기본 작업 종류가 없는 에이전트에도 적용된다 |
+| `resolve <plugin:name> [--role build\|review] [--task <class>]` | stdout 에 티어 한 단어만 — 리더가 스폰에 붙일 값. `--task` 가 없으면 그 에이전트의 기본 작업 종류(§7)를 쓰고, 기본 작업 종류가 없는 에이전트는 task 층을 건너뛴다. 명시한 `--task` 는 기본 작업 종류가 없는 에이전트에도 적용된다. `--task classify`·`--task status` 는 사용자 설정이 없으면 출하 canary 가 opus 대신 저가 티어로 푼다(§7) |
 
 - `<tier>` 는 `haiku|sonnet|opus`. 별칭(`deep-async` 등)은 받지 않는다. `<class>` 는 §7 의 8개뿐이다 — 그 밖은 `unknown task: <x> (expected …)` (exit 2).
 - `set`/`reset` 의 `--plugin` 은 `task` 스코프에서만 받는다. `set agent`·`set phase`·`set plugin`(과 같은 `reset`)에 붙이면 `unknown flag: --plugin` (exit 2). `show --plugin` 은 표 범위를 고르는 별개 플래그다.
-- 우선순위: 사용자 agent > 사용자 task > 사용자 phase(artibot 만) > 사용자 plugin 기본값 > 출하값. 작업 종류 단의 출처 이름은 `override-task`. 작업 종류 설정이 있으면 같은 에이전트의 단계(구현/검수) 설정은 가려진다. 마지막에 fable 게이트와 `FABLE_DENYLIST` 가 적용돼 어떤 사용자 설정도 그것을 넘지 못한다.
+- 우선순위: 사용자 agent > 사용자 task > 사용자 phase(artibot 만) > 사용자 plugin 기본값 > 출하 canary(`classify`·`status` 만, §7) > 출하값. 작업 종류 단의 출처 이름은 `override-task`, 출하 canary 는 `canary-task`(사용자 override 가 아니라서 `override` 열이 비어 있다). 작업 종류 설정이 있으면 같은 에이전트의 단계(구현/검수) 설정은 가려진다. 마지막에 fable 게이트와 `FABLE_DENYLIST` 가 적용돼 어떤 사용자 설정도 그것을 넘지 못한다.
 - `validate --live` 판정 한계: 기대 티어는 원장 행의 `action_class` 가 아니라 **에이전트의 기본 작업 종류(§7)** 로, 단계(role) 없이 계산한다 — `resolve --task` 로 다른 종류를 넘겼거나 `--role` 로 단계 설정을 받아 스폰한 행은 `unhonored` 로 읽힐 수 있다(출력의 세 번째 `caveat:` 줄).
 - 모든 서브커맨드는 `--plugin-root <dir>` · `--cowork-root <dir>` 도 받는다(다른 설치본을 볼 때만).
 - 종료 코드: `0` 성공 · `1` 거부/검증 오류(아무것도 안 씀) · `2` 사용법 오류(미지 서브커맨드·플래그·티어·에이전트·작업 종류; stderr 한 줄, 아무것도 안 씀). `--help` 는 없다(`unknown subcommand: --help`, exit 2) — 사용법은 이 표와 CLI 파일 머리 주석에 있다.
@@ -90,6 +90,7 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 - 호스트는 플러그인 에이전트를 그 에이전트 frontmatter 의 `model:` 로 띄운다. 이 설정이 스폰에 닿는 경로는 **Agent 도구의 `model` 파라미터 하나뿐**이다.
 - 리더는 스폰 직전 `resolve <plugin:name> [--role build|review]` 를 돌리고, 그 출력 한 단어를 Agent 도구의 `model` 파라미터로 넘긴다. `--role` 은 그 스폰의 phase(구현 = `build`, 검수 = `review`)에 맞춘다.
 - `resolve` 는 에이전트의 기본 작업 종류(§7)를 자동으로 반영한다. 그 스폰의 실제 작업이 기본과 다르면(예: `doc-updater` 에게 검수를 맡김) `--task <class>` 를 붙인다.
+- **의도 판별·라우팅(`classify`)이나 이미 있는 상태를 읽어 보고하는(`status`) 스폰은 `--task classify` / `--task status` 를 붙인다.** 어느 에이전트도 이 두 종류가 기본이 아니라서, 붙이지 않으면 출하 canary(저가 티어)가 닿지 않고 opus 그대로다(§7).
 - **리더가 넘기지 않으면 설정은 아무 효과가 없다.** 이를 막거나 채워 넣는 훅은 없다. 사용자에게 이 사실을 숨기지 마라.
 - `show` 의 host path 열: `frontmatter` = 실효값이 frontmatter 와 같아 넘길 것이 없다. `needs-spawn-param` = 리더가 `resolve` 값을 넘길 때만 실제가 된다. `--role` 없는 `show`(와 `validate` 의 `needs-spawn-param` 목록)는 역할 없이 계산하므로, phase 설정의 효과는 `show --role build|review` 로 본다.
 
@@ -103,7 +104,7 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 
 - 파일: `~/.claude/artibot/model-routing.json` (Windows `%USERPROFILE%\.claude\artibot\model-routing.json`). CLI 출력의 `overrides:` / `written:` 줄이 실제 경로다 — 그것을 믿어라. 작업 종류 값은 `plugins.<plugin>.tasks` 에 저장된다(이 키가 없는 기존 파일도 그대로 읽힌다).
 - 플러그인의 `artibot.config.json` 은 건드리지 않는다. 그 파일은 설치·업그레이드마다 덮이므로 사용자 설정은 이 별도 파일에 있어야 살아남는다.
-- `set`/`reset`/`apply` 는 before→after **실효값** 차이(`effective changes (N):`)를 찍는다. 줄은 에이전트마다 `  <plugin:agent>: <전> → <후>`(역할마다 다르면 `[role=<none|build|review>]`)이고, 저장된 작업 종류 값이 바뀐 종류에는 `  <plugin> [task=<class>]: <전> → <후> for <n> of <m> agent(s) not defaulting to <class>` 가 붙는다 — 그 종류가 기본이 아닌 에이전트 m명을 `resolve --task <class>` 로 풀었을 때의 변화이며(역할마다 다르면 `[task=<class> role=<none|build|review>]`), 기본인 에이전트가 없는 `status`·`classify` 설정은 이 줄로만 보인다. 그다음 기존 파일을 `.bak` 으로 복사한 뒤 원자적으로 쓴다(`written: <경로>`). `apply` 는 변경이 여러 개여도 `.bak` 과 쓰기가 한 번이다. 파일이 없을 때 `reset` 은 `nothing to reset` 으로 끝난다.
+- `set`/`reset`/`apply` 는 before→after **실효값** 차이(`effective changes (N):`)를 찍는다. 줄은 에이전트마다 `  <plugin:agent>: <전> → <후>`(역할마다 다르면 `[role=<none|build|review>]`)이고, 저장된 작업 종류 값이 바뀐 종류에는 `  <plugin> [task=<class>]: <전> → <후> for <n> of <m> agent(s) not defaulting to <class>` 가 붙는다 — 그 종류가 기본이 아닌 에이전트 m명을 `resolve --task <class>` 로 풀었을 때의 변화이며(역할마다 다르면 `[task=<class> role=<none|build|review>]`), 기본인 에이전트가 없는 `status`·`classify` 설정은 이 줄로만 보인다. 출하 canary 가 거는 `classify`·`status`(§7)는 저장값이 안 바뀌어도 실효값이 바뀌면 같은 줄로 보인다(예: `set plugin artibot opus`, `set agent artibot:doc-updater opus` — 기본 작업 종류 줄은 opus → opus 라 없어도 `[task=classify]: sonnet → opus …` 가 나온다). 그다음 기존 파일을 `.bak` 으로 복사한 뒤 원자적으로 쓴다(`written: <경로>`). `apply` 는 변경이 여러 개여도 `.bak` 과 쓰기가 한 번이다. 파일이 없을 때 `reset` 은 `nothing to reset` 으로 끝난다.
 - `--dry-run` 은 같은 차이를 찍고 `dry-run: nothing written (<경로>)` 로 끝난다 — 파일을 만들지도 바꾸지도 않는다. 여러 에이전트가 바뀌는 `set task`·`set phase`·`set plugin` 은 먼저 `--dry-run` 으로 보여 주기를 권한다.
 - 파일이 손상되면(JSON 오류·스키마 위반) `show`/`resolve` 는 stderr 에 `... IGNORED, shipped values shown` 경고를 내고 출하값으로 답한다(`resolve` 는 exit 0 이므로 **경고를 꼭 전달**한다). `set`/`reset`(`--all` 포함)은 `refusing to write ... Fix or remove it by hand; nothing was changed.` 로 거부한다(exit 1). **파일을 대신 지우거나 고치지 마라** — 경로와 오류를 보여 주고 사용자가 직접 고치거나 지우게 한다(직전 쓰기 이전 내용은 `.bak` 에 있다).
 
@@ -113,8 +114,8 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 
 | 작업 종류 | 뜻 | 이 종류가 기본인 에이전트 (`AGENT_ACTION_CLASS`) |
 |---|---|---|
-| `classify` | 의도 판별·라우팅, 산출물 없음 | 없음 — `resolve --task classify` 를 명시할 때만 적용 |
-| `status` | 이미 있는 상태를 읽어 보고 | 없음 — `resolve --task status` 를 명시할 때만 적용 |
+| `classify` | 의도 판별·라우팅, 산출물 없음 | 없음 — `resolve --task classify` 를 명시할 때만 적용(출하 canary 가 저가 티어로 푼다) |
+| `status` | 이미 있는 상태를 읽어 보고 | 없음 — `resolve --task status` 를 명시할 때만 적용(출하 canary 가 저가 티어로 푼다) |
 | `explore` | 범위가 불확실한 조사·측정(읽기 위주) | repo-benchmarker · investigator · data-analyst |
 | `edit-routine` | 기계적이고 범위가 정해진 쓰기 | doc-updater · refactor-cleaner |
 | `implement` | 여러 파일에 걸친 코드·산출물 생산 | backend-developer · frontend-developer · typescript-pro · tdd-guide · mcp-developer · devops-engineer · e2e-runner · ad-specialist · content-marketer · presentation-designer |
@@ -123,7 +124,8 @@ Bash: MR=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/model-r
 | `review` | 이미 있는 작업을 판정 | code-reviewer · spec-reviewer · quality-reviewer · security-reviewer · database-reviewer · auditor · cro-specialist · seo-specialist |
 
 - artibot 30종은 전부 매핑돼 있다. cowork 는 같은 이름 10종이 같은 종류를 따르고, `case-study-writer`·`long-form-writer` 는 매핑이 없어 기본 작업 종류가 없다(`show` 의 task 열 `-`, JSON `task: null`, `tasks[].agents` 에서 빠짐). 그 둘에는 `resolve --task <class>` 를 명시할 때만 작업 종류 설정이 닿는다 — 메뉴에서는 "종류 없음" 후보나 플러그인 기본값으로 설정한다.
-- 작업 종류 → 티어의 출하값은 따로 없다(`ACTION_CLASS_TIERS` 는 관측용 권고표로 라우팅에 적용되지 않는다). 작업 종류 설정이 없으면 그 아래 층(phase → plugin → 출하값)으로 내려간다.
+- 작업 종류 → 티어의 출하값은 **`classify`·`status` 둘뿐**이다(CA-02): 출하 canary(`artibot.config.json` 의 `routing.canary` — `actionClasses: [classify, status]`, `tier: sonnet`)가 `resolve --task classify|status` 를 opus 대신 저가 티어로 푼다. 사용자 설정(agent·task·phase·plugin 기본값 중 어느 것이든)이 있으면 그것이 이기고, canary 는 자리를 **낮출 때만** 답한다 — 이미 그 티어 이하인 cowork 에이전트는 그대로 두고, `FABLE_DENYLIST` 에이전트(`security-reviewer`)는 건드리지 않는다. `show --task classify` 행의 `source` 가 `canary-task` 이면 이 경로다. 끄려면 `routing.canary.actionClasses` 를 `[]` 로 되돌린다(1키 롤백). 스폰에 닿으려면 리더가 `--task classify|status` 를 붙이고 그 출력을 Agent 의 `model` 로 넘겨야 한다(§4).
+- 나머지 여섯 종류는 출하값이 따로 없다(`ACTION_CLASS_TIERS` 는 관측용 권고표로 라우팅에 적용되지 않는다). 작업 종류 설정이 없으면 그 아래 층(phase → plugin → 출하값)으로 내려간다.
 
 ## 8. 메뉴 모드 (`$ARGUMENTS` 가 비었을 때)
 
@@ -149,7 +151,7 @@ Other 입력: "현재 보기"·"show" → `show` 출력을 보여 주고 끝. "�
 
 **③ 항목을 한 번에 묻기** — 각 질문의 옵션은 `haiku` · `sonnet` · `opus` · `유지 (현재 <값>)` 4개다. 질문 문구에 **현재 실효값과 출처**를 적는다(예: `artibot:doc-updater — 현재 opus [shipped]`). 권장: 그 항목에 걸린 행들의 `shipped` 가 한 값일 때만 — 현재 값이 출하값과 같으면 `유지` 를, 다르면 그 출하 티어를 첫 옵션으로 올리고 label 끝에 ` (권장)` 을 붙인다. 출하값이 없거나 행마다 다르면 권장 표기를 하지 않는다. 작업 종류 스코프에서 비교하는 "현재 값" 은 그 종류 행들의 `effective` 다. 현재 값이 task override 때문에 출하값과 다르면 출하 티어를 권장으로 두지 말고 Other "초기화" 를 안내한다(출하 티어를 고르면 초기화가 아니라 새 override 가 생긴다). Other 로 "초기화" 를 받으면 그 항목은 reset(`tier: null`)이다. Other 입력이 티어 단어(`haiku|sonnet|opus`)도 "초기화" 도 아니면(예: `fable`) 그 항목은 유지로 두고 그렇게 했다고 알린다.
 
-- **작업 종류별**: 질문 4개씩 2회 — ① `classify` · `status` · `explore` · `edit-routine`, ② `implement` · `complex-debug` · `architecture` · `review`. 현재 값 = `tasks[]` 의 플러그인별 override(없으면 "미설정") + 그 종류 에이전트들의 실효값 요약(예: `opus×10`). 매핑된 에이전트가 없는 종류는 문구에 그 사실을 적는다. 플러그인은 `all`(`set task` 기본값과 같다) — 한 플러그인만 바꾸려면 인자 모드 `set task <class> <tier> --plugin <name>` 을 안내한다.
+- **작업 종류별**: 질문 4개씩 2회 — ① `classify` · `status` · `explore` · `edit-routine`, ② `implement` · `complex-debug` · `architecture` · `review`. 현재 값 = `tasks[]` 의 플러그인별 override(없으면 "미설정") + 그 종류 에이전트들의 실효값 요약(예: `opus×10`). 매핑된 에이전트가 없는 종류는 문구에 그 사실을 적는다. `classify`·`status` 는 "미설정" 이어도 opus 가 아니다 — 출하 canary(§7)가 저가 티어로 푼다. 이 두 종류는 그 사실을 문구에 적고, 실효값은 `show --json --task <class>` 행의 `effective`(`source: canary-task`)에서 읽는다. 플러그인은 `all`(`set task` 기본값과 같다) — 한 플러그인만 바꾸려면 인자 모드 `set task <class> <tier> --plugin <name>` 을 안내한다.
 - **단계별**: 1회, 질문 2개(`build` · `review`). 현재 값 = `phases[].override`(없으면 "미설정"), 권장 근거 = `phases[].shipped`. artibot 전용이고 리더가 `--role` 로 해석할 때만 적용된다는 것, 그리고 작업 종류 설정이 있는 에이전트에는 phase 값이 닿지 않는다는 것(agent > task > phase — artibot 30종은 전부 기본 작업 종류가 있다)을 문구에 적는다.
 - **에이전트별**: 30명은 한 화면에 들어가지 않는다. (a) 플러그인 질문(artibot / artibot-cowork — cowork 가 `unavailable` 이면 묻지 않고 artibot). (b) 작업 종류 질문 — 좁히기는 ①의 행별 `task` 필드로 한다(`show --task` 는 필터가 아니다, §2). 후보는 그 플러그인 행 중 `task` 가 그 종류인 행이 있는 종류(§7 순서)이고, `task: null` 인 행이 있으면(cowork 의 `case-study-writer`·`long-form-writer`) "종류 없음" 도 후보다. 옵션 설명에 에이전트 수를 적는다. 후보가 4개를 넘으면 2단으로 나눈다: 앞 3개 + "다른 종류 보기" → 다음 호출에서 나머지(또 넘치면 같은 식으로). Other 로 종류 이름이나 `<plugin:name>` 을 직접 받으면 그 종류·그 에이전트로 바로 간다. "종류 없음" 에이전트는 플러그인 기본값 범위로도 설정된다는 것을 옵션 설명에 적는다. (c) 고른 종류의 에이전트를 질문 4개씩 한 호출에 묻는다(10명이면 4 · 4 · 2 로 3회). 권장 근거는 각 행의 `shipped`.
 - **플러그인 기본값**: 1회, 질문 2개(artibot · artibot-cowork; cowork 가 `unavailable` 이면 1개). 현재 값 = `source` 가 `override-plugin` 인 행의 `effective`. 그런 행이 0개면 `overridesStatus` 가 `absent`(파일 없음)일 때만 "미설정" 이고, 아니면 `show --json` 의 `file` 경로를 Read 해 `plugins.<plugin>.default` 를 보여 준다. 읽을 수 없으면 "확인 불가(상위 층에 가려짐)" 로 표시한다.
@@ -171,7 +173,7 @@ Other 입력: "현재 보기"·"show" → `show` 출력을 보여 주고 끝. "�
 - `scope: plugin` — `key` 는 생략(값이 있으면 거부). `plugin` ∈ `artibot|artibot-cowork`(필수, `all` 불가).
 - `tier` = `haiku|sonnet|opus`, `null` 은 reset. 에이전트별에서 두 플러그인을 다 바꾸면 한정 이름이 다르므로 change 가 자연히 둘로 나뉜다(§3).
 
-`apply <파일> --dry-run` 을 돌려 stdout(`effective changes (N):` …)을 그대로 보여 준다. exit 가 0 이 아니면 stderr 를 그대로 보여 주고 멈춘다 — exit 1 이면 `change <i>: <why>` 줄들(틀린 change 마다 한 줄, 아무것도 쓰지 않음)이다. 추측으로 고쳐 다시 돌리지 마라. `apply <파일>` 본실행이 exit 1 이어도 같다. dry-run 결과가 `effective changes (none):` 이면(에이전트 줄도 `[task=…]` 줄도 없다 — 같은 값을 다시 골랐거나, 지금 실효값과 같은 티어를 골랐거나, 에이전트별 설정이 해당 에이전트를 전부 가렸다 — 각 에이전트의 기본 작업 종류 문맥과 저장값이 바뀐 작업 종류 문맥에서 실효값이 바뀌지 않는다) 확인 질문 없이 "실효값 변화 없음" 으로 끝낸다. `[task=…]` 줄도 N 에 들어가므로 `status`·`classify` 선택은 확인 질문으로 간다(예: `  artibot [task=status]: opus → haiku for 30 of 30 agent(s) not defaulting to status`). 그 밖이면 확인을 묻는다:
+`apply <파일> --dry-run` 을 돌려 stdout(`effective changes (N):` …)을 그대로 보여 준다. exit 가 0 이 아니면 stderr 를 그대로 보여 주고 멈춘다 — exit 1 이면 `change <i>: <why>` 줄들(틀린 change 마다 한 줄, 아무것도 쓰지 않음)이다. 추측으로 고쳐 다시 돌리지 마라. `apply <파일>` 본실행이 exit 1 이어도 같다. dry-run 결과가 `effective changes (none):` 이면(에이전트 줄도 `[task=…]` 줄도 없다 — 같은 값을 다시 골랐거나, 지금 실효값과 같은 티어를 골랐거나, 에이전트별 설정이 해당 에이전트를 전부 가렸다 — 각 에이전트의 기본 작업 종류 문맥과 저장값이 바뀐 작업 종류 문맥에서 실효값이 바뀌지 않는다) 확인 질문 없이 "실효값 변화 없음" 으로 끝낸다. `[task=…]` 줄도 N 에 들어가므로 `status`·`classify` 선택은 확인 질문으로 간다(예: `  artibot [task=status]: sonnet → haiku for 29 of 30 agent(s) not defaulting to status` — 출하 canary 가 시작값이다). 그 밖이면 확인을 묻는다:
 
 ```
 AskUserQuestion(
