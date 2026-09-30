@@ -23,9 +23,10 @@
  *    a throw report.
  *  - **Data keys ⊆ declared allowlist fields, and required ⊆ emitted.** The
  *    writer passes an UNDECLARED data key through untyped
- *    (`tests/firewall/ledger-vocab-allowlist.test.js` "lets an UNDECLARED data
- *    key through untouched"), so a writer-accepts assertion alone could not
- *    notice a key the allowlist never typed. The key sets are compared head-on.
+ *    (`tests/firewall/ledger-vocab-allowlist-declared-keys.test.js` "lets an
+ *    UNDECLARED data key through untouched"), so a writer-accepts assertion
+ *    alone could not notice a key the allowlist never typed. The key sets are
+ *    compared head-on.
  *  - **One line per call, on a real ledger file.** The append tests use the
  *    REAL writer against a `mkdtemp` root — never the repository's own
  *    `.artibot` — and read the file back.
