@@ -318,7 +318,8 @@ function readDeclaredBudgets() {
         const marker = '/scripts/hooks/';
         const at = String(hook.command || '').indexOf(marker);
         if (at < 0) continue;
-        const key = String(hook.command).slice(at + marker.length).trim();
+        // The script path is quoted in hooks.json; the key stays `name.js args` without the quote.
+        const key = String(hook.command).slice(at + marker.length).replaceAll('"', '').trim();
         if (typeof hook.timeout === 'number') out[key] = hook.timeout * 1000;
       }
     }

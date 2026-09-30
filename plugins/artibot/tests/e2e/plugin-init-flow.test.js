@@ -283,8 +283,10 @@ describe('E2E: Plugin Initialization Flow', () => {
           .map(fullCommand)),
       );
       for (const cmd of allCommands) {
-        // Extract the script path: "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/foo.js [args]"
-        const match = cmd.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^\s]+)/);
+        // Extract the script path: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/foo.js" [args]'.
+        // The path is quoted (a space in the plugin root splits it otherwise), so the
+        // capture stops at the closing quote instead of swallowing it.
+        const match = cmd.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^\s"]+)/);
         if (match) {
           const scriptPath = path.join(PLUGIN_ROOT, match[1]);
           expect(
@@ -305,7 +307,7 @@ describe('E2E: Plugin Initialization Flow', () => {
         (entries) => entries.flatMap((entry) => entry.hooks
           .filter((h) => h.type !== 'prompt')),
       );
-      const dispatcherRe = /\/_[a-z]+-dispatcher\.js(?:\s|$)/;
+      const dispatcherRe = /\/_[a-z]+-dispatcher\.js(?:["\s]|$)/;
       for (const entry of allEntries) {
         expect(entry.timeout).toBeGreaterThan(0);
         const isDispatcher =

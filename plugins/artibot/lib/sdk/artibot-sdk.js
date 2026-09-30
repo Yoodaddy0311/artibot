@@ -546,7 +546,8 @@ async function _commitHook(result, spec, pluginRoot, options = {}) {
     const eventList = Array.isArray(hooks[spec.event]) ? [...hooks[spec.event]] : [];
     const entry = {
       matcher: '*',
-      hooks: [{ type: 'command', command: `node \${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${spec.name}.js` }],
+      // Quoted: an unquoted path splits on a space in the plugin root.
+      hooks: [{ type: 'command', command: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${spec.name}.js"` }],
       category: 'sdk',
     };
     const already = eventList.some((h) => JSON.stringify(h) === JSON.stringify(entry));

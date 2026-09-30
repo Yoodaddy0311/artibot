@@ -26,7 +26,7 @@ const write = (line) => process.stdout.write(line + '\n');
  */
 function extractScriptPath(command) {
   if (typeof command !== 'string') return null;
-  const match = command.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/(\S+\.(?:js|sh|cjs|mjs))/);
+  const match = command.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^\s"]+\.(?:js|sh|cjs|mjs))/);
   if (!match) return null;
   return match[1];
 }

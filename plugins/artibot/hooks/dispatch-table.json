@@ -94,7 +94,7 @@
       "dispatcher": null,
       "strategy": "single-hook",
       "note": "Not dispatcher-consolidated. PreCompact remains a single direct hook registration in hooks.json. The `singleHookCommand` and `singleHookTimeoutMs` below MUST match the PreCompact entry in hooks.json — loaders/tests use them as a drift tripwire. If you change either side, update the other in the same PR.",
-      "singleHookCommand": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js",
+      "singleHookCommand": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact.js\"",
       "singleHookTimeoutMs": 8000,
       "handlers": []
     },
@@ -103,7 +103,7 @@
       "dispatcher": null,
       "strategy": "single-hook",
       "note": "Not dispatcher-consolidated (vNext PR-CX01, 2026-09-02). PostCompact is a single direct hook registration in hooks.json, same convention as PreCompact. `singleHookCommand` / `singleHookTimeoutMs` MUST match the PostCompact entry in hooks.json — tests/firewall/hook-timeout-budget.test.js compares them with equality. Automation 0: the hook only rebuilds a rehydration bundle from the PreCompact snapshot and reports it.",
-      "singleHookCommand": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-rehydrate.js",
+      "singleHookCommand": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-rehydrate.js\"",
       "singleHookTimeoutMs": 8000,
       "handlers": []
     }

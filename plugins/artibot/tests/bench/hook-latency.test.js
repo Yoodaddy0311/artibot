@@ -104,7 +104,8 @@ function declaredTimeoutsSeconds(tail) {
   for (const entries of Object.values(HOOKS_JSON.hooks || {})) {
     for (const entry of entries || []) {
       for (const hook of entry.hooks || []) {
-        if (String(hook.command || '').endsWith(suffix)) hits.push(hook.timeout);
+        // The script path is quoted in hooks.json; compare without the quotes.
+        if (String(hook.command || '').replaceAll('"', '').endsWith(suffix)) hits.push(hook.timeout);
       }
     }
   }
