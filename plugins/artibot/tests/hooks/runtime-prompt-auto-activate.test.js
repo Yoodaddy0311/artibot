@@ -39,7 +39,12 @@ import {
   handleUserPromptSubmit,
   RECOMMENDATION_HINTS,
 } from '../../scripts/hooks/runtime-prompt.js';
-import { AUTO_ACTIVATE_ACTIVATABLE, renderAutoActivateDirective } from '../../lib/cognitive/auto-activate.js';
+import {
+  AUTO_ACTIVATE_ACTIVATABLE,
+  matchAutoActivateCommand,
+  renderAutoActivateDirective,
+} from '../../lib/cognitive/auto-activate.js';
+import { detectIntent } from '../../lib/intent/index.js';
 import { ACTIVATION_OBSERVED } from '../../lib/observability/decision-events.js';
 import { foldHintFollowed } from '../../scripts/evals/nl-activation-report.mjs';
 
@@ -428,8 +433,11 @@ describe('switch ON — every other condition still withholds', () => {
     for (const prompt of [
       'git push origin main 하고 src/lib 코드 분석해줘',
       'rm -rf / 하고 이 코드 설명해줘',
-      '사각지대 점검해줘 그리고 gh release create v1',
+      'npm publish 하고 이 코드 설명해줘',
     ]) {
+      // The trigger DOES match (the shape gate lets the prompt through), so it is the
+      // gate screen that withholds it below — not a missing trigger.
+      expect(matchAutoActivateCommand(prompt).command, prompt).not.toBeNull();
       const { out, hint } = await submit(ROOT_ON, prompt);
       expect(ctxOf(out), prompt).not.toContain('auto-activate');
       expect(hint, prompt).toBeNull();
@@ -443,10 +451,20 @@ describe('switch ON — every other condition still withholds', () => {
   });
 
   it('a prompt the ROUTER reads as two different actions withholds it (real intent, not a stub)', async () => {
-    // "analyze" selects /analyze, but "수정" (fix) is a second action intent; the
-    // router's own ambiguity score reaches its threshold, and asking is the right
-    // shape for a request that may want the fix, not the report.
-    const { out, hint } = await submit(ROOT_ON, '이 코드 분석하고 수정해줘');
+    // "이 코드 … 분석해줘" selects /analyze and the shape gate lets the prompt through
+    // (the topic before the object is open vocabulary), but "수정하고" (fix, then) is
+    // a second action intent: the router's own ambiguity score reaches its threshold,
+    // and asking is the right shape for a request that may want the fix, not the
+    // report. Only this gate stops it — the matcher alone selects `analyze`.
+    const text = '수정하고 이 코드 분석해줘';
+    expect(matchAutoActivateCommand(text).command).toBe('analyze');
+    const config = JSON.parse(readFileSync(REAL_CONFIG_PATH, 'utf-8'));
+    const intent = detectIntent(text, {
+      languages: config.automation.supportedLanguages,
+      ambiguityThreshold: config.automation.ambiguityThreshold,
+    });
+    expect(intent.ambiguity.ambiguous, 'the router must be what flags it').toBe(true);
+    const { out, hint } = await submit(ROOT_ON, text);
     expect(ctxOf(out)).not.toContain('auto-activate');
     expect(hint).toBeNull();
     // Control: the same analysis request without the second action DOES fire, so the
@@ -456,17 +474,68 @@ describe('switch ON — every other condition still withholds', () => {
   });
 
   it('a YouTube link keeps the confirm-first-free watch hint and nothing else', async () => {
-    const { out, hint } = await submit(ROOT_ON, '이 코드 설명해줘 https://youtu.be/dQw4w9WgXcQ');
+    // The link goes FIRST: a trigger must end the prompt, and with the link last the
+    // matcher itself refuses it. Here the matcher selects `explain`, so it is the
+    // watch hint's precedence in `composePromptParts` that drops the activation.
+    const text = 'https://youtu.be/dQw4w9WgXcQ 이 코드 설명해줘';
+    expect(matchAutoActivateCommand(text).command).toBe('explain');
+    const { out, hint } = await submit(ROOT_ON, text);
     expect(ctxOf(out)).toContain('recommend=watch');
     expect(ctxOf(out)).not.toContain('auto-activate');
     expect(hint).toBe('watch');
   });
 
   it('never writes the prompt to the store: the record holds the command name only', async () => {
-    await submit(ROOT_ON, 'src/lib 코드 분석해줘 SECRET-MARKER-XYZ');
+    await submit(ROOT_ON, 'SECRET-MARKER-XYZ src/lib 코드 분석해줘');
     const raw = activationEvents(ROOT_ON).map((e) => JSON.stringify(e)).join('\n');
     expect(raw).toContain('auto-analyze');
     expect(raw).not.toContain('SECRET-MARKER-XYZ');
+  });
+});
+
+describe('switch ON — the reviewed false positives stay silent on the real hook', () => {
+  // The seven prompts a review measured FIRING on this very path (shipped config)
+  // before the shape gate existed. "Silent" is compared with the OFF root, so it
+  // means byte-identical to a hook without the feature — not merely "no directive".
+  const REVIEWED_FALSE_POSITIVES = [
+    ['noun "설명 좀" in a rewrite request', '고객한테 보낼 제품 설명 좀 다듬어줘'],
+    ['noun "설명 좀" in an editing request', '이 메일에 설명 좀 추가해서 보내줘'],
+    ['quoted text', '회의록에 "설명해주세요" 라고 적혀 있는데 그 부분 지워줘'],
+    ['compound: analyze, then commit', '이 함수 분석하고 커밋해줘'],
+    ['compound: check, then fix', '사각지대 없는지 보고 바로 수정해줘'],
+    ['loose "놓친 거 있어?" about a mailbox', '메일 놓친 거 있어?'],
+    ['a trigger inside a pasted code fence', 'summarize this file:\n```// TODO: explain this module and its exports```'],
+  ];
+
+  it.each(REVIEWED_FALSE_POSITIVES)('%s', async (_defect, prompt) => {
+    const on = await submit(ROOT_ON, prompt);
+    const off = await submit(ROOT_OFF, prompt);
+    expect(ctxOf(on.out), prompt).not.toContain('auto-activate');
+    expect(on.hint, prompt).toBeNull();
+    expect(stable(on.out), prompt).toEqual(stable(off.out));
+  });
+
+  it('their controls — the same requests without the defect — DO fire on this root', async () => {
+    // Without this the seven above could be silent because the hook is deaf to them.
+    for (const [command, prompt] of [
+      ['explain', '제품 설명 좀 해줘'],
+      ['analyze', '이 함수 분석해줘'],
+      ['blindspot', '사각지대 없는지 봐줘'],
+      ['blindspot', '놓친 거 있어?'],
+      ['explain', 'explain this module'],
+    ]) {
+      const { out, hint } = await submit(ROOT_ON, prompt);
+      expect(ctxOf(out).startsWith(autoLine(command)), prompt).toBe(true);
+      expect(hint, prompt).toBe(`auto-${command}`);
+    }
+  });
+
+  it('a foreign clause in front of a blindspot or scorecard term stays silent too', async () => {
+    for (const prompt of ['커밋하고 사각지대 점검해줘', '푸시하고 스코어카드 보여줘']) {
+      const { out, hint } = await submit(ROOT_ON, prompt);
+      expect(ctxOf(out), prompt).not.toContain('auto-activate');
+      expect(hint, prompt).toBeNull();
+    }
   });
 });
 
