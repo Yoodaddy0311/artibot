@@ -99,7 +99,11 @@ const CARRIERS = [
     probe: 'scripts/checkpoint/resume-report.mjs',
     uses: ['<pluginRoot>/scripts/checkpoint/resume-report.mjs', '<pluginRoot>/scripts/checkpoint/read-order-guard.mjs'],
   },
-  { file: 'commands/doctor.md', probe: 'scripts/ledger/topology-agreement.mjs', uses: ['<pluginRoot>', 'scripts/ledger/topology-agreement.mjs'] },
+  {
+    file: 'commands/doctor.md',
+    probe: 'scripts/ledger/topology-agreement.mjs',
+    uses: ['<pluginRoot>/scripts/ledger/topology-agreement.mjs', '<pluginRoot>/artibot.config.json'],
+  },
   {
     file: 'commands/dreaming.md',
     probe: 'lib/learning/memory/dream/collector.js',
@@ -239,13 +243,6 @@ const EXCEPTIONS = new Map([
     {
       count: 2,
       why: 'Authoring-time commands for people editing skills inside the Artibot repo (scripts/ci/lint-skill-descriptions.js); they run from the plugin directory of a source checkout by definition.',
-    },
-  ],
-  [
-    'commands/doctor.md',
-    {
-      count: 1,
-      why: 'Check 7 topology-agreement line, inside the SHA-frozen Check 1-7 block. The Paths section above it maps a bare node scripts/... to <pluginRoot>; the direct edit needs a re-freeze of the Check 7 digest.',
     },
   ],
 ]);

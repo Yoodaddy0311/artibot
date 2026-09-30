@@ -55,7 +55,7 @@ All paths below are relative to `<pluginRoot>`. Wherever Checks 1-7 write `plugi
 
 ### Check 1: Config Validation
 
-1. Read `plugins/artibot/artibot.config.json`
+1. Read `<pluginRoot>/artibot.config.json`
 2. Parse as JSON — if parse fails, report FAIL immediately
 3. Apply `validateConfig()` logic from `lib/core/config-schema.js`:
    - Verify root is a plain object
@@ -289,7 +289,7 @@ Run the reader against the PROJECT root this check resolved in step 1, not
 against the current directory:
 
 ```
-node scripts/ledger/topology-agreement.mjs [--cwd <projectRoot>] [--since <iso>] [--json]
+node "<pluginRoot>/scripts/ledger/topology-agreement.mjs" [--cwd <projectRoot>] [--since <iso>] [--json]
 ```
 
 `--cwd` matters because the decisions store is per project root and, in a
