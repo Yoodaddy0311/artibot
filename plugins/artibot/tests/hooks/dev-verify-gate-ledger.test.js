@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
+import { GATE_FILES, sessionGateDir } from '../../lib/project-state/gate-markers.js';
 import { evidenceHash, evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
 
 /**
@@ -111,21 +112,41 @@ function git(args, cwd) {
 }
 
 /**
- * A throwaway repo `isArtibotRepo()` accepts, with a dirty tracked file, plus a
- * throwaway plugin root carrying ONLY the main-agent-edit marker (no
- * `runtime/last-dev-verify-sha.txt`), so the gate fires on the first run.
+ * A throwaway repo `isArtibotRepo()` accepts, with a dirty tracked file, plus the
+ * main-agent-edit marker in the session gate directories of that repo's store
+ * (no `last-dev-verify-sha.txt`), so the gate fires on the first run.
  *
- * TWO ROOTS ON PURPOSE. `testResult` is written under the REPO root, where
- * `tests/reporters/test-status-reporter.js` puts it, while the marker stays
- * under the plugin root, where the PostToolUse hook puts it. That split IS the
- * thing under test (owner decision R1): a fixture that put both in one place
- * would pass while production reads two.
+ * WHERE THE MARKER GOES (O2). It is per project and per session:
+ * `<store>/gates/sessions/<session>/`, `<store>` being the repo's git common dir
+ * (`.git/artibot`). Seeded in BOTH the `SESSION` slot and the `no-session` slot,
+ * so one sandbox serves both payload shapes this suite sends (a Stop with a
+ * session id and the case-4 Stop without one — a payload without an id is looked
+ * up in the `no-session` slot). The plugin root is a throwaway directory that
+ * stays EMPTY: the hook must not put state there, and the cases that read `cache`
+ * would find no file if it did.
+ *
+ * TWO LOCATIONS ON PURPOSE. `testResult` is written under the REPO root, where
+ * `tests/reporters/test-status-reporter.js` puts it, while the marker sits in the
+ * project's store. That split IS the thing under test (owner decision R1): a
+ * fixture that put both in one place would pass while production reads two.
  *
  * `markerAgeMs` shifts the marker's mtime rather than sleeping. A positive
  * value ages it into the past (so a result dated "now" is fresh); a negative
  * value pushes it into the future (so the same result is stale). Comparing
  * against wall-clock sleeps would make the case flaky on a loaded machine and
  * slow on every machine.
+ *
+ * THE SHIFT IS ANCHORED ON THE RESULT'S OWN TIMESTAMP when `testResult` has one,
+ * not on the moment the marker is written. The two differ by however long this
+ * function's git setup (and, for a second sandbox, the first sandbox's whole run)
+ * took, and a margin of 10 s is a function of host load. Observed in the
+ * full-suite run of 2026-09-30 (1070 s, five lanes sharing the host): the registry
+ * case's SECOND sandbox read `unmeasured` where the first read `pass`, and the
+ * file passes alone (15/15). The mechanism is INFERRED, not measured — a marker
+ * written more than 10 s after `freshResult()` stamped the shared payload is
+ * newer than the result it was meant to predate, which is exactly `stale`.
+ * Anchored on the result, "10 s older than the result" holds however long the
+ * setup takes.
  *
  * @param {{ testResult?: object|null, markerAgeMs?: number }} [opts]
  * @returns {{ repo: string, pluginRoot: string, ledger: string, cache: string }}
@@ -146,9 +167,14 @@ function buildSandbox(opts = {}) {
 
   const pluginRoot = mkdtempSync(path.join(os.tmpdir(), 'dvg-it-plugin-'));
   created.push(pluginRoot);
-  mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
-  const marker = path.join(pluginRoot, 'runtime', 'last-main-agent-edit.timestamp');
-  writeFileSync(marker, 'x');
+
+  const markers = [SESSION, undefined].map((id) => {
+    const dir = sessionGateDir(repo, id);
+    mkdirSync(dir, { recursive: true });
+    const marker = path.join(dir, GATE_FILES.mainAgentEdit);
+    writeFileSync(marker, 'x');
+    return marker;
+  });
 
   if (opts.testResult) {
     const runtimeDir = path.join(repo, 'plugins', 'artibot', 'runtime');
@@ -159,15 +185,19 @@ function buildSandbox(opts = {}) {
     );
   }
   if (typeof opts.markerAgeMs === 'number') {
-    const shifted = new Date(statSync(marker).mtimeMs - opts.markerAgeMs);
-    utimesSync(marker, shifted, shifted);
+    const resultMs = opts.testResult ? Date.parse(opts.testResult.timestamp) : Number.NaN;
+    for (const marker of markers) {
+      const anchorMs = Number.isFinite(resultMs) ? resultMs : statSync(marker).mtimeMs;
+      const shifted = new Date(anchorMs - opts.markerAgeMs);
+      utimesSync(marker, shifted, shifted);
+    }
   }
 
   return {
     repo,
     pluginRoot,
     ledger: ledgerFilePath(repo),
-    cache: path.join(pluginRoot, 'runtime', 'last-dev-verify-sha.txt'),
+    cache: path.join(sessionGateDir(repo, SESSION), GATE_FILES.devVerifyFingerprint),
   };
 }
 
@@ -256,12 +286,17 @@ describe('dev-verify-gate — unmeasured denominator (real spawn)', () => {
     expect(normal.stdout).toBe(EXPECTED_STDOUT);
 
     const box = buildSandbox();
-    // Occupy the ledger DIRECTORY path with a regular file, so the writer's
-    // mkdir fails. `appendLedgerEvent` never throws, so the hook must be
-    // unaffected; the ledger simply stays absent.
-    const ledgerDir = path.dirname(box.ledger);
-    rmSync(ledgerDir, { recursive: true, force: true });
-    writeFileSync(ledgerDir, 'not a directory\n');
+    // Occupy the ledger FILE path with a directory, so every append fails
+    // (EISDIR). `appendLedgerEvent` never throws, so the hook must be unaffected;
+    // nothing is ever written into the ledger.
+    //
+    // This used to occupy the ledger's PARENT directory with a regular file. That
+    // directory (`<git common dir>/artibot`) is also where the gate's own state
+    // lives now (O2), so removing it would measure the gate losing its marker — a
+    // different failure, and one that fails SAFE (silence), covered by
+    // `gate-state-project-scope.test.js`. The registry case below uses the same
+    // directory-where-a-file-belongs device.
+    mkdirSync(box.ledger, { recursive: true });
 
     const blocked = runHook(box);
     expect(
@@ -269,7 +304,8 @@ describe('dev-verify-gate — unmeasured denominator (real spawn)', () => {
       `normal=${JSON.stringify(normal.stdout)} blocked=${JSON.stringify(blocked.stdout)} `
       + `stderr=${blocked.stderr}`,
     ).toBe(true);
-    expect(readLedgerLines(box.ledger)).toEqual([]);
+    expect(statSync(box.ledger).isDirectory(), 'the ledger path is still the directory we put there').toBe(true);
+    expect(readdirSync(box.ledger), 'and nothing was written into it').toEqual([]);
   }, 60_000);
 
   it('records nothing and prints the same stdout when stdin carries no session_id', () => {
@@ -281,7 +317,8 @@ describe('dev-verify-gate — unmeasured denominator (real spawn)', () => {
 
   /**
    * IDEMPOTENCY, STATED PRECISELY: the fingerprint cache
-   * (`runtime/last-dev-verify-sha.txt`) is the EFFECTIVE dedupe — a second Stop
+   * (`last-dev-verify-sha.txt`, in the session's gate directory) is the
+   * EFFECTIVE dedupe — a second Stop
    * over the same working-tree state returns before any ledger work. The
    * writer's idempotency key only dedupes SAME-SECOND retries, because
    * `verification_id` embeds `measured_at` at second resolution

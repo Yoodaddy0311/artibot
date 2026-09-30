@@ -13,10 +13,17 @@ import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isArtibotRepo, isSkippablePath } from '../../lib/core/hook-utils.js';
 import { getHeadSha, getRepoRoot } from '../../lib/git/repo-root-cache.js';
+import { GATE_FILES, treeGateDir } from '../../lib/project-state/gate-markers.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'stop-review-gate';
-const STATE_FILE = 'last-review-gate-sha.txt';
+// The loop-guard memory is per WORKING TREE and lives in the project's store
+// (`<store>/gates/trees/<tree>/`, see lib/project-state/gate-markers.js), not in
+// the plugin root: that directory is shared by every project and replaced on
+// every plugin update. A tree rather than a session because the fingerprint
+// describes a tree's state — scoping it by session would make each new session
+// block once more over an unchanged state.
+const STATE_FILE = GATE_FILES.reviewGateFingerprint;
 const log = (msg) => process.stderr.write(`[artibot:${HOOK_NAME}] ${msg}\n`);
 
 const CODE_EXTENSIONS = new Set([
@@ -125,10 +132,13 @@ function buildFingerprint(repoRoot, sha, files) {
   return `${repoHash}|${sha}|${files.slice().sort().join(',')}`;
 }
 
-/** @returns {string} */
-function readLastFingerprint(pluginRoot) {
+/**
+ * @param {string} stateDir this working tree's gate directory
+ * @returns {string}
+ */
+function readLastFingerprint(stateDir) {
   try {
-    const filePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+    const filePath = path.join(stateDir, STATE_FILE);
     if (!existsSync(filePath)) return '';
     return readFileSync(filePath, 'utf-8').trim();
   } catch {
@@ -136,9 +146,13 @@ function readLastFingerprint(pluginRoot) {
   }
 }
 
-function saveFingerprint(pluginRoot, fingerprint) {
+/**
+ * @param {string} stateDir this working tree's gate directory
+ * @param {string} fingerprint
+ */
+function saveFingerprint(stateDir, fingerprint) {
   try {
-    const filePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+    const filePath = path.join(stateDir, STATE_FILE);
     atomicWriteSync(filePath, fingerprint + '\n');
   } catch {
     // best-effort persistence
@@ -150,13 +164,13 @@ function saveFingerprint(pluginRoot, fingerprint) {
  * edits since last gate fire). False means HEAD/working-tree drift but no
  * actual edits — same break-the-loop pattern as dev-verify-gate.js:167-186.
  *
- * @param {string} pluginRoot
+ * @param {string} stateDir this working tree's gate directory
  * @param {string} repoRoot
  * @param {string[]} changedFiles
  * @returns {boolean}
  */
-function hasNewerEdits(pluginRoot, repoRoot, changedFiles) {
-  const cachePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+function hasNewerEdits(stateDir, repoRoot, changedFiles) {
+  const cachePath = path.join(stateDir, STATE_FILE);
   if (!existsSync(cachePath)) return true;
   let cacheMtime;
   try {
@@ -499,7 +513,8 @@ function aggregateIssues(analysis, missingTests) {
  * @param {string[]} issues
  * @param {string[]} changedFiles
  * @param {string|null} codexMode
- * @param {{ duplicate: boolean, fingerprint: string|null, pluginRoot: string }} cacheCtx
+ * @param {{ duplicate: boolean, fingerprint: string|null, stateDir: string|null }} cacheCtx
+ *   `fingerprint` and `stateDir` are set together, and only when there are issues
  */
 function buildResult(issues, changedFiles, codexMode, cacheCtx) {
   void codexMode; // reserved for future cross-check
@@ -521,7 +536,7 @@ function buildResult(issues, changedFiles, codexMode, cacheCtx) {
   }
 
   log(reason);
-  if (cacheCtx.fingerprint) saveFingerprint(cacheCtx.pluginRoot, cacheCtx.fingerprint);
+  if (cacheCtx.fingerprint) saveFingerprint(cacheCtx.stateDir, cacheCtx.fingerprint);
   writeStdout({ decision: 'block', reason });
 }
 
@@ -565,17 +580,17 @@ export async function main() {
 
   // Fingerprint cache + mtime guard (mirrors dev-verify-gate.js loop fix).
   // Only relevant when issues exist — clean runs always emit `approve`.
-  const pluginRoot = getPluginRoot();
-  let cacheCtx = { duplicate: false, fingerprint: null, pluginRoot };
+  let cacheCtx = { duplicate: false, fingerprint: null, stateDir: null };
   if (issues.length > 0) {
+    const stateDir = treeGateDir(repoRoot);
     const headSha = getHeadSha(repoRoot) || 'unknown';
     const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
-    const sameFingerprint = readLastFingerprint(pluginRoot) === fingerprint;
-    const noNewerEdits = !hasNewerEdits(pluginRoot, repoRoot, changedFiles);
+    const sameFingerprint = readLastFingerprint(stateDir) === fingerprint;
+    const noNewerEdits = !hasNewerEdits(stateDir, repoRoot, changedFiles);
     cacheCtx = {
       duplicate: sameFingerprint && noNewerEdits,
       fingerprint,
-      pluginRoot,
+      stateDir,
     };
   }
 

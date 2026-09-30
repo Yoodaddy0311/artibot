@@ -2,10 +2,18 @@
 /**
  * PostToolUse hook for Edit / Write / MultiEdit.
  *
- * Writes `runtime/last-main-agent-edit.timestamp` ONLY when the edit was made
- * by the main orchestrator agent — not by a Task-spawned teammate / subagent.
- * The dev-verify-gate Stop hook compares this marker's mtime against its own
- * fingerprint cache to decide whether to surface the DEV verify checklist.
+ * Writes `last-main-agent-edit.timestamp` ONLY when the edit was made by the main
+ * orchestrator agent — not by a Task-spawned teammate / subagent — and only for
+ * the session and project that made it. The dev-verify-gate Stop hook compares
+ * this marker's mtime against its own fingerprint cache to decide whether to
+ * surface the DEV verify checklist.
+ *
+ * Where the marker lives (O2): `<store>/gates/sessions/<session>/`, with `<store>`
+ * from `lib/project-state/store-location.js` — see
+ * `lib/project-state/gate-markers.js` for the layout and the reasons. It used to
+ * be ONE file in `<pluginRoot>/runtime/`, shared by every project and lost on
+ * every plugin update, so an edit anywhere fired the Stop gate of any Artibot
+ * checkout.
  *
  * Why this matters (v4.5.6 in-flight regression that v4.5.8 closes):
  *   The previous gate fired on every Stop with uncommitted changes in the
@@ -24,9 +32,20 @@
  * `subagent_type` / `parent_session_id` / `role: 'teammate'`, and we bail
  * without touching the marker.
  *
- * Side-effect contract: writes one timestamp file. No stdout. Errors are
- * logged via the shared error handler with `exit: false` — a marker write
- * failure must never break tool execution.
+ * When it writes NOTHING (each is a case no Stop gate could ever read):
+ *   - the tool is not an edit tool, or the call came from a subagent;
+ *   - `cwd` is not inside a git work tree. Both Stop gates need git
+ *     (`getRepoRoot()`), so a marker outside one is unreachable. The walk up is
+ *     pure filesystem — this hook runs on every edit and must not start a
+ *     process (see `_main-entry.js#nearestWorkTreeRoot`);
+ *   - the work tree is not an Artibot repo. The gates bail outside one
+ *     (`isArtibotRepo`), so the marker would be state no reader exists for, left
+ *     in every unrelated project the plugin is installed into.
+ *
+ * Side-effect contract: writes one timestamp file, and — only for the process
+ * that just created a new session directory — prunes idle ones. No stdout.
+ * Errors are logged via the shared error handler with `exit: false` — a marker
+ * write failure must never break tool execution.
  *
  * @module scripts/hooks/mark-main-agent-edit
  */
@@ -34,15 +53,23 @@
 import path from 'node:path';
 import {
   atomicWriteSync,
-  getPluginRoot,
   parseJSON,
   readStdin,
 } from '../utils/index.js';
-import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
-import { isMainEntry } from './_main-entry.js';
+import { createErrorHandler, extractToolName, isArtibotRepo } from '../../lib/core/hook-utils.js';
+import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
+import {
+  claimGateDir,
+  GATE_FILES,
+  gatesDir,
+  pruneStaleGateState,
+  sessionGateDir,
+  sessionIdOf,
+  sessionSlot,
+} from '../../lib/project-state/gate-markers.js';
+import { isMainEntry, nearestWorkTreeRoot } from './_main-entry.js';
 
 const HOOK_NAME = 'mark-main-agent-edit';
-const MARKER_FILE = 'last-main-agent-edit.timestamp';
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 
 /**
@@ -61,14 +88,42 @@ export function isSubagentContext(hookData) {
 }
 
 /**
- * Resolve the absolute path of the main-agent-edit marker file.
+ * Absolute path of the main-agent-edit marker for one session of one project.
  *
- * @param {string} [pluginRoot]
+ * The same `sessionGateDir` the Stop gate reads, so the two cannot disagree
+ * about the location.
+ *
+ * @param {string} projectRoot work-tree root
+ * @param {unknown} [sessionId] hook payload `session_id`
  * @returns {string}
  */
-export function getMarkerPath(pluginRoot) {
-  const root = pluginRoot ?? getPluginRoot();
-  return path.join(root, 'runtime', MARKER_FILE);
+export function getMarkerPath(projectRoot, sessionId) {
+  return path.join(sessionGateDir(projectRoot, sessionId), GATE_FILES.mainAgentEdit);
+}
+
+/**
+ * Decide where this payload's marker goes, or that it goes nowhere.
+ *
+ * @param {object} hookData parsed PostToolUse payload
+ * @returns {{ projectRoot: string, dir: string, file: string, gates: string, slot: string }|null}
+ *   null when no Stop gate could read a marker written for this payload
+ */
+export function resolveMarkerTarget(hookData) {
+  const reported = hookData?.cwd;
+  const cwd = typeof reported === 'string' && reported.trim() !== '' ? reported : process.cwd();
+  const projectRoot = nearestWorkTreeRoot(cwd, resolveGitCommonDir);
+  if (projectRoot === null) return null;
+  if (!isArtibotRepo(projectRoot)) return null;
+
+  const sessionId = sessionIdOf(hookData);
+  const dir = sessionGateDir(projectRoot, sessionId);
+  return {
+    projectRoot,
+    dir,
+    file: path.join(dir, GATE_FILES.mainAgentEdit),
+    gates: gatesDir(projectRoot),
+    slot: sessionSlot(sessionId),
+  };
 }
 
 async function main() {
@@ -87,8 +142,14 @@ async function main() {
   // the orchestrator made them.
   if (isSubagentContext(hookData)) return;
 
-  const markerPath = getMarkerPath();
-  atomicWriteSync(markerPath, new Date().toISOString() + '\n');
+  const target = resolveMarkerTarget(hookData);
+  if (target === null) return;
+
+  // The creator of a session directory owes the prune of idle ones; a process
+  // that finds it already there does not pay for a directory listing.
+  const created = claimGateDir(target.dir);
+  atomicWriteSync(target.file, new Date().toISOString() + '\n');
+  if (created) pruneStaleGateState(target.gates, { keep: [target.slot] });
 }
 
 // Direct-run guard: importing this module (tests) must not execute the hook.

@@ -17,20 +17,26 @@
  *
  * ── THE FRESHNESS RULE (owner decision F1) ──────────────────────────────────
  * A result counts only when it is at least as new as the last main-agent edit
- * (`runtime/last-main-agent-edit.timestamp`, the same marker the gate uses to
- * decide whether to fire at all). Anything older described a tree that no
- * longer exists. There is deliberately NO time-to-live: a 24-hour window would
- * let a stale green survive an edit, which is exactly the failure F1 rejects.
+ * (`last-main-agent-edit.timestamp`, the same marker the gate uses to decide
+ * whether to fire at all). Anything older described a tree that no longer
+ * exists. There is deliberately NO time-to-live: a 24-hour window would let a
+ * stale green survive an edit, which is exactly the failure F1 rejects.
  *
- * ── THE TWO ROOTS, AND WHY THEY DIFFER (owner decision R1) ──────────────────
+ * ── THE TWO LOCATIONS, AND WHY THEY DIFFER (owner decision R1) ──────────────
  * The result file is read under the REPO root, not the plugin root. The
  * reporter writes it beside the sources it ran against, and the installed
  * plugin copy under `~/.claude/plugins/cache/` never has one — resolving it
  * against `CLAUDE_PLUGIN_ROOT` would make the live numerator permanently zero
- * (measured 2026-09-14: present in the checkout, absent in the install). The
- * marker, in contrast, really does live under the plugin root, because the
- * PostToolUse hook that writes it runs from the install. Comparing across the
- * two is sound: both values come from the same machine's wall clock.
+ * (measured 2026-09-14: present in the checkout, absent in the install).
+ *
+ * The marker is read from a path the CALLER hands in (`markerPath`). It lives in
+ * the session's own gate directory under the project store
+ * (`lib/project-state/gate-markers.js`), no longer under the plugin root: a
+ * plugin-root marker was shared by every project and lost on every update, so a
+ * run could be judged fresh or stale against an edit made somewhere else. This
+ * module stays ignorant of that layout on purpose — it is pure, and the one
+ * caller that knows the layout is the one that already gated on the same file.
+ * Comparing the two values is sound: both come from the same machine's wall clock.
  *
  * A consequence worth stating: run `npm test` in one worktree and edit in
  * another, and this reports UNMEASURED. That is the honest answer, not a bug —
@@ -39,7 +45,7 @@
  * ── PURITY ──────────────────────────────────────────────────────────────────
  * No `node:fs` import. Every byte arrives through injected ports, so the
  * decision table is testable without a filesystem and the Stop hook keeps the
- * only IO. `node:path` is the sole import, for joining the two roots.
+ * only IO. `node:path` is the sole import, for joining the repo root.
  *
  * @module lib/verification/deterministic-source
  */
@@ -52,9 +58,6 @@ import path from 'node:path';
  * would pin one machine's layout into a record other machines have to read.
  */
 export const RESULT_FILE_RELPATH = 'plugins/artibot/runtime/last-test-result.json';
-
-/** The marker the gate itself writes/reads, relative to the PLUGIN root. */
-const MARKER_RELPARTS = Object.freeze(['runtime', 'last-main-agent-edit.timestamp']);
 
 /**
  * Tolerance for a result timestamp that sits in the future.
@@ -210,11 +213,13 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
  * @param {{ readFile: (p: string) => string|null, statMtimeMs: (p: string) => number|null }} ports
  * @param {object} p
  * @param {string|null} p.repoRoot Root of the checkout the reporter wrote into.
- * @param {string|null} p.pluginRoot Root the marker lives under.
+ * @param {string|null} p.markerPath Absolute path of the session's
+ *   `last-main-agent-edit.timestamp`; an empty or missing value reads as "no
+ *   marker", never as a guess at where one might be.
  * @param {number} [p.nowMs]
  * @returns {{ deterministic: { exitCode?: number, reason: string, evidence?: Array<object> } }}
  */
-export function readDeterministicLayer(ports, { repoRoot, pluginRoot, nowMs } = {}) {
+export function readDeterministicLayer(ports, { repoRoot, markerPath, nowMs } = {}) {
   const readFile = typeof ports?.readFile === 'function' ? ports.readFile : null;
   const statMtimeMs = typeof ports?.statMtimeMs === 'function' ? ports.statMtimeMs : null;
 
@@ -233,13 +238,13 @@ export function readDeterministicLayer(ports, { repoRoot, pluginRoot, nowMs } = 
   // `absent` is the more specific truth than whatever the marker would say.
   if (resultJsonText === null) return { deterministic: { reason: REASONS.absent } };
 
-  if (!statMtimeMs || typeof pluginRoot !== 'string' || pluginRoot === '') {
+  if (!statMtimeMs || typeof markerPath !== 'string' || markerPath === '') {
     return { deterministic: { reason: REASONS.noMarker } };
   }
 
   let markerMtimeMs;
   try {
-    const raw = statMtimeMs(path.join(pluginRoot, ...MARKER_RELPARTS));
+    const raw = statMtimeMs(markerPath);
     markerMtimeMs = Number.isFinite(raw) ? Number(raw) : null;
   } catch {
     return { deterministic: { reason: REASONS.noMarker } };

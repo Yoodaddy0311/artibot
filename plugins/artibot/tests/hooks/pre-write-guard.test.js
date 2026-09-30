@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { isClaudeConfigPath, PROTECTED_CONFIG_BASENAMES } from '../../lib/security/human-gate-enforce.js';
 import { getGateRow } from '../../lib/security/human-gates.js';
+import { GATE_FILES, sessionGateDir } from '../../lib/project-state/gate-markers.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -20,7 +21,9 @@ vi.mock('../../scripts/utils/index.js', () => ({
   atomicWriteSync: vi.fn((filePath, data) => {
     writtenFiles[filePath] = data;
   }),
-  // v4.7.4: pre-write-guard fingerprint cache writes to <pluginRoot>/runtime/.
+  // The hook no longer takes state from the plugin root (O2: the loop guard's
+  // memory is per session, in the project's store). The mock stays so that a
+  // regression which WOULD write there is visible as a path under '/plugin-root'.
   getPluginRoot: vi.fn(() => '/plugin-root'),
   // P0 advisory-mode toggle: resolveWriteGuardMode reads artibot.config.json.
   resolveConfigPath: vi.fn((...segs) => ['/plugin-root', ...segs].join('/')),
@@ -119,6 +122,26 @@ function makePostReadData(filePath, sessionId = 'test-session') {
 
 function trackingPath(sessionId = 'test-session') {
   return path.join('/tmp', `artibot-read-tracking-${sessionId}.json`);
+}
+
+/**
+ * Where the loop guard remembers a block (O2): the session's gate directory under
+ * the project store. `getRepoRootMock` answers '/workspace' in this file and
+ * '/workspace' has no `.git`, so the store is the `<root>/.artibot/runtime`
+ * fallback; the helper is the module's own, and the literal layout is pinned in
+ * `mark-main-agent-edit.test.js` and `tests/project-state/gate-markers.test.js`.
+ *
+ * @param {string} [sessionId]
+ * @param {string} [root]
+ * @returns {string}
+ */
+function blockFingerprintPath(sessionId = 'test-session', root = '/workspace') {
+  return path.join(sessionGateDir(root, sessionId), GATE_FILES.preWriteBlock);
+}
+
+/** Every path the hook asked `atomicWriteSync` to write for the loop guard. */
+function loopGuardWrites() {
+  return Object.keys(writtenFiles).filter((file) => file.includes(GATE_FILES.preWriteBlock));
 }
 
 // ---------------------------------------------------------------------------
@@ -556,9 +579,8 @@ describe('pre-write-guard hook', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(writeStdout).not.toHaveBeenCalled();
-      // Advisory path must NOT persist a block fingerprint.
-      const fpPath = path.join('/plugin-root', 'runtime', 'last-pre-write-block.txt');
-      expect(writtenFiles[fpPath]).toBeUndefined();
+      // Advisory path must NOT persist a block fingerprint — anywhere.
+      expect(loopGuardWrites()).toEqual([]);
     });
 
     it('env ARTIBOT_WRITE_GUARD_MODE=advisory overrides config block', async () => {
@@ -645,9 +667,59 @@ describe('pre-write-guard hook', () => {
       expect(writeStdout).toHaveBeenCalledWith(
         expect.objectContaining({ decision: 'block' }),
       );
-      // Fingerprint persisted to runtime/last-pre-write-block.txt
-      const fpPath = path.join('/plugin-root', 'runtime', 'last-pre-write-block.txt');
-      expect(writtenFiles[fpPath]).toBeDefined();
+      // Fingerprint persisted to the SESSION's gate directory in the project
+      // store (O2) — exactly one file, and none of it under the plugin root.
+      expect(loopGuardWrites()).toEqual([blockFingerprintPath('test-session')]);
+      expect(writtenFiles[blockFingerprintPath('test-session')]).toMatch(/^[0-9a-f]{16}\n$/);
+      expect(Object.keys(writtenFiles).some((file) => file.includes('plugin-root'))).toBe(false);
+    });
+
+    it('keeps each session\'s block memory in its own file (one session cannot evict another\'s)', async () => {
+      const filePath = '/workspace/plugins/artibot/lib/core/cache.js';
+      existsSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot-read-tracking')) return true;
+        if (s.includes('last-pre-write-block.txt')) return false;
+        return true;
+      });
+      readFileSync.mockReturnValue('[]');
+
+      readStdin.mockResolvedValueOnce(makePreWriteData(filePath, 'Write', 'session-one'));
+      await runHook();
+      readStdin.mockResolvedValueOnce(makePreWriteData(filePath, 'Write', 'session-two'));
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const writes = loopGuardWrites();
+      expect(writes).toHaveLength(2);
+      expect(writes.sort()).toEqual(
+        [blockFingerprintPath('session-one'), blockFingerprintPath('session-two')].sort(),
+      );
+      // Session two's fingerprint differs, but that is not what keeps them apart:
+      // even identical contents would sit in two files.
+      expect(path.dirname(writes[0])).not.toBe(path.dirname(writes[1]));
+    });
+
+    it('a session without an id uses the fixed no-session slot', async () => {
+      const filePath = '/workspace/plugins/artibot/lib/core/cache.js';
+      existsSync.mockImplementation((p) => {
+        const s = String(p);
+        if (s.includes('artibot-read-tracking')) return true;
+        if (s.includes('last-pre-write-block.txt')) return false;
+        return true;
+      });
+      readFileSync.mockReturnValue('[]');
+      readStdin.mockResolvedValue(JSON.stringify({
+        hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: filePath },
+      }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // `null`, not `undefined`: the helper's default parameter would turn the
+      // latter into 'test-session' and this case would compare the wrong slot.
+      expect(loopGuardWrites()).toEqual([blockFingerprintPath(null)]);
+      expect(blockFingerprintPath(null)).toContain(`${path.sep}no-session${path.sep}`);
     });
 
     it('downgrades a duplicate block to approve (loop bypass)', async () => {

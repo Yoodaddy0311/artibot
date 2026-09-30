@@ -28,8 +28,19 @@
  *
  * Loop guards:
  *   - `stop_hook_active === true` → bail (Claude Code retry after block)
- *   - SHA + file fingerprint cache (`runtime/last-dev-verify-sha.txt`)
- *     prevents repeated verification asks for the same working-tree state.
+ *   - SHA + file fingerprint cache (`last-dev-verify-sha.txt`) prevents repeated
+ *     verification asks for the same working-tree state.
+ *
+ * Where the state lives (O2): the fingerprint cache and the main-agent-edit
+ * marker it is compared with are both per PROJECT and per SESSION —
+ * `<store>/gates/sessions/<session>/`, `<store>` from
+ * `lib/project-state/store-location.js` (layout and reasons in
+ * `lib/project-state/gate-markers.js`). They used to be two files in
+ * `<pluginRoot>/runtime/`, shared by every project and replaced on every plugin
+ * update: an edit in one project fired another project's gate, one session's
+ * fire hid another session's unverified edit, and an update forgot what had
+ * already been asked. The two files are compared by MTIME, which is why they
+ * share one scope. The legacy plugin-root files are never read.
  *
  * Ledger side effect (OB-07): a fire also records four `verify.completed`
  * lines (three layers + overall). See {@link recordVerifyDenominator}. The
@@ -64,7 +75,6 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import {
   atomicWriteSync,
-  getPluginRoot,
   parseJSON,
   readStdin,
   resolveConfigPath,
@@ -76,11 +86,12 @@ import {
   getRepoRoot as getCachedRepoRoot,
 } from '../../lib/git/repo-root-cache.js';
 import { buildDevVerifyOutput, resolveDevVerifyMode } from '../../lib/core/dev-verify-output.js';
+import { GATE_FILES, sessionGateDir, sessionIdOf } from '../../lib/project-state/gate-markers.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'dev-verify-gate';
-const STATE_FILE = 'last-dev-verify-sha.txt';
-const MARKER_FILE = 'last-main-agent-edit.timestamp';
+const STATE_FILE = GATE_FILES.devVerifyFingerprint;
+const MARKER_FILE = GATE_FILES.mainAgentEdit;
 
 // Single line on purpose: Claude Code ≥ 2.1.172 renders Stop-hook
 // additionalContext verbatim in the terminal ("Stop hook feedback:") and
@@ -191,12 +202,12 @@ function buildFingerprint(repoRoot, sha, files) {
 }
 
 /**
- * @param {string} pluginRoot
+ * @param {string} stateDir this session's gate directory
  * @returns {string}
  */
-function readLastFingerprint(pluginRoot) {
+function readLastFingerprint(stateDir) {
   try {
-    const filePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+    const filePath = path.join(stateDir, STATE_FILE);
     if (!existsSync(filePath)) return '';
     return readFileSync(filePath, 'utf-8').trim();
   } catch {
@@ -205,12 +216,12 @@ function readLastFingerprint(pluginRoot) {
 }
 
 /**
- * @param {string} pluginRoot
+ * @param {string} stateDir this session's gate directory
  * @param {string} fingerprint
  */
-function saveFingerprint(pluginRoot, fingerprint) {
+function saveFingerprint(stateDir, fingerprint) {
   try {
-    const filePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+    const filePath = path.join(stateDir, STATE_FILE);
     atomicWriteSync(filePath, fingerprint + '\n');
   } catch (err) {
     logHookError(HOOK_NAME, 'failed to persist fingerprint', err);
@@ -220,10 +231,12 @@ function saveFingerprint(pluginRoot, fingerprint) {
 /**
  * Has the main orchestrator agent made an edit since the last gate fire?
  *
- * Compares `runtime/last-main-agent-edit.timestamp` (written by the
+ * Compares `last-main-agent-edit.timestamp` (written by the
  * mark-main-agent-edit PostToolUse hook on Edit/Write/MultiEdit, only when
- * NOT inside a subagent context) against `runtime/last-dev-verify-sha.txt`
- * (written by this gate after a successful fire).
+ * NOT inside a subagent context) against `last-dev-verify-sha.txt` (written by
+ * this gate after a successful fire). Both live in `stateDir`, the session's own
+ * gate directory, so the comparison is between THIS session's edit and THIS
+ * session's last ask — never another session's or another project's.
  *
  * Decision matrix:
  *   - marker missing       → no main-agent edits have ever fired   → bail (false)
@@ -234,14 +247,16 @@ function saveFingerprint(pluginRoot, fingerprint) {
  * The "marker missing → bail" branch is critical: a fresh checkout with
  * dirty working-tree (e.g. an in-progress branch resumed from another
  * machine) must NOT spuriously fire the verify ask, because the orchestrator
- * has not actually edited anything in this session yet.
+ * has not actually edited anything in this session yet. It is also the direction
+ * every unattributable case fails in: a session id the writer never saw, a
+ * plugin directory that predates this layout, an unwritable store.
  *
- * @param {string} pluginRoot
+ * @param {string} stateDir this session's gate directory
  * @returns {boolean} true → fire gate, false → bail
  */
-function hasNewerMainAgentEdit(pluginRoot) {
-  const markerPath = path.join(pluginRoot, 'runtime', MARKER_FILE);
-  const cachePath = path.join(pluginRoot, 'runtime', STATE_FILE);
+function hasNewerMainAgentEdit(stateDir) {
+  const markerPath = path.join(stateDir, MARKER_FILE);
+  const cachePath = path.join(stateDir, STATE_FILE);
 
   if (!existsSync(markerPath)) return false;
   if (!existsSync(cachePath)) return true;
@@ -294,10 +309,12 @@ function resolveHookEventName(hookData) {
  * `tests/reporters/test-status-reporter.js` writes the last `npm test` outcome
  * to `<repoRoot>/plugins/artibot/runtime/last-test-result.json` (owner decision
  * R1 — the installed plugin copy never has one, so resolving it against
- * `pluginRoot` would pin the live numerator at zero). That file becomes a
+ * the plugin root would pin the live numerator at zero). That file becomes a
  * `pass`/`fail` on the DETERMINISTIC line only when it is at least as new as
- * `runtime/last-main-agent-edit.timestamp` (owner decision F1 — no TTL, because
- * a time window lets a stale green outlive the edit that invalidated it).
+ * this session's `last-main-agent-edit.timestamp` (owner decision F1 — no TTL,
+ * because a time window lets a stale green outlive the edit that invalidated
+ * it). The marker is this session's, not the project's last: a run that covers
+ * another session's edit says nothing about this one's.
  * Anything else — absent, corrupt, undated, no marker, stale, or a run that
  * collected ZERO tests (`failed === 0` is true of a suite that never ran, so
  * the count is checked, not the status) — stays `unmeasured`, with the branch
@@ -359,14 +376,15 @@ function resolveHookEventName(hookData) {
  * @param {string} repoRoot Ledger root — the writer derives the file from it,
  *   and the vitest result file is resolved against it (R1). The evidence
  *   registry is bound to it too.
- * @param {string} pluginRoot Root the edit marker lives under. Passed in rather
- *   than re-resolved so this reads the SAME root `main()` already gated on.
+ * @param {string} markerPath Absolute path of THIS session's main-agent-edit
+ *   marker. Passed in rather than re-resolved so this reads the SAME file
+ *   `main()` already gated on.
  * @param {object} hookData Raw Stop payload; `session_id` is the join key.
  * @returns {Promise<object>} the writer's tally (`appended`/`deduped`/
  *   `rejected`/`skipped`). `skipped: 1` means the payload carried no
  *   `session_id`, which the writer refuses — no id is invented here.
  */
-async function recordVerifyDenominator(repoRoot, pluginRoot, hookData) {
+async function recordVerifyDenominator(repoRoot, markerPath, hookData) {
   const [verifier, writer, ledger, source, evidenceDeps] = await Promise.all([
     import('../../lib/verification/unified-verifier.js'),
     import('../../lib/verification/verify-writer.js'),
@@ -380,7 +398,7 @@ async function recordVerifyDenominator(repoRoot, pluginRoot, hookData) {
       readFile: (file) => (existsSync(file) ? readFileSync(file, 'utf-8') : null),
       statMtimeMs: (file) => (existsSync(file) ? statSync(file).mtimeMs : null),
     },
-    { repoRoot, pluginRoot, nowMs: Date.now() },
+    { repoRoot, markerPath, nowMs: Date.now() },
   );
 
   const sessionId = typeof hookData?.session_id === 'string' ? hookData.session_id : undefined;
@@ -493,20 +511,22 @@ export async function main() {
   // Read-only / diagnostic turn — no DEV verify needed.
   if (changedFiles.length === 0) return;
 
-  const pluginRoot = getPluginRoot();
+  // This session's gate directory (O2): the edit marker and the fingerprint
+  // cache live here, per project and per session, never in the plugin root.
+  const stateDir = sessionGateDir(repoRoot, sessionIdOf(hookData));
 
   // Marker check: did the main orchestrator agent edit anything since the
   // last verify fire? If not (only teammates edited, or only working-tree
   // drift like autopilot WIP commits), bail. This is the v4.5.8 fix for
   // the v4.5.6 paralysis bug where every orchestrator Stop while teammates
   // were mid-edit got blocked with a spurious "Pending verification" ask.
-  if (!hasNewerMainAgentEdit(pluginRoot)) return;
+  if (!hasNewerMainAgentEdit(stateDir)) return;
 
   const headSha = getHeadSha(repoRoot) || 'unknown';
   const fingerprint = buildFingerprint(repoRoot, headSha, changedFiles);
-  if (readLastFingerprint(pluginRoot) === fingerprint) return; // already verified
+  if (readLastFingerprint(stateDir) === fingerprint) return; // already verified
 
-  saveFingerprint(pluginRoot, fingerprint);
+  saveFingerprint(stateDir, fingerprint);
 
   // Mode-aware output: 'enforce' (default) blocks the stop; 'advisory' surfaces
   // the same checklist as non-blocking 2.1.163 additionalContext feedback.
@@ -539,7 +559,7 @@ export async function main() {
   // The record itself is a SIDE EFFECT ONLY: the tally is not read, nothing
   // branches on it, and every failure mode (import, read, append) is absorbed.
   try {
-    await recordVerifyDenominator(repoRoot, pluginRoot, hookData);
+    await recordVerifyDenominator(repoRoot, path.join(stateDir, MARKER_FILE), hookData);
   } catch (err) {
     logHookError(HOOK_NAME, 'failed to record the verify denominator', err);
   }
