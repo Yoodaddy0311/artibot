@@ -61,7 +61,7 @@ Accepted — 2026-09-29. 결정 문구(§5-1)는 리더(artibot-68)가 R2-10 으
 | 축 | Shadow 기록 경로 (SH-02) | Canary 강제 경로 (CA-13) |
 |---|---|---|
 | 실행 지점 | SessionEnd 디스패처 자식 `scripts/hooks/mission-complete-record.js` (`hooks/dispatch-table.json:79`) | `lib/autopilot/engine.js:560` (`runPhase6Report` 안 `gateReportOnVerify`) 와 `lib/autopilot/engine-state.js:159` (`recordPhaseResult` 안 `refuseRecordedReport`) |
-| 입력 | 원장 행(`verify.completed`·`review.completed`·`human.*`) + StateStore 행 + 디스크의 `plan.md`·`review.md` | `state.attemptJournal`(VERIFY·EXECUTE 시작 행과 ACK 행) + 열린 `activePhaseAttempt` 슬롯뿐 (`lib/autopilot/report-verify-gate.js` 헤더 "Evidence rule") |
+| 입력 | 원장 행(`verify.completed`·`review.completed`·`human.*`) + StateStore 행 + 디스크의 `plan.md`·`review.md` | `state.attemptJournal`(VERIFY·EXECUTE 시작 행과 ACK 행) + 열린 `activePhaseAttempt` 슬롯뿐 (`lib/autopilot/report-verify-gate.js` 헤더 "Evidence rule") (origin/master 245fc47c 부터 rule 6 이 `state.verifyResult` 도 읽는다 — 여전히 세션 상태만) |
 | 스위치 | `runtime.artifactLifecycle.enabled`(출하 false) **AND** 프로젝트 마커 `.artibot/artifact-lifecycle.optin` (`lib/runtime/artifact-lifecycle.js#resolveArtifactGate`) | `autopilot.reportVerifyGate.enforce`(출하 false, 리터럴 true 만 ON) |
 | OFF 일 때 | 파일 0. 원장의 선언 줄과 stderr 사유 줄은 계속 남는다 (`declareCompletion` 은 게이트와 무관, `writeOutcome` 만 게이트를 본다) | 평가 자체를 안 한다 — 틱·persist 없이 바이트 불변 (`gateReportOnVerify` 가 null 반환) |
 | 거부의 결과 | 파일을 안 쓴다 + `block=<코드>` 한 줄. stdout 0바이트, exit 0 (헤더 :32-35) | 세션이 PAUSED (`pausedReason report-verify-evidence-missing:<code>`, `pendingPhase VERIFY`) — 재개하면 VERIFY 부터 다시 |

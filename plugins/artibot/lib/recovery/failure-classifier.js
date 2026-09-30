@@ -3,7 +3,7 @@
  *
  * Observe stage (design §2.5): this module records a judgement. It does not
  * act on it. `lib/autopilot/engine.js` is not touched by this work — the
- * `nextPhase: 'IMPROVE'` transition at engine.js:497 stays fixed until the
+ * `nextPhase: 'IMPROVE'` transition in `engine.js#runPhase4Verify` stays fixed until the
  * Canary stage. Wiring a consumer is a later task, deliberately.
  *
  * ── Where the five classes come from ──────────────────────────────────────

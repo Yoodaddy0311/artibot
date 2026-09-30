@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { classify } from '../../lib/recovery/failure-classifier.js';
 import { decide, RECOVERY_ACTIONS } from '../../lib/recovery/recovery-controller.js';
 
-/** The payload `engine.js:503` already emits, unchanged. */
+/** The `onFailure` payload `engine.js#runPhase4Verify` already emits, unchanged. */
 const ENGINE_ON_FAILURE = Object.freeze({
   agent: 'build-error-resolver',
   retryLimit: 3,

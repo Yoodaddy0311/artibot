@@ -3,7 +3,7 @@
  *
  * Observe stage (design §2.5): `decide()` returns a recommendation and writes
  * nothing. No caller in `lib/autopilot/engine.js` reads it, and this task does
- * not add one — replacing the fixed `nextPhase: 'IMPROVE'` at engine.js:497 is
+ * not add one — replacing the fixed `nextPhase: 'IMPROVE'` in `engine.js#runPhase4Verify` is
  * Canary work. Until then the value of this module is that a judgement exists
  * and can be recorded, so the eventual switch has a measured denominator
  * instead of a guess.
@@ -32,8 +32,8 @@
  *
  * ── Consuming the existing onFailure payload ──────────────────────────────
  * `runPhase4Verify` already emits `onFailure: { agent, retryLimit: 3,
- * escalateTo: 'pause' }` (engine.js:480 `runPhase4Verify`, re-measured
- * 2026-09-15; the old :503-507 citation had drifted) and lane 4 §1.6 measured that no
+ * escalateTo: 'pause' }` (`engine.js#runPhase4Verify`, cited by symbol: the line
+ * numbers of that function drift, the old :503-507 citation already had) and lane 4 §1.6 measured that no
  * code reads it. This module is that reader: `retryLimit` caps repairs and
  * `escalateTo` names the terminal action. The payload is read-only here — the
  * engine is not modified, and `onFailure.agent` is not consulted because
@@ -87,7 +87,7 @@ const TARGET_BY_ACTION = Object.freeze({
 
 /**
  * Repair budget when `onFailure.retryLimit` is absent. 3 mirrors the value the
- * engine already emits (engine.js:505) so the default is the observed payload,
+ * engine already emits (`engine.js#runPhase4Verify` `onFailure`) so the default is the observed payload,
  * not a new number.
  */
 const DEFAULT_RETRY_LIMIT = 3;
@@ -183,7 +183,7 @@ function renderHumanRung(failureClass, escalateTo, reason) {
  *   was already proposed for this mission. True means §35's last line applies:
  *   the ultraplan did not resolve it, so a person decides.
  * @param {{retryLimit?: number, escalateTo?: string}} [attemptState.onFailure]
- *   The verify-phase payload from `engine.js:503`. Read only.
+ *   The verify-phase payload from `engine.js#runPhase4Verify` (`onFailure`). Read only.
  * @returns {{action: string, target: string, reason: string}}
  */
 export function decide(classification, attemptState = {}) {

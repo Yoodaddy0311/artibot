@@ -25,7 +25,7 @@ category: "learning"
 
 # Evolution Loop
 
-> **Status (2026-09-29)** — 이 가이드에서 **GRPO 를 서술한 부분**(5단계 "GRPO", "GRPO in Plain Terms", 스케줄의 "GRPO Training", Cowork 참여 1번의 "GRPO 학습에 영향")은 은퇴했다: GRPO 옵티마이저·정책 트레이너는 CLI 플러그인에서 2026-06-20 에 삭제됐다(`artibot.config.json` 의 `learning.grpoRouting.comment`). 오늘 남은 GRPO 계열은 세션 종료 배치 학습의 **그룹 내 규칙 기반 랭킹**(CLI 플러그인 `lib/learning/pattern-analyzer.js#grpoRankGroup`)이며, 모델을 학습시키지 않고 경험을 순위 매겨 패턴 파일을 만든다. 실제 세션 종료 파이프라인(`lib/learning/evolution-loop.js`)은 compress → knowledge graph → skill 평가 → auto-research → 집단 허브 기여 → 실패 분류이고 GRPO 단계가 없다. 해당 서술은 역사 기록으로 보존한다.
+> **Status (2026-09-29)** — 이 가이드에서 **GRPO 를 서술한 부분**(5단계 "GRPO", "GRPO in Plain Terms", 스케줄의 "GRPO Training", Cowork 참여 1번의 "GRPO 학습에 영향")은 은퇴했다: GRPO 옵티마이저·정책 트레이너는 CLI 플러그인에서 2026-06-20 에 삭제됐다(`artibot.config.json` 의 `learning.grpoRouting.comment`). 오늘 남은 GRPO 계열은 세션 종료 배치 학습의 **그룹 내 규칙 기반 랭킹**(CLI 플러그인 `plugins/artibot/lib/learning/pattern-analyzer.js#grpoRankGroup`)이며, 모델을 학습시키지 않고 경험을 순위 매겨 패턴 파일을 만든다. 실제 세션 종료 파이프라인(`lib/learning/evolution-loop.js`)은 compress → knowledge graph → skill 평가 → auto-research → 집단 허브 기여 → 실패 분류이고 GRPO 단계가 없다. 해당 서술은 역사 기록으로 보존한다.
 
 ## When This Skill Applies
 - Understanding how Artibot learns and self-improves over time

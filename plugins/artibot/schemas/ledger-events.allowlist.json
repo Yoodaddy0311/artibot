@@ -674,7 +674,7 @@
         "scheduler"
       ],
       "v1_1_example": true,
-      "spec": "lane 6 §5-② #18. accepted is deliberately three-valued: the writer appends {accepted:null} first and, when the observation window closes, APPENDS a second line with the verdict plus `supersedes` rather than rewriting the first (append-only; the reader takes the last value). KPI denominators count non-null only. This line is a fact derived AFTER outcome.md exists -- a ledger entry with no outcome.md is ledger contamination, not a completion (design §3.4)."
+      "spec": "lane 6 §5-② #18. accepted is deliberately three-valued: the writer appends {accepted:null} first and, when the observation window closes, APPENDS a second line with the verdict plus `supersedes` rather than rewriting the first (append-only; the reader takes the last value). KPI denominators count non-null only. The {accepted:null} line is a DECLARATION and precedes any outcome.md (design §7.2 §6, owner decision W11-Q4 (a)); only a NON-NULL accepted line is a fact derived after outcome.md exists — a non-null line with no outcome.md is ledger contamination, not a completion (design §3.4)."
     },
     "mission.archived": {
       "required": [
