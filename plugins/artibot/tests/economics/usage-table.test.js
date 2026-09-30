@@ -12,9 +12,10 @@
  *    tokens times the CURRENT catalog price (`priceUsage`, the writer's own
  *    formula) and the receipts' recorded `cost.total` rides beside it;
  *  - filters (session list, `since`, run list) and the conservation invariant
- *    `seen = malformed + Σ filtered + estimate_grade + duplicates + counted`;
+ *    `seen = malformed + Σ filtered + estimate_grade + source_missing + duplicates + counted`;
  *  - honesty: zero rows stays zero rows (no total, no 0-cost row), an estimate
- *    grade receipt is never mixed into a measured aggregate, a same-key receipt
+ *    grade receipt — and one with no `usage.source` at all, which is a different
+ *    finding — is never mixed into a measured aggregate, a same-key receipt
  *    with DIFFERENT content is kept (real ledger: a redacted run id collapsed
  *    two runs into one key), an unverified price is `null` and never a number.
  *
@@ -377,10 +378,11 @@ describe('foldUsageTable: filters', () => {
     expect(foldUsageTable([noTime]).receipts.counted).toBe(1);
   });
 
-  it('conserves every receipt: seen = malformed + filtered + estimate + duplicates + counted', () => {
+  it('conserves every receipt: seen = malformed + filtered + estimate + source_missing + duplicates + counted', () => {
     const events = [
       ...multiModelEvents(),
       receipt({ session: 'S3', run: 'agent-e1', source: 'estimate' }),
+      receipt({ session: 'S3', run: 'agent-ns', source: null }),
       receipt({ session: 'S3', run: 'agent-dup' }),
       receipt({ session: 'S3', run: 'agent-dup' }),
       receipt({ session: 'S3', run: 'agent-m', omitUsage: true }),
@@ -388,10 +390,11 @@ describe('foldUsageTable: filters', () => {
     const table = foldUsageTable(events, { sessionIds: ['S1', 'S3'] });
     const r = table.receipts;
     const filtered = Object.values(r.filtered).reduce((n, v) => n + v, 0);
-    expect(r.seen).toBe(10);
-    expect(r.seen).toBe(r.malformed + filtered + r.estimate_grade + r.duplicates + r.counted);
+    expect(r.seen).toBe(11);
+    expect(r.seen).toBe(r.malformed + filtered + r.estimate_grade + r.source_missing + r.duplicates + r.counted);
     expect(r.malformed).toBe(1);
     expect(r.estimate_grade).toBe(1);
+    expect(r.source_missing).toBe(1);
     expect(r.duplicates).toBe(1);
     expect(filtered).toBe(3); // the three S2 rows
     expect(r.counted).toBe(4); // S1 x3 + one agent-dup
@@ -418,6 +421,27 @@ describe('foldUsageTable: what is never mixed into a measured aggregate', () => 
     expect(table.receipts.counted).toBe(1);
     // Allowlist, not denylist: an unknown source string is excluded like `estimate`.
     expect(table.receipts.estimate_grade).toBe(2);
+    expect(table.receipts.source_missing).toBe(0);
+    expect(table.total.usage.output_tokens).toBe(5000);
+  });
+
+  it('counts a receipt with no usage.source as source_missing — not as estimate grade — and sums nothing of it', () => {
+    // The schema makes `usage.source` mandatory, so a row without one is not a
+    // receipt somebody graded `estimate`: it is a row nobody labelled. Naming it
+    // an estimate would put a claim on it that nothing recorded.
+    const absent = receipt({ run: 'agent-absent', usage: { output_tokens: 999999 } });
+    delete absent.data.usage.source;
+    const table = foldUsageTable([
+      receipt({ run: 'agent-ok' }),
+      absent,
+      receipt({ run: 'agent-null', source: null, usage: { output_tokens: 999999 } }),
+      receipt({ run: 'agent-empty', source: '', usage: { output_tokens: 999999 } }),
+      receipt({ run: 'agent-est', source: 'estimate', usage: { output_tokens: 999999 } }),
+    ]);
+
+    expect(table.receipts.counted).toBe(1);
+    expect(table.receipts.source_missing).toBe(3);
+    expect(table.receipts.estimate_grade).toBe(1);
     expect(table.total.usage.output_tokens).toBe(5000);
   });
 

@@ -53,11 +53,18 @@
  *   rows). With this flag the session's transcript (`<projects>/<slug>/<id>.jsonl`
  *   plus its `subagents/` directory) is folded straight into receipts by the same
  *   builder SessionEnd uses, and REPLACES that session's ledger rows rather than
- *   adding to them. It records nothing: when the session ends, SessionEnd writes
- *   the ledger row as before. The id is passed explicitly and the script reads NO
- *   environment variable — the caller expands `${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}`.
- *   A BLANK id (an empty expansion) is not a usage error: the table is printed
- *   without it and says so. `--projects-dir` overrides `~/.claude/projects`.
+ *   adding to them — but ONLY when every transcript file was read. A read that
+ *   could not open some file (`meta.unreadableFiles` > 0) is a SUBSET of the
+ *   session, and replacing a fuller ledger copy with it would drop spend without
+ *   a trace; so that read replaces nothing and adds nothing: the ledger rows stay,
+ *   the partial receipts are left out of the table, and both outputs carry a
+ *   warning (`live.status` `incomplete`, `live.unreadable_files`, `live.warning`;
+ *   the markdown note starts with the same sentence). It records nothing: when the
+ *   session ends, SessionEnd writes the ledger row as before. The id is passed
+ *   explicitly and the script reads NO environment variable — the caller expands
+ *   `${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}`. A BLANK id (an empty
+ *   expansion) is not a usage error: the table is printed without it and says so.
+ *   `--projects-dir` overrides `~/.claude/projects`.
  *
  *   `--json` prints one line of JSON instead of markdown.
  *
@@ -81,7 +88,11 @@
  *    {"event","measured_at","ledger_path","filter","live","receipts","rows",
  *     "total","by_kind","pricing","census"}
  *  `total` is null — never a row of zeros — when nothing was counted. `live` is
- *  null unless `--live-session` was given. `error` is the ONE optional key,
+ *  null unless `--live-session` was given; its `status` is one of `ok` | `empty` |
+ *  `incomplete` | `read-failed` | `not-found` | `blank-session-id` |
+ *  `invalid-session-id`, and `warning` is a sentence (or null) for `incomplete`.
+ *  Unparseable ledger lines are `census.dropped.loss.corrupt`; the markdown says
+ *  so in a line of its own. `error` is the ONE optional key,
  *  present only when an unexpected throw was caught; the fold's fields then carry
  *  their empty values and `census` is null.
  *
@@ -105,7 +116,7 @@ import path from 'node:path';
 import { buildUsageReceipts } from '../../lib/economics/usage-receipt.js';
 import { toUsageReceiptEnvelopes, USAGE_RECEIPT_EVENT } from '../../lib/economics/receipt-envelope.js';
 import { foldUsageTable, mergeLiveEvents } from '../../lib/economics/usage-table.js';
-import { formatUsageTableMarkdown } from '../../lib/economics/usage-table-render.js';
+import { formatUsageTableMarkdown, liveWarning } from '../../lib/economics/usage-table-render.js';
 import { readLedgerCensus } from '../../lib/runtime/ledger.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
@@ -262,7 +273,14 @@ function findTranscript(projectsDir, sessionId) {
   return null;
 }
 
-/** The `live` block for a request that never reached a transcript. */
+/**
+ * The `live` block for a request that never reached a transcript. Every key is
+ * present in every status, so a caller reads one shape: `unreadable_files` is the
+ * count of transcript files the builder could not read; `kept_ledger_receipts` is
+ * set only for `incomplete` (the session's ledger rows a partial read left in
+ * place; null elsewhere, where it does not apply); `warning` is the sentence for
+ * `incomplete` and null otherwise.
+ */
 function liveInfo(sessionId, status, extra = {}) {
   return {
     requested: true,
@@ -271,15 +289,25 @@ function liveInfo(sessionId, status, extra = {}) {
     transcript_path: null,
     files: 0,
     receipts: 0,
+    unreadable_files: 0,
     replaced_ledger_receipts: 0,
+    kept_ledger_receipts: null,
     unresolved_models: [],
     searched: null,
+    warning: null,
     ...extra,
   };
 }
 
 /**
  * Fold the current session's transcript into receipt envelopes.
+ *
+ * FAIL-CLOSED ON A PARTIAL READ. `mergeLiveEvents` replaces the ledger's rows of
+ * a live session with the live copy, which is right only when the live copy is
+ * the whole session. When the builder could not read some transcript file
+ * (`meta.unreadableFiles` > 0) the receipts it did build are a subset, so none of
+ * them is passed on: nothing replaces the ledger rows and nothing is added, and
+ * the `incomplete` status and its warning say so.
  *
  * @param {object} request
  * @returns {Promise<{info: object|null, events: object[]}>} `info` is null when
@@ -304,18 +332,27 @@ async function collectLive(request) {
   }
   const receipts = Array.isArray(built?.receipts) ? built.receipts : [];
   const unreadable = built?.meta?.unreadableFiles ?? 0;
-  let status = 'ok';
-  if (receipts.length === 0) status = unreadable > 0 ? 'read-failed' : 'empty';
-  return {
-    info: liveInfo(sessionId, status, {
-      transcript_path: transcriptPath,
-      files: built?.meta?.files ?? 0,
-      receipts: receipts.length,
-      unresolved_models: Object.keys(built?.meta?.unresolvedModels ?? {}).sort(),
-    }),
-    events: toUsageReceiptEnvelopes(receipts, { sessionId }),
+  const found = {
+    transcript_path: transcriptPath,
+    files: built?.meta?.files ?? 0,
+    receipts: receipts.length,
+    unreadable_files: unreadable,
+    unresolved_models: Object.keys(built?.meta?.unresolvedModels ?? {}).sort(),
   };
+  if (receipts.length === 0) {
+    return { info: liveInfo(sessionId, unreadable > 0 ? 'read-failed' : 'empty', found), events: [] };
+  }
+  if (unreadable > 0) {
+    const info = liveInfo(sessionId, 'incomplete', found);
+    info.warning = liveWarning(info);
+    return { info, events: [] };
+  }
+  return { info: liveInfo(sessionId, 'ok', found), events: toUsageReceiptEnvelopes(receipts, { sessionId }) };
 }
+
+/** How many of the ledger's `usage.receipt` rows belong to a session — the rows a partial live read leaves in place. */
+const ledgerReceiptsOf = (events, sessionId) => events
+  .filter((e) => e.event === USAGE_RECEIPT_EVENT && e.session_id === sessionId).length;
 
 /** `ok` | `missing` | `unreadable`, from the reader's census. */
 function ledgerState(census) {
@@ -364,6 +401,9 @@ async function measure(request, measuredAt) {
   const live = await collectLive(request);
   const merged = mergeLiveEvents(events, live.events);
   if (live.info !== null) live.info.replaced_ledger_receipts = merged.replaced;
+  if (live.info?.status === 'incomplete') {
+    live.info.kept_ledger_receipts = ledgerReceiptsOf(events, live.info.session_id);
+  }
 
   const table = foldUsageTable(merged.events, {
     sessionIds: request.sessionIds,
@@ -374,7 +414,13 @@ async function measure(request, measuredAt) {
   return {
     printed: report({ table, measuredAt, ledgerPath, live: live.info, census }),
     markdown: formatUsageTableMarkdown(table, {
-      measuredAt, ledgerPath, ledgerState: ledgerState(census), live: live.info,
+      measuredAt,
+      ledgerPath,
+      ledgerState: ledgerState(census),
+      // Only `corrupt` lines can have been receipts: a line that parses but has no
+      // string `event` (`malformed_envelope`) cannot be a `usage.receipt`.
+      corruptLines: census.dropped.loss.corrupt,
+      live: live.info,
     }),
   };
 }
