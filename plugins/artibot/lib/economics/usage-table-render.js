@@ -10,10 +10,14 @@
  *
  *  - the price source and its reference date, and the unit prices that produced
  *    the dollars (so a reader can redo the multiplication);
+ *  - what the price check rests on — the catalog's own `priceMeasured` flag —
+ *    and NOT a claim that every model was compared with the official page;
  *  - `가격 미검증` — never a number — for a model whose catalog price is not
  *    verified, and a call-out with BOTH amounts for receipts recorded under an
  *    older price table (the recorded figure may be over-stated);
  *  - zero rows as "영수증 0행" with the reason, never as a table of zeros;
+ *  - what the read could not see: ledger lines that could not be parsed (each
+ *    might have been a receipt) and a live read that came back partial;
  *  - ONE limit line under the table: receipts are written by SessionEnd only,
  *    so a session that has not ended — the one producing the report, and every
  *    spawn inside it — is not in the ledger.
@@ -28,12 +32,21 @@
  *  - WHETHER THE WORDING IS RIGHT FOR A READER WHO SKIPS THE NOTES. The table
  *    shows `가격 미검증` in the cost cell for the case that matters most; the
  *    rest of the caveats live in the lines below it.
+ *  - WHICH SOURCE THE CATALOG COMPARED A GIVEN MODEL'S PRICE WITH. The catalog
+ *    records that in code comments, not in a field a caller can read, so the
+ *    price line says the flag is the basis and that no per-model source is shown.
+ *    Naming the official page for every model would be a claim nobody checked
+ *    per model: one row (the current sonnet id) is documented there as compared
+ *    with a skill price table, and its cache-write prices as derived.
  *
  * @module lib/economics/usage-table-render
  */
 
 /** Text of the cost cell for a model that has no verified price. */
 const UNVERIFIED = '가격 미검증';
+
+/** The catalog's own verified flag (`MODELS[tier].priceMeasured`) — what a price check here rests on. */
+const CATALOG_FLAG = '카탈로그 가격 검증 표시(priceMeasured)';
 
 /** Stamps that are not a price table: an unpriced receipt, or one with no stamp at all. */
 const NON_TABLE_STAMPS = Object.freeze(['unresolved', 'missing']);
@@ -157,30 +170,58 @@ function leftOutParts(receipts) {
     ['시작 경계에 걸침', receipts.filtered.straddling_since, '(세션 단위 합이라 분할 불가)'],
     ['시각 없음', receipts.filtered.no_time, ''],
     ['estimate 등급', receipts.estimate_grade, '(측정값과 섞지 않음)'],
+    ['출처 미기재', receipts.source_missing, '(측정값과 섞지 않음)'],
     ['중복 기록', receipts.duplicates, ''],
   ]);
 }
 
-/** Why there are no rows: the ledger's state first, then what removed every receipt. */
+/** What was wrong with the ledger file itself, or null when it was read. */
+function ledgerProblem(state) {
+  if (state === 'missing') return '원장 파일이 없다';
+  if (state === 'unreadable') return '원장을 읽지 못했다';
+  return null;
+}
+
+/** Did a live read put receipts into the fold? Only a complete one does; a partial read adds none. */
+const liveContributed = (live) => live !== null && live !== undefined && live.requested === true && live.status === 'ok';
+
+/** Where the receipts of a zero-row report were counted from, so the reason names the source that applies. */
+function receiptOrigin(problem, live) {
+  if (problem !== null) return '현재 세션 직접 집계'; // the ledger supplied nothing
+  return liveContributed(live) ? '원장·현재 세션 직접 집계' : '원장';
+}
+
+/**
+ * Why there are no rows. With no receipt at all the ledger's state is the reason;
+ * with receipts, the reason is what removed them — and a missing or unreadable
+ * ledger is then only a fact about where they came from (a live read supplied
+ * them), never the reason the table is empty.
+ */
 function zeroReason(table, context) {
-  if (context.ledgerState === 'missing') return '원장 파일이 없다';
-  if (context.ledgerState === 'unreadable') return '원장을 읽지 못했다';
+  const problem = ledgerProblem(context.ledgerState);
   const { seen } = table.receipts;
-  if (seen === 0) return '원장에 usage.receipt 행이 없다';
+  if (seen === 0) return problem ?? '원장에 usage.receipt 행이 없다';
   const parts = [...filterParts(table.receipts), ...leftOutParts(table.receipts)];
-  return `원장 usage.receipt ${fmtInt(seen)}행 중 조건 통과 0행 (제외: ${parts.join(' · ')})`;
+  const finding = `${receiptOrigin(problem, context.live)} usage.receipt ${fmtInt(seen)}행 중 조건 통과 0행 (제외: ${parts.join(' · ')})`;
+  return problem === null ? finding : `${finding}, ${problem}`;
 }
 
 // ---------------------------------------------------------------------------
 // Notes under the table
 // ---------------------------------------------------------------------------
 
-/** How much of the price table the catalog compared with the source. */
+/**
+ * How much of the price table carries the catalog's own verified flag. The flag
+ * does not say WHICH source a model's price was compared with (see the module
+ * header), and neither does this line — it says so instead of naming the
+ * official page for every model.
+ */
 function verificationClause(rows) {
   const verified = rows.filter((r) => r.cost.usd !== null && r.cost.price_status === 'verified');
-  if (verified.length === rows.length) return '공식 가격표와 대조됨(이후 공식 가격 변동은 미확인)';
-  if (verified.length === 0) return '대조된 단가 없음';
-  return `${verified.map((r) => r.model_id).join(', ')} 만 공식 가격표와 대조됨(이후 공식 가격 변동은 미확인)`;
+  const caveat = '모델별 대조 출처는 표시하지 않음, 이후 공식 가격 변동은 미확인';
+  if (verified.length === rows.length) return `${CATALOG_FLAG} 기준으로 검증됨(${caveat})`;
+  if (verified.length === 0) return `${CATALOG_FLAG}가 있는 단가 없음`;
+  return `${verified.map((r) => r.model_id).join(', ')} 만 ${CATALOG_FLAG} 있음(${caveat})`;
 }
 
 /** Source, reference date, and what the dollars are (and are not). */
@@ -206,7 +247,7 @@ function unitPriceLine(table) {
 function unverifiedLine(table) {
   const ids = table.total.cost.unpriced_models;
   if (ids.length === 0) return null;
-  return `- ${UNVERIFIED}: ${ids.join(', ')} — 카탈로그가 공식 가격표와 대조하지 않았거나 모르는 모델이라 비용을 표시하지 않고 합계에서 뺐다.`;
+  return `- ${UNVERIFIED}: ${ids.join(', ')} — ${CATALOG_FLAG}가 없거나 카탈로그가 모르는 모델이라 비용을 표시하지 않고 합계에서 뺐다.`;
 }
 
 /**
@@ -260,9 +301,14 @@ function staleLine(table) {
   return `${head}: ${sums} — 차이 나는 모델: ${items.slice(0, MAX_NAMED).join(' · ')}${more}`;
 }
 
-/** Receipts that recorded no cost at all; the table filled them from tokens. */
+/**
+ * Receipts that recorded no cost at all; the table filled them from tokens. Only
+ * the receipts of a PRICED model were filled: a `가격 미검증` row has no unit
+ * price to multiply by, so its unrecorded receipts stay out of the sum and are
+ * covered by that row's own line.
+ */
 function unrecordedLine(table) {
-  const n = table.total.cost.unrecorded_receipts;
+  const n = table.rows.reduce((sum, r) => (r.cost.usd === null ? sum : sum + r.cost.unrecorded_receipts), 0);
   if (n === 0) return null;
   return `- 영수증에 기록 비용이 없는 ${fmtInt(n)}건(cost.total 없음, 스탬프 unresolved)은 토큰×현재 단가로 채웠다.`;
 }
@@ -300,11 +346,30 @@ function collisionLine(receipts) {
     + '(중복 기록이거나 run_id 가 redaction 으로 합쳐진 서로 다른 런) — 모두 합산했고 스폰 수는 적게 잡힐 수 있다.';
 }
 
+/**
+ * `incomplete`: the warning, what happened to the ledger rows, and what the
+ * partial read was NOT used for. The readable part's receipts are counted in the
+ * sentence but not in the table — a figure known to be a subset must not sit in
+ * a cost table as if it were the session's spend.
+ */
+function incompleteLine(live, id) {
+  let ledger = '';
+  if (Number.isFinite(live.kept_ledger_receipts)) {
+    ledger = live.kept_ledger_receipts > 0
+      ? `(이 세션의 원장 행 ${fmtInt(live.kept_ledger_receipts)}건)`
+      : '(이 세션의 원장 행 0건 — 이 세션은 표에 없다)';
+  }
+  return `- 현재 세션 ${id}: ${liveWarning(live)}${ledger}.`
+    + ` 읽은 부분의 영수증 ${fmtInt(live.receipts)}건은 표에 넣지 않았다 — 이 세션의 비용은 과소일 수 있다.`;
+}
+
 /** The note for a live-session read, in whichever state it ended. */
 function liveLine(live) {
   if (live === null || live === undefined || live.requested !== true) return null;
   const id = shortId(live.session_id);
   switch (live.status) {
+    case 'incomplete':
+      return incompleteLine(live, id);
     case 'ok':
     case 'empty': {
       const parts = [live.status === 'ok'
@@ -327,6 +392,19 @@ function liveLine(live) {
 }
 
 /**
+ * Ledger lines the reader could not parse. Each might have been a `usage.receipt`
+ * and nothing can say — an unparseable line has no readable `event` — so the
+ * count is a "cost may be under-stated" flag, not a number of lost receipts.
+ * Lines that parse but carry no `event` are not counted by the caller: they
+ * cannot have been receipts.
+ */
+function corruptLine(context) {
+  const n = context.corruptLines;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `- 원장 깨진 줄 ${fmtInt(n)} (usage.receipt 여부 판별 불가 — 비용 과소 가능)`;
+}
+
+/**
  * The one limit line. It is always the last line, and there is exactly one:
  * whichever variant applies says what is NOT in the table.
  */
@@ -343,6 +421,21 @@ function limitLine(live) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The one-sentence warning for a live read that could not open every transcript
+ * file, or null for any other state. `scripts/ledger/usage-cost-table.mjs` puts
+ * this sentence in its JSON (`live.warning`) and the markdown note starts with
+ * it, so both outputs say the same thing in the same words.
+ *
+ * @param {object|null|undefined} live - the `live` block.
+ * @returns {string|null}
+ */
+export function liveWarning(live) {
+  if (live === null || live === undefined || live.requested !== true || live.status !== 'incomplete') return null;
+  const unread = Number.isFinite(live.unreadable_files) ? fmtInt(live.unreadable_files) : '미확인';
+  return `live 판독 불완전: 읽지 못한 파일 ${unread} — 원장 행 유지`;
+}
+
+/**
  * Render the usage table as markdown.
  *
  * @param {object} table - {@link import('./usage-table.js').foldUsageTable} result.
@@ -351,6 +444,8 @@ function limitLine(live) {
  * @param {string|null} [context.ledgerPath] - the ledger file that was read.
  * @param {'ok'|'missing'|'unreadable'|null} [context.ledgerState] - what the
  *   read found; picks the reason printed when there are no rows.
+ * @param {number|null} [context.corruptLines] - ledger lines the reader could not
+ *   parse (`census.dropped.loss.corrupt`); a line is printed when it is above 0.
  * @param {object|null} [context.live] - the live-session read, when one was
  *   requested (`scripts/ledger/usage-cost-table.mjs`).
  * @returns {string} markdown, no trailing newline.
@@ -366,7 +461,7 @@ export function formatUsageTableMarkdown(table, context = {}) {
   // directly.
   if (table.total === null) {
     out.push(`조건에 맞는 usage.receipt 가 없다 — ${zeroReason(table, ctx)}. 비용 0 이 아니라 "측정된 영수증 없음"이다.`, '');
-    out.push(...[liveLine(ctx.live), collisionLine(table.receipts), limitLine(ctx.live)].filter((l) => l !== null));
+    out.push(...[liveLine(ctx.live), collisionLine(table.receipts), corruptLine(ctx), limitLine(ctx.live)].filter((l) => l !== null));
     return out.join('\n');
   }
 
@@ -381,6 +476,7 @@ export function formatUsageTableMarkdown(table, context = {}) {
     leftOutLine(table.receipts),
     filterLine(table.receipts),
     collisionLine(table.receipts),
+    corruptLine(ctx),
     liveLine(ctx.live),
     limitLine(ctx.live),
   ];

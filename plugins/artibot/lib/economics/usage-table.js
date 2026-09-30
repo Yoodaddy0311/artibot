@@ -52,6 +52,10 @@
  * allowlist ({@link MEASURED_SOURCES}); a receipt graded `estimate`, or with
  * any source the allowlist does not name, is counted and left out of every sum
  * (schema: "estimate values must never be mixed into a measured aggregate").
+ * A receipt with NO `usage.source` at all is counted apart (`source_missing`)
+ * and left out of every sum the same way. The schema makes the field mandatory,
+ * so such a row is unlabelled, not graded `estimate`: a reader of "estimate
+ * grade 3" would take all three for estimates, and none of them was ever graded.
  *
  * DUPLICATES, AND THE CASE THAT LOOKS LIKE ONE BUT IS NOT. The writer's key is
  * (session, run, model). A CONTENT-IDENTICAL repeat of a receipt is a double
@@ -79,7 +83,7 @@
  * thread — is reported, not silently included or dropped.
  *
  * CONSERVATION. Every `usage.receipt` line lands in exactly one bucket:
- * `seen = malformed + Σ filtered + estimate_grade + duplicates + counted`
+ * `seen = malformed + Σ filtered + estimate_grade + source_missing + duplicates + counted`
  * (`key_collisions` is a property of counted receipts, not a bucket).
  *
  * WHAT THIS MODULE CANNOT SEE
@@ -88,9 +92,14 @@
  *    {@link mergeLiveEvents} lets a caller add a session read straight from its
  *    transcript; this module cannot tell whether it should.
  *  - WHETHER THE CATALOG IS RIGHT ON ANY GIVEN DAY. `price_status: verified`
- *    means the catalog row's `priceMeasured` flag is set, i.e. its five price
- *    columns were compared with the official page on `PRICING_VERSION`. Any
- *    change after that date is unchecked here.
+ *    means the catalog row's `priceMeasured` flag is set — the catalog defines
+ *    that as "its five price columns were compared with the official page on
+ *    `PRICING_VERSION`". Any change after that date is unchecked here.
+ *  - WHICH SOURCE A GIVEN ROW WAS COMPARED WITH. The catalog documents an
+ *    exception in a code comment (the current sonnet id: input, output and cache
+ *    read compared with a skill price table rather than the page, cache writes
+ *    derived from input), and keeps no field a reader of `getPricing` could see.
+ *    So this module reports that the flag is set, never that the page was read.
  *  - THE 1-HOUR CACHE TTL, THINKING TOKENS AS A SEPARATE COST, and whether a
  *    subscription bills anything at all.
  *
@@ -294,7 +303,8 @@ function bucketOf(r, f) {
       return r.completedMs !== null && r.completedMs >= f.sinceMs ? 'straddling_since' : 'before_since';
     }
   }
-  if (r.source === null || !MEASURED_SOURCES.includes(r.source)) return 'estimate_grade';
+  if (r.source === null) return 'source_missing';
+  if (!MEASURED_SOURCES.includes(r.source)) return 'estimate_grade';
   return null;
 }
 
@@ -316,6 +326,7 @@ function emptyTally() {
       session: 0, run: 0, before_since: 0, straddling_since: 0, no_time: 0,
     },
     estimate_grade: 0,
+    source_missing: 0,
     duplicates: 0,
     key_collisions: 0,
     counted: 0,
@@ -690,6 +701,12 @@ const isReceiptEvent = (e) => isObj(e) && e.event === USAGE_RECEIPT_EVENT;
  * (the transcript only grows, so the live copy is the superset). A live session
  * with no receipts replaces nothing: an empty read is not a measurement that
  * the ledger's rows are wrong.
+ *
+ * "The live copy is the superset" holds only for a COMPLETE read. A read that
+ * could not open every transcript file is a subset, and replacing a fuller
+ * ledger copy with it would drop spend without a trace — so a caller passes NO
+ * live events for such a read (`scripts/ledger/usage-cost-table.mjs#collectLive`
+ * does, and says so). This function cannot tell a partial read from a whole one.
  *
  * @param {unknown} ledgerEvents - lines from the ledger.
  * @param {unknown} liveEvents - `usage.receipt` envelopes built from a transcript

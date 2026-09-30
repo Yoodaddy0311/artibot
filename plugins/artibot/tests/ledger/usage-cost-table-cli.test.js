@@ -19,7 +19,10 @@
  * the ledger cannot describe the session that is producing the report — the
  * live ledger held 0 `usage.receipt` rows for the running session while it had
  * 342 rows of other events (2026-09-30T02:17Z). The cases below pin that a
- * session read live REPLACES its own ledger rows and never adds to them.
+ * session read live REPLACES its own ledger rows and never adds to them — and
+ * that a live read which could not open every transcript file replaces NOTHING
+ * (measured on a copy of the real ledger, 2026-09-30: a 21-of-22-file read
+ * replaced 22 ledger rows and printed $84.07 where the ledger said $87.28).
  *
  * READ-ONLY IS ASSERTED, NOT ASSUMED: an empty root must still have no ledger
  * file afterwards, a seeded root's ledger must have the same byte length before
@@ -41,13 +44,17 @@
  *  - WHETHER THE HOST'S SESSION ID EQUALS THE TRANSCRIPT STEM. The locator
  *    matches `<projects>/*` + `/<id>.jsonl`; the mapping is measured, not
  *    guaranteed.
+ *  - HOW A REAL HOST MAKES A TRANSCRIPT FILE UNREADABLE. The partial-read cases
+ *    put a DIRECTORY where a `.jsonl` file should be: same counter
+ *    (`meta.unreadableFiles`), same catch, but no sharing violation or torn write
+ *    — and a torn LINE inside a readable file is skipped with no counter at all.
  *
  * @module tests/ledger/usage-cost-table-cli
  */
 
 import { spawnSync } from 'node:child_process';
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
+  appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
   statSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -372,6 +379,57 @@ describe('usage-cost-table: a seeded ledger', () => {
   });
 });
 
+describe('usage-cost-table: ledger lines that cannot be read', () => {
+  /**
+   * Two lines the reader cannot parse, appended after the seeded rows. The second
+   * is what a torn write looks like: it names `usage.receipt` and stops mid-object,
+   * so nothing can say whether it was a receipt.
+   */
+  function appendUnreadableLines(root) {
+    appendFileSync(ledgerFilePath(root), 'this is not json\n{"event":"usage.receipt","session_id":"TORN-WRITE",\n', 'utf-8');
+  }
+
+  it('says how many lines were unreadable — markdown and the JSON census agree, and the table is unchanged', async () => {
+    const root = makeRoot('K');
+    await seedLedger(root);
+    const clean = parseJson(runCli(['--cwd', root, '--json'], root));
+    appendUnreadableLines(root);
+
+    const printed = parseJson(runCli(['--cwd', root, '--json'], root));
+    const md = runCli(['--cwd', root], root).stdout;
+
+    expect(printed.census.dropped.loss.corrupt).toBe(2);
+    expect(md).toContain('- 원장 깨진 줄 2 (usage.receipt 여부 판별 불가 — 비용 과소 가능)');
+    // The unreadable lines are not counted as anything else: the table is what it was.
+    expect(printed.rows).toEqual(clean.rows);
+    expect(printed.total).toEqual(clean.total);
+    // ... and the limit line still closes the block.
+    expect(md.trimEnd().split('\n').at(-1)).toMatch(/^- 한계:/);
+  });
+
+  it('says it on a zero-row report, where an empty table beside unreadable lines is not a clean ledger', () => {
+    const root = makeRoot('K');
+    mkdirSync(path.dirname(ledgerFilePath(root)), { recursive: true });
+    writeFileSync(ledgerFilePath(root), 'garbage\nmore garbage\nand more\n', 'utf-8');
+
+    const out = runCli(['--cwd', root], root);
+
+    expect(out.status).toBe(0);
+    expect(out.stdout).toContain('영수증 0행');
+    expect(out.stdout).toContain('- 원장 깨진 줄 3 (usage.receipt 여부 판별 불가 — 비용 과소 가능)');
+  });
+
+  it('prints no such line for a clean ledger', async () => {
+    const root = makeRoot('K');
+    await seedLedger(root);
+
+    const out = runCli(['--cwd', root], root);
+
+    expect(out.stdout).not.toContain('깨진 줄');
+    expect(out.stdout).not.toContain('출처 미기재');
+  });
+});
+
 describe('usage-cost-table: filters', () => {
   it('--since keeps runs that STARTED at or after the cutoff', async () => {
     const root = makeRoot('F');
@@ -449,6 +507,15 @@ function writeLiveSession(sessionId, { main, agents = {}, t0 }) {
   return projects;
 }
 
+/**
+ * Make one subagent transcript of a written live session unreadable: a DIRECTORY
+ * where the `.jsonl` file should be. The builder lists it by name, fails to read
+ * it and counts it in `meta.unreadableFiles`; the other files still fold.
+ */
+function breakSubagentTranscript(projects, sessionId, agentId = 'unreadable') {
+  mkdirSync(path.join(projects, 'C--fake-slug', sessionId, 'subagents', `agent-${agentId}.jsonl`), { recursive: true });
+}
+
 const LIVE_SESSION = 'sessTableLive01';
 
 describe('usage-cost-table: --live-session (the session that has not ended yet)', () => {
@@ -468,6 +535,8 @@ describe('usage-cost-table: --live-session (the session that has not ended yet)'
     expect(printed.live.session_id).toBe(LIVE_SESSION);
     expect(printed.live.files).toBe(3);
     expect(printed.live.receipts).toBe(3);
+    expect(printed.live.unreadable_files).toBe(0);
+    expect(printed.live.warning).toBeNull();
     expect(printed.live.replaced_ledger_receipts).toBe(0);
     expect(printed.rows.map((r) => r.model_id)).toEqual([OPUS, SONNET]);
     expect(rowOf(printed, SONNET).spawns).toBe(2);
@@ -504,6 +573,111 @@ describe('usage-cost-table: --live-session (the session that has not ended yet)'
     expect(rowOf(printed, SONNET).usage.output_tokens).toBe(sumUsage(perRun(5), perRun(1)).output);
     expect(rowOf(printed, SONNET).spawns).toBe(2);
     expect(rowOf(printed, HAIKU).sessions).toBe(1);
+  });
+
+  it('does NOT replace a session whose transcript was only partly readable: the ledger rows stay, and both outputs say so', async () => {
+    const root = makeRoot('L');
+    // The ledger holds an earlier snapshot of the session (n=1 for the spawn) ...
+    await seedSession(root, LIVE_SESSION, {
+      main: { model: OPUS, n: 1 },
+      agents: { lv1: { model: SONNET, n: 1 } },
+      t0: NEW_T0,
+    });
+    // ... the transcript has a bigger copy (n=5), but one subagent file cannot be read.
+    const projects = writeLiveSession(LIVE_SESSION, {
+      main: { model: OPUS, n: 1 },
+      agents: { lv1: { model: SONNET, n: 5 } },
+      t0: NEW_T0,
+    });
+    breakSubagentTranscript(projects, LIVE_SESSION);
+    const args = ['--cwd', root, '--projects-dir', projects, '--live-session', LIVE_SESSION];
+
+    const printed = parseJson(runCli([...args, '--json'], root));
+
+    expect(printed.live.status).toBe('incomplete');
+    expect(printed.live.unreadable_files).toBe(1);
+    expect(printed.live.files).toBe(3); // main + lv1 + the unreadable one
+    expect(printed.live.receipts).toBe(2); // what the readable part yielded — and was NOT used
+    expect(printed.live.replaced_ledger_receipts).toBe(0);
+    expect(printed.live.kept_ledger_receipts).toBe(2);
+    expect(printed.live.warning).toBe('live 판독 불완전: 읽지 못한 파일 1 — 원장 행 유지');
+    // The ledger copy (n=1) is what the table holds; the partial live copy (n=5) is not in it.
+    expect(printed.receipts.counted).toBe(2);
+    expect(rowOf(printed, SONNET).usage.output_tokens).toBe(perRun(1).output);
+    expect(rowOf(printed, SONNET).spawns).toBe(1);
+
+    const md = runCli(args, root).stdout;
+    expect(md).toContain('live 판독 불완전: 읽지 못한 파일 1 — 원장 행 유지');
+    expect(md).toContain('원장 행 2건');
+    expect(md).not.toContain('transcript 직접 집계');
+  });
+
+  it('leaves the session out of the table, and says so, when a partial read has no ledger rows to fall back on', () => {
+    const root = makeRoot('L');
+    const projects = writeLiveSession(LIVE_SESSION, {
+      main: { model: OPUS, n: 1 },
+      agents: { lv1: { model: SONNET, n: 2 } },
+      t0: NEW_T0,
+    });
+    breakSubagentTranscript(projects, LIVE_SESSION);
+    const args = ['--cwd', root, '--projects-dir', projects, '--live-session', LIVE_SESSION];
+
+    const printed = parseJson(runCli([...args, '--json'], root));
+
+    expect(printed.live.status).toBe('incomplete');
+    expect(printed.live.receipts).toBe(2);
+    expect(printed.live.kept_ledger_receipts).toBe(0);
+    // A partial figure is not printed as if it were the session's spend.
+    expect(printed.rows).toEqual([]);
+    expect(printed.total).toBeNull();
+
+    const md = runCli(args, root).stdout;
+    expect(md).toContain('영수증 0행');
+    expect(md).toContain('live 판독 불완전: 읽지 못한 파일 1 — 원장 행 유지');
+    expect(md).toContain('이 세션은 표에 없다');
+    expect(md).not.toContain('| 모델 |');
+  });
+
+  it('keeps the ledger rows when nothing at all could be read from the transcript', async () => {
+    const root = makeRoot('L');
+    await seedSession(root, LIVE_SESSION, {
+      main: { model: OPUS, n: 1 },
+      agents: { lv1: { model: SONNET, n: 1 } },
+      t0: NEW_T0,
+    });
+    // The main transcript "file" is a directory: found by name, unreadable as a file.
+    const projects = path.join(tmp, 'projects');
+    mkdirSync(path.join(projects, 'C--fake-slug', `${LIVE_SESSION}.jsonl`), { recursive: true });
+
+    const printed = parseJson(runCli([
+      '--cwd', root, '--projects-dir', projects, '--live-session', LIVE_SESSION, '--json',
+    ], root));
+
+    expect(printed.live.status).toBe('read-failed');
+    expect(printed.live.unreadable_files).toBe(1);
+    expect(printed.live.replaced_ledger_receipts).toBe(0);
+    expect(printed.receipts.counted).toBe(2);
+    expect(rowOf(printed, SONNET).usage.output_tokens).toBe(perRun(1).output);
+  });
+
+  it('does not blame the missing ledger when the current session was read live and the filters removed it', () => {
+    const root = makeRoot('L'); // no ledger file at all
+    const projects = writeLiveSession(LIVE_SESSION, {
+      main: { model: OPUS, n: 1 },
+      agents: { lv1: { model: SONNET, n: 1 } },
+      t0: NEW_T0,
+    });
+
+    const md = runCli([
+      '--cwd', root, '--projects-dir', projects, '--live-session', LIVE_SESSION, '--session', 'someone-else',
+    ], root).stdout;
+    const finding = md.split('\n').find((l) => l.startsWith('조건에 맞는 usage.receipt 가 없다'));
+
+    expect(finding).toMatch(/2행 중 조건 통과 0행/);
+    expect(finding).toContain('현재 세션 직접 집계');
+    expect(finding).toContain('원장 파일이 없다'); // still said, as a fact about where the receipts came from
+    expect(finding).not.toMatch(/없다 — 원장 파일이 없다\./);
+    expect(existsSync(ledgerFilePath(root))).toBe(false);
   });
 
   it('says so — and reads nothing outside the projects dir — when the transcript is not there', () => {
