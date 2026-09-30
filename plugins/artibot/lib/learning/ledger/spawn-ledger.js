@@ -36,7 +36,9 @@
  *
  * V5 ROUTING COLUMNS (T-31) — `recommendedModel`, `actionClass`,
  * `routing_epoch_id`, `depth`, `mission_id`, `task_id`, `route_ledger`, plus
- * `review_ledger` (the SubagentStop review recorder's outcome column). These
+ * `review_ledger` (the SubagentStop review recorder's outcome column) and, since
+ * SH-19, `parent_agent_id` + `depth_source` (the STOP row's host-reported parent,
+ * and the label saying whose unit `depth` is in). These
  * are OPTIONAL in the {@link OPTIONAL_FIELDS} sense: a key the caller does not
  * supply is OMITTED from the line, exactly like `durationMs`, rather than
  * written as null. Two reasons, and both matter:
@@ -135,6 +137,8 @@ const OPTIONAL_FIELDS = Object.freeze([
   ['task_id', 'string'],
   ['route_ledger', 'string'],
   ['review_ledger', 'string'],
+  ['parent_agent_id', 'string'],
+  ['depth_source', 'string'],
 ]);
 
 /**

@@ -54,6 +54,10 @@
  *     The 64 KB case is a firewall fixture, never a live measurement.
  *   - Whether the recommendation is any GOOD. `route-scorer` is uncalibrated
  *     in Phase 0; this records a decision, it does not validate one.
+ *   - Whether the host puts `agent_id` on the PreToolUse payload of an Agent call
+ *     made from INSIDE a subagent. Its payload schema says so (host 2.1.284, R7
+ *     recon); no such payload was ever captured, so a non-null `caller_agent_id`
+ *     is unmeasured live and null means only "the payload named no agent".
  *
  * @module scripts/hooks/route-observe-pre
  */
@@ -169,6 +173,34 @@ const REQUESTED_MODEL_MAX = 128;
 function requestedModel(value) {
   const model = str(value);
   return model === null ? null : model.trim().slice(0, REQUESTED_MODEL_MAX);
+}
+
+/**
+ * Longest `agent_id` copied into `caller_agent_id`. Mirrors the schema's
+ * `maxLength`; the ledger writer's subset validator does not run it, so this
+ * slice is what actually holds the bound on a live row.
+ * @type {number}
+ */
+const CALLER_AGENT_ID_MAX = 128;
+
+/**
+ * The agent that CALLED the Agent tool - the PreToolUse payload's own `agent_id`
+ * - trimmed and capped, or null when the payload carries none.
+ *
+ * WHAT NULL MEANS. The host documents `agent_id` as present only when the hook
+ * fires from inside a subagent and absent for the main thread (payload schema,
+ * host 2.1.284, R7 recon), so null is read as the main thread. That is the host's
+ * documentation, not a measurement: no nested Agent call payload was ever
+ * captured. A non-null value is the REQUESTER of this spawn, not the spawned agent
+ * (that id is `route.bound.data.agent_id`, joined on `tool_use_id`), and it feeds
+ * nothing - never `routeModel`, the decision, a reason code or a gate.
+ *
+ * @param {unknown} value - `payload.agent_id`
+ * @returns {string|null}
+ */
+function callerAgentId(value) {
+  const id = str(value);
+  return id === null ? null : id.trim().slice(0, CALLER_AGENT_ID_MAX);
 }
 
 /**
@@ -541,10 +573,19 @@ export function receiptPhase(classified) {
  * code (`tests/hooks/route-observe-pre-request.test.js` pins that byte for
  * byte). `models.selected` stays the POLICY PREDICTION described above.
  *
+ * `caller_agent_id` (SH-19) IS APPENDED THE SAME WAY, after `requested_task`. It is
+ * the payload's own `agent_id` - WHO ASKED for this spawn - so it is null on a
+ * payload that names none. Like the request keys it is never part of the
+ * `routeModel` argument and moves no prediction, decision or reason code
+ * (`tests/hooks/route-observe-pre-caller.test.js` pins that). It ships in the SAME
+ * commit as its schema property: `route-receipt.schema.json` is closed, and the
+ * ledger writer rejects an undeclared key (`receipt-additional:caller_agent_id`),
+ * which drops the whole receipt.
+ *
  * @param {{toolUseId: string, sessionId: string, missionId: string,
  *   agentType: string|null, text: string, config: object|undefined,
  *   currentTier?: string|null, actionsSinceSwitch?: number|null,
- *   requestedModel?: unknown,
+ *   requestedModel?: unknown, callerAgentId?: unknown,
  *   catalog?: object}} ctx - `catalog` is a pinned price port for tests; absent, routeModel uses the live catalog
  * @returns {object|null} Receipt, or null when it would be structurally
  *   incomplete (the append is then skipped rather than fabricated)
@@ -589,6 +630,7 @@ export function buildReceipt(ctx) {
     ...receipt,
     requested_model: requestedModel(ctx.requestedModel),
     requested_task: requestedTask(ctx.text),
+    caller_agent_id: callerAgentId(ctx.callerAgentId),
   };
 }
 
@@ -652,6 +694,7 @@ export async function observePre(hookData) {
       currentTier,
       actionsSinceSwitch,
       requestedModel: toolInput.model,
+      callerAgentId: hookData?.agent_id,
     });
     if (receipt === null) return { ok: false, reason: 'no-receipt' };
 

@@ -167,6 +167,72 @@ describe('spawn-ledger store', () => {
     expect(typeof rec.ts).toBe('string');
   });
 
+  // SH-19: the STOP row carries the host-reported parent and the label saying
+  // whose unit `depth` is in. Before the two columns were listed, appendSpawn
+  // dropped both silently (measured 2026-09-29: depth 0 persisted, the other two
+  // gone), so a bare host-unit depth would have landed with no label.
+  it('appendSpawn persists parent_agent_id and depth_source beside depth (SH-19)', () => {
+    appendSpawn(tmp, startRecord({
+      event: 'stop', depth: 1, parent_agent_id: 'agent-parent-1', depth_source: 'host-meta',
+    }));
+    const [rec] = readSpawns(tmp);
+    expect(rec.depth).toBe(1);
+    expect(rec.parent_agent_id).toBe('agent-parent-1');
+    expect(rec.depth_source).toBe('host-meta');
+  });
+
+  it('keeps an explicit null for the SH-19 columns and omits them when not supplied', () => {
+    appendSpawn(tmp, startRecord({ event: 'stop', parent_agent_id: null, depth_source: null }));
+    appendSpawn(tmp, startRecord({ agentId: 'a2' }));
+    const [measuredNothing, notProduced] = readSpawns(tmp);
+    // "The writer produced the column and found nothing"...
+    expect(measuredNothing).toHaveProperty('parent_agent_id', null);
+    expect(measuredNothing).toHaveProperty('depth_source', null);
+    // ...is not "this writer does not produce the column": a START row stays
+    // byte-identical to what it was before the columns existed.
+    expect(notProduced).not.toHaveProperty('parent_agent_id');
+    expect(notProduced).not.toHaveProperty('depth_source');
+  });
+
+  it('degrades a non-string or empty value of the SH-19 columns to null', () => {
+    appendSpawn(tmp, startRecord({ event: 'stop', parent_agent_id: 7, depth_source: '' }));
+    appendSpawn(tmp, startRecord({ event: 'stop', parent_agent_id: { id: 'x' }, depth_source: ['host-meta'] }));
+    const recs = readSpawns(tmp);
+    expect(recs).toHaveLength(2);
+    for (const rec of recs) {
+      expect(rec).toHaveProperty('parent_agent_id', null);
+      expect(rec).toHaveProperty('depth_source', null);
+    }
+  });
+
+  it('still drops unknown keys: the allowlist gained two entries, not a passthrough (SH-19)', () => {
+    appendSpawn(tmp, startRecord({
+      event: 'stop',
+      parent_agent_id: 'agent-parent-1',
+      depth_source: 'host-meta',
+      // Near-misses of the new names and an outright stranger: none may reach disk.
+      parentAgentId: 'camel-case', parent_agent: 'short', depth_sourse: 'typo', bogus: 'dropped',
+    }));
+    const [rec] = readSpawns(tmp);
+    for (const key of ['parentAgentId', 'parent_agent', 'depth_sourse', 'bogus']) {
+      expect(rec, key).not.toHaveProperty(key);
+    }
+    expect(rec.parent_agent_id).toBe('agent-parent-1');
+    expect(rec.depth_source).toBe('host-meta');
+  });
+
+  it('redacts a secret in the SH-19 string columns and keeps the line valid JSON', () => {
+    const secretValue = 'v'.repeat(24);
+    appendSpawn(tmp, startRecord({
+      event: 'stop', parent_agent_id: `credential=${secretValue}`, depth_source: 'host-meta',
+    }));
+    const raw = readFileSync(spawnLedgerPath(tmp), 'utf-8');
+    expect(raw).not.toContain(secretValue);
+    const rec = JSON.parse(raw.trim());
+    expect(rec.parent_agent_id).toContain('REDACTED');
+    expect(rec.depth_source).toBe('host-meta');
+  });
+
   it('appendSpawn never throws: bad root / bad event / unwritable path', () => {
     expect(appendSpawn('', startRecord())).toEqual({ ok: false, reason: 'no-project-root' });
     expect(appendSpawn(tmp, { ...startRecord(), event: 'boom' })).toEqual({ ok: false, reason: 'invalid-event' });

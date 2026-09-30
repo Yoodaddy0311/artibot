@@ -192,12 +192,13 @@ describe('route-observe-pre — requested model and task, as the host runs it', 
     expect(validateRoute(line.data)).toBe(true);
   });
 
-  it('appends the two keys last, so every pre-existing key keeps its position', () => {
+  it('appends the two keys after `source`, so every pre-existing key keeps its position', () => {
     expect(runHook(payloadFor(DOC_UPDATER_INPUT), home).status).toBe(0);
     const [line] = readRunLedger(repo);
     const keys = Object.keys(line.data);
-    expect(keys.slice(-2)).toEqual(['requested_model', 'requested_task']);
-    expect(keys[keys.length - 3]).toBe('source');
+    // `caller_agent_id` (SH-19) is appended after these two; its own test file pins the tail.
+    expect(keys.slice(-3)).toEqual(['requested_model', 'requested_task', 'caller_agent_id']);
+    expect(keys[keys.length - 4]).toBe('source');
   });
 });
 
