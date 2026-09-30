@@ -54,6 +54,16 @@ const HOOK_NAME = '_posttooluse-dispatcher';
 const EVENT_NAME = 'PostToolUse';
 
 /**
+ * The host timeout of this slot in ms: the `timeout` (seconds) of the
+ * hooks/hooks.json entry that registers this dispatcher, x 1000. `spawnHook` needs
+ * it to keep a stretched child budget from outlasting the slot (it clamps each
+ * one to this minus `DISPATCHER_HEADROOM_MS`). Typed here by hand, not read at
+ * run time: tests/dispatcher/posttooluse-dispatcher.test.js reads hooks.json and
+ * goes red when the two differ.
+ */
+const SLOT_TIMEOUT_MS = 30_000;
+
+/**
  * Hook table — loaded from hooks/dispatch-table.json (v4.8.0 P1).
  * Each entry's `tools` array drives the per-payload routing in selectHooks().
  */
@@ -104,6 +114,10 @@ async function main() {
         // SessionStart and SessionEnd a stretched budget can outlive the host's
         // slot timeout and lose the merged output, so they do not pass this.
         allowTimeoutScale: true,
+        // Here it is bounded instead: a scaled budget is clamped to the slot
+        // minus the dispatcher headroom, and without the slot spawnHook applies
+        // no scale at all.
+        slotTimeoutMs: SLOT_TIMEOUT_MS,
       }),
     ),
   );

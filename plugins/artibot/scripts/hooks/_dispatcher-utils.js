@@ -106,9 +106,16 @@ export function hookPath(name) {
  * @param {string[]} [opts.args] extra CLI arguments to pass after the script
  * @param {string} [opts.dispatcherName] dispatcher tag for stderr lines
  * @param {boolean} [opts.allowTimeoutScale] opt in to the TEST-ONLY budget
- *   multiplier (see resolveTimeoutScale). Only the literal `true` opts in; the
- *   default runs `timeoutMs` as declared whatever the environment holds. The
- *   PostToolUse dispatcher is the one caller that passes it.
+ *   multiplier (see resolveTimeoutScale). Only the literal `true` opts in, and
+ *   only together with a usable `slotTimeoutMs`; the default runs `timeoutMs` as
+ *   declared whatever the environment holds. The PostToolUse dispatcher is the
+ *   one caller that passes it.
+ * @param {number} [opts.slotTimeoutMs] the host timeout of the slot this
+ *   dispatcher is registered in, in ms (hooks/hooks.json `timeout`, which is in
+ *   seconds, x 1000). It bounds a SCALED budget at `slotTimeoutMs` minus
+ *   DISPATCHER_HEADROOM_MS (see scaledBudgetCeilingMs). Read only when
+ *   `allowTimeoutScale` is true; without a finite slot above the headroom the
+ *   scale is not applied at all.
  * @returns {Promise<{ status: 'ok'|'timeout'|'error', name: string, stdout: string }>}
  */
 export function spawnHook(scriptPath, payload, opts) {
@@ -118,12 +125,24 @@ export function spawnHook(scriptPath, payload, opts) {
     args = [],
     dispatcherName = '_dispatcher',
     allowTimeoutScale = false,
+    slotTimeoutMs,
   } = opts || {};
   // The declared budget, byte for byte, unless the caller opted in with a literal
-  // `true` AND the test-only scale is set (see resolveTimeoutScale). An allowlist:
-  // a dispatcher added later starts on the shipped budget.
-  const scale = allowTimeoutScale === true ? resolveTimeoutScale() : 1;
-  const budgetMs = scaleTimeoutMs(timeoutMs, scale);
+  // `true`, named the slot it runs in, AND the test-only scale is set (see
+  // resolveTimeoutScale). An allowlist: a dispatcher added later starts on the
+  // shipped budget. No slot, no stretch: nothing can be kept inside a slot the
+  // caller did not name, so an opt-in without one is refused, not left unbounded.
+  const ceilingMs = scaledBudgetCeilingMs(slotTimeoutMs);
+  const scale = allowTimeoutScale === true && ceilingMs !== null ? resolveTimeoutScale() : 1;
+  const budgetMs = scaleTimeoutMs(timeoutMs, scale, ceilingMs ?? undefined);
+  // What an operator reading a stretched timeout needs: the declared budget, the
+  // factor and, only when the ceiling shortened the product, that it did.
+  let stretchNote = '';
+  if (budgetMs !== timeoutMs) {
+    stretchNote = budgetMs < scaleTimeoutMs(timeoutMs, scale)
+      ? ` (declared ${timeoutMs}ms x ${scale}, capped by the ${slotTimeoutMs}ms slot)`
+      : ` (declared ${timeoutMs}ms x ${scale})`;
+  }
 
   return new Promise((resolve) => {
     let settled = false;
@@ -151,8 +170,7 @@ export function spawnHook(scriptPath, payload, opts) {
 
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      const scaled = budgetMs === timeoutMs ? '' : ` (declared ${timeoutMs}ms x ${scale})`;
-      process.stderr.write(`[artibot:${dispatcherName}] ${name} timed out after ${budgetMs}ms${scaled}\n`);
+      process.stderr.write(`[artibot:${dispatcherName}] ${name} timed out after ${budgetMs}ms${stretchNote}\n`);
       finish('timeout');
     }, budgetMs);
 
@@ -199,8 +217,33 @@ const TIMEOUT_SCALE_SYNTAX = /^\d+(?:\.\d+)?$/;
 const TIMER_MAX_MS = 2 ** 31 - 1;
 
 /**
+ * What a dispatcher keeps for ITS OWN work inside the host slot: node cold start,
+ * dispatch-table load, child fan-out and the merge that writes the one stdout.
+ * It is the same 3 s that tests/firewall/hook-timeout-budget.test.js reserves
+ * (`HEADROOM_MS` there, a private constant of that test) - a conservative budget
+ * figure, NOT a measurement. The two are equal by convention: nothing links them.
+ */
+export const DISPATCHER_HEADROOM_MS = 3000;
+
+/**
+ * The most a SCALED child budget may be inside a host slot of `slotTimeoutMs`: the
+ * slot minus {@link DISPATCHER_HEADROOM_MS}. `null` when a ceiling cannot be
+ * derived - the slot is not a finite number, or leaves no room above the headroom
+ * - and `spawnHook` then applies no scale at all (fail closed).
+ *
+ * @param {unknown} slotTimeoutMs host timeout of the slot in ms
+ * @returns {number|null}
+ */
+export function scaledBudgetCeilingMs(slotTimeoutMs) {
+  if (!Number.isFinite(slotTimeoutMs)) return null;
+  const ceiling = slotTimeoutMs - DISPATCHER_HEADROOM_MS;
+  return ceiling > 0 ? ceiling : null;
+}
+
+/**
  * TEST-ONLY budget multiplier. Returns the factor `spawnHook` applies to every
- * declared `timeoutMs` of a caller that opted in (`allowTimeoutScale: true`):
+ * declared `timeoutMs` of a caller that opted in (`allowTimeoutScale: true`, with
+ * the host slot named in `slotTimeoutMs`):
  * exactly 1 (the shipped budgets, byte for byte) unless
  * `ARTIBOT_DISPATCH_TIMEOUT_SCALE` holds a plain decimal, which is then clamped
  * to [1, 10].
@@ -237,17 +280,34 @@ const TIMER_MAX_MS = 2 ** 31 - 1;
  * (lib/core/guard-registry.js#checkHardcodedSecret) can emit decision:'block'.
  * PostToolUse fires after the tool ran, so a lost block is lost feedback on a
  * write that already happened, not a gate on it. The slot is 30 s and
- * post-edit-format is declared 10 s, so the 3 s dispatcher headroom that
- * tests/firewall/hook-timeout-budget.test.js reserves runs out above 2.7x, and
- * at the 10x cap post-edit-format alone is 100 s. A child that really hangs
- * under such a scale gets the dispatcher cancelled before its own timer fires,
- * and the merged output goes with it. That is why this is a test knob.
+ * post-edit-format is declared 10 s, so an UNBOUNDED scale ran the 3 s
+ * dispatcher headroom that tests/firewall/hook-timeout-budget.test.js reserves
+ * out above 2.7x, and at the 10x cap post-edit-format alone was 100 s: a child
+ * that really hung got the dispatcher cancelled before its own timer fired, and
+ * the merged output went with it.
+ *
+ * THE CEILING. `spawnHook` therefore clamps each SCALED budget to the slot minus
+ * DISPATCHER_HEADROOM_MS (27 s for PostToolUse), and applies the scale at all
+ * only to a caller that names its slot (`slotTimeoutMs`). Why per budget and not a
+ * lower cap on the multiplier: a cap derived from the slot and the largest
+ * declared budget is 2.7x (27 s over post-edit-format's 10 s), and that would cut
+ * post-write-tdd - the tightest budget, the one this knob exists for - from 30 s
+ * to 8.1 s. tests/dispatcher/posttooluse-dispatcher.test.js records 9-11 s for a
+ * whole dispatch under the 16-parallel harness, the load the knob was added for;
+ * the child's own share of that was not measured, so 8.1 s is a reason for
+ * caution, not a proven failure. Clamping each child's timer keeps the stretch
+ * where it is needed and stops it only where it would outlast the slot. It also
+ * needs no update when a handler with a bigger budget joins the table. A declared
+ * budget already above the ceiling is left as declared, never shortened: that is
+ * the firewall gate's finding, not something a test knob may repair.
  *
  * ENVELOPE (each line is pinned by tests/dispatcher/dispatcher-utils-timeout.test.js):
  *   - It can only LENGTHEN. A value below 1 is floored to 1, so it can never turn
  *     every hook into a `timeout` and silently disable them.
  *   - It is capped at 10, and `scaleTimeoutMs` keeps the product inside what
  *     setTimeout can hold.
+ *   - A scaled budget never exceeds `slotTimeoutMs` - DISPATCHER_HEADROOM_MS, and
+ *     a caller that names no usable slot gets no stretch at all.
  *   - It is read from `^\d+(\.\d+)?$` and nothing else. Anything else is 1, so a
  *     typo fails closed to the shipped budgets.
  *   - It is read only for a caller passing the literal `allowTimeoutScale: true`,
@@ -256,11 +316,22 @@ const TIMER_MAX_MS = 2 ** 31 - 1;
  *
  * WHAT IT CANNOT SEE. tests/firewall/hook-timeout-budget.test.js checks the
  * DECLARED budgets against the host's slot timeout (hooks/hooks.json), so a
- * runtime multiplier is invisible to it; the PostToolUse limit above is exactly
- * that gap. Nothing stops an operator exporting the variable in a real session
- * either: it then reaches the PostToolUse dispatcher and no other, and what it
- * can cost there is the paragraph above, not merely "slower to give up".
- * ARTIBOT_DISABLE_DISPATCHER=1 stays the explicit off switch.
+ * runtime multiplier is invisible to it; the ceiling above is what covers that
+ * gap for the one dispatcher that scales. What the ceiling does not cover:
+ *   - The headroom is that gate's conservative 3 s budget, not a measurement. A
+ *     dispatcher whose own cold start, table load and merge take longer under
+ *     load can still lose a slot whose slowest child ran to the ceiling.
+ *   - The slot is a figure the PostToolUse dispatcher names itself. Its equality
+ *     with the hooks/hooks.json `timeout` is pinned by
+ *     tests/dispatcher/posttooluse-dispatcher.test.js, which reads that file; a
+ *     dispatcher added later that opts in must name its own slot and is on its own
+ *     until it has a pin of that kind.
+ *   - How the host enforces that timeout is not verified in this repo.
+ * Nothing stops an operator exporting the variable in a real session either: it
+ * then reaches the PostToolUse dispatcher and no other, where a real hang can
+ * now cost up to 27 s of the 30 s slot before the child is cut, but no longer the
+ * slot's merged output. ARTIBOT_DISABLE_DISPATCHER=1 stays the explicit off
+ * switch.
  *
  * @param {Record<string, unknown>|null} [env] defaults to process.env
  * @returns {number} a finite number in [1, 10]
@@ -273,17 +344,22 @@ export function resolveTimeoutScale(env = process.env) {
 
 /**
  * Apply `scale` to a declared budget. The identity at scale 1; otherwise the
- * product rounded up and clamped to what setTimeout can hold. Never shorter than
- * the declared budget, whatever `scale` is (0, negative, NaN, Infinity): that
- * guard is the second line of defence behind `resolveTimeoutScale`'s floor.
+ * product rounded up and clamped to what setTimeout can hold and to `ceilingMs`.
+ * Never shorter than the declared budget, whatever `scale` is (0, negative, NaN,
+ * Infinity) and whatever `ceilingMs` is (below the budget, NaN, null, 0): that
+ * guard is the second line of defence behind `resolveTimeoutScale`'s floor, and
+ * it makes an unusable ceiling leave the declared budget rather than unbound the
+ * product. Omitting `ceilingMs` (undefined) means no ceiling beyond the timer's.
  *
  * @param {number} timeoutMs declared budget
  * @param {number} scale factor from resolveTimeoutScale
+ * @param {number} [ceilingMs] the most the scaled budget may be, from
+ *   scaledBudgetCeilingMs
  * @returns {number}
  */
-export function scaleTimeoutMs(timeoutMs, scale) {
+export function scaleTimeoutMs(timeoutMs, scale, ceilingMs = TIMER_MAX_MS) {
   if (scale === 1) return timeoutMs;
-  const scaled = Math.min(Math.ceil(timeoutMs * scale), TIMER_MAX_MS);
+  const scaled = Math.min(Math.ceil(timeoutMs * scale), TIMER_MAX_MS, ceilingMs);
   return scaled > timeoutMs ? scaled : timeoutMs;
 }
 
