@@ -168,3 +168,63 @@ describe('a malformed scope is refused, not read as "no rows" or "all rows"', ()
       .toEqual({ counts: { z: 1 }, absent: 0, denominator: 1 });
   });
 });
+
+describe('an inventory entry can require carrier rows before it is measurable (direct hooks)', () => {
+  // OB-24 follow-up (2026-09-29). A direct hook has no row at all on a ledger written before the release that
+  // ships its writer, so `fired: 0, measured: true` there would read as "unused" for a hook nobody was
+  // listening to. The CLI marks those entries with `requires`; the fold (this module) applies it.
+  const REASON = 'unmeasured:direct-carrier-not-yet-shipped';
+  const REQUIRES = Object.freeze({ field: 'slot', anyOf: ['PreToolUse', 'Notification'], reason: REASON });
+  const dispatch = () => line('hook.fired', { slot: 'Stop', hooks: ['memory-tracker'], count: 1 });
+  const direct = () => line('hook.fired', { slot: 'PreToolUse', hooks: ['pre-bash'], count: 1 });
+  const inventory = () => ({ hooks: ['memory-tracker', { name: 'pre-bash', requires: REQUIRES }, { name: 'pre-write', requires: REQUIRES }] });
+  const byName = (audit) => Object.fromEntries(audit.kinds.hooks.entries.map((e) => [e.name, e]));
+
+  it('stays unmeasured, with its own reason, while no carrier row has an allowed slot', () => {
+    const audit = buildExistenceAudit([dispatch()], { inventory: inventory() });
+    const e = byName(audit);
+    expect(e['memory-tracker']).toMatchObject({ fired: 1, measured: true, reason: null });
+    for (const name of ['pre-bash', 'pre-write']) {
+      expect(e[name], name).toMatchObject({ fired: null, measured: false, reason: REASON });
+      expect(e[name].fired, 'null, never a zero: nobody was listening').not.toBe(0);
+    }
+    expect(audit.summary).toMatchObject({ entries: 3, measured: 1, unmeasured: 2 });
+  });
+
+  it('the first row with an allowed slot opens the gate: from then on a silent entry is a MEASURED zero', () => {
+    const audit = buildExistenceAudit([dispatch(), direct()], { inventory: inventory() });
+    const e = byName(audit);
+    expect(e['pre-bash']).toMatchObject({ fired: 1, measured: true, reason: null });
+    expect(e['pre-write']).toMatchObject({ fired: 0, measured: true, reason: null });
+    expect(audit.summary).toMatchObject({ measured: 3, unmeasured: 0 });
+  });
+
+  it('a row in a slot outside the list does not open it: dispatcher rows are not the direct carrier', () => {
+    const rows = [dispatch(), line('hook.fired', { slot: 'PostToolUse', hooks: ['pre-bash'], count: 1 })];
+    expect(byName(buildExistenceAudit(rows, { inventory: inventory() }))['pre-bash']).toMatchObject({ measured: false, reason: REASON });
+  });
+
+  it('an empty ledger keeps the general carrier-absent reason: the kind is unmeasured before the gate is asked', () => {
+    const e = byName(buildExistenceAudit([], { inventory: inventory() }));
+    for (const name of ['memory-tracker', 'pre-bash']) {
+      expect(e[name], name).toMatchObject({ fired: null, measured: false, reason: CARRIER_ABSENT_REASON });
+    }
+  });
+
+  it('leaves an entry without `requires` exactly as before', () => {
+    const plain = buildExistenceAudit([dispatch()], { inventory: { hooks: ['memory-tracker', 'quiet-hook'] } });
+    expect(byName(plain)['quiet-hook']).toMatchObject({ fired: 0, measured: true, reason: null });
+  });
+
+  it.each([
+    ['a missing field', { anyOf: ['PreToolUse'], reason: REASON }],
+    ['an empty anyOf', { field: 'slot', anyOf: [], reason: REASON }],
+    ['a non-string in anyOf', { field: 'slot', anyOf: ['PreToolUse', 7], reason: REASON }],
+    ['a missing reason', { field: 'slot', anyOf: ['PreToolUse'] }],
+    ['a reason outside the unmeasured: namespace', { field: 'slot', anyOf: ['PreToolUse'], reason: 'unused' }],
+    ['a non-object', 'slot'],
+  ])('refuses %s instead of measuring against a gate nobody can read', (_label, requires) => {
+    expect(() => buildExistenceAudit([dispatch()], { inventory: { hooks: [{ name: 'pre-bash', requires }] } }))
+      .toThrow(/requires/);
+  });
+});

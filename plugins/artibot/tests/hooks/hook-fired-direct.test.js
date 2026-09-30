@@ -1,9 +1,12 @@
 /**
  * OB-24 / R1 `ob24-direct-hook-carrier` -- the hooks registered DIRECTLY in
- * `hooks/hooks.json` record a `hook.fired` row, one per firing. This is the
- * SPAWNED half: every registration is run as a real child process. The in-process
- * half (slot allowlist, envelope, snapshot, recording switch, repo finder, no
- * spawn) is `hook-fired-direct-unit.test.js`; shared plumbing is
+ * `hooks/hooks.json` record a `hook.fired` row for the FIRST firing per (UTC day,
+ * session, slot, hook) (architect review 2026-09-29: one row per firing cost
+ * ~21.5k rows a day and broke owner decision O8=a1). This is the SPAWNED half:
+ * every registration is run as a real child process. The in-process halves are
+ * `hook-fired-direct-unit.test.js` (slot allowlist, envelope, snapshot, recording
+ * switch, repo finder, no spawn) and `hook-fired-direct-marker.test.js` (marker
+ * path, prune, the flow with a recorder spy); shared plumbing is
  * `tests/helpers/hook-fired-harness.js`.
  *
  * WHY THIS SUITE EXISTS. `lib/replay/existence-audit.js#CARRIERS.hooks` reads
@@ -37,6 +40,10 @@
  *      FILE) writes to the shared central ledger, like a dispatcher row.
  *   7. THE RUNNER DEFAULT: a child that inherits `VITEST` records nothing unless
  *      told `on` (35 existing tests assert the exact ledger their hooks leave).
+ *   8. THE SESSION-DAY MARKER: 2 firings of one session/slot/hook -> 1 row; a new
+ *      UTC day -> a row again; a failed append -> no marker; with the marker
+ *      present the writer is never loaded (read from the process's module log,
+ *      not from timing); a new day's first firing prunes date dirs > 7 days old.
  *
  * WHAT THIS SUITE CANNOT SEE (rules section 9 -- read a green run as no more)
  *   - REAL HOST PAYLOADS FOR EIGHT OF THE TEN EVENTS. `hook_event_name` is
@@ -47,14 +54,15 @@
  *     live host, so the payloads below are synthesised. A host that omitted the
  *     key on one of them would write no row for it (fail-closed), and only a
  *     live probe would show that.
- *   - LATENCY. Nothing here times anything; the cost of loading the ledger
- *     writer in every hook process is measured by hand and reported.
- *   - VOLUME. One row per firing roughly doubles the daily `hook.fired` line
- *     count; that is a fact about the live ledger, not about this code.
- *   - THE CLI INVENTORY. `scripts/ledger/existence-audit.mjs` still leaves the
- *     direct hooks out of `kinds.hooks` and lists them under
- *     `hooksOutsideCarrier`; the audit test at the bottom feeds the fold an
- *     inventory that names them, which is what the CLI would have to do.
+ *   - LATENCY. Nothing here times anything; the cost of a unit's first firing
+ *     (the ledger writer loads) and of a later one (a marker check) is measured
+ *     by hand and reported.
+ *   - VOLUME. A row is a session-day unit, so the daily count is bounded by
+ *     sessions x 24 and not by tool calls; the actual figure is a fact about the
+ *     live ledger, measured by hand, not about this code.
+ *   - THE CLI INVENTORY. `tests/ledger/existence-audit-cli.test.js` pins what the
+ *     CLI lists, gates and counts outside; the audit test at the bottom of THIS
+ *     file feeds the fold an inventory of its own, not the CLI's.
  *   - A HOOK THAT THROWS THROUGH AN `exit: true` TAIL. The tap fires right
  *     after the payload parses, but the row lands when the writer finishes
  *     loading; a tail that calls `process.exit(0)` first can cut it. Not
@@ -64,14 +72,17 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
   DISPATCHED_SCRIPTS, DISPATCHER_SLOTS, DISTINCT_SCRIPTS, ENTRIES, firedRows, HOOKS_DIR, HOOKS_JSON,
-  ledgerLines, makeLinkedWorktree, makeSandbox, PER_EVENT, removeSandboxes, runScript,
+  hookSeenDirOf, ledgerLines, LOAD_LOGGER_AVAILABLE, makeLinkedWorktree, makeLoadLogger, makeSandbox, markerFiles,
+  PER_EVENT, removeSandboxes, runScript, spawnScript, utcDayOf,
 } from '../helpers/hook-fired-harness.js';
 import { buildExistenceAudit, CARRIERS, foldFiredCounts } from '../../lib/replay/existence-audit.js';
 import { ledgerFilePath, readAllEvents } from '../../lib/runtime/ledger.js';
@@ -395,9 +406,9 @@ describe('fail-silent: an unrecordable firing writes nothing and changes nothing
 
   it('the off switch is exact: only the literal "off" silences the tap (child scrubbed of VITEST, like production)', () => {
     const sb = makeSandbox('switch');
-    const input = JSON.stringify(good(sb));
     for (const value of ['0', 'false', 'OFF', 'no', '']) {
-      const out = runScript(sb, 'pre-bash.js', [], input, { ARTIBOT_HOOK_FIRED_DIRECT: value });
+      // A fresh session each time: the same session would (rightly) be one row, not five.
+      const out = runScript(sb, 'pre-bash.js', [], JSON.stringify(good(sb)), { ARTIBOT_HOOK_FIRED_DIRECT: value });
       expect(out.status).toBe(0);
     }
     // Five other spellings all left the recorder on: five rows, none silenced.
@@ -418,16 +429,20 @@ describe('fail-silent: an unrecordable firing writes nothing and changes nothing
 });
 
 describe('existence audit: a direct hook is counted, not read as a false zero', () => {
-  it('folds three real firings into per-hook counts and keeps a silent hook at a measured zero', () => {
+  it('folds session-day units into per-hook counts and keeps a silent hook at a measured zero', () => {
     const sb = makeSandbox('audit');
-    const sid = randomUUID();
-    const bash = { session_id: sid, cwd: sb.repo, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo hello' } };
-    const write = { session_id: sid, cwd: sb.repo, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: path.join(sb.repo, 'src', 'a.js'), content: 'x' } };
+    const [sidA, sidB] = [randomUUID(), randomUUID()];
+    const bash = (sid) => ({ session_id: sid, cwd: sb.repo, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo hello' } });
+    const write = { session_id: sidA, cwd: sb.repo, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: path.join(sb.repo, 'src', 'a.js'), content: 'x' } };
     const on = { ARTIBOT_HOOK_FIRED_DIRECT: 'on' };
-    runScript(sb, 'pre-bash.js', [], JSON.stringify({ ...bash, tool_use_id: 'toolu_r1_a1' }), on);
-    runScript(sb, 'pre-bash.js', [], JSON.stringify({ ...bash, tool_use_id: 'toolu_r1_a2' }), on);
-    runScript(sb, 'pre-write.js', [], JSON.stringify({ ...write, tool_use_id: 'toolu_r1_a3' }), on);
+    runScript(sb, 'pre-bash.js', [], JSON.stringify({ ...bash(sidA), tool_use_id: 'toolu_r1_a1' }), on);
+    // The same session firing pre-bash again is NOT another unit: it is the same (day, session, slot, hook).
+    runScript(sb, 'pre-bash.js', [], JSON.stringify({ ...bash(sidA), tool_use_id: 'toolu_r1_a2' }), on);
+    runScript(sb, 'pre-bash.js', [], JSON.stringify({ ...bash(sidB), tool_use_id: 'toolu_r1_a3' }), on);
+    runScript(sb, 'pre-write.js', [], JSON.stringify({ ...write, tool_use_id: 'toolu_r1_a4' }), on);
 
+    // `fired` for a direct hook counts SESSION-DAY UNITS (2 sessions used pre-bash, 1 used pre-write), and
+    // the denominator now mixes those units with the dispatchers' one-row-per-dispatch.
     const events = readAllEvents(sb.repo);
     expect(foldFiredCounts(events, CARRIERS.hooks)).toEqual({
       counts: { 'pre-bash': 2, 'pre-write': 1 },
@@ -441,5 +456,158 @@ describe('existence audit: a direct hook is counted, not read as a false zero', 
       'pre-bash': [2, true],
       'pre-write': [1, true],
     });
+  });
+});
+
+describe('session-day marker: a row is the FIRST firing per (UTC day, session, slot, hook)', () => {
+  const on = { ARTIBOT_HOOK_FIRED_DIRECT: 'on' };
+  const sha16 = (s) => createHash('sha1').update(s).digest('hex').slice(0, 16);
+  const bashInput = (sb, sid, over = {}) => JSON.stringify({
+    session_id: sid,
+    transcript_path: path.join(sb.root, 'transcript.jsonl'),
+    cwd: sb.repo,
+    permission_mode: 'default',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'echo hello' },
+    tool_use_id: 'toolu_r1_m',
+    ...over,
+  });
+  const loadedInput = (sb, sid) => JSON.stringify({
+    ...(sid === undefined ? {} : { session_id: sid }),
+    transcript_path: path.join(sb.root, 'transcript.jsonl'),
+    cwd: sb.repo,
+    permission_mode: 'default',
+    hook_event_name: 'InstructionsLoaded',
+    file_path: path.join(sb.repo, 'CLAUDE.md'),
+    memory_type: 'Project',
+    load_reason: 'session_start',
+  });
+  const SILENT = { status: 0, stdout: '', stderr: '' };
+
+  it('two firings of the same session/slot/hook leave ONE row and ONE marker, named by the session hash', () => {
+    const sb = makeSandbox('mark');
+    const sid = randomUUID();
+    expect(runScript(sb, 'pre-bash.js', [], bashInput(sb, sid), on)).toEqual(SILENT);
+    expect(runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m2' }), on)).toEqual(SILENT);
+    expect(runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m3' }), on)).toEqual(SILENT);
+    expect(firedRows(sb)).toHaveLength(1);
+    const files = markerFiles(sb);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(new RegExp(`^\\d{4}-\\d{2}-\\d{2}/${sha16(sid)}\\.PreToolUse\\.pre-bash$`));
+    expect(files[0]).not.toContain(sid);
+  });
+
+  it('another hook, another slot and another session are each their own first firing', () => {
+    const sb = makeSandbox('mark');
+    const sid = randomUUID();
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid), on);
+    runScript(sb, 'bash-risk-guard.js', [], bashInput(sb, sid), on);
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, randomUUID()), on);
+    runScript(sb, 'context-tracker.js', [], JSON.stringify({ session_id: sid, cwd: sb.repo, hook_event_name: 'Notification', message: 'm' }), on);
+    // Repeating every one of them adds nothing.
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m9' }), on);
+    runScript(sb, 'bash-risk-guard.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m9' }), on);
+    const rows = firedRows(sb);
+    expect(rows.map((r) => `${r.data.slot}:${r.data.hooks[0]}`).sort()).toEqual([
+      'Notification:context-tracker', 'PreToolUse:bash-risk-guard', 'PreToolUse:pre-bash', 'PreToolUse:pre-bash',
+    ]);
+    expect(markerFiles(sb)).toHaveLength(4);
+  });
+
+  it('the next UTC day records the same triple again', () => {
+    const sb = makeSandbox('mark');
+    const sid = randomUUID();
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid), on);
+    expect(firedRows(sb)).toHaveLength(1);
+    // Simulate the day rolling over by moving the first day's marker directory back one day.
+    const seen = hookSeenDirOf(sb);
+    const [first] = readdirSync(seen);
+    const yesterday = new Date(Date.parse(`${first}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    renameSync(path.join(seen, first), path.join(seen, yesterday));
+    expect(runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m4' }), on)).toEqual(SILENT);
+    expect(firedRows(sb)).toHaveLength(2);
+    expect(markerFiles(sb)).toHaveLength(2);
+    // ...and within that new day it is one row again.
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m5' }), on);
+    expect(firedRows(sb)).toHaveLength(2);
+  });
+
+  it('a failed append leaves no marker, and does not poison the day', () => {
+    const sb = makeSandbox('mark');
+    const sid = randomUUID();
+    // A DIRECTORY where the ledger file must go: the append fails, the marker directory stays creatable.
+    const ledger = path.join(path.dirname(hookSeenDirOf(sb)), 'ledger.jsonl');
+    mkdirSync(ledger, { recursive: true });
+    expect(runScript(sb, 'pre-bash.js', [], bashInput(sb, sid), on)).toEqual(SILENT);
+    expect(existsSync(hookSeenDirOf(sb)), 'nothing may be claimed for a row that was not written').toBe(false);
+    // Positive control: with the ledger writable again, the SAME session/slot/hook records at once.
+    rmSync(ledger, { recursive: true, force: true });
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { tool_use_id: 'toolu_r1_m6' }), on);
+    expect(firedRows(sb)).toHaveLength(1);
+    expect(markerFiles(sb)).toHaveLength(1);
+  });
+
+  it.skipIf(!LOAD_LOGGER_AVAILABLE)('with the marker present the ledger writer is NEVER loaded (read from the process\'s module log)', () => {
+    const sb = makeSandbox('mark');
+    const logger = makeLoadLogger(sb);
+    const sid = randomUUID();
+    const run = (name) => spawnScript(sb, 'instructions-loaded.js', {
+      input: loadedInput(sb, sid), env: { ...on, ...logger.env(name) }, nodeArgs: logger.nodeArgs,
+    });
+    const has = (name, tail) => logger.loaded(name).some((u) => u.endsWith(tail));
+    const WRITER = ['/scripts/hooks/_hook-fired-record.js', '/lib/runtime/ledger.js', '/lib/runtime/event-writer.js'];
+
+    expect(run('first').status).toBe(0);
+    expect(run('second').status).toBe(0);
+
+    expect(has('first', '/scripts/hooks/instructions-loaded.js'), 'the logger really saw the hook load').toBe(true);
+    for (const m of WRITER) expect(has('first', m), `the first firing loads ${m}`).toBe(true);
+    for (const m of WRITER) expect(has('second', m), `the second firing must not load ${m}`).toBe(false);
+    // It did get as far as the marker check, through the two tiny resolvers.
+    expect(has('second', '/lib/project-state/git-common-dir.js')).toBe(true);
+    expect(has('second', '/lib/project-state/store-location.js')).toBe(true);
+    expect(firedRows(sb)).toHaveLength(1);
+  });
+
+  it.skipIf(!LOAD_LOGGER_AVAILABLE)('no session id: nothing beyond the hook itself is loaded, and no marker directory appears', () => {
+    const sb = makeSandbox('mark');
+    const logger = makeLoadLogger(sb);
+    const out = spawnScript(sb, 'instructions-loaded.js', {
+      input: loadedInput(sb, undefined), env: { ...on, ...logger.env('nosid') }, nodeArgs: logger.nodeArgs,
+    });
+    expect(out.status).toBe(0);
+    const loaded = logger.loaded('nosid');
+    expect(loaded.some((u) => u.endsWith('/scripts/hooks/instructions-loaded.js'))).toBe(true);
+    for (const m of ['/lib/project-state/git-common-dir.js', '/scripts/hooks/_hook-fired-record.js']) {
+      expect(loaded.some((u) => u.endsWith(m)), `${m} must not load without a session id`).toBe(false);
+    }
+    expect(existsSync(hookSeenDirOf(sb))).toBe(false);
+    expect(firedRows(sb)).toEqual([]);
+  });
+
+  it('the first firing of a new day prunes date directories older than 7 days, and only those', () => {
+    const sb = makeSandbox('mark');
+    const seen = hookSeenDirOf(sb);
+    for (const name of ['2026-01-01', '2026-01-02', `${utcDayOf(-8)}`, `${utcDayOf(-7)}`, `${utcDayOf(-1)}`, 'notes']) {
+      mkdirSync(path.join(seen, name), { recursive: true });
+      writeFileSync(path.join(seen, name, 'stale.PreToolUse.pre-bash'), '');
+    }
+    const out = runScript(sb, 'pre-bash.js', [], bashInput(sb, randomUUID()), on);
+    expect(out).toEqual(SILENT);
+    // 7 days back is kept, 8 is gone; a name that is not a date is never touched; today's directory now exists.
+    expect(readdirSync(seen).sort()).toEqual([utcDayOf(-7), utcDayOf(-1), 'notes', utcDayOf(0)].sort());
+    expect(readdirSync(path.join(seen, 'notes'))).toEqual(['stale.PreToolUse.pre-bash']);
+  });
+
+  it('a linked worktree claims in the MAIN store, so a second worktree window sees the marker', () => {
+    const sb = makeSandbox('mark');
+    const wt = makeLinkedWorktree(sb);
+    const sid = randomUUID();
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { cwd: wt }), on, wt);
+    runScript(sb, 'pre-bash.js', [], bashInput(sb, sid, { cwd: sb.repo }), on, sb.repo);
+    expect(firedRows(sb)).toHaveLength(1);
+    expect(markerFiles(sb)).toHaveLength(1);
+    expect(existsSync(path.join(wt, '.artibot'))).toBe(false);
   });
 });

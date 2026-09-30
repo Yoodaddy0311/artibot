@@ -47,6 +47,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
+import { DIRECT_HOOK_SLOTS } from '../../scripts/hooks/_main-entry.js';
 
 // This file spawns child processes; the budget is headroom for load only.
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
@@ -101,15 +102,24 @@ const DISPATCH_TABLE = {
   },
 };
 
-/** hooks.json: two dispatchers plus two hooks registered directly. */
+/**
+ * hooks.json: two dispatchers, two hooks registered directly (their events are in
+ * DIRECT_HOOK_SLOTS), and ONE stray: `stray.js` under `SessionEnd`, which is
+ * neither a dispatcher script nor a direct-slot event, so it is the only command
+ * `hooksOutsideCarrier` can list. It keeps that branch tested.
+ */
 const HOOKS_JSON = {
   hooks: {
     SessionStart: [{ hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_sessionstart-dispatcher.js' }] }],
     PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js' }] }],
     Stop: [{ hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_stop-dispatcher.js' }] }],
     Notification: [{ hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/workflow-status.js notification' }] }],
+    SessionEnd: [{ hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stray.js' }] }],
   },
 };
+
+/** What a direct-only entry reads on a ledger with no direct-slot row: unmeasured, not "unused". */
+const NOT_YET_SHIPPED = 'unmeasured:direct-carrier-not-yet-shipped';
 
 /**
  * A full fixture plugin root. Each source holds one item the enumerator must
@@ -222,6 +232,11 @@ describe('existence-audit: a seeded ledger against a fixture plugin root', () =>
     expect(entry(printed, 'hooks', 'memory-tracker')).toMatchObject({ fired: 2, measured: true, reason: null });
     expect(entry(printed, 'hooks', 'session-start').fired).toBe(1);
     expect(entry(printed, 'hooks', 'quiet-hook')).toMatchObject({ fired: 0, measured: true });
+    // The two hooks registered directly are IN the inventory now, but this ledger holds no row whose slot is
+    // a direct slot: the direct writer has not shipped for it, so they are unmeasured, never "unused".
+    for (const name of ['pre-bash', 'workflow-status']) {
+      expect(entry(printed, 'hooks', name), name).toMatchObject({ fired: null, measured: false, reason: NOT_YET_SHIPPED });
+    }
     // commands: bare stems, lowercased (`Team.md` -> `team`).
     expect(printed.kinds.commands.denominator).toBe(3);
     expect(printed.kinds.commands.entries.map((e) => e.name)).toEqual(['split', 'team']);
@@ -257,7 +272,8 @@ describe('existence-audit: a seeded ledger against a fixture plugin root', () =>
     expect(printed.summary.eventsReceived).toBe(5);
     expect(printed.summary.census.survivors).toBe(5);
     expect(printed.summary.census.file.present).toBe(true);
-    expect(printed.summary.entries).toBe(3 + 2 + 2 + 2);
+    // hooks: 3 dispatch-table names + 2 directly registered ones.
+    expect(printed.summary.entries).toBe(5 + 2 + 2 + 2);
   });
 
   it('lists what it skipped and what the carrier counted outside the inventory', () => {
@@ -269,15 +285,18 @@ describe('existence-audit: a seeded ledger against a fixture plugin root', () =>
 
     expect(printed.sources.commands).toMatchObject({ status: 'enumerated', count: 2, skipped: 1 });
     expect(printed.sources.skills).toMatchObject({ status: 'enumerated', count: 2, skipped: 1 });
-    // memory-tracker sits in two slots: 4 handler entries, 3 distinct hooks.
-    expect(printed.sources.hooks).toMatchObject({ status: 'enumerated', count: 3, handlerEntries: 4 });
+    // memory-tracker sits in two slots: 4 handler entries, 3 distinct dispatch-table hooks; the two hooks
+    // registered directly (events in DIRECT_HOOK_SLOTS) make 5 in the inventory.
+    expect(printed.sources.hooks).toMatchObject({
+      status: 'enumerated', count: 5, handlerEntries: 4, directEntries: 2, directStatus: 'enumerated',
+    });
     expect(printed.sources.modules).toMatchObject({ status: 'enumerated', count: 2 });
-    // The hooks no hook.fired row can ever name are counted, not audited.
+    // What is left outside the carrier is neither a dispatcher nor a command on a direct-slot event.
     expect(printed.hooksOutsideCarrier).toEqual({
       path: 'hooks/hooks.json',
       status: 'enumerated',
-      count: 2,
-      entries: ['PreToolUse pre-bash.js', 'Notification workflow-status.js notification'],
+      count: 1,
+      entries: ['SessionEnd stray.js'],
     });
     // The other half of a false zero: names the rows hold that nothing lists.
     expect(printed.unmatched).toEqual({
@@ -365,6 +384,123 @@ describe('existence-audit: an absent source is not an empty one', () => {
   });
 });
 
+/** A hooks.json with one `node <plugin>/scripts/hooks/<command>` entry per listed command, per event. */
+function hooksJsonOf(byEvent) {
+  const hooks = {};
+  for (const [event, commands] of Object.entries(byEvent)) {
+    hooks[event] = commands.map((command) => ({
+      hooks: [{ type: 'command', command: `node \${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${command}` }],
+    }));
+  }
+  return `${JSON.stringify({ hooks })}\n`;
+}
+
+/** The fixture's two dispatchers plus whatever the case registers, so only its entries are direct or stray. */
+function withHooksJson(plugin, byEvent) {
+  put(plugin, 'hooks/hooks.json', hooksJsonOf({
+    SessionStart: ['_sessionstart-dispatcher.js'], Stop: ['_stop-dispatcher.js'], ...byEvent,
+  }));
+}
+
+describe('existence-audit: hooks registered directly in hooks.json (OB-24)', () => {
+  /** A direct row as `recordDirectHookFired` writes it: `slot` is the hook event itself. */
+  const seedDirect = (root, hook, slot = 'PreToolUse') => seed(root, 'hook.fired', { slot, hooks: [hook], count: 1 });
+
+  it('counts a hook only hooks.json runs once a direct-slot row exists, and leaves the ghost visible', () => {
+    const project = makeProject('D1');
+    const plugin = makePlugin('dplug1');
+    seedLedger(project);
+    seedDirect(project, 'pre-bash');
+    expect(ledgerLines(project).filter((e) => e.event === 'ledger.rejected')).toEqual([]);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(entry(printed, 'hooks', 'pre-bash')).toMatchObject({ fired: 1, measured: true, reason: null });
+    // The gate belongs to the carrier, not to one hook: from the first direct-slot row on, a silent direct
+    // hook is a MEASURED zero (what an Existence Audit exists to find), not "unmeasured".
+    expect(entry(printed, 'hooks', 'workflow-status')).toMatchObject({ fired: 0, measured: true, reason: null });
+    expect(printed.kinds.hooks.denominator).toBe(3);
+    // pre-bash is listed now, so it is not unmatched; only the name nothing lists remains.
+    expect(printed.unmatched.hooks).toEqual({ 'ghost-hook': 1 });
+  });
+
+  it('lists a hook once when the dispatch table AND hooks.json run it, and never gates it', () => {
+    const project = makeProject('D2');
+    const plugin = makePlugin('dplug2');
+    // memory-tracker is dispatched (SessionStart, Stop) and registered directly: the dual-path scripts.
+    withHooksJson(plugin, { PreToolUse: ['pre-bash.js', 'memory-tracker.js'] });
+    seedLedger(project);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.kinds.hooks.entries.filter((e) => e.name === 'memory-tracker')).toHaveLength(1);
+    // Someone WAS listening (the dispatcher), so it is a count although no direct-slot row exists yet.
+    expect(entry(printed, 'hooks', 'memory-tracker')).toMatchObject({ fired: 2, measured: true, reason: null });
+    expect(entry(printed, 'hooks', 'pre-bash')).toMatchObject({ fired: null, measured: false, reason: NOT_YET_SHIPPED });
+    expect(printed.sources.hooks).toMatchObject({ count: 4, handlerEntries: 4, directEntries: 2 });
+  });
+
+  it.each([
+    ['absent', null, 'absent'],
+    ['not JSON', '{ nope', 'malformed'],
+    ['without a hooks object', JSON.stringify({ hooks: [] }), 'malformed'],
+  ])('keeps the dispatch-table inventory and names the missing half when hooks.json is %s', (_label, text, status) => {
+    const project = makeProject('D3');
+    const plugin = makePlugin('dplug3');
+    if (text === null) rmSync(path.join(plugin, 'hooks', 'hooks.json'));
+    else writeFileSync(path.join(plugin, 'hooks', 'hooks.json'), text, 'utf-8');
+    seedLedger(project);
+    seedDirect(project, 'pre-bash');
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    // Same hooks kind as before this change; the direct half is reported, not silently dropped.
+    expect(printed.kinds.hooks.enumerated).toBe(true);
+    expect(printed.kinds.hooks.entries.map((e) => e.name).sort()).toEqual(['memory-tracker', 'quiet-hook', 'session-start']);
+    expect(printed.sources.hooks).toMatchObject({
+      status: 'enumerated', count: 3, handlerEntries: 4, directEntries: null, directStatus: status,
+    });
+    expect(printed.hooksOutsideCarrier).toMatchObject({ status, count: null, entries: null });
+    // Unlisted, so the direct row surfaces as unmatched instead of vanishing.
+    expect(printed.unmatched.hooks).toEqual({ 'ghost-hook': 1, 'pre-bash': 1 });
+  });
+
+  it('takes the slot list from the hook tap: every allowlisted event is direct, anything else is outside', () => {
+    const project = makeProject('D4');
+    const plugin = makePlugin('dplug4');
+    const byEvent = Object.fromEntries(DIRECT_HOOK_SLOTS.map((event, i) => [event, [`direct-${i}.js`]]));
+    byEvent[DIRECT_HOOK_SLOTS[0]].push('unnamed.sh'); // on a direct slot, but no script to name: outside
+    byEvent.SessionEnd = ['stray-a.js']; // an event the tap does not record: outside
+    byEvent.UserPromptSubmit = ['stray-b.mjs arg']; // a dispatcher-owned event: outside, args kept
+    withHooksJson(plugin, byEvent);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    const names = printed.kinds.hooks.entries.map((e) => e.name);
+    DIRECT_HOOK_SLOTS.forEach((event, i) => expect(names, event).toContain(`direct-${i}`));
+    expect(names.filter((n) => n.startsWith('stray') || n.startsWith('unnamed'))).toEqual([]);
+    expect(printed.sources.hooks).toMatchObject({
+      count: 3 + DIRECT_HOOK_SLOTS.length, directEntries: DIRECT_HOOK_SLOTS.length,
+    });
+    expect(printed.hooksOutsideCarrier).toEqual({
+      path: 'hooks/hooks.json',
+      status: 'enumerated',
+      count: 3,
+      entries: [
+        `${DIRECT_HOOK_SLOTS[0]} node \${CLAUDE_PLUGIN_ROOT}/scripts/hooks/unnamed.sh`,
+        'SessionEnd stray-a.js',
+        'UserPromptSubmit stray-b.mjs arg',
+      ],
+    });
+  });
+
+  it('imports the slot list instead of keeping a copy that can drift from the tap', () => {
+    const source = readFileSync(CLI, 'utf-8');
+    expect(source).toMatch(/import\s*\{[^}]*\bDIRECT_HOOK_SLOTS\b[^}]*\}\s*from\s*'\.\.\/hooks\/_main-entry\.js'/);
+    for (const event of DIRECT_HOOK_SLOTS) expect(source, event).not.toContain(`'${event}'`);
+  });
+});
+
 /**
  * The fold fixture: `save` is a command only, `split` and `team` are both a
  * command and a skill, `alpha` and `beta` are skills only.
@@ -385,9 +521,11 @@ function seedSkill(root, skill) {
 
 /**
  * Every spelling the fold has to tell apart.
- *   tool.used (11 rows)   artibot:split x2, split, artibot:alpha,
+ *   tool.used 11행 중 Skill carrier 10행 (Bash 1행은 where 밖, absent 아님)
+ *                         Skill: artibot:split x2, split, artibot:alpha,
  *                         artibot-cowork:beta, artibot:save x2, save,
- *                         `artibot:` alone, claude-api, one Bash row (no skill)
+ *                         `artibot:` alone, claude-api; the 11th row is a Bash
+ *                         row with no skill, outside the carrier's `where`
  *   intent.detected (3)   artibot:team, split, artibot:ghost
  */
 function seedFoldLedger(root) {
@@ -409,7 +547,8 @@ describe('existence-audit: the own-plugin namespace fold', () => {
 
     const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
 
-    expect(printed.kinds.skills.denominator).toBe(11);
+    // 10, not 11: the Bash row is not a Skill row, so it is neither counted nor "absent".
+    expect(printed.kinds.skills.denominator).toBe(10);
     expect(entry(printed, 'skills', 'split')).toMatchObject({ fired: 3, measured: true });
     expect(entry(printed, 'skills', 'alpha').fired).toBe(1);
     // Another plugin's `beta` is not this plugin's `beta`.
@@ -552,6 +691,10 @@ describe('existence-audit: it writes nothing', () => {
     expect(printed.summary.eventsReceived).toBe(0);
     expect(entry(printed, 'hooks', 'quiet-hook')).toMatchObject({
       fired: null, reason: 'unmeasured:carrier-event-absent-from-ledger',
+    });
+    // A direct-only hook keeps the GENERAL reason here: the kind is unmeasured before the direct gate is asked.
+    expect(entry(printed, 'hooks', 'pre-bash')).toMatchObject({
+      fired: null, measured: false, reason: 'unmeasured:carrier-event-absent-from-ledger',
     });
     expect(existsSync(file)).toBe(false);
   });

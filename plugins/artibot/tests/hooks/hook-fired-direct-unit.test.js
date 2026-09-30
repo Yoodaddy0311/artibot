@@ -71,7 +71,7 @@ describe('DIRECT_HOOK_SLOTS: an allowlist of the host events that have no dispat
   });
 });
 
-describe('buildDirectHookFiredEnvelope: one row per firing, naming the one hook', () => {
+describe('buildDirectHookFiredEnvelope: one row for one hook (which firing earns it is the tap\'s marker)', () => {
   it('builds the hook.fired envelope with a single-element hooks array', () => {
     const env = rec.buildDirectHookFiredEnvelope({ hook: 'pre-bash', payload: payload() });
     expect(env).toMatchObject({

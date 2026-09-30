@@ -89,10 +89,20 @@
  * dispatcher's (one envelope literal, {@link buildHookFiredEnvelope}), with
  * three differences that all follow from one process per hook instead of one
  * per slot:
- *   - ONE ROW PER FIRING OF ONE HOOK. `data.hooks` has one element and `count`
- *     is 1; there is no fan-out to fold. The Audit's multi-valued fold counts it
- *     like any dispatcher row, so `denominator` (rows of the carrier event) is
- *     now dispatcher dispatches PLUS direct firings.
+ *   - ONE ROW PER SESSION-DAY UNIT OF ONE HOOK, NOT ONE PER FIRING. A row is the
+ *     FIRST firing per (UTC day, session, slot, hook); the tap looks for a marker
+ *     file first (`_main-entry.js#fireOnceDirect`) and does not load this module
+ *     once it exists. A row per firing was withdrawn on architect review
+ *     (2026-09-29): a direct hook runs on every tool call, so it put this
+ *     module's graph on each of them and grew the ledger by thousands of rows a
+ *     day, against owner decision O8=a1 above ("1 dispatch = 1 row"). Nothing in
+ *     THIS module changed for it: it still writes exactly the row it is handed;
+ *     deciding which firing is the first is the tap's. `data.hooks` has one
+ *     element and `count` is 1; there is no fan-out to fold. The Audit's
+ *     multi-valued fold counts it like any dispatcher row, so `denominator`
+ *     (rows of the carrier event) is dispatcher dispatches PLUS direct
+ *     session-days: two different units in one number, which the Audit's
+ *     carrier note says out loud.
  *   - `data.slot` IS THE HOST EVENT (`PreToolUse`, `Notification`, ...), never a
  *     dispatcher slot, and `data.tool` is not written (the allowlist documents
  *     it for PostToolUse only).
@@ -165,10 +175,16 @@
  *     ledger writer has finished loading, which is after the hook's own
  *     synchronous work; a fail-open tail that calls `process.exit(0)` first
  *     (the `exit: true` error handlers) can cut it. That under-counts a
- *     crashing hook, never records a wrong one.
+ *     crashing hook, never records a wrong one, and the unit is not lost: the
+ *     tap claims its marker only AFTER a successful append, so the next firing
+ *     of the same (UTC day, session, slot, hook) tries again.
+ *   - HOW MANY FIRINGS A DIRECT ROW STANDS FOR. Any number, from 1 up: a row is
+ *     a session-day unit. Two parallel FIRST firings of one unit can also both
+ *     append (neither has a marker to see yet); that duplicate is accepted.
  *   - THE COST OF RECORDING. Loading the ledger writer's module graph is the
  *     dominant cost of a direct row (~30-65 ms in a fresh process, measured
- *     2026-09-29 on a loaded machine), paid by every recorded firing.
+ *     2026-09-29 on a loaded machine). Only a unit's first firing pays it; the
+ *     later ones stop at the marker (a few small modules and one `existsSync`).
  *
  * @module scripts/hooks/_hook-fired-record
  */
@@ -417,9 +433,10 @@ export function nearestGitRoot(cwd) {
 }
 
 /**
- * Build the ledger envelope for ONE firing of ONE directly registered hook.
- * PURE: no I/O. Null -- never a half-envelope -- unless the inputs can produce a
- * row the writer would accept.
+ * Build the ledger envelope for ONE directly registered hook's row (the tap
+ * hands over the first firing of a session-day, see the module header). PURE:
+ * no I/O. Null -- never a half-envelope -- unless the inputs can produce a row
+ * the writer would accept.
  *
  * The slot is the payload's own `hook_event_name`, and it must be one of
  * {@link DIRECT_HOOK_SLOTS}: that allowlist is what keeps a dispatched child
@@ -449,9 +466,10 @@ export function buildDirectHookFiredEnvelope(args) {
 }
 
 /**
- * Build and append the row for one firing of a directly registered hook.
- * NEVER throws, NEVER writes stdout, and -- unlike {@link recordHookFired} --
- * NEVER writes stderr either.
+ * Build and append the row for a directly registered hook. It writes exactly the
+ * row it is handed; which firing is worth a row is decided before it is loaded
+ * (`_main-entry.js#fireOnceDirect`). NEVER throws, NEVER writes stdout, and --
+ * unlike {@link recordHookFired} -- NEVER writes stderr either.
  *
  * The project root comes from {@link nearestGitRoot}, not `resolveProjectRoot`:
  * no `git rev-parse` fallback, so no process is ever started and a directory

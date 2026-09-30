@@ -164,11 +164,17 @@ describe('an unmeasured kind reports null, never zero', () => {
     expect(CARRIER_NOTES.hooks).toContain('hook.fired');
     expect(CARRIER_NOTES.hooks).toContain('_hook-fired-record.js');
     // The note must keep naming what the carrier CANNOT see. Since R1 the 24
-    // commands registered straight in hooks.json DO write a row per firing, so
-    // the blind spot is no longer "they never do" -- it is that nothing exists
+    // commands registered straight in hooks.json DO write a row -- but ONE PER
+    // SESSION-DAY UNIT (the first firing per UTC day, session, slot and hook;
+    // architect review 2026-09-29), not one per firing -- so a direct hook's
+    // `fired` counts session-days, and the denominator MIXES that unit with the
+    // dispatchers' one row per dispatch. The blind spots are that nothing exists
     // before the release that shipped the tap, that a cwd outside a git work
     // tree is skipped, and that the switch is off on a machine that set it. A
-    // note that drops any of those stops warning about a false `fired: 0`.
+    // note that drops any of those stops warning about a false `fired: 0`, and one
+    // that drops the unit stops warning that two counts are not comparable.
+    expect(CARRIER_NOTES.hooks).toContain('session-day');
+    expect(CARRIER_NOTES.hooks).toContain('MIXES the two units');
     expect(CARRIER_NOTES.hooks).toContain('24');
     expect(CARRIER_NOTES.hooks).toContain('hooks.json');
     expect(CARRIER_NOTES.hooks).toContain('recordDirectHookFired');

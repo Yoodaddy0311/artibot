@@ -19,8 +19,9 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
+import * as nodeModule from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -177,20 +178,30 @@ export function childEnv(sb, extra = {}) {
 
 /**
  * Spawn a hook script exactly as the host would: argv[1] is the script, the
- * payload is on stdin.
+ * payload is on stdin. `nodeArgs` go BEFORE the script (e.g. `--import`), which
+ * is why this is the options form: the positional {@link runScript} stays short.
  *
+ * @param {{root: string, repo: string, home: string, tmp: string}} sb
+ * @param {string} script file name under `scripts/hooks/`
+ * @param {{args?: string[], input?: string, env?: Record<string, string>, cwd?: string,
+ *   nodeArgs?: string[]}} [opts]
  * @returns {{status: number|null, stdout: string, stderr: string}}
  */
-export function runScript(sb, script, args, input, extraEnv = {}, cwd = sb.repo) {
-  const res = spawnSync(process.execPath, [path.join(HOOKS_DIR, script), ...args], {
+export function spawnScript(sb, script, { args = [], input, env = {}, cwd = sb.repo, nodeArgs = [] } = {}) {
+  const res = spawnSync(process.execPath, [...nodeArgs, path.join(HOOKS_DIR, script), ...args], {
     input,
     encoding: 'utf-8',
     windowsHide: true,
     cwd,
-    env: childEnv(sb, extraEnv),
+    env: childEnv(sb, env),
     timeout: 60_000,
   });
   return { status: res.status, stdout: String(res.stdout ?? ''), stderr: String(res.stderr ?? '') };
+}
+
+/** {@link spawnScript} with positional arguments, the form most of the suites use. */
+export function runScript(sb, script, args, input, extraEnv = {}, cwd = sb.repo) {
+  return spawnScript(sb, script, { args, input, env: extraEnv, cwd });
 }
 
 /** Every line of a sandbox's central ledger, parsed. */
@@ -202,3 +213,69 @@ export function ledgerLines(sb) {
 
 /** The `hook.fired` lines of a sandbox's central ledger. */
 export const firedRows = (sb) => ledgerLines(sb).filter((l) => l.event === 'hook.fired');
+
+/** The store directory next to the ledger (`<git common dir>/artibot`). */
+export const storeDirOf = (sb) => path.dirname(ledgerFilePath(sb.repo));
+
+/** Where the session-day markers live. */
+export const hookSeenDirOf = (sb) => path.join(storeDirOf(sb), 'hook-seen');
+
+/**
+ * Every marker file, as `<UTC day>/<file name>`, sorted. `[]` when there is no
+ * marker directory at all (which is itself an answer, not an error).
+ */
+export function markerFiles(sb) {
+  const seen = hookSeenDirOf(sb);
+  if (!existsSync(seen)) return [];
+  return readdirSync(seen).sort().flatMap((day) => {
+    const dir = path.join(seen, day);
+    return statSync(dir).isDirectory() ? readdirSync(dir).sort().map((f) => `${day}/${f}`) : [];
+  });
+}
+
+/** UTC calendar day `offsetDays` from now, as the markers spell it. */
+export const utcDayOf = (offsetDays = 0) => new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+
+/** `module.register` exists from Node 20.6; a suite that needs the load logger skips below that. */
+export const LOAD_LOGGER_AVAILABLE = typeof nodeModule.register === 'function';
+
+/**
+ * A module-load logger for a spawned hook: an ESM customization hook that
+ * appends the URL of EVERY module the process loads to a per-run log file. That
+ * is the process's real module cache, read from outside, so "the ledger writer
+ * was never loaded" is a fact about the run and not a timing inference.
+ *
+ * Use: `spawnScript(sb, script, { input, env: { ...extraEnv, ...logger.env('run1') }, nodeArgs: logger.nodeArgs })`
+ * then `logger.loaded('run1')`.
+ *
+ * @param {{root: string}} sb
+ * @returns {{available: boolean, nodeArgs: string[], env: (name: string) => Record<string, string>, loaded: (name: string) => string[]}}
+ */
+export function makeLoadLogger(sb) {
+  const dir = path.join(sb.root, 'loadlog');
+  mkdirSync(dir, { recursive: true });
+  const hooksFile = path.join(dir, 'hooks.mjs');
+  const registerFile = path.join(dir, 'register.mjs');
+  writeFileSync(hooksFile, [
+    "import { appendFileSync } from 'node:fs';",
+    'export async function load(url, context, nextLoad) {',
+    '  if (process.env.R1_LOAD_LOG) appendFileSync(process.env.R1_LOAD_LOG, `${url}\\n`);',
+    '  return nextLoad(url, context);',
+    '}',
+    '',
+  ].join('\n'), 'utf-8');
+  writeFileSync(registerFile, [
+    "import { register } from 'node:module';",
+    `register(${JSON.stringify(pathToFileURL(hooksFile).href)});`,
+    '',
+  ].join('\n'), 'utf-8');
+  return {
+    available: LOAD_LOGGER_AVAILABLE,
+    nodeArgs: ['--import', pathToFileURL(registerFile).href],
+    env: (name) => ({ R1_LOAD_LOG: path.join(dir, `${name}.log`) }),
+    loaded: (name) => {
+      const file = path.join(dir, `${name}.log`);
+      return existsSync(file) ? readFileSync(file, 'utf-8').split('\n').filter(Boolean) : [];
+    },
+  };
+}

@@ -40,12 +40,15 @@
  *            `sources.skills.skipped`, not audited.
  *  hooks     the DISTINCT handler `name`s across every
  *            `hooks/dispatch-table.json#slots.*.handlers[*]`, raw spelling,
- *            because `_hook-fired-record.js` records them raw. A name in two
- *            slots is ONE hook (the table's `handlerEntries` vs `count` shows
- *            the difference). FAIL-CLOSED: a table that is unreadable, not
- *            JSON, or has any handler without a non-empty string `name` makes
- *            the whole kind `malformed` — a partial list would print a
- *            complete-looking audit of the wrong set.
+ *            because `_hook-fired-record.js` records them raw, PLUS the stem
+ *            of every non-dispatcher `hooks/hooks.json` command on a
+ *            `_main-entry.js#DIRECT_HOOK_SLOTS` event (HOOKS REGISTERED
+ *            DIRECTLY below). A name in two slots, or on both paths, is ONE
+ *            hook (`sources.hooks.handlerEntries`/`directEntries` vs `count`).
+ *            FAIL-CLOSED on the table: one that is unreadable, not JSON, or
+ *            has any handler without a non-empty string `name` makes the whole
+ *            kind `malformed` — a partial list would print a complete-looking
+ *            audit of the wrong set.
  *  modules   every `.js` / `.mjs` / `.cjs` file under `lib/`, as a
  *            plugin-relative forward-slash path (`lib/replay/replay.js`).
  *            ENUMERATED although no event carries it, so each entry says
@@ -61,6 +64,23 @@
  *  are also left out. `sources.<kind>.status` names which of those four
  *  (`enumerated` | `absent` | `unreadable` | `malformed`) it was, so
  *  `enumerated: false` never has to be guessed at.
+ *
+ * -- HOOKS REGISTERED DIRECTLY (OB-24, 2026-09-29) -------------------------
+ *  Before the tap (`_main-entry.js#tapDirectFiring`) no `hook.fired` row could
+ *  name them and this script only COUNTED them. Now the hooks.json commands on a
+ *  `DIRECT_HOOK_SLOTS` event are inventory, named by the tap's own `hookStem`;
+ *  the slot list is imported, never copied. Two things a reader must not skip:
+ *  - THE UNIT. A direct hook's row is one per UTC day, session, slot and hook,
+ *    not per firing: its `fired` counts session-days, a dispatcher handler's
+ *    counts dispatches, and a name on both paths adds the two.
+ *  - THE GATE. A direct-only entry carries `requires` (`DIRECT_GATE`): it stays
+ *    `unmeasured:direct-carrier-not-yet-shipped` until the ledger holds one row
+ *    from a direct slot, so a ledger from before the tap never reads as "these
+ *    hooks are unused". A name a dispatcher also runs is NOT gated. Once any
+ *    direct-slot row exists, a silent one IS a measured zero.
+ *  `hooksOutsideCarrier` is what is left: neither a dispatcher nor on a direct
+ *  event, or naming no script. An absent, unreadable or malformed `hooks.json`
+ *  leaves the kind as the dispatch table alone (`sources.hooks.directStatus`).
  *
  * -- THE NAMESPACE FOLD (READ SIDE ONLY) ----------------------------------
  *  The Skill tool rows are spelled both ways — measured on the central
@@ -168,11 +188,12 @@
  *    prefix is today's manifest name, so rows under the old name stay
  *    unmatched. (iv) A `skillCarrierCommands` name is not a command firing:
  *    the commands kind still counts only user-typed slash prompts.
- *  - HOOKS REGISTERED DIRECTLY IN `hooks/hooks.json` ARE NOT IN THE INVENTORY.
- *    No dispatcher runs them, so no `hook.fired` row can name them, and
- *    listing them would print a false `fired: 0`. They are COUNTED instead,
- *    in `hooksOutsideCarrier` (a hooks.json command that does not invoke a
- *    dispatcher named in the table); their firing is not audited at all.
+ *  - A DIRECT HOOK'S GATE IS ONLY ABOUT THE LEDGER. `requires` opens on the first
+ *    direct-slot row, so a `--since` window that starts before the tap's release,
+ *    on a ledger that also holds later direct rows, still reads a silent direct
+ *    hook as `fired: 0, measured: true`. The scripts are not opened: one that
+ *    never calls the tap would read the same (`tests/hooks/hook-fired-direct
+ *    .test.js` pins this repository's wiring; an installed copy is on trust).
  *  - A DISABLED `hook.fired` SLOT READS AS A FALSE ZERO. The fold decides
  *    `measured` per KIND (any `hook.fired` row at all), not per slot. If
  *    `ledger.hookFired.slots` switched one slot off while others kept
@@ -200,7 +221,7 @@ import { readLedgerCensus } from '../../lib/runtime/ledger.js';
 import {
   AUDITED_KINDS, buildExistenceAudit, CARRIERS, foldFiredCounts,
 } from '../../lib/replay/existence-audit.js';
-import { isMainEntry } from '../hooks/_main-entry.js';
+import { DIRECT_HOOK_SLOTS, hookStem, isMainEntry } from '../hooks/_main-entry.js';
 
 /** This file's own plugin root: scripts/ledger -> plugin root. */
 const OWN_PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -220,6 +241,17 @@ const SOURCE_PATHS = Object.freeze({
 });
 
 const HOOKS_JSON = 'hooks/hooks.json';
+
+/**
+ * The gate every direct-only hook carries (`requires`, see the fold's
+ * `buildExistenceAudit`): unmeasured until the ledger holds one row from a
+ * direct slot. The slot list is the tap's own, imported, so they cannot drift.
+ */
+const DIRECT_GATE = Object.freeze({
+  field: 'slot',
+  anyOf: DIRECT_HOOK_SLOTS,
+  reason: 'unmeasured:direct-carrier-not-yet-shipped',
+});
 
 /** The manifest whose `name` is the only namespace prefix folded. */
 const PLUGIN_MANIFEST = '.claude-plugin/plugin.json';
@@ -397,12 +429,70 @@ function dispatchTableDefect(table) {
 }
 
 /**
- * Distinct dispatch-table handler names, plus the dispatcher script basenames
- * that `hooksOutsideCarrier` needs.
+ * Every `hooks/hooks.json` command, split into the script it runs and the rest.
+ * Never throws; a file that cannot be used says why instead.
  *
  * @param {string} root plugin root
- * @returns {{status: string, items?: string[], handlerEntries?: number,
- *   dispatchers?: string[], error?: string}}
+ * @returns {{status: 'enumerated', commands: Array<{event: string, tail: string, script: string}>}
+ *   |{status: 'absent'|'unreadable'|'malformed', error?: string}}
+ */
+function readHookCommands(root) {
+  const read = readJson(path.join(root, HOOKS_JSON));
+  if (read.status !== 'ok') return read;
+  const events = read.value?.hooks;
+  if (!events || typeof events !== 'object' || Array.isArray(events)) {
+    return { status: 'malformed', error: 'hooks is not an object' };
+  }
+  const commands = [];
+  for (const [event, groups] of Object.entries(events)) {
+    for (const group of Array.isArray(groups) ? groups : []) {
+      for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) {
+        const command = typeof hook?.command === 'string' ? hook.command.trim() : '';
+        // The script basename plus its arguments, e.g. `workflow-status.js notification`.
+        const tail = command.match(/[^\s/\\]+\.(?:c|m)?js\b.*$/)?.[0] ?? command;
+        commands.push({ event, tail, script: tail.split(/\s/)[0] });
+      }
+    }
+  }
+  return { status: 'enumerated', commands };
+}
+
+/**
+ * Sort the `hooks.json` commands three ways. A DISPATCHER script is skipped (its
+ * handlers are the table's). A command on a `DIRECT_HOOK_SLOTS` event that runs a
+ * script is DIRECT, named by the tap's own stem rule. Everything else -- an event
+ * the tap does not record, or no script to name -- is OUTSIDE: counted, not audited.
+ *
+ * @param {Array<{event: string, tail: string, script: string}>} commands
+ * @param {string[]} dispatchers dispatcher script basenames from the table
+ * @returns {{direct: string[], outside: string[]}} `direct` has one name per command
+ */
+function classifyHookCommands(commands, dispatchers) {
+  const direct = [];
+  const outside = [];
+  for (const { event, tail, script } of commands) {
+    if (dispatchers.includes(script)) continue;
+    if (DIRECT_HOOK_SLOTS.includes(event) && /\.[cm]?js$/.test(script)) direct.push(hookStem(script));
+    else outside.push(`${event} ${tail}`);
+  }
+  return { direct, outside };
+}
+
+/**
+ * The hooks inventory: the DISTINCT dispatch-table handler names, plus the
+ * scripts `hooks/hooks.json` registers directly that no handler already names
+ * (they carry {@link DIRECT_GATE}; a name on both paths is ONE entry, ungated:
+ * the dispatcher was listening). Also returns what `hooksOutsideCarrier` needs.
+ *
+ * FAIL-CLOSED on the dispatch table only. An absent, unreadable or malformed
+ * `hooks.json` leaves the kind as the table alone and says so in `directStatus`:
+ * the table half is still a complete answer about the dispatchers.
+ *
+ * @param {string} root plugin root
+ * @returns {{status: string, items?: Array<string|{name: string, requires: object}>,
+ *   handlerEntries?: number, dispatchers?: string[], directStatus?: string,
+ *   directEntries?: number|null, directError?: string, outside?: string[]|null,
+ *   error?: string}}
  */
 function enumerateHooks(root) {
   const read = readJson(path.join(root, SOURCE_PATHS.hooks));
@@ -415,7 +505,20 @@ function enumerateHooks(root) {
     for (const h of def.handlers ?? []) names.push(h.name);
     if (typeof def.dispatcher === 'string') dispatchers.push(path.posix.basename(def.dispatcher));
   }
-  return { status: 'enumerated', items: [...new Set(names)], handlerEntries: names.length, dispatchers };
+  const handlers = [...new Set(names)];
+  const parsed = readHookCommands(root);
+  const sorted = parsed.status === 'enumerated' ? classifyHookCommands(parsed.commands, dispatchers) : null;
+  const directOnly = sorted === null ? [] : [...new Set(sorted.direct)].filter((name) => !handlers.includes(name));
+  return {
+    status: 'enumerated',
+    items: [...handlers, ...directOnly.map((name) => ({ name, requires: DIRECT_GATE }))],
+    handlerEntries: names.length,
+    dispatchers,
+    directStatus: parsed.status,
+    directEntries: sorted === null ? null : sorted.direct.length,
+    ...(parsed.error === undefined ? {} : { directError: parsed.error }),
+    outside: sorted === null ? null : sorted.outside,
+  };
 }
 
 /**
@@ -445,38 +548,21 @@ function enumerateModules(root) {
 }
 
 /**
- * hooks.json commands that do NOT invoke a dispatcher in the table — the hooks
- * `hook.fired` structurally cannot name.
+ * hooks.json commands that neither invoke a dispatcher in the table nor sit on a
+ * `DIRECT_HOOK_SLOTS` event: the hooks no `hook.fired` row can name, because no
+ * dispatcher runs them and the tap does not record their event.
  *
- * @param {string} root plugin root
- * @param {string[]|undefined} dispatchers dispatcher basenames, when the table was usable
+ * @param {ReturnType<typeof enumerateHooks>} hooks the hooks enumeration
  * @returns {{path: string, status: string, count: number|null, entries: string[]|null,
  *   error?: string}}
  */
-function hooksOutsideCarrier(root, dispatchers) {
+function hooksOutsideCarrier(hooks) {
   const notCounted = (status, error) => ({
     path: HOOKS_JSON, status, count: null, entries: null, ...(error ? { error } : {}),
   });
-  if (dispatchers === undefined) return notCounted('unmeasured:dispatch-table-not-enumerated');
-  const read = readJson(path.join(root, HOOKS_JSON));
-  if (read.status !== 'ok') return notCounted(read.status, read.error);
-  const events = read.value?.hooks;
-  if (!events || typeof events !== 'object' || Array.isArray(events)) {
-    return notCounted('malformed', 'hooks is not an object');
-  }
-  const entries = [];
-  for (const [event, groups] of Object.entries(events)) {
-    for (const group of Array.isArray(groups) ? groups : []) {
-      for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) {
-        const command = typeof hook?.command === 'string' ? hook.command.trim() : '';
-        // The script basename plus its arguments, e.g. `workflow-status.js notification`.
-        const tail = command.match(/[^\s/\\]+\.(?:c|m)?js\b.*$/)?.[0] ?? command;
-        if (dispatchers.includes(tail.split(/\s/)[0])) continue;
-        entries.push(`${event} ${tail}`);
-      }
-    }
-  }
-  return { path: HOOKS_JSON, status: 'enumerated', count: entries.length, entries };
+  if (hooks.dispatchers === undefined) return notCounted('unmeasured:dispatch-table-not-enumerated');
+  if (hooks.directStatus !== 'enumerated') return notCounted(hooks.directStatus, hooks.directError);
+  return { path: HOOKS_JSON, status: 'enumerated', count: hooks.outside.length, entries: hooks.outside };
 }
 
 /**
@@ -499,10 +585,13 @@ function enumerate(root) {
     const source = { path: SOURCE_PATHS[kind], status: r.status, count: r.items ? r.items.length : null };
     if (r.skipped !== undefined) source.skipped = r.skipped;
     if (r.handlerEntries !== undefined) source.handlerEntries = r.handlerEntries;
+    if (r.directStatus !== undefined) source.directStatus = r.directStatus;
+    if (r.directEntries !== undefined) source.directEntries = r.directEntries;
+    if (r.directError !== undefined) source.directError = r.directError;
     if (r.error !== undefined) source.error = r.error;
     sources[kind] = source;
   }
-  return { inventory, sources, outside: hooksOutsideCarrier(root, results.hooks.dispatchers) };
+  return { inventory, sources, outside: hooksOutsideCarrier(results.hooks) };
 }
 
 /**
@@ -517,7 +606,8 @@ function unmatchedNames(events, inventory) {
   for (const kind of AUDITED_KINDS) {
     const fold = foldFiredCounts(events, CARRIERS[kind] ?? null);
     if (fold === null || !Object.hasOwn(inventory, kind)) { out[kind] = null; continue; }
-    const listed = new Set(inventory[kind]);
+    // An item is a bare name or `{ name, requires }` (the hooks kind's direct-only entries).
+    const listed = new Set(inventory[kind].map((item) => (typeof item === 'string' ? item : item.name)));
     out[kind] = Object.fromEntries(Object.entries(fold.counts).filter(([name]) => !listed.has(name)));
   }
   return out;
