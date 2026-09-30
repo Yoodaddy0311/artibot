@@ -262,8 +262,12 @@ describe('artibot.config.json — runtime.resume.staleGuard', () => {
     expect(readStaleGuardEnabled({ runtime: { resume: { staleGuard: false } } })).toBe(false);
   });
 
-  it('adds no top-level key (32 as pinned by tests/firewall/v5-config-firewall.test.js)', () => {
-    expect(Object.keys(SHIPPED).length).toBe(32);
+  it('adds no top-level key (33 as pinned by tests/firewall/v5-config-firewall.test.js)', () => {
+    // 32 -> 33 on 2026-09-30: `projectBootstrap` (portability O1 + O3, owner
+    // decision D1) is the one top-level key added since this case was written.
+    // The count is the same one v5-config-firewall pins; this case only asserts
+    // that CA-08 itself contributed none, so it moves with that pin.
+    expect(Object.keys(SHIPPED).length).toBe(33);
   });
 
   it('leaves the write-side gate untouched: three keys under artifactLifecycle, enabled false (rules §10)', () => {

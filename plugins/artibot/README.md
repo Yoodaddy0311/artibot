@@ -227,6 +227,8 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
 | `permissions.autoApprove` | `[]` | PermissionRequest allowlist `{tool, commandPattern}` (not the `settings.json` allowlist). A matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive/unjudgeable commands fall back to the normal prompt |
 | `updateCheck.enabled` | `true` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` wins over config. Off = no network call, no cache write |
+| `projectBootstrap.gitExclude` | `true` | SessionStart: writes a managed block (`# >>> artibot runtime >>>`) into `<git common dir>/info/exclude` so the `.artibot/` runtime files (state.yaml, runtime/, ledger/, transcripts/ ...) are not committed by `git add .`. Never edits your `.gitignore`, shared by every worktree, no-op outside git. Env `ARTIBOT_PROJECT_BOOTSTRAP=off` wins over config and turns off both `projectBootstrap` rows |
+| `projectBootstrap.rulesDigest` | `true` | SessionStart: when `~/.claude/rules/artibot/` holds no rules (the manifest `rules` field is not auto-loaded by the host), injects a digest of them (at most 1,500 bytes) with the directory of the full texts. Injects nothing once the rules are installed |
 | `cognitive.system1.maxLatency` | `100` | ms — unused (System 1 execution engine removed; key kept for schema compatibility) |
 | `learning.lifelong.batchSize` | `50` | Experiences per lifelong-learning batch |
 | `team.engine` | `"claude-agent-teams"` | Native Claude Code Agent Teams |
@@ -1609,7 +1611,7 @@ plugins/artibot/
 ├── hooks/
 │   └── hooks.json               # 훅 이벤트 매핑
 ├── scripts/
-│   ├── hooks/                   # 77개 훅 스크립트 파일 (.js 71 + .mjs 6, ESM, file-lock 포함)
+│   ├── hooks/                   # 78개 훅 스크립트 파일 (.js 72 + .mjs 6, ESM, file-lock 포함)
 │   ├── ci/                      # 20개 CI 검증 스크립트 (.js 18 + .mjs 2)
 │   ├── evals/                   # 런타임 eval 스위트
 │   └── utils/
