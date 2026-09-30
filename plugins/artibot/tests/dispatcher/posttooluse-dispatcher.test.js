@@ -139,6 +139,37 @@ afterAll(() => {
 });
 
 /**
+ * Budget multiplier every dispatch in this file is spawned with
+ * (`ARTIBOT_DISPATCH_TIMEOUT_SCALE`, read and clamped to [1, 10] by
+ * `scripts/hooks/_dispatcher-utils.js#resolveTimeoutScale`; 10 is its cap).
+ *
+ * WHY. The `hook.fired` cases assert `data.failed` is `[]`. `failed` names a
+ * handler whose child was still running when its budget ran out, and the timer
+ * starts at spawn(), so the tightest Edit-route budget (post-write-tdd, in
+ * `hooks/dispatch-table.json`) also has to cover a node cold start. On a loaded
+ * machine that race is lost and the assertion fails for a reason unrelated to
+ * the code under test. The assertion stays STRICT; the budget stops racing the
+ * machine. The same scale covers the other cases here that need a handler to
+ * finish (zero-result-guard's advice, the two `tool.used` rows).
+ *
+ * WHAT STAYS STRICT. `failed` keeps its meaning (a handler that timed out or
+ * failed to spawn) and the assertions on it are unchanged. A handler that really
+ * hangs still fails these cases: one whose scaled budget is under the 35 s spawn
+ * timeout below is recorded in `failed`, and a longer one outlasts that timeout
+ * so `status` goes non-zero. The delay-injection cases at the bottom of this
+ * file pin both directions: a delay past the SHIPPED budget IS recorded in
+ * `failed`, and the same delay under this scale is NOT.
+ *
+ * WHAT THIS NO LONGER SEES. Inside these cases the effective timeout is 10x the
+ * declared budget, so a handler that merely got slower (say 0.3 s to 5 s, inside
+ * its 10x) is no longer reported here. It was only ever reported here when the
+ * machine happened to be busy, which is the coupling being removed; declared
+ * budgets are gated by tests/firewall/hook-timeout-budget.test.js and measured
+ * latency by scripts/bench/hook-latency.mjs.
+ */
+const GENEROUS_TIMEOUT_SCALE = '10';
+
+/**
  * Spawn options for the dispatcher, in ONE place so the isolation self-check
  * at the bottom reads the same `cwd` the real spawns use. Inlining `cwd:` at
  * the call site instead lets the two drift, and the self-check then passes
@@ -161,6 +192,9 @@ function spawnOptions(env = {}) {
       HOME: sandboxHome,
       ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
       ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
+      // Scaled budgets, see GENEROUS_TIMEOUT_SCALE. A per-call `env` may
+      // override it, and the delay-injection cases at the bottom do.
+      ARTIBOT_DISPATCH_TIMEOUT_SCALE: GENEROUS_TIMEOUT_SCALE,
       ...env,
     },
     encoding: 'utf-8',
@@ -385,6 +419,8 @@ describe('_posttooluse-dispatcher (integration)', () => {
     expect(fired[0].data.slot).toBe('PostToolUse');
     expect(fired[0].data.tool).toBe('Skill');
     expect(fired[0].data.hooks).toEqual(['tool-tracker', 'tool-used-record']);
+    // STRICT on purpose: budgets are scaled (GENEROUS_TIMEOUT_SCALE), so a name
+    // in `failed` is a real timeout or spawn error, not a slow machine.
     expect(fired[0].data.failed).toEqual([]);
     expect(fired[0].data.count).toBe(2);
     expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
@@ -428,6 +464,7 @@ describe('_posttooluse-dispatcher (integration)', () => {
     expect(fired).toHaveLength(1);
     expect(fired[0].data.tool).toBe('AskUserQuestion');
     expect(fired[0].data.hooks).toEqual(['tool-tracker', 'tool-used-record']);
+    // STRICT on purpose, same reason as the Skill route above.
     expect(fired[0].data.failed).toEqual([]);
     expect(fired[0].data.count).toBe(2);
   });
@@ -480,6 +517,8 @@ describe('_posttooluse-dispatcher (integration)', () => {
       'mark-main-agent-edit', 'post-edit-format', 'post-edit-recovery',
       'post-write-tdd', 'quality-gate', 'tool-tracker',
     ]);
+    // STRICT on purpose, same reason as the Skill route above. This is the case
+    // that lost the race in CI: post-write-tdd has the tightest Edit budget.
     expect(fired[0].data.failed).toEqual([]);
     // Edit selects no `tool.used` writer, so the two carriers are independent.
     expect(lines.filter((l) => l.event === 'tool.used')).toEqual([]);
@@ -559,5 +598,122 @@ describe('_posttooluse-dispatcher (integration)', () => {
     });
     expect(status).toBe(0);
     expect(porcelain()).toBe(before);
+  });
+});
+
+/**
+ * Preload for NODE_OPTIONS=--require, written into the sandbox home by the
+ * suite below. It busy-waits before ONE named hook script runs and touches
+ * nothing else: it keys on the script's basename inside a `hooks` directory,
+ * so the dispatcher (its file name starts with an underscore), vitest, git and
+ * every sibling handler are unaffected. Atomics.wait blocks synchronously, so
+ * the delay does not depend on scheduling or on how busy the machine is.
+ */
+const HOOK_DELAY_PRELOAD = [
+  "'use strict';",
+  "const path = require('node:path');",
+  "const file = String(process.argv[1] || '');",
+  "const only = String(process.env.ARTIBOT_TEST_HOOK_DELAY_ONLY || '').split(',').filter(Boolean);",
+  'const ms = Number(process.env.ARTIBOT_TEST_HOOK_DELAY_MS || 0);',
+  "const inHooksDir = path.basename(path.dirname(file)) === 'hooks';",
+  "if (ms > 0 && inHooksDir && only.includes(path.basename(file, '.js'))) {",
+  '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);',
+  '}',
+].join('\n');
+
+/**
+ * DELAY INJECTION -- the deterministic half of the timeout accounting.
+ *
+ * The `hook.fired` cases above prove `failed` is `[]` when nothing is slow. They
+ * cannot prove the field means anything: if the dispatcher stopped recording
+ * timeouts, or the budget scale leaked into the default path, they would stay
+ * green. These cases make ONE handler slow on purpose, by a fixed amount instead
+ * of by machine load, and check that the accounting moves in both directions:
+ *
+ *   shipped budgets (scale unset)  + a delay past the budget -> the handler IS in `failed`
+ *   scaled budgets  (the default)  + the same delay          -> `failed` is `[]`
+ *
+ * Why the first is deterministic: the child cannot exit before the delay has
+ * elapsed, and the dispatcher's timer for it started before the child did. The
+ * delay is derived from the dispatch table (budget + margin), so a budget change
+ * moves the pin with it instead of quietly making it vacuous. The child is
+ * killed at its budget in that case, so a large margin costs no test time there.
+ *
+ * WHAT THIS DOES NOT SEE. It fixes one handler (post-write-tdd, the tightest
+ * budget on the Edit route) on one route, and says nothing about how often a real
+ * cold start beats a real budget; that is a load question. Load can ADD names to
+ * `failed`, so the positive case asserts inclusion and shape, never equality.
+ * The one way this pin can fail on a healthy tree is a dispatcher process
+ * descheduled for longer than DELAY_MARGIN_MS while its timer and the child's
+ * exit both fall due; the margin is sized against that, not proven against it.
+ */
+describe('_posttooluse-dispatcher timeout accounting (delay injection)', () => {
+  /**
+   * Past the budget by enough that the delayed child cannot beat the timer. The
+   * timer is due at most `budget` after spawn; the child cannot exit before
+   * `budget + margin` after spawn. 1.5 s is a margin, not a measurement: under
+   * the 16-parallel harness a whole dispatch took ~9-11 s, but how late an
+   * already-running dispatcher wakes under that load was not measured.
+   */
+  const DELAY_MARGIN_MS = 1500;
+  let preloadPath;
+
+  beforeAll(() => {
+    preloadPath = path.join(sandboxHome, 'delay-hook-preload.cjs');
+    writeFileSync(preloadPath, HOOK_DELAY_PRELOAD, 'utf-8');
+  });
+
+  /** One Edit dispatch with post-write-tdd held back for (budget + margin) ms. */
+  async function editWithSlowPostWriteTdd(tag, env) {
+    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
+    const budget = mod.HOOKS.find((h) => h.name === 'post-write-tdd').timeoutMs;
+    const repo = makeLedgerRepo(tag);
+    const preload = `--require "${preloadPath.split(path.sep).join('/')}"`;
+    const { status } = runDispatcher({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: 'x.js' },
+      tool_use_id: `toolu_posttooluse_${tag}`,
+      session_id: 'sess-posttooluse-dispatcher-0003',
+      cwd: repo,
+    }, {
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '),
+      ARTIBOT_TEST_HOOK_DELAY_ONLY: 'post-write-tdd',
+      ARTIBOT_TEST_HOOK_DELAY_MS: String(budget + DELAY_MARGIN_MS),
+      ...env,
+    });
+    const lines = readLedger(repo);
+    return { status, budget, lines, fired: lines.filter((l) => l.event === 'hook.fired') };
+  }
+
+  it('records a handler that outruns its SHIPPED budget in data.failed (scale unset)', async () => {
+    const { status, budget, lines, fired } = await editWithSlowPostWriteTdd('slow-shipped', {
+      ARTIBOT_DISPATCH_TIMEOUT_SCALE: undefined,
+    });
+    expect(status).toBe(0);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    expect(fired).toHaveLength(1);
+
+    const { count, failed, hooks } = fired[0].data;
+    expect(count).toBe(6);
+    // POSITIVE PIN. This is what makes `failed: []` elsewhere in this file mean
+    // something: the same field does go non-empty when a handler is too slow.
+    expect(failed, `post-write-tdd was held past its ${budget}ms budget`).toContain('post-write-tdd');
+    // Shape that holds under any load: load can add names, it cannot invent one.
+    expect(new Set(failed).size).toBe(failed.length);
+    expect(failed.every((name) => hooks.includes(name))).toBe(true);
+  });
+
+  it('keeps data.failed strictly empty for the SAME slow handler under scaled budgets', async () => {
+    const { status, lines, fired } = await editWithSlowPostWriteTdd('slow-scaled', {});
+    expect(status).toBe(0);
+    expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
+    expect(fired).toHaveLength(1);
+    expect(fired[0].data.count).toBe(6);
+    // Strict, and load-proof: the handler is late by design, yet inside 10x its budget.
+    expect(
+      fired[0].data.failed,
+      'a slow handler inside the scaled budget must not be reported; is ARTIBOT_DISPATCH_TIMEOUT_SCALE still set by spawnOptions()?',
+    ).toEqual([]);
   });
 });

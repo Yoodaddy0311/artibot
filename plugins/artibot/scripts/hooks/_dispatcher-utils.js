@@ -101,7 +101,7 @@ export function hookPath(name) {
  * @param {string} scriptPath absolute path to the hook script
  * @param {object} payload JSON-serializable input
  * @param {object} opts
- * @param {number} opts.timeoutMs hard timeout per hook (default 5000)
+ * @param {number} opts.timeoutMs hard timeout per hook (default 5000; x resolveTimeoutScale())
  * @param {string} opts.name human-readable hook name for logs
  * @param {string[]} [opts.args] extra CLI arguments to pass after the script
  * @param {string} [opts.dispatcherName] dispatcher tag for stderr lines
@@ -114,6 +114,9 @@ export function spawnHook(scriptPath, payload, opts) {
     args = [],
     dispatcherName = '_dispatcher',
   } = opts || {};
+  // The identity unless the test-only scale is set (see resolveTimeoutScale).
+  const scale = resolveTimeoutScale();
+  const budgetMs = scaleTimeoutMs(timeoutMs, scale);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -141,9 +144,10 @@ export function spawnHook(scriptPath, payload, opts) {
 
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      process.stderr.write(`[artibot:${dispatcherName}] ${name} timed out after ${timeoutMs}ms\n`);
+      const scaled = budgetMs === timeoutMs ? '' : ` (declared ${timeoutMs}ms x ${scale})`;
+      process.stderr.write(`[artibot:${dispatcherName}] ${name} timed out after ${budgetMs}ms${scaled}\n`);
       finish('timeout');
-    }, timeoutMs);
+    }, budgetMs);
 
     child.on('error', (err) => {
       clearTimeout(timer);
@@ -173,6 +177,75 @@ export function spawnHook(scriptPath, payload, opts) {
       // Let exit/timeout handlers complete the promise.
     }
   });
+}
+
+/** The only environment variable that stretches hook budgets. TEST-ONLY. */
+const TIMEOUT_SCALE_ENV = 'ARTIBOT_DISPATCH_TIMEOUT_SCALE';
+
+/** Largest multiplier `resolveTimeoutScale` will return, however big the value. */
+const TIMEOUT_SCALE_MAX = 10;
+
+/** The one accepted syntax: a plain non-negative decimal, ASCII digits only. */
+const TIMEOUT_SCALE_SYNTAX = /^\d+(?:\.\d+)?$/;
+
+/** setTimeout keeps its delay in a signed 32-bit int; a longer one fires after 1 ms. */
+const TIMER_MAX_MS = 2 ** 31 - 1;
+
+/**
+ * TEST-ONLY budget multiplier. Returns the factor `spawnHook` applies to every
+ * declared `timeoutMs`: exactly 1 (the shipped budgets, byte for byte) unless
+ * `ARTIBOT_DISPATCH_TIMEOUT_SCALE` holds a plain decimal, which is then clamped
+ * to [1, 10].
+ *
+ * WHY. A handler's timer starts at spawn(), so its budget also has to cover
+ * process creation and node cold start. On a loaded machine the tightest budget
+ * (post-write-tdd, hooks/dispatch-table.json) loses that race, the handler is
+ * recorded as `timeout`, and a test asserting `hook.fired` `data.failed` is `[]`
+ * fails with no defect in the code under test. Scaling the budget keeps that
+ * assertion strict instead of loosening it.
+ *
+ * ENVELOPE (each line is pinned by tests/dispatcher/dispatcher-utils-timeout.test.js):
+ *   - It can only LENGTHEN. A value below 1 is floored to 1, so it can never turn
+ *     every hook into a `timeout` and silently disable them.
+ *   - It is capped at 10, and `scaleTimeoutMs` keeps the product inside what
+ *     setTimeout can hold.
+ *   - It is read from `^\d+(\.\d+)?$` and nothing else. Anything else is 1, so a
+ *     typo fails closed to the shipped budgets.
+ *   - This module is its only reader.
+ *
+ * WHAT IT CANNOT SEE. tests/firewall/hook-timeout-budget.test.js checks the
+ * DECLARED budgets against the host's slot timeout (hooks/hooks.json). A runtime
+ * multiplier is invisible to it: at 10x, post-edit-format's 10 s becomes 100 s,
+ * beyond the 30 s the host allows the PostToolUse dispatcher, so a child that
+ * really hangs would get the dispatcher killed (its merged output lost) before
+ * the child's own timer fired. That is why this is a test knob. Nothing stops an
+ * operator exporting it in a real session either; the envelope only bounds the
+ * damage to "slower to give up". ARTIBOT_DISABLE_DISPATCHER=1 stays the explicit
+ * off switch.
+ *
+ * @param {Record<string, unknown>|null} [env] defaults to process.env
+ * @returns {number} a finite number in [1, 10]
+ */
+export function resolveTimeoutScale(env = process.env) {
+  const raw = env?.[TIMEOUT_SCALE_ENV];
+  if (typeof raw !== 'string' || !TIMEOUT_SCALE_SYNTAX.test(raw)) return 1;
+  return Math.min(Math.max(Number(raw), 1), TIMEOUT_SCALE_MAX);
+}
+
+/**
+ * Apply `scale` to a declared budget. The identity at scale 1; otherwise the
+ * product rounded up and clamped to what setTimeout can hold. Never shorter than
+ * the declared budget, whatever `scale` is (0, negative, NaN, Infinity): that
+ * guard is the second line of defence behind `resolveTimeoutScale`'s floor.
+ *
+ * @param {number} timeoutMs declared budget
+ * @param {number} scale factor from resolveTimeoutScale
+ * @returns {number}
+ */
+export function scaleTimeoutMs(timeoutMs, scale) {
+  if (scale === 1) return timeoutMs;
+  const scaled = Math.min(Math.ceil(timeoutMs * scale), TIMER_MAX_MS);
+  return scaled > timeoutMs ? scaled : timeoutMs;
 }
 
 /**
