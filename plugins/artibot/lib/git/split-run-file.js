@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJsonSync } from '../core/file.js';
+import { withFileLock } from '../core/file-lock.js';
 
 /**
  * Shape version stamped into `run.json` / `plan.json` on write. Bump only when
@@ -140,9 +141,26 @@ export function readPlanJson(parentRoot) {
  * (`{}` when the file is missing) and returns the object to store; returning
  * `undefined` keeps the (possibly mutated) input.
  *
- * The plan is otherwise write-once, so this exists for exactly one caller
- * shape: recording `limbs[].forkPoint` after a worktree is created. It is not
- * a general editor for plan contents.
+ * The plan is otherwise write-once, so this exists for exactly two caller
+ * shapes: recording `limbs[].forkPoint` after a worktree is created, and
+ * recording the run-to-mission `missionBinding` (SH-11). It is not a general
+ * editor for plan contents.
+ *
+ * ── One read-modify-write at a time (SH-11 pre-flip condition 3) ────────────
+ * The whole read -> `fn` -> rename runs under `withFileLock(plan.json)`
+ * (`plan.json.lock`, exclusive and fail-closed — `lib/core/file-lock.js`), so
+ * two windows binding or recording at the same instant take turns: the second
+ * reads what the first wrote, and `fn` sees it. Before the lock, both read the
+ * old file and the later rename silently dropped the earlier write (the bind
+ * race `lib/topology/split-state.js#bindRunToMission` names M1).
+ *  - Contended past the lock's wait budget this THROWS (`code: 'ELOCKTIMEOUT'`)
+ *    and writes nothing; the callers that are record-only turn that into a skip.
+ *  - A call for this plan from inside `fn` throws `ELOCKREENTRANT`.
+ *  - `fn` runs while the lock is held: keep it short and synchronous.
+ * WHAT THE LOCK DOES NOT COVER: a writer that does not come through here
+ * (`/split plan`'s inline plan write runs once, before any dispatch, and takes
+ * no lock), and `run.json` — {@link updateRunJson} is still an unlocked
+ * read-modify-write.
  *
  * @param {string} parentRoot
  * @param {(current: object) => object|undefined} fn
@@ -150,12 +168,15 @@ export function readPlanJson(parentRoot) {
  */
 export function updatePlanJson(parentRoot, fn) {
   if (typeof fn !== 'function') throw new TypeError('updatePlanJson: fn must be a function');
-  const current = readPlanJson(parentRoot) ?? {};
-  const next = fn(current);
-  const out = next === undefined ? current : next;
-  if (!out || typeof out !== 'object' || Array.isArray(out)) throw new TypeError('updatePlanJson: fn must yield a plain object');
-  atomicWriteJsonSync(planJsonPath(parentRoot), stampSchemaVersion(out));
-  return out;
+  const file = planJsonPath(parentRoot);
+  return withFileLock(file, () => {
+    const current = readPlanJson(parentRoot) ?? {};
+    const next = fn(current);
+    const out = next === undefined ? current : next;
+    if (!out || typeof out !== 'object' || Array.isArray(out)) throw new TypeError('updatePlanJson: fn must yield a plain object');
+    atomicWriteJsonSync(file, stampSchemaVersion(out));
+    return out;
+  });
 }
 
 /**

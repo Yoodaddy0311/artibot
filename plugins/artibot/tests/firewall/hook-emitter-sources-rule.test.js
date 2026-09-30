@@ -613,7 +613,7 @@ const ROLE_SOURCED = Object.freeze({
       + 'which one a reader sees; the paired human.asked IS the hook\'s own '
       + 'observation and stays source:hook.',
   },
-  'lib/project-state/state-manager.js:409': {
+  'lib/project-state/state-manager.js:411': {
     event: 'state.updated',
     source: 'supervisor',
     reason: 'Collected because lib/runtime/middleware/tasks.js (an appender) imports '
