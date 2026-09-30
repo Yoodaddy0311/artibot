@@ -43,7 +43,10 @@
  *    the workflow plan (`runtime-prompt.js#composePromptParts`) and is covered
  *    by `tests/hooks/runtime-prompt.test.js`. That it is byte-identical across
  *    CA-15 with the switch off was measured once (before/after probe on
- *    491a4de8), not pinned.
+ *    491a4de8), not pinned. The three follow-ups (a: cue vocabulary, b: status
+ *    field, c: dead reads) repeated that probe on ad8e5b28 against their tree:
+ *    11 prompts, identical once the per-call `teardown(Nms)` and `ckpt=<random>`
+ *    tokens are normalised. Also not pinned.
  *  - THE REAL HOOK PAYLOAD AND CONFIG. `hookData` is hand-built and the config
  *    is minimal (router + tasks only).
  *  - WHETHER THE MODEL OBEYS THE DIRECTIVE. With the switch on the block is
@@ -255,6 +258,7 @@ describe('CA-15 gate inputs — the real pipeline feeds the recorder', () => {
     expect(root).toBe(run.projectRoot);
     expect(envelope).toMatchObject({ event: GATE_EVENT, source: 'hook', session_id: SESSION });
     expect(envelope.data.interpretation_present).toBe(true);
+    expect(envelope.data.interpretation_status).toBe('ok');
     // The same row, through the real writer, on disk.
     expect(run.mission.question_gate).toBe('appended');
     expect(run.gateRows).toHaveLength(1);
@@ -317,6 +321,8 @@ describe('CA-15 gate inputs — the real pipeline feeds the recorder', () => {
 
       expect(flags(run.gate)).toEqual([false, false, false, false]);
       expect(run.gate.interpretation_present).toBe(false);
+      // Nothing threw: the interpreter returned no interpretation.
+      expect(run.gate.interpretation_status).toBe('absent');
     });
   });
 
@@ -449,9 +455,24 @@ describe('CA-15 gate inputs — the interpreter cannot reach its neighbours', ()
     expect(run.mission.ok).toBe(true);
     expect(run.mission.question_gate).toBe('appended');
     expect(run.gate.interpretation_present).toBe(false);
+    // The throw is recorded as one, not as a caller that supplied none, and not
+    // as a row written before CA-15 (which has no status key at all).
+    expect(run.gate.interpretation_status).toBe('threw');
     expect(flags(run.gate)).toEqual([false, false, false, false]);
     expect(run.prepared.userPrompt).toBe(`${S1}${COMMIT_PROMPT}`);
     expect(run.prepared.message).toBe('[runtime] route=SYSTEM1 | intent=action:document | task=subAgent');
+  });
+
+  it('tells a throw from a withheld interpretation: two rows that differ only in the status', async () => {
+    vi.mocked(interpretIntent).mockImplementationOnce(() => { throw new Error('interp-boom'); });
+    const threw = await prepare(COMMIT_PROMPT);
+    vi.mocked(interpretIntent).mockReturnValueOnce(null);
+    const withheld = await prepare(COMMIT_PROMPT);
+
+    const { interpretation_status: threwStatus, ...threwRest } = threw.gate;
+    const { interpretation_status: withheldStatus, ...withheldRest } = withheld.gate;
+    expect(threwRest).toEqual(withheldRest);
+    expect([threwStatus, withheldStatus]).toEqual(['threw', 'absent']);
   });
 
   it('with the switch on, a throwing interpreter degrades to not blocking, never to a crash', async () => {

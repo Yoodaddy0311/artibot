@@ -69,8 +69,24 @@
  *  supplied". So every line carries `interpretation_present`, and it is a
  *  REQUIRED key: the writer's oversized-line fold keeps only required keys, and
  *  a line that lost the marker would read as a complete evaluation. It is now
- *  false only when a caller supplied none (`tasks.js#interpretForGate` returns
- *  `null` if the interpreter throws).
+ *  false only when no interpretation reached the recorder, which on the
+ *  UserPromptSubmit path means `tasks.js#interpretForGate` caught a throw.
+ *
+ * ── THE INTERPRETATION STATUS (CA-15 follow-up b) ───────────────────────────
+ *  `interpretation_present:false` alone cannot tell three things apart: a row
+ *  written before CA-15 (nothing ever supplied an interpretation, and there is
+ *  no other key to say so), a row written after it where `interpretIntent()`
+ *  THREW, and a caller that simply supplied none. The first two were separable
+ *  only by `ts` against the CA-15 landing, which no reader should have to
+ *  carry. So every line now also carries `interpretation_status`, a closed
+ *  vocabulary ({@link INTERPRETATION_STATUSES}: `ok` | `threw` | `absent`) and
+ *  a REQUIRED key for the same reason as the marker: a row that lost it would
+ *  read as one written before CA-15. A row from before this change has NO such
+ *  key at all, and that absence is what marks it. `threw` is reported by the
+ *  caller (`input.interpretationThrew`), because only the caller can see the
+ *  throw; the recorder maps the fact onto the vocabulary and never sees the
+ *  error. `interpretation_present` is kept as it was (readers of SH-18 and the
+ *  Q2-O1 flip criteria count it), and is true exactly when the status is `ok`.
  *
  * ── WHY config IS NOT FORWARDED ─────────────────────────────────────────────
  *  `evaluateConditions` honours `config.question_gate.force`, which pins a
@@ -113,6 +129,46 @@ export const QUESTION_GATE_EVENT = 'adr.question_gate_evaluated';
 export const INTERPRETATION_PRESENT_KEY = 'interpretation_present';
 
 /**
+ * The data key that says WHY an interpretation was or was not part of this
+ * evaluation. See the module header ("THE INTERPRETATION STATUS").
+ * @type {string}
+ */
+export const INTERPRETATION_STATUS_KEY = 'interpretation_status';
+
+const STATUS_OK = 'ok';
+const STATUS_THREW = 'threw';
+const STATUS_ABSENT = 'absent';
+
+/**
+ * The closed vocabulary of {@link INTERPRETATION_STATUS_KEY}: `ok` (an
+ * interpretation was supplied), `threw` (the caller's `interpretIntent()` call
+ * threw, so none exists), `absent` (none was supplied and nothing threw).
+ * `schemas/ledger-events.allowlist.json#/enums/interpretation_status` is the
+ * home of the vocabulary on disk; `tests/runtime/question-gate-record.test.js`
+ * pins the two equal, the way `human-asked-record.js` pins its `kind` enum.
+ * @type {readonly string[]}
+ */
+export const INTERPRETATION_STATUSES = Object.freeze([STATUS_OK, STATUS_THREW, STATUS_ABSENT]);
+
+/**
+ * Map what the caller reported onto {@link INTERPRETATION_STATUSES}.
+ *
+ * Allowlist-shaped on purpose: `ok` needs a supplied interpretation object,
+ * `threw` needs the boolean `true` (a truthy look-alike such as `'true'` or `1`
+ * is not a throw report) and no interpretation, and everything else is
+ * `absent`. A supplied interpretation outranks a throw report, so
+ * `interpretation_present` is true exactly when the status is `ok`.
+ *
+ * @param {boolean} supplied - an interpretation object was supplied
+ * @param {unknown} threw - the caller's report that its interpreter call threw
+ * @returns {string}
+ */
+function interpretationStatusOf(supplied, threw) {
+  if (supplied) return STATUS_OK;
+  return threw === true ? STATUS_THREW : STATUS_ABSENT;
+}
+
+/**
  * Build the `data` object for one question-gate line.
  *
  * The four condition keys are the gate's own names, read from
@@ -129,16 +185,20 @@ export const INTERPRETATION_PRESENT_KEY = 'interpretation_present';
  * @param {object} [input.intent] - `detectIntent()` output (unused by the gate today).
  * @param {object} [input.classification] - `classifyComplexity()` output.
  * @param {object} [input.interpretation] - `interpretIntent()` output, when one exists.
- * @returns {Record<string, boolean>|null}
+ * @param {boolean} [input.interpretationThrew] - the caller's `interpretIntent()`
+ *   call threw, so no interpretation exists; only the boolean `true` counts.
+ * @returns {Record<string, boolean|string>|null}
  */
 export function buildQuestionGateData(input = {}) {
   try {
-    const { prompt, intent, classification, interpretation } = input ?? {};
+    const { prompt, intent, classification, interpretation, interpretationThrew } = input ?? {};
     const conditions = evaluateConditions({ prompt, intent, classification, interpretation });
+    const supplied = interpretation !== null && typeof interpretation === 'object';
     return {
       ...Object.fromEntries(GATE_CONDITIONS.map((key) => [key, conditions[key] === true])),
       required: requiresQuestion(conditions),
-      [INTERPRETATION_PRESENT_KEY]: interpretation !== null && typeof interpretation === 'object',
+      [INTERPRETATION_PRESENT_KEY]: supplied,
+      [INTERPRETATION_STATUS_KEY]: interpretationStatusOf(supplied, interpretationThrew),
     };
   } catch {
     return null;
@@ -156,7 +216,7 @@ export function buildQuestionGateData(input = {}) {
  * returns, taken whole so the root and the ids cannot come from two sources.
  *
  * @param {{projectRoot?: string|null, sessionId?: string|null, missionId?: string|null}} identity
- * @param {Record<string, boolean>|null} data - {@link buildQuestionGateData} output
+ * @param {Record<string, boolean|string>|null} data - {@link buildQuestionGateData} output
  * @param {number} nowMs - The single epoch-ms reading for this prompt.
  * @param {{appendLedgerEvent?: Function}} [deps] - Injected writer port (tests).
  * @returns {string} `appended` | `rejected:<reason>` | `skipped:<why>` | `error:<message>`

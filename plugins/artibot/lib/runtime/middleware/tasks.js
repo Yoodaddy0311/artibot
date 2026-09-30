@@ -386,27 +386,33 @@ function recordMissionState(state, result, nowMs, identity, deps) {
 }
 
 /**
- * The `interpretIntent()` output for the question gate, or `null` when none
- * could be produced.
+ * The `interpretIntent()` output for the question gate, and whether producing it
+ * threw.
  *
  * Guarded on its own rather than left to {@link recordQuestionGate}'s catch,
  * which would drop the whole gate line, and a lost line is a hole in the SH-18
- * denominator. `null` degrades to the record made before CA-15 fed the
- * interpretation: `interpretation_present:false`, the honest statement that the
- * input was not supplied, and, with the switch on, `inputs_absent:
- * ['interpretation']`. An absent interpretation can only LOWER conditions 2 and
- * 4, so this can never turn a block on. `interpretIntent` is pure, so this is
- * containment (an `intent.intents` that is not iterable would throw inside it),
- * not an expected path.
+ * denominator. A throw degrades to `interpretation: null`, the record made
+ * before CA-15 fed the interpretation: `interpretation_present:false`, the
+ * honest statement that the input was not supplied, and, with the switch on,
+ * `inputs_absent: ['interpretation']`. An absent interpretation can only LOWER
+ * conditions 2 and 4, so this can never turn a block on. `interpretIntent` is
+ * pure, so this is containment (an `intent.intents` that is not iterable would
+ * throw inside it), not an expected path.
+ *
+ * `threw` is what lets the recorded row say so (CA-15 follow-up b): the row's
+ * `interpretation_status` is `threw` for this case, where a row written before
+ * CA-15 has no status at all and a caller that supplied none is `absent`.
+ * Only this function can see the throw, so it reports the fact and
+ * `question-gate-record.js` maps it onto the vocabulary.
  *
  * @param {{prompt: string, intent: object|undefined, classification: object|undefined}} input
- * @returns {object|null}
+ * @returns {{interpretation: object|null, threw: boolean}}
  */
 function interpretForGate(input) {
   try {
-    return interpretIntent(input);
+    return { interpretation: interpretIntent(input), threw: false };
   } catch {
-    return null;
+    return { interpretation: null, threw: true };
   }
 }
 
@@ -452,7 +458,7 @@ function interpretForGate(input) {
  * @param {object} state middleware state
  * @param {number} nowMs the single epoch-ms reading for this prompt
  * @param {{projectRoot: string|null, sessionId: string|null, missionId: string|null}} identity
- * @returns {{status: string, data: Record<string, boolean>|null}} the recorder's
+ * @returns {{status: string, data: Record<string, boolean|string>|null}} the recorder's
  *   status (`error:<message>` if it threw) and the evaluated data, or `null`
  */
 function recordQuestionGate(state, nowMs, identity) {
@@ -461,11 +467,13 @@ function recordQuestionGate(state, nowMs, identity) {
     const prompt = String(state.input?.prompt ?? '');
     const intent = state.context?.intent;
     const classification = state.context?.routing;
+    const { interpretation, threw } = interpretForGate({ prompt, intent, classification });
     data = buildQuestionGateData({
       prompt,
       intent,
       classification,
-      interpretation: interpretForGate({ prompt, intent, classification }),
+      interpretation,
+      interpretationThrew: threw,
     });
     return { status: appendQuestionGateEvent(identity, data, nowMs), data };
   } catch (err) {
@@ -482,7 +490,7 @@ function recordQuestionGate(state, nowMs, identity) {
  * CA-15. ON always adds it — a compile failure passes `null` data and records
  * `block: false` — so the mission key set does not depend on which path ran.
  *
- * @param {{status: string, data: Record<string, boolean>|null}} gate
+ * @param {{status: string, data: Record<string, boolean|string>|null}} gate
  * @param {boolean} enforce the switch, from `readTeamGateInputs`
  * @returns {{question_gate: string, question_gate_enforcement?: object}}
  */
