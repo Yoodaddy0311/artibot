@@ -391,10 +391,14 @@ export const ROOT_SCAN_TREE_FILES = Object.freeze(['.artibot/project.md']);
  *   `git ls-files -z -- .artibot/guides .artibot/adr .artibot/archive
  *    reports/SPLIT .artibot/project.md | tr '\0' '\n' | grep -c '\.md$'`
  *   → 95 (guides 77 · adr 11 · archive 4 · SPLIT 2 · project.md 1).
+ * Re-measured 2026-09-30 on integ/batch1-20260930 @ 4f56ced0 (same command)
+ *   → 109 (guides 86 · adr 14 · archive 4 · SPLIT 4 · project.md 1); the v5
+ *   re-scope document and measurement runbook took the old 95 floor to where
+ *   dropping the ADR tree (14) no longer went below it.
  * Count with `-z`: five ADR filenames are Korean and a non-`-z` listing wraps
  * them in C-quotes, which hides them from a `$`-anchored grep (86, not 95).
  */
-export const MIN_ROOT_TREE_DOC_FILES = 95;
+export const MIN_ROOT_TREE_DOC_FILES = 109;
 
 /**
  * Is a repo-relative POSIX path inside the root-tree scan scope?
