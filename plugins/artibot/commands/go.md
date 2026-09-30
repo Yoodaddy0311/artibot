@@ -153,7 +153,13 @@ const toFileUrl = (p) => {
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
-const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+// 후보 순서: env → 아래 hostRoot 리터럴(호스트가 써 넣은 경로, "$" 로 시작하면 미치환이라 건너뜀) → 캐시(숫자 내림차순) → mirror
+const hostRoot = "${CLAUDE_PLUGIN_ROOT}";
+const candidates = [process.env.CLAUDE_PLUGIN_ROOT, hostRoot.startsWith('$') ? '' : hostRoot].filter(Boolean);
+const cacheDir = path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot');
+if (fs.existsSync(cacheDir)) {
+  for (const v of fs.readdirSync(cacheDir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) candidates.push(path.join(cacheDir, v));
+}
 const mpDir = path.join(home, '.claude', 'plugins', 'marketplaces');
 if (fs.existsSync(mpDir)) {
   for (const mp of fs.readdirSync(mpDir)) {

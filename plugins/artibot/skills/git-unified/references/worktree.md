@@ -104,8 +104,9 @@ WORKTREE STATUS DASHBOARD
 모든 워크트리 쌍 간 충돌 예측. `git merge-tree --write-tree` 기반이며, **구현은 `lib/git/merge-preflight.js` 가 단일 소유**한다(ADR-005 — `/split integrate` 도 같은 모듈을 소비). 손으로 `git merge-tree` 를 치지 말고 모듈을 호출한다. cwd 는 검사할 워크트리가 속한 프로젝트이고 모듈은 플러그인 안에 있다 — cwd 상대 `./lib/...` import 는 플러그인 디렉터리에서만 풀리므로 먼저 플러그인 루트(`<pluginRoot>`)를 한 번 찾는다(CLAUDE_PLUGIN_ROOT 는 Bash 에서 자주 비어 있다). `artibot plugin root not found - run /update` 가 나오면 그 줄을 그대로 전하고 멈춘다:
 
 ```bash
-F="lib/git/merge-preflight.js"; R=""; P="$HOME/.claude/plugins"
-for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT:-}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+F="lib/git/merge-preflight.js"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT:-}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
 [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
 [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
 [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"

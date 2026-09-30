@@ -23,13 +23,14 @@ allowed-tools: [Read, Bash, Grep, Glob]
 
 ## 워크플로우 (커맨드가 수행)
 
-### 플러그인 루트 (아래 모든 Bash 호출 전에 한 번)
+### 플러그인 루트 (`--session`·`--routing`·`--compare` 호출 전에 한 번)
 
-cwd 는 사용자 프로젝트이지 이 플러그인이 아니고 `CLAUDE_PLUGIN_ROOT` 는 Bash 에서 자주 비어 있다 — env 에서 엔진 경로를 바로 읽으면 `path.join(undefined, …)` 이 던진다. 아래를 한 번 실행해 출력된 절대경로를 `<pluginRoot>` 로 쓴다(따옴표로 감싼다). `artibot plugin root not found - run /update` 가 나오면 그 줄을 그대로 전하고 멈춘다.
+cwd 는 사용자 프로젝트이지 이 플러그인이 아니고 `CLAUDE_PLUGIN_ROOT` 는 Bash 에서 자주 비어 있다 — env 에서 엔진 경로를 바로 읽으면 `path.join(undefined, …)` 이 던진다. 아래를 한 번 실행해 출력된 절대경로를 `<pluginRoot>` 로 쓴다(따옴표로 감싼다). `artibot plugin root not found - run /update` 가 나오면 그 줄을 그대로 전하고 멈춘다. (`--baseline`·`--diff`·`list` 의 한 줄 스니펫은 이 절 없이 같은 순서 — 소스 트리 → 호스트가 써 넣은 경로 → 플러그인 캐시 → `$HOME/.claude/artibot` → 마켓플레이스 — 로 엔진을 스스로 찾는다.)
 
 ```bash
-F="lib/scorecard/index.js"; R=""; P="$HOME/.claude/plugins"
-for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+F="lib/scorecard/index.js"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
 [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
 [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
 [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
@@ -43,7 +44,7 @@ for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT}"; do [ -n "$d" ] && [ -f "$d/$
    - **증거를 못 찾으면 evidence를 빈 배열로 두라** — 엔진이 `unverified`로 표기한다(거짓 점수보다 정직 표기).
 3. **스냅샷 저장** — `{label, areas}` JSON을 **stdin으로** 엔진 CLI `add`에 넘긴다:
 ```
-Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ] || ENGINE="<pluginRoot>/lib/planning/scorecard.js"; if [ -f "$ENGINE" ]; then echo '<payload-json>' | node "$ENGINE" add; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
+Bash: F="lib/planning/scorecard.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then echo '<payload-json>' | node "$ENGINE" add; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
 ```
    `<payload-json>` = `{"label":"작업 전","areas":[{"name":"자막 추출","score":90,"evidence":[{"file":"watch-ingest.js:120","note":"vtt 파싱"}]},{"name":"프레임","score":0,"evidence":[]}]}` (한 줄 JSON). 엔진이 표를 렌더한다(첫 실행=baseline, 이후=직전 스냅샷과 diff).
 4. 렌더된 표를 사용자에게 보여주고, "작업 후 다시 `/scorecard`로 채점하면 상승폭을 볼 수 있어요" 안내.
@@ -51,14 +52,14 @@ Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ]
 ### 전후 비교 (`--diff`)
 엔진 CLI `diff`가 **최신 2개** 스냅샷을 `diffSnapshots`→`renderScorecard`로 표 렌더한다. 특정 두 스냅샷을 지정하려면 `--from <label> --to <label>`. 스냅샷이 2개 미만이면 안내 메시지("비교하려면 스냅샷 2개가 필요합니다 — 현재 N개.").
 ```
-Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ] || ENGINE="<pluginRoot>/lib/planning/scorecard.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" diff; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
+Bash: F="lib/planning/scorecard.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" diff; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
 ```
 특정 쌍 비교: `node "$ENGINE" diff --from "작업 전" --to "작업 후"`.
 출력 표: `| 평가 항목 | 작업 전 | 작업 후 | 상승폭 | 남은 갭 |` — 남은 갭 열은 `▰▱` 게이지(작업 후 점수 기준 채움) + 남은 점수. 신규 영역은 작업 전 `—`, `unverified` 영역은 항목명에 `*` + 각주.
 
 ### 목록 (`list`)
 ```
-Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ] || ENGINE="<pluginRoot>/lib/planning/scorecard.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
+Bash: F="lib/planning/scorecard.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
 ```
 
 ### 세션/라우팅 카드 (`--session` / `--routing`)

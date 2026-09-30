@@ -72,7 +72,22 @@ separate, explicit task.
 
 The user's plugin path can contain non-ASCII characters (e.g. `바탕 화면`), so
 import the module via a manually-constructed `file://` URL rather than a bare
-specifier. From a Node ESM context:
+specifier.
+
+First find the plugin root. The env var is empty in Bash and the working
+directory is usually another project, so run this finder. It prints the
+absolute path (`<pluginRoot>` below) or `artibot plugin root not found - run /update`:
+
+```bash
+F="lib/core/preset-packs.js"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
+
+Then, from a Node ESM context:
 
 ```js
 import path from 'node:path';
@@ -84,9 +99,11 @@ const toFileUrl = (p) => {
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 
-// plugin root: the env var is often empty in Bash, so the literal below is the fallback — the host
-// writes the plugin's absolute path into this command text when it loads.
-const root = process.env.CLAUDE_PLUGIN_ROOT || '${CLAUDE_PLUGIN_ROOT}';
+// plugin root: handed in from outside (the finder above prints it), never written into the code,
+// so a path with an apostrophe or a space cannot break a quoted literal. Run it as
+//   ARTIBOT_PLUGIN_ROOT="<pluginRoot>" node --input-type=module <this code, from a file or stdin>
+const root = process.env.ARTIBOT_PLUGIN_ROOT;
+if (!root) throw new Error('ARTIBOT_PLUGIN_ROOT is empty - run the finder above and pass its output');
 const { listPacks, resolvePack, applyPack } = await import(
   toFileUrl(path.join(root, 'lib', 'core', 'preset-packs.js'))
 );

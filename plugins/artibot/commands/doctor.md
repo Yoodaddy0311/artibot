@@ -34,8 +34,9 @@ Parse $ARGUMENTS:
 `<pluginRoot>` is the plugin root: `plugins/artibot/` inside the Artibot source repo, the installed plugin directory anywhere else. The working directory is normally the user's project, not the plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so never assume a cwd-relative path. Find it once, before Check 1, and use the absolute path it prints, quoted. If it prints `artibot plugin root not found - run /update`, report that line and stop: there is no plugin to check.
 
 ```bash
-F="scripts/ledger/topology-agreement.mjs"; R=""; P="$HOME/.claude/plugins"
-for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+F="scripts/ledger/topology-agreement.mjs"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
 [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
 [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
 [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"

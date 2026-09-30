@@ -34,7 +34,7 @@ Multi-goal scheduling layer on top of `/autopilot`. Enqueue several long-running
 
 ### Step 1 — Module Import
 
-**반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). `/autopilot` Step 1과 동일한 resolver 사용 (3-location 폴백: env-var → marketplace mirror scan → fail-fast):
+**반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). `/autopilot` Step 1과 동일한 resolver 사용 (폴백 순서: env-var → 호스트가 본문에 써 넣은 경로 → 플러그인 캐시 → marketplace mirror scan → fail-fast):
 
 ```js
 import path from 'node:path';
@@ -44,9 +44,15 @@ const toFileUrl = (p) => {
   const f = p.replace(/\\/g, '/');
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
-// 3 가능 경로 — ~/.claude/artibot 은 install.sh의 runtime data dir이라 lib/ 없음, 후보 제외
+// 후보 순서: env → 아래 hostRoot 리터럴(호스트가 써 넣은 경로, "$" 로 시작하면 미치환이라 건너뜀) → 캐시(숫자 내림차순) → mirror
+// ~/.claude/artibot 은 install.sh의 runtime data dir이라 lib/ 없음, 후보 제외
 const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
-const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+const hostRoot = "${CLAUDE_PLUGIN_ROOT}";
+const candidates = [process.env.CLAUDE_PLUGIN_ROOT, hostRoot.startsWith('$') ? '' : hostRoot].filter(Boolean);
+const cacheDir = path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot');
+if (fs.existsSync(cacheDir)) {
+  for (const v of fs.readdirSync(cacheDir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) candidates.push(path.join(cacheDir, v));
+}
 const mpDir = path.join(home, '.claude', 'plugins', 'marketplaces');
 if (fs.existsSync(mpDir)) {
   for (const mp of fs.readdirSync(mpDir)) {

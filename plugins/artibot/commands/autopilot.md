@@ -206,7 +206,7 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
 
 ### Step 1 — Engine Import & Argument Parse
 
-1. `lib/autopilot/index.js` 동적 import — **반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). Claude Code가 플러그인 커맨드 실행 시 `CLAUDE_PLUGIN_ROOT`를 주입. 미주입 시 마켓플레이스 mirror를 스캔하고, 그래도 못 찾으면 fail-fast로 명확한 에러:
+1. `lib/autopilot/index.js` 동적 import — **반드시 `CLAUDE_PLUGIN_ROOT` 환경변수 기준 절대경로**로 해석한다 (cwd 상대경로 금지 — 타 프로젝트에서 호출 시 "엔진 부재"로 실패). Bash 에서는 이 환경변수가 자주 비어 있으므로 호스트가 커맨드 본문에 써 넣은 경로 → 플러그인 캐시(최신 버전부터) → 마켓플레이스 mirror 순으로 스캔하고, 그래도 못 찾으면 fail-fast로 명확한 에러:
    ```js
    import path from 'node:path';
    import fs from 'node:fs';
@@ -215,12 +215,19 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
      const f = p.replace(/\\/g, '/');
      return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
    };
-   // Plugin location candidates (3 가능 경로):
-   //   1. CLAUDE_PLUGIN_ROOT (Claude Code 주입 — 정상 경로)
-   //   2. ~/.claude/plugins/marketplaces/<id>/plugins/artibot/ (marketplace mirror)
-   //   3. (NOT ~/.claude/artibot — install.sh가 만드는 runtime data dir, lib/ 없음)
+   // Plugin location candidates (이 순서):
+   //   1. CLAUDE_PLUGIN_ROOT 환경변수 (Bash 에서는 자주 빈 값)
+   //   2. 호스트가 이 커맨드를 불러올 때 아래 hostRoot 리터럴에 써 넣는 플러그인 절대경로 ("$" 로 시작하면 치환이 안 된 것이라 건너뛴다)
+   //   3. ~/.claude/plugins/cache/artibot/artibot/<버전>/ (플러그인 캐시, 숫자 내림차순)
+   //   4. ~/.claude/plugins/marketplaces/<id>/plugins/artibot/ (marketplace mirror — 디렉터리 소스 마켓플레이스에는 없다)
+   //   5. (NOT ~/.claude/artibot — install.sh가 만드는 runtime data dir, lib/ 없음)
    const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
-   const candidates = [process.env.CLAUDE_PLUGIN_ROOT].filter(Boolean);
+   const hostRoot = "${CLAUDE_PLUGIN_ROOT}";
+   const candidates = [process.env.CLAUDE_PLUGIN_ROOT, hostRoot.startsWith('$') ? '' : hostRoot].filter(Boolean);
+   const cacheDir = path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot');
+   if (fs.existsSync(cacheDir)) {
+     for (const v of fs.readdirSync(cacheDir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) candidates.push(path.join(cacheDir, v));
+   }
    const mpDir = path.join(home, '.claude', 'plugins', 'marketplaces');
    if (fs.existsSync(mpDir)) {
      for (const mp of fs.readdirSync(mpDir)) {
@@ -355,11 +362,11 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 2. **아래 한 줄을 그대로 실행한다**(`Bash`). 바꿀 곳은 자리표시자 네 개 — `<PASS|FAIL>` · `<one-line summary>` · `<path:line|command>` · `<project root>` — 뿐이다(`--evidence` 반복 추가는 예외):
 
    ```
-   REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/record-verify.mjs"; [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs"; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
+   F="scripts/ledger/record-verify.mjs"; REC=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && REC="plugins/artibot/$F"; [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$REC" ] || REC="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$REC" ] || REC="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$REC" ] || REC="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>" --evidence "<path:line|command>" --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>"; else echo "record-verify not found - outcome NOT recorded"; fi
    ```
 
    - `<one-line summary>` 는 한 줄이다(예: `npm run ci: PASS` · `npm run ci: FAIL after 3 retries`). 출력 전문을 붙이지 마라.
-   - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로를 `$HOME` 아래부터 찾는 이유: Bash 셸에서 `CLAUDE_PLUGIN_ROOT` 환경변수는 비어 있을 수 있고(두 번째 위치는 환경변수가 아니라 호스트가 이 커맨드 본문에 직접 써 넣는 플러그인 경로라 그래도 풀린다) 맨 상대경로는 소스 리포 안에서만 풀린다.
+   - `<project root>` 는 이 프로젝트의 절대 루트(`.git/` 를 가진 디렉터리)다. 다른 디렉터리를 주면 기록이 그 프로젝트의 원장에 들어간다. 스크립트 경로 탐색 순서: 소스 트리(`plugins/artibot/.claude-plugin/plugin.json` 의 name 이 `artibot` 일 때만 — 그냥 `plugins/artibot` 폴더가 있는 프로젝트는 무시) → 호스트가 이 커맨드 본문에 직접 써 넣는 플러그인 경로 → 플러그인 캐시의 최신 버전 → `$HOME/.claude/artibot`(install.sh 가 만든 옛 사본 — 플러그인보다 여러 릴리스 뒤처질 수 있어 뒤에서 두 번째) → 마켓플레이스 사본. Bash 셸에서 `CLAUDE_PLUGIN_ROOT` 환경변수는 비어 있을 수 있어서 두 번째 위치는 환경변수가 아니라 본문 치환을 쓴다.
    - 세션 id 는 철자가 둘이고 `CLAUDE_SESSION_ID` 는 자주 비어 있다. 이 호스트(Windows) 실측(2026-09-21 · 09-29)에서는 빈 값이고 `CLAUDE_CODE_SESSION_ID` 가 채워져 있었다 — 다른 호스트는 미측정이다. 그래서 위 줄이 뒤의 것으로 폴백한다. 둘 다 비면 스크립트가 `recorded:false` 와 세션 사유를 낸다 — id 를 알면 `--session <id>` 를 직접 준다.
 3. **stdout JSON 의 `recorded` 를 읽는다** — exit code 가 아니다. 스크립트는 아무것도 기록하지 못했을 때도 exit 0 이고, 사유는 같은 줄의 `reason` 에 있다.
 4. **결과를 한 줄로 남긴다**: `RECORDED <verification_id>` 또는 `NOT RECORDED <reason>`(스크립트 부재 포함). 사용자에게 나가는 다음 보고 — Step 4 의 PAUSED 알림 또는 Step 5 의 완료 보고 — 에 그 한 줄을 싣는다.
@@ -413,7 +420,7 @@ Phase 6 완료 후:
 - **모델별 사용량·비용 (자동 — 생략 금지)**: 완료 보고 끝에 모델별 사용량·비용 표를 붙인다(위 비용 요약은 Phase 별이고 이 표는 실제로 서빙한 모델별이다). 숫자를 손으로 쓰지 않는다 — 아래 한 줄을 `Bash` 로 실행해 **출력 전문을 그대로** 싣는다. 바꿀 곳은 `<작업 시작 ISO>`(이 세션의 `state.createdAt`)와 `<project root>`(프로젝트 절대 루트) 둘이다:
 
   ```
-  SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}"; USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT}/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs"; if [ -f "$USG" ]; then node "$USG" --since "<작업 시작 ISO>" --session "$SID" --live-session "$SID" --cwd "<project root>"; else echo "usage-cost-table not found - 표 생략"; fi
+  SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}"; F="scripts/ledger/usage-cost-table.mjs"; USG=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && USG="plugins/artibot/$F"; [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$USG" ] || USG="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$USG" ] || USG="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$USG" ] || USG="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$USG" ]; then node "$USG" --since "<작업 시작 ISO>" --session "$SID" --live-session "$SID" --cwd "<project root>"; else echo "usage-cost-table not found - 표 생략"; fi
   ```
 
   읽기 전용이다. 영수증은 세션이 끝날 때(SessionEnd)에만 원장에 쓰이므로 `--live-session` 이 이 세션의 transcript 를 직접 읽는다 — 없으면 이 세션과 그 스폰 전부가 표에서 빠진다. 리더 자신(메인 스레드)의 영수증은 세션 단위 합이라, 작업 시작보다 먼저 시작된 세션이면 `--since` 에서 "시작 경계에 걸침" 으로 표 밖에 남고 그 사실이 출력에 적힌다. 출력의 `영수증 0행` · `가격 미검증` · 단가 출처 · `한계:` 줄은 지우거나 고쳐 쓰지 않는다. 스크립트가 없거나 종료코드가 0 이 아니면(세션 id 가 비어 `--session` 이 거부된 경우 포함) 표 자리에 `TABLE OMITTED <사유 한 줄>` 만 적는다 — 다른 출처의 숫자로 대신하지 않는다.

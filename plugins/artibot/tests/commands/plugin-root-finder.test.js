@@ -13,13 +13,18 @@
  * -- The fix, and why it is a copied block --------------------------------------
  * `CLAUDE_PLUGIN_ROOT` is empty in the Bash tool (measured), and a slash command
  * cannot include another file, so each carrier holds its own copy of one small
- * finder block: `plugins/artibot` and `.` (the Artibot source repo, in both cwd
- * layouts), then the host-written plugin path, then the newest plugin-cache
- * version (numeric sort), then the marketplace copy. It tests for the SPECIFIC
- * file the carrier needs, so a stale or half-installed directory is skipped.
- * Checking the working directory FIRST keeps the source repo dogfooding its own
- * tree: the host-written path is always the INSTALLED copy, so putting it first
- * made /squash, /ship and /export run the cache inside the repo (review finding).
+ * finder block, in this order:
+ *   1. `plugins/artibot` and `.` (the Artibot source repo, in both cwd layouts),
+ *      accepted ONLY when `<cand>/.claude-plugin/plugin.json` names `artibot`;
+ *   2. the host-written plugin path;
+ *   3. the newest plugin-cache version (numeric sort);
+ *   4. the marketplace copy.
+ * Every step tests for the SPECIFIC file the carrier needs, so a stale or
+ * half-installed directory is skipped. Checking the working directory FIRST keeps
+ * the source repo dogfooding its own tree (the host-written path is always the
+ * INSTALLED copy, so putting it first made /squash, /ship and /export run the
+ * cache inside the repo). The manifest check exists because "a folder named
+ * plugins/artibot holds that file" is not proof of being this plugin.
  *
  * Two spellings of the host-written candidate exist, on purpose:
  *  - COMMAND carriers (`commands/*.md`) use the exact braced token. Measured
@@ -30,25 +35,24 @@
  *    nothing is substituted; they use `${CLAUDE_PLUGIN_ROOT:-}`, which is also
  *    safe under `set -u`.
  *
- * The same measurement is why the `REC=`/`USG=`/`ENGINE=` chains in verify, team,
- * autopilot, split, theme and watch now spell their middle candidate as the exact
- * token: with `:-` it was never replaced, so on a marketplace-only install (no
- * `~/.claude/artibot` global copy, empty env) those steps silently found nothing.
- *
  * -- What this file gates --------------------------------------------------------
  *  1. Every carrier's block is byte-identical to the canonical text for its kind
  *     (only `F` differs), sits in a fence, probes a file that exists, and its
- *     `<pluginRoot>` uses are present.
- *  2. The set of files holding a block equals CARRIERS exactly.
- *  3. A ratchet: no command, skill or agent may tell Claude to run a cwd-relative
+ *     `<pluginRoot>` uses are present. 11 carriers; the set is exact.
+ *  2. A ratchet: no command, skill or agent may tell Claude to run a cwd-relative
  *     `node scripts/...`, `bash plugins/artibot/scripts/...`, `require('./lib/...')`,
  *     `import('./lib/...')`, or a `Glob` under `plugins/artibot/`. Known exceptions
  *     carry an exact count and a reason. The `:-` spelling is banned in commands.
- *  4. The block really runs: host substitution is MODELLED by replacing the token
- *     with a literal path (valid, stale, with a space, with a `$`), with the source
- *     layouts, a space and non-ASCII characters in HOME, two versions that sort
- *     differently as text and as numbers, marketplace only, and nothing installed.
- *  5. The existing chains resolve on a simulated marketplace-only install.
+ *  3. The block really runs, from ONE batched driver (see the harness): host
+ *     substitution is MODELLED by replacing the token with a literal path (valid,
+ *     stale, with a space, an apostrophe, a `$`), the source layouts, a space and
+ *     non-ASCII characters in HOME, two versions that sort differently as text and
+ *     as numbers, marketplace only, nothing installed, and the DECOYS the manifest
+ *     check exists for (no manifest, `artibot-cowork`, a manifest without the file).
+ *  4. The REAL manifest passes the check (the real plugin directory is run as the
+ *     working directory) and the sibling cowork manifest does not.
+ *  The script CHAINS (`REC=`, `USG=`, `ENGINE=`, `PLUGIN_ROOT=`), the node resolvers
+ *  and `install.md` are gated in `plugin-root-chains.test.js`.
  *
  * -- What this gate cannot see (rules 9: written next to the gate) ---------------
  *  - Whether a model follows the instruction. Nothing here runs a model.
@@ -61,14 +65,16 @@
  *    and fails its `-f` test, so the block falls through to the cache. Single quotes
  *    would keep the `$` but turn an apostrophe (O'Brien) into a syntax error that
  *    kills the whole block, so the quotes stay double. Both are pinned below.
+ *  - The manifest check is an ACCIDENT guard, not a security boundary. A project
+ *    that deliberately plants `plugins/artibot/<file>` AND a manifest naming
+ *    `artibot` is still preferred over the installed copy; the literal path the old
+ *    text ran had exactly that trust, so this is not new exposure. What it stops is
+ *    a project that merely has a folder of that name (and `artibot-cowork`).
  *  - zsh (the block uses no bash-only syntax and no unmatched glob, but only bash
  *    is exercised), and `CLAUDE_CONFIG_DIR` (a relocated `~/.claude` is not searched).
- *  - Trust: the working-directory candidates come first, so a project that plants
- *    `plugins/artibot/<file>` is preferred over the installed copy. The literal path
- *    the old text ran had exactly that trust, so this is not new exposure.
  *  - Native installs (`install.sh`): their global copy `~/.claude/artibot` is NOT a
  *    candidate of the block (it has no `agents/`, so a script that reads them would
- *    fail worse than "not found"). The chains keep it as their first candidate.
+ *    fail worse than "not found"). The script chains keep it, after the cache.
  *  - The executable half skips, with a printed reason, where `bash` cannot open
  *    native paths (for example WSL bash launched from PowerShell); the static
  *    halves always run.
@@ -80,22 +86,17 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { announceBashSkip, probeBash } from '../../scripts/utils/bash-compat.js';
+import {
+  cacheDir, lf, mirrorDir, NAME_CHECK, NOT_FOUND, PLUGIN_ROOT, posix, read, runBatch, same, TOKEN, TOKEN_ENV, touch, writeManifest,
+} from '../helpers/plugin-root-harness.js';
 
-const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const lf = (s) => s.replace(/\r\n/g, '\n');
-const read = (rel) => lf(readFileSync(path.join(PLUGIN_ROOT, rel), 'utf-8'));
-const posix = (p) => p.replaceAll('\\', '/');
-
-/** The literal tokens, written so a linter does not read them as template placeholders. */
-const TOKEN = '$' + '{CLAUDE_PLUGIN_ROOT}';
-const TOKEN_ENV = '$' + '{CLAUDE_PLUGIN_ROOT:-}';
-const NOT_FOUND = 'artibot plugin root not found - run /update';
+// One batched driver runs every executable scenario; the budgets buy headroom for load.
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 240_000 });
 
 /**
  * The finder, one line per element. `__FILE__` is the only free part; the host-written
@@ -104,13 +105,15 @@ const NOT_FOUND = 'artibot plugin root not found - run /update';
 function canonicalLines(kind) {
   const hostCandidate = kind === 'command' ? TOKEN : TOKEN_ENV;
   return [
-    'F="__FILE__"; R=""; P="$HOME/.claude/plugins"',
-    `for d in plugins/artibot . "${hostCandidate}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done`,
+    `F="__FILE__"; R=""; P="$HOME/.claude/plugins"; T="${hostCandidate}"`,
+    `for d in plugins/artibot .; do [ -f "$d/$F" ] && ${NAME_CHECK} "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done`,
+    '[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"',
     '[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done',
     '[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done',
     '[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"',
   ];
 }
+const BLOCK_LINES = canonicalLines('command').length;
 const kindOf = (rel) => (rel.startsWith('commands/') ? 'command' : 'reference');
 const finderFor = (file, kind = 'command') => canonicalLines(kind).join('\n').replace('__FILE__', file);
 
@@ -142,7 +145,12 @@ const CARRIERS = [
   {
     file: 'commands/scorecard.md',
     probe: 'lib/scorecard/index.js',
-    uses: ['-- "<pluginRoot>" $ARGUMENTS', '<pluginRoot>/lib/planning/scorecard.js'],
+    uses: ['-- "<pluginRoot>" $ARGUMENTS'],
+  },
+  {
+    file: 'commands/install.md',
+    probe: 'lib/core/preset-packs.js',
+    uses: ['ARTIBOT_PLUGIN_ROOT="<pluginRoot>"', 'process.env.ARTIBOT_PLUGIN_ROOT', "'lib', 'core', 'preset-packs.js'"],
   },
   {
     file: 'skills/split/references/operations.md',
@@ -158,22 +166,22 @@ const CARRIERS = [
 ];
 
 /**
- * Extract finder blocks: a line that opens with `F="..."; R=""; P="$HOME/.claude/plugins"`
- * plus the four lines after it, requiring a fence line before and after.
+ * Extract finder blocks: a line that opens with `F="..."; R=""; P="$HOME/.claude/plugins"; T="..."`
+ * plus the lines after it, requiring a fence line before and after.
  *
  * @param {string} text - Newline-normalised markdown.
  * @returns {Array<{ probe: string, text: string, fenced: boolean, line: number }>}
  */
 export function extractFinderBlocks(text) {
   const lines = lf(text).split('\n');
-  const opener = /^F="([^"]+)"; R=""; P="\$HOME\/\.claude\/plugins"$/;
+  const opener = /^F="([^"]+)"; R=""; P="\$HOME\/\.claude\/plugins"; T="[^"]*"$/;
   const blocks = [];
   lines.forEach((raw, i) => {
     const m = raw.trim().match(opener);
     if (m === null) return;
-    const body = lines.slice(i, i + 5).map((l) => l.trim());
+    const body = lines.slice(i, i + BLOCK_LINES).map((l) => l.trim());
     const before = (lines[i - 1] ?? '').trim();
-    const after = (lines[i + 5] ?? '').trim();
+    const after = (lines[i + BLOCK_LINES] ?? '').trim();
     blocks.push({ probe: m[1], text: body.join('\n'), fenced: before.startsWith('```') && after === '```', line: i + 1 });
   });
   return blocks;
@@ -200,7 +208,7 @@ describe('plugin-root finder: the copies in the carriers', () => {
   it('scans a plausible number of documents (0 violations is not 0 documents)', () => {
     expect(SCANNED.length).toBeGreaterThan(180);
     expect(SCANNED.filter((rel) => rel.startsWith('agents/')).length).toBeGreaterThanOrEqual(30);
-    expect(CARRIERS.length).toBe(10);
+    expect(CARRIERS.length).toBe(11);
   });
 
   it.each(CARRIERS.map((c) => [c.file, c]))('%s holds exactly one fenced block, identical to the canonical text for its kind', (_file, carrier) => {
@@ -227,12 +235,25 @@ describe('plugin-root finder: the copies in the carriers', () => {
     expect(holders).toEqual(CARRIERS.map((c) => c.file).sort());
   });
 
-  it('the working-directory candidates come BEFORE the host-written path (source repo keeps dogfooding)', () => {
+  it('the steps come in order: working directory, host-written path, newest cache, marketplace', () => {
     for (const kind of ['command', 'reference']) {
-      const loop = canonicalLines(kind)[1];
-      expect(loop.indexOf('plugins/artibot')).toBeGreaterThan(-1);
-      expect(loop.indexOf('plugins/artibot')).toBeLessThan(loop.indexOf(' . '));
-      expect(loop.indexOf(' . ')).toBeLessThan(loop.indexOf('CLAUDE_PLUGIN_ROOT'));
+      const [opener, cwdLoop, hostStep, cacheStep, mirrorStep] = canonicalLines(kind);
+      expect(opener).toContain('T="');
+      expect(cwdLoop.indexOf('plugins/artibot')).toBeGreaterThan(-1);
+      expect(cwdLoop.indexOf('plugins/artibot')).toBeLessThan(cwdLoop.indexOf(' .;'));
+      expect(hostStep).toContain('"$T/$F"');
+      expect(cacheStep).toContain('cache/artibot/artibot');
+      expect(mirrorStep).toContain('marketplaces');
+    }
+  });
+
+  it('every working-directory candidate is gated by the manifest name check (review N-c)', () => {
+    for (const kind of ['command', 'reference']) {
+      const cwdLoop = canonicalLines(kind)[1];
+      expect(cwdLoop).toContain(`${NAME_CHECK} "$d/.claude-plugin/plugin.json"`);
+      // The probe of the file comes first and the manifest second, both before `R=` is set.
+      expect(cwdLoop.indexOf('[ -f "$d/$F" ]')).toBeLessThan(cwdLoop.indexOf('grep -q'));
+      expect(cwdLoop.indexOf('grep -q')).toBeLessThan(cwdLoop.indexOf('R="$d"'));
     }
   });
 
@@ -243,6 +264,31 @@ describe('plugin-root finder: the copies in the carriers', () => {
     expect(extractFinderBlocks(finderFor('a/b.js'))[0].fenced).toBe(false);
     expect(extractFinderBlocks('nothing here')).toEqual([]);
     expect(finderFor('a/b.js', 'command')).not.toBe(finderFor('a/b.js', 'reference'));
+    // An old five-line block (no T, no manifest check) is no longer recognised as a carrier.
+    expect(extractFinderBlocks('F="a/b.js"; R=""; P="$HOME/.claude/plugins"')).toEqual([]);
+  });
+});
+
+describe('plugin-root finder: the manifest name check', () => {
+  const COWORK = path.resolve(PLUGIN_ROOT, '..', 'artibot-cowork', '.claude-plugin', 'plugin.json');
+  /** The JS twin of the grep the block runs. */
+  const GREP_TWIN = /"name"\s*:\s*"artibot"/;
+
+  it('the real plugin manifest passes it, so the source repo keeps dogfooding', () => {
+    const text = read('.claude-plugin/plugin.json');
+    expect(GREP_TWIN.test(text)).toBe(true);
+    expect(JSON.parse(text).name).toBe('artibot');
+  });
+
+  it.skipIf(!existsSync(COWORK))('the sibling cowork plugin manifest does not pass it', () => {
+    expect(GREP_TWIN.test(lf(readFileSync(COWORK, 'utf-8')))).toBe(false);
+  });
+
+  it('the twin discriminates (self-check)', () => {
+    expect(GREP_TWIN.test('{"name":"artibot"}')).toBe(true);
+    expect(GREP_TWIN.test('{ "name"  :  "artibot" }')).toBe(true);
+    expect(GREP_TWIN.test('{"name":"artibot-cowork"}')).toBe(false);
+    expect(GREP_TWIN.test('{"name":"my-artibot"}')).toBe(false);
   });
 });
 
@@ -378,6 +424,7 @@ describe('plugin-root finder: no new cwd-relative run instruction (ratchet)', ()
       "load('lib/git/repo-acquire.js')",
       'import(pathToFileURL(path.join(process.argv[1], p)).href)',
       'Glob `skills/*/SKILL.md` under the plugin root',
+      '//   ARTIBOT_PLUGIN_ROOT="<pluginRoot>" node --input-type=module <this code, from a file or stdin>',
     ]) {
       expect(isRepoRelativeInstruction(ok), ok).toBe(false);
     }
@@ -398,250 +445,218 @@ describe('plugin-root finder: commands never use the :- spelling the host does n
   });
 });
 
+/** The probe file of the executable scenarios (any file the carriers probe would do). */
+const F = 'scripts/squash-wip.mjs';
+
+/**
+ * Build every executable scenario. Fixtures are created here (before the batch starts),
+ * `want[id]` is the path the scenario must print, and a scenario without an entry has its
+ * own assertion. `substitute` models the HOST: it replaces the exact token in the text with
+ * a literal path before bash sees it. `kind` picks the command or reference spelling.
+ *
+ * @param {string} base - Temp directory that owns every fixture.
+ */
+function buildCases(base) {
+  const foreign = path.join(base, 'project');
+  const emptyHome = path.join(base, 'empty-home');
+  mkdirSync(foreign, { recursive: true });
+  mkdirSync(emptyHome, { recursive: true });
+  const cases = [];
+  const want = {};
+  const add = (id, o, expected) => {
+    const { file = F, kind = 'command', substitute, home = emptyHome, cwd = foreign, envRoot, nounset = false } = o;
+    let script = finderFor(file, kind);
+    if (substitute !== undefined) script = script.replaceAll(TOKEN, substitute);
+    cases.push({ id, script, cwd, home, envRoot, nounset });
+    if (expected !== undefined) want[id] = expected;
+  };
+  /** A fake Artibot source repo: `<dir>/plugins/artibot` with the probe file and (optionally) a manifest. */
+  const repo = (dir, { manifest = 'artibot', withFile = true, raw } = {}) => {
+    const plugin = path.join(dir, 'plugins', 'artibot');
+    if (withFile) touch(path.join(plugin, F));
+    if (manifest !== null) writeManifest(plugin, manifest, raw);
+    return plugin;
+  };
+  /** A home holding one installed cache copy, the place every decoy scenario must fall through to. */
+  const cacheHome = (name) => {
+    const home = path.join(base, name);
+    touch(path.join(cacheDir(home, '4.70.0'), F));
+    return home;
+  };
+
+  // -- install layouts --------------------------------------------------------------
+  const numeric = path.join(base, 'home-numeric');
+  for (const v of ['3.0.0', '4.9.0', '4.10.0']) touch(path.join(cacheDir(numeric, v), F));
+  mkdirSync(cacheDir(numeric, '4.11.0'), { recursive: true });
+  add('numeric', { home: numeric }, cacheDir(numeric, '4.10.0'));
+
+  const spaced = cacheHome('home with space');
+  add('home-space', { home: spaced }, cacheDir(spaced, '4.70.0'));
+  const unicode = cacheHome('홍길동');
+  add('home-nonascii', { home: unicode }, cacheDir(unicode, '4.70.0'));
+
+  const market = path.join(base, 'home-marketplace');
+  touch(path.join(mirrorDir(market), F));
+  add('marketplace', { home: market }, mirrorDir(market));
+  add('not-found', {});
+
+  // -- host substitution (the token is replaced by a literal path before bash runs) ----
+  const installed = path.join(base, 'installed-plugin');
+  touch(path.join(installed, F));
+  add('host-valid', { substitute: posix(installed) }, installed);
+
+  const s1Cache = cacheDir(path.join(base, 'home-s1'), '4.70.0');
+  touch(path.join(s1Cache, F));
+  const s1Plugin = repo(path.join(base, 'source-repo-s1'));
+  add('host-vs-source-root', { cwd: path.dirname(path.dirname(s1Plugin)), substitute: posix(s1Cache) }, s1Plugin);
+  add('host-vs-source-plugin', { cwd: s1Plugin, substitute: posix(s1Cache) }, s1Plugin);
+
+  const programFiles = path.join(base, 'Program Files (x86)', 'artibot 4.70');
+  touch(path.join(programFiles, F));
+  add('host-space', { substitute: posix(programFiles) }, programFiles);
+  const obrien = path.join(base, "O'Brien", 'artibot');
+  touch(path.join(obrien, F));
+  add('host-apostrophe', { substitute: posix(obrien) }, obrien);
+
+  const dollarHome = cacheHome('home-dollar');
+  add('host-dollar', { home: dollarHome, substitute: posix(path.join(base, 'dollar$x', 'artibot')) }, cacheDir(dollarHome, '4.70.0'));
+  const staleHome = path.join(base, 'home-stale');
+  touch(path.join(cacheDir(staleHome, '4.71.0'), F));
+  add('host-stale', { home: staleHome, substitute: posix(cacheDir(staleHome, '4.70.0')) }, cacheDir(staleHome, '4.71.0'));
+
+  // -- no substitution (a host that does not replace the token, or a reference file) ----
+  const envHome = cacheHome('home-env');
+  const envRoot = path.join(base, 'env-root');
+  touch(path.join(envRoot, F));
+  for (const kind of ['command', 'reference']) {
+    add(`env-hit-${kind}`, { home: envHome, kind, envRoot }, envRoot);
+    add(`env-miss-${kind}`, { home: envHome, kind, envRoot: path.join(base, 'nope') }, cacheDir(envHome, '4.70.0'));
+  }
+  const nounsetHome = cacheHome('home-nounset');
+  add('nounset-reference', { home: nounsetHome, kind: 'reference', nounset: true }, cacheDir(nounsetHome, '4.70.0'));
+
+  const srcPlugin = repo(path.join(base, 'source-repo'));
+  add('source-from-repo-root', { cwd: path.dirname(path.dirname(srcPlugin)) }, srcPlugin);
+  add('source-from-plugin-dir', { cwd: srcPlugin }, srcPlugin);
+
+  // -- decoys: a folder that holds the file but is not this plugin (review N-c) --------
+  const d1Home = cacheHome('home-d1');
+  repo(path.join(base, 'decoy-no-manifest'), { manifest: null });
+  add('decoy-no-manifest', { home: d1Home, cwd: path.join(base, 'decoy-no-manifest') }, cacheDir(d1Home, '4.70.0'));
+  const d2Home = cacheHome('home-d2');
+  repo(path.join(base, 'decoy-cowork'), { manifest: 'artibot-cowork' });
+  add('decoy-other-name', { home: d2Home, cwd: path.join(base, 'decoy-cowork') }, cacheDir(d2Home, '4.70.0'));
+  const d3Home = cacheHome('home-d3');
+  touch(path.join(base, 'decoy-dot', F));
+  add('decoy-dot-no-manifest', { home: d3Home, cwd: path.join(base, 'decoy-dot') }, cacheDir(d3Home, '4.70.0'));
+  const d4Home = cacheHome('home-d4');
+  repo(path.join(base, 'decoy-no-file'), { withFile: false });
+  add('decoy-manifest-without-file', { home: d4Home, cwd: path.join(base, 'decoy-no-file') }, cacheDir(d4Home, '4.70.0'));
+  const spacing = repo(path.join(base, 'manifest-spacing'), { raw: '{"name"  :"artibot"}\n' });
+  add('manifest-spacing', { cwd: path.dirname(path.dirname(spacing)) }, spacing);
+
+  // -- the REAL plugin directory, with its real manifest, as the working directory -----
+  add('real-plugin', { cwd: PLUGIN_ROOT, file: 'lib/core/skill-hash.js' }, PLUGIN_ROOT);
+  return { cases, want, foreign };
+}
+
 const bash = probeBash();
 if (!bash.ok) announceBashSkip('plugin-root-finder/executable');
 
 describe.skipIf(!bash.ok)('plugin-root finder: the block runs', () => {
   let base = '';
-  let foreign = '';
-  let emptyHome = '';
+  let run;
+  let want;
+  let foreign;
+  let total = 0;
   beforeAll(() => {
     base = mkdtempSync(path.join(os.tmpdir(), 'artibot-finder-'));
-    foreign = path.join(base, 'project');
-    emptyHome = path.join(base, 'empty-home');
-    mkdirSync(foreign, { recursive: true });
-    mkdirSync(emptyHome, { recursive: true });
-  });
+    const built = buildCases(base);
+    ({ want, foreign } = built);
+    total = built.cases.length;
+    run = runBatch(path.join(base, 'batch'), built.cases);
+  }, 240_000);
   afterAll(() => {
     if (base !== '') rmSync(base, { recursive: true, force: true });
   });
 
-  const touch = (p) => {
-    mkdirSync(path.dirname(p), { recursive: true });
-    writeFileSync(p, '// probe\n');
+  const res = (id) => {
+    const r = run.results.get(id);
+    if (r === undefined) throw new Error(`no such case: ${id}`);
+    return r;
   };
-  const F = 'scripts/squash-wip.mjs';
+  /** The scenario printed exactly the path it was built to find, and nothing went to stderr. */
+  const prints = (id) => {
+    const r = res(id);
+    expect(r.status, `${id} status (stderr: ${r.err})`).toBe(0);
+    expect(r.err, `${id} stderr`).toBe('');
+    expect(same(r.out, want[id]), `${id}: printed ${r.out}, wanted ${want[id]}`).toBe(true);
+  };
 
-  /**
-   * Run a block. `substitute` models the HOST: it replaces the exact token in the text with a
-   * literal path before bash sees it. `kind` picks the command or reference spelling.
-   */
-  const run = ({ home, cwd = foreign, env = {}, file = F, kind = 'command', substitute, nounset = false }) => {
-    let script = finderFor(file, kind);
-    if (substitute !== undefined) script = script.replaceAll(TOKEN, substitute);
-    const child = { ...process.env, HOME: home, USERPROFILE: home, ...env };
-    if (env.CLAUDE_PLUGIN_ROOT === undefined) delete child.CLAUDE_PLUGIN_ROOT;
-    const args = nounset ? ['-u', '-c', script] : ['-c', script];
-    const r = spawnSync('bash', args, { cwd, env: child, encoding: 'utf-8' });
-    return { status: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
-  };
-  // Compare real paths: bash prints the canonical long form (`pwd -W`), while
-  // os.tmpdir() can be an 8.3 short name (C:\Users\NAME~1) on the same directory.
-  const canon = (p) => {
-    try {
-      return realpathSync.native(p);
-    } catch {
-      return path.resolve(p);
-    }
-  };
-  const same = (a, b) => {
-    const norm = (p) => canon(p).replace(/[\\/]+$/, '');
-    return process.platform === 'win32' ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
-  };
-  const cacheDir = (home, version) => path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot', version);
-
-  it('picks the highest version by NUMBER, and skips a directory that lacks the file', () => {
-    const home = path.join(base, 'home-numeric');
-    for (const v of ['3.0.0', '4.9.0', '4.10.0']) touch(path.join(cacheDir(home, v), F));
-    mkdirSync(cacheDir(home, '4.11.0'), { recursive: true });
-    const r = run({ home });
-    expect(r.status).toBe(0);
-    expect(same(r.out, cacheDir(home, '4.10.0')), r.out).toBe(true);
+  it('the batch driver ran every scenario to completion', () => {
+    expect(run.driver.timedOut, 'driver timed out').toBe(false);
+    expect([...run.results].filter(([, r]) => r.status === null).map(([id]) => id)).toEqual([]);
+    // CARDINALITY ANCHOR: a driver that ran nothing would leave every `prints` below to fail one
+    // by one; this says so once, and pins that the scenario list did not quietly shrink.
+    expect(run.results.size).toBe(total);
+    expect(total).toBeGreaterThanOrEqual(25);
   });
 
-  it('works when HOME contains a space', () => {
-    const home = path.join(base, 'home with space');
-    touch(path.join(cacheDir(home, '4.70.0'), F));
-    expect(same(run({ home }).out, cacheDir(home, '4.70.0'))).toBe(true);
-  });
-
-  it('works when HOME contains non-ASCII characters', () => {
-    const home = path.join(base, '\uD64D\uAE38\uB3D9');
-    touch(path.join(cacheDir(home, '4.70.0'), F));
-    expect(same(run({ home }).out, cacheDir(home, '4.70.0'))).toBe(true);
-  });
-
-  it('falls back to the marketplace copy when the cache has nothing', () => {
-    const home = path.join(base, 'home-marketplace');
-    const mp = path.join(home, '.claude', 'plugins', 'marketplaces', 'artibot', 'plugins', 'artibot');
-    touch(path.join(mp, F));
-    expect(same(run({ home }).out, mp)).toBe(true);
-  });
-
+  it('picks the highest version by NUMBER, and skips a directory that lacks the file', () => prints('numeric'));
+  it('works when HOME contains a space', () => prints('home-space'));
+  it('works when HOME contains non-ASCII characters', () => prints('home-nonascii'));
+  it('falls back to the marketplace copy when the cache has nothing', () => prints('marketplace'));
   it('prints the not-found line and exits 0 when nothing is installed', () => {
-    expect(run({ home: emptyHome })).toEqual({ status: 0, out: NOT_FOUND, err: '' });
+    expect(res('not-found')).toEqual({ status: 0, out: NOT_FOUND, err: '' });
   });
 
   describe('host substitution (the token is replaced by a literal path before bash runs)', () => {
-    it('uses the host-written path when the working directory offers nothing', () => {
-      const installed = path.join(base, 'installed-plugin');
-      touch(path.join(installed, F));
-      expect(same(run({ home: emptyHome, substitute: posix(installed) }).out, installed)).toBe(true);
-    });
-
+    it('uses the host-written path when the working directory offers nothing', () => prints('host-valid'));
     it('prefers the working-directory source tree over the host-written installed copy (review S1)', () => {
-      const installed = path.join(cacheDir(path.join(base, 'home-s1'), '4.70.0'));
-      touch(path.join(installed, F));
-      const repo = path.join(base, 'source-repo-s1');
-      const plugin = path.join(repo, 'plugins', 'artibot');
-      touch(path.join(plugin, F));
-      const fromRepoRoot = run({ home: emptyHome, cwd: repo, substitute: posix(installed) });
-      expect(same(fromRepoRoot.out, plugin), `repo root: ${fromRepoRoot.out}`).toBe(true);
-      const fromPluginDir = run({ home: emptyHome, cwd: plugin, substitute: posix(installed) });
-      expect(same(fromPluginDir.out, plugin), `plugin dir: ${fromPluginDir.out}`).toBe(true);
+      prints('host-vs-source-root');
+      prints('host-vs-source-plugin');
     });
-
-    it('works when the host-written path contains a space', () => {
-      const installed = path.join(base, 'Program Files (x86)', 'artibot 4.70');
-      touch(path.join(installed, F));
-      expect(same(run({ home: emptyHome, substitute: posix(installed) }).out, installed)).toBe(true);
-    });
-
-    it('works when the host-written path contains an apostrophe (why the quotes are double)', () => {
-      const installed = path.join(base, "O'Brien", 'artibot');
-      touch(path.join(installed, F));
-      const r = run({ home: emptyHome, substitute: posix(installed) });
-      expect(r.err).toBe('');
-      expect(same(r.out, installed), r.out).toBe(true);
-    });
-
-    it('falls through, without a syntax error, when the host-written path holds a dollar sign', () => {
-      const home = path.join(base, 'home-dollar');
-      touch(path.join(cacheDir(home, '4.70.0'), F));
-      const r = run({ home, substitute: posix(path.join(base, 'dollar$x', 'artibot')) });
-      expect(r.status).toBe(0);
-      expect(r.err).toBe('');
-      expect(same(r.out, cacheDir(home, '4.70.0')), r.out).toBe(true);
-    });
-
-    it('falls through to the cache when the host-written path went stale (plugin updated mid-session)', () => {
-      const home = path.join(base, 'home-stale');
-      touch(path.join(cacheDir(home, '4.71.0'), F));
-      const r = run({ home, substitute: posix(cacheDir(home, '4.70.0')) });
-      expect(same(r.out, cacheDir(home, '4.71.0')), r.out).toBe(true);
-    });
+    it('works when the host-written path contains a space', () => prints('host-space'));
+    it('works when the host-written path contains an apostrophe (why the quotes are double)', () => prints('host-apostrophe'));
+    it('falls through, without a syntax error, when the host-written path holds a dollar sign', () => prints('host-dollar'));
+    it('falls through to the cache when the host-written path went stale (plugin updated mid-session)', () => prints('host-stale'));
   });
 
   describe('no substitution (a host that does not replace the token, or a reference file)', () => {
     it('reads CLAUDE_PLUGIN_ROOT from the environment when it holds the file, and falls through when it does not', () => {
-      const home = path.join(base, 'home-env');
-      touch(path.join(cacheDir(home, '4.70.0'), F));
-      const envRoot = path.join(base, 'env-root');
-      touch(path.join(envRoot, F));
       for (const kind of ['command', 'reference']) {
-        expect(same(run({ home, kind, env: { CLAUDE_PLUGIN_ROOT: envRoot } }).out, envRoot), kind).toBe(true);
-        expect(same(run({ home, kind, env: { CLAUDE_PLUGIN_ROOT: path.join(base, 'nope') } }).out, cacheDir(home, '4.70.0')), kind).toBe(true);
+        prints(`env-hit-${kind}`);
+        prints(`env-miss-${kind}`);
       }
     });
-
-    it('the reference spelling survives `set -u` with the variable unset', () => {
-      const home = path.join(base, 'home-nounset');
-      touch(path.join(cacheDir(home, '4.70.0'), F));
-      const r = run({ home, kind: 'reference', nounset: true });
-      expect(r.err).toBe('');
-      expect(same(r.out, cacheDir(home, '4.70.0')), r.out).toBe(true);
-    });
-
+    it('the reference spelling survives `set -u` with the variable unset', () => prints('nounset-reference'));
     it('keeps the source-repo behaviour: plugins/artibot from the repo root, . from the plugin root', () => {
-      const repo = path.join(base, 'source-repo');
-      const plugin = path.join(repo, 'plugins', 'artibot');
-      touch(path.join(plugin, F));
-      expect(same(run({ home: emptyHome, cwd: repo }).out, plugin)).toBe(true);
-      expect(same(run({ home: emptyHome, cwd: plugin }).out, plugin)).toBe(true);
+      prints('source-from-repo-root');
+      prints('source-from-plugin-dir');
     });
   });
 
+  describe('decoys: a working directory that holds the file but is not this plugin (review N-c)', () => {
+    it('ignores plugins/artibot/<file> when there is no manifest', () => prints('decoy-no-manifest'));
+    it('ignores it when the manifest names artibot-cowork (the closing quote matters)', () => prints('decoy-other-name'));
+    it('ignores the working directory itself when it holds the file but no manifest', () => prints('decoy-dot-no-manifest'));
+    it('still needs the file: a manifest without the probe file is skipped', () => prints('decoy-manifest-without-file'));
+    it('accepts a manifest whose JSON is spaced differently (the check is a pattern, not a formatter match)', () => prints('manifest-spacing'));
+  });
+
   it('prints a path that a child node process can import by file URL (the contract the commands rely on)', () => {
-    const real = run({ home: emptyHome, cwd: PLUGIN_ROOT, file: 'lib/core/skill-hash.js' });
-    expect(same(real.out, PLUGIN_ROOT), real.out).toBe(true);
+    prints('real-plugin');
     const code = [
       "import path from 'node:path';",
       "import { pathToFileURL } from 'node:url';",
       "const m = await import(pathToFileURL(path.join(process.argv[1], 'lib/core/skill-hash.js')).href);",
       'process.stdout.write(typeof m.computeHash);',
     ].join('');
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', code, real.out], { cwd: foreign, encoding: 'utf-8' });
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', code, res('real-plugin').out], {
+      cwd: foreign, encoding: 'utf-8', timeout: 60_000,
+    });
     expect(child.stderr).toBe('');
     expect(child.stdout).toBe('function');
-  });
-
-  describe('the REC/USG/ENGINE/PLUGIN_ROOT chains on a marketplace-only install', () => {
-    /** `$HOME/.claude/artibot/<a>` then the exact token `<b>`, for REC, USG or ENGINE. */
-    const ASSIGN_CHAIN = /((REC|USG|ENGINE)="\$HOME\/\.claude\/artibot\/([^"]+)"; \[ -f "\$\2" \] \|\| \2="\$\{CLAUDE_PLUGIN_ROOT\}\/([^"]+)")/g;
-    /** update.md and learning.md: the token first, the native-install default second. */
-    const ROOT_CHAIN = /(PLUGIN_ROOT="\$\{CLAUDE_PLUGIN_ROOT\}"; \[ -f "\$PLUGIN_ROOT\/([^"]+)" \] \|\| PLUGIN_ROOT="\$HOME\/\.claude\/artibot")/g;
-
-    /** Exact counts, so a chain that changes spelling cannot silently drop out of this test. */
-    const ASSIGN_FILES = {
-      'commands/verify.md': 1, 'commands/team.md': 2, 'commands/autopilot.md': 2, 'commands/split.md': 1,
-      'commands/theme.md': 3, 'commands/watch.md': 1,
-    };
-    const ROOT_FILES = { 'commands/update.md': 2, 'commands/learning.md': 2 };
-
-    const matchesIn = (rel, re) => [...read(rel).matchAll(re)];
-    /** Print PLUGIN_ROOT the way the finder prints a root (`pwd -W` on Git Bash), so Node can compare it. */
-    const PRINT_ROOT = '(cd "$PLUGIN_ROOT" && { pwd -W 2>/dev/null || pwd; })';
-
-    it('finds exactly the chains it is meant to exercise', () => {
-      for (const [rel, count] of Object.entries(ASSIGN_FILES)) expect(matchesIn(rel, ASSIGN_CHAIN).length, rel).toBe(count);
-      for (const [rel, count] of Object.entries(ROOT_FILES)) expect(matchesIn(rel, ROOT_CHAIN).length, rel).toBe(count);
-    });
-
-    it('every token chain resolves to the cache copy when the host substitutes the token', () => {
-      const home = path.join(base, 'pure-marketplace-home');
-      const cache = cacheDir(home, '4.70.0');
-      const failures = [];
-      for (const rel of Object.keys(ASSIGN_FILES)) {
-        for (const m of matchesIn(rel, ASSIGN_CHAIN)) {
-          touch(path.join(cache, m[4]));
-          const script = `${m[1].replaceAll(TOKEN, posix(cache))}; echo "$${m[2]}"`;
-          const r = spawnSync('bash', ['-c', script], { cwd: foreign, env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf-8' });
-          if (!same(r.stdout.trim(), path.join(cache, m[4]))) failures.push(`${rel} ${m[2]}: ${r.stdout.trim()}`);
-        }
-      }
-      expect(failures, failures.join('\n')).toEqual([]);
-    });
-
-    it('control: the same chains do NOT reach the cache when nothing is substituted (what the :- spelling did)', () => {
-      const home = path.join(base, 'pure-marketplace-home');
-      const cache = cacheDir(home, '4.70.0');
-      const m = matchesIn('commands/verify.md', ASSIGN_CHAIN)[0];
-      touch(path.join(cache, m[4]));
-      const env = { ...process.env, HOME: home, USERPROFILE: home };
-      delete env.CLAUDE_PLUGIN_ROOT;
-      const r = spawnSync('bash', ['-c', `${m[1]}; echo "$${m[2]}"`], { cwd: foreign, env, encoding: 'utf-8' });
-      expect(same(r.stdout.trim(), path.join(cache, m[4]))).toBe(false);
-    });
-
-    it('update.md and learning.md use the substituted root, and keep the native-install default', () => {
-      const home = path.join(base, 'pure-marketplace-home');
-      const cache = cacheDir(home, '4.70.0');
-      const nativeHome = path.join(base, 'native-home');
-      for (const rel of Object.keys(ROOT_FILES)) {
-        for (const m of matchesIn(rel, ROOT_CHAIN)) {
-          touch(path.join(cache, m[2]));
-          touch(path.join(nativeHome, '.claude', 'artibot', m[2]));
-          const viaHost = spawnSync('bash', ['-c', `${m[1].replaceAll(TOKEN, posix(cache))}; ${PRINT_ROOT}`], {
-            cwd: foreign, env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf-8',
-          });
-          expect(same(viaHost.stdout.trim(), cache), `${rel} ${m[2]} via host: ${viaHost.stdout.trim()}`).toBe(true);
-          const env = { ...process.env, HOME: nativeHome, USERPROFILE: nativeHome };
-          delete env.CLAUDE_PLUGIN_ROOT;
-          const native = spawnSync('bash', ['-c', `${m[1]}; ${PRINT_ROOT}`], { cwd: foreign, env, encoding: 'utf-8' });
-          expect(same(native.stdout.trim(), path.join(nativeHome, '.claude', 'artibot')), `${rel} ${m[2]} native: ${native.stdout.trim()}`).toBe(true);
-        }
-      }
-    });
   });
 });
 

@@ -32,7 +32,7 @@ Parse $ARGUMENTS:
 The working directory is usually the user's project, not this plugin, so the source-repo layout (`plugins/artibot/commands/`, `plugins/artibot/agents/`, `plugins/artibot/skills/`) only exists inside the Artibot source repo and would give an empty catalog anywhere else. This command has no Bash tool, so find `<pluginRoot>` with `Glob`; the first hit wins:
 
 1. The plugin root the host filled in when this command loaded: `${CLAUDE_PLUGIN_ROOT}`. Use it when it is an absolute path that holds `commands/index.md`; if it still shows a variable reference instead of a path, go to 2
-2. `Glob` `plugins/artibot/commands/index.md`. A hit means the working directory is the Artibot source repo, so `<pluginRoot>` is `plugins/artibot`
+2. `Glob` `plugins/artibot/commands/index.md`, then `Grep` the pattern `"name"\s*:\s*"artibot"` in `plugins/artibot/.claude-plugin/plugin.json`. Both must hit: a project that merely has a folder of the same name is not this plugin. Two hits mean the working directory is the Artibot source repo, so `<pluginRoot>` is `plugins/artibot`. The same two checks without the `plugins/artibot/` prefix (`commands/index.md`, `.claude-plugin/plugin.json`) mean the working directory is the plugin directory itself, so `<pluginRoot>` is `.`
 3. `Glob` `*/commands/index.md` with `path` `~/.claude/plugins/cache/artibot/artibot`. `<pluginRoot>` is the version directory of the hit; with several hits take the highest version number
 4. `Glob` `*/plugins/artibot/commands/index.md` with `path` `~/.claude/plugins/marketplaces`. `<pluginRoot>` is the `plugins/artibot` directory of the hit
 

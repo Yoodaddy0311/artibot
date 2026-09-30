@@ -22,9 +22,11 @@ Parse $ARGUMENTS:
 1. Run the update script via Bash:
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -f "$PLUGIN_ROOT/scripts/update.js" ] || PLUGIN_ROOT="$HOME/.claude/artibot"
+F="scripts/update.js"; PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/cache/artibot/artibot/$v"; done; [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$HOME/.claude/artibot"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/marketplaces/$m/plugins/artibot"; done
 node "${PLUGIN_ROOT}/scripts/update.js" $ARGUMENTS
 ```
+
+The chain looks for `update.js` in this order: the plugin path the host writes into this command text, the newest plugin-cache version, the legacy `$HOME/.claude/artibot` copy that `install.sh` makes, then the marketplace copy. The Artibot source tree is deliberately NOT a candidate (every other script chain tries it first): `update.js` decides native vs legacy install from its own location (`lib/core/install-mode.js`), so a working-tree copy would push a marketplace install into the legacy git-pull + `install.sh` flow.
 
 2. Display the full output of the script to the user exactly as printed.
 
@@ -46,7 +48,7 @@ node "${PLUGIN_ROOT}/scripts/update.js" $ARGUMENTS
 If the script exits with a non-zero code, display its stderr output and suggest running manually:
 
 ```
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -f "$PLUGIN_ROOT/scripts/update.js" ] || PLUGIN_ROOT="$HOME/.claude/artibot"
+F="scripts/update.js"; PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/cache/artibot/artibot/$v"; done; [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$HOME/.claude/artibot"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/marketplaces/$m/plugins/artibot"; done
 node "${PLUGIN_ROOT}/scripts/update.js" --check
 ```
 

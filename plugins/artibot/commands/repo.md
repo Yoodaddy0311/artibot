@@ -117,8 +117,9 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 2. **Acquire — leader only.** Call the acquisition helper once per URL. **This is the single place in `/repo` that clones**; neither the teammates (★ MANDATORY rule 1) nor the standalone agent ([repo-benchmarker](../agents/repo-benchmarker.md) § *Process*) run `git clone`. `lib/git/repo-acquire.js#acquireRepo` validates the input via `lib/core/repo-input.js#parseRepoInput` (HTTPS only; shell metacharacters and NUL rejected, and traversal already collapsed by URL normalization before validation runs — the Security rules below, executable), clones `--depth 1` into the cache, enforces the 500MB ceiling, and returns `{ localPath, sourceUrl, sourceSha, cacheStatus, sizeBytes, depth }`. Run the calls concurrently for multiple URLs. First find the plugin root: the working directory is wherever the benchmark was launched (usually the user's project), not this plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so a dynamic import of `./lib/...` resolved against the cwd only works inside the plugin directory. Run this once and use the absolute path it prints as `<pluginRoot>`, quoted (steps 2 and 10 both use it). If it prints `artibot plugin root not found - run /update`, report that line and stop:
 
    ```bash
-   F="lib/git/repo-acquire.js"; R=""; P="$HOME/.claude/plugins"
-   for d in plugins/artibot . "${CLAUDE_PLUGIN_ROOT}"; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+   F="lib/git/repo-acquire.js"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+   for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+   [ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
    [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
    [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
    [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"

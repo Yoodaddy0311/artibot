@@ -28,7 +28,7 @@ allowed-tools:
 tokens: "~5K"
 category: "persona"
 whenNotToUse: "Do not apply when an existing persona is already active in the session — switch personas via persona-architect instead. Do not apply when the user wants to invoke (use) a persona on a task — that's persona-architect's job. Do not apply for one-off tone shifts inside a single message; only use when producing a persisted, reusable persona-* skill from local source material."
-source_hash: 8ad99ade
+source_hash: 1b4e5b78
 ---
 
 # Persona Distill: Compile a Person into a Skill
@@ -107,7 +107,7 @@ If a layer has fewer than 2 source quotes supporting it, mark it with `(source-t
 
 ### Step 4: GENERATE the artifact
 
-Decide `<skillsDir>` first. If `plugins/artibot/skills/persona-distill/SKILL.md` exists relative to the working directory (probe with `Read`), you are in the Artibot source repo and `<skillsDir>` is `plugins/artibot/skills`. In any other project it is that project's own `.claude/skills` (create the directory if it is missing). Never create a `plugins/artibot/` tree inside someone else's project.
+Decide `<skillsDir>` first. If `plugins/artibot/skills/persona-distill/SKILL.md` exists relative to the working directory and `plugins/artibot/.claude-plugin/plugin.json` names the plugin `artibot` (probe both with `Read`), you are in the Artibot source repo and `<skillsDir>` is `plugins/artibot/skills`. In any other project it is that project's own `.claude/skills` (create the directory if it is missing). Never create a `plugins/artibot/` tree inside someone else's project.
 
 Create `<skillsDir>/persona-{slug}/SKILL.md` with frontmatter:
 

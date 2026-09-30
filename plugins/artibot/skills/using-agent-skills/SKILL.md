@@ -19,7 +19,7 @@ tokens: "~2K"
 category: "meta"
 agents: [orchestrator, planner]
 whenNotToUse: "Inside an active skill — discovery is for orientation, not work. If you already know which skill applies, jump straight to it."
-source_hash: 6683394a
+source_hash: 47049bd6
 ---
 
 # Using Agent Skills (Meta-Skill)
@@ -69,7 +69,7 @@ These are **auto-invoked** — users never need to type them. The meta-rule from
 | Marketing / Growth | Ads, SEO, content | `advertising`, `content-seo`, `cro-forms` |
 | Meta | Discovery, this file | `using-agent-skills` |
 
-Enumerate the full set with `Glob` on `skills/*/SKILL.md`, passing the plugin root as `path` — the directory scan is the single source of truth for the count. Plugin root: `${CLAUDE_PLUGIN_ROOT}` (the host fills in the absolute path when this skill loads). If that still shows a variable reference instead of a path, use `plugins/artibot` when the working directory is the Artibot source repo, otherwise the highest version directory under `~/.claude/plugins/cache/artibot/artibot`.
+Enumerate the full set with `Glob` on `skills/*/SKILL.md`, passing the plugin root as `path` — the directory scan is the single source of truth for the count. Plugin root: `${CLAUDE_PLUGIN_ROOT}` (the host fills in the absolute path when this skill loads). If that still shows a variable reference instead of a path, use `plugins/artibot` when the working directory is the Artibot source repo (its `plugins/artibot/.claude-plugin/plugin.json` names the plugin `artibot`), otherwise the highest version directory under `~/.claude/plugins/cache/artibot/artibot`.
 
 ## Decision flowchart
 
