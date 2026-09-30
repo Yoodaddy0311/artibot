@@ -38,7 +38,9 @@
  *      driver to write). Any one → `VERIFY_RESULT_FAILED`. Rules 1-5 only see the
  *      status the driver passed to `recordPhaseResult`, so `status: 'done'` beside
  *      `verifyResult: {status: 'FAIL'}` passed them all. Last on purpose: a stale
- *      or unacknowledged VERIFY is reported as that, not as its result.
+ *      or unacknowledged VERIFY is reported as that, not as its result. The rule
+ *      reads the slot itself, never the attempt stamp or the history around it;
+ *      "Attempt scope of `verifyResult`" below says why.
  *
  * ### Why rule 3 has no case-fold (decided 2026-09-29)
  *
@@ -85,6 +87,51 @@
  * EXECUTE, VERIFY and REPORT `done` with no attempt. Which build ran that
  * session is not established here.
  *
+ * There is NO exemption list (R2-9): a list of sessions or ages that skip the pause
+ * would let exactly the unverified ones through. What a flip needs is the count, and
+ * {@link censusReportVerifyEvidence} takes it, read-only, from states the caller
+ * hands in. Measured 2026-09-29T07:31Z over this checkout's store, the marketplace
+ * copy's and the 4.68.0 cache's: 12 files, 10 distinct session ids, and
+ * `NO_VERIFY_ATTEMPT` on 10 of 10. Of those, 3 are terminal (COMPLETED 1, ABORTED 2),
+ * where the gate cannot fire, and 7 are live (INTAKE 3, EXECUTE 2, PLAN 1,
+ * CROSS_CHECK 1), each still ahead of the VERIFY hand-out. Driven through the
+ * engine they are handed a VERIFY attempt before REPORT (inference: not run here),
+ * so `pauseAtReport` is 0 of 10. "10 of 10 lack evidence" is therefore not "10 would
+ * pause". The 46 session ids counted at 04:13Z above are not reproducible from these
+ * stores (36 fewer; why is not established: pruned, or an older cache version
+ * removed since). A count of 0 describes these files, not sessions started later.
+ *
+ * ## Attempt scope of `verifyResult` (W2-7, decided 2026-09-29)
+ *
+ * The slot used to be one cell for the whole session. A FAIL a driver wrote for
+ * attempt 1 stayed in it through a VERIFY re-run acknowledged `done`, and REPORT was
+ * refused with `VERIFY_RESULT_FAILED` until the driver happened to overwrite it.
+ * With the switch ON, `engine.js#runPhase4Verify` now calls
+ * {@link scopeVerifyResultToAttempt} as it opens each VERIFY attempt: the previous
+ * value is archived in `state.verifyResultHistory`, the slot is emptied, and
+ * `state.verifyResultScope = {attemptId}` names the attempt that owns it. What a
+ * driver writes afterwards is that attempt's by construction, so this rule reads
+ * "the result of the latest hand-out" without asking which attempt wrote what.
+ *
+ *   - Archived, not deleted. The superseded FAIL stays auditable.
+ *   - The gate does NOT read the stamp or the history, on purpose. A label cannot
+ *     prove a result stale: a stale in-memory copy saved back over the hand-out, or
+ *     a hand-out made by a build that does not scope, leaves a stamp naming one
+ *     attempt beside a result that may belong to the next. Dismissing by label would
+ *     fail open. So an unbound slot (no stamp, or one naming another attempt) is read
+ *     exactly as before: an explicit FAIL in it refuses. Only the seal can make a
+ *     FAIL stop refusing, and only by taking it out of the slot.
+ *   - Fail closed on the writing side too: no usable attempt id, no seal.
+ *   - Switch OFF: nothing happens, byte for byte. Under OFF a re-run therefore still
+ *     inherits the previous result, and the SH-06 recorder that reads the slot at the
+ *     ACK (`recovery-record.js#foldVerify`) keeps reading it.
+ *
+ * The other side of the fix, said plainly: a re-run acknowledged `done` whose driver
+ * writes no `verifyResult` leaves the slot empty, and an empty slot passes rule 6
+ * (see the blind spots below). The same driver used to be refused by the leftover
+ * FAIL. The gate now takes such a re-run at rule 3's word, `'done'`, as it always
+ * took a first attempt that wrote nothing.
+ *
  * ## Two entry points
  *
  * The engine path is `engine.js#runPhase6Report` → {@link gateReportOnVerify}.
@@ -116,10 +163,13 @@
  *     (`verifyResult.mcp.ok`) and a non-object all pass. How often a driver
  *     writes no explicit signal is the SH-06 recorder's measurement, not
  *     something this gate enforces.
- *   - `verifyResult` is not attempt-scoped: it is one slot. A FAIL left in it
- *     refuses the next REPORT even after a re-run VERIFY is acknowledged `done`
- *     (fail-closed; the driver must overwrite it — `commands/autopilot.md`), and a
- *     PASS left over from an earlier attempt cannot be told from this attempt's.
+ *   - `verifyResult` is attempt-scoped only by the engine's seal (section above), and
+ *     only with the switch ON. A session that never went through a scoped hand-out
+ *     (stored earlier, hand-driven, or run with the switch OFF) still has one
+ *     unlabelled slot: a FAIL left in it refuses the next REPORT even after a
+ *     re-run acknowledged `done`, until the next VERIFY hand-out seals it, and a PASS
+ *     left over from an earlier attempt cannot be told from this attempt's. A driver
+ *     that writes nothing during a scoped attempt leaves an empty slot, which passes.
  *
  * ## Kill switch
  *
@@ -127,7 +177,10 @@
  * nothing at all — no tick, no state change — and the engine proceeds byte for
  * byte as before. ON, missing evidence pauses the session back to VERIFY.
  * Observation without enforcement is done offline, by running
- * {@link evaluateReportVerifyEvidence} over stored session states.
+ * {@link evaluateReportVerifyEvidence} (one session) or
+ * {@link censusReportVerifyEvidence} (a store) over stored session states.
+ * The same switch governs the VERIFY hand-out's seal: OFF, {@link scopeVerifyResultToAttempt}
+ * returns before it reads the state.
  *
  * The switch is read from `<pluginRoot>/artibot.config.json` on every call, and
  * an unreadable file (missing, or JSON that does not parse) reads OFF with no
@@ -243,7 +296,9 @@ function verdict(code, started = null, slot = null) {
 /**
  * Decide whether the session holds VERIFY evidence for the work being reported.
  * Pure: reads `state` (`attemptJournal`, `activePhaseAttempt` and, for rule 6,
- * `verifyResult`), never mutates it. The rule is in the module header.
+ * `verifyResult`), never mutates it. It does not read `verifyResultScope` or
+ * `verifyResultHistory`: see {@link scopeVerifyResultToAttempt} for why. The rule is
+ * in the module header.
  *
  * @param {object} state
  * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null}}
@@ -267,6 +322,162 @@ export function evaluateReportVerifyEvidence(state) {
   if (slot) return verdict(REPORT_VERIFY_CODES.VERIFY_NOT_ACKED, started, slot);
   if (hasExplicitVerifyFail(state?.verifyResult)) return verdict(REPORT_VERIFY_CODES.VERIFY_RESULT_FAILED, started);
   return verdict(REPORT_VERIFY_CODES.OK, started);
+}
+
+/**
+ * The engine's half of the attempt scope of `state.verifyResult` (W2-7). Called by
+ * `engine.js#runPhase4Verify` right after it opens a VERIFY attempt, and before
+ * `attachMcpVerify` fills `verifyResult.mcp` (sealing after it would archive that
+ * fresh slot).
+ *
+ * `verifyResult` is one slot the driver overwrites (`commands/autopilot.md`). Left
+ * alone, whatever the previous hand-out wrote stays there and is read as the new
+ * attempt's: a stale FAIL refused the next REPORT after a re-run that had been
+ * acknowledged `done`, and a stale PASS could not be told from a fresh one. So the
+ * hand-out SEALS the slot. The old value moves into the append-only
+ * `state.verifyResultHistory` as `{attemptId, verifyResult, supersededBy}` (nothing
+ * is deleted; `attemptId` is the attempt the stamp said owned it, `null` when the
+ * slot predates scoping), the slot is emptied, and `state.verifyResultScope` names
+ * the attempt the slot belongs to from now on. What the driver writes after the
+ * hand-out is that attempt's, by construction. The history is not capped: it gains
+ * one entry per hand-out that superseded a result, a handful in a session.
+ *
+ * Why the slot is EMPTIED and not just labelled: a label cannot prove a result
+ * stale, and a gate that dismissed results by label would fail open. A stale
+ * in-memory copy saved back over the hand-out, or a hand-out made by a build that
+ * does not scope, leaves a stamp naming one attempt beside a result that may belong
+ * to the next. Only the seal removing the value can make "the slot holds this
+ * attempt's result" true, so {@link evaluateReportVerifyEvidence} never reads the
+ * stamp or the history: an explicit FAIL still in the slot is refused whatever the
+ * stamp says (unbound or mislabelled: fail closed), and a session that never went
+ * through a scoped hand-out keeps the one-slot behaviour until its next VERIFY.
+ *
+ * Switch OFF: returns false before `state` is read: no read, no write, no tick, the
+ * engine proceeds byte for byte as before. The switch is the gate's own (only the
+ * literal `true` counts): the seal exists for the gate, so it obeys the gate's switch.
+ * Also false, with the slot untouched, when the attempt has no usable id: a slot
+ * that cannot be bound is not emptied.
+ *
+ * @param {object} state - Live session state (mutated only when it scopes).
+ * @param {{attemptId?: unknown}} attempt - The attempt `phase-attempt.js#openPhaseAttempt` just opened.
+ * @param {{enforce?: boolean}} [config] - Injectable for tests; omitted, it is read
+ *   from `artibot.config.json` (a missing or unreadable file reads OFF).
+ * @returns {boolean} true when the slot now belongs to `attempt`.
+ */
+export function scopeVerifyResultToAttempt(state, attempt, config = undefined) {
+  if ((config ?? loadReportVerifyGateConfig())?.enforce !== true) return false;
+  const attemptId = attempt?.attemptId;
+  if (state === null || typeof state !== 'object' || Array.isArray(state)) return false;
+  if (typeof attemptId !== 'string' || attemptId === '') return false;
+  // Asked twice for one attempt: the slot may already hold that attempt's own result.
+  if (state.verifyResultScope?.attemptId === attemptId) return true;
+  const prior = state.verifyResult;
+  if (prior !== undefined && prior !== null) {
+    const owner = state.verifyResultScope?.attemptId;
+    const history = Array.isArray(state.verifyResultHistory) ? state.verifyResultHistory : [];
+    state.verifyResultHistory = [...history, {
+      attemptId: typeof owner === 'string' && owner !== '' ? owner : null,
+      verifyResult: prior,
+      supersededBy: attemptId,
+    }];
+    state.verifyResult = null;
+  }
+  state.verifyResultScope = { attemptId };
+  return true;
+}
+
+/** Session phases the gate can never fire on: resume is a no-op there and a REPORT record is only kept. */
+const TERMINAL_PHASES = new Set(['COMPLETED', 'ABORTED']);
+
+/**
+ * True only when `nextTarget` positively says the engine will hand the session a
+ * VERIFY attempt before REPORT: its resume target is a known phase at or before
+ * VERIFY. An unknown target, a non-string, a throw: false, so the census counts
+ * the session toward the warning rather than away from it.
+ * @param {object} state
+ * @param {(state: object) => unknown} nextTarget
+ * @param {readonly string[]} phases
+ * @param {number} verifyAt - index of 'VERIFY' in `phases`
+ * @returns {boolean}
+ */
+function handsOutVerifyFirst(state, nextTarget, phases, verifyAt) {
+  let target;
+  try {
+    target = nextTarget(state);
+  } catch {
+    return false;
+  }
+  const at = typeof target === 'string' ? phases.indexOf(target) : -1;
+  return at !== -1 && at <= verifyAt;
+}
+
+/**
+ * Read-only census of stored sessions: what {@link evaluateReportVerifyEvidence}
+ * says of each, and how many of them switching the gate ON would really pause at
+ * REPORT (R2-9). The one-time `NO_VERIFY_ATTEMPT` pause of a pre-journal session
+ * stays honest behaviour with no exemption list, so what a flip needs is the count,
+ * not a carve-out. Pure: no I/O, no mutation, nothing written anywhere. The caller
+ * reads the store: this takes states, not paths.
+ *
+ * Counts, over the entries that are session objects:
+ *
+ *   - `total`, `unreadable` (entries that are not session objects: not counted in
+ *     `total`, so `total + unreadable` is the length of the input)
+ *   - `byCode`: every code of {@link REPORT_VERIFY_CODES}, zero-filled. "All N lack
+ *     evidence" alone is not what a flip costs; the terminal/live split below is.
+ *   - `terminal` (COMPLETED or ABORTED) + `live` = `total`. Terminal sessions cannot
+ *     be paused: resume is a no-op for them and a REPORT record is only kept.
+ *   - `liveWithoutEvidence`: live sessions whose evaluation is not `ok`. An upper
+ *     bound on who a flip could pause; a session that has not reached VERIFY yet
+ *     will be handed a VERIFY attempt by the engine and gain the evidence.
+ *   - `pauseAtReport`: the live, evidence-less sessions whose resume target is
+ *     AFTER the VERIFY hand-out, so they reach REPORT without another one. Each of
+ *     those pauses once at REPORT when the gate is switched ON. `null` (unmeasured,
+ *     never a guess) when `opts` does not carry both seams below.
+ *
+ * What it cannot see: how the driver will behave after a flip, and any session that
+ * is not in the store handed in (deleted, pruned, another checkout). A count of
+ * zero is a statement about THIS input, and says nothing about a store not read.
+ *
+ * @param {Iterable<unknown>} states - Parsed session states; the loader's `[]`
+ *   backfill of a missing journal is not needed, a missing journal reads the same.
+ * @param {{nextTarget?: (state: object) => unknown, phases?: readonly string[]}} [opts]
+ *   `engine-state.js#nextTarget` and `#PHASES`, passed in because that module
+ *   imports this one (the same reason as `refuseRecordedReport`'s `livePhases`).
+ * @returns {{total: number, unreadable: number, byCode: Record<string, number>,
+ *   terminal: number, live: number, liveWithoutEvidence: number, pauseAtReport: number|null}}
+ * @throws {TypeError} when `states` is not an iterable object: a zero census of
+ *   garbage would read as "no sessions".
+ */
+export function censusReportVerifyEvidence(states, opts = {}) {
+  if (states === null || typeof states !== 'object' || typeof states[Symbol.iterator] !== 'function') {
+    throw new TypeError('states must be an iterable of session states');
+  }
+  const { nextTarget, phases } = opts ?? {};
+  const measurable = typeof nextTarget === 'function' && Array.isArray(phases) && phases.includes('VERIFY');
+  const verifyAt = measurable ? phases.indexOf('VERIFY') : -1;
+  const byCode = Object.fromEntries(Object.values(REPORT_VERIFY_CODES).map((code) => [code, 0]));
+  const census = {
+    total: 0, unreadable: 0, byCode, terminal: 0, live: 0, liveWithoutEvidence: 0, pauseAtReport: measurable ? 0 : null,
+  };
+  for (const state of states) {
+    if (state === null || typeof state !== 'object' || Array.isArray(state)) {
+      census.unreadable += 1;
+      continue;
+    }
+    census.total += 1;
+    const { code } = evaluateReportVerifyEvidence(state);
+    byCode[code] += 1;
+    if (TERMINAL_PHASES.has(state.phase)) {
+      census.terminal += 1;
+      continue;
+    }
+    census.live += 1;
+    if (code === REPORT_VERIFY_CODES.OK) continue;
+    census.liveWithoutEvidence += 1;
+    if (measurable && !handsOutVerifyFirst(state, nextTarget, phases, verifyAt)) census.pauseAtReport += 1;
+  }
+  return census;
 }
 
 /**
