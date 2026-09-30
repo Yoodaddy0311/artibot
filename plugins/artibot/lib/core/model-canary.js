@@ -8,10 +8,12 @@
  * resolved for one of those two TASKS (`resolve <plugin:name> --task classify`),
  * {@link canaryTierFor} answers the low tier and
  * `lib/core/model-overrides.js#resolveEffectiveModel` returns it instead of the
- * shipped opus. That answer is only real when the leader passes it on as
- * `Agent(model=<resolve output>)` — the owner recognised exactly that path as the
- * CA-02 actuator (decision D1, 2026-09-28: the `/model-routing` task layer, leader
- * relay, NO enforcing hook). Nothing here spawns anything.
+ * shipped opus — unless {@link canaryMayLower} holds the spawn (a review role, or a
+ * review/architecture agent: see THE REVIEW GUARD below). That answer is only real
+ * when the leader passes it on as `Agent(model=<resolve output>)` — the owner
+ * recognised exactly that path as the CA-02 actuator (decision D1, 2026-09-28: the
+ * `/model-routing` task layer, leader relay, NO enforcing hook). Nothing here
+ * spawns anything.
  *
  * PRIORITY. It is a shipped DEFAULT of the task layer, so it sits below every
  * user setting and above the shipped policy:
@@ -38,14 +40,34 @@
  * actuator's list equals the router's list narrowed to the vocabulary, carrier by
  * carrier.
  *
+ * THE REVIEW GUARD (CA-02 review, SHOULD-1). The owner's rule is design and review =
+ * opus, implementation = sonnet, and the canary is a cost lever for spawns that are
+ * genuinely classify/status work — so a leader that labels a REVIEW or DESIGN spawn
+ * `--task status` must not get sonnet. {@link canaryMayLower} is the one place that
+ * says whether a spawn may be lowered, and it is an ALLOWLIST: ALL of these must hold.
+ *  - The role is absent or a build word (`BUILD_ROLES`). A review word, and any word
+ *    core does not know (`planning`, `design`), keeps the shipped tier.
+ *  - The agent's OWN default task is absent or one of
+ *    {@link CANARY_LOWERABLE_AGENT_CLASSES} — the eight action classes minus `review`
+ *    and `architecture`. Anything else, a near miss included, keeps the shipped tier.
+ *  - The agent is not in {@link CANARY_PROTECTED_AGENTS}.
+ * lib/core cannot read `AGENT_ACTION_CLASS` (lib/routing is a higher layer), so the
+ * default task arrives as DATA: `opts.agentTask` of `resolveEffectiveModel`, which
+ * the `/model-routing` CLI fills in (`model-routing.mjs#callOpts`). A caller that
+ * passes none is judged on role and name only — the class guard needs its input.
+ *
  * WHAT THIS MODULE CANNOT SEE:
  *  - Whether a leader ever passes `--task classify|status`. No agent DEFAULTS to
  *    those classes (`AGENT_ACTION_CLASS`), so an unlabelled spawn is never lowered.
  *  - Whether the host serves what was resolved; only `usage.receipt` shows that.
  *  - The router's policy ceiling (`allowedTiers`). This is the user-override
  *    layer's answer, which — like any user pick — is not bounded by it; the guards
- *    live in `resolveEffectiveModel` (never raise a seat, never move
- *    `FABLE_DENYLIST`).
+ *    are {@link canaryMayLower} (what it may lower) and `resolveEffectiveModel`
+ *    (never raise a seat).
+ *  - The agent's default task, unless the caller passes it (see the guard above).
+ *  - The receipt path. `adaptive-model-router.js` writes `canary:<tier>` from the
+ *    same key WITHOUT this guard: that is record-only intent inside the policy
+ *    ceiling (its own header says so), not an answer to `resolve`.
  *
  * Layer 1 (lib/core): imports lib/core only. Pure: no I/O, never throws, never
  * mutates its input.
@@ -54,6 +76,7 @@
  */
 
 import { listTiers } from './model-catalog.js';
+import { BUILD_ROLES } from './model-policy.js';
 
 /**
  * The action classes the canary may ever be armed for — CA-02's own names
@@ -82,6 +105,44 @@ export const CANARY_TIERS = Object.freeze(['haiku', 'sonnet']);
  * @type {string}
  */
 export const CANARY_SOURCE = 'canary-task';
+
+/**
+ * The DEFAULT tasks (`lib/routing/action-classifier.js#AGENT_ACTION_CLASS`) of the
+ * agents the canary may lower: every action class EXCEPT `review` and
+ * `architecture` — the owner's "design and review = opus" (2026-09-29). It is an
+ * ALLOWLIST on purpose: a class that is not listed is held, so a ninth action class
+ * stays protected until somebody decides otherwise, and
+ * `tests/core/model-canary.test.js` fails until they do (this list plus
+ * `review` and `architecture` must partition `ACTION_CLASSES`). A subset of that
+ * vocabulary, pinned by the same test, because core cannot import routing. No agent
+ * defaults to `classify` or `status` today; they are listed so an agent that did
+ * would still be lowered for its own default task.
+ *
+ * @type {readonly string[]}
+ */
+export const CANARY_LOWERABLE_AGENT_CLASSES = Object.freeze([
+  'classify',
+  'status',
+  'explore',
+  'edit-routine',
+  'implement',
+  'complex-debug',
+]);
+
+/**
+ * Agents the canary NEVER lowers, whatever the task, role or default task a call
+ * names — bare, lower-case names. It is the canary's OWN list, deliberately not
+ * `FABLE_DENYLIST`: that one answers "may this agent run on the fable tier" (a
+ * refusal-classifier concern), this one answers "may a cost lever lower this seat".
+ * Two levers, so widening one must not silently widen the other. It STARTS with the
+ * same member (`security-reviewer`); `tests/core/model-overrides-canary.test.js`
+ * pins the independence in both directions. It is also the floor for a caller that
+ * names no default task — `security-reviewer` defaults to `review`, which the class
+ * guard already holds, but only when the caller says so.
+ *
+ * @type {readonly string[]}
+ */
+export const CANARY_PROTECTED_AGENTS = Object.freeze(['security-reviewer']);
 
 /**
  * `{ classes, tier, ignored }` for a config that arms nothing.
@@ -196,4 +257,79 @@ export function outranksTier(tier, than) {
   const a = order.indexOf(tier);
   const b = order.indexOf(than);
   return a !== -1 && b !== -1 && a > b;
+}
+
+/**
+ * @param {*} value
+ * @returns {boolean} True for `undefined` and `null` — "the caller named nothing".
+ */
+function isAbsent(value) {
+  return value === undefined || value === null;
+}
+
+/**
+ * @param {*} role - The spawn's `opts.role`.
+ * @returns {boolean} True when it is absent or exactly a build word. A review word,
+ *   an unknown word, a near miss (`Build`, ` build`), an empty string and a non-string
+ *   are all false: a cost lever must not read "not review" as "build".
+ */
+function roleAllowsCanary(role) {
+  return isAbsent(role) || (typeof role === 'string' && BUILD_ROLES.has(role));
+}
+
+/**
+ * @param {*} agentTask - The agent's OWN default task, as the caller read it.
+ * @returns {boolean} True when it is absent (the agent has none, or the caller did not
+ *   say) or exactly one of {@link CANARY_LOWERABLE_AGENT_CLASSES}. `review`,
+ *   `architecture`, any other string (a near miss included) and any non-string are false.
+ */
+function classAllowsCanary(agentTask) {
+  return isAbsent(agentTask) || (typeof agentTask === 'string' && CANARY_LOWERABLE_AGENT_CLASSES.includes(agentTask));
+}
+
+/**
+ * @param {*} agent - Bare or `plugin:`-prefixed agent name.
+ * @returns {boolean} True for a non-blank name that is not in
+ *   {@link CANARY_PROTECTED_AGENTS}. The name is trimmed, stripped of its plugin prefix
+ *   and lower-cased first — the same spellings `qualifyAgent` folds together — so a
+ *   variant cannot slip past the list. A non-string or blank name is false.
+ */
+function agentAllowsCanary(agent) {
+  if (typeof agent !== 'string') return false;
+  const bare = agent.trim().split(':').pop().trim().toLowerCase();
+  return bare !== '' && !CANARY_PROTECTED_AGENTS.includes(bare);
+}
+
+/**
+ * Whether the canary may lower THIS spawn's seat — the review guard (SHOULD-1).
+ *
+ * An ALLOWLIST: true only when the role is absent or a build word, the agent's own
+ * default task is absent or one of {@link CANARY_LOWERABLE_AGENT_CLASSES}, and the
+ * agent is off {@link CANARY_PROTECTED_AGENTS}. Anything the guard cannot read as
+ * lowerable — a review word, an unknown role, a near-miss class, a non-string, a
+ * spawn that is not a plain object — is false. It says nothing about WHICH tier the
+ * canary answers ({@link canaryTierFor}) or whether that lowers anything
+ * ({@link outranksTier}); `resolveEffectiveModel` asks all three.
+ *
+ * Never throws (a throwing getter on `spawn` reads as false), never mutates `spawn`.
+ *
+ * @param {{ agent?: string, role?: string, agentTask?: string|null }} spawn - The agent
+ *   (bare or prefixed), the spawn's `opts.role`, and the agent's own default task
+ *   (`getActionClassForAgent`, which core cannot import — the caller passes it).
+ * @returns {boolean}
+ *
+ * @example
+ * canaryMayLower({ agent: 'doc-updater', role: 'build', agentTask: 'edit-routine' }); // true
+ * canaryMayLower({ agent: 'code-reviewer', role: 'review' }); // false — a review role
+ * canaryMayLower({ agent: 'planner', agentTask: 'architecture' }); // false — a design agent
+ * canaryMayLower({ agent: 'security-reviewer' }); // false — the protected list
+ */
+export function canaryMayLower(spawn) {
+  try {
+    if (!isPlainObject(spawn)) return false;
+    const { agent, role, agentTask } = spawn;
+    return roleAllowsCanary(role) && classAllowsCanary(agentTask) && agentAllowsCanary(agent);
+  } catch {
+    return false;
+  }
 }

@@ -31,7 +31,9 @@
  * shipped. The fable gate and
  * `FABLE_DENYLIST` are applied LAST, so no user setting can lift them. With no
  * override in play the artibot answer is `resolveModel(...)` unchanged — except
- * for the two canary tasks, which the shipped `routing.canary` lowers.
+ * for the two canary tasks, which the shipped `routing.canary` lowers for a spawn
+ * `canaryMayLower` lets through (never a review role, a review/architecture agent
+ * or a protected agent).
  *
  * `artibot-cowork` has no resolver of its own: its shipped value is its agent
  * frontmatter, which the caller supplies. It is never looked up in the core
@@ -48,7 +50,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveArtibotDir } from './config.js';
-import { CANARY_SOURCE, canaryTierFor, outranksTier } from './model-canary.js';
+import { CANARY_SOURCE, canaryMayLower, canaryTierFor, outranksTier } from './model-canary.js';
 import { resolveRole } from './model-catalog.js';
 import {
   BUILD_ROLES,
@@ -631,21 +633,35 @@ function applyGates(model, plugin, agent, config) {
  * non-empty string) > user phase (artibot only; `opts.role` mapped via
  * BUILD_ROLES / REVIEW_ROLES) > user plugin default > canary (CA-02, below) >
  * shipped. Shipped for
- * artibot is `resolveModel(qualifiedName, opts, config)` with `opts.task`
- * removed, so the shipped answer cannot depend on it; shipped for
- * artibot-cowork is its frontmatter value, never the core policy. The fable gate
+ * artibot is `resolveModel(qualifiedName, opts, config)` with `opts.task` and
+ * `opts.agentTask` removed, so the shipped answer cannot depend on either; shipped
+ * for artibot-cowork is its frontmatter value, never the core policy. The fable gate
  * and FABLE_DENYLIST are applied last.
  *
  * CANARY (CA-02). With no user pick in play, a SHIPPED answer is lowered to
  * `routing.canary.tier` when `opts.task` is one of the classes that key arms (only
  * `classify` and `status` can be — `model-canary.js`) and `config` carries it. It
- * is a shipped default of the task layer, so every user layer above wins, and it is
- * asked only after they found nothing. Three guards keep it a cost lever: it never
- * RAISES a seat (a shipped tier at or below the canary tier is returned untouched,
- * source included), it never moves a FABLE_DENYLIST agent (the receipt path keeps
- * those on opus too), and it has nothing to lower for a role alias / tier word, an
- * unparseable name or a cowork agent whose frontmatter is unknown. No `config`, or
- * one without `routing.canary`, means no canary.
+ * is a shipped default of the task layer, so every user layer above wins — the
+ * guards below limit the canary, never the user — and it is asked only after they
+ * found nothing. Four guards keep it a cost lever: it never RAISES a seat (a shipped
+ * tier at or below the canary tier is returned untouched, source included); it never
+ * lowers a spawn `canaryMayLower` refuses — a role that is not absent or a build word
+ * (`opts.role`), an agent whose OWN default task (`opts.agentTask`, below) is review
+ * or architecture, or an agent on the canary's own protected list
+ * (`CANARY_PROTECTED_AGENTS`, independent of FABLE_DENYLIST); and it has nothing to
+ * lower for a role alias / tier word, an unparseable name or a cowork agent whose
+ * frontmatter is unknown. The owner's rule behind the second guard: design and review
+ * = opus, implementation = sonnet. No `config`, or one without `routing.canary`,
+ * means no canary.
+ *
+ * `opts.agentTask` is the agent's OWN default task (`getActionClassForAgent` in
+ * `lib/routing/action-classifier.js`), which core cannot derive (lib/core may not
+ * import lib/routing) — the CALLER passes it, distinct from `opts.task`, the task
+ * THIS spawn was labelled with. Only the canary reads it; the shipped and user
+ * answers never depend on it. Absent (or null) means "the agent has none / the
+ * caller did not say", so a caller that omits it is judged on role and name only;
+ * the model-routing CLI always passes it when the agent has one
+ * (`model-routing.mjs#callOpts`).
  *
  * Core derives no default task: with `opts.task` absent the task layer is
  * skipped even when a task override is stored. A given `opts.task` is used
@@ -668,7 +684,9 @@ function applyGates(model, plugin, agent, config) {
  *
  * @param {string} qualifiedName - `artibot:x`, `artibot-cowork:x` or bare `x`.
  * @param {object} [opts] - Same options as `resolveModel` (`role`, `advisor`,
- *   `agentType`), plus `task` (string) — the task the caller identified.
+ *   `agentType`), plus `task` (string) — the task the caller identified — and
+ *   `agentTask` (string|null) — the agent's own default task, read by the canary
+ *   guard only.
  * @param {{ config?: object, overrides?: object|null, coworkFrontmatter?: Record<string,string>|null }} [ctx]
  * @returns {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }}
  *   `source` ∈ override-agent | override-task | override-phase |
@@ -681,7 +699,7 @@ function applyGates(model, plugin, agent, config) {
  */
 export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overrides = null, coworkFrontmatter = null } = {}) {
   const options = isPlainObject(opts) ? opts : {};
-  const shippedOpts = withoutTask(opts);
+  const shippedOpts = withoutTaskContext(opts);
   const q = qualifyAgent(qualifiedName);
   const plugin = q === null ? pluginOfUnparsed(qualifiedName) : (q.plugin ?? 'artibot');
   if (plugin === 'artibot' && (q === null || resolveRole(q.agent) !== null)) {
@@ -693,13 +711,15 @@ export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overri
     const gated = applyGates(picked.model, plugin, q.agent, config);
     return { ...gated, source: picked.source, requested: picked.model, scope: picked.scope };
   }
-  // No user pick: the shipped answer, lowered by the CA-02 canary when this task is one it names.
+  // No user pick: the shipped answer, lowered by the CA-02 canary when this task is one it names
+  // and the review guard lets this spawn through.
   const canary = canaryTierFor(config, options.task);
-  if (plugin === 'artibot') return lowerToCanary(shippedResult(resolveModel(qualifiedName, shippedOpts, config)), canary, q.agent);
+  const spawn = { agent: q.agent, role: options.role, agentTask: options.agentTask };
+  if (plugin === 'artibot') return lowerToCanary(shippedResult(resolveModel(qualifiedName, shippedOpts, config)), canary, spawn);
   const shipped = lookupTier(coworkFrontmatter, q.agent);
   if (shipped === null) return { ...UNKNOWN_COWORK };
   const gated = applyGates(shipped, plugin, q.agent, config);
-  return lowerToCanary({ ...gated, source: 'cowork-frontmatter', requested: shipped, scope: null }, canary, q.agent);
+  return lowerToCanary({ ...gated, source: 'cowork-frontmatter', requested: shipped, scope: null }, canary, spawn);
 }
 
 /**
@@ -710,11 +730,13 @@ export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overri
  *
  * @param {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }} shipped
  * @param {string|null} tier - `canaryTierFor(...)`: the low tier when armed for this task, else null.
- * @param {string} agent - Bare agent name; a FABLE_DENYLIST agent is never lowered.
+ * @param {{ agent: string, role?: *, agentTask?: * }} spawn - What `canaryMayLower` judges: the bare
+ *   agent name, `opts.role` and `opts.agentTask` (the agent's own default task). A spawn it refuses —
+ *   a review-side or unknown role, a review/architecture agent, a protected agent — keeps `shipped`.
  * @returns {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }}
  */
-function lowerToCanary(shipped, tier, agent) {
-  if (tier === null || isDenylisted(agent) || !outranksTier(shipped.model, tier)) return shipped;
+function lowerToCanary(shipped, tier, spawn) {
+  if (tier === null || !outranksTier(shipped.model, tier) || !canaryMayLower(spawn)) return shipped;
   return { model: tier, source: CANARY_SOURCE, reason: null, requested: null, scope: null };
 }
 
@@ -735,16 +757,20 @@ function shippedResult(model) {
   return { model, source: 'shipped', reason: null, requested: null, scope: null };
 }
 
+/** Keys of `opts` that belong to the task layer and the canary, never to `resolveModel`. */
+const TASK_CONTEXT_KEYS = Object.freeze(['task', 'agentTask']);
+
 /**
- * `opts` without its `task` key, for `resolveModel`. Anything else — including
- * a non-object `opts` — is passed through untouched, as before the task layer.
+ * `opts` without its `task` and `agentTask` keys, for `resolveModel`, so the shipped
+ * answer cannot depend on either. Anything else — including a non-object `opts` —
+ * is passed through untouched, as before the task layer.
  *
  * @param {*} opts
  * @returns {*}
  */
-function withoutTask(opts) {
-  if (!isPlainObject(opts) || !Object.hasOwn(opts, 'task')) return opts;
-  return Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'task'));
+function withoutTaskContext(opts) {
+  if (!isPlainObject(opts) || !TASK_CONTEXT_KEYS.some((key) => Object.hasOwn(opts, key))) return opts;
+  return Object.fromEntries(Object.entries(opts).filter(([k]) => !TASK_CONTEXT_KEYS.includes(k)));
 }
 
 /**

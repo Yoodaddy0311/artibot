@@ -5,7 +5,11 @@
  * anything outside it is ignored, never widened; a malformed carrier collapses to
  * "nothing armed" (fail-closed) exactly as the router's own normaliser does; the
  * two readers of the ONE key `routing.canary.actionClasses` cannot drift apart;
- * and the JSON schema enums equal the code constants.
+ * the JSON schema enums equal the code constants; and the REVIEW GUARD
+ * ({@link canaryMayLower}) — the canary may lower a spawn only when its role is
+ * absent or a build role, its agent's own default task is not review/architecture,
+ * and the agent is off the canary's OWN protected list (independent of
+ * FABLE_DENYLIST).
  *
  * WHAT THIS GATE CANNOT SEE:
  *   1. Whether a spawn is ever resolved with `--task classify|status` — no agent
@@ -17,6 +21,10 @@
  *      layered under the user's settings is pinned in
  *      `tests/core/model-overrides.test.js` and, through the CLI, in
  *      `tests/scripts/model-routing-canary.test.js`.
+ *   4. Whether a caller passes the agent's default task. `canaryMayLower` can only
+ *      judge what it is handed; the CLI hands it `agentTask` (pinned in
+ *      `tests/scripts/model-routing-canary.test.js`), and a caller that hands none
+ *      gets the role guard and the protected-agent floor, not the class guard.
  *
  * @module tests/core/model-canary
  */
@@ -30,13 +38,17 @@ import { configSchema, validateConfig } from '../../lib/core/config-schema.js';
 import { listTiers } from '../../lib/core/model-catalog.js';
 import {
   CANARY_ACTION_CLASSES,
+  CANARY_LOWERABLE_AGENT_CLASSES,
+  CANARY_PROTECTED_AGENTS,
   CANARY_SOURCE,
   CANARY_TIERS,
+  canaryMayLower,
   canaryTierFor,
   outranksTier,
   readCanaryPlan,
 } from '../../lib/core/model-canary.js';
 import { OVERRIDE_TIERS } from '../../lib/core/model-overrides.js';
+import { BUILD_ROLES, FABLE_DENYLIST, REVIEW_ROLES } from '../../lib/core/model-policy.js';
 import { ACTION_CLASSES } from '../../lib/routing/action-classifier.js';
 import { resolveCanaryClasses } from '../../lib/routing/adaptive-model-router.js';
 
@@ -284,5 +296,129 @@ describe('outranksTier — the never-raise comparator', () => {
       expect(outranksTier(bad, 'sonnet'), String(bad)).toBe(false);
       expect(outranksTier('opus', bad), String(bad)).toBe(false);
     }
+  });
+});
+
+describe('the protected lists — design and review stay off the canary (SHOULD-1)', () => {
+  it('CANARY_LOWERABLE_AGENT_CLASSES is the six default tasks the canary may lower for, frozen', () => {
+    expect(CANARY_LOWERABLE_AGENT_CLASSES).toEqual(['classify', 'status', 'explore', 'edit-routine', 'implement', 'complex-debug']);
+    expect(Object.isFrozen(CANARY_LOWERABLE_AGENT_CLASSES)).toBe(true);
+  });
+
+  it('is an allowlist: everything it leaves out of the eight action classes is exactly review and architecture', () => {
+    // The owner's rule (2026-09-29): design and review = opus. The guard lists what MAY be lowered, so a ninth
+    // action class is protected by default, and this is the gate that makes adding one a decision: the two
+    // sides below must partition ACTION_CLASSES, with the protected side written out.
+    for (const name of CANARY_LOWERABLE_AGENT_CLASSES) expect(ACTION_CLASSES).toContain(name);
+    expect(ACTION_CLASSES.filter((name) => !CANARY_LOWERABLE_AGENT_CLASSES.includes(name)).sort()).toEqual(['architecture', 'review']);
+    expect(new Set(CANARY_LOWERABLE_AGENT_CLASSES).size).toBe(CANARY_LOWERABLE_AGENT_CLASSES.length);
+    expect(CANARY_LOWERABLE_AGENT_CLASSES.length + 2).toBe(ACTION_CLASSES.length);
+  });
+
+  it('every class the canary is armed FOR is one its own agents may be lowered for (no agent defaults to them, but the lists must not contradict)', () => {
+    for (const name of CANARY_ACTION_CLASSES) expect(CANARY_LOWERABLE_AGENT_CLASSES).toContain(name);
+  });
+
+  it('CANARY_PROTECTED_AGENTS is security-reviewer today: bare lower-case names, frozen', () => {
+    expect(CANARY_PROTECTED_AGENTS).toEqual(['security-reviewer']);
+    expect(Object.isFrozen(CANARY_PROTECTED_AGENTS)).toBe(true);
+    for (const name of CANARY_PROTECTED_AGENTS) {
+      expect(name).toBe(name.trim().toLowerCase());
+      expect(name).not.toContain(':');
+    }
+  });
+
+  it('is its OWN list, not FABLE_DENYLIST: a different object, so widening one does not widen the other', () => {
+    expect(CANARY_PROTECTED_AGENTS).not.toBe(FABLE_DENYLIST);
+    // The behavioural half — an emptied or widened FABLE_DENYLIST does not move the canary's answer —
+    // needs the module graph mocked, so it lives in tests/core/model-overrides-canary.test.js.
+  });
+});
+
+describe('canaryMayLower — the guard is an allowlist of spawns', () => {
+  const ok = Object.freeze({ agent: 'doc-updater' });
+  const PROTECTED_CLASSES = Object.freeze(['review', 'architecture']);
+
+  it('positive control: a plain agent with no role and no default task may be lowered', () => {
+    expect(canaryMayLower(ok)).toBe(true);
+    expect(canaryMayLower({ agent: 'artibot:doc-updater' })).toBe(true);
+    expect(canaryMayLower({ agent: 'artibot-cowork:content-marketer' })).toBe(true);
+  });
+
+  it('a build-side role may be lowered — every word core reads as build — and so may "no role"', () => {
+    for (const role of BUILD_ROLES) expect(canaryMayLower({ ...ok, role }), role).toBe(true);
+    for (const role of [undefined, null]) expect(canaryMayLower({ ...ok, role }), String(role)).toBe(true);
+  });
+
+  it('a review-side role never is — every word core reads as review', () => {
+    for (const role of REVIEW_ROLES) expect(canaryMayLower({ ...ok, role }), role).toBe(false);
+  });
+
+  it('a role that is neither absent nor a build word fails closed: an unknown word is not "build"', () => {
+    // `planning` and `design` are exactly the roles the owner keeps on opus; core does not know them,
+    // so the guard cannot read them as review and must not read them as build either.
+    for (const role of ['planning', 'design', 'Build', ' build', 'BUILD', 'review ', '', 42, true, {}, ['build']]) {
+      expect(canaryMayLower({ ...ok, role }), JSON.stringify(role)).toBe(false);
+    }
+  });
+
+  it('an agent whose default task is one of the six may be lowered; none / undefined means "no default task"', () => {
+    for (const agentTask of CANARY_LOWERABLE_AGENT_CLASSES) expect(canaryMayLower({ ...ok, agentTask }), agentTask).toBe(true);
+    for (const agentTask of [undefined, null]) expect(canaryMayLower({ ...ok, agentTask }), String(agentTask)).toBe(true);
+  });
+
+  it('an agent whose default task is review or architecture never is', () => {
+    for (const agentTask of PROTECTED_CLASSES) expect(canaryMayLower({ ...ok, agentTask }), agentTask).toBe(false);
+  });
+
+  it('a default task that is not EXACTLY one of the six fails closed — a near miss is not a class, so it is not lowered', () => {
+    // The same doctrine as `canaryTierFor` (no trimming, no case folding), pointed the safe way round:
+    // there a near miss arms nothing, here it protects.
+    for (const agentTask of ['Review', ' architecture ', 'ARCHITECTURE', 'Implement', 'implement ', ' status', 'no-such-class', 'complex-debugging', '']) {
+      expect(canaryMayLower({ ...ok, agentTask }), JSON.stringify(agentTask)).toBe(false);
+    }
+    for (const agentTask of [42, true, {}, ['review'], ['implement']]) {
+      expect(canaryMayLower({ ...ok, agentTask }), JSON.stringify(agentTask)).toBe(false);
+    }
+  });
+
+  it('a protected agent never is, bare, prefixed or upper-case, even with no role and no default task', () => {
+    for (const agent of [...CANARY_PROTECTED_AGENTS, ...CANARY_PROTECTED_AGENTS.map((n) => `artibot:${n}`), 'artibot-cowork:Security-Reviewer', ' security-reviewer ']) {
+      expect(canaryMayLower({ agent }), agent).toBe(false);
+      expect(canaryMayLower({ agent, role: 'build', agentTask: 'implement' }), agent).toBe(false);
+    }
+  });
+
+  it('a non-string or blank agent fails closed', () => {
+    for (const agent of [undefined, null, 42, {}, '', '   ', ':', 'artibot:', ['doc-updater']]) {
+      expect(canaryMayLower({ agent }), JSON.stringify(agent) ?? String(agent)).toBe(false);
+    }
+  });
+
+  it('the conditions are ANDed: any one failing is enough, and the rest cannot outvote it', () => {
+    expect(canaryMayLower({ agent: 'doc-updater', role: 'build', agentTask: 'implement' })).toBe(true);
+    expect(canaryMayLower({ agent: 'doc-updater', role: 'review', agentTask: 'implement' })).toBe(false);
+    expect(canaryMayLower({ agent: 'doc-updater', role: 'build', agentTask: 'review' })).toBe(false);
+    expect(canaryMayLower({ agent: 'security-reviewer', role: 'build', agentTask: 'implement' })).toBe(false);
+  });
+
+  it('a spawn that is not a plain object fails closed and never throws', () => {
+    for (const spawn of [undefined, null, 0, 'doc-updater', [], () => ok]) {
+      expect(() => canaryMayLower(spawn), String(spawn)).not.toThrow();
+      expect(canaryMayLower(spawn), String(spawn)).toBe(false);
+    }
+    expect(canaryMayLower()).toBe(false);
+  });
+
+  it('a throwing getter on the spawn is swallowed', () => {
+    const spawn = { agent: 'doc-updater' };
+    Object.defineProperty(spawn, 'role', { get: () => { throw new Error('hostile getter'); }, enumerable: true });
+    expect(canaryMayLower(spawn)).toBe(false);
+  });
+
+  it('never mutates its input', () => {
+    const spawn = Object.freeze({ agent: 'artibot:doc-updater', role: 'build', agentTask: 'implement' });
+    expect(canaryMayLower(spawn)).toBe(true);
+    expect(spawn).toEqual({ agent: 'artibot:doc-updater', role: 'build', agentTask: 'implement' });
   });
 });
