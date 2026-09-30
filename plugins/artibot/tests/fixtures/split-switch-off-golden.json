@@ -1,0 +1,253 @@
+{
+  "steps": [
+    [
+      "feed auth (bind asked, key off)",
+      {
+        "fed": true,
+        "skipped": null,
+        "missionId": "M-20260929-Sabcd1234",
+        "taskId": "auth",
+        "added": [
+          "auth",
+          "billing"
+        ],
+        "refreshed": [],
+        "claim": "claimed",
+        "stateVersion": 3,
+        "location": "project-root-fallback"
+      }
+    ],
+    [
+      "feed auth again",
+      {
+        "fed": true,
+        "skipped": null,
+        "missionId": "M-20260929-Sabcd1234",
+        "taskId": "auth",
+        "added": [],
+        "refreshed": [],
+        "claim": "renewed",
+        "stateVersion": 4,
+        "location": "project-root-fallback"
+      }
+    ],
+    [
+      "lane-state auth active",
+      {
+        "limb": "auth",
+        "state": "active",
+        "previous": null,
+        "since": "2026-09-29T06:00:00.000Z",
+        "window": "w-auth",
+        "note": "n-active",
+        "changed": true,
+        "ledger": "skipped:no-event"
+      }
+    ],
+    [
+      "lease sync active",
+      {
+        "outcome": "renewed",
+        "missionId": "M-20260929-Sabcd1234"
+      }
+    ],
+    [
+      "lane-state auth review",
+      {
+        "limb": "auth",
+        "state": "review",
+        "previous": "active",
+        "since": "2026-09-29T07:00:00.000Z",
+        "window": "w-auth",
+        "note": "n-review",
+        "changed": true,
+        "ledger": "skipped:no-event"
+      }
+    ],
+    [
+      "lease sync review",
+      {
+        "outcome": "renewed",
+        "missionId": "M-20260929-Sabcd1234"
+      }
+    ],
+    [
+      "lane-state auth done",
+      {
+        "limb": "auth",
+        "state": "done",
+        "previous": "review",
+        "since": "2026-09-29T08:00:00.000Z",
+        "window": "w-auth",
+        "note": "n-done",
+        "changed": true,
+        "ledger": "skipped:missing:session_id"
+      }
+    ],
+    [
+      "lease sync done",
+      {
+        "outcome": "released:done",
+        "missionId": "M-20260929-Sabcd1234"
+      }
+    ],
+    [
+      "forkPoint recorded",
+      {
+        "runId": "split-off-1",
+        "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "limbs": [
+          {
+            "limb": "auth",
+            "affectedPaths": [
+              "lib/auth/**",
+              "tests/auth/**"
+            ],
+            "forkPoint": "ffffffffffffffffffffffffffffffffffffffff"
+          },
+          {
+            "limb": "billing",
+            "affectedPaths": [
+              "lib/billing.js"
+            ]
+          }
+        ]
+      }
+    ]
+  ],
+  "runJson": "{\n  \"runId\": \"split-off-1\",\n  \"lanes\": {\n    \"auth\": {\n      \"window\": \"w-auth\",\n      \"note\": \"n-done\",\n      \"state\": \"done\",\n      \"since\": \"2026-09-29T08:00:00.000Z\",\n      \"projected_from\": \"run.json\",\n      \"updated_at\": \"2026-09-29T08:00:00.000Z\"\n    }\n  },\n  \"schema_version\": 1\n}\n",
+  "planJson": "{\n  \"runId\": \"split-off-1\",\n  \"base\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n  \"limbs\": [\n    {\n      \"limb\": \"auth\",\n      \"affectedPaths\": [\n        \"lib/auth/**\",\n        \"tests/auth/**\"\n      ],\n      \"forkPoint\": \"ffffffffffffffffffffffffffffffffffffffff\"\n    },\n    {\n      \"limb\": \"billing\",\n      \"affectedPaths\": [\n        \"lib/billing.js\"\n      ]\n    }\n  ],\n  \"schema_version\": 1\n}\n",
+  "journal": "{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":1,\"kind\":\"mission.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"mission\":{\"status\":\"executing\",\"intent\":{\"path\":\".artibot/intent.md\",\"revision\":1},\"plan\":{\"path\":\".artibot/plan.md\",\"revision\":1}}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":1,\"kind\":\"graph.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"graph\":{\"schema_version\":1,\"mission_id\":\"M-20260929-Sabcd1234\",\"tasks\":[]}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":2,\"kind\":\"mission.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"mission\":{\"status\":\"executing\",\"intent\":{\"path\":\".artibot/intent.md\",\"revision\":1},\"plan\":{\"path\":\".artibot/plan.md\",\"revision\":1}}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":2,\"kind\":\"graph.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"graph\":{\"schema_version\":1,\"mission_id\":\"M-20260929-Sabcd1234\",\"updated_at\":\"2026-09-29T05:00:00.000Z\",\"tasks\":[{\"id\":\"auth\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb auth\",\"status\":\"queued\",\"owner\":null,\"file_ownership\":[\"lib/auth/**\",\"tests/auth/**\"],\"created_at\":\"2026-09-29T05:00:00.000Z\"},{\"id\":\"billing\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb billing\",\"status\":\"queued\",\"owner\":null,\"file_ownership\":[\"lib/billing.js\"],\"created_at\":\"2026-09-29T05:00:00.000Z\"}]}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":3,\"kind\":\"task.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task\":{\"id\":\"auth\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb auth\",\"status\":\"claimed\",\"owner\":\"auth\",\"file_ownership\":[\"lib/auth/**\",\"tests/auth/**\"],\"created_at\":\"2026-09-29T05:00:00.000Z\"}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":3,\"kind\":\"lease.set\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task_id\":\"auth\",\"lease\":{\"owner\":\"auth\",\"acquired_at\":\"2026-09-29T05:00:00.000Z\",\"expires_at\":\"2026-09-30T05:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T05:00:00.000Z\",\"session_id\":\"abcd1234-ef56-7890-1234-567890abcdef\"}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":4,\"kind\":\"task.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task\":{\"id\":\"auth\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb auth\",\"status\":\"claimed\",\"owner\":\"auth\",\"file_ownership\":[\"lib/auth/**\",\"tests/auth/**\"],\"created_at\":\"2026-09-29T05:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T05:00:00.000Z\",\"heartbeat_source\":\"lane-heartbeat\"}}\n{\"v\":1,\"ts\":\"2026-09-29T05:00:00.000Z\",\"state_version\":4,\"kind\":\"lease.set\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task_id\":\"auth\",\"lease\":{\"owner\":\"auth\",\"acquired_at\":\"2026-09-29T05:00:00.000Z\",\"expires_at\":\"2026-09-30T05:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T05:00:00.000Z\",\"session_id\":\"abcd1234-ef56-7890-1234-567890abcdef\"}}\n{\"v\":1,\"ts\":\"2026-09-29T06:00:00.000Z\",\"state_version\":5,\"kind\":\"task.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task\":{\"id\":\"auth\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb auth\",\"status\":\"claimed\",\"owner\":\"auth\",\"file_ownership\":[\"lib/auth/**\",\"tests/auth/**\"],\"created_at\":\"2026-09-29T05:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T06:00:00.000Z\",\"heartbeat_source\":\"lane-heartbeat\"}}\n{\"v\":1,\"ts\":\"2026-09-29T06:00:00.000Z\",\"state_version\":5,\"kind\":\"lease.set\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task_id\":\"auth\",\"lease\":{\"owner\":\"auth\",\"acquired_at\":\"2026-09-29T05:00:00.000Z\",\"expires_at\":\"2026-09-30T06:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T06:00:00.000Z\",\"session_id\":\"abcd1234-ef56-7890-1234-567890abcdef\"}}\n{\"v\":1,\"ts\":\"2026-09-29T07:00:00.000Z\",\"state_version\":6,\"kind\":\"task.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task\":{\"id\":\"auth\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb auth\",\"status\":\"claimed\",\"owner\":\"auth\",\"file_ownership\":[\"lib/auth/**\",\"tests/auth/**\"],\"created_at\":\"2026-09-29T05:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T07:00:00.000Z\",\"heartbeat_source\":\"lane-heartbeat\"}}\n{\"v\":1,\"ts\":\"2026-09-29T07:00:00.000Z\",\"state_version\":6,\"kind\":\"lease.set\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task_id\":\"auth\",\"lease\":{\"owner\":\"auth\",\"acquired_at\":\"2026-09-29T05:00:00.000Z\",\"expires_at\":\"2026-09-30T07:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T07:00:00.000Z\",\"session_id\":\"abcd1234-ef56-7890-1234-567890abcdef\"}}\n{\"v\":1,\"ts\":\"2026-09-29T08:00:00.000Z\",\"state_version\":7,\"kind\":\"task.upsert\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task\":{\"id\":\"auth\",\"mission_id\":\"M-20260929-Sabcd1234\",\"title\":\"/split limb auth\",\"status\":\"done\",\"owner\":null,\"file_ownership\":[\"lib/auth/**\",\"tests/auth/**\"],\"created_at\":\"2026-09-29T05:00:00.000Z\",\"heartbeat_at\":\"2026-09-29T07:00:00.000Z\",\"heartbeat_source\":\"lane-heartbeat\"}}\n{\"v\":1,\"ts\":\"2026-09-29T08:00:00.000Z\",\"state_version\":7,\"kind\":\"lease.clear\",\"mission_id\":\"M-20260929-Sabcd1234\",\"task_id\":\"auth\"}\n",
+  "ledger": [
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T05:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:1:f3367223660e",
+      "data": {
+        "state_version": 1,
+        "status": "executing",
+        "reason": "test.seed"
+      }
+    },
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T05:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:2:703a04ebc49a",
+      "data": {
+        "state_version": 2,
+        "status": "executing",
+        "reason": "split.task-feed"
+      }
+    },
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T05:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:3:716d7e896688",
+      "data": {
+        "state_version": 3,
+        "status": "executing",
+        "reason": "split.task-feed"
+      }
+    },
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T05:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:4:24d573ce14ff",
+      "data": {
+        "state_version": 4,
+        "status": "executing",
+        "reason": "split.task-feed"
+      }
+    },
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T06:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:5:850f72038996",
+      "data": {
+        "state_version": 5,
+        "status": "executing",
+        "reason": "split.lane-lease"
+      }
+    },
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T07:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:6:3224d399d7aa",
+      "data": {
+        "state_version": 6,
+        "status": "executing",
+        "reason": "split.lane-lease"
+      }
+    },
+    {
+      "event": "state.updated",
+      "mission_id": "M-20260929-Sabcd1234",
+      "session_id": "abcd1234-ef56-7890-1234-567890abcdef",
+      "source": "supervisor",
+      "ts": "2026-09-29T08:00:00.000Z",
+      "idempotency_key": "state.updated:M-20260929-Sabcd1234:7:97d36bb49272",
+      "data": {
+        "state_version": 7,
+        "status": "executing",
+        "reason": "split.lane-lease"
+      }
+    }
+  ],
+  "splitDir": [
+    "plan.json",
+    "run.json"
+  ],
+  "graph": {
+    "schema_version": 1,
+    "mission_id": "M-20260929-Sabcd1234",
+    "updated_at": "2026-09-29T05:00:00.000Z",
+    "tasks": [
+      {
+        "id": "auth",
+        "mission_id": "M-20260929-Sabcd1234",
+        "title": "/split limb auth",
+        "status": "done",
+        "owner": null,
+        "file_ownership": [
+          "lib/auth/**",
+          "tests/auth/**"
+        ],
+        "created_at": "2026-09-29T05:00:00.000Z",
+        "heartbeat_at": "2026-09-29T07:00:00.000Z",
+        "heartbeat_source": "lane-heartbeat"
+      },
+      {
+        "id": "billing",
+        "mission_id": "M-20260929-Sabcd1234",
+        "title": "/split limb billing",
+        "status": "queued",
+        "owner": null,
+        "file_ownership": [
+          "lib/billing.js"
+        ],
+        "created_at": "2026-09-29T05:00:00.000Z"
+      }
+    ]
+  },
+  "leases": {
+    "M-20260929-Sabcd1234": {}
+  }
+}

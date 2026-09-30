@@ -74,7 +74,7 @@ import {
   workerTransitionIdempotencyKey,
   writeWorkerState,
 } from '../../lib/topology/split-state.js';
-import { createStateStore } from '../../lib/project-state/state-manager.js';
+import { createStateStore, readJournal } from '../../lib/project-state/state-manager.js';
 import { LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS, V11_STATUSES } from '../../lib/supervisor/contracts.js';
 import { assessLane } from '../../lib/supervisor/lane-monitor.js';
 
@@ -1010,17 +1010,20 @@ const laneOf = (w, limb) => readRun(w.runDir).lanes?.[limb];
 const runBytes = (w) => fs.readFileSync(path.join(w.runDir, 'run.json'));
 const storeVersion = (w) => w.store.getState().state_version;
 
-/** A store whose first `times` commits lose a race to another writer (a real CAS conflict, not a stub). */
+/**
+ * A store whose first `times` commits lose a race to another writer (a real CAS conflict, not a stub).
+ * The bound write commits through `updateTask` (SH-11 pre-flip condition 2), so that is the call raced.
+ */
 function racingStore(w, times) {
   let calls = 0;
   return {
     calls: () => calls,
     store: {
       ...w.store,
-      updateMission: (...args) => {
+      updateTask: (...args) => {
         calls += 1;
         if (calls <= times) w.store.updateMission(MISSION, (cur) => cur, { reason: 'test.race' });
-        return w.store.updateMission(...args);
+        return w.store.updateTask(...args);
       },
     },
   };
@@ -1123,11 +1126,14 @@ describe('SH-11 bound writeWorkerState — the store commit is the write, run.js
 
   it('keys the transition by the NODE\'s since, not by a stale run.json lane', () => {
     const w = makeBoundWorld();
-    boundWrite(w, 'alpha', { ops_state: 'active' });
-    // Skew the projection: the lane now claims an older since than the node.
-    const run = readRun(w.runDir);
-    run.lanes.alpha.since = iso(3);
-    fs.writeFileSync(path.join(w.runDir, 'run.json'), JSON.stringify(run));
+    boundWrite(w, 'alpha', { ops_state: 'pending' }, { now: () => utc(3) });
+    // Skew the projection the way it really happens: the commit lands and the run.json
+    // projection fails, so the lane still claims an older word and since than the node.
+    // (Editing the lane by hand is no longer this case: a sealed lane edited by hand is
+    // drift, and the stale guard refuses it — see the pre-flip condition 4 block below.)
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }, { projectRunJson: () => { throw new Error('disk full'); } }).projection).toMatch(/^failed/);
+    expect(laneOf(w, 'alpha')).toMatchObject({ state: 'pending', since: iso(3) });
+    expect(nodeOf(w, 'alpha').ops.since).toBe(iso(5));
 
     const events = [];
     const res = boundWrite(w, 'alpha', { ops_state: 'done' }, {
@@ -1172,6 +1178,65 @@ describe('SH-11 bound writeWorkerState — the store commit is the write, run.js
     expect(storeVersion(w)).toBe(v);
     expect(w.store.getTaskGraph(MISSION).tasks).toEqual([]);
     expect(opened).toBe(0);
+  });
+});
+
+/* ══════════ SH-11 pre-flip condition (2) — a bound lane write is ONE single-node store write ══════════
+ *
+ * The bound write used to go through `updateMission(…, { graph })`, which replaces the WHOLE graph:
+ * every lane write journalled a `mission.upsert` (the row, unchanged) and a `graph.upsert` carrying
+ * every sibling node, to change one. It now goes through `store.updateTask` — one `task.upsert`, the
+ * node as the write planned it, `ops` included. WHAT THIS CANNOT SEE: the live store's journal size
+ * (the fixtures hold two nodes), and two PROCESSES racing one store.
+ */
+describe('SH-11 pre-flip (2) — the bound write is one task.upsert', () => {
+  const journal = (w) => readJournal(w.store.paths.journal).records;
+
+  it('journals exactly ONE task.upsert per bound write; the mission row and the sibling nodes are not rewritten', () => {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    expect(boundWrite(w, 'beta', { ops_state: 'review' }).ok).toBe(true);
+    const before = journal(w).length;
+
+    expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(6) }).ok).toBe(true);
+
+    const added = journal(w).slice(before);
+    expect(added.map((r) => r.kind)).toEqual(['task.upsert']);
+    expect(added[0].task).toMatchObject({
+      id: 'alpha', status: 'reviewing', owner: 'alpha', ops: { state: 'review', since: iso(6), run_id: RUN_ID },
+    });
+  });
+
+  it('the FIRST write of a limb costs one record too — the node is created, not the graph replaced', () => {
+    const w = makeBoundWorld();
+    const before = journal(w).length;
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    expect(journal(w).slice(before).map((r) => r.kind)).toEqual(['task.upsert']);
+    expect(nodeOf(w, 'alpha')).toMatchObject({ id: 'alpha', file_ownership: ['lib/a/**'], status: 'executing' });
+  });
+
+  it('a sibling node is byte-identical after a write to its neighbour, and keeps its place in the graph', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    boundWrite(w, 'beta', { ops_state: 'review' });
+    const beta = JSON.stringify(nodeOf(w, 'beta'));
+    boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
+    expect(JSON.stringify(nodeOf(w, 'beta'))).toBe(beta);
+    expect(w.store.getTaskGraph(MISSION).tasks.map((t) => t.id)).toEqual(['alpha', 'beta']);
+  });
+
+  it('the paired ledger row is unchanged: one state.updated carrying the split.lane-state reason', () => {
+    const w = makeBoundWorld();
+    const rows = w.ledger.length;
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    expect(w.ledger.slice(rows).map((e) => [e.event, e.data.reason])).toEqual([['state.updated', 'split.lane-state']]);
+  });
+
+  it('the node the write planned is the node the store holds — nothing the mutator ignored sneaks in from the graph', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active', window: 'w-1' });
+    const written = journal(w).at(-1).task;
+    expect(nodeOf(w, 'alpha')).toEqual(written);
   });
 });
 
@@ -1227,6 +1292,17 @@ describe('SH-11 T3 — a binding that cannot be honoured REJECTS; there is no ru
     expect(thrown).toMatchObject({ ok: false, reason: 'store-unavailable' });
     expect(thrown.detail).toMatch(/sessionId is required/);
     expect(runBytes(w)).toEqual(before);
+  });
+
+  it('a store with no updateTask is not a usable port: the bound write rejects instead of falling back to the graph door', () => {
+    const w = makeBoundWorld();
+    const before = runBytes(w);
+    const v = storeVersion(w);
+    const oldShape = { getState: w.store.getState, updateMission: w.store.updateMission }; // what a bound write needed before pre-flip condition 2
+    const res = boundWrite(w, 'alpha', { ops_state: 'active' }, { store: oldShape });
+    expect(res).toMatchObject({ ok: false, reason: 'store-unavailable', worker: 'alpha' });
+    expect(runBytes(w)).toEqual(before);
+    expect(storeVersion(w)).toBe(v);
   });
 
   it('another run\'s node is refused, not overwritten (I2)', () => {
@@ -1566,8 +1642,10 @@ describe('SH-11 bindRunToMission — the writer of the binding', () => {
     const w = makeBoundWorld({ binding: null, missions: [MISSION, OTHER_MISSION] });
     const theirs = { ...BINDING, mission_id: OTHER_MISSION, bound_by_session: 'other-session-0001', bound_at: iso(3) };
     // The store port is consulted AFTER the probe and BEFORE the write, so it is
-    // where a competing binder lands. updatePlanJson has no lock; the read-back
-    // after the write is what decides who won.
+    // where a competing binder lands: before `updatePlanJson` takes the plan.json
+    // lock, where its `fn` finds the record. A binder that lands INSIDE the
+    // read-modify-write is another process, and that one is measured in
+    // split-state-bind-race.test.js (the lock itself: tests/git/split-run-file.test.js).
     const racy = {
       getState: () => {
         const plan = JSON.parse(planText(w));
@@ -1698,13 +1776,17 @@ describe('SH-11 switch (③) — the key OFF reverts a bound run', () => {
  * writes run.json and never the node, so after off -> on the node's `ops`
  * describes a moment BEFORE the lane's last word. A bound write computes its
  * previous state, its `since` and its ledger key from that node, so it
- * REFUSES rather than build on it. Two clauses, either refuses: the lane's
+ * REFUSES rather than build on it. Two judges, either refuses. The first reads
+ * no clock (pre-flip condition 4, the nested block at the end): a bound write
+ * seals the lane it projects, and a lane that says something other than its
+ * seal was written by something other than the store's projection since. The
+ * second is for a lane with no seal, and two clauses of it refuse: the lane's
  * `updated_at` is later than the node's, OR the lane's word differs from
  * `node.ops.state` and post-dates `node.ops.since` (the second exists because
  * the legacy feeder's ownership refresh also stamps `node.updated_at`, after
  * its own lane write, which hides the first). WHAT THIS CANNOT SEE: a legacy
- * write with a clock behind the node's, and a lane hand-edited without
- * touching `updated_at`.
+ * write that leaves the sealed facts as they were, made with a clock behind the
+ * node's, and a lane hand-edited to say what it said before.
  */
 describe('SH-11 stale guard (④)', () => {
   /** alpha written to the store at 05:00, then — key OFF — to run.json at 06:00. */
@@ -1802,8 +1884,11 @@ describe('SH-11 stale guard (④)', () => {
     expect(w.store.updateMission(MISSION, (cur) => cur, { graph: { ...graph, tasks }, reason: 'test.legacy-refresh' }).ok).toBe(true);
   };
 
-  it('a legacy ownership refresh AFTER the legacy lane write moves node.updated_at past the lane — the lane is still stale: its word differs from ops and post-dates ops.since', () => {
+  it('a legacy ownership refresh AFTER the legacy lane write moves node.updated_at past the lane — an UNSEALED lane is still stale: its word differs from ops and post-dates ops.since', () => {
     const w = flippedWorld(); // ops active since 05:00; lane review, run.json, 06:00
+    // The seal is what sees this case first (next test), so take it off to keep timestamp clause (2) pinned
+    // for the lanes that have none — a lane the projection never reached.
+    tamperLane(w, { projection_seal: undefined });
     legacyRefresh(w, iso(6, 30)); // node.updated_at 06:30 > lane 06:00: the updated_at comparison alone cannot see the drift
     const before = runBytes(w);
     const v = storeVersion(w);
@@ -1816,6 +1901,15 @@ describe('SH-11 stale guard (④)', () => {
     expect(nodeOf(w, 'alpha').ops.state).toBe('active');
   });
 
+  it('the same refresh over a SEALED lane is stale by the seal, without reading a stamp', () => {
+    const w = flippedWorld();
+    legacyRefresh(w, iso(6, 30));
+    const res = boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
+    expect(res).toMatchObject({ ok: false, reason: 'binding-stale', worker: 'alpha' });
+    expect(res.detail).toMatch(/projected/);
+    expect(res.detail).toMatch(/state: "active" -> "review"/);
+  });
+
   it('CONTROL — the same refresh over a lane that says what ops says is not stale: there is no drift to lose', () => {
     const w = makeBoundWorld();
     expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
@@ -1826,12 +1920,143 @@ describe('SH-11 stale guard (④)', () => {
     expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store', previousOps: 'active' });
   });
 
-  it('CONTROL — a lane the projection left BEHIND the node is not stale: a different word, but older than the ops change (the store is right)', () => {
+  it('CONTROL — a lane the projection left BEHIND the node is not stale: a real projection failure leaves it sealed at the last projection (the store is right)', () => {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    const cut = boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(6), projectRunJson: () => { throw new Error('disk full'); } });
+    expect(cut.projection).toMatch(/^failed:disk full/); // ops review since 06:00; the lane still says active
+    expect(laneOf(w, 'alpha').state).toBe('active');
+    expect(boundWrite(w, 'alpha', { ops_state: 'closing' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store', previousOps: 'review' });
+  });
+
+  it('CONTROL — the former tamper model of that case is only "behind" for a lane with no seal: older than the ops change, so not stale', () => {
     const w = makeBoundWorld();
     expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
     expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(6) }).ok).toBe(true); // ops review since 06:00
-    tamperLane(w, { state: 'active', projected_from: PROJECTION_MARK, updated_at: iso(5, 30) }); // a lane that never caught up, no store stamp
+    // a lane that never caught up, no store stamp and no seal (the projection never reached it)
+    tamperLane(w, { state: 'active', projected_from: PROJECTION_MARK, updated_at: iso(5, 30), projection_seal: undefined });
     expect(boundWrite(w, 'alpha', { ops_state: 'closing' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store', previousOps: 'review' });
+  });
+
+  describe('pre-flip condition (4) — the marker that does not read the clock', () => {
+    /*
+     * The clauses above compare `updated_at` stamps, so they inherit the clock's two blind spots: a legacy write
+     * made with a clock BEHIND the node's reads as older than the node, and a lane edited by hand without touching
+     * `updated_at` reads as untouched. A bound write now SEALS the lane it projects (`projection_seal`: the
+     * facts it gave the lane — state, since, window, note, blocked_by). The legacy path spreads the lane it
+     * rewrites, so the seal survives it while the facts do not: the lane saying something other than what the
+     * store last projected into it is drift, judged by comparison, with no clock. A lane with no seal (never
+     * projected) is still judged by the timestamp clauses.
+     * WHAT THIS CANNOT SEE: a write that leaves the five facts as they were (a legacy re-assert of the same
+     * word is not drift — the timestamp clauses still judge that one), and a lane hand-edited to say exactly
+     * what it said before.
+     */
+    const editLane = (w, over) => {
+      const run = readRun(w.runDir);
+      run.lanes.alpha = { ...run.lanes.alpha, ...over };
+      fs.writeFileSync(path.join(w.runDir, 'run.json'), JSON.stringify(run));
+    };
+    const legacyWrite = (w, state, hour) => writeWorkerState({
+      runDir: w.runDir, worker: 'alpha', patch: { ops_state: state }, store: w.store, honorBinding: false, now: () => utc(hour),
+    });
+
+    it('a bound write seals the lane it projects with the facts it gave it', () => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'active', window: 'w-1', note: 'go' });
+      expect(laneOf(w, 'alpha').projection_seal).toEqual({ state: 'active', since: iso(5), window: 'w-1', note: 'go', blocked_by: null });
+      boundWrite(w, 'beta', { ops_state: 'serial-gate', blocked_by: ['lane:alpha'] });
+      expect(laneOf(w, 'beta').projection_seal).toEqual({ state: 'serial-gate', since: iso(5), window: null, note: null, blocked_by: ['lane:alpha'] });
+    });
+
+    it('the seal survives a legacy write untouched — that is what lets the guard see the write', () => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'active', window: 'w-1' });
+      const sealed = laneOf(w, 'alpha').projection_seal;
+      expect(sealed).toMatchObject({ state: 'active', window: 'w-1' });
+      expect(legacyWrite(w, 'review', 6).binding).toEqual({ status: 'disabled' });
+      expect(laneOf(w, 'alpha')).toMatchObject({ state: 'review', projected_from: PROJECTION_MARK });
+      expect(laneOf(w, 'alpha').projection_seal).toEqual(sealed);
+    });
+
+    it('the OFF path adds nothing: a lane the legacy path writes that was never sealed carries no seal key', () => {
+      const w = makeBoundWorld();
+      expect(legacyWrite(w, 'active', 5).ok).toBe(true);
+      expect(Object.keys(laneOf(w, 'alpha')).sort()).toEqual(['projected_from', 'since', 'state', 'updated_at']);
+    });
+
+    it('a legacy write made with a clock BEHIND the node is stale — the word moved, whatever the stamps say', () => {
+      const w = makeBoundWorld();
+      expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true); // node ops: active since 05:00
+      expect(legacyWrite(w, 'review', 4).binding).toEqual({ status: 'disabled' }); // key OFF, and that write's clock reads 04:00
+      expect(laneOf(w, 'alpha')).toMatchObject({ state: 'review', updated_at: iso(4) });
+      const before = runBytes(w);
+      const v = storeVersion(w);
+      const res = boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
+      expect(res).toMatchObject({ ok: false, reason: 'binding-stale', worker: 'alpha', ledger: 'not-attempted' });
+      expect(res.detail).toMatch(/lanes\.alpha/);
+      expect(res.detail).toMatch(/projected/);
+      expect(res.detail).toMatch(/state: "active" -> "review"/);
+      expect(res.detail).toMatch(/missionBinding/);
+      expect(runBytes(w)).toEqual(before);
+      expect(storeVersion(w)).toBe(v);
+      expect(nodeOf(w, 'alpha').ops.state).toBe('active');
+    });
+
+    it('a projected lane edited by hand without touching its stamps is stale', () => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'active', window: 'w-1' });
+      editLane(w, { window: 'w-elsewhere' }); // projected_from is still "store" and updated_at is untouched
+      expect(laneOf(w, 'alpha')).toMatchObject({ projected_from: STORE_PROJECTION_MARK, updated_at: iso(5) });
+      const res = boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(7) });
+      expect(res).toMatchObject({ ok: false, reason: 'binding-stale' });
+      expect(res.detail).toMatch(/window: "w-1" -> "w-elsewhere"/);
+    });
+
+    it.each([
+      ['since', { since: iso(2) }],
+      ['note', { note: 'added by hand' }],
+      ['blocked_by', { blocked_by: ['human:paused'] }],
+    ])('every fact counts: a changed %s is drift', (_name, over) => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'active' });
+      editLane(w, over);
+      expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(7) })).toMatchObject({ ok: false, reason: 'binding-stale' });
+    });
+
+    it('CONTROL — a lane the projection never reached is NOT stale: it is sealed at the LAST projection, and the next write heals it', () => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'pending' }, { now: () => utc(4) });
+      const cut = boundWrite(w, 'alpha', { ops_state: 'active' }, { now: () => utc(5), projectRunJson: () => { throw new Error('disk full'); } });
+      expect(cut).toMatchObject({ ok: true, opsState: 'active' });
+      expect(cut.projection).toMatch(/^failed:disk full/);
+      expect(laneOf(w, 'alpha')).toMatchObject({ state: 'pending', projected_from: STORE_PROJECTION_MARK }); // behind the node, and says so in its own seal
+      const res = boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(6) });
+      expect(res).toMatchObject({ ok: true, previousOps: 'active' });
+      expect(laneOf(w, 'alpha')).toMatchObject({ state: 'review', projected_from: STORE_PROJECTION_MARK });
+      expect(laneOf(w, 'alpha').projection_seal.state).toBe('review');
+    });
+
+    it('CONTROL — a legacy re-assert of the SAME facts is not drift (no word moved)', () => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'active' });
+      expect(legacyWrite(w, 'active', 4).ok).toBe(true); // a clock behind the node, but nothing the lane says has changed
+      expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store', previousOps: 'active' });
+    });
+
+    it('a lane with NO seal (never projected) is still judged by the timestamp clauses', () => {
+      const w = flippedWorld(); // alpha active@05:00 in the store, review@06:00 in run.json — with a seal, as a bound write left it
+      const run = readRun(w.runDir);
+      delete run.lanes.alpha.projection_seal;
+      fs.writeFileSync(path.join(w.runDir, 'run.json'), JSON.stringify(run));
+      expect(boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) })).toMatchObject({ ok: false, reason: 'binding-stale' });
+    });
+
+    it('a malformed seal is no seal: the timestamp clauses answer instead of a crash', () => {
+      const w = makeBoundWorld();
+      boundWrite(w, 'alpha', { ops_state: 'active' });
+      editLane(w, { projection_seal: 'not-an-object' });
+      expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store' });
+    });
   });
 
   it('off -> on -> off -> on: each turn of the key is safe, and only the stale one refuses', () => {
