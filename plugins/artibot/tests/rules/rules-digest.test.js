@@ -29,6 +29,7 @@ import {
   DIGEST_MAX_BYTES,
   hasInstalledUserRules,
   listRuleNames,
+  PATH_SCOPED_LABEL,
   RULE_SUMMARIES,
   userRulesDir,
 } from '../../lib/project-state/rules-digest.js';
@@ -71,6 +72,33 @@ function makeHome(rules) {
 }
 
 const REAL_NAMES = listRuleNames(REAL_RULES_DIR);
+
+/**
+ * A plugin root whose `rules/` is a COPY of the real rule files — real
+ * frontmatter, so the digest groups it exactly as it groups the real thing. The
+ * stub roots above have no frontmatter, which makes every rule always-on and
+ * leaves the path-scoped label out; a cap test over those would be measuring a
+ * digest that never ships.
+ */
+function makeRealisticRoot(root = tmp('real-root')) {
+  fs.mkdirSync(path.join(root, 'rules'), { recursive: true });
+  for (const name of REAL_NAMES) {
+    fs.copyFileSync(path.join(REAL_RULES_DIR, `${name}.md`), path.join(root, 'rules', `${name}.md`));
+  }
+  return root;
+}
+
+/**
+ * Does this rule file's leading frontmatter block declare `paths:`? Written
+ * independently of the module (a line scan, not its regex) so the grouping
+ * assertions below do not just mirror the code under test.
+ */
+function declaresPaths(file) {
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  if (lines[0] !== '---') return false;
+  const end = lines.indexOf('---', 1);
+  return end > 0 && lines.slice(1, end).some((line) => line.startsWith('paths:'));
+}
 
 describe('hasInstalledUserRules — the injection gate', () => {
   it('is false when ~/.claude/rules/artibot/ does not exist', () => {
@@ -146,23 +174,38 @@ describe('buildRulesDigest — content', () => {
     expect(digest.split(REAL_RULES_DIR).length - 1).toBe(1);
   });
 
-  it('has one core line for every rule file, in priority order, none cut short', () => {
+  it('has one core line for every rule file, always-on first then path-scoped, none cut short', () => {
+    const keys = Object.keys(RULE_SUMMARIES);
+    const scoped = keys.filter((k) => declaresPaths(path.join(REAL_RULES_DIR, `${k}.md`)));
+    const alwaysOn = keys.filter((k) => !scoped.includes(k));
     const ruleLines = digest.split('\n').filter((l) => l.startsWith('- '));
-    expect(ruleLines.map((l) => l.slice(2, l.indexOf(':')))).toEqual(Object.keys(RULE_SUMMARIES));
+    expect(ruleLines.map((l) => l.slice(2, l.indexOf(':')))).toEqual([...alwaysOn, ...scoped]);
     for (const line of ruleLines) {
       const name = line.slice(2, line.indexOf(':'));
       expect(line).toBe(`- ${name}: ${RULE_SUMMARIES[name]}`);
     }
   });
 
-  it('puts the always-on rules before the path-scoped domain rules', () => {
-    const order = Object.keys(RULE_SUMMARIES);
-    const alwaysOn = ['verification-discipline', 'dev-protocol', 'agent-coordination', 'quality-gates', 'question-recommendations'];
-    for (const name of alwaysOn) {
-      for (const scoped of ['backend-patterns', 'frontend-patterns', 'test-patterns']) {
-        expect(order.indexOf(name), `${name} before ${scoped}`).toBeLessThan(order.indexOf(scoped));
-      }
-    }
+  it('groups by each rule file\'s OWN frontmatter: always-on, then the label, then path-scoped', () => {
+    const scoped = REAL_NAMES.filter((n) => declaresPaths(path.join(REAL_RULES_DIR, `${n}.md`)));
+    const alwaysOn = REAL_NAMES.filter((n) => !scoped.includes(n));
+    // Non-vacuous: the real census has both kinds, or this would compare nothing.
+    expect(alwaysOn.length).toBeGreaterThan(0);
+    expect(scoped.length).toBeGreaterThan(0);
+
+    const lines = digest.split('\n');
+    const labelAt = lines.indexOf(PATH_SCOPED_LABEL);
+    expect(lines.filter((l) => l === PATH_SCOPED_LABEL)).toHaveLength(1);
+    const at = (name) => lines.findIndex((l) => l.startsWith(`- ${name}:`));
+    for (const name of alwaysOn) expect(at(name), `${name} before the label`).toBeLessThan(labelAt);
+    for (const name of scoped) expect(at(name), `${name} after the label`).toBeGreaterThan(labelAt);
+  });
+
+  it('labels the path-scoped rules as applying to matching files only', () => {
+    expect(PATH_SCOPED_LABEL.startsWith('Path-scoped')).toBe(true);
+    expect(PATH_SCOPED_LABEL).toContain('only to matching files');
+    expect(PATH_SCOPED_LABEL).toContain('frontmatter');
+    expect(bytes(PATH_SCOPED_LABEL)).toBeLessThanOrEqual(90);
   });
 
   it('keeps every summary to one non-empty line', () => {
@@ -183,14 +226,42 @@ describe('buildRulesDigest — the byte cap', () => {
     expect(DIGEST_MAX_BYTES).toBe(1500);
   });
 
-  it('keeps every rule at a realistic, long install path (about 100 characters)', () => {
+  it('keeps every rule AND the path-scoped label at a realistic, long install path (about 100 characters)', () => {
     const base = tmp('base');
     const filler = Math.max(1, 100 - base.length - 1);
-    const root = makeRoot(Object.keys(RULE_SUMMARIES), path.join(base, 'p'.repeat(filler)));
+    const root = makeRealisticRoot(path.join(base, 'p'.repeat(filler)));
     const text = buildRulesDigest({ pluginRoot: root });
     expect(bytes(text)).toBeLessThanOrEqual(DIGEST_MAX_BYTES);
     expect(text.split('\n').filter((l) => l.startsWith('- '))).toHaveLength(Object.keys(RULE_SUMMARIES).length);
+    expect(text.split('\n')).toContain(PATH_SCOPED_LABEL);
     expect(text).not.toContain('more rule files');
+  });
+
+  it('never ends a digest on the label, and counts only RULES in the dropped tally — at every cap', () => {
+    // Exhaustive over caps in steps narrower than one rule line, so every
+    // boundary where the label would be the last thing to fit is crossed.
+    const totalRules = REAL_NAMES.length;
+    let sawLabelKept = false;
+    let sawLabelDropped = false;
+    for (let cap = 0; cap <= 1700; cap += 7) {
+      const text = buildRulesDigest({ pluginRoot: PLUGIN_ROOT, maxBytes: cap });
+      if (text === null) continue;
+      const lines = text.split('\n');
+      const ruleLines = lines.filter((l) => l.startsWith('- '));
+      const tail = lines.find((l) => l.startsWith('(+'));
+      const labelAt = lines.indexOf(PATH_SCOPED_LABEL);
+      if (labelAt >= 0) {
+        sawLabelKept = true;
+        expect(lines[labelAt + 1]?.startsWith('- '), `cap ${cap}: a rule follows the label`).toBe(true);
+      } else if (ruleLines.length < totalRules) {
+        sawLabelDropped = true;
+      }
+      const dropped = totalRules - ruleLines.length;
+      expect(tail, `cap ${cap}`).toBe(dropped > 0 ? `(+${dropped} more rule files in that directory)` : undefined);
+    }
+    // Non-vacuous: the sweep really saw both the label kept and the label dropped.
+    expect(sawLabelKept).toBe(true);
+    expect(sawLabelDropped).toBe(true);
   });
 
   it('never exceeds the cap for any cap: null, or within it', () => {
@@ -217,24 +288,34 @@ describe('buildRulesDigest — the byte cap', () => {
     expect(kept[0].startsWith('- verification-discipline:')).toBe(true);
   });
 
-  it('squeezes the domain rules out first when the install path is very long', () => {
+  it('squeezes the path-scoped rules out first when the install path is very long', () => {
     const base = tmp('long');
-    const root = makeRoot(Object.keys(RULE_SUMMARIES), path.join(base, 'a'.repeat(120), 'b'.repeat(120)));
+    const root = makeRealisticRoot(path.join(base, 'a'.repeat(120), 'b'.repeat(120)));
     const text = buildRulesDigest({ pluginRoot: root });
     expect(bytes(text)).toBeLessThanOrEqual(DIGEST_MAX_BYTES);
-    expect(text).toContain('- verification-discipline:');
+    // Every always-on rule survives; the last path-scoped one is the first to go.
+    for (const name of ['verification-discipline', 'agent-coordination', 'question-recommendations']) {
+      expect(text, name).toContain(`- ${name}:`);
+    }
     expect(text).not.toContain('- frontend-patterns:');
     expect(text).toMatch(/\(\+\d+ more rule files in that directory\)$/);
   });
 
   it('measures UTF-8 BYTES, not characters — a digest a character cap would accept is cut', () => {
     const base = tmp('utf8');
-    const root = makeRoot(Object.keys(RULE_SUMMARIES), path.join(base, '한'.repeat(100)));
-    const full = buildRulesDigest({ pluginRoot: root, maxBytes: 100000 });
-    // Precondition, asserted so the case cannot pass vacuously: the full text is
-    // under 1,500 CHARACTERS and over 1,500 BYTES.
-    expect(full.length).toBeLessThanOrEqual(DIGEST_MAX_BYTES);
-    expect(bytes(full)).toBeGreaterThan(DIGEST_MAX_BYTES);
+    // Pick the Hangul count so the full text is under 1,500 CHARACTERS and over
+    // 1,500 BYTES whatever this machine's temp path length is. Asserted, so the
+    // case cannot pass vacuously.
+    let root = null;
+    for (const hangul of [80, 70, 60, 50, 40, 30]) {
+      const candidate = makeRealisticRoot(path.join(base, '한'.repeat(hangul)));
+      const full = buildRulesDigest({ pluginRoot: candidate, maxBytes: 100000 });
+      if (full.length <= DIGEST_MAX_BYTES && bytes(full) > DIGEST_MAX_BYTES) {
+        root = candidate;
+        break;
+      }
+    }
+    expect(root, 'a Hangul root length that separates characters from bytes').not.toBeNull();
 
     const capped = buildRulesDigest({ pluginRoot: root });
     expect(bytes(capped)).toBeLessThanOrEqual(DIGEST_MAX_BYTES);
@@ -284,6 +365,37 @@ describe('buildRulesDigest — what is on disk wins', () => {
       '- hasOwnProperty: see the file.',
       '- toString: see the file.',
     ]);
+  });
+
+  it('classifies every rule from its OWN frontmatter: LF and CRLF `paths:` are scoped, anything else is always-on', () => {
+    const root = tmp('classify');
+    const rules = path.join(root, 'rules');
+    fs.mkdirSync(rules);
+    const write = (name, body) => fs.writeFileSync(path.join(rules, `${name}.md`), body);
+    write('a-scoped-lf', '---\npaths:\n  - "**/*.js"\n---\n# a\n');
+    write('b-scoped-crlf', '---\r\npaths:\r\n  - "**/*.py"\r\n---\r\n# b\r\n');
+    write('c-frontmatter-without-paths', '---\ndescription: x\n---\n# c\n');
+    write('d-paths-only-in-the-body', '# d\n\nThe word paths: appears here, outside any frontmatter.\n');
+    write('e-paths-after-the-block', '---\ndescription: x\n---\npaths:\n  - nope\n');
+
+    const lines = buildRulesDigest({ pluginRoot: root }).split('\n').filter((l) => l !== '' && !l.startsWith('[artibot:rules]'));
+    expect(lines.map((l) => (l === PATH_SCOPED_LABEL ? '<label>' : l.slice(2, l.indexOf(':'))))).toEqual([
+      'c-frontmatter-without-paths',
+      'd-paths-only-in-the-body',
+      'e-paths-after-the-block',
+      '<label>',
+      'a-scoped-lf',
+      'b-scoped-crlf',
+    ]);
+  });
+
+  it('leaves the label out when no rule is path-scoped, and when the rule files cannot be classified', () => {
+    const stub = buildRulesDigest({ pluginRoot: makeRoot(['dev-protocol', 'quality-gates']) });
+    expect(stub.split('\n')).not.toContain(PATH_SCOPED_LABEL);
+    // Frontmatter that never closes within the first kilobyte is not a declaration.
+    const root = makeRoot([]);
+    fs.writeFileSync(path.join(root, 'rules', 'runaway.md'), `---\n${'x: 1\n'.repeat(400)}paths:\n`);
+    expect(buildRulesDigest({ pluginRoot: root }).split('\n')).not.toContain(PATH_SCOPED_LABEL);
   });
 
   it.each([

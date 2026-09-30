@@ -257,6 +257,52 @@ describe('project-bootstrap hook (spawned)', () => {
     expect(out.stderr).toContain('runtime exclude not written (read-failed)');
     expect(fs.statSync(file).isDirectory()).toBe(true);
   });
+
+  it('stays QUIET on a read-only exclude: exit 0, empty stderr, nothing written — a lock is a choice, not an error', () => {
+    const repo = makeRepo();
+    const file = excludeFile(repo);
+    const before = fs.readFileSync(file);
+    fs.chmodSync(file, 0o444);
+    let out;
+    try {
+      out = runHook({ payload: payloadFor(repo), home: makeHome(['x.md']) });
+    } finally {
+      fs.chmodSync(file, 0o666);
+    }
+
+    expect(out.status).toBe(0);
+    expect(out.stderr).toBe('');
+    expect(out.stdout).toBe('');
+    expect(fs.readFileSync(file).equals(before)).toBe(true);
+  });
+
+  it('reports a UTF-16 exclude with the remedy and leaves it byte for byte', () => {
+    const repo = makeRepo();
+    const file = excludeFile(repo);
+    const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('node_modules/\r\n', 'utf16le')]);
+    fs.writeFileSync(file, utf16);
+
+    const out = runHook({ payload: payloadFor(repo), home: makeHome(['x.md']) });
+
+    expect(out.status).toBe(0);
+    expect(out.stderr).toContain('runtime exclude not written (utf16-exclude)');
+    expect(out.stderr).toContain('re-save it as UTF-8');
+    expect(fs.readFileSync(file).equals(utf16)).toBe(true);
+  });
+
+  it('keeps a cp949-edited exclude intact through a real hook run', () => {
+    const repo = makeRepo();
+    const file = excludeFile(repo);
+    const cp949 = Buffer.concat([Buffer.from([0xb0, 0xa1, 0xb3, 0xaa]), Buffer.from('/\n')]);
+    fs.writeFileSync(file, cp949);
+
+    const out = runHook({ payload: payloadFor(repo), home: makeHome(['x.md']) });
+
+    expect(out.status).toBe(0);
+    const after = fs.readFileSync(file);
+    expect(after.subarray(0, cp949.length).equals(cp949)).toBe(true);
+    expect(after.includes(Buffer.from(BLOCK_BEGIN))).toBe(true);
+  });
 });
 
 describe('the module is import-safe', () => {

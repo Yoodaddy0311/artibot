@@ -51,7 +51,9 @@ function parsePayload(raw) {
 
 /**
  * Say what the exclude job did — once, and only when something happened or went
- * wrong. A steady-state session (`unchanged`, `skipped`) is silent.
+ * wrong. A steady-state session (`unchanged`, `skipped`) is silent, and that
+ * includes a read-only exclude: a deliberate lock is a choice, not a failure, and
+ * a line on every session start would only nag about it.
  *
  * @param {object|null} exclude - The job's result, or `null` when it did not run.
  */
