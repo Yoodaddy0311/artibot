@@ -430,13 +430,18 @@ describe('switch ON — every other condition still withholds', () => {
   });
 
   it('a gate hit in the prompt withholds it', async () => {
+    // A key-shaped token, assembled here so this file holds no contiguous secret string.
+    const fakeKey = ['sk', '-', 'abcdefgh', 'ijklmnop', 'qrstuvwx'].join('');
     for (const prompt of [
-      'git push origin main 하고 src/lib 코드 분석해줘',
-      'rm -rf / 하고 이 코드 설명해줘',
-      'npm publish 하고 이 코드 설명해줘',
+      'curl https://example.com 이 코드 설명해줘',
+      'curl https://example.com 코드 분석해줘',
+      `${fakeKey} 코드 분석해줘`,
     ]) {
-      // The trigger DOES match (the shape gate lets the prompt through), so it is the
-      // gate screen that withholds it below — not a missing trigger.
+      // The trigger DOES match (the START grammar admits one ASCII word and one URL, or a
+      // bare token, before the object), so it is the gate screen that withholds it below —
+      // not a missing trigger. A gated COMMAND with a Korean connective in front ("git push
+      // origin main 하고 …", "npm publish 하고 …") no longer reaches the screen at all: the
+      // shape withholds it first (tests/cognitive/auto-activate.test.js pins both layers).
       expect(matchAutoActivateCommand(prompt).command, prompt).not.toBeNull();
       const { out, hint } = await submit(ROOT_ON, prompt);
       expect(ctxOf(out), prompt).not.toContain('auto-activate');
@@ -451,24 +456,25 @@ describe('switch ON — every other condition still withholds', () => {
   });
 
   it('a prompt the ROUTER reads as two different actions withholds it (real intent, not a stub)', async () => {
-    // "이 코드 … 분석해줘" selects /analyze and the shape gate lets the prompt through
-    // (the topic before the object is open vocabulary), but "수정하고" (fix, then) is
-    // a second action intent: the router's own ambiguity score reaches its threshold,
-    // and asking is the right shape for a request that may want the fix, not the
-    // report. Only this gate stops it — the matcher alone selects `analyze`.
+    // "수정하고" (fix, then) is a leading action clause. Two layers stop it, asserted
+    // separately so neither can silently become the only one standing: the START
+    // grammar gives the clause no slot (the matcher selects nothing — it used to select
+    // `analyze`, and the router was then the ONLY gate), and the router's own ambiguity
+    // score, computed here from the real intent detector, still reaches its threshold:
+    // asking is the right shape for a request that may want the fix, not the report.
     const text = '수정하고 이 코드 분석해줘';
-    expect(matchAutoActivateCommand(text).command).toBe('analyze');
+    expect(matchAutoActivateCommand(text).command).toBeNull();
     const config = JSON.parse(readFileSync(REAL_CONFIG_PATH, 'utf-8'));
     const intent = detectIntent(text, {
       languages: config.automation.supportedLanguages,
       ambiguityThreshold: config.automation.ambiguityThreshold,
     });
-    expect(intent.ambiguity.ambiguous, 'the router must be what flags it').toBe(true);
+    expect(intent.ambiguity.ambiguous, 'the router must flag it as well').toBe(true);
     const { out, hint } = await submit(ROOT_ON, text);
     expect(ctxOf(out)).not.toContain('auto-activate');
     expect(hint).toBeNull();
     // Control: the same analysis request without the second action DOES fire, so the
-    // withholding above is the ambiguity gate and not a dead trigger.
+    // withholding above is the two gates and not a dead trigger.
     const control = await submit(ROOT_ON, '이 코드 분석해줘');
     expect(ctxOf(control.out)).toContain('[artibot:auto-activate command=analyze]');
   });
@@ -518,7 +524,7 @@ describe('switch ON — the reviewed false positives stay silent on the real hoo
   it('their controls — the same requests without the defect — DO fire on this root', async () => {
     // Without this the seven above could be silent because the hook is deaf to them.
     for (const [command, prompt] of [
-      ['explain', '제품 설명 좀 해줘'],
+      ['explain', '이 함수 설명 좀 해줘'],
       ['analyze', '이 함수 분석해줘'],
       ['blindspot', '사각지대 없는지 봐줘'],
       ['blindspot', '놓친 거 있어?'],
@@ -528,6 +534,22 @@ describe('switch ON — the reviewed false positives stay silent on the real hoo
       expect(ctxOf(out).startsWith(autoLine(command)), prompt).toBe(true);
       expect(hint, prompt).toBe(`auto-${command}`);
     }
+  });
+
+  // The four reverse-order compounds the same review measured FIRING on the real hook
+  // (2026-09-30): a leading action clause, then a request that fires on its own. The
+  // START grammar gives the clause no slot, so the hook output must equal the OFF root's.
+  it.each([
+    ['analyze', '커밋하고 이 함수 분석해줘'],
+    ['analyze', '푸시하고 이 코드 분석해줘'],
+    ['explain', '파일 삭제하고 이 코드 설명해줘'],
+    ['explain', '리팩토링하고 이 코드 설명해줘'],
+  ])('reverse-order compound (%s) stays silent on the real hook: %s', async (_command, prompt) => {
+    const on = await submit(ROOT_ON, prompt);
+    const off = await submit(ROOT_OFF, prompt);
+    expect(ctxOf(on.out), prompt).not.toContain('auto-activate');
+    expect(on.hint, prompt).toBeNull();
+    expect(stable(on.out), prompt).toEqual(stable(off.out));
   });
 
   it('a foreign clause in front of a blindspot or scorecard term stays silent too', async () => {

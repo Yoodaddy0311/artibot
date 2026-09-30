@@ -14,6 +14,10 @@
  *     decision module only through the dynamic, fail-closed loader.
  *  4. `CLAUDE.md` and `docs/ORCHESTRATION-ROUTING.md` describe what the code does,
  *     with the allowlist and the switch path character-identical.
+ *  5. What the directive tells the model still runs is what `hooks/hooks.json`
+ *     registers (PreToolUse security hooks on Bash, Write and Edit, none on Read,
+ *     Glob, Grep or TaskCreate), and it says nothing about human gates, which
+ *     `lib/security/human-gates.js` only classifies.
  *
  * WHAT THIS GATE CANNOT SEE (rules §9, stated beside the gate so the gate is not
  * mistaken for a safety proof):
@@ -41,6 +45,7 @@ import {
   readAutoActivateEnabled,
   renderAutoActivateDirective,
 } from '../../lib/cognitive/auto-activate.js';
+import { HUMAN_GATE_MATRIX } from '../../lib/security/human-gates.js';
 import { RECOMMENDATION_HINTS } from '../../scripts/hooks/runtime-prompt.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -154,6 +159,58 @@ describe('hook wiring — confirm-first surface untouched, decision module reach
       const line = renderAutoActivateDirective(name);
       expect(line).toMatch(new RegExp(`^\\[artibot:auto-activate command=${name}\\] [^\\n]+$`));
     }
+  });
+});
+
+describe('directive — the claims it makes rest on facts pinned here', () => {
+  /**
+   * Every PreToolUse entry of the plugin's own hooks.json. A matcher there is an
+   * unanchored regex (the file's `description` says so), `*` meaning every tool.
+   */
+  const preToolUse = JSON.parse(read(PLUGIN_ROOT, 'hooks', 'hooks.json')).hooks.PreToolUse
+    .map((entry) => ({ matcher: entry.matcher, category: entry.category }));
+  const covers = (entry, tool) => entry.matcher === '*' || new RegExp(entry.matcher).test(tool);
+
+  it('the directive names the tools whose PreToolUse hooks exist: Bash, Write and Edit carry a security hook', () => {
+    const line = renderAutoActivateDirective('analyze');
+    expect(line).toContain('PreToolUse hooks still run on Bash, Write and Edit calls');
+    for (const tool of ['Bash', 'Write', 'Edit']) {
+      expect(preToolUse.some((entry) => entry.category === 'security' && covers(entry, tool)), tool).toBe(true);
+    }
+  });
+
+  it('no PreToolUse hook covers Read, Glob, Grep or TaskCreate — "every tool call" would be an overclaim', () => {
+    // The four commands declare Read/Glob/Grep (and analyze TaskCreate). hooks.json
+    // registers PreToolUse hooks for Write|Edit, Bash, Agent (observe only) and
+    // WebFetch (cache) — nothing for these. If a `*` hook is ever added, the
+    // directive and the module header may say more; until then they must not.
+    for (const tool of ['Read', 'Glob', 'Grep', 'TaskCreate']) {
+      expect(preToolUse.filter((entry) => covers(entry, tool)), tool).toEqual([]);
+    }
+  });
+
+  it('the human-gate matrix cannot be claimed as a fence: HG-10 is a judgement no hook can enforce', () => {
+    // `lib/security/human-gates.js` header: "분류·기록만 한다. 어떤 차단도 새로 만들지 않는다."
+    // The matrix classifies and records; its rows are enforced by a hook only where
+    // `enforcement` says so, and HG-10 (a product or business choice) is declared
+    // `undetectable` — no tool-call pattern can carry it. So "human gates still apply"
+    // is not something the directive can say of the matrix as a whole, and it does not
+    // say it. (The wording is pinned to HG-10, which can never become a hook, rather
+    // than to the rows a gate lane may legitimately start enforcing.)
+    const hg10 = HUMAN_GATE_MATRIX.find((row) => row.id === 'HG-10');
+    expect(hg10, 'HG-10 is gone from the matrix: re-derive this pin').toBeDefined();
+    expect(hg10.enforcement).not.toBe('hook');
+    expect(hg10.undetectable).toBeDefined();
+    const line = renderAutoActivateDirective('analyze');
+    expect(line).not.toMatch(/human gate/i);
+    expect(line).not.toMatch(/tool permission/i);
+  });
+
+  it('the module header says the hooks are scoped, names the START grammar, and no longer lists its closed holes', () => {
+    const libSrc = read(PLUGIN_ROOT, 'lib', 'cognitive', 'auto-activate.js');
+    expect(libSrc).not.toMatch(/still run for every tool call/);
+    expect(libSrc).not.toMatch(/Holes the shape gate does NOT close/);
+    expect(libSrc).toMatch(/START grammar/);
   });
 });
 

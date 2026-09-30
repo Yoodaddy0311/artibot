@@ -17,16 +17,22 @@
  * WHAT LIMITS THE BLAST RADIUS — an argument from the code's structure, not a
  * measurement, and where it stops. It is not the gate screen below: the screen
  * is a text match on natural language. The directive only removes a QUESTION
- * ("may I run this command?"). The PreToolUse hooks still run for every tool
- * call the command then makes. The host's own permission prompt is a different
- * matter: a command's frontmatter `allowed-tools` can pre-approve the tools it
+ * ("may I run this command?"). The plugin's PreToolUse hooks (`hooks/hooks.json`)
+ * still run, but only where they are registered: Write|Edit, Bash, Agent (observe
+ * only) and WebFetch (cache) — not for Read, Glob, Grep or TaskCreate, which the
+ * commands also use. The human-gate matrix (`lib/security/human-gates.js`) only
+ * classifies and records, so it is not a second fence either
+ * (`tests/firewall/auto-activate-contract.test.js` pins both facts). The host's
+ * own permission prompt is a different matter: a command's frontmatter
+ * `allowed-tools` can pre-approve the tools it
  * lists, and all four activatable commands list Bash (`commands/<name>.md`) —
  * whether that waives the prompt for a run the model starts from this directive
  * is UNVERIFIED here. So a wrong activation may run those tools without a
  * prompt, and TRIGGER PRECISION is the safety line: an over-eager trigger is
  * not the safe direction, it is the one that removes a confirmation. That is
- * why the table below fires only for a short, single-sentence request whose
- * FINAL predicate is the trigger. The allowlist keeps the removed question
+ * why the table below fires only for a short, single-sentence request that
+ * both STARTS and ENDS inside a closed grammar (the START grammar, below; the
+ * FINAL predicate is the trigger). The allowlist keeps the removed question
  * cheap: by their own command docs each activatable command is a
  * read-and-report flow (`allowed-tools` has no Write/Edit), and `/scorecard`'s
  * default path also appends a snapshot to `.artibot/scorecard.json`.
@@ -81,22 +87,52 @@
  *    command's own frontmatter (trigger list or example hint) and pinned on
  *    synthetic prompts, among them the false positives a 2026-09-30 review
  *    measured on the real hook (the noun "설명 좀", a quoted phrase, "분석하고
- *    커밋해줘", "메일 놓친 거 있어?", a pasted code fence); live false-positive
- *    and false-negative rates are unmeasured. Holes the shape gate does NOT
- *    close, because the topic before an `analyze`/`explain` trigger is open
- *    vocabulary and Korean connectives ("-하고", "-해서") are bound to open-class
- *    verb stems, so no allowlist covers them: a compound whose FIRST clause is
- *    the other action. Measured 2026-09-30 on the real hook: "커밋하고 이 함수
- *    분석해줘", "푸시하고 이 코드 분석해줘", "파일 삭제하고 이 코드 설명해줘" and
- *    "리팩토링하고 이 코드 설명해줘" fire; the router's ambiguity gate
- *    (`detectIntent` at the shipped threshold) withholds the fix / implement /
- *    deploy / test / build variants and does not know commit / push / delete /
- *    refactor. Also open: an `explain` request aimed at a third party ("고객한테
- *    이 정책 설명해줘"). `blindspot` and `scorecard` do not have the first hole:
- *    only `SCOPE` words may precede their term.
+ *    커밋해줘", "메일 놓친 거 있어?", a pasted code fence) and the reverse-order
+ *    compounds the same review measured firing ("커밋하고 이 함수 분석해줘",
+ *    "푸시하고 이 코드 분석해줘", "파일 삭제하고 이 코드 설명해줘", "리팩토링하고
+ *    이 코드 설명해줘"); live false-positive and false-negative rates are
+ *    unmeasured.
+ *  - What the START grammar gives up, and what it leaves open. The Korean
+ *    `analyze` and `explain` shapes used to be anchored at the END only, and the
+ *    topic before the object was open vocabulary, so a leading clause fired. The
+ *    Korean connectives ("-하고", "-한 다음", "-해서") bind to open-class verb
+ *    stems, which is why no list of forbidden leading verbs could ever be
+ *    complete. The shapes are now a CLOSED grammar at the START as well — `^`,
+ *    then only: opener words (이, 그, 해당, 현재 … — first in the prompt, never
+ *    after a noun) · ONE ASCII word and ONE path or URL, either order (a term,
+ *    not a command) · at most one adnominal clause (a free stem plus 한 / 된 /
+ *    하는 …, which can only modify the noun behind it) · nouns from
+ *    `AUTO_ACTIVATE_START_VOCABULARY` · the object · the verb · `$`. A clause
+ *    that ends in a connective ("커밋하고", "푸시한 다음", "삭제 후") has no slot
+ *    to sit in, nor has an English command ("git push", "npm test": two words),
+ *    and no third party can be addressed ("고객한테"). A word added to the
+ *    vocabulary widens only what a request may be ABOUT; a bound noun or a
+ *    connective ("다음", "뒤", "-하고") would put the hole back, and
+ *    `tests/cognitive/auto-activate-start-anchor.test.js` fails on it.
+ *    RECALL GIVEN UP, by choice and not by measurement: a Korean noun outside
+ *    the vocabulary ("제품 설명 좀 해줘", "회의록 설명해주세요" — an open noun
+ *    slot cannot be told from a leading "X하고"), a two-word English term
+ *    ("event loop 설명해줘", "REST API 설명해줘" — no grammar tells it from
+ *    "git push"), a relative clause with an object of its own ("이 함수를
+ *    호출하는 코드"), free verbs and adverbs in an explain ("이 코드가 뭘
+ *    하는지 설명해줘", "… 이해할 수 있게").
+ *    STILL OPEN: ONE English word in front of the request ("push 코드 분석해줘",
+ *    "commit 이 함수 분석해줘", "push origin/main 코드 분석해줘"): a bare word
+ *    carries no Korean connective and is indistinguishable from a one-word term
+ *    ("JWT 설명해줘"). What stands there is the router's ambiguity gate
+ *    (`detectIntent`), which withholds the fix / implement / deploy / publish
+ *    words and does not know commit / push, and the gate screen, which catches
+ *    only gated commands. Measured 2026-09-30 with the real router and screen
+ *    on a two-word slot: "npm publish 코드 분석해줘" was withheld by the router,
+ *    while "git push 코드 분석해줘" and "git commit 이 코드 분석해줘" passed both
+ *    — which is why the slot holds one word. Also open: two clauses typed with
+ *    NO space between them ("푸시하고수정한 코드") read as one adnominal stem.
+ *    `blindspot` and `scorecard` never had the hole: only `SCOPE` words may
+ *    precede their term, and every English shape starts with `^`.
  *  - Natural-language risk with no command in it ("delete production and then
  *    analyze the code") passes the screen. The command that would do harm is
- *    not the allowlisted one, and it stays behind the PreToolUse gates.
+ *    not the allowlisted one, and it stays behind the PreToolUse hooks of the
+ *    tools they cover (see above).
  *  - Whether the model complies, and whether the user found it helpful.
  *
  * PURE apart from two lazy `import()`s of the gate catalogs, taken only after a
@@ -137,14 +173,20 @@ export const AUTO_ACTIVATE_ALLOWLIST = Object.freeze([
  * built from its `source` below.
  * Every quantifier is bounded: an open `+`/`*` before a literal is quadratic on
  * a long single run, and the prompt is user-sized.
+ *
+ * The noun and file-extension pieces are named because the START grammar below
+ * builds its object from the same words: one list, two uses.
  */
+const KO_CODE_NOUN = '코드베이스|코드|소스|모듈|함수|클래스|저장소|아키텍처|의존성|취약점'
+  + '|리포지토리|레포지토리|리포(?!트)|레포(?!트)';
+const EN_CODE_WORD = '\\bcode(?:base)?\\b|\\bsource\\b|\\bmodules?\\b|\\bfunctions?\\b|\\bclass(?:es)?\\b'
+  + '|\\brepo(?:sitory)?\\b|\\barchitecture\\b|\\bdependenc(?:y|ies)\\b|\\bvulnerabilit(?:y|ies)\\b';
+const SOURCE_EXT = 'js|mjs|cjs|jsx|ts|tsx|py|go|rs|java|rb|sh';
 const CODE_OBJECT = new RegExp([
-  '코드베이스|코드|소스|모듈|함수|클래스|저장소|아키텍처|의존성|취약점',
-  '리포지토리|레포지토리|리포(?!트)|레포(?!트)',
-  '\\bcode(?:base)?\\b|\\bsource\\b|\\bmodules?\\b|\\bfunctions?\\b|\\bclass(?:es)?\\b',
-  '\\brepo(?:sitory)?\\b|\\barchitecture\\b|\\bdependenc(?:y|ies)\\b|\\bvulnerabilit(?:y|ies)\\b',
+  KO_CODE_NOUN,
+  EN_CODE_WORD,
   '(?:^|\\s)@[\\w./-]{1,128}',
-  '\\b[\\w-]{1,64}\\.(?:js|mjs|cjs|jsx|ts|tsx|py|go|rs|java|rb|sh)\\b',
+  `\\b[\\w-]{1,64}\\.(?:${SOURCE_EXT})\\b`,
 ].join('|'), 'i');
 
 /**
@@ -213,13 +255,24 @@ const CHECK_KO = `(?:${doVerb('점검|확인|체크|검토')}|${giveVerb('봐|�
  * scope words, each with an optional particle — an ALLOWLIST, so a noun that
  * names no work ("메일 놓친 거 있어?") cannot pass. The "가" particle lets
  * 내/제/우리 be the speaker ("내가 빠뜨린 거").
+ *
+ * Split by what the words ARE: OPENERS are function words (deictic, possessive,
+ * temporal, quantifier, discourse) and can open any request; NOUNS name a kind of
+ * work and only make sense in front of a term about that work. `SCOPE_WORDS` is
+ * their concatenation in the original order, so the `SCOPE` regex below — and with
+ * it every `blindspot` / `scorecard` row — is unchanged; the START grammar of the
+ * `analyze` / `explain` shapes reuses the openers only.
  */
-const SCOPE_WORDS = [
+const SCOPE_OPENERS = [
   '이', '그', '저', '해당', '현재', '우리', '내', '제', '이번', '최근', '방금', '지금까지', '그동안',
   '전체', '모든', '혹시나', '혹시', '일단', '우선', '먼저', '지금', '자', '그럼', '뭔가', '뭐', '더',
-  '또', '아직', '작업', '변경', '구현', '코드', '모듈', '기능', '프로젝트', '세션', '커밋',
+  '또', '아직',
+];
+const SCOPE_NOUNS = [
+  '작업', '변경', '구현', '코드', '모듈', '기능', '프로젝트', '세션', '커밋',
   '요구사항', '설계', '계획', '테스트', '리뷰', '파일', '시스템', '서비스', 'PR',
 ];
+const SCOPE_WORDS = [...SCOPE_OPENERS, ...SCOPE_NOUNS];
 const SCOPE = `(?:(?:${SCOPE_WORDS.join('|')})(?:들|의|에서|에|중|중에|가)?\\s{1,3}){0,4}`;
 /** English opener: an optional "please" and "can/could/would you (please)". */
 const EN_OPEN = '(?:please\\s{1,3})?(?:(?:can|could|would)\\s{1,3}you\\s{1,3}(?:please\\s{1,3})?)?';
@@ -241,6 +294,112 @@ const EN_HEAD = `${EN_CODE_HEAD}|files?|pipelines?|flows?|systems?|logic|designs
 /** The verbs an English "explain how/why/what X …" clause may end on. */
 const EN_PRED = 'works?|happens?|fails?|breaks?|is|are|does|do|means?|behaves?|handles?|runs?|loads?|differs?';
 
+// ---------------------------------------------------------------------------
+// The START grammar of the Korean `analyze` / `explain` shapes (the header,
+// "What the START grammar gives up, and what it leaves open", says why). Every
+// piece is a CLOSED class and every quantifier is bounded. Korean is verb-final,
+// so a leading clause ("커밋하고 …") cannot be refused by anchoring on the verb:
+// the prompt has to be refused by what may stand BEFORE the request, and that
+// can only be an allowlist — the connectives bind to open-class verb stems.
+// ---------------------------------------------------------------------------
+
+/** Alternation source, longest word first so a short word never hides a longer one. */
+const alt = (words) => [...words].sort((a, b) => b.length - a.length).join('|');
+
+/**
+ * Nouns a Korean request may be ABOUT or qualified by: code and its parts,
+ * aspects, domains, a few concepts, modifiers, quantifiers and pronouns. CLOSED
+ * and BARE on purpose: no word here takes a connective, and none is a bound noun
+ * ("다음", "뒤", "후", "김", "채") — either would let a leading clause back in
+ * ("커밋한 다음 …"). Adding one widens only what a request may be about; the
+ * start-anchor test suite checks that the list stays free of both kinds.
+ */
+const TOPIC_NOUNS = [
+  // code and its parts
+  '코드베이스', '코드', '소스', '모듈', '함수', '클래스', '저장소', '리포지토리', '레포지토리',
+  '파일', '폴더', '디렉터리', '프로젝트', '시스템', '서비스', '컴포넌트', '인터페이스',
+  '라이브러리', '패키지', '프레임워크', '플러그인', '에이전트', '프롬프트', '스크립트', '명령어',
+  '커맨드', '설정', '스키마', '쿼리', '모델', '핸들러', '컨트롤러', '라우터', '라우팅', '미들웨어',
+  '파이프라인', '훅', '알고리즘', '정규식', '로그', '에러', '오류', '예외', '버그', '이슈',
+  '커밋', '브랜치', '변경', 'PR', '구현', '기능', '테스트', '배포', '빌드', '세션',
+  // aspects
+  '성능', '보안', '품질', '구조', '아키텍처', '의존성', '취약점', '설계', '동작', '원리', '흐름',
+  '로직', '역할', '목적', '의도', '방식', '작동', '용도', '차이', '구성',
+  // domains and concepts
+  '인증', '인가', '권한', '로그인', '결제', '주문', '사용자', '유저', '데이터', '데이터베이스',
+  '네트워크', '서버', '클라이언트', '프론트엔드', '프런트엔드', '백엔드', '캐시', '스레드',
+  '프로세스', '메모리', '이벤트', '루프', '비동기', '동시성', '트랜잭션', '인덱스', '클로저',
+  '콜백', '프로미스', '재귀', '상속', '다형성', '제네릭', '스코프', '해시', '스택', '트리',
+  '포인터', '렌더링', '상태', '토큰', '쿠키', '리팩토링', '리팩터링', '마이그레이션', '디버깅',
+  '최적화', '머지', '리베이스', '롤백',
+  // modifiers
+  '핵심', '공통', '기존', '신규', '레거시', '내부', '외부', '메인',
+  // quantifiers
+  '전체', '전부', '모든', '각',
+  // pronouns
+  '이거', '이것', '이걸', '그거', '그것', '그걸', '저거', '저것',
+];
+
+/** Adverbs an `explain` request may carry right before its verb ("자세히 설명해줘"). */
+const EXPLAIN_ADVERBS = [
+  '자세히', '상세히', '상세하게', '쉽게', '간단히', '간단하게', '간략히', '간략하게',
+  '차근차근', '꼼꼼히', '꼼꼼하게', '천천히', '깊이', '깊게', '친절하게',
+];
+
+/**
+ * What a free stem must END in to be an adnominal clause — the form that can only
+ * MODIFY the noun behind it ("수정한 코드", "호출하는 함수", "복잡한 모듈"). Not a
+ * connective: "수정하고", "수정해서", "수정한 다음" do not end in one of these, and
+ * after one the next word has to be a noun of the vocabulary, never a bound noun.
+ */
+const ADNOMINAL_ENDINGS = ['하는', '되는', '했던', '하던', '한', '된', '할', '될'];
+
+/**
+ * The lists above, exposed for the contract tests (frozen; not an extension point —
+ * a new word is a code change with its own pinned phrase).
+ */
+export const AUTO_ACTIVATE_START_VOCABULARY = Object.freeze({
+  openers: Object.freeze([...SCOPE_OPENERS]),
+  topicNouns: Object.freeze([...TOPIC_NOUNS]),
+  adverbs: Object.freeze([...EXPLAIN_ADVERBS]),
+  adnominalEndings: Object.freeze([...ADNOMINAL_ENDINGS]),
+});
+
+/** Opener words, first in the prompt: "이 ", "우리의 ", "내가 ", "일단 ". */
+const START_OPENERS = `(?:(?:${alt(SCOPE_OPENERS)})(?:들|의|에서|에|중|중에|가)?\\s{1,3}){0,3}`;
+/**
+ * The ASCII slot: at most ONE bare term or identifier ("JWT", "auth", "Node.js",
+ * "SECRET-MARKER-XYZ") and at most ONE path or URL (it contains `/`, `\` or `@`, or
+ * ends in a source extension), in either order, each with the particle that may
+ * follow it ("JWT를 ", "CORS에 대해 "). Neither class has Hangul, so "commit하고" and
+ * "push 하고" (the connective is a Hangul token) do not fit. One word, not two:
+ * "git push" / "git commit" / "npm test" are an English clause, and no grammar can
+ * tell a two-word command from a two-word term ("event loop"), so the slot gives
+ * up the second word of a term rather than let the command through.
+ */
+const ASCII_GAP = '(?:의|을|를|은|는|도|만|에서|에|에\\s{0,2}대해서?|에\\s{0,2}관해서?)?\\s{1,3}';
+const ASCII_WORD = `[A-Za-z0-9][A-Za-z0-9_.-]{0,31}${ASCII_GAP}`;
+const ASCII_PATH = '(?:@[\\w./-]{1,128}|[\\w.:-]{0,64}[/\\\\][\\w./\\\\:-]{0,128}'
+  + `|[\\w.-]{1,64}\\.(?:${SOURCE_EXT})\\b)${ASCII_GAP}`;
+const START_ASCII = `(?:(?:${ASCII_WORD})?(?:${ASCII_PATH})?|(?:${ASCII_PATH})(?:${ASCII_WORD}))`;
+/** At most one adnominal clause: a free stem plus a closed ending, then the gap. */
+const START_ADNOMINAL = `(?:[가-힣]{1,8}(?:${alt(ADNOMINAL_ENDINGS)})\\s{1,3})?`;
+/** Nouns of the vocabulary, spaced or glued ("소스코드", "보안취약점"), each with an optional particle. */
+const START_NOUNS = `(?:(?:${alt(TOPIC_NOUNS)})(?:들|의|에서|에|중|중에)?\\s{0,3}){0,5}`;
+/**
+ * Everything that may stand between `^` and the object: the ASCII slot goes on ONE
+ * side of the openers (so one word and one path in all), the adnominal clause and
+ * the nouns come after both. An opener never follows a noun: "커밋 이 코드 …" does
+ * not fit.
+ */
+const START = `(?:${START_ASCII}${START_OPENERS}|${START_OPENERS}${START_ASCII})`
+  + `${START_ADNOMINAL}${START_NOUNS}`;
+/** The object of an analyze request: a code noun (glued pairs allowed), @path or a file path. */
+const OBJECT_HEAD = `(?:(?:${KO_CODE_NOUN}){1,2}|${EN_CODE_WORD}|@[\\w./-]{1,128}`
+  + `|[\\w./\\\\:-]{1,96}\\.(?:${SOURCE_EXT})\\b)`;
+/** What may close an explain topic before its verb: a particle or "에 대해". */
+const EXPLAIN_FINAL = '(?:을|를|도|만|은|는|에\\s{0,2}대해서?|에\\s{0,2}관해서?)?';
+
 /**
  * @param {string} id stable rule id (charset `[a-z0-9-]`)
  * @param {string} command the allowlisted command this rule selects
@@ -249,9 +408,11 @@ const EN_PRED = 'works?|happens?|fails?|breaks?|is|are|does|do|means?|behaves?|h
  *   prompt that mentions two commands ambiguous. No `g`/`y` flag: `.test` must be
  *   stateless across calls.
  * @param {...string} shapes TRIGGER SHAPE — regex sources OR-ed into one
- *   case-insensitive regex, each ending in `$` so the trigger clause is the LAST
- *   thing in the prompt (an English shape is also anchored with `^`). A row
- *   fires only when its mention regexes AND its shape match.
+ *   case-insensitive regex, each anchored at BOTH ends: `^`, so only a closed
+ *   grammar may precede the request, and `$`, so the trigger clause is the LAST
+ *   thing in the prompt. A row fires only when its mention regexes AND its shape
+ *   match. (`tests/cognitive/auto-activate-start-anchor.test.js` checks every
+ *   alternative of every row for both anchors.)
  */
 function rule(id, command, all, ...shapes) {
   const shape = new RegExp(shapes.map((source) => `(?:${source})`).join('|'), 'i');
@@ -270,26 +431,27 @@ function rule(id, command, all, ...shapes) {
  * request. There is no row for `why`: it has no command.
  *
  * A row is a MENTION plus a SHAPE (see `rule`). The mention says what the prompt
- * is about; the shape says the trigger IS the request — the final predicate of a
- * short plain sentence, not a noun, a quoted phrase or the first half of a
- * compound. Ambiguity is decided on mentions, so a prompt that names two
- * commands still selects none.
+ * is about; the shape says the trigger IS the request — a short plain sentence
+ * that opens inside a closed grammar and whose final predicate is the trigger,
+ * not a noun, a quoted phrase or one half of a compound. Ambiguity is decided on
+ * mentions, so a prompt that names two commands still selects none.
  * @type {readonly Readonly<{id: string, command: string,
  *   all: readonly RegExp[], shape: RegExp}>[]}
  */
 const TRIGGER_RULES = Object.freeze([
-  // Korean: the code object sits RIGHT before the verb — only a particle, "전체" or
-  // a focus noun (성능·보안·품질·구조·아키텍처·의존성, after the `--focus` domains
-  // of `commands/analyze.md`) may sit between — so "이 함수 커밋하고 분석해줘" does
-  // not fit, and "이 함수 분석하고 커밋해줘" ends in another verb. What may come
-  // BEFORE the object is open vocabulary (see the header's list of holes).
+  // Korean: `^`, the START grammar (openers, one ASCII word and one path, at most one
+  // adnominal clause, vocabulary nouns), the code object, then only a particle,
+  // "전체" or a focus noun (성능·보안·품질·구조·아키텍처·의존성, after the `--focus`
+  // domains of `commands/analyze.md`), the verb and `$`. So "커밋하고 이 함수
+  // 분석해줘" has no slot for its first clause, "이 함수 커밋하고 분석해줘" has
+  // none for its middle one, and "이 함수 분석하고 커밋해줘" ends in another verb.
   // English: verb first, at most one modifier, and the code object is the LAST
   // word ("analyze the auth module", "analyze src/lib/foo.js").
   rule(
     'analyze-code',
     'analyze',
     [/분석|analy[sz]e|analysis/i, CODE_OBJECT],
-    `(?:${CODE_OBJECT.source})(?:들)?(?:\\s{0,2}(?:전체|전부|모두))?(?:의|을|를|도|만)?`
+    `^${START}${OBJECT_HEAD}(?:들)?(?:\\s{0,2}(?:전체|전부|모두))?(?:의|을|를|도|만)?`
       + `(?:\\s{0,2}(?:성능|보안|품질|구조|아키텍처|의존성))?(?:을|를)?\\s{0,2}${SOFT}${doVerb('분석')}$`,
     `^${EN_OPEN}analy[sz]e\\s{1,3}${EN_DET}(?:${EN_FREE}\\s{1,3})?`
       + `(?:${EN_CODE_HEAD}|@[\\w./-]{1,128}`
@@ -297,7 +459,16 @@ const TRIGGER_RULES = Object.freeze([
   ),
   // The VERB form closes the prompt ("설명해줘", "설명 좀 해줘"). The noun forms —
   // "제품 설명 좀 다듬어줘", "설명 부탁" — are not requests to be taught anything.
-  rule('explain-ko', 'explain', [/설명/], `${doVerb('설명')}$`),
+  // What may stand before the verb is the START grammar alone: an explain has no
+  // code object to anchor on ("이벤트 루프 설명해줘", "JWT 설명해줘"), so the topic
+  // is the closed vocabulary or an ASCII term, plus an optional particle or
+  // "에 대해" and one adverb of a fixed list.
+  rule(
+    'explain-ko',
+    'explain',
+    [/설명/],
+    `^${START}${EXPLAIN_FINAL}\\s{0,2}${SOFT}(?:(?:${alt(EXPLAIN_ADVERBS)})\\s{1,2})?${doVerb('설명')}$`,
+  ),
   // English: "explain this", "explain the auth module", "explain how the router
   // works" — a closed grammar (see `EN_HEAD`), not an open tail.
   rule(
@@ -537,5 +708,6 @@ export function renderAutoActivateDirective(command) {
     + `Low-risk allowlisted command: run /${command} for this request now without asking for confirmation, `
     + 'and say so in one short Korean sentence first. '
     + 'If the request clearly does not fit it, ignore this line. '
-    + 'Human gates and tool permissions still apply.';
+    + 'This line skips only that confirmation and is not approval for any other action; '
+    + 'PreToolUse hooks still run on Bash, Write and Edit calls.';
 }
