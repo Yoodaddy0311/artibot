@@ -5,6 +5,7 @@
 - 관련 문서: 결정 배경 [V5-RESCOPE-20260930.md](V5-RESCOPE-20260930.md) · 행의 정본 [V5-BACKLOG.md](V5-BACKLOG.md) · 증거 보관 관례 [evidence/README.md](evidence/README.md) · 판정 기준의 정본 [ARTIBOT-5.0-DESIGN.md](ARTIBOT-5.0-DESIGN.md) §4.
 - 기준: master `1ec215bf` 트리, 설치본 4.69.0(홈 `installed_plugins.json` 열람 2026-09-30, `gitCommitSha` `ad8e5b28`). 체감 패키지(v4.70.0 계획)가 착지하면 §1.4 의 스위치 값이 달라진다.
 - 검증 수준: 명령은 스크립트 머리 주석의 USAGE 와 커맨드 문서에서 옮겼고 파일 존재는 Glob 으로 확인했다. 이 문서를 쓴 작업자에게는 셸이 없어 **어떤 명령도 실행하지 못했다**. 첫 실행은 §5 의 점검으로 검증한다. 미확인은 §8 에 모았다.
+- 예외 — §3.6 한 줄 census: 그 스크립트(`v51-census.mjs`)는 이 리포 작업 트리에서 실행했다(실측 2026-09-30, 출력은 §3.6 에 인용). §1~§7 의 나머지 명령이 미실행이라는 위 문단은 그대로다.
 - 절 참조: 숫자만 있는 §N 은 이 문서의 절이고, 백로그의 절은 "백로그 §N" 이나 소문자 접미가 붙은 §4-c 처럼 쓴다.
 - 이 문서의 위치: 배포 사용자용이 아니라 이 리포 내부 절차라서 `plugins/artibot/docs/` 가 아닌 이 디렉터리에 둔다. 이유는 셋이다. (1) 결과를 되돌리는 절차(백로그 · 증거 README)가 이 리포 전용이다. (2) 플러그인 패키지에 넣으면 릴리스에 묶인다 — 설치본에는 `docs/` 가 실리지만(4.69.0 캐시 Glob 확인) v4.70.0 뒤에 커밋하면 다음 릴리스 전까지 설치본에 없다. (3) 판독기 사용법은 각 스크립트 머리 주석이 이미 설치본에 실려 있다. 대상 리포의 세션은 이 리포 메인 체크아웃의 이 파일을 읽는다(설치본에는 없다).
 
@@ -15,7 +16,7 @@
 | 준비 | 플러그인 버전 · 판독기 경로 · 원장 위치 · 스위치 확인 | 준비 기록 | 1 |
 | 기준선 T0 | 스위치 ON 전 상태를 같은 판독기로 재서 기록 | T0 기록 | 2 |
 | 사용 | 대상 리포에서 플러그인을 평소처럼 쓴다 | 원장 행 | 없음 |
-| 측정 | 창마다 판독기를 돌려 분자·분모·시각을 적는다 | 원시 출력 | 3 |
+| 측정 | 창마다 판독기를 돌려 분자·분모·시각을 적는다(원장 판독기 한 번에: 3.6) | 원시 출력 | 3 |
 | 정합성 | 관측치가 서로 모순되지 않는지 점검 | 정합성 블록 | 4 |
 | 반환 | 증거 문서로 만들어 이 리포 백로그로 되돌린다 | 증거 문서와 백로그 행 갱신 | 6 |
 | B-3 표 | 완료 보고의 모델별 사용량 표를 원장과 대조 | B-3 착지 뒤 | 7 |
@@ -186,6 +187,57 @@ node "$AB\scripts\ledger\verify-rate.mjs"
 
 표본이 안 생기면: SH-05 · SH-06 · SH-12 · SH-19 · CA-03 은 특정 사용(auditor 검수 · `/autopilot` VERIFY · `/split` 레인 · 중첩 스폰)이 있어야 생긴다. 자연 발생을 기다릴지 의도적 프로브를 할지는 오너 결정이고, 프로브는 자연 표본과 구분해 표기한다(§1.5).
 
+### 3.6 한 줄 census — `v51-census.mjs` (다른 리포에서 실행, 2026-09-30 추가)
+
+§3.1 의 원장 판독기를 손으로 하나씩 돌리는 대신 이 명령 하나로 돌린다. 원장은 세션이 도는 동안 계속 늘어서(§1.3 주의 3) 판독기마다 따로 읽으면 분모가 서로 다른 순간의 것이 된다. 그래서 명령은 **원장 사본 하나**를 시작할 때 만들고 모든 원장 판독기에 그 사본을 읽힌다(`plugins/artibot/scripts/ledger/v51-census.mjs:28-39`). 판독기는 고치지 않고 자식 프로세스로 실행한다. 사본은 OS 임시 디렉터리에 실행 동안만 있고 끝나면 지운다(도중에 강제 종료하면 `artibot-census-` 로 시작하는 디렉터리가 남으니 지운다).
+
+**돌리는 것.** 사본을 읽는 7개 — session-coverage(④) · verify-rate 와 verify-call-rate(③) · route-compare(②) · existence-audit(⑤) · usage-cost-table · `model-routing.mjs validate --live` — 와, 원장이 아니라 자동조종 세션 저장소를 읽는 recovery-journal-census 1개다. 마지막 것은 사본 대상이 아니고 `--since` 도 받지 않아 문서에 `live-store` 와 범위 `all` 로 표시된다(`plugins/artibot/scripts/ledger/v51-census.mjs:41-47`). 돌리지 않는 6개 — outcome-census · nl-activation-report · topology-agreement · question-rate · resume-report · read-order-guard — 는 입력이 원장 하나가 아니거나 원장이 아니라서 사본만 넘길 수 없다. 문서의 `notRun` 이 이유와 따로 돌리는 명령을 적는다(`plugins/artibot/scripts/ledger/v51-census-readers.mjs#NOT_RUN`). 이 6개의 지표(SH-03 · SH-04 · SH-09 · CA-05 · CA-08 · outcome 게이트)는 §3.1 대로 따로 잰다.
+
+**스크립트 찾기.** 스크립트는 자기 플러그인 트리(판독기와 `lib/`)만 쓰고 대상 리포의 것을 쓰지 않으므로 어느 cwd 에서나 돈다. 설치본 캐시에는 이 스크립트가 든 릴리스 전까지 없다(실측 2026-09-30: 4.70.0 캐시 Glob 결과 없음). 그때까지는 이 리포 메인 체크아웃의 `plugins/artibot/scripts/ledger/v51-census.mjs` 경로로 직접 부른다. 릴리스 뒤에는 `/model-routing` 커맨드 §1 과 같은 순서(환경변수, 캐시 최신 버전, 마켓 사본)로 찾는다. 아래 한 줄은 Bash 에서 실행했다(실측 2026-09-30: 환경변수가 비어 있으면 `v51-census not found`, 이 워크트리의 플러그인 루트를 주면 그 경로를 출력).
+
+```text
+VC=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/ledger/v51-census.mjs"; if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/$S" ]; then VC="$CLAUDE_PLUGIN_ROOT/$S"; fi; if [ -z "$VC" ]; then for v in $(ls -1 "$C" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do if [ -f "$C/$v/$S" ]; then VC="$C/$v/$S"; break; fi; done; fi; if [ -z "$VC" ]; then for m in "$HOME"/.claude/plugins/marketplaces/*/plugins/artibot; do if [ -f "$m/$S" ]; then VC="$m/$S"; break; fi; done; fi; if [ -n "$VC" ]; then echo "$VC"; else echo "v51-census not found"; fi
+```
+
+**실행.** 대상 리포 루트를 `--cwd` 로 준다(생략하면 cwd). 하위 디렉터리를 주면 경로 해석기가 위로 올라가지 않아 `no-ledger` 로 끝난다(§1.2). 이 리포 체크아웃에서 돌리고 설치본을 재는 권장형:
+
+```text
+node "<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs" --cwd "<대상 리포 루트>" --plugin-root "<installPath>" --autopilot-dir "<installPath>/runtime/autopilot" --since <ISO 시각> --json --out "<증거>.md" > census.json
+```
+
+- `<installPath>` 는 §1.1 의 값이다. `--plugin-root` 를 빼면 existence-audit 는 이 체크아웃의 인벤토리를, model-routing 은 이 체크아웃의 설정과 로스터를 잰다. 대상 프로젝트가 쓴 것은 설치본이다(실측 2026-09-30: 4.70.0 캐시를 주고 판독기 8건 중 error 0, ok 7 · unmeasured 1).
+- `--autopilot-dir` 를 빼면 recovery-journal-census 는 스크립트가 든 플러그인의 저장소를 읽는다. 자동조종 세션은 설치 버전 디렉터리에 저장되므로(§1.3) 설치본 저장소를 준다(실측: 4.70.0 저장소는 파일 4개에 저널 1행).
+- `--since` 를 주면 판독기마다 창과 전체 이력을 둘 다 잰다. §2.3 6번이 창만 보고하는 것을 금지한다.
+- JSON 은 크다(이 리포 원장 25MB 로 0.5~0.9MB). 파일로 받고 `metrics` 와 `consistency` 부터 읽는다. Git Bash 의 `>` 를 쓴다. PowerShell 5.1 의 `>` 는 UTF-16 이 될 수 있다(§1.2, 미확인).
+- node 가 PATH 에 없으면 PowerShell 에서 `& (Get-Command node).Source <스크립트> ...` 로 부른다(실측 2026-09-30: PowerShell 에서 외부 임시 git 리포 루트에 서서 성공).
+
+| 플래그 | 뜻 | 기본 |
+|---|---|---|
+| `--cwd <루트>` | 재는 프로젝트. 저장소 루트여야 한다 | 현재 디렉터리 |
+| `--since <ISO 또는 epoch 밀리초>` | 창 경계. 숫자만이면 epoch 밀리초(판독기와 같은 규칙) | 없음(전체 이력) |
+| `--json` | 문서를 한 줄 JSON 으로 출력 | 증거 markdown 출력 |
+| `--out <경로>.md` | 증거 markdown 도 파일로 쓴다. `.md` 만 받는다(원장을 덮어쓸 수 없다) | 안 씀 |
+| `--plugin-root <디렉터리>` | existence-audit 인벤토리와 model-routing 기대 티어의 기준 플러그인 | 스크립트가 든 플러그인 |
+| `--autopilot-dir <디렉터리>` | recovery-journal-census 가 읽는 세션 저장소 | 스크립트가 든 플러그인의 저장소 |
+| `--exclude-sessions <목록 파일 또는 id 나열>` | session-coverage 한 판독기에만 적용. raw 수치가 항상 같이 나온다(§1.5) | 없음 |
+
+**읽는 법.**
+
+- `status`: `ok` · `partial`(판독기 오류나 누락, 또는 일관성 위반) · `no-ledger`(원장 없음 — 측정 없음, exit 0, 판독기는 하나도 돌지 않는다) · `ledger-unreadable` · `error`. exit 0 이어도 이 값을 먼저 읽는다.
+- `metrics[]`: 행마다 `numerator` · `denominator` · `ratio` · `measuredAt` · `status`. 분모 0 은 `unmeasured` 이고 ratio 는 null 이다(§2.3 1번). 판독기가 시각을 내지 않으면 그 실행의 시작 시각이 들어가고 `measuredAtSource` 가 `census-run-start` 다(§2.1).
+- `consistency.ok`: 모든 원장 판독기가 사본을 읽었는지(입력 경로와 바이트), 각 판독기 census 의 합(§4 첫 항목), 판독기별 합계 항등식을 자동 대조한 결과다. false 면 `checks` 에서 `holds: false` 를 찾는다. §4 대로 숨기지 않고 올린다.
+- `runs[].status` 가 `error` 인 판독기의 지표는 수치가 null 이고 `errors` 에 이유가 있다. 판독기가 죽으며 낸 빈 fold 는 0 으로 읽지 않는다.
+- `ledger.grewDuringRun` 이 true 면 그 증가분은 어떤 수치에도 없다. 같은 시점을 다시 재려면 다시 돌린다.
+- 이 명령을 돌린 세션도 훅으로 원장에 행을 남긴다(§1.5). 그 세션 id 를 적는다.
+- 증거 문서로 옮길 때는 §6.2 를 따른다. 원시 JSON 은 대상 리포에 커밋하지 않고(1번), 문서와 JSON 에 든 대상 프로젝트 경로와 에이전트 id(route-compare 의 pairs, model-routing 의 rows)는 3번대로 다룬다.
+
+**검증(실측 2026-09-30, 이 리포 원장 사본).**
+
+- 사본(25,066,715 B, sha256 앞 12자 `22ad2cfd29dc`)을 외부 스크래치 프로젝트에 놓고 중립 cwd 에서 `--since 2026-09-28T00:00:00Z` 로 돌렸다. 15건(판독기 7개 x 창·이력 + 저장소 1) ok 14 · unmeasured 1(체크아웃 기준 저장소가 없음) · error 0, 일관성 55건 중 위반 0, 12.6초. 창 행 하나를 같은 사본에 `session-coverage.mjs --since` 를 직접 돌린 값과 대조했다(14/24 와 14/24).
+- 같은 사본을 `git init` 한 외부 임시 리포에 놓고 그 루트에서 `--cwd` 없이 PowerShell 로 돌렸다. 이력 행 20개가 위 실행과 전부 같았고(같은 snapshot sha256) 10.6초였다.
+- 테스트: `plugins/artibot/tests/ledger/v51-census-cli.test.js` 와 `v51-census-inproc.test.js` — 픽스처 원장, 원장 없음, 죽는 판독기, 돌아가는 동안 원장이 늘 때의 스냅샷 일관성.
+- 못 본 것: 새 플랫폼 프로젝트에서의 첫 실행, 이 리포 원장보다 큰 원장의 시간과 출력 크기(25MB 까지만 쟀다), 설치본 캐시에서의 실행(릴리스 전이라 없다).
+
 ## 4. 정합성 점검
 
 관측치 3건 이상을 한 블록으로 보고할 때 "이 수치들이 서로 모순되지 않는가"를 명시 점검 항목으로 넣는다(검증 규율 §5). 개별 사실이 다 맞아도 합치면 설명되지 않는 제3의 사건이 필요할 수 있다. 점검할 항등식과 이 리포에서 관찰된 예:
@@ -258,11 +310,12 @@ node "$AB\scripts\ledger\verify-rate.mjs"
 
 ## 8. 미확인
 
-- 이 문서의 어떤 명령도 실행하지 않았다(셸 없음). 플래그와 출력 필드는 스크립트 머리 주석에서 옮겼다.
+- §3.6 의 census 를 뺀 이 문서의 어떤 명령도 실행하지 않았다(셸 없음). 플래그와 출력 필드는 스크립트 머리 주석에서 옮겼다.
 - 체감 패키지 착지 후 스위치 값 · B-1 메커니즘 · B-2 키 이름 · B-3 표 형식.
 - 설정 편집이 진행 중 세션에 즉시 반영되는지, `/update` 가 설치본 설정 편집을 되돌리는지(추론 근거는 SH-11 행뿐).
 - SH-03 실사용 n, Canary 오작동·되돌림률 임계, SH-12 heartbeat 를 읽는 정확한 필드 위치.
 - PAUSE·재시도 횟수와 CA-01 게이트 히트를 세는 판독기.
 - 대상 리포가 git 이 아니거나 워크트리인 경우의 실환경 동작(폴백 경로 규칙은 코드로만 확인).
 - PowerShell 리다이렉트의 인코딩.
+- §3.6 census: 어느 릴리스부터 설치본 캐시에 들어가는지, 새 플랫폼 프로젝트에서의 첫 실행, 25MB 를 넘는 원장에서의 실행 시간과 출력 크기, 측정 중 원장에 붙은 행이 사본에 반쯤 잘려 들어갔을 때 판독기 census 의 corrupt 1행으로 읽히는지(추론만 — 그 순간을 재현하지 못했다).
 - 대상 리포 세션이 이 런북을 읽는 경로(오너가 그 프로젝트의 CLAUDE.md 에 이 파일 위치를 적을지는 오너 결정).
