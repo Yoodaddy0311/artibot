@@ -264,8 +264,13 @@ describe('docs — say what the code does, character-identical where it names th
     // PreToolUse hooks do run, but a command's own `allowed-tools` may waive the host
     // prompt, and whether it does for a directive-started run is unverified. The three
     // places that carried it now say so; this pin keeps the old sentence from returning.
+    // Its replacement ("the PreToolUse hooks still run for every tool call") was itself too
+    // wide: hooks.json registers no PreToolUse hook for Read, Glob, Grep or TaskCreate
+    // (pinned above), so CLAUDE.md now names the tools the hooks do cover.
     const p = autoActivateParagraph();
-    expect(p).toMatch(/PreToolUse hooks still run for every tool call the command makes/);
+    expect(p).toMatch(/PreToolUse hooks still run on Bash, Write and Edit calls \(not on Read, Glob, Grep or TaskCreate\)/);
+    expect(p).not.toMatch(/every tool call/);
+    expect(p).toMatch(/opens inside a closed START grammar/);
     expect(p).toMatch(/host permission prompt may be waived by the command's own `allowed-tools` \(unverified\)/);
     expect(p).toMatch(/trigger precision, not the permission system, is the safety line/);
     expect(p).not.toMatch(/tool permission still applies/);

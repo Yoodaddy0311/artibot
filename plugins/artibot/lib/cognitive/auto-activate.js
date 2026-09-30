@@ -108,7 +108,12 @@
  *    and no third party can be addressed ("고객한테"). A word added to the
  *    vocabulary widens only what a request may be ABOUT; a bound noun or a
  *    connective ("다음", "뒤", "-하고") would put the hole back, and
- *    `tests/cognitive/auto-activate-start-anchor.test.js` fails on it.
+ *    `tests/cognitive/auto-activate-start-anchor.test.js` fails on it. The grammar
+ *    only REFUSES: its object alternatives are the mention regex's own (see
+ *    `OBJECT_HEAD`), so nothing fires that did not fire before; that test compares
+ *    30,000 generated prompts with a frozen copy of the old shapes. A generated
+ *    corpus shows this, it does not prove it (a first draft of the object grammar
+ *    was wider, and only a review's corpus found it).
  *    RECALL GIVEN UP, by choice and not by measurement: a Korean noun outside
  *    the vocabulary ("제품 설명 좀 해줘", "회의록 설명해주세요" — an open noun
  *    slot cannot be told from a leading "X하고"), a two-word English term
@@ -116,10 +121,14 @@
  *    "git push"), a relative clause with an object of its own ("이 함수를
  *    호출하는 코드"), free verbs and adverbs in an explain ("이 코드가 뭘
  *    하는지 설명해줘", "… 이해할 수 있게").
- *    STILL OPEN: ONE English word in front of the request ("push 코드 분석해줘",
- *    "commit 이 함수 분석해줘", "push origin/main 코드 분석해줘"): a bare word
- *    carries no Korean connective and is indistinguishable from a one-word term
- *    ("JWT 설명해줘"). What stands there is the router's ambiguity gate
+ *    STILL OPEN: what the ASCII slot admits — ONE bare English word ("push 코드
+ *    분석해줘", "commit 이 함수 분석해줘"), a hyphenated or slash-joined word, which
+ *    is one token ("rm-rf 코드 분석해줘", "force-push 이 코드 분석해줘", "reset/rebase
+ *    이 브랜치 설명해줘"), and a word plus a path ("rm /tmp 코드 분석해줘", "rm src/
+ *    코드 분석해줘", "push origin/main 코드 분석해줘"). None carries a Korean
+ *    connective and none can be told from a term such as "JWT 설명해줘" or a path
+ *    argument (all measured 2026-09-30 firing, and all fired before the START
+ *    grammar too). What stands there is the router's ambiguity gate
  *    (`detectIntent`), which withholds the fix / implement / deploy / publish
  *    words and does not know commit / push, and the gate screen, which catches
  *    only gated commands. Measured 2026-09-30 with the real router and screen
@@ -394,9 +403,20 @@ const START_NOUNS = `(?:(?:${alt(TOPIC_NOUNS)})(?:들|의|에서|에|중|중에)
  */
 const START = `(?:${START_ASCII}${START_OPENERS}|${START_OPENERS}${START_ASCII})`
   + `${START_ADNOMINAL}${START_NOUNS}`;
-/** The object of an analyze request: a code noun (glued pairs allowed), @path or a file path. */
-const OBJECT_HEAD = `(?:(?:${KO_CODE_NOUN}){1,2}|${EN_CODE_WORD}|@[\\w./-]{1,128}`
-  + `|[\\w./\\\\:-]{1,96}\\.(?:${SOURCE_EXT})\\b)`;
+/**
+ * The object of an analyze request. EVERY alternative is one the mention regex
+ * (`CODE_OBJECT`) accepts at the same position, so this grammar can only REFUSE what
+ * the old, start-unanchored shape accepted, never accept more. (A first draft was
+ * wider — an `@path` glued to a noun, a path ending in `/.js` or `--.js`, a name of
+ * 65+ characters — and a review measured 25 new activations in 2,600 prompts.) So:
+ * a code noun (a glued pair is fine: the old shape saw the second one); an `@path`
+ * only at the start or after whitespace, as in the mention regex; a file path whose
+ * LAST component is exactly the mention regex's `name.ext` (`\b[\w-]{1,64}\.ext\b`),
+ * behind an optional directory prefix, which the old shape never had to swallow and
+ * ours does to reach `^`.
+ */
+const OBJECT_HEAD = `(?:(?:${KO_CODE_NOUN}){1,2}|${EN_CODE_WORD}|(?<=^|\\s)@[\\w./-]{1,128}`
+  + `|(?:[\\w./\\\\:-]{0,96}[/\\\\.])?\\b[\\w-]{1,64}\\.(?:${SOURCE_EXT})\\b)`;
 /** What may close an explain topic before its verb: a particle or "에 대해". */
 const EXPLAIN_FINAL = '(?:을|를|도|만|은|는|에\\s{0,2}대해서?|에\\s{0,2}관해서?)?';
 
