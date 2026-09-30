@@ -125,8 +125,8 @@ import {
 import { isMainEntry } from '../hooks/_main-entry.js';
 
 /**
- * Dotted config path of the opt-in switch. Exported so the reader, the shipped
- * config pin and the command-document pin share one spelling.
+ * Dotted config path of the stale-guard switch (shipped true). Exported so the
+ * reader, the shipped config pin and the command-document pin share one spelling.
  *
  * @type {string}
  */
