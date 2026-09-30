@@ -230,8 +230,11 @@ export function runHookPatiently(script, payload, ctx, opts = {}) {
  * @param {string} repo project whose file was edited (also the payload `cwd`)
  * @param {string} pluginRoot
  * @param {string} sessionId
- * @param {{ cwd?: string, extra?: object }} [opts] `cwd` overrides where the hook
- *   process runs AND what the payload reports; `extra` merges into the payload
+ * @param {{ cwd?: string, processCwd?: string, extra?: object }} [opts] `cwd` is what
+ *   the payload reports and, unless `processCwd` is given, where the hook process
+ *   runs; `processCwd` runs the PROCESS somewhere else (the host's payload `cwd` and
+ *   a hook's own working directory are two facts that can differ); `extra` merges
+ *   into the payload
  * @returns {{ status: number|null, stdout: string, stderr: string }}
  */
 export function runEdit(repo, pluginRoot, sessionId, opts = {}) {
@@ -243,7 +246,7 @@ export function runEdit(repo, pluginRoot, sessionId, opts = {}) {
     session_id: sessionId,
     cwd,
     ...(opts.extra ?? {}),
-  }, { cwd, pluginRoot });
+  }, { cwd: opts.processCwd ?? cwd, pluginRoot });
 }
 
 /**
@@ -252,7 +255,8 @@ export function runEdit(repo, pluginRoot, sessionId, opts = {}) {
  * @param {string} repo
  * @param {string} pluginRoot
  * @param {string} sessionId
- * @param {{ cwd?: string }} [opts]
+ * @param {{ cwd?: string, processCwd?: string }} [opts] payload `cwd` / process cwd,
+ *   as for {@link runEdit}
  * @returns {{ status: number|null, stdout: string, stderr: string }}
  */
 export function runDevVerifyStop(repo, pluginRoot, sessionId, opts = {}) {
@@ -262,7 +266,7 @@ export function runDevVerifyStop(repo, pluginRoot, sessionId, opts = {}) {
     stop_hook_active: false,
     session_id: sessionId,
     cwd,
-  }, { cwd, pluginRoot });
+  }, { cwd: opts.processCwd ?? cwd, pluginRoot });
 }
 
 /**
@@ -276,7 +280,8 @@ export function runDevVerifyStop(repo, pluginRoot, sessionId, opts = {}) {
  * @param {string} repo
  * @param {string} pluginRoot
  * @param {string} sessionId
- * @param {{ expectChanges?: boolean }} [opts]
+ * @param {{ expectChanges?: boolean, processCwd?: string }} [opts] `processCwd` runs the
+ *   process somewhere other than the payload's `cwd` (see {@link runEdit})
  * @returns {{ status: number|null, stdout: string, stderr: string, timedOut: boolean }}
  */
 export function runReviewStop(repo, pluginRoot, sessionId, opts = {}) {
@@ -288,7 +293,7 @@ export function runReviewStop(repo, pluginRoot, sessionId, opts = {}) {
     stop_hook_active: false,
     session_id: sessionId,
     cwd: repo,
-  }, { cwd: repo, pluginRoot }, { inconclusive: expectChanges ? sawNothing : undefined });
+  }, { cwd: opts.processCwd ?? repo, pluginRoot }, { inconclusive: expectChanges ? sawNothing : undefined });
 }
 
 /**

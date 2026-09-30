@@ -212,6 +212,41 @@ describe('resolveMarkerTarget', () => {
     expect(target?.file).toBe(getMarkerPath(root, 's1'));
   });
 
+  it('roots on the payload cwd even when the process runs somewhere else entirely', () => {
+    const root = makeProject();
+    const elsewhere = makeProject({ artibot: false, git: false });
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(elsewhere);
+    try {
+      // The Stop gates root on the same payload cwd (`payloadCwdOf`); a writer that
+      // followed the process instead would leave the marker where they never look.
+      expect(resolveMarkerTarget({ cwd: root, session_id: 's1' })?.projectRoot).toBe(root);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('falls back to the process cwd only when the payload names none', () => {
+    const root = makeProject();
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(root);
+    try {
+      expect(resolveMarkerTarget({ session_id: 's1' })?.projectRoot).toBe(root);
+      expect(resolveMarkerTarget({ session_id: 's1', cwd: '  ' })?.projectRoot).toBe(root);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('does NOT fall back when the payload cwd names a place with no repository (writer and readers agree: nothing)', () => {
+    const inRepo = makeProject();
+    const nowhere = makeProject({ artibot: false, git: false });
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(inRepo);
+    try {
+      expect(resolveMarkerTarget({ cwd: nowhere, session_id: 's1' })).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('accepts the camelCase session key the ledger recorder also accepts', () => {
     const root = makeProject();
     expect(resolveMarkerTarget({ cwd: root, sessionId: 's2' })?.file).toBe(getMarkerPath(root, 's2'));

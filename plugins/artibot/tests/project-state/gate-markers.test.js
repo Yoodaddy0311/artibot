@@ -12,6 +12,7 @@ import {
   GATES_DIR_NAME,
   gatesDir,
   NO_SESSION_SLOT,
+  payloadCwdOf,
   pruneStaleGateState,
   sessionGateDir,
   sessionIdOf,
@@ -109,6 +110,19 @@ describe('sessionIdOf', () => {
   });
 });
 
+describe('payloadCwdOf', () => {
+  it('returns the payload cwd when it is a non-blank string, as given', () => {
+    expect(payloadCwdOf({ cwd: '/some/dir' })).toBe('/some/dir');
+    expect(payloadCwdOf({ cwd: 'C:\\Users\\x\\proj', session_id: 's' })).toBe('C:\\Users\\x\\proj');
+  });
+
+  it('returns null when the payload names no usable cwd, so the caller falls back to the process cwd', () => {
+    for (const value of [null, undefined, 'x', 42, [], {}, { cwd: '' }, { cwd: '   ' }, { cwd: null }, { cwd: 7 }, { cwd: {} }]) {
+      expect(payloadCwdOf(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+});
+
 describe('sessionSlot', () => {
   it('is the first 16 hex characters of the SHA-1 of the id', () => {
     // SHA-1("abc") = a9993e364706816aba3e25717850c26c9cd0d89d — a published vector,
@@ -152,6 +166,42 @@ describe('treeSlot', () => {
 
   it.runIf(process.platform !== 'win32')('keeps case on POSIX, where two spellings are two directories', () => {
     expect(treeSlot('/Some/Tree')).not.toBe(treeSlot('/some/tree'));
+  });
+
+  /**
+   * THE KEY IS THE DIRECTORY, NOT ITS SPELLING. `git rev-parse --show-toplevel`
+   * and a payload `cwd` can name one tree as a link path, a Windows 8.3 short name
+   * (`C:\Users\HEECHA~1\...` — the spelling `os.tmpdir()` returns on this host) or
+   * the long name; hashing the string as spelled would split one tree's loop-guard
+   * memory across slots. The existing directory is resolved through `realpath`
+   * first; a path that does not exist keeps its resolved spelling.
+   */
+  it('gives a link and its target the SAME slot', () => {
+    const target = tmp('gm-tree-target');
+    const holder = tmp('gm-tree-holder');
+    const link = path.join(holder, 'alias');
+    try {
+      symlinkSync(target, link, 'junction');
+    } catch {
+      return; // no link support on this host: nothing to assert
+    }
+    expect(treeSlot(link)).toBe(treeSlot(target));
+  });
+
+  it('gives an existing directory the same slot under its short and its long spelling', () => {
+    // `mkdtemp` keeps the spelling of `os.tmpdir()`: an 8.3 short name on this
+    // Windows host. Where the spellings coincide (POSIX, 8.3 disabled) the case is a
+    // plain repeat and cannot fail — the honest limit of this case; the link case
+    // above is the one that bites everywhere.
+    const spelled = mkdtempSync(path.join(os.tmpdir(), 'gm-short-'));
+    roots.push(spelled);
+    expect(treeSlot(spelled)).toBe(treeSlot(realpathSync.native(spelled)));
+  });
+
+  it('still names a directory that does not exist, by its resolved spelling', () => {
+    const ghost = path.join(os.tmpdir(), 'gm-no-such-tree', 'child');
+    expect(treeSlot(ghost)).toMatch(/^[0-9a-f]{16}$/);
+    expect(treeSlot(path.join(ghost, '..', 'child'))).toBe(treeSlot(ghost));
   });
 });
 

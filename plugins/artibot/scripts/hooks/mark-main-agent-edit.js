@@ -34,7 +34,8 @@
  *
  * When it writes NOTHING (each is a case no Stop gate could ever read):
  *   - the tool is not an edit tool, or the call came from a subagent;
- *   - `cwd` is not inside a git work tree. Both Stop gates need git
+ *   - `cwd` (the payload's, else the process's — the Stop gates root on the same
+ *     one) is not inside a git work tree. Both Stop gates need git
  *     (`getRepoRoot()`), so a marker outside one is unreachable. The walk up is
  *     pure filesystem — this hook runs on every edit and must not start a
  *     process (see `_main-entry.js#nearestWorkTreeRoot`);
@@ -62,6 +63,7 @@ import {
   claimGateDir,
   GATE_FILES,
   gatesDir,
+  payloadCwdOf,
   pruneStaleGateState,
   sessionGateDir,
   sessionIdOf,
@@ -104,13 +106,17 @@ export function getMarkerPath(projectRoot, sessionId) {
 /**
  * Decide where this payload's marker goes, or that it goes nowhere.
  *
+ * The project is resolved from the payload's `cwd`, falling back to the process
+ * cwd only when the payload names none — the SAME source the Stop gates use
+ * (`gate-markers.js#payloadCwdOf`), so writer and readers cannot root in two
+ * different directories.
+ *
  * @param {object} hookData parsed PostToolUse payload
  * @returns {{ projectRoot: string, dir: string, file: string, gates: string, slot: string }|null}
  *   null when no Stop gate could read a marker written for this payload
  */
 export function resolveMarkerTarget(hookData) {
-  const reported = hookData?.cwd;
-  const cwd = typeof reported === 'string' && reported.trim() !== '' ? reported : process.cwd();
+  const cwd = payloadCwdOf(hookData) ?? process.cwd();
   const projectRoot = nearestWorkTreeRoot(cwd, resolveGitCommonDir);
   if (projectRoot === null) return null;
   if (!isArtibotRepo(projectRoot)) return null;

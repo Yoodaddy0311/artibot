@@ -49,14 +49,25 @@ describe('O2 — a main-agent edit only fires the gate of the project and sessio
     const projectA = makeRepo(created, 'proj-a');
     const projectB = makeRepo(created, 'proj-b');
 
+    const sessionB = sid('b');
+
     // Project A's main agent edits. Project B's main agent does nothing at all,
     // but B has a dirty tree (any branch resumed from elsewhere looks like this).
     runEdit(projectA, plugin, sid('a'));
-    const stopB = runDevVerifyStop(projectB, plugin, sid('b'));
+    const stopB = runDevVerifyStop(projectB, plugin, sessionB);
 
     expect(blocked(stopB.stdout), `B's Stop must stay quiet. stdout=${stopB.stdout} stderr=${stopB.stderr}`)
       .toBe(false);
-  }, 120_000);
+
+    // CONTROL IN THE SAME PROJECT. A gate that cannot reach git reads "no repo, no
+    // changes" and is just as silent — the host's own git timeout is swallowed — so
+    // the silence above proves nothing by itself. B's OWN main agent now edits: B's
+    // gate must fire, which it can only do if it really looked at B.
+    runEdit(projectB, plugin, sessionB);
+    const ownStopB = runDevVerifyStop(projectB, plugin, sessionB);
+    expect(blocked(ownStopB.stdout), `B's own edit must fire B. stdout=${ownStopB.stdout} stderr=${ownStopB.stderr}`)
+      .toBe(true);
+  }, 240_000);
 
   it('CONTROL: the gate still fires in the project whose own main agent edited', () => {
     const plugin = makeDir(created, 'plugin');
@@ -75,13 +86,21 @@ describe('O2 — a main-agent edit only fires the gate of the project and sessio
   it('an edit in session S1 does NOT fire session S2 of the same project', () => {
     const plugin = makeDir(created, 'plugin');
     const project = makeRepo(created, 'proj');
+    const s2 = sid('s2');
 
     runEdit(project, plugin, sid('s1'));
-    const stopS2 = runDevVerifyStop(project, plugin, sid('s2'));
+    const stopS2 = runDevVerifyStop(project, plugin, s2);
 
     expect(blocked(stopS2.stdout), `S2 edited nothing. stdout=${stopS2.stdout} stderr=${stopS2.stderr}`)
       .toBe(false);
-  }, 120_000);
+
+    // CONTROL IN THE SAME PROJECT (see the cross-project case): S2's own edit must
+    // fire S2, or S2's silence was a gate that never got to look.
+    runEdit(project, plugin, s2);
+    const ownStopS2 = runDevVerifyStop(project, plugin, s2);
+    expect(blocked(ownStopS2.stdout), `S2's own edit must fire S2. stdout=${ownStopS2.stdout} stderr=${ownStopS2.stderr}`)
+      .toBe(true);
+  }, 240_000);
 
   it('two sessions of one project keep independent "already verified" state', () => {
     const plugin = makeDir(created, 'plugin');
@@ -129,7 +148,18 @@ describe('O2 — a main-agent edit only fires the gate of the project and sessio
     const again = runDevVerifyStop(project, pluginV2, session);
 
     expect(blocked(again.stdout), `stdout=${again.stdout} stderr=${again.stderr}`).toBe(false);
-  }, 180_000);
+
+    // CONTROL: a genuinely NEW state must still be asked about, under the new
+    // plugin directory and in the same session. The loop guard fingerprints the SET
+    // of changed files (not their content), so a second file is what makes a new
+    // state. Without this, "already asked" could equally be a gate that never got
+    // to look (a swallowed git timeout is silent too).
+    writeFileSync(path.join(project, 'src', 'a.js'), 'export const a = 2;\n');
+    runEdit(project, pluginV2, session);
+    const fresh = runDevVerifyStop(project, pluginV2, session);
+    expect(blocked(fresh.stdout), `a new state must be asked about. stdout=${fresh.stdout} stderr=${fresh.stderr}`)
+      .toBe(true);
+  }, 300_000);
 
   it('fires in a linked worktree — the /split window layout', () => {
     const plugin = makeDir(created, 'plugin');
@@ -153,13 +183,22 @@ describe('O2 — a main-agent edit only fires the gate of the project and sessio
     writeFileSync(path.join(wt, 'tracked.txt'), `dirty in worktree ${Date.now()}\n`);
     writeFileSync(path.join(main, 'tracked.txt'), `dirty in main ${Date.now()}\n`);
 
+    const sessionMain = sid('main');
+
     // Both trees share ONE git common directory (the store's F3 location), so a
     // store keyed by project alone would let the worktree's edit fire main.
     runEdit(wt, plugin, sid('wt'));
-    const stopMain = runDevVerifyStop(main, plugin, sid('main'));
+    const stopMain = runDevVerifyStop(main, plugin, sessionMain);
 
     expect(blocked(stopMain.stdout), `stdout=${stopMain.stdout} stderr=${stopMain.stderr}`).toBe(false);
-  }, 120_000);
+
+    // CONTROL IN THE SAME TREE: main's own main-agent edit must fire main's gate,
+    // or the silence above was a gate that never got to look at main.
+    runEdit(main, plugin, sessionMain);
+    const ownStopMain = runDevVerifyStop(main, plugin, sessionMain);
+    expect(blocked(ownStopMain.stdout), `main's own edit must fire main. stdout=${ownStopMain.stdout} stderr=${ownStopMain.stderr}`)
+      .toBe(true);
+  }, 240_000);
 
   it('fires when the edit hook ran from a subdirectory of the project', () => {
     const plugin = makeDir(created, 'plugin');
@@ -283,5 +322,79 @@ describe('O2 — the edit marker stays out of the plugin directory and out of un
 
     expect(blocked(stop.stdout), `stdout=${stop.stdout} stderr=${stop.stderr}`).toBe(false);
     expect(existsSync(path.join(plugin, 'runtime'))).toBe(false);
+
+    // CONTROL IN THE SAME SESSION: the leader's own edit fires the gate, so the
+    // silence above was a gate that looked and found no marker, not one that never
+    // looked.
+    runEdit(project, plugin, session);
+    const ownStop = runDevVerifyStop(project, plugin, session);
+    expect(blocked(ownStop.stdout), `the leader's own edit must fire. stdout=${ownStop.stdout} stderr=${ownStop.stderr}`)
+      .toBe(true);
+  }, 240_000);
+});
+
+describe('O2 — the writer and the reader root on the payload cwd, not on the process cwd', () => {
+  // The host reports the directory a hook ran in (`cwd`) and starts the hook process
+  // in some directory too. They are the same in a healthy session, but they are two
+  // facts, and the marker's writer (`mark-main-agent-edit`) and its reader
+  // (`dev-verify-gate`) have to read the SAME one or they look in two places. The
+  // writer always used the payload; the reader used `git rev-parse` from the process
+  // cwd. Both now use the payload `cwd` and fall back to the process cwd only when
+  // the payload names none.
+
+  it('a Stop whose process runs outside any repository still gates the project its payload names', () => {
+    const plugin = makeDir(created, 'plugin');
+    const project = makeRepo(created, 'proj');
+    const elsewhere = makeDir(created, 'elsewhere');
+    const session = sid('pcwd');
+
+    runEdit(project, plugin, session, { processCwd: elsewhere });
+    const stop = runDevVerifyStop(project, plugin, session, { processCwd: elsewhere });
+
+    expect(blocked(stop.stdout), `stdout=${stop.stdout} stderr=${stop.stderr}`).toBe(true);
+  }, 120_000);
+
+  it('the payload cwd wins over the directory the process happens to run in', () => {
+    const plugin = makeDir(created, 'plugin');
+    const projectA = makeRepo(created, 'proj-a');
+    const projectB = makeRepo(created, 'proj-b');
+    const sessionA = sid('pa');
+    const sessionB = sid('pb');
+
+    // A's payload, but both processes run inside B (another Artibot checkout with
+    // its own dirty tree). Rooted on the process cwd the Stop would judge B and
+    // find no marker for A's session — silent; rooted on the payload it judges A.
+    runEdit(projectA, plugin, sessionA, { processCwd: projectB });
+    const stopA = runDevVerifyStop(projectA, plugin, sessionA, { processCwd: projectB });
+    expect(blocked(stopA.stdout), `A. stdout=${stopA.stdout} stderr=${stopA.stderr}`).toBe(true);
+
+    // And the other way: B's payload from a process inside A. B's main agent has
+    // edited nothing, so B stays quiet — then B's own edit fires B. The second half
+    // is what makes the first mean something.
+    const stopB = runDevVerifyStop(projectB, plugin, sessionB, { processCwd: projectA });
+    expect(blocked(stopB.stdout), `B. stdout=${stopB.stdout} stderr=${stopB.stderr}`).toBe(false);
+    runEdit(projectB, plugin, sessionB, { processCwd: projectA });
+    const ownStopB = runDevVerifyStop(projectB, plugin, sessionB, { processCwd: projectA });
+    expect(blocked(ownStopB.stdout), `B own. stdout=${ownStopB.stdout} stderr=${ownStopB.stderr}`).toBe(true);
+  }, 360_000);
+
+  it('falls back to the process cwd when the payload names no cwd', () => {
+    const plugin = makeDir(created, 'plugin');
+    const project = makeRepo(created, 'proj');
+    const session = sid('nocwd');
+    // Payloads WITHOUT a `cwd` key, sent from a process running in the project.
+    runHookPatiently(hookPath('mark-main-agent-edit.js'), {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: path.join(project, 'tracked.txt') },
+      session_id: session,
+    }, { cwd: project, pluginRoot: plugin });
+    const stop = runHookPatiently(hookPath('dev-verify-gate.js'), {
+      hook_event_name: 'Stop',
+      stop_hook_active: false,
+      session_id: session,
+    }, { cwd: project, pluginRoot: plugin });
+
+    expect(blocked(stop.stdout), `stdout=${stop.stdout} stderr=${stop.stderr}`).toBe(true);
   }, 120_000);
 });

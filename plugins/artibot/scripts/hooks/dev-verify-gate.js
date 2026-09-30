@@ -40,7 +40,9 @@
  * update: an edit in one project fired another project's gate, one session's
  * fire hid another session's unverified edit, and an update forgot what had
  * already been asked. The two files are compared by MTIME, which is why they
- * share one scope. The legacy plugin-root files are never read.
+ * share one scope. The legacy plugin-root files are never read. The project is
+ * resolved from the payload's `cwd` (process cwd only when the payload names none),
+ * the same source the marker's writer uses.
  *
  * Ledger side effect (OB-07): a fire also records four `verify.completed`
  * lines (three layers + overall). See {@link recordVerifyDenominator}. The
@@ -86,7 +88,9 @@ import {
   getRepoRoot as getCachedRepoRoot,
 } from '../../lib/git/repo-root-cache.js';
 import { buildDevVerifyOutput, resolveDevVerifyMode } from '../../lib/core/dev-verify-output.js';
-import { GATE_FILES, sessionGateDir, sessionIdOf } from '../../lib/project-state/gate-markers.js';
+import {
+  GATE_FILES, payloadCwdOf, sessionGateDir, sessionIdOf,
+} from '../../lib/project-state/gate-markers.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'dev-verify-gate';
@@ -127,9 +131,14 @@ function git(cmd, cwd) {
   }
 }
 
-/** @returns {string|null} */
-function getRepoRoot() {
-  return getCachedRepoRoot();
+/**
+ * The repository root of `cwd` (the process cwd when `cwd` is null).
+ *
+ * @param {string|null} cwd the payload's `cwd`, from `payloadCwdOf`
+ * @returns {string|null}
+ */
+function getRepoRoot(cwd) {
+  return getCachedRepoRoot(cwd ?? undefined);
 }
 
 /** @returns {string|null} */
@@ -499,7 +508,10 @@ export async function main() {
   // hooks after a previous block. Bail to prevent infinite block→retry loops.
   if (hookData.stop_hook_active === true) return;
 
-  const repoRoot = getRepoRoot();
+  // The project comes from the payload's `cwd` (the process cwd only when the
+  // payload names none) — the SAME source the marker's writer roots on, so the two
+  // can never look in different stores. See `gate-markers.js#payloadCwdOf`.
+  const repoRoot = getRepoRoot(payloadCwdOf(hookData));
   if (!repoRoot) return;
 
   // Scope guard: DEV verify is an Artibot-internal policy. Bail silently in

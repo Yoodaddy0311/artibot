@@ -13,7 +13,7 @@ import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension, isArtibotRepo, isSkippablePath } from '../../lib/core/hook-utils.js';
 import { getHeadSha, getRepoRoot } from '../../lib/git/repo-root-cache.js';
-import { GATE_FILES, treeGateDir } from '../../lib/project-state/gate-markers.js';
+import { GATE_FILES, payloadCwdOf, treeGateDir } from '../../lib/project-state/gate-markers.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'stop-review-gate';
@@ -554,7 +554,10 @@ export async function main() {
     return;
   }
 
-  const repoRoot = getRepoRoot();
+  // The project comes from the payload's `cwd` (the process cwd only when the
+  // payload names none), as in dev-verify-gate.js: both gates answer the same Stop
+  // and must be talking about the same repository.
+  const repoRoot = getRepoRoot(payloadCwdOf(hookData) ?? undefined);
   if (!repoRoot) {
     log('Not in a git repository, skipping review gate');
     return;

@@ -76,9 +76,10 @@
  *
  * ── WHAT THIS MODULE CANNOT SEE ───────────────────────────────────────────
  * Whether a writer and a reader resolved the SAME project root: both are handed
- * a root by their caller, and a spelling that aliases one directory (8.3 short
- * name, case, a junction) reaches the same files, while two roots that are two
- * directories do not meet. Whether the store is writable: every write is the
+ * a root by their caller — from one source, {@link payloadCwdOf} — and a spelling
+ * that aliases one directory (8.3 short name, case, a junction) reaches the same
+ * files, while two roots that are two directories do not meet. (The tree slot is
+ * the one key derived from a path; it canonicalizes, see {@link treeSlot}.) Whether the store is writable: every write is the
  * caller's `atomicWriteSync`, which logs and never throws, so an unwritable
  * store reads back as "no state". Whether a session id survives `--resume`.
  *
@@ -91,7 +92,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGitCommonDir } from './git-common-dir.js';
 import { resolveStoreLocation } from './store-location.js';
@@ -154,6 +155,29 @@ export function sessionIdOf(hookData) {
 }
 
 /**
+ * The directory a hook payload says it ran in, or null.
+ *
+ * ONE SOURCE FOR THE ROOT. The host reports the directory a hook ran in (`cwd`)
+ * and also starts the hook process somewhere; in a healthy session they are the
+ * same, but they are two facts, and the edit marker's writer
+ * (`mark-main-agent-edit.js`) and its readers (`dev-verify-gate.js`,
+ * `stop-review-gate.js`) must resolve the project from the SAME one or they look
+ * in different stores. All of them take the payload's `cwd` and fall back to the
+ * process cwd ONLY when the payload names none (this returns null, and the caller's
+ * own default — `process.cwd()` — applies). A payload `cwd` that names a directory
+ * with no repository does NOT fall back: the writer then writes nothing and the
+ * readers find nothing, which is the same answer from both ends.
+ *
+ * @param {unknown} hookData
+ * @returns {string|null}
+ */
+export function payloadCwdOf(hookData) {
+  if (!hookData || typeof hookData !== 'object') return null;
+  const cwd = /** @type {Record<string, unknown>} */ (hookData).cwd;
+  return isNonBlank(cwd) ? cwd : null;
+}
+
+/**
  * The directory name for a session: first 16 hex characters of the SHA-1 of the
  * id, or {@link NO_SESSION_SLOT}. Hashed so an id is never written to disk under
  * a name it chose and a hostile one cannot carry a path separator or `..`.
@@ -168,15 +192,25 @@ export function sessionSlot(sessionId) {
 
 /**
  * The directory name for a working tree: first 16 hex characters of the SHA-1 of
- * its resolved root. Case-folded on Windows, where `C:\X` and `c:\x` are one
- * directory.
+ * its CANONICAL root. The key is the directory, not its spelling: `git rev-parse
+ * --show-toplevel` and a payload `cwd` can name one tree as a link path, a Windows
+ * 8.3 short name (`C:\Users\HEECHA~1\...`, the spelling `os.tmpdir()` returns on
+ * such a host) or the long name, and hashing the string as spelled would split one
+ * tree's loop-guard memory across slots. An existing directory is therefore
+ * resolved through `realpath` first (links and short names collapse); one that does
+ * not exist keeps its resolved spelling. Then case-folded on Windows, where `C:\X`
+ * and `c:\x` are one directory.
  *
  * @param {string} projectRoot
  * @returns {string}
  */
 export function treeSlot(projectRoot) {
   const resolved = path.resolve(projectRoot);
-  const folded = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  let canonical = resolved;
+  try {
+    canonical = realpathSync.native(resolved);
+  } catch { /* not there (yet): the resolved spelling is all there is */ }
+  const folded = process.platform === 'win32' ? canonical.toLowerCase() : canonical;
   return createHash('sha1').update(folded).digest('hex').slice(0, 16);
 }
 

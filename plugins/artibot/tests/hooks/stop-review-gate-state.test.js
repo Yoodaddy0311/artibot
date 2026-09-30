@@ -55,6 +55,19 @@ describe('O2 — stop-review-gate keeps its loop-guard memory per working tree',
     expect(blocked(second.stdout), `second. stdout=${second.stdout} stderr=${second.stderr}`).toBe(false);
   }, 120_000);
 
+  it('judges the project the payload names, not the directory the process happens to run in', () => {
+    const plugin = makeDir(created, 'plugin');
+    const repo = flaggedRepo('pcwd');
+    const elsewhere = makeDir(created, 'elsewhere');
+
+    // The sibling Stop gate (dev-verify-gate) roots on the payload `cwd`; the two
+    // gates answer the same Stop and must be talking about the same repository.
+    const run = runReviewStop(repo, plugin, sid('pcwd'), { processCwd: elsewhere });
+
+    expect(blocked(run.stdout), `stdout=${run.stdout} stderr=${run.stderr}`).toBe(true);
+    expect(run.stdout).toContain('Review gate found');
+  }, 120_000);
+
   it('leaves no gate state behind when there is nothing to remember', () => {
     const plugin = makeDir(created, 'plugin');
     // One commit and a clean tree: no changed files, so the gate approves before
