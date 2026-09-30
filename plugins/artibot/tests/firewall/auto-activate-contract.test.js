@@ -201,6 +201,38 @@ describe('docs — say what the code does, character-identical where it names th
     expect(p).toMatch(/unmeasured/);
   });
 
+  it('CLAUDE.md, the config comment and the module header say trigger precision is the safety line', () => {
+    // A 2026-09-30 review found the earlier claim — "every tool call still passes the
+    // host permission system, so no human gate is bypassed" — unsupported: the
+    // PreToolUse hooks do run, but a command's own `allowed-tools` may waive the host
+    // prompt, and whether it does for a directive-started run is unverified. The three
+    // places that carried it now say so; this pin keeps the old sentence from returning.
+    const p = autoActivateParagraph();
+    expect(p).toMatch(/PreToolUse hooks still run for every tool call the command makes/);
+    expect(p).toMatch(/host permission prompt may be waived by the command's own `allowed-tools` \(unverified\)/);
+    expect(p).toMatch(/trigger precision, not the permission system, is the safety line/);
+    expect(p).not.toMatch(/tool permission still applies/);
+
+    const comment = config.automation.autoActivate.comment;
+    expect(comment).toMatch(/host permission prompt may be waived by the command's own allowed-tools \(unverified\)/);
+    expect(comment).not.toMatch(/tool permission still applies/);
+
+    const libSrc = read(PLUGIN_ROOT, 'lib', 'cognitive', 'auto-activate.js');
+    expect(libSrc).toMatch(/TRIGGER PRECISION is the safety line/);
+    expect(libSrc).toMatch(/UNVERIFIED here/);
+    expect(libSrc).not.toMatch(/no human gate is bypassed/);
+  });
+
+  it('every activatable command declares Bash, as the module header says', () => {
+    // The header ("WHAT LIMITS THE BLAST RADIUS") states "all four activatable commands
+    // list Bash". If one stops, reword that caveat — do not just delete this test.
+    expect(AUTO_ACTIVATE_ACTIVATABLE).toHaveLength(4);
+    expect(read(PLUGIN_ROOT, 'lib', 'cognitive', 'auto-activate.js')).toMatch(/all four activatable commands list Bash/);
+    for (const name of AUTO_ACTIVATE_ACTIVATABLE) {
+      expect(declaredTools(name), `commands/${name}.md`).toContain('Bash');
+    }
+  });
+
   it('CLAUDE.md leaves the confirm-first hint rule as it was', () => {
     expect(claude).toContain('**Recommend-hint surfacing rule**');
     expect(claude).toContain('wait for confirmation before acting');
