@@ -28,9 +28,8 @@
  *     scan is deliberately literal; it raises the cost of the obvious regression,
  *     not of a determined one.
  *   - Any other hook or module that keeps ITS OWN state in the plugin root. Only
- *     these five files are named here; the other runtime markers
- *     (`current-effort`, `user-profile`, `token-usage`, `current-teammates`,
- *     `first-run-state`, `task-budget`, ...) are not this gate's subject.
+ *     these five files are named here; every other file under `runtime/` belongs
+ *     to some other change and is not this gate's subject.
  *   - That the named hooks are registered or ever fire (`hooks/hooks.json`), and
  *     that two processes agree on the directory. The spawn suites measure the
  *     second; nothing here measures the first.

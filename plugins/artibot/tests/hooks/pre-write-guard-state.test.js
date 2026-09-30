@@ -3,7 +3,7 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  blocked, canonical, cleanup, hookPath, makeDir, makeRepo, runHook,
+  blocked, canonical, cleanup, hookPath, makeDir, makeRepo, runHookPatiently,
 } from './_gate-state-harness.js';
 
 /**
@@ -79,7 +79,7 @@ function seedTracking(sessionId) {
  * @returns {{ status: number|null, stdout: string, stderr: string }}
  */
 function attempt(repo, pluginRoot, sessionId, target) {
-  return runHook(hookPath('pre-write-guard.js'), {
+  return runHookPatiently(hookPath('pre-write-guard.js'), {
     hook_event_name: 'PreToolUse',
     tool_name: 'Write',
     tool_input: { file_path: target },

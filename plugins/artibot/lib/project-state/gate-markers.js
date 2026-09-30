@@ -72,7 +72,7 @@
  * One directory per session grows without bound, so {@link pruneStaleGateState}
  * removes slot directories idle for {@link GATE_STATE_KEEP_MS}. The process that
  * CREATES a new session directory does it ({@link claimGateDir} says who), the
- * same way `scripts/hooks/_main-entry.js#claimMarker` prunes `hook-seen`.
+ * same way `scripts/hooks/_hook-seen-marker.js#claimMarker` prunes `hook-seen`.
  *
  * ── WHAT THIS MODULE CANNOT SEE ───────────────────────────────────────────
  * Whether a writer and a reader resolved the SAME project root: both are handed
@@ -138,7 +138,7 @@ function isNonBlank(v) {
  * The session id a hook payload carries, or null.
  *
  * `session_id` first, `sessionId` second, non-blank only — the same rule
- * `scripts/hooks/_main-entry.js#fireOnceDirect` applies, so a writer and a
+ * `scripts/hooks/_hook-seen-marker.js#fireOnceDirect` applies, so a writer and a
  * reader that read the same payload always read the same id.
  *
  * @param {unknown} hookData

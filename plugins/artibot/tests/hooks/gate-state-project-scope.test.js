@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-  blocked, canonical, cleanup, git, hookPath, makeDir, makeRepo, runDevVerifyStop, runEdit, runHook,
+  blocked, canonical, cleanup, git, hookPath, makeDir, makeRepo, runDevVerifyStop, runEdit,
+  runHookPatiently,
 } from './_gate-state-harness.js';
 
 /**
@@ -207,11 +208,13 @@ describe('O2 — through the real dispatchers (the production path)', () => {
     const sessionA = sid('da');
     const sessionB = sid('db');
     const env = { HOME: home, USERPROFILE: home };
-    const stop = (repo, session) => runHook(hookPath('_stop-dispatcher.js'), {
+    // Patient, because a dispatcher kills a child at its own budget (8 s for the DEV
+    // verify gate) and a busy host turns that into a silent Stop — see the harness.
+    const stop = (repo, session) => runHookPatiently(hookPath('_stop-dispatcher.js'), {
       hook_event_name: 'Stop', stop_hook_active: false, session_id: session, cwd: repo,
     }, { cwd: repo, pluginRoot: plugin, env });
 
-    const edit = runHook(hookPath('_posttooluse-dispatcher.js'), {
+    const edit = runHookPatiently(hookPath('_posttooluse-dispatcher.js'), {
       hook_event_name: 'PostToolUse',
       tool_name: 'Edit',
       tool_input: { file_path: path.join(projectA, 'tracked.txt') },

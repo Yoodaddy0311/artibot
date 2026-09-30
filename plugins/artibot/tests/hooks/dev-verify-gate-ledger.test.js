@@ -10,6 +10,7 @@ import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
 import { GATE_FILES, sessionGateDir } from '../../lib/project-state/gate-markers.js';
 import { evidenceHash, evidenceRegistryPath } from '../../lib/verification/evidence-registry.js';
+import { runHookPatiently } from './_gate-state-harness.js';
 
 /**
  * dev-verify-gate.js — the "unmeasured denominator" ledger wiring (OB-07).
@@ -202,27 +203,23 @@ function buildSandbox(opts = {}) {
 }
 
 /**
- * Spawn the hook exactly the way the Stop dispatcher does.
+ * Spawn the hook exactly the way the Stop dispatcher does — through the shared
+ * harness runner, which spawns it once, and again while the gate answered nothing
+ * because the HOST was too busy (a git timeout in its stderr, or the harness's own
+ * limit hit). This file measures what the gate WRITES; a run that never got to look
+ * at the repository measured nothing, and on a saturated host (1070 s full-suite
+ * runs next to other lanes) that was the usual reason for a failure here.
  *
  * @param {{repo: string, pluginRoot: string}} box
  * @param {object} [payload] stdin JSON; `null` sends a payload with no session_id
  * @returns {{ status: number|null, stdout: string, stderr: string }}
  */
 function runHook(box, payload) {
-  const env = { ...process.env, CLAUDE_PLUGIN_ROOT: box.pluginRoot };
-  delete env.ARTIBOT_DEV_VERIFY_MODE;
-  const stdin = JSON.stringify(
+  return runHookPatiently(
+    HOOK,
     payload ?? { session_id: SESSION, hook_event_name: 'Stop', stop_hook_active: false },
+    { cwd: box.repo, pluginRoot: box.pluginRoot },
   );
-  const r = spawnSync(process.execPath, [HOOK], {
-    cwd: box.repo,
-    input: stdin,
-    encoding: 'utf-8',
-    windowsHide: true,
-    timeout: 60_000,
-    env,
-  });
-  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 /**

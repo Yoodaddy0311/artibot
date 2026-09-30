@@ -61,7 +61,8 @@ describe('O2 — stop-review-gate keeps its loop-guard memory per working tree',
     // it has any fingerprint to keep.
     const repo = makeRepo(created, 'clean', { dirty: false });
 
-    const run = runReviewStop(repo, plugin, sid('clean'));
+    // `expectChanges: false` — this case EXPECTS "no changes to review".
+    const run = runReviewStop(repo, plugin, sid('clean'), { expectChanges: false });
 
     expect(run.status, `stderr=${run.stderr}`).toBe(0);
     expect(blocked(run.stdout)).toBe(false);

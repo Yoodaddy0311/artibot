@@ -135,7 +135,8 @@ export function makeRepo(created, label, opts = {}) {
  * @param {string} script absolute path ({@link hookPath})
  * @param {object} payload stdin JSON
  * @param {{ cwd: string, pluginRoot: string, env?: Record<string, string|undefined> }} ctx
- * @returns {{ status: number|null, stdout: string, stderr: string }}
+ * @returns {{ status: number|null, stdout: string, stderr: string, timedOut: boolean }}
+ *   `timedOut` is true when THIS harness killed the process at its own limit
  */
 export function runHook(script, payload, { cwd, pluginRoot, env = {} }) {
   const childEnv = {
@@ -152,49 +153,72 @@ export function runHook(script, payload, { cwd, pluginRoot, env = {} }) {
     input: JSON.stringify(payload),
     encoding: 'utf-8',
     windowsHide: true,
-    timeout: 60_000,
+    timeout: SPAWN_LIMIT_MS,
     env: childEnv,
   });
-  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+  return {
+    status: r.status,
+    stdout: r.stdout || '',
+    stderr: r.stderr || '',
+    timedOut: r.error?.code === 'ETIMEDOUT',
+  };
 }
 
 /**
- * The gates give each of their git calls 5 s (`execSync({ timeout: 5000 })`) and,
- * when one times out, carry on as if git had said nothing: no repo root, or no
- * changed files, and a silent Stop. On a host that is busy enough that is a LOAD
- * symptom, not a verdict — observed while running this suite next to other full
- * test runs (`spawnSync cmd.exe ETIMEDOUT` in the gate's own stderr) — and it would
- * turn a case that expects "fires" into a failure and, worse, a case that expects
- * silence into a vacuous pass. A SILENT spawn whose stderr carries it is therefore
- * INCONCLUSIVE and is run again: a gate that stayed quiet because git timed out
- * returned before saving anything, so the retry starts from the same state. A
- * spawn that FIRED despite the symptom is taken as it is — it already consumed its
- * fire, and running it again would answer "quiet". Still silent-and-timing-out after
- * the last attempt, it THROWS: a case that expects silence must not pass on a gate
- * that never got to look.
+ * WHAT A BUSY HOST DOES TO THESE CASES, AND WHAT THE HARNESS WILL NOT LET IT DO.
+ *
+ * Every gate gives each of its git calls 5 s (`execSync({ timeout: 5000 })`) and,
+ * when one times out, carries on as if git had said nothing — no repo root, or no
+ * changed files — and the dispatchers kill a child at its own budget (8 s for the
+ * DEV verify gate). On a host busy enough, that is a LOAD symptom, not a verdict.
+ * Observed while this suite ran next to other full test runs: `spawnSync cmd.exe
+ * ETIMEDOUT` in the gate's stderr, a dispatcher's `timed out after 8000ms`, and
+ * spawns that never finished inside this file's own limit. Left alone it turns a
+ * case that expects "fires" into a failure and, worse, a case that expects silence
+ * into a VACUOUS pass.
+ *
+ * So a spawn is INCONCLUSIVE, and is run again, when it printed NO decision and
+ *   - this harness killed it (`timedOut`), or
+ *   - its stderr carries one of the symptoms above, or
+ *   - the caller's own `inconclusive(result)` says the gate saw nothing it should
+ *     have seen (the review gate reporting "no changes" in a repo that has some).
+ * A spawn that DID print a decision is taken as it is, even when it also logged a
+ * timeout or was killed afterwards: it already consumed its fire (saved its
+ * fingerprint before printing), and running it again would answer "quiet".
+ * Inconclusive after the last attempt, it THROWS — a case that expects silence
+ * must not pass on a gate that never got to look.
+ *
+ * WHAT THIS CANNOT SEE: a git call that timed out WITHOUT saying so (the repo-root
+ * and HEAD lookups swallow their errors). A silently wrong `HEAD` makes a
+ * fingerprint differ once; no stderr betrays it, so it cannot be retried here.
  */
-const LOAD_SYMPTOM = /ETIMEDOUT/;
+const LOAD_SYMPTOM = /ETIMEDOUT|timed out after/;
 const ATTEMPTS = 3;
+const SPAWN_LIMIT_MS = 120_000;
 
 /**
- * {@link runHook}, run again while the gate is silent AND reports a git timeout.
+ * {@link runHook}, run again while the answer is inconclusive.
  *
  * @param {string} script
  * @param {object} payload
  * @param {{ cwd: string, pluginRoot: string, env?: Record<string, string|undefined> }} ctx
- * @returns {{ status: number|null, stdout: string, stderr: string }}
- * @throws {Error} when every attempt was silent with a git timeout in stderr
+ * @param {{ inconclusive?: (result: object) => boolean }} [opts] the caller's own test
+ * @returns {{ status: number|null, stdout: string, stderr: string, timedOut: boolean }}
+ * @throws {Error} when every attempt was inconclusive
  */
-export function runHookPatiently(script, payload, ctx) {
-  const inconclusive = (r) => r.stdout.trim() === '' && LOAD_SYMPTOM.test(r.stderr);
+export function runHookPatiently(script, payload, ctx, opts = {}) {
+  const silent = (r) => r.stdout.trim() === '';
+  const inconclusive = (r) => (silent(r) && (r.timedOut || LOAD_SYMPTOM.test(r.stderr)))
+    || (typeof opts.inconclusive === 'function' && opts.inconclusive(r));
   let result = runHook(script, payload, ctx);
   for (let attempt = 2; attempt <= ATTEMPTS && inconclusive(result); attempt += 1) {
     result = runHook(script, payload, ctx);
   }
   if (inconclusive(result)) {
     throw new Error(
-      `${path.basename(script)} never got an answer out of git in ${ATTEMPTS} attempts `
-      + `(host too busy?): ${result.stderr.trim().slice(0, 300)}`,
+      `${path.basename(script)} gave no usable answer in ${ATTEMPTS} attempts (host too busy?): `
+      + `timedOut=${result.timedOut} stdout=${result.stdout.trim().slice(0, 120)} `
+      + `stderr=${result.stderr.trim().slice(0, 300)}`,
     );
   }
   return result;
@@ -212,7 +236,7 @@ export function runHookPatiently(script, payload, ctx) {
  */
 export function runEdit(repo, pluginRoot, sessionId, opts = {}) {
   const cwd = opts.cwd ?? repo;
-  return runHook(hookPath('mark-main-agent-edit.js'), {
+  return runHookPatiently(hookPath('mark-main-agent-edit.js'), {
     hook_event_name: 'PostToolUse',
     tool_name: 'Edit',
     tool_input: { file_path: path.join(repo, 'tracked.txt') },
@@ -244,18 +268,27 @@ export function runDevVerifyStop(repo, pluginRoot, sessionId, opts = {}) {
 /**
  * A Stop event for the review gate.
  *
+ * `expectChanges` (default true) says the repo has a change for the gate to see.
+ * The gate swallows its git errors, so a timed-out `git diff` reads as "no changes
+ * to review" — an approve that is not an answer about THIS repo — and that is
+ * treated as inconclusive. A case that really expects an empty diff passes false.
+ *
  * @param {string} repo
  * @param {string} pluginRoot
  * @param {string} sessionId
- * @returns {{ status: number|null, stdout: string, stderr: string }}
+ * @param {{ expectChanges?: boolean }} [opts]
+ * @returns {{ status: number|null, stdout: string, stderr: string, timedOut: boolean }}
  */
-export function runReviewStop(repo, pluginRoot, sessionId) {
+export function runReviewStop(repo, pluginRoot, sessionId, opts = {}) {
+  const { expectChanges = true } = opts;
+  const sawNothing = (r) => /No changes to review|No changed files detected|Not in a git repository/
+    .test(`${r.stdout}\n${r.stderr}`);
   return runHookPatiently(hookPath('stop-review-gate.js'), {
     hook_event_name: 'Stop',
     stop_hook_active: false,
     session_id: sessionId,
     cwd: repo,
-  }, { cwd: repo, pluginRoot });
+  }, { cwd: repo, pluginRoot }, { inconclusive: expectChanges ? sawNothing : undefined });
 }
 
 /**
