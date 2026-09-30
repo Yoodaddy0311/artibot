@@ -22,12 +22,12 @@
  *      `/split` -> `split`, neither -> `balanced`.
  *
  * Stage: OBSERVE. Nothing here changes a spawn. `artibot.config.json#routing`
- * ships `observe: true` with an EMPTY `canary.actionClasses`, so the caller
- * (T-31) records this result and routes on `lib/core/model-policy.js`
- * `resolveModel` exactly as before. GA-02 (Wave 14) adds a canary decision
- * gate that annotates `reason[]` with `canary:<tier>`; the EMPTY
- * `actionClasses` above is still what keeps this observe-only, and the
- * actuator (CA-02) is not landed.
+ * ships `observe: true`, so the caller (T-31) records this result and routes on
+ * `lib/core/model-policy.js` `resolveModel` exactly as before. GA-02 (Wave 14)
+ * added a canary decision gate that annotates `reason[]` with `canary:<tier>`;
+ * CA-02 (2026-09-30) armed `canary.actionClasses` for classify/status, and its
+ * actuator is `lib/core/model-canary.js` behind `/model-routing resolve --task`
+ * (owner decision D1) — this module still changes nothing.
  *
  * Layer: L2 pure. No `fs`, no `process`, no clock, no imports at all. The
  * config object and the schema validator both arrive by injection, which is

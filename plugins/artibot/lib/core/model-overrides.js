@@ -27,9 +27,11 @@
  * {@link resolveEffectiveModel} is the one answer to "which model for this
  * spawn, counting the user's choice". Precedence: user agent > user task
  * (only with `opts.task`) > user phase (artibot only) > user plugin default >
+ * canary (CA-02; only `opts.task` classify/status, see `model-canary.js`) >
  * shipped. The fable gate and
  * `FABLE_DENYLIST` are applied LAST, so no user setting can lift them. With no
- * override in play the artibot answer is `resolveModel(...)` unchanged.
+ * override in play the artibot answer is `resolveModel(...)` unchanged — except
+ * for the two canary tasks, which the shipped `routing.canary` lowers.
  *
  * `artibot-cowork` has no resolver of its own: its shipped value is its agent
  * frontmatter, which the caller supplies. It is never looked up in the core
@@ -46,6 +48,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveArtibotDir } from './config.js';
+import { CANARY_SOURCE, canaryTierFor, outranksTier } from './model-canary.js';
 import { resolveRole } from './model-catalog.js';
 import {
   BUILD_ROLES,
@@ -626,11 +629,23 @@ function applyGates(model, plugin, agent, config) {
  *
  * Precedence: user agent > user task (both plugins; only when `opts.task` is a
  * non-empty string) > user phase (artibot only; `opts.role` mapped via
- * BUILD_ROLES / REVIEW_ROLES) > user plugin default > shipped. Shipped for
+ * BUILD_ROLES / REVIEW_ROLES) > user plugin default > canary (CA-02, below) >
+ * shipped. Shipped for
  * artibot is `resolveModel(qualifiedName, opts, config)` with `opts.task`
  * removed, so the shipped answer cannot depend on it; shipped for
  * artibot-cowork is its frontmatter value, never the core policy. The fable gate
  * and FABLE_DENYLIST are applied last.
+ *
+ * CANARY (CA-02). With no user pick in play, a SHIPPED answer is lowered to
+ * `routing.canary.tier` when `opts.task` is one of the classes that key arms (only
+ * `classify` and `status` can be — `model-canary.js`) and `config` carries it. It
+ * is a shipped default of the task layer, so every user layer above wins, and it is
+ * asked only after they found nothing. Three guards keep it a cost lever: it never
+ * RAISES a seat (a shipped tier at or below the canary tier is returned untouched,
+ * source included), it never moves a FABLE_DENYLIST agent (the receipt path keeps
+ * those on opus too), and it has nothing to lower for a role alias / tier word, an
+ * unparseable name or a cowork agent whose frontmatter is unknown. No `config`, or
+ * one without `routing.canary`, means no canary.
  *
  * Core derives no default task: with `opts.task` absent the task layer is
  * skipped even when a task override is stored. A given `opts.task` is used
@@ -657,10 +672,11 @@ function applyGates(model, plugin, agent, config) {
  * @param {{ config?: object, overrides?: object|null, coworkFrontmatter?: Record<string,string>|null }} [ctx]
  * @returns {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }}
  *   `source` ∈ override-agent | override-task | override-phase |
- *   override-plugin | shipped | cowork-frontmatter | cowork-frontmatter-unknown;
+ *   override-plugin | canary-task | shipped | cowork-frontmatter |
+ *   cowork-frontmatter-unknown;
  *   `reason` ∈ null | fable-gate | denylist; `requested` = the picked value
  *   before the gates (override or cowork frontmatter; null for
- *   shipped/unknown); `scope` ∈ agent | task | phase | plugin | null (null
+ *   shipped/canary/unknown); `scope` ∈ agent | task | phase | plugin | null (null
  *   unless an override was picked).
  */
 export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overrides = null, coworkFrontmatter = null } = {}) {
@@ -677,11 +693,29 @@ export function resolveEffectiveModel(qualifiedName, opts = {}, { config, overri
     const gated = applyGates(picked.model, plugin, q.agent, config);
     return { ...gated, source: picked.source, requested: picked.model, scope: picked.scope };
   }
-  if (plugin === 'artibot') return shippedResult(resolveModel(qualifiedName, shippedOpts, config));
+  // No user pick: the shipped answer, lowered by the CA-02 canary when this task is one it names.
+  const canary = canaryTierFor(config, options.task);
+  if (plugin === 'artibot') return lowerToCanary(shippedResult(resolveModel(qualifiedName, shippedOpts, config)), canary, q.agent);
   const shipped = lookupTier(coworkFrontmatter, q.agent);
   if (shipped === null) return { ...UNKNOWN_COWORK };
   const gated = applyGates(shipped, plugin, q.agent, config);
-  return { ...gated, source: 'cowork-frontmatter', requested: shipped, scope: null };
+  return lowerToCanary({ ...gated, source: 'cowork-frontmatter', requested: shipped, scope: null }, canary, q.agent);
+}
+
+/**
+ * The CA-02 canary layer for one SHIPPED result: the canary tier when that LOWERS the
+ * seat, otherwise the result untouched. Reached only after `pickOverride` found no
+ * user pick, so it can never override one. Returns `shipped` itself (not a copy)
+ * when it changes nothing, so the no-canary path stays byte-identical.
+ *
+ * @param {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }} shipped
+ * @param {string|null} tier - `canaryTierFor(...)`: the low tier when armed for this task, else null.
+ * @param {string} agent - Bare agent name; a FABLE_DENYLIST agent is never lowered.
+ * @returns {{ model: string|null, source: string, reason: string|null, requested: string|null, scope: string|null }}
+ */
+function lowerToCanary(shipped, tier, agent) {
+  if (tier === null || isDenylisted(agent) || !outranksTier(shipped.model, tier)) return shipped;
+  return { model: tier, source: CANARY_SOURCE, reason: null, requested: null, scope: null };
 }
 
 /** Result for a cowork agent whose shipped value is not known. */

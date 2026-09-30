@@ -21,6 +21,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { readCanaryPlan } from '../../lib/core/model-canary.js';
 import {
   allowedTiersFor,
   clearOverride,
@@ -390,9 +391,11 @@ export function inertTaskKeys(overrides) {
  * rows) is resolved with `--task <class>` under every role. An agent whose role
  * variants changed identically counts once; otherwise per changed role, as the
  * per-agent rows do. One row per plugin, class and outcome, counted over those
- * agents, e.g. `  artibot [task=status]: opus → haiku for 30 of 30 agent(s) not
+ * agents, e.g. `  artibot [task=status]: sonnet → haiku for 29 of 30 agent(s) not
  * defaulting to status`. A re-set value or a pick every agent override shadows
- * gives no row.
+ * gives no row. The classes the shipped canary arms (CA-02: classify, status)
+ * are checked too whether or not their stored value changed, because their
+ * answer moves under an agent, phase or plugin-default pick as well.
  *
  * @param {object} ctx
  * @param {object} before
@@ -403,8 +406,13 @@ export function inertTaskKeys(overrides) {
  */
 export function taskContextDiff(ctx, before, after, roles, resolve) {
   const storedTask = (doc, plugin, task) => doc?.plugins?.[plugin]?.tasks?.[task] ?? null;
+  // The shipped canary arms these classes (CA-02): their effective value can move under ANY layer
+  // — an agent pick, a phase pick, a plugin default — not only when a stored task value changes.
+  // A class whose answer does not change prints no row, so listing them costs nothing.
+  const { classes, tier } = readCanaryPlan(ctx.config);
+  const armed = tier === null ? [] : classes;
   return PLUGIN_NAMES.filter((plugin) => ctx.rosters[plugin]).flatMap((plugin) =>
-    ACTION_CLASSES.filter((task) => storedTask(before, plugin, task) !== storedTask(after, plugin, task)).flatMap((task) => {
+    ACTION_CLASSES.filter((task) => armed.includes(task) || storedTask(before, plugin, task) !== storedTask(after, plugin, task)).flatMap((task) => {
       const agents = [...ctx.rosters[plugin].keys()].filter((a) => rowTask(`${plugin}:${a}`) !== task);
       const counts = new Map();
       for (const agent of agents) {

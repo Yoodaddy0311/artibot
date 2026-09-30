@@ -16,7 +16,10 @@
  * from `scripts/hooks/subagent-handler.js`), which returns either the host's
  * canonical model or `resolveModel(...)` and never reads `models.selected`
  * (measured 2026-09-21). A matched receipt therefore records INTENT, not
- * execution — and the shipped allowlist is empty, so today it records neither.
+ * execution. Since CA-02 (2026-09-30) the shipped allowlist names classify and
+ * status, so those receipts do record it; the spawn itself is answered by
+ * another reader of the same key (`lib/core/model-canary.js`, behind
+ * `/model-routing resolve --task`).
  *
  * Three structural guarantees, each pinned by a test:
  *
@@ -436,12 +439,13 @@ function buildIdentity(evidence, reason) {
  *
  * A CALLER DOES EXIST: `scripts/hooks/route-observe-pre.js#buildReceipt` — the
  * site of that file's `routeModel` call, reached from `#observePre` — forwards
- * `config.routing.canary` on every routed action (measured 2026-09-21). What
- * keeps the gate inert is not the absence of a caller but the SHIPPED EMPTY
- * LIST — `artibot.config.json` `routing.canary.actionClasses` is `[]`, pinned
- * by `tests/firewall/canary-actionclass-gate.test.js` and by
- * `tests/firewall/v5-config-firewall.test.js`. Filling that one key is all it
- * takes to arm this path.
+ * `config.routing.canary` on every routed action (measured 2026-09-21). CA-02
+ * (2026-09-30) FILLED that list: `artibot.config.json`
+ * `routing.canary.actionClasses` ships `['classify','status']`, pinned by
+ * `tests/firewall/canary-actionclass-gate.test.js` and by
+ * `tests/firewall/v5-config-firewall.test.js`. This normaliser accepts ANY
+ * class name; the closed two-name vocabulary is enforced by the config schema,
+ * those two pins and the actuator's own reader, `lib/core/model-canary.js`.
  *
  * @param {*} canary - `input.canary`, any shape, possibly hostile.
  * @returns {string[]} Trimmed class names, or [].
@@ -512,28 +516,40 @@ function resolveCanaryIdentity(src, actionClass, top, catalog) {
  * already agree, because "the gate applied and changed nothing" and "the gate
  * never matched" are different facts and only the reason code separates them.
  *
- * PRECONDITIONS BEFORE ANYONE FILLS `routing.canary.actionClasses` — each one
- * is unmet as of 2026-09-21:
- *  1. NO ACTUATOR. Nothing converts a matched receipt into a spawn; the
- *     PreToolUse stdout contract is unchanged and design I4/I7 precede CA-02.
- *     Arming the list changes receipts only.
- *  2. CONSUMERS READ `models.selected` AS "WHAT RAN" AND WOULD GO SILENTLY
- *     WRONG. `lib/scorecard/routing-scorecard.js` derives
+ * PRECONDITIONS THAT WERE LISTED BEFORE THE LIST WAS FILLED, AND WHERE THEY
+ * STAND after CA-02 filled `routing.canary.actionClasses` (2026-09-30):
+ *  1. NO ACTUATOR — answered by a DIFFERENT path, not by this one. Nothing
+ *     converts a matched receipt into a spawn (the PreToolUse stdout contract is
+ *     unchanged); the owner recognised the `/model-routing` task layer as the
+ *     CA-02 actuator (decision D1, 2026-09-28), and `lib/core/model-canary.js`
+ *     answers `resolve --task classify|status` from the SAME key. Receipts stay
+ *     record-only.
+ *  2. CONSUMERS READ `models.selected` AS "WHAT RAN" — STILL OPEN, unchanged by
+ *     CA-02. `lib/scorecard/routing-scorecard.js` derives
  *     `routing.recommendation_divergence`, `routing.avoided_switch` /
  *     `routing.avoided_switch_pinned` and `routing.selected_tiers` from
  *     `models.recommended.tier` vs `models.selected.tier`; the RouteBench
  *     baseline in `scripts/bench/routebench-corpus.mjs` reads
  *     `models.selected` the same way. Under a matched canary those two tiers
- *     are EQUAL by construction, so divergence would read as zero while the
- *     policy answer is still there — in `reason`. Such consumers must key on
- *     `policy:<tier>` and `canary:<tier>` first.
- *  3. ONLY opus↔fable IS REACHABLE. With the shipped config every agent's
- *     ceiling sits inside {opus, fable} because `agents.modelPolicy.low.agents`
- *     is `[]` (and `loadModelPolicy` normalises only the `high`/`medium`
- *     buckets). Reaching haiku or sonnet needs that second key too, so "one
- *     config key" opens opus↔fable moves and nothing wider.
- *  4. MEMBERS ARE NOT CHECKED AGAINST `ACTION_CLASSES`. A typo is silently
- *     unmatched — fail-closed, but with no warning anywhere.
+ *     are EQUAL by construction, so divergence reads as zero while the policy
+ *     answer is still there — in `reason`. Such consumers must key on
+ *     `policy:<tier>` and `canary:<tier>` first. Exposure is small today: an
+ *     agent-classified receipt takes its agent's own class and no agent defaults
+ *     to classify or status, so only TEXT-classified receipts can match
+ *     (measured 2026-09-30, counting `data.action.type` over the git-common-dir
+ *     ledger: 1 of 770 `route.selected` rows is classify or status).
+ *  3. ONLY opus↔fable IS REACHABLE HERE — unchanged. Every agent's ceiling sits
+ *     inside {opus, fable} because `agents.modelPolicy.low.agents` is `[]` (and
+ *     `loadModelPolicy` normalises only the `high`/`medium` buckets), so under
+ *     the shipped config a receipt's `canary:<tier>` is never the low tier.
+ *     The low tier reaches a spawn through the actuator above, which is not
+ *     bounded by this ceiling: the two answers are DIFFERENT decisions, not
+ *     one seen twice.
+ *  4. MEMBERS ARE NOT CHECKED AGAINST `ACTION_CLASSES` — closed for the shipped
+ *     file, open here. The config schema enum and both firewall pins hold the
+ *     shipped list to the two-name vocabulary and the actuator ignores any other
+ *     name; this router still accepts any non-empty string (a typo is silently
+ *     unmatched — fail-closed, with no warning).
  *
  * @param {object} src - Router input.
  * @param {string} actionClass - Resolved action class.
@@ -608,9 +624,9 @@ function pickRoute(src, actionClass, catalog) {
  *   Injected effort/budget ports. Nothing is computed when they are absent.
  * @param {object} [input.canary] - GA-02 canary gate. `canary.actionClasses`
  *   is an allowlist of action classes whose seat may move onto the RECOMMENDED
- *   tier instead of the `resolveModel` answer. Fail-closed, and SHIPPED EMPTY —
- *   see {@link resolveCanaryClasses} for who forwards it and
- *   {@link resolveSelection} for what must be true before the list is filled.
+ *   tier instead of the `resolveModel` answer. Fail-closed; shipped as the two
+ *   CA-02 classes — see {@link resolveCanaryClasses} for who forwards it and
+ *   {@link resolveSelection} for where the pre-fill preconditions now stand.
  * @param {string} [input.epoch] - Routing epoch id (G1: the spawn run_id).
  * @param {object} [input.evidence] - {@link REQUIRED_EVIDENCE} plus optional ids.
  * @returns {object} A RouteReceipt (`schemas/route-receipt.schema.json`).

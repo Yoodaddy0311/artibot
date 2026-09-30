@@ -658,13 +658,16 @@ describe('task layer — isolation, gates, shipped identity', () => {
       .toEqual(R('opus', 'override-task', { reason: 'fable-gate', requested: 'fable', scope: 'task' }));
   });
 
-  it('with no override for the task, opts.task leaves every shipped answer byte-identical', () => {
+  it('with no override for the task, opts.task leaves every shipped answer byte-identical (6 non-canary classes)', () => {
+    // classify/status are the CA-02 canary classes — pinned in model-overrides-canary.test.js.
+    const plain = ACTION_CLASSES.filter((task) => !shippedConfig.routing.canary.actionClasses.includes(task));
+    expect(plain).toHaveLength(6);
     const other = setOverride(null, { scope: 'task', plugin: 'artibot', key: 'implement', tier: 'haiku' });
     let checked = 0;
     for (const overrides of [null, emptyOverrides(), other]) {
       for (const agent of AGENTS) {
         for (const role of ROLE_OPTS) {
-          for (const task of ACTION_CLASSES) {
+          for (const task of plain) {
             if (overrides === other && task === 'implement') continue;
             const got = resolveEffectiveModel(`artibot:${agent}`, { ...role, task }, { config: shippedConfig, overrides });
             expect(got, `${agent} ${JSON.stringify(role)} ${task}`).toEqual(SHIPPED(resolveModel(`artibot:${agent}`, role, shippedConfig)));
@@ -673,7 +676,7 @@ describe('task layer — isolation, gates, shipped identity', () => {
         }
       }
     }
-    expect(checked).toBe(30 * 3 * 8 * 3 - 30 * 3);
+    expect(checked).toBe(30 * 3 * 6 * 3 - 30 * 3);
   });
 
   it('role aliases keep their fast path even with opts.task and a matching task override', () => {

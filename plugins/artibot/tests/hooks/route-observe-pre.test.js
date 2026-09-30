@@ -821,19 +821,22 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
     expect(line.data.models.current).toBeNull();
   });
 
-  it('stays mute for an Agent call under the SHIPPED empty canary allowlist', () => {
+  it('stays mute for an Agent call under the SHIPPED canary allowlist, and names no canary for a class it does not list', () => {
     // The child process loads the real `artibot.config.json`, so this is the
-    // shipped `routing.canary.actionClasses: []` reaching the hook for real —
-    // not a synthesized one. Read here rather than pinned, so a flip of that
-    // key retires this test's premise instead of leaving it asserting a value
-    // the file no longer has.
+    // shipped `routing.canary` reaching the hook for real — not a synthesized
+    // one. CA-02 (2026-09-30) armed it for classify/status; this call is a
+    // tdd-guide spawn (class `implement`), which the list does not name, so its
+    // receipt carries no `canary:` code — and stdout stays empty either way.
     const shipped = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
-    expect(shipped.routing.canary.actionClasses).toEqual([]);
+    expect(shipped.routing.canary.actionClasses).toEqual(['classify', 'status']);
 
     const r = runHook(payloadFor({ transcript_path: transcriptFor('fable') }), home);
     expect(r.status).toBe(0);
     expect(Buffer.byteLength(r.stdout, 'utf8')).toBe(0);
-    expect(readRunLedger(repo)).toHaveLength(1);
+    const lines = readRunLedger(repo);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].data.action.type).toBe('implement');
+    expect(lines[0].data.reason.some((c) => c.startsWith('canary:'))).toBe(false);
   });
 });
 

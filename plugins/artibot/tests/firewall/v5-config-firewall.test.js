@@ -75,6 +75,7 @@ import { describe, expect, it } from 'vitest';
 
 import { loadModelPolicy, resolveModel } from '../../lib/core/model-policy.js';
 import { validateConfig } from '../../lib/core/config-schema.js';
+import { CANARY_ACTION_CLASSES, CANARY_TIERS, readCanaryPlan } from '../../lib/core/model-canary.js';
 import {
   FOLLOW_WORKFLOW_PLAN_CONFIG_KEY,
   readFollowWorkflowPlan,
@@ -223,11 +224,24 @@ describe('v5 신설 최상위 키 6종 — 형태와 값', () => {
     expect(TOPOLOGY_MODES).toContain(config.topology.default);
   });
 
-  it('routing.canary.actionClasses 는 빈 배열이다 (observe-only 의 정의)', () => {
-    // 비어 있지 않으면 그 클래스의 추천이 실제로 적용된다 = 더 이상 기록만이 아니다.
-    // GA-02 결정 게이트(Wave 14)는 reason[] 에 canary:<tier> 를 싣지만 작동기는 아니다 —
-    // 이 배열이 빈 동안 판정은 기록만 한다(작동기 CA-02 미착수).
-    expect(config.routing.canary.actionClasses).toEqual([]);
+  it('routing.canary 는 CA-02 출하값이다: classify·status 만, 저가 티어 sonnet', () => {
+    // CA-02(오너 승인 2026-09-30): 작동기는 `/model-routing` task 층이다(오너 결정 D1 — 리더 전달,
+    // 강제 훅 없음). `resolve --task classify|status` 가 opus 대신 이 티어를 찍고, 사용자 설정이
+    // 항상 이긴다(model-overrides-canary.test.js). 목록을 [] 로 되돌리면 그 경로가 꺼진다(1키 롤백).
+    // 못 보는 것: 리더가 --task 를 붙이는지(어느 에이전트도 기본 작업 종류가 classify·status 가
+    // 아니다), 그 단어를 Agent(model=…) 로 넘기는지, 호스트가 그것을 서빙하는지(usage.receipt 만 안다).
+    // 영수증 경로(adaptive-model-router)도 같은 키를 읽지만 그쪽은 정책 천장 안의 의도만 기록한다.
+    expect(config.routing.canary.actionClasses).toEqual(['classify', 'status']);
+    expect(config.routing.canary.tier).toBe('sonnet');
+    expect(Object.keys(config.routing.canary).sort()).toEqual(['actionClasses', 'tier']);
+  });
+
+  it('routing.canary 는 닫힌 어휘 안이다 — 어휘 밖 값은 실효 목록에서 무시된다 (allowlist, 부정 목록 아님)', () => {
+    const plan = readCanaryPlan(config);
+    expect(plan.ignored).toEqual([]);
+    expect(plan.classes).toEqual(config.routing.canary.actionClasses);
+    for (const name of config.routing.canary.actionClasses) expect(CANARY_ACTION_CLASSES).toContain(name);
+    expect(CANARY_TIERS).toContain(config.routing.canary.tier);
   });
 
   it('missions.substantiveSignals 는 S1~S6 allowlist 다', () => {

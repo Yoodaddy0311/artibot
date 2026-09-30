@@ -17,6 +17,14 @@
  * merged into `loadConfig()`: the CI drift gate and the routebench baselines read
  * that config, and a developer machine's override must not leak into either.
  *
+ * THE SHIPPED CANARY (CA-02). That config's `routing.canary` makes
+ * `resolve <plugin:name> --task classify|status` print a low tier (sonnet) instead
+ * of opus: a shipped DEFAULT of the task layer that every user setting beats,
+ * applied inside `resolveEffectiveModel` (`lib/core/model-canary.js`). This file
+ * re-derives no answer: `show`'s source column reads `canary-task` for such a row,
+ * and the effective-changes preview always diffs the armed classes
+ * (`model-routing-task.mjs#taskContextDiff`).
+ *
  * THE SETTING ONLY TAKES EFFECT WHEN THE LEADER PASSES IT. The host spawns a
  * plugin agent on its frontmatter `model:` unless the spawn call carries a
  * `model` parameter. So every row whose effective model differs from its

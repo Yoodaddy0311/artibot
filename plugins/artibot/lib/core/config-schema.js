@@ -275,9 +275,14 @@ export const configSchema = {
         canary: {
           type: 'object',
           properties: {
-            // Allowlist of action classes whose recommendation is applied.
-            // Empty = observe-only; fail-closed for future classes.
-            actionClasses: { type: 'array', items: { type: 'string' } },
+            // CA-02: CLOSED allowlist of action classes whose recommendation is
+            // applied — the same two names as lib/core/model-canary.js#
+            // CANARY_ACTION_CLASSES (tests/core/model-canary.test.js pins that).
+            // Empty = nothing armed; fail-closed for future classes.
+            actionClasses: { type: 'array', items: { type: 'string', enum: ['classify', 'status'] } },
+            // The low tier an armed class resolves to (= CANARY_TIERS). Absent or
+            // outside the pair = the canary is OFF; there is no default tier.
+            tier: { type: 'string', enum: ['haiku', 'sonnet'] },
           },
         },
         comment: { type: 'string' },
