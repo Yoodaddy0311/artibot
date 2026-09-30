@@ -16,12 +16,13 @@ import path from 'node:path';
 import * as artifactLifecycle from '../../lib/runtime/artifact-lifecycle.js';
 import { readJsonFileSync } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
+import { appendLedgerEvent, ledgerFilePath, readAllEvents } from '../../lib/runtime/ledger.js';
 import {
   bindIntentRevision,
   MISSION_ID_PATTERN,
   parseReviewVerdict,
 } from '../../lib/review/independent-reviewer.js';
+import { resolveStopIdentity } from '../../lib/review/stop-identity.js';
 import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 
 // ---------------------------------------------------------------------------
@@ -172,11 +173,25 @@ const TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024;
 const REVIEW_COLUMN_MAX = 160;
 
 /**
+ * The allowlist predicate — ONE function for the stop's own type and for every
+ * type `resolveStopIdentity` offers, so resolving a name can never widen it.
+ * @param {string|null} identity a normalised identity
+ * @returns {boolean} true for a reviewer type or a team inspector name
+ */
+function onAllowlist(identity) {
+  if (identity === null) return false;
+  return REVIEWER_AGENT_TYPES.includes(identity)
+    || identity.endsWith(INSPECTOR_NAME_SUFFIX);
+}
+
+/**
  * Whether this stop belongs to a reviewer at all.
  *
  * Returning false means the review path is NOT ENTERED: no transcript read, no
  * ledger read, no ledger write, and no `review_ledger` column on the spawn
- * record. That is the cheap and the safe answer for the ~24 non-reviewer agents.
+ * record (the one read a false answer may have cost is the bounded identity
+ * resolution described below). That is the cheap and the safe answer for the
+ * ~24 non-reviewer agents.
  *
  * `identityOf` is INJECTED rather than imported or re-implemented. It lives in
  * `scripts/hooks/subagent-handler.js`, which imports this module, so importing
@@ -184,15 +199,51 @@ const REVIEW_COLUMN_MAX = 160;
  * agent is this", which is exactly what its own doc comment warns against. The
  * caller passes the one normalizer its bind path already uses.
  *
+ * THE OPTIONAL THIRD ARGUMENT is the stop's context (SH-05). A team spawn's
+ * `agent_type` is its NAME (`review-f1`), which no allowlist matches, so before
+ * this the review path was unreachable for every named reviewer — 0 rows of
+ * `review.completed` / `review.claim_audit` in the whole ledger. With the
+ * context, a stop that was REGISTERED at SubagentStart (`tracked.startedAt` is
+ * written by that hook alone) is resolved to the definition type it was spawned
+ * with (`lib/review/stop-identity.js`: host meta, then the spawn's ledger
+ * trail) and that type is put to the SAME allowlist. Without it the answer is
+ * exactly the two-argument answer. FAIL CLOSED: nothing resolvable — no project
+ * root, no ledger, no row, a row older than the scan window — is `false`.
+ * The root comes from the payload (`payloadProjectRoot`), never from
+ * `process.cwd()`. COST, measured 2026-09-30 on a 62,152-line / 24.6 MB ledger
+ * copy (Node 24.15, Windows 11): an allowlisted or unregistered stop pays ~0 ms;
+ * a registered one 1.2 ms (trail 300 KB back) to 7.7 ms (2.5 MB back), 19 ms
+ * when nothing is found and the whole 8 MiB window is read (N=30). The resolver
+ * is a STATIC import (this function is sync): 1.7 ms marginal, N=15, paid by
+ * every SubagentStart and Stop.
+ *
  * @param {unknown} agentType `agent_type` from the payload, or the tracked one
  * @param {(value: unknown) => string|null} identityOf the caller's normalizer
+ * @param {{hookData?: object, agentId?: string, sessionId?: string|null,
+ *   projectRoot?: string|null, tracked?: object}} [stop] `handleStop`'s context
  * @returns {boolean} true when the type is a reviewer or a team inspector
  */
-export function isReviewerStop(agentType, identityOf) {
-  const identity = identityOf(agentType);
-  if (identity === null) return false;
-  return REVIEWER_AGENT_TYPES.includes(identity)
-    || identity.endsWith(INSPECTOR_NAME_SUFFIX);
+export function isReviewerStop(agentType, identityOf, stop) {
+  if (onAllowlist(identityOf(agentType))) return true;
+  if (stop === undefined || stop === null || typeof stop !== 'object') return false;
+  try {
+    const startedAt = stop.tracked?.startedAt;
+    const startedAtMs = typeof startedAt === 'string' ? Date.parse(startedAt) : Number.NaN;
+    if (!Number.isFinite(startedAtMs)) return false;
+    const root = stop.projectRoot;
+    return resolveStopIdentity({
+      agentType,
+      agentId: stop.agentId,
+      sessionId: stop.sessionId,
+      transcriptPath: stop.hookData?.agent_transcript_path,
+      startedAtMs,
+    }, {
+      accept: (type) => onAllowlist(identityOf(type)),
+      ledgerPath: () => (typeof root === 'string' && root !== '' ? ledgerFilePath(root) : null),
+    }).identity !== null;
+  } catch {
+    return false;
+  }
 }
 
 /**

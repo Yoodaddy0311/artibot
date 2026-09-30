@@ -762,7 +762,7 @@ function handleStop(hookData, ids) {
   const effectiveType = tracked?.agentType ?? agentType;
   // Reviewer stops only (allowlist — see `_review-stop-record.js#isReviewerStop`);
   // `identityOf` is injected because that module must not import this one back.
-  const review = isReviewerStop(effectiveType, identityOf)
+  const review = isReviewerStop(effectiveType, identityOf, { hookData, agentId, sessionId, projectRoot, tracked })
     ? recordReviewFromStop(hookData, { agentId, agentType: effectiveType, sessionId, missionId }, projectRoot)
     : null;
   recordSpawn(hookData, projectRoot, {
