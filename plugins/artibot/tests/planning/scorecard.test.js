@@ -24,9 +24,58 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', 'planning', 'scorecard.js');
 
-/** Run the scorecard CLI in `cwd`, piping `stdin` (for `add`). Returns { stdout, status }. */
+/**
+ * Per-spawn ceiling for the CLI. Its only job is to turn a WEDGED child into a failure that
+ * names the call, so it is far above any measured time: one whole CLI call (cold `node` start
+ * plus the work) took at most 0.83 s across a 2026-09-30 probe of 900 spawns, up to 8 in
+ * flight, with and without file churn. 60 s is what tests/scripts/resume-report-cli.test.js
+ * gives its spawns too.
+ */
+const CLI_TIMEOUT_MS = 60_000;
+
+/** A CLI case spawns up to three children, so its vitest budget may not be smaller than their sum. */
+const CLI_CASE_TIMEOUT_MS = 3 * CLI_TIMEOUT_MS;
+
+/** What explains a failed child, for assertion messages (JSON.stringify makes empty output visible). */
+function describeRun(res) {
+  return [
+    `status=${res.status} signal=${res.signal ?? 'none'}`,
+    `stdout=${JSON.stringify(res.stdout ?? '')}`,
+    `stderr=${JSON.stringify(res.stderr ?? '')}`,
+  ].join('\n');
+}
+
+/**
+ * Run the scorecard CLI in `cwd`, piping `stdin` (for `add`). Returns the spawnSync result.
+ * Throws when the child could not run to completion (spawn failure, or killed at
+ * CLI_TIMEOUT_MS): `status` would be null and stdout partial, and the caller's next
+ * assertion would blame the output instead of the run.
+ */
 function runCli(args, { cwd, stdin = '' } = {}) {
-  return spawnSync(process.execPath, [SCRIPT, ...args], { cwd, input: stdin, encoding: 'utf8' });
+  const res = spawnSync(process.execPath, [SCRIPT, ...args], {
+    cwd, input: stdin, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, windowsHide: true,
+  });
+  if (res.error) {
+    const why = res.error.code ?? res.error.message;
+    throw new Error(`scorecard \`${args.join(' ')}\` did not run to completion (${why}, limit ${CLI_TIMEOUT_MS} ms)\n${describeRun(res)}`);
+  }
+  return res;
+}
+
+/**
+ * Setup step: `add` one snapshot through the CLI and prove it was persisted.
+ *
+ * `status === 0` proves nothing here. The CLI catches its own errors and exits 0: a failed
+ * save is the STDOUT line `저장 실패: <error>` (an exception is `_scorecard 오류: ...`), and
+ * only a successful save prints `saved: <path>`. Reproduced 2026-09-30 with file churn
+ * running beside it: the SECOND `add` (the one that renames over an existing store) failed
+ * with `EPERM: ... rename '...scorecard.json.tmp...'`, exit 0, store left at one snapshot,
+ * and the test then failed on the `diff` output ("현재 1개"), far from its cause.
+ */
+function addViaCli(projectRoot, json) {
+  const res = runCli(['add'], { cwd: projectRoot, stdin: json });
+  const persisted = res.status === 0 && /^saved: /m.test(res.stdout) && !/저장 실패|_scorecard 오류/.test(res.stdout);
+  expect(persisted, `setup \`add\` did not persist its snapshot\nstdin=${json}\n${describeRun(res)}`).toBe(true);
 }
 
 // Guarded import: until sl-dev lands the snapshots-model rewrite, missing exports
@@ -200,7 +249,8 @@ describe('loadScorecard / saveScorecard — persistence', () => {
   it('save then load round-trips the store intact', async () => {
     expect(typeof mod.saveScorecard, 'scorecard.js must export saveScorecard').toBe('function');
     const store = storeWith([area('perf', 80), area('security', 90)], 'round');
-    await mod.saveScorecard({ projectRoot }, store);
+    const saved = await mod.saveScorecard({ projectRoot }, store);
+    expect(saved.ok, `saveScorecard did not persist: ${JSON.stringify(saved)}`).toBe(true);
     const loaded = await mod.loadScorecard({ projectRoot });
     expect(loaded.snapshots).toHaveLength(store.snapshots.length);
     expect(loaded.snapshots.at(-1).areas.map((a) => a.name).sort()).toEqual(['perf', 'security']);
@@ -208,7 +258,8 @@ describe('loadScorecard / saveScorecard — persistence', () => {
 
   it('save is atomic — no temp-file residue is left behind', async () => {
     const store = storeWith([area('perf', 80)], 'atomic');
-    await mod.saveScorecard({ projectRoot }, store);
+    const saved = await mod.saveScorecard({ projectRoot }, store);
+    expect(saved.ok, `saveScorecard did not persist: ${JSON.stringify(saved)}`).toBe(true);
     // scan the whole projectRoot tree for any *.tmp* residue
     const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       const p = join(dir, e.name);
@@ -223,7 +274,7 @@ describe('loadScorecard / saveScorecard — persistence', () => {
   });
 });
 
-describe('CLI diff — last-2 auto-select (the structural fix for the id-sort bug)', () => {
+describe('CLI diff — last-2 auto-select (the structural fix for the id-sort bug)', { timeout: CLI_CASE_TIMEOUT_MS }, () => {
   let projectRoot;
   beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-cli-')); });
   afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
@@ -233,22 +284,25 @@ describe('CLI diff — last-2 auto-select (the structural fix for the id-sort bu
 
   it('degrades gracefully when fewer than 2 snapshots exist', () => {
     const zero = runCli(['diff'], { cwd: projectRoot });
-    expect(zero.status).toBe(0);
+    expect(zero.status, describeRun(zero)).toBe(0);
     expect(zero.stdout).toMatch(/2개|2 개|필요/); // Korean "needs 2 snapshots" notice
 
-    runCli(['add'], { cwd: projectRoot, stdin: payload('before', 'perf', 50) });
+    // `addViaCli` also guards this case's premise: with a FAILED add the store holds 0
+    // snapshots and the notice below still contains `필요`, so the `/1개|필요/` match alone
+    // could not tell "one snapshot" from "none".
+    addViaCli(projectRoot, payload('before', 'perf', 50));
     const one = runCli(['diff'], { cwd: projectRoot });
-    expect(one.status).toBe(0);
+    expect(one.status, describeRun(one)).toBe(0);
     expect(one.stdout).toMatch(/1개|필요/);
   });
 
   it('diffs the last two snapshots by insertion order (time order), label order irrelevant', () => {
     // Insert an alphabetically-LATER label first, then an EARLIER one, to prove the
     // old lexical-id-sort bug cannot recur: selection is by array position, not name.
-    runCli(['add'], { cwd: projectRoot, stdin: payload('zzz-before', 'perf', 20) });
-    runCli(['add'], { cwd: projectRoot, stdin: payload('aaa-after', 'perf', 80) });
+    addViaCli(projectRoot, payload('zzz-before', 'perf', 20));
+    addViaCli(projectRoot, payload('aaa-after', 'perf', 80));
     const diff = runCli(['diff'], { cwd: projectRoot });
-    expect(diff.status).toBe(0);
+    expect(diff.status, describeRun(diff)).toBe(0);
     // before=20 (first inserted), after=80 (last inserted) -> +60, NOT reversed.
     expect(diff.stdout).toContain('20');
     expect(diff.stdout).toContain('80');
@@ -353,7 +407,7 @@ describe('loadThemePalette — theme-file fallback', () => {
   });
 });
 
-describe('CLI isTTY branching — non-TTY pipe yields plain GFM', () => {
+describe('CLI isTTY branching — non-TTY pipe yields plain GFM', { timeout: CLI_CASE_TIMEOUT_MS }, () => {
   let projectRoot;
   beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-tty-')); });
   afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
@@ -362,10 +416,10 @@ describe('CLI isTTY branching — non-TTY pipe yields plain GFM', () => {
     JSON.stringify({ label, areas: [{ name, score, evidence: [{ file: 'a.js:1', note: 'n' }] }] });
 
   it('a piped (non-TTY) `diff` prints the GFM table without ANSI color', () => {
-    runCli(['add'], { cwd: projectRoot, stdin: payload('before', 'perf', 50) });
-    runCli(['add'], { cwd: projectRoot, stdin: payload('after', 'perf', 80) });
+    addViaCli(projectRoot, payload('before', 'perf', 50));
+    addViaCli(projectRoot, payload('after', 'perf', 80));
     const diff = runCli(['diff'], { cwd: projectRoot }); // spawnSync pipes -> stdout not a TTY
-    expect(diff.status).toBe(0);
+    expect(diff.status, describeRun(diff)).toBe(0);
     expect(diff.stdout).toContain('| 평가 항목 | 작업 전 | 작업 후 | 상승폭 | 남은 갭 |');
     expect(diff.stdout).not.toMatch(ANSI_TRUECOLOR); // no truecolor when piped
   });
