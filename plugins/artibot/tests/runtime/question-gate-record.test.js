@@ -14,6 +14,13 @@
  *    rows written before CA-15 are always false. The marker is what lets a
  *    reader of the line tell "false because the prompt had no cue" from "false
  *    because the input that could have made it true was never supplied".
+ *  - **The status names WHY, and a throw is not a row from before CA-15.**
+ *    `interpretation_status` (`ok` | `threw` | `absent`, CA-15 follow-up b) is
+ *    what separates an interpreter that threw from a caller that supplied none;
+ *    a row written before it existed has no such key at all. The vocabulary is
+ *    pinned equal to the allowlist's enum, `interpretation_present` is pinned
+ *    true exactly when the status is `ok`, and only the boolean `true` counts as
+ *    a throw report.
  *  - **Data keys ⊆ declared allowlist fields, and required ⊆ emitted.** The
  *    writer passes an UNDECLARED data key through untyped
  *    (`tests/firewall/ledger-vocab-allowlist.test.js` "lets an UNDECLARED data
@@ -62,6 +69,8 @@ import {
   appendQuestionGateEvent,
   buildQuestionGateData,
   INTERPRETATION_PRESENT_KEY,
+  INTERPRETATION_STATUS_KEY,
+  INTERPRETATION_STATUSES,
   QUESTION_GATE_EVENT,
 } from '../../lib/runtime/question-gate-record.js';
 
@@ -169,11 +178,17 @@ describe('buildQuestionGateData — the four booleans and required', () => {
     expect(fired.map((f) => f.name)).toEqual(['a cue for all four conditions']);
   });
 
-  it('emits strict booleans for every key, never undefined or a truthy look-alike', () => {
+  it('emits strict booleans for every key but the status, never undefined or a truthy look-alike', () => {
+    // RE-PINNED by CA-15 follow-up b (intended): `interpretation_status` is the
+    // one key that is a closed-vocabulary string, not a boolean.
     for (const { input } of FIXTURES) {
       const data = buildQuestionGateData(input);
       for (const [key, value] of Object.entries(data)) {
-        expect(typeof value, key).toBe('boolean');
+        if (key === INTERPRETATION_STATUS_KEY) {
+          expect(INTERPRETATION_STATUSES, key).toContain(value);
+        } else {
+          expect(typeof value, key).toBe('boolean');
+        }
       }
     }
   });
@@ -217,6 +232,77 @@ describe('buildQuestionGateData — the interpretation-absent marker', () => {
     });
     expect(without.materialDownstreamImpact).toBe(false);
     expect(withIt.materialDownstreamImpact).toBe(true);
+  });
+});
+
+describe('buildQuestionGateData — the interpretation status (CA-15 follow-up b)', () => {
+  // `interpretation_present:false` is written both by a caller that supplied no
+  // interpretation and by `tasks.js#interpretForGate` when `interpretIntent`
+  // THREW, and every row written before CA-15 also read false with no key at
+  // all. The status is what tells a throw from the other two without `ts`.
+  const STATUS = INTERPRETATION_STATUS_KEY;
+
+  it('names its key and pins the closed vocabulary', () => {
+    expect(STATUS).toBe('interpretation_status');
+    expect(INTERPRETATION_STATUSES).toEqual(['ok', 'threw', 'absent']);
+    expect(Object.isFrozen(INTERPRETATION_STATUSES)).toBe(true);
+  });
+
+  it('records ok when an interpretation was supplied', () => {
+    const data = buildQuestionGateData({ prompt: NONE_PROMPT, interpretation: { completion_expectation: 'answer' } });
+    expect(data[STATUS]).toBe('ok');
+    expect(data[INTERPRETATION_PRESENT_KEY]).toBe(true);
+  });
+
+  it('records absent when none was supplied and nothing threw', () => {
+    for (const input of [{ prompt: NONE_PROMPT }, { prompt: NONE_PROMPT, interpretation: null }, undefined]) {
+      const data = buildQuestionGateData(input);
+      expect(data[STATUS], JSON.stringify(input)).toBe('absent');
+      expect(data[INTERPRETATION_PRESENT_KEY]).toBe(false);
+    }
+  });
+
+  it('records threw when the caller reports a throw and supplies no interpretation', () => {
+    const data = buildQuestionGateData({ prompt: NONE_PROMPT, interpretationThrew: true });
+    expect(data[STATUS]).toBe('threw');
+    expect(data[INTERPRETATION_PRESENT_KEY]).toBe(false);
+  });
+
+  it('tells a throw from a caller that supplied none: same conditions, same marker, different status', () => {
+    const threw = buildQuestionGateData({ prompt: ALL_FOUR_PROMPT, interpretationThrew: true });
+    const none = buildQuestionGateData({ prompt: ALL_FOUR_PROMPT });
+    const { [STATUS]: threwStatus, ...threwRest } = threw;
+    const { [STATUS]: noneStatus, ...noneRest } = none;
+    expect(threwRest).toEqual(noneRest);
+    expect(threwStatus).not.toBe(noneStatus);
+  });
+
+  it('lets a supplied interpretation outrank a throw report: present holds exactly when ok', () => {
+    const data = buildQuestionGateData({
+      prompt: NONE_PROMPT, interpretation: { completion_expectation: 'commit' }, interpretationThrew: true,
+    });
+    expect(data[STATUS]).toBe('ok');
+    expect(data[INTERPRETATION_PRESENT_KEY]).toBe(true);
+  });
+
+  it.each([['the string "true"', 'true'], ['1', 1], ['an object', {}], ['an array', [true]],
+    ['null', null], ['undefined', undefined], ['false', false], ['the word threw', 'threw']])(
+    'reads only the boolean true as a throw report, not %s',
+    (_label, report) => {
+      expect(buildQuestionGateData({ prompt: NONE_PROMPT, interpretationThrew: report })[STATUS]).toBe('absent');
+    },
+  );
+
+  it('always lands in the vocabulary and agrees with the presence marker, on every input shape', () => {
+    const interpretations = [undefined, null, 'commit', 7, true, {}, { completion_expectation: 'commit' }, []];
+    for (const interpretation of interpretations) {
+      for (const interpretationThrew of [undefined, true, false]) {
+        const data = buildQuestionGateData({ prompt: NONE_PROMPT, interpretation, interpretationThrew });
+        const label = `${JSON.stringify(interpretation)} / ${interpretationThrew}`;
+        expect(INTERPRETATION_STATUSES, label).toContain(data[STATUS]);
+        expect(data[INTERPRETATION_PRESENT_KEY], label).toBe(data[STATUS] === 'ok');
+      }
+    }
   });
 });
 
@@ -303,6 +389,16 @@ describe('the emitted key set against the allowlist', () => {
       expect(spec.fields[key]?.type, key).toBe('boolean');
     }
   });
+
+  it('declares the status as a closed enum pinned to the recorder\'s own vocabulary, and requires it', () => {
+    // The same shape as `human.resolved`'s `kind`: the recorder exports the
+    // vocabulary, the allowlist owns the enum, and this pin keeps the two equal.
+    expect(spec.fields[INTERPRETATION_STATUS_KEY]).toEqual({ enum_ref: 'interpretation_status' });
+    expect(getAllowlist().enums.interpretation_status).toEqual([...INTERPRETATION_STATUSES]);
+    // Required, not merely declared: a row that lost it would read as a row
+    // written before CA-15, which is the very ambiguity the field removes.
+    expect(spec.required).toContain(INTERPRETATION_STATUS_KEY);
+  });
 });
 
 describe('appendQuestionGateEvent — statuses on a real ledger file', () => {
@@ -362,6 +458,34 @@ describe('appendQuestionGateEvent — statuses on a real ledger file', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].event).toBe('ledger.rejected');
     expect(readAllEvents(root)).toHaveLength(0);
+  });
+
+  it('refuses a status outside the vocabulary, and the writer records the refusal', () => {
+    const bad = { ...buildQuestionGateData({ prompt: NONE_PROMPT }), [INTERPRETATION_STATUS_KEY]: 'timeout' };
+    expect(appendQuestionGateEvent(identity(), bad, NOW_MS))
+      .toBe('rejected:enum-violation:interpretation_status');
+    expect(readAllEvents(root)).toHaveLength(0);
+    expect(allLines().map((l) => l.event)).toEqual(['ledger.rejected']);
+  });
+
+  it('refuses a line that lost its status, which would read as a row written before CA-15', () => {
+    const { [INTERPRETATION_STATUS_KEY]: _lost, ...data } = buildQuestionGateData({ prompt: NONE_PROMPT });
+    expect(appendQuestionGateEvent(identity(), data, NOW_MS))
+      .toBe('rejected:missing-required-data:interpretation_status');
+    expect(readAllEvents(root)).toHaveLength(0);
+  });
+
+  it('writes each of the three states to disk, so they can be told apart when read back', () => {
+    const inputs = [
+      { prompt: NONE_PROMPT, interpretation: { completion_expectation: 'answer' } },
+      { prompt: NONE_PROMPT, interpretationThrew: true },
+      { prompt: NONE_PROMPT },
+    ];
+    for (const input of inputs) {
+      expect(appendQuestionGateEvent(identity(), buildQuestionGateData(input), NOW_MS)).toBe('appended');
+    }
+    expect(readAllEvents(root).map((l) => l.data[INTERPRETATION_STATUS_KEY]))
+      .toEqual(['ok', 'threw', 'absent']);
   });
 
   it('reports a thrown append as error:<message> and does not throw', () => {

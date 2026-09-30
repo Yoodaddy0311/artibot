@@ -87,6 +87,11 @@
       "prompt_id+fifo",
       "name-only",
       "fifo-only"
+    ],
+    "interpretation_status": [
+      "ok",
+      "threw",
+      "absent"
     ]
   },
   "enum_sources": {
@@ -101,7 +106,8 @@
     "memory_kind": "lane 6 §5-④, from artifact-governance 08 '승격 대상'. The non-promotable list (transient logs, one-off retries, stale plans, provisional guesses) has no kind, so it is structurally unrepresentable rather than merely discouraged.",
     "route_bind_confidence": "ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §2.3-4 declares confidence exact|inferred and defines exact as 'passed tier 2', i.e. a named spawn whose prompt_id also matched. `inferred` is SPLIT here into `name` (tier 2 hit, tier 1 did not -- still deterministic) and `fifo` (nothing left to match on, probabilistic). Splitting only refines the denominator: `exact` keeps the design's meaning, so the KPI numerator is unchanged, and the two kinds of not-exact stop being one indistinguishable bucket.",
     "route_bind_matched_on": "MEASURED 2026-09-04, host 2.1.260 (limb l2-d1 D2 burn): an Agent-tool spawn reports agent_type === subagent_type on SubagentStart even when the caller passed a name (2/2 rows, 1/1 of them named), while team/autopilot spawns report agent_type === name (1025-row spawns.ndjson census, name-shaped values dominate). Design §2.1 recorded only the second. Tier 2 therefore matches EITHER spelling, and this field records which one actually matched -- otherwise a confidence of exact cannot be audited against the host behaviour it assumes.",
-    "route_bind_method": "ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §2.3-4, verbatim: correlation.method = 'prompt_id+name' | 'prompt_id+fifo' | 'name-only' | 'fifo-only'. Which TIERS fired, recorded beside the confidence they produced, so a later reader can tell a promptless-but-named bind from a scoped guess without re-deriving it."
+    "route_bind_method": "ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md §2.3-4, verbatim: correlation.method = 'prompt_id+name' | 'prompt_id+fifo' | 'name-only' | 'fifo-only'. Which TIERS fired, recorded beside the confidence they produced, so a later reader can tell a promptless-but-named bind from a scoped guess without re-deriving it.",
+    "interpretation_status": "CA-15 follow-up b (2026-09-30), lib/runtime/question-gate-record.js#INTERPRETATION_STATUSES verbatim (pinned equal by tests/runtime/question-gate-record.test.js, the way human_resolved_kind is pinned by its recorder's test): why an interpretation was or was not part of an adr.question_gate_evaluated row. `ok` = one was supplied (interpretation_present true); `threw` = tasks.js#interpretForGate caught an interpretIntent() throw; `absent` = the recorder was handed none and nothing threw. The values are outcomes of one call, so there is deliberately no `unknown`: a row from before this field exists has NO interpretation_status key, and that absence is what marks it -- a value for it would let a reader mistake an old row for a measured one."
   },
   "events": {
     "mission.created": {
@@ -501,7 +507,8 @@
         "evidenceCannotDecide",
         "costOfWrongAssumptionMeaningful",
         "required",
-        "interpretation_present"
+        "interpretation_present",
+        "interpretation_status"
       ],
       "fields": {
         "valueJudgmentRequired": {
@@ -521,12 +528,15 @@
         },
         "interpretation_present": {
           "type": "boolean"
+        },
+        "interpretation_status": {
+          "enum_ref": "interpretation_status"
         }
       },
       "sources": [
         "hook"
       ],
-      "spec": "ARTIBOT-5.0-DESIGN.md §7.3, §48 item #27 'ADR question gate(4조건 기록)' (Shadow row) + ADDENDUM-HARDENING.md §18 :659-677 (the four conditions); V5-BACKLOG SH-18. One line per prompt, written by lib/runtime/question-gate-record.js#appendQuestionGateEvent, emitter tasks.js#recordMissionCompile on the UserPromptSubmit path. The four condition keys are lib/planning/question-gate.js#GATE_CONDITIONS verbatim (camelCase, the gate's own names); `required` is their conjunction (requiresQuestion). RECORDING ONLY -- no question is asked or suppressed by this line; enforcement is CA-15. INPUTS (CA-15, 2026-09-29): tasks.js#recordQuestionGate passes the router classification (state.context.routing itself) and one interpretIntent() output, so the escalating-completion / structural-purpose routes of conditions 2 and 4 and the factors.risk >= 0.5 route of condition 4 are live; rows written before that change had neither input (interpretation_present false on every row) and are not comparable with later rows. `interpretation_present` records whether an interpretation was supplied; since CA-15 it is false only when interpretIntent threw (tasks.js#interpretForGate), so a false can still be read as 'no cue' versus 'input absent'. config.question_gate.force is not forwarded, so a forced value is never recorded as observed. All six keys are required because event-writer.js#foldOversized keeps only required keys above the line cap. No idempotency key."
+      "spec": "ARTIBOT-5.0-DESIGN.md §7.3, §48 item #27 'ADR question gate(4조건 기록)' (Shadow row) + ADDENDUM-HARDENING.md §18 :659-677 (the four conditions); V5-BACKLOG SH-18. One line per prompt, written by lib/runtime/question-gate-record.js#appendQuestionGateEvent, emitter tasks.js#recordMissionCompile on the UserPromptSubmit path. The four condition keys are lib/planning/question-gate.js#GATE_CONDITIONS verbatim (camelCase, the gate's own names); `required` is their conjunction (requiresQuestion). RECORDING ONLY -- no question is asked or suppressed by this line; enforcement is CA-15. INPUTS (CA-15, 2026-09-29): tasks.js#recordQuestionGate passes the router classification (state.context.routing itself) and one interpretIntent() output, so the escalating-completion / structural-purpose routes of conditions 2 and 4 and the factors.risk >= 0.5 route of condition 4 are live; rows written before that change had neither input (interpretation_present false on every row) and are not comparable with later rows. `interpretation_present` records whether an interpretation was supplied; since CA-15 it is false only when interpretIntent threw (tasks.js#interpretForGate), so a false can still be read as 'no cue' versus 'input absent'. `interpretation_status` (CA-15 follow-up b, 2026-09-30) is the closed vocabulary enums.interpretation_status = ok | threw | absent (lib/runtime/question-gate-record.js#INTERPRETATION_STATUSES): ok = an interpretation was supplied (interpretation_present true), threw = tasks.js#interpretForGate caught an interpretIntent() throw, absent = the recorder was handed none and nothing threw. A row written before that change has NO interpretation_status key, which is what tells it from a threw row without reading `ts`; the field is required so a row that lost it cannot pass for one of those. config.question_gate.force is not forwarded, so a forced value is never recorded as observed. All seven keys are required because event-writer.js#foldOversized keeps only required keys above the line cap. No idempotency key."
     },
     "budget.warning": {
       "required": [

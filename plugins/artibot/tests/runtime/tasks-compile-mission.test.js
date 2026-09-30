@@ -249,17 +249,16 @@ describe('T-25 — ledger append', () => {
     expect(lines[1].mission_id).toBe(lines[0].mission_id);
   });
 
-  it('records the four gate conditions, required and the interpretation marker as booleans', async () => {
+  it('records the four gate conditions, required and the interpretation marker as booleans, and the status', async () => {
     const task = await runMiddleware();
     const gate = readLedger().find((l) => l.event === GATE_EVENT);
 
     expect(task.mission.question_gate).toBe('appended');
-    expect(Object.keys(gate.data).sort())
-      .toEqual([...GATE_CONDITIONS, 'required', 'interpretation_present'].sort());
-    for (const value of Object.values(gate.data)) expect(value).toBeTypeOf('boolean');
-    // RE-PINNED false -> true by CA-15 (intended): `recordQuestionGate` now feeds
-    // `interpretIntent()`; the real-router wiring is tasks-question-gate-inputs.test.js.
-    expect(gate.data.interpretation_present).toBe(true);
+    // RE-PINNED (intended): CA-15 false -> true; follow-up b adds the string status. Real router: tasks-question-gate-inputs.test.js.
+    expect(gate.data).toEqual({
+      ...Object.fromEntries(GATE_CONDITIONS.map((key) => [key, expect.any(Boolean)])),
+      required: expect.any(Boolean), interpretation_present: true, interpretation_status: 'ok',
+    });
   });
 
   it('puts the gate line after the paired state.updated on a substantive prompt', async () => {

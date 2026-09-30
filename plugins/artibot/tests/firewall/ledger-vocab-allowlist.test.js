@@ -69,6 +69,7 @@ import { shrinkToFit } from '../../lib/runtime/ledger-fold.js';
 import { readAllEvents } from '../../lib/runtime/ledger.js';
 import {
   buildQuestionGateData,
+  INTERPRETATION_STATUS_KEY,
   QUESTION_GATE_EVENT,
 } from '../../lib/runtime/question-gate-record.js';
 import {
@@ -391,7 +392,8 @@ describe('adr.question_gate_evaluated declares every key its recorder emits', ()
   /**
    * The recorder is `lib/runtime/question-gate-record.js`. Its data keys are
    * the question gate's own condition names (`GATE_CONDITIONS`) plus
-   * `required` and `interpretation_present`, all booleans.
+   * `required` and `interpretation_present`, all booleans, and (CA-15 follow-up
+   * b) `interpretation_status`, the one closed-vocabulary string.
    */
   const EVENT = QUESTION_GATE_EVENT;
 
@@ -410,7 +412,7 @@ describe('adr.question_gate_evaluated declares every key its recorder emits', ()
     });
   }
 
-  it('is registered hook-only, with every emitted key typed boolean and required', () => {
+  it('is registered hook-only, with every emitted key typed boolean (the status: a closed enum) and required', () => {
     const spec = getAllowlist().events[EVENT];
     expect(spec).toBeDefined();
     expect(spec.sources).toEqual(['hook']);
@@ -418,7 +420,16 @@ describe('adr.question_gate_evaluated declares every key its recorder emits', ()
     expect(Object.keys(spec.fields).sort()).toEqual(emitted);
     // Required, not merely declared: foldOversized keeps only required keys.
     expect([...spec.required].sort()).toEqual(emitted);
-    for (const key of emitted) expect(spec.fields[key].type, key).toBe('boolean');
+    // Still exact for every key: a boolean, except the status, which must be
+    // declared as the closed enum (its vocabulary is pinned in
+    // tests/runtime/question-gate-record.test.js).
+    for (const key of emitted) {
+      if (key === INTERPRETATION_STATUS_KEY) {
+        expect(spec.fields[key], key).toEqual({ enum_ref: 'interpretation_status' });
+      } else {
+        expect(spec.fields[key].type, key).toBe('boolean');
+      }
+    }
     // Not a v1.1 example and not a known gap — the six-example pin lives in
     // tests/schemas/ledger-envelope.test.js.
     expect(spec.v1_1_example).toBeUndefined();

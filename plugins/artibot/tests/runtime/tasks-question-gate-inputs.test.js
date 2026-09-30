@@ -21,6 +21,11 @@
  * (router -> tasks): the router produces the state shape, nothing is injected,
  * and the ledger row is read back off the real writer as well as off the port.
  *
+ * FOLLOW-UP c (2026-09-30). The same dead key was read in two more places: the
+ * `compileMission` call in `tasks.js` (deleted, since nothing consumes it) and
+ * `workflow-mode.js#planWorkflow`'s `factors` (now read off `routing`). The last
+ * `describe` pins both on the production path.
+ *
  * FIXTURES ISOLATE ONE ROUTE EACH, and every case asserts that isolation as a
  * precondition read off the real router output, so a vocabulary change that
  * quietly stops isolating a route fails loudly here instead of passing for the
@@ -38,14 +43,18 @@
  *    the workflow plan (`runtime-prompt.js#composePromptParts`) and is covered
  *    by `tests/hooks/runtime-prompt.test.js`. That it is byte-identical across
  *    CA-15 with the switch off was measured once (before/after probe on
- *    491a4de8), not pinned.
+ *    491a4de8), not pinned. The three follow-ups (a: cue vocabulary, b: status
+ *    field, c: dead reads) repeated that probe on ad8e5b28 against their tree:
+ *    11 prompts, identical once the per-call `teardown(Nms)` and `ckpt=<random>`
+ *    tokens are normalised. Also not pinned.
  *  - THE REAL HOOK PAYLOAD AND CONFIG. `hookData` is hand-built and the config
  *    is minimal (router + tasks only).
  *  - WHETHER THE MODEL OBEYS THE DIRECTIVE. With the switch on the block is
  *    advisory text next to the prompt; this pins the text, not a question.
- *  - THE QUALITY OF THE CUES. A `true` means a cue list matched.
- *  - `tasks.js#recordMissionCompile`'s `compileMission` call, which still reads
- *    `routing.classification` (CA-15's scope was the gate).
+ *  - THE QUALITY OF THE CUES. A `true` means a cue list matched. The commit and
+ *    migrate cues are phrase allowlists (CA-15 follow-up a); the cases here pin a
+ *    few false positives end to end, not the vocabulary, which is
+ *    `tests/intent/interpreter.test.js`.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -67,16 +76,30 @@ vi.mock('../../lib/intent/interpreter.js', async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, interpretIntent: vi.fn(actual.interpretIntent) };
 });
+// CA-15 follow-up (c): the two other places `tasks.js` used to read
+// `routing.classification`. Wrapped, never replaced, so a case can read the
+// argument each was handed on the production path.
+vi.mock('../../lib/mission/compiler.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, compileMission: vi.fn(actual.compileMission) };
+});
+vi.mock('../../lib/cognitive/workflow-plan.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, buildWorkflowPlan: vi.fn(actual.buildWorkflowPlan) };
+});
 
 import { createArtibotAgent } from '../../lib/runtime/create-artibot-agent.js';
 import { resetRouter } from '../../lib/cognitive/router.js';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
 import { interpretIntent } from '../../lib/intent/interpreter.js';
+import { compileMission } from '../../lib/mission/compiler.js';
+import { buildWorkflowPlan } from '../../lib/cognitive/workflow-plan.js';
 import { evaluateConditions, GATE_CONDITIONS, requiresQuestion } from '../../lib/planning/question-gate.js';
 
 const realLedger = await vi.importActual('../../lib/runtime/ledger.js');
 const realInterpreter = await vi.importActual('../../lib/intent/interpreter.js');
+const realCompiler = await vi.importActual('../../lib/mission/compiler.js');
 
 const GATE_EVENT = 'adr.question_gate_evaluated';
 const NOW = 1700000000000;
@@ -101,8 +124,20 @@ const RISK_PROMPT = 'delete the audit notes';
 const COMMIT_PROMPT = 'README 오타 고치고 커밋까지 해줘';
 /** A structural work purpose (design) and nothing else: only the INTERPRETATION route, [F,T,F,T]. */
 const DESIGN_PROMPT = '새 알림 흐름 설계해줘';
-/** Conditions 1 and 3 by prompt cue; 2 and 4 ONLY through the interpretation (commit). */
-const BLOCK_PROMPT = 'Which should we pick? It is a product decision with no right answer, so commit to it.';
+/**
+ * Conditions 1 and 3 by prompt cue; 2 and 4 ONLY through the interpretation
+ * (commit). The commit request is a real one ("commit the change"). It used to
+ * read "... so commit to it.", which is a decision idiom and not a git commit:
+ * the fixture leaned on the interpreter's bare `commit` cue, i.e. on the false
+ * positive CA-15 follow-up (a) removed. That sentence is now COMMIT_TO_IT_PROMPT.
+ */
+const BLOCK_PROMPT = 'Which should we pick? It is a product decision with no right answer, so decide and commit the change.';
+/** Conditions 1 and 3 by prompt cue, and NO commit request: "commit to it" is a decision idiom. */
+const COMMIT_TO_IT_PROMPT = 'Which should we pick? It is a product decision with no right answer, so commit to it.';
+/** "에이전트" (agent) contains the syllables "이전"; a bare "이전" cue read it as a migration. */
+const AGENT_PROMPT = '에이전트 팀을 구성해줘';
+/** The owner's own phrasing: "upgrade X" means "improve X", not a version migration. */
+const UPGRADE_PROMPT = 'split 을 업그레이드해줘';
 /** A multi-step prompt that routes agentTeam, so the Execution contract suffix is in play. */
 const SYSTEM2_PROMPT = 'Plan the migration, refactor the backend API, redesign the frontend components, '
   + 'update the database schema, and verify security across the whole system';
@@ -223,6 +258,7 @@ describe('CA-15 gate inputs — the real pipeline feeds the recorder', () => {
     expect(root).toBe(run.projectRoot);
     expect(envelope).toMatchObject({ event: GATE_EVENT, source: 'hook', session_id: SESSION });
     expect(envelope.data.interpretation_present).toBe(true);
+    expect(envelope.data.interpretation_status).toBe('ok');
     // The same row, through the real writer, on disk.
     expect(run.mission.question_gate).toBe('appended');
     expect(run.gateRows).toHaveLength(1);
@@ -285,6 +321,26 @@ describe('CA-15 gate inputs — the real pipeline feeds the recorder', () => {
 
       expect(flags(run.gate)).toEqual([false, false, false, false]);
       expect(run.gate.interpretation_present).toBe(false);
+      // Nothing threw: the interpreter returned no interpretation.
+      expect(run.gate.interpretation_status).toBe('absent');
+    });
+  });
+
+  describe('cue words that are not the intent do not reach conditions 2 and 4 (follow-up a)', () => {
+    // Each of these made conditions 2 and 4 true from the interpretation alone
+    // before the cue vocabulary was narrowed to phrase allowlists (measured
+    // 2026-09-30 on ad8e5b28: [.,T,.,T] for all three). The router risk is
+    // asserted below 0.5 so the classification route is not what is being read.
+    it.each([
+      ['"commit to it" is a decision idiom, not a git commit', COMMIT_TO_IT_PROMPT, [true, false, true, false]],
+      ['"이전" inside "에이전트" (agent) is not a migration', AGENT_PROMPT, [false, false, false, false]],
+      ['a generic "업그레이드" (improve) is not a migration', UPGRADE_PROMPT, [false, false, false, false]],
+    ])('%s', async (_name, prompt, expected) => {
+      const run = await prepare(prompt);
+
+      expect(run.routing.factors.risk).toBeLessThan(0.5);
+      expect(flags(run.gate)).toEqual(expected);
+      expect(run.gate.interpretation_present).toBe(true);
     });
   });
 });
@@ -370,6 +426,25 @@ describe('CA-15 gate inputs — switch ON', () => {
     expect(on.prepared.userPrompt).toBe(off.prepared.userPrompt);
     expect(on.prepared.message).toBe(off.prepared.message);
   });
+
+  it('does not block "commit to it": a decision idiom is not a commit request, and the input is present', async () => {
+    const off = await prepare(COMMIT_TO_IT_PROMPT);
+    const on = await prepare(COMMIT_TO_IT_PROMPT, { enforce: true });
+
+    // Conditions 1 and 3 hold from the prompt; 2 and 4 have nothing to stand on.
+    // Before the vocabulary was narrowed this exact sentence was BLOCK_PROMPT.
+    expect(flags(on.gate)).toEqual([true, false, true, false]);
+    expect(on.mission.question_gate_enforcement).toEqual({
+      enforce: true,
+      block: false,
+      kind: null,
+      at: 'adr_start',
+      reason: 'conditions-not-met',
+      inputs_absent: [],
+    });
+    expect(on.prepared.userPrompt).toBe(off.prepared.userPrompt);
+    expect(on.prepared.message).toBe(off.prepared.message);
+  });
 });
 
 describe('CA-15 gate inputs — the interpreter cannot reach its neighbours', () => {
@@ -380,9 +455,25 @@ describe('CA-15 gate inputs — the interpreter cannot reach its neighbours', ()
     expect(run.mission.ok).toBe(true);
     expect(run.mission.question_gate).toBe('appended');
     expect(run.gate.interpretation_present).toBe(false);
+    // The throw is recorded as one, not as a caller that supplied none, and not
+    // as a row written before this key existed (no status key at all: every
+    // pre-CA-15 row, and every row v4.69.0 wrote after the CA-15 input fold).
+    expect(run.gate.interpretation_status).toBe('threw');
     expect(flags(run.gate)).toEqual([false, false, false, false]);
     expect(run.prepared.userPrompt).toBe(`${S1}${COMMIT_PROMPT}`);
     expect(run.prepared.message).toBe('[runtime] route=SYSTEM1 | intent=action:document | task=subAgent');
+  });
+
+  it('tells a throw from a withheld interpretation: two rows that differ only in the status', async () => {
+    vi.mocked(interpretIntent).mockImplementationOnce(() => { throw new Error('interp-boom'); });
+    const threw = await prepare(COMMIT_PROMPT);
+    vi.mocked(interpretIntent).mockReturnValueOnce(null);
+    const withheld = await prepare(COMMIT_PROMPT);
+
+    const { interpretation_status: threwStatus, ...threwRest } = threw.gate;
+    const { interpretation_status: withheldStatus, ...withheldRest } = withheld.gate;
+    expect(threwRest).toEqual(withheldRest);
+    expect([threwStatus, withheldStatus]).toEqual(['threw', 'absent']);
   });
 
   it('with the switch on, a throwing interpreter degrades to not blocking, never to a crash', async () => {
@@ -394,5 +485,55 @@ describe('CA-15 gate inputs — the interpreter cannot reach its neighbours', ()
       enforce: true, block: false, reason: 'conditions-not-met', inputs_absent: ['interpretation'],
     });
     expect(on.prepared.userPrompt).not.toContain(TAG);
+  });
+});
+
+describe('CA-15 follow-up c — the other two reads of routing.classification', () => {
+  // `tasks.js` read `routing.classification` in two more places than the gate:
+  // the `compileMission` call and (via `workflow-mode.js#planWorkflow`) the
+  // planner's `factors`. The router never writes that key, so both were
+  // undefined on every prompt. One is deleted (nothing consumes it), the other
+  // is read from where the router really puts it.
+
+  it('hands compileMission the prompt, intent, clock and system, and no classification: it reads none', async () => {
+    const run = await prepare(RISK_PROMPT);
+
+    expect(compileMission).toHaveBeenCalledTimes(1);
+    const [arg] = vi.mocked(compileMission).mock.calls[0];
+    expect(Object.keys(arg).sort()).toEqual(['intent', 'nowMs', 'prompt', 'system']);
+    expect(arg.prompt).toBe(RISK_PROMPT);
+    expect(arg.intent).toBe(run.prepared.context.intent);
+    expect(arg.nowMs).toBe(NOW);
+    expect(arg.system).toBe('system1');
+  });
+
+  it('proves the deleted read was dead: the compile result is the same with or without a classification', async () => {
+    const run = await prepare(RISK_PROMPT);
+    const [arg] = vi.mocked(compileMission).mock.calls[0];
+
+    const without = JSON.stringify(realCompiler.compileMission(arg));
+    // Every shape a caller could plausibly hand it: the router's routing object,
+    // and the nested shape the deleted read looked for.
+    const shapes = [
+      run.routing,
+      { score: run.routing.score, factors: run.routing.factors },
+      { factors: run.routing.factors, system: 2 },
+    ];
+    for (const classification of shapes) {
+      expect(JSON.stringify(realCompiler.compileMission({ ...arg, classification }))).toBe(without);
+    }
+    // The comparison can see a difference: another prompt compiles differently.
+    expect(JSON.stringify(realCompiler.compileMission({ ...arg, prompt: `${RISK_PROMPT} and rename the README` })))
+      .not.toBe(without);
+  });
+
+  it("hands the planner the router's score and factors, read off routing itself", async () => {
+    const run = await prepare(RISK_PROMPT);
+
+    // Precondition, read off the REAL router: there is something to hand over.
+    expect(run.routing.factors.risk).toBeGreaterThanOrEqual(0.5);
+    expect(buildWorkflowPlan).toHaveBeenCalledTimes(1);
+    const [classification] = vi.mocked(buildWorkflowPlan).mock.calls[0];
+    expect(classification).toEqual({ score: run.routing.score, factors: run.routing.factors });
   });
 });
