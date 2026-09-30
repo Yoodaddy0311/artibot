@@ -8,7 +8,7 @@
  * knows to delegate to the `tdd-guide` agent for regression coverage.
  *
  * Strictly advisory — never blocks. Ignores `*.test.js` / `*.spec.js` to
- * prevent recursion. Timeout budget ≤ 2 s.
+ * prevent recursion. Timeout budget: 3 s (hooks/dispatch-table.json).
  *
  * @module scripts/hooks/post-write-tdd
  */
@@ -100,7 +100,7 @@ export async function main() {
   if (typeof filePath !== 'string' && !isArtibotRepo(getRepoRoot())) return;
 
   // Pure path checks run before the scope guard: getRepoRoot() spawns git
-  // (cmd.exe + git on Windows) inside a 2000ms dispatcher budget, and most
+  // (cmd.exe + git on Windows) inside a 3000ms dispatcher budget, and most
   // Edit/Write targets are not lib/ files.
   const normalized = normalizePath(filePath);
   if (!isLibSourceFile(normalized)) return;

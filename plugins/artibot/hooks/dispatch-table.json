@@ -44,7 +44,7 @@
         { "name": "post-edit-recovery",   "script": "post-edit-recovery.js",   "timeoutMs": 5000,  "tools": ["Edit", "Write"] },
         { "name": "post-bash",            "script": "post-bash.js",            "timeoutMs": 5000,  "tools": ["Bash"] },
         { "name": "post-bash-failure",    "script": "post-bash-failure.js",    "timeoutMs": 3000,  "tools": ["Bash"] },
-        { "name": "post-write-tdd",       "script": "post-write-tdd.js",       "timeoutMs": 2000,  "tools": ["Edit", "Write"] },
+        { "name": "post-write-tdd",       "script": "post-write-tdd.js",       "timeoutMs": 3000,  "tools": ["Edit", "Write"] },
         { "name": "mark-main-agent-edit", "script": "mark-main-agent-edit.js", "timeoutMs": 3000,  "tools": ["Edit", "Write", "MultiEdit"] },
         { "name": "tool-tracker",         "script": "tool-tracker.js",         "timeoutMs": 3000,  "tools": ["*"] },
         { "name": "tool-used-record",     "script": "tool-used-record.js",     "timeoutMs": 3000,  "tools": ["Skill", "AskUserQuestion"] },
