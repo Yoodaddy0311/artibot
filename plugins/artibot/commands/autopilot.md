@@ -410,6 +410,13 @@ Phase 6 완료 후:
 - `engine.notifyCompletion(sessionId)` 호출.
 - 보고서 경로 + 큐된 질문 요약을 사용자에게 출력.
 - 비용 요약: `engine.renderCostBlock(engine.getSessionCost(sessionId))` 마크다운 테이블을 사용자에게 노출 (Phase별 토큰/$ + Budget 사용률).
+- **모델별 사용량·비용 (자동 — 생략 금지)**: 완료 보고 끝에 모델별 사용량·비용 표를 붙인다(위 비용 요약은 Phase 별이고 이 표는 실제로 서빙한 모델별이다). 숫자를 손으로 쓰지 않는다 — 아래 한 줄을 `Bash` 로 실행해 **출력 전문을 그대로** 싣는다. 바꿀 곳은 `<작업 시작 ISO>`(이 세션의 `state.createdAt`)와 `<project root>`(프로젝트 절대 루트) 둘이다:
+
+  ```
+  SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}"; USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs"; if [ -f "$USG" ]; then node "$USG" --since "<작업 시작 ISO>" --session "$SID" --live-session "$SID" --cwd "<project root>"; else echo "usage-cost-table not found - 표 생략"; fi
+  ```
+
+  읽기 전용이다. 영수증은 세션이 끝날 때(SessionEnd)에만 원장에 쓰이므로 `--live-session` 이 이 세션의 transcript 를 직접 읽는다 — 없으면 이 세션과 그 스폰 전부가 표에서 빠진다. 리더 자신(메인 스레드)의 영수증은 세션 단위 합이라, 작업 시작보다 먼저 시작된 세션이면 `--since` 에서 "시작 경계에 걸침" 으로 표 밖에 남고 그 사실이 출력에 적힌다. 출력의 `영수증 0행` · `가격 미검증` · 단가 출처 · `한계:` 줄은 지우거나 고쳐 쓰지 않는다. 스크립트가 없거나 종료코드가 0 이 아니면(세션 id 가 비어 `--session` 이 거부된 경우 포함) 표 자리에 `TABLE OMITTED <사유 한 줄>` 만 적는다 — 다른 출처의 숫자로 대신하지 않는다.
 - pre-flight 경고가 있었다면 `engine.renderPreflightSummary(state.preflightResult)` 출력 (참고용).
 - abort/완료 시 `engine.releaseAllForSession(sessionId)`로 잔존 lock 일괄 해제.
 
