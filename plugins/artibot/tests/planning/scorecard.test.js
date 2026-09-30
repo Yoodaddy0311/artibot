@@ -65,18 +65,24 @@ function runCli(args, { cwd, stdin = '' } = {}) {
 /**
  * Setup step: `add` one snapshot through the CLI and prove it was persisted.
  *
- * `status === 0` proves nothing here. The CLI catches its own errors and exits 0: a failed
- * save is the STDOUT line `저장 실패: <error>` (an exception is `_scorecard 오류: ...`), and
- * only a successful save prints `saved: <path>`. Reproduced 2026-09-30 with file churn
- * running beside it: the SECOND `add` (the one that renames over an existing store) failed
- * with `EPERM: ... rename '...scorecard.json.tmp...'`, exit 0, store left at one snapshot,
- * and the test then failed on the `diff` output ("현재 1개"), far from its cause.
+ * `status === 0` alone proves nothing here. The top-level handler catches an exception and
+ * exits 0 with `_scorecard 오류: ...` on STDOUT, and only a successful save prints
+ * `saved: <path>` (a failed save prints `저장 실패: <error>` and, since the fix that
+ * followed this measurement, exits 1; before it, the CLI exited 0 on a failed save too).
+ * Measured 2026-09-30 with file churn running beside it: the SECOND `add` (the one that
+ * renames over an existing store) failed with `EPERM: ... rename '...scorecard.json.tmp...'`,
+ * store left at one snapshot, and the test then failed on the `diff` output ("현재 1개"),
+ * far from its cause.
  */
 function addViaCli(projectRoot, json) {
   const res = runCli(['add'], { cwd: projectRoot, stdin: json });
   const persisted = res.status === 0 && /^saved: /m.test(res.stdout) && !/저장 실패|_scorecard 오류/.test(res.stdout);
   expect(persisted, `setup \`add\` did not persist its snapshot\nstdin=${json}\n${describeRun(res)}`).toBe(true);
 }
+
+/** One `add` payload: a snapshot holding a single area that carries evidence. */
+const payload = (label, name, score) =>
+  JSON.stringify({ label, areas: [{ name, score, evidence: [{ file: 'a.js:1', note: 'n' }] }] });
 
 // Guarded import: until sl-dev lands the snapshots-model rewrite, missing exports
 // surface as clear per-test failures instead of a collection crash (TDD RED).
@@ -279,9 +285,6 @@ describe('CLI diff — last-2 auto-select (the structural fix for the id-sort bu
   beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-cli-')); });
   afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
 
-  const payload = (label, name, score) =>
-    JSON.stringify({ label, areas: [{ name, score, evidence: [{ file: 'a.js:1', note: 'n' }] }] });
-
   it('degrades gracefully when fewer than 2 snapshots exist', () => {
     const zero = runCli(['diff'], { cwd: projectRoot });
     expect(zero.status, describeRun(zero)).toBe(0);
@@ -412,9 +415,6 @@ describe('CLI isTTY branching — non-TTY pipe yields plain GFM', { timeout: CLI
   beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-tty-')); });
   afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
 
-  const payload = (label, name, score) =>
-    JSON.stringify({ label, areas: [{ name, score, evidence: [{ file: 'a.js:1', note: 'n' }] }] });
-
   it('a piped (non-TTY) `diff` prints the GFM table without ANSI color', () => {
     addViaCli(projectRoot, payload('before', 'perf', 50));
     addViaCli(projectRoot, payload('after', 'perf', 80));
@@ -422,5 +422,27 @@ describe('CLI isTTY branching — non-TTY pipe yields plain GFM', { timeout: CLI
     expect(diff.status, describeRun(diff)).toBe(0);
     expect(diff.stdout).toContain('| 평가 항목 | 작업 전 | 작업 후 | 상승폭 | 남은 갭 |');
     expect(diff.stdout).not.toMatch(ANSI_TRUECOLOR); // no truecolor when piped
+  });
+});
+
+describe('CLI add — a failed save exits non-zero', { timeout: CLI_CASE_TIMEOUT_MS }, () => {
+  let projectRoot;
+  beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-save-')); });
+  afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
+
+  it('exits 1 and still says why on stdout when the store cannot be written', () => {
+    // `.artibot` as a FILE: its directory cannot be created, so the save fails on every
+    // platform and never reaches the transient-rename retry.
+    writeFileSync(join(projectRoot, '.artibot'), 'not a directory');
+    const res = runCli(['add'], { cwd: projectRoot, stdin: payload('before', 'perf', 50) });
+    expect(res.status, describeRun(res)).toBe(1);
+    expect(res.stdout, describeRun(res)).toContain('저장 실패');
+    expect(res.stdout).not.toMatch(/^saved: /m);
+  });
+
+  it('still exits 0 after a save that worked (negative control)', () => {
+    const res = runCli(['add'], { cwd: projectRoot, stdin: payload('before', 'perf', 50) });
+    expect(res.status, describeRun(res)).toBe(0);
+    expect(res.stdout).toMatch(/^saved: /m);
   });
 });

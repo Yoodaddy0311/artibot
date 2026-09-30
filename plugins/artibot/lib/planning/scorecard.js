@@ -370,6 +370,10 @@ async function runCli(argv) {
     : diffSnapshots({ areas: [] }, snaps.at(-1));
   process.stdout.write(renderForOutput(rows) + '\n');
   process.stdout.write(saved.ok ? `\nsaved: ${saved.filePath}\n` : `\n저장 실패: ${saved.error}\n`);
+  // The table above is rendered from the in-memory store, so a failed save reads as a
+  // success to anything that only looks at the exit status. Say so there too; stdout is
+  // unchanged. `exitCode` rather than `exit()` so the stdout write above still flushes.
+  if (!saved.ok) process.exitCode = 1;
 }
 
 // Run only as a CLI entry point; importing (tests) gets the exports untouched.
