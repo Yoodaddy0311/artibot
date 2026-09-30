@@ -13,7 +13,7 @@
  *   4. post-edit-recovery.js  Edit / Write      (5s)   — recovery tracking
  *   5. post-bash.js           Bash              (5s)   — bash post-processing
  *   6. post-bash-failure.js   Bash              (3s)   — bash failure recovery
- *   7. post-write-tdd.js      Edit / Write      (2s)   — TDD advisory
+ *   7. post-write-tdd.js      Edit / Write      (3s)   — TDD advisory
  *   8. mark-main-agent-edit.js Edit/Write/Multi (3s)   — agent ownership tag
  *   9. tool-tracker.js        *                 (3s)   — universal tracker
  *  10. tool-used-record.js    Skill             (3s)   — Existence Audit carrier (skill key, SH-29)
@@ -99,6 +99,11 @@ async function main() {
         name: h.name,
         args: h.args || [],
         dispatcherName: HOOK_NAME,
+        // The ONLY dispatcher that takes the test-only budget scale
+        // (_dispatcher-utils.js#resolveTimeoutScale). On Stop, SubagentStop,
+        // SessionStart and SessionEnd a stretched budget can outlive the host's
+        // slot timeout and lose the merged output, so they do not pass this.
+        allowTimeoutScale: true,
       }),
     ),
   );

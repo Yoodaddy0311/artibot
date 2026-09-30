@@ -192,7 +192,7 @@ describe('post-write-tdd hook', () => {
     expect(isArtibotRepoMock).toHaveBeenCalledTimes(1);
   });
 
-  // getRepoRoot() spawns git (cmd.exe + git on Windows) under a 2000ms
+  // getRepoRoot() spawns git (cmd.exe + git on Windows) under a 3000ms
   // dispatcher budget, so a path the pure checks already reject must not pay
   // for it. Measured on the posttooluse dispatcher suite's own payload, x.js.
   it.each(['Edit', 'Write'])('does not resolve the repo root for a non-lib %s', async (tool) => {

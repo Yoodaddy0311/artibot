@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -338,5 +338,105 @@ describe('_subagentstop-dispatcher (integration)', () => {
     });
     expect(status).toBe(0);
     expect(readLedger(repo)).toEqual([]);
+  });
+});
+
+/**
+ * Preload for NODE_OPTIONS=--require, written into the sandbox home by the suite
+ * below. In the ONE process whose script basename equals
+ * ARTIBOT_TEST_TIMER_SPY_ONLY it appends every setTimeout delay to
+ * ARTIBOT_TEST_TIMER_SPY_FILE and then arms the real timer unchanged. Every other
+ * process is untouched: the handlers the dispatcher spawns inherit NODE_OPTIONS
+ * too, but their script basename never matches.
+ */
+const TIMER_SPY_PRELOAD = [
+  "'use strict';",
+  "const fs = require('node:fs');",
+  "const path = require('node:path');",
+  "const only = String(process.env.ARTIBOT_TEST_TIMER_SPY_ONLY || '');",
+  "const out = String(process.env.ARTIBOT_TEST_TIMER_SPY_FILE || '');",
+  "if (only && out && path.basename(String(process.argv[1] || '')) === only) {",
+  '  const real = globalThis.setTimeout;',
+  '  const spy = function setTimeout(fn, ms, ...rest) {',
+  "    try { fs.appendFileSync(out, String(ms) + '\\n'); } catch { /* ignore */ }",
+  '    return real.call(this, fn, ms, ...rest);',
+  '  };',
+  // Carry util.promisify.custom (a symbol) over so nothing promisifying setTimeout notices.
+  '  for (const sym of Object.getOwnPropertySymbols(real)) spy[sym] = real[sym];',
+  '  globalThis.setTimeout = spy;',
+  '}',
+].join('\n');
+
+/**
+ * The test-only budget scale (`ARTIBOT_DISPATCH_TIMEOUT_SCALE`, read by
+ * `scripts/hooks/_dispatcher-utils.js#resolveTimeoutScale`) must NOT reach this
+ * slot. Negative control for the opt-in: only the PostToolUse dispatcher passes
+ * `allowTimeoutScale: true` to spawnHook.
+ *
+ * WHY THIS SLOT. It has the tightest host budget of the five: hooks.json gives
+ * the dispatcher 15 s, and `agent-evaluator` is declared 8 s, so 1.875x already
+ * reaches that limit (the variable's cap is 10x). A dispatcher that outlives its
+ * host timeout is cancelled and writes nothing, so what its children produced is
+ * lost. No handler on this slot emits a decision today (a grep of
+ * subagent-handler / agent-evaluator / workflow-status finds no `block` literal
+ * and `decision` only in prose comments; not an execution), so the loss would be
+ * the merged `message` and the `hook.fired` row, not a gate. That is why this is
+ * a pin and not a fix for an observed leak.
+ *
+ * WHAT IT MEASURES. Not a slow child, which would be a race against the machine,
+ * but the delay the DISPATCHER hands to setTimeout for each handler, read by the
+ * preload above. spawnHook arms it synchronously at spawn, so the number does not
+ * depend on load. Two assertions: the declared budgets WERE observed (a spy that
+ * saw nothing would satisfy the second one vacuously), and none of their 10x
+ * values was armed.
+ *
+ * WHAT IT DOES NOT SEE. Whether the host really cancels at the hooks.json timeout
+ * (not verified in this repo), and any budget that does not go through spawnHook.
+ */
+describe('_subagentstop-dispatcher under the test-only budget scale (timer spy)', () => {
+  let preloadPath;
+
+  beforeAll(() => {
+    preloadPath = path.join(sandboxHome, 'timer-spy-preload.cjs');
+    writeFileSync(preloadPath, TIMER_SPY_PRELOAD, 'utf-8');
+  });
+
+  /** One dispatch with the spy on: the setTimeout delays the dispatcher process armed. */
+  function armedDelays(tag, env) {
+    const spyFile = path.join(sandboxHome, `timer-spy-${tag}.txt`);
+    const preload = `--require "${preloadPath.split(path.sep).join('/')}"`;
+    // No `cwd` key in the payload on purpose: the hooks resolve a project root from
+    // it, and this case must not aim any write at a repository.
+    const { status } = runDispatcher({
+      hook_event_name: 'SubagentStop',
+      session_id: `subagentstop-timer-spy-${tag}`,
+      subagent_id: `sub-timer-spy-${tag}`,
+    }, {
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '),
+      ARTIBOT_TEST_TIMER_SPY_ONLY: '_subagentstop-dispatcher.js',
+      ARTIBOT_TEST_TIMER_SPY_FILE: spyFile,
+      ...env,
+    });
+    const armed = existsSync(spyFile)
+      ? readFileSync(spyFile, 'utf-8').split('\n').filter(Boolean).map(Number)
+      : [];
+    return { status, armed };
+  }
+
+  it('arms every handler at its SHIPPED budget with the scale at its cap of 10', async () => {
+    const mod = await import('../../scripts/hooks/_subagentstop-dispatcher.js');
+    const declared = mod.HOOKS.map((h) => h.timeoutMs);
+    // What a scale reaching this slot would arm instead. A stretched value that is
+    // also somebody's declared budget could not tell the two apart, so it is dropped.
+    const stretched = declared.map((ms) => ms * 10).filter((ms) => !declared.includes(ms));
+    expect(stretched.length, 'nothing to tell a leak apart by').toBeGreaterThan(0);
+
+    const { status, armed } = armedDelays('cap', { ARTIBOT_DISPATCH_TIMEOUT_SCALE: '10' });
+
+    expect(status).toBe(0);
+    // Live-observation control: without it an empty spy file passes the next line.
+    expect(armed).toEqual(expect.arrayContaining(declared));
+    // The pin itself.
+    expect(armed.filter((ms) => stretched.includes(ms))).toEqual([]);
   });
 });

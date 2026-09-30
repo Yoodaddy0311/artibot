@@ -105,6 +105,10 @@ export function hookPath(name) {
  * @param {string} opts.name human-readable hook name for logs
  * @param {string[]} [opts.args] extra CLI arguments to pass after the script
  * @param {string} [opts.dispatcherName] dispatcher tag for stderr lines
+ * @param {boolean} [opts.allowTimeoutScale] opt in to the TEST-ONLY budget
+ *   multiplier (see resolveTimeoutScale). Only the literal `true` opts in; the
+ *   default runs `timeoutMs` as declared whatever the environment holds. The
+ *   PostToolUse dispatcher is the one caller that passes it.
  * @returns {Promise<{ status: 'ok'|'timeout'|'error', name: string, stdout: string }>}
  */
 export function spawnHook(scriptPath, payload, opts) {
@@ -113,7 +117,13 @@ export function spawnHook(scriptPath, payload, opts) {
     name = path.basename(scriptPath, '.js'),
     args = [],
     dispatcherName = '_dispatcher',
+    allowTimeoutScale = false,
   } = opts || {};
+  // The declared budget, byte for byte, unless the caller opted in with a literal
+  // `true` AND the test-only scale is set (see resolveTimeoutScale). An allowlist:
+  // a dispatcher added later starts on the shipped budget.
+  const scale = allowTimeoutScale === true ? resolveTimeoutScale() : 1;
+  const budgetMs = scaleTimeoutMs(timeoutMs, scale);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -141,9 +151,10 @@ export function spawnHook(scriptPath, payload, opts) {
 
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      process.stderr.write(`[artibot:${dispatcherName}] ${name} timed out after ${timeoutMs}ms\n`);
+      const scaled = budgetMs === timeoutMs ? '' : ` (declared ${timeoutMs}ms x ${scale})`;
+      process.stderr.write(`[artibot:${dispatcherName}] ${name} timed out after ${budgetMs}ms${scaled}\n`);
       finish('timeout');
-    }, timeoutMs);
+    }, budgetMs);
 
     child.on('error', (err) => {
       clearTimeout(timer);
@@ -173,6 +184,107 @@ export function spawnHook(scriptPath, payload, opts) {
       // Let exit/timeout handlers complete the promise.
     }
   });
+}
+
+/** The only environment variable that stretches hook budgets. TEST-ONLY. */
+const TIMEOUT_SCALE_ENV = 'ARTIBOT_DISPATCH_TIMEOUT_SCALE';
+
+/** Largest multiplier `resolveTimeoutScale` will return, however big the value. */
+const TIMEOUT_SCALE_MAX = 10;
+
+/** The one accepted syntax: a plain non-negative decimal, ASCII digits only. */
+const TIMEOUT_SCALE_SYNTAX = /^\d+(?:\.\d+)?$/;
+
+/** setTimeout keeps its delay in a signed 32-bit int; a longer one fires after 1 ms. */
+const TIMER_MAX_MS = 2 ** 31 - 1;
+
+/**
+ * TEST-ONLY budget multiplier. Returns the factor `spawnHook` applies to every
+ * declared `timeoutMs` of a caller that opted in (`allowTimeoutScale: true`):
+ * exactly 1 (the shipped budgets, byte for byte) unless
+ * `ARTIBOT_DISPATCH_TIMEOUT_SCALE` holds a plain decimal, which is then clamped
+ * to [1, 10].
+ *
+ * WHY. A handler's timer starts at spawn(), so its budget also has to cover
+ * process creation and node cold start. On a loaded machine the tightest budget
+ * (post-write-tdd, hooks/dispatch-table.json) loses that race, the handler is
+ * recorded as `timeout`, and a test asserting `hook.fired` `data.failed` is `[]`
+ * fails with no defect in the code under test. Scaling the budget keeps that
+ * assertion strict instead of loosening it.
+ *
+ * WHY ONLY POSTTOOLUSE. A dispatcher waits for every child (Promise.allSettled)
+ * and writes ONE merged stdout after the last one settles, and hooks/hooks.json
+ * gives each dispatcher a host timeout. One that outlives it is cancelled (how
+ * the host enforces that is not verified in this repo) and writes nothing, so
+ * what its children already produced is lost. A stretched child budget can turn
+ * "a slow hook gave up" into "the slot's whole output vanished":
+ *   - Stop: 30 s slot, stop-review-gate declared 15 s, so from 2x it reaches the
+ *     host limit. dev-verify-gate's decision:'block' (stop-review-gate can emit
+ *     one too) exists only as that stdout, so it is lost with the dispatcher and
+ *     the gate does not block.
+ *   - SubagentStop: 15 s slot, agent-evaluator declared 8 s, so from 1.875x. No
+ *     handler on this slot emits a decision today; the loss is the merged
+ *     `message` and the `hook.fired` row.
+ *   - SessionStart, SessionEnd: 30 s slot, swarm-download / swarm-sync declared
+ *     15 s, so from 2x.
+ * Those four never opt in, so they keep the declared budgets whatever the
+ * environment holds. The Stop and SubagentStop suites pin that with a timer spy,
+ * and tests/dispatcher/dispatcher-utils-timeout.test.js pins who may opt in,
+ * which is what covers SessionStart and SessionEnd.
+ *
+ * WHAT IT COSTS POSTTOOLUSE. Its handlers are advisory except quality-gate,
+ * whose hardcoded-secret post guard
+ * (lib/core/guard-registry.js#checkHardcodedSecret) can emit decision:'block'.
+ * PostToolUse fires after the tool ran, so a lost block is lost feedback on a
+ * write that already happened, not a gate on it. The slot is 30 s and
+ * post-edit-format is declared 10 s, so the 3 s dispatcher headroom that
+ * tests/firewall/hook-timeout-budget.test.js reserves runs out above 2.7x, and
+ * at the 10x cap post-edit-format alone is 100 s. A child that really hangs
+ * under such a scale gets the dispatcher cancelled before its own timer fires,
+ * and the merged output goes with it. That is why this is a test knob.
+ *
+ * ENVELOPE (each line is pinned by tests/dispatcher/dispatcher-utils-timeout.test.js):
+ *   - It can only LENGTHEN. A value below 1 is floored to 1, so it can never turn
+ *     every hook into a `timeout` and silently disable them.
+ *   - It is capped at 10, and `scaleTimeoutMs` keeps the product inside what
+ *     setTimeout can hold.
+ *   - It is read from `^\d+(\.\d+)?$` and nothing else. Anything else is 1, so a
+ *     typo fails closed to the shipped budgets.
+ *   - It is read only for a caller passing the literal `allowTimeoutScale: true`,
+ *     and the PostToolUse dispatcher is the only production module that does.
+ *   - This module is its only reader.
+ *
+ * WHAT IT CANNOT SEE. tests/firewall/hook-timeout-budget.test.js checks the
+ * DECLARED budgets against the host's slot timeout (hooks/hooks.json), so a
+ * runtime multiplier is invisible to it; the PostToolUse limit above is exactly
+ * that gap. Nothing stops an operator exporting the variable in a real session
+ * either: it then reaches the PostToolUse dispatcher and no other, and what it
+ * can cost there is the paragraph above, not merely "slower to give up".
+ * ARTIBOT_DISABLE_DISPATCHER=1 stays the explicit off switch.
+ *
+ * @param {Record<string, unknown>|null} [env] defaults to process.env
+ * @returns {number} a finite number in [1, 10]
+ */
+export function resolveTimeoutScale(env = process.env) {
+  const raw = env?.[TIMEOUT_SCALE_ENV];
+  if (typeof raw !== 'string' || !TIMEOUT_SCALE_SYNTAX.test(raw)) return 1;
+  return Math.min(Math.max(Number(raw), 1), TIMEOUT_SCALE_MAX);
+}
+
+/**
+ * Apply `scale` to a declared budget. The identity at scale 1; otherwise the
+ * product rounded up and clamped to what setTimeout can hold. Never shorter than
+ * the declared budget, whatever `scale` is (0, negative, NaN, Infinity): that
+ * guard is the second line of defence behind `resolveTimeoutScale`'s floor.
+ *
+ * @param {number} timeoutMs declared budget
+ * @param {number} scale factor from resolveTimeoutScale
+ * @returns {number}
+ */
+export function scaleTimeoutMs(timeoutMs, scale) {
+  if (scale === 1) return timeoutMs;
+  const scaled = Math.min(Math.ceil(timeoutMs * scale), TIMER_MAX_MS);
+  return scaled > timeoutMs ? scaled : timeoutMs;
 }
 
 /**
