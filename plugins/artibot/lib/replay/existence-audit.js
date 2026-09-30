@@ -92,7 +92,7 @@
  *
  *   - `tool.used.tool` (allowlist:280-295 today, :232-242 when this paragraph
  *     was written) carries the TOOL name — the firewall fixture writes
- *     `{tool: 'Bash'}` (tests/firewall/ledger-vocab-allowlist.test.js:215). A
+ *     `{tool: 'Bash'}` (ledger-vocab-allowlist.test.js "accepts a registered event"). A
  *     skill reaches the runtime through the `Skill` tool, so THAT field can at
  *     best say "a skill fired" and never WHICH skill. An aggregate that loses
  *     the identity is not a per-skill count. This is the near miss Wave 11

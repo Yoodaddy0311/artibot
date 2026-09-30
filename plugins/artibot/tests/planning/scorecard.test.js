@@ -33,7 +33,16 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', 
  */
 const CLI_TIMEOUT_MS = 60_000;
 
-/** A CLI case spawns up to three children, so its vitest budget may not be smaller than their sum. */
+/**
+ * Vitest budget for a CLI case (up to three spawns). vitest cannot interrupt a SYNCHRONOUS
+ * test: `spawnSync` blocks the event loop, so the test timer never fires mid-spawn. The runner
+ * compares elapsed time after the test returns instead, and fails a test that overran even
+ * though every assertion passed. Measured on vitest 4.0.18: a sync test that took 1.2 s under
+ * a 500 ms budget failed with "Test timed out in 500ms" when it returned normally, and kept
+ * its own message when it threw. So this budget bounds nothing: a wedged child is bounded by
+ * CLI_TIMEOUT_MS, and runCli throws at once. The budget only keeps up to three slow but
+ * successful spawns from being failed after the fact.
+ */
 const CLI_CASE_TIMEOUT_MS = 3 * CLI_TIMEOUT_MS;
 
 /** What explains a failed child, for assertion messages (JSON.stringify makes empty output visible). */
@@ -73,11 +82,39 @@ function runCli(args, { cwd, stdin = '' } = {}) {
  * renames over an existing store) failed with `EPERM: ... rename '...scorecard.json.tmp...'`,
  * store left at one snapshot, and the test then failed on the `diff` output ("현재 1개"),
  * far from its cause.
+ *
+ * `saved:` only says THIS write landed, so the snapshot count is checked on disk as well. The
+ * `add` path now refuses a store it could not read (`loadScorecard({strict})`), but a corrupt
+ * store is still read as empty, and a count that did not grow by one is reported as that,
+ * not as a wrong `diff` output later.
  */
 function addViaCli(projectRoot, json) {
+  const countBefore = storedSnapshotCount(projectRoot);
   const res = runCli(['add'], { cwd: projectRoot, stdin: json });
   const persisted = res.status === 0 && /^saved: /m.test(res.stdout) && !/저장 실패|_scorecard 오류/.test(res.stdout);
   expect(persisted, `setup \`add\` did not persist its snapshot\nstdin=${json}\n${describeRun(res)}`).toBe(true);
+  const countAfter = storedSnapshotCount(projectRoot);
+  expect(
+    countAfter,
+    `setup \`add\` saved, but the store holds ${countAfter} snapshot(s), expected ${countBefore + 1}: `
+      + `the CLI read the earlier ones as empty and replaced them\nstdin=${json}\n${describeRun(res)}`,
+  ).toBe(countBefore + 1);
+}
+
+/**
+ * Snapshots in the project's store, read straight from disk (0 when there is no store yet).
+ * A store that exists but cannot be read is an error naming the file, never a silent 0.
+ */
+function storedSnapshotCount(projectRoot) {
+  const file = join(projectRoot, '.artibot', 'scorecard.json');
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return 0;
+    throw new Error(`cannot read the scorecard store ${file}: ${err?.code ?? err?.message}`, { cause: err });
+  }
+  return JSON.parse(text).snapshots.length;
 }
 
 /** One `add` payload: a snapshot holding a single area that carries evidence. */
@@ -280,6 +317,42 @@ describe('loadScorecard / saveScorecard — persistence', () => {
   });
 });
 
+describe('loadScorecard — strict read (the CLI add path)', () => {
+  let projectRoot;
+  beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-strict-')); });
+  afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
+
+  const storeFile = () => join(projectRoot, '.artibot', 'scorecard.json');
+
+  it('rejects a store it could not read, where the default reads it as empty', async () => {
+    // A directory where the store file belongs: reading it fails with EISDIR on every platform.
+    // The next save would replace whatever could not be read, so `add` must not go on.
+    mkdirSync(storeFile(), { recursive: true });
+    await expect(mod.loadScorecard({ projectRoot, strict: true })).rejects.toThrow(/EISDIR/);
+    expect(await mod.loadScorecard({ projectRoot })).toEqual({ snapshots: [] });
+  });
+
+  it('reads an absent store, and a `.artibot` that is a file, as "no store"', async () => {
+    expect(await mod.loadScorecard({ projectRoot, strict: true })).toEqual({ snapshots: [] });
+    writeFileSync(join(projectRoot, '.artibot'), 'not a directory');
+    expect(await mod.loadScorecard({ projectRoot, strict: true })).toEqual({ snapshots: [] });
+  });
+
+  it('still reads a corrupt store as empty (the documented contract is unchanged)', async () => {
+    mkdirSync(join(projectRoot, '.artibot'), { recursive: true });
+    writeFileSync(storeFile(), '{ not json');
+    expect(await mod.loadScorecard({ projectRoot, strict: true })).toEqual({ snapshots: [] });
+  });
+
+  it('reads a good store the same way in both modes (positive control)', async () => {
+    const saved = await mod.saveScorecard({ projectRoot }, storeWith([area('perf', 80)], 'strict'));
+    expect(saved.ok, `saveScorecard did not persist: ${JSON.stringify(saved)}`).toBe(true);
+    const strict = await mod.loadScorecard({ projectRoot, strict: true });
+    expect(strict.snapshots).toHaveLength(1);
+    expect(strict).toEqual(await mod.loadScorecard({ projectRoot }));
+  });
+});
+
 describe('CLI diff — last-2 auto-select (the structural fix for the id-sort bug)', { timeout: CLI_CASE_TIMEOUT_MS }, () => {
   let projectRoot;
   beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-cli-')); });
@@ -425,10 +498,20 @@ describe('CLI isTTY branching — non-TTY pipe yields plain GFM', { timeout: CLI
   });
 });
 
-describe('CLI add — a failed save exits non-zero', { timeout: CLI_CASE_TIMEOUT_MS }, () => {
+describe('CLI add — a failed read or save exits non-zero', { timeout: CLI_CASE_TIMEOUT_MS }, () => {
   let projectRoot;
   beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'scorecard-save-')); });
   afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
+
+  it('refuses to overwrite a store it could not read: exits 1, says so, never reaches the save', () => {
+    // A directory where the store file belongs: reading it fails with EISDIR on every platform.
+    mkdirSync(join(projectRoot, '.artibot', 'scorecard.json'), { recursive: true });
+    const res = runCli(['add'], { cwd: projectRoot, stdin: payload('before', 'perf', 50) });
+    expect(res.status, describeRun(res)).toBe(1);
+    expect(res.stdout, describeRun(res)).toContain('읽기 실패');
+    expect(res.stdout).not.toContain('저장 실패');
+    expect(res.stdout).not.toMatch(/^saved: /m);
+  });
 
   it('exits 1 and still says why on stdout when the store cannot be written', () => {
     // `.artibot` as a FILE: its directory cannot be created, so the save fails on every
