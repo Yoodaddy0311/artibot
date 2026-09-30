@@ -329,9 +329,9 @@ Full guide: [CONTRIBUTING.md](./CONTRIBUTING.md).
 ## Privacy & Data Policy
 
 Artibot is **local-first by design**. All operational data — including learned
-patterns, GRPO policy weights, hierarchical memory, swarm telemetry, command
-history, hook checkpoints, and benchmark artifacts — is read from and written
-to your own filesystem under the plugin root or `~/.claude/artibot/`. The
+patterns, GRPO policy weights (retired 2026-06; no longer written), hierarchical memory, swarm telemetry,
+command history, hook checkpoints, and benchmark artifacts — is read from and written to your own
+filesystem under the plugin root or `~/.claude/artibot/`. The
 plugin never establishes outbound network connections to third-party telemetry,
 analytics, or remote storage backends. The only network traffic Claude Code
 itself makes is the Anthropic API calls you initiate; Artibot does not add to
@@ -1490,8 +1490,8 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 | `quickstart` | 인터랙티브 첫 실행 온보딩 가이드, 프로젝트 타입 감지 |
 | `repo-benchmarking` | 외부 git 레포 클론 + 10차원 정량 벤치마킹, 채택 권고 |
 | `scheduled-learning` | 야간 학습 파이프라인/드리프트 체크 CronCreate 스케줄링 |
-| `self-evaluation` | Self-Rewarding + GRPO 하이브리드 자기 평가 시스템 |
-| `self-learning` | Toolformer + GRPO 도구 선택 자기학습, 성공률 기반 랭킹 |
+| `self-evaluation` | Self-Rewarding 자기 평가 시스템 (규칙 기반, 외부 judge AI 없음) |
+| `self-learning` | Toolformer 도구 선택 자기학습, 성공률 기반 랭킹 |
 | `session-worklog` | 세션 작업 자동 일지 (auto-memory) — 태스크·결정·미완료 항목 기록 |
 | `setup` | Artibot 초기 설정 인터랙티브 위저드 (언어, MCP, 권한, Git 자동화) |
 | `skill-authoring` | SKILL.md 신규 작성/편집 지원 |
@@ -1617,7 +1617,7 @@ plugins/artibot/
 │   ├── core/                    # 코어: platform, config, cache, lifecycle, extension, error-codes, hook-utils, quickstart, guard-registry, file-lock, event-bus, blocked-patterns 등
 │   ├── runtime/                 # 런타임: create-artibot-agent, evaluator, middleware/ (router, subagents, tasks, checkpoint, memory, skills, guardrail, token-usage, summarization, lifecycle 등)
 │   ├── cognitive/               # 인지 엔진 (8): router, system1, system2 (core+strategies), sandbox, loop-detector
-│   ├── learning/                # 학습 (15): memory, grpo, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
+│   ├── learning/                # 학습 (15): memory, knowledge-transfer, knowledge-demotion, lifelong, tool-learner, self-evaluator, vault 등
 │   ├── adapters/                # 멀티모델 어댑터 (7): base, gemini, codex, cursor, antigravity, adapter-utils
 │   ├── swarm/                   # 연합 지능 (6): swarm-client, pattern-packager, sync-scheduler, swarm-persistence, swarm-config
 │   ├── intent/                  # 의도 감지 (4): language, trigger, ambiguity

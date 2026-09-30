@@ -272,8 +272,8 @@ Privacy guarantees: SHA-256 anonymization + PII stripping + Laplacian differenti
 
 ### Evolution Loop (Reference)
 
-The `evolution-loop` skill explains Artibot's GRPO-based self-improvement cycle:
-- **GRPO**: Group Relative Policy Optimization — preference training over response variants
+The `evolution-loop` skill explains Artibot's self-improvement cycle (pattern extraction, skill refinement, swarm contribution):
+- **GRPO** *(retired 2026-06-20)*: the preference-training stage the guide describes no longer exists — only a rule-based group ranking remains in the CLI plugin's batch learning
 - **Pattern scoring**: Frequency (30%) + Success Rate (40%) + Novelty (15%) + Confidence (15%), threshold ≥ 0.75
 - **Cowork role**: passive participant via swarm opt-in + manual skill encoding via `/sdk`
 
