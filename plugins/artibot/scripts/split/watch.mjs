@@ -468,8 +468,18 @@ export function reportLeaseReclaim({ parent, lanes, nowMs, apply = false, ports 
     const sid = ports.sessionId ?? sessionIdFromEnv();
     if (typeof sid !== 'string' || sid === '') return { ...base, available: false, reason: 'no-session-id' };
     const store = (ports.openStore ?? openFeedStore)(parent, sid);
-    const keepAlive = (Array.isArray(lanes) ? lanes : []).filter((l) => heartbeatEligibility(l).eligible).map((l) => l.limb);
-    return { ...base, ...reclaimExpiredLaneLeases({ store, nowMs, keepAlive, apply }), available: true };
+    const list = Array.isArray(lanes) ? lanes : [];
+    const keepAlive = list.filter((l) => heartbeatEligibility(l).eligible).map((l) => l.limb);
+    const report = reclaimExpiredLaneLeases({ store, nowMs, keepAlive, apply });
+    // What THIS run's lane says about a candidate (null = the limb is not in this run's plan: a stale lane of an
+    // older run). The scan is judged by clock alone; the word next to it is what lets a human confirm or refuse.
+    const opsByLimb = new Map(list.map((l) => [l?.limb, typeof l?.opsState === 'string' ? l.opsState : null]));
+    return {
+      ...base,
+      ...report,
+      candidates: report.candidates.map((c) => ({ ...c, laneOps: opsByLimb.get(c.taskId) ?? null })),
+      available: true,
+    };
   } catch (err) {
     return { ...base, available: false, reason: `store-threw:${err?.message ?? 'unknown'}` };
   }
@@ -528,7 +538,8 @@ export function renderLeaseLines(leases) {
     } else if (!apply && candidates.length > 0) {
       lines.push(`lease reclaim [report-only]: ${candidates.length} expired lane lease(s) — pass --apply-reclaim to release them`);
       for (const c of candidates) {
-        lines.push(`  ${c.taskId}  mission ${c.missionId}  owner ${c.owner}  status ${c.status}  silent ${fmtAge(c.silentForMs)}  expired ${fmtAge(c.expiredForMs)} ago  → ${c.action}`);
+        const lane = typeof c.laneOps === 'string' ? `lane ${c.laneOps}` : 'lane (not in this run)';
+        lines.push(`  ${c.taskId}  mission ${c.missionId}  owner ${c.owner}  status ${c.status}  ${lane}  silent ${fmtAge(c.silentForMs)}  expired ${fmtAge(c.expiredForMs)} ago  → ${c.action}`);
       }
     }
   }

@@ -35,8 +35,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
+import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
+import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
 import { LIMB_LEASE_TTL_MS } from '../../lib/topology/split-task-feed.js';
 import { LANE_LEASE_ACTIONS, LANE_LEASE_REASON } from '../../scripts/split/lane-lease.mjs';
 import { feedLimb } from '../../scripts/split/task-feed.mjs';
@@ -453,6 +455,8 @@ describe('collect — the heartbeat and the reclaim report on a poll', () => {
     expect(r.leases.heartbeat.lanes[0]).toMatchObject({ limb: 'auth', outcome: 'renewed' });
     expect(r.leases.reclaim).toMatchObject({ mode: 'report', available: true, applied: false });
     expect(r.leases.reclaim.candidates.map((c) => [c.taskId, c.action, c.targetStatus])).toEqual([['billing', 'release-to-queued', 'queued']]);
+    // What this run's lane says is shown next to the clock's verdict, so a human can confirm or refuse.
+    expect(r.leases.reclaim.candidates[0].laneOps).toBe('closing');
     expect(r.leases.reclaim.results).toEqual([]);
     expect(store.getLease(MISSION, 'billing')?.owner).toBe('billing');
     expect(updates().length).toBe(before + 1); // the auth renewal only
@@ -530,6 +534,8 @@ describe('collect — the heartbeat and the reclaim report on a poll', () => {
         expect(store.getLease(MISSION, 'zed').heartbeat_at).toBe('2026-09-30T00:00:00.000Z');
         expect(r.leases.reclaim.candidates.map((c) => c.taskId)).toContain('zed');
         expect(r.leases.reclaim.protected.map((p) => p.taskId)).not.toContain('zed');
+        // The contradiction a human needs to see: the lane is declared active, its session is gone.
+        expect(r.leases.reclaim.candidates.find((c) => c.taskId === 'zed').laneOps).toBe('active');
       });
     }, 60_000);
 
@@ -544,6 +550,18 @@ describe('collect — the heartbeat and the reclaim report on a poll', () => {
         expect(r.leases.reclaim.candidates.map((c) => c.taskId)).not.toContain('zed');
       });
     }, 60_000);
+  });
+
+  it('a stale lane of an OLDER run (its limb is not in this run\'s plan) is still reported, and says so', async () => {
+    const older = { ...PLAN, limbs: [...PLAN.limbs, { limb: 'old-run-lane', affectedPaths: ['lib/old.js'] }] };
+    expect(feedLimb({ parentRoot: repo, plan: older, limb: 'old-run-lane', sessionId: SESSION }, { openStore: () => store, config: OFF }).claim).toBe('claimed');
+    clock = new Date(T0 + 25 * H);
+    const r = await poll();
+    const stale = r.leases.reclaim.candidates.find((c) => c.taskId === 'old-run-lane');
+    expect(stale).toMatchObject({ laneOps: null, status: 'claimed', action: 'release-to-queued' });
+    const text = renderText(r);
+    expect(text).toMatch(/old-run-lane .*lane \(not in this run\)/);
+    expect(text).toMatch(/billing .*lane closing/);
   });
 
   it('no session id: the report says so instead of guessing, collect still resolves, and `missing` is untouched', async () => {
@@ -616,6 +634,79 @@ describe('CLI surface', () => {
   }, 60_000);
 });
 
+describe('production wiring — the REAL openFeedStore and the REAL central ledger writer, in a child process', () => {
+  let repo;
+  let storeDir;
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-watch-lease-prod-'));
+    storeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'artibot-watch-lease-prod-store-'));
+    git(['init', '-q', '-b', 'master'], repo);
+    git(['config', 'user.email', 't@example.com'], repo);
+    git(['config', 'user.name', 't'], repo);
+    git(['config', 'commit.gpgsign', 'false'], repo);
+    fs.mkdirSync(path.join(repo, '.artibot', 'split'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.artibot', 'split', 'plan.json'), JSON.stringify({ runId: 'split-prod', limbs: [{ limb: 'auth', affectedPaths: ['lib/auth/**'] }] }));
+    fs.writeFileSync(path.join(repo, '.artibot', 'split', 'run.json'), JSON.stringify({ runId: 'split-prod', lanes: { auth: { state: 'active' } } }));
+  }, 60_000);
+  afterAll(() => {
+    for (const d of [repo, storeDir]) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  /** What `task-feed.mjs#openFeedStore` builds, with one difference: a clock, so the lease can be aged. */
+  const openAged = (now) => createStateStore({
+    projectRoot: repo,
+    sessionId: SESSION,
+    source: 'supervisor',
+    renderProjectionFile: false,
+    now,
+    appendEvent: (envelope) => appendLedgerEvent(repo, envelope),
+    resolveGitCommonDir: () => resolveGitCommonDir(repo),
+  });
+  const ledgerRows = () => fs.readFileSync(path.join(repo, '.git', 'artibot', 'ledger.jsonl'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const heartbeatRows = () => ledgerRows().filter((e) => e.event === 'state.updated' && e.data?.reason === LANE_LEASE_REASON);
+  const childEnv = () => {
+    const env = { ...process.env, CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_SESSION_ID: '' };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete env[k];
+    return env;
+  };
+  const runWatch = () => JSON.parse(execFileSync(process.execPath, [SCRIPT, '--json', '--parent', repo, '--store-dir', storeDir], { encoding: 'utf-8', windowsHide: true, env: childEnv() }));
+
+  it('a poll past ttl/3 renews a real lease and leaves a split.lane-lease row in the central ledger; the next poll writes nothing', () => {
+    // A lease the real feeder claimed 10 hours ago (the real clock minus 10h), through the same store location the child will open.
+    const aged = openAged(() => new Date(Date.now() - 10 * H));
+    expect(aged.updateMission(MISSION, () => ({
+      status: 'executing',
+      intent: { path: '.artibot/intent.md', revision: 1 },
+      plan: { path: '.artibot/plan.md', revision: 1 },
+    }), { reason: 'test.seed' }).ok).toBe(true);
+    const plan = { runId: 'split-prod', limbs: [{ limb: 'auth', affectedPaths: ['lib/auth/**'] }] };
+    expect(feedLimb({ parentRoot: repo, plan, limb: 'auth', sessionId: SESSION }, { openStore: () => aged, config: OFF }).claim).toBe('claimed');
+    expect(heartbeatRows()).toHaveLength(0);
+
+    const first = runWatch();
+
+    expect(first.leases.heartbeat).toMatchObject({ enabled: true, available: true, eligible: 1, renewed: 1 });
+    expect(first.leases.heartbeat.lanes[0]).toMatchObject({ limb: 'auth', outcome: 'renewed', missionId: MISSION });
+    const now = openAged(() => new Date());
+    const lease = now.getLease(MISSION, 'auth');
+    expect(Math.abs(Date.now() - Date.parse(lease.heartbeat_at))).toBeLessThan(5 * MIN);
+    expect(Date.parse(lease.heartbeat_at) - Date.parse(lease.acquired_at)).toBeGreaterThan(9.9 * H);
+    expect(Date.parse(lease.expires_at) - Date.parse(lease.heartbeat_at)).toBe(24 * H);
+    expect(now.getTaskGraph(MISSION).tasks.find((t) => t.id === 'auth')).toMatchObject({ status: 'claimed', heartbeat_source: 'lane-heartbeat' });
+    // The exact evidence the SH-12 measurement reads: a state.updated row, reason split.lane-lease, in the central ledger.
+    expect(heartbeatRows()).toHaveLength(1);
+    expect(heartbeatRows()[0]).toMatchObject({ event: 'state.updated', mission_id: MISSION, session_id: SESSION });
+
+    const second = runWatch();
+
+    expect(second.leases.heartbeat.lanes[0].outcome).toBe('skipped:not-due');
+    expect(second.leases.heartbeat.renewed).toBe(0);
+    expect(heartbeatRows()).toHaveLength(1);
+    expect(second.leases.reclaim).toMatchObject({ mode: 'report', available: true, applied: false, candidates: [] });
+  }, 120_000);
+});
+
 describe('renderLeaseLines — pure', () => {
   const heartbeat = (over = {}) => ({
     enabled: true, available: true, reason: null, divisor: 3, eligible: 2, renewed: 1,
@@ -630,7 +721,7 @@ describe('renderLeaseLines — pure', () => {
     mode: 'report', available: true, reason: null, applied: false, scanned: { missions: 1, leases: 1, laneLeases: 1 }, live: 0,
     protected: [], malformed: [], results: [],
     candidates: [{
-      missionId: MISSION, taskId: 'gone', owner: 'gone', ownerIsLane: true, status: 'claimed', carriesOps: false,
+      missionId: MISSION, taskId: 'gone', owner: 'gone', ownerIsLane: true, status: 'claimed', carriesOps: false, laneOps: 'done',
       acquiredAt: 'x', heartbeatAt: 'x', expiresAt: 'x', expiredForMs: 3 * H + 10 * MIN, silentForMs: 27 * H, heartbeatSource: null,
       action: 'release-to-queued', targetStatus: 'queued',
     }],
@@ -672,6 +763,12 @@ describe('renderLeaseLines — pure', () => {
     expect(report).toContain('release-to-queued');
     expect(report).toContain('3h 10m');
     expect(report).toContain('--apply-reclaim');
+    expect(report).toContain('lane done');
+    const stale = renderLeaseLines({
+      heartbeat: heartbeat({ eligible: 0, renewed: 0, lanes: [] }),
+      reclaim: reclaim({ candidates: [{ ...reclaim().candidates[0], laneOps: null }] }),
+    }).join('\n');
+    expect(stale).toContain('lane (not in this run)');
 
     const applied = renderLeaseLines({
       heartbeat: heartbeat({ eligible: 0, renewed: 0, lanes: [] }),

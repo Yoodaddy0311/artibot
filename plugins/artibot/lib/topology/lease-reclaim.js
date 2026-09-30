@@ -64,9 +64,13 @@
  * feeder's own marker ({@link LANE_TASK_TITLE_PREFIX}) or by `ops`; a feeder
  * that changes both silences the report (pinned by the drift test against
  * `mergeLimbTasks`). It scans every mission in the store, not one run — a stale
- * lane lease of an older run is exactly what it is for. And every
- * `store.getState()` re-parses the whole journal, which the tests exercise on
- * a handful of records only.
+ * lane lease of an older run is exactly what it is for — but `keepAlive` is
+ * matched by lane id alone, so an older run's stale lease on a limb name the
+ * current run is working stays protected until that lane ends (it errs toward
+ * keeping). A lane parked as `suspended` holds a lease nobody renews
+ * (`LANE_LEASE_ACTIONS`: nothing to say to the lease), so it lapses into the
+ * report after the TTL like any other. And every `store.getState()` re-parses
+ * the whole journal, which the tests exercise on a handful of records only.
  *
  * ── Layer ──────────────────────────────────────────────────────────────────
  * L4 (`lib/topology/`, ceiling L2): pure except for the store passed in, reads
