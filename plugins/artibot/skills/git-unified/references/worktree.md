@@ -101,11 +101,20 @@ WORKTREE STATUS DASHBOARD
 
 ### `check`
 
-모든 워크트리 쌍 간 충돌 예측. `git merge-tree --write-tree` 기반이며, **구현은 `lib/git/merge-preflight.js` 가 단일 소유**한다(ADR-005 — `/split integrate` 도 같은 모듈을 소비). 손으로 `git merge-tree` 를 치지 말고 모듈을 호출한다:
+모든 워크트리 쌍 간 충돌 예측. `git merge-tree --write-tree` 기반이며, **구현은 `lib/git/merge-preflight.js` 가 단일 소유**한다(ADR-005 — `/split integrate` 도 같은 모듈을 소비). 손으로 `git merge-tree` 를 치지 말고 모듈을 호출한다. cwd 는 검사할 워크트리가 속한 프로젝트이고 모듈은 플러그인 안에 있다 — cwd 상대 `./lib/...` import 는 플러그인 디렉터리에서만 풀리므로 먼저 플러그인 루트(`<pluginRoot>`)를 한 번 찾는다(CLAUDE_PLUGIN_ROOT 는 Bash 에서 자주 비어 있다). `artibot plugin root not found - run /update` 가 나오면 그 줄을 그대로 전하고 멈춘다:
 
 ```bash
-# 워크트리 브랜치 목록을 모아 모듈에 넘긴다 (플러그인 루트 plugins/artibot 에서)
-node --input-type=module -e "const m=await import('./lib/git/merge-preflight.js');const branches=process.argv.slice(1);const r=m.preflightBranches(branches,{cwd:process.cwd()});console.log(m.formatConflictMatrix(r));process.exitCode=r.blocked?1:0;" $(git worktree list --porcelain | sed -n 's#^branch refs/heads/##p')
+F="lib/git/merge-preflight.js"; R=""; P="$HOME/.claude/plugins"
+for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
+
+그다음 워크트리 브랜치 목록을 모아 모듈에 넘긴다. 프로젝트 디렉터리에서 실행하고, 모듈은 `<pluginRoot>` 에서 `file://` URL 로 로드한다(절대경로를 그대로 import 하면 Windows 에서 실패한다):
+
+```bash
+node --input-type=module -e "import path from 'node:path';import {pathToFileURL} from 'node:url';const m=await import(pathToFileURL(path.join(process.argv[1],'lib/git/merge-preflight.js')).href);const branches=process.argv.slice(2);const r=m.preflightBranches(branches,{cwd:process.cwd()});console.log(m.formatConflictMatrix(r));process.exitCode=r.blocked?1:0;" "<pluginRoot>" $(git worktree list --porcelain | sed -n 's#^branch refs/heads/##p')
 ```
 
 - 종료코드 1 = `blocked`(충돌 쌍이 있거나 예측 불가). 0 = 모든 쌍 SAFE.

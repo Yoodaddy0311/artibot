@@ -26,7 +26,7 @@ Routes the user's request to the appropriate specialist agent for the **ship** l
 
 | Flag | Description |
 |------|-------------|
-| `--auto-description` | Run `scripts/build-pr-description.mjs` and pipe its markdown into `gh pr create --body`. Combines git history between base..HEAD with the most recent `.artibot/SESSION-NOTES.md` entry. |
+| `--auto-description` | Run `<pluginRoot>/scripts/build-pr-description.mjs` (root found in the workflow below) and pipe its markdown into `gh pr create --body`. Combines git history between base..HEAD with the most recent `.artibot/SESSION-NOTES.md` entry. |
 | `--stats` | Forwarded to the builder — appends a `git diff base...head --stat` block. Useful for large PRs. |
 
 ### Auto-description workflow
@@ -34,16 +34,24 @@ Routes the user's request to the appropriate specialist agent for the **ship** l
 When `--auto-description` is passed, the ship agent should:
 
 1. Resolve the base branch (defaults to `master` if not specified)
-2. Invoke the builder:
+2. Find the plugin root. The working directory is the user's project, not this plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so `plugins/artibot/scripts/...` only resolves inside the Artibot source repo. Run this once and use the absolute path it prints as `<pluginRoot>`, quoted. If it prints `artibot plugin root not found - run /update`, say so and write the body by hand instead:
    ```bash
-   node plugins/artibot/scripts/build-pr-description.mjs \
+   F="scripts/build-pr-description.mjs"; R=""; P="$HOME/.claude/plugins"
+   for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+   [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+   [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+   [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+   ```
+3. Invoke the builder from the project directory:
+   ```bash
+   node "<pluginRoot>/scripts/build-pr-description.mjs" \
      --base master \
      --head HEAD \
      --session-notes .artibot/SESSION-NOTES.md \
      [--stats]
    ```
-3. Capture stdout into a heredoc variable
-4. Pass it to `gh pr create --body "$(...)"`
+4. Capture stdout into a heredoc variable
+5. Pass it to `gh pr create --body "$(...)"`
 
 The builder is fault-tolerant: git failures or a missing SESSION-NOTES.md
 collapse to an empty section rather than aborting. The default flow (no

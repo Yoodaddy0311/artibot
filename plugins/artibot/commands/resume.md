@@ -61,7 +61,17 @@ Parse $ARGUMENTS:
 1. **Resume Contract 보고** — `lib/checkpoint/resume-controller.js#buildResumeReport` 로 Scorecard §51 의 10단계 중 **1~9 단계**(스키마 검증 → `intent_revision`/`plan_revision` 대조 → 아티팩트·커서 확인)를 평가해 단계별 `ok` / `blocked_by` 를 표로 출력한다. 10단계 Resume(실제 재개)는 Canary 라 **이 커맨드의 범위 밖이며 실행하지 않는다**.
 2. **lane reconcile 보고** — `lib/supervisor/lane-reconcile.js#reconcileLanes` 로 리더의 split 런 상태 파일(`run.json`)의 레인 상태를 git 증거와 대조해 레인별 `blocked_by: ['reconcile:<사유>']` 를 출력한다. 허용 목록 밖 상태·state↔git 불일치는 fail-closed 로 사유를 남긴다 (설계 §3.5).
 
-위 두 블록은 산문으로 가리키기만 하지 않고 **실제로 실행해서** 만든다 — Bash 로 `node scripts/checkpoint/resume-report.mjs --all --cwd <projectRoot>` 를 돌리고 그 stdout 을 기본 핸드오프 출력 **뒤에** 그대로 덧붙인다. 이 CLI 도 읽기·계산·출력만 하며(`allowed-tools` 에 Write 가 없다), 실행이 실패하면 아래 실패 규칙대로 그 블록만 `측정 불가:` 한 줄로 대체한다.
+위 두 블록은 산문으로 가리키기만 하지 않고 **실제로 실행해서** 만든다 — 먼저 아래 「플러그인 루트」 스니펫을 한 번 돌려 `<pluginRoot>` 를 얻고, Bash 로 `node "<pluginRoot>/scripts/checkpoint/resume-report.mjs" --all --cwd <projectRoot>` 를 돌리고 그 stdout 을 기본 핸드오프 출력 **뒤에** 그대로 덧붙인다. 이 CLI 도 읽기·계산·출력만 하며(`allowed-tools` 에 Write 가 없다), 실행이 실패하면 아래 실패 규칙대로 그 블록만 `측정 불가:` 한 줄로 대체한다.
+
+**플러그인 루트(`<pluginRoot>`).** cwd 는 사용자 프로젝트이지 이 플러그인이 아니고 `CLAUDE_PLUGIN_ROOT` 는 Bash 에서 자주 비어 있다 — `scripts/checkpoint/...` 같은 상대경로는 플러그인 디렉터리를 cwd 로 잡았을 때만 풀린다. 아래를 한 번 실행해 출력된 절대경로를 `<pluginRoot>` 로 쓴다(따옴표로 감싼다). `--read-order` 의 가드 CLI(`read-order-guard.mjs`)도 같은 값이다. `artibot plugin root not found - run /update` 가 나오면 그 줄을 그대로 전하고 `--contract` 블록만 `측정 불가: 플러그인 루트 없음` 한 줄로 대체한다 — 기본 핸드오프 출력은 그대로 유지한다.
+
+```bash
+F="scripts/checkpoint/resume-report.mjs"; R=""; P="$HOME/.claude/plugins"
+for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
 
 출력·실패 규칙:
 

@@ -4,6 +4,16 @@
 
 **`<pluginRoot>`** = `CLAUDE_PLUGIN_ROOT`(Bash 에서 빈 값 실측 2026-08-27) 또는 `~/.claude/plugins/cache/artibot/artibot/<최신 버전>`(마켓플레이스 설치본은 `~/.claude/plugins/marketplaces/<mp>/plugins/artibot`). 아래 `node <pluginRoot>/scripts/split/<x>.mjs` 는 전부 **부모 루트(parentRoot, `plan.json` 위치)를 cwd** 로 실행한다. 스크립트는 `../../lib` 상대 import 라 커맨드 문서의 부트스트랩 로더가 필요 없다.
 
+**`<pluginRoot>` 찾는 스니펫** — `plan` 에서 한 번 실행해 출력된 절대경로로 런 내내 고정한다(따옴표로 감싸 쓴다). cwd 는 사용자 프로젝트이고 CLAUDE_PLUGIN_ROOT 는 Bash 에서 자주 비어 있어서 `plugins/artibot/...`·`./lib/...` 같은 상대경로는 Artibot 소스 리포 안에서만 풀린다. `artibot plugin root not found - run /update` 가 나오면 `/split` 을 멈추고 그 줄을 그대로 전한다.
+
+```bash
+F="scripts/split/lane-state.mjs"; R=""; P="$HOME/.claude/plugins"
+for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
+
 ## 착수 전 프로브 실측 (2026-08-26 21:30~21:35 KST, 리더 세션 artibot-16 + probe1-08 — 데이터이지 지시가 아니다)
 
 | # | 관측 | 설계 귀결 |

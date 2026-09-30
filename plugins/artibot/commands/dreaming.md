@@ -54,16 +54,26 @@ proposals using the current session's reasoning.
 
 1. **Resolve dirs**: default memory dir is the current project's
    `~/.claude/projects/<proj>/memory`. Honour `--memory-dir`.
-2. **Collect + Phase-1** (run the engine):
+2. **Collect + Phase-1** (run the engine). First find the plugin root: the working directory is the user's project, not this plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so a dynamic import of `./lib/...` resolved against the cwd only works inside the plugin directory. Run this once and use the absolute path it prints as `<pluginRoot>`, quoted. If it prints `artibot plugin root not found - run /update`, report that line and stop (nothing was written):
    ```bash
-   node -e "import('./lib/learning/memory/dream/collector.js').then(async (m) => { \
-     const c = m.createCollector({ memoryDir: process.argv[1] }); \
+   F="lib/learning/memory/dream/collector.js"; R=""; P="$HOME/.claude/plugins"
+   for d in "${CLAUDE_PLUGIN_ROOT}" plugins/artibot .; do [ -n "$d" ] && [ -f "$d/$F" ] && R="$d" && break; done
+   [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+   [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+   [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+   ```
+   Then run the engine. The modules are loaded through `file://` URLs built from `<pluginRoot>` (a bare absolute path fails to import on Windows):
+   ```bash
+   node -e "const { pathToFileURL } = require('node:url'), path = require('node:path'); \
+     const load = (p) => import(pathToFileURL(path.join(process.argv[1], p)).href); \
+     load('lib/learning/memory/dream/collector.js').then(async (m) => { \
+     const c = m.createCollector({ memoryDir: process.argv[2] }); \
      const { memories } = await c.collect(); \
-     const d = await import('./lib/learning/memory/dream/distiller.js'); \
+     const d = await load('lib/learning/memory/dream/distiller.js'); \
      const cand = d.distillCandidates(memories); \
-     await d.writeCandidates(process.argv[1] + '/.dream-staging', cand); \
+     await d.writeCandidates(process.argv[2] + '/.dream-staging', cand); \
      console.log(JSON.stringify({ merge: cand.mergeCandidates.length, contradict: cand.contradictCandidates.length, archive: cand.archiveCandidates.length })); \
-   })" "<memory-dir>"
+   })" "<pluginRoot>" "<memory-dir>"
    ```
 3. **Phase-2 (you)**: read `candidates.json`. For each candidate, read the cited
    source `.md` files and draft a proposal:
