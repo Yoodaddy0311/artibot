@@ -19,7 +19,7 @@ import { createSummarizationMiddleware } from './middleware/summarization.js';
 import { createCheckpointMiddleware, readCheckpoints } from './middleware/checkpoint.js';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
 import { ARTIBOT_DIR } from '../core/config.js';
-import { getPluginRoot } from '../core/platform.js';
+import { getHomeDir, getPluginRoot } from '../core/platform.js';
 
 const TEST_CONFIG = Object.freeze({
   automation: {
@@ -119,6 +119,16 @@ async function runHook(scriptName, payload, options = {}) {
   const pluginRoot = options.pluginRoot || getPluginRoot();
   const scriptPath = path.join(pluginRoot, 'scripts', 'hooks', scriptName);
   const timeout = options.timeout ?? 30_000;
+  // O2: hooks keep global/session state (user profile, token usage, first-run
+  // counter, ...) under the artibot STATE dir — `~/.claude/artibot`, the user's real
+  // one — not under the plugin root. This harness runs the real hooks with a
+  // synthetic prompt, so unless the caller already redirected the state dir (vitest's
+  // setup does) the child gets a scratch one, or a run of `npm run ci` would append
+  // the eval prompt to the developer's own profile. `ARTIBOT_STATE_DIR_HOME` is the
+  // pairing `resolveArtibotDir()` requires before it honours the override.
+  const ownStateDir = process.env.ARTIBOT_STATE_DIR
+    ? null
+    : await mkdtemp(path.join(os.tmpdir(), 'artibot-runtime-eval-state-'));
   // Use execFileSync instead of async execFile because async execFile has a
   // known stdin-piping race on Windows with hooks that call readStdin() —
   // the parent's input write doesn't always trigger 'end' on the child's
@@ -132,6 +142,7 @@ async function runHook(scriptName, payload, options = {}) {
       cwd: pluginRoot,
       env: {
         ...process.env,
+        ...(ownStateDir ? { ARTIBOT_STATE_DIR: ownStateDir, ARTIBOT_STATE_DIR_HOME: getHomeDir() } : {}),
         CLAUDE_PLUGIN_ROOT: pluginRoot,
         ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
         ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
@@ -146,6 +157,8 @@ async function runHook(scriptName, payload, options = {}) {
     const stderr = err.stderr ? String(err.stderr).slice(0, 500) : '';
     const reason = stderr || err.message || 'unknown';
     throw new Error(`runHook(${scriptName}) failed: ${reason}`, { cause: err });
+  } finally {
+    if (ownStateDir) await rm(ownStateDir, { recursive: true, force: true });
   }
 
   const trimmed = String(stdout || '').trim();

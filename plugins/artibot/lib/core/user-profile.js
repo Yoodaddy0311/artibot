@@ -4,17 +4,38 @@
  * 'novice' or 'pro'. Starts on the safe side ('novice') and self-promotes
  * once enough positive pro-signals accumulate.
  *
- * Persistence target: `config.ux.profilePath` (default `~/.claude/artibot/user-profile.json`),
+ * Persistence target: `config.ux.profilePath` (shipped as `runtime/user-profile.json`),
  * overridden by the `ARTIBOT_USER_PROFILE_PATH` env var when set — it wins over
  * the config value so a sandboxed harness can redirect this store. See
  * `resolveProfilePath` for why the env is checked first.
+ *
+ * WHERE THE PROFILE LIVES (O2). It is GLOBAL — one per user, the skill level it
+ * learns should not reset when anything else changes — so a RELATIVE path (the
+ * shipped config value, and the default when nothing is configured) resolves under
+ * the artibot state dir, `<state dir>/runtime/user-profile.json`
+ * (`lib/core/runtime-state.js`; `~/.claude/artibot`), NOT under the plugin root. In a
+ * marketplace install the plugin root is a version-scoped cache directory, and the
+ * hook re-applies the relative config value on every prompt, so the profile was
+ * written to `<cache>/<version>/runtime/user-profile.json` and every plugin update
+ * started a new one (measured 2026-09-30: 3 cache version dirs held a profile of 8,959,
+ * 1,054 and 2,550 bytes — files that grow with every prompt — while
+ * `~/.claude/artibot/user-profile.json`, the path this header used to name as the
+ * default, held a different, stale one: 651 bytes, last written 2026-07-31). The
+ * default and the shipped config value now name the SAME file, so a reader that never
+ * configured a path
+ * (`resolveProfilePath()` in `self-benchmark.js`) sees what the hook wrote. A profile
+ * left at the old places — the plugin root or sibling versions' `runtime/`, or the old
+ * default `<state dir>/user-profile.json` — is copied over once, the first time the
+ * profile is read and the new file does not exist yet.
  *
  * @module lib/core/user-profile
  */
 
 import path from 'node:path';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { getHomeDir, getPluginRoot } from './platform.js';
+import { resolveArtibotDir } from './config.js';
+import { getHomeDir } from './platform.js';
+import { migrateLegacyFile, resolveGlobalStatePath } from './runtime-state.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -22,6 +43,9 @@ import { getHomeDir, getPluginRoot } from './platform.js';
 
 const MIN_SIGNALS_FOR_AUTO_DETECT = 10;
 const MAX_STORED_SIGNALS = 200;
+
+/** The profile's name under the state dir — the shipped `ux.profilePath`, and the default. */
+const DEFAULT_PROFILE_REL = 'runtime/user-profile.json';
 
 /** Jargon heuristic token list (lowercase ASCII). */
 const JARGON_TOKENS = [
@@ -50,6 +74,14 @@ const NOVICE_PHRASES = [
 
 /** @type {string|null} */
 let cachedProfilePath = null;
+
+/**
+ * The state-dir-relative name `cachedProfilePath` was resolved from — the key a legacy
+ * copy is looked up by. Null when the configured path was absolute (an operator's
+ * explicit choice, never migrated).
+ * @type {string|null}
+ */
+let cachedProfileRel = null;
 
 /**
  * @typedef {object} Signal
@@ -90,25 +122,31 @@ function expandHome(p) {
  * Resolve a user-supplied profile path. Supports:
  *   - `~` / `~/...` / `~\...` home-relative paths
  *   - absolute paths (kept as-is)
- *   - relative paths (resolved against the plugin root, NOT CWD)
+ *   - relative paths (resolved against the artibot STATE dir, NOT CWD and NOT the
+ *     plugin root)
  *
- * Resolving against the plugin root — instead of CWD — prevents the per-session
+ * Resolving against a fixed directory — instead of CWD — prevents the per-session
  * directory drift that caused stale `runtime/user-profile.json.tmp.*` files when
- * the hook was launched from differing working directories.
+ * the hook was launched from differing working directories. The state dir rather
+ * than the plugin root because the plugin root of a marketplace install is replaced
+ * on every update (see the module header); under the install.sh layout the two are
+ * the same directory, so nothing moves there.
  *
  * @param {string} newPath
- * @returns {string}
+ * @returns {{ file: string, rel: string|null }} `rel`: the name under the state dir
+ *   for a relative path, null for an absolute one.
  */
 function resolveConfiguredPath(newPath) {
   const expanded = expandHome(newPath);
-  return path.isAbsolute(expanded) ? expanded : path.join(getPluginRoot(), expanded);
+  if (path.isAbsolute(expanded)) return { file: expanded, rel: null };
+  return { file: resolveGlobalStatePath(expanded), rel: expanded };
 }
 
 /**
  * Resolve the profile file path. Precedence:
  *   1. `ARTIBOT_USER_PROFILE_PATH` env (sandbox redirect — see below)
  *   2. the override installed by `configureProfilePath`
- *   3. the default under the home dir
+ *   3. the default, `<state dir>/runtime/user-profile.json`
  *
  * Exported so readers (e.g. self-benchmark's userProfileSignals) resolve the
  * exact same path the writer uses, instead of duplicating the path string and
@@ -133,8 +171,7 @@ export function resolveProfilePath() {
   const envPath = process.env.ARTIBOT_USER_PROFILE_PATH?.trim();
   if (envPath) return path.resolve(envPath);
   if (cachedProfilePath) return cachedProfilePath;
-  const defaultPath = path.join(getHomeDir(), '.claude', 'artibot', 'user-profile.json');
-  return defaultPath;
+  return resolveGlobalStatePath(DEFAULT_PROFILE_REL);
 }
 
 /**
@@ -144,7 +181,32 @@ export function resolveProfilePath() {
  * @param {string|null} newPath
  */
 export function configureProfilePath(newPath) {
-  cachedProfilePath = newPath ? resolveConfiguredPath(newPath) : null;
+  if (!newPath) {
+    cachedProfilePath = null;
+    cachedProfileRel = null;
+    return;
+  }
+  const { file, rel } = resolveConfiguredPath(newPath);
+  cachedProfilePath = file;
+  cachedProfileRel = rel;
+}
+
+/**
+ * Carry a profile left at an OLD location over to the active one, once: copy-if-absent,
+ * and only when the active path is one this module chose (relative config value or the
+ * default) — an env override or an absolute configured path is the operator's choice
+ * and gets no migration. Old places, in order: `<pluginRoot>/runtime/` and sibling
+ * versions' (`migrateLegacyFile`), then the old default `<state dir>/user-profile.json`.
+ */
+function migrateLegacyProfile() {
+  if (process.env.ARTIBOT_USER_PROFILE_PATH?.trim()) return;
+  const rel = cachedProfilePath ? cachedProfileRel : DEFAULT_PROFILE_REL;
+  if (!rel) return;
+  migrateLegacyFile(resolveProfilePath(), rel, {
+    extraSources: rel === DEFAULT_PROFILE_REL
+      ? [path.join(resolveArtibotDir(), 'user-profile.json')]
+      : [],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +234,7 @@ function defaultProfile() {
  * @returns {Promise<Profile>}
  */
 async function readProfile() {
+  migrateLegacyProfile();
   const p = resolveProfilePath();
   if (!existsSync(p)) return defaultProfile();
   try {
@@ -459,4 +522,5 @@ export async function detectSkillLevel() {
  */
 export function _resetPathCache() {
   cachedProfilePath = null;
+  cachedProfileRel = null;
 }

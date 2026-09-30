@@ -4,7 +4,7 @@
 # Line 1: [model] 📁 dir 🌿 branch ✎dirty | 🤖 agent
 # Line 2: ctx% bar | 💰 cost ⏱ time | artibot vX.Y.Z ✓eval | ⚡ cog-mode
 #
-# Input:  JSON via stdin (model, context_window, cost, agent, worktree)
+# Input:  JSON via stdin (session_id, model, context_window, cost, agent, worktree)
 # Output: 2 lines to stdout
 # Cache:  /tmp/artibot-statusline-cache (5s TTL for git calls)
 
@@ -106,6 +106,88 @@ FAST_ON=$(jq_get '.fast_mode' '')
 # ─── Resolve plugin root (script lives at <plugin>/scripts/hooks/) ────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# >>> artibot-runtime-state >>>
+# ─── Where the hooks keep their state (O2) ───────────────────────────────────
+# GLOBAL and SESSION hook state lives under the artibot STATE dir — the directory
+# lib/core/config.js#resolveArtibotDir() returns, ~/.claude/artibot — NOT under
+# the plugin root. A marketplace install's plugin root is a version-scoped cache
+# directory that Claude Code replaces on every update, and the hooks run from it;
+# this script, wired from ~/.claude/artibot, used to read
+# $PLUGIN_ROOT/runtime/*.json while the hooks wrote the same names to THEIR plugin
+# root (measured 2026-09-30: the team and token files sat in the cache version
+# dirs, never in ~/.claude/artibot/runtime), so those segments could not render.
+#
+# Session-scoped files are $STATE_ROOT/runtime/sessions/<session_id>/<name>. This
+# script gets session_id on stdin, so it reads ITS OWN session's file first. Then,
+# in order: the flat file in the state dir (a hook payload that had no session id),
+# then the flat file under the plugin root (state written by a hook that predates
+# O2; on the install.sh layout the plugin root IS the state dir and this is the
+# same file as the previous candidate).
+#
+# Deliberately not a config switch: a shell script cannot read artibot.config.json
+# with any confidence, so a switch would split the readers from the writers again.
+#
+# SESSION_ID_SAFE must equal lib/core/runtime-state.js#sanitizeSessionId for ASCII
+# ids — tests/hooks/statusline-runtime-state.test.js pins the parity, and pins this
+# block by extracting it from this file between the markers above and below.
+#
+# NO COMMAND SUBSTITUTION BELOW except the one jq call: every `$(...)` is a fork, and the
+# rest of this script already has 56 of them (counted 2026-09-30) plus the processes they
+# start (measured 2026-09-30, Git Bash on Windows: one run took 34 s). So the helpers
+# leave their result in a variable (SESSION_ID_RAW, SESSION_ID_SAFE, STATE_FILE) and use
+# bash's own string operators.
+STATE_ROOT="${HOME:-}/.claude/artibot"
+
+# session_id via jq — the payload's own parser.
+_session_id_via_jq() {
+  printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null
+}
+
+# session_id without jq: the FIRST "session_id":"…" in the payload, by bash's own regex
+# engine. Sets SESSION_ID_RAW ('' when there is none).
+_session_id_via_bash() {
+  local re='"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"'
+  SESSION_ID_RAW=''
+  if [[ "$input" =~ $re ]]; then SESSION_ID_RAW="${BASH_REMATCH[1]}"; fi
+}
+
+# Keep [A-Za-z0-9._-]; everything else becomes '-'; collapse dot runs; strip leading
+# dots/dashes; cap at 120 — the same four steps, in the same order, as the JS one.
+# Sets SESSION_ID_SAFE. C locale, so the ranges mean ASCII whatever the user's locale is
+# (LC_ALL on its own line: the expansion on the next one has to see it).
+_sanitize_session_id() {
+  local LC_ALL=C
+  local s="${1//[^A-Za-z0-9._-]/-}"
+  while [[ "$s" == *..* ]]; do s="${s//../.}"; done
+  while [[ "$s" == [.-]* ]]; do s="${s#?}"; done
+  SESSION_ID_SAFE="${s:0:120}"
+}
+
+SESSION_ID_RAW=''
+if command -v jq >/dev/null 2>&1; then
+  SESSION_ID_RAW=$(_session_id_via_jq || true)
+else
+  _session_id_via_bash
+fi
+_sanitize_session_id "$SESSION_ID_RAW"
+
+# state_file <name> — sets STATE_FILE to the first candidate that exists ('' when none does).
+state_file() {
+  local name="$1" cand
+  STATE_FILE=''
+  for cand in \
+    "${SESSION_ID_SAFE:+$STATE_ROOT/runtime/sessions/$SESSION_ID_SAFE/$name}" \
+    "$STATE_ROOT/runtime/$name" \
+    "$PLUGIN_ROOT/runtime/$name"; do
+    if [ -n "$cand" ] && [ -f "$cand" ]; then
+      STATE_FILE="$cand"
+      return 0
+    fi
+  done
+  return 0
+}
+# <<< artibot-runtime-state <<<
 
 # ─── Artibot version ─────────────────────────────────────────────────────────
 ARTIBOT_VERSION=''
@@ -287,13 +369,14 @@ COG_MODE="${ARTIBOT_COG_MODE:-sys1}"
 
 # ─── Effort level (cognitive depth) ──────────────────────────────────────────
 # Prefer stdin effort.level (official schema); fall back to current-effort.json
-# so the pre-stdin behavior is preserved when the CLI doesn't send it. When an
-# effort value is present, append ·think / ·fast from the stdin flags.
+# (this session's, via state_file) so the pre-stdin behavior is preserved when the
+# CLI doesn't send it. When an effort value is present, append ·think / ·fast from
+# the stdin flags.
 EFFORT_LABEL=''
 EFFORT_VALUE="$EFFORT_STDIN"
 if [ -z "$EFFORT_VALUE" ]; then
-  EFFORT_FILE="$PLUGIN_ROOT/runtime/current-effort.json"
-  if [ -f "$EFFORT_FILE" ]; then
+  state_file current-effort.json; EFFORT_FILE="$STATE_FILE"
+  if [ -n "$EFFORT_FILE" ]; then
     EFFORT_VALUE=$(_json_file_get "$EFFORT_FILE" '.effort' '')
   fi
 fi
@@ -305,8 +388,8 @@ fi
 
 # ─── Active teammates (parallel team mode) ───────────────────────────────────
 TEAM_LABEL=''
-TEAM_FILE="$PLUGIN_ROOT/runtime/current-teammates.json"
-if [ -f "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
+state_file current-teammates.json; TEAM_FILE="$STATE_FILE"
+if [ -n "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
   TEAM_LABEL=$(ARTIBOT_SL_FILE_CONTENT=$(cat "$TEAM_FILE" 2>/dev/null || true) node -e "
     try {
       const o = JSON.parse(process.env.ARTIBOT_SL_FILE_CONTENT || '{}');
@@ -332,8 +415,8 @@ fi
 
 # ─── Long context mode (1M window indicator) ────────────────────────────────
 LONGCTX_LABEL=''
-LONGCTX_FILE="$PLUGIN_ROOT/runtime/long-context-active.json"
-if [ -f "$LONGCTX_FILE" ]; then
+state_file long-context-active.json; LONGCTX_FILE="$STATE_FILE"
+if [ -n "$LONGCTX_FILE" ]; then
   LONGCTX_ENABLED=$(_json_file_get "$LONGCTX_FILE" '.enabled' 'false')
   if [ "$LONGCTX_ENABLED" = "true" ]; then
     LONGCTX_LABEL="🪟 1M"
@@ -342,8 +425,8 @@ fi
 
 # ─── Session token usage (from runtime-prompt.js) ───────────────────────────
 TOKEN_LABEL=''
-TOKEN_FILE="$PLUGIN_ROOT/runtime/token-usage-session.json"
-if [ -f "$TOKEN_FILE" ]; then
+state_file token-usage-session.json; TOKEN_FILE="$STATE_FILE"
+if [ -n "$TOKEN_FILE" ]; then
   RAW_TOKENS=$(_json_file_get "$TOKEN_FILE" '.totalTokens' '0')
   if [ -n "$RAW_TOKENS" ] && [ "$RAW_TOKENS" -gt 0 ] 2>/dev/null; then
     if [ "$RAW_TOKENS" -ge 1000000 ]; then

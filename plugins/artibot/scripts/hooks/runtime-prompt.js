@@ -30,6 +30,11 @@ import {
   writeStdout,
 } from '../utils/index.js';
 import { createErrorHandler, extractUserPromptText } from '../../lib/core/hook-utils.js';
+// O2 — where GLOBAL and SESSION hook state lives. STATIC, like `detectSlashCommand`
+// below: it is a pure path helper (no top-level side effects), and the two writers in
+// this file that fall back to it (`persistEffortMeta`'s catch, `persistTokenUsage`)
+// must not depend on a dynamic import succeeding.
+import { resolveScopedStatePath } from '../../lib/core/runtime-state.js';
 // T-50 #10 — `detectSlashCommand` used to be duplicated here, byte-identical to
 // the L2 copy. That copy's own JSDoc explains the duplication as "an L2 module
 // may not import" the hook layer — true, but the dependency runs the other way:
@@ -72,14 +77,15 @@ async function resolveCommandEffort(commandName, pluginRoot) {
 }
 
 /**
- * Persist the detected command + effort to runtime/ for downstream consumers
+ * Persist the detected command + effort for downstream consumers
  * (statusline, observability, future native effort API wiring).
  *
- * F05: the record now carries identity (`sessionId`, `promptId`) and an
- * `expiresAt`, and is also written per-session to `runtime/effort/<sid>.json`
- * by `lib/runtime/task-budget.js#persistEffortRecord`. That helper always writes
- * the legacy shared file too; the catch below repeats the legacy write directly
- * so an import failure can never lose it.
+ * F05: the record carries identity (`sessionId`, `promptId`) and an `expiresAt`.
+ * O2: it is written by `lib/runtime/task-budget.js#persistEffortRecord` to
+ * `<state dir>/runtime/sessions/<session_id>/current-effort.json` — the state dir is
+ * `~/.claude/artibot`, not the plugin root, which a plugin update replaces — or to the
+ * flat `<state dir>/runtime/current-effort.json` when the payload has no session id.
+ * The catch below repeats that write directly so an import failure can never lose it.
  *
  * @param {{ command: string, effort: string, baseline?: string, shift?: number, reason?: string } | null} meta
  * @param {string} pluginRoot
@@ -97,15 +103,12 @@ async function persistEffortMeta(meta, pluginRoot, hookData = {}) {
     });
     return;
   } catch {
-    // Fall through to the legacy-only write below.
+    // Fall through to the direct write below.
   }
   try {
-    const runtimeDir = path.join(pluginRoot, 'runtime');
-    mkdirSync(runtimeDir, { recursive: true });
-    writeFileSync(
-      path.join(runtimeDir, 'current-effort.json'),
-      JSON.stringify({ ...meta, updatedAt: new Date().toISOString() }) + '\n',
-    );
+    const file = resolveScopedStatePath(hookData?.session_id, 'current-effort.json');
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ ...meta, updatedAt: new Date().toISOString() }) + '\n');
   } catch {
     // Non-critical: effort metadata is advisory
   }
@@ -505,11 +508,17 @@ async function fallbackPreparePrompt(prompt, pluginRoot, hookData) {
 }
 
 /**
- * Persist token usage session stats to a temp file for statusline.sh.
+ * Persist token usage session stats for statusline.sh and the dashboard.
+ *
+ * O2: SESSION-scoped — `<state dir>/runtime/sessions/<session_id>/token-usage-session.json`
+ * (the flat `<state dir>/runtime/` file when the payload has no session id). The
+ * state dir is `~/.claude/artibot`, where the statusline reads; it used to be
+ * `<pluginRoot>/runtime/`, the cache directory of the running version.
+ *
  * @param {object} context - prepared.context from preparePrompt
- * @param {string} pluginRoot
+ * @param {object} [hookData] - Hook payload carrying `session_id`.
  */
-function persistTokenUsage(context, pluginRoot) {
+function persistTokenUsage(context, hookData = {}) {
   const tokenUsage = context?.tokenUsage;
   if (!tokenUsage?.enabled) return;
 
@@ -523,12 +532,9 @@ function persistTokenUsage(context, pluginRoot) {
   };
 
   try {
-    const runtimeDir = path.join(pluginRoot, 'runtime');
-    mkdirSync(runtimeDir, { recursive: true });
-    writeFileSync(
-      path.join(runtimeDir, 'token-usage-session.json'),
-      JSON.stringify(data) + '\n',
-    );
+    const file = resolveScopedStatePath(hookData?.session_id, 'token-usage-session.json');
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(data) + '\n');
   } catch {
     // Non-critical: statusline will just not show tokens
   }
@@ -580,21 +586,22 @@ async function resolveScoredEffort(commandName, signals, pluginRoot) {
 }
 
 /**
- * Resolve the effort metadata for a prompt. Persists the result to
- * runtime/current-effort.json and returns
+ * Resolve the effort metadata for a prompt. Persists the result to the session's
+ * current-effort.json (see `persistEffortMeta`) and returns
  * `{ command, effort, baseline, shift, reason } | null`.
  *
  * Native-signal priority (TODO #30806): when Claude Code exposes a native
  * effort band via a local env var, it OVERRIDES the heuristic-resolved band
- * before the result is persisted to runtime/current-effort.json. Because hooks
+ * before the result is persisted to current-effort.json. Because hooks
  * run in isolated processes, the in-memory router setter does not propagate
  * across hook invocations — so the file write is where cross-process priority
  * must be applied. When no native signal is present the heuristic result is
  * passed through unchanged (regression-zero).
  *
- * F05: the persist also writes a per-session record under `runtime/effort/` and
- * stamps identity + expiry, so a later reader cannot pick up another session's
- * or an older prompt's band (`lib/runtime/task-budget.js#readEffortRecord`).
+ * F05: the persisted record carries identity + expiry, so a later reader cannot
+ * pick up another session's or an older prompt's band
+ * (`lib/runtime/task-budget.js#readEffortRecord`). O2: it lives in the session's
+ * own directory under the state dir, so there is no shared slot to pick up.
  *
  * @param {string} prompt
  * @param {string} pluginRoot
@@ -634,8 +641,8 @@ async function resolveEffortMeta(prompt, pluginRoot, hookData = {}) {
 
 // D9 (2026-09-05): the `runtime-prompt / effort-classified` trail write that
 // used to sit here is gone with the trail freeze (`lib/core/decision-trail.js`
-// header). The resolved effort is still persisted to `runtime/current-effort.
-// json` by `persistEffortMeta`, and the prompt's routing facts reach the
+// header). The resolved effort is still persisted to `current-effort.json`
+// by `persistEffortMeta`, and the prompt's routing facts reach the
 // projectRoot decisions store through `recordObserveOnlyDecisions` below.
 
 /**
@@ -831,15 +838,16 @@ async function recordPromptSignals(prompt, commandName, pluginRoot, runtimeConfi
 
 /**
  * Task Budget auto-wire (P3-2): derive max_tokens per effort and persist
- * runtime/current-task-budget.json + build the [artibot:task-budget …]
+ * current-task-budget.json (session-scoped, O2) + build the [artibot:task-budget …]
  * directive that is injected alongside the effort prefix.
  *
  * @param {{ command: string, effort: string } | null} effortMeta
  * @param {string} pluginRoot
  * @param {object} runtimeConfig
+ * @param {object} [hookData] - Hook payload carrying `session_id`.
  * @returns {Promise<string>}
  */
-async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig) {
+async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig, hookData = {}) {
   if (!effortMeta) return '';
   try {
     const tbPath = path.join(pluginRoot, 'lib', 'runtime', 'task-budget.js');
@@ -855,6 +863,7 @@ async function resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig)
     persistTaskBudget(
       { command: effortMeta.command, effort: effortMeta.effort, budget },
       pluginRoot,
+      { sessionId: hookData?.session_id ?? null },
     );
     return directive;
   } catch {
@@ -1157,18 +1166,20 @@ export async function handleUserPromptSubmit(hookData) {
   const useNativeApi = effortConfig.nativeApi === true;     // default false
 
   // Resolve + persist effort BEFORE preparing the prompt: the runtime pipeline's
-  // tasks middleware reads runtime/current-effort.json to attach effort meta and
+  // tasks middleware reads the session's current-effort.json to attach effort meta and
   // build the workflow plan. If preparePrompt ran first it would read the PRIOR
   // prompt's effort file (stale off-by-one), so the write must precede the read.
   const effortMeta = await resolveEffortMeta(prompt, pluginRoot, hookData);
   await recordPromptSignals(prompt, effortMeta?.command || null, pluginRoot, runtimeConfig, hookData);
 
-  const taskBudgetDirective = await resolveTaskBudgetDirective(effortMeta, pluginRoot, runtimeConfig);
+  const taskBudgetDirective = await resolveTaskBudgetDirective(
+    effortMeta, pluginRoot, runtimeConfig, hookData,
+  );
 
   const prepared = await fallbackPreparePrompt(prompt, pluginRoot, hookData);
   if (!prepared) return null;
 
-  persistTokenUsage(prepared.context, pluginRoot);
+  persistTokenUsage(prepared.context, hookData);
 
   if (useNativeApi && effortMeta) {
     // Prefer a real native signal (stdin effort.level > $CLAUDE_EFFORT) over the

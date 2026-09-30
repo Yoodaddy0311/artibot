@@ -5,12 +5,20 @@
  * v3.3 hierarchical memory system. If the metrics file does not exist yet
  * (cold start), reports zeros rather than failing. Read-only.
  *
+ * The metrics file is GLOBAL (O2): `<state dir>/runtime/memory-metrics.json`
+ * (`~/.claude/artibot`), not `<pluginRoot>/runtime/`, which in a marketplace install
+ * is a version-scoped cache directory. A file the previous version left there is
+ * copied over once (`lib/core/runtime-state.js`) — the tool is otherwise read-only,
+ * and that copy is the only write it can cause. Measured 2026-09-30: no module in
+ * this repo WRITES the file (`grep memory-metrics` finds this reader and two design
+ * notes), so on a real install it is absent and the tool reports zeros; the move only
+ * keeps the reader pointed at the place any future writer should use.
+ *
  * @module lib/mcp/tools/get-memory-stats
  */
 
-import path from 'node:path';
 import { exists, readJsonFile } from '../../core/file.js';
-import { getPluginRoot } from '../../core/platform.js';
+import { resolveGlobalStateFile } from '../../core/runtime-state.js';
 
 const INPUT_SCHEMA = Object.freeze({
   type: 'object',
@@ -26,7 +34,7 @@ function emptyLayer() {
 async function handler(args = {}) {
   const metricsPath = typeof args.metricsPath === 'string' && args.metricsPath.length > 0
     ? args.metricsPath
-    : path.join(getPluginRoot(), 'runtime', 'memory-metrics.json');
+    : resolveGlobalStateFile('runtime/memory-metrics.json');
   const present = await exists(metricsPath);
   let stats;
   if (present) {

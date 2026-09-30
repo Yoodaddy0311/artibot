@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import {
   resolveProfilePath,
   setSkillLevel,
 } from '../../lib/core/user-profile.js';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { getHomeDir, getPluginRoot } from '../../lib/core/platform.js';
 import {
   readDecisionEvents,
@@ -21,6 +22,7 @@ import {
   resetDecisionRecorderStats,
   SKILL_LEVEL_CHANGED,
 } from '../../lib/observability/decision-events.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
 
 // D9 (2026-09-05): a novice->pro promotion no longer touches the decision
 // trail. `recordSignal` reports the transition through its `recordChange` port
@@ -233,14 +235,18 @@ describe('user-profile', () => {
       try { rmSync(explicit); } catch { /* ignore */ }
     });
 
-    it('resolves relative paths against the plugin root (not CWD)', async () => {
-      // Write to a relative path — the module must anchor it to the plugin
-      // root so it resolves to the same file regardless of process.cwd().
+    it('resolves relative paths against the artibot STATE dir (not CWD, not the plugin root)', async () => {
+      // Write to a relative path — the module must anchor it to the state dir
+      // (`~/.claude/artibot`, O2) so it resolves to the same file regardless of
+      // process.cwd() AND of which plugin build is running: a marketplace install's
+      // plugin root is a version-scoped cache directory that an update replaces.
       const relPath = `runtime/__test__/user-profile-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
-      const expected = join(getPluginRoot(), relPath);
+      const expected = join(resolveArtibotDir(), relPath);
       configureProfilePath(relPath);
+      expect(resolveProfilePath()).toBe(expected);
       await recordSignal({ type: 'slash-command', value: 'test' });
       expect(existsSync(expected)).toBe(true);
+      expect(existsSync(join(getPluginRoot(), relPath))).toBe(false);
       try { rmSync(expected); } catch { /* ignore */ }
     });
 
@@ -296,10 +302,36 @@ describe('user-profile', () => {
       expect(resolveProfilePath()).toBe(resolve('sandbox-profile.json'));
     });
 
-    it('falls back to the default home path when unset and unconfigured', () => {
+    it('falls back to <state dir>/runtime/user-profile.json when unset and unconfigured', () => {
       _resetPathCache();
+      // The SAME file the shipped config value `ux.profilePath: runtime/user-profile.json`
+      // resolves to, so a reader that never configured a path (self-benchmark) sees what the
+      // hook wrote. It used to be ~/.claude/artibot/user-profile.json, a different file
+      // from the one the hook wrote.
       expect(resolveProfilePath())
-        .toBe(join(getHomeDir(), '.claude', 'artibot', 'user-profile.json'));
+        .toBe(join(resolveArtibotDir(), 'runtime', 'user-profile.json'));
+      configureProfilePath('runtime/user-profile.json');
+      expect(resolveProfilePath())
+        .toBe(join(resolveArtibotDir(), 'runtime', 'user-profile.json'));
+    });
+
+    it('with a real home and no override the default is under <home>/.claude/artibot/runtime', () => {
+      _resetPathCache();
+      const saved = {
+        ARTIBOT_STATE_DIR: process.env.ARTIBOT_STATE_DIR,
+        ARTIBOT_STATE_DIR_HOME: process.env.ARTIBOT_STATE_DIR_HOME,
+      };
+      try {
+        delete process.env.ARTIBOT_STATE_DIR;
+        delete process.env.ARTIBOT_STATE_DIR_HOME;
+        expect(resolveProfilePath())
+          .toBe(join(getHomeDir(), '.claude', 'artibot', 'runtime', 'user-profile.json'));
+      } finally {
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
     });
 
     it('treats an empty string as unset', () => {
@@ -328,7 +360,6 @@ describe('user-profile', () => {
     });
 
     it('cleans up stale tmp files from prior interrupted writes', async () => {
-      const { writeFileSync } = await import('node:fs');
       const stale = `${profilePath}.tmp.999999`;
       writeFileSync(stale, '{"partial":true}');
       expect(existsSync(stale)).toBe(true);
@@ -352,10 +383,150 @@ describe('user-profile', () => {
 
   describe('corruption resilience', () => {
     it('returns default profile when file contains invalid JSON', async () => {
-      const { writeFileSync } = await import('node:fs');
       writeFileSync(profilePath, '{not json');
       const p = await getProfile();
       expect(p.skillLevel).toBe('novice');
     });
+  });
+});
+
+// O2 — the profile is GLOBAL and lives under the artibot state dir, and a profile the
+// previous plugin build left at an old place is carried over once.
+//
+// Measured 2026-09-30: three cache version dirs each held their own `user-profile.json`
+// (8,959 / 1,054 / 2,550 bytes, growing with every prompt) because `ux.profilePath` is
+// plugin-root-relative, while `~/.claude/artibot/user-profile.json` — the documented
+// default — was a different, stale file (651 bytes, last written 2026-07-31).
+describe('user-profile — location and migration (O2)', () => {
+  const REL = 'runtime/user-profile.json';
+  let base;
+  let stateDir;
+  let restoreState;
+  let savedPluginRoot;
+  let savedProfileEnv;
+
+  /** A profile with `n` slash-command signals — `insufficient signals (n/10)` when read. */
+  const profileWith = (n) => JSON.stringify({
+    skillLevel: 'novice',
+    source: 'initial',
+    signals: Array.from({ length: n }, (_, i) => ({ type: 'slash-command', value: `plan ${i}`, timestamp: i })),
+    evidence: [],
+    updatedAt: new Date(0).toISOString(),
+  });
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'artibot-profile-o2-'));
+    stateDir = join(base, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    restoreState = pointStateDirAt(stateDir);
+    savedPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    savedProfileEnv = process.env.ARTIBOT_USER_PROFILE_PATH;
+    delete process.env.ARTIBOT_USER_PROFILE_PATH;
+    _resetPathCache();
+  });
+
+  afterEach(() => {
+    _resetPathCache();
+    restoreState();
+    if (savedPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = savedPluginRoot;
+    if (savedProfileEnv === undefined) delete process.env.ARTIBOT_USER_PROFILE_PATH;
+    else process.env.ARTIBOT_USER_PROFILE_PATH = savedProfileEnv;
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  function seed(file, content) {
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, content);
+    return file;
+  }
+
+  it('the hook\'s config value and the no-config default are one file (a reader sees what the hook wrote)', async () => {
+    configureProfilePath(REL); // what runtime-prompt.js does from config.ux.profilePath
+    await recordSignal({ type: 'slash-command', value: 'plan' });
+    const written = resolveProfilePath();
+    expect(written).toBe(join(stateDir, 'runtime', 'user-profile.json'));
+    expect(existsSync(written)).toBe(true);
+
+    _resetPathCache(); // a reader process that never configured a path
+    expect(resolveProfilePath()).toBe(written);
+  });
+
+  it('carries over a profile the previous version left in a SIBLING version directory', async () => {
+    const cache = join(base, 'cache', 'artibot', 'artibot');
+    const running = join(cache, '4.71.0');
+    mkdirSync(running, { recursive: true });
+    process.env.CLAUDE_PLUGIN_ROOT = running;
+    seed(join(cache, '4.70.0', REL), profileWith(8));
+
+    configureProfilePath(REL);
+    const p = await getProfile();
+
+    expect(p.evidence.join(' ')).toMatch(/\(8\/10\)/);
+    expect(existsSync(join(stateDir, 'runtime', 'user-profile.json'))).toBe(true);
+  });
+
+  it('carries over the profile in the running plugin root\'s own runtime/', async () => {
+    const pluginRoot = join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    seed(join(pluginRoot, REL), profileWith(5));
+
+    const p = await getProfile(); // no configureProfilePath: the default path migrates too
+
+    expect(p.evidence.join(' ')).toMatch(/\(5\/10\)/);
+  });
+
+  it('carries over the OLD DEFAULT, <state dir>/user-profile.json, after the plugin-root copies', async () => {
+    const pluginRoot = join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    seed(join(stateDir, 'user-profile.json'), profileWith(3));
+
+    const p = await getProfile();
+
+    expect(p.evidence.join(' ')).toMatch(/\(3\/10\)/);
+    expect(existsSync(join(stateDir, 'runtime', 'user-profile.json'))).toBe(true);
+  });
+
+  it('never overwrites a profile that is already at the new location', async () => {
+    const pluginRoot = join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    seed(join(pluginRoot, REL), profileWith(8));
+    seed(join(stateDir, 'runtime', 'user-profile.json'), profileWith(2));
+
+    const p = await getProfile();
+
+    expect(p.evidence.join(' ')).toMatch(/\(2\/10\)/);
+    expect(JSON.parse(readFileSync(join(stateDir, 'runtime', 'user-profile.json'), 'utf8')).signals).toHaveLength(2);
+  });
+
+  it('an absolute configured path is the operator\'s choice: no migration into it', async () => {
+    const pluginRoot = join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    seed(join(pluginRoot, REL), profileWith(8));
+    const explicit = join(base, 'mine', 'profile.json');
+
+    configureProfilePath(explicit);
+    const p = await getProfile();
+
+    expect(p.evidence.join(' ')).toMatch(/\(0\/10\)/);
+    expect(existsSync(explicit)).toBe(false);
+  });
+
+  it('an ARTIBOT_USER_PROFILE_PATH override is never migrated into either', async () => {
+    const pluginRoot = join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    seed(join(pluginRoot, REL), profileWith(8));
+    const sandboxed = join(base, 'sandbox', 'profile.json');
+    process.env.ARTIBOT_USER_PROFILE_PATH = sandboxed;
+
+    const p = await getProfile();
+
+    expect(p.evidence.join(' ')).toMatch(/\(0\/10\)/);
+    expect(existsSync(sandboxed)).toBe(false);
   });
 });

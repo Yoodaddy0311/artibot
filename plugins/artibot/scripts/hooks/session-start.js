@@ -11,6 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate, resolveUpdateCheckPolicy } from '../../lib/core/version-checker.js';
 import { createErrorHandler, getStatePath } from '../../lib/core/hook-utils.js';
+import { migrateLegacyFile, resolveGlobalStatePath, resolveScopedStatePath, sweepSessionDirs } from '../../lib/core/runtime-state.js';
 import { getLastTestStatus } from '../../lib/core/test-status.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import {
@@ -53,12 +54,22 @@ function loadConfig() {
  * P3-3: 1M context opt-in. When `runtime.longContext.enabled` is true in
  * artibot.config.json, append the beta header to ANTHROPIC_BETA (advisory,
  * child-process only — Claude Code picks it up when spawned from this env)
- * and persist runtime/long-context-active.json so statusline/observability
+ * and persist long-context-active.json so statusline/observability
  * surfaces the activated state.
+ *
+ * O2: SESSION-scoped — `<state dir>/runtime/sessions/<session_id>/long-context-active.json`
+ * (the flat `<state dir>/runtime/` file when the payload has no session id), where
+ * statusline.sh reads it; it used to go to `<pluginRoot>/runtime/`, the cache
+ * directory of the running version. Nothing is written when the option is off, so a
+ * session that starts with it off shows no marker.
+ *
+ * Exported (with `sweepIdleSessionState` and `maybeEmitFirstRunBanner` below) so
+ * `tests/hooks/session-start-state.test.js` can drive the O2 state handling on real
+ * files — `session-start.test.js` mocks `node:fs` wholesale and can only see the calls.
  * @param {object} config
- * @param {string} pluginRoot
+ * @param {string|null} sessionId - the SessionStart payload's `session_id`
  */
-function activateLongContext(config, pluginRoot) {
+export function activateLongContext(config, sessionId) {
   try {
     const longContext = config?.runtime?.longContext;
     if (!longContext || longContext.enabled !== true) return;
@@ -69,10 +80,10 @@ function activateLongContext(config, pluginRoot) {
       ? Array.from(new Set(existing.split(',').map((s) => s.trim()).filter(Boolean).concat(betaHeader))).join(',')
       : betaHeader;
 
-    const runtimeDir = path.join(pluginRoot, 'runtime');
-    mkdirSync(runtimeDir, { recursive: true });
+    const markerPath = resolveScopedStatePath(sessionId, 'long-context-active.json');
+    mkdirSync(path.dirname(markerPath), { recursive: true });
     writeFileSync(
-      path.join(runtimeDir, 'long-context-active.json'),
+      markerPath,
       JSON.stringify({
         enabled: true,
         betaHeader,
@@ -82,6 +93,33 @@ function activateLongContext(config, pluginRoot) {
   } catch {
     // Non-critical: long-context activation is advisory
   }
+}
+
+/**
+ * O2: drop idle `runtime/sessions/<id>/` directories (age cutoff + count cap, see
+ * `lib/core/runtime-state.js#sweepSessionDirs`) so per-session state cannot grow
+ * without bound. Runs on every SessionStart — the one place a session directory is
+ * guaranteed to be revisited — and never touches the session that is starting.
+ * (`session-start-sweep.mjs` would be the natural home, but it is not registered in
+ * `hooks/dispatch-table.json`; a cleanup in an unregistered hook is a cleanup that
+ * never runs.) Best-effort, never blocks start.
+ * @param {string|null} sessionId - the session that is starting; never swept
+ */
+export function sweepIdleSessionState(sessionId) {
+  try {
+    sweepSessionDirs({ protect: sessionId === null ? [] : [sessionId] });
+  } catch {
+    // Non-critical: cleanup is advisory
+  }
+}
+
+/**
+ * @param {unknown} payload - parsed SessionStart stdin
+ * @returns {string|null} its `session_id` when it is a non-empty string
+ */
+function payloadSessionId(payload) {
+  const id = payload?.session_id;
+  return typeof id === 'string' && id.trim() !== '' ? id : null;
 }
 
 /**
@@ -265,7 +303,7 @@ async function surfaceAdvisoryMessages(pluginRoot, config, lines) {
  * @param {object} config
  * @param {string[]} lines
  */
-async function maybeEmitFirstRunBanner(pluginRoot, config, lines) {
+export async function maybeEmitFirstRunBanner(pluginRoot, config, lines) {
   try {
     const masterEnabled = config?.ago?.selfControl?.masterEnabled !== false;
     if (!masterEnabled) return;
@@ -275,14 +313,18 @@ async function maybeEmitFirstRunBanner(pluginRoot, config, lines) {
     const firstRunState = await getFirstRunState(config);
     const threshold = config?.ago?.selfControl?.firstRunMode?.observeRuns || 5;
 
-    const runtimeDir = path.join(pluginRoot, 'runtime');
-    const welcomeMarker = path.join(runtimeDir, 'self-control-welcomed.marker');
+    // O2: GLOBAL, one per user — `<state dir>/runtime/self-control-welcomed.marker`. It
+    // used to live in `<pluginRoot>/runtime/`, a version-scoped cache directory, so every
+    // plugin update re-showed this banner (measured 2026-09-30: the marker existed in 4 of
+    // 4 cache version dirs). A marker the previous version left is carried over once.
+    const welcomeMarker = resolveGlobalStatePath('runtime/self-control-welcomed.marker');
+    migrateLegacyFile(welcomeMarker, 'runtime/self-control-welcomed.marker', { pluginRoot });
     if (!existsSync(welcomeMarker)) {
       lines.push(
         '[artibot:welcome] Artibot은 기본 ON 모드로 시작됐어요. 처음 5회는 관찰만 하며 학습합니다. 끄려면 artibot.config.json의 ago.selfControl.masterEnabled=false.',
       );
       try {
-        mkdirSync(runtimeDir, { recursive: true });
+        mkdirSync(path.dirname(welcomeMarker), { recursive: true });
         writeFileSync(welcomeMarker, new Date().toISOString() + '\n', 'utf-8');
       } catch {
         // ignore marker write failure
@@ -667,7 +709,7 @@ const SESSION_START_MS = Date.now();
 
 export async function main() {
   const raw = await readStdin();
-  parseJSON(raw);
+  const sessionId = payloadSessionId(parseJSON(raw));
 
   if (!process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS) {
     process.env.CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS = '180000';
@@ -675,7 +717,8 @@ export async function main() {
 
   const env = detectEnvironment();
   const config = loadConfig();
-  activateLongContext(config, env.pluginRoot);
+  activateLongContext(config, sessionId);
+  sweepIdleSessionState(sessionId);
 
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const previousState = loadPreviousState();

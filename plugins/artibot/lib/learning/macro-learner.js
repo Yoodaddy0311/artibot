@@ -37,6 +37,7 @@
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { redactString as sharedRedactString, TAGGED_PATTERNS } from '../core/redaction.js';
+import { resolveGlobalStateFile } from '../core/runtime-state.js';
 
 // --- action keyword catalogue -----------------------------------------------
 
@@ -107,10 +108,23 @@ function fingerprint(actions) {
 
 // --- storage ---------------------------------------------------------------
 
+/**
+ * Where the suggestion store lives. GLOBAL (O2): one store per user, under the artibot
+ * state dir (`<state dir>/runtime/macro-suggestions.json`, `~/.claude/artibot`) rather
+ * than `<pluginRoot>/runtime/` — in a marketplace install that is a version-scoped cache
+ * directory, so pending suggestions and their occurrence counts were dropped on every
+ * plugin update. `pluginRoot` names only where a LEGACY store may be; a store the
+ * previous version left there (or in a sibling version directory) is copied over once.
+ * An absolute `suggestionsPath` is used as given.
+ *
+ * @param {string} pluginRoot
+ * @param {object} [config]
+ * @returns {string}
+ */
 function resolveSuggestionsPath(pluginRoot, config) {
   const relative = config?.ago?.macroLearning?.suggestionsPath
     || 'runtime/macro-suggestions.json';
-  return path.join(pluginRoot, relative);
+  return resolveGlobalStateFile(relative, { pluginRoot });
 }
 
 function safeReadJson(filePath, fallback) {

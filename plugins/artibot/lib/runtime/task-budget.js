@@ -10,11 +10,14 @@
  */
 
 import path from 'node:path';
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { readJsonFileSync } from '../core/file.js';
 import { getTokenizerCoeff } from '../core/model-catalog.js';
+import {
+  resolveScopedStatePath, resolveSessionReadChain, resolveSessionStatePath,
+} from '../core/runtime-state.js';
 import { isMainEntry } from '../../scripts/hooks/_main-entry.js';
 
 const DEFAULT_BUDGET_MAP = Object.freeze({
@@ -146,23 +149,35 @@ export function buildTaskBudgetDirective(effortLevel, budget, config = {}) {
   return `[artibot:task-budget ${segments.join(' ')}]`;
 }
 
+/** SESSION-scoped file names (see `lib/core/runtime-state.js`). */
+const EFFORT_FILE = 'current-effort.json';
+const TASK_BUDGET_FILE = 'current-task-budget.json';
+
 /**
  * Persist the current task budget context for downstream consumers
  * (statusline, team orchestrator, observability).
  *
+ * O2: written to `<state dir>/runtime/sessions/<session_id>/current-task-budget.json`
+ * — one per session, so two sessions no longer overwrite one slot — or, when the
+ * caller has no session id, to the flat `<state dir>/runtime/current-task-budget.json`.
+ * The state dir is `resolveArtibotDir()` (`~/.claude/artibot`), NOT `pluginRoot`, which
+ * in a marketplace install is a version-scoped cache directory that is replaced on
+ * update. `pluginRoot` is still required (a caller with no plugin root gets null, as
+ * before) but no longer decides where the file lands.
+ *
  * @param {{ command?: string|null, effort?: string|null, budget?: number|null }} meta
  * @param {string} pluginRoot
+ * @param {{ sessionId?: string|null }} [opts]
  * @returns {string|null} Absolute path to the written file, or null on failure.
  */
-export function persistTaskBudget(meta, pluginRoot) {
+export function persistTaskBudget(meta, pluginRoot, opts = {}) {
   if (!meta || typeof pluginRoot !== 'string' || !pluginRoot) return null;
   const { command = null, effort = null, budget = null } = meta;
   if (!effort || typeof budget !== 'number' || budget <= 0) return null;
 
   try {
-    const runtimeDir = path.join(pluginRoot, 'runtime');
-    mkdirSync(runtimeDir, { recursive: true });
-    const filePath = path.join(runtimeDir, 'current-task-budget.json');
+    const filePath = resolveScopedStatePath(opts?.sessionId, TASK_BUDGET_FILE);
+    mkdirSync(path.dirname(filePath), { recursive: true });
     const payload = {
       command,
       effort,
@@ -177,49 +192,36 @@ export function persistTaskBudget(meta, pluginRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Effort records (F05) — identity + expiry on the effort hand-off
+// Effort records (F05, relocated by O2) — identity + expiry on the effort hand-off
 //
-// `runtime/current-effort.json` is a SINGLE file shared by every session under
-// one plugin root. Two concurrent sessions overwrite each other's record, and a
-// record left by an earlier prompt is indistinguishable from the current one —
-// so the reader could hand a stale or foreign command/budget to a task.
+// F05 found `current-effort.json` was ONE file shared by every session under one
+// plugin root: two concurrent sessions overwrote each other's record, and a record
+// left by an earlier prompt was indistinguishable from the current one — so the
+// reader could hand a stale or foreign command/budget to a task. It added identity
+// (`sessionId`, `promptId`) and an expiry (`expiresAt`) to the record and gated the
+// read on both.
 //
-// The fix adds identity (`sessionId`, `promptId`) and an expiry (`expiresAt`) to
-// the record, plus a per-session file at `runtime/effort/<sid>.json`. The legacy
-// file is STILL written on every persist with the same payload, because two
-// consumers read it by literal path for display: `lib/tui/dashboard.js` and
-// `scripts/hooks/statusline.sh`. `commands/team.md` does NOT read it as a
-// decision input — it uses {@link readEffortSnapshot} via the CLI below; the
-// path survives there only as prose about that display copy, pinned by
+// O2 removed the shared slot itself. The record now lives at
+// `<state dir>/runtime/sessions/<session_id>/current-effort.json`
+// (`lib/core/runtime-state.js`), one per session, in a directory that survives
+// plugin updates — the F05 gate stays, because a session can still find a record
+// that has expired or names another prompt. The flat
+// `<state dir>/runtime/current-effort.json` is written only when the payload has no
+// session id, and is otherwise a READ fallback (as is `<pluginRoot>/runtime/`, where
+// hooks before O2 wrote): the display consumers `lib/tui/dashboard.js` and
+// `scripts/hooks/statusline.sh` read session-first and still name the file, which
+// `tests/firewall/effort-record-expiry.test.js` pins. `commands/team.md` does NOT
+// read it as a decision input — it uses {@link readEffortSnapshot} via the CLI
+// below; the path survives there only as prose about that display copy, pinned by
 // `tests/firewall/constitution-stage-a-commands.test.js`.
+//
+// The per-session `runtime/effort/<sid>.json` directory and its GC are gone: a
+// session directory holds at most five small files and is swept by age
+// (`runtime-state.js#sweepSessionDirs`).
 // ---------------------------------------------------------------------------
 
 /** How long an effort record stays honourable after it is written. */
 export const EFFORT_RECORD_TTL_MS = 10 * 60 * 1000;
-
-/** How many per-session records survive a GC pass (newest by mtime). */
-export const EFFORT_RECORD_KEEP = 32;
-
-/** Directory under `runtime/` holding the per-session records. */
-export const EFFORT_RECORDS_DIRNAME = 'effort';
-
-/**
- * Reduce a session id to characters that cannot leave the records directory.
- *
- * The rule is COPIED from `lib/observability/decision-events.js#sanitizeRunId`
- * rather than imported: L5 runtime must not depend on the observability module
- * for a four-line string function, and the charset is the contract here.
- *
- * @param {string} raw
- * @returns {string}
- */
-function sanitizeEffortRecordId(raw) {
-  return String(raw)
-    .replace(/[^A-Za-z0-9._-]/g, '-')
-    .replace(/\.{2,}/g, '.')
-    .replace(/^[.-]+/, '')
-    .slice(0, 120);
-}
 
 /**
  * @param {number|Date|undefined|null} now
@@ -262,8 +264,12 @@ export function buildEffortRecord(meta, opts = {}) {
 }
 
 /**
- * Persist the effort record to BOTH the legacy shared file and (when a session
- * id is known) the per-session file. Never throws.
+ * Persist the effort record — to the session's own file when the session is
+ * identifiable, to the flat file otherwise. Never throws.
+ *
+ * `pluginRoot` is required (a caller with none gets the empty result, as before) but
+ * does not decide where the record lands: that is the STATE dir
+ * (`runtime-state.js#resolveScopedStatePath`), which survives plugin updates.
  *
  * `meta === null` writes nothing and does NOT delete a stale file — that is
  * today's behaviour in `scripts/hooks/runtime-prompt.js#persistEffortMeta` and
@@ -272,39 +278,26 @@ export function buildEffortRecord(meta, opts = {}) {
  *
  * @param {object|null} meta
  * @param {string} pluginRoot
- * @param {{ sessionId?: string|null, promptId?: string|null, now?: number|Date, ttlMs?: number, keep?: number }} [opts]
- * @returns {{ legacyPath: string|null, sessionPath: string|null }}
+ * @param {{ sessionId?: string|null, promptId?: string|null, now?: number|Date, ttlMs?: number }} [opts]
+ * @returns {{ legacyPath: string|null, sessionPath: string|null }} `sessionPath`: the
+ *   per-session file written; `legacyPath`: the flat file written, which is only
+ *   written when there is no usable session id (hence never both).
  */
 export function persistEffortRecord(meta, pluginRoot, opts = {}) {
   const result = { legacyPath: null, sessionPath: null };
   if (!meta || typeof pluginRoot !== 'string' || !pluginRoot) return result;
 
   const record = buildEffortRecord(meta, opts);
-  const line = JSON.stringify(record) + '\n';
-  const runtimeDir = path.join(pluginRoot, 'runtime');
-
+  const sessionPath = resolveSessionStatePath(record.sessionId, EFFORT_FILE);
+  const target = sessionPath ?? resolveScopedStatePath(null, EFFORT_FILE);
   try {
-    mkdirSync(runtimeDir, { recursive: true });
-    const legacyPath = path.join(runtimeDir, 'current-effort.json');
-    writeFileSync(legacyPath, line);
-    result.legacyPath = legacyPath;
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, JSON.stringify(record) + '\n');
+    if (sessionPath) result.sessionPath = target;
+    else result.legacyPath = target;
   } catch {
     // Non-critical: effort metadata is advisory.
   }
-
-  const sid = record.sessionId ? sanitizeEffortRecordId(record.sessionId) : '';
-  if (!sid) return result;
-
-  const recordsDir = path.join(runtimeDir, EFFORT_RECORDS_DIRNAME);
-  try {
-    mkdirSync(recordsDir, { recursive: true });
-    const sessionPath = path.join(recordsDir, `${sid}.json`);
-    writeFileSync(sessionPath, line);
-    result.sessionPath = sessionPath;
-  } catch {
-    // Non-critical: the legacy file above is still the hand-off of record.
-  }
-  gcEffortRecords(recordsDir, { now: opts.now, keep: opts.keep });
   return result;
 }
 
@@ -364,15 +357,32 @@ function acceptsRecord(record, nowMs, sessionId, promptId) {
 }
 
 /**
+ * @param {string[]} paths - candidate record files, best first.
+ * @returns {object|null} the first one that parses to a record.
+ */
+function readFirstRecord(paths) {
+  for (const filePath of paths) {
+    const record = readRecordFile(filePath);
+    if (record) return record;
+  }
+  return null;
+}
+
+/**
  * Read the effort record for this reader's identity. The GATE: a record is
  * refused when it has expired, when it names a different session, or when it
  * names a different prompt.
  *
- * Lookup order: the per-session file first (when a session id is known), then
- * the legacy shared file. A REFUSED session file does not fall through to a
- * legacy file that names a different session — that fall-through is the
- * cross-session overwrite this gate exists to stop. It falls through only to a
- * legacy file with no identity at all, which is how pre-F05 writers left it.
+ * Lookup order: the session's own file first (when a session id is known), then
+ * the FLAT files — the state dir's, then `<pluginRoot>/runtime/`, where hooks wrote
+ * before O2 (the same file on the install.sh layout). A REFUSED session file does
+ * not fall through to a flat record that names a different session — that
+ * fall-through is the cross-session overwrite this gate exists to stop. It falls
+ * through only to a flat record with no identity at all, which is how pre-F05
+ * writers left it.
+ *
+ * `pluginRoot` names only the LEGACY location; the session and state-dir paths come
+ * from `runtime-state.js` and do not depend on it.
  *
  * @param {string} pluginRoot
  * @param {{ sessionId?: string|null, promptId?: string|null, now?: number|Date }} [opts]
@@ -383,22 +393,23 @@ export function readEffortRecord(pluginRoot, opts = {}) {
   const nowMs = toEpochMs(opts.now);
   const sessionId = trimmedOrNull(opts.sessionId);
   const promptId = trimmedOrNull(opts.promptId);
-  const runtimeDir = path.join(pluginRoot, 'runtime');
-  const legacyPath = path.join(runtimeDir, 'current-effort.json');
 
-  const sid = sessionId ? sanitizeEffortRecordId(sessionId) : '';
-  if (sid) {
-    const sessionRecord = readRecordFile(path.join(runtimeDir, EFFORT_RECORDS_DIRNAME, `${sid}.json`));
+  const chain = resolveSessionReadChain(sessionId, EFFORT_FILE, { pluginRoot });
+  const sessionPath = resolveSessionStatePath(sessionId, EFFORT_FILE);
+  const flatPaths = sessionPath ? chain.slice(1) : chain;
+
+  if (sessionPath) {
+    const sessionRecord = readRecordFile(sessionPath);
     if (sessionRecord) {
       if (acceptsRecord(sessionRecord, nowMs, sessionId, promptId)) return sessionRecord;
-      const legacy = readRecordFile(legacyPath);
-      return legacy && hasNoIdentity(legacy) && !isExpiredRecord(legacy, nowMs) ? legacy : null;
+      const flat = readFirstRecord(flatPaths);
+      return flat && hasNoIdentity(flat) && !isExpiredRecord(flat, nowMs) ? flat : null;
     }
   }
 
-  const legacy = readRecordFile(legacyPath);
-  if (!legacy) return null;
-  return acceptsRecord(legacy, nowMs, sessionId, promptId) ? legacy : null;
+  const flat = readFirstRecord(flatPaths);
+  if (!flat) return null;
+  return acceptsRecord(flat, nowMs, sessionId, promptId) ? flat : null;
 }
 
 /**
@@ -406,13 +417,15 @@ export function readEffortRecord(pluginRoot, opts = {}) {
  * accepted for this reader, plus the budget RECOMPUTED from that record's
  * effort with {@link getTaskBudgetForEffort}.
  *
- * R2b: the budget is deliberately NOT read from `runtime/current-task-budget.json`.
- * That file is a single slot every session under this plugin root overwrites and
- * carries no identity, so pairing it with a gated effort handed session A its
- * own `max` with session B's `low` budget. Recomputing from the accepted effort
- * makes the two halves share one identity gate by construction. The file is
- * still WRITTEN (`persistTaskBudget`) for the dashboard and statusline, which
- * display it; it is no longer a decision input.
+ * R2b: the budget is deliberately NOT read from `current-task-budget.json`.
+ * Before O2 that file was a single slot every session under a plugin root
+ * overwrote, with no identity, so pairing it with a gated effort handed session A
+ * its own `max` with session B's `low` budget. It is per-session now, but it is
+ * still a slot without identity or expiry (and the flat fallback is still shared),
+ * so recomputing from the accepted effort remains what makes the two halves share
+ * one identity gate by construction. The file is still WRITTEN
+ * (`persistTaskBudget`) for the dashboard and statusline, which display it; it is
+ * not a decision input.
  *
  * `config` must be the config the writer used, so the recomputed number equals
  * the one `scripts/hooks/runtime-prompt.js` injected into the prompt. Overlay and
@@ -435,76 +448,6 @@ export function readEffortSnapshot(pluginRoot, opts = {}, config = {}) {
     reason: record.reason || null,
     taskBudget: getTaskBudgetForEffort(effort, config),
   };
-}
-
-/**
- * @param {string} filePath
- * @returns {boolean} true when the file is gone after the call.
- */
-function removeRecordFile(filePath) {
-  try {
-    rmSync(filePath, { force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Collect the per-session records, deleting the expired ones as it goes.
- *
- * @param {string} dir
- * @param {number} nowMs
- * @returns {{ survivors: Array<{ filePath: string, mtimeMs: number }>, removed: number }}
- */
-function sweepExpiredRecords(dir, nowMs) {
-  let names;
-  try {
-    names = readdirSync(dir).filter((name) => name.endsWith('.json'));
-  } catch {
-    return { survivors: [], removed: 0 };
-  }
-  const survivors = [];
-  let removed = 0;
-  for (const name of names) {
-    const filePath = path.join(dir, name);
-    let mtimeMs;
-    try {
-      mtimeMs = statSync(filePath).mtimeMs;
-    } catch {
-      continue;
-    }
-    const record = readRecordFile(filePath);
-    if (record && isExpiredRecord(record, nowMs)) {
-      if (removeRecordFile(filePath)) removed += 1;
-      continue;
-    }
-    survivors.push({ filePath, mtimeMs });
-  }
-  return { survivors, removed };
-}
-
-/**
- * Garbage-collect the per-session records directory: expired first, then the
- * oldest by mtime beyond `keep`. Never throws; a missing directory is a no-op.
- *
- * @param {string} dir
- * @param {{ now?: number|Date, keep?: number }} [opts]
- * @returns {{ removed: number, kept: number }}
- */
-export function gcEffortRecords(dir, opts = {}) {
-  if (typeof dir !== 'string' || !dir) return { removed: 0, kept: 0 };
-  const nowMs = toEpochMs(opts.now);
-  const keep = Number.isInteger(opts.keep) && opts.keep >= 0 ? opts.keep : EFFORT_RECORD_KEEP;
-
-  const { survivors, removed } = sweepExpiredRecords(dir, nowMs);
-  survivors.sort((a, b) => b.mtimeMs - a.mtimeMs);
-
-  let overflowRemoved = 0;
-  for (const entry of survivors.slice(keep)) {
-    if (removeRecordFile(entry.filePath)) overflowRemoved += 1;
-  }
-  return { removed: removed + overflowRemoved, kept: survivors.length - overflowRemoved };
 }
 
 // ---------------------------------------------------------------------------

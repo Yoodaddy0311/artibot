@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join as joinPath } from 'node:path';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 
 /**
  * Regression tests for scripts/hooks/workflow-status.js.
@@ -193,6 +195,94 @@ describe('workflow-status', () => {
     const a1 = teamWrite.data.teammates.find((t) => t.name === 'a1');
     expect(a1.tasksTotal).toBe(2);
     expect(a1.tasksCompleted).toBe(1);
+  });
+
+  // O2 — the roster is SESSION-scoped. The agent map in the shared workflow state holds
+  // EVERY session's teammates, so each teammate is stamped with the session that owns it
+  // and the roster written for a session keeps only its own.
+  describe('session-scoped roster (O2)', () => {
+    const teamWrites = () => mockState.writes.filter((w) => /current-teammates\.json$/.test(w.path));
+    const inSessions = (p, sid) => p.endsWith(joinPath('runtime', 'sessions', sid, 'current-teammates.json'));
+
+    it('writes to the session\'s own file under the STATE dir, not the plugin root', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setStdin({ agent_id: 'a1', session_id: 'sess-A', current_task: 'plan' });
+
+      await runHookFresh();
+
+      const [write] = teamWrites();
+      expect(write).toBeDefined();
+      expect(inSessions(write.path, 'sess-A')).toBe(true);
+      expect(write.path.startsWith(resolveArtibotDir())).toBe(true);
+    });
+
+    it('stamps the session id on the teammate record it saves', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setStdin({ agent_id: 'a1', session_id: 'sess-A', current_task: 'plan' });
+
+      await runHookFresh();
+
+      expect(mockState.writes.find((w) => w.path === '/state/workflow-status.json').data.agents.a1.sessionId)
+        .toBe('sess-A');
+    });
+
+    it('keeps an id it already has when a later payload carries none', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: { a1: { role: 'planner', active: true, sessionId: 'sess-A' } }, tasks: [] });
+      setStdin({ agent_id: 'a1', current_task: 'plan' });
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.agents.a1.sessionId).toBe('sess-A');
+    });
+
+    it('the roster for a session keeps only that session\'s teammates', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      const fresh = new Date().toISOString();
+      setExistingState({
+        agents: {
+          a1: { role: 'planner', active: true, currentTask: 'plan', sessionId: 'sess-A', updatedAt: fresh },
+          b1: { role: 'builder', active: true, currentTask: 'build', sessionId: 'sess-B', updatedAt: fresh },
+          old: { role: 'tester', active: true, currentTask: 'test', updatedAt: fresh }, // pre-O2 residue: no owner
+        },
+        tasks: [],
+      });
+      setStdin({ agent_id: 'a1', session_id: 'sess-A', current_task: 'plan' });
+
+      await runHookFresh();
+
+      const [write] = teamWrites();
+      expect(write.data.teammates.map((t) => t.name)).toEqual(['a1']);
+    });
+
+    it('a payload with no session id writes the flat file in the state dir, unfiltered', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      const fresh = new Date().toISOString();
+      setExistingState({
+        agents: {
+          a1: { role: 'planner', active: true, currentTask: 'plan', sessionId: 'sess-A', updatedAt: fresh },
+          b1: { role: 'builder', active: true, currentTask: 'build', sessionId: 'sess-B', updatedAt: fresh },
+        },
+        tasks: [],
+      });
+      setStdin({ agent_id: 'a1', current_task: 'plan' });
+
+      await runHookFresh();
+
+      const [write] = teamWrites();
+      expect(write.path).toBe(joinPath(resolveArtibotDir(), 'runtime', 'current-teammates.json'));
+      expect(write.data.teammates.map((t) => t.name).sort()).toEqual(['a1', 'b1']);
+    });
+
+    it('a session id that is not a string is treated as no session', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setStdin({ agent_id: 'a1', session_id: { evil: true }, current_task: 'plan' });
+
+      await runHookFresh();
+
+      const [write] = teamWrites();
+      expect(write.path).toBe(joinPath(resolveArtibotDir(), 'runtime', 'current-teammates.json'));
+    });
   });
 
   it('routes through all 4 hook event types without throwing', async () => {
