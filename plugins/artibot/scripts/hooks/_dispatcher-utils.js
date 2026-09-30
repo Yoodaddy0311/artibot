@@ -218,10 +218,14 @@ const TIMER_MAX_MS = 2 ** 31 - 1;
 
 /**
  * What a dispatcher keeps for ITS OWN work inside the host slot: node cold start,
- * dispatch-table load, child fan-out and the merge that writes the one stdout.
- * It is the same 3 s that tests/firewall/hook-timeout-budget.test.js reserves
- * (`HEADROOM_MS` there, a private constant of that test) - a conservative budget
- * figure, NOT a measurement. The two are equal by convention: nothing links them.
+ * dispatch-table load, child fan-out and the merge that writes the one stdout. A
+ * conservative budget figure, NOT a measurement.
+ *
+ * PAIRED CONSTANT. tests/firewall/hook-timeout-budget.test.js reserves the same
+ * 3 s as its private `HEADROOM_MS` when it checks the DECLARED budgets against the
+ * slot. The two are equal by convention and nothing links them: change one, change
+ * the other in the same commit. That test belongs to another lane and is left as it
+ * is; it can import this export to drop the duplicate.
  */
 export const DISPATCHER_HEADROOM_MS = 3000;
 

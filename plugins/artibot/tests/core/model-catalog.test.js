@@ -563,8 +563,9 @@ describe('model-catalog', () => {
    * kind are typed by whoever edits the catalog and no test can re-read the page
    * or the skill table (data policy: nothing here fetches anything). The literal
    * pins below agree with the catalog's own prose as of 2026-09-30; they do not
-   * prove the prose. The official-table date is tied to PRICING_VERSION only for
-   * tier rows, because that is what `priceMeasured` already claims.
+   * prove the prose. The official-table date is tied to PRICING_VERSION for every
+   * MEASURED row, tier or legacy id, because that is what `priceMeasured` already
+   * claims; a row that is not measured is not held to it.
    */
   describe('priceSource (where each price row came from)', () => {
     const SOURCE_KINDS = ['official-table', 'skill-table'];
@@ -653,15 +654,21 @@ describe('model-catalog', () => {
       }
     });
 
-    it('a current tier row read off the official page was read on PRICING_VERSION (what priceMeasured already says)', () => {
+    it('a measured official-table row was read on PRICING_VERSION; a row that was not re-read must not be measured', () => {
       // `priceMeasured: true` is defined as "compared against PRICING_SOURCE on
-      // PRICING_VERSION". PRICING_VERSION moved but a row keeps an older date: either
-      // that row was not re-read (record that, do not copy the new date over it) or
-      // priceSource was forgotten. Legacy id rows are exempt: they are frozen history.
-      for (const tier of listTiers()) {
-        const { priceSource, priceMeasured } = getModel(tier);
-        if (priceMeasured === true && priceSource.kind === 'official-table') {
-          expect(priceSource.checkedAt, `tier ${tier}`).toBe(PRICING_VERSION);
+      // PRICING_VERSION", for a tier row and a legacy ID_PRICES row alike. So when
+      // PRICING_VERSION moves, each official-table row is one of two things: re-read
+      // (its checkedAt moves to the new stamp) or not re-read, which it says with
+      // priceMeasured: false. The rule is written at PRICING_VERSION in
+      // lib/core/model-catalog.js. Copying the new date onto a row nobody re-read
+      // would be a false claim, and this case is what stops it.
+      for (const [label, row] of rows) {
+        if (row.priceMeasured === true && row.priceSource.kind === 'official-table') {
+          expect(
+            row.priceSource.checkedAt,
+            `${label} is measured but was not read on ${PRICING_VERSION}: re-read it and move checkedAt, `
+              + 'or set priceMeasured to false (rule at PRICING_VERSION)',
+          ).toBe(PRICING_VERSION);
         }
       }
     });

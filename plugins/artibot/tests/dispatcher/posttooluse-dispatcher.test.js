@@ -822,6 +822,24 @@ describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)',
     return { ceiling, declared, expected: declared.map((ms) => Math.min(ms * scale, ceiling)) };
   }
 
+  /**
+   * The `>=` counts in the cases below are LOWER bounds: they still hold when an
+   * extra timer is armed beside the right ones (a handler armed twice, or one that
+   * skipped the clamp while another carried it). This is the upper bound: no timer
+   * the dispatcher armed outlasts the ceiling.
+   *
+   * The whole armed list is read as handler timers because the dispatcher process
+   * arms one per selected handler and nothing else (measured on the Edit route at
+   * scales 10, 3 and 1, 2026-09-30). A legitimate non-handler timer above the
+   * ceiling, added later, turns this red: decide then whether it belongs, not
+   * whether to loosen the bound. The length check comes first so the max is never
+   * taken over an empty list, where Math.max is -Infinity and passes everything.
+   */
+  function expectNoTimerPastCeiling(armed, handlerCount, ceiling) {
+    expect(armed.length, 'at least one timer armed per selected handler').toBeGreaterThanOrEqual(handlerCount);
+    expect(Math.max(...armed), 'the slowest timer the dispatcher armed, in ms').toBeLessThanOrEqual(ceiling);
+  }
+
   it('arms every Edit-route handler at min(10x its declared budget, slot minus headroom) with the scale at its cap', async () => {
     const { ceiling, declared, expected } = await editBudgets(10);
     // Not vacuous: at the cap the ceiling binds for some handler, and no armed value
@@ -837,6 +855,8 @@ describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)',
     for (const ms of new Set(expected)) {
       expect(occurrences(armed, ms), `handlers armed at ${ms} ms`).toBeGreaterThanOrEqual(occurrences(expected, ms));
     }
+    // And nothing extra rode along unclamped.
+    expectNoTimerPastCeiling(armed, expected.length, ceiling);
   });
 
   it('keeps the plain product where it fits and clamps only what would outlast the slot (scale 3)', async () => {
@@ -851,5 +871,7 @@ describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)',
     for (const ms of new Set(expected)) {
       expect(occurrences(armed, ms), `handlers armed at ${ms} ms`).toBeGreaterThanOrEqual(occurrences(expected, ms));
     }
+    // The product 3 x 10 s = 30000 is the one an unclamped extra would arm.
+    expectNoTimerPastCeiling(armed, expected.length, ceiling);
   });
 });

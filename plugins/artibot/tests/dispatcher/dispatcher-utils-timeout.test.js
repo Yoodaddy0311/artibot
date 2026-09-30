@@ -255,8 +255,9 @@ describe('scaleTimeoutMs', () => {
 describe('scaledBudgetCeilingMs', () => {
   it('is the host slot minus the dispatcher headroom', () => {
     // 3 s is the figure tests/firewall/hook-timeout-budget.test.js reserves
-    // (HEADROOM_MS, a conservative budget, not a measurement). It is a literal here
-    // on purpose: a silent change of the headroom must show up as a red line.
+    // (HEADROOM_MS, a conservative budget, not a measurement); the two are a pair
+    // and move together. It is a literal here on purpose: a silent change of the
+    // headroom must show up as a red line.
     expect(DISPATCHER_HEADROOM_MS).toBe(3000);
     expect(scaledBudgetCeilingMs(SLOT_MS)).toBe(CEILING_MS);
     expect(scaledBudgetCeilingMs(SLOT_MS)).toBe(SLOT_MS - DISPATCHER_HEADROOM_MS);

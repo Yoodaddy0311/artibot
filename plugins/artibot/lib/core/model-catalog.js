@@ -109,6 +109,17 @@ export const CATALOG_VERSION = '2026-09-30';
  * or a price edit that keeps the stamp, goes red there (limits in that file's
  * header).
  *
+ * **When you bump it, re-date only what you re-read.** Move a row's
+ * `priceSource.checkedAt` to the new stamp ONLY for a row actually re-read against
+ * its source that day; never copy the new date onto the rest. An `official-table`
+ * row that was NOT re-read (a legacy {@link ID_PRICES} row included) cannot keep
+ * `priceMeasured: true`, which means "compared against {@link PRICING_SOURCE} on
+ * this stamp": set it to `false`. The receipt writer then leaves that model
+ * unpriced and the usage table shows it as unverified, instead of a fresh stamp
+ * vouching for a price nobody looked at. `tests/core/model-catalog.test.js`
+ * ('priceSource') is red for a measured `official-table` row whose date is not the
+ * stamp.
+ *
  * 2026-09-28 bump: opus and sonnet rows moved to the Opus 5.5 / Sonnet 5
  * official prices (read off {@link PRICING_SOURCE} that day). haiku and fable
  * were re-read the same day and already matched, so their values did not move.
@@ -175,7 +186,9 @@ export const PRICING_SOURCE =
  * here re-verifies nothing. An id priced by its tier's row (every current id, and
  * a legacy id with no {@link ID_PRICES} row, such as claude-sonnet-5) reports the
  * TIER row's source: that row's latest comparison, not necessarily one made for
- * that id. Shape and vocabulary are pinned in `tests/core/model-catalog.test.js`.
+ * that id. What a {@link PRICING_VERSION} bump must do to `checkedAt` and
+ * `priceMeasured` is written at that constant. Shape and vocabulary are pinned in
+ * `tests/core/model-catalog.test.js`.
  *
  * `legacyIds` lists older model ids that must still resolve to the tier, so a
  * transcript or ledger row written before an id change keeps its tier instead
