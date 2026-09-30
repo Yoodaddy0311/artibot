@@ -489,7 +489,7 @@ export function runPhase4Verify(state) {
   const attempt = isAttemptArmed('VERIFY') ? openPhaseAttempt(state, { phase: 'VERIFY' }) : null;
   // CA-13: the previous attempt's verifyResult is sealed, not inherited. Keep this
   // above attachMcpVerify, which fills verifyResult.mcp: sealing after it would
-  // archive that fresh slot. A no-op unless the REPORT gate is ON.
+  // archive that fresh slot. A no-op unless the REPORT gate or CA-03 is ON (W3-7).
   if (attempt) scopeVerifyResultToAttempt(state, attempt);
   persist(state);
   tick(state.sessionId, attempt

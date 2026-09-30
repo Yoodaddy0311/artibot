@@ -25,6 +25,10 @@
  *      previous result (archived, not deleted) and stamps the new attempt, switch ON
  *      only; the gate itself never dismisses a result by its stamp (fail closed);
  *      driven through `resumeAutopilot` so the engine call is what is measured.
+ *   5c. The seal has two switches (W3-7): `reportVerifyGate.enforce` OR
+ *      `recovery.transitionFromVerdict`, each only as the literal `true`. Both false is
+ *      pinned byte for byte against a hand-out with the seal call removed, and CA-03
+ *      alone never switches the REPORT gate on.
  *   6. Sessions with no VERIFY row in their journal (stored before the journal,
  *      run before VERIFY was armed, or hand-driven), switch ON: pinned as today's
  *      behaviour, one pause and one VERIFY re-run.
@@ -33,12 +37,14 @@
  *      the same harness ON through a temp plugin root.
  *   8. `loadReportVerifyGateConfig` against real files, including the silent OFF
  *      of an unreadable config.
+ *   8b. The seal's two switches read from real config files (W3-7).
  *
  * The engine layer swaps the gate through `vi.mock` rather than `vi.spyOn`: the
  * engine holds a named import, which a spy on the module namespace never sees.
- * `gateMode.bypass` stands in for "the call line is not there",
- * `gateMode.config` injects the switch without touching artibot.config.json, and
- * `gateMode.shipped` removes that injection so the real reader runs.
+ * `gateMode.bypass` stands in for "the call line is not there" (and `gateMode.sealBypass`
+ * for the same on the VERIFY hand-out's seal), `gateMode.config` injects the switch
+ * without touching artibot.config.json, and `gateMode.shipped` removes that injection
+ * so the real reader runs.
  *
  * Isolation: the autopilot store (session JSON + events.ndjson) is sandboxed by
  * `tests/setup/state-dir.js` (ARTIBOT_AUTOPILOT_STORE_DIR); PRD and report
@@ -50,7 +56,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const gateMode = vi.hoisted(() => ({
-  bypass: false, config: { enforce: false }, loads: 0, shipped: false,
+  bypass: false, config: { enforce: false }, loads: 0, sealBypass: false, shipped: false,
 }));
 
 vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
@@ -62,10 +68,12 @@ vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
     gateReportOnVerify: (state, config) => (gateMode.bypass
       ? null
       : real.gateReportOnVerify(state, gateMode.shipped ? config : (config ?? gateMode.config))),
-    // The VERIFY hand-out (engine.js#runPhase4Verify) reads the same switch through
-    // this export, so it takes the same injection as the REPORT gate.
-    scopeVerifyResultToAttempt: (state, attempt, config) => real.scopeVerifyResultToAttempt(
-      state, attempt, gateMode.shipped ? config : (config ?? gateMode.config)),
+    // The VERIFY hand-out (engine.js#runPhase4Verify) reads its switches through
+    // this export, so it takes the same injection as the REPORT gate. `sealBypass`
+    // stands in for "the seal call line is not there" (section 5c).
+    scopeVerifyResultToAttempt: (state, attempt, config) => (gateMode.sealBypass
+      ? false
+      : real.scopeVerifyResultToAttempt(state, attempt, gateMode.shipped ? config : (config ?? gateMode.config))),
     // A caller that reads the switch itself (the driver path, section 4) sees
     // the injected value instead of the plugin root's artibot.config.json.
     loadReportVerifyGateConfig: () => {
@@ -114,6 +122,7 @@ const sessionsToClean = new Set();
 afterEach(async () => {
   gateMode.bypass = false;
   gateMode.config = { enforce: false };
+  gateMode.sealBypass = false;
   gateMode.shipped = false;
   for (const id of sessionsToClean) {
     try { await abortAutopilot(id, { graceful: false }); } catch { /* ignore */ }
@@ -1090,6 +1099,10 @@ describe('refuseRecordedReport — the livePhases argument', () => {
 const attemptOf = (attemptId) => ({ attemptId, phase: 'VERIFY', status: 'started' });
 const ON = { enforce: true };
 const OFF = { enforce: false };
+/** CA-03 (`recovery.transitionFromVerdict`) ON with the REPORT gate OFF: the W3-7 case. */
+const CA03_ONLY = { enforce: false, transitionFromVerdict: true };
+/** Both seal switches spelled out as OFF: the characterization case, nothing may change. */
+const BOTH_OFF = { enforce: false, transitionFromVerdict: false };
 
 describe('scopeVerifyResultToAttempt — a VERIFY hand-out seals the previous result', () => {
   it('should archive the previous result, empty the slot and stamp the new attempt', () => {
@@ -1206,6 +1219,98 @@ describe('scopeVerifyResultToAttempt — a VERIFY hand-out seals the previous re
     expect(() => scopeVerifyResultToAttempt(state, attemptOf('v2'), ON)).not.toThrow();
 
     expect(state.verifyResultHistory[0].verifyResult).toEqual({ status: 'FAIL', nested: { a: 1 } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5c. The seal has two switches (W3-7): enforce OR recovery.transitionFromVerdict
+// ---------------------------------------------------------------------------
+
+describe('scopeVerifyResultToAttempt — either switch arms the seal (W3-7)', () => {
+  // `state.verifyResult` has two readers: the REPORT gate (rule 6) and the SH-06
+  // recorder, whose verdict CA-03 turns into a transition. The seal serves both, so
+  // it obeys `reportVerifyGate.enforce` OR `recovery.transitionFromVerdict`, each
+  // one only as the literal `true`. The REPORT gate itself stays `enforce`'s alone.
+  it.each([
+    ['enforce alone', ON],
+    ['CA-03 alone', CA03_ONLY],
+    ['CA-03 alone, with no enforce key at all', { transitionFromVerdict: true }],
+    ['both', { enforce: true, transitionFromVerdict: true }],
+  ])('should seal exactly as it does for enforce when %s is on', (_label, config) => {
+    const state = { verifyResult: { status: 'FAIL', lint: 'x' } };
+
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'), config)).toBe(true);
+
+    expect(state.verifyResult).toBeNull();
+    expect(state.verifyResultScope).toEqual({ attemptId: 'v2' });
+    expect(state.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL', lint: 'x' }, supersededBy: 'v2' },
+    ]);
+  });
+
+  it.each([
+    ['both are the literal false', BOTH_OFF],
+    ['both keys are absent', {}],
+    ['both are the string "true"', { enforce: 'true', transitionFromVerdict: 'true' }],
+    ['both are the number 1', { enforce: 1, transitionFromVerdict: 1 }],
+    ['CA-03 is the string "true" and enforce is false', { enforce: false, transitionFromVerdict: 'true' }],
+    ['CA-03 is the number 1 and enforce is false', { enforce: false, transitionFromVerdict: 1 }],
+    ['CA-03 is an object', { enforce: false, transitionFromVerdict: {} }],
+    ['CA-03 is null', { enforce: false, transitionFromVerdict: null }],
+    ['CA-03 is undefined', { enforce: false, transitionFromVerdict: undefined }],
+    ['the config is a string', 'x'],
+    ['the config is a number', 42],
+  ])('should touch nothing when %s (an allowlist: only a literal true arms it)', (_label, config) => {
+    const state = { verifyResult: { status: 'FAIL' }, verifyResultScope: { attemptId: 'v1' } };
+    const before = JSON.stringify(state);
+
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'), config)).toBe(false);
+
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it('should not archive again when it is asked twice for one attempt under CA-03 alone', () => {
+    const state = { verifyResult: { status: 'FAIL' } };
+    scopeVerifyResultToAttempt(state, attemptOf('v2'), CA03_ONLY);
+    state.verifyResult = { status: 'PASS' }; // written for v2, after its hand-out
+
+    scopeVerifyResultToAttempt(state, attemptOf('v2'), CA03_ONLY);
+
+    expect(state.verifyResult).toEqual({ status: 'PASS' });
+    expect(state.verifyResultHistory).toHaveLength(1);
+  });
+
+  it.each([
+    ['no attempt', undefined],
+    ['a null attempt', null],
+    ['an attempt without an id', {}],
+    ['an empty id', { attemptId: '' }],
+    ['a numeric id', { attemptId: 7 }],
+  ])('should keep the slot when it cannot bind it to an attempt under CA-03 alone: %s (fail closed)', (_label, attempt) => {
+    const state = { verifyResult: { status: 'FAIL' } };
+    const before = JSON.stringify(state);
+
+    expect(scopeVerifyResultToAttempt(state, attempt, CA03_ONLY)).toBe(false);
+
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it.each([[null], [undefined], ['x'], [42]])('should not throw on a non-object state under CA-03 alone (%j)', (state) => {
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v1'), CA03_ONLY)).toBe(false);
+  });
+
+  it('should leave the REPORT gate to enforce alone: CA-03 ON never switches it on', () => {
+    // The seal empties a slot; the gate refuses a REPORT. Only the second is an
+    // enforcement, and only `enforce` may arm it.
+    const noEvidence = { sessionId: uniqueId('ca03-gate'), phase: 'REPORT', attemptJournal: [], activePhaseAttempt: null };
+    sessionsToClean.add(noEvidence.sessionId);
+    const before = JSON.stringify(noEvidence);
+
+    expect(gateReportOnVerify(noEvidence, CA03_ONLY)).toBeNull();
+    expect(refuseRecordedReport(noEvidence, { status: 'done' }, CA03_ONLY, PHASES)).toBe(false);
+
+    expect(JSON.stringify(noEvidence)).toBe(before);
+    expect(readEvents(noEvidence.sessionId)).toEqual([]);
   });
 });
 
@@ -1368,6 +1473,107 @@ describe('a VERIFY hand-out through the engine (resumeAutopilot → runPhase4Ver
     await resumeAutopilot(sessionId);
 
     expect(loadSession(sessionId).verifyResult).toEqual(old);
+  });
+
+  // W3-7: the seal serves two readers of the slot (the REPORT gate and the SH-06
+  // recorder CA-03 acts on), so CA-03 ON arms it with the REPORT gate OFF.
+  it('should seal when only CA-03 is ON: the stale FAIL moves to the history and the slot is stamped', async () => {
+    gateMode.config = CA03_ONLY;
+    const sessionId = await readyForVerify('scope-ca03', { verifyResult: { status: 'FAIL', lint: 'red' } });
+
+    const resumed = await resumeAutopilot(sessionId);
+
+    expect(resumed).toMatchObject({ phase: 'VERIFY', status: 'ok' });
+    const after = loadSession(sessionId);
+    const { attemptId } = after.activePhaseAttempt;
+    expect(after.verifyResult).toBeNull();
+    expect(after.verifyResultScope).toEqual({ attemptId });
+    expect(after.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL', lint: 'red' }, supersededBy: attemptId },
+    ]);
+  });
+
+  it('should build the mcp slot AFTER the seal under CA-03 alone too', async () => {
+    gateMode.config = CA03_ONLY;
+    const old = { status: 'FAIL', mcp: { ok: false, violations: ['old'] } };
+    const sessionId = await readyForVerify('scope-mcp-ca03', { verifyResult: old }, { mcpVerify: true });
+
+    await resumeAutopilot(sessionId);
+
+    const after = loadSession(sessionId);
+    expect(after.verifyResult).toEqual({ mcp: { ok: null, violations: [] } });
+    expect(after.verifyResultHistory[0].verifyResult).toEqual(old);
+  });
+
+  it('should touch nothing with both switches spelled out as OFF: the stale FAIL stays, no stamp, no history', async () => {
+    gateMode.config = BOTH_OFF;
+    const stale = { status: 'FAIL', lint: 'red' };
+    const sessionId = await readyForVerify('scope-both-off', { verifyResult: stale });
+
+    await resumeAutopilot(sessionId);
+
+    const after = loadSession(sessionId);
+    expect(after.verifyResult).toEqual(stale);
+    expect('verifyResultScope' in after).toBe(false);
+    expect('verifyResultHistory' in after).toBe(false);
+  });
+
+  it('should be byte-identical to a hand-out with no seal call when both switches are OFF: return, state and events', async () => {
+    // The characterization pin for "both false = byte for byte as before": the same
+    // stored session is handed out twice from the same bytes, once with the call
+    // line removed (`sealBypass`) and once through the real seal reading BOTH_OFF.
+    gateMode.config = BOTH_OFF;
+    const sessionId = await readyForVerify('scope-bytes', { verifyResult: { status: 'FAIL', lint: 'red' } });
+    const snapshot = readFileSync(getSessionPath(sessionId), 'utf8');
+    const attemptIds = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+    const scrubRun = (value) => JSON.parse(JSON.stringify(value)
+      .replace(ISO, '<ts>').replace(attemptIds, '<attempt>').replaceAll(sessionId, '<sid>'));
+    const handOut = async (sealBypass) => {
+      gateMode.sealBypass = sealBypass;
+      const before = readEvents(sessionId).length;
+      const returned = await resumeAutopilot(sessionId);
+      const run = {
+        returned: scrubRun(returned),
+        state: scrubRun(loadSession(sessionId)),
+        events: scrubRun(readEvents(sessionId).slice(before)),
+      };
+      writeFileSync(getSessionPath(sessionId), snapshot);
+      return run;
+    };
+
+    const withoutSeal = await handOut(true);
+    const bothOff = await handOut(false);
+
+    expect.soft(bothOff.state).toEqual(withoutSeal.state);
+    expect.soft(bothOff.events).toEqual(withoutSeal.events);
+    expect.soft(bothOff.returned).toEqual(withoutSeal.returned);
+    // Not vacuous: the hand-out ran, and the stale FAIL is the one it left in the slot.
+    expect(bothOff.state.verifyResult).toEqual({ status: 'FAIL', lint: 'red' });
+    expect(bothOff.events.map((e) => e.type)).toContain('attempt-started');
+  });
+
+  it('should leave the engine REPORT gate silent when only CA-03 is ON', async () => {
+    gateMode.config = CA03_ONLY;
+    const sessionId = await start('ca03-report');
+
+    const result = runPhase6Report(loadSession(sessionId));
+
+    expect(result.type).toBe('phase-result');
+    expect(loadSession(sessionId).phase).toBe('COMPLETED');
+    expect(gateTicks(sessionId)).toEqual([]);
+    expect(readEvents(sessionId).filter((e) => e.type === 'pause')).toEqual([]);
+  });
+
+  it('should leave the driver-path REPORT record alone when only CA-03 is ON', () => {
+    const state = seeded('ca03-drv', {});
+    gateMode.config = CA03_ONLY;
+    const before = readEvents(state.sessionId).length;
+
+    recordPhaseResult(state, { phase: 'REPORT', status: 'done' });
+
+    expect(state).toMatchObject({ phase: 'REPORT', pendingPhase: null });
+    expect(state.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
+    expect(readEvents(state.sessionId).slice(before)).toEqual([]);
   });
 });
 
@@ -1745,6 +1951,58 @@ describe('loadReportVerifyGateConfig — the config file at the plugin root', ()
   it('should read OFF when the plugin root holds no config at all', () => {
     withPluginRoot(undefined, () => {
       expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8b. The seal's two switches against real files (W3-7)
+// ---------------------------------------------------------------------------
+
+describe('scopeVerifyResultToAttempt — the two switches at the plugin root config', () => {
+  // Nothing injected: the seal reads `autopilot.reportVerifyGate.enforce` and
+  // `autopilot.recovery.transitionFromVerdict` itself, each strictly `=== true`.
+  const sealConfig = (enforce, transitionFromVerdict) => JSON.stringify({
+    autopilot: { reportVerifyGate: { enforce }, recovery: { transitionFromVerdict } },
+  });
+
+  it.each([
+    ['both true', sealConfig(true, true), true],
+    ['enforce alone', sealConfig(true, false), true],
+    ['CA-03 alone', sealConfig(false, true), true],
+    ['both false', sealConfig(false, false), false],
+    ['the string "true" in both', sealConfig('true', 'true'), false],
+    ['the number 1 for CA-03 with enforce false', sealConfig(false, 1), false],
+    ['CA-03 true under the wrong parent', JSON.stringify({ recovery: { transitionFromVerdict: true } }), false],
+    ['CA-03 true under reportVerifyGate', JSON.stringify({ autopilot: { reportVerifyGate: { transitionFromVerdict: true } } }), false],
+    ['neither key', JSON.stringify({ autopilot: {} }), false],
+  ])('should read %s', (_label, text, sealed) => {
+    withPluginRoot(text, () => {
+      const state = { verifyResult: { status: 'FAIL' } };
+
+      expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(sealed);
+
+      expect(state.verifyResult).toEqual(sealed ? null : { status: 'FAIL' });
+    });
+  });
+
+  it('should read OFF, without a trace, from a config that does not parse', () => {
+    withPluginRoot('{ "autopilot": ', () => {
+      const state = { verifyResult: { status: 'FAIL' } };
+
+      expect(() => scopeVerifyResultToAttempt(state, attemptOf('v2'))).not.toThrow();
+
+      expect(state).toEqual({ verifyResult: { status: 'FAIL' } });
+    });
+  });
+
+  it('should read OFF when the plugin root holds no config at all', () => {
+    withPluginRoot(undefined, () => {
+      const state = { verifyResult: { status: 'FAIL' } };
+
+      expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(false);
+
+      expect(state).toEqual({ verifyResult: { status: 'FAIL' } });
     });
   });
 });
