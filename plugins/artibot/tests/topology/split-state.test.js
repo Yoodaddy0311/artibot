@@ -19,14 +19,18 @@
  *
  * WHAT THEY DO NOT COVER (next to the gate, so the gate does not become the
  * next illusion — rules §9):
- *  - The StateStore. It EXISTS
+ *  - The StateStore, in the FIRST half of this file. It EXISTS
  *    (`lib/project-state/state-manager.js#createStateStore`), but every
- *    `storeReader` in THIS file is a fixture this file wrote, so "store wins"
- *    is proven about the priority code here and about NOTHING on disk. The
- *    interlock against a real store — a seeded mission projected through
- *    `getProjection()` into `normalizeStore` and on into `readWorkerState` —
- *    is pinned in the sibling `split-state-sources.test.js`, together with
- *    the three contracts that block a write-target flip.
+ *    `storeReader` in the describes above the SH-11 block is a fixture this
+ *    file wrote, so "store wins" there is proven about the priority code and
+ *    about NOTHING on disk. The interlock against a real store — a seeded
+ *    mission projected through `getProjection()` into `normalizeStore` and on
+ *    into `readWorkerState` — is pinned in the sibling
+ *    `split-state-sources.test.js`. The SH-11 block at the END of this file is
+ *    the other half: a BOUND run against a real `createStateStore` in a
+ *    tmpdir — the write (ledger -> one store commit -> run.json projection),
+ *    its refusals, the CAS retry, the projection failure, the canonical read
+ *    and the binding writer.
  *  - The real writer. The payload is checked against the SHIPPED
  *    `schemas/ledger-events.allowlist.json`, not against
  *    `event-writer.js#writeEvent` itself: `lib/topology` is L4 and the writer
@@ -61,12 +65,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  bindRunToMission,
   PROJECTION_MARK,
+  readMissionBinding,
   readWorkerState,
   STATE_SOURCES,
+  STORE_PROJECTION_MARK,
   workerTransitionIdempotencyKey,
   writeWorkerState,
 } from '../../lib/topology/split-state.js';
+import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS, V11_STATUSES } from '../../lib/supervisor/contracts.js';
 import { assessLane } from '../../lib/supervisor/lane-monitor.js';
 
@@ -937,5 +945,904 @@ describe('writeWorkerState — clock port is strict', () => {
       now: () => '2026-09-02T12:00:00.000Z',
     })).toThrow(TypeError);
     expect(called).toBe(0);
+  });
+});
+
+/* ══════════════ SH-11 — a BOUND run: the StateStore is canonical, run.json its projection ══════════════
+ *
+ * Every store below is a REAL `createStateStore` over a tmpdir (no store fake
+ * stands in for the contract under test), rooted beside a canonical run
+ * directory. WHAT THIS BLOCK CANNOT SEE (rules §9): concurrency between two
+ * PROCESSES (the CAS races here are two commits interleaved in one), the live
+ * store's size, and whether any live run has ever been bound — the bind is
+ * measured, the traffic is not.
+ */
+
+const RUN_ID = 'split-abc123';
+const MISSION = 'M-20260929-Sabcd1234';
+const OTHER_MISSION = 'M-20260929-Szzzz9999';
+const SID = 'abcd1234-ef56-7890-1234-567890abcdef';
+const utc = (h, m = 0) => new Date(Date.UTC(2026, 8, 29, h, m, 0));
+const iso = (h, m = 0) => utc(h, m).toISOString();
+const BINDING = { mission_id: MISSION, run_id: RUN_ID, generation: 1, bound_at: iso(4), bound_by_session: SID };
+const BOUND_PLAN = {
+  runId: RUN_ID,
+  limbs: [
+    { limb: 'alpha', affectedPaths: ['lib/a/**'] },
+    { limb: 'beta', affectedPaths: ['lib/b/**'] },
+  ],
+};
+const SEED_MISSION = () => ({ status: 'executing', intent: { path: 'i.md', revision: 1 }, plan: { path: 'p.md', revision: 1 } });
+
+/**
+ * A canonical run directory plus a real StateStore rooted beside it, with one
+ * mission row per id in `missions` (the row is the precondition — creating it
+ * is the prompt pipeline's job, never the split tooling's).
+ *
+ * @param {{ binding?: object|null, missions?: string[], run?: object, planOver?: object }} [o]
+ */
+function makeBoundWorld({ binding = BINDING, missions = [MISSION], run = {}, planOver = {} } = {}) {
+  const runDir = makeRunDir({
+    plan: { ...BOUND_PLAN, ...planOver, ...(binding ? { missionBinding: binding } : {}) },
+    run: { runId: RUN_ID, ...run },
+  });
+  const root = path.dirname(path.dirname(runDir));
+  const flags = { refuse: false, onEvent: null };
+  const ledger = [];
+  const store = createStateStore({
+    projectRoot: root,
+    sessionId: SID,
+    renderProjectionFile: false,
+    appendEvent: (e) => {
+      if (flags.refuse) return { ok: false, reason: 'port-down' };
+      flags.onEvent?.(e);
+      ledger.push(e);
+      return { ok: true };
+    },
+  });
+  for (const id of missions) expect(store.updateMission(id, SEED_MISSION, { reason: 'test.seed' }).ok).toBe(true);
+  return { runDir, root, store, ledger, flags };
+}
+
+const boundWrite = (w, worker, patch, extra = {}) => writeWorkerState({ runDir: w.runDir, worker, patch, store: w.store, honorBinding: true, now: () => utc(5), ...extra });
+const nodeOf = (w, limb, mission = MISSION) => w.store.getTaskGraph(mission)?.tasks.find((t) => t.id === limb);
+const laneOf = (w, limb) => readRun(w.runDir).lanes?.[limb];
+const runBytes = (w) => fs.readFileSync(path.join(w.runDir, 'run.json'));
+const storeVersion = (w) => w.store.getState().state_version;
+
+/** A store whose first `times` commits lose a race to another writer (a real CAS conflict, not a stub). */
+function racingStore(w, times) {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    store: {
+      ...w.store,
+      updateMission: (...args) => {
+        calls += 1;
+        if (calls <= times) w.store.updateMission(MISSION, (cur) => cur, { reason: 'test.race' });
+        return w.store.updateMission(...args);
+      },
+    },
+  };
+}
+
+describe('SH-11 bound writeWorkerState — the store commit is the write, run.json is projected from it', () => {
+  it('commits ONE store version, then stamps the lane projected_from:store', () => {
+    const w = makeBoundWorld();
+    const v0 = storeVersion(w);
+    const res = boundWrite(w, 'alpha', { ops_state: 'active', window: 'w-1', note: 'go' });
+
+    expect(res.ok).toBe(true);
+    expect(res).toMatchObject({
+      source: 'store', missionId: MISSION, opsState: 'active', status: 'executing',
+      changed: true, previousOps: null, projection: 'written', stateVersion: v0 + 1,
+    });
+    expect(storeVersion(w)).toBe(v0 + 1);
+
+    const node = nodeOf(w, 'alpha');
+    expect(node).toMatchObject({
+      id: 'alpha', status: 'executing', owner: 'alpha', file_ownership: ['lib/a/**'],
+      heartbeat_at: iso(5), heartbeat_source: 'lane-heartbeat',
+    });
+    expect(node.ops).toEqual({ state: 'active', since: iso(5), run_id: RUN_ID, window: 'w-1', note: 'go' });
+
+    expect(STORE_PROJECTION_MARK).toBe('store');
+    expect(laneOf(w, 'alpha')).toMatchObject({
+      state: 'active', since: iso(5), window: 'w-1', note: 'go', projected_from: STORE_PROJECTION_MARK, updated_at: iso(5),
+    });
+    expect(readRun(w.runDir).runId).toBe(RUN_ID); // every other run.json key survives
+  });
+
+  it('orders the effects: ledger event -> store commit -> run.json projection', () => {
+    const w = makeBoundWorld();
+    const seen = [];
+    w.flags.onEvent = (e) => seen.push({ at: 'store', event: e.event, lane: laneOf(w, 'alpha') ?? null });
+    const res = writeWorkerState({
+      runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'awaiting-dispatch' }, store: w.store, honorBinding: true, now: () => utc(5),
+      ledger: { session_id: SID, agent_type: 'artibot:backend-developer', model_tier: 'opus' },
+      appendEvent: (e) => { seen.push({ at: 'ledger', event: e.event, version: storeVersion(w), lane: laneOf(w, 'alpha') ?? null }); return { ok: true }; },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.ledger).toBe('appended');
+    expect(seen.map((s) => `${s.at}:${s.event}`)).toEqual(['ledger:worker.claimed', 'store:state.updated']);
+    expect(seen[0]).toMatchObject({ version: 1, lane: null }); // the store was still at its seed version
+    expect(seen[1].lane).toBeNull(); // and run.json had no lane when the store's own event went out
+    expect(laneOf(w, 'alpha')).toMatchObject({ state: 'awaiting-dispatch', projected_from: STORE_PROJECTION_MARK });
+  });
+
+  it('writes only to the bound mission, whichever other missions the store holds', () => {
+    const w = makeBoundWorld({ missions: [MISSION, OTHER_MISSION] });
+    const other = w.store.getTaskGraph(OTHER_MISSION);
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    expect(w.store.getTaskGraph(OTHER_MISSION)).toEqual(other);
+    expect(nodeOf(w, 'alpha')).toBeDefined();
+    expect(nodeOf(w, 'alpha', OTHER_MISSION)).toBeUndefined();
+  });
+
+  it('B3 and the lease fold: a re-assert keeps since and re-stamps the heartbeat; done releases the owner and leaves the last heartbeat', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    boundWrite(w, 'alpha', { ops_state: 'active' }, { now: () => utc(6) });
+    expect(nodeOf(w, 'alpha').ops.since).toBe(iso(5));
+    expect(nodeOf(w, 'alpha').heartbeat_at).toBe(iso(6));
+    expect(laneOf(w, 'alpha').since).toBe(iso(5));
+
+    boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
+    const done = nodeOf(w, 'alpha');
+    expect(done).toMatchObject({ status: 'done', owner: null, heartbeat_at: iso(6) });
+    expect(done.ops.since).toBe(iso(7));
+  });
+
+  it('keeps hand-added lane keys and puts only window and note into the node\'s closed ops record', () => {
+    const w = makeBoundWorld({ run: { lanes: { alpha: { state: 'active', since: iso(3), pr: 220, inspector: 'r2' } } } });
+    boundWrite(w, 'alpha', { ops_state: 'review', pr: 221 });
+    expect(laneOf(w, 'alpha')).toMatchObject({ state: 'review', pr: 221, inspector: 'r2' });
+    expect(nodeOf(w, 'alpha').ops).toEqual({ state: 'review', since: iso(5), run_id: RUN_ID });
+    expect(JSON.stringify(nodeOf(w, 'alpha'))).not.toContain('inspector');
+  });
+
+  it('T8: backfills from the run.json lane when the node has no ops — the lane\'s since survives a state-less patch', () => {
+    const w = makeBoundWorld({ run: { lanes: { alpha: { state: 'review', since: iso(3), window: 'w-a' } } } });
+    const ledgerBefore = w.ledger.length;
+    const owed = [];
+    const res = boundWrite(w, 'alpha', { note: 'more' }, {
+      ledger: { session_id: SID, agent_type: 'a', model_tier: 'opus' }, appendEvent: (e) => { owed.push(e); return { ok: true }; },
+    });
+    expect(res).toMatchObject({ ok: true, previousOps: 'review', changed: false, opsState: 'review' });
+    expect(nodeOf(w, 'alpha')).toMatchObject({ status: 'reviewing', owner: 'alpha' });
+    expect(nodeOf(w, 'alpha').ops).toEqual({ state: 'review', since: iso(3), run_id: RUN_ID, window: 'w-a', note: 'more' });
+    expect(w.ledger.length).toBe(ledgerBefore + 1); // exactly one state.updated
+    expect(owed).toEqual([]); // and no worker.claimed / task.released: nothing changed state
+  });
+
+  it('a limb the plan does not list still gets a node, with an empty ownership list', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'gamma', { ops_state: 'active' });
+    expect(nodeOf(w, 'gamma').file_ownership).toEqual([]);
+  });
+
+  it('keys the transition by the NODE\'s since, not by a stale run.json lane', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    // Skew the projection: the lane now claims an older since than the node.
+    const run = readRun(w.runDir);
+    run.lanes.alpha.since = iso(3);
+    fs.writeFileSync(path.join(w.runDir, 'run.json'), JSON.stringify(run));
+
+    const events = [];
+    const res = boundWrite(w, 'alpha', { ops_state: 'done' }, {
+      now: () => utc(7), ledger: { session_id: SID }, appendEvent: (e) => { events.push(e); return { ok: true }; },
+    });
+    expect(res.ok).toBe(true);
+    expect(events).toHaveLength(1);
+    expect(events[0].event).toBe('task.released');
+    expect(events[0].idempotency_key).toBe(`task.released:${RUN_ID}:alpha:active:done:${iso(5)}`);
+  });
+
+  it('a retry after a refused append reuses that key and leaves the store where it was', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    const events = [];
+    const v = storeVersion(w);
+    const refused = boundWrite(w, 'alpha', { ops_state: 'done' }, {
+      now: () => utc(7), ledger: { session_id: SID }, appendEvent: (e) => { events.push(e); return { ok: false, reason: 'busy' }; },
+    });
+    expect(refused).toMatchObject({ ok: false, ledger: 'refused' });
+    expect(storeVersion(w)).toBe(v);
+    expect(nodeOf(w, 'alpha').ops.state).toBe('active');
+    expect(laneOf(w, 'alpha').state).toBe('active');
+    boundWrite(w, 'alpha', { ops_state: 'done' }, {
+      now: () => utc(8), ledger: { session_id: SID }, appendEvent: (e) => { events.push(e); return { ok: true }; },
+    });
+    expect(events).toHaveLength(2);
+    expect(events[1].idempotency_key).toBe(events[0].idempotency_key);
+    expect(nodeOf(w, 'alpha')).toMatchObject({ status: 'done', owner: null });
+  });
+
+  it('CONTROL — an UNBOUND run ignores the store entirely and writes run.json as before', () => {
+    const w = makeBoundWorld({ binding: null });
+    const v = storeVersion(w);
+    let opened = 0;
+    const res = writeWorkerState({
+      runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'active' }, store: w.store, openStore: () => { opened += 1; return w.store; }, now: () => utc(5),
+    });
+    expect(res.ok).toBe(true);
+    expect(res.source).toBeUndefined();
+    expect(laneOf(w, 'alpha').projected_from).toBe(PROJECTION_MARK);
+    expect(storeVersion(w)).toBe(v);
+    expect(w.store.getTaskGraph(MISSION).tasks).toEqual([]);
+    expect(opened).toBe(0);
+  });
+});
+
+describe('SH-11 T3 — a binding that cannot be honoured REJECTS; there is no run.json fallback', () => {
+  it('a dangling binding (mission not in the store) rejects with run.json byte-identical, even when another live mission exists', () => {
+    const w = makeBoundWorld({ missions: [OTHER_MISSION] });
+    const before = runBytes(w);
+    const v = storeVersion(w);
+    const res = boundWrite(w, 'alpha', { ops_state: 'active' });
+    expect(res).toMatchObject({ ok: false, reason: 'binding-dangling', worker: 'alpha' });
+    expect(res.detail).toMatch(new RegExp(MISSION));
+    expect(runBytes(w)).toEqual(before);
+    expect(storeVersion(w)).toBe(v);
+    expect(w.store.getTaskGraph(OTHER_MISSION).tasks).toEqual([]);
+  });
+
+  it('a mission removed AFTER the bind is dangling too', () => {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    expect(w.store.updateMission(MISSION, () => null, { reason: 'test.archive' }).ok).toBe(true);
+    const before = runBytes(w);
+    expect(boundWrite(w, 'alpha', { ops_state: 'review' })).toMatchObject({ ok: false, reason: 'binding-dangling' });
+    expect(runBytes(w)).toEqual(before);
+  });
+
+  it('a malformed binding rejects, naming the field', () => {
+    const w = makeBoundWorld({ binding: { ...BINDING, generation: 0 } });
+    const before = runBytes(w);
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' })).toMatchObject({ ok: false, reason: 'binding-invalid:generation' });
+    expect(runBytes(w)).toEqual(before);
+    expect(storeVersion(w)).toBe(1);
+  });
+
+  it('a binding for another run rejects (I1: one run, one mission)', () => {
+    const w = makeBoundWorld({ binding: { ...BINDING, run_id: 'split-other' } });
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' })).toMatchObject({ ok: false, reason: 'binding-run-mismatch' });
+  });
+
+  it('F3: plan.json and run.json naming different runs rejects, whatever the binding says', () => {
+    const w = makeBoundWorld({ run: { runId: 'split-zzz' } });
+    const before = runBytes(w);
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' })).toMatchObject({ ok: false, reason: 'run-id-mismatch' });
+    expect(runBytes(w)).toEqual(before);
+  });
+
+  it('with no store to write, a bound run rejects rather than falling back — a missing port, a null thunk and a throwing thunk alike', () => {
+    const w = makeBoundWorld();
+    const before = runBytes(w);
+    const base = { runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'active' }, honorBinding: true, now: () => utc(5) };
+    expect(writeWorkerState(base)).toMatchObject({ ok: false, reason: 'store-unavailable' });
+    expect(writeWorkerState({ ...base, openStore: () => null })).toMatchObject({ ok: false, reason: 'store-unavailable' });
+    const thrown = writeWorkerState({ ...base, openStore: () => { throw new TypeError('sessionId is required'); } });
+    expect(thrown).toMatchObject({ ok: false, reason: 'store-unavailable' });
+    expect(thrown.detail).toMatch(/sessionId is required/);
+    expect(runBytes(w)).toEqual(before);
+  });
+
+  it('another run\'s node is refused, not overwritten (I2)', () => {
+    const w = makeBoundWorld();
+    const foreign = {
+      schema_version: 1, mission_id: MISSION,
+      tasks: [{ id: 'alpha', mission_id: MISSION, status: 'done', owner: null, ops: { state: 'done', since: iso(2), run_id: 'split-other' } }],
+    };
+    expect(w.store.updateMission(MISSION, (cur) => cur, { graph: foreign, reason: 'test.foreign' }).ok).toBe(true);
+    const before = runBytes(w);
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' })).toMatchObject({ ok: false, reason: 'task-run-mismatch' });
+    expect(nodeOf(w, 'alpha').ops.run_id).toBe('split-other');
+    expect(runBytes(w)).toEqual(before);
+  });
+});
+
+describe('SH-11 T4 — B1/B2 refuse by THROWING, before any effect', () => {
+  /** A bound world whose alpha node was left `claimed` by a lease call after its ops said `active`. */
+  function skewedWorld() {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    expect(w.store.releaseTask({ missionId: MISSION, taskId: 'alpha', status: 'claimed', reason: 'test.skew' }).ok).toBe(true);
+    expect(nodeOf(w, 'alpha')).toMatchObject({ status: 'claimed' });
+    expect(nodeOf(w, 'alpha').ops.state).toBe('active');
+    return w;
+  }
+
+  it('a state-less patch on a node whose ops and status disagree throws; state_version, run.json and the ledger stay put', () => {
+    const w = skewedWorld();
+    const v = storeVersion(w);
+    const before = runBytes(w);
+    const events = [];
+    expect(() => boundWrite(w, 'alpha', { note: 'x' }, { ledger: { session_id: SID }, appendEvent: (e) => { events.push(e); return { ok: true }; } }))
+      .toThrow(/ops.state 'active' projects to status 'executing' but the node says 'claimed'/);
+    expect(storeVersion(w)).toBe(v);
+    expect(runBytes(w)).toEqual(before);
+    expect(events).toEqual([]);
+  });
+
+  it('an explicit state rewrites both fields and repairs the skew', () => {
+    const w = skewedWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }, { now: () => utc(6) }).ok).toBe(true);
+    expect(nodeOf(w, 'alpha')).toMatchObject({ status: 'executing', owner: 'alpha' });
+    expect(nodeOf(w, 'alpha').ops.since).toBe(iso(5)); // same state: the clock did not restart
+  });
+
+  it('B2: a suspended lane needs a human: reason, a working lane takes no blockers, a free-form reason is refused', () => {
+    const w = makeBoundWorld();
+    const v = storeVersion(w);
+    const events = [];
+    const io = { ledger: { session_id: SID }, appendEvent: (e) => { events.push(e); return { ok: true }; } };
+    expect(() => boundWrite(w, 'alpha', { ops_state: 'suspended', blocked_by: ['gate:x'] }, io)).toThrow(/human:/);
+    expect(() => boundWrite(w, 'alpha', { ops_state: 'active', blocked_by: ['lane:beta'] }, io)).toThrow(/only .*blocked/);
+    expect(() => boundWrite(w, 'alpha', { ops_state: 'serial-gate', blocked_by: ['waiting on the leader'] }, io)).toThrow(/lane\|gate\|human\|reconcile/);
+    expect(storeVersion(w)).toBe(v);
+    expect(events).toEqual([]);
+    expect(fs.readFileSync(path.join(w.runDir, 'run.json'), 'utf-8')).not.toContain('alpha');
+  });
+
+  it('B2: the blocked states round-trip their reason through the node', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'suspended' });
+    expect(nodeOf(w, 'alpha')).toMatchObject({ status: 'blocked', owner: null, blockers: ['human:suspend'] });
+    boundWrite(w, 'beta', { ops_state: 'serial-gate', blocked_by: ['lane:alpha'] });
+    expect(nodeOf(w, 'beta').blockers).toEqual(['lane:alpha']);
+    expect(laneOf(w, 'beta')).toMatchObject({ state: 'serial-gate', blocked_by: ['lane:alpha'] });
+    boundWrite(w, 'beta', { ops_state: 'active' });
+    expect(Object.hasOwn(nodeOf(w, 'beta'), 'blockers')).toBe(false);
+  });
+
+  it('a worker with no state anywhere throws instead of inventing one', () => {
+    const w = makeBoundWorld();
+    expect(() => boundWrite(w, 'alpha', { note: 'x' })).toThrow(/needs a state/);
+    expect(storeVersion(w)).toBe(1);
+  });
+});
+
+describe('SH-11 T5 — F5: a CAS conflict is retried ONCE, then rejected', () => {
+  it('a lost race is re-derived from a fresh snapshot and succeeds on the retry', () => {
+    const w = makeBoundWorld();
+    const racing = racingStore(w, 1);
+    const res = writeWorkerState({ runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'active' }, store: racing.store, honorBinding: true, now: () => utc(5) });
+    expect(res.ok).toBe(true);
+    expect(racing.calls()).toBe(2);
+    expect(nodeOf(w, 'alpha').ops.state).toBe('active');
+    expect(laneOf(w, 'alpha').projected_from).toBe(STORE_PROJECTION_MARK);
+  });
+
+  it('a second conflict rejects with cas-conflict and never touches run.json', () => {
+    const w = makeBoundWorld();
+    const before = runBytes(w);
+    const racing = racingStore(w, 2);
+    const res = writeWorkerState({ runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'active' }, store: racing.store, honorBinding: true, now: () => utc(5) });
+    expect(res).toMatchObject({ ok: false, reason: 'cas-conflict', worker: 'alpha' });
+    expect(racing.calls()).toBe(2);
+    expect(runBytes(w)).toEqual(before);
+    expect(nodeOf(w, 'alpha')).toBeUndefined();
+  });
+
+  it('a store that refuses the commit (its own ledger port said no) rejects with store-refused and writes nothing', () => {
+    const w = makeBoundWorld();
+    const before = runBytes(w);
+    const v = storeVersion(w);
+    w.flags.refuse = true;
+    const res = boundWrite(w, 'alpha', { ops_state: 'active' });
+    expect(res).toMatchObject({ ok: false, reason: 'store-refused' });
+    expect(res.detail).toMatch(/ledger refused/);
+    expect(runBytes(w)).toEqual(before);
+    w.flags.refuse = false;
+    expect(storeVersion(w)).toBe(v);
+  });
+});
+
+describe('SH-11 T6 — the store commit is the truth even when the projection fails', () => {
+  it('a projection that throws does not undo the commit: the write reports it, and the next read answers from the store with the disagreement as evidence', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'pending' });
+    const stale = runBytes(w);
+
+    const res = boundWrite(w, 'alpha', { ops_state: 'active' }, { projectRunJson: () => { throw new Error('disk full'); } });
+    expect(res.ok).toBe(true);
+    expect(res.projection).toMatch(/^failed:disk full/);
+    expect(nodeOf(w, 'alpha')).toMatchObject({ status: 'executing' });
+    expect(runBytes(w)).toEqual(stale);
+
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true });
+    expect(read.source).toBe('store');
+    expect(read.workers.alpha).toMatchObject({ status: 'executing', source: 'store', ops_state: 'active' });
+    expect(read.conflicts).toEqual([{
+      worker: 'alpha',
+      field: 'status',
+      values: [{ source: 'store', value: 'executing' }, { source: 'run.json', value: 'queued' }],
+    }]);
+
+    // The next successful write heals the projection, and the evidence goes away.
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }, { now: () => utc(6) }).projection).toBe('written');
+    expect(readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true }).conflicts).toEqual([]);
+  });
+});
+
+describe('SH-11 bound readWorkerState — canonical reads take the store from the binding only', () => {
+  it('reads the bound mission\'s nodes keyed by limb and reports the binding', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active', window: 'w-1' });
+    boundWrite(w, 'beta', { ops_state: 'review' });
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true });
+    expect(read.source).toBe('store');
+    expect(read.binding).toEqual({ status: 'bound', mission_id: MISSION, run_id: RUN_ID, generation: 1 });
+    expect(Object.keys(read.workers).sort()).toEqual(['alpha', 'beta']);
+    expect(read.workers.alpha).toMatchObject({ status: 'executing', owns: ['lib/a/**'], ops_state: 'active', since: iso(5), window: 'w-1', source: 'store', heartbeat_source: 'lane-heartbeat' });
+    expect(read.workers.beta.status).toBe('reviewing');
+    expect(read.conflicts).toEqual([]);
+  });
+
+  it('ignores a caller-supplied storeReader on a bound run — one canonical source, not two', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true, storeReader: () => ({ workers: { alpha: { status: 'done' } } }) });
+    expect(read.workers.alpha.status).toBe('executing');
+  });
+
+  it('a bound run read with no store answers from run.json and says the store was not read', () => {
+    const w = makeBoundWorld({ run: { lanes: { alpha: { state: 'review', since: iso(3) } } } });
+    const read = readWorkerState({ runDir: w.runDir, honorBinding: true });
+    expect(read.source).toBe('run.json');
+    expect(read.binding).toEqual({ status: 'unread', mission_id: MISSION, run_id: RUN_ID, generation: 1 });
+  });
+
+  it('a dangling binding contributes no store layer, and the read says so', () => {
+    const w = makeBoundWorld({ missions: [OTHER_MISSION], run: { lanes: { alpha: { state: 'review', since: iso(3) } } } });
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true });
+    expect(read.binding).toEqual({ status: 'dangling', mission_id: MISSION, run_id: RUN_ID, generation: 1 });
+    expect(read.source).toBe('run.json');
+    expect(read.workers.alpha.status).toBe('reviewing');
+  });
+
+  it('an invalid binding is reported and the store is not consulted', () => {
+    const w = makeBoundWorld({ binding: { ...BINDING, mission_id: 'nope' } });
+    let asked = 0;
+    const read = readWorkerState({ runDir: w.runDir, honorBinding: true, store: { getState: () => { asked += 1; return {}; } } });
+    expect(read.binding).toEqual({ status: 'invalid', reason: 'binding-invalid:mission_id' });
+    expect(asked).toBe(0);
+  });
+
+  it('F4: a limb also present in ANOTHER mission is evidence in conflicts[], never a second answer', () => {
+    const w = makeBoundWorld({ missions: [MISSION, OTHER_MISSION] });
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    const legacy = { schema_version: 1, mission_id: OTHER_MISSION, tasks: [{ id: 'alpha', mission_id: OTHER_MISSION, status: 'done', owner: null }] };
+    expect(w.store.updateMission(OTHER_MISSION, (cur) => cur, { graph: legacy, reason: 'test.residue' }).ok).toBe(true);
+
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true });
+    expect(read.workers.alpha).toMatchObject({ status: 'executing', source: 'store' });
+    const c = read.conflicts.find((x) => x.worker === 'alpha' && x.field === 'status');
+    expect(c.values).toEqual(expect.arrayContaining([
+      { source: 'store', value: 'executing' },
+      { source: `store:${OTHER_MISSION}`, value: 'done' },
+    ]));
+    // and the reader wrote nothing
+    expect(w.store.getTaskGraph(OTHER_MISSION).tasks).toHaveLength(1);
+  });
+
+  it('a limb in another mission that AGREES is not a conflict', () => {
+    const w = makeBoundWorld({ missions: [MISSION, OTHER_MISSION] });
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    const same = { schema_version: 1, mission_id: OTHER_MISSION, tasks: [{ id: 'alpha', mission_id: OTHER_MISSION, status: 'executing', owner: 'alpha' }] };
+    w.store.updateMission(OTHER_MISSION, (cur) => cur, { graph: same, reason: 'test.residue' });
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true });
+    expect(read.workers.alpha).toMatchObject({ status: 'executing', source: 'store' });
+    expect(read.conflicts).toEqual([]);
+  });
+
+  it('a node whose ops and status disagree at rest is reported as a conflict, not silently trusted', () => {
+    const w = makeBoundWorld();
+    boundWrite(w, 'alpha', { ops_state: 'active' });
+    w.store.releaseTask({ missionId: MISSION, taskId: 'alpha', status: 'claimed', reason: 'test.skew' });
+    const read = readWorkerState({ runDir: w.runDir, store: w.store, honorBinding: true });
+    const c = read.conflicts.find((x) => x.worker === 'alpha' && x.field === 'status');
+    expect(c.values).toEqual(expect.arrayContaining([{ source: 'store', value: 'claimed' }, { source: 'store:ops', value: 'executing' }]));
+  });
+
+  it('CONTROL — an unbound read has no binding key and still honours storeReader', () => {
+    const w = makeBoundWorld({ binding: null });
+    const read = readWorkerState({ runDir: w.runDir, storeReader: () => ({ workers: { alpha: { status: 'reviewing' } } }) });
+    expect(Object.hasOwn(read, 'binding')).toBe(false);
+    expect(read.workers.alpha).toMatchObject({ status: 'reviewing', source: 'store' });
+  });
+});
+
+describe('SH-11 readMissionBinding', () => {
+  it('reads none, bound, and every way a binding can be wrong', () => {
+    expect(readMissionBinding({ runDir: makeBoundWorld({ binding: null }).runDir })).toEqual({ status: 'none' });
+    const bound = readMissionBinding({ runDir: makeBoundWorld().runDir });
+    expect(bound).toMatchObject({ status: 'bound', runId: RUN_ID });
+    expect(bound.binding).toEqual(BINDING);
+    expect(readMissionBinding({ runDir: makeBoundWorld({ binding: { ...BINDING, extra: 1 } }).runDir }))
+      .toEqual({ status: 'invalid', reason: 'binding-invalid:unknown-key:extra' });
+    expect(readMissionBinding({ runDir: makeBoundWorld({ binding: null, planOver: { missionBinding: null } }).runDir }))
+      .toEqual({ status: 'invalid', reason: 'binding-invalid:not-an-object' });
+    expect(readMissionBinding({ runDir: makeBoundWorld({ binding: { ...BINDING, run_id: 'split-other' } }).runDir }))
+      .toEqual({ status: 'invalid', reason: 'binding-run-mismatch' });
+    expect(readMissionBinding({ runDir: makeBoundWorld({ run: { runId: 'split-zzz' } }).runDir }))
+      .toEqual({ status: 'invalid', reason: 'run-id-mismatch' });
+  });
+
+  it('a plan with no runId cannot carry a binding, and a missing plan or a run.json with no runId is not a mismatch', () => {
+    expect(readMissionBinding({ runDir: makeBoundWorld({ planOver: { runId: undefined } }).runDir }))
+      .toEqual({ status: 'invalid', reason: 'binding-run-mismatch' });
+    expect(readMissionBinding({ runDir: makeRunDir({}) })).toEqual({ status: 'none' });
+    expect(readMissionBinding({ runDir: makeBoundWorld({ run: { runId: undefined } }).runDir }).status).toBe('bound');
+  });
+
+  it('a corrupt plan.json throws rather than reading as unbound', () => {
+    const w = makeBoundWorld();
+    expect(readMissionBinding({ runDir: w.runDir }).status).toBe('bound'); // the same directory, intact
+    fs.writeFileSync(path.join(w.runDir, 'plan.json'), '{ not json');
+    expect(() => readMissionBinding({ runDir: w.runDir })).toThrow(SyntaxError);
+  });
+
+  it('requires runDir', () => {
+    expect(() => readMissionBinding({})).toThrow(/runDir is required/);
+  });
+});
+
+describe('SH-11 bindRunToMission — the writer of the binding', () => {
+  const bind = (w, over = {}) => bindRunToMission({ runDir: w.runDir, missionId: MISSION, sessionId: SID, now: () => utc(4), store: w.store, ...over });
+  const planText = (w) => fs.readFileSync(path.join(w.runDir, 'plan.json'), 'utf-8');
+
+  it('writes generation 1 into plan.json, keeps every other plan key, and reports bound:true', () => {
+    const w = makeBoundWorld({ binding: null });
+    const res = bind(w);
+    expect(res).toMatchObject({ ok: true, bound: true });
+    expect(res.binding).toEqual(BINDING);
+    const plan = JSON.parse(planText(w));
+    expect(plan.missionBinding).toEqual(BINDING);
+    expect(plan.runId).toBe(RUN_ID);
+    expect(plan.limbs).toEqual(BOUND_PLAN.limbs);
+    expect(readMissionBinding({ runDir: w.runDir }).status).toBe('bound');
+  });
+
+  it('binds ONCE: a second call, even naming another mission, reuses the record and leaves plan.json byte-identical (I1)', () => {
+    const w = makeBoundWorld({ binding: null, missions: [MISSION, OTHER_MISSION] });
+    bind(w);
+    const before = planText(w);
+    const again = bind(w, { missionId: OTHER_MISSION, sessionId: 'other-session-0001', now: () => utc(9) });
+    expect(again).toMatchObject({ ok: true, bound: false });
+    expect(again.binding).toEqual(BINDING);
+    expect(planText(w)).toBe(before);
+  });
+
+  it('never creates a mission row: an absent mission is refused and the store does not move', () => {
+    const w = makeBoundWorld({ binding: null, missions: [OTHER_MISSION] });
+    const v = storeVersion(w);
+    const before = planText(w);
+    expect(bind(w)).toEqual({ ok: false, reason: 'mission-missing' });
+    expect(storeVersion(w)).toBe(v);
+    expect(Object.keys(w.store.getState().active_missions)).toEqual([OTHER_MISSION]);
+    expect(planText(w)).toBe(before);
+  });
+
+  it('refuses what it cannot bind, each with plan.json untouched', () => {
+    const cases = [
+      [{ binding: null, planOver: { runId: undefined } }, {}, 'plan-run-id-missing'],
+      [{ binding: null, run: { runId: 'split-zzz' } }, {}, 'run-id-mismatch'],
+      [{ binding: null }, { missionId: 'M-2026-1' }, 'binding-invalid:mission_id'],
+      [{ binding: null }, { sessionId: '' }, 'binding-invalid:bound_by_session'],
+      [{ binding: { ...BINDING, generation: 0 } }, {}, 'binding-invalid:generation'],
+    ];
+    for (const [worldOver, callOver, reason] of cases) {
+      const w = makeBoundWorld(worldOver);
+      const before = planText(w);
+      expect(bind(w, callOver), reason).toEqual({ ok: false, reason });
+      expect(planText(w), reason).toBe(before);
+    }
+  });
+
+  it('a run with no plan.json yet is refused as plan-missing', () => {
+    const runDir = makeRunDir({});
+    expect(bindRunToMission({ runDir, missionId: MISSION, sessionId: SID, now: () => utc(4) })).toEqual({ ok: false, reason: 'plan-missing' });
+    expect(fs.existsSync(path.join(runDir, 'plan.json'))).toBe(false);
+  });
+
+  it('works without a store port (the caller has already checked the row) and in a non-canonical directory', () => {
+    const runDir = makeRunDir({ plan: BOUND_PLAN, run: { runId: RUN_ID }, canonical: false });
+    const res = bindRunToMission({ runDir, missionId: MISSION, sessionId: SID, now: () => utc(4) });
+    expect(res).toMatchObject({ ok: true, bound: true });
+    expect(JSON.parse(fs.readFileSync(path.join(runDir, 'plan.json'), 'utf-8')).missionBinding).toEqual(BINDING);
+  });
+
+  it('takes the strict clock like every other writer here', () => {
+    const w = makeBoundWorld({ binding: null });
+    expect(() => bind(w, { now: () => 1788350400000 })).toThrow(/bindRunToMission: now\(\) must return a Date, received number/);
+    expect(JSON.parse(planText(w)).missionBinding).toBeUndefined();
+    expect(bind(w).ok).toBe(true); // the same call with a real clock binds
+  });
+
+  it('M1: a binding that lands between the probe and the write wins — the caller gets the winner, and plan.json keeps it', () => {
+    const w = makeBoundWorld({ binding: null, missions: [MISSION, OTHER_MISSION] });
+    const theirs = { ...BINDING, mission_id: OTHER_MISSION, bound_by_session: 'other-session-0001', bound_at: iso(3) };
+    // The store port is consulted AFTER the probe and BEFORE the write, so it is
+    // where a competing binder lands. updatePlanJson has no lock; the read-back
+    // after the write is what decides who won.
+    const racy = {
+      getState: () => {
+        const plan = JSON.parse(planText(w));
+        plan.missionBinding = theirs;
+        fs.writeFileSync(path.join(w.runDir, 'plan.json'), JSON.stringify(plan));
+        return w.store.getState();
+      },
+    };
+    const res = bind(w, { store: racy });
+    expect(res).toMatchObject({ ok: true, bound: false });
+    expect(res.binding).toEqual(theirs);
+    expect(JSON.parse(planText(w)).missionBinding).toEqual(theirs);
+  });
+
+  it('M1: what it reports as bound is what plan.json holds afterwards', () => {
+    const w = makeBoundWorld({ binding: null });
+    const res = bind(w);
+    expect(res).toMatchObject({ ok: true, bound: true });
+    expect(JSON.parse(planText(w)).missionBinding).toEqual(res.binding);
+  });
+});
+
+/* ══════════ SH-11 canary switch (③) — with the key OFF a bound run is written and read by the legacy path ══════════
+ *
+ * `lib/topology` is L4 and never reads config: the caller injects an
+ * `honorBinding` port (`true`, or a function returning `true`). It is
+ * FAIL-CLOSED — an absent port, `'true'`, `1` and a port that throws are all
+ * "off" — so a caller that forgets it gets the legacy behaviour, never a
+ * silent store write. WHAT THIS CANNOT SEE: the three CLIs' own reading of the
+ * key (`tests/scripts/*.test.js` measure that) and the shipped value
+ * (`tests/firewall/split-config-firewall.test.js`).
+ */
+describe('SH-11 switch (③) — the key OFF reverts a bound run', () => {
+  const legacyWrite = (w, patch, extra = {}) => writeWorkerState({ runDir: w.runDir, worker: 'alpha', patch, store: w.store, now: () => utc(5), ...extra });
+
+  it('the DEFAULT is off: with no honorBinding port the write goes to run.json only, the store is untouched, and the result says disabled', () => {
+    const w = makeBoundWorld();
+    const v = storeVersion(w);
+    const res = legacyWrite(w, { ops_state: 'active' });
+    expect(res.ok).toBe(true);
+    expect(res.source).toBeUndefined();
+    expect(res.binding).toEqual({ status: 'disabled' });
+    expect(laneOf(w, 'alpha')).toMatchObject({ state: 'active', since: iso(5), projected_from: PROJECTION_MARK });
+    expect(storeVersion(w)).toBe(v);
+    expect(w.store.getTaskGraph(MISSION).tasks).toEqual([]);
+  });
+
+  it('an explicit false, a port that says false and every non-literal value revert the same way', () => {
+    for (const port of [false, () => false, 'true', 1, {}, () => 'yes', () => { throw new Error('config unreadable'); }]) {
+      const w = makeBoundWorld();
+      const res = legacyWrite(w, { ops_state: 'active' }, { honorBinding: port });
+      expect(res.binding, String(port)).toEqual({ status: 'disabled' });
+      expect(laneOf(w, 'alpha').projected_from, String(port)).toBe(PROJECTION_MARK);
+      expect(storeVersion(w), String(port)).toBe(1);
+    }
+  });
+
+  it('CONTROL — the literal true (or a function returning it) is what turns the store write on', () => {
+    for (const port of [true, () => true]) {
+      const w = makeBoundWorld();
+      const res = legacyWrite(w, { ops_state: 'active' }, { honorBinding: port });
+      expect(res).toMatchObject({ ok: true, source: 'store' });
+      expect(Object.hasOwn(res, 'binding')).toBe(false);
+      expect(laneOf(w, 'alpha').projected_from).toBe(STORE_PROJECTION_MARK);
+    }
+  });
+
+  it('the port is asked lazily: never for a run that carries no binding, once for one that does', () => {
+    let asked = 0;
+    const port = () => { asked += 1; return true; };
+    legacyWrite(makeBoundWorld({ binding: null }), { ops_state: 'active' }, { honorBinding: port });
+    expect(asked).toBe(0);
+    legacyWrite(makeBoundWorld(), { ops_state: 'active' }, { honorBinding: port });
+    expect(asked).toBe(1);
+  });
+
+  it('a DAMAGED binding is not judged while the switch is off, and rejects when it is on', () => {
+    const w = makeBoundWorld({ binding: { ...BINDING, generation: 0 } });
+    const off = legacyWrite(w, { ops_state: 'active' }, { honorBinding: false });
+    expect(off.ok).toBe(true);
+    expect(off.binding).toEqual({ status: 'disabled' });
+    const before = runBytes(w);
+    expect(legacyWrite(w, { ops_state: 'review' }, { honorBinding: true })).toMatchObject({ ok: false, reason: 'binding-invalid:generation' });
+    expect(runBytes(w)).toEqual(before);
+  });
+
+  it('the opener is never called while the switch is off (a session id is needed only to open a store)', () => {
+    const w = makeBoundWorld();
+    let opened = 0;
+    legacyWrite(w, { ops_state: 'active' }, { store: undefined, openStore: () => { opened += 1; return w.store; } });
+    expect(opened).toBe(0);
+  });
+
+  it('an unbound run\'s result never carries a binding key: the annotation is only for a run that HAS a record', () => {
+    for (const port of [undefined, true, false]) {
+      const res = legacyWrite(makeBoundWorld({ binding: null }), { ops_state: 'active' }, { honorBinding: port });
+      expect(res.ok, String(port)).toBe(true);
+      expect(Object.hasOwn(res, 'binding'), String(port)).toBe(false);
+    }
+  });
+
+  it('the ledger-refusal shape carries the annotation too', () => {
+    const w = makeBoundWorld();
+    const res = legacyWrite(w, { ops_state: 'done' }, { ledger: { session_id: SID }, appendEvent: () => ({ ok: false, reason: 'busy' }) });
+    expect(res).toMatchObject({ ok: false, ledger: 'refused', binding: { status: 'disabled' } });
+  });
+
+  it('reads: with the key off the legacy storeReader answers, the store port is never consulted, and the result says disabled', () => {
+    const w = makeBoundWorld({ run: { lanes: { alpha: { state: 'review', since: iso(3) } } } });
+    let asked = 0;
+    const store = { getState: () => { asked += 1; return {}; } };
+    const read = readWorkerState({ runDir: w.runDir, store, storeReader: () => ({ workers: { alpha: { status: 'done' } } }) });
+    expect(asked).toBe(0);
+    expect(read.binding).toEqual({ status: 'disabled' });
+    expect(read.workers.alpha).toMatchObject({ status: 'done', source: 'store' }); // the legacy store layer
+  });
+
+  it('reads: a damaged binding reads as disabled while off, invalid while on', () => {
+    const w = makeBoundWorld({ binding: { ...BINDING, mission_id: 'nope' } });
+    expect(readWorkerState({ runDir: w.runDir }).binding).toEqual({ status: 'disabled' });
+    expect(readWorkerState({ runDir: w.runDir, honorBinding: true }).binding).toEqual({ status: 'invalid', reason: 'binding-invalid:mission_id' });
+  });
+});
+
+/* ══════════ SH-11 stale guard (④) — writes made while the key was OFF leave node.ops behind run.json ══════════
+ *
+ * Turning the key off is safe; turning it on again is not free. The legacy path
+ * writes run.json and never the node, so after off -> on the node's `ops`
+ * describes a moment BEFORE the lane's last word. A bound write computes its
+ * previous state, its `since` and its ledger key from that node, so it
+ * REFUSES rather than build on it. Two clauses, either refuses: the lane's
+ * `updated_at` is later than the node's, OR the lane's word differs from
+ * `node.ops.state` and post-dates `node.ops.since` (the second exists because
+ * the legacy feeder's ownership refresh also stamps `node.updated_at`, after
+ * its own lane write, which hides the first). WHAT THIS CANNOT SEE: a legacy
+ * write with a clock behind the node's, and a lane hand-edited without
+ * touching `updated_at`.
+ */
+describe('SH-11 stale guard (④)', () => {
+  /** alpha written to the store at 05:00, then — key OFF — to run.json at 06:00. */
+  function flippedWorld() {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    const off = writeWorkerState({ runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'review' }, store: w.store, honorBinding: false, now: () => utc(6) });
+    expect(off.binding).toEqual({ status: 'disabled' });
+    expect(laneOf(w, 'alpha')).toMatchObject({ state: 'review', projected_from: PROJECTION_MARK, updated_at: iso(6) });
+    return w;
+  }
+  const tamperLane = (w, over) => {
+    const run = readRun(w.runDir);
+    run.lanes.alpha = { ...run.lanes.alpha, ...over };
+    for (const [k, v] of Object.entries(over)) if (v === undefined) delete run.lanes.alpha[k];
+    fs.writeFileSync(path.join(w.runDir, 'run.json'), JSON.stringify(run));
+  };
+
+  it('rejects a bound write with binding-stale; run.json, the store and the ledger port are untouched', () => {
+    const w = flippedWorld();
+    const before = runBytes(w);
+    const v = storeVersion(w);
+    const events = [];
+    const res = boundWrite(w, 'alpha', { ops_state: 'done' }, {
+      now: () => utc(7), ledger: { session_id: SID }, appendEvent: (e) => { events.push(e); return { ok: true }; },
+    });
+    expect(res).toMatchObject({ ok: false, reason: 'binding-stale', worker: 'alpha', ledger: 'not-attempted' });
+    expect(res.detail).toMatch(/lanes\.alpha/);
+    expect(res.detail).toMatch(/missionBinding/);
+    expect(runBytes(w)).toEqual(before);
+    expect(storeVersion(w)).toBe(v);
+    expect(nodeOf(w, 'alpha').ops.state).toBe('active');
+    expect(events).toEqual([]);
+  });
+
+  it('judges the record, not the request: a state-less patch is refused too', () => {
+    const w = flippedWorld();
+    expect(boundWrite(w, 'alpha', { note: 'x' }, { now: () => utc(7) })).toMatchObject({ ok: false, reason: 'binding-stale' });
+  });
+
+  it('a different limb of the same run is not affected — the guard is per node', () => {
+    const w = flippedWorld();
+    expect(boundWrite(w, 'beta', { ops_state: 'active' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store' });
+  });
+
+  it('the way out is deliberate: drop the stale lane entry and the same write goes through', () => {
+    const w = flippedWorld();
+    const run = readRun(w.runDir);
+    delete run.lanes.alpha;
+    fs.writeFileSync(path.join(w.runDir, 'run.json'), JSON.stringify(run));
+    const res = boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
+    expect(res).toMatchObject({ ok: true, opsState: 'done', previousOps: 'active' });
+    expect(laneOf(w, 'alpha')).toMatchObject({ state: 'done', projected_from: STORE_PROJECTION_MARK });
+  });
+
+  it('does not fire for what it can judge current: a lane the store projected, an older lane, an equal instant, no updated_at, a node with no ops', () => {
+    const cases = {
+      'store-projected lane, even with a later stamp': { projected_from: STORE_PROJECTION_MARK, updated_at: iso(9) },
+      'legacy lane OLDER than the node': { projected_from: PROJECTION_MARK, updated_at: iso(4) },
+      'legacy lane at the SAME instant': { projected_from: PROJECTION_MARK, updated_at: iso(5) },
+      'legacy lane with no updated_at': { projected_from: PROJECTION_MARK, updated_at: undefined },
+      'lane with no projected_from stamp and an unparseable updated_at': { projected_from: undefined, updated_at: 'soon' },
+    };
+    for (const [name, over] of Object.entries(cases)) {
+      const w = makeBoundWorld();
+      expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok, name).toBe(true);
+      tamperLane(w, over);
+      expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(10) }), name).toMatchObject({ ok: true, source: 'store' });
+    }
+  });
+
+  it('a lane with a LATER updated_at and no store mark is stale, whoever wrote it — the store did not', () => {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    tamperLane(w, { projected_from: undefined, updated_at: iso(8) });
+    expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(10) })).toMatchObject({ ok: false, reason: 'binding-stale' });
+  });
+
+  it('a node with no ops has nothing to be behind: the lane is its previous state (the backfill), whatever its stamp', () => {
+    const w = makeBoundWorld({ run: { lanes: { alpha: { state: 'review', since: iso(3), projected_from: PROJECTION_MARK, updated_at: iso(8) } } } });
+    const legacyNode = { schema_version: 1, mission_id: MISSION, tasks: [{ id: 'alpha', mission_id: MISSION, status: 'claimed', owner: 'alpha', updated_at: iso(1) }] };
+    expect(w.store.updateMission(MISSION, (cur) => cur, { graph: legacyNode, reason: 'test.legacy' }).ok).toBe(true);
+    expect(boundWrite(w, 'alpha', { note: 'x' }, { now: () => utc(10) })).toMatchObject({ ok: true, previousOps: 'review', changed: false });
+  });
+
+  /**
+   * What the LEGACY feeder does to a node in the off period when the plan's
+   * ownership changed: `mergeLimbTasks` rewrites `file_ownership` and stamps
+   * `updated_at` — `ops` is left alone. (`claimTask` / `releaseTask` /
+   * `heartbeatWorker` do NOT stamp `updated_at`; only this refresh does.)
+   */
+  const legacyRefresh = (w, at) => {
+    const graph = w.store.getTaskGraph(MISSION);
+    const tasks = graph.tasks.map((t) => (t.id === 'alpha' ? { ...t, file_ownership: ['src/moved/**'], updated_at: at } : t));
+    expect(w.store.updateMission(MISSION, (cur) => cur, { graph: { ...graph, tasks }, reason: 'test.legacy-refresh' }).ok).toBe(true);
+  };
+
+  it('a legacy ownership refresh AFTER the legacy lane write moves node.updated_at past the lane — the lane is still stale: its word differs from ops and post-dates ops.since', () => {
+    const w = flippedWorld(); // ops active since 05:00; lane review, run.json, 06:00
+    legacyRefresh(w, iso(6, 30)); // node.updated_at 06:30 > lane 06:00: the updated_at comparison alone cannot see the drift
+    const before = runBytes(w);
+    const v = storeVersion(w);
+    const res = boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
+    expect(res).toMatchObject({ ok: false, reason: 'binding-stale', worker: 'alpha' });
+    expect(res.detail).toMatch(/says 'review'/);
+    expect(res.detail).toMatch(/ops says 'active'/);
+    expect(runBytes(w)).toEqual(before);
+    expect(storeVersion(w)).toBe(v);
+    expect(nodeOf(w, 'alpha').ops.state).toBe('active');
+  });
+
+  it('CONTROL — the same refresh over a lane that says what ops says is not stale: there is no drift to lose', () => {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    // A legacy re-assert of the SAME word at 06:00, then the refresh at 06:30.
+    const off = writeWorkerState({ runDir: w.runDir, worker: 'alpha', patch: { ops_state: 'active' }, store: w.store, honorBinding: false, now: () => utc(6) });
+    expect(off).toMatchObject({ ok: true, binding: { status: 'disabled' } });
+    legacyRefresh(w, iso(6, 30));
+    expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store', previousOps: 'active' });
+  });
+
+  it('CONTROL — a lane the projection left BEHIND the node is not stale: a different word, but older than the ops change (the store is right)', () => {
+    const w = makeBoundWorld();
+    expect(boundWrite(w, 'alpha', { ops_state: 'active' }).ok).toBe(true);
+    expect(boundWrite(w, 'alpha', { ops_state: 'review' }, { now: () => utc(6) }).ok).toBe(true); // ops review since 06:00
+    tamperLane(w, { state: 'active', projected_from: PROJECTION_MARK, updated_at: iso(5, 30) }); // a lane that never caught up, no store stamp
+    expect(boundWrite(w, 'alpha', { ops_state: 'closing' }, { now: () => utc(7) })).toMatchObject({ ok: true, source: 'store', previousOps: 'review' });
+  });
+
+  it('off -> on -> off -> on: each turn of the key is safe, and only the stale one refuses', () => {
+    const w = makeBoundWorld();
+    const write = (honorBinding, state, hour) => writeWorkerState({ runDir: w.runDir, worker: 'alpha', patch: { ops_state: state }, store: w.store, honorBinding, now: () => utc(hour) });
+    expect(write(true, 'active', 5)).toMatchObject({ ok: true, source: 'store' });
+    expect(write(true, 'review', 6)).toMatchObject({ ok: true, source: 'store' });
+    expect(write(false, 'closing', 7)).toMatchObject({ ok: true, binding: { status: 'disabled' } });
+    expect(write(false, 'done', 8)).toMatchObject({ ok: true, binding: { status: 'disabled' } });
+    expect(write(true, 'done', 9)).toMatchObject({ ok: false, reason: 'binding-stale' });
+    expect(nodeOf(w, 'alpha').ops.state).toBe('review'); // the store still says what it said at 06:00
+    expect(laneOf(w, 'alpha').state).toBe('done'); // and run.json says what the operator last set
   });
 });

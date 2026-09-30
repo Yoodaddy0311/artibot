@@ -25,8 +25,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
-import { writeRunJson } from '../../lib/git/split-run-file.js';
+import { readRunJson, writeRunJson } from '../../lib/git/split-run-file.js';
 import { LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
+import { HEARTBEAT_OPS_STATES } from '../../lib/topology/split-state-sources.js';
 import { feedLimb, openFeedStore } from '../../scripts/split/task-feed.mjs';
 import * as laneState from '../../scripts/split/lane-state.mjs';
 import { LANE_LEASE_ACTIONS, LANE_LEASE_REASON, syncLaneLease } from '../../scripts/split/lane-lease.mjs';
@@ -71,8 +72,11 @@ function seedMission(store) {
   expect(r.ok).toBe(true);
 }
 
-const feed = (store, limb = 'auth') => feedLimb({ parentRoot: root, plan: PLAN, limb, sessionId: SESSION }, { openStore: () => store });
-const sync = (store, state, limb = 'auth') => syncLaneLease({ parentRoot: root, limb, state, sessionId: SESSION }, { openStore: () => store });
+// The SH-11 canary switch (split.missionBinding.enabled): only a literal true honours a binding.
+const ON = { split: { missionBinding: { enabled: true } } };
+const OFF = { split: { missionBinding: { enabled: false } } };
+const feed = (store, limb = 'auth') => feedLimb({ parentRoot: root, plan: PLAN, limb, sessionId: SESSION }, { openStore: () => store, config: ON });
+const sync = (store, state, limb = 'auth', config = ON) => syncLaneLease({ parentRoot: root, limb, state, sessionId: SESSION }, { openStore: () => store, config });
 const updates = () => ledger.filter((e) => e.event === 'state.updated').length;
 const task = (store, limb = 'auth') => store.getTaskGraph(MISSION).tasks.find((t) => t.id === limb);
 
@@ -364,5 +368,191 @@ describe('dispatch path stays unwired', () => {
     expect(store.getLease(MISSION, 'auth')?.owner).toBe('auth');
     expect(store.getLease(MISSION, 'auth').heartbeat_at).toBe(beat);
     expect(task(store).status).toBe('claimed');
+  });
+});
+
+/* ══════════ SH-11 — a BOUND run: the sync follows the binding and adds no second store write ══════════
+ *
+ * In a bound run the lane write is ONE store commit that already carries what
+ * the sync used to write (the heartbeat stamp, the release of `status`/`owner`),
+ * so the sync's remaining job is lease-RECORD hygiene: release a lease that was
+ * taken before the run was bound. The bound feeder never claims (`claimTask`
+ * would set `status: claimed` over the node's own ops state).
+ *
+ * WHAT THIS CANNOT SEE: a live leader session — none has run a bound lane yet.
+ */
+describe('SH-11 bound run — lease sync', () => {
+  const BOUND = { mission_id: MISSION, run_id: 'split-t', generation: 1, bound_at: '2026-09-23T00:00:00.000Z', bound_by_session: SESSION };
+  const bindPlan = (binding = BOUND) => fs.writeFileSync(path.join(root, '.artibot', 'split', 'plan.json'), JSON.stringify({ ...PLAN, missionBinding: binding }));
+  const boundCli = (store, argv) => {
+    const c = collect();
+    const code = laneState.main(argv, {
+      cwd: root, ...c.io, now: () => clock, openStore: () => store, sessionId: SESSION, config: ON,
+      syncLease: (input) => syncLaneLease({ ...input, sessionId: SESSION }, { openStore: () => store, config: ON }),
+    });
+    return { code, ...c };
+  };
+  const reasons = () => ledger.map((e) => e.data?.reason);
+
+  it('a lane write and its lease sync cost ONE store commit, not two', () => {
+    const store = makeStore();
+    seedMission(store);
+    bindPlan();
+    const before = updates();
+
+    const r = boundCli(store, ['auth', 'done', '--json']);
+
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout());
+    expect(out.lease).toEqual({ outcome: 'unchanged', missionId: MISSION });
+    expect(out).toMatchObject({ source: 'store', missionId: MISSION });
+    expect(updates()).toBe(before + 1);
+    expect(reasons().filter((x) => x === LANE_LEASE_REASON)).toEqual([]);
+    expect(reasons().at(-1)).toBe('split.lane-state');
+    expect(task(store)).toMatchObject({ status: 'done', owner: null });
+  });
+
+  it('a working state stamps the node in that same commit; with no lease the sync has nothing to renew', () => {
+    const store = makeStore();
+    seedMission(store);
+    bindPlan();
+    clock = new Date('2026-09-23T03:00:00.000Z');
+    const before = updates();
+
+    const r = boundCli(store, ['auth', 'active', '--json']);
+
+    expect(JSON.parse(r.stdout()).lease).toEqual({ outcome: 'skipped:no-lease', missionId: MISSION });
+    expect(updates()).toBe(before + 1);
+    expect(task(store)).toMatchObject({ status: 'executing', owner: 'auth', heartbeat_at: '2026-09-23T03:00:00.000Z', heartbeat_source: 'lane-heartbeat' });
+    expect(store.getLease(MISSION, 'auth')).toBe(null);
+  });
+
+  it('T2: two dated missions carrying the session tail still resolve, through the binding', () => {
+    const OLDER = 'M-20260922-Sabcd1234';
+    const store = makeStore();
+    seedMission(store);
+    expect(store.updateMission(OLDER, () => ({ status: 'executing', intent: { path: 'i.md', revision: 1 }, plan: { path: 'p.md', revision: 1 } }), { reason: 'test.seed' }).ok).toBe(true);
+    bindPlan();
+    expect(boundCli(store, ['auth', 'done']).code).toBe(0);
+
+    expect(sync(store, 'done')).toEqual({ outcome: 'unchanged', missionId: MISSION });
+    expect(store.getTaskGraph(OLDER).tasks).toEqual([]);
+
+    // CONTROL — the same store with the binding removed is the legacy ambiguity.
+    fs.writeFileSync(path.join(root, '.artibot', 'split', 'plan.json'), JSON.stringify(PLAN));
+    expect(sync(store, 'done')).toEqual({ outcome: 'skipped:no-mission', missionId: null });
+  });
+
+  it('T3: a dangling binding is skipped — never re-resolved through the session — and nothing is written', () => {
+    const GONE = 'M-20260901-001';
+    bindPlan({ ...BOUND, mission_id: GONE });
+    const store = makeStore();
+    seedMission(store); // the session's own live mission, which the per-session join would have used
+    const version = store.getState().state_version;
+    expect(sync(store, 'done')).toEqual({ outcome: 'skipped:binding-dangling', missionId: GONE });
+    expect(sync(store, 'active')).toEqual({ outcome: 'skipped:binding-dangling', missionId: GONE });
+    expect(store.getState().state_version).toBe(version);
+  });
+
+  it('hygiene: a lease taken BEFORE the run was bound is still released at done', () => {
+    const store = makeStore();
+    seedMission(store);
+    expect(feed(store).claim).toBe('claimed'); // the legacy feed: lease held, status claimed, no ops
+    bindPlan();
+    expect(store.getLease(MISSION, 'auth')?.owner).toBe('auth');
+
+    const r = boundCli(store, ['auth', 'done', '--json']);
+
+    expect(JSON.parse(r.stdout()).lease).toEqual({ outcome: 'released:done', missionId: MISSION });
+    expect(store.getLease(MISSION, 'auth')).toBe(null);
+    expect(task(store)).toMatchObject({ status: 'done', owner: null });
+    expect(task(store).ops.state).toBe('done');
+  });
+
+  it('HEARTBEAT_OPS_STATES (the writer\'s list) is the same set of words LANE_LEASE_ACTIONS calls heartbeat', () => {
+    const heartbeat = Object.keys(LANE_LEASE_ACTIONS).filter((s) => LANE_LEASE_ACTIONS[s] === 'heartbeat');
+    expect([...HEARTBEAT_OPS_STATES].sort()).toEqual(heartbeat.sort());
+  });
+});
+
+/* ══════════ SH-11 canary switch (③) — the lease sync and lane-state with the key OFF ══════════
+ *
+ * A run that carries a binding is written and synced by the LEGACY path while
+ * `split.missionBinding.enabled` is not a literal true, and every result says
+ * `binding: { status: 'disabled' }`. WHAT THIS CANNOT SEE: the shipped value of
+ * the key (tests/firewall/split-config-firewall.test.js) and a live host.
+ */
+describe('SH-11 switch (③) — key OFF', () => {
+  const BOUND = { mission_id: MISSION, run_id: 'split-t', generation: 1, bound_at: '2026-09-23T00:00:00.000Z', bound_by_session: SESSION };
+  const bindPlan = (binding = BOUND) => fs.writeFileSync(path.join(root, '.artibot', 'split', 'plan.json'), JSON.stringify({ ...PLAN, missionBinding: binding }));
+  const GONE = 'M-20260901-001';
+
+  it('the sync of a bound run resolves through the SESSION while off and says disabled; with the key on the same files are a dangling skip', () => {
+    const store = makeStore();
+    seedMission(store); // the session's own mission
+    bindPlan({ ...BOUND, mission_id: GONE });
+    expect(sync(store, 'done', 'auth', OFF)).toEqual({ outcome: 'skipped:no-task', missionId: MISSION, binding: { status: 'disabled' } });
+    expect(sync(store, 'done', 'auth', ON)).toEqual({ outcome: 'skipped:binding-dangling', missionId: GONE });
+  });
+
+  it('the legacy lease semantics are back: a claimed limb is released by the ordinary sync', () => {
+    const store = makeStore();
+    seedMission(store);
+    expect(feed(store).claim).toBe('claimed');
+    bindPlan();
+    expect(sync(store, 'done', 'auth', OFF)).toEqual({ outcome: 'released:done', missionId: MISSION, binding: { status: 'disabled' } });
+    expect(store.getLease(MISSION, 'auth')).toBe(null);
+    expect(task(store).status).toBe('done');
+  });
+
+  it('every result after the resolution carries the annotation, and an unbound run\'s never does', () => {
+    const store = makeStore();
+    seedMission(store);
+    feed(store, 'billing'); // seeds both nodes, claims billing only
+    bindPlan();
+    // (`pending` and the other no-transition words return before any run is looked at.)
+    for (const state of ['active', 'done']) {
+      expect(sync(store, state, 'auth', OFF).binding, state).toEqual({ status: 'disabled' });
+    }
+    fs.writeFileSync(path.join(root, '.artibot', 'split', 'plan.json'), JSON.stringify(PLAN));
+    for (const state of ['active', 'done']) expect(Object.hasOwn(sync(store, state, 'auth', OFF), 'binding'), state).toBe(false);
+  });
+
+  it('the CLI with the key off writes run.json, opens no store, forwards the config to the sync, and reports disabled for both halves', () => {
+    const store = makeStore();
+    seedMission(store);
+    bindPlan();
+    const rows = updates();
+    let opened = 0;
+    const c = collect();
+    const code = laneState.main(['auth', 'active', '--json'], {
+      cwd: root, ...c.io, now: () => clock, sessionId: SESSION, config: OFF,
+      openStore: () => { opened += 1; return store; },
+      syncLease: (input, ports) => syncLaneLease({ ...input, sessionId: SESSION }, { openStore: () => store, ...ports }),
+    });
+    expect(code).toBe(0);
+    const out = JSON.parse(c.stdout());
+    expect(out.binding).toEqual({ status: 'disabled' });
+    // Resolved through the SESSION while off (the seeded mission has no task for this limb yet) — and annotated.
+    expect(out.lease).toEqual({ outcome: 'skipped:no-task', missionId: MISSION, binding: { status: 'disabled' } });
+    expect(Object.hasOwn(out, 'source')).toBe(false);
+    expect(opened).toBe(0);
+    expect(updates()).toBe(rows);
+    expect(readRunJson(root).lanes.auth).toMatchObject({ state: 'active', projected_from: 'run.json' });
+  });
+
+  it('CONTROL — the same CLI call with the key ON writes the store', () => {
+    const store = makeStore();
+    seedMission(store);
+    bindPlan();
+    const c = collect();
+    const code = laneState.main(['auth', 'active', '--json'], {
+      cwd: root, ...c.io, now: () => clock, sessionId: SESSION, config: ON,
+      openStore: () => store,
+      syncLease: (input, ports) => syncLaneLease({ ...input, sessionId: SESSION }, { openStore: () => store, ...ports }),
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(c.stdout())).toMatchObject({ source: 'store', missionId: MISSION });
+    expect(readRunJson(root).lanes.auth.projected_from).toBe('store');
   });
 });

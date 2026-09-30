@@ -123,7 +123,42 @@
             }
           ]
         },
-        "evidence_refs": { "$ref": "#/definitions/evidenceRefs" }
+        "evidence_refs": { "$ref": "#/definitions/evidenceRefs" },
+        "ops": {
+          "type": "object",
+          "description": "Operational lane record of a /split limb node: the ops vocabulary (contracts.js LANE_OPS_STATES) that run.json.lanes[limb] used to carry alone, moved onto the node so the Task Graph can be the canonical 'now' of a bound run. `state` is the ops word, `since` moves only when `state` changes, `run_id` is the split run that owns the node (one run -> one mission; every limb node of the run carries the same value). The agreement between `ops.state` and `status` (LANE_OPS_TO_V11_STATUS) and the blocked-reason rules are WRITER obligations (lib/topology/split-state.js) -- a new allOf rule here would fork the mapping table. `projected_from` is deliberately NOT a field: it stays a run.json-only stamp. Closed on purpose: an unknown key is a schema error, not a free-form extension.",
+          "required": ["state", "since", "run_id"],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "active",
+                "awaiting-dispatch",
+                "review",
+                "serial-gate",
+                "closing",
+                "done",
+                "suspended",
+                "failed"
+              ],
+              "description": "The 9 ops words, in the order of contracts.js LANE_OPS_STATES (a drift guard in tests/topology/split-state-sources.test.js compares the two)."
+            },
+            "since": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO-8601 instant this `state` was entered. Moves only on a state change: a re-assert keeps it, so the ledger idempotency key that names the transition (worker.claimed / task.released) is stable across a retry."
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The /split run (plan.json runId) that owns this node. Invariant I2 of the run-to-mission binding: all limb nodes of one run in a mission graph carry the same value."
+            },
+            "window": { "type": "string", "description": "Session name of the window working the limb (free text, as run.json lanes[limb].window)." },
+            "note": { "type": "string", "description": "Free-form note (why / what is next), as run.json lanes[limb].note." }
+          },
+          "additionalProperties": false
+        }
       },
       "allOf": [
         {
