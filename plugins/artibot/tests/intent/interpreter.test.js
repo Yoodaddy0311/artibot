@@ -295,3 +295,104 @@ describe('cueMatches', () => {
     expect(cueMatches('anything', '')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CA-15 follow-up (a): the `commit` completion tier and the `migrate` work
+// purpose used to fire on bare words. Both feed the question gate as
+// "structural / escalating" evidence, so a false positive there makes gate
+// conditions 2 and 4 true for a prompt that never asked for a commit or a
+// migration (measured 2026-09-30 on ad8e5b28 through evaluateConditions: every
+// case in the NEGATIVE tables below returned conditions 2 and 4 both true).
+//
+// The fix is an ALLOWLIST of phrases, not a deny list: a bare `commit`,
+// `check in`, `upgrade`, `업그레이드` or `이전` is no longer a cue; only the
+// phrases that state the intent are. So an unlisted phrasing FAILS CLOSED
+// (the tier is missed, which under-serves) instead of failing open. The
+// POSITIVE tables are what keep that from being satisfied by deleting the
+// cues altogether.
+// ---------------------------------------------------------------------------
+describe('cue vocabulary — phrase-context allowlists (CA-15 follow-up)', () => {
+  /** @param {string} prompt @returns {string[]} every completion tier with a cue */
+  const completionTiers = (prompt) => interpretIntent({ prompt }).completion_expectations;
+  /** @param {string} prompt @returns {string[]} every work purpose with a cue */
+  const purposes = (prompt) => interpretIntent({ prompt }).work_purposes;
+
+  describe('completion tier: commit', () => {
+    it.each([
+      ['a decision, not a git commit', 'Which should we pick? It is a product decision with no right answer, so commit to it.'],
+      ['commit to an approach', 'We should commit to this approach and move on.'],
+      ['commit to a naming scheme', "Let's commit to a naming scheme first."],
+      ['commit to memory', 'I want to commit to memory the rule about tabs.'],
+      ['check in with people', 'Please check in with the team about the schedule.'],
+      ['check in on a status', 'Can you check in on the status of the build?'],
+      ['a commit mentioned as a noun', 'What does the last commit do?'],
+    ])('does not read %s as a commit request', (_label, prompt) => {
+      expect(completionTiers(prompt)).not.toContain('commit');
+      expect(interpretIntent({ prompt }).completion_expectation).not.toBe('commit');
+    });
+
+    it.each([
+      'Fix the typo and commit it.',
+      'Implement the parser, run the tests, then commit.',
+      'Please commit the changes when you are done.',
+      'commit these files and push',
+      'git commit the fix after review',
+      'Make a commit with the updated README.',
+      'Check in the changes once the build is green.',
+      'README 오타 고치고 커밋까지 해줘',
+      '구현하고 커밋해줘',
+    ])('still reads %j as a commit request', (prompt) => {
+      expect(completionTiers(prompt)).toContain('commit');
+    });
+
+    it('resolves a plain commit request to the commit tier when nothing further is asked', () => {
+      expect(interpretIntent({ prompt: 'Fix the typo and commit it.' }).completion_expectation)
+        .toBe('commit');
+    });
+  });
+
+  describe('work purpose: migrate', () => {
+    it.each([
+      ['a generic improvement (Korean)', '이 함수 성능을 업그레이드해줘'],
+      ['the project owner\'s own "upgrade split" phrasing', 'split 을 업그레이드해줘'],
+      ['a cosmetic upgrade', 'UI 를 좀 더 예쁘게 업그레이드해줘'],
+      ['"previous" (이전) as a word', '이전 대화 내용을 요약해줘'],
+      ['"previously" (이전에)', '이전에 만든 함수 이름이 뭐였지'],
+      ['이전 inside 에이전트 (agent)', '에이전트 팀을 구성해줘'],
+      ['이전 inside 서브에이전트', '서브에이전트에게 위임해줘'],
+      ['a revert to a previous version', '이전 버전으로 되돌려줘'],
+      ['a generic improvement (English)', 'Please upgrade the split command'],
+      ['a cosmetic upgrade (English)', 'upgrade the UI so it looks nicer'],
+    ])('does not read %s as a migration', (_label, prompt) => {
+      expect(purposes(prompt)).not.toContain('migrate');
+      expect(interpretIntent({ prompt }).work_purpose).not.toBe('migrate');
+    });
+
+    it.each([
+      '패키지 버전 업그레이드 해줘',
+      '최신 버전으로 업그레이드해줘',
+      '의존성 업그레이드가 필요해',
+      '메이저 버전 업그레이드를 진행해줘',
+      '서버를 새 리전으로 이전해줘',
+      '데이터베이스 이전 작업을 계획해줘',
+      '서버 이전 계획을 세워줘',
+      '데이터를 새 저장소로 이전했다',
+      'postgres 로 마이그레이션 해줘',
+      'upgrade to node 22',
+      'upgrade the dependencies to the latest major version',
+      'migrate the database to postgres',
+    ])('still reads %j as a migration', (prompt) => {
+      expect(purposes(prompt)).toContain('migrate');
+      expect(interpretIntent({ prompt }).work_purpose).toBe('migrate');
+    });
+  });
+
+  it('records the allowlisted phrase, not a bare word, as the evidence cue', () => {
+    const { evidence } = interpretIntent({ prompt: '서버를 새 리전으로 이전해줘 그리고 커밋해줘 then commit' });
+    const cues = evidence.filter((e) => e.value === 'migrate' || e.value === 'commit').map((e) => e.cue);
+    expect(cues).toContain('이전해');
+    expect(cues).toContain('then commit');
+    expect(cues).not.toContain('이전');
+    expect(cues).not.toContain('commit');
+  });
+});

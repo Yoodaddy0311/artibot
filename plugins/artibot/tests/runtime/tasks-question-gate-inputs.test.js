@@ -101,8 +101,20 @@ const RISK_PROMPT = 'delete the audit notes';
 const COMMIT_PROMPT = 'README 오타 고치고 커밋까지 해줘';
 /** A structural work purpose (design) and nothing else: only the INTERPRETATION route, [F,T,F,T]. */
 const DESIGN_PROMPT = '새 알림 흐름 설계해줘';
-/** Conditions 1 and 3 by prompt cue; 2 and 4 ONLY through the interpretation (commit). */
-const BLOCK_PROMPT = 'Which should we pick? It is a product decision with no right answer, so commit to it.';
+/**
+ * Conditions 1 and 3 by prompt cue; 2 and 4 ONLY through the interpretation
+ * (commit). The commit request is a real one ("commit the change"). It used to
+ * read "... so commit to it.", which is a decision idiom and not a git commit:
+ * the fixture leaned on the interpreter's bare `commit` cue, i.e. on the false
+ * positive CA-15 follow-up (a) removed. That sentence is now COMMIT_TO_IT_PROMPT.
+ */
+const BLOCK_PROMPT = 'Which should we pick? It is a product decision with no right answer, so decide and commit the change.';
+/** Conditions 1 and 3 by prompt cue, and NO commit request: "commit to it" is a decision idiom. */
+const COMMIT_TO_IT_PROMPT = 'Which should we pick? It is a product decision with no right answer, so commit to it.';
+/** "에이전트" (agent) contains the syllables "이전"; a bare "이전" cue read it as a migration. */
+const AGENT_PROMPT = '에이전트 팀을 구성해줘';
+/** The owner's own phrasing: "upgrade X" means "improve X", not a version migration. */
+const UPGRADE_PROMPT = 'split 을 업그레이드해줘';
 /** A multi-step prompt that routes agentTeam, so the Execution contract suffix is in play. */
 const SYSTEM2_PROMPT = 'Plan the migration, refactor the backend API, redesign the frontend components, '
   + 'update the database schema, and verify security across the whole system';
@@ -287,6 +299,24 @@ describe('CA-15 gate inputs — the real pipeline feeds the recorder', () => {
       expect(run.gate.interpretation_present).toBe(false);
     });
   });
+
+  describe('cue words that are not the intent do not reach conditions 2 and 4 (follow-up a)', () => {
+    // Each of these made conditions 2 and 4 true from the interpretation alone
+    // before the cue vocabulary was narrowed to phrase allowlists (measured
+    // 2026-09-30 on ad8e5b28: [.,T,.,T] for all three). The router risk is
+    // asserted below 0.5 so the classification route is not what is being read.
+    it.each([
+      ['"commit to it" is a decision idiom, not a git commit', COMMIT_TO_IT_PROMPT, [true, false, true, false]],
+      ['"이전" inside "에이전트" (agent) is not a migration', AGENT_PROMPT, [false, false, false, false]],
+      ['a generic "업그레이드" (improve) is not a migration', UPGRADE_PROMPT, [false, false, false, false]],
+    ])('%s', async (_name, prompt, expected) => {
+      const run = await prepare(prompt);
+
+      expect(run.routing.factors.risk).toBeLessThan(0.5);
+      expect(flags(run.gate)).toEqual(expected);
+      expect(run.gate.interpretation_present).toBe(true);
+    });
+  });
 });
 
 describe('CA-15 gate inputs — switch OFF: the record changes, the output does not', () => {
@@ -366,6 +396,25 @@ describe('CA-15 gate inputs — switch ON', () => {
       at: 'adr_start',
       reason: 'conditions-not-met',
       inputs_absent: ['interpretation'],
+    });
+    expect(on.prepared.userPrompt).toBe(off.prepared.userPrompt);
+    expect(on.prepared.message).toBe(off.prepared.message);
+  });
+
+  it('does not block "commit to it": a decision idiom is not a commit request, and the input is present', async () => {
+    const off = await prepare(COMMIT_TO_IT_PROMPT);
+    const on = await prepare(COMMIT_TO_IT_PROMPT, { enforce: true });
+
+    // Conditions 1 and 3 hold from the prompt; 2 and 4 have nothing to stand on.
+    // Before the vocabulary was narrowed this exact sentence was BLOCK_PROMPT.
+    expect(flags(on.gate)).toEqual([true, false, true, false]);
+    expect(on.mission.question_gate_enforcement).toEqual({
+      enforce: true,
+      block: false,
+      kind: null,
+      at: 'adr_start',
+      reason: 'conditions-not-met',
+      inputs_absent: [],
     });
     expect(on.prepared.userPrompt).toBe(off.prepared.userPrompt);
     expect(on.prepared.message).toBe(off.prepared.message);
