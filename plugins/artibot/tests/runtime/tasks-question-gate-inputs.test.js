@@ -21,6 +21,11 @@
  * (router -> tasks): the router produces the state shape, nothing is injected,
  * and the ledger row is read back off the real writer as well as off the port.
  *
+ * FOLLOW-UP c (2026-09-30). The same dead key was read in two more places: the
+ * `compileMission` call in `tasks.js` (deleted, since nothing consumes it) and
+ * `workflow-mode.js#planWorkflow`'s `factors` (now read off `routing`). The last
+ * `describe` pins both on the production path.
+ *
  * FIXTURES ISOLATE ONE ROUTE EACH, and every case asserts that isolation as a
  * precondition read off the real router output, so a vocabulary change that
  * quietly stops isolating a route fails loudly here instead of passing for the
@@ -43,9 +48,10 @@
  *    is minimal (router + tasks only).
  *  - WHETHER THE MODEL OBEYS THE DIRECTIVE. With the switch on the block is
  *    advisory text next to the prompt; this pins the text, not a question.
- *  - THE QUALITY OF THE CUES. A `true` means a cue list matched.
- *  - `tasks.js#recordMissionCompile`'s `compileMission` call, which still reads
- *    `routing.classification` (CA-15's scope was the gate).
+ *  - THE QUALITY OF THE CUES. A `true` means a cue list matched. The commit and
+ *    migrate cues are phrase allowlists (CA-15 follow-up a); the cases here pin a
+ *    few false positives end to end, not the vocabulary, which is
+ *    `tests/intent/interpreter.test.js`.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -67,16 +73,30 @@ vi.mock('../../lib/intent/interpreter.js', async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, interpretIntent: vi.fn(actual.interpretIntent) };
 });
+// CA-15 follow-up (c): the two other places `tasks.js` used to read
+// `routing.classification`. Wrapped, never replaced, so a case can read the
+// argument each was handed on the production path.
+vi.mock('../../lib/mission/compiler.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, compileMission: vi.fn(actual.compileMission) };
+});
+vi.mock('../../lib/cognitive/workflow-plan.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, buildWorkflowPlan: vi.fn(actual.buildWorkflowPlan) };
+});
 
 import { createArtibotAgent } from '../../lib/runtime/create-artibot-agent.js';
 import { resetRouter } from '../../lib/cognitive/router.js';
 import { resetSeq } from '../../lib/runtime/event-writer.js';
 import { appendLedgerEvent, readAllEvents } from '../../lib/runtime/ledger.js';
 import { interpretIntent } from '../../lib/intent/interpreter.js';
+import { compileMission } from '../../lib/mission/compiler.js';
+import { buildWorkflowPlan } from '../../lib/cognitive/workflow-plan.js';
 import { evaluateConditions, GATE_CONDITIONS, requiresQuestion } from '../../lib/planning/question-gate.js';
 
 const realLedger = await vi.importActual('../../lib/runtime/ledger.js');
 const realInterpreter = await vi.importActual('../../lib/intent/interpreter.js');
+const realCompiler = await vi.importActual('../../lib/mission/compiler.js');
 
 const GATE_EVENT = 'adr.question_gate_evaluated';
 const NOW = 1700000000000;
@@ -443,5 +463,55 @@ describe('CA-15 gate inputs — the interpreter cannot reach its neighbours', ()
       enforce: true, block: false, reason: 'conditions-not-met', inputs_absent: ['interpretation'],
     });
     expect(on.prepared.userPrompt).not.toContain(TAG);
+  });
+});
+
+describe('CA-15 follow-up c — the other two reads of routing.classification', () => {
+  // `tasks.js` read `routing.classification` in two more places than the gate:
+  // the `compileMission` call and (via `workflow-mode.js#planWorkflow`) the
+  // planner's `factors`. The router never writes that key, so both were
+  // undefined on every prompt. One is deleted (nothing consumes it), the other
+  // is read from where the router really puts it.
+
+  it('hands compileMission the prompt, intent, clock and system, and no classification: it reads none', async () => {
+    const run = await prepare(RISK_PROMPT);
+
+    expect(compileMission).toHaveBeenCalledTimes(1);
+    const [arg] = vi.mocked(compileMission).mock.calls[0];
+    expect(Object.keys(arg).sort()).toEqual(['intent', 'nowMs', 'prompt', 'system']);
+    expect(arg.prompt).toBe(RISK_PROMPT);
+    expect(arg.intent).toBe(run.prepared.context.intent);
+    expect(arg.nowMs).toBe(NOW);
+    expect(arg.system).toBe('system1');
+  });
+
+  it('proves the deleted read was dead: the compile result is the same with or without a classification', async () => {
+    const run = await prepare(RISK_PROMPT);
+    const [arg] = vi.mocked(compileMission).mock.calls[0];
+
+    const without = JSON.stringify(realCompiler.compileMission(arg));
+    // Every shape a caller could plausibly hand it: the router's routing object,
+    // and the nested shape the deleted read looked for.
+    const shapes = [
+      run.routing,
+      { score: run.routing.score, factors: run.routing.factors },
+      { factors: run.routing.factors, system: 2 },
+    ];
+    for (const classification of shapes) {
+      expect(JSON.stringify(realCompiler.compileMission({ ...arg, classification }))).toBe(without);
+    }
+    // The comparison can see a difference: another prompt compiles differently.
+    expect(JSON.stringify(realCompiler.compileMission({ ...arg, prompt: `${RISK_PROMPT} and rename the README` })))
+      .not.toBe(without);
+  });
+
+  it("hands the planner the router's score and factors, read off routing itself", async () => {
+    const run = await prepare(RISK_PROMPT);
+
+    // Precondition, read off the REAL router: there is something to hand over.
+    expect(run.routing.factors.risk).toBeGreaterThanOrEqual(0.5);
+    expect(buildWorkflowPlan).toHaveBeenCalledTimes(1);
+    const [classification] = vi.mocked(buildWorkflowPlan).mock.calls[0];
+    expect(classification).toEqual({ score: run.routing.score, factors: run.routing.factors });
   });
 });

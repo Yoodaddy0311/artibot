@@ -547,10 +547,16 @@ function recordMissionCompile(state, now, deps, questionGateEnforce = false) {
     // between calls is a supported use, not an abuse. Every downstream instant
     // is derived from this constant.
     const nowMs = now();
+    // No `classification`: `compileMission` reads none (`lib/mission/compiler.js`
+    // documents the parameter but no code path consumes it), and this call used
+    // to hand it `routing.classification`, a key the router never writes
+    // (CA-15 follow-up c, measured 2026-09-30). Passing `routing` instead would
+    // only make the dead argument look alive: its `system` is the string
+    // 'system1'|'system2', not the number a classification carries. Pinned in
+    // tests/runtime/tasks-question-gate-inputs.test.js.
     const result = compileMission({
       prompt: String(state.input?.prompt ?? ''),
       intent: state.context?.intent,
-      classification: state.context?.routing?.classification,
       nowMs,
       // system1 → reduced contract. Not the `agentTeam` flag: that one is a
       // topology decision, this one selects the contract shape (§3.5).

@@ -8,7 +8,20 @@
  * resolver and honours the answer; this file pins what the answer is.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+/**
+ * The planner, wrapped and not replaced: `buildWorkflowPlan` runs for real in
+ * every case, and the `planWorkflow` cases read what it was handed. Nothing in
+ * its output depends on `factors` (it reads only `score`), so an argument
+ * check is the only way to see which path `planWorkflow` read them from.
+ */
+vi.mock('../../../lib/cognitive/workflow-plan.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, buildWorkflowPlan: vi.fn(actual.buildWorkflowPlan) };
+});
+
+import { buildWorkflowPlan } from '../../../lib/cognitive/workflow-plan.js';
 import {
   FOLLOW_WORKFLOW_PLAN_CONFIG_KEY,
   planWorkflow,
@@ -260,7 +273,11 @@ describe('planWorkflow — accepted parent effort context (R3)', () => {
     })),
     best: { intent: 'action:implement', commands: ['/implement'], agents: ['planner'] },
   });
-  const stateAt = (score) => ({ context: { routing: { score, classification: { factors: {} } } }, input: {} });
+  // The REAL router shape: `middleware/router.js` spreads the classification
+  // into `routing` (`{ ...classification, system }`), so `factors` sits on
+  // `routing` itself. This fixture used to nest it under `routing.classification`,
+  // which is the shape the code read and the router never wrote.
+  const stateAt = (score) => ({ context: { routing: { score, factors: {} } }, input: {} });
 
   it('CONTROL: without a context the parent is the static /implement band', () => {
     const plan = planWorkflow(stateAt(0.8), CFG, INTENT, false);
@@ -309,5 +326,43 @@ describe('planWorkflow — accepted parent effort context (R3)', () => {
   ])('ignores %s — the plan is the no-context plan', (_label, ctx) => {
     expect(JSON.stringify(planWorkflow(stateAt(0.8), CFG, INTENT, false, ctx)))
       .toBe(JSON.stringify(planWorkflow(stateAt(0.8), CFG, INTENT, false)));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CA-15 follow-up (c) — a dead read. `planWorkflow` built the planner's
+// classification as `{ score, factors: routing?.classification?.factors }`, but
+// the router never writes `routing.classification`: it spreads the
+// classification INTO `routing`, so `factors` was always undefined. The planner
+// does not read `factors` today (its JSDoc lists it as part of the input, its
+// code reads `score` only), so nothing observable moved; what these cases pin
+// is the value handed over, so a future consumer of `factors` finds real data.
+// ---------------------------------------------------------------------------
+describe('planWorkflow — the classification it hands the planner (CA-15 follow-up c)', () => {
+  const FACTORS = Object.freeze({ steps: 0.4, domains: 0.2, uncertainty: 0.1, risk: 0.6, novelty: 0 });
+  const CFG = Object.freeze({ team: {} });
+  const INTENT = Object.freeze({ intents: [], recommendations: [], best: null });
+  /** @returns {object} the first argument of the most recent `buildWorkflowPlan` call */
+  const lastClassification = () => vi.mocked(buildWorkflowPlan).mock.calls.at(-1)[0];
+
+  it("hands over the router's score and factors, read off routing itself", () => {
+    planWorkflow(
+      { context: { routing: { score: 0.8, system: 'system2', factors: FACTORS } }, input: {} },
+      CFG, INTENT, false,
+    );
+    expect(lastClassification()).toEqual({ score: 0.8, factors: FACTORS });
+  });
+
+  it('does not look for a nested routing.classification: the router never writes one', () => {
+    planWorkflow(
+      { context: { routing: { score: 0.8, classification: { factors: FACTORS } } }, input: {} },
+      CFG, INTENT, false,
+    );
+    expect(lastClassification().factors).toBeUndefined();
+  });
+
+  it('hands over score 0 and no factors when there is no routing at all', () => {
+    planWorkflow({ context: {}, input: {} }, CFG, INTENT, false);
+    expect(lastClassification()).toEqual({ score: 0, factors: undefined });
   });
 });

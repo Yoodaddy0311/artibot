@@ -206,9 +206,16 @@ export function resolveWorkflowMode({
  * @returns {object} the `buildWorkflowPlan` result
  */
 export function planWorkflow(state, cfg, intent, optOut, effortContext = null) {
+  // `middleware/router.js` spreads the classification INTO `routing`
+  // (`{ ...classification, system }`), so `score` and `factors` are both
+  // read off `routing` itself. This used to read
+  // `routing.classification.factors`, a key the router never writes, so the
+  // planner always received `factors: undefined` (CA-15 follow-up c, measured
+  // 2026-09-30). The planner reads `score` only today; `factors` is part of its
+  // documented input, and is handed over truthfully.
   const classification = {
     score: state.context.routing?.score ?? 0,
-    factors: state.context.routing?.classification?.factors,
+    factors: state.context.routing?.factors,
   };
   const accepted = EFFORT_LADDER.includes(effortContext?.effort) ? effortContext.effort : null;
   return buildWorkflowPlan(classification, intent, cfg, {
