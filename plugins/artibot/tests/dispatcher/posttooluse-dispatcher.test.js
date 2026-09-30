@@ -166,6 +166,15 @@ afterAll(() => {
  * machine happened to be busy, which is the coupling being removed; declared
  * budgets are gated by tests/firewall/hook-timeout-budget.test.js and measured
  * latency by scripts/bench/hook-latency.mjs.
+ *
+ * WHY ONLY THIS SUITE. PostToolUse is the only dispatcher that opts in (it passes
+ * `allowTimeoutScale: true` to spawnHook); the other four keep their declared
+ * budgets whatever the variable holds, since a stretched budget there can outlive
+ * the host's slot timeout and lose the merged output (Stop's blocking decisions
+ * included). Here it is bounded, not free: the slot is 30 s and post-edit-format is
+ * declared 10 s, so at 10x a child that REALLY hangs gets the dispatcher cancelled
+ * first, and a quality-gate decision:'block' goes with it. The timer-spy case at
+ * the bottom pins that the scale IS applied.
  */
 const GENEROUS_TIMEOUT_SCALE = '10';
 
@@ -715,5 +724,76 @@ describe('_posttooluse-dispatcher timeout accounting (delay injection)', () => {
       fired[0].data.failed,
       'a slow handler inside the scaled budget must not be reported; is ARTIBOT_DISPATCH_TIMEOUT_SCALE still set by spawnOptions()?',
     ).toEqual([]);
+  });
+});
+
+/**
+ * Preload for NODE_OPTIONS=--require: in the ONE process whose script basename
+ * equals ARTIBOT_TEST_TIMER_SPY_ONLY it appends every setTimeout delay to
+ * ARTIBOT_TEST_TIMER_SPY_FILE, then arms the real timer unchanged. The handlers
+ * the dispatcher spawns inherit NODE_OPTIONS but never match that basename.
+ */
+const TIMER_SPY_PRELOAD = [
+  "'use strict';",
+  "const fs = require('node:fs');",
+  "const path = require('node:path');",
+  "const only = String(process.env.ARTIBOT_TEST_TIMER_SPY_ONLY || '');",
+  "const out = String(process.env.ARTIBOT_TEST_TIMER_SPY_FILE || '');",
+  "if (only && out && path.basename(String(process.argv[1] || '')) === only) {",
+  '  const real = globalThis.setTimeout;',
+  '  const spy = function setTimeout(fn, ms, ...rest) {',
+  "    try { fs.appendFileSync(out, String(ms) + '\\n'); } catch { /* ignore */ }",
+  '    return real.call(this, fn, ms, ...rest);',
+  '  };',
+  // Carry util.promisify.custom (a symbol) over so nothing promisifying setTimeout notices.
+  '  for (const sym of Object.getOwnPropertySymbols(real)) spy[sym] = real[sym];',
+  '  globalThis.setTimeout = spy;',
+  '}',
+].join('\n');
+
+/**
+ * POSITIVE control for the opt-in: the test-only budget scale IS applied on this
+ * dispatcher, the one place it is meant to be (the Stop and SubagentStop suites
+ * hold the matching negative case). It reads the delay the DISPATCHER hands to
+ * setTimeout for each selected handler, armed synchronously at spawn, so it does
+ * not depend on machine load. Unlike the delay-injection pair above it is also red
+ * for a change that keeps the behaviour but drops the scale or the opt-in. Only the
+ * Edit route is driven.
+ */
+describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)', () => {
+  let preloadPath;
+
+  beforeAll(() => {
+    preloadPath = path.join(sandboxHome, 'timer-spy-preload.cjs');
+    writeFileSync(preloadPath, TIMER_SPY_PRELOAD, 'utf-8');
+  });
+
+  it('arms every Edit-route handler at 10x its declared budget with the scale at its cap', async () => {
+    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
+    const selected = mod.selectHooks('Edit');
+    expect(selected.length, 'the Edit route selects handlers').toBeGreaterThan(0);
+    const declared = selected.map((h) => h.timeoutMs);
+    const scaled = declared.map((ms) => ms * 10);
+    expect(scaled.filter((ms) => declared.includes(ms))).toEqual([]);
+
+    const spyFile = path.join(sandboxHome, 'timer-spy-posttooluse-cap.txt');
+    const preload = `--require "${preloadPath.split(path.sep).join('/')}"`;
+    const { status } = runDispatcher({
+      tool: 'Edit',
+      tool_input: { file_path: '/tmp/nonexistent.txt', old_string: 'a', new_string: 'b' },
+    }, {
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '),
+      ARTIBOT_TEST_TIMER_SPY_ONLY: '_posttooluse-dispatcher.js',
+      ARTIBOT_TEST_TIMER_SPY_FILE: spyFile,
+      ARTIBOT_DISPATCH_TIMEOUT_SCALE: '10',
+    });
+    const armed = existsSync(spyFile)
+      ? readFileSync(spyFile, 'utf-8').split('\n').filter(Boolean).map(Number)
+      : [];
+
+    expect(status).toBe(0);
+    // Inclusion of the 10x values: an empty spy file, or a dispatcher that dropped
+    // the opt-in (and so armed the declared budgets), both fail this line.
+    expect(armed).toEqual(expect.arrayContaining(scaled));
   });
 });

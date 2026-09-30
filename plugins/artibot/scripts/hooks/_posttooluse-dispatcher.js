@@ -99,6 +99,11 @@ async function main() {
         name: h.name,
         args: h.args || [],
         dispatcherName: HOOK_NAME,
+        // The ONLY dispatcher that takes the test-only budget scale
+        // (_dispatcher-utils.js#resolveTimeoutScale). On Stop, SubagentStop,
+        // SessionStart and SessionEnd a stretched budget can outlive the host's
+        // slot timeout and lose the merged output, so they do not pass this.
+        allowTimeoutScale: true,
       }),
     ),
   );

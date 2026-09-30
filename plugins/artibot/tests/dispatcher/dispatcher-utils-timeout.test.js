@@ -11,7 +11,8 @@ import {
 
 /**
  * scripts/hooks/_dispatcher-utils.js -- the TEST-ONLY hook-budget multiplier
- * (`ARTIBOT_DISPATCH_TIMEOUT_SCALE`) and the security envelope around it.
+ * (`ARTIBOT_DISPATCH_TIMEOUT_SCALE`), the opt-in that limits it to one
+ * dispatcher, and the security envelope around both.
  *
  * WHY THE SEAM EXISTS. `spawnHook` starts a handler's timer the moment it calls
  * spawn(), so the budget covers process creation + node cold start + import,
@@ -22,25 +23,57 @@ import {
  * under test. Loosening that assertion would throw away what it proves, so the
  * budget is what gets a multiplier, and the assertion stays strict.
  *
- * SECURITY ENVELOPE (each line below is pinned by a case in this file).
+ * WHY IT IS OPT-IN. A dispatcher waits for every child and writes ONE merged
+ * stdout after the last one settles, and hooks/hooks.json gives it a host
+ * timeout. One that outlives that timeout is cancelled and writes nothing, so a
+ * stretched child budget can lose the slot's whole output. On Stop that output
+ * carries dev-verify-gate's decision:'block' (30 s slot, stop-review-gate
+ * declared 15 s, so the host limit is reached from 2x): the gate would stop
+ * blocking. SubagentStop (15 s slot, agent-evaluator 8 s, from 1.875x) has no
+ * decision-emitting handler today and would lose its `message` and its
+ * `hook.fired` row. SessionStart and SessionEnd (30 s slot, 15 s swarm-download
+ * / swarm-sync, from 2x) have the same shape. So `spawnHook` reads the variable
+ * only for a caller passing the literal `allowTimeoutScale: true`, and
+ * PostToolUse is the only dispatcher that does. The numbers and the reasoning
+ * are in `resolveTimeoutScale`'s JSDoc.
+ *
+ * SECURITY ENVELOPE (each line below is pinned by a case in this file, or where
+ * noted by the dispatcher suites).
  *   - It can only LENGTHEN a budget. A value below 1 is floored to 1, so it can
  *     never make every hook "time out" and silently disable them.
  *   - It is capped at 10. A larger value is clamped, and the product is clamped
  *     to what setTimeout can hold: Node turns a delay beyond 2^31-1 ms into 1 ms.
  *   - It is read from a strict decimal syntax and nothing else. Anything that
  *     does not parse falls back to 1, i.e. the shipped budgets, byte for byte.
- *   - Exactly one production module references it (see the last case), so no
- *     second reader can apply the value without the clamp.
+ *   - It is read only for a caller that passes the literal `allowTimeoutScale: true`
+ *     (an allowlist, default off), and exactly one production module does: the
+ *     PostToolUse dispatcher (see 'who may opt in'). The Stop and SubagentStop
+ *     dispatchers are also pinned end to end, with the variable at its cap, by a
+ *     timer-spy case in stop-dispatcher.test.js and subagentstop-dispatcher.test.js.
+ *   - Exactly one production module references the VARIABLE (see 'ownership of
+ *     the variable'), so no second reader can apply the value without the clamp.
  *
  * WHAT THIS FILE DOES NOT SEE.
  *   - tests/firewall/hook-timeout-budget.test.js gates the DECLARED budgets
- *     against the host's slot timeout in hooks/hooks.json. A runtime multiplier
- *     is invisible to it: at 10x, post-edit-format's 10 s becomes 100 s, longer
- *     than the 30 s the host gives the PostToolUse dispatcher, so a child that
- *     really hangs would get the dispatcher killed (its merged output lost)
- *     before the child's own timer fired. That is why the value is a test knob.
+ *     against the host's slot timeout in hooks/hooks.json, so a runtime
+ *     multiplier is invisible to it. Where the scale still applies, PostToolUse,
+ *     the slot is 30 s and post-edit-format is declared 10 s: the 3 s headroom
+ *     that gate reserves runs out above 2.7x, and at 10x post-edit-format alone
+ *     is 100 s. A child that really hangs under such a scale gets the dispatcher
+ *     cancelled before the child's own timer fires, and its merged output is
+ *     lost. PostToolUse handlers are advisory except quality-gate, whose
+ *     hardcoded-secret guard can emit decision:'block' (after the write, so the
+ *     loss is feedback, not a gate on it). That residual is why the value is a
+ *     test knob.
  *   - Nothing here can stop an operator from exporting the variable in a real
- *     session. The envelope bounds the damage to "slower to give up".
+ *     session. With the opt-in it reaches the PostToolUse dispatcher and no
+ *     other, and what it can cost there is the residual above, not merely
+ *     "slower to give up".
+ *   - How the host enforces the hooks.json `timeout` is not observed anywhere in
+ *     this repo; "cancelled" above is the contract those files assume.
+ *   - SessionStart and SessionEnd are covered by the opt-in allowlist case (no
+ *     other dispatcher can name the option) but have no timer-spy case of their
+ *     own, so their end-to-end budgets are not measured here.
  *   - The dispatchers' own stdout/exit behaviour is covered by the per-dispatcher
  *     suites, not here; this file drives `spawnHook` directly.
  */
@@ -55,6 +88,9 @@ let TMP;
 
 const INSTANT = 'process.exit(0);';
 const HANG = 'setTimeout(() => process.exit(0), 60000);';
+
+/** What the PostToolUse dispatcher passes: the only way a caller receives the scale. */
+const OPT_IN = { allowTimeoutScale: true };
 
 // Non-ASCII digits, built from code points so this file stays pure ASCII. JS `\d`
 // is already ASCII-only, so these cannot catch a regression to `\d` itself; they
@@ -196,16 +232,19 @@ describe('scaleTimeoutMs', () => {
  * posttooluse-dispatcher.test.js, whose scaled budget is 30 s.
  *
  * @param {number} timeoutMs declared budget handed to spawnHook
+ * @param {object} [callerOpts] extra spawnHook options; the scaled cases pass OPT_IN
  * @returns {Promise<number[]>} every setTimeout delay armed during the call
  */
-async function armedTimerDelays(timeoutMs) {
+async function armedTimerDelays(timeoutMs, callerOpts = {}) {
   const armed = [];
   const realSetTimeout = globalThis.setTimeout;
   const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn, ms, ...rest) => {
     armed.push(ms);
     return realSetTimeout(fn, ms, ...rest);
   });
-  const pending = spawnHook(script('instant', INSTANT), {}, { timeoutMs, name: 'instant', dispatcherName: 'dtest' });
+  const pending = spawnHook(script('instant', INSTANT), {}, {
+    timeoutMs, name: 'instant', dispatcherName: 'dtest', ...callerOpts,
+  });
   spy.mockRestore();
   await pending;
   return armed;
@@ -214,35 +253,58 @@ async function armedTimerDelays(timeoutMs) {
 describe('spawnHook budget', () => {
   it('arms the DECLARED budget when the variable is unset (the shipped path)', async () => {
     delete process.env[ENV];
-    expect(await armedTimerDelays(3000)).toEqual([3000]);
+    expect(await armedTimerDelays(3000, OPT_IN)).toEqual([3000]);
   });
 
-  it('arms the SCALED budget when the variable is set', async () => {
+  it('arms the SCALED budget when the variable is set and the caller opted in', async () => {
     process.env[ENV] = '10';
-    expect(await armedTimerDelays(3000)).toEqual([30000]);
+    expect(await armedTimerDelays(3000, OPT_IN)).toEqual([30000]);
   });
 
   it('rounds a fractional product up', async () => {
     process.env[ENV] = '1.5';
-    expect(await armedTimerDelays(2001)).toEqual([3002]);
+    expect(await armedTimerDelays(2001, OPT_IN)).toEqual([3002]);
   });
 
   it('never arms a SHORTER timer: a sub-1 scale leaves the declared budget alone', async () => {
     // With the floor missing this would arm ceil(15000 x 0.0001) = 2 ms, and no
     // node child boots in 2 ms, so a healthy hook would be reported as `timeout`.
     process.env[ENV] = '0.0001';
-    expect(await armedTimerDelays(15000)).toEqual([15000]);
+    expect(await armedTimerDelays(15000, OPT_IN)).toEqual([15000]);
   });
 
   it('caps a huge scale at 10x instead of letting the product overflow setTimeout to 1 ms', async () => {
     // Uncapped this is 15000 x 1e11 = 1.5e15 ms, which Node would fire after 1 ms.
     process.env[ENV] = '99999999999';
-    expect(await armedTimerDelays(15000)).toEqual([150000]);
+    expect(await armedTimerDelays(15000, OPT_IN)).toEqual([150000]);
   });
 
   it('leaves a value that is not a plain decimal on the declared budget', async () => {
     process.env[ENV] = '3x';
+    expect(await armedTimerDelays(3000, OPT_IN)).toEqual([3000]);
+  });
+
+  // NEGATIVE CONTROLS for the opt-in. Every case above passes OPT_IN, so on their
+  // own they would stay green if the default flipped to "scaled unless told
+  // otherwise". These are the cases that go red then.
+  it('arms the DECLARED budget for a caller that did not opt in, even at the cap of 10', async () => {
+    // 3000 x 10 = 30000 is what a leaking scale would arm; the shipped budget is 3000.
+    process.env[ENV] = '10';
     expect(await armedTimerDelays(3000)).toEqual([3000]);
+  });
+
+  it.each([
+    ['false', false],
+    ['the string "true"', 'true'],
+    ['the number 1', 1],
+    ['the string "yes"', 'yes'],
+    ['an object', {}],
+    ['an array', [true]],
+    ['null', null],
+    ['undefined', undefined],
+  ])('only the literal true opts in: %s stays on the declared budget', async (_label, flag) => {
+    process.env[ENV] = '10';
+    expect(await armedTimerDelays(3000, { allowTimeoutScale: flag })).toEqual([3000]);
   });
 
   it('kills a hung child at the DECLARED budget with the historical stderr line (variable unset)', async () => {
@@ -254,40 +316,85 @@ describe('spawnHook budget', () => {
     expect(watch.lines()).toEqual(['[artibot:dtest] hang timed out after 300ms\n']);
   });
 
-  it('kills a hung child at the SCALED budget and names both budgets on stderr', async () => {
+  it('kills a hung child at the DECLARED budget when the caller did not opt in, even with the variable set', async () => {
     process.env[ENV] = '5';
     const watch = watchStderr('dtest');
     const res = await spawnHook(script('hang', HANG), {}, { timeoutMs: 300, name: 'hang', dispatcherName: 'dtest' });
     expect(res.status).toBe('timeout');
+    // No "(declared ... x ...)" suffix: the scale was never applied.
+    expect(watch.lines()).toEqual(['[artibot:dtest] hang timed out after 300ms\n']);
+  });
+
+  it('kills a hung child at the SCALED budget and names both budgets on stderr', async () => {
+    process.env[ENV] = '5';
+    const watch = watchStderr('dtest');
+    const res = await spawnHook(script('hang', HANG), {}, {
+      timeoutMs: 300, name: 'hang', dispatcherName: 'dtest', ...OPT_IN,
+    });
+    expect(res.status).toBe('timeout');
     expect(watch.lines()).toEqual(['[artibot:dtest] hang timed out after 1500ms (declared 300ms x 5)\n']);
   });
 });
+
+/**
+ * Every production module whose text contains `needle`, as sorted plugin-relative
+ * POSIX paths, plus how many files the walk looked at (for the scanner self-check).
+ *
+ * @param {string} needle
+ * @returns {{ scanned: number, readers: string[] }}
+ */
+function productionModulesMentioning(needle) {
+  let scanned = 0;
+  const readers = [];
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules') continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(full);
+      } else if (/\.(?:m?js|cjs|json)$/.test(entry.name)) {
+        scanned += 1;
+        if (readFileSync(full, 'utf-8').includes(needle)) {
+          readers.push(path.relative(PLUGIN_ROOT, full).split(path.sep).join('/'));
+        }
+      }
+    }
+  };
+  for (const root of ['scripts', 'lib', 'bin', 'server', 'hooks']) visit(path.join(PLUGIN_ROOT, root));
+  return { scanned, readers: readers.sort() };
+}
 
 describe('ownership of the variable', () => {
   // Matches the NAME anywhere in the file, comments included, so a bare mention
   // in a second module also turns this red. That friction is deliberate: a
   // second mention is the moment to decide whether it needs the clamp.
   it('is referenced by exactly one production module, so no second reader can skip the clamp', () => {
-    let scanned = 0;
-    const readers = [];
-    const visit = (dir) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name === 'node_modules') continue;
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          visit(full);
-        } else if (/\.(?:m?js|cjs|json)$/.test(entry.name)) {
-          scanned += 1;
-          if (readFileSync(full, 'utf-8').includes(ENV)) {
-            readers.push(path.relative(PLUGIN_ROOT, full).split(path.sep).join('/'));
-          }
-        }
-      }
-    };
-    for (const root of ['scripts', 'lib', 'bin', 'server', 'hooks']) visit(path.join(PLUGIN_ROOT, root));
+    const { scanned, readers } = productionModulesMentioning(ENV);
 
     // Scanner self-check: a walk that found nothing would pass this case forever.
     expect(scanned).toBeGreaterThan(300);
     expect(readers).toEqual(['scripts/hooks/_dispatcher-utils.js']);
+  });
+});
+
+describe('who may opt in to the scale', () => {
+  // The same friction one level up, and for the same reason: `spawnHook` reads
+  // the variable only for a caller that names the option, so the set of modules
+  // that name it IS the set of dispatchers the variable can reach. Stop,
+  // SubagentStop, SessionStart and SessionEnd must not be in it (see the header),
+  // and a dispatcher added later must not join it without someone deciding that
+  // a stretched budget cannot outlive its host slot. The pin is an allowlist, so
+  // a new mention, comments included, is red until it is registered here.
+  it('is named by exactly the defining module and the PostToolUse dispatcher', () => {
+    const { scanned, readers } = productionModulesMentioning('allowTimeoutScale');
+
+    // Scanner self-check, twice over: the walk must have looked at a real tree,
+    // and it must have found BOTH expected names. A scan that saw neither would
+    // otherwise be a scan of nothing.
+    expect(scanned).toBeGreaterThan(300);
+    expect(readers).toEqual([
+      'scripts/hooks/_dispatcher-utils.js',
+      'scripts/hooks/_posttooluse-dispatcher.js',
+    ]);
   });
 });

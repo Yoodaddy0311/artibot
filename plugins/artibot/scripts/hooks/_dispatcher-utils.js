@@ -101,10 +101,14 @@ export function hookPath(name) {
  * @param {string} scriptPath absolute path to the hook script
  * @param {object} payload JSON-serializable input
  * @param {object} opts
- * @param {number} opts.timeoutMs hard timeout per hook (default 5000; x resolveTimeoutScale())
+ * @param {number} opts.timeoutMs hard timeout per hook (default 5000)
  * @param {string} opts.name human-readable hook name for logs
  * @param {string[]} [opts.args] extra CLI arguments to pass after the script
  * @param {string} [opts.dispatcherName] dispatcher tag for stderr lines
+ * @param {boolean} [opts.allowTimeoutScale] opt in to the TEST-ONLY budget
+ *   multiplier (see resolveTimeoutScale). Only the literal `true` opts in; the
+ *   default runs `timeoutMs` as declared whatever the environment holds. The
+ *   PostToolUse dispatcher is the one caller that passes it.
  * @returns {Promise<{ status: 'ok'|'timeout'|'error', name: string, stdout: string }>}
  */
 export function spawnHook(scriptPath, payload, opts) {
@@ -113,9 +117,12 @@ export function spawnHook(scriptPath, payload, opts) {
     name = path.basename(scriptPath, '.js'),
     args = [],
     dispatcherName = '_dispatcher',
+    allowTimeoutScale = false,
   } = opts || {};
-  // The identity unless the test-only scale is set (see resolveTimeoutScale).
-  const scale = resolveTimeoutScale();
+  // The declared budget, byte for byte, unless the caller opted in with a literal
+  // `true` AND the test-only scale is set (see resolveTimeoutScale). An allowlist:
+  // a dispatcher added later starts on the shipped budget.
+  const scale = allowTimeoutScale === true ? resolveTimeoutScale() : 1;
   const budgetMs = scaleTimeoutMs(timeoutMs, scale);
 
   return new Promise((resolve) => {
@@ -193,7 +200,8 @@ const TIMER_MAX_MS = 2 ** 31 - 1;
 
 /**
  * TEST-ONLY budget multiplier. Returns the factor `spawnHook` applies to every
- * declared `timeoutMs`: exactly 1 (the shipped budgets, byte for byte) unless
+ * declared `timeoutMs` of a caller that opted in (`allowTimeoutScale: true`):
+ * exactly 1 (the shipped budgets, byte for byte) unless
  * `ARTIBOT_DISPATCH_TIMEOUT_SCALE` holds a plain decimal, which is then clamped
  * to [1, 10].
  *
@@ -204,6 +212,37 @@ const TIMER_MAX_MS = 2 ** 31 - 1;
  * fails with no defect in the code under test. Scaling the budget keeps that
  * assertion strict instead of loosening it.
  *
+ * WHY ONLY POSTTOOLUSE. A dispatcher waits for every child (Promise.allSettled)
+ * and writes ONE merged stdout after the last one settles, and hooks/hooks.json
+ * gives each dispatcher a host timeout. One that outlives it is cancelled (how
+ * the host enforces that is not verified in this repo) and writes nothing, so
+ * what its children already produced is lost. A stretched child budget can turn
+ * "a slow hook gave up" into "the slot's whole output vanished":
+ *   - Stop: 30 s slot, stop-review-gate declared 15 s, so from 2x it reaches the
+ *     host limit. dev-verify-gate's decision:'block' (stop-review-gate can emit
+ *     one too) exists only as that stdout, so it is lost with the dispatcher and
+ *     the gate does not block.
+ *   - SubagentStop: 15 s slot, agent-evaluator declared 8 s, so from 1.875x. No
+ *     handler on this slot emits a decision today; the loss is the merged
+ *     `message` and the `hook.fired` row.
+ *   - SessionStart, SessionEnd: 30 s slot, swarm-download / swarm-sync declared
+ *     15 s, so from 2x.
+ * Those four never opt in, so they keep the declared budgets whatever the
+ * environment holds. The Stop and SubagentStop suites pin that with a timer spy,
+ * and tests/dispatcher/dispatcher-utils-timeout.test.js pins who may opt in,
+ * which is what covers SessionStart and SessionEnd.
+ *
+ * WHAT IT COSTS POSTTOOLUSE. Its handlers are advisory except quality-gate,
+ * whose hardcoded-secret post guard
+ * (lib/core/guard-registry.js#checkHardcodedSecret) can emit decision:'block'.
+ * PostToolUse fires after the tool ran, so a lost block is lost feedback on a
+ * write that already happened, not a gate on it. The slot is 30 s and
+ * post-edit-format is declared 10 s, so the 3 s dispatcher headroom that
+ * tests/firewall/hook-timeout-budget.test.js reserves runs out above 2.7x, and
+ * at the 10x cap post-edit-format alone is 100 s. A child that really hangs
+ * under such a scale gets the dispatcher cancelled before its own timer fires,
+ * and the merged output goes with it. That is why this is a test knob.
+ *
  * ENVELOPE (each line is pinned by tests/dispatcher/dispatcher-utils-timeout.test.js):
  *   - It can only LENGTHEN. A value below 1 is floored to 1, so it can never turn
  *     every hook into a `timeout` and silently disable them.
@@ -211,17 +250,17 @@ const TIMER_MAX_MS = 2 ** 31 - 1;
  *     setTimeout can hold.
  *   - It is read from `^\d+(\.\d+)?$` and nothing else. Anything else is 1, so a
  *     typo fails closed to the shipped budgets.
+ *   - It is read only for a caller passing the literal `allowTimeoutScale: true`,
+ *     and the PostToolUse dispatcher is the only production module that does.
  *   - This module is its only reader.
  *
  * WHAT IT CANNOT SEE. tests/firewall/hook-timeout-budget.test.js checks the
- * DECLARED budgets against the host's slot timeout (hooks/hooks.json). A runtime
- * multiplier is invisible to it: at 10x, post-edit-format's 10 s becomes 100 s,
- * beyond the 30 s the host allows the PostToolUse dispatcher, so a child that
- * really hangs would get the dispatcher killed (its merged output lost) before
- * the child's own timer fired. That is why this is a test knob. Nothing stops an
- * operator exporting it in a real session either; the envelope only bounds the
- * damage to "slower to give up". ARTIBOT_DISABLE_DISPATCHER=1 stays the explicit
- * off switch.
+ * DECLARED budgets against the host's slot timeout (hooks/hooks.json), so a
+ * runtime multiplier is invisible to it; the PostToolUse limit above is exactly
+ * that gap. Nothing stops an operator exporting the variable in a real session
+ * either: it then reaches the PostToolUse dispatcher and no other, and what it
+ * can cost there is the paragraph above, not merely "slower to give up".
+ * ARTIBOT_DISABLE_DISPATCHER=1 stays the explicit off switch.
  *
  * @param {Record<string, unknown>|null} [env] defaults to process.env
  * @returns {number} a finite number in [1, 10]
