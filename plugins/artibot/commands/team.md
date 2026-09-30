@@ -413,6 +413,18 @@ Collect all results, cross-check findings, and **inspection report**, then repor
 |------|------|------|
 | {file path} | {created/modified} | {teammate} |
 
+**모델별 사용량·비용 (자동 — 생략 금지)**
+
+보고 끝에 모델별 사용량·비용 표를 붙인다. 숫자를 손으로 쓰지 않는다 — 아래 한 줄을 `Bash` 로 실행해 **출력 전문을 그대로** 싣는다(바꿀 곳은 `<project root>` 하나 — 프로젝트 절대 루트):
+
+```
+SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}"; USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs"; [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs"; if [ -f "$USG" ]; then node "$USG" --session "$SID" --live-session "$SID" --cwd "<project root>"; else echo "usage-cost-table not found - 표 생략"; fi
+```
+
+- 실제로 서빙한 모델별 세션·스폰·토큰(입력·출력·캐시 읽기·캐시 쓰기)·비용 표다. 읽기 전용이라 원장에 쓰지 않는다.
+- 영수증은 세션이 끝날 때(SessionEnd)에만 원장에 쓰인다 — 원장만 읽으면 지금 이 세션과 그 팀원 전부가 표에서 빠진다. 그래서 `--live-session` 이 이 세션의 transcript 를 직접 읽고, `--session` 이 표를 이 세션으로 좁힌다(같은 세션에서 앞서 한 작업의 몫도 든다. 작업 시작 시각을 알면 `--since "<ISO>"` 를 더한다).
+- 출력의 `영수증 0행` · `가격 미검증` · 단가 출처 · `한계:` 줄은 지우거나 고쳐 쓰지 않는다. 측정 시각은 출력의 `측정` 이 곧 중계 계약이 요구하는 측정 시각이다. 스크립트가 없거나 종료코드가 0 이 아니면(세션 id 가 비어 `--session` 이 거부된 경우 포함) 표 자리에 `TABLE OMITTED <사유 한 줄>` 만 적는다 — 다른 출처의 숫자로 대신하지 않는다.
+
 ### Phase 5.5: FOLLOW-UP (Leader only)
 Phase 5 리포트를 유저에게 보여준 직후, `AskUserQuestion` 도구를 사용해 인터랙티브 후속 액션을 제안한다.
 
