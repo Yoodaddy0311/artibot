@@ -11,6 +11,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.70.1] — 2026-09-30
+
+`v4.70.0`(`ac5dfb4d`) 이후 5 커밋 = **48 files +2,210/−201**(`git rev-list --count ac5dfb4d..76914561` · `git diff --shortstat ac5dfb4d..76914561`, 2026-09-30 측정 — 릴리스 커밋은 들어 있지 않다). 전부 `fix(portability)` 이고 새 기능 · 출하 스위치 변경은 0 이다(`artibot.config.json` 은 이 구간에서 바뀌지 않았다). **플러그인을 Artibot 소스 리포가 아닌 아무 프로젝트에서나 쓸 수 있게 하는 패치다.**
+
+### 행동 변화 고지
+
+① **슬래시 커맨드 문서 21개와 스킬 문서 4개가 플러그인 루트를 스스로 찾는다**(`246285ab` · `d06ef4b5` · `76914561`). 종전에는 커맨드 문서가 `node plugins/artibot/scripts/...` · `node scripts/...` · `import('./lib/...')` 처럼 **현재 디렉터리 기준 경로**로 플러그인 스크립트를 돌리라고 적어서, cwd 가 Artibot 소스 리포일 때만 동작하고 다른 프로젝트에서는 `MODULE_NOT_FOUND` / `ERR_MODULE_NOT_FOUND` 로 실패했다(커밋 본문 측정: 2026-09-30, 외부 cwd, 옛 문구 대 이 트리). 이제 해당 문서마다 작은 탐색 블록이 필요한 파일이 실제로 있는 플러그인 루트를 찾아 절대 경로를 출력하고, 못 찾으면 `artibot plugin root not found - run /update` 를 출력한다. 탐색 순서는 ⓐ 작업 디렉터리의 소스(`plugins/artibot`, `.` — 그 `.claude-plugin/plugin.json` 이 `artibot` 을 이름으로 댈 때만) ⓑ 호스트가 쓴 `${CLAUDE_PLUGIN_ROOT}` ⓒ 플러그인 캐시의 최신 버전(숫자 정렬, 필요한 파일이 없는 버전은 건너뜀) ⓓ (해석 체인에 한해) 옛 전역 복사본 `~/.claude/artibot` ⓔ 마켓플레이스 사본이다. 탐색 블록을 넣은 곳: `/export` · `/ship` · `/squash` · `/resume`(+ read-order-guard 의 루트) · `/dreaming` · `/repo` · `/install` · `/doctor`(`## Paths` 절) · `/index`(Bash 가 없어 Glob 으로 찾는다) · `split` 의 integrate · lane-state 절차(`skills/split/references/operations.md`) · `git-unified` 의 worktree 확인 · `using-agent-skills` · `persona-distill`(Artibot 리포 밖에서는 새 스킬을 그 프로젝트의 `.claude/skills` 에 쓴다).
+
+② **오래된 전역 복사본이 플러그인 캐시를 이기지 않는다**(`76914561`). 종전에는 `/verify` · `/team` · `/autopilot` · `/split` · `/theme` · `/watch` · `/scorecard` 의 해석 체인(REC · USG · ENGINE)이 `$HOME/.claude/artibot` 을 **맨 먼저** 시도했고, `/update` · `/learning` 의 체인은 호스트 토큰에서 곧장 그 복사본으로 넘어갔다 — 낡은 `~/.claude/artibot` 과 캐시가 함께 있으면 낡은 쪽이 실행됐다(커밋 본문: 가짜 HOME 에 둘을 함께 두고 `verify.md` 의 이전 체인은 낡은 복사본을, 새 체인은 캐시를 출력). 해석 체인 17개가 모두 ⓐ~ⓔ 순서를 따른다. **예외**: `/update` 는 소스 단계가 없다 — `update.js` 가 설치 방식(native · legacy)을 자기 위치로 정하므로(`lib/core/install-mode.js`) 작업 디렉터리 복사본을 잡으면 마켓플레이스 설치가 legacy 갱신 흐름(git pull + install.sh)으로 끌려가기 때문이다.
+
+③ **마켓플레이스 전용 · 캐시 전용 설치에서도 해석된다**(`d06ef4b5` · `76914561`). `/autopilot` · `/autopilot-queue` · `/go` · `/plan` 의 해석기는 마켓플레이스 미러만 훑었는데, 디렉터리 소스 마켓플레이스에는 미러가 없어 캐시만 있는 설치에서 네 커맨드 모두 "not found" 를 던졌다(커밋 본문: 수정 전 HEAD 에서 측정). 이제 환경변수 → 호스트가 쓴 경로(`# Changelog
+
+All notable changes to Artibot are documented in this file.
+
+모든 주목할 만한 변경 사항은 이 파일에 기록됩니다.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+ 로 시작하면 건너뜀) → 플러그인 캐시(번호순) → 미러 순서로 찾는다. `/scorecard` 의 node 조각 3개는 비어 있으면 예외를 던지던 `process.env.CLAUDE_PLUGIN_ROOT` 대신 같은 탐색 블록이 낸 루트를 받고, `/install` 의 조각은 호스트가 쓴 경로를 작은따옴표로 감싸 `C:/Users/O'Brien/...` 에서 구문 오류가 나던 것을 환경변수(`ARTIBOT_PLUGIN_ROOT`)로 받도록 바꿨다.
+
+④ **훅 명령 30개가 플러그인 경로를 따옴표로 감싼다**(`b844d6dd` · `d06ef4b5`). `hooks/hooks.json` 은 훅을 `node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/x.js` 로 등록하고 있었다. 호스트가 토큰 자리에 플러그인 디렉터리를 넣어 셸에 넘기므로 그 디렉터리에 공백이 있으면(`C:\Users\First Last\...`) 경로가 두 단어로 쪼개져 `node` 가 스크립트를 못 찾는다. 커밋 본문 측정(2026-09-30): 플러그인 사본을 `with space` 디렉터리에 두고 실제 훅 명령 30개를 플랫폼 셸로 돌리면 이전 30/30 실패, 이후 0/30 실패. 이제 경로만 JSON 이스케이프된 따옴표로 감싼다 — `node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/x.js\" [args]` — 인자(`start` · `teammate-update` · `failure`)는 밖에 둔다. 이 절을 쓰며 센 값: `hooks/hooks.json` 의 훅 명령 30개가 전부 새 형태다(`JSON.parse` 로 센 명령 30 · 새 형태 30). 이 스펠링을 읽는 곳이 함께 움직였다 — `hooks/dispatch-table.json` 의 `singleHookCommand` 2개(테스트가 hooks.json 과 같아야 한다고 요구), `tests/hooks-schema-fingerprint.txt`(스냅샷 재계산), 명령 꼬리를 읽는 `scripts/ledger/existence-audit.mjs` · `scripts/bench/hook-latency.mjs` · `scripts/audit-hooks.js`(따옴표를 벗기고 읽는다 — 안 그러면 존재 감사가 모든 dispatcher 를 직접 훅으로 셀 뻔했다), SDK `createHook().commit` 이 새 플러그인의 hooks.json 에 쓰는 항목(`lib/sdk/artibot-sdk.js`)과 `CONTRIBUTING.md` 예시. `.mcp.json` · `plugin.json` 은 플러그인 루트 경로를 담지 않아(`CLAUDE_PLUGIN_ROOT` 0건) 따옴표 대상이 없고 `artibot-cowork` 에는 `hooks/` 가 없다.
+
+⑤ **`/doctor` 의 Check 1 · 7 이 `<pluginRoot>` 를 쓴다 — 동결 다이제스트 2개를 다시 동결했다**(`b3f5d469`, 같은 패치 안의 별도 커밋이라 따로 검토하거나 떼어낼 수 있다). `/doctor` 는 플러그인 루트를 `## Paths` 절의 탐색 블록으로 한 번 찾고(①, `246285ab`) 그 절대 경로로 읽는다. Check 1–7 은 `tests/commands/doctor-checks-8-9.test.js` 가 SHA-256 으로 동결(`CHECK_1_7_SHA256`)하고 있어서 각 블록의 **한 줄씩만** 바꿨다 — Check 1 1단계 `Read plugins/artibot/artibot.config.json` → `Read <pluginRoot>/artibot.config.json`, Check 7 `node scripts/ledger/topology-agreement.mjs ...` → `node "<pluginRoot>/scripts/ledger/topology-agreement.mjs" ...`(옛 명령은 외부 cwd 에서 `MODULE_NOT_FOUND`, 커밋 본문 측정 2026-09-30). 래칫의 문서화된 절차대로 편집은 정확히 "keeps Check 1 byte-identical" · "keeps Check 7 byte-identical" 두 테스트에서 RED 가 됐고(2 failed · 110 passed, 커밋 본문) 다이제스트를 날짜 주석과 함께 의도적으로 다시 동결했다: **Check 1 `68a7994da5db8345` → `592beff8ce567f9e`, Check 7 `23a7be708a43666c` → `2762923188c8fadf`**. Check 2–6 은 종전 `dc9a4c12` 다이제스트 그대로이고 단언은 하나도 완화하지 않았다. 이 절을 쓰며 이 트리에서 `doctor-checks-8-9.test.js` 를 돌렸다: 114 tests | 2 skipped, 통과.
+
+⑥ **테스트**. 새 파일 4개 — `tests/commands/plugin-root-finder.test.js`(탐색 블록이 전부 정본과 같고 실제 있는 파일을 탐침하는지 · 새 cwd 상대 실행 지시에 대한 래칫 · 가짜 HOME 에서 공백 · 비ASCII · 숫자 버전 정렬 · 마켓플레이스 전용 · 미설치 시나리오를 실제 실행), `tests/commands/plugin-root-chains.test.js`(해석 체인 17개를 템플릿에 바이트 핀하고 문서에서 꺼내 가짜 HOME 에서 실행 — 낡은 전역 복사본과 캐시가 함께 있으면 모든 체인이 캐시를 고른다), `tests/hooks/hooks-command-quoting.test.js`(훅 명령의 토큰을 `plugin root (x86)` 디렉터리로 바꿔 bash 와 플랫폼 기본 셸에서 실행 + 따옴표를 벗기면 실패하는 음성 대조), 공용 하니스 `tests/helpers/plugin-root-harness.js`. 스위트 총수는 **25,034**(`v4.70.0` 의 `plugins/artibot/marketplace.json#qualityMetrics.tests`) → **25,165**(+131)이고 25,165 = 25,121 통과 + 44 스킵이다(Test Files 822).
+
+### 착지
+
+- `246285ab` 커맨드 · 스킬 문서의 플러그인 루트 탐색 블록(`tests/commands/plugin-root-finder.test.js` 신설) → `b3f5d469` `/doctor` Check 1 · 7 재동결(별도 커밋) → `b844d6dd` 훅 명령 경로 따옴표 30개(`tests/hooks/hooks-command-quoting.test.js` 신설) → `d06ef4b5` 검수 수정(탐색 순서 · 마켓플레이스 전용 체인 · 더 넓은 래칫) → `76914561` 캐시 우선 · 캐시 전용 해석기 · 매니페스트 검사 · 일괄 탐색 테스트(`tests/commands/plugin-root-chains.test.js` 신설).
+
+### 미확인
+
+- 위 ①~⑤ 의 **측정**(외부 cwd 실패 재현 · 30/30 → 0/30 · 체인 실행 결과 · 가짜 HOME 시나리오)은 커밋 작성자와 검수자의 것이며 이 절을 쓰며 재현하지 않았다. 직접 다시 잰 것: 커밋 수 · diff 수치 · 파일 구성(커맨드 21 · 스킬 4 · 테스트 16 · 새 파일 4 — `git diff --name-only ac5dfb4d..76914561 -- <dir>`), `hooks.json` 의 훅 명령 30/30, `artibot.config.json` 무변경, 재동결 다이제스트 2개가 테스트 파일에 적힌 값과 같다는 것과 그 테스트의 통과, 해석 체인 17개(`plugin-root-chains.test.js` 의 `SITES.length`), Ubuntu 총수.
+- 호스트가 이 따옴표 형태를 그대로 셸에 넘기는지, 설치본의 훅이 실호스트에서 발화하는지는 설치 · 재시작 뒤 `hook.fired` 원장으로 봐야 한다 — 미확인. 테스트는 토큰을 치환한 문자열을 bash 와 플랫폼 기본 셸에서 돌렸고 호스트를 돌리지 않았다.
+- 탐색 블록은 **우발 오류 방지 장치이지 보안 경계가 아니다**: 프로젝트가 자기 `plugins/artibot/.claude-plugin/plugin.json` 에 `"name": "artibot"` 을 쓰면 그 디렉터리가 플러그인 루트로 뽑힌다(커밋 본문).
+- 알려진 미수정: 마켓플레이스 캐시와 평탄한 설치 페이로드가 함께 있는 머신에서 `detectInstallMode` 는 `ambiguous` 를 내고 `update.js` 는 legacy 갱신기로 진행한다(커밋 본문 N-a). 체인을 바꾸지 않은 곳: `team.md` · `autopilot.md` 의 선택 절 `render-progress.js`(경로 하나 + 문서화된 인라인 폴백, 장식용)와 `model-routing.md`(자체 cache → marketplace 해석기, 전역 복사본 없음). `tests/scorecard/command-doc.test.js` 는 `/scorecard` 의 고전 섹션을 HEAD 와 비교하므로 미커밋 편집에는 설계상 RED 다.
+- **검증 실행(릴리스 직전 트리 `76914561`)**: 임시 ci 브랜치에 push 해 GitHub check-runs 7/7 success 를 받았다(Detect plugin-asset changes · Validate Node 20 · 22 · 24 · Node 22 on Windows · plugin.json 구조 2종). 총수 25,165 는 Ubuntu 러너 Node 20 · 22 · 24 로그 세 개가 같은 값이다(`gh api repos/{owner}/{repo}/actions/jobs/<job id>/logs` 의 `Tests  25121 passed | 44 skipped (25165)`). 릴리스 커밋 자신의 check-runs 결과는 이 파일이 아니라 릴리스 커밋 메시지와 GitHub 에 있다(결과를 이 절에 적으면 그 결과를 낸 트리가 바뀐다).
+- 머리 수치는 `76914561` 기준이다. 릴리스 커밋과 그 뒤 커밋이 더해지면 커밋 수와 diff 가 달라진다.
+
 ## [4.70.0] — 2026-09-30
 
 `v4.69.0`(`ad8e5b28`) 이후 65 커밋(first-parent 27 · merge 20 · non-merge 45) = **157 files +25,210/−1,685**(`git rev-list --count v4.69.0..HEAD` · `--first-parent` · `--merges` · `--no-merges` · `git diff --shortstat v4.69.0..HEAD`, 통합 브랜치 `integ/batch1-20260930` HEAD `598c2328`, 2026-09-30T04:07Z 측정 · 총계는 04:21Z 에 같은 값으로 재확인 — `git log --format=%an` 의 저자 이름이 한 종류뿐이라 릴리스 봇 커밋은 없다). **이 절과 버전 범프 커밋 자신은 65 에 들어 있지 않다**(범프 전 HEAD 를 쟀다). 리더가 이 브랜치에 더 얹으면 숫자가 달라지므로 릴리스 직전에 다시 잰다. 157 files 의 내역(`git diff --numstat v4.69.0 HEAD` 를 경로로 나눠 합산 — 테스트 = `plugins/artibot/tests/` · 문서 = `.artibot/guides/v5-design/` · 나머지 = 출하 코드 · 문서; 바이너리 1개 `artibot-cowork.plugin` 은 줄 수에 잡히지 않는다): 출하 코드 · 문서 82 files +7,230/−483 · 테스트 68 files +17,098/−1,175 · v5-design 문서 7 files +882/−27. 세 덩어리가 섞여 있다: batch 3B-2(v4.69.0 릴리스 뒤에 얹힘, `ad8e5b28..1ec215bf` 31 커밋 66 files +11,090/−1,225) · 대기 브랜치 3개(R1 · W3-6 · dispatcher flake, `1ec215bf..6b64dc42` 14 커밋 55 files +4,621/−244 — 이미 origin/master) · 이 통합 브랜치의 batch 1(`6b64dc42..HEAD` 20 커밋 54 files +9,582/−299). 31 + 14 + 20 = 65(구간별 files · 줄 수의 합은 총계와 다르다 — 같은 파일이 여러 구간에서 바뀐다. "이미 origin/master" 는 fetch 하지 않은 로컬 `origin/master` ref 가 `6b64dc42` 인 것을 읽은 값이다).
