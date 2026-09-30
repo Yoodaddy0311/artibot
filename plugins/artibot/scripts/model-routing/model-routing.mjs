@@ -20,9 +20,12 @@
  * THE SHIPPED CANARY (CA-02). That config's `routing.canary` makes
  * `resolve <plugin:name> --task classify|status` print a low tier (sonnet) instead
  * of opus: a shipped DEFAULT of the task layer that every user setting beats,
- * applied inside `resolveEffectiveModel` (`lib/core/model-canary.js`). This file
- * re-derives no answer: `show`'s source column reads `canary-task` for such a row,
- * and the effective-changes preview always diffs the armed classes
+ * applied inside `resolveEffectiveModel` (`lib/core/model-canary.js`). Design and
+ * review stay on opus (the review guard, `canaryMayLower`): a `--role review` spawn
+ * and any agent whose own default task is review or architecture are never lowered,
+ * and this file feeds the guard that default as `opts.agentTask` (`callOpts`). This
+ * file re-derives no answer: `show`'s source column reads `canary-task` for a lowered
+ * row, and the effective-changes preview always diffs the armed classes, role by role
  * (`model-routing-task.mjs#taskContextDiff`).
  *
  * THE SETTING ONLY TAKES EFFECT WHEN THE LEADER PASSES IT. The host spawns a
@@ -238,6 +241,12 @@ function effectiveOverrides(ctx) {
  * Resolver options for one spawn. The core resolver derives no default task, so
  * the agent's default is filled in here — without it the task layer is skipped.
  *
+ * The agent's OWN default task also goes in, separately, as `agentTask`, even when
+ * `--task` names another one: core cannot read `AGENT_ACTION_CLASS` (lib/routing is
+ * a higher layer), and the shipped canary (CA-02) must not lower an agent whose
+ * default is review or architecture just because the leader labelled the spawn
+ * `--task status`. Only that guard reads it; an agent with no default task omits it.
+ *
  * @param {string} name - `<plugin:name>`.
  * @param {string|null} role - 'build'|'review'|null
  * @param {string|null} [task] - Explicit action class; null = the agent's default.
@@ -245,7 +254,8 @@ function effectiveOverrides(ctx) {
  */
 function callOpts(name, role, task = null) {
   const picked = rowTask(name, task);
-  return { ...(role ? { role } : {}), ...(picked ? { task: picked } : {}) };
+  const own = rowTask(name);
+  return { ...(role ? { role } : {}), ...(picked ? { task: picked } : {}), ...(own ? { agentTask: own } : {}) };
 }
 
 /**

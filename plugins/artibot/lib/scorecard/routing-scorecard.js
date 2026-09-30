@@ -702,7 +702,7 @@ export function buildRoutingScorecard(replay) {
       source: 'route.selected · data.models.selected.tier',
       note: 'selected 는 PreToolUse 시점의 정책 예측(resolveModel 결과)이지 서빙 관측이 아니다 — '
         + 'requested_model 도 아니다. 서빙 모델은 usage.receipt(transcript usage)로만 본다(route.bound 는 조인 키).'
-        + ' canary 목록이 이 class 와 매칭되면 추천 티어로 바뀌어도 여전히 예측이다(출하 목록 [] 에선 항상 정책 결과).',
+        + ' canary 목록이 이 class 와 매칭되면 추천 티어로 바뀌어도 여전히 예측이다(출하 목록은 [classify, status] 라 그 두 class 의 영수증만 추천 티어이고, 나머지는 정책 결과).',
     }),
     metric({
       key: 'routing.tier_comparability',

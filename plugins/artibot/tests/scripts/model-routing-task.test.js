@@ -653,21 +653,43 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
   /** @returns {string[]} every artibot roster agent, from `show --json` */
   const artibotRoster = () => showJson('--plugin', 'artibot').plugins.artibot.rows.map((r) => r.agent);
 
-  // CA-02: `status` and `classify` are the two classes the shipped canary lowers, so their
-  // "before" is sonnet (29 agents) / opus (the FABLE_DENYLIST agent the canary skips) — not
-  // the opus every class had before 2026-09-30. Fixture cowork: planner sonnet (equals the
-  // canary), case-study-writer haiku (below it — a canary never raises it).
-  it.each(['status', 'classify'])('a %s pick no agent defaults to is not "none": one [task=] row per plugin and outcome, N = row count', (cls) => {
-    const n = artibotRoster().length;
+  /**
+   * The artibot roster split the way the canary's review guard splits it, from each row's own default
+   * task in a plain `show --json`: `held` agents default to review or architecture and are opus under
+   * every role; `lowered` agents are the rest (the canary answers them under none and build, never review).
+   *
+   * @returns {{ n: number, held: number, lowered: number }}
+   */
+  const artibotSplit = () => {
+    const rows = showJson('--plugin', 'artibot').plugins.artibot.rows;
+    const isHeld = (r) => ['review', 'architecture'].includes(r.task);
+    return { n: rows.length, held: rows.filter(isHeld).length, lowered: rows.filter((r) => !isHeld(r)).length };
+  };
+  const sorted = (lines) => [...lines].sort();
+
+  // CA-02: `status` and `classify` are the two classes the shipped canary lowers, so their "before" is
+  // sonnet for an agent the review guard lets through (under none and build), and opus under a review
+  // role and for the agents it holds (default task review/architecture) — not the opus every class had
+  // before 2026-09-30. Fixture cowork: planner sonnet (equals the canary), case-study-writer haiku
+  // (below it — a canary never raises it).
+  it.each(['status', 'classify'])('a %s pick no agent defaults to is not "none": rows per plugin, role and outcome', (cls) => {
+    const { n, held, lowered } = artibotSplit();
     const r = run('apply', taskApply(cls), '--dry-run');
     expect(r.code, r.stderr).toBe(0);
     const { header, lines } = diffOf(r.stdout);
-    expect(lines).toEqual([
-      `  artibot [task=${cls}]: sonnet → haiku for ${n - 1} of ${n} agent(s) not defaulting to ${cls}`,
-      `  artibot [task=${cls}]: opus → haiku for 1 of ${n} agent(s) not defaulting to ${cls}`,
+    const tail = `agent(s) not defaulting to ${cls}`;
+    expect(sorted(lines)).toEqual(sorted([
+      // The lowered agents differ by role (a review role never had the canary), so they print per role...
+      `  artibot [task=${cls} role=none]: sonnet → haiku for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=${cls} role=build]: sonnet → haiku for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=${cls} role=review]: opus → haiku for ${lowered} of ${n} ${tail}`,
+      // ...the held agents are opus under every role, so they print once.
+      `  artibot [task=${cls}]: opus → haiku for ${held} of ${n} ${tail}`,
       // case-study-writer is haiku already: 1 of the 2 fixture agents changes.
-      `  artibot-cowork [task=${cls}]: sonnet → haiku for 1 of 2 agent(s) not defaulting to ${cls}`,
-    ]);
+      `  artibot-cowork [task=${cls}]: sonnet → haiku for 1 of 2 ${tail}`,
+    ]));
+    expect(held).toBeGreaterThan(0);
+    expect(lowered).toBeGreaterThan(0);
     expect(header).toBe(`effective changes (${lines.length}):`);
     expect(existsSync(stateFile)).toBe(false);
   }, TIMEOUT);
@@ -676,13 +698,18 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
     const viaApply = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
     expect(diffOf(run('set', 'task', 'status', 'haiku', '--dry-run').stdout)).toEqual(viaApply);
     expect(diffOf(run('set', 'task', 'status', 'haiku').stdout)).toEqual(viaApply);
+    const { n, held, lowered } = artibotSplit();
     const reset = diffOf(run('reset', 'task', 'status', '--plugin', 'artibot').stdout);
-    // reset returns to the SHIPPED value, which for `status` is now the canary (sonnet), not opus.
-    expect(reset.lines).toEqual([
-      expect.stringMatching(/^ {2}artibot \[task=status\]: haiku → sonnet for (\d+) of \d+ agent\(s\) not defaulting to status$/),
-      expect.stringMatching(/^ {2}artibot \[task=status\]: haiku → opus for 1 of \d+ agent\(s\) not defaulting to status$/),
-    ]);
-    expect(reset.header).toBe('effective changes (2):');
+    const tail = 'agent(s) not defaulting to status';
+    // reset returns to the SHIPPED value, which for `status` is now the canary (sonnet) under none and build — and
+    // opus under a review role and for the held agents, which the canary never lowers.
+    expect(sorted(reset.lines)).toEqual(sorted([
+      `  artibot [task=status role=none]: haiku → sonnet for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=status role=build]: haiku → sonnet for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=status role=review]: haiku → opus for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=status]: haiku → opus for ${held} of ${n} ${tail}`,
+    ]));
+    expect(reset.header).toBe('effective changes (4):');
   });
 
   it('re-setting the stored value is still none (setting unchanged)', { timeout: TIMEOUT }, () => {
@@ -704,11 +731,22 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
     const cowork = { default: null, agents: { planner: 'sonnet', 'case-study-writer': 'sonnet' } };
     writeOverrides({ artibot: { default: null, agents: pinned(roster), phaseRoles: {} }, 'artibot-cowork': cowork });
     expect(run('apply', taskApply('status'), '--dry-run').stdout).toMatch(/^effective changes \(none\):\n/);
-    writeOverrides({ artibot: { default: null, agents: pinned(roster.slice(1)), phaseRoles: {} }, 'artibot-cowork': cowork });
-    const { header, lines } = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
-    // The unshadowed agent (first in the roster) is not the denylisted one, so its "before" is the canary's sonnet.
-    expect(lines).toEqual([`  artibot [task=status]: sonnet → haiku for 1 of ${roster.length} agent(s) not defaulting to status`]);
-    expect(header).toBe('effective changes (1):');
+    const tail = `agent(s) not defaulting to status`;
+    // Unshadow ONE builder (default task edit-routine): its "before" is the canary's sonnet under none and build, and the
+    // shipped opus under a review role, which the canary never lowers — so it prints per role.
+    writeOverrides({ artibot: { default: null, agents: pinned(roster.filter((a) => a !== 'doc-updater')), phaseRoles: {} }, 'artibot-cowork': cowork });
+    const builder = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
+    expect(sorted(builder.lines)).toEqual(sorted([
+      `  artibot [task=status role=none]: sonnet → haiku for 1 of ${roster.length} ${tail}`,
+      `  artibot [task=status role=build]: sonnet → haiku for 1 of ${roster.length} ${tail}`,
+      `  artibot [task=status role=review]: opus → haiku for 1 of ${roster.length} ${tail}`,
+    ]));
+    expect(builder.header).toBe('effective changes (3):');
+    // Unshadow ONE reviewer (default task review): the guard holds it, so it is opus under every role — one uniform row.
+    writeOverrides({ artibot: { default: null, agents: pinned(roster.filter((a) => a !== 'code-reviewer')), phaseRoles: {} }, 'artibot-cowork': cowork });
+    const reviewer = diffOf(run('apply', taskApply('status'), '--dry-run').stdout);
+    expect(reviewer.lines).toEqual([`  artibot [task=status]: opus → haiku for 1 of ${roster.length} ${tail}`]);
+    expect(reviewer.header).toBe('effective changes (1):');
   });
 
   it('adds no row for agents whose DEFAULT task is the class — the per-agent rows already show them', { timeout: TIMEOUT }, () => {
@@ -730,17 +768,22 @@ describe('CLI: effective changes under an explicit task context (MR1)', () => {
   });
 
   it('role variants that differ print per role, like the per-agent rows', { timeout: TIMEOUT }, () => {
-    // CA-02: the roles differ because a USER phase pick (build=opus) beats the canary, which answers
-    // sonnet for the other two roles. The denylisted agent is pinned by an agent override so this
-    // stays a test of role variants; its carve-out is pinned in model-routing-canary.test.js.
+    // CA-02: the roles differ because a USER phase pick (build=opus) beats the canary, which answers sonnet under
+    // no role, and because a review role never had the canary (opus, the shipped tier). The agents the review guard
+    // holds (default task review/architecture) are opus under every role, so they print once. security-reviewer is
+    // pinned by an agent override so this stays a test of role variants: the user's agent pick beats a task pick.
+    // Its carve-out is pinned in model-routing-canary.test.js.
     writeOverrides({ artibot: { default: null, agents: { 'security-reviewer': 'sonnet' }, phaseRoles: { build: 'opus' } } });
-    const n = artibotRoster().length;
+    const { n, held, lowered } = artibotSplit();
     const { header, lines } = diffOf(run('set', 'task', 'status', 'haiku', '--plugin', 'artibot', '--dry-run').stdout);
-    expect(lines).toEqual([
-      `  artibot [task=status role=none]: sonnet → haiku for ${n - 1} of ${n} agent(s) not defaulting to status`,
-      `  artibot [task=status role=build]: opus → haiku for ${n - 1} of ${n} agent(s) not defaulting to status`,
-      `  artibot [task=status role=review]: sonnet → haiku for ${n - 1} of ${n} agent(s) not defaulting to status`,
-    ]);
-    expect(header).toBe('effective changes (3):');
+    const tail = 'agent(s) not defaulting to status';
+    expect(sorted(lines)).toEqual(sorted([
+      `  artibot [task=status role=none]: sonnet → haiku for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=status role=build]: opus → haiku for ${lowered} of ${n} ${tail}`,
+      `  artibot [task=status role=review]: opus → haiku for ${lowered} of ${n} ${tail}`,
+      // Every held agent except the pinned security-reviewer.
+      `  artibot [task=status]: opus → haiku for ${held - 1} of ${n} ${tail}`,
+    ]));
+    expect(header).toBe('effective changes (4):');
   });
 });
