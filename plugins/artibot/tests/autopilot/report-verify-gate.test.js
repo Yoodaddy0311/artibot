@@ -8,7 +8,7 @@
  *      a FAIL, which blind spots pass on purpose, the precedence over the other
  *      codes, and parity with `recovery-record.js#foldVerify`.
  *   2. The kill switch — `readReportVerifyGateEnforce` accepts only the literal
- *      `true`, and the shipped config reads OFF.
+ *      `true`, and the shipped config reads ON (owner decision 2026-09-30).
  *   3. The engine — `runPhase6Report` with the switch OFF must match a run with
  *      the gate removed in every field, every event and the report's Phase
  *      Timeline row; with it ON, missing evidence closes the REPORT window and
@@ -33,8 +33,8 @@
  *      run before VERIFY was armed, or hand-driven), switch ON: pinned as today's
  *      behaviour, one pause and one VERIFY re-run.
  *   6b. The read-only census of how many stored sessions that pause would reach.
- *   7. The shipped switch driven with NOTHING injected, plus controls that turn
- *      the same harness ON through a temp plugin root.
+ *   7. The shipped switch (ON) driven with NOTHING injected, plus controls that turn
+ *      the same harness OFF through a temp plugin root.
  *   8. `loadReportVerifyGateConfig` against real files, including the silent OFF
  *      of an unreadable config.
  *   8b. The seal's two switches read from real config files (W3-7).
@@ -366,9 +366,9 @@ describe('kill switch reader', () => {
     }
   });
 
-  it('should read the shipped config as OFF', () => {
+  it('should read the shipped config as ON (owner decision 2026-09-30)', () => {
     expect(REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH).toBe('autopilot.reportVerifyGate.enforce');
-    expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true });
   });
 });
 
@@ -413,7 +413,7 @@ function runReportFrom(sessionId, snapshot) {
   return { state, result, events, timelineRow };
 }
 
-describe('runPhase6Report — switch OFF (shipped)', () => {
+describe('runPhase6Report — switch OFF (the kill switch thrown)', () => {
   it('should be byte-identical to a gate-less run: state, return, events and the timeline row', async () => {
     const sessionId = await start('off-baseline');
     const snapshot = readFileSync(getSessionPath(sessionId), 'utf8');
@@ -1170,13 +1170,17 @@ describe('scopeVerifyResultToAttempt — a VERIFY hand-out seals the previous re
     expect(JSON.stringify(state)).toBe(before);
   });
 
-  it('should read the shipped switch (OFF) when no config is passed', () => {
+  it('should read the shipped switch (ON) when no config is passed: the slot is sealed', () => {
+    // The shipped enforce is true since 2026-09-30; the OFF twin, with the plugin root
+    // config's switches thrown OFF, is in the section 7 controls and section 8b.
     const state = { verifyResult: { status: 'FAIL' } };
-    const before = JSON.stringify(state);
 
-    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(false);
+    expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(true);
 
-    expect(JSON.stringify(state)).toBe(before);
+    expect(state.verifyResult).toBeNull();
+    expect(state.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL' }, supersededBy: 'v2' },
+    ]);
   });
 
   it.each([
@@ -1418,16 +1422,19 @@ describe('a VERIFY hand-out through the engine (resumeAutopilot → runPhase4Ver
     expect('verifyResultHistory' in after).toBe(false);
   });
 
-  it('should touch nothing with the shipped switch and nothing injected', async () => {
-    gateMode.shipped = true; // the real reader, against the artibot.config.json this checkout ships (OFF)
+  it('should seal with the shipped switch and nothing injected (ON since 2026-09-30)', async () => {
+    gateMode.shipped = true; // the real reader, against the artibot.config.json this checkout ships (ON)
     const sessionId = await readyForVerify('scope-shipped', { verifyResult: { status: 'FAIL' } });
 
     await resumeAutopilot(sessionId);
 
     const after = loadSession(sessionId);
-    expect(after.verifyResult).toEqual({ status: 'FAIL' });
-    expect('verifyResultScope' in after).toBe(false);
-    expect('verifyResultHistory' in after).toBe(false);
+    const { attemptId } = after.activePhaseAttempt;
+    expect(after.verifyResult).toBeNull();
+    expect(after.verifyResultScope).toEqual({ attemptId });
+    expect(after.verifyResultHistory).toEqual([
+      { attemptId: null, verifyResult: { status: 'FAIL' }, supersededBy: attemptId },
+    ]);
   });
 
   it('should seal at the crash re-run too, archiving the first hand-out\'s result under that hand-out', async () => {
@@ -1840,18 +1847,24 @@ const shippedWith = (enforce) => JSON.stringify({
 describe('the shipped switch, with nothing injected', () => {
   // Sections 3-5 inject the switch, so none of them runs what a user actually
   // gets: the engine's own default argument plus the reader against the config
-  // this checkout ships. `gateMode.shipped` removes the injection.
+  // this checkout ships. It ships ON since 2026-09-30 (owner decision), with
+  // CA-03 (`recovery.transitionFromVerdict`) still OFF. `gateMode.shipped`
+  // removes the injection.
   const failed = { attemptJournal: [...EVIDENCE], verifyResult: { status: 'FAIL' } };
 
-  it('should read OFF from the config this checkout ships', () => {
-    expect(SHIPPED_CONFIG.autopilot.reportVerifyGate.enforce).toBe(false);
-    expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+  it('should read ON from the config this checkout ships', () => {
+    expect(SHIPPED_CONFIG.autopilot.reportVerifyGate.enforce).toBe(true);
+    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true });
+  });
+
+  it('should leave CA-03 OFF: the flip did not switch the recovery transition on', () => {
+    expect(SHIPPED_CONFIG.autopilot.recovery.transitionFromVerdict).toBe(false);
   });
 
   it.each([
-    ['no evidence', {}],
-    ['an explicit FAIL result', failed],
-  ])('engine path: runPhase6Report completes with %s, and the gate leaves no trace', async (_label, fields) => {
+    ['no evidence', {}, 'NO_VERIFY_ATTEMPT'],
+    ['an explicit FAIL result', failed, 'VERIFY_RESULT_FAILED'],
+  ])('engine path: runPhase6Report pauses back to VERIFY with %s', async (_label, fields, code) => {
     const sessionId = await start('shipped-engine');
     const state = { ...loadSession(sessionId), ...fields };
     saveSession(state);
@@ -1859,68 +1872,81 @@ describe('the shipped switch, with nothing injected', () => {
 
     const result = runPhase6Report(loadSession(sessionId));
 
+    expect(result).toMatchObject({ type: 'pause', code, reason: `report-verify-evidence-missing:${code}` });
+    expect(loadSession(sessionId)).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY' });
+    expect(readEvents(sessionId).filter((e) => e.type === 'pause')).toHaveLength(1);
+  });
+
+  it('engine path: runPhase6Report completes a verified session and leaves one gate tick', async () => {
+    const sessionId = await start('shipped-engine-ok');
+    saveSession({ ...loadSession(sessionId), attemptJournal: [...EVIDENCE], verifyResult: { status: 'PASS' } });
+    gateMode.shipped = true;
+
+    const result = runPhase6Report(loadSession(sessionId));
+
     expect(result.type).toBe('phase-result');
     expect(loadSession(sessionId).phase).toBe('COMPLETED');
-    expect(gateTicks(sessionId)).toEqual([]);
-    expect(readEvents(sessionId).filter((e) => e.type === 'pause')).toEqual([]);
+    expect(gateTicks(sessionId).map((e) => e.data.code)).toEqual(['ok']);
   });
 
   it.each([
-    ['no evidence', {}],
-    ['an explicit FAIL result', failed],
-  ])('driver path: recordPhaseResult(REPORT) records it with %s and emits nothing', (_label, fields) => {
+    ['no evidence', {}, 'NO_VERIFY_ATTEMPT'],
+    ['an explicit FAIL result', failed, 'VERIFY_RESULT_FAILED'],
+  ])('driver path: recordPhaseResult(REPORT) refuses it with %s and pauses back to VERIFY', (_label, fields, code) => {
     const state = seeded('shipped-drv', fields);
     gateMode.shipped = true;
-    const before = readEvents(state.sessionId).length;
 
     recordPhaseResult(state, { phase: 'REPORT', status: 'done' });
 
-    expect(state).toMatchObject({ phase: 'REPORT', pendingPhase: null });
-    expect(state.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
-    expect(readEvents(state.sessionId).slice(before)).toEqual([]);
+    expect(state).toMatchObject({
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY', pausedReason: `report-verify-evidence-missing:${code}`,
+    });
+    expect(state.phases).toEqual([]);
   });
 
-  // Without these the two blocks above could pass for the wrong reason (an
-  // injected OFF that never reaches the real reader). Same calls, same
-  // harness, a plugin root whose config is ON: both must now refuse.
-  it('control: gateReportOnVerify pauses when the plugin root config is ON', () => {
-    withPluginRoot(shippedWith(true), () => {
+  // Without these the blocks above could pass for the wrong reason (a shipped
+  // value the real reader never sees). Same calls, same harness, a plugin root
+  // whose config is the shipped one with the switch thrown OFF: every one must now
+  // let REPORT through, and the seal must touch nothing.
+  it('control: gateReportOnVerify returns null when the plugin root config is OFF', () => {
+    withPluginRoot(shippedWith(false), () => {
       gateMode.shipped = true;
-      const state = { sessionId: uniqueId('shipped-on-gate'), phase: 'REPORT', attemptJournal: [], activePhaseAttempt: null };
+      const state = { sessionId: uniqueId('shipped-off-gate'), phase: 'REPORT', attemptJournal: [], activePhaseAttempt: null };
 
-      expect(gateReportOnVerify(state)).toMatchObject({ type: 'pause', code: 'NO_VERIFY_ATTEMPT' });
+      expect(gateReportOnVerify(state)).toBeNull();
     });
   });
 
-  it('control: recordPhaseResult(REPORT) refuses when the plugin root config is ON', () => {
-    withPluginRoot(shippedWith(true), () => {
+  it('control: recordPhaseResult(REPORT) records it when the plugin root config is OFF', () => {
+    withPluginRoot(shippedWith(false), () => {
       gateMode.shipped = true;
-      const state = seeded('shipped-on-drv', {});
+      const state = seeded('shipped-off-drv', {});
 
       recordPhaseResult(state, { phase: 'REPORT', status: 'done' });
 
-      expect(state).toMatchObject({ phase: 'PAUSED', pendingPhase: 'VERIFY' });
-      expect(state.phases).toEqual([]);
+      expect(state).toMatchObject({ phase: 'REPORT', pendingPhase: null });
+      expect(state.phases.at(-1)).toMatchObject({ name: 'REPORT', status: 'done' });
     });
   });
 
-  it('control: the VERIFY hand-out seal takes the switch from the plugin root config too', () => {
+  it('control: the VERIFY hand-out seal takes both switches from the plugin root config too', () => {
     // The engine passes the seal no config, so the real reader is the only source.
-    // ON here, OFF in 'should read the shipped switch (OFF) when no config is passed'.
-    withPluginRoot(shippedWith(true), () => {
+    // OFF here (enforce thrown OFF, CA-03 still OFF), ON in 'should read the shipped
+    // switch (ON) when no config is passed'.
+    withPluginRoot(shippedWith(false), () => {
       const state = { verifyResult: { status: 'FAIL' } };
+      const before = JSON.stringify(state);
 
-      expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(true);
+      expect(scopeVerifyResultToAttempt(state, attemptOf('v2'))).toBe(false);
 
-      expect(state.verifyResult).toBeNull();
-      expect(state.verifyResultHistory).toHaveLength(1);
+      expect(JSON.stringify(state)).toBe(before);
     });
   });
 
-  it('control: the ON copy differs from the shipped config in that one key only', () => {
-    const on = JSON.parse(shippedWith(true));
-    on.autopilot.reportVerifyGate.enforce = false;
-    expect(on).toEqual(SHIPPED_CONFIG);
+  it('control: the OFF copy differs from the shipped config in that one key only', () => {
+    const off = JSON.parse(shippedWith(false));
+    off.autopilot.reportVerifyGate.enforce = true;
+    expect(off).toEqual(SHIPPED_CONFIG);
   });
 });
 

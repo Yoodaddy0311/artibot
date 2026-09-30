@@ -30,8 +30,8 @@
  *   - PROSE COHERENCE. The first version of the neighbouring `--read-order`
  *     section printed HANDOFF twice and was green at 35/35 tokens. Token pins
  *     cannot read for contradiction; a human reviewer has to.
- *   - LIVE REACH. Production ships the key false and has no
- *     `.artibot/missions/`; nothing here says the guard has ever fired.
+ *   - LIVE REACH. Production ships the key `true` (owner decision 2026-09-30) and has
+ *     no `.artibot/missions/` yet; nothing here says the guard has ever fired.
  *
  * @module tests/commands/resume-read-order-guard-doc
  */
@@ -142,7 +142,9 @@ describe('the guard paragraph', () => {
     expect(block).toContain('--mission');
     expect(block).toContain('--cwd');
     expect(block).toContain(READ_ORDER_STALE_GUARD_CONFIG_PATH);
-    expect(block).toMatch(/기본\s*`false`|출하 기본/);
+    // 2026-09-30: ships ON, and the paragraph says how to turn it off.
+    expect(block).toMatch(/출하 기본\s*`true`/);
+    expect(block).toContain('끄려면 `false`');
   });
 
   it('says the CLI reads the switch itself and that empty output with exit 0 means OFF', () => {
@@ -223,13 +225,15 @@ describe('the doc and the script agree', () => {
   it('the key the doc names is the path the reader reads', () => {
     expect(READ_ORDER_STALE_GUARD_CONFIG_PATH).toBe('runtime.resume.staleGuard');
     const value = READ_ORDER_STALE_GUARD_CONFIG_PATH.split('.').reduce((node, key) => node?.[key], SHIPPED);
-    expect(value).toBe(false);
+    expect(value).toBe(true);
   });
 });
 
 describe('artibot.config.json — runtime.resume.staleGuard', () => {
-  it('ships the boolean false: opt-in, default OFF (a string "false" would be a type change)', () => {
-    expect(SHIPPED.runtime.resume.staleGuard).toBe(false);
+  // Re-pinned false -> true on purpose (owner decision 2026-09-30). A string "true"
+  // would be a type change the strict `=== true` reader reads as OFF.
+  it('ships the boolean true: the guard is ON by default, `false` is the way back', () => {
+    expect(SHIPPED.runtime.resume.staleGuard).toBe(true);
     expect(typeof SHIPPED.runtime.resume.staleGuard).toBe('boolean');
   });
 
@@ -246,12 +250,16 @@ describe('artibot.config.json — runtime.resume.staleGuard', () => {
     ]) {
       expect(comment, token).toContain(token);
     }
-    expect(comment).toMatch(/ships false|default false|OFF/);
+    // ON is the shipped state; the comment says how to go back to OFF and what OFF keeps.
+    expect(comment).toContain('true = ON, the shipped state');
+    expect(comment).toContain('false = OFF');
+    expect(comment).toContain('byte-identical');
     expect(comment.length).toBeGreaterThan(400);
   });
 
-  it('the reader sees the shipped config as OFF', () => {
-    expect(readStaleGuardEnabled(SHIPPED)).toBe(false);
+  it('the reader sees the shipped config as ON, and a copy with the key false as OFF', () => {
+    expect(readStaleGuardEnabled(SHIPPED)).toBe(true);
+    expect(readStaleGuardEnabled({ runtime: { resume: { staleGuard: false } } })).toBe(false);
   });
 
   it('adds no top-level key (32 as pinned by tests/firewall/v5-config-firewall.test.js)', () => {

@@ -35,8 +35,8 @@
  * store keeps no review revision). Reading both sides from the same file would
  * compare a value with itself and never report staleness.
  *
- * ── OPT-IN, AND OFF MEANS SILENT ───────────────────────────────────────────
- * The switch is `runtime.resume.staleGuard`, strict `=== true`, shipped `false`.
+ * ── ON IS THE SHIPPED STATE, AND OFF MEANS SILENT ──────────────────────────
+ * The switch is `runtime.resume.staleGuard`, strict `=== true`, shipped `true` since 2026-09-30.
  * With anything else — a string, a number, an absent key, an absent or
  * unparseable config file — this prints NOTHING and exits 0, before it parses
  * its arguments, reads a single artifact or opens the store; a malformed
@@ -93,10 +93,10 @@
  *     between worktrees is judged against whichever store answers there.
  *   - STEPS 3 AND 5, AND THE HANDOFF FALLBACK. Only steps 4 and 6 are guarded; a
  *     handoff written earlier can quote a plan that has since gone stale.
- *   - AN UNREADABLE CONFIG. It reads OFF, silently. An operator who turned the
+ *   - AN UNREADABLE CONFIG. It reads OFF, silently. An operator who left the
  *     key on and then broke the config file gets no guard and no message.
- *   - LIVE REACH. Production ships the key `false` and has no
- *     `.artibot/missions/`, so nothing here has fired outside a test.
+ *   - LIVE REACH. Production ships the key `true` but had no
+ *     `.artibot/missions/` as of 2026-09-29, so nothing here has fired outside a test.
  *
  * USAGE
  *   node scripts/checkpoint/read-order-guard.mjs --mission <M-id> [--cwd <projectRoot>]

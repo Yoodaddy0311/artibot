@@ -425,8 +425,8 @@ describe('신설 키가 참조하는 기존 값은 이번 변경에서 건드리
     ['runtime.checkpoint.saveOnSave', false],
     // CA-15 kill switch: question-gate enforcement lands OFF; flipping it is an owner decision.
     ['runtime.questionGate.enforce', false],
-    // CA-13 kill switch: the REPORT verify-evidence gate lands OFF (observe only); flipping it is an owner decision.
-    ['autopilot.reportVerifyGate.enforce', false],
+    // 2026-09-30 오너 결정으로 의도적 재핀: CA-13 REPORT 검증 근거 게이트 false→true (W3-7 이 VERIFY 봉인 조건을 먼저 착지).
+    ['autopilot.reportVerifyGate.enforce', true],
   ])('%s === %j (무변경)', (dotted, value) => {
     expect(resolveDotPath(config, dotted)).toEqual(value);
   });
@@ -517,25 +517,38 @@ describe('runtime.questionGate.enforce — CA-15 킬스위치의 등재값', () 
  * CA-15 와 같은 이유로 여기서 소유한다: `autopilot` 은 신설 6키 allowlist 사정권
  * 밖이고 JSON 스키마는 비-strict 라 값을 못 본다. 소비자
  * `lib/autopilot/report-verify-gate.js#readReportVerifyGateEnforce` 가 `=== true`
- * 리터럴 비교라 문자열 `"false"` 도 OFF 로 읽히므로 타입을 따로 단언한다.
+ * 리터럴 비교라 문자열 `"true"` 도 OFF 로 읽히므로 타입을 따로 단언한다.
+ *
+ * 2026-09-30 오너 결정으로 출하값이 false → true 로 뒤집혔다(W3-7 이 VERIFY 봉인 조건을
+ * `enforce ∥ transitionFromVerdict` 로 먼저 착지시킨 뒤). 이 핀은 그 값을 그대로
+ * 고정하고, 끄는 길(복사본에서 false)이 여전히 소비자에게 닿는지도 본다 — 되돌리기가
+ * 죽은 스위치가 되면 안 된다. `autopilot.recovery.transitionFromVerdict`(CA-03)는 이번에
+ * 켜지 않았고 위 "신설 키가 참조하는 기존 값" 표가 false 로 계속 고정한다.
  *
  * 이 게이트가 못 보는 것(rules §9):
  *  - ON 일 때의 동작. 판정과 PAUSE 는 `tests/autopilot/report-verify-gate.test.js` 가 본다.
- *  - 게이트의 도달 범위. 게이트는 `engine.js#runPhase6Report` 안에서만 돈다 — 드라이버가
- *    `recordPhaseResult` 로 REPORT 를 기록하는 경로는 이 키와 무관하게 게이트를 거치지 않는다.
+ *  - 게이트의 도달 범위. 두 진입점(`engine.js#runPhase6Report`, 드라이버 경로
+ *    `engine-state.js#recordPhaseResult`)이 같은 스위치를 읽는다. `state.phases`·`state.phase`
+ *    를 직접 쓰는 코드는 어느 쪽도 거치지 않는다.
  */
 describe('autopilot.reportVerifyGate.enforce — CA-13 킬스위치의 등재값', () => {
-  it('키가 등재돼 있고 boolean false 다 (문자열 "false" 거부)', () => {
-    expect(resolveDotPath(config, 'autopilot.reportVerifyGate.enforce')).toBe(false);
+  it('키가 등재돼 있고 boolean true 다 (문자열 "true" 거부)', () => {
+    expect(resolveDotPath(config, 'autopilot.reportVerifyGate.enforce')).toBe(true);
     expect(typeof config.autopilot.reportVerifyGate.enforce).toBe('boolean');
   });
 
-  it('등재가 소비자를 켜지 않는다 — readReportVerifyGateEnforce 가 false 를 준다', () => {
-    expect(readReportVerifyGateEnforce(config)).toBe(false);
+  it('출하값이 소비자를 켠다 — readReportVerifyGateEnforce 가 true 를 준다', () => {
+    expect(readReportVerifyGateEnforce(config)).toBe(true);
+  });
+
+  it('끄는 길이 열려 있다 — 복사본에서 false 로 바꾸면 소비자가 false 를 준다', () => {
+    const off = structuredClone(config);
+    off.autopilot.reportVerifyGate.enforce = false;
+    expect(readReportVerifyGateEnforce(off)).toBe(false);
   });
 
   it('소비자가 보는 경로가 이 키의 경로와 같다 (상수 드리프트 탐지)', () => {
     expect(REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH).toBe('autopilot.reportVerifyGate.enforce');
-    expect(resolveDotPath(config, REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH)).toBe(false);
+    expect(resolveDotPath(config, REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH)).toBe(true);
   });
 });

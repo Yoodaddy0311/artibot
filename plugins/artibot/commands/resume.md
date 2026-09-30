@@ -96,9 +96,9 @@ Parse $ARGUMENTS:
 5. 관련 ADR — `.artibot/adr/` 아래에서 이번 작업에 걸리는 결정 기록만 읽는다. 여러 건이어도 요지 5줄 상한은 **건별이 아니라 이 단계 합계**이며, 머리줄도 `[5/6]` 하나로 묶는다 (출력 총량 상한 유지). `INDEX.md` 는 수기 정본이라 **읽기만** 하고 재생성·재번호 매기기를 절대 호출하지 않는다. 부재 시 `부재: .artibot/adr/` 한 줄.
 6. Review / Outcome — 해당하는 경우에만 읽는다. 경로 단서는 활성 미션 아래의 `review.md`·`outcome.md` (`.artibot/missions/<미션 id>/`). 해당 없음이면 `부재: review/outcome` 한 줄.
 
-**4·6단계 stale 가드 (opt-in — 설정 키 `runtime.resume.staleGuard`, 출하 기본 `false`).** 4·6단계에서 `plan.md`·`review.md`·`outcome.md` 를 모델이 직접 열면, 이미 낡은 산출물이 현재 진실처럼 요약될 수 있다. 그래서 이 두 단계의 출력은 `Read` 가 아니라 판정 CLI 가 만든다 — 4단계에 들어가기 **전에** Bash 로 `node <pluginRoot>/scripts/checkpoint/read-order-guard.mjs --mission <미션 id> --cwd <projectRoot>` 를 **한 번** 돌린다 (`<미션 id>` 는 2단계에서 얻은 값, `<pluginRoot>` 는 `--contract` 절의 `resume-report.mjs` 와 같은 루트). 미션 id 가 미확정이면 이 CLI 는 돌리지 않고 3·4·6단계는 위 목록이 정한 대로 처리한다. 이 CLI 도 읽기·계산·출력만 하며 위 키를 스스로 읽는다.
+**4·6단계 stale 가드 (설정 키 `runtime.resume.staleGuard`, 출하 기본 `true` — 끄려면 `false`).** 4·6단계에서 `plan.md`·`review.md`·`outcome.md` 를 모델이 직접 열면, 이미 낡은 산출물이 현재 진실처럼 요약될 수 있다. 그래서 이 두 단계의 출력은 `Read` 가 아니라 판정 CLI 가 만든다 — 4단계에 들어가기 **전에** Bash 로 `node <pluginRoot>/scripts/checkpoint/read-order-guard.mjs --mission <미션 id> --cwd <projectRoot>` 를 **한 번** 돌린다 (`<미션 id>` 는 2단계에서 얻은 값, `<pluginRoot>` 는 `--contract` 절의 `resume-report.mjs` 와 같은 루트). 미션 id 가 미확정이면 이 CLI 는 돌리지 않고 3·4·6단계는 위 목록이 정한 대로 처리한다. 이 CLI 도 읽기·계산·출력만 하며 위 키를 스스로 읽는다.
 
-- 종료 코드 0 에 출력이 **비어 있으면** 가드가 꺼진 것이다. 이 문단은 없는 것과 같고, 4·6단계는 위 목록 그대로 산출물을 직접 읽어 요지 5줄 이내로 적는다.
+- 종료 코드 0 에 출력이 **비어 있으면** 가드가 꺼진 것이다(키를 `false` 로 되돌렸거나 설정 파일을 읽지 못한 경우 — 출하 기본은 켜짐이다). 이 문단은 없는 것과 같고, 4·6단계는 위 목록 그대로 산출물을 직접 읽어 요지 5줄 이내로 적는다.
 - 출력이 있으면 그것이 4·6단계의 출력이다. `plan.md`·`review.md`·`outcome.md` 를 `Read` 로 따로 열지 않는다. 출력의 첫 블록(`[4/6]` 블록 또는 `부재:` 줄)은 4단계 자리에, 나머지 블록(`[6/6]` 블록 또는 `부재: review/outcome` 줄)은 6단계 자리에 놓는다.
   - `CURRENT:` 줄이 붙은 블록은 CLI 가 실은 본문을 요지 5줄 이내로 줄여 적는다. 그 줄 끝의 `verdict …`(review)·`accepted …`(outcome)는 본문에 없을 수 있는 frontmatter 값이므로 요지에 그대로 옮긴다.
   - `STALE:`·`INVALID:`·`NOT_ACCEPTABLE:`·`BROKEN:`·`측정 불가:` 줄이 붙은 블록은 그 한 줄이 해당 산출물 출력의 전부다. 본문은 CLI 가 싣지 않았고 다른 경로로도 열지 않으며, 그 산출물을 현재 진실로 삼아 요약하지 않는다.

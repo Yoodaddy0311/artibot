@@ -183,9 +183,11 @@
  *
  * ## Kill switch
  *
- * `autopilot.reportVerifyGate.enforce`, shipped `false`. OFF, the gate does
- * nothing at all — no tick, no state change — and the engine proceeds byte for
- * byte as before. ON, missing evidence pauses the session back to VERIFY.
+ * `autopilot.reportVerifyGate.enforce`, shipped `true` since 2026-09-30 (owner
+ * decision; the seal above was armed for either switch first). ON, missing evidence
+ * pauses the session back to VERIFY. OFF, the way back, the gate does nothing at all
+ * — no tick, no state change — and the engine proceeds byte for byte as before; that
+ * path is pinned by tests that inject the switch, not by the shipped file.
  * Observation without enforcement is done offline, by running
  * {@link evaluateReportVerifyEvidence} (one session) or
  * {@link censusReportVerifyEvidence} (a store) over stored session states.
@@ -580,9 +582,10 @@ function pauseForVerify(state, result) {
  * The REPORT-entry gate. Returns null to let REPORT proceed, or a pause
  * instruction when the switch is on and the evidence is missing.
  *
- * OFF (the shipped default) is byte-invariant: no evaluation, no tick, no
- * persist — it returns null before touching anything, so events.ndjson and the
- * report's Phase Timeline are exactly what they were without the gate.
+ * OFF (the kill switch thrown; the shipped value is ON since 2026-09-30) is
+ * byte-invariant: no evaluation, no tick, no persist — it returns null before
+ * touching anything, so events.ndjson and the report's Phase Timeline are exactly
+ * what they were without the gate.
  *
  * @param {object} state - Live session state (mutated only when pausing).
  * @param {{enforce?: boolean}} [config] - Injectable for tests; omitted, it is
