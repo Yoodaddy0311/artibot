@@ -293,6 +293,33 @@ export function matchWatchUrl(text) {
 }
 
 /**
+ * CA-01 — the ONLY shape `composePromptParts` accepts for a Canary
+ * auto-activation directive: one line, `[artibot:auto-activate command=<name>]`
+ * then free prose. The string is PRODUCED by
+ * `lib/cognitive/auto-activate.js#renderAutoActivateDirective` (closed
+ * allowlist, loaded lazily by `resolveAutoActivation`); it is only ACCEPTED
+ * here, so a bug upstream cannot smuggle multi-line text into the model's
+ * context through the `autoActivate` parameter. Deliberately NOT a member of
+ * `RECOMMENDATION_HINTS`: that list is the confirm-first surface, and this is
+ * its opposite (`CLAUDE.md` "Auto-activate rule").
+ */
+const AUTO_ACTIVATE_DIRECTIVE_RE = /^\[artibot:auto-activate command=([a-z][a-z0-9-]{0,31})\][^\r\n]*$/;
+
+/**
+ * CA-01 — validate an auto-activation result before it reaches the prompt.
+ *
+ * @param {{command?: unknown, directive?: unknown}|null|undefined} activation
+ * @returns {{command: string, directive: string}|null} null unless the
+ *   directive matches {@link AUTO_ACTIVATE_DIRECTIVE_RE} AND names `command`
+ */
+export function acceptAutoActivation(activation) {
+  const directive = activation?.directive;
+  if (typeof directive !== 'string') return null;
+  const m = AUTO_ACTIVATE_DIRECTIVE_RE.exec(directive);
+  return m !== null && m[1] === activation.command ? { command: m[1], directive } : null;
+}
+
+/**
  * Prepend one or more artibot directives to the user prompt on a single
  * leading line, separated from the original prompt by a blank line.
  *
@@ -1001,10 +1028,19 @@ export function composePromptOutput(params) {
  * wins over `watch`, and `injectPrompt === false` is null because no directive
  * reaches either surface, so nothing was shown to anyone.
  *
+ * CA-01: `autoActivate` is the optional `{command, directive}` from
+ * `resolveAutoActivation`. It is dropped — the output is then byte-identical to
+ * a call without the key — unless it passes `acceptAutoActivation` AND no team
+ * directive, `recommend=` hint or `watch` hint is present this turn (those keep
+ * their own confirm/delegate rules). When shown, `shownHint` is
+ * `auto-<command>`, which the activation record stores as `hint_recommend`.
+ *
  * @param {object} params
  * @returns {{ output: object, shownHint: string|null }}
  */
-export function composePromptParts({ prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt }) {
+export function composePromptParts({
+  prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt, autoActivate,
+}) {
   const basePrompt = prepared.userPrompt ?? prompt;
   const effortDirective = buildEffortDirective(effortMeta);
   // P2: the pipeline's tasks middleware derives a unified workflow plan
@@ -1024,7 +1060,16 @@ export function composePromptParts({ prepared, prompt, effortMeta, taskBudgetDir
   // auto-fires. Built from the user text, so it's '' for non-YouTube prompts.
   const watchUrl = matchWatchUrl(basePrompt);
   const watchDirective = buildWatchDirective(basePrompt);
-  const directives = [teamDirective, effortDirective, taskBudgetDirective, recommendationDirective, watchDirective];
+  // CA-01: LAST in the list, and only when nothing above is asking the model to
+  // delegate, confirm or ingest this turn. '' otherwise, so every other prompt
+  // stays byte-identical to a hook without this feature.
+  const autoActivation = teamDirective === '' && recommendHint === null && watchUrl === null
+    ? acceptAutoActivation(autoActivate)
+    : null;
+  const directives = [
+    teamDirective, effortDirective, taskBudgetDirective, recommendationDirective, watchDirective,
+    autoActivation === null ? '' : autoActivation.directive,
+  ];
   const finalUserPrompt = injectPrompt
     ? applyPromptPrefix(basePrompt, directives)
     : basePrompt;
@@ -1046,8 +1091,50 @@ export function composePromptParts({ prepared, prompt, effortMeta, taskBudgetDir
       additionalContext,
     };
   }
-  const shownHint = injectPrompt ? (recommendHint ?? (watchUrl === null ? null : 'watch')) : null;
+  let shownHint = null;
+  if (injectPrompt) {
+    if (recommendHint !== null) shownHint = recommendHint;
+    else if (watchUrl !== null) shownHint = 'watch';
+    else if (autoActivation !== null) shownHint = `auto-${autoActivation.command}`;
+  }
   return { output, shownHint };
+}
+
+/**
+ * CA-01 — ask `lib/cognitive/auto-activate.js` whether this prompt earns a
+ * Canary auto-activation directive, and render it if so.
+ *
+ * Loaded DYNAMICALLY like every other optional lib module here, and fail-CLOSED:
+ * a missing module (an older installed tree), a throw, or anything but an
+ * explicit `activate: true` yields null — which `composePromptParts` treats as
+ * "no directive", i.e. today's output byte for byte. The kill switch
+ * (`automation.autoActivate.commands`) is read by the decision module itself,
+ * from the `runtimeConfig` this hook already parsed, so there is one reader.
+ *
+ * @param {object} params
+ * @param {string} params.prompt
+ * @param {object} params.prepared - `preparePrompt` result (`context.intent` is read)
+ * @param {object} params.runtimeConfig
+ * @param {string} params.pluginRoot
+ * @param {boolean} params.injectPrompt - false = no directive is delivered at all
+ * @returns {Promise<{command: string, directive: string}|null>}
+ */
+async function resolveAutoActivation({ prompt, prepared, runtimeConfig, pluginRoot, injectPrompt }) {
+  if (injectPrompt !== true) return null;
+  try {
+    const mod = await loadLibModule(pluginRoot, 'cognitive', 'auto-activate.js');
+    const decision = await mod.decideAutoActivation({
+      text: prompt,
+      config: runtimeConfig,
+      slashCommand: detectSlashCommand(prompt),
+      intent: prepared?.context?.intent ?? null,
+    });
+    if (decision?.activate !== true) return null;
+    const directive = mod.renderAutoActivateDirective(decision.command);
+    return directive === '' ? null : { command: decision.command, directive };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1092,8 +1179,11 @@ export async function handleUserPromptSubmit(hookData) {
     await applyNativeEffortHint(nativeBand ?? effortMeta.effort, pluginRoot);
   }
 
+  const autoActivate = await resolveAutoActivation({
+    prompt, prepared, runtimeConfig, pluginRoot, injectPrompt,
+  });
   const { output, shownHint } = composePromptParts({
-    prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt,
+    prepared, prompt, effortMeta, taskBudgetDirective, injectPrompt, autoActivate,
   });
 
   // T-37 — observe-only records, placed AFTER `output` is already final. The

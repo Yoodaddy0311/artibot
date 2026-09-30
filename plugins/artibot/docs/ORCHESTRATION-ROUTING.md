@@ -78,6 +78,14 @@ workflow/autopilot recommendations into prompt text.
 `orchestrate` (classifier label `workflow`) and `autopilot` MUST NEVER auto-fire without explicit user opt-in.
 The classifier MAY only recommend them (advisory text). Only `inline` and `team` auto-fire.
 
+**Low-risk command auto-activation (Canary, CA-01)** is a separate, command-level rule — it is not a
+runner row and it does not relax the constraint above. While `automation.autoActivate.commands` is
+`true`, `scripts/hooks/runtime-prompt.js` may add `[artibot:auto-activate command=X]` for a closed
+allowlist of low-risk commands (`analyze`, `explain`, `blindspot`, `scorecard`) and the model then runs
+`/X` without asking. It never applies to `orchestrate`, `autopilot` or `split`. Decision logic and the
+definition of a "gate hit": `lib/cognitive/auto-activate.js`; rendered rule: `CLAUDE.md`
+"Auto-activate rule".
+
 ---
 
 ## Process Cardinality (orthogonal)

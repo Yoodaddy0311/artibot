@@ -502,7 +502,10 @@ describe('shownHint is the hint the turn ACTUALLY showed (pure half)', () => {
 
 describe('the shown hint reaches the activation record', () => {
   it('writes both hint keys as null for a prompt with no hint', async () => {
-    await submit({ prompt: 'explain how the router works', sid: 'sess-hint-a', pid: 'prompt-hint-a' });
+    // NOT 'explain how the router works': since CA-01 (Canary auto-activation,
+    // shipped ON) that phrase selects `/explain` and records `auto-explain`. This
+    // case needs a prompt that no hint of any kind applies to.
+    await submit({ prompt: 'how does the router work', sid: 'sess-hint-a', pid: 'prompt-hint-a' });
 
     const [ev] = activationEvents();
     expect(ev.data.hint_recommend).toBeNull();
@@ -631,7 +634,10 @@ describe('the NL-activation reporter can read what the hook wrote', () => {
     // NEGATIVE CONTROL for the case above: without it, an axis that numerated
     // every hint row unconditionally would look identical.
     await submit({ prompt: `이 영상 봐줘 ${YT}`, sid: 'sess-ignored', pid: 'prompt-ignored-1' });
-    await submit({ prompt: 'explain how the router works', sid: 'sess-ignored', pid: 'prompt-ignored-2' });
+    // A prompt no hint applies to (see the note in the "no hint" case above: the
+    // old 'explain how the router works' is a CA-01 trigger and would add a second
+    // hint row, changing the denominator this case asserts).
+    await submit({ prompt: 'how does the router work', sid: 'sess-ignored', pid: 'prompt-ignored-2' });
 
     const followed = hintFollowedAxis();
     expect(followed.denominator).toBe(1);
