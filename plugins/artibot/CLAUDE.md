@@ -72,7 +72,7 @@ So "Claude auto-triggers without the user typing a slash" is accurate at the beh
 - `recommend=split` (창 N개 분할 적합 — 파일 소유권이 갈리는 대형 작업): "이 작업은 줄기가 갈려서 창을 나눠 병렬로 돌리면 빨라요. `/split plan` 으로 나눠 볼까요?" → 사용자 확인 전 자동 실행 없음(`/split` 은 사람이 창을 여는 표면이라 모델은 제안만 한다).
 - `recommend=watch` (유튜브 URL 감지): **명시적 예외 — 확인 없이 즉시 실행** (orchestrate/autopilot과 달리 사전 확인 불필요). transcript 모드는 경량·로컬·인바운드 전용(공개 자막 텍스트만)이라 advisory-only 원칙의 예외로 승인된 동작. frames(프레임 판독)는 여전히 opt-in — 토큰 비용이 있으므로 자동 실행 금지, 필요 시 한 줄 제안. yt-dlp 미설치 시 실행 대신 설치 안내만 출력.
 
-See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hint cross-reference), `commands/watch.md` (watch hint cross-reference), `docs/ORCHESTRATION-ROUTING.md` (advisory-only rule).
+See also: `commands/team.md` (hint cross-reference), `commands/autopilot.md` (hint cross-reference), `commands/watch.md` (watch hint cross-reference), `docs/ORCHESTRATION-ROUTING.md` (advisory-only rule). Low-risk command auto-activation is a separate tag with its own rule: "Auto-activate rule" below.
 
 ## Quality Gates
 
@@ -105,6 +105,10 @@ npm run ci             # validate + skill:check + lint + test + eval:runtime
 ```
 
 Config: `artibot.config.json` (model policy, team, cognitive). Manifest: `.claude-plugin/plugin.json`.
+
+## Auto-activate rule (Canary, CA-01)
+
+A different tag from the `[artibot:hint recommend=X]` hint above — `[artibot:auto-activate command=X]`, emitted by `scripts/hooks/runtime-prompt.js` only while `automation.autoActivate.commands` is `true` (the one kill switch; shipped ON). `X` comes from a closed allowlist of low-risk commands — `analyze` · `explain` · `blindspot` · `scorecard` (v5 design A2 also names `why`, which has no command and never fires) — and only for a prompt that selects exactly one of them, trips no human/policy gate (`lib/cognitive/auto-activate.js#screenGateHits`), is not ambiguous or a typed slash command, and carries no team, `recommend=` or `watch` directive. The model runs `/X` **without asking**, says so in one short Korean sentence, and every hook gate and tool permission still applies. This is an instruction to the model, not a dispatcher (a hook cannot run a command), and whether the model complies is unmeasured. The confirmation rule above does not apply to it, and it never covers `/orchestrate`, `/autopilot` or `/split`, which stay advisory.
 
 ## Artibot Integration
 

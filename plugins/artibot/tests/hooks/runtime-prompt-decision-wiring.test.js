@@ -429,7 +429,12 @@ function maskIntentionalUpsField(s) {
 describe('stdout is byte-identical to the pre-wiring hook', () => {
   const PAYLOADS = [
     { label: 'slash command', user_prompt: '/implement add oauth login', session_id: 'sess-bytes-1' },
-    { label: 'plain prompt', user_prompt: 'explain how the router works', session_id: 'sess-bytes-2' },
+    // Not 'explain how the router works': CA-01 (Canary auto-activation, shipped ON)
+    // adds a directive to that phrase on purpose, so it is no longer "plain". The
+    // identity claim here is about the decision-recording wiring, for prompts
+    // outside the CA-01 allowlist; the directive itself is pinned in
+    // tests/hooks/runtime-prompt-auto-activate.test.js.
+    { label: 'plain prompt', user_prompt: 'how does the router work', session_id: 'sess-bytes-2' },
     { label: 'split phrase', user_prompt: '대규모 변경을 파일별로 병렬 처리해줘', session_id: 'sess-bytes-3' },
     { label: 'youtube hint', user_prompt: 'summarize https://youtu.be/dQw4w9WgXcQ', session_id: 'sess-bytes-4' },
     { label: 'no session', user_prompt: 'a prompt with no session at all' },

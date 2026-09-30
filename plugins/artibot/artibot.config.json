@@ -948,7 +948,11 @@
       "ko",
       "ja",
       "zh"
-    ]
+    ],
+    "autoActivate": {
+      "commands": true,
+      "comment": "CA-01 Canary kill switch (v5 design A2). true = for a prompt that selects exactly one command of the closed allowlist (lib/cognitive/auto-activate.js AUTO_ACTIVATE_ALLOWLIST: analyze, explain, blindspot, scorecard; why is named by the design but has no command), trips no human/policy gate, is not ambiguous, is not itself a slash command and carries no team or recommend= hint, scripts/hooks/runtime-prompt.js adds one line [artibot:auto-activate command=X] telling the model to run /X without asking for confirmation. It is an instruction to the model, not an executor - whether the model complies is unmeasured - and every hook gate and tool permission still applies. Never covers orchestrate, autopilot or split. Ships true per the 2026-09-30 owner instruction as relayed in the CA-01 lane brief, with the A3 precondition (Shadow ledger, one release) NOT met; false restores the previous hook output byte for byte. The reader (readAutoActivateEnabled) is strict === true, so a missing key or the string \"true\" is OFF; tests/firewall/auto-activate-contract.test.js pins the shipped value."
+    }
   },
   "context": {
     "importCacheTTL": 30000
