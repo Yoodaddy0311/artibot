@@ -12,8 +12,13 @@
  *    a number, and a receipt recorded under an old price stamp is called out with
  *    both amounts;
  *  - THE PRICE CHECK IS NOT OVERSTATED: the line says the catalog's own
- *    `priceMeasured` flag was the basis and that no per-model comparison source
- *    is shown — it never says every model was compared with the official page;
+ *    `priceMeasured` flag was the basis — it never says every model was compared
+ *    with the official page;
+ *  - THE SOURCE IS SAID PER MODEL: the next line names, for each model whose price
+ *    is verified, the source the catalog records for its price row (`priceSource`:
+ *    kind, label, date, and any column derived instead of read), grouped where
+ *    models share one. A verified model whose row records none says `출처 미기재`;
+ *    a model whose price is not verified is not given a source at all;
  *  - ZERO ROWS ARE PRINTED AS ZERO ROWS: no table, no `$0.00`, and the reason
  *    (no ledger / no receipts / everything filtered) is on the line — and it is
  *    the reason that applies: a missing ledger is not blamed for receipts a live
@@ -34,8 +39,11 @@
  *  - WHETHER THE WORDING IS RIGHT. Only load-bearing tokens are pinned (source,
  *    date, `가격 미검증`, `SessionEnd`, `0행`); a reworded sentence that keeps
  *    them stays green.
- *  - WHICH SOURCE THE CATALOG COMPARED A GIVEN PRICE WITH. The catalog keeps that
- *    in code comments, not in a field, so nothing here can assert it per model.
+ *  - WHETHER A SOURCE LABEL IS TRUE. The per-model line prints what the catalog's
+ *    `priceSource` says; nothing here re-reads the page or the skill table, so it
+ *    proves that the table carries the catalog's record, not that the record is
+ *    right. A legacy id priced by its tier's row (claude-sonnet-5) shows that
+ *    row's source, the latest comparison of the row, not one made for that id.
  *
  * @module tests/economics/usage-table-render
  */
@@ -229,15 +237,15 @@ describe('formatUsageTableMarkdown: cost honesty', () => {
     expect(md).toMatch(/청구액이 아니/);
   });
 
-  it('bases the price check on the catalog verified flag, says later changes are unchecked, and names no per-model source', () => {
+  it('bases the price check on the catalog verified flag, says later changes are unchecked, and points at the per-model line', () => {
     const md = formatUsageTableMarkdown(twoModels(), CTX);
     const line = lines(md).find((l) => l.startsWith('- 단가 출처:'));
 
     expect(line).toMatch(/카탈로그 가격 검증 표시\(priceMeasured\) 기준으로 검증됨/);
     expect(line).toMatch(/이후 공식 가격 변동은 미확인/);
-    // The catalog records which source a price was compared with in code comments,
-    // not in a field, so the table cannot name one per model — and says it does not.
-    expect(line).toMatch(/모델별 대조 출처는 표시하지 않음/);
+    // The "not shown" placeholder is gone: the next line says it, per model.
+    expect(md).not.toMatch(/모델별 대조 출처는 표시하지 않음/);
+    expect(line).toContain('모델별 대조 출처는 아래 줄');
   });
 
   it('never says every model was compared with the official price table', () => {
@@ -247,6 +255,114 @@ describe('formatUsageTableMarkdown: cost honesty', () => {
     // would be false for it.
     const md = formatUsageTableMarkdown(twoModels(), CTX);
     expect(md).not.toMatch(/공식 가격표와 대조/);
+  });
+
+  describe('the source of each price, per model', () => {
+    /** The per-model source line: directly under the price source line. */
+    const sourceLine = (md) => lines(md).find((l) => l.startsWith('- 모델별 대조 출처:'));
+    /** `claude-x` and the rest of the models that share one phrase; split on the item separator. */
+    const itemOf = (line, id) => line.slice('- 모델별 대조 출처: '.length).split(' · ').find((item) => item.includes(id));
+
+    it('prints, for each verified model, the source the catalog records for its row', () => {
+      const md = formatUsageTableMarkdown(twoModels(), CTX);
+      const line = sourceLine(md);
+      const opus = MODELS.opus.priceSource;
+      const sonnet = MODELS.sonnet.priceSource;
+
+      expect(line).toBeDefined();
+      // Opus: read off the official page.
+      expect(line).toContain(`${OPUS_NEW} — 공식 가격표(${opus.ref}) ${opus.checkedAt} 대조`);
+      // Sonnet: compared with the skill table, cache writes computed and not read.
+      expect(line).toContain(`${SONNET_NEW} — skill 가격표(${sonnet.ref}) ${sonnet.checkedAt} 대조`);
+      expect(line).toContain('priceCacheWrite5mPerMTok·priceCacheWrite1hPerMTok는 입력 단가에서 계산한 값이라 읽지 않음');
+      // Directly under the line that points at it.
+      const all = lines(md);
+      expect(all.indexOf(line)).toBe(all.findIndex((l) => l.startsWith('- 단가 출처:')) + 1);
+    });
+
+    it('never describes the sonnet row as read off the official page, or an opus row as derived', () => {
+      const line = sourceLine(formatUsageTableMarkdown(twoModels(), CTX));
+
+      expect(itemOf(line, SONNET_NEW)).not.toContain('공식 가격표');
+      expect(itemOf(line, SONNET_NEW)).not.toContain(PRICING_SOURCE);
+      expect(itemOf(line, OPUS_NEW)).not.toContain('skill');
+      expect(itemOf(line, OPUS_NEW)).not.toContain('계산한 값');
+    });
+
+    it('lists models that share a source once, and names that source once', () => {
+      const table = foldUsageTable([
+        receipt({ run: 'agent-1', model: HAIKU }),
+        receipt({ run: 'agent-2', model: OPUS_NEW }),
+        receipt({ run: 'agent-3', model: SONNET_NEW }),
+      ]);
+      const line = sourceLine(formatUsageTableMarkdown(table, CTX));
+
+      expect(line).toContain(`${HAIKU}, ${OPUS_NEW} — 공식 가격표(${PRICING_SOURCE})`);
+      expect(line.split(PRICING_SOURCE)).toHaveLength(2); // named once, not once per model
+      expect(line.slice('- 모델별 대조 출처: '.length).split(' · ')).toHaveLength(2); // two sources, two items
+    });
+
+    it('gives a legacy id its own row: claude-opus-5 reads the official page', () => {
+      const line = sourceLine(formatUsageTableMarkdown(foldUsageTable([receipt({ run: 'agent-1', model: OPUS_OLD })]), CTX));
+      expect(line).toContain(`${OPUS_OLD} — 공식 가격표(${PRICING_SOURCE}) ${MODELS.opus.priceSource.checkedAt} 대조`);
+    });
+
+    it('names no source for a model the catalog does not know, or whose price is not verified', () => {
+      const unknown = foldUsageTable([
+        receipt({ run: 'agent-1', model: OPUS_NEW }),
+        receipt({ run: 'agent-2', model: 'claude-mystery-9' }),
+      ]);
+      expect(sourceLine(formatUsageTableMarkdown(unknown, CTX))).not.toContain('claude-mystery-9');
+
+      const partial = foldUsageTable([
+        receipt({ run: 'agent-1', model: OPUS_NEW }),
+        receipt({ run: 'agent-2', model: SONNET_NEW }),
+      ], { ports: unverifiedPorts([OPUS_NEW]) });
+      const line = sourceLine(formatUsageTableMarkdown(partial, CTX));
+      expect(line).toContain(SONNET_NEW);
+      expect(line).not.toContain(OPUS_NEW);
+    });
+
+    it('prints no per-model line, and no pointer to one, when no model has a verified price', () => {
+      const table = foldUsageTable([receipt({ run: 'agent-1', model: OPUS_NEW })], { ports: unverifiedPorts([OPUS_NEW]) });
+      const md = formatUsageTableMarkdown(table, CTX);
+
+      expect(sourceLine(md)).toBeUndefined();
+      expect(md).not.toContain('모델별 대조 출처');
+    });
+
+    it('says 출처 미기재 for a verified model whose catalog row records no source, and invents none', () => {
+      const noSource = {
+        getPricing: (key) => {
+          const real = getPricing(key);
+          return real === null ? null : { ...real, source: null };
+        },
+      };
+      const table = foldUsageTable([receipt({ run: 'agent-1', model: OPUS_NEW })], { ports: noSource });
+      const line = sourceLine(formatUsageTableMarkdown(table, CTX));
+
+      expect(line).toContain(`${OPUS_NEW} — 출처 미기재`);
+      expect(line).not.toContain('공식 가격표');
+    });
+
+    it('reads a table that predates the field (no price_source key at all) as 출처 미기재', () => {
+      const table = twoModels();
+      for (const model of table.pricing.models) delete model.price_source;
+      const line = sourceLine(formatUsageTableMarkdown(table, CTX));
+
+      expect(line).toContain(`${OPUS_NEW}, ${SONNET_NEW} — 출처 미기재`);
+    });
+
+    it('prints an unknown source kind as it is rather than hiding it, and never prints undefined, null or NaN', () => {
+      const table = twoModels();
+      for (const model of table.pricing.models) model.price_source = { ...model.price_source, kind: 'constructor' };
+      const md = formatUsageTableMarkdown(table, CTX);
+
+      // `constructor` is an inherited key of every object: it must not resolve to a label.
+      expect(sourceLine(md)).toContain(`${OPUS_NEW} — constructor(`);
+      expect(formatUsageTableMarkdown(twoModels(), CTX)).not.toMatch(/undefined|NaN|\bnull\b/);
+      expect(md).not.toMatch(/undefined|NaN|\bnull\b|function/);
+    });
   });
 
   it('shows 가격 미검증 — never a number — for a model whose price is not verified', () => {
