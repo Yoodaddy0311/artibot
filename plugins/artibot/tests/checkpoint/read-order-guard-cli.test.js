@@ -4,7 +4,7 @@
  * real writer and REAL artifacts rendered by the real serializers.
  *
  *   1. KEY FALSE -> NOTHING HAPPENS. With `runtime.resume.staleGuard` anything
- *      but the literal `true` — the shipped `false`, a string, a number, an
+ *      but the literal `true` — an explicit `false`, a string, a number, an
  *      absent key, an absent or unparseable config file — the CLI prints ZERO
  *      bytes, on stdout and on stderr, and exits 0, for a CURRENT project and a
  *      STALE one alike, and for a MALFORMED COMMAND LINE too: the switch is read
@@ -12,7 +12,10 @@
  *      `commands/resume.md` turns into `측정 불가` for steps 4 and 6, and OFF must
  *      never do that. An empty stdout is the only output that cannot differ from
  *      the pre-change document; that is the "byte-identical" pin. The sibling
- *      `resume-report.mjs` is pinned unchanged by the key as well.
+ *      `resume-report.mjs` is pinned unchanged by the key as well. The SHIPPED
+ *      config has been ON since 2026-09-30 (owner decision), so every OFF case
+ *      injects its OFF through a temp plugin root instead of leaning on the
+ *      shipped file; a separate block reads the real shipped file as a canary.
  *   2. KEY TRUE -> STALE / INVALID / NOT_ACCEPTABLE / BROKEN print ONE reason
  *      line and the body is absent from stdout. The body markers are unique
  *      sentinels that exist only inside a rendered body, and every scenario has
@@ -25,8 +28,8 @@
  *     `Read`s plan.md directly never reaches this program. The doc test pins
  *     the sentence that forbids it, and a sentence is not an enforcement point.
  *     Live behaviour is UNMEASURED.
- *   - LIVE REACH. Production has no `.artibot/missions/` and ships the key
- *     false; every ON case runs against a temp project this file built.
+ *   - LIVE REACH. Production ships the key `true` but has no `.artibot/missions/`
+ *     yet; every ON case runs against a temp project this file built.
  *   - THE git-common-dir STORE. The temp project is not a git repository, so
  *     the store resolves to the `project-root-fallback` location. The shared
  *     location is the same code path (`createStateStore`) but is not exercised
@@ -78,10 +81,13 @@ const run = (args, opts) => spawnScript(CLI, args, opts);
 const lineOf = (stdout, startsWith) => stdout.split('\n').find((l) => l.startsWith(startsWith));
 
 /** @type {string} */ let onRoot;
+/** @type {string} */ let offRoot;
 /** @type {Record<string, string>} */ const projects = {};
 
 beforeAll(() => {
   onRoot = makePluginRoot(ON);
+  // The OFF cases inject this instead of reading the shipped file, which ships ON.
+  offRoot = makePluginRoot({ runtime: { resume: { staleGuard: false } } });
   const all = { 'plan.md': planText(), 'review.md': reviewText(), 'outcome.md': outcomeText() };
   // Everything at the live revisions the artifacts declare.
   projects.current = makeProject({ live: { intent: 3, plan: 5 }, files: all });
@@ -111,13 +117,14 @@ beforeAll(() => {
 
 afterAll(cleanupTempDirs);
 
-// The first case below reads the SHIPPED config, so it is a canary: flipping
-// `runtime.resume.staleGuard` to true in `artibot.config.json` turns it red on
-// purpose, and that flip has to edit this pin and the doc test's shipped-value
-// pin in the same commit (the precedent is CA-05 `saveOnSave` and CA-15).
+// The OFF cases below never read the SHIPPED config: it ships ON since 2026-09-30,
+// so each one injects its OFF through a temp plugin root (`offRoot` for the plain
+// `false`). The real shipped file is read only by the 'SHIPPED config' block, which is
+// the canary: moving `runtime.resume.staleGuard` in `artibot.config.json` turns it red
+// on purpose, and that move has to edit this pin and the doc test's shipped-value pin in
+// the same commit (the precedent is CA-05 `saveOnSave` and CA-15).
 describe('KEY FALSE — the CLI prints nothing, whatever the project holds', () => {
   const offCases = [
-    ['the SHIPPED config (false)', undefined],
     ['an explicit false', makePluginRoot({ runtime: { resume: { staleGuard: false } } })],
     ['the string "true"', makePluginRoot({ runtime: { resume: { staleGuard: 'true' } } })],
     ['the number 1', makePluginRoot({ runtime: { resume: { staleGuard: 1 } } })],
@@ -128,14 +135,14 @@ describe('KEY FALSE — the CLI prints nothing, whatever the project holds', () 
   ];
 
   it.each(offCases)('%s -> empty stdout, empty stderr, exit 0 (STALE project)', (_label, pluginRoot) => {
-    const res = run(['--mission', MISSION, '--cwd', projects.intentMoved], pluginRoot === undefined ? {} : { pluginRoot });
+    const res = run(['--mission', MISSION, '--cwd', projects.intentMoved], { pluginRoot });
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toBe('');
     expect(res.stderr).toBe('');
   });
 
-  it('the SHIPPED config is silent on a CURRENT project too (nothing to leak, nothing to add)', () => {
-    const res = run(['--mission', MISSION, '--cwd', projects.current]);
+  it('an explicit OFF is silent on a CURRENT project too (nothing to leak, nothing to add)', () => {
+    const res = run(['--mission', MISSION, '--cwd', projects.current], { pluginRoot: offRoot });
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toBe('');
     expect(res.stderr).toBe('');
@@ -145,7 +152,7 @@ describe('KEY FALSE — the CLI prints nothing, whatever the project holds', () 
     const before = census(projects.intentMoved);
     // A non-trivial tree, or "unchanged" is a statement about an empty directory.
     expect(Object.keys(before).length).toBeGreaterThanOrEqual(4);
-    const res = run(['--mission', MISSION, '--cwd', projects.intentMoved]);
+    const res = run(['--mission', MISSION, '--cwd', projects.intentMoved], { pluginRoot: offRoot });
     expect(res.status).toBe(0);
     expect(census(projects.intentMoved)).toEqual(before);
   });
@@ -162,7 +169,7 @@ describe('KEY FALSE — the CLI prints nothing, whatever the project holds', () 
     ['a bare positional', [MISSION]],
     ['--cwd with no value', ['--mission', MISSION, '--cwd']],
   ])('OFF is a pure no-op even for a malformed command line (%s): exit 0, 0 bytes on both streams', (_label, args) => {
-    const res = run(args);
+    const res = run(args, { pluginRoot: offRoot });
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toBe('');
     expect(res.stderr).toBe('');
@@ -184,6 +191,34 @@ describe('KEY FALSE — the CLI prints nothing, whatever the project holds', () 
     // Without this the two tests above would pass for a CLI that never reports
     // a usage error at all.
     const res = run(['--mision', MISSION], { pluginRoot: onRoot });
+    expect(res.status).toBe(2);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain('unknown argument: --mision');
+  });
+});
+
+// The canary. No plugin root is injected, so the CLI reads the artibot.config.json this
+// checkout ships: ON since 2026-09-30 (owner decision). Everything above injects its OFF.
+describe('SHIPPED config — runtime.resume.staleGuard ships ON', () => {
+  it('a STALE project prints its reason lines and no body', () => {
+    const res = run(['--mission', MISSION, '--cwd', projects.intentMoved]);
+    expect(res.status, res.stderr).toBe(0);
+    const out = res.stdout;
+    expect(lineOf(out, 'STALE: plan')).toBe('STALE: plan rev 5 — intent_revision(선언 3, 현재 4) · 본문 미출력');
+    expect(out).not.toContain(PLAN_MARK);
+    expect(out).not.toContain(OUTCOME_MARK);
+  });
+
+  it('a CURRENT project prints exactly what an injected ON prints', () => {
+    const shipped = run(['--mission', MISSION, '--cwd', projects.current]);
+    const injected = run(['--mission', MISSION, '--cwd', projects.current], { pluginRoot: onRoot });
+    expect(shipped.status, shipped.stderr).toBe(0);
+    expect(shipped.stdout).toBe(injected.stdout);
+    expect(shipped.stdout).toContain(PLAN_MARK);
+  });
+
+  it('a malformed command line is a usage error (exit 2), which the doc reads as 측정 불가', () => {
+    const res = run(['--mision', MISSION]);
     expect(res.status).toBe(2);
     expect(res.stdout).toBe('');
     expect(res.stderr).toContain('unknown argument: --mision');

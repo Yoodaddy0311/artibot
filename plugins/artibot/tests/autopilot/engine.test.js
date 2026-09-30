@@ -8,6 +8,7 @@ import {
   abortAutopilot,
   getStatus,
   PHASES,
+  recordPhaseResult,
   resumeAutopilot,
   runPhase0Intake,
   runPhase1Plan,
@@ -250,6 +251,12 @@ describe('Phase runner functions return instruction objects', () => {
     const r = await start({ task: 'phase6 report 산출', mode: 'default' });
     track(r.sessionId);
     const state = await getStatus(r.sessionId);
+    // The REPORT verify gate ships ON (2026-09-30), so a REPORT needs the VERIFY a real
+    // driver leaves: the engine hands VERIFY out, the driver acknowledges it 'done'.
+    // Give it that instead of switching the gate off; the gate's own cases live in
+    // report-verify-gate.test.js.
+    runPhase4Verify(state);
+    recordPhaseResult(state, { phase: 'VERIFY', status: 'done' });
     const inst = runPhase6Report(state);
     expect(inst).toBeTruthy();
     expect(inst.type).toBe('phase-result');

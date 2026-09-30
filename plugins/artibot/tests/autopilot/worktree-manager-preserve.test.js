@@ -25,8 +25,10 @@ import {
 } from '../../lib/autopilot/worktree-manager.js';
 import {
   abortAutopilot,
+  recordPhaseResult,
   runPhase1Plan,
   runPhase2Execute,
+  runPhase4Verify,
   runPhase6Report,
   startAutopilot,
 } from '../../lib/autopilot/index.js';
@@ -392,6 +394,13 @@ describe('engine integration — unintegrated results survive REPORT and ABORT',
     // turn the whole AP-05 assertion into a silent green.
     expect(s.worktreePath).toBeTruthy();
     const sha = commitInside(s.worktreePath, 'ap05.txt', 'unintegrated\n');
+    // The REPORT verify gate ships ON (2026-09-30), and a gated REPORT never reaches the
+    // reap below. Leave it the evidence a real driver leaves: EXECUTE acknowledged, then
+    // VERIFY handed out by the engine and acknowledged 'done'.
+    const driven = loadSession(s.sessionId);
+    recordPhaseResult(driven, { phase: 'EXECUTE', status: 'done' });
+    runPhase4Verify(driven);
+    recordPhaseResult(driven, { phase: 'VERIFY', status: 'done' });
 
     runPhase6Report(loadSession(s.sessionId));
 

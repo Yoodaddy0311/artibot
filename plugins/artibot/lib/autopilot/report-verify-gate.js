@@ -106,9 +106,9 @@
  * The slot used to be one cell for the whole session. A FAIL a driver wrote for
  * attempt 1 stayed in it through a VERIFY re-run acknowledged `done`, and REPORT was
  * refused with `VERIFY_RESULT_FAILED` until the driver happened to overwrite it.
- * With the switch ON, `engine.js#runPhase4Verify` now calls
- * {@link scopeVerifyResultToAttempt} as it opens each VERIFY attempt: the previous
- * value is archived in `state.verifyResultHistory`, the slot is emptied, and
+ * With the seal armed (see "Which switch arms the seal" below), `engine.js#runPhase4Verify`
+ * now calls {@link scopeVerifyResultToAttempt} as it opens each VERIFY attempt: the
+ * previous value is archived in `state.verifyResultHistory`, the slot is emptied, and
  * `state.verifyResultScope = {attemptId}` names the attempt that owns it. What a
  * driver writes afterwards is that attempt's by construction, so this rule reads
  * "the result of the latest hand-out" without asking which attempt wrote what.
@@ -122,9 +122,19 @@
  *     exactly as before: an explicit FAIL in it refuses. Only the seal can make a
  *     FAIL stop refusing, and only by taking it out of the slot.
  *   - Fail closed on the writing side too: no usable attempt id, no seal.
- *   - Switch OFF: nothing happens, byte for byte. Under OFF a re-run therefore still
- *     inherits the previous result, and the SH-06 recorder that reads the slot at the
- *     ACK (`recovery-record.js#foldVerify`) keeps reading it.
+ *   - Both switches OFF: nothing happens, byte for byte. Under OFF a re-run therefore
+ *     still inherits the previous result, and the SH-06 recorder that reads the slot at
+ *     the ACK (`recovery-record.js#foldVerify`) keeps reading it.
+ *
+ * Which switch arms the seal (W3-7, decided 2026-09-30): EITHER
+ * `autopilot.reportVerifyGate.enforce` OR `autopilot.recovery.transitionFromVerdict`
+ * (CA-03), each only as the literal `true`. The slot has two readers. This gate reads
+ * it at REPORT (rule 6). The SH-06 recorder reads it at the VERIFY ACK
+ * (`recovery-record.js#foldVerify`), and with CA-03 ON that verdict steers the next
+ * phase, so a stale FAIL a re-run inherited would repair or replan from a result that is
+ * not this attempt's. Arming the seal for either reader lets the two flips be made in
+ * either order. Only the seal is shared: the REPORT gate itself is still `enforce`'s
+ * alone, and CA-03 ON with `enforce` OFF refuses no REPORT.
  *
  * The other side of the fix, said plainly: a re-run acknowledged `done` whose driver
  * writes no `verifyResult` leaves the slot empty, and an empty slot passes rule 6
@@ -164,8 +174,8 @@
  *     writes no explicit signal is the SH-06 recorder's measurement, not
  *     something this gate enforces.
  *   - `verifyResult` is attempt-scoped only by the engine's seal (section above), and
- *     only with the switch ON. A session that never went through a scoped hand-out
- *     (stored earlier, hand-driven, or run with the switch OFF) still has one
+ *     only with the seal armed. A session that never went through a scoped hand-out
+ *     (stored earlier, hand-driven, or run with both switches OFF) still has one
  *     unlabelled slot: a FAIL left in it refuses the next REPORT even after a
  *     re-run acknowledged `done`, until the next VERIFY hand-out seals it, and a PASS
  *     left over from an earlier attempt cannot be told from this attempt's. A driver
@@ -173,20 +183,25 @@
  *
  * ## Kill switch
  *
- * `autopilot.reportVerifyGate.enforce`, shipped `false`. OFF, the gate does
- * nothing at all — no tick, no state change — and the engine proceeds byte for
- * byte as before. ON, missing evidence pauses the session back to VERIFY.
+ * `autopilot.reportVerifyGate.enforce`, shipped `true` since 2026-09-30 (owner
+ * decision; the seal above was armed for either switch first). ON, missing evidence
+ * pauses the session back to VERIFY. OFF, the way back, the gate does nothing at all
+ * — no tick, no state change — and the engine proceeds byte for byte as before; that
+ * path is pinned by tests that inject the switch, not by the shipped file.
  * Observation without enforcement is done offline, by running
  * {@link evaluateReportVerifyEvidence} (one session) or
  * {@link censusReportVerifyEvidence} (a store) over stored session states.
- * The same switch governs the VERIFY hand-out's seal: OFF, {@link scopeVerifyResultToAttempt}
- * returns before it reads the state.
+ * The VERIFY hand-out's seal has a second key: it is armed by this switch OR by
+ * `autopilot.recovery.transitionFromVerdict` (W3-7); with both OFF,
+ * {@link scopeVerifyResultToAttempt} returns before it reads the state. The gate
+ * itself obeys this switch alone.
  *
  * The switch is read from `<pluginRoot>/artibot.config.json` on every call, and
  * an unreadable file (missing, or JSON that does not parse) reads OFF with no
  * tick and no warning — see {@link loadReportVerifyGateConfig}. A corrupted
  * config therefore disables enforcement silently; nothing here can tell that
- * from a deliberate OFF.
+ * from a deliberate OFF. The seal's second key is read the same way, through
+ * `recovery-transition.js#loadRecoveryTransitionConfig`.
  *
  * @module lib/autopilot/report-verify-gate
  */
@@ -196,6 +211,7 @@ import path from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { mergeQueuedNotification, persist, tick } from './_engine-helpers.js';
 import { notifyPause } from './notification.js';
+import { loadRecoveryTransitionConfig } from './recovery-transition.js';
 
 /**
  * Config path of the kill switch. Exported so the firewall pin and the reader
@@ -325,6 +341,24 @@ export function evaluateReportVerifyEvidence(state) {
 }
 
 /**
+ * Is the VERIFY hand-out's seal armed? True when `enforce` (CA-13) OR
+ * `transitionFromVerdict` (CA-03) is exactly `true`. An injected `config` is the
+ * whole answer (a key it leaves out is not ON); without one, the two switches are
+ * read from `artibot.config.json` through their own loaders, the second only when the
+ * first is not ON. Never throws: both loaders read an unreadable file as OFF.
+ *
+ * @param {{enforce?: unknown, transitionFromVerdict?: unknown}|undefined|null} config
+ * @returns {boolean}
+ */
+function isVerifySealArmed(config) {
+  if (config !== undefined && config !== null) {
+    return config.enforce === true || config.transitionFromVerdict === true;
+  }
+  return loadReportVerifyGateConfig().enforce === true
+    || loadRecoveryTransitionConfig().transitionFromVerdict === true;
+}
+
+/**
  * The engine's half of the attempt scope of `state.verifyResult` (W2-7). Called by
  * `engine.js#runPhase4Verify` right after it opens a VERIFY attempt, and before
  * `attachMcpVerify` fills `verifyResult.mcp` (sealing after it would archive that
@@ -352,20 +386,27 @@ export function evaluateReportVerifyEvidence(state) {
  * stamp says (unbound or mislabelled: fail closed), and a session that never went
  * through a scoped hand-out keeps the one-slot behaviour until its next VERIFY.
  *
- * Switch OFF: returns false before `state` is read: no read, no write, no tick, the
- * engine proceeds byte for byte as before. The switch is the gate's own (only the
- * literal `true` counts): the seal exists for the gate, so it obeys the gate's switch.
- * Also false, with the slot untouched, when the attempt has no usable id: a slot
- * that cannot be bound is not emptied.
+ * Both switches OFF: returns false before `state` is read: no read, no write, no
+ * tick, the engine proceeds byte for byte as before. The seal is armed by EITHER of
+ * two switches (W3-7), each only as the literal `true` (an allowlist: a string, a 1,
+ * an absent key or an unreadable config reads OFF): `autopilot.reportVerifyGate.enforce`,
+ * whose gate reads the slot at REPORT, or `autopilot.recovery.transitionFromVerdict`
+ * (CA-03), whose recorder reads it at the VERIFY ACK and, ON, acts on what it finds. The
+ * seal exists for those two readers, so it obeys the switch of either one; the REPORT
+ * gate itself stays `enforce`'s alone. Also false, with the slot untouched, when the
+ * attempt has no usable id: a slot that cannot be bound is not emptied.
  *
  * @param {object} state - Live session state (mutated only when it scopes).
  * @param {{attemptId?: unknown}} attempt - The attempt `phase-attempt.js#openPhaseAttempt` just opened.
- * @param {{enforce?: boolean}} [config] - Injectable for tests; omitted, it is read
- *   from `artibot.config.json` (a missing or unreadable file reads OFF).
+ * @param {{enforce?: boolean, transitionFromVerdict?: boolean}} [config] - The two
+ *   switches, injectable for tests; only what is passed counts, so a key left out is
+ *   OFF. Omitted, they are read from `artibot.config.json` ({@link loadReportVerifyGateConfig}
+ *   and `recovery-transition.js#loadRecoveryTransitionConfig`; a missing or unreadable
+ *   file reads OFF).
  * @returns {boolean} true when the slot now belongs to `attempt`.
  */
 export function scopeVerifyResultToAttempt(state, attempt, config = undefined) {
-  if ((config ?? loadReportVerifyGateConfig())?.enforce !== true) return false;
+  if (!isVerifySealArmed(config)) return false;
   const attemptId = attempt?.attemptId;
   if (state === null || typeof state !== 'object' || Array.isArray(state)) return false;
   if (typeof attemptId !== 'string' || attemptId === '') return false;
@@ -541,9 +582,10 @@ function pauseForVerify(state, result) {
  * The REPORT-entry gate. Returns null to let REPORT proceed, or a pause
  * instruction when the switch is on and the evidence is missing.
  *
- * OFF (the shipped default) is byte-invariant: no evaluation, no tick, no
- * persist — it returns null before touching anything, so events.ndjson and the
- * report's Phase Timeline are exactly what they were without the gate.
+ * OFF (the kill switch thrown; the shipped value is ON since 2026-09-30) is
+ * byte-invariant: no evaluation, no tick, no persist — it returns null before
+ * touching anything, so events.ndjson and the report's Phase Timeline are exactly
+ * what they were without the gate.
  *
  * @param {object} state - Live session state (mutated only when pausing).
  * @param {{enforce?: boolean}} [config] - Injectable for tests; omitted, it is
