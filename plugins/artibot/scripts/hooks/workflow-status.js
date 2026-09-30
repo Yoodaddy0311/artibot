@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const PHASE_NAMES = {
   feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
@@ -282,7 +282,7 @@ function persistTeammates(teammates) {
 export async function main() {
   const eventType = process.argv[2] || 'teammate-update';
   const raw = await readStdin();
-  const hookData = parseJSON(raw) || {};
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) || {};
 
   // WIRE: Claude Code's subagent-lifecycle payload carries no team task counts,
   // so phase/percent stayed empty. When the payload has no task data, hydrate it

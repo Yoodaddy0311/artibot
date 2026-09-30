@@ -55,7 +55,7 @@ import { readFileSync } from 'node:fs';
 import { parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { classifyRisk } from '../../lib/autopilot/safety.js';
 import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** Max chars of a judge reason echoed to stderr (keep the line readable). */
 const REASON_ECHO_MAX = 200;
@@ -184,7 +184,7 @@ export async function main() {
   const raw = await readStdin();
   let payload;
   try {
-    payload = parseJSON(raw);
+    payload = tapDirectFiring(import.meta.url, parseJSON(raw));
   } catch {
     return; // No decision — fall through
   }

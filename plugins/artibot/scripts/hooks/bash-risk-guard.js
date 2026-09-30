@@ -25,7 +25,7 @@
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
 import { classifyRisk } from '../../lib/autopilot/safety.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** Max command length echoed back in a message/reason (avoid flooding output). */
 const CMD_ECHO_MAX = 160;
@@ -145,7 +145,7 @@ async function recordDangerForActiveSession(hookData, command) {
 
 async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw) ?? {};
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) ?? {};
 
   const result = evaluateBashRisk(hookData);
   if (!result) return; // safe / non-Bash / empty → approve by omission

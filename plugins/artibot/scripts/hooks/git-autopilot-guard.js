@@ -15,7 +15,7 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName } from '../../lib/core/hook-utils.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 import { gitPath } from '../../lib/git/git-dir.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 // -------------------------------------------------------------------------
 // Constants
@@ -113,7 +113,7 @@ function toRelativePath(absPath, repoRoot) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw) ?? {};
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) ?? {};
 
   const toolName = extractToolName(hookData);
   if (!WRITE_TOOLS.has(toolName)) return; // Only guard write tools

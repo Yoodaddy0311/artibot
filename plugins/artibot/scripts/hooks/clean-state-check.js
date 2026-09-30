@@ -10,7 +10,7 @@
 
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, hasExtension } from '../../lib/core/hook-utils.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
 
@@ -82,7 +82,7 @@ function buildResult(hasCodeChanges, codeFiles) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   if (!hookData) return;
 

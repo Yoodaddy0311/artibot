@@ -138,7 +138,12 @@ describe('an unmeasured kind reports null, never zero', () => {
     // rest are not, and a new carrier makes that statement stale. `skills`
     // measured 2026-09-15 (Wave 11), `hooks` and `commands` 2026-09-17
     // (Wave 12 parts A and B), all SH-29.
-    expect(CARRIERS.skills).toEqual({ event: 'tool.used', field: 'skill' });
+    // `skills` is SCOPED (R1 / OB-24, 2026-09-29): tool.used also carries
+    // AskUserQuestion since SH-09, and only a `tool === 'Skill'` row can name a skill.
+    // Widening or dropping the scope moves every skills count, so it is pinned here
+    // and behaviourally under "the skills carrier is scoped to Skill rows".
+    expect(CARRIERS.skills).toEqual({ event: 'tool.used', field: 'skill', where: { tool: 'Skill' } });
+    expect(Object.isFrozen(CARRIERS.skills.where)).toBe(true);
     expect(CARRIERS.hooks).toEqual({ event: 'hook.fired', field: 'hooks', multi: true });
     expect(CARRIERS.commands).toEqual({ event: 'intent.detected', field: 'command' });
     // Only `hooks` is multi-valued; a second one would change how every reader
@@ -152,13 +157,30 @@ describe('an unmeasured kind reports null, never zero', () => {
       expect(CARRIER_NOTES[kind], `${kind} note`).toEqual(expect.any(String));
     }
     expect(CARRIER_NOTES.skills).toContain('tool.used.skill');
+    // The skills note must keep naming the scope, or a reader meets the narrowed
+    // denominator with no explanation for why AskUserQuestion rows are missing.
+    expect(CARRIER_NOTES.skills).toContain("where: { tool: 'Skill' }");
+    expect(CARRIER_NOTES.skills).toContain('AskUserQuestion');
     expect(CARRIER_NOTES.hooks).toContain('hook.fired');
     expect(CARRIER_NOTES.hooks).toContain('_hook-fired-record.js');
-    // The note must keep naming what the carrier CANNOT see: the 24 hooks
-    // registered straight in hooks.json never produce a hook.fired row, so
-    // their zero is false. A note that drops that number stops warning.
+    // The note must keep naming what the carrier CANNOT see. Since R1 the 24
+    // commands registered straight in hooks.json DO write a row -- but ONE PER
+    // SESSION-DAY UNIT (the first firing per UTC day, session, slot and hook;
+    // architect review 2026-09-29), not one per firing -- so a direct hook's
+    // `fired` counts session-days, and the denominator MIXES that unit with the
+    // dispatchers' one row per dispatch. The blind spots are that nothing exists
+    // before the release that shipped the tap, that a cwd outside a git work
+    // tree is skipped, and that the switch is off on a machine that set it. A
+    // note that drops any of those stops warning about a false `fired: 0`, and one
+    // that drops the unit stops warning that two counts are not comparable.
+    expect(CARRIER_NOTES.hooks).toContain('session-day');
+    expect(CARRIER_NOTES.hooks).toContain('MIXES the two units');
     expect(CARRIER_NOTES.hooks).toContain('24');
     expect(CARRIER_NOTES.hooks).toContain('hooks.json');
+    expect(CARRIER_NOTES.hooks).toContain('recordDirectHookFired');
+    expect(CARRIER_NOTES.hooks).toContain('before the release');
+    expect(CARRIER_NOTES.hooks).toContain('git work tree');
+    expect(CARRIER_NOTES.hooks).toContain('ARTIBOT_HOOK_FIRED_DIRECT');
     expect(CARRIER_NOTES.commands).toContain('intent.detected.command');
     expect(CARRIER_NOTES.commands).toContain('runtime-prompt.js');
     // Same rule as the hooks note: the commands carrier's blind spots are the
@@ -378,8 +400,12 @@ describe('the skills carrier, folded from real tool.used rows', () => {
       line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
       line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:split' }),
       line('tool.used', { tool: 'Skill', ok: true, duration_ms: null, skill: 'artibot:team' }),
-      // A tool.used row for a non-Skill tool: the key is OMITTED, never null.
+      // A tool.used row for a non-Skill tool: the key is OMITTED, never null. Before
+      // R1 (2026-09-29) this row was `absent` and widened the denominator to 4; the
+      // carrier is now scoped to tool === 'Skill', so it is not a row OF this carrier.
       line('tool.used', { tool: 'Bash', ok: true, duration_ms: 12 }),
+      // A Skill row that names none is what `absent` is for.
+      line('tool.used', { tool: 'Skill', ok: true, duration_ms: null }),
       line('phase.started', { segment: 'build' }),
     ];
 
@@ -598,9 +624,17 @@ describe('the hooks carrier is MULTI-valued: one row, many names', () => {
       line('tool.used', { tool: 'Bash' }),
     ];
     const expected = { counts: { 'artibot:split': 1 }, absent: 1, denominator: 2 };
-    expect(foldFiredCounts(events, CARRIERS.skills)).toEqual(expected);
-    expect(foldFiredCounts(events, { event: 'tool.used', field: 'skill', multi: false }))
-      .toEqual(expected);
+    // The specimen is the UNSCOPED single-value carrier. Before R1 / OB-24
+    // (2026-09-29) it was `CARRIERS.skills` itself; that carrier is now scoped to
+    // tool === 'Skill', so the Bash row is out of ITS scope (asserted below) and
+    // the mode-switch guard needs a carrier that still counts every tool.used row.
+    const unscoped = { event: 'tool.used', field: 'skill' };
+    expect(foldFiredCounts(events, unscoped)).toEqual(expected);
+    expect(foldFiredCounts(events, { ...unscoped, multi: false })).toEqual(expected);
+    // The shipped skills carrier is that same fold narrowed to Skill rows: the
+    // Bash row is neither counted nor absent, and not in the denominator.
+    expect(foldFiredCounts(events, CARRIERS.skills))
+      .toEqual({ counts: { 'artibot:split': 1 }, absent: 0, denominator: 1 });
     // An ARRAY value under a non-multi carrier is non-scalar, so countBy files
     // it as absent rather than silently counting its elements.
     expect(foldFiredCounts(

@@ -10,7 +10,7 @@ import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { extractToolName } from '../../lib/core/hook-utils.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
 import { FileCheckpoint } from '../../lib/core/file-checkpoint.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /**
  * Resolve the session id for this invocation. The hook stdin payload carries
@@ -36,7 +36,7 @@ export function resolveSessionId(hookData) {
  */
 async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   const toolName = extractToolName(hookData) || '';
   if (toolName !== 'Write' && toolName !== 'Edit') {

@@ -15,7 +15,7 @@ import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index
 import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** Path to the persisted loop detector state file. */
 const LOOP_STATE_FILE = path.join(getArtibotDataDir(), 'loop-state.json');
@@ -202,7 +202,7 @@ function extractToolResult(hookData) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   if (!hookData) return;
 

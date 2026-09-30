@@ -429,7 +429,8 @@ describe('ledger round trip', () => {
     expect(entry.fired).toBe(1);
     expect(entry.measured).toBe(true);
     expect(entry.reason).toBeNull();
-    expect(audit.kinds.skills.carrier).toEqual({ event: TOOL_USED_EVENT, field: 'skill' });
+    // Scoped to Skill rows since R1 / OB-24 (2026-09-29), see the interplay block below.
+    expect(audit.kinds.skills.carrier).toEqual({ event: TOOL_USED_EVENT, field: 'skill', where: { tool: SKILL_TOOL } });
     expect(audit.kinds.skills.denominator).toBe(1);
   });
 
@@ -788,17 +789,18 @@ describe('AskUserQuestion carrier (SH-09): fixture provenance', () => {
   });
 });
 
-describe('AskUserQuestion carrier (SH-09): interplay with the existence audit (measured, NOT fixed here)', () => {
-  // lib/replay/existence-audit.js belongs to R1 (ob24-direct-hook-carrier).
-  // CARRIERS.skills is `{event:'tool.used', field:'skill'}` and the fold filters
-  // on the EVENT ONLY, so every tool.used row counts toward the skills
-  // denominator whether or not it names a skill. The two KNOWN INTERPLAY cases
-  // pin what that does to question rows; the first case pins what it does NOT do.
-  const R1_NOTE = 'KNOWN INTERPLAY handed to R1 (ob24-direct-hook-carrier), owner of '
-    + 'lib/replay/existence-audit.js: CARRIERS.skills counts EVERY tool.used row. If R1 scoped '
-    + 'it to tool==="Skill", flip these pins in the same commit (absent 0, denominator 1, a '
-    + 'questions-only ledger unmeasured) and delete the KNOWN LIMITATION paragraph in '
-    + 'scripts/hooks/tool-used-record.js. Do not loosen or delete the pins to go green.';
+describe('AskUserQuestion carrier (SH-09): interplay with the existence audit (scoped by R1 / OB-24)', () => {
+  // SH-09 made `tool.used` carry AskUserQuestion beside Skill. Until R1 / OB-24
+  // (2026-09-29) `CARRIERS.skills` filtered on the EVENT ONLY, so every question
+  // row landed in the skills fold's `absent` bucket and its denominator (absent 2,
+  // denominator 3 on this fixture), and a ledger holding only question rows read
+  // every skill as `measured: true, fired: 0`. The two cases below were the
+  // "KNOWN INTERPLAY" pins that recorded that; they were flipped, not loosened,
+  // when the carrier gained `where: { tool: 'Skill' }`. The first case pins what
+  // the scope never changed.
+  const SCOPE_NOTE = 'CARRIERS.skills must be scoped to tool==="Skill": a question row names no '
+    + 'skill, so it is not a row of the skills carrier (absent 0, denominator 1, and a '
+    + 'questions-only ledger is unmeasured). If this fails, the scope was widened or dropped.';
 
   /** One Skill row plus two question rows, read back the way the audit reads them. */
   function seedMixed() {
@@ -820,14 +822,14 @@ describe('AskUserQuestion carrier (SH-09): interplay with the existence audit (m
     expect(fired).toEqual({ [SKILL_NAME]: 1, 'artibot:other': 0 });
   });
 
-  it('KNOWN INTERPLAY: question rows land in the skills fold as absent and widen its denominator', () => {
+  it('FLIPPED (was KNOWN INTERPLAY): question rows are not rows of the skills fold: absent 0, denominator 1', () => {
     const { fold, audit } = seedMixed();
-    expect(fold.absent, R1_NOTE).toBe(2);
-    expect(fold.denominator, R1_NOTE).toBe(3);
-    expect(audit.kinds.skills.denominator, R1_NOTE).toBe(3);
+    expect(fold.absent, SCOPE_NOTE).toBe(0);
+    expect(fold.denominator, SCOPE_NOTE).toBe(1);
+    expect(audit.kinds.skills.denominator, SCOPE_NOTE).toBe(1);
   });
 
-  it('KNOWN INTERPLAY: a ledger holding only question rows reads every skill as a measured zero', () => {
+  it('FLIPPED (was KNOWN INTERPLAY): a ledger holding only question rows reads every skill as UNMEASURED', () => {
     // Control, the pre-carrier state of the same kind: no tool.used row at all is UNMEASURED.
     const before = buildExistenceAudit([], { inventory: { skills: [SKILL_NAME] } }).kinds.skills.entries[0];
     expect(before.measured).toBe(false);
@@ -837,8 +839,10 @@ describe('AskUserQuestion carrier (SH-09): interplay with the existence audit (m
     recordAskRows(1);
     const after = buildExistenceAudit(readAllEvents(repo), { inventory: { skills: [SKILL_NAME] } })
       .kinds.skills.entries[0];
-    expect(after.measured, R1_NOTE).toBe(true);
-    expect(after.fired, R1_NOTE).toBe(0);
-    expect(after.reason, R1_NOTE).toBeNull();
+    // The row really is in the ledger, so this is not the empty-ledger case in disguise.
+    expect(readAllEvents(repo).filter((e) => e.event === TOOL_USED_EVENT && e.data?.tool === ASK_TOOL)).toHaveLength(1);
+    expect(after.measured, SCOPE_NOTE).toBe(false);
+    expect(after.fired, SCOPE_NOTE).toBeNull();
+    expect(after.reason, SCOPE_NOTE).toBe('unmeasured:carrier-event-absent-from-ledger');
   });
 });

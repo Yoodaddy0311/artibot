@@ -68,7 +68,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { parseJSON, readStdin } from '../utils/index.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /**
  * Every `lib/` module this hook needs — imported LAZILY, inside the try.
@@ -647,7 +647,7 @@ export async function main() {
     const raw = await readStdin();
     // parseJSON returns null on malformed input; observeIntent then falls out
     // at its first check. Non-JSON stdin is a no-op, not an error.
-    const parsed = parseJSON(raw);
+    const parsed = tapDirectFiring(import.meta.url, parseJSON(raw));
     const outcome = await observeIntent(parsed);
     await import('./_plan-observe-record.js')
       .then((m) => m.observePlanWrite(parsed)).catch(() => null);

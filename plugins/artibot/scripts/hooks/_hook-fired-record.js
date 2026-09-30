@@ -80,6 +80,68 @@
  * {@link recordHookFired} never throws, so a carrier fault cannot reach the
  * slot even if the caller forgot its own try/catch.
  *
+ * ── DIRECT HOOKS (OB-24 / R1, 2026-09-29) ───────────────────────────────────
+ * The 24 registrations in `hooks/hooks.json` that no dispatcher fronts (21
+ * distinct scripts over ten host events) used to leave no row, so the Existence
+ * Audit could not tell a silent hook from an unobserved one. They now write
+ * through {@link recordDirectHookFired}, reached from
+ * `_main-entry.js#tapDirectFiring`. The row has the SAME shape as a
+ * dispatcher's (one envelope literal, {@link buildHookFiredEnvelope}), with
+ * three differences that all follow from one process per hook instead of one
+ * per slot:
+ *   - ONE ROW PER SESSION-DAY UNIT OF ONE HOOK, NOT ONE PER FIRING. A row is the
+ *     FIRST firing per (UTC day, session, slot, hook); the tap looks for a marker
+ *     file first (`_main-entry.js#fireOnceDirect`) and does not load this module
+ *     once it exists. A row per firing was withdrawn on architect review
+ *     (2026-09-29): a direct hook runs on every tool call, so it put this
+ *     module's graph on each of them and grew the ledger by thousands of rows a
+ *     day, against owner decision O8=a1 above ("1 dispatch = 1 row"). Nothing in
+ *     THIS module changed for it: it still writes exactly the row it is handed;
+ *     deciding which firing is the first is the tap's. `data.hooks` has one
+ *     element and `count` is 1; there is no fan-out to fold. The Audit's
+ *     multi-valued fold counts it like any dispatcher row, so `denominator`
+ *     (rows of the carrier event) is dispatcher dispatches PLUS direct
+ *     session-days: two different units in one number, which the Audit's
+ *     carrier note says out loud.
+ *   - `data.slot` IS THE HOST EVENT (`PreToolUse`, `Notification`, ...), never a
+ *     dispatcher slot, and `data.tool` is not written (the allowlist documents
+ *     it for PostToolUse only).
+ *   - `data.failed` IS ALWAYS EMPTY. The row is written when the hook STARTS,
+ *     at its payload-parse site, not when it ends; whether the hook then did
+ *     its job is invisible here (for a dispatcher row `ok` likewise means only
+ *     "the child exited").
+ *
+ * NO DOUBLE COUNT. Five scripts are both direct hooks and dispatcher handlers.
+ * The direct path writes only for the ten host events in `DIRECT_HOOK_SLOTS`
+ * (an allowlist owned by `_main-entry.js`, disjoint from the six dispatcher
+ * slots), so a dispatched child -- same script, same stdin, slot in
+ * `hook_event_name` -- writes nothing of its own.
+ *
+ * NO SPAWN, SO ONLY INSIDE A GIT WORK TREE. The dispatcher path resolves the
+ * project root with `resolveProjectRoot`, which for a directory with no `.git`
+ * above it runs `git rev-parse` (a child process; 181-270 ms in that module's
+ * header, 240-360 ms per dispatcher in the CANNOT SEE list below, and a 5 s
+ * timeout in `repo-root-cache.js`). A PreToolUse hook must not. The direct path
+ * uses {@link nearestGitRoot} (step 1 of the same resolver, asked through the
+ * ledger writer's own pure-fs `resolveGitCommonDir`) and skips a directory
+ * outside any repository, with `no-git-root`.
+ *
+ * OUTSIDE THE O8-i SWITCH. `ledger.hookFired.slots` is an allowlist of the six
+ * dispatcher slots, and `tests/firewall/v5-config-firewall.test.js` pins both
+ * its value and the key set under `hookFired`, so a direct slot cannot be added
+ * to it (the config's own comment says direct hooks "are outside this switch").
+ * The one switch is the environment variable `ARTIBOT_HOOK_FIRED_DIRECT`, read
+ * by the tap (`_main-entry.js#directRecordingEnabled`): the literal `off`
+ * silences it, `on` forces it, and anything else leaves it on EXCEPT inside the
+ * vitest runner (35 existing tests assert the exact contents of the ledger these
+ * hooks leave; see that function). Switching it off removes the direct hooks
+ * from the carrier the way a disabled slot does, so a reader must take their
+ * silence as UNMEASURED, not zero.
+ *
+ * SILENT, EVEN ON FAILURE. Unlike {@link recordHookFired}, the direct path
+ * never writes to stderr: it runs inside PreToolUse hooks whose stderr the host
+ * may surface, and a bookkeeping fault there is not worth a byte.
+ *
  * ── WHAT THIS MODULE CANNOT SEE (rules §9 — write it next to the gate) ──────
  *   - A DISPATCH THAT RAN ZERO HANDLERS. PostToolUse returns before spawning
  *     anything when its tool-filtered table is empty, and UserPromptSubmit
@@ -104,9 +166,25 @@
  *     the allowlist's `required` keys — `slot` and `hooks` — drops `failed`,
  *     `count` and `tool`, and the line is ACCEPTED. A fold writes one stderr
  *     line here and is invisible in the ledger's own error stream.
- *   - HOOKS THE HOST RUNS OUTSIDE AN ARTIBOT DISPATCHER. Only the six
- *     dispatchers call this. A hook registered directly in settings.json
- *     produces no row.
+ *   - HOOKS THE HOST RUNS OUTSIDE AN ARTIBOT SCRIPT. The six dispatchers call
+ *     {@link recordHookFired}; the 21 scripts registered directly in
+ *     `hooks/hooks.json` reach {@link recordDirectHookFired} (see DIRECT HOOKS
+ *     above). A hook the USER registers in `~/.claude/settings.json` or a
+ *     project's settings, or by another plugin, produces no row.
+ *   - A DIRECT HOOK THAT DIES BEFORE ITS ROW LANDS. The row is appended when the
+ *     ledger writer has finished loading, which is after the hook's own
+ *     synchronous work; a fail-open tail that calls `process.exit(0)` first
+ *     (the `exit: true` error handlers) can cut it. That under-counts a
+ *     crashing hook, never records a wrong one, and the unit is not lost: the
+ *     tap claims its marker only AFTER a successful append, so the next firing
+ *     of the same (UTC day, session, slot, hook) tries again.
+ *   - HOW MANY FIRINGS A DIRECT ROW STANDS FOR. Any number, from 1 up: a row is
+ *     a session-day unit. Two parallel FIRST firings of one unit can also both
+ *     append (neither has a marker to see yet); that duplicate is accepted.
+ *   - THE COST OF RECORDING. Loading the ledger writer's module graph is the
+ *     dominant cost of a direct row (~30-65 ms in a fresh process, measured
+ *     2026-09-29 on a loaded machine). Only a unit's first firing pays it; the
+ *     later ones stop at the marker (a few small modules and one `existsSync`).
  *
  * @module scripts/hooks/_hook-fired-record
  */
@@ -116,6 +194,8 @@ import { readFileSync } from 'node:fs';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
+import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
+import { DIRECT_HOOK_SLOTS, nearestWorkTreeRoot } from './_main-entry.js';
 
 /** The registered event this module writes. */
 export const HOOK_FIRED_EVENT = 'hook.fired';
@@ -333,5 +413,84 @@ export function recordHookFired(args) {
       process.stderr.write(`${ERR_TAG} ${err?.message || 'record-failed'}\n`);
     } catch { /* ignore */ }
     return { ok: false, reason: err?.message || 'record-failed' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Direct hooks (OB-24 / R1) -- see the module header
+// ---------------------------------------------------------------------------
+
+/**
+ * The nearest ancestor of `cwd` (itself included) that is a git work-tree root,
+ * or null; never spawns, never throws. `_main-entry.js#nearestWorkTreeRoot` does
+ * the walk and this supplies the resolver, which that leaf may not import.
+ *
+ * @param {unknown} cwd
+ * @returns {string|null}
+ */
+export function nearestGitRoot(cwd) {
+  return nearestWorkTreeRoot(cwd, resolveGitCommonDir);
+}
+
+/**
+ * Build the ledger envelope for ONE directly registered hook's row (the tap
+ * hands over the first firing of a session-day, see the module header). PURE:
+ * no I/O. Null -- never a half-envelope -- unless the inputs can produce a row
+ * the writer would accept.
+ *
+ * The slot is the payload's own `hook_event_name`, and it must be one of
+ * {@link DIRECT_HOOK_SLOTS}: that allowlist is what keeps a dispatched child
+ * (slot PostToolUse, SubagentStop, ...) from writing a second row beside its
+ * dispatcher's. Session, mission and correlation fields follow
+ * {@link buildHookFiredEnvelope}, of which this is a one-handler special case.
+ *
+ * @param {object} args
+ * @param {string} args.hook the hook's name: its file stem (`_main-entry.js#directHookName`)
+ * @param {object} args.payload the parsed host payload
+ * @returns {object|null} caller-level envelope, or null when not recordable
+ */
+export function buildDirectHookFiredEnvelope(args) {
+  try {
+    // Destructured INSIDE the try: a parameter default only covers `undefined`,
+    // so `f(null)` would throw at binding, before any catch could see it.
+    const { hook, payload } = args ?? {};
+    const name = str(hook);
+    if (name === null) return null;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const slot = payload.hook_event_name;
+    if (!DIRECT_HOOK_SLOTS.includes(slot)) return null;
+    return buildHookFiredEnvelope({ slot, payload, results: [{ name, status: 'ok' }] });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build and append the row for a directly registered hook. It writes exactly the
+ * row it is handed; which firing is worth a row is decided before it is loaded
+ * (`_main-entry.js#fireOnceDirect`). NEVER throws, NEVER writes stdout, and --
+ * unlike {@link recordHookFired} -- NEVER writes stderr either.
+ *
+ * The project root comes from {@link nearestGitRoot}, not `resolveProjectRoot`:
+ * no `git rev-parse` fallback, so no process is ever started and a directory
+ * outside any repository is skipped (`no-git-root`). `args.projectRoot` lets the
+ * tap hand over the root it already found; without it the root is found here.
+ *
+ * @param {object} args see {@link buildDirectHookFiredEnvelope}
+ * @param {string} [args.projectRoot] an already-resolved git work-tree root
+ * @returns {{ok: true, folded: boolean} | {ok: false, reason: string}}
+ */
+export function recordDirectHookFired(args) {
+  try {
+    const { hook, payload, projectRoot } = args ?? {};
+    const envelope = buildDirectHookFiredEnvelope({ hook, payload });
+    if (envelope === null) return { ok: false, reason: 'not-recordable' };
+    const root = str(projectRoot) ?? nearestGitRoot(payload?.cwd);
+    if (root === null) return { ok: false, reason: 'no-git-root' };
+    const result = appendLedgerEvent(root, envelope);
+    if (result?.ok === true) return { ok: true, folded: result.folded === true };
+    return { ok: false, reason: String(result?.reason ?? 'append-failed') };
+  } catch {
+    return { ok: false, reason: 'record-failed' };
   }
 }

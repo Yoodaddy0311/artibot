@@ -85,7 +85,7 @@ import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.j
 // than keeping a second copy that can drift. Importing it is safe — it carries
 // a direct-run guard, so nothing executes on import.
 import { isIdentifierLike, recordFire } from './zero-result-guard.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** Prefix for every emitted advice line. */
 const ADVICE_PREFIX = '[artibot:tool-advice]';
@@ -667,7 +667,7 @@ export function buildAdvice(hookData) {
 
 async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
   if (!hookData) return;
 
   let selected;

@@ -14,7 +14,7 @@ import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -266,7 +266,7 @@ function extractCommandTags(commandData) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw);
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw));
 
   const eventType = process.argv[2] || hookData?.event_type || hookData?.hook_type || 'unknown';
 

@@ -13,7 +13,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createErrorHandler, getClaudeDir, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 import { estimateTokens } from '../../lib/context/context-pressure.js';
-import { isMainEntry } from './_main-entry.js';
+import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const HOOK_NAME = 'pre-compact';
 const log = (msg) => process.stderr.write(`[artibot:${HOOK_NAME}] ${msg}\n`);
@@ -423,7 +423,7 @@ function buildSnapshot({ hookData, currentState, summary, tokenEstimate }) {
 
 export async function main() {
   const raw = await readStdin();
-  const hookData = parseJSON(raw) ?? {};
+  const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) ?? {};
 
   const claudeDir = getClaudeDir();
   const statePath = getStatePath();
