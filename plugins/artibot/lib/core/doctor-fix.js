@@ -213,8 +213,9 @@ function fixOrphanLock(ctx) {
   if (typeof lockReleaser !== 'function') {
     return record('manual', code,
       '잠긴 작업(lock)을 자동 해제할 수 없어요. ' +
-      '오토파일럿 세션이 비정상 종료된 경우 `runtime/autopilot/locks/`의 ' +
-      '오래된 .lock 파일을 확인해 주세요.');
+      '오토파일럿 세션이 비정상 종료된 경우 `~/.claude/artibot/runtime/autopilot/locks/`의 ' +
+      '오래된 .lock 파일을 확인해 주세요. (이전 버전이 플러그인 폴더 안의 ' +
+      '`runtime/autopilot/locks/` 에 남긴 파일도 같은 방식으로 확인합니다.)');
   }
   if (dryRun) {
     return record('fixed', code, '[dry-run] orphan lock 해제 예정', { detail });

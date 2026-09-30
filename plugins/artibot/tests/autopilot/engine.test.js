@@ -130,7 +130,12 @@ describe('getStatus', () => {
   it('returns the most recent session when sessionId is omitted', async () => {
     const r = await start({ task: 'most-recent 픽업', mode: 'plan' });
     track(r.sessionId);
-    const recent = await getStatus();
+    // Asked from the project the session was started for. `start()` records
+    // ARTIFACT_ROOT as the session's project (`options.projectRoot`), and since
+    // D2 a no-id status answers for the ASKER's project rather than for whichever
+    // project ran last — so the asker has to stand in that project. The
+    // cross-project half is pinned by tests/autopilot/session-project.test.js.
+    const recent = await getStatus(undefined, { cwd: ARTIFACT_ROOT });
     expect(recent).toBeTruthy();
     expect(typeof recent.sessionId).toBe('string');
   });

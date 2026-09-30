@@ -216,6 +216,13 @@ describe('consent-gate / result shaping', () => {
 
 let ROOT = '';
 let ARTIFACTS = '';
+// The session store no longer lives under the plugin root (owner decision D2):
+// its default is `resolveArtibotDir()/runtime/autopilot`. A scan of ROOT alone
+// would therefore see nothing in BOTH the open-gate and the blocked cases — the
+// positive control below is what turned red and caught it — so the state dir is
+// redirected to a temp dir of its own and scanned with ROOT.
+let STATE = '';
+let savedStateDir;
 
 /** Write the plugin-root config the resolver + session store will read. */
 function writeConfig(autopilot) {
@@ -226,17 +233,22 @@ function writeConfig(autopilot) {
   );
 }
 
-/** Every file created anywhere under the faked plugin root. */
-function artifactsUnder(dir) {
+/** Every file created anywhere under `dir`, the config stub excepted. */
+function filesUnder(dir) {
   if (!existsSync(dir)) return [];
   const out = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.name === 'artibot.config.json') continue;
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...artifactsUnder(p));
+    if (e.isDirectory()) out.push(...filesUnder(p));
     else out.push(p);
   }
   return out;
+}
+
+/** Every file created under the faked plugin root OR the state dir the store lives in. */
+function artifactsUnder() {
+  return [...filesUnder(ROOT), ...filesUnder(STATE)];
 }
 
 vi.mock('../../lib/core/platform.js', async (importOriginal) => {
@@ -249,13 +261,20 @@ const { startAutopilot } = await import('../../lib/autopilot/engine.js');
 beforeAll(() => {
   ROOT = mkdtempSync(path.join(os.tmpdir(), 'artibot-consent-root-'));
   ARTIFACTS = mkdtempSync(path.join(os.tmpdir(), 'artibot-consent-art-'));
+  STATE = mkdtempSync(path.join(os.tmpdir(), 'artibot-consent-state-'));
   mkdirSync(path.join(ROOT, 'runtime'), { recursive: true });
   process.env.__CONSENT_TEST_ROOT = ROOT;
+  // `ARTIBOT_STATE_DIR_HOME` (the pair `resolveArtibotDir` requires) is already
+  // stamped by the global setup for this home, so the override is honored.
+  savedStateDir = process.env.ARTIBOT_STATE_DIR;
+  process.env.ARTIBOT_STATE_DIR = STATE;
 });
 
 afterAll(() => {
   delete process.env.__CONSENT_TEST_ROOT;
-  for (const d of [ROOT, ARTIFACTS]) {
+  if (savedStateDir === undefined) delete process.env.ARTIBOT_STATE_DIR;
+  else process.env.ARTIBOT_STATE_DIR = savedStateDir;
+  for (const d of [ROOT, ARTIFACTS, STATE]) {
     try { rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 });
@@ -264,6 +283,9 @@ beforeEach(() => {
   for (const e of readdirSync(ROOT)) {
     if (e === 'artibot.config.json') continue;
     rmSync(path.join(ROOT, e), { recursive: true, force: true });
+  }
+  for (const e of readdirSync(STATE)) {
+    rmSync(path.join(STATE, e), { recursive: true, force: true });
   }
 });
 
@@ -276,20 +298,20 @@ describe('engine wiring / execution gate leaves zero side effects', () => {
   // 먼저 증명한다. 이게 없으면 아래 음성 단언은 "경로를 잘못 봤다"와 구별되지 않는다.
   it('positive control: an open gate really does create session artifacts', async () => {
     writeConfig({ execution: { enabled: true } });
-    expect(artifactsUnder(ROOT)).toHaveLength(0);
+    expect(artifactsUnder()).toHaveLength(0);
 
     const res = await startAutopilot({ task, options: { projectRoot: ARTIFACTS } });
     expect(res.blocked).toBeUndefined();
     expect(res.sessionId).toBeTruthy();
 
-    const created = artifactsUnder(ROOT);
+    const created = artifactsUnder();
     expect(created.length).toBeGreaterThan(0);
     expect(created.some((p) => p.includes(res.sessionId))).toBe(true);
   });
 
   it('legacy autopilot.enabled:false creates NO session and NO lock', async () => {
     writeConfig({ enabled: false });
-    expect(artifactsUnder(ROOT)).toHaveLength(0);
+    expect(artifactsUnder()).toHaveLength(0);
 
     const res = await startAutopilot({ task, options: { projectRoot: ARTIFACTS } });
 
@@ -298,21 +320,21 @@ describe('engine wiring / execution gate leaves zero side effects', () => {
     expect(res.instruction.type).toBe('pause');
     expect(res.sessionId).toBeNull();
     // 파일시스템 단언 — 반환값이 아니라 디스크가 진실원이다.
-    expect(artifactsUnder(ROOT)).toEqual([]);
+    expect(artifactsUnder()).toEqual([]);
   });
 
   it('explicit execution.enabled:false blocks the same way', async () => {
     writeConfig({ execution: { enabled: false } });
     const res = await startAutopilot({ task, options: { projectRoot: ARTIFACTS } });
     expect(res.blocked).toBe(true);
-    expect(artifactsUnder(ROOT)).toEqual([]);
+    expect(artifactsUnder()).toEqual([]);
   });
 
   it('a config-planted override does not unblock start (negative control)', async () => {
     writeConfig({ execution: { enabled: false }, override: true, consentOverride: true });
     const res = await startAutopilot({ task, options: { projectRoot: ARTIFACTS } });
     expect(res.blocked).toBe(true);
-    expect(artifactsUnder(ROOT)).toEqual([]);
+    expect(artifactsUnder()).toEqual([]);
   });
 
   it('the call-argument override unblocks and stamps a receipt on the session', async () => {
@@ -322,7 +344,7 @@ describe('engine wiring / execution gate leaves zero side effects', () => {
     });
     expect(res.blocked).toBeUndefined();
     expect(res.sessionId).toBeTruthy();
-    expect(artifactsUnder(ROOT).length).toBeGreaterThan(0);
+    expect(artifactsUnder().length).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------

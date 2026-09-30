@@ -88,14 +88,20 @@ export function evaluateBashRisk(hookData) {
  *
  * @param {object} store - session-store module (listSessions/loadSession/getSessionPath)
  * @param {object} fs - node:fs (statSync)
+ * @param {(state: object) => boolean} [isMine] - Project filter. The store holds
+ *   every project's sessions (one per user since owner decision D2), and the
+ *   caller WRITES a danger event into the session this returns — so a session
+ *   that is provably another project's must not be a candidate. Omitted, every
+ *   session is (the pre-D2 behaviour).
  * @returns {object|null} session state
  */
-export function findActiveSession(store, fs) {
+export function findActiveSession(store, fs, isMine = () => true) {
   let best = null;
   let bestMtime = -Infinity;
   for (const id of store.listSessions()) {
     const state = store.loadSession(id);
     if (!state || !state.phase || INACTIVE_PHASES.has(state.phase)) continue;
+    if (!isMine(state)) continue;
     let mtime = 0;
     try {
       mtime = fs.statSync(store.getSessionPath(id)).mtimeMs;
@@ -126,8 +132,11 @@ async function recordDangerForActiveSession(hookData, command) {
     if (!isAutopilotAllowed(cwd)) return; // capture-only gate (same as git-autopilot-guard)
 
     const store = await import('../../lib/autopilot/session-store.js');
+    const { sessionFilterFor } = await import('../../lib/autopilot/session-project.js');
     const fs = await import('node:fs');
-    const active = findActiveSession(store, fs);
+    // This project's session only: a dangerous command here must not pause a
+    // run that belongs to a different repository.
+    const active = findActiveSession(store, fs, sessionFilterFor(cwd));
     if (!active) return;
 
     const { recordRiskEvent } = await import('../../lib/autopilot/engine-state.js');

@@ -1,6 +1,10 @@
 /**
  * Session store for autopilot runs.
- * Persists state to runtime/autopilot/{sessionId}.json.
+ * Persists state to `<state dir>/runtime/autopilot/{sessionId}.json`, where the
+ * state dir is `lib/core/config.js#resolveArtibotDir()` (`~/.claude/artibot`) —
+ * NOT the plugin root. See {@link getStoreDir} for why, and for the one-time
+ * adoption of the store an older build kept inside the plugin root
+ * ({@link migrateLegacyStore}).
  * Korean-path safe; uses atomic writes to prevent partial-write corruption.
  *
  * Schema reference: PRD docs/PRD/autopilot-mode.md section 13.4
@@ -11,9 +15,13 @@
 import path from 'node:path';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { resolveArtibotDir } from '../core/config.js';
 import { renameWithRetry } from '../core/file.js';
 import { getPluginRoot, sameDirPath } from '../core/platform.js';
 import { resolveRunEventsPath } from '../observability/run-events.js';
+import {
+  adoptLegacy, adoptLegacyOnce, LEGACY_LEDGER_NAME, skippedReport,
+} from './legacy-store-adoption.js';
 import { migrateV2toV3, SCHEMA_VERSION_V3 } from './migrate-v3.js';
 
 /**
@@ -63,21 +71,48 @@ const MAX_RENAME_BACKOFF_MS = 250;
 const RENAME_RETRY_OPTS = { attempts: MAX_RENAME_ATTEMPTS, maxBackoffMs: MAX_RENAME_BACKOFF_MS };
 
 /**
- * Resolve the autopilot runtime directory inside the plugin root.
+ * Resolve the autopilot runtime directory.
  * Path is constructed via path.join so Korean / spaced paths are preserved.
+ *
+ * THE DEFAULT is `resolveArtibotDir()/runtime/autopilot` (`~/.claude/artibot/
+ * runtime/autopilot`), NOT `<pluginRoot>/runtime/autopilot` as it was before
+ * owner decision D2 (2026-09-30). The plugin root is a version-scoped cache
+ * directory: the host replaces it on upgrade and `scripts/update.js#clearCache`
+ * prunes the stale ones afterwards, so a store anchored there was lost or
+ * orphaned on every update — the same reason `resolveArtibotDir` gives for not
+ * anchoring user state there. Measured 2026-09-30 on the owner's machine: three
+ * cache versions (4.68.0, 4.69.0, 4.70.0) each held their OWN copy of the same
+ * sessions, and one copy had diverged from the others. A single store also means
+ * a single lock namespace across versions, so a 4.71 run and a 4.70 run contend
+ * on one feature instead of both starting it. Everything built on this function
+ * moves with it: events, `locks/`, `memory/` and `worktrees/`.
+ * `ARTIBOT_STATE_DIR` (with its `ARTIBOT_STATE_DIR_HOME` pair) relocates the
+ * default through `resolveArtibotDir`, on that function's terms.
+ *
+ * SIDE EFFECT, stated here because a path resolver is not expected to have one:
+ * the first call per process for the DEFAULT store adopts what an older build
+ * left at `<pluginRoot>/runtime/autopilot` (see {@link migrateLegacyStore}).
+ * This function is the one place every reader and writer of the store passes
+ * through — `lock.js`, `memory.js`, `telemetry.js` and `worktree-manager.js`
+ * call it directly — so putting the trigger here is what lets a caller that
+ * never touches the session API (a lock probe, an event read) still find the
+ * data. It never throws, costs one `Set` lookup after the first call, and is
+ * skipped entirely while an honored override is in force.
  *
  * `ARTIBOT_AUTOPILOT_STORE_DIR` relocates that directory. It is a path knob,
  * not a test kill-switch: every read and write still happens, just somewhere
  * else, so a suite can exercise the real store code without depositing session
- * files among the real ones. The directory is git-ignored (`.gitignore` matches
- * `/runtime/`, and `git ls-files runtime` is empty as of 2026-09-21), so the
- * cost of a stray test write is not a dirty working copy — it is that every
- * reader of the store population counts fixtures as sessions: {@link
+ * files among the real ones. A stray test write shows up in no `git status` —
+ * the default store is under the user's home, and before D2 it sat in the
+ * git-ignored `/runtime/` — so the cost is not a dirty working copy, it is that
+ * every reader of the store population counts fixtures as sessions: {@link
  * listSessions} and, through it, `lib/autopilot/cross-session-learner.js` and
  * `scripts/hooks/bash-risk-guard.js`; `scripts/dev/prune-autopilot-store.mjs`
  * enumerates the same directory directly via this function.
  * It is read on EVERY call, because a value captured at import is already fixed
- * before a test can set it.
+ * before a test can set it. An honored override also switches the legacy
+ * adoption above OFF: a sandbox has to be hermetic, and real sessions turning
+ * up inside it would be the contamination the override exists to prevent.
  *
  * `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT` records the plugin root the override was
  * minted for, and the override is honored only while that is still the root in
@@ -111,24 +146,104 @@ const RENAME_RETRY_OPTS = { attempts: MAX_RENAME_ATTEMPTS, maxBackoffMs: MAX_REN
  * resolves against cwd, which is where fs would have placed it anyway.
  *
  * @returns {string} Absolute directory path, in the platform separator, for
- *   both the plugin-root default and an honored override.
+ *   both the state-dir default and an honored override.
  */
 export function getStoreDir() {
-  // One read of the plugin root, not two: the derived path and the value the
-  // pairing is compared against must come from the same observation, or a
-  // `CLAUDE_PLUGIN_ROOT` changed between the two calls would let an override
-  // minted for root A be honored while the fallback points at root B.
+  const resolved = resolveStore();
+  if (!resolved.overridden) adoptLegacyOnce(resolved.dir, legacyDirOf(resolved.pluginRoot));
+  return resolved.dir;
+}
+
+/**
+ * The same directory as {@link getStoreDir}, WITHOUT the legacy adoption. For a
+ * caller that must not write as a side effect of asking where the store is — a
+ * dry-run tool, a path-only assertion. Everything that reads or writes the store
+ * should keep calling {@link getStoreDir}: a caller that uses this one and then
+ * opens files has opted out of finding the sessions an older build left behind.
+ *
+ * @returns {string} Absolute directory path, exactly as `getStoreDir` returns it.
+ */
+export function resolveStoreDir() {
+  return resolveStore().dir;
+}
+
+/**
+ * The store directory, without the legacy adoption {@link getStoreDir} performs.
+ *
+ * One observation of the plugin root, not two: the derived path and the value
+ * the pairing is compared against must come from the same read, or a
+ * `CLAUDE_PLUGIN_ROOT` changed between the two calls would let an override
+ * minted for root A be honored while the fallback points at root B. Pure: it
+ * touches no file.
+ *
+ * @returns {{ dir: string, pluginRoot: string, overridden: boolean }}
+ */
+function resolveStore() {
   const pluginRoot = getPluginRoot();
-  const rootDerived = path.join(pluginRoot, 'runtime', 'autopilot');
   const override = process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
-  if (!override) return rootDerived;
-
   const mintedFor = process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
-  if (!mintedFor) return rootDerived;
+  if (override && mintedFor && sameDirPath(mintedFor, pluginRoot)) {
+    return { dir: path.resolve(override), pluginRoot, overridden: true };
+  }
+  return { dir: path.join(resolveArtibotDir(), 'runtime', 'autopilot'), pluginRoot, overridden: false };
+}
 
-  if (!sameDirPath(mintedFor, pluginRoot)) return rootDerived;
+// ---------------------------------------------------------------------------
+// Legacy store adoption (owner decision D2)
+// ---------------------------------------------------------------------------
+//
+// Before D2 the store was `<pluginRoot>/runtime/autopilot`. The copy that keeps
+// those sessions from being orphaned — what it takes, what it leaves, why it is a
+// copy and why it runs once per id — is in `legacy-store-adoption.js`. THIS file
+// decides WHEN it runs (the first `getStoreDir()` per process, for the default
+// store only) and owns every path, so that module never spells the location.
 
-  return path.resolve(override);
+export { LEGACY_LEDGER_NAME };
+
+/**
+ * `<pluginRoot>/runtime/autopilot` — where a build before D2 kept the store.
+ *
+ * @param {string} pluginRoot
+ * @returns {string}
+ */
+function legacyDirOf(pluginRoot) {
+  return path.join(pluginRoot, 'runtime', 'autopilot');
+}
+
+/**
+ * The legacy directory a build before D2 would have used under the plugin root
+ * in force, or `null` when no legacy adoption applies: an honored override (a
+ * sandbox must stay hermetic) or a legacy directory that IS the store. Pure.
+ *
+ * @returns {string|null}
+ */
+export function getLegacyStoreDir() {
+  const { dir, pluginRoot, overridden } = resolveStore();
+  if (overridden) return null;
+  const legacy = legacyDirOf(pluginRoot);
+  return sameDirPath(legacy, dir) ? null : legacy;
+}
+
+/**
+ * Adopt the legacy store into the current one now. Normally unnecessary —
+ * {@link getStoreDir} does this on its own — and exported for an explicit
+ * re-run (`force`) and for tests.
+ *
+ * `force` re-evaluates a legacy directory this process has already looked at,
+ * which is how a session that appeared there later gets picked up. It does NOT
+ * bypass the ledger: an id dealt with once is never copied again.
+ *
+ * @param {{ force?: boolean }} [opts]
+ * @returns {import('./legacy-store-adoption.js').AdoptionReport}
+ *   `sessions` are the ids copied by THIS pass, `present` the ids the store
+ *   already had (recorded, not copied), `memory` the feature files copied, and
+ *   `errors` the files that could not be dealt with (retried by the next pass).
+ */
+export function migrateLegacyStore({ force = false } = {}) {
+  const { dir, pluginRoot, overridden } = resolveStore();
+  const legacy = legacyDirOf(pluginRoot);
+  if (overridden) return skippedReport(dir, legacy, 'override');
+  return adoptLegacy(dir, legacy, { force });
 }
 
 /**

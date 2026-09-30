@@ -2,6 +2,8 @@
  * Unit tests for lib/autopilot/session-store.js
  * Covers newSessionId, save/load roundtrip, listSessions, deleteSession.
  */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -13,7 +15,8 @@ import {
   newSessionId,
   saveSession,
 } from '../../lib/autopilot/session-store.js';
-import { getPluginRoot, sameDirPath } from '../../lib/core/platform.js';
+import { resolveArtibotDir } from '../../lib/core/config.js';
+import { getHomeDir, getPluginRoot, sameDirPath } from '../../lib/core/platform.js';
 
 describe('newSessionId', () => {
   it('returns ap-YYYYMMDD-HHMMSS-xxxxxx format with random suffix', () => {
@@ -96,8 +99,11 @@ describe('listSessions / deleteSession', () => {
 describe('getStoreDir env seam', () => {
   const VAR = 'ARTIBOT_AUTOPILOT_STORE_DIR';
   const PAIR = 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT';
-  /** @type {{ dir: string | undefined, root: string | undefined }} */
+  const PLUGIN_ROOT_VAR = 'CLAUDE_PLUGIN_ROOT';
+  /** @type {{ dir: string | undefined, root: string | undefined, plugin: string | undefined }} */
   let saved;
+  /** @type {string | null} */
+  let fakeRoot = null;
 
   /** Restore one variable to its pre-test value; absent means absent, not ''. */
   const restore = (name, value) => {
@@ -105,8 +111,24 @@ describe('getStoreDir env seam', () => {
     else process.env[name] = value;
   };
 
+  /** The store the DEFAULT resolution lands on since D2: under the state dir. */
+  const stateDerivedStore = () => path.join(resolveArtibotDir(), 'runtime', 'autopilot');
+
+  /**
+   * Point the plugin root at an empty temp dir. Cases that drop the override
+   * resolve the DEFAULT store, and the first such call per process adopts the
+   * legacy store under the plugin root in force — which, left at the real one,
+   * is this checkout's own `runtime/autopilot`. A fake root keeps a path-only
+   * test from copying real sessions anywhere.
+   */
+  const useFakePluginRoot = () => {
+    fakeRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-seam-root-'));
+    writeFileSync(path.join(fakeRoot, 'artibot.config.json'), '{}', 'utf-8');
+    process.env[PLUGIN_ROOT_VAR] = fakeRoot;
+  };
+
   beforeEach(() => {
-    saved = { dir: process.env[VAR], root: process.env[PAIR] };
+    saved = { dir: process.env[VAR], root: process.env[PAIR], plugin: process.env[PLUGIN_ROOT_VAR] };
   });
 
   // Restoring matters beyond tidiness: the global setup turns these two on by
@@ -115,6 +137,9 @@ describe('getStoreDir env seam', () => {
   afterEach(() => {
     restore(VAR, saved.dir);
     restore(PAIR, saved.root);
+    restore(PLUGIN_ROOT_VAR, saved.plugin);
+    if (fakeRoot) rmSync(fakeRoot, { recursive: true, force: true });
+    fakeRoot = null;
   });
 
   // The only LIVE assertion that executes inside the `autopilot` vitest project.
@@ -133,8 +158,10 @@ describe('getStoreDir env seam', () => {
   // left in place no matter what order the file's tests are run in.
   it('is redirected away from the real store by global setup (autopilot project)', () => {
     expect(process.env[VAR]).toBeTruthy();
-    expect(sameDirPath(getStoreDir(), path.join(getPluginRoot(), 'runtime', 'autopilot')))
-      .toBe(false);
+    // The real store is the one a user's machine has: under the real home, not
+    // under whatever `ARTIBOT_STATE_DIR` the setup also redirected.
+    const realStore = path.join(getHomeDir(), '.claude', 'artibot', 'runtime', 'autopilot');
+    expect(sameDirPath(getStoreDir(), realStore)).toBe(false);
   });
 
   it('returns the override when its paired root is the plugin root in force', () => {
@@ -169,7 +196,8 @@ describe('getStoreDir env seam', () => {
   });
 
   it('discards the override when the paired root is absent or a different dir', () => {
-    const fallback = path.join(getPluginRoot(), 'runtime', 'autopilot');
+    useFakePluginRoot();
+    const fallback = stateDerivedStore();
     process.env[VAR] = path.join(getPluginRoot(), '.tmp-store-seam', 'autopilot');
 
     delete process.env[PAIR];
@@ -182,9 +210,12 @@ describe('getStoreDir env seam', () => {
     expect(getStoreDir()).toBe(fallback);
   });
 
-  it('returns the plugin-root path unchanged when neither variable is set', () => {
+  it('returns the state-dir path (not a plugin-root path) when neither variable is set', () => {
+    useFakePluginRoot();
     delete process.env[VAR];
     delete process.env[PAIR];
-    expect(getStoreDir()).toBe(path.join(getPluginRoot(), 'runtime', 'autopilot'));
+    expect(getStoreDir()).toBe(stateDerivedStore());
+    // The regression D2 closes: the store must not follow the plugin root.
+    expect(sameDirPath(getStoreDir(), path.join(getPluginRoot(), 'runtime', 'autopilot'))).toBe(false);
   });
 });

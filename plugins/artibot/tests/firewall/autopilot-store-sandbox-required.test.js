@@ -1,12 +1,15 @@
 /**
  * Firewall — the autopilot session store must be sandboxed for the whole suite.
  *
- * The store is `<pluginRoot>/runtime/autopilot`, resolved by
- * `lib/autopilot/session-store.js#getStoreDir` (cited by symbol on purpose: a
- * line number in that module has not survived past edits). The directory is
- * git-ignored (`.gitignore` matches `/runtime/`; `git ls-files runtime` was
- * empty on 2026-09-21), so a stray test write does NOT dirty the working copy —
- * it shows up in no `git status`, which is what makes it worth a gate. The cost
+ * The store is `<state dir>/runtime/autopilot` — `resolveArtibotDir()`, i.e.
+ * `~/.claude/artibot` — resolved by `lib/autopilot/session-store.js#getStoreDir`
+ * (cited by symbol on purpose: a line number in that module has not survived
+ * past edits). Until owner decision D2 (2026-09-30) it was
+ * `<pluginRoot>/runtime/autopilot`; the paragraphs below that speak of the plugin
+ * root describe the measurements made then, and are kept as measured. The store
+ * is outside the repository now and was git-ignored before (`.gitignore` matched
+ * `/runtime/`), so a stray test write does NOT dirty the working copy — it shows
+ * up in no `git status`, which is what makes it worth a gate. The cost
  * is that test sessions share a directory with real ones and every reader of
  * the store population counts them: `session-store.js#listSessions`, and
  * through it `lib/autopilot/cross-session-learner.js:37` and
@@ -15,6 +18,15 @@
  * five route through that one resolver: `saveSession`,
  * `lib/autopilot/telemetry.js`, `lib/autopilot/lock.js`,
  * `lib/autopilot/memory.js` and `lib/autopilot/worktree-manager.js`.
+ *
+ * TWO SEAMS NOW GUARD IT, and this gate pins the one that is its own. The
+ * autopilot override below redirects the store into a temp directory; the
+ * setup's `ARTIBOT_STATE_DIR` redirects `resolveArtibotDir()` for everything
+ * else, which would catch a store whose override was dropped. The "real store" in
+ * this file is therefore the one a user's machine has — under the real home,
+ * not under the redirected state dir — and the default store a discarded
+ * override falls back to is asserted against the state dir, which is where it
+ * lands in the suite.
  *
  * WHY A GATE RATHER THAN PER-FILE ISOLATION. Most files under
  * `tests/autopilot/` set no override at all, so isolation was moved into the
@@ -62,6 +74,15 @@
  * spellings fails open for the next one written.
  *
  * WHAT THIS GATE CANNOT SEE — do not read a green run as more than it is:
+ *   - **A leak of any file but this gate's own.** Until D2 case (b) compared the
+ *     real store's entry count before and after and so noticed ANY stray write.
+ *     The real store is now the user's shared `~/.claude/artibot/runtime/autopilot`,
+ *     which a live autopilot run in another window legitimately changes while
+ *     the suite runs, so the count is no longer this suite's to pin and case (b)
+ *     checks only the session id it wrote itself. A different test leaking a
+ *     different file into the real store is caught by (a) and the setup
+ *     assertions if it goes through the resolver, and by nothing here if it does
+ *     not.
  *   - **A test that deletes or repoints the override and never restores it.**
  *     Nothing here runs between other people's tests. Setup re-runs per file,
  *     so the blast radius is the rest of that one file, unobserved.
@@ -113,16 +134,29 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getPluginRoot, sameDirPath } from '../../lib/core/platform.js';
+import { resolveArtibotDir } from '../../lib/core/config.js';
+import { getHomeDir, sameDirPath } from '../../lib/core/platform.js';
 import { getStoreDir, saveSession } from '../../lib/autopilot/session-store.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SETUP_FILE = path.join(PLUGIN_ROOT, 'tests', 'setup', 'state-dir.js');
 const VITEST_CONFIG = path.join(PLUGIN_ROOT, 'vitest.config.js');
 
-/** The real store this gate keeps test writes out of — shared with live runs. */
+/**
+ * The real store this gate keeps test writes out of — shared with live runs.
+ *
+ * Built from the REAL home, not from `resolveArtibotDir()`: the global setup
+ * points `ARTIBOT_STATE_DIR` at a per-worker temp directory, so the resolver
+ * itself answers "a temp dir" here, which is precisely the wrong thing to
+ * compare a temp-dir assertion against.
+ */
 function realStoreDir() {
-  return path.join(getPluginRoot(), 'runtime', 'autopilot');
+  return path.join(getHomeDir(), '.claude', 'artibot', 'runtime', 'autopilot');
+}
+
+/** Where a DISCARDED override falls back to: the state dir's store. */
+function defaultStoreDir() {
+  return path.join(resolveArtibotDir(), 'runtime', 'autopilot');
 }
 
 /**
@@ -167,26 +201,6 @@ function canonical(p) {
 function isInside(parent, child) {
   const rel = path.relative(canonical(parent), canonical(child));
   return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
-/**
- * Entry count for a directory, with absence distinguished from emptiness.
- *
- * Returning -1 rather than 0 for a missing directory is what lets the
- * before/after comparison pin "absent stayed absent" as strictly as "empty
- * stayed empty". Folding both to 0 would let a run that CREATED the real store
- * pass.
- *
- * @param {string} dir
- * @returns {number} Entry count, or -1 when the directory does not exist.
- */
-function entryCount(dir) {
-  try {
-    return fsSync.readdirSync(dir).length;
-  } catch (err) {
-    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return -1;
-    throw err;
-  }
 }
 
 /**
@@ -303,12 +317,30 @@ function modulesSpellingStorePath() {
 
 describe('the autopilot store is sandboxed for every test in the suite', () => {
   const savedEnv = { ...process.env };
+  /** @type {string|null} */
+  let fakeRoot = null;
+
+  /**
+   * A discarded override falls back to the DEFAULT store, and the first call per
+   * process for the default store adopts the legacy store under the plugin root
+   * in force. These cases only resolve paths, so they run against an empty fake
+   * root rather than this checkout's own `runtime/autopilot`.
+   */
+  function useFakePluginRoot() {
+    fakeRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'artibot-fw-root-'));
+    fsSync.writeFileSync(path.join(fakeRoot, 'artibot.config.json'), '{}', 'utf-8');
+    process.env.CLAUDE_PLUGIN_ROOT = fakeRoot;
+  }
 
   afterEach(() => {
-    for (const key of ['ARTIBOT_AUTOPILOT_STORE_DIR', 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT']) {
+    for (const key of [
+      'ARTIBOT_AUTOPILOT_STORE_DIR', 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT', 'CLAUDE_PLUGIN_ROOT',
+    ]) {
       if (savedEnv[key] === undefined) delete process.env[key];
       else process.env[key] = savedEnv[key];
     }
+    if (fakeRoot) fsSync.rmSync(fakeRoot, { recursive: true, force: true });
+    fakeRoot = null;
   });
 
   it('resolves the store into a temp directory, not the real one', () => {
@@ -321,16 +353,21 @@ describe('the autopilot store is sandboxed for every test in the suite', () => {
   it('writes a real session to temp and leaves the real store untouched', () => {
     // A resolver assertion alone is a necessary condition, not the claim. This
     // drives the actual writer and then looks at both directories on disk.
-    const before = entryCount(realStoreDir());
     const sessionId = `fw-autopilot-store-${process.pid}-${Date.now()}`;
     const written = saveSession({ sessionId, phase: 'FIREWALL' });
     try {
       expect(fsSync.existsSync(written)).toBe(true);
       expect(isInside(os.tmpdir(), written)).toBe(true);
       expect(isInside(realStoreDir(), written)).toBe(false);
-      // Absent must stay absent and empty must stay empty; `entryCount`
-      // distinguishes the two so neither drifts into the other.
-      expect(entryCount(realStoreDir())).toBe(before);
+      // THIS RUN'S OWN id, not the store's entry count. Before D2 the real store
+      // was a per-checkout directory nothing else wrote to, so "the count did
+      // not move" was a sound end-to-end witness. It is now the user's shared
+      // `~/.claude/artibot/runtime/autopilot`, which a live autopilot run in
+      // another window legitimately changes while this suite runs — a count
+      // comparison there would be red for a reason that has nothing to do with
+      // this suite.
+      expect(fsSync.existsSync(path.join(realStoreDir(), `${sessionId}.json`))).toBe(false);
+      expect(fsSync.existsSync(path.join(realStoreDir(), `${sessionId}.events.ndjson`))).toBe(false);
     } finally {
       try { fsSync.unlinkSync(written); } catch { /* best effort */ }
     }
@@ -338,17 +375,32 @@ describe('the autopilot store is sandboxed for every test in the suite', () => {
 
   it('discards the override when the recorded plugin root no longer matches', () => {
     // The inherited-env hazard: a child handed a different CLAUDE_PLUGIN_ROOT
-    // must fall back to its own store rather than keep writing into the
-    // parent's. Path resolution only — nothing here touches disk.
-    process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT = path.join(os.tmpdir(), 'some-other-plugin-root');
-    expect(sameDirPath(getStoreDir(), realStoreDir())).toBe(true);
+    // must fall back to the default store rather than keep writing into the
+    // parent's sandbox. Path resolution only.
+    const override = getStoreDir();
+    expect(sameDirPath(override, path.resolve(process.env.ARTIBOT_AUTOPILOT_STORE_DIR))).toBe(true);
+    useFakePluginRoot();
+    expect(sameDirPath(getStoreDir(), override)).toBe(false);
+    expect(sameDirPath(getStoreDir(), defaultStoreDir())).toBe(true);
+    // ...and the fallback is the state dir's store, which the setup has also
+    // redirected — never the real home's.
+    expect(sameDirPath(getStoreDir(), realStoreDir())).toBe(false);
   });
 
   it('discards an override that carries no recorded root at all', () => {
     // The fail-open shape the pairing exists to refuse: "cannot place" must not
     // read as "trust".
+    const override = getStoreDir();
+    useFakePluginRoot();
     delete process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
-    expect(sameDirPath(getStoreDir(), realStoreDir())).toBe(true);
+    expect(sameDirPath(getStoreDir(), override)).toBe(false);
+    expect(sameDirPath(getStoreDir(), defaultStoreDir())).toBe(true);
+  });
+
+  it('follows the state dir, not the plugin root, when the override is discarded (D2)', () => {
+    useFakePluginRoot();
+    delete process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
+    expect(sameDirPath(getStoreDir(), path.join(fakeRoot, 'runtime', 'autopilot'))).toBe(false);
   });
 
   it('knows every module naming the store path in code (module ratchet)', () => {

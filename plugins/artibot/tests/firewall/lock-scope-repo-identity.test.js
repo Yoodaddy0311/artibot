@@ -36,8 +36,14 @@
  *   - A user's own `~/.claude/artibot/autopilot-allowlist.json` — the gate
  *     assertion only checks a repo that is on NO allowlist.
  *
- * The lock store is redirected to a temp dir via CLAUDE_PLUGIN_ROOT (read at
- * call time by `getPluginRoot`), so nothing under `runtime/` is touched.
+ * The lock store is redirected to a temp dir via ARTIBOT_STATE_DIR (read at
+ * call time by `resolveArtibotDir`), so nothing under the real store is touched.
+ * Until owner decision D2 (2026-09-30) the store lived under the plugin root and
+ * CLAUDE_PLUGIN_ROOT alone redirected it; it follows the state dir now.
+ * CLAUDE_PLUGIN_ROOT is still pointed at a temp dir, for one reason: the global
+ * setup's `ARTIBOT_AUTOPILOT_STORE_DIR` is paired with the REAL plugin root, so
+ * changing the root is what makes the store resolver discard that override and
+ * fall through to the state dir this file controls.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -73,9 +79,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.join(__dirname, '..', '..');
 
 const ORIGINAL_PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT;
+const ORIGINAL_STATE_DIR = process.env.ARTIBOT_STATE_DIR;
 
 let sandbox = '';
 let store = '';
+let stateDir = '';
 let repoA = '';
 let repoAWorktree = '';
 let repoB = '';
@@ -110,6 +118,10 @@ beforeAll(() => {
   store = path.join(sandbox, 'plugin-root');
   fsSync.mkdirSync(store, { recursive: true });
   process.env.CLAUDE_PLUGIN_ROOT = store;
+  // `ARTIBOT_STATE_DIR_HOME` (the pair `resolveArtibotDir` requires) is already
+  // stamped for this home by the global setup, so this override is honoured.
+  stateDir = path.join(sandbox, 'state');
+  process.env.ARTIBOT_STATE_DIR = stateDir;
 
   repoA = path.join(sandbox, 'repo-a');
   initRepo(repoA, { remote: 'https://github.com/Example/Repo-A.git' });
@@ -132,16 +144,23 @@ beforeAll(() => {
 afterAll(() => {
   if (ORIGINAL_PLUGIN_ROOT === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
   else process.env.CLAUDE_PLUGIN_ROOT = ORIGINAL_PLUGIN_ROOT;
+  if (ORIGINAL_STATE_DIR === undefined) delete process.env.ARTIBOT_STATE_DIR;
+  else process.env.ARTIBOT_STATE_DIR = ORIGINAL_STATE_DIR;
   try {
     fsSync.rmSync(sandbox, { recursive: true, force: true });
   } catch { /* best effort */ }
 });
 
 describe('store redirection (precondition for every write below)', () => {
-  it('writes lock files under the temp plugin root, never under the real runtime/', () => {
+  it('writes lock files under the temp state dir, never under the real runtime/ or the real home', () => {
     const p = getLockPath('probe');
-    expect(path.normalize(p).startsWith(path.normalize(store))).toBe(true);
+    expect(path.normalize(p).startsWith(path.normalize(stateDir))).toBe(true);
     expect(path.normalize(p).startsWith(path.normalize(path.join(PLUGIN_ROOT, 'runtime')))).toBe(false);
+    expect(path.normalize(p).startsWith(path.normalize(path.join(os.homedir(), '.claude')))).toBe(false);
+  });
+
+  it('does not write under the plugin root it was handed (D2: the store left the plugin root)', () => {
+    expect(path.normalize(getLockPath('probe')).startsWith(path.normalize(store))).toBe(false);
   });
 });
 
@@ -211,7 +230,7 @@ describe('scoped key composition — single string, sanitised', () => {
 
   it('is byte-identical to the legacy path when no identity is given', () => {
     expect(getLockKey('feature-x')).toBe('feature-x');
-    expect(getLockPath('feature-x')).toBe(path.join(store, 'runtime', 'autopilot', 'locks', 'feature-x.lock'));
+    expect(getLockPath('feature-x')).toBe(path.join(stateDir, 'runtime', 'autopilot', 'locks', 'feature-x.lock'));
   });
 });
 

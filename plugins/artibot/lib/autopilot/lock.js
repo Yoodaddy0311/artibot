@@ -24,6 +24,21 @@
  * scoped O_EXCL write are two steps, not one; a legacy holder appearing in
  * between is a pre-upgrade process racing an upgraded one — accepted.
  *
+ * ── Locks across the store move (owner decision D2) ────────────────────────
+ * ("Legacy" in this section means the old STORE location, not the unscoped lock
+ * KEY of the section above — the two are unrelated.)
+ * The store left the plugin root for the user-state dir, so a lock an OLDER
+ * build is still holding sits where this build no longer looks. Ignoring it
+ * lets a post-upgrade process start a feature a pre-upgrade process is still
+ * running; copying every legacy lock forward would carry dead ones into a clean
+ * store. {@link adoptLegacyStoreLocks} takes the third road: a legacy lock is
+ * carried over only if THIS file's staleness rule ({@link isStale}) calls it
+ * live, and an existing holder in the new store is never overwritten. It runs
+ * once per process, before the first lock query, and is skipped while a test
+ * override redirects the store. It is a transition aid, not a parallel reader:
+ * a legacy lock created after that first query is not seen until the next
+ * process.
+ *
  * @module lib/autopilot/lock
  */
 
@@ -37,9 +52,11 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import { ensureDirSync, sleepSync } from '../core/file.js';
+import { atomicCreateTextSync, ensureDirSync, sleepSync } from '../core/file.js';
 import { composeScopedKey } from '../git/repo-identity.js';
-import { getSessionPath, getStoreDir, loadSession } from './session-store.js';
+import {
+  getLegacyStoreDir, getSessionPath, getStoreDir, loadSession,
+} from './session-store.js';
 
 const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const POLL_MS = 100;
@@ -188,6 +205,55 @@ function isStale(holder) {
   return false;
 }
 
+/** `<legacyDir>\0<storeDir>` pairs whose live locks this process already carried over. */
+const adoptedLegacyStoreLocks = new Set();
+
+/**
+ * Carry the LIVE locks of the pre-D2 store into the current one (see the module
+ * header). Called before every lock query that asks "does anyone hold this?".
+ *
+ * Order matters and is deliberate: `getStoreDir()` runs first, because its first
+ * call per process is what copies the legacy SESSIONS across, and `isStale`
+ * judges a holder by looking its session up in the current store. Asked before
+ * that copy, every legacy holder would read as "session gone, past grace" and be
+ * dropped as leaked.
+ *
+ * A lock is never copied blindly: unreadable or corrupt files are skipped (and
+ * left alone), and so is anything {@link isStale} calls stale — a dead pid, an
+ * age over 24 hours, a terminal or leaked holder session. The create is
+ * exclusive, so a holder the current store already has is never overwritten.
+ * Nothing in the legacy directory is written to or removed. Never throws: a lock
+ * that cannot be adopted leaves this process exactly where it was before D2.
+ *
+ * @returns {void}
+ */
+function adoptLegacyStoreLocks() {
+  try {
+    const storeDir = getStoreDir();
+    const legacyDir = getLegacyStoreDir();
+    if (!legacyDir) return;
+    const key = `${legacyDir}\u0000${storeDir}`;
+    if (adoptedLegacyStoreLocks.has(key)) return;
+    adoptedLegacyStoreLocks.add(key);
+
+    const from = path.join(legacyDir, 'locks');
+    if (!existsSync(from)) return;
+    for (const name of readdirSync(from)) {
+      if (!name.endsWith('.lock')) continue;
+      const src = path.join(from, name);
+      const holder = readLockFile(src);
+      if (!holder || isStale(holder)) continue;
+      try {
+        atomicCreateTextSync(path.join(storeDir, 'locks', name), readFileSync(src, 'utf-8'));
+      } catch {
+        /* one lock that cannot be carried over must not stop the others */
+      }
+    }
+  } catch {
+    /* best-effort transition aid */
+  }
+}
+
 /**
  * Inspect lock state without acquiring.
  *
@@ -200,6 +266,7 @@ function isStale(holder) {
  * @returns {{ locked: boolean, holder?: object, stale?: boolean, scheme?: 'scoped'|'legacy' }}
  */
 export function isLocked(featureKey, opts = {}) {
+  adoptLegacyStoreLocks();
   const scoped = Boolean(opts && opts.repoIdentity);
   const holder = readLock(featureKey, opts);
   if (holder) {
@@ -267,6 +334,7 @@ function buildHolderState(featureKey, sessionId, scope) {
  * @returns {{ ok: boolean, lockPath: string, holder?: object, scheme?: 'scoped'|'legacy' }}
  */
 function attemptAcquire(featureKey, sessionId, scope) {
+  adoptLegacyStoreLocks();
   const lockPath = getLockPath(featureKey, scope);
   ensureDirSync(path.dirname(lockPath));
   const state = buildHolderState(featureKey, sessionId, scope);
@@ -365,6 +433,7 @@ export function releaseLock(featureKey, sessionId, opts = {}) {
  * @returns {Array<{ lockKey: string, lockPath: string, holder: object, stale: boolean }>}
  */
 export function listLocks() {
+  adoptLegacyStoreLocks();
   const locksDir = path.join(getStoreDir(), 'locks');
   if (!existsSync(locksDir)) return [];
   let entries;

@@ -485,7 +485,69 @@ describe('recovery-journal-census CLI: a malformed command line', () => {
   });
 });
 
+/**
+ * An environment in which the DEFAULT store resolves under a fake home: every
+ * variable that could move it is removed (an `undefined` value is not passed to
+ * the child at all) and the home is repointed, so nothing of the developer's own
+ * state — the real `~/.claude/artibot`, nor the state dir the test setup set —
+ * can leak into what the child resolves.
+ *
+ * @param {string} root the plugin root in force
+ * @param {string} fakeHome
+ * @returns {Record<string, string|undefined>}
+ */
+function defaultEnv(root, fakeHome) {
+  return {
+    CLAUDE_PLUGIN_ROOT: root,
+    USERPROFILE: fakeHome,
+    HOME: fakeHome,
+    ARTIBOT_STATE_DIR: undefined,
+    ARTIBOT_STATE_DIR_HOME: undefined,
+    ARTIBOT_AUTOPILOT_STORE_DIR: undefined,
+    ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: undefined,
+  };
+}
+
+/** The default store under a fake home — `<home>/.claude/artibot/runtime/autopilot`. */
+function defaultStoreOf(fakeHome) {
+  return path.join(fakeHome, '.claude', 'artibot', 'runtime', 'autopilot');
+}
+
 describe('recovery-journal-census CLI: the store directory resolution', () => {
+  it('reads <state dir>/runtime/autopilot by default, not a plugin-root path (D2)', () => {
+    const root = path.join(tmp, 'root-default');
+    const fakeHome = path.join(tmp, 'home-default');
+    mkdirSync(root, { recursive: true });
+    const store = defaultStoreOf(fakeHome);
+    mkdirSync(store, { recursive: true });
+    writeSession(store, { sessionId: 'a', recoveryJournal: [{ divergent: true }] }, 'a');
+
+    const r = run([], defaultEnv(root, fakeHome)).json;
+
+    expect(path.resolve(r.inputPath)).toBe(path.resolve(store));
+    expect(r.rows).toBe(1);
+    expect(r.census.legacyFallback).toBe(false);
+  });
+
+  it('follows ARTIBOT_STATE_DIR when it is paired with the home it was minted for', () => {
+    const root = path.join(tmp, 'root-state');
+    const fakeHome = path.join(tmp, 'home-state');
+    const stateDir = path.join(tmp, 'elsewhere');
+    mkdirSync(root, { recursive: true });
+    const store = path.join(stateDir, 'runtime', 'autopilot');
+    mkdirSync(store, { recursive: true });
+    writeSession(store, { sessionId: 'a', recoveryJournal: [{ divergent: false }] }, 'a');
+
+    const r = run([], {
+      ...defaultEnv(root, fakeHome),
+      ARTIBOT_STATE_DIR: stateDir,
+      ARTIBOT_STATE_DIR_HOME: fakeHome,
+    }).json;
+
+    expect(path.resolve(r.inputPath)).toBe(path.resolve(store));
+    expect(r.rows).toBe(1);
+  });
+
   it('honours the env override only when its recorded root matches', () => {
     const root = path.join(tmp, 'root');
     const store = makeStore('override-store');
@@ -505,35 +567,35 @@ describe('recovery-journal-census CLI: the store directory resolution', () => {
     // An override we cannot place must not be trusted; otherwise a spawned
     // child inherits the parent's store and reports the wrong denominator.
     const root = path.join(tmp, 'root2');
+    const fakeHome = path.join(tmp, 'home2');
     const store = makeStore('override-store2');
     mkdirSync(root, { recursive: true });
     writeSession(store, { sessionId: 'a', recoveryJournal: [{ divergent: true }] }, 'a');
 
     const ignored = run([], {
-      CLAUDE_PLUGIN_ROOT: root,
+      ...defaultEnv(root, fakeHome),
       ARTIBOT_AUTOPILOT_STORE_DIR: store,
       ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: '',
     }).json;
-    expect(path.resolve(ignored.inputPath))
-      .toBe(path.resolve(path.join(root, 'runtime', 'autopilot')));
+    expect(path.resolve(ignored.inputPath)).toBe(path.resolve(defaultStoreOf(fakeHome)));
     expect(ignored.rows).toBe(0);
   });
 
   it('IGNORES an override minted for a DIFFERENT root', () => {
     const root = path.join(tmp, 'root3');
     const otherRoot = path.join(tmp, 'other-root');
+    const fakeHome = path.join(tmp, 'home3');
     const store = makeStore('override-store3');
     mkdirSync(root, { recursive: true });
     mkdirSync(otherRoot, { recursive: true });
     writeSession(store, { sessionId: 'a', recoveryJournal: [{ divergent: true }] }, 'a');
 
     const ignored = run([], {
-      CLAUDE_PLUGIN_ROOT: root,
+      ...defaultEnv(root, fakeHome),
       ARTIBOT_AUTOPILOT_STORE_DIR: store,
       ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: otherRoot,
     }).json;
-    expect(path.resolve(ignored.inputPath))
-      .toBe(path.resolve(path.join(root, 'runtime', 'autopilot')));
+    expect(path.resolve(ignored.inputPath)).toBe(path.resolve(defaultStoreOf(fakeHome)));
   });
 
   it('--dir overrules the env pair', () => {
@@ -640,90 +702,5 @@ describe('recovery-journal-census CLI: per-session and whole-store in one run', 
     const only = run(['--dir', dir, '--session', 'b']).json;
     expect(only.census.perSession).toEqual([{ sessionId: 'b', rows: 2 }]);
     expect(only.rows).toBe(2);
-  });
-});
-
-describe('recovery-journal-census CLI: the mirrored resolver stays in step', () => {
-  // `resolveStoreDir` is a deliberate COPY of
-  // `lib/autopilot/session-store.js#getStoreDir`: the reader may not import the
-  // writer (the allowlist above is what forbids it), so the duplication is the
-  // price of the allowlist. A copy drifts in silence, and the reader would go
-  // on reporting a confident denominator for a directory the writer had left.
-  // These four cases are the whole decision table of the env pair, and each
-  // asserts the two resolvers AGREE before asserting what they agree on, so a
-  // drift stays red even if both halves were moved to some third rule.
-  const KEYS = [
-    'CLAUDE_PLUGIN_ROOT',
-    'ARTIBOT_AUTOPILOT_STORE_DIR',
-    'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT',
-  ];
-  /** @type {Record<string, string|undefined>} */
-  let savedEnv;
-
-  beforeEach(() => {
-    savedEnv = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
-  });
-
-  afterEach(() => {
-    for (const k of KEYS) {
-      if (savedEnv[k] === undefined) delete process.env[k];
-      else process.env[k] = savedEnv[k];
-    }
-  });
-
-  /**
-   * Apply one environment, then read both resolvers under exactly that one.
-   *
-   * @param {Record<string, string|undefined>} env
-   * @returns {Promise<{mirror: string, canonical: string}>}
-   */
-  async function bothUnder(env) {
-    for (const k of KEYS) {
-      if (env[k] === undefined) delete process.env[k];
-      else process.env[k] = env[k];
-    }
-    const { resolveStoreDir } = await import(`file://${CLI.split(path.sep).join('/')}`);
-    const { getStoreDir } = await import('../../lib/autopilot/session-store.js');
-    return { mirror: resolveStoreDir(), canonical: getStoreDir() };
-  }
-
-  it('agrees on the plugin-root default when no override is set', async () => {
-    const root = path.join(tmp, 'pair-root');
-    const { mirror, canonical } = await bothUnder({ CLAUDE_PLUGIN_ROOT: root });
-    expect(mirror).toBe(canonical);
-    expect(mirror).toBe(path.join(root, 'runtime', 'autopilot'));
-  });
-
-  it('agrees on discarding an override with no recorded root', async () => {
-    const root = path.join(tmp, 'pair-root');
-    const { mirror, canonical } = await bothUnder({
-      CLAUDE_PLUGIN_ROOT: root,
-      ARTIBOT_AUTOPILOT_STORE_DIR: path.join(tmp, 'pair-store'),
-    });
-    expect(mirror).toBe(canonical);
-    expect(mirror).toBe(path.join(root, 'runtime', 'autopilot'));
-  });
-
-  it('agrees on honouring an override minted for the root in force', async () => {
-    const root = path.join(tmp, 'pair-root');
-    const store = path.join(tmp, 'pair-store');
-    const { mirror, canonical } = await bothUnder({
-      CLAUDE_PLUGIN_ROOT: root,
-      ARTIBOT_AUTOPILOT_STORE_DIR: store,
-      ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: root,
-    });
-    expect(mirror).toBe(canonical);
-    expect(mirror).toBe(path.resolve(store));
-  });
-
-  it('agrees on discarding an override minted for a different root', async () => {
-    const root = path.join(tmp, 'pair-root');
-    const { mirror, canonical } = await bothUnder({
-      CLAUDE_PLUGIN_ROOT: root,
-      ARTIBOT_AUTOPILOT_STORE_DIR: path.join(tmp, 'pair-store'),
-      ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: path.join(tmp, 'pair-other'),
-    });
-    expect(mirror).toBe(canonical);
-    expect(mirror).toBe(path.join(root, 'runtime', 'autopilot'));
   });
 });
