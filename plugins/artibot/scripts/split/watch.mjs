@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 /**
- * `/split watch` — supervisor dashboard (PR-SV02). It observes; since SH-12 it
- * also keeps the working lanes' leases alive and reports the lapsed ones (see
- * "Lease" below — the lines that used to say "read-only, S0" no longer hold).
+ * `/split watch` — read-only supervisor dashboard (PR-SV02, autonomy S0).
  *
  *   node scripts/split/watch.mjs [--json] [--run-id <id>] [--parent <root>] [--store-dir <dir>]
- *                                [--no-heartbeat] [--apply-reclaim]
  *
  * `--store-dir` overrides the split store dir (`runtime/split/` under the
  * plugin root by default) — the same seam `split-telemetry.js` exposes so
@@ -19,61 +16,39 @@
  *      + dirtiness (`git worktree list --porcelain`, `git status --porcelain`)
  *   3. the two event streams under the split store dir, replayed through
  *      `lib/supervisor/run-store.js#rebuildState`
+ *   4. the project's StateStore, through `getState()` ONLY, for the lease
+ *      report below
  *
  * and prints the design §08 table: limb · ops state · supervisor state ·
  * complete/reason · last commit age · heartbeat age · health, followed by the
  * `commands/split.md` "측정 고지" values raw (`humanWaitPct` `null` stays
  * `null`).
  *
- * Side effects: (1) `rebuildState` rewrites `<storeDir>/{runId}.state.json` (a
- * cache of the append-only streams); (2) the lease heartbeat below — one
- * StateStore commit per lease it renews, off with `--no-heartbeat`; (3) a lease
- * RELEASE, only with `--apply-reclaim`. No git mutation, no session contact, no
- * telemetry write. Exit code is always 0: an observer that fails to observe
- * says so on stdout and leaves.
- *
- * ── Lease: heartbeat (SH-12) and reclaim report (CA-09) ───────────────────
- * Root cause: the lane lease `task-feed.mjs` takes at dispatch (24h TTL) was
- * renewed only at a moment the leader declares — `lane-state`, or a
- * re-dispatch — never on a clock, and a lapsed lease was never looked at. One
- * poll of this dashboard is now the clock:
- *
- *  - HEARTBEAT. A lane that is WORKING — its ops word is one
- *    `lane-lease.mjs#LANE_LEASE_ACTIONS` classifies `heartbeat` (active,
- *    review, serial-gate, closing) — and is not known finished (trailer
- *    `complete`, supervisor DONE) or dead (`sessionPresent === false`) has its
- *    lease renewed THROUGH `syncLaneLease`, once ttl/3 of the lease's own
- *    granted span has passed since its last beat
- *    (`lib/topology/lease-reclaim.js#heartbeatCadence`). A poll is stateless —
- *    the age is read from the lease — so any polling rhythm works, and a poll
- *    that is not due writes nothing. With the shipped 24h TTL the first renewal
- *    is at 8h; `LIMB_LEASE_TTL_MS` says to shorten it only together with an
- *    emitter, which this now is. Not renewed, and said per lane: a non-working
- *    ops word (`done` is NOT released from here — that is `lane-state`'s),
- *    a finished lane, a dead session. A dead session is not renewed because a
- *    heartbeat is a claim of liveness and the observer has evidence against it.
- *  - NO SECOND MISSION RULE. `resolveRunMission` has exactly two production
- *    callers, pinned by `tests/firewall/split-state-binding.test.js`; this file
- *    is not one. The cadence gate sits on the store PORT handed to
- *    `syncLaneLease`: it lets `heartbeatWorker` through only when the lease it
- *    is about to renew is due. The mission, the owner check, the no-lease and
- *    held-by-another outcomes, the `split.lane-lease` reason and the fail-open
- *    contract all stay `lane-lease.mjs`'s.
- *  - RECLAIM REPORT. The lapsed lane leases no lane keeps alive, from
- *    `lib/topology/lease-reclaim.js`, in the output of every poll. REPORT-ONLY:
- *    nothing is released unless `--apply-reclaim` — the human confirmation the
- *    canon asks for before GA. There is no config key; both switches are flags.
- *  - Both need a session id (the store stamps its ledger envelopes with one);
- *    without it the output says `no-session-id` instead of guessing. The legacy
- *    mission rule is per session, so the heartbeat reaches a lane's lease only
- *    from the session that dispatched it. A BOUND run (SH-11 canary ON) has no
- *    lane lease — the bound feeder never claims — so its lanes answer
- *    `skipped:no-lease`.
+ * Side effects: exactly one — `rebuildState` rewrites
+ * `<storeDir>/{runId}.state.json` (a cache of the append-only streams). No
+ * git mutation, no session contact, no telemetry write, no StateStore write.
+ * Exit code is always 0: an observer that fails to observe says so on stdout
+ * and leaves.
  *
  * Session presence is inferred from the worktree lock line
  * (`locked claude session <name> (pid N)`) plus a `kill(pid, 0)` liveness
  * probe. A dead pid with a lingering lock (measured 2026-09-02 on Ontology:
  * 5 locks, 5 dead pids) reads as `present: false`.
+ *
+ * ── Lease report (CA-09) — a listing, never an action ─────────────────────
+ * A `/split` lane lease (`task-feed.mjs` claims it at dispatch) that has
+ * lapsed and that no lane holds is listed under "lease reclaim", with the
+ * lane's own word (`laneOps`) beside the clock's verdict so a human can
+ * confirm or refuse. `watch` only LISTS it. The lease WRITES — the heartbeat
+ * that keeps a live lane's lease alive and the release of ids a human
+ * confirmed — live in `scripts/split/lease-tick.mjs`: autonomy S0 is display
+ * and warn only (design §03), and design §9 names the lease emitters (hooks
+ * and `lane-state.mjs`) without `watch`, so `watch` gets none. The report
+ * reads the StateStore through a facade that exposes `getState` and nothing
+ * else. It needs a session id only because opening a store requires one;
+ * without it the output says `no-session-id` instead of guessing.
+ * `--apply-reclaim` and `--no-heartbeat` are not `watch` flags: passing one
+ * prints a note and changes nothing.
  *
  * Config (read with defaults; keys proposed in laneC-notes.md):
  *   `split.supervisor.suspectHeartbeatSeconds` (480)
@@ -92,21 +67,17 @@ import { readPlanCompletion } from '../../lib/git/limb-completion.js';
 import { summarizeWallClock } from '../../lib/observability/split-telemetry.js';
 import { readAllEvents, rebuildState } from '../../lib/supervisor/run-store.js';
 import { assessLane, DEFAULT_THRESHOLDS, readLaneOpsState } from '../../lib/supervisor/lane-monitor.js';
-import {
-  HEARTBEAT_INTERVAL_DIVISOR,
-  heartbeatCadence,
-  reclaimExpiredLaneLeases,
-} from '../../lib/topology/lease-reclaim.js';
+import { classifyLaneLiveness, reclaimExpiredLaneLeases } from '../../lib/topology/lease-reclaim.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
-import { LANE_LEASE_ACTIONS, syncLaneLease } from './lane-lease.mjs';
 import { openFeedStore, sessionIdFromEnv } from './task-feed.mjs';
 
 /**
- * `--no-heartbeat` and `--apply-reclaim` are set only when given, so the result
- * of a plain invocation keeps the shape it always had.
+ * `--apply-reclaim` and `--no-heartbeat` moved to `lease-tick.mjs`; they are
+ * recorded in `moved` (only when given, so the result of a plain invocation
+ * keeps the shape it always had) so `main` can say they were ignored.
  *
  * @param {string[]} argv
- * @returns {{ json: boolean, runId: string|null, parent: string, storeDir: string|undefined, heartbeat?: false, applyReclaim?: true }}
+ * @returns {{ json: boolean, runId: string|null, parent: string, storeDir: string|undefined, moved?: string[] }}
  */
 export function parseArgs(argv) {
   const out = { json: false, runId: null, parent: process.cwd(), storeDir: undefined };
@@ -116,8 +87,7 @@ export function parseArgs(argv) {
     else if (a === '--run-id' && argv[i + 1]) out.runId = argv[++i];
     else if (a === '--parent' && argv[i + 1]) out.parent = argv[++i];
     else if (a === '--store-dir' && argv[i + 1]) out.storeDir = path.resolve(argv[++i]);
-    else if (a === '--no-heartbeat') out.heartbeat = false;
-    else if (a === '--apply-reclaim') out.applyReclaim = true;
+    else if (a === '--apply-reclaim' || a === '--no-heartbeat') out.moved = [...(out.moved ?? []), a];
   }
   out.parent = path.resolve(out.parent);
   return out;
@@ -295,170 +265,76 @@ export function renderNotice(wall, lastEventTs, reevalPct) {
   return { text, verdict };
 }
 
-/* ─────────────────── lane lease: heartbeat (SH-12) and reclaim report (CA-09) ─────────────────── */
-
-/** Prefix of the refusal the cadence gate returns through `heartbeatWorker`'s `errors[0]`. */
-const CADENCE_REFUSAL = 'cadence';
+/* ─────────────────── lease report (CA-09): read-only ─────────────────── */
 
 /**
- * Should this poll keep this lane's lease alive? Pure and total.
+ * When the leader last touched a lane in `run.json` — the lane-state half of
+ * the liveness evidence (`lease-reclaim.js#classifyLaneLiveness`). `updated_at`
+ * is stamped by every `writeWorkerState` (a re-assert included); `since` moves
+ * only when the word changes, so it is the fallback. A string-form entry
+ * (`lanes[limb] = 'active'`) carries no time at all.
  *
- * Yes only for a lane that is WORKING and not known to be over: its ops word is
- * one `LANE_LEASE_ACTIONS` classifies `heartbeat` (the allowlist itself, so a
- * new ops word is classified in ONE place), its trailer does not say `complete`,
- * the supervisor has not reduced it to DONE, and its session is not known dead.
- * The ops word is judged first, so a finished lane reports the word it carries.
- * Absence of evidence is not evidence of absence: an unobserved session (`null`)
- * still renews.
- *
- * @param {unknown} lane - One `collect()` lane: `{ opsState, complete, health, sessionPresent }`.
- * @returns {{ eligible: boolean, reason: string|null }} `reason` is `ops-state:<word|unknown>` |
- *   `lane-complete` | `lane-state-done` | `session-absent`, and null when eligible.
+ * @param {object|null|undefined} runJson - parsed `run.json`
+ * @param {string} limb
+ * @returns {string|null} An ISO instant, or null
  */
-export function heartbeatEligibility(lane) {
-  const l = lane !== null && typeof lane === 'object' ? lane : {};
-  const ops = typeof l.opsState === 'string' && Object.hasOwn(LANE_LEASE_ACTIONS, l.opsState) ? l.opsState : null;
-  if (ops === null) return { eligible: false, reason: 'ops-state:unknown' };
-  if (LANE_LEASE_ACTIONS[ops] !== 'heartbeat') return { eligible: false, reason: `ops-state:${ops}` };
-  if (l.complete === true) return { eligible: false, reason: 'lane-complete' };
-  if (l.health?.health === 'done') return { eligible: false, reason: 'lane-state-done' };
-  if (l.sessionPresent === false) return { eligible: false, reason: 'session-absent' };
-  return { eligible: true, reason: null };
-}
-
-/**
- * The cadence gate: a view of `store` whose `heartbeatWorker` passes only when
- * the lease it is about to renew is due (`heartbeatCadence`). Every other
- * method is the store's own, so `syncLaneLease` still owns the mission, the
- * owner check and the reason. A refusal is `{ok:false, errors:['cadence:<why>']}`
- * — `syncLaneLease` reports it as `refused:cadence:<why>`, which the caller
- * turns back into a `skipped:` outcome. The verdict it judged on is left in
- * `seen` (by task id) for the output.
- *
- * @param {object} store - StateStore.
- * @param {{ nowMs: number, seen: Map<string, object> }} ctx
- * @returns {object}
- */
-function gateCadence(store, { nowMs, seen }) {
-  return {
-    ...store,
-    heartbeatWorker: (params) => {
-      const verdict = heartbeatCadence(store.getLease(params.missionId, params.taskId), nowMs, { divisor: HEARTBEAT_INTERVAL_DIVISOR });
-      seen.set(params.taskId, verdict);
-      if (!verdict.due) return { ok: false, conflict: false, errors: [`${CADENCE_REFUSAL}:${verdict.reason}`] };
-      return store.heartbeatWorker(params);
-    },
-  };
-}
-
-/** @param {object} verdict - A `heartbeatCadence` answer. @returns {object} Its judged numbers, without the undefined ones. */
-function verdictDetail(verdict) {
-  const out = { reason: verdict.reason };
-  for (const key of ['ageMs', 'intervalMs', 'ttlMs', 'expired']) if (verdict[key] !== undefined) out[key] = verdict[key];
-  return out;
-}
-
-/**
- * One row of the heartbeat report.
- *
- * @param {{ limb: string|null, opsState: string|null, eligible: boolean }} plan
- * @param {string} outcome
- * @param {object} [extra]
- * @returns {{ limb: string|null, opsState: string|null, eligible: boolean, outcome: string, missionId: string|null }}
- */
-function laneRow(plan, outcome, extra = {}) {
-  return { limb: plan.limb, opsState: plan.opsState, eligible: plan.eligible, outcome, missionId: null, ...extra };
-}
-
-/**
- * Renew the lease of every lane this poll keeps alive, once it is due.
- * Never throws; every refusal is an outcome string.
- *
- * The write is `lane-lease.mjs#syncLaneLease` — imported, not re-implemented —
- * with the cadence gate on its store port (see {@link gateCadence}). One lane,
- * one `syncLaneLease` call, one commit when due and none when not.
- *
- * @param {{ parent?: string, lanes?: unknown[], nowMs?: number, ports?: { openStore?: Function, sessionId?: string|null, config?: object|null } }} [input]
- *   `ports` is the test seam: `openStore(root, sid)`, `sessionId` (absent = the host env; `''` = none) and `config`
- *   (the parsed artibot.config.json the canary key is read from; absent = the shipped file).
- * @returns {{ enabled: true, available: boolean, reason: string|null, divisor: number, eligible: number, renewed: number,
- *   lanes: Array<{ limb: string|null, opsState: string|null, eligible: boolean, outcome: string, missionId: string|null, detail?: object, binding?: object }> }}
- *   Outcomes: `renewed` | `skipped:not-due` | `skipped:<heartbeatEligibility reason>` | any `syncLaneLease` outcome
- *   (`skipped:no-lease`, `held-by:<owner>`, `refused:<msg>`, `skipped:store-threw:<msg>`, …) | `skipped:no-session-id`.
- *   `available` is false when an eligible lane could not be tried (`reason` says why).
- */
-export function renewLaneHeartbeats({ parent, lanes, nowMs, ports = {} } = {}) {
-  const plans = (Array.isArray(lanes) ? lanes : []).map((l) => ({
-    limb: typeof l?.limb === 'string' ? l.limb : null,
-    opsState: typeof l?.opsState === 'string' ? l.opsState : null,
-    ...heartbeatEligibility(l),
-  }));
-  const eligible = plans.filter((p) => p.eligible).length;
-  const out = { enabled: true, available: true, reason: null, divisor: HEARTBEAT_INTERVAL_DIVISOR, eligible, renewed: 0, lanes: [] };
-  const skipped = (p) => laneRow(p, `skipped:${p.reason}`);
-  if (eligible === 0) return { ...out, lanes: plans.map(skipped) };
-  try {
-    const sid = ports.sessionId ?? sessionIdFromEnv();
-    if (typeof sid !== 'string' || sid === '') {
-      return { ...out, available: false, reason: 'no-session-id', lanes: plans.map((p) => (p.eligible ? laneRow(p, 'skipped:no-session-id') : skipped(p))) };
-    }
-    const seen = new Map();
-    const open = ports.openStore ?? openFeedStore;
-    const gated = { openStore: (root, s) => gateCadence(open(root, s), { nowMs, seen }), config: ports.config };
-    let renewed = 0;
-    const rows = plans.map((p) => {
-      if (!p.eligible) return skipped(p);
-      const r = syncLaneLease({ parentRoot: parent, limb: p.limb, state: p.opsState, sessionId: sid }, gated);
-      const verdict = seen.get(p.limb);
-      seen.delete(p.limb);
-      const gate = `refused:${CADENCE_REFUSAL}:`;
-      let outcome = r.outcome;
-      if (outcome.startsWith(gate)) {
-        const why = outcome.slice(gate.length);
-        outcome = why === 'fresh' ? 'skipped:not-due' : `skipped:${why}`;
-      }
-      if (outcome === 'renewed') renewed += 1;
-      return laneRow(p, outcome, {
-        missionId: r.missionId ?? null,
-        ...(verdict ? { detail: verdictDetail(verdict) } : {}),
-        ...(r.binding ? { binding: r.binding } : {}),
-      });
-    });
-    return { ...out, renewed, lanes: rows };
-  } catch (err) {
-    return { ...out, available: false, reason: `threw:${err?.message ?? 'unknown'}`, lanes: plans.map((p) => (p.eligible ? laneRow(p, 'skipped:threw') : skipped(p))) };
+export function readLaneOpsUpdatedAt(runJson, limb) {
+  const entry = runJson?.lanes?.[limb];
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  for (const key of ['updated_at', 'since']) {
+    if (typeof entry[key] === 'string' && Number.isFinite(Date.parse(entry[key]))) return entry[key];
   }
+  return null;
 }
 
 /**
- * The heartbeat block of a poll that was told not to renew (`--no-heartbeat`).
+ * The lane ids whose lapsed lease is held back from the reclaim candidates: a
+ * lane a tick would renew (it has liveness evidence) and a suspended one. One
+ * rule for the report here and for the apply in `lease-tick.mjs`.
  *
- * @param {unknown[]} lanes
- * @returns {{ enabled: false, available: true, reason: null, divisor: number, eligible: number, renewed: 0, lanes: [] }}
+ * @param {unknown[]} lanes - `collect()` lanes
+ * @param {number} nowMs
+ * @returns {string[]}
  */
-function heartbeatOff(lanes) {
-  const eligible = lanes.filter((l) => heartbeatEligibility(l).eligible).length;
-  return { enabled: false, available: true, reason: null, divisor: HEARTBEAT_INTERVAL_DIVISOR, eligible, renewed: 0, lanes: [] };
+export function keepAliveLanes(lanes, nowMs) {
+  return (Array.isArray(lanes) ? lanes : [])
+    .filter((l) => typeof l?.limb === 'string' && classifyLaneLiveness(l, { nowMs }).keepAlive)
+    .map((l) => l.limb);
 }
 
 /**
- * The lapsed lane leases no lane keeps alive — REPORT-ONLY unless `apply` is
- * the literal `true`. Never throws. The lanes this poll keeps alive
- * (`heartbeatEligibility`) are handed to the scan as `keepAlive`, so a lane it
- * just renewed, or would have, is never a candidate.
+ * Put what THIS run's lane says next to each candidate (`laneOps`; null = the
+ * limb is not in this run's plan: a stale lane of an older run). The scan is
+ * judged by clock alone; the word is what lets a human confirm or refuse.
  *
- * @param {{ parent?: string, lanes?: unknown[], nowMs?: number, apply?: boolean, ports?: { openStore?: Function, sessionId?: string|null } }} [input]
- * @returns {{ mode: 'report'|'apply', available: boolean, reason: string|null, applied: boolean, scanned: object, live: number,
- *   protected: object[], candidates: object[], malformed: object[], results: object[] }}
+ * @param {object[]} candidates
+ * @param {unknown[]} lanes - `collect()` lanes
+ * @returns {object[]}
  */
-export function reportLeaseReclaim({ parent, lanes, nowMs, apply = false, ports = {} } = {}) {
+export function annotateCandidates(candidates, lanes) {
+  const opsByLimb = new Map((Array.isArray(lanes) ? lanes : []).map((l) => [l?.limb, typeof l?.opsState === 'string' ? l.opsState : null]));
+  return candidates.map((c) => ({ ...c, laneOps: opsByLimb.get(c.taskId) ?? null }));
+}
+
+/**
+ * The lapsed lane leases no lane holds — a LISTING. Never throws. The store is
+ * reached through a facade with `getState` and nothing else, so no write port
+ * is even reachable from here.
+ *
+ * @param {{ parent?: string, lanes?: unknown[], nowMs?: number, ports?: { openStore?: Function, sessionId?: string|null } }} [input]
+ *   `ports` is the test seam: `openStore(root, sid)` and `sessionId` (absent = the host env; `''` = none).
+ * @returns {{ mode: 'report', available: boolean, reason: string|null, applied: false, scanned: object, live: number, liveIds: string[],
+ *   protected: object[], candidates: object[], malformed: object[], results: [] }}
+ */
+export function reportLeaseReclaim({ parent, lanes, nowMs, ports = {} } = {}) {
   const base = {
-    mode: apply === true ? 'apply' : 'report',
+    mode: 'report',
     available: true,
     reason: null,
     applied: false,
     scanned: { missions: 0, leases: 0, laneLeases: 0 },
     live: 0,
+    liveIds: [],
     protected: [],
     candidates: [],
     malformed: [],
@@ -468,32 +344,23 @@ export function reportLeaseReclaim({ parent, lanes, nowMs, apply = false, ports 
     const sid = ports.sessionId ?? sessionIdFromEnv();
     if (typeof sid !== 'string' || sid === '') return { ...base, available: false, reason: 'no-session-id' };
     const store = (ports.openStore ?? openFeedStore)(parent, sid);
-    const list = Array.isArray(lanes) ? lanes : [];
-    const keepAlive = list.filter((l) => heartbeatEligibility(l).eligible).map((l) => l.limb);
-    const report = reclaimExpiredLaneLeases({ store, nowMs, keepAlive, apply });
-    // What THIS run's lane says about a candidate (null = the limb is not in this run's plan: a stale lane of an
-    // older run). The scan is judged by clock alone; the word next to it is what lets a human confirm or refuse.
-    const opsByLimb = new Map(list.map((l) => [l?.limb, typeof l?.opsState === 'string' ? l.opsState : null]));
-    return {
-      ...base,
-      ...report,
-      candidates: report.candidates.map((c) => ({ ...c, laneOps: opsByLimb.get(c.taskId) ?? null })),
-      available: true,
-    };
+    const readOnly = { getState: () => store.getState() };
+    const report = reclaimExpiredLaneLeases({ store: readOnly, nowMs, keepAlive: keepAliveLanes(lanes, nowMs) });
+    return { ...base, ...report, candidates: annotateCandidates(report.candidates, lanes), available: true };
   } catch (err) {
     return { ...base, available: false, reason: `store-threw:${err?.message ?? 'unknown'}` };
   }
 }
 
 /**
- * Ports for one poll's two lease passes that open the StateStore ONCE: the
- * store re-reads its files on every call, so sharing the instance is safe and
- * saves a git spawn (`resolveGitCommonDir`) per pass.
+ * Ports for one poll's lease passes that open the StateStore ONCE: the store
+ * re-reads its files on every call, so sharing the instance is safe and saves a
+ * git spawn (`resolveGitCommonDir`) per pass.
  *
  * @param {{ openStore?: Function }|null|undefined} ports
  * @returns {object}
  */
-function sharedStorePorts(ports) {
+export function sharedStorePorts(ports) {
   const base = ports ?? {};
   const open = base.openStore ?? openFeedStore;
   let store = null;
@@ -501,62 +368,44 @@ function sharedStorePorts(ports) {
 }
 
 /**
- * The lease lines of the text output. Quiet when there is nothing to say: no
- * eligible lane and no candidate print nothing. Pure and total.
+ * The reclaim lines of the text output. Quiet when there is nothing to say.
+ * Pure and total.
  *
- * @param {{ heartbeat?: object|null, reclaim?: object|null }|null|undefined} leases - `collect().leases`
+ * @param {object|null|undefined} reclaim - `collect().leases.reclaim`
  * @returns {string[]}
  */
-export function renderLeaseLines(leases) {
+export function renderReclaimLines(reclaim) {
   const lines = [];
-  const hb = leases?.heartbeat;
-  if (hb && typeof hb === 'object') {
-    if (hb.enabled === false) lines.push('lease heartbeat: off (--no-heartbeat)');
-    else if (hb.available === false) lines.push(`lease heartbeat: not run (${hb.reason ?? 'unavailable'})`);
-    else if (hb.eligible > 0) {
-      lines.push(`lease heartbeat (renew at ttl/${hb.divisor ?? HEARTBEAT_INTERVAL_DIVISOR}): renewed ${hb.renewed} of ${hb.eligible} eligible lane(s)`);
-      for (const l of (Array.isArray(hb.lanes) ? hb.lanes : []).filter((x) => x?.eligible)) {
-        const d = l.detail;
-        let note = '';
-        if (l.outcome === 'skipped:not-due' && d) note = ` (last beat ${fmtAge(d.ageMs)} ago, due after ${fmtAge(d.intervalMs)})`;
-        else if (l.outcome === 'renewed' && d?.expired) note = ' (the lease had already lapsed)';
-        lines.push(`  ${l.limb}: ${l.outcome}${note}`);
-      }
+  if (reclaim === null || typeof reclaim !== 'object') return lines;
+  const candidates = Array.isArray(reclaim.candidates) ? reclaim.candidates : [];
+  const held = Array.isArray(reclaim.protected) ? reclaim.protected : [];
+  if (reclaim.available === false) {
+    lines.push(`lease reclaim: not run (${reclaim.reason ?? 'unavailable'})`);
+    return lines;
+  }
+  if (candidates.length > 0) {
+    lines.push(`lease reclaim [report-only]: ${candidates.length} expired lane lease(s) — to release one, confirm it and run scripts/split/lease-tick.mjs --apply-reclaim <id[,id...]>`);
+    for (const c of candidates) {
+      const lane = typeof c.laneOps === 'string' ? `lane ${c.laneOps}` : 'lane (not in this run)';
+      lines.push(`  ${c.id}  owner ${c.owner}  status ${c.status}  ${lane}  silent ${fmtAge(c.silentForMs)}  expired ${fmtAge(c.expiredForMs)} ago  → ${c.action}`);
     }
   }
-  const rc = leases?.reclaim;
-  if (rc && typeof rc === 'object') {
-    const apply = rc.mode === 'apply';
-    const candidates = Array.isArray(rc.candidates) ? rc.candidates : [];
-    const results = Array.isArray(rc.results) ? rc.results : [];
-    if (rc.available === false) {
-      lines.push(`lease reclaim${apply ? ' [apply]' : ''}: not run (${rc.reason ?? 'unavailable'})`);
-    } else if (apply && candidates.length > 0) {
-      const done = results.filter((r) => typeof r?.outcome === 'string' && r.outcome.startsWith('reclaimed:')).length;
-      lines.push(`lease reclaim [apply]: reclaimed ${done} of ${candidates.length}`);
-      for (const r of results) lines.push(`  ${r.taskId}: ${r.outcome}`);
-    } else if (!apply && candidates.length > 0) {
-      lines.push(`lease reclaim [report-only]: ${candidates.length} expired lane lease(s) — pass --apply-reclaim to release them`);
-      for (const c of candidates) {
-        const lane = typeof c.laneOps === 'string' ? `lane ${c.laneOps}` : 'lane (not in this run)';
-        lines.push(`  ${c.taskId}  mission ${c.missionId}  owner ${c.owner}  status ${c.status}  ${lane}  silent ${fmtAge(c.silentForMs)}  expired ${fmtAge(c.expiredForMs)} ago  → ${c.action}`);
-      }
-    }
+  if (held.length > 0) {
+    lines.push(`lease reclaim: ${held.length} lapsed lease(s) held back (lane alive or suspended): ${held.map((p) => p.id).join(', ')}`);
   }
   return lines;
 }
 
 /**
  * Collect everything the dashboard shows. Performs the reads listed in the
- * module header and the single `state.json` write, then the lease passes: the
- * heartbeat (unless `heartbeat` is `false`) and the reclaim report (REPORT-ONLY
- * unless `applyReclaim` is `true`).
+ * module header and the single `state.json` write, then the read-only lease
+ * report.
  *
- * @param {{ parent: string, runId: string|null, nowMs?: number, storeDir?: string, heartbeat?: boolean, applyReclaim?: boolean, ports?: object }} opts
- *   `ports`: the lease passes' test seam — see {@link renewLaneHeartbeats}.
- * @returns {Promise<object>} The dashboard, plus `leases: { heartbeat, reclaim }`.
+ * @param {{ parent: string, runId: string|null, nowMs?: number, storeDir?: string, ports?: object }} opts
+ *   `ports`: the lease report's test seam — see {@link reportLeaseReclaim}.
+ * @returns {Promise<object>} The dashboard, plus `leases: { reclaim }`.
  */
-export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), storeDir, heartbeat = true, applyReclaim = false, ports = {} }) {
+export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), storeDir, ports = {} }) {
   const store = storeDir ? { storeDir } : {};
   const missing = [];
   const splitDir = path.join(parent, '.artibot', 'split');
@@ -643,6 +492,7 @@ export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), sto
       branch: l.branch,
       worktreePath: l.worktreePath,
       opsState: ops,
+      opsUpdatedAt: readLaneOpsUpdatedAt(run, l.limb),
       supervisorState: lane?.state ?? null,
       complete: comp?.complete === true,
       reason: comp?.reason ?? 'no-branch',
@@ -656,14 +506,7 @@ export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), sto
     };
   });
 
-  // The lease passes run AFTER the lanes are observed and in this order: the
-  // heartbeat first, so a lease it just renewed is live when the reclaim scan
-  // reads the store.
-  const leasePorts = sharedStorePorts(ports);
-  const leases = {
-    heartbeat: heartbeat === false ? heartbeatOff(lanes) : renewLaneHeartbeats({ parent, lanes, nowMs, ports: leasePorts }),
-    reclaim: reportLeaseReclaim({ parent, lanes, nowMs, apply: applyReclaim === true, ports: leasePorts }),
-  };
+  const leases = { reclaim: reportLeaseReclaim({ parent, lanes, nowMs, ports: sharedStorePorts(ports) }) };
 
   return {
     parent, runId, missing, thresholds, reevalPct,
@@ -699,10 +542,10 @@ export function renderText(r) {
     lines.push(`reducer warnings (${r.run.warnings.length}):`);
     for (const w of r.run.warnings.slice(0, 20)) lines.push(`  [${w.code}] #${w.index} ${w.message}`);
   }
-  const leaseLines = renderLeaseLines(r.leases);
-  if (leaseLines.length) {
+  const reclaimLines = renderReclaimLines(r.leases?.reclaim);
+  if (reclaimLines.length) {
     lines.push('');
-    lines.push(...leaseLines);
+    lines.push(...reclaimLines);
   }
   lines.push('');
   lines.push(r.notice.text);
@@ -718,7 +561,10 @@ export async function main() {
   const args = parseArgs(process.argv.slice(2));
   try {
     const r = await collect(args);
-    process.stdout.write(`${args.json ? JSON.stringify(r, null, 2) : renderText(r)}\n`);
+    // A flag that moved is said, never silently ignored: `--apply-reclaim` that did nothing must not read as applied.
+    const note = args.moved ? `watch is read-only: ${args.moved.join(' ')} moved to scripts/split/lease-tick.mjs and was ignored.` : null;
+    if (args.json) process.stdout.write(`${JSON.stringify(note ? { ...r, ignoredFlags: args.moved } : r, null, 2)}\n`);
+    else process.stdout.write(`${note ? `${note}\n` : ''}${renderText(r)}\n`);
   } catch (err) {
     process.stdout.write(`watch: could not observe — ${err?.message ?? err}\n`);
   }
