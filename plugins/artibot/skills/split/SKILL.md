@@ -18,7 +18,7 @@ category: orchestration
 tokens: 2500
 agents: [orchestrator, planner]
 whenNotToUse: "Work that fits in one window — fewer than two stems with disjoint file ownership (use /team), a single dependency chain (sequential is faster), tasks that all touch one shared file or one dev-server port, or when the user cannot open a second terminal. Not the session sizer's `sequence` recommendation (that splits one task across consecutive sessions, not concurrent windows)."
-source_hash: 290d33e9
+source_hash: fab905d1
 ---
 
 # /split
@@ -71,7 +71,8 @@ Progress:
 |---|---|---|
 | 프롬프트 2.5KB 창마다 복제 전송(9회) | `dispatch <limb>` | 템플릿 렌더 + 브리프 worktree 복사 + **포인터 1줄** |
 | 랜딩마다 수동 재측정 6종 × ~4 왕복 | `land <limb>` | 트레일러·소유권·바이너리·인용·merge-tree·뒤처짐 PASS/FAIL 표(승인 아님) |
-| 창 순찰·상태 자유형 기록 | `watch` | ops·supervisor·트레일러·health 한 표(부작용 0, S0) |
+| 창 순찰·상태 자유형 기록 | `watch` | ops·supervisor·트레일러·health 한 표 + 만료 레인 lease 목록(StateStore 쓰기 0 — 부작용은 캐시 1건, S0) |
+| 레인 lease 는 선언 순간에만 갱신되고 만료는 아무도 안 봄(2026-09-30 호출처 grep) | `lease-tick` | 작업 중 줄기 lease 를 min(ttl/3, 45분) 마다 갱신(생존 증거가 있을 때만, Monitor ~15분 주기) + 사람이 적은 id 만 회수(`--apply-reclaim`, 전체 해제 없음, 목록 없으면 전체 거부) |
 | SOLO 경보 수십 건 중 실개입 0 | `probe` | `active` 줄기만 경보, 미지는 `(state unknown)` 로 경보 |
 | node_modules 부재·env 미복사·공유 e2e DB | `worktree-setup <wt>` | junction·`.env.local`·`lane.env`; teardown 은 reparse point 만 |
 | `git checkout --` 가 sha 지문 파괴 | `restore-blob <f>` | `cat-file -p` 바이트 복원 + `update-index --refresh` |

@@ -16,6 +16,8 @@
  *      + dirtiness (`git worktree list --porcelain`, `git status --porcelain`)
  *   3. the two event streams under the split store dir, replayed through
  *      `lib/supervisor/run-store.js#rebuildState`
+ *   4. the project's StateStore, through `getState()` ONLY, for the lease
+ *      report below
  *
  * and prints the design §08 table: limb · ops state · supervisor state ·
  * complete/reason · last commit age · heartbeat age · health, followed by the
@@ -24,13 +26,29 @@
  *
  * Side effects: exactly one — `rebuildState` rewrites
  * `<storeDir>/{runId}.state.json` (a cache of the append-only streams). No
- * git mutation, no session contact, no telemetry write. Exit code is always
- * 0: an observer that fails to observe says so on stdout and leaves.
+ * git mutation, no session contact, no telemetry write, no StateStore write.
+ * Exit code is always 0: an observer that fails to observe says so on stdout
+ * and leaves.
  *
  * Session presence is inferred from the worktree lock line
  * (`locked claude session <name> (pid N)`) plus a `kill(pid, 0)` liveness
  * probe. A dead pid with a lingering lock (measured 2026-09-02 on Ontology:
  * 5 locks, 5 dead pids) reads as `present: false`.
+ *
+ * ── Lease report (CA-09) — a listing, never an action ─────────────────────
+ * A `/split` lane lease (`task-feed.mjs` claims it at dispatch) that has
+ * lapsed and that no lane holds is listed under "lease reclaim", with the
+ * lane's own word (`laneOps`) beside the clock's verdict so a human can
+ * confirm or refuse. `watch` only LISTS it. The lease WRITES — the heartbeat
+ * that keeps a live lane's lease alive and the release of ids a human
+ * confirmed — live in `scripts/split/lease-tick.mjs`: autonomy S0 is display
+ * and warn only (design §03), and design §9 names the lease emitters (hooks
+ * and `lane-state.mjs`) without `watch`, so `watch` gets none. The report
+ * reads the StateStore through a facade that exposes `getState` and nothing
+ * else. It needs a session id only because opening a store requires one;
+ * without it the output says `no-session-id` instead of guessing.
+ * `--apply-reclaim` and `--no-heartbeat` are not `watch` flags: passing one
+ * prints a note and changes nothing.
  *
  * Config (read with defaults; keys proposed in laneC-notes.md):
  *   `split.supervisor.suspectHeartbeatSeconds` (480)
@@ -49,11 +67,17 @@ import { readPlanCompletion } from '../../lib/git/limb-completion.js';
 import { summarizeWallClock } from '../../lib/observability/split-telemetry.js';
 import { readAllEvents, rebuildState } from '../../lib/supervisor/run-store.js';
 import { assessLane, DEFAULT_THRESHOLDS, readLaneOpsState } from '../../lib/supervisor/lane-monitor.js';
+import { classifyLaneLiveness, reclaimExpiredLaneLeases } from '../../lib/topology/lease-reclaim.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
+import { openFeedStore, sessionIdFromEnv } from './task-feed.mjs';
 
 /**
+ * `--apply-reclaim` and `--no-heartbeat` moved to `lease-tick.mjs`; they are
+ * recorded in `moved` (only when given, so the result of a plain invocation
+ * keeps the shape it always had) so `main` can say they were ignored.
+ *
  * @param {string[]} argv
- * @returns {{ json: boolean, runId: string|null, parent: string, storeDir: string|undefined }}
+ * @returns {{ json: boolean, runId: string|null, parent: string, storeDir: string|undefined, moved?: string[] }}
  */
 export function parseArgs(argv) {
   const out = { json: false, runId: null, parent: process.cwd(), storeDir: undefined };
@@ -63,6 +87,7 @@ export function parseArgs(argv) {
     else if (a === '--run-id' && argv[i + 1]) out.runId = argv[++i];
     else if (a === '--parent' && argv[i + 1]) out.parent = argv[++i];
     else if (a === '--store-dir' && argv[i + 1]) out.storeDir = path.resolve(argv[++i]);
+    else if (a === '--apply-reclaim' || a === '--no-heartbeat') out.moved = [...(out.moved ?? []), a];
   }
   out.parent = path.resolve(out.parent);
   return out;
@@ -240,14 +265,147 @@ export function renderNotice(wall, lastEventTs, reevalPct) {
   return { text, verdict };
 }
 
+/* ─────────────────── lease report (CA-09): read-only ─────────────────── */
+
+/**
+ * When the leader last touched a lane in `run.json` — the lane-state half of
+ * the liveness evidence (`lease-reclaim.js#classifyLaneLiveness`). `updated_at`
+ * is stamped by every `writeWorkerState` (a re-assert included); `since` moves
+ * only when the word changes, so it is the fallback. A string-form entry
+ * (`lanes[limb] = 'active'`) carries no time at all.
+ *
+ * @param {object|null|undefined} runJson - parsed `run.json`
+ * @param {string} limb
+ * @returns {string|null} An ISO instant, or null
+ */
+export function readLaneOpsUpdatedAt(runJson, limb) {
+  const entry = runJson?.lanes?.[limb];
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  for (const key of ['updated_at', 'since']) {
+    if (typeof entry[key] === 'string' && Number.isFinite(Date.parse(entry[key]))) return entry[key];
+  }
+  return null;
+}
+
+/**
+ * The lane ids whose lapsed lease is held back from the reclaim candidates: a
+ * lane a tick would renew (it has liveness evidence) and a suspended one. One
+ * rule for the report here and for the apply in `lease-tick.mjs`.
+ *
+ * @param {unknown[]} lanes - `collect()` lanes
+ * @param {number} nowMs
+ * @returns {string[]}
+ */
+export function keepAliveLanes(lanes, nowMs) {
+  return (Array.isArray(lanes) ? lanes : [])
+    .filter((l) => typeof l?.limb === 'string' && classifyLaneLiveness(l, { nowMs }).keepAlive)
+    .map((l) => l.limb);
+}
+
+/**
+ * Put what THIS run's lane says next to each candidate (`laneOps`; null = the
+ * limb is not in this run's plan: a stale lane of an older run). The scan is
+ * judged by clock alone; the word is what lets a human confirm or refuse.
+ *
+ * @param {object[]} candidates
+ * @param {unknown[]} lanes - `collect()` lanes
+ * @returns {object[]}
+ */
+export function annotateCandidates(candidates, lanes) {
+  const opsByLimb = new Map((Array.isArray(lanes) ? lanes : []).map((l) => [l?.limb, typeof l?.opsState === 'string' ? l.opsState : null]));
+  return candidates.map((c) => ({ ...c, laneOps: opsByLimb.get(c.taskId) ?? null }));
+}
+
+/**
+ * The lapsed lane leases no lane holds — a LISTING. Never throws. The store is
+ * reached through a facade with `getState` and nothing else, so no write port
+ * is even reachable from here.
+ *
+ * @param {{ parent?: string, lanes?: unknown[], nowMs?: number, ports?: { openStore?: Function, sessionId?: string|null } }} [input]
+ *   `ports` is the test seam: `openStore(root, sid)` and `sessionId` (absent = the host env; `''` = none).
+ * @returns {{ mode: 'report', available: boolean, reason: string|null, applied: false, scanned: object, live: number, liveIds: string[],
+ *   protected: object[], candidates: object[], malformed: object[], results: [] }}
+ */
+export function reportLeaseReclaim({ parent, lanes, nowMs, ports = {} } = {}) {
+  const base = {
+    mode: 'report',
+    available: true,
+    reason: null,
+    applied: false,
+    scanned: { missions: 0, leases: 0, laneLeases: 0 },
+    live: 0,
+    liveIds: [],
+    protected: [],
+    candidates: [],
+    malformed: [],
+    results: [],
+  };
+  try {
+    const sid = ports.sessionId ?? sessionIdFromEnv();
+    if (typeof sid !== 'string' || sid === '') return { ...base, available: false, reason: 'no-session-id' };
+    const store = (ports.openStore ?? openFeedStore)(parent, sid);
+    const readOnly = { getState: () => store.getState() };
+    const report = reclaimExpiredLaneLeases({ store: readOnly, nowMs, keepAlive: keepAliveLanes(lanes, nowMs) });
+    return { ...base, ...report, candidates: annotateCandidates(report.candidates, lanes), available: true };
+  } catch (err) {
+    return { ...base, available: false, reason: `store-threw:${err?.message ?? 'unknown'}` };
+  }
+}
+
+/**
+ * Ports for one poll's lease passes that open the StateStore ONCE: the store
+ * re-reads its files on every call, so sharing the instance is safe and saves a
+ * git spawn (`resolveGitCommonDir`) per pass.
+ *
+ * @param {{ openStore?: Function }|null|undefined} ports
+ * @returns {object}
+ */
+export function sharedStorePorts(ports) {
+  const base = ports ?? {};
+  const open = base.openStore ?? openFeedStore;
+  let store = null;
+  return { ...base, openStore: (root, sid) => (store ??= open(root, sid)) };
+}
+
+/**
+ * The reclaim lines of the text output. Quiet when there is nothing to say.
+ * Pure and total.
+ *
+ * @param {object|null|undefined} reclaim - `collect().leases.reclaim`
+ * @returns {string[]}
+ */
+export function renderReclaimLines(reclaim) {
+  const lines = [];
+  if (reclaim === null || typeof reclaim !== 'object') return lines;
+  const candidates = Array.isArray(reclaim.candidates) ? reclaim.candidates : [];
+  const held = Array.isArray(reclaim.protected) ? reclaim.protected : [];
+  if (reclaim.available === false) {
+    lines.push(`lease reclaim: not run (${reclaim.reason ?? 'unavailable'})`);
+    return lines;
+  }
+  if (candidates.length > 0) {
+    lines.push(`lease reclaim [report-only]: ${candidates.length} expired lane lease(s) — to release one, confirm it and run scripts/split/lease-tick.mjs --apply-reclaim <id[,id...]>`);
+    for (const c of candidates) {
+      const lane = typeof c.laneOps === 'string' ? `lane ${c.laneOps}` : 'lane (not in this run)';
+      lines.push(`  ${c.id}  owner ${c.owner}  status ${c.status}  ${lane}  silent ${fmtAge(c.silentForMs)}  expired ${fmtAge(c.expiredForMs)} ago  → ${c.action}`);
+    }
+  }
+  if (held.length > 0) {
+    lines.push(`lease reclaim: ${held.length} lapsed lease(s) held back (lane alive or suspended): ${held.map((p) => p.id).join(', ')}`);
+  }
+  return lines;
+}
+
 /**
  * Collect everything the dashboard shows. Performs the reads listed in the
- * module header and the single `state.json` write.
+ * module header and the single `state.json` write, then the read-only lease
+ * report.
  *
- * @param {{ parent: string, runId: string|null, nowMs?: number, storeDir?: string }} opts
- * @returns {Promise<object>}
+ * @param {{ parent: string, runId: string|null, nowMs?: number, storeDir?: string, ports?: object }} opts
+ *   `ports`: the lease report's test seam — see {@link reportLeaseReclaim}.
+ * @returns {Promise<object>} The dashboard, plus `leases: { reclaim }`.
  */
-export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), storeDir }) {
+export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), storeDir, ports = {} }) {
   const store = storeDir ? { storeDir } : {};
   const missing = [];
   const splitDir = path.join(parent, '.artibot', 'split');
@@ -334,6 +492,7 @@ export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), sto
       branch: l.branch,
       worktreePath: l.worktreePath,
       opsState: ops,
+      opsUpdatedAt: readLaneOpsUpdatedAt(run, l.limb),
       supervisorState: lane?.state ?? null,
       complete: comp?.complete === true,
       reason: comp?.reason ?? 'no-branch',
@@ -347,10 +506,13 @@ export async function collect({ parent, runId: runIdArg, nowMs = Date.now(), sto
     };
   });
 
+  const leases = { reclaim: reportLeaseReclaim({ parent, lanes, nowMs, ports: sharedStorePorts(ports) }) };
+
   return {
     parent, runId, missing, thresholds, reevalPct,
     run: { state: supervisor.state?.state ?? null, warnings: supervisor.warnings, events: supervisor.events, statePath: supervisor.path },
     lanes, wallClock: wall, lastEventTs,
+    leases,
     notice: renderNotice(wall, lastEventTs, reevalPct),
   };
 }
@@ -380,6 +542,11 @@ export function renderText(r) {
     lines.push(`reducer warnings (${r.run.warnings.length}):`);
     for (const w of r.run.warnings.slice(0, 20)) lines.push(`  [${w.code}] #${w.index} ${w.message}`);
   }
+  const reclaimLines = renderReclaimLines(r.leases?.reclaim);
+  if (reclaimLines.length) {
+    lines.push('');
+    lines.push(...reclaimLines);
+  }
   lines.push('');
   lines.push(r.notice.text);
   if (r.run.statePath) lines.push(`(state cache written: ${r.run.statePath})`);
@@ -394,7 +561,10 @@ export async function main() {
   const args = parseArgs(process.argv.slice(2));
   try {
     const r = await collect(args);
-    process.stdout.write(`${args.json ? JSON.stringify(r, null, 2) : renderText(r)}\n`);
+    // A flag that moved is said, never silently ignored: `--apply-reclaim` that did nothing must not read as applied.
+    const note = args.moved ? `watch is read-only: ${args.moved.join(' ')} moved to scripts/split/lease-tick.mjs and was ignored.` : null;
+    if (args.json) process.stdout.write(`${JSON.stringify(note ? { ...r, ignoredFlags: args.moved } : r, null, 2)}\n`);
+    else process.stdout.write(`${note ? `${note}\n` : ''}${renderText(r)}\n`);
   } catch (err) {
     process.stdout.write(`watch: could not observe — ${err?.message ?? err}\n`);
   }
