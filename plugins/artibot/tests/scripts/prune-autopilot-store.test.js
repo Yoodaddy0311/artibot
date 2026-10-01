@@ -282,19 +282,49 @@ describe('CLI', () => {
     expect(listing(dir)).toHaveLength(7);
   });
 
-  it('never touches the default store when --store names another directory', () => {
-    // A throwaway plugin root, complete with the config file `getPluginRoot`
-    // looks for, standing in for the developer's real installation.
+  /**
+   * A child environment in which the DEFAULT store resolves under a fake home —
+   * every variable that could move it is removed (an `undefined` value is not
+   * passed to the child at all), so neither the developer's real
+   * `~/.claude/artibot` nor the state dir the test setup set can be reached.
+   *
+   * @param {string} pluginRoot
+   * @param {string} fakeHome
+   * @returns {Record<string, string|undefined>}
+   */
+  function defaultStoreEnv(pluginRoot, fakeHome) {
+    return {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+      USERPROFILE: fakeHome,
+      HOME: fakeHome,
+      ARTIBOT_STATE_DIR: undefined,
+      ARTIBOT_STATE_DIR_HOME: undefined,
+      ARTIBOT_AUTOPILOT_STORE_DIR: undefined,
+      ARTIBOT_AUTOPILOT_STORE_DIR_ROOT: undefined,
+    };
+  }
+
+  /** Where that environment's default store is (owner decision D2). */
+  const defaultStoreOf = (fakeHome) => path.join(fakeHome, '.claude', 'artibot', 'runtime', 'autopilot');
+
+  /** A throwaway plugin root, complete with the config file `getPluginRoot` looks for. */
+  function makePluginRoot() {
     const pluginRoot = makeTemp();
     writeFileSync(path.join(pluginRoot, 'artibot.config.json'), '{}', 'utf8');
-    const defaultStore = path.join(pluginRoot, 'runtime', 'autopilot');
+    return pluginRoot;
+  }
+
+  it('never touches the default store when --store names another directory', () => {
+    const pluginRoot = makePluginRoot();
+    const fakeHome = makeTemp();
+    const defaultStore = defaultStoreOf(fakeHome);
     seedStore(defaultStore);
     const defaultBefore = listing(defaultStore);
 
     const target = makeTemp();
     seedStore(target);
 
-    const applied = run(['--store', target, '--apply'], { CLAUDE_PLUGIN_ROOT: pluginRoot });
+    const applied = run(['--store', target, '--apply'], defaultStoreEnv(pluginRoot, fakeHome));
 
     expect(applied.status).toBe(0);
     // The explicitly named store was pruned...
@@ -304,18 +334,50 @@ describe('CLI', () => {
     expect(listing(defaultStore)).toHaveLength(7);
   });
 
-  it('falls back to the plugin-root store when --store is omitted', () => {
-    const pluginRoot = makeTemp();
-    writeFileSync(path.join(pluginRoot, 'artibot.config.json'), '{}', 'utf8');
-    const defaultStore = path.join(pluginRoot, 'runtime', 'autopilot');
+  it('falls back to the state-dir store when --store is omitted', () => {
+    const pluginRoot = makePluginRoot();
+    const fakeHome = makeTemp();
+    const defaultStore = defaultStoreOf(fakeHome);
     seedStore(defaultStore);
 
-    const r = run(['--json'], { CLAUDE_PLUGIN_ROOT: pluginRoot });
+    const r = run(['--json'], defaultStoreEnv(pluginRoot, fakeHome));
 
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
+    expect(path.resolve(parsed.dir)).toBe(path.resolve(defaultStore));
     expect(parsed.total.files).toBe(5);
     expect(parsed.applied).toBe(false);
     expect(listing(defaultStore)).toHaveLength(7);
+  });
+
+  it('does NOT read the old plugin-root location by default (D2), and stays dry', () => {
+    // The residue this script was written for sits at the OLD place. The default
+    // is the new store; naming the old one is what `--store` is for. A dry run
+    // must also not adopt anything as a side effect of asking where the store is.
+    const pluginRoot = makePluginRoot();
+    const fakeHome = makeTemp();
+    const oldStore = path.join(pluginRoot, 'runtime', 'autopilot');
+    seedStore(oldStore);
+    const oldBefore = listing(oldStore);
+
+    const r = run(['--json'], defaultStoreEnv(pluginRoot, fakeHome));
+
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).total.files).toBe(0);
+    expect(listing(oldStore)).toEqual(oldBefore);
+    // Nothing was copied into the new store, and the store was not created.
+    expect(existsSync(defaultStoreOf(fakeHome))).toBe(false);
+  });
+
+  it('prunes the OLD location when --store names it', () => {
+    const pluginRoot = makePluginRoot();
+    const fakeHome = makeTemp();
+    const oldStore = path.join(pluginRoot, 'runtime', 'autopilot');
+    const { survivors } = seedStore(oldStore);
+
+    const r = run(['--store', oldStore, '--apply'], defaultStoreEnv(pluginRoot, fakeHome));
+
+    expect(r.status).toBe(0);
+    expect(listing(oldStore)).toEqual(survivors.sort());
   });
 });

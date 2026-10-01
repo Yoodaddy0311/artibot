@@ -121,6 +121,30 @@ export function isRepoInAllowlist(url, allowlist = loadAllowlist()) {
 }
 
 /**
+ * The gate's verdict AND what it computed to reach it.
+ *
+ * `isAutopilotAllowed` answers with a boolean and throws the rest away: the raw
+ * remote URL and its canonical `owner/name` form. A caller that needs the repo's
+ * identity next — `scripts/hooks/bash-risk-guard.js` tells whose autopilot
+ * session a danger belongs to — would otherwise ask git for the same remote a
+ * second time (measured by the reviewer of 6b410964 at about 0.85 s on that
+ * hook's block path under load). This hands the answer over instead, with no
+ * extra spawn and no import of `lib/git/` (the separation the firewall pins).
+ *
+ * `repoId` keeps the URL's own case, as `normalizeRepoId` always has; the
+ * observational identity in `lib/git/repo-identity.js` is the lower-cased form
+ * of the same string (asserted equal by `lock-scope-repo-identity.test.js`).
+ *
+ * @param {string} cwd Repo working tree root.
+ * @returns {{ allowed: boolean, remote: string, repoId: string }} `remote` and
+ *   `repoId` are `''` when the directory has no origin remote.
+ */
+export function checkAutopilotAllowed(cwd) {
+  const remote = getRemoteUrl(cwd);
+  return { allowed: isRepoInAllowlist(remote), remote, repoId: normalizeRepoId(remote) };
+}
+
+/**
  * Top-level gate used by all five autopilot hooks. Capture-only mode:
  * if this returns false, the hook MUST NOT perform any git write
  * (commit / push / pull / autopilot.json refresh). All other subsystems
@@ -130,5 +154,5 @@ export function isRepoInAllowlist(url, allowlist = loadAllowlist()) {
  * @returns {boolean}
  */
 export function isAutopilotAllowed(cwd) {
-  return isRepoInAllowlist(getRemoteUrl(cwd));
+  return checkAutopilotAllowed(cwd).allowed;
 }

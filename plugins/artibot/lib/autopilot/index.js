@@ -134,7 +134,6 @@ export {
 export {
   saveSession,
   loadSession,
-  listSessions,
   deleteSession,
   deleteSessionArtifacts,
   newSessionId,
@@ -144,6 +143,23 @@ export {
   migrateState,
   isLegacyState,
 } from './session-store.js';
+
+// `listSessions` is PROJECT-SCOPED at this surface, and that is deliberate.
+// `commands/autopilot.md` calls `engine.listSessions()` for `/autopilot list`
+// with no arguments, and since owner decision D2 the store holds every project's
+// sessions (one per user, not one per plugin version). The barrel therefore
+// answers with this project's sessions plus the ones that recorded no project;
+// `listAllSessions` is the raw directory listing for a caller that really means
+// "everything". Internal modules import `listSessions` from `./session-store.js`
+// directly and keep the raw listing — the cross-session learner and the cost
+// predictor aggregate across projects on purpose.
+export { listSessions as listAllSessions } from './session-store.js';
+export {
+  classifySessionProject,
+  classifyStoredSessions,
+  listSessionsForProject as listSessions,
+  sessionFilterFor,
+} from './session-project.js';
 
 export {
   notifyCompletion,

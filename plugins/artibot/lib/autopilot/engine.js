@@ -918,15 +918,22 @@ function settleOutstandingAttempt(state, sessionId, ackOutstandingAttempt) {
 }
 
 /**
- * Get current session status. If sessionId omitted, returns the most-recent session.
+ * Get current session status. If sessionId omitted, returns the most-recent
+ * session OF THIS PROJECT (see `session-project.js`); naming an id is not
+ * restricted to it.
  * @param {string} [sessionId]
+ * @param {{ cwd?: string }} [opts] - The directory whose project is asking;
+ *   defaults to the process working directory. Only used when no id is given.
  * @returns {Promise<object|null>}
  */
-export async function getStatus(sessionId) {
+export async function getStatus(sessionId, { cwd = process.cwd() } = {}) {
   if (sessionId) return loadSession(sessionId);
-  // Fallback: pick the most recent session by createdAt.
-  const { listSessions } = await import('./session-store.js');
-  const ids = listSessions();
+  // Fallback: pick the most recent session by createdAt — among this project's
+  // and the unscoped ones. The store is one per user since D2, so "the newest
+  // session in it" would be whichever project ran last; answering another
+  // project's status as if it were this one's is worse than answering null.
+  const { listSessionsForProject } = await import('./session-project.js');
+  const ids = listSessionsForProject(cwd);
   if (!ids.length) return null;
   let best = null;
   for (const id of ids) {

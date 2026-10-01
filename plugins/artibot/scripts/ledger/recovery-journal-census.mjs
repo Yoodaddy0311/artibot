@@ -38,7 +38,10 @@
  *  mis-parsed. The cost is that prose here must name those verbs indirectly.
  *
  * -- THE STORE DIRECTORY, AND THE ENV PAIR ----------------------------------
- *  The default is `<pluginRoot>/runtime/autopilot`, and the
+ *  The default is `<state dir>/runtime/autopilot`, where the state dir is what
+ *  `lib/core/config.js#resolveArtibotDir` returns (`~/.claude/artibot`, or
+ *  `ARTIBOT_STATE_DIR` when paired with the home it was minted for). Until
+ *  owner decision D2 (2026-09-30) it was `<pluginRoot>/runtime/autopilot`. The
  *  `ARTIBOT_AUTOPILOT_STORE_DIR` / `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT` pair is
  *  honoured on the SAME terms the session store's own resolver honours it: the
  *  override counts only while the root it was minted for is still the root in
@@ -46,6 +49,24 @@
  *  place" must not mean "trust". A reader that ignored the pair would report a
  *  confident row count for a directory the writer is not writing to. `--dir`
  *  overrules both and is what the tests use.
+ *
+ *  THE OLD LOCATIONS ARE READ, WITHOUT ADOPTING THEM. The session store copies
+ *  what older builds left behind — under the plugin root in force, in every
+ *  cached version directory and in the marketplace mirror, never a developer
+ *  checkout — into the new store the first time any autopilot process touches
+ *  it, and this reader may not (it opens nothing for writing). Until that has
+ *  happened the new store is empty while real sessions still sit at the old
+ *  places, and a census of the empty one would print `unmeasured:no-store` over
+ *  a denominator that exists. So, when no `--dir` was given and no override is
+ *  in force, and the new store holds no session file AND has no adoption ledger
+ *  beside it (the store has never adopted anything), those directories are read
+ *  instead — ONE file per session id, the freshest copy, exactly the choice the
+ *  adoption makes — and the report says so: `inputPath` is still the store the
+ *  run describes, `census.readFrom` lists the directories the numbers actually
+ *  came from and `census.legacyFallback` is true. A store that HAS adopted
+ *  (ledger present) is never second-guessed — a session the user deleted must
+ *  not reappear in a count. The source list is a mirror of the store's
+ *  `getLegacyStoreDirs`; the paired test runs both over the same layouts.
  *
  * -- THE THREE-WAY SPLIT IS EXHAUSTIVE --------------------------------------
  *  Every row lands in exactly one bucket, so the three always sum to `rows`:
@@ -111,15 +132,33 @@
  *    2026-09-22, 6 session files: 0 of them carry a `recoveryJournal` at all,
  *    so `rows` is 0 and `ratio` is `null` — `unmeasured:no-journal`. That is
  *    an absent measurement, not a ratio of zero.
+ *  - THE OLD LOCATIONS ONCE THE NEW STORE IS NON-EMPTY. The fallback above fires
+ *    only for a store with no session file and no ledger. A session an older
+ *    build is still running keeps changing at the old place after the new store
+ *    has adopted a snapshot of it, and that later state is not in this count.
+ *  - FILE TIMES IT NEVER SEES. The freshest-copy choice reads each copy's mtime
+ *    through `statSync`, the one read verb beyond the three the paired test
+ *    originally pinned; a stamp that cannot be read ranks last.
  *  - THE INSTALLED COPY. The tests run the file in this worktree.
  *
  * @module scripts/ledger/recovery-journal-census
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { getPluginRoot, sameDirPath } from '../../lib/core/platform.js';
+import {
+  getHomeDir, getPluginRoot, normalizeDirPath, sameDirPath,
+} from '../../lib/core/platform.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
+
+/**
+ * The adoption ledger's name — a DIRECTORY of per-id marker files, not one file
+ * — and a COPY of `session-store.js`'s `LEGACY_LEDGER_NAME` (this reader may not
+ * import the writer module). Its presence beside a store means the store has
+ * adopted the old locations; `tests/ledger/recovery-journal-census-store.test.js`
+ * asserts the two names stay equal.
+ */
+export const LEGACY_LEDGER_NAME = 'legacy-migration.ledger';
 
 /** Flags that take a value. Anything else on the command line is an error. */
 const VALUE_FLAGS = ['--dir', '--session'];
@@ -180,6 +219,31 @@ function usageError(opts) {
 }
 
 /**
+ * The user-state directory — a mirror of `lib/core/config.js#resolveArtibotDir`.
+ *
+ * That function lives in a module which imports the file-writing helpers, so the
+ * reader cannot import it (the allowlist in the paired test is what forbids it);
+ * the duplication is the price. The rule is the same pairing rule as the store's
+ * own: `ARTIBOT_STATE_DIR` counts only while EVERY home variable that is set
+ * still names the home it was minted for (`ARTIBOT_STATE_DIR_HOME`), and an
+ * override with no recorded home is one we cannot place. The paired test runs
+ * both resolvers through the same decision table so a drift stays red.
+ *
+ * @returns {string} absolute directory path
+ */
+export function resolveStateDir() {
+  const homeDerived = path.join(getHomeDir(), '.claude', 'artibot');
+  const override = process.env.ARTIBOT_STATE_DIR;
+  if (!override) return homeDerived;
+  const mintedFor = process.env.ARTIBOT_STATE_DIR_HOME;
+  if (!mintedFor) return homeDerived;
+  const declaredHomes = [process.env.USERPROFILE, process.env.HOME].filter(Boolean);
+  const homes = declaredHomes.length > 0 ? declaredHomes : [getHomeDir()];
+  if (!homes.every((home) => sameDirPath(mintedFor, home))) return homeDerived;
+  return override;
+}
+
+/**
  * The autopilot session store directory this run reads.
  *
  * Mirrors the session store's own `getStoreDir` — see the module header for
@@ -192,13 +256,141 @@ function usageError(opts) {
 export function resolveStoreDir(dirOpt) {
   if (dirOpt !== undefined) return path.resolve(dirOpt);
   const pluginRoot = getPluginRoot();
-  const rootDerived = path.join(pluginRoot, 'runtime', 'autopilot');
   const override = process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
-  if (!override) return rootDerived;
   const mintedFor = process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
-  if (!mintedFor) return rootDerived;
-  if (!sameDirPath(mintedFor, pluginRoot)) return rootDerived;
-  return path.resolve(override);
+  if (override && mintedFor && sameDirPath(mintedFor, pluginRoot)) return path.resolve(override);
+  return path.join(resolveStateDir(), 'runtime', 'autopilot');
+}
+
+/**
+ * True when `dir` exists and is a directory. A `readdirSync` of a file throws, so
+ * no other fs verb is needed to tell the two apart.
+ *
+ * @param {string} dir
+ * @returns {boolean}
+ */
+function isDirectory(dir) {
+  try {
+    readdirSync(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} dir
+ * @returns {string[]} names of the subdirectories of `dir`; `[]` when it is absent
+ */
+function subdirectories(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * True when `child` lies strictly inside `parent` (case-insensitive on Windows).
+ *
+ * @param {string} parent
+ * @param {string} child
+ * @returns {boolean}
+ */
+function isInside(parent, child) {
+  const p = normalizeDirPath(parent);
+  const c = normalizeDirPath(child);
+  if (!p || !c) return false;
+  const fold = (x) => (process.platform === 'win32' ? x.toLowerCase() : x);
+  const rel = path.relative(fold(p), fold(c));
+  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`)) return false;
+  return !path.isAbsolute(rel);
+}
+
+/**
+ * A developer checkout — `<repo>/plugins/artibot` with `<repo>/.git` (a directory,
+ * or a FILE in a linked worktree) — whose old store holds the sessions the test
+ * suite and the developer's own runs wrote. The marketplace mirror has the same
+ * layout and is not one. Mirrors `session-store.js#isDevCheckoutRoot`.
+ *
+ * @param {string} root a plugin root
+ * @param {string} home
+ * @returns {boolean}
+ */
+function isDevCheckoutRoot(root, home) {
+  if (path.basename(root) !== 'artibot') return false;
+  const plugins = path.dirname(root);
+  if (path.basename(plugins) !== 'plugins') return false;
+  if (!existsSync(path.join(path.dirname(plugins), '.git'))) return false;
+  return !isInside(path.join(home, '.claude', 'plugins', 'marketplaces'), root);
+}
+
+/**
+ * Newest version first, numerically (4.10.0 is newer than 4.9.0); names that are
+ * not versions after every version, by name. Mirrors the store's own ordering.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function compareVersionsDesc(a, b) {
+  const va = /^(\d+)\.(\d+)\.(\d+)/.exec(a);
+  const vb = /^(\d+)\.(\d+)\.(\d+)/.exec(b);
+  if (va && vb) {
+    for (let i = 1; i <= 3; i += 1) {
+      const diff = Number(vb[i]) - Number(va[i]);
+      if (diff !== 0) return diff;
+    }
+  } else if (va) {
+    return -1;
+  } else if (vb) {
+    return 1;
+  }
+  if (a === b) return 0;
+  return a < b ? 1 : -1;
+}
+
+/**
+ * Every directory an older build could have left sessions in, in the order the
+ * session store's adoption would read them: the plugin root in force, then — for
+ * the default state dir only — every cached version newest first, then the
+ * marketplace mirrors; existing directories only, each once, never the store
+ * itself and never a developer checkout.
+ *
+ * `[]` when the default store is not the one in use: `--dir` or an honoured
+ * override names a store explicitly, and reading others behind it would describe
+ * directories nobody asked about. A MIRROR of `session-store.js#getLegacyStoreDirs`
+ * (this reader may not import the writer); the paired test runs both over the
+ * same fabricated layouts so a drift stays red.
+ *
+ * @param {string|undefined} dirOpt the `--dir` value
+ * @returns {string[]}
+ */
+export function resolveLegacyStoreDirs(dirOpt) {
+  if (dirOpt !== undefined) return [];
+  const pluginRoot = getPluginRoot();
+  const override = process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
+  const mintedFor = process.env.ARTIBOT_AUTOPILOT_STORE_DIR_ROOT;
+  if (override && mintedFor && sameDirPath(mintedFor, pluginRoot)) return [];
+  const store = resolveStoreDir(undefined);
+  const home = getHomeDir();
+  const roots = [pluginRoot];
+  if (sameDirPath(resolveStateDir(), path.join(home, '.claude', 'artibot'))) {
+    const cacheRoot = path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot');
+    const marketplaces = path.join(home, '.claude', 'plugins', 'marketplaces');
+    roots.push(
+      ...subdirectories(cacheRoot).sort(compareVersionsDesc).map((name) => path.join(cacheRoot, name)),
+      ...subdirectories(marketplaces).sort().map((name) => path.join(marketplaces, name, 'plugins', 'artibot')),
+    );
+  }
+  const sources = [];
+  for (const root of roots) {
+    const source = path.join(root, 'runtime', 'autopilot');
+    if (isDevCheckoutRoot(root, home) || sameDirPath(source, store)) continue;
+    if (!isDirectory(source) || sources.some((seen) => sameDirPath(seen, source))) continue;
+    sources.push(source);
+  }
+  return sources;
 }
 
 /**
@@ -261,14 +453,15 @@ function listStoreFiles(dir, session) {
  * rather than a zero row, which would read as "this session recovered nothing"
  * when the truth is "this session has no journal".
  *
- * @param {string} dir
- * @param {string[]} files
+ * @param {{name: string, file: string}[]} entries the `{sessionId}.json` names
+ *   and where each is read from — one directory, or several while the old
+ *   locations are being read in place of a store that has adopted nothing
  * @returns {{rows: number, divergentTrue: number, divergentFalse: number,
  *   divergentMissing: number, filesRead: number, filesUnparsable: number,
  *   filesWithJournal: number, filesNonArray: number, bytes: number,
  *   perSession: {sessionId: string, rows: number}[]}}
  */
-function collect(dir, files) {
+function collect(entries) {
   const tally = {
     rows: 0,
     divergentTrue: 0,
@@ -281,8 +474,7 @@ function collect(dir, files) {
     bytes: 0,
     perSession: /** @type {{sessionId: string, rows: number}[]} */ ([]),
   };
-  for (const name of files) {
-    const file = path.join(dir, name);
+  for (const { name, file } of entries) {
     let parsed;
     try {
       const text = readFileSync(file, 'utf-8');
@@ -366,9 +558,14 @@ function storeReason(store, dir) {
  * @returns {string}
  */
 function humanLine(report) {
+  // A reader of the line alone must not take an old-location count for the
+  // current store's.
+  const where = report.census.legacyFallback
+    ? `${report.census.readFrom.join(', ')} (old location(s), not yet adopted)`
+    : report.inputPath;
   if (report.rows === 0) {
     return `recovery journal: 0 rows — ratio null (${report.status})`
-      + ` | ${report.census.filesRead} file(s) read at ${report.inputPath}`
+      + ` | ${report.census.filesRead} file(s) read at ${where}`
       + ` | measured ${report.measuredAt}\n`;
   }
   const pct = (n) => `${((n / report.rows) * 100).toFixed(1)}%`;
@@ -377,25 +574,105 @@ function humanLine(report) {
     + ` false ${report.divergentFalse} (${pct(report.divergentFalse)}),`
     + ` missing ${report.divergentMissing} (${pct(report.divergentMissing)})`
     + ` | ${report.census.filesWithJournal}/${report.census.filesRead} file(s) carry one`
-    + ` at ${report.inputPath} | measured ${report.measuredAt}\n`;
+    + ` at ${where} | measured ${report.measuredAt}\n`;
 }
 
 /**
- * Take the census. Pure apart from the two fs reads and the clock.
+ * @param {string} file
+ * @returns {number} the file's mtime in ms; 0 when it cannot be read, which ranks
+ *   last — the file itself is still counted
+ */
+function mtimeOf(file) {
+  try {
+    return statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * What the old locations would hand the store, one file per session id: the
+ * FRESHEST copy (latest mtime; a tie goes to the earlier source, the newer
+ * directory) — the same choice the session store's adoption makes, because the
+ * same id sits in several version directories and a count must describe the copy
+ * that would be adopted, not whichever was listed first. Sorted by id.
+ *
+ * @param {string[]} sources in precedence order
+ * @param {string|undefined} session the `--session` narrowing, if any
+ * @returns {{name: string, file: string, dir: string}[]}
+ */
+function freshestLegacyEntries(sources, session) {
+  const chosen = new Map();
+  for (const dir of sources) {
+    for (const name of listStoreFiles(dir, session).files) {
+      const file = path.join(dir, name);
+      const mtimeMs = mtimeOf(file);
+      const held = chosen.get(name);
+      if (!held || mtimeMs > held.mtimeMs) chosen.set(name, { name, file, dir, mtimeMs });
+    }
+  }
+  return [...chosen.values()]
+    .sort((a, b) => (a.name < b.name ? -1 : Number(a.name > b.name)))
+    .map(({ name, file, dir }) => ({ name, file, dir }));
+}
+
+/**
+ * Decide what this run reads: the store itself, or — while the store has adopted
+ * nothing — the old locations.
+ *
+ * The new store has adopted nothing yet when it holds no session file AT ALL
+ * (judged without the `--session` narrowing, which would make a populated store
+ * look empty) and has no ledger that would say it once did. If the old locations
+ * then hold sessions, they are read rather than print `no-store` over a
+ * denominator that exists.
+ *
+ * @param {string} primary the store directory
+ * @param {{dir?: string, session?: string}} opts
+ * @returns {{store: {present: boolean, readable: boolean, files: string[]},
+ *   entries: {name: string, file: string}[], readFrom: string[], legacyFallback: boolean}}
+ */
+function chooseInputs(primary, opts) {
+  const store = listStoreFiles(primary, opts.session);
+  const adoptedNothing = store.files.length === 0
+    && listStoreFiles(primary, undefined).files.length === 0
+    && !existsSync(path.join(primary, LEGACY_LEDGER_NAME));
+  if (adoptedNothing) {
+    const legacy = freshestLegacyEntries(resolveLegacyStoreDirs(opts.dir), opts.session);
+    if (legacy.length > 0) {
+      return {
+        store: { present: true, readable: true, files: legacy.map((e) => e.name) },
+        entries: legacy,
+        readFrom: [...new Set(legacy.map((e) => e.dir))],
+        legacyFallback: true,
+      };
+    }
+  }
+  return {
+    store,
+    entries: store.files.map((name) => ({ name, file: path.join(primary, name) })),
+    readFrom: [primary],
+    legacyFallback: false,
+  };
+}
+
+/**
+ * Take the census. Pure apart from the fs reads and the clock.
  *
  * @param {{dir?: string, session?: string, now?: string}} [opts]
  * @returns {object} the stdout report, with a FIXED key order
  */
 export function census(opts = {}) {
-  const dir = resolveStoreDir(opts.dir);
+  const primary = resolveStoreDir(opts.dir);
   const measuredAt = opts.now ?? new Date().toISOString();
-  const store = listStoreFiles(dir, opts.session);
-  const tally = collect(dir, store.files);
-  const reason = storeReason(store, dir);
+  const {
+    store, entries, readFrom, legacyFallback,
+  } = chooseInputs(primary, opts);
+  const tally = collect(entries);
+  const reason = storeReason(store, primary);
   return {
     ok: reason === null,
     reason,
-    inputPath: dir,
+    inputPath: primary,
     measuredAt,
     rows: tally.rows,
     divergentTrue: tally.divergentTrue,
@@ -414,6 +691,8 @@ export function census(opts = {}) {
       bytesRead: tally.bytes,
       sessionFilter: opts.session ?? null,
       perSession: tally.perSession,
+      legacyFallback,
+      readFrom,
     },
   };
 }

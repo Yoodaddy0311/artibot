@@ -2,8 +2,11 @@
 /**
  * `prune-autopilot-store` -- remove non-session residue from the autopilot store.
  *
- * The store (`lib/autopilot/session-store.js#getStoreDir`, i.e.
- * `<pluginRoot>/runtime/autopilot`) holds one `<id>.json` per session plus the
+ * The store (`lib/autopilot/session-store.js#resolveStoreDir`, i.e.
+ * `<state dir>/runtime/autopilot` — `~/.claude/artibot` by default; until owner
+ * decision D2 it was `<pluginRoot>/runtime/autopilot`, which is where the
+ * residue this script was written for still sits: point `--store` at it to prune
+ * the OLD location) holds one `<id>.json` per session plus the
  * matching `<id>.events.ndjson` telemetry stream. Three other file kinds
  * accumulate there and are not sessions:
  *
@@ -38,12 +41,16 @@ import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 
 import { isMainEntry } from '../hooks/_main-entry.js';
-import { getStoreDir } from '../../lib/autopilot/session-store.js';
+// `resolveStoreDir`, not `getStoreDir`: the latter adopts the legacy store as a
+// side effect of the first call, and a tool whose default mode is a dry run must
+// not copy anything to tell you where the store is.
+import { resolveStoreDir } from '../../lib/autopilot/session-store.js';
 
 export const HELP = `usage: node scripts/dev/prune-autopilot-store.mjs [--store <dir>] [--apply] [--json]
 
   --store <dir>  store directory to scan (default: the autopilot store under
-                 the resolved plugin root)
+                 the user-state dir; name the old store inside the plugin
+                 root here to prune that one instead)
   --apply        actually delete the residue (default: dry run, deletes nothing)
   --json         emit one machine-readable JSON object instead of a table
   --help, -h     show this message
@@ -300,7 +307,7 @@ export function main(argv, io = {}) {
     return 0;
   }
 
-  const dir = args.store ?? getStoreDir();
+  const dir = args.store ?? resolveStoreDir();
   const result = pruneStore(dir, { apply: args.apply });
 
   if (args.json) {

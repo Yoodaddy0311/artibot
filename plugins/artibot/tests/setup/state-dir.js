@@ -56,10 +56,13 @@
  * THE AUTOPILOT STORE is the second store this file redirects, for the same
  * reason and on the same terms.
  *
- * It is `<pluginRoot>/runtime/autopilot`, resolved by
- * `lib/autopilot/session-store.js#getStoreDir`. It is NOT tracked — `.gitignore`
- * matches `/runtime/` and `git ls-files runtime` returned nothing on
- * 2026-09-21 — so a stray test write leaves the working copy clean and shows up
+ * It is `<state dir>/runtime/autopilot` — `resolveArtibotDir()`, i.e.
+ * `~/.claude/artibot` — resolved by `lib/autopilot/session-store.js#getStoreDir`
+ * (owner decision D2, 2026-09-30; it was `<pluginRoot>/runtime/autopilot` until
+ * then, and the measurements below were made against that location). It is NOT
+ * tracked — it is outside the repository now and was git-ignored before
+ * (`.gitignore` matched `/runtime/`; `git ls-files runtime` returned nothing on
+ * 2026-09-21) — so a stray test write leaves the working copy clean and shows up
  * nowhere in `git status`. That is precisely why it is worth a seam: the damage
  * is silent. Test sessions land in the same directory as real ones and every
  * reader of the store POPULATION then counts them —
@@ -112,11 +115,17 @@
  *
  * REACH: a spawned child inherits both variables, so a child that is otherwise
  * unisolated still writes into the sandbox. A child handed a different
- * `CLAUDE_PLUGIN_ROOT` gets the better outcome automatically: the pair no
- * longer matches the root in force, `getStoreDir()` discards the inherited
- * override, and the child lands in its own `<sandbox>/runtime/autopilot`. That
- * is the hazard the `ARTIBOT_STATE_DIR_HOME` note above describes, already
- * solved on this store by construction.
+ * `CLAUDE_PLUGIN_ROOT` drops the inherited override (the pair no longer matches
+ * the root in force) and lands in the DEFAULT store. Since D2 that default is
+ * under the state dir, not under the plugin root it was handed: with this
+ * file's `ARTIBOT_STATE_DIR` still inherited it is this worker's temp state dir
+ * (`<state dir>/runtime/autopilot`), and a child that was also handed its own
+ * HOME drops that override too (the `_HOME` pair) and lands in
+ * `<that home>/.claude/artibot/runtime/autopilot`. Either way nothing reaches
+ * the real home unless the child was given the real one. A test that used to
+ * read a child's store at `<sandbox plugin root>/runtime/autopilot` must read
+ * the state dir's instead. That is the hazard the `ARTIBOT_STATE_DIR_HOME` note
+ * above describes, already solved on this store by construction.
  *
  * WHAT THIS DOES NOT COVER:
  *   - **A test that deletes or repoints the override without restoring it.**

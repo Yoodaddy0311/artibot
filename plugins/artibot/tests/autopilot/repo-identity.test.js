@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  checkAutopilotAllowed,
   DEFAULT_ALLOWLIST,
+  isAutopilotAllowed,
   isRepoInAllowlist,
   loadAllowlist,
   normalizeRepoId,
@@ -132,6 +138,51 @@ describe('repo-identity', () => {
 
     it('DEFAULT_ALLOWLIST is frozen (immutable)', () => {
       expect(Object.isFrozen(DEFAULT_ALLOWLIST)).toBe(true);
+    });
+  });
+
+  describe('checkAutopilotAllowed (the verdict plus what it computed)', () => {
+    // A remote on NO allowlist, so the verdict does not depend on whatever
+    // `~/.claude/artibot/autopilot-allowlist.json` the machine running this has.
+    let root;
+    let withRemote;
+    let withoutRemote;
+    let notARepo;
+
+    const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'ignore', windowsHide: true });
+
+    beforeAll(() => {
+      root = mkdtempSync(path.join(os.tmpdir(), 'artibot-gate-'));
+      withRemote = path.join(root, 'with-remote');
+      withoutRemote = path.join(root, 'without-remote');
+      notARepo = path.join(root, 'plain');
+      for (const dir of [withRemote, withoutRemote, notARepo]) mkdirSync(dir, { recursive: true });
+      git(['init', '-q', '-b', 'main', '.'], withRemote);
+      git(['remote', 'add', 'origin', 'git@github.com:Example/Not-Listed.git'], withRemote);
+      git(['init', '-q', '-b', 'main', '.'], withoutRemote);
+    });
+
+    afterAll(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+
+    it('hands over the raw remote and its canonical owner/name, case kept', () => {
+      const gate = checkAutopilotAllowed(withRemote);
+      expect(gate.remote).toBe('git@github.com:Example/Not-Listed.git');
+      // The case of the URL is kept; lib/git/repo-identity.js lower-cases it.
+      expect(gate.repoId).toBe('Example/Not-Listed');
+      expect(gate.allowed).toBe(false);
+    });
+
+    it('answers empty strings, not undefined, for a repo with no origin and for a non-repo', () => {
+      expect(checkAutopilotAllowed(withoutRemote)).toEqual({ allowed: false, remote: '', repoId: '' });
+      expect(checkAutopilotAllowed(notARepo)).toEqual({ allowed: false, remote: '', repoId: '' });
+    });
+
+    it('is exactly what isAutopilotAllowed answers, which is now a thin wrapper', () => {
+      for (const dir of [withRemote, withoutRemote, notARepo]) {
+        expect(isAutopilotAllowed(dir)).toBe(checkAutopilotAllowed(dir).allowed);
+      }
     });
   });
 });
