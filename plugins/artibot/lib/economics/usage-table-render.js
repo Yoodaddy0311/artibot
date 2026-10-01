@@ -12,6 +12,9 @@
  *    the dollars (so a reader can redo the multiplication);
  *  - what the price check rests on — the catalog's own `priceMeasured` flag —
  *    and NOT a claim that every model was compared with the official page;
+ *  - per model, the source the catalog records for that price row (kind, label,
+ *    date, and any column computed instead of read), models sharing one source
+ *    named together; `출처 미기재` where a row records none;
  *  - `가격 미검증` — never a number — for a model whose catalog price is not
  *    verified, and a call-out with BOTH amounts for receipts recorded under an
  *    older price table (the recorded figure may be over-stated);
@@ -32,12 +35,14 @@
  *  - WHETHER THE WORDING IS RIGHT FOR A READER WHO SKIPS THE NOTES. The table
  *    shows `가격 미검증` in the cost cell for the case that matters most; the
  *    rest of the caveats live in the lines below it.
- *  - WHICH SOURCE THE CATALOG COMPARED A GIVEN MODEL'S PRICE WITH. The catalog
- *    records that in code comments, not in a field a caller can read, so the
- *    price line says the flag is the basis and that no per-model source is shown.
- *    Naming the official page for every model would be a claim nobody checked
- *    per model: one row (the current sonnet id) is documented there as compared
- *    with a skill price table, and its cache-write prices as derived.
+ *  - WHETHER A SOURCE LABEL IS TRUE. The per-model line prints the catalog's
+ *    `priceSource` as the fold carried it (`pricing.models[].price_source`): the
+ *    catalog's own statement, typed by whoever edited it. Nothing here re-reads
+ *    the page or the skill table, so the line proves the record was carried, not
+ *    that it is right. An id priced by its tier's row shows that row's source
+ *    (the latest comparison of the row), not one made for that id. The price
+ *    line still rests on the `priceMeasured` flag and says later changes are
+ *    unchecked.
  *
  * @module lib/economics/usage-table-render
  */
@@ -210,18 +215,69 @@ function zeroReason(table, context) {
 // Notes under the table
 // ---------------------------------------------------------------------------
 
+/** The models whose price carries the catalog's verified flag and was priced: the ones a source is named for. */
+const verifiedRows = (rows) => rows.filter((r) => r.cost.usd !== null && r.cost.price_status === 'verified');
+
 /**
  * How much of the price table carries the catalog's own verified flag. The flag
- * does not say WHICH source a model's price was compared with (see the module
- * header), and neither does this line — it says so instead of naming the
- * official page for every model.
+ * does not say WHICH source a model's price was compared with, and this line does
+ * not name the official page for every model: the per-model line under it does,
+ * from the catalog's `priceSource`, and this line points there. Both use
+ * {@link verifiedRows}, so the pointer exists exactly when its target does.
  */
 function verificationClause(rows) {
-  const verified = rows.filter((r) => r.cost.usd !== null && r.cost.price_status === 'verified');
-  const caveat = '모델별 대조 출처는 표시하지 않음, 이후 공식 가격 변동은 미확인';
+  const verified = verifiedRows(rows);
+  const caveat = '모델별 대조 출처는 아래 줄, 이후 공식 가격 변동은 미확인';
   if (verified.length === rows.length) return `${CATALOG_FLAG} 기준으로 검증됨(${caveat})`;
   if (verified.length === 0) return `${CATALOG_FLAG}가 있는 단가 없음`;
   return `${verified.map((r) => r.model_id).join(', ')} 만 ${CATALOG_FLAG} 있음(${caveat})`;
+}
+
+/** Korean names of the catalog's source kinds; an unknown kind is printed as it is, so a new one shows up instead of vanishing. */
+const SOURCE_KIND_LABELS = new Map([
+  ['official-table', '공식 가격표'],
+  ['skill-table', 'skill 가격표'],
+]);
+
+/** A non-empty string. */
+const isText = (v) => typeof v === 'string' && v.length > 0;
+
+/**
+ * What one model's price was compared with, as one phrase: the kind, the label the
+ * catalog gives it, the day, and — when some columns were computed instead of read
+ * — which ones. A row that records no whole source is `출처 미기재`, never a guess.
+ * The phrase is also the key models are grouped by, so two models print together
+ * exactly when they print the same words.
+ *
+ * @param {object|null|undefined} source - `pricing.models[].price_source`.
+ * @returns {string}
+ */
+function sourcePhrase(source) {
+  if (source === null || typeof source !== 'object'
+    || !isText(source.kind) || !isText(source.ref) || !isText(source.checked_at)) {
+    return '출처 미기재(카탈로그 priceSource 없음)';
+  }
+  const label = SOURCE_KIND_LABELS.get(source.kind) ?? source.kind;
+  const base = `${label}(${source.ref}) ${source.checked_at} 대조`;
+  const derived = Array.isArray(source.derived_columns) ? source.derived_columns.filter(isText) : [];
+  return derived.length === 0 ? base : `${base}, ${derived.join('·')}는 입력 단가에서 계산한 값이라 읽지 않음`;
+}
+
+/**
+ * For each model whose price is verified, what the catalog says that price was
+ * compared with. Models that share a source are named together and the source is
+ * said once. Null when no model has a verified price: there is nothing to source.
+ */
+function modelSourceLine(table) {
+  const verified = verifiedRows(table.rows);
+  if (verified.length === 0) return null;
+  const groups = new Map();
+  for (const row of verified) {
+    const phrase = sourcePhrase(table.pricing.models.find((m) => m.model_id === row.model_id)?.price_source);
+    groups.set(phrase, [...(groups.get(phrase) ?? []), row.model_id]);
+  }
+  const items = [...groups].map(([phrase, ids]) => `${ids.join(', ')} — ${phrase}`);
+  return `- 모델별 대조 출처: ${items.join(' · ')}`;
 }
 
 /** Source, reference date, and what the dollars are (and are not). */
@@ -468,6 +524,7 @@ export function formatUsageTableMarkdown(table, context = {}) {
   out.push('', ...tableLines(table), '');
   const notes = [
     priceSourceLine(table),
+    modelSourceLine(table),
     unitPriceLine(table),
     unverifiedLine(table),
     staleLine(table),

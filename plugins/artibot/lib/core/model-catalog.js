@@ -81,9 +81,15 @@ export const BASELINE_TIER = 'opus';
  * changed (the Sonnet 5.5 input / output / cache read figures equal Sonnet
  * 5's), so {@link PRICING_VERSION} did not move.
  *
+ * 2026-09-30 bump: every row of {@link MODELS} and {@link ID_PRICES} gained
+ * `priceSource` (kind, ref, checkedAt, derivedColumns) and {@link getPricing}
+ * reports it as `source`. It is the provenance the notes in this file already
+ * gave, written as data; no price was read or changed, so
+ * {@link PRICING_VERSION} did not move.
+ *
  * @type {string}
  */
-export const CATALOG_VERSION = '2026-09-29';
+export const CATALOG_VERSION = '2026-09-30';
 
 /**
  * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
@@ -103,6 +109,17 @@ export const CATALOG_VERSION = '2026-09-29';
  * or a price edit that keeps the stamp, goes red there (limits in that file's
  * header).
  *
+ * **When you bump it, re-date only what you re-read.** Move a row's
+ * `priceSource.checkedAt` to the new stamp ONLY for a row actually re-read against
+ * its source that day; never copy the new date onto the rest. An `official-table`
+ * row that was NOT re-read (a legacy {@link ID_PRICES} row included) cannot keep
+ * `priceMeasured: true`, which means "compared against {@link PRICING_SOURCE} on
+ * this stamp": set it to `false`. The receipt writer then leaves that model
+ * unpriced and the usage table shows it as unverified, instead of a fresh stamp
+ * vouching for a price nobody looked at. `tests/core/model-catalog.test.js`
+ * ('priceSource') is red for a measured `official-table` row whose date is not the
+ * stamp.
+ *
  * 2026-09-28 bump: opus and sonnet rows moved to the Opus 5.5 / Sonnet 5
  * official prices (read off {@link PRICING_SOURCE} that day). haiku and fable
  * were re-read the same day and already matched, so their values did not move.
@@ -114,6 +131,10 @@ export const CATALOG_VERSION = '2026-09-29';
  * table (cached 2026-09-25, not {@link PRICING_SOURCE}) and equal the Sonnet 5
  * row, so no price moved. That table lists no cache-write prices, so the sonnet
  * row's 2.5 / 4 stay the standard 1.25x / 2x of input and were not read for 5.5.
+ *
+ * 2026-09-30, NO bump: `priceSource` was added to every price row. It records
+ * where the figures came from, as the notes above and on the rows say; no figure
+ * was re-read, so this stamp keeps the date of the last read.
  *
  * @type {string}
  */
@@ -154,6 +175,21 @@ export const PRICING_SOURCE =
  * {@link PRICING_VERSION} and match it) and `tokenizerCoeffMeasured` (see
  * {@link getCostFactor} — currently false).
  *
+ * `priceSource` says what stands behind `priceMeasured`, as data instead of a
+ * comment: `kind` is the class of source (`official-table` = the official pricing
+ * page, cited by {@link PRICING_SOURCE}; `skill-table` = the claude-api skill
+ * price table), `ref` its label (scheme-less, for the reason PRICING_SOURCE is),
+ * `checkedAt` the `YYYY-MM-DD` day the row was compared with it, and
+ * `derivedColumns` the price columns that were NOT read there but computed from
+ * input (today only the sonnet row's two cache-write columns, at the standard
+ * 1.25x / 2x). Every value is what this file's own notes already said; typing it
+ * here re-verifies nothing. An id priced by its tier's row (every current id, and
+ * a legacy id with no {@link ID_PRICES} row, such as claude-sonnet-5) reports the
+ * TIER row's source: that row's latest comparison, not necessarily one made for
+ * that id. What a {@link PRICING_VERSION} bump must do to `checkedAt` and
+ * `priceMeasured` is written at that constant. Shape and vocabulary are pinned in
+ * `tests/core/model-catalog.test.js`.
+ *
  * `legacyIds` lists older model ids that must still resolve to the tier, so a
  * transcript or ledger row written before an id change keeps its tier instead
  * of falling to "unknown model". It is present on EVERY tier (`[]` when there
@@ -178,6 +214,12 @@ export const PRICING_SOURCE =
  *   priceCacheWrite5mPerMTok: number,
  *   priceCacheWrite1hPerMTok: number,
  *   priceMeasured: boolean,
+ *   priceSource: Readonly<{
+ *     kind: 'official-table'|'skill-table',
+ *     ref: string,
+ *     checkedAt: string,
+ *     derivedColumns: readonly string[]
+ *   }>,
  *   tokenizerCoeff: number,
  *   tokenizerCoeffMeasured: boolean,
  *   ctxLimit: number,
@@ -197,6 +239,15 @@ export const MODELS = deepFreeze({
     priceCacheWrite5mPerMTok: 1.25,
     priceCacheWrite1hPerMTok: 2,
     priceMeasured: true,
+    // Re-read on 2026-09-28 and already matched (the PRICING_VERSION notes), so
+    // the figures above did not move; `priceMeasured` defines that read as against
+    // PRICING_SOURCE on PRICING_VERSION.
+    priceSource: {
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-09-28',
+      derivedColumns: [],
+    },
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     ctxLimit: 200_000,
@@ -234,6 +285,17 @@ export const MODELS = deepFreeze({
     priceCacheWrite5mPerMTok: 2.5,
     priceCacheWrite1hPerMTok: 4,
     priceMeasured: true,
+    // The structured form of the comment block above. Input, output and cache
+    // read: the claude-api skill price table, compared on 2026-09-29 when the tier
+    // id moved to Sonnet 5.5 (they equal the Sonnet 5 figures read off
+    // PRICING_SOURCE on 2026-09-28). The two cache-write columns are computed from
+    // input and were not read.
+    priceSource: {
+      kind: 'skill-table',
+      ref: 'claude-api skill price table, cached 2026-09-25',
+      checkedAt: '2026-09-29',
+      derivedColumns: ['priceCacheWrite5mPerMTok', 'priceCacheWrite1hPerMTok'],
+    },
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     // ctxLimit, outLimit, thinkingMode and promptStyle are the values the
@@ -262,6 +324,13 @@ export const MODELS = deepFreeze({
     priceCacheWrite5mPerMTok: 5,
     priceCacheWrite1hPerMTok: 8,
     priceMeasured: true,
+    // The official page row named in the comment above, read on 2026-09-28.
+    priceSource: {
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-09-28',
+      derivedColumns: [],
+    },
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
@@ -284,6 +353,15 @@ export const MODELS = deepFreeze({
     priceCacheWrite5mPerMTok: 12.5,
     priceCacheWrite1hPerMTok: 20,
     priceMeasured: true,
+    // Re-read on 2026-09-28 and already matched (the PRICING_VERSION notes), so
+    // the figures above did not move; `priceMeasured` defines that read as against
+    // PRICING_SOURCE on PRICING_VERSION, and the 0.025x footnote above is that page's.
+    priceSource: {
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-09-28',
+      derivedColumns: [],
+    },
     tokenizerCoeff: 1.3,
     tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
@@ -323,9 +401,9 @@ export const ROLE_ALIASES = deepFreeze({
  * `MODELS[tier].legacyIds` (the tier resolution and its "no id in two tiers"
  * rule are untouched); every key here must be one of those legacy ids, never a
  * current `id` (that would be a second price for the tier's own row) and never
- * an id no tier resolves. Same five price columns and `priceMeasured` flag as
- * {@link MODELS}, same {@link PRICING_VERSION} stamp. Both rules are pinned in
- * `tests/core/model-catalog.test.js`.
+ * an id no tier resolves. Same five price columns, `priceMeasured` flag and
+ * `priceSource` as {@link MODELS}, same {@link PRICING_VERSION} stamp. Both rules
+ * are pinned in `tests/core/model-catalog.test.js`.
  *
  * @type {Readonly<Record<string, Readonly<{
  *   priceInPerMTok: number,
@@ -333,7 +411,13 @@ export const ROLE_ALIASES = deepFreeze({
  *   priceCacheReadPerMTok: number,
  *   priceCacheWrite5mPerMTok: number,
  *   priceCacheWrite1hPerMTok: number,
- *   priceMeasured: boolean
+ *   priceMeasured: boolean,
+ *   priceSource: Readonly<{
+ *     kind: 'official-table'|'skill-table',
+ *     ref: string,
+ *     checkedAt: string,
+ *     derivedColumns: readonly string[]
+ *   }>
  * }>>>}
  */
 export const ID_PRICES = deepFreeze({
@@ -346,6 +430,13 @@ export const ID_PRICES = deepFreeze({
     priceCacheWrite5mPerMTok: 6.25,
     priceCacheWrite1hPerMTok: 10,
     priceMeasured: true,
+    // The same official page row, read on 2026-09-28 (the comment above).
+    priceSource: {
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-09-28',
+      derivedColumns: [],
+    },
   },
 });
 
@@ -451,11 +542,20 @@ export function tierForModelId(modelId) {
  * row, and `id` is the id that was asked for. Returns null (never throws) for
  * unknown or non-string input.
  *
+ * `source` is the `priceSource` of the row that priced the key (see
+ * {@link MODELS}: an id priced by its tier's row reports the tier row's), or null
+ * if a row records none. It exists only on a lookup against the CURRENT catalog:
+ * `lib/core/pricing-history.js#getPricingAt` reports none for a past stamp, whose
+ * frozen rows hold prices and nothing about where they came from.
+ *
  * @param {string} key - A ROLE_ALIASES key, a tier key, or an exact model id.
  * @returns {Readonly<{
  *   tier: string, id: string, input: number, output: number,
  *   cacheRead: number, cacheWrite5m: number, cacheWrite1h: number,
- *   measured: boolean, version: string
+ *   measured: boolean, version: string,
+ *   source: Readonly<{
+ *     kind: string, ref: string, checkedAt: string, derivedColumns: readonly string[]
+ *   }>|null
  * }>|null} Frozen pricing record, or null if unresolvable.
  *
  * @example
@@ -480,6 +580,7 @@ export function getPricing(key) {
     cacheWrite1h: row.priceCacheWrite1hPerMTok,
     measured: row.priceMeasured,
     version: PRICING_VERSION,
+    source: row.priceSource ?? null,
   });
 }
 

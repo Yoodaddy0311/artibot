@@ -45,10 +45,11 @@ describe('CATALOG_VERSION', () => {
     expect(parsed.toISOString().slice(0, 10)).toBe(CATALOG_VERSION);
   });
 
-  it('2026-09-29 비가격 변경(sonnet id 를 claude-sonnet-5-5 로 승격, claude-sonnet-5 는 legacyIds)을 도장으로 남긴다', () => {
+  it('2026-09-30 비가격 변경(모델·ID 행마다 priceSource 출처 필드 추가)을 도장으로 남긴다', () => {
     // 리터럴 핀: MODELS 의 비가격 값을 바꾸면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
-    // 이전 값: 2026-09-28(opus thinkingMode always-on). 가격 열은 그대로라 PRICING_VERSION 은 안 움직였다.
-    expect(CATALOG_VERSION).toBe('2026-09-29');
+    // 이전 값: 2026-09-29(sonnet id 를 claude-sonnet-5-5 로 승격, claude-sonnet-5 는 legacyIds).
+    // 가격 열은 그대로고 다시 읽지도 않았으므로 PRICING_VERSION 은 안 움직였다(아래 핀).
+    expect(CATALOG_VERSION).toBe('2026-09-30');
   });
 
   it('카탈로그가 비어 있지 않다 (버전이 도장 찍을 대상이 실재하는 분모)', () => {

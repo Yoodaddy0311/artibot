@@ -11,6 +11,7 @@ import {
   ID_PRICES,
   listTiers,
   MODELS,
+  PRICING_SOURCE,
   PRICING_VERSION,
   resolveRole,
   ROLE_ALIASES,
@@ -40,6 +41,26 @@ const PRICE_TABLE = [
   { tier: 'opus', id: 'claude-opus-5-5', input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 },
   { tier: 'fable', id: 'claude-fable-5-1', input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20 },
 ];
+
+/**
+ * What the catalog's OWN comments say about where each price row came from, typed
+ * out: the PRICING_VERSION notes (2026-09-28: opus and sonnet read off
+ * PRICING_SOURCE, haiku and fable re-read the same day and already matched;
+ * 2026-09-29: sonnet 5.5 compared with the claude-api skill price table, cached
+ * 2026-09-25, whose table lists no cache writes), the sonnet / opus row comments and
+ * the ID_PRICES comment (Claude Opus 5 row, official page, 2026-09-28). Literal on
+ * purpose, and NOT imported: the structured field must agree with the prose, and a
+ * value copied from the module under test would agree with itself.
+ */
+const OFFICIAL_2026_09_28 = {
+  kind: 'official-table', ref: PRICING_SOURCE, checkedAt: '2026-09-28', derivedColumns: [],
+};
+const SONNET_SOURCE = {
+  kind: 'skill-table',
+  ref: 'claude-api skill price table, cached 2026-09-25',
+  checkedAt: '2026-09-29',
+  derivedColumns: ['priceCacheWrite5mPerMTok', 'priceCacheWrite1hPerMTok'],
+};
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const catalogSrcPath = path.join(
@@ -289,6 +310,7 @@ describe('model-catalog', () => {
         cacheWrite1h: 8,
         measured: true,
         version: PRICING_VERSION,
+        source: OFFICIAL_2026_09_28,
       });
     });
 
@@ -397,6 +419,7 @@ describe('model-catalog', () => {
         cacheWrite1h: 10,
         measured: true,
         version: PRICING_VERSION,
+        source: OFFICIAL_2026_09_28,
       });
     });
 
@@ -419,6 +442,8 @@ describe('model-catalog', () => {
         cacheWrite1h: 4,
         measured: true,
         version: PRICING_VERSION,
+        // No ID_PRICES row for this id, so it reports the TIER row's source.
+        source: SONNET_SOURCE,
       });
     });
 
@@ -527,6 +552,154 @@ describe('model-catalog', () => {
         id: 'claude-sonnet-5',
       });
       expect(getPricing('balanced')).toEqual(getPricing('sonnet'));
+    });
+  });
+
+  /**
+   * `priceSource`: where the five price columns of a row were read from, as data a
+   * caller can read instead of a code comment.
+   *
+   * WHAT THIS BLOCK CANNOT SEE. Whether any of it is TRUE: a date, a label and a
+   * kind are typed by whoever edits the catalog and no test can re-read the page
+   * or the skill table (data policy: nothing here fetches anything). The literal
+   * pins below agree with the catalog's own prose as of 2026-09-30; they do not
+   * prove the prose. The official-table date is tied to PRICING_VERSION for every
+   * MEASURED row, tier or legacy id, because that is what `priceMeasured` already
+   * claims; a row that is not measured is not held to it.
+   */
+  describe('priceSource (where each price row came from)', () => {
+    const SOURCE_KINDS = ['official-table', 'skill-table'];
+    const PRICE_COLUMNS = [
+      'priceInPerMTok',
+      'priceOutPerMTok',
+      'priceCacheReadPerMTok',
+      'priceCacheWrite5mPerMTok',
+      'priceCacheWrite1hPerMTok',
+    ];
+    // The only derivation this catalog documents: a cache-write column as a
+    // standard multiple of input. Anything else that wants to be `derived` has to
+    // be added here, on purpose.
+    const DERIVED_MULTIPLES = { priceCacheWrite5mPerMTok: 1.25, priceCacheWrite1hPerMTok: 2 };
+
+    const rows = [
+      ...listTiers().map((tier) => [`tier ${tier}`, getModel(tier)]),
+      ...Object.entries(ID_PRICES).map(([id, row]) => [`id ${id}`, row]),
+    ];
+    const rowOf = Object.fromEntries(rows);
+
+    const EVIDENCE = {
+      'tier haiku': OFFICIAL_2026_09_28,
+      'tier sonnet': SONNET_SOURCE,
+      'tier opus': OFFICIAL_2026_09_28,
+      'tier fable': OFFICIAL_2026_09_28,
+      'id claude-opus-5': OFFICIAL_2026_09_28,
+    };
+
+    it('covers every tier row and every ID_PRICES row, and the evidence table names exactly those rows', () => {
+      // The denominator: a row added to the catalog without a pin here is red, and
+      // so is a pin for a row that is gone.
+      expect(rows.map(([label]) => label).sort()).toEqual(Object.keys(EVIDENCE).sort());
+      expect(rows).toHaveLength(5);
+    });
+
+    it.each(rows)('%s carries a frozen priceSource with exactly kind, ref, checkedAt, derivedColumns', (_label, row) => {
+      const source = row.priceSource;
+      expect(source).toBeTypeOf('object');
+      expect(Object.keys(source).sort()).toEqual(['checkedAt', 'derivedColumns', 'kind', 'ref']);
+      expect(Object.isFrozen(source)).toBe(true);
+      expect(Object.isFrozen(source.derivedColumns)).toBe(true);
+    });
+
+    it.each(rows)('%s: kind is in the closed vocabulary, ref is a scheme-less label, checkedAt is a real date', (_label, row) => {
+      const { kind, ref, checkedAt } = row.priceSource;
+      expect(SOURCE_KINDS).toContain(kind);
+      expect(typeof ref).toBe('string');
+      expect(ref.length).toBeGreaterThan(0);
+      // The outbound guard fails model-catalog.js on any URL literal, comments and
+      // strings included: a label is a bare path or a name, never a link.
+      expect(ref).not.toMatch(/^[a-z][a-z0-9+.-]*:\/\//i);
+      expect(checkedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(new Date(`${checkedAt}T00:00:00Z`).toISOString().slice(0, 10)).toBe(checkedAt);
+    });
+
+    it('the JSDoc typedefs name the same kinds as the vocabulary (a new kind lands in both)', () => {
+      const typedefs = [...catalogSrc.matchAll(/^\s*\*\s+kind: ('[^']+'(?:\|'[^']+')*),$/gm)];
+      // One for MODELS and one for ID_PRICES.
+      expect(typedefs.length).toBeGreaterThanOrEqual(2);
+      for (const match of typedefs) {
+        expect(match[1].split('|').map((s) => s.slice(1, -1)).sort()).toEqual([...SOURCE_KINDS].sort());
+      }
+    });
+
+    it.each(rows)('%s: derivedColumns are unique price columns, and each is really the standard multiple of input', (_label, row) => {
+      const { derivedColumns } = row.priceSource;
+      expect(new Set(derivedColumns).size).toBe(derivedColumns.length);
+      for (const column of derivedColumns) {
+        expect(PRICE_COLUMNS).toContain(column);
+        // Closed allowlist: a derivation this test does not know is red, not waved through.
+        expect(Object.keys(DERIVED_MULTIPLES)).toContain(column);
+        expect(row[column]).toBeCloseTo(DERIVED_MULTIPLES[column] * row.priceInPerMTok, 10);
+      }
+      // A row that read nothing would claim a source for numbers nobody looked at.
+      expect(derivedColumns.length).toBeLessThan(PRICE_COLUMNS.length);
+    });
+
+    it.each(Object.entries(EVIDENCE))('%s carries the source its own comments evidence', (label, expected) => {
+      expect(rowOf[label].priceSource).toEqual(expected);
+    });
+
+    it('an official-table source names PRICING_SOURCE, the page the catalog says its price columns come from', () => {
+      for (const [, row] of rows) {
+        if (row.priceSource.kind === 'official-table') expect(row.priceSource.ref).toBe(PRICING_SOURCE);
+      }
+    });
+
+    it('a measured official-table row was read on PRICING_VERSION; a row that was not re-read must not be measured', () => {
+      // `priceMeasured: true` is defined as "compared against PRICING_SOURCE on
+      // PRICING_VERSION", for a tier row and a legacy ID_PRICES row alike. So when
+      // PRICING_VERSION moves, each official-table row is one of two things: re-read
+      // (its checkedAt moves to the new stamp) or not re-read, which it says with
+      // priceMeasured: false. The rule is written at PRICING_VERSION in
+      // lib/core/model-catalog.js. Copying the new date onto a row nobody re-read
+      // would be a false claim, and this case is what stops it.
+      for (const [label, row] of rows) {
+        if (row.priceMeasured === true && row.priceSource.kind === 'official-table') {
+          expect(
+            row.priceSource.checkedAt,
+            `${label} is measured but was not read on ${PRICING_VERSION}: re-read it and move checkedAt, `
+              + 'or set priceMeasured to false (rule at PRICING_VERSION)',
+          ).toBe(PRICING_VERSION);
+        }
+      }
+    });
+
+    it('only the sonnet tier reads its base columns from the skill table, and only its cache writes are derived', () => {
+      for (const tier of listTiers()) {
+        const { kind, derivedColumns } = getModel(tier).priceSource;
+        expect(kind === 'skill-table', tier).toBe(tier === 'sonnet');
+        expect(derivedColumns.length > 0, tier).toBe(tier === 'sonnet');
+      }
+    });
+
+    it('getPricing reports the source of the row that prices the key', () => {
+      expect(getPricing('opus').source).toEqual(OFFICIAL_2026_09_28);
+      expect(getPricing('frontier').source).toBe(MODELS.opus.priceSource);
+      expect(getPricing('claude-opus-5-5').source).toBe(MODELS.opus.priceSource);
+      // A legacy id with its own ID_PRICES row reads THAT row, not its tier's.
+      expect(getPricing('claude-opus-5').source).toBe(ID_PRICES['claude-opus-5'].priceSource);
+      expect(getPricing('claude-opus-5').source).not.toBe(MODELS.opus.priceSource);
+      // A legacy id with no row of its own is priced by the tier row and reports the
+      // tier row's source: the row's latest comparison, not one made for that id.
+      expect(getPricing('claude-sonnet-5').source).toBe(MODELS.sonnet.priceSource);
+      expect(getPricing('claude-sonnet-5-5').source).toBe(MODELS.sonnet.priceSource);
+    });
+
+    it('every getPricing record carries a frozen source, for every tier, role and id', () => {
+      for (const key of [...listTiers(), ...Object.keys(ROLE_ALIASES), 'claude-opus-5', 'claude-sonnet-5']) {
+        const { source } = getPricing(key);
+        expect(source, key).toBeTruthy();
+        expect(Object.isFrozen(source), key).toBe(true);
+      }
     });
   });
 

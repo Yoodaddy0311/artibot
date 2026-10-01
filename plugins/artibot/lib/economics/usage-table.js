@@ -95,11 +95,15 @@
  *    means the catalog row's `priceMeasured` flag is set — the catalog defines
  *    that as "its five price columns were compared with the official page on
  *    `PRICING_VERSION`". Any change after that date is unchecked here.
- *  - WHICH SOURCE A GIVEN ROW WAS COMPARED WITH. The catalog documents an
- *    exception in a code comment (the current sonnet id: input, output and cache
- *    read compared with a skill price table rather than the page, cache writes
- *    derived from input), and keeps no field a reader of `getPricing` could see.
- *    So this module reports that the flag is set, never that the page was read.
+ *  - WHETHER A SOURCE LABEL IS TRUE. The catalog records, per price row, where
+ *    its figures were compared (`priceSource`: kind, label, date, and the columns
+ *    computed instead of read - the current sonnet id's input, output and cache
+ *    read against a skill price table rather than the page, its cache writes
+ *    derived from input), and this module carries that record as
+ *    `pricing.models[].price_source`. It is the catalog's statement, typed by
+ *    whoever edited it: nothing here re-reads the page or the table, so the
+ *    table proves the record was carried, never that it is right. An id priced by
+ *    its tier's row shows that row's source, not one made for that id.
  *  - THE 1-HOUR CACHE TTL, THINKING TOKENS AS A SEPARATE COST, and whether a
  *    subscription bills anything at all.
  *
@@ -604,7 +608,26 @@ function kindBlock(kind) {
   };
 }
 
-/** What the numbers were priced with: source, its date, and the unit prices per model. */
+/**
+ * The catalog's structured source of one price row (`getPricing(id).source`), in
+ * this table's snake_case, or `null` when the model is unknown or its row records
+ * none - or something that is not the record: a source with no kind, label or
+ * date says nothing, and is not passed on as if it did. A COPY: the catalog's own
+ * object is frozen and shared, and this result is plain data a caller may hold or
+ * change.
+ */
+function priceSourceBlock(pricing) {
+  const s = pricing?.source;
+  if (!isObj(s) || str(s.kind) === null || str(s.ref) === null || str(s.checkedAt) === null) return null;
+  return {
+    kind: s.kind,
+    ref: s.ref,
+    checked_at: s.checkedAt,
+    derived_columns: Array.isArray(s.derivedColumns) ? [...s.derivedColumns] : [],
+  };
+}
+
+/** What the numbers were priced with: source, its date, and the unit prices and source per model. */
 function pricingBlock(rows, ports) {
   return {
     basis: PRICING_BASIS,
@@ -625,6 +648,7 @@ function pricingBlock(rows, ports) {
           cache_read: p.cacheRead,
           cache_write_5m: p.cacheWrite5m,
         },
+        price_source: priceSourceBlock(p),
       };
     }),
   };

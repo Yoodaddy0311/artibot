@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { ledgerFilePath } from '../../lib/runtime/ledger.js';
+import { DISPATCHER_HEADROOM_MS } from '../../scripts/hooks/_dispatcher-utils.js';
 
 /**
  * PostToolUse dispatcher integration tests.
@@ -154,27 +155,30 @@ afterAll(() => {
  *
  * WHAT STAYS STRICT. `failed` keeps its meaning (a handler that timed out or
  * failed to spawn) and the assertions on it are unchanged. A handler that really
- * hangs still fails these cases: one whose scaled budget is under the 35 s spawn
- * timeout below is recorded in `failed`, and a longer one outlasts that timeout
- * so `status` goes non-zero. The delay-injection cases at the bottom of this
- * file pin both directions: a delay past the SHIPPED budget IS recorded in
+ * hangs still fails these cases: every scaled budget is held to 27 s (see WHY ONLY
+ * THIS SUITE), under the 35 s spawn timeout below, so a hung handler is recorded in
+ * `failed` and never outlasts that timeout. The delay-injection cases at the bottom
+ * of this file pin both directions: a delay past the SHIPPED budget IS recorded in
  * `failed`, and the same delay under this scale is NOT.
  *
  * WHAT THIS NO LONGER SEES. Inside these cases the effective timeout is 10x the
- * declared budget, so a handler that merely got slower (say 0.3 s to 5 s, inside
- * its 10x) is no longer reported here. It was only ever reported here when the
- * machine happened to be busy, which is the coupling being removed; declared
- * budgets are gated by tests/firewall/hook-timeout-budget.test.js and measured
- * latency by scripts/bench/hook-latency.mjs.
+ * declared budget, up to 27 s, so a handler that merely got slower (say 0.3 s to
+ * 5 s, inside its 10x) is no longer reported here. It was only ever reported here
+ * when the machine happened to be busy, which is the coupling being removed;
+ * declared budgets are gated by tests/firewall/hook-timeout-budget.test.js and
+ * measured latency by scripts/bench/hook-latency.mjs.
  *
  * WHY ONLY THIS SUITE. PostToolUse is the only dispatcher that opts in (it passes
  * `allowTimeoutScale: true` to spawnHook); the other four keep their declared
  * budgets whatever the variable holds, since a stretched budget there can outlive
  * the host's slot timeout and lose the merged output (Stop's blocking decisions
- * included). Here it is bounded, not free: the slot is 30 s and post-edit-format is
- * declared 10 s, so at 10x a child that REALLY hangs gets the dispatcher cancelled
- * first, and a quality-gate decision:'block' goes with it. The timer-spy case at
- * the bottom pins that the scale IS applied.
+ * included). Here it is bounded: spawnHook clamps each scaled budget to the slot
+ * (30 s, hooks/hooks.json) minus the 3 s dispatcher headroom, so at 10x every
+ * Edit-route budget is 27 s and a child that REALLY hangs is cut before the host's
+ * slot ends. Before that clamp, post-edit-format (declared 10 s) was 100 s at 10x
+ * and the dispatcher was cancelled first, taking a quality-gate decision:'block'
+ * with it. The timer-spy cases at the bottom pin the clamp, that the dispatcher's
+ * slot is the one hooks.json holds, and that the scale IS applied.
  */
 const GENEROUS_TIMEOUT_SCALE = '10';
 
@@ -719,7 +723,7 @@ describe('_posttooluse-dispatcher timeout accounting (delay injection)', () => {
     expect(lines.filter((l) => l.event === 'ledger.rejected')).toEqual([]);
     expect(fired).toHaveLength(1);
     expect(fired[0].data.count).toBe(6);
-    // Strict, and load-proof: the handler is late by design, yet inside 10x its budget.
+    // Strict, and load-proof: the handler is late by design, yet inside its scaled budget (27 s).
     expect(
       fired[0].data.failed,
       'a slow handler inside the scaled budget must not be reported; is ARTIBOT_DISPATCH_TIMEOUT_SCALE still set by spawnOptions()?',
@@ -752,13 +756,34 @@ const TIMER_SPY_PRELOAD = [
 ].join('\n');
 
 /**
- * POSITIVE control for the opt-in: the test-only budget scale IS applied on this
- * dispatcher, the one place it is meant to be (the Stop and SubagentStop suites
- * hold the matching negative case). It reads the delay the DISPATCHER hands to
- * setTimeout for each selected handler, armed synchronously at spawn, so it does
- * not depend on machine load. Unlike the delay-injection pair above it is also red
- * for a change that keeps the behaviour but drops the scale or the opt-in. Only the
- * Edit route is driven.
+ * The host slot of the PostToolUse dispatcher in ms: the `timeout` (seconds) of the
+ * hooks/hooks.json entry that registers it. READ from the file and never typed, so
+ * a change of the slot fails this suite instead of the dispatcher quietly keeping
+ * the figure it was written against (the dispatcher names its own copy; this read
+ * is what pins the two together).
+ */
+function hostSlotMs() {
+  const hooksJson = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf-8'));
+  const entries = (hooksJson.hooks?.PostToolUse ?? [])
+    .flatMap((group) => group?.hooks ?? [])
+    .filter((h) => typeof h?.command === 'string' && h.command.includes('_posttooluse-dispatcher.js'));
+  // Exactly one: none would make every case below vacuous, two would make "the" slot ambiguous.
+  expect(entries, 'hooks.json registers the PostToolUse dispatcher exactly once').toHaveLength(1);
+  return entries[0].timeout * 1000;
+}
+
+/** How many times `value` is in `list`. */
+const occurrences = (list, value) => list.filter((v) => v === value).length;
+
+/**
+ * The test-only budget scale IS applied on this dispatcher, the one place it is
+ * meant to be (the Stop and SubagentStop suites hold the matching negative case),
+ * AND it is bounded: no scaled child timer is armed later than the host slot minus
+ * the dispatcher headroom. It reads the delay the DISPATCHER hands to setTimeout
+ * for each selected handler, armed synchronously at spawn, so it does not depend
+ * on machine load. Unlike the delay-injection pair above it is also red for a
+ * change that keeps the behaviour but drops the scale, the opt-in or the slot.
+ * Only the Edit route is driven.
  */
 describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)', () => {
   let preloadPath;
@@ -768,15 +793,9 @@ describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)',
     writeFileSync(preloadPath, TIMER_SPY_PRELOAD, 'utf-8');
   });
 
-  it('arms every Edit-route handler at 10x its declared budget with the scale at its cap', async () => {
-    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
-    const selected = mod.selectHooks('Edit');
-    expect(selected.length, 'the Edit route selects handlers').toBeGreaterThan(0);
-    const declared = selected.map((h) => h.timeoutMs);
-    const scaled = declared.map((ms) => ms * 10);
-    expect(scaled.filter((ms) => declared.includes(ms))).toEqual([]);
-
-    const spyFile = path.join(sandboxHome, 'timer-spy-posttooluse-cap.txt');
+  /** One Edit dispatch with the scale set to `scale`; the delays the dispatcher armed. */
+  function armedDelaysAt(scale) {
+    const spyFile = path.join(sandboxHome, `timer-spy-posttooluse-${scale}.txt`);
     const preload = `--require "${preloadPath.split(path.sep).join('/')}"`;
     const { status } = runDispatcher({
       tool: 'Edit',
@@ -785,15 +804,74 @@ describe('_posttooluse-dispatcher under the test-only budget scale (timer spy)',
       NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '),
       ARTIBOT_TEST_TIMER_SPY_ONLY: '_posttooluse-dispatcher.js',
       ARTIBOT_TEST_TIMER_SPY_FILE: spyFile,
-      ARTIBOT_DISPATCH_TIMEOUT_SCALE: '10',
+      ARTIBOT_DISPATCH_TIMEOUT_SCALE: String(scale),
     });
     const armed = existsSync(spyFile)
       ? readFileSync(spyFile, 'utf-8').split('\n').filter(Boolean).map(Number)
       : [];
+    return { status, armed };
+  }
+
+  /** The Edit route's declared budgets, and what each becomes at `scale` under the ceiling. */
+  async function editBudgets(scale) {
+    const mod = await import('../../scripts/hooks/_posttooluse-dispatcher.js');
+    const selected = mod.selectHooks('Edit');
+    expect(selected.length, 'the Edit route selects handlers').toBeGreaterThan(0);
+    const ceiling = hostSlotMs() - DISPATCHER_HEADROOM_MS;
+    const declared = selected.map((h) => h.timeoutMs);
+    return { ceiling, declared, expected: declared.map((ms) => Math.min(ms * scale, ceiling)) };
+  }
+
+  /**
+   * The `>=` counts in the cases below are LOWER bounds: they still hold when an
+   * extra timer is armed beside the right ones (a handler armed twice, or one that
+   * skipped the clamp while another carried it). This is the upper bound: no timer
+   * the dispatcher armed outlasts the ceiling.
+   *
+   * The whole armed list is read as handler timers because the dispatcher process
+   * arms one per selected handler and nothing else (measured on the Edit route at
+   * scales 10, 3 and 1, 2026-09-30). A legitimate non-handler timer above the
+   * ceiling, added later, turns this red: decide then whether it belongs, not
+   * whether to loosen the bound. The length check comes first so the max is never
+   * taken over an empty list, where Math.max is -Infinity and passes everything.
+   */
+  function expectNoTimerPastCeiling(armed, handlerCount, ceiling) {
+    expect(armed.length, 'at least one timer armed per selected handler').toBeGreaterThanOrEqual(handlerCount);
+    expect(Math.max(...armed), 'the slowest timer the dispatcher armed, in ms').toBeLessThanOrEqual(ceiling);
+  }
+
+  it('arms every Edit-route handler at min(10x its declared budget, slot minus headroom) with the scale at its cap', async () => {
+    const { ceiling, declared, expected } = await editBudgets(10);
+    // Not vacuous: at the cap the ceiling binds for some handler, and no armed value
+    // equals a declared budget, so a dispatcher that dropped the scale or the opt-in fails below.
+    expect(declared.map((ms) => ms * 10).some((ms) => ms > ceiling)).toBe(true);
+    expect(expected.filter((ms) => declared.includes(ms))).toEqual([]);
+
+    const { status, armed } = armedDelaysAt(10);
 
     expect(status).toBe(0);
-    // Inclusion of the 10x values: an empty spy file, or a dispatcher that dropped
-    // the opt-in (and so armed the declared budgets), both fail this line.
-    expect(armed).toEqual(expect.arrayContaining(scaled));
+    // Every handler carries its expected budget: counted, because arrayContaining
+    // would be satisfied by ONE handler at 27000 while the rest stayed unbounded.
+    for (const ms of new Set(expected)) {
+      expect(occurrences(armed, ms), `handlers armed at ${ms} ms`).toBeGreaterThanOrEqual(occurrences(expected, ms));
+    }
+    // And nothing extra rode along unclamped.
+    expectNoTimerPastCeiling(armed, expected.length, ceiling);
+  });
+
+  it('keeps the plain product where it fits and clamps only what would outlast the slot (scale 3)', async () => {
+    const { ceiling, declared, expected } = await editBudgets(3);
+    // Mixed on purpose: the clamp binds for post-edit-format (3 x 10 s) and for nothing else.
+    expect(declared.map((ms) => ms * 3).some((ms) => ms > ceiling)).toBe(true);
+    expect(declared.map((ms) => ms * 3).some((ms) => ms <= ceiling)).toBe(true);
+
+    const { status, armed } = armedDelaysAt(3);
+
+    expect(status).toBe(0);
+    for (const ms of new Set(expected)) {
+      expect(occurrences(armed, ms), `handlers armed at ${ms} ms`).toBeGreaterThanOrEqual(occurrences(expected, ms));
+    }
+    // The product 3 x 10 s = 30000 is the one an unclamped extra would arm.
+    expectNoTimerPastCeiling(armed, expected.length, ceiling);
   });
 });
