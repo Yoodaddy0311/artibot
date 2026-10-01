@@ -23,6 +23,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 
 const PLUGIN_ROOT = path.resolve(
@@ -210,9 +211,12 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
   });
 
   /**
-   * Isolation self-check. The suite drives the real hook, which persists
-   * `runtime/*.json` and reads `artibot.config.json` from its plugin root; both
-   * must land in the sandbox, not the repo.
+   * Isolation self-check. The suite drives the real hook, which persists runtime
+   * state and reads `artibot.config.json` from its plugin root; the config read
+   * must land in the sandbox, not the repo, and the state must land in the STATE
+   * dir — the per-worker sandbox `tests/setup/state-dir.js` points it at — rather
+   * than in the plugin root (O2: `<pluginRoot>/runtime/` is a version-scoped cache
+   * directory in a marketplace install, so the hook no longer writes there).
    *
    * Blind spots this does NOT cover: writes reaching the repo through the
    * linked directories (`lib/`, `commands/`, `skills/`, `agents/` are
@@ -220,12 +224,15 @@ describe('runtime-prompt effort + task-budget prefix injection', () => {
    * exercised code paths writes there), and writes to `<home>/.claude/`, which
    * this suite was measured not to make.
    */
-  it('leaves the repo config untouched and redirects runtime writes to the sandbox', () => {
+  it('leaves the repo config untouched and redirects runtime writes to the state dir', () => {
     const digestNow = createHash('sha256').update(readFileSync(REAL_CONFIG_PATH)).digest('hex');
     expect(digestNow).toBe(realConfigDigestAtStart);
 
-    // Positive proof the redirection actually took effect: had CLAUDE_PLUGIN_ROOT
-    // still pointed at the repo, these writes would have gone there instead.
-    expect(existsSync(path.join(sandboxRoot, 'runtime'))).toBe(true);
+    // Positive proof the state went where it should: the hook ran above with no session
+    // id, so its effort/budget/token records are the flat files under the state dir …
+    const stateRuntime = path.join(resolveArtibotDir(), 'runtime');
+    expect(existsSync(path.join(stateRuntime, 'current-effort.json'))).toBe(true);
+    // … and NOT under the plugin root it was handed, which used to receive them.
+    expect(existsSync(path.join(sandboxRoot, 'runtime'))).toBe(false);
   });
 });

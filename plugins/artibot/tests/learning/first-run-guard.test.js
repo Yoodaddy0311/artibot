@@ -4,7 +4,7 @@
  * Uses a temp state file per-test to isolate global-run counter state.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,6 +16,7 @@ import {
   resetFirstRunState,
   shouldObserveOnly,
 } from '../../lib/learning/first-run-guard.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
 
 // ---------------------------------------------------------------------------
 // Test harness: each test gets a fresh temp dir + absolute statePath override
@@ -183,5 +184,111 @@ describe('_internals', () => {
     expect(_internals.getObserveRuns({})).toBe(5);
     expect(_internals.getObserveRuns({ ago: { selfControl: { firstRunMode: { observeRuns: -1 } } } })).toBe(5);
     expect(_internals.getObserveRuns({ ago: { selfControl: { firstRunMode: { observeRuns: 7 } } } })).toBe(7);
+  });
+});
+
+// O2 — every case above hands an ABSOLUTE `statePath`, so none of them reaches the path
+// production actually uses: the shipped config value is the RELATIVE `runtime/first-run-state.json`.
+// That one resolves under the artibot STATE dir (`~/.claude/artibot`), not the plugin root — the
+// counter is GLOBAL (it counts runs since INSTALL) and a plugin root that is a version-scoped
+// cache directory made it restart at zero on every update (measured 2026-09-30: the file existed
+// in 3 of 4 cache version dirs).
+describe('default (relative) statePath — the state dir, and the legacy copy (O2)', () => {
+  let base;
+  let stateDir;
+  let restoreState;
+  const REL = 'runtime/first-run-state.json';
+  const counter = (globalRuns) => JSON.stringify({ globalRuns, features: {}, transitions: [] });
+
+  beforeEach(() => {
+    base = mkdtempSync(path.join(tmpdir(), 'artibot-first-run-o2-'));
+    stateDir = path.join(base, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    restoreState = pointStateDirAt(stateDir);
+  });
+
+  afterEach(() => {
+    restoreState();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  function seed(root, globalRuns) {
+    const file = path.join(root, REL);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, counter(globalRuns));
+    return file;
+  }
+
+  it('resolves under the state dir, not under the plugin root it is handed', () => {
+    const pluginRoot = path.join(base, 'plugin');
+    expect(_internals.resolveStatePath({}, { pluginRoot })).toBe(path.join(stateDir, REL));
+    expect(_internals.resolveStatePath({ ago: { selfControl: { firstRunMode: { statePath: 'runtime/other.json' } } } }))
+      .toBe(path.join(stateDir, 'runtime', 'other.json'));
+  });
+
+  it('counts there, and leaves the plugin root alone', async () => {
+    const pluginRoot = path.join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+
+    const first = await bumpRunCounter('autoCommit', {}, { pluginRoot });
+
+    expect(first.runsSoFar).toBe(1);
+    expect(JSON.parse(readFileSync(path.join(stateDir, REL), 'utf8')).globalRuns).toBe(1);
+    expect(existsSync(path.join(pluginRoot, 'runtime'))).toBe(false);
+  });
+
+  it('a caller that passes no pluginRoot and one that passes the same root see ONE counter', async () => {
+    const pluginRoot = path.join(base, 'plugin');
+    mkdirSync(pluginRoot, { recursive: true });
+    const saved = process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    try {
+      await bumpRunCounter('a', {}); // session-start / wakeup style: no opts
+      await bumpRunCounter('b', {}, { pluginRoot }); // cron-runner style: explicit root
+      expect((await getFirstRunState({})).runsSoFar).toBe(2);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = saved;
+    }
+  });
+
+  it('carries a counter left in the plugin root over, once, and keeps counting from it', async () => {
+    const pluginRoot = path.join(base, 'plugin');
+    seed(pluginRoot, 3);
+
+    expect((await getFirstRunState({}, { pluginRoot })).runsSoFar).toBe(3);
+    expect(JSON.parse(readFileSync(path.join(stateDir, REL), 'utf8')).globalRuns).toBe(3);
+
+    const next = await bumpRunCounter('autoCommit', {}, { pluginRoot });
+    expect(next.runsSoFar).toBe(4);
+    // a COPY: the legacy file is left as it was
+    expect(JSON.parse(readFileSync(path.join(pluginRoot, REL), 'utf8')).globalRuns).toBe(3);
+  });
+
+  it('carries the PREVIOUS version\'s counter over when the running plugin root is a version directory', async () => {
+    const cache = path.join(base, 'cache', 'artibot', 'artibot');
+    const running = path.join(cache, '4.71.0');
+    mkdirSync(running, { recursive: true });
+    seed(path.join(cache, '4.70.0'), 4);
+
+    expect((await getFirstRunState({}, { pluginRoot: running })).runsSoFar).toBe(4);
+  });
+
+  it('never overwrites a counter that is already in the state dir', async () => {
+    const pluginRoot = path.join(base, 'plugin');
+    seed(pluginRoot, 1);
+    seed(stateDir, 5);
+
+    expect((await getFirstRunState({}, { pluginRoot })).runsSoFar).toBe(5);
+  });
+
+  it('an absolute statePath is used as given and never migrated into', async () => {
+    const pluginRoot = path.join(base, 'plugin');
+    seed(pluginRoot, 3);
+    const explicit = path.join(base, 'mine', 'first-run.json');
+    const config = { ago: { selfControl: { firstRunMode: { statePath: explicit } } } };
+
+    expect((await getFirstRunState(config, { pluginRoot })).runsSoFar).toBe(0);
+    expect(existsSync(explicit)).toBe(false);
   });
 });

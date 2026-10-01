@@ -45,6 +45,7 @@ import {
 } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REAL_CONFIG_PATH = path.join(PLUGIN_ROOT, 'artibot.config.json');
@@ -60,6 +61,7 @@ const LINKED_DIRS = ['lib', 'commands', 'skills', 'agents'];
 let sandboxRoot = '';
 let effortFile = '';
 let savedEnv;
+let restoreState;
 
 beforeAll(() => {
   sandboxRoot = mkdtempSync(path.join(tmpdir(), 'artibot-effort-order-'));
@@ -83,6 +85,12 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  // O2: effort state lives under the artibot STATE dir, not under the plugin root. These
+  // payloads carry no session id, so the hook writes the FLAT file there; pointing the
+  // state dir at the sandbox (the install.sh layout: state dir == plugin root) keeps
+  // `effortFile` — and with it the stale-seed + read-after-write ordering this suite
+  // exists to pin — at `<sandbox>/runtime/current-effort.json`.
+  restoreState = pointStateDirAt(sandboxRoot);
   // Seed a STALE effort file as if left over from a prior prompt.
   writeFileSync(
     effortFile,
@@ -104,6 +112,7 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  restoreState();
 });
 
 describe('runtime-prompt — effort resolved before pipeline (FIX-2 ordering)', () => {

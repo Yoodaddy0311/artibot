@@ -12,29 +12,39 @@
  *   - Concurrency safe: atomic rename per write, read-modify-write merge
  *     tolerates lost updates by keeping the higher counter.
  *
+ * WHERE THE COUNTER LIVES (O2). It is GLOBAL — one per user, the point being that
+ * it counts runs since INSTALL — so it sits under the artibot state dir
+ * (`<state dir>/runtime/first-run-state.json`, `~/.claude/artibot`), not under the
+ * plugin root. In a marketplace install the plugin root is a version-scoped cache
+ * directory, and a counter kept there restarted at zero on every update (measured
+ * 2026-09-30: `first-run-state.json` in 3 of 4 cache version dirs). A relative
+ * `statePath` from config resolves under the state dir; an absolute one is used as
+ * given. A counter the previous version left is carried over once
+ * (`lib/core/runtime-state.js`, copy-if-absent), from `opts.pluginRoot` when a
+ * caller passes one and from the running plugin root otherwise.
+ *
  * @module lib/learning/first-run-guard
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
 
 import { atomicWriteJsonSync } from '../core/file.js';
-import { getPluginRoot } from '../core/platform.js';
+import { resolveGlobalStateFile } from '../core/runtime-state.js';
 
 const DEFAULT_OBSERVE_RUNS = 5;
 const DEFAULT_STATE_PATH = 'runtime/first-run-state.json';
 
 /**
- * Resolve the absolute path to the first-run state file.
+ * Resolve the absolute path to the first-run state file, migrating a legacy
+ * plugin-root copy into place the first time it is asked for.
  * @param {object} [config]
- * @param {{pluginRoot?: string}} [opts]
+ * @param {{pluginRoot?: string}} [opts] - `pluginRoot` names only where a LEGACY copy
+ *   may be; it does not decide where the state lives.
  * @returns {string}
  */
 function resolveStatePath(config, opts = {}) {
   const rel = config?.ago?.selfControl?.firstRunMode?.statePath || DEFAULT_STATE_PATH;
-  if (path.isAbsolute(rel)) return rel;
-  const root = opts.pluginRoot || getPluginRoot();
-  return path.join(root, rel);
+  return resolveGlobalStateFile(rel, { pluginRoot: opts.pluginRoot });
 }
 
 /**

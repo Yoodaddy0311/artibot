@@ -62,9 +62,9 @@ function makeTaskId(nowFn) {
  * fixture record would be expired or fresh depending on when the suite ran.
  *
  * R2b: the budget is RECOMPUTED from the accepted record's effort
- * (`task-budget.js#readEffortSnapshot`), never read from the shared
- * `runtime/current-task-budget.json`. That file has no identity, so reading it
- * paired this session's effort with whichever session wrote the budget last.
+ * (`task-budget.js#readEffortSnapshot`), never read back from `current-task-budget.json`
+ * (one per session since O2, under runtime/sessions/<sid>/; before O2 ONE file for every
+ * session, so reading it paired this session's effort with the last writer's budget).
  * `cfg` is the config this middleware already read once for the plan, so the
  * meta budget and the plan's `budgetResolver` use one budget map.
  *

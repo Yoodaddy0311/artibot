@@ -689,9 +689,22 @@ describe('_userprompt-dispatcher (integration)', () => {
       cwd: sandboxCwd, stdio: ['pipe', 'pipe', 'pipe'],
     })).toThrow();
 
-    // Canary: this slot writes no learning store today. A future hook that does
+    // Canary: this slot writes no LEARNING store today. A future hook that does
     // will trip this in a temp dir rather than in the developer's real store.
-    expect(existsSync(path.join(sandboxHome, '.claude'))).toBe(false);
+    //
+    // O2 changed what "nothing under HOME" can mean. Runtime state — the session's
+    // effort / task-budget / token-usage records and the global user profile — now lives
+    // under the artibot STATE dir, `<home>/.claude/artibot/runtime/`, instead of the plugin
+    // root (a version-scoped cache directory in a marketplace install). So a prompt run
+    // here DOES create `<sandboxHome>/.claude/artibot/runtime`; that is where it belongs,
+    // and the sandbox HOME is exactly what keeps it out of the developer's own. The canary
+    // is therefore an allowlist, not an absence check: `.claude` may hold `artibot`, and
+    // `artibot` may hold `runtime` — anything else is a new writer.
+    const claudeDir = path.join(sandboxHome, '.claude');
+    if (existsSync(claudeDir)) {
+      expect(readdirSync(claudeDir)).toEqual(['artibot']);
+      expect(readdirSync(path.join(claudeDir, 'artibot'))).toEqual(['runtime']);
+    }
   });
 
   /**

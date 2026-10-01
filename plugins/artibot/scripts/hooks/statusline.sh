@@ -4,7 +4,7 @@
 # Line 1: [model] 📁 dir 🌿 branch ✎dirty | 🤖 agent
 # Line 2: ctx% bar | 💰 cost ⏱ time | artibot vX.Y.Z ✓eval | ⚡ cog-mode
 #
-# Input:  JSON via stdin (model, context_window, cost, agent, worktree)
+# Input:  JSON via stdin (session_id, model, context_window, cost, agent, worktree)
 # Output: 2 lines to stdout
 # Cache:  /tmp/artibot-statusline-cache (5s TTL for git calls)
 
@@ -106,6 +106,141 @@ FAST_ON=$(jq_get '.fast_mode' '')
 # ─── Resolve plugin root (script lives at <plugin>/scripts/hooks/) ────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# >>> artibot-runtime-state >>>
+# ─── Where the hooks keep their state (O2) ───────────────────────────────────
+# GLOBAL and SESSION hook state lives under the artibot STATE dir — the directory
+# lib/core/config.js#resolveArtibotDir() returns, ~/.claude/artibot — NOT under
+# the plugin root. A marketplace install's plugin root is a version-scoped cache
+# directory that Claude Code replaces on every update, and the hooks run from it;
+# this script, wired from ~/.claude/artibot, used to read
+# $PLUGIN_ROOT/runtime/*.json while the hooks wrote the same names to THEIR plugin
+# root (measured 2026-09-30: the team and token files sat in the cache version
+# dirs, never in ~/.claude/artibot/runtime), so those segments could not render.
+#
+# Session-scoped files are $STATE_ROOT/runtime/sessions/<session_id>/<name>. This
+# script gets session_id on stdin and reads ITS OWN session's file — and nothing else:
+# a session with no file of its own shows nothing, never a flat file another session
+# or a pre-O2 hook left (a flat teammate roster or token count has no owner; reproduced
+# in review on 2026-09-30 as a teammate "ghost-from-other-session" and "~987K tokens").
+# Only when the payload has NO usable session id does it take the flat file in the state
+# dir and then the flat file under the plugin root (state written by a hook that predates
+# O2; on the install.sh layout the plugin root IS the state dir and these are one file),
+# and only for the files lib/core/runtime-state.js#SESSIONLESS_FALLBACK_FILES lists:
+# current-effort.json. A test pins the two lists equal.
+#
+# STATE_ROOT follows lib/core/config.js#resolveArtibotDir(): the home is USERPROFILE, then
+# HOME (lib/core/platform.js#getHomeDir), and ARTIBOT_STATE_DIR replaces it only while
+# ARTIBOT_STATE_DIR_HOME names that home — otherwise a reader here and a writer there
+# could disagree about where the state is.
+#
+# Deliberately not a config switch: a shell script cannot read artibot.config.json
+# with any confidence, so a switch would split the readers from the writers again.
+#
+# SESSION_ID_SAFE must equal lib/core/runtime-state.js#sanitizeSessionId for ASCII
+# ids — tests/hooks/statusline-runtime-state.test.js pins the parity, and pins this
+# block by extracting it from this file between the markers above and below.
+#
+# NO COMMAND SUBSTITUTION BELOW except the one jq call: every `$(...)` is a fork, and the
+# rest of this script already has 56 of them (counted 2026-09-30) plus the processes they
+# start (measured 2026-09-30, Git Bash on Windows: one run took 34 s). So the helpers
+# leave their result in a variable (SESSION_ID_RAW, SESSION_ID_SAFE, STATE_FILE) and use
+# bash's own string operators.
+
+# _canon_dir <path> — sets CANON_DIR: forward slashes, an MSYS drive path (/c/x) spelled
+# with its drive letter (c:/x), no trailing slash. Only for comparing two spellings of a
+# home: Git Bash hands this script HOME=/c/Users/x where Windows means C:\Users\x.
+_canon_dir() {
+  local p="${1//\\//}" re='^/([A-Za-z])(/.*)?$'
+  if [[ "$p" =~ $re ]]; then p="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"; fi
+  while [[ "$p" == */ && "$p" != / ]]; do p="${p%/}"; done
+  CANON_DIR="$p"
+}
+
+# _same_dir <a> <b> — status 0 when both spell one directory. Case-insensitive only for a
+# drive-letter path, as lib/core/platform.js#sameDirPath is only on win32. Call it from an
+# `if`: a non-zero status would end the script under `set -e`.
+_same_dir() {
+  local a b re='^[A-Za-z]:' r=1
+  _canon_dir "$1"; a="$CANON_DIR"
+  _canon_dir "$2"; b="$CANON_DIR"
+  if [[ "$a" =~ $re ]]; then
+    shopt -s nocasematch
+    if [[ "$a" == "$b" ]]; then r=0; fi
+    shopt -u nocasematch
+  elif [[ "$a" == "$b" ]]; then
+    r=0
+  fi
+  return $r
+}
+
+# The state dir, as resolveArtibotDir() returns it: <home>/.claude/artibot, unless
+# ARTIBOT_STATE_DIR is set AND ARTIBOT_STATE_DIR_HOME names the home in force — EVERY
+# declared home variable must agree, else the override is dropped (it was minted for
+# another home; a child started with its own HOME must not inherit its parent's redirect).
+STATE_ROOT="${USERPROFILE:-${HOME:-}}/.claude/artibot"
+if [ -n "${ARTIBOT_STATE_DIR:-}" ] && [ -n "${ARTIBOT_STATE_DIR_HOME:-}" ] && [ -n "${USERPROFILE:-}${HOME:-}" ]; then
+  STATE_PAIRED=1
+  for STATE_HOME in "${USERPROFILE:-}" "${HOME:-}"; do
+    if [ -n "$STATE_HOME" ] && ! _same_dir "$ARTIBOT_STATE_DIR_HOME" "$STATE_HOME"; then STATE_PAIRED=0; fi
+  done
+  if [ "$STATE_PAIRED" = 1 ]; then STATE_ROOT="$ARTIBOT_STATE_DIR"; fi
+fi
+
+# session_id via jq — the payload's own parser.
+_session_id_via_jq() {
+  printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null
+}
+
+# session_id without jq: the FIRST "session_id":"…" in the payload, by bash's own regex
+# engine. Sets SESSION_ID_RAW ('' when there is none).
+_session_id_via_bash() {
+  local re='"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"'
+  SESSION_ID_RAW=''
+  if [[ "$input" =~ $re ]]; then SESSION_ID_RAW="${BASH_REMATCH[1]}"; fi
+}
+
+# Keep [A-Za-z0-9._-]; everything else becomes '-'; collapse dot runs; strip leading
+# dots/dashes; cap at 120 — the same four steps, in the same order, as the JS one.
+# Sets SESSION_ID_SAFE. C locale, so the ranges mean ASCII whatever the user's locale is
+# (LC_ALL on its own line: the expansion on the next one has to see it).
+_sanitize_session_id() {
+  local LC_ALL=C
+  local s="${1//[^A-Za-z0-9._-]/-}"
+  while [[ "$s" == *..* ]]; do s="${s//../.}"; done
+  while [[ "$s" == [.-]* ]]; do s="${s#?}"; done
+  SESSION_ID_SAFE="${s:0:120}"
+}
+
+SESSION_ID_RAW=''
+if command -v jq >/dev/null 2>&1; then
+  SESSION_ID_RAW=$(_session_id_via_jq || true)
+else
+  _session_id_via_bash
+fi
+_sanitize_session_id "$SESSION_ID_RAW"
+
+# state_file <name> — sets STATE_FILE to the file this render may show ('' when there is none).
+# With a session id: that session's file, or nothing. Without one: the flat file in the state
+# dir, then the plugin root's, for current-effort.json only (see the header above).
+state_file() {
+  local name="$1" cand
+  STATE_FILE=''
+  if [ -n "$SESSION_ID_SAFE" ]; then
+    cand="$STATE_ROOT/runtime/sessions/$SESSION_ID_SAFE/$name"
+    if [ -f "$cand" ]; then STATE_FILE="$cand"; fi
+    return 0
+  fi
+  if [ "$name" != 'current-effort.json' ]; then return 0; fi
+  for cand in "$STATE_ROOT/runtime/$name" "$PLUGIN_ROOT/runtime/$name"; do
+    if [ -f "$cand" ]; then
+      STATE_FILE="$cand"
+      return 0
+    fi
+  done
+  return 0
+}
+# <<< artibot-runtime-state <<<
 
 # ─── Artibot version ─────────────────────────────────────────────────────────
 ARTIBOT_VERSION=''
@@ -287,13 +422,14 @@ COG_MODE="${ARTIBOT_COG_MODE:-sys1}"
 
 # ─── Effort level (cognitive depth) ──────────────────────────────────────────
 # Prefer stdin effort.level (official schema); fall back to current-effort.json
-# so the pre-stdin behavior is preserved when the CLI doesn't send it. When an
-# effort value is present, append ·think / ·fast from the stdin flags.
+# (this session's, via state_file) so the pre-stdin behavior is preserved when the
+# CLI doesn't send it. When an effort value is present, append ·think / ·fast from
+# the stdin flags.
 EFFORT_LABEL=''
 EFFORT_VALUE="$EFFORT_STDIN"
 if [ -z "$EFFORT_VALUE" ]; then
-  EFFORT_FILE="$PLUGIN_ROOT/runtime/current-effort.json"
-  if [ -f "$EFFORT_FILE" ]; then
+  state_file current-effort.json; EFFORT_FILE="$STATE_FILE"
+  if [ -n "$EFFORT_FILE" ]; then
     EFFORT_VALUE=$(_json_file_get "$EFFORT_FILE" '.effort' '')
   fi
 fi
@@ -305,8 +441,8 @@ fi
 
 # ─── Active teammates (parallel team mode) ───────────────────────────────────
 TEAM_LABEL=''
-TEAM_FILE="$PLUGIN_ROOT/runtime/current-teammates.json"
-if [ -f "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
+state_file current-teammates.json; TEAM_FILE="$STATE_FILE"
+if [ -n "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
   TEAM_LABEL=$(ARTIBOT_SL_FILE_CONTENT=$(cat "$TEAM_FILE" 2>/dev/null || true) node -e "
     try {
       const o = JSON.parse(process.env.ARTIBOT_SL_FILE_CONTENT || '{}');
@@ -332,8 +468,8 @@ fi
 
 # ─── Long context mode (1M window indicator) ────────────────────────────────
 LONGCTX_LABEL=''
-LONGCTX_FILE="$PLUGIN_ROOT/runtime/long-context-active.json"
-if [ -f "$LONGCTX_FILE" ]; then
+state_file long-context-active.json; LONGCTX_FILE="$STATE_FILE"
+if [ -n "$LONGCTX_FILE" ]; then
   LONGCTX_ENABLED=$(_json_file_get "$LONGCTX_FILE" '.enabled' 'false')
   if [ "$LONGCTX_ENABLED" = "true" ]; then
     LONGCTX_LABEL="🪟 1M"
@@ -342,8 +478,8 @@ fi
 
 # ─── Session token usage (from runtime-prompt.js) ───────────────────────────
 TOKEN_LABEL=''
-TOKEN_FILE="$PLUGIN_ROOT/runtime/token-usage-session.json"
-if [ -f "$TOKEN_FILE" ]; then
+state_file token-usage-session.json; TOKEN_FILE="$STATE_FILE"
+if [ -n "$TOKEN_FILE" ]; then
   RAW_TOKENS=$(_json_file_get "$TOKEN_FILE" '.totalTokens' '0')
   if [ -n "$RAW_TOKENS" ] && [ "$RAW_TOKENS" -gt 0 ] 2>/dev/null; then
     if [ "$RAW_TOKENS" -ge 1000000 ]; then

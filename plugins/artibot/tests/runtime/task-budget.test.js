@@ -6,22 +6,26 @@
  * - buildTaskBudgetDirective() output format + beta header toggle
  * - persistTaskBudget() file write + idempotency
  * - F05 effort records: buildEffortRecord / persistEffortRecord /
- *   readEffortRecord / gcEffortRecords
+ *   readEffortRecord
+ *
+ * O2: both records are SESSION-scoped and live under the artibot STATE dir
+ * (`<state dir>/runtime/sessions/<session_id>/`, `lib/core/runtime-state.js`), not
+ * under the `pluginRoot` argument. The suites below that write files point the state
+ * dir at their tmp dir (`pointStateDirAt`) — the install.sh layout, where the state
+ * dir and the plugin root are one directory — so `<tmpRoot>/runtime/...` assertions
+ * keep their shape and each test starts empty.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
   buildEffortRecord,
   buildTaskBudgetDirective,
-  EFFORT_RECORD_KEEP,
   EFFORT_RECORD_TTL_MS,
-  EFFORT_RECORDS_DIRNAME,
-  gcEffortRecords,
   getTaskBudgetForEffort,
   persistEffortRecord,
   persistTaskBudget,
@@ -29,6 +33,7 @@ import {
   readEffortSnapshot,
   runSnapshotCli,
 } from '../../lib/runtime/task-budget.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
 
 const TASK_BUDGET_SCRIPT = fileURLToPath(new URL('../../lib/runtime/task-budget.js', import.meta.url));
 
@@ -231,22 +236,25 @@ describe('buildTaskBudgetDirective', () => {
 
 describe('persistTaskBudget', () => {
   let tmpRoot;
+  let restoreState;
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-tb-'));
+    restoreState = pointStateDirAt(tmpRoot);
   });
 
   afterEach(() => {
+    restoreState();
     try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
-  it('writes runtime/current-task-budget.json with expected shape', () => {
+  it('writes runtime/current-task-budget.json with expected shape (no session: the flat file)', () => {
     const filePath = persistTaskBudget(
       { command: 'implement', effort: 'xhigh', budget: 128000 },
       tmpRoot,
     );
 
-    expect(filePath).toBeTruthy();
+    expect(filePath).toBe(path.join(tmpRoot, 'runtime', 'current-task-budget.json'));
     expect(existsSync(filePath)).toBe(true);
 
     const data = JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -254,6 +262,33 @@ describe('persistTaskBudget', () => {
     expect(data.effort).toBe('xhigh');
     expect(data.budget).toBe(128000);
     expect(typeof data.updatedAt).toBe('string');
+  });
+
+  it('with a session id it writes that session\'s own file and leaves the flat one alone (O2)', () => {
+    const a = persistTaskBudget({ command: 'implement', effort: 'max', budget: 200000 }, tmpRoot, { sessionId: 'sA' });
+    const b = persistTaskBudget({ command: 'daily', effort: 'low', budget: 16000 }, tmpRoot, { sessionId: 'sB' });
+
+    expect(a).toBe(path.join(tmpRoot, 'runtime', 'sessions', 'sA', 'current-task-budget.json'));
+    expect(b).toBe(path.join(tmpRoot, 'runtime', 'sessions', 'sB', 'current-task-budget.json'));
+    // B did not overwrite A — the pre-O2 single slot.
+    expect(JSON.parse(readFileSync(a, 'utf8')).budget).toBe(200000);
+    expect(JSON.parse(readFileSync(b, 'utf8')).budget).toBe(16000);
+    expect(existsSync(path.join(tmpRoot, 'runtime', 'current-task-budget.json'))).toBe(false);
+  });
+
+  it('does not write under pluginRoot once the state dir is somewhere else (O2)', () => {
+    const elsewhere = mkdtempSync(path.join(os.tmpdir(), 'artibot-tb-state-'));
+    const restoreElsewhere = pointStateDirAt(elsewhere);
+    try {
+      const filePath = persistTaskBudget(
+        { command: 'implement', effort: 'xhigh', budget: 128000 }, tmpRoot, { sessionId: 'sA' },
+      );
+      expect(filePath.startsWith(elsewhere)).toBe(true);
+      expect(existsSync(path.join(tmpRoot, 'runtime'))).toBe(false);
+    } finally {
+      restoreElsewhere();
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   });
 
   it('returns null when pluginRoot is missing', () => {
@@ -292,19 +327,20 @@ describe('F05 effort records', () => {
   const META = { command: 'implement', effort: 'max', baseline: 'xhigh', shift: 1, reason: 'r' };
   const T0 = Date.parse('2026-09-14T00:00:00.000Z');
   let tmpRoot;
+  let restoreState;
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-effort-'));
+    restoreState = pointStateDirAt(tmpRoot);
   });
 
   afterEach(() => {
+    restoreState();
     try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
-  it('exports sane defaults', () => {
+  it('exports the record TTL', () => {
     expect(EFFORT_RECORD_TTL_MS).toBe(10 * 60 * 1000);
-    expect(EFFORT_RECORD_KEEP).toBe(32);
-    expect(EFFORT_RECORDS_DIRNAME).toBe('effort');
   });
 
   it('buildEffortRecord derives updatedAt/expiresAt from the injected clock', () => {
@@ -325,27 +361,37 @@ describe('F05 effort records', () => {
     expect(record.expiresAt).toBe(new Date(T0 + 5000).toISOString());
   });
 
-  it('persistEffortRecord writes both files and readEffortRecord round-trips', () => {
+  it('persistEffortRecord writes the SESSION file — and only it — and readEffortRecord round-trips', () => {
     const { legacyPath, sessionPath } = persistEffortRecord(META, tmpRoot, {
       sessionId: 's1', promptId: 'p1', now: T0,
     });
-    expect(existsSync(legacyPath)).toBe(true);
+    expect(legacyPath).toBeNull();
     expect(existsSync(sessionPath)).toBe(true);
-    expect(sessionPath).toBe(path.join(tmpRoot, 'runtime', EFFORT_RECORDS_DIRNAME, 's1.json'));
+    expect(sessionPath).toBe(path.join(tmpRoot, 'runtime', 'sessions', 's1', 'current-effort.json'));
+    // O2: no shared slot is written alongside it.
+    expect(existsSync(path.join(tmpRoot, 'runtime', 'current-effort.json'))).toBe(false);
+    expect(existsSync(path.join(tmpRoot, 'runtime', 'effort'))).toBe(false);
 
     const read = readEffortRecord(tmpRoot, { sessionId: 's1', promptId: 'p1', now: T0 + 1 });
     expect(read.effort).toBe('max');
     expect(read.shift).toBe(1);
   });
 
+  it('with no session id the record goes to the flat file in the state dir and round-trips', () => {
+    const { legacyPath, sessionPath } = persistEffortRecord(META, tmpRoot, { sessionId: null, now: T0 });
+    expect(sessionPath).toBeNull();
+    expect(legacyPath).toBe(path.join(tmpRoot, 'runtime', 'current-effort.json'));
+    expect(readEffortRecord(tmpRoot, { sessionId: null, now: T0 + 1 })?.effort).toBe('max');
+  });
+
   it('persistEffortRecord writes nothing for meta === null (the stale file is NOT deleted)', () => {
     persistEffortRecord(META, tmpRoot, { sessionId: 's1', promptId: 'p1', now: T0 });
-    const legacyPath = path.join(tmpRoot, 'runtime', 'current-effort.json');
-    const before = readFileSync(legacyPath, 'utf8');
+    const sessionFile = path.join(tmpRoot, 'runtime', 'sessions', 's1', 'current-effort.json');
+    const before = readFileSync(sessionFile, 'utf8');
 
     expect(persistEffortRecord(null, tmpRoot, { sessionId: 's1', now: T0 }))
       .toEqual({ legacyPath: null, sessionPath: null });
-    expect(readFileSync(legacyPath, 'utf8')).toBe(before);
+    expect(readFileSync(sessionFile, 'utf8')).toBe(before);
   });
 
   it('persistEffortRecord rejects a missing pluginRoot without throwing', () => {
@@ -364,25 +410,37 @@ describe('F05 effort records', () => {
 
   it('readEffortRecord rejects a missing pluginRoot and unparseable files', () => {
     expect(readEffortRecord('', { sessionId: 's1' })).toBeNull();
-    writeFileSync(path.join(tmpRoot, 'runtime'), '');
-    rmSync(path.join(tmpRoot, 'runtime'));
-    persistEffortRecord(META, tmpRoot, { sessionId: 's1', now: T0 });
+    // a session file that is not JSON, and a flat file that is not JSON: nothing is accepted.
+    const sessionFile = path.join(tmpRoot, 'runtime', 'sessions', 's1', 'current-effort.json');
+    mkdirSync(path.dirname(sessionFile), { recursive: true });
+    writeFileSync(sessionFile, '{ not json');
     writeFileSync(path.join(tmpRoot, 'runtime', 'current-effort.json'), '{ not json');
-    rmSync(path.join(tmpRoot, 'runtime', EFFORT_RECORDS_DIRNAME), { recursive: true, force: true });
     expect(readEffortRecord(tmpRoot, { sessionId: 's1', now: T0 })).toBeNull();
   });
 
-  it('gcEffortRecords keeps the newest `keep` records', () => {
-    for (let i = 0; i < 5; i += 1) {
-      persistEffortRecord(META, tmpRoot, { sessionId: `s${i}`, now: T0, keep: 100 });
-    }
-    const dir = path.join(tmpRoot, 'runtime', EFFORT_RECORDS_DIRNAME);
-    expect(readdirSync(dir).length).toBe(5);
+  it('a session id that sanitizes to nothing is treated as "no session": flat file, never sessions/', () => {
+    const { legacyPath, sessionPath } = persistEffortRecord(META, tmpRoot, { sessionId: '...', now: T0 });
+    expect(sessionPath).toBeNull();
+    expect(legacyPath).toBe(path.join(tmpRoot, 'runtime', 'current-effort.json'));
+    expect(existsSync(path.join(tmpRoot, 'runtime', 'sessions'))).toBe(false);
+  });
 
-    const result = gcEffortRecords(dir, { now: T0, keep: 2 });
-    expect(result.kept).toBe(2);
-    expect(result.removed).toBe(3);
-    expect(readdirSync(dir).length).toBe(2);
+  it('reads a record a pre-O2 hook left in <pluginRoot>/runtime/ — for a reader with no session id only', () => {
+    // Not the state dir: a DIFFERENT directory that is only the plugin root.
+    const legacyRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-effort-legacy-'));
+    try {
+      mkdirSync(path.join(legacyRoot, 'runtime'), { recursive: true });
+      writeFileSync(
+        path.join(legacyRoot, 'runtime', 'current-effort.json'),
+        JSON.stringify({ command: 'daily', effort: 'medium' }),
+      );
+      // no session id: the legacy fallback, through the flat gate
+      expect(readEffortRecord(legacyRoot, { now: T0 })?.effort).toBe('medium');
+      // a session id: its own file or nothing — never a flat record that belongs to nobody
+      expect(readEffortRecord(legacyRoot, { sessionId: 's1', now: T0 })).toBeNull();
+    } finally {
+      rmSync(legacyRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -394,12 +452,15 @@ describe('readEffortSnapshot', () => {
   const A = { command: 'implement', effort: 'max', baseline: 'xhigh', shift: 1, reason: 'score>=0.7 (+1)' };
   const B = { command: 'daily', effort: 'low', baseline: 'medium', shift: -1, reason: 'score<=0.25 (-1)' };
   let tmpRoot;
+  let restoreState;
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-snapshot-'));
+    restoreState = pointStateDirAt(tmpRoot);
   });
 
   afterEach(() => {
+    restoreState();
     try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
@@ -458,24 +519,60 @@ describe('readEffortSnapshot', () => {
 describe('task-budget CLI (snapshot)', () => {
   let tmpRoot;
   let homeDir;
+  let restoreState;
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-snapshot-cli-'));
     homeDir = mkdtempSync(path.join(os.tmpdir(), 'artibot-snapshot-home-'));
+    restoreState = pointStateDirAt(tmpRoot);
   });
 
   afterEach(() => {
+    restoreState();
     try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* noop */ }
     try { rmSync(homeDir, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
-  /** Spawn the real file as a CLI. Throws on a non-zero exit, which is the assertion. */
+  /**
+   * Spawn the real file as a CLI. Throws on a non-zero exit, which is the assertion.
+   *
+   * The child has its OWN home, so the in-process state dir (`tmpRoot`) has to be handed
+   * over explicitly — paired with the CHILD's home, the only pairing `resolveArtibotDir`
+   * honours. Without it the child would look in `<homeDir>/.claude/artibot`, which is
+   * exactly what the real command does: it finds the records under `~/.claude/artibot`.
+   */
   function runCli(args) {
-    const env = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+    const env = {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      ARTIBOT_STATE_DIR: tmpRoot,
+      ARTIBOT_STATE_DIR_HOME: homeDir,
+    };
     delete env.CLAUDE_SESSION_ID;
     delete env.CLAUDE_CODE_SESSION_ID;
     return execFileSync(process.execPath, [TASK_BUDGET_SCRIPT, ...args], { env, encoding: 'utf8' });
   }
+
+  it('finds the records under <home>/.claude/artibot with no override at all (the real command)', () => {
+    const real = path.join(homeDir, '.claude', 'artibot');
+    mkdirSync(path.join(real, 'runtime', 'sessions', 'sA'), { recursive: true });
+    const now = Date.now();
+    writeFileSync(
+      path.join(real, 'runtime', 'sessions', 'sA', 'current-effort.json'),
+      JSON.stringify(buildEffortRecord({ command: 'implement', effort: 'max' }, { sessionId: 'sA', now })),
+    );
+    const env = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+    delete env.ARTIBOT_STATE_DIR;
+    delete env.ARTIBOT_STATE_DIR_HOME;
+    delete env.CLAUDE_CODE_SESSION_ID;
+
+    const out = execFileSync(process.execPath, [TASK_BUDGET_SCRIPT, 'snapshot', '--session', 'sA', '--plugin-root', tmpRoot], {
+      env, encoding: 'utf8',
+    });
+
+    expect(JSON.parse(out)).toMatchObject({ effort: 'max', command: 'implement' });
+  });
 
   it('prints this session\'s snapshot as one JSON line and exits 0', () => {
     // Real clock: the CLI reads records against Date.now(), so the fixture must

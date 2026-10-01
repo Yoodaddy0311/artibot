@@ -16,6 +16,7 @@ import {
   sweepAutoRegister,
   tryAutoRegister,
 } from '../../lib/learning/macro-learner.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
 
 function makeAutoConfig(overrides = {}) {
   return {
@@ -85,6 +86,7 @@ function makePending(overrides = {}) {
 }
 
 let root;
+let restoreState;
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'artibot-macro-auto-'));
@@ -94,10 +96,17 @@ beforeEach(() => {
     JSON.stringify({ version: '0.0.0' }, null, 2),
     'utf-8',
   );
+  // O2: the suggestion store and the first-run counter are GLOBAL state under the artibot
+  // STATE dir, not under `pluginRoot`. Pointing the state dir at this tmp root reproduces
+  // the install.sh layout (one directory for both), so the `<root>/runtime/...` seeds and
+  // assertions below keep their shape — while `artibot.config.json` (written by an approved
+  // macro) stays where it always was, under `pluginRoot`.
+  restoreState = pointStateDirAt(root);
   seedFirstRunBypass(root);
 });
 
 afterEach(() => {
+  restoreState();
   rmSync(root, { recursive: true, force: true });
 });
 

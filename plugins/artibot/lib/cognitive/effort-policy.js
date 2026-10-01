@@ -21,8 +21,9 @@
 // plugin has NO Messages API caller and sets NO output_config.effort; grep
 // `output_config` in lib/ and scripts/ finds only comments):
 //   1. scripts/hooks/runtime-prompt.js resolves EFFORT_POLICY (via
-//      effort-resolver.js) on UserPromptSubmit, persists it to
-//      runtime/current-effort.json, and emits the prose directive
+//      effort-resolver.js) on UserPromptSubmit, persists it to the session's
+//      current-effort.json (`<state dir>/runtime/sessions/<session_id>/`, O2 — see
+//      lib/runtime/task-budget.js#persistEffortRecord), and emits the prose directive
 //      `[artibot:effort level=X command=Y]` as
 //      hookSpecificOutput.additionalContext. The host delivers that as a
 //      separate meta message ("UserPromptSubmit hook additional context: …")

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 
 /**
  * session-start.js initializes the Artibot plugin on every Claude Code session.
@@ -39,6 +40,8 @@ const mockState = {
   // Args of every checkForUpdate call, in order. The opt-out tests assert the
   // hook made ZERO calls, which a factory-return assertion cannot express.
   checkForUpdateCalls: [],
+  // Args of every `sweepSessionDirs` call (O2) — see the partial mock below.
+  sweepCalls: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -152,6 +155,23 @@ vi.mock('../../lib/core/version-checker.js', async () => {
   };
 });
 
+// O2 — session directories under `<state dir>/runtime/sessions/` are swept on every
+// SessionStart. Partial mock, like `version-checker` above: only the sweep is replaced,
+// so the tests can assert that `main()` CALLS it (and with which protected session)
+// without the `node:fs` mock above standing between the real sweep and a real directory.
+// The sweep's own behaviour is `tests/core/runtime-state.test.js` and
+// `tests/hooks/session-start-state.test.js`.
+vi.mock('../../lib/core/runtime-state.js', async () => {
+  const actual = await vi.importActual('../../lib/core/runtime-state.js');
+  return {
+    ...actual,
+    sweepSessionDirs: vi.fn((...args) => {
+      mockState.sweepCalls.push(args);
+      return { scanned: 0, removed: 0, kept: 0 };
+    }),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -203,6 +223,7 @@ describe('session-start hook', () => {
     mockState.handoffHeadContent = null;
     mockState.checkForUpdateFactory = () => Promise.resolve({ hasUpdate: false });
     mockState.checkForUpdateCalls = [];
+    mockState.sweepCalls = [];
     savedUpdateCheckEnv = process.env.ARTIBOT_UPDATE_CHECK;
     delete process.env.ARTIBOT_UPDATE_CHECK;
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -569,6 +590,88 @@ describe('session-start hook', () => {
       await importAndWait();
 
       expect(process.env.ANTHROPIC_BETA).toContain('context-1m-2025-08-01');
+    });
+
+    // O2 — the marker is SESSION-scoped and lives under the STATE dir (`~/.claude/artibot`,
+    // where statusline.sh reads), not `<pluginRoot>/runtime/`. `getPluginRoot` is mocked to
+    // '/fake/plugin/root' in this file, so a write that still followed the plugin root would
+    // show up here as a path under it.
+    describe('where the marker goes (O2)', () => {
+      const LONG_CONTEXT_CONFIG = (filePath) => {
+        if (String(filePath).includes('artibot.config.json')) {
+          return JSON.stringify({
+            runtime: { longContext: { enabled: true, betaHeader: 'context-1m-2025-08-01' } },
+          });
+        }
+        throw new Error('ENOENT');
+      };
+      const markerWrites = () => mockState.writeFileSyncCalls.filter((args) =>
+        String(args[0]).includes('long-context-active.json'));
+
+      it('writes the session\'s own file when the payload names a session', async () => {
+        mockState.readFileSyncImpl = LONG_CONTEXT_CONFIG;
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({ session_id: 'sess-A' }));
+
+        await importAndWait();
+
+        const [write] = markerWrites();
+        expect(write[0]).toBe(path.join(resolveArtibotDir(), 'runtime', 'sessions', 'sess-A', 'long-context-active.json'));
+        expect(String(write[0]).includes('fake')).toBe(false);
+      });
+
+      it('writes the flat file in the state dir when the payload has no session id', async () => {
+        mockState.readFileSyncImpl = LONG_CONTEXT_CONFIG;
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+        await importAndWait();
+
+        const [write] = markerWrites();
+        expect(write[0]).toBe(path.join(resolveArtibotDir(), 'runtime', 'long-context-active.json'));
+      });
+
+      it('creates the session directory before writing into it', async () => {
+        mockState.readFileSyncImpl = LONG_CONTEXT_CONFIG;
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({ session_id: 'sess-A' }));
+
+        await importAndWait();
+
+        const dirs = mockState.mkdirSyncCalls.map((args) => String(args[0]));
+        expect(dirs).toContain(path.join(resolveArtibotDir(), 'runtime', 'sessions', 'sess-A'));
+      });
+    });
+
+    // O2 — "session dirs must not grow without bound" is only true if something sweeps
+    // them. `session-start-sweep.mjs` is the obvious home but is not registered in
+    // hooks/dispatch-table.json, so the call lives here, in the hook that IS.
+    describe('session directory sweep (O2)', () => {
+      it('sweeps once per start and protects the session that is starting', async () => {
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({ session_id: 'sess-A' }));
+
+        await importAndWait();
+
+        expect(mockState.sweepCalls).toHaveLength(1);
+        expect(mockState.sweepCalls[0][0]).toEqual({ protect: ['sess-A'] });
+      });
+
+      it('sweeps with nothing protected when the payload has no session id', async () => {
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+
+        await importAndWait();
+
+        expect(mockState.sweepCalls).toHaveLength(1);
+        expect(mockState.sweepCalls[0][0]).toEqual({ protect: [] });
+      });
+
+      it('a sweep that throws never blocks the session start', async () => {
+        const runtimeState = await import('../../lib/core/runtime-state.js');
+        runtimeState.sweepSessionDirs.mockImplementationOnce(() => { throw new Error('disk on fire'); });
+        mockState.readStdinResult = Promise.resolve(JSON.stringify({ session_id: 'sess-A' }));
+
+        await importAndWait();
+
+        expect(mockState.writeStdoutCalls.length).toBeGreaterThan(0);
+        expect(exitSpy).not.toHaveBeenCalled();
+      });
     });
 
     it('does NOT write long-context file when enabled=false (default)', async () => {

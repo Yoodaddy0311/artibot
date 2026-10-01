@@ -8,8 +8,9 @@
  * - Fire-and-forget. `emit()` to a type with no subscriber is an intentional
  *   no-op (returns 0), not an error. Producers must not assume delivery.
  * - Not for session-level aggregation. Cross-prompt/session stats must be
- *   persisted to disk (see runtime/token-usage-session.json) — the in-memory
- *   bus cannot survive process exit.
+ *   persisted to disk (see token-usage-session.json, written per session under
+ *   `<state dir>/runtime/sessions/<session_id>/` — `lib/core/runtime-state.js`) —
+ *   the in-memory bus cannot survive process exit.
  *
  * A subscriber must be instantiated in the SAME process as the producer to
  * receive events (e.g. an observability sink attached within preparePrompt()).

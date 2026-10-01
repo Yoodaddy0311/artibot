@@ -1,8 +1,19 @@
 /**
  * Artibot visual progress dashboard.
  *
- * Aggregates runtime/*.json state files and renders a single-line status
- * suitable for the Claude Code statusline (or a multi-line full dashboard).
+ * Aggregates the runtime state files the hooks write and renders a single-line
+ * status suitable for the Claude Code statusline (or a multi-line full dashboard).
+ *
+ * WHERE THE STATE IS READ FROM (O2). The five files — current-effort,
+ * current-task-budget, token-usage-session, long-context-active, current-teammates —
+ * are SESSION-scoped: hooks write them to
+ * `<state dir>/runtime/sessions/<session_id>/<file>` (`lib/core/runtime-state.js`;
+ * the state dir is `~/.claude/artibot`). A reader that knows its session id reads
+ * THAT file and nothing else: a session with no file of its own shows nothing, never
+ * a flat file another session (or a pre-O2 hook) left — the flat copy of a teammate
+ * roster or a token count has no owner. A reader with NO session id may take the flat
+ * files (the state dir's, then `pluginRoot`'s legacy copy) for `current-effort.json`
+ * only; see `runtime-state.js#resolveSessionReadChain`.
  *
  * Design goals:
  *   - Zero throw: missing files / malformed JSON must gracefully degrade.
@@ -14,7 +25,8 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
+
+import { resolveSessionReadChain } from '../core/runtime-state.js';
 
 // ─────────────────────────────────────────────
 // ANSI helpers (self-contained to avoid circular deps with lib/core/tui)
@@ -152,10 +164,33 @@ function pickTeammates(teammatesJson) {
 }
 
 /**
- * Read current runtime state from plugin `runtime/` JSON files.
+ * The first candidate of a session-scoped state file that parses to an object. Which
+ * candidates exist is `runtime-state.js#resolveSessionReadChain`'s rule: the session's
+ * own file alone when `sessionId` is usable, else the flat files for the effort record
+ * only (see the module header).
+ *
+ * @param {string} fileName
+ * @param {string|null|undefined} sessionId
+ * @param {string} pluginRoot
+ * @returns {object|null}
+ */
+function readSessionState(fileName, sessionId, pluginRoot) {
+  for (const candidate of resolveSessionReadChain(sessionId, fileName, { pluginRoot })) {
+    const json = readJsonSafe(candidate);
+    if (json) return json;
+  }
+  return null;
+}
+
+/**
+ * Read current runtime state from the hooks' JSON files.
  * Never throws; missing / malformed files become null fields.
  *
- * @param {string} pluginRoot - Absolute path to the plugin root.
+ * @param {string} pluginRoot - Absolute path to the plugin root (the LEGACY location
+ *   of the state files; also the "is there anything to read" guard).
+ * @param {{ sessionId?: string|null }} [opts] - The reader's own session (the statusLine
+ *   payload's `session_id`). Omit it and no session file is consulted: only the effort
+ *   may then come from the flat files, and the other fields stay empty.
  * @returns {Promise<{
  *   effort: string|null,
  *   command: string|null,
@@ -165,7 +200,7 @@ function pickTeammates(teammatesJson) {
  *   teammates: Array<{name: string, status?: string}>
  * }>}
  */
-export async function readDashboardState(pluginRoot) {
+export async function readDashboardState(pluginRoot, opts = {}) {
   const empty = {
     effort: null,
     command: null,
@@ -176,12 +211,12 @@ export async function readDashboardState(pluginRoot) {
   };
   if (!pluginRoot || typeof pluginRoot !== 'string') return empty;
 
-  const runtimeDir = path.join(pluginRoot, 'runtime');
-  const effortJson = readJsonSafe(path.join(runtimeDir, 'current-effort.json'));
-  const budgetJson = readJsonSafe(path.join(runtimeDir, 'current-task-budget.json'));
-  const tokenJson = readJsonSafe(path.join(runtimeDir, 'token-usage-session.json'));
-  const longCtxJson = readJsonSafe(path.join(runtimeDir, 'long-context-active.json'));
-  const teammatesJson = readJsonSafe(path.join(runtimeDir, 'current-teammates.json'));
+  const sessionId = opts?.sessionId ?? null;
+  const effortJson = readSessionState('current-effort.json', sessionId, pluginRoot);
+  const budgetJson = readSessionState('current-task-budget.json', sessionId, pluginRoot);
+  const tokenJson = readSessionState('token-usage-session.json', sessionId, pluginRoot);
+  const longCtxJson = readSessionState('long-context-active.json', sessionId, pluginRoot);
+  const teammatesJson = readSessionState('current-teammates.json', sessionId, pluginRoot);
 
   const taskBudget =
     budgetJson && typeof budgetJson.budget === 'number' && budgetJson.budget > 0
@@ -286,14 +321,14 @@ function resolveFlags(config) {
 /**
  * Render a single-line status suitable for the Claude Code statusline.
  *
- * @param {{pluginRoot: string, config: object}} inputs
+ * @param {{pluginRoot: string, config: object, sessionId?: string|null}} inputs
  * @returns {Promise<string>} Single line (no trailing newline). Empty when disabled.
  */
-export async function renderStatusLine({ pluginRoot, config } = {}) {
+export async function renderStatusLine({ pluginRoot, config, sessionId } = {}) {
   const flags = resolveFlags(config);
   if (!flags.enabled) return '';
 
-  const state = await readDashboardState(pluginRoot);
+  const state = await readDashboardState(pluginRoot, { sessionId });
   const sections = buildSections(state, flags);
   if (sections.length <= 1) return ''; // only the [artibot] tag => nothing useful to show
 
@@ -304,14 +339,14 @@ export async function renderStatusLine({ pluginRoot, config } = {}) {
 /**
  * Render a multi-line dashboard for full-screen or log output.
  *
- * @param {{pluginRoot: string, config: object}} inputs
+ * @param {{pluginRoot: string, config: object, sessionId?: string|null}} inputs
  * @returns {Promise<string>}
  */
-export async function renderFullDashboard({ pluginRoot, config } = {}) {
+export async function renderFullDashboard({ pluginRoot, config, sessionId } = {}) {
   const flags = resolveFlags(config);
   if (!flags.enabled) return '';
 
-  const state = await readDashboardState(pluginRoot);
+  const state = await readDashboardState(pluginRoot, { sessionId });
   const lines = [];
   lines.push(paint('Artibot Dashboard', 'cyan', 'bold'));
   lines.push(paint('─────────────────', 'gray'));

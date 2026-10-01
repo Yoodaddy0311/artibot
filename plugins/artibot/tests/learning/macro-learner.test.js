@@ -11,6 +11,7 @@ import {
   redactSensitive,
   rejectSuggestion,
 } from '../../lib/learning/macro-learner.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
 
 // Avoid literal secret-shaped strings in source. The redaction patterns look
 // for `sk-` / `AIza` / `ghp_` prefixes, so we build sample strings at runtime.
@@ -35,6 +36,7 @@ function makeConfig(overrides = {}) {
 describe('macro-learner', () => {
   let root;
   let config;
+  let restoreState;
 
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), 'artibot-macro-'));
@@ -45,9 +47,15 @@ describe('macro-learner', () => {
     );
     mkdirSync(path.join(root, 'runtime'), { recursive: true });
     config = makeConfig();
+    // O2: the suggestion store is GLOBAL state under the artibot STATE dir, not under
+    // `pluginRoot`. Pointing the state dir at this tmp root is the install.sh layout (both
+    // are one directory), so the `<root>/runtime/macro-suggestions.json` assertions below
+    // keep their shape and each test starts from an empty store.
+    restoreState = pointStateDirAt(root);
   });
 
   afterEach(() => {
+    restoreState();
     rmSync(root, { recursive: true, force: true });
   });
 

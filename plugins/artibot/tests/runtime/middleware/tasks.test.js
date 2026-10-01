@@ -17,6 +17,7 @@ import {
   readDecisionEvents,
   WORKFLOW_PLANNED,
 } from '../../../lib/observability/decision-events.js';
+import { pointStateDirAt } from '../../helpers/state-dir.js';
 
 function makeState(overrides = {}) {
   return {
@@ -151,10 +152,16 @@ describe('middleware/tasks', () => {
 describe('middleware/tasks — Score-Aware effort meta propagation', () => {
   let pluginRoot;
   let projectRoot;
+  let restoreState;
 
   beforeEach(() => {
     pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-'));
     mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
+    // O2: effort records live under the STATE dir, not under `pluginRoot`. Pointing the
+    // state dir at this tmp root reproduces the install.sh layout (they are one
+    // directory), so the flat `<root>/runtime/current-effort.json` fixtures below are
+    // the records a pre-O2 hook left and the per-session ones are where O2 writes.
+    restoreState = pointStateDirAt(pluginRoot);
     // A sandbox project root for the cases that supply a `session_id`. Without a
     // `cwd`, `recordWorkflowPlanDecision` resolves the root from `process.cwd()`
     // and writes `<repo>/.artibot/runtime/decisions/<sid>.events.ndjson` for real
@@ -164,6 +171,7 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
   });
 
   afterEach(() => {
+    restoreState();
     rmSync(pluginRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
   });
@@ -176,9 +184,9 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
   }
 
   function writeSessionFixture(sessionId, meta) {
-    const dir = path.join(pluginRoot, 'runtime', 'effort');
+    const dir = path.join(pluginRoot, 'runtime', 'sessions', sessionId);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, `${sessionId}.json`), JSON.stringify(meta) + '\n');
+    writeFileSync(path.join(dir, 'current-effort.json'), JSON.stringify(meta) + '\n');
   }
 
   // No fixture in this suite writes `current-task-budget.json` or a config, so
@@ -236,7 +244,8 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
 
   // F05 — the reader passes its own identity to `readEffortRecord`, so a record
   // another session left behind cannot become this task's effort. The fixtures
-  // above carry no identity and stay honoured (that is the compatibility pin).
+  // above carry no identity and stay honoured for a reader with NO session id (the
+  // compatibility pin); a reader that has one reads its own session file only.
   it('prefers the per-session record when hookData.session_id matches', async () => {
     writeEffortFixture({ command: 'daily', effort: 'low', sessionId: 'sess-B', promptId: 'b1' });
     writeSessionFixture('sess-A', {
@@ -300,11 +309,25 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     });
   });
 
-  it('still honours a legacy fixture with no identity when the reader has a session id', async () => {
+  it('does NOT take a flat record with no identity when the reader has a session id: its own file or nothing', async () => {
+    // What this case used to pin the other way round ("still honours a legacy fixture"): a
+    // flat record belongs to no session in particular, so a reader that knows its session
+    // is never handed one (review 2026-09-30, the cross-session leak in the read chain).
     writeEffortFixture({ command: 'implement', effort: 'high', shift: 0, reason: 'baseline' });
     const mw = createTasksMiddleware({ now: () => 1700000000000 });
     const state = makeState({
       input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toBeUndefined();
+  });
+
+  it('still honours a legacy fixture with no identity when the reader has NO session id', async () => {
+    writeEffortFixture({ command: 'implement', effort: 'high', shift: 0, reason: 'baseline' });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot } },
     });
     const result = await mw(state);
 
@@ -324,10 +347,13 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
 //
 // The fixtures below are written by the PRODUCTION writers, in production
 // order — `runtime-prompt.js#resolveEffortMeta` persists the effort record,
-// then `#resolveTaskBudgetDirective` persists the budget — so the global file
-// holds exactly what a real second prompt would leave there. Each case first
-// asserts that precondition: a fixture that did not reproduce the overwrite
-// could not show the fix doing anything.
+// then `#resolveTaskBudgetDirective` persists the budget — and then ONE MORE
+// session-less budget write, which is what still leaves a shared slot behind: since
+// O2 the session-scoped budget files no longer collide, but the flat file a prompt
+// with no session id (or a pre-O2 hook) writes is still one slot every such writer
+// overwrites. The global file therefore holds exactly what a real second prompt
+// would leave there. Each case first asserts that precondition: a fixture that did
+// not reproduce the overwrite could not show the fix doing anything.
 // ---------------------------------------------------------------------------
 
 describe('middleware/tasks — effort and budget from one accepted record (R2b)', () => {
@@ -344,9 +370,11 @@ describe('middleware/tasks — effort and budget from one accepted record (R2b)'
   };
   let pluginRoot;
   let projectRoot;
+  let restoreState;
 
   beforeEach(() => {
     pluginRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-r2b-'));
+    restoreState = pointStateDirAt(pluginRoot); // O2 — see the effort meta suite above
     // Sandbox for the session-scoped decision/ledger writes (see the effort
     // meta suite above for why a session id without a `cwd` is unsafe).
     projectRoot = mkdtempSync(path.join(tmpdir(), 'artibot-tasks-r2b-proj-'));
@@ -354,17 +382,21 @@ describe('middleware/tasks — effort and budget from one accepted record (R2b)'
   });
 
   afterEach(() => {
+    restoreState();
     rmSync(pluginRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
   });
 
   function writePrompt(p, cfg = {}) {
     persistEffortRecord(p.meta, pluginRoot, { sessionId: p.sessionId, promptId: p.promptId, now: NOW });
-    persistTaskBudget({
+    const budget = {
       command: p.meta.command,
       effort: p.meta.effort,
       budget: getTaskBudgetForEffort(p.meta.effort, cfg),
-    }, pluginRoot);
+    };
+    persistTaskBudget(budget, pluginRoot, { sessionId: p.sessionId });
+    // The shared slot: a session-less writer (or a pre-O2 hook), last one wins.
+    persistTaskBudget(budget, pluginRoot);
   }
 
   function globalBudget() {

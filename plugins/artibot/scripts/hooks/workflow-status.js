@@ -11,10 +11,10 @@
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
-import { getPluginRoot } from '../../lib/core/platform.js';
+import { resolveScopedStatePath } from '../../lib/core/runtime-state.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const PHASE_NAMES = {
@@ -238,6 +238,7 @@ function buildTeammateList(agents) {
     tasksCompleted: info.tasksCompleted,
     tasksTotal: info.tasksTotal,
     updatedAt: info.updatedAt,
+    sessionId: info.sessionId,
   }));
 }
 
@@ -247,8 +248,26 @@ function buildTeammateList(agents) {
 const TEAMMATE_FRESH_WINDOW_MS = 10 * 60 * 1000;
 
 /**
- * Persist the live teammate roster (with progress signals) to
- * runtime/current-teammates.json so statusline.sh can render its
+ * The session a hook payload belongs to, or null. For SubagentStart/SubagentStop the
+ * host's payload key set carries `session_id` next to a separate `agent_id`
+ * (tests/hooks/fixtures/host-payloads), and it names the PARENT session — the one the
+ * statusline is showing. Measured 2026-09-30 in the repo ledger, whose `hook.fired` rows
+ * take their session_id from this same `payload.session_id`
+ * (`_hook-fired-record.js`): a SubagentStart row carries the id of the UserPromptSubmit
+ * row 0.9 s before it, and the SubagentStop rows of 2026-09-21 carry an id that also has
+ * SessionStart, UserPromptSubmit and Stop rows, i.e. a main session.
+ *
+ * @param {object} hookData
+ * @returns {string|null}
+ */
+function payloadSessionId(hookData) {
+  const id = hookData?.session_id ?? hookData?.sessionId;
+  return typeof id === 'string' && id.trim() !== '' ? id : null;
+}
+
+/**
+ * Persist the live teammate roster (with progress signals) to the session's
+ * current-teammates.json so statusline.sh can render its
  * `👥 <name>+N XX%` team-progress segment.
  *
  * Nothing wrote this file before, which is why that segment never appeared.
@@ -257,20 +276,30 @@ const TEAMMATE_FRESH_WINDOW_MS = 10 * 60 * 1000;
  * self-clears rather than showing a stale team. Best-effort: any failure is
  * swallowed (the segment is advisory, never load-bearing).
  *
+ * O2: the file is `<state dir>/runtime/sessions/<session_id>/current-teammates.json`
+ * (the flat `<state dir>/runtime/` file when the payload has no session id) — under
+ * `~/.claude/artibot`, where statusline.sh reads, not under the plugin root of the
+ * running version. The agent map in the shared workflow state (`~/.claude/artibot-state
+ * .json`) holds EVERY session's teammates, so the roster written for a session is
+ * filtered to the agents stamped with that session; without the filter two concurrent
+ * sessions would each show the other's team.
+ *
  * @param {object[]} teammates - buildTeammateList() output
+ * @param {string|null} sessionId - this payload's session, or null for the flat file
  */
-function persistTeammates(teammates) {
+function persistTeammates(teammates, sessionId) {
   try {
     const now = Date.now();
     const active = (Array.isArray(teammates) ? teammates : []).filter((t) => {
       if (!t || t.status === 'idle') return false;
+      if (sessionId !== null && t.sessionId !== sessionId) return false;
       // Drop stale cross-session residue; keep records without a timestamp.
       const ts = t.updatedAt ? Date.parse(t.updatedAt) : NaN;
       return !Number.isFinite(ts) || (now - ts) <= TEAMMATE_FRESH_WINDOW_MS;
     });
-    const runtimeDir = join(getPluginRoot(), 'runtime');
-    mkdirSync(runtimeDir, { recursive: true });
-    atomicWriteSync(join(runtimeDir, 'current-teammates.json'), {
+    const file = resolveScopedStatePath(sessionId, 'current-teammates.json');
+    mkdirSync(dirname(file), { recursive: true });
+    atomicWriteSync(file, {
       teammates: active,
       updatedAt: new Date().toISOString(),
     });
@@ -283,6 +312,7 @@ export async function main() {
   const eventType = process.argv[2] || 'teammate-update';
   const raw = await readStdin();
   const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) || {};
+  const sessionId = payloadSessionId(hookData);
 
   // WIRE: Claude Code's subagent-lifecycle payload carries no team task counts,
   // so phase/percent stayed empty. When the payload has no task data, hydrate it
@@ -339,6 +369,9 @@ export async function main() {
               blocked: hookData?.blocked || false,
               error: hookData?.error || null,
               updatedAt: new Date().toISOString(),
+              // Which session this teammate belongs to (see persistTeammates). Kept
+              // when a later payload has none, so an id is never erased.
+              sessionId: sessionId ?? existing.sessionId,
             },
           },
         };
@@ -437,7 +470,7 @@ export async function main() {
 
   // Persist the roster so statusline.sh can render the live team-progress
   // segment. Done for BOTH solo (empty roster → segment clears) and team paths.
-  persistTeammates(teammates);
+  persistTeammates(teammates, sessionId);
 
   // Construct a summary message
   const activeCnt = teammates.filter((t) => t.status === 'in_progress').length;
