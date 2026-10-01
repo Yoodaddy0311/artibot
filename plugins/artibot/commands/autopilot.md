@@ -455,7 +455,7 @@ fable 단일 턴은 수 분이 정상이다. checkpoint 주기 내 무진행으�
 
 ### `/autopilot:tail` Live Telemetry (PRD v4.1 P0-2)
 
-야간 무개입 자율 모드의 black-box 문제 해소용. 각 Phase 진입/종료, pause, abort 시점에 `runtime/autopilot/<sessionId>.events.ndjson` 으로 한 줄 JSON 이 append 되며, 본 서브커맨드로 tail 조회한다.
+야간 무개입 자율 모드의 black-box 문제 해소용. 각 Phase 진입/종료, pause, abort 시점에 `<상태 디렉터리>/runtime/autopilot/<sessionId>.events.ndjson`(기본 `~/.claude/artibot/runtime/autopilot/` — D2 이후 플러그인 루트 아래가 아니다) 으로 한 줄 JSON 이 append 되며, 본 서브커맨드로 tail 조회한다.
 
 1. `sessionId` 미지정 시 `engine.getStatus()` 로 가장 최근 세션 자동 선택.
 2. `engine.readEvents(sessionId, { tail: lines })` 호출 (기본 `lines=50`).
@@ -482,7 +482,7 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 
 ### 동작
 
-1. Phase 2 EXECUTE 시 `createWorktree(sessionId)` → `runtime/autopilot/worktrees/<sessionId>` 또는 ASCII tmpdir(한글 cwd 회피)
+1. Phase 2 EXECUTE 시 `createWorktree(sessionId)` → `<상태 디렉터리>/runtime/autopilot/worktrees/<sessionId>`(기본 `~/.claude/artibot/runtime/autopilot/worktrees/<sessionId>`, D2) 또는 ASCII tmpdir(한글 cwd 회피)
 2. 기본 branched: `autopilot/<sessionId>` 브랜치 생성. `--detached` 시 detached HEAD
 3. featureKey 단위 lock — 동일 feature에 동시 진입 시 두 번째 세션은 `ok=false` + holder 정보
 4. abort 시 worktree 자동 제거 + lock 자동 해제 (best-effort)
@@ -497,7 +497,7 @@ DATA POLICY: ndjson 파일은 로컬에만 존재. 외부 송신 없음.
 
 | sessionId | mode | phase | worktree | lock | branch |
 |-----------|------|-------|----------|------|--------|
-| ap-20260427-130421 | night | EXECUTE | runtime/autopilot/worktrees/ap-... | locked | autopilot/ap-... |
+| ap-20260427-130421 | night | EXECUTE | ~/.claude/artibot/runtime/autopilot/worktrees/ap-... | locked | autopilot/ap-... |
 | ap-20260427-110001 | default | COMPLETED | (none) | (released) | - |
 
 `--orphans`: session-store에는 없지만 worktree 디렉토리만 남은 항목 표시
