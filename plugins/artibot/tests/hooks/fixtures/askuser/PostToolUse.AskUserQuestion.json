@@ -3,7 +3,7 @@
   "label_ko": "문서 기반, 라이브 미캡처",
   "provenance": "document-based-not-live-captured",
   "live_captured": false,
-  "used_by": "tests/hooks/tool-used-record.test.js and tests/dispatcher/posttooluse-dispatcher.test.js (SH-09 permanent carrier, limb sh09-askuser-carrier)",
+  "used_by": "tests/hooks/tool-used-record-askuser.test.js and tests/dispatcher/posttooluse-dispatcher.test.js (SH-09 permanent carrier, limb sh09-askuser-carrier)",
   "shape_sources": {
     "envelope": {
       "keys": ["cwd", "duration_ms", "effort", "hook_event_name", "permission_mode", "prompt_id", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path"],
