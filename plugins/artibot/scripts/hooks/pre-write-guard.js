@@ -26,7 +26,7 @@
  *  `tests/hooks/pretooluse-passthrough.test.js`.
  */
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -388,12 +388,19 @@ function shouldEnforceGuard(filePath) {
   if (cwdNorm && norm.startsWith(cwdNorm)) return true;
   return norm.includes('plugins/artibot/');
 }
-import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
+import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractFilePath, extractToolName, normalizePath } from '../../lib/core/hook-utils.js';
+import { GATE_FILES, sessionGateDir, sessionIdOf } from '../../lib/project-state/gate-markers.js';
 import { recordHumanAsked } from '../../lib/runtime/human-asked-record.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
-const BLOCK_FINGERPRINT_FILE = 'last-pre-write-block.txt';
+// The loop-guard memory is per SESSION and lives in the project's store
+// (`<store>/gates/sessions/<session>/`, see lib/project-state/gate-markers.js),
+// not in the plugin root. That directory is shared by every session of every
+// project — one session's block evicted another's, so the retry bypass failed
+// exactly when several windows were open — and is replaced on every plugin
+// update.
+const BLOCK_FINGERPRINT_FILE = GATE_FILES.preWriteBlock;
 
 /**
  * The fail-closed reason string, unchanged from before this file recorded
@@ -462,13 +469,36 @@ function buildBlockFingerprint(sessionId, toolName, normalizedPath) {
 }
 
 /**
+ * This session's gate directory, or null when it cannot be worked out.
+ *
+ * The root is resolved the way `shouldEnforceGuard` resolves the Artibot marker
+ * check — the git root of the cwd, else the cwd itself — so the loop guard and
+ * the decision it belongs to always speak about the same project. Null (never a
+ * throw) makes both loop-guard functions below no-ops: a guard that cannot
+ * remember simply does not bypass, which is the strict direction.
+ *
+ * @param {object} hookData
+ * @returns {string|null}
+ */
+function blockStateDir(hookData) {
+  try {
+    const cwd = process.cwd();
+    return sessionGateDir(getRepoRoot(cwd) || cwd, sessionIdOf(hookData));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read the last block fingerprint from disk. Returns empty string when the
  * fingerprint file does not exist or is unreadable.
+ * @param {string|null} stateDir this session's gate directory
  * @returns {string}
  */
-function readLastBlockFingerprint() {
+function readLastBlockFingerprint(stateDir) {
+  if (!stateDir) return '';
   try {
-    const filePath = path.join(getPluginRoot(), 'runtime', BLOCK_FINGERPRINT_FILE);
+    const filePath = path.join(stateDir, BLOCK_FINGERPRINT_FILE);
     if (!existsSync(filePath)) return '';
     return readFileSync(filePath, 'utf-8').trim();
   } catch {
@@ -478,16 +508,15 @@ function readLastBlockFingerprint() {
 
 /**
  * Persist the latest block fingerprint to disk so the next attempt can
- * detect a duplicate and bypass the block.
+ * detect a duplicate and bypass the block. `atomicWriteSync` creates the
+ * directory chain itself.
+ * @param {string|null} stateDir this session's gate directory
  * @param {string} fingerprint
  */
-function saveBlockFingerprint(fingerprint) {
+function saveBlockFingerprint(stateDir, fingerprint) {
+  if (!stateDir) return;
   try {
-    const dir = path.join(getPluginRoot(), 'runtime');
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    atomicWriteSync(path.join(dir, BLOCK_FINGERPRINT_FILE), fingerprint + '\n');
+    atomicWriteSync(path.join(stateDir, BLOCK_FINGERPRINT_FILE), fingerprint + '\n');
   } catch {
     // best-effort — fingerprint persistence is a UX nicety, not load-bearing
   }
@@ -666,7 +695,8 @@ async function handleWriteGuard(hookData) {
   // separate Node child-processes can share the bypass signal. Pattern
   // mirrors dev-verify-gate.js's fingerprint cache (l.151-186).
   const fingerprint = buildBlockFingerprint(sessionId, toolName, normalized);
-  if (readLastBlockFingerprint() === fingerprint) {
+  const stateDir = blockStateDir(hookData);
+  if (readLastBlockFingerprint(stateDir) === fingerprint) {
     process.stderr.write(
       `[pre-write-guard] duplicate block bypassed (loop guard) — file: ${filePath}\n`,
     );
@@ -698,7 +728,7 @@ async function handleWriteGuard(hookData) {
     + 'File exists but was not Read in this session. '
     + `Read the file first to understand its contents before modifying, then retry the same ${toolName}.`;
   process.stderr.write(`[artibot:pre-write-guard] ${reason}\n`);
-  saveBlockFingerprint(fingerprint);
+  saveBlockFingerprint(stateDir, fingerprint);
   writeStdout({ decision: 'block', reason });
   await recordHumanAsked({ hookData, tool: toolName, reason });
 }

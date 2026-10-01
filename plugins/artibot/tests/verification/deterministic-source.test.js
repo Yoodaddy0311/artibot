@@ -331,49 +331,76 @@ describe('readDeterministicLayer — the port boundary', () => {
     };
   }
 
+  // The marker's location is the CALLER's knowledge (the session's gate
+  // directory under the project store — `lib/project-state/gate-markers.js`);
+  // this module reads exactly the path it is handed. The value is a stand-in.
+  const MARKER = path.join('/store', 'gates', 'sessions', 'abc', 'last-main-agent-edit.timestamp');
+
   it('wraps the layer under the key verify() expects', () => {
     const { ports } = spyPorts();
-    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', pluginRoot: '/plugin', nowMs: NOW_MS });
+    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', markerPath: MARKER, nowMs: NOW_MS });
     expect(Object.keys(layers)).toEqual(['deterministic']);
     expect(layers.deterministic.exitCode).toBe(0);
   });
 
-  it('reads the result under repoRoot and the marker under pluginRoot (owner decision R1)', () => {
+  it('reads the result under repoRoot and the marker at the exact path it is given (owner decision R1)', () => {
     const { ports, seen } = spyPorts();
-    readDeterministicLayer(ports, { repoRoot: '/repo', pluginRoot: '/plugin', nowMs: NOW_MS });
+    readDeterministicLayer(ports, { repoRoot: '/repo', markerPath: MARKER, nowMs: NOW_MS });
     expect(seen).toEqual([
       path.join('/repo', 'plugins', 'artibot', 'runtime', 'last-test-result.json'),
-      path.join('/plugin', 'runtime', 'last-main-agent-edit.timestamp'),
+      MARKER,
     ]);
   });
 
   it('degrades to absent when the result port throws', () => {
     const { ports } = spyPorts({ throwOn: 'read' });
-    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', pluginRoot: '/plugin', nowMs: NOW_MS });
+    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', markerPath: MARKER, nowMs: NOW_MS });
     expect(layers.deterministic).toEqual({ reason: REASONS.absent });
   });
 
   it('degrades to noMarker when the marker port throws', () => {
     const { ports } = spyPorts({ throwOn: 'stat' });
-    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', pluginRoot: '/plugin', nowMs: NOW_MS });
+    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', markerPath: MARKER, nowMs: NOW_MS });
     expect(layers.deterministic).toEqual({ reason: REASONS.noMarker });
   });
 
   it('degrades to absent when repoRoot is missing, without calling any port', () => {
     const { ports, seen } = spyPorts();
-    const layers = readDeterministicLayer(ports, { repoRoot: null, pluginRoot: '/plugin', nowMs: NOW_MS });
+    const layers = readDeterministicLayer(ports, { repoRoot: null, markerPath: MARKER, nowMs: NOW_MS });
     expect(layers.deterministic).toEqual({ reason: REASONS.absent });
     expect(seen).toEqual([]);
   });
 
-  it('degrades to noMarker when pluginRoot is missing', () => {
-    const { ports } = spyPorts();
-    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', pluginRoot: '', nowMs: NOW_MS });
+  it('degrades to noMarker when markerPath is missing, empty or not a string', () => {
+    for (const markerPath of [undefined, null, '', 42, {}]) {
+      const { ports, seen } = spyPorts();
+      const layers = readDeterministicLayer(ports, { repoRoot: '/repo', markerPath, nowMs: NOW_MS });
+      expect(layers.deterministic, `markerPath=${JSON.stringify(markerPath)}`)
+        .toEqual({ reason: REASONS.noMarker });
+      // Only the result file was looked at: no marker port call for a path it
+      // was never given.
+      expect(seen, `markerPath=${JSON.stringify(markerPath)}`).toHaveLength(1);
+    }
+  });
+
+  /**
+   * THE LEGACY LOCATION IS NEVER GUESSED. Until O2 the marker was derived from a
+   * `pluginRoot` argument (`<pluginRoot>/runtime/last-main-agent-edit.timestamp`),
+   * a file shared by every project and replaced on every plugin update. A caller
+   * still passing `pluginRoot` must fail SAFE — "no marker", the unmeasured
+   * branch — rather than silently judge freshness against an edit made in some
+   * other project. The marker port must not even be asked.
+   */
+  it('ignores a legacy pluginRoot argument and reads no marker for it (fail safe, no migration)', () => {
+    const { ports, seen } = spyPorts();
+    const layers = readDeterministicLayer(ports, { repoRoot: '/repo', pluginRoot: '/plugin', nowMs: NOW_MS });
     expect(layers.deterministic).toEqual({ reason: REASONS.noMarker });
+    expect(seen).toEqual([path.join('/repo', 'plugins', 'artibot', 'runtime', 'last-test-result.json')]);
+    expect(seen.some((p) => p.includes('last-main-agent-edit'))).toBe(false);
   });
 
   it('never throws when the ports object itself is missing', () => {
-    expect(readDeterministicLayer(undefined, { repoRoot: '/repo', pluginRoot: '/plugin', nowMs: NOW_MS }))
+    expect(readDeterministicLayer(undefined, { repoRoot: '/repo', markerPath: MARKER, nowMs: NOW_MS }))
       .toEqual({ deterministic: { reason: REASONS.absent } });
   });
 });

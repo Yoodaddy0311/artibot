@@ -5,6 +5,7 @@ import {
 import path from 'node:path';
 import os from 'node:os';
 import { buildDevVerifyOutput } from '../../lib/core/dev-verify-output.js';
+import { GATE_FILES, sessionGateDir } from '../../lib/project-state/gate-markers.js';
 import { verifyCompletedIdempotencyKey } from '../../lib/verification/verify-writer.js';
 
 /**
@@ -23,6 +24,37 @@ import { verifyCompletedIdempotencyKey } from '../../lib/verification/verify-wri
  * up a real git repo + stdin — so we exercise the pure helper through
  * filesystem fixtures and only smoke-test main()'s read-only-turn bail path.
  */
+
+// ---------------------------------------------------------------------------
+// Gate-state fixtures (O2)
+// ---------------------------------------------------------------------------
+//
+// The edit marker and the fingerprint cache live in the SESSION's gate directory
+// under the project store (`lib/project-state/gate-markers.js`), keyed by the
+// repo root the hook resolves — so a fixture has to name a REAL directory as
+// `mockState.repoRoot` and seed the marker under it. `mockState.pluginRoot` is
+// kept as a separate, empty directory on purpose: state showing up there would be
+// the regression.
+//
+// The path is computed with the module's own `sessionGateDir`; that the layout is
+// what it should be is pinned literally in `mark-main-agent-edit.test.js` and
+// `tests/project-state/gate-markers.test.js`, and that two processes agree on it
+// is measured with real spawns in `gate-state-project-scope.test.js`.
+
+/**
+ * Seed the main-agent-edit marker the gate reads for (`repoRoot`, `sessionId`).
+ *
+ * @param {string} repoRoot
+ * @param {string|undefined} sessionId `undefined` = a payload with no session id
+ * @returns {string} the marker file
+ */
+function seedMarker(repoRoot, sessionId) {
+  const dir = sessionGateDir(repoRoot, sessionId);
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, GATE_FILES.mainAgentEdit);
+  writeFileSync(file, 'x');
+  return file;
+}
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -93,9 +125,9 @@ vi.mock('../../lib/git/repo-root-cache.js', () => ({
 }));
 
 /**
- * 원장 포트 대역(OB-07). `mockState.repoRoot` 는 '/fake/repo' 라 실제 디스크의
- * `C:\fake\repo` (POSIX 라면 `/fake/repo`) 로 풀린다 — 훅이 이제 원장을 쓰므로
- * 대역이 없으면 이 스위트가 샌드박스 밖에 파일을 만든다. 그래서 append/read
+ * 원장 포트 대역(OB-07). 훅이 원장을 쓰므로 대역이 없으면 이 스위트가 repoRoot 밑에
+ * (`mockState.repoRoot` 가 기본값 '/fake/repo' 인 스위트는 실제 디스크의
+ * `C:\fake\repo` 로 풀려 샌드박스 밖에) 원장 파일을 만든다. 그래서 append/read
  * 두 포트를 여기서 가로챈다. `vi.hoisted` 인 이유: `vi.mock` 팩토리는 변수
  * 선언 위로 끌어올려지므로 평범한 `const` 는 팩토리 안에서 TDZ 로 죽는다.
  */
@@ -192,21 +224,24 @@ describe('dev-verify-gate / getChangedFiles 경로 디코딩', () => {
 
   beforeEach(async () => {
     workRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-z-'));
-    mockState.pluginRoot = workRoot;
+    // The repo root is the real directory the gate state hangs off; the plugin
+    // root is a separate path the hook must no longer use for it.
+    mockState.repoRoot = workRoot;
+    mockState.pluginRoot = path.join(workRoot, 'plugin-root-unused');
     mockState.stdin = '{}';
     mockState.stdoutChunks = [];
     mockState.execLog = [];
     mockState.dualDiff = null;
 
     // 마커만 있고 캐시가 없으면 hasNewerMainAgentEdit() 이 참 — 게이트 발화 조건.
-    const runtime = path.join(workRoot, 'runtime');
-    mkdirSync(runtime, { recursive: true });
-    writeFileSync(path.join(runtime, 'last-main-agent-edit.timestamp'), 'x');
+    // stdin `{}` 에는 session_id 가 없으므로 no-session 슬롯에 심는다.
+    seedMarker(workRoot, undefined);
 
     ({ main } = await import('../../scripts/hooks/dev-verify-gate.js'));
   });
 
   afterEach(() => {
+    mockState.repoRoot = '/fake/repo';
     try { rmSync(workRoot, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
@@ -464,7 +499,10 @@ describe('excluded-files filter (ground truth)', () => {
 // `vi.doMock` 으로 던지는 모듈을 꽂는 것이 유일한 측정 수단이다.
 // ---------------------------------------------------------------------------
 describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
+  /** 기본 repoRoot — 게이트 상태(마커·지문)가 그 저장소 아래에 생기는 실제 디렉터리. */
   let denomRoot;
+  /** 플러그인 디렉터리 대역. 훅이 더는 여기에 상태를 쓰지 않으므로 끝까지 비어 있어야 한다. */
+  let pluginDir;
   /** 신선 케이스에서만 쓰는 실제 디렉터리. 빈 문자열이면 정리할 것이 없다. */
   let freshRepoRoot = '';
 
@@ -486,7 +524,13 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
 
   function fireFixture() {
     denomRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-denom-'));
-    mockState.pluginRoot = denomRoot;
+    pluginDir = mkdtempSync(path.join(os.tmpdir(), 'artibot-dvg-plugin-'));
+    // `denomRoot` has no vitest result file, which is exactly why every case here
+    // that does not plant one stays `unmeasured`. The deterministic cases below
+    // repoint `repoRoot` at a directory that has one (and seed the marker THERE,
+    // because the marker is looked up under the repo root the hook resolves).
+    mockState.repoRoot = denomRoot;
+    mockState.pluginRoot = pluginDir;
     mockState.stdoutChunks = [];
     mockState.execLog = [];
     mockState.dualDiff = { z: 'lib/a.js\0', plain: 'lib/a.js\n' };
@@ -494,9 +538,7 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
       session_id: SESSION, hook_event_name: 'Stop', stop_hook_active: false,
     });
     // 마커만 있고 캐시가 없으면 게이트가 발화한다.
-    const runtime = path.join(denomRoot, 'runtime');
-    mkdirSync(runtime, { recursive: true });
-    writeFileSync(path.join(runtime, 'last-main-agent-edit.timestamp'), 'x');
+    seedMarker(denomRoot, SESSION);
   }
 
   beforeEach(() => {
@@ -504,15 +546,13 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     ledgerMock.reads.length = 0;
     ledgerMock.readThrows = false;
     ledgerMock.events = [];
-    // Restored per case because the deterministic-source case below repoints it
-    // at a real directory: '/fake/repo' has no vitest result file on any disk,
-    // which is exactly why every OTHER case here stays `unmeasured`.
-    mockState.repoRoot = '/fake/repo';
     fireFixture();
   });
 
   afterEach(() => {
+    mockState.repoRoot = '/fake/repo';
     try { rmSync(denomRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(pluginDir, { recursive: true, force: true }); } catch { /* ignore */ }
     if (freshRepoRoot) {
       try { rmSync(freshRepoRoot, { recursive: true, force: true }); } catch { /* ignore */ }
       freshRepoRoot = '';
@@ -587,16 +627,63 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
     });
   });
 
-  it('샌드박스 밖(/fake/repo)에 아무것도 만들지 않는다', async () => {
+  it('원장·증거 파일은 대역이 막고, 게이트 상태는 세션 디렉터리에만 남는다(플러그인 디렉터리는 비어 있다)', async () => {
     const main = await loadMain();
     await main();
-    // 대역이 빠지면 event-writer 가 실제로 여기에 디렉터리를 판다.
-    expect(existsSync(path.resolve('/fake'))).toBe(false);
-    expect(existsSync(path.resolve('/fake/repo'))).toBe(false);
+    // 대역이 빠지면 event-writer 가 실제로 repoRoot 밑에 원장을 판다.
+    expect(existsSync(path.join(denomRoot, '.artibot', 'runtime', 'ledger.jsonl'))).toBe(false);
+    expect(existsSync(path.join(denomRoot, '.artibot', 'runtime', 'evidence.jsonl'))).toBe(false);
+    // 지문 캐시는 이 세션의 게이트 디렉터리에 — O2. 플러그인 디렉터리에는 아무것도 없다.
+    const stateDir = sessionGateDir(denomRoot, SESSION);
+    expect(existsSync(path.join(stateDir, GATE_FILES.devVerifyFingerprint)), 'fingerprint cache').toBe(true);
+    expect(existsSync(path.join(pluginDir, 'runtime')), 'runtime/ under the plugin root').toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // O2 — 마커·지문 캐시의 범위. 프로세스 사이의 증명(다른 프로젝트의 편집이 이
+  // 프로젝트의 게이트를 못 깨운다)은 `gate-state-project-scope.test.js` 의 실제
+  // spawn 이 맡는다. 여기서는 훅이 어디를 읽는지만 잰다.
+  // -------------------------------------------------------------------------
+  it('다른 세션의 마커만 있으면 발화하지 않는다(세션 범위)', async () => {
+    rmSync(path.join(sessionGateDir(denomRoot, SESSION)), { recursive: true, force: true });
+    seedMarker(denomRoot, 'some-other-session');
+    const main = await loadMain();
+    await main();
+    expect(mockState.stdoutChunks).toEqual([]);
+    expect(ledgerMock.appends).toHaveLength(0);
+  });
+
+  it('옛 플러그인 루트 위치의 마커는 읽지 않는다 — 이주 없이 fail safe', async () => {
+    rmSync(path.join(sessionGateDir(denomRoot, SESSION)), { recursive: true, force: true });
+    // 옛 배치: <pluginRoot>/runtime/last-main-agent-edit.timestamp. 새 위치에는 없다.
+    mkdirSync(path.join(pluginDir, 'runtime'), { recursive: true });
+    writeFileSync(path.join(pluginDir, 'runtime', GATE_FILES.mainAgentEdit), 'x');
+    const main = await loadMain();
+    await main();
+    // 어느 프로젝트의 편집인지 알 수 없는 마커를 가져오면 교차 프로젝트 오발화가
+    // 되살아난다. 마커가 없으면 조용히 물러나는 것이 안전한 방향이다.
+    expect(mockState.stdoutChunks).toEqual([]);
+  });
+
+  it('같은 세션의 지문 캐시가 있으면 같은 상태를 다시 묻지 않는다', async () => {
+    const main = await loadMain();
+    await main();
+    expect(mockState.stdoutChunks).toEqual([EXPECTED_STDOUT]);
+    // 지문이 세션 디렉터리에 남았다. 마커를 다시 새것으로 만들어도(편집이 있었어도)
+    // 작업트리 상태가 같으면 조용하다 — 기존 루프 가드의 동작 그대로.
+    const marker = seedMarker(denomRoot, SESSION);
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(marker, later, later);
+    mockState.stdoutChunks = [];
+    await main();
+    expect(mockState.stdoutChunks).toEqual([]);
   });
 
   it('stdin 에 session_id 가 없으면 원장을 건드리지 않는다', async () => {
     mockState.stdin = JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: false });
+    // id 없는 payload 는 no-session 슬롯에서 마커를 찾는다(게이트가 여전히 발화해야
+    // 이 케이스가 "원장을 안 건드린다"를 재는 것이지 "게이트가 안 돈다"를 재지 않는다).
+    seedMarker(denomRoot, undefined);
     const main = await loadMain();
     await main();
     expect(ledgerMock.appends).toHaveLength(0);
@@ -642,11 +729,12 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
    * 신선한 vitest 결과가 있으면 deterministic 만 판정이 된다(오너 결정 F1·R1).
    *
    * 이 스위트의 다른 케이스가 전부 `unmeasured` 인 이유가 여기서 드러난다:
-   * `mockState.repoRoot` 가 '/fake/repo' 라 결과 파일이 어느 디스크에도 없다.
-   * `node:fs` 는 대역하지 않으므로 훅은 진짜로 읽는다 — repoRoot 를 실재
-   * 디렉터리로 돌리고 리포터 산출물을 심으면 그것이 곧 분자다.
+   * 기본 `mockState.repoRoot`(denomRoot) 밑에는 결과 파일이 없다.
+   * `node:fs` 는 대역하지 않으므로 훅은 진짜로 읽는다 — repoRoot 를 결과 파일이 있는
+   * 디렉터리로 돌리고 리포터 산출물을 심으면 그것이 곧 분자다. 마커는 훅이 푸는
+   * repoRoot 의 저장소 밑에서 찾으므로 **그 repoRoot 밑에** 심어야 한다.
    *
-   * 마커 mtime 을 10초 과거로 당기는 이유: fireFixture 가 방금 쓴 마커와
+   * 마커 mtime 을 10초 과거로 당기는 이유: seedMarker 가 방금 쓴 마커와
    * `new Date()` 결과가 같은 밀리초에 걸리면 `>=` 판정이 파일시스템 시간
    * 해상도에 좌우된다. sleep 대신 utimesSync 로 확정한다.
    */
@@ -664,7 +752,7 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
       skipped: 12,
       failedFiles: [],
     }));
-    const marker = path.join(denomRoot, 'runtime', 'last-main-agent-edit.timestamp');
+    const marker = seedMarker(freshRepoRoot, SESSION);
     const aged = new Date(Date.now() - 10_000);
     utimesSync(marker, aged, aged);
 
@@ -695,6 +783,9 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
       timestamp: new Date(Date.now() - 600_000).toISOString(),
       durationMs: 1, totalTests: 1, passed: 1, failed: 0, skipped: 0, failedFiles: [],
     }));
+    // The marker is written NOW, ten minutes after the result: the result predates
+    // the edit. It has to sit under this repo root for the gate to fire at all.
+    seedMarker(freshRepoRoot, SESSION);
 
     const main = await loadMain();
     await main();
@@ -737,7 +828,7 @@ describe('dev-verify-gate / 미측정 분모 원장 기록', () => {
       timestamp: new Date().toISOString(),
       durationMs: 1, totalTests: 5, passed: 5, failed: 0, skipped: 0, failedFiles: [],
     }));
-    const marker = path.join(denomRoot, 'runtime', 'last-main-agent-edit.timestamp');
+    const marker = seedMarker(freshRepoRoot, SESSION);
     const aged = new Date(Date.now() - 10_000);
     utimesSync(marker, aged, aged);
   }
