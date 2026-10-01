@@ -56,12 +56,12 @@ node "$AB\scripts\ledger\verify-rate.mjs"
 | 결정 스토어 | `<projectRoot>/.artibot/runtime/decisions/*.events.ndjson` — 작업 트리 안, 워크트리별 | topology-agreement, nl-activation-report | `plugins/artibot/lib/observability/decision-events.js:153` · `plugins/artibot/commands/doctor.md:285-288` |
 | 증거 레지스트리 | `<git-common-dir>/artibot/evidence.jsonl` | 전용 판독기 미확인 | `plugins/artibot/lib/verification/evidence-registry.js#evidenceRegistryPath` |
 | 상태 스토어 | `<git-common-dir>/artibot/project-state.json` 과 `project-state.jsonl` | resume-report | `plugins/artibot/lib/runtime/middleware/tasks.js:103` |
-| 자동조종 세션 저장소 | `<플러그인 루트>/runtime/autopilot/<sessionId>.json` — 대상 리포가 아니라 설치 버전 디렉터리 안 | recovery-journal-census(`--dir`), 함수 censusReportVerifyEvidence | `plugins/artibot/lib/autopilot/session-store.js:116-132` · `plugins/artibot/scripts/ledger/recovery-journal-census.mjs:40-48` |
+| 자동조종 세션 저장소 | `<상태 디렉터리>/runtime/autopilot/<sessionId>.json` — 기본 `~/.claude/artibot/runtime/autopilot/`(D2, 오너 결정 2026-09-30). 대상 리포도 설치 버전 디렉터리도 아니라서 `/update` 를 넘어 남는다(v4.70.1 까지는 `<플러그인 루트>/runtime/autopilot` 이었다) | recovery-journal-census(`--dir`), 함수 censusReportVerifyEvidence | `plugins/artibot/lib/autopilot/session-store.js:185-193` · `plugins/artibot/scripts/ledger/recovery-journal-census.mjs:256-263` |
 | 호스트 transcript | `~/.claude/projects/<slug>/*.jsonl`(main 만) | question-rate | `plugins/artibot/scripts/evals/question-rate.mjs:7-9` |
 
 - `<git-common-dir>` 는 대상 리포 루트에서 `git rev-parse --git-common-dir` 로 얻는다(설정의 `plugins/artibot/artibot.config.json#stateStore.location` 이 이 값을 기준으로 선언한다).
-- 주의 1 — 자동조종 세션 저장소는 플러그인 캐시 안이라 `/update` 가 새 버전 디렉터리를 만들면 새 버전은 옛 저장소를 읽지 않는다(추론: `getStoreDir` 가 `getPluginRoot()` 기준이다). 이 리포 CA-13 행이 저장 세션 id 46 에서 10 으로의 감소를 보고하고 원인을 "D10 캐시 삭제로 보이나 미확인"으로 둔다. CA-03·CA-13 을 재려면 업데이트 전에 판독하거나 폴더를 복사해 `--dir` 로 읽는다. 저장 위치를 고정하는 환경 변수 쌍(`ARTIBOT_AUTOPILOT_STORE_DIR` 와 `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT`)은 플러그인 루트가 같을 때만 유효하다(`plugins/artibot/lib/autopilot/session-store.js:82-97`). 버전이 바뀌면 다시 맞춰야 한다.
-- 주의 2 — 플러그인이 작업 트리에 쓰는 `.artibot/` 하위 산출물(결정 스토어 등)은 대상 리포에서 untracked 로 보일 수 있다. 이 리포는 `.gitignore:146`(`**/.artibot/runtime/`) · `:148`(`**/.artibot/transcripts/`) · `:154`(`**/.artibot/state.yaml`)로 막는다. 대상 리포 `.gitignore` 에 무엇을 넣을지는 오너 결정이다.
+- 주의 1 — 자동조종 세션 저장소는 v4.70.1 까지 플러그인 캐시 안(`<플러그인 루트>/runtime/autopilot`)이라 `/update` 가 새 버전 디렉터리를 만들면 새 버전은 옛 저장소를 읽지 않았다(`getStoreDir` 가 `getPluginRoot()` 기준이었다). 이 리포 CA-13 행이 저장 세션 id 46 에서 10 으로의 감소를 보고하고 원인을 "D10 캐시 삭제로 보이나 미확인"으로 둔다 — 그 감소는 옛 배치 아래의 일이다. D2 이후의 빌드는 기본 저장소가 사용자 상태 디렉터리 `~/.claude/artibot/runtime/autopilot` 이라 업데이트를 넘어 같은 저장소를 읽는다(`plugins/artibot/lib/autopilot/session-store.js:185-193`). 옛 위치(플러그인 루트 · 캐시된 모든 버전 디렉터리 · 마켓플레이스 미러)에 남은 세션은 자동조종 프로세스가 기본 저장소를 처음 열 때 새 저장소로 **복사**되고 원본은 그대로 남는다(채택 기록은 저장소 옆 `legacy-migration.ledger`, `session-store.js:155-158` · `plugins/artibot/lib/autopilot/legacy-store-adoption.js`). 채택 전에는 판독기가 옛 위치를 대신 읽고 `census.legacyFallback` 이 true 로 찍힌다(`plugins/artibot/scripts/ledger/recovery-journal-census.mjs`). v4.71.0 미만에서 올릴 때만 채택 전 저장소가 버전 디렉터리에 있다 — 그때 CA-03·CA-13 을 재려면 업데이트 전에 판독하거나 폴더를 복사해 `--dir` 로 읽는다. 저장 위치를 고정하는 환경 변수 쌍(`ARTIBOT_AUTOPILOT_STORE_DIR` 와 `ARTIBOT_AUTOPILOT_STORE_DIR_ROOT`)은 지금도 플러그인 루트가 같을 때만 유효하다(`session-store.js:185-193`). 버전이 바뀌면 다시 맞춰야 한다.
+- 주의 2 — 플러그인이 작업 트리에 쓰는 `.artibot/` 하위 산출물(결정 스토어 등)은 대상 리포에서 untracked 로 보일 수 있다. 이 리포는 `.gitignore:146`(`**/.artibot/runtime/`) · `:148`(`**/.artibot/transcripts/`) · `:154`(`**/.artibot/state.yaml`)로 막는다. 대상 리포 `.gitignore` 에 무엇을 넣을지는 오너 결정이었고, 결정은 D1(2026-09-30)이다: v4.71.0 부터 SessionStart 훅 `project-bootstrap` 이 대상 리포의 `<git-common-dir>/info/exclude` 에 관리 블록을 써서 이 산출물이 `git add .` 에 딸려 들어가지 않게 한다. 프로젝트의 `.gitignore` 는 건드리지 않고 git 리포가 아니면 아무것도 하지 않으며, 끄는 길은 `projectBootstrap.gitExclude: false` 또는 환경변수 `ARTIBOT_PROJECT_BOOTSTRAP=0` 이다(`plugins/artibot/artibot.config.json#projectBootstrap.comment`). 이미 쓴 블록은 끄더라도 지워지지 않는다.
 - 주의 3 — 원장은 세션이 도는 동안 계속 는다. 판독기 출력의 `census` 는 같은 읽기에서 줄 수와 바이트를 함께 낸다(`plugins/artibot/lib/runtime/ledger.js:211-237`). 총계와 내역은 같은 출력에서 취한다.
 
 ### 1.4 스위치
@@ -182,7 +182,7 @@ node "$AB\scripts\ledger\verify-rate.mjs"
 | T0 | 기준선 일괄(§2.1) | Canary "이전 대비" |
 | T1 | 스위치 ON 직후. 재시작 뒤 첫 세션의 시작 시각을 적고 판독기를 한 번 더 | 창 경계 |
 | T2 | 표본 창이 찰 때마다(④ 는 ended 50 단위) | 통과선 판정 |
-| T3 | `/update` 직전 | 자동조종 세션 저장소가 버전 디렉터리에 있다(§1.3 주의 1) |
+| T3 | `/update` 직전(v4.71.0 미만 설치에서 올릴 때만) | 채택 전의 자동조종 세션 저장소는 옛 버전 디렉터리에 있다. D2 빌드 설치 뒤에는 `~/.claude/artibot/runtime/autopilot` 이라 업데이트를 넘어 남는다(§1.3 주의 1) |
 | T4 | 판정 직전 최종 재측정 | 원장이 계속 늘고 있다 |
 
 표본이 안 생기면: SH-05 · SH-06 · SH-12 · SH-19 · CA-03 은 특정 사용(auditor 검수 · `/autopilot` VERIFY · `/split` 레인 · 중첩 스폰)이 있어야 생긴다. 자연 발생을 기다릴지 의도적 프로브를 할지는 오너 결정이고, 프로브는 자연 표본과 구분해 표기한다(§1.5).
