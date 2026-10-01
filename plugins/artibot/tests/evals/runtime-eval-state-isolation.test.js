@@ -23,7 +23,11 @@
  * HOME. The CONTROL half proves the detector can see a leak at all: the same hook
  * run directly, with the same HOME and no override, does write there — so an empty
  * result for the harness means the harness redirected, not that nothing is ever
- * written.
+ * written. The harness hands its children a scratch HOME rather than a scratch
+ * ARTIBOT_STATE_DIR because the resolver drops an override that is unpaired, minted
+ * for another home, or contradicted by a second home variable; the cases below set
+ * each of those up, and a child whose state dir leaked would show in a directory
+ * they check.
  *
  * WHAT THIS CANNOT SEE: hooks other than the two the harness spawns, and a
  * developer whose HOME is the real one while the override is set by hand to the
@@ -125,5 +129,47 @@ describe('runtime eval harness — state isolation (O2)', () => {
     // the hook wrote where it was told to, and nothing went to the HOME-derived dir
     expect(existsSync(path.join(mine, 'runtime', 'token-usage-session.json'))).toBe(true);
     expect(existsSync(stateDirUnderHome())).toBe(false);
+  });
+
+  // `resolveArtibotDir()` drops an override that has no ARTIBOT_STATE_DIR_HOME, or one minted
+  // for another home, and answers with the real `~/.claude/artibot`. "The variable is set" is
+  // therefore not "the redirect is in force": a harness that stopped at the first would hand
+  // its children the real state dir (review 2026-09-30, inferred from the code).
+  it.each([
+    ['ARTIBOT_STATE_DIR with no ARTIBOT_STATE_DIR_HOME', () => {}],
+    ['ARTIBOT_STATE_DIR minted for another home', () => {
+      process.env.ARTIBOT_STATE_DIR_HOME = path.join(base, 'some-other-home');
+    }],
+  ])('%s is not a redirect — the hook children still get a scratch home', async (_label, arrange) => {
+    const unpaired = path.join(base, 'unpaired-state');
+    process.env.ARTIBOT_STATE_DIR = unpaired;
+    arrange();
+    const scenario = DEFAULT_RUNTIME_EVAL_SCENARIOS.find((item) => item.id === 'reverify-hook-chain');
+
+    const result = await evaluateRuntimeScenario(scenario);
+
+    expect(result.passed, JSON.stringify(result.assertions)).toBe(true);
+    // neither the dropped override's target nor the real, home-derived dir was written
+    expect(existsSync(unpaired)).toBe(false);
+    expect(existsSync(stateDirUnderHome())).toBe(false);
+  });
+
+  it('HOME and USERPROFILE naming different directories — where no pairing can hold — leaves both homes untouched', async () => {
+    // `resolveArtibotDir()` checks the pair against EVERY declared home, so with two different
+    // homes no ARTIBOT_STATE_DIR_HOME is ever accepted. A harness that redirected with the
+    // override alone would then write the USERPROFILE-derived dir.
+    const otherHome = path.join(base, 'other-home');
+    mkdirSync(otherHome, { recursive: true });
+    process.env.USERPROFILE = otherHome; // HOME stays `home`
+    process.env.ARTIBOT_STATE_DIR = path.join(base, 'wanted-state');
+    process.env.ARTIBOT_STATE_DIR_HOME = home; // minted for HOME only; USERPROFILE disagrees
+    const scenario = DEFAULT_RUNTIME_EVAL_SCENARIOS.find((item) => item.id === 'reverify-hook-chain');
+
+    const result = await evaluateRuntimeScenario(scenario);
+
+    expect(result.passed, JSON.stringify(result.assertions)).toBe(true);
+    expect(existsSync(path.join(base, 'wanted-state'))).toBe(false);
+    expect(existsSync(stateDirUnderHome())).toBe(false);
+    expect(existsSync(path.join(otherHome, '.claude', 'artibot'))).toBe(false);
   });
 });

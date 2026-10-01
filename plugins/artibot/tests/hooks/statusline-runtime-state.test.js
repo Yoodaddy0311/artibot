@@ -17,9 +17,13 @@
  *
  * Now hooks write session state to
  * `~/.claude/artibot/runtime/sessions/<session_id>/<file>` and this script — which
- * gets `session_id` on stdin — reads its own session's file first, then the flat
- * file in the state dir, then the flat file under the plugin root (state from a
- * hook that predates O2).
+ * gets `session_id` on stdin — reads its own session's file and NOTHING else: a
+ * session with no file of its own shows nothing, never the flat file another session
+ * or a pre-O2 hook left (review 2026-09-30: such a session rendered
+ * `👥 ghost-from-other-session | ~987K tokens`). Only a payload with no session id may
+ * take a flat file — the state dir's, then the plugin root's — and only for the effort
+ * record. It also finds the state dir the way the library does (USERPROFILE before
+ * HOME, a paired ARTIBOT_STATE_DIR honoured), so reader and writer cannot disagree.
  *
  * ── how these tests run the script ──────────────────────────────────────────
  * Two layers, because a full `statusline.sh` run is slow where `fork()` is slow:
@@ -54,7 +58,9 @@ import { fileURLToPath } from 'node:url';
 
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
 import { resolveArtibotDir } from '../../lib/core/config.js';
-import { resolveSessionStatePath, sanitizeSessionId } from '../../lib/core/runtime-state.js';
+import {
+  resolveSessionStatePath, sanitizeSessionId, SESSIONLESS_FALLBACK_FILES,
+} from '../../lib/core/runtime-state.js';
 import { announceBashSkip, probeBash, toBashPath } from '../../scripts/utils/bash-compat.js';
 import { makeVersionRoot } from '../helpers/linked-plugin-root.js';
 
@@ -198,10 +204,17 @@ describe('statusline.sh — the state-resolution block', () => {
     }
   });
 
-  describe.skipIf(!BASH.ok)('precedence', () => {
+  describe.skipIf(!BASH.ok)('what a render may show', () => {
     const pluginRoot = () => path.join(base, 'plugin');
-    const sessionFile = (sid) => path.join(stateRoot(), 'runtime', 'sessions', sid, 'current-teammates.json');
+    const sessionFile = (sid, name = 'current-teammates.json') => path.join(stateRoot(), 'runtime', 'sessions', sid, name);
+    const flatFile = (name) => path.join(stateRoot(), 'runtime', name);
+    const legacyFile = (name) => path.join(pluginRoot(), 'runtime', name);
     const who = (line) => (line ? JSON.parse(line).who : '');
+    const payload = (sid) => JSON.stringify({ session_id: sid });
+    const FIVE = [
+      'current-effort.json', 'current-task-budget.json', 'token-usage-session.json',
+      'current-teammates.json', 'long-context-active.json',
+    ];
 
     /**
      * `who` of the file `state_file` picks for each input, '' when it picks none. The file is
@@ -209,13 +222,25 @@ describe('statusline.sh — the state-resolution block', () => {
      * Git Bash), which node on Windows would read as `C:\tmp\…`.
      */
     const PICK = 'state_file current-teammates.json; if [ -n "$STATE_FILE" ]; then cat "$STATE_FILE"; fi';
-    const payload = (sid) => JSON.stringify({ session_id: sid });
+    const PICK_EFFORT = 'state_file current-effort.json; cat "$STATE_FILE"';
+    /** The names, of the five, that `state_file` finds a file for. */
+    const PICKED_NAMES = `picked=''; for n in ${FIVE.join(' ')}; do state_file "$n"; `
+      + 'if [ -n "$STATE_FILE" ]; then picked="$picked $n"; fi; done; printf %s "$picked"';
+    const names = (line) => line.trim().split(/\s+/).filter(Boolean);
 
-    it('session file > flat file in the state dir > plugin-root file, and no session ever reads another\'s', () => {
+    /** Flat copies (state dir) and legacy copies (plugin root) of all five files. */
+    function seedFlatAndLegacy() {
+      for (const name of FIVE) {
+        writeJson(flatFile(name), { who: 'flat' });
+        writeJson(legacyFile(name), { who: 'legacy' });
+      }
+    }
+
+    it('a session reads its OWN file and nothing else: not the flat file, not the plugin-root file, not another session\'s', () => {
       writeJson(sessionFile('sess-A'), { who: 'A' });
       writeJson(sessionFile('sess-B'), { who: 'B' });
-      writeJson(path.join(stateRoot(), 'runtime', 'current-teammates.json'), { who: 'flat' });
-      writeJson(path.join(pluginRoot(), 'runtime', 'current-teammates.json'), { who: 'legacy' });
+      writeJson(flatFile('current-teammates.json'), { who: 'flat' });
+      writeJson(legacyFile('current-teammates.json'), { who: 'legacy' });
       // `sessions/../../../evil` would resolve to <home>/.claude/evil if the id were used raw.
       writeJson(path.join(home, '.claude', 'evil', 'current-teammates.json'), { who: 'evil' });
 
@@ -226,25 +251,92 @@ describe('statusline.sh — the state-resolution block', () => {
       }).map(who);
 
       expect(picked).toEqual([
-        'A', //      its own session file, over the flat and the legacy ones
-        'B', //      a different session reads a different file — B never sees A's
-        'flat', //   a session with no file of its own falls back to the state dir's flat file
-        'flat', //   a payload with no session id still reads the flat files
-        'flat', //   a hostile id is sanitized, so it cannot point outside sessions/
+        'A', //  its own session file, over the flat and the legacy ones
+        'B', //  a different session reads a different file — B never sees A's
+        '', //   an id and no file of its own: NOTHING (it used to show the flat one — the ghost)
+        '', //   no session id: no flat TEAM roster either, it belongs to no session
+        '', //   a hostile id is sanitized to the safe id `evil`, which has no file: not the decoy, not the flat file
       ]);
     });
 
-    it('falls back to the plugin-root file last (state a hook wrote before O2), and to nothing when there is none', () => {
-      writeJson(path.join(pluginRoot(), 'runtime', 'current-teammates.json'), { who: 'legacy' });
+    it('a session with an id but no files finds NONE of the five, though flat and legacy copies of all five exist', () => {
+      seedFlatAndLegacy();
+      // what the review reproduced: another session's roster and token count, shown as this one's
+      writeJson(flatFile('current-teammates.json'), { teammates: [{ name: 'ghost-from-other-session' }] });
+      writeJson(flatFile('token-usage-session.json'), { totalTokens: 987000 });
 
-      // The probe removes the file it read, so the SECOND pass finds no candidate at all.
-      const picked = runBlockEach({
-        inputs: [payload('sess-A'), payload('sess-A')],
-        pluginRoot: pluginRoot(),
-        probe: 'state_file current-teammates.json; if [ -n "$STATE_FILE" ]; then cat "$STATE_FILE"; rm -f "$STATE_FILE"; fi',
-      }).map(who);
+      const [picked] = runBlockEach({ inputs: [payload('sess-Z')], pluginRoot: pluginRoot(), probe: PICKED_NAMES });
 
-      expect(picked).toEqual(['legacy', '']); // and the script survived `set -euo pipefail` with nothing found
+      expect(names(picked)).toEqual([]);
+    });
+
+    it('with no session id ONLY the effort record falls back — the state dir\'s flat file first, then the plugin root\'s', () => {
+      seedFlatAndLegacy();
+
+      const [flatPass] = runBlockEach({ inputs: ['{}'], pluginRoot: pluginRoot(), probe: PICKED_NAMES });
+      // the list the shell spells and the list the library exports are one list
+      expect(names(flatPass)).toEqual([...SESSIONLESS_FALLBACK_FILES]);
+
+      const [first] = runBlockEach({ inputs: ['{}'], pluginRoot: pluginRoot(), probe: PICK_EFFORT });
+      expect(JSON.parse(first).who).toBe('flat');
+
+      rmSync(flatFile('current-effort.json'));
+      const [second] = runBlockEach({ inputs: ['{}'], pluginRoot: pluginRoot(), probe: PICK_EFFORT });
+      expect(JSON.parse(second).who).toBe('legacy');
+    });
+
+    it('prints nothing when no candidate exists, and the script survives set -euo pipefail', () => {
+      const [withId] = runBlockEach({ inputs: [payload('sess-A')], pluginRoot: pluginRoot(), probe: PICKED_NAMES });
+      const [withoutId] = runBlockEach({ inputs: ['{}'], pluginRoot: pluginRoot(), probe: PICKED_NAMES });
+
+      expect(withId).toBe('');
+      expect(withoutId).toBe('');
+    });
+  });
+
+  describe.skipIf(!BASH.ok)('where the state dir is (aligned with lib/core/config.js#resolveArtibotDir)', () => {
+    // [label, USERPROFILE, HOME, ARTIBOT_STATE_DIR, ARTIBOT_STATE_DIR_HOME, STATE_ROOT the block must yield]
+    const ROWS = [
+      ['USERPROFILE outranks HOME, as getHomeDir() has it', '/up', '/hm', '', '', '/up/.claude/artibot'],
+      ['HOME when USERPROFILE is not set', '', '/hm', '', '', '/hm/.claude/artibot'],
+      ['a paired override is honoured', '/up', '/up', '/x/state', '/up', '/x/state'],
+      ['an override with no ARTIBOT_STATE_DIR_HOME is dropped', '/up', '/up', '/x/state', '', '/up/.claude/artibot'],
+      ['an override minted for another home is dropped', '/up', '/up', '/x/state', '/other', '/up/.claude/artibot'],
+      ['EVERY declared home must agree with the pair', '/up', '/hm', '/x/state', '/up', '/up/.claude/artibot'],
+      ['Windows and MSYS spellings of one home agree', 'C:\\Users\\me', '/c/Users/me', 'D:\\state', 'C:\\Users\\me', 'D:\\state'],
+      ['drive-letter paths compare case-insensitively', 'C:\\Users\\me', '', 'D:\\state', 'c:/users/ME', 'D:\\state'],
+      ['POSIX paths compare case-sensitively', '/up', '', '/x/state', '/UP', '/up/.claude/artibot'],
+      ['no declared home at all: the override cannot be placed, so it is dropped', '', '', '/x/state', '/x', '/.claude/artibot'],
+    ];
+    // The rows whose answer does not depend on the platform's path semantics: the library gives the same one.
+    const PLATFORM_NEUTRAL = ROWS.slice(0, 6);
+
+    it('the block resolves STATE_ROOT the way the library does', () => {
+      const out = runBlock({
+        input: '{}',
+        pluginRoot: path.join(base, 'plugin'),
+        call: 'B="$3"; shift 4; while [ "$#" -ge 4 ]; do '
+          + '( export USERPROFILE="$1" HOME="$2" ARTIBOT_STATE_DIR="$3" ARTIBOT_STATE_DIR_HOME="$4"; . "$B"; printf "%s\\n" "$STATE_ROOT" ); '
+          + 'shift 4; done',
+        args: ROWS.flatMap((row) => row.slice(1, 5)),
+      });
+
+      expect(out.split('\n').slice(0, ROWS.length).map((line, index) => [ROWS[index][0], line]))
+        .toEqual(ROWS.map((row) => [row[0], row[5]]));
+    });
+
+    it('and the library, handed the same environment, resolves the same directory (reader and writer cannot diverge)', () => {
+      for (const [label, userProfile, homeVar, stateDir, minted, expected] of PLATFORM_NEUTRAL) {
+        for (const [key, value] of [
+          ['USERPROFILE', userProfile], ['HOME', homeVar],
+          ['ARTIBOT_STATE_DIR', stateDir], ['ARTIBOT_STATE_DIR_HOME', minted],
+        ]) {
+          if (value === '') delete process.env[key];
+          else process.env[key] = value;
+        }
+        // path.join may spell the separators its own way; the directory is what is compared.
+        expect(resolveArtibotDir().replace(/\\/g, '/'), label).toBe(expected);
+      }
     });
   });
 

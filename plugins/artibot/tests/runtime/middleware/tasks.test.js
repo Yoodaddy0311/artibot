@@ -244,7 +244,8 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
 
   // F05 — the reader passes its own identity to `readEffortRecord`, so a record
   // another session left behind cannot become this task's effort. The fixtures
-  // above carry no identity and stay honoured (that is the compatibility pin).
+  // above carry no identity and stay honoured for a reader with NO session id (the
+  // compatibility pin); a reader that has one reads its own session file only.
   it('prefers the per-session record when hookData.session_id matches', async () => {
     writeEffortFixture({ command: 'daily', effort: 'low', sessionId: 'sess-B', promptId: 'b1' });
     writeSessionFixture('sess-A', {
@@ -308,11 +309,25 @@ describe('middleware/tasks — Score-Aware effort meta propagation', () => {
     });
   });
 
-  it('still honours a legacy fixture with no identity when the reader has a session id', async () => {
+  it('does NOT take a flat record with no identity when the reader has a session id: its own file or nothing', async () => {
+    // What this case used to pin the other way round ("still honours a legacy fixture"): a
+    // flat record belongs to no session in particular, so a reader that knows its session
+    // is never handed one (review 2026-09-30, the cross-session leak in the read chain).
     writeEffortFixture({ command: 'implement', effort: 'high', shift: 0, reason: 'baseline' });
     const mw = createTasksMiddleware({ now: () => 1700000000000 });
     const state = makeState({
       input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot, session_id: 'sess-A' } },
+    });
+    const result = await mw(state);
+
+    expect(result.context.tasks.meta).toBeUndefined();
+  });
+
+  it('still honours a legacy fixture with no identity when the reader has NO session id', async () => {
+    writeEffortFixture({ command: 'implement', effort: 'high', shift: 0, reason: 'baseline' });
+    const mw = createTasksMiddleware({ now: () => 1700000000000 });
+    const state = makeState({
+      input: { prompt: 'x', pluginRoot, hookData: { cwd: projectRoot } },
     });
     const result = await mw(state);
 

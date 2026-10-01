@@ -31,10 +31,22 @@
  *   GLOBAL   user-profile.json · first-run-state.json · self-control-welcomed.marker
  *            · macro-suggestions.json · memory-metrics.json
  *
+ * READING A SESSION FILE (who may fall back to what). A reader that knows its session —
+ * a usable `session_id` — reads THAT session's file and nothing else: no flat file, no
+ * legacy one. A flat file belongs to no session in particular (it is what a payload with
+ * no `session_id` wrote, or what a pre-O2 hook left), so falling back to it shows one
+ * session another session's teammates or token count — reproduced in review on
+ * 2026-09-30: a session with no file of its own rendered
+ * `👥 ghost-from-other-session | ~987K tokens`. A reader with NO usable session id may
+ * take the flat files (the state dir's, then the plugin root's legacy copy) only for the
+ * files in {@link SESSIONLESS_FALLBACK_FILES} — `current-effort.json`, whose record
+ * carries its own identity gate — and gets nothing for the rest.
+ *
  * MIGRATION (copy-if-absent). A GLOBAL file that is absent at its new path is
  * copied, once, from the legacy `<pluginRoot>/runtime/` copy — and, when the
  * plugin root is itself a version directory (`…/4.71.0`), from the newest copy in
- * a SIBLING version directory, because in a marketplace install the state to
+ * a SIBLING version directory (newest by file mtime, not by semver: the most recently
+ * written data wins), because in a marketplace install the state to
  * carry over was written by the PREVIOUS version, not the running one. The copy
  * is an exclusive create (`file.js#atomicCreateTextSync`), so a concurrent writer
  * is never overwritten and a reader never sees a half-copied file, and the legacy
@@ -82,6 +94,17 @@ export const SESSION_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** At most this many session directories survive a sweep (newest first). */
 export const SESSION_DIR_KEEP = 256;
+
+/**
+ * The session-scoped files a reader with NO usable session id may still take from the
+ * flat locations (the state dir's, then the plugin root's legacy copy). Only the effort
+ * record qualifies: it names its own session and prompt and expires, so a flat one that
+ * belongs to somebody else is refused by `task-budget.js#readEffortRecord`. The others —
+ * a teammate roster, a token count, a budget, a long-context marker — carry no identity,
+ * so a flat copy is some other session's and there is nothing honest to show.
+ * `scripts/hooks/statusline.sh#state_file` spells the same list; a test pins the two.
+ */
+export const SESSIONLESS_FALLBACK_FILES = Object.freeze(['current-effort.json']);
 
 const SESSION_ID_MAX_LENGTH = 120;
 
@@ -159,7 +182,9 @@ export function resolveSessionStatePath(sessionId, fileName) {
  * WRITER side of a session-scoped file: the session's own path when the session is
  * identifiable, otherwise the flat file in the runtime dir (a payload with no
  * `session_id` — old hosts, headless probes — keeps the pre-O2 single-slot behaviour,
- * now at a stable location).
+ * now at a stable location). Of the flat files only `current-effort.json` is read back
+ * by current code ({@link SESSIONLESS_FALLBACK_FILES}); the other four are left for
+ * pre-O2 readers, such as an old `statusline.sh` copy.
  *
  * @param {unknown} sessionId
  * @param {string} fileName - a bare file name
@@ -170,23 +195,31 @@ export function resolveScopedStatePath(sessionId, fileName) {
 }
 
 /**
- * READER side of a session-scoped file, in precedence order: the session's own file,
- * the flat file in the state dir, then the flat file under `pluginRoot` (state a hook
- * wrote before O2 — the same file as the second entry on the install.sh layout, and
- * then listed once).
+ * READER side of a session-scoped file.
+ *
+ *   - A reader with a usable session id gets ONE candidate: that session's own file. No
+ *     flat or legacy fallback — a flat file belongs to no session in particular, so
+ *     falling back to it would show this session another session's state (see the
+ *     module header).
+ *   - A reader with no usable session id gets, for the files in
+ *     {@link SESSIONLESS_FALLBACK_FILES} only, the flat file in the state dir and then
+ *     the flat file under `pluginRoot` (state a hook wrote before O2 — the same file as
+ *     the first entry on the install.sh layout, and then listed once). For every other
+ *     file the chain is empty.
  *
  * @param {unknown} sessionId
  * @param {string} fileName - a bare file name
  * @param {{ pluginRoot?: string }} [opts]
- * @returns {string[]}
+ * @returns {string[]} candidates, best first; possibly empty
  */
 export function resolveSessionReadChain(sessionId, fileName, { pluginRoot } = {}) {
   assertBareFileName(fileName);
-  const chain = [];
   const sessionPath = resolveSessionStatePath(sessionId, fileName);
-  if (sessionPath) chain.push(sessionPath);
+  if (sessionPath) return [sessionPath];
+  if (!SESSIONLESS_FALLBACK_FILES.includes(fileName)) return [];
+
   const flat = path.join(resolveRuntimeDir(), fileName);
-  chain.push(flat);
+  const chain = [flat];
   if (typeof pluginRoot === 'string' && pluginRoot) {
     const legacy = path.join(pluginRoot, RUNTIME_DIRNAME, fileName);
     if (!sameDirPath(legacy, flat)) chain.push(legacy);

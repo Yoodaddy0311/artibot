@@ -119,11 +119,20 @@ PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # dirs, never in ~/.claude/artibot/runtime), so those segments could not render.
 #
 # Session-scoped files are $STATE_ROOT/runtime/sessions/<session_id>/<name>. This
-# script gets session_id on stdin, so it reads ITS OWN session's file first. Then,
-# in order: the flat file in the state dir (a hook payload that had no session id),
-# then the flat file under the plugin root (state written by a hook that predates
-# O2; on the install.sh layout the plugin root IS the state dir and this is the
-# same file as the previous candidate).
+# script gets session_id on stdin and reads ITS OWN session's file — and nothing else:
+# a session with no file of its own shows nothing, never a flat file another session
+# or a pre-O2 hook left (a flat teammate roster or token count has no owner; reproduced
+# in review on 2026-09-30 as a teammate "ghost-from-other-session" and "~987K tokens").
+# Only when the payload has NO usable session id does it take the flat file in the state
+# dir and then the flat file under the plugin root (state written by a hook that predates
+# O2; on the install.sh layout the plugin root IS the state dir and these are one file),
+# and only for the files lib/core/runtime-state.js#SESSIONLESS_FALLBACK_FILES lists:
+# current-effort.json. A test pins the two lists equal.
+#
+# STATE_ROOT follows lib/core/config.js#resolveArtibotDir(): the home is USERPROFILE, then
+# HOME (lib/core/platform.js#getHomeDir), and ARTIBOT_STATE_DIR replaces it only while
+# ARTIBOT_STATE_DIR_HOME names that home — otherwise a reader here and a writer there
+# could disagree about where the state is.
 #
 # Deliberately not a config switch: a shell script cannot read artibot.config.json
 # with any confidence, so a switch would split the readers from the writers again.
@@ -137,7 +146,46 @@ PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # start (measured 2026-09-30, Git Bash on Windows: one run took 34 s). So the helpers
 # leave their result in a variable (SESSION_ID_RAW, SESSION_ID_SAFE, STATE_FILE) and use
 # bash's own string operators.
-STATE_ROOT="${HOME:-}/.claude/artibot"
+
+# _canon_dir <path> — sets CANON_DIR: forward slashes, an MSYS drive path (/c/x) spelled
+# with its drive letter (c:/x), no trailing slash. Only for comparing two spellings of a
+# home: Git Bash hands this script HOME=/c/Users/x where Windows means C:\Users\x.
+_canon_dir() {
+  local p="${1//\\//}" re='^/([A-Za-z])(/.*)?$'
+  if [[ "$p" =~ $re ]]; then p="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"; fi
+  while [[ "$p" == */ && "$p" != / ]]; do p="${p%/}"; done
+  CANON_DIR="$p"
+}
+
+# _same_dir <a> <b> — status 0 when both spell one directory. Case-insensitive only for a
+# drive-letter path, as lib/core/platform.js#sameDirPath is only on win32. Call it from an
+# `if`: a non-zero status would end the script under `set -e`.
+_same_dir() {
+  local a b re='^[A-Za-z]:' r=1
+  _canon_dir "$1"; a="$CANON_DIR"
+  _canon_dir "$2"; b="$CANON_DIR"
+  if [[ "$a" =~ $re ]]; then
+    shopt -s nocasematch
+    if [[ "$a" == "$b" ]]; then r=0; fi
+    shopt -u nocasematch
+  elif [[ "$a" == "$b" ]]; then
+    r=0
+  fi
+  return $r
+}
+
+# The state dir, as resolveArtibotDir() returns it: <home>/.claude/artibot, unless
+# ARTIBOT_STATE_DIR is set AND ARTIBOT_STATE_DIR_HOME names the home in force — EVERY
+# declared home variable must agree, else the override is dropped (it was minted for
+# another home; a child started with its own HOME must not inherit its parent's redirect).
+STATE_ROOT="${USERPROFILE:-${HOME:-}}/.claude/artibot"
+if [ -n "${ARTIBOT_STATE_DIR:-}" ] && [ -n "${ARTIBOT_STATE_DIR_HOME:-}" ] && [ -n "${USERPROFILE:-}${HOME:-}" ]; then
+  STATE_PAIRED=1
+  for STATE_HOME in "${USERPROFILE:-}" "${HOME:-}"; do
+    if [ -n "$STATE_HOME" ] && ! _same_dir "$ARTIBOT_STATE_DIR_HOME" "$STATE_HOME"; then STATE_PAIRED=0; fi
+  done
+  if [ "$STATE_PAIRED" = 1 ]; then STATE_ROOT="$ARTIBOT_STATE_DIR"; fi
+fi
 
 # session_id via jq — the payload's own parser.
 _session_id_via_jq() {
@@ -172,15 +220,20 @@ else
 fi
 _sanitize_session_id "$SESSION_ID_RAW"
 
-# state_file <name> — sets STATE_FILE to the first candidate that exists ('' when none does).
+# state_file <name> — sets STATE_FILE to the file this render may show ('' when there is none).
+# With a session id: that session's file, or nothing. Without one: the flat file in the state
+# dir, then the plugin root's, for current-effort.json only (see the header above).
 state_file() {
   local name="$1" cand
   STATE_FILE=''
-  for cand in \
-    "${SESSION_ID_SAFE:+$STATE_ROOT/runtime/sessions/$SESSION_ID_SAFE/$name}" \
-    "$STATE_ROOT/runtime/$name" \
-    "$PLUGIN_ROOT/runtime/$name"; do
-    if [ -n "$cand" ] && [ -f "$cand" ]; then
+  if [ -n "$SESSION_ID_SAFE" ]; then
+    cand="$STATE_ROOT/runtime/sessions/$SESSION_ID_SAFE/$name"
+    if [ -f "$cand" ]; then STATE_FILE="$cand"; fi
+    return 0
+  fi
+  if [ "$name" != 'current-effort.json' ]; then return 0; fi
+  for cand in "$STATE_ROOT/runtime/$name" "$PLUGIN_ROOT/runtime/$name"; do
+    if [ -f "$cand" ]; then
       STATE_FILE="$cand"
       return 0
     fi

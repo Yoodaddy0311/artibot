@@ -9,9 +9,11 @@
  * are SESSION-scoped: hooks write them to
  * `<state dir>/runtime/sessions/<session_id>/<file>` (`lib/core/runtime-state.js`;
  * the state dir is `~/.claude/artibot`). A reader that knows its session id reads
- * that file first, then the flat file in the state dir, then the flat file under
- * `pluginRoot` (where hooks wrote before O2). A reader with NO session id skips the
- * first step and so never shows another session's state as its own.
+ * THAT file and nothing else: a session with no file of its own shows nothing, never
+ * a flat file another session (or a pre-O2 hook) left — the flat copy of a teammate
+ * roster or a token count has no owner. A reader with NO session id may take the flat
+ * files (the state dir's, then `pluginRoot`'s legacy copy) for `current-effort.json`
+ * only; see `runtime-state.js#resolveSessionReadChain`.
  *
  * Design goals:
  *   - Zero throw: missing files / malformed JSON must gracefully degrade.
@@ -162,9 +164,10 @@ function pickTeammates(teammatesJson) {
 }
 
 /**
- * The first candidate of a session-scoped state file that parses to an object:
- * the session's own file, then the flat file in the state dir, then the flat file
- * under `pluginRoot` (see the module header).
+ * The first candidate of a session-scoped state file that parses to an object. Which
+ * candidates exist is `runtime-state.js#resolveSessionReadChain`'s rule: the session's
+ * own file alone when `sessionId` is usable, else the flat files for the effort record
+ * only (see the module header).
  *
  * @param {string} fileName
  * @param {string|null|undefined} sessionId
@@ -186,7 +189,8 @@ function readSessionState(fileName, sessionId, pluginRoot) {
  * @param {string} pluginRoot - Absolute path to the plugin root (the LEGACY location
  *   of the state files; also the "is there anything to read" guard).
  * @param {{ sessionId?: string|null }} [opts] - The reader's own session (the statusLine
- *   payload's `session_id`). Omit it and no session file is consulted.
+ *   payload's `session_id`). Omit it and no session file is consulted: only the effort
+ *   may then come from the flat files, and the other fields stay empty.
  * @returns {Promise<{
  *   effort: string|null,
  *   command: string|null,

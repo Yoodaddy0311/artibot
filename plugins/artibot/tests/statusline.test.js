@@ -127,6 +127,29 @@ describe('scripts/statusline.js — session_id from stdin (O2)', () => {
     expect(b.stdout).not.toContain('effort=xhigh');
   });
 
+  it('a payload that names a session with no file of its own renders no foreign team or tokens (no flat fallback)', () => {
+    writeState('sessions/sess-B/current-effort.json', { effort: 'low', command: 'daily' });
+    // what another session, a session-less payload and a pre-O2 hook left behind
+    writeState('current-effort.json', { effort: 'xhigh', command: 'flat' });
+    writeState('current-teammates.json', { teammates: [{ name: 'ghost-from-other-session' }] });
+    writeState('token-usage-session.json', { totalTokens: 987000 });
+    writeFileSync(path.join(tmp, 'runtime', 'token-usage-session.json'), JSON.stringify({ totalTokens: 555000 }));
+
+    const own = render(JSON.stringify({ session_id: 'sess-B' }));
+    expect(own.status).toBe(0);
+    expect(own.stdout).toContain('effort=low');
+    for (const ghost of ['ghost', '987K', '555K', 'tokens=', 'team=', 'xhigh']) {
+      expect(own.stdout, ghost).not.toContain(ghost);
+    }
+
+    // an id and no file at all: nothing — not the flat effort either
+    const none = render(JSON.stringify({ session_id: 'sess-Z' }));
+    expect(none.status).toBe(0);
+    for (const ghost of ['effort=', 'ghost', 'tokens=', 'team=']) {
+      expect(none.stdout, ghost).not.toContain(ghost);
+    }
+  });
+
   it('falls back to the flat file when the payload carries no session_id, or is not JSON', () => {
     writeState('sessions/sess-A/current-effort.json', { effort: 'xhigh', command: 'implement' });
     writeState('current-effort.json', { effort: 'medium', command: 'flat' });

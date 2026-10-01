@@ -37,6 +37,7 @@ import {
   sanitizeSessionId,
   SESSION_DIR_KEEP,
   SESSION_DIR_MAX_AGE_MS,
+  SESSIONLESS_FALLBACK_FILES,
   sweepSessionDirs,
 } from '../../lib/core/runtime-state.js';
 import { pointStateDirAt } from '../helpers/state-dir.js';
@@ -141,16 +142,44 @@ describe('locations', () => {
     expect(() => resolveSessionStatePath('s1', '')).toThrow(TypeError);
   });
 
-  it('resolveSessionReadChain: session → state-dir flat → plugin-root flat (legacy)', () => {
+  const SESSION_FILES = [
+    'current-effort.json', 'current-task-budget.json', 'token-usage-session.json',
+    'current-teammates.json', 'long-context-active.json',
+  ];
+
+  it('resolveSessionReadChain: a reader with a session id gets that session\'s file ONLY — no flat, no legacy', () => {
+    // A flat file belongs to no session in particular: falling back to it showed one session
+    // another session's teammates and token count ("ghost-from-other-session", review 2026-09-30).
     const pluginRoot = path.join(base, 'plugin');
-    expect(resolveSessionReadChain('s1', 'current-teammates.json', { pluginRoot })).toEqual([
-      path.join(stateDir, 'runtime', 'sessions', 's1', 'current-teammates.json'),
-      path.join(stateDir, 'runtime', 'current-teammates.json'),
-      path.join(pluginRoot, 'runtime', 'current-teammates.json'),
+    for (const file of SESSION_FILES) {
+      expect(resolveSessionReadChain('s1', file, { pluginRoot })).toEqual([
+        path.join(stateDir, 'runtime', 'sessions', 's1', file),
+      ]);
+    }
+  });
+
+  it('resolveSessionReadChain: with no usable session id only the effort record has flat candidates', () => {
+    const pluginRoot = path.join(base, 'plugin');
+    expect(SESSIONLESS_FALLBACK_FILES).toEqual(['current-effort.json']);
+    expect(resolveSessionReadChain(null, 'current-effort.json', { pluginRoot })).toEqual([
+      path.join(stateDir, 'runtime', 'current-effort.json'),
+      path.join(pluginRoot, 'runtime', 'current-effort.json'),
     ]);
-    // no session id → no session candidate; install layout → the legacy entry is the flat one, listed once.
-    expect(resolveSessionReadChain(null, 'current-teammates.json', { pluginRoot: stateDir })).toEqual([
-      path.join(stateDir, 'runtime', 'current-teammates.json'),
+    // install layout: the legacy entry IS the flat one, listed once.
+    expect(resolveSessionReadChain('', 'current-effort.json', { pluginRoot: stateDir })).toEqual([
+      path.join(stateDir, 'runtime', 'current-effort.json'),
+    ]);
+    // the other four have nothing a reader that cannot name its session could honestly show
+    for (const file of SESSION_FILES.filter((name) => !SESSIONLESS_FALLBACK_FILES.includes(name))) {
+      for (const none of [undefined, null, '', '   ', '...', 42]) {
+        expect(resolveSessionReadChain(none, file, { pluginRoot }), `${file} / ${String(none)}`).toEqual([]);
+      }
+    }
+  });
+
+  it('resolveSessionReadChain: a hostile id is sanitized to a safe id and gets only that id\'s path', () => {
+    expect(resolveSessionReadChain('../../../evil', 'current-teammates.json', {})).toEqual([
+      path.join(stateDir, 'runtime', 'sessions', 'evil', 'current-teammates.json'),
     ]);
   });
 });

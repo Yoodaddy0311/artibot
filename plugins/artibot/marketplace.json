@@ -202,7 +202,7 @@
     "thirdPartyTelemetry": "none",
     "userDataForwarding": "none",
     "secretsHandling": "env-vars-only",
-    "auditLog": "runtime/token-usage-session.json",
+    "auditLog": "~/.claude/artibot/runtime/sessions/<session_id>/token-usage-session.json",
     "complianceNotes": "Strict CRITICAL data policy — no external DB, no third-party forwarding. OTEL exporter opt-in with loopback-preferred enforcement.",
     "vulnerabilityDisclosure": "./SECURITY.md"
   },

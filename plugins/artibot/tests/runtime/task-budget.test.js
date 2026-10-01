@@ -425,7 +425,7 @@ describe('F05 effort records', () => {
     expect(existsSync(path.join(tmpRoot, 'runtime', 'sessions'))).toBe(false);
   });
 
-  it('reads a record a pre-O2 hook left in <pluginRoot>/runtime/ (legacy fallback, the flat gate)', () => {
+  it('reads a record a pre-O2 hook left in <pluginRoot>/runtime/ — for a reader with no session id only', () => {
     // Not the state dir: a DIFFERENT directory that is only the plugin root.
     const legacyRoot = mkdtempSync(path.join(os.tmpdir(), 'artibot-effort-legacy-'));
     try {
@@ -434,7 +434,10 @@ describe('F05 effort records', () => {
         path.join(legacyRoot, 'runtime', 'current-effort.json'),
         JSON.stringify({ command: 'daily', effort: 'medium' }),
       );
-      expect(readEffortRecord(legacyRoot, { sessionId: 's1', now: T0 })?.effort).toBe('medium');
+      // no session id: the legacy fallback, through the flat gate
+      expect(readEffortRecord(legacyRoot, { now: T0 })?.effort).toBe('medium');
+      // a session id: its own file or nothing — never a flat record that belongs to nobody
+      expect(readEffortRecord(legacyRoot, { sessionId: 's1', now: T0 })).toBeNull();
     } finally {
       rmSync(legacyRoot, { recursive: true, force: true });
     }

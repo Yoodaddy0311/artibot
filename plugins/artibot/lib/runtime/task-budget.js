@@ -207,9 +207,11 @@ export function persistTaskBudget(meta, pluginRoot, opts = {}) {
 // plugin updates — the F05 gate stays, because a session can still find a record
 // that has expired or names another prompt. The flat
 // `<state dir>/runtime/current-effort.json` is written only when the payload has no
-// session id, and is otherwise a READ fallback (as is `<pluginRoot>/runtime/`, where
-// hooks before O2 wrote): the display consumers `lib/tui/dashboard.js` and
-// `scripts/hooks/statusline.sh` read session-first and still name the file, which
+// session id, and is read back only by a reader that ALSO has no session id (as is
+// `<pluginRoot>/runtime/`, where hooks before O2 wrote): a reader that knows its
+// session reads its own file and nothing else, so it can never be handed a flat record
+// that belongs to somebody else. The display consumers `lib/tui/dashboard.js` and
+// `scripts/hooks/statusline.sh` follow the same rule and still name the file, which
 // `tests/firewall/effort-record-expiry.test.js` pins. `commands/team.md` does NOT
 // read it as a decision input — it uses {@link readEffortSnapshot} via the CLI
 // below; the path survives there only as prose about that display copy, pinned by
@@ -344,14 +346,6 @@ function conflictsWithIdentity(record, sessionId, promptId) {
   return Boolean(recordPrompt && promptId && recordPrompt !== promptId);
 }
 
-/**
- * @param {object} record
- * @returns {boolean} true when the record names neither a session nor a prompt.
- */
-function hasNoIdentity(record) {
-  return !trimmedOrNull(record.sessionId) && !trimmedOrNull(record.promptId);
-}
-
 function acceptsRecord(record, nowMs, sessionId, promptId) {
   return !isExpiredRecord(record, nowMs) && !conflictsWithIdentity(record, sessionId, promptId);
 }
@@ -373,13 +367,12 @@ function readFirstRecord(paths) {
  * refused when it has expired, when it names a different session, or when it
  * names a different prompt.
  *
- * Lookup order: the session's own file first (when a session id is known), then
- * the FLAT files — the state dir's, then `<pluginRoot>/runtime/`, where hooks wrote
- * before O2 (the same file on the install.sh layout). A REFUSED session file does
- * not fall through to a flat record that names a different session — that
- * fall-through is the cross-session overwrite this gate exists to stop. It falls
- * through only to a flat record with no identity at all, which is how pre-F05
- * writers left it.
+ * Lookup: a reader that knows its session reads THAT session's file and nothing else —
+ * no fall-through to a flat record, whether the session file is missing or refused. A
+ * flat record belongs to no session in particular, and handing it to a session is the
+ * cross-session overwrite this gate exists to stop. Only a reader with NO session id
+ * takes the FLAT files — the state dir's, then `<pluginRoot>/runtime/`, where hooks
+ * wrote before O2 (the same file on the install.sh layout) — through the same gate.
  *
  * `pluginRoot` names only the LEGACY location; the session and state-dir paths come
  * from `runtime-state.js` and do not depend on it.
@@ -394,22 +387,10 @@ export function readEffortRecord(pluginRoot, opts = {}) {
   const sessionId = trimmedOrNull(opts.sessionId);
   const promptId = trimmedOrNull(opts.promptId);
 
-  const chain = resolveSessionReadChain(sessionId, EFFORT_FILE, { pluginRoot });
-  const sessionPath = resolveSessionStatePath(sessionId, EFFORT_FILE);
-  const flatPaths = sessionPath ? chain.slice(1) : chain;
-
-  if (sessionPath) {
-    const sessionRecord = readRecordFile(sessionPath);
-    if (sessionRecord) {
-      if (acceptsRecord(sessionRecord, nowMs, sessionId, promptId)) return sessionRecord;
-      const flat = readFirstRecord(flatPaths);
-      return flat && hasNoIdentity(flat) && !isExpiredRecord(flat, nowMs) ? flat : null;
-    }
-  }
-
-  const flat = readFirstRecord(flatPaths);
-  if (!flat) return null;
-  return acceptsRecord(flat, nowMs, sessionId, promptId) ? flat : null;
+  const candidates = resolveSessionReadChain(sessionId, EFFORT_FILE, { pluginRoot });
+  const record = readFirstRecord(candidates);
+  if (!record) return null;
+  return acceptsRecord(record, nowMs, sessionId, promptId) ? record : null;
 }
 
 /**

@@ -18,8 +18,8 @@ import { createSubagentsMiddleware } from './middleware/subagents.js';
 import { createSummarizationMiddleware } from './middleware/summarization.js';
 import { createCheckpointMiddleware, readCheckpoints } from './middleware/checkpoint.js';
 import { ensureDir, readJsonFile, writeJsonFile } from '../core/file.js';
-import { ARTIBOT_DIR } from '../core/config.js';
-import { getHomeDir, getPluginRoot } from '../core/platform.js';
+import { ARTIBOT_DIR, resolveArtibotDir } from '../core/config.js';
+import { getPluginRoot, sameDirPath } from '../core/platform.js';
 
 const TEST_CONFIG = Object.freeze({
   automation: {
@@ -115,6 +115,43 @@ async function runRuntimePrompt(prompt, options = {}) {
   });
 }
 
+/**
+ * True only when the STATE dir is ALREADY redirected in this process — vitest's setup does
+ * it for every worker, an operator may do it by hand — so a hook child inherits a redirect
+ * that is really in force.
+ *
+ * "`ARTIBOT_STATE_DIR` is set" is not that: `resolveArtibotDir()` drops an override that has
+ * no `ARTIBOT_STATE_DIR_HOME`, or one minted for another home, and answers with the real
+ * `~/.claude/artibot`. So the variable is compared with what the resolver actually returns.
+ * An override that names the real dir on purpose still counts: the operator chose it.
+ *
+ * @returns {boolean}
+ */
+function stateDirIsRedirected() {
+  const override = process.env.ARTIBOT_STATE_DIR;
+  return Boolean(override) && sameDirPath(resolveArtibotDir(), override);
+}
+
+/**
+ * The environment of a hook child that must not write the developer's real state.
+ *
+ * It gets a scratch HOME (both variables `getHomeDir()` reads), so its state dir is the
+ * home-derived `<scratch>/.claude/artibot` whatever the parent's environment holds; any
+ * inherited `ARTIBOT_STATE_DIR` pair is removed rather than trusted. Redirecting with
+ * `ARTIBOT_STATE_DIR` + `ARTIBOT_STATE_DIR_HOME` instead would rest on the resolver's
+ * pairing rule, which can never hold when HOME and USERPROFILE name different directories
+ * — and then the child writes the real dir.
+ *
+ * @param {string} home - a scratch directory
+ * @returns {NodeJS.ProcessEnv}
+ */
+function scratchHomeEnv(home) {
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.ARTIBOT_STATE_DIR;
+  delete env.ARTIBOT_STATE_DIR_HOME;
+  return env;
+}
+
 async function runHook(scriptName, payload, options = {}) {
   const pluginRoot = options.pluginRoot || getPluginRoot();
   const scriptPath = path.join(pluginRoot, 'scripts', 'hooks', scriptName);
@@ -122,13 +159,12 @@ async function runHook(scriptName, payload, options = {}) {
   // O2: hooks keep global/session state (user profile, token usage, first-run
   // counter, ...) under the artibot STATE dir — `~/.claude/artibot`, the user's real
   // one — not under the plugin root. This harness runs the real hooks with a
-  // synthetic prompt, so unless the caller already redirected the state dir (vitest's
-  // setup does) the child gets a scratch one, or a run of `npm run ci` would append
-  // the eval prompt to the developer's own profile. `ARTIBOT_STATE_DIR_HOME` is the
-  // pairing `resolveArtibotDir()` requires before it honours the override.
-  const ownStateDir = process.env.ARTIBOT_STATE_DIR
+  // synthetic prompt, so unless the state dir is really redirected already the child
+  // gets a scratch home, or a run of `npm run ci` would append the eval prompt to the
+  // developer's own profile.
+  const scratchHome = stateDirIsRedirected()
     ? null
-    : await mkdtemp(path.join(os.tmpdir(), 'artibot-runtime-eval-state-'));
+    : await mkdtemp(path.join(os.tmpdir(), 'artibot-runtime-eval-home-'));
   // Use execFileSync instead of async execFile because async execFile has a
   // known stdin-piping race on Windows with hooks that call readStdin() —
   // the parent's input write doesn't always trigger 'end' on the child's
@@ -141,8 +177,7 @@ async function runHook(scriptName, payload, options = {}) {
     stdout = execFileSyncCompat(process.execPath, [scriptPath], {
       cwd: pluginRoot,
       env: {
-        ...process.env,
-        ...(ownStateDir ? { ARTIBOT_STATE_DIR: ownStateDir, ARTIBOT_STATE_DIR_HOME: getHomeDir() } : {}),
+        ...(scratchHome ? scratchHomeEnv(scratchHome) : process.env),
         CLAUDE_PLUGIN_ROOT: pluginRoot,
         ARTIBOT_RUNTIME_CHECKPOINT_DISABLE: '1',
         ARTIBOT_RUNTIME_MEMORY_DISABLE: '1',
@@ -158,7 +193,7 @@ async function runHook(scriptName, payload, options = {}) {
     const reason = stderr || err.message || 'unknown';
     throw new Error(`runHook(${scriptName}) failed: ${reason}`, { cause: err });
   } finally {
-    if (ownStateDir) await rm(ownStateDir, { recursive: true, force: true });
+    if (scratchHome) await rm(scratchHome, { recursive: true, force: true });
   }
 
   const trimmed = String(stdout || '').trim();

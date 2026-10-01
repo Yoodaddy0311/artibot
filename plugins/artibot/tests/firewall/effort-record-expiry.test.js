@@ -15,12 +15,13 @@
  * plugin update does not replace), one per session. The F05 gate stays — a session
  * can still meet a record that has expired or names another prompt, and a flat
  * `runtime/current-effort.json` still exists for payloads without a session id and
- * as a read fallback for records a pre-O2 hook left. What is no longer true, and
- * what the cases below used to pin the other way round:
+ * as a read fallback for records a pre-O2 hook left — for a reader that ALSO has no
+ * session id: a reader that knows its session reads its own file and nothing else.
+ * What is no longer true, and what the cases below used to pin the other way round:
  *   - there is no parallel write of a flat legacy file next to the session file
  *     (the old "the legacy parallel write is part of the contract" group). The
- *     display consumers moved to reading the session file first, then the flat
- *     fallbacks, so the parallel write has no reader left that needs it; case (d)
+ *     display consumers read the session file (or, without a session id, the flat
+ *     effort fallback), so the parallel write has no reader left that needs it; case (d)
  *     still pins that all three consumers name the file, and adds that the two
  *     that can read the session path do;
  *   - the per-session `runtime/effort/<sid>.json` directory and its GC are gone —
@@ -223,13 +224,33 @@ describe('firewall/effort-record — the identity gate', () => {
     expect(seen).toBeNull();
   });
 
-  it('falls through to a flat record with NO identity when the session file is refused', () => {
+  it('a reader with a session id reads ONLY its own file: nothing falls through to a flat record, identity or not', () => {
+    // The session's own file expired and is refused. A flat record with NO identity — how a
+    // pre-F05 writer left it, and what this reader used to fall through to — is not offered.
     persistEffortRecord(META, root, { sessionId: 'sess-A', promptId: 'a1', now: T0 });
     writeLegacy({ command: 'daily', effort: 'medium' });
-    const seen = readEffortRecord(root, {
+    expect(readEffortRecord(root, {
       sessionId: 'sess-A', promptId: 'a1', now: T0 + EFFORT_RECORD_TTL_MS + 1,
-    });
-    expect(seen?.effort).toBe('medium');
+    })).toBeNull();
+    // A session that has no file at all does not take the flat record either.
+    expect(readEffortRecord(root, { sessionId: 'sess-Z', promptId: null, now: T0 })).toBeNull();
+  });
+
+  it('a reader with NO session id still takes a flat record — the state dir\'s, then the plugin root\'s — through the gate', () => {
+    const oldRoot = path.join(root, 'old-plugin-root');
+    mkdirSync(path.join(oldRoot, 'runtime'), { recursive: true });
+    writeFileSync(path.join(oldRoot, 'runtime', 'current-effort.json'), JSON.stringify({ command: 'daily', effort: 'medium' }));
+
+    // only the pre-O2 copy in the old plugin root exists: that is what is read
+    expect(readEffortRecord(oldRoot, { now: T0 })?.effort).toBe('medium');
+
+    // a flat record in the state dir outranks it
+    writeLegacy({ command: 'plan', effort: 'high' });
+    expect(readEffortRecord(oldRoot, { now: T0 })?.effort).toBe('high');
+
+    // and the gate still applies: an expired flat record is refused
+    writeLegacy({ ...META, effort: 'low', expiresAt: new Date(T0 - 1).toISOString() });
+    expect(readEffortRecord(oldRoot, { now: T0 })).toBeNull();
   });
 
   it('returns null when nothing has been persisted', () => {
@@ -264,7 +285,7 @@ describe('firewall/effort-record — no shared slot (O2), and the consumers stil
     }
   });
 
-  it('the two display consumers that can know a session read the SESSION path first', () => {
+  it('the two display consumers that can know a session read the SESSION path (and only that, with a session id)', () => {
     const dashboard = readFileSync(path.join(PLUGIN_ROOT, 'lib', 'tui', 'dashboard.js'), 'utf8');
     expect(dashboard).toContain('resolveSessionReadChain');
     const statusline = readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'statusline.sh'), 'utf8');
