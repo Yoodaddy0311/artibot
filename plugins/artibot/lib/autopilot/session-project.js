@@ -22,7 +22,7 @@
  *
  * THE THREE ANSWERS:
  *   match     the session's repo identity equals the asker's, OR the asker is
- *             working inside (or above) a directory the session recorded
+ *             working inside (never above) a directory the session recorded
  *   foreign   the session recorded a project and that project is provably
  *             someone else's
  *   unscoped  it recorded none (sessions from before lock scoping, non-git
@@ -91,19 +91,28 @@ function within(parent, child) {
 }
 
 /**
- * Whether two directories are one project's: equal, or either inside the other.
+ * Whether the asker is working INSIDE the project directory a session recorded:
+ * the same directory, or one beneath it. ONE-WAY, on purpose. The reverse — an
+ * asker standing in an ANCESTOR of the recorded directory — used to match too,
+ * which made a prompt opened in the home directory a member of every child
+ * project at once, and this answer drives writes (the danger recorder pauses the
+ * run it picks). A session recorded from a subdirectory is still reached from
+ * the repository root through the repo identity; the price is paid only by a
+ * project with no identity (not a git repository), which has to be asked from
+ * inside the directory it recorded.
+ *
  * Case-insensitive on Windows, where `C:\Repo` and `c:\repo` are one directory.
  *
- * @param {string} a
- * @param {string|undefined} b
+ * @param {string} projectDir - A directory the session recorded.
+ * @param {string|undefined} askerDir - Where the asker is working.
  * @returns {boolean}
  */
-function dirsRelated(a, b) {
-  const na = normalizeDirPath(a);
-  const nb = normalizeDirPath(b);
-  if (!na || !nb) return false;
+function askerInside(projectDir, askerDir) {
+  const parent = normalizeDirPath(projectDir);
+  const child = normalizeDirPath(askerDir);
+  if (!parent || !child) return false;
   const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
-  return within(fold(na), fold(nb)) || within(fold(nb), fold(na));
+  return within(fold(parent), fold(child));
 }
 
 /**
@@ -128,7 +137,7 @@ function dirsRelated(a, b) {
 export function classifySessionProject(state, query = {}) {
   const { repoIdentity, dirs } = recordedProject(state);
   if (!repoIdentity && dirs.length === 0) return 'unscoped';
-  if (dirs.some((dir) => dirsRelated(dir, query.cwd))) return 'match';
+  if (dirs.some((dir) => askerInside(dir, query.cwd))) return 'match';
   if (repoIdentity && query.repoIdentity && repoIdentity === query.repoIdentity) return 'match';
   return 'foreign';
 }

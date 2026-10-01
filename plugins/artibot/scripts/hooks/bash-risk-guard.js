@@ -128,15 +128,22 @@ export function findActiveSession(store, fs, isMine = () => true) {
 async function recordDangerForActiveSession(hookData, command) {
   try {
     const cwd = hookData?.cwd || process.cwd();
-    const { isAutopilotAllowed } = await import('../../lib/autopilot/repo-identity.js');
-    if (!isAutopilotAllowed(cwd)) return; // capture-only gate (same as git-autopilot-guard)
+    const { checkAutopilotAllowed } = await import('../../lib/autopilot/repo-identity.js');
+    const gate = checkAutopilotAllowed(cwd);
+    if (!gate.allowed) return; // capture-only gate (same as git-autopilot-guard)
 
     const store = await import('../../lib/autopilot/session-store.js');
     const { sessionFilterFor } = await import('../../lib/autopilot/session-project.js');
     const fs = await import('node:fs');
     // This project's session only: a dangerous command here must not pause a
-    // run that belongs to a different repository.
-    const active = findActiveSession(store, fs, sessionFilterFor(cwd));
+    // run that belongs to a different repository. The asker's identity is the
+    // one the gate above just computed (the lower-cased `owner/name` that
+    // `lib/git/repo-identity.js` would answer for a repo with an origin) — asking
+    // git for it again is a second spawn on the block path, measured at about
+    // 0.85 s under load. `tests/hooks/bash-risk-guard-identity.test.js` counts
+    // the spawns.
+    const repoIdentity = gate.repoId ? gate.repoId.toLowerCase() : null;
+    const active = findActiveSession(store, fs, sessionFilterFor(cwd, { getRepoIdentity: () => repoIdentity }));
     if (!active) return;
 
     const { recordRiskEvent } = await import('../../lib/autopilot/engine-state.js');

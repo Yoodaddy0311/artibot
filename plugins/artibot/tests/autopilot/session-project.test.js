@@ -20,7 +20,7 @@
  *
  * The three answers and what each is for:
  *   match     the session's repo identity equals the asker's, or the asker is
- *             working inside (or above) the directory the session recorded
+ *             working inside (never above) the directory the session recorded
  *   foreign   it recorded a project and that project is provably someone else's
  *   unscoped  it recorded none (pre-scoping sessions, non-git directories) — so
  *             it cannot be proven foreign and stays visible rather than vanish
@@ -89,9 +89,27 @@ describe('classifySessionProject (pure — no git, no disk)', () => {
       .toBe('match');
   });
 
-  it('matches when the asker stands ABOVE the recorded directory', () => {
+  it('does NOT match when the asker stands ABOVE the recorded directory', () => {
+    // An ancestor would match every child project's session, and the decision
+    // drives WRITES (the danger recorder pauses the run it picks). Reaching a
+    // session from a parent directory takes the same repo identity, or standing
+    // inside the project — never merely containing it.
     const state = scoped('s', null, path.join(appA, 'packages', 'x'));
-    expect(project.classifySessionProject(state, { cwd: appA, repoIdentity: null })).toBe('match');
+    expect(project.classifySessionProject(state, { cwd: appA, repoIdentity: null })).toBe('foreign');
+  });
+
+  it('gives a common parent (the home directory, say) no project at all', () => {
+    const inA = scoped('a', null, appA);
+    const inB = scoped('b', null, appB);
+    const query = { cwd: tmp, repoIdentity: null };
+    expect(project.classifySessionProject(inA, query)).toBe('foreign');
+    expect(project.classifySessionProject(inB, query)).toBe('foreign');
+  });
+
+  it('still matches a session recorded from a SUBDIRECTORY when the identity agrees', () => {
+    // The price of the one-way rule is paid only for projects with no identity.
+    const state = scoped('s', 'owner/a', path.join(appA, 'packages', 'x'));
+    expect(project.classifySessionProject(state, { cwd: appA, repoIdentity: 'owner/a' })).toBe('match');
   });
 
   it('does not treat a shared string prefix as containment (app vs app2)', () => {
