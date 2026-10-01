@@ -582,6 +582,33 @@ status 어휘: done / in-progress / todo / 보류 / 기각. evidence 없는 항�
 
 **미확인**: batch 2(`d13470d2`)의 check-runs 결론(조회 안 함) · batch 3A 는 push 한 SHA `1d1ec842`·`6fe40f00` 이 각각 7/7 success(2026-09-29T07:56Z · 08:21Z 통합 창 조회) — batch 3B-1 은 v4.69.0 릴리스 ci 브랜치의 SHA 에서 함께 검증되며 그 결과는 릴리스 보고에 있다 · F1 수리 뒤 라이브 호스트의 권한 프롬프트 복원(v4.69.0 설치 뒤) · `claude-sonnet-5-5` 영수증 라이브 1행(릴리스·`/update` 뒤) · `tool.used{tool:AskUserQuestion}` 라이브 도달(설치 뒤) · CA-13 체크리스트의 "저장 세션 46/46"(리더 계수, 통합 창 재계수 없음) · OB-07 · SH-15 의 상시 호출률(상시 writer W2-6 은 코드만 착지 — fold `0794c076`, 설치 뒤 라이브 호출률 미측정, 라이브 표본은 L-1 1회뿐) · CA-15 입력 공급의 라이브 효과(설치 뒤 `interpretation_present:true` 행 — 분포는 `b6a152cf` 앞뒤를 나눠서만 읽는다) · **batch 3B-2**: check-runs 결론(이 docs 커밋 시점에는 push 전이라 미조회 — ci 브랜치 push 뒤 통합 창이 7개 check-run 을 확인하며 결과는 랜딩 보고에 있다) · SH-11 · CA-08 은 출하 false 이고 SH-19 는 설치본이 없어서 세 줄기의 라이브 효과는 전부 미측정(SH-19 는 설치 뒤 중첩 스폰 1건이 필요) · CA-13 census 의 표본 차이(04:13Z 46 id → 08:01Z 10 id)의 원인 · SH-01 플립 리허설이 본 추가 소비처 3곳(cowork 릴리스 dry-run · autopilot reaper · `git worktree remove`)의 라이브 발생 빈도 · ADR-013 에 대한 오너의 개별 확인.
 
+### §4-l v4.71.0 통합 브랜치(`integ/release-4710`) 착지 기록 (2026-10-01, 통합 담당 팀원 → 리더 검토)
+
+근거: 리더 통합 지시(2026-10-01) · 각 fold 의 커밋 본문 · `evidence/m1-live-census-20260930.md` · 병합 직후 줄기별 테스트 실행. 오너 위임(RESCOPE §8)과 §8-b 의 결정은 그대로이고 게이트 완화 · done 조건 확대는 없다. 줄기별 사용자 영향은 `plugins/artibot/CHANGELOG.md` [4.71.0] 에 있다.
+
+**착지**: v4.70.1(`59b7b3a5`) → `b46a7511` first-parent 30커밋 = 줄기 fold merge **14** + 통합 · 문서 커밋 16(`git rev-list --count --first-parent v4.70.1..b46a7511` = 30 · `--first-parent --merges` = 14, 2026-10-01T10:04Z 측정. `--merges` 전체 15 는 W3 줄기가 병합 전에 origin/master 를 받은 내부 merge 1건을 더한 값이다). 병합은 `git merge --no-ff` 였고 충돌은 0 이다(순서는 아래 표 — lane-b2 를 lane-c 보다 먼저). 이 절을 쓰는 docs 커밋은 범위 밖이다.
+
+| 순서 | fold(커밋) | 줄기 | 반영한 행 |
+|---|---|---|---|
+| 1 | `27a72582`(`4c67ed9d` · `37470fb8`) | lane-b2 O2 — 훅 상태를 `~/.claude/artibot/runtime` 로 | §2 행 없음(이식성) · CHANGELOG ② |
+| 2 | `53540d10`(`6b410964` · `b3510532` · `2add2d27` · `cad959db`) | lane-c O2 · D2 — 자동조종 저장소 이전 + 옛 위치 채택 + 프로젝트 범위 조회 | SH-06 · CA-03 · CA-13 분모의 판독 위치(런북 §1.3) |
+| 3 | `b2c2fb44`(`957f71ad` · `95946d3b` · `428cff0f` · `f9262334`) | lane-a O1 · O3 · D1 — `project-bootstrap` | §2 행 없음(이식성) · RESCOPE §8-b B6 의 선행 |
+| 4 | `52394058`(`a521478e` · `8dc9c9f2` · `dd1062f2`) | lane-b1 O2 — Stop 게이트 마커를 프로젝트 · 세션별로 | §2 행 없음(이식성) |
+| 5 | `d14d2ba0`(`c442f9ae` · `af50ee3b`) | lane-f1 CA-01 시작 문법 | CA-01 |
+| 6 | `7ed13040`(`0e4af96c` · `e60756fc`) | lane-f2 직접 훅 마커 leaf 분리 | OB-24(R1 후속) · RESCOPE §8 'R1 SHOULD 2건' |
+| 7 | `de4ae103`(`73da6284` · `c78660a5` · `4ccab4ff`) | lane-f34 디스패처 배율 상한 + 카탈로그 `priceSource` | RESCOPE §8 '배율 상한 10x' 후속 · B-3 단가 출처 줄 |
+| 8 | `c6f17737`(`cebeff38` · `75bd8412` · `c69e34d0` · `8e92bea3` · `c957aefb`) | lane-f5 scorecard CLI · 원자적 쓰기 · 테스트 분할 | §3 W29 #13b · #21 |
+| 9 | `e05832be`(`8913500d`) | W1 m1 라이브 census 증거 | P0-16 · OB-24 · SH-19 · GA-02 |
+| 10 | `5635608d`(`6e9ef0e7`) | W6 test-split-b | §3 800줄 부채 5/5 |
+| 11 | `3999e1b2`(`7e9f252a` · `084e3f0b` · `4443a05a` · `b5784e72` · `774c8ef4` · `46b19036`) | W2 SH-11 켜기 전 조건 | SH-11 |
+| 12 | `dcc14376`(`e97cefba` · `eedb1bd8` · `21844d21` · `64743e04` · `7b45c7e0` · `dc7d099f` · `ca63d795` · `a202c1ea`) | W3 SH-12 lease-tick | SH-12 · CA-09 |
+| 13 | `cc570b84`(`a612dc1d` · `edcbeb2b` · `fb623c53`) | W5 v5.1 한 줄 census | 런북 §3.6 · RESCOPE §6 (ii) 측정 도구 |
+| 14 | `8c334e6c`(`0390e273` · `ad6038c3` · `9ba1f110`) | W4 SH-05 검수 신원 | SH-05 · CA-17 · SH-02 review.md 도달 |
+
+**status 전환**(리더 판정, 앞선 docs 커밋 `9a201b59`): §2 → done 4건 — P0-16 · OB-24 · SH-19 · GA-02(근거 W1 증거 문서; 각 행 evidence 칸 맨 앞에 단서). §2 in-progress 유지 — SH-05 · SH-11 · SH-12 · CA-01 은 evidence 칸에 착지 기록을 더했고 status 는 바꾸지 않았다(done 조건 미충족: SH-05 = 검수 에이전트가 블록을 내는 라이브 행 0 · SH-11 = 키 OFF, 켜기 전 조건 ⑤ 와 L2 열림 · SH-12 = 라이브 lease 갱신 0 · CA-01 = 라이브 발화 · 오탐 표본 미확인). §1: done 60 → **64**, in-progress 23 → **19**, todo 13 그대로, 진행률 60% → 64%(같은 awk 재계수, 위 §1 의 「2026-10-01 v4.71.0 통합 브랜치 재계산」). §3: W29 후속 #13b → done(fold `c6f17737`), #21 첫 항목 해소(`c69e34d0`), 새 후속 14행(통합 후속 a~n). 이번 결정 기록은 RESCOPE §8-b(D1 · D2 · 기본값 B1~B8 · `/split watch` S0 · 45분 상한 · lane-c 범위 · `/update` 소스 단계)다.
+
+**미확인**: 줄기별 측정(퍼징 · 경합 · 비용 · 지연 · 유실 건수)은 각 커밋 본문 값이고 이 통합에서 재현하지 않았다. 병합 직후 줄기별 테스트 실행 결과는 CHANGELOG [4.71.0] 의 미확인 절에 있다. 전체 `npm run ci` 는 이 절을 쓰는 시점에 돌리기 전이다(결과는 릴리스 커밋과 GitHub 에 남는다). 설치본은 `installed_plugins.json` 기준 artibot 4.70.1(`59b7b3a5`, lastUpdated 2026-10-01T03:44Z, 2026-10-01T10:05Z 읽음)이라 이 절의 변경은 설치본에 없다 — 라이브 효과는 모두 설치 · 재시작 뒤에야 알 수 있다.
+
 ## §5 Shadow 진입 최소 집합 (선행 순서 · 크기 · 소유)
 
 크기 등급: S ≤150줄 · M 150~600 · L >600 (구현+테스트 합, 추정 — 미측정).
