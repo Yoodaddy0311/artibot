@@ -40,12 +40,17 @@
  * never from the session, and a binding that cannot be honoured is a
  * `skipped:<reason>` — not a fall back to the session. The lane write of a
  * bound run is already ONE store commit that carries the heartbeat stamp and
- * the release of `status`/`owner` (`lib/topology/split-state.js`), so this sync
- * adds no second write for it: the node is already in the state a release
- * would produce (`unchanged`), and a working state finds no lease to renew
- * (`skipped:no-lease`, because the bound feeder never claims). What is left is
- * hygiene — a lease taken BEFORE the run was bound is still renewed and
- * released here, on the same terms as before.
+ * the release of `status`/`owner` on the NODE (`lib/topology/split-state.js`),
+ * but it never touches the lease RECORD: the bound feed takes that at dispatch,
+ * BESIDE the node (`task-feed.mjs#leaseBesideNode` — `claimTask` with the
+ * node's own status, not `claimed` forced over its ops word), and this sync
+ * renews and releases it like any other lease: `renewed` while working,
+ * `released:<state>` at `done`/`failed` — each a second store commit, the lane
+ * write being the first — and `unchanged` (no write) on a repeat. A limb the
+ * feed left no lease for — its `lease` key said `skipped:status-<status>` or
+ * `refused:<msg>`, or the feed skipped — costs nothing here: `unchanged` at a
+ * finishing state, `skipped:no-lease` while working. A lease taken BEFORE the
+ * run was bound is renewed and released on the same terms.
  *
  * With the canary key off (`split.missionBinding.enabled`, shipped `false`;
  * `task-feed.mjs#missionBindingEnabled`) a run that carries a record is

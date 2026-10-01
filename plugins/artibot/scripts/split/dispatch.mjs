@@ -26,7 +26,8 @@
  *   parent plan.json                                limbs[].forkPoint, written once; missionBinding, written once (SH-11, and
  *                                                   only with artibot.config.json#split.missionBinding.enabled === true)
  *   StateStore task graph                           limb task + lease (record-only, via task-feed.mjs); a BOUND run's node
- *                                                   is written by the lane write itself and the feed adds ops, no claim
+ *                                                   is written by the lane write itself; the feed adds its ops and takes the
+ *                                                   lease beside the node (leaseBesideNode, reported as `taskFeed.lease`)
  *
  * The SH-11 canary key `split.missionBinding.enabled` ships `false`: with it off
  * dispatch binds nothing and a run that already carries a record is dispatched
@@ -366,7 +367,9 @@ export async function runDispatch(args, opts = {}) {
   // and it is the canary key itself, so a shipped install binds nothing. This
   // is the one caller that asks: `lane-state` and the lease sync read a
   // binding, they never create one. For a bound run the feed backfills `ops`
-  // from run.json, does not claim, and reports `binding` in `taskFeed`.
+  // from run.json, takes the lease beside the node instead of the legacy claim
+  // (`task-feed.mjs#leaseBesideNode`), and reports `lease` and `binding` in
+  // `taskFeed`.
   const taskFeed = (opts.feedLimb ?? feedLimb)({
     parentRoot, plan, limb: row.limb, dryRun: args.dryRun, bind: bindingOn, ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
   }, { config, ...(opts.openStore ? { openStore: opts.openStore } : {}) });
