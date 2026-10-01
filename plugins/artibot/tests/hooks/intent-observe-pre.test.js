@@ -1039,7 +1039,7 @@ describe('intent-observe-pre — gate self-verification', () => {
     const groups = HOOKS_JSON.hooks.PreToolUse ?? [];
     const matched = groups.filter(
       (g) => (g.hooks ?? []).some(
-        (h) => String(h.command ?? '').endsWith('scripts/hooks/intent-observe-pre.js'),
+        (h) => String(h.command ?? '').replace(/"([^"]*\.(?:c|m)?js)"/, '$1').endsWith('scripts/hooks/intent-observe-pre.js'),
       ),
     );
     expect(matched).toHaveLength(1);

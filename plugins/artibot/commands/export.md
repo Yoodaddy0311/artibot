@@ -32,10 +32,23 @@ Parse $ARGUMENTS:
 ## Execution Flow
 
 1. **Validate**: Check `tool` argument is a supported platform name
-2. **Run export script**: Execute `node plugins/artibot/scripts/export-to-tool.mjs` with the parsed arguments
+2. **Run export script**: Find the plugin root first (see **Plugin root** below), then execute `node "<pluginRoot>/scripts/export-to-tool.mjs"` with the parsed arguments. Run it from the user's project directory: `--out` (default `./{tool}-export/`) is relative to it
 3. **Handle `all`**: If tool is `all`, run the script for each of the 4 platforms with `--out <base>/<tool>/`
 4. **Report**: Display summary — agent count, files written, output location
 5. **Post-install hint**: Show the platform-specific activation command
+
+### Plugin root
+
+The working directory is the user's project, not this plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so a repo-relative path such as `plugins/artibot/scripts/...` only resolves inside the Artibot source repo. Run this once (it tests for the file this flow needs) and use the absolute path it prints as `<pluginRoot>`, quoted, in every command above. If it prints `artibot plugin root not found - run /update`, report that line and stop.
+
+```bash
+F="scripts/export-to-tool.mjs"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
 
 ## Post-Export Activation
 

@@ -25,13 +25,13 @@ allowed-tools: [Read, Bash]
 ## 실행 (엔진 호출)
 
 엔진은 `scripts/media/watch-ingest.js`. **설치 방식에 따라 위치가 다르다** (theme 커맨드와 동일 규약):
-- **flat / full install (install.sh)**: `$HOME/.claude/artibot/scripts/media/watch-ingest.js` (안정 경로)
-- **네이티브 마켓플레이스 install**: `$CLAUDE_PLUGIN_ROOT/scripts/media/watch-ingest.js`
+- **flat / full install (install.sh)**: `$HOME/.claude/artibot/scripts/media/watch-ingest.js` (위치는 불변이지만 install.sh 를 다시 돌릴 때만 갱신되어 플러그인 캐시보다 뒤처질 수 있다)
+- **네이티브 마켓플레이스 install**: 플러그인 캐시(`~/.claude/plugins/cache/artibot/artibot/<버전>/scripts/media/watch-ingest.js`) 안에만 존재
 
-아래 스니펫은 `$HOME` 경로를 우선하고 없으면 `$CLAUDE_PLUGIN_ROOT`로 폴백하며, 두 경로 모두 없으면 안내 문구를 낸다.
+아래 스니펫은 이 순서로 찾는다: 소스 트리(`plugins/artibot/.claude-plugin/plugin.json` 의 name 이 `artibot` 일 때만) → 호스트가 이 커맨드 본문에 써 넣는 플러그인 경로 → 플러그인 캐시의 최신 버전 → `$HOME/.claude/artibot`(옛 사본이라 뒤에서 두 번째) → 마켓플레이스 사본. 전부 없으면 안내 문구를 낸다.
 
 ```
-Bash: ENGINE="$HOME/.claude/artibot/scripts/media/watch-ingest.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/media/watch-ingest.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" "<youtube-url>" [--frames] [--max-frames N]; else echo "watch engine not found — run the full install (bash install.sh) to use /watch"; fi
+Bash: F="scripts/media/watch-ingest.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" "<youtube-url>" [--frames] [--max-frames N]; else echo "watch engine not found — run the full install (bash install.sh) to use /watch"; fi
 ```
 
 ## 판독 흐름 (커맨드가 수행)

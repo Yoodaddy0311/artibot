@@ -25,19 +25,19 @@ Parse `$ARGUMENTS`:
 ## 실행 (엔진 호출)
 
 엔진은 `theme-apply.js`이며 **설치 방식에 따라 위치가 다르다**:
-- **flat / full install (install.sh)**: `$HOME/.claude/artibot/scripts/theme-apply.js` — 안정 경로(업데이트에도 불변)
-- **네이티브 마켓플레이스 install**: 플러그인 캐시 안에만 존재 → `$CLAUDE_PLUGIN_ROOT/scripts/theme-apply.js`
+- **flat / full install (install.sh)**: `$HOME/.claude/artibot/scripts/theme-apply.js` — 위치는 업데이트에도 불변이지만 내용은 install.sh 를 다시 돌릴 때만 갱신된다(플러그인 캐시보다 뒤처질 수 있다)
+- **네이티브 마켓플레이스 install**: 플러그인 캐시(`~/.claude/plugins/cache/artibot/artibot/<버전>/scripts/theme-apply.js`) 안에만 존재
 
-아래 각 Bash 스니펫은 `$HOME` 경로를 우선하고(대부분의 install.sh 사용자), 없으면 `$CLAUDE_PLUGIN_ROOT`로 폴백한다. **주의: `CLAUDE_PLUGIN_ROOT`는 Bash 도구 컨텍스트에서 빈 값일 수 있다**(현 세션에서도 unset 확인됨) — 그래서 각 스니펫은 폴백 뒤 `[ -f ]`로 **한 번 더 가드**하고, 두 경로 모두 없으면 raw 에러 대신 안내 문구를 출력한다. 즉 네이티브 폴백은 셸에 `CLAUDE_PLUGIN_ROOT`가 노출되는 환경에서만 성공하며, 실패하면 `/theme`를 쓰기 위해 **full install(`bash install.sh`)**이 필요하다. (네이티브 전용 설치는 major 업데이트 후 `/theme` 재실행이 필요할 수 있다.)
+아래 각 Bash 스니펫은 이 순서로 엔진을 찾는다: 소스 트리(`plugins/artibot/.claude-plugin/plugin.json` 의 name 이 `artibot` 일 때만) → 호스트가 이 커맨드 본문에 써 넣는 플러그인 경로 → 플러그인 캐시의 최신 버전 → `$HOME/.claude/artibot`(옛 사본이라 뒤에서 두 번째) → 마켓플레이스 사본. **주의: `CLAUDE_PLUGIN_ROOT`는 Bash 도구 컨텍스트에서 빈 값일 수 있다**(현 세션에서도 unset 확인됨) — 그래서 환경변수가 아니라 본문 치환과 캐시 스캔을 쓴다. 각 위치는 `[ -f ]`로 확인하고, 전부 없으면 raw 에러 대신 안내 문구를 출력한다(그 경우 `/theme`를 쓰려면 **full install(`bash install.sh`)**이 필요하다). (네이티브 전용 설치는 major 업데이트 후 `/theme` 재실행이 필요할 수 있다.)
 
 ### `/theme` 또는 `/theme list`
 ```
-Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
+Bash: F="scripts/theme-apply.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
 ```
 출력을 그대로 사용자에게 보여주고, "적용하려면 `/theme neon-city`" 안내. (엔진 미발견 안내가 나오면 그대로 사용자에게 전달.)
 
 ### `/theme <name>` (적용)
-1. 다음 실행: `Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" <name>; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi`
+1. 다음 실행: `Bash: F="scripts/theme-apply.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" <name>; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi`
 2. 엔진 출력(적용된 표면)을 사용자에게 보여준다. (엔진 미발견 안내가 나오면 그대로 전달.)
 3. **반드시 사용자에게 다음 3가지를 안내**:
    - statusLine/색상은 **화면 갱신 또는 Claude Code 재시작 시** 완전 반영
@@ -46,7 +46,7 @@ Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] ||
 
 ### `/theme reset` (원복)
 ```
-Bash: ENGINE="$HOME/.claude/artibot/scripts/theme-apply.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/scripts/theme-apply.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" reset; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
+Bash: F="scripts/theme-apply.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" reset; else echo "theme engine not found — run the full install (bash install.sh) to use /theme"; fi
 ```
 + "output-style은 엔진이 이전 값(또는 기본)으로 **자동 복원**한다 — 별도 명령 불필요" 안내.
 

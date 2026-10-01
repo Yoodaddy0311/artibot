@@ -384,22 +384,29 @@ describe('existence-audit: an absent source is not an empty one', () => {
   });
 });
 
-/** A hooks.json with one `node <plugin>/scripts/hooks/<command>` entry per listed command, per event. */
-function hooksJsonOf(byEvent) {
+/**
+ * A hooks.json with one `node <plugin>/scripts/hooks/<command>` entry per listed command, per event.
+ * `quoted` spells the script path the way the shipped hooks.json does (`node "<path>" args`); the
+ * default keeps the unquoted spelling the older fixtures were written against.
+ */
+function hooksJsonOf(byEvent, { quoted = false } = {}) {
   const hooks = {};
   for (const [event, commands] of Object.entries(byEvent)) {
-    hooks[event] = commands.map((command) => ({
-      hooks: [{ type: 'command', command: `node \${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${command}` }],
-    }));
+    hooks[event] = commands.map((command) => {
+      const [script, ...args] = command.split(' ');
+      const scriptPath = `\${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${script}`;
+      const spelled = quoted ? `"${scriptPath}"` : scriptPath;
+      return { hooks: [{ type: 'command', command: `node ${spelled}${args.length > 0 ? ` ${args.join(' ')}` : ''}` }] };
+    });
   }
   return `${JSON.stringify({ hooks })}\n`;
 }
 
 /** The fixture's two dispatchers plus whatever the case registers, so only its entries are direct or stray. */
-function withHooksJson(plugin, byEvent) {
+function withHooksJson(plugin, byEvent, options = {}) {
   put(plugin, 'hooks/hooks.json', hooksJsonOf({
     SessionStart: ['_sessionstart-dispatcher.js'], Stop: ['_stop-dispatcher.js'], ...byEvent,
-  }));
+  }, options));
 }
 
 describe('existence-audit: hooks registered directly in hooks.json (OB-24)', () => {
@@ -438,6 +445,53 @@ describe('existence-audit: hooks registered directly in hooks.json (OB-24)', () 
     expect(entry(printed, 'hooks', 'memory-tracker')).toMatchObject({ fired: 2, measured: true, reason: null });
     expect(entry(printed, 'hooks', 'pre-bash')).toMatchObject({ fired: null, measured: false, reason: NOT_YET_SHIPPED });
     expect(printed.sources.hooks).toMatchObject({ count: 4, handlerEntries: 4, directEntries: 2 });
+  });
+
+  it('reads the QUOTED command spelling hooks.json ships exactly like the unquoted one', () => {
+    // hooks.json quotes the script path (an unquoted path splits on a space in the plugin
+    // root). With the closing quote left in the command, `script` read `_stop-dispatcher.js"`,
+    // no dispatcher matched its basename and every dispatcher became a direct or stray hook.
+    const project = makeProject('D5');
+    const byEvent = {
+      PreToolUse: ['pre-bash.js', 'memory-tracker.js'], SessionEnd: ['stray-a.js'], UserPromptSubmit: ['stray-b.mjs arg'],
+    };
+    const plain = makePlugin('dplug5u');
+    withHooksJson(plain, byEvent);
+    const quoted = makePlugin('dplug5q');
+    withHooksJson(quoted, byEvent, { quoted: true });
+    const raw = readFileSync(path.join(quoted, 'hooks/hooks.json'), 'utf-8');
+    expect(raw, 'the fixture must really carry the quoted spelling').toContain('node \\"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/_stop-dispatcher.js\\"');
+    seedLedger(project);
+
+    const a = parseOne(runCli(['--cwd', project, '--plugin-root', plain], project));
+    const b = parseOne(runCli(['--cwd', project, '--plugin-root', quoted], project));
+
+    expect(b.kinds.hooks).toEqual(a.kinds.hooks);
+    expect(b.sources.hooks).toEqual(a.sources.hooks);
+    expect(b.hooksOutsideCarrier).toEqual(a.hooksOutsideCarrier);
+    // Positive control: the two dispatchers were skipped, so only the two PreToolUse hooks are direct.
+    expect(b.sources.hooks).toMatchObject({ directEntries: 2 });
+    expect(b.hooksOutsideCarrier.entries).toEqual(['SessionEnd stray-a.js', 'UserPromptSubmit stray-b.mjs arg']);
+  });
+
+  it('unwraps only the quoted script path: a quoted ARGUMENT keeps its quotes', () => {
+    const project = makeProject('D6');
+    const plugin = makePlugin('dplug6');
+    const entryFor = (script, args = '') => ({
+      hooks: [{ type: 'command', command: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/hooks/${script}"${args}` }],
+    });
+    put(plugin, 'hooks/hooks.json', `${JSON.stringify({
+      hooks: {
+        SessionStart: [entryFor('_sessionstart-dispatcher.js')],
+        Stop: [entryFor('_stop-dispatcher.js')],
+        SessionEnd: [entryFor('stray-c.js', ' "two words"')],
+      },
+    })}\n`);
+    seedLedger(project);
+
+    const printed = parseOne(runCli(['--cwd', project, '--plugin-root', plugin], project));
+
+    expect(printed.hooksOutsideCarrier.entries).toEqual(['SessionEnd stray-c.js "two words"']);
   });
 
   it.each([

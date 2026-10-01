@@ -19,13 +19,24 @@ Parse $ARGUMENTS:
 ## Execution Flow
 
 1. **Parse**: Extract query and category filter
-2. **Scan**: Read available plugin resources:
-   - Commands: `plugins/artibot/commands/*.md` frontmatter
-   - Agents: `plugins/artibot/agents/*.md` frontmatter
-   - Skills: `plugins/artibot/skills/*/SKILL.md` frontmatter
+2. **Scan**: Read available plugin resources under the plugin root (see **Plugin root** below):
+   - Commands: `<pluginRoot>/commands/*.md` frontmatter
+   - Agents: `<pluginRoot>/agents/*.md` frontmatter
+   - Skills: `<pluginRoot>/skills/*/SKILL.md` frontmatter
 3. **Filter**: If query provided, match against names, descriptions, and triggers
 4. **Format**: Output organized catalog with cross-references
 5. **Suggest**: If query matches no exact results, suggest closest alternatives
+
+### Plugin root
+
+The working directory is usually the user's project, not this plugin, so the source-repo layout (`plugins/artibot/commands/`, `plugins/artibot/agents/`, `plugins/artibot/skills/`) only exists inside the Artibot source repo and would give an empty catalog anywhere else. This command has no Bash tool, so find `<pluginRoot>` with `Glob`; the first hit wins:
+
+1. The plugin root the host filled in when this command loaded: `${CLAUDE_PLUGIN_ROOT}`. Use it when it is an absolute path that holds `commands/index.md`; if it still shows a variable reference instead of a path, go to 2
+2. `Glob` `plugins/artibot/commands/index.md`, then `Grep` the pattern `"name"\s*:\s*"artibot"` in `plugins/artibot/.claude-plugin/plugin.json`. Both must hit: a project that merely has a folder of the same name is not this plugin. Two hits mean the working directory is the Artibot source repo, so `<pluginRoot>` is `plugins/artibot`. The same two checks without the `plugins/artibot/` prefix (`commands/index.md`, `.claude-plugin/plugin.json`) mean the working directory is the plugin directory itself, so `<pluginRoot>` is `.`
+3. `Glob` `*/commands/index.md` with `path` `~/.claude/plugins/cache/artibot/artibot`. `<pluginRoot>` is the version directory of the hit; with several hits take the highest version number
+4. `Glob` `*/plugins/artibot/commands/index.md` with `path` `~/.claude/plugins/marketplaces`. `<pluginRoot>` is the `plugins/artibot` directory of the hit
+
+If none of these hits, say `artibot plugin root not found - run /update` and stop. Do not print an empty catalog.
 
 ## Catalog Structure
 

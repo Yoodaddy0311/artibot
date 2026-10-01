@@ -14,8 +14,8 @@
  *
  * The step follows the shape that `tests/commands/verify-record-steps.test.js`
  * measured to work for the record step: the script is found through a chain that
- * resolves from any cwd (`$HOME` copy, then `CLAUDE_PLUGIN_ROOT`, then the source
- * tree), the session id is read under BOTH spellings (`CLAUDE_SESSION_ID` is
+ * resolves from any cwd (source tree, host-written plugin path, newest plugin
+ * cache, legacy `$HOME` copy, marketplace copy), the session id is read under BOTH spellings (`CLAUDE_SESSION_ID` is
  * often empty on this host, `CLAUDE_CODE_SESSION_ID` is what the host sets), and
  * a missing script prints a line instead of failing silently.
  *
@@ -38,9 +38,11 @@
  *  - WHETHER ANY MODEL RUNS THE STEP. This pins wording. A model that skips it
  *    leaves every assertion green.
  *  - THE SHELL LINE IS NEVER EXECUTED AS SHELL HERE. Its flags are fed to the
- *    real CLI through `node`. A quoting mistake, or a wrong `[ -f ]` chain, is
- *    guarded by the byte pin and by a manual probe, not by a run in this suite.
- *    The `${A:-$B}` fallback is POSIX semantics that nothing here exercises.
+ *    real CLI through `node`. A quoting mistake is guarded by the byte pin and
+ *    by a manual probe, not by a run in this suite. The `${A:-$B}` fallback is
+ *    POSIX semantics that nothing here exercises. The resolution CHAIN (the
+ *    `[ -f ]` order, stale global copy versus cache) is run against fake homes
+ *    by `tests/commands/plugin-root-finder.test.js`.
  *  - THE INSTALLED COPIES. This reads the commands in THIS worktree;
  *    `~/.claude/commands`, the plugin cache and `~/.claude/artibot/scripts` can
  *    lag by releases — until they are updated the chain reports "not found".
@@ -79,18 +81,27 @@ const HEADING = '모델별 사용량·비용 (자동 — 생략 금지)';
  * change in a command is a visible edit of this file.
  */
 const CHAIN = 'SID="${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}";'
-  + ' USG="$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs";'
-  + ' [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs";'
-  + ' [ -f "$USG" ] || USG="plugins/artibot/scripts/ledger/usage-cost-table.mjs";'
+  + ' F="scripts/ledger/usage-cost-table.mjs"; USG=""; grep -q \'"name"[[:space:]]*:[[:space:]]*"artibot"\' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null'
+  + ' && USG="plugins/artibot/$F";'
+  + ' [ -f "$USG" ] || USG="${CLAUDE_PLUGIN_ROOT}/$F";'
+  + ' P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$USG" ] || USG="$P/cache/artibot/artibot/$v/$F"; done;'
+  + ' [ -f "$USG" ] || USG="$HOME/.claude/artibot/$F";'
+  + ' for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$USG" ] || USG="$P/marketplaces/$m/plugins/artibot/$F"; done;'
   + ' if [ -f "$USG" ]; then node "$USG"';
 
 const TAIL = '; else echo "usage-cost-table not found - 표 생략"; fi';
 
-/** The three places, in the order the chain must try them. */
+/**
+ * The five places, in the order the chain must try them: the source tree (name-checked), the
+ * host-written path, the newest plugin-cache version, the legacy `install.sh` copy (stale ahead of
+ * the cache is the regression this order fixes), the marketplace copy.
+ */
 const CHAIN_ORDER = [
-  '$HOME/.claude/artibot/scripts/ledger/usage-cost-table.mjs',
-  '${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/usage-cost-table.mjs',
-  'plugins/artibot/scripts/ledger/usage-cost-table.mjs',
+  'plugins/artibot/$F',
+  '${CLAUDE_PLUGIN_ROOT}/$F',
+  '$P/cache/artibot/artibot/$v/$F',
+  '$HOME/.claude/artibot/$F',
+  '$P/marketplaces/$m/plugins/artibot/$F',
 ];
 
 /**
@@ -206,7 +217,7 @@ describe.each(CARRIERS)('$file: the usage-table step', (carrier) => {
     expect(block.slice(at + carrier.line.length)).toContain('```');
   });
 
-  it('tries the three locations in order, so it resolves from any cwd', () => {
+  it('tries the five locations in order, so it resolves from any cwd', () => {
     const positions = CHAIN_ORDER.map((p) => carrier.line.indexOf(p));
     expect(positions.every((p) => p > -1)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);

@@ -461,7 +461,7 @@ Add your hook to `hooks/hooks.json`:
       "matcher": "Write|Edit",
       "hooks": [{
         "type": "command",
-        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/my-pre-write-hook.js",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/my-pre-write-hook.js\"",
         "timeout": 5
       }]
     }

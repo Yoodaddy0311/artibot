@@ -28,7 +28,7 @@ allowed-tools:
 tokens: "~5K"
 category: "persona"
 whenNotToUse: "Do not apply when an existing persona is already active in the session — switch personas via persona-architect instead. Do not apply when the user wants to invoke (use) a persona on a task — that's persona-architect's job. Do not apply for one-off tone shifts inside a single message; only use when producing a persisted, reusable persona-* skill from local source material."
-source_hash: e1d552b6
+source_hash: 1b4e5b78
 ---
 
 # Persona Distill: Compile a Person into a Skill
@@ -74,7 +74,7 @@ Use distill when the static template is too generic. Use the static template whe
 | 1. DETECT | Identify the subject: real person (with consent), role archetype ("the senior backend engineer who hates over-engineering"), or character. Refuse impersonation of public figures without consent. | Subject card with name, role, scope of authority |
 | 2. COLLECT | Gather LOCAL source material only: commits, ADR files, PR comments, paste-ins of writing. Reject any external HTTP fetch, external chat-API extraction, or audio transcription requests. | Source bundle (file paths + paste content) |
 | 3. MAP | Walk the 6-layer schema (see `references/six-layer-persona.md`). Fill each layer from source evidence; never invent unsourced material. Apply Artibot tags from `references/tag-behavior-map.md` to convert tag → behavior. | Filled 6-layer draft |
-| 4. GENERATE | Write `persona.md` (character) + optional `work.md` (capability profile) under `plugins/artibot/skills/persona-{slug}/`. Use Artibot frontmatter (`name`, `triggers`, `level: 3`, `category: persona`, `whenNotToUse`). | Skill artifact ready to lint |
+| 4. GENERATE | Write `persona.md` (character) + optional `work.md` (capability profile) under `<skillsDir>/persona-{slug}/` (`<skillsDir>` is decided in Step 4). Use Artibot frontmatter (`name`, `triggers`, `level: 3`, `category: persona`, `whenNotToUse`). | Skill artifact ready to lint |
 | 5. VERIFY | Run the red-flag checklist below. Test invocation via `/team` mention or skill trigger. Confirm Layer 0 rules are concrete behaviors, not adjectives. | Pass/fail per red flag, fix iterations until clean |
 
 ### Step 1: DETECT subject
@@ -107,7 +107,9 @@ If a layer has fewer than 2 source quotes supporting it, mark it with `(source-t
 
 ### Step 4: GENERATE the artifact
 
-Create `plugins/artibot/skills/persona-{slug}/SKILL.md` with frontmatter:
+Decide `<skillsDir>` first. If `plugins/artibot/skills/persona-distill/SKILL.md` exists relative to the working directory and `plugins/artibot/.claude-plugin/plugin.json` names the plugin `artibot` (probe both with `Read`), you are in the Artibot source repo and `<skillsDir>` is `plugins/artibot/skills`. In any other project it is that project's own `.claude/skills` (create the directory if it is missing). Never create a `plugins/artibot/` tree inside someone else's project.
+
+Create `<skillsDir>/persona-{slug}/SKILL.md` with frontmatter:
 
 ```yaml
 ---

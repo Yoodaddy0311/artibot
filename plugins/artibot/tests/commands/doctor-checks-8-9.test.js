@@ -939,17 +939,33 @@ describe('commands/doctor.md gained Check 8 and Check 9', () => {
  * never enters the status table; S3/S4/S5 and every earlier line of the check
  * are byte-identical. Checks 1-6 still carry their dc9a4c12 digests.
  *   f9cbd1a65ef3c2cc -> 23a7be708a43666c
+ *
+ * Checks 1 and 7 were re-frozen together a FOURTH time on 2026-09-30, for the
+ * plugin-root portability fix. Each held ONE cwd-relative instruction that only
+ * resolves inside the Artibot source repo: Check 1 step 1, `Read
+ * plugins/artibot/artibot.config.json`, and the Check 7 topology-agreement
+ * command, `node scripts/ledger/topology-agreement.mjs` (measured 2026-09-30:
+ * MODULE_NOT_FOUND from a foreign working directory). Both now name
+ * `<pluginRoot>`, which the un-frozen `## Paths` section defines and resolves
+ * with a finder block (`tests/commands/plugin-root-finder.test.js` pins that
+ * block). One line changed in each of the two blocks and nothing else; Checks
+ * 2-6 still carry their dc9a4c12 digests, which is what keeps the refresh
+ * auditable.
+ *   Check 1: 68a7994da5db8345 -> 592beff8ce567f9e
+ *   Check 7: 23a7be708a43666c -> 2762923188c8fadf
  */
 const CHECK_1_7_SHA256 = Object.freeze({
-  'Check 1': '68a7994da5db8345',
+  // Re-frozen 2026-09-30 (plugin-root portability). See the note above.
+  'Check 1': '592beff8ce567f9e',
   'Check 2': 'abb2dcdb15ee2345',
   'Check 3': '13cf1d3e560e5b64',
   'Check 4': 'b48ec269f024a6d3',
   'Check 5': '76b677614892ac3c',
   'Check 6': '889cb2c477eae694',
-  // Re-frozen 2026-09-03 (store path move), 2026-09-05 (D9) and 2026-09-21
-  // (SH-04 topology agreement block). See the note above.
-  'Check 7': '23a7be708a43666c',
+  // Re-frozen 2026-09-03 (store path move), 2026-09-05 (D9), 2026-09-21
+  // (SH-04 topology agreement block) and 2026-09-30 (plugin-root portability).
+  // See the note above.
+  'Check 7': '2762923188c8fadf',
 });
 
 // Truncated to 16 hex characters, the same shape `lib/core/skill-hash.js` uses

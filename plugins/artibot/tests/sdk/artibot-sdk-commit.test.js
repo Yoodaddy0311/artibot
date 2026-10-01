@@ -190,6 +190,16 @@ describe('createHook().commit', () => {
     expect(hooksData.hooks.PreToolUse[0].hooks[0].command).toMatch(/demo-hook\.js/);
   });
 
+  it('registers the script path QUOTED, like the shipped hooks.json (a space in the plugin root splits it otherwise)', async () => {
+    const result = createHook(spec);
+    await result.commit(pluginRoot);
+
+    const hooksData = JSON.parse(readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
+    expect(hooksData.hooks.PreToolUse[0].hooks[0].command).toBe(
+      'node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/demo-hook.js"',
+    );
+  });
+
   it('is idempotent when registering the same event entry twice', async () => {
     const result = createHook(spec);
     await result.commit(pluginRoot);

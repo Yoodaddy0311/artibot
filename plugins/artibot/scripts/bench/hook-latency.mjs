@@ -318,7 +318,9 @@ function readDeclaredBudgets() {
         const marker = '/scripts/hooks/';
         const at = String(hook.command || '').indexOf(marker);
         if (at < 0) continue;
-        const key = String(hook.command).slice(at + marker.length).trim();
+        // The script path is quoted in hooks.json; drop only the quote that closes it, so the
+        // key stays `name.js args` and any quoted argument is left alone.
+        const key = String(hook.command).slice(at + marker.length).replace(/^([^\s"]*\.(?:c|m)?js)"/, '$1').trim();
         if (typeof hook.timeout === 'number') out[key] = hook.timeout * 1000;
       }
     }

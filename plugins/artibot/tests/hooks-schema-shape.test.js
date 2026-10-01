@@ -20,10 +20,16 @@ import { fileURLToPath } from 'node:url';
  * or hook bag shape requires updating tests/hooks-schema-fingerprint.txt
  * as a deliberate two-step.
  *
+ * 2026-09-30: the script path is now QUOTED (`node "${CLAUDE_PLUGIN_ROOT}/.../x.js"`).
+ * Unquoted, a plugin root containing a space (C:\Users\First Last\...) splits the
+ * path into two shell words and `node` never finds the script. The execution half
+ * is tests/hooks/hooks-command-quoting.test.js; this file pins the spelling.
+ *
  * Checks:
  *   1. Every hook entry has a `command` string in shell-form starting with
- *      `node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js` (optionally
- *      followed by space-separated subcommand args, e.g. ` start`).
+ *      `node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js"` (optionally
+ *      followed by space-separated subcommand args after the closing quote,
+ *      e.g. ` start`).
  *   2. No hook entry uses the deprecated exec-form `args[]` field.
  *   3. Every referenced .js file exists on disk.
  *   4. Every hook entry declares a numeric timeout — in SECONDS. The host
@@ -80,7 +86,7 @@ function* iterHookEntries(doc) {
 }
 
 const COMMAND_RE =
-  /^node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/hooks\/([a-z_][a-z0-9_-]*\.(?:js|mjs))(?:\s+\S+)*$/;
+  /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/hooks\/([a-z_][a-z0-9_-]*\.(?:js|mjs))"(?:\s+\S+)*$/;
 
 /** Host default for `command` hooks, in seconds. Anything above it is not a plausible seconds value. */
 const HOST_TIMEOUT_DEFAULT_S = 600;
@@ -143,7 +149,20 @@ const PRETOOLUSE_INTENT = {
 };
 
 describe('hooks.json schema shape', () => {
-  it('every hook entry has a shell-form command starting with node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js', () => {
+  it('the command pattern requires the QUOTED path and rejects the unquoted spelling (self-check)', () => {
+    const quoted = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js"';
+    expect(COMMAND_RE.test(quoted)).toBe(true);
+    expect(COMMAND_RE.test('node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js" start')).toBe(true);
+    // Unquoted: splits on a space in the plugin path.
+    expect(COMMAND_RE.test('node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js')).toBe(false);
+    // Half-quoted and quote-swallowing-the-args spellings are not the pinned shape either.
+    expect(COMMAND_RE.test('node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js')).toBe(false);
+    expect(COMMAND_RE.test('node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-handler.js start"')).toBe(false);
+    // The capture group is the bare script name, with no quote in it.
+    expect(quoted.match(COMMAND_RE)?.[1]).toBe('pre-write.js');
+  });
+
+  it('every hook entry has a shell-form command starting with node "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/<name>.js"', () => {
     for (const { event, entry } of iterHookEntries(HOOKS_DOC)) {
       expect(
         typeof entry.command,

@@ -114,13 +114,24 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 ## Execution Flow
 
 1. **Parse & Validate** — tokenize URLs, dedupe
-2. **Acquire — leader only.** Call the acquisition helper once per URL. **This is the single place in `/repo` that clones**; neither the teammates (★ MANDATORY rule 1) nor the standalone agent ([repo-benchmarker](../agents/repo-benchmarker.md) § *Process*) run `git clone`. `lib/git/repo-acquire.js#acquireRepo` validates the input via `lib/core/repo-input.js#parseRepoInput` (HTTPS only; shell metacharacters and NUL rejected, and traversal already collapsed by URL normalization before validation runs — the Security rules below, executable), clones `--depth 1` into the cache, enforces the 500MB ceiling, and returns `{ localPath, sourceUrl, sourceSha, cacheStatus, sizeBytes, depth }`. Run the calls concurrently for multiple URLs. From the plugin root:
+2. **Acquire — leader only.** Call the acquisition helper once per URL. **This is the single place in `/repo` that clones**; neither the teammates (★ MANDATORY rule 1) nor the standalone agent ([repo-benchmarker](../agents/repo-benchmarker.md) § *Process*) run `git clone`. `lib/git/repo-acquire.js#acquireRepo` validates the input via `lib/core/repo-input.js#parseRepoInput` (HTTPS only; shell metacharacters and NUL rejected, and traversal already collapsed by URL normalization before validation runs — the Security rules below, executable), clones `--depth 1` into the cache, enforces the 500MB ceiling, and returns `{ localPath, sourceUrl, sourceSha, cacheStatus, sizeBytes, depth }`. Run the calls concurrently for multiple URLs. First find the plugin root: the working directory is wherever the benchmark was launched (usually the user's project), not this plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so a dynamic import of `./lib/...` resolved against the cwd only works inside the plugin directory. Run this once and use the absolute path it prints as `<pluginRoot>`, quoted (steps 2 and 10 both use it). If it prints `artibot plugin root not found - run /update`, report that line and stop:
 
    ```bash
-   node --input-type=module -e "const{acquireRepo,formatSourceStamp}=await import('./lib/git/repo-acquire.js');const r=acquireRepo(process.argv[1],{deep:process.argv[2]==='deep'});console.log(JSON.stringify(r,null,2));console.log(formatSourceStamp(r));" "https://github.com/owner/repo"
+   F="lib/git/repo-acquire.js"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+   for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+   [ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
+   [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+   [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+   [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
    ```
 
-   Pass `--deep` through as the second argument for full history, and `{skipClone:true}` for `--compare-only` / `--skip-clone`. **Hand every teammate its `localPath` *and* `sourceSha`.** `sourceSha` is the commit each `file:line` in the report was read against — without it the citations are unverifiable a week later, so it goes in the report header (`formatSourceStamp`). A `RepoInputError` or `RepoAcquireError` for one URL drops that URL from the batch; report the code and continue with the rest.
+   Then acquire each URL. The module is loaded through a `file://` URL built from `<pluginRoot>` (a bare absolute path fails to import on Windows):
+
+   ```bash
+   node --input-type=module -e "import path from 'node:path'; import { pathToFileURL } from 'node:url'; const{acquireRepo,formatSourceStamp}=await import(pathToFileURL(path.join(process.argv[1],'lib/git/repo-acquire.js')).href);const r=acquireRepo(process.argv[2],{deep:['deep','--deep'].includes(process.argv[3])});console.log(JSON.stringify(r,null,2));console.log(formatSourceStamp(r));" "<pluginRoot>" "https://github.com/owner/repo"
+   ```
+
+   Pass `deep` (or `--deep`) as the third argument for full history, and `{skipClone:true}` for `--compare-only` / `--skip-clone`. **Hand every teammate its `localPath` *and* `sourceSha`.** `sourceSha` is the commit each `file:line` in the report was read against — without it the citations are unverifiable a week later, so it goes in the report header (`formatSourceStamp`). A `RepoInputError` or `RepoAcquireError` for one URL drops that URL from the batch; report the code and continue with the rest.
 3. **Structure Scan** — count agents/commands/skills/hooks/lib/tests per repo
 4. **Delegate**:
    - If 1 URL → single `repo-benchmarker` agent
@@ -132,7 +143,7 @@ Only after completing steps 1–5, proceed to the Execution Flow below.
 7. **Judge candidates** — run the 3 VETO axes (safety / robustness / efficiency) at the strictness set by `--complexity-budget`, then score the 4 GAIN axes. Vetoed candidates go to `SUPPRESSED` with the failing axis named. See *Adoption Judgment* below
 8. **Don't-Replace-If-Better Rule** — if Artibot's score on dimension D exceeds target's, label as "ADVANTAGE — keep as-is"; never recommend swap
 9. **Validate claims** *(inspired by awesome-opensource-ai/validate_awesome.py)* — for each adoption suggestion, verify the referenced file/pattern actually exists in the target repo (grep/read check) before listing
-10. **Already-in-Artibot check** *(mirror of step 9 — opposite direction)* — before emitting any `ADOPT`, grep **Artibot** for the pattern (`Grep` over `plugins/artibot/{agents,commands,skills,hooks,lib,scripts}/`). If it already exists, downgrade to `REJECT — already implemented` and cite the Artibot `file:line`. This is the single most common false-ADOPT: in 2026-06 thirteen of fourteen benchmark proposals were rejected and "이미구현" was the top reason. A verdict of ADOPT is invalid without this grep having been run.
+10. **Already-in-Artibot check** *(mirror of step 9 — opposite direction)* — before emitting any `ADOPT`, grep **Artibot** for the pattern (`Grep` over `<pluginRoot>/{agents,commands,skills,hooks,lib,scripts}/` — the plugin root found in step 2, which is `plugins/artibot/` inside the Artibot source repo; run that snippet even for `--compare-only` / `--skip-clone`). If it already exists, downgrade to `REJECT — already implemented` and cite the Artibot `file:line`. This is the single most common false-ADOPT: in 2026-06 thirteen of fourteen benchmark proposals were rejected and "이미구현" was the top reason. A verdict of ADOPT is invalid without this grep having been run.
 11. **Aggregate Report** — single multi-repo table if N≥2
 
 ## 10 Scoring Dimensions

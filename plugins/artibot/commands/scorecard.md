@@ -23,6 +23,19 @@ allowed-tools: [Read, Bash, Grep, Glob]
 
 ## 워크플로우 (커맨드가 수행)
 
+### 플러그인 루트 (`--session`·`--routing`·`--compare` 호출 전에 한 번)
+
+cwd 는 사용자 프로젝트이지 이 플러그인이 아니고 `CLAUDE_PLUGIN_ROOT` 는 Bash 에서 자주 비어 있다 — env 에서 엔진 경로를 바로 읽으면 `path.join(undefined, …)` 이 던진다. 아래를 한 번 실행해 출력된 절대경로를 `<pluginRoot>` 로 쓴다(따옴표로 감싼다). `artibot plugin root not found - run /update` 가 나오면 그 줄을 그대로 전하고 멈춘다. (`--baseline`·`--diff`·`list` 의 한 줄 스니펫은 이 절 없이 같은 순서 — 소스 트리 → 호스트가 써 넣은 경로 → 플러그인 캐시 → `$HOME/.claude/artibot` → 마켓플레이스 — 로 엔진을 스스로 찾는다.)
+
+```bash
+F="lib/scorecard/index.js"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
+
 ### 채점 (기본 / `--baseline`)
 1. **영역 도출** — PRD/docs/라우트/모듈 구조에서 기능 영역을 3~8개 추출한다(예: 자막 추출·프레임 캡처·요약·에러 처리). 코드 대상이면 Grep/Glob/Read로 실제 구조를 먼저 파악한다. (분해 철학은 `/blindspot`과 동일 — 큰 덩어리를 쪼개 빠뜨림을 줄인다.)
 2. **증거 채점** — 각 영역마다 **file:line 하드 증거를 수집**해 0~100 부여:
@@ -31,7 +44,7 @@ allowed-tools: [Read, Bash, Grep, Glob]
    - **증거를 못 찾으면 evidence를 빈 배열로 두라** — 엔진이 `unverified`로 표기한다(거짓 점수보다 정직 표기).
 3. **스냅샷 저장** — `{label, areas}` JSON을 **stdin으로** 엔진 CLI `add`에 넘긴다:
 ```
-Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/lib/planning/scorecard.js"; if [ -f "$ENGINE" ]; then echo '<payload-json>' | node "$ENGINE" add; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
+Bash: F="lib/planning/scorecard.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then echo '<payload-json>' | node "$ENGINE" add; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
 ```
    `<payload-json>` = `{"label":"작업 전","areas":[{"name":"자막 추출","score":90,"evidence":[{"file":"watch-ingest.js:120","note":"vtt 파싱"}]},{"name":"프레임","score":0,"evidence":[]}]}` (한 줄 JSON). 엔진이 표를 렌더한다(첫 실행=baseline, 이후=직전 스냅샷과 diff).
 4. 렌더된 표를 사용자에게 보여주고, "작업 후 다시 `/scorecard`로 채점하면 상승폭을 볼 수 있어요" 안내.
@@ -39,14 +52,14 @@ Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ]
 ### 전후 비교 (`--diff`)
 엔진 CLI `diff`가 **최신 2개** 스냅샷을 `diffSnapshots`→`renderScorecard`로 표 렌더한다. 특정 두 스냅샷을 지정하려면 `--from <label> --to <label>`. 스냅샷이 2개 미만이면 안내 메시지("비교하려면 스냅샷 2개가 필요합니다 — 현재 N개.").
 ```
-Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/lib/planning/scorecard.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" diff; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
+Bash: F="lib/planning/scorecard.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" diff; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
 ```
 특정 쌍 비교: `node "$ENGINE" diff --from "작업 전" --to "작업 후"`.
 출력 표: `| 평가 항목 | 작업 전 | 작업 후 | 상승폭 | 남은 갭 |` — 남은 갭 열은 `▰▱` 게이지(작업 후 점수 기준 채움) + 남은 점수. 신규 영역은 작업 전 `—`, `unverified` 영역은 항목명에 `*` + 각주.
 
 ### 목록 (`list`)
 ```
-Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT:-}/lib/planning/scorecard.js"; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
+Bash: F="lib/planning/scorecard.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && ENGINE="plugins/artibot/$F"; [ -f "$ENGINE" ] || ENGINE="${CLAUDE_PLUGIN_ROOT}/$F"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$ENGINE" ] || ENGINE="$P/cache/artibot/artibot/$v/$F"; done; [ -f "$ENGINE" ] || ENGINE="$HOME/.claude/artibot/$F"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$ENGINE" ] || ENGINE="$P/marketplaces/$m/plugins/artibot/$F"; done; if [ -f "$ENGINE" ]; then node "$ENGINE" list; else echo "scorecard engine not found — run the full install (bash install.sh)"; fi
 ```
 
 ### 세션/라우팅 카드 (`--session` / `--routing`)
@@ -59,19 +72,19 @@ Bash: ENGINE="$HOME/.claude/artibot/lib/planning/scorecard.js"; [ -f "$ENGINE" ]
 Bash: node --input-type=module -e "
 const { pathToFileURL } = await import('node:url');
 const path = (await import('node:path')).default;
-const root = process.env.CLAUDE_PLUGIN_ROOT;
+const root = process.argv[1];
 const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
 const { readAllEvents } = await load('lib/runtime/ledger.js');
 const { loadReplay } = await load('lib/replay/index.js');
 const sc = await load('lib/scorecard/index.js');
-const args = process.argv.slice(1);
+const args = process.argv.slice(2);
 const sid = args.find((a) => !a.startsWith('-')) ?? process.env.CLAUDE_SESSION_ID;
 const replay = loadReplay(process.cwd(), { readEvents: readAllEvents });
 const card = args.includes('--routing')
   ? sc.buildRoutingScorecard(replay)
   : sc.buildSessionScorecard(replay, { session_id: sid });
 process.stdout.write(sc.renderScorecardMarkdown(card));
-" -- $ARGUMENTS
+" -- "<pluginRoot>" $ARGUMENTS
 ```
 
 - `readEvents` 포트를 빠뜨리면 `loadReplay` 가 **던진다**. 빈 배열로 기본값을 주면 배선 오류가 "아무 일도 없던 실행"과 같은 출력이 되므로 일부러 fail-closed 다.
@@ -79,7 +92,7 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 - `CLAUDE_SESSION_ID` 는 **폴백이지 보장이 아니다**(`commands/team.md` — 훅 payload 가 1순위, env 는 폴백). 비어 있으면 `buildSessionScorecard` 가 이유를 적어 던지므로, 그때는 `--session <id>` 로 id 를 직접 준다. 조용히 전 세션을 접는 대신 멈추는 쪽이 맞다.
 - 경로 해석은 `node:url` 의 `pathToFileURL` 을 쓴다 — 손으로 만든 `file://` 문자열은 셸 인용 단계에서 백슬래시가 먹히고 **한글 경로를 퍼센트 인코딩하지 못한다**(위 `## 제약 / 안전` 의 Korean-path 주의가 이 경로에도 그대로 적용된다). 두 플래그 모두 이 스니펫 그대로 실행해 확인했다.
 - 출력은 아래 `## 출력` 절의 TTY 테마 렌더가 **아니다**. 이 경로는 GFM 표 마크다운 **한 형태뿐**이며 TTY 여부로 분기하지 않는다 — 프로세스를 읽는 것은 효과이고 이 엔진은 순수(L2)다.
-- **분모 0 인 지표는 `unmeasured` 로 렌더된다. `0%` 로 쓰지 않는다.** 훅 배선은 착지했으나(`lib/runtime/human-asked-record.js#recordHumanAsked` `human.asked`, `scripts/hooks/subagent-handler.js#observeRoute` `route.selected`, `lib/runtime/middleware/tasks.js#createTasksMiddleware` Mission Contract) **설치본에 반영되기 전까지 원장이 비어 전 지표가 `unmeasured`** 다. 훅은 `${CLAUDE_PLUGIN_ROOT}` 로 등록되므로(`hooks/hooks.json:38·182`) 마켓플레이스 설치본을 쓰는 경우 `npm run sync:local` 전까지 옛 사본이 돈다. 반영 후 스폰·차단·프롬프트부터 채워진다.
+- **분모 0 인 지표는 `unmeasured` 로 렌더된다. `0%` 로 쓰지 않는다.** 훅 배선은 착지했으나(`lib/runtime/human-asked-record.js#recordHumanAsked` `human.asked`, `scripts/hooks/subagent-handler.js#observeRoute` `route.selected`, `lib/runtime/middleware/tasks.js#createTasksMiddleware` Mission Contract) **설치본에 반영되기 전까지 원장이 비어 전 지표가 `unmeasured`** 다. 훅은 플러그인 루트 변수 `CLAUDE_PLUGIN_ROOT` 경로로 등록되므로(`hooks/hooks.json:38·182`) 마켓플레이스 설치본을 쓰는 경우 `npm run sync:local` 전까지 옛 사본이 돈다. 반영 후 스폰·차단·프롬프트부터 채워진다.
 - 카드가 **못 보는 것**(Progress·Status·Elapsed·토큰/비용·Useful/Wasteful Switch·Switch Efficiency·Transition Cost/Time)은 각 모듈 헤더에 이유와 함께 적혀 있다. 지출 합산은 `lib/economics` 의 단일 답이고, 원장 gap 판정은 `/doctor` Check 8 의 일이다 — 여기서 두 번째 답을 만들지 않는다.
 
 #### 스폰 비교 카드 (`--compare`)
@@ -90,13 +103,13 @@ process.stdout.write(sc.renderScorecardMarkdown(card));
 Bash: node --input-type=module -e "
 const { pathToFileURL } = await import('node:url');
 const path = (await import('node:path')).default;
-const root = process.env.CLAUDE_PLUGIN_ROOT;
+const root = process.argv[1];
 const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
 const { readAllEvents } = await load('lib/runtime/ledger.js');
 const { joinSpawnOutcomes } = await load('lib/replay/index.js');
 const { labelReplay } = await load('lib/replay/index.js');
 const sc = await load('lib/scorecard/index.js');
-const args = process.argv.slice(1);
+const args = process.argv.slice(2);
 const at = args.indexOf('--since');
 let sinceMs = null;
 if (at !== -1) {
@@ -110,7 +123,7 @@ const events = readAllEvents(process.cwd(), sinceMs === null ? {} : { since: sin
 const since = sinceMs === null ? null : new Date(sinceMs).toISOString();
 const card = sc.buildCompareScorecard(joinSpawnOutcomes(events), { since, replay: labelReplay(events) });
 process.stdout.write(sc.renderScorecardMarkdown(card));
-" -- $ARGUMENTS
+" -- "<pluginRoot>" $ARGUMENTS
 ```
 
 - `--since <ISO|epoch ms>` 는 **리더 필터에 epoch ms 로** 걸고(`readAllEvents` 의 `filter.since`) 카드 라벨에는 ISO 로 넘긴다. 파싱할 수 없는 값도, **값이 아예 없는 `--since` 도** 조용히 무시하지 않고 메시지와 함께 중단한다 — 범위를 못 건 실행이 전 기간 실행과 같은 출력이 되면 안 된다. 그래서 분기가 `--since` **플래그의 존재**를 보고 값의 존재를 보지 않는다: 값으로 분기하면 `--compare --since` 가 조용히 전 기간 카드를 내는 fail-open 이 된다(실측 확인 후 수정). 스니펫이 `Date` 를 쓰는 것은 **호출자 쪽**이라 허용된다(순수성은 `lib/scorecard/` 의 계약이다).
@@ -135,13 +148,13 @@ Bash: node --input-type=module -e "
 const { pathToFileURL } = await import('node:url');
 const path = (await import('node:path')).default;
 const { existsSync } = await import('node:fs');
-const root = process.env.CLAUDE_PLUGIN_ROOT;
+const root = process.argv[1];
 const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
 const { readAllEvents } = await load('lib/runtime/ledger.js');
 const { loadReplay } = await load('lib/replay/index.js');
 const { outcomeArtifactPath } = await load('lib/mission/index.js');
 const sc = await load('lib/scorecard/index.js');
-const args = process.argv.slice(1);
+const args = process.argv.slice(2);
 const at = args.indexOf('--mission');
 const id = at === -1 ? '' : String(args[at + 1] ?? '').trim();
 if (id === '' || id.startsWith('-')) throw new Error('--mission needs a mission id');
@@ -150,7 +163,7 @@ if (!existsSync(outcome)) throw new Error('no outcome.md at ' + outcome + ' — 
 const replay = loadReplay(process.cwd(), { readEvents: readAllEvents });
 const card = sc.buildMissionScorecard(replay, { mission_id: id, outcome_present: true });
 process.stdout.write(sc.renderScorecardMarkdown(card));
-" -- $ARGUMENTS
+" -- "<pluginRoot>" $ARGUMENTS
 ```
 
 - **분모 0 인 지표는 `unmeasured`** 다. `0%` 로 쓰지 않는다. 그리고 `outcome.md` 생성은 **킬스위치 뒤**에 있다(`runtime.artifactLifecycle.enabled` 가 false 로 출하) — 그래서 지금 라이브에서 이 카드가 서는 횟수가 **0 인 것이 정답**이다. 이 경로가 착지했다는 것과 SH-20 이 done 이라는 것은 다른 진술이다.

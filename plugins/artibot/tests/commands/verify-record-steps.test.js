@@ -19,7 +19,8 @@
  *       in a NUMBERED step;
  *   (b) a relative `node scripts/ledger/...` resolves only when the cwd is the
  *       source repository's `plugins/artibot` — the `REC=` chain must resolve
- *       from anywhere, `$HOME` first;
+ *       from anywhere: verified source tree, host-written path, newest plugin
+ *       cache, legacy `$HOME` copy, marketplace copy, in that order;
  *   (c) the host exports `CLAUDE_CODE_SESSION_ID`, not `CLAUDE_SESSION_ID` — a
  *       call reading only the first spelling records `recorded:false`.
  *
@@ -58,10 +59,11 @@
  *  - WHETHER ANY MODEL RUNS THE STEP. This pins wording. A model that skips a
  *    numbered step leaves every assertion here green.
  *  - THE SHELL LINE ITSELF IS NEVER EXECUTED HERE. Only its flags are fed to
- *    the real CLI through `node`. A quoting mistake in the line, or a wrong
- *    `[ -f ]` chain, is guarded by the byte pin and by a manual literal probe,
- *    not by a run in this suite. The `${A:-$B}` fallback is POSIX shell
- *    semantics that nothing here exercises.
+ *    the real CLI through `node`. A quoting mistake in the line is guarded by
+ *    the byte pin and by a manual literal probe, not by a run in this suite.
+ *    The `${A:-$B}` fallback is POSIX shell semantics that nothing here
+ *    exercises. The resolution CHAIN (`[ -f ]` order, stale global copy versus
+ *    cache) is run against fake homes by `tests/commands/plugin-root-finder.test.js`.
  *  - THE INSTALLED COPIES. This reads the commands in THIS worktree.
  *    `~/.claude/commands` and the plugin cache can lag by releases.
  *  - THE REST OF THE PROSE. Only the load-bearing sentences are pinned. What
@@ -121,9 +123,12 @@ const EVIDENCE_ARG = ' --evidence "<path:line|command>"';
  * rather than built from `verify.md`, so a wording change here is a visible
  * edit; the parity test at the bottom ties it back to `verify.md`.
  */
-const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
-  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs";'
-  + ' [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs";'
+const DOC_LINE = 'F="scripts/ledger/record-verify.mjs"; REC=""; grep -q \'"name"[[:space:]]*:[[:space:]]*"artibot"\' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null'
+  + ' && REC="plugins/artibot/$F";'
+  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/$F";'
+  + ' P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$REC" ] || REC="$P/cache/artibot/artibot/$v/$F"; done;'
+  + ' [ -f "$REC" ] || REC="$HOME/.claude/artibot/$F";'
+  + ' for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$REC" ] || REC="$P/marketplaces/$m/plugins/artibot/$F"; done;'
   + ' if [ -f "$REC" ]; then node "$REC" --status <PASS|FAIL> --command "<one-line summary>"'
   + EVIDENCE_ARG
   + ' --session "${CLAUDE_SESSION_ID:-$CLAUDE_CODE_SESSION_ID}" --cwd "<project root>";'
@@ -132,11 +137,20 @@ const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
 /** The flags the line is expected to name — the cardinality anchor for the CLI case. */
 const DOC_FLAGS = ['--status', '--command', '--evidence', '--session', '--cwd'];
 
-/** The three places the script may live, in the order the chain must try them. */
+/**
+ * The five places the script may live, in the order the chain must try them: the Artibot source
+ * tree first (accepted only when its plugin.json names `artibot`, so the repo runs its own
+ * script and a project that merely holds a `plugins/artibot` folder is ignored), then the path
+ * the host writes into the command text, then the newest plugin-cache version, then the legacy
+ * `install.sh` copy (it can lag the plugin by releases, so it must not come before the cache),
+ * then the marketplace copy. The script's own name is held once, in `F`.
+ */
 const CHAIN = [
-  '$HOME/.claude/artibot/scripts/ledger/record-verify.mjs',
-  '${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs',
-  'plugins/artibot/scripts/ledger/record-verify.mjs',
+  'plugins/artibot/$F',
+  '${CLAUDE_PLUGIN_ROOT}/$F',
+  '$P/cache/artibot/artibot/$v/$F',
+  '$HOME/.claude/artibot/$F',
+  '$P/marketplaces/$m/plugins/artibot/$F',
 ];
 
 /**
@@ -324,8 +338,12 @@ describe.each(CARRIERS)('verify record step: $file', (carrier) => {
     expect(lines, `${file} must hold the invocation on exactly one line`).toHaveLength(1);
     const [line] = lines;
 
-    // Cause (b): all three locations, and in this order — `$HOME` first because
-    // `${CLAUDE_PLUGIN_ROOT}` can be empty in a Bash shell.
+    // Cause (b): all five locations, and in this order — the verified source tree first, then the
+    // exact braced token, which the HOST replaces inline with the plugin path when the command
+    // loads (measured 2026-09-30; the `:-` spelling is not replaced and the CLAUDE_PLUGIN_ROOT
+    // environment variable can be empty in a Bash shell), then the newest plugin-cache version,
+    // then the legacy `$HOME` copy (stale ahead of the cache is the regression this order fixes),
+    // then the marketplace copy. The order is EXECUTED in tests/commands/plugin-root-finder.test.js.
     const at = CHAIN.map((part) => line.indexOf(part));
     expect(at.every((i) => i > -1), `every REC location present: ${JSON.stringify(at)}`).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -499,7 +517,7 @@ describe('verify record step: shared with commands/verify.md', () => {
   it('differs from verify.md Step 5 by the --evidence argument and nothing else', () => {
     const verifyLines = read('verify.md')
       .split('\n')
-      .filter((line) => line.startsWith('REC="$HOME/.claude/artibot/'));
+      .filter((line) => line.startsWith('F="scripts/ledger/record-verify.mjs"; REC=""; grep -q '));
     // CARDINALITY ANCHOR: exactly one Step 5 line to compare against.
     expect(verifyLines).toHaveLength(1);
     const expected = verifyLines[0].trim();

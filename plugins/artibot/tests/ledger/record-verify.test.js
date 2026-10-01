@@ -667,9 +667,12 @@ const DOC_CALL = 'node "$REC" --status <PASS|FAIL> --command "<one-line summary>
  * host sets `CLAUDE_CODE_SESSION_ID` and leaves `CLAUDE_SESSION_ID` empty, so a
  * call naming only the first spelling records nothing.
  */
-const DOC_LINE = 'REC="$HOME/.claude/artibot/scripts/ledger/record-verify.mjs";'
-  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT:-}/scripts/ledger/record-verify.mjs";'
-  + ' [ -f "$REC" ] || REC="plugins/artibot/scripts/ledger/record-verify.mjs";'
+const DOC_LINE = 'F="scripts/ledger/record-verify.mjs"; REC=""; grep -q \'"name"[[:space:]]*:[[:space:]]*"artibot"\' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null'
+  + ' && REC="plugins/artibot/$F";'
+  + ' [ -f "$REC" ] || REC="${CLAUDE_PLUGIN_ROOT}/$F";'
+  + ' P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$REC" ] || REC="$P/cache/artibot/artibot/$v/$F"; done;'
+  + ' [ -f "$REC" ] || REC="$HOME/.claude/artibot/$F";'
+  + ' for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$REC" ] || REC="$P/marketplaces/$m/plugins/artibot/$F"; done;'
   + ` if [ -f "$REC" ]; then ${DOC_CALL};`
   + ' else echo "record-verify not found - outcome NOT recorded"; fi';
 

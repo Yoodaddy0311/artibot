@@ -72,9 +72,11 @@ background/SessionEnd auto-enqueue (privacy-sensitive promotion stays explicit).
 dashboard. Pass everything AFTER the `review` token to the review script:
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+F="scripts/ledger-review.js"; PLUGIN_ROOT=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && PLUGIN_ROOT="plugins/artibot"; [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/cache/artibot/artibot/$v"; done; [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$HOME/.claude/artibot"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/marketplaces/$m/plugins/artibot"; done
 node "${PLUGIN_ROOT}/scripts/ledger-review.js" $ARGUMENTS
 ```
+
+Both scripts below are found in this order: the Artibot source tree (only when `plugins/artibot/.claude-plugin/plugin.json` names `artibot`), the plugin path the host writes into this command text, the newest plugin-cache version, the legacy `$HOME/.claude/artibot` copy that `install.sh` makes, then the marketplace copy.
 
 `$ARGUMENTS` is forwarded verbatim — the script ignores the leading `review`
 token, so `review`, `review approve <id>`, and `review reject --all` all work.
@@ -86,7 +88,7 @@ the user they can `approve`/`reject` by id (the output already prints the hint).
 1. Run the diagnostic script via Bash:
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/artibot}"
+F="scripts/learning-diag.js"; PLUGIN_ROOT=""; grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' plugins/artibot/.claude-plugin/plugin.json 2>/dev/null && PLUGIN_ROOT="plugins/artibot"; [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; P="$HOME/.claude/plugins"; for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/cache/artibot/artibot/$v"; done; [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$HOME/.claude/artibot"; for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$PLUGIN_ROOT/$F" ] || PLUGIN_ROOT="$P/marketplaces/$m/plugins/artibot"; done
 node "${PLUGIN_ROOT}/scripts/learning-diag.js" $ARGUMENTS
 ```
 
