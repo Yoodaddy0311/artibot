@@ -1,7 +1,7 @@
 # Artibot v5.0 백로그 — 진행률 단일 분모 (정본)
 
 - 생성: 2026-09-11 (세션 25918244, NEXT-SESSION 「Wave 6 착지 + Wave 7 준비」 22:1x 절 이후). 작성: planner(fable) 초안, 리더 Write.
-- 기준 master: `0dddb6ac` (release: v4.67.0 — Wave 18 잔여 + Wave 19~23 착지분 출하, 2026-09-28; §1 표·§2 status 는 이 SHA 기준, 갱신 경위는 §4-g). 종전 기준: `c2f300e3` (release: v4.62.0 — Wave 9 착지분 출하, 2026-09-14 12:5x; 당시 §1 표는 3ba981eb 기준 그대로 — 4.62.0 은 기능 코드 0)
+- 기준 master: `6a6bc421` (v4.71.0 통합 브랜치 `integ/release-4710` 의 로컬 SHA — 릴리스 커밋 전, 2026-10-01; §1 표·§2 status 는 이 SHA 의 트리 기준, 갱신 경위는 §4-l). 종전 기준: `0dddb6ac` (release: v4.67.0 — Wave 18 잔여 + Wave 19~23 착지분 출하, 2026-09-28; 갱신 경위는 §4-g) · `c2f300e3` (release: v4.62.0 — Wave 9 착지분 출하, 2026-09-14 12:5x; 당시 §1 표는 3ba981eb 기준 그대로 — 4.62.0 은 기능 코드 0)
 - 설치본: 4.67.0 (installed_plugins.json artibot@artibot gitCommitSha 0dddb6ac, lastUpdated 2026-09-28T03:42:57Z — 2026-09-28 13:0x KST state 팀원 실측; cache 4.67.0 agents 30/30 opus). 종전: 4.62.0 (`sync:local` 2026-09-14 13:0x, 설치 경로 `dev-verify-gate.js` 에 `recordUnmeasuredDenominator` 3건 — 호스트 재시작 전)
 - **오너 결정 2026-09-14(E1·E2·E3·G1, ADR-012)**: 감사 F01~F10 은 로드맵 ID 의 선행 불변식이면 로드맵으로 세고 해당 ID 비고에 F 번호를 명기한다(E1) · Observe ⑤ 는 Shadow 이월, 종료 판정은 ①②③④(E2) · RouteBench 는 B안(E3) · v5.0 GA 조건 = GA-02 기전 GA 만, GA-01·GA-03 은 v5.1(G1). Wave 10 편성 정본 = `.artibot/adr/ADR-012-*.md` + `docs/PRD/v5-ga-roadmap-audit-fold-20260914.md`.
 - **이 문서가 v5.0 진행률의 정본이다.** 로드맵 항목의 status·evidence 는 여기서만 갱신한다. 갱신 규칙: 웨이브 착지(배치 랜딩 커밋)마다 리더가 해당 항목의 status·evidence(커밋 SHA 또는 file#symbol)를 갱신하고 헤더의 기준 SHA 를 올린다. `done` 은 evidence 가 있을 때만. 항목 추가는 설계 정본(`ARTIBOT-5.0-DESIGN.md` §4·§7.3·§8.4·부록 결정)에 근거가 있을 때만 — 정찰 후속은 §3 부채 트랙으로.
