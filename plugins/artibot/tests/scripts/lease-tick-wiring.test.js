@@ -32,6 +32,7 @@ import { LEASE_RECLAIM_REASON, LEASE_TICK_REASON } from '../../lib/topology/leas
 import { LANE_LEASE_REASON } from '../../scripts/split/lane-lease.mjs';
 import { feedLimb } from '../../scripts/split/task-feed.mjs';
 import { tick } from '../../scripts/split/lease-tick.mjs';
+import { usePatientRename } from '../helpers/patient-rename.js';
 
 const H = 3_600_000;
 const MIN = 60_000;
@@ -65,6 +66,10 @@ const NO_SESSION_ENV = { ...process.env, CLAUDE_CODE_SESSION_ID: '', CLAUDE_SESS
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 }
+
+// The in-process store commits (the seeding and the aged claims) wait out the Windows EPERM-on-rename that outlasts core's ~150ms retry
+// (tests/helpers/patient-rename.js). The child processes below are NOT covered: they run the unpatched rename.
+usePatientRename();
 
 describe('a real locked worktree — liveness read the way collect reads it (`git worktree list --porcelain` + a pid probe)', () => {
   let repo;

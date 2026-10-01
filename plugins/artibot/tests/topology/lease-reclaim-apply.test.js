@@ -25,6 +25,7 @@ import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { LIMB_LEASE_TTL_MS } from '../../lib/topology/split-task-feed.js';
 import { LEASE_RECLAIM_REASON, reclaimExpiredLaneLeases } from '../../lib/topology/lease-reclaim.js';
 import { feedLimb } from '../../scripts/split/task-feed.mjs';
+import { usePatientRename } from '../helpers/patient-rename.js';
 
 const H = 3_600_000;
 const T0 = Date.parse('2026-09-30T00:00:00.000Z');
@@ -40,6 +41,9 @@ const PLAN = {
 };
 /** The id `--apply-reclaim` takes for a lane of the fixture mission. */
 const idOf = (task) => `${MISSION}/${task}`;
+
+// Real store commits: wait out the Windows EPERM-on-rename that outlasts core's ~150ms retry (tests/helpers/patient-rename.js).
+usePatientRename();
 
 describe('reclaimExpiredLaneLeases — against a real StateStore', () => {
   let root;

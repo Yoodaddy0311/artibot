@@ -48,6 +48,7 @@ import {
   renderText,
   reportLeaseReclaim,
 } from '../../scripts/split/watch.mjs';
+import { usePatientRename } from '../helpers/patient-rename.js';
 
 const H = 3_600_000;
 const MIN = 60_000;
@@ -87,6 +88,10 @@ function git(args, cwd) {
 function codeOf(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 }
+
+// The in-process store commits (the fixtures' seeding and claims) wait out the Windows EPERM-on-rename that outlasts core's ~150ms retry
+// (tests/helpers/patient-rename.js). The child processes below are NOT covered: they run the unpatched rename.
+usePatientRename();
 
 describe('readLaneOpsUpdatedAt — the lane-state half of the liveness evidence', () => {
   it('prefers updated_at (stamped by every writeWorkerState, a re-assert included) and falls back to since', () => {

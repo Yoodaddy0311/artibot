@@ -62,6 +62,7 @@ import {
   renewLaneHeartbeats,
   tick,
 } from '../../scripts/split/lease-tick.mjs';
+import { usePatientRename } from '../helpers/patient-rename.js';
 
 const H = 3_600_000;
 const MIN = 60_000;
@@ -84,6 +85,9 @@ const iso = (ms) => new Date(ms).toISOString();
 const lane = (over = {}) => ({
   limb: 'auth', opsState: 'active', complete: false, sessionPresent: true, health: { health: 'unknown' }, opsUpdatedAt: null, ...over,
 });
+
+// Hundreds of real store commits in tight loops: wait out the Windows EPERM-on-rename that outlasts core's ~150ms retry (tests/helpers/patient-rename.js).
+usePatientRename();
 
 describe('parseArgs — the flags of a writer are strict', () => {
   it('defaults: cwd as the parent, no ids (so no apply)', () => {
