@@ -172,8 +172,13 @@ const TOPOLOGY_MODES = Object.freeze(['solo', 'subagent', 'team', 'autopilot', '
  * resolveUpdateCheckPolicy` 가 읽는 유일한 최상위 키) 1건이 더해져 32 다. 그날 리더가
  * 결정 없이 키를 넣었다가 이 단언에 CI RED(32≠31)로 되돌린 뒤 등록했다 — 이 게이트가
  * 설계대로 작동한 실측 1건.
+ *
+ * 2026-09-30: 32 → 33. 오너 결정 D1(O1+O3 — "exclude 는 자동으로 쓰고, config opt-out 키를
+ * 둔다")에 따라 `projectBootstrap`(gitExclude·rulesDigest) 1건이 더해졌다. 읽는 곳은
+ * `lib/project-state/project-bootstrap.js#resolveProjectBootstrapPolicy` 하나다.
+ * 같은 기간 다른 줄기가 최상위 키를 더하면 이 수는 그만큼 더 올라가야 한다.
  */
-const EXPECTED_TOP_LEVEL_COUNT = 32;
+const EXPECTED_TOP_LEVEL_COUNT = 33;
 
 /**
  * 정책 버킷이 결정하는 30 에이전트 전건. `FABLE_AGENTS` 는 `fable.allowlist` 10종의

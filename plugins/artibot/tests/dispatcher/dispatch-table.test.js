@@ -32,7 +32,10 @@ const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
 const EXPECTED_HANDLER_COUNTS = {
   // 10 → 9: auto-learning-check.js removed with the nightly autoLearning
   // pipeline retirement (OS-unregistered since 2026-05-18, zero auto-runs).
-  SessionStart: 9,
+  // 9 -> 10 (2026-09-30): project-bootstrap.js joined the slot - the managed
+  // `.artibot` runtime block in <git common dir>/info/exclude, plus the rules
+  // digest for a project with no installed rules (portability O1 + O3).
+  SessionStart: 10,
   // Bumped 6 → 7 in v4.8.0 backlog: auto-command-suggest.js joined the
   // UserPromptSubmit slot to suggest /adr and /migrate from natural-language
   // prompts (alongside the existing auto-team-trigger and autopilot-nlu).

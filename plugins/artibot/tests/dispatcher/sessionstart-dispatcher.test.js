@@ -25,7 +25,7 @@ import { ledgerFilePath } from '../../lib/runtime/ledger.js';
  *    `<home>/.claude/artibot` (measured: this file created
  *    `artibot/update-check.json` under a sandbox home).
  *
- *  - cwd -> throwaway NON-git dir. Two of the 9 hooks are git-autopilot hooks,
+ *  - cwd -> throwaway NON-git dir. Two of the 10 hooks are git-autopilot hooks,
  *    and both resolve the repository from process cwd alone:
  *    `git-autopilot-setup.js:105` and `git-autopilot-session.js:61` each run
  *    `git rev-parse --show-toplevel` with no `cwd` option. Spawning from
@@ -248,9 +248,9 @@ describe('_sessionstart-dispatcher (integration)', () => {
     expect(stdout).toBe('');
   });
 
-  it('registers all 9 wrapped hooks in HOOKS table', async () => {
+  it('registers all 10 wrapped hooks in HOOKS table', async () => {
     const mod = await import('../../scripts/hooks/_sessionstart-dispatcher.js');
-    expect(mod.HOOKS).toHaveLength(9);
+    expect(mod.HOOKS).toHaveLength(10);
     const names = mod.HOOKS.map((h) => h.name);
     expect(names).toContain('session-start');
     expect(names).toContain('memory-tracker');
@@ -261,6 +261,7 @@ describe('_sessionstart-dispatcher (integration)', () => {
     expect(names).toContain('git-autopilot-session');
     expect(names).toContain('skill-validation-check');
     expect(names).toContain('session-readback');
+    expect(names).toContain('project-bootstrap');
   });
 
   it('passes "SessionStart" arg to memory-tracker so it routes to the right handler', async () => {
@@ -298,20 +299,20 @@ describe('_sessionstart-dispatcher (integration)', () => {
   /**
    * ROUND TRIP for the `hook.fired` carrier (SH-29, owner O8=a1).
    *
-   * ONE ROW PER DISPATCH, not one per handler: SessionStart fans out to nine
-   * handlers, and the rejected alternative would have written nine lines for
+   * ONE ROW PER DISPATCH, not one per handler: SessionStart fans out to ten
+   * handlers, and the rejected alternative would have written ten lines for
    * one session open. The row count is the assertion that carries the
    * decision; `data.hooks` is what keeps the identities the Existence Audit
    * needs (`lib/replay/existence-audit.js#CARRIERS.hooks` was null until this
    * event existed).
    *
    * `data.failed` is asserted as a SUBSET of `data.hooks`, not as empty. Two of
-   * the nine are network-bound (`swarm-download`, 15s) and a timeout is a
+   * the ten are network-bound (`swarm-download`, 15s) and a timeout is a
    * legitimate status, not a defect — pinning `[]` would make this case fail on
    * a slow or offline machine and teach the next reader to delete it. What must
    * hold in every environment is that a failure names a handler that ran.
    */
-  it('writes exactly one hook.fired row naming all 9 handlers in table order', () => {
+  it('writes exactly one hook.fired row naming all 10 handlers in table order', () => {
     const repo = makeLedgerRepo('fired');
     const { status } = runDispatcher({
       hook_event_name: 'SessionStart',
@@ -329,9 +330,9 @@ describe('_sessionstart-dispatcher (integration)', () => {
     expect(fired[0].data.hooks).toEqual([
       'session-start', 'memory-tracker', 'swarm-download', 'git-autopilot-setup',
       'image-cleanup', 'session-digest', 'git-autopilot-session',
-      'skill-validation-check', 'session-readback',
+      'skill-validation-check', 'session-readback', 'project-bootstrap',
     ]);
-    expect(fired[0].data.count).toBe(9);
+    expect(fired[0].data.count).toBe(10);
     // No tool on this slot: the key is OMITTED, never null (a null would be a
     // `type-violation:tool` rejection against the allowlist's declared string).
     expect('tool' in fired[0].data).toBe(false);
@@ -341,7 +342,7 @@ describe('_sessionstart-dispatcher (integration)', () => {
     // SessionStart carries no tool_use_id and no prompt_id, so there is no
     // correlation key to record and the envelope omits it.
     expect('action_id' in fired[0]).toBe(false);
-    // The carrier is a library module, not a 10th handler — it never names
+    // The carrier is a library module, not an 11th handler — it never names
     // itself, and it costs no spawn.
     expect(fired[0].data.hooks).not.toContain('_hook-fired-record');
   });
@@ -366,7 +367,7 @@ describe('_sessionstart-dispatcher (integration)', () => {
 
   /**
    * The self-check below, repeated for the payload shape the round-trip case
-   * introduced. A `cwd` FIELD is new input to nine handlers; this proves it
+   * introduced. A `cwd` FIELD is new input to ten handlers; this proves it
    * does not become a second route to the real checkout the way a spawn cwd
    * would. Writes INSIDE the sandbox repo are acceptable — it is a throwaway.
    */
@@ -385,6 +386,43 @@ describe('_sessionstart-dispatcher (integration)', () => {
     expect(after.branch).toBe(before.branch);
     expect(after.reflog).toBe(before.reflog);
     expect(after.autopilotBranches).toBe(before.autopilotBranches);
+  });
+
+  /**
+   * END TO END for project-bootstrap (portability O1 + O3). Its own suite
+   * (`tests/hooks/project-bootstrap.test.js`) spawns the hook directly, which
+   * proves the hook works and cannot prove it RUNS: only the row in
+   * `hooks/dispatch-table.json` makes the dispatcher start it. A hook written,
+   * tested and never registered is the failure this case closes.
+   *
+   * The sandbox HOME holds no `.claude/rules/artibot/`, so the digest is due. The
+   * spawn env pins two things the developer's shell could otherwise change: an
+   * explicit `on` beats an inherited ARTIBOT_PROJECT_BOOTSTRAP=off (someone who
+   * opted out), and empty GIT_* keeps repository discovery on the sandbox repo
+   * when the suite is launched from a git hook. The repository written into is
+   * the throwaway one named by `payload.cwd`, never the checkout.
+   */
+  it('runs project-bootstrap: the sandbox repo gets the exclude block and the merged context carries the digest', () => {
+    const repo = makeLedgerRepo('bootstrap');
+    const { stdout, status } = runDispatcher(
+      {
+        hook_event_name: 'SessionStart',
+        source: 'startup',
+        session_id: 'sess-bootstrap-0001',
+        cwd: repo,
+      },
+      { ARTIBOT_PROJECT_BOOTSTRAP: 'on', GIT_DIR: '', GIT_COMMON_DIR: '', GIT_WORK_TREE: '' },
+    );
+    expect(status).toBe(0);
+
+    const exclude = readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf-8');
+    expect(exclude).toContain('# >>> artibot runtime >>>');
+    expect(exclude).toContain('**/.artibot/state.yaml');
+    expect(exclude).toContain('# <<< artibot runtime <<<');
+
+    const { hookSpecificOutput } = JSON.parse(stdout);
+    expect(hookSpecificOutput.hookEventName).toBe('SessionStart');
+    expect(hookSpecificOutput.additionalContext).toContain('[artibot:rules]');
   });
 
   it('leaves the real repository untouched (no autopilot.json write, no HEAD move)', () => {
