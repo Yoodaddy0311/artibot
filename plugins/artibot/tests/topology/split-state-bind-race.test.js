@@ -108,7 +108,7 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-/** A canonical run directory: `<tmp>/.artibot/split/{plan,run}.json`, the plan carrying no binding yet. */
+/** A canonical run directory (`split` under the tmp project's `.artibot`, holding `plan.json` and `run.json`), the plan carrying no binding yet. */
 function seedRun(limbs) {
   const runDir = path.join(tmpDir, '.artibot', 'split');
   fs.mkdirSync(runDir, { recursive: true });
