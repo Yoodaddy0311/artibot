@@ -21,18 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ② **오래된 전역 복사본이 플러그인 캐시를 이기지 않는다**(`76914561`). 종전에는 `/verify` · `/team` · `/autopilot` · `/split` · `/theme` · `/watch` · `/scorecard` 의 해석 체인(REC · USG · ENGINE)이 `$HOME/.claude/artibot` 을 **맨 먼저** 시도했고, `/update` · `/learning` 의 체인은 호스트 토큰에서 곧장 그 복사본으로 넘어갔다 — 낡은 `~/.claude/artibot` 과 캐시가 함께 있으면 낡은 쪽이 실행됐다(커밋 본문: 가짜 HOME 에 둘을 함께 두고 `verify.md` 의 이전 체인은 낡은 복사본을, 새 체인은 캐시를 출력). 해석 체인 17개가 모두 ⓐ~ⓔ 순서를 따른다. **예외**: `/update` 는 소스 단계가 없다 — `update.js` 가 설치 방식(native · legacy)을 자기 위치로 정하므로(`lib/core/install-mode.js`) 작업 디렉터리 복사본을 잡으면 마켓플레이스 설치가 legacy 갱신 흐름(git pull + install.sh)으로 끌려가기 때문이다.
 
-③ **마켓플레이스 전용 · 캐시 전용 설치에서도 해석된다**(`d06ef4b5` · `76914561`). `/autopilot` · `/autopilot-queue` · `/go` · `/plan` 의 해석기는 마켓플레이스 미러만 훑었는데, 디렉터리 소스 마켓플레이스에는 미러가 없어 캐시만 있는 설치에서 네 커맨드 모두 "not found" 를 던졌다(커밋 본문: 수정 전 HEAD 에서 측정). 이제 환경변수 → 호스트가 쓴 경로(`# Changelog
-
-All notable changes to Artibot are documented in this file.
-
-모든 주목할 만한 변경 사항은 이 파일에 기록됩니다.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
----
-
- 로 시작하면 건너뜀) → 플러그인 캐시(번호순) → 미러 순서로 찾는다. `/scorecard` 의 node 조각 3개는 비어 있으면 예외를 던지던 `process.env.CLAUDE_PLUGIN_ROOT` 대신 같은 탐색 블록이 낸 루트를 받고, `/install` 의 조각은 호스트가 쓴 경로를 작은따옴표로 감싸 `C:/Users/O'Brien/...` 에서 구문 오류가 나던 것을 환경변수(`ARTIBOT_PLUGIN_ROOT`)로 받도록 바꿨다.
+③ **마켓플레이스 전용 · 캐시 전용 설치에서도 해석된다**(`d06ef4b5` · `76914561`). `/autopilot` · `/autopilot-queue` · `/go` · `/plan` 의 해석기는 마켓플레이스 미러만 훑었는데, 디렉터리 소스 마켓플레이스에는 미러가 없어 캐시만 있는 설치에서 네 커맨드 모두 "not found" 를 던졌다(커밋 본문: 수정 전 HEAD 에서 측정). 이제 환경변수 → 호스트가 쓴 경로(`$` 로 시작하면 건너뜀) → 플러그인 캐시(번호순) → 미러 순서로 찾는다. `/scorecard` 의 node 조각 3개는 비어 있으면 예외를 던지던 `process.env.CLAUDE_PLUGIN_ROOT` 대신 같은 탐색 블록이 낸 루트를 받고, `/install` 의 조각은 호스트가 쓴 경로를 작은따옴표로 감싸 `C:/Users/O'Brien/...` 에서 구문 오류가 나던 것을 환경변수(`ARTIBOT_PLUGIN_ROOT`)로 받도록 바꿨다.
 
 ④ **훅 명령 30개가 플러그인 경로를 따옴표로 감싼다**(`b844d6dd` · `d06ef4b5`). `hooks/hooks.json` 은 훅을 `node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/x.js` 로 등록하고 있었다. 호스트가 토큰 자리에 플러그인 디렉터리를 넣어 셸에 넘기므로 그 디렉터리에 공백이 있으면(`C:\Users\First Last\...`) 경로가 두 단어로 쪼개져 `node` 가 스크립트를 못 찾는다. 커밋 본문 측정(2026-09-30): 플러그인 사본을 `with space` 디렉터리에 두고 실제 훅 명령 30개를 플랫폼 셸로 돌리면 이전 30/30 실패, 이후 0/30 실패. 이제 경로만 JSON 이스케이프된 따옴표로 감싼다 — `node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/x.js\" [args]` — 인자(`start` · `teammate-update` · `failure`)는 밖에 둔다. 이 절을 쓰며 센 값: `hooks/hooks.json` 의 훅 명령 30개가 전부 새 형태다(`JSON.parse` 로 센 명령 30 · 새 형태 30). 이 스펠링을 읽는 곳이 함께 움직였다 — `hooks/dispatch-table.json` 의 `singleHookCommand` 2개(테스트가 hooks.json 과 같아야 한다고 요구), `tests/hooks-schema-fingerprint.txt`(스냅샷 재계산), 명령 꼬리를 읽는 `scripts/ledger/existence-audit.mjs` · `scripts/bench/hook-latency.mjs` · `scripts/audit-hooks.js`(따옴표를 벗기고 읽는다 — 안 그러면 존재 감사가 모든 dispatcher 를 직접 훅으로 셀 뻔했다), SDK `createHook().commit` 이 새 플러그인의 hooks.json 에 쓰는 항목(`lib/sdk/artibot-sdk.js`)과 `CONTRIBUTING.md` 예시. `.mcp.json` · `plugin.json` 은 플러그인 루트 경로를 담지 않아(`CLAUDE_PLUGIN_ROOT` 0건) 따옴표 대상이 없고 `artibot-cowork` 에는 `hooks/` 가 없다.
 
