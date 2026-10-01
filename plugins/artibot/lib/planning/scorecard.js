@@ -17,6 +17,7 @@
  * @module lib/planning/scorecard
  */
 
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { atomicWriteJson, readJsonFile } from '../core/file.js';
 import { isMainEntry } from '../../scripts/hooks/_main-entry.js';
@@ -44,14 +45,32 @@ function storePath(projectRoot) {
   return path.join(projectRoot, ...STORE_REL);
 }
 
+/** Errnos that mean "there is no store here" (`.artibot` being a file is ENOTDIR), as opposed to "a store that could not be read". */
+const ABSENT_CODES = new Set(['ENOENT', 'ENOTDIR']);
+
 /**
  * Load the scorecard store. Missing/corrupt file yields `{ snapshots: [] }`.
- * @param {{ projectRoot: string }} params
+ *
+ * `strict` is for a caller that is about to WRITE (the CLI `add`). It rejects with the
+ * read error for anything but "no such file": an unreadable store read as empty would
+ * be replaced by the next save, so the earlier snapshots would be lost while the
+ * command reports `saved:`. A corrupt file is still read as empty, as documented.
+ * @param {{ projectRoot: string, strict?: boolean }} params
  * @returns {Promise<Store>}
  */
-export async function loadScorecard({ projectRoot } = {}) {
+export async function loadScorecard({ projectRoot, strict = false } = {}) {
   if (!projectRoot) return { snapshots: [] };
-  const data = await readJsonFile(storePath(projectRoot));
+  let data;
+  if (strict) {
+    try {
+      data = JSON.parse(await fs.readFile(storePath(projectRoot), 'utf-8'));
+    } catch (err) {
+      if (!(err instanceof SyntaxError) && !ABSENT_CODES.has(err?.code)) throw err;
+      data = null;
+    }
+  } else {
+    data = await readJsonFile(storePath(projectRoot));
+  }
   if (!data || !Array.isArray(data.snapshots)) return { snapshots: [] };
   return { snapshots: data.snapshots };
 }
@@ -343,7 +362,17 @@ function selectDiffPair(store, argv) {
 async function runCli(argv) {
   const sub = argv[2];
   const projectRoot = process.cwd();
-  const store = await loadScorecard({ projectRoot });
+  // Only `add` writes, and it must not go on from a store it could not read (see the `strict`
+  // option of loadScorecard). `list` and `diff` only read, so they keep the tolerant load.
+  const writes = sub !== 'list' && sub !== 'diff';
+  let store;
+  try {
+    store = await loadScorecard({ projectRoot, strict: writes });
+  } catch (err) {
+    process.stdout.write(`읽기 실패: ${String((err && err.message) || err)} — 저장소를 덮어쓰지 않았습니다.\n`);
+    process.exitCode = 1;
+    return;
+  }
   if (sub === 'list') {
     if (store.snapshots.length === 0) { process.stdout.write('_저장된 스냅샷이 없습니다._\n'); return; }
     for (const [i, s] of store.snapshots.entries()) {
@@ -370,6 +399,10 @@ async function runCli(argv) {
     : diffSnapshots({ areas: [] }, snaps.at(-1));
   process.stdout.write(renderForOutput(rows) + '\n');
   process.stdout.write(saved.ok ? `\nsaved: ${saved.filePath}\n` : `\n저장 실패: ${saved.error}\n`);
+  // The table above is rendered from the in-memory store, so a failed save reads as a
+  // success to anything that only looks at the exit status. Say so there too; stdout is
+  // unchanged. `exitCode` rather than `exit()` so the stdout write above still flushes.
+  if (!saved.ok) process.exitCode = 1;
 }
 
 // Run only as a CLI entry point; importing (tests) gets the exports untouched.

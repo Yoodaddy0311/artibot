@@ -31,9 +31,13 @@
  *     measurement.
  *   - CONCURRENCY. One process at a time. A `/save` writing while this reads is
  *     not exercised.
- *   - GIT EVIDENCE QUALITY. The temp project is not a git repository, so every
- *     limb's completion reads `no-branch` and the lane rows assert the
- *     fail-closed reasons, not a true/false completion verdict.
+ *   - GIT EVIDENCE QUALITY. The temp project is not a git repository, so no
+ *     limb branch name can be derived and every limb's completion reads
+ *     `no-branch-name` (`limbGitEvidence` returns before git is asked; had a
+ *     branch name been known, `readLimbCompletion` would say `git-error` for a
+ *     non-repo cwd — `no-branch` is git's own "ref absent" answer and never
+ *     appears here), and the lane rows assert the fail-closed reasons, not a
+ *     true/false completion verdict.
  *   - THE `--mission` PATH against a mission that does not exist is asserted to
  *     produce a report, not to be useful.
  *

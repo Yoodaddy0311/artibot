@@ -176,11 +176,58 @@ export function renameWithRetry(tmp, dest, opts = {}) {
 }
 
 /**
+ * Async sleep for the retry backoff. Unlike {@link sleepSync} it must not block
+ * the thread: the async writers run beside other work in the same process.
+ *
+ * @param {number} ms - non-negative milliseconds
+ * @returns {Promise<void>}
+ */
+function sleepAsync(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+/**
+ * `fs.rename` (promises) with the bounded retry {@link renameWithRetry} already
+ * gives the sync writers: the same transient codes, the same five attempts, the
+ * same 10·20·40·80ms backoff (~150ms), and the last error re-thrown unchanged.
+ *
+ * Measured 2026-09-30 (Windows, file churn running beside it): the scorecard
+ * CLI's second `add` — an async `atomicWriteJson` over an existing store —
+ * failed in 4 of 160 add/add/diff sequences with
+ * `EPERM: operation not permitted, rename '<dest>.tmp.<pid>.<ts>.<rand>' -> '<dest>'`,
+ * and in 0 of 140 without churn. The 2026-09-15 fix had covered only the sync
+ * writers, which is the same second-write-only shape that fix described.
+ *
+ * Private on purpose: `renameWithRetry` is exported because `session-store.js`
+ * and `split-brief.js` tune its budget; nothing needs to tune this one.
+ *
+ * @param {string} tmp - source temp path
+ * @param {string} dest - destination final path
+ * @returns {Promise<void>}
+ */
+async function renameWithRetryAsync(tmp, dest) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.rename(tmp, dest);
+      return;
+    } catch (err) {
+      if (!TRANSIENT_RENAME_CODES.has(err?.code) || attempt >= MAX_RENAME_ATTEMPTS) throw err;
+      await sleepAsync(10 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+/**
  * Atomic text write with temp file + rename. Guaranteed crash-safe: readers
  * never observe a partial file, and a crash mid-write leaves the previous
  * content intact. Creates parent directory first, then writes a unique tmp
  * sibling, then renames into place. If rename fails, the tmp file is removed
  * so we never leak `.tmp.*` droppings.
+ *
+ * The rename retries a transient Windows destination lock (EPERM, EBUSY,
+ * EACCES) exactly as {@link atomicWriteTextSync} does — five attempts, ~150ms —
+ * and throws the last error when every attempt failed. Any other errno fails on
+ * the first attempt.
  *
  * The content is written byte-for-byte as given — no trailing newline is
  * added. Callers that want one must include it, otherwise a read → write
@@ -197,7 +244,7 @@ export async function atomicWriteText(filePath, content) {
   const tmp = buildAtomicTmpPath(filePath);
   try {
     await fs.writeFile(tmp, content, 'utf-8');
-    await fs.rename(tmp, filePath);
+    await renameWithRetryAsync(tmp, filePath);
   } catch (err) {
     cleanupTmpSync(tmp);
     throw err;
