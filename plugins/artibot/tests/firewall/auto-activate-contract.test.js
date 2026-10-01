@@ -24,7 +24,8 @@
  *  - `allowed-tools` is what a command DECLARES. It is not a sandbox; a command
  *    whose prose tells the model to write a file is invisible here. The claim
  *    that these commands are low-risk rests on their documented flow plus the
- *    fact that every tool call still passes the PreToolUse hooks — not on this test.
+ *    fact that their Bash, Write and Edit calls still pass the PreToolUse hooks
+ *    (hooks.json registers none for Read, Glob, Grep or TaskCreate) — not on this test.
  *  - Whether the model follows the directive, and whether the trigger table is
  *    precise on real prompts. Both unmeasured.
  *  - The design's own preconditions (A3 "Shadow ledger for one release", the
@@ -278,6 +279,11 @@ describe('docs — say what the code does, character-identical where it names th
     const comment = config.automation.autoActivate.comment;
     expect(comment).toMatch(/host permission prompt may be waived by the command's own allowed-tools \(unverified\)/);
     expect(comment).not.toMatch(/tool permission still applies/);
+    // The same two corrections CLAUDE.md got (lane CA-01 review follow-up): the START
+    // grammar is named, and the PreToolUse claim is scoped to the tools that have a hook.
+    expect(comment).toMatch(/opens inside a closed START grammar/);
+    expect(comment).toMatch(/PreToolUse hooks still run on Bash, Write and Edit calls/);
+    expect(comment).not.toMatch(/every tool call/);
 
     const libSrc = read(PLUGIN_ROOT, 'lib', 'cognitive', 'auto-activate.js');
     expect(libSrc).toMatch(/TRIGGER PRECISION is the safety line/);
