@@ -193,10 +193,16 @@ describe('recovery-journal-census CLI: it imports no writer', () => {
   });
 
   it('takes only read verbs from node:fs', () => {
+    // `statSync` joined the original three on 2026-09-30, for one reason: the
+    // fallback that reads the old locations picks, per session id, the copy with
+    // the latest mtime — the choice the store's adoption makes — and a count must
+    // describe the copy that would be adopted. It is a read verb, it is named
+    // here rather than waved through, and the writer-token scan above still
+    // covers every verb that could make this file a writer.
     const named = /import\s+\{([^}]*)\}\s+from\s+'node:fs'/.exec(source);
     expect(named).not.toBe(null);
     expect(named[1].split(',').map((n) => n.trim()).filter((n) => n !== ''))
-      .toEqual(['existsSync', 'readdirSync', 'readFileSync']);
+      .toEqual(['existsSync', 'readdirSync', 'readFileSync', 'statSync']);
   });
 
   it('does not import the session store, which is the writer', () => {

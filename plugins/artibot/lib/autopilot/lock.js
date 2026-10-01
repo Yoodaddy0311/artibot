@@ -54,8 +54,9 @@ import {
 } from 'node:fs';
 import { atomicCreateTextSync, ensureDirSync, sleepSync } from '../core/file.js';
 import { composeScopedKey } from '../git/repo-identity.js';
+import { getPluginRoot } from '../core/platform.js';
 import {
-  getLegacyStoreDir, getSessionPath, getStoreDir, loadSession,
+  getLegacyStoreDirs, getSessionPath, getStoreDir, loadSession,
 } from './session-store.js';
 
 const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -205,12 +206,15 @@ function isStale(holder) {
   return false;
 }
 
-/** `<legacyDir>\0<storeDir>` pairs whose live locks this process already carried over. */
+/** `<storeDir>\0<pluginRoot>` pairs whose live locks this process already carried over. */
 const adoptedLegacyStoreLocks = new Set();
 
 /**
- * Carry the LIVE locks of the pre-D2 store into the current one (see the module
- * header). Called before every lock query that asks "does anyone hold this?".
+ * Carry the LIVE locks of the pre-D2 stores into the current one (see the module
+ * header) — from every directory `getLegacyStoreDirs()` names, not only the
+ * plugin root in force: the old process that still holds a feature is the one
+ * running from an OLDER version directory. Called before every lock query that
+ * asks "does anyone hold this?".
  *
  * Order matters and is deliberate: `getStoreDir()` runs first, because its first
  * call per process is what copies the legacy SESSIONS across, and `isStale`
@@ -230,27 +234,38 @@ const adoptedLegacyStoreLocks = new Set();
 function adoptLegacyStoreLocks() {
   try {
     const storeDir = getStoreDir();
-    const legacyDir = getLegacyStoreDir();
-    if (!legacyDir) return;
-    const key = `${legacyDir}\u0000${storeDir}`;
+    const key = `${storeDir}\u0000${getPluginRoot()}`;
     if (adoptedLegacyStoreLocks.has(key)) return;
     adoptedLegacyStoreLocks.add(key);
-
-    const from = path.join(legacyDir, 'locks');
-    if (!existsSync(from)) return;
-    for (const name of readdirSync(from)) {
-      if (!name.endsWith('.lock')) continue;
-      const src = path.join(from, name);
-      const holder = readLockFile(src);
-      if (!holder || isStale(holder)) continue;
-      try {
-        atomicCreateTextSync(path.join(storeDir, 'locks', name), readFileSync(src, 'utf-8'));
-      } catch {
-        /* one lock that cannot be carried over must not stop the others */
-      }
-    }
+    for (const legacyDir of getLegacyStoreDirs()) adoptLocksFrom(legacyDir, storeDir);
   } catch {
     /* best-effort transition aid */
+  }
+}
+
+/**
+ * Carry the live locks of ONE legacy directory into the store. The first
+ * directory to offer a file name wins (the create is exclusive); a stale or
+ * unreadable lock is skipped, so a live one of the same name further down the
+ * list still gets its turn.
+ *
+ * @param {string} legacyDir
+ * @param {string} storeDir
+ * @returns {void}
+ */
+function adoptLocksFrom(legacyDir, storeDir) {
+  const from = path.join(legacyDir, 'locks');
+  if (!existsSync(from)) return;
+  for (const name of readdirSync(from)) {
+    if (!name.endsWith('.lock')) continue;
+    const src = path.join(from, name);
+    const holder = readLockFile(src);
+    if (!holder || isStale(holder)) continue;
+    try {
+      atomicCreateTextSync(path.join(storeDir, 'locks', name), readFileSync(src, 'utf-8'));
+    } catch {
+      /* one lock that cannot be carried over must not stop the others */
+    }
   }
 }
 

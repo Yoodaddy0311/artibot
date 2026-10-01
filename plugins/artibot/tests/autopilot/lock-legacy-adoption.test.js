@@ -287,3 +287,38 @@ describe('what adoption must not do', () => {
     expect(acquireLock('feat-none', 'ap-first').ok).toBe(true);
   });
 });
+
+describe('a lock left in an OLDER version directory (review of 6b410964, SHOULD 2)', () => {
+  // The old process that still holds a feature is the one running from an older
+  // cache directory, not from the directory the new build runs in — so the live
+  // locks worth honouring are exactly the ones under the OTHER versions.
+  const olderRoot = () => path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot', '4.69.0');
+
+  function seedOlder(sessionId, phase, lockName, holder) {
+    const dir = path.join(olderRoot(), 'runtime', 'autopilot');
+    mkdirSync(path.join(dir, 'locks'), { recursive: true });
+    writeFileSync(path.join(dir, `${sessionId}.json`), JSON.stringify({ sessionId, phase }), 'utf-8');
+    writeFileSync(
+      path.join(dir, 'locks', lockName),
+      JSON.stringify({ pid: process.pid, acquiredAt: Date.now(), ...holder }),
+      'utf-8',
+    );
+  }
+
+  it('is honoured when its holder is alive', () => {
+    seedOlder('ap-older-run', 'EXECUTE', 'feat-older.lock', { sessionId: 'ap-older-run', featureKey: 'feat-older' });
+
+    expect(isLocked('feat-older').locked).toBe(true);
+    expect(acquireLock('feat-older', 'ap-new-run').ok).toBe(false);
+    expect(readFileSync(path.join(newStoreLocks(), 'feat-older.lock'), 'utf-8')).toContain('ap-older-run');
+  });
+
+  it('is dropped, like any stale lock, when its holder is dead', () => {
+    seedOlder('ap-older-dead', 'EXECUTE', 'feat-older-dead.lock', {
+      sessionId: 'ap-older-dead', featureKey: 'feat-older-dead', pid: DEAD_PID,
+    });
+
+    expect(isLocked('feat-older-dead').locked).toBe(false);
+    expect(existsSync(path.join(newStoreLocks(), 'feat-older-dead.lock'))).toBe(false);
+  });
+});

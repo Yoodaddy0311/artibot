@@ -4,17 +4,19 @@
  *
  * Before D2 the store was `<pluginRoot>/runtime/autopilot`; it is now under the
  * user-state dir (see `session-store.js#getStoreDir`). Sessions already sitting
- * at the old place must not be orphaned by the move, so the first use of the new
+ * at the old places must not be orphaned by the move, so the first use of the new
  * store adopts them. This module is the copy; `session-store.js` decides WHEN
- * (first `getStoreDir()` per process, default store only) and owns every path, so
- * nothing here spells the store location — it is handed `dir` and `legacy`.
+ * (first `getStoreDir()` per process, default store only) and WHERE FROM (every
+ * place an older build could have left sessions, in precedence order — see
+ * `getLegacyStoreDirs`), and owns every path, so nothing here spells the store
+ * location: it is handed `dir` and a list of source directories.
  *
  * WHY COPY, NOT READ-THROUGH. A read fallback (`listSessions`/`loadSession` also
- * consulting the legacy directory) would have to be repeated in every consumer
+ * consulting the legacy directories) would have to be repeated in every consumer
  * that derives a path from `getStoreDir()` — telemetry, locks, memory, worktrees —
  * because each builds its own path, and an events stream split across two
  * directories is worse than either one. It also leaves the data inside the
- * version directory that `clearCache` deletes, which is the loss being fixed.
+ * version directories that `clearCache` deletes, which is the loss being fixed.
  * Copying moves the data once and every consumer then finds it where it looks.
  *
  * WHAT IS ADOPTED: each `<id>.json` session with its `<id>.events.ndjson` and
@@ -26,15 +28,32 @@
  * staleness, pid liveness, the holder's session — so `lock.js#adoptLegacyStoreLocks`
  * applies that rule to the live ones and never copies a stale one).
  *
- * COPY-IF-ABSENT, AND ONCE PER ID. The copy is an exclusive create, so a session
- * the store already has is never overwritten. A ledger beside the store records
- * every id it has dealt with — copied OR found already present — so a session
- * the user later deletes (or the pruner removes) does not come back from the
- * legacy directory that still holds it. That matters beyond tidiness: a cache
- * carried forward by the host hands the next version a snapshot of ids already
- * migrated, and the dev checkout's legacy directory never goes away.
+ * SEVERAL SOURCES, ONE COPY PER ID. The same session id can sit in several source
+ * directories — the host copies a previous version's runtime forward, so each
+ * version holds a snapshot of the ones before it. The copy adopted is the
+ * FRESHEST (latest mtime; a tie goes to the earlier source in precedence order,
+ * which is the newer directory): a build still running in an older directory
+ * keeps writing there after the snapshot was taken, so the older directory can
+ * hold the newer state. Side files come from the same source as the record.
  *
- * NON-DESTRUCTIVE: nothing is written to, moved from, or deleted in the legacy
+ * COPY-IF-ABSENT, AND ONCE PER ID. The copy is an exclusive create, so a session
+ * the store already has is never overwritten. Every id dealt with — copied OR
+ * found already present — gets a MARKER FILE beside the store, so a session the
+ * user later deletes (or the pruner removes) does not come back from the legacy
+ * directories that still hold it. That matters beyond tidiness: a cache carried
+ * forward by the host hands the next version a snapshot of ids already migrated.
+ *
+ * WHY MARKER FILES AND NOT ONE LEDGER FILE. The first version kept a single JSON
+ * ledger, read at the start of a pass and rewritten at its end. Two plugin
+ * versions adopting at once each wrote the ledger they had built and the last
+ * writer won: the reviewer measured 40 ids lost across 15 of 15 concurrent runs
+ * and a deleted session reappearing in 3 of 3. A marker is created exclusively,
+ * one file per id, so there is no shared file to overwrite and no
+ * read-modify-write to interleave. The existence of the marker IS the record, and
+ * it is checked at the moment each id is handled rather than once per pass, so a
+ * marker another process wrote mid-pass is honoured.
+ *
+ * NON-DESTRUCTIVE: nothing is written to, moved from, or deleted in a legacy
  * directory. A legacy session an older build is still running keeps changing
  * there; the copy is a snapshot of it, not a live mirror. That is the cost of not
  * reaching into a directory this build does not own.
@@ -46,22 +65,25 @@ import path from 'node:path';
 import {
   existsSync, readdirSync, readFileSync, statSync, utimesSync,
 } from 'node:fs';
-import { atomicCreateTextSync, atomicWriteTextSync, readJsonFileSync } from '../core/file.js';
+import { atomicCreateTextSync } from '../core/file.js';
 import { sameDirPath } from '../core/platform.js';
 
 /**
- * Ledger of ids already dealt with. No `.json` suffix: every reader of the
- * store (`listSessions`, the census, the pruner) keys on it. Mirrored by
- * `scripts/ledger/recovery-journal-census.mjs` (it may not import this module)
- * and its paired test asserts the two names stay equal.
+ * The adoption ledger: a DIRECTORY beside the store holding one marker file per
+ * id dealt with (`session.<id>`, `memory.<file>`). Not a `.json` file and not a
+ * `.json`-suffixed anything: every reader of the store (`listSessions`, the
+ * census, the pruner) keys on that suffix, and its presence beside a store is how
+ * the census tells "this store has adopted" from "this store never has".
+ * Mirrored by `scripts/ledger/recovery-journal-census.mjs` (it may not import this
+ * module); its paired test asserts the two names stay equal.
  */
 export const LEGACY_LEDGER_NAME = 'legacy-migration.ledger';
 
 /**
  * @typedef {object} AdoptionReport
- * @property {'override'|'same-dir'|'no-legacy'|'nothing-to-adopt'|null} skipped
- *   why nothing was attempted, or null when the legacy directory was examined
- * @property {string} legacyDir
+ * @property {'override'|'no-legacy'|'nothing-to-adopt'|null} skipped
+ *   why nothing was attempted, or null when the sources were examined
+ * @property {string[]} legacyDirs the source directories offered to this pass
  * @property {string} storeDir
  * @property {string[]} sessions ids copied by THIS pass
  * @property {string[]} present ids the store already had (recorded, not copied)
@@ -69,62 +91,66 @@ export const LEGACY_LEDGER_NAME = 'legacy-migration.ledger';
  * @property {number} errors files that could not be dealt with (retried by the next pass)
  */
 
-/** `<storeDir>\0<legacyDir>` pairs already attempted by this process. */
+/** Reports of the passes this process has run, by the caller's key. */
 const attempts = new Map();
-
-/**
- * @param {string} dir
- * @param {string} legacy
- * @returns {string}
- */
-function attemptKey(dir, legacy) {
-  return `${dir}\u0000${legacy}`;
-}
 
 /**
  * A report for a pass that did nothing.
  *
  * @param {string} dir
- * @param {string} legacy
+ * @param {string[]} legacyDirs
  * @param {AdoptionReport['skipped']} skipped
  * @returns {AdoptionReport}
  */
-export function skippedReport(dir, legacy, skipped) {
-  return { skipped, legacyDir: legacy, storeDir: dir, sessions: [], present: [], memory: [], errors: 0 };
+export function skippedReport(dir, legacyDirs, skipped) {
+  return { skipped, legacyDirs, storeDir: dir, sessions: [], present: [], memory: [], errors: 0 };
 }
 
 /**
- * Run the adoption at most once per process per (store, legacy) pair. The pair
- * is claimed BEFORE the work starts, so a failure still counts as this
- * process's one attempt instead of being retried on every path computation.
+ * Run the adoption at most once per process per `key`. The key is claimed BEFORE
+ * the work starts, so a failure still counts as this process's one attempt
+ * instead of being retried on every path computation, and `getSources` — which
+ * reads directories — runs only when the pass actually does.
  *
+ * @param {string} key - What makes two calls "the same adoption" (store + plugin root).
  * @param {string} dir - The store being adopted INTO.
- * @param {string} legacy - The legacy directory being adopted FROM.
+ * @param {() => string[]} getSources - The directories to adopt FROM, in precedence order.
  * @returns {void}
  */
-export function adoptLegacyOnce(dir, legacy) {
-  const key = attemptKey(dir, legacy);
+export function adoptLegacyOnce(key, dir, getSources) {
   if (attempts.has(key)) return;
   attempts.set(key, null);
-  attempts.set(key, adopt(dir, legacy));
+  attempts.set(key, adopt(dir, safeSources(getSources)));
 }
 
 /**
- * Adopt now. `force` re-evaluates a legacy directory this process has already
- * looked at, which is how a session that appeared there later gets picked up;
- * it does NOT bypass the ledger — an id dealt with once is never copied again.
+ * Adopt now. `force` re-evaluates sources this process has already looked at,
+ * which is how a session that appeared there later gets picked up; it does NOT
+ * bypass the markers — an id dealt with once is never copied again.
  *
+ * @param {string} key
  * @param {string} dir
- * @param {string} legacy
+ * @param {() => string[]} getSources
  * @param {{ force?: boolean }} [opts]
  * @returns {AdoptionReport}
  */
-export function adoptLegacy(dir, legacy, { force = false } = {}) {
-  const key = attemptKey(dir, legacy);
+export function adoptLegacy(key, dir, getSources, { force = false } = {}) {
   if (!force && attempts.get(key)) return attempts.get(key);
-  const report = adopt(dir, legacy);
+  const report = adopt(dir, safeSources(getSources));
   attempts.set(key, report);
   return report;
+}
+
+/**
+ * @param {() => string[]} getSources
+ * @returns {string[]} `[]` when enumerating the sources throws
+ */
+function safeSources(getSources) {
+  try {
+    return getSources();
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -132,25 +158,21 @@ export function adoptLegacy(dir, legacy, { force = false } = {}) {
  * usable store, and this runs inside a path resolver.
  *
  * @param {string} dir
- * @param {string} legacy
+ * @param {string[]} sources
  * @returns {AdoptionReport}
  */
-function adopt(dir, legacy) {
-  const report = skippedReport(dir, legacy, null);
+function adopt(dir, sources) {
+  const report = skippedReport(dir, sources, null);
   try {
-    if (sameDirPath(dir, legacy)) return { ...report, skipped: 'same-dir' };
-    if (!existsSync(legacy)) return { ...report, skipped: 'no-legacy' };
+    const live = sources.filter((source) => !sameDirPath(source, dir) && isDirectory(source));
+    if (live.length === 0) return { ...report, skipped: 'no-legacy' };
 
-    const { sidecars, ids } = indexLegacyDir(legacy);
-    const memoryNames = listFiles(path.join(legacy, 'memory'), '.jsonl');
-    if (ids.length === 0 && memoryNames.length === 0) return { ...report, skipped: 'nothing-to-adopt' };
+    const { sessions, memory } = gather(live);
+    if (sessions.size === 0 && memory.size === 0) return { ...report, skipped: 'nothing-to-adopt' };
 
-    const pass = {
-      dir, legacy, report, ledger: readLedger(dir), at: new Date().toISOString(), dirty: false,
-    };
-    for (const id of ids) adoptSession(pass, id, sidecars.get(id) ?? []);
-    for (const name of memoryNames) adoptMemoryFile(pass, name);
-    if (pass.dirty) writeLedger(pass);
+    const pass = { dir, report, at: new Date().toISOString() };
+    for (const [id, candidate] of sessions) adoptSession(pass, id, candidate);
+    for (const [name, candidate] of memory) adoptMemoryFile(pass, name, candidate);
   } catch {
     report.errors += 1;
   }
@@ -158,26 +180,102 @@ function adopt(dir, legacy) {
 }
 
 /**
- * @typedef {object} Pass
- * @property {string} dir - The store being adopted INTO.
- * @property {string} legacy - The legacy directory being adopted FROM.
- * @property {AdoptionReport} report - Filled in as the pass goes.
- * @property {{ version: number, entries: Record<string, object> }} ledger
- * @property {string} at - One timestamp for every entry this pass records.
- * @property {boolean} dirty - Whether the ledger gained an entry.
+ * @param {string} dir
+ * @returns {boolean} true when `dir` exists and is a directory
+ */
+export function isDirectory(dir) {
+  try {
+    return statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} file
+ * @returns {number} the file's mtime in ms, or 0 when it cannot be read
+ */
+function mtimeOf(file) {
+  try {
+    return statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * @typedef {object} Candidate
+ * @property {string} legacy - The source directory this copy would come from.
+ * @property {number} mtimeMs - That copy's record (or file) mtime.
+ * @property {string[]} [sidecars] - Its side files, for a session.
  */
 
 /**
- * Record that `key` has been dealt with, so no later pass offers it again.
+ * Everything the sources offer, one candidate per session id and per memory
+ * file: the FRESHEST copy, and on a tie the one from the earlier source.
+ *
+ * @param {string[]} sources in precedence order
+ * @returns {{ sessions: Map<string, Candidate>, memory: Map<string, Candidate> }}
+ */
+function gather(sources) {
+  const sessions = new Map();
+  const memory = new Map();
+  const offer = (into, key, candidate) => {
+    const held = into.get(key);
+    if (!held || candidate.mtimeMs > held.mtimeMs) into.set(key, candidate);
+  };
+  for (const legacy of sources) {
+    const { ids, sidecars } = indexLegacyDir(legacy);
+    for (const id of ids) {
+      offer(sessions, id, {
+        legacy, mtimeMs: mtimeOf(path.join(legacy, `${id}.json`)), sidecars: sidecars.get(id) ?? [],
+      });
+    }
+    for (const name of listFiles(path.join(legacy, 'memory'), '.jsonl')) {
+      offer(memory, name, { legacy, mtimeMs: mtimeOf(path.join(legacy, 'memory', name)) });
+    }
+  }
+  return { sessions, memory };
+}
+
+/**
+ * @typedef {object} Pass
+ * @property {string} dir - The store being adopted INTO.
+ * @property {AdoptionReport} report - Filled in as the pass goes.
+ * @property {string} at - One timestamp for every marker this pass writes.
+ */
+
+/**
+ * The marker for one id: a file inside the ledger directory.
+ *
+ * @param {string} dir
+ * @param {'session'|'memory'} kind
+ * @param {string} name
+ * @returns {string}
+ */
+function markerFile(dir, kind, name) {
+  return path.join(dir, LEGACY_LEDGER_NAME, `${kind}.${name}`);
+}
+
+/**
+ * Record that `name` has been dealt with, so no later pass offers it again. An
+ * exclusive create: if another process recorded it first, that is the same fact
+ * and nothing is overwritten. A failure is counted, not thrown — the copy
+ * already stands, and the next pass re-derives "present" from it.
  *
  * @param {Pass} pass
- * @param {string} key
+ * @param {'session'|'memory'} kind
+ * @param {string} name
  * @param {'copied'|'present'} how
+ * @param {string} from
  * @returns {void}
  */
-function record(pass, key, how) {
-  pass.ledger.entries[key] = { at: pass.at, from: pass.legacy, how };
-  pass.dirty = true;
+function record(pass, kind, name, how, from) {
+  try {
+    atomicCreateTextSync(markerFile(pass.dir, kind, name), `${JSON.stringify({ at: pass.at, from, how })}\n`);
+  } catch {
+    pass.report.errors += 1;
+  }
 }
 
 /**
@@ -185,28 +283,31 @@ function record(pass, key, how) {
  *
  * @param {Pass} pass
  * @param {string} id
- * @param {string[]} sidecarNames - The `<id>` events / backup files in the legacy directory.
+ * @param {Candidate} candidate
  * @returns {void}
  */
-function adoptSession(pass, id, sidecarNames) {
-  const { dir, legacy, report, ledger } = pass;
-  if (Object.hasOwn(ledger.entries, id)) return;
+function adoptSession(pass, id, candidate) {
+  const { dir, report } = pass;
+  const { legacy, sidecars } = candidate;
+  // Checked NOW, not once per pass: a marker another process wrote while this
+  // one was busy with earlier ids must still be honoured.
+  if (existsSync(markerFile(dir, 'session', id))) return;
   try {
     // A session the store already has owns its side files too; the legacy
     // events of the same id are not merged into it.
     if (existsSync(path.join(dir, `${id}.json`))) {
       report.present.push(id);
-      record(pass, id, 'present');
+      record(pass, 'session', id, 'present', legacy);
       return;
     }
     // Side files first and the session record LAST: a reader that can see
     // `<id>.json` then also finds the events that belong to it.
-    for (const name of sidecarNames) copyTextIfAbsent(path.join(legacy, name), path.join(dir, name));
+    for (const name of sidecars) copyTextIfAbsent(path.join(legacy, name), path.join(dir, name));
     const copied = copyTextIfAbsent(path.join(legacy, `${id}.json`), path.join(dir, `${id}.json`));
     (copied ? report.sessions : report.present).push(id);
-    record(pass, id, copied ? 'copied' : 'present');
+    record(pass, 'session', id, copied ? 'copied' : 'present', legacy);
   } catch {
-    report.errors += 1; // not ledgered, so the next pass retries it
+    report.errors += 1; // not recorded, so the next pass retries it
   }
 }
 
@@ -215,31 +316,19 @@ function adoptSession(pass, id, sidecarNames) {
  *
  * @param {Pass} pass
  * @param {string} name - File name under `memory/`.
+ * @param {Candidate} candidate
  * @returns {void}
  */
-function adoptMemoryFile(pass, name) {
-  const { dir, legacy, report, ledger } = pass;
-  const key = `memory/${name}`;
-  if (Object.hasOwn(ledger.entries, key)) return;
+function adoptMemoryFile(pass, name, candidate) {
+  const { dir, report } = pass;
+  if (existsSync(markerFile(dir, 'memory', name))) return;
   try {
-    const copied = copyTextIfAbsent(path.join(legacy, 'memory', name), path.join(dir, 'memory', name));
+    const copied = copyTextIfAbsent(
+      path.join(candidate.legacy, 'memory', name),
+      path.join(dir, 'memory', name),
+    );
     if (copied) report.memory.push(name);
-    record(pass, key, copied ? 'copied' : 'present');
-  } catch {
-    report.errors += 1;
-  }
-}
-
-/**
- * Persist the ledger. A failure is counted, not thrown: the copies already
- * stand, and the next pass re-derives "present" from them.
- *
- * @param {Pass} pass
- * @returns {void}
- */
-function writeLedger({ dir, ledger, report }) {
-  try {
-    atomicWriteTextSync(path.join(dir, LEGACY_LEDGER_NAME), `${JSON.stringify(ledger, null, 2)}\n`);
+    record(pass, 'memory', name, copied ? 'copied' : 'present', candidate.legacy);
   } catch {
     report.errors += 1;
   }
@@ -320,19 +409,4 @@ function copyTextIfAbsent(src, dst) {
     /* an ordering hint only — the copy itself stands */
   }
   return true;
-}
-
-/**
- * @param {string} dir
- * @returns {{ version: number, entries: Record<string, object> }} never throws;
- *   an absent or corrupt ledger reads as empty, which can only re-offer an id
- *   for copying (still copy-if-absent), never overwrite one.
- */
-function readLedger(dir) {
-  const parsed = readJsonFileSync(path.join(dir, LEGACY_LEDGER_NAME), null);
-  const entries = Object.create(null);
-  if (parsed && typeof parsed === 'object' && parsed.entries && typeof parsed.entries === 'object') {
-    Object.assign(entries, parsed.entries);
-  }
-  return { version: 1, entries };
 }

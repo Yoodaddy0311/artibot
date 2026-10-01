@@ -289,7 +289,7 @@ describe('legacy store migration — copy once, copy-if-absent', () => {
     expect(report.skipped).toBe('override');
     // A sandbox is hermetic: real sessions must never appear in it.
     expect(existsSync(sandbox)).toBe(false);
-    expect(store.getLegacyStoreDir()).toBeNull();
+    expect(store.getLegacyStoreDirs()).toEqual([]);
   });
 
   it('reports why it did nothing when there is nothing to adopt', () => {
@@ -308,11 +308,12 @@ describe('legacy store migration — copy once, copy-if-absent', () => {
     expect(report.errors).toBe(0);
   });
 
-  it('never throws, and still copies, when the ledger cannot be written', () => {
+  it('never throws, and still copies, when a marker cannot be written', () => {
     writeLegacySession(rootA, 'ap-ledger-blocked');
-    // A directory squatting on the ledger path makes the final write fail on
-    // every platform, and makes the read fall back to an empty ledger.
-    mkdirSync(path.join(expectedStore(), 'legacy-migration.ledger'), { recursive: true });
+    // The ledger is a DIRECTORY of markers; a plain FILE squatting on its path
+    // makes every marker write fail on every platform.
+    mkdirSync(expectedStore(), { recursive: true });
+    writeFileSync(path.join(expectedStore(), 'legacy-migration.ledger'), 'in the way', 'utf-8');
 
     let report;
     expect(() => { report = store.migrateLegacyStore({ force: true }); }).not.toThrow();
@@ -320,6 +321,23 @@ describe('legacy store migration — copy once, copy-if-absent', () => {
     expect(report.sessions).toEqual(['ap-ledger-blocked']);
     expect(report.errors).toBeGreaterThanOrEqual(1);
     expect(store.loadSession('ap-ledger-blocked')?.task).toBe('task-ap-ledger-blocked');
+  });
+
+  it('keeps one marker file per adopted id, each created exclusively (no shared ledger to lose)', () => {
+    writeLegacySession(rootA, 'ap-marked-1');
+    writeLegacySession(rootA, 'ap-marked-2');
+    mkdirSync(path.join(legacyStore(rootA), 'memory'), { recursive: true });
+    writeFileSync(path.join(legacyStore(rootA), 'memory', 'feat.jsonl'), '{"lesson":"x"}\n', 'utf-8');
+
+    store.migrateLegacyStore();
+
+    const markers = readdirSync(path.join(expectedStore(), 'legacy-migration.ledger')).sort();
+    expect(markers).toEqual(['memory.feat.jsonl', 'session.ap-marked-1', 'session.ap-marked-2']);
+    // A second pass finds every marker and writes none: the directory is unchanged.
+    const before = markers.map((name) => statSync(path.join(expectedStore(), 'legacy-migration.ledger', name)).mtimeMs);
+    store.migrateLegacyStore({ force: true });
+    const after = markers.map((name) => statSync(path.join(expectedStore(), 'legacy-migration.ledger', name)).mtimeMs);
+    expect(after).toEqual(before);
   });
 
   it('never makes the migration ledger look like a session', () => {
@@ -330,5 +348,184 @@ describe('legacy store migration — copy once, copy-if-absent', () => {
     expect(names.some((n) => n.includes('ledger'))).toBe(true);
     // listSessions / the census / the pruner all key on the `.json` suffix.
     expect(store.listSessions()).toEqual(['ap-ledgered']);
+  });
+});
+
+describe('every place an older build left sessions (review of 6b410964, SHOULD 2)', () => {
+  // The first version adopted only what sat under the plugin root IN FORCE, so a
+  // session that existed only in an older version directory — or in the
+  // marketplace mirror the host copies from — was never adopted. The sources are
+  // now the running root, every cached version (newest first) and the mirror.
+  const cacheDir = (version) => path.join(home, '.claude', 'plugins', 'cache', 'artibot', 'artibot', version);
+  const cloneDir = () => path.join(home, '.claude', 'plugins', 'marketplaces', 'artibot');
+  const mirrorRoot = () => path.join(cloneDir(), 'plugins', 'artibot');
+
+  /** A version directory shaped like the host's cache entry, holding `ids` as legacy sessions. */
+  function versionDir(version, ids = []) {
+    const root = makePluginRoot(cacheDir(version));
+    for (const id of ids) writeLegacySession(root, id, { from: version });
+    return root;
+  }
+
+  /** The marketplace mirror: a git clone (so it has a `.git`) with the `plugins/artibot` layout. */
+  function mirror(ids = []) {
+    mkdirSync(path.join(cloneDir(), '.git'), { recursive: true });
+    const root = makePluginRoot(mirrorRoot());
+    for (const id of ids) writeLegacySession(root, id, { from: 'mirror' });
+    return root;
+  }
+
+  /** A developer checkout: `<repo>/plugins/artibot` with `<repo>/.git`. */
+  function devCheckout(name, { gitIsAFile = false } = {}) {
+    const repo = path.join(tmp, name);
+    mkdirSync(repo, { recursive: true });
+    if (gitIsAFile) writeFileSync(path.join(repo, '.git'), 'gitdir: /elsewhere/.git/worktrees/x', 'utf-8');
+    else mkdirSync(path.join(repo, '.git'), { recursive: true });
+    return makePluginRoot(path.join(repo, 'plugins', 'artibot'));
+  }
+
+  it('adopts a session that exists only in an OLDER version directory', () => {
+    const running = versionDir('4.71.0');
+    versionDir('4.68.0', ['ap-only-in-4-68']);
+    useRoot(running);
+
+    expect(store.listSessions()).toEqual(['ap-only-in-4-68']);
+    expect(store.loadSession('ap-only-in-4-68')?.from).toBe('4.68.0');
+  });
+
+  it('adopts from every cached version, not only the one that is running', () => {
+    versionDir('4.71.0', ['ap-in-running']);
+    versionDir('4.70.0', ['ap-in-470']);
+    versionDir('4.69.0', ['ap-in-469']);
+    useRoot(cacheDir('4.71.0'));
+
+    const report = store.migrateLegacyStore();
+
+    expect(report.sessions.sort()).toEqual(['ap-in-469', 'ap-in-470', 'ap-in-running']);
+  });
+
+  it('adopts from the marketplace mirror, which is a git clone but NOT a developer checkout', () => {
+    // The mirror has a `.git` and the `plugins/artibot` layout — exactly what a
+    // developer checkout looks like — yet it is where real sessions were measured
+    // (2026-09-30: all four of the owner's, with their `lockPath` pointing there).
+    mirror(['ap-in-mirror']);
+    useRoot(versionDir('4.71.0'));
+
+    expect(store.migrateLegacyStore().sessions).toEqual(['ap-in-mirror']);
+  });
+
+  it('adopts the mirror when IT is the running root', () => {
+    useRoot(mirror(['ap-running-from-mirror']));
+
+    expect(store.migrateLegacyStore().sessions).toEqual(['ap-running-from-mirror']);
+  });
+
+  it('prefers the FRESHEST copy when several directories hold the same session', () => {
+    // A running older build keeps writing in its own directory after the host
+    // copied a snapshot forward, so the older directory can hold the newer state.
+    const newer = versionDir('4.70.0');
+    const older = versionDir('4.69.0');
+    const stale = writeLegacySession(newer, 'ap-dup', { from: '4.70.0-stale-snapshot' });
+    const fresh = writeLegacySession(older, 'ap-dup', { from: '4.69.0-still-running' });
+    utimesSync(stale, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-01T00:00:00Z'));
+    utimesSync(fresh, new Date('2026-09-20T00:00:00Z'), new Date('2026-09-20T00:00:00Z'));
+    useRoot(versionDir('4.71.0'));
+
+    store.migrateLegacyStore();
+
+    expect(store.loadSession('ap-dup')?.from).toBe('4.69.0-still-running');
+  });
+
+  it('takes the newer DIRECTORY on a tie, and never adopts one id twice', () => {
+    const t = new Date('2026-09-10T00:00:00Z');
+    const a = writeLegacySession(versionDir('4.70.0'), 'ap-tie', { from: '4.70.0' });
+    const b = writeLegacySession(versionDir('4.69.0'), 'ap-tie', { from: '4.69.0' });
+    utimesSync(a, t, t);
+    utimesSync(b, t, t);
+    useRoot(versionDir('4.71.0'));
+
+    const report = store.migrateLegacyStore();
+
+    expect(store.loadSession('ap-tie')?.from).toBe('4.70.0');
+    expect(report.sessions).toEqual(['ap-tie']);
+  });
+
+  it('does NOT adopt from a developer checkout: it holds sessions the test suite wrote', () => {
+    const dev = devCheckout('dev-repo');
+    writeLegacySession(dev, 'ap-test-origin');
+    useRoot(dev);
+
+    expect(store.getLegacyStoreDirs()).not.toContain(legacyStore(dev));
+    expect(store.migrateLegacyStore().sessions).toEqual([]);
+    expect(store.listSessions()).toEqual([]);
+  });
+
+  it('treats a LINKED worktree (its `.git` is a file) as a developer checkout too', () => {
+    const dev = devCheckout('dev-worktree', { gitIsAFile: true });
+    writeLegacySession(dev, 'ap-test-origin-wt');
+    useRoot(dev);
+
+    expect(store.migrateLegacyStore().sessions).toEqual([]);
+  });
+
+  it('skips only the developer checkout itself — installed versions are still adopted from it', () => {
+    versionDir('4.70.0', ['ap-installed']);
+    const dev = devCheckout('dev-repo-2');
+    writeLegacySession(dev, 'ap-test-origin-2');
+    useRoot(dev);
+
+    expect(store.migrateLegacyStore().sessions).toEqual(['ap-installed']);
+  });
+
+  it('does not mistake a plugin root that merely sits under a repository for a checkout', () => {
+    // `<repo>/plugins/artibot` is a developer checkout only while `<repo>/.git` exists.
+    const repo = path.join(tmp, 'just-a-folder');
+    const root = makePluginRoot(path.join(repo, 'plugins', 'artibot'));
+    writeLegacySession(root, 'ap-not-a-checkout');
+    useRoot(root);
+
+    expect(store.migrateLegacyStore().sessions).toEqual(['ap-not-a-checkout']);
+  });
+
+  it('does not scan the installed versions while ARTIBOT_STATE_DIR redirects the state dir', () => {
+    // A redirected state dir is a sandbox (the test suite sets one for every
+    // worker): the user's real installed versions are not its business.
+    versionDir('4.70.0', ['ap-installed-not-mine']);
+    const running = versionDir('4.71.0', ['ap-in-running-root']);
+    useRoot(running);
+    process.env.ARTIBOT_STATE_DIR = path.join(tmp, 'sandbox-state');
+    process.env.ARTIBOT_STATE_DIR_HOME = home;
+
+    expect(store.migrateLegacyStore().sessions).toEqual(['ap-in-running-root']);
+  });
+
+  it('lists the sources in precedence order: running root, versions newest first, mirror', () => {
+    // 4.10.0 is NEWER than 4.9.0; a string sort gets that backwards.
+    const running = versionDir('4.70.0', ['ap-r']);
+    versionDir('4.9.0', ['ap-1']);
+    versionDir('4.10.0', ['ap-2']);
+    versionDir('4.71.0', ['ap-3']);
+    mkdirSync(path.join(cacheDir('latest'), 'runtime', 'autopilot'), { recursive: true });
+    writeFileSync(path.join(path.dirname(cacheDir('4.70.0')), 'README.txt'), 'not a directory', 'utf-8');
+    mirror(['ap-m']);
+    useRoot(running);
+
+    expect(store.getLegacyStoreDirs().map((d) => path.relative(home, d))).toEqual([
+      path.join('.claude', 'plugins', 'cache', 'artibot', 'artibot', '4.70.0', 'runtime', 'autopilot'),
+      path.join('.claude', 'plugins', 'cache', 'artibot', 'artibot', '4.71.0', 'runtime', 'autopilot'),
+      path.join('.claude', 'plugins', 'cache', 'artibot', 'artibot', '4.10.0', 'runtime', 'autopilot'),
+      path.join('.claude', 'plugins', 'cache', 'artibot', 'artibot', '4.9.0', 'runtime', 'autopilot'),
+      path.join('.claude', 'plugins', 'cache', 'artibot', 'artibot', 'latest', 'runtime', 'autopilot'),
+      path.join('.claude', 'plugins', 'marketplaces', 'artibot', 'plugins', 'artibot', 'runtime', 'autopilot'),
+    ]);
+  });
+
+  it('lists only directories that exist, and never the store itself', () => {
+    const running = versionDir('4.71.0');
+    mkdirSync(cacheDir('4.70.0'), { recursive: true }); // a version with no runtime/autopilot at all
+    useRoot(running);
+
+    expect(store.getLegacyStoreDirs()).toEqual([]);
+    expect(store.migrateLegacyStore().skipped).toBe('no-legacy');
   });
 });
