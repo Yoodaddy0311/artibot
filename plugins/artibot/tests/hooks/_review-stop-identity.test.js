@@ -407,3 +407,143 @@ describe('isReviewerStop - host meta file', () => {
     expect(isReviewerStop('review-f1', identityOf, ctxWith(transcript))).toBe(false);
   });
 });
+
+/**
+ * THE NAME JOIN MUST NOT FAIL OPEN. The opus review of 0390e273 built four ledgers in
+ * which a BUILDER was recognised as a reviewer (A-D below; E-I are its controls). Every one
+ * of them reached the name join with a spawn that had no usable receipt of its own, and the
+ * join then took a same-name receipt that was not this spawn's: a stale one (A), one that
+ * another agent had already consumed (A2), one a FIFO bind had stepped past (B), one the
+ * spawn's own empty-typed receipt had stepped past (C), one written after START (D).
+ *
+ * Fixtures keep the reviewer's timings: T0 = 10:00:00Z, a stale receipt at T0 bound at T0+100 ms,
+ * the current spawn STARTing an hour later.
+ */
+describe('isReviewerStop - adversarial ledgers: the name join cannot be steered to a receipt that is not this spawn\'s', () => {
+  const T0 = Date.parse('2026-09-30T10:00:00.000Z');
+  const HOUR = 3_600_000;
+  const MIN = 60_000;
+  const iso = (ms) => new Date(ms).toISOString();
+  const sel = (ms, epoch, name, type, session = SID) => selectedRow({ epoch, name, type, session, ts: iso(ms) });
+  const bound = (ms, agentId, epoch, confidence, subagentType) => boundRow({
+    agentId, epoch, name: 'whoever', subagentType: subagentType ?? undefined, confidence, ts: iso(ms),
+  });
+  /** `hook.fired`-shaped rows that merely MENTION the agent id (NIT-1: they are not route rows). */
+  const mentions = (ms, count, agentId) => Array.from({ length: count }, (_, i) => ({
+    v: 1, ts: iso(ms + i), event: 'hook.fired', session_id: SID, source: 'hook', pid: 2, seq: 0,
+    mission_id: 'M-20260930-Ssessstop', data: { slot: 'PostToolUse', i, agent_id: agentId }, action_id: `toolu_m${i}`,
+  }));
+  /** The stop of agent-new, named rv-1, registered at `startMs`. */
+  const stopOf = (startMs, name = 'rv-1') => stop({
+    agentId: 'agent-new', tracked: { agentType: name, startedAt: iso(startMs) },
+  });
+  const verdict = (rows, startMs, name = 'rv-1') => {
+    writeLedger(rows);
+    return isReviewerStop(name, identityOf, stopOf(startMs, name));
+  };
+  const STALE = [
+    sel(T0, 'toolu_old', 'rv-1', 'artibot:code-reviewer'),
+    bound(T0 + 100, 'agent-old', 'toolu_old', 'exact', 'artibot:code-reviewer'),
+  ];
+
+  it('A: a stale same-name reviewer receipt (1 h old, bound to another agent) is not a builder\'s own', () => {
+    expect(verdict([...STALE, ...mentions(T0 + 1000, 50, 'agent-old')], T0 + HOUR)).toBe(false);
+  });
+
+  it('A2: nor is one INSIDE the window that another agent_id has already consumed', () => {
+    const start = T0 + 5 * MIN;
+    expect(verdict([...STALE], start)).toBe(false);
+    // The same receipt with NO binder is this spawn's candidate: the exclusion is what says no.
+    expect(verdict([STALE[0]], start)).toBe(true);
+  });
+
+  it('A3: nor is an UNBOUND one that is older than the window (61 minutes)', () => {
+    expect(verdict([STALE[0]], T0 + 61 * MIN)).toBe(false);
+  });
+
+  it('W: the window is exactly 10 minutes before START, inclusive, and START itself is the upper bound', () => {
+    const start = T0 + 10 * MIN;
+    expect(verdict([sel(T0, 'toolu_w', 'rv-1', 'artibot:code-reviewer')], start)).toBe(true);
+    expect(verdict([sel(T0 - 1, 'toolu_w', 'rv-1', 'artibot:code-reviewer')], start)).toBe(false);
+  });
+
+  it('B: a FIFO bind to someone else\'s frontend receipt does not fall through to the name join', () => {
+    expect(verdict([
+      ...STALE,
+      sel(T0 + HOUR - 1000, 'toolu_other', 'other', 'artibot:frontend-developer'),
+      bound(T0 + HOUR - 100, 'agent-new', 'toolu_other', 'fifo', 'artibot:frontend-developer'),
+    ], T0 + HOUR)).toBe(false);
+  });
+
+  it('B2: ...even when a FRESH unbound same-name reviewer receipt is there to fall through to', () => {
+    expect(verdict([
+      sel(T0 + HOUR - 30_000, 'toolu_fresh', 'rv-1', 'artibot:code-reviewer'),
+      sel(T0 + HOUR - 1000, 'toolu_other', 'other', 'artibot:frontend-developer'),
+      bound(T0 + HOUR - 100, 'agent-new', 'toolu_other', 'fifo', 'artibot:frontend-developer'),
+    ], T0 + HOUR)).toBe(false);
+  });
+
+  it('B3: a trusted bind whose receipt is nowhere in the ledger is unresolved, not a reason to try the name', () => {
+    expect(verdict([
+      sel(T0 + HOUR - 30_000, 'toolu_fresh', 'rv-1', 'artibot:code-reviewer'),
+      bound(T0 + HOUR - 100, 'agent-new', 'toolu_gone', 'exact', null),
+    ], T0 + HOUR)).toBe(false);
+  });
+
+  it('C: the spawn\'s OWN receipt has an empty subagent_type: unresolved, not the stale reviewer', () => {
+    expect(verdict([
+      ...STALE,
+      sel(T0 + HOUR - 1000, 'toolu_new', 'rv-1', ''),
+      bound(T0 + HOUR - 100, 'agent-new', 'toolu_new', 'exact', null),
+    ], T0 + HOUR)).toBe(false);
+  });
+
+  it('C2: ...and the same holds in the name join: a newer eligible receipt with an empty type settles it as unresolved', () => {
+    expect(verdict([
+      sel(T0 + 2 * MIN, 'toolu_older', 'rv-1', 'artibot:code-reviewer'),
+      sel(T0 + 3 * MIN, 'toolu_newer', 'rv-1', ''),
+    ], T0 + 4 * MIN)).toBe(false);
+  });
+
+  it('D: a same-name receipt written AFTER START (500 ms) is not this agent\'s own', () => {
+    expect(verdict([sel(T0 + 500, 'toolu_later', 'rv-1', 'artibot:code-reviewer')], T0)).toBe(false);
+  });
+
+  it('D2: one written at exactly START is; one millisecond later is not (no slack)', () => {
+    expect(verdict([sel(T0, 'toolu_at', 'rv-1', 'artibot:code-reviewer')], T0)).toBe(true);
+    expect(verdict([sel(T0 + 1, 'toolu_at', 'rv-1', 'artibot:code-reviewer')], T0)).toBe(false);
+  });
+
+  it('E: 2 s after START is excluded (control)', () => {
+    expect(verdict([sel(T0 + 2000, 'toolu_later', 'rv-1', 'artibot:code-reviewer')], T0)).toBe(false);
+  });
+
+  it('F: an exact bind that says builder beats a stale reviewer receipt (control)', () => {
+    expect(verdict([
+      sel(T0, 'toolu_old', 'rv-1', 'artibot:code-reviewer'),
+      sel(T0 + HOUR - 1000, 'toolu_new', 'rv-1', 'artibot:backend-developer'),
+      bound(T0 + HOUR - 100, 'agent-new', 'toolu_new', 'exact', 'artibot:backend-developer'),
+    ], T0 + HOUR)).toBe(false);
+  });
+
+  it('G: a named reviewer with an exact bind IS recognised (positive control)', () => {
+    expect(verdict([
+      sel(T0, 'toolu_new', 'rv-1', 'artibot:code-reviewer'),
+      bound(T0 + 100, 'agent-new', 'toolu_new', 'exact', 'artibot:code-reviewer'),
+    ], T0 + 200)).toBe(true);
+  });
+
+  it('H: rows that only MENTION the agent id after the bind cannot starve the scan (liveness)', () => {
+    // The reviewer used 600 against the old budget of 512. The budget is 1,024 now, so the fixture is 1,500:
+    // counted, they would still spend it; not counted (they are not route rows), they cost nothing.
+    expect(verdict([
+      sel(T0, 'toolu_new', 'rv-1', 'artibot:code-reviewer'),
+      bound(T0 + 100, 'agent-new', 'toolu_new', 'exact', 'artibot:code-reviewer'),
+      ...mentions(T0 + 1000, 1500, 'agent-new'),
+    ], T0 + 200)).toBe(true);
+  });
+
+  it('I: a same-name reviewer receipt of ANOTHER session is excluded (control)', () => {
+    expect(verdict([sel(T0, 'toolu_x', 'rv-1', 'artibot:code-reviewer', 'sess-OTHER')], T0 + HOUR)).toBe(false);
+  });
+});

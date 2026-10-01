@@ -8,10 +8,10 @@ import {
   readStopMeta,
   resolveStopIdentity,
   STOP_META_MAX_BYTES,
+  STOP_NAME_JOIN_WINDOW_MS,
   STOP_SCAN_BYTES,
   STOP_SCAN_CHUNK_BYTES,
   STOP_SCAN_MAX_CANDIDATES,
-  STOP_START_SLACK_MS,
   subagentTypeFromReceiptKey,
 } from '../../lib/review/stop-identity.js';
 import { receiptKey } from '../../scripts/hooks/route-observe-pre.js';
@@ -28,6 +28,11 @@ import { receiptKey } from '../../scripts/hooks/route-observe-pre.js';
  * same resolver through `isReviewerStop`, and
  * `tests/hooks/subagent-handler-review-identity.test.js` through the real handler.
  *
+ * THE NAME JOIN IS THE FAIL-OPEN SURFACE and most of this file is about it: it may
+ * answer only when the whole window holds NO bind row for the agent, from a receipt
+ * written in the 10 minutes up to START, not bound to another agent, and the newest
+ * such receipt settles it (even with an empty type). See the module header.
+ *
  * WHAT GREEN HERE DOES NOT PROVE: that a live ledger line has the shape these
  * builders write (the E2E file uses the real writers for that), that the cap fits
  * every reviewer (it is sized from a measurement, 2026-09-30, n=276 reviewer-ish
@@ -38,6 +43,7 @@ import { receiptKey } from '../../scripts/hooks/route-observe-pre.js';
 const SID = 'sess-lib-stop-identity';
 const PROMPT = 'pid-lib';
 const HEX = '0123456789abcdef';
+const MIN = 60_000;
 
 let tmp;
 
@@ -68,6 +74,14 @@ const fillerRow = (i, note = '') => ({
   action_id: `toolu_filler${i}`,
 });
 
+/** Rows of OTHER events that merely MENTION an agent id: a hook payload, a usage receipt's run_id. */
+const mentionRows = (count, agentId) => Array.from({ length: count }, (_, i) => (i % 2 === 0
+  ? { ...fillerRow(i), data: { slot: 'PostToolUse', i, agent_id: agentId } }
+  : {
+    v: 1, ts: '2026-09-30T08:30:00.000Z', event: 'usage.receipt', session_id: SID, source: 'hook', pid: 3, seq: 0,
+    run_id: agentId, data: { i },
+  }));
+
 const fillerLines = (count, note = '') => Array.from({ length: count }, (_, i) => `${JSON.stringify(fillerRow(i, note))}\n`);
 const linesOf = (rows) => rows.map((r) => `${JSON.stringify(r)}\n`);
 const bytes = (lines) => lines.reduce((n, l) => n + Buffer.byteLength(l), 0);
@@ -96,9 +110,15 @@ describe('constants are the measured ones', () => {
     expect(STOP_SCAN_BYTES).toBeGreaterThan(3_385_771);
     expect(STOP_SCAN_BYTES).toBeGreaterThan(1_465_464);
     expect(STOP_SCAN_CHUNK_BYTES).toBe(256 * 1024);
-    expect(STOP_SCAN_MAX_CANDIDATES).toBe(512);
+    // Only route.bound / route.selected rows count; the name join parses every bind row in the window
+    // (~270 per 8 MiB on the live ledger), so 1,024 is 4x headroom.
+    expect(STOP_SCAN_MAX_CANDIDATES).toBe(1024);
     expect(STOP_META_MAX_BYTES).toBe(65536);
-    expect(STOP_START_SLACK_MS).toBe(1000);
+  });
+
+  it('takes the name-join window from the START-side binder, with no slack after START', () => {
+    // subagent-handler.js#RECEIPT_WINDOW_MS: a receipt older than 10 min was never a bind candidate.
+    expect(STOP_NAME_JOIN_WINDOW_MS).toBe(10 * 60 * 1000);
   });
 });
 
@@ -178,14 +198,15 @@ describe('readStopMeta', () => {
   });
 });
 
-describe('findSpawnSubagentType - the reverse tail scan', () => {
+describe('findSpawnSubagentType - the exact join (route.bound by agent id)', () => {
   const AGENT = `areview-f1-${HEX}`;
+  const STARTED = Date.parse('2026-09-30T08:00:03.000Z');
   const trail = ({ type = 'artibot:code-reviewer', name = 'review-f1', epoch = 'toolu_01AAAA', boundType = true } = {}) => [
     selectedRow({ epoch, name, type }),
     boundRow({ agentId: AGENT, epoch, name, subagentType: boundType ? type : undefined }),
   ];
   const find = (file, query = {}, opts = {}) => findSpawnSubagentType(
-    file, { agentId: AGENT, name: 'review-f1', sessionId: SID, ...query }, opts,
+    file, { agentId: AGENT, name: 'review-f1', sessionId: SID, startedAtMs: STARTED, ...query }, opts,
   );
 
   it('resolves through the bind row when it carries subagent_type', () => {
@@ -198,14 +219,6 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
     expect(r).toMatchObject({ type: 'artibot:code-reviewer', source: 'route.bound>route.selected' });
   });
 
-  it('falls back to the name join with no bind row, taking the MOST RECENT same-session row', () => {
-    const file = writeRaw(linesOf([
-      selectedRow({ epoch: 'toolu_01', name: 'review-f1', type: 'artibot:tdd-guide' }),
-      selectedRow({ epoch: 'toolu_02', name: 'review-f1', type: 'artibot:code-reviewer' }),
-    ]));
-    expect(find(file, { agentId: null })).toMatchObject({ type: 'artibot:code-reviewer', source: 'route.selected:worker' });
-  });
-
   it('the exact join wins over the name join even when they disagree', () => {
     const file = writeRaw(linesOf([
       ...trail({ type: 'artibot:code-reviewer', epoch: 'toolu_01' }),
@@ -214,63 +227,188 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
     expect(find(file)).toMatchObject({ type: 'artibot:code-reviewer', source: 'route.bound' });
   });
 
-  it('ignores a FIFO (or unlabelled) bind and lets the name join answer', () => {
+  it('a FIFO, unlabelled or unknown-confidence bind resolves NOTHING and closes the name join (case B)', () => {
     for (const confidence of ['fifo', null, 'guess']) {
       const file = writeRaw(linesOf([
         selectedRow({ epoch: 'toolu_01', name: 'other', type: 'artibot:code-reviewer' }),
         boundRow({ agentId: AGENT, epoch: 'toolu_01', subagentType: 'artibot:code-reviewer', confidence }),
         selectedRow({ epoch: 'toolu_02', name: 'review-f1', type: 'artibot:frontend-developer' }),
-      ]));
-      expect(find(file)).toMatchObject({ type: 'artibot:frontend-developer', source: 'route.selected:worker' });
+      ]), `fifo-${confidence}.jsonl`);
+      expect(find(file)).toMatchObject({ type: null, source: null });
     }
   });
 
-  it('bounds the name join by the agent\'s START: a later same-name receipt is skipped, an unbounded query takes it', () => {
+  it('a trusted bind whose receipt has an EMPTY type is unresolved, not a reason to try the name (case C)', () => {
     const file = writeRaw(linesOf([
       selectedRow({ epoch: 'toolu_old', name: 'review-f1', type: 'artibot:code-reviewer', ts: '2026-09-30T08:00:00.000Z' }),
-      selectedRow({ epoch: 'toolu_new', name: 'review-f1', type: 'artibot:frontend-developer', ts: '2026-09-30T09:00:00.000Z' }),
+      selectedRow({ epoch: 'toolu_new', name: 'review-f1', type: '', ts: '2026-09-30T08:00:01.000Z' }),
+      boundRow({ agentId: AGENT, epoch: 'toolu_new', subagentType: undefined }),
     ]));
-    const started = Date.parse('2026-09-30T08:00:03.000Z');
-    expect(find(file, { agentId: null, startedAtMs: started })).toMatchObject({ type: 'artibot:code-reviewer' });
-    expect(find(file, { agentId: null })).toMatchObject({ type: 'artibot:frontend-developer' });
+    expect(find(file)).toMatchObject({ type: null, source: null });
   });
 
-  it('allows the START slack for clock granularity and not a millisecond more', () => {
-    const started = Date.parse('2026-09-30T08:00:00.000Z');
-    const at = (offsetMs) => writeRaw(linesOf([selectedRow({
-      epoch: 'toolu_s', name: 'review-f1', type: 'artibot:code-reviewer', ts: new Date(started + offsetMs).toISOString(),
-    })]), `slack${offsetMs}.jsonl`);
-    expect(find(at(STOP_START_SLACK_MS), { agentId: null, startedAtMs: started })).toMatchObject({ type: 'artibot:code-reviewer' });
-    expect(find(at(STOP_START_SLACK_MS + 1), { agentId: null, startedAtMs: started })).toMatchObject({ type: null });
+  it('a trusted bind whose receipt is nowhere in the file is unresolved, not a reason to try the name', () => {
+    const file = writeRaw(linesOf([
+      selectedRow({ epoch: 'toolu_zz', name: 'review-f1', type: 'artibot:spec-reviewer' }),
+      boundRow({ agentId: AGENT, epoch: 'toolu_gone' }),
+    ]));
+    expect(find(file)).toMatchObject({ type: null, source: null });
   });
 
-  it('never takes a name-join receipt whose timestamp is unreadable once a START bound is given', () => {
-    const row = selectedRow({ epoch: 'toolu_bad', name: 'review-f1', type: 'artibot:code-reviewer' });
-    row.ts = 'not a time';
-    const file = writeRaw(linesOf([row]));
-    expect(find(file, { agentId: null, startedAtMs: Date.parse('2026-09-30T08:00:03.000Z') })).toMatchObject({ type: null });
-    expect(find(file, { agentId: null })).toMatchObject({ type: 'artibot:code-reviewer' });
+  it('a bind row for ANOTHER agent says nothing about this one', () => {
+    const file = writeRaw(linesOf(trail({ type: 'artibot:code-reviewer' })));
+    expect(find(file, { agentId: 'anobody-0000000000000000' })).toMatchObject({ type: null });
   });
 
-  it('does not use a row from another session for the name join, but the agent-id join needs no session', () => {
-    const other = writeRaw(linesOf([selectedRow({ epoch: 'toolu_01', name: 'review-f1', type: 'artibot:code-reviewer', session: 'other' })]));
-    expect(find(other, { agentId: null })).toMatchObject({ type: null });
-    const bound = writeRaw(linesOf(trail()), 'bound.jsonl');
-    expect(find(bound, { sessionId: 'a-different-session' })).toMatchObject({ type: 'artibot:code-reviewer' });
+  it('the agent-id join needs no session and no START time', () => {
+    const file = writeRaw(linesOf(trail()));
+    expect(find(file, { sessionId: 'a-different-session', startedAtMs: undefined })).toMatchObject({ type: 'artibot:code-reviewer' });
   });
 
   it('keeps looking for the selected row when the bind is found first, and gives up cleanly when it is gone', () => {
     const file = writeRaw(linesOf([boundRow({ agentId: AGENT, epoch: 'toolu_gone' })]));
     expect(find(file, { name: null })).toMatchObject({ type: null, source: null });
   });
+});
 
-  it('a trusted bind without a type falls back to the name join when the selected row is out of the file', () => {
-    const file = writeRaw(linesOf([
-      selectedRow({ epoch: 'toolu_zz', name: 'review-f1', type: 'artibot:spec-reviewer' }),
-      boundRow({ agentId: AGENT, epoch: 'toolu_gone' }),
-    ]));
-    expect(find(file)).toMatchObject({ type: 'artibot:spec-reviewer', source: 'route.selected:worker' });
+describe('findSpawnSubagentType - the name join is the fail-open surface', () => {
+  /** An agent id that has no bind row anywhere in these files. */
+  const UNBOUND = 'anobody-0000000000000000';
+  const START = Date.parse('2026-09-30T10:00:00.000Z');
+  const iso = (ms) => new Date(ms).toISOString();
+  const sel = (ms, epoch, type, name = 'rv-1', session = SID) => selectedRow({ epoch, name, type, session, ts: iso(ms) });
+  const bound = (agentId, epoch, confidence = 'exact', subagentType = undefined) => boundRow({ agentId, epoch, subagentType, confidence });
+  const find = (file, query = {}, opts = {}) => findSpawnSubagentType(
+    file, { agentId: UNBOUND, name: 'rv-1', sessionId: SID, startedAtMs: START, ...query }, opts,
+  );
+  const file = (rows, name = 'ledger.jsonl') => writeRaw(linesOf(rows), name);
+
+  it('takes the NEWEST eligible same-session receipt', () => {
+    const f = file([
+      sel(START - 2 * MIN, 'toolu_1', 'artibot:tdd-guide'),
+      sel(START - 1 * MIN, 'toolu_2', 'artibot:code-reviewer'),
+    ]);
+    expect(find(f)).toMatchObject({ type: 'artibot:code-reviewer', source: 'route.selected:worker', exhausted: true });
   });
+
+  it('is bounded by START: a later receipt is skipped and the older eligible one is used', () => {
+    const f = file([
+      sel(START - 1 * MIN, 'toolu_old', 'artibot:code-reviewer'),
+      sel(START + 1 * MIN, 'toolu_new', 'artibot:frontend-developer'),
+    ]);
+    expect(find(f)).toMatchObject({ type: 'artibot:code-reviewer' });
+  });
+
+  it.each([
+    ['START - 10 min is INSIDE the window', -STOP_NAME_JOIN_WINDOW_MS, 'artibot:code-reviewer'],
+    ['START - 10 min - 1 ms is outside it', -STOP_NAME_JOIN_WINDOW_MS - 1, null],
+    ['START itself is INSIDE (the upper bound is inclusive)', 0, 'artibot:code-reviewer'],
+    ['START + 1 ms is outside it: there is no slack after START (case D)', 1, null],
+    ['START + 500 ms is outside it (case D)', 500, null],
+    ['START + 2 s is outside it (control)', 2000, null],
+    ['a receipt an hour old is outside it (case A)', -60 * MIN, null],
+  ])('window edges: %s', (_label, offset, expected) => {
+    expect(find(file([sel(START + offset, 'toolu_w', 'artibot:code-reviewer')]))).toMatchObject({ type: expected });
+  });
+
+  it('never takes a receipt whose timestamp is unreadable', () => {
+    const row = sel(START - MIN, 'toolu_bad', 'artibot:code-reviewer');
+    row.ts = 'not a time';
+    expect(find(file([row]))).toMatchObject({ type: null });
+  });
+
+  it('excludes a receipt ALREADY BOUND to a different agent_id and falls to the next older eligible one (case A)', () => {
+    const f = file([
+      sel(START - 5 * MIN, 'toolu_a', 'artibot:code-reviewer'),
+      sel(START - 4 * MIN, 'toolu_b', 'artibot:tdd-guide'),
+      bound('agent-someone-else', 'toolu_b', 'exact', 'artibot:tdd-guide'),
+    ]);
+    expect(find(f)).toMatchObject({ type: 'artibot:code-reviewer', source: 'route.selected:worker' });
+    // ...and with the older one consumed too, nothing is left.
+    const g = file([
+      sel(START - 5 * MIN, 'toolu_a', 'artibot:code-reviewer'),
+      bound('agent-first', 'toolu_a', 'exact', 'artibot:code-reviewer'),
+      sel(START - 4 * MIN, 'toolu_b', 'artibot:tdd-guide'),
+      bound('agent-someone-else', 'toolu_b', 'fifo', 'artibot:tdd-guide'),
+    ], 'both-bound.jsonl');
+    expect(find(g)).toMatchObject({ type: null });
+  });
+
+  it('a receipt bound by ANY confidence is spoken for, FIFO included', () => {
+    const f = file([
+      sel(START - 2 * MIN, 'toolu_a', 'artibot:code-reviewer'),
+      bound('agent-fifo', 'toolu_a', 'fifo'),
+    ]);
+    expect(find(f)).toMatchObject({ type: null });
+  });
+
+  it('the newest eligible receipt SETTLES the join: an empty type is unresolved and older receipts are not consulted (case C)', () => {
+    const f = file([
+      sel(START - 3 * MIN, 'toolu_older', 'artibot:code-reviewer'),
+      sel(START - 2 * MIN, 'toolu_newer', ''),
+    ]);
+    expect(find(f)).toMatchObject({ type: null, source: null, exhausted: true });
+  });
+
+  it('is OFF when the window holds ANY bind row for this agent, however useless (cases A, B, C)', () => {
+    const fresh = sel(START - 2 * MIN, 'toolu_fresh', 'artibot:code-reviewer');
+    for (const row of [
+      bound(UNBOUND, 'toolu_x', 'fifo', 'artibot:frontend-developer'),
+      bound(UNBOUND, 'toolu_gone', 'exact'),
+      bound(UNBOUND, 'toolu_fresh2', 'exact', 'artibot:backend-developer'),
+    ]) {
+      expect(find(file([fresh, row], `off-${row.data.tool_use_id}.jsonl`))).not.toMatchObject({ source: 'route.selected:worker' });
+    }
+  });
+
+  it.each([
+    ['no usable agent id (null)', { agentId: null }],
+    ['the fallback agent id "unknown"', { agentId: 'unknown' }],
+    ['no name', { name: null }],
+    ['no session', { sessionId: null }],
+    ['no START time', { startedAtMs: undefined }],
+    ['a non-finite START time', { startedAtMs: Number.NaN }],
+    ['a START time that is not a number', { startedAtMs: '2026-09-30T10:00:00.000Z' }],
+  ])('needs everything it is bounded by - %s -> no name join', (_label, query) => {
+    expect(find(file([sel(START - MIN, 'toolu_a', 'artibot:code-reviewer')]), query)).toMatchObject({ type: null });
+  });
+
+  it('does not use a receipt of ANOTHER session', () => {
+    expect(find(file([sel(START - MIN, 'toolu_o', 'artibot:code-reviewer', 'rv-1', 'other')]))).toMatchObject({ type: null });
+  });
+
+  it('answers only from a scan that reached the window\'s edge (the budget cutting it short proves nothing)', () => {
+    // The eligible receipt is the NEWEST row, so the walk settles on it first. What is still unknown is whether
+    // a bind row for this agent exists farther back, and only reaching the window's edge can say "no". The 30
+    // route rows that mention this agent id are what spends a small budget before that edge is reached.
+    const mentions = Array.from({ length: 30 }, (_, i) => ({
+      ...selectedRow({ epoch: `toolu_m${i}`, name: 'someone-else', type: 'artibot:tdd-guide' }),
+      data: { shadow_of: `tool_use:toolu_m${i}`, note: UNBOUND },
+    }));
+    const hit = sel(START - 5 * MIN, 'toolu_hit', 'artibot:code-reviewer');
+    const f = file([...mentions, hit]);
+    // The SAME file, only the budget differs.
+    expect(find(f, {}, { maxCandidates: 100 })).toMatchObject({ type: 'artibot:code-reviewer', exhausted: true });
+    const cut = find(f, {}, { maxCandidates: 10 });
+    expect(cut).toMatchObject({ type: null, exhausted: false });
+    expect(cut.candidates).toBe(10);
+    // And a bind row for this agent farther back closes the join even with room to read it.
+    const closed = file([bound(UNBOUND, 'toolu_own', 'fifo', 'artibot:frontend-developer'), ...mentions, hit], 'closed.jsonl');
+    expect(find(closed, {}, { maxCandidates: 100 })).toMatchObject({ type: null, source: null });
+  });
+});
+
+describe('findSpawnSubagentType - the reverse tail scan', () => {
+  const AGENT = `areview-f1-${HEX}`;
+  const UNBOUND = 'anobody-0000000000000000';
+  const STARTED = Date.parse('2026-09-30T08:00:03.000Z');
+  const trail = ({ type = 'artibot:code-reviewer', name = 'review-f1', epoch = 'toolu_01AAAA', boundType = true } = {}) => [
+    selectedRow({ epoch, name, type }),
+    boundRow({ agentId: AGENT, epoch, name, subagentType: boundType ? type : undefined }),
+  ];
+  const find = (file, query = {}, opts = {}) => findSpawnSubagentType(
+    file, { agentId: AGENT, name: 'review-f1', sessionId: SID, startedAtMs: STARTED, ...query }, opts,
+  );
 
   it.each([64, 97, 200, 1000, 4096, STOP_SCAN_CHUNK_BYTES])('finds the rows at chunk size %i - lines cross chunk boundaries', (chunkBytes) => {
     const note = '검수 결과 — 한글과 emoji 🚀 가 경계에 걸려도 깨지지 않는다';
@@ -291,15 +429,16 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
       ...fillerLines(40, '한글'),
     ]);
     for (const chunkBytes of [50, 101, 333, 4096]) {
-      expect(find(file, { agentId: null, name }, { chunkBytes })).toMatchObject({ type: 'artibot:auditor' });
+      expect(find(file, { agentId: UNBOUND, name }, { chunkBytes })).toMatchObject({ type: 'artibot:auditor' });
     }
   });
 
   it('finds the FIRST line of the file (no newline before it)', () => {
     // The name join is the only path that needs line 1 here: the selected row is the file's first line.
-    const file = writeRaw([...linesOf(trail()), ...fillerLines(50)]);
+    const first = selectedRow({ epoch: 'toolu_first', name: 'review-f1', type: 'artibot:code-reviewer' });
+    const file = writeRaw([...linesOf([first]), ...fillerLines(50)]);
     for (const chunkBytes of [64, 500, STOP_SCAN_CHUNK_BYTES]) {
-      expect(find(file, { agentId: null }, { chunkBytes })).toMatchObject({
+      expect(find(file, { agentId: UNBOUND }, { chunkBytes })).toMatchObject({
         type: 'artibot:code-reviewer', source: 'route.selected:worker',
       });
     }
@@ -311,6 +450,7 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
     const early = find(file, {}, { chunkBytes: 65536 });
     expect(early.type).toBe('artibot:code-reviewer');
     expect(early.bytesRead).toBeLessThanOrEqual(65536);
+    expect(early.exhausted).toBe(false);
     expect(bytes(head)).toBeGreaterThan(1_500_000);
 
     const miss = find(file, { agentId: 'anobody-0000000000000000', name: 'nobody' }, { maxBytes: 300_000, chunkBytes: 65536 });
@@ -318,6 +458,7 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
     expect(miss.bytesRead).toBeGreaterThan(0);
     // The cap, plus the ONE byte of look-behind that tells a cut line from a whole one.
     expect(miss.bytesRead).toBeLessThanOrEqual(300_000 + 1);
+    expect(miss.exhausted).toBe(true);
   });
 
   it('does not see a row older than the window, and drops the line the window edge cuts', () => {
@@ -334,19 +475,14 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
     expect(find(file, {}, { maxBytes: onlyBound, chunkBytes: 256 })).toMatchObject({ type: 'artibot:code-reviewer' });
   });
 
-  it('stops at the candidate cap', () => {
-    const noise = Array.from({ length: 50 }, (_, i) => selectedRow({ epoch: `toolu_n${i}`, name: 'review-f1', type: 'artibot:tdd-guide', session: 'other' }));
-    const file = writeRaw([...linesOf([selectedRow({ epoch: 'toolu_hit', name: 'review-f1', type: 'artibot:code-reviewer' })]), ...linesOf(noise)]);
-    expect(find(file, { agentId: null }, { maxCandidates: 10 })).toMatchObject({ type: null });
-    expect(find(file, { agentId: null }, { maxCandidates: 100 })).toMatchObject({ type: 'artibot:code-reviewer' });
-  });
-
   it('honours endOffset, the as-of seam: rows appended after it are invisible', () => {
-    const early = linesOf(trail({ type: 'artibot:code-reviewer' }));
+    const early = linesOf([selectedRow({ epoch: 'toolu_early', name: 'review-f1', type: 'artibot:code-reviewer' })]);
     const late = linesOf([selectedRow({ epoch: 'toolu_late', name: 'review-f1', type: 'artibot:frontend-developer' })]);
     const file = writeRaw([...early, ...late]);
-    expect(find(file, { agentId: null })).toMatchObject({ type: 'artibot:frontend-developer' });
-    expect(find(file, { agentId: null }, { endOffset: bytes(early) })).toMatchObject({ type: 'artibot:code-reviewer' });
+    // With the receipt of the LATE row in the window and no bind row for this id, the name join takes it...
+    expect(find(file, { agentId: UNBOUND })).toMatchObject({ type: 'artibot:frontend-developer' });
+    // ...and as of the early end it is invisible, so the early receipt answers.
+    expect(find(file, { agentId: UNBOUND }, { endOffset: bytes(early) })).toMatchObject({ type: 'artibot:code-reviewer' });
   });
 
   it('skips a torn last line and corrupt lines instead of failing', () => {
@@ -368,11 +504,53 @@ describe('findSpawnSubagentType - the reverse tail scan', () => {
       const r = find(target);
       expect(r.type).toBeNull();
     }
+    // A giant line is not a ledger: the walk aborts, so the window was NOT read to its edge.
+    expect(find(giant).exhausted).toBe(false);
     const ok = writeRaw(linesOf(trail()), 'ok.jsonl');
     for (const query of [{ agentId: null, name: null }, { agentId: 'unknown', name: null }, { agentId: {}, name: [] }, null, undefined]) {
       expect(() => findSpawnSubagentType(ok, query)).not.toThrow();
     }
     expect(findSpawnSubagentType(ok, { agentId: 'unknown', name: null }).type).toBeNull();
+  });
+});
+
+describe('findSpawnSubagentType - what counts against the parse budget', () => {
+  const AGENT = 'areview-f1-0123456789abcdef';
+  const START = Date.parse('2026-09-30T08:00:03.000Z');
+  const find = (file, opts = {}) => findSpawnSubagentType(
+    file, { agentId: AGENT, name: 'review-f1', sessionId: SID, startedAtMs: START }, opts,
+  );
+  const trailRows = () => [
+    selectedRow({ epoch: 'toolu_b', name: 'review-f1', type: 'artibot:code-reviewer' }),
+    boundRow({ agentId: AGENT, epoch: 'toolu_b', subagentType: 'artibot:code-reviewer' }),
+  ];
+
+  it('rows that merely MENTION the agent id are neither parsed nor counted (liveness)', () => {
+    const file = writeRaw(linesOf([...trailRows(), ...mentionRows(600, AGENT)]));
+    // 600 id-bearing rows sit between the end of the file and the bind row. Counted, they would have
+    // spent the whole default budget of the previous release (512) before the bind row was reached.
+    const r = find(file);
+    expect(r).toMatchObject({ type: 'artibot:code-reviewer', source: 'route.bound' });
+    expect(r.candidates).toBe(1);
+    // ...and even a budget of 5 is enough, which proves the mention rows do not draw on it.
+    expect(find(file, { maxCandidates: 5 })).toMatchObject({ type: 'artibot:code-reviewer', candidates: 1 });
+  });
+
+  it('counts only the route rows it parsed: bind rows of other agents NEWER than this one are read, older ones are not', () => {
+    const others = (from) => Array.from({ length: 7 }, (_, i) => boundRow({
+      agentId: `agent-other-${from}-${i}`, epoch: `toolu_o${from}${i}`, subagentType: 'artibot:tdd-guide',
+    }));
+    const own = [
+      selectedRow({ epoch: 'toolu_b', name: 'review-f1', type: 'artibot:code-reviewer' }),
+      boundRow({ agentId: AGENT, epoch: 'toolu_b', subagentType: 'artibot:code-reviewer' }),
+    ];
+    // While the name join is open the walk reads every bind row newer than its own (to learn which receipts
+    // are spoken for): 7 of them + its own. The 40 rows that only mention the id are still not counted.
+    const newer = writeRaw(linesOf([...own, ...others('n'), ...mentionRows(40, AGENT)]), 'newer.jsonl');
+    expect(find(newer)).toMatchObject({ type: 'artibot:code-reviewer', candidates: 8 });
+    // Older bind rows are never reached: the walk stops at its own.
+    const older = writeRaw(linesOf([...others('o'), ...own, ...mentionRows(40, AGENT)]), 'older.jsonl');
+    expect(find(older)).toMatchObject({ type: 'artibot:code-reviewer', candidates: 1 });
   });
 });
 
@@ -437,10 +615,10 @@ describe('resolveStopIdentity', () => {
       boundRow({ agentId: AGENT, epoch: 'toolu_01', name: 'review-f1', subagentType: 'artibot:frontend-developer' }),
     ]));
     const { ports } = probe(file);
-    expect(resolveStopIdentity(stop(), ports).identity).toBeNull();
+    expect(resolveStopIdentity(stop({ startedAtMs: Date.parse('2026-09-30T08:00:03.000Z') }), ports).identity).toBeNull();
   });
 
-  it('hands the agent\'s START time to the name join', () => {
+  it('hands the agent\'s START time to the name join, and without one the name join is off', () => {
     const file = writeRaw(linesOf([
       selectedRow({ epoch: 'toolu_old', name: 'review-f1', type: 'artibot:code-reviewer', ts: '2026-09-30T08:00:00.000Z' }),
       selectedRow({ epoch: 'toolu_new', name: 'review-f1', type: 'artibot:frontend-developer', ts: '2026-09-30T09:00:00.000Z' }),

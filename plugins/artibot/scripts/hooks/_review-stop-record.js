@@ -10,19 +10,21 @@
  * @module scripts/hooks/_review-stop-record
  */
 
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import * as artifactLifecycle from '../../lib/runtime/artifact-lifecycle.js';
 import { readJsonFileSync } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { appendLedgerEvent, ledgerFilePath, readAllEvents } from '../../lib/runtime/ledger.js';
+import { appendLedgerEvent, ledgerFilePath } from '../../lib/runtime/ledger.js';
 import {
   bindIntentRevision,
   MISSION_ID_PATTERN,
   parseReviewVerdict,
 } from '../../lib/review/independent-reviewer.js';
+import { readReviewKeysTail } from '../../lib/review/review-keys.js';
 import { resolveStopIdentity } from '../../lib/review/stop-identity.js';
+import { assistantEntryText, readLastAssistantEntry, reviewerModel } from '../../lib/review/stop-transcript.js';
 import { recordReviewOutcome } from '../../lib/review/verdict-writer.js';
 
 // ---------------------------------------------------------------------------
@@ -161,14 +163,6 @@ const REVIEWER_AGENT_TYPES = Object.freeze([
  */
 const INSPECTOR_NAME_SUFFIX = '-inspector';
 
-/**
- * How far back a subagent transcript is read, in bytes. The wanted line is the
- * LAST assistant turn, so a tail is sufficient and a hook must not grow with a
- * transcript that has no bound.
- * @type {number}
- */
-const TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024;
-
 /** Cap for the `review_ledger` spawn column; it is a summary, not a report. */
 const REVIEW_COLUMN_MAX = 160;
 
@@ -210,12 +204,14 @@ function onAllowlist(identity) {
  * exactly the two-argument answer. FAIL CLOSED: nothing resolvable — no project
  * root, no ledger, no row, a row older than the scan window — is `false`.
  * The root comes from the payload (`payloadProjectRoot`), never from
- * `process.cwd()`. COST, measured 2026-09-30 on a 62,152-line / 24.6 MB ledger
- * copy (Node 24.15, Windows 11): an allowlisted or unregistered stop pays ~0 ms;
- * a registered one 1.2 ms (trail 300 KB back) to 7.7 ms (2.5 MB back), 19 ms
- * when nothing is found and the whole 8 MiB window is read (N=30). The resolver
- * is a STATIC import (this function is sync): 1.7 ms marginal, N=15, paid by
- * every SubagentStart and Stop.
+ * `process.cwd()`. COST, measured on a 62,152-line / 24.6 MB ledger copy (Node
+ * 24.15, Windows 11, N=30): an allowlisted or unregistered stop pays ~0 ms; a
+ * registered one 1.2 ms (trail 300 KB back) to 6.3 ms (2.5 MB back), 21 ms (max
+ * 34) when nothing is found and the whole 8 MiB window is read. The lane's four
+ * `lib/review` modules are STATIC imports (these functions are sync): 6.9 ms
+ * marginal after the base hook graph (4.7-10.8, N=20), whole-graph import 95.8 /
+ * 92.4 ms before / after the lane (N=40, indistinguishable) — paid by every
+ * SubagentStart and Stop.
  *
  * @param {unknown} agentType `agent_type` from the payload, or the tracked one
  * @param {(value: unknown) => string|null} identityOf the caller's normalizer
@@ -247,101 +243,6 @@ export function isReviewerStop(agentType, identityOf, stop) {
 }
 
 /**
- * Parse one transcript line, or null. A line that is not a whole JSON object is
- * skipped rather than fatal: a transcript is written by another process and may
- * be mid-append while this hook reads it.
- *
- * @param {unknown} line one raw line
- * @returns {object|null} the parsed entry
- */
-function parseTranscriptLine(line) {
-  try {
-    const trimmed = String(line).trim();
-    if (!trimmed.startsWith('{')) return null;
-    const parsed = JSON.parse(trimmed);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Scan backwards for the last `type:"assistant"` entry carrying a message.
- *
- * BACKWARDS, not forwards: a reviewer's final answer is its last turn, and a
- * forward scan of a long transcript would both cost more and pick the wrong
- * turn. The LAST line is often not an assistant line (a summary or a tool
- * result follows), which is why this looks for the last of a KIND.
- *
- * @param {string[]} lines transcript lines in file order
- * @returns {object|null} the entry
- */
-function findLastAssistantEntry(lines) {
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const entry = parseTranscriptLine(lines[i]);
-    const message = entry?.message;
-    if (entry?.type === 'assistant' && message && typeof message === 'object') return entry;
-  }
-  return null;
-}
-
-/**
- * The last assistant entry of a subagent transcript, read from a bounded tail.
- *
- * NEVER THROWS. A missing, unreadable, corrupt or empty transcript yields null,
- * which costs the review line and nothing else. The first line of the window is
- * dropped when the read started mid-file, because a byte-offset read almost
- * always lands mid-line and a truncated object that happens to parse is worse
- * than a line not read.
- *
- * @param {unknown} transcriptPath `agent_transcript_path` from the payload
- * @returns {object|null} the entry
- */
-function readLastAssistantEntry(transcriptPath) {
-  let fd = null;
-  try {
-    if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) return null;
-    if (!existsSync(transcriptPath)) return null;
-    const size = statSync(transcriptPath).size;
-    const start = size > TRANSCRIPT_TAIL_BYTES ? size - TRANSCRIPT_TAIL_BYTES : 0;
-    const length = size - start;
-    if (length <= 0) return null;
-    const buf = Buffer.alloc(length);
-    fd = openSync(transcriptPath, 'r');
-    readSync(fd, buf, 0, length, start);
-    const lines = buf.toString('utf8').split('\n');
-    if (start > 0) lines.shift();
-    return findLastAssistantEntry(lines);
-  } catch {
-    return null;
-  } finally {
-    if (fd !== null) {
-      try { closeSync(fd); } catch { /* noop */ }
-    }
-  }
-}
-
-/**
- * The text of an assistant entry: its `content` string, or every text block of
- * its content array joined. Blocks that are not text (tool uses, thinking) are
- * dropped rather than stringified — a JSON blob of a tool call is not an answer.
- *
- * @param {object|null} entry {@link readLastAssistantEntry} output
- * @returns {string|null} the text, or null when there is none
- */
-function assistantEntryText(entry) {
-  const content = entry?.message?.content;
-  if (typeof content === 'string') return content.trim() === '' ? null : content;
-  if (!Array.isArray(content)) return null;
-  const parts = [];
-  for (const block of content) {
-    if (block && typeof block === 'object' && typeof block.text === 'string') parts.push(block.text);
-  }
-  const joined = parts.join('\n');
-  return joined.trim() === '' ? null : joined;
-}
-
-/**
  * The reviewer's answer: `last_assistant_message` when the host supplied one,
  * otherwise the transcript's final assistant text.
  *
@@ -358,17 +259,6 @@ function reviewerText(hookData, entry) {
   const direct = hookData?.last_assistant_message;
   if (typeof direct === 'string' && direct.trim() !== '') return direct;
   return assistantEntryText(entry);
-}
-
-/**
- * The model that served the reviewer's final turn, from the transcript only.
- *
- * @param {object|null} entry the already-read transcript entry
- * @returns {string|null} an exact provider model id, or null
- */
-function reviewerModel(entry) {
-  const model = entry?.message?.model;
-  return typeof model === 'string' && model.trim() !== '' ? model : null;
 }
 
 /**
@@ -686,13 +576,34 @@ function resolveIntentBinding(verdictText, stopMissionId, projectRoot, bindInten
 }
 
 /**
+ * The `existingKeys` port: the review idempotency keys of this session that the
+ * ledger's TAIL holds (`lib/review/review-keys.js`; 8 MiB window, flat 17-26 ms).
+ * It replaced `readAllEvents`, a whole-ledger read that took 4.1-5.9 s over a 20x
+ * ledger — the handler was killed at its 5,000 ms budget and lost its
+ * `recordSpawn`. A redelivery older than the window is NOT deduped — the recorded
+ * gap. A read that did not reach the window's edge THROWS: the writer turns that
+ * into `rejected:port-threw`, because a verdict not written beats a verdict written
+ * twice.
+ *
+ * @param {string} projectRoot the project the ledger belongs to
+ * @param {string} sessionId envelope `session_id`
+ * @returns {string[]} idempotency keys already recorded for this session
+ */
+function existingReviewKeys(projectRoot, sessionId) {
+  const read = readReviewKeysTail(ledgerFilePath(projectRoot), sessionId);
+  if (!read.complete) throw new Error('review-keys-incomplete');
+  return read.keys;
+}
+
+/**
  * Record a reviewer's answer as up to two ledger lines.
  *
  * The ports are built HERE rather than inside the writer because
  * `lib/review/verdict-writer.js` is L2 and may not import `lib/runtime/` — the
  * same split `lib/verification/verify-writer.js` already uses. The
  * `existingKeys` port is what makes a redelivered stop dedupe instead of
- * inflating the §4.1 denominator with a second copy of one verdict.
+ * inflating the §4.1 denominator with a second copy of one verdict; it reads a
+ * BOUNDED tail ({@link existingReviewKeys}), not the whole ledger.
  *
  * NEVER THROWS: anything unexpected becomes `{ error: '<ConstructorName>' }`,
  * which lands in the spawn column and nowhere else.
@@ -738,9 +649,7 @@ export function recordReviewFromStop(hookData, ids, projectRoot, ports = {}) {
       intentBinding,
     }, {
       append: (input) => appendLedgerEvent(projectRoot, input),
-      existingKeys: () => readAllEvents(projectRoot, { session_id: sessionId })
-        .map((event) => event?.idempotency_key)
-        .filter((key) => typeof key === 'string' && key.length > 0),
+      existingKeys: () => existingReviewKeys(projectRoot, sessionId),
     });
 
     return {

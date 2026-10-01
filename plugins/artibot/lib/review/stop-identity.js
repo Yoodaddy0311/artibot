@@ -24,35 +24,46 @@
  *        a. EXACT — the `route.bound` row whose `data.agent_id` is this agent.
  *           Its `data.subagent_type` when present (2026-09-30 onward), else the
  *           type in the joined `route.selected` key. A bind whose `confidence`
- *           is not `exact`/`name` is a positional (FIFO) guess and is IGNORED:
- *           14 of 790 live binds are, and their receipt may be another spawn's.
- *        b. NAME — the most recent `route.selected` row whose `worker` is this
- *           agent's name, same session, written no later than this agent's
- *           START. Used only when (a) gave nothing.
+ *           is not `exact`/`name` is a positional (FIFO) guess and resolves
+ *           NOTHING: 14 of 790 live binds are, and their receipt may be another
+ *           spawn's. A receipt with an empty type resolves nothing either.
+ *        b. NAME — ONLY when the whole window holds no `route.bound` row for
+ *           this agent id AT ALL (a FIFO, typeless or unresolvable bind counts
+ *           as one, and closes this door). The newest `route.selected` row whose
+ *           `worker` is this agent's name, same session, written in
+ *           [START - 10 min, START], and not already bound to a DIFFERENT
+ *           agent_id. If that newest eligible receipt has an empty type the
+ *           answer is "unresolved": older receipts are not consulted.
  *      The type is the tail of the receipt's `idempotency_key`
  *      (`route.pre:<tool_use_id>:<prompt_id>:<subagent_type>`): `route.selected`
  *      has NO `data.subagent_type` (0 of 794 live rows).
  *
+ * WHY (b) IS THAT NARROW. Each clause closes a ledger in which a BUILDER was
+ * recognised as a reviewer (opus review of 0390e273, cases A-D): a stale
+ * same-name receipt (A), one another agent had already consumed (A), one a FIFO
+ * bind stepped past (B), one the spawn's own empty-typed receipt stepped past
+ * (C), one written after START (D). The window is the one the START-side binder
+ * itself applies to a receipt (`subagent-handler.js#RECEIPT_WINDOW_MS`, 10 min):
+ * an older receipt could not have been this spawn's bind candidate. There is NO
+ * slack after START: PreToolUse precedes SubagentStart and `startedAt` is taken
+ * after the bind, so the true receipt is never later, and the +1 s this module
+ * first carried bought nothing but case D. It also needs the scan to have covered
+ * the WHOLE window: "no bind row for this agent" is a fact about a window that
+ * was read to its edge, not about one the parse budget cut short.
+ *
  * THE ALLOWLIST IS NOT HERE. `accept` is injected, so this module cannot widen
  * who counts as a reviewer: it only finds out which type a stop belongs to.
  *
- * ── Bounded, and sized from a measurement ───────────────────────────────────
+ * ── Bounded ─────────────────────────────────────────────────────────────────
  * The ledger grows without bound and this runs on SubagentStop, so the scan
- * reads backwards from the end in chunks, stops at the first answer, and never
- * goes further than {@link STOP_SCAN_BYTES}. Bytes between a spawn's bind row and
- * its stop, measured against a 62,152-line / 24.6 MB ledger copy (2026-09-30):
- *
- *                          n     p50      p90      p99      max
- *   reviewer-ish stops    276   123 KB   371 KB   1.38 MB  1.47 MB
- *   every stop with bind 1216   170 KB   772 KB   3.39 MB  4.97 MB
- *
- * Share of those stops whose bind row lies inside a window of that size
- * (reviewer-ish / every stop): 128 KB, the window `subagent-handler.js` uses for
- * its receipt scan, 54% / 43%; 1 MiB 99% / 93%; 4 MiB 100% / 99.7%; 8 MiB
- * 100% / 100% — hence a number of its own. A scan is a native `indexOf` per
- * needle over each chunk and a `JSON.parse` only of lines that contain a needle
- * — 90% of live rows are `hook.fired`, which never parse. `bytesRead` and
- * `candidates` come back with every answer so a test can assert bounded work
+ * (`./tail-scan.js`, sized from a measurement — see there) reads backwards from
+ * the end, stops at the first exact answer, and never goes further than
+ * {@link STOP_SCAN_BYTES}. A scan is a native `indexOf` per needle over each
+ * chunk, and a line is parsed ONLY when it is a `route.bound` / `route.selected`
+ * row that holds a needle — 90% of live rows are `hook.fired`, which never parse,
+ * and rows that merely MENTION an agent id (`run_id` of a `usage.receipt`, a
+ * hook payload) are skipped without being counted against the budget. `bytesRead`
+ * and `candidates` come back with every answer so a test can assert bounded work
  * without a wall-clock.
  *
  * FAIL CLOSED. Every failure — unreadable, torn, oversize, not found, cap hit —
@@ -65,6 +76,10 @@
  *    out of the window and are simply not recorded.
  *  - That a real `route.selected` exists for every spawn. The PreToolUse hook
  *    writes none when the classifier finds no phase (`no-receipt`).
+ *  - That the name join can never be wrong: a builder whose own bind row is
+ *    missing, with an UNBOUND same-name reviewer receipt inside the 10 minutes
+ *    before its START, is still taken for that reviewer. The verdict gate
+ *    (`parseReviewVerdict`) is what stands between that and a ledger line.
  *  - That `customAgentType` / `agentType` in the meta file keep their meaning:
  *    it is an UNDOCUMENTED host file (`tests/hooks/fixtures/host-files/`).
  *
@@ -74,40 +89,36 @@
  * @module lib/review/stop-identity
  */
 
-import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+
+import {
+  positiveInt, scanLedgerTail, TAIL_SCAN_BYTES, TAIL_SCAN_CHUNK_BYTES,
+} from './tail-scan.js';
+
+/** Furthest back from the ledger's end a scan reads (see `./tail-scan.js`). @type {number} */
+export const STOP_SCAN_BYTES = TAIL_SCAN_BYTES;
+
+/** Bytes per read. @type {number} */
+export const STOP_SCAN_CHUNK_BYTES = TAIL_SCAN_CHUNK_BYTES;
 
 /**
- * Furthest back from the ledger's end a scan reads. 8 MiB is the bound the same
- * hook already uses for a subagent transcript tail
- * (`_review-stop-record.js#TRANSCRIPT_TAIL_BYTES`) and is 1.6x the largest
- * bind-to-stop distance measured (4.97 MB over 1,216 stops).
+ * Most `route.bound` / `route.selected` lines one scan will parse before it gives
+ * up. Only those rows count: the name join reads every bind row in the window
+ * (~270 per 8 MiB on the live ledger, 2026-09-30), so 1,024 leaves 4x headroom.
  * @type {number}
  */
-export const STOP_SCAN_BYTES = 8 * 1024 * 1024;
-
-/** Bytes per read; a line is ~330 B, so one chunk holds ~800 lines. @type {number} */
-export const STOP_SCAN_CHUNK_BYTES = 256 * 1024;
-
-/** Most lines one scan will decode and parse before it gives up. @type {number} */
-export const STOP_SCAN_MAX_CANDIDATES = 512;
+export const STOP_SCAN_MAX_CANDIDATES = 1024;
 
 /** A meta file is a few hundred bytes; a larger one is not read. @type {number} */
 export const STOP_META_MAX_BYTES = 65536;
 
 /**
- * A line longer than this with no newline in it is not a ledger (the writer caps
- * a line at 4 KB); the scan stops rather than concatenate it without bound.
+ * How far BEFORE an agent's START a same-name receipt may have been written and
+ * still be taken for that agent's own: the window the START-side binder applies
+ * (`subagent-handler.js#RECEIPT_WINDOW_MS`).
  * @type {number}
  */
-const MAX_CARRY_BYTES = 64 * 1024;
-
-/**
- * How far AFTER an agent's START a same-name receipt may have been written and
- * still be taken for that agent's own. PreToolUse precedes SubagentStart, so the
- * true receipt is never later; the margin absorbs clock granularity only.
- * @type {number}
- */
-export const STOP_START_SLACK_MS = 1000;
+export const STOP_NAME_JOIN_WINDOW_MS = 10 * 60 * 1000;
 
 /** Prefix of the correlation key `route-observe-pre.js#receiptKey` writes. */
 const RECEIPT_KEY_PREFIX = 'route.pre:';
@@ -118,7 +129,13 @@ const TRUSTED_BIND_CONFIDENCE = Object.freeze(['exact', 'name']);
 /** The fallback id `hook-utils.js#extractAgentId` returns when the payload has none. */
 const UNKNOWN_AGENT_ID = 'unknown';
 
-const NEWLINE = 0x0a;
+/**
+ * The literal bytes of the two event keys the ledger writer emits (compact JSON,
+ * `"event"` right after `ts`). Pinned as raw bytes by
+ * `tests/hooks/subagent-handler-routing-fields.test.js`.
+ */
+const BOUND_EVENT = '"event":"route.bound"';
+const SELECTED_EVENT = '"event":"route.selected"';
 
 /** @param {unknown} value @returns {string|null} the string, or null when empty or not one */
 const text = (value) => (typeof value === 'string' && value !== '' ? value : null);
@@ -128,11 +145,6 @@ const usableId = (value) => {
   const id = text(value);
   return id === null || id === UNKNOWN_AGENT_ID ? null : id;
 };
-
-/** @param {unknown} value @param {number} fallback @returns {number} a positive integer */
-const positiveInt = (value, fallback) => (
-  Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
-);
 
 /**
  * The `subagent_type` segment of a receipt key
@@ -184,21 +196,6 @@ export function readStopMeta(transcriptPath) {
 }
 
 /**
- * Read exactly `buf.length` bytes at `position`, or as many as the file has.
- * @param {number} fd @param {Buffer} buf @param {number} position
- * @returns {number} bytes read
- */
-function readFully(fd, buf, position) {
-  let total = 0;
-  while (total < buf.length) {
-    const n = readSync(fd, buf, total, buf.length - total, position + total);
-    if (n <= 0) break;
-    total += n;
-  }
-  return total;
-}
-
-/**
  * The line of `body` that holds the last match of `needle` starting at or before
  * `from`: `{start, end}` (end excludes the newline), or null.
  * @param {string} body @param {string} needle @param {number} from
@@ -222,60 +219,84 @@ function parseRow(line) {
   }
 }
 
+/** @returns {object} a fresh search state */
+const newState = () => ({
+  exact: null,
+  exactDone: false, // a route.bound row for THIS agent was seen, whatever its confidence
+  epoch: null,
+  epochDone: false,
+  workerType: null,
+  workerSettled: false, // an eligible same-name receipt was seen; its type may be null
+  otherBound: new Set(), // tool_use_ids already bound to a DIFFERENT agent_id
+  parsed: 0,
+});
+
 /**
- * Fold one parsed row into the search state. The caller has already matched the
- * row against a needle, so the exact field checks here are what make it a hit.
+ * Fold one `route.bound` row into the search state. A bind row for THIS agent
+ * closes the name join for good, whatever it says; one for another agent only
+ * marks its receipt as spoken for.
  *
- * @param {object} row parsed ledger row
+ * @param {object} row parsed `route.bound` row
  * @param {object} st search state (mutated)
- * @param {{agentId: string|null, name: string|null, sessionId: string|null, notAfterMs: number|null}} q the query
+ * @param {{agentId: string}} q the query
  * @returns {void}
  */
-function absorb(row, st, q) {
-  if (row.event === 'route.bound') {
-    if (st.exactDone || q.agentId === null || row.data?.agent_id !== q.agentId) return;
-    st.exactDone = true;
-    if (!TRUSTED_BIND_CONFIDENCE.includes(row.data?.confidence)) {
-      st.epochDone = true;
-      return;
-    }
-    const direct = text(row.data?.subagent_type);
-    if (direct !== null) {
-      st.exact = { type: direct, source: 'route.bound' };
-      return;
-    }
-    st.epoch = text(row.data?.tool_use_id) ?? text(row.action_id);
-    st.epochDone = st.epoch === null;
+function absorbBound(row, st, q) {
+  const toolUse = text(row.data?.tool_use_id) ?? text(row.action_id);
+  if (row.data?.agent_id !== q.agentId) {
+    if (toolUse !== null && !st.workerSettled) st.otherBound.add(toolUse);
     return;
   }
-  if (row.event !== 'route.selected') return;
+  if (st.exactDone) return;
+  st.exactDone = true;
+  if (!TRUSTED_BIND_CONFIDENCE.includes(row.data?.confidence)) {
+    st.epochDone = true;
+    return;
+  }
+  const direct = text(row.data?.subagent_type);
+  if (direct !== null) {
+    st.exact = { type: direct, source: 'route.bound' };
+    return;
+  }
+  st.epoch = toolUse;
+  st.epochDone = toolUse === null;
+}
+
+/**
+ * Fold one `route.selected` row into the search state: it may be the receipt the
+ * exact join is waiting for, and/or the newest ELIGIBLE same-name receipt.
+ *
+ * @param {object} row parsed `route.selected` row
+ * @param {object} st search state (mutated)
+ * @param {{name: string|null, sessionId: string|null, notBeforeMs: number|null, notAfterMs: number|null}} q
+ * @returns {void}
+ */
+function absorbSelected(row, st, q) {
   if (st.epoch !== null && !st.epochDone && row.routing_epoch_id === st.epoch) {
     st.epochDone = true;
     const type = subagentTypeFromReceiptKey(row.idempotency_key, row.routing_epoch_id);
     if (type !== null) st.exact = { type, source: 'route.bound>route.selected' };
   }
-  if (!st.workerDone && row.worker === q.name && row.session_id === q.sessionId) {
-    if (q.notAfterMs !== null) {
-      const ts = Date.parse(row.ts);
-      if (!Number.isFinite(ts) || ts > q.notAfterMs) return;
-    }
-    const type = subagentTypeFromReceiptKey(row.idempotency_key, row.routing_epoch_id);
-    if (type !== null) {
-      st.workerType = type;
-      st.workerDone = true;
-    }
-  }
+  if (st.workerSettled || st.exactDone || q.notAfterMs === null) return;
+  if (row.worker !== q.name || row.session_id !== q.sessionId) return;
+  const ts = Date.parse(row.ts);
+  if (!Number.isFinite(ts) || ts > q.notAfterMs || ts < q.notBeforeMs) return;
+  if (st.otherBound.has(row.routing_epoch_id)) return;
+  st.workerSettled = true;
+  st.workerType = subagentTypeFromReceiptKey(row.idempotency_key, row.routing_epoch_id);
 }
 
-/** @param {object} st search state @returns {boolean} nothing left to look for */
+/** @param {object} st search state @returns {boolean} the exact join has nothing left to look for */
 const finished = (st) => st.exact !== null
-  || (st.exactDone && (st.epoch === null || st.epochDone) && st.workerDone);
+  || (st.exactDone && (st.epoch === null || st.epochDone));
 
 /**
  * Search one decoded run of WHOLE lines, newest line first.
  *
  * Needles are JSON-quoted (`"<agent id>"`, `"worker":"<name>"`, `"<tool_use_id>"`)
- * so a hit is almost always the row wanted; `absorb` makes the exact check.
+ * or the literal `route.bound` event key, so a hit is almost always a row wanted;
+ * a line is parsed — and counted against `maxCandidates` — only when it really is
+ * a `route.bound` / `route.selected` row, and `absorb*` makes the exact check.
  * Per needle the next candidate line is cached, and only recomputed once a line
  * at or after it has been consumed, so a run costs one backward `lastIndexOf`
  * sweep per needle rather than one per candidate.
@@ -283,17 +304,19 @@ const finished = (st) => st.exact !== null
  * @param {string} body whole lines, oldest first
  * @param {object} st search state (mutated)
  * @param {object} q query
- * @param {{id: string|null, worker: string|null}} needles fixed needles
+ * @param {{id: string, worker: string|null, bound: string|null}} needles fixed needles
  * @param {number} maxCandidates parse budget across the whole scan
  * @returns {boolean} true when the scan should stop (answer found, or budget spent)
  */
 function searchRun(body, st, q, needles, maxCandidates) {
-  const cache = { id: undefined, worker: undefined, epoch: undefined };
+  const cache = {};
   let limit = body.length;
   for (;;) {
     const active = [];
-    if (needles.id !== null && !st.exactDone) active.push(['id', needles.id]);
-    if (needles.worker !== null && !st.workerDone) active.push(['worker', needles.worker]);
+    const nameJoinOpen = !st.workerSettled && !st.exactDone;
+    if (!st.exactDone) active.push(['id', needles.id]);
+    if (needles.worker !== null && nameJoinOpen) active.push(['worker', needles.worker]);
+    if (needles.bound !== null && nameJoinOpen) active.push(['bound', needles.bound]);
     if (st.epoch !== null && !st.epochDone) active.push(['epoch', JSON.stringify(st.epoch)]);
     let best = null;
     for (const [key, needle] of active) {
@@ -305,11 +328,17 @@ function searchRun(body, st, q, needles, maxCandidates) {
       if (hit !== null && (best === null || hit.start > best.start)) best = hit;
     }
     if (best === null) return false;
-    st.parsed += 1;
-    const row = parseRow(body.slice(best.start, best.end));
-    if (row !== null) absorb(row, st, q);
-    if (finished(st)) return true;
-    if (st.parsed >= maxCandidates) return true;
+    const line = body.slice(best.start, best.end);
+    const isBound = line.includes(BOUND_EVENT);
+    if (isBound || line.includes(SELECTED_EVENT)) {
+      st.parsed += 1;
+      const row = parseRow(line);
+      if (row !== null) {
+        if (isBound) absorbBound(row, st, q);
+        else absorbSelected(row, st, q);
+      }
+      if (finished(st) || st.parsed >= maxCandidates) return true;
+    }
     if (best.start === 0) return false;
     limit = best.start - 1;
   }
@@ -317,118 +346,78 @@ function searchRun(body, st, q, needles, maxCandidates) {
 
 /**
  * Normalise a query into what `searchRun` needs: the exact-check fields and the
- * two fixed needles. The exact join needs a usable agent id; the name join needs
- * a name AND a session, and is bounded by the START time when one is given.
+ * fixed needles. The exact join needs a usable agent id (without one there is
+ * nothing to join and no way to show "no bind row for this agent", so the name
+ * join is off too); the name join additionally needs a name, a session and the
+ * START time that bounds it.
  *
  * @param {{agentId?: unknown, name?: unknown, sessionId?: unknown, startedAtMs?: unknown}} [query]
- * @returns {{q: object, needles: {id: string|null, worker: string|null}}}
+ * @returns {{q: object, needles: {id: string|null, worker: string|null, bound: string|null}}}
  */
 function planSearch(query) {
   const agentId = usableId(query?.agentId);
   const name = text(query?.name);
   const sessionId = text(query?.sessionId);
   const startedAtMs = Number.isFinite(query?.startedAtMs) ? query.startedAtMs : null;
+  const nameJoin = agentId !== null && name !== null && sessionId !== null && startedAtMs !== null;
   return {
-    q: { agentId, name, sessionId, notAfterMs: startedAtMs === null ? null : startedAtMs + STOP_START_SLACK_MS },
+    q: {
+      agentId,
+      name,
+      sessionId,
+      notAfterMs: startedAtMs,
+      notBeforeMs: startedAtMs === null ? null : startedAtMs - STOP_NAME_JOIN_WINDOW_MS,
+    },
     needles: {
       id: agentId === null ? null : JSON.stringify(agentId),
-      worker: name === null || sessionId === null ? null : `"worker":${JSON.stringify(name)}`,
+      worker: nameJoin ? `"worker":${JSON.stringify(name)}` : null,
+      bound: nameJoin ? BOUND_EVENT : null,
     },
   };
 }
 
 /**
- * Walk `[lowest, top)` of an open file from its END, `chunkBytes` at a time, and
- * hand each run of WHOLE lines (newest run first) to `onRun` until it says stop.
- *
- * What a chunk boundary splits is carried as BYTES to the next older chunk, so a
- * line is only ever decoded whole and a multibyte character is never decoded
- * half-read. Lines after a region's first newline are whole; what precedes it is
- * the tail of a line that began in an older chunk — or, at the window's edge
- * (`lowest > 0`), a line the window cut, which is dropped. A short read, or a
- * carry past {@link MAX_CARRY_BYTES} (not a ledger), ends the walk.
- *
- * @param {number} fd open file descriptor
- * @param {{top: number, lowest: number, chunkBytes: number}} window byte range and chunk size
- * @param {{bytesRead: number}} io counter, updated as chunks are read
- * @param {(run: string) => boolean} onRun receives whole lines; true stops the walk
- * @returns {void}
- */
-function scanBackwards(fd, { top, lowest, chunkBytes }, io, onRun) {
-  let end = top;
-  let carry = Buffer.alloc(0);
-  while (end > lowest) {
-    const start = Math.max(lowest, end - chunkBytes);
-    const chunk = Buffer.allocUnsafe(end - start);
-    if (readFully(fd, chunk, start) !== chunk.length) return;
-    io.bytesRead += chunk.length;
-    const region = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk;
-    const firstNl = region.indexOf(NEWLINE);
-    // No newline at all in an interior region means the whole region is one partial line.
-    const wholeFrom = start === 0 ? 0 : (firstNl < 0 ? region.length : firstNl + 1);
-    carry = start === 0 ? Buffer.alloc(0) : region.subarray(0, firstNl < 0 ? region.length : firstNl);
-    if (carry.length > MAX_CARRY_BYTES) return;
-    if (wholeFrom < region.length && onRun(region.subarray(wholeFrom).toString('utf8'))) return;
-    end = start;
-  }
-}
-
-/**
  * Find the `subagent_type` a spawn was started with, from the ledger's tail.
  *
- * READS BACKWARDS, in chunks, and stops at the first answer: a chunk that holds
- * no needle costs one native `indexOf` per needle and no decode of its lines.
- * At most `maxBytes + 1` bytes are read — one byte of look-behind tells a line
- * the window edge cut from a whole one. See {@link scanBackwards} for how chunk
- * boundaries are handled. NEVER THROWS.
+ * READS BACKWARDS (`./tail-scan.js`) and stops at the first exact answer: a chunk
+ * that holds no needle costs one native `indexOf` per needle and no decode of its
+ * lines. At most `maxBytes + 1` bytes are read. The name join is only answered
+ * from a scan that covered the WHOLE window (`exhausted`): a scan the parse
+ * budget or a read error cut short has not shown that no bind row exists. NEVER
+ * THROWS.
  *
  * @param {unknown} ledgerPath absolute ledger file path; anything else finds nothing
  * @param {{agentId?: unknown, name?: unknown, sessionId?: unknown, startedAtMs?: unknown}} [query]
- *   `agentId` enables the exact join; `name` + `sessionId` enable the name join, which
- *   `startedAtMs` (the agent's START time) bounds so a LATER same-name spawn is never taken
+ *   `agentId` enables the exact join; with `name`, `sessionId` and `startedAtMs` (the
+ *   agent's START time) the name join is enabled too, bounded to the 10 minutes before START
  * @param {{maxBytes?: number, chunkBytes?: number, maxCandidates?: number, endOffset?: number}} [opts]
  *   caps, and `endOffset` — read as if the file ended there (replay and tests)
- * @returns {{type: string|null, source: string|null, bytesRead: number, candidates: number}}
- *   `source` is `route.bound` | `route.bound>route.selected` | `route.selected:worker`
+ * @returns {{type: string|null, source: string|null, bytesRead: number, candidates: number,
+ *   exhausted: boolean}} `source` is `route.bound` | `route.bound>route.selected` |
+ *   `route.selected:worker`; `exhausted` says the whole window was read
  */
 export function findSpawnSubagentType(ledgerPath, query, opts = {}) {
-  const st = {
-    exact: null, exactDone: false, epoch: null, epochDone: false, workerType: null, workerDone: false, parsed: 0,
-  };
-  const io = { bytesRead: 0 };
+  const st = newState();
+  let scan = { bytesRead: 0, status: 'error' };
   const result = () => {
-    const hit = st.exact
-      ?? (st.workerType === null ? null : { type: st.workerType, source: 'route.selected:worker' });
-    return { type: hit?.type ?? null, source: hit?.source ?? null, bytesRead: io.bytesRead, candidates: st.parsed };
+    const nameJoin = scan.status === 'exhausted' && !st.exactDone && st.workerType !== null;
+    const hit = st.exact ?? (nameJoin ? { type: st.workerType, source: 'route.selected:worker' } : null);
+    return {
+      type: hit?.type ?? null,
+      source: hit?.source ?? null,
+      bytesRead: scan.bytesRead,
+      candidates: st.parsed,
+      exhausted: scan.status === 'exhausted',
+    };
   };
-  let fd = null;
   try {
-    if (typeof ledgerPath !== 'string' || ledgerPath === '') return result();
     const { q, needles } = planSearch(query);
-    st.exactDone = needles.id === null;
-    st.workerDone = needles.worker === null;
-    if (finished(st)) return result();
-
+    if (q.agentId === null) return result();
     const maxCandidates = positiveInt(opts.maxCandidates, STOP_SCAN_MAX_CANDIDATES);
-    fd = openSync(ledgerPath, 'r');
-    const size = fstatSync(fd).size;
-    const top = Number.isFinite(opts.endOffset) && opts.endOffset >= 0
-      ? Math.min(size, Math.floor(opts.endOffset))
-      : size;
-    const floor = Math.max(0, top - positiveInt(opts.maxBytes, STOP_SCAN_BYTES));
-    scanBackwards(fd, {
-      top,
-      // One byte of look-behind: when it is a newline, the line at `floor` is whole.
-      lowest: floor > 0 ? floor - 1 : 0,
-      chunkBytes: positiveInt(opts.chunkBytes, STOP_SCAN_CHUNK_BYTES),
-    }, io, (run) => searchRun(run, st, q, needles, maxCandidates));
+    scan = scanLedgerTail(ledgerPath, opts, (run) => searchRun(run, st, q, needles, maxCandidates));
     return result();
   } catch {
     return result();
-  } finally {
-    if (fd !== null) {
-      try { closeSync(fd); } catch { /* noop */ }
-    }
   }
 }
 
