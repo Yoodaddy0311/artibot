@@ -69,8 +69,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync,
-  writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -208,6 +207,14 @@ function toRequest(opts) {
  * Copy the live ledger once into a fresh temp root, at the path the shared resolver
  * assigns a non-git root, so `--cwd <root>` makes every reader read this copy.
  *
+ * READ, THEN WRITE — NEVER THE PLATFORM'S SINGLE-CALL FILE COPY. On Windows that call
+ * opens the source without write sharing, so for as long as it runs every hook that
+ * appends to the live ledger fails with EBUSY, and the writer does not retry: the row
+ * is silently lost. A measuring tool that drops the rows it measures is its own next
+ * defect. Measured by the reviewer against a 25 MB ledger: 4,793 of 8,820 appends
+ * failed during the single-call copy and 0 of 5,926 during a read plus a write, because
+ * a read shares the file. The hash is of the very buffer that was read and written.
+ *
  * @param {string} live
  * @param {object} deps
  * @returns {{root: string, file: string, bytes: number, sha256: string, takenAt: string}}
@@ -217,10 +224,10 @@ function takeSnapshot(live, deps) {
   try {
     const file = ledgerFilePath(root);
     mkdirSync(path.dirname(file), { recursive: true });
-    copyFileSync(live, file);
-    const bytes = readFileSync(file);
+    const buf = readFileSync(live);
+    writeFileSync(file, buf);
     return {
-      root, file, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), takenAt: nowIso(deps),
+      root, file, bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex'), takenAt: nowIso(deps),
     };
   } catch (err) {
     rmSync(root, { recursive: true, force: true });

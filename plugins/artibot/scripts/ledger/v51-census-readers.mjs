@@ -305,7 +305,7 @@ export const NOT_RUN = Object.freeze([
  */
 export const LIMITATIONS = Object.freeze([
   { id: 'snapshot-copy', text: '원장 유래 수치는 전부 시작 시점에 한 번 복사한 바이트 사본에서 나왔다. 그 뒤에 원장에 붙은 행은 어떤 수치에도 없고, 증가분은 ledger.bytesAtEnd 에만 있다.' },
-  { id: 'store-readers-not-windowed', text: 'recovery-journal-census 는 원장이 아니라 자동조종 세션 저장소를 읽고 --since 를 받지 않는다. 범위는 all 이고 스냅샷 대상이 아니다. 읽은 디렉터리는 runs[].inputPath 에 있다. 기본은 판독기가 고른 위치(v4.71.0 부터 사용자 상태 디렉터리, 그 전에는 플러그인 루트 아래)이고, 새 저장소가 비어 있고 채택 기록이 없을 때만 옛 위치를 대신 읽는다(detail.legacyFallback). --autopilot-dir 를 주면 그 디렉터리만 읽고 폴백은 꺼진다.' },
+  { id: 'store-readers-not-windowed', text: 'recovery-journal-census 는 원장이 아니라 자동조종 세션 저장소를 읽고 --since 를 받지 않는다. 범위는 all 이고 스냅샷 대상이 아니다. 읽은 디렉터리는 runs[].inputPath 에 있다. 기본은 판독기가 고른 위치(저장소를 사용자 상태 디렉터리로 옮긴 판독기는 거기, 옮기기 전 판독기는 플러그인 루트 아래)이고, 새 저장소가 비어 있고 채택 기록이 없을 때만 옛 위치를 대신 읽는다(detail.legacyFallback). --autopilot-dir 를 주면 그 디렉터리만 읽고 폴백은 꺼진다.' },
   { id: 'since-semantics', text: '같은 --since 시각을 창 판독기 전부에 넘기지만 각 판독기가 자기 필드에 적용한다(행 타임스탬프 대 run 시작 시각 등). 창 경계에 걸친 세션은 창 수치에서 잘릴 수 있다.' },
   { id: 'exclusion-scope', text: '--exclude-sessions 는 session-coverage 에만 적용된다. 다른 판독기의 수치에는 제외한 세션의 행이 그대로 들어 있다(런북 1.5: raw 와 병기하고 분모를 깎은 것은 아닌지 본다).' },
   { id: 'existence-audit-inventory', text: 'existence-audit 는 오늘 디스크의 인벤토리(--plugin-root, 기본은 이 스크립트가 든 플러그인)를 이 프로젝트의 원장 이력에 대조한다. modules 는 어떤 이벤트도 싣지 않아 세지 않는다.' },

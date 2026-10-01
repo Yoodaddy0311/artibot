@@ -205,15 +205,15 @@ VC=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/ledger/v51-ce
 node "<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs" --cwd "<대상 리포 루트>" --plugin-root "<installPath>" --since <ISO 시각> --json --out "<증거>.md" > census.json
 ```
 
-v4.71.0 을 설치한 뒤에는 설치본 경로에서 `--plugin-root` 도 뺀 한 줄이면 된다. 스크립트가 든 플러그인이 곧 설치본이라 인벤토리와 기대 티어가 이미 설치본 기준이다. 위 찾기 한 줄은 캐시에서 **가장 높은 버전**을 고른다. 세션이 실제로 쓴 버전과 다를 수 있으니(업데이트 직후 재시작 전 등) §1.1 의 `installPath` 와 다르면 그 경로를 직접 쓴다.
+이 스크립트가 든 릴리스를 설치한 뒤에는 설치본 경로에서 `--plugin-root` 도 뺀 한 줄이면 된다. 스크립트가 든 플러그인이 곧 설치본이라 인벤토리와 기대 티어가 이미 설치본 기준이다. 위 찾기 한 줄은 캐시에서 **가장 높은 버전**을 고른다. 세션이 실제로 쓴 버전과 다를 수 있으니(업데이트 직후 재시작 전 등) §1.1 의 `installPath` 와 다르면 그 경로를 직접 쓴다.
 
 ```text
 node "<installPath>/scripts/ledger/v51-census.mjs" --cwd "<대상 리포 루트>" --since <ISO 시각> --json --out "<증거>.md" > census.json
 ```
 
 - `<installPath>` 는 §1.1 의 값이다. `--plugin-root` 를 빼면 existence-audit 는 이 체크아웃의 인벤토리를, model-routing 은 이 체크아웃의 설정과 로스터를 잰다. 대상 프로젝트가 쓴 것은 설치본이다(실측 2026-09-30: 4.70.0 캐시를 `--plugin-root` 로 주고 판독기 8건 중 error 0).
-- `--autopilot-dir` 는 권장형에서 **뺀다**. v4.71.0 부터 recovery-journal-census 의 기본 저장소는 플러그인 루트가 아니라 사용자 상태 디렉터리 아래(기본 `~/.claude/artibot`)라서 어느 체크아웃이나 설치본에서 돌려도 같은 저장소를 읽는다. 새 저장소에 세션 파일도 채택 기록도 없을 때만 옛 위치(그 판독기가 든 플러그인 루트 아래)를 대신 읽고, 그러면 지표 행의 `detail.legacyFallback` 이 true 이고 `detail.primaryStore` 가 비어 있던 새 저장소다. 실제로 읽은 디렉터리는 `runs[].inputPath` 다. `--autopilot-dir` 를 주면 그 디렉터리만 읽고 폴백은 꺼진다. 옛 위치(`<installPath>/runtime/autopilot`)를 주면 옛 저장소를 강제하는 것이므로, 채택 전의 옛 저장소를 일부러 재거나 복사해 둔 저장소와 픽스처를 읽을 때만 쓴다.
-- 위 저장소 이전 동작은 착지 전 커밋 `6b410964` 의 판독기를 가짜 홈과 가짜 플러그인 루트 아래에서 실행해 확인했다(실측 2026-09-30: 새 저장소가 비면 폴백, 세션이 있으면 새 저장소, `--dir` 이면 폴백 없음). 그 줄기의 수정 커밋과 설치본 4.71.0 에서의 실행은 미확인이다. v4.70.0 까지의 기본은 플러그인 루트 아래였고, 그 배치에서 설치본 4.70.0 저장소는 파일 4개에 저널 1행이었다(실측).
+- `--autopilot-dir` 는 권장형에서 **뺀다**. 자동조종 세션 저장소를 사용자 상태 디렉터리로 옮긴 릴리스부터 recovery-journal-census 의 기본 저장소는 플러그인 루트가 아니라 사용자 상태 디렉터리 아래(기본 `~/.claude/artibot`)라서 어느 체크아웃이나 설치본에서 돌려도 같은 저장소를 읽는다. 새 저장소에 세션 파일도 채택 기록도 없을 때만 옛 위치(그 판독기가 든 플러그인 루트 아래)를 대신 읽고, 그러면 지표 행의 `detail.legacyFallback` 이 true 이고 `detail.primaryStore` 가 비어 있던 새 저장소다. 실제로 읽은 디렉터리는 `runs[].inputPath` 다. `--autopilot-dir` 를 주면 그 디렉터리만 읽고 폴백은 꺼진다. 옛 위치(`<installPath>/runtime/autopilot`)를 주면 옛 저장소를 강제하는 것이므로, 채택 전의 옛 저장소를 일부러 재거나 복사해 둔 저장소와 픽스처를 읽을 때만 쓴다.
+- 위 저장소 이전 동작은 착지 전 커밋 `6b410964` 의 판독기를 가짜 홈과 가짜 플러그인 루트 아래에서 실행해 확인했다(실측 2026-09-30: 새 저장소가 비면 폴백, 세션이 있으면 새 저장소, `--dir` 이면 폴백 없음). 그 줄기의 수정 커밋과, 그 줄기를 담은 릴리스의 설치본에서의 실행은 미확인이다. v4.70.0 까지의 기본은 플러그인 루트 아래였고, 그 배치에서 설치본 4.70.0 저장소는 파일 4개에 저널 1행이었다(실측).
 - `--since` 를 주면 판독기마다 창과 전체 이력을 둘 다 잰다. §2.3 6번이 창만 보고하는 것을 금지한다.
 - JSON 은 크다(이 리포 원장 25MB 로 0.5~0.9MB). 파일로 받고 `metrics` 와 `consistency` 부터 읽는다. Git Bash 의 `>` 를 쓴다. PowerShell 5.1 의 `>` 는 UTF-16 이 될 수 있다(§1.2, 미확인).
 - node 가 PATH 에 없으면 PowerShell 에서 `& (Get-Command node).Source <스크립트> ...` 로 부른다(실측 2026-09-30: PowerShell 에서 외부 임시 git 리포 루트에 서서 성공).
