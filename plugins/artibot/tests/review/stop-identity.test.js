@@ -361,6 +361,21 @@ describe('findSpawnSubagentType - the name join is the fail-open surface', () =>
     }
   });
 
+  it('is OFF when this agent\'s own bind row is OLDER than the eligible receipt: the walk settles on the receipt first', () => {
+    const fresh = sel(START - 2 * MIN, 'toolu_fresh', 'artibot:code-reviewer');
+    // Control: with no bind row for this agent, the very same receipt answers the name join.
+    expect(find(file([fresh], 'older-control.jsonl')))
+      .toMatchObject({ type: 'artibot:code-reviewer', source: 'route.selected:worker', exhausted: true });
+    // A trusted bind whose receipt is nowhere in the file keeps the exact join waiting, so the walk does not stop at
+    // the bind row: it goes on to the window's edge (`exhausted`) with the newer receipt already settled. Only the bind
+    // row can still say "this agent has an identity of its own", and the walk meets it AFTER the receipt.
+    expect(find(file([bound(UNBOUND, 'toolu_gone', 'exact'), fresh], 'older-gone.jsonl')))
+      .toMatchObject({ type: null, source: null, exhausted: true });
+    // An untrusted bind in the same order: nothing the name join may answer either.
+    expect(find(file([bound(UNBOUND, 'toolu_x', 'fifo', 'artibot:frontend-developer'), fresh], 'older-fifo.jsonl')))
+      .toMatchObject({ type: null, source: null });
+  });
+
   it.each([
     ['no usable agent id (null)', { agentId: null }],
     ['the fallback agent id "unknown"', { agentId: 'unknown' }],

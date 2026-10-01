@@ -89,6 +89,16 @@ describe('readReviewKeysTail - what it collects', () => {
     expect(got.complete).toBe(true);
   });
 
+  it('skips a quoting row even when it carries a top-level key of its own in this session', () => {
+    // The case above nests the key inside `data`, so a reader that dropped the event check would still add nothing.
+    // Here the row quotes the marker AND has a top-level `idempotency_key`: only the event check keeps it out.
+    const quoting = { ...reviewRow('ledger.rejected', `ledger.rejected:${SID}:refused`), data: { event: 'review.completed', reason: 'oversize' } };
+    const real = `review.completed:${SID}:v1`;
+    const got = readReviewKeysTail(write(lines([quoting, reviewRow('review.completed', real)])), SID);
+    expect(got.keys).toEqual([real]);
+    expect(got.complete).toBe(true);
+  });
+
   it('returns each key once', () => {
     const key = `review.completed:${SID}:v1`;
     const file = write(lines([reviewRow('review.completed', key), reviewRow('review.completed', key)]));
