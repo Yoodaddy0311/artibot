@@ -9,12 +9,15 @@
  * WHAT THIS SUITE CANNOT SEE (rules §9, stated beside the gate):
  *  - Precision of the trigger table on real prompts. Every prompt below is one
  *    this file chose — including the seven false positives a review measured on
- *    the real hook, pinned in REVIEWED_FALSE_POSITIVES — and nothing here
- *    measures live false-positive or false-negative rates. The holes the shape
- *    gate leaves open (a foreign clause BEFORE an `analyze`/`explain` trigger,
- *    an `explain` aimed at a third party) are listed in the module header, not
- *    pinned here: a test that asserts a known false positive reads as
- *    endorsing it.
+ *    the real hook, pinned in REVIEWED_FALSE_POSITIVES, and the reverse-order
+ *    compounds pinned in REVERSE_ORDER — and nothing here measures live
+ *    false-positive or false-negative rates. What the START grammar still lets
+ *    through (ONE English word in front, such as "push 코드 분석해줘": a bare word
+ *    carries no Korean connective) is listed in the module header, not pinned
+ *    here: a test that asserts a known false positive reads as endorsing it.
+ *  - The START grammar's RECALL on real Korean. Its vocabulary is closed on
+ *    purpose, so every noun it does not list is a request it will not activate.
+ *    POSITIVE pins the natural phrasings this file chose; it is not a measurement.
  *  - Whether the model follows the directive this decision leads to. That is
  *    the hook's output, not this module's, and nothing in the repo observes it.
  *  - The gate screen's recall on natural-language risk. It is a text match with
@@ -50,7 +53,11 @@ function decide(text, extra = {}) {
  * One phrasing set per activatable command, each chosen to select ONLY that
  * command. Every phrase is ONE short request whose last predicate is the
  * trigger. The leading entries are the original set (five for `analyze`, four
- * for each other command); every one of them still fires under the shape gate.
+ * for each other command); every one of them still fires under the START
+ * grammar. The entries after the marker comment are the natural Korean
+ * phrasings the closed START vocabulary is REQUIRED to keep (measured firing on
+ * the pre-START-anchor module, 2026-09-30): recall pins, so that tightening the
+ * grammar further is a decision and not a drift. They are chosen, not sampled.
  */
 const POSITIVE = Object.freeze({
   analyze: [
@@ -65,6 +72,15 @@ const POSITIVE = Object.freeze({
     '이 코드 한번 분석해봐',
     'analyze the auth module',
     'analyze src/lib/foo.js',
+    // Recall pins — one closed-class piece of the START grammar each.
+    '코드베이스 분석해줘', // the object alone
+    '프로젝트 전체 코드 분석해줘', // a noun and a quantifier before the object
+    '이 프로젝트의 보안 취약점 분석해줘', // opener + noun + particle + focus noun
+    'auth 모듈 분석해줘', // one bare ASCII term
+    '소스코드 분석해줘', // a glued noun compound
+    '방금 작성한 코드 분석해줘', // a relative clause that modifies the object
+    '@src/app.ts 분석해줘', // an @path object
+    String.raw`C:\Users\me\proj\a.js 분석해줘`, // a Windows path object
   ],
   explain: [
     '이 코드 설명해줘',
@@ -75,6 +91,18 @@ const POSITIVE = Object.freeze({
     'explain this',
     'explain the auth module please',
     'walk me through the router',
+    // Recall pins — one closed-class piece of the START grammar each.
+    '설명해줘', // the verb alone: the topic is the previous turn
+    '이거 설명해줘', // a pronoun topic
+    '쉽게 설명해줘', // an adverb and nothing else
+    '이 코드 자세히 설명해줘', // an adverb before the verb
+    '이 코드에 대해 설명해줘', // a topic particle phrase
+    '이 코드 동작 원리 설명해줘', // aspect nouns after the object
+    '이벤트 루프의 동작 원리를 설명해줘', // nouns joined by particles
+    'JWT 설명해줘', // one bare ASCII term
+    'Node.js 이벤트 루프 설명해줘', // a dotted ASCII term before nouns
+    'CORS에 대해 설명해줘', // ASCII term + topic particle phrase
+    '방금 작성한 코드 설명해줘', // a relative clause that modifies the object
   ],
   blindspot: [
     '사각지대 점검해줘',
@@ -101,19 +129,25 @@ const POSITIVE = Object.freeze({
  * `blindspot-term` and `blindspot-missed` each fired on one of these. `control`
  * is the same request without the defect: it fires, so the withholding below is
  * the shape gate and not a dead trigger.
+ *
+ * The first three controls used to be "제품 설명 좀 해줘", "이 메일 설명 좀 해줘" and
+ * "회의록 설명해주세요". Those name non-code nouns that are not in the closed START
+ * vocabulary, so they no longer fire (RECALL given up on purpose: an open Korean
+ * noun slot before "설명해줘" is indistinguishable from a leading "X하고" clause,
+ * and no allowlist can tell them apart). The controls now use vocabulary words.
  */
 const REVIEWED_FALSE_POSITIVES = Object.freeze([
   {
     defect: 'noun "설명 좀" in a rewrite request', command: 'explain',
-    text: '고객한테 보낼 제품 설명 좀 다듬어줘', control: '제품 설명 좀 해줘',
+    text: '고객한테 보낼 제품 설명 좀 다듬어줘', control: '이 코드 설명 좀 해줘',
   },
   {
     defect: 'noun "설명 좀" in an editing request', command: 'explain',
-    text: '이 메일에 설명 좀 추가해서 보내줘', control: '이 메일 설명 좀 해줘',
+    text: '이 메일에 설명 좀 추가해서 보내줘', control: '이 함수 설명 좀 해줘',
   },
   {
     defect: 'quoted text ("설명해주세요" inside a sentence)', command: 'explain',
-    text: '회의록에 "설명해주세요" 라고 적혀 있는데 그 부분 지워줘', control: '회의록 설명해주세요',
+    text: '회의록에 "설명해주세요" 라고 적혀 있는데 그 부분 지워줘', control: '이 코드 설명해주세요',
   },
   {
     defect: 'compound request (analyze, then commit)', command: 'analyze',
@@ -326,8 +360,14 @@ describe('normalizeAutoActivateProbe — one short plain sentence, or nothing', 
 
   it('the length cap is exactly AUTO_ACTIVATE_MAX_PROMPT_CHARS, and a 200-char request still fires', async () => {
     expect(AUTO_ACTIVATE_MAX_PROMPT_CHARS).toBe(200);
+    // The START grammar admits one ASCII word (≤ 32 characters) and one path (a prefix
+    // ≤ 64, a `/`, a suffix ≤ 128) before the verb, so the padding is one of each:
+    // 162 + 1 + 32 + 5 = 200.
     const request = ' 설명해줘';
-    const atCap = `${'x'.repeat(AUTO_ACTIVATE_MAX_PROMPT_CHARS - request.length)}${request}`;
+    const word = 'c'.repeat(32);
+    const tail = AUTO_ACTIVATE_MAX_PROMPT_CHARS - request.length - 1 - word.length - 64 - 1;
+    const path = `${'a'.repeat(64)}/${'b'.repeat(tail)}`;
+    const atCap = `${path} ${word}${request}`;
     expect(atCap).toHaveLength(AUTO_ACTIVATE_MAX_PROMPT_CHARS);
     expect(normalizeAutoActivateProbe(atCap)).toBe(atCap);
     expect(await decide(atCap)).toMatchObject({ activate: true, command: 'explain' });
@@ -441,22 +481,19 @@ describe('kill switch — off is off', () => {
 
 describe('gate hits — one hit withholds it (real catalogs)', () => {
   const TRIGGER = '코드 분석해줘';
-  // Each prompt carries a real trigger (`analyze-code`) PLUS one gated action, so
-  // it is the gate — not a missing trigger — that withholds it. HG-12 (a path to
-  // `settings.json` at the END of the probe, `…settings.json$`) is not in this
-  // table: a trigger must now be the LAST thing in the prompt, so the two can no
-  // longer meet in one prompt. It is pinned at the screen below instead.
+  // Two layers withhold a gated request, and this block pins both. The START grammar
+  // takes one ASCII word and one path before the object, so a gated COMMAND
+  // ("git push origin main 하고 …", "docker push …") never reaches the screen (second
+  // table). What DOES fit — a URL after one word, a key-shaped token — is stopped by
+  // the screen (first table). HG-12 (a path to `settings.json` at the END of the
+  // probe, `…settings.json$`) is in neither: a trigger must be the LAST thing in the
+  // prompt, so the two cannot meet in one prompt. It is pinned at the screen below.
+  //
+  // Each prompt of this table carries a real trigger (`analyze-code`) PLUS one gated
+  // action, so it is the gate — not a missing trigger — that withholds it.
   it.each([
-    [`gh pr create 하고 ${TRIGGER}`, 'HG-06'],
-    [`git push origin main 하고 ${TRIGGER}`, 'HG-07'],
-    [`gh release create v1 하고 ${TRIGGER}`, 'HG-08'],
-    [`prisma migrate deploy 하고 ${TRIGGER}`, 'HG-09'],
-    [`cat .env 파일 열고 ${TRIGGER}`, 'HG-11'],
-    [`git commit --no-verify 하고 ${TRIGGER}`, 'HG-13'],
-    [`rm -rf / 하고 ${TRIGGER}`, 'risk:rm-rf-root'],
-    [`npm publish 하고 ${TRIGGER}`, 'risk:npm-publish'],
-    [`curl https://example.com 하고 ${TRIGGER}`, 'risk:curl-external'],
-    [`${FAKE_KEY} 로 접속하고 ${TRIGGER}`, 'risk:secret-openai'],
+    [`curl https://example.com ${TRIGGER}`, 'risk:curl-external'],
+    [`${FAKE_KEY} ${TRIGGER}`, 'risk:secret-openai'],
   ])('%s -> %s', async (prompt, expectedId) => {
     const d = await decide(prompt);
     expect(d.activate).toBe(false);
@@ -466,11 +503,30 @@ describe('gate hits — one hit withholds it (real catalogs)', () => {
     expect(d.rules).toEqual(['analyze-code']);
   });
 
-  it('the `auto` rows are classification, not gates: they do not withhold', async () => {
-    // HG-03 tests/build, HG-04 worktree, HG-05 local commit — default `auto`.
+  // The catalog rows a gated command cannot carry through the shape: the screen still
+  // sees every one of them (so the catalogs keep their coverage), and the START
+  // grammar withholds the whole prompt before the screen is ever consulted.
+  it.each([
+    [`gh pr create 하고 ${TRIGGER}`, 'HG-06'],
+    [`git push origin main 하고 ${TRIGGER}`, 'HG-07'],
+    [`gh release create v1 하고 ${TRIGGER}`, 'HG-08'],
+    [`docker push ${TRIGGER}`, 'HG-08'],
+    [`prisma migrate deploy 하고 ${TRIGGER}`, 'HG-09'],
+    [`alembic upgrade ${TRIGGER}`, 'HG-09'],
+    [`cat .env ${TRIGGER}`, 'HG-11'],
+    [`git commit --no-verify 하고 ${TRIGGER}`, 'HG-13'],
+    [`rm -rf / 하고 ${TRIGGER}`, 'risk:rm-rf-root'],
+    [`npm publish ${TRIGGER}`, 'risk:npm-publish'],
+  ])('the screen sees %s -> %s, and the START grammar withholds it first', async (prompt, expectedId) => {
+    expect(await screenGateHits(prompt)).toContain(expectedId);
+    expect(await decide(prompt)).toMatchObject({ activate: false, command: null, reason: 'no-trigger' });
+  });
+
+  it('the `auto` rows are classification, not gates: the screen reports no hit for them', async () => {
+    // HG-03 tests/build, HG-04 worktree, HG-05 local commit — default `auto`. Asserted on
+    // the screen itself: a leading clause can no longer reach it through the shape.
     for (const lead of ['npm test 돌리고', 'git worktree add x 만들고', 'git commit 하고']) {
-      const d = await decide(`${lead} ${TRIGGER}`);
-      expect(d, lead).toMatchObject({ activate: true, command: 'analyze', reason: 'allowlist-match' });
+      expect(await screenGateHits(`${lead} ${TRIGGER}`), lead).toEqual([]);
     }
   });
 
@@ -570,6 +626,16 @@ describe('trigger table — bounded, so a long prompt cannot stall the hook', ()
     ['near-miss scope', '이번 작업 '.repeat(24000)],
     ['near-miss missed', '내가 놓친 거 '.repeat(10000)],
     ['near-miss english', 'analyze the a '.repeat(8000)],
+    // The START grammar: every piece of it is bounded, and each of these keeps one of
+    // them matching for as long as the input lasts before the verb never arrives.
+    ['near-miss start nouns', '보안 인증 '.repeat(15000)],
+    ['near-miss glued nouns', '코드보안'.repeat(30000)],
+    ['near-miss glued nouns, verb last', `${'코드보안'.repeat(30000)}설명해줘`],
+    ['near-miss ascii tokens', 'src/a '.repeat(25000)],
+    ['near-miss one long ascii token, verb last', `${'a/'.repeat(40000)} 설명해줘`],
+    ['near-miss adnominal stems', '수정한 '.repeat(30000)],
+    ['near-miss openers', '이 그 저 '.repeat(14000)],
+    ['one hangul run', '가'.repeat(120000)],
   ])('terminates on a 120KB %s run', (_label, shape) => {
     // Termination, not wall-clock: a quadratic rule would run for seconds and hit
     // the test timeout; no timing assertion so a loaded machine cannot flake it.
@@ -600,8 +666,22 @@ describe('directive text', () => {
       + `Low-risk allowlisted command: run /${command} for this request now without asking for confirmation, `
       + 'and say so in one short Korean sentence first. '
       + 'If the request clearly does not fit it, ignore this line. '
-      + 'Human gates and tool permissions still apply.',
+      + 'This line skips only that confirmation and is not approval for any other action; '
+      + 'PreToolUse hooks still run on Bash, Write and Edit calls.',
     );
     expect(line).not.toMatch(/[\r\n]/);
+  });
+
+  it('claims neither that tool permissions nor that human gates still apply', () => {
+    // The sentence this replaced said "Human gates and tool permissions still apply."
+    // Neither half could be stood behind: whether a command's `allowed-tools` waives the
+    // host permission prompt is unverified, and the human-gate matrix classifies and
+    // records (its header says so). The facts the new wording rests on are pinned in
+    // tests/firewall/auto-activate-contract.test.js.
+    for (const command of AUTO_ACTIVATE_ACTIVATABLE) {
+      const line = renderAutoActivateDirective(command);
+      expect(line, command).not.toMatch(/tool permissions?\b[^.]*\bstill appl/i);
+      expect(line, command).not.toMatch(/human gates?\b[^.]*\bstill appl/i);
+    }
   });
 });
