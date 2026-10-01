@@ -643,10 +643,18 @@ describe('renderTickLines — pure', () => {
     expect(text).toContain('lease heartbeat');
     expect(text).toContain('renewed 1 of 2 renewable');
     expect(text).toContain('min(ttl/3, 45m)');
-    expect(text).toContain('auth: renewed');
+    expect(text).toContain('auth: renewed (evidence: session-alive)');
     expect(text).toMatch(/billing: skipped:not-due.*20m.*45m/);
     expect(text).toContain('quiet: skipped:no-liveness-evidence');
     expect(text).not.toContain('done-lane');
+  });
+
+  it('says what a renewal rested on, and when the lease it renewed had already lapsed', () => {
+    const late = { limb: 'late', opsState: 'active', working: true, renew: true, evidence: 'lane-state-fresh', outcome: 'renewed', missionId: MISSION, detail: { reason: 'due', ageMs: 30 * H, intervalMs: 45 * MIN, ttlMs: 24 * H, expired: true } };
+    const bare = { limb: 'bare', opsState: 'active', working: true, renew: true, evidence: null, outcome: 'renewed', missionId: MISSION };
+    const text = renderTickLines({ heartbeat: heartbeat({ lanes: [late, bare] }), reclaim: empty }).join('\n');
+    expect(text).toContain('  late: renewed (evidence: lane-state-fresh) (the lease had already lapsed)\n');
+    expect(text).toMatch(/\n {2}bare: renewed$/m);
   });
 
   it('is quiet when no lane is working and nothing lapsed', () => {

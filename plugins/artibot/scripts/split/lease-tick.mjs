@@ -306,6 +306,38 @@ export async function tick({ parent, runId = null, nowMs = Date.now(), storeDir,
 }
 
 /**
+ * What follows a working lane's outcome in the heartbeat block: the numbers a
+ * not-due lane was judged on, or what a renewal rested on. Pure and total.
+ *
+ * @param {{ outcome?: string, evidence?: string|null, detail?: object }} lane - One `renewLaneHeartbeats` row.
+ * @returns {string}
+ */
+function laneNote(lane) {
+  const d = lane.detail;
+  if (lane.outcome === 'skipped:not-due' && d) return ` (last beat ${fmtAge(d.ageMs)} ago, due after ${fmtAge(d.intervalMs)})`;
+  if (lane.outcome === 'renewed') return `${lane.evidence ? ` (evidence: ${lane.evidence})` : ''}${d?.expired ? ' (the lease had already lapsed)' : ''}`;
+  return '';
+}
+
+/**
+ * The heartbeat block of a tick's text output: one line per WORKING lane under
+ * a header, nothing when no lane is working. Pure and total.
+ *
+ * @param {object} hb - `tick().leases.heartbeat`
+ * @returns {string[]}
+ */
+function heartbeatLines(hb) {
+  if (hb.available === false) return [`lease heartbeat: not run (${hb.reason ?? 'unavailable'})`];
+  const working = (Array.isArray(hb.lanes) ? hb.lanes : []).filter((l) => l?.working);
+  if (working.length === 0) return [];
+  const cap = Number.isFinite(hb.maxIntervalMs) ? Math.round(hb.maxIntervalMs / 60000) : 45;
+  return [
+    `lease heartbeat (every min(ttl/${hb.divisor ?? 3}, ${cap}m), only with liveness evidence): renewed ${hb.renewed} of ${hb.renewable} renewable lane(s)`,
+    ...working.map((l) => `  ${l.limb}: ${l.outcome}${laneNote(l)}`),
+  ];
+}
+
+/**
  * The lines of a tick's text output. Quiet when there is nothing to say: no
  * working lane and nothing lapsed print nothing. Pure and total.
  *
@@ -315,24 +347,7 @@ export async function tick({ parent, runId = null, nowMs = Date.now(), storeDir,
 export function renderTickLines(leases) {
   const lines = [];
   const hb = leases?.heartbeat;
-  if (hb && typeof hb === 'object') {
-    if (hb.available === false) {
-      lines.push(`lease heartbeat: not run (${hb.reason ?? 'unavailable'})`);
-    } else {
-      const working = (Array.isArray(hb.lanes) ? hb.lanes : []).filter((l) => l?.working);
-      if (working.length > 0) {
-        const cap = Number.isFinite(hb.maxIntervalMs) ? Math.round(hb.maxIntervalMs / 60000) : 45;
-        lines.push(`lease heartbeat (every min(ttl/${hb.divisor ?? 3}, ${cap}m), only with liveness evidence): renewed ${hb.renewed} of ${hb.renewable} renewable lane(s)`);
-        for (const l of working) {
-          const d = l.detail;
-          let note = '';
-          if (l.outcome === 'skipped:not-due' && d) note = ` (last beat ${fmtAge(d.ageMs)} ago, due after ${fmtAge(d.intervalMs)})`;
-          else if (l.outcome === 'renewed') note = `${l.evidence ? ` (evidence: ${l.evidence})` : ''}${d?.expired ? ' (the lease had already lapsed)' : ''}`;
-          lines.push(`  ${l.limb}: ${l.outcome}${note}`);
-        }
-      }
-    }
-  }
+  if (hb && typeof hb === 'object') lines.push(...heartbeatLines(hb));
   const rc = leases?.reclaim;
   if (rc && typeof rc === 'object' && (rc.mode === 'apply' || rc.mode === 'refused')) {
     const results = Array.isArray(rc.results) ? rc.results : [];
