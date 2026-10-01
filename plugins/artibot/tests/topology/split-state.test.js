@@ -1904,10 +1904,14 @@ describe('SH-11 stale guard (④)', () => {
   it('the same refresh over a SEALED lane is stale by the seal, without reading a stamp', () => {
     const w = flippedWorld();
     legacyRefresh(w, iso(6, 30));
+    const before = runBytes(w);
+    const v = storeVersion(w);
     const res = boundWrite(w, 'alpha', { ops_state: 'done' }, { now: () => utc(7) });
     expect(res).toMatchObject({ ok: false, reason: 'binding-stale', worker: 'alpha' });
     expect(res.detail).toMatch(/projected/);
     expect(res.detail).toMatch(/state: "active" -> "review"/);
+    expect(runBytes(w)).toEqual(before); // a refusal writes nothing: run.json and the store stay put
+    expect(storeVersion(w)).toBe(v);
   });
 
   it('CONTROL — the same refresh over a lane that says what ops says is not stale: there is no drift to lose', () => {

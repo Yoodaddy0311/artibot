@@ -224,13 +224,23 @@ function recordForkPoint({ parentRoot, plan, worktreePath, limb }) {
   if (!base) {
     return { value: null, recorded: false, ref: null, reason: `git merge-base <ref> HEAD failed in ${worktreePath} — tried ${INTEGRATION_REFS.join(', ')} (${failures.join(' | ')})` };
   }
-  updatePlanJson(parentRoot, (cur) => {
-    const limbs = Array.isArray(cur.limbs) ? [...cur.limbs] : [];
-    const i = limbs.findIndex((l) => l && l.limb === limb);
-    if (i < 0 || forkPointForLimb(cur, limb)) return cur;
-    limbs[i] = { ...limbs[i], forkPoint: base };
-    return { ...cur, limbs };
-  });
+  try {
+    updatePlanJson(parentRoot, (cur) => {
+      const limbs = Array.isArray(cur.limbs) ? [...cur.limbs] : [];
+      const i = limbs.findIndex((l) => l && l.limb === limb);
+      if (i < 0 || forkPointForLimb(cur, limb)) return cur;
+      limbs[i] = { ...limbs[i], forkPoint: base };
+      return { ...cur, limbs };
+    });
+  } catch (err) {
+    // Another process holds plan.json.lock past the lock's wait budget (the plan write has been exclusive
+    // since SH-11 pre-flip condition 3). Same class as the git failure above — reported, not thrown: the
+    // fork point stays UNRECORDED and `value` is null, so the prompt carries plan.base, which is what `land`
+    // falls back to (it must not be told a base `land` will not use). A later dispatch retries. Anything
+    // else the write throws is a real fault and stays loud.
+    if (err?.code !== 'ELOCKTIMEOUT') throw err;
+    return { value: null, recorded: false, ref, reason: `plan.json lock not acquired — fork point ${base} (via ${ref}) NOT recorded: ${err.message}` };
+  }
   return { value: base, recorded: true, reason: null, ref };
 }
 

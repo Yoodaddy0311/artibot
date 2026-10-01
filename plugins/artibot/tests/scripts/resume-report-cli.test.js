@@ -473,7 +473,7 @@ describe('source pins', () => {
   });
 
   it('binds no write port of the StateStore', () => {
-    for (const port of ['updateMission', 'claimTask', 'releaseTask', 'heartbeatWorker']) {
+    for (const port of ['updateMission', 'updateTask', 'claimTask', 'releaseTask', 'heartbeatWorker']) {
       expect(source, `${port} must not appear in a report-only CLI`).not.toContain(port);
     }
   });
