@@ -91,7 +91,7 @@
  * per slot:
  *   - ONE ROW PER SESSION-DAY UNIT OF ONE HOOK, NOT ONE PER FIRING. A row is the
  *     FIRST firing per (UTC day, session, slot, hook); the tap looks for a marker
- *     file first (`_main-entry.js#fireOnceDirect`) and does not load this module
+ *     file first (`_hook-seen-marker.js#fireOnceDirect`) and does not load this module
  *     once it exists. A row per firing was withdrawn on architect review
  *     (2026-09-29): a direct hook runs on every tool call, so it put this
  *     module's graph on each of them and grew the ledger by thousands of rows a
@@ -468,7 +468,7 @@ export function buildDirectHookFiredEnvelope(args) {
 /**
  * Build and append the row for a directly registered hook. It writes exactly the
  * row it is handed; which firing is worth a row is decided before it is loaded
- * (`_main-entry.js#fireOnceDirect`). NEVER throws, NEVER writes stdout, and --
+ * (`_hook-seen-marker.js#fireOnceDirect`). NEVER throws, NEVER writes stdout, and --
  * unlike {@link recordHookFired} -- NEVER writes stderr either.
  *
  * The project root comes from {@link nearestGitRoot}, not `resolveProjectRoot`:

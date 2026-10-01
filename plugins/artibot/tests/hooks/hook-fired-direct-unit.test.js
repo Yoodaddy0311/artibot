@@ -1,9 +1,13 @@
 /**
  * OB-24 / R1 `ob24-direct-hook-carrier` -- the IN-PROCESS half of the direct-hook
  * suite: the slot allowlist, the pure envelope, the payload snapshot, the
- * recording switch, the tap itself, the repository finder, and the no-spawn
- * guarantee. The spawned half (every registration run for real, byte identity,
- * fail-silent, linked worktree, double count) is `hook-fired-direct.test.js`;
+ * session rule, the recording switch, the tap itself, the repository finder, the
+ * import-graph pins of `_main-entry.js` and its sibling `_hook-seen-marker.js`,
+ * and the no-spawn guarantee. The spawned half (every registration run for real,
+ * byte identity, fail-silent, linked worktree, double count) is
+ * `hook-fired-direct.test.js`; the deny-branch bytes are
+ * `hook-fired-direct-deny.test.js`; what the marker module costs a firing is
+ * read from the process's module log in `hook-fired-direct-marker-load.test.js`;
  * shared plumbing is `tests/helpers/hook-fired-harness.js`.
  *
  * WHAT THIS FILE CANNOT SEE (rules section 9)
@@ -174,6 +178,40 @@ describe('snapshotFiring: the tap hands the recorder a copy, not the live payloa
   });
 });
 
+describe('firingSessionId: the one rule for "this firing has a session"', () => {
+  // The tap asks it before it loads the marker module, and the marker module asks it again as the
+  // first decision of fireOnceDirect. Two callers, one function: they cannot disagree.
+  it('takes the first NON-BLANK string of session_id, then sessionId', () => {
+    expect(entry.firingSessionId({ session_id: 'abc', sessionId: 'xyz' })).toBe('abc');
+    expect(entry.firingSessionId({ sessionId: 'xyz' })).toBe('xyz');
+    expect(entry.firingSessionId({ session_id: '', sessionId: 'xyz' })).toBe('xyz');
+    expect(entry.firingSessionId({ session_id: '  \t', sessionId: 'xyz' })).toBe('xyz');
+  });
+
+  it('is null for anything that is not a usable session, and never throws', () => {
+    for (const bad of [
+      undefined, null, {}, 'text', 7, [], { session_id: 5 }, { session_id: { a: 1 } },
+      { session_id: ' ', sessionId: '\t' }, { session_id: undefined, sessionId: null },
+    ]) {
+      expect(() => entry.firingSessionId(bad)).not.toThrow();
+      expect(entry.firingSessionId(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('returns the id as given, untrimmed: the marker and the row must key the same string', () => {
+    expect(entry.firingSessionId({ session_id: ' abc ' })).toBe(' abc ');
+  });
+
+  it('is what the snapshot carries: a payload the tap would skip, the recorder would refuse too', () => {
+    for (const over of [{ session_id: undefined }, { session_id: '   ' }, { session_id: 5 }]) {
+      const full = payload(over);
+      expect(entry.firingSessionId(entry.snapshotFiring(full)), JSON.stringify(over)).toBeNull();
+      expect(rec.buildDirectHookFiredEnvelope({ hook: 'pre-bash', payload: full }), JSON.stringify(over)).toBeNull();
+    }
+    expect(entry.firingSessionId(entry.snapshotFiring(payload()))).toBe(SID);
+  });
+});
+
 describe('directRecordingEnabled: three literals of ARTIBOT_HOOK_FIRED_DIRECT decide it', () => {
   const RUNNER = { VITEST: 'true' };
 
@@ -273,15 +311,73 @@ describe('nearestGitRoot: asks the ledger writer\'s own resolver, never the mark
   });
 });
 
-describe('_main-entry.js stays a dependency-free leaf', () => {
-  // A static import of anything under lib/ broke scripts that copy this file into a minimal tree
-  // (tests/scripts/sync-marketplace-meta.test.js: ERR_MODULE_NOT_FOUND, measured 2026-09-29).
-  it('imports nothing statically except node: builtins; lib/ is loaded on demand', () => {
-    const src = readFileSync(path.join(HOOKS_DIR, '_main-entry.js'), 'utf-8');
-    const staticSpecifiers = [...src.matchAll(/^import\s[^;]*?from\s+'([^']+)';/gm)].map((m) => m[1]);
-    expect(staticSpecifiers.length).toBeGreaterThan(0);
-    expect(staticSpecifiers.filter((s) => !s.startsWith('node:'))).toEqual([]);
+/**
+ * Every module specifier a source loads at LINK time: `import ... from '...'`, a bare
+ * `import '...'`, and a re-export (`export { a } from '...'`, `export * from '...'`), which is
+ * a static import too. A dynamic `import('...')` is deliberately NOT one: that is the on-demand
+ * edge these pins protect. Line-anchored, so a specifier quoted in a comment or a string is
+ * not read as one. (The scan that stood here before saw `import ... from` only, so a
+ * back-compat re-export of the marker functions from `_main-entry.js` would have walked past it.)
+ *
+ * @param {string} src
+ * @returns {string[]}
+ */
+function staticSpecifiers(src) {
+  const pattern = /^import\s[^;]*?from\s+'([^']+)';|^import\s+'([^']+)';|^export\s+(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+'([^']+)';/gm;
+  return [...src.matchAll(pattern)].map((m) => m[1] ?? m[2] ?? m[3]);
+}
+
+describe('_main-entry.js and _hook-seen-marker.js stay leaves', () => {
+  // A static import of anything under lib/ broke scripts that copy _main-entry.js into a minimal tree
+  // (tests/scripts/sync-marketplace-meta.test.js: ERR_MODULE_NOT_FOUND, measured 2026-09-29). The same
+  // holds for the sibling marker module: tests/hooks/runtime-prompt-decision-wiring.test.js copies
+  // _main-entry.js ALONE, so _main-entry.js may reach the marker module only with a dynamic import().
+  const read = (name) => readFileSync(path.join(HOOKS_DIR, name), 'utf-8');
+
+  it('the specifier scan sees every static form and skips the dynamic one (detector self-check)', () => {
+    const sample = [
+      "import a from 'node:fs';",
+      "import { b,",
+      "  c } from './multi-line.js';",
+      "import './bare.js';",
+      "export { d } from './re-export.js';",
+      "export * from './star.js';",
+      "export * as e from './star-as.js';",
+      "// import x from './in-a-comment.js';",
+      "const lazy = () => import('./dynamic.js');",
+      "export function f() { return 'from \"./in-a-string.js\";'; }",
+    ].join('\n');
+    expect(staticSpecifiers(sample)).toEqual([
+      'node:fs', './multi-line.js', './bare.js', './re-export.js', './star.js', './star-as.js',
+    ]);
+  });
+
+  it('_main-entry.js imports nothing statically except node: builtins; lib/ and the marker module load on demand', () => {
+    const src = read('_main-entry.js');
+    const specs = staticSpecifiers(src);
+    expect(specs.length).toBeGreaterThan(0);
+    expect(specs.filter((s) => !s.startsWith('node:'))).toEqual([]);
     expect(src).toMatch(/import\('\.\.\/\.\.\/lib\/project-state\/git-common-dir\.js'\)/);
+    expect(src).toMatch(/import\('\.\/_hook-seen-marker\.js'\)/);
+  });
+
+  it('_main-entry.js takes only realpathSync from node:fs and nothing from node:module', () => {
+    // The read-only CLIs (scripts/ledger/*) import isMainEntry from here, and
+    // tests/ledger/recovery-journal-census.test.js says this file "takes only realpathSync" so that
+    // their import graph holds no writer. That sentence was true when written (2026-09-22), false
+    // from the day the marker code (mkdirSync, openSync, rmSync, createRequire) landed here, and
+    // true again once it moved out. This is what keeps it true.
+    const src = read('_main-entry.js');
+    const fsNames = [...src.matchAll(/^import\s*\{([^}]*)\}\s*from\s+'node:fs';/gm)]
+      .flatMap((m) => m[1].split(',').map((name) => name.trim()).filter(Boolean));
+    expect(fsNames).toEqual(['realpathSync']);
+    expect(staticSpecifiers(src)).not.toContain('node:module');
+  });
+
+  it('_hook-seen-marker.js takes node: builtins and ./_main-entry.js, and nothing under lib/', () => {
+    const specs = staticSpecifiers(read('_hook-seen-marker.js'));
+    expect(specs.length).toBeGreaterThan(1);
+    expect(specs.filter((s) => !s.startsWith('node:'))).toEqual(['./_main-entry.js']);
   });
 });
 

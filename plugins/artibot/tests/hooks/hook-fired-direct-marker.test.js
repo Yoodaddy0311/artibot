@@ -19,6 +19,13 @@
  * loaded when the marker exists). The spawned half is in
  * `hook-fired-direct.test.js`, which also reads the process's real module log.
  *
+ * WHERE THE CODE IS. `directMarkerPath`, `pruneHookSeen` and `fireOnceDirect`
+ * live in `scripts/hooks/_hook-seen-marker.js` since review R1 SHOULD 2
+ * (2026-09-30); they used to be exports of `_main-entry.js`, which keeps
+ * `hookStem` and `directHookName` (the name rule below) and is what the marker
+ * module imports `DIRECT_HOOK_SLOTS` from. Nothing else changed here: the
+ * expectations are the ones the code had before it moved.
+ *
  * WHAT THIS FILE CANNOT SEE (rules section 9)
  *   - REAL PARALLELISM. The duplicate on racing first firings is accepted, not
  *     pinned: the outcome is a race, and asserting it either way would be a lie.
@@ -47,11 +54,14 @@ import {
 
 const COMMON_URL = pathToFileURL(path.join(PLUGIN_ROOT, 'lib', 'project-state', 'git-common-dir.js')).href;
 const STORE_URL = pathToFileURL(path.join(PLUGIN_ROOT, 'lib', 'project-state', 'store-location.js')).href;
+const MARKER_URL = pathToFileURL(path.join(PLUGIN_ROOT, 'scripts', 'hooks', '_hook-seen-marker.js')).href;
 
 let entry;
+let marker;
 
 beforeAll(async () => {
   entry = await import(MAIN_ENTRY_URL);
+  marker = await import(MARKER_URL);
 });
 
 afterEach(removeSandboxes);
@@ -66,27 +76,27 @@ describe('directMarkerPath: one marker per (UTC day, session, slot, hook)', () =
   const args = (over = {}) => ({ storeDir: STORE, sessionId: SID, slot: 'PreToolUse', hook: 'pre-bash', nowMs: NOW, ...over });
 
   it('is <store>/hook-seen/<UTC day>/<first 16 hex of sha1(session)>.<slot>.<hook>', () => {
-    expect(entry.directMarkerPath(args()))
+    expect(marker.directMarkerPath(args()))
       .toBe(path.join(STORE, 'hook-seen', '2026-09-29', `${sha16(SID)}.PreToolUse.pre-bash`));
   });
 
   it('hashes the session id: the raw id never reaches the disk', () => {
-    expect(entry.directMarkerPath(args())).not.toContain(SID);
+    expect(marker.directMarkerPath(args())).not.toContain(SID);
   });
 
   it('rolls the day at UTC midnight, whatever the local zone is', () => {
-    const day = (nowMs) => path.basename(path.dirname(entry.directMarkerPath(args({ nowMs }))));
+    const day = (nowMs) => path.basename(path.dirname(marker.directMarkerPath(args({ nowMs }))));
     expect(day(Date.parse('2026-09-29T23:59:59.999Z'))).toBe('2026-09-29');
     expect(day(Date.parse('2026-09-30T00:00:00.000Z'))).toBe('2026-09-30');
     expect(day(Date.parse('2026-01-01T00:00:00.000Z'))).toBe('2026-01-01');
   });
 
   it('is the same for the same triple and different for another session, slot or hook', () => {
-    const base = entry.directMarkerPath(args());
-    expect(entry.directMarkerPath(args({ nowMs: NOW + 5_000 }))).toBe(base);
-    expect(entry.directMarkerPath(args({ sessionId: randomUUID() }))).not.toBe(base);
-    expect(entry.directMarkerPath(args({ slot: 'PostToolUseFailure' }))).not.toBe(base);
-    expect(entry.directMarkerPath(args({ hook: 'bash-risk-guard' }))).not.toBe(base);
+    const base = marker.directMarkerPath(args());
+    expect(marker.directMarkerPath(args({ nowMs: NOW + 5_000 }))).toBe(base);
+    expect(marker.directMarkerPath(args({ sessionId: randomUUID() }))).not.toBe(base);
+    expect(marker.directMarkerPath(args({ slot: 'PostToolUseFailure' }))).not.toBe(base);
+    expect(marker.directMarkerPath(args({ hook: 'bash-risk-guard' }))).not.toBe(base);
   });
 
   it.each([
@@ -101,7 +111,7 @@ describe('directMarkerPath: one marker per (UTC day, session, slot, hook)', () =
     ['an invalid clock', { nowMs: Number.NaN }],
     ['a relative store directory', { storeDir: 'artibot' }],
   ])('refuses %s: a marker name can never leave its directory', (_label, over) => {
-    expect(entry.directMarkerPath(args(over))).toBeNull();
+    expect(marker.directMarkerPath(args(over))).toBeNull();
   });
 });
 
@@ -139,7 +149,7 @@ describe('pruneHookSeen: only stale UTC date directories go', () => {
   it('removes date directories older than 7 days and keeps today and the last 7', () => {
     const sb = makeSandbox('prune');
     const dir = seenWith(sb, ['2026-09-29', '2026-09-28', '2026-09-22', '2026-09-21', '2026-09-01', '2025-12-31']);
-    entry.pruneHookSeen(dir, '2026-09-29');
+    marker.pruneHookSeen(dir, '2026-09-29');
     // 09-22 is exactly 7 days back (kept); 09-21 is 8 (gone).
     expect(readdirSync(dir).sort()).toEqual(['2026-09-22', '2026-09-28', '2026-09-29']);
   });
@@ -148,13 +158,13 @@ describe('pruneHookSeen: only stale UTC date directories go', () => {
     const sb = makeSandbox('prune');
     const keep = ['README', '2026-9-1', '2026-09-01.bak', 'notes', '2027-01-01'];
     const dir = seenWith(sb, [...keep, '2026-01-01']);
-    entry.pruneHookSeen(dir, '2026-09-29');
+    marker.pruneHookSeen(dir, '2026-09-29');
     expect(readdirSync(dir).sort()).toEqual([...keep].sort());
   });
 
   it('is silent when the directory is missing', () => {
     const sb = makeSandbox('prune');
-    expect(() => entry.pruneHookSeen(path.join(sb.root, 'nowhere'), '2026-09-29')).not.toThrow();
+    expect(() => marker.pruneHookSeen(path.join(sb.root, 'nowhere'), '2026-09-29')).not.toThrow();
   });
 
   it('does not follow a link: a linked date directory survives, and so does its target', () => {
@@ -168,7 +178,7 @@ describe('pruneHookSeen: only stale UTC date directories go', () => {
     symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
 
-    entry.pruneHookSeen(dir, '2026-09-29');
+    marker.pruneHookSeen(dir, '2026-09-29');
 
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(readFileSync(path.join(target, 'keep.txt'), 'utf-8')).toBe('must survive');
@@ -191,10 +201,10 @@ describe('fireOnceDirect: the marker decides, before the writer is ever loaded',
       loadStore: () => { loads.store += 1; return import(STORE_URL); },
       loadRecorder: async () => { loads.recorder += 1; return { recordDirectHookFired: impl }; },
     };
-    return { loads, rows, run: (fired, over = {}) => entry.fireOnceDirect({ ...deps, fired, ...over }) };
+    return { loads, rows, run: (fired, over = {}) => marker.fireOnceDirect({ ...deps, fired, ...over }) };
   }
   const fired = (sb, over = {}) => ({ session_id: SID, hook_event_name: 'PreToolUse', cwd: sb.repo, tool_use_id: 'toolu_1', ...over });
-  const markerOf = (sb, over = {}) => entry.directMarkerPath({
+  const markerOf = (sb, over = {}) => marker.directMarkerPath({
     storeDir: storeDirOf(sb), sessionId: SID, slot: 'PreToolUse', hook: 'pre-bash', nowMs: NOW, ...over,
   });
 
