@@ -1,12 +1,13 @@
 /**
  * The reader registry behind `v51-census.mjs`: how each existing reader is
- * invoked, where it prints the ledger path it read, and how its JSON becomes
- * numerator / denominator rows. PURE — no filesystem, no child process, no clock;
- * `v51-census.mjs` is the impure shell and owns every run.
+ * invoked, where it prints the ledger path it read, how its JSON becomes
+ * numerator / denominator rows, and the consistency checks over a run. PURE — no
+ * filesystem, no child process, no clock; `v51-census.mjs` is the impure shell
+ * and owns every run.
  *
  * Split from the shell only to keep both under the 800-line standard. Nothing here
  * is a second arithmetic: a ratio the reader prints is carried through, and a
- * ratio is computed by the shell only where no reader owns one (an inventory share).
+ * ratio is computed (`finishRow`) only where no reader owns one (an inventory share).
  *
  * EVERY EXTRACTOR MUST SURVIVE AN EMPTY OBJECT. When a reader dies the census still
  * needs the ROW IDS it would have produced, so it can mark them `error` with null
@@ -155,10 +156,24 @@ function routingRows(r) {
 }
 
 function recoveryRows(r) {
+  const c = isObj(r.census) ? r.census : {};
+  const detail = {
+    divergentFalse: r.divergentFalse,
+    divergentMissing: r.divergentMissing,
+    filesRead: c.filesRead,
+    // The directory the reader actually read, so the row alone says which store it was.
+    inputPath: r.inputPath ?? null,
+  };
+  // The session store moved out of the plugin root (owner decision D2) and the reader
+  // then began to print these two. A reader from before the move prints neither, and
+  // neither is invented here: each is surfaced only when it is present.
+  if (typeof c.legacyFallback === 'boolean') detail.legacyFallback = c.legacyFallback;
+  if (typeof c.primaryStore === 'string') detail.primaryStore = c.primaryStore;
+  const fellBack = c.legacyFallback === true ? '옛 위치를 읽었다(새 저장소가 비어 있고 채택 기록이 없다)' : null;
   return [rowOf('ca03.recovery-journal-divergent', 'CA-03 복구 저널 중 divergent=true (divergentTrue / rows)', 'journal rows',
     [r.divergentTrue, r.rows, isObj(r.ratio) ? r.ratio.divergentTrue : null], {
-      note: r.status ?? null,
-      detail: { divergentFalse: r.divergentFalse, divergentMissing: r.divergentMissing, filesRead: get(r, 'census.filesRead') },
+      note: [r.status, fellBack].filter((x) => typeof x === 'string').join(' · ') || null,
+      detail,
     })];
 }
 
@@ -290,7 +305,7 @@ export const NOT_RUN = Object.freeze([
  */
 export const LIMITATIONS = Object.freeze([
   { id: 'snapshot-copy', text: '원장 유래 수치는 전부 시작 시점에 한 번 복사한 바이트 사본에서 나왔다. 그 뒤에 원장에 붙은 행은 어떤 수치에도 없고, 증가분은 ledger.bytesAtEnd 에만 있다.' },
-  { id: 'store-readers-not-windowed', text: 'recovery-journal-census 는 원장이 아니라 자동조종 세션 저장소(설치 버전 디렉터리)를 읽고 --since 를 받지 않는다. 범위는 all 이고 스냅샷 대상이 아니다.' },
+  { id: 'store-readers-not-windowed', text: 'recovery-journal-census 는 원장이 아니라 자동조종 세션 저장소를 읽고 --since 를 받지 않는다. 범위는 all 이고 스냅샷 대상이 아니다. 읽은 디렉터리는 runs[].inputPath 에 있다. 기본은 판독기가 고른 위치(v4.71.0 부터 사용자 상태 디렉터리, 그 전에는 플러그인 루트 아래)이고, 새 저장소가 비어 있고 채택 기록이 없을 때만 옛 위치를 대신 읽는다(detail.legacyFallback). --autopilot-dir 를 주면 그 디렉터리만 읽고 폴백은 꺼진다.' },
   { id: 'since-semantics', text: '같은 --since 시각을 창 판독기 전부에 넘기지만 각 판독기가 자기 필드에 적용한다(행 타임스탬프 대 run 시작 시각 등). 창 경계에 걸친 세션은 창 수치에서 잘릴 수 있다.' },
   { id: 'exclusion-scope', text: '--exclude-sessions 는 session-coverage 에만 적용된다. 다른 판독기의 수치에는 제외한 세션의 행이 그대로 들어 있다(런북 1.5: raw 와 병기하고 분모를 깎은 것은 아닌지 본다).' },
   { id: 'existence-audit-inventory', text: 'existence-audit 는 오늘 디스크의 인벤토리(--plugin-root, 기본은 이 스크립트가 든 플러그인)를 이 프로젝트의 원장 이력에 대조한다. modules 는 어떤 이벤트도 싣지 않아 세지 않는다.' },
@@ -299,3 +314,150 @@ export const LIMITATIONS = Object.freeze([
   { id: 'repo-root-cwd', text: '--cwd 는 저장소 루트여야 한다. 하위 디렉터리를 주면 경로 해석기가 위로 올라가지 않아 없는 폴백 경로를 읽고 no-ledger 로 끝난다.' },
   { id: 'not-run-readers', text: 'notRun 의 판독기는 이 census 에 없다. 그 지표(SH-03, SH-04, SH-09, CA-05, CA-08, outcome 게이트)는 런북 3.1 대로 따로 잰다.' },
 ]);
+
+// ---------------------------------------------------------------------------
+// Folds over one reader run: metric rows and consistency checks (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * One metric row. `measuredAtFrom` says where `measuredAt` comes from: `reader`
+ * (the reader printed its own clock) or `census-run-start` (it printed none, so the
+ * run's start stands in, runbook 2.1). A zero denominator is unmeasured with a null
+ * ratio, never a measured 0.
+ */
+function finishRow(partial, run) {
+  const numerator = num(partial.numerator);
+  const denominator = num(partial.denominator);
+  let status = 'measured';
+  let reason = null;
+  if (numerator === null || denominator === null) [status, reason] = ['unmeasured', 'field-missing'];
+  else if (denominator === 0) [status, reason] = ['unmeasured', 'denominator-0'];
+  const ratio = status === 'measured' ? (num(partial.ratio) ?? numerator / denominator) : null;
+  return {
+    id: partial.id,
+    axis: run.axis,
+    label: partial.label,
+    reader: run.reader,
+    scope: run.scope,
+    unit: partial.unit,
+    status,
+    reason,
+    numerator,
+    denominator,
+    ratio,
+    measuredAt: run.measuredAt ?? run.startedAt,
+    measuredAtFrom: run.measuredAt === null ? 'census-run-start' : 'reader',
+    input: run.input,
+    note: partial.note ?? null,
+    detail: partial.detail ?? null,
+  };
+}
+
+/** A row for a run that printed nothing to read: an error with null numbers, never a zero. */
+function errorRow(partial, run) {
+  return {
+    ...finishRow({ ...partial, numerator: null, denominator: null, ratio: null }, run),
+    status: 'error',
+    reason: `${run.error.kind}: ${run.error.message}`,
+  };
+}
+
+/**
+ * Metric rows of one run. An extractor that throws is an error entry, not a crash.
+ *
+ * @param {object} spec a registry entry
+ * @param {object} run one run record
+ * @param {object[]} errors collects `extract-failed` entries
+ * @returns {object[]}
+ */
+export function metricsOf(spec, run, errors) {
+  if (run.status === 'skipped') return [];
+  try {
+    if (run.status === 'error') return spec.extract({}).map((p) => errorRow(p, run));
+    const rows = spec.extract(run.result).map((p) => finishRow(p, run));
+    return run.status === 'unmeasured' ? rows.map((r) => ({ ...r, status: 'unmeasured', reason: run.reason, ratio: null })) : rows;
+  } catch (err) {
+    errors.push({ reader: run.reader, scope: run.scope, kind: 'extract-failed', message: err?.message ?? String(err) });
+    return [];
+  }
+}
+
+/** A reader's line census adds up: raw = blank + nonblank, nonblank = losses + selection + survivors. */
+function censusAddsUp(c) {
+  const l = c?.lines;
+  const d = c?.dropped_total;
+  if (![l?.raw, l?.blank, l?.nonblank, d?.loss, d?.selection, c?.survivors].every((v) => num(v) !== null)) return null;
+  return l.raw === l.blank + l.nonblank && l.nonblank === d.loss + d.selection + c.survivors;
+}
+
+/**
+ * The checks that say "this reader read the snapshot". They must be PROVEN: a reader
+ * that prints no input path, or no byte count, has shown nothing, and `null` (could
+ * not be judged) is not a pass. The other checks (line arithmetic, a reader's own
+ * identities) only fail on a violation; a field a reader does not print there is not
+ * a claim about the snapshot.
+ */
+export const SNAPSHOT_CHECKS = Object.freeze([
+  'reader-input-is-snapshot', 'reader-bytes-equal-snapshot', 'lines-raw-same-across-readers',
+]);
+
+const isProof = (check) => SNAPSHOT_CHECKS.includes(check.id);
+const passes = (check) => (isProof(check) ? check.holds === true : check.holds !== false);
+
+/** A consistency block for a census that checked nothing: `ok` is null, not true. */
+export const noChecks = () => ({ ok: null, violated: 0, unproven: 0, checks: [] });
+
+/** Checks for one snapshot-fed run that printed a result. */
+function runChecks(spec, run, snap) {
+  const put = (id, holds, expected, actual) => ({ id, reader: run.reader, scope: run.scope, holds, expected, actual });
+  const printed = spec.census(run.result);
+  const c = isObj(printed) ? printed : null;
+  const bytes = num(c?.file?.bytes);
+  const out = [
+    put('reader-input-is-snapshot', run.inputIsSnapshot, snap.file, run.inputPath),
+    // Always present: a reader that prints no census is an UNPROVEN check, not a missing one.
+    put('reader-bytes-equal-snapshot', bytes === null ? null : bytes === snap.bytes, snap.bytes, bytes),
+  ];
+  if (c !== null) out.push(put('census-lines-add-up', censusAddsUp(c), true, censusAddsUp(c)));
+  const own = spec.identities ? spec.identities(run.result) : [];
+  return [...out, ...own.map((i) => put(i.id, i.holds, i.expected, i.actual))];
+}
+
+/**
+ * Every consistency check: per-run path, bytes, line arithmetic and the identities
+ * each reader promises, plus one cross-reader check that every reader counted the
+ * same number of raw lines. A run that errored printed nothing trustworthy, so it
+ * is left out rather than judged on the empty folds it printed.
+ *
+ * `ok` is true only when at least one check ran, none was violated and every
+ * snapshot check was proven; it is null when nothing could be checked (a census
+ * with no successful snapshot reader proves nothing, it does not pass).
+ *
+ * @param {ReadonlyArray<object>} readers the registry in use
+ * @param {object[]} runs every run record
+ * @param {{file: string, bytes: number}} snap the snapshot
+ * @returns {{ok: boolean|null, violated: number, unproven: number, checks: object[]}}
+ */
+export function consistencyOf(readers, runs, snap) {
+  const checks = [];
+  const raws = [];
+  for (const run of runs) {
+    if (run.input !== 'snapshot' || run.result === null || run.status === 'error') continue;
+    const spec = readers.find((r) => r.id === run.reader);
+    checks.push(...runChecks(spec, run, snap));
+    const raw = num(spec.census(run.result)?.lines?.raw);
+    if (raw !== null) raws.push(raw);
+  }
+  const distinct = [...new Set(raws)];
+  if (raws.length > 0) {
+    checks.push({
+      id: 'lines-raw-same-across-readers', reader: '*', scope: '*', holds: distinct.length === 1, expected: distinct[0], actual: distinct,
+    });
+  }
+  return {
+    ok: checks.length === 0 ? null : checks.every(passes),
+    violated: checks.filter((c) => c.holds === false).length,
+    unproven: checks.filter((c) => isProof(c) && c.holds === null).length,
+    checks,
+  };
+}

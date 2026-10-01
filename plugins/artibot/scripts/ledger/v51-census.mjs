@@ -34,9 +34,9 @@
  *  spawned as child processes and are not modified. A reader never sees the live
  *  file, so its two reads (session-coverage reads twice with `--since`) cannot
  *  straddle an append. Proof is checked, not assumed: each reader prints the path
- *  and byte count it read, and `consistency` compares both with the snapshot, plus
- *  the identities each reader promises (runbook 4). The live file's growth during
- *  the run is reported in `ledger`, and is in NO number.
+ *  and byte count it read and `consistency` compares both with the snapshot. A reader
+ *  that prints neither is UNPROVEN and `consistency.ok` is false; the identities each
+ *  reader promises (runbook 4) are checked too. Live growth is in `ledger`, in NO number.
  *
  * -- WHICH READERS, AND WHICH ARE NOT RUN -----------------------------------
  *  The registry and its reasons live in `v51-census-readers.mjs`. Seven readers run
@@ -78,7 +78,7 @@ import { fileURLToPath } from 'node:url';
 import { ledgerFilePath } from '../../lib/runtime/ledger.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import {
-  get, isObj, LIMITATIONS, NOT_RUN, num, READERS,
+  consistencyOf, get, isObj, LIMITATIONS, metricsOf, noChecks, NOT_RUN, READERS, SNAPSHOT_CHECKS,
 } from './v51-census-readers.mjs';
 
 export { NOT_RUN, READERS };
@@ -321,108 +321,6 @@ function plan(readers, scopes) {
 }
 
 // ---------------------------------------------------------------------------
-// Metrics and consistency
-// ---------------------------------------------------------------------------
-
-/** Status for one row: a zero denominator is unmeasured with a null ratio, never a measured 0. */
-function finishRow(partial, run) {
-  const numerator = num(partial.numerator);
-  const denominator = num(partial.denominator);
-  let status = 'measured';
-  let reason = null;
-  if (numerator === null || denominator === null) [status, reason] = ['unmeasured', 'field-missing'];
-  else if (denominator === 0) [status, reason] = ['unmeasured', 'denominator-0'];
-  const ratio = status === 'measured' ? (num(partial.ratio) ?? numerator / denominator) : null;
-  return {
-    id: partial.id,
-    axis: run.axis,
-    label: partial.label,
-    reader: run.reader,
-    scope: run.scope,
-    unit: partial.unit,
-    status,
-    reason,
-    numerator,
-    denominator,
-    ratio,
-    measuredAt: run.measuredAt ?? run.startedAt,
-    measuredAtSource: run.measuredAt === null ? 'census-run-start' : 'reader',
-    input: run.input,
-    note: partial.note ?? null,
-    detail: partial.detail ?? null,
-  };
-}
-
-/** A row for a run that printed nothing to read: an error with null numbers, never a zero. */
-function errorRow(partial, run) {
-  return {
-    ...finishRow({ ...partial, numerator: null, denominator: null, ratio: null }, run),
-    status: 'error',
-    reason: `${run.error.kind}: ${run.error.message}`,
-  };
-}
-
-/** Metric rows of one run. An extractor that throws is an error entry, not a crash. */
-function metricsOf(spec, run, errors) {
-  if (run.status === 'skipped') return [];
-  try {
-    if (run.status === 'error') return spec.extract({}).map((p) => errorRow(p, run));
-    const rows = spec.extract(run.result).map((p) => finishRow(p, run));
-    return run.status === 'unmeasured' ? rows.map((r) => ({ ...r, status: 'unmeasured', reason: run.reason, ratio: null })) : rows;
-  } catch (err) {
-    errors.push({ reader: run.reader, scope: run.scope, kind: 'extract-failed', message: err?.message ?? String(err) });
-    return [];
-  }
-}
-
-/** A reader's line census adds up: raw = blank + nonblank, nonblank = losses + selection + survivors. */
-function censusAddsUp(c) {
-  const l = c?.lines;
-  const d = c?.dropped_total;
-  if (![l?.raw, l?.blank, l?.nonblank, d?.loss, d?.selection, c?.survivors].every((v) => num(v) !== null)) return null;
-  return l.raw === l.blank + l.nonblank && l.nonblank === d.loss + d.selection + c.survivors;
-}
-
-/** Checks for one snapshot-fed run that printed a result. */
-function runChecks(spec, run, snap) {
-  const put = (id, holds, expected, actual) => ({ id, reader: run.reader, scope: run.scope, holds, expected, actual });
-  const c = spec.census(run.result);
-  const out = [put('reader-input-is-snapshot', run.inputIsSnapshot, snap.file, run.inputPath)];
-  if (isObj(c)) {
-    const bytes = num(c.file?.bytes);
-    out.push(put('reader-bytes-equal-snapshot', bytes === null ? null : bytes === snap.bytes, snap.bytes, bytes));
-    out.push(put('census-lines-add-up', censusAddsUp(c), true, censusAddsUp(c)));
-  }
-  const own = spec.identities ? spec.identities(run.result) : [];
-  return [...out, ...own.map((i) => put(i.id, i.holds, i.expected, i.actual))];
-}
-
-/**
- * Every consistency check: per-run path, bytes, line arithmetic and the identities
- * each reader promises, plus one cross-reader check that every reader counted the
- * same number of raw lines. A run that errored printed nothing trustworthy, so it
- * is left out rather than judged on the empty folds it printed.
- */
-function consistencyOf(readers, runs, snap) {
-  const checks = [];
-  const raws = [];
-  for (const run of runs) {
-    if (run.input !== 'snapshot' || run.result === null || run.status === 'error') continue;
-    const spec = readers.find((r) => r.id === run.reader);
-    checks.push(...runChecks(spec, run, snap));
-    const raw = num(spec.census(run.result)?.lines?.raw);
-    if (raw !== null) raws.push(raw);
-  }
-  const distinct = [...new Set(raws)];
-  if (raws.length > 0) {
-    checks.push({
-      id: 'lines-raw-same-across-readers', reader: '*', scope: '*', holds: distinct.length === 1, expected: distinct[0], actual: distinct,
-    });
-  }
-  return { ok: checks.every((c) => c.holds !== false), checks };
-}
-
-// ---------------------------------------------------------------------------
 // The document
 // ---------------------------------------------------------------------------
 
@@ -491,7 +389,7 @@ function assemble(head, parts) {
 /** A census with no reader run: every reader listed as skipped, for one reason. */
 function emptyCensus(head, job, reason) {
   const runs = plan(job.readers, job.scopes).map(([spec, scope]) => skipped(spec, scope, reason));
-  return assemble(head, { runs, metrics: [], consistency: { ok: null, checks: [] }, extractErrors: [] });
+  return assemble(head, { runs, metrics: [], consistency: noChecks(), extractErrors: [] });
 }
 
 /** Run every planned reader on the snapshot and assemble the document. */
@@ -601,15 +499,18 @@ function commandLine(request) {
 
 function headSection(doc) {
   const count = (s) => doc.runs.filter((r) => r.status === s).length;
-  const red = doc.consistency.checks.filter((x) => x.holds === false);
+  const { checks } = doc.consistency;
+  const red = checks.filter((x) => x.holds === false);
+  const unproven = checks.filter((x) => SNAPSHOT_CHECKS.includes(x.id) && x.holds === null);
   return [
     '## 0. 판정(먼저)',
     `판정 없음 — 이 census 는 측정만 한다. 상태: **${doc.status}**.`,
     ...(doc.message === null ? [] : [`- ${doc.message}`]),
     `- 판독기 실행 ${doc.runs.length}건: ok ${count('ok')} · unmeasured ${count('unmeasured')} · error ${count('error')} · skipped ${count('skipped')}`,
-    `- 일관성 점검 ${doc.consistency.checks.length}건 중 위반 ${red.length}건 (consistency.ok = ${doc.consistency.ok})`,
+    `- 일관성 점검 ${checks.length}건 중 위반 ${red.length}건 · 미증명 ${unproven.length}건 (consistency.ok = ${doc.consistency.ok})`,
     ...doc.errors.map((e) => `- 오류: ${e.reader} (${e.scope}) ${e.kind} — ${e.message}`),
     ...red.map((x) => `- 위반: ${x.id} (${x.reader}, ${x.scope}) 기대 ${JSON.stringify(x.expected)} 실제 ${JSON.stringify(x.actual)}`),
+    ...unproven.map((x) => `- 미증명: ${x.id} (${x.reader}, ${x.scope}) — 판독기가 입력 경로나 바이트 수를 출력하지 않아 사본을 읽었다는 증거가 없다`),
   ].join('\n');
 }
 
@@ -651,9 +552,6 @@ function checkTable(checks) {
     : table(['점검', '건수', '위반', '미판정'], [...byId].map(([id, t]) => [id, t.n, t.red, t.unjudged]));
 }
 
-/** The checks that say "every reader read the snapshot"; the rest are the readers' own identities. */
-const SNAPSHOT_CHECKS = new Set(['reader-input-is-snapshot', 'reader-bytes-equal-snapshot', 'lines-raw-same-across-readers']);
-
 function checksSection(doc) {
   const s = doc.snapshot;
   const checks = doc.consistency.checks;
@@ -661,14 +559,14 @@ function checksSection(doc) {
     '## 3. 유효성 대조',
     s === null
       ? '- snapshot 이 없어 대조할 것이 없다.'
-      : `- 각 원장 판독기가 출력한 입력 경로·바이트 수를 snapshot(${s.bytes} B)과 대조했다. 위반 열이 0 이어야 모든 판독기가 같은 사본을 읽은 것이다.`,
+      : `- 각 원장 판독기가 출력한 입력 경로·바이트 수를 snapshot(${s.bytes} B)과 대조했다. 위반과 미판정 열이 둘 다 0 이어야 모든 판독기가 같은 사본을 읽었음이 증명된 것이다(미판정은 통과가 아니다).`,
     '',
-    checkTable(checks.filter((c) => SNAPSHOT_CHECKS.has(c.id))),
+    checkTable(checks.filter((c) => SNAPSHOT_CHECKS.includes(c.id))),
     '',
     '## 4. 관측치 정합성',
     '판독기가 구조상 지키는 항등식(줄 수 census 합, 판독기별 합계 항등식)을 자동 대조한다. 위반은 숨기지 않고 §0 에 올린다.',
     '',
-    checkTable(checks.filter((c) => !SNAPSHOT_CHECKS.has(c.id))),
+    checkTable(checks.filter((c) => !SNAPSHOT_CHECKS.includes(c.id))),
   ].join('\n');
 }
 
@@ -742,7 +640,7 @@ function crashDoc(request, err, deps) {
     snapshot: null,
   };
   const extractErrors = [{ reader: '*', scope: '*', kind: 'census-crashed', message }];
-  return assemble(head, { runs: [], metrics: [], consistency: { ok: null, checks: [] }, extractErrors });
+  return assemble(head, { runs: [], metrics: [], consistency: noChecks(), extractErrors });
 }
 
 /**

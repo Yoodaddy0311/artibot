@@ -199,14 +199,21 @@ node "$AB\scripts\ledger\verify-rate.mjs"
 VC=""; C="$HOME/.claude/plugins/cache/artibot/artibot"; S="scripts/ledger/v51-census.mjs"; if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/$S" ]; then VC="$CLAUDE_PLUGIN_ROOT/$S"; fi; if [ -z "$VC" ]; then for v in $(ls -1 "$C" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do if [ -f "$C/$v/$S" ]; then VC="$C/$v/$S"; break; fi; done; fi; if [ -z "$VC" ]; then for m in "$HOME"/.claude/plugins/marketplaces/*/plugins/artibot; do if [ -f "$m/$S" ]; then VC="$m/$S"; break; fi; done; fi; if [ -n "$VC" ]; then echo "$VC"; else echo "v51-census not found"; fi
 ```
 
-**실행.** 대상 리포 루트를 `--cwd` 로 준다(생략하면 cwd). 하위 디렉터리를 주면 경로 해석기가 위로 올라가지 않아 `no-ledger` 로 끝난다(§1.2). 이 리포 체크아웃에서 돌리고 설치본을 재는 권장형:
+**실행.** 대상 리포 루트를 `--cwd` 로 준다(생략하면 cwd). 하위 디렉터리를 주면 경로 해석기가 위로 올라가지 않아 `no-ledger` 로 끝난다(§1.2). 릴리스 전에 이 리포 체크아웃에서 돌리고 설치본을 재는 권장형(`--autopilot-dir` 는 일부러 뺐다):
 
 ```text
-node "<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs" --cwd "<대상 리포 루트>" --plugin-root "<installPath>" --autopilot-dir "<installPath>/runtime/autopilot" --since <ISO 시각> --json --out "<증거>.md" > census.json
+node "<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs" --cwd "<대상 리포 루트>" --plugin-root "<installPath>" --since <ISO 시각> --json --out "<증거>.md" > census.json
 ```
 
-- `<installPath>` 는 §1.1 의 값이다. `--plugin-root` 를 빼면 existence-audit 는 이 체크아웃의 인벤토리를, model-routing 은 이 체크아웃의 설정과 로스터를 잰다. 대상 프로젝트가 쓴 것은 설치본이다(실측 2026-09-30: 4.70.0 캐시를 주고 판독기 8건 중 error 0, ok 7 · unmeasured 1).
-- `--autopilot-dir` 를 빼면 recovery-journal-census 는 스크립트가 든 플러그인의 저장소를 읽는다. 자동조종 세션은 설치 버전 디렉터리에 저장되므로(§1.3) 설치본 저장소를 준다(실측: 4.70.0 저장소는 파일 4개에 저널 1행).
+v4.71.0 을 설치한 뒤에는 설치본 경로에서 `--plugin-root` 도 뺀 한 줄이면 된다. 스크립트가 든 플러그인이 곧 설치본이라 인벤토리와 기대 티어가 이미 설치본 기준이다. 위 찾기 한 줄은 캐시에서 **가장 높은 버전**을 고른다. 세션이 실제로 쓴 버전과 다를 수 있으니(업데이트 직후 재시작 전 등) §1.1 의 `installPath` 와 다르면 그 경로를 직접 쓴다.
+
+```text
+node "<installPath>/scripts/ledger/v51-census.mjs" --cwd "<대상 리포 루트>" --since <ISO 시각> --json --out "<증거>.md" > census.json
+```
+
+- `<installPath>` 는 §1.1 의 값이다. `--plugin-root` 를 빼면 existence-audit 는 이 체크아웃의 인벤토리를, model-routing 은 이 체크아웃의 설정과 로스터를 잰다. 대상 프로젝트가 쓴 것은 설치본이다(실측 2026-09-30: 4.70.0 캐시를 `--plugin-root` 로 주고 판독기 8건 중 error 0).
+- `--autopilot-dir` 는 권장형에서 **뺀다**. v4.71.0 부터 recovery-journal-census 의 기본 저장소는 플러그인 루트가 아니라 사용자 상태 디렉터리 아래(기본 `~/.claude/artibot`)라서 어느 체크아웃이나 설치본에서 돌려도 같은 저장소를 읽는다. 새 저장소에 세션 파일도 채택 기록도 없을 때만 옛 위치(그 판독기가 든 플러그인 루트 아래)를 대신 읽고, 그러면 지표 행의 `detail.legacyFallback` 이 true 이고 `detail.primaryStore` 가 비어 있던 새 저장소다. 실제로 읽은 디렉터리는 `runs[].inputPath` 다. `--autopilot-dir` 를 주면 그 디렉터리만 읽고 폴백은 꺼진다. 옛 위치(`<installPath>/runtime/autopilot`)를 주면 옛 저장소를 강제하는 것이므로, 채택 전의 옛 저장소를 일부러 재거나 복사해 둔 저장소와 픽스처를 읽을 때만 쓴다.
+- 위 저장소 이전 동작은 착지 전 커밋 `6b410964` 의 판독기를 가짜 홈과 가짜 플러그인 루트 아래에서 실행해 확인했다(실측 2026-09-30: 새 저장소가 비면 폴백, 세션이 있으면 새 저장소, `--dir` 이면 폴백 없음). 그 줄기의 수정 커밋과 설치본 4.71.0 에서의 실행은 미확인이다. v4.70.0 까지의 기본은 플러그인 루트 아래였고, 그 배치에서 설치본 4.70.0 저장소는 파일 4개에 저널 1행이었다(실측).
 - `--since` 를 주면 판독기마다 창과 전체 이력을 둘 다 잰다. §2.3 6번이 창만 보고하는 것을 금지한다.
 - JSON 은 크다(이 리포 원장 25MB 로 0.5~0.9MB). 파일로 받고 `metrics` 와 `consistency` 부터 읽는다. Git Bash 의 `>` 를 쓴다. PowerShell 5.1 의 `>` 는 UTF-16 이 될 수 있다(§1.2, 미확인).
 - node 가 PATH 에 없으면 PowerShell 에서 `& (Get-Command node).Source <스크립트> ...` 로 부른다(실측 2026-09-30: PowerShell 에서 외부 임시 git 리포 루트에 서서 성공).
@@ -218,14 +225,14 @@ node "<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs" --cwd
 | `--json` | 문서를 한 줄 JSON 으로 출력 | 증거 markdown 출력 |
 | `--out <경로>.md` | 증거 markdown 도 파일로 쓴다. `.md` 만 받는다(원장을 덮어쓸 수 없다) | 안 씀 |
 | `--plugin-root <디렉터리>` | existence-audit 인벤토리와 model-routing 기대 티어의 기준 플러그인 | 스크립트가 든 플러그인 |
-| `--autopilot-dir <디렉터리>` | recovery-journal-census 가 읽는 세션 저장소 | 스크립트가 든 플러그인의 저장소 |
+| `--autopilot-dir <디렉터리>` | recovery-journal-census 가 읽는 세션 저장소를 그 디렉터리로 고정한다(옛 위치 폴백도 꺼진다). 권장형에서는 주지 않는다 | 사용자 상태 디렉터리의 저장소. 비어 있고 채택 기록이 없으면 옛 위치 |
 | `--exclude-sessions <목록 파일 또는 id 나열>` | session-coverage 한 판독기에만 적용. raw 수치가 항상 같이 나온다(§1.5) | 없음 |
 
 **읽는 법.**
 
-- `status`: `ok` · `partial`(판독기 오류나 누락, 또는 일관성 위반) · `no-ledger`(원장 없음 — 측정 없음, exit 0, 판독기는 하나도 돌지 않는다) · `ledger-unreadable` · `error`. exit 0 이어도 이 값을 먼저 읽는다.
-- `metrics[]`: 행마다 `numerator` · `denominator` · `ratio` · `measuredAt` · `status`. 분모 0 은 `unmeasured` 이고 ratio 는 null 이다(§2.3 1번). 판독기가 시각을 내지 않으면 그 실행의 시작 시각이 들어가고 `measuredAtSource` 가 `census-run-start` 다(§2.1).
-- `consistency.ok`: 모든 원장 판독기가 사본을 읽었는지(입력 경로와 바이트), 각 판독기 census 의 합(§4 첫 항목), 판독기별 합계 항등식을 자동 대조한 결과다. false 면 `checks` 에서 `holds: false` 를 찾는다. §4 대로 숨기지 않고 올린다.
+- `status`: `ok` · `partial`(판독기 오류나 누락, 또는 일관성 위반·미증명) · `no-ledger`(원장 없음 — 측정 없음, exit 0, 판독기는 하나도 돌지 않는다) · `ledger-unreadable` · `error`. exit 0 이어도 이 값을 먼저 읽는다.
+- `metrics[]`: 행마다 `numerator` · `denominator` · `ratio` · `measuredAt` · `status`. 분모 0 은 `unmeasured` 이고 ratio 는 null 이다(§2.3 1번). 판독기가 시각을 내지 않으면 그 실행의 시작 시각이 들어가고 `measuredAtFrom` 이 `census-run-start` 다(판독기가 자기 시각을 냈으면 `reader`, §2.1).
+- `consistency.ok`: 모든 원장 판독기가 사본을 읽었음을 **증명했는지**(입력 경로와 바이트), 각 판독기 census 의 합(§4 첫 항목), 판독기별 합계 항등식을 자동 대조한 결과다. true 는 위반이 없고 사본 증명이 전부 성립했을 때만이다. 판독기가 경로나 바이트 수를 내지 않으면 위반이 아니라 **미증명**이라 false 이고(`checks` 의 `holds: null`, 개수는 `consistency.unproven`), 대조할 것이 하나도 없으면(성공한 원장 판독기 0) null 이다. false 면 `checks` 에서 `holds: false` 와 `holds: null` 을 찾는다. §4 대로 숨기지 않고 올린다.
 - `runs[].status` 가 `error` 인 판독기의 지표는 수치가 null 이고 `errors` 에 이유가 있다. 판독기가 죽으며 낸 빈 fold 는 0 으로 읽지 않는다.
 - `ledger.grewDuringRun` 이 true 면 그 증가분은 어떤 수치에도 없다. 같은 시점을 다시 재려면 다시 돌린다.
 - 이 명령을 돌린 세션도 훅으로 원장에 행을 남긴다(§1.5). 그 세션 id 를 적는다.
@@ -233,10 +240,10 @@ node "<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs" --cwd
 
 **검증(실측 2026-09-30, 이 리포 원장 사본).**
 
-- 사본(25,066,715 B, sha256 앞 12자 `22ad2cfd29dc`)을 외부 스크래치 프로젝트에 놓고 중립 cwd 에서 `--since 2026-09-28T00:00:00Z` 로 돌렸다. 15건(판독기 7개 x 창·이력 + 저장소 1) ok 14 · unmeasured 1(체크아웃 기준 저장소가 없음) · error 0, 일관성 55건 중 위반 0, 12.6초. 창 행 하나를 같은 사본에 `session-coverage.mjs --since` 를 직접 돌린 값과 대조했다(14/24 와 14/24).
+- 사본(25,066,715 B, sha256 앞 12자 `22ad2cfd29dc`)을 외부 스크래치 프로젝트에 놓고 중립 cwd 에서 `--since 2026-09-28T00:00:00Z` 로 돌렸다. 15건(판독기 7개 x 창·이력 + 저장소 1) ok 14 · unmeasured 1(저장소 이전 전 배치라 체크아웃 기준 저장소가 없었다) · error 0, 일관성 55건 중 위반 0, 12.6초. 창 행 하나를 같은 사본에 `session-coverage.mjs --since` 를 직접 돌린 값과 대조했다(14/24 와 14/24).
 - 같은 사본을 `git init` 한 외부 임시 리포에 놓고 그 루트에서 `--cwd` 없이 PowerShell 로 돌렸다. 이력 행 20개가 위 실행과 전부 같았고(같은 snapshot sha256) 10.6초였다.
-- 테스트: `plugins/artibot/tests/ledger/v51-census-cli.test.js` 와 `v51-census-inproc.test.js` — 픽스처 원장, 원장 없음, 죽는 판독기, 돌아가는 동안 원장이 늘 때의 스냅샷 일관성.
-- 못 본 것: 새 플랫폼 프로젝트에서의 첫 실행, 이 리포 원장보다 큰 원장의 시간과 출력 크기(25MB 까지만 쟀다), 설치본 캐시에서의 실행(릴리스 전이라 없다).
+- 테스트: `plugins/artibot/tests/ledger/v51-census-cli.test.js` 와 `v51-census-inproc.test.js` — 픽스처 원장, 원장 없음, 죽는 판독기, 돌아가는 동안 원장이 늘 때의 스냅샷 일관성, 경로나 바이트를 내지 않는 판독기(미증명), 저장소 이전 뒤 판독기 출력.
+- 못 본 것: 새 플랫폼 프로젝트에서의 첫 실행, 이 리포 원장보다 큰 원장의 시간과 출력 크기(25MB 까지만 쟀다), 설치본 캐시에서의 실행(릴리스 전이라 없다), 저장소 이전이 착지한 트리에서 census 전체를 돌린 것(이전 판독기 출력은 따로 실행해 확인했고 census 는 그 출력을 흉내 낸 판독기로만 돌렸다).
 
 ## 4. 정합성 점검
 

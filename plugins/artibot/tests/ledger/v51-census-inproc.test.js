@@ -19,10 +19,22 @@
  * is decoration. Fake readers that report a different file, different byte counts
  * or different line counts must turn `consistency.ok` false and the status partial.
  *
- * MISBEHAVING READERS ARE DATA. Seven fake readers — exits 1, prints junk, never
- * returns, reports its own `error`, reports `ok:false`, is missing on disk, and one
- * good one — run in a single census. It must return (never throw), keep the good
- * reader's numbers, and classify each of the others.
+ * NOT JUDGED IS NOT A PASS. A reader that prints no input path, or no byte count,
+ * has proven nothing about the snapshot. Its check is `null`, and the block must be
+ * `ok: false` with the gap counted as `unproven` — the fail-open shape is reading
+ * `null` as fine. A block with nothing to check is `ok: null`, never `true`.
+ *
+ * MISBEHAVING READERS ARE DATA. Six fake readers — exits 1, prints junk, reports its
+ * own `error`, reports `ok:false`, is missing on disk, and one good one — run in a
+ * single census under the generous default timeout. It must return (never throw),
+ * keep the good reader's numbers, and classify each of the others. The reader that
+ * never returns has a census of its own with a short timeout, so a slow machine can
+ * never turn a healthy fake into a `timeout`.
+ *
+ * THE MOVED SESSION STORE. The recovery row must carry `legacyFallback` and
+ * `primaryStore` when the reader prints them and invent neither when it does not.
+ * The fixtures are the reader's real output, captured from lane-c's commit over
+ * scratch stores, not a shape guessed from its header.
  *
  * SOURCE CONTRACT. The script is read-only toward the project by construction:
  * its imports are an ALLOWLIST (a deny list is fail-open for the next import) and
@@ -54,7 +66,7 @@ import {
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
 import { ledgerFilePath } from '../../lib/runtime/event-writer.js';
 import {
-  census, FLAGS, main, NOT_RUN, READERS,
+  census, FLAGS, main, NOT_RUN, READERS, renderMarkdown,
 } from '../../scripts/ledger/v51-census.mjs';
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
@@ -269,27 +281,28 @@ describe('v51-census: the consistency checks can go red', () => {
 });
 
 describe('v51-census: readers that misbehave are data, never a crash', () => {
+  // NO timeout is injected here: every reader in this census runs with the generous
+  // default, so a slow machine cannot turn a healthy fake into a `timeout`. The one
+  // case that needs a short budget (a reader that never returns) has its own census.
   it('classifies each failure mode and keeps the good reader', () => {
     const root = makeProject('zoo');
     seedEnded(root, 'sessZoo000001');
     const specs = [
       fakeSpec('zoo-exit', writeFake('zoo-exit', "process.stderr.write('boom: cannot read\\n'); process.exit(1);")),
       fakeSpec('zoo-junk', writeFake('zoo-junk', "process.stdout.write('this is not json');")),
-      fakeSpec('zoo-hang', writeFake('zoo-hang', 'setInterval(() => {}, 1000);')),
       fakeSpec('zoo-reported', writeFake('zoo-reported', "process.stdout.write(JSON.stringify({ error: 'fold threw', ledger_path: file, n: 0, d: 0 }));")),
       fakeSpec('zoo-unmeasured', writeFake('zoo-unmeasured', "process.stdout.write(JSON.stringify({ ok: false, reason: 'no store at /x', ledger_path: file }));")),
       fakeSpec('zoo-missing', path.join(tmp, 'never-written.mjs')),
       fakeSpec('zoo-good', writeFake('zoo-good', HONEST)),
     ];
 
-    const doc = census({ cwd: root, since: null }, { readers: specs, tmpRoot: tmp, timeoutMs: 2500 });
+    const doc = census({ cwd: root, since: null }, { readers: specs, tmpRoot: tmp });
     const byId = Object.fromEntries(doc.runs.map((r) => [r.reader, r]));
 
     expect(byId['zoo-exit'].status).toBe('error');
     expect(byId['zoo-exit'].error).toMatchObject({ kind: 'exit', exitCode: 1 });
     expect(byId['zoo-exit'].error.stderr).toContain('boom: cannot read');
     expect(byId['zoo-junk'].error.kind).toBe('unparsable-output');
-    expect(byId['zoo-hang'].error.kind).toBe('timeout');
     expect(byId['zoo-reported'].status).toBe('error');
     expect(byId['zoo-reported'].error).toMatchObject({ kind: 'reader-reported', message: 'fold threw' });
     // A reader that threw prints empty folds: they stay in `result` but are not measurements.
@@ -303,8 +316,23 @@ describe('v51-census: readers that misbehave are data, never a crash', () => {
     expect(metric(doc, 'zoo-good.metric')).toMatchObject({ status: 'measured', numerator: 1, denominator: 2, ratio: 0.5 });
 
     expect(doc.status).toBe('partial');
-    expect(doc.errors.map((e) => e.reader).sort()).toEqual(['zoo-exit', 'zoo-hang', 'zoo-junk', 'zoo-reported']);
+    expect(doc.errors.map((e) => e.reader).sort()).toEqual(['zoo-exit', 'zoo-junk', 'zoo-reported']);
     expect(existsSync(doc.snapshot.path)).toBe(false);
+  });
+
+  it('kills a reader that never returns at the timeout and reports it as one error', () => {
+    const root = makeProject('hang');
+    seedEnded(root, 'sessHang000001');
+    // The ONLY census in this file with a short budget. The reader never returns, so the
+    // outcome is `timeout` however slowly the child starts; nothing else runs under it.
+    const hang = fakeSpec('zoo-hang', writeFake('zoo-hang', 'setInterval(() => {}, 1000);'));
+
+    const doc = census({ cwd: root, since: null }, { readers: [hang], tmpRoot: tmp, timeoutMs: 1500 });
+
+    expect(doc.runs[0].status).toBe('error');
+    expect(doc.runs[0].error.kind).toBe('timeout');
+    expect(doc.errors.map((e) => e.reader)).toEqual(['zoo-hang']);
+    expect(doc.snapshot.removed).toBe(true);
   });
 
   it('never leaves the snapshot behind, even when every reader fails', () => {
@@ -317,6 +345,8 @@ describe('v51-census: readers that misbehave are data, never a crash', () => {
     expect(doc.runs[0].error.exitCode).toBe(3);
     expect(doc.snapshot.removed).toBe(true);
     expect(existsSync(doc.snapshot.path)).toBe(false);
+    // Every reader failed, so nothing was checked: that is "unknown", not "consistent".
+    expect(doc.consistency.ok).toBeNull();
   });
 
   it('stamps a run with the census clock when the reader prints no time of its own', () => {
@@ -325,11 +355,193 @@ describe('v51-census: readers that misbehave are data, never a crash', () => {
     const noClock = writeFake('noclock', HONEST.replace("measured_at: '2026-09-30T00:00:00.000Z', ", ''));
     const doc = census({ cwd: root, since: null }, { readers: [fakeSpec('noclock', noClock)], tmpRoot: tmp });
     const row = metric(doc, 'noclock.metric');
-    expect(row.measuredAtSource).toBe('census-run-start');
+    expect(row.measuredAtFrom).toBe('census-run-start');
+    expect(row).not.toHaveProperty('measuredAtSource');
     expect(Date.parse(row.measuredAt)).toBeGreaterThanOrEqual(Date.parse(doc.measuredAt));
     const withClock = census({ cwd: root, since: null }, { readers: [fakeSpec('honest', writeFake('honest2', HONEST))], tmpRoot: tmp });
-    expect(metric(withClock, 'honest.metric').measuredAtSource).toBe('reader');
+    expect(metric(withClock, 'honest.metric').measuredAtFrom).toBe('reader');
     expect(metric(withClock, 'honest.metric').measuredAt).toBe('2026-09-30T00:00:00.000Z');
+  });
+});
+
+/** A `--cwd`-fed reader whose output leaves out exactly the thing a check needs. */
+const NO_CENSUS = "process.stdout.write('{\"n\":1,\"d\":2}');";
+const NO_BYTES = [
+  'const lines = { raw: 4, blank: 1, nonblank: 3 };',
+  'process.stdout.write(JSON.stringify({ ledger_path: file, n: 1, d: 2,',
+  '  census: { file: { present: true, readable: true, path: file }, lines,',
+  '    dropped_total: { loss: 0, selection: 0 }, survivors: 3 } }));',
+].join('\n');
+const NO_PATH = [
+  'const lines = { raw: 4, blank: 1, nonblank: 3 };',
+  'process.stdout.write(JSON.stringify({ n: 1, d: 2,',
+  '  census: { file: { present: true, readable: true, bytes }, lines,',
+  '    dropped_total: { loss: 0, selection: 0 }, survivors: 3 } }));',
+].join('\n');
+
+/** The request `main` would have built, for rendering a document by hand. */
+const REQUEST = {
+  cwd: '/x', since: null, json: false, out: null, pluginRoot: null, autopilotDir: null, exclude: null,
+};
+
+describe('v51-census: a reader that proves nothing is not a pass', () => {
+  it.each([
+    ['prints no path and no census', 'silent', NO_CENSUS, ['reader-input-is-snapshot', 'reader-bytes-equal-snapshot']],
+    ['prints a path but no byte count', 'nobytes', NO_BYTES, ['reader-bytes-equal-snapshot']],
+    ['prints a byte count but no path', 'nopath', NO_PATH, ['reader-input-is-snapshot']],
+  ])('a reader that %s is UNPROVEN: the check is null, consistency.ok is false, the status partial', (_what, id, body, unprovenIds) => {
+    const root = makeProject(`unproven-${id}`);
+    seedEnded(root, `sessUnproven-${id}`);
+
+    const doc = census(
+      { cwd: root, since: null },
+      { readers: [fakeSpec(id, writeFake(id, body)), fakeSpec('honest', writeFake(`${id}-honest`, HONEST))], tmpRoot: tmp },
+    );
+
+    const mine = doc.consistency.checks.filter((c) => c.reader === id);
+    for (const checkId of unprovenIds) expect(mine.find((c) => c.id === checkId), checkId).toMatchObject({ holds: null });
+    // `null` is not a pass: nothing was DISPROVEN, and it still fails the block.
+    expect(doc.consistency.ok).toBe(false);
+    expect(doc.consistency.violated).toBe(0);
+    expect(doc.consistency.unproven).toBe(unprovenIds.length);
+    expect(doc.status).toBe('partial');
+    // A proving reader next to it stays fully proven: the finding is about the silent one.
+    expect(doc.consistency.checks.filter((c) => c.reader === 'honest').every((c) => c.holds === true)).toBe(true);
+  });
+
+  it('lists the unproven checks in section 0 of the evidence markdown', () => {
+    const root = makeProject('unproven-md');
+    seedEnded(root, 'sessUnprovenMd01');
+    const doc = census({ cwd: root, since: null }, { readers: [fakeSpec('silent', writeFake('silent-md', NO_CENSUS))], tmpRoot: tmp });
+
+    const md = renderMarkdown(doc, REQUEST);
+    const sec0 = md.slice(md.indexOf('## 0. '), md.indexOf('## 1. '));
+
+    expect(sec0).toContain('consistency.ok = false');
+    expect(sec0).toContain('미증명 2건');
+    expect(sec0).toContain('미증명: reader-input-is-snapshot (silent, history)');
+    expect(sec0).toContain('미증명: reader-bytes-equal-snapshot (silent, history)');
+  });
+
+  it('does not claim consistency when there was nothing to check', () => {
+    const root = makeProject('unproven-none');
+    seedEnded(root, 'sessUnprovenNon1');
+    const doc = census({ cwd: root, since: null }, { readers: [], tmpRoot: tmp });
+    // An empty block must not read as a pass (`every` over nothing is true).
+    expect(doc.consistency).toEqual({ ok: null, violated: 0, unproven: 0, checks: [] });
+  });
+
+  it('POSITIVE CONTROL: proving readers make the same block ok = true with nothing unproven', () => {
+    const root = makeProject('unproven-ctl');
+    seedEnded(root, 'sessUnprovenCtl1');
+    const doc = census({ cwd: root, since: null }, { readers: [fakeSpec('honest', writeFake('honest-ctl', HONEST))], tmpRoot: tmp });
+    expect(doc.consistency).toMatchObject({ ok: true, violated: 0, unproven: 0 });
+    expect(doc.status).toBe('ok');
+  });
+});
+
+/**
+ * The recovery-journal reader's output AFTER the session store moved out of the plugin
+ * root (owner decision D2, lane-c commit 6b410964). Captured 2026-09-30 by running that
+ * commit's `recovery-journal-census.mjs` over scratch stores, with the paths shortened:
+ * the new store held no session and no adoption record, so the old location was read.
+ */
+const MOVED_STORE_FALLBACK = {
+  ok: true,
+  reason: null,
+  inputPath: '/plug/old-store',
+  measuredAt: '2026-09-30T12:06:02.709Z',
+  rows: 2,
+  divergentTrue: 1,
+  divergentFalse: 1,
+  divergentMissing: 0,
+  ratio: { divergentTrue: 0.5, divergentFalse: 0.5, divergentMissing: 0 },
+  status: 'measured',
+  census: {
+    storePresent: true,
+    storeReadable: true,
+    filesSeen: 1,
+    filesRead: 1,
+    filesUnparsable: 0,
+    filesWithJournal: 1,
+    filesNonArray: 0,
+    bytesRead: 60,
+    sessionFilter: null,
+    perSession: [{ sessionId: 's-legacy', rows: 2 }],
+    legacyFallback: true,
+    primaryStore: '/state/new-store',
+  },
+};
+
+/** The same reader when the new store held a session: no fallback. */
+const MOVED_STORE_PRIMARY = {
+  ...MOVED_STORE_FALLBACK,
+  inputPath: '/state/new-store',
+  rows: 1,
+  divergentTrue: 1,
+  divergentFalse: 0,
+  ratio: { divergentTrue: 1, divergentFalse: 0, divergentMissing: 0 },
+  census: { ...MOVED_STORE_FALLBACK.census, legacyFallback: false, primaryStore: '/state/new-store' },
+};
+
+/** The reader from before the move printed neither field. */
+function beforeTheMove(result) {
+  const printed = { ...result.census };
+  delete printed.legacyFallback;
+  delete printed.primaryStore;
+  return { ...result, census: printed };
+}
+
+describe('v51-census: the recovery row carries what the moved session store reports', () => {
+  const recovery = READERS.find((r) => r.id === 'recovery-journal-census');
+  const rowFor = (result) => recovery.extract(result)[0];
+
+  it('surfaces legacyFallback and primaryStore in detail, and says so in the note, when the old location was read', () => {
+    const row = rowFor(MOVED_STORE_FALLBACK);
+    expect(row.detail).toMatchObject({
+      legacyFallback: true, primaryStore: '/state/new-store', inputPath: '/plug/old-store', filesRead: 1,
+    });
+    expect(row.note).toContain('measured');
+    expect(row.note).toContain('옛 위치');
+  });
+
+  it('surfaces them as false when the new store itself was read, without a fallback note', () => {
+    const row = rowFor(MOVED_STORE_PRIMARY);
+    expect(row.detail).toMatchObject({ legacyFallback: false, primaryStore: '/state/new-store', inputPath: '/state/new-store' });
+    expect(row.note).toBe('measured');
+  });
+
+  it('tolerates a reader that prints neither: no key is invented, the note is the status alone', () => {
+    const row = rowFor(beforeTheMove(MOVED_STORE_FALLBACK));
+    expect(row.detail).not.toHaveProperty('legacyFallback');
+    expect(row.detail).not.toHaveProperty('primaryStore');
+    expect(row.detail.inputPath).toBe('/plug/old-store');
+    expect(row.note).toBe('measured');
+    // And a dead reader (the extractor runs on `{}`) still yields the row, with nothing in it.
+    expect(recovery.extract({})[0].detail).not.toHaveProperty('legacyFallback');
+    expect(recovery.extract({})[0].note).toBeNull();
+  });
+
+  it('keeps the numbers the reader printed: numerator, denominator and its own ratio', () => {
+    expect(rowFor(MOVED_STORE_FALLBACK)).toMatchObject({ numerator: 1, denominator: 2, ratio: 0.5 });
+    expect(rowFor(MOVED_STORE_PRIMARY)).toMatchObject({ numerator: 1, denominator: 1, ratio: 1 });
+  });
+
+  it('flows through a real census: the store reader runs, its output is parsed, the row keeps the fields', () => {
+    const root = makeProject('moved-store');
+    seedEnded(root, 'sessMovedStore01');
+    const script = writeFake('moved-store', `process.stdout.write(${JSON.stringify(JSON.stringify(MOVED_STORE_FALLBACK))});`);
+
+    const doc = census({ cwd: root, since: null }, { readers: [{ ...recovery, script }], tmpRoot: tmp });
+
+    const run = doc.runs[0];
+    expect(run.input).toBe('live-store');
+    expect(run.scope).toBe('all');
+    expect(run.inputPath).toBe('/plug/old-store');
+    const row = metric(doc, 'ca03.recovery-journal-divergent', 'all');
+    expect(row).toMatchObject({ status: 'measured', numerator: 1, denominator: 2, ratio: 0.5 });
+    expect(row.detail).toMatchObject({ legacyFallback: true, primaryStore: '/state/new-store' });
+    expect(row.note).toContain('옛 위치');
   });
 });
 
@@ -530,15 +742,54 @@ describe('v51-census: the registries cannot rot', () => {
   });
 });
 
+/** The runbook's own section 3.6, from its heading to the next heading. */
+function runbookSection() {
+  const md = readFileSync(RUNBOOK, 'utf-8');
+  const start = md.indexOf('### 3.6');
+  expect(start).toBeGreaterThan(-1);
+  const rest = md.slice(start + 1);
+  const next = rest.search(/\n#{2,3} /);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
+/** Every fenced block in a section that runs the script, in order. */
+function commandBlocks(section) {
+  return [...section.matchAll(/```text\r?\n([\s\S]*?)```/g)].map((m) => m[1]).filter((b) => b.trimStart().startsWith('node "'));
+}
+
 describe('v51-census: the runbook documents the flags the script accepts', () => {
   it('names the script and every flag inside its own runbook section', () => {
-    const md = readFileSync(RUNBOOK, 'utf-8');
-    const start = md.indexOf('### 3.6');
-    expect(start).toBeGreaterThan(-1);
-    const rest = md.slice(start + 1);
-    const next = rest.search(/\n#{2,3} /);
-    const section = next === -1 ? rest : rest.slice(0, next);
+    const section = runbookSection();
     expect(section).toContain('v51-census.mjs');
     for (const flag of [...FLAGS.value, ...FLAGS.boolean]) expect(section, flag).toContain(flag);
+  });
+
+  it('never recommends --autopilot-dir in a command: it pins the store and turns the fallback off', () => {
+    const blocks = commandBlocks(runbookSection());
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of blocks) expect(block).not.toContain('--autopilot-dir');
+    // It stays documented as the explicit override, and the prose says what it costs.
+    expect(runbookSection()).toMatch(/--autopilot-dir[^\n]*폴백/);
+  });
+
+  it('gives the recommended form (checkout + installed plugin) and the post-release form (cache path, no --plugin-root)', () => {
+    const blocks = commandBlocks(runbookSection());
+    const recommended = blocks.find((b) => b.includes('<메인 체크아웃>/plugins/artibot/scripts/ledger/v51-census.mjs'));
+    const postRelease = blocks.find((b) => b.includes('<installPath>/scripts/ledger/v51-census.mjs'));
+    expect(recommended).toContain('--plugin-root');
+    expect(postRelease).toBeDefined();
+    expect(postRelease).not.toContain('--plugin-root');
+    // One line, as promised.
+    expect(postRelease.trim().split('\n')).toHaveLength(1);
+    // The finder picks the newest cache version, and the section says to check that against installPath.
+    expect(runbookSection()).toContain('가장 높은 버전');
+  });
+
+  it('no longer says the store is the script plugin\'s, and names the current field instead of the old one', () => {
+    const section = runbookSection();
+    expect(section).not.toContain('스크립트가 든 플러그인의 저장소');
+    expect(section).not.toContain('설치본 저장소를 준다');
+    expect(section).toContain('measuredAtFrom');
+    expect(section).not.toContain('measuredAtSource');
   });
 });

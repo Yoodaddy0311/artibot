@@ -348,6 +348,11 @@ describe('v51-census: a foreign project with a seeded ledger', () => {
     const row = shared.doc.metrics.find((m) => m.id === 'ca03.recovery-journal-divergent');
     expect(row.numerator).toBe(1);
     expect(row.denominator).toBe(1);
+    // Which store was read is on the row itself. The reader from after the session store
+    // moved also prints `legacyFallback` (false for an explicit --dir, which never falls
+    // back); the one from before the move prints nothing. Both are right, so both pass.
+    expect(path.resolve(row.detail.inputPath)).toBe(path.resolve(shared.store));
+    expect([undefined, false]).toContain(row.detail.legacyFallback);
   });
 
   it('made every snapshot-fed reader read the snapshot, byte for byte', () => {
