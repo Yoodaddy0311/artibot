@@ -60,8 +60,13 @@
  * because each is a decision:
  *  - it backfills `ops` on the run's nodes from `run.json.lanes` (once), so the
  *    node can be the canonical "now" (`lib/topology/split-state-sources.js#attachRunOps`);
- *  - it does NOT claim: `claimTask` sets `status: claimed` over the node's own
- *    ops state, and the node is now the record of who holds the limb;
+ *  - it takes the lease BESIDE the node, not over it (SH-11 pre-flip condition
+ *    1): `claimTask({ status: <the node's own status> })` adds the lease record
+ *    and moves nothing else, so `ops.state` and `status` still agree (B1). The
+ *    legacy claim forced `status: claimed` over the ops word and so could not be
+ *    used; without any lease the SH-12 heartbeat emitter
+ *    (`scripts/split/lane-lease.mjs`) finds nothing to renew for a bound run.
+ *    {@link leaseBesideNode} says what it did in the result's `lease` key;
  *  - it leaves a limb another run owns in that mission alone (I2) and refuses
  *    to dispatch it (`task-run-mismatch`).
  *
@@ -98,7 +103,8 @@ import {
   readMissionBindingEnabled,
 } from '../../lib/topology/split-state-sources.js';
 import { LIMB_LEASE_TTL_MS, mergeLimbTasks } from '../../lib/topology/split-task-feed.js';
-import { TERMINAL_TASK_STATUSES } from '../../lib/project-state/validate.js';
+import { isLeaseExpired } from '../../lib/project-state/lease.js';
+import { OWNED_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../../lib/project-state/validate.js';
 import { selectMissionForSession } from '../hooks/post-compact-rehydrate.js';
 
 /** Ledger/journal `reason` for the graph write this module makes. */
@@ -320,6 +326,46 @@ function claimLimb(store, missionId, limb, task) {
 }
 
 /**
+ * Take the lease of a BOUND run's limb BESIDE its node (SH-11 pre-flip
+ * condition 1, the SH-12 lease in parallel).
+ *
+ * The node is the record of the lane, and its `status` is derived from its
+ * `ops` word; the legacy claim forced `claimed` over that word, which is why the
+ * bound feed did not claim at all and a bound run had no lease for the SH-12
+ * heartbeat to renew. This takes the lease with the status the node ALREADY has
+ * (`claimTask({ status })`), so the lease record appears and nothing else moves.
+ *
+ * It is idempotent and never takes anything that is not this limb's:
+ *  - a node whose status cannot carry an owner (queued, blocked, done, failed,
+ *    cancelled) gets no lease — a pending lane has nothing to hold, a finished
+ *    one must not be walked back (`skipped:status-<status>`);
+ *  - a live lease of this limb is left alone (`held`): a repeat feed writes
+ *    nothing, and the heartbeat is the lane-state sync's to renew;
+ *  - an EXPIRED lease of this limb is reclaimed (`reclaimed`) — the window is
+ *    dispatching again, so it is alive;
+ *  - a lease held by someone else is reported (`held-by:<owner>`), never broken,
+ *    expired or not: reclaiming a stranger's lease is CA-09's decision.
+ * A refused claim is a string (`refused:<msg>`), never a throw — the feed is
+ * record-only.
+ *
+ * @param {object} store - StateStore.
+ * @param {string} missionId - The bound mission.
+ * @param {string} limb - Task id and owner.
+ * @param {() => Date} now - The clock `isLeaseExpired` judges by (the store judges by its own inside `claimTask`).
+ * @returns {string} `claimed` | `reclaimed` | `held` | `held-by:<owner>` | `skipped:status-<status>` | `refused:<msg>`.
+ */
+function leaseBesideNode(store, missionId, limb, now) {
+  const node = store.getTaskGraph(missionId)?.tasks?.find((t) => t?.id === limb);
+  if (!OWNED_TASK_STATUSES.includes(node?.status)) return `skipped:status-${node?.status ?? 'absent'}`;
+  const held = store.getLease(missionId, limb);
+  if (held && held.owner !== limb) return `held-by:${held.owner}`;
+  if (held && !isLeaseExpired(held, now())) return 'held';
+  const claim = store.claimTask({ missionId, taskId: limb, owner: limb, ttlMs: LIMB_LEASE_TTL_MS, status: node.status, reason: FEED_REASON });
+  if (!claim.ok) return `refused:${claim.errors?.[0] ?? 'claim-failed'}`;
+  return claim.reclaimed ? 'reclaimed' : 'claimed';
+}
+
+/**
  * The bound variant of {@link mergeAndWrite}: the same CAS-guarded merge with
  * ONE retry, plus the backfill of `ops` on the run's own nodes.
  *
@@ -378,9 +424,10 @@ function tryBind({ parentRoot, plan, limb, state, missionId, sid, store, now }) 
 
 /**
  * Feed one limb of a BOUND run: merge the plan into the bound mission's graph,
- * attach `ops`, and stop there — there is deliberately no claim (see the
- * module header). Returns the same result shape as the legacy feed, with
- * `claim: 'bound:node'` and three extra keys: `binding`, `opsAttached` and,
+ * attach `ops`, then take the lease beside the node ({@link leaseBesideNode}) —
+ * no legacy claim, which would set `status: claimed` over the ops word. Returns
+ * the same result shape as the legacy feed, with `claim: 'bound:node'` and four
+ * extra keys: `lease` (what the lease step did), `binding`, `opsAttached` and,
  * when non-empty, `opsSkipped`.
  */
 function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, now }) {
@@ -395,6 +442,7 @@ function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, n
     if (!out.commit.ok) return { ...skipped(`graph-write-refused:${out.commit.errors?.[0] ?? 'unknown'}`), missionId };
     stateVersion = out.commit.state_version ?? stateVersion;
   }
+  const lease = leaseBesideNode(store, missionId, limb, now);
   return {
     fed: true,
     skipped: null,
@@ -403,6 +451,7 @@ function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, n
     added: out.merged.added,
     refreshed: out.merged.refreshed,
     claim: 'bound:node',
+    lease,
     stateVersion: store.getState().state_version ?? stateVersion,
     location: store.location?.source ?? null,
     binding: {
@@ -420,8 +469,9 @@ function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, n
 /**
  * Seed and claim one dispatched limb. Total — returns a result for every input.
  *
- * A run that carries a binding is fed through {@link feedBound} instead (no
- * claim; see the module header). `bind: true` lets this call write the binding
+ * A run that carries a binding is fed through {@link feedBound} instead (the
+ * lease is taken beside the node, not claimed over it; see the module header).
+ * `bind: true` lets this call write the binding
  * when the run has none and the legacy rule finds a live mission for the session.
  * Both are subject to the canary key ({@link missionBindingEnabled}): with it
  * off, `bind: true` binds nothing and a record already on disk is not honoured.
@@ -436,7 +486,7 @@ function feedBound({ store, state, parentRoot, plan, limb, missionId, binding, n
  * @param {{ openStore?: Function, now?: () => Date, config?: object|null }} [ports] - Test seam. `config`: the parsed artibot.config.json the canary key is read from; `null` is "no config" (off); absent reads the shipped file.
  * @returns {{fed: boolean, skipped: string|null, missionId: string|null, taskId: string|null,
  *   added: string[], refreshed: string[], claim: string|null, stateVersion?: number, location?: string,
- *   binding?: object, opsAttached?: string[], opsSkipped?: object[]}} `binding` appears on a bound feed, on a legacy feed that asked to bind and could not (`{status:'unbound', reason}`), and on any legacy result of a run whose record the switch is not honouring (`{status:'disabled'}`).
+ *   lease?: string, binding?: object, opsAttached?: string[], opsSkipped?: object[]}} `lease` appears on a bound feed only (see {@link leaseBesideNode}). `binding` appears on a bound feed, on a legacy feed that asked to bind and could not (`{status:'unbound', reason}`), and on any legacy result of a run whose record the switch is not honouring (`{status:'disabled'}`).
  * @example
  * feedLimb({ parentRoot, plan, limb: 'auth' }); // { fed: true, claim: 'claimed', ... }
  */

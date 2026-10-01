@@ -371,13 +371,20 @@ describe('dispatch path stays unwired', () => {
   });
 });
 
-/* ══════════ SH-11 — a BOUND run: the sync follows the binding and adds no second store write ══════════
+/* ══════════ SH-11 — a BOUND run: the sync follows the binding; with no lease record it adds no second store write ══════════
  *
  * In a bound run the lane write is ONE store commit that already carries what
- * the sync used to write (the heartbeat stamp, the release of `status`/`owner`),
- * so the sync's remaining job is lease-RECORD hygiene: release a lease that was
- * taken before the run was bound. The bound feeder never claims (`claimTask`
- * would set `status: claimed` over the node's own ops state).
+ * the sync used to write on the node (the heartbeat stamp, the release of
+ * `status`/`owner`); it never touches the lease RECORD. That record is the bound
+ * feed's: it takes it at dispatch, BESIDE the node (`task-feed.mjs#leaseBesideNode`,
+ * `claimTask` with the node's own status — a bare claim would set `status:
+ * claimed` over the node's ops state), and the sync renews and releases it. That
+ * flow, with a lease the bound feed took, is measured end to end in
+ * `task-feed.test.js` ("SH-11 pre-flip (1)"). The cases below bind a run WITHOUT
+ * feeding it, so there is no lease record unless a case takes one: they pin the
+ * sync's other side — a limb with no lease costs one commit, not two
+ * (`unchanged` / `skipped:no-lease`) — and that a lease taken BEFORE the run was
+ * bound is still released.
  *
  * WHAT THIS CANNOT SEE: a live leader session — none has run a bound lane yet.
  */

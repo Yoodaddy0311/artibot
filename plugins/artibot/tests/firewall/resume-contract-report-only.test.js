@@ -7,8 +7,9 @@
  * steps whose names are all verbs — "Restore Task Graph", "Find expired worker
  * leases", "Reconcile Ledger". Every one of those names is one keystroke away
  * from the write that Shadow forbids: `getLease` sits beside `claimTask` on the
- * same store object (`lib/project-state/state-manager.js:430` and `:432`,
- * measured 2026-09-14), and
+ * same store object (`lib/project-state/state-manager.js:542` and `:546`,
+ * re-measured for SH-11 pre-flip condition 2; the 2026-09-14 lines were `:430`
+ * and `:432`), and
  * `reconcile` repairs the snapshot the moment it is handed `apply: true`
  * (`lib/project-state/reconcile.js:51`, the `if (drifted && opts.apply === true)`
  * branch). A controller that took one of those turns would still return a
@@ -27,7 +28,7 @@
  *     weakened until it stopped meaning anything.
  *   - DYNAMIC. Static text cannot see a write reached through an injected port,
  *     which is the only way this module could write at all. So the controller
- *     is run across a fixture matrix with every port recording, and the five
+ *     is run across a fixture matrix with every port recording, and the six
  *     write ports must show zero calls while `reconcile` must never see
  *     `apply: true` — even though the caller passes `apply: true` in the
  *     options, which is the forwarding mistake the run reproduces on purpose.
@@ -74,13 +75,17 @@ const MISSION = 'm-1';
 const NOW_MS = Date.parse('2026-09-14T12:00:00.000Z');
 
 /**
- * The five state-changing bindings on the StateStore, measured 2026-09-14 at
- * `lib/project-state/state-manager.js:431-435` (`buildStoreApi`) — every write
- * the store exposes, and none of them may be called. They sit immediately
- * below the three read bindings this controller does use (`:428-430`), which
- * is the whole reason the gate exists.
+ * The six state-changing bindings on the StateStore, re-measured for SH-11
+ * pre-flip condition 2 at `lib/project-state/state-manager.js:543-549`
+ * (`buildStoreApi`; first measured 2026-09-14 at `:431-435`, when there were
+ * five) — every write the store exposes, and none of them may be called. The
+ * sixth, `updateTask`, is the single-node door that condition added
+ * (`lib/project-state/task-update.js`): a node write is exactly the kind of
+ * write "Restore Task Graph" is one keystroke from. They sit immediately below
+ * the three read bindings this controller does use (`:540-542`), which is the
+ * whole reason the gate exists.
  */
-const WRITE_PORTS = Object.freeze(['updateMission', 'claimTask', 'releaseTask', 'heartbeatWorker', 'appendEvent']);
+const WRITE_PORTS = Object.freeze(['updateMission', 'updateTask', 'claimTask', 'releaseTask', 'heartbeatWorker', 'appendEvent']);
 
 /** Tokens that would mean the module reached for I/O or a clock of its own. */
 const FORBIDDEN_TOKENS = Object.freeze([

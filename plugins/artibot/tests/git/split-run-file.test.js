@@ -19,6 +19,7 @@
  * used this module", never "this file is version 1". Do not gate on its absence.
  */
 
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -228,6 +229,136 @@ describe('updatePlanJson', () => {
     expect(updatePlanJson(root, (cur) => ({ ...cur, runId: 'new' }))).toEqual({ runId: 'new' });
     expect(() => updatePlanJson(root, null)).toThrow(TypeError);
     expect(() => updatePlanJson(root, () => [1])).toThrow(TypeError);
+  });
+});
+
+/* ══════════ SH-11 pre-flip condition (3): plan.json read-modify-write is ONE at a time ══════════
+ *
+ * `updatePlanJson` used to read, run `fn`, then rename with nothing stopping a
+ * second window from doing the same in between (the bind race the run-to-mission
+ * binder documents as M1). The lock is `withFileLock(plan.json)`: a sentinel
+ * `plan.json.lock`, exclusive, fail-closed (ELOCKTIMEOUT, the holder's lock
+ * untouched), re-entry refused.
+ *
+ * WHAT THESE CASES CANNOT SEE: a holder slower than the lock's stale threshold
+ * (10 s — `fn` here is a few lines), a lock stranded by SIGKILL (reclaimed by
+ * the lock module's own stale rules, measured in tests/core/file-lock*.test.js),
+ * and any writer that does not go through `updatePlanJson` — the leader's inline
+ * plan write at `/split plan` time still takes no lock.
+ */
+describe('updatePlanJson — one read-modify-write at a time (SH-11 pre-flip 3)', () => {
+  const lockOf = (root) => `${planJsonPath(root)}.lock`;
+  const libUrl = new URL('../../lib/git/split-run-file.js', import.meta.url).href;
+
+  it('holds the plan.json lock for the whole read-modify-write, and the holder is this process', () => {
+    const root = mkTmp();
+    let seen = null;
+    updatePlanJson(root, (cur) => {
+      seen = fs.existsSync(lockOf(root)) ? JSON.parse(fs.readFileSync(lockOf(root), 'utf-8')) : null;
+      return { ...cur, runId: 'split-lock' };
+    });
+    expect(seen).not.toBeNull();
+    expect(seen.pid).toBe(process.pid);
+    expect(readPlanJson(root).runId).toBe('split-lock');
+  });
+
+  it('releases the lock afterwards — on success and when fn throws — and leaves no tmp file', () => {
+    const root = mkTmp();
+    updatePlanJson(root, () => ({ runId: 'a' }));
+    expect(fs.existsSync(lockOf(root))).toBe(false);
+    expect(() => updatePlanJson(root, () => { throw new Error('boom'); })).toThrow('boom');
+    expect(fs.existsSync(lockOf(root))).toBe(false);
+    expect(() => updatePlanJson(root, () => [1])).toThrow(TypeError);
+    expect(fs.existsSync(lockOf(root))).toBe(false);
+    expect(fs.readdirSync(path.dirname(planJsonPath(root))).sort()).toEqual(['plan.json']);
+    expect(readPlanJson(root)).toEqual({ runId: 'a', schema_version: V }); // and the failed attempts wrote nothing
+  });
+
+  it('a nested update from inside fn is refused instead of interleaving — the outer write keeps its read', () => {
+    const root = mkTmp();
+    updatePlanJson(root, () => ({ runId: 'split-nest', base: 'b'.repeat(40) }));
+    let inner = null;
+    updatePlanJson(root, (cur) => {
+      try {
+        updatePlanJson(root, (c2) => ({ ...c2, inner: true }));
+      } catch (err) {
+        inner = err;
+      }
+      return { ...cur, outer: true };
+    });
+    expect(inner?.code).toBe('ELOCKREENTRANT');
+    expect(readPlanJson(root)).toEqual({ runId: 'split-nest', base: 'b'.repeat(40), outer: true, schema_version: V });
+  });
+
+  describe('across processes', () => {
+    const kids = [];
+    afterEach(() => {
+      for (const k of kids.splice(0)) {
+        try { k.kill('SIGKILL'); } catch { /* already gone */ }
+      }
+    });
+    const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    const waitFor = (file, ms) => {
+      const until = Date.now() + ms;
+      while (!fs.existsSync(file)) {
+        if (Date.now() > until) throw new Error(`timed out waiting for ${path.basename(file)}`);
+        pause(5);
+      }
+    };
+
+    /**
+     * A child that parks at a barrier file, then does ONE `updatePlanJson` and writes its verdict to a file.
+     * It is up and parked BEFORE this process takes any lock, so how long it takes to start cannot
+     * lengthen the time the lock is held (the lock goes stale after 10 s).
+     */
+    function startChild(root, tag) {
+      const script = path.join(root, 'plan-writer-child.mjs');
+      if (!fs.existsSync(script)) {
+        fs.writeFileSync(script, [
+          "import { existsSync, writeFileSync } from 'node:fs';",
+          `import { updatePlanJson } from ${JSON.stringify(libUrl)};`,
+          'const [root, ready, go, result] = process.argv.slice(2);',
+          'const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);',
+          "writeFileSync(ready, '1');",
+          'const until = Date.now() + 20000;',
+          'while (!existsSync(go)) { if (Date.now() > until) process.exit(98); pause(2); }',
+          'try {',
+          "  updatePlanJson(root, (cur) => ({ ...cur, child: 'wrote' }));",
+          "  writeFileSync(result, 'WROTE');",
+          '} catch (err) {',
+          "  writeFileSync(result, 'FAILED:' + (err && err.code));",
+          '}',
+          '',
+        ].join('\n'));
+      }
+      const at = (ext) => path.join(root, `${tag}.${ext}`);
+      const p = { ready: at('ready'), go: at('go'), result: at('result') };
+      kids.push(spawn(process.execPath, [script, root, p.ready, p.go, p.result], { stdio: 'ignore', windowsHide: true }));
+      waitFor(p.ready, 20_000);
+      return p;
+    }
+
+    it('another PROCESS cannot interleave: it fails closed while this one holds the lock, and writes once the lock is free', () => {
+      const root = mkTmp();
+      updatePlanJson(root, () => ({ runId: 'split-proc' }));
+
+      const held = startChild(root, 'held');
+      updatePlanJson(root, (cur) => {
+        fs.writeFileSync(held.go, ''); // release the child while THIS process holds the lock...
+        waitFor(held.result, 20_000); // ...and wait for its answer: it gives up after the lock's wait budget
+        return { ...cur, outer: true };
+      });
+      expect(fs.readFileSync(held.result, 'utf-8')).toBe('FAILED:ELOCKTIMEOUT');
+      expect(readPlanJson(root)).toEqual({ runId: 'split-proc', outer: true, schema_version: V });
+
+      // CONTROL: the same child, released with the lock free, writes — so the refusal above was the lock, not a broken child.
+      const free = startChild(root, 'free');
+      fs.writeFileSync(free.go, '');
+      waitFor(free.result, 20_000);
+      expect(fs.readFileSync(free.result, 'utf-8')).toBe('WROTE');
+      expect(readPlanJson(root)).toEqual({ runId: 'split-proc', outer: true, child: 'wrote', schema_version: V });
+      expect(fs.existsSync(lockOf(root))).toBe(false);
+    }, 60_000);
   });
 });
 

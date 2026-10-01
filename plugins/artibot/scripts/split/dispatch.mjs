@@ -26,7 +26,8 @@
  *   parent plan.json                                limbs[].forkPoint, written once; missionBinding, written once (SH-11, and
  *                                                   only with artibot.config.json#split.missionBinding.enabled === true)
  *   StateStore task graph                           limb task + lease (record-only, via task-feed.mjs); a BOUND run's node
- *                                                   is written by the lane write itself and the feed adds ops, no claim
+ *                                                   is written by the lane write itself; the feed adds its ops and takes the
+ *                                                   lease beside the node (leaseBesideNode, reported as `taskFeed.lease`)
  *
  * The SH-11 canary key `split.missionBinding.enabled` ships `false`: with it off
  * dispatch binds nothing and a run that already carries a record is dispatched
@@ -224,13 +225,23 @@ function recordForkPoint({ parentRoot, plan, worktreePath, limb }) {
   if (!base) {
     return { value: null, recorded: false, ref: null, reason: `git merge-base <ref> HEAD failed in ${worktreePath} — tried ${INTEGRATION_REFS.join(', ')} (${failures.join(' | ')})` };
   }
-  updatePlanJson(parentRoot, (cur) => {
-    const limbs = Array.isArray(cur.limbs) ? [...cur.limbs] : [];
-    const i = limbs.findIndex((l) => l && l.limb === limb);
-    if (i < 0 || forkPointForLimb(cur, limb)) return cur;
-    limbs[i] = { ...limbs[i], forkPoint: base };
-    return { ...cur, limbs };
-  });
+  try {
+    updatePlanJson(parentRoot, (cur) => {
+      const limbs = Array.isArray(cur.limbs) ? [...cur.limbs] : [];
+      const i = limbs.findIndex((l) => l && l.limb === limb);
+      if (i < 0 || forkPointForLimb(cur, limb)) return cur;
+      limbs[i] = { ...limbs[i], forkPoint: base };
+      return { ...cur, limbs };
+    });
+  } catch (err) {
+    // Another process holds plan.json.lock past the lock's wait budget (the plan write has been exclusive
+    // since SH-11 pre-flip condition 3). Same class as the git failure above — reported, not thrown: the
+    // fork point stays UNRECORDED and `value` is null, so the prompt carries plan.base, which is what `land`
+    // falls back to (it must not be told a base `land` will not use). A later dispatch retries. Anything
+    // else the write throws is a real fault and stays loud.
+    if (err?.code !== 'ELOCKTIMEOUT') throw err;
+    return { value: null, recorded: false, ref, reason: `plan.json lock not acquired — fork point ${base} (via ${ref}) NOT recorded: ${err.message}` };
+  }
   return { value: base, recorded: true, reason: null, ref };
 }
 
@@ -356,7 +367,9 @@ export async function runDispatch(args, opts = {}) {
   // and it is the canary key itself, so a shipped install binds nothing. This
   // is the one caller that asks: `lane-state` and the lease sync read a
   // binding, they never create one. For a bound run the feed backfills `ops`
-  // from run.json, does not claim, and reports `binding` in `taskFeed`.
+  // from run.json, takes the lease beside the node instead of the legacy claim
+  // (`task-feed.mjs#leaseBesideNode`), and reports `lease` and `binding` in
+  // `taskFeed`.
   const taskFeed = (opts.feedLimb ?? feedLimb)({
     parentRoot, plan, limb: row.limb, dryRun: args.dryRun, bind: bindingOn, ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
   }, { config, ...(opts.openStore ? { openStore: opts.openStore } : {}) });

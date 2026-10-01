@@ -22,8 +22,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
+import { LANE_OPS_TO_V11_STATUS } from '../../lib/supervisor/contracts.js';
+import { readWorkerState, writeWorkerState } from '../../lib/topology/split-state.js';
 import { LIMB_LEASE_TTL_MS } from '../../lib/topology/split-task-feed.js';
 import { selectMissionForSession } from '../../scripts/hooks/post-compact-rehydrate.js';
+import { syncLaneLease } from '../../scripts/split/lane-lease.mjs';
 import {
   FEED_REASON, feedLimb, missionBindingEnabled, openFeedStore, readShippedConfigSync, resolveRunMission,
   selectLegacyMission, sessionIdFromEnv,
@@ -592,6 +595,166 @@ describe('SH-11 T8 — the bound feed backfills ops from run.json once, and a re
     expect(r.opsAttached).toEqual(['billing']);
     expect(nodeIn(store, MISSION, 'auth').ops).toBeUndefined();
     expect(nodeIn(store, MISSION, 'auth').status).toBe('claimed');
+  });
+});
+
+/* ══════════ SH-11 pre-flip condition (1) — the lease sits BESIDE the bound node (SH-12 in parallel) ══════════
+ *
+ * A bound node's `status` is derived from its `ops` word (B1). The bound feed used not to claim at all,
+ * because `claimTask` forced `status: 'claimed'` over that word — so a bound run had NO lease, and the
+ * SH-12 heartbeat emitter (`lane-lease.mjs#syncLaneLease`) answered `skipped:no-lease` for every working
+ * state: turning the SH-11 key on would have silenced the only lease-heartbeat source. The feed now takes
+ * the lease with `claimTask({ status: <the node's own status> })`: the record appears, nothing else moves.
+ *
+ * WHAT THIS BLOCK CANNOT SEE: a live `/split` run (none is bound yet), CA-09's reclaim decision (an own
+ * lease that expired is reclaimed here, somebody else's never is), and the host clock that `ctx.now` and the
+ * feed's `now` port both read in production.
+ */
+describe('SH-11 pre-flip (1) — the bound feed takes the lease beside the node', () => {
+  const T0 = Date.parse('2026-09-29T05:00:00.000Z');
+  const activeLane = { auth: { state: 'active', since: T_LANE, window: 'w-a' } };
+
+  /** A store and a feed port that read ONE hand-cranked clock, so a lease's expiry is judged the same on both sides. */
+  function clocked() {
+    const clock = { t: T0 };
+    const store = createStateStore({
+      projectRoot: root, sessionId: SESSION, renderProjectionFile: false, now: () => new Date(clock.t),
+      appendEvent: (e) => { ledger.push(e); },
+    });
+    const feedAt = (limb, over = {}) => feedLimb(
+      { parentRoot: root, plan: PLAN_RUN, limb, sessionId: SESSION, ...over },
+      { openStore: () => store, now: () => new Date(clock.t), config: ON },
+    );
+    return { clock, store, feedAt };
+  }
+  const b1 = (node) => LANE_OPS_TO_V11_STATUS[node.ops.state] === node.status;
+
+  it('claims the lease for the dispatched limb; the node keeps the status its ops word derives, its owner and its ops', () => {
+    seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+    const { store, feedAt } = clocked();
+    seedMission(store);
+    const r = feedAt('auth', { bind: true });
+    expect(r).toMatchObject({ fed: true, claim: 'bound:node', lease: 'claimed' });
+
+    const node = nodeIn(store, MISSION, 'auth');
+    expect(node).toMatchObject({ status: 'executing', owner: 'auth' });
+    expect(node.ops).toEqual({ state: 'active', since: T_LANE, run_id: RUN, window: 'w-a' });
+    expect(b1(node)).toBe(true);
+    expect(store.getLease(MISSION, 'auth')).toMatchObject({ owner: 'auth' });
+    expect(Date.parse(store.getLease(MISSION, 'auth').expires_at) - T0).toBe(LIMB_LEASE_TTL_MS);
+  });
+
+  it('a second feed is idempotent: the lease is held, so nothing is written — no version, no journal line, no ledger row', () => {
+    seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+    const { store, feedAt } = clocked();
+    seedMission(store);
+    feedAt('auth', { bind: true });
+    const version = store.getState().state_version;
+    const rows = ledger.length;
+    const lines = journalKinds().length;
+
+    const again = feedAt('auth');
+    expect(again).toMatchObject({ fed: true, claim: 'bound:node', lease: 'held' });
+    expect(store.getState().state_version).toBe(version);
+    expect(ledger.length).toBe(rows);
+    expect(journalKinds().length).toBe(lines);
+  });
+
+  it('a limb that holds no owned status gets no lease: pending is queued, and done is finished', () => {
+    seedRunFiles({ run: { runId: RUN, lanes: { auth: { state: 'done', since: T_LANE } } } });
+    const { store, feedAt } = clocked();
+    seedMission(store);
+    expect(feedAt('auth', { bind: true })).toMatchObject({ fed: true, lease: 'skipped:status-done' });
+    expect(feedAt('billing')).toMatchObject({ fed: true, lease: 'skipped:status-queued' });
+    expect(store.getState().task_leases[MISSION] ?? {}).toEqual({});
+    expect(nodeIn(store, MISSION, 'auth')).toMatchObject({ status: 'done', owner: null }); // the terminal status was not walked back
+  });
+
+  it('a lease held by SOMEONE ELSE is reported and never broken, expired or not', () => {
+    seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+    const { clock, store, feedAt } = clocked();
+    seedMission(store);
+    feedAt('auth', { bind: true });
+    expect(store.releaseTask({ missionId: MISSION, taskId: 'auth', status: 'executing', reason: 'test.handoff' }).ok).toBe(true);
+    expect(store.claimTask({ missionId: MISSION, taskId: 'auth', owner: 'someone-else', ttlMs: 1000, status: 'executing' }).ok).toBe(true);
+
+    expect(feedAt('auth')).toMatchObject({ lease: 'held-by:someone-else' });
+    clock.t += 60_000; // their lease is now long expired — reclaiming it is CA-09's decision, not the feed's
+    expect(feedAt('auth')).toMatchObject({ lease: 'held-by:someone-else' });
+    expect(store.getLease(MISSION, 'auth').owner).toBe('someone-else');
+  });
+
+  it('an EXPIRED lease of this same limb is reclaimed — the window is alive, it is dispatching again', () => {
+    seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+    const { clock, store, feedAt } = clocked();
+    seedMission(store);
+    feedAt('auth', { bind: true });
+    clock.t += LIMB_LEASE_TTL_MS + 1000;
+    expect(feedAt('auth')).toMatchObject({ lease: 'reclaimed' });
+    const lease = store.getLease(MISSION, 'auth');
+    expect(lease.owner).toBe('auth');
+    expect(Date.parse(lease.expires_at)).toBeGreaterThan(clock.t);
+    expect(b1(nodeIn(store, MISSION, 'auth'))).toBe(true);
+  });
+
+  it('a refused claim is a fact in the result, never an exception, and the node is left as the graph write made it', () => {
+    seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+    const { store } = clocked();
+    seedMission(store);
+    const broken = { ...store, claimTask: () => ({ ok: false, errors: ['claimTask: nope'] }) };
+    const r = feedLimb({ parentRoot: root, plan: PLAN_RUN, limb: 'auth', sessionId: SESSION, bind: true }, { openStore: () => broken, now: nowPort, config: ON });
+    expect(r).toMatchObject({ fed: true, claim: 'bound:node', lease: 'refused:claimTask: nope' });
+    expect(nodeIn(store, MISSION, 'auth')).toMatchObject({ status: 'executing', owner: 'auth' });
+  });
+
+  describe('end to end — dispatch, lane transitions and release on a bound run (SH-12 heartbeat in parallel)', () => {
+    const runDir = () => path.join(root, '.artibot', 'split');
+    const laneWrite = (store, clock, state) => writeWorkerState({
+      runDir: runDir(), worker: 'auth', patch: { ops_state: state }, store, honorBinding: true, now: () => new Date(clock.t),
+    });
+    const sync = (store, state) => syncLaneLease({ parentRoot: root, limb: 'auth', state, sessionId: SESSION }, { openStore: () => store, config: ON });
+
+    it('review renews the lease beside the node, done releases it, and the node never disagrees with its ops word', () => {
+      seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+      const { clock, store, feedAt } = clocked();
+      seedMission(store);
+      expect(feedAt('auth', { bind: true })).toMatchObject({ lease: 'claimed' });
+      const claimedAt = store.getLease(MISSION, 'auth').heartbeat_at;
+
+      clock.t += 3_600_000;
+      expect(laneWrite(store, clock, 'review')).toMatchObject({ ok: true, source: 'store', opsState: 'review' });
+      expect(sync(store, 'review')).toMatchObject({ outcome: 'renewed', missionId: MISSION });
+      const beat = store.getLease(MISSION, 'auth');
+      expect(Date.parse(beat.heartbeat_at)).toBe(clock.t);
+      expect(beat.heartbeat_at).not.toBe(claimedAt);
+      expect(beat.acquired_at).toBe(new Date(T0).toISOString()); // the claim began at the dispatch; renewing moves the beat, not the start
+      expect(nodeIn(store, MISSION, 'auth')).toMatchObject({ status: 'reviewing', owner: 'auth' });
+      expect(b1(nodeIn(store, MISSION, 'auth'))).toBe(true);
+
+      clock.t += 3_600_000;
+      expect(laneWrite(store, clock, 'done')).toMatchObject({ ok: true, opsState: 'done' });
+      expect(sync(store, 'done')).toMatchObject({ outcome: 'released:done', missionId: MISSION });
+      expect(store.getLease(MISSION, 'auth')).toBeNull();
+      const done = nodeIn(store, MISSION, 'auth');
+      expect(done).toMatchObject({ status: 'done', owner: null });
+      expect(b1(done)).toBe(true);
+
+      const read = readWorkerState({ runDir: runDir(), store, honorBinding: true });
+      expect(read.workers.auth).toMatchObject({ status: 'done', source: 'store' });
+      expect(read.conflicts).toEqual([]);
+    });
+
+    it('CONTROL — with no lease beside the node (the feed that never claimed) the same sync has nothing to renew', () => {
+      seedRunFiles({ run: { runId: RUN, lanes: activeLane } });
+      const { clock, store, feedAt } = clocked();
+      seedMission(store);
+      feedAt('auth', { bind: true });
+      expect(store.releaseTask({ missionId: MISSION, taskId: 'auth', status: 'executing', reason: 'test.no-lease' }).ok).toBe(true);
+      expect(store.getLease(MISSION, 'auth')).toBeNull();
+      clock.t += 3_600_000;
+      laneWrite(store, clock, 'review');
+      expect(sync(store, 'review')).toMatchObject({ outcome: 'skipped:no-lease' });
+    });
   });
 });
 

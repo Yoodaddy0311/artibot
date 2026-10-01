@@ -47,6 +47,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createStateStore } from '../../lib/project-state/state-manager.js';
 import {
   BODY_FRAGMENTS, census, cleanupTempDirs, makePluginRoot, makeProject, MISSION,
   ON, OUTCOME_MARK, outcomeText, PLAN_MARK, planText, REL, reviewText,
@@ -478,10 +479,30 @@ describe('source pins — this CLI reports; it cannot write', () => {
     expect(source.split(needle).length - 1).toBe(0);
   });
 
-  it('binds no write port of the StateStore', () => {
-    for (const port of ['updateMission', 'claimTask', 'releaseTask', 'heartbeatWorker']) {
-      expect(source, `${port} must not appear in a report-only CLI`).not.toContain(port);
-    }
+  // The write-port pin is an ALLOWLIST. The write set is every function the REAL store exposes minus the names
+  // below, so a method the store grows later is a write port until someone decides it reads and lists it here.
+  // The deny-list this replaced named five methods and could not see `writeProjection` (it writes
+  // .artibot/state.yaml) or `appendEvent`.
+  /** Store methods that cannot change the store. */
+  const READ_ONLY_PORTS = ['getState', 'getProjection', 'getMission', 'getTaskGraph', 'getLease', 'renderProjection'];
+  /** Names this CLI spells on purpose, in a form pinned below: `appendEvent` as the option that hands the store a REFUSING ledger port. */
+  const SPELLED_UNDER_A_PIN = ['appendEvent'];
+  const storeMethods = (store) => Object.keys(store).filter((name) => typeof store[name] === 'function');
+  const writePortsOf = (store, allowed) => storeMethods(store).filter((name) => !allowed.includes(name));
+
+  it('binds no write port of the StateStore — the write set is derived from the real store, minus the allowlist', () => {
+    const store = createStateStore({ projectRoot: PLUGIN_ROOT, sessionId: 'write-port-pin', appendEvent: () => ({ ok: false }) });
+    const allowed = [...READ_ONLY_PORTS, ...SPELLED_UNDER_A_PIN];
+    // An entry that is no longer a store method is a rename this pin would otherwise stop noticing.
+    for (const name of allowed) expect(storeMethods(store), `${name} is not a StateStore method`).toContain(name);
+    const writePorts = writePortsOf(store, allowed);
+    // The known writes must come out as writes, or the loop below can pass over nothing.
+    expect(writePorts).toEqual(expect.arrayContaining(['updateMission', 'updateTask', 'claimTask', 'releaseTask', 'heartbeatWorker', 'writeProjection']));
+    for (const port of writePorts) expect(source, `${port} must not appear in a report-only CLI`).not.toContain(port);
+  });
+
+  it('the write-port derivation fails closed: a store method it has never seen is a write port (self-check)', () => {
+    expect(writePortsOf({ getMission() {}, purgeMission() {}, paths: {} }, ['getMission'])).toEqual(['purgeMission']);
   });
 
   it('never reconciles or applies anything', () => {

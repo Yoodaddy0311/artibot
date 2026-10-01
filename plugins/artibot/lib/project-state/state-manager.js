@@ -99,6 +99,7 @@ import { buildProjection, clone, renderProjection } from './projection.js';
 import { reconcileStore } from './reconcile.js';
 import { validateMissionId, validateSnapshot } from './validate.js';
 import { resolveStoreLocation } from './store-location.js';
+import { claimStatusError, runTaskUpdate } from './task-update.js';
 
 /** Derived snapshot: a cache. Delete it and the journal rebuilds it. */
 export const SNAPSHOT_FILE = 'project-state.json';
@@ -214,7 +215,8 @@ export {
  *
  * @param {StateStoreOptions} options - Store options.
  * @returns {object} The store: `{location, paths, getState, getMission, updateMission,
- *   claimTask, releaseTask, heartbeatWorker, appendEvent, reconcile, renderProjection}`.
+ *   updateTask, claimTask, releaseTask, heartbeatWorker, appendEvent, reconcile,
+ *   renderProjection}`.
  * @example
  * const store = createStateStore({
  *   projectRoot, sessionId: 's1',
@@ -539,6 +541,8 @@ function buildStoreApi(ctx) {
     getTaskGraph: (missionId) => clone(readState().task_graphs[missionId] ?? null),
     getLease: (missionId, taskId) => clone(readState().task_leases[missionId]?.[taskId] ?? null),
     updateMission: (missionId, mutator, opts) => updateMission(ctx, missionId, mutator, opts),
+    // One node, one `task.upsert` — the single-node door (task-update.js).
+    updateTask: (params) => runTaskUpdate(commit, ctx, params),
     claimTask: (params) => claimTask(ctx, params),
     releaseTask: (params) => releaseTask(ctx, params),
     heartbeatWorker: (params) => heartbeatWorker(ctx, params),
@@ -601,11 +605,21 @@ function updateMission(ctx, missionId, mutator, opts = {}) {
  * expiry is judged from `expires_at` against the injected clock, never read
  * from a stored boolean (`lease.schema.json`).
  *
+ * `status` is what the node carries afterwards; the default, `claimed`, is what
+ * every caller got before the argument existed. A node that already has a status
+ * of its own — a bound `/split` limb whose `ops` says `active`, i.e. `executing`
+ * — passes that status, so the lease is taken BESIDE it instead of over it (SH-11
+ * pre-flip condition 1). Only claimed / executing / reviewing are accepted (the
+ * words that may carry the owner a claim sets); anything else is refused before
+ * the lock is taken, with nothing written (`task-update.js#claimStatusError`).
+ *
  * @param {object} ctx - Store context.
- * @param {object} params - Claim parameters.
+ * @param {object} params - Claim parameters (`status` optional, see above).
  * @returns {object} Commit result, with `lease` and `reclaimed` on success.
  */
-function claimTask(ctx, { missionId, taskId, owner, ttlMs, expectedVersion, reason, token }) {
+function claimTask(ctx, { missionId, taskId, owner, ttlMs, expectedVersion, reason, token, status = 'claimed' }) {
+  const statusError = claimStatusError(status);
+  if (statusError !== null) return { ok: false, conflict: false, errors: [statusError], warnings: [] };
   let outcome = {};
   const result = commit(ctx, {
     missionId,
@@ -626,7 +640,7 @@ function claimTask(ctx, { missionId, taskId, owner, ttlMs, expectedVersion, reas
       outcome = { lease, reclaimed: Boolean(held) };
       return {
         records: [
-          { kind: 'task.upsert', mission_id: missionId, task: { ...clone(task), owner, status: 'claimed' } },
+          { kind: 'task.upsert', mission_id: missionId, task: { ...clone(task), owner, status } },
           { kind: 'lease.set', mission_id: missionId, task_id: taskId, lease },
         ],
       };

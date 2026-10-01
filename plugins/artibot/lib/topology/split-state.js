@@ -59,9 +59,13 @@
  * written and stamped `projected_from: 'run.json'`, the store layer of a read
  * contributing nothing — and the result says so, `binding: { status:
  * 'disabled' }`, instead of saying nothing. Turning it back ON is guarded (④):
- * a lane the legacy path wrote AFTER the node last changed — a later stamp, or
- * a different word than `ops.state` written after `ops.since` — is refused as
- * `binding-stale`, because the node's `ops` is then behind `run.json`.
+ * a lane the legacy path wrote AFTER the node last changed is refused as
+ * `binding-stale`, because the node's `ops` is then behind `run.json`. The
+ * judge that reads no clock is the lane's SEAL (`split-lane-seal.js`): a bound
+ * write seals the lane it projects, and a lane that says something other than
+ * its seal was rewritten since (SH-11 pre-flip condition 4). A lane with no
+ * seal falls back to the stamps — a later `updated_at`, or a different word
+ * than `ops.state` written after `ops.since`.
  * {@link bindRunToMission} is not gated here: it only records; the caller that
  * decides to bind (`task-feed.mjs`) asks the same key.
  *
@@ -102,8 +106,11 @@
  *    `conflicts[]` entry of a bound read (`store:<mission>`), never a write.
  *  - Its bound write does not create, renew or release a LEASE record
  *    (`task_leases`): the node carries `heartbeat_at` / `owner` / `status`, in
- *    the same single commit. `claimTask` would set `status: claimed` over the
- *    node's own ops state, so the bound feeder does not call it.
+ *    the same single commit. The lease sits BESIDE the node and is someone
+ *    else's to keep: the bound feed takes it with `claimTask({ status: <the
+ *    node's own status> })` (`task-feed.mjs#leaseBesideNode`, SH-11 pre-flip
+ *    condition 1 — the legacy claim forced `claimed` over the ops word), and
+ *    `lane-lease.mjs#syncLaneLease` renews and releases it.
  *  - It does not validate the events it hands to `appendEvent`; the writer is
  *    the one validator, and a refusal comes back as `{ok:false}`. The payload
  *    targets `lib/runtime/event-writer.js#writeEvent`, whose `EVENT_RE` takes
@@ -124,6 +131,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { atomicWriteJsonSync } from '../core/file.js';
+import { withFileLock } from '../core/file-lock.js';
 import { readRunJson, updatePlanJson, updateRunJson } from '../git/split-run-file.js';
 import { MISSION_ID_PATTERN } from '../project-state/validate.js';
 import { isLaneOpsState, isV11Status, LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS } from '../supervisor/contracts.js';
@@ -134,6 +142,7 @@ import { isLaneOpsState, isV11Status, LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS } 
 // the re-export: a clock is a core leaf, and routing through a verification
 // module would make this file depend on a verifier it does not otherwise use.
 import { readClock } from '../core/clock.js';
+import { LANE_SEAL_KEY, laneFacts, laneSealDrift } from './split-lane-seal.js';
 import {
   BINDING_DISABLED,
   honorsBinding,
@@ -264,17 +273,24 @@ function updateRunJsonAt(paths, fn) {
  * `plan.json` read-modify-write, the twin of {@link updateRunJsonAt}. Used by
  * exactly one caller shape: recording the run-to-mission binding.
  *
+ * Serialised by the plan.json lock on BOTH branches (SH-11 pre-flip condition
+ * 3): the canonical layout goes through `updatePlanJson`, which takes it, and
+ * a non-canonical directory takes the same `withFileLock` here, so the binder
+ * behaves the same wherever the run directory sits.
+ *
  * @param {ReturnType<typeof resolveRunDir>} paths
  * @param {(current: object) => object|undefined} fn
  * @returns {object}
  */
 function updatePlanJsonAt(paths, fn) {
   if (paths.parentRoot) return updatePlanJson(paths.parentRoot, fn);
-  const current = readJsonObjectOrNull(paths.planJsonPath) ?? {};
-  const next = fn(current);
-  const out = next === undefined ? current : next;
-  atomicWriteJsonSync(paths.planJsonPath, out);
-  return out;
+  return withFileLock(paths.planJsonPath, () => {
+    const current = readJsonObjectOrNull(paths.planJsonPath) ?? {};
+    const next = fn(current);
+    const out = next === undefined ? current : next;
+    atomicWriteJsonSync(paths.planJsonPath, out);
+    return out;
+  });
 }
 
 /* ─────────────────────── the run-to-mission binding (SH-11) ──────────────────────
@@ -294,8 +310,10 @@ function updatePlanJsonAt(paths, fn) {
  * WHAT THE RECORD DOES NOT DO: it does not create a mission row (a row without
  * a `mission.created` event is `/doctor` Check 8-3's orphan), it does not say
  * the mission is still alive (a fact about the store, judged per call), and it
- * is not a lock — two windows binding the same run at the same instant are
- * decided by plan.json's last atomic rename, unmeasured under real contention.
+ * is not itself a lock. Two windows binding the same run at the same instant
+ * are serialised by the plan.json lock `updatePlanJson` takes (SH-11 pre-flip
+ * condition 3): the first binds, the second reads that record inside its own
+ * read-modify-write and reuses it (I1).
  */
 
 /**
@@ -372,17 +390,16 @@ export function bindRunToMission({ runDir, missionId, sessionId, now, store } = 
   if (store && !store.getState()?.active_missions?.[missionId]) return { ok: false, reason: 'mission-missing' };
 
   const binding = Object.freeze({ mission_id: missionId, run_id: plan.runId, generation: 1, bound_at: ts, bound_by_session: sessionId });
-  // NOT a locked read-modify-write (M1): `updatePlanJson` reads, runs `fn`, then
-  // renames, and nothing stops a second window from doing the same in between.
-  // The check inside `fn` only narrows the gap since the probe above. So the
-  // write is not trusted: the plan is read back and the record it NOW carries
-  // is what the caller gets — no caller acts on a binding that is not on disk.
-  // What this still cannot see: two windows that both read "unbound", both
-  // write, and both read back BEFORE the other's rename each return their own
-  // record for that one call; the file settles on the later rename and every
-  // later call reads that one. Closing it takes a lock (state-manager.js) —
-  // listed in the commit body as a pre-flip condition, unmeasured under real
-  // contention.
+  // A LOCKED read-modify-write (M1, closed by SH-11 pre-flip condition 3):
+  // `updatePlanJson` holds the plan.json lock across read -> `fn` -> rename, so a
+  // second window binding the same run takes its turn and its `fn` finds the
+  // record the first one wrote — the check below is then decided, not merely
+  // narrowed. The write is STILL not trusted: the plan is read back and the
+  // record it NOW carries is what the caller gets — no caller acts on a binding
+  // that is not on disk. The read-back earns its keep against a writer that does
+  // not take the lock (the leader's inline plan write at `/split plan` time).
+  // Contended past the lock's wait budget the update throws ELOCKTIMEOUT and
+  // nothing is bound; the callers here are record-only and report a skip.
   updatePlanJsonAt(paths, (current) => (Object.hasOwn(current, MISSION_BINDING_KEY) ? current : { ...current, [MISSION_BINDING_KEY]: binding }));
   const landed = probeBinding(paths, readJsonObjectOrNull(paths.planJsonPath));
   if (landed.status === 'invalid') return { ok: false, reason: landed.reason };
@@ -909,9 +926,15 @@ function ledgerRefusal(outcome) {
  *
  * WHAT THIS DOES NOT DO: no lease record is created, renewed or released here.
  * The node carries the liveness (`heartbeat_at`, `owner`, `status`) in the one
- * commit, which is what "fold the lane-lease write" means for a bound run; the
- * store's `claimTask` would set `status: claimed` over the node's own ops state
- * (a B1 violation by construction), so the bound feeder does not call it.
+ * commit, which is what "fold the lane-lease write" means for a bound run. The
+ * lease record is beside the node, not in this write: the bound feed takes it
+ * with `claimTask({ status })` so the node keeps the status its ops word derives
+ * (a bare `claimTask` would set `claimed` over it — a B1 violation by
+ * construction), and the lane-lease sync renews and releases it.
+ *
+ * The commit itself is `store.updateTask` — ONE `task.upsert`, the node this
+ * write planned (SH-11 pre-flip condition 2) — not a graph replacement: the
+ * mission row and every sibling node stay exactly as the store holds them.
  */
 
 /** @returns {Readonly<object>} the `{ok:false}` result of a bound write refused before any effect. */
@@ -929,7 +952,7 @@ function rejectBound(worker, reason, detail) {
 function acquireStore({ store, openStore }) {
   try {
     const got = store ?? (typeof openStore === 'function' ? openStore() : null);
-    if (got && typeof got.getState === 'function' && typeof got.updateMission === 'function') return { store: got };
+    if (got && typeof got.getState === 'function' && typeof got.updateTask === 'function') return { store: got };
     return {
       reason: 'store-unavailable',
       detail: 'a bound run writes the StateStore and none was supplied (no store port, or the opener returned none — usually no session id) — run.json left unchanged',
@@ -939,29 +962,6 @@ function acquireStore({ store, openStore }) {
   }
 }
 
-/** `updateMission` mutator: keep the mission row exactly as it is (a null row would be written as a removal). */
-function keepMission(current) {
-  if (current === null) throw new Error('the bound mission vanished between the snapshot and the commit');
-  return current;
-}
-
-/**
- * The graph to commit: the snapshot's graph with `node` replaced (or appended).
- * Every other task is carried by reference, untouched — a `/team` node, another
- * run's node, a sibling limb.
- */
-function graphWithNode(snapshot, missionId, node, ts) {
-  const graph = snapshot.task_graphs?.[missionId];
-  const tasks = Array.isArray(graph?.tasks) ? graph.tasks : [];
-  const at = tasks.findIndex((t) => t?.id === node.id);
-  return {
-    schema_version: Number.isInteger(graph?.schema_version) && graph.schema_version >= 1 ? graph.schema_version : 1,
-    mission_id: missionId,
-    updated_at: ts,
-    tasks: at >= 0 ? tasks.map((t, i) => (i === at ? node : t)) : [...tasks, node],
-  };
-}
-
 /**
  * The stale guard (④). Turning the canary switch off is safe; turning it back
  * on is not free: while it is off the legacy branch writes `run.json` and never
@@ -969,28 +969,45 @@ function graphWithNode(snapshot, missionId, node, ts) {
  * lane's last word. A bound write computes its previous state, its `since` and
  * its ledger key from that node, so it must not build on it.
  *
- * Stale = the node carries `ops`, the `run.json` lane was NOT projected by the
- * store (`projected_from` is anything but `'store'`, absent included), and
- * EITHER
- *  (1) the lane's `updated_at` is strictly LATER than the node's, OR
- *  (2) the lane's word differs from `node.ops.state` and the lane's `updated_at`
- *      is strictly later than `node.ops.since`.
- * Clause (2) exists because `node.updated_at` is not only the bound writer's
- * stamp: the LEGACY feeder's ownership refresh (`mergeLimbTasks`) also stamps
- * it, and `dispatch` runs that refresh right AFTER its own lane write — so
- * (1) alone reads "the node is newer" and misses a drifted lane. `ops.since`
- * moves only when the bound writer changes the state, and `ops` is never
- * touched by the legacy path. (`claimTask` / `releaseTask` / `heartbeatWorker`
- * do not stamp `updated_at`.) Clause (2) does NOT fire on a lane the
- * projection left BEHIND the node (a projection failure after a commit): that
- * lane is OLDER than `ops.since`, and the store is the side that is right.
- * What cannot be judged — a stamp missing or unparseable, a node with no `ops`
- * (the lane is then its previous state, the backfill) — is not called stale: a
- * lane written before `updated_at` existed would otherwise brick every bound
- * write of its limb.
+ * TWO judges, the first of them clock-free (SH-11 pre-flip condition 4):
  *
- * WHAT THIS CANNOT SEE: a legacy write made with a clock behind the node's, and
- * a lane hand-edited without touching `updated_at`.
+ * A. THE SEAL (`split-lane-seal.js`). A bound write seals the lane it projects
+ *    with the facts it gave it; the legacy path spreads the entry it rewrites, so
+ *    the seal survives it while the facts do not. A lane that says something
+ *    other than what its seal says was written by something other than the
+ *    store's projection since the store last did — drift, judged by comparing two
+ *    values the lane holds, and stale whatever the stamps say. That is what a
+ *    clock cannot see: a legacy write made with a clock BEHIND the node's, and a
+ *    lane edited by hand without touching `updated_at`.
+ *
+ * B. THE TIMESTAMP CLAUSES, for a lane with no seal (it was never projected — the
+ *    backfill case) and as the belt for one that has it. Stale = the node carries
+ *    `ops`, the `run.json` lane was NOT projected by the store (`projected_from`
+ *    is anything but `'store'`, absent included), and EITHER
+ *     (1) the lane's `updated_at` is strictly LATER than the node's, OR
+ *     (2) the lane's word differs from `node.ops.state` and the lane's
+ *         `updated_at` is strictly later than `node.ops.since`.
+ *    Clause (2) exists because `node.updated_at` is not only the bound writer's
+ *    stamp: the LEGACY feeder's ownership refresh (`mergeLimbTasks`) also stamps
+ *    it, and `dispatch` runs that refresh right AFTER its own lane write — so
+ *    (1) alone reads "the node is newer" and misses a drifted lane. `ops.since`
+ *    moves only when the bound writer changes the state, and `ops` is never
+ *    touched by the legacy path. (`claimTask` / `releaseTask` / `heartbeatWorker`
+ *    do not stamp `updated_at`.) Clause (2) does NOT fire on a lane the
+ *    projection left BEHIND the node (a projection failure after a commit): that
+ *    lane is OLDER than `ops.since`, and the store is the side that is right.
+ *
+ * What cannot be judged — a node with no `ops` (the lane is then its previous
+ * state, the backfill), a lane with no seal and a stamp that is missing or
+ * unparseable — is not called stale: a lane written before `updated_at` existed
+ * would otherwise brick every bound write of its limb. A lane the projection
+ * failed to rewrite is sealed at its LAST projection, so it is not drift either:
+ * the store is the side that is right and the next write heals it.
+ *
+ * WHAT THIS CANNOT SEE: a legacy write that leaves the sealed facts as they were
+ * (a re-assert of the same word) made with a clock behind the node's — it moved
+ * nothing the node is behind on; and a lane hand-edited to say exactly what it
+ * said before.
  *
  * @param {string} worker
  * @param {unknown} laneRaw - `run.json.lanes[worker]` as stored
@@ -999,6 +1016,11 @@ function graphWithNode(snapshot, missionId, node, ts) {
  */
 function staleLaneDetail(worker, laneRaw, node) {
   if (!isPlainObject(laneRaw) || !isPlainObject(node?.ops)) return null;
+  const drift = laneSealDrift(laneRaw);
+  if (drift !== null && drift.length > 0) {
+    const moved = drift.map((d) => `${d.fact}: ${JSON.stringify(d.sealed)} -> ${JSON.stringify(d.now)}`).join(', ');
+    return `run.json lanes.${worker} no longer says what the store last projected into it (${moved}) ${staleWayOut(worker)}`;
+  }
   if (laneRaw.projected_from === STORE_PROJECTION_MARK) return null;
   const laneAt = isoMs(laneRaw.updated_at);
   const newerThanNode = laneAt > isoMs(node.updated_at); // NaN compares false: unjudgeable is not stale
@@ -1008,7 +1030,12 @@ function staleLaneDetail(worker, laneRaw, node) {
   const how = newerThanNode
     ? `was written by the ${writer} path at ${laneRaw.updated_at}, after this node's last update at ${node.updated_at}`
     : `says '${String(laneRaw.state)}' (written by the ${writer} path at ${laneRaw.updated_at}) while this node's ops says '${node.ops.state}' since ${node.ops.since}`;
-  return `run.json lanes.${worker} ${how} — the split.missionBinding switch was off in between, so node.ops may be behind run.json; run.json and the store were left unchanged. Reconcile deliberately: the store node is canonical for a bound run, so either remove lanes.${worker} from run.json (the node then answers alone) or remove ${MISSION_BINDING_KEY} from plan.json to stay on the legacy path`;
+  return `run.json lanes.${worker} ${how} ${staleWayOut(worker)}`;
+}
+
+/** The end of every `binding-stale` detail: why the write was refused and the two deliberate ways out. */
+function staleWayOut(worker) {
+  return `— the split.missionBinding switch was off in between (or the lane was edited by hand), so node.ops may be behind run.json; run.json and the store were left unchanged. Reconcile deliberately: the store node is canonical for a bound run, so either remove lanes.${worker} from run.json (the node then answers alone) or remove ${MISSION_BINDING_KEY} from plan.json to stay on the legacy path`;
 }
 
 /**
@@ -1060,8 +1087,12 @@ function commitBoundWrite({ paths, plan, binding, store, worker, opsWord, blocke
     }
     let commit;
     try {
-      commit = store.updateMission(missionId, keepMission, {
-        graph: graphWithNode(snapshot, missionId, planned.node, ts), expectedVersion: snapshot.state_version, reason: BOUND_WRITE_REASON,
+      // ONE node, ONE `task.upsert` (SH-11 pre-flip condition 2): the mission row
+      // and every sibling node stay as they are. The node is the one just planned,
+      // so the mutator ignores the stored copy — the CAS on `state_version` is what
+      // says the stored copy is still the one the plan was derived from.
+      commit = store.updateTask({
+        missionId, taskId: worker, mutate: () => planned.node, expectedVersion: snapshot.state_version, reason: BOUND_WRITE_REASON,
       });
     } catch (err) {
       return { ok: false, result: rejectBound(worker, 'store-threw', `the StateStore threw on the commit: ${err?.message ?? err} — run.json left unchanged`) };
@@ -1085,7 +1116,7 @@ function projectedLane(atWrite, rest, node, ts) {
   const base = { ...atWrite, ...rest };
   delete base.blocked_by; // the node's blockers are the truth; a stale list must not outlive them
   const { ops } = node;
-  return {
+  const lane = {
     ...base,
     state: ops.state,
     since: ops.since,
@@ -1095,6 +1126,10 @@ function projectedLane(atWrite, rest, node, ts) {
     projected_from: STORE_PROJECTION_MARK,
     updated_at: ts,
   };
+  // SH-11 pre-flip condition 4: seal what was just projected. The legacy path
+  // spreads the entry it finds, so the seal outlives a legacy write that changes
+  // the facts — which is how the stale guard sees that write without a clock.
+  return { ...lane, [LANE_SEAL_KEY]: laneFacts(lane) };
 }
 
 /** Write one worker of a BOUND run. See the section comment above. */
@@ -1191,7 +1226,7 @@ function writeBound({ paths, plan, probe, worker, opsWord, blockedBy, rest, ts, 
  * @param {(event: object) => unknown} [p.appendEvent] - ledger port, called with a `writeEvent` input envelope. Injected, never imported: `lib/topology` is L4 and `lib/runtime` is L5.
  * @param {object} [p.ledger] - what the event contract needs and this module cannot derive: `{ session_id, mission_id?, source?, agent_type?, model_tier?, owner?, data? }`. `source` defaults to `'supervisor'`, which is the one value the allowlist accepts for BOTH events.
  * @param {() => Date} [p.now] - clock port. Omit for the wall clock; present-but-wrong throws (`core/clock.js#readClock`, the same judge `state-manager` uses).
- * @param {{ getState: Function, updateMission: Function }} [p.store] - StateStore port. Used ONLY when the run is bound; an unbound run never touches it.
+ * @param {{ getState: Function, updateTask: Function }} [p.store] - StateStore port. Used ONLY when the run is bound; an unbound run never touches it. A store with no `updateTask` is not a usable port (`store-unavailable`).
  * @param {() => (object|null)} [p.openStore] - lazy alternative to `store`, called only for a bound run, so an unbound write pays nothing (a session id is needed to open a store).
  * @param {(mutate: (current: object) => object) => unknown} [p.projectRunJson] - replaces the run.json read-modify-write of a bound run's projection (a test seam and a rewire point).
  * @param {boolean|(() => boolean)} [p.honorBinding] - the canary switch (`artibot.config.json#split.missionBinding.enabled`), read by the CALLER — this module is L4 and reads no config. Only a literal `true`, or a function returning one, honours a binding; a function is asked lazily, never for a run that carries none. ABSENT MEANS OFF: a run that carries a binding is then written by the legacy branch, exactly as an unbound one, and the result carries `binding: {status:'disabled'}` (an unbound run's result never has the key).
