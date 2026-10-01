@@ -74,15 +74,28 @@
  * spellings fails open for the next one written.
  *
  * WHAT THIS GATE CANNOT SEE — do not read a green run as more than it is:
- *   - **A leak of any file but this gate's own.** Until D2 case (b) compared the
- *     real store's entry count before and after and so noticed ANY stray write.
- *     The real store is now the user's shared `~/.claude/artibot/runtime/autopilot`,
- *     which a live autopilot run in another window legitimately changes while
- *     the suite runs, so the count is no longer this suite's to pin and case (b)
- *     checks only the session id it wrote itself. A different test leaking a
- *     different file into the real store is caught by (a) and the setup
- *     assertions if it goes through the resolver, and by nothing here if it does
- *     not.
+ *   - **Anything but a NEW top-level name, inside case (b)'s own milliseconds.**
+ *     Case (b) lists the real store's top-level names (`null` when the directory
+ *     does not exist) immediately before and after ONE `saveSession`, leaves out
+ *     names containing `.tmp.` (a writer's in-flight temp file, not a leak), and
+ *     asserts that the directory was not created and that no name was added.
+ *     That catches a writer that creates the real store or drops a new
+ *     top-level file into it — and the check is run against a stand-in directory
+ *     by the self-verification block below, so it is known to go red.
+ *     It does NOT detect a delete or a modify: a name that vanished, or a file
+ *     whose bytes changed, reads as "nothing added". Neither did the entry-count
+ *     comparison this replaced — a count also reads one delete plus one add as
+ *     "unchanged". It does not look inside an existing subdirectory (`locks/`,
+ *     `memory/`, `worktrees/`). And it sees only its own window: a different
+ *     test leaking a different file at another time, in another worker, is
+ *     caught by (a) and the setup assertions if it goes through the resolver,
+ *     and by nothing here if it does not. The narrow window is also why a live
+ *     autopilot run in another window should not turn the gate red: that run
+ *     would have to create a NEW top-level name inside those milliseconds.
+ *     Measured 2026-09-30 against a SIMULATED live writer (atomic rewrite of one
+ *     session file plus an events append every few ms; in the second variant a
+ *     new top-level name every tenth tick), with the home pointed at a scratch
+ *     directory: 16 of 16 gate runs green. That is not a bound on the rate.
  *   - **A test that deletes or repoints the override and never restores it.**
  *     Nothing here runs between other people's tests. Setup re-runs per file,
  *     so the blast radius is the rest of that one file, unobserved.
@@ -128,7 +141,7 @@
  */
 
 import {
-  afterEach, describe, expect, it,
+  afterEach, beforeEach, describe, expect, it,
 } from 'vitest';
 import fsSync from 'node:fs';
 import os from 'node:os';
@@ -157,6 +170,69 @@ function realStoreDir() {
 /** Where a DISCARDED override falls back to: the state dir's store. */
 function defaultStoreDir() {
   return path.join(resolveArtibotDir(), 'runtime', 'autopilot');
+}
+
+/**
+ * A writer's in-flight temp file — `saveSession` names it `<file>.tmp.<pid>.<ms>.<rand>`
+ * and renames it into place. It belongs to whichever process is mid-write, which
+ * in the real store can be a live autopilot run, so it is not evidence of a leak.
+ * Only this exact shape is left out: `leak.tmp` and `tmp.json` are still names.
+ */
+const IN_FLIGHT_NAME = /\.tmp\./;
+
+/**
+ * The top-level names in a store directory, or `null` when it does not exist.
+ *
+ * `null` is not `[]`. A directory that is absent and one that exists but is empty
+ * are different states, and creating the real store is itself a leak this gate
+ * exists to catch. Only ENOENT reads as absent: a listing that fails for any
+ * other reason (a file where the directory should be, no permission) throws, so
+ * the gate goes red instead of reading "cannot look" as "nothing there".
+ *
+ * @param {string} dir
+ * @returns {string[]|null} sorted names, in-flight temp names excluded
+ */
+function topLevelNames(dir) {
+  try {
+    return fsSync.readdirSync(dir).filter((name) => !IN_FLIGHT_NAME.test(name)).sort();
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/**
+ * What appeared between two {@link topLevelNames} snapshots: the directory
+ * itself, or top-level names. Absent before and after is clean.
+ *
+ * Deliberately blind to deletes and modifies (a name that is gone is not an
+ * addition) and to anything below the top level — see WHAT THIS GATE CANNOT SEE.
+ *
+ * @param {string[]|null} before
+ * @param {string[]|null} after
+ * @returns {{created: boolean, added: string[]}}
+ */
+function appearedBetween(before, after) {
+  if (after === null) return { created: false, added: [] };
+  if (before === null) return { created: true, added: [...after] };
+  const known = new Set(before);
+  return { created: false, added: after.filter((name) => !known.has(name)) };
+}
+
+/**
+ * Run `act` and report what it left in `dir` that was not there before.
+ *
+ * The window is exactly `act()`: nothing else runs between the two listings, so
+ * it is milliseconds wide whatever `act` is.
+ *
+ * @param {string} dir
+ * @param {() => void} act
+ * @returns {{created: boolean, added: string[]}}
+ */
+function leakedBy(dir, act) {
+  const before = topLevelNames(dir);
+  act();
+  return appearedBetween(before, topLevelNames(dir));
 }
 
 /**
@@ -293,8 +369,11 @@ const KNOWN_STORE_PATH_MODULES = [
   // writer-import allowlist. It mirrors the env PAIR with the same
   // fail-closed semantics (`tests/ledger/recovery-journal-census.test.js`
   // pins the unpaired and wrong-root discards), and it opens nothing for
-  // writing — so it can reach no store, sandboxed or real. If the resolver's
-  // pairing rule ever changes, THIS copy is the one that will not notice.
+  // writing — so it can reach no store, sandboxed or real. It mirrors the list
+  // of old locations the store adopts from (`getLegacyStoreDirs`) the same way;
+  // `tests/ledger/recovery-journal-census-store.test.js` runs both over the
+  // same layouts. If the resolver's pairing rule ever changes, THIS copy is the
+  // one that will not notice.
   'scripts/ledger/recovery-journal-census.mjs',
 ];
 
@@ -354,20 +433,29 @@ describe('the autopilot store is sandboxed for every test in the suite', () => {
     // A resolver assertion alone is a necessary condition, not the claim. This
     // drives the actual writer and then looks at both directories on disk.
     const sessionId = `fw-autopilot-store-${process.pid}-${Date.now()}`;
-    const written = saveSession({ sessionId, phase: 'FIREWALL' });
+    let written = null;
+    const leaked = leakedBy(realStoreDir(), () => {
+      written = saveSession({ sessionId, phase: 'FIREWALL' });
+    });
     try {
       expect(fsSync.existsSync(written)).toBe(true);
       expect(isInside(os.tmpdir(), written)).toBe(true);
       expect(isInside(realStoreDir(), written)).toBe(false);
-      // THIS RUN'S OWN id, not the store's entry count. Before D2 the real store
-      // was a per-checkout directory nothing else wrote to, so "the count did
-      // not move" was a sound end-to-end witness. It is now the user's shared
-      // `~/.claude/artibot/runtime/autopilot`, which a live autopilot run in
-      // another window legitimately changes while this suite runs — a count
-      // comparison there would be red for a reason that has nothing to do with
-      // this suite.
+      // The real store is the user's shared `~/.claude/artibot/runtime/autopilot`,
+      // which a live autopilot run in another window may be writing to. Two
+      // checks, because they fail differently:
+      //   - this run's OWN id is absent — exact, and immune to that live run;
+      //   - no NEW top-level name appeared, and the directory was not created,
+      //     in the milliseconds around the write — broad, so it also catches a
+      //     writer that leaks a differently named file or makes the directory
+      //     without writing one. A live run would have to create a new
+      //     top-level name inside that window to turn it red; if one does,
+      //     re-run.
+      // Names, not a count: a count reads one delete plus one add as "no
+      // change", and an in-flight temp file of a live run moves it.
       expect(fsSync.existsSync(path.join(realStoreDir(), `${sessionId}.json`))).toBe(false);
       expect(fsSync.existsSync(path.join(realStoreDir(), `${sessionId}.events.ndjson`))).toBe(false);
+      expect(leaked).toEqual({ created: false, added: [] });
     } finally {
       try { fsSync.unlinkSync(written); } catch { /* best effort */ }
     }
@@ -486,5 +574,153 @@ describe('scanner self-verification', () => {
     // newline, not swallow the rest of the file.
     const src = "// see below\nconst d = path.join(r, 'runtime', 'autopilot');";
     expect(spellsStorePath(src)).toBe(true);
+  });
+});
+
+describe('real-store leak check self-verification', () => {
+  // The check behind case (b) is a few lines over a directory listing, and its
+  // first version could not go red: it looked only at the id the test wrote
+  // itself, so a saveSession that also created the real store, or dropped a
+  // `leak-<ms>.json` into it, left it green (reviewer mutation, 2026-09-30).
+  // Each control builds a stand-in for the real store under os.tmpdir() and runs
+  // the SAME functions case (b) runs, so what the gate must catch is reproduced
+  // by hand and the real home is never touched.
+  /** @type {string} */
+  let scratch;
+
+  beforeEach(() => {
+    scratch = fsSync.mkdtempSync(path.join(os.tmpdir(), 'artibot-fw-leak-'));
+  });
+
+  afterEach(() => {
+    fsSync.rmSync(scratch, { recursive: true, force: true });
+  });
+
+  const storeIn = () => path.join(scratch, '.claude', 'artibot', 'runtime', 'autopilot');
+  const touch = (...parts) => fsSync.writeFileSync(path.join(...parts), '{}\n', 'utf-8');
+
+  /** A store that already exists and holds one session, as a user's does. */
+  function existingStore() {
+    const dir = storeIn();
+    fsSync.mkdirSync(dir, { recursive: true });
+    touch(dir, 'real-session.json');
+    return dir;
+  }
+
+  /** Aim the real `saveSession` at `dir` through the override pair, then restore. */
+  function saveInto(dir, sessionId) {
+    const saved = process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
+    process.env.ARTIBOT_AUTOPILOT_STORE_DIR = dir;
+    try {
+      return saveSession({ sessionId, phase: 'FIREWALL' });
+    } finally {
+      if (saved === undefined) delete process.env.ARTIBOT_AUTOPILOT_STORE_DIR;
+      else process.env.ARTIBOT_AUTOPILOT_STORE_DIR = saved;
+    }
+  }
+
+  it('flags a writer that creates the store directory and nothing else', () => {
+    const dir = storeIn();
+    const leaked = leakedBy(dir, () => fsSync.mkdirSync(dir, { recursive: true }));
+    expect(leaked).toEqual({ created: true, added: [] });
+  });
+
+  it('flags a writer that drops a new top-level file into an existing store', () => {
+    const dir = existingStore();
+    const leaked = leakedBy(dir, () => touch(dir, 'leak-1757000000000.json'));
+    expect(leaked).toEqual({ created: false, added: ['leak-1757000000000.json'] });
+  });
+
+  it('flags a writer that creates the directory and a file in one go', () => {
+    const dir = storeIn();
+    const leaked = leakedBy(dir, () => {
+      fsSync.mkdirSync(dir, { recursive: true });
+      touch(dir, 'leak-2.json');
+    });
+    expect(leaked).toEqual({ created: true, added: ['leak-2.json'] });
+  });
+
+  it('flags an added name even when the same window deletes another (a count reads no change)', () => {
+    const dir = existingStore();
+    const leaked = leakedBy(dir, () => {
+      fsSync.unlinkSync(path.join(dir, 'real-session.json'));
+      touch(dir, 'leak-3.json');
+    });
+    expect(leaked.added).toEqual(['leak-3.json']);
+    // One entry before, one after: the comparison this gate replaced saw 1 === 1.
+    expect(fsSync.readdirSync(dir)).toHaveLength(1);
+  });
+
+  it('sees the real writer: a saveSession aimed at the watched directory is flagged', () => {
+    // The positive control through the actual code path, not a hand-made file.
+    // Unless the real writer's output is visible to this check — including its
+    // `<file>.tmp.<pid>…` rename — a green case (b) means nothing.
+    const absent = storeIn();
+    const firstId = `fw-seen-${process.pid}-${Date.now()}`;
+    const first = leakedBy(absent, () => saveInto(absent, firstId));
+    expect(first.created).toBe(true);
+    expect(first.added).toContain(`${firstId}.json`);
+
+    const secondId = `fw-seen-again-${process.pid}-${Date.now()}`;
+    const second = leakedBy(absent, () => saveInto(absent, secondId));
+    expect(second.created).toBe(false);
+    expect(second.added).toEqual([`${secondId}.json`]);
+  });
+
+  it('is clean when the store is absent before and after (a machine that never ran autopilot)', () => {
+    const dir = storeIn();
+    expect(topLevelNames(dir)).toBeNull();
+    expect(leakedBy(dir, () => {})).toEqual({ created: false, added: [] });
+  });
+
+  it('is clean when the window changes nothing in an existing store', () => {
+    const dir = existingStore();
+    expect(leakedBy(dir, () => {})).toEqual({ created: false, added: [] });
+  });
+
+  it("ignores another process's in-flight temp file, and only that shape", () => {
+    const dir = existingStore();
+    const inFlight = leakedBy(dir, () => touch(dir, 'live-run.json.tmp.4242.1757000000000.k3j9x2'));
+    expect(inFlight).toEqual({ created: false, added: [] });
+    // `.tmp.` inside a name is the whole rule: these are names, and are flagged.
+    const lookalikes = leakedBy(dir, () => {
+      touch(dir, 'leak.tmp');
+      touch(dir, 'tmp.json');
+      touch(dir, 'leak.tmp-1.json');
+    });
+    expect(lookalikes.added).toEqual(['leak.tmp', 'leak.tmp-1.json', 'tmp.json']);
+  });
+
+  it('does NOT see a delete, a modify, or a file added below the top level', () => {
+    // Stated limits, pinned so a green run is not read as more than it is. If
+    // the check ever learns one of these, this case goes red and the WHAT THIS
+    // GATE CANNOT SEE note in the header has to change with it.
+    const dir = existingStore();
+    fsSync.mkdirSync(path.join(dir, 'locks'));
+    touch(dir, 'kept.json');
+    const clean = { created: false, added: [] };
+
+    expect(leakedBy(dir, () => fsSync.unlinkSync(path.join(dir, 'real-session.json')))).toEqual(clean);
+    expect(leakedBy(dir, () => {
+      fsSync.writeFileSync(path.join(dir, 'kept.json'), '{"tampered":true}\n', 'utf-8');
+    })).toEqual(clean);
+    expect(leakedBy(dir, () => touch(dir, 'locks', 'leak.lock'))).toEqual(clean);
+  });
+
+  it('reads only ENOENT as absent: a file where the directory should be is an error', () => {
+    // "Cannot look" must not read as "nothing there".
+    const dir = storeIn();
+    fsSync.mkdirSync(path.dirname(dir), { recursive: true });
+    touch(dir);
+    expect(() => topLevelNames(dir)).toThrow();
+  });
+
+  it('tells the snapshots apart without touching disk', () => {
+    expect(appearedBetween(null, null)).toEqual({ created: false, added: [] });
+    expect(appearedBetween(null, [])).toEqual({ created: true, added: [] });
+    expect(appearedBetween([], [])).toEqual({ created: false, added: [] });
+    expect(appearedBetween(['a.json'], ['a.json', 'b.json'])).toEqual({ created: false, added: ['b.json'] });
+    expect(appearedBetween(['a.json', 'b.json'], ['a.json'])).toEqual({ created: false, added: [] });
+    expect(appearedBetween(['a.json'], null)).toEqual({ created: false, added: [] });
   });
 });
