@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.1] — 2026-10-02
+
+`v4.71.0`(`95b654b4`) 이후 1 커밋 = **13 files +195/−22**(`git rev-list --count v4.71.0..eb532c10` · `git diff --shortstat v4.71.0..eb532c10`, 2026-10-02 측정 — 릴리스 커밋은 이 수치에 없다).
+
+### 행동 변화 고지
+
+① **`/team` 리더가 기한 없이 기다리지 않는다**(`eb532c10`). 종전 Phase 3 은 "막히지 않으면 개입하지 않는다"뿐이라, 팀원 하나가 보고 없이 멈추면 Phase 4 교차 검수가 영영 시작되지 않았다. 이제 리더는 자기 백그라운드 타이머(기본 20분)를 걸고, 기한에 무보고 팀원에게 1회 질의, 다음 기한에도 무응답이면 `TaskStop` 후 재스폰, 재스폰도 실패하면 그 단위를 FAIL 로 적고 나머지로 진행한다. `/autopilot` Phase 2 와 `/split` 창 안의 팀 운용에도 같은 절차가 들어갔다. `allowed-tools` 에 `TaskStop`(team · autopilot) · `Monitor`(team) 추가.
+
+② **팀원 보고 계약에 "백그라운드 작업을 걸어 둔 채 턴을 끝내지 않는다" 조항**(`eb532c10`). 2026-10-02 실측(팀원 transcript 62개)에서 유휴 팀원에게 도착한 완료 알림 5건 중 5건이 팀원을 깨우지 못했고 최장 818분 정지했다. 10분 안의 명령은 포그라운드, 더 길면 나누거나 블로킹 대기를 포그라운드로 반복한다. team · autopilot · ultraplan · sc · split 5개 문서에 같은 문장으로 들어갔고, 메인 세션(split 창 자체)에는 걸리지 않는다. 메인 세션 리더에게 보내는 보고 주소는 `main` 으로 명시했다.
+
+③ **TeammateIdle · TaskCompleted 훅이 팀원을 구분한다**(`eb532c10`). `extractAgentId` 가 `teammate_name` 등에서도 식별자를 읽어, 종전처럼 모든 팀원이 `unknown` 한 행으로 뭉치지 않는다(실측 192회 중 186회가 `unknown`). 유휴 이벤트에서 팀원이 `working` 으로 기록되던 `workflow-status.js` 결함도 고쳤다. 식별자가 없는 이벤트는 키 이름만 기록해 호스트가 실제로 보내는 필드를 다음 런에서 측정할 수 있게 했다.
+
+### 검증
+
+- 커밋 `eb532c10` 의 GitHub CI check-run 7개 전부 success(Validate Node 20 · 22 · 24 각 `Tests 26486 passed | 47 skipped (26533)`, Windows Node 22 `26536 passed | 20 skipped (26556)`).
+- 실제 `/team` 런에서 리더 타이머가 리더를 깨우는지, `TaskStop` 이 팀원 이름으로 멈추는지, 호스트 TeammateIdle 페이로드의 필드 이름은 미측정이다.
+
 ## [4.71.0] — 2026-10-01
 
 `v4.70.1`(`59b7b3a5`) 이후 79 커밋(first-parent 31 · merge 15 · non-merge 64) = **209 files +33,758/−3,467**(`git rev-list --count v4.70.1..HEAD` · `--first-parent` · `--merges` · `--no-merges` · `git diff --shortstat v4.70.1..HEAD`, 통합 브랜치 `integ/release-4710` HEAD `821e7383`, 2026-10-01T10:07Z 측정 — 이 절을 쓰는 커밋과 그 뒤 커밋, 릴리스 커밋은 들어 있지 않다). 내역(`git diff --numstat` 을 경로로 나눠 합산): 테스트 121 files +24,023/−2,360 · `.artibot/guides/v5-design` 문서 5 files +593/−23 · 출하 코드 · 문서 83 files +9,142/−1,084. first-parent 31 은 줄기 병합 14개(`git merge --no-ff`, 모두 충돌 0; merge 15 는 W3 줄기가 병합 전에 origin/master 를 받은 내부 merge 1건을 더한 값이다)와 통합 커밋 17개다. **플러그인을 Artibot 소스 리포가 아닌 프로젝트에서 쓸 때 생기는 상태 · 경로 문제를 마무리하는 릴리스**다(v4.70.1 의 이어짐). 새 강제 스위치는 없고 새 최상위 config 키는 `projectBootstrap` 하나다(32 → 33, 출하 ON, 끄는 법은 ①). 측정을 읽는 쪽의 불연속은 셋이다: 영수증의 `catalog_version` 값이 2026-09-30 이 되고(⑥, 가격은 그대로), `/split` 의 lease 갱신이 `state.updated` 행을 이유 `split.lease-tick` 으로 남기며(⑦), 이름 붙은 검수자의 `review.completed` · `review.claim_audit` 행이 처음 생길 수 있게 된다(⑩ — 지금까지 원장 전체에서 0행이었다).
