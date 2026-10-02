@@ -354,6 +354,11 @@ export async function main() {
         // progress. tasksCompleted still honors any per-agent +1 count from the
         // task-complete event; only the team-wide total is injected here.
         const { completed, total } = deriveTeamProgress(state);
+        // This case is wired to BOTH SubagentStart and TeammateIdle (hooks.json).
+        // The TeammateIdle payload carries no `active` key, so reading only
+        // `active !== false` recorded every idle teammate as active — the
+        // opposite of the event. The event name is the idle signal.
+        const wentIdle = hookData?.active === false || hookData?.hook_event_name === 'TeammateIdle';
         state = {
           ...state,
           agents: {
@@ -361,7 +366,7 @@ export async function main() {
             [agentId]: {
               ...existing,
               role: agentRole || existing.role || 'teammate',
-              active: hookData?.active !== false,
+              active: !wentIdle,
               currentTask: hookData?.current_task || hookData?.currentTask || existing.currentTask || '',
               progress: hookData?.progress ?? existing.progress,
               tasksCompleted: existing.tasksCompleted ?? (total > 0 ? completed : undefined),
@@ -379,7 +384,7 @@ export async function main() {
         // Opt-A: refresh the derived workflow phase from current task progress.
         state = { ...state, workflow: deriveWorkflow(state) };
 
-        const statusVerb = hookData?.active === false ? 'went idle' : 'updated';
+        const statusVerb = wentIdle ? 'went idle' : 'updated';
         state = addEvent(state, 'info', agentId, `Agent ${statusVerb}`);
         break;
       }

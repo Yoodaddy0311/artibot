@@ -505,6 +505,16 @@ describe('hook-utils / Hook Input Extraction', () => {
       expect(extractAgentId({ name: 'test-agent' })).toBe('test-agent');
     });
 
+    it('reads teammate-shaped keys before the generic name', () => {
+      expect(extractAgentId({ teammate_id: 't-id', name: 'n' })).toBe('t-id');
+      expect(extractAgentId({ teammate_name: 'team-x-sid-builder', name: 'n' })).toBe('team-x-sid-builder');
+      expect(extractAgentId({ agent_name: 'an', name: 'n' })).toBe('an');
+    });
+
+    it('keeps agent_id ahead of every teammate key', () => {
+      expect(extractAgentId({ agent_id: 'a1', teammate_name: 'tn', teammate_id: 'ti' })).toBe('a1');
+    });
+
     it('returns "unknown" for missing data', () => {
       expect(extractAgentId(null)).toBe('unknown');
       expect(extractAgentId({})).toBe('unknown');

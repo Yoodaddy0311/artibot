@@ -163,6 +163,28 @@ describe('workflow-status', () => {
     expect(written.agents.a1.active).toBe(true);
   });
 
+  it('records a TeammateIdle firing as idle even though the payload has no active key', async () => {
+    process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+    setStdin({ hook_event_name: 'TeammateIdle', agent_id: 'a1', agent_type: 'tdd-guide', idle_reason: 'turn_complete' });
+
+    await runHookFresh();
+
+    const written = mockState.writes[0].data;
+    expect(written.agents.a1.active).toBe(false);
+    expect(written.events.at(-1).message).toBe('Agent went idle');
+  });
+
+  it('keeps a SubagentStart firing (no active key) active', async () => {
+    process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+    setStdin({ hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'tdd-guide' });
+
+    await runHookFresh();
+
+    const written = mockState.writes[0].data;
+    expect(written.agents.a1.active).toBe(true);
+    expect(written.events.at(-1).message).toBe('Agent updated');
+  });
+
   it('writes the workflow state exactly once per invocation', async () => {
     process.argv = ['node', 'workflow-status.js', 'teammate-update'];
     setStdin({ agent_id: 'a1' });

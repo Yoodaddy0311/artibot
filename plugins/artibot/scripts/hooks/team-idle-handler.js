@@ -8,6 +8,31 @@
  * Hook attachment (hooks.json): TeammateIdle
  * Stdin: Claude Code hook data JSON
  * Stdout: JSON { message, stop? }
+ *
+ * HOST SEMANTICS — read before "fixing" the output shape. The hooks reference
+ * (code.claude.com/docs/en/hooks.md, "TeammateIdle decision control", read
+ * 2026-10-02) says, verbatim: "Exit code 2 or `{"continue": false,
+ * "stopReason": "..."}` blocks the teammate from going idle, so it continues
+ * working." and "To allow the teammate to go idle normally, exit 0 without
+ * JSON or return any other exit code." Both controls mean the opposite of
+ * stopping. So:
+ *   - `stop: true` below is not a documented field. The auto-stop option
+ *     (team.autoStopIdle, off by default and absent from the shipped config)
+ *     therefore has no host effect beyond the message; it is not a way to end
+ *     a teammate. Ending one is the leader's TaskStop / shutdown_request.
+ *   - Do NOT rename `stop: true` to `continue: false`: that would turn
+ *     "auto-stop" into "never let this teammate idle".
+ *
+ * PAYLOAD SHAPE is 미확인. The same reference documents `agent_id`,
+ * `agent_type`, `idle_reason`; this repo's own fixture
+ * (tests/hooks/hook-fired-direct.test.js, TeammateIdle case) carries
+ * `teammate_name`/`team_name` and no `agent_id`; the shared state file held
+ * an `agents.unknown` row (2026-10-02), so at least some real firings had no
+ * key extractAgentId then read. Whenever a firing has no `agent_id`, its
+ * top-level KEY NAMES (never values) go to `state.idlePayloadWithoutAgentId`
+ * so the shape the host really sends can be measured. Consequence to know: a
+ * firing keyed by `teammate_name` lands on a different `agents` row than the
+ * SubagentStart row keyed by `agent_id`, if teammates fire SubagentStart.
  */
 
 import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
@@ -51,6 +76,28 @@ function trackIdleCount(agentId, state) {
     state: { ...state, idleCounts: { ...idleCounts, [agentId]: count } },
     count,
   };
+}
+
+/**
+ * Key names (sorted, values dropped) of a payload.
+ * @param {object|null} hookData
+ * @returns {{ keys: string[], at: string }}
+ */
+export function payloadKeyRecord(hookData) {
+  const keys = hookData && typeof hookData === 'object' ? Object.keys(hookData).sort() : [];
+  return { keys, at: new Date().toISOString() };
+}
+
+/**
+ * Return the state with the payload's key names recorded when the firing has
+ * no `agent_id` (immutable; unchanged state otherwise).
+ * @param {object} state
+ * @param {object|null} hookData
+ * @returns {object}
+ */
+export function withIdlePayloadRecord(state, hookData) {
+  if (hookData?.agent_id) return state;
+  return { ...state, idlePayloadWithoutAgentId: payloadKeyRecord(hookData) };
 }
 
 export async function main() {
@@ -97,6 +144,8 @@ export async function main() {
         stop = true;
       }
     }
+
+    state = withIdlePayloadRecord(state, hookData);
 
     atomicWriteSync(statePath, state);
     return {

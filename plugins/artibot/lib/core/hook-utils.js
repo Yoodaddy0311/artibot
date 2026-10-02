@@ -350,12 +350,28 @@ export const NO_TEAM_FLAG = /--no-team\b/i;
 
 /**
  * Extract the agent identifier from hook data.
- * Checks agent_id, subagent_id, and name fields.
+ *
+ * Checks agent_id, subagent_id, then the teammate-shaped keys (teammate_id,
+ * teammate_name, agent_name), then name. The teammate keys are there because
+ * the TeammateIdle path resolved to 'unknown' on real firings (2026-10-02: the
+ * shared state file holds an `agents.unknown` row) although the hooks
+ * reference documents `agent_id` for that event — the payload that actually
+ * arrives is 미확인, and an id the payload does carry under a teammate key
+ * must not collapse into the shared 'unknown' bucket. `team-idle-handler.js`
+ * records the key names of any firing that carries no `agent_id`, so the
+ * real field can be measured.
+ *
  * @param {object} hookData - Parsed hook data
  * @returns {string}
  */
 export function extractAgentId(hookData) {
-  return hookData?.agent_id || hookData?.subagent_id || hookData?.name || 'unknown';
+  return hookData?.agent_id
+    || hookData?.subagent_id
+    || hookData?.teammate_id
+    || hookData?.teammate_name
+    || hookData?.agent_name
+    || hookData?.name
+    || 'unknown';
 }
 
 /**

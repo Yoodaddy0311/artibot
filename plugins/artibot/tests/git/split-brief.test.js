@@ -72,7 +72,7 @@ describe('shipped PROMPT-TEMPLATE.md — 줄기 내부 팬아웃 절 (gotchas #1
     ['창은 배정·검증·커밋만 (#16)', /배정·검증·커밋뿐이다/],
     ['모델은 resolveModel 이 정본', /resolveModel/],
     ['모델 ID 하드코딩 금지', /모델 ID 를 프롬프트에 하드코딩하지 않는다/],
-    ['팀원 스폰에 보고 계약 삽입 (#24)', /\[보고 계약\] 8줄을 그대로 삽입/],
+    ['팀원 스폰에 보고 계약 삽입 (#24)', /\[보고 계약\] 9줄을 그대로 삽입/],
     ['스폰 원장이 관측점', /spawns\.ndjson/],
     ['계수 축은 start ∪ stop distinct', /start ∪ stop/],
     ['ref 조작 금지 (#21)', /branch -f \/ `-m` \/ `-D`|ref 조작 금지/],
