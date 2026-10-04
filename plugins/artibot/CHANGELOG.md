@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.2] — 2026-10-04
+
+`v4.71.1` 이후 1 커밋(`52f010f5`) = **11 files +713/−18**(`git diff --shortstat v4.71.1..52f010f5`, 2026-10-04 측정 — 릴리스 커밋은 이 수치에 없다).
+
+### 행동 변화 고지
+
+① **계층 메모리(Working/Episodic/Semantic)의 선언을 실제 배선에 맞췄다 — 런타임 동작 변화는 없다.** `learning.hierarchicalMemory` 가 `enabled:true`·`default-on` 이었지만 `isHierarchicalEnabled()` 는 config 를 읽지 않고(`HIERARCHICAL_MEMORY` 환경변수와 테스트 시임만 본다) 프로덕션에는 Working/Episodic 층을 채우는 호출이 없다(`workingStore.append` 호출자 0, `working.js#flush` 호출자 0). 그래서 config 를 `enabled:false`·`rolloutStage:"phase-c"` 로 바꾸고 README·마켓플레이스 문구를 "dormant"로 정정했다. flat 메모리는 그대로 라이브다. 재활성 조건 6개는 config `comment` 에 적었다.
+
+② **거짓 주석 3곳과 유령 참조 1곳을 바로잡았다**(`memory-manager.js` 2곳, `lib/runtime/middleware/memory.js`, `scripts/ci/triage-wiring-gaps.mjs` 의 존재하지 않는 `working-compaction.js` 참조). 주석만 바뀌었고 로직 변화는 없다.
+
+③ **읽기 전용 측정 스크립트 `scripts/evals/context-roi-census.mjs` 추가.** 세션 transcript 에서 도구 결과(tool_result)가 신규 컨텍스트 토큰에서 차지하는 크기를 잰다. 압축 동작은 없고, 어떤 출력에도 도구 결과 본문이 들어가지 않는다. 같은 requestId 의 분할 줄은 마지막 줄 usage 를 쓴다(첫 줄을 쓰면 서브에이전트 파일에서 `output_tokens` 가 과소집계된다).
+
+### 검증
+
+- 단계별 실측(2026-10-04): `validate`·`validate:bin`·`validate:install`(23 checks)·`skill:check`(160 skills)·`lint` 통과, `docs:check` 618 files 0 broken, `eval:runtime:check` 8/8.
+- `npm test` 는 `.git` 없는 ASCII 복사본에서 861 파일 통과 + 17 파일 실패였고, 그 17 파일은 `git ls-files` 등 `.git` 의존 테스트라 실제 트리에서 재실행해 17/17(506 passed) 통과했다. **한 환경에서 `npm run ci` 를 한 번에 통과시킨 것은 아니다.**
+- 실제 세션 transcript 1건(7파일)에서 census 를 돌린 첫 실측: 도구 결과 추정 토큰 ≈ 신규 컨텍스트의 6.45%. **n=1 이라 압축기 불필요의 근거로 쓰지 않는다.**
+- 미측정: `usage-receipt.js` 의 첫 줄 우선 규칙이 서브에이전트 파일에서 실제로 얼마나 과소집계하는지(이 세션 합산은 1.22배), 한글 경로에서 `runtime-prompt-*` 테스트 2건이 변경 전에도 크래시하는지.
+- 손대지 않음: `usage-receipt.js`, Skill 관측·진화 모듈, `split.contextLifecycle`(꺼진 채 유지).
+
 ## [4.71.1] — 2026-10-02
 
 `v4.71.0`(`95b654b4`) 이후 1 커밋 = **13 files +195/−22**(`git rev-list --count v4.71.0..eb532c10` · `git diff --shortstat v4.71.0..eb532c10`, 2026-10-02 측정 — 릴리스 커밋은 이 수치에 없다).
