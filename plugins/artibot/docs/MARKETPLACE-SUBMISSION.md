@@ -196,7 +196,7 @@ fire-and-forget delegation). It ships 30 specialized agents, 80 slash commands, 
 Core capabilities:
 - Dual-process cognitive routing (System 1 fast pattern-match / System 2
   deliberative reasoning) that escalates by measured complexity.
-- Hierarchical memory (working / episodic / semantic) with active curation
+- Hierarchical memory (working / episodic / semantic) with active curation (shadow/dormant: capture and promotion path not wired in production; flat memory is live)
   and cross-session continuity.
 - Verifiable-reward self-learning (test-pass / typecheck / no-revisit signals)
   that biases routing and skill selection over time — no data leaves the

@@ -9,7 +9,7 @@
 [![Cowork Plugin](https://img.shields.io/badge/Claude_Cowork-Plugin-orange?style=flat-square)](https://claude.com/cowork)
 [![Agent Teams](https://img.shields.io/badge/Agent_Teams-Native-orange?style=flat-square)](plugins/artibot/lib/runtime/middleware/subagents.js)
 
-> **Cognitive orchestration OS for Claude Code with hierarchical memory, RLVR self-learning, MCP server, and multi-platform agent teams.**
+> **Cognitive orchestration OS for Claude Code with hierarchical memory (dormant; flat memory is live), RLVR self-learning, MCP server, and multi-platform agent teams.**
 
 This repository ships **two complementary plugins** under one marketplace:
 

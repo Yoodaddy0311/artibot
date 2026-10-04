@@ -1006,8 +1006,9 @@
       "enabled": true
     },
     "hierarchicalMemory": {
-      "enabled": true,
-      "rolloutStage": "default-on",
+      "enabled": false,
+      "rolloutStage": "phase-c",
+      "comment": "Dormant, NOT live. No runtime code reads this block (hierarchical dispatch is decided only by env HIERARCHICAL_MEMORY=1/0 or the test seam; weights are unread in production). Flat memory is the source of truth. Re-enable only when: (1) a production path appends live entries to a session-scoped Working Store (no production workingStore.append caller today); (2) a production caller of working.js#flush / an Episodic promotion sink exists; (3) entry producers are documented and measured; (4) exactly one authoritative runtime gate consumes this config; (5) a live probe shows capture -> retrieval -> prompt injection without duplicates; (6) token overhead and latency are measured.",
       "workingTokenBudget": 200000,
       "episodicRetentionDays": 180,
       "semanticRetentionDays": -1,

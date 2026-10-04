@@ -480,8 +480,8 @@ export async function searchMemory(query, options = {}) {
   if (queryTokens.length === 0) return [];
 
   // Phase C dispatch: when the hierarchical flag is on, route through the
-  // 3-layer retriever (Working/Episodic/Semantic). Flat legacy behaviour
-  // remains the default until the v3.4 default-on flip.
+  // 3-layer retriever (Working/Episodic/Semantic). Production stays flat: the
+  // flag is off unless HIERARCHICAL_MEMORY=1 or the test seam turns it on.
   if (isHierarchicalEnabled()) {
     const hierarchical = await searchMemoryHierarchical(query, {
       ...options,
@@ -719,12 +719,13 @@ export async function getMemoryStats() {
 // Hierarchical Memory Façade (v3.2.0 Phase A)
 // ---------------------------------------------------------------------------
 //
-// When `learning.hierarchicalMemory.enabled === true` (read lazily from the
-// project config OR the HIERARCHICAL_MEMORY=1 env override), saveMemory and
-// searchMemory dispatch through the per-layer stores:
+// When `isHierarchicalEnabled()` is true, saveMemory and searchMemory dispatch
+// through the per-layer stores. Only HIERARCHICAL_MEMORY=1|0 or the
+// `__setHierarchicalMemoryEnabled` test seam decide; `learning.hierarchicalMemory.*`
+// config is NOT read, so production is OFF and flat memory is the source of
+// truth. Nothing in production feeds the Working/Episodic layers. When on:
 //   - type=preference|error → semantic layer
-//   - type=context|command  → episodic layer (falls through to legacy until
-//                              Phase B's episodic store lands)
+//   - type=context|command  → episodic layer (not routed yet; falls to flat)
 //
 // The public API shape is unchanged. When the flag is off (default in
 // Phase A) callers observe the flat v3.1.x behaviour bit-for-bit.

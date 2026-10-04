@@ -7,7 +7,7 @@
 [![Lint](https://img.shields.io/badge/lint-clean-brightgreen?style=flat-square)](./eslint.config.js)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin-7C3AED?style=flat-square)](https://github.com/anthropics/claude-code)
 
-> **Cognitive orchestration OS for Claude Code** — hierarchical memory, verifiable-reward learning (RLVR), MCP server, and multi-platform agent teams.
+> **Cognitive orchestration OS for Claude Code** — hierarchical memory (dormant; flat memory is live), verifiable-reward learning (RLVR), MCP server, and multi-platform agent teams.
 >
 > **Claude Code를 위한 인지 오케스트레이션 OS** — 계층 메모리, 검증가능-보상(RLVR) 학습, MCP 서버, 멀티 플랫폼 에이전트 팀.
 
@@ -49,7 +49,7 @@ setting and prints a hint — it never writes it.
 | # | Differentiator | Evidence |
 |---|---|---|
 | 1 | **Dual-Process Cognitive Router (System 1 / System 2)** — production implementation of 2026 DPA architecture | `lib/cognitive/router.js`, `effort-resolver.js`, `lib/runtime/middleware/router.js` |
-| 2 | **Hierarchical Memory** — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong-learner.js` |
+| 2 | **Hierarchical Memory** (shadow/dormant: capture and promotion path not wired in production; flat memory is live) — working / episodic / semantic with active curation | `lib/learning/memory-manager.js`, `lib/learning/lifelong-learner.js` |
 | 3 | **Lifelong Learning (RLVR)** — verifiable-reward signals (test-pass / typecheck / no-revisit) feed drift-detector + rule-extractor + skill promotion. *No GRPO/RL optimizer — removed in the 2026-06 lean redesign.* | `lib/learning/` (lifelong-learner, rule-extractor, drift-detector, knowledge-graph, ...) |
 | 4 | **11-Stage Runtime Middleware** — default chain: lifecycle → router → memory → skills → tasks → subagents → guardrail → summarization → token-usage → checkpoint → cache-roi (assembled from 17 module files) | `lib/runtime/middleware/`, `create-artibot-agent.js#defaultPipeline` |
 | 5 | **MCP Server (v3.8+)** — Artibot exposes its own MCP server so Claude Desktop/Code can consume Artibot inventory | `lib/mcp/server.js`, `bin/artibot-mcp.mjs` |
@@ -96,7 +96,7 @@ flowchart TD
 |---|---|---|---|
 | 5 | Runtime | `lib/runtime/` | 11-stage default middleware chain (of 17 module files), agent factory |
 | 4 | Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
-| 3 | Learning | `lib/learning/` | RLVR-signal learning, hierarchical memory, knowledge transfer |
+| 3 | Learning | `lib/learning/` | RLVR-signal learning, hierarchical memory (dormant), knowledge transfer |
 | 2 | Auxiliary | `lib/{adapters,swarm,privacy,visual,mcp,observability,git,...}/` | Domain services |
 | 1 | Core | `lib/core/` | Config, I/O, cache, event-bus, guards |
 
@@ -109,7 +109,7 @@ Per-module detail lives in each source file's JSDoc `@module` header under the `
 | Pillar | What you get |
 |---|---|
 | **Cognitive Routing** | System 1 / System 2 classification by weighted complexity score against a threshold (default 0.4, adapts within 0.2–0.7 from outcome feedback) |
-| **Hierarchical Memory** | working / episodic / semantic layers with promotion/demotion, MEMORY.md index, 3-scope (user / project / session) |
+| **Hierarchical Memory** | shadow/dormant (off by default; flat memory is live) — working / episodic / semantic layers with promotion/demotion, MEMORY.md index, 3-scope (user / project / session) |
 | **RLVR Self-Learning** | Verifiable-reward signals (test pass / typecheck / no-revisit) bias routing and skill promotion — no external reward model, no RL policy optimizer (the GRPO optimizer was removed in the 2026-06 lean redesign) |
 | **MCP Server** | Artibot publishes its own MCP server (skills, agents, memory, git bridges); also consumes Context7 + Playwright |
 | **Multi-Platform Agent Teams** | Native Claude Code; auto-export adapters for Gemini CLI / Codex CLI / Cursor / Antigravity (graceful degradation) |

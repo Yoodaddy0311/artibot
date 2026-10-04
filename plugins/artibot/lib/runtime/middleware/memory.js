@@ -151,7 +151,8 @@ function setMemoryErrorState(state, error) {
  *   `options.hierarchical` is true, Working lines are prepended to the
  *   injected context at up to 50% of `workingTokenBudget`.
  * @param {boolean} [options.hierarchical=false] - Gate for L1 consumption.
- *   Mirrors `learning.hierarchicalMemory.enabled` from artibot.config.json.
+ *   Supplied by the caller only (tests/seams); no production code reads
+ *   `learning.hierarchicalMemory.enabled` from artibot.config.json to set it.
  * @param {number} [options.workingTokenBudget=200000]
  * @returns {(state: object) => Promise<object>}
  */

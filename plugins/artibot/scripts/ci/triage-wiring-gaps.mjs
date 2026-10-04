@@ -21,7 +21,8 @@
  * Depth-2 orphan refinement: a caller that lives in a file which itself has NO
  * inbound production reference (an "orphan caller") does not count — this catches
  * transitively-dead chains (e.g. episodic.appendEpisode is called only from
- * working.js#flush(), whose own trigger working-compaction.js is never wired).
+ * working.js#flush(), which has no production caller; the previously cited
+ * `working-compaction.js` does not exist in the tree).
  *
  * READ-ONLY: emits a single JSON object to stdout. Creates/modifies no files.
  *
