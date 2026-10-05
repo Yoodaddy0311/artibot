@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 릴리스 배지 착지 대기창 25분 + 시간 초과/빨간 체크 구분 (라이브 미검증)
+
+- **`release.yml` 의 `wait_for_green` 한도를 40×15초(10분) → `WAIT_ATTEMPTS=100` × `WAIT_POLL_SECONDS=15` = 25분으로 올렸다.** 근거: Windows CI 잡(비필수 레그지만 대기 대상에 포함)이 첫 시도 push 런 45건(2026-09-29~10-04) 기준 최소 7.78 · 중앙 11.28 · p90 13.30 · 최대 13.63분(`gh api …/actions/runs/<id>/jobs` 의 started→completed, 2026-10-05 측정)이라 10분 한도가 중앙값보다 짧았다. 규칙은 두 구현이 이미 쓰던 "가장 느린 첫 시도의 약 1.8배"(13.63 × 1.8 ≈ 24.5 → 25분). v4.71.2·v4.71.3 릴리스가 모두 10분 한도에서 `total=7 pending=1 failed=0` 으로 시간 초과해 수동 착지됐다(#121, #122).
+- **JS 포트 `lib/git/batch-landing.js#WAIT_FOR_GREEN_ATTEMPTS` 도 80 → 100**(release.yml 과 같은 값). 착지 락 TTL `landingLockStaleMs()` 는 `3 × (1+maxRebuilds) × attempts × pollMs` 라 기본 120분 → **150분**이 된다. `tests/git/batch-landing.test.js` 의 리터럴 6곳과 `landing-lock.js` · `landing-serialization.test.js` · `commands/split.md` 의 20분/120분 서술을 25분/150분으로 맞췄다(`landing-lock.test.js` 의 "120 minutes" 는 과거 시나리오 서술이라 두었다).
+- **락스텝 테스트 신설**(`tests/firewall/release-wait-window-lockstep.test.js`): 착지 스텝의 실행 셸(주석 제거 후)에서 `WAIT_ATTEMPTS`·`WAIT_POLL_SECONDS` 대입문이 정확히 1개씩이고 JS 상수와 같으며 루프가 그 변수를 실제로 쓰는지(`seq 1 <숫자>` · `sleep <숫자>` 리터럴 잔존 시 RED)를 고정한다. 파일·스텝·함수 부재는 RED(fail-closed), 실행 셸 전체에서 두 이름의 출현 수도 각각 정확히 1(`WAIT_ATTEMPTS=40;` · `export` · `$((40))` · 호출부 접두 같은 고정 형식 밖의 두 번째 대입 차단), 문자열 변조 7종 + 두 번째 대입 5종 + 빈 입력 + JS 상수 불일치로 스캐너 자기검증(19 tests). **못 보는 것**: 두 구현의 다른 분기(zero-poll · 실패 판정)의 동치, 워크플로 실행 자체.
+- **시간 초과와 빨간 체크를 구분한다**(반환값 0/1/2 계약은 그대로, 정보만 추가). 이슈 본문과 `::warning::` 에 "last poll: total=T pending=P failed=F after N polls (~M min)" 를 넣고, 숫자 `failed` > 0 이면 red check, 폴링 수가 한도에 닿았으면 timeout(`total` 이 숫자가 아니면 "사용 가능한 payload 없음"), 한도 전에 끝났는데 red 도 아니면 "ended early"(공백·오류 payload)로 적는다(미할당은 `?`). 성공 시 경과 폴링 수를 로그 1줄로 남기고 한도의 60%를 넘기면 `::warning::` 를 낸다 — 60% 는 임의 초기값이다. 이슈 제목은 바꾸지 않았다(자가치유 reconciler 가 제목으로 찾는다).
+- **검증**(2026-10-05, `plugins/artibot` 에서): `npx vitest run` 8 파일(락스텝 19 · `release-landing-push-identity` · `landing-serialization` · `batch-landing` · badge-stall 3종 · `workflow-branch-lockstep`) → 141 passed. 셸 시뮬레이션 두 번: 스텁 `gh`/`sleep`/`jq` 로 시나리오 7종 a~g(초록 · 100회 시간 초과 · 빨간 체크 · 런 0건 rc 2 · 빈 payload `?` · 60% 경계 60폴링 무경고/61폴링 경고 · 이전 호출 카운트 비상속; 70폴링 변형은 끝까지 도는 것을 확인하지 못했다), 그리고 감사관의 node 기반 `jq` 재구현 하네스로 `describe_wait` 를 `bash -e`/`-eu` 에서(2폴링 red · 100폴링 시간 초과 · 빈 payload · 공백 payload "ended early" · `total=null` 오류 JSON · total=0 × 8 rc 2). 스크래치 사본 음성 대조 10종 모두 RED(변조 적용·복원 해시 확인). **알려진 잔여 결함(미수정)**: `zero_polls` 가 리셋되지 않아 "8 consecutive" 가 누적이고 비JSON 본문이 total=0 으로 같이 세어짐(HEAD 동일), 셸 `gh api` 에 타임아웃 없음, 스텝 최악 소요 약 50~55분(감사관 추정), 60% 경고는 런 주석일 뿐 통보 경로 아님 — 설계 문서 §8.
+- **라이브 미검증.** 이 수정은 실제 릴리스에서 한 번도 돌지 않았다. 배지 변경이 있는 다음 릴리스에서만 증명되며(변경이 없으면 착지 스텝이 skipped 라 대기창이 가동되지 않는다), 그때까지 효과는 #121 타임라인으로 한 사후 계산(완료 ≈15:25:27Z < 푸시 15:11:47Z + 25분)이다. 25분도 Windows 중앙값이 계속 오르면 소진된다. 설계: `.artibot/guides/RELEASE-WAIT-WINDOW-DESIGN.md` §8.
+
+### 검증 규율 §11: 없는 검사 명령을 강제하지 않는다 (라이브 미검증)
+
+- `rules/verification-discipline.md` §11(커밋 전 체크리스트)이 `npx tsc --noEmit`·`npm run prebuild`·`npm run build` 를 무조건 실행하라고 요구해, 해당 스크립트가 없는 프로젝트(이 리포 포함)에서는 지킬 수 없는 항목이 있었다. 이제 첫 항목이 "타입 검사·prebuild·build 유무 확인"(package.json scripts · Makefile · CI 설정)이고, 세 검사는 "(있으면)" 항목이며, "(있으면)" 항목이 없으면 `없음 — {확인한 명령}` 으로 **기록**하고 조용히 건너뛰지 않는다. 전체 vitest·교차검수 + 최종 검수·경로 명시 add·lint-staged 재게이트는 그대로다(오너 결정 2026-10-05, `.artibot/guides/VERIFICATION-ECONOMICS-DESIGN.md` §0.2 기록).
+- **설치된 사용자 규칙 파일은 자동으로 바뀌지 않는다.** `install.sh#install_rules` 는 설치본(`~/.claude/rules/artibot/verification-discipline.md`)이 리포 사본과 다르면(손편집 여부와 무관 — 설치기는 리포 사본과 바이트를 비교하므로 기존 설치본은 모두 이 경우에 해당한다) 덮어쓰지 않고 새 버전을 `verification-discipline.md.artibot-new` 로 보관하며(`.md` 로 끝나지 않아 로드되지 않는다), 직접 병합해야 반영된다(`install.ps1#Copy-MdFiles -Preserve` 도 같은 규칙). 설치된 개인 규칙 병합은 이번에 하지 않기로 결정했다.
+
 ## [4.71.3] — 2026-10-05
 
 `v4.71.2` 이후 3 커밋(`5a3bb327`·`77294ddc`·`0d33f68a`) = **10 files +955/−5**(`git diff --shortstat v4.71.2..0d33f68a`, 2026-10-05 측정 — 릴리스 커밋은 이 수치에 없다). 그중 +926 은 문서 3개이고, 코드 변경은 생성기 1줄과 테스트 19줄이다.

@@ -186,11 +186,13 @@ git log --oneline -1              # 기준 커밋
 ## 11. 커밋 전 체크리스트 (전부 실행 — 하나도 건너뛰지 마라)
 
 ```
+□ 타입 검사·prebuild·build 유무 확인  package.json scripts·Makefile·CI 설정. 없는 명령을 지어내지도, 다른 프로젝트 체크리스트를 베끼지도 마라
 □ git diff --cached --stat        인덱스 오염 없는가 (§7)
-□ npx tsc --noEmit                리포 전체 수치. "내 파일은 0" 은 다른 진술이다
+□ 타입 검사 (있으면)              예: npx tsc --noEmit. 리포 전체 수치. "내 파일은 0" 은 다른 진술이다
 □ 전체 vitest                     실제 숫자를 기록
-□ npm run prebuild                7단계. check-unused-ratchet 이 baseline 유지하는지
-□ npm run build                   프로덕션 전용 잠복결함(미사용심볼·route export·번들 경계)
+□ prebuild (있으면)               예: npm run prebuild — 7단계. check-unused-ratchet 이 baseline 유지하는지
+□ build (있으면)                  예: npm run build — 프로덕션 전용 잠복결함(미사용심볼·route export·번들 경계)
+□ (있으면) 항목이 없으면          "없음 — {확인한 명령}" 으로 기록. 조용히 건너뛰기 금지 (§0: 확인 안 했으면 미확인)
 □ 교차검수 + 최종 검수            자기 작업은 자기가 검수하지 않는다
 □ 경로 명시 add                   git add -A 금지
 □ lint-staged 가 파일을 고쳤으면  커밋된 상태로 게이트 재실행

@@ -1,6 +1,6 @@
 # Artibot 검증 경제성·안정성 개선 설계
 
-작성일: 2026-10-05 · 상태: **제안 설계 / 제품 구현 미적용**  
+작성일: 2026-10-05 · 상태: **제안 설계 — §3.0 대기창과 §2.1 중 §11 '없는 명령 3종' 정리만 구현됨(2026-10-05, 대기창은 라이브 미검증), 나머지 제품 구현 미적용**  
 기준: `bc98327a7cdf94fa040dc6bfce56a1181c0d7377` / v4.71.2  
 근거: [플러그인 감사 보고서](../REPORTS/plugin-economics-audit-2026-10-04.md). A/B/C 번호는 이 보고서의 항목이며, 아래 섹션 제목·행에 `(A2)` 같은 태그로 대응시켰다(매핑: A1→§2.2 tdd-workflow, A2→§2.1·§2.2 §11, A3→§2.3, A4→§2.2 plan/ultraplan/session-sizer, A5→§2.2 test-patterns+§2.4 설치본 규칙, B1→§3.1, B2→§3.3, B3→§3.2, B4→§3.4, C1→§4.1, C2→§4.2, C3→§4.3, C4→§5(+§3.1 npm ci fallback), C5→§4.4). **보고서에 없는 이 가이드 고유 제안**: §3.4의 autopilot 10분 기본값, §3.1의 concurrency YAML, §5의 adapter 계약 세부.
 **링크 주의:** 인용한 감사 보고서와 이 가이드는 둘 다 untracked다(`git ls-files .artibot/REPORTS` = 0건, 2026-10-05 실측). 가이드만 커밋하면 위 상대 링크가 깨진다.
@@ -17,20 +17,20 @@
 
 | 제안 | 판정 | 근거 한 줄 |
 |---|---|---|
-| §2 §11 tsc/prebuild/build 제거 | NECESSARY (범위는 오너 결정) | artibot repo에 해당 스크립트 없음, 단 규칙은 TS/Next 스택용 전역 규칙 |
-| §2 §11 전체 vitest 완화 + 증거 재사용 | 오너 결정 (DEFER) | 설치본 §10.5(a)·VD §6·v5 설계 "완화 0"과 충돌 |
+| §2 §11 tsc/prebuild/build 제거 | NECESSARY (범위는 오너 결정) | artibot repo에 해당 스크립트 없음, 단 규칙은 TS/Next 스택용 전역 규칙 — 오너 결정 2026-10-05: 없는 명령 3종(tsc·prebuild·build)만 "프로젝트에 실제 있는 검사 명령 확인"으로 정리. 전체 vitest·교차검수·경로 명시 add(`git add -A` 금지)·lint-staged 는 유지. |
+| §2 §11 전체 vitest 완화 + 증거 재사용 | 오너 결정 (DEFER) | 설치본 §10.5(a)·VD §6·v5 설계 "완화 0"과 충돌 — 오너 결정 2026-10-05: 완화하지 않음(현행 유지). |
 | §2.2 tdd `!` 줄 제거 | NECESSARY (조건부) | 줄 존재 확인. 호스트의 `!` 실행 여부 미확인 |
 | §2.2 REFACTOR 5분 삭제 | REJECT (제안 형태로는) | 규칙이 아니라 참고용 표의 반박 셀. 선택적 문구 완화로만 |
-| §2.2 Checkpoint→Self-check | DEFER | stage-b 분류 표 동시 수정 없으면 RED |
+| §2.2 Checkpoint→Self-check | DEFER | stage-b 분류 표 동시 수정 없으면 RED — 오너 결정 2026-10-05: 현행 유지(기록 3, Checkpoint 1 은 사람 결정). |
 | §2.2 test-patterns 3분리 | NECESSARY | |
 | §2.2 plan/ultraplan expand 문구 | NECESSARY | `expand` 소비처는 문구뿐 |
 | §2.2 session-sizer 무변경 | null-result 정당 | 코드 소비자 없음 |
 | §2.3 Cross-check/Inspection 분리 | NECESSARY | team.md에 정의 없는 `[Cross-check Mode]` 표식이 이미 매달려 있음 |
-| §2.3 WARN+WARN→APPROVE | DEFER / 오너 | 판정 완화 |
-| §2.3 재검수 2회 한도 | DEFER | 기존 '최대 2회' 없음, 기록 위치 미지정 |
-| §2.4 설치본 3파일 병합 | NECESSARY (오너 파일 수정은 오너 승인 필요) | 설치본·소스 양방향 차이 실측 |
+| §2.3 WARN+WARN→APPROVE | DEFER / 오너 | 판정 완화 — 오너 결정 2026-10-05: 현행 유지. |
+| §2.3 재검수 2회 한도 | DEFER | 기존 '최대 2회' 없음, 기록 위치 미지정 — 오너 결정 2026-10-05: 현행 유지. |
+| §2.4 설치본 3파일 병합 | NECESSARY (오너 파일 수정은 오너 승인 필요) | 설치본·소스 양방향 차이 실측 — 오너 결정 2026-10-05: 설치된 개인 규칙(`~/.claude/rules/artibot/`) 병합은 하지 않음. |
 | §2.4 설치기 보존 동작 | 이미 참 | 변경 불요 |
-| §3.1 coverage 4→1 | DEFER | 절감은 러너 분 단위뿐, Windows 임계값 신호 상실 |
+| §3.1 coverage 4→1 | DEFER | 절감은 러너 분 단위뿐, Windows 임계값 신호 상실 — 오너 결정 2026-10-05: 현행 유지. |
 | §3.1 `--ignore-scripts` fallback | NECESSARY | 현재 두 정책이 공존 |
 | §3.1 concurrency | REJECT (현재) | 최근 ci 20/20 `push`, 취소할 PR run 없음 |
 | §3.3 릴리스 결과 재사용 | NECESSARY (job outputs 선호, 추론) | v4.71.2에서 tag SHA == master SHA(이전 릴리스는 미확인), 릴리스 절차상 정상 경로(추론) |
@@ -47,7 +47,7 @@
 | §4.3 kind/scope 필드 | DEFER | 10+ 테스트가 `totalTokens` 형태를 고정 |
 | §4.4 skill 사전 읽기 off | NECESSARY (낮은 우선) | |
 | §5 shadow 배선 | NECESSARY / PARTIAL | 관측 채널 정의 전까지 부분 |
-| §5 enforce adapter | DEFER / 오너 | |
+| §5 enforce adapter | DEFER / 오너 | 오너 결정 2026-10-05: HG-12/13 설정 오류 차단 정책·`humanGates` config 키는 기존 일정(CA-04, R-5)대로, 지금 채택 안 함. |
 | §5 호스트 재프로브 | NECESSARY | 증거가 오래·좁음 |
 
 ### 0.2 오너 결정 필요 (권고 없음)
@@ -60,6 +60,17 @@
 | 4 | HG-12/13 설정 오류 fail-closed 정책(검수된 L1 설계 선택을 뒤집음, R-5에 없음)과 읽을 수 없는 config 처리(a/b) |
 | 5 | shipped config에 `permissions.humanGates` 키 추가 여부 |
 | 6 | coverage 4→1에서 Windows 임계값 신호 상실 수용 여부 |
+
+#### 오너 결정 기록 (2026-10-05)
+
+| # | 결정 | 기록 |
+|---|---|---|
+| 1 | §11 | 존재하지 않는 명령 3종(tsc·prebuild·build)만 "프로젝트에 실제 있는 검사 명령 확인"으로 정리. 전체 테스트·교차검수·경로 명시 add(`git add -A` 금지)·lint-staged 는 유지 |
+| 2 | 설치된 개인 규칙(`~/.claude/rules/artibot/`) 병합 | 하지 않음 |
+| 3 | SPEC_WARN+QUALITY_WARN→APPROVE · 재검수 한도 · verification-completion Checkpoint 1 | 현행 유지(SPEC_WARN+QUALITY_WARN→REQUEST_CHANGES · 재검수 한도 없음 · Checkpoint 1 은 사람 결정) |
+| 4 | HG-12/13 설정 오류 차단 정책 | 기존 일정(CA-04, R-5)대로, 지금 채택 안 함 |
+| 5 | `permissions.humanGates` config 키 | 기존 일정(CA-04, R-5)대로, 지금 채택 안 함 |
+| 6 | coverage 4→1 | 현행 유지 |
 
 ### 0.3 가이드 밖에서 새로 확인된 결함
 
@@ -123,6 +134,8 @@
 > 같은 코드·의존성·실행환경·명령 옵션에 대한 유효한 통과 증거는 검수자가 재사용한다. 커밋 생성이나 검수자 교체 자체는 재실행 사유가 아니다. 검증 후 파일이 바뀌면 영향을 받은 검사를 다시 실행하며, 영향 범위를 판단할 수 없으면 전체 검사를 실행한다. 필요한 원격 CI 게이트는 그대로 통과해야 한다.
 >
 > 관련 검사가 통과하고, 미해결 필수 결함·후속 변경·새로운 위험 근거가 없으면 작업을 종료한다. 정보·스타일 제안을 구현하려고 완료 범위를 늘리지 않는다. 부분 검증을 전체 검증으로 보고하지 않는다.
+
+> 적용됨(2026-10-05): §0.2 기록 1 범위만 — 없는 명령 3종 정리. 위험도 기반 실행·증거 재사용 문구는 채택하지 않았다.
 
 실행 선택은 다음처럼 적용한다. 각 행의 검사를 중복해서 더하는 체크리스트가 아니다.
 
@@ -204,6 +217,8 @@ CI 수치와 로컬 수치가 서로 다른 기존 의도는 유지한다. 테�
 이하 `lib/`, `scripts/`, `schemas/`, `tests/`, `hooks/`, `commands/`, `artibot.config.json` 경로는 별도 표시가 없으면 `plugins/artibot/` 기준이다. `.github/workflows/`는 저장소 루트 기준이다.
 
 ### 3.0 (신규, 가이드 밖) 릴리스 대기창이 Windows CI보다 짧다 — 판정 NECESSARY P1
+
+> 구현됨(2026-10-05, 한도 25분): `RELEASE-WAIT-WINDOW-DESIGN.md` §8. 라이브 미검증 — 배지 변경이 있는 다음 릴리스에서만 확인된다.
 
 감사 보고서는 "원격 Actions 실행 미확인"이라 적었고 이 결함을 놓쳤다. 감사팀 실측(2026-10-05 KST, 감사 보고 기준 — 이 문서 작성자는 Actions를 재조회하지 않음):
 
