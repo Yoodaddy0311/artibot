@@ -1,6 +1,6 @@
 # 릴리스 배지 착지 대기창 설계 (#121 재발 방지)
 
-작성일: 2026-10-05 · 개정 1회(감사 반영) · 상태: **제안 설계 / 구현 미적용**
+작성일: 2026-10-05 · 개정 1회(감사 반영) · 상태: **구현 완료(2026-10-05), 라이브 미검증** — 변경 내역은 §8
 기준: master `5a3bb327` (태그 `v4.71.2` = `bc98327a`)
 관련: `VERIFICATION-ECONOMICS-DESIGN.md` §3.0 · 이슈 #121(2026-10-05 00:41 KST 수동 착지 후 종료)
 
@@ -124,3 +124,26 @@
 - R3의 경보 임계 60%가 적절한지 — 임의 초기값
 - 제 집계 표본 n=45와 감사관 n=46·n=58 사이의 차이가 어느 런 때문인지(표본 구간·실패 런 제외 규칙의 차이로 추정, 런 목록은 보존하지 않았다)
 - 다음 실제 릴리스에서의 25분 한도의 라이브 동작
+
+## 8. 구현 기록 (2026-10-05, 라이브 미검증)
+
+오너가 §5 의 권장안을 택했다: 상한 25분(100 × 15초), 늦은 green 자동 착지 없음, 필수 체크 이름 미복사, 브랜치 보호 우회 없음. R1·R2·R3 를 구현했다. 위 분석(§1~§7)은 고치지 않았다.
+
+| 항목 | 변경 | 위치 |
+|---|---|---|
+| R1 | `seq 1 40`/`sleep 15` → `WAIT_ATTEMPTS=100`·`WAIT_POLL_SECONDS=15` 대입문 + 루프가 변수를 쓴다. 주석의 근거를 2026-10-05 측정으로 교체 | `.github/workflows/release.yml` 착지 스텝 `wait_for_green` |
+| R1 | `WAIT_FOR_GREEN_ATTEMPTS` 80 → 100, 락 TTL `landingLockStaleMs()` 120 → 150분(3 × 2 × 100 × 15초), 관련 주석·리터럴 갱신 | `lib/git/batch-landing.js`, `lib/git/landing-lock.js`, `tests/git/batch-landing.test.js`(리터럴 6곳 — §3 R1 이 센 5곳 외에 `landingLockStaleMs({}, 0)` 의 `60 * MIN` → `75 * MIN` 이 하나 더 있었다), `tests/firewall/landing-serialization.test.js` 주석, `commands/split.md`(20분 → 25분, 120분 → 150분) |
+| R2 | 락스텝 테스트 신설. 대입문 정확히 1개씩 · JS 상수와 동일 · 루프가 변수를 쓰고 숫자 리터럴이 없음 · 파일/스텝/함수 부재는 RED · 실행 셸 전체에서 `WAIT_ATTEMPTS=`·`WAIT_POLL_SECONDS=` 출현 수 정확히 1(고정 형식 밖의 두 번째 대입 — `;`·`export`·`$((40))`·호출부 접두 — 차단) · 문자열 변조 7종 + 두 번째 대입 5종 + 빈 입력 + JS 상수 불일치로 스캐너 자기검증(19 tests) | `tests/firewall/release-wait-window-lockstep.test.js` |
+| R3 | 시간 초과/빨간 체크를 구분하는 `describe_wait`(반환값 0/1/2 불변). 이슈 본문과 `::warning::` 에 "last poll: total=T pending=P failed=F after N polls (~M min)" 추가, 미할당은 `?`. 판정은 관측으로 가른다: 숫자 `failed` > 0 이면 red check, 폴링 수가 한도(`WAIT_ATTEMPTS`)에 닿았으면 timeout(`total` 이 숫자가 아니면 "API never returned a usable check-run payload"), 한도 전에 끝났는데 red 도 아니면 "ended early"(공백·오류 payload). 성공 시 경과 폴링 수 로그 1줄, 한도의 60% 초과 시 `::warning::`(60% 는 임의 초기값). 이슈 제목은 그대로 | 같은 스텝 |
+
+**검증한 것**: `npx vitest run` 8 파일(락스텝 19 · `release-landing-push-identity` · `landing-serialization` · `batch-landing` · badge-stall 3종 · `workflow-branch-lockstep`) 141 passed. 셸 시뮬레이션 두 번: ① 스텁 `gh`·`sleep`·`jq`(bash 함수)로 7개 시나리오 a~g — 초록 · 시간 초과 100회 · 빨간 체크 · 런 0건 · 빈 payload · 60% 경계(60폴링 무경고, 61폴링 경고) · 이전 호출 카운트 비상속(a~g 7개; 70폴링 변형 f70 은 끝까지 도는 것을 확인하지 못했다). ② 교차 검수 후 재작성한 `describe_wait` 는 감사관의 node 기반 `jq` 재구현(실제 JSON 파싱) 하네스에 현재 `release.yml` 에서 추출한 착지 스텝을 얹어 `bash -e` 와 `bash -eu` 로 구동했다: 2폴링 red · 100폴링 시간 초과 · 전 폴링 빈 payload · 공백 payload(1폴링에 rc 1, "ended early") · `total=null` 오류 JSON · total=0 × 8(rc 2, `describe_wait` 미호출) · 초록. 스크래치 사본 음성 대조 10종(`=40`·poll `=20`·주석 처리·JS 80·`seq`/`sleep` 리터럴·두 번째 대입 4종)이 모두 RED 였고 변조 적용과 복원을 해시로 확인했다.
+
+**알려진 잔여 결함(미수정)** — 이번 변경 범위 밖이거나 별도 설계가 필요해 고치지 않았다. 아래 1·2번은 HEAD 에도 있던 결함이다.
+
+1. `wait_for_green` 의 `zero_polls` 는 total 이 0 이 아닌 폴링에서 **리셋되지 않는다**. "8 consecutive" 는 실제로는 누적 8회이고, JSON 이 아닌 본문은 `|| echo 0` 으로 `total="0"` 이 되어 같이 센다. 대기창이 100폴링으로 넓어져 일시적 5xx 8회가 인증 실패 문구("no workflow run was ever created")로 오표기될 노출이 커졌다. 코드 읽기로 확인했고 이번에 고치지 않았다(`ZERO_POLL_LIMIT=8` 계약을 건드리는 별도 변경).
+2. 셸의 `gh api` 호출에는 **타임아웃이 없다**(JS 포트는 `GH_CHECK_RUNS_TIMEOUT_MS` = 10초). 한 번 멈춘 호출이 스텝을 붙잡을 수 있다.
+3. 스텝 최악 소요는 약 50~55분(감사관 추정: 대기 25분 × rebase 재시도 포함 2회 + API 지연). 직접 재현하지 않았다.
+4. 60% 경고는 **통보 경로가 아니라 런 주석**일 뿐이다. 누군가 런을 열어 봐야 보인다.
+5. 이슈 개설 시점이 시간 초과 기준으로 10분 → 25분 늦어졌다. 대신 오경보(체크가 아직 도는데 이슈가 열림)는 줄었다.
+
+**검증하지 못한 것**: 이 수정은 **라이브에서 한 번도 돌지 않았다.** 배지 변경이 있는 다음 실제 릴리스에서만 증명된다(변경이 없으면 착지 스텝이 skipped 라 대기창이 가동되지 않는다). 셸 시뮬레이션의 `jq` 는 `wait_for_green` 이 쓰는 필터 3종만 흉내 내는 스텁이라 실제 `jq` 의 해석 차이는 보지 못한다. R3 의 60% 임계값과 25분 상한이 충분한지는 추세(Windows 중앙값 상승)에 달려 있다.

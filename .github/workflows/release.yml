@@ -776,9 +776,18 @@ jobs:
           # the authority on what is required, and it rejects the push if the
           # set is not satisfied.
           #
-          # 40 attempts x 15s = 10 min ceiling. Measured 2026-08-15 on PR #100:
-          # the Node matrix took 3m33s wall and the plugin.json contexts 4s, so
-          # the ceiling is roughly 3x the observed worst case.
+          # Ceiling: WAIT_ATTEMPTS x WAIT_POLL_SECONDS = 100 x 15s = 25 min.
+          # The previous 40 x 15s = 10 min was sized 2026-08-15 against a 3m33s
+          # Node matrix; the non-required Windows leg has since grown to ~13 min.
+          # Measured 2026-10-05 over 45 first-attempt push runs (2026-09-29 to
+          # 2026-10-04): min 7.78, p50 11.28, p90 13.30, max 13.63 min. Rule:
+          # ceiling is about 1.8x the slowest first attempt (13.63 x 1.8 = 24.5,
+          # rounded up to 25 min). Releases v4.71.2 and v4.71.3 both ran out of
+          # polls at the old ceiling with pending=1 failed=0 (issues #121, #122).
+          # The two values are kept in lockstep with
+          # lib/git/batch-landing.js#WAIT_FOR_GREEN_ATTEMPTS and
+          # #WAIT_FOR_GREEN_POLL_MS by tests/firewall/release-wait-window-lockstep.test.js.
+          # Design: .artibot/guides/RELEASE-WAIT-WINDOW-DESIGN.md.
           #
           # Return codes: 0 green, 1 red-or-timeout, 2 no check runs ever
           # appeared. 2 is split out because it is a different failure with a
@@ -792,11 +801,25 @@ jobs:
           # for approval still exists as an object and is counted by total_count,
           # so total_count == 0 is specific to "no event was generated".
           ZERO_POLL_LIMIT=8
+          WAIT_ATTEMPTS=100
+          WAIT_POLL_SECONDS=15
+          # Elapsed-time warning threshold, percent of the ceiling. 60 is an
+          # arbitrary initial value (design R3), not a measured one.
+          WAIT_WARN_PERCENT=60
           wait_for_green() {
             target_sha="$1"
             zero_polls=0
-            for _ in $(seq 1 40); do
-              sleep 15
+            # Globals, not `local`: the call sites read these after the call to
+            # say WHY a non-zero return happened (red check vs timeout). Reset on
+            # every call so the second call site never reports the first call's
+            # counts.
+            wait_polls=0
+            total=""
+            pending=""
+            failed=""
+            for _ in $(seq 1 "${WAIT_ATTEMPTS}"); do
+              sleep "${WAIT_POLL_SECONDS}"
+              wait_polls=$((wait_polls + 1))
               payload="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs" 2>/dev/null || echo '')"
               # `if`, not `[ ... ] && continue`: the default shell is `bash -e`,
               # where a bare short-circuit list that evaluates false is a failing
@@ -822,9 +845,56 @@ jobs:
               failed="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.conclusion != null) | select([.conclusion] | inside(["success","neutral","skipped"]) | not)] | length' 2>/dev/null || echo 0)"
               echo "  ${target_sha}: total=${total} pending=${pending} failed=${failed}"
               if [ "${failed}" != "0" ]; then return 1; fi
-              if [ "${pending}" = "0" ]; then return 0; fi
+              if [ "${pending}" = "0" ]; then
+                wait_minutes=$((wait_polls * WAIT_POLL_SECONDS / 60))
+                echo "  ${target_sha}: green after ${wait_polls} polls (~${wait_minutes} min of a $((WAIT_ATTEMPTS * WAIT_POLL_SECONDS / 60)) min ceiling)"
+                # `if`, not `[ ... ] && echo`: same errexit reason as above.
+                if [ $((wait_polls * 100)) -gt $((WAIT_ATTEMPTS * WAIT_WARN_PERCENT)) ]; then
+                  echo "::warning::Green took ${wait_polls} of ${WAIT_ATTEMPTS} polls (more than ${WAIT_WARN_PERCENT} percent of the ceiling) on ${target_sha} — the ceiling may need raising before it is hit."
+                fi
+                return 0
+              fi
             done
             return 1
+          }
+
+          # Fill wait_detail / wait_verdict from the globals wait_for_green leaves
+          # behind. Information only: the 0/1/2 contract is unchanged. `${x:-?}`
+          # because every poll may have returned an empty API payload, in which
+          # case the counts were never assigned.
+          #
+          # The verdict is decided by what was observed, not by which variable is
+          # empty: red needs a numeric failed > 0; a timeout needs the poll count
+          # to have reached the ceiling; a return before the ceiling that is not
+          # red (blank or error payload: jq printed nothing or null) is "ended
+          # early", never called a timeout. A count is usable only when it is all
+          # digits, and that is tested BEFORE any -gt/-ge (a non-number there
+          # would abort the step under errexit). `case` and `if`, not
+          # `[ ... ] && ...` or a bare `(( ... ))`, for the same errexit reason.
+          describe_wait() {
+            wait_minutes=$((wait_polls * WAIT_POLL_SECONDS / 60))
+            wait_detail="last poll: total=${total:-?} pending=${pending:-?} failed=${failed:-?} after ${wait_polls} polls (~${wait_minutes} min)"
+            wait_red=no
+            case "${failed}" in
+              ''|*[!0-9]*) ;;
+              *) if [ "${failed}" -gt 0 ]; then wait_red=yes; fi ;;
+            esac
+            wait_total_ok=no
+            case "${total}" in
+              ''|*[!0-9]*) ;;
+              *) wait_total_ok=yes ;;
+            esac
+            if [ "${wait_red}" = "yes" ]; then
+              wait_verdict="red check, at least one check run failed"
+            elif [ "${wait_polls}" -ge "${WAIT_ATTEMPTS}" ]; then
+              if [ "${wait_total_ok}" = "yes" ]; then
+                wait_verdict="timeout, no check run had failed"
+              else
+                wait_verdict="timeout, the API never returned a usable check-run payload"
+              fi
+            else
+              wait_verdict="ended early without a usable check-run payload"
+            fi
           }
 
           # Assembled from the workflow-level env pair, not written out here, so
@@ -855,9 +925,10 @@ jobs:
             exit 0
           fi
           if [ "${wait_rc}" != "0" ]; then
-            echo "::warning::Checks on ${BRANCH} @ ${SHA} did not go green within the wait window."
+            describe_wait
+            echo "::warning::Checks on ${BRANCH} @ ${SHA} did not go green within the wait window (${wait_verdict}; ${wait_detail})."
             open_issue "${ISSUE_TITLE}" \
-              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) did not reach a green required-check state at \`${SHA}\`, so master was not fast-forwarded. The badge + marketplace changes are on the branch and need a human to land or discard them."
+              "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) did not reach a green required-check state at \`${SHA}\`, so master was not fast-forwarded. The badge + marketplace changes are on the branch and need a human to land or discard them. Wait result: ${wait_verdict}; ${wait_detail}."
             exit 0
           fi
 
@@ -897,9 +968,10 @@ jobs:
             echo "Fast-forwarded master onto ${BRANCH} @ ${SHA_RETRY} after rebase"
             exit 0
           fi
-          echo "::warning::Retry after rebase still could not land ${BRANCH} on master."
+          describe_wait
+          echo "::warning::Retry after rebase still could not land ${BRANCH} on master (last green-wait, ${wait_detail})."
           open_issue "${ISSUE_TITLE}" \
-            "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) failed to land on master even after one rebase retry (head \`${SHA_RETRY}\`). Needs a human to land or discard it."
+            "Branch \`${BRANCH}\` (release ${GITHUB_REF_NAME}) failed to land on master even after one rebase retry (head \`${SHA_RETRY}\`). Needs a human to land or discard it. Last green-wait after the rebase: ${wait_detail}."
 
       - name: Land badge sync via PR + auto-merge
         id: badge_pr

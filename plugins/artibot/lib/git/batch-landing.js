@@ -34,12 +34,13 @@
  * a failed conclusion is an immediate red; deliberately
  * NOT a copy of the required-context list — branch protection stays the
  * authority and simply rejects the push if the set is unmet). It is NOT a
- * line-for-line port, in two places:
- *   - **The ceiling.** release.yml keeps 40 × 15s = 10 min, sized 2026-08-15 at
- *     ~3× a 3m33s Node matrix. This repo's Windows job alone now runs ~11 min,
- *     so a 10-minute wait reported `not-green` for batches whose checks were
- *     still running. The ceiling here is 20 min (`WAIT_FOR_GREEN_ATTEMPTS`,
- *     where the measurement is cited); release.yml is untouched.
+ * line-for-line port, in one place (the ceiling is shared, see below):
+ *   - **The ceiling is the same number.** 100 × 15s = 25 min here
+ *     (`WAIT_FOR_GREEN_ATTEMPTS`, where the measurements are cited) and in
+ *     release.yml (`WAIT_ATTEMPTS` / `WAIT_POLL_SECONDS`). Until 2026-10-05
+ *     release.yml kept 40 × 15s = 10 min while this port moved on to 80, and
+ *     two releases timed out on it; `tests/firewall/release-wait-window-lockstep.test.js`
+ *     now fails when the two copies differ.
  *   - **No zero-poll exit.** release.yml returns early (rc 2) after 8
  *     consecutive `total_count == 0` polls; here a zero payload is only "not
  *     yet" and runs to the ceiling.
@@ -109,20 +110,31 @@ import { getRepoIdentity } from './repo-identity.js';
 
 export const INTEGRATION_BRANCH_PREFIX = 'ci/split-';
 /**
- * 80 × 15s = 20 min. Not release.yml's 40 (10 min): that ceiling predates the
- * Windows job. Measured 2026-09-28 over push runs of the `CI` workflow on
- * master and ci/** from 2026-09-21 to 2026-09-28 (`gh run list --workflow CI
- * --limit 100` + `gh run view <id> --json jobs`):
+ * 100 × 15s = 25 min, the same value as release.yml's `WAIT_ATTEMPTS` ×
+ * `WAIT_POLL_SECONDS` (kept equal by
+ * `tests/firewall/release-wait-window-lockstep.test.js`). Rule: about 1.8× the
+ * slowest first attempt of the Windows job.
+ *
+ * Measured 2026-10-05 (`.artibot/guides/RELEASE-WAIT-WINDOW-DESIGN.md` §1):
+ * the Windows job on 45 first-attempt push runs, 2026-09-29 to 2026-10-04
+ * (`gh api repos/<owner>/<repo>/actions/runs/<id>/jobs`, started→completed):
+ * min 7.78, p50 11.28, p90 13.30, max 13.63 min. 13.63 × 1.8 ≈ 24.5 → 25 min.
+ * At the old release.yml ceiling (10 min) releases v4.71.2 and v4.71.3 both ran
+ * out of polls (issues #121, #122); at 80 (20 min) the margin over the max had
+ * shrunk to ~1.47×.
+ *
+ * History, measured 2026-09-28 over push runs of the `CI` workflow on master
+ * and ci/** from 2026-09-21 to 2026-09-28 (`gh run list --workflow CI
+ * --limit 100` + `gh run view <id> --json jobs`), which set the earlier 80:
  *   - `Validate (Node 22) on Windows`, started→completed: 98 jobs, p50 9.10,
  *     p90 10.57, max 11.25 min.
  *   - Run created→last job completed, first attempts only: 94 runs, p90 10.58,
  *     max 11.32 min. (Four second attempts reached 21.33; a rerun follows a
  *     red first attempt, which `waitForGreen` has already returned on.)
  * Batch landings that day ran out of polls once at 40 and reached 39 and 30 on
- * the next two. 20 min is ~1.8× the slowest first attempt. Callers can still
- * pass `wait.attempts` to `landBatch`.
+ * the next two. Callers can still pass `wait.attempts` to `landBatch`.
  */
-export const WAIT_FOR_GREEN_ATTEMPTS = 80;
+export const WAIT_FOR_GREEN_ATTEMPTS = 100;
 export const WAIT_FOR_GREEN_POLL_MS = 15_000;
 /** Exactly one rebuild when master moves; the next writer is a human. */
 export const MAX_REBUILDS = 1;
@@ -130,12 +142,12 @@ export const MAX_REBUILDS = 1;
 /**
  * TTL for the landing lock: 3 × the longest a landing can legitimately hold
  * it, i.e. (1 + maxRebuilds) green waits at the effective ceiling, never below
- * `DEFAULT_STALE_MS`. 120 min with the defaults.
+ * `DEFAULT_STALE_MS`. 150 min with the defaults (3 × 2 × 100 × 15s).
  *
  * The lock is not refreshed while held; the NEXT acquirer judges its age
  * against the longer of its own `staleMs` and the one this value writes into
  * the record (`landing-lock.js#acquireLandingLock`). The 30-minute default is
- * shorter than the 40-minute worst case of two 20-minute waits, so without the
+ * shorter than the 50-minute worst case of two 25-minute waits, so without the
  * record's TTL a second landing could take the lock from a live one mid-wait.
  * Because the TTL travels in the record, an acquirer that runs THIS
  * `landing-lock.js` is held off even when it passes the default (a script, a
@@ -333,8 +345,8 @@ export async function waitForGreen(sha, opts) {
  * the landing — and its lock — forever. Below the 15s poll interval, so a
  * hung call costs at most one extra interval; far above one REST GET plus `gh`
  * start-up. A timeout reads as a failed fetch: null, the next poll. Every
- * call hanging stretches one default wait to 80 × (15s + 10s) ≈ 33 min, still
- * inside `landingLockStaleMs()` (120 min for two waits).
+ * call hanging stretches one default wait to 100 × (15s + 10s) ≈ 42 min, still
+ * inside `landingLockStaleMs()` (150 min for two waits).
  */
 export const GH_CHECK_RUNS_TIMEOUT_MS = 10_000;
 

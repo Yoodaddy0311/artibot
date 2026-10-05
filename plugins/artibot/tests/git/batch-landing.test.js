@@ -247,7 +247,8 @@ describe('integration branch naming', () => {
 
 /**
  * The green-wait ceiling. The 10-minute ceiling inherited from release.yml was
- * too short for this repo's Windows job: a batch whose checks finished after
+ * too short for this repo's Windows job (and 20 minutes is now ~1.47× its
+ * measured max of 13.63 min, hence 100 polls = 25 min, 2026-10-05): a batch whose checks finished after
  * poll 40 came back `not-green` although nothing failed. The fixture turns
  * green at poll 42 — past the old ceiling, inside the new one — and the same
  * fetcher with `attempts: 40` is the positive control that the old ceiling
@@ -271,10 +272,10 @@ describe('waitForGreen ceiling', () => {
     };
   }
 
-  it('the default ceiling is 80 polls x 15s = 20 min', () => {
-    expect(WAIT_FOR_GREEN_ATTEMPTS).toBe(80);
+  it('the default ceiling is 100 polls x 15s = 25 min', () => {
+    expect(WAIT_FOR_GREEN_ATTEMPTS).toBe(100);
     expect(WAIT_FOR_GREEN_POLL_MS).toBe(15_000);
-    expect((WAIT_FOR_GREEN_ATTEMPTS * WAIT_FOR_GREEN_POLL_MS) / 60_000).toBe(20);
+    expect((WAIT_FOR_GREEN_ATTEMPTS * WAIT_FOR_GREEN_POLL_MS) / 60_000).toBe(25);
   });
 
   it('turns green at poll 42 under the default ceiling', async () => {
@@ -334,23 +335,23 @@ describe('waitForGreen ceiling', () => {
 /**
  * The landing lock must outlive the longest landing. Nothing refreshes the lock
  * while it is held, so a TTL shorter than 1 + maxRebuilds green waits lets a
- * second landing reclaim a live one mid-wait. With the 20-minute ceiling that
- * worst case is 40 min — past the 30-minute DEFAULT_STALE_MS. The NEXT acquirer
+ * second landing reclaim a live one mid-wait. With the 25-minute ceiling that
+ * worst case is 50 min — past the 30-minute DEFAULT_STALE_MS. The NEXT acquirer
  * judges age against the longer of its own `staleMs` and the holder's, which
  * the record carries (`landing-lock.js`).
  */
 describe('landing lock staleMs', () => {
   const MIN = 60_000;
 
-  it('is 3 x (1 + maxRebuilds) x the effective ceiling: 120 min by default', () => {
-    expect(landingLockStaleMs()).toBe(120 * MIN);
+  it('is 3 x (1 + maxRebuilds) x the effective ceiling: 150 min by default', () => {
+    expect(landingLockStaleMs()).toBe(150 * MIN);
     expect(landingLockStaleMs({}, MAX_REBUILDS)).toBe(3 * (1 + MAX_REBUILDS) * WAIT_FOR_GREEN_ATTEMPTS * WAIT_FOR_GREEN_POLL_MS);
   });
 
   it('follows the wait the caller actually passes', () => {
     expect(landingLockStaleMs({ attempts: 200 })).toBe(3 * 2 * 200 * 15_000);
-    expect(landingLockStaleMs({ pollMs: 30_000 })).toBe(3 * 2 * 80 * 30_000);
-    expect(landingLockStaleMs({}, 0)).toBe(60 * MIN);
+    expect(landingLockStaleMs({ pollMs: 30_000 })).toBe(3 * 2 * 100 * 30_000);
+    expect(landingLockStaleMs({}, 0)).toBe(75 * MIN);
   });
 
   it('never drops below DEFAULT_STALE_MS', () => {
@@ -359,7 +360,7 @@ describe('landing lock staleMs', () => {
   });
 
   // The holder is this very process (live pid, same host), stamped 45 minutes
-  // ago: past the old 30-minute TTL, inside the new 120-minute one. RED before
+  // ago: past the old 30-minute TTL, inside the new 150-minute one. RED before
   // the fix (2026-09-28): landBatch reclaimed it and came back `landed`.
   it('landBatch does not reclaim a live holder that is 45 minutes into its landing', async () => {
     const key = buildLandingLockKey('owner/repo', 'main');
@@ -379,7 +380,7 @@ describe('landing lock staleMs', () => {
     }
   });
 
-  // The reverse direction: the HOLDER is a landBatch (120-minute TTL in its
+  // The reverse direction: the HOLDER is a landBatch (150-minute TTL in its
   // record) and the acquirer is on the 30-minute default — a script, or any
   // caller of THIS landing-lock.js that passes no staleMs (an older plugin copy
   // runs its own landing-lock.js and is not covered). Before the TTL travelled
@@ -394,7 +395,7 @@ describe('landing lock staleMs', () => {
       const r = acquireLandingLock(key, { lockDir, sessionId: 'default-acquirer' });
       expect(r.ok).toBe(false);
       expect(r.holder?.sessionId).toBe('landbatch-holder');
-      expect(r.holder?.staleMs).toBe(120 * MIN);
+      expect(r.holder?.staleMs).toBe(150 * MIN);
     } finally {
       releaseLandingLock(key, { lockDir, token: held.token });
     }

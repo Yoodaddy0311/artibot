@@ -4,7 +4,7 @@
  * Why a separate lock and not `lib/autopilot/lock.js`: that lock's staleness
  * rule is bound to autopilot sessions (`isHolderSessionInactive` reclaims a
  * lock whose session file is missing after 60s). A landing has no autopilot
- * session and legitimately holds its lock across CI green waits (20 min each,
+ * session and legitimately holds its lock across CI green waits (25 min each,
  * up to two per landing, `batch-landing.js`), so it would be stolen mid-wait.
  * This module keeps the same O_EXCL mechanics and none of the session coupling.
  *
@@ -31,7 +31,7 @@
  * ── Staleness ────────────────────────────────────────────────────────────────
  * A holder is stale when its PID is dead (same host) or when the record is
  * older than `staleMs`. `DEFAULT_STALE_MS` (30 min) applies only when the
- * caller passes none; `landBatch` passes `landingLockStaleMs()` (120 min with
+ * caller passes none; `landBatch` passes `landingLockStaleMs()` (150 min with
  * the defaults, `batch-landing.js`). Reclaim is unlink + fresh O_EXCL; if two
  * reclaimers race, exactly one `wx` succeeds.
  *
@@ -80,7 +80,7 @@ import { composeScopedKey, sanitizeSegment } from './repo-identity.js';
 
 /**
  * Fallback TTL for a caller that passes no `staleMs`. Sized as 3× the old
- * 10-minute CI wait; the ceiling is now 20 min, and `landBatch` passes the
+ * 10-minute CI wait; the ceiling is now 25 min, and `landBatch` passes the
  * longer `batch-landing.js#landingLockStaleMs()`, which never goes below this.
  */
 export const DEFAULT_STALE_MS = 30 * 60 * 1000;
