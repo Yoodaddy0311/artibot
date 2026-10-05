@@ -1,8 +1,64 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-09-28 KST 갱신, master = `0dddb6ac` = **v4.67.0** · Wave 18~23 착지 · 모델 정책 = opus 단일 티어 + fable 휴면 · `/model-routing` 신설 · v5.0 진행률 52/100)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, master = **v4.71.5** 릴리스 커밋 — SHA 는 `git rev-parse v4.71.5` 로 확인 · v4.71.2~v4.71.5 릴리스 4회 · 배지 착지 대기 루프 보강 · runtime eval 2분 대기 수정 · 외부 재검수 패키지 수정 단위 A·B 미착수)
+
+> 이전 헤더(2026-09-28, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-28 KST 갱신, master = `0dddb6ac` = **v4.67.0** · Wave 18~23 착지 · 모델 정책 = opus 단일 티어 + fable 휴면 · `/model-routing` 신설 · v5.0 진행률 52/100)
 
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.71.2 ~ v4.71.5 (2026-10-04 ~ 10-06 KST, 세션 artibot-e8)
+
+**한 줄**: 한 세션에서 패치 릴리스 4회. 내용은 릴리스 착지 자동화의 실패 원인 제거(대기창 10분 → 25분, 대기 루프의 오판 3종, CI 스텝 2분 낭비, 타이밍 테스트 플레이크)와 output style 코딩 지침 유지, 검증 규율 §11 정정이다. 줄기별 정본은 `plugins/artibot/CHANGELOG.md` [4.71.2]~[4.71.5], 대기 루프 설계·실측은 `RELEASE-WAIT-WINDOW-DESIGN.md` §6~§8, 미구현 제안은 `VERIFICATION-ECONOMICS-DESIGN.md`. v4.67.0 뒤 ~ v4.71.1 구간은 이 파일에 절이 없다 — CHANGELOG 가 정본이다.
+
+**이 절이 모르는 것**: 이 문서는 v4.71.5 릴리스 커밋에 실려 나가므로 **v4.71.5 자신의 CI·배지 착지 결과를 담지 못한다.** 다른 PC 에서 아래 4가지를 먼저 확인하라.
+
+| # | 확인 | 명령 | 읽는 법 |
+|---|---|---|---|
+| 1 | 태그와 master | `git fetch --tags origin` → `git rev-parse v4.71.5 origin/master` → `git log --oneline v4.71.5..origin/master` | 태그 뒤에 `docs(release): sync marketplace meta + count prose to v4.71.5` 1커밋이 있으면 배지 착지 완료(자동 또는 수동). 0커밋이면 배지 변경이 없었거나 착지 실패 — 2번을 본다 |
+| 2 | 착지 실패 이슈 | `gh issue list --state open` | `chore(release): badge sync v4.71.5 could not land on master` 가 있으면 아래 "배지 착지 수동 절차" |
+| 3 | 대기 루프 라이브 결과 | `gh run list --workflow release.yml --limit 3` → `gh run view <id> --log` 에서 `green after`, `did not go green`, `last usable poll` 검색 | `green after N polls` = 새 대기 루프의 **첫 자동 착지 성공**(25분 상한·타임아웃·숫자 가드의 라이브 검증). `never returned a usable check-run payload` 면 SHA 보다 러너의 `timeout`(exit 124) 동작을 먼저 의심한다 — 검수 2회 모두 러너 실동작을 확인하지 못했다 |
+| 4 | runtime eval 스텝 시간 | 최신 CI 런의 `Run runtime eval gate` 스텝 소요(`gh run view <id> --json jobs`) | 수 초면 타이머 수정이 CI 에서도 유효. 여전히 약 2.0분이면 로컬 실측(119초 → 0초)과 CI 가 다르다는 뜻이니 재조사 |
+
+**다른 PC 셋업**: `git pull` → `plugins/artibot` 에서 `npm run sync:local`(설치본을 4.71.5 로) → Claude Code 재시작. `/theme` 을 쓰는 PC 는 한 번 다시 적용해야 한다 — `~/.claude/output-styles/*.md` 생성물은 PC 별이고 v4.71.3 이전 생성물에는 `keep-coding-instructions: true` 가 없다(업데이트 경로 없음). 설치된 `~/.claude/rules/artibot/verification-discipline.md` 는 설치기가 덮지 않고 새 판을 `.artibot-new` 로 둔다 — 병합하지 않기로 한 것이 오너 결정이다(아래).
+
+**넘어오지 않는 것(로컬 전용)**: `.artibot/HANDOFF.md`·`handoffs/`, 자동 메모리, 미추적 외부 검수 패키지 `v.4.71.2/`·`v.4.71.3/`·`v.4.71.5/`, 스크래치의 실험 원자료(조사관 타이밍 표본·검수 하네스).
+
+| 릴리스 | 릴리스 커밋 / 배지 커밋 | 내용 | 배지 착지 |
+|---|---|---|---|
+| v4.71.2 | `bc98327a` / `5a3bb327` | 계층 메모리를 휴면으로 표기(`learning.hierarchicalMemory.enabled:false`, `rolloutStage:"phase-c"`), 거짓 주석 정정, `scripts/evals/context-roi-census.mjs` | 10분 한도 시간 초과 → 수동 ff (#121) |
+| v4.71.3 | `d7b0bf2b` / `b1a855e3` | `/theme` 생성 스타일에 `keep-coding-instructions: true`(`scripts/theme/registry.js#buildOutputStyle`) | 시간 초과 → 수동 ff (#122) |
+| v4.71.4 | `78db75ac` / `8994caed` | 대기창 25분(`WAIT_ATTEMPTS=100` × 15초) + red check / timeout 구분, 검증 규율 §11 의 tsc·prebuild·build 를 "(있으면)" 으로 | 18폴링에 red check(타이밍 테스트 1건) → 실패 잡 재실행 후 수동 ff (#123) |
+| v4.71.5 | `git rev-parse v4.71.5` | 대기 루프 오판 3종 수정, 정적 output style 파일 8개 플래그, runtime eval 가드 타이머 해제, ReDoS 양성 대조 플레이크 완화 | **이 문서 작성 시점에 모름** — 위 표 1~3 |
+
+**오너 결정 (2026-10-05, `VERIFICATION-ECONOMICS-DESIGN.md` §0.2 에 기록)**: ① §11 은 없는 명령 3종(tsc·prebuild·build)만 조건부로 — 전체 vitest·교차검수·경로 명시 add·lint-staged 재게이트는 유지 ② 설치된 개인 규칙(`~/.claude/rules/artibot/`)은 병합·수정하지 않는다 ③ 검수·체크포인트 완화는 하지 않는다(현행 유지) ④ 사람 게이트 HG-12/13 은 기존 일정(CA-04, R-5) ⑤ coverage 4환경 → 1환경 축소는 하지 않는다(재제안 금지).
+
+**v4.71.5 에서 실측으로 바뀐 사실**:
+
+- **Windows CI 가 느려진 원인은 Windows 가 아니라 스위트 증가다**(조사관 측정 2026-10-05, 리더 미재측정): 09-17 → 10-05 테스트 18,836 → 26,594(+41%), Linux 테스트 스텝 ×2.35 · Windows ×1.97, `ci.yml` 불변. 10-02 → 10-05 는 평평(n=21, p50 13.27 · max 13.78분). 25분 상한 도달 추정(11월 중·하순)은 외삽이다.
+- **`Run runtime eval gate` 가 4개 레그 모두 약 2.0분이던 것은 `lib/runtime/evaluator.js#evaluateRuntimeSuite` 의 미해제 120초 가드 타이머였다**(스위트 자체는 1초 미만). `finally { clearTimeout }` 로 수정, 로컬에서 러너 1.05초(리더 실측). CI 단축은 위 표 4번으로 확인.
+- **과거 배지 착지 실패 5건(#115·#117~#120) 중 타이밍 계열은 #119 하나**(다른 테스트 — `tests/autopilot/safety.test.js` 절대 50ms 상한)이고 4건은 버전 lockstep·README 카운트 문구의 결정적 실패였다(조사관이 각 SHA 의 잡 로그로 확인).
+- **#123 의 테스트**: `tests/security/human-gate-enforce-redos.test.js` 양성 대조는 8,192B/49,152B 의 2차식 성장비 `(큰+4)/(작은+4) > 18` 을 재는데 작은 쪽이 약 25ms 창이라 CPU 경합에 뒤집힌다. 작은 쪽을 앞뒤 2회 재고 작은 값을 쓰도록 바꿨다(임계 18·실제 게이트·헬퍼 불변). CI 잔여 실패율은 미확인.
+
+**배지 착지 수동 절차**(이슈 `chore(release): badge sync vX could not land on master` 가 열렸을 때): ① `gh api repos/Yoodaddy0311/artibot/commits/<sha>/check-runs` 로 그 SHA 의 체크 7/7 success 확인(빨간 잡이 있으면 원인을 읽고, 플레이크면 `gh run rerun <run id> --failed` 1회) ② `git fetch origin` → `git merge --ff-only origin/ci/sync-badges-vX` ③ `git push origin master` ④ 이슈에 사유 댓글 후 닫기 ⑤ `git push origin --delete ci/sync-badges-vX`. `ARTIBOT_ALLOW_DIRECT_PUSH=1` 은 쓰지 않는다. 릴리스 절차 정본은 `plugins/artibot/RELEASE.md`.
+
+**다음 작업 후보(백로그)**:
+
+1. **외부 재검수 패키지 `v.4.71.5/` 의 수정 단위 A·B + 결과 없는 완료**(작성 2026-10-05 21:19 KST, 기준 `8994caed`, 이 PC 에만 있음. 패키지의 권고는 지시가 아니며 **오너 승인 뒤 착수**). 해당 줄은 리더가 2026-10-06 열람해 사실임을 확인했다:
+   - **A — Lint: OK 오표시**: `lib/handoff/handoff-builder.js#renderStateTable` 의 `lintCell` 이 `quality.summary.failed === 0` 이면 `OK` 다. 테스트 실패 0 을 린트 통과로 표시한다. 최소 수정 = 실제 lint 증거가 없으면 "미측정". 인계 생성 시 린트 자동 실행·새 evidence DB 는 범위 밖.
+   - **B — 테스트 결과 생산/소비 계약**: `tests/reporters/test-status-reporter.js#onTestRunEnd(testModules = [])` 가 1인자만 소비하고(`unhandledErrors`·`reason` 미사용), `lib/verification/deterministic-source.js` 가 `exitCode: failed === 0 ? 0 : 1` 을 합성한다(`totalTests` 0 가드는 이미 있음). 전부 skip · suite hook 오류 · unhandled error · 중단 · 부분 실행이 구분되지 않는다. 설계는 `VERIFICATION-ECONOMICS-DESIGN.md` §3.2(completion 부분 NECESSARY 판정). 기존 테스트 2개가 키 8개·사유 6개·스냅샷을 고정하고 있어 함께 바꿔야 한다(같은 설계 문서 §3.2 의 기록 — 리더 재열람 안 함).
+   - **결과 없는 VERIFY 완료**: `lib/autopilot/report-verify-gate.js` rule 6 은 명시적 FAIL 만 거부하고 부재·`UNMEASURED` 는 통과한다(파일 머리말에 한계로 적혀 있음). 생산자(B)가 안정화되기 전에 strict 거부부터 켜지 않는다.
+   - 패키지의 단위 C(양성 대조)와 잔여 2건(`zero_polls` 리셋·`gh api` 타임아웃)은 v4.71.5 에서 처리했다.
+2. **Windows 절대 ms 게이트 플레이크 2건**(CI 400런 창 2026-09-05 ~ 10-05): `tests/autopilot/safety.test.js` 50ms 상한(#119, `50.54 < 50`), `tests/core/command-segments.test.js` 200ms 상한(`248.17 < 200`, 재실행 없음 — 잡음인지 회귀인지 미확인).
+3. **25분 상한 여유 감시**: 스위트가 계속 커지면 소진된다. `tests/autopilot/safety.test.js` 의 무거운 스윕을 직렬 프로젝트 밖으로(보류), Windows coverage A/B(보류), sharding(보류). 대기 대상에서 비필수 레그를 빼는 안은 기각(게이트 약화).
+4. **npm install 경고**: v4.71.4 릴리스 런 로그에 `9 vulnerabilities (1 low, 2 moderate, 4 high, 2 critical)`(외부 패키지의 발췌, 리더 미확인). 의존 경로·악용 가능성 미분류, `npm audit fix` 는 돌리지 않았다.
+5. **`VERIFICATION-ECONOMICS-DESIGN.md` 나머지**(미구현 제안)와 `v.4.71.3/` 패키지 후보 C(오너의 v5.1 결정 대기).
+6. **미추적 파일 정리 결정**: `v.4.71.x/` 3개, `.artibot/REPORTS/` 의 옛 보고서 9개, `plugins/artibot/.artibot/`(런타임 산출물) — 둘지 · gitignore 할지 · 커밋할지 오너에게 묻지 못했다.
+
+**미확인(다음 세션이 물려받는 것)**: v4.71.5 대기 루프의 라이브 동작 전부(러너 `timeout` 이 `gh` 를 끊는지, 실제 `jq` 와 시뮬레이션용 재구현의 동치, 실제 100폴링 상한 경로) · 호스트가 플러그인 `output-styles/` 를 선택 가능한 스타일로 로드하는지와 플래그의 실효 · ReDoS 양성 대조의 CI 잔여 실패율 · 등록상 로드되는 플러그인 캐시 버전(2026-10-05 이 PC 에서 4.57.0 캐시가 등록돼 있었다 — 실제 로드 사본 미확인).
+
+**이 세션의 작업 방식과 함정**: 사용자 지시로 검수·조사는 Fable 5.1, 구현은 Sonnet 5.5 로 돌렸다(`artibot.config.json` 의 모델 정책과 별개인 세션 지시). ① 이름 있는 팀원의 최종 메시지는 자동 전달되지 않는다 — 보고 주소는 `team-lead` ② `npm test` 는 `plugins/artibot/runtime/last-test-result.json` 을 덮어쓴다 — 표적 실행은 `npx vitest run <파일> --reporter=default` ③ CI 대기는 백그라운드 sleep 루프가 아니라 포그라운드 `gh run watch <id> --exit-status` ④ PC 가 절전에 들어가면 서브에이전트가 "600초 무진행"으로 끊긴다 — `SendMessage` 로 같은 에이전트를 재개하면 이어서 한다 ⑤ 타이밍 테스트를 재는 동안 같은 PC 에서 다른 테스트를 돌리면 표본이 오염된다.
+
+---
 
 ## Wave 18~23 착지 + v4.67.0 (2026-09-23 ~ 09-28 KST, master = `0dddb6ac`)
 
