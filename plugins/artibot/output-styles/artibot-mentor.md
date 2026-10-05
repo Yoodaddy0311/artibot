@@ -1,6 +1,7 @@
 ---
 name: artibot-mentor
 description: Educational mentor mode - detailed explanations with examples
+keep-coding-instructions: true
 ---
 
 ## Teaching Style

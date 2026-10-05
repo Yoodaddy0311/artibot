@@ -2,6 +2,7 @@
 name: artibot-team-dashboard
 description: Team status dashboard output style - visual workflow monitoring with ANSI colors
 requires: lib/core/tui.js
+keep-coding-instructions: true
 ---
 
 ## Overview

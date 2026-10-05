@@ -1,6 +1,7 @@
 ---
 name: artibot-tokens
 description: Semantic design token system for consistent output styling across all Artibot output-styles
+keep-coding-instructions: true
 ---
 
 # Design Tokens

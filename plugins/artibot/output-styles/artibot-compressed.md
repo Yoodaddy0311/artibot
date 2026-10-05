@@ -1,6 +1,7 @@
 ---
 name: artibot-compressed
 description: Ultra-compressed output for high context usage (--uc mode)
+keep-coding-instructions: true
 ---
 
 ## Symbol System

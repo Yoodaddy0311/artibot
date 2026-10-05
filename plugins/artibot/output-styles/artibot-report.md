@@ -1,6 +1,7 @@
 ---
 name: artibot-report
 description: Markdown table-based report style for task completion, evaluation, and patch summaries
+keep-coding-instructions: true
 ---
 
 ## Report Format

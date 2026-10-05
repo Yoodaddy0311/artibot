@@ -463,7 +463,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### Output Design System (v1.14.0+)
 
-- 7개 출력 스타일: default, compressed, mentor, team-dashboard, tokens, narrative, statusline
+- 7개 출력 스타일: default, compressed, intelligence, mentor, narrative, report, team-dashboard (+ 공용 토큰 문서 `tokens.md`)
 - Design Token 시스템 (`tokens.md`): 일관된 포맷팅을 위한 디자인 토큰
 
 
@@ -1626,7 +1626,7 @@ plugins/artibot/
 │   ├── privacy/                 # 프라이버시 (6): pii-scrubber, pii-detector, homoglyph-detector, token-rotation, differential-privacy
 │   ├── system/                  # 시스템 (2): lsp-client
 │   └── context/                 # 컨텍스트 (2): session
-├── output-styles/               # 7개 출력 스타일 (default, compressed, mentor, team-dashboard, tokens, narrative, statusline)
+├── output-styles/               # 7개 출력 스타일 (default, compressed, intelligence, mentor, narrative, report, team-dashboard) + tokens.md
 ├── templates/                   # 5개 작성 템플릿
 ├── artibot.config.json          # 플러그인 설정 (Agent Teams 포함)
 ├── package.json                 # Node.js ESM 런타임

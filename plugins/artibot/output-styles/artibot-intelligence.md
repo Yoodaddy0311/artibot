@@ -1,6 +1,7 @@
 ---
 name: artibot-intelligence
 description: Intelligence output style — surfaces active features and session stats inline
+keep-coding-instructions: true
 ---
 
 ## Purpose

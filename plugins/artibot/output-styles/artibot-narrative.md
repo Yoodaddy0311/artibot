@@ -1,6 +1,7 @@
 ---
 name: artibot-narrative
 description: Narrative structure output style — Hero-Support-Detail-CTA storytelling for CLI analysis reports
+keep-coding-instructions: true
 ---
 
 # Narrative Output Style
