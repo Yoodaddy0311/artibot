@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.5] — 2026-10-06
+
+`v4.71.4` 이후 6 커밋(`8994caed`·`a31bcbbd`·`e59d41b5`·`3f1281e7`·`0576a1c7`·`75c33524`) = **23 files +476/−34**(`git diff --shortstat v4.71.4..75c33524`, 2026-10-06 측정 — 릴리스 커밋은 이 수치에 없다). 릴리스 전 로컬 전체 스위트는 돌리지 못했다 — 실행이 시작 직후 메모리 부족으로 중단됐고(여유 1.6GB / 15.3GB) 다시 띄우지 않았다. 로컬 실측은 변경 영역 10 파일 201 passed(`--maxWorkers=2`), 플러그인 전체 `eslint . --max-warnings=0`, `validate` · `validate:readme:claims` · `docs:check` 통과이며, 전체 스위트의 판정은 `ci/release-v4.71.5` 의 CI 4개 레그다. 이 릴리스의 배지 동기화가 아래 대기 루프 수정의 첫 라이브 실행이다 — 결과는 이 항목 작성 시점에 알 수 없다.
+
 ### 릴리스 배지 착지 대기 루프 보강: 연속 0건 · 비JSON 응답 · gh 타임아웃 (라이브 미검증)
 
 - **`zero_polls` 가 실제로 "연속"이 된다.** `release.yml` 착지 스텝 `wait_for_green` 은 `total_count` 가 0 이 아닌 폴링에서 카운터를 되돌리지 않아 로그의 "N consecutive polls" 와 달리 누적이었다(0건 7회 → pending 1회 → 0건 1회에 rc 2). 이제 `total_count` > 0 인 폴링에서 `zero_polls=0` 으로 리셋한다(쓸 수 없는 폴링은 올리지도 리셋하지도 않으므로 "연속"은 사용 가능한 폴링 기준이다). `ZERO_POLL_LIMIT=8` 과 "런이 한 번도 안 생긴 푸시는 rc 2 로 분리" 계약은 그대로다.

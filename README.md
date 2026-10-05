@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.71.4-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.71.5-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.4** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.5** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.71.4` |
+| `version` | Plugin version | `4.71.5` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.71.5** (2026-10-06) — Four fixes behind the release landing and CI time: 6 commits, 23 files +476/−34 since v4.71.4 (`git diff --shortstat v4.71.4..75c33524`, measured 2026-10-06; the release commit is not in these numbers). **The badge-sync wait loop no longer misreads three situations**: its "consecutive empty polls" counter was cumulative, a non-JSON API response was counted as "no workflow run" and reported as an auth problem, and a hung `gh api` call had no time limit (now 10 seconds per call). **The CI step `Run runtime eval gate` took about 2 minutes on every job because a 120-second guard timer was never cleared**; the suite itself finishes in under a second, and the runner now exits when it does. **The eight files in `output-styles/` carry `keep-coding-instructions: true`**, as the `/theme` styles have since v4.71.3. **The timing test that blocked the v4.71.4 badge landing (#123) measures its noisy side twice**; its threshold and the real gates are unchanged. None of this has run on a real release or a CI runner yet: the wait loop, the step time and the test's failure rate on CI are unverified, and the full suite was not run locally before this release (the run was stopped for low memory), so the CI run on the release branch is the full-suite check. Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
 **4.71.4** (2026-10-05) — Release-landing fix and a rule correction: 3 commits, 15 files +444/−66 since v4.71.3 (`git diff --shortstat v4.71.3..41f6bb4e`, measured 2026-10-05; the release commit is not in these numbers). **The badge-sync landing now waits 25 minutes instead of 10** and its issue says whether the wait hit a red check, timed out, or ended without a usable API payload: the non-required Windows CI job takes about 13 minutes, so v4.71.2 and v4.71.3 both timed out and were landed by hand (#121, #122). A new test keeps `release.yml` and `lib/git/batch-landing.js` on the same ceiling. Not yet exercised on a real release — this release is its first live run. **The verification rule's pre-commit checklist no longer mandates `tsc`, `prebuild` and `build` in projects that lack them**; a missing check must be recorded, not skipped, and the full test run stays mandatory. Rule files already installed on a machine are not updated automatically. Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
