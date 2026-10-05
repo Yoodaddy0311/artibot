@@ -784,6 +784,17 @@ jobs:
           # ceiling is about 1.8x the slowest first attempt (13.63 x 1.8 = 24.5,
           # rounded up to 25 min). Releases v4.71.2 and v4.71.3 both ran out of
           # polls at the old ceiling with pending=1 failed=0 (issues #121, #122).
+          # The 25 min is the sum of the sleeps between polls ONLY; each `gh api`
+          # call adds its own latency on top. Every polling `gh api` call is
+          # bounded by GH_API_TIMEOUT_SECONDS (the `gh issue` calls in open_issue
+          # and the git operations are NOT bounded and are not in these figures),
+          # so the worst case of one wait, with every polling call hanging to that
+          # bound, is WAIT_ATTEMPTS x (WAIT_POLL_SECONDS +
+          # GH_API_TIMEOUT_SECONDS) = 100 x (15 + 10) s = 2500 s = about 41.7 min.
+          # The rebase path can wait a second time, so the step's worst case is
+          # about twice that plus the git operations (before 2026-10-05 a hung
+          # call had no bound at all).
+          #
           # The two values are kept in lockstep with
           # lib/git/batch-landing.js#WAIT_FOR_GREEN_ATTEMPTS and
           # #WAIT_FOR_GREEN_POLL_MS by tests/firewall/release-wait-window-lockstep.test.js.
@@ -803,6 +814,14 @@ jobs:
           ZERO_POLL_LIMIT=8
           WAIT_ATTEMPTS=100
           WAIT_POLL_SECONDS=15
+          # Kill budget for one `gh api` check-runs call, so a hung call cannot
+          # hold the step. Same value as the JS port's GH_CHECK_RUNS_TIMEOUT_MS
+          # (10 s): below the 15 s poll interval, far above one REST GET plus gh
+          # start-up. `timeout` is GNU coreutils on this job's ubuntu-latest
+          # runner. A killed call yields an empty payload, or a partial stdout
+          # that the numeric total_count guard below rejects; either way the loop
+          # treats it as an API failure and polls again.
+          GH_API_TIMEOUT_SECONDS=10
           # Elapsed-time warning threshold, percent of the ceiling. 60 is an
           # arbitrary initial value (design R3), not a measured one.
           WAIT_WARN_PERCENT=60
@@ -820,7 +839,7 @@ jobs:
             for _ in $(seq 1 "${WAIT_ATTEMPTS}"); do
               sleep "${WAIT_POLL_SECONDS}"
               wait_polls=$((wait_polls + 1))
-              payload="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs" 2>/dev/null || echo '')"
+              payload="$(timeout "${GH_API_TIMEOUT_SECONDS}" gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs" 2>/dev/null || echo '')"
               # `if`, not `[ ... ] && continue`: the default shell is `bash -e`,
               # where a bare short-circuit list that evaluates false is a failing
               # final command and aborts the whole step.
@@ -829,7 +848,18 @@ jobs:
               # so it deliberately does not advance zero_polls — otherwise a
               # 2-minute API outage would be reported as an auth failure.
               if [ -z "${payload}" ]; then continue; fi
-              total="$(printf '%s' "${payload}" | jq -r '.total_count' 2>/dev/null || echo 0)"
+              # The same holds when total_count is not a number: a non-JSON body
+              # (an HTML 502), error JSON whose total_count is null, or a jq
+              # failure. `|| echo 0` used to turn those into total=0 and count
+              # them as "no workflow run was ever created". Only a real 0 is
+              # evidence about the SHA, so anything else polls again, and `total`
+              # keeps the last USABLE value (empty if there never was one), which
+              # is what describe_wait reads.
+              poll_total="$(printf '%s' "${payload}" | jq -r '.total_count' 2>/dev/null || echo '')"
+              case "${poll_total}" in
+                ''|*[!0-9]*) continue ;;
+              esac
+              total="${poll_total}"
               if [ "${total}" = "0" ]; then
                 zero_polls=$((zero_polls + 1))
                 # `zero_polls=$((...))` is an assignment, so it yields status 0
@@ -839,8 +869,17 @@ jobs:
                   echo "  ${target_sha}: total=0 on ${zero_polls} consecutive polls — no workflow run was ever created"
                   return 2
                 fi
+                # This payload reported no check runs, so there is nothing for
+                # pending or failed: clear what an earlier poll left, or
+                # describe_wait would show a mix of two different polls.
+                pending=""
+                failed=""
                 continue
               fi
+              # A real total_count above 0 means runs exist, so the count starts
+              # over. "Consecutive" is counted among USABLE polls: an unusable poll
+              # (empty or non-numeric payload) neither advances nor resets it.
+              zero_polls=0
               pending="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)"
               failed="$(printf '%s' "${payload}" | jq -r '[.check_runs[] | select(.conclusion != null) | select([.conclusion] | inside(["success","neutral","skipped"]) | not)] | length' 2>/dev/null || echo 0)"
               echo "  ${target_sha}: total=${total} pending=${pending} failed=${failed}"
@@ -866,14 +905,16 @@ jobs:
           # The verdict is decided by what was observed, not by which variable is
           # empty: red needs a numeric failed > 0; a timeout needs the poll count
           # to have reached the ceiling; a return before the ceiling that is not
-          # red (blank or error payload: jq printed nothing or null) is "ended
-          # early", never called a timeout. A count is usable only when it is all
+          # red is "ended early", never called a timeout. (Defensive: with the
+          # numeric total guard in wait_for_green no current path returns 1 before
+          # the ceiling without a red check, so this branch is not expected to be
+          # reached.) A count is usable only when it is all
           # digits, and that is tested BEFORE any -gt/-ge (a non-number there
           # would abort the step under errexit). `case` and `if`, not
           # `[ ... ] && ...` or a bare `(( ... ))`, for the same errexit reason.
           describe_wait() {
             wait_minutes=$((wait_polls * WAIT_POLL_SECONDS / 60))
-            wait_detail="last poll: total=${total:-?} pending=${pending:-?} failed=${failed:-?} after ${wait_polls} polls (~${wait_minutes} min)"
+            wait_detail="last usable poll: total=${total:-?} pending=${pending:-?} failed=${failed:-?} after ${wait_polls} polls (~${wait_minutes} min)"
             wait_red=no
             case "${failed}" in
               ''|*[!0-9]*) ;;

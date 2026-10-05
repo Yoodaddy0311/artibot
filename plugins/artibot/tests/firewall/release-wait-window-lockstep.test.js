@@ -45,6 +45,8 @@
  *     변수는 그대로 쓰면서 실효 반복 횟수를 줄이는 변경은 정적 검사로 일반 해법이
  *     없다. 대입문 출현 수(아래 4번)는 "두 번째 대입"만 막는다. `declare`/`printf -v`
  *     같은 다른 대입 형태도 같은 이유로 보지 않는다.
+ *   - **폴링 위생(타임아웃·비숫자 total·zero_polls 리셋) 블록의 못 보는 것**은 그 블록
+ *     위의 별도 주석에 있다(러너에서의 `timeout` 실동작 포함). 이 헤더는 락스텝 두 숫자만 다룬다.
  *   - **PR 모드의 정지 감지기**(다른 스텝의 `seq 1 6` / `sleep 20`)는 이 스텝
  *     밖이라 보지 않는다.
  *   - **YAML 파서가 아니라 스텝 절단기**를 쓴다(`badge-stall-yaml-tools.js`). 스텝
@@ -126,10 +128,13 @@ function checkWaitWindow(yaml, jsAttempts, jsPollMs) {
  * @returns {string}
  */
 function mutate(yaml, from, to) {
-  const hits = yaml.split(from).length - 1;
+  // 작업트리 사본은 CRLF 일 수 있다. 여러 줄 대상이 맞도록 LF 로 정규화한 사본을 변조한다
+  // (sliceStep/executableShell 은 \r?\n 을 다 받는다).
+  const lf = yaml.replace(/\r\n/g, '\n');
+  const hits = lf.split(from).length - 1;
   if (hits !== 1) throw new Error(`변조 대상이 ${hits}곳이다 (정확히 1곳이어야 한다): ${from}`);
-  const out = yaml.replace(from, () => to);
-  if (out === yaml) throw new Error(`변조가 적용되지 않았다: ${from}`);
+  const out = lf.replace(from, () => to);
+  if (out === lf) throw new Error(`변조가 적용되지 않았다: ${from}`);
   return out;
 }
 
@@ -235,5 +240,122 @@ describe('release.yml 대기창 ↔ batch-landing.js 락스텝', () => {
       const p = checkWaitWindow(source, WAIT_FOR_GREEN_ATTEMPTS, 30_000);
       expect(p.violations.some((v) => v.includes('WAIT_FOR_GREEN_POLL_MS=30000'))).toBe(true);
     });
+  });
+});
+
+/**
+ * `wait_for_green` 폴링 위생 — 락스텝과 같은 착지 스텝, 같은 추출기.
+ *   1. 모든 `gh api` 가 `timeout "${GH_API_TIMEOUT_SECONDS}"` 로 감싸이고, 그 상수는 실행 셸 전체에서
+ *      `GH_API_TIMEOUT_SECONDS=` 출현이 정확히 1회(`WAIT_ATTEMPTS`·`WAIT_POLL_SECONDS` 와 같은 규칙: 두 번째 대입·호출부
+ *      접두를 막는다 — `timeout 0` 은 한도를 끈다)인 양의 정수이며 폴링 간격(WAIT_POLL_SECONDS)보다 작다
+ *      (release.yml 주석의 "below the poll interval" 주장).
+ *   2. `total_count` 가 숫자가 아니면(HTML 502·오류 JSON·jq 실패) 다음 폴링으로 넘어간다:
+ *      `.total_count` 줄에 `|| echo 0` 류(따옴표 친 0 포함)가 없고, `case "${poll_total}"` 숫자 가드가
+ *      있고, `total="${poll_total}"` 대입이 정확히 1개이며 가드보다 **뒤**다(앞이면 사용 불가 값이 total 을 덮어쓴다).
+ *   3. `zero_polls=0` 리셋은 실행 셸에서 total==0 분기의 닫는 fi **직후**에 있다(분기 안이면 rc 2 가 영영
+ *      안 난다) + 함수 안 `zero_polls=0` 줄이 정확히 2개(시작 + 리셋) + 함수 안 `zero_polls=` 대입이
+ *      정확히 3개(초기화·증가·리셋; 리셋 뒤에 `zero_polls="$((ZERO_POLL_LIMIT - 1))"` 같은 값을
+ *      넣어 "런이 있는 폴링 뒤 0건 1회에 rc 2" 로 만드는 변조를 막는다). 0건 분기는 `continue` 직전에
+ *      `pending=""` `failed=""` 로 앞선 폴링의 값을 비운다(describe_wait 가 두 폴링의 혼합을 보이지 않게).
+ *
+ * 못 보는 것: `timeout` 이 러너에서 실제로 호출을 끊는지(ubuntu-latest 의 coreutils 존재·종료 코드 124·
+ * SIGTERM 에 gh 가 즉시 죽는지 — `timeout -k` 는 없다), 리셋·가드의 런타임 동작과 `case` 가드 뒤 분기의
+ * 시맨틱(문자열 존재·상대 위치만 본다), 다른 스텝의 `gh api`·`gh issue`(open_issue 의 gh 호출은 한도가 없다),
+ * 위 형태를 피하는 다른 우회(예: 변수 간접 참조), 루프 자체를 자르는 파이프. 런타임 동작은 추출 함수를
+ * `bash -e` 로 구동한 시뮬레이션만 보여 주었고(CHANGELOG [Unreleased]) 그것도 라이브가 아니다.
+ *
+ * @param {string | null} yaml
+ * @returns {string[]} 위반 목록 (빈 배열이면 통과)
+ */
+function checkPollHygiene(yaml) {
+  /** @type {string[]} */
+  const v = [];
+  if (typeof yaml !== 'string' || yaml.length === 0) return ['워크플로 텍스트가 비어 있다'];
+  const body = sliceStep(yaml, FF_STEP);
+  if (body === null) return [`"${FF_STEP}" 스텝을 찾지 못했다`];
+  const shell = executableShell(body);
+
+  // 타임아웃 상수: 대입 출현 1회(고정 형식 밖 대입·호출부 접두 포함) + 양의 정수 + 폴링 간격 미만.
+  const occ = (shell.match(/\bGH_API_TIMEOUT_SECONDS\+?=/g) ?? []).length;
+  if (occ !== 1) v.push(`GH_API_TIMEOUT_SECONDS= 출현이 실행 셸 전체에서 ${occ}회다 (정확히 1회여야 한다)`);
+  const tm = [...shell.matchAll(/^\s*GH_API_TIMEOUT_SECONDS=(\d+)\s*$/gm)];
+  const pm = [...shell.matchAll(/^\s*WAIT_POLL_SECONDS=(\d+)\s*$/gm)];
+  if (tm.length !== 1 || !(Number(tm[0][1]) > 0)) {
+    v.push(`GH_API_TIMEOUT_SECONDS 양의 정수 대입문이 정확히 1개가 아니다 (${tm.length}개)`);
+  } else if (pm.length === 1 && !(Number(tm[0][1]) < Number(pm[0][1]))) {
+    v.push(`GH_API_TIMEOUT_SECONDS=${tm[0][1]} 이 폴링 간격 WAIT_POLL_SECONDS=${pm[0][1]} 미만이 아니다`);
+  }
+  const all = (shell.match(/\bgh api\b/g) ?? []).length;
+  const bounded = (shell.match(/\btimeout "\$\{GH_API_TIMEOUT_SECONDS\}" gh api\b/g) ?? []).length;
+  if (all === 0) v.push('gh api 호출이 하나도 없다');
+  if (all !== bounded) v.push(`타임아웃 없는 gh api 호출이 ${all - bounded}개 있다 (전체 ${all}, 감싼 것 ${bounded})`);
+
+  const fnMatch = /^\s*wait_for_green\(\) \{\n([\s\S]*?)\n\s*\}$/m.exec(shell);
+  if (!fnMatch) return [...v, 'wait_for_green 함수 본문을 찾지 못했다'];
+  const fn = fnMatch[1];
+  for (const line of fn.split('\n')) {
+    if (line.includes('.total_count') && /\|\|\s*echo\s+["']?0["']?(?!\d)/.test(line)) {
+      v.push('.total_count 줄이 실패를 `|| echo 0` 으로 0 처럼 만든다');
+    }
+  }
+  const guardRe = /case "\$\{poll_total\}" in\s*\n\s*''\|\*\[!0-9\]\*\) continue ;;/;
+  const guard = guardRe.exec(fn);
+  if (!guard) v.push('poll_total 숫자 가드(case … continue)가 없다');
+  const assigns = [...fn.matchAll(/^\s*total="\$\{poll_total\}"$/gm)];
+  if (assigns.length !== 1) {
+    v.push(`total="\${poll_total}" 대입이 ${assigns.length}개다 (정확히 1개여야 한다)`);
+  } else if (guard && assigns[0].index < guard.index) {
+    v.push('total 대입이 poll_total 숫자 가드보다 앞이다 (사용 불가 값이 total 을 덮어쓴다)');
+  }
+
+  const resets = [...fn.matchAll(/^\s*zero_polls=0$/gm)];
+  if (resets.length !== 2) v.push(`함수 안 zero_polls=0 줄이 ${resets.length}개다 (시작 + 리셋, 정확히 2개여야 한다)`);
+  const zeroAssigns = (fn.match(/\bzero_polls=/g) ?? []).length;
+  if (zeroAssigns !== 3) v.push(`함수 안 zero_polls= 대입이 ${zeroAssigns}개다 (초기화·증가·리셋, 정확히 3개여야 한다)`);
+  if (!fn.includes('if [ "${total}" = "0" ]; then')) v.push('total == 0 분기를 찾지 못했다');
+  if (!/\n\s*continue\n\s*fi\n\s*zero_polls=0\n/.test(fn)) {
+    v.push('zero_polls=0 리셋이 total==0 분기의 닫는 fi 직후에 있지 않다');
+  }
+  if (!/\n\s*pending=""\n\s*failed=""\n\s*continue\n\s*fi\n\s*zero_polls=0\n/.test(fn)) {
+    v.push('total==0 분기가 continue 전에 pending/failed 를 비우지 않는다 (두 폴링의 혼합)');
+  }
+  return v;
+}
+
+describe('wait_for_green 폴링 위생: gh api 타임아웃 · 비숫자 total · zero_polls 리셋 · 혼합 방지', () => {
+  const run = checkPollHygiene;
+  const RESET = '              zero_polls=0\n              pending="$(';
+  const NO_RESET = '              : # reset removed\n              pending="$(';
+  const TIMEOUT_LINE = '          GH_API_TIMEOUT_SECONDS=10';
+  const JQ_TOTAL = "jq -r '.total_count' 2>/dev/null || echo ''";
+
+  it('현재 release.yml 은 위반이 없다 (무변조 대조군)', () => {
+    expect(run(source)).toEqual([]);
+  });
+
+  it.each([
+    ['gh api 의 timeout 접두 제거', (s) => mutate(s, 'timeout "${GH_API_TIMEOUT_SECONDS}" gh api', 'gh api'), '타임아웃 없는 gh api 호출이'],
+    ['타임아웃 상수 0', (s) => mutate(s, TIMEOUT_LINE, '          GH_API_TIMEOUT_SECONDS=0'), 'GH_API_TIMEOUT_SECONDS 양의 정수'],
+    ['타임아웃 상수 주석 처리', (s) => mutate(s, TIMEOUT_LINE, '          # GH_API_TIMEOUT_SECONDS=10'), 'GH_API_TIMEOUT_SECONDS 양의 정수'],
+    ['타임아웃 상수 3600 (폴링 간격 이상)', (s) => mutate(s, TIMEOUT_LINE, '          GH_API_TIMEOUT_SECONDS=3600'), '폴링 간격 WAIT_POLL_SECONDS=15 미만이 아니다'],
+    ['타임아웃 두 번째 대입 (세미콜론)', (s) => mutate(s, TIMEOUT_LINE, `${TIMEOUT_LINE}\n          GH_API_TIMEOUT_SECONDS=0;`), 'GH_API_TIMEOUT_SECONDS= 출현이 실행 셸 전체에서 2회'],
+    ['타임아웃 호출부 접두 대입', (s) => mutate(s, 'wait_for_green "${SHA}" ||', 'GH_API_TIMEOUT_SECONDS=0 wait_for_green "${SHA}" ||'), 'GH_API_TIMEOUT_SECONDS= 출현이 실행 셸 전체에서 2회'],
+    ['타임아웃 없는 두 번째 gh api 추가', (s) => mutate(s, 'if [ -z "${payload}" ]; then continue; fi', 'extra="$(gh api rate_limit)"\n              if [ -z "${payload}" ]; then continue; fi'), '타임아웃 없는 gh api 호출이'],
+    ['.total_count 줄의 || echo 0 복원', (s) => mutate(s, JQ_TOTAL, "jq -r '.total_count' 2>/dev/null || echo 0"), '|| echo 0'],
+    ['.total_count 줄의 || echo "0" (따옴표)', (s) => mutate(s, JQ_TOTAL, "jq -r '.total_count' 2>/dev/null || echo \"0\""), '|| echo 0'],
+    ['숫자 가드의 continue 제거', (s) => mutate(s, "''|*[!0-9]*) continue ;;", "''|*[!0-9]*) ;;"), 'poll_total 숫자 가드'],
+    ['total 대입을 가드 앞으로 이동', (s) => mutate(mutate(s, '              total="${poll_total}"\n', ''), '              case "${poll_total}" in', '              total="${poll_total}"\n              case "${poll_total}" in'), 'total 대입이 poll_total 숫자 가드보다 앞이다'],
+    ['zero_polls 리셋 제거', (s) => mutate(s, RESET, NO_RESET), '함수 안 zero_polls=0 줄이 1개다'],
+    ['zero_polls 리셋을 0건 분기 안으로 이동', (s) => mutate(mutate(s, RESET, NO_RESET), '                failed=""\n                continue\n', '                failed=""\n                zero_polls=0\n                continue\n'), 'zero_polls=0 리셋이 total==0 분기의 닫는 fi 직후에 있지 않다'],
+    ['zero_polls 리셋 뒤에 한도-1 대입 추가', (s) => mutate(s, RESET, '              zero_polls=0\n              zero_polls="$((ZERO_POLL_LIMIT - 1))"\n              pending="$('), '함수 안 zero_polls= 대입이 4개다'],
+    ['0건 분기의 pending/failed 비우기 제거', (s) => mutate(s, '                pending=""\n                failed=""\n                continue\n', '                continue\n'), '두 폴링의 혼합'],
+  ])('변조 사본: %s → RED', (_name, apply, expected) => {
+    const bad = run(apply(source));
+    expect(bad.some((m) => m.includes(expected)), JSON.stringify(bad)).toBe(true);
+  });
+
+  it('스텝이 없거나 입력이 비면 RED (fail-closed)', () => {
+    expect(run('').length).toBeGreaterThan(0);
+    expect(run(mutate(source, `- name: ${FF_STEP}`, '- name: Renamed landing step')).length).toBeGreaterThan(0);
   });
 });

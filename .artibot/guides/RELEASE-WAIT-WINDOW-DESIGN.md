@@ -111,7 +111,8 @@
 ## 6. 범위 밖·후속
 
 - **과거 5건에서 무엇이 빨갛게 됐는지**(§1): 이번에 조사하지 않았다. 배지·메타데이터 커밋의 체크가 5번 실패했다면 이 설계와 다른 원인이 있을 수 있다.
-- **Windows 잡이 느려지는 원인**은 측정하지 않았다(코드 주석의 2026-09-21~28 측정 중앙값 9.10분에서 10-04 표본 중앙값 13.4분까지, 약 열흘 사이. 두 측정은 표본 구성이 달라 엄밀한 비교는 아니다). 테스트 수 증가, 러너 변동, coverage 등 후보가 있으나 **미확인**이다.
+- **Windows 잡이 느려지는 원인.** 초안 시점에는 측정하지 않았다(코드 주석의 2026-09-21~28 측정 중앙값 9.10분에서 10-04 표본 중앙값 13.4분까지, 약 열흘 사이. 두 측정은 표본 구성이 달라 엄밀한 비교가 아니다). 이후 조사관이 측정했다 — **조사관 측정(2026-10-05 20:32~21:03 KST), 리더·작성자 미재측정**: 09-17 → 10-05 테스트 18,836 → 26,594(+41%), 테스트 파일 723 → 879(+22%). 같은 기간 Linux 테스트 스텝은 ×2.35, Windows 는 ×1.97 이고 `ci.yml` 은 불변이며, 변하지 않은 594개 파일 대조군은 평평했다 — 따라서 원인은 Windows 러너가 아니라 **스위트 증가**로 보인다(추론). 증가는 테스트가 착지할 때 계단식이고, 10-02 → 10-05 의 n=21 은 p50 13.27 / p90 13.63 / max 13.78분으로 평평하다. Windows 증가분의 약 39% 가 직렬 autopilot 프로젝트이고 그 절반이 `tests/autopilot/safety.test.js`(50~65초)다. 25분에 닿는 시점(테스트 파일 약 390~470개가 더 늘면, 최근 속도로 11월 중·하순)은 **외삽**이다. 미확인: Windows 에서의 coverage 오버헤드, 러너 속도의 이봉성.
+- **`Run runtime eval gate` 스텝이 4개 레그 모두 약 2.0분이던 원인**(스위트 자체는 0.37초): `lib/runtime/evaluator.js#evaluateRuntimeSuite` 의 120초 suite-timeout 가드 타이머를 해제하지 않아 프로세스가 약 120초 뒤에야 끝났다(조사관 측정, 리더 미재측정). 담당 팀원이 `finally { clearTimeout }` 로 고쳤다(로컬 Windows: 마지막 출력→종료 119.1~119.3초 → 0.0초. 리더 실측: 러너 1.05초 rc 0, 새 테스트 포함 2파일 15 passed). 이 스텝은 Windows 레그에도 있으므로 줄면 Windows 잡 소요도 줄 것으로 보이나(추론) **CI 러너에서의 단축은 측정하지 않았다.**
 - 가이드 §3.1(coverage 4→1)의 Windows 비계측 A/B는 이 과제와 함께 다룬다.
 - 같은 제목의 이슈 #114(v4.51.0)는 체크가 한 번도 생성되지 않은 인증 귀속 사례다. 위 표에는 넣지 않았고, 본문이 다른 5건과 같은 문장인지는 제목만 확인해 **미확인**이다.
 
@@ -120,7 +121,7 @@
 - 과거 5건에서 어떤 체크가 빨갛게 됐는지, 그것이 같은 원인인지
 - Actions 안의 `GITHUB_TOKEN`·`ARTIBOT_LANDING_PAT`가 `branches/master/protection`을 읽을 수 있는지(대안 B의 나머지 절반)
 - 푸시→체크 완료 전체 경과(큐 대기 포함)의 시간대별 분포
-- Windows 소요 증가의 원인과 향후 추세
+- Windows 소요 증가의 원인(§6 의 조사관 측정은 리더 미재측정)과 25분에 닿는 시점(외삽), coverage 오버헤드, 러너 속도의 이봉성, runtime eval 타이머 수정이 CI 러너에서 실제로 줄이는 시간
 - R3의 경보 임계 60%가 적절한지 — 임의 초기값
 - 제 집계 표본 n=45와 감사관 n=46·n=58 사이의 차이가 어느 런 때문인지(표본 구간·실패 런 제외 규칙의 차이로 추정, 런 목록은 보존하지 않았다)
 - 다음 실제 릴리스에서의 25분 한도의 라이브 동작
@@ -134,16 +135,35 @@
 | R1 | `seq 1 40`/`sleep 15` → `WAIT_ATTEMPTS=100`·`WAIT_POLL_SECONDS=15` 대입문 + 루프가 변수를 쓴다. 주석의 근거를 2026-10-05 측정으로 교체 | `.github/workflows/release.yml` 착지 스텝 `wait_for_green` |
 | R1 | `WAIT_FOR_GREEN_ATTEMPTS` 80 → 100, 락 TTL `landingLockStaleMs()` 120 → 150분(3 × 2 × 100 × 15초), 관련 주석·리터럴 갱신 | `lib/git/batch-landing.js`, `lib/git/landing-lock.js`, `tests/git/batch-landing.test.js`(리터럴 6곳 — §3 R1 이 센 5곳 외에 `landingLockStaleMs({}, 0)` 의 `60 * MIN` → `75 * MIN` 이 하나 더 있었다), `tests/firewall/landing-serialization.test.js` 주석, `commands/split.md`(20분 → 25분, 120분 → 150분) |
 | R2 | 락스텝 테스트 신설. 대입문 정확히 1개씩 · JS 상수와 동일 · 루프가 변수를 쓰고 숫자 리터럴이 없음 · 파일/스텝/함수 부재는 RED · 실행 셸 전체에서 `WAIT_ATTEMPTS=`·`WAIT_POLL_SECONDS=` 출현 수 정확히 1(고정 형식 밖의 두 번째 대입 — `;`·`export`·`$((40))`·호출부 접두 — 차단) · 문자열 변조 7종 + 두 번째 대입 5종 + 빈 입력 + JS 상수 불일치로 스캐너 자기검증(19 tests) | `tests/firewall/release-wait-window-lockstep.test.js` |
-| R3 | 시간 초과/빨간 체크를 구분하는 `describe_wait`(반환값 0/1/2 불변). 이슈 본문과 `::warning::` 에 "last poll: total=T pending=P failed=F after N polls (~M min)" 추가, 미할당은 `?`. 판정은 관측으로 가른다: 숫자 `failed` > 0 이면 red check, 폴링 수가 한도(`WAIT_ATTEMPTS`)에 닿았으면 timeout(`total` 이 숫자가 아니면 "API never returned a usable check-run payload"), 한도 전에 끝났는데 red 도 아니면 "ended early"(공백·오류 payload). 성공 시 경과 폴링 수 로그 1줄, 한도의 60% 초과 시 `::warning::`(60% 는 임의 초기값). 이슈 제목은 그대로 | 같은 스텝 |
+| R3 | 시간 초과/빨간 체크를 구분하는 `describe_wait`(반환값 0/1/2 불변). 이슈 본문과 `::warning::` 에 "last usable poll: total=T pending=P failed=F after N polls (~M min)" 추가(라벨은 2026-10-06 검수 반영으로 "last poll:" 에서 바뀌었고, 0건 분기는 앞선 폴링의 pending/failed 를 비워 두 폴링의 혼합을 보이지 않는다), 미할당은 `?`. 판정은 관측으로 가른다: 숫자 `failed` > 0 이면 red check, 폴링 수가 한도(`WAIT_ATTEMPTS`)에 닿았으면 timeout(`total` 이 숫자가 아니면 "API never returned a usable check-run payload"), 한도 전에 끝났는데 red 도 아니면 "ended early"(공백·오류 payload). 성공 시 경과 폴링 수 로그 1줄, 한도의 60% 초과 시 `::warning::`(60% 는 임의 초기값). 이슈 제목은 그대로 | 같은 스텝 |
 
 **검증한 것**: `npx vitest run` 8 파일(락스텝 19 · `release-landing-push-identity` · `landing-serialization` · `batch-landing` · badge-stall 3종 · `workflow-branch-lockstep`) 141 passed. 셸 시뮬레이션 두 번: ① 스텁 `gh`·`sleep`·`jq`(bash 함수)로 7개 시나리오 a~g — 초록 · 시간 초과 100회 · 빨간 체크 · 런 0건 · 빈 payload · 60% 경계(60폴링 무경고, 61폴링 경고) · 이전 호출 카운트 비상속(a~g 7개; 70폴링 변형 f70 은 끝까지 도는 것을 확인하지 못했다). ② 교차 검수 후 재작성한 `describe_wait` 는 감사관의 node 기반 `jq` 재구현(실제 JSON 파싱) 하네스에 현재 `release.yml` 에서 추출한 착지 스텝을 얹어 `bash -e` 와 `bash -eu` 로 구동했다: 2폴링 red · 100폴링 시간 초과 · 전 폴링 빈 payload · 공백 payload(1폴링에 rc 1, "ended early") · `total=null` 오류 JSON · total=0 × 8(rc 2, `describe_wait` 미호출) · 초록. 스크래치 사본 음성 대조 10종(`=40`·poll `=20`·주석 처리·JS 80·`seq`/`sleep` 리터럴·두 번째 대입 4종)이 모두 RED 였고 변조 적용과 복원을 해시로 확인했다.
 
-**알려진 잔여 결함(미수정)** — 이번 변경 범위 밖이거나 별도 설계가 필요해 고치지 않았다. 아래 1·2번은 HEAD 에도 있던 결함이다.
+**수정됨(2026-10-05, 라이브 미검증)** — 이 절에 "알려진 잔여 결함(미수정)"으로 적었던 것 중 1·2번과 타임아웃. `release.yml` 착지 스텝 `wait_for_green` 주변만 바꿨고 0/1/2 반환 · 호출형 · 이슈 제목 · `WAIT_ATTEMPTS=100`/`WAIT_POLL_SECONDS=15`/`ZERO_POLL_LIMIT=8` · `describe_wait` 판정 규칙은 그대로다. 세 전제(리셋 없음, `|| echo 0`, 타임아웃 없음)는 코드를 직접 읽어 확인했다.
 
-1. `wait_for_green` 의 `zero_polls` 는 total 이 0 이 아닌 폴링에서 **리셋되지 않는다**. "8 consecutive" 는 실제로는 누적 8회이고, JSON 이 아닌 본문은 `|| echo 0` 으로 `total="0"` 이 되어 같이 센다. 대기창이 100폴링으로 넓어져 일시적 5xx 8회가 인증 실패 문구("no workflow run was ever created")로 오표기될 노출이 커졌다. 코드 읽기로 확인했고 이번에 고치지 않았다(`ZERO_POLL_LIMIT=8` 계약을 건드리는 별도 변경).
-2. 셸의 `gh api` 호출에는 **타임아웃이 없다**(JS 포트는 `GH_CHECK_RUNS_TIMEOUT_MS` = 10초). 한 번 멈춘 호출이 스텝을 붙잡을 수 있다.
-3. 스텝 최악 소요는 약 50~55분(감사관 추정: 대기 25분 × rebase 재시도 포함 2회 + API 지연). 직접 재현하지 않았다.
-4. 60% 경고는 **통보 경로가 아니라 런 주석**일 뿐이다. 누군가 런을 열어 봐야 보인다.
-5. 이슈 개설 시점이 시간 초과 기준으로 10분 → 25분 늦어졌다. 대신 오경보(체크가 아직 도는데 이슈가 열림)는 줄었다.
+1. **`zero_polls` 리셋.** `total_count` 가 0 보다 큰 폴링에서 `zero_polls=0` 으로 되돌린다. 이전에는 함수 시작에서만 0 이었어서 로그의 "N consecutive polls" 와 달리 누적이었다(0건 7회 → pending 1회 → 0건 1회에 rc 2). 시뮬레이션으로 같은 시나리오가 수정 전에는 9번째 호출에 rc 2, 수정 후에는 16폴링 만에 초록으로 끝남을 확인했다.
+2. **숫자가 아닌 `total_count` 는 API 실패로 센다.** `jq … || echo 0` 이 실패를 0 으로 바꾸던 것을 `|| echo ''` + `case` 숫자 가드(`continue`)로 고쳤다. HTML 502 같은 비JSON 본문, `total_count` 가 null 인 오류 JSON, jq 실패는 이제 "런이 한 번도 안 생김"(rc 2)으로 세지 않고 다음 폴링으로 넘어간다 — 빈 payload 와 같은 원칙이다. `total` 은 마지막 **사용 가능한** 값을 유지하고(없으면 빈 값) `describe_wait` 가 이를 읽는다. 시뮬레이션: HTML 502 본문은 수정 전 8폴링에 rc 2 "no workflow run was ever created", 수정 후 100폴링을 돌고 "timeout, the API never returned a usable check-run payload".
+3. **`gh api` 타임아웃.** `timeout "${GH_API_TIMEOUT_SECONDS}" gh api …`, `GH_API_TIMEOUT_SECONDS=10`(JS 포트 `GH_CHECK_RUNS_TIMEOUT_MS` 와 같은 10초 — 폴링 간격 15초 미만, REST GET 1회보다 훨씬 큼). `timeout` 은 이 잡의 `runs-on: ubuntu-latest` 러너의 GNU coreutils 다. 끊긴 호출은 빈 payload(또는 숫자 가드가 거르는 부분 stdout)가 되어 위 2번과 같은 경로를 탄다. **25분은 폴링 사이 sleep 의 합일 뿐 API 지연은 별도다.** 모든 폴링 `gh api` 호출이 타임아웃까지 걸리는 최악은 한 번의 대기가 100 × (15 + 10) 초 = 2500초 = 약 41.7분이고, rebase 재시도로 두 번 기다리면 약 83분(+ git 작업)이다. 묶인 것은 폴링의 `gh api` 뿐이다 — `open_issue` 의 `gh issue` 호출과 git 은 한도가 없고 이 수치에 들어 있지 않다. 정상 지연(호출당 약 1초)이면 약 50~55분(감사관 추정)이다. 이 값은 주석(`release.yml`)과 JS 포트의 같은 계산(`landingLockStaleMs()` 150분 안)과 맞는다.
+4. **검수 반영(2026-10-06).** Fable 교차 검수(APPROVE, 차단 0)의 권고를 하나씩 재현한 뒤 고쳤다.
+   - **테스트 구멍(4묶음).** 단위 정리: "구멍 4종"은 검수가 지적한 **묶음 4개**이고 "변조 N종"은 그 묶음을 실제로 재현·고정한 **개별 변조의 수**다. 4묶음 = ① 두 번째 대입·호출부 접두, ② 리셋 위치 이동, ③ `echo "0"`·상수 3600, ④ 대입 순서이며 개별 변조로는 6개(두 번째 대입, 호출부 접두, 리셋 이동, `echo "0"`, 상수 3600, 대입 순서)다. 스크래치 사본에서 재현했다: `GH_API_TIMEOUT_SECONDS=0;` 두 번째 대입과 호출부 접두 `GH_API_TIMEOUT_SECONDS=0 wait_for_green …`(`timeout 0` 은 한도를 끈다), `zero_polls=0` 리셋을 0건 분기 **안**으로 옮김(rc 2 가 영영 안 난다), `|| echo "0"`(따옴표)·`GH_API_TIMEOUT_SECONDS=3600`(주 게이트는 통과하고 자기검증의 `mutate()` 예외로만 우연히 RED), `total="${poll_total}"` 를 가드 앞으로 옮김 — 전부 수정 전 테스트에서 28 passed 이거나 우연히만 RED 였다. 같은 파일이 `WAIT_ATTEMPTS`·`WAIT_POLL_SECONDS` 에 쓰던 `\bNAME\+?=` 출현 수 === 1 규칙을 새 상수에 적용하고, 리셋 위치(0건 분기의 닫는 `fi` 직후)·함수 안 `zero_polls=0` 줄 수(정확히 2)·`echo ["']?0` 정규식·`GH_API_TIMEOUT_SECONDS` < `WAIT_POLL_SECONDS`·`total` 대입이 가드보다 뒤임을 고정했다. 마지막(순서)은 문자열 상대 위치 검사라 비용이 작고 깨지면 사용 불가 값이 `total` 을 덮어쓰는 실결함이어서 고정하는 쪽으로 판단했다.
+   - **`describe_wait` 의 혼합 값.** `pending → 0건 → HTML×8` 이 "last poll: total=0 pending=1 failed=0"(어느 폴링도 돌려준 적 없는 조합)으로 나왔다. 0건 분기의 `continue` 직전에 `pending=""`·`failed=""` 로 비우고 라벨을 "last usable poll:" 로 바꿨다. 그 문자열을 고정하는 테스트·문서는 리포 전역 grep(`.github/ plugins/artibot/{tests,lib,docs,commands} .artibot/guides` 와 루트)에 없었다 — 과거 라이브 출력을 인용한 기록(아래 v4.71.4)과 이미 출시된 4.71.4 CHANGELOG 항목은 당시 문구라 그대로 둔다. 판정 3분기 의미와 0/1/2 계약은 불변.
+   - **주석 3곳 정정.** "연속"은 **사용 가능한 폴링 기준**이다(쓸 수 없는 폴링은 올리지도 리셋하지도 않는다). 타임아웃으로 묶인 것은 폴링의 `gh api` 뿐이다. 끊긴 호출은 빈 payload 이거나 숫자 가드가 거르는 부분 stdout 이다.
+5. **2차 검수 반영(2026-10-06).** 2차 Fable 검수(종합 APPROVE, 차단 0; 검수자 실측 2026-10-06 01:00~01:34 KST): 추가분 diff 5곳 확인, 1차에서 통과하던 변조 6종과 검수자 신규 4종이 모두 주 게이트에서 RED, `pending → 0건 → HTML×8` 혼합 제거 재현, red 판정을 잃는 입력열 없음, "last poll" 소비처 0건, 0/1/2 계약 불변. 남은 참고 1건(X1)을 스크래치 사본에서 재현한 뒤 고쳤다: 리셋 줄 바로 뒤에 `zero_polls="$((ZERO_POLL_LIMIT - 1))"` 를 넣어도 주 게이트가 통과했다(실효: 런이 있는 폴링 뒤 0건 1회에 rc 2). 함수 안 `zero_polls=` 대입 출현 수 === 3(초기화·증가·리셋; 현재 함수를 주석 제거 후 세어 3개임을 확인)을 단언에 더했다. **러너 `timeout`·실제 `jq`·실제 100회 상한 경로는 2차 검수에서도 해소되지 않았다.**
+
+고정하는 테스트: `tests/firewall/release-wait-window-lockstep.test.js` 의 "폴링 위생" 블록(2026-10-06 기준 파일 36 tests) — 모든 `gh api` 가 `timeout "${GH_API_TIMEOUT_SECONDS}"` 로 감싸이고 상수는 출현 1회의 양의 정수이며 폴링 간격 미만, `.total_count` 줄에 `|| echo 0` 류(따옴표 포함) 없음 + `case` 가드 + `total` 대입이 가드 뒤, `zero_polls=0` 리셋이 0건 분기의 닫는 `fi` 직후이고 함수 안 줄 수가 정확히 2, 0건 분기가 `continue` 전에 `pending`/`failed` 를 비움(변조 사본 15종으로 자기검증; 2차 검수 반영으로 함수 안 `zero_polls=` 대입 정확히 3개 단언 추가). **못 보는 것**: `timeout` 이 러너에서 실제로 끊는지(coreutils 존재·종료 코드 124·SIGTERM 에 gh 가 즉시 죽는지), 리셋·가드의 런타임 동작과 `case` 가드 뒤 분기의 시맨틱(문자열 존재·상대 위치만 본다), 다른 스텝의 `gh api`·`gh issue`, 변수 간접 참조 같은 다른 우회, 루프 자체를 자르는 파이프(`seq … | head -40`). 시뮬레이션이 보여 준 것이 런타임 동작의 전부이고 그것도 라이브가 아니다.
+
+**남은 결함·위험(미수정)**
+
+- 60% 경고는 **통보 경로가 아니라 런 주석**일 뿐이다. 누군가 런을 열어 봐야 보인다.
+- 이슈 개설 시점이 시간 초과 기준으로 10분 → 25분 늦어졌다. 대신 오경보(체크가 아직 도는데 이슈가 열림)는 줄었다.
+- 스텝 최악 소요: 위 3번의 계산(정상 지연 약 50~55분, 모든 호출이 타임아웃까지 걸리면 약 83분 + git). 직접 라이브로 재지 않았다.
+- `describe_wait` 의 "ended early without a usable check-run payload" 분기는 숫자 가드 이후 **사실상 도달 불가**로 추론된다(빈·공백·오류 payload 는 이제 가드에서 `continue` 하므로 한도 전에 red 가 아닌 채 rc 1 로 끝나는 경로를 찾지 못했다). 방어용으로 남겼고 도달 여부를 실측하지 않았다.
+- `timeout` 에 `-k` 가 없다. gh 가 SIGTERM 에 즉시 죽지 않으면 그만큼 늦게 끊긴다(미확인).
+
+**검수가 해소하지 못한 미확인(2026-10-06)**: 러너에서의 `timeout` 실동작(검수 PC 는 MSYS coreutils 8.32), 실제 `jq` 와의 동치(검수 PC 에 jq 가 없어 별도 node 재구현으로 확인), 실제 `WAIT_ATTEMPTS=100` 상한 경로(10회 사본으로만 구동), gh 가 SIGTERM 에 즉시 죽는지, 위 "ended early" 도달 불가는 추론이라는 점.
+
+**검수 후 재검증(2026-10-06)**: 관련 8 파일 158 passed(락스텝 36 · push-identity 9 · landing-serialization 16 · batch-landing 25 · sync-order 8 · workflow-branch-lockstep 34 · yaml-tools 4 · issue-lifecycle 26). 스크래치 사본 음성 대조(변조 적용을 해시로 확인한 뒤): 구멍 4종 재현은 수정 전 테스트에서 주 게이트가 통과(28 passed)했고, 수정 후에는 개별 변조 7종(구멍 4묶음의 6개 + 혼합 비우기 삭제 1개: 두 번째 대입 · 호출부 접두 · 리셋 이동 · `echo "0"` · 상수 3600 · 대입 순서 · 비우기 삭제)과 2차 검수의 1종(리셋 뒤 `zero_polls="$((ZERO_POLL_LIMIT - 1))"` 대입)이 모두 주 게이트에서 RED. 시뮬레이션(감사관 node-`jq` 하네스, `bash -e`/`-eu`, `WAIT_ATTEMPTS=10` 사본): `pending → 0건 → HTML×8` 은 수정 전 "last poll: total=0 pending=1 failed=0", 수정 후 "last usable poll: total=0 pending=? failed=?"; `0건×3 → HTML×7` 은 값은 같고 라벨만 바뀐다. 이전에 보고한 시나리오(0건 8연속 rc 2, 0건 7회 → pending → 0건 7회는 16폴링 초록, HTML 502·오류 JSON 은 timeout "usable payload 없음", 정상 초록·빨강)는 같은 결과로 재확인했다.
+
+**v4.71.4 첫 라이브 실행(2026-10-05)** — 배지 동기화 `8994caed` 의 대기 단계가 18폴링에 `total=7 pending=3 failed=1` 로 끝났고 경고에 "red check, at least one check run failed; last poll: … after 18 polls" 가 찍혔다(당시 문구이며 이후 라벨은 "last usable poll:" 로 바뀌었다). 진단 문구(R3)는 라이브로 작동했다. 원인은 `tests/security/human-gate-enforce-redos.test.js` 의 타이밍 비율 단언 1건(`expected 15.126842833928468 to be greater than 18`, Node 22, 1 failed / 26523 passed)이었고, 실패 잡을 재실행해 통과한 뒤 수동 fast-forward 로 착지했다(이슈 #123). **25분 상한 자체는 이 실행에서 가동되지 않아(폴링 18회에서 red) 여전히 라이브 미검증이다.**
 
 **검증하지 못한 것**: 이 수정은 **라이브에서 한 번도 돌지 않았다.** 배지 변경이 있는 다음 실제 릴리스에서만 증명된다(변경이 없으면 착지 스텝이 skipped 라 대기창이 가동되지 않는다). 셸 시뮬레이션의 `jq` 는 `wait_for_green` 이 쓰는 필터 3종만 흉내 내는 스텁이라 실제 `jq` 의 해석 차이는 보지 못한다. R3 의 60% 임계값과 25분 상한이 충분한지는 추세(Windows 중앙값 상승)에 달려 있다.
