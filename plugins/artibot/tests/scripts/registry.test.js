@@ -112,6 +112,25 @@ describe('buildOutputStyle', () => {
     }
   });
 
+  it('keeps the host coding instructions: exactly one `keep-coding-instructions: true` in the frontmatter of every theme', () => {
+    // Claude Code defaults keep-coding-instructions to false for custom output styles;
+    // a theme only changes how replies look, so the coding behavior must be kept.
+    expect(THEME_NAMES.length).toBeGreaterThan(0);
+    for (const name of THEME_NAMES) {
+      const md = buildOutputStyle(name);
+      const lines = md.split('\n');
+      expect(lines[0], name).toBe('---');
+      const end = lines.indexOf('---', 1);
+      expect(end, `${name}: closing ---`).toBeGreaterThan(1);
+      const front = lines.slice(1, end);
+      expect(front[0], name).toMatch(/^name: /);
+      expect(front.filter((l) => l === 'keep-coding-instructions: true'), name).toHaveLength(1);
+      // A second, conflicting key (`...: false`) would still leave one exact `true` line.
+      expect(front.filter((l) => l.startsWith('keep-coding-instructions')), name).toHaveLength(1);
+      expect(lines.slice(end + 1).join('\n'), name).not.toContain('keep-coding-instructions');
+    }
+  });
+
   it('emits frontmatter with the theme label and uses its glyphs', () => {
     const md = buildOutputStyle('neon-city');
     expect(md).toMatch(/^---\nname: NEON CITY/);

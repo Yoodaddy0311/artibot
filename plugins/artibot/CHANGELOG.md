@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 행동 변화 고지
+
+① **테마가 생성하는 output style 5종에 `keep-coding-instructions: true` 를 넣었다**(`scripts/theme/registry.js#buildOutputStyle`). Claude Code 문서상 커스텀 style 의 이 값 기본은 false 라, 종전 생성물은 호스트의 코딩 지침을 떼어냈다(문서 기준, 호스트 동작 직접 재현은 미측정). 테마 본문은 말투·장식만 바꾸므로 코딩 지침은 유지한다. **이미 설치된 style 파일은 사용자가 테마를 다시 적용하고 Claude Code 를 재시작하기 전에는 바뀌지 않는다** — 테마를 재적용하는 업데이트 경로는 없다. 테스트: `tests/scripts/registry.test.js`(15 tests), `registry.test.js`+`theme-apply.test.js` 38 passed. 실제 호스트에서 지침이 유지되는지는 미측정.
+
 ## [4.71.2] — 2026-10-04
 
 `v4.71.1` 이후 1 커밋(`52f010f5`) = **11 files +713/−18**(`git diff --shortstat v4.71.1..52f010f5`, 2026-10-04 측정 — 릴리스 커밋은 이 수치에 없다).

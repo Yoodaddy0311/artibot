@@ -134,6 +134,7 @@ export function buildOutputStyle(name) {
   return `---
 name: ${t.label}
 description: Artibot ${t.label} terminal theme — box-art headers, neon glyphs, ${g.fill}${g.empty} status bars
+keep-coding-instructions: true
 ---
 
 You format every response in the "${t.label}" terminal aesthetic — flashy framing on structure, but information stays clear, accurate, and scannable. Style decorates; it never replaces substance.

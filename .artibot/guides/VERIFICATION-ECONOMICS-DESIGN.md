@@ -67,7 +67,7 @@
 |---|---|
 | 릴리스 대기 10분 vs Windows CI 13분 (issue #121, 수동 착지로 해소) | §3.0 |
 | handoff-builder가 `failed=0`을 lint OK로 표시 | §3.2 |
-| dev-verify-gate가 범위와 무관하게 snapshot을 결정적 PASS로 수용 | §3.2 |
+| dev-verify-gate가 범위와 무관하게 snapshot을 결정적 PASS로 수용. 단 shipped config는 `devProtocol.verifyMode="advisory"`(비차단 additionalContext) | §3.2 |
 | usage-receipt 서브에이전트 파일 first-wins 과소집계 + 거짓 코드 주석 2건 | §4.1 |
 | 메모리 두 프로세스 데이터 유실 + 손상 store 덮어쓰기 + 저장 실패인데 `summarized:true` | §4.2 |
 | 토큰 UI 오표기 + 거짓 문서 2건 | §4.3 |
@@ -272,7 +272,21 @@ completion: { reason, unhandledErrorCount, unfinishedCount }
 
 범위는 파일 개수가 아니라 실행 옵션과 Vitest 실행 문맥으로 판단한다. **정정(감사팀 실측, 설치된 Vitest 4.0.18, 2026-10-05):** `onInit(vitest)`는 존재하나 그 시점에 CLI 경로 필터는 **얻을 수 없다**(`config.filters`는 선언만 되고 채워지지 않으며, `vitest.filenamePattern`은 onInit 이후에 할당되고 공개 타입에 없음). 수집된 파일은 `onTestRunStart(specifications)`에서 얻는다. 경로 필터는 `unknown`으로 분류하고, config에서 읽을 수 있는 것은 testNamePattern·related·changed·project·shard다. Vitest API에서 의미가 확실하지 않은 값은 추측하지 않는다. `onTestRunEnd(testModules, unhandledErrors, reason)`가 존재하고 reason ∈ passed|interrupted|failed이지만 **reason은 unhandledErrors를 반영하지 않는다 → 둘 다 기록한다.** todo/pending/정체불명 상태를 passed에 포함하지 않는다.
 
-**라이브 재현(스크래치 마이크로 스위트, ASCII 경로, 감사팀 2026-10-05):** (1) `beforeAll`이 throw → vitest exit 1, snapshot은 `failed:0, failedFiles:[]`(테스트 3개가 mode run / state skipped로 집계). (2) unhandled rejection → exit 1, reason `passed`, unhandled 1, snapshot passed:1 failed:0.
+**라이브 재현(스크래치 마이크로 스위트, ASCII 경로, 감사팀 2026-10-05 — 재측정, 본 문서 작성자가 재현하지 않은 감사팀 측정치):** 아래는 vitest 4.0.18 + 실제 reporter 사본으로 만든 격리 마이크로 스위트 결과이며, `beforeAll` throw는 **배치 위치에 따라 갈린다**(초판의 "beforeAll throw → failed:0"은 `describe` 안쪽 배치에만 해당하므로 정정).
+
+| 케이스 | vitest exit | snapshot | 판정 |
+|---|---|---|---|
+| `describe` 안쪽 `beforeAll` throw | 1 | total 3 / passed 0 / failed 0 / skipped 3 | 합성 exitCode 0 → PASS (불일치) |
+| 파일 최상위 `beforeAll` throw | 1 | failed 1 | FAIL (불일치 없음) |
+| unhandled rejection | 1 | passed 1 / failed 0 | PASS (불일치) |
+| 타이머 uncaught exception | 1 | (감사 보고에 snapshot 수치 없음) | PASS (불일치) |
+| `afterAll` throw | 1 | (감사 보고에 snapshot 수치 없음) | PASS (불일치) |
+| 수집 오류만 있는 실행 | 1 | total 0 / failed 1 | UNMEASURED (FAIL 아님) |
+| 수집 오류 + 통과 파일 동시 | 1 | total 1 / passed 1 / failed 1 | FAIL (불일치 없음) |
+| 실패한 테스트 | 1 | failed ≥ 1 | FAIL |
+| 선언된 skip+todo만 | 0 | — | PASS (불일치 없음) |
+
+exit 1이었던 8케이스 중 PASS 4 · UNMEASURED 1 · FAIL 3. **손으로 만든 케이스에서의 도달 비율이지 실제 세션의 발생률이 아니다.**
 
 **현재 구현 사실(감사 보고 기준, 재열람 안 함):** 현 reporter는 8개 키(timestamp, durationMs, modules, totalTests, passed, failed, skipped, failedFiles)를 mkdirSync+writeFileSync로 쓴다(**원자적 아님**). 원자 유틸 `lib/core/file.js#atomicWriteJsonSync`는 있으나 `tests/reporters/test-status-reporter.test.js`가 reporter 파일 하나만 임시 root에 복사하므로 reporter에서 `../../lib/...`를 import하면 그 하네스가 깨진다 → inline tmp+rename / 주입 writer / 하네스 변경 중 선택. 같은 테스트가 **정확히 8개 키**를 고정한다(필드를 추가하면 RED). `tests/verification/deterministic-source.test.js`는 REASONS 길이 6 + 해시 인라인 스냅샷 7개 + 정확한 evidence-note 문자열을 고정한다.
 
@@ -290,6 +304,8 @@ completion: { reason, unhandledErrorCount, unfinishedCount }
 4. 실행 전후 dirty이거나 SHA가 달라졌다면 현재 변경 전체의 통과 증거로 재사용하지 않는다. 시작·끝 clean도 실행 중 변동이 없었다는 완전한 증명은 아니므로 **이 v2만으로 테스트를 자동 생략하지 않는다.**
 5. snapshot 쓰기는 기존 원자적 파일 저장 유틸을 사용한다. 실패 시 테스트 결과를 바꾸지는 않지만, 오래된 snapshot의 날짜/runId를 현재 실행처럼 표시하지 않는다.
 6. `deterministic-source.js`의 현재 `failed===0 → exitCode:0` 처리를 그대로 두지 않는다. v2의 중단·미처리 예외·실행 미완료는 failed=0이어도 PASS로 변환하지 않는다. 확인된 테스트 실패/미처리 실행 오류는 실패로, 중단·범위/완료 미확인은 기존 UNMEASURED 표현(합성 exitCode 생략)으로 전달한다. 전체 성공이 필요한 판단에 targeted·unknown·v1을 전체 PASS 증거로 공급하지 않는다. 관련 사유와 범위는 결과 표시에도 남긴다.
+
+**dev-verify-gate 모드(본 문서 작성 시 직접 열람, 2026-10-05):** shipped `plugins/artibot/artibot.config.json#devProtocol.verifyMode`는 `"advisory"`다. `scripts/hooks/dev-verify-gate.js#loadVerifyMode`가 `resolveConfigPath('artibot.config.json')`로 읽은 config를 `lib/core/dev-verify-output.js#resolveDevVerifyMode`에 넘기며(환경변수 `ARTIBOT_DEV_VERIFY_MODE` 우선, 읽기 실패 시 기본값 `enforce`), advisory에서는 `decision:"block"` 대신 `{suppressOutput:true, hookSpecificOutput:{hookEventName, additionalContext}}`를 낸다. 즉 이 게이트의 snapshot PASS 수용 결함은 shipped 설정에서는 **차단이 아니라 비차단 안내**에 영향을 준다. 미확인: 특정 머신에서 hook이 실제로 어느 config 사본을 읽는지(플러그인 캐시/설치본/repo)와 그 사본의 값. 추론(실행 안 함): `getChangedFiles`는 `git diff --name-only -z HEAD`와 `--cached`만 보므로 untracked 파일만 새로 만든 턴은 변경 파일 0건으로 잡힌다.
 
 **변경 목록에 추가할 하드 증거(감사 보고 기준, 재열람 안 함):** `lib/handoff/handoff-builder.js#renderStateTable`(~:653-656)이 `lintCell = summary.failed === 0 ? 'OK' : '(check)'`로 테스트 failed=0을 lint OK로 표시한다(위 소비 규칙 3의 라이브 사례). `scripts/hooks/dev-verify-gate.js#recordVerifyDenominator`는 snapshot을 범위와 무관하게 결정적 PASS로 수용한다. snapshot의 런타임 소비처: `session-start.js#appendTestStatus`(failed>0일 때만 경고), handoff-builder, dev-verify-gate, `commands/save.md`. 소비처가 **아닌** 것: statusline, doctor, tdd-workflow SKILL(`!` 줄이 npm test를 새로 실행), /verify.
 
