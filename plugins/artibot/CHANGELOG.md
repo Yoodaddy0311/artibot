@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.71.5] — 2026-10-06
 
-`v4.71.4` 이후 6 커밋(`8994caed`·`a31bcbbd`·`e59d41b5`·`3f1281e7`·`0576a1c7`·`75c33524`) = **23 files +476/−34**(`git diff --shortstat v4.71.4..75c33524`, 2026-10-06 측정 — 릴리스 커밋은 이 수치에 없다). 릴리스 전 로컬 전체 스위트는 돌리지 못했다 — 실행이 시작 직후 메모리 부족으로 중단됐고(여유 1.6GB / 15.3GB) 다시 띄우지 않았다. 로컬 실측은 변경 영역 10 파일 201 passed(`--maxWorkers=2`), 플러그인 전체 `eslint . --max-warnings=0`, `validate` · `validate:readme:claims` · `docs:check` 통과이며, 전체 스위트의 판정은 `ci/release-v4.71.5` 의 CI 4개 레그다. 이 릴리스의 배지 동기화가 아래 대기 루프 수정의 첫 라이브 실행이다 — 결과는 이 항목 작성 시점에 알 수 없다.
+`v4.71.4` 이후 6 커밋(`8994caed`·`a31bcbbd`·`e59d41b5`·`3f1281e7`·`0576a1c7`·`75c33524`) = **23 files +476/−34**(`git diff --shortstat v4.71.4..75c33524`, 2026-10-06 측정 — 릴리스 커밋은 이 수치에 없다). 릴리스 전 로컬 전체 스위트는 돌리지 못했다 — 실행이 시작 직후 메모리 부족으로 중단됐고(여유 1.6GB / 15.3GB) 다시 띄우지 않았다. 로컬 실측은 변경 영역 10 파일 201 passed(`--maxWorkers=2`), 플러그인 전체 `eslint . --max-warnings=0`, `validate` · `validate:readme:claims` · `docs:check` 통과이며, 전체 스위트의 판정은 `ci/release-v4.71.5` 의 CI 4개 레그다. 그 CI 가 첫 푸시(`75caaf0f`)에서 실제로 1건을 잡았다 — `tests/firewall/no-control-bytes.test.js` 가 `tests/firewall/release-wait-window-lockstep.test.js` 주석의 리터럴 백스페이스 1바이트(`\b` 를 쓰려던 자리, 256행)로 4개 레그 모두 실패했고(Node 22: 1 failed / 26548 passed / 47 skipped), 릴리스 커밋 뒤 1 커밋으로 그 바이트를 두 글자 `\b` 로 바꿨다(위 수치에 없다). 이 릴리스의 배지 동기화가 아래 대기 루프 수정의 첫 라이브 실행이다 — 결과는 이 항목 작성 시점에 알 수 없다.
 
 ### 릴리스 배지 착지 대기 루프 보강: 연속 0건 · 비JSON 응답 · gh 타임아웃 (라이브 미검증)
 

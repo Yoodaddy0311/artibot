@@ -253,7 +253,7 @@ describe('release.yml 대기창 ↔ batch-landing.js 락스텝', () => {
  *      `.total_count` 줄에 `|| echo 0` 류(따옴표 친 0 포함)가 없고, `case "${poll_total}"` 숫자 가드가
  *      있고, `total="${poll_total}"` 대입이 정확히 1개이며 가드보다 **뒤**다(앞이면 사용 불가 값이 total 을 덮어쓴다).
  *   3. `zero_polls=0` 리셋은 실행 셸에서 total==0 분기의 닫는 fi **직후**에 있다(분기 안이면 rc 2 가 영영
- *      안 난다) + 함수 안 `zero_polls=0` 줄이 정확히 2개(시작 + 리셋) + 함수 안 `zero_polls=` 대입이
+ *      안 난다) + 함수 안 `zero_polls=0` 줄이 정확히 2개(시작 + 리셋) + 함수 안 `\bzero_polls=` 대입이
  *      정확히 3개(초기화·증가·리셋; 리셋 뒤에 `zero_polls="$((ZERO_POLL_LIMIT - 1))"` 같은 값을
  *      넣어 "런이 있는 폴링 뒤 0건 1회에 rc 2" 로 만드는 변조를 막는다). 0건 분기는 `continue` 직전에
  *      `pending=""` `failed=""` 로 앞선 폴링의 값을 비운다(describe_wait 가 두 폴링의 혼합을 보이지 않게).
