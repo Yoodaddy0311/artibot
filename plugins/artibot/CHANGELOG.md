@@ -11,9 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.3] — 2026-10-05
+
+`v4.71.2` 이후 3 커밋(`5a3bb327`·`77294ddc`·`0d33f68a`) = **10 files +955/−5**(`git diff --shortstat v4.71.2..0d33f68a`, 2026-10-05 측정 — 릴리스 커밋은 이 수치에 없다). 그중 +926 은 문서 3개이고, 코드 변경은 생성기 1줄과 테스트 19줄이다.
+
 ### 행동 변화 고지
 
 ① **테마가 생성하는 output style 5종에 `keep-coding-instructions: true` 를 넣었다**(`scripts/theme/registry.js#buildOutputStyle`). Claude Code 문서상 커스텀 style 의 이 값 기본은 false 라, 종전 생성물은 호스트의 코딩 지침을 떼어냈다(문서 기준, 호스트 동작 직접 재현은 미측정). 테마 본문은 말투·장식만 바꾸므로 코딩 지침은 유지한다. **이미 설치된 style 파일은 사용자가 테마를 다시 적용하고 Claude Code 를 재시작하기 전에는 바뀌지 않는다** — 테마를 재적용하는 업데이트 경로는 없다. 테스트: `tests/scripts/registry.test.js`(15 tests), `registry.test.js`+`theme-apply.test.js` 38 passed. 실제 호스트에서 지침이 유지되는지는 미측정.
+
+### 문서 (동작 변화 없음)
+
+- `.artibot/guides/VERIFICATION-ECONOMICS-DESIGN.md` — 검증 경제성 제안서. 제안마다 NECESSARY/DEFER/REJECT 판정을 달았고 오너 결정 6건은 권고 없이 나열했다. 구현은 하지 않았다.
+- `.artibot/guides/RELEASE-WAIT-WINDOW-DESIGN.md` — v4.71.2 배지 착지(#121)가 시간 초과한 원인(대기 10분 대 Windows 잡 약 13분)과 상한 조정 설계. 구현은 하지 않았으므로 **이번 릴리스의 배지 착지도 같은 한도에 걸릴 수 있다.**
+- `.artibot/REPORTS/plugin-economics-audit-2026-10-04.md` — 위 두 설계가 인용하는 감사 보고서.
+
+### 검증
+
+- `npx vitest run tests/scripts/registry.test.js tests/scripts/theme-apply.test.js` → 2 files, 38 passed(2026-10-05 09:17 KST). 수정 전 생성기에서는 새 테스트가 실패했다(1 failed / 14 passed).
+- 격리 사본 변조(매회 적용을 해시로 확인): 플래그 줄 삭제, `"true"` 인용, `false`, `name:` 앞으로 이동, 줄 중복, 본문에만 배치, 상충하는 두 번째 키 추가 — 전부 테스트 실패.
+- 생성기 주변 테스트 31파일 863 passed / 3 skipped, `eslint --max-warnings=0`, `validate`, `docs:check`(620 files, 0 broken), `validate:readme:claims` 통과.
+- 미측정: 호스트가 이 플래그로 코딩 지침을 실제로 유지하는지, 반영 조건이 재시작인지 새 세션인지. 전체 스위트는 이 항목 작성 시점에 로컬에서 한 번에 돌리지 않았다.
+- 손대지 않음: `scripts/theme-apply.js`, 사용자 머신에 이미 설치된 style 파일, 플러그인 `output-styles/` 의 정적 style 8개(같은 플래그가 없다 — 별도 과제).
 
 ## [4.71.2] — 2026-10-04
 
