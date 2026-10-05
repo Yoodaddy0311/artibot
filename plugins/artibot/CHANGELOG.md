@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.4] — 2026-10-05
+
+`v4.71.3` 이후 3 커밋(`b1a855e3`·`8ed9795b`·`41f6bb4e`) = **15 files +444/−66**(`git diff --shortstat v4.71.3..41f6bb4e`, 2026-10-05 측정 — 릴리스 커밋은 이 수치에 없다). 이 릴리스의 배지 동기화가 25분 대기창의 첫 라이브 실행이다 — 결과는 이 항목 작성 시점에 알 수 없다.
+
 ### 릴리스 배지 착지 대기창 25분 + 시간 초과/빨간 체크 구분 (라이브 미검증)
 
 - **`release.yml` 의 `wait_for_green` 한도를 40×15초(10분) → `WAIT_ATTEMPTS=100` × `WAIT_POLL_SECONDS=15` = 25분으로 올렸다.** 근거: Windows CI 잡(비필수 레그지만 대기 대상에 포함)이 첫 시도 push 런 45건(2026-09-29~10-04) 기준 최소 7.78 · 중앙 11.28 · p90 13.30 · 최대 13.63분(`gh api …/actions/runs/<id>/jobs` 의 started→completed, 2026-10-05 측정)이라 10분 한도가 중앙값보다 짧았다. 규칙은 두 구현이 이미 쓰던 "가장 느린 첫 시도의 약 1.8배"(13.63 × 1.8 ≈ 24.5 → 25분). v4.71.2·v4.71.3 릴리스가 모두 10분 한도에서 `total=7 pending=1 failed=0` 으로 시간 초과해 수동 착지됐다(#121, #122).
