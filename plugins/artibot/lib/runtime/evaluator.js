@@ -405,10 +405,17 @@ export async function evaluateRuntimeSuite(scenarios = DEFAULT_RUNTIME_EVAL_SCEN
   let results;
   if (parallel) {
     const tasks = scenarios.map((scenario) => evaluateRuntimeScenario(scenario));
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Suite timeout after ${suiteTimeout}ms`)), suiteTimeout),
-    );
-    results = await Promise.race([Promise.all(tasks), timeoutPromise]);
+    // The guard must be cleared once the race settles: a pending 120 s timer keeps
+    // the process alive, so the runner exited ~120 s after the suite had finished.
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error(`Suite timeout after ${suiteTimeout}ms`)), suiteTimeout);
+    });
+    try {
+      results = await Promise.race([Promise.all(tasks), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   } else {
     results = [];
     for (const scenario of scenarios) {
