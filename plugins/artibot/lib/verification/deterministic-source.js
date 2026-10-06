@@ -5,9 +5,9 @@
  * Stop that followed a main-agent edit and records the DENOMINATOR of the
  * verification measurement — four `verify.completed` lines, all `unmeasured`.
  * A denominator with no numerator answers nothing, so this module supplies the
- * only numerator the repo can produce today without lying: the exit status of
- * the last `npm test`, as written by
- * `tests/reporters/test-status-reporter.js` (:38-39, :99-108).
+ * only numerator the repo can produce today without lying: the outcome of the
+ * last `npm test`, as written by
+ * `tests/reporters/test-status-reporter.js` (:51-52, :125-140).
  *
  * WHY NOT THE OTHER LAYERS. lint, tsc and build leave no exit code anywhere a
  * hook can read (the PostToolUse Bash hooks read `tool_response.exit_code` and
@@ -21,6 +21,40 @@
  * whether to fire at all). Anything older described a tree that no longer
  * exists. There is deliberately NO time-to-live: a 24-hour window would let a
  * stale green survive an edit, which is exactly the failure F1 rejects.
+ *
+ * ── THE COMPLETION RULE (records that carry `completion`, "v2") ─────────────
+ * `failed === 0` says no TEST failed. It does not say the RUN ended well: an
+ * unobserved promise rejection, an exception thrown from a timer, a hook that
+ * throws inside a `describe`, a worker killed mid-file and a run stopped by
+ * `--bail` all leave `failed: 0` while vitest itself exits 1 (measured on vitest
+ * 4.0.18, 2026-10-06; VERIFICATION-ECONOMICS-DESIGN §3.2). So the reporter also
+ * writes `schemaVersion: 2` and `completion: { reason, unhandledErrorCount,
+ * unfinishedCount }`, and a record that carries them is judged in this order —
+ * the first rule that applies wins, and a CERTAIN failure outranks every
+ * "cannot tell" below it:
+ *
+ *   1. failed > 0                   -> exitCode 1
+ *   2. unhandledErrorCount > 0      -> exitCode 1
+ *   3. reason 'failed'              -> exitCode 1  (vitest itself judged the run failed)
+ *   4. reason 'interrupted'         -> UNMEASURED
+ *   5. unfinishedCount > 0          -> UNMEASURED
+ *   6. reason 'passed' AND 0 unhandled AND 0 unfinished -> exitCode 0, the ONLY pass
+ *   7. anything else (a field missing, null, mistyped, outside the vocabulary,
+ *      or a reason vitest adds later)                   -> UNMEASURED
+ *
+ * The pass is an ALLOWLIST (6), so nothing reaches exitCode 0 by being left out
+ * of a list of failures. A record WITHOUT `completion` (the reporter as it was
+ * before 2026-10-06) is read exactly as it always was, `failed === 0`: its gap
+ * was scope — a targeted run — which this module cannot see either, and it stays
+ * readable. A record is v2 when it has a `completion` key or a `schemaVersion`
+ * that is not a number below 2; a version that is present but is not a number is
+ * not a record this module can vouch for, so it fails closed rather than reading
+ * as v1.
+ *
+ * The ledger drops `reason`, so the verdicts that carry an exitCode append
+ * `completion=… unhandled=… unfinished=…` to the evidence note; the three new
+ * UNMEASURED outcomes keep the reason-only shape and are told apart by their
+ * hash (`REASONS.interrupted`, `.unfinished`, `.completionUnreadable`).
  *
  * ── THE TWO LOCATIONS, AND WHY THEY DIFFER (owner decision R1) ──────────────
  * The result file is read under the REPO root, not the plugin root. The
@@ -76,6 +110,8 @@ const FUTURE_SKEW_TOLERANCE_MS = 60_000;
  * stores `layer`, `result`, `evidence` and `verification_id`, never `reason`.
  * Editing one of these silently re-keys the live histogram, so
  * `tests/verification/deterministic-source.test.js` pins the resulting hashes.
+ * The last three arrived with the `completion` record; the first six are
+ * byte-identical to what shipped before it.
  */
 export const REASONS = Object.freeze({
   absent: `no vitest result at ${RESULT_FILE_RELPATH} — nothing was run in this repo copy`,
@@ -84,11 +120,98 @@ export const REASONS = Object.freeze({
   noMarker: 'no last-main-agent-edit marker — there is nothing for a run to be fresher than',
   stale: 'the vitest result predates the last main-agent edit — that run did not cover this tree',
   emptyRun: '0 tests ran — an empty run does not measure the tree, whatever its exit status',
+  interrupted: 'vitest reported the run as interrupted — a stopped run does not measure the tree, '
+    + 'whatever its failure count',
+  unfinished: 'some tests never reached a final state — a run that did not finish does not '
+    + 'measure the tree, whatever its failure count',
+  completionUnreadable: 'the vitest result file carries no usable completion record — whether the '
+    + 'run ended cleanly is not decidable',
 });
+
+/**
+ * The values vitest 4 documents for `onTestRunEnd`'s third argument, which the
+ * reporter writes verbatim as `completion.reason`. The reporter cannot import
+ * this module and this module cannot import the reporter (the reporter's test
+ * copies that single file out of the tree), so the vocabulary exists on both
+ * sides; the writer-to-reader round trip in
+ * `tests/reporters/test-status-reporter.test.js` is what keeps them in step.
+ */
+const COMPLETION_REASONS = Object.freeze(['passed', 'interrupted', 'failed']);
 
 /** @param {unknown} v @returns {boolean} */
 function isCount(v) {
   return Number.isInteger(v) && Number(v) >= 0;
+}
+
+/**
+ * Does this snapshot carry — or claim to carry — a completion record?
+ *
+ * v1 is the one shape the reporter wrote before `completion`: no `completion`
+ * key, and either no `schemaVersion` or a number below 2. Everything else is v2,
+ * including a version that is present but not a number.
+ *
+ * @param {Record<string, any>} r
+ * @returns {boolean}
+ */
+function isV2Record(r) {
+  if (Object.hasOwn(r, 'completion')) return true;
+  if (!Object.hasOwn(r, 'schemaVersion')) return false;
+  const version = r.schemaVersion;
+  return !(typeof version === 'number' && version < 2);
+}
+
+/**
+ * Read `completion` one field at a time. A field that is not usable becomes
+ * `null` — "unknown" — and never a default that would read as a clean run.
+ *
+ * @param {Record<string, any>} r
+ * @returns {{ reason: string|null, unhandledErrorCount: number|null, unfinishedCount: number|null }}
+ */
+function readCompletion(r) {
+  const c = r.completion && typeof r.completion === 'object' && !Array.isArray(r.completion)
+    ? r.completion
+    : {};
+  return {
+    reason: COMPLETION_REASONS.includes(c.reason) ? c.reason : null,
+    unhandledErrorCount: isCount(c.unhandledErrorCount) ? c.unhandledErrorCount : null,
+    unfinishedCount: isCount(c.unfinishedCount) ? c.unfinishedCount : null,
+  };
+}
+
+/**
+ * The v2 verdict; the rule order is the one in the module header.
+ *
+ * @param {number} failed
+ * @param {ReturnType<typeof readCompletion>} c
+ * @returns {{ exitCode: 0|1, clause: string }|{ unmeasured: string }}
+ */
+function completionVerdict(failed, c) {
+  if (failed > 0) return { exitCode: 1, clause: '' };
+  if (c.unhandledErrorCount !== null && c.unhandledErrorCount > 0) {
+    return { exitCode: 1, clause: `; ${c.unhandledErrorCount} unhandled error(s) outside the tests` };
+  }
+  if (c.reason === 'failed') return { exitCode: 1, clause: '; vitest itself ended the run as failed' };
+  if (c.reason === 'interrupted') return { unmeasured: REASONS.interrupted };
+  if (c.unfinishedCount !== null && c.unfinishedCount > 0) return { unmeasured: REASONS.unfinished };
+  // The ONLY way to a v2 pass, written as an allowlist: a reason vitest adds
+  // later, or a field this module cannot read, lands in UNMEASURED below instead
+  // of being waved through by omission.
+  if (c.reason === 'passed' && c.unhandledErrorCount === 0 && c.unfinishedCount === 0) {
+    return { exitCode: 0, clause: '; the run ended cleanly (no unhandled errors, no unfinished tests)' };
+  }
+  return { unmeasured: REASONS.completionUnreadable };
+}
+
+/**
+ * The completion facts as one deterministic evidence-note clause. An unusable
+ * field is spelled `unknown`; its raw value is never copied into the ledger.
+ *
+ * @param {ReturnType<typeof readCompletion>} c
+ * @returns {string}
+ */
+function completionNoteClause(c) {
+  return ` completion=${c.reason ?? 'unknown'} unhandled=${c.unhandledErrorCount ?? 'unknown'} `
+    + `unfinished=${c.unfinishedCount ?? 'unknown'}`;
 }
 
 /**
@@ -149,6 +272,12 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
   // deterministic `pass`, `v1-a69aa375bbc0-…`). The COUNT is the only field
   // that separates the two cases, so the count is what this checks. A run whose
   // tests were all SKIPPED still collected them and is left alone.
+  //
+  // `failed === 0` is ALSO true of a run that ended badly without failing a test
+  // (an unhandled error, a hook that threw inside a `describe`, a killed worker,
+  // an interrupted run). That second fail-open is closed at the verdict below,
+  // for records that carry `completion`; the guards in between are untouched and
+  // still run first, in this order.
   if (result.totalTests === 0) return { reason: REASONS.emptyRun };
 
   const timestamp = result.timestamp;
@@ -179,23 +308,41 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
   // would read as a run that collected no files, which is a different claim
   // from "the run did not record this".
   const modulesClause = isCount(result.modules) ? ` modules=${result.modules}` : '';
+
+  // v1 keeps `failed === 0` and appends nothing, so its reason, note and id stay
+  // byte-identical. A v2 record is judged on how the run ENDED as well; the
+  // three UNMEASURED outcomes leave here with the reason-only shape.
+  let exitCode = failed === 0 ? 0 : 1;
+  let reasonClause = '';
+  let noteClause = '';
+  if (isV2Record(result)) {
+    const completion = readCompletion(result);
+    const verdict = completionVerdict(failed, completion);
+    if ('unmeasured' in verdict) return { reason: verdict.unmeasured };
+    exitCode = verdict.exitCode;
+    reasonClause = verdict.clause;
+    noteClause = completionNoteClause(completion);
+  }
+
   return {
-    exitCode: failed === 0 ? 0 : 1,
+    exitCode,
     reason: `vitest result fresh — ${totalTests} tests, ${passed} passed, ${failed} failed, `
-      + `${skipped} skipped (measured ${timestamp}, at or after the last main-agent edit)`,
+      + `${skipped} skipped (measured ${timestamp}, at or after the last main-agent edit)${reasonClause}`,
     // The counts ride in `note` because the ledger drops `reason`. A reader
     // that wants to know whether this was the whole suite or a targeted run
     // has these numbers and nothing else — say them plainly. `modules` (the
     // number of test FILES) narrows that question without answering it: a
     // filter matching every file counts the same as no filter, and the vitest
     // reporter API exposes no filter, so no "was targeted" flag is written.
+    // The completion clause (v2 only) rides here for the same reason: it is the
+    // only place a later reader can see how the run ended.
     evidence: [{
       kind: 'file',
       file: RESULT_FILE_RELPATH,
       line: 1,
       measured_at: timestamp,
       note: `vitest total=${totalTests} passed=${passed} failed=${failed} `
-        + `skipped=${skipped}${modulesClause}`,
+        + `skipped=${skipped}${modulesClause}${noteClause}`,
     }],
   };
 }

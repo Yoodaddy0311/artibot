@@ -11,7 +11,9 @@
  *     "failed": 20,
  *     "skipped": 0,
  *     "failedFiles": ["tests/cron/auto-cleanup-runner.test.js", ...],
- *     "durationMs": 18045
+ *     "durationMs": 18045,
+ *     "schemaVersion": 2,
+ *     "completion": { "reason": "passed", "unhandledErrorCount": 0, "unfinishedCount": 0 }
  *   }
  *
  * Only failing test FILES are recorded — not individual test names — to keep
@@ -25,6 +27,17 @@
  * every file counts the same as no filter at all. The reporter API exposes no
  * filter, so the honest field is the count, not a "was targeted" boolean.
  *
+ * `schemaVersion` and `completion` say how the RUN ended, which the four test
+ * counts cannot: an unobserved rejection, a timer that throws, a hook that
+ * throws inside a `describe`, a killed worker and an interrupted run all leave
+ * `failed: 0` while vitest itself exits 1 (VERIFICATION-ECONOMICS-DESIGN §3.2).
+ * `reason` is vitest's own verdict, `unhandledErrorCount` its count of errors
+ * raised outside any test, `unfinishedCount` the tests that reached no final
+ * state. The first two are independent: an unobserved rejection ends with
+ * reason 'passed' AND one unhandled error. UNKNOWN IS `null` — a caller that
+ * hands over only the modules has told us nothing about the end of the run, and
+ * writing 0 or 'passed' there would be a measurement nobody made.
+ *
  * Vitest 4 reporter API: onInit + onTestRunStart + onTestRunEnd.
  *
  * @module tests/reporters/test-status-reporter
@@ -37,6 +50,12 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const PLUGIN_ROOT = path.resolve(path.dirname(__filename), '..', '..');
 const OUTPUT_PATH = path.join(PLUGIN_ROOT, 'runtime', 'last-test-result.json');
+
+/** Bumped when a key is ADDED. 1 is the shape before `completion`, which never wrote a version. */
+const SCHEMA_VERSION = 2;
+
+/** The values vitest 4 documents for `onTestRunEnd`'s third argument. Anything else is unknown. */
+const RUN_END_REASONS = Object.freeze(['passed', 'interrupted', 'failed']);
 
 /**
  * Convert an absolute module path to a forward-slash plugin-relative label
@@ -67,13 +86,16 @@ export default class TestStatusReporter {
    * Vitest 4 hook — called once after the entire run finishes.
    *
    * @param {ReadonlyArray<{ moduleId: string, errors: () => any[], children: { allTests: (state?: string) => Iterable<{ result: () => { state: string } }> } }>} testModules
+   * @param {ReadonlyArray<unknown>} [unhandledErrors] Errors raised outside any test.
+   * @param {'passed'|'interrupted'|'failed'} [reason] Vitest's own verdict on the run.
    */
-  onTestRunEnd(testModules = []) {
+  onTestRunEnd(testModules = [], unhandledErrors, reason) {
     try {
       let totalTests = 0;
       let passed = 0;
       let failed = 0;
       let skipped = 0;
+      let unfinished = 0;
       const failedFiles = new Set();
 
       for (const mod of testModules) {
@@ -93,6 +115,10 @@ export default class TestStatusReporter {
             failed += 1;
             if (label) failedFiles.add(label);
           } else if (state === 'skipped') skipped += 1;
+          // Keyed on the STATE, never on `options.mode`: `ctx.skip()` ends as
+          // state 'skipped' under mode 'run' and is a final state, so counting by
+          // mode would call a clean run unfinished on whichever host skips.
+          else unfinished += 1;
         }
       }
 
@@ -105,6 +131,12 @@ export default class TestStatusReporter {
         failed,
         skipped,
         failedFiles: Array.from(failedFiles).sort(),
+        schemaVersion: SCHEMA_VERSION,
+        completion: {
+          reason: RUN_END_REASONS.includes(reason) ? reason : null,
+          unhandledErrorCount: Array.isArray(unhandledErrors) ? unhandledErrors.length : null,
+          unfinishedCount: unfinished,
+        },
       };
       mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
       writeFileSync(OUTPUT_PATH, JSON.stringify(payload, null, 2) + '\n', 'utf-8');

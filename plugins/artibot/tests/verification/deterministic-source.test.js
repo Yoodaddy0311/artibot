@@ -24,13 +24,21 @@ import { verify } from '../../lib/verification/unified-verifier.js';
  * Every other outcome is UNMEASURED — which this module expresses by omitting
  * `exitCode`, because `unified-verifier.js#normalizeDeterministic` (:323-325)
  * treats a missing numeric exit code as "nothing was run".
+ *
+ * The completion record (`schemaVersion: 2` / `completion`) is pinned in the
+ * sibling `deterministic-source-completion.test.js`: the v1 byte-identity guard,
+ * the v2 rule order, precedence, which records are v2, guard order and the table
+ * of real vitest runs. The hash table and the REASONS count below still cover
+ * every reason, including the three that record added.
  */
 
 const MARKER_MS = Date.parse('2026-09-15T00:00:00.000Z');
 const NOW_MS = Date.parse('2026-09-15T01:00:00.000Z');
 
 /**
- * A reporter payload shaped like `tests/reporters/test-status-reporter.js:99-108`.
+ * A reporter payload without `completion` (v1): the eight keys of
+ * `tests/reporters/test-status-reporter.js:126-133`. A v2 case adds `schemaVersion`
+ * and `completion` (:134-139) through `over`.
  *
  * @param {object} [over]
  * @returns {string}
@@ -245,10 +253,13 @@ describe('deterministic-source — every unmeasured branch', () => {
     expect(layer.exitCode, 'the guard is about an EMPTY run, not an idle one').toBe(0);
   });
 
+  // Nine: the six that existed before `completion`, then interrupted, unfinished
+  // and completionUnreadable. The pin is a count on purpose — adding a tenth is a
+  // decision someone has to make here, with its hash pinned below.
   it('gives every branch a distinct reason, so the id hash can tell them apart', () => {
     const reasons = Object.values(REASONS);
     expect(new Set(reasons).size).toBe(reasons.length);
-    expect(reasons).toHaveLength(6);
+    expect(reasons).toHaveLength(9);
   });
 
   it('keeps the clock out of the decision when nowMs is unusable (no TTL, owner decision F1)', () => {
@@ -283,25 +294,37 @@ describe('deterministic-source — reason to verification_id hash', () => {
   }
 
   it('pins one hash prefix per unmeasured reason', () => {
-    expect({
+    const table = {
       absent: hashFor(REASONS.absent),
       corrupt: hashFor(REASONS.corrupt),
       badTimestamp: hashFor(REASONS.badTimestamp),
       noMarker: hashFor(REASONS.noMarker),
       stale: hashFor(REASONS.stale),
       emptyRun: hashFor(REASONS.emptyRun),
+      // The three the completion record added. The six above are unchanged.
+      interrupted: hashFor(REASONS.interrupted),
+      unfinished: hashFor(REASONS.unfinished),
+      completionUnreadable: hashFor(REASONS.completionUnreadable),
       // The shape this gate wrote before a source existed. Live ledger lines
       // carrying it are pre-numerator fires, not a new unmeasured branch.
       legacyNoLayerSupplied: hashFor(undefined),
-    }).toMatchInlineSnapshot(`
+    };
+
+    // A mistyped REASONS key reads as `undefined` and hashes like the legacy
+    // shape; distinct values are what make that visible instead of pinned.
+    expect(new Set(Object.values(table)).size, 'every pinned hash is different').toBe(Object.keys(table).length);
+    expect(table).toMatchInlineSnapshot(`
       {
         "absent": "cd83b9f6c3a6",
         "badTimestamp": "8193e683f558",
+        "completionUnreadable": "9ecb52e0ca27",
         "corrupt": "ecfca95e038e",
         "emptyRun": "a6a1361a1360",
+        "interrupted": "d54fa73267aa",
         "legacyNoLayerSupplied": "83866286c2d8",
         "noMarker": "aff638bdfb2b",
         "stale": "f51a647bdd7d",
+        "unfinished": "a3401f394b91",
       }
     `);
   });
