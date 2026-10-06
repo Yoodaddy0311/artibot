@@ -185,6 +185,35 @@ describe('workflow-status', () => {
     expect(written.events.at(-1).message).toBe('Agent updated');
   });
 
+  it('records a SubagentStop firing as inactive even though the payload has no active key', async () => {
+    process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+    setStdin({ hook_event_name: 'SubagentStop', agent_id: 'a1', agent_type: 'tdd-guide' });
+
+    await runHookFresh();
+
+    const written = mockState.writes[0].data;
+    expect(written.agents.a1.active).toBe(false);
+    expect(written.events.at(-1).message).toBe('Agent stopped');
+  });
+
+  it('does not flip a row the stop handler already closed back to active', async () => {
+    // The SubagentStop dispatcher runs this beside `subagent-handler stop`, in either order.
+    process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+    const stoppedAt = new Date(Date.now() - 60_000).toISOString();
+    setExistingState({
+      agents: { a1: { role: 'tdd-guide', active: false, startedAt: stoppedAt, stoppedAt } },
+      tasks: [],
+      events: [],
+    });
+    setStdin({ hook_event_name: 'SubagentStop', agent_id: 'a1', agent_type: 'tdd-guide' });
+
+    await runHookFresh();
+
+    const row = mockState.writes[0].data.agents.a1;
+    expect(row.active).toBe(false);
+    expect(row.stoppedAt).toBe(stoppedAt);
+  });
+
   it('writes the workflow state exactly once per invocation', async () => {
     process.argv = ['node', 'workflow-status.js', 'teammate-update'];
     setStdin({ agent_id: 'a1' });
@@ -471,6 +500,97 @@ describe('workflow-status', () => {
 
       const wf = mockState.writes[0].data.workflow;
       expect(wf.currentPhase).toBe(5); // Merge
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Retention: the shared `agents` map is bounded on the write path
+  // -------------------------------------------------------------------------
+  describe('agent retention', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const ago = (ms) => new Date(Date.now() - ms).toISOString();
+
+    function seedMixedAgents() {
+      setExistingState({
+        agents: {
+          // rows written before SubagentStop was recorded as inactive read active:true with a stoppedAt
+          'old-stopped': { role: 'teammate', active: true, stoppedAt: ago(8 * DAY_MS), updatedAt: ago(8 * DAY_MS) },
+          'old-idle': { role: 'teammate', active: false, updatedAt: ago(8 * DAY_MS) },
+          'recent-stopped': { role: 'teammate', active: false, stoppedAt: ago(DAY_MS), updatedAt: ago(DAY_MS) },
+          running: { role: 'teammate', active: true, updatedAt: ago(60_000) },
+        },
+        tasks: [],
+        events: [],
+      });
+    }
+
+    it('drops retired agents from the state it writes and keeps the live ones', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      seedMixedAgents();
+      setStdin({ agent_id: 'a1', role: 'planner' });
+
+      await runHookFresh();
+
+      expect(Object.keys(mockState.writes[0].data.agents).sort()).toEqual(['a1', 'recent-stopped', 'running']);
+    });
+
+    it('prunes on the task-complete and task-error paths as well', async () => {
+      for (const event of ['task-complete', 'task-error']) {
+        vi.resetModules();
+        mockState.writes = [];
+        process.argv = ['node', 'workflow-status.js', event];
+        seedMixedAgents();
+        setStdin({ agent_id: 'running', task_id: '7', error: 'sample' });
+
+        await runHookFresh();
+
+        expect(Object.keys(mockState.writes[0].data.agents).sort()).toEqual(['recent-stopped', 'running']);
+      }
+    });
+
+    it('reports the pruned team size, not the size the file had', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      seedMixedAgents();
+      setStdin({ agent_id: 'a1', role: 'planner' });
+
+      await runHookFresh();
+
+      // The mock's call history is shared across tests: read this run's own (last) call.
+      const { writeStdout } = await import('../../scripts/utils/index.js');
+      expect(writeStdout.mock.calls.at(-1)[0].message).toContain('Team: 3 members');
+    });
+
+    it('drops a ghost (active, no stoppedAt, silent for days) from the state it writes', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({
+        agents: {
+          ghost: { role: 'teammate', active: true, updatedAt: ago(2 * DAY_MS) },
+          running: { role: 'teammate', active: true, updatedAt: ago(60_000) },
+        },
+        tasks: [],
+        events: [],
+      });
+      setStdin({ agent_id: 'a1', role: 'planner' });
+
+      await runHookFresh();
+
+      expect(Object.keys(mockState.writes[0].data.agents).sort()).toEqual(['a1', 'running']);
+    });
+
+    it('keeps the agent the event is about even when its row was already past the stale window', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({
+        agents: { a1: { role: 'planner', active: true, updatedAt: ago(5 * DAY_MS), tasksCompleted: 4 } },
+        tasks: [],
+        events: [],
+      });
+      setStdin({ agent_id: 'a1', role: 'planner' });
+
+      await runHookFresh();
+
+      const written = mockState.writes[0].data.agents.a1;
+      expect(written.tasksCompleted).toBe(4);
+      expect(Date.now() - Date.parse(written.updatedAt)).toBeLessThan(60_000);
     });
   });
 });

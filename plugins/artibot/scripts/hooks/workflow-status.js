@@ -16,6 +16,7 @@ import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractA
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { resolveScopedStatePath } from '../../lib/core/runtime-state.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
+import { pruneAgents } from './_team-state.js';
 
 const PHASE_NAMES = {
   feature: ['Plan', 'Design', 'Implement', 'Review', 'Test', 'Merge'],
@@ -354,11 +355,16 @@ export async function main() {
         // progress. tasksCompleted still honors any per-agent +1 count from the
         // task-complete event; only the team-wide total is injected here.
         const { completed, total } = deriveTeamProgress(state);
-        // This case is wired to BOTH SubagentStart and TeammateIdle (hooks.json).
+        // This case is wired to SubagentStart and TeammateIdle (hooks.json) and,
+        // through the SubagentStop dispatcher, to SubagentStop (dispatch-table.json).
         // The TeammateIdle payload carries no `active` key, so reading only
         // `active !== false` recorded every idle teammate as active — the
-        // opposite of the event. The event name is the idle signal.
+        // opposite of the event — and the SubagentStop firing did the same to a
+        // stopped agent, racing `subagent-handler stop` to write `active: true`
+        // back over its `active: false`. The event name is the signal.
+        const stopped = hookData?.hook_event_name === 'SubagentStop';
         const wentIdle = hookData?.active === false || hookData?.hook_event_name === 'TeammateIdle';
+        const inactive = wentIdle || stopped;
         state = {
           ...state,
           agents: {
@@ -366,7 +372,7 @@ export async function main() {
             [agentId]: {
               ...existing,
               role: agentRole || existing.role || 'teammate',
-              active: !wentIdle,
+              active: !inactive,
               currentTask: hookData?.current_task || hookData?.currentTask || existing.currentTask || '',
               progress: hookData?.progress ?? existing.progress,
               tasksCompleted: existing.tasksCompleted ?? (total > 0 ? completed : undefined),
@@ -384,7 +390,7 @@ export async function main() {
         // Opt-A: refresh the derived workflow phase from current task progress.
         state = { ...state, workflow: deriveWorkflow(state) };
 
-        const statusVerb = wentIdle ? 'went idle' : 'updated';
+        const statusVerb = stopped ? 'stopped' : wentIdle ? 'went idle' : 'updated';
         state = addEvent(state, 'info', agentId, `Agent ${statusVerb}`);
         break;
       }
@@ -466,6 +472,10 @@ export async function main() {
         break;
     }
 
+    // Bound the shared `agents` map on the way out (_team-state.js#pruneAgents). After the
+    // switch, so the row this event just refreshed is already inside every window; and the
+    // pruned state is what the dashboard below counts.
+    state = pruneAgents(state);
     saveState(state);
     return state;
   });

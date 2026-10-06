@@ -45,6 +45,13 @@ function makeHookData(data) {
   return JSON.stringify(data);
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+/** ISO stamp `ms` before now — the retention rules read the real clock. */
+function agoMs(ms) {
+  return new Date(Date.now() - ms).toISOString();
+}
+
 /**
  * Import the hook and run its entry point. The module carries a direct-run
  * guard, so importing it no longer executes `main()` — the call has to be
@@ -190,6 +197,42 @@ describe('subagent-handler hook', () => {
       expect(savedState.agents['existing-agent']).toBeDefined();
       expect(savedState.agents['new-agent']).toBeDefined();
     });
+
+    it('drops retired agents from the state it writes while it registers a new one', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({
+        agents: {
+          'old-stopped': { role: 'builder', active: false, startedAt: agoMs(9 * DAY_MS), stoppedAt: agoMs(8 * DAY_MS) },
+          'recent-stopped': { role: 'builder', active: false, startedAt: agoMs(2 * HOUR_MS), stoppedAt: agoMs(HOUR_MS) },
+          running: { role: 'builder', active: true, updatedAt: agoMs(60_000) },
+        },
+      }));
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'new-agent', role: 'builder' }));
+
+      await runHook();
+      await waitForSettle();
+
+      const savedState = atomicWriteSync.mock.calls[0][1];
+      expect(Object.keys(savedState.agents).sort()).toEqual(['new-agent', 'recent-stopped', 'running']);
+    });
+
+    it('drops a ghost (active, no stoppedAt, silent for days) from the state it writes while it registers a new one', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({
+        agents: {
+          ghost: { role: 'teammate', active: true, updatedAt: agoMs(2 * DAY_MS) },
+          running: { role: 'builder', active: true, updatedAt: agoMs(60_000) },
+        },
+      }));
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'new-agent', role: 'builder' }));
+
+      await runHook();
+      await waitForSettle();
+
+      expect(Object.keys(atomicWriteSync.mock.calls[0][1].agents).sort()).toEqual(['new-agent', 'running']);
+    });
   });
 
   describe('team-context initialization (Area 2 fix)', () => {
@@ -302,6 +345,43 @@ describe('subagent-handler hook', () => {
           message: expect.stringContaining('deregistered'),
         }),
       );
+    });
+
+    it('drops retired agents from the state it writes while it deregisters', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'stop'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({
+        agents: {
+          'builder-01': { role: 'builder', active: true, startedAt: agoMs(2 * HOUR_MS) },
+          'old-stopped': { role: 'builder', active: false, startedAt: agoMs(9 * DAY_MS), stoppedAt: agoMs(8 * DAY_MS) },
+        },
+      }));
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01' }));
+
+      await runHook();
+      await waitForSettle();
+
+      const savedState = atomicWriteSync.mock.calls[0][1];
+      expect(Object.keys(savedState.agents)).toEqual(['builder-01']);
+      expect(savedState.agents['builder-01'].active).toBe(false);
+      expect(savedState.agents['builder-01'].stoppedAt).toBeDefined();
+    });
+
+    it('drops a ghost (active, no stoppedAt, silent for days) from the state it writes while it deregisters', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'stop'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue(JSON.stringify({
+        agents: {
+          'builder-01': { role: 'builder', active: true, startedAt: agoMs(2 * HOUR_MS) },
+          ghost: { role: 'teammate', active: true, updatedAt: agoMs(2 * DAY_MS) },
+        },
+      }));
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01' }));
+
+      await runHook();
+      await waitForSettle();
+
+      expect(Object.keys(atomicWriteSync.mock.calls[0][1].agents)).toEqual(['builder-01']);
     });
 
     it('handles stop for unknown agent gracefully', async () => {
