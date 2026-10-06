@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.71.5-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.71.6-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.5** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.6** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.71.5` |
+| `version` | Plugin version | `4.71.6` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.71.6** (2026-10-06) — Verification signals, state-file upkeep and doc syntax: 8 commits, 61 files +2,442/−233 since v4.71.5 (`git diff --shortstat v4.71.5 487b7ceb`, measured 2026-10-06; the release commit is not in these numbers). **The `/save` handoff's Lint cell now always reads "not measured" (`미측정`)**: it printed `OK` whenever the last test snapshot had zero failures, and a test result is not a lint verdict. **The Stop gate no longer reads a run that vitest itself failed as a pass**: an unhandled error, a throwing suite hook or an interrupted run leaves `failed: 0` while vitest exits 1, so the test reporter now records how the run ended and the gate reads it; in an 18-scenario probe on vitest 4.0.18 the scenarios vitest ended with exit 1 but the gate read as a pass fell from 6 to 0, and none of the exit-0 scenarios was blocked. **The SessionStart warning now also fires for a run that did not end cleanly**, even when no test failed; a snapshot written without the new record reads exactly as before. **The shared state file's `agents` map is pruned on every write** — one machine's live file had grown to 1,666 rows / 453 KB, and why those rows piled up is not known; finished agents' rows go after 7 days, rows with no start record go after 24 hours of silence, and the oldest finished rows go first above 500 — **and a stopped agent now leaves the statusline team list at once** instead of after up to 10 minutes. **`SendMessage` examples in the agent, command and skill documents use the current call syntax** (`to`, `message`, `summary`; the report address is `main` when the leader is the main session); `artibot-cowork` keeps the old wording until its next release. Not verified live: how the Stop gate reacts to a real run's new record, and the SessionStart banner end to end (the tests stop at the text the reader returns). Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
 **4.71.5** (2026-10-06) — Four fixes behind the release landing and CI time: 6 commits, 23 files +476/−34 since v4.71.4 (`git diff --shortstat v4.71.4..75c33524`, measured 2026-10-06; the release commit is not in these numbers). **The badge-sync wait loop no longer misreads three situations**: its "consecutive empty polls" counter was cumulative, a non-JSON API response was counted as "no workflow run" and reported as an auth problem, and a hung `gh api` call had no time limit (now 10 seconds per call). **The CI step `Run runtime eval gate` took about 2 minutes on every job because a 120-second guard timer was never cleared**; the suite itself finishes in under a second, and the runner now exits when it does. **The eight files in `output-styles/` carry `keep-coding-instructions: true`**, as the `/theme` styles have since v4.71.3. **The timing test that blocked the v4.71.4 badge landing (#123) measures its noisy side twice**; its threshold and the real gates are unchanged. None of this has run on a real release or a CI runner yet: the wait loop, the step time and the test's failure rate on CI are unverified, and the full suite was not run locally before this release (the run was stopped for low memory), so the CI run on the release branch is the full-suite check. Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 

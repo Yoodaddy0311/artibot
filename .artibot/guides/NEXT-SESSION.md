@@ -1,10 +1,49 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, master = `0c67ad59` = **v4.71.5**(태그 `9d347d09`) + 배지 동기화 자동 착지 · v4.71.2~v4.71.5 릴리스 4회 · 배지 착지 대기 루프 보강과 첫 자동 착지 성공 · runtime eval 2분 대기 수정(CI 확인) · 외부 재검수 패키지 수정 단위 A·B 는 브랜치 `fix/verify-completion-contract` 에 구현, master 착지 대기)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, **v4.71.6** — v4.71.5(태그 `9d347d09`) 이후 8 커밋 + 릴리스 커밋: `/save` Lint 칸 `미측정` · Stop 게이트의 비정상 종료 판독 · SessionStart 경고 · 상태 파일 `agents` 맵 정리 · SendMessage 표기 현행화 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 결과는 미반영)
+
+> 이전 헤더(2026-10-06, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, master = `0c67ad59` = **v4.71.5**(태그 `9d347d09`) + 배지 동기화 자동 착지 · v4.71.2~v4.71.5 릴리스 4회 · 배지 착지 대기 루프 보강과 첫 자동 착지 성공 · runtime eval 2분 대기 수정(CI 확인) · 외부 재검수 패키지 수정 단위 A·B 는 브랜치 `fix/verify-completion-contract` 에 구현, master 착지 대기)
 
 > 이전 헤더(2026-09-28, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-28 KST 갱신, master = `0dddb6ac` = **v4.67.0** · Wave 18~23 착지 · 모델 정책 = opus 단일 티어 + fable 휴면 · `/model-routing` 신설 · v5.0 진행률 52/100)
 
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.71.6 (2026-10-06 KST, 세션 0730156d)
+
+**한 줄**: v4.71.5 와 같은 날의 패치 릴리스 1회. 핸드오프 Lint 칸 오표시 수정, Stop 게이트와 SessionStart 경고가 vitest 의 비정상 종료(`failed: 0` 인 실패 실행)를 놓치던 것 수정, 공유 상태 파일 `agents` 맵의 무한 증가 정리와 정지한 에이전트가 statusline 팀 목록에서 바로 빠지게 하는 수정, SendMessage 호출 표기 현행화(artibot 만)다. 줄기별 정본은 `plugins/artibot/CHANGELOG.md` [4.71.6]. v4.71.5 이후 8 커밋 = 61 files +2,442/−233(`git rev-list --count v4.71.5..487b7ceb` · `git diff --shortstat v4.71.5 487b7ceb`, 2026-10-06 측정 — 릴리스 커밋 제외). 이 절은 릴리스 전에 썼다: 태그 · master 착지 · CI 결과는 아직 없다.
+
+| 줄기 | 커밋 | 제목 |
+|---|---|---|
+| v4.71.5 배지 동기화 | `0c67ad59` | `docs(release): sync marketplace meta + count prose to v4.71.5` |
+| v4.71.5 라이브 결과 기록 | `9cb4a181` | `docs(release): record the v4.71.5 live results for the next machine` |
+| 핸드오프 Lint 칸 | `1215378d` | `fix(handoff): stop showing a test result as a lint verdict in the handoff state table` |
+| Stop 게이트 비정상 종료 판독 | `131270ea` | `fix(verification): do not read a run vitest itself failed as a deterministic pass` |
+| 위 두 수정의 기록 | `62cb1908` | `docs: record the handoff Lint and verification completion fixes` |
+| SessionStart 경고 | `dee080c1` | `fix(core): warn at SessionStart when the last test run did not end cleanly` |
+| SendMessage 표기 · [4.71.0] 수치 | `81652114` | `docs: current SendMessage syntax everywhere in the plugin, and 4.71.0 numbers at the tag range` |
+| 상태 파일 `agents` 맵 | `487b7ceb` | `fix(hooks): stop the agents map in the shared state file from growing without bound` |
+
+### 다른 PC 에서 할 일
+
+- ① `git pull` 후 설치본을 4.71.6 으로 올린다: 마켓 사본(`~/.claude/plugins/marketplaces/artibot/`)을 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/scripts/install.sh files`. `npm run sync:local` 은 `install.sh install` 전체라 쓰지 않는다. 그다음 Claude Code 를 재시작한다.
+- ② 그 PC 의 미추적 파일 13개와 `v.4.71.x/` 외부 검수 패키지를 처리한다 — 커밋 · gitignore · 삭제 중 결정. 이 PC 에는 없다.
+- ③ `/theme` 을 쓰는 PC 는 한 번 다시 적용한다(기존 안내 그대로 — 아래 v4.71.2 ~ v4.71.5 절의 "다른 PC 셋업").
+- ④ 그 PC 의 `~/.claude/artibot-state.json` 에서 `endedAt` 이 최근 날짜로 갱신되는지 확인한다. 이 PC 는 2026-10-01 이후 SessionEnd 가 끝까지 돈 기록이 없다(원인 미확인).
+- ⑤ `~/.claude/rules/artibot/` 의 `.artibot-new` 는 병합하지 않는다(오너 결정 2026-10-05).
+
+### 남은 것
+
+- `caa3d2eb` — 이 PC 의 로컬 브랜치 `docs/v4710-followup-o` 에 있는 커밋. 권한 분류기가 cherry-pick 을 거부해 옮기지 못했다. 오너가 직접 처리한다.
+- artibot-cowork 의 옛 SendMessage 표기 13파일(에이전트 10 · skill 2 · 커맨드 1) — 배포 ZIP 고정(`tests/firewall/cowork-plugin-zip-drift.test.js`) 때문에 다음 cowork 릴리스 때 고친다.
+- 보고 계약이 없는 스폰 경로(`/assemble` · `/go` · `/orchestrate` · `/spawn`)의 보고 주소 폴백 설계.
+- `plugins/artibot/rules/verification-discipline.md:145` 의 `to="team-lead"` — 오너 결정이 필요하다(안전 계약 면제 문서).
+- `lib/core/agent-registry.js#consumeBlockList` 가 frontmatter `tools` 목록 항목의 줄 끝 주석을 tools 문자열에 남긴다(MCP 응답에 노출).
+- SessionEnd 가 끝까지 안 도는 원인(이 PC, 2026-10-01 이후)과 `agents` 맵에 유령 행이 생기는 원인 — 둘 다 미확인.
+- `/team` 런 실측 2건 — TeammateIdle 페이로드의 키 이름, `TaskStop` 이 팀원 이름으로 멈추는지.
+- split-wave24 의 suspended 2건 — `lib/supervisor/contracts.js#LANE_OPS_STATES` 에 인계 상태가 없다. done 조작 금지라 그대로 둔다.
+- `lib/core/test-status.js` 의 기존 결함 3건 — `failedFiles` 원문 출력 · 미래 시각이면 `-30m` 처럼 음수로 찍히는 나이 · 음수나 소수 `failed`.
+
+---
 
 ## v4.71.2 ~ v4.71.5 (2026-10-04 ~ 10-06 KST, 세션 artibot-e8)
 
@@ -23,7 +62,7 @@
 
 **다른 PC 에서 처음 할 확인**: `git fetch --tags origin` → `git rev-parse --short v4.71.5 origin/master`(`9d347d09` 와, `0c67ad59` 또는 그 뒤의 문서 커밋) → `gh issue list --state open`(0건이어야 한다) → master 최신 CI 런이 green 인지.
 
-**다른 PC 셋업**: `git pull` → `plugins/artibot` 에서 `npm run sync:local`(설치본을 4.71.5 로) → Claude Code 재시작. `/theme` 을 쓰는 PC 는 한 번 다시 적용해야 한다 — `~/.claude/output-styles/*.md` 생성물은 PC 별이고 v4.71.3 이전 생성물에는 `keep-coding-instructions: true` 가 없다(업데이트 경로 없음). 설치된 `~/.claude/rules/artibot/verification-discipline.md` 는 설치기가 덮지 않고 새 판을 `.artibot-new` 로 둔다 — 병합하지 않기로 한 것이 오너 결정이다(아래).
+**다른 PC 셋업**(v4.71.5 당시 안내 — **v4.71.6 부터는 위 절의 「다른 PC 에서 할 일」 ① 을 따른다**, `sync:local` 은 `install.sh install` 전체라 쓰지 않는다): `git pull` → `plugins/artibot` 에서 `npm run sync:local`(설치본을 4.71.5 로) → Claude Code 재시작. `/theme` 을 쓰는 PC 는 한 번 다시 적용해야 한다 — `~/.claude/output-styles/*.md` 생성물은 PC 별이고 v4.71.3 이전 생성물에는 `keep-coding-instructions: true` 가 없다(업데이트 경로 없음). 설치된 `~/.claude/rules/artibot/verification-discipline.md` 는 설치기가 덮지 않고 새 판을 `.artibot-new` 로 둔다 — 병합하지 않기로 한 것이 오너 결정이다(아래).
 
 **넘어오지 않는 것(로컬 전용)**: `.artibot/HANDOFF.md`·`handoffs/`, 자동 메모리, 미추적 외부 검수 패키지 `v.4.71.2/`·`v.4.71.3/`·`v.4.71.5/`, 스크래치의 실험 원자료(조사관 타이밍 표본·검수 하네스).
 
@@ -48,10 +87,10 @@
 **다음 작업 후보(백로그)**:
 
 1. **외부 재검수 패키지 `v.4.71.5/` 의 수정 단위 A·B + 결과 없는 완료**(작성 2026-10-05 21:19 KST, 기준 `8994caed`, 이 PC 에만 있음. 패키지의 권고는 지시가 아니며 **오너 승인 뒤 착수** — 오너 승인 2026-10-06). 해당 줄은 리더가 2026-10-06 열람해 사실임을 확인했다:
-   - **A — Lint: OK 오표시 — 완료(2026-10-06, 브랜치 `fix/verify-completion-contract`, master 착지 대기)**: `lib/handoff/handoff-builder.js#renderStateTable` 의 Lint 칸이 항상 `미측정` 이다 — 테스트 결과는 린트 증거가 아니다. 종전에는 `lintCell` 이 `quality.summary.failed === 0` 이면 `OK` 여서, 낡은 snapshot 이어도 테스트 실패 0 을 린트 통과로 표시했다. 인계 생성 시 린트 자동 실행·새 evidence DB 는 범위 밖.
-   - **B — 테스트 결과 생산/소비 계약 — completion 부분 완료(2026-10-06, 브랜치 `fix/verify-completion-contract`, master 착지 대기)**: `tests/reporters/test-status-reporter.js` 가 `schemaVersion: 2` 와 `completion { reason, unhandledErrorCount, unfinishedCount }` 를 쓰고(reason·unhandledErrorCount 는 모르면 null, `unfinishedCount` 는 `options.mode` 가 아니라 결과 state 로 센다), `lib/verification/deterministic-source.js` 는 v1 기록을 종전과 바이트 동일하게 판정하고 v2 는 fail-closed 로 판정한다 — failed>0·unhandled>0·reason `failed` 는 exitCode 1, reason `interrupted`·unfinished>0·읽을 수 없는 completion 은 UNMEASURED, exitCode 0 은 reason `passed` + unhandled 0 + unfinished 0 뿐이다(새 REASONS 3종: `interrupted`·`unfinished`·`completionUnreadable`). 실제 vitest(4.0.18)로 18 시나리오를 돌린 프로브(리더·구현자 실측 2026-10-06): 수정 전 vitest 가 exit 1 인데 exitCode 0 으로 읽힌 시나리오 6 → 수정 후 0, exit 0 인 시나리오가 막힌 경우 0. 수집 오류만 있는 실행은 0테스트 가드가 먼저 걸려 UNMEASURED(`emptyRun`) 로 남는다 — PASS 가 아니다. 기존 고정 테스트 2개도 함께 갱신(키 8→10, REASONS 6→9). selection·source·environment·runId 와 원자적 snapshot 쓰기는 DEFER 그대로. 설계는 `VERIFICATION-ECONOMICS-DESIGN.md` §3.2(completion 부분 NECESSARY 판정).
+   - **A — Lint: OK 오표시 — 완료(2026-10-06, 브랜치 `fix/verify-completion-contract`, master 착지 `1215378d` — v4.71.6)**: `lib/handoff/handoff-builder.js#renderStateTable` 의 Lint 칸이 항상 `미측정` 이다 — 테스트 결과는 린트 증거가 아니다. 종전에는 `lintCell` 이 `quality.summary.failed === 0` 이면 `OK` 여서, 낡은 snapshot 이어도 테스트 실패 0 을 린트 통과로 표시했다. 인계 생성 시 린트 자동 실행·새 evidence DB 는 범위 밖.
+   - **B — 테스트 결과 생산/소비 계약 — completion 부분 완료(2026-10-06, 브랜치 `fix/verify-completion-contract`, master 착지 `131270ea` — v4.71.6)**: `tests/reporters/test-status-reporter.js` 가 `schemaVersion: 2` 와 `completion { reason, unhandledErrorCount, unfinishedCount }` 를 쓰고(reason·unhandledErrorCount 는 모르면 null, `unfinishedCount` 는 `options.mode` 가 아니라 결과 state 로 센다), `lib/verification/deterministic-source.js` 는 v1 기록을 종전과 바이트 동일하게 판정하고 v2 는 fail-closed 로 판정한다 — failed>0·unhandled>0·reason `failed` 는 exitCode 1, reason `interrupted`·unfinished>0·읽을 수 없는 completion 은 UNMEASURED, exitCode 0 은 reason `passed` + unhandled 0 + unfinished 0 뿐이다(새 REASONS 3종: `interrupted`·`unfinished`·`completionUnreadable`). 실제 vitest(4.0.18)로 18 시나리오를 돌린 프로브(리더·구현자 실측 2026-10-06): 수정 전 vitest 가 exit 1 인데 exitCode 0 으로 읽힌 시나리오 6 → 수정 후 0, exit 0 인 시나리오가 막힌 경우 0. 수집 오류만 있는 실행은 0테스트 가드가 먼저 걸려 UNMEASURED(`emptyRun`) 로 남는다 — PASS 가 아니다. 기존 고정 테스트 2개도 함께 갱신(키 8→10, REASONS 6→9). selection·source·environment·runId 와 원자적 snapshot 쓰기는 DEFER 그대로. 설계는 `VERIFICATION-ECONOMICS-DESIGN.md` §3.2(completion 부분 NECESSARY 판정).
    - **결과 없는 VERIFY 완료**: `lib/autopilot/report-verify-gate.js` rule 6 은 명시적 FAIL 만 거부하고 부재·`UNMEASURED` 는 통과한다(파일 머리말에 한계로 적혀 있음). 생산자(B)가 안정화되기 전에 strict 거부부터 켜지 않는다.
-   - **후속 — `lib/core/test-status.js` 가 `completion` 을 읽지 않는다(열림)**: SessionStart 경고(`lib/core/test-status.js#getLastTestStatus` → `scripts/hooks/session-start.js#appendTestStatus`)는 아직 `failed` 만 본다. v2 snapshot 의 `completion`(unhandled·interrupted·unfinished)이 이 경로에 반영되지 않아, `failed: 0` 인 비정상 종료 실행에도 SessionStart 는 경고하지 않는다.
+   - **후속 — `lib/core/test-status.js` 가 `completion` 을 읽는다 — 완료(v4.71.6, 2026-10-06, `dee080c1`)**: SessionStart 경고(`lib/core/test-status.js#getLastTestStatus` → `scripts/hooks/session-start.js#appendTestStatus`)가 v2 snapshot 의 `completion`(unhandled·interrupted·unfinished)을 읽어, `failed: 0` 인 비정상 종료 실행에도 경고한다(`failed > 0` 이면 종전 문구 뒤에 덧붙이고, `completion` 이 없는 기록은 종전과 바이트 동일). 종전에는 `failed` 만 보았다. 못 본 것: SessionStart 훅이 배너를 내는 end-to-end 는 실행해 확인하지 않았고, 이 판독기의 기존 결함 3건은 위 v4.71.6 절의 "남은 것"에 있다.
    - 패키지의 단위 C(양성 대조)와 잔여 2건(`zero_polls` 리셋·`gh api` 타임아웃)은 v4.71.5 에서 처리했다.
 2. **Windows 절대 ms 게이트 플레이크 2건**(CI 400런 창 2026-09-05 ~ 10-05): `tests/autopilot/safety.test.js` 50ms 상한(#119, `50.54 < 50`), `tests/core/command-segments.test.js` 200ms 상한(`248.17 < 200`, 재실행 없음 — 잡음인지 회귀인지 미확인).
 3. **25분 상한 여유 감시**: 스위트가 계속 커지면 소진된다. `tests/autopilot/safety.test.js` 의 무거운 스윕을 직렬 프로젝트 밖으로(보류), Windows coverage A/B(보류), sharding(보류). 대기 대상에서 비필수 레그를 빼는 안은 기각(게이트 약화).
@@ -61,7 +100,7 @@
 
 **미확인(다음 세션이 물려받는 것)**: v4.71.5 대기 루프에서 라이브로 가동되지 않은 분기(러너 `timeout` 이 멈춘 `gh` 를 끊는지, `zero_polls` 리셋, 비숫자 `total_count` 분기, 실제 100폴링 상한 경로 — 정상 경로는 v4.71.5 에서 증명됨) · 호스트가 플러그인 `output-styles/` 를 선택 가능한 스타일로 로드하는지와 플래그의 실효 · ReDoS 양성 대조의 CI 잔여 실패율 · 등록상 로드되는 플러그인 캐시 버전(2026-10-05 이 PC 에서 4.57.0 캐시가 등록돼 있었다 — 실제 로드 사본 미확인).
 
-**이 세션의 작업 방식과 함정**: 사용자 지시로 검수·조사는 Fable 5.1, 구현은 Sonnet 5.5 로 돌렸다(`artibot.config.json` 의 모델 정책과 별개인 세션 지시). ① 이름 있는 팀원의 최종 메시지는 자동 전달되지 않는다 — 보고 주소는 `team-lead` ② `npm test` 는 `plugins/artibot/runtime/last-test-result.json` 을 덮어쓴다 — 표적 실행은 `npx vitest run <파일> --reporter=default` ③ CI 대기는 백그라운드 sleep 루프가 아니라 포그라운드 `gh run watch <id> --exit-status` ④ PC 가 절전에 들어가면 서브에이전트가 "600초 무진행"으로 끊긴다 — `SendMessage` 로 같은 에이전트를 재개하면 이어서 한다 ⑤ 타이밍 테스트를 재는 동안 같은 PC 에서 다른 테스트를 돌리면 표본이 오염된다.
+**이 세션의 작업 방식과 함정**: 사용자 지시로 검수·조사는 Fable 5.1, 구현은 Sonnet 5.5 로 돌렸다(`artibot.config.json` 의 모델 정책과 별개인 세션 지시). ① 이름 있는 팀원의 최종 메시지는 자동 전달되지 않는다 — 보고 주소는 리더가 메인 세션이면 `main` 이다(`commands/team.md` 의 보고 계약. `to="team-lead"` 는 success 를 받고도 리더에게 도착하지 않았다 — 이 파일 아래 "이 세션 관찰(도구)" 절) ② `npm test` 는 `plugins/artibot/runtime/last-test-result.json` 을 덮어쓴다 — 표적 실행은 `npx vitest run <파일> --reporter=default` ③ CI 대기는 백그라운드 sleep 루프가 아니라 포그라운드 `gh run watch <id> --exit-status` ④ PC 가 절전에 들어가면 서브에이전트가 "600초 무진행"으로 끊긴다 — `SendMessage` 로 같은 에이전트를 재개하면 이어서 한다 ⑤ 타이밍 테스트를 재는 동안 같은 PC 에서 다른 테스트를 돌리면 표본이 오염된다.
 
 ---
 
