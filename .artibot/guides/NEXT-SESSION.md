@@ -10,7 +10,7 @@
 
 ## v4.71.6 (2026-10-06 KST, 세션 0730156d)
 
-**한 줄**: v4.71.5 와 같은 날의 패치 릴리스 1회. 핸드오프 Lint 칸 오표시 수정, Stop 게이트와 SessionStart 경고가 vitest 의 비정상 종료(`failed: 0` 인 실패 실행)를 놓치던 것 수정, 공유 상태 파일 `agents` 맵의 무한 증가 정리와 정지한 에이전트가 statusline 팀 목록에서 바로 빠지게 하는 수정, SendMessage 호출 표기 현행화(artibot 만)다. 줄기별 정본은 `plugins/artibot/CHANGELOG.md` [4.71.6]. v4.71.5 이후 8 커밋 = 61 files +2,442/−233(`git rev-list --count v4.71.5..487b7ceb` · `git diff --shortstat v4.71.5 487b7ceb`, 2026-10-06 측정 — 릴리스 커밋 제외). 이 절은 릴리스 전에 썼다: 태그 · master 착지 · CI 결과는 아직 없다.
+**한 줄**: v4.71.5 와 같은 날의 패치 릴리스 1회. 핸드오프 Lint 칸 오표시 수정, Stop 게이트와 SessionStart 경고가 vitest 의 비정상 종료(`failed: 0` 인 실패 실행)를 놓치던 것 수정, 공유 상태 파일 `agents` 맵의 무한 증가 정리와 정지한 에이전트가 statusline 팀 목록에서 바로 빠지게 하는 수정, SendMessage 호출 표기 현행화(artibot 만)다. 줄기별 정본은 `plugins/artibot/CHANGELOG.md` [4.71.6]. v4.71.5 이후 8 커밋 = 61 files +2,442/−233(`git rev-list --count v4.71.5..487b7ceb` · `git diff --shortstat v4.71.5 487b7ceb`, 2026-10-06 측정 — 릴리스 커밋 제외). **출하 결과**(리더 실측 2026-10-06): 릴리스 커밋 `e3dc9410` = 태그 `v4.71.6`, `ci/release-v4.71.6` check-run 7/7 success 뒤 `--ff-only` 로 master 착지, GitHub Release 게시 2026-10-06T07:48:41Z, 배지 동기화 `e5117219` **자동 착지**(이슈 0건). 이 PC 설치: 레지스트리 4.71.6 · gitCommitSha `e5117219`, 릴리스 트리 2,046 파일 대 캐시 4.71.6 상이 0 · 누락 0(CRLF 정규화 비교, 음성 대조 4.71.5 캐시 상이 60 · 누락 1), 전역 사본(`install.sh files`) 4.71.6. 로컬 표적·firewall 런에서 git 계열 파일 단위 실패(`beforeAll` 30초)는 단독 재실행에서 전부 통과했다 — 부하 경합으로 본다.
 
 | 줄기 | 커밋 | 제목 |
 |---|---|---|
