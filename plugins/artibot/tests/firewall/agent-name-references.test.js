@@ -185,21 +185,19 @@ const SCAN_DIRS = ['commands', 'agents', 'skills'];
  * 재확인: Claude Code 세션의 하네스 서브에이전트 목록과 직접 대조하라. 위 수치는
  * "출하하지 않는데 쓰인다"는 **정황**이지 빌트인이라는 직접 증거가 아니다.
  *
- * ── `general-purpose` 추가 (레인 1E-①, 2026-10-07) ─────────────────────────────
- * 호출부 `subagent_type=` 접두 규칙(아래 "2차 표면")이 이 집합을 재사용한다. 원래 집합은
- * `Explore`·`Plan` 둘뿐이었다. 하네스 빌트인 `general-purpose` 도 접두 없이 불러야 하므로
- * 면제에 넣었다. 근거는 둘이다.
- *   - 라이브 원장 census 가 frontmatter 없는 `general-purpose` 스폰을 기록한다
- *     (`.artibot/guides/v5-design/evidence/m1-live-census-20260930.md` 표 181~188행).
- *   - 짝 목록 `lib/routing/action-classifier.js#HOST_BUILTIN_AGENTS` 가 `Explore`·`Plan`·
- *     `general-purpose` 셋이다. 이 집합은 그 목록의 **수동 사본**이다(아래 한계 #4).
- *
- * 부작용: 위 `Agent(<name>)` 표면의 면제도 같이 넓어진다. 영향 실측(2026-10-07):
- * 두 플러그인의 `commands`·`agents`·`skills` 에서 `Agent(general-purpose` 와
- * `agent: general-purpose` 는 **0건**이라 지금은 어떤 결과도 바뀌지 않는다.
+ * ── 집합은 `Explore`·`Plan` 둘로 유지 (레인 1E-① 교차검수 결정, 2026-10-07) ────────
+ * 호출부 `subagent_type=` 접두 규칙(아래 "2차 표면")이 이 집합을 재사용한다. 레인 1E-① 은
+ * 하네스 빌트인 `general-purpose` 를 여기에 더하려 했으나 교차검수가 되돌렸다. 이유:
+ *   - 필요로 하는 호출부가 없다. 두 플러그인의 `commands`·`agents`·`skills` 에서
+ *     `Agent(general-purpose` 와 `agent: general-purpose` 는 0건이다(2026-10-07 실측).
+ *   - 이 집합은 `Agent(<name>)` 표면의 면제이기도 하다. 넓히면 지금까지 미출하 이름으로
+ *     RED 였던 `Agent(general-purpose)` 가 통과한다 — fail-open 방향이고, 요청 범위 밖이다.
+ * 짝 목록 `lib/routing/action-classifier.js#HOST_BUILTIN_AGENTS` 는 셋(`general-purpose`
+ * 포함)이지만 그것은 라우팅 분류용이고 이 게이트의 면제 목록과 같을 필요가 없다. 호출부가
+ * 실제로 `general-purpose` 를 접두 없이 써야 하는 날이 오면 그 호출부와 함께 넓힌다.
  * 재현: grep -rn "Agent(general-purpose\|^agent: general-purpose" plugins/artibot/commands plugins/artibot/agents plugins/artibot/skills plugins/artibot-cowork/commands plugins/artibot-cowork/agents plugins/artibot-cowork/skills
  */
-const BUILTIN_SUBAGENTS = new Set(['Explore', 'Plan', 'general-purpose']);
+const BUILTIN_SUBAGENTS = new Set(['Explore', 'Plan']);
 
 /**
  * 이름 자리에 오는 **틀 문자열**. 실제 이름이 아니라 "여기에 이름을 넣어라"는
@@ -378,7 +376,7 @@ const isTemplateValue = (v) => /[{}[\]…]|\.\.\./.test(v);
 /**
  * 값 하나를 판정한다. **허용 목록**이다 — 아래 넷 중 하나가 아니면 위반이다(fail-closed).
  *
- *   1. 빌트인 (`Explore`·`Plan`·`general-purpose`) — 접두 없이 부른다
+ *   1. 빌트인 (`Explore`·`Plan`) — 접두 없이 부른다
  *   2. 틀 문자열 자리표시 (`PLACEHOLDERS`)
  *   3. 틀 문자열 (`{type}` · `artibot:{agent-type}` · `[…]` · 생략표) — 정적으로 해석 불가라 통과
  *   4. `artibot:` + 출하 에이전트 이름
@@ -614,9 +612,11 @@ describe('subagent_type= 접두 규칙 — 판정', () => {
   });
 
   it('빌트인은 접두 없이 통과하고, 접두를 붙이면 오히려 위반이다', () => {
-    for (const b of ['Explore', 'Plan', 'general-purpose']) {
+    for (const b of ['Explore', 'Plan']) {
       expect(verdict(b)).toEqual({ ok: true, via: 'builtin' });
     }
+    // 하네스 빌트인이지만 이 게이트의 면제 목록에는 없다(머리글 "집합은 Explore·Plan 둘로 유지").
+    expect(verdict('general-purpose')).toEqual({ ok: false, reason: 'no-prefix' });
     expect(verdict('artibot:Explore')).toEqual({ ok: false, reason: 'unshipped' });
   });
 
