@@ -653,7 +653,12 @@ function renderStateTable(data) {
   const testCell = data.quality?.summary
     ? `${data.quality.summary.passed}/${data.quality.summary.totalTests} pass`
     : '(no data)';
-  const lintCell = data.quality?.summary && data.quality.summary.failed === 0 ? 'OK' : '(check)';
+  // A test result is not lint evidence. `data.quality` is getLastTestStatus()
+  // (lib/core/test-status.js), whose `summary` is the vitest reporter's
+  // { totalTests, passed, failed, failedFiles } — no lint field exists anywhere
+  // in the handoff data. Deriving OK from `failed === 0` printed a verdict nobody
+  // measured. Stays unmeasured until something produces real lint evidence.
+  const lintCell = '미측정';
   const unpushed = data.gitState?.unpushed !== null && data.gitState?.unpushed !== undefined
     ? String(data.gitState.unpushed)
     : '(no-upstream)';

@@ -340,6 +340,107 @@ describe('handoff-builder / full render', () => {
 });
 
 // ---------------------------------------------------------------------------
+// §1 Lint 행 — 테스트 결과는 lint 증거가 아니다
+//
+// data.quality 는 getLastTestStatus() 의 반환, 곧 vitest 리포터가 쓴
+// { totalTests, passed, failed, failedFiles } 뿐이다. 인계 데이터 어디에도 eslint
+// 실행 기록은 없다. 예전에는 failed === 0 이면 Lint 행이 OK 였다 — 측정한 적 없는
+// 린트 판정을 테스트 그린이 대신 찍었다. 실제 lint 증거를 생산하는 곳이 생기기
+// 전까지 이 행은 스냅샷 모양과 무관하게 미측정이다(생산자가 생기면 그 계약에 맞춰 고친다).
+// ---------------------------------------------------------------------------
+
+describe('handoff-builder / §1 Lint 행', () => {
+  let pluginRoot;
+  let projectRoot;
+
+  beforeEach(() => {
+    pluginRoot = makeTempRoot();
+    projectRoot = makeTempRoot();
+  });
+
+  afterEach(() => {
+    rmSync(pluginRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  function seedSnapshot(fields) {
+    mkdirSync(path.join(pluginRoot, 'runtime'), { recursive: true });
+    writeFileSync(
+      path.join(pluginRoot, 'runtime', 'last-test-result.json'),
+      JSON.stringify({ timestamp: new Date().toISOString(), failedFiles: [], ...fields }),
+      'utf8',
+    );
+  }
+
+  async function collect(overrides = {}) {
+    return collectHandoffData({
+      pluginRoot,
+      projectRoot,
+      gitRunner: HAPPY_GIT,
+      taskList: [],
+      firstPrompts: [],
+      now: FROZEN_NOW,
+      ...overrides,
+    });
+  }
+
+  // §1 표의 한 행 — 첫 칸 라벨로 찾는다.
+  function sectionOneRow(md, label) {
+    const sec1 = md.split('## 1. 지금 상태')[1].split('## 2. 이번 세션 한 일')[0];
+    return sec1.split('\n').find((line) => line.startsWith(`| ${label} |`));
+  }
+
+  // 행이 정확히 이 문자열이고, OK 표기는 문서 어디에도 없다.
+  function expectLintUnmeasured(md) {
+    expect(sectionOneRow(md, 'Lint')).toBe('| Lint | 미측정 |');
+    expect(md).not.toContain('| Lint | OK |');
+  }
+
+  it('prints 미측정, never OK, when the snapshot has zero failed tests', async () => {
+    seedSnapshot({ totalTests: 100, passed: 100, failed: 0 });
+    const md = renderHandoffMarkdown(await collect(), { now: FROZEN_NOW });
+    expect(sectionOneRow(md, 'Tests')).toBe('| Tests | 100/100 pass |');
+    expectLintUnmeasured(md);
+  });
+
+  it('prints 미측정 when the snapshot has failed tests and keeps the Tests row as the pass ratio', async () => {
+    seedSnapshot({ totalTests: 100, passed: 97, failed: 3, failedFiles: ['tests/a.test.js'] });
+    const md = renderHandoffMarkdown(await collect(), { now: FROZEN_NOW });
+    expect(sectionOneRow(md, 'Tests')).toBe('| Tests | 97/100 pass |');
+    expectLintUnmeasured(md);
+  });
+
+  it('prints 미측정 when the snapshot is stale', async () => {
+    const twoDaysAgo = new Date(Date.now() - 48 * 3_600_000).toISOString();
+    seedSnapshot({ timestamp: twoDaysAgo, totalTests: 100, passed: 100, failed: 0 });
+    const data = await collect();
+    expect(data.quality.stale).toBe(true);
+    expectLintUnmeasured(renderHandoffMarkdown(data, { now: FROZEN_NOW }));
+  });
+
+  it('prints 미측정 when no snapshot exists', async () => {
+    const md = renderHandoffMarkdown(await collect(), { now: FROZEN_NOW });
+    expect(sectionOneRow(md, 'Tests')).toBe('| Tests | (no data) |');
+    expectLintUnmeasured(md);
+  });
+
+  it('prints 미측정 when quality collection throws', async () => {
+    // A non-string pluginRoot makes path.join throw inside getLastTestStatus;
+    // collectQualityState absorbs it into the empty fallback.
+    const data = await collect({ pluginRoot: undefined });
+    expect(data.quality.summary).toBeNull();
+    const md = renderHandoffMarkdown(data, { now: FROZEN_NOW });
+    expect(sectionOneRow(md, 'Tests')).toBe('| Tests | (no data) |');
+    expectLintUnmeasured(md);
+  });
+
+  it('prints 미측정 when the data carries no quality block at all', async () => {
+    const data = await collect();
+    expectLintUnmeasured(renderHandoffMarkdown({ ...data, quality: undefined }, { now: FROZEN_NOW }));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 설계 §3.3: derived-from provenance header
 //
 // 파생 렌더 파일은 어떤 state 버전에서 나왔는지 frontmatter 에 남긴다. handoff
