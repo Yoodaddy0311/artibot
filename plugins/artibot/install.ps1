@@ -1220,7 +1220,64 @@ function Set-SwarmConsent {
 }
 
 # ---------------------------------------------------------------------------
-# Auto-learning — parity with install.sh setup_auto_learning (L826)
+# Auto-learning dead-registration cleanup - parity with install.sh
+# _unregister_dead_auto_learning
+# ---------------------------------------------------------------------------
+# scripts\run-auto-learning.js was deleted in 211712e3 (2026-07-09), but the
+# Task Scheduler entry ArtibotAutoLearning (daily 03:00) registered while it
+# existed keeps firing it: MODULE_NOT_FOUND on every run. Set-AutoLearning
+# already refuses to REGISTER without the runner; nothing removed an EXISTING
+# task, because its marker early-return made every later install skip all of it.
+#
+# ALLOWLIST: the task is deleted only when the marker says this installer
+# registered it (method = schtasks). hint-only, claude-schedule and none only
+# lose their marker; an unreadable marker is left alone. Honors -DryRun.
+function Remove-DeadAutoLearning {
+  param([string]$Marker)
+  if (-not (Test-Path -LiteralPath $Marker)) { return }
+
+  $method = ''
+  try {
+    $m = Get-Content -LiteralPath $Marker -Raw | ConvertFrom-Json
+    $prop = $m.PSObject.Properties['method']
+    if ($prop) { $method = [string]$prop.Value }
+  } catch { $method = '' }
+
+  switch ($method) {
+    'schtasks' {
+      if ($DryRun) { Write-Log '[dry-run] would remove dead auto-learning schedule (Task Scheduler: ArtibotAutoLearning)'; return }
+      $taskName = 'ArtibotAutoLearning'
+      $gone = $false
+      if (Get-Command schtasks.exe -ErrorAction SilentlyContinue) {
+        try { & schtasks.exe /Delete /TN $taskName /F *> $null; $gone = ($LASTEXITCODE -eq 0) } catch { $gone = $false }
+        if (-not $gone) {
+          # Delete failed: the task was never there (a user may have removed it
+          # by hand) or it could not be removed. The exit codes are the same and
+          # the messages are localized, so ask again - still queryable means
+          # still registered.
+          $still = $false
+          try { & schtasks.exe /Query /TN $taskName *> $null; $still = ($LASTEXITCODE -eq 0) } catch { $still = $false }
+          $gone = -not $still
+        }
+      }
+      if ($gone) {
+        try { Remove-Item -LiteralPath $Marker -Force } catch { }
+        Write-Log 'Removed dead auto-learning schedule (Task Scheduler: ArtibotAutoLearning) - its runner no longer ships'
+      } else {
+        Write-Warn2 'Could not remove the dead auto-learning schedule. Run (cmd or PowerShell): schtasks /Delete /TN ArtibotAutoLearning /F'
+      }
+    }
+    { $_ -in 'hint-only', 'claude-schedule', 'none' } {
+      if ($DryRun) { Write-Log "[dry-run] would clear stale auto-learning marker (method: $method)"; return }
+      try { Remove-Item -LiteralPath $Marker -Force } catch { }
+      Write-Log "Cleared stale auto-learning marker (method: $method) - no scheduler entry was removed"
+    }
+    default { }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Auto-learning — parity with install.sh setup_auto_learning
 # ---------------------------------------------------------------------------
 # install.sh tries claude-schedule -> crontab -> schtasks. On Windows the
 # relevant path is schtasks. We honor the same gating: skip if a marker exists,
@@ -1228,6 +1285,18 @@ function Set-SwarmConsent {
 # via schtasks (idempotent) and write the marker regardless to avoid re-prompts.
 function Set-AutoLearning {
   $marker = Join-Path $ArtibotDir 'auto-learning-registered.json'
+  $runner = Join-Path $ArtibotDir 'scripts\run-auto-learning.js'
+
+  # The runner is gone (Install-Assets replaces scripts\ and drops stale files),
+  # so nothing can be registered and an entry registered earlier is dead. Clean
+  # up BEFORE the marker early-return below: that return is what kept the dead
+  # task alive. Returning here instead of falling through keeps parity with
+  # install.sh, where the cleanup must not reopen a registration path.
+  if (-not (Test-Path -LiteralPath $runner)) {
+    Remove-DeadAutoLearning -Marker $marker
+    return
+  }
+
   if (Test-Path -LiteralPath $marker) {
     Write-Log 'Auto-learning schedule already registered - skipping'
     return
@@ -1255,7 +1324,6 @@ function Set-AutoLearning {
   if ($DryRun) { Write-Log "[dry-run] would register auto-learning ($schedule) via schtasks"; return }
 
   $method = 'hint-only'
-  $runner = Join-Path $ArtibotDir 'scripts\run-auto-learning.js'
   $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
   $schtasks = Get-Command schtasks.exe -ErrorAction SilentlyContinue
 

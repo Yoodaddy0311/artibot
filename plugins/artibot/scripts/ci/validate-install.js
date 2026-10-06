@@ -54,6 +54,7 @@ export const PARITY_MATRIX = [
   { name: 'auto-memory seed', sh: 'seed_auto_memory', ps1: 'Initialize-AutoMemory' },
   { name: 'swarm consent', sh: 'setup_swarm_consent', ps1: 'Set-SwarmConsent' },
   { name: 'auto-learning', sh: 'setup_auto_learning', ps1: 'Set-AutoLearning' },
+  { name: 'auto-learning dead-registration cleanup', sh: '_unregister_dead_auto_learning', ps1: 'Remove-DeadAutoLearning' },
   { name: 'settings config', sh: 'configure_settings', ps1: 'Set-Settings' },
 ];
 

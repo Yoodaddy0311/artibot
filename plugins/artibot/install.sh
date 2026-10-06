@@ -1517,8 +1517,132 @@ _try_schtasks() {
   return $?
 }
 
+# ──────────────────────────────────────────────
+# Dead-registration cleanup (lane 1D)
+#
+# scripts/run-auto-learning.js was deleted in 211712e3 (2026-07-09), but an
+# entry registered while it existed (crontab, or the Windows task
+# ArtibotAutoLearning at 03:00) keeps firing it: MODULE_NOT_FOUND on every run.
+# _try_crontab/_try_schtasks already refuse to REGISTER without the runner;
+# nothing ever removed an EXISTING entry, because the marker early-return in
+# setup_auto_learning made every later install skip all of this.
+#
+# ALLOWLIST: the scheduler is touched only when the marker says this installer
+# registered the entry (method = schtasks | crontab). claude-schedule, hint-only
+# and none only lose their marker; an unreadable marker is left alone. An entry
+# the installer has no record of creating is never deleted.
+# ──────────────────────────────────────────────
+
+# Run the Windows scheduler CLI with MSYS argument conversion switched off.
+#
+# Git Bash rewrites every argument that starts with "/" before it reaches a
+# native .exe, so `schtasks.exe /Delete /TN X /F` arrives as
+# `C:/Program Files/Git/Delete C:/Program Files/Git/TN X F:/` and fails.
+# Measured 2026-10-07 with node as the native probe (the real schtasks.exe was
+# NOT called). MSYS2_ARG_CONV_EXCL='*' turns the rewrite off; it is inert on
+# Linux, macOS and under PowerShell.
+_schtasks_cli() {
+  local bin="schtasks.exe"
+  command -v schtasks.exe &>/dev/null || bin="schtasks"
+  MSYS2_ARG_CONV_EXCL='*' "$bin" "$@"
+}
+
+# Print the "method" recorded in the marker (schtasks, crontab, ...), or nothing
+# when it cannot be read. Plain sed on purpose: both installers write the marker
+# (JSON.stringify puts one space after the colon, Windows PowerShell's
+# ConvertTo-Json two), and a cleanup that needs node would silently do nothing
+# on a machine where node is missing.
+_auto_learning_marker_method() {
+  sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+# Remove the ArtibotAutoLearning task. Returns 0 when it is gone (deleted, or it
+# was never there) and 1 when it may still be registered (delete failed, or no
+# scheduler CLI to ask).
+_unregister_schtasks_entry() {
+  local task_name="ArtibotAutoLearning"
+  if ! command -v schtasks.exe &>/dev/null && ! command -v schtasks &>/dev/null; then
+    return 1
+  fi
+  if _schtasks_cli /Delete /TN "$task_name" /F &>/dev/null; then
+    return 0
+  fi
+  # Delete failed: the task was never there (a user may have removed it by hand)
+  # or it could not be removed. The exit codes are the same and the messages are
+  # localized, so ask again — still queryable means still registered.
+  if _schtasks_cli /Query /TN "$task_name" &>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
+# Remove only the line _try_crontab wrote. Both of its markers must be present
+# (the runner path and the trailing comment), so a line a person edited or wrote
+# by hand is never dropped. Returns 0 when nothing of ours is left, 1 on failure.
+_unregister_crontab_entry() {
+  command -v crontab &>/dev/null || return 1
+  local current filtered
+  # No crontab at all => nothing of ours is registered.
+  current=$(crontab -l 2>/dev/null) || return 0
+  filtered=$(printf '%s\n' "$current" | awk '!(index($0, "run-auto-learning.js") && index($0, "# artibot-auto-learning"))')
+  [ "$filtered" = "$current" ] && return 0
+  if [ -z "$filtered" ]; then
+    crontab -r 2>/dev/null
+  else
+    printf '%s\n' "$filtered" | crontab - 2>/dev/null
+  fi
+}
+
+# Always returns 0: a failed cleanup must never abort the install (set -e).
+_unregister_dead_auto_learning() {
+  local marker="$1"
+  [ -f "$marker" ] || return 0
+
+  local method=""
+  method=$(_auto_learning_marker_method "$marker") || method=""
+
+  case "$method" in
+    schtasks)
+      if _unregister_schtasks_entry; then
+        rm -f "$marker"
+        log "Removed dead auto-learning schedule (Task Scheduler: ArtibotAutoLearning) - its runner no longer ships"
+      else
+        warn "Could not remove the dead auto-learning schedule. Run (cmd or PowerShell): schtasks /Delete /TN ArtibotAutoLearning /F"
+      fi
+      ;;
+    crontab)
+      if _unregister_crontab_entry; then
+        rm -f "$marker"
+        log "Removed dead auto-learning schedule (crontab line marked '# artibot-auto-learning') - its runner no longer ships"
+      else
+        warn "Could not remove the dead auto-learning schedule. Run 'crontab -e' and delete the line ending in '# artibot-auto-learning'"
+      fi
+      ;;
+    hint-only|claude-schedule|none)
+      rm -f "$marker"
+      log "Cleared stale auto-learning marker (method: ${method}) - no scheduler entry was removed"
+      ;;
+    *)
+      : # unreadable or unknown method: leave the marker and the scheduler alone
+      ;;
+  esac
+  return 0
+}
+
 setup_auto_learning() {
   local marker="${ARTIBOT_DIR}/auto-learning-registered.json"
+
+  # The runner is gone (install_hooks drops stale files from scripts/), so
+  # nothing can be registered and an entry registered earlier is dead. Clean up
+  # BEFORE the marker early-return below: that return is what kept the dead
+  # entry alive. Returning here instead of falling through matters too: the
+  # cleanup may just have removed the marker, and the strategies below include
+  # `claude schedule`, which never looks at the runner and would register a
+  # fresh entry for a pipeline that no longer exists.
+  if [ ! -f "${ARTIBOT_DIR}/scripts/run-auto-learning.js" ]; then
+    _unregister_dead_auto_learning "$marker"
+    return 0
+  fi
 
   # Skip if already registered
   if [ -f "$marker" ]; then
@@ -1766,7 +1890,7 @@ main() {
     # This is an ALLOWLIST, not a denylist. check_prerequisites (wants the
     # claude CLI), the marketplace/cache mirrors, install_mcp,
     # configure_settings, the three seed_* steps, setup_swarm_consent,
-    # setup_auto_learning (registers crontab/schtasks — machine scope) and
+    # setup_auto_learning (registers/removes crontab/schtasks entries — machine scope) and
     # save_source_path are excluded BY NOT BEING LISTED. A step added to
     # `install)` later does not leak in here on its own; someone has to decide
     # it belongs. A denylist would have failed open on exactly that.
