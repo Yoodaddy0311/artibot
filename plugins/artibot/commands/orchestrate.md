@@ -64,12 +64,12 @@ Parse $ARGUMENTS:
    - Use `TaskList` / `TaskGet` to monitor progress
 6. **Coordinate via Messaging**: Manage inter-phase communication:
    ```
-   SendMessage(type="message", recipient="{next-agent}", content="{handoff context}")
+   SendMessage(to="{next-agent}", message="{handoff context}")
    ```
    - Pass findings, artifacts, and constraints between phases
    - Route implementation output to reviewers
    - Aggregate feedback at decision points
-   - Use `SendMessage(type="broadcast")` only for critical team-wide updates
+   - For critical team-wide updates only, send one `SendMessage(to="{teammate}")` per teammate (the tool has no broadcast)
 7. **Quality Gates**: Validate final output before completion:
    - All tests passing
    - No CRITICAL/HIGH review findings
@@ -77,7 +77,7 @@ Parse $ARGUMENTS:
    - Security scan clean
 8. **Shutdown and Cleanup**: Gracefully end the orchestration:
    ```
-   SendMessage(type="shutdown_request", recipient="{teammate}")
+   SendMessage(to="{teammate}", message={type: "shutdown_request"})
    ```
    - Send shutdown requests to all teammates
    - Wait for shutdown confirmations
@@ -91,9 +91,8 @@ Between each pipeline phase, the orchestrator sends a structured handoff message
 
 ```
 SendMessage(
-  type="message",
-  recipient="{next-phase-agent}",
-  content="
+  to="{next-phase-agent}",
+  message="
     HANDOFF: {from-agent} -> {to-agent}
     ========================================
     Phase:     {completed phase name}

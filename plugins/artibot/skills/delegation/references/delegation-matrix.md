@@ -52,12 +52,12 @@ Target ratio: **Sub-Agent ~35% | Team ~40%** (remaining ~25% is direct execution
 | `TaskUpdate` | Assign, claim, complete, set dependencies | Throughout lifecycle |
 | `TaskList` | View tasks and status | Coordination and self-claiming |
 | `TaskGet` | Read full task details | Before starting a task |
-| `SendMessage(type: "message")` | DM specific teammate | Coordination |
-| `SendMessage(type: "broadcast")` | Message all teammates | Critical announcements only |
-| `SendMessage(type: "shutdown_request")` | Request teammate shutdown | Cleanup phase |
-| `SendMessage(type: "shutdown_response")` | Approve/reject shutdown | Response to request |
-| `SendMessage(type: "plan_approval_response")` | Approve/reject plan | Plan mode workflow |
-| `SendMessage(shutdown_request)` | Shut a teammate down; this IS the teardown | Per teammate, when done |
+| `SendMessage(to="<teammate-name>")` | DM specific teammate | Coordination |
+| `SendMessage(to="<teammate-name>")` once per teammate (the tool has no broadcast) | Message all teammates | Critical announcements only |
+| `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` | Request teammate shutdown | Cleanup phase |
+| `SendMessage(to="<leader>", message={type: "shutdown_response", ...})` | Approve/reject shutdown | Response to request |
+| `SendMessage(to="<teammate-name>", message={type: "plan_approval_response", ...})` | Approve/reject plan | Plan mode workflow |
+| `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` | Shut a teammate down; this IS the teardown | Per teammate, when done |
 
 ## Sub-Agent Specialization
 
@@ -99,5 +99,5 @@ Applies to both Sub-Agent and Team modes:
 5. [ ] `TaskUpdate` to assign or let teammates self-claim
 6. [ ] Monitor via `TaskList` and coordinate via `SendMessage`
 7. [ ] Aggregate results as tasks complete
-8. [ ] `SendMessage(shutdown_request)` to each teammate
+8. [ ] `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` to each teammate
 9. [ ] shutdown_request to every teammate -- that is the whole cleanup

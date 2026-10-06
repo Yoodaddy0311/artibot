@@ -44,10 +44,10 @@ Target ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 | `TaskUpdate` | Assignment and progress | Assign, claim, complete |
 | `TaskList` | Coordination | View available/blocked tasks |
 | `TaskGet` | Before starting work | Read full task details |
-| `SendMessage(message)` | Coordination | DM a specific teammate |
-| `SendMessage(broadcast)` | Critical announcements | Message all teammates |
-| `SendMessage(shutdown_request)` | Completion | Request teammate exit |
-| `SendMessage(shutdown_request)` | Cleanup | Shut down each teammate when done |
+| `SendMessage(to="<teammate-name>")` | Coordination | DM a specific teammate |
+| `SendMessage(to="<teammate-name>")` once per teammate (the tool has no broadcast) | Critical announcements | Message all teammates |
+| `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` | Completion | Request teammate exit |
+| `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` | Cleanup | Shut down each teammate when done |
 
 ## Wave Mode Triggers
 

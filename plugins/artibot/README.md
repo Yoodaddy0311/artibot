@@ -404,10 +404,10 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 | 생명주기 | 일회성 | 생성 → 작업 → 종료 → 정리 |
 
 **사용하는 Agent Teams API 도구:**
-- `SendMessage` - DM, 브로드캐스트, 셧다운 요청/응답, 계획 승인
+- `SendMessage` - DM, 브로드캐스트(팀원마다 한 번씩 전송), 셧다운 요청/응답, 계획 승인
 - `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` - 공유 태스크 관리
 - `Agent(type, name="{run-slug}-{role}")` - 팀원 스폰. 팀은 세션당 하나(암묵적)라 생성 호출이 없다 (런 슬러그 = `team-{task-slug}-{sid}`, `{sid}` 는 세션 판별자 — `commands/team.md` Phase 2 참조)
-- 해체 호출은 없다 — 팀원 전원에게 `SendMessage(shutdown_request)` 를 보내면 그것이 정리의 전부다
+- 해체 호출은 없다 — 팀원 전원에게 `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` 를 보내면 그것이 정리의 전부다
 
 ### CTO-Led 팀 오케스트레이션
 
@@ -1008,9 +1008,9 @@ cd artibot/plugins/artibot && bash install.sh
 6. [팀원 작업 수행]
    - TaskGet → 태스크 상세 확인
    - TaskUpdate(status: "in_progress") → 작업 시작
-   - SendMessage(type: "message") → 리더/동료에게 보고
+   - SendMessage(to="<leader or teammate-name>") → 리더/동료에게 보고
    - TaskUpdate(status: "completed") → 완료
-7. SendMessage(type: "shutdown_request") × N  -- 종료 요청
+7. SendMessage(to="<teammate-name>", message={type: "shutdown_request"}) × N  -- 종료 요청
 8. shutdown_request 전원 발송  -- 이것이 정리의 전부
 ```
 
@@ -1354,7 +1354,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 2. TaskGet(taskId) → 상세 요구사항 확인
 3. TaskUpdate(taskId, status: "in_progress") → 작업 시작
 4. [전문 역할 수행]
-5. SendMessage(type: "message", recipient: "team-lead") → 진행 보고
+5. SendMessage(to="<leader>") → 진행 보고
 6. TaskUpdate(taskId, status: "completed") → 완료
 7. TaskList → 다음 태스크 확인 (self-claim)
 8. shutdown_request 수신 → shutdown_response(approve: true)

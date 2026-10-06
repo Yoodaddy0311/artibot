@@ -26,9 +26,9 @@ tools:
   # accept a shutdown_request. The Agent schema states this directly:
   # "team_name — Deprecated; ignored. The session has a single implicit team."
   # --- Communication ---
-  - SendMessage          # DM (type:"message"), broadcast (type:"broadcast")
-                         # shutdown (type:"shutdown_request"/"shutdown_response")
-                         # plan approval (type:"plan_approval_response")
+  - SendMessage          # DM: to=<name>, message="..." — no broadcast (one call per teammate)
+                         # shutdown: message={type:"shutdown_request"|"shutdown_response", ...}
+                         # plan approval: message={type:"plan_approval_response", request_id, approve}
   # --- Task Management ---
   - TaskCreate
   - TaskUpdate
@@ -368,8 +368,8 @@ TaskGet(taskId="2")  # Detailed status of specific task
 ### 6. Coordinate via Messaging
 
 ```
-SendMessage(type="message", recipient="be-dev", content="Auth schema approved. Proceed with implementation.", summary="Auth schema approved")
-SendMessage(type="broadcast", content="Phase 1 complete. Moving to implementation.", summary="Phase 1 complete")
+SendMessage(to="be-dev", message="Auth schema approved. Proceed with implementation.", summary="Auth schema approved")
+SendMessage(to="<teammate-name>", message="Phase 1 complete. Moving to implementation.", summary="Phase 1 complete")  # the tool has no broadcast: one call per teammate
 ```
 
 ### 7. Approve Teammate Plans
@@ -377,13 +377,13 @@ SendMessage(type="broadcast", content="Phase 1 complete. Moving to implementatio
 When a teammate submits a plan for approval:
 
 ```
-SendMessage(type="plan_approval_response", request_id="abc-123", recipient="arch-lead", approve=true)
+SendMessage(to="arch-lead", message={type: "plan_approval_response", request_id: "abc-123", approve: true})
 ```
 
 Or reject with feedback:
 
 ```
-SendMessage(type="plan_approval_response", request_id="abc-123", recipient="arch-lead", approve=false, content="Add rate limiting to the API design")
+SendMessage(to="arch-lead", message={type: "plan_approval_response", request_id: "abc-123", approve: false, feedback: "Add rate limiting to the API design"})
 ```
 
 ### 8. Graceful Shutdown
@@ -393,9 +393,9 @@ to release teammates — an explicit user request, a complete domain switch, or 
 teammate being replaced. Task completion alone is not a trigger.
 
 ```
-SendMessage(type="shutdown_request", recipient="fe-dev", content="Team released by user request")
-SendMessage(type="shutdown_request", recipient="be-dev", content="Team released by user request")
-SendMessage(type="shutdown_request", recipient="test-lead", content="Team released by user request")
+SendMessage(to="fe-dev", message={type: "shutdown_request", reason: "Team released by user request"})
+SendMessage(to="be-dev", message={type: "shutdown_request", reason: "Team released by user request"})
+SendMessage(to="test-lead", message={type: "shutdown_request", reason: "Team released by user request"})
 # That is the whole teardown. The team is implicit, so once every teammate has
 # confirmed shutdown there is nothing further to disband.
 ```
@@ -599,12 +599,12 @@ Phase: ACT
 
 | Situation | Method | Example |
 |-----------|--------|---------|
-| Assign work to specific teammate | DM | `SendMessage(type="message", recipient="be-dev", ...)` |
-| Provide feedback on teammate's work | DM | `SendMessage(type="message", recipient="reviewer", ...)` |
-| Approve/reject a teammate's plan | Plan Approval | `SendMessage(type="plan_approval_response", ...)` |
-| Phase transition announcement | Broadcast | `SendMessage(type="broadcast", content="Phase 2 complete", ...)` |
-| Critical blocker affecting all | Broadcast | `SendMessage(type="broadcast", content="Blocking issue found", ...)` |
-| Request teammate shutdown | Shutdown | `SendMessage(type="shutdown_request", recipient="fe-dev", ...)` |
+| Assign work to specific teammate | DM | `SendMessage(to="be-dev", ...)` |
+| Provide feedback on teammate's work | DM | `SendMessage(to="reviewer", ...)` |
+| Approve/reject a teammate's plan | Plan Approval | `SendMessage(to="arch-lead", message={type: "plan_approval_response", ...})` |
+| Phase transition announcement | Broadcast | `SendMessage(to="<teammate-name>", message="Phase 2 complete", ...)` once per teammate (the tool has no broadcast) |
+| Critical blocker affecting all | Broadcast | `SendMessage(to="<teammate-name>", message="Blocking issue found", ...)` once per teammate (the tool has no broadcast) |
+| Request teammate shutdown | Shutdown | `SendMessage(to="fe-dev", message={type: "shutdown_request", ...})` |
 
 ### Communication Rules
 
@@ -668,7 +668,7 @@ When teammates produce conflicting outputs:
 | 3. **Announce** | Tell the user: team level, teammate list, what will happen | Text output to user | immediate |
 | 4. **STOP** | **End your turn. Do NOT monitor. Do NOT poll TaskList in a loop.** | - | - |
 | 5. **React** | When a teammate messages you (auto-delivered), wake up and handle: approve plans, resolve blockers, gate quality, transition phases | SendMessage, TaskGet, TaskUpdate | on-demand |
-| 6. **Deliver** | When all tasks done, aggregate results, report to user, then hold teammates idle for the next assignment (Token Conservation Rule) | Text output to user; `SendMessage(type="shutdown_request", ...)` only on explicit release | 1 turn |
+| 6. **Deliver** | When all tasks done, aggregate results, report to user, then hold teammates idle for the next assignment (Token Conservation Rule) | Text output to user; `SendMessage(to="{teammate}", message={type: "shutdown_request", ...})` only on explicit release | 1 turn |
 
 ### What the orchestrator MUST NOT do during Compose (Step 2):
 - ❌ `Read` files to "understand the codebase" - delegate this to a planner or Explore teammate

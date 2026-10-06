@@ -55,7 +55,7 @@ TaskCreate(subject="Stage 1: Lint", description="...")       # Task #1
 TaskCreate(subject="Stage 2: Test", description="...")       # Task #2
 TaskUpdate(taskId="2", addBlockedBy=["1"])
 # When Stage 1 completes:
-SendMessage(type="message", recipient="tester", content="{lint results and context}")
+SendMessage(to="tester", message="{lint results and context}")
 ```
 
 ## Strategy Types
@@ -102,12 +102,12 @@ SendMessage(type="message", recipient="tester", content="{lint results and conte
    - Handle failures: reassign tasks or spawn replacement teammates
    - Use `SendMessage` to coordinate, redirect, or provide additional context
 7. **Aggregate Results**: Combine all teammate outputs:
-   - Collect findings via `SendMessage(type="message")` from each teammate
+   - Collect findings via `SendMessage` from each teammate
    - Merge results by priority and severity
    - Resolve conflicts between teammate recommendations
 8. **Shutdown and Cleanup**: Gracefully end the team:
    ```
-   SendMessage(type="shutdown_request", recipient="{teammate}")
+   SendMessage(to="{teammate}", message={type: "shutdown_request"})
    ```
    - Send shutdown requests to all teammates
    - Wait for confirmations

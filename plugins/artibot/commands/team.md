@@ -241,7 +241,7 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
    `SendMessage(to="{팀원 이름}", message="진행 상황·남은 일·막힌 곳을 한 줄씩. 백그라운드 작업을 걸어 뒀다면 지금 포그라운드로 결과를 확인하라.")`.
    메시지는 유휴 팀원을 깨운다. 그리고 같은 길이로 타이머를 다시 건다.
 4. **두 번째 기한에도 무응답이면 재스폰한다** — `TaskStop(task_id="{팀원 이름}")` 로 멈추고(도구 설명: 팀원은 이름 또는
-   `name@team` 으로 멈출 수 있다 — 실호출 미측정. 실패하면 `SendMessage(type="shutdown_request", recipient="{팀원}")`), 같은 작업 명세에
+   `name@team` 으로 멈출 수 있다 — 실호출 미측정. 실패하면 `SendMessage(to="{팀원}", message={type: "shutdown_request"})`), 같은 작업 명세에
    "이전 팀원의 산출물: {변경 파일·커밋·브랜치}" 를 붙여 새 이름(`team-*-{role}-r2`)으로 띄운다. 이전 팀원의
    변경을 버리지 말고 이어받게 한다. 응답에 사용량 한도("limit"·"reset") 문구가 보이면 재스폰 대신 리셋
    시각에 맞춘 타이머를 걸고 그 사실을 사용자에게 한 줄로 알린다.
@@ -271,7 +271,7 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
    보고 계약 1조가 이미 그 채널을 강제한다.
 3. Phase 3.5 진행률 바의 `done`/`total` 은 리더가 배정한 작업 단위 수와 수신한 완료 보고
    수로 직접 센다 (태스크 조회 없이도 계산이 성립한다).
-4. Phase 6 SHUTDOWN 은 그대로다 — `SendMessage(type="shutdown_request", ...)` 는 태스크
+4. Phase 6 SHUTDOWN 은 그대로다 — `SendMessage(to="{팀원}", message={type: "shutdown_request"})` 는 태스크
    도구와 별개다.
 
 `SendMessage` 마저 없으면 팀원은 애초에 주소가 잡히지 않는다. 그때는 이름 없이
@@ -516,7 +516,7 @@ Then wait for the user's next instruction. When a new task arrives, go back to *
 
 ### Phase 6: SHUTDOWN (On Request Only)
 ```
-SendMessage(type="shutdown_request", recipient="{teammate}")
+SendMessage(to="{teammate}", message={type: "shutdown_request"})
 ```
 - Shutdown all teammates after explicit user request
 - 그게 정리의 전부다 — 팀이 암묵적이라 뒤에 붙는 해체 호출이 없다
@@ -568,7 +568,7 @@ When the user gives a new task to a persistent team:
 ### Releasing Specific Teammates
 **다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만** 해제:
 ```
-SendMessage(type="shutdown_request", recipient="{teammate-to-release}")
+SendMessage(to="{teammate-to-release}", message={type: "shutdown_request"})
 ```
 - **업무 완료만으로는 셧다운 사유가 안 됨** — 재소환 비용(토큰) > idle 유지 비용
 - 애매하면 유지 — 다음 작업에서 다시 활용 가능

@@ -161,10 +161,10 @@ When running as a teammate in an agent team:
 
 1. **On Start**: Call `TaskList()` to find tasks assigned to you. Use `TaskGet(taskId)` to read full task details before starting work
 2. **Claim Work**: Use `TaskUpdate(taskId, status="in_progress")` when you begin a task
-3. **Report Progress**: Use `SendMessage(type="message", recipient="<team-lead>")` to report findings, ask clarifying questions, or flag blockers
-4. **Complete Work**: Use `TaskUpdate(taskId, status="completed")` when done, then `SendMessage` your deliverable summary to the team lead
-5. **Peer Communication**: Use `SendMessage(type="message", recipient="<teammate-name>")` for direct coordination with other teammates when needed
-6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(type="shutdown_response", request_id="...", approve=true)`
+3. **Report Progress**: Use `SendMessage(to="<leader>")` to report findings, ask clarifying questions, or flag blockers; `<leader>` is the address named in your spawn prompt's report contract (`main` when the leader is the main session)
+4. **Complete Work**: Use `TaskUpdate(taskId, status="completed")` when done, then `SendMessage` your deliverable summary to `<leader>`
+5. **Peer Communication**: Use `SendMessage(to="<teammate-name>")` for direct coordination with other teammates when needed
+6. **Shutdown**: When you receive a `shutdown_request`, finish any in-progress task, mark it completed, and respond with `SendMessage(to="<leader>", message={type: "shutdown_response", request_id: "...", approve: true})`
 
 감사 대상이 리더의 보고여도 동일하게 감사한다. 리더의 인용·지시·전제가 틀렸으면 그대로 보고하라 — 교정도 완결된 결과다.
 
