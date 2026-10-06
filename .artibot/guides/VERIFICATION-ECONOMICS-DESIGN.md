@@ -1,6 +1,6 @@
 # Artibot 검증 경제성·안정성 개선 설계
 
-작성일: 2026-10-05 · 상태: **제안 설계 — §3.0 대기창과 §2.1 중 §11 '없는 명령 3종' 정리만 구현됨(2026-10-05, 대기창은 라이브 미검증), 나머지 제품 구현 미적용**  
+작성일: 2026-10-05 · 상태: **제안 설계 — §3.0 대기창과 §2.1 중 §11 '없는 명령 3종' 정리만 구현됨(2026-10-05, 대기창은 라이브 미검증), §3.2 `completion` 부분은 2026-10-06 브랜치 `fix/verify-completion-contract` 에 구현(master 착지 전), 나머지 제품 구현 미적용**  
 기준: `bc98327a7cdf94fa040dc6bfce56a1181c0d7377` / v4.71.2  
 근거: [플러그인 감사 보고서](../REPORTS/plugin-economics-audit-2026-10-04.md). A/B/C 번호는 이 보고서의 항목이며, 아래 섹션 제목·행에 `(A2)` 같은 태그로 대응시켰다(매핑: A1→§2.2 tdd-workflow, A2→§2.1·§2.2 §11, A3→§2.3, A4→§2.2 plan/ultraplan/session-sizer, A5→§2.2 test-patterns+§2.4 설치본 규칙, B1→§3.1, B2→§3.3, B3→§3.2, B4→§3.4, C1→§4.1, C2→§4.2, C3→§4.3, C4→§5(+§3.1 npm ci fallback), C5→§4.4). **보고서에 없는 이 가이드 고유 제안**: §3.4의 autopilot 10분 기본값, §3.1의 concurrency YAML, §5의 adapter 계약 세부.
 **링크 주의:** 인용한 감사 보고서와 이 가이드는 둘 다 untracked다(`git ls-files .artibot/REPORTS` = 0건, 2026-10-05 실측). 가이드만 커밋하면 위 상대 링크가 깨진다.
@@ -265,7 +265,7 @@ concurrency:
 
 ### 3.2 테스트 snapshot v2: 먼저 범위를 표시하고 자동 생략은 하지 않음 (B3)
 
-**판정 분할:** `completion` 부분(`reason`과 `unhandledErrors.length`를 둘 다 읽고 미완료를 센다) = **NECESSARY**. selection/source/environment/runId = **DEFER**(사고 증거 없음; 원장의 라이브 전체 통과 PASS 1건은 878모듈 전체 실행이었고, 지시 표면이 필터된 `npm test`를 돌리는 경우는 없음). §3.2.6의 deterministic-source 수정은 completion에 의존하므로 함께 출하한다. (감사팀 판정, 2026-10-05)
+**판정 분할:** `completion` 부분(`reason`과 `unhandledErrors.length`를 둘 다 읽고 미완료를 센다) = **NECESSARY**. selection/source/environment/runId = **DEFER**(사고 증거 없음; 원장의 라이브 전체 통과 PASS 1건은 878모듈 전체 실행이었고, 지시 표면이 필터된 `npm test`를 돌리는 경우는 없음). §3.2.6의 deterministic-source 수정은 completion에 의존하므로 함께 출하한다. (감사팀 판정, 2026-10-05) **진행(2026-10-06):** `completion` 부분(reporter 쓰기 + deterministic-source 소비)은 브랜치 `fix/verify-completion-contract`에 구현했다(커밋 SHA 미정, master 착지 전). 나머지는 DEFER 그대로이며, 아래 '현재 구현 사실' 단락은 이 변경 전의 감사 기준이다.
 
 수정 대상:
 
@@ -305,7 +305,7 @@ exit 1이었던 8케이스 중 PASS 4 · UNMEASURED 1 · FAIL 3. **손으로 만
 
 **현재 구현 사실(감사 보고 기준, 재열람 안 함):** 현 reporter는 8개 키(timestamp, durationMs, modules, totalTests, passed, failed, skipped, failedFiles)를 mkdirSync+writeFileSync로 쓴다(**원자적 아님**). 원자 유틸 `lib/core/file.js#atomicWriteJsonSync`는 있으나 `tests/reporters/test-status-reporter.test.js`가 reporter 파일 하나만 임시 root에 복사하므로 reporter에서 `../../lib/...`를 import하면 그 하네스가 깨진다 → inline tmp+rename / 주입 writer / 하네스 변경 중 선택. 같은 테스트가 **정확히 8개 키**를 고정한다(필드를 추가하면 RED). `tests/verification/deterministic-source.test.js`는 REASONS 길이 6 + 해시 인라인 스냅샷 7개 + 정확한 evidence-note 문자열을 고정한다.
 
-`unfinishedCount` 정의(감사팀): `options.mode==='run'`이면서 결과 state가 passed/failed가 아닌 테스트 수이며, 선언된 skip/todo는 따로 센다. 정직한 공백: 현재 실제 snapshot의 totalTests 26574 vs passed 26464 + skipped 48 → **62건이 설명되지 않는다**(원인 미확인, 마이크로 스위트에서 재현 못 함).
+`unfinishedCount` 정의(감사팀): `options.mode==='run'`이면서 결과 state가 passed/failed가 아닌 테스트 수이며, 선언된 skip/todo는 따로 센다. 정직한 공백: 현재 실제 snapshot의 totalTests 26574 vs passed 26464 + skipped 48 → **62건이 설명되지 않는다**(원인 미확인, 마이크로 스위트에서 재현 못 함). **정정(구현 단계 실측, vitest 4.0.18, 2026-10-06):** 구현은 `options.mode`가 아니라 결과 state로 센다. `unfinishedCount`는 state가 passed·failed·skipped 어느 것도 아닌 테스트 수이고, 선언된 skip/todo와 실행 중 `ctx.skip()`은 모두 `skipped`로 센다. `ctx.skip()`은 mode `'run'`인데 state는 `'skipped'`로 끝나므로(`it.skip`은 mode `'skip'`, `it.todo`는 mode `'todo'`, 둘 다 state `'skipped'`), mode 기준 정의는 이 repo의 호스트 조건부 `ctx.skip()` 호출 4곳 때문에 깨끗한 실행도 호스트에 따라 “미완료”로 만든다.
 
 `cleanAtStart/End` 정의: 이 repo는 항상 untracked 항목이 있어 '깨끗함'이 로컬에서 늘 false가 된다 → tracked만(`--untracked-files=no`)인지 `??` 포함인지 정의해야 한다. git 비용(Node execFileSync 실측, 감사팀): rev-parse 19~24 ms, status --porcelain 40~67 ms(4회 ≈ 100~200 ms vs 전체 실행 ~317,884 ms); git 아닌 컨텍스트는 exit 128 → null.
 
@@ -530,7 +530,7 @@ return withFileLock(storePath, () => {
 |---|---|---|
 | 규칙·리뷰 | **정정:** `scripts/ci/validate-{agents,commands,skills}.js`는 frontmatter만 검사한다. 실제 prose 고정: `constitution-stage-a-rules.test.js`(VD heading ## 0–## 12 + §13 마지막 + `git add -A` 포함 앵커 5개), `constitution-stage-b.test.js`·`constitution-stage-b-rationalizations.test.js`(스킬 heading 기준선), `tests/replay/claim-audit-join.test.js`·`tests/commands/verify-record-steps.test.js`(team.md의 `### Phase 4.5: INSPECTION`, `#### Phase 4.5 마감 — 검증 기록`, `### 중계 계약` heading), `tests/firewall/command-body-tool-parity.test.js`(team.md 본문에 명명된 도구는 allowed-tools에 있어야 함), `tests/skills/anti-rationalization.test.js`. §11의 tsc/prebuild/build 문구를 고정하는 테스트는 없다 (감사 보고 기준, 재열람 안 함) | Cross-check의 재위임 금지와 Inspection 유지가 문서 전체에서 일관됨; 두 WARN만으로 차단하지 않음; 필수 결함은 계속 차단 |
 | CI/릴리스 | `tests/firewall/workflow-branch-lockstep.test.js`, `tests/firewall/badge-stall-sync-order.test.js` | 4환경 테스트 유지, 1환경 coverage, 체크 이름 유지; 동일 SHA 재사용/다른 SHA fallback; count→badge→prose 순서 |
-| snapshot | `tests/reporters/test-status-reporter.test.js`, `tests/verification/deterministic-source.test.js` | v1 호환, targeted/unknown, 중단·미처리 예외, 합계 밖 상태, reporter를 전체 CI 증거로 오인하지 않음 |
+| snapshot | `tests/reporters/test-status-reporter.test.js`, `tests/verification/deterministic-source.test.js`, `tests/verification/deterministic-source-completion.test.js` | v1 호환, targeted/unknown, 중단·미처리 예외, 합계 밖 상태, reporter를 전체 CI 증거로 오인하지 않음 |
 | usage | `tests/economics/usage-receipt.test.js`, `tests/evals/context-roi-census.test.js`, 기존 schema guard | 10→160, 손상된 마지막 행, run 분리, ID/필드 누락, 모델 충돌, 두 소비자의 결과 일치 |
 | memory | `tests/learning/memory-manager.test.js`(lib/core/file.js 부분 mock — withFileLock을 추가하면 실제 ARTIBOT_DIR에 **실제 `.lock`**이 생기므로 ARTIBOT_STATE_DIR(+ARTIBOT_STATE_DIR_HOME) 격리 필요; tracker는 그 seam을 무시), `tests/hooks/session-end.test.js`, `tests/hooks/memory-tracker.test.js`(SessionEnd 쓰기를 단언하는 3개 테스트 → 그 경로를 제거하면 RED), `tests/learning/pipeline-success-experience.test.js`(~:381, summarize mock이 undefined를 반환하는데 `summarized:true`를 단언). 두 실제 자식 프로세스를 쓰는 기존 테스트는 없다 (감사 보고 기준, 재열람 안 함) | **두 실제 자식 프로세스가 같은 임시 store를 갱신해 둘 다 보존**; 손상 파일 보존; 한 writer; project 전달; 중복 이벤트; 실패 전파 |
 | 토큰·skill | `tests/hooks/runtime-prompt.test.js`와 해당 middleware/UI 기존 검사 | 추정/실측 표시 구분, legacy 처리, 기본 prompt·추천 계약 유지, 불필요 본문 읽기 없음 |

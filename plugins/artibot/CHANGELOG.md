@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `/save` 핸드오프의 Lint 칸이 테스트 결과로 `OK` 를 찍지 않는다
+
+- `lib/handoff/handoff-builder.js#renderStateTable` 이 만드는 HANDOFF `## 1. 지금 상태` 표의 **Lint 칸이 항상 `미측정`이다.** 종전에는 테스트 snapshot 의 `failed === 0` 이면 `OK`(아니면 `(check)`)를 찍어, 낡은 snapshot 이어도 테스트 실패 0 을 린트 통과처럼 보여 줬다. 테스트 결과는 린트 증거가 아니고 인계 데이터에 린트 필드도 없다. Tests 칸은 그대로다. 인계 생성 시 린트를 자동 실행하거나 증거 저장소를 새로 만드는 일은 범위 밖이라 이 칸은 계속 `미측정`이다.
+- 테스트: `tests/handoff/handoff-builder.test.js` 의 "§1 Lint 행" 블록이 Lint 행이 `미측정` 이고 `OK` 표기가 문서 어디에도 없음을 고정한다.
+
+### Stop 게이트가 vitest 자신이 실패로 끝낸 실행을 PASS 로 읽지 않는다 (snapshot `schemaVersion: 2` + `completion`, 라이브 Stop 게이트 반응은 미검증)
+
+- **`failed === 0` 은 "테스트가 하나도 안 떨어졌다"일 뿐 "실행이 정상 종료했다"가 아니다.** 미처리 오류 · suite 훅 throw · 중단처럼 vitest 가 실행 자체를 실패로 끝내도 `failed` 는 0 일 수 있다. 종전 Stop 게이트(`scripts/hooks/dev-verify-gate.js`)는 그런 snapshot 을 결정론 층 `pass` 로 기록했다.
+- **리포터**(`tests/reporters/test-status-reporter.js`)는 기존 8개 키에 `schemaVersion: 2` 와 `completion { reason, unhandledErrorCount, unfinishedCount }` 를 더해 쓴다. `reason`(vitest 의 판정)과 `unhandledErrorCount`(테스트 밖에서 난 오류 수)는 `onTestRunEnd` 인자에서 얻고, 얻지 못하면 `0` 이나 `'passed'` 로 채우지 않고 `null` 로 둔다. `unfinishedCount` 는 `options.mode` 가 아니라 결과 state 가 passed·failed·skipped 가 아닌 테스트 수다 — `ctx.skip()` 은 mode `'run'` 인데 state `'skipped'` 로 끝나므로 mode 로 세면 skip 이 일어난 호스트에서 깨끗한 실행이 "미완료"가 된다.
+- **판정**(`lib/verification/deterministic-source.js#deterministicLayerFrom`): `completion` 이 없는 v1 기록은 종전 그대로 `failed === 0` 으로 읽는다(reason · 증거 note · `verification_id` 바이트 동일). v2 는 첫 번째로 맞는 규칙이 이긴다 — `failed` > 0, 미처리 오류 > 0, reason `failed` 는 FAIL(exitCode 1). reason `interrupted`, 미완료 테스트 > 0, 읽을 수 없는 `completion` 은 UNMEASURED(exitCode 생략, 새 `REASONS` `interrupted` · `unfinished` · `completionUnreadable`). PASS 는 reason `passed` + 미처리 0 + 미완료 0 일 때만이다(허용목록 — 목록에서 빠졌다고 PASS 가 되지 않는다). exitCode 가 있는 v2 판정의 증거 note 에는 `completion=… unhandled=… unfinished=…` 절이 더해진다.
+- **측정**(리더·구현자 실측 2026-10-06, 실제 vitest 4.0.18, 시나리오 18개): 수정 전 vitest 가 exit 1 로 끝났는데 합성 exitCode 0 으로 읽힌 시나리오가 6개였고 수정 후에는 0개다. vitest 가 exit 0 인 시나리오가 막힌 경우는 없다.
+- **못 보는 것 / 남은 것**: 수집 오류만 있는 실행은 테스트 0건 가드가 먼저 걸려 UNMEASURED(`emptyRun`)로 남는다(FAIL 도 PASS 도 아니다). SessionStart 경고(`lib/core/test-status.js`)는 여전히 `failed` 만 본다. selection(전체/부분 실행) · source · environment · runId 필드와 snapshot 원자적 쓰기는 `.artibot/guides/VERIFICATION-ECONOMICS-DESIGN.md` §3.2 대로 보류했고, `/autopilot` 의 결과 없는 VERIFY 완료를 거부하는 strict 모드도 켜지 않았다. 18개 시나리오는 마이크로 스위트라, 이 브랜치에서 실제 전체 스위트를 1회 돌려 따로 쟀다(리더 실측 2026-10-06, Windows, 882 files · 26706 tests): snapshot 은 `schemaVersion: 2`, `completion` = reason `failed` · 미처리 0 · **미완료 0** 이고 26533 passed + 21 failed + 152 skipped = 26706 이라 설명되지 않는 테스트가 없다. 즉 정상 종료한 전체 실행이 미완료 때문에 UNMEASURED 로 막히는 일은 이 표본에서 없었다. 그 런의 실패 21건(16 files: git · 설치 · 락 계열)은 이 변경과 겹치지 않고 각 파일 단독 재실행에서 전부 통과했다(부하 경합으로 보인다). 라이브 Stop 게이트가 v2 snapshot 을 원장에 어떻게 남기는지는 확인하지 않았다.
+- 테스트: `tests/reporters/test-status-reporter.test.js`(스키마 키 · state 기준 미완료 집계), `tests/verification/deterministic-source.test.js`(신선도·미측정 분기 · reason→id 해시 핀 · 포트 경계), `tests/verification/deterministic-source-completion.test.js`(completion 판정 사례 — 앞 파일에서 순수 이동).
+
 ## [4.71.5] — 2026-10-06
 
 `v4.71.4` 이후 6 커밋(`8994caed`·`a31bcbbd`·`e59d41b5`·`3f1281e7`·`0576a1c7`·`75c33524`) = **23 files +476/−34**(`git diff --shortstat v4.71.4..75c33524`, 2026-10-06 측정 — 릴리스 커밋은 이 수치에 없다). 릴리스 전 로컬 전체 스위트는 돌리지 못했다 — 실행이 시작 직후 메모리 부족으로 중단됐고(여유 1.6GB / 15.3GB) 다시 띄우지 않았다. 로컬 실측은 변경 영역 10 파일 201 passed(`--maxWorkers=2`), 플러그인 전체 `eslint . --max-warnings=0`, `validate` · `validate:readme:claims` · `docs:check` 통과이며, 전체 스위트의 판정은 `ci/release-v4.71.5` 의 CI 4개 레그다. 그 CI 가 첫 푸시(`75caaf0f`)에서 실제로 1건을 잡았다 — `tests/firewall/no-control-bytes.test.js` 가 `tests/firewall/release-wait-window-lockstep.test.js` 주석의 리터럴 백스페이스 1바이트(`\b` 를 쓰려던 자리, 256행)로 4개 레그 모두 실패했고(Node 22: 1 failed / 26548 passed / 47 skipped), 릴리스 커밋 뒤 1 커밋으로 그 바이트를 두 글자 `\b` 로 바꿨다(위 수치에 없다). 이 릴리스의 배지 동기화가 아래 대기 루프 수정의 첫 라이브 실행이다 — 결과는 이 항목 작성 시점에 알 수 없다.

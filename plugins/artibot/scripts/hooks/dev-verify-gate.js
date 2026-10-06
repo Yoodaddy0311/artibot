@@ -324,10 +324,14 @@ function resolveHookEventName(hookData) {
  * because a time window lets a stale green outlive the edit that invalidated
  * it). The marker is this session's, not the project's last: a run that covers
  * another session's edit says nothing about this one's.
- * Anything else — absent, corrupt, undated, no marker, stale, or a run that
+ * Anything else — absent, corrupt, undated, no marker, stale, a run that
  * collected ZERO tests (`failed === 0` is true of a suite that never ran, so
- * the count is checked, not the status) — stays `unmeasured`, with the branch
- * recorded in the verdict `reason` and therefore in the `verification_id` hash. `lib/verification/deterministic-source.js`
+ * the count is checked, not the status), a run vitest reported as interrupted,
+ * tests that never reached a final state, or an unreadable `completion`
+ * record — stays `unmeasured`, with the branch recorded in the verdict
+ * `reason` and therefore in the `verification_id` hash. A run vitest itself
+ * ended badly — unhandled errors, or reason 'failed' in `completion` — is a
+ * `fail` even when `failed === 0`. `lib/verification/deterministic-source.js`
  * holds that decision table and the pinned hashes are in its test.
  *
  * Behavioral and operational remain `unmeasured` unconditionally: there is no
