@@ -6,7 +6,12 @@
  *   - re-introduce the github entry
  *   - drop one of the three shipped servers (context7 / playwright / chrome-devtools)
  *   - leak a hard-coded token
- *   - swap a pinned package for an unpinned one
+ *   - float a server off its exact version (@latest, another dist-tag, a range,
+ *     or no version at all)
+ *
+ * Bumping a pin means editing three places together: the args in .mcp.json,
+ * the expected strings in the `points the expected package at each server`
+ * test below, and the measured versions in docs/MCP-SETUP.md.
  */
 
 import { readFileSync } from 'node:fs';
@@ -43,12 +48,18 @@ describe('.mcp.json — server registry', () => {
 
   describe('every server is a pinned stdio/npx server', () => {
     for (const name of ['context7', 'playwright', 'chrome-devtools']) {
-      it(`${name} uses npx with a version-pinned @latest package`, () => {
+      it(`${name} uses npx with an exact-semver-pinned package (never @latest)`, () => {
         const entry = mcpConfig.mcpServers[name];
         expect(entry.command).toBe('npx');
         expect(Array.isArray(entry.args)).toBe(true);
+        expect(entry.args).toHaveLength(2);
         expect(entry.args[0]).toBe('-y');
-        expect(entry.args[1]).toMatch(/@latest$/);
+        // Allowlist, not a ban list: whatever follows the last `@` must be exactly
+        // MAJOR.MINOR.PATCH. That rejects @latest, @next, ranges (@^4.1.1, @4.1,
+        // @4) and a missing version (the slice then returns the package name).
+        const version = entry.args[1].slice(entry.args[1].lastIndexOf('@') + 1);
+        expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(entry.args[1]).not.toMatch(/@latest$/);
       });
     }
   });
@@ -56,15 +67,15 @@ describe('.mcp.json — server registry', () => {
   it('points the expected package at each server', () => {
     expect(mcpConfig.mcpServers.context7.args).toEqual([
       '-y',
-      '@upstash/context7-mcp@latest',
+      '@upstash/context7-mcp@4.1.1',
     ]);
     expect(mcpConfig.mcpServers.playwright.args).toEqual([
       '-y',
-      '@executeautomation/playwright-mcp-server@latest',
+      '@executeautomation/playwright-mcp-server@1.0.12',
     ]);
     expect(mcpConfig.mcpServers['chrome-devtools'].args).toEqual([
       '-y',
-      'chrome-devtools-mcp@latest',
+      'chrome-devtools-mcp@1.10.1',
     ]);
   });
 

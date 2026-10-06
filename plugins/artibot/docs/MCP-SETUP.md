@@ -21,15 +21,15 @@ The servers are declared in `plugins/artibot/.mcp.json`:
   "mcpServers": {
     "context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+      "args": ["-y", "@upstash/context7-mcp@4.1.1"]
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@executeautomation/playwright-mcp-server@latest"]
+      "args": ["-y", "@executeautomation/playwright-mcp-server@1.0.12"]
     },
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest"]
+      "args": ["-y", "chrome-devtools-mcp@1.10.1"]
     }
   }
 }
@@ -37,6 +37,12 @@ The servers are declared in `plugins/artibot/.mcp.json`:
 
 > **Note (Claude Code v2.1.69 bug #30989):** do not set `defer_loading` and
 > `cache_control` simultaneously on the same server entry — MCP fails to load.
+
+---
+
+## Pinned versions
+
+Each server is pinned to an exact release instead of the moving `latest` dist-tag. Every machine and session therefore starts the same code, and a new upstream release reaches users only after someone bumps the pin. The pins were measured on 2026-10-06T16:16:21Z (KST 2026-10-07 01:16) with `npm view <package> version`: `@upstash/context7-mcp` 4.1.1, `@executeautomation/playwright-mcp-server` 1.0.12, `chrome-devtools-mcp` 1.10.1. To bump one, re-run that command and update the three places that name the version together: the `args` in `plugins/artibot/.mcp.json`, the expected string in the `points the expected package at each server` test in `plugins/artibot/tests/mcp/mcp-config.test.js`, and the snippet and measurement date here. The test fails if a server floats back to a tag or a range, or if `.mcp.json` and the expected string differ. No test compares this page's versions with `.mcp.json`, and `docs:check` only validates its links and rendering, so keep its snippet and date in step by hand.
 
 ---
 
