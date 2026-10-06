@@ -344,7 +344,7 @@ hook/statusline이 아니라 **리더의 채팅 출력**이라 항상 보이고,
 After ALL main tasks complete (§기한 있는 대기 5 에서 FAIL 로 둔 단위는 완료로 센다 — 그 단위는 Phase 5 에 FAIL 로 적는다), spawn cross-check agents on the **review 티어** — 팀원별 `--role review` 해석(현재 단일 티어라 전원 opus):
 
 ```
-Agent(subagent_type="code-reviewer", name="team-*-checker-{n}",
+Agent(subagent_type="artibot:code-reviewer", name="team-*-checker-{n}",
      /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer --role review 출력값을 Agent 호출의 model 파라미터에 넘긴다 — review 티어 */
      prompt="[Cross-check Mode]\n\n{teammate-A}의 작업물을 검증해주세요.
      변경 파일: {list}\n요구사항: {original requirements}\n

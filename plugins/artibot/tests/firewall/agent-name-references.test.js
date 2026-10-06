@@ -95,6 +95,57 @@
  *     발견했으나(최종 실측 **14종 / 18건**), 이 파일은 에이전트만 본다.
  *     그 표면은 `command-name-references.test.js` 가 맡는다.
  *
+ * ══ 2차 표면: 호출부 키워드형 `subagent_type=` 의 `artibot:` 접두 규칙 (레인 1E-①, 2026-10-07) ══
+ *
+ * 위 게이트는 이름이 출하 목록에 **있는가**만 본다. 이 절의 게이트는 호출부가 에이전트를
+ * **어떤 이름으로** 부르는가를 본다. 플러그인 에이전트는 `artibot:<이름>` 으로 불러야 하고,
+ * 접두 없는 이름은 호스트가 낡은 평면 사본(`~/.claude/agents`)으로 해석할 수 있다. 이는
+ * 감사 보고 §6 #2 의 주장이며 이 게이트는 그 동작을 **재측정하지 않는다**(P0b 프로브 대기, 미확인).
+ *
+ * 규칙은 허용 목록이다. 호출부 값은 (1) 빌트인 (2) 틀 문자열 자리표시 (3) 틀 문자열
+ * `{type}`·`[…]`·생략표 (4) `artibot:` + 출하 이름 중 하나여야 하고, 그 밖은 전부 위반이다.
+ * 위반 사유는 `no-prefix`(접두 없음, 타 플러그인 접두 포함)와 `unshipped`(접두는 맞는데 출하 목록에 없음).
+ *
+ * **표면을 섞지 않는다(PRD S10).** 이 규칙은 `Agent(<name>)` 위치인자 표면(에이전트 frontmatter
+ * tools 의 `Agent(spec-reviewer)` 등)에 닿지 않는다. 닿으면 에이전트 30개가 즉시 RED 다.
+ * 이쪽은 `extractSubagentTypeCalls` 가 따로 읽고, 위 `extractAgentRefs`·`scanPlugin` 은 무수정이다.
+ *
+ * ── 2차 표면 실측 (커밋·시점 의존 — 재측정 없이 인용하지 마라) ─────────────────
+ * **기준: HEAD `93d82b4e` + 이 레인 편집, 2026-10-07 01:3x KST.**
+ *   - 범위: artibot 의 commands·agents·skills·rules·output-styles·templates 마크다운 **361개**
+ *   - 호출부 `subagent_type=` **23건** = 따옴표 리터럴 18 · 생략표 4 · 대괄호 서술 1
+ *   - 판정: `artibot:` + 출하 이름 **14** · 틀 문자열 **9** · 위반 **0**
+ *   - 수정 전 위반은 정확히 **1건**이었다. `commands/team.md` Phase 4 교차검수 스폰의
+ *     `subagent_type="code-reviewer"`(접두 없음). 같은 파일 Phase 4.5 는 이미 `artibot:code-reviewer` 였다.
+ *   - 독립 교차: 이 게이트의 추출기와 grep 이 같은 23건을 낸다. `plugins/artibot` 에서 재현:
+ *       grep -rIoE --include='*.md' 'subagent_type[[:space:]]*=' commands agents skills rules output-styles templates | wc -l
+ *     콜론 표기까지 넓힌 패턴(`[=:]`)도 같은 23건이라 숨은 콜론형 호출부는 이 시점 **0건**이다.
+ *     패턴을 `subagent_type` 단독으로 넓히면 34회 출현(32줄)이고, 차이 11은 `Agent(subagent_type, name=…)`
+ *     류 위치인자 자리표시와 산문이다.
+ *   - cowork: 마크다운 155개에 호출부 2건, 둘 다 `agents/orchestrator.md` 한 줄의 생략표다(리터럴 0건).
+ *
+ * ── 2차 표면이 못 보는 것 (rules §9 — 게이트 옆에 적어라) ────────────────────────
+ *  1. **실행하지 않는다.** `artibot:x` 가 호스트에서 실제로 해석되는지, 접두 없는 이름이 정말
+ *     평면 사본으로 가는지는 확인하지 않는다. 이름의 **형태**만 본다.
+ *  2. **`Agent(<name>)` 표면은 일부러 안 본다.** orchestrator 의 `Agent(x)` 표기에 접두를 허용하는지는
+ *     P0b 결과를 기다리는 별개 결정이다(PRD 1E-②). 이 게이트가 그 표면에 접두를 강제하지 않는다.
+ *  3. **틀 문자열은 해석하지 못해 통과시킨다.** 통과 9건 중 접두 없는 `{type}` 이 `commands/orchestrate.md`
+ *     와 `commands/spawn.md` 에 1건씩, `[matched agent type]` 이 `commands/sc.md` 에 1건이다. 모델이
+ *     그 자리에 맨이름을 채우면 team.md 의 결함과 같은 결과인데 이 게이트는 못 본다. 템플릿에
+ *     `artibot:` 를 박을지는 사람이 정할 일이다.
+ *  4. **마크다운만 훑는다.** JS·MJS 소스 리터럴(예: `scripts/bench/hook-latency.mjs` 의
+ *     `subagent_type: 'general-purpose'`), JSON, 원장 픽스처, `tests/` 는 대상이 아니다. 거꾸로
+ *     산문 속 `subagent_type="x"` 예시는 호출부로 오인된다(오탐 방향 — 이 시점 0건).
+ *  5. **콜론 표기·위치인자 문자열·백틱 값은 안 읽는다.** 콜론은 `subagent_type: string` 같은 타입
+ *     설명이 맨 토큰으로 오탐되는 것을 피하려고 일부러 뺐다(파서 테스트가 이 구멍을 고정한다).
+ *  6. **cowork 는 면제다.** 접두는 `artibot-cowork:` 일 텐데 cowork 수정은 이 PRD 범위 밖이다(보고만).
+ *     면제의 전제(따옴표·맨 토큰 호출부 0건)는 테스트가 기록하고, `scanSubagentTypeCalls` 는 artibot
+ *     외 플러그인에 쓰면 던진다.
+ *  7. **빌트인 목록은 수동 사본이다**(위 한계 #4 와 같은 이유). 짝은
+ *     `lib/routing/action-classifier.js#HOST_BUILTIN_AGENTS` 다.
+ *  8. **출하 목록은 `agents/*.md` 의 `name:` 필드**이지 파일명이 아니다. 2026-10-07 실측으로 30개가
+ *     전부 파일명과 같다. 둘이 갈라질 때 호스트가 어느 쪽으로 해석하는지는 미확인이다.
+ *
  * @module tests/firewall/agent-name-references
  */
 
@@ -133,8 +184,22 @@ const SCAN_DIRS = ['commands', 'agents', 'skills'];
  *
  * 재확인: Claude Code 세션의 하네스 서브에이전트 목록과 직접 대조하라. 위 수치는
  * "출하하지 않는데 쓰인다"는 **정황**이지 빌트인이라는 직접 증거가 아니다.
+ *
+ * ── `general-purpose` 추가 (레인 1E-①, 2026-10-07) ─────────────────────────────
+ * 호출부 `subagent_type=` 접두 규칙(아래 "2차 표면")이 이 집합을 재사용한다. 원래 집합은
+ * `Explore`·`Plan` 둘뿐이었다. 하네스 빌트인 `general-purpose` 도 접두 없이 불러야 하므로
+ * 면제에 넣었다. 근거는 둘이다.
+ *   - 라이브 원장 census 가 frontmatter 없는 `general-purpose` 스폰을 기록한다
+ *     (`.artibot/guides/v5-design/evidence/m1-live-census-20260930.md` 표 181~188행).
+ *   - 짝 목록 `lib/routing/action-classifier.js#HOST_BUILTIN_AGENTS` 가 `Explore`·`Plan`·
+ *     `general-purpose` 셋이다. 이 집합은 그 목록의 **수동 사본**이다(아래 한계 #4).
+ *
+ * 부작용: 위 `Agent(<name>)` 표면의 면제도 같이 넓어진다. 영향 실측(2026-10-07):
+ * 두 플러그인의 `commands`·`agents`·`skills` 에서 `Agent(general-purpose` 와
+ * `agent: general-purpose` 는 **0건**이라 지금은 어떤 결과도 바뀌지 않는다.
+ * 재현: grep -rn "Agent(general-purpose\|^agent: general-purpose" plugins/artibot/commands plugins/artibot/agents plugins/artibot/skills plugins/artibot-cowork/commands plugins/artibot-cowork/agents plugins/artibot-cowork/skills
  */
-const BUILTIN_SUBAGENTS = new Set(['Explore', 'Plan']);
+const BUILTIN_SUBAGENTS = new Set(['Explore', 'Plan', 'general-purpose']);
 
 /**
  * 이름 자리에 오는 **틀 문자열**. 실제 이름이 아니라 "여기에 이름을 넣어라"는
@@ -256,6 +321,131 @@ export function scanPlugin(plugin, allowlist) {
   return { violations, scanned, refCount, shipped };
 }
 
+// ── 2차 표면: 호출부 키워드형 `subagent_type=` 의 접두 규칙 (레인 1E-①) ──────────
+// 설계·실측·못 보는 것은 파일 머리 주석의 "2차 표면" 절에 있다. 위 `extractAgentRefs` 와
+// `scanPlugin` 은 건드리지 않는다 — 이쪽은 접두를 요구하고 저쪽은 요구하지 않는다.
+
+/**
+ * 이 규칙이 훑는 하위 디렉터리. `SCAN_DIRS` 에 LLM 이 읽는 나머지 마크다운 표면 셋
+ * (`rules`·`output-styles`·`templates`)을 더했다. 그 셋의 호출부는 지금 0건이라 결과는
+ * 같지만, "호출부 bare 0건" 이라는 주장을 **측정한 범위**와 게이트가 **지키는 범위**를
+ * 맞추려는 것이다.
+ */
+const SUBAGENT_SCAN_DIRS = [...SCAN_DIRS, 'rules', 'output-styles', 'templates'];
+
+/** 호스트는 플러그인 에이전트를 `<플러그인>:<이름>` 으로 부른다. artibot 의 접두. */
+const ARTIBOT_AGENT_PREFIX = 'artibot:';
+
+/**
+ * `subagent_type=` 뒤에 오는 값의 네 표기. 캡처 그룹:
+ *   1 `=` 뒤 공백 · 2 따옴표 · 3 따옴표 안의 값 · 4 `[...]` 서술 · 5 생략표 · 6 맨 토큰
+ * 따옴표 앞뒤의 선택적 역슬래시는 JSON 이스케이프(`\"x\"`)를 읽기 위한 것이다.
+ * 맨 토큰은 `=` 바로 뒤에서만 인정한다 — 공백이 끼면 "subagent_type= is omitted" 같은 산문이다.
+ */
+const SUBAGENT_TYPE_CALL = new RegExp(
+  String.raw`(?<![A-Za-z0-9_])subagent_type\s*=(\s*)` +
+    String.raw`(?:\\?(["'])([^"'\\\r\n]*)\\?\2|(\[[^\]\r\n]*\])|(…|\.\.\.)|([A-Za-z][A-Za-z0-9_:-]*))`,
+  'g',
+);
+
+/**
+ * 한 파일에서 호출부 키워드형 `subagent_type=` 의 값을 뽑는다.
+ *
+ * 파는 것: `=` 뒤의 따옴표 문자열 · `=` 바로 뒤 맨 토큰 · `[...]` 서술 · 생략표.
+ * 안 파는 것(알고 남긴 구멍): `Agent(x)` 위치인자, `subagent_type:` 콜론 표기 — 머리 주석 참조.
+ *
+ * @param {string} text
+ * @returns {{value: string, line: number, form: 'quoted'|'bare'|'bracket'|'ellipsis'}[]}
+ */
+export function extractSubagentTypeCalls(text) {
+  const calls = [];
+  text.split(/\r?\n/).forEach((l, i) => {
+    for (const m of l.matchAll(SUBAGENT_TYPE_CALL)) {
+      const [, gap, , quoted, bracket, ellipsis, token] = m;
+      const line = i + 1;
+      if (quoted !== undefined) calls.push({ value: quoted, line, form: 'quoted' });
+      else if (bracket !== undefined) calls.push({ value: bracket, line, form: 'bracket' });
+      else if (ellipsis !== undefined) calls.push({ value: ellipsis, line, form: 'ellipsis' });
+      else if (token !== undefined && gap === '') calls.push({ value: token, line, form: 'bare' });
+    }
+  });
+  return calls;
+}
+
+/** 틀 문자열: `{type}` · `[matched agent type]` · 생략표. 실제 이름이 아니라 "여기에 이름을 넣어라" 표기다. */
+const isTemplateValue = (v) => /[{}[\]…]|\.\.\./.test(v);
+
+/**
+ * 값 하나를 판정한다. **허용 목록**이다 — 아래 넷 중 하나가 아니면 위반이다(fail-closed).
+ *
+ *   1. 빌트인 (`Explore`·`Plan`·`general-purpose`) — 접두 없이 부른다
+ *   2. 틀 문자열 자리표시 (`PLACEHOLDERS`)
+ *   3. 틀 문자열 (`{type}` · `artibot:{agent-type}` · `[…]` · 생략표) — 정적으로 해석 불가라 통과
+ *   4. `artibot:` + 출하 에이전트 이름
+ *
+ * 순서가 load-bearing 이다: 3 이 접두 검사보다 앞이라야 접두 없는 `{type}` 이 통과한다.
+ * 뒤집으면 orchestrate.md · spawn.md 의 `{type}` 이 RED 가 된다.
+ *
+ * @param {string} value
+ * @param {Set<string>} shipped 출하 에이전트 이름(접두 없는 형태)
+ * @returns {{ok: true, via: 'builtin'|'placeholder'|'template'|'prefixed'} | {ok: false, reason: 'no-prefix'|'unshipped'}}
+ */
+export function classifySubagentType(value, shipped) {
+  if (BUILTIN_SUBAGENTS.has(value)) return { ok: true, via: 'builtin' };
+  if (PLACEHOLDERS.has(value)) return { ok: true, via: 'placeholder' };
+  if (isTemplateValue(value)) return { ok: true, via: 'template' };
+  if (!value.startsWith(ARTIBOT_AGENT_PREFIX)) return { ok: false, reason: 'no-prefix' };
+  if (!shipped.has(value.slice(ARTIBOT_AGENT_PREFIX.length))) return { ok: false, reason: 'unshipped' };
+  return { ok: true, via: 'prefixed' };
+}
+
+const readUtf8 = (p) => readFileSync(p, 'utf-8');
+
+/**
+ * 플러그인의 마크다운에서 호출부를 전부 모은다. 판정은 하지 않는다.
+ *
+ * @param {{id: string, dir: string}} plugin
+ * @param {{readFile?: (path: string) => string}} [opts] 뮤테이션 테스트가 메모리 사본을 주입한다.
+ */
+export function collectSubagentTypeCalls(plugin, { readFile = readUtf8 } = {}) {
+  const calls = [];
+  let scanned = 0;
+  for (const sub of SUBAGENT_SCAN_DIRS) {
+    for (const file of walk(join(plugin.dir, sub))) {
+      scanned += 1;
+      const rel = relative(plugin.dir, file).replace(/\\/g, '/');
+      for (const c of extractSubagentTypeCalls(readFile(file))) {
+        calls.push({ ...c, file: `${plugin.id}/${rel}` });
+      }
+    }
+  }
+  return { calls, scanned };
+}
+
+/**
+ * artibot 의 호출부를 접두 규칙으로 판정한다. **artibot 한정**이다 — cowork 는 면제이고,
+ * 다른 플러그인에 쓰면 조용히 틀린 접두로 판정하지 않고 던진다.
+ *
+ * @param {{id: string, dir: string}} plugin
+ * @param {{shipped?: Set<string>, readFile?: (path: string) => string}} [opts]
+ */
+export function scanSubagentTypeCalls(plugin, { shipped = shippedAgents(plugin.dir), readFile } = {}) {
+  if (plugin.id !== 'artibot') {
+    throw new Error(`scanSubagentTypeCalls 는 artibot 한정이다 — ${plugin.id} 는 면제 (머리 주석 "2차 표면" 절)`);
+  }
+  const { calls, scanned } = collectSubagentTypeCalls(plugin, { readFile });
+  const via = { builtin: 0, placeholder: 0, template: 0, prefixed: 0 };
+  const violations = [];
+  for (const c of calls) {
+    const verdict = classifySubagentType(c.value, shipped);
+    if (verdict.ok) via[verdict.via] += 1;
+    else violations.push({ file: c.file, line: c.line, name: c.value, kind: 'subagent_type=', reason: verdict.reason });
+  }
+  return { violations, scanned, callCount: calls.length, via, shipped };
+}
+
+const formatCalls = (vs) => vs.map((v) => `  ${v.name} [${v.reason}]  ${v.file}:${v.line}`).join('\n');
+
 const format = (vs) => vs.map((v) => `  ${v.name} (${v.kind})  ${v.file}:${v.line}`).join('\n');
 
 describe('에이전트 이름 참조 — 실재 검증', () => {
@@ -342,5 +532,193 @@ describe('스캐너 자기검증 — 게이트가 헛돌지 않는다', () => {
     expect(BUILTIN_SUBAGENTS.has('Explore')).toBe(true);
     const refs = extractAgentRefs('Agent(Explore)');
     expect(refs.map((r) => r.name)).toEqual(['Explore']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2차 표면 — 호출부 키워드형 `subagent_type=` 의 `artibot:` 접두 규칙 (레인 1E-①)
+//
+// 위 `Agent(<name>)` 표면과 **다른 표면**이다. 이쪽은 접두를 요구하고 저쪽은 요구하지
+// 않는다. 합치면 에이전트 30개의 `Agent(spec-reviewer)` 가 즉시 RED 가 된다(PRD S10).
+// 설계·실측·못 보는 것은 파일 머리 주석의 "2차 표면" 절을 보라.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('subagent_type= 접두 규칙 — 파서 자기검증', () => {
+  const values = (t) => extractSubagentTypeCalls(t).map((c) => c.value);
+
+  it('따옴표 리터럴을 읽는다 (큰따옴표, 작은따옴표, JSON 이스케이프, = 주변 공백)', () => {
+    expect(values('Agent(subagent_type="artibot:planner", name="x")')).toEqual(['artibot:planner']);
+    expect(values("Agent(subagent_type='artibot:planner')")).toEqual(['artibot:planner']);
+    expect(values(String.raw`{ "prompt": "Agent(subagent_type=\"code-reviewer\")" }`)).toEqual(['code-reviewer']);
+    expect(values('subagent_type = "code-reviewer"')).toEqual(['code-reviewer']);
+  });
+
+  it('= 바로 뒤의 맨 토큰도 읽는다 — 공백이 끼면 산문으로 보고 읽지 않는다', () => {
+    expect(values('Agent(subagent_type=code-reviewer, name="x")')).toEqual(['code-reviewer']);
+    expect(values('subagent_type=artibot:planner')).toEqual(['artibot:planner']);
+    expect(values('when subagent_type= is omitted')).toEqual([]);
+  });
+
+  it('대괄호 서술과 생략표도 호출부로 센다 (값은 틀 문자열)', () => {
+    expect(extractSubagentTypeCalls('subagent_type=[matched agent type],').map((c) => c.form)).toEqual(['bracket']);
+    expect(values('`Agent(subagent_type=…)` / `Task(subagent_type=…)`')).toEqual(['…', '…']);
+    expect(values('Agent(subagent_type=...)')).toEqual(['...']);
+  });
+
+  it('한 줄의 여러 호출부와 줄 번호를 읽는다', () => {
+    const t = 'a\r\nAgent(subagent_type="artibot:x") + Agent(subagent_type="artibot:y")\r\nb';
+    expect(extractSubagentTypeCalls(t).map((c) => [c.value, c.line])).toEqual([
+      ['artibot:x', 2],
+      ['artibot:y', 2],
+    ]);
+  });
+
+  it('위치인자 표기와 = 없는 언급은 읽지 않는다 — Agent(x) 표면은 이 규칙 밖이다 (S10)', () => {
+    // 이 규칙이 저 표면에 닿으면 에이전트 30개의 `Agent(spec-reviewer)` 가 즉시 RED 가 된다.
+    expect(values('Agent(code-reviewer)')).toEqual([]);
+    expect(values('Agent("code-reviewer")')).toEqual([]);
+    expect(values('Agent(subagent_type, name="x")')).toEqual([]);
+    expect(values('Agent(subagent_type)')).toEqual([]);
+    expect(values('`subagent_type` 필드')).toEqual([]);
+  });
+
+  it('식별자 꼬리의 subagent_type 은 오탐하지 않는다', () => {
+    expect(values('bind_subagent_type="x"')).toEqual([]);
+    expect(values('xsubagent_type="x"')).toEqual([]);
+  });
+
+  it('콜론 표기는 읽지 않는다 (알고 남긴 구멍 — 머리 주석 "못 보는 것" 참조)', () => {
+    // `subagent_type: string` 같은 타입 설명이 맨 토큰으로 오탐되는 것을 피하려고 `=` 만 판다.
+    // 이 단언이 깨지면 누군가 표기를 넓힌 것이다 — 머리 주석과 census 를 같이 갱신하라.
+    expect(values('{ "subagent_type": "code-reviewer" }')).toEqual([]);
+    expect(values('subagent_type: string')).toEqual([]);
+  });
+});
+
+describe('subagent_type= 접두 규칙 — 판정', () => {
+  const shipped = new Set(['planner', 'code-reviewer']);
+  const verdict = (v) => classifySubagentType(v, shipped);
+
+  it('artibot: 접두 + 출하 이름이면 통과한다', () => {
+    expect(verdict('artibot:planner')).toEqual({ ok: true, via: 'prefixed' });
+  });
+
+  it('접두 없는 맨이름은 출하 이름이어도 위반이다 (낡은 사본으로 갈 수 있는 호출)', () => {
+    expect(verdict('code-reviewer')).toEqual({ ok: false, reason: 'no-prefix' });
+    expect(verdict('other-plugin:planner')).toEqual({ ok: false, reason: 'no-prefix' });
+  });
+
+  it('접두는 맞는데 출하 목록에 없으면 위반이다', () => {
+    expect(verdict('artibot:ghost')).toEqual({ ok: false, reason: 'unshipped' });
+    expect(verdict('artibot:')).toEqual({ ok: false, reason: 'unshipped' });
+  });
+
+  it('빌트인은 접두 없이 통과하고, 접두를 붙이면 오히려 위반이다', () => {
+    for (const b of ['Explore', 'Plan', 'general-purpose']) {
+      expect(verdict(b)).toEqual({ ok: true, via: 'builtin' });
+    }
+    expect(verdict('artibot:Explore')).toEqual({ ok: false, reason: 'unshipped' });
+  });
+
+  it('틀 문자열은 접두 검사보다 먼저 통과한다 — 접두 없는 {type} 도 통과', () => {
+    // 순서가 load-bearing 이다: 뒤집으면 orchestrate.md · spawn.md 의 `{type}` 이 RED 가 된다.
+    expect(verdict('{type}')).toEqual({ ok: true, via: 'template' });
+    expect(verdict('artibot:{agent-type}')).toEqual({ ok: true, via: 'template' });
+    expect(verdict('[matched agent type]')).toEqual({ ok: true, via: 'template' });
+    expect(verdict('…')).toEqual({ ok: true, via: 'template' });
+    expect(verdict('...')).toEqual({ ok: true, via: 'template' });
+    expect(verdict('type')).toEqual({ ok: true, via: 'placeholder' });
+  });
+
+  it('빈 값은 위반이다', () => {
+    expect(verdict('')).toEqual({ ok: false, reason: 'no-prefix' });
+  });
+});
+
+describe('subagent_type= 접두 규칙 — 실제 트리 (artibot 한정)', () => {
+  const artibot = PLUGINS.find((p) => p.id === 'artibot');
+  const cowork = PLUGINS.find((p) => p.id === 'artibot-cowork');
+
+  it('artibot: 호출부 subagent_type= 값이 전부 artibot:<출하 에이전트> 이거나 면제 대상이다', () => {
+    const { violations, shipped } = scanSubagentTypeCalls(artibot);
+    expect(
+      violations,
+      `접두가 없거나 출하하지 않는 에이전트를 호출부가 가리킨다 (출하 ${shipped.size}종).\n` +
+        `고치는 법: artibot:<이름> 으로 쓴다. 접두 없는 이름은 낡은 평면 사본으로 해석될 수 있다 ` +
+        `(감사 보고 §6 #2, 이 게이트는 그 동작을 재측정하지 않는다).\n${formatCalls(violations)}`,
+    ).toEqual([]);
+  });
+
+  it('artibot: 게이트가 실제로 무언가를 본다 — 분모가 0 이면 위 검사는 공허하다', () => {
+    const { scanned, callCount, via } = scanSubagentTypeCalls(artibot);
+    expect(scanned).toBeGreaterThan(20);
+    expect(callCount).toBeGreaterThan(10);
+    // 접두 분기가 실데이터로 실행된다 (전부 틀 문자열이어서 통과하는 상태를 막는다).
+    expect(via.prefixed).toBeGreaterThan(5);
+  });
+
+  it('artibot-cowork: 면제 — 이 규칙을 적용하지 않고 면제의 전제를 기록한다', () => {
+    // 전제: cowork 에는 따옴표·맨 토큰 호출부가 없다(생략표만 있다). 이게 깨지면 cowork 가
+    // 리터럴 호출부를 쓰기 시작한 것이니 `artibot-cowork:` 접두 규칙 적용 여부를 정하라.
+    const { calls, scanned } = collectSubagentTypeCalls(cowork);
+    expect(scanned).toBeGreaterThan(20);
+    const literals = calls.filter((c) => c.form === 'quoted' || c.form === 'bare');
+    expect(literals, `cowork 호출부 리터럴: ${JSON.stringify(literals)}`).toEqual([]);
+  });
+
+  it('scan 은 artibot 외 플러그인에 쓰면 던진다 (면제가 코드로 강제된다)', () => {
+    expect(() => scanSubagentTypeCalls(cowork)).toThrow(/artibot 한정/);
+  });
+});
+
+describe('subagent_type= 접두 규칙 — 게이트가 헛돌지 않는다 (음성 대조 3단)', () => {
+  const artibot = PLUGINS.find((p) => p.id === 'artibot');
+  const NEEDLE = 'subagent_type="artibot:code-reviewer"';
+  const BARE = 'subagent_type="code-reviewer"';
+  const isTeamMd = (p) => p.replace(/\\/g, '/').endsWith('/commands/team.md');
+  const readReal = (p) => readFileSync(p, 'utf-8');
+  const count = (text, needle) => text.split(needle).length - 1;
+
+  it('실제 team.md 의 접두를 떼어 bare 로 되돌리면 그 호출부가 위반으로 잡힌다', () => {
+    // 파일은 쓰지 않는다 — 메모리 사본만 바꾼다. 그래서 "복원 후 해시 동일" 은 구조적으로 참이다.
+    const real = readReal(join(artibot.dir, 'commands', 'team.md'));
+    const n = count(real, NEEDLE);
+
+    // ② 뮤테이션 대상이 있고, 원본은 깨끗하다 (이 단계 없이는 ③ 의 RED 가 무의미하다).
+    expect(n, '뮤테이션 대상(접두가 붙은 code-reviewer 호출부)이 team.md 에 없다').toBeGreaterThanOrEqual(1);
+    expect(count(real, BARE), '원본 team.md 에 bare code-reviewer 호출부가 남아 있다').toBe(0);
+
+    // ① 적용 + ② 적용 확인
+    const mutated = real.split(NEEDLE).join(BARE);
+    expect(mutated).not.toBe(real);
+    expect(count(mutated, BARE)).toBe(n);
+    expect(count(mutated, NEEDLE)).toBe(0);
+
+    // ③ 변조본은 RED, 원본은 GREEN
+    const { violations } = scanSubagentTypeCalls(artibot, {
+      readFile: (p) => (isTeamMd(p) ? mutated : readReal(p)),
+    });
+    expect(violations).toHaveLength(n);
+    for (const v of violations) {
+      expect([v.file, v.name, v.reason]).toEqual(['artibot/commands/team.md', 'code-reviewer', 'no-prefix']);
+    }
+    expect(scanSubagentTypeCalls(artibot).violations).toEqual([]);
+  });
+
+  it('출하 목록에서 code-reviewer 를 빼면 접두 호출부가 unshipped 로 잡힌다', () => {
+    const full = shippedAgents(artibot.dir);
+    expect(full.has('code-reviewer')).toBe(true);
+    const shrunk = new Set(full);
+    shrunk.delete('code-reviewer');
+    const { violations } = scanSubagentTypeCalls(artibot, { shipped: shrunk });
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.every((v) => v.name === 'artibot:code-reviewer' && v.reason === 'unshipped')).toBe(true);
+  });
+
+  it('출하 목록이 비면 접두 호출부가 전부 위반이다 (분모와 위반 수가 맞물린다)', () => {
+    const { via } = scanSubagentTypeCalls(artibot);
+    const { violations } = scanSubagentTypeCalls(artibot, { shipped: new Set() });
+    expect(via.prefixed).toBeGreaterThan(0);
+    expect(violations).toHaveLength(via.prefixed);
   });
 });
