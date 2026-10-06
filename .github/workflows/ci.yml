@@ -68,11 +68,10 @@ jobs:
     defaults:
       run:
         working-directory: plugins/artibot
-        # Windows runners default to pwsh, which is a parse error — not a
-        # runtime failure — on the sh syntax these steps use (`||` fallback at
-        # :62 below). bash is present on all three runner images, so setting it
-        # workflow-wide keeps one step body valid on every leg instead of
-        # forking the script per OS.
+        # Windows runners default to pwsh. Some steps use sh syntax (the `&&`
+        # chain in "Validate docs", for one), and bash is present on all three
+        # runner images, so setting it workflow-wide keeps one step body valid
+        # on every leg instead of forking the script per OS.
         shell: bash
 
     steps:
@@ -99,7 +98,11 @@ jobs:
             plugins/artibot/_reports/**/*.json
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts || npm install
+        # No fallback on purpose. When `npm ci` fails, usually because the
+        # lockfile has drifted from package.json, this job must go red. A
+        # fallback to a plain install would turn that into a green run on
+        # whatever it resolves, with lifecycle scripts enabled.
+        run: npm ci --ignore-scripts
 
       - name: Validate agents
         run: node scripts/ci/validate-agents.js

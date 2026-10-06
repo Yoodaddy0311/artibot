@@ -95,7 +95,9 @@ jobs:
           cache-dependency-path: plugins/artibot/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts || npm install
+        # No fallback on purpose, same as the validate job in ci.yml: a failed
+        # `npm ci` must fail the task instead of degrading to a plain install.
+        run: npm ci --ignore-scripts
 
       - name: Resolve task
         id: resolve
