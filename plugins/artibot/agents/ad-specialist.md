@@ -23,19 +23,10 @@ tools:
   - Read
   - Write
   - WebSearch
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - advertising
-  - copywriting
-  - ab-testing
-memory:
-  scope: user
 category: support
 ---
 

@@ -544,3 +544,164 @@ export function extractFrontmatter(content) {
   }
   return fields;
 }
+
+/**
+ * Why each rule of {@link checkStrictAgentFrontmatter} is an error.
+ *
+ * Shared by the firewall gate and `validate-agents.js` so both print the same
+ * reason next to the same rule code.
+ */
+export const STRICT_AGENT_RULE_HINTS = Object.freeze({
+  'no-frontmatter': 'the file does not open with a --- line',
+  unclosed: 'there is no closing --- line',
+  dashes: 'three dashes inside the block: the host closes frontmatter at the first --- it finds, comment or not',
+  comment: 'a comment line inside the block: host tolerance is unmeasured and the plugin parsers hide it',
+  'inline-comment': 'a trailing comment after a value or list item',
+  'blank-in-list': 'a blank line inside a block list',
+  'unsupported-structure':
+    'outside the four allowed forms (key: scalar, key: [inline], key: plus contiguous - items, key: | block)',
+  'empty-value': 'a key with neither a value nor list items',
+});
+
+/**
+ * True when `text` carries a YAML comment: a `#` preceded by whitespace and
+ * outside quotes. A `#` glued to a word (`C#`) or inside quotes is content.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function hasInlineComment(text) {
+  let quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '#' && i > 0 && /\s/.test(text[i - 1])) return true;
+  }
+  return false;
+}
+
+/**
+ * Check one agent file against the strict frontmatter dialect.
+ *
+ * Why it exists: the host closes an agent's frontmatter at the first `---` it
+ * finds, comment or not (observed n=5, audit 2026-10-06 section 2.5), so every
+ * key after a `# --- Team Collaboration ---` comment leaked into the prompt body
+ * on all 30 agents while every plugin parser, which reads comments as normal,
+ * stayed green. This oracle is deliberately stricter than that host model:
+ * whether the host tolerates a comment WITHOUT dashes is unmeasured (probe P0a),
+ * so any comment is an error.
+ *
+ * The allowed grammar, and nothing else:
+ *   - `key: scalar`
+ *   - `key: [inline, list]` on one line
+ *   - `key:` followed by contiguous `  - item` lines (no blank line, no comment)
+ *   - `key: |` (also `|-` and `|+`) followed by indented or blank lines, which
+ *     are content: a hash inside them is text, not a comment
+ * Blank lines between top-level keys are tolerated. Three dashes anywhere in the
+ * block, block scalars included, are an error, because the host may close on
+ * them. Nested mappings, folded scalars (`>`), flow mappings and multi-line flow
+ * sequences are outside the grammar and reported as `unsupported-structure`.
+ *
+ * Reports every violation in file order. Looks only at the block between the
+ * opening line and the first closing `---` line; the body is not inspected.
+ * Deliberately NOT used by the runtime registry (decision D1): third-party
+ * extension agents are read by that parser and must not be rejected.
+ *
+ * @param {string} content - Raw file content, LF or CRLF.
+ * @returns {{ ok: boolean, violations: Array<{ line: number, rule: string, text: string }> }}
+ *   `line` is the 1-based line in the file.
+ */
+export function checkStrictAgentFrontmatter(content) {
+  const lines = String(content).split(/\r?\n/);
+  if (!/^---[ \t]*$/.test(lines[0])) {
+    return { ok: false, violations: [{ line: 1, rule: 'no-frontmatter', text: lines[0] }] };
+  }
+  let close = -1;
+  for (let i = 1; i < lines.length; i += 1) {
+    if (/^---[ \t]*$/.test(lines[i])) {
+      close = i;
+      break;
+    }
+  }
+  if (close === -1) {
+    return { ok: false, violations: [{ line: 1, rule: 'unclosed', text: lines[0] }] };
+  }
+
+  const violations = [];
+  const flag = (index, rule) => violations.push({ line: index + 1, rule, text: lines[index] });
+  let inScalar = false;
+  let listKeyLine = -1;
+  let listItems = 0;
+
+  for (let i = 1; i < close; i += 1) {
+    const line = lines[i];
+    if (line.includes('---')) flag(i, 'dashes');
+
+    if (inScalar) {
+      if (line.trim() === '' || /^\s/.test(line)) continue;
+      inScalar = false;
+    }
+
+    if (listKeyLine !== -1) {
+      if (/^ {2,}- +\S/.test(line)) {
+        if (hasInlineComment(line.replace(/^ +- +/, ''))) flag(i, 'inline-comment');
+        listItems += 1;
+        continue;
+      }
+      if (line.trim() === '') {
+        flag(i, 'blank-in-list');
+        continue;
+      }
+      if (/^\s*#/.test(line)) {
+        flag(i, 'comment');
+        continue;
+      }
+      if (/^\s/.test(line)) {
+        flag(i, 'unsupported-structure');
+        continue;
+      }
+      if (listItems === 0) flag(listKeyLine, 'empty-value');
+      listKeyLine = -1;
+    }
+
+    if (line.trim() === '') continue;
+    if (/^\s*#/.test(line)) {
+      flag(i, 'comment');
+      continue;
+    }
+    const key = /^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$/.exec(line);
+    if (!key) {
+      flag(i, 'unsupported-structure');
+      continue;
+    }
+    const value = (key[2] ?? '').trim();
+    if (value === '') {
+      listKeyLine = i;
+      listItems = 0;
+      continue;
+    }
+    if (/^\|[+-]?$/.test(value)) {
+      inScalar = true;
+      continue;
+    }
+    if (/^[|>{]/.test(value)) {
+      flag(i, 'unsupported-structure');
+      continue;
+    }
+    if (value.startsWith('[') && !/^\[[^\]]*\]$/.test(value.replace(/\s+#.*$/, ''))) {
+      flag(i, 'unsupported-structure');
+      continue;
+    }
+    if (hasInlineComment(value)) flag(i, 'inline-comment');
+  }
+  if (listKeyLine !== -1 && listItems === 0) flag(listKeyLine, 'empty-value');
+
+  return { ok: violations.length === 0, violations };
+}

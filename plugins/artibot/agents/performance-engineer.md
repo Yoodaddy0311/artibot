@@ -24,17 +24,10 @@ tools:
   - Glob
   - Grep
   - Bash
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: acceptEdits
-maxTurns: 25
-skills:
-  - persona-performance
-memory:
-  scope: project
 category: expert
 ---
 

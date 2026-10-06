@@ -20,18 +20,10 @@ tools:
   - Read
   - Grep
   - Glob
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: plan
-maxTurns: 25
-skills:
-  - principles
-  - persona-architect
-memory:
-  scope: project
 category: manager
 ---
 

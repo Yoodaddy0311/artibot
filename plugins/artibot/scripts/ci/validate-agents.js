@@ -3,11 +3,24 @@
  * CI: Validate agents/*.md files.
  * Checks that each agent file has valid YAML frontmatter with required fields:
  *   name, description, model
+ *
+ * It also holds every file to the strict dialect (`checkStrictAgentFrontmatter`):
+ * no comment and no three-dash run inside the block. The host closes frontmatter at
+ * the first `---` it sees, comment or not, so a comment inside `tools:` silently
+ * drops every key after it. This is the same function the firewall gate
+ * (`tests/firewall/frontmatter-tool-names.test.js`) calls, so the two cannot drift.
+ * The gate of record is that vitest file; this check is a second consumer of the
+ * same oracle. The runtime registry stays lenient on purpose (extension agents).
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { extractFrontmatter, getPluginRoot } from './ci-utils.js';
+import {
+  checkStrictAgentFrontmatter,
+  extractFrontmatter,
+  getPluginRoot,
+  STRICT_AGENT_RULE_HINTS,
+} from './ci-utils.js';
 
 const REQUIRED_FIELDS = ['name', 'description', 'model'];
 
@@ -40,14 +53,26 @@ function main() {
       continue;
     }
 
+    let fileErrors = 0;
+
     for (const field of REQUIRED_FIELDS) {
       if (!frontmatter[field]) {
         console.error(`FAIL: ${file} - Missing required field: ${field}`);
         errors++;
+        fileErrors++;
       }
     }
 
-    if (frontmatter.name && frontmatter.description && frontmatter.model) {
+    for (const v of checkStrictAgentFrontmatter(content).violations) {
+      console.error(
+        `FAIL: ${file}:${v.line} - strict frontmatter [${v.rule}] ${STRICT_AGENT_RULE_HINTS[v.rule]}: ${v.text.trim()}`,
+      );
+      errors++;
+      fileErrors++;
+    }
+
+    // A file that failed any check never prints PASS (the log is read by people).
+    if (fileErrors === 0) {
       console.log(`PASS: ${file}`);
     }
   }

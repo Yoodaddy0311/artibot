@@ -21,21 +21,12 @@ tools:
   - Grep
   - Glob
   - Bash
-  # --- Sub-Agent Delegation ---
   - Agent(spec-reviewer)
   - Agent(quality-reviewer)
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: acceptEdits
-maxTurns: 25
-skills:
-  - coding-standards
-  - testing-standards
-memory:
-  scope: project
 category: builder
 ---
 

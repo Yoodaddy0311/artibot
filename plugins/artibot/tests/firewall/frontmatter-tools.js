@@ -170,6 +170,10 @@ export function parseCommandTools(text) {
  * 블록 시퀀스는 `- name` 행만 항목으로 친다. 들여쓴 주석 행(`#` 로 시작)과
  * 앞 항목의 주석이 이어지는 행은 건너뛰고, 들여쓰기가 끝나면 블록도 끝난다.
  *
+ * **일부러 관대하다** (D1 · cowork 면제 경로). strict 루트의 `agents/*.md` 는 이 파서가 아니라
+ * `scripts/ci/ci-utils.js#checkStrictAgentFrontmatter` 가 먼저 판정한다 — 주석을 정상으로 읽는
+ * 이 파서만 믿어서 호스트가 잘라 읽는 30/30 결함이 green 으로 통과했었다.
+ *
  * @param {string} text
  * @returns {{ ok: true, tools: string[] } | { ok: false, reason: string }}
  */

@@ -23,18 +23,10 @@ tools:
   - Edit
   - Bash
   - Grep
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: acceptEdits
-maxTurns: 25
-skills:
-  - tdd-workflow
-  - testing-standards
-memory:
-  scope: project
 category: builder
 ---
 

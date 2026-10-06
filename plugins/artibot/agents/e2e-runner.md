@@ -23,18 +23,10 @@ tools:
   - Bash
   - Grep
   - Glob
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - testing-standards
-  - mcp-playwright
-memory:
-  scope: user
 category: support
 ---
 

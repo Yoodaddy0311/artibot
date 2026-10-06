@@ -25,19 +25,10 @@ tools:
   - Glob
   - Grep
   - WebSearch
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - marketing-strategy
-  - competitive-intelligence
-  - campaign-planning
-memory:
-  scope: user
 category: support
 ---
 

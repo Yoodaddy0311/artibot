@@ -26,19 +26,10 @@ tools:
   - Glob
   - Grep
   - Bash
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: plan
-maxTurns: 25
-skills:
-  - systematic-debugging
-  - verification-completion
-  - principles
-memory:
-  scope: project
 category: expert
 ---
 

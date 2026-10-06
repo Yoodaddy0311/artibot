@@ -26,19 +26,10 @@ tools:
   - Grep
   - Bash
   - WebSearch
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - seo-strategy
-  - technical-seo
-  - content-seo
-memory:
-  scope: user
 category: support
 ---
 

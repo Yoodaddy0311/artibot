@@ -24,19 +24,10 @@ tools:
   - Bash
   - WebSearch
   - WebFetch
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - repo-benchmarking
-  - principles
-  - persona-architect
-memory:
-  scope: user
 category: support
 ---
 

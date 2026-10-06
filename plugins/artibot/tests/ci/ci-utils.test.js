@@ -43,6 +43,7 @@ import {
   assertRootScanFloor,
   assertRootTreeScanFloor,
   assertScanFloors,
+  checkStrictAgentFrontmatter,
   extractFrontmatter,
   gatherRepoRootDocFiles,
   gatherRepoRootTreeDocFiles,
@@ -551,5 +552,130 @@ describe('extractFrontmatter', () => {
     const fields = extractFrontmatter(readFileSync(file, 'utf-8'));
     expect(fields.description.length).toBeGreaterThan(100);
     expect(fields.description.startsWith('|')).toBe(false);
+  });
+});
+
+describe('checkStrictAgentFrontmatter — the strict agent dialect (lane 1A)', () => {
+  // Why this dialect exists: the host closes an agent's frontmatter at the first
+  // `---` it finds, comment or not (observed n=5, audit 2026-10-06 section 2.5).
+  // Every key after that point leaked into the prompt body. The plugin's own
+  // parsers read comments as normal, so every gate stayed green while the host
+  // truncated all 30 agents. This oracle is deliberately stricter than the host
+  // model: whether the host tolerates a comment WITHOUT dashes is unmeasured
+  // (probe P0a), so any comment is an error here.
+
+  /** A file written entirely in the four allowed forms. */
+  const CLEAN = [
+    '---',
+    'name: demo',
+    'capabilities: [a, b]',
+    'lifecycle: null',
+    'description: |',
+    '  First line.',
+    '',
+    '  A hash or a ratio like 3 # 4 inside a block scalar is content, not a comment.',
+    'model: opus',
+    'tools:',
+    '  - Read',
+    '  - Agent(architect)',
+    'category: expert',
+    '---',
+    '',
+    '# Body heading',
+    '',
+    '---',
+    'a horizontal rule in the body is not frontmatter',
+    '',
+  ].join('\n');
+
+  const rulesOf = (text) => checkStrictAgentFrontmatter(text).violations.map((v) => v.rule);
+
+  /** Insert `line` before the 1-based file line `at` (so it lands on that line). */
+  const insertAt = (text, at, line) => {
+    const lines = text.split('\n');
+    lines.splice(at - 1, 0, line);
+    return lines.join('\n');
+  };
+
+  it('accepts a file written in the four allowed forms', () => {
+    expect(checkStrictAgentFrontmatter(CLEAN)).toEqual({ ok: true, violations: [] });
+  });
+
+  it('accepts the same file with CRLF line endings', () => {
+    expect(checkStrictAgentFrontmatter(CLEAN.replace(/\n/g, '\r\n')).ok).toBe(true);
+  });
+
+  it('flags a dash-bearing comment inside a tools list as comment AND dashes, on the right file line', () => {
+    // CLEAN line 12 is `  - Agent(architect)`; the injected line becomes line 12.
+    const mutated = insertAt(CLEAN, 12, '  # --- Team Collaboration ---');
+    const result = checkStrictAgentFrontmatter(mutated);
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual([
+      { line: 12, rule: 'dashes', text: '  # --- Team Collaboration ---' },
+      { line: 12, rule: 'comment', text: '  # --- Team Collaboration ---' },
+    ]);
+  });
+
+  it('flags a comment WITHOUT dashes too (host tolerance is unmeasured, so it is an error)', () => {
+    expect(rulesOf(insertAt(CLEAN, 12, '  # team tools'))).toEqual(['comment']);
+  });
+
+  it('flags a top-level comment between keys', () => {
+    expect(rulesOf(insertAt(CLEAN, 9, '# the model'))).toEqual(['comment']);
+  });
+
+  it('flags an inline comment after a list item and after a scalar', () => {
+    expect(rulesOf(CLEAN.replace('  - Read', '  - Read   # DM'))).toEqual(['inline-comment']);
+    expect(rulesOf(CLEAN.replace('model: opus', 'model: opus # tier'))).toEqual(['inline-comment']);
+  });
+
+  it('does not mistake a hash inside quotes, glued to a word, or in a block scalar for a comment', () => {
+    expect(checkStrictAgentFrontmatter(CLEAN.replace('name: demo', 'name: "demo # one"')).ok).toBe(true);
+    expect(checkStrictAgentFrontmatter(CLEAN.replace('name: demo', "name: 'demo # one'")).ok).toBe(true);
+    expect(checkStrictAgentFrontmatter(CLEAN.replace('name: demo', 'name: C#')).ok).toBe(true);
+    // The block-scalar line in CLEAN already carries ` # `; it must stay content.
+    expect(CLEAN).toContain('3 # 4');
+  });
+
+  it('flags three dashes anywhere inside the block, block scalars included, but not two', () => {
+    expect(rulesOf(insertAt(CLEAN, 7, '  --- looks like a delimiter'))).toEqual(['dashes']);
+    expect(rulesOf(insertAt(CLEAN, 7, '  use the -- flag'))).toEqual([]);
+  });
+
+  it('does not look past the closing delimiter: a horizontal rule in the body is fine', () => {
+    expect(CLEAN.split('\n').filter((l) => l === '---')).toHaveLength(3);
+    expect(checkStrictAgentFrontmatter(CLEAN).ok).toBe(true);
+  });
+
+  it('flags a blank line inside a block list', () => {
+    expect(rulesOf(CLEAN.replace('  - Read\n', '  - Read\n\n'))).toEqual(['blank-in-list']);
+  });
+
+  it('flags a nested mapping (the removed `memory:` shape) as outside the grammar', () => {
+    const nested = CLEAN.replace('category: expert', 'memory:\n  scope: project\ncategory: expert');
+    expect(rulesOf(nested)).toContain('unsupported-structure');
+    expect(rulesOf(nested)).toContain('empty-value');
+  });
+
+  it('flags a folded scalar, a flow mapping, and a multi-line flow sequence', () => {
+    expect(rulesOf(CLEAN.replace('description: |', 'description: >'))).toContain('unsupported-structure');
+    expect(rulesOf(CLEAN.replace('model: opus', 'model: {a: b}'))).toEqual(['unsupported-structure']);
+    expect(rulesOf(CLEAN.replace('capabilities: [a, b]', 'capabilities: [a,'))).toContain('unsupported-structure');
+  });
+
+  it('flags a key with neither a value nor list items', () => {
+    expect(rulesOf(CLEAN.replace('model: opus', 'model:'))).toEqual(['empty-value']);
+  });
+
+  it('reports a missing or unclosed block instead of passing silently', () => {
+    expect(checkStrictAgentFrontmatter('# no frontmatter\n').violations.map((v) => v.rule)).toEqual(['no-frontmatter']);
+    expect(checkStrictAgentFrontmatter('---\nname: x\n').violations.map((v) => v.rule)).toEqual(['unclosed']);
+    expect(checkStrictAgentFrontmatter('').ok).toBe(false);
+  });
+
+  it('reports every violation in file order instead of stopping at the first', () => {
+    const mutated = insertAt(insertAt(CLEAN, 12, '  # one'), 5, '# two');
+    const lines = checkStrictAgentFrontmatter(mutated).violations.map((v) => v.line);
+    expect(lines).toEqual([5, 13]);
   });
 });

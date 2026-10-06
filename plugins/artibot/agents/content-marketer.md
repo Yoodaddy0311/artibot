@@ -23,18 +23,10 @@ tools:
   - Glob
   - Grep
   - WebSearch
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - persona-scribe
-  - copywriting
-memory:
-  scope: user
 category: support
 ---
 

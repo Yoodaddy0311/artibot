@@ -150,6 +150,15 @@ export function stripTrailingComment(scalar) {
  * Trailing line comments are not part of an item; an item that is only a
  * comment is skipped.
  *
+ * Deliberately lenient (decision D1, 2026-10-07): comment lines are skipped and a
+ * trailing comment stays in the item text. This parser also reads third-party
+ * extension agents, so it must not reject them. The strict dialect lives in
+ * `scripts/ci/ci-utils.js#checkStrictAgentFrontmatter` and is enforced on the
+ * shipped agents by `tests/firewall/frontmatter-tool-names.test.js` and
+ * `scripts/ci/validate-agents.js`. `tests/firewall/agent-frontmatter-oracle-parity.test.js`
+ * pins what this parser returns for comment fixtures, so loosening or tightening it
+ * shows up there.
+ *
  * @param {string[]} lines
  * @param {number} startIdx
  * @returns {{ value: string[], nextIdx: number }}

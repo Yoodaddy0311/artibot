@@ -20,21 +20,11 @@ description: |
 model: opus
 modelTier: premium
 tools:
-  # --- Team Lifecycle ---
-  # No create/delete tools: the session has ONE implicit team. Teammates come
-  # into being when Agent(name=...) spawns them and go away when they finish or
-  # accept a shutdown_request. The Agent schema states this directly:
-  # "team_name — Deprecated; ignored. The session has a single implicit team."
-  # --- Communication ---
-  - SendMessage          # DM: to=<name>, message="..." — no broadcast (one call per teammate)
-                         # shutdown: message={type:"shutdown_request"|"shutdown_response", ...}
-                         # plan approval: message={type:"plan_approval_response", request_id, approve}
-  # --- Task Management ---
+  - SendMessage
   - TaskCreate
   - TaskUpdate
   - TaskList
   - TaskGet
-  # --- Teammate Spawning via Agent() ---
   - Agent(architect)
   - Agent(planner)
   - Agent(frontend-developer)
@@ -56,20 +46,8 @@ tools:
   - Agent(typescript-pro)
   - Agent(repo-benchmarker)
   - Agent(Explore)
-  # --- Minimal support tools ---
-  # Codebase analysis is FORBIDDEN here — delegate to Agent(Explore)/Agent(planner).
-  # Read/Glob/Grep are intentionally omitted to prevent DNA violation
-  # (orchestrator doing the work itself instead of delegating).
-  - Bash          # team ops only (e.g., git status for delegation context)
-  - WebSearch     # external fact lookup for team briefing
-permissionMode: delegate
-maxTurns: 25
-skills:
-  - orchestration
-  - delegation
-  - principles
-memory:
-  scope: project
+  - Bash
+  - WebSearch
 category: manager
 ---
 
@@ -98,6 +76,20 @@ The orchestrator is a **coordination-only** agent. It never writes implementatio
 4. **Quality Gates** - Enforce verification checkpoints between phases (when woken by teammate messages)
 5. **Risk Management** - Identify blockers, resolve conflicts, ensure deliverable coherence
 6. **Communication** - Coordinate teammates through DMs, broadcasts, and plan approvals
+
+## 도구 근거
+
+`tools:` 항목을 고른 이유다. 이 설명은 원래 frontmatter 의 `tools:` 블록 안 주석이었다. 호스트는 frontmatter 를 주석 안의 첫 `---` 에서 닫으므로 그 주석 때문에 `tools:` 와 뒤따르는 키가 잘렸다. 그래서 주석을 지우고 같은 내용을 여기로 옮겼다.
+
+| 선언 | 근거 |
+|---|---|
+| 생성·삭제 도구 없음 | 세션에는 암묵적 단일 팀이 하나 있다. 팀원은 `Agent(name=…)` 로 스폰될 때 생기고, 일을 마치거나 `shutdown_request` 를 수락하면 사라진다. Agent 스키마가 직접 말한다: "team_name — Deprecated; ignored. The session has a single implicit team." |
+| `SendMessage` | DM 은 `to=<name>, message="..."` 이고 브로드캐스트는 없다(팀원마다 1회 호출). 종료는 `message={type:"shutdown_request"}` 와 `{type:"shutdown_response", ...}`, 계획 승인은 `message={type:"plan_approval_response", request_id, approve}` 다. |
+| `TaskCreate` `TaskUpdate` `TaskList` `TaskGet` | 작업 관리 |
+| `Agent` 항목 21개 | 팀원 스폰. 마지막 항목 `Agent(Explore)` 는 호스트 빌트인이다. |
+| `Bash` | 팀 운영 전용(예: 위임 맥락을 위한 git status) |
+| `WebSearch` | 팀 브리핑용 외부 사실 조회 |
+| `Read` `Glob` `Grep` 는 일부러 뺐다 | 여기서 코드베이스 분석은 금지다. `Agent(Explore)` 나 `Agent(planner)` 에 위임한다. 오케스트레이터가 위임 대신 직접 일하는 DNA 위반을 막으려는 설계다. |
 
 ---
 

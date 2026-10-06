@@ -22,18 +22,10 @@ tools:
   - Grep
   - Glob
   - Bash
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: plan
-maxTurns: 25
-skills:
-  - coding-standards
-  - testing-standards
-memory:
-  scope: project
 category: expert
 ---
 

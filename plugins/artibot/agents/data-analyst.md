@@ -25,19 +25,10 @@ tools:
   - Glob
   - Grep
   - Bash
-  # --- Team Collaboration ---
   - SendMessage
   - TaskUpdate
   - TaskList
   - TaskGet
-permissionMode: default
-maxTurns: 25
-skills:
-  - data-analysis
-  - data-visualization
-  - report-generation
-memory:
-  scope: user
 category: support
 ---
 
