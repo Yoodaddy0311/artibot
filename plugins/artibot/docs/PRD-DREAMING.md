@@ -1,13 +1,15 @@
 # PRD: Dreaming — Memory Consolidation Loop
 
-> **Status**: Draft (설계 검토 대기) · **Created**: 2026-05-30 · **Owner**: Artibot core
-> **성격**: 비파괴적 consolidation. 작동 중인 사용자 가시 auto-memory MD 위에 검증된 게이팅 알고리즘을 적용. 코드 미구현 — 설계 + 단계적 빌드 플랜.
+> **Status**: Implemented (S1~S4 코드 착지 · §11 수락 기준 미재검증) · **Created**: 2026-05-30 · **Owner**: Artibot core
+> **성격**: 비파괴적 consolidation. 작동 중인 사용자 가시 auto-memory MD 위에 검증된 게이팅 알고리즘을 적용. 설계 + 단계적 빌드 플랜.
+>
+> **정정 (2026-10-12)**: S1~S4 코드가 착지했다 — 구현 현황은 §8 끝에 있다. §1~§11 본문은 2026-05-30 설계 시점 서술이라 "dormant"·"6개 작업"·"7번째 슬롯" 은 그때 기준이다. §1 의 Dreams API 지원 모델 서술은 2026-10-01 릴리스 노트로 갱신했고, API 크레딧(2026-10-07)은 §9 에 재평가 트리거로만 기록했다.
 
 ## 1. 배경 (확정 사실)
 
-**"Dreaming"은 Anthropic 공식 기능**(Managed Agents API: `platform.claude.com/docs/en/managed-agents/dreams` + `/memory`). 정의: 기존 memory store + 과거 session transcript(1~100)를 입력으로 받아 **새로운 재구성 store**를 생성 — 중복 merge / stale·모순 항목을 최신값으로 교체 / 신규 insight 발굴. **입력 store는 절대 불변**, 출력은 검토 후 채택/폐기. 비동기 job, opus-4-8 지원.
+**"Dreaming"은 Anthropic 공식 기능**(Managed Agents API: `platform.claude.com/docs/en/managed-agents/dreams` + `/memory`). 정의: 기존 memory store + 과거 session transcript(1~100)를 입력으로 받아 **새로운 재구성 store**를 생성 — 중복 merge / stale·모순 항목을 최신값으로 교체 / 신규 insight 발굴. **입력 store는 절대 불변**, 출력은 검토 후 채택/폐기. 비동기 job, research preview. 지원 모델 목록은 공식 Dreams 문서(Supported models)가 정본이다 — 최초 작성 시점의 "opus-4-8 지원" 은 당시 목록이고, 2026-10-01 릴리스 노트가 Opus 5.5·Fable 5.1·Sonnet 5.5 지원을 추가했다. 이는 외부 API 의 사실이며 Artibot 라우팅과 무관하다: 로컬 복제본은 모델 id 를 고정하지 않고 Phase-2 는 `/dreaming` 을 실행하는 세션의 모델이 수행한다.
 
-**제약**: Dreaming API는 Managed Agents(서버측 플랫폼) 전용. Artibot은 Claude Code 플러그인이라 API 직접 사용이 부적합. 따라서 **dream의 알고리즘·안전원칙을 Claude Code 네이티브 auto-memory에 복제**한다. (Managed Agents 직접 채택은 future option으로만 표기 — §9.)
+**제약**: Dreaming API는 Managed Agents(서버측 플랫폼) 전용. Artibot은 Claude Code 플러그인이라 API 직접 사용이 부적합. 따라서 **dream의 알고리즘·안전원칙을 Claude Code 네이티브 auto-memory에 복제**한다. (Managed Agents 직접 채택은 future option으로만 표기 — §9, 재평가 트리거 포함.)
 
 **학계 검증된 consolidation 5단계** (가중치 비변경, 외부 텍스트 메모리 distill→다음 프롬프트 주입 — Artibot `.md` 시스템과 동일 패러다임): Collect → Distill → Prune → Promote → Apply.
 
@@ -169,8 +171,12 @@ promoter의 게이팅을 MD에 차용:
 
 각 Stage 독립 머지 가능. S1·S2는 사람 검토 게이트가 없어도 staging만 만들어 위험 0. S3에서 처음으로 실제 MD 쓰기 경로가 열리며 기본값은 dry-run.
 
+**구현 현황 (2026-10-12, 파일 실재·연결 기준)**: S1 `memory-md-adapter.js` · S2 `collector.js`/`distiller.js`/`promote-md.js` (모두 `lib/learning/memory/dream/`) · S3 `commands/dreaming.md` + `apply.js` · S4 `scripts/hooks/nightly-dream-consolidate.mjs`(Phase-1 + wakeup marker) + `scripts/setup-nightly-trainers.js` TRAINERS 05:00 항목 + `artibot.config.json#/learning/dream` 블록(`autoAccept.enabled=false` 출하). 킬스위치는 nightly 훅이 `dream-consolidate` 키를 조회하는 데까지만 연결돼 있고, 트립을 기록하는 호출처는 `lib/`·`scripts/` 에서 찾지 못했다. 테스트는 `tests/learning/memory/dream/` 와 `tests/scripts/nightly-dream-consolidate.test.js`. 이 정정은 파일 존재와 연결만 확인했다 — §11 수락 기준 11항의 충족과 테스트 통과는 재검증하지 않았다. TRAINERS 는 현재 2항목(session-rollup 04:30 · dream-consolidate 05:00)이라 "6개 작업"·"7번째 슬롯" 은 설계 시점 서술이다.
+
 ## 9. Future Option (비채택, 기록만)
 Managed Agents Dreaming API 직접 사용 — 사용자가 Managed Agents 런타임을 운용하고 DATA POLICY를 완화하기로 결정할 경우에 한해. 그 경우 `dream/distiller.js`의 LLM 측을 API job 호출로 교체하고 staging 단계는 동일 유지(검토 게이트 보존). 현재는 채택하지 않음.
+
+**재평가 트리거 (기록만, 채택 결정 아님)**: 2026-10-07 부터 Max 5x/20x·Team 구독에 월 API 크레딧이 포함된다 — Claude API·Managed Agents·Agent SDK 사용분에 쓰이고 Claude Code 사용분은 제외된다(공식 문서 "API credits for Max and Team plans"). 비용 장벽이 낮아질 뿐 위 두 조건(서버 런타임 운용 · DATA POLICY 완화)과 §10 은 그대로이므로 비채택을 유지하고, 이 항은 다시 볼 사유로만 남긴다.
 
 ## 10. DATA POLICY
 모든 입출력 로컬. transcript·memory·correction을 외부로 전송하지 않음. Phase-2 LLM-Distill은 **현재 세션의 Claude 컨텍스트 내**에서 수행(별도 API 송신 없음). nightly hook(Phase-1)은 LLM 자체를 호출하지 않음(ADR-3). staging/archive/ledger 전부 로컬 파일. 외부 네트워크 IO 0.

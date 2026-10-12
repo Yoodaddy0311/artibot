@@ -35,7 +35,7 @@ agents:
 tokens: "~3K"
 category: "security"
 whenNotToUse: "Do not apply LLM-specific controls to pure deterministic code paths with no model in the loop (e.g., a config parser, a math utility). When no untrusted text ever reaches a model context and no agent acts on tool output, the classical security-standards skill covers it. Scale up to this skill the moment external text enters a prompt, a RAG store, or a tool result an agent will act on."
-source_hash: ebc2cd8a
+source_hash: aa5cee5c
 ---
 
 # AI Security Standards
@@ -87,7 +87,7 @@ Enforcement pattern:
 
 ## Reasoning-Native Model Guard (CoT)
 
-For reasoning-native models (`claude-opus-5`, o3, R1, Qwen3-thinking), **do not** instruct the
+For reasoning-native models (`claude-opus-5`, `claude-opus-5-5`, o3, R1, Qwen3-thinking), **do not** instruct the
 model to emit step-by-step chain-of-thought as visible output, and **do not** build prompts that
 ask it to "show your full reasoning" when that reasoning may contain or leak the trusted system
 channel. Reasoning is internal; expose conclusions and evidence, not the raw CoT. Injecting
