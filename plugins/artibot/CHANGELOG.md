@@ -11,6 +11,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.7] — 2026-10-12
+
+`v4.71.6`(`e3dc9410`) 이후 13 커밋 = **65 files +3,604/−437**(`git rev-list --count v4.71.6..8aee6541` · `git diff --shortstat v4.71.6 8aee6541`, 2026-10-12 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 v4.71.6 배지 동기화 봇 커밋 `e5117219` 와 출하 결과 기록 `93d82b4e` 를 뺀 11 커밋(`4980e43f..8aee6541`) = **59 files +3,597/−430**(`git diff --shortstat 4980e43f^ 8aee6541`)이 아래 내용이다. 릴리스 전 로컬 전체 스위트는 돌리지 않았다(이 PC 의 부하를 피하려고 — 전체 스위트의 판정은 CI). 릴리스 전 트리 `8aee6541`(`ci/w2-20261012`)의 CI 는 Ubuntu Node 20/22/24 세 레그가 모두 `Test Files 888 passed (888)` · `Tests 26946 passed | 47 skipped (26993)` 로 끝났고 Windows(Node 22) 레그도 `Tests 26996 passed | 20 skipped (27016)` 로 success 이며(문서에 적는 시험 수 26,993 은 release.yml 이 Ubuntu 러너의 `numTotalTests` 로 다시 쓰는 값이다), 두 plugin.json 구조 검증과 변경 감지 잡도 success 다(2026-10-12, 잡 로그의 vitest 요약 줄 — 릴리스 커밋은 이 트리에 없다).
+
+### Sonnet 5.5 cache read 단가 0.20 → 0.10 $/MTok, 카탈로그 전 행을 공식 가격표와 다시 대조
+
+- 공식 가격 페이지(2026-10-12 조회)가 Claude Sonnet 5.5 의 cache read 를 입력의 0.05배 = **$0.10/MTok**(2026-10-07 변경)로 적는다. 카탈로그의 모든 행을 그 표와 다시 읽었다: sonnet 은 `skill-table` → `official-table` 로 옮겨 두 cache-write 칸(2.50 / 4)을 파생이 아니라 읽은 값으로 두었고, opus 5.5 · `claude-opus-5` · fable · haiku 4.5 행은 이미 일치했다.
+- `PRICING_VERSION` 과 `CATALOG_VERSION` 이 둘 다 `2026-10-12`(조회일)로 움직였다(`checkedAt` 은 스탬프와 같아야 하고, `priceSource` 편집은 가격이 아닌 값으로 센다 — 2026-09-30 선례). `claude-sonnet-5` 는 자기 `ID_PRICES` 행(cache read 0.20 유지)을 가져 옛 id 영수증이 청구된 단가로 재생된다. 2026-09-28 가격 행은 `lib/core/pricing-history.js` 에 동결했고 재생 테스트가 있다.
+- 테스트: `tests/core/model-catalog-sonnet-cache-read.test.js`(신규), `model-catalog.test.js` · `pricing-history.test.js` · `tests/economics/*` 의 단가 핀. 커밋 작성자 보고는 `tests/core` · `tests/economics` · `tests/routing` 과 핀이 걸린 firewall · hook · middleware 스위트 통과, 독립 검수(게이트 완화 없음)다 — 이 릴리스 작성 중에는 재실행하지 않았다(전체 스위트는 CI).
+
+### haiku 티어가 Claude Haiku 5.5 로 이동, 가격 구간(프롬프트 100K 이하) 표기와 계수 추가
+
+- `MODELS.haiku` 가 `claude-haiku-5-5`(2026-10-07 출시)다: 컨텍스트 1M · 출력 128K · adaptive thinking(`{type:'enabled', budget_tokens}` 는 Haiku 5.5 에서 400 — 모델 개요 · thinking 페이지, 2026-10-12 조회). 가격은 공식 표에서 프롬프트 100,000 토큰 이하 구간의 값이다(입력 0.10 / 출력 0.50 / cache read 0.01 / 5분 write 0.125 / 1시간 write 0.20 $/MTok). `claude-haiku-4-5` 는 legacy id 로 남고 자기 `ID_PRICES` 행(1 / 5)을 가져 그 영수증은 청구된 단가로 재생된다.
+- **100K 이하 구간만 저장한다.** 영수증은 요청을 한 카운터 블록으로 접어 두므로 100K 초과 구간(모든 칸 5배)을 적용할 방법이 없다. 대신 모든 행이 `priceMaxPromptTokens`(haiku 100,000 · 나머지 `null`)를 갖고 `getPricing` 이 `maxPromptTokens` 로 보고하며, `buildUsageReceipts` 의 `meta.overPriceBandRequests` 가 구간을 넘은 요청 수를 센다(호출 시점 통계 — 영수증 자체는 바꾸지 않는다). 이 계수는 receipts meta 에만 있다: `git grep -F overPriceBandRequests` 는 `lib/` 와 `tests/` 에서만 맞고 `scripts/` 의 어떤 표도 이 값을 인쇄하지 않는다(2026-10-12 측정) — 과소 계산은 meta 를 읽는 호출자에게만 보인다.
+- 스탬프: `CATALOG_VERSION` · `PRICING_VERSION` 은 `2026-10-12` 를 유지한다(같은 날 주석). 스탬프를 세운 커밋 `4980e43f` 를 담은 릴리스 태그는 이 릴리스 전에 없었고(`git tag --contains 4980e43f` 가 빈 출력, 2026-10-12) origin/master 에는 2026-10-12 16:31 KST push 로 올라 있었다 — 그 사이 master 에서 설치한 곳이 기록에 이 스탬프를 찍었을 수 있다. 그런 설치의 haiku 영수증은 `claude-haiku-4-5` 를 적어 새 `ID_PRICES` 행으로 청구된 가격 그대로 재생되고, 티어 이름만 적은 기록은 새 티어 행으로 재생된다(잔여 위험, `tests/core/pricing-history.test.js` 에 고정).
+- Sonnet 5.5 의 `thinkingMode` 는 `adaptive` 를 유지한다(주석): 이 모델은 `disabled` 를 거부하고 `between_tools` 는 받지만, 카탈로그 값 중 그것을 서술하는 것이 없다.
+- `cache-roi` · `escalation-controller` · `context-pressure` 의 주석 사실을 맞췄고, `agents/llm-architect.md` 가 티어 이름을 적으며, `docs/CLAUDE-MODEL-CATALOG.md` 를 재생성했다.
+- 이 이동은 아래 route-scorer 수정을 전제로 한다. 수정 전 scorer 에서는 Haiku 5.5 의 가격(sonnet 의 1/20)이 explore · edit-routine 의 선호 티어 순위를 뒤집었고, 그래서 `4980e43f` 시점에는 이동을 보류했었다(오너 결정 2026-10-12).
+
+### route-scorer 의 cost 항을 선호 티어에서 바닥 처리: 가격 벡터와 무관하게 선호 티어가 비용 때문에 밀리지 않는다
+
+- **문제**: `lib/routing/route-scorer.js` 는 cost 를 허용된 후보 중 가장 싼 티어 대비 상대로 점수화했다. 가격 차가 충분히 크면 cost 가중치 0.15 전체가 가장 싼 티어로 가서 선호 티어의 비비용 우위(한 단계 아래로 약 0.108)를 이겼고, 다른 모든 티어의 cost 점수도 눌렀다. Haiku 5.5 가 sonnet 가격의 1/20 이라 explore · edit-routine 에서 haiku 가 sonnet 을 이겼다.
+- **수정**: cost 효율 = `floor / max(factor, floor)`, `floor = max(가장 싼 factor, 선호 티어의 factor)`(`costFloor`). 선호 티어는 항상 1 점을 받고 cost 는 다른 티어를 선호 티어 위로 올릴 수 없다 — 어떤 가격 벡터에서도. 625 벡터 × 8 작업 종류 × 8 허용 집합 격자가 이를 고정한다(옛 scorer 에서는 40,000 검사 중 17,600 이 실패하고 `TIER_QUALITY` 변조에서도 실패한다 — 커밋 작성자 측정). `UNDERSHOOT_PENALTY` 는 1/3 을 유지하고 낡은 0.002 마진 근거는 지웠다.
+- 하류 핀 5개가 2026-09-28 이전의 대조(`git show 5820948d`)로 돌아왔다: fable 이 되살아나면 `[opus, fable]` 상한의 architecture · review 가 다시 fable 을 권고한다 — 테스트 주석이 "fable-anchor 백로그 항목"이라 부르던 것이 이로써 풀린다. `route-observe-pre` 의 anti-vacuity 검사는 fable 을 서술하지 못하는 카탈로그로 구분하도록 바뀌었다.
+- **출하 설정에서의 영향**(커밋 작성자 측정, 이 릴리스에서 재현하지 않음): `fable.enabled=false` 인 출하 config 에서 router 영수증 810건 중 HEAD 와 다른 것은 0건.
+
+### 명령 문서: effort 기본값 정정, Agent 도구 effort 매개변수의 사실 등급, `/assemble` 모델 라우팅, `/implement` 의 effort 절, 스폰 보고 주소
+
+- `commands/team.md` · `commands/implement.md` · `lib/cognitive/effort-policy.js` 가 effort 기본값이 모든 표면에서 high 라고 적었다. effort 문서(2026-10-07 시행, 2026-10-12 조회)는 **Opus 5.5 와 Haiku 5.5 의 기본이 medium, 나머지 effort 모델은 high** 라고 한다. 세 곳을 맞췄다.
+- `team.md:79` 는 더 이상 "Agent 도구에 effort 매개변수가 없다"고 단정하지 않고 사실의 등급을 나눈다: 호스트 changelog 2.1.292 에 `effort` 매개변수 추가 항목이 있다 · 호스트 2.1.296 의 리더 메인 세션에 노출된 Agent 스키마에는 effort 매개변수가 없었다(2026-10-12 측정) · 서브에이전트 세션의 관측은 미기록으로 표시한다 · 2.1.292 미만 호스트는 미확인이다. 방화벽 핀은 새 문장을 따르고 옛 단언의 `not.toMatch` 를 유지한다. 줄 수는 그대로다.
+- `/assemble` 의 스폰 5곳이 하드코딩된 `model="sonnet"` 을 버리고 `/team` 처럼 model-routing CLI(`scripts/model-routing/model-routing.mjs resolve`)로 티어를 정한다(`allowed-tools` 에 Bash 추가). `raw-model-names` 가 `assemble.md` 를 스캔하고 `assemble-model-routing.test.js` 가 resolve 5줄을 스캐너 자기검증과 함께 고정한다.
+- `/implement` 는 `output_config.effort` 와 task-budgets beta 블록 스니펫을 보여 줬다. 둘 다 Messages API 로는 유효한 모양이지만, 공식 task-budgets 페이지는 task budget 이 `/implement` 가 도는 Claude Code 에서 지원되지 않는다고 하고, 64K/128K 기본값은 문서 근거가 없었다. 이제 이 절은 effort 를 호스트/세션이 정한다고 말하고(해석 순서는 Claude Code model-config 문서), `xhigh` 를 플러그인 정책으로 표시하며 공식 페이지를 가리킨다. 옛 스니펫이 돌아오면 핀이 잡는다.
+- `/assemble` · `/spawn` · `/orchestrate` 는 이름 붙은 팀원을 스폰하고 그들의 메시지를 기다리면서 어디로 보고할지는 알리지 않았다. 각 스폰 프롬프트가 `[보고 주소]` 블록으로 끝난다: `team.md` 의 채널 조항 + `to="main"` + 5,000자 이하 청크 규칙. `/go` 는 바꾸지 않았다(유일한 스폰이 이름 없는 것이고 값을 돌려받는다). `report-contract-parity` 가 기대 줄을 `team.md` 에서 파생하므로 그쪽 문구가 바뀌면 이 셋이 RED 가 된다.
+- **못 보는 것**: 새 `[보고 주소]` 블록을 읽은 팀원이 실제로 `to="main"` 으로 보내는지(라이브 스폰)는 이 릴리스에서 측정하지 않았다. 호스트 2.1.296 이후의 Agent 스키마와 서브에이전트 세션에 effort 매개변수가 노출되는지도 마찬가지다.
+
+### 문서 · 규칙 데이터: Haiku 5.5 행, 샘플링 매개변수 허용목록, Dreams PRD 상태, 갭 검토 보고서
+
+- `agents/llm-architect.md`: Claude Haiku 5.5 행(`claude-haiku-5-5`, 2026-10-07 출시, 프롬프트 길이에 따른 가격 구간 2개)과 이전 안내. `rules/csv/llm.csv`: `sampling-params-omit` 가 `claude-haiku-5-5` 를 id 로 나열하고 버전 패턴으로 목록을 늘리는 것을 금지한다. `skills/ai-security-standards/SKILL.md`: `claude-opus-5` 옆에 `claude-opus-5-5` 를 더하고 새 본문으로 `source_hash` 를 다시 계산했다.
+- `docs/PRD-DREAMING.md`: 상태를 Implemented 로(S1–S4 코드 착지, §11 수용 기준은 다시 검증하지 않았다), Dreams 모델 지원을 공식 문서와 2026-10-01 릴리스 노트로 돌려놓고, 2026-10-07 플랜 API 크레딧에 대한 재평가 트리거를 적었다.
+- `.artibot/REPORTS/claude-updates-gap-review-2026-10-12.md`(480줄, 신규): 위 변경 일부를 이끈 갭 검토 보고서. P-1 은 메인 세션 Agent 스키마 측정을 기록하고, P-3(haiku 티어를 Haiku 5.5 로)은 route-scorer cost 항 설계가 나오기 전까지 보류(오너 2026-10-12)로 표시돼 있다 — 그 보류는 같은 릴리스의 위 두 항목(route-scorer 수정 · haiku 티어 이동)으로 풀렸고 보고서 본문은 작성 시점 그대로다.
+
+### 프론트매터 블록 목록의 YAML 꼬리 주석을 벗긴다
+
+- `lib/core/agent-registry.js#consumeBlockList` 가 블록 목록 항목의 꼬리 주석을 값에 남겨, `orchestrator.tools` 가 `"SendMessage          # DM: ..."` 같은 항목 3개를 MCP `get-agent`/`list-agents` 로 내보냈다. 새 `stripTrailingComment` 는 YAML 규칙을 따른다: `#` 은 줄머리거나 공백 뒤일 때만 주석을 시작하고, 따옴표 스칼라 안(이스케이프 · 겹작은따옴표 처리)에서는 시작하지 않으며, 주석뿐인 항목은 건너뛴다.
+- `scripts/validate-agent-frontmatter.js` 는 같은 파서의 비공개 복사본을 갖고 있었고 틀린 판정을 냈다(`- ""  # none` 과 `- # todo` 가 통과). 이제 그 helper 를 import 하고 주석뿐인 항목을 맨 대시처럼 표시한다. 첫 테스트가 스크립트를 자식 프로세스로 fixture 에이전트에 대해 실행한다. 출하 에이전트 30개의 라이브 출력은 그대로다(30/30 valid — 커밋 작성자 측정).
+
+### SessionStart test-status 경고를 정화한다 ([4.71.6] 이 남은 결함으로 적은 3건)
+
+- [4.71.6] 의 "SessionStart 경고" 항목 끝에 "이번 변경 밖의 기존 결함 3건이 그대로 남았다"고 적은 것이 이 셋이다(그 항목은 당시의 기록이라 고치지 않았다). 모두 `lib/core/test-status.js` 다:
+  - `failedFiles` 를 검증 없이 원문 그대로 출력하던 것 — 제어 · 서식 · 공백 연속은 공백 하나로 접고, 라벨은 120자(`FAILED_FILE_ECHO_MAX`)로 자르며, 빈 라벨은 버리고, 하나도 남지 않으면 매달린 대시를 남기지 않는다.
+  - snapshot 시각이 미래이면 `-30m ago` 로 찍히던 것 — `30m in the future` 로 찍고 경고는 그대로 낸다.
+  - `failed` 가 음이 아닌 정수가 아닌 경우(음수 · 소수 · 오버플로 · 문자열 · `null`) — 개수나 통과로 읽지 않고 snapshot 없음으로 취급한다.
+- **못 보는 것**: 확인된 것은 `getLastTestStatus` 가 돌려주는 문자열까지다(`tests/core/test-status.test.js`). SessionStart 훅이 그 줄을 실제 배너로 내는 end-to-end 는 이 릴리스에서 실행해 확인하지 않았다.
+
+### nightly dream 슬롯이 무엇으로 게이트되는지 문서가 정확히 말한다 (동작 변화 없음)
+
+- `scripts/hooks/nightly-dream-consolidate.mjs` 머리말은 `learning.dream.enabled` 가 실행을 끊는다고, config 주석은 "feature gated OFF" 라고 적었다. 그러나 `dream.enabled` 를 읽는 코드는 없다: 05:00 슬롯은 `learning.dream.nightly.enabled === false` 하나로만 게이트되고(설계 — 불활성 후보만 만든다), 설정이 비어 있으면 돈다. 머리말 · 게이트 문서 · `artibot.config.json` 주석을 그렇게 고쳤다. `dream.enabled` 를 fail-closed 로 바꾸면 기본 설정의 opt-in 작업이 모두 no-op 이 되므로 동작은 바꾸지 않았다.
+- 현재 계약을 출하 config 로 고정하는 테스트를 더했다(`tests/scripts/nightly-dream-consolidate.test.js`). 게이트가 `dream.enabled` 도 보게 바뀌면 RED 가 된다.
+
+### SessionEnd 가 공유 상태 파일을 덮어쓰지 않고 병합한다, 등록된 적 없는 SubagentStop 은 행을 만들지 않는다
+
+- **문제**: `scripts/hooks/session-end.js#saveSessionState` 가 `~/.claude/artibot-state.json` 을 새 `{sessionId, endedAt, startedAt, cwd, metadata}` 로 덮어썼다. 이 파일은 살아 있는 여러 세션이 공유하므로 한 세션이 끝나면 다른 세션의 `agents` · `events` · `idlePayloadWithoutAgentId` 가 지워졌다. [4.71.6] 의 `agents` 맵 항목이 코드를 읽은 추론으로 지목했던, 종전에 맵을 비운 유일한 쓰기가 바로 이 덮어쓰기다.
+- **수정**: `scripts/hooks/_team-state.js#mergeSessionSnapshot` — 다른 쓰기 경로가 쓰는 것과 같은 파일 잠금 아래의 읽기-수정-쓰기(대기 2초 한도, 잠금 없는 폴백 없음)다. 끝난 팀의 진행 미러(`tasks` · `workflow` · `teamId` · `domain`)만 빼고 모든 키를 보존하고, `saveState` 처럼 `agents` 를 가지치기한다. 객체가 아닌 파일은 스냅샷으로 대체하고, 읽을 수 없는 파일은 건드리지 않고 로그를 남긴다. 스냅샷은 여전히 stdin 을 파싱한 직후의 첫 단계이며 영수증 처리보다 앞이다. 함수를 직접 읽어 확인했다(`_team-state.js:279`).
+- `scripts/hooks/workflow-status.js` 는 등록된 적 없는 id 의 `SubagentStop` 에 `agents` 행을 만들지 않는다. 호스트가 내부 보조 에이전트에 stop 만 단독으로 보내는데, 이 리포 spawn 원장의 id 7,613개 중 6,811개가 그런 id 였고(커밋 작성자 측정, 이 릴리스에서 재현하지 않음) 측정 당일 `agents` 행의 절반이 stop-only 였다. `session-end.js` 줄 인용 두 곳을 다시 지정했다.
+- **못 보는 것**: 이 병합이 라이브 파일에서 얼마나 자주 도는지는 모른다 — SessionEnd 가 창을 닫을 때 호출되는지(`/exit` 대 창 닫기)를 측정하지 않았고, [4.71.6] 이 적은 "2026-10-01 이후 SessionEnd 가 끝까지 돌지 않는 원인"도 풀리지 않았다. 확인된 것은 테스트(`tests/hooks/session-end-state.test.js` · `_team-state.test.js` · `workflow-status.test.js`)까지다.
+
 ## [4.71.6] — 2026-10-06
 
 `v4.71.5`(`9d347d09`) 이후 8 커밋 = **61 files +2,442/−233**(`git rev-list --count v4.71.5..487b7ceb` · `git diff --shortstat v4.71.5 487b7ceb`, 2026-10-06 측정 — 릴리스 커밋은 이 수치에 없다).
