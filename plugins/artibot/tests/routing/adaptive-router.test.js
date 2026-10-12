@@ -79,19 +79,22 @@ const CONFIG = Object.freeze({
 });
 
 /**
- * Pinned price port, fixed for the same reason CONFIG is: the ranking these
- * tests lean on (fable outranks opus for `architecture`) comes from the scorer
- * tables AND the price table, and this file pins the ROUTER MECHANISM —
- * ceiling, divergence, pin/route — not today's prices. A catalog re-price must
- * not turn it red (2026-09-28 did: at Opus 5.5's $4 input opus outranks fable).
+ * Pinned price port, fixed for the same reason CONFIG is: this file pins the
+ * ROUTER MECHANISM — ceiling, divergence, pin/route — not today's prices, so a
+ * catalog re-price must not turn it red. Since the F1 cost floor (2026-10-12)
+ * the price table no longer decides whether fable outranks opus for
+ * `architecture` (the preferred tier's cost efficiency is 1 on any prices);
+ * before it, the 2026-09-28 re-price to Opus 5.5's $4 input flipped that
+ * ranking to opus, which is why this port exists.
  *
  * The in/out numbers are the 2026-09-12 table the assertions were written
  * against. They are FIXTURE values, not current prices — those live in
  * `lib/core/model-catalog.js` and are pinned in tests/core/model-catalog.test.js.
  * Ids, limits, tokenizer coefficients and the catalog version still come from
- * the real catalog, so every identity in a receipt stays real. Under this
- * table fable leads opus over {opus, fable} by a thin margin (utility 0.7940 vs
- * 0.7867, measured 2026-09-28), so a scorer-table edit can still flip it.
+ * the real catalog, so every identity in a receipt stays real. Over {opus,
+ * fable} fable leads opus by utility 0.8863 vs 0.7867 on this table and on the
+ * live one alike (measured 2026-10-12); what can still flip it is a scorer-table
+ * edit (`TIER_QUALITY`, `TIER_LATENCY_INDEX`, the weights), not a price.
  */
 const PINNED_PRICES = Object.freeze({
   haiku: Object.freeze({ in: 1, out: 5 }),
@@ -259,23 +262,27 @@ describe('pinned price fixture', () => {
   });
 });
 
-describe('live prices (PRICING_VERSION 2026-09-28) — behaviour pin, not a mechanism test', () => {
-  it('recommends opus, not fable, for architecture under an [opus, fable] ceiling — if fable is revived, architecture/review recommendations go to opus; re-calibrating the fable anchor is an owner backlog item', () => {
+describe('live prices (PRICING_VERSION 2026-10-12) — behaviour pin, not a mechanism test', () => {
+  it('recommends fable, not opus, for architecture under an [opus, fable] ceiling — the F1 cost floor keeps the preferred tier first on any prices', () => {
     // Deliberately on DEFAULT_CATALOG (the real price table), unlike every
-    // other ranking test in this file. At Opus 5.5's $4 input the fable cost
-    // factor is 3.25 (was 2.6 at $5), and over {opus, fable} the scorer ranks
-    // opus 0.7867 > fable 0.7825 (was fable 0.7940 > opus 0.7867, measured
-    // 2026-09-28). The shipped config has fable.enabled=false, so live routing
-    // is unaffected today; this pin makes the flip visible the day fable is
-    // re-enabled, instead of leaving it hidden behind the pinned fixture.
+    // other ranking test in this file. History: at Opus 5.5's $4 input the
+    // fable cost factor is 3.25 (was 2.6 at $5), and from 2026-09-28 until the
+    // F1 cost floor (2026-10-12) the scorer ranked opus 0.7867 > fable 0.7825
+    // over {opus, fable}, so a revived fable gate would have recommended opus
+    // for architecture/review. The floor resolves that fable-anchor backlog
+    // item: cost efficiency is floored at the class's preferred tier, which
+    // makes it 1 for fable here, and fable leads opus 0.8863 > 0.7867
+    // (measured 2026-10-12). The shipped config has fable.enabled=false, so
+    // live routing is unaffected either way; this pin makes the ranking
+    // visible the day fable is re-enabled, instead of leaving it hidden behind
+    // the pinned fixture.
     const input = completeInput({ actionClass: 'architecture', catalog: DEFAULT_CATALOG });
     expect(resolveCandidateTiers(input)).toEqual(['opus', 'fable']);
     const receipt = routeModel(input);
-    expect(receipt.models.recommended.tier).toBe('opus');
+    expect(receipt.models.recommended.tier).toBe('fable');
     expect(receipt.models.selected.tier).toBe('opus');
-    expect(receipt.reason).not.toContain('divergence');
-    // The same input on the pinned fixture still diverges — the difference is
-    // the price table and nothing else.
+    expect(receipt.reason).toContain('divergence');
+    // The pinned fixture agrees: this ranking no longer depends on the price table.
     expect(routeModel({ ...input, catalog: PINNED_CATALOG }).models.recommended.tier)
       .toBe('fable');
   });

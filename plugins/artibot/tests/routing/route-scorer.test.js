@@ -21,7 +21,7 @@ import {
   TIER_QUALITY,
 } from '../../lib/routing/route-scorer.js';
 import { ACTION_CLASS_TIERS, ACTION_CLASSES } from '../../lib/routing/action-classifier.js';
-import { getCostFactor, MODELS } from '../../lib/core/model-catalog.js';
+import { getCostFactor, getModel, MODELS } from '../../lib/core/model-catalog.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(HERE, '../..');
@@ -168,6 +168,101 @@ describe('ranking', () => {
       expect(rows[0].tier).toBe(ACTION_CLASS_TIERS[actionClass]);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// The preferred tier survives any price vector
+// ---------------------------------------------------------------------------
+
+describe('the preferred tier wins under any price vector', () => {
+  /** Five orders of magnitude, including the Haiku 5.5 / Opus 5.5 input-price ratio. */
+  const FACTORS = [0.001, 0.025, 0.5, 1, 1000];
+
+  /** Every assignment of one of FACTORS to each tier: 5^4 = 625 vectors. */
+  const VECTORS = ALL_TIERS.reduce(
+    (vectors, tier) => vectors.flatMap((v) => FACTORS.map((f) => ({ ...v, [tier]: f }))),
+    [{}],
+  );
+
+  /** Haiku 5.5 input price against Opus 5.5 ($0.10 / $4), the other tiers as catalogued. */
+  const HAIKU_55 = { haiku: 0.025, sonnet: 0.5, opus: 1, fable: 3.25 };
+
+  const priced = (factors) => ({ getModel, getCostFactor: (tier) => factors[tier] });
+
+  /** The eight allow-sets (of the four tiers) that contain `preferred`. */
+  function allowSetsWith(preferred) {
+    const others = ALL_TIERS.filter((t) => t !== preferred);
+    return Array.from({ length: 1 << others.length }, (_, mask) => [
+      preferred,
+      ...others.filter((_tier, i) => mask & (1 << i)),
+    ]);
+  }
+
+  it('ranks the preferred tier first at a cost efficiency of 1, for every class and allow-set', () => {
+    const failures = [];
+    let checked = 0;
+    for (const vector of VECTORS) {
+      const catalog = priced(vector);
+      for (const actionClass of ACTION_CLASSES) {
+        const preferred = ACTION_CLASS_TIERS[actionClass];
+        for (const allowedTiers of allowSetsWith(preferred)) {
+          const rows = scoreRoutes({ actionClass, allowedTiers, catalog });
+          const cost = rows.find((r) => r.tier === preferred).terms.cost.value;
+          checked += 1;
+          if (rows[0].tier !== preferred || cost !== 1) {
+            failures.push({ vector, actionClass, allowedTiers, winner: rows[0].tier, cost });
+          }
+        }
+      }
+    }
+    expect(VECTORS).toHaveLength(625);
+    expect(checked).toBe(625 * ACTION_CLASSES.length * 8);
+    expect({ count: failures.length, first: failures.slice(0, 3) }).toEqual({ count: 0, first: [] });
+  });
+
+  it.each([...ACTION_CLASSES])(
+    'ranks the preferred tier of %s first at Haiku 5.5 prices when every tier is allowed',
+    (actionClass) => {
+      const rows = scoreRoutes({ actionClass, allowedTiers: ALL_TIERS, catalog: priced(HAIKU_55) });
+      expect(rows[0].tier).toBe(ACTION_CLASS_TIERS[actionClass]);
+    },
+  );
+
+  it('prefers sonnet to haiku for implement when opus is not allowed, at Haiku 5.5 prices', () => {
+    const rows = scoreRoutes({
+      actionClass: 'implement',
+      allowedTiers: ['haiku', 'sonnet'],
+      catalog: priced(HAIKU_55),
+    });
+    expect(rows.map((r) => r.tier)).toEqual(['sonnet', 'haiku']);
+  });
+
+  it('gives a tier at or below the preferred one full cost credit and prices only the tiers above it', () => {
+    const rows = scoreRoutes({
+      actionClass: 'explore',
+      allowedTiers: ALL_TIERS,
+      catalog: priced(HAIKU_55),
+    });
+    const cost = Object.fromEntries(rows.map((r) => [r.tier, r.terms.cost.value]));
+    expect(cost.haiku).toBe(1);
+    expect(cost.sonnet).toBe(1);
+    expect(cost.opus).toBeCloseTo(HAIKU_55.sonnet / HAIKU_55.opus, 10);
+    expect(cost.fable).toBeCloseTo(HAIKU_55.sonnet / HAIKU_55.fable, 10);
+  });
+
+  it('takes no floor from a preferred tier the injected catalog cannot describe', () => {
+    // The port prices haiku and sonnet only. implement prefers opus, which it
+    // cannot describe, so the price it would report for opus is a fallback and
+    // the floor stays at the cheapest allowed tier: the plain relative rule.
+    const partial = {
+      getModel: (tier) => (tier === 'haiku' || tier === 'sonnet' ? getModel(tier) : null),
+      getCostFactor: (tier) => HAIKU_55[tier],
+    };
+    const rows = scoreRoutes({ actionClass: 'implement', allowedTiers: ALL_TIERS, catalog: partial });
+    expect(rows.map((r) => r.tier)).toEqual(['haiku', 'sonnet']);
+    expect(rows[0].terms.cost.value).toBe(1);
+    expect(rows[1].terms.cost.value).toBeCloseTo(HAIKU_55.haiku / HAIKU_55.sonnet, 10);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -345,13 +440,14 @@ describe('signals', () => {
 // Relative cost and latency efficiency
 // ---------------------------------------------------------------------------
 
-describe('cost and latency are relative to the candidate set', () => {
+describe('cost and latency are relative to the candidate set, cost floored at the preferred tier', () => {
   it('gives the cheapest allowed tier a cost efficiency of 1', () => {
     const rows = scoreRoutes({ actionClass: 'implement', allowedTiers: ALL_TIERS });
     const byTier = Object.fromEntries(rows.map((r) => [r.tier, r]));
     expect(byTier.haiku.terms.cost.value).toBe(1);
+    // implement prefers opus, so opus is the floor and fable is priced against it.
     expect(byTier.fable.terms.cost.value)
-      .toBeCloseTo(getCostFactor('haiku') / getCostFactor('fable'), 10);
+      .toBeCloseTo(getCostFactor('opus') / getCostFactor('fable'), 10);
   });
 
   it('re-bases cost efficiency when the allow-set narrows', () => {

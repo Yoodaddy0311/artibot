@@ -932,9 +932,11 @@ describe('route-observe-pre — the canary value is forwarded, never interpreted
    * Pinned price port (mirrors `tests/routing/adaptive-router.test.js`; inline
    * because a shared fixture module would be a new file). The divergence this
    * block needs — recommendation fable vs policy opus — comes from the scorer
-   * tables AND the price table, and at the live 2026-09-28 prices (Opus 5.5,
-   * $4 input) opus outranks fable, so the seat would have nowhere to move. The
-   * in/out numbers are the 2026-09-12 table: FIXTURE values, not current
+   * tables. Since the F1 cost floor (2026-10-12) the price table can no longer
+   * remove it; between 2026-09-28 and then, at the live prices (Opus 5.5, $4
+   * input) opus outranked fable and the seat had nowhere to move, which is why
+   * this port was added. It stays so the block does not read today's catalog.
+   * The in/out numbers are the 2026-09-12 table: FIXTURE values, not current
    * prices. Ids, limits, tokenizer coefficients and the catalog version stay
    * the real catalog's. The live-price behaviour itself is pinned in
    * `tests/routing/adaptive-router.test.js` ("live prices" describe).
@@ -978,10 +980,20 @@ describe('route-observe-pre — the canary value is forwarded, never interpreted
     const absent = stable(buildReceipt(liveCtx));
     const explicit = stable(buildReceipt({ ...liveCtx, catalog: DEFAULT_CATALOG }));
     expect(JSON.stringify(absent)).toBe(JSON.stringify(explicit));
-    // And the pinned port really is different input: same ctx, other catalog,
-    // other recommendation. Without this the identity above could be vacuous.
-    expect(buildReceipt(architectCtx([])).models.recommended.tier)
-      .not.toBe(absent.models.recommended.tier);
+    // And a forwarded port really is different input: same ctx, other catalog,
+    // other recommendation. Without this the identity above could be vacuous,
+    // because a hook that ignored `ctx.catalog` would pass it. A PRICE
+    // difference cannot play this part any more: since the F1 cost floor
+    // (2026-10-12) no price table changes which tier wins `architecture`
+    // (the pinned port above recommends fable too). What does change it is a
+    // port that cannot describe fable: the scorer drops a tier the catalog does
+    // not know, so the recommendation falls to opus.
+    expect(absent.models.recommended.tier).toBe('fable');
+    const noFable = {
+      ...DEFAULT_CATALOG,
+      getModel: (tier) => (tier === 'fable' ? null : DEFAULT_CATALOG.getModel(tier)),
+    };
+    expect(buildReceipt({ ...liveCtx, catalog: noFable }).models.recommended.tier).toBe('opus');
   });
 
   it('hands the list to the key routeModel actually reads — the moved seat is the proof', () => {

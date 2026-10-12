@@ -111,13 +111,11 @@ const OVERSHOOT_PENALTY = 0.10;
  *
  * Sized so a tier at the far end of {@link TIER_ORDER} from the preferred one
  * scores exactly 0: three steps under is not a cheaper option, it is the wrong
- * tool. It is also the smallest value at which the class→tier anchor survives
- * the cost term — measured 2026-09-02, a penalty of 0.30 let haiku outrank
- * sonnet by 0.002 utility for the sonnet-preferred classes (`explore`,
- * `edit-routine`) under {@link DEFAULT_WEIGHTS}, which would have made
- * ACTION_CLASS_TIERS decorative for those two. The invariant it restores —
- * the preferred tier wins when no signal argues otherwise — is pinned per
- * class in tests/routing/route-scorer.test.js.
+ * tool. The class→tier anchor — the preferred tier wins when no signal argues
+ * otherwise — does not rest on this value: the cost term is floored at the
+ * preferred tier ({@link costFloor}), so a price table can widen the preferred
+ * tier's lead through cost and never close it. The invariant is pinned per
+ * class, and over a grid of price vectors, in tests/routing/route-scorer.test.js.
  */
 const UNDERSHOOT_PENALTY = 1 / 3;
 /** Neutral value for a term whose signal was not supplied. */
@@ -324,10 +322,14 @@ function predictedCost(contextTokens, model) {
 /**
  * Score every allowed tier for an action class and rank them by utility.
  *
- * Cost and latency are scored RELATIVE TO THE CANDIDATE SET: the cheapest
- * allowed tier gets `cost.value === 1`, the fastest gets `latency.value === 1`.
- * That is the decision actually on the table — "which of these" — and it keeps
- * the terms comparable when policy narrows the allow-set to a single tier.
+ * Cost and latency are scored RELATIVE TO THE CANDIDATE SET: the fastest
+ * allowed tier gets `latency.value === 1`, and the cheapest allowed tier still
+ * gets `cost.value === 1`. Cost is FLOORED at the class's preferred tier,
+ * though ({@link costFloor}): every allowed tier priced at or below it gets 1
+ * and a dearer one gets `floor / factor`, so no tier is rewarded for being
+ * cheaper than the one the class asks for. That is the decision actually on the
+ * table — "which of these" — and it keeps the terms comparable when policy
+ * narrows the allow-set to a single tier.
  *
  * @param {object} input - Scoring input (§2.2 contract).
  * @param {string} input.actionClass - One of {@link ACTION_CLASSES}.
@@ -370,8 +372,8 @@ export function scoreRoutes(input = {}, options = {}) {
   const weights = normaliseWeights(options.weights);
   const factors = tiers.map((t) => resolveCostFactor(catalog, t));
   const indices = tiers.map((t) => TIER_LATENCY_INDEX[t] ?? 1);
-  const bestFactor = Math.min(...factors);
   const bestIndex = Math.min(...indices);
+  const floor = costFloor(catalog, src.actionClass, Math.min(...factors));
 
   const rows = tiers.map((tier, i) => buildRow({
     tier,
@@ -379,7 +381,7 @@ export function scoreRoutes(input = {}, options = {}) {
     model: catalog.getModel(tier),
     signals,
     weights,
-    costEfficiency: factors[i] > 0 ? bestFactor / factors[i] : NEUTRAL,
+    costEfficiency: factors[i] > 0 ? floor / Math.max(factors[i], floor) : NEUTRAL,
     latencyEfficiency: indices[i] > 0 ? bestIndex / indices[i] : NEUTRAL,
     costFactor: factors[i],
   }));
@@ -401,6 +403,33 @@ function resolveCostFactor(catalog, tier) {
     ? catalog.getCostFactor(tier)
     : 1;
   return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
+/**
+ * The cost factor at or below which a tier earns full cost credit: the larger of
+ * the cheapest allowed tier's factor and the class's preferred tier's.
+ *
+ * Measured against the cheapest allowed tier alone, a tier priced far under the
+ * preferred one collects up to the whole `cost` weight of {@link DEFAULT_WEIGHTS}
+ * and can outrank a preferred tier whose lead over it on every other term is
+ * smaller (Haiku 5.5 costs 0.025x of Opus 5.5 on input). Flooring at the
+ * preferred tier's factor gives the preferred tier the largest cost efficiency
+ * there is, 1, so a price table can widen its lead through cost and never close
+ * it. When the preferred tier is cheaper than every allowed tier the floor is
+ * the cheapest allowed factor, which is the plain relative rule.
+ *
+ * A catalog port that cannot describe the preferred tier gets no floor from it:
+ * the price it would report for that tier is a fallback, not a price.
+ *
+ * @param {object} catalog - Catalog port.
+ * @param {string} actionClass - One of {@link ACTION_CLASSES}.
+ * @param {number} bestFactor - Cost factor of the cheapest allowed tier.
+ * @returns {number} Floor factor > 0.
+ */
+function costFloor(catalog, actionClass, bestFactor) {
+  const preferred = ACTION_CLASS_TIERS[actionClass];
+  if (!catalog.getModel(preferred)) return bestFactor;
+  return Math.max(bestFactor, resolveCostFactor(catalog, preferred));
 }
 
 /**

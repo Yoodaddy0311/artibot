@@ -50,16 +50,19 @@ const CONFIG = Object.freeze({
  * Pinned price port, mirroring `adaptive-router.test.js` (kept inline there
  * and here: a shared fixture module would be a new file). The canary gate is a
  * MECHANISM — it needs the recommendation (fable) to diverge from policy
- * (opus) — and that divergence comes from the scorer tables AND the price
- * table. Pinning prices here, like CONFIG pins policy, keeps a catalog re-price
- * from turning these red (2026-09-28 did: at Opus 5.5's $4 input opus
- * outranks fable, the divergence disappears and the seat has nowhere to move).
+ * (opus). Since the F1 cost floor (2026-10-12) that divergence no longer
+ * depends on the price table: the preferred tier of `architecture` has a cost
+ * efficiency of 1 on any prices. Pinning prices here, like CONFIG pins policy,
+ * still keeps these tests off today's catalog (before the floor, the
+ * 2026-09-28 re-price to Opus 5.5's $4 input put opus ahead of fable, the
+ * divergence disappeared and the seat had nowhere to move).
  *
  * The in/out numbers are the 2026-09-12 table the assertions were written
  * against — FIXTURE values, not current prices (those live in
  * `lib/core/model-catalog.js`). Ids, limits, tokenizer coefficients and the
- * catalog version stay the real catalog's. The fable lead over opus under this
- * table is thin (utility 0.7940 vs 0.7867, measured 2026-09-28).
+ * catalog version stay the real catalog's. Over {opus, fable} fable leads opus
+ * by utility 0.8863 vs 0.7867 on this table and on the live one (measured
+ * 2026-10-12).
  */
 const PINNED_PRICES = Object.freeze({
   haiku: Object.freeze({ in: 1, out: 5 }),
