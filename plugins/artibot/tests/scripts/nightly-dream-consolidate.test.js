@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import {
+  _internals,
   parseArgs,
   resolveDefaultPluginRoot,
   runNightlyDream,
@@ -181,6 +182,87 @@ describe('runNightlyDream — Phase-1 only (ADR-3 invariants)', () => {
     expect(res.candidates).toBe(0);
     expect(res.llmCalls).toBe(0);
     expect(res.mdWrites).toBe(0);
+  });
+});
+
+/**
+ * WHICH CONFIG KEY GATES THE NIGHTLY SLOT. Only `learning.dream.nightly.enabled === false`
+ * stops it; `learning.dream.enabled` is not read here. The shipped config pairs
+ * `dream.enabled: false` (its comment says that flag is informational and that
+ * `nightly.enabled` gates the 05:00 slot) with `dream.nightly.enabled: true`, and the
+ * 05:00 job is opt-in at the OS level (README "Optional: Background Learning Schedules"), so a
+ * user who registered it gets candidates tonight. Making the hook honour `dream.enabled`
+ * (fail-closed or not) would turn it into a silent no-op for every default config. That is a
+ * product decision, not a cleanup: whoever makes it changes this block and the shipped config
+ * together, on purpose. Absent config runs too, which is what the tests above rely on.
+ */
+describe('nightly gate — dream.nightly.enabled decides, dream.enabled is not read', () => {
+  const dream = (block) => ({ learning: { dream: block } });
+  const SHIPPED_PAIRING = 'dream.enabled=false + nightly.enabled=true (the shipped pairing)';
+  const readShipped = async () => JSON.parse(
+    await fs.readFile(path.join(resolveDefaultPluginRoot(), 'artibot.config.json'), 'utf-8'),
+  );
+
+  const GATE_CASES = [
+    { what: 'no config at all', config: undefined, runs: true },
+    { what: 'an empty config', config: {}, runs: true },
+    { what: 'an empty dream block', config: dream({}), runs: true },
+    { what: 'nightly.enabled=true', config: dream({ nightly: { enabled: true } }), runs: true },
+    { what: 'nightly.enabled=false', config: dream({ nightly: { enabled: false } }), runs: false },
+    { what: 'dream.enabled=false alone', config: dream({ enabled: false }), runs: true },
+    { what: SHIPPED_PAIRING, config: dream({ enabled: false, nightly: { enabled: true } }), runs: true },
+    { what: 'dream.enabled=true + nightly.enabled=false', config: dream({ enabled: true, nightly: { enabled: false } }), runs: false },
+  ];
+
+  it.each(GATE_CASES)('allows the run: $runs for $what', ({ config, runs }) => {
+    expect(_internals.dreamEnabled(config)).toBe(runs);
+  });
+
+  // NEGATIVE CONTROL. A gate that also consults dream.enabled must fail these pins, or they could
+  // not tell it from the real one. Each stub is the real gate plus one extra dream.enabled check;
+  // it has to disagree with the matrix on the shipped pairing and with the real gate on the real
+  // shipped file (the rows and the end-to-end run in this block are what turn red for it).
+  it.each([
+    { stub: 'fail-closed: dream.enabled must be true', extra: (c) => c?.learning?.dream?.enabled === true },
+    { stub: 'honours an explicit dream.enabled=false', extra: (c) => c?.learning?.dream?.enabled !== false },
+  ])('catches a stub gate that also checks dream.enabled: $stub', async ({ extra }) => {
+    const stub = (c) => extra(c) && _internals.dreamEnabled(c);
+    const wrongRows = GATE_CASES.filter(({ config, runs }) => stub(config) !== runs).map(({ what }) => what);
+    expect(wrongRows).toContain(SHIPPED_PAIRING);
+    const shipped = await readShipped();
+    expect(stub(shipped)).toBe(false);
+    expect(_internals.dreamEnabled(shipped)).toBe(true);
+  });
+
+  it('completes with dream.enabled=false and nightly.enabled=true, reaching candidates.json', async () => {
+    const res = await runNightlyDream({
+      memoryDir: memDir, pluginRoot, logger: silent(),
+      config: { learning: { dream: { enabled: false, nightly: { enabled: true } } } },
+    });
+    expect(res.status).toBe('completed');
+    expect(res.candidates).toBeGreaterThanOrEqual(1);
+    await expect(fs.access(path.join(memDir, '.dream-staging', 'candidates.json'))).resolves.toBeUndefined();
+  });
+
+  it('skips on nightly.enabled=false even when dream.enabled=true', async () => {
+    const res = await runNightlyDream({
+      memoryDir: memDir, pluginRoot, logger: silent(),
+      config: { learning: { dream: { enabled: true, nightly: { enabled: false } } } },
+    });
+    expect(res.status).toBe('skipped');
+    expect(res.reason).toBe('dream-nightly-disabled');
+    await expect(fs.access(path.join(memDir, '.dream-staging', 'candidates.json'))).rejects.toThrow();
+  });
+
+  // What users get today. The synthetic cases above hold whatever the file says; this one reads
+  // the real shipped file, and says so loudly if it no longer has the OFF flag it is about.
+  it('completes with the real shipped artibot.config.json', async () => {
+    const shipped = await readShipped();
+    expect(shipped.learning.dream.enabled, 'shipped dream.enabled changed: re-read this block').toBe(false);
+    expect(shipped.learning.dream.nightly.enabled).toBe(true);
+    const res = await runNightlyDream({ memoryDir: memDir, pluginRoot, config: shipped, logger: silent() });
+    expect(res.status).toBe('completed');
+    expect(res.candidates).toBeGreaterThanOrEqual(1);
   });
 });
 

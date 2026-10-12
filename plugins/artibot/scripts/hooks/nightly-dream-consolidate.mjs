@@ -15,7 +15,10 @@
  *   - Only `candidates.json` + a wakeup marker are produced.
  *   - never-throws — returns a structured status object (rollup hook pattern).
  *   - Honours the kill-switch; `--dry-run` computes without writing candidates.
- *   - `dream.enabled` config gate (default OFF/conservative) short-circuits.
+ *   - Config gate: only `learning.dream.nightly.enabled === false` short-circuits the run
+ *     (`dream-nightly-disabled`). `learning.dream.enabled` (shipped false) is not read here:
+ *     candidates are inert staging data, so the opt-in nightly slot runs while the broader
+ *     feature is OFF. Pinned in tests/scripts/nightly-dream-consolidate.test.js.
  *
  * Flags:
  *   --dry-run               Compute candidates, skip the candidates.json write
@@ -97,8 +100,9 @@ export function resolveDefaultPluginRoot() {
 // ---------------------------------------------------------------------------
 
 /**
- * Check the dream config gate (default conservative). Returns true when the
- * nightly Phase-1 run is allowed to proceed.
+ * Check the nightly config gate. Returns true when the nightly Phase-1 run is
+ * allowed to proceed: anything but `learning.dream.nightly.enabled === false`
+ * allows it, so a missing config runs. `learning.dream.enabled` is not read.
  * @param {object} [config]
  */
 function dreamEnabled(config) {

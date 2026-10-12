@@ -1030,7 +1030,7 @@
     },
     "dream": {
       "enabled": false,
-      "comment": "Non-destructive memory consolidation (PRD-DREAMING). Conservative defaults: feature gated OFF, dry-run default, autoAccept OFF. Input memory/*.md is NEVER modified; output lands in memory/.dream-staging/, replaced originals move to memory/.dream-archive/ (hard-delete 0). LLM Phase-2 runs only in sessions (/dreaming); nightly is Phase-1 (candidates) + wakeup marker only — zero LLM, zero MD writes (ADR-3).",
+      "comment": "Non-destructive memory consolidation (PRD-DREAMING). Conservative defaults: enabled=false is informational (no code gates on it; the 05:00 nightly slot is gated by nightly.enabled below), dry-run default, autoAccept OFF. Input memory/*.md is NEVER modified; output lands in memory/.dream-staging/, replaced originals move to memory/.dream-archive/ (hard-delete 0). LLM Phase-2 runs only in sessions (/dreaming); nightly is Phase-1 (candidates) + wakeup marker only — zero LLM, zero MD writes (ADR-3).",
       "nightly": {
         "enabled": true,
         "comment": "Allows the 05:00 hook to produce inert candidates.json + a wakeup marker. Set false to disable the nightly slot entirely."
