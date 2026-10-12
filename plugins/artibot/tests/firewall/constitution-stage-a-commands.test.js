@@ -16,6 +16,12 @@
  *       (`[artibot:effort level=…]` 프롬프트 디렉티브 + `runtime/current-effort.json`)가
  *       그대로 살아 있어야 하므로, 그쪽은 **존재**를 단언한다. 삭제 게이트가 정작
  *       대체 경로까지 지워지는 것을 못 보면 게이트가 결함을 만든다.
+ *       2026-10-12 갱신(P-1): 호스트 changelog 2.1.292(2026-10-06)가 `Agent` 도구에
+ *       `effort` 파라미터를 추가했다. 그래서 "`Agent` 도구에는 effort·budget 파라미터가
+ *       없다" 단정 핀을 **사실 등급 핀**으로 바꿨다 — changelog 사실 · 리더 메인 세션
+ *       미노출 실측 · 서브에이전트 세션은 관측 보고(근거 미기록) · 미확인 표기가 본문에
+ *       남아 있어야 하고, 낡은 단정과 "기본 high"(모델별 기본값이 다르다) 는 돌아오면
+ *       RED 다.
  *
  *  A-7  `commands/adr.md` 의 "결정 요소만 질문한다 (D09 · OD-5)" — 결정 요소는 묻고
  *       사실은 조사한다는 분리, 질문 게이트 4조건, 권장 옵션 `(권장)` 표기 규칙,
@@ -43,8 +49,17 @@
  *     `output_config` JSON 스니펫이 남아 있다** — T-07 소유 경로가 아니라 손대지
  *     않았고, 이 게이트도 그것을 보지 않는다. 여기 그린을 "리포 전체에 API 오정보가
  *     없다" 의 근거로 쓰지 마라.
+ *     2026-10-12 갱신: 그 구간에서 **"기본 high" 진술 하나만** 모델별 기본값으로 고쳐
+ *     마지막 A-6 테스트가 핀한다. 스니펫(:77-81)과 task-budget 블록(:85-90, 베타 헤더
+ *     포함)은 그대로이고 여전히 이 게이트 밖이다.
  *  5. **설치본 드리프트.** 리포 정본만 읽는다. 사용자 환경에 설치된 커맨드 사본이
  *     어긋나 있어도 조용하다(사본 대조 게이트 **없음** — 미확인).
+ *  6. **`Agent` effort 파라미터의 실제 노출·효과.** 이 스캔은 본문이 사실 등급을
+ *     지키는지(리터럴)만 본다. 노출 실측은 2026-10-12 리더 메인 세션 한 번뿐이고(호스트
+ *     2.1.296, effort 없음) 서브에이전트 세션은 근거 없는 관측 보고다. 다른 세션·호스트에서
+ *     노출되는지, 줘도 팀원의 effort 가 바뀌는지, `maxEffortLevel` 상한이 걸리는지는
+ *     **미측정**이다(P-4 사전 프로브 몫). 모델별 기본 effort 진술은 공식 effort 문서
+ *     (효력일 2026-10-07, 열람일 2026-10-12)를 옮긴 것이라, 문서가 바뀌어도 이 스캔은 모른다.
  *
  * @module tests/firewall/constitution-stage-a-commands
  */
@@ -63,6 +78,8 @@ const PLAN = path.join(COMMANDS_DIR, 'plan.md');
 const ULTRAPLAN = path.join(COMMANDS_DIR, 'ultraplan.md');
 const TEAM = path.join(COMMANDS_DIR, 'team.md');
 const ADR = path.join(COMMANDS_DIR, 'adr.md');
+const IMPLEMENT = path.join(COMMANDS_DIR, 'implement.md');
+const EFFORT_POLICY_JS = path.resolve(COMMANDS_DIR, '..', 'lib', 'cognitive', 'effort-policy.js');
 
 /**
  * 파일을 읽되 **없으면 던진다**. fail-closed 형태다 — 파일이 사라지면 스캔이
@@ -220,11 +237,52 @@ describe('헌법 단계 A — commands 소유분 (A-5·A-6·A-7)', () => {
       expect(headings(body)).toContain('### Auto-Effort Pre-injection (현재 정책 티어 Agentic)');
     });
 
-    it('삭제 이유가 본문에 남아 있다 — `Agent` 도구에 파라미터가 없다는 진술', () => {
+    it('삭제 이유가 본문에 남아 있다 — SDK `output_config` 예시는 `Agent` 스폰에 통하지 않는다 + 실측 근거', () => {
       const body = normalize(read(TEAM));
-      expect(body).toMatch(/`Agent` 도구에는 effort·budget 파라미터가 \*\*없다\*\*/);
+      // 무엇을 왜 지웠는지 — 적어 두지 않으면 다음 사람이 되돌려 놓는다
+      expect(body).toContain('SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다');
       // 실측 근거 인용 (존재 ≠ 작동을 구분하는 출처)
       expect(body).toContain('lib/cognitive/effort-policy.js');
+    });
+
+    it('`Agent` 도구 파라미터 진술이 사실 등급을 지킨다 — 낡은 "없다" 단정 대신 changelog 사실 + 메인 세션 실측 + 서브에이전트 관측 보고(근거 미기록) + 미확인 표기', () => {
+      const body = normalize(read(TEAM));
+      // 낡은 단정은 돌아오면 안 된다 — 호스트 2.1.292 changelog 가 Agent 에 effort 를 추가했다.
+      expect(body).not.toMatch(/`Agent` 도구에는 effort·budget 파라미터가 \*\*없다\*\*/);
+      // effort — changelog 사실과 그 조건(버전)
+      expect(body).toContain('2.1.292');
+      expect(body).toContain('Added an `effort` parameter to the Agent tool');
+      // 노출은 보장되지 않는다 — 실측은 측정한 자리(리더 메인 세션)에 묶여 있어야 한다
+      expect(body).toMatch(/호스트 2\.1\.296\(`claude --version`, 리뷰어 측정\)의 리더 메인 세션에 노출된 `Agent` 도구 스키마의 파라미터는 description·isolation·mode·model·name·prompt·subagent_type·team_name 이었고 effort 파라미터는 \*\*없었다\*\*\(2026-10-12 메인 세션 실측\)/);
+      // 서브에이전트 세션 진술은 근거가 기록되지 않았다 — 실측으로 돌아오면 안 되고 관측 보고로 남는다
+      expect(body).not.toMatch(/서브에이전트 세션에 노출된 `Agent` 도구 스키마에는 effort 파라미터가 \*\*없었다\*\*\(2026-10-12 실측\)/);
+      expect(body).toContain('(**관측 보고, 근거 미기록**)');
+      expect(body).toMatch(/2\.1\.292 미만 호스트의 동작은 \*\*미확인\*\*/);
+      // budget — 추가 항목을 찾지 못했을 뿐 "없다" 단정이 아니다
+      expect(body).toMatch(/\*\*budget\*\*: 파라미터를 추가했다는 changelog 항목은 찾지 못했다/);
+      // 디렉티브 경로는 현행 절차이자 폴백으로 남는다 (이 변경이 절차를 바꾸지 않는다)
+      expect(body).toContain('디렉티브 경로가 현행 절차이자 폴백이다');
+    });
+
+    it('기본 effort 진술이 모델별이다 — "기본 high" 단정이 돌아오지 않는다', () => {
+      const body = normalize(read(TEAM));
+      expect(body).not.toContain('(기본 `high`)');
+      expect(body).not.toContain('high (기본)');
+      // 공식 effort 문서(효력일 2026-10-07, 열람일 2026-10-12): Opus 5.5·Haiku 5.5 는 medium, 그 밖의 effort 지원 모델은 high
+      expect(body).toContain('Opus 5.5·Haiku 5.5 는 `medium`, 그 밖의 effort 지원 모델은 `high`');
+    });
+
+    it('effort-policy.js 머리말도 같은 사실이다 — 모델 고정 머리말과 "기본 high" 가 없다', () => {
+      const source = normalize(read(EFFORT_POLICY_JS));
+      expect(source).not.toContain('Opus 4.8');
+      expect(source).not.toContain("Default is 'high' on every");
+      expect(source).toMatch(/API default is per model[\s\S]*medium on Opus 5\.5 and Haiku 5\.5, high on the other effort models/);
+    });
+
+    it('implement.md 의 기본 effort 진술도 모델별이다 — "기본 high" 단정이 돌아오지 않는다', () => {
+      const body = normalize(read(IMPLEMENT));
+      expect(body).not.toMatch(/기본 `?high`?(?![-\w])/);
+      expect(body).toContain('Opus 5.5·Haiku 5.5 는 `medium`, 그 밖의 effort 지원 모델은 `high`');
     });
 
     it('effort 권장값 표는 유지됐다 — 삭제가 정책까지 지우지 않았다', () => {

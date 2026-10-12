@@ -20,8 +20,10 @@
  *     the policy (those comments will not match the numeric suffix pattern)
  *   - This test file itself (not in scope)
  *
- * Scope: the 5 command files most likely to drift —
- *   plan.md, ultraplan.md, team.md, repo.md, autopilot.md
+ * Scope: the 6 command files most likely to drift —
+ *   plan.md, ultraplan.md, team.md, repo.md, autopilot.md, assemble.md
+ *   (assemble.md joined 2026-10-12: it spawned 5 teammates with a hardcoded
+ *   `model="sonnet"` instead of passing the model-routing CLI result.)
  */
 
 import { readFile } from 'node:fs/promises';
@@ -43,7 +45,7 @@ const COMMANDS_DIR = path.resolve(__dirname, '../../commands');
 const RAW_MODEL_PATTERN =
   /model="(opus|sonnet|haiku|fable)"|(?:opus|sonnet|haiku)\s+4\.\d|(?:opus|sonnet|haiku)\s+3\.\d|claude-(?:opus|sonnet|haiku|fable)-[\w.-]+/i;
 
-const TARGET_FILES = ['plan.md', 'ultraplan.md', 'team.md', 'repo.md', 'autopilot.md'];
+const TARGET_FILES = ['plan.md', 'ultraplan.md', 'team.md', 'repo.md', 'autopilot.md', 'assemble.md'];
 
 describe('command files must not contain raw model names', () => {
   for (const filename of TARGET_FILES) {

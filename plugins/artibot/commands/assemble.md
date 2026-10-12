@@ -1,7 +1,7 @@
 ---
 description: "(Artibot) Avengers Assemble! - Easter egg that summons the full Artibot agent team using real Agent Teams API"
 argument-hint: '"어벤저스 어셈블!"'
-allowed-tools: [Read, Glob, Grep, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
+allowed-tools: [Read, Glob, Grep, Bash, Agent, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
 ---
 
@@ -83,30 +83,39 @@ Show the full 26-agent roster to the user immediately:
 
 ### Step 3: Spawn Representative Teammates
 
-Spawn **one agent per category** (5 total, sonnet model for balance) into the "avengers" team. Each teammate introduces themselves with their role and specialty in plain Korean. Launch ALL 5 in parallel:
+Spawn **one agent per category** (5 total) into the "avengers" team. Each teammate introduces themselves with their role and specialty in plain Korean.
+
+> **모델 전달 — 아래 스폰 예시의 `model` 주석이 가리키는 절차.** 리더는 스폰 직전에 에이전트마다 `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:<agent-type>` 를 실행하고(`--role`·`--task` 는 붙이지 않는다 — 에이전트의 기본 작업 종류 `lib/routing/action-classifier.js#AGENT_ACTION_CLASS` 가 기준이라 각 에이전트가 자기 작업 종류의 티어로 뜬다), 출력된 한 단어를 Agent 호출의 `model` 파라미터에 **그대로 넘긴다**. 이 문서에는 모델 이름을 적지 않는다 — 판정은 CLI 가 한다. 다섯 `resolve` 를 먼저 한 번에 받은 뒤 다섯 Agent 를 한 메시지에서 병렬로 띄운다. `model` 을 생략하지 않는다(생략한 스폰에는 `/model-routing` 설정이 닿지 않는다). CLI 가 없거나 실패하면 `lib/core/model-policy.js#resolveModel('<agent-type>')` 값으로 폴백한다 — 근거·상세는 `commands/team.md` §Teammate Rules & Model Policy.
+
+Launch ALL 5 in parallel:
 
 ```
-Agent(architect, name="avengers-architect", model="sonnet",
+Agent(architect, name="avengers-architect",
+  /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:architect 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 시스템 설계 및 아키텍처 결정.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Agent(code-reviewer, name="avengers-code-reviewer", model="sonnet",
+Agent(code-reviewer, name="avengers-code-reviewer",
+  /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 코드 리뷰 및 품질 검증.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Agent(backend-developer, name="avengers-backend-dev", model="sonnet",
+Agent(backend-developer, name="avengers-backend-dev",
+  /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:backend-developer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: API 설계 및 서버 로직 구현.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Agent(security-reviewer, name="avengers-security-reviewer", model="sonnet",
+Agent(security-reviewer, name="avengers-security-reviewer",
+  /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:security-reviewer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 보안 취약점 탐지 및 대응.
   담당 분야와 준비 상태를 간단히 말해주세요.")
 
-Agent(tdd-guide, name="avengers-tdd-guide", model="sonnet",
+Agent(tdd-guide, name="avengers-tdd-guide",
+  /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:tdd-guide 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 테스트 주도 개발 가이드.
   담당 분야와 준비 상태를 간단히 말해주세요.")
@@ -134,7 +143,7 @@ whole teardown — the team is implicit, so there is no disband call after it.
 
 - This is a FUN easter egg but uses REAL Agent Teams infrastructure
 - The team persists and can accept real work if the user wants
-- Use sonnet model for all spawned teammates for quality balance
+- Each teammate's `model` comes from the model-routing CLI at spawn time (Step 3) - never hardcode a model name here
 - All 5 representatives are spawned IN PARALLEL for speed
 - The roster banner is shown IMMEDIATELY (before teammates respond)
 - NO hero titles or cringey names - use plain role descriptions only

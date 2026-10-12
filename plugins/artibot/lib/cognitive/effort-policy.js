@@ -1,7 +1,7 @@
 /**
  * Static Effort Level Policy (cognitive layer, pure L4 leaf — no imports).
  *
- * Maps slash-command names to Claude Opus 4.8 native effort levels. Extracted
+ * Maps slash-command names to the Claude native effort levels. Extracted
  * verbatim from router.js so the static mapping can be imported without pulling
  * in the System 1/2 routing graph (breaks the router↔effort-resolver cycle and
  * keeps router.js under the <800-line quality gate). Logic is byte-identical to
@@ -14,8 +14,8 @@
 // Effort Level Policy (native effort level vocabulary)
 // ---------------------------------------------------------------------------
 // Official guide: https://platform.claude.com/docs/ko/build-with-claude/effort
-// Native levels: max | xhigh | high | medium | low. Default is 'high' on every
-// surface; no beta header is required.
+// Native levels: max | xhigh | high | medium | low. API default is per model (guide, effective 2026-10-07, read 2026-10-12):
+// medium on Opus 5.5 and Haiku 5.5, high on the other effort models. No beta header is required.
 //
 // HOW THIS MAPPING ACTUALLY REACHES THE MODEL (measured 2026-09-02 — the
 // plugin has NO Messages API caller and sets NO output_config.effort; grep

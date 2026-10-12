@@ -72,7 +72,7 @@ Before writing a single line of code, verify three things (use Grep/Read — no 
 - **Ask-When-Unclear**: If any requirement is ambiguous, ask the user BEFORE implementing.
 
 ### Effort & Task Budget (현재 정책 티어 네이티브)
-현재 정책 티어(model-policy 해석)는 effort를 네이티브 레벨(**max / xhigh / high / medium / low**, 기본 high, 베타 헤더 불필요)로 노출한다. 구현 작업은 **xhigh**가 기본 권장값이며 호출 측은 `output_config.effort`로 직접 지정한다.
+현재 정책 티어(model-policy 해석)는 effort를 네이티브 레벨(**max / xhigh / high / medium / low**, 베타 헤더 불필요)로 노출한다. API 기본값은 모델마다 다르다 — 공식 effort 문서(효력일 2026-10-07, 열람일 2026-10-12) 기준 Opus 5.5·Haiku 5.5 는 `medium`, 그 밖의 effort 지원 모델은 `high`. 구현 작업은 **xhigh**가 기본 권장값이며 호출 측은 `output_config.effort`로 직접 지정한다.
 
 ```json
 {
