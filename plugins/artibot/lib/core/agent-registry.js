@@ -113,7 +113,42 @@ function consumeBlockScalar(lines, startIdx) {
 }
 
 /**
+ * Drop a trailing YAML line comment from a one-line scalar. `#` starts a comment
+ * only after whitespace (or at the very start) and never inside a quoted scalar,
+ * so `Read  # why` becomes `Read` while `"a # b"` and `a#b` come back whole. A
+ * quote opens a quoted scalar only as its first character: the apostrophe in
+ * `don't # note` is plain text. The quotes themselves stay on the result.
+ *
+ * Exported because `scripts/validate-agent-frontmatter.js` keeps its own copy of this
+ * parser and must read list items by the same rule.
+ *
+ * @param {string} scalar - trimmed text after the `- ` of a list item
+ * @returns {string}
+ */
+export function stripTrailingComment(scalar) {
+  const quote = scalar[0] === '"' || scalar[0] === "'" ? scalar[0] : '';
+  let i = quote ? 1 : 0;
+  while (quote && i < scalar.length) {
+    if (quote === '"' && scalar[i] === '\\') i += 2;
+    else if (scalar[i] !== quote) i += 1;
+    else if (quote === "'" && scalar[i + 1] === "'") i += 2;
+    else {
+      i += 1;
+      break;
+    }
+  }
+  for (; i < scalar.length; i += 1) {
+    if (scalar[i] === '#' && (i === 0 || /[ \t]/.test(scalar[i - 1]))) {
+      return scalar.slice(0, i).trimEnd();
+    }
+  }
+  return scalar;
+}
+
+/**
  * Consume a YAML block list (indented `- item` lines) following `key:`.
+ * Trailing line comments are not part of an item; an item that is only a
+ * comment is skipped.
  *
  * @param {string[]} lines
  * @param {number} startIdx
@@ -130,7 +165,8 @@ function consumeBlockList(lines, startIdx) {
     }
     const trimmed = line.trim();
     if (leadingSpaces(line) >= 2 && trimmed.startsWith('- ')) {
-      items.push(trimmed.slice(2).trim().replace(/^['"]|['"]$/g, ''));
+      const item = stripTrailingComment(trimmed.slice(2).trim());
+      if (item !== '') items.push(item.replace(/^['"]|['"]$/g, ''));
       i += 1;
       continue;
     }

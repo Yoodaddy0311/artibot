@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { validateFrontmatter } from '../lib/core/agent-frontmatter-schema.js';
+import { stripTrailingComment } from '../lib/core/agent-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -114,7 +115,9 @@ function consumeBlockList(lines, startIdx) {
     }
     const trimmed = line.trim();
     if (leadingSpaces(line) >= 2 && trimmed.startsWith('- ')) {
-      items.push(trimmed.slice(2).trim().replace(/^['"]|['"]$/g, ''));
+      // A trailing `# comment` is not part of the value (same rule as the registry's parser).
+      // An item that is only a comment is empty, exactly like the bare `-` below.
+      items.push(stripTrailingComment(trimmed.slice(2).trim()).replace(/^['"]|['"]$/g, ''));
       i += 1;
       continue;
     }
