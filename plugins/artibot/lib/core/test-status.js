@@ -31,6 +31,12 @@ const DEFAULT_TTL_HOURS = 24;
 const STATE_REL_PATH = ['runtime', 'last-test-result.json'];
 
 /**
+ * Longest failing-file label the warning echoes. A plugin-relative test path is well under
+ * this; it keeps one broken or hostile `failedFiles` entry from flooding the banner line.
+ */
+const FAILED_FILE_ECHO_MAX = 120;
+
+/**
  * The values vitest 4 documents for `onTestRunEnd`'s third argument, which the
  * reporter writes verbatim as `completion.reason`. `lib/core` may not import
  * `lib/verification` and nothing in `lib` imports the reporter, so this reader
@@ -73,20 +79,55 @@ function badEndFacts(completion) {
 }
 
 /**
+ * How long ago the snapshot was recorded: `15m ago`, `1.5h ago`. A snapshot dated ahead of
+ * this clock (skew, or a file written under a wrong clock) has no age; it says `30m in the
+ * future` rather than a negative number, and one under half a minute ahead still reads `0m ago`.
+ *
+ * @param {number} ageHours negative when the snapshot is dated ahead of now
+ * @returns {string}
+ */
+function describeAge(ageHours) {
+  const span = Math.abs(ageHours);
+  const amount = span < 1 ? `${Math.round(span * 60)}m` : `${span.toFixed(1)}h`;
+  return ageHours < 0 && amount !== '0m' ? `${amount} in the future` : `${amount} ago`;
+}
+
+/**
+ * The failing-file labels the warning may echo, in file order. `failedFiles` is read from a
+ * file anything can write, and the warning is one line handed to the model as well as the
+ * user, so each label is made safe to sit on that line: only strings are labels; control and
+ * format characters (a newline, an ANSI escape, a bidi override) and runs of whitespace become
+ * one space; a label past FAILED_FILE_ECHO_MAX is cut and marked with an ellipsis; what is
+ * empty once cleaned is not a label.
+ *
+ * @param {unknown} failedFiles `failedFiles` as read from disk, so any shape
+ * @returns {string[]}
+ */
+function failedFileLabels(failedFiles) {
+  if (!Array.isArray(failedFiles)) return [];
+  const labels = [];
+  for (const entry of failedFiles) {
+    if (typeof entry !== 'string') continue;
+    const label = entry.replace(/[\p{Cc}\p{Cf}\s]+/gu, ' ').trim();
+    if (label === '') continue;
+    labels.push(label.length > FAILED_FILE_ECHO_MAX ? `${label.slice(0, FAILED_FILE_ECHO_MAX)}…` : label);
+  }
+  return labels;
+}
+
+/**
  * The SessionStart line for a snapshot that is not stale, or `null` when nothing is
  * wrong. A failing test leads and its text is as it always was; how the run ended only
  * follows it, so the failing files are never pushed aside. With no failing test the end
  * of the run is all that can still be wrong, and it warns on its own.
  *
- * @param {{ failed: number, failedFiles: string[] }} summary
+ * @param {{ failed: number, failedFiles: unknown }} summary `failed` is a count
  * @param {any} completion `completion` as read from disk, so any shape
  * @param {number} ageHours
  * @returns {string | null}
  */
 function formatWarning({ failed, failedFiles }, completion, ageHours) {
-  const ageHint = ageHours < 1
-    ? `${Math.round(ageHours * 60)}m ago`
-    : `${ageHours.toFixed(1)}h ago`;
+  const ageHint = describeAge(ageHours);
   const badEnd = badEndFacts(completion);
 
   if (failed === 0) {
@@ -95,15 +136,30 @@ function formatWarning({ failed, failedFiles }, completion, ageHours) {
       : `[artibot:test-status] last test run did not end cleanly (${badEnd}) recorded ${ageHint}`;
   }
 
-  const sample = failedFiles.slice(0, 3).join(', ');
-  const extra = failedFiles.length > 3 ? ` (+${failedFiles.length - 3} more)` : '';
+  const labels = failedFileLabels(failedFiles);
+  const sample = labels.slice(0, 3).join(', ');
+  const extra = labels.length > 3 ? ` (+${labels.length - 3} more)` : '';
+  const where = labels.length === 0 ? '' : ` — ${sample}${extra}`;
   const endClause = badEnd === null ? '' : ` — run also did not end cleanly (${badEnd})`;
   return `[artibot:test-status] ${failed} failing test(s) recorded ${ageHint}`
-    + ` — ${sample}${extra}${endClause}`;
+    + `${where}${endClause}`;
 }
 
 /**
- * Read the last test result with TTL guard.
+ * What the reader returns when there is no snapshot to read: a missing file, an unreadable
+ * one, or a record whose `failed` is not a count. A new object each time, never a shared one.
+ *
+ * @returns {{ exists: false, stale: false, ageHours: null, summary: null, warning: null }}
+ */
+function noSnapshot() {
+  return { exists: false, stale: false, ageHours: null, summary: null, warning: null };
+}
+
+/**
+ * Read the last test result with TTL guard. A record whose `failed` is present but is not a
+ * count (negative, fractional, overflowed, or not a number) is not a snapshot: its other
+ * numbers cannot be vouched for either, and `failed` is never rounded, clamped or defaulted
+ * to 0, which would read as a pass.
  *
  * @param {string} pluginRoot
  * @param {{ ttlHours?: number, now?: () => number }} [options]
@@ -120,9 +176,7 @@ export function getLastTestStatus(pluginRoot, options = {}) {
   const now = options.now ?? Date.now;
   const statusPath = path.join(pluginRoot, ...STATE_REL_PATH);
 
-  if (!existsSync(statusPath)) {
-    return { exists: false, stale: false, ageHours: null, summary: null, warning: null };
-  }
+  if (!existsSync(statusPath)) return noSnapshot();
 
   let parsed;
   try {
@@ -133,18 +187,20 @@ export function getLastTestStatus(pluginRoot, options = {}) {
 
   // Unreadable, unparseable, or the JSON text `null` (which parses fine and has no
   // properties to read): none of them is a snapshot, so all of them are "no snapshot".
-  if (parsed === null) {
-    return { exists: false, stale: false, ageHours: null, summary: null, warning: null };
-  }
+  if (parsed === null) return noSnapshot();
 
   const ts = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
   if (Number.isNaN(ts)) {
     return { exists: true, stale: true, ageHours: null, summary: null, warning: null };
   }
 
+  // `failed` counts tests, so what is not a count (-3, 1.5, 1e999, "3", null) is no measurement
+  // of any run. A record without the key at all is the old shape and still reads as 0 below.
+  if (parsed.failed !== undefined && !isCount(parsed.failed)) return noSnapshot();
+
   const ageHours = (now() - ts) / 3_600_000;
   const stale = ageHours > ttlHours;
-  const failed = Number.isFinite(parsed.failed) ? parsed.failed : 0;
+  const failed = isCount(parsed.failed) ? parsed.failed : 0;
   const passed = Number.isFinite(parsed.passed) ? parsed.passed : 0;
   const totalTests = Number.isFinite(parsed.totalTests) ? parsed.totalTests : passed + failed;
   const failedFiles = Array.isArray(parsed.failedFiles) ? parsed.failedFiles : [];
