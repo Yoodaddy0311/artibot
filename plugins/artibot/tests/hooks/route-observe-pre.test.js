@@ -560,6 +560,7 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
     // Re-pinned 2026-09-28: CATALOG_VERSION bumped with opus thinkingMode -> always-on.
     // Re-pinned 2026-09-29: CATALOG_VERSION bumped with the sonnet id -> claude-sonnet-5-5.
     // Re-pinned 2026-09-30: CATALOG_VERSION bumped with priceSource on every price row.
+    // Re-pinned 2026-10-12: CATALOG_VERSION bumped with the priceSource re-read (sonnet row -> official-table).
     models: {
       current: null,
       recommended: {
@@ -568,7 +569,7 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
         tier: 'opus',
         model_id: 'claude-opus-5-5',
         version: 'claude-opus-5-5',
-        catalog_version: '2026-09-30',
+        catalog_version: '2026-10-12',
       },
       selected: {
         provider: 'anthropic',
@@ -576,7 +577,7 @@ describe('route-observe-pre — incumbent tier and residency (K1), as the host r
         tier: 'opus',
         model_id: 'claude-opus-5-5',
         version: 'claude-opus-5-5',
-        catalog_version: '2026-09-30',
+        catalog_version: '2026-10-12',
       },
     },
     decision: { type: 'route' },

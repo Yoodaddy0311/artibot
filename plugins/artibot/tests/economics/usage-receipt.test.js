@@ -115,8 +115,9 @@ describe('resolveModelIdentity', () => {
       // Literal on purpose: a catalog data change must show up here as a
       // deliberate re-pin (2026-09-23: opus id → claude-opus-5-5 + legacyIds;
       // 2026-09-28: opus thinkingMode → always-on; 2026-09-29: sonnet id →
-      // claude-sonnet-5-5 + legacyIds; 2026-09-30: priceSource on every price row).
-      catalog_version: '2026-09-30',
+      // claude-sonnet-5-5 + legacyIds; 2026-09-30: priceSource on every price row;
+      // 2026-10-12: priceSource values re-read, sonnet row -> official-table).
+      catalog_version: '2026-10-12',
     });
   });
 
@@ -127,7 +128,7 @@ describe('resolveModelIdentity', () => {
       tier: 'opus',
       model_id: 'claude-opus-5-5',
       version: 'claude-opus-5-5',
-      catalog_version: '2026-09-30',
+      catalog_version: '2026-10-12',
     });
   });
 
@@ -138,7 +139,7 @@ describe('resolveModelIdentity', () => {
       tier: 'sonnet',
       model_id: 'claude-sonnet-5-5',
       version: 'claude-sonnet-5-5',
-      catalog_version: '2026-09-30',
+      catalog_version: '2026-10-12',
     });
   });
 
@@ -636,6 +637,22 @@ describe('buildUsageReceipts — subagent files', () => {
     expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
   });
 
+  // The same positive controls for the sonnet pair (2026-10-12), written from the
+  // LITERAL rows. A legacy receipt must keep its own price, not its successor's.
+  it.each([
+    // Sonnet 5 (legacy): 2 / 10 / 0.2 / 2.5
+    ['claude-sonnet-5', (100 * 2 + 900 * 0.2 + 50 * 2.5 + 20 * 10) / 1e6],
+    // Sonnet 5.5 (current): 2 / 10 / 0.1 / 2.5
+    ['claude-sonnet-5-5', (100 * 2 + 900 * 0.1 + 50 * 2.5 + 20 * 10) / 1e6],
+  ])('prices a %s receipt at that id\'s own official row', async (model, expected) => {
+    const result = await run({ [MAIN]: jsonl([assistantEntry({ model })]) });
+    const [receipt] = result.receipts;
+    expect(receipt.model_identity.tier).toBe('sonnet');
+    expect(receipt.model_identity.model_id).toBe(model);
+    expect(receipt.cost.total).toBeCloseTo(expected, 12);
+    expect(receipt.cost.pricing_version).toBe(PRICING_VERSION);
+  });
+
   it('bills the legacy opus id above the current one for the same usage', async () => {
     const legacy = await run({ [MAIN]: jsonl([assistantEntry({ model: 'claude-opus-5' })]) });
     const current = await run({ [MAIN]: jsonl([assistantEntry({ model: 'claude-opus-5-5' })]) });
@@ -726,12 +743,13 @@ describe('priceUsage', () => {
   // Expected = input + cacheRead + cacheWrite5m + output, one MTok of each.
   // Sourced from the catalog's own table, NOT restated from a price page here:
   // a second hand-typed copy of the rates is the two-table problem again.
-  // (opus / sonnet rows follow the catalog's 2026-09-28 PRICING_VERSION.)
+  // (opus / sonnet rows follow the catalog's PRICING_VERSION; sonnet is Sonnet 5.5
+  // with the 0.1 cache read since 2026-10-12.)
   it.each([
     ['fable', 10 + 0.25 + 12.5 + 50],
     ['opus', 4 + 0.2 + 5 + 20],
     ['haiku', 1 + 0.1 + 1.25 + 5],
-    ['sonnet', 2 + 0.2 + 2.5 + 10],
+    ['sonnet', 2 + 0.1 + 2.5 + 10],
   ])('prices one MTok of each counter for %s', (tier, expected) => {
     const priced = priceUsage(ONE_MTOK_EACH, tier);
     expect(priced.total).toBeCloseTo(expected, 9);
@@ -748,6 +766,10 @@ describe('priceUsage', () => {
     ['opus', undefined, 4 + 0.2 + 5 + 20],
     // an id of ANOTHER tier is ignored: the tier the caller named wins
     ['haiku', 'claude-opus-5', 1 + 0.1 + 1.25 + 5],
+    // legacy id with its own row (2026-10-12): Sonnet 5 keeps the 0.2 cache read the
+    // Sonnet 5.5 tier row no longer has
+    ['sonnet', 'claude-sonnet-5', 2 + 0.2 + 2.5 + 10],
+    ['sonnet', 'claude-sonnet-5-5', 2 + 0.1 + 2.5 + 10],
   ])('prices tier %s with model id %p at the id row first, else the tier row', (tier, id, expected) => {
     const priced = priceUsage(ONE_MTOK_EACH, tier, id);
     expect(priced.total).toBeCloseTo(expected, 9);

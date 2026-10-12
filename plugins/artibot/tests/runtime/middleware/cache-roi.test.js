@@ -101,16 +101,14 @@ describe('_resolvePricing', () => {
     // Off-catalog claude-* ids no longer reach the substring step: unpriced.
     expect(_resolvePricing('claude-fable-5')).toBeNull();
     expect(_resolvePricing('claude-opus-x')).toBeNull();
-    // 2026-09-29: the sonnet tier id is claude-sonnet-5-5, so the tier row is
-    // the current id's row. claude-sonnet-5 is a legacy id: same five price
-    // columns (no ID_PRICES row), reporting the id that was asked for - the
-    // same shape as claude-opus-5 below, just without a price of its own.
+    // The sonnet tier id is claude-sonnet-5-5, so the tier row is the current id's
+    // row. claude-sonnet-5 is a legacy id with its own ID_PRICES row (2026-10-12),
+    // reporting the id that was asked for - the same shape as claude-opus-5 below.
     expect(_resolvePricing('claude-sonnet-5-5')).toEqual(getPricing('sonnet'));
-    expect(_resolvePricing('claude-sonnet-5')).toEqual({
-      ...getPricing('sonnet'),
-      id: 'claude-sonnet-5',
-    });
+    expect(_resolvePricing('claude-sonnet-5')).toEqual(getPricing('claude-sonnet-5'));
     expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('haiku'));
+    // Literal: the legacy id is NOT billed at its successor's tier row (cache read 0.1).
+    expect(_resolvePricing('claude-sonnet-5').cacheRead).toBe(0.2);
   });
 
   it('resolves an exact catalog id before any substring, so a legacy id keeps its own row', () => {
@@ -261,12 +259,13 @@ describe('computeCacheMetrics', () => {
   // the literal per-MTok price, so a price drift shows up as a failed assert.
   it.each([
     ['claude-fable-5-1', 'fable', 9.75, 72.75],
-    // opus / sonnet rows: PRICING_VERSION 2026-09-28 official prices.
+    // opus row: official Opus 5.5 prices.
     ['claude-opus-5-5', 'opus', 3.8, 29.2],
     // Legacy id, own official Claude Opus 5 row: saved 5 - 0.5, spent 5+0.5+6.25+25.
     ['claude-opus-5', 'opus', 4.5, 36.75],
-    // 2026-09-29: current sonnet id, then the legacy one at the same numbers.
-    ['claude-sonnet-5-5', 'sonnet', 1.8, 14.7],
+    // 2026-10-12: current sonnet id (cache read 0.1: saved 2 - 0.1, spent 0.1+2.5+2+10),
+    // then the legacy one on its own row, which kept the 0.2 cache read.
+    ['claude-sonnet-5-5', 'sonnet', 1.9, 14.6],
     ['claude-sonnet-5', 'sonnet', 1.8, 14.7],
     ['claude-haiku-4-5', 'haiku', 0.9, 7.35],
   ])('prices 1M tokens per bucket for %s', (model, tier, saved, spent) => {
@@ -281,7 +280,7 @@ describe('computeCacheMetrics', () => {
     const blank = computeCacheMetrics(ONE_M_EACH, '', nowFn);
     expect(blank.pricingTier).toBe('sonnet');
     expect(blank.model).toBe('unknown');
-    expect(blank.spentCostUsd).toBeCloseTo(14.7, 6);
+    expect(blank.spentCostUsd).toBeCloseTo(14.6, 6);
   });
 
   it('leaves an off-catalog claude id unpriced: tokens counted, dollars and stamp null', () => {

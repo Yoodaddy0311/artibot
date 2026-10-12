@@ -42,8 +42,8 @@
  *  - WHETHER A SOURCE LABEL IS TRUE. The per-model line prints what the catalog's
  *    `priceSource` says; nothing here re-reads the page or the skill table, so it
  *    proves that the table carries the catalog's record, not that the record is
- *    right. A legacy id priced by its tier's row (claude-sonnet-5) shows that
- *    row's source, the latest comparison of the row, not one made for that id.
+ *    right. An id priced by its tier's row (every current id) shows that row's
+ *    source, the latest comparison of the row, not one made for that id.
  *
  * @module tests/economics/usage-table-render
  */
@@ -121,6 +121,33 @@ function unverifiedPorts(unverified) {
     ),
   };
 }
+
+/**
+ * Catalog ports in which the sonnet row is documented the way it was until
+ * 2026-10-12: compared with a skill price table, its cache writes computed from
+ * input. No catalog row differs in source any more (all are official-table rows with
+ * nothing derived), so the cases that need two kinds of source in one table inject it.
+ */
+function skillSonnetPorts() {
+  const skill = {
+    kind: 'skill-table',
+    ref: 'claude-api skill price table, cached 2026-09-25',
+    checkedAt: '2026-09-29',
+    derivedColumns: ['priceCacheWrite5mPerMTok', 'priceCacheWrite1hPerMTok'],
+  };
+  return {
+    getPricing: (key) => {
+      const real = getPricing(key);
+      return real === null || real.tier !== 'sonnet' ? real : { ...real, source: skill };
+    },
+  };
+}
+
+const twoModelsWithSkillSonnet = () => foldUsageTable([
+  receipt({ run: 'S1', model: OPUS_NEW, usage: { fresh_input_tokens: 1234567 } }),
+  receipt({ run: 'agent-a1', model: SONNET_NEW }),
+  receipt({ run: 'agent-a2', model: SONNET_NEW }),
+], { ports: skillSonnetPorts() });
 
 /** A `live` block as `scripts/ledger/usage-cost-table.mjs` builds it. */
 const liveBlock = (o = {}) => ({
@@ -249,12 +276,13 @@ describe('formatUsageTableMarkdown: cost honesty', () => {
   });
 
   it('never says every model was compared with the official price table', () => {
-    // One catalog row (the current sonnet id) is documented as compared with a skill
-    // price table, not the official page, and its cache-write prices are derived: a
-    // line that said "compared with the official price table" for every model
-    // would be false for it.
-    const md = formatUsageTableMarkdown(twoModels(), CTX);
+    // A catalog row can be compared with a skill price table, not the official page,
+    // with columns derived (none is today, but one was until 2026-10-12): a line that
+    // said "compared with the official price table" for every model would be false
+    // for it. The per-model line says it per source instead.
+    const md = formatUsageTableMarkdown(twoModelsWithSkillSonnet(), CTX);
     expect(md).not.toMatch(/공식 가격표와 대조/);
+    expect(formatUsageTableMarkdown(twoModels(), CTX)).not.toMatch(/공식 가격표와 대조/);
   });
 
   describe('the source of each price, per model', () => {
@@ -270,18 +298,29 @@ describe('formatUsageTableMarkdown: cost honesty', () => {
       const sonnet = MODELS.sonnet.priceSource;
 
       expect(line).toBeDefined();
-      // Opus: read off the official page.
-      expect(line).toContain(`${OPUS_NEW} — 공식 가격표(${opus.ref}) ${opus.checkedAt} 대조`);
-      // Sonnet: compared with the skill table, cache writes computed and not read.
-      expect(line).toContain(`${SONNET_NEW} — skill 가격표(${sonnet.ref}) ${sonnet.checkedAt} 대조`);
-      expect(line).toContain('priceCacheWrite5mPerMTok·priceCacheWrite1hPerMTok는 입력 단가에서 계산한 값이라 읽지 않음');
+      // Opus and sonnet share one source since the 2026-10-12 read, so they are one item.
+      expect(sonnet).toEqual(opus);
+      expect(line).toContain(`${OPUS_NEW}, ${SONNET_NEW} — 공식 가격표(${opus.ref}) ${opus.checkedAt} 대조`);
+      // Nothing is derived on either row, so the line says nothing about computed columns.
+      expect(line).not.toContain('계산한 값');
       // Directly under the line that points at it.
       const all = lines(md);
       expect(all.indexOf(line)).toBe(all.findIndex((l) => l.startsWith('- 단가 출처:')) + 1);
     });
 
-    it('never describes the sonnet row as read off the official page, or an opus row as derived', () => {
-      const line = sourceLine(formatUsageTableMarkdown(twoModels(), CTX));
+    it('prints a row compared with a skill table, its cache writes computed and not read, apart from an official one', () => {
+      // Positive control for the second kind of source, injected (see skillSonnetPorts).
+      const md = formatUsageTableMarkdown(twoModelsWithSkillSonnet(), CTX);
+      const line = sourceLine(md);
+      const opus = MODELS.opus.priceSource;
+
+      expect(line).toContain(`${OPUS_NEW} — 공식 가격표(${opus.ref}) ${opus.checkedAt} 대조`);
+      expect(line).toContain(`${SONNET_NEW} — skill 가격표(claude-api skill price table, cached 2026-09-25) 2026-09-29 대조`);
+      expect(line).toContain('priceCacheWrite5mPerMTok·priceCacheWrite1hPerMTok는 입력 단가에서 계산한 값이라 읽지 않음');
+    });
+
+    it('never describes a skill-table row as read off the official page, or an official row as derived', () => {
+      const line = sourceLine(formatUsageTableMarkdown(twoModelsWithSkillSonnet(), CTX));
 
       expect(itemOf(line, SONNET_NEW)).not.toContain('공식 가격표');
       expect(itemOf(line, SONNET_NEW)).not.toContain(PRICING_SOURCE);
@@ -297,9 +336,20 @@ describe('formatUsageTableMarkdown: cost honesty', () => {
       ]);
       const line = sourceLine(formatUsageTableMarkdown(table, CTX));
 
-      expect(line).toContain(`${HAIKU}, ${OPUS_NEW} — 공식 가격표(${PRICING_SOURCE})`);
+      expect(line).toContain(`${HAIKU}, ${OPUS_NEW}, ${SONNET_NEW} — 공식 가격표(${PRICING_SOURCE})`);
       expect(line.split(PRICING_SOURCE)).toHaveLength(2); // named once, not once per model
-      expect(line.slice('- 모델별 대조 출처: '.length).split(' · ')).toHaveLength(2); // two sources, two items
+      expect(line.slice('- 모델별 대조 출처: '.length).split(' · ')).toHaveLength(1); // one source, one item
+
+      // Two sources, two items: the same three models with the sonnet row on a skill table.
+      const mixed = foldUsageTable([
+        receipt({ run: 'agent-1', model: HAIKU }),
+        receipt({ run: 'agent-2', model: OPUS_NEW }),
+        receipt({ run: 'agent-3', model: SONNET_NEW }),
+      ], { ports: skillSonnetPorts() });
+      const mixedLine = sourceLine(formatUsageTableMarkdown(mixed, CTX));
+      expect(mixedLine).toContain(`${HAIKU}, ${OPUS_NEW} — 공식 가격표(${PRICING_SOURCE})`);
+      expect(mixedLine.split(PRICING_SOURCE)).toHaveLength(2);
+      expect(mixedLine.slice('- 모델별 대조 출처: '.length).split(' · ')).toHaveLength(2);
     });
 
     it('gives a legacy id its own row: claude-opus-5 reads the official page', () => {
@@ -359,7 +409,8 @@ describe('formatUsageTableMarkdown: cost honesty', () => {
       const md = formatUsageTableMarkdown(table, CTX);
 
       // `constructor` is an inherited key of every object: it must not resolve to a label.
-      expect(sourceLine(md)).toContain(`${OPUS_NEW} — constructor(`);
+      // (Both models carry the same source since the 2026-10-12 read, so they group.)
+      expect(sourceLine(md)).toContain(`${OPUS_NEW}, ${SONNET_NEW} — constructor(`);
       expect(formatUsageTableMarkdown(twoModels(), CTX)).not.toMatch(/undefined|NaN|\bnull\b/);
       expect(md).not.toMatch(/undefined|NaN|\bnull\b|function/);
     });

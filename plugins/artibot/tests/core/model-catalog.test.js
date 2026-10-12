@@ -22,21 +22,18 @@ import {
 const ENUM_WHITELIST = ['sonnet', 'opus', 'haiku', 'fable'];
 
 /**
- * Official per-MTok price table (platform.claude.com pricing page; haiku and
- * fable verified 2026-09-12, opus and sonnet re-verified 2026-09-28). Literal
- * pins: these numbers are copied from the page, NOT derived from each other,
- * so a future "simplification" that computes cache prices from a single
- * multiplier breaks here instead of silently mispricing fable (0.025x) or
- * opus (0.05x), whose cache-read multipliers are not the usual 0.1x.
+ * Official per-MTok price table (platform.claude.com pricing page; every row
+ * re-read 2026-10-12). Literal pins: these numbers are copied from the page, NOT
+ * derived from each other, so a future "simplification" that computes cache prices
+ * from a single multiplier breaks here instead of silently mispricing fable
+ * (0.025x) or opus and sonnet 5.5 (0.05x), whose cache-read multipliers are not the
+ * usual 0.1x.
  */
 const PRICE_TABLE = [
   { tier: 'haiku', id: 'claude-haiku-4-5', input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
-  // 2026-09-28: Sonnet 5 공식가. 2/10 이 표준가로 확정(9/1 예정 인상 취소 — 공식 각주).
-  // 2026-09-29: the tier id is now Sonnet 5.5 (claude-sonnet-5 is its legacy id). Its
-  // input / output / cache read are the claude-api skill price table (cached
-  // 2026-09-25): 2 / 10 / 0.2, identical to Sonnet 5. That table does not list cache
-  // writes, so 2.5 / 4 are the standard 1.25x / 2x of input (multiplier-derived).
-  { tier: 'sonnet', id: 'claude-sonnet-5-5', input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
+  // 2026-10-12: Sonnet 5.5 공식가, cache hit 0.10 (0.05x base input, 공식 각주 2 —
+  // 2026-10-07 릴리스 노트로 0.20 에서 인하). 2026-09-28 stamp 까지는 0.2 였고 그 행은 얼려 있다.
+  { tier: 'sonnet', id: 'claude-sonnet-5-5', input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2.5, cacheWrite1h: 4 },
   // 2026-09-28: Opus 5.5 공식가. cache read 0.2 는 0.05x base input(공식 각주), 0.1x 아님.
   { tier: 'opus', id: 'claude-opus-5-5', input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 },
   { tier: 'fable', id: 'claude-fable-5-1', input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20 },
@@ -44,22 +41,14 @@ const PRICE_TABLE = [
 
 /**
  * What the catalog's OWN comments say about where each price row came from, typed
- * out: the PRICING_VERSION notes (2026-09-28: opus and sonnet read off
- * PRICING_SOURCE, haiku and fable re-read the same day and already matched;
- * 2026-09-29: sonnet 5.5 compared with the claude-api skill price table, cached
- * 2026-09-25, whose table lists no cache writes), the sonnet / opus row comments and
- * the ID_PRICES comment (Claude Opus 5 row, official page, 2026-09-28). Literal on
+ * out: the PRICING_VERSION notes (2026-10-12: every row read off PRICING_SOURCE
+ * that day, so all of them are official-table rows read on the stamp and none
+ * derives a column), the row comments and the ID_PRICES comments. Literal on
  * purpose, and NOT imported: the structured field must agree with the prose, and a
  * value copied from the module under test would agree with itself.
  */
-const OFFICIAL_2026_09_28 = {
-  kind: 'official-table', ref: PRICING_SOURCE, checkedAt: '2026-09-28', derivedColumns: [],
-};
-const SONNET_SOURCE = {
-  kind: 'skill-table',
-  ref: 'claude-api skill price table, cached 2026-09-25',
-  checkedAt: '2026-09-29',
-  derivedColumns: ['priceCacheWrite5mPerMTok', 'priceCacheWrite1hPerMTok'],
+const OFFICIAL_2026_10_12 = {
+  kind: 'official-table', ref: PRICING_SOURCE, checkedAt: '2026-10-12', derivedColumns: [],
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -214,7 +203,7 @@ describe('model-catalog', () => {
     });
   });
 
-  describe('price table (verified against PRICING_SOURCE, PRICING_VERSION 2026-09-28)', () => {
+  describe('price table (verified against PRICING_SOURCE, PRICING_VERSION 2026-10-12)', () => {
     it.each(PRICE_TABLE)(
       '$tier pins all five price columns',
       ({ tier, id, input, output, cacheRead, cacheWrite5m, cacheWrite1h }) => {
@@ -259,13 +248,12 @@ describe('model-catalog', () => {
       );
     });
 
-    it.each(['haiku', 'sonnet'])(
-      '%s cache reads are the standard 0.1x of input',
-      (tier) => {
-        const m = getModel(tier);
-        expect(m.priceCacheReadPerMTok).toBeCloseTo(0.1 * m.priceInPerMTok, 10);
-      },
-    );
+    // sonnet joined opus as a 0.05x cache-read row on 2026-10-12: pinned, with the
+    // reason, in model-catalog-sonnet-cache-read.test.js.
+    it('haiku cache reads are the standard 0.1x of input', () => {
+      const m = getModel('haiku');
+      expect(m.priceCacheReadPerMTok).toBeCloseTo(0.1 * m.priceInPerMTok, 10);
+    });
 
     it.each(PRICE_TABLE)(
       '$tier cache writes are 1.25x (5m) and 2x (1h) of input',
@@ -310,7 +298,7 @@ describe('model-catalog', () => {
         cacheWrite1h: 8,
         measured: true,
         version: PRICING_VERSION,
-        source: OFFICIAL_2026_09_28,
+        source: OFFICIAL_2026_10_12,
       });
     });
 
@@ -419,19 +407,17 @@ describe('model-catalog', () => {
         cacheWrite1h: 10,
         measured: true,
         version: PRICING_VERSION,
-        source: OFFICIAL_2026_09_28,
+        source: OFFICIAL_2026_10_12,
       });
     });
 
-    it('prices the legacy id claude-sonnet-5 at the literal Sonnet 5 row, which today equals the tier row', () => {
-      // Literal pin (Sonnet 5 row, official pricing page, fetched 2026-09-28
-      // KST). The sonnet TIER moved to Sonnet 5.5 on 2026-09-29 with identical
-      // numbers, so this id needs no ID_PRICES row today (the keys pin below
-      // lists the rows that exist). It is priced by the tier row, which means
-      // a later edit of that row would silently reprice every old
-      // claude-sonnet-5 receipt: if this pin goes red, add an ID_PRICES row
-      // for the id (the claude-opus-5 pattern) instead of editing the numbers
-      // here.
+    it('prices the legacy id claude-sonnet-5 at its own Sonnet 5 row: cache read 0.2, not the Sonnet 5.5 tier row\'s 0.1', () => {
+      // Literal pin (official pricing page row "Claude Sonnet 5", fetched 2026-10-12
+      // KST). Until 2026-10-12 the tier row (Sonnet 5.5) priced this id with
+      // identical numbers and a pin said "if the two ever differ, add an ID_PRICES
+      // row". They differ since the 2026-10-07 cache read cut, which applied to
+      // Sonnet 5.5 only: without this row every old claude-sonnet-5 receipt would be
+      // billed at its successor's 0.1.
       expect(getPricing('claude-sonnet-5')).toEqual({
         tier: 'sonnet',
         id: 'claude-sonnet-5',
@@ -442,9 +428,9 @@ describe('model-catalog', () => {
         cacheWrite1h: 4,
         measured: true,
         version: PRICING_VERSION,
-        // No ID_PRICES row for this id, so it reports the TIER row's source.
-        source: SONNET_SOURCE,
+        source: OFFICIAL_2026_10_12,
       });
+      expect(getPricing('claude-sonnet-5').cacheRead).not.toBe(getPricing('sonnet').cacheRead);
     });
 
     it('prices a current id at its tier row and reports the id that was asked for', () => {
@@ -469,7 +455,7 @@ describe('model-catalog', () => {
       for (const id of Object.keys(ID_PRICES)) {
         expect(legacy).toContain(id);
       }
-      expect(Object.keys(ID_PRICES)).toEqual(['claude-opus-5']);
+      expect(Object.keys(ID_PRICES)).toEqual(['claude-opus-5', 'claude-sonnet-5']);
     });
 
     it('is deep-frozen and every row is measured with five finite prices', () => {
@@ -524,32 +510,30 @@ describe('model-catalog', () => {
     });
 
     it('is the sonnet tier row itself, and the row carries the Sonnet 5.5 numbers', () => {
-      // WHAT THIS PINS: the tier row is the one Sonnet 5.5 is billed at. Where
-      // the numbers come from: input 2 / output 10 / cache read 0.2 are the
-      // claude-api skill price table (cached 2026-09-25), identical to the
-      // Sonnet 5 row read off PRICING_SOURCE on 2026-09-28. That table does not
-      // list cache writes, so 2.5 / 4 are the standard 1.25x / 2x of input
-      // (multiplier-derived, not read for 5.5). A real difference between the
-      // two models later goes red here on purpose: move the tier, bump
-      // PRICING_VERSION, freeze the outgoing row, and give claude-sonnet-5 its
-      // own ID_PRICES row.
+      // WHAT THIS PINS: the tier row is the one Sonnet 5.5 is billed at. All five
+      // columns are the official pricing page row "Claude Sonnet 5.5", read on
+      // 2026-10-12: input 2 / output 10 / cache writes 2.5 and 4 / cache hit 0.1
+      // (0.05x input, cut from 0.2 by the 2026-10-07 release note). Until that read
+      // the cache writes were derived and the other three came from the claude-api
+      // skill price table.
       expect(getPricing('claude-sonnet-5-5')).toEqual(getPricing('sonnet'));
       expect(getPricing('claude-sonnet-5-5')).toMatchObject({
         tier: 'sonnet',
         id: 'claude-sonnet-5-5',
         input: 2,
         output: 10,
-        cacheRead: 0.2,
+        cacheRead: 0.1,
         cacheWrite5m: 2.5,
         cacheWrite1h: 4,
         measured: true,
       });
     });
 
-    it('keeps the pre-5.5 id priced at the same numbers, reporting the id that was asked for', () => {
+    it('keeps the pre-5.5 id on its own row: the same figures except the cache read, reporting the id that was asked for', () => {
       expect(getPricing('claude-sonnet-5')).toEqual({
         ...getPricing('sonnet'),
         id: 'claude-sonnet-5',
+        cacheRead: 0.2,
       });
       expect(getPricing('balanced')).toEqual(getPricing('sonnet'));
     });
@@ -562,7 +546,7 @@ describe('model-catalog', () => {
    * WHAT THIS BLOCK CANNOT SEE. Whether any of it is TRUE: a date, a label and a
    * kind are typed by whoever edits the catalog and no test can re-read the page
    * or the skill table (data policy: nothing here fetches anything). The literal
-   * pins below agree with the catalog's own prose as of 2026-09-30; they do not
+   * pins below agree with the catalog's own prose as of 2026-10-12; they do not
    * prove the prose. The official-table date is tied to PRICING_VERSION for every
    * MEASURED row, tier or legacy id, because that is what `priceMeasured` already
    * claims; a row that is not measured is not held to it.
@@ -588,18 +572,19 @@ describe('model-catalog', () => {
     const rowOf = Object.fromEntries(rows);
 
     const EVIDENCE = {
-      'tier haiku': OFFICIAL_2026_09_28,
-      'tier sonnet': SONNET_SOURCE,
-      'tier opus': OFFICIAL_2026_09_28,
-      'tier fable': OFFICIAL_2026_09_28,
-      'id claude-opus-5': OFFICIAL_2026_09_28,
+      'tier haiku': OFFICIAL_2026_10_12,
+      'tier sonnet': OFFICIAL_2026_10_12,
+      'tier opus': OFFICIAL_2026_10_12,
+      'tier fable': OFFICIAL_2026_10_12,
+      'id claude-opus-5': OFFICIAL_2026_10_12,
+      'id claude-sonnet-5': OFFICIAL_2026_10_12,
     };
 
     it('covers every tier row and every ID_PRICES row, and the evidence table names exactly those rows', () => {
       // The denominator: a row added to the catalog without a pin here is red, and
       // so is a pin for a row that is gone.
       expect(rows.map(([label]) => label).sort()).toEqual(Object.keys(EVIDENCE).sort());
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(6);
     });
 
     it.each(rows)('%s carries a frozen priceSource with exactly kind, ref, checkedAt, derivedColumns', (_label, row) => {
@@ -673,24 +658,26 @@ describe('model-catalog', () => {
       }
     });
 
-    it('only the sonnet tier reads its base columns from the skill table, and only its cache writes are derived', () => {
-      for (const tier of listTiers()) {
-        const { kind, derivedColumns } = getModel(tier).priceSource;
-        expect(kind === 'skill-table', tier).toBe(tier === 'sonnet');
-        expect(derivedColumns.length > 0, tier).toBe(tier === 'sonnet');
+    it('no row reads the skill table or derives a column since the 2026-10-12 read of the page', () => {
+      // Until then the sonnet row used the claude-api skill price table and derived
+      // its cache writes; the page lists all five, so doing that again is a regression.
+      for (const [label, row] of rows) {
+        expect(row.priceSource.kind, label).toBe('official-table');
+        expect(row.priceSource.derivedColumns, label).toEqual([]);
       }
     });
 
     it('getPricing reports the source of the row that prices the key', () => {
-      expect(getPricing('opus').source).toEqual(OFFICIAL_2026_09_28);
+      expect(getPricing('opus').source).toEqual(OFFICIAL_2026_10_12);
       expect(getPricing('frontier').source).toBe(MODELS.opus.priceSource);
       expect(getPricing('claude-opus-5-5').source).toBe(MODELS.opus.priceSource);
       // A legacy id with its own ID_PRICES row reads THAT row, not its tier's.
       expect(getPricing('claude-opus-5').source).toBe(ID_PRICES['claude-opus-5'].priceSource);
       expect(getPricing('claude-opus-5').source).not.toBe(MODELS.opus.priceSource);
-      // A legacy id with no row of its own is priced by the tier row and reports the
-      // tier row's source: the row's latest comparison, not one made for that id.
-      expect(getPricing('claude-sonnet-5').source).toBe(MODELS.sonnet.priceSource);
+      expect(getPricing('claude-sonnet-5').source).toBe(ID_PRICES['claude-sonnet-5'].priceSource);
+      expect(getPricing('claude-sonnet-5').source).not.toBe(MODELS.sonnet.priceSource);
+      // A current id has no row of its own: it is priced by the tier row and reports
+      // that row's source, the row's latest comparison, not one made for that id.
       expect(getPricing('claude-sonnet-5-5').source).toBe(MODELS.sonnet.priceSource);
     });
 

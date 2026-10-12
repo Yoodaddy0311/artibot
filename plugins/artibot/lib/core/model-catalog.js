@@ -87,9 +87,18 @@ export const BASELINE_TIER = 'opus';
  * gave, written as data; no price was read or changed, so
  * {@link PRICING_VERSION} did not move.
  *
+ * 2026-10-12 bump: the `priceSource` values changed with that day's re-read of
+ * the official page, whose price edits are stamped separately by
+ * {@link PRICING_VERSION}. The sonnet row went from `skill-table` to
+ * `official-table` (its `ref` is now {@link PRICING_SOURCE}) and its
+ * `derivedColumns` from the two cache-write columns to none, and `checkedAt` was
+ * re-dated to 2026-10-12 on every row that was re-read. claude-sonnet-5 gained an
+ * {@link ID_PRICES} row, which carries a `priceSource` of its own. No id, limit,
+ * coefficient or constraint changed.
+ *
  * @type {string}
  */
-export const CATALOG_VERSION = '2026-09-30';
+export const CATALOG_VERSION = '2026-10-12';
 
 /**
  * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
@@ -136,9 +145,21 @@ export const CATALOG_VERSION = '2026-09-30';
  * where the figures came from, as the notes above and on the rows say; no figure
  * was re-read, so this stamp keeps the date of the last read.
  *
+ * 2026-10-12 bump: every row was re-read off {@link PRICING_SOURCE} that day
+ * (fetched 2026-10-12 KST), after one official change: the Claude Sonnet 5.5
+ * cache read fell from $0.20 to $0.10 per MTok (0.05x input; announced in the
+ * 2026-10-07 release note). The stamp is the day the page was read, not the day the
+ * change took effect (2026-10-07), because `checkedAt` has to equal it. The haiku,
+ * opus 5.5, claude-opus-5 and fable rows already matched. The page also lists the
+ * Sonnet 5.5 cache writes (2.50 / 4), so the sonnet row reads them instead of
+ * deriving them and is an `official-table` row with nothing derived.
+ * claude-sonnet-5 keeps its $0.20 cache read: it got an {@link ID_PRICES} row so it
+ * is not billed at its successor's rate. {@link CATALOG_VERSION} moved that day
+ * too, for the `priceSource` edits of its own.
+ *
  * @type {string}
  */
-export const PRICING_VERSION = '2026-09-28';
+export const PRICING_VERSION = '2026-10-12';
 
 /**
  * Where the price columns came from: the official Anthropic pricing page.
@@ -162,12 +183,12 @@ export const PRICING_SOURCE =
  *
  * **Cache prices are stored as literals, never derived.** The official page
  * footnotes two cache-read exceptions: Claude Fable 5.1 is priced at 0.025x
- * the base input price, and Claude Opus 5.5 at 0.05x; the other catalog
- * models use the standard 0.1x multiplier. A single "10% of input" rule would
- * overcharge fable cache reads by 4x and opus cache reads by 2x. Write-price
- * multipliers (1.25x for the 5-minute TTL, 2x for the 1-hour TTL) are uniform
- * today, but they are pinned as literals too so a future per-model exception
- * lands as a value edit, not a formula rewrite.
+ * the base input price, and Claude Opus 5.5 and Claude Sonnet 5.5 at 0.05x; the
+ * other catalog models use the standard 0.1x multiplier. A single "10% of input"
+ * rule would overcharge fable cache reads by 4x and opus / sonnet cache reads by
+ * 2x. Write-price multipliers (1.25x for the 5-minute TTL, 2x for the 1-hour TTL)
+ * are uniform today, but they are pinned as literals too so a future per-model
+ * exception lands as a value edit, not a formula rewrite.
  *
  * Two measurement flags travel with the data so consumers can tell a verified
  * number from an estimate: `priceMeasured` (true = all five price columns of
@@ -178,16 +199,17 @@ export const PRICING_SOURCE =
  * `priceSource` says what stands behind `priceMeasured`, as data instead of a
  * comment: `kind` is the class of source (`official-table` = the official pricing
  * page, cited by {@link PRICING_SOURCE}; `skill-table` = the claude-api skill
- * price table), `ref` its label (scheme-less, for the reason PRICING_SOURCE is),
- * `checkedAt` the `YYYY-MM-DD` day the row was compared with it, and
- * `derivedColumns` the price columns that were NOT read there but computed from
- * input (today only the sonnet row's two cache-write columns, at the standard
- * 1.25x / 2x). Every value is what this file's own notes already said; typing it
- * here re-verifies nothing. An id priced by its tier's row (every current id, and
- * a legacy id with no {@link ID_PRICES} row, such as claude-sonnet-5) reports the
- * TIER row's source: that row's latest comparison, not necessarily one made for
- * that id. What a {@link PRICING_VERSION} bump must do to `checkedAt` and
- * `priceMeasured` is written at that constant. Shape and vocabulary are pinned in
+ * price table, which no row uses since the 2026-10-12 read), `ref` its label
+ * (scheme-less, for the reason PRICING_SOURCE is), `checkedAt` the `YYYY-MM-DD`
+ * day the row was compared with it, and `derivedColumns` the price columns that
+ * were NOT read there but computed from input (none today: the sonnet row's two
+ * cache-write columns were, at the standard 1.25x / 2x, until that read). Every
+ * value is what this file's own notes already said; typing it here re-verifies
+ * nothing. An id priced by its tier's row (every current id, and a legacy id with
+ * no {@link ID_PRICES} row) reports the TIER row's source: that row's latest
+ * comparison, not necessarily one made for that id. What a
+ * {@link PRICING_VERSION} bump must do to `checkedAt` and `priceMeasured` is
+ * written at that constant. Shape and vocabulary are pinned in
  * `tests/core/model-catalog.test.js`.
  *
  * `legacyIds` lists older model ids that must still resolve to the tier, so a
@@ -239,13 +261,13 @@ export const MODELS = deepFreeze({
     priceCacheWrite5mPerMTok: 1.25,
     priceCacheWrite1hPerMTok: 2,
     priceMeasured: true,
-    // Re-read on 2026-09-28 and already matched (the PRICING_VERSION notes), so
+    // Re-read on 2026-10-12 and already matched (the PRICING_VERSION notes), so
     // the figures above did not move; `priceMeasured` defines that read as against
     // PRICING_SOURCE on PRICING_VERSION.
     priceSource: {
       kind: 'official-table',
       ref: PRICING_SOURCE,
-      checkedAt: '2026-09-28',
+      checkedAt: '2026-10-12',
       derivedColumns: [],
     },
     tokenizerCoeff: 1.0,
@@ -267,34 +289,27 @@ export const MODELS = deepFreeze({
     // transcripts and ledger rows keep tier sonnet.
     id: 'claude-sonnet-5-5',
     legacyIds: ['claude-sonnet-5'],
-    // Where the price columns come from. Sonnet 5 official pricing page row,
-    // fetched 2026-09-28 KST: the page footnotes $2 / $10 as the confirmed
-    // standard price (the increase that had been scheduled for 9/1 was
-    // cancelled); cache read is the standard 0.1x of input.
-    // Sonnet 5.5: input $2 / output $10 / cache read $0.20 per MTok are the
-    // claude-api skill price table (cached 2026-09-25) - identical to Sonnet 5,
-    // so this one row prices both ids and claude-sonnet-5 needs no ID_PRICES
-    // row (a pin in tests/core/model-catalog.test.js goes red if the two ever
-    // differ). That table does not list cache writes: 2.5 / 4 are the standard
-    // 1.25x / 2x multiples of input, derived and not read for 5.5.
-    // `priceMeasured` therefore means: compared with PRICING_SOURCE for Sonnet
-    // 5, and with the skill table (not the page) for Sonnet 5.5.
+    // Official pricing page row "Claude Sonnet 5.5", fetched 2026-10-12 KST:
+    // $2 / $2.50 / $4 / $0.10 / $10 per MTok (input / 5m write / 1h write / cache
+    // hit / output). The cache hit is 0.05x of input (the page's footnote 2, shared
+    // with Opus 5.5), cut from $0.20 by the 2026-10-07 release note; every other
+    // column is unchanged. Until 2026-10-12 this row was priced from the
+    // claude-api skill price table (cached 2026-09-25) with the cache writes
+    // derived from input; the page now lists all five, so nothing is derived.
+    // claude-sonnet-5 is NOT priced by this row any more: its cache hit stayed at
+    // $0.20, so it has its own ID_PRICES row.
     priceInPerMTok: 2,
     priceOutPerMTok: 10,
-    priceCacheReadPerMTok: 0.2,
+    priceCacheReadPerMTok: 0.1,
     priceCacheWrite5mPerMTok: 2.5,
     priceCacheWrite1hPerMTok: 4,
     priceMeasured: true,
-    // The structured form of the comment block above. Input, output and cache
-    // read: the claude-api skill price table, compared on 2026-09-29 when the tier
-    // id moved to Sonnet 5.5 (they equal the Sonnet 5 figures read off
-    // PRICING_SOURCE on 2026-09-28). The two cache-write columns are computed from
-    // input and were not read.
+    // The page row above, read on 2026-10-12.
     priceSource: {
-      kind: 'skill-table',
-      ref: 'claude-api skill price table, cached 2026-09-25',
-      checkedAt: '2026-09-29',
-      derivedColumns: ['priceCacheWrite5mPerMTok', 'priceCacheWrite1hPerMTok'],
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-10-12',
+      derivedColumns: [],
     },
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
@@ -315,8 +330,9 @@ export const MODELS = deepFreeze({
     id: 'claude-opus-5-5',
     legacyIds: ['claude-opus-5'],
     // Opus 5.5 official pricing page row, fetched 2026-09-28 KST (replaces
-    // the claude-opus-5 row 5 / 25 / 0.5 / 6.25 / 10). opus is BASELINE_TIER,
-    // so this input price is the divisor of every getCostFactor.
+    // the claude-opus-5 row 5 / 25 / 0.5 / 6.25 / 10) and read again on
+    // 2026-10-12, when it still matched. opus is BASELINE_TIER, so this input
+    // price is the divisor of every getCostFactor.
     priceInPerMTok: 4,
     priceOutPerMTok: 20,
     // 0.05x input, NOT the standard 0.1x — official footnote.
@@ -324,11 +340,11 @@ export const MODELS = deepFreeze({
     priceCacheWrite5mPerMTok: 5,
     priceCacheWrite1hPerMTok: 8,
     priceMeasured: true,
-    // The official page row named in the comment above, read on 2026-09-28.
+    // The official page row named in the comment above, last read on 2026-10-12.
     priceSource: {
       kind: 'official-table',
       ref: PRICING_SOURCE,
-      checkedAt: '2026-09-28',
+      checkedAt: '2026-10-12',
       derivedColumns: [],
     },
     tokenizerCoeff: 1.0,
@@ -347,19 +363,19 @@ export const MODELS = deepFreeze({
     legacyIds: [],
     priceInPerMTok: 10,
     priceOutPerMTok: 50,
-    // 0.025x input, NOT the standard 0.1x (opus is the other exception, at
-    // 0.05x) — official footnote.
+    // 0.025x input, NOT the standard 0.1x (opus and sonnet 5.5 are the other
+    // exception, at 0.05x) — official footnote.
     priceCacheReadPerMTok: 0.25,
     priceCacheWrite5mPerMTok: 12.5,
     priceCacheWrite1hPerMTok: 20,
     priceMeasured: true,
-    // Re-read on 2026-09-28 and already matched (the PRICING_VERSION notes), so
+    // Re-read on 2026-10-12 and already matched (the PRICING_VERSION notes), so
     // the figures above did not move; `priceMeasured` defines that read as against
     // PRICING_SOURCE on PRICING_VERSION, and the 0.025x footnote above is that page's.
     priceSource: {
       kind: 'official-table',
       ref: PRICING_SOURCE,
-      checkedAt: '2026-09-28',
+      checkedAt: '2026-10-12',
       derivedColumns: [],
     },
     tokenizerCoeff: 1.3,
@@ -423,18 +439,39 @@ export const ROLE_ALIASES = deepFreeze({
 export const ID_PRICES = deepFreeze({
   'claude-opus-5': {
     // Official pricing page row (Claude Opus 5), fetched 2026-09-28 KST. The
-    // opus tier row moved to Opus 5.5 the same day; this id keeps its own.
+    // opus tier row moved to Opus 5.5 the same day; this id keeps its own. Read
+    // again on 2026-10-12, when it still matched.
     priceInPerMTok: 5,
     priceOutPerMTok: 25,
     priceCacheReadPerMTok: 0.5,
     priceCacheWrite5mPerMTok: 6.25,
     priceCacheWrite1hPerMTok: 10,
     priceMeasured: true,
-    // The same official page row, read on 2026-09-28 (the comment above).
+    // The same official page row, last read on 2026-10-12 (the comment above).
     priceSource: {
       kind: 'official-table',
       ref: PRICING_SOURCE,
-      checkedAt: '2026-09-28',
+      checkedAt: '2026-10-12',
+      derivedColumns: [],
+    },
+  },
+  'claude-sonnet-5': {
+    // Official pricing page row "Claude Sonnet 5", fetched 2026-10-12 KST:
+    // $2 / $2.50 / $4 / $0.20 / $10 per MTok. The sonnet tier row (Sonnet 5.5)
+    // cut its cache hit to $0.10 on the 2026-10-07 release note; this id did not,
+    // and until then the tier row priced both. The $2 / $10 are the standard price
+    // (footnote 3: the increase to $3 / $15 scheduled for 2026-09-01 did not occur).
+    priceInPerMTok: 2,
+    priceOutPerMTok: 10,
+    priceCacheReadPerMTok: 0.2,
+    priceCacheWrite5mPerMTok: 2.5,
+    priceCacheWrite1hPerMTok: 4,
+    priceMeasured: true,
+    // The page row above, read on 2026-10-12.
+    priceSource: {
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-10-12',
       derivedColumns: [],
     },
   },

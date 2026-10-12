@@ -47,7 +47,7 @@ const PRICE_FIELDS = Object.freeze([
  *
  * @type {readonly string[]}
  */
-export const PRICING_VERSIONS = Object.freeze(['2026-09-12', '2026-09-28']);
+export const PRICING_VERSIONS = Object.freeze(['2026-09-12', '2026-09-28', '2026-10-12']);
 
 /**
  * Past rows, frozen from git. Never holds the current version.
@@ -59,6 +59,16 @@ export const PRICING_VERSIONS = Object.freeze(['2026-09-12', '2026-09-28']);
  * the opus id with claude-opus-5 as legacy — both still billed at the tier
  * rows below (5 / 25 for opus-5-5 was the live rate, not its official one).
  * Receipts priced by tier only, so there are no per-id rows.
+ *
+ * 2026-09-28: stamp set by 5820948d and replaced by the 2026-10-12 stamp (the
+ * Sonnet 5.5 cache read cut). The tier price columns did not change under it:
+ * sonnet carries 0.2 cache read here, the rate the catalog priced it at, not the
+ * 0.1 it fell to on 2026-10-07 (receipts written 2026-10-07..2026-10-12 recorded
+ * 0.2, overstating the 0.1 the official page lists from 2026-10-07; they replay
+ * at the 0.2 that produced them). Its id set grew once with no price edit:
+ * claude-sonnet-5-5 joined on 2026-09-29. claude-opus-5 has its own per-id row
+ * (the opus tier row moved to Opus 5.5 under this stamp); claude-sonnet-5 was
+ * priced by the sonnet tier row.
  *
  * Price rows are columns in {@link PRICE_FIELDS} order: in, out, cache read,
  * cache write 5m, cache write 1h (USD per MTok), then the measured flag.
@@ -80,6 +90,25 @@ const FROZEN_ROWS = {
       'claude-fable-5-1': 'fable',
     },
     idPrices: {},
+  },
+  '2026-09-28': {
+    tiers: {
+      haiku: [1, 5, 0.1, 1.25, 2, true],
+      sonnet: [2, 10, 0.2, 2.5, 4, true],
+      opus: [4, 20, 0.2, 5, 8, true],
+      fable: [10, 50, 0.25, 12.5, 20, true],
+    },
+    ids: {
+      'claude-haiku-4-5': 'haiku',
+      'claude-sonnet-5': 'sonnet',
+      'claude-sonnet-5-5': 'sonnet',
+      'claude-opus-5-5': 'opus',
+      'claude-opus-5': 'opus',
+      'claude-fable-5-1': 'fable',
+    },
+    idPrices: {
+      'claude-opus-5': [5, 25, 0.5, 6.25, 10, true],
+    },
   },
 };
 

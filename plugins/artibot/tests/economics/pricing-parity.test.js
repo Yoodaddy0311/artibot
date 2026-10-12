@@ -187,7 +187,7 @@ describe('pricing parity: same input -> same tier', () => {
     // and the ledger disagree on dollars for the id the host actually serves.
     // Since the promotion the id IS the sonnet tier id, so `row` is the sonnet
     // tier row itself (see tests/core/model-catalog.test.js for where its
-    // numbers come from and which of them are multiplier-derived).
+    // numbers come from; since 2026-10-12 none of them is multiplier-derived).
     const id = 'claude-sonnet-5-5';
     const row = getPricing(id);
     expect(row, id).not.toBeNull();
@@ -203,9 +203,9 @@ describe('pricing parity: same input -> same tier', () => {
   it('the pre-5.5 sonnet id claude-sonnet-5 keeps its tier and one row in cache-roi and the receipt', () => {
     // A legacy id since 2026-09-29, but old transcripts and ledger rows still
     // carry it, so both readers must keep resolving it and must agree on the
-    // row they price it at, whichever row that is: today the sonnet tier row
-    // (no ID_PRICES row); the numbers themselves are pinned as literals in
-    // tests/core/model-catalog.test.js.
+    // row they price it at, whichever row that is: since 2026-10-12 its own
+    // ID_PRICES row (cache read 0.2, where the sonnet tier row has 0.1); the
+    // numbers themselves are pinned as literals in tests/core/model-catalog.test.js.
     const id = 'claude-sonnet-5';
     const row = getPricing(id);
     expect(row.id).toBe(id);

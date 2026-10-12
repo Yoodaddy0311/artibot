@@ -88,16 +88,32 @@ describe('pricing.models[].price_source', () => {
     for (const id of [HAIKU, SONNET, OPUS, OPUS_LEGACY, FABLE]) {
       expect(entryOf(table, id).price_source, id).toEqual(snake(getPricing(id).source));
     }
-    // The two rows that differ in KIND: sonnet reads the skill table and computes its cache writes.
-    expect(entryOf(table, SONNET).price_source.kind).toBe('skill-table');
-    expect(entryOf(table, SONNET).price_source.derived_columns).toEqual(MODELS.sonnet.priceSource.derivedColumns);
+    // Since the 2026-10-12 read every catalog row is an official-table row with nothing derived.
+    expect(entryOf(table, SONNET).price_source.kind).toBe('official-table');
+    expect(entryOf(table, SONNET).price_source.derived_columns).toEqual([]);
     expect(entryOf(table, OPUS).price_source.kind).toBe('official-table');
     expect(entryOf(table, OPUS).price_source.derived_columns).toEqual([]);
   });
 
+  it('carries whatever kind and derived columns the catalog row records, not a constant of its own', () => {
+    // Positive control: no catalog row differs in kind any more (the sonnet row used to
+    // read the skill table and derive its cache writes), so a row that does is injected.
+    const source = {
+      kind: 'skill-table',
+      ref: 'a skill price table',
+      checkedAt: '2026-01-01',
+      derivedColumns: ['priceCacheWrite5mPerMTok', 'priceCacheWrite1hPerMTok'],
+    };
+    const ports = { getPricing: (key) => { const real = getPricing(key); return real === null ? null : { ...real, source }; } };
+    const table = foldOf([SONNET], { ports });
+    expect(entryOf(table, SONNET).price_source).toEqual(snake(source));
+  });
+
   it('reads a legacy id from its own ID_PRICES row, not from its tier', () => {
-    const table = foldOf([OPUS_LEGACY]);
-    expect(entryOf(table, OPUS_LEGACY).price_source).toEqual(snake(ID_PRICES[OPUS_LEGACY].priceSource));
+    for (const id of [OPUS_LEGACY, 'claude-sonnet-5']) {
+      const table = foldOf([id]);
+      expect(entryOf(table, id).price_source, id).toEqual(snake(ID_PRICES[id].priceSource));
+    }
   });
 
   it('is null for a model the catalog does not know, exactly where per_mtok is null', () => {
@@ -144,7 +160,7 @@ describe('pricing.models[].price_source', () => {
     block.derived_columns.push('mutated');
     block.kind = 'mutated';
     expect(MODELS.sonnet.priceSource.derivedColumns).not.toContain('mutated');
-    expect(MODELS.sonnet.priceSource.kind).toBe('skill-table');
+    expect(MODELS.sonnet.priceSource.kind).toBe('official-table');
   });
 
   it('survives a JSON round trip and leaves the rest of the pricing block as it was', () => {

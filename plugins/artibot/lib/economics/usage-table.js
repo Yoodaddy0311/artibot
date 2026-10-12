@@ -96,14 +96,15 @@
  *    that as "its five price columns were compared with the official page on
  *    `PRICING_VERSION`". Any change after that date is unchecked here.
  *  - WHETHER A SOURCE LABEL IS TRUE. The catalog records, per price row, where
- *    its figures were compared (`priceSource`: kind, label, date, and the columns
- *    computed instead of read - the current sonnet id's input, output and cache
- *    read against a skill price table rather than the page, its cache writes
- *    derived from input), and this module carries that record as
- *    `pricing.models[].price_source`. It is the catalog's statement, typed by
- *    whoever edited it: nothing here re-reads the page or the table, so the
- *    table proves the record was carried, never that it is right. An id priced by
- *    its tier's row shows that row's source, not one made for that id.
+ *    its figures were compared (`priceSource`: kind, label, date, and any column
+ *    computed instead of read - none today; until 2026-10-12 the sonnet tier row
+ *    took its input, output and cache read from a skill price table rather than
+ *    the page and derived its cache writes from input), and this module carries
+ *    that record as `pricing.models[].price_source`. It is the catalog's
+ *    statement, typed by whoever edited it: nothing here re-reads the page or the
+ *    table, so the table proves the record was carried, never that it is right.
+ *    An id priced by its tier's row shows that row's source, not one made for
+ *    that id.
  *  - THE 1-HOUR CACHE TTL, THINKING TOKENS AS A SEPARATE COST, and whether a
  *    subscription bills anything at all.
  *

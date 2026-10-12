@@ -11,6 +11,10 @@
  *               that era priced by tier only, so there are no per-id rows.
  *   2026-09-28  stamp set by 5820948d (opus/sonnet official sync + the
  *               claude-opus-5 per-id row); f8b49049 left every price as is.
+ *   2026-10-12  stamp set by the commit that bumped PRICING_VERSION to 2026-10-12
+ *               (Sonnet 5.5 cache read cut to 0.1; no hash cited: the row below
+ *               is typed from the official pricing page rows read that day, not
+ *               copied from git).
  *
  * 이 게이트가 못 보는 것 / WHAT THIS GATE CANNOT SEE
  *  (a) Whether any row matches the published price page. Internal agreement
@@ -97,6 +101,28 @@ const EXPECTED = {
       'claude-opus-5': row(5, 25, 0.5, 6.25, 10),
     },
   },
+  '2026-10-12': {
+    // The Sonnet 5.5 cache read fell to 0.1. claude-sonnet-5 now has a per-id row:
+    // the sonnet tier row no longer carries its price.
+    tiers: {
+      haiku: row(1, 5, 0.1, 1.25, 2),
+      sonnet: row(2, 10, 0.1, 2.5, 4),
+      opus: row(4, 20, 0.2, 5, 8),
+      fable: row(10, 50, 0.25, 12.5, 20),
+    },
+    ids: {
+      'claude-haiku-4-5': 'haiku',
+      'claude-sonnet-5-5': 'sonnet',
+      'claude-sonnet-5': 'sonnet',
+      'claude-opus-5-5': 'opus',
+      'claude-opus-5': 'opus',
+      'claude-fable-5-1': 'fable',
+    },
+    idPrices: {
+      'claude-opus-5': row(5, 25, 0.5, 6.25, 10),
+      'claude-sonnet-5': row(2, 10, 0.2, 2.5, 4),
+    },
+  },
 };
 
 /** Keys that must behave the same through getPricing and getPricingAt(current). */
@@ -168,7 +194,7 @@ describe('pricing history gate', () => {
   });
 
   it('every row prices exactly as git recorded under that stamp', () => {
-    // A price edit that keeps the stamp changes the derived 2026-09-28 row
+    // A price edit that keeps the stamp changes the derived 2026-10-12 row
     // and goes red here. Deleting an ID_PRICES row counts: past receipts of
     // that id would silently re-price if EXPECTED were edited to match.
     for (const version of PRICING_VERSIONS) {
@@ -239,6 +265,16 @@ describe('getPricingAt()', () => {
     expect(getPricingAt('2026-09-12', 'claude-sonnet-4-6')).toMatchObject({
       tier: 'sonnet', id: 'claude-sonnet-4-6', input: 3, output: 15, version: '2026-09-12',
     });
+  });
+
+  it('prices sonnet under 2026-09-28 at the 0.2 cache read the catalog recorded, not the 0.1 it fell to', () => {
+    // The cut was announced 2026-10-07 and entered the catalog under the 2026-10-12
+    // stamp; receipts written in between carry the 09-28 stamp, recorded 0.2 (more
+    // than the 0.1 the official page lists from 2026-10-07) and replay at that 0.2.
+    expect(getPricingAt('2026-09-28', 'claude-sonnet-5-5')).toMatchObject({
+      tier: 'sonnet', id: 'claude-sonnet-5-5', input: 2, output: 10, cacheRead: 0.2, version: '2026-09-28',
+    });
+    expect(getPricingAt(PRICING_VERSION, 'claude-sonnet-5-5')).toMatchObject({ cacheRead: 0.1 });
   });
 
   it('returns frozen records', () => {

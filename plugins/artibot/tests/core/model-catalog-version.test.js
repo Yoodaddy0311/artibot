@@ -45,11 +45,11 @@ describe('CATALOG_VERSION', () => {
     expect(parsed.toISOString().slice(0, 10)).toBe(CATALOG_VERSION);
   });
 
-  it('2026-09-30 비가격 변경(모델·ID 행마다 priceSource 출처 필드 추가)을 도장으로 남긴다', () => {
+  it('2026-10-12 비가격 변경(priceSource 값 재독: sonnet 행 skill-table → official-table, derivedColumns 비움, checkedAt 재날짜)을 도장으로 남긴다', () => {
     // 리터럴 핀: MODELS 의 비가격 값을 바꾸면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
-    // 이전 값: 2026-09-29(sonnet id 를 claude-sonnet-5-5 로 승격, claude-sonnet-5 는 legacyIds).
-    // 가격 열은 그대로고 다시 읽지도 않았으므로 PRICING_VERSION 은 안 움직였다(아래 핀).
-    expect(CATALOG_VERSION).toBe('2026-09-30');
+    // 이전 값: 2026-09-30(모델·ID 행마다 priceSource 출처 필드 추가).
+    // 이번에는 같은 날 공식 가격표를 다시 읽어 가격 열도 바뀌었고 PRICING_VERSION 도 함께 움직였다(아래 핀).
+    expect(CATALOG_VERSION).toBe('2026-10-12');
   });
 
   it('카탈로그가 비어 있지 않다 (버전이 도장 찍을 대상이 실재하는 분모)', () => {
@@ -98,10 +98,12 @@ describe('PRICING_VERSION', () => {
     expect(parsed.toISOString().slice(0, 10)).toBe(PRICING_VERSION);
   });
 
-  it('2026-09-28 공식표 대조(opus·sonnet 가격 갱신)를 도장으로 남긴다', () => {
+  it('2026-10-12 공식표 대조(Sonnet 5.5 캐시 읽기 인하)를 도장으로 남긴다', () => {
     // 리터럴 핀: 가격을 다시 대조하면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
     // 날짜만 바꾸고 값은 안 본 커밋을 막지는 못한다 — 위 "못 보는 것" 1 참고.
-    expect(PRICING_VERSION).toBe('2026-09-28');
+    // 이전 값: 2026-09-28(opus·sonnet 가격 갱신). 변경 효력일(2026-10-07)이 아니라
+    // 표를 읽은 날이다 — 모든 measured official-table 행의 checkedAt 이 이 값과 같아야 한다.
+    expect(PRICING_VERSION).toBe('2026-10-12');
   });
 
   it('도장 찍을 가격 열이 실재한다 (분모)', () => {
