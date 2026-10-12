@@ -416,7 +416,7 @@ async function recordVerifyDenominator(repoRoot, markerPath, hookData) {
 
   const sessionId = typeof hookData?.session_id === 'string' ? hookData.session_id : undefined;
   // `mission_id` is passed through ONLY when the host declared one, matching
-  // `session-end.js:534`. The writer derives a session-scoped fallback itself,
+  // `session-end.js:538`. The writer derives a session-scoped fallback itself,
   // and reading the ledger a second time to resolve the current mission would
   // cost more than the line is worth.
   const missionId = typeof hookData?.mission_id === 'string' ? hookData.mission_id : undefined;

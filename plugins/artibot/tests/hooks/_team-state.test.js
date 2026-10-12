@@ -10,6 +10,7 @@ import {
   AGENT_STALE_ACTIVE_MS,
   initTeamContext,
   loadState,
+  mergeSessionSnapshot,
   pruneAgents,
   saveState,
   updateTeamState,
@@ -459,6 +460,124 @@ describe('_team-state', () => {
       expect(() => saveState({ agents, marker: 'kept' })).not.toThrow();
       expect(enumerations).toBeGreaterThan(1);
       expect(JSON.parse(readFileSync(statePath, 'utf-8'))).toEqual({ agents: target, marker: 'kept' });
+    });
+  });
+
+  // SessionEnd's write. The file is shared by every live session, and SessionEnd used to
+  // replace all of it with a five-key snapshot (the hook-level pins are in
+  // session-end-state.test.js). Real filesystem and real lock, like the rest of this file.
+  describe('mergeSessionSnapshot', () => {
+    const snapshot = () => ({
+      sessionId: 'sess-END',
+      endedAt: '2026-10-12T00:00:00.000Z',
+      startedAt: null,
+      cwd: '/work/dir',
+      metadata: { platform: 'win32', nodeVersion: 'v24.0.0' },
+    });
+    const stamp = (ms) => new Date(Date.now() - ms).toISOString();
+    const read = () => JSON.parse(readFileSync(statePath, 'utf-8'));
+    const seed = (state) => writeFileSync(statePath, JSON.stringify(state), 'utf-8');
+    const live = () => ({
+      sessionId: 'sess-OLD',
+      endedAt: '2026-10-11T00:00:00.000Z',
+      agents: { a: { role: 'builder', active: true, startedAt: stamp(60_000), updatedAt: stamp(60_000) } },
+      events: [{ timestamp: stamp(1000), type: 'info', agent: 'a', message: 'Agent updated' }],
+      idleCounts: { a: 1 },
+      idlePayloadWithoutAgentId: { keys: ['session_id'], at: stamp(1000) },
+    });
+
+    it('writes the snapshot keys over the old ones and keeps every other key', () => {
+      const before = live();
+      seed(before);
+
+      expect(mergeSessionSnapshot(statePath, snapshot())).toBe(true);
+
+      expect(read()).toEqual({ ...before, ...snapshot() });
+      expect(existsSync(`${statePath}.lock`)).toBe(false);
+    });
+
+    it('drops tasks, workflow, teamId and domain, and nothing else', () => {
+      seed({
+        ...live(),
+        tasks: [{ id: '1', status: 'pending' }],
+        workflow: { playbook: 'feature', currentPhase: 1 },
+        teamId: 'team-x',
+        domain: 'backend',
+        startedAt: 1791780234051,
+        futureKey: 1,
+      });
+
+      mergeSessionSnapshot(statePath, snapshot());
+
+      const after = read();
+      for (const key of ['tasks', 'workflow', 'teamId', 'domain']) expect(after, key).not.toHaveProperty(key);
+      expect(after.futureKey).toBe(1);
+      // startedAt is one of the snapshot's own keys: the numeric team clock is replaced by
+      // the snapshot's value, which initTeamContext reads as "stale, start a new one".
+      expect(after.startedAt).toBeNull();
+    });
+
+    it('prunes the agents map it writes, as saveState does', () => {
+      seed({
+        agents: {
+          gone: { role: 'teammate', active: false, stoppedAt: stamp(AGENT_RETENTION_MS + 60_000), updatedAt: stamp(AGENT_RETENTION_MS + 60_000) },
+          ghost: { role: 'teammate', active: true, updatedAt: stamp(AGENT_STALE_ACTIVE_MS + 60_000) },
+          running: { role: 'teammate', active: true, updatedAt: stamp(60_000) },
+        },
+      });
+
+      mergeSessionSnapshot(statePath, snapshot());
+
+      expect(Object.keys(read().agents)).toEqual(['running']);
+    });
+
+    it('writes the snapshot alone when there is no file yet, without a word on stderr', () => {
+      expect(mergeSessionSnapshot(statePath, snapshot())).toBe(true);
+      expect(read()).toEqual(snapshot());
+      expect(stderrText()).toBe('');
+    });
+
+    it('writes the snapshot alone over content that is not a JSON object, and says so', () => {
+      for (const text of ['{ not json', '', '[1,2]', 'null', '7', '"x"']) {
+        writeFileSync(statePath, text, 'utf-8');
+        stderr.mockClear();
+
+        expect(mergeSessionSnapshot(statePath, snapshot()), text).toBe(true);
+
+        expect(read(), text).toEqual(snapshot());
+        expect(stderrText(), text).toContain('[artibot:session-end] state file is not a JSON object; replaced by the session snapshot');
+      }
+    });
+
+    it('writes nothing when the file exists but cannot be read, and says so', () => {
+      mkdirSync(statePath); // readFileSync -> EISDIR, which is not "no file"
+
+      expect(mergeSessionSnapshot(statePath, snapshot())).toBe(false);
+
+      expect(existsSync(statePath)).toBe(true);
+      expect(stderrText()).toContain('[artibot:session-end] state file unreadable; snapshot not saved');
+    });
+
+    it('takes the lock every other writer takes: refused inside it, nothing is written', () => {
+      const before = live();
+      seed(before);
+      const bytes = readFileSync(statePath, 'utf-8');
+
+      // Same-process re-entry is refused with ELOCKREENTRANT, so this only passes if the
+      // merge asks for `<statePath>.lock`. It must not fall back to an unlocked write.
+      const wrote = withFileLock(statePath, () => mergeSessionSnapshot(statePath, snapshot()));
+
+      expect(wrote).toBe(false);
+      expect(readFileSync(statePath, 'utf-8')).toBe(bytes);
+      expect(stderrText()).toContain('[artibot:session-end] Failed to save state: ');
+      expect(stderrText()).toContain('re-entry refused');
+    });
+
+    it('does not mutate the snapshot it was given', () => {
+      const snap = snapshot();
+      seed(live());
+      mergeSessionSnapshot(statePath, snap);
+      expect(snap).toEqual(snapshot());
     });
   });
 });

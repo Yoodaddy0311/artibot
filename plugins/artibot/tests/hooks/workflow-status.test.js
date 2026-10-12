@@ -187,6 +187,13 @@ describe('workflow-status', () => {
 
   it('records a SubagentStop firing as inactive even though the payload has no active key', async () => {
     process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+    // The row a SubagentStart registered. A stop for an id with no row creates none
+    // (see 'SubagentStop for an agent no event registered' below).
+    setExistingState({
+      agents: { a1: { role: 'tdd-guide', active: true, startedAt: new Date(Date.now() - 60_000).toISOString() } },
+      tasks: [],
+      events: [],
+    });
     setStdin({ hook_event_name: 'SubagentStop', agent_id: 'a1', agent_type: 'tdd-guide' });
 
     await runHookFresh();
@@ -212,6 +219,128 @@ describe('workflow-status', () => {
     const row = mockState.writes[0].data.agents.a1;
     expect(row.active).toBe(false);
     expect(row.stoppedAt).toBe(stoppedAt);
+  });
+
+  // The host sends SubagentStop on its own for internal helper agents no SubagentStart ever
+  // announced (measured 2026-10-12 in the repo spawn ledger: 6,811 of 7,613 agent ids have a
+  // stop and no start; 19 of the 39 rows in the live state file are finished rows with no
+  // start). A stop is news about an agent, not a reason to list one.
+  describe('SubagentStop for an agent no event registered', () => {
+    const ago = (ms) => new Date(Date.now() - ms).toISOString();
+    const stop = (extra = {}) => ({
+      hook_event_name: 'SubagentStop', agent_id: 'helper-1', agent_type: 'general-purpose', ...extra,
+    });
+
+    it('does not create a row for an id the state has never seen', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      const seeded = { role: 'planner', active: true, startedAt: ago(60_000), updatedAt: ago(60_000) };
+      setExistingState({ agents: { a1: seeded }, tasks: [], events: [] });
+      setStdin(stop());
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.agents).toEqual({ a1: seeded });
+    });
+
+    it('creates no row from a fresh state either, and none under the fallback id', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = false;
+      setStdin({ hook_event_name: 'SubagentStop' }); // no agent_id: the hook-utils fallback is 'unknown'
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.agents).toEqual({});
+    });
+
+    it('still records that the stop happened, and still writes the state once', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: {}, tasks: [], events: [] });
+      setStdin(stop());
+
+      await runHookFresh();
+
+      expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json')).toHaveLength(1);
+      const last = mockState.writes[0].data.events.at(-1);
+      expect(last).toMatchObject({ type: 'info', agent: 'helper-1', message: 'Agent stopped' });
+    });
+
+    it('reports a solo run (no teammates) as an empty dashboard, not a one-member team', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: {}, tasks: [], events: [] });
+      setStdin(stop());
+
+      await runHookFresh();
+
+      const { writeStdout } = await import('../../scripts/utils/index.js');
+      expect(writeStdout.mock.calls.at(-1)[0]).toEqual({});
+    });
+
+    it('still closes a row that exists: inactive, newer updatedAt, the rest of the row kept', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      const startedAt = ago(30 * 60_000);
+      setExistingState({
+        agents: { 'helper-1': { role: 'tdd-guide', active: true, startedAt, updatedAt: startedAt, tasksCompleted: 2 } },
+        tasks: [],
+        events: [],
+      });
+      setStdin(stop());
+
+      await runHookFresh();
+
+      const row = mockState.writes[0].data.agents['helper-1'];
+      expect(row.active).toBe(false);
+      expect(row.startedAt).toBe(startedAt);
+      expect(row.tasksCompleted).toBe(2);
+      expect(Date.now() - Date.parse(row.updatedAt)).toBeLessThan(60_000);
+      expect(mockState.writes[0].data.events.at(-1).message).toBe('Agent stopped');
+    });
+
+    it('leaves the other rows exactly as they were', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      const agents = {
+        a1: { role: 'planner', active: true, startedAt: ago(5 * 60_000), updatedAt: ago(60_000), sessionId: 'sess-A' },
+        b1: { role: 'builder', active: false, startedAt: ago(9 * 60_000), stoppedAt: ago(8 * 60_000), updatedAt: ago(8 * 60_000) },
+      };
+      setExistingState({ agents, tasks: [], events: [] });
+      setStdin(stop());
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.agents).toEqual(agents);
+    });
+
+    // Pinned so the fix cannot spread: only SubagentStop is exempt from creating a row.
+    it('TeammateIdle for an unknown id still creates the idle row', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: {}, tasks: [], events: [] });
+      setStdin({ hook_event_name: 'TeammateIdle', agent_id: 'helper-1', agent_type: 'general-purpose', idle_reason: 'turn_complete' });
+
+      await runHookFresh();
+
+      const row = mockState.writes[0].data.agents['helper-1'];
+      expect(row).toMatchObject({ active: false, blocked: false, error: null });
+      expect(mockState.writes[0].data.events.at(-1).message).toBe('Agent went idle');
+    });
+
+    it('SubagentStart for an unknown id still creates an active row', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: {}, tasks: [], events: [] });
+      setStdin({ hook_event_name: 'SubagentStart', agent_id: 'helper-1', agent_type: 'general-purpose' });
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.agents['helper-1']).toMatchObject({ active: true });
+    });
+
+    it('a payload with no event name and an unknown id still creates a row (the non-lifecycle callers)', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: {}, tasks: [], events: [] });
+      setStdin({ agent_id: 'helper-1', role: 'backend', current_task: 'wire endpoints' });
+
+      await runHookFresh();
+
+      expect(mockState.writes[0].data.agents['helper-1']).toMatchObject({ role: 'backend', active: true });
+    });
   });
 
   it('writes the workflow state exactly once per invocation', async () => {

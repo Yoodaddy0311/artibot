@@ -6,7 +6,7 @@
  * Extracted from subagent-handler.js (which had reached the 800-line cap) with
  * the bodies unchanged; the one new piece is updateTeamState(). pruneAgents() was
  * added later and is also used by workflow-status.js, the file's other writer of
- * the `agents` map.
+ * the `agents` map. mergeSessionSnapshot() is session-end.js's write into the file.
  *
  * @module scripts/hooks/_team-state
  */
@@ -41,9 +41,9 @@ export const AGENT_RETENTION_MS = 7 * DAY_MS;
  * agents are live, or have been silent for less than the ghost window.
  * Known (U4 review F2): the row a stop is writing in this very call is finished too, and over
  * the cap it can be among the first dropped. Left as is: nothing reads a finished row back
- * (handleStop took `tracked` before it saved; the roster lists only non-idle rows), and when
- * the stop saves first, the same stop's workflow-status upsert re-creates the row as an
- * inactive one (if the upsert saves first, the dropped row stays gone).
+ * (handleStop took `tracked` before it saved; the roster lists only non-idle rows), and the
+ * same stop's workflow-status event does not bring it back (a SubagentStop closes a row that
+ * exists and never creates one), so a dropped row stays gone either way.
  */
 export const AGENT_MAX_ENTRIES = 500;
 
@@ -62,10 +62,11 @@ export const AGENT_MAX_ENTRIES = 500;
  * canonicalModel, actionClass and durationMs. Registered rows get the retention window, see
  * isGhost.
  * An unregistered row exists because workflow-status saw a lifecycle event for the id, and
- * its next event re-creates it (teammate-update upserts on SubagentStart, SubagentStop and
- * TeammateIdle). A day without a refresh means the stop was never recorded (cause not measured:
- * SubagentStop never fired, or its state update lost the lock) or the agent is still running
- * with no event in between; dropping the row loses nothing a stop reads either way.
+ * its next SubagentStart or TeammateIdle re-creates it (teammate-update upserts on those two;
+ * on SubagentStop it only refreshes a row that is there). A day without a refresh means the
+ * stop was never recorded (cause not measured: SubagentStop never fired, or its state update
+ * lost the lock) or the agent is still running with no event in between; dropping the row
+ * loses nothing a stop reads either way.
  * 24 hours: the longest start-to-stop span among the file's 134 stopped rows was 10.2h
  * (p99 2.2h).
  */
@@ -213,6 +214,84 @@ export function updateTeamState(statePath, mutate) {
     logHookError('subagent-handler', 'team state not updated', err);
   }
   return ran;
+}
+
+/**
+ * Top-level keys that describe the team that was running when a session ended. SessionEnd
+ * drops these four and nothing else (mergeSessionSnapshot).
+ * - `tasks`, `workflow`: mirrored from the finished team's task list by workflow-status
+ *   (reconcileTasks adds by id and never removes). Task ids restart at 1 in each session's list
+ *   and no other writer clears them, so kept they would blend into the next session's progress
+ *   line and into team-idle-handler's pending-task count. The next workflow-status event of a
+ *   live team re-derives both.
+ * - `teamId`, `domain`: initTeamContext derives them once per session (`team-<session_id>`);
+ *   kept, the next session would inherit this one's.
+ * Every other key stays, because it may belong to a session that is still running: the whole
+ * file used to be replaced, which is what wiped them.
+ */
+const FINISHED_TEAM_KEYS = Object.freeze(['tasks', 'workflow', 'teamId', 'domain']);
+
+/**
+ * The state file as a read-modify-write sees it. `{}` when there is no file, or when its
+ * content is not a JSON object (said on stderr, because the write that follows replaces it).
+ * `null` when a file is there but cannot be read: the caller must not write over what it
+ * could not see (a failed read, EBUSY or EPERM on Windows say, is no evidence the content is bad).
+ * @param {string} statePath
+ * @returns {object|null}
+ */
+function readStateForMerge(statePath) {
+  let text;
+  try {
+    text = readFileSync(statePath, 'utf-8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return {};
+    logHookError('session-end', 'state file unreadable; snapshot not saved', err);
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch { /* not JSON: same outcome as a JSON value that is not an object */ }
+  logHookError('session-end', 'state file is not a JSON object; replaced by the session snapshot');
+  return {};
+}
+
+/**
+ * SessionEnd's write: lay the session snapshot (`sessionId`, `endedAt`, `startedAt`, `cwd`,
+ * `metadata`) over the shared state file instead of replacing the file with it.
+ *
+ * The file is shared by every live session on the machine (agents, events, idle records), so
+ * the old whole-file overwrite wiped whatever the other sessions had recorded. This is a
+ * read-modify-write under the lock the other writers take (`<statePath>.lock`), keeps every key
+ * except FINISHED_TEAM_KEYS, and prunes `agents` like saveState does — the overwrite used to be
+ * the only thing that bounded the map.
+ *
+ * Bounded: withFileLock waits at most its LOCK_WAIT_MS (2s) and then throws without running the
+ * merge; that is logged and the snapshot is skipped. It never falls back to an unlocked write,
+ * which could clobber a writer holding the lock; a skipped snapshot only leaves the previous
+ * `endedAt` in place. Never throws.
+ *
+ * @param {string} statePath - Path of the state file
+ * @param {{sessionId: string|null, endedAt: string, startedAt: *, cwd: string, metadata: object}} snapshot
+ * @returns {boolean} Whether the merged state was handed to atomicWriteSync (which logs and
+ *   returns on a failure of its own); false when the snapshot was skipped
+ */
+export function mergeSessionSnapshot(statePath, snapshot) {
+  let wrote = false;
+  try {
+    withFileLock(statePath, () => {
+      const prior = readStateForMerge(statePath);
+      if (prior === null) return;
+      const kept = Object.fromEntries(
+        Object.entries(prior).filter(([key]) => !FINISHED_TEAM_KEYS.includes(key)),
+      );
+      atomicWriteSync(statePath, pruneAgents({ ...kept, ...snapshot }));
+      wrote = true;
+    });
+  } catch (err) {
+    logHookError('session-end', 'Failed to save state', err);
+  }
+  return wrote;
 }
 
 /**

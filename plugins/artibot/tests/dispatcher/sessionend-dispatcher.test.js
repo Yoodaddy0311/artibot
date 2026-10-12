@@ -37,7 +37,7 @@ import { ledgerFilePath } from '../../lib/runtime/ledger.js';
  *    from the PAYLOAD `cwd` only), so unlike SessionStart there is no `checkout -b` to
  *    prevent here. Three of them do read `process.cwd()`, and all three
  *    reads end in the home sandbox rather than the repo:
- *      * `session-end.js:89` and `memory-tracker.js:134` copy the string into
+ *      * `session-end.js:96` and `memory-tracker.js:134` copy the string into
  *        a state/summary record written under `<home>/.claude/artibot/`.
  *      * `session-ledger.mjs:46` resolves from the PAYLOAD `cwd` key, not
  *        from the process, and skips when it is absent — no payload in this

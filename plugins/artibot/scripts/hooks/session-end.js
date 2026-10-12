@@ -11,10 +11,11 @@
  *   4. knowledge transfer hot-swap
  */
 
-import { atomicWriteSync, getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
+import { getPluginRoot, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import path from 'node:path';
 import { createErrorHandler, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 import { isMainEntry } from './_main-entry.js';
+import { mergeSessionSnapshot } from './_team-state.js';
 
 /**
  * Run the learning pipeline using shutdownLearning() which includes:
@@ -78,11 +79,17 @@ async function maybeEmitFirstRunWelcome() {
 
 /**
  * Persist the session-end state snapshot atomically.
+ *
+ * The snapshot is laid over `~/.claude/artibot-state.json`, not written in its place: every
+ * live session shares that file, and replacing it wiped the agents, events and idle records
+ * the others had recorded (see {@link mergeSessionSnapshot} for what is kept, what is dropped
+ * and how long the lock can be waited for). main() calls this first, once stdin is read.
+ *
+ * Exported for tests.
  * @param {object} hookData
  */
-function saveSessionState(hookData) {
-  const statePath = getStatePath();
-  const state = {
+export function saveSessionState(hookData) {
+  mergeSessionSnapshot(getStatePath(), {
     sessionId: hookData?.session_id || null,
     endedAt: new Date().toISOString(),
     startedAt: hookData?.started_at || null,
@@ -91,12 +98,7 @@ function saveSessionState(hookData) {
       platform: process.platform,
       nodeVersion: process.version,
     },
-  };
-  try {
-    atomicWriteSync(statePath, state);
-  } catch (err) {
-    logHookError('session-end', 'Failed to save state', err);
-  }
+  });
 }
 
 /**

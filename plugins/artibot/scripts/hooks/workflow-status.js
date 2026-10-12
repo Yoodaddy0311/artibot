@@ -365,9 +365,18 @@ export async function main() {
         const stopped = hookData?.hook_event_name === 'SubagentStop';
         const wentIdle = hookData?.active === false || hookData?.hook_event_name === 'TeammateIdle';
         const inactive = wentIdle || stopped;
+        // A SubagentStop only closes a row that exists. The host also sends one on its
+        // own for helper agents no SubagentStart announced (measured 2026-10-12: 6,811 of
+        // 7,613 agent ids in the repo spawn ledger have a stop and no start, and 19 of the
+        // 39 rows in the live state file are finished rows with no start), and a row made
+        // from that stop alone is a finished teammate nothing reads — it only pads the
+        // `Team: N members` count until pruneAgents ages it out. `subagent-handler stop`
+        // already keeps such an id out of the state file. The event below is still
+        // appended: it says the stop was seen.
+        const unseenStop = stopped && !Object.hasOwn(state.agents, agentId);
         state = {
           ...state,
-          agents: {
+          agents: unseenStop ? state.agents : {
             ...state.agents,
             [agentId]: {
               ...existing,
