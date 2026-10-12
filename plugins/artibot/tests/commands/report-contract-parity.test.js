@@ -23,6 +23,9 @@ import { fileURLToPath } from 'node:url';
 //   team.md 의 그 숫자를 손으로 맞춰라.
 // - 조항의 **의미**가 아니라 정규식 매칭만 본다. 문구가 남아 있어도 뜻이
 //   뒤집히면 통과한다.
+// - 맨 아래 "보고 주소 폴백" 절은 `CARRIERS` 밖의 스폰 경로(/assemble·/spawn·/orchestrate)를
+//   본다. 거기서는 정본 채널 조항 한 줄(정본에서 파생)과 조각 보고 조항만 보고, 전문 9줄·
+//   중계 계약의 파리티는 대상이 아니다. 그 절이 못 보는 것은 절 머리말에 따로 적었다.
 // ---------------------------------------------------------------------------
 
 const COMMANDS_DIR = path.resolve(fileURLToPath(import.meta.url), '..', '..', '..', 'commands');
@@ -208,5 +211,138 @@ describe('리더 검증 의무 조항', () => {
     const body = leaderRole();
     expect(body).toMatch(/scripts\/cron\/auto-pr-creator\.js/);
     expect(body).toMatch(/scripts\/hooks\/git-autopilot-merge\.js/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 보고 주소 폴백 — 보고 계약 전문을 싣지 않는 스폰 경로 (2026-10-12)
+//
+// /assemble · /spawn · /orchestrate 는 이름 있는 팀원을 띄우고(`name="…"`) 그 보고를
+// `SendMessage` 로 모은다고 적으면서도 스폰 프롬프트에는 보고 채널이 한 줄도 없었다.
+// 팀원은 백그라운드로 돌아 일반 텍스트 출력이 리더에게 전달되지 않는다(2026-07-27, 7/7).
+//
+// 이 셋은 `CARRIERS` 에 넣지 않았다. 넣으면 전문 9줄과 중계 계약까지 싣게 되고,
+// `command-output-invariance.test.js` 가 이 파일의 `CARRIERS` 배열을 파싱해 완료 블록
+// 캐리어와 정확히 맞추도록 묶여 있어 그쪽도 함께 움직여야 한다. 그래서 정본 계약의
+// **채널 조항 한 줄**만 파생해 싣고 별도 목록(`FALLBACK_CARRIERS`)으로 게이트한다.
+//
+// /go 는 이 목록에 없다: 유일한 스폰이 이름 없는 `Agent(architect, …)` 라 결과가 Agent
+// 호출의 반환값으로 돌아온다(commands/team.md "이름 없이 fire-and-forget 위임하고 반환값을
+// 리더가 취합", agents/orchestrator.md Mode Capabilities "sub-agent: One-way (result return
+// only)"). 면제의 전제(이름 있는 스폰 0건)는 아래 테스트가 핀한다 — 이름 있는 스폰이
+// 생기면 RED 이고 그때 go.md 를 폴백 캐리어로 옮긴다. 이 면제는 문서 판독에서 나온 **추론**이고
+// 호스트에서 실측하지 않았다.
+//
+// 이 절이 못 보는 것 (게이트 옆에 적어 둔다):
+// - 팀원이 실제로 그 채널로 보고하는지. 문구의 존재 ≠ 준수다. 준수율은 미측정이다.
+// - `main` 이 이 호스트·세션에서 실제로 수신되는지. 2026-09-22 실측(commands/team.md)에 기댄 값이다.
+//   `main` 만 닿는 주소도 아니다: 리더 프로브(2026-10-12)에서 `to="team-lead"` 도 리더에 도달했다
+//   (거부된 것은 리더 세션 자신의 이름이다). 이 절은 도달이 아니라 정본 계약과의 문구 일치를 잰다.
+// - 5,000자 조각 보고가 지금 호스트에서도 필요한지, 지켜지는지. 2026-09-11 관측에 기댄 조항이다.
+// - 프롬프트 추출은 `prompt="…"` 정규식이다. 다른 표기로 스폰이 늘면 못 본다 — 분모 단언
+//   (`FALLBACK_PROMPTS`)이 늘어난 `prompt=` 를 잡을 뿐이다.
+// - 이 목록 밖의 스폰 커맨드. `grep -l 'name="' commands/*.md` 로 훑은 것이 아니다.
+// ---------------------------------------------------------------------------
+
+const FALLBACK_CARRIERS = ['assemble.md', 'spawn.md', 'orchestrate.md'];
+
+/** 폴백 캐리어별 `prompt="…"` 개수 — 늘어난 스폰이 보고 주소 없이 지나가지 못하게 하는 분모다. */
+const FALLBACK_PROMPTS = { 'assemble.md': 5, 'spawn.md': 1, 'orchestrate.md': 1 };
+
+const extractAddress = (src) => extractBlock(src, '보고 주소');
+
+/**
+ * 정본 계약의 채널 조항을 폴백 문구로 바꾼다. 리더가 메인 세션이므로 `{리더 이름}` 은 `main`
+ * 이다. 정본에서 파생하므로 team.md 의 문구가 바뀌면 폴백 파일이 RED 가 된다.
+ */
+function canonicalChannelClause(contract = contracts[CANONICAL]) {
+  const line = contract.split('\n').find((l) => l.includes('SendMessage(to="{리더 이름}")'));
+  return line === undefined ? null : line.replace('{리더 이름}', 'main');
+}
+
+/**
+ * 폴백 캐리어 한 파일의 위반을 모은다. 빈 배열이 통과다. 순수 함수라 음성 대조가 워킹트리를
+ * 건드리지 않고 문자열 뮤테이션으로 돈다.
+ */
+function fallbackViolations(src, expectedPrompts, clause = canonicalChannelClause()) {
+  const block = extractAddress(src);
+  if (block === null) return ['[보고 주소] 블록 없음'];
+  const problems = [];
+  if (clause === null) problems.push('정본 계약에서 채널 조항을 못 찾음');
+  else if (!block.split('\n').includes(clause)) problems.push('채널 조항이 정본과 다름');
+  if (!/5,000자를 넘으면.*5,000자 이하 조각/.test(block)) problems.push('조각 보고 조항 없음');
+  const prompts = extractPrompts(src);
+  if (prompts.length !== expectedPrompts) problems.push(`prompt= ${prompts.length}개 (기대 ${expectedPrompts})`);
+  const uncovered = prompts.filter((p) => !p.includes('{보고 주소}'));
+  if (uncovered.length > 0) problems.push(`{보고 주소} 없는 스폰 프롬프트 ${uncovered.length}개`);
+  return problems;
+}
+
+describe('보고 주소 폴백/정본 파생', () => {
+  it('정본 계약에서 채널 조항을 찾아 main 으로 바꾼다 (null 로 조용히 통과하지 않게)', () => {
+    expect(canonicalChannelClause()).toBe(
+      '- 보고는 반드시 SendMessage(to="main") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.',
+    );
+  });
+});
+
+describe('보고 주소 폴백/스폰 경로 커버리지', () => {
+  it.each(FALLBACK_CARRIERS)('%s: 블록·채널 조항·조각 조항·스폰 프롬프트 전건이 위반 0건이다', (f) => {
+    expect(fallbackViolations(read(f), FALLBACK_PROMPTS[f])).toEqual([]);
+  });
+
+  it('세 파일의 [보고 주소] 블록이 문자 단위로 같다', () => {
+    const blocks = FALLBACK_CARRIERS.map((f) => extractAddress(read(f)));
+    expect(blocks[0], '첫 파일에서 블록 추출 실패').not.toBeNull();
+    for (const b of blocks) expect(b).toBe(blocks[0]);
+  });
+
+  it('/go 의 면제 전제가 유지된다 — Agent 스폰이 있고 전부 이름이 없다', () => {
+    const src = read('go.md').replace(/\r\n/g, '\n');
+    const calls = [...src.matchAll(/(?<![A-Za-z0-9_$.])Agent\s*\(/g)];
+    expect(calls.length, 'go.md 에서 Agent( 호출을 하나도 못 찾았다 — 면제 전제가 공허하다').toBeGreaterThan(0);
+    for (const m of calls) {
+      const end = src.indexOf('\n```', m.index);
+      const call = src.slice(m.index, end === -1 ? undefined : end);
+      expect(call, '이름 있는 스폰이 생겼다 — go.md 도 FALLBACK_CARRIERS 로 옮기고 [보고 주소] 를 실어라').not.toMatch(/\bname\s*=/);
+    }
+  });
+});
+
+describe('보고 주소 폴백/음성 대조 — 게이트가 헛돌지 않는다', () => {
+  const assemble = () => read('assemble.md');
+
+  it('블록을 지우면 잡힌다', () => {
+    const mutated = assemble().replace('[보고 주소]', '[삭제됨]');
+    expect(fallbackViolations(mutated, 5)).toEqual(['[보고 주소] 블록 없음']);
+  });
+
+  it('수신자를 정본과 다른 주소(team-lead)로 바꾸면 잡힌다 — 재는 것은 도달이 아니라 정본 일치다', () => {
+    // team-lead 도 리더에 닿는다(위 머리말). 이 뮤테이션은 "그 주소가 틀렸다"가 아니라
+    // "정본 계약이 정한 주소(main)에서 벗어났다"를 게이트가 잡는지 본다.
+    const mutated = assemble().replace('SendMessage(to="main")', 'SendMessage(to="team-lead")');
+    expect(fallbackViolations(mutated, 5)).toEqual(['채널 조항이 정본과 다름']);
+  });
+
+  it('정본 계약의 채널 문구가 바뀌면 폴백 파일이 RED 가 된다 (파생이 정본에 묶여 있다)', () => {
+    const drifted = contracts[CANONICAL].replace('일반 텍스트 출력은 리더에게 전달되지 않는다', '다른 문구');
+    expect(drifted).not.toBe(contracts[CANONICAL]); // 뮤테이션이 실제로 적용됐다
+    expect(fallbackViolations(assemble(), 5, canonicalChannelClause(drifted))).toEqual(['채널 조항이 정본과 다름']);
+  });
+
+  it('조각 보고 조항을 지우면 잡힌다', () => {
+    const mutated = assemble().replace(/^- 보고가 5,000자를 넘으면.*$/m, '');
+    expect(fallbackViolations(mutated, 5)).toEqual(['조각 보고 조항 없음']);
+  });
+
+  it('스폰 프롬프트 하나에서 {보고 주소} 슬롯을 빼면 잡힌다', () => {
+    const mutated = assemble().replace('  {보고 주소}")', '  ")');
+    expect(mutated).not.toBe(assemble());
+    expect(fallbackViolations(mutated, 5)).toEqual(['{보고 주소} 없는 스폰 프롬프트 1개']);
+  });
+
+  it('스폰 프롬프트가 늘면 분모 불일치와 미커버로 잡힌다', () => {
+    const mutated = `${assemble()}\nAgent(x, name="y",\n  prompt="새 스폰")\n`;
+    expect(fallbackViolations(mutated, 5)).toEqual(['prompt= 6개 (기대 5)', '{보고 주소} 없는 스폰 프롬프트 1개']);
   });
 });

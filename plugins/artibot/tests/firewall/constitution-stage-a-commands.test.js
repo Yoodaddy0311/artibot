@@ -22,8 +22,14 @@
  *       미노출 실측 · 서브에이전트 세션은 관측 보고(근거 미기록) · 미확인 표기가 본문에
  *       남아 있어야 하고, 낡은 단정과 "기본 high"(모델별 기본값이 다르다) 는 돌아오면
  *       RED 다.
+ *       2026-10-12 갱신: `commands/implement.md` 의 "Effort & Task Budget" 도 같은 결함
+ *       ("호출 측은 `output_config.effort` 로 직접 지정한다" + JSON 스니펫 둘)이라 team.md
+ *       와 같은 방식으로 걷어냈다. 공식 task-budgets 문서가 "Task budgets are not
+ *       supported on Claude Code or Cowork surfaces" 라고 적으므로(열람일 2026-10-12)
+ *       작업 예산 JSON 은 이 표면의 커맨드에 둘 자리가 없다. 코드블록 금칙 핀·사실 등급
+ *       핀·수정 전 모양 자기검증이 아래 마지막 A-6 테스트들이다.
  *
- *  A-7  `commands/adr.md` 의 "결정 요소만 질문한다 (D09 · OD-5)" — 결정 요소는 묻고
+ *  A-7 `commands/adr.md` 의 "결정 요소만 질문한다 (D09 · OD-5)" — 결정 요소는 묻고
  *       사실은 조사한다는 분리, 질문 게이트 4조건, 권장 옵션 `(권장)` 표기 규칙,
  *       비대화형 정지. 더해 본문이 `AskUserQuestion(...)` 를 호출하라고 지시하므로
  *       프론트매터 `allowed-tools` 에 그 이름이 **선언돼 있어야** 한다
@@ -44,14 +50,17 @@
  *  3. **`output_config` 의 다른 표기.** A-6 금칙어는 `output_config`·`task_budget` JSON
  *     키와 `task-budgets-` 베타 헤더 문자열이다. 같은 내용을 산문으로 풀어 쓰거나
  *     `outputConfig` 로 캐멀케이스화하면 이 스캔에 걸리지 않는다.
- *  4. **다른 커맨드의 같은 결함.** 스코프는 A-5·A-6·A-7 이 소유한 네 파일뿐이다.
- *     측정 시각 2026-09-02 기준 `commands/implement.md:74-88` 에 **같은 형태의
- *     `output_config` JSON 스니펫이 남아 있다** — T-07 소유 경로가 아니라 손대지
- *     않았고, 이 게이트도 그것을 보지 않는다. 여기 그린을 "리포 전체에 API 오정보가
- *     없다" 의 근거로 쓰지 마라.
- *     2026-10-12 갱신: 그 구간에서 **"기본 high" 진술 하나만** 모델별 기본값으로 고쳐
- *     마지막 A-6 테스트가 핀한다. 스니펫(:77-81)과 task-budget 블록(:85-90, 베타 헤더
- *     포함)은 그대로이고 여전히 이 게이트 밖이다.
+ *  4. **다른 커맨드의 같은 결함.** 스코프는 A-5·A-6·A-7 이 소유한 네 파일과
+ *     `commands/implement.md` 의 Effort & Task Budget 절뿐이다. 코드블록 스캔은 그중
+ *     team.md·implement.md 둘에만 건다. 측정 시각 2026-10-12, 저장소 루트에서
+ *     `grep -rIl 'output_config\|task_budget\|task-budgets' plugins docs .github *.md`
+ *     (node_modules·.claude/worktrees 제외)가 찾은 파일은 6개 — CHANGELOG.md ·
+ *     artibot.config.json · commands/implement.md · commands/team.md ·
+ *     lib/cognitive/effort-policy.js · 이 테스트다. 나머지 넷의 코드블록은 이 게이트가
+ *     보지 않고, 7번째 파일이 생겨도 모른다. 이력: 2026-09-02 에는
+ *     `commands/implement.md:74-88` 에 같은 형태의 JSON 스니펫이 남아 있었고 이 게이트가
+ *     보지 않았다(T-07 소유 경로가 아니었다). 2026-10-12 에 걷어냈다. 여기 그린을
+ *     "리포 전체에 API 오정보가 없다" 의 근거로 쓰지 마라.
  *  5. **설치본 드리프트.** 리포 정본만 읽는다. 사용자 환경에 설치된 커맨드 사본이
  *     어긋나 있어도 조용하다(사본 대조 게이트 **없음** — 미확인).
  *  6. **`Agent` effort 파라미터의 실제 노출·효과.** 이 스캔은 본문이 사실 등급을
@@ -283,6 +292,49 @@ describe('헌법 단계 A — commands 소유분 (A-5·A-6·A-7)', () => {
       const body = normalize(read(IMPLEMENT));
       expect(body).not.toMatch(/기본 `?high`?(?![-\w])/);
       expect(body).toContain('Opus 5.5·Haiku 5.5 는 `medium`, 그 밖의 effort 지원 모델은 `high`');
+    });
+
+    it.each(FORBIDDEN_IN_SNIPPETS)('implement.md 의 코드블록에도 `%s` 가 없다 — team.md 와 같은 SDK 스니펫 삭제', (needle) => {
+      expect(fencedBlocks(read(IMPLEMENT))).not.toContain(needle);
+    });
+
+    it('implement.md 의 effort·작업 예산 진술이 사실 등급을 지킨다 — 호스트·세션이 정한다 + Agent 파라미터는 team.md 정본에 위임 + 작업 예산은 Claude Code 미지원(공식 문서 원문)', () => {
+      const body = normalize(read(IMPLEMENT));
+      // 낡은 지시는 돌아오면 안 된다 — 플러그인에는 Messages API 호출자가 없다(effort-policy.js 주석).
+      expect(body).not.toContain('호출 측은 `output_config.effort`로 직접 지정한다');
+      expect(body).toContain('호스트·세션이 정한다');
+      // Agent 도구 effort 파라미터 — 사실 등급 진술은 team.md 정본에 두고 여기서는 단정하지 않는다.
+      expect(body).toContain('2.1.292');
+      expect(body).toContain('모든 세션에 노출된다는 보장은 없다');
+      expect(body).toContain('`commands/team.md` 의 `### Effort & Task Budget`');
+      // 작업 예산 — 공식 task-budgets 문서(열람일 2026-10-12)의 표면 진술을 번역하지 않고 원문으로 핀한다.
+      expect(body).toContain('Task budgets are not supported on Claude Code or Cowork surfaces');
+      // 근거 없는 고정 기본값("기본 64,000") 처방은 돌아오면 안 된다 — 공식 문서는 작업 길이 분포로 정하라고 한다.
+      expect(body).not.toMatch(/기본 \*\*64,000\*\*/);
+    });
+
+    it('자기검증 — 수정 전 implement.md 구간(2026-10-12 이전 모양)을 넣으면 금칙어 셋이 전부 잡힌다', () => {
+      const OLD_SHAPE = [
+        '### Effort & Task Budget (현재 정책 티어 네이티브)',
+        '구현 작업은 **xhigh**가 기본 권장값이며 호출 측은 `output_config.effort`로 직접 지정한다.',
+        '',
+        '```json',
+        '{',
+        '  "output_config": { "effort": "xhigh" }',
+        '}',
+        '```',
+        '',
+        '```json',
+        '{',
+        '  "headers": { "anthropic-beta": "task-budgets-2026-03-13" },',
+        '  "output_config": { "task_budget": { "type": "tokens", "total": 64000 } }',
+        '}',
+        '```',
+      ].join('\n');
+      const hits = FORBIDDEN_IN_SNIPPETS.filter((needle) => fencedBlocks(OLD_SHAPE).includes(needle));
+      expect(hits).toEqual(FORBIDDEN_IN_SNIPPETS);
+      // 펜스 밖 산문에만 남은 같은 지시는 이 스캔이 못 본다(헤더 "못 보는 것" #3) — 그 층은 위 텍스트 핀이 맡는다.
+      expect(fencedBlocks(OLD_SHAPE.split('```json')[0])).toBe('');
     });
 
     it('effort 권장값 표는 유지됐다 — 삭제가 정책까지 지우지 않았다', () => {

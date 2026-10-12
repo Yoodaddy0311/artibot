@@ -44,11 +44,12 @@ Parse $ARGUMENTS:
    Agent(
      subagent_type="{type}",
      name="orchestrate-{workflow-slug}-{role-name}",
-     prompt="{role brief}"
+     prompt="{role brief}\n\n{보고 주소}"
    )
    ```
    The name is what makes a teammate addressable by `SendMessage`, so spawn with
-   one even when the role seems obvious.
+   one even when the role seems obvious. The `{보고 주소}` slot takes the report
+   address block from `## Report Address` below, verbatim, in every spawn prompt.
    - Spawn all teammates needed for the pipeline pattern
    - Each teammate is a specialist agent activated via the Task tool
 4. **Create Phase Tasks**: Build the pipeline as shared tasks:
@@ -84,6 +85,27 @@ Parse $ARGUMENTS:
    - No teardown call follows. The team is implicit, so shutting down every
      teammate *is* the cleanup; there is nothing left to delete.
 9. **Report**: Output orchestration summary with team metrics
+
+## Report Address (MANDATORY)
+
+Teammates run in the background, so plain-text output does not reach the leader
+(`commands/team.md` `### 보고 계약` records 7 of 7 agents finishing in plain text on
+2026-07-27 with nothing delivered). The handoffs below flow leader to teammate; the way back
+(phase results, review findings) works only if every teammate is told where to send it. This
+command is not a parity carrier of the full `[보고 계약]` block
+(`tests/commands/report-contract-parity.test.js`), so it carries only that block's channel
+clause, below.
+
+`main` is the address of the main session that ran this command. Use a teammate's own name
+instead only when that teammate is the one running `/orchestrate`. Never put a session name or
+a run slug there: a message addressed to the main session by such a name is refused (measured
+2026-09-22, recorded in `commands/team.md`).
+
+```
+[보고 주소]
+- 보고는 반드시 SendMessage(to="main") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.
+- 보고가 5,000자를 넘으면 줄 경계에서 5,000자 이하 조각으로 나눠 여러 번 보낸다. 각 조각 첫 줄에 `chunk k/N` 을 적는다.
+```
 
 ## Communication Protocol
 

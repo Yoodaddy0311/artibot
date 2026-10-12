@@ -87,6 +87,14 @@ Spawn **one agent per category** (5 total) into the "avengers" team. Each teamma
 
 > **모델 전달 — 아래 스폰 예시의 `model` 주석이 가리키는 절차.** 리더는 스폰 직전에 에이전트마다 `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:<agent-type>` 를 실행하고(`--role`·`--task` 는 붙이지 않는다 — 에이전트의 기본 작업 종류 `lib/routing/action-classifier.js#AGENT_ACTION_CLASS` 가 기준이라 각 에이전트가 자기 작업 종류의 티어로 뜬다), 출력된 한 단어를 Agent 호출의 `model` 파라미터에 **그대로 넘긴다**. 이 문서에는 모델 이름을 적지 않는다 — 판정은 CLI 가 한다. 다섯 `resolve` 를 먼저 한 번에 받은 뒤 다섯 Agent 를 한 메시지에서 병렬로 띄운다. `model` 을 생략하지 않는다(생략한 스폰에는 `/model-routing` 설정이 닿지 않는다). CLI 가 없거나 실패하면 `lib/core/model-policy.js#resolveModel('<agent-type>')` 값으로 폴백한다 — 근거·상세는 `commands/team.md` §Teammate Rules & Model Policy.
 
+**보고 주소 (MANDATORY)** — 아래 스폰 예시의 `{보고 주소}` 자리에는 다음 블록을 그대로 삽입한다. 이 커맨드는 `commands/team.md` 의 `[보고 계약]` 전문(5캐리어 parity 대상)을 싣지 않고 채널 조항만 싣는다. 팀원이 자기소개를 일반 텍스트로만 내면 Step 4 가 기다리는 리더에게 전달되지 않기 때문이다(채널 명시 근거는 `commands/team.md` 의 `### 보고 계약`). `main` 은 이 커맨드를 실행한 메인 세션의 주소다. 이름 있는 팀원이 이 커맨드를 돌릴 때만 그 이름으로 바꾸고, 세션 이름·런 슬러그는 넣지 마라 — 그 이름으로 메인 세션에 보낸 메시지는 거부된다(2026-09-22 실측, `commands/team.md` 에 기록).
+
+```
+[보고 주소]
+- 보고는 반드시 SendMessage(to="main") 로 보낸다. 일반 텍스트 출력은 리더에게 전달되지 않는다.
+- 보고가 5,000자를 넘으면 줄 경계에서 5,000자 이하 조각으로 나눠 여러 번 보낸다. 각 조각 첫 줄에 `chunk k/N` 을 적는다.
+```
+
 Launch ALL 5 in parallel:
 
 ```
@@ -94,31 +102,36 @@ Agent(architect, name="avengers-architect",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:architect 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 시스템 설계 및 아키텍처 결정.
-  담당 분야와 준비 상태를 간단히 말해주세요.")
+  담당 분야와 준비 상태를 간단히 말해주세요.
+  {보고 주소}")
 
 Agent(code-reviewer, name="avengers-code-reviewer",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 코드 리뷰 및 품질 검증.
-  담당 분야와 준비 상태를 간단히 말해주세요.")
+  담당 분야와 준비 상태를 간단히 말해주세요.
+  {보고 주소}")
 
 Agent(backend-developer, name="avengers-backend-dev",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:backend-developer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: API 설계 및 서버 로직 구현.
-  담당 분야와 준비 상태를 간단히 말해주세요.")
+  담당 분야와 준비 상태를 간단히 말해주세요.
+  {보고 주소}")
 
 Agent(security-reviewer, name="avengers-security-reviewer",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:security-reviewer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 보안 취약점 탐지 및 대응.
-  담당 분야와 준비 상태를 간단히 말해주세요.")
+  담당 분야와 준비 상태를 간단히 말해주세요.
+  {보고 주소}")
 
 Agent(tdd-guide, name="avengers-tdd-guide",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:tdd-guide 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 테스트 주도 개발 가이드.
-  담당 분야와 준비 상태를 간단히 말해주세요.")
+  담당 분야와 준비 상태를 간단히 말해주세요.
+  {보고 주소}")
 ```
 
 ### Step 4: Collect Introductions
