@@ -28,8 +28,9 @@
  * The repository disagrees with itself about how large a context window is:
  *
  * - `scripts/hooks/context-tracker.js` uses `DEFAULT_MAX_TOKENS = 128_000`.
- * - `lib/core/model-catalog.js` gives `MODELS.*.ctxLimit` as 200_000 for one
- *   model and 1_000_000 for three others.
+ * - `lib/core/model-catalog.js` gives `MODELS.*.ctxLimit` as 1_000_000 for all
+ *   four tiers (200_000 for the haiku tier until it moved to Haiku 5.5 on
+ *   2026-10-12).
  *
  * Picking either one here would bake a silent, wrong denominator into every
  * score. So `computeContextPressure` has NO default capacity: when `maxTokens`

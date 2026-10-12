@@ -30,7 +30,10 @@ const ENUM_WHITELIST = ['sonnet', 'opus', 'haiku', 'fable'];
  * usual 0.1x.
  */
 const PRICE_TABLE = [
-  { tier: 'haiku', id: 'claude-haiku-4-5', input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
+  // 2026-10-12: Claude Haiku 5.5, the "up to 100,000 tokens" rows of the page. The
+  // over-100,000 list (0.50 / 0.625 / 1 / 0.05 / 2.50) is not stored: see the
+  // 'priceMaxPromptTokens' block below. claude-haiku-4-5 ($1 / $5 ...) is an ID_PRICES row.
+  { tier: 'haiku', id: 'claude-haiku-5-5', input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.2 },
   // 2026-10-12: Sonnet 5.5 공식가, cache hit 0.10 (0.05x base input, 공식 각주 2 —
   // 2026-10-07 릴리스 노트로 0.20 에서 인하). 2026-09-28 stamp 까지는 0.2 였고 그 행은 얼려 있다.
   { tier: 'sonnet', id: 'claude-sonnet-5-5', input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2.5, cacheWrite1h: 4 },
@@ -77,7 +80,7 @@ describe('model-catalog', () => {
       });
       expect(getModel('opus').id).toBe('claude-opus-5-5');
       expect(getModel('sonnet').id).toBe('claude-sonnet-5-5');
-      expect(getModel('haiku').id).toBe('claude-haiku-4-5');
+      expect(getModel('haiku').id).toBe('claude-haiku-5-5');
     });
 
     it('marks Opus 5.5 thinking as always-on (it cannot be disabled), prompt style unchanged', () => {
@@ -88,18 +91,27 @@ describe('model-catalog', () => {
       expect(getModel('sonnet').thinkingMode).toBe('adaptive');
     });
 
-    it('marks Haiku 4.5 thinking as extended (budget_tokens only, no adaptive)', () => {
-      // claude-api skill, "Thinking & Effort": adaptive on every current model
-      // except Haiku 4.5, which still takes {type:'enabled', budget_tokens}.
-      expect(getModel('haiku').thinkingMode).toBe('extended');
+    it('marks Haiku 5.5 thinking as adaptive: it can be disabled, unlike opus and fable', () => {
+      // Thinking page, table "Configuring thinking", Haiku 5.5 row (read
+      // 2026-10-12): no `thinking` field and "adaptive" both give adaptive
+      // thinking, "enabled" with budget_tokens is a 400, and "disabled" turns
+      // thinking off at effort `high` or below. The models overview labels it
+      // plain "Adaptive" (opus and fable say "Adaptive (always on)"). Until the
+      // move to 5.5 the tier was Haiku 4.5, which took budget_tokens only
+      // ('extended'); no tier carries that value now, it stays in the vocabulary.
+      expect(getModel('haiku').thinkingMode).toBe('adaptive');
+      expect(getModel('haiku').thinkingMode).not.toBe(getModel('opus').thinkingMode);
     });
 
-    it('pins official output limits: Sonnet 5 128K, Haiku 4.5 64K', () => {
-      // claude-api skill shared/models.md (Sonnet 5 row: 128K; Haiku 4.5 row: 64K).
-      // 2026-09-29: the tier id moved to Sonnet 5.5 and this limit was carried
-      // over as is. The row cited is Sonnet 5's; nobody re-read it for 5.5.
-      expect(getModel('sonnet').outLimit).toBe(128_000);
-      expect(getModel('haiku').outLimit).toBe(64_000);
+    it('pins official limits: 1M context and 128K output on every tier since Haiku 5.5', () => {
+      // Models overview (read 2026-10-12): Context window 1M tokens and Max output
+      // 128K tokens for Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5 alike.
+      // Haiku was 200K / 64K while the tier was Haiku 4.5. The sonnet limits were
+      // carried over from Sonnet 5 on 2026-09-29 and agree with the overview.
+      for (const tier of ['fable', 'opus', 'sonnet', 'haiku']) {
+        expect(getModel(tier).ctxLimit, `${tier} ctxLimit`).toBe(1_000_000);
+        expect(getModel(tier).outLimit, `${tier} outLimit`).toBe(128_000);
+      }
     });
 
     it('returns null for an unknown tier', () => {
@@ -181,8 +193,10 @@ describe('model-catalog', () => {
       expect(getCostFactor('sonnet')).toBeCloseTo(0.5, 10);
     });
 
-    it('haiku = (1/4) * 1.0 = 0.25', () => {
-      expect(getCostFactor('haiku')).toBeCloseTo(0.25, 10);
+    it('haiku = (0.1/4) * 1.0 = 0.025', () => {
+      // Haiku 5.5 is a tenth of Haiku 4.5's input price ($0.10 against $1), so
+      // the factor fell from 0.25 to 0.025 on 2026-10-12.
+      expect(getCostFactor('haiku')).toBeCloseTo(0.025, 10);
     });
 
     it('every factor divides by the Opus 5.5 input price (4), not the old claude-opus-5 row (5)', () => {
@@ -191,7 +205,7 @@ describe('model-catalog', () => {
       expect(BASELINE_TIER).toBe('opus');
       expect(getModel(BASELINE_TIER).priceInPerMTok).toBe(4);
       const factors = Object.fromEntries(listTiers().map((t) => [t, getCostFactor(t)]));
-      expect(factors.haiku).toBeCloseTo(0.25, 10);
+      expect(factors.haiku).toBeCloseTo(0.025, 10);
       expect(factors.sonnet).toBeCloseTo(0.5, 10);
       expect(factors.opus).toBe(1);
       expect(factors.fable).toBeCloseTo(3.25, 10);
@@ -299,6 +313,7 @@ describe('model-catalog', () => {
         measured: true,
         version: PRICING_VERSION,
         source: OFFICIAL_2026_10_12,
+        maxPromptTokens: null,
       });
     });
 
@@ -343,12 +358,20 @@ describe('model-catalog', () => {
       expect(getModel('opus').legacyIds).toEqual(['claude-opus-5']);
     });
 
-    it.each(['haiku', 'fable'])(
-      '%s carries an empty legacyIds array (same shape on every tier)',
-      (tier) => {
-        expect(getModel(tier).legacyIds).toEqual([]);
-      },
-    );
+    it('fable carries an empty legacyIds array (same shape on every tier)', () => {
+      expect(getModel('fable').legacyIds).toEqual([]);
+    });
+
+    it('haiku keeps claude-haiku-4-5 as its only legacy id; claude-haiku-5-5 is the current id', () => {
+      // 2026-10-12: the tier moved from Haiku 4.5 to Haiku 5.5, the way opus
+      // moved to claude-opus-5-5 on 2026-09-23. The 4.5 id stays in the list so
+      // transcripts and ledger rows written against it keep tier haiku (and,
+      // through ID_PRICES, the price they were billed at).
+      expect(getModel('haiku').id).toBe('claude-haiku-5-5');
+      expect(getModel('haiku').legacyIds).toEqual(['claude-haiku-4-5']);
+      expect(tierForModelId('claude-haiku-5-5')).toBe('haiku');
+      expect(tierForModelId('claude-haiku-4-5')).toBe('haiku');
+    });
 
     it('sonnet keeps claude-sonnet-5 as its only legacy id; claude-sonnet-5-5 is the current id', () => {
       // 2026-09-29: the host serves `claude-sonnet-5-5` for the sonnet tier and
@@ -390,6 +413,7 @@ describe('model-catalog', () => {
     it('getPricing still names the current id, not a legacy one', () => {
       expect(getPricing('opus').id).toBe('claude-opus-5-5');
       expect(getPricing('sonnet').id).toBe('claude-sonnet-5-5');
+      expect(getPricing('haiku').id).toBe('claude-haiku-5-5');
     });
   });
 
@@ -408,6 +432,7 @@ describe('model-catalog', () => {
         measured: true,
         version: PRICING_VERSION,
         source: OFFICIAL_2026_10_12,
+        maxPromptTokens: null,
       });
     });
 
@@ -429,8 +454,35 @@ describe('model-catalog', () => {
         measured: true,
         version: PRICING_VERSION,
         source: OFFICIAL_2026_10_12,
+        maxPromptTokens: null,
       });
       expect(getPricing('claude-sonnet-5').cacheRead).not.toBe(getPricing('sonnet').cacheRead);
+    });
+
+    it('prices the legacy id claude-haiku-4-5 at its own Haiku 4.5 row, a tenth of the Haiku 5.5 tier row on every column', () => {
+      // Literal pin (official pricing page row "Claude Haiku 4.5", fetched
+      // 2026-10-12 KST). The haiku TIER moved to Haiku 5.5 that day ($0.10 in, up to
+      // 100,000 tokens); this id keeps the price it was billed at, and one price at
+      // any prompt length, so no band. Without the row every claude-haiku-4-5
+      // receipt and cache-roi lookup would be billed a tenth of what it cost.
+      expect(getPricing('claude-haiku-4-5')).toEqual({
+        tier: 'haiku',
+        id: 'claude-haiku-4-5',
+        input: 1,
+        output: 5,
+        cacheRead: 0.1,
+        cacheWrite5m: 1.25,
+        cacheWrite1h: 2,
+        measured: true,
+        version: PRICING_VERSION,
+        source: OFFICIAL_2026_10_12,
+        maxPromptTokens: null,
+      });
+      const old = getPricing('claude-haiku-4-5');
+      const tier = getPricing('haiku');
+      for (const column of ['input', 'output', 'cacheRead', 'cacheWrite5m', 'cacheWrite1h']) {
+        expect(old[column] / tier[column], column).toBeCloseTo(10, 10);
+      }
     });
 
     it('prices a current id at its tier row and reports the id that was asked for', () => {
@@ -455,7 +507,7 @@ describe('model-catalog', () => {
       for (const id of Object.keys(ID_PRICES)) {
         expect(legacy).toContain(id);
       }
-      expect(Object.keys(ID_PRICES)).toEqual(['claude-opus-5', 'claude-sonnet-5']);
+      expect(Object.keys(ID_PRICES)).toEqual(['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5']);
     });
 
     it('is deep-frozen and every row is measured with five finite prices', () => {
@@ -578,13 +630,14 @@ describe('model-catalog', () => {
       'tier fable': OFFICIAL_2026_10_12,
       'id claude-opus-5': OFFICIAL_2026_10_12,
       'id claude-sonnet-5': OFFICIAL_2026_10_12,
+      'id claude-haiku-4-5': OFFICIAL_2026_10_12,
     };
 
     it('covers every tier row and every ID_PRICES row, and the evidence table names exactly those rows', () => {
       // The denominator: a row added to the catalog without a pin here is red, and
       // so is a pin for a row that is gone.
       expect(rows.map(([label]) => label).sort()).toEqual(Object.keys(EVIDENCE).sort());
-      expect(rows).toHaveLength(6);
+      expect(rows).toHaveLength(7);
     });
 
     it.each(rows)('%s carries a frozen priceSource with exactly kind, ref, checkedAt, derivedColumns', (_label, row) => {
@@ -676,13 +729,17 @@ describe('model-catalog', () => {
       expect(getPricing('claude-opus-5').source).not.toBe(MODELS.opus.priceSource);
       expect(getPricing('claude-sonnet-5').source).toBe(ID_PRICES['claude-sonnet-5'].priceSource);
       expect(getPricing('claude-sonnet-5').source).not.toBe(MODELS.sonnet.priceSource);
+      expect(getPricing('claude-haiku-4-5').source).toBe(ID_PRICES['claude-haiku-4-5'].priceSource);
+      expect(getPricing('claude-haiku-4-5').source).not.toBe(MODELS.haiku.priceSource);
       // A current id has no row of its own: it is priced by the tier row and reports
       // that row's source, the row's latest comparison, not one made for that id.
       expect(getPricing('claude-sonnet-5-5').source).toBe(MODELS.sonnet.priceSource);
     });
 
     it('every getPricing record carries a frozen source, for every tier, role and id', () => {
-      for (const key of [...listTiers(), ...Object.keys(ROLE_ALIASES), 'claude-opus-5', 'claude-sonnet-5']) {
+      for (const key of [
+        ...listTiers(), ...Object.keys(ROLE_ALIASES), 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5',
+      ]) {
         const { source } = getPricing(key);
         expect(source, key).toBeTruthy();
         expect(Object.isFrozen(source), key).toBe(true);

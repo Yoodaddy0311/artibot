@@ -93,8 +93,27 @@ export const BASELINE_TIER = 'opus';
  * `official-table` (its `ref` is now {@link PRICING_SOURCE}) and its
  * `derivedColumns` from the two cache-write columns to none, and `checkedAt` was
  * re-dated to 2026-10-12 on every row that was re-read. claude-sonnet-5 gained an
- * {@link ID_PRICES} row, which carries a `priceSource` of its own. No id, limit,
- * coefficient or constraint changed.
+ * {@link ID_PRICES} row, which carries a `priceSource` of its own. That edit
+ * changed no id, limit, coefficient or constraint; the one below did.
+ *
+ * 2026-10-12, same day and same stamp: the haiku tier moved from Claude Haiku 4.5
+ * to Claude Haiku 5.5. Its `id` is now `claude-haiku-5-5` and `claude-haiku-4-5` its
+ * legacy id (the move opus made on 2026-09-23 and sonnet on 2026-09-29); `ctxLimit`
+ * went from 200_000 to 1_000_000, `outLimit` from 64_000 to 128_000 and
+ * `thinkingMode` from `extended` to `adaptive`, all read off the models overview
+ * and the thinking page that day (`{type:'enabled', budget_tokens}` now returns 400
+ * on Haiku 5.5). Every row of {@link MODELS} and {@link ID_PRICES} gained
+ * `priceMaxPromptTokens`, which {@link getPricing} reports as `maxPromptTokens`.
+ * The stamp stayed. No release tag contains the commit that set it, 4980e43f
+ * (`git tag --contains` was empty on 2026-10-12; latest tag v4.71.6), but that commit
+ * has been on origin/master, the branch the marketplace entry `./plugins/artibot` is
+ * installed from, since the push of 2026-10-12 16:31 KST (the commit is dated 16:17),
+ * so an install taken from master since then could have stamped records with it. A
+ * haiku receipt stamped that way names `claude-haiku-4-5`, which the new
+ * {@link ID_PRICES} row replays at the price that billed it; a record that names only
+ * the tier would replay at the new tier row (the residual, pinned in
+ * `tests/core/pricing-history.test.js`). The price edits of this move are noted at
+ * {@link PRICING_VERSION}.
  *
  * @type {string}
  */
@@ -157,6 +176,18 @@ export const CATALOG_VERSION = '2026-10-12';
  * is not billed at its successor's rate. {@link CATALOG_VERSION} moved that day
  * too, for the `priceSource` edits of its own.
  *
+ * 2026-10-12, same day and same stamp: the haiku tier row moved to Claude Haiku
+ * 5.5, read off the two "Claude Haiku 5.5" rows of {@link PRICING_SOURCE} that day.
+ * The row holds the "up to 100,000 tokens" prices, $0.10 in / $0.50 out, cache read
+ * 0.01, cache writes 0.125 and 0.20; the over-100,000 list (0.50 / 2.50, 0.05, 0.625
+ * and 1) is not stored, see the haiku row. claude-haiku-4-5 gained an
+ * {@link ID_PRICES} row with the $1 / $5 / 0.10 / 1.25 / 2 it was billed at (its
+ * page row, also read that day, still matches). The stamp stayed; see
+ * {@link CATALOG_VERSION} for where it has been published. A haiku receipt written
+ * under it before this move names model_id `claude-haiku-4-5`, which that row replays
+ * at the same prices; only a record that names the tier alone (a tier-level lookup of
+ * `haiku`) reads the new row, and that is the residual.
+ *
  * @type {string}
  */
 export const PRICING_VERSION = '2026-10-12';
@@ -212,6 +243,16 @@ export const PRICING_SOURCE =
  * written at that constant. Shape and vocabulary are pinned in
  * `tests/core/model-catalog.test.js`.
  *
+ * `priceMaxPromptTokens` is the largest prompt, in tokens, that the five price
+ * columns of a row apply to; `null` means one price at any prompt length. A
+ * request's prompt counts its input, cache-read and cache-write tokens together
+ * (the pricing page's own definition). Only Claude Haiku 5.5 is banded, so only its
+ * row holds a number (100_000), and the page's higher price list for a longer prompt
+ * is NOT stored: no reader applies it, so a request over the boundary is priced at
+ * the stored columns, which understates it (see the haiku row).
+ * {@link getPricing} reports the field as `maxPromptTokens`. It is not a price
+ * column, so `lib/core/pricing-history.js` does not freeze it.
+ *
  * `legacyIds` lists older model ids that must still resolve to the tier, so a
  * transcript or ledger row written before an id change keeps its tier instead
  * of falling to "unknown model". It is present on EVERY tier (`[]` when there
@@ -225,7 +266,11 @@ export const PRICING_SOURCE =
  * `{type:'adaptive'}` and thinking can be disabled; `always-on` = adaptive
  * only, disabling and `budget_tokens` are rejected; `extended` =
  * `{type:'enabled', budget_tokens}` only, no adaptive. The set is pinned in
- * `tests/core/model-catalog.test.js`.
+ * `tests/core/model-catalog.test.js`. No tier carries `extended` since the haiku
+ * tier moved to Haiku 5.5 (2026-10-12); the value stays in the closed vocabulary.
+ * Sonnet 5.5 is `adaptive` here because the official models overview labels it
+ * `Adaptive`; it also rejects `{type:'disabled'}` and takes `{type:'between_tools'}`,
+ * a shape this vocabulary has no value for (see the sonnet row).
  *
  * @type {Readonly<Record<string, Readonly<{
  *   id: string,
@@ -242,6 +287,7 @@ export const PRICING_SOURCE =
  *     checkedAt: string,
  *     derivedColumns: readonly string[]
  *   }>,
+ *   priceMaxPromptTokens: number|null,
  *   tokenizerCoeff: number,
  *   tokenizerCoeffMeasured: boolean,
  *   ctxLimit: number,
@@ -253,30 +299,54 @@ export const PRICING_SOURCE =
  */
 export const MODELS = deepFreeze({
   haiku: {
-    id: 'claude-haiku-4-5',
-    legacyIds: [],
-    priceInPerMTok: 1,
-    priceOutPerMTok: 5,
-    priceCacheReadPerMTok: 0.1,
-    priceCacheWrite5mPerMTok: 1.25,
-    priceCacheWrite1hPerMTok: 2,
+    // 2026-10-12: the tier moved from Claude Haiku 4.5 to Claude Haiku 5.5, the move
+    // opus made on 2026-09-23 and sonnet on 2026-09-29. claude-haiku-4-5 stays
+    // resolvable as a legacy id and keeps its own ID_PRICES row, so older
+    // transcripts and ledger rows keep tier haiku and the $1 / $5 they were billed at.
+    id: 'claude-haiku-5-5',
+    legacyIds: ['claude-haiku-4-5'],
+    // Official pricing page rows "Claude Haiku 5.5 (for prompts up to 100,000
+    // tokens)", fetched 2026-10-12 KST: $0.10 / $0.125 / $0.20 / $0.01 / $0.50 per
+    // MTok (input / 5m write / 1h write / cache hit / output). The cache hit is the
+    // standard 0.1x of input.
+    //
+    // ONLY THAT BAND IS STORED. The page prices Haiku 5.5 per request by prompt
+    // length, where the prompt counts input, cache reads and cache writes together:
+    // a request over 100,000 tokens pays $0.50 / $0.625 / $1 / $0.05 / $2.50, which
+    // is 5x every column. Nothing here or in a reader applies that second list
+    // (`priceMaxPromptTokens` names the boundary; the receipt writer counts the
+    // requests over it in `meta.overPriceBandRequests` and still prices them at the
+    // columns below), so a request over 100K prompt tokens is under-priced by 5x and
+    // a receipt that sums such requests by up to 5x.
+    priceInPerMTok: 0.1,
+    priceOutPerMTok: 0.5,
+    priceCacheReadPerMTok: 0.01,
+    priceCacheWrite5mPerMTok: 0.125,
+    priceCacheWrite1hPerMTok: 0.2,
     priceMeasured: true,
-    // Re-read on 2026-10-12 and already matched (the PRICING_VERSION notes), so
-    // the figures above did not move; `priceMeasured` defines that read as against
-    // PRICING_SOURCE on PRICING_VERSION.
+    // The two page rows above, read on 2026-10-12.
     priceSource: {
       kind: 'official-table',
       ref: PRICING_SOURCE,
       checkedAt: '2026-10-12',
       derivedColumns: [],
     },
+    priceMaxPromptTokens: 100_000,
+    // tokenizerCoeff, tokenizerCoeffMeasured and promptStyle are the values the
+    // Haiku 4.5 row carried; nobody re-verified them for 5.5 (the coefficient is an
+    // estimate on every tier, see getCostFactor).
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
-    ctxLimit: 200_000,
-    outLimit: 64_000,
-    // Haiku 4.5 has no adaptive thinking: {type:'enabled', budget_tokens} only
-    // (claude-api skill, Thinking & Effort).
-    thinkingMode: 'extended',
+    // Models overview, Haiku 5.5 column, read 2026-10-12: context window 1M tokens,
+    // max output 128K tokens.
+    ctxLimit: 1_000_000,
+    outLimit: 128_000,
+    // Haiku 5.5 takes {type:'adaptive'}, which is also what it does when no
+    // `thinking` field is sent. {type:'enabled', budget_tokens} returns 400, and
+    // {type:'disabled'} is accepted at effort `high` or below (400 at `xhigh` or
+    // `max`), so thinking CAN be turned off here, unlike on opus and fable (thinking
+    // page, table "Configuring thinking", read 2026-10-12).
+    thinkingMode: 'adaptive',
     promptStyle: 'prescriptive',
     constraints: [],
   },
@@ -311,12 +381,17 @@ export const MODELS = deepFreeze({
       checkedAt: '2026-10-12',
       derivedColumns: [],
     },
+    priceMaxPromptTokens: null,
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     // ctxLimit, outLimit, thinkingMode and promptStyle are the values the
     // catalog carried for Sonnet 5 (outLimit per the claude-api skill,
-    // 2026-09-28). They were carried over when the id moved to 5.5; nobody
-    // re-read them for 5.5.
+    // 2026-09-28). They were carried over when the id moved to 5.5. On 2026-10-12
+    // the models overview was read for 5.5: it agrees on ctxLimit (1M), outLimit
+    // (128K) and the `Adaptive` label that `thinkingMode` uses. The thinking page
+    // adds a nuance this vocabulary has no value for: Sonnet 5.5 rejects
+    // {type:'disabled'} (400) and takes {type:'between_tools'} as its lowest
+    // setting. promptStyle was not re-read.
     ctxLimit: 1_000_000,
     // 128K max output (claude-api skill shared/models.md, Sonnet 5 row).
     outLimit: 128_000,
@@ -347,6 +422,7 @@ export const MODELS = deepFreeze({
       checkedAt: '2026-10-12',
       derivedColumns: [],
     },
+    priceMaxPromptTokens: null,
     tokenizerCoeff: 1.0,
     tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
@@ -378,6 +454,7 @@ export const MODELS = deepFreeze({
       checkedAt: '2026-10-12',
       derivedColumns: [],
     },
+    priceMaxPromptTokens: null,
     tokenizerCoeff: 1.3,
     tokenizerCoeffMeasured: false,
     ctxLimit: 1_000_000,
@@ -417,9 +494,10 @@ export const ROLE_ALIASES = deepFreeze({
  * `MODELS[tier].legacyIds` (the tier resolution and its "no id in two tiers"
  * rule are untouched); every key here must be one of those legacy ids, never a
  * current `id` (that would be a second price for the tier's own row) and never
- * an id no tier resolves. Same five price columns, `priceMeasured` flag and
- * `priceSource` as {@link MODELS}, same {@link PRICING_VERSION} stamp. Both rules
- * are pinned in `tests/core/model-catalog.test.js`.
+ * an id no tier resolves. Same five price columns, `priceMeasured` flag,
+ * `priceSource` and `priceMaxPromptTokens` as {@link MODELS}, same
+ * {@link PRICING_VERSION} stamp. Both rules are pinned in
+ * `tests/core/model-catalog.test.js`.
  *
  * @type {Readonly<Record<string, Readonly<{
  *   priceInPerMTok: number,
@@ -433,7 +511,8 @@ export const ROLE_ALIASES = deepFreeze({
  *     ref: string,
  *     checkedAt: string,
  *     derivedColumns: readonly string[]
- *   }>
+ *   }>,
+ *   priceMaxPromptTokens: number|null
  * }>>>}
  */
 export const ID_PRICES = deepFreeze({
@@ -454,6 +533,7 @@ export const ID_PRICES = deepFreeze({
       checkedAt: '2026-10-12',
       derivedColumns: [],
     },
+    priceMaxPromptTokens: null,
   },
   'claude-sonnet-5': {
     // Official pricing page row "Claude Sonnet 5", fetched 2026-10-12 KST:
@@ -474,6 +554,27 @@ export const ID_PRICES = deepFreeze({
       checkedAt: '2026-10-12',
       derivedColumns: [],
     },
+    priceMaxPromptTokens: null,
+  },
+  'claude-haiku-4-5': {
+    // Official pricing page row "Claude Haiku 4.5", fetched 2026-10-12 KST:
+    // $1 / $1.25 / $2 / $0.10 / $5 per MTok. The haiku tier row moved to Haiku 5.5
+    // the same day (its price list is a tenth of this one); this id keeps the price
+    // it was billed at. One price at any prompt length, so no band.
+    priceInPerMTok: 1,
+    priceOutPerMTok: 5,
+    priceCacheReadPerMTok: 0.1,
+    priceCacheWrite5mPerMTok: 1.25,
+    priceCacheWrite1hPerMTok: 2,
+    priceMeasured: true,
+    // The page row above, read on 2026-10-12.
+    priceSource: {
+      kind: 'official-table',
+      ref: PRICING_SOURCE,
+      checkedAt: '2026-10-12',
+      derivedColumns: [],
+    },
+    priceMaxPromptTokens: null,
   },
 });
 
@@ -585,6 +686,12 @@ export function tierForModelId(modelId) {
  * `lib/core/pricing-history.js#getPricingAt` reports none for a past stamp, whose
  * frozen rows hold prices and nothing about where they came from.
  *
+ * `maxPromptTokens` is the row's `priceMaxPromptTokens`: the largest prompt the
+ * five price columns apply to, or null when the model has one price at any prompt
+ * length. A caller that prices a request whose prompt is over it is using columns
+ * that do not apply (see {@link MODELS}); this function does not hold the other
+ * list. Like `source`, a past stamp reports none.
+ *
  * @param {string} key - A ROLE_ALIASES key, a tier key, or an exact model id.
  * @returns {Readonly<{
  *   tier: string, id: string, input: number, output: number,
@@ -592,7 +699,8 @@ export function tierForModelId(modelId) {
  *   measured: boolean, version: string,
  *   source: Readonly<{
  *     kind: string, ref: string, checkedAt: string, derivedColumns: readonly string[]
- *   }>|null
+ *   }>|null,
+ *   maxPromptTokens: number|null
  * }>|null} Frozen pricing record, or null if unresolvable.
  *
  * @example
@@ -618,6 +726,7 @@ export function getPricing(key) {
     measured: row.priceMeasured,
     version: PRICING_VERSION,
     source: row.priceSource ?? null,
+    maxPromptTokens: row.priceMaxPromptTokens ?? null,
   });
 }
 

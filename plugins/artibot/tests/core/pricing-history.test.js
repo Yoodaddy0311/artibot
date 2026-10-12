@@ -15,6 +15,8 @@
  *               (Sonnet 5.5 cache read cut to 0.1; no hash cited: the row below
  *               is typed from the official pricing page rows read that day, not
  *               copied from git).
+ *               Haiku row edited in place (Haiku 5.5): no release tag holds the stamp, but origin/master
+ *               has since 2026-10-12; 4.5 receipts replay at 1/5 via idPrices, tier-only records do not.
  *
  * 이 게이트가 못 보는 것 / WHAT THIS GATE CANNOT SEE
  *  (a) Whether any row matches the published price page. Internal agreement
@@ -103,14 +105,18 @@ const EXPECTED = {
   },
   '2026-10-12': {
     // The Sonnet 5.5 cache read fell to 0.1. claude-sonnet-5 now has a per-id row:
-    // the sonnet tier row no longer carries its price.
+    // the sonnet tier row no longer carries its price. The haiku tier moved to
+    // Haiku 5.5 the same day (the "up to 100,000 tokens" prices; the band boundary
+    // is not a price column) and claude-haiku-4-5 got a per-id row at the 1 / 5 it
+    // was billed at.
     tiers: {
-      haiku: row(1, 5, 0.1, 1.25, 2),
+      haiku: row(0.1, 0.5, 0.01, 0.125, 0.2),
       sonnet: row(2, 10, 0.1, 2.5, 4),
       opus: row(4, 20, 0.2, 5, 8),
       fable: row(10, 50, 0.25, 12.5, 20),
     },
     ids: {
+      'claude-haiku-5-5': 'haiku',
       'claude-haiku-4-5': 'haiku',
       'claude-sonnet-5-5': 'sonnet',
       'claude-sonnet-5': 'sonnet',
@@ -121,6 +127,7 @@ const EXPECTED = {
     idPrices: {
       'claude-opus-5': row(5, 25, 0.5, 6.25, 10),
       'claude-sonnet-5': row(2, 10, 0.2, 2.5, 4),
+      'claude-haiku-4-5': row(1, 5, 0.1, 1.25, 2),
     },
   },
 };
@@ -129,7 +136,8 @@ const EXPECTED = {
 const LOOKUP_KEYS = [
   'haiku', 'sonnet', 'opus', 'fable',
   'frontier', 'deep-async', 'balanced', 'fast',
-  'claude-haiku-4-5', 'claude-sonnet-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5',
+  'claude-haiku-4-5', 'claude-haiku-5-5', 'claude-sonnet-5', 'claude-sonnet-5-5', 'claude-opus-5-5',
+  'claude-opus-5',
   'claude-fable-5-1', 'claude-sonnet-4-6', 'claude-opus-4-8', 'gpt-4',
   '', 'toString', '__proto__', null, undefined, 42, {},
 ];
@@ -452,6 +460,54 @@ describe('pricingForReceipt()', () => {
       + built.usage.cache_creation_tokens * replayed.cacheWrite5m / 1e6
       + built.usage.output_tokens * replayed.output / 1e6;
     expect(recomputed).toBe(built.cost.total);
+  });
+
+  it('replays a freshly built claude-haiku-4-5 receipt at the 1 / 5 that billed it, though the haiku tier row is Haiku 5.5', async () => {
+    // WHY THE 2026-10-12 STAMP COULD KEEP ITS NAME when the haiku tier moved to 5.5:
+    // a haiku receipt written under it before the move names model_id
+    // claude-haiku-4-5, and the id row replays it at the price that produced it.
+    const main = '/fake/projects/slug/sess-history-haiku45.jsonl';
+    const usage = {
+      input_tokens: 100,
+      cache_read_input_tokens: 900,
+      cache_creation_input_tokens: 50,
+      output_tokens: 20,
+    };
+    const { receipts, meta } = await buildUsageReceipts({
+      transcriptPath: main,
+      missionId: 'm-history-haiku45',
+      readTranscript: (p) => {
+        if (p !== main) throw new Error(`ENOENT ${p}`);
+        return JSON.stringify({
+          type: 'assistant',
+          requestId: 'req-history-haiku45',
+          timestamp: '2026-10-12T00:00:00.000Z',
+          message: { model: 'claude-haiku-4-5-20251001', role: 'assistant', content: [], usage },
+        });
+      },
+      listSubagentTranscripts: () => [],
+    });
+
+    expect(meta.unresolvedModels).toEqual({});
+    expect(receipts).toHaveLength(1);
+    const [built] = receipts;
+    expect(built.model_identity).toMatchObject({ tier: 'haiku', model_id: 'claude-haiku-4-5' });
+    const replayed = pricingForReceipt(built);
+    expect(replayed).toStrictEqual(getPricing('claude-haiku-4-5'));
+    expect(replayed).toMatchObject({ input: 1, output: 5, cacheRead: 0.1 });
+    const recomputed =
+      built.usage.fresh_input_tokens * replayed.input / 1e6
+      + built.usage.cached_input_tokens * replayed.cacheRead / 1e6
+      + built.usage.cache_creation_tokens * replayed.cacheWrite5m / 1e6
+      + built.usage.output_tokens * replayed.output / 1e6;
+    expect(recomputed).toBe(built.cost.total);
+    // A lookup by TIER alone (no model id on the record) reads the tier row, which is
+    // Haiku 5.5 now: the residual a same-stamp edit leaves for a record that carries
+    // no id.
+    expect(pricingForReceipt({
+      cost: { total: 1, pricing_version: PRICING_VERSION },
+      model_identity: { tier: 'haiku' },
+    })).toMatchObject({ input: 0.1, output: 0.5 });
   });
 
   it('returns null for unresolved, unknown, missing or malformed input', () => {

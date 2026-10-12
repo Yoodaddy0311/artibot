@@ -49,6 +49,11 @@ describe('CATALOG_VERSION', () => {
     // 리터럴 핀: MODELS 의 비가격 값을 바꾸면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
     // 이전 값: 2026-09-30(모델·ID 행마다 priceSource 출처 필드 추가).
     // 이번에는 같은 날 공식 가격표를 다시 읽어 가격 열도 바뀌었고 PRICING_VERSION 도 함께 움직였다(아래 핀).
+    // 같은 날 같은 도장: haiku 티어를 Haiku 4.5 에서 5.5 로 옮겼다(id·legacyIds·ctxLimit·outLimit·thinkingMode,
+    // 전 행 priceMaxPromptTokens). 도장을 만든 4980e43f 를 담은 릴리스 태그는 없다(git tag --contains 가 비어 있었다).
+    // 다만 origin/master 에는 2026-10-12 부터 올라가 있어 master 설치가 이 도장을 찍었을 수 있다. 그래서 도장은 유지하고,
+    // 그런 haiku 영수증은 claude-haiku-4-5 를 이름으로 가져 새 ID_PRICES 행으로 같은 1/5 에 재생된다.
+    // tier 만 가진 기록은 새 tier 행으로 재생된다(잔여 위험, tests/core/pricing-history.test.js 가 고정).
     expect(CATALOG_VERSION).toBe('2026-10-12');
   });
 
@@ -103,6 +108,9 @@ describe('PRICING_VERSION', () => {
     // 날짜만 바꾸고 값은 안 본 커밋을 막지는 못한다 — 위 "못 보는 것" 1 참고.
     // 이전 값: 2026-09-28(opus·sonnet 가격 갱신). 변경 효력일(2026-10-07)이 아니라
     // 표를 읽은 날이다 — 모든 measured official-table 행의 checkedAt 이 이 값과 같아야 한다.
+    // 같은 날 같은 도장: haiku 티어 가격 행이 Haiku 5.5 의 "100,000 토큰 이하" 구간 가격으로 바뀌었고
+    // claude-haiku-4-5 는 ID_PRICES 행(1 / 5 / 0.1 / 1.25 / 2)을 얻었다. model_id 를 가진 4.5 영수증은 그 행으로 같은 값에
+    // 재생되고 tier 만 가진 기록은 예외다(tests/core/pricing-history.test.js 의 헤더·재생 테스트).
     expect(PRICING_VERSION).toBe('2026-10-12');
   });
 

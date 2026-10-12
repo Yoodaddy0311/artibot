@@ -17,7 +17,7 @@
 | `fable` ⭐ | `claude-fable-5-1` | 1M | 128K | $10 / $50 | 1.3 | always-on |
 | `opus` | `claude-opus-5-5` | 1M | 128K | $4 / $20 | 1 | always-on |
 | `sonnet` | `claude-sonnet-5-5` | 1M | 128K | $2 / $10 | 1 | adaptive |
-| `haiku` | `claude-haiku-4-5` | 200K | 64K | $1 / $5 | 1 | extended |
+| `haiku` | `claude-haiku-5-5` | 1M | 128K | $0.1 / $0.5 | 1 | adaptive |
 
 ⭐ = most capable widely released model.
 

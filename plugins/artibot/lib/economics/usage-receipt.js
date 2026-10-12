@@ -54,6 +54,14 @@
  * under a green suite. Still unchecked anywhere: whether the catalog rates equal
  * the published page on any given day.
  *
+ * PROMPT BANDS. One catalog model is priced by prompt length: Claude Haiku 5.5
+ * charges 5x every column for a request whose prompt is over 100,000 tokens. The
+ * catalog stores only the lower list and the boundary (`maxPromptTokens`), and a
+ * receipt carries sums over many requests, so a receipt that includes such a
+ * request is priced at the lower list throughout and its `cost.total` is a lower
+ * bound, up to 5x too low. `meta.overPriceBandRequests` is how a caller sees that
+ * it happened (see {@link priceUsage}); the receipt schema has no field for it.
+ *
  * WHAT THIS MODULE DOES NOT DO
  * ----------------------------
  *  - It does not append to the ledger. It returns receipt DATA; the caller
@@ -148,6 +156,7 @@ export function emptyResult() {
       skipped: [],
       sources: { transcript: 0, estimate: 0 },
       effortMixByRun: {},
+      overPriceBandRequests: 0,
     },
   };
 }
@@ -406,7 +415,18 @@ function resolveReceiptPricing(tier, modelId) {
  * {@link resolveReceiptPricing}). One tier can carry ids with different
  * official prices — `claude-opus-5` (legacy) and `claude-opus-5-5` are both
  * tier `opus` — so pricing by tier alone would bill a pre-switch transcript at
- * its successor's rate.
+ * its successor's rate. The same holds for `claude-haiku-4-5` ($1 / $5) and
+ * `claude-haiku-5-5` ($0.10 / $0.50).
+ *
+ * PROMPT BAND: a model whose catalog row carries `maxPromptTokens` (Claude Haiku
+ * 5.5: 100_000) is priced at the stored columns, which the official page applies to
+ * a request whose prompt (input, cache reads and cache writes together) is up to that
+ * length. A longer request is billed at a second price list that the catalog does not
+ * hold, 5x every column for Haiku 5.5. The `usage` block passed in here is a SUM over
+ * many requests, so this function cannot tell which of its tokens belonged to such a
+ * request: it prices all of them at the stored columns, and the total is a lower
+ * bound, up to 5x too low. `buildUsageReceipts` counts the requests over the
+ * boundary in `meta.overPriceBandRequests` and does not change a receipt for them.
  *
  * @param {object} usage - Receipt `usage` block: `fresh_input_tokens`,
  *   `cached_input_tokens`, `cache_creation_tokens`, `output_tokens`, and
@@ -524,6 +544,9 @@ function newGroup(runId, identity) {
   return {
     runId,
     identity,
+    // Largest prompt the model's catalog price columns apply to, or null when it
+    // has one price at any length. Resolved once per group, not once per entry.
+    maxPromptTokens: resolveReceiptPricing(identity.tier, identity.model_id)?.maxPromptTokens ?? null,
     fresh: 0,
     cached: 0,
     cacheWrite: 0,
@@ -568,6 +591,27 @@ function foldUsage(group, usage, degraded, timestamp, counted) {
     group.minTs = group.minTs === null ? timestamp : Math.min(group.minTs, timestamp);
     group.maxTs = group.maxTs === null ? timestamp : Math.max(group.maxTs, timestamp);
   }
+}
+
+/**
+ * Count one folded request whose prompt is over its model's price band.
+ *
+ * The prompt of a request is its input, cache-read and cache-write tokens
+ * together (the pricing page's own definition), so a request that is mostly cache
+ * hits still counts by its whole prompt. Exactly `maxPromptTokens` is inside the
+ * band ("up to" it). The request is not re-priced: see {@link priceUsage}.
+ *
+ * @param {object} meta - Mutable `meta` of the fold.
+ * @param {object} group - The request's group, holding `maxPromptTokens`.
+ * @param {object} usage - The entry's `message.usage`.
+ * @returns {void}
+ */
+function countOverBand(meta, group, usage) {
+  if (group.maxPromptTokens === null) return;
+  const prompt = counter(usage, 'input_tokens')
+    + counter(usage, 'cache_read_input_tokens')
+    + counter(usage, 'cache_creation_input_tokens');
+  if (prompt > group.maxPromptTokens) meta.overPriceBandRequests += 1;
 }
 
 /**
@@ -666,6 +710,7 @@ function foldEntry(state, entry, runId) {
     state.groups.set(key, group);
   }
   foldUsage(group, usage, degraded, parseTimestamp(entry.timestamp), requestId !== null);
+  countOverBand(state.meta, group, usage);
 
   const effort = typeof entry.effort === 'string' && entry.effort.length > 0
     ? entry.effort
@@ -830,7 +875,14 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
  *   see COST in the module header before changing it. An `estimate`-graded receipt is
  *   priced too: its missing counters enter the formula as 0, so its total is
  *   a LOWER BOUND — `usage.source` is the honesty marker, not a null cost.
- * @returns {Promise<{receipts: object[], meta: object}>}
+ * @returns {Promise<{receipts: object[], meta: object}>} `meta.overPriceBandRequests`
+ *   counts folded requests whose prompt (input + cache reads + cache writes) is over
+ *   `maxPromptTokens` of their model's catalog row (Claude Haiku 5.5: 100_000;
+ *   exactly 100_000 is inside the band) - requests priced at the lower list, see
+ *   {@link priceUsage}. It is a call-time statistic: nothing persists it
+ *   (`scripts/hooks/session-end.js` reads `meta.coverage`, `meta.unresolvedModels`
+ *   and the empty-receipt classification; `scripts/ledger/usage-cost-table.mjs`
+ *   reads `meta.files`, `meta.unreadableFiles` and `meta.unresolvedModels`).
  * @throws {TypeError} When `transcriptPath` or `missionId` is not a non-empty string.
  *
  * @example

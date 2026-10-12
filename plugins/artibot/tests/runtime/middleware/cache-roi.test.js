@@ -106,7 +106,10 @@ describe('_resolvePricing', () => {
     // reporting the id that was asked for - the same shape as claude-opus-5 below.
     expect(_resolvePricing('claude-sonnet-5-5')).toEqual(getPricing('sonnet'));
     expect(_resolvePricing('claude-sonnet-5')).toEqual(getPricing('claude-sonnet-5'));
-    expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('haiku'));
+    // 2026-10-12: the haiku tier is Haiku 5.5, so claude-haiku-4-5 is a legacy id on
+    // its own ID_PRICES row (reporting the id that was asked for), like claude-sonnet-5.
+    expect(_resolvePricing('claude-haiku-4-5-20251001')).toEqual(getPricing('claude-haiku-4-5'));
+    expect(_resolvePricing('claude-haiku-5-5')).toEqual(getPricing('haiku'));
     // Literal: the legacy id is NOT billed at its successor's tier row (cache read 0.1).
     expect(_resolvePricing('claude-sonnet-5').cacheRead).toBe(0.2);
   });
@@ -182,7 +185,8 @@ describe('_resolvePricing', () => {
     });
     expect(_PRICING.unknown).toEqual(_PRICING.sonnet);
     expect(_PRICING.opus.input).toBe(4);
-    expect(_PRICING.haiku.cacheWrite).toBe(1.25);
+    // The haiku tier row since 2026-10-12 is Haiku 5.5: 1.25x of $0.10 input.
+    expect(_PRICING.haiku.cacheWrite).toBe(0.125);
     expect(Object.isFrozen(_PRICING)).toBe(true);
   });
 });
@@ -267,6 +271,9 @@ describe('computeCacheMetrics', () => {
     // then the legacy one on its own row, which kept the 0.2 cache read.
     ['claude-sonnet-5-5', 'sonnet', 1.9, 14.6],
     ['claude-sonnet-5', 'sonnet', 1.8, 14.7],
+    // 2026-10-12: Haiku 5.5 is the haiku tier row (saved 0.1 - 0.01, spent
+    // 0.01+0.125+0.1+0.5); the legacy 4.5 id keeps its own row, ten times that.
+    ['claude-haiku-5-5', 'haiku', 0.09, 0.735],
     ['claude-haiku-4-5', 'haiku', 0.9, 7.35],
   ])('prices 1M tokens per bucket for %s', (model, tier, saved, spent) => {
     const m = computeCacheMetrics(ONE_M_EACH, model, nowFn);

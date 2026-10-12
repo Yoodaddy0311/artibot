@@ -38,6 +38,13 @@ import { emit } from '../../core/event-bus.js';
 // API reported in its `usage` payload, which already reflect the tokenizer.
 // The coefficient is a PREDICTION axis and belongs to `getCostFactor`, which
 // estimates tokens that have not been spent yet.
+//
+// PROMPT BANDS. The catalog prices one model by prompt length (Claude Haiku 5.5: a
+// request whose prompt is over 100,000 tokens, cache reads and writes included, pays
+// 5x every column) and stores only the "up to 100,000" list. This roll-up prices
+// every request at that stored list, so for such a request `savedCostUsd` and
+// `spentCostUsd` are 5x too low. `getPricing(...).maxPromptTokens` names the
+// boundary; nothing here compares a request's prompt with it.
 // ---------------------------------------------------------------------------
 
 /**

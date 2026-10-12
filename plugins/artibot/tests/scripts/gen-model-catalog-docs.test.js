@@ -56,14 +56,14 @@ describe('gen-model-catalog-docs', () => {
       expect(lines.length).toBe(2 + catalog.listTiers().length);
     });
 
-    it('renders each tier row with its catalog thinkingMode (opus is always-on since 2026-09-28)', () => {
+    it('renders each tier row with its catalog thinkingMode (opus always-on since 2026-09-28, haiku adaptive since 2026-10-12)', () => {
       const lines = specTable(catalog);
       for (const tier of catalog.listTiers()) {
         const row = lines.find((l) => l.startsWith(`| \`${tier}\``));
         expect(row).toMatch(new RegExp(`\\| ${catalog.getModel(tier).thinkingMode} \\|$`));
       }
       expect(lines.find((l) => l.startsWith('| `opus`'))).toMatch(/\| always-on \|$/);
-      expect(lines.find((l) => l.startsWith('| `haiku`'))).toMatch(/\| extended \|$/);
+      expect(lines.find((l) => l.startsWith('| `haiku`'))).toMatch(/\| adaptive \|$/);
     });
 
     it('renders the Max output column from catalog outLimit (Sonnet 5 = 128K)', () => {

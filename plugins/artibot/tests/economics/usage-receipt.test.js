@@ -744,11 +744,12 @@ describe('priceUsage', () => {
   // Sourced from the catalog's own table, NOT restated from a price page here:
   // a second hand-typed copy of the rates is the two-table problem again.
   // (opus / sonnet rows follow the catalog's PRICING_VERSION; sonnet is Sonnet 5.5
-  // with the 0.1 cache read since 2026-10-12.)
+  // with the 0.1 cache read since 2026-10-12, and so is the haiku tier, now Haiku 5.5:
+  // its "up to 100,000 tokens" list, a tenth of the Haiku 4.5 prices.)
   it.each([
     ['fable', 10 + 0.25 + 12.5 + 50],
     ['opus', 4 + 0.2 + 5 + 20],
-    ['haiku', 1 + 0.1 + 1.25 + 5],
+    ['haiku', 0.1 + 0.01 + 0.125 + 0.5],
     ['sonnet', 2 + 0.1 + 2.5 + 10],
   ])('prices one MTok of each counter for %s', (tier, expected) => {
     const priced = priceUsage(ONE_MTOK_EACH, tier);
@@ -765,11 +766,15 @@ describe('priceUsage', () => {
     ['opus', 'claude-opus-9', 4 + 0.2 + 5 + 20],
     ['opus', undefined, 4 + 0.2 + 5 + 20],
     // an id of ANOTHER tier is ignored: the tier the caller named wins
-    ['haiku', 'claude-opus-5', 1 + 0.1 + 1.25 + 5],
+    ['haiku', 'claude-opus-5', 0.1 + 0.01 + 0.125 + 0.5],
     // legacy id with its own row (2026-10-12): Sonnet 5 keeps the 0.2 cache read the
     // Sonnet 5.5 tier row no longer has
     ['sonnet', 'claude-sonnet-5', 2 + 0.2 + 2.5 + 10],
     ['sonnet', 'claude-sonnet-5-5', 2 + 0.1 + 2.5 + 10],
+    // 2026-10-12: the haiku tier moved to Haiku 5.5. The current id is the tier row;
+    // the legacy id keeps its own row, the $1 / $5 list it was billed at.
+    ['haiku', 'claude-haiku-5-5', 0.1 + 0.01 + 0.125 + 0.5],
+    ['haiku', 'claude-haiku-4-5', 1 + 0.1 + 1.25 + 5],
   ])('prices tier %s with model id %p at the id row first, else the tier row', (tier, id, expected) => {
     const priced = priceUsage(ONE_MTOK_EACH, tier, id);
     expect(priced.total).toBeCloseTo(expected, 9);
@@ -922,7 +927,9 @@ describe('priceReceipts option', () => {
 
     const sub = result.receipts.find((r) => r.run_id === 'agent-abc123');
     expect(sub.model_identity.tier).toBe('haiku');
-    expect(sub.cost.total).toBe(priceUsage(sub.usage, 'haiku').total);
+    // The transcript names claude-haiku-4-5, a legacy id since the haiku tier
+    // moved to Haiku 5.5 (2026-10-12): it is priced on its own row, not the tier's.
+    expect(sub.cost.total).toBe(priceUsage(sub.usage, 'haiku', 'claude-haiku-4-5').total);
   });
 
   it('prices an estimate-graded receipt too, and says so via the source field', async () => {
