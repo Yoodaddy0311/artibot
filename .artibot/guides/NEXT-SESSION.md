@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, **v4.71.6** — v4.71.5(태그 `9d347d09`) 이후 8 커밋 + 릴리스 커밋: `/save` Lint 칸 `미측정` · Stop 게이트의 비정상 종료 판독 · SessionStart 경고 · 상태 파일 `agents` 맵 정리 · SendMessage 표기 현행화 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 결과는 미반영)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-12 KST 갱신, **v4.71.7** — v4.71.6 이후 13 커밋(내용 11) + 릴리스 커밋: Sonnet 5.5 cache read 0.10 · haiku 티어 = Haiku 5.5 · route-scorer cost 바닥 · SessionEnd 병합 · YAML 꼬리 주석 · test-status 정화 · 명령 문서 정정 · master = 태그 `3d0a4c0a` · 이 PC 설치 4.71.7(재시작 전, 로드 미확인))
+
+> 이전 헤더(2026-10-06, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, **v4.71.6** — v4.71.5(태그 `9d347d09`) 이후 8 커밋 + 릴리스 커밋: `/save` Lint 칸 `미측정` · Stop 게이트의 비정상 종료 판독 · SessionStart 경고 · 상태 파일 `agents` 맵 정리 · SendMessage 표기 현행화 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 결과는 미반영)
 
 > 이전 헤더(2026-10-06, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-06 KST 갱신, master = `0c67ad59` = **v4.71.5**(태그 `9d347d09`) + 배지 동기화 자동 착지 · v4.71.2~v4.71.5 릴리스 4회 · 배지 착지 대기 루프 보강과 첫 자동 착지 성공 · runtime eval 2분 대기 수정(CI 확인) · 외부 재검수 패키지 수정 단위 A·B 는 브랜치 `fix/verify-completion-contract` 에 구현, master 착지 대기)
 
@@ -7,6 +9,66 @@
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.71.7 (2026-10-12 KST, 릴리스 엔지니어 팀원)
+
+**한 줄**: v4.71.6 이후 패치 릴리스 1회. 가격·라우팅(Sonnet 5.5 cache read 0.20 → 0.10 $/MTok · haiku 티어가 Claude Haiku 5.5 로 이동하며 가격 구간 계수 추가 · route-scorer 의 cost 항을 선호 티어에서 바닥 처리), 공유 상태 파일 보호(SessionEnd 가 덮어쓰지 않고 병합 · 등록된 적 없는 SubagentStop 은 행을 만들지 않음), 파서·경고 수정(프론트매터 블록 목록의 YAML 꼬리 주석 · SessionStart test-status 경고 정화), 명령 문서 정정(effort 기본값 · Agent 도구 effort 매개변수의 사실 등급 · `/assemble` 모델 라우팅 · `/implement` effort 절 · 스폰 보고 주소)이다. 줄기별 정본은 `plugins/artibot/CHANGELOG.md` [4.71.7]. v4.71.6 이후 13 커밋 = 65 files +3,604/−437(`git rev-list --count v4.71.6..8aee6541` · `git diff --shortstat v4.71.6 8aee6541`, 2026-10-12 측정 — 릴리스 커밋 제외), 그중 내용은 11 커밋(`4980e43f..8aee6541`) = 59 files +3,597/−430이다. **출하 결과**(릴리스 엔지니어 실측 2026-10-12): 릴리스 전 트리 `8aee6541`(`ci/w2-20261012`)은 check-run 7/7 success(CI 런 `38234315266`). 릴리스 커밋 `3d0a4c0a` = 태그 `v4.71.7`(주석 태그, 태그 객체 `47edabb9`)는 `ci/release-v4.71.7` 의 check-run 7/7 success(CI 런 `38235840024`) 뒤 `--ff-only` 로 master 에 착지했고(pre-push landing-flow ok, 훅 우회 0) master 푸시의 CI 런 `38237249954` 도 success 다. release.yml 런 `38237320590` success(3 잡, 7분 27초), GitHub Release 게시 2026-10-12T10:40:11Z, 열린 이슈 0건. 시험 수 N = 26993 — Ubuntu Node 20/22/24 세 레그가 모두 `Test Files 888 passed (888)` · `Tests 26946 passed | 47 skipped (26993)` 였고(릴리스 전 트리와 릴리스 커밋이 같다), Windows 레그는 `26996 passed | 20 skipped (27016)` 라 문서 값이 아니다. 배지 동기화가 `Counted test cases: 26993` · "metadata already in sync" · "prose already in sync" · "No README / marketplace changes to land" 로 끝나 **봇 커밋이 없다**(master = 태그 = `3d0a4c0a`). 로컬 전체 스위트는 돌리지 않았다(이 PC 부하) — 전체 판정은 CI 다. **이 PC 설치**: 레지스트리 `artibot@artibot` 4.71.7 · gitCommitSha `3d0a4c0a` · lastUpdated 2026-10-12T10:46:15Z, 릴리스 트리 2,052 파일 대 캐시 4.71.7 상이 0 · 누락 0(원본 일치 5 + CRLF 정규화 일치 2,047; 음성 대조로 4.71.6 캐시는 상이 62 · 누락 6 이고 `git diff --name-status e5117219 3d0a4c0a -- plugins/artibot` 의 M 62 · A 6 과 같다), 전역 사본(`install.sh files`)은 버전 4.71.7 이며 관리 대상 902 파일에서 상이 0 · 누락 0 · 잉여 0(원본 일치 55 + 정규화 일치 847). `settings.json` 해시와 `~/.claude/agents`(4) · `commands`(0) 파일 수는 설치 전후 같고, `~/.claude/rules/artibot` 의 사용자 편집 규칙 3개는 병합하지 않고 `.artibot-new` 만 갱신했다. **Claude Code 를 재시작하기 전이라 4.71.7 이 실제로 로드됐는지는 미확인이다.**
+
+| 줄기 | 커밋 | 제목 |
+|---|---|---|
+| v4.71.6 배지 동기화 | `e5117219` | `docs(release): sync marketplace meta + count prose to v4.71.6` |
+| v4.71.6 출하 결과 기록 | `93d82b4e` | `docs(release): record the v4.71.6 ship results for the next machine` |
+| Sonnet 5.5 cache read | `4980e43f` | `fix(pricing): Sonnet 5.5 cache read 0.20 -> 0.10 per MTok, re-read 2026-10-12` |
+| effort 기본값 · `/assemble` 라우팅 | `1d55e389` | `docs(commands): per-model effort defaults, graded Agent effort facts, /assemble model routing` |
+| Haiku 5.5 문서 행 · Dreams PRD | `d477212a` | `docs: Haiku 5.5 row, sampling-param allowlist, Dreams PRD status` |
+| 갭 검토 보고서 | `c3a48f3d` | `docs(reports): Claude updates 2026-10-02..12 gap review` |
+| route-scorer cost 바닥 | `8bb76ecc` | `fix(routing): floor the scorer's cost term at the class's preferred tier` |
+| haiku 티어 → Haiku 5.5 | `101e84ea` | `feat(catalog): haiku tier moves to Claude Haiku 5.5` |
+| YAML 꼬리 주석 | `2a228bcb` | `fix(core): strip YAML trailing comments from frontmatter block lists` |
+| test-status 정화 | `6a7a90ac` | `fix(core): sanitize the SessionStart test-status warning` |
+| dream 슬롯 게이트 문서 | `d6a0436b` | `docs(dream): say what gates the nightly slot, and pin it` |
+| SessionEnd 병합 | `303dd7f5` | `fix(hooks): SessionEnd merges into the shared state file instead of replacing it` |
+| `/implement` effort 절 · 보고 주소 | `8aee6541` | `docs(commands): honest effort/task-budget section in /implement, report address in spawn commands` |
+| 릴리스 | `3d0a4c0a` | `release: v4.71.7` |
+
+### 이번에 알게 된 함정
+
+- **`files` 모드 설치기는 `plugins/artibot/install.sh`(플러그인 루트)다. `plugins/artibot/scripts/install.sh` 가 아니다.** 후자는 원클릭 설치기(curl 용)로 `files` 모드가 없고, `files` 인자를 무시한 채 기본 대상(`--plugin-dir`·`ARTIBOT_PLUGIN_DIR` 로 바꾸지 않으면 `~/.claude/plugins/artibot/`)에 플러그인 소스 전체를 `cp -r` 한다. v4.71.6 절 ① 이 후자를 적고 있었고, 이번 릴리스에서 그 경로를 그대로 돌렸다: `~/.claude/plugins/artibot/`(81MB · 4,345 파일 · 심볼릭 링크 0)이 생겼고 이 PC 에서는 소스 트리의 오래된 찌꺼기(아래 「남은 것」) 때문에 `cp` 가 exit 1 로 죽었다. `npm ci` · 검증 단계는 돌지 않았다. 생긴 디렉터리는 가드를 건 PowerShell(경로 일치 · reparse point 0 · 실행 시작 전 파일 0)로 삭제했고 `~/.claude/plugins` 목록이 실행 전과 같음을 확인했다. v4.71.6 절 ① 의 경로는 이번 커밋에서 바로잡았다.
+- 이 PC 에서 `claude plugin marketplace update artibot` 와 `claude plugin update artibot@artibot` 는 비-TTY Bash 에서도 동작했다(`Successfully updated marketplace: artibot` · `Plugin "artibot" updated from 4.71.6 to 4.71.7 for scope user. Restart to apply changes.`).
+- 직전 릴리스 태그 v4.71.4 ~ v4.71.6 은 경량 태그이고 v4.71.7 은 주석 태그다(`git cat-file -t`). release.yml 은 `v*` 태그 푸시면 어느 쪽이든 돈다.
+
+### 다른 PC 에서 할 일
+
+- ① `git pull` 후 설치본을 4.71.7 로 올린다: 마켓 사본(`~/.claude/plugins/marketplaces/artibot/`)을 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/install.sh files`(**플러그인 루트의 `install.sh`** — `scripts/install.sh` 가 아니다). `npm run sync:local` 은 `install.sh install` 전체라 쓰지 않는다. 그다음 Claude Code 를 재시작한다.
+- ② (v4.71.6 절에서 이월) 그 PC 의 미추적 파일 13개와 `v.4.71.x/` 외부 검수 패키지를 처리한다 — 커밋 · gitignore · 삭제 중 결정. 이 PC 에는 없다.
+- ③ (이월) `/theme` 을 쓰는 PC 는 한 번 다시 적용한다(아래 v4.71.2 ~ v4.71.5 절의 "다른 PC 셋업").
+- ④ 그 PC 의 `~/.claude/artibot-state.json` 을 확인한다: `endedAt` 이 최근 날짜로 갱신되는지, 그리고 SessionEnd 가 이제 병합하므로 다른 세션이 살아 있는 동안 한 세션이 끝나도 그 세션의 `agents` 행이 남는지. 이 PC 는 2026-10-01 이후 SessionEnd 가 끝까지 돈 기록이 없다(원인 미확인).
+- ⑤ (이월) `~/.claude/rules/artibot/` 의 `.artibot-new` 는 병합하지 않는다(오너 결정 2026-10-05).
+
+### 이 릴리스로 닫힌 것 (v4.71.6 절의 「남은 것」에서)
+
+- `lib/core/agent-registry.js#consumeBlockList` 의 꼬리 주석 문제 — `2a228bcb`.
+- `lib/core/test-status.js` 의 기존 결함 3건(`failedFiles` 원문 출력 · 미래 시각 음수 나이 · 음수/소수 `failed`) — `6a7a90ac`.
+- SessionEnd 의 공유 상태 파일 덮어쓰기(D1)와 stop-only `agents` 행 — `303dd7f5`.
+- `plugins/artibot/rules/verification-discipline.md:145` 의 `to="team-lead"` — **결함이 아니다**: 리더 프로브(2026-10-12)에서 `SendMessage(to="team-lead")` 가 리더에게 전달됐다(릴리스 엔지니어가 재현하지는 않았다). 오너 결정 대상에서 뺀다.
+
+### 남은 것
+
+- `caa3d2eb` — 이 PC 의 로컬 브랜치 `docs/v4710-followup-o` 에 있는 커밋. 권한 분류기가 cherry-pick 을 거부해 옮기지 못했다. 오너가 직접 처리한다.
+- artibot-cowork 의 옛 SendMessage 표기 13파일(에이전트 10 · skill 2 · 커맨드 1) — 배포 ZIP 고정(`tests/firewall/cowork-plugin-zip-drift.test.js`) 때문에 다음 cowork 릴리스 때 고친다.
+- split-wave24 의 suspended 2건 — `lib/supervisor/contracts.js#LANE_OPS_STATES` 에 인계 상태가 없다. done 조작 금지라 그대로 둔다.
+- 스폰 경로의 보고 주소: `/assemble` · `/spawn` · `/orchestrate` 는 이 릴리스에서 `[보고 주소]` 블록을 얻었다(`8aee6541`; `/go` 는 이름 없는 스폰이라 불변). 새 블록을 읽은 팀원이 실제로 `to="main"` 으로 보내는지(라이브 스폰)는 측정하지 않았다.
+- `/team` 런 실측 2건 — TeammateIdle 페이로드의 키 이름(`agent_id` 는 추론이고 관측하지 않았다), `TaskStop` 이 팀원 이름으로 멈추는지.
+- SessionEnd 가 창을 닫을 때 호출되는지(`/exit` 대 창 X 를 비교 측정). 그리고 `agents` 맵의 유령 행 — 세션 `08c5f089` 에서 나온 5행의 출처는 미확인이다.
+- Sonnet 5.5 `thinkingMode` 어휘: 이 모델은 `disabled` 를 거부하고 `between_tools` 를 받지만 카탈로그 값 중 그것을 서술하는 것이 없다(`lib/core/model-catalog.js` 주석).
+- `meta.overPriceBandRequests` 를 `scripts/ledger/usage-cost-table.mjs` 가 인쇄하지 않는다 — 현재 어떤 표에도 안 나온다(`git grep -F overPriceBandRequests`: `lib/` · `tests/` 만). 생성되는 카탈로그 문서(`scripts/gen-model-catalog-docs.js`)에도 가격 구간 각주가 없다.
+- `commands/team.md:69` 의 "권장 task_budget" 열 이름이 Claude Code 에서 지원되지 않는 API 기능(task budgets)과 겹친다.
+- `{sid}` 구분자가 `/assemble` · `/spawn` · `/orchestrate` 의 팀원 이름에 없다(`commands/team.md` 에는 6곳 있다).
+- **오너 결정**: `/implement` 의 effort 정책 — 플러그인 정책 `xhigh` 대 공식 문서의 medium 기본 권장.
+- 사소: `lib/core/model-catalog.js` 의 `CATALOG_VERSION` 주석("No release tag contains the commit that set it, 4980e43f (`git tag --contains` was empty on 2026-10-12; latest tag v4.71.6)")은 작성일 기준 사실이고, v4.71.7 이 `4980e43f` 를 담게 되어 이제 낡았다. 동작과 무관하다.
+- 이 PC 로컬 찌꺼기(소스 트리, git-ignored): `plugins/artibot/UsersHeechangLeeAppDataLocalTempclaudeC--Users-HeechangLee-Desktop-Artibote05dd64b-097a-44e8-9ef1-78178b7a810escratchpad/`(2026-08-24, 안에 심볼릭 링크 `jx`)는 `.gitignore:64` 의 `*AppDataLocalTemp*` 에 걸려 `git status` 에 안 보이지만 플러그인 루트를 통째로 `cp -r` 하는 것을 깬다. 지울지는 오너 결정이다(이번에 건드리지 않았다).
+
+---
 
 ## v4.71.6 (2026-10-06 KST, 세션 0730156d)
 
@@ -25,7 +87,7 @@
 
 ### 다른 PC 에서 할 일
 
-- ① `git pull` 후 설치본을 4.71.6 으로 올린다: 마켓 사본(`~/.claude/plugins/marketplaces/artibot/`)을 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/scripts/install.sh files`. `npm run sync:local` 은 `install.sh install` 전체라 쓰지 않는다. 그다음 Claude Code 를 재시작한다.
+- ① `git pull` 후 설치본을 4.71.6 으로 올린다: 마켓 사본(`~/.claude/plugins/marketplaces/artibot/`)을 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/install.sh files`. `npm run sync:local` 은 `install.sh install` 전체라 쓰지 않는다. 그다음 Claude Code 를 재시작한다.
 - ② 그 PC 의 미추적 파일 13개와 `v.4.71.x/` 외부 검수 패키지를 처리한다 — 커밋 · gitignore · 삭제 중 결정. 이 PC 에는 없다.
 - ③ `/theme` 을 쓰는 PC 는 한 번 다시 적용한다(기존 안내 그대로 — 아래 v4.71.2 ~ v4.71.5 절의 "다른 PC 셋업").
 - ④ 그 PC 의 `~/.claude/artibot-state.json` 에서 `endedAt` 이 최근 날짜로 갱신되는지 확인한다. 이 PC 는 2026-10-01 이후 SessionEnd 가 끝까지 돈 기록이 없다(원인 미확인).
