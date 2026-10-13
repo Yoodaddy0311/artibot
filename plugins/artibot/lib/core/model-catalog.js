@@ -265,14 +265,17 @@ export const PRICING_SOURCE =
  * `tests/core/model-catalog.test.js`).
  *
  * `thinkingMode` names the request shape a tier accepts: `adaptive` =
- * `{type:'adaptive'}` and thinking can be disabled; `always-on` = adaptive
- * only, disabling and `budget_tokens` are rejected; `extended` =
- * `{type:'enabled', budget_tokens}` only, no adaptive. The set is pinned in
- * `tests/core/model-catalog.test.js`. No tier carries `extended` since the haiku
- * tier moved to Haiku 5.5 (2026-10-12); the value stays in the closed vocabulary.
- * Sonnet 5.5 is `adaptive` here because the official models overview labels it
- * `Adaptive`; it also rejects `{type:'disabled'}` and takes `{type:'between_tools'}`,
- * a shape this vocabulary has no value for (see the sonnet row).
+ * `{type:'adaptive'}` is accepted, and nothing more is promised: whether
+ * `{type:'disabled'}` is accepted too varies per tier (the haiku row accepts it at
+ * effort `high` or below, the sonnet row rejects it), so read the row's comment
+ * before sending it; `always-on` = adaptive only, disabling and `budget_tokens` are
+ * rejected; `extended` = `{type:'enabled', budget_tokens}` only, no adaptive. The
+ * set is pinned in `tests/core/model-catalog.test.js`. No tier carries `extended`
+ * since the haiku tier moved to Haiku 5.5 (2026-10-12); the value stays in the
+ * closed vocabulary. Sonnet 5.5 is `adaptive` here because the official models
+ * overview labels it `Adaptive`; it also rejects `{type:'disabled'}` and takes
+ * `{type:'between_tools'}` as its lowest setting, a shape this vocabulary has no
+ * value for (see the sonnet row). The generated doc states both per-tier details.
  *
  * @type {Readonly<Record<string, Readonly<{
  *   id: string,

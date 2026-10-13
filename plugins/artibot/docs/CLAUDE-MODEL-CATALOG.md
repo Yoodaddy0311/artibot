@@ -17,11 +17,25 @@
 | `fable` ⭐ | `claude-fable-5-1` | 1M | 128K | $10 / $50 | 1.3 | always-on |
 | `opus` | `claude-opus-5-5` | 1M | 128K | $4 / $20 | 1 | always-on |
 | `sonnet` | `claude-sonnet-5-5` | 1M | 128K | $2 / $10 | 1 | adaptive |
-| `haiku` | `claude-haiku-5-5` | 1M | 128K | $0.1 / $0.5 | 1 | adaptive |
+| `haiku` | `claude-haiku-5-5` | 1M | 128K | $0.1 / $0.5 † | 1 | adaptive |
 
 ⭐ = most capable widely released model.
 
+† **Price band.** A price marked † holds only for a prompt up to the size listed for its tier below, where the prompt of a request is its input, cache-read and cache-write tokens together (exactly that size is inside the band). The official pricing page (`platform.claude.com/docs/en/about-claude/pricing`) lists a higher price for a longer prompt; the catalog does not store it and no reader applies it, so a longer request is still priced at the listed columns and its cost is understated. The receipt writer counts such requests in `meta.overPriceBandRequests` and does not re-price them.
+
+- `haiku` (`claude-haiku-5-5`): up to 100,000 tokens.
+
 `tokenizerCoeff` is tokens-per-content relative to the `opus` baseline, `claude-opus-5-5`, which is 1.0. A coefficient > 1.0 means the same text costs more tokens — re-baseline `max_tokens`/budgets accordingly.
+
+The `Thinking` column is each tier's `thinkingMode`, the request shape it accepts:
+
+- `adaptive`: takes `{type:'adaptive'}`; whether `{type:'disabled'}` is accepted as well varies per tier.
+- `always-on`: takes `{type:'adaptive'}` only; disabling and `budget_tokens` are rejected.
+
+Per-model details the value does not carry (thinking page, read 2026-10-12):
+
+- `sonnet` (`claude-sonnet-5-5`, `adaptive`): rejects `{type:'disabled'}` (400) and takes `{type:'between_tools'}` as its lowest setting.
+- `haiku` (`claude-haiku-5-5`, `adaptive`): accepts `{type:'disabled'}` at effort `high` or below (400 at `xhigh` or `max`), so thinking can be turned off.
 
 ---
 

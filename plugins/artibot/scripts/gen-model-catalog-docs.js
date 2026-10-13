@@ -5,6 +5,11 @@
  * renders that data into a Markdown reference and OVERWRITES the doc. The doc
  * is generated — never hand-edit it; change model-catalog.js and re-run.
  *
+ * One exception, and it is fenced: THINKING_NOTES holds per-model request-shape
+ * facts that the catalog's `thinkingMode` vocabulary has no value for. They live
+ * in the catalog's row comments, which a script cannot read, so they are typed
+ * here, each tied to the exact model id it was read for (see THINKING_NOTES).
+ *
  * Korean-path safety: the user's repo lives under `바탕 화면` (non-ASCII + space).
  * pathToFileURL() percent-encodes those chars and Node's import() on Windows
  * cannot resolve them, so we build the file:/// URL manually (see toFileUrl()).
@@ -45,9 +50,24 @@ function toFileUrl(filePath) {
   return `file://${forward}`;
 }
 
-/** Format a per-MTok price pair as `$in / $out`. */
+/** The tier rows, in the order the table lists them. */
+const TIER_ORDER = Object.freeze(['fable', 'opus', 'sonnet', 'haiku']);
+
+/** Ties a price cell to the price-band note under the table. */
+const BAND_MARK = '†';
+
+/**
+ * The largest prompt, in tokens, a model's listed price applies to, or null when
+ * the model has one price at any prompt length (catalog `priceMaxPromptTokens`).
+ */
+function bandOf(model) {
+  return model.priceMaxPromptTokens ?? null;
+}
+
+/** Format a per-MTok price pair as `$in / $out`, marked when the price has a band. */
 function priceCell(model) {
-  return `$${model.priceInPerMTok} / $${model.priceOutPerMTok}`;
+  const pair = `$${model.priceInPerMTok} / $${model.priceOutPerMTok}`;
+  return bandOf(model) === null ? pair : `${pair} ${BAND_MARK}`;
 }
 
 /** Format a token count as a compact `1M` / `200K` style string. */
@@ -57,6 +77,11 @@ function tokens(n) {
   return String(n);
 }
 
+/** Format a whole token count with thousands separators (`100000` -> `100,000`), locale-free. */
+function withCommas(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 /**
  * Build the model spec table rows in a stable, baseline-first order.
  *
@@ -64,12 +89,11 @@ function tokens(n) {
  * @returns {string[]} Markdown table lines.
  */
 function specTable(catalog) {
-  const order = ['fable', 'opus', 'sonnet', 'haiku'];
   const lines = [
     '| Tier | Claude API ID | Context | Max output | Price in/out (per MTok) | tokenizerCoeff | Thinking |',
     '|---|---|---|---|---|---|---|',
   ];
-  for (const tier of order) {
+  for (const tier of TIER_ORDER) {
     const m = catalog.getModel(tier);
     if (!m) continue;
     const star = tier === 'fable' ? ' ⭐' : '';
@@ -80,6 +104,112 @@ function specTable(catalog) {
     );
   }
   return lines;
+}
+
+/**
+ * The price-band note under the table: one bullet per tier whose listed price
+ * stops at a prompt size. The tier, its id and the size are read from the catalog
+ * and nothing is typed per tier, so a tier that gains or loses a band changes the
+ * note and its table marker together. What the note says about a request over the
+ * band is the catalog's own account (the `priceMaxPromptTokens` and haiku-row
+ * comments in model-catalog.js) and the receipt writer's
+ * `meta.overPriceBandRequests`; the higher price list itself is not in the catalog.
+ *
+ * @param {object} catalog - The imported model-catalog module.
+ * @returns {string[]} Markdown lines; empty when no tier has a band.
+ */
+function priceBandLines(catalog) {
+  const bullets = TIER_ORDER.flatMap((tier) => {
+    const model = catalog.getModel(tier);
+    const limit = model ? bandOf(model) : null;
+    return limit === null
+      ? []
+      : [`- \`${tier}\` (\`${model.id}\`): up to ${withCommas(limit)} tokens.`];
+  });
+  if (bullets.length === 0) return [];
+  return [
+    `${BAND_MARK} **Price band.** A price marked ${BAND_MARK} holds only for a prompt up ` +
+      'to the size listed for its tier below, where the prompt of a request is its ' +
+      'input, cache-read and cache-write tokens together (exactly that size is inside ' +
+      `the band). The official pricing page (\`${catalog.PRICING_SOURCE}\`) lists a ` +
+      'higher price for a longer prompt; the catalog does not store it and no reader ' +
+      'applies it, so a longer request is still priced at the listed columns and its ' +
+      'cost is understated. The receipt writer counts such requests in ' +
+      '`meta.overPriceBandRequests` and does not re-price them.',
+    '',
+    ...bullets,
+  ];
+}
+
+/**
+ * What each `thinkingMode` value means. Mirrors the closed vocabulary of the
+ * `thinkingMode` typedef in lib/core/model-catalog.js; the test file fails when
+ * the two name different sets. `adaptive` promises only the adaptive request
+ * shape: whether disabling is accepted too varies per tier, and the sonnet row
+ * rejects it.
+ */
+export const THINKING_LEGEND = Object.freeze({
+  adaptive: "takes `{type:'adaptive'}`; whether `{type:'disabled'}` is accepted as well varies per tier",
+  'always-on': "takes `{type:'adaptive'}` only; disabling and `budget_tokens` are rejected",
+  extended: "takes `{type:'enabled', budget_tokens}` only, no adaptive",
+});
+
+/** The day the facts in THINKING_NOTES were read off the thinking page. */
+const THINKING_NOTES_READ_ON = '2026-10-12';
+
+/**
+ * Per-model request-shape facts the `thinkingMode` value cannot carry, as the
+ * catalog's row comments record them (thinking page, table "Configuring
+ * thinking"). They are NOT catalog data, so each is fenced to the exact model id
+ * it was read for (`readFor`): a tier that moves to another id loses its note
+ * instead of having it stated for a model nobody read, and the test that expects
+ * the note goes red, which is the cue to read the page again.
+ */
+const THINKING_NOTES = Object.freeze([
+  {
+    tier: 'sonnet',
+    readFor: 'claude-sonnet-5-5',
+    note: "rejects `{type:'disabled'}` (400) and takes `{type:'between_tools'}` as its lowest setting",
+  },
+  {
+    tier: 'haiku',
+    readFor: 'claude-haiku-5-5',
+    note: "accepts `{type:'disabled'}` at effort `high` or below (400 at `xhigh` or `max`), " +
+      'so thinking can be turned off',
+  },
+]);
+
+/**
+ * The legend for the Thinking column (only the values some tier uses) and the
+ * per-model notes that apply to the catalog's current ids.
+ *
+ * @param {object} catalog - The imported model-catalog module.
+ * @returns {string[]} Markdown lines.
+ */
+function thinkingLines(catalog) {
+  const used = new Set(TIER_ORDER.map((tier) => catalog.getModel(tier)?.thinkingMode));
+  const legend = Object.entries(THINKING_LEGEND)
+    .filter(([mode]) => used.has(mode))
+    .map(([mode, meaning]) => `- \`${mode}\`: ${meaning}.`);
+  const notes = THINKING_NOTES.flatMap(({ tier, readFor, note }) => {
+    const model = catalog.getModel(tier);
+    return model?.id === readFor
+      ? [`- \`${tier}\` (\`${model.id}\`, \`${model.thinkingMode}\`): ${note}.`]
+      : [];
+  });
+  return [
+    "The `Thinking` column is each tier's `thinkingMode`, the request shape it accepts:",
+    '',
+    ...legend,
+    ...(notes.length === 0
+      ? []
+      : [
+          '',
+          `Per-model details the value does not carry (thinking page, read ${THINKING_NOTES_READ_ON}):`,
+          '',
+          ...notes,
+        ]),
+  ];
 }
 
 /**
@@ -161,11 +291,15 @@ function renderDoc(catalog) {
   out.push('');
   out.push('⭐ = most capable widely released model.');
   out.push('');
+  const band = priceBandLines(catalog);
+  if (band.length > 0) out.push(...band, '');
   out.push(
     `\`tokenizerCoeff\` is tokens-per-content relative to ${baseline.label}, ` +
       'which is 1.0. A coefficient > 1.0 means the same text costs more tokens — ' +
       're-baseline `max_tokens`/budgets accordingly.',
   );
+  out.push('');
+  out.push(...thinkingLines(catalog));
   out.push('');
   out.push('---');
   out.push('');
