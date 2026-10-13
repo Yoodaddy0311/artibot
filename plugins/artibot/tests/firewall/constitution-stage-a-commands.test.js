@@ -8,7 +8,7 @@
  *       Anti-Patterns 에 "일반 실패를 재프레이밍으로 끌고 오지 마라" 한 줄.
  *       두 파일이 짝이다 — 사다리만 있고 진입 금지가 없으면 맨 윗칸이 기본값이 된다.
  *
- *  A-6  `commands/team.md` 의 "Effort & Task Budget" 에서 **SDK `output_config` JSON
+ *  A-6  `commands/team.md` 의 "Effort & 토큰 상한 권고"(옛 이름 "Effort & Task Budget") 에서 **SDK `output_config` JSON
  *       스니펫이 사라졌는가**(설계 §3.7 R7). 그 스니펫은 `Agent` 도구에 없는 파라미터를
  *       "호출 측이 직접 지정한다" 고 가르쳤다. 실측 근거는 `lib/cognitive/effort-policy.js`
  *       주석 — 플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 세팅하는
@@ -28,6 +28,10 @@
  *       supported on Claude Code or Cowork surfaces" 라고 적으므로(열람일 2026-10-12)
  *       작업 예산 JSON 은 이 표면의 커맨드에 둘 자리가 없다. 코드블록 금칙 핀·사실 등급
  *       핀·수정 전 모양 자기검증이 아래 마지막 A-6 테스트들이다.
+ *       2026-10-13 갱신: team.md 의 절 이름·표 열("권장 task_budget")·산문이 API 기능 "task
+ *       budgets"(Claude Code 미지원)와 같은 이름으로 읽혀 "토큰 상한(권고)" 로 개명했다.
+ *       디렉티브 `[artibot:task-budget …]` 와 `current-task-budget.json` 은 훅·테스트가
+ *       쓰는 식별자라 이름을 유지한다. 옛 열 이름이 돌아오지 않는 핀은 아래 A-6 테스트다.
  *
  *  A-7 `commands/adr.md` 의 "결정 요소만 질문한다 (D09 · OD-5)" — 결정 요소는 묻고
  *       사실은 조사한다는 분리, 질문 게이트 4조건, 권장 옵션 `(권장)` 표기 규칙,
@@ -306,7 +310,7 @@ describe('헌법 단계 A — commands 소유분 (A-5·A-6·A-7)', () => {
       // Agent 도구 effort 파라미터 — 사실 등급 진술은 team.md 정본에 두고 여기서는 단정하지 않는다.
       expect(body).toContain('2.1.292');
       expect(body).toContain('모든 세션에 노출된다는 보장은 없다');
-      expect(body).toContain('`commands/team.md` 의 `### Effort & Task Budget`');
+      expect(body).toContain('`commands/team.md` 의 `### Effort & 토큰 상한 권고`');
       // 작업 예산 — 공식 task-budgets 문서(열람일 2026-10-12)의 표면 진술을 번역하지 않고 원문으로 핀한다.
       expect(body).toContain('Task budgets are not supported on Claude Code or Cowork surfaces');
       // 근거 없는 고정 기본값("기본 64,000") 처방은 돌아오면 안 된다 — 공식 문서는 작업 길이 분포로 정하라고 한다.
@@ -339,11 +343,23 @@ describe('헌법 단계 A — commands 소유분 (A-5·A-6·A-7)', () => {
 
     it('effort 권장값 표는 유지됐다 — 삭제가 정책까지 지우지 않았다', () => {
       const body = normalize(read(TEAM));
-      expect(headings(body)).toContain('### Effort & Task Budget');
+      expect(headings(body)).toContain('### Effort & 토큰 상한 권고');
       for (const level of ['max', 'xhigh', 'high', 'medium', 'low']) {
         expect(body).toContain(level);
       }
       expect(body).toContain('| `/team` 구현 phase | xhigh | 128,000 |');
+    });
+
+    it('토큰 상한 권고가 API 기능 "task budgets" 로 읽히지 않는다 — 열 이름 개명 + 권고 텍스트 진술 + 지원 여부는 implement.md 로 위임', () => {
+      const body = normalize(read(TEAM));
+      // 옛 열 이름은 돌아오면 안 된다 — API `task_budget` 필드(Claude Code 미지원)처럼 읽혔다.
+      expect(body).not.toContain('권장 task_budget');
+      expect(body).toContain('| 상황 | 권장 effort | 권장 토큰 상한(권고) |');
+      // 값이 어떤 물건인지 — 프롬프트 텍스트이지 Claude Code 가 보내는 파라미터가 아니다.
+      expect(body).toContain('프롬프트에 적히는 텍스트일 뿐 Claude Code 가 보내는 파라미터가 아니다');
+      // 지원 여부의 원문 인용·열람일은 implement.md 에 있다 — 포인터와 그 목적지가 둘 다 살아 있어야 한다.
+      expect(body).toContain('(공식 문서 원문과 열람일은 `commands/implement.md` 의 `### Effort & Task Budget`)');
+      expect(headings(read(IMPLEMENT))).toContain('### Effort & Task Budget (현재 정책 티어 네이티브)');
     });
 
     it('보고·중계 계약 블록이 살아 있다 — A-6 편집이 같은 파일을 잘랐다', () => {

@@ -75,14 +75,22 @@ SendMessage(to="tester", message="{lint results and context}")
    - Select strategy (by-directory/by-domain/by-task/auto)
    - Identify required specialist types
 3. **Name the run**: There is no team to create. The session has one implicit
-   team, so instead fix a run slug `spawn-{task-slug}` and use it as the prefix
-   of every teammate name below, which is what keeps one run's agents
+   team, so instead fix a run slug `spawn-{task-slug}-{sid}` and use it as the
+   prefix of every teammate name below, which is what keeps one run's agents
    distinguishable from another's.
+   `{sid}` is the session discriminator and may not be omitted: `{task-slug}`
+   comes deterministically from the task text, so two sessions in the same repo
+   given the same task would otherwise build the same names, and `SendMessage`
+   resolves a same-name collision silently, so a cross-session message lands on
+   the wrong teammate with no error. How to pick it is defined once, in
+   `commands/team.md` Phase 2 (`#### {sid} — 세션 판별자`): the first 6 characters
+   of the hook payload `session_id`, or the 6-character `[ref]` on your own
+   `ListAgents` row. Keep it fixed for the whole run.
 4. **Spawn Teammates**: Launch specialist agents:
    ```
    Agent(
      subagent_type="{type}",
-     name="spawn-{task-slug}-{role-name}",
+     name="spawn-{task-slug}-{sid}-{role-name}",
      prompt="{role brief}\n\n{보고 주소}"
    )
    ```
@@ -140,13 +148,13 @@ slug there: a message addressed to the main session by such a name is refused (m
 
 | Domain | Teammate Spawn | Focus |
 |--------|----------------|-------|
-| Security | `Agent(security-reviewer, name="spawn-*-security")` | Vulnerabilities, compliance |
-| Performance | `Agent(performance-engineer, name="spawn-*-perf-analyst")` | Bottlenecks, optimization |
-| Quality | `Agent(code-reviewer, name="spawn-*-quality")` | Code quality, patterns |
-| Architecture | `Agent(architect, name="spawn-*-architect")` | Structure, design |
-| Testing | `Agent(tdd-guide, name="spawn-*-tester")` | Coverage, test quality |
-| Frontend | `Agent(frontend-developer, name="spawn-*-frontend-dev")` | UI, accessibility |
-| Backend | `Agent(backend-developer, name="spawn-*-backend-dev")` | API, data, reliability |
+| Security | `Agent(security-reviewer, name="spawn-{task-slug}-{sid}-security")` | Vulnerabilities, compliance |
+| Performance | `Agent(performance-engineer, name="spawn-{task-slug}-{sid}-perf-analyst")` | Bottlenecks, optimization |
+| Quality | `Agent(code-reviewer, name="spawn-{task-slug}-{sid}-quality")` | Code quality, patterns |
+| Architecture | `Agent(architect, name="spawn-{task-slug}-{sid}-architect")` | Structure, design |
+| Testing | `Agent(tdd-guide, name="spawn-{task-slug}-{sid}-tester")` | Coverage, test quality |
+| Frontend | `Agent(frontend-developer, name="spawn-{task-slug}-{sid}-frontend-dev")` | UI, accessibility |
+| Backend | `Agent(backend-developer, name="spawn-{task-slug}-{sid}-backend-dev")` | API, data, reliability |
 
 ## Output Format
 

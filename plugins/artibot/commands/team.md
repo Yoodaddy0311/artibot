@@ -62,11 +62,11 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 - 애매하면 유지 — idle 상태 팀원은 토큰을 소비하지 않는다
 - 셧다운 판단 기준: 다음 작업의 도메인이 완전히 달라져서 해당 전문성이 0% 필요할 때만
 
-### Effort & Task Budget
+### Effort & 토큰 상한 권고
 
-effort 레벨은 **max / xhigh / high / medium / low** 다 (API 기본값은 모델마다 다르다 — 공식 effort 문서(효력일 2026-10-07, 열람일 2026-10-12) 기준 Opus 5.5·Haiku 5.5 는 `medium`, 그 밖의 effort 지원 모델은 `high`). `/team` 구현 phase 는 **xhigh** 가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max** 까지 올린다. 작업 예산(task budget)은 에이전트 루프 토큰 폭주 방지용 **옵트인 권고값**으로, 팀 전체 작업 예산을 모델에 권고한다.
+effort 레벨은 **max / xhigh / high / medium / low** 다 (API 기본값은 모델마다 다르다 — 공식 effort 문서(효력일 2026-10-07, 열람일 2026-10-12) 기준 Opus 5.5·Haiku 5.5 는 `medium`, 그 밖의 effort 지원 모델은 `high`). `/team` 구현 phase 는 **xhigh** 가 기본 권장값이고, 대규모 멀티에이전트 오케스트레이션은 **max** 까지 올린다. 토큰 상한(권고)은 에이전트 루프의 토큰 폭주를 막으려고 리더가 팀원 스폰 프롬프트에 **텍스트로 적어 넣는 권고값**이다 — 값은 아래 "Auto-Effort Pre-injection" 의 `[artibot:task-budget max_tokens=…]` 디렉티브로 팀원에게 전해진다.
 
-| 상황 | 권장 effort | 권장 task_budget |
+| 상황 | 권장 effort | 권장 토큰 상한(권고) |
 |---|---|---|
 | `/team` 대규모 오케스트레이션 | max | 200,000 |
 | `/team` 구현 phase | xhigh | 128,000 |
@@ -74,7 +74,7 @@ effort 레벨은 **max / xhigh / high / medium / low** 다 (API 기본값은 모
 | 짧은 배치 | medium | 20,000 (최소) |
 | 개방형 탐색 | high | 설정하지 말 것 |
 
-주의: 하드 캡이 아니라 권고다. 요청별 상한(`max_tokens`)과는 역할이 다르다.
+주의: 하드 캡이 아니라 권고다. 위 표의 값은 프롬프트에 적히는 텍스트일 뿐 Claude Code 가 보내는 파라미터가 아니다. API 의 task budgets(베타 기능)와는 별개이며, 그 기능은 Claude Code 에서 지원되지 않는다(공식 문서 원문과 열람일은 `commands/implement.md` 의 `### Effort & Task Budget`). 요청별 상한(`max_tokens`)과도 역할이 다르다. 디렉티브 이름 `task-budget` 과 상태 파일 `current-task-budget.json` 은 훅과 테스트가 쓰는 식별자라 그대로 두었다 — 이름이 같아도 위 API 기능이 아니다.
 
 > **두 값이 팀원에게 닿는 경로로 이 문서가 쓰는 것은 오케스트레이터(모델)가 쓰는 프롬프트 디렉티브뿐이다.** `Agent` 도구의 파라미터는 사실 등급이 갈린다. **effort**: 호스트 changelog 2.1.292(2026-10-06)에 "Added an `effort` parameter to the Agent tool" 항목이 있다. 그러나 모든 세션에 노출된다는 보장은 없다 — 호스트 2.1.296(`claude --version`, 리뷰어 측정)의 리더 메인 세션에 노출된 `Agent` 도구 스키마의 파라미터는 description·isolation·mode·model·name·prompt·subagent_type·team_name 이었고 effort 파라미터는 **없었다**(2026-10-12 메인 세션 실측). 서브에이전트 세션에서도 없었다는 관측 보고가 있으나 근거는 기록되지 않았다(**관측 보고, 근거 미기록**). 2.1.292 미만 호스트의 동작은 **미확인**이다. **budget**: 파라미터를 추가했다는 changelog 항목은 찾지 못했다(2026-10-02~10-12 구간 changelog 기준 — 없다는 단정이 아니다). 그래서 이 문서는 effort·budget 을 `Agent` 파라미터로 넘기는 절차를 두지 않는다 — 파라미터가 노출되는 세션에서도 디렉티브 경로가 현행 절차이자 폴백이다. 아래 "Auto-Effort Pre-injection" 대로 오케스트레이터가 `[artibot:effort level=…][artibot:task-budget max_tokens=…]` 를 팀원 프롬프트 맨 앞에 **직접 써 넣는다**(값의 출처는 **이 세션의 수락된 effort 레코드 하나**다 — 아래 절 1번. 그 레코드는 이 세션 자신의 파일 `<상태 디렉터리>/runtime/sessions/<session_id>/current-effort.json` 이다. `runtime/current-effort.json`·`runtime/current-task-budget.json` 은 대시보드·statusline 이 읽는 표시용 사본이라 **직접 Read 하지 않는다**(budget 파일은 reader 도 읽지 않는다. 세션 id 를 아는 reader 는 자기 세션 파일만 읽고 평면 파일로 넘어가지 않으며, 평면 파일은 세션 id 가 없는 페이로드만 쓰고 세션 id 가 없는 reader 만 신원·만료 게이트를 거쳐 읽는다); reader 가 `null` 이면 기본값 xhigh/128000 이 쓰이므로 **설치본 훅이 세션 레코드를 남겨야 측정값이 반영된다**). 훅(`scripts/hooks/runtime-prompt.js`)은 이 값을 **리더 세션**에는 `UserPromptSubmit` 의 `hookSpecificOutput.additionalContext` 로 알릴 뿐이고, 팀원 프롬프트를 직접 만들지 않는다 — 호스트는 훅이 프롬프트를 치환하는 것을 허용하지 않는다(공식 hooks 문서 "UserPromptSubmit: can’t replace the prompt", 2.1.259 실측 `.artibot/guides/v5-design/PROBE-effort-directive-delivery.md`). 플러그인 쪽 실측 근거는 `lib/cognitive/effort-policy.js:20-30`("HOW THIS MAPPING ACTUALLY REACHES THE MODEL" 주석, 2026-09-02 측정) — "플러그인에는 Messages API 호출자가 없고 `output_config.effort` 를 설정하는 곳도 없다". 이 자리에 있던 SDK `output_config` JSON 예시는 `Agent` 스폰에도 통하는 것처럼 읽혀 삭제했다(설계 §3.7 R7). SDK·API 를 직접 호출하는 경우의 파라미터 형태는 이 문서의 범위가 아니다 — 필요하면 공식 API 문서를 보라.
 

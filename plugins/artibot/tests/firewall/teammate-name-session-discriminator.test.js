@@ -46,18 +46,26 @@ const TEAM_MD = join(PLUGIN_ROOT, 'commands', 'team.md');
 const teamMd = readFileSync(TEAM_MD, 'utf-8');
 
 /**
- * 팀원을 스폰하는 커맨드 4종. `report-contract-parity.test.js#CARRIERS` 와 같은
+ * 팀원을 스폰하는 커맨드(2026-10-13 에 assemble·spawn·orchestrate 가 합류해 7종).
+ * `report-contract-parity.test.js#CARRIERS` 와 같은
  * 목록이며 이유도 같다 — 계약이 한 파일에만 있으면 나머지 경로가 더 약한 규약으로
  * 돈다. 이름 규약도 정확히 같은 성질이다.
  *
  * `minNames` 는 **분모 단언**이다. 스캔이 0건을 내면 "위반 0" 이 "검사 0" 을
  * 뜻하게 되므로, 각 캐리어가 최소 몇 개의 name 예시를 갖는지 못박는다.
  * 2026-08-26 실측: team 4 / autopilot 1 / ultraplan 4 / sc 0.
+ * 2026-10-13 합류분 실측: assemble 5 / spawn 8 / orchestrate 9.
  */
 const CARRIERS = [
   { file: 'team.md', minNames: 4 },
   { file: 'autopilot.md', minNames: 1 },
   { file: 'ultraplan.md', minNames: 4 },
+  // 아래 셋은 2026-10-13 에 합류했다. 그 전에는 고정 접두(`avengers-…`)나 `spawn-{task-slug}-…`
+  // 뿐이라 같은 리포의 두 세션이 같은 이름을 만들었다. 표의 `*` 축약은 쓰지 않는다 — 이름
+  // 리터럴이 전부 `{sid}` 를 직접 싣는다(아래 "정의 없는 별표 축약" 음성 대조가 `spawn-*-…` 형을 막는다).
+  { file: 'assemble.md', minNames: 5 },
+  { file: 'spawn.md', minNames: 8 },
+  { file: 'orchestrate.md', minNames: 9 },
   // sc.md 는 **의도적으로 0** 이다 — 아래 전용 테스트가 그 0 을 지킨다.
   { file: 'sc.md', minNames: 0 },
 ];
@@ -150,7 +158,7 @@ describe('명명 규약 — 세션 판별자가 문서에 성문화돼 있다', 
 
 });
 
-describe('명명 규약 — 스폰 캐리어 4종 전수', () => {
+describe('명명 규약 — 스폰 캐리어 전수', () => {
   // 분모 먼저. 스캐너가 아무것도 못 읽고 "위반 0" 으로 통과하는 것을 막는다.
   it.each(CARRIERS)('$file 의 name 예시 수가 하한 이상이다', ({ file, minNames }) => {
     expect(spawnNameLiterals(carrierSrc[file]).length).toBeGreaterThanOrEqual(minNames);
@@ -171,6 +179,15 @@ describe('명명 규약 — 스폰 캐리어 4종 전수', () => {
     (name) => {
       expect(DISCRIMINATOR.test(name), `"${name}" 이 판별자로 오인정됐다 (무앵커 fail-open 회귀)`)
         .toBe(false);
+    },
+  );
+
+  // 2026-10-13: assemble·spawn·orchestrate 는 `team-*-…` 같은 별표 축약을 정의하지 않는다 —
+  // 정의 없는 `spawn-*-…` 표 예시는 `{sid}` 가 빠진 이름을 그대로 베끼게 만든다.
+  it.each(['spawn-*-security', 'orchestrate-*-planner'])(
+    '정의 없는 별표 축약은 판별자가 아니다: %s',
+    (name) => {
+      expect(DISCRIMINATOR.test(name), `"${name}" 이 판별자로 오인정됐다`).toBe(false);
     },
   );
 

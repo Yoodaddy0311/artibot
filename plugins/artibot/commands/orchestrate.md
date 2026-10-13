@@ -36,14 +36,22 @@ Parse $ARGUMENTS:
 
 1. **Parse**: Extract workflow requirements, select or detect pattern
 2. **Name the run**: There is no team to create. The session has one implicit
-   team, so instead fix a run slug `orchestrate-{workflow-slug}` and use it as
-   the prefix of every teammate name below, which is what keeps one run's agents
+   team, so instead fix a run slug `orchestrate-{workflow-slug}-{sid}` and use it
+   as the prefix of every teammate name below, which is what keeps one run's agents
    distinguishable from another's.
+   `{sid}` is the session discriminator and may not be omitted: `{workflow-slug}`
+   comes deterministically from the workflow text, so two sessions in the same repo
+   given the same workflow would otherwise build the same names, and `SendMessage`
+   resolves a same-name collision silently, so a cross-session message lands on
+   the wrong teammate with no error. How to pick it is defined once, in
+   `commands/team.md` Phase 2 (`#### {sid} — 세션 판별자`): the first 6 characters
+   of the hook payload `session_id`, or the 6-character `[ref]` on your own
+   `ListAgents` row. Keep it fixed for the whole run.
 3. **Spawn Teammates**: Launch required agents for the pipeline:
    ```
    Agent(
      subagent_type="{type}",
-     name="orchestrate-{workflow-slug}-{role-name}",
+     name="orchestrate-{workflow-slug}-{sid}-{role-name}",
      prompt="{role brief}\n\n{보고 주소}"
    )
    ```
@@ -145,14 +153,14 @@ SendMessage(
 
 | Phase | Teammate Spawn | Purpose |
 |-------|----------------|---------|
-| Plan | `Agent(planner, name="orchestrate-*-planner")` | Implementation breakdown |
-| Design | `Agent(architect, name="orchestrate-*-architect")` | System design decisions |
-| Implement | `Agent(backend-developer, name="orchestrate-*-developer")` | Code creation/modification |
-| Test | `Agent(tdd-guide, name="orchestrate-*-tester")` | Test writing and execution |
-| Review | `Agent(code-reviewer, name="orchestrate-*-reviewer")` | Code quality validation |
-| Security | `Agent(security-reviewer, name="orchestrate-*-security")` | Security assessment |
-| Fix Build | `Agent(build-error-resolver, name="orchestrate-*-build-fixer")` | Build error resolution |
-| E2E | `Agent(e2e-runner, name="orchestrate-*-e2e-runner")` | End-to-end testing |
+| Plan | `Agent(planner, name="orchestrate-{workflow-slug}-{sid}-planner")` | Implementation breakdown |
+| Design | `Agent(architect, name="orchestrate-{workflow-slug}-{sid}-architect")` | System design decisions |
+| Implement | `Agent(backend-developer, name="orchestrate-{workflow-slug}-{sid}-developer")` | Code creation/modification |
+| Test | `Agent(tdd-guide, name="orchestrate-{workflow-slug}-{sid}-tester")` | Test writing and execution |
+| Review | `Agent(code-reviewer, name="orchestrate-{workflow-slug}-{sid}-reviewer")` | Code quality validation |
+| Security | `Agent(security-reviewer, name="orchestrate-{workflow-slug}-{sid}-security")` | Security assessment |
+| Fix Build | `Agent(build-error-resolver, name="orchestrate-{workflow-slug}-{sid}-build-fixer")` | Build error resolution |
+| E2E | `Agent(e2e-runner, name="orchestrate-{workflow-slug}-{sid}-e2e-runner")` | End-to-end testing |
 
 ## Output Format
 

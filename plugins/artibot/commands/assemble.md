@@ -19,8 +19,16 @@ Easter egg command. When triggered, creates a **real Agent Team** and spawns tea
 ### Step 1: Name the Squad
 
 There is no team to create — the session already has one implicit team. Fix
-`avengers` as the name prefix for every teammate spawned below, so the roster is
+`avengers-{sid}` as the name prefix for every teammate spawned below, so the roster is
 recognizable in `SendMessage` and in the task list.
+
+`{sid}` is the session discriminator and may not be omitted: these names do not
+depend on the task, so two sessions in the same repo would otherwise build the same
+names, and `SendMessage` resolves a same-name collision silently, so a cross-session
+message lands on the wrong teammate with no error. How to pick it is defined once, in
+`commands/team.md` Phase 2 (`#### {sid} — 세션 판별자`): the first 6 characters of the
+hook payload `session_id`, or the 6-character `[ref]` on your own `ListAgents` row.
+Keep it fixed for the whole run.
 
 ### Step 2: Display Roster Banner
 
@@ -98,35 +106,35 @@ Spawn **one agent per category** (5 total) into the "avengers" team. Each teamma
 Launch ALL 5 in parallel:
 
 ```
-Agent(architect, name="avengers-architect",
+Agent(architect, name="avengers-{sid}-architect",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:architect 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 시스템 설계 및 아키텍처 결정.
   담당 분야와 준비 상태를 간단히 말해주세요.
   {보고 주소}")
 
-Agent(code-reviewer, name="avengers-code-reviewer",
+Agent(code-reviewer, name="avengers-{sid}-code-reviewer",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:code-reviewer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 코드 리뷰 및 품질 검증.
   담당 분야와 준비 상태를 간단히 말해주세요.
   {보고 주소}")
 
-Agent(backend-developer, name="avengers-backend-dev",
+Agent(backend-developer, name="avengers-{sid}-backend-dev",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:backend-developer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: API 설계 및 서버 로직 구현.
   담당 분야와 준비 상태를 간단히 말해주세요.
   {보고 주소}")
 
-Agent(security-reviewer, name="avengers-security-reviewer",
+Agent(security-reviewer, name="avengers-{sid}-security-reviewer",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:security-reviewer 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 보안 취약점 탐지 및 대응.
   담당 분야와 준비 상태를 간단히 말해주세요.
   {보고 주소}")
 
-Agent(tdd-guide, name="avengers-tdd-guide",
+Agent(tdd-guide, name="avengers-{sid}-tdd-guide",
   /* model: node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve artibot:tdd-guide 출력값을 Agent 호출의 model 파라미터에 넘긴다 */
   prompt="Artibot 팀에 소환되었습니다.
   한국어 1-2문장으로 자기소개해주세요. 역할: 테스트 주도 개발 가이드.
