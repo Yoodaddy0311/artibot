@@ -882,7 +882,8 @@ function buildReceipt(group, missionId, outcomes, priceReceipts) {
  *   {@link priceUsage}. It is a call-time statistic: nothing persists it
  *   (`scripts/hooks/session-end.js` reads `meta.coverage`, `meta.unresolvedModels`
  *   and the empty-receipt classification; `scripts/ledger/usage-cost-table.mjs`
- *   reads `meta.files`, `meta.unreadableFiles` and `meta.unresolvedModels`).
+ *   reads `meta.files`, `meta.unreadableFiles`, `meta.unresolvedModels` and this
+ *   count, and prints it for a `--live-session` read; a ledger row has no count).
  * @throws {TypeError} When `transcriptPath` or `missionId` is not a non-empty string.
  *
  * @example

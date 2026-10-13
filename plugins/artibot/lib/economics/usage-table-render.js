@@ -21,6 +21,10 @@
  *  - zero rows as "영수증 0행" with the reason, never as a table of zeros;
  *  - what the read could not see: ledger lines that could not be parsed (each
  *    might have been a receipt) and a live read that came back partial;
+ *  - for a live read that is in the table, how many of its requests were over a
+ *    model's price band — priced at the lower list, so that model's cost is a
+ *    floor. Counted from the transcript only: a ledger receipt does not store it,
+ *    and a count that was not taken prints nothing rather than a 0;
  *  - ONE limit line under the table: receipts are written by SessionEnd only,
  *    so a session that has not ended — the one producing the report, and every
  *    spawn inside it — is not in the ledger.
@@ -448,6 +452,27 @@ function liveLine(live) {
 }
 
 /**
+ * How many of the current session's requests had a prompt over their model's price
+ * band (`live.over_price_band_requests`, the transcript fold's
+ * `meta.overPriceBandRequests`). The table priced every one of them at the lower
+ * list, so above 0 the cost of the banded model is a floor.
+ *
+ * Printed only when a live read put its receipts in the table AND the block carries
+ * a count. A count that was not taken (`null`, missing, anything but a non-negative
+ * integer) is "not measured" and prints nothing: a 0 here would claim the session
+ * was looked at and had none. The count is the live session's alone — a ledger
+ * receipt is a sum over many requests and does not store it — and the line says so,
+ * so the silence about ledger rows is not left to read as "none".
+ */
+function priceBandLine(live) {
+  if (!liveContributed(live)) return null;
+  const n = live.over_price_band_requests;
+  if (!Number.isInteger(n) || n < 0) return null;
+  const head = `- 가격 구간 초과 요청: ${fmtInt(n)}건 — 현재 세션 transcript 만 센 수다(원장 영수증은 이 수를 저장하지 않는다).`;
+  return n === 0 ? head : `${head} 구간 상한을 넘는 요청도 상한 이내 단가로 환산했으므로 해당 모델 비용은 하한이다.`;
+}
+
+/**
  * Ledger lines the reader could not parse. Each might have been a `usage.receipt`
  * and nothing can say — an unparseable line has no readable `event` — so the
  * count is a "cost may be under-stated" flag, not a number of lost receipts.
@@ -535,6 +560,7 @@ export function formatUsageTableMarkdown(table, context = {}) {
     collisionLine(table.receipts),
     corruptLine(ctx),
     liveLine(ctx.live),
+    priceBandLine(ctx.live),
     limitLine(ctx.live),
   ];
   out.push(...notes.filter((line) => line !== null));

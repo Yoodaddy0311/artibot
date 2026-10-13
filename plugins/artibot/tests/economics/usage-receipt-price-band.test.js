@@ -11,8 +11,11 @@
  * WHAT THIS FILE CANNOT SEE
  *  1. THAT THE COUNT IS PERSISTED OR SURFACED. It is a call-time statistic: the two
  *     callers of `buildUsageReceipts` (`scripts/hooks/session-end.js`,
- *     `scripts/ledger/usage-cost-table.mjs`) read other `meta` fields and store none of
- *     this one. A green run says the writer counts correctly, not that anyone is told.
+ *     `scripts/ledger/usage-cost-table.mjs`) store none of it, so no ledger row has
+ *     it. `usage-cost-table.mjs` prints it for a `--live-session` read (pinned in
+ *     `tests/ledger/usage-cost-table-price-band.test.js`); `session-end.js` does not
+ *     read it. A green run here says the writer counts correctly, not that anyone is
+ *     told.
  *  2. THAT A COUNTED REQUEST WAS BILLED AT THE HIGHER LIST. The 100,000 boundary and
  *     the 5x factor come from the official pricing page as read on 2026-10-12 (see
  *     `tests/core/model-catalog-price-band.test.js`); no test re-reads the page, and the

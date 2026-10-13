@@ -104,14 +104,16 @@ export const BASELINE_TIER = 'opus';
  * and the thinking page that day (`{type:'enabled', budget_tokens}` now returns 400
  * on Haiku 5.5). Every row of {@link MODELS} and {@link ID_PRICES} gained
  * `priceMaxPromptTokens`, which {@link getPricing} reports as `maxPromptTokens`.
- * The stamp stayed. No release tag contains the commit that set it, 4980e43f
- * (`git tag --contains` was empty on 2026-10-12; latest tag v4.71.6), but that commit
- * has been on origin/master, the branch the marketplace entry `./plugins/artibot` is
- * installed from, since the push of 2026-10-12 16:31 KST (the commit is dated 16:17),
- * so an install taken from master since then could have stamped records with it. A
- * haiku receipt stamped that way names `claude-haiku-4-5`, which the new
- * {@link ID_PRICES} row replays at the price that billed it; a record that names only
- * the tier would replay at the new tier row (the residual, pinned in
+ * The stamp stayed. The commit that set it, 4980e43f, is in the release tag v4.71.7
+ * (tag commit 3d0a4c0a): `git tag --contains 4980e43f` printed only `v4.71.7` on
+ * 2026-10-13, where it had been empty on 2026-10-12 (latest tag then v4.71.6), and the
+ * file at that tag carries the same stamp. Before the tag the commit had been on
+ * origin/master, the branch the marketplace entry `./plugins/artibot` is installed
+ * from, since the push of 2026-10-12 16:31 KST (the commit is dated 16:17), so an
+ * install taken from master in that window, or a v4.71.7 install, could have stamped
+ * records with it. A haiku receipt stamped that way names `claude-haiku-4-5`, which
+ * the new {@link ID_PRICES} row replays at the price that billed it; a record that
+ * names only the tier would replay at the new tier row (the residual, pinned in
  * `tests/core/pricing-history.test.js`). The price edits of this move are noted at
  * {@link PRICING_VERSION}.
  *

@@ -50,8 +50,9 @@ describe('CATALOG_VERSION', () => {
     // 이전 값: 2026-09-30(모델·ID 행마다 priceSource 출처 필드 추가).
     // 이번에는 같은 날 공식 가격표를 다시 읽어 가격 열도 바뀌었고 PRICING_VERSION 도 함께 움직였다(아래 핀).
     // 같은 날 같은 도장: haiku 티어를 Haiku 4.5 에서 5.5 로 옮겼다(id·legacyIds·ctxLimit·outLimit·thinkingMode,
-    // 전 행 priceMaxPromptTokens). 도장을 만든 4980e43f 를 담은 릴리스 태그는 없다(git tag --contains 가 비어 있었다).
-    // 다만 origin/master 에는 2026-10-12 부터 올라가 있어 master 설치가 이 도장을 찍었을 수 있다. 그래서 도장은 유지하고,
+    // 전 행 priceMaxPromptTokens). 도장을 만든 4980e43f 는 릴리스 태그 v4.71.7 에 들어 있다(2026-10-13 `git tag --contains 4980e43f`
+    // 출력은 v4.71.7 하나, 2026-10-12 에는 비어 있었다). 그 전에는 origin/master 에만 2026-10-12 부터 올라가 있었고, master 설치나
+    // v4.71.7 설치가 이 도장을 찍었을 수 있다. 그래서 도장은 유지하고,
     // 그런 haiku 영수증은 claude-haiku-4-5 를 이름으로 가져 새 ID_PRICES 행으로 같은 1/5 에 재생된다.
     // tier 만 가진 기록은 새 tier 행으로 재생된다(잔여 위험, tests/core/pricing-history.test.js 가 고정).
     expect(CATALOG_VERSION).toBe('2026-10-12');

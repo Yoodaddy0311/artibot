@@ -91,6 +91,12 @@
  *  null unless `--live-session` was given; its `status` is one of `ok` | `empty` |
  *  `incomplete` | `read-failed` | `not-found` | `blank-session-id` |
  *  `invalid-session-id`, and `warning` is a sentence (or null) for `incomplete`.
+ *  `live.over_price_band_requests` is `meta.overPriceBandRequests` of the transcript
+ *  fold: the session's requests whose prompt was over their model's price band,
+ *  which the table still priced at the lower list, so that model's cost is a lower
+ *  bound. It is a number whenever a transcript was folded and null where none was —
+ *  null is "not counted", never 0. The markdown prints it (a measured 0 too) only
+ *  when the live read's receipts are in the table (`status` `ok`).
  *  Unparseable ledger lines are `census.dropped.loss.corrupt`; the markdown says
  *  so in a line of its own. `error` is the ONE optional key,
  *  present only when an unexpected throw was caught; the fold's fields then carry
@@ -101,6 +107,10 @@
  *    Open `/split` worker windows are absent until their own SessionEnd.
  *  - WHETHER THE COST IS WHAT ANYONE PAID. It is measured tokens x the catalog's
  *    list price (`usage-table.js` COST); a subscription bills nothing per token.
+ *  - REQUESTS OVER A PRICE BAND IN THE LEDGER'S ROWS. A receipt is a sum over many
+ *    requests and nothing stores how many of them were over a band, so only the
+ *    `--live-session` read can count them, and only for that session. For every
+ *    ledger row the count is unknown — not 0 — and the table prints no line about it.
  *  - A RESUMED SESSION'S PRE-RESUME PART, if the host rewrote its transcript.
  *    The live read trusts the transcript as it is on disk now.
  *  - WHETHER THE HOST'S SESSION ID IS THE TRANSCRIPT STEM. The locator matches
@@ -273,13 +283,18 @@ function findTranscript(projectsDir, sessionId) {
   return null;
 }
 
+/** A non-negative integer count, or null: a count the builder did not report is "not counted", not 0. */
+const countOrNull = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
+
 /**
  * The `live` block for a request that never reached a transcript. Every key is
  * present in every status, so a caller reads one shape: `unreadable_files` is the
  * count of transcript files the builder could not read; `kept_ledger_receipts` is
  * set only for `incomplete` (the session's ledger rows a partial read left in
  * place; null elsewhere, where it does not apply); `warning` is the sentence for
- * `incomplete` and null otherwise.
+ * `incomplete` and null otherwise; `over_price_band_requests` is the builder's
+ * count of requests over a model's price band, null where no transcript was
+ * folded ("not counted", which must not read as a measured 0).
  */
 function liveInfo(sessionId, status, extra = {}) {
   return {
@@ -293,6 +308,7 @@ function liveInfo(sessionId, status, extra = {}) {
     replaced_ledger_receipts: 0,
     kept_ledger_receipts: null,
     unresolved_models: [],
+    over_price_band_requests: null,
     searched: null,
     warning: null,
     ...extra,
@@ -338,6 +354,7 @@ async function collectLive(request) {
     receipts: receipts.length,
     unreadable_files: unreadable,
     unresolved_models: Object.keys(built?.meta?.unresolvedModels ?? {}).sort(),
+    over_price_band_requests: countOrNull(built?.meta?.overPriceBandRequests),
   };
   if (receipts.length === 0) {
     return { info: liveInfo(sessionId, unreadable > 0 ? 'read-failed' : 'empty', found), events: [] };
