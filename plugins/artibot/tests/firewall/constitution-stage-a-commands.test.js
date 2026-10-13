@@ -32,6 +32,13 @@
  *       budgets"(Claude Code 미지원)와 같은 이름으로 읽혀 "토큰 상한(권고)" 로 개명했다.
  *       디렉티브 `[artibot:task-budget …]` 와 `current-task-budget.json` 은 훅·테스트가
  *       쓰는 식별자라 이름을 유지한다. 옛 열 이름이 돌아오지 않는 핀은 아래 A-6 테스트다.
+ *       2026-10-13 갱신(토큰 상한 표의 값): 표의 리뷰 phase 40,000 · 짧은 배치 20,000(최소)은
+ *       2026-04-20 에 API `task_budget` 권장값으로 들어온 수였고, 훅이 내는
+ *       `[artibot:task-budget max_tokens=…]` 의 맵(`artibot.config.json#runtime.effort.budgetMap`)
+ *       어느 값과도 같지 않았다 — 팀원에게 닿는 경로가 없는 숫자다. 표를 그 맵에서 옮겨 적었고
+ *       (high 64,000 / medium 32,000), 표의 모든 숫자를 config 맵과 코드 기본값에서 **읽어**
+ *       대조하는 핀을 더했다(손으로 든 사본이 아니다). 옛 두 행이 돌아오면 RED 고, 대조기가
+ *       옛 표를 실제로 잡는지는 자기검증 테스트가 본다.
  *
  *  A-7 `commands/adr.md` 의 "결정 요소만 질문한다 (D09 · OD-5)" — 결정 요소는 묻고
  *       사실은 조사한다는 분리, 질문 게이트 4조건, 권장 옵션 `(권장)` 표기 규칙,
@@ -73,6 +80,12 @@
  *     노출되는지, 줘도 팀원의 effort 가 바뀌는지, `maxEffortLevel` 상한이 걸리는지는
  *     **미측정**이다(P-4 사전 프로브 몫). 모델별 기본 effort 진술은 공식 effort 문서
  *     (효력일 2026-10-07, 열람일 2026-10-12)를 옮긴 것이라, 문서가 바뀌어도 이 스캔은 모른다.
+ *  7. **리더가 훅의 숫자를 팀원 프롬프트에 실제로 옮겨 쓰는지.** 표 ↔ 맵 핀은 문서와 맵이
+ *     같다는 것만 본다. 팀원이 받은 `max_tokens` 가 무엇이었는지는 transcript 로만 알 수 있고
+ *     **미측정**이다. 훅이 `opts`(모델 티어) 없이 `getTaskBudgetForEffort` 를 부른다는 산문
+ *     진술은 `runtime-prompt.js` 의 호출 문자열 한 줄 핀이라 리팩터링에는 RED(의도: 문서도 같이
+ *     고치게 한다)이고, 훅이 다른 파일에서 같은 함수를 부르게 바뀌어도 모른다. 숫자 칸에 숫자가
+ *     없는 행("설정하지 말 것")은 대조하지 않고, 머리글 아래 첫 표만 본다.
  *
  * @module tests/firewall/constitution-stage-a-commands
  */
@@ -81,6 +94,7 @@ import { describe, expect, it } from 'vitest';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getTaskBudgetForEffort } from '../../lib/runtime/task-budget.js';
 
 const COMMANDS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -93,6 +107,8 @@ const TEAM = path.join(COMMANDS_DIR, 'team.md');
 const ADR = path.join(COMMANDS_DIR, 'adr.md');
 const IMPLEMENT = path.join(COMMANDS_DIR, 'implement.md');
 const EFFORT_POLICY_JS = path.resolve(COMMANDS_DIR, '..', 'lib', 'cognitive', 'effort-policy.js');
+const CONFIG_JSON = path.resolve(COMMANDS_DIR, '..', 'artibot.config.json');
+const RUNTIME_PROMPT_JS = path.resolve(COMMANDS_DIR, '..', 'scripts', 'hooks', 'runtime-prompt.js');
 
 /**
  * 파일을 읽되 **없으면 던진다**. fail-closed 형태다 — 파일이 사라지면 스캔이
@@ -143,6 +159,66 @@ function headings(source) {
   return normalize(source).split('\n')
     .map((line) => line.trim())
     .filter((line) => /^#{1,6}\s/.test(line));
+}
+
+const BUDGET_TABLE_HEADER = '| 상황 | 권장 effort | 권장 토큰 상한(권고) |';
+const BUDGET_NUMBER = /^\d{1,3}(?:,\d{3})*$/;
+
+/**
+ * team.md 의 `### Effort & 토큰 상한 권고` 표를 읽어, 표의 (effort, 숫자) 쌍을 `budgetOf` 와 대조한다.
+ *
+ * 숫자 칸에 숫자가 **하나라도** 있는 행은 전부 대조 대상이다. 칸이 `a / b` 꼴이면 effort 칸도 같은
+ * 개수여야 하고, 각 숫자는 정확히 `1,234` 꼴이어야 한다 — `20,000 (최소)` 처럼 숫자에 말이 붙은 칸은
+ * "읽지 못함" 으로 problem 이다(옛 표의 그 행이 이 모양이었다. 숫자만 골라 읽으면 통과해 버린다).
+ * 숫자가 하나도 없는 행("설정하지 말 것")은 대조 대상이 아니라 skipped 로 센다.
+ *
+ * @param {string} source team.md 전문
+ * @param {(effort: string) => number | null | undefined} budgetOf effort 레벨 → 기대 숫자
+ * @returns {{ checked: Array<{ row: string, effort: string, table: number, expected: number }>,
+ *   skipped: string[], problems: string[] }}
+ */
+function auditBudgetTable(source, budgetOf) {
+  const result = { checked: [], skipped: [], problems: [] };
+  const lines = normalize(source).split('\n');
+  const head = lines.findIndex((line) => line.trim() === BUDGET_TABLE_HEADER);
+  if (head === -1) {
+    result.problems.push('표 머리글이 없다');
+    return result;
+  }
+  // head + 1 은 `|---|---|---|` 구분선이다.
+  for (let i = head + 2; i < lines.length && lines[i].trim().startsWith('|'); i += 1) {
+    const cells = lines[i].trim().split('|').slice(1, -1).map((cell) => cell.trim());
+    if (cells.length !== 3) {
+      result.problems.push(`${lines[i].trim()}: 칸이 3개가 아니다`);
+      continue;
+    }
+    const [row, effortCell, budgetCell] = cells;
+    if (!/\d/.test(budgetCell)) {
+      result.skipped.push(row);
+      continue;
+    }
+    const efforts = effortCell.split('/').map((cell) => cell.trim());
+    const numbers = budgetCell.split('/').map((cell) => cell.trim());
+    if (efforts.length !== numbers.length) {
+      result.problems.push(`${row}: effort ${efforts.length}칸 ↔ 숫자 ${numbers.length}칸`);
+      continue;
+    }
+    efforts.forEach((effort, k) => {
+      if (!BUDGET_NUMBER.test(numbers[k])) {
+        result.problems.push(`${row}: '${numbers[k]}' 는 숫자만 있는 칸이 아니다`);
+        return;
+      }
+      const table = Number(numbers[k].replaceAll(',', ''));
+      const expected = budgetOf(effort);
+      if (typeof expected !== 'number') {
+        result.problems.push(`${row}: effort '${effort}' 의 기대값이 없다`);
+        return;
+      }
+      result.checked.push({ row, effort, table, expected });
+      if (table !== expected) result.problems.push(`${row}: ${effort} 표 ${table} ≠ 기대 ${expected}`);
+    });
+  }
+  return result;
 }
 
 describe('헌법 단계 A — commands 소유분 (A-5·A-6·A-7)', () => {
@@ -360,6 +436,67 @@ describe('헌법 단계 A — commands 소유분 (A-5·A-6·A-7)', () => {
       // 지원 여부의 원문 인용·열람일은 implement.md 에 있다 — 포인터와 그 목적지가 둘 다 살아 있어야 한다.
       expect(body).toContain('(공식 문서 원문과 열람일은 `commands/implement.md` 의 `### Effort & Task Budget`)');
       expect(headings(read(IMPLEMENT))).toContain('### Effort & Task Budget (현재 정책 티어 네이티브)');
+    });
+
+    describe('토큰 상한 표의 숫자 = 훅이 내는 예산 맵 (2026-10-13)', () => {
+      const configMap = JSON.parse(read(CONFIG_JSON)).runtime.effort.budgetMap;
+
+      it('표의 모든 숫자가 artibot.config.json#runtime.effort.budgetMap 과 같다', () => {
+        const audit = auditBudgetTable(read(TEAM), (effort) => configMap[effort]);
+        expect(audit.problems).toEqual([]);
+        // 분모 — 표를 못 읽어 0쌍을 "문제 없음" 으로 통과시키지 않는다. 지금 표는 5쌍(max · xhigh · high · medium · medium)이다.
+        expect(audit.checked.length).toBeGreaterThanOrEqual(5);
+      });
+
+      it('표의 모든 숫자가 코드 기본값(getTaskBudgetForEffort, config 없음)과도 같다 — config 맵이 없어도 훅이 같은 숫자를 낸다', () => {
+        const audit = auditBudgetTable(read(TEAM), (effort) => getTaskBudgetForEffort(effort));
+        expect(audit.problems).toEqual([]);
+        expect(audit.checked.length).toBeGreaterThanOrEqual(5);
+      });
+
+      it('표 아래 산문이 값의 출처 셋을 가리키고, 훅이 모델 티어 옵션을 넘기지 않는다는 진술이 코드와 같다', () => {
+        const body = normalize(read(TEAM));
+        expect(body).toContain('`artibot.config.json#runtime.effort.budgetMap`');
+        expect(body).toContain('`lib/runtime/task-budget.js#DEFAULT_BUDGET_MAP`');
+        expect(body).toContain('`lib/runtime/task-budget.js#FABLE_MIN_BUDGET`');
+        expect(body).toContain('훅은 그 옵션을 넘기지 않는다');
+        // 진술의 코드 쪽: 훅의 `getTaskBudgetForEffort` 호출은 정확히 이 한 줄이고 인자는 둘이다(opts 없음).
+        const calls = read(RUNTIME_PROMPT_JS).match(/getTaskBudgetForEffort\([^)]*\)/g) ?? [];
+        expect(calls).toEqual(['getTaskBudgetForEffort(effortMeta.effort, runtimeConfig)']);
+      });
+
+      it('자기검증 — 옛 표를 넣으면 리뷰·짧은 배치 두 행이 problem 으로 잡히고, 읽는 행·건너뛴 행이 센다', () => {
+        const OLD_TABLE = [
+          BUDGET_TABLE_HEADER,
+          '|---|---|---|',
+          '| `/team` 대규모 오케스트레이션 | max | 200,000 |',
+          '| `/team` 구현 phase | xhigh | 128,000 |',
+          '| `/team` 리뷰 phase | high / medium | 40,000 |',
+          '| 짧은 배치 | medium | 20,000 (최소) |',
+          '| 개방형 탐색 | high | 설정하지 말 것 |',
+        ].join('\n');
+        const audit = auditBudgetTable(OLD_TABLE, (effort) => configMap[effort]);
+        expect(audit.problems).toHaveLength(2);
+        expect(audit.problems[0]).toContain('리뷰 phase');
+        expect(audit.problems[1]).toContain('짧은 배치');
+        expect(audit.checked.map((c) => c.effort)).toEqual(['max', 'xhigh']);
+        expect(audit.skipped).toEqual(['개방형 탐색']);
+      });
+
+      it('자기검증 — 옛 숫자가 파싱되는 모양이어도 맵과 다르면 잡힌다 (양성 대조), 머리글이 없으면 RED', () => {
+        const SHAPE_OK_VALUE_OLD = [
+          BUDGET_TABLE_HEADER,
+          '|---|---|---|',
+          '| 리뷰 | high | 40,000 |',
+          '| 배치 | medium | 20,000 |',
+        ].join('\n');
+        const audit = auditBudgetTable(SHAPE_OK_VALUE_OLD, (effort) => configMap[effort]);
+        expect(audit.problems).toEqual([
+          `리뷰: high 표 40000 ≠ 기대 ${configMap.high}`,
+          `배치: medium 표 20000 ≠ 기대 ${configMap.medium}`,
+        ]);
+        expect(auditBudgetTable('# 표 없음\n', () => 1).problems).toEqual(['표 머리글이 없다']);
+      });
     });
 
     it('보고·중계 계약 블록이 살아 있다 — A-6 편집이 같은 파일을 잘랐다', () => {

@@ -135,7 +135,7 @@ P2       | [cat]    | [specific action]     | +[X]%
 
 When running as a teammate in an agent team:
 
-1. **On Start**: Call `TaskList()` to find tasks assigned to you. Use `TaskGet(taskId)` to read full task details before starting work
+1. **On Start**: If `TaskList` is available, call `TaskList()` to find tasks assigned to you and use `TaskGet(taskId)` to read full task details before starting work. If a task tool answers "disabled for this session", do not retry it: the spawn prompt is your assignment and `SendMessage` is your report channel
 2. **Claim Work**: Use `TaskUpdate(taskId, status="in_progress")` when you begin a task
 3. **Report Progress**: Use `SendMessage(to="<leader>")` to report findings, ask clarifying questions, or flag blockers; `<leader>` is the address named in your spawn prompt's report contract (`main` when the leader is the main session)
 4. **Complete Work**: Use `TaskUpdate(taskId, status="completed")` when done, then `SendMessage` your deliverable summary to `<leader>`

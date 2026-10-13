@@ -37,7 +37,8 @@ TaskCreate(subject="Analyze {module-A}", description="...")  # Task #1
 TaskCreate(subject="Analyze {module-B}", description="...")  # Task #2
 TaskCreate(subject="Analyze {module-C}", description="...")  # Task #3
 # No blockedBy - all tasks available immediately
-# Teammates self-claim via TaskList -> TaskUpdate(owner)
+# Teammates self-claim via TaskList -> TaskUpdate(owner) when task tools are available;
+# if they answer "disabled for this session", assign each task in the spawn prompt instead
 ```
 
 **Sequential**:
@@ -106,7 +107,7 @@ SendMessage(to="tester", message="{lint results and context}")
    - Sequential: linear chain of blockedBy
    - Pipeline: chain + SendMessage for output forwarding
 6. **Monitor Execution**: Track progress and handle failures:
-   - Poll `TaskList` to monitor task statuses
+   - Poll `TaskList` to monitor task statuses (if it answers "disabled for this session", track status from teammates' `SendMessage` reports instead)
    - Use `TaskGet(taskId)` for detailed status on specific tasks
    - Handle failures: reassign tasks or spawn replacement teammates
    - Use `SendMessage` to coordinate, redirect, or provide additional context

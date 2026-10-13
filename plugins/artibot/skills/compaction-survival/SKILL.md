@@ -27,7 +27,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: 8cd80930
+source_hash: 1c6b26c2
 whenNotToUse: "Short sessions well within context limits where compaction is not imminent; do not invoke as a routine step — only apply when context size poses a real loss risk."
 ---
 
@@ -128,7 +128,7 @@ Claude Code는 컨텍스트 윈도우 한계에 근접하면 이전 메시지를
 
 ```
 1. Task 시스템 확인
-   → TaskList()로 in_progress 상태 태스크 확인
+   → TaskList()로 in_progress 상태 태스크 확인 (세션에 TaskList 가 없거나 "disabled for this session" 이면 건너뛰고 2번으로)
    → 태스크 description에 작업 범위 기록됨
 
 2. Git 상태 확인
@@ -161,7 +161,7 @@ Claude Code는 컨텍스트 윈도우 한계에 근접하면 이전 메시지를
 
 ```
 복구 절차:
-1. TaskList() → 진행 중 태스크 확인
+1. TaskList() → 진행 중 태스크 확인 (없거나 disabled 면 건너뜀)
 2. git status → 변경된 파일 목록
 3. MEMORY.md → 최근 checkpoint 확인
 4. 최근 메시지에서 컨텍스트 추출

@@ -70,9 +70,11 @@ effort 레벨은 **max / xhigh / high / medium / low** 다 (API 기본값은 모
 |---|---|---|
 | `/team` 대규모 오케스트레이션 | max | 200,000 |
 | `/team` 구현 phase | xhigh | 128,000 |
-| `/team` 리뷰 phase | high / medium | 40,000 |
-| 짧은 배치 | medium | 20,000 (최소) |
+| `/team` 리뷰 phase | high / medium | 64,000 / 32,000 |
+| 짧은 배치 | medium | 32,000 |
 | 개방형 탐색 | high | 설정하지 말 것 |
+
+표의 숫자는 effort 레벨이 정하는 값이다 — 같은 레벨이면 같은 숫자이고, 훅이 내는 `[artibot:task-budget max_tokens=…]` 와 같은 맵에서 나온다: `artibot.config.json#runtime.effort.budgetMap`(코드 기본값 `lib/runtime/task-budget.js#DEFAULT_BUDGET_MAP` 과 같은 값). 훅은 `getTaskBudgetForEffort(effort, config)` 한 호출로 그 값을 내고(`scripts/hooks/runtime-prompt.js#resolveTaskBudgetDirective`), 자동 팀의 팀원별 값도 같은 함수에서 나온다(`lib/runtime/middleware/workflow-mode.js#planWorkflow` 의 `budgetResolver`). 그래서 표를 그 맵에서 옮겨 적었고, 어긋나면 `tests/firewall/constitution-stage-a-commands.test.js` 가 RED 다. 옛 표의 리뷰 phase 40,000 · 짧은 배치 20,000(최소)은 그 맵의 어느 값도 아니었다 — 코드가 내는 숫자가 아니라서, 리더가 표를 따르면 같은 팀의 팀원이 훅이 낸 값과 다른 상한을 받을 수 있었다. 2026-04-20 에 API `task_budget` 권장값으로 들어온 뒤 값이 바뀐 적이 없다. 20,000 은 `lib/runtime/task-budget.js#FABLE_MIN_BUDGET`(Task Budgets 베타 하한)과 같은 수지만, 그 하한은 `getTaskBudgetForEffort` 에 `opts.modelTier='fable'` 이 주어질 때만 걸리고 훅은 그 옵션을 넘기지 않는다.
 
 주의: 하드 캡이 아니라 권고다. 위 표의 값은 프롬프트에 적히는 텍스트일 뿐 Claude Code 가 보내는 파라미터가 아니다. API 의 task budgets(베타 기능)와는 별개이며, 그 기능은 Claude Code 에서 지원되지 않는다(공식 문서 원문과 열람일은 `commands/implement.md` 의 `### Effort & Task Budget`). 요청별 상한(`max_tokens`)과도 역할이 다르다. 디렉티브 이름 `task-budget` 과 상태 파일 `current-task-budget.json` 은 훅과 테스트가 쓰는 식별자라 그대로 두었다 — 이름이 같아도 위 API 기능이 아니다.
 
@@ -108,6 +110,7 @@ Break the user's request into independent work units, 각 단위에 **작업 성
 - Identify natural boundaries (by file, by domain, by concern)
 - Each unit should be independently completable
 - Choose the best specialist agent for each unit
+- 셸 실행(측정·계수·테스트·git)이 필요한 단위는 배정 전에 그 에이전트의 도구를 확인한다. 도구를 정하는 것은 `agents/<name>.md` 프론트매터의 `tools:` 이고 `agents/INDEX.md` 에는 도구 열이 없다. Bash 가 없는 에이전트(`tools:` 판독 2026-10-13: ad-specialist · architect · content-marketer · doc-updater · marketing-strategist · planner · presentation-designer)에는 셸이 필요 없는 단위만 주고 측정은 Bash 가 있는 에이전트에 배정한다 — 라이브 점검(2026-10-13, 점검 팀원 보고)에서 doc-updater 에 셸 재측정이 배정돼 막혔다.
 
 #### `nature: process | judge` — 작업 성격 태깅 (2026-09-04 오너 결정 MP-1)
 
@@ -140,7 +143,7 @@ The orchestrator MUST:
 
    {원래 teammate prompt}
    ```
-3. **Lower-only override allowed mid-team** — 예: Phase 4 review 팀원은 `high` 또는 `medium`로 하향 가능
+3. **Lower-only override allowed mid-team** — 예: Phase 4 review 팀원은 `high` 또는 `medium`로 하향 가능. 내릴 때 `max_tokens` 도 위 "Effort & 토큰 상한 권고" 표에서 그 레벨의 값으로 같이 내린다
 4. **Up-escalate requires user approval** — 팀원이 기본값보다 더 높은 effort/budget를 요청하면 유저 확인 필요
 5. `lib/runtime/middleware/tasks.js#readEffortMeta` 도 같은 reader(`readEffortSnapshot`)로 `task.meta.effort`, `task.meta.taskBudget`을 채우므로(표시용 파일을 읽지 않는다 — 1번과 출처가 같다), TaskCreate 시 meta를 그대로 넘기면 된다
 
@@ -186,6 +189,14 @@ Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{sid}-{role}"
 
 `name`이 있어야 `SendMessage(to="{name}")`로 주소가 잡힌다. 역할이 자명해 보여도
 이름 없이 스폰하지 마라 — 이름 없는 팀원에게는 중간 지시를 보낼 수 없다.
+
+#### 스폰 운영 주의 (라이브 점검 2026-10-13 — 점검 팀원 보고, 리더 재현 없음)
+
+호스트 동작은 이 플러그인이 고치지 못한다. 아래는 그 동작을 전제로 한 리더 쪽 규칙이다.
+
+- **제약은 전부 스폰 프롬프트에 싣는다**(범위·파일 소유·금지 사항·성공기준). 작업 중인 팀원에게 보낸 리더 메시지가 16분 넘게 배달되지 않았다(`read:false`). 중간 보정은 팀원이 현재 작업을 끝낸 뒤에야 처리되는 일이 많아, 보정 전 설계로 "완료" 보고가 오고 늦게 처리된 보정이 이미 끝난 결과를 뒤집을 수 있다. 중간 보정을 보냈다면 완료 보고를 받은 뒤 그 결과를 보정에 비추어 다시 대조한다.
+- **병렬 스폰이 실패하면 실패한 호출만 한 번 다시 부른다.** `Agent` 호출 8개 중 2개가 `Lock file is already being held` 로 실패했고 같은 호출을 다시 불렀더니 성공했다. 성공한 스폰은 다시 부르지 않는다(같은 작업을 두 번 맡기게 된다). 큰 fan-out 은 위 "Spawn ALL teammates in a single message" 의 예외로, 몇 개씩 나눠 연달아 스폰한다 — 나누면 경합이 줄어드는지는 미측정이다.
+- **팀원 쪽 Task 도구가 꺼져 있을 수 있다.** 팀원 8명 중 7명의 첫 `TaskList` 호출이 "disabled for this session" 으로 응답했다. 작업 명세는 항상 스폰 프롬프트에 싣고(아래 "Task 도구가 없는 세션" 과 같은 이유다) `TaskCreate` 레코드는 보조로 둔다. `agents/*.md` 의 On Start 단계는 이 경우를 위해 조건부로 바뀌었다.
 
 ### 보고 계약 (MANDATORY — 모든 스폰 프롬프트의 `{보고 계약}` 자리에 그대로 삽입)
 
