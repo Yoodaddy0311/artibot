@@ -61,11 +61,13 @@
 - `/team` 런 실측 2건 — TeammateIdle 페이로드의 키 이름(`agent_id` 는 추론이고 관측하지 않았다), `TaskStop` 이 팀원 이름으로 멈추는지.
 - SessionEnd 가 창을 닫을 때 호출되는지(`/exit` 대 창 X 를 비교 측정). 그리고 `agents` 맵의 유령 행 — 세션 `08c5f089` 에서 나온 5행의 출처는 미확인이다.
 - Sonnet 5.5 `thinkingMode` 어휘: 이 모델은 `disabled` 를 거부하고 `between_tools` 를 받지만 카탈로그 값 중 그것을 서술하는 것이 없다(`lib/core/model-catalog.js` 주석).
-- `meta.overPriceBandRequests` 를 `scripts/ledger/usage-cost-table.mjs` 가 인쇄하지 않는다 — 현재 어떤 표에도 안 나온다(`git grep -F overPriceBandRequests`: `lib/` · `tests/` 만). 생성되는 카탈로그 문서(`scripts/gen-model-catalog-docs.js`)에도 가격 구간 각주가 없다.
-- `commands/team.md:69` 의 "권장 task_budget" 열 이름이 Claude Code 에서 지원되지 않는 API 기능(task budgets)과 겹친다.
-- `{sid}` 구분자가 `/assemble` · `/spawn` · `/orchestrate` 의 팀원 이름에 없다(`commands/team.md` 에는 6곳 있다).
-- **오너 결정**: `/implement` 의 effort 정책 — 플러그인 정책 `xhigh` 대 공식 문서의 medium 기본 권장.
-- 사소: `lib/core/model-catalog.js` 의 `CATALOG_VERSION` 주석("No release tag contains the commit that set it, 4980e43f (`git tag --contains` was empty on 2026-10-12; latest tag v4.71.6)")은 작성일 기준 사실이고, v4.71.7 이 `4980e43f` 를 담게 되어 이제 낡았다. 동작과 무관하다.
+- ~~`meta.overPriceBandRequests` 를 `scripts/ledger/usage-cost-table.mjs` 가 인쇄하지 않는다~~ → **처리(2026-10-13)**: `--live-session` 읽기에서 `live.over_price_band_requests` 로 싣고 표 아래 한 줄로 인쇄한다(원장 영수증은 이 수를 저장하지 않아 원장 행은 "미측정"). 남은 것: 생성되는 카탈로그 문서(`scripts/gen-model-catalog-docs.js`)에 가격 구간 각주가 없다.
+- ~~`commands/team.md:69` 의 "권장 task_budget" 열 이름~~ → **처리(2026-10-13)**: 제목·열을 "토큰 상한(권고)" 로 바꾸고 API task budgets 와 별개라고 적었다. 남은 것: 표 값(리뷰 40,000 · 짧은 배치 20,000)이 훅 `budgetMap`(high 64000 · medium 32000 · low 16000)과 다른 것이 의도인지 미확인.
+- ~~`{sid}` 구분자가 `/assemble` · `/spawn` · `/orchestrate` 의 팀원 이름에 없다~~ → **처리(2026-10-13)**: 이름 리터럴 5/8/9개 전부 `{sid}` 를 싣고 `tests/firewall/teammate-name-session-discriminator.test.js` 의 CARRIERS 에 합류. 라이브 스폰에서 리더가 실제로 그 이름을 짓는지는 미측정.
+- `/team` 라이브 점검(2026-10-13, 다른 터미널의 팀 `team-06383969`, 점검 팀원 보고 — 리더 재현 없음): 작업 중인 팀원에게 리더 메시지가 16분+ 미배달(`read:false` 3회) · 병렬 스폰 8개 중 2개가 `Lock file is already being held` 로 실패 후 재시도 성공 · Bash 없는 doc-updater 에 셸 재측정 배정 · 팀원 7/8 이 첫 호출 TaskList 에서 "disabled for this session" · `~/.claude/artibot-state.json#agents` 가 sonnet 서빙 팀원을 `canonicalModel:"opus"` 로 기록(서빙값이 아니라 정책값으로 보임) · TeammateIdle·TaskStop 은 이 런에서도 0회라 여전히 미측정. 서빙 모델은 8/8 일치.
+- ~~**오너 결정**: `/implement` 의 effort 정책 — 플러그인 정책 `xhigh` 대 공식 문서의 medium 기본 권장.~~ → **결정됨(2026-10-13): `xhigh` 유지.** 현행 `lib/cognitive/effort-policy.js#EFFORT_POLICY.implement` · `commands/implement.md:75` 가 이미 xhigh 라 코드 변경 없음.
+- 점검(2026-10-13, 이 PC): 설치 4.71.7 ✅(로드는 재시작 후 상태줄로 확인 — 미확인) · `endedAt` 2026-10-13T00:11:58Z 로 SessionEnd 완주 재개 ✅ · `caa3d2eb` 여전히 master 밖(`git cherry` = `+`) · 위 나머지 항목은 미처리 그대로.
+- ~~사소: `lib/core/model-catalog.js` 의 `CATALOG_VERSION` 주석~~ → **처리(2026-10-13)**: `git tag --contains 4980e43f` = `v4.71.7` 로 고쳐 적었다. 원래 항목: `CATALOG_VERSION` 주석("No release tag contains the commit that set it, 4980e43f (`git tag --contains` was empty on 2026-10-12; latest tag v4.71.6)")은 작성일 기준 사실이고, v4.71.7 이 `4980e43f` 를 담게 되어 이제 낡았다. 동작과 무관하다.
 - 이 PC 로컬 찌꺼기(소스 트리, git-ignored): `plugins/artibot/UsersHeechangLeeAppDataLocalTempclaudeC--Users-HeechangLee-Desktop-Artibote05dd64b-097a-44e8-9ef1-78178b7a810escratchpad/`(2026-08-24, 안에 심볼릭 링크 `jx`)는 `.gitignore:64` 의 `*AppDataLocalTemp*` 에 걸려 `git status` 에 안 보이지만 플러그인 루트를 통째로 `cp -r` 하는 것을 깬다. 지울지는 오너 결정이다(이번에 건드리지 않았다).
 
 ---
