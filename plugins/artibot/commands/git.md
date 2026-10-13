@@ -235,7 +235,7 @@ WARNINGS (if any)
 |---|------|--------|------|
 | 1 | 푸시 전 검증 | `/verify` | 커밋 전 전체 검증 파이프라인 |
 | 2 | 작업 리포트 | `/daily` | 일일 작업 회고 리포트 |
-| 3 | 작업 상태 업데이트 | `/task` | 커밋 관련 작업 상태 갱신 |
+| 3 | 작업 상태 업데이트 | `/task` | 커밋 관련 작업 상태 갱신 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |
 | 4 | Git 가이드 | `/git guide` | Git 개념 설명 + 상황별 가이드 |
 | 5 | 충돌 예측 | `/git conflict check` | 머지 전 충돌 미리 확인 |
 | 6 | 워크트리 생성 | `/git worktree create` | 별도 작업 공간 생성 |

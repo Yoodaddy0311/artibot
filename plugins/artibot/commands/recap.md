@@ -48,7 +48,7 @@ Run ALL of the following in a single message (parallel, no dependencies):
 
 5. **Worklog**: Read `~/.claude/projects/<project-slug>/memory/worklog.md`
 
-6. **Tasks**: TaskList tool (skip if `--no-tasks`)
+6. **Tasks**: TaskList tool (skip if `--no-tasks`, or if the tool is absent or answers "disabled for this session" — do not retry it; Section 4 shows the skip note)
 
 ### Phase 2: Quality Collection (~15s)
 
@@ -97,6 +97,7 @@ Combine data from multiple sources with priority ranking:
 - Sort by priority, then by source order
 - Every item must cite its source in the 근거 column
 - If no items from any source: show "다음 단계 없음 — 오늘 작업 완료!"
+- If TaskList was not collected (`--no-tasks`, or the tool is absent or answers "disabled for this session"), the two TaskList rows contribute nothing
 
 ## Output Format
 
@@ -191,6 +192,7 @@ All body sections use pure GFM markdown (NO ANSI colors inside tables — they b
 - Show up to 3 task subjects per row (truncate with "외 N건" if more)
 - If no tasks: show `활성 작업 없음`
 - If `--no-tasks`: show `> 작업 현황: --no-tasks 모드로 생략됨`
+- If TaskList is absent or answers "disabled for this session": do not retry it and show `> 작업 현황: Task 도구 사용 불가로 생략됨`
 
 #### Section 5: 세션 기록
 
@@ -251,6 +253,7 @@ When `--save` is specified:
 | npm test timeout (>20s) | `⚠️ TIMEOUT` in 품질 현황 table |
 | npm test not configured | `⚠️ 미설정` in 품질 현황 table |
 | No tasks in TaskList | `활성 작업 없음` in 작업 현황 section |
+| TaskList absent or answers "disabled for this session" | `> 작업 현황: Task 도구 사용 불가로 생략됨` in 작업 현황 section; no retry |
 | No pending items for next steps | Only show git-status and quality items; if none: "다음 단계 없음" |
 | Not a git repository | Exit with: `git 저장소가 아닙니다` |
 | worklog.md does not exist | Skip 세션 기록 section with note |
@@ -272,5 +275,5 @@ When `--save` is specified:
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
 | 1 | 체크포인트 저장 | `/checkpoint` | 현재 상태 스냅샷 저장 |
-| 2 | 미완료 작업 정리 | `/task` | 보류 및 진행중 작업 정리 |
+| 2 | 미완료 작업 정리 | `/task` | 보류 및 진행중 작업 정리 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |
 | 3 | 변경사항 커밋 | `/git` | 미커밋 변경사항 커밋 |

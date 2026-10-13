@@ -22,7 +22,7 @@ agents:
   - "tdd-guide"
 tokens: "~3K"
 category: "quality"
-source_hash: d7564d23
+source_hash: 20098765
 whenNotToUse: "Do not apply full verification protocol to internal planning steps, WIP checkpoints mid-task, or agent-to-agent status messages. Reserve the protocol for final completion claims that a human or downstream agent will act on."
 ---
 
@@ -207,5 +207,5 @@ The following table captures common excuses agents make to skip critical steps i
 - Test output not quoted or linked in the completion evidence
 - "Done" claim made before `npm test` or equivalent has been run
 - Verification section says "tests should pass" rather than "tests passed — [output]"
-- Agent TaskUpdate status set to "completed" before evidence is collected
+- Agent TaskUpdate status set to "completed" before evidence is collected (if the task tools are absent or answer "disabled for this session", the same applies to a "done" SendMessage report)
 - One instance of a recurring issue fixed while sibling sites of the same pattern/function family went unscanned (COMPLETE-CLASS skipped)

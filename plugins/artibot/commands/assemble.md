@@ -178,4 +178,4 @@ whole teardown — the team is implicit, so there is no disband call after it.
 |---|------|--------|------|
 | 1 | 팀 작업 배정 | `/team` | 소환된 팀에 작업 배정 |
 | 2 | 워크플로우 실행 | `/orchestrate` | 멀티에이전트 워크플로우 구성 |
-| 3 | 작업 등록 | `/task` | 팀 작업 항목 등록 |
+| 3 | 작업 등록 | `/task` | 팀 작업 항목 등록 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |

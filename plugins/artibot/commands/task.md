@@ -1,7 +1,7 @@
 ---
 description: (Artibot) Task management with creation, assignment, tracking, and completion
 argument-hint: '[op] e.g. "할 일 목록 생성 및 추적"'
-allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TaskCreate]
+allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, TaskCreate, TaskUpdate, TaskList, TaskGet]
 toolset: team
 ---
 
@@ -42,13 +42,14 @@ Remove all completed tasks from the list.
 ## Execution Flow
 
 1. **Parse**: Identify operation and extract parameters
-2. **Context**: TodoRead to get current task state
+2. **Context**: TaskList to get current task state (TaskGet for the task named by `--id`)
+   - At any step, if a task tool the operation needs is absent or answers "disabled for this session", print only one line, `Task 도구를 사용할 수 없어 /task 를 실행하지 않았습니다 (도구 없음 또는 "disabled for this session")`, and stop: do not retry it and do not substitute another store
 3. **Execute**:
    - `create`: Decompose into atomic tasks, assign priorities, write with TaskCreate
    - `list`: Read and format current tasks by status
-   - `update`: Modify specified task, re-validate dependencies
-   - `complete`: Verify task output, mark done, check if unblocks other tasks
-   - `block`: Mark blocked, identify dependent tasks affected
+   - `update`: Modify specified task with TaskUpdate, re-validate dependencies
+   - `complete`: Verify task output, mark done with TaskUpdate, check if unblocks other tasks
+   - `block`: Mark blocked with TaskUpdate, identify dependent tasks affected
    - `clear`: Remove completed tasks, compact list
 4. **Verify**: Ensure single task in_progress at a time. Validate no circular dependencies
 5. **Report**: Output updated task board

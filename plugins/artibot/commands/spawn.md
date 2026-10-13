@@ -29,6 +29,8 @@ Parse $ARGUMENTS:
 | sequential | Tasks chained: `TaskUpdate(taskId, addBlockedBy=[previous-id])` | Each task unblocks the next upon completion |
 | pipeline | Tasks chained with output forwarding via SendMessage between phases | Teammate sends results to next teammate, who uses them as input |
 
+> **Task tools unavailable**: if a task tool is absent or answers "disabled for this session", skip every task record this file describes (the modes above, the examples below, the Strategy Types table, steps 5-6) and do not retry it: the spawn prompt is the assignment and the teammates' `SendMessage` reports are the status channel. For sequential and pipeline work, brief each later-stage teammate to wait for your `SendMessage` hand-off, and send it only after the previous stage has reported.
+
 ### Mode Implementation
 
 **Parallel**:
@@ -106,9 +108,10 @@ SendMessage(to="tester", message="{lint results and context}")
    - Parallel: no dependencies between peer tasks
    - Sequential: linear chain of blockedBy
    - Pipeline: chain + SendMessage for output forwarding
+   - If a task tool is absent or answers "disabled for this session", skip this step and do not retry it: the spawn prompt's `{role brief}` (step 4) is the assignment, so put each work unit's scope, objectives and success criteria there (write `-` where a template asks for a Task ID or task count)
 6. **Monitor Execution**: Track progress and handle failures:
-   - Poll `TaskList` to monitor task statuses (if it answers "disabled for this session", track status from teammates' `SendMessage` reports instead)
-   - Use `TaskGet(taskId)` for detailed status on specific tasks
+   - Poll `TaskList` to monitor task statuses (if it is absent or answers "disabled for this session", do not retry it and track status from teammates' `SendMessage` reports instead)
+   - Use `TaskGet(taskId)` for detailed status on specific tasks (skip under the same condition)
    - Handle failures: reassign tasks or spawn replacement teammates
    - Use `SendMessage` to coordinate, redirect, or provide additional context
 7. **Aggregate Results**: Combine all teammate outputs:
@@ -209,6 +212,6 @@ Use GFM markdown tables:
 
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
-| 1 | 진행 추적 | `/task` | 스폰된 작업 진행 상태 추적 |
+| 1 | 진행 추적 | `/task` | 스폰된 작업 진행 상태 추적 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |
 | 2 | 결과 검증 | `/verify` | 에이전트 작업 결과 검증 |
 | 3 | 변경사항 커밋 | `/git` | 작업 결과 커밋 및 푸시 |

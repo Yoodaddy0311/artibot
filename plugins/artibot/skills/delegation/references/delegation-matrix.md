@@ -1,5 +1,7 @@
 # Delegation Matrix
 
+**Task tools unavailable**: if a task tool is absent or answers "disabled for this session", skip the `Task*` steps in the tables and checklist below and do not retry it: the spawn prompt is the assignment and the teammates' `SendMessage` reports are the status channel.
+
 ## Mode Decision Matrix
 
 | Factor | Weight | Sub-Agent (<0.6) | Team (>=0.6) |
@@ -95,9 +97,9 @@ Applies to both Sub-Agent and Team modes:
        `team-{task-slug}-{sid}`, where `{sid}` is a session discriminator
        (see `commands/team.md` Phase 2)
 3. [ ] `Agent(type, name="{run-slug}-{role}")` for each teammate
-4. [ ] `TaskCreate` for all work items with clear descriptions
-5. [ ] `TaskUpdate` to assign or let teammates self-claim
-6. [ ] Monitor via `TaskList` and coordinate via `SendMessage`
+4. [ ] `TaskCreate` for all work items with clear descriptions (skip if a task tool is absent or answers "disabled for this session": put each work item in its spawn prompt)
+5. [ ] `TaskUpdate` to assign or let teammates self-claim (same skip: the spawn prompt is the assignment)
+6. [ ] Monitor via `TaskList` and coordinate via `SendMessage` (same skip: the teammates' `SendMessage` reports are the status channel)
 7. [ ] Aggregate results as tasks complete
 8. [ ] `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` to each teammate
 9. [ ] shutdown_request to every teammate -- that is the whole cleanup

@@ -125,7 +125,7 @@ after they are spawned:
 
 | Mode | Available Tools | Delegation | Communication | Task Tracking |
 |------|----------------|------------|---------------|---------------|
-| **agent-teams** | Agent(name=…), SendMessage, TaskCreate | Named teammates, addressable while running | Bidirectional (DM, broadcast, plan approval) | Shared TaskList |
+| **agent-teams** | Agent(name=…), SendMessage, TaskCreate | Named teammates, addressable while running | Bidirectional (DM, broadcast, plan approval) | Shared TaskList (or SendMessage reports when `Task*` is absent/disabled) |
 | **sub-agent** | Spawn tool of the session — `Agent()` interactive, `Task()` headless | Fire-and-forget sub-agents | One-way (result return only) | Manual tracking via orchestrator |
 | **direct** | Read, Glob, Grep, Bash, WebSearch | None - orchestrator does all work | N/A | Orchestrator self-manages |
 
@@ -148,6 +148,8 @@ Check what the session actually has before concluding anything is missing.
 > than trusting a count from the other one. What stays unverified is whether the env var
 > gates anything *interactively* — nobody has toggled it on that surface — and no other CLI
 > version was tested, so older builds may genuinely have gated these tools.
+
+A `Task*` tool that is exposed but answers "disabled for this session" counts as absent: skip the task records and do not retry it. The spawn prompt is the assignment and the teammates' `SendMessage` reports are the status channel. Every other `Task*` step in this file (task creation, owner assignment, `TaskList` / `TaskGet` gates) is skipped the same way. If only the `Task*` family is lost and `SendMessage` still works, the mode stays `agent-teams` and only step 2 of the list below (skip `TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`) applies; the list's other steps are for a session without `SendMessage`.
 
 Once you have confirmed the tools are genuinely absent:
 

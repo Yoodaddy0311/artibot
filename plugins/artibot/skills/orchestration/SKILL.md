@@ -31,7 +31,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "orchestration"
-source_hash: d6b0c41d
+source_hash: 4e0dd5f8
 whenNotToUse: "Simple single-agent, single-file tasks under 30 lines where orchestration overhead exceeds the value; also not applicable outside the Artibot plugin environment."
 ---
 
@@ -73,6 +73,8 @@ Team mode auto-boost keywords: "전체", "모든", "all", "comprehensive", "audi
 | Swarm | Independent parallel work | TaskCreate (all items) → teammates self-claim |
 | Pipeline | Strict dependencies | TaskCreate with blockedBy chains |
 
+**Task tools unavailable**: if a task tool is absent or answers "disabled for this session", skip the `Task*` steps of the patterns above and do not retry it: the spawn prompt is the assignment and the teammates' `SendMessage` reports are the status channel.
+
 ## HARD-GATE: Design Before Implementation
 
 For System 2 (complex) requests: **produce and get approval for a design doc before any Edit/Write/Bash**.
@@ -85,7 +87,7 @@ Bypass: System 1 requests, explicit user override ("just do it"), `--hotfix` fla
 
 ## Quick Reference
 
-**Team API Tools**: Agent(type, name), TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage. No create/delete calls: the session has one implicit team, and shutdown_request is the teardown.
+**Team API Tools**: Agent(type, name), TaskCreate, TaskUpdate, TaskList, TaskGet, SendMessage. No create/delete calls: the session has one implicit team, and shutdown_request is the teardown. The `Task*` tools may be absent or answer "disabled for this session": skip them, no retry (see Team Patterns).
 
 **Token zones**: Green 0-60% | Yellow 60-75% (enable --uc) | Orange 75-85% (compress) | Red 85%+ (/clear)
 

@@ -50,7 +50,7 @@ When the prompt contains `[artibot:hint recommend=workflow]`, surface to the use
 - **Each teammate works independently** on their assigned scope
 - After main work: cross-check another teammate's output (review phase-role — 현재 opus)
 
-> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver for the shipped policy is `lib/core/model-policy.js#resolveModel(agentName, { role })`, backed by `artibot.config.json#/agents/modelPolicy` (`resolveModelForPhase(role)` is the agent-less variant — it cannot see the allowlist/denylist, so never use it to pick a teammate's tier). The SubagentStart hook (`scripts/hooks/subagent-handler.js#checkModelPolicy`) computes `canonicalModel` with `resolveModel`, but its drift flag compares it against a requested model read by `#extractRequestedModel` from `model`/`tool_input.model`/`agent_model` — keys the SubagentStart payload does not carry (2.1.260 top-level keys: agent_id, agent_type, cwd, hook_event_name, prompt_id, session_id, transcript_path — the same file's comment above `route.bound`). So the flag cannot fire on a real spawn and is **not** a safety net for a forgotten model parameter: the leader passing `model` (below) is the only path.
+> **Single source of truth:** the phase→model mapping above is a prose summary. The authoritative resolver for the shipped policy is `lib/core/model-policy.js#resolveModel(agentName, { role })`, backed by `artibot.config.json#/agents/modelPolicy` (`resolveModelForPhase(role)` is the agent-less variant — it cannot see the allowlist/denylist, so never use it to pick a teammate's tier). The SubagentStart hook (`scripts/hooks/subagent-handler.js#checkModelPolicy`) runs `resolveModel` on the payload's `agent_type`, but only when that name is itself a policy key — a direct Agent-tool spawn (`artibot:tdd-guide`). A named spawn (what `/team` makes) carries the teammate name there (name-shaped `agent_type` values dominate this repo's `spawns.ndjson` census, while on 2026-09-04 a named Agent-tool spawn reported its `subagent_type` instead, 1/1 — the receipt matcher accepts both spellings, `scripts/hooks/subagent-handler.js#matchReceipt`), which is not a policy key, so `checkModelPolicy` answers null for it; the `canonicalModel` the hook then records (spawn ledger, team state, `route.bound` `selected_model`) is re-derived from the `subagent_type` of the route receipt the spawn bound to (`lib/routing/bind-model-fallback.js#resolveBoundModel`) and stays null when no `route.bound` row was written or the receipt names no policy-listed definition (a resume of an already-registered agent carries over the `canonicalModel` of the entry it replaces). Either way it is the policy tier, not the model the host served (that is `servedModel` on the SubagentStop row). The drift flag stays keyed to the payload's `agent_type` and compares `checkModelPolicy`'s value against a requested model read by `#extractRequestedModel` from `model`/`tool_input.model`/`agent_model` — keys the SubagentStart payload does not carry (2.1.260 top-level keys: agent_id, agent_type, cwd, hook_event_name, prompt_id, session_id, transcript_path — the same file's comment above `route.bound`). So the flag cannot fire on a real spawn and is **not** a safety net for a forgotten model parameter: the leader passing `model` (below) is the only path.
 
 > **모델 전달 — 아래 스폰 예시의 `model` 주석이 가리키는 절차.** 리더는 스폰마다 `node <pluginRoot>/scripts/model-routing/model-routing.mjs resolve <plugin:name> --role <build|review>` 를 실행하고 그 출력값을 Agent 호출의 `model` 파라미터에 **실제로 넘긴다**. `<plugin:name>` 은 `artibot:code-reviewer` 같은 플러그인 한정 이름, `--role build` 는 구현·process 스폰, `--role review` 는 크로스체크·최종 검수·judge 스폰이다. config 에 적힌 값은 리더가 넘기지 않으면 스폰에 닿지 않고, 넘기지 않은 스폰은 에이전트 frontmatter `model:` 을 따른다 — 둘 다 **추론**이다(코드·호스트 페이로드 판독, 실행 확인 없음). 넘겼을 때 Agent 호출의 `model` 파라미터가 플러그인 `subagent_type` 의 frontmatter 보다 우선하는지도 **미확인**이다(2026-09-23 설계 정찰 §3 표 — general-purpose 스폰에서 haiku 반영만 자기보고로 관측). 호스트 페이로드 실측 6행에는 `model` 인자가 한 번도 없었다(`scripts/hooks/route-observe-pre.js#TOOL_INPUT_KEYS` 주석 — 넘긴 시나리오 자체가 없었다). 그 CLI 가 아직 없거나 실패하면 폴백은 `lib/core/model-policy.js#resolveModel(agentName, { role })` 의 값이다(오늘은 전 에이전트 opus).
 
@@ -196,7 +196,7 @@ Agent(subagent_type="artibot:{agent-type}", name="team-{task-slug}-{sid}-{role}"
 
 - **제약은 전부 스폰 프롬프트에 싣는다**(범위·파일 소유·금지 사항·성공기준). 작업 중인 팀원에게 보낸 리더 메시지가 16분 넘게 배달되지 않았다(`read:false`). 중간 보정은 팀원이 현재 작업을 끝낸 뒤에야 처리되는 일이 많아, 보정 전 설계로 "완료" 보고가 오고 늦게 처리된 보정이 이미 끝난 결과를 뒤집을 수 있다. 중간 보정을 보냈다면 완료 보고를 받은 뒤 그 결과를 보정에 비추어 다시 대조한다.
 - **병렬 스폰이 실패하면 실패한 호출만 한 번 다시 부른다.** `Agent` 호출 8개 중 2개가 `Lock file is already being held` 로 실패했고 같은 호출을 다시 불렀더니 성공했다. 성공한 스폰은 다시 부르지 않는다(같은 작업을 두 번 맡기게 된다). 큰 fan-out 은 위 "Spawn ALL teammates in a single message" 의 예외로, 몇 개씩 나눠 연달아 스폰한다 — 나누면 경합이 줄어드는지는 미측정이다.
-- **팀원 쪽 Task 도구가 꺼져 있을 수 있다.** 팀원 8명 중 7명의 첫 `TaskList` 호출이 "disabled for this session" 으로 응답했다. 작업 명세는 항상 스폰 프롬프트에 싣고(아래 "Task 도구가 없는 세션" 과 같은 이유다) `TaskCreate` 레코드는 보조로 둔다. `agents/*.md` 의 On Start 단계는 이 경우를 위해 조건부로 바뀌었다.
+- **팀원 쪽 Task 도구가 꺼져 있을 수 있다.** 팀원 8명 중 7명의 첫 `TaskList` 호출이 "disabled for this session" 으로 응답했다. 작업 명세는 항상 스폰 프롬프트에 싣고(아래 "Task 도구가 없는 세션" 과 같은 이유다) `TaskCreate` 레코드는 보조로 둔다. `agents/*.md` 의 On Start · Claim Work · Complete Work · Shutdown 단계는 이 경우를 위해 조건부로 바뀌었다 — 보고(`SendMessage`)는 조건 밖이라 그대로 필수다.
 
 ### 보고 계약 (MANDATORY — 모든 스폰 프롬프트의 `{보고 계약}` 자리에 그대로 삽입)
 
@@ -268,10 +268,12 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
 #### Task 도구가 없는 세션 (fallback)
 
 하네스가 태스크 도구를 내려주지 않은 세션에서는 `TaskCreate` · `TaskUpdate` · `TaskList` ·
-`TaskGet` 이 **아예 존재하지 않는다**. 그때는 위 태스크 단계를 **생략하고 SendMessage 기반으로
-진행**한다 — 없는 도구를 호출하려다 턴을 태우지 마라.
+`TaskGet` 이 **아예 존재하지 않는다**. 도구가 노출돼 있어도 호출하면 "disabled for this session" 으로
+응답하는 세션도 있다(위 "스폰 운영 주의" 의 팀원 쪽 관측 — 리더 쪽 응답은 미확인). 어느 쪽이든 위 태스크 단계를
+**생략하고 SendMessage 기반으로 진행**한다 — 없는 도구를 호출하려다 턴을 태우지 마라. "disabled" 응답을 한 번 받은
+도구는 다시 부르지 않는다.
 
-판단 기준은 **도구의 실제 존재 여부**이지 환경변수가 아니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`
+판단 기준은 **도구의 실제 존재 여부와 호출 응답**이지 환경변수가 아니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`
 미설정은 도구 부재를 뜻하지 않는다 — CLI 2.1.220 headless 실측에서 변수 유무와 무관하게 `Task*`
 7종이 모두 존재했고, 실제로 도구를 지운 것은 `--tools` 허용목록뿐이었다 (대화형 표면과 타 CLI
 버전은 미확인).

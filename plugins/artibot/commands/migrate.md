@@ -58,7 +58,7 @@ lifecycle: ship
    - 서비스 / 인프라 / 런타임 교체 → `devops-engineer` 우선
 5. **Generate**: 아래 **체크리스트 템플릿** 형식으로 출력
 6. **Persist**: `.artibot/REPORTS/YYYY-MM-DD-migration-<slug>.md` 로 저장 (운영팀 공유용)
-7. **Track**: `TaskCreate`로 각 섹션의 미완료 항목을 작업화
+7. **Track**: `TaskCreate`로 각 섹션의 미완료 항목을 작업화 (Task 도구가 없거나 "disabled for this session" 이면 이 단계만 건너뛰고 재시도하지 않는다 — 체크리스트 출력과 6단계 저장은 그대로다)
 
 ## 출력 — 6섹션 체크리스트 템플릿
 
@@ -268,6 +268,6 @@ lifecycle: ship
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
 | 1 | 실행 계획 | `/plan` | 마이그레이션 체크리스트 기반 phase별 작업 분해 |
-| 2 | 작업 등록 | `/task` | 각 체크리스트 항목을 추적 가능한 task로 등록 |
+| 2 | 작업 등록 | `/task` | 각 체크리스트 항목을 추적 가능한 task로 등록 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |
 | 3 | 배포 | `/ship` | 점검 윈도우 도래 시 실제 cutover 실행 |
 | 4 | 사후 회고 | `/recap` | T+24h 회고 보고서 작성 |

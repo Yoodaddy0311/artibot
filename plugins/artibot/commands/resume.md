@@ -185,4 +185,4 @@ for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:
 |---|------|--------|------|
 | 1 | 새 핸드오프 저장 | `/save` | 이번 세션 진행 후 다음 세션용 핸드오프 작성 |
 | 2 | 아카이브 목록 | `/resume --list` | 과거 핸드오프 비교 |
-| 3 | 작업 상태 | `/task` | TaskList 기반 현재 작업 확인 |
+| 3 | 작업 상태 | `/task` | TaskList 기반 현재 작업 확인 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |

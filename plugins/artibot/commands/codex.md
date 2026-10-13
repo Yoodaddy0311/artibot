@@ -177,7 +177,7 @@ Artibot code-reviewer와 codex-plugin-cc의 review 기능을 병렬로 실행하
    - `--staged`: staged 변경사항만 대상
 
 3. **병렬 실행**:
-   - **Artibot**: code-reviewer 에이전트로 리뷰 (TaskCreate)
+   - **Artibot**: code-reviewer 에이전트로 리뷰 (TaskCreate). Task 도구가 없거나 "disabled for this session" 이면 재시도하지 않고 이 줄만 건너뛴다 — 출력의 `Artibot:` 는 `미실행 (Task 도구 사용 불가)`, 교차 통계(AGREEMENT · ARTIBOT-ONLY · CODEX-ONLY)는 `-` 로 적어 크로스체크가 성립하지 않았음을 밝힌다
    - **Codex**: `codex review [scope]` 실행 (Bash를 통해 codex-plugin-cc 트리거)
    - 두 결과를 동시에 수집
 

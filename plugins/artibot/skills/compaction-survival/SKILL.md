@@ -27,7 +27,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: 1c6b26c2
+source_hash: 68a95935
 whenNotToUse: "Short sessions well within context limits where compaction is not imminent; do not invoke as a routine step — only apply when context size poses a real loss risk."
 ---
 
@@ -153,7 +153,7 @@ Claude Code는 컨텍스트 윈도우 한계에 근접하면 이전 메시지를
 사전 방어 절차:
 1. /checkpoint — 현재 상태를 auto memory에 저장
 2. 핵심 결정사항을 메시지에 요약
-3. 진행 중인 작업을 TaskCreate로 태스크 시스템에 기록
+3. 진행 중인 작업을 TaskCreate로 태스크 시스템에 기록 (Task 도구가 없거나 "disabled for this session" 이면 건너뛰고 재시도하지 않는다)
 4. 중요 파일 경로를 전체 경로로 명시적 언급
 ```
 
@@ -181,7 +181,7 @@ Progress:
 - [ ] Step 2: 핵심 상태를 최근 메시지에 요약
 - [ ] Step 3: 중요 파일 경로를 전체 경로로 명시
 - [ ] Step 4: /checkpoint로 상태 스냅샷 저장
-- [ ] Step 5: 진행 중 작업을 TaskCreate로 기록
+- [ ] Step 5: 진행 중 작업을 TaskCreate로 기록 (도구가 없거나 "disabled for this session" 이면 건너뜀)
 - [ ] Step 6: (컴팩션 후) 복구 절차 실행
 ```
 
@@ -193,7 +193,7 @@ Progress:
 | 160자 규칙 | 앞 160자에 핵심 배치 | 요약 시 앞부분 우선 보존 |
 | 파일 경로 명시 | `/` + 확장자 포함 전체 경로 | key files 자동 추출 대상 |
 | Checkpoint | 70% 도달 시 /checkpoint | auto memory에 상태 영구 저장 |
-| Task 기록 | 진행 중 작업을 TaskCreate | 컴팩션 후 TaskList로 복구 가능 |
+| Task 기록 | 진행 중 작업을 TaskCreate (도구가 없거나 "disabled for this session" 이면 생략) | 컴팩션 후 TaskList로 복구 가능 (생략 시 복구 대상 없음) |
 
 ## Rationalizations
 > 이 절은 참고 자료다 — 아래 변명·반박은 모델이 작업 중 스스로 지름길을 점검하는 데 쓰고, 사용자에게 묻는 질문 목록이나 별도 게이트로 쓰지 않는다. 반박에 비추어 스스로 바로잡을 수 없으면 이 스킬의 Step·Checkpoint 규칙을 따른다.

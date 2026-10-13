@@ -27,7 +27,7 @@ agents:
   - "orchestrator"
 tokens: "~3K"
 category: "orchestration"
-source_hash: e7426a72
+source_hash: e3540f6f
 whenNotToUse: "Do not delegate single-file changes under 30 lines to sub-agents or teams — the delegation overhead exceeds the task cost. Do not use Team Mode for tasks with strict sequential dependencies where all work would block on the first agent anyway."
 ---
 
@@ -71,6 +71,8 @@ Team auto-boost: "전체", "all", "comprehensive", "audit", "병렬", "parallel"
 | Council | Consensus needed | SendMessage discussion → leader decides |
 | Swarm | Independent tasks | Teammates self-claim from TaskList (if the session exposes it; otherwise the leader assigns each task in the spawn prompt) |
 | Pipeline | Sequential deps | TaskCreate with blockedBy |
+
+**Task tools unavailable**: if a task tool is absent or answers "disabled for this session", skip the `Task*` steps of the lifecycle and patterns above and do not retry it: the spawn prompt is the assignment and the teammates' `SendMessage` reports are the status channel.
 
 **Team sizing**: Squad 3 | Platoon 5 | Battalion 7+
 

@@ -49,6 +49,8 @@ Target ratio: **Simple ~25% | Sub-Agent ~35% | Team ~40%**
 | `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` | Completion | Request teammate exit |
 | `SendMessage(to="<teammate-name>", message={type: "shutdown_request"})` | Cleanup | Shut down each teammate when done |
 
+**Task tools unavailable**: if a task tool is absent or answers "disabled for this session", skip the `Task*` tools listed here and in the Delegation Mode Decision table above and do not retry it: the spawn prompt is the assignment and the teammates' `SendMessage` reports are the status channel.
+
 ## Wave Mode Triggers
 
 | Condition | Threshold | Wave Strategy | Delegation Mode |

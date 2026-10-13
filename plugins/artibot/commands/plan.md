@@ -67,7 +67,7 @@ Parse $ARGUMENTS:
    - `--list [filter]` 지정 시: `listArtifacts({filter})` 결과를 표로 출력 (조회 전용 — 플랜 생성·이동 없음).
    - `--archive` 지정 시: 기본 `archiveStale({dryRun:true})`로 **이동 예정 목록만** 미리보기 → 사용자가 `--apply`를 추가하면 `dryRun:false`로 실제 `_archive/` 이동 + `indexArtifacts()`로 INDEX.md 갱신. **삭제 아님(이동), git 추적이라 복구 가능**.
    - `--supersede <oldSlug> <newPath>` 지정 시: `supersede()`로 옛 문서에 superseded 표식.
-10. **Report**: Output structured plan with TaskCreate integration. 마지막에 autopilot 핸드오프 라인을 사이징 결과(`autopilot.maxHint`/`autopilot.budgetHint`)에 맞춰 출력한다 (아래 Output Format 참조).
+10. **Report**: Output structured plan with TaskCreate integration (if a task tool is absent or answers "disabled for this session", skip only the TaskCreate part and do not retry it; the step 6 `.plan-state.json` tracking is unchanged). 마지막에 autopilot 핸드오프 라인을 사이징 결과(`autopilot.maxHint`/`autopilot.budgetHint`)에 맞춰 출력한다 (아래 Output Format 참조).
 
 ## Plan Structure
 
@@ -377,4 +377,4 @@ const { ok, oldPath } = await supersede({   // async — await 필수
 |---|------|--------|------|
 | 1 | 계획 실행 | `/implement` | 계획된 기능 구현 시작 |
 | 2 | 공수 산정 | `/estimate` | 계획 기반 공수 산정 |
-| 3 | 작업 등록 | `/task` | 계획 항목 작업 목록 등록 |
+| 3 | 작업 등록 | `/task` | 계획 항목 작업 목록 등록 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |

@@ -24,7 +24,7 @@ Parse $ARGUMENTS:
 2. **Capture State**:
    - Current branch and commit hash
    - Modified/staged/untracked files list
-   - Active TaskCreate tasks and their status
+   - Active TaskCreate tasks and their status (if a task tool is absent or answers "disabled for this session", do not retry it: write `(작업 데이터 없음 — Task 도구 사용 불가)` under Task State and `-` for Tasks in the output)
    - Key metrics: test count, lint errors, build status
    - Git diff summary (if `--include-diff`)
 3. **Save**: Write checkpoint to auto memory:
@@ -103,5 +103,5 @@ Worklog:  [appended to memory/worklog.md]
 | # | 액션 | 커맨드 | 설명 |
 |---|------|--------|------|
 | 1 | 일일 리포트 | `/daily` | 체크포인트 포함 일일 회고 |
-| 2 | 작업 관리 | `/task` | 체크포인트 기반 작업 정리 |
+| 2 | 작업 관리 | `/task` | 체크포인트 기반 작업 정리 (Task 도구가 없거나 "disabled for this session" 이면 이 행은 건너뛴다) |
 | 3 | 커밋 | `/git` | 체크포인트 시점 변경사항 커밋 |

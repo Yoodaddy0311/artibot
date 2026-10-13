@@ -21,7 +21,7 @@ agents:
   - "code-reviewer"
   - "security-reviewer"
 tokens: "~2.5K"
-source_hash: 3187bc07
+source_hash: 0daf156a
 whenNotToUse: "Single-AI workflows where codex-plugin-cc is not installed or OpenAI CLI is unavailable; do not apply when the user is not running a dual-AI (Artibot + Codex) setup."
 ---
 
@@ -71,6 +71,8 @@ User triggers /codex review
     - Tag source: [Artibot] / [Codex] / [Both]
     - Highlight disagreements
 ```
+
+TaskCreate 가 없거나 "disabled for this session" 이면 Artibot 쪽 리뷰만 건너뛰고(재시도 없음) 출력에 `Artibot: 미실행` 으로 밝힌다 — 이 경우 결과는 크로스체크가 아니라 Codex 단독 리뷰다.
 
 **Configuration** (`artibot.config.json`):
 ```json
