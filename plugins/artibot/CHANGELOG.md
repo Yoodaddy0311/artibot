@@ -11,6 +11,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.8] — 2026-10-13
+
+`v4.71.7`(`3d0a4c0a`) 이후 11 커밋 = **93 files +5,140/−459**(`git rev-list --count v4.71.7..8fde2443` · `git diff --shortstat v4.71.7 8fde2443`, 2026-10-13 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `f9459206`·`0c8ff7b4`·`425220ad` 3개는 인계 문서 커밋이고 내용 커밋은 8개다.
+
+### 공유 상태 파일이 손상·읽기 실패에 닫힌다 (`48e85610`)
+
+- `~/.claude/artibot-state.json` 을 읽고 다시 쓰는 훅 넷 중 셋(SubagentStart/Stop · `workflow-status` · `team-idle-handler`)이 손상 파일이나 읽기 실패(EBUSY·EPERM 등)를 빈 상태로 읽고 덮어써서 다른 세션의 행을 지웠다. 샌드박스 HOME 실측: 3-agent 정상 파일이 EBUSY 한 번에 1행 골격(`team-idle-handler` 는 `{}`)으로 교체됐다.
+- 새 `lib/runtime/subagent-state-guard.js#readStateForUpdate`: ENOENT 만 "파일 없음", 그 밖의 읽기 실패·비JSON·비객체·`agents` 비객체는 `null` → 그 훅은 쓰지 않고 호출한 훅 이름으로 stderr 한 줄. `workflow-status` 는 거부 때 `current-teammates.json` 롤링도 건너뛴다. 정상 경로의 stdout·종료 코드는 그대로다. 호출자가 없어진 fail-open 리더 `_team-state.js#loadState` 는 삭제했고 테스트가 부재를 고정한다.
+- 재개(resume) START 가 같은 agentId·같은 agentType 으로 이미 등록돼 있으면 원장을 읽지 않고 `skipped:already-bound` 로 남긴다. 첫 bind 가 128 KB 원장 창 밖으로 밀린 뒤의 재개가 형제 스폰의 영수증을 FIFO 로 가져가던 경로다(라이브 `route.bound` 에서 agent id 4개가 두 번 묶임). 같은 id 의 다른 타입·agentType 없는 행·읽을 수 없는 상태 파일은 그대로 bind 한다.
+- `scripts/hooks/subagent-handler.js` 를 973 → 772줄로 나눴다(순수 헬퍼는 `lib/runtime/subagent-spawn-columns.js`, 재노출로 import 처 불변). 훅 수는 79 그대로다.
+
+### SubagentStop 행에 실제 서빙 모델 (`95c4846c`)
+
+- SubagentStart 페이로드에 모델이 없어 `requestedModel` 은 모든 행에서 null 이었고, 상태 파일은 sonnet 으로 뜬 팀원을 `canonicalModel:"opus"`(정책 티어)로 적었다. STOP 행과 상태 항목에 transcript 꼬리에서 읽은 `servedModel`·`servedTier` 와, 정책 티어 대 서빙 티어를 비교하는 별도 불리언 `servedDrift`(의도된 `/model-routing` 경로 포함, 오류 신호 아님)를 더했다. `modelMismatch` 는 START 의미 그대로다.
+- 재개 START 가 정책 열(`canonicalModel`·`recommendedModel`·`actionClass`)을 null 로 지우던 것(244개 id 중 231)을 같은 agentType 에 한해 이어받게 했다.
+
+### Task 도구가 없거나 "disabled for this session" 이어도 지시가 깨지지 않는다 (`44e51c92`·`8fde2443`)
+
+- 라이브 `/team` 런에서 팀원 8명 중 7명이 첫 TaskList 에서 "disabled for this session" 을 받았다. 에이전트 29종의 On Start · Claim Work · Complete Work · Shutdown 단계와 orchestrate · spawn · daily/recap · resume · team · task · checkpoint · migrate · plan · codex 커맨드, delegation · orchestration · compaction-survival · codex-integration · verification-completion 스킬이 같은 문구로 바뀌었다: 건너뛰고 재시도하지 않는다, 스폰 프롬프트가 배정이고 `SendMessage` 보고가 상태 채널이다. 보고는 조건 밖이라 계속 필수다.
+- `commands/task.md` 의 퇴역 도구명 `TodoRead` 를 `TaskList`/`TaskGet` 으로 바꾸고, 본문이 부르는 Task 도구를 `allowed-tools` 에 맞췄다.
+
+### `/team` 문서 (`bd997f04`·`44e51c92`)
+
+- 토큰 상한 표가 API task budgets 기능처럼 읽혀 "토큰 상한(권고)" 으로 개명했다. 표의 리뷰 40,000 · 짧은 배치 20,000 은 코드가 내는 값이 아니었다(2026-04-20 `27bca93f` 이후 불변) — 훅이 쓰는 `budgetMap`(64,000 / 32,000)으로 맞추고 표 ↔ config ↔ 코드 기본값 대조 핀을 붙였다.
+- 「스폰 운영 주의」: 작업 중인 팀원은 리더 메시지를 늦게 받으니 제약은 스폰 프롬프트에, `Lock file is already being held` 는 1회 재시도, Bash 없는 에이전트 7종에는 셸 작업을 주지 않는다.
+- `/assemble` · `/spawn` · `/orchestrate` 의 팀원 이름이 모두 세션 판별자 `{sid}` 를 싣는다.
+
+### 카탈로그·비용표 (`f3ca6090`·`c017b3f2`·`abce89ca`)
+
+- `usage-cost-table` 의 `--live-session` 읽기가 가격 구간 초과 요청 수(`meta.overPriceBandRequests`)를 한 줄로 인쇄한다(원장 영수증은 이 수를 저장하지 않아 원장 행은 미측정).
+- 생성 카탈로그 문서에 가격 구간 각주(†)와 모델별 thinking 노트. 노트는 이제 `MODELS` 행의 `thinkingNote` 필드에서 렌더되고, 문서와 행을 대조하는 테스트가 있다. `CATALOG_VERSION` 2026-10-12 → 2026-10-13(비가격 값 변경 규칙), 가격·`PRICING_VERSION` 불변.
+
+### 알려진 것
+
+- 과거 원장의 이중 bind 5건(`agent_bound_twice`)은 append-only 원장에 남아 doctor Check 10 은 그대로 FAIL 로 읽힌다(재구성 기준, 실제 `/doctor` 미실행). 창·기준선 처리는 후속이다.
+- artibot-cowork 의 같은 옛 줄(에이전트 11 · `commands/sdk.md`)은 ZIP 고정이라 다음 cowork 릴리스 때 고친다.
+
 ## [4.71.7] — 2026-10-12
 
 `v4.71.6`(`e3dc9410`) 이후 13 커밋 = **65 files +3,604/−437**(`git rev-list --count v4.71.6..8aee6541` · `git diff --shortstat v4.71.6 8aee6541`, 2026-10-12 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 v4.71.6 배지 동기화 봇 커밋 `e5117219` 와 출하 결과 기록 `93d82b4e` 를 뺀 11 커밋(`4980e43f..8aee6541`) = **59 files +3,597/−430**(`git diff --shortstat 4980e43f^ 8aee6541`)이 아래 내용이다. 릴리스 전 로컬 전체 스위트는 돌리지 않았다(이 PC 의 부하를 피하려고 — 전체 스위트의 판정은 CI). 릴리스 전 트리 `8aee6541`(`ci/w2-20261012`)의 CI 는 Ubuntu Node 20/22/24 세 레그가 모두 `Test Files 888 passed (888)` · `Tests 26946 passed | 47 skipped (26993)` 로 끝났고 Windows(Node 22) 레그도 `Tests 26996 passed | 20 skipped (27016)` 로 success 이며(문서에 적는 시험 수 26,993 은 release.yml 이 Ubuntu 러너의 `numTotalTests` 로 다시 쓰는 값이다), 두 plugin.json 구조 검증과 변경 감지 잡도 success 다(2026-10-12, 잡 로그의 vitest 요약 줄 — 릴리스 커밋은 이 트리에 없다).
