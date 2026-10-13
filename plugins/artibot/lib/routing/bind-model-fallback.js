@@ -19,6 +19,13 @@
  * Nothing here changes which model runs; it only stops the record from being
  * blank about it.
  *
+ * THE VALUE IS POLICY, NOT WHAT WAS SERVED. Both branches answer "which tier
+ * should this definition get" (`resolveModel`), so a spawn the leader routed with
+ * `model: "sonnet"` still records `opus` here. The served model is a different
+ * fact with a different source — the subagent transcript, read at SubagentStop
+ * and recorded on the spawn ledger's STOP row as `servedModel` / `servedTier`
+ * (`lib/learning/ledger/spawn-ledger.js`). Do not read one as the other.
+ *
  * WHAT THIS CANNOT SEE (repo rule §9 — the blind spot, beside the gate):
  *   - WHETHER THE MATCHED RECEIPT IS THE RIGHT RECEIPT. Tier-3 correlation is
  *     FIFO, i.e. a guess (`subagent-handler.js#matchReceipt`). A wrong receipt

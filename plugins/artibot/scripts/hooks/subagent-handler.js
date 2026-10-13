@@ -12,10 +12,14 @@ import { getPolicyModel, resolveModel } from '../../lib/core/model-policy.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { appendSpawn } from '../../lib/learning/ledger/spawn-ledger.js';
+// Static, so Start pays it too: 2.5-4.2 ms marginal after the rest of the graph (N=5, 2026-10-13).
+import { resolveModelIdentity } from '../../lib/economics/usage-receipt.js';
 import { getActionClassForAgent } from '../../lib/routing/action-classifier.js';
 import { resolveBoundModel } from '../../lib/routing/bind-model-fallback.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
-import { DEFAULT_TAIL_BYTES, readLedgerTail as readLedgerTailWindow } from '../../lib/runtime/ledger-tail.js';
+import {
+  DEFAULT_TAIL_BYTES, readLedgerTail as readLedgerTailWindow, readNdjsonTail,
+} from '../../lib/runtime/ledger-tail.js';
 import { isMissionId, sessionFallbackMissionId } from '../../lib/mission/mission-id.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 import { isReviewerStop, recordReviewFromStop, reviewLedgerColumn } from './_review-stop-record.js';
@@ -25,6 +29,14 @@ import { initTeamContext, loadState, saveState, updateTeamState } from './_team-
  * Read an explicitly-requested model from the hook payload, if present.
  * Spawn payloads carry the model under varying keys depending on the caller;
  * check all known locations defensively.
+ *
+ * NONE OF THE THREE KEYS WAS POPULATED on any START in this repo's spawn ledger
+ * (0 of 1,527 rows, 2026-09-13..2026-10-13): the SubagentStart payload has no model
+ * key and no `tool_input` (host 2.1.260, see the bind block below). The Agent
+ * call's `model` parameter is visible to the PreToolUse hook (receipt
+ * `requested_model`) and to the host's meta file, not here. So this probe is
+ * dormant, not wrong, and the `modelMismatch` flag it feeds cannot fire on a real
+ * START; the STOP row's served model and `servedDrift` answer the question instead.
  * @param {object} hookData - Parsed hook data
  * @returns {string|null} The requested model, or null when none was specified
  */
@@ -35,6 +47,10 @@ function extractRequestedModel(hookData) {
 /**
  * Resolve the policy-canonical model for an agent type and compare it against
  * any explicitly-requested model.
+ *
+ * `canonicalModel` is the POLICY tier the agent definition should get — never
+ * the model the host served. A spawn the leader routes with `model: "sonnet"`
+ * keeps `opus` here. What was served is read at SubagentStop ({@link readServedModel}).
  *
  * Best-effort and advisory only — must NEVER throw (teammate registration
  * runs regardless). Hooks run as a fresh Node process with an empty config
@@ -253,6 +269,99 @@ export function stopDepthFields(hookData) {
     parent_agent_id: meta.parentAgentId,
     depth_source: fromMeta ? HOST_META_SOURCE : null,
   };
+}
+
+/**
+ * Tail of the subagent transcript read for its served model, in bytes: 512 KiB.
+ *
+ * MEASURED 2026-10-13 over 1,034 subagent transcripts under ~/.claude/projects (size
+ * p50 1.3 MB, max 22.3 MB): the last real assistant line STARTS 10,098 B (p50),
+ * 43,499 B (p99) and 146,974 B (max) before EOF; 65,536 B reaches it in 1,016 of the
+ * 1,020 transcripts that have a real turn, 262,144 B in all 1,020. 512 KiB is 3.6x the
+ * worst case and 2.8-3.2 ms p50 through `readNdjsonTail` (two runs, warm cache, Node 24,
+ * Windows). A turn older than the window, or a line larger than it, is not found: the
+ * answer is null, never a guess.
+ * @type {number}
+ */
+export const SERVED_TAIL_BYTES = 524288;
+
+/** The host's placeholder `message.model` on a record it wrote itself: not a served model. */
+const SYNTHETIC_MODEL = '<synthetic>';
+
+/** Longest served id kept on a row; the ledger writer scrubs string columns but caps none. */
+const SERVED_MODEL_MAX = 128;
+
+/**
+ * The model the host SERVED a subagent: `message.model` of the last real assistant turn
+ * of its transcript (`agent_transcript_path` of a SubagentStop payload) and that id's
+ * catalog tier.
+ *
+ * Neither hook payload carries a model key (host 2.1.260 Start, 2.1.269 Stop), so START
+ * cannot know and `canonicalModel` is policy. The host meta file's `model` is the REQUEST
+ * (`sonnet`), and a request is not evidence of what ran, so it is not read. The tier goes
+ * through `resolveModelIdentity`, the one transcript-id to tier resolver: it strips the
+ * `[1m]` and `-YYYYMMDD` qualifiers transcripts append, where `tierForModelId` alone
+ * answers null. An id the catalog does not name keeps its `servedModel` with a null tier
+ * (1 of 1,034 transcripts: `claude-opus-4-8`).
+ *
+ * ONLY `message.model` LEAVES: a transcript holds prompts, file contents and paths. The
+ * LAST turn wins (1 of 1,034 transcripts held two real ids); `<synthetic>` records
+ * (interrupts, error notices) are scanned past. Never throws; null means "looked, found
+ * no real turn".
+ *
+ * @param {unknown} transcriptPath - `agent_transcript_path` of a SubagentStop payload
+ * @returns {{servedModel: string|null, servedTier: string|null}}
+ */
+export function readServedModel(transcriptPath) {
+  const none = { servedModel: null, servedTier: null };
+  try {
+    if (typeof transcriptPath !== 'string' || !transcriptPath.endsWith('.jsonl')) return none;
+    const records = readNdjsonTail(transcriptPath, { tailBytes: SERVED_TAIL_BYTES });
+    for (let i = records.length - 1; i >= 0; i -= 1) {
+      const id = records[i]?.type === 'assistant' ? records[i]?.message?.model : null;
+      if (typeof id !== 'string' || id.trim() === '' || id === SYNTHETIC_MODEL) continue;
+      const servedModel = id.trim().slice(0, SERVED_MODEL_MAX);
+      return { servedModel, servedTier: resolveModelIdentity(servedModel)?.tier ?? null };
+    }
+    return none;
+  } catch {
+    return none;
+  }
+}
+
+/**
+ * What a STOP adds to the START entry it read back: the served model and tier, and
+ * `servedDrift`, whether the served tier is not the policy tier (`canonicalModel`,
+ * left untouched). It is policy tier versus served tier, intended routes included,
+ * NOT an error signal: a sonnet build teammate routed by `/model-routing` reads `true`
+ * by design. Drift needs both tiers non-empty, so an untracked stop, an agent no policy
+ * lists, or an id the catalog does not name is false ("cannot judge" and "same tier"
+ * are both false; the tiers beside it tell them apart).
+ *
+ * `modelMismatch` is not returned and not touched: it keeps its START meaning
+ * (requested model versus policy tier), so served drift never raises it.
+ *
+ * @param {object|undefined} tracked - `state.agents[agentId]` as the START left it
+ * @param {{servedModel?: string|null, servedTier?: string|null}} [served] - {@link readServedModel} output
+ * @returns {{servedModel: string|null, servedTier: string|null, servedDrift: boolean}}
+ */
+export function servedFields(tracked, served) {
+  const { servedModel = null, servedTier = null } = served ?? {};
+  const policy = tracked?.canonicalModel;
+  const servedDrift = typeof policy === 'string' && policy !== ''
+    && typeof servedTier === 'string' && servedTier !== ''
+    && policy !== servedTier;
+  return { servedModel, servedTier, servedDrift };
+}
+
+/**
+ * The state entry of a stopped agent: the START entry, closed, plus what the STOP learned.
+ * @param {object} existing - `state.agents[agentId]` as the START left it
+ * @param {{servedModel?: string|null, servedTier?: string|null}} served - {@link readServedModel} output
+ * @returns {object}
+ */
+function stoppedEntry(existing, served) {
+  return { ...existing, active: false, stoppedAt: new Date().toISOString(), ...servedFields(existing, served) };
 }
 
 /**
@@ -596,10 +705,11 @@ function bindRoute(ctx) {
       recommendedModel: match.receipt.recommendedModel ?? null,
       actionClass: match.receipt.actionClass ?? base.actionClass,
     };
-    // The model of the agent that actually spawned. `agent_type` is the DEFINITION name
-    // only on a direct Agent-tool spawn; on a named spawn it is the teammate's name, which
-    // no policy lists, so the definition is read off the receipt instead (rules and blind
-    // spots: bind-model-fallback.js). `ok:bound` holds by construction — a receipt matched.
+    // The POLICY tier of the definition that spawned — not what the host served (that is
+    // `servedModel` on the STOP row). `agent_type` is the DEFINITION name only on a direct
+    // Agent-tool spawn; on a named spawn it is the teammate's name, which no policy lists, so
+    // the definition is read off the receipt instead (rules and blind spots:
+    // bind-model-fallback.js). `ok:bound` holds by construction — a receipt matched.
     const bound = resolveBoundModel({
       canonicalModel: ctx.canonicalModel, routeLedger: 'ok:bound', config: ctx.config,
       receiptSubagentType: match.receipt.subagentType ?? null,
@@ -663,10 +773,52 @@ function spawnDurationMs(tracked, nowMs = Date.now()) {
   return d >= 0 ? d : undefined;
 }
 
+/** The START columns that come from the bind and describe the spawn, not the turn. */
+const POLICY_COLUMNS = Object.freeze(['canonicalModel', 'recommendedModel', 'actionClass']);
+
+const isText = (value) => typeof value === 'string' && value !== '';
+
+/**
+ * The policy columns of a START, each one this START could not compute taken from the
+ * entry it replaces.
+ *
+ * A START for an id that is already registered is the host resuming the teammate (or
+ * redelivering the hook), and it cannot recompute them: `bindRoute` answers
+ * `skipped:already-bound` before it reads a receipt, and a teammate's `agent_type` is its
+ * NAME, which no policy lists. The entry used to be replaced with nulls, so the next STOP
+ * read back no policy tier and {@link servedFields} had nothing to compare. MEASURED
+ * 2026-10-13 on this repo's spawn ledger: 335 of 814 agent ids have 2 or more START rows,
+ * and of the 244 whose first START recorded a `canonicalModel`, 231 have a later START
+ * row where it is null.
+ *
+ * Keyed on the registered entry, not on the `already-bound` string: a resume after the
+ * first bind line left the ledger window records `skipped:unbound`. It never overrides a
+ * value the START computed, never crosses to another `agentType` (an id reused by a
+ * different agent) and invents nothing: a spawn that never had a tier stays null.
+ * `route_ledger` is not carried, it says what THIS START did.
+ *
+ * @param {object|undefined} previous - `state.agents[agentId]` as the earlier START left it
+ * @param {string} agentType - `agent_type` of this START
+ * @param {{canonicalModel?: unknown, recommendedModel?: unknown, actionClass?: unknown}} [fresh]
+ * @returns {{canonicalModel: string|null, recommendedModel: string|null, actionClass: string|null}}
+ */
+export function carryPolicyColumns(previous, agentType, fresh) {
+  const same = isText(agentType) && previous !== null && typeof previous === 'object'
+    && previous.agentType === agentType;
+  const out = {};
+  for (const key of POLICY_COLUMNS) {
+    if (isText(fresh?.[key])) out[key] = fresh[key];
+    else out[key] = same && isText(previous[key]) ? previous[key] : null;
+  }
+  return out;
+}
+
 /**
  * SubagentStart: register the teammate, observe the routing decision, and
  * append the spawn record. Neither ledger write can affect registration or the
- * advisory message — both are best-effort and swallow every failure.
+ * advisory message — both are best-effort and swallow every failure. A START for
+ * an id that is already registered (a resume) keeps the policy columns of the
+ * entry it replaces ({@link carryPolicyColumns}).
  *
  * @param {object} hookData - Parsed hook payload
  * @param {{agentId: string, agentRole: string, agentType: string, statePath: string}} ids
@@ -685,11 +837,16 @@ async function handleStart(hookData, ids) {
     hookData, agentId, agentType, sessionId, missionId, taskId, projectRoot, canonicalModel, config,
   });
   // What the BIND row recorded: `canonicalModel` on a direct spawn, the receipt's
-  // definition on a named one. `modelMismatch` deliberately stays keyed to the
-  // payload's `agent_type` — a name matched no policy key, so nothing contradicts it.
-  const boundModel = route.canonicalModel;
+  // definition on a named one — both POLICY tiers, neither the served model.
+  // `modelMismatch` deliberately stays keyed to the payload's `agent_type` — a name
+  // matched no policy key, so nothing contradicts it. The STOP records served drift apart.
+  // A resume computes none of the policy columns and takes them from the entry it replaces.
+  let policy = {
+    canonicalModel: route.canonicalModel, recommendedModel: route.recommendedModel, actionClass: route.actionClass,
+  };
   updateTeamState(statePath, () => {
     const loaded = loadState();
+    policy = carryPolicyColumns((loaded.agents || {})[agentId], agentType, policy);
     saveState({
       ...loaded,
       ...initTeamContext(loaded, hookData, agentRole),
@@ -700,18 +857,18 @@ async function handleStart(hookData, ids) {
           agentType,
           active: true,
           startedAt: new Date().toISOString(),
-          canonicalModel: boundModel,
+          canonicalModel: policy.canonicalModel,
           modelMismatch,
-          recommendedModel: route.recommendedModel,
-          actionClass: route.actionClass,
+          recommendedModel: policy.recommendedModel,
+          actionClass: policy.actionClass,
         },
       },
     });
   });
   recordSpawn(hookData, projectRoot, {
-    event: 'start', agentId, agentType, requestedModel, canonicalModel: boundModel, modelMismatch,
-    recommendedModel: route.recommendedModel,
-    actionClass: route.actionClass,
+    event: 'start', agentId, agentType, requestedModel, canonicalModel: policy.canonicalModel, modelMismatch,
+    recommendedModel: policy.recommendedModel,
+    actionClass: policy.actionClass,
     routing_epoch_id: agentId,
     depth: extractDepth(hookData),
     mission_id: missionId,
@@ -730,25 +887,26 @@ async function handleStart(hookData, ids) {
  * `route.selected` line is written here — a routing decision belongs to the
  * START of an epoch, and one epoch must not produce two.
  *
+ * The one place the SERVED model is knowable: the stop record and the state entry
+ * gain `servedModel` / `servedTier` ({@link readServedModel}) and `servedDrift`
+ * ({@link servedFields}). `modelMismatch` keeps its START meaning and is only repeated.
+ * Record only — stdout is unchanged.
+ *
  * @param {object} hookData - Parsed hook payload
  * @param {{agentId: string, agentType: string, statePath: string}} ids
  * @returns {void}
  */
 function handleStop(hookData, ids) {
   const { agentId, agentType, statePath } = ids;
+  // Before the lock, not under it: a transcript tail is file I/O, the lock is for the write.
+  const served = readServedModel(hookData?.agent_transcript_path);
   let tracked;
   const updated = updateTeamState(statePath, () => {
     const loaded = loadState();
     const existing = (loaded.agents || {})[agentId];
     tracked = existing;
     saveState(existing
-      ? {
-          ...loaded,
-          agents: {
-            ...(loaded.agents || {}),
-            [agentId]: { ...existing, active: false, stoppedAt: new Date().toISOString() },
-          },
-        }
+      ? { ...loaded, agents: { ...(loaded.agents || {}), [agentId]: stoppedEntry(existing, served) } }
       : loaded);
   });
   // No lock, no write — but the stop record still needs the START fields, and an
@@ -771,6 +929,7 @@ function handleStop(hookData, ids) {
     agentType: effectiveType,
     canonicalModel: tracked?.canonicalModel ?? null,
     modelMismatch: tracked?.modelMismatch === true,
+    ...servedFields(tracked, served),
     durationMs: spawnDurationMs(tracked),
     recommendedModel: tracked?.recommendedModel ?? null,
     actionClass: tracked?.actionClass ?? null,

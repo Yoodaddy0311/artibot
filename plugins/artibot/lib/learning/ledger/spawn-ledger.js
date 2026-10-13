@@ -28,17 +28,50 @@
  *   plus the OPTIONAL v5 routing columns below.
  *
  * `requestedModel` is whatever the spawn payload carried (a model id or a
- * tier alias — caller-owned). `canonicalModel` is the value returned by
+ * tier alias — caller-owned). Neither hook payload carries a model key (host
+ * 2.1.260 SubagentStart, 2.1.269 SubagentStop), so it is null for a spawn made
+ * through the Agent tool: measured 2026-10-13 on this repo's file, 0 of 1,527
+ * start rows and 0 of 8,270 stop rows held a string (reproduce: count rows
+ * whose `requestedModel` is not null). The request itself is on the PreToolUse
+ * receipt (`requested_model`) and, when the call passed one, in the host's
+ * `agent-<id>.meta.json` (`model`); this column reads neither.
+ *
+ * `canonicalModel` is the value returned by
  * `lib/core/model-policy.js#resolveModel`, i.e. the effective policy TIER
  * (`opus`, `fable`, …), not a model id; map through
  * `lib/core/model-catalog.js#MODELS` when an id is needed. Same value the
- * hook stores in `artibot-state.json#agents[id].canonicalModel`.
+ * hook stores in `artibot-state.json#agents[id].canonicalModel`. IT IS POLICY,
+ * NEVER WHAT WAS SERVED: it answers "which tier should this agent definition
+ * get", so a spawn routed elsewhere (the Agent call's `model` parameter, set by
+ * `/model-routing`) keeps its policy tier here. One is not evidence for the other.
+ * A resume START (same agent id, another turn) cannot recompute `canonicalModel`,
+ * `recommendedModel` or `actionClass`, so it carries them from the entry it replaces;
+ * `route_ledger` still says `skipped:already-bound`, because that names what THIS
+ * START did.
+ *
+ * SERVED COLUMNS — `servedModel`, `servedTier` and `servedDrift`, on the STOP row
+ * only: a START cannot know (no model in the payload, no turn yet). `servedModel`
+ * is the exact `message.model` of the subagent transcript's last real assistant
+ * turn, qualifiers kept (`claude-opus-5-5[1m]`); `servedTier` is that id's catalog
+ * tier (`sonnet`), null when the catalog does not name it. Both are explicit null
+ * when the stop looked and found nothing (no transcript, only host placeholder
+ * turns, the last turn older than the read window) and ABSENT on a START row.
+ * `servedDrift` is a boolean: `servedTier` and `canonicalModel` are both non-empty
+ * and different. It is policy tier versus served tier, intended routes included,
+ * NOT an error signal: a sonnet build teammate routed by `/model-routing` reads
+ * `true` by design. `false` covers both "same tier" and "cannot judge" (a side is
+ * unknown), so read `servedTier` and `canonicalModel` to tell them apart.
+ *
+ * `modelMismatch` keeps its START meaning on every row: "requested model differs
+ * from the policy tier" (blind in practice, see above). A STOP row repeats the
+ * START entry's value; served drift never reaches it.
  *
  * V5 ROUTING COLUMNS (T-31) — `recommendedModel`, `actionClass`,
  * `routing_epoch_id`, `depth`, `mission_id`, `task_id`, `route_ledger`, plus
- * `review_ledger` (the SubagentStop review recorder's outcome column) and, since
- * SH-19, `parent_agent_id` + `depth_source` (the STOP row's host-reported parent,
- * and the label saying whose unit `depth` is in). These
+ * `review_ledger` (the SubagentStop review recorder's outcome column), since
+ * SH-19 `parent_agent_id` + `depth_source` (the STOP row's host-reported parent,
+ * and the label saying whose unit `depth` is in) and the STOP row's
+ * `servedModel` + `servedTier` + `servedDrift` (above). These
  * are OPTIONAL in the {@link OPTIONAL_FIELDS} sense: a key the caller does not
  * supply is OMITTED from the line, exactly like `durationMs`, rather than
  * written as null. Two reasons, and both matter:
@@ -122,11 +155,12 @@ function scrubbed(v) {
  * The v5 routing columns, in line order, with the coercion each one gets.
  *
  * `string` fields are scrubbed and degrade to null; `depth` keeps a
- * non-negative integer and degrades to null. A key ABSENT from the caller's
- * record is absent from the line — see the module header for why omission and
- * null are kept distinct.
+ * non-negative integer and degrades to null; `boolean` fields are true only for
+ * `true` and false for anything else, like `modelMismatch` (no null: false is
+ * the degraded value). A key ABSENT from the caller's record is absent from the
+ * line — see the module header for why omission and null are kept distinct.
  *
- * @type {readonly [string, 'string'|'depth'][]}
+ * @type {readonly [string, 'string'|'depth'|'boolean'][]}
  */
 const OPTIONAL_FIELDS = Object.freeze([
   ['recommendedModel', 'string'],
@@ -139,6 +173,9 @@ const OPTIONAL_FIELDS = Object.freeze([
   ['review_ledger', 'string'],
   ['parent_agent_id', 'string'],
   ['depth_source', 'string'],
+  ['servedModel', 'string'],
+  ['servedTier', 'string'],
+  ['servedDrift', 'boolean'],
 ]);
 
 /**
@@ -155,6 +192,8 @@ function applyOptionalFields(out, r) {
     const value = r[key];
     if (kind === 'depth') {
       out[key] = Number.isInteger(value) && value >= 0 ? value : null;
+    } else if (kind === 'boolean') {
+      out[key] = value === true;
     } else {
       out[key] = scrubbed(value);
     }
@@ -272,6 +311,11 @@ export function readSpawns(projectRoot, filter = {}) {
  * Pure roll-up of spawn records for audits (fan-out probe, model-policy).
  * Only `start` events count as spawns; `stop` events contribute nothing to
  * the counts but still advance `lastTs`.
+ *
+ * `byModel` buckets a spawn by its POLICY tier (`canonicalModel`), falling back
+ * to the requested model and then 'unknown'. It is not a count of the models
+ * that served: a START row cannot know that, and this roll-up reads START rows
+ * only. The served model is on the STOP row (`servedModel`, `servedTier`).
  *
  * @param {object[]} records
  * @returns {{

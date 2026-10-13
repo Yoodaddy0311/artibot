@@ -233,6 +233,93 @@ describe('spawn-ledger store', () => {
     expect(rec.depth_source).toBe('host-meta');
   });
 
+  // The STOP row carries the model the host SERVED, beside `canonicalModel` (the
+  // policy tier). `servedModel` is an id as the transcript wrote it, `servedTier`
+  // its catalog tier, `servedDrift` a boolean: served tier versus policy tier, intended
+  // routes included, not an error signal. Same omission/null rule as the SH-19 columns:
+  // absent = the writer does not produce the column, null = it read the transcript and
+  // found nothing (`servedDrift` has no null: false covers agreement and "cannot judge").
+  it('appendSpawn persists servedModel, servedTier and servedDrift beside the policy tier', () => {
+    // An intended route: served tier differs from policy (drift) while modelMismatch, which
+    // keeps its START meaning, stays false.
+    appendSpawn(tmp, startRecord({
+      event: 'stop',
+      canonicalModel: 'opus',
+      servedModel: 'claude-sonnet-5-5',
+      servedTier: 'sonnet',
+      servedDrift: true,
+      modelMismatch: false,
+    }));
+    const [rec] = readSpawns(tmp);
+    expect(rec.canonicalModel).toBe('opus');
+    expect(rec.servedModel).toBe('claude-sonnet-5-5');
+    expect(rec.servedTier).toBe('sonnet');
+    expect(rec.servedDrift).toBe(true);
+    expect(rec.modelMismatch).toBe(false);
+  });
+
+  it('keeps an explicit null for the served columns and omits them when not supplied', () => {
+    appendSpawn(tmp, startRecord({ event: 'stop', servedModel: null, servedTier: null, servedDrift: false }));
+    appendSpawn(tmp, startRecord({ agentId: 'a2' }));
+    const [measuredNothing, notProduced] = readSpawns(tmp);
+    expect(measuredNothing).toHaveProperty('servedModel', null);
+    expect(measuredNothing).toHaveProperty('servedTier', null);
+    expect(measuredNothing).toHaveProperty('servedDrift', false);
+    // A START row stays byte-identical to what it was before the columns existed.
+    expect(notProduced).not.toHaveProperty('servedModel');
+    expect(notProduced).not.toHaveProperty('servedTier');
+    expect(notProduced).not.toHaveProperty('servedDrift');
+  });
+
+  it('writes servedDrift as a strict boolean: only true is true, like modelMismatch', () => {
+    for (const [i, value] of [true, false, 'yes', 1, null, 'true'].entries()) {
+      appendSpawn(tmp, startRecord({ event: 'stop', agentId: `d${i}`, servedDrift: value }));
+    }
+    expect(readSpawns(tmp).map((r) => r.servedDrift)).toEqual([true, false, false, false, false, false]);
+  });
+
+  it('degrades a non-string or empty value of the served columns to null', () => {
+    appendSpawn(tmp, startRecord({ event: 'stop', servedModel: 7, servedTier: '' }));
+    appendSpawn(tmp, startRecord({ event: 'stop', servedModel: { id: 'x' }, servedTier: ['sonnet'] }));
+    const recs = readSpawns(tmp);
+    expect(recs).toHaveLength(2);
+    for (const rec of recs) {
+      expect(rec).toHaveProperty('servedModel', null);
+      expect(rec).toHaveProperty('servedTier', null);
+    }
+  });
+
+  it('still drops unknown keys: the allowlist gained three served entries, not a passthrough', () => {
+    appendSpawn(tmp, startRecord({
+      event: 'stop',
+      servedModel: 'claude-sonnet-5-5',
+      servedTier: 'sonnet',
+      servedDrift: true,
+      // Near-misses of the new names: none may reach disk.
+      served_model: 'snake', servedmodel: 'lower', servedTierName: 'long', served: 'short',
+      served_drift: true, servedDrifted: true, drift: true,
+    }));
+    const [rec] = readSpawns(tmp);
+    for (const key of ['served_model', 'servedmodel', 'servedTierName', 'served', 'served_drift', 'servedDrifted', 'drift']) {
+      expect(rec, key).not.toHaveProperty(key);
+    }
+    expect(rec.servedModel).toBe('claude-sonnet-5-5');
+    expect(rec.servedTier).toBe('sonnet');
+    expect(rec.servedDrift).toBe(true);
+  });
+
+  it('redacts a secret in the served columns and keeps the line valid JSON', () => {
+    const secretValue = 'v'.repeat(24);
+    appendSpawn(tmp, startRecord({
+      event: 'stop', servedModel: `credential=${secretValue}`, servedTier: 'sonnet',
+    }));
+    const raw = readFileSync(spawnLedgerPath(tmp), 'utf-8');
+    expect(raw).not.toContain(secretValue);
+    const rec = JSON.parse(raw.trim());
+    expect(rec.servedModel).toContain('REDACTED');
+    expect(rec.servedTier).toBe('sonnet');
+  });
+
   it('appendSpawn never throws: bad root / bad event / unwritable path', () => {
     expect(appendSpawn('', startRecord())).toEqual({ ok: false, reason: 'no-project-root' });
     expect(appendSpawn(tmp, { ...startRecord(), event: 'boom' })).toEqual({ ok: false, reason: 'invalid-event' });
