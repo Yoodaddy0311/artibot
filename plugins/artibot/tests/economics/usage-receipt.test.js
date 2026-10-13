@@ -116,8 +116,9 @@ describe('resolveModelIdentity', () => {
       // deliberate re-pin (2026-09-23: opus id → claude-opus-5-5 + legacyIds;
       // 2026-09-28: opus thinkingMode → always-on; 2026-09-29: sonnet id →
       // claude-sonnet-5-5 + legacyIds; 2026-09-30: priceSource on every price row;
-      // 2026-10-12: priceSource values re-read, sonnet row -> official-table).
-      catalog_version: '2026-10-12',
+      // 2026-10-12: priceSource values re-read, sonnet row -> official-table;
+      // 2026-10-13: thinkingNote on every model row).
+      catalog_version: '2026-10-13',
     });
   });
 
@@ -128,7 +129,7 @@ describe('resolveModelIdentity', () => {
       tier: 'opus',
       model_id: 'claude-opus-5-5',
       version: 'claude-opus-5-5',
-      catalog_version: '2026-10-12',
+      catalog_version: '2026-10-13',
     });
   });
 
@@ -139,7 +140,7 @@ describe('resolveModelIdentity', () => {
       tier: 'sonnet',
       model_id: 'claude-sonnet-5-5',
       version: 'claude-sonnet-5-5',
-      catalog_version: '2026-10-12',
+      catalog_version: '2026-10-13',
     });
   });
 

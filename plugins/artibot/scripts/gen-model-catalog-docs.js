@@ -5,10 +5,8 @@
  * renders that data into a Markdown reference and OVERWRITES the doc. The doc
  * is generated — never hand-edit it; change model-catalog.js and re-run.
  *
- * One exception, and it is fenced: THINKING_NOTES holds per-model request-shape
- * facts that the catalog's `thinkingMode` vocabulary has no value for. They live
- * in the catalog's row comments, which a script cannot read, so they are typed
- * here, each tied to the exact model id it was read for (see THINKING_NOTES).
+ * The per-model request-shape facts that the catalog's `thinkingMode` vocabulary
+ * has no value for are rendered from each row's `thinkingNote`; none is typed here.
  *
  * Korean-path safety: the user's repo lives under `바탕 화면` (non-ASCII + space).
  * pathToFileURL() percent-encodes those chars and Node's import() on Windows
@@ -154,30 +152,26 @@ export const THINKING_LEGEND = Object.freeze({
   extended: "takes `{type:'enabled', budget_tokens}` only, no adaptive",
 });
 
-/** The day the facts in THINKING_NOTES were read off the thinking page. */
-const THINKING_NOTES_READ_ON = '2026-10-12';
-
 /**
- * Per-model request-shape facts the `thinkingMode` value cannot carry, as the
- * catalog's row comments record them (thinking page, table "Configuring
- * thinking"). They are NOT catalog data, so each is fenced to the exact model id
- * it was read for (`readFor`): a tier that moves to another id loses its note
- * instead of having it stated for a model nobody read, and the test that expects
- * the note goes red, which is the cue to read the page again.
+ * The per-model lines under the legend: one for each tier whose row carries a
+ * `thinkingNote` read for the row's current id, in table order. The tier, id, mode,
+ * day and text are the row's own. A note read for another id is not stated: the
+ * tier moved on and nobody read the thinking page for the new model, and the
+ * catalog test that pins `readFor` to `id` is the cue to read it again.
+ *
+ * @param {object} catalog - The imported model-catalog module.
+ * @returns {string[]} Markdown bullet lines; empty when no tier has a current note.
  */
-const THINKING_NOTES = Object.freeze([
-  {
-    tier: 'sonnet',
-    readFor: 'claude-sonnet-5-5',
-    note: "rejects `{type:'disabled'}` (400) and takes `{type:'between_tools'}` as its lowest setting",
-  },
-  {
-    tier: 'haiku',
-    readFor: 'claude-haiku-5-5',
-    note: "accepts `{type:'disabled'}` at effort `high` or below (400 at `xhigh` or `max`), " +
-      'so thinking can be turned off',
-  },
-]);
+function thinkingNoteLines(catalog) {
+  return TIER_ORDER.flatMap((tier) => {
+    const model = catalog.getModel(tier);
+    const note = model?.thinkingNote;
+    if (!note || note.readFor !== model.id) return [];
+    return [
+      `- \`${tier}\` (\`${model.id}\`, \`${model.thinkingMode}\`, read ${note.readOn}): ${note.text}.`,
+    ];
+  });
+}
 
 /**
  * The legend for the Thinking column (only the values some tier uses) and the
@@ -191,12 +185,7 @@ function thinkingLines(catalog) {
   const legend = Object.entries(THINKING_LEGEND)
     .filter(([mode]) => used.has(mode))
     .map(([mode, meaning]) => `- \`${mode}\`: ${meaning}.`);
-  const notes = THINKING_NOTES.flatMap(({ tier, readFor, note }) => {
-    const model = catalog.getModel(tier);
-    return model?.id === readFor
-      ? [`- \`${tier}\` (\`${model.id}\`, \`${model.thinkingMode}\`): ${note}.`]
-      : [];
-  });
+  const notes = thinkingNoteLines(catalog);
   return [
     "The `Thinking` column is each tier's `thinkingMode`, the request shape it accepts:",
     '',
@@ -205,7 +194,7 @@ function thinkingLines(catalog) {
       ? []
       : [
           '',
-          `Per-model details the value does not carry (thinking page, read ${THINKING_NOTES_READ_ON}):`,
+          'Per-model details the value does not carry (thinking page; each line gives the day it was read):',
           '',
           ...notes,
         ]),

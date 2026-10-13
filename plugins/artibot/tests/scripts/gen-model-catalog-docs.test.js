@@ -4,9 +4,11 @@
  * catalog data change cannot silently produce a stale or malformed doc.
  *
  * WHAT THIS FILE CANNOT SEE
- *  1. Whether the typed per-model thinking notes (THINKING_NOTES in the generator)
- *     are still true on the official thinking page. Only their model-id fence
- *     notices a model move; a page that changed under the same id is invisible here.
+ *  1. Whether the per-model thinking notes (`thinkingNote` on the catalog rows) are
+ *     still true on the official thinking page, or were read on the day they say.
+ *     This file pins that the doc says what the rows say; the catalog test
+ *     (tests/core/model-catalog-thinking-note.test.js) pins that a note was read for
+ *     its row's current id. A page that changed under the same id is invisible to both.
  *  2. Whether the receipt writer really counts requests over a price band, and
  *     where the boundary falls. The footnote repeats the catalog's account of that;
  *     tests/economics/usage-receipt-price-band.test.js is what pins it.
@@ -47,6 +49,50 @@ function catalogWith(patch) {
       return spec === null ? null : { ...spec, ...patch(tier) };
     },
   };
+}
+
+/** One tier's `thinkingNote` with some fields replaced, as a `catalogWith` patch value. */
+function noteOf(tier, fields) {
+  return { thinkingNote: { ...catalog.getModel(tier).thinkingNote, ...fields } };
+}
+
+/**
+ * The per-model note lines of a rendered doc, read back as data: the bullets that
+ * follow the "Per-model details" paragraph. A bullet of another shape fails here.
+ *
+ * @param {string} doc - A rendered document.
+ * @returns {Array<{tier: string, id: string, mode: string, readOn: string, text: string}>}
+ */
+function renderedNotes(doc) {
+  const lines = doc.split('\n');
+  const at = lines.findIndex((line) => line.startsWith('Per-model details'));
+  if (at === -1) return [];
+  const bullets = [];
+  for (const line of lines.slice(at + 2)) {
+    if (!line.startsWith('- ')) break;
+    const m = line.match(/^- `(\w+)` \(`([^`]+)`, `([^`]+)`, read (\d{4}-\d{2}-\d{2})\): (.+)\.$/);
+    expect(m, `a note line of the expected shape: ${line}`).not.toBeNull();
+    bullets.push({ tier: m[1], id: m[2], mode: m[3], readOn: m[4], text: m[5] });
+  }
+  return bullets;
+}
+
+/**
+ * What the rows of `cat` say the doc must carry, in the order of the doc's own
+ * table: each tier whose note was read for the id the row has now.
+ *
+ * @param {object} cat - A catalog-shaped object.
+ * @returns {Array<{tier: string, id: string, mode: string, readOn: string, text: string}>}
+ */
+function notesOf(cat) {
+  const order = specTable(cat).slice(2).map((row) => row.match(/^\| `(\w+)`/)[1]);
+  return order.flatMap((tier) => {
+    const model = cat.getModel(tier);
+    const note = model.thinkingNote;
+    return note && note.readFor === model.id
+      ? [{ tier, id: model.id, mode: model.thinkingMode, readOn: note.readOn, text: note.text }]
+      : [];
+  });
 }
 
 describe('gen-model-catalog-docs', () => {
@@ -302,6 +348,57 @@ describe('gen-model-catalog-docs', () => {
       const doc = renderDoc(catalogWith((tier) => ({ id: `${tier}-moved` })));
       expect(doc).not.toContain('Per-model details');
       expect(doc).toContain("The `Thinking` column is each tier's `thinkingMode`");
+    });
+  });
+
+  describe("per-model thinking notes are the catalog rows' own (one source of truth)", () => {
+    it('every note line in the doc reads back equal to its row: tier, id, mode, day and text, in table order', () => {
+      const expected = notesOf(catalog);
+      // The denominator: with no note on any row the comparison below proves nothing.
+      expect(expected.length).toBeGreaterThan(0);
+      expect(renderedNotes(renderDoc(catalog))).toEqual(expected);
+    });
+
+    it('what-if: with every note null the doc carries none of the real notes and no details heading', () => {
+      // A copy typed in the generator survives this, which is the failure it guards.
+      const bare = renderDoc(catalogWith(() => ({ thinkingNote: null })));
+      expect(bare).not.toContain('Per-model details');
+      for (const { tier, text } of notesOf(catalog)) {
+        expect(bare, tier).not.toContain(text);
+      }
+    });
+
+    it('what-if: a replaced note text replaces the line, and the old text is gone', () => {
+      const old = catalog.getModel('sonnet').thinkingNote.text;
+      const edited = catalogWith((tier) => (tier === 'sonnet' ? noteOf(tier, { text: 'is described by this test instead' }) : {}));
+      const doc = renderDoc(edited);
+      expect(renderedNotes(doc)).toEqual(notesOf(edited));
+      expect(renderedNotes(doc).find((n) => n.tier === 'sonnet').text).toBe('is described by this test instead');
+      expect(doc).not.toContain(old);
+    });
+
+    it("what-if: a note on a tier that has none appears under that tier's own id, mode and day, in table order", () => {
+      const opus = catalog.getModel('opus');
+      const added = catalogWith((tier) => (tier === 'opus'
+        ? { thinkingNote: { readFor: opus.id, readOn: '2026-01-02', text: 'takes nothing this test knows of' } }
+        : {}));
+      const notes = renderedNotes(renderDoc(added));
+      expect(notes).toEqual(notesOf(added));
+      expect(notes.map((n) => n.tier)).toEqual(['opus', 'sonnet', 'haiku']);
+      expect(notes[0]).toEqual({
+        tier: 'opus', id: opus.id, mode: opus.thinkingMode, readOn: '2026-01-02', text: 'takes nothing this test knows of',
+      });
+    });
+
+    it('what-if: each line carries the day of its own row', () => {
+      const dated = catalogWith((tier) => (tier === 'sonnet' ? noteOf(tier, { readOn: '2026-03-04' }) : {}));
+      const days = Object.fromEntries(renderedNotes(renderDoc(dated)).map((n) => [n.tier, n.readOn]));
+      expect(days).toEqual({ sonnet: '2026-03-04', haiku: catalog.getModel('haiku').thinkingNote.readOn });
+    });
+
+    it("what-if: a note whose readFor is not the row's id is not stated, though the id itself did not move", () => {
+      const stale = catalogWith((tier) => (tier === 'haiku' ? noteOf(tier, { readFor: 'claude-haiku-4-5' }) : {}));
+      expect(renderedNotes(renderDoc(stale)).map((n) => n.tier)).toEqual(['sonnet']);
     });
   });
 

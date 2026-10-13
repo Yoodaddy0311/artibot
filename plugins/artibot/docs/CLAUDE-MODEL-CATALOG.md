@@ -32,10 +32,10 @@ The `Thinking` column is each tier's `thinkingMode`, the request shape it accept
 - `adaptive`: takes `{type:'adaptive'}`; whether `{type:'disabled'}` is accepted as well varies per tier.
 - `always-on`: takes `{type:'adaptive'}` only; disabling and `budget_tokens` are rejected.
 
-Per-model details the value does not carry (thinking page, read 2026-10-12):
+Per-model details the value does not carry (thinking page; each line gives the day it was read):
 
-- `sonnet` (`claude-sonnet-5-5`, `adaptive`): rejects `{type:'disabled'}` (400) and takes `{type:'between_tools'}` as its lowest setting.
-- `haiku` (`claude-haiku-5-5`, `adaptive`): accepts `{type:'disabled'}` at effort `high` or below (400 at `xhigh` or `max`), so thinking can be turned off.
+- `sonnet` (`claude-sonnet-5-5`, `adaptive`, read 2026-10-12): rejects `{type:'disabled'}` (400) and takes `{type:'between_tools'}` as its lowest setting.
+- `haiku` (`claude-haiku-5-5`, `adaptive`, read 2026-10-12): accepts `{type:'disabled'}` at effort `high` or below (400 at `xhigh` or `max`), so thinking can be turned off.
 
 ---
 

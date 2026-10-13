@@ -45,17 +45,17 @@ describe('CATALOG_VERSION', () => {
     expect(parsed.toISOString().slice(0, 10)).toBe(CATALOG_VERSION);
   });
 
-  it('2026-10-12 비가격 변경(priceSource 값 재독: sonnet 행 skill-table → official-table, derivedColumns 비움, checkedAt 재날짜)을 도장으로 남긴다', () => {
+  it('2026-10-13 비가격 변경(모든 MODELS 행에 thinkingNote 필드 추가)을 도장으로 남긴다', () => {
     // 리터럴 핀: MODELS 의 비가격 값을 바꾸면 이 줄도 같은 커밋에서 새 날짜로 옮긴다.
-    // 이전 값: 2026-09-30(모델·ID 행마다 priceSource 출처 필드 추가).
-    // 이번에는 같은 날 공식 가격표를 다시 읽어 가격 열도 바뀌었고 PRICING_VERSION 도 함께 움직였다(아래 핀).
-    // 같은 날 같은 도장: haiku 티어를 Haiku 4.5 에서 5.5 로 옮겼다(id·legacyIds·ctxLimit·outLimit·thinkingMode,
-    // 전 행 priceMaxPromptTokens). 도장을 만든 4980e43f 는 릴리스 태그 v4.71.7 에 들어 있다(2026-10-13 `git tag --contains 4980e43f`
-    // 출력은 v4.71.7 하나, 2026-10-12 에는 비어 있었다). 그 전에는 origin/master 에만 2026-10-12 부터 올라가 있었고, master 설치나
-    // v4.71.7 설치가 이 도장을 찍었을 수 있다. 그래서 도장은 유지하고,
-    // 그런 haiku 영수증은 claude-haiku-4-5 를 이름으로 가져 새 ID_PRICES 행으로 같은 1/5 에 재생된다.
-    // tier 만 가진 기록은 새 tier 행으로 재생된다(잔여 위험, tests/core/pricing-history.test.js 가 고정).
-    expect(CATALOG_VERSION).toBe('2026-10-12');
+    // 이번 변경: 네 티어 행 모두 thinkingNote 를 얻었다(sonnet·haiku 는 { readFor, readOn, text }, opus·fable 은 null).
+    // 생성 문서가 생성기에 직접 쓴 텍스트에서 가져가던 티어별 thinking 서술을 카탈로그 행으로 옮긴 것이다.
+    // 필드 추가에 도장을 올리는 선례는 2026-09-30(priceSource). id·한도·계수·제약·가격은 안 바뀌어 PRICING_VERSION 은 그대로다(아래 핀).
+    // 이전 값: 2026-10-12(priceSource 값 재독: sonnet 행 skill-table → official-table, derivedColumns 비움, checkedAt 재날짜.
+    // 같은 날 같은 도장으로 haiku 티어를 Haiku 4.5 에서 5.5 로 옮겼다 — id·legacyIds·ctxLimit·outLimit·thinkingMode, 전 행 priceMaxPromptTokens).
+    // 그 도장을 만든 4980e43f 는 릴리스 태그 v4.71.7 에 들어 있다(2026-10-13 `git tag --contains 4980e43f` 출력은 v4.71.7 하나,
+    // 2026-10-12 에는 비어 있었다). 2026-10-12 도장을 찍은 haiku 영수증은 claude-haiku-4-5 를 이름으로 가져 새 ID_PRICES 행으로
+    // 같은 1/5 에 재생되고, tier 만 가진 기록은 새 tier 행으로 재생된다(잔여 위험, tests/core/pricing-history.test.js 가 고정).
+    expect(CATALOG_VERSION).toBe('2026-10-13');
   });
 
   it('카탈로그가 비어 있지 않다 (버전이 도장 찍을 대상이 실재하는 분모)', () => {

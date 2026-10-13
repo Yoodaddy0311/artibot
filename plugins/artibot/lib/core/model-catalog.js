@@ -117,9 +117,15 @@ export const BASELINE_TIER = 'opus';
  * `tests/core/pricing-history.test.js`). The price edits of this move are noted at
  * {@link PRICING_VERSION}.
  *
+ * 2026-10-13 bump: every row of {@link MODELS} gained `thinkingNote`, the per-model
+ * thinking facts the generated doc used to take from text typed into its generator.
+ * It is a non-price value inside MODELS, so the stamp moves, as it did for
+ * `priceSource` on 2026-09-30. No id, limit, coefficient or price changed, so
+ * {@link PRICING_VERSION} did not move.
+ *
  * @type {string}
  */
-export const CATALOG_VERSION = '2026-10-12';
+export const CATALOG_VERSION = '2026-10-13';
 
 /**
  * Version stamp of the PRICE COLUMNS ONLY — `priceInPerMTok`,
@@ -266,16 +272,22 @@ export const PRICING_SOURCE =
  *
  * `thinkingMode` names the request shape a tier accepts: `adaptive` =
  * `{type:'adaptive'}` is accepted, and nothing more is promised: whether
- * `{type:'disabled'}` is accepted too varies per tier (the haiku row accepts it at
- * effort `high` or below, the sonnet row rejects it), so read the row's comment
- * before sending it; `always-on` = adaptive only, disabling and `budget_tokens` are
- * rejected; `extended` = `{type:'enabled', budget_tokens}` only, no adaptive. The
- * set is pinned in `tests/core/model-catalog.test.js`. No tier carries `extended`
- * since the haiku tier moved to Haiku 5.5 (2026-10-12); the value stays in the
- * closed vocabulary. Sonnet 5.5 is `adaptive` here because the official models
- * overview labels it `Adaptive`; it also rejects `{type:'disabled'}` and takes
- * `{type:'between_tools'}` as its lowest setting, a shape this vocabulary has no
- * value for (see the sonnet row). The generated doc states both per-tier details.
+ * `{type:'disabled'}` is accepted too varies per tier, so read the row's
+ * `thinkingNote` before sending it; `always-on` = adaptive only, disabling and
+ * `budget_tokens` are rejected; `extended` = `{type:'enabled', budget_tokens}` only,
+ * no adaptive. The set is pinned in `tests/core/model-catalog.test.js`. No tier
+ * carries `extended` since the haiku tier moved to Haiku 5.5 (2026-10-12); the value
+ * stays in the closed vocabulary. Sonnet 5.5 is `adaptive` here because the official
+ * models overview labels it `Adaptive`; what the thinking page adds is its note.
+ *
+ * `thinkingNote` records, per row, what `thinkingMode` has no value for: `null` when
+ * the mode says all that is recorded (opus and fable, `always-on`), else `{ readFor,
+ * readOn, text }`, `text` being a sentence fragment without its full stop, `readFor`
+ * the exact model id the thinking page was read for and `readOn` the `YYYY-MM-DD` day.
+ * Only the generated doc reads it, and states a note only while `readFor` equals the
+ * row's `id`: a tier that moves to another id stops asserting what nobody read for
+ * it, and `tests/core/model-catalog-thinking-note.test.js` is red until the page is
+ * read again.
  *
  * @type {Readonly<Record<string, Readonly<{
  *   id: string,
@@ -298,6 +310,7 @@ export const PRICING_SOURCE =
  *   ctxLimit: number,
  *   outLimit: number,
  *   thinkingMode: 'adaptive'|'always-on'|'extended',
+ *   thinkingNote: Readonly<{ readFor: string, readOn: string, text: string }>|null,
  *   promptStyle: 'prescriptive'|'declarative',
  *   constraints: readonly string[]
  * }>>>}
@@ -347,11 +360,16 @@ export const MODELS = deepFreeze({
     ctxLimit: 1_000_000,
     outLimit: 128_000,
     // Haiku 5.5 takes {type:'adaptive'}, which is also what it does when no
-    // `thinking` field is sent. {type:'enabled', budget_tokens} returns 400, and
-    // {type:'disabled'} is accepted at effort `high` or below (400 at `xhigh` or
-    // `max`), so thinking CAN be turned off here, unlike on opus and fable (thinking
-    // page, table "Configuring thinking", read 2026-10-12).
+    // `thinking` field is sent, and {type:'enabled', budget_tokens} returns 400
+    // (thinking page, table "Configuring thinking", read 2026-10-12). Whether thinking
+    // can be turned off, unlike on opus and fable, is the note.
     thinkingMode: 'adaptive',
+    thinkingNote: {
+      readFor: 'claude-haiku-5-5',
+      readOn: '2026-10-12',
+      text: "accepts `{type:'disabled'}` at effort `high` or below (400 at `xhigh` or `max`), " +
+        'so thinking can be turned off',
+    },
     promptStyle: 'prescriptive',
     constraints: [],
   },
@@ -394,13 +412,17 @@ export const MODELS = deepFreeze({
     // 2026-09-28). They were carried over when the id moved to 5.5. On 2026-10-12
     // the models overview was read for 5.5: it agrees on ctxLimit (1M), outLimit
     // (128K) and the `Adaptive` label that `thinkingMode` uses. The thinking page
-    // adds a nuance this vocabulary has no value for: Sonnet 5.5 rejects
-    // {type:'disabled'} (400) and takes {type:'between_tools'} as its lowest
-    // setting. promptStyle was not re-read.
+    // adds a nuance this vocabulary has no value for, which the note records.
+    // promptStyle was not re-read.
     ctxLimit: 1_000_000,
     // 128K max output (claude-api skill shared/models.md, Sonnet 5 row).
     outLimit: 128_000,
     thinkingMode: 'adaptive',
+    thinkingNote: {
+      readFor: 'claude-sonnet-5-5',
+      readOn: '2026-10-12',
+      text: "rejects `{type:'disabled'}` (400) and takes `{type:'between_tools'}` as its lowest setting",
+    },
     promptStyle: 'prescriptive',
     constraints: [],
   },
@@ -436,6 +458,7 @@ export const MODELS = deepFreeze({
     // budget_tokens return 400 at every effort (claude-api skill, Migrating to
     // Claude Opus 5.5, cached 2026-06-24).
     thinkingMode: 'always-on',
+    thinkingNote: null,
     promptStyle: 'prescriptive',
     constraints: [],
   },
@@ -465,6 +488,7 @@ export const MODELS = deepFreeze({
     ctxLimit: 1_000_000,
     outLimit: 128_000,
     thinkingMode: 'always-on',
+    thinkingNote: null,
     promptStyle: 'declarative',
     constraints: [
       'refusal-classifier',
