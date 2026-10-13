@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { resolveScopedStatePath } from '../../lib/core/runtime-state.js';
+import { readStateForUpdate } from '../../lib/runtime/subagent-state-guard.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 import { pruneAgents } from './_team-state.js';
 
@@ -25,16 +26,30 @@ const PHASE_NAMES = {
   security: ['Scan', 'Assess', 'Fix', 'Verify', 'Audit', 'Merge'],
 };
 
+const freshState = () => ({ agents: {}, tasks: [], events: [], workflow: null });
+
+/**
+ * The shared team state this event starts from, and whether it may be written back.
+ *
+ * The read is `readStateForUpdate`'s (lib/runtime/subagent-state-guard.js), the rule SubagentStart
+ * and SubagentStop already keep for their half of the file: only a read's own ENOENT is a missing
+ * file (a fresh state, and the write creates it). A file that cannot be read (EBUSY or EPERM from a
+ * scanner, say), is not JSON, is not an object, or has an `agents` that is not an object is NOT
+ * replaced. It comes back as `writable: false` over a fresh state, so the event is still worked out
+ * (the dashboard is printed as it always was) but nothing derived from what was never read is
+ * saved; the guard says why once on stderr. This hook runs on SubagentStart, SubagentStop,
+ * TeammateIdle and Notification, so while its own load failed open it replaced the file even on the
+ * events where subagent-handler refused to.
+ *
+ * The keys a valid object lacks (`tasks`, `events`, `workflow`) are defaulted by main().
+ *
+ * @returns {{ state: object, writable: boolean }}
+ */
 function loadState() {
-  const statePath = getStateFilePath();
-  if (!existsSync(statePath)) {
-    return { agents: {}, tasks: [], events: [], workflow: null };
-  }
-  try {
-    return JSON.parse(readFileSync(statePath, 'utf-8'));
-  } catch {
-    return { agents: {}, tasks: [], events: [], workflow: null };
-  }
+  const read = readStateForUpdate(getStateFilePath(), { hook: 'workflow-status' });
+  return read === null
+    ? { state: freshState(), writable: false }
+    : { state: read, writable: true };
 }
 
 function saveState(state) {
@@ -332,13 +347,14 @@ export async function main() {
   cleanupStaleStateTmpFiles(getStateFilePath());
 
   // All state mutations happen inside the file lock (read-modify-write)
-  const finalState = withFileLock(getStateFilePath(), () => {
-    const loaded = loadState();
+  const { state: finalState, saved } = withFileLock(getStateFilePath(), () => {
+    const { state: loaded, writable } = loadState();
     let state = {
       ...loaded,
       agents: { ...(loaded.agents || {}) },
       events: [...(loaded.events || [])],
       tasks: [...(loaded.tasks || [])],
+      workflow: loaded.workflow ?? null,
     };
 
     // Reconcile any team task data carried on the payload before dispatching,
@@ -485,8 +501,9 @@ export async function main() {
     // switch, so the row this event just refreshed is already inside every window; and the
     // pruned state is what the dashboard below counts.
     state = pruneAgents(state);
-    saveState(state);
-    return state;
+    // Not writable: the file is left exactly as it was (see loadState).
+    if (writable) saveState(state);
+    return { state, saved: writable };
   });
 
   // Build dashboard message
@@ -494,7 +511,9 @@ export async function main() {
 
   // Persist the roster so statusline.sh can render the live team-progress
   // segment. Done for BOTH solo (empty roster → segment clears) and team paths.
-  persistTeammates(teammates, sessionId);
+  // Not when the state was left untouched: a roster worked out from the fresh state stands in
+  // for the whole team, and would replace the last real one with a partial list.
+  if (saved) persistTeammates(teammates, sessionId);
 
   // Construct a summary message
   const activeCnt = teammates.filter((t) => t.status === 'in_progress').length;

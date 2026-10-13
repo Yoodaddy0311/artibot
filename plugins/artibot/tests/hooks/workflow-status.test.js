@@ -7,7 +7,8 @@ import { resolveArtibotDir } from '../../lib/core/config.js';
  *
  * Covers:
  *   - Missing state file → returns fresh skeleton (no crash)
- *   - Corrupted state JSON → falls back to skeleton (no propagation)
+ *   - A state file the hook could not read (corrupt, EBUSY, ...) → left alone: no state or roster
+ *     write, the dashboard printed as before (real files, child processes: workflow-status-state-guard.test.js)
  *   - mapAgentStatus shape for the 4 supported hook events
  *   - atomicWriteSync is invoked exactly once per call (write-through cache)
  *   - All 4 events (teammate-update / task-complete / task-error /
@@ -24,6 +25,7 @@ const mockState = {
   statePathResult: '/state/workflow-status.json',
   fileExists: false,
   fileContent: '',
+  readError: null, // errno code the state file's read fails with, or null
   writes: [],
   lockCallCount: 0,
 };
@@ -49,6 +51,11 @@ vi.mock('../../lib/core/hook-utils.js', () => ({
   extractAgentRole: vi.fn((d, def) => d?.role || d?.agent_role || def),
   getStatePath: vi.fn(() => mockState.statePathResult),
   cleanupStaleStateTmpFiles: vi.fn(),
+  // The guard's refusals (lib/runtime/subagent-state-guard.js) go through this; same line format.
+  logHookError: vi.fn((hook, message, cause) => {
+    const detail = cause !== null && cause !== undefined ? `: ${cause.message ?? cause}` : '';
+    process.stderr.write(`[artibot:${hook}] ${message}${detail}\n`);
+  }),
 }));
 
 vi.mock('../../lib/core/file-lock.js', () => ({
@@ -63,7 +70,18 @@ vi.mock('node:fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn(() => mockState.fileExists),
-    readFileSync: vi.fn(() => mockState.fileContent),
+    // The state file reads the way the real one does: the hook asks no `existsSync` first, so a
+    // missing file is the read's own ENOENT and a failure is whatever errno is injected.
+    readFileSync: vi.fn((file, ...rest) => {
+      if (String(file) !== mockState.statePathResult) return actual.readFileSync(file, ...rest);
+      if (mockState.readError) {
+        throw Object.assign(new Error(`${mockState.readError}: injected`), { code: mockState.readError });
+      }
+      if (!mockState.fileExists) {
+        throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      }
+      return mockState.fileContent;
+    }),
   };
 });
 
@@ -75,6 +93,7 @@ function resetState() {
   mockState.statePathResult = '/state/workflow-status.json';
   mockState.fileExists = false;
   mockState.fileContent = '';
+  mockState.readError = null;
   mockState.writes = [];
   mockState.lockCallCount = 0;
 }
@@ -139,16 +158,71 @@ describe('workflow-status', () => {
     expect(written.agents.a1.role).toBe('planner');
   });
 
-  it('falls back to skeleton when state JSON is corrupted', async () => {
-    process.argv = ['node', 'workflow-status.js', 'teammate-update'];
-    mockState.fileExists = true;
-    mockState.fileContent = '{ not valid json';
-    setStdin({ agent_id: 'a1' });
+  // Fail-closed: a state file the hook could not read is not replaced (the guard's rule,
+  // lib/runtime/subagent-state-guard.js). The same cases on real files, as child processes, are in
+  // workflow-status-state-guard.test.js.
+  describe('a team-state file it could not read', () => {
+    const SESSION = { agent_id: 'a1', role: 'planner', session_id: 'sess-A' };
+    const said = () => stderrSpy.mock.calls.map((c) => String(c[0])).join('');
+    // The mock's call history is shared across tests: this run's output is the last call.
+    const lastOutput = async () => (await import('../../scripts/utils/index.js')).writeStdout.mock.calls.at(-1)[0];
 
-    await runHookFresh();
+    /** The dashboard the same event prints over a missing file (the fresh skeleton). */
+    async function referenceOutput() {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setStdin(SESSION);
+      await runHookFresh();
+      const out = await lastOutput();
+      expect(out.message).toContain('Team: 1 members'); // not vacuous
+      resetState();
+      return out;
+    }
 
-    expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json')).toHaveLength(1);
-    expect(mockState.writes[0].data.agents.a1).toBeDefined();
+    it.each([
+      ['truncated JSON', '{ not valid json'],
+      ['an empty file', ''],
+      ['JSON null', 'null'],
+      ['a JSON array', '[1,2]'],
+      ['an agents value that is not an object', '{"agents":[]}'],
+    ])('writes neither the state nor the roster when the file is %s, and prints the dashboard it always did', async (_label, text) => {
+      const reference = await referenceOutput();
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = true;
+      mockState.fileContent = text;
+      setStdin(SESSION);
+
+      await runHookFresh();
+
+      expect(mockState.writes).toEqual([]);
+      expect(await lastOutput()).toEqual(reference);
+      expect(said()).toContain('team state left untouched');
+    });
+
+    it.each(['EBUSY', 'EPERM'])('writes nothing when reading a healthy file fails with %s', async (code) => {
+      const reference = await referenceOutput();
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      setExistingState({ agents: { b1: { role: 'builder', active: true, updatedAt: new Date().toISOString() } }, tasks: [] });
+      mockState.readError = code;
+      setStdin(SESSION);
+
+      await runHookFresh();
+
+      expect(mockState.writes).toEqual([]);
+      expect(await lastOutput()).toEqual(reference);
+      expect(said()).toContain(`team state left untouched (unreadable): ${code}`);
+    });
+
+    it('POSITIVE CONTROL: a missing file is not a refusal - it is created, roster included, and nothing is said', async () => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = false;
+      setStdin(SESSION);
+
+      await runHookFresh();
+
+      expect(mockState.writes.filter((w) => w.path === '/state/workflow-status.json')).toHaveLength(1);
+      expect(mockState.writes.filter((w) => /current-teammates\.json$/.test(w.path))).toHaveLength(1);
+      expect(said()).not.toContain('team state left untouched');
+    });
   });
 
   it('maps a teammate-update with currentTask to in_progress status', async () => {

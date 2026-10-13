@@ -4,12 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { withFileLock } from '../../lib/core/file-lock.js';
+import { readStateForUpdate } from '../../lib/runtime/subagent-state-guard.js';
 import {
   AGENT_MAX_ENTRIES,
   AGENT_RETENTION_MS,
   AGENT_STALE_ACTIVE_MS,
   initTeamContext,
-  loadState,
   mergeSessionSnapshot,
   pruneAgents,
   saveState,
@@ -50,18 +50,28 @@ describe('_team-state', () => {
 
   const stderrText = () => stderr.mock.calls.map((c) => String(c[0])).join('');
 
-  describe('loadState / saveState', () => {
-    it('returns an empty agent map when the file is missing or unparseable', () => {
-      expect(loadState()).toEqual({ agents: {} });
-      writeFileSync(statePath, 'not json{{', 'utf-8');
-      expect(loadState()).toEqual({ agents: {} });
-    });
-
-    it('round-trips a state through the file under ~/.claude', () => {
+  describe('saveState', () => {
+    it('round-trips a state through the file under ~/.claude, read back by the guard every reader uses', () => {
       const state = { agents: { a: { active: true } }, teamId: 'team-x' };
       saveState(state);
       expect(JSON.parse(readFileSync(statePath, 'utf-8'))).toEqual(state);
-      expect(loadState()).toEqual(state);
+      expect(readStateForUpdate(statePath)).toEqual(state);
+    });
+  });
+
+  // `loadState()` lived here and answered `{ agents: {} }` for a file it could not read AND for one
+  // that was not JSON; the read-modify-write after it wrote that empty state back over every other
+  // agent's row. Every hook reads through `readStateForUpdate` now (lib/runtime/subagent-state-guard.js,
+  // whose own suite pins what it refuses), so the export is gone, and this keeps it gone: a hook
+  // written later that wants the state file finds only the guard.
+  // WHAT THIS DOES NOT SEE: a reader under another name, or a hook-local JSON.parse(readFileSync(...))
+  // of the state file (session-start and pre-compact read it that way, read-only). The writers are
+  // listed in the guard's header ("WHAT THIS DOES NOT SEE").
+  describe('the retired fail-open reader', () => {
+    it('is not exported, and the namespace is not empty (positive control)', async () => {
+      const exported = await import('../../scripts/hooks/_team-state.js');
+      expect(Object.keys(exported)).not.toContain('loadState');
+      expect(Object.keys(exported)).toEqual(expect.arrayContaining(['saveState', 'updateTeamState', 'pruneAgents']));
     });
   });
 
@@ -74,7 +84,7 @@ describe('_team-state', () => {
       expect(updateTeamState(statePath, mutate)).toBe(true);
       expect(mutate).toHaveBeenCalledTimes(1);
       expect(existsSync(`${statePath}.lock`)).toBe(false);
-      expect(loadState()).toEqual({ agents: { a: {} } });
+      expect(readStateForUpdate(statePath)).toEqual({ agents: { a: {} } });
       expect(stderrText()).toBe('');
     });
 

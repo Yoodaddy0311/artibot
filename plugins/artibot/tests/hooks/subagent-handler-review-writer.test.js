@@ -139,7 +139,7 @@ function auditBlock(over = {}) {
     nature: 'process',
     claims_total: 9,
     claims_refuted: 2,
-    evidence_refs: ['scripts/hooks/subagent-handler.js:725'],
+    evidence_refs: ['scripts/hooks/subagent-handler.js:555'],
     ...over,
   };
 }

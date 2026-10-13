@@ -14,11 +14,14 @@ vi.mock('../../scripts/utils/index.js', () => ({
   atomicWriteSync: vi.fn(),
 }));
 
+// The default read answers "no such file" the way node does: with the errno code. The team-state
+// guard (lib/runtime/subagent-state-guard.js) takes only that code for a missing file; any other
+// read failure, a code-less one included, means "could not read" and the state is not written.
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual('node:fs');
   return {
     ...actual,
-    readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+    readFileSync: vi.fn(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
     existsSync: vi.fn(() => false),
   };
 });
@@ -80,7 +83,7 @@ describe('subagent-handler hook', () => {
     originalArgv = process.argv;
     // Default: no state file exists
     existsSync.mockReturnValue(false);
-    readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
+    readFileSync.mockImplementation(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); });
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
   });
@@ -415,19 +418,87 @@ describe('subagent-handler hook', () => {
       expect(savedState.agents['agent-1']).toBeDefined();
     });
 
-    it('handles corrupted state file gracefully', async () => {
+    // Fail-closed, like SessionEnd's merge (`_team-state.js#readStateForMerge`): a state file
+    // that cannot be read whole is not written over. The file is shared by every live session,
+    // and falling back to an empty state used to replace every other agent's row.
+    // End-to-end on real files: subagent-state-guard.test.js.
+    async function spawnEvents() {
+      const { appendSpawn } = await import('../../lib/learning/ledger/spawn-ledger.js');
+      return appendSpawn.mock.calls.map((c) => c[1].event);
+    }
+
+    it.each([
+      ['not valid JSON', 'not valid json{{{'],
+      ['JSON null', 'null'],
+      ['a JSON array', '[]'],
+      ['an agents value that is not an object', '{"agents":[],"x":1}'],
+    ])('start leaves a state file that is %s alone, and still records the spawn and registers', async (_label, text) => {
       process.argv = ['node', 'subagent-handler.js', 'start'];
       existsSync.mockReturnValue(true);
-      readFileSync.mockReturnValue('not valid json{{{');
-      readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1' }));
+      readFileSync.mockReturnValue(text);
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'agent-1', role: 'builder', cwd: os.tmpdir() }));
 
       await runHook();
       await waitForSettle();
 
-      // Falls back to default state
-      const savedState = atomicWriteSync.mock.calls[0][1];
-      expect(savedState.agents).toBeDefined();
-      expect(savedState.agents['agent-1']).toBeDefined();
+      expect(atomicWriteSync).not.toHaveBeenCalled();
+      expect(writeStdout).toHaveBeenCalledWith({ message: '[team] Agent registered: agent-1 (builder)' });
+      expect(await spawnEvents()).toEqual(['start']);
+      expect(exitSpy).not.toHaveBeenCalled();
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      expect(stderrOutput).toContain('[artibot:subagent-handler] team state left untouched');
+    });
+
+    it('stop leaves a corrupted state file alone too, and still records the spawn and deregisters', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'stop'];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockReturnValue('not valid json{{{');
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', cwd: os.tmpdir() }));
+
+      await runHook();
+      await waitForSettle();
+
+      expect(atomicWriteSync).not.toHaveBeenCalled();
+      expect(writeStdout).toHaveBeenCalledWith({ message: '[team] Agent deregistered: builder-01' });
+      expect(await spawnEvents()).toEqual(['stop']);
+      expect(exitSpy).not.toHaveBeenCalled();
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      expect(stderrOutput).toContain('[artibot:subagent-handler] team state left untouched');
+    });
+
+    it.each(['start', 'stop'])('%s leaves a state file alone when reading it fails with EBUSY', async (action) => {
+      process.argv = ['node', 'subagent-handler.js', action];
+      existsSync.mockReturnValue(true);
+      readFileSync.mockImplementation(() => {
+        throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      });
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', cwd: os.tmpdir() }));
+
+      await runHook();
+      await waitForSettle();
+
+      expect(atomicWriteSync).not.toHaveBeenCalled();
+      expect(await spawnEvents()).toEqual([action]);
+      expect(writeStdout).toHaveBeenCalledTimes(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      expect(stderrOutput).toContain('[artibot:subagent-handler] team state left untouched (unreadable): EBUSY');
+    });
+
+    it('a read failure that carries no errno code is not taken for a missing file', async () => {
+      process.argv = ['node', 'subagent-handler.js', 'start'];
+      // existsSync says false, as it does for ANY path it cannot stat; the guard does not ask it.
+      existsSync.mockReturnValue(false);
+      readFileSync.mockImplementation(() => { throw new Error('read failed'); });
+      readStdin.mockResolvedValue(makeHookData({ agent_id: 'builder-01', role: 'builder', cwd: os.tmpdir() }));
+
+      await runHook();
+      await waitForSettle();
+
+      expect(atomicWriteSync).not.toHaveBeenCalled();
+      expect(writeStdout).toHaveBeenCalledWith({ message: '[team] Agent registered: builder-01 (builder)' });
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join('');
+      expect(stderrOutput).toContain('[artibot:subagent-handler] team state left untouched (unreadable): read failed');
     });
 
     it('writes state file path based on HOME env variable', async () => {

@@ -1,6 +1,6 @@
 /**
  * Team-state helpers for subagent-handler.js: `~/.claude/artibot-state.json`
- * read, write, locked update, and the top-level team context.
+ * write, locked update, and the top-level team context.
  *
  * Not a hook — nothing here runs on import, and there is no direct-run entry.
  * Extracted from subagent-handler.js (which had reached the 800-line cap) with
@@ -8,10 +8,18 @@
  * added later and is also used by workflow-status.js, the file's other writer of
  * the `agents` map. mergeSessionSnapshot() is session-end.js's write into the file.
  *
+ * THERE IS NO GENERAL READER HERE, ON PURPOSE. The `loadState()` that lived in this file
+ * answered `{ agents: {} }` for a file it could not read AND for one that was not JSON, and
+ * the write after it replaced every other agent's row. It was retired on 2026-10-13, once
+ * subagent-handler, workflow-status and team-idle-handler all read through
+ * `lib/runtime/subagent-state-guard.js#readStateForUpdate`. Exporting a reader again would let
+ * a new hook pick the fail-open one: a read-modify-write starts from `readStateForUpdate`
+ * (`tests/hooks/_team-state.test.js` pins that this module exports no `loadState`).
+ *
  * @module scripts/hooks/_team-state
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { atomicWriteSync } from '../utils/index.js';
 import { getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
@@ -168,16 +176,6 @@ export function pruneAgents(state, nowMs = Date.now()) {
   }
 }
 
-export function loadState() {
-  const statePath = getStatePath();
-  if (!existsSync(statePath)) return { agents: {} };
-  try {
-    return JSON.parse(readFileSync(statePath, 'utf-8'));
-  } catch {
-    return { agents: {} };
-  }
-}
-
 /** Write the state under ~/.claude, with the `agents` map pruned first (see pruneAgents). */
 export function saveState(state) {
   const statePath = getStatePath();
@@ -185,8 +183,8 @@ export function saveState(state) {
 }
 
 /**
- * Run `mutate` (a loadState → saveState read-modify-write) under the state
- * file's lock.
+ * Run `mutate` (a `readStateForUpdate` → saveState read-modify-write; the reader is
+ * lib/runtime/subagent-state-guard.js's) under the state file's lock.
  *
  * The update is best-effort, like the atomicWriteSync under it. When the lock
  * is not taken — `mutate` never ran: ELOCKTIMEOUT, ELOCKREENTRANT, or a create

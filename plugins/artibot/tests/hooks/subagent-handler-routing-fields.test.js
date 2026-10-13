@@ -689,7 +689,12 @@ describe('subagent-handler v5 routing fields (child process)', () => {
     execFileSync('git', ['init'], { cwd: repo2, stdio: 'ignore', windowsHide: true });
     mkdirSync(ledgerFilePath(repo2), { recursive: true });
 
-    const blocked = runHook({ ...basePayload({ agent_id: 'agent-baseline' }), cwd: repo2 }, 'start', home);
+    // Its own sandbox HOME: the baseline registered `agent-baseline` in `home`, and a START for a
+    // registered id and type is a resume that binds nothing (`skipped:already-bound`, answered before
+    // the ledger is read), which is not the first-START outcome this case measures below.
+    const home2 = path.join(tmp, 'home2');
+    mkdirSync(path.join(home2, '.claude'), { recursive: true });
+    const blocked = runHook({ ...basePayload({ agent_id: 'agent-baseline' }), cwd: repo2 }, 'start', home2);
     expect(blocked.status).toBe(0);
     // Byte-for-byte identical stdout: the routing observer is invisible to the
     // hook's contract whether it succeeds or fails.

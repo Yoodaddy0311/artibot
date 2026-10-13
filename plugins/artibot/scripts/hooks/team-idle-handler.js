@@ -33,12 +33,16 @@
  * so the shape the host really sends can be measured. Consequence to know: a
  * firing keyed by `teammate_name` lands on a different `agents` row than the
  * SubagentStart row keyed by `agent_id`, if teammates fire SubagentStart.
+ * Not recorded when the state file could not be read (nothing is written
+ * then, see the read in main()): an absent record is not proof of a payload
+ * that carried `agent_id`.
  */
 
 import { atomicWriteSync, parseJSON, readStdin, resolveConfigPath, writeStdout } from '../utils/index.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createErrorHandler, extractAgentId, extractAgentRole, getStatePath } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
+import { readStateForUpdate } from '../../lib/runtime/subagent-state-guard.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 /** Maximum consecutive idle events before auto-stop (0 = disabled). */
@@ -112,16 +116,22 @@ export async function main() {
 
   // Read-modify-write under file lock
   const { pendingTasks, shouldStop, idleCount } = withFileLock(statePath, () => {
-    let state = {};
+    // The shared state file is read the way SubagentStart/Stop read it (readStateForUpdate,
+    // lib/runtime/subagent-state-guard.js): only a read's own ENOENT is a missing file. `null` is
+    // a file that is there but was not read as a state object (unreadable, not JSON, not an
+    // object, an `agents` that is not an object): this firing then works out its message over an
+    // empty state, as it did when that failure was ignored, and writes nothing. Written back,
+    // that empty state (plus the key record) would replace every row the file holds, on every
+    // TeammateIdle and TaskCompleted firing.
+    const loaded = readStateForUpdate(statePath, { hook: 'team-idle-handler' });
+    let state = loaded ?? {};
     let pending = [];
 
-    if (existsSync(statePath)) {
-      try {
-        state = JSON.parse(readFileSync(statePath, 'utf-8'));
-        pending = (state.tasks || []).filter((t) => t.status === 'pending');
-      } catch {
-        // Ignore
-      }
+    try {
+      pending = (state.tasks || []).filter((t) => t.status === 'pending');
+    } catch {
+      // A `tasks` that is not a list of rows: no pending tasks to report. The state is written
+      // back as it was read.
     }
 
     let stop = false;
@@ -147,7 +157,7 @@ export async function main() {
 
     state = withIdlePayloadRecord(state, hookData);
 
-    atomicWriteSync(statePath, state);
+    if (loaded !== null) atomicWriteSync(statePath, state);
     return {
       pendingTasks: pending,
       shouldStop: stop,
