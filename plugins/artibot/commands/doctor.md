@@ -673,8 +673,11 @@ Status for this check — **first matching row wins**:
 |---|---|
 | Either count was not supplied (a file was not read) | **unmeasured** |
 | A live conflict — a `tool_use_id` or an `agent_id` bound more than once, or a receipt written twice (invariant 1); legacy conflicts (below) are not live | **fail** |
-| Both counts non-zero AND different | **warn** |
 | Otherwise | **pass** |
+
+The counts are reported, not compared: they measure different populations
+(2026-10-14: 6 unbound receipts against 313 unbound spawns, no live conflict),
+so the row that warned on unequal non-zero counts was removed.
 
 **Legacy conflicts (informational).** An `agent_bound_twice` conflict whose
 latest row predates `RESUME_REBIND_FIXED_AT` (`doctor-checks.js`,
@@ -689,8 +692,7 @@ conflict with any row at or after the cutoff, and one whose `last_ts` is null
 count only. Measured 2026-10-14 on this repo's ledger: 5 conflicts, all
 `agent_bound_twice`, over 11 bind rows, the latest at 2026-10-13T09:19:38.198Z.
 The verdict was fail before this rule; with it those 5 read as legacy and the
-verdict is warn, from the residue row alone (6 unbound receipts, 311 unbound
-spawns).
+verdict is pass.
 
 Report BOTH counts together with the session scope and BOTH absolute file
 paths — both are SHARED under `<git-common-dir>/artibot/`:
@@ -704,12 +706,12 @@ count (or "not counted" when the join was not read), and the bind side's own bou
 an alias for `lib/runtime/ledger-tail.js#DEFAULT_TAIL_BYTES`, which owns the
 131072 literal) — because a
 receipt older than that window is unbound BY DESIGN and belongs in the reader's
-explanation of the number, not in a warning.
+explanation of the number.
 
-**unmeasured is not a pass.** Both files are required. A residue verdict
-reached from one side is a comparison with nothing on the other, and reporting
-it as `pass` would be exactly the false green the two-file design exists to
-prevent. Measured 2026-09-05 02:34 KST on the worktree that landed this
+**unmeasured is not a pass.** Both files are required, though neither count
+decides the verdict: zero unbound spawns in a file that does not exist is not a
+measurement, and `pass` would be a false green. Measured 2026-09-05 02:34 KST
+on the worktree that landed this
 section, AFTER its own review agents had spawned: `ledger.jsonl` held 3
 `route.selected` and 3 `route.bound` lines (`grep -c`), `spawns.ndjson` held 7
 lines over 3 distinct agent ids (`route_ledger`: 3 `ok:bound`, 1
@@ -717,23 +719,22 @@ lines over 3 distinct agent ids (`route_ledger`: 3 `ok:bound`, 1
 conflicts 0 (all `confidence: exact`, `prompt_id+name`), and
 `checkRouteBindResidue` returned **pass** — one live end-to-end run. Before
 those spawns (02:1x) the same tree held 0/0 and no spawn ledger, which is what
-the `unmeasured` row is for. The warn and fail rows were exercised on fixtures
-only until 2026-10-14, when this repo's real ledger drove both (the legacy
-conflicts paragraph above).
+the `unmeasured` row is for. The fail row was exercised on fixtures only until
+2026-10-14, when this repo's real ledger drove it (the legacy conflicts
+paragraph above).
 
 **What this check cannot see** (§9 — state it next to the gate):
 
 - **Whether a bound pair is the RIGHT pair.** A tier-3 FIFO bind
-  (`confidence: 'fifo'`) that picked the wrong receipt reads as bound. Equal
-  residue counts mean nothing was left over, not that the pairs are correct.
+  (`confidence: 'fifo'`) that picked the wrong receipt reads as bound.
   Correctness needs the bind line's `selected_model` against the receipt's
   prediction (invariant 2), which this check does not evaluate.
 - **Asymmetries that are legitimate by design.** A spawn that never went through
   the `Agent` tool (SDK, scheduler, loop entry) has no receipt and is a normal
   `skipped:unbound`; a tool call the host cancelled leaves an unbound receipt
   with no spawn; a receipt past the 10-minute window or beyond the 128 KB tail
-  is unbound on purpose. The warn row fires on any inequality and cannot tell
-  these from a real miss — read the two lists, not just the two numbers.
+  is unbound on purpose. A real miss adds one to each count and hides among
+  these — read the two lists, not just the two numbers.
 - **Receipts the join excludes.** Pre-4.55 `route.selected` lines carry
   `shadow_of: spawn:<agentId>` and can never bind; they are counted under
   `route_binds.ignored.pre_tool_use_only` and never as residue.
@@ -745,12 +746,12 @@ conflicts paragraph above).
   `sessionId` is null under `null`; a session-scoped read misses it.
 - **Which worktree each side came from.** Both sides now live under
   `<git-common-dir>/artibot/` (ADR-011 §5 ③), so both sum every linked
-  worktree and the receipt/spawn asymmetry that once made a mismatch WARN
-  structural is gone. Only the projection (`state.yaml`) and `decisions/` stay
+  worktree and the receipt/spawn asymmetry that once split the two counts by
+  worktree is gone. Only the projection (`state.yaml`) and `decisions/` stay
   per-tree. What this cannot see is an INSTALL older than that rule: the hooks
   run from the install, so an old `spawn-ledger.js` keeps writing the tree-local
   `.artibot/ledger/` file, the shared path holds no spawn file at all, the spawn
-  count comes back `undefined`, and the verdict is `unmeasured` — NOT a warn.
+  count comes back `undefined`, and the verdict is `unmeasured`.
   Once the install is current, an `unmeasured` on the spawn side means the
   one-time migration (ADR-011 §1회 이관 절차) has not been run yet, not that
   nothing spawned.

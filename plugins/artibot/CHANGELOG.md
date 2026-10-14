@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 컴팩트 정리 (2026-10-14)
 
-- `/doctor` Check 10: v4.71.8 의 재개 재바인드 수정(`48e85610`) 이전에 쓰인 `agent_bound_twice` 충돌을 `legacyConflicts` 로 따로 센다. append-only 원장에 남은 5건 때문에 이 검사가 영구 FAIL 이던 것을 풀었다. 컷오프는 고정 상수(`RESUME_REBIND_FIXED_AT`, 릴리스 시각)이고, 다른 종류이거나 컷오프 이후 행이 하나라도 있거나 시각을 매길 수 없는 충돌은 그대로 FAIL 이다. 이 리포 원장 실측은 fail → warn 이다. 남은 warn 은 unbound 잔여 대조(6 대 311)다.
+- `/doctor` Check 10: v4.71.8 의 재개 재바인드 수정(`48e85610`) 이전에 쓰인 `agent_bound_twice` 충돌을 `legacyConflicts` 로 따로 센다. append-only 원장에 남은 5건 때문에 이 검사가 영구 FAIL 이던 것을 풀었다. 컷오프는 고정 상수(`RESUME_REBIND_FIXED_AT`, 릴리스 시각)이고, 다른 종류이거나 컷오프 이후 행이 하나라도 있거나 시각을 매길 수 없는 충돌은 그대로 FAIL 이다. 이 리포 원장 실측은 fail → warn 이다.
+- `/doctor` Check 10: `route-bind-residue-mismatch` warn 을 지웠다. unbound receipt 수와 unbound spawn 수는 서로 다른 집단을 센다. 2026-10-14 실측 6 대 313 이고, spawn 쪽 313 은 수정 전 resume 재START 222 · `no-receipt` Agent 호출 40 · forked-skill 20 · Workflow `agent()` 20 · 다른 agent 에 묶인 receipt 10 · 미확인 1 이다. 진짜 bind 누락은 두 수를 똑같이 1씩 올리므로 이 비교로는 보이지 않는다. 두 수는 `counts` 에 정보로 남는다. 라이브 판정은 warn → pass 다.
+- `/team` Task 도구 가용성 문단: 공식 문서상 최신 모델은 `Task*` 가 opt-in(`CLAUDE_CODE_ENABLE_TODO_TOOLS=1` 등)이라고 고쳐 적었다. 이 플러그인은 opt-in 을 요구하지 않는다. `/save` 의 TaskList 단계도 도구가 없을 때 건너뛴다.
 - `workflow-status`: 공유 상태 파일의 `tasks`·`events` 가 배열이 아니면(문자열·숫자·객체·`0`·`""`) 쓰지 않고 stderr 한 줄을 남긴다. 전에는 문자열이 문자 배열로 다시 쓰이거나 TypeError 로 훅이 죽었다. `null`·없음은 전처럼 기본값이다.
 - `team-idle-handler`: 문서에 없는 `stop: true` 출력과 그것만 켜던 `team.autoStopIdle`·`maxIdleCount` 옵션을 지웠다(출하 config 에 없음, 소비처는 이 훅뿐). 모듈을 import 하지 않던 재구현 테스트도 지웠다.
 - `/task clear`: 수행 도구를 `TaskUpdate(taskId, status="deleted")`(태스크마다 1회)로 적었다.

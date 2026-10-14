@@ -31,8 +31,8 @@
  *   3. RESIDUE — receipts that never bound (`unbound_receipts[]`), reported
  *      beside the spawn ledger's `skipped:unbound` count (`countUnboundSpawns`).
  *      The two numbers come from two different files with two different
- *      retentions; putting them side by side is the whole point, and deciding
- *      what a mismatch means is `/doctor` Check 10's job
+ *      retentions and count different populations, so nothing here compares
+ *      them; `/doctor` Check 10 reports both and judges only invariant 1
  *      (`lib/project-state/doctor-checks.js#checkRouteBindResidue`).
  * Invariant 2 (subagent_type preservation) needs the spawn record's
  * `canonicalModel` next to the receipt's prediction, which the bind line already

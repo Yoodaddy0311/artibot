@@ -7,9 +7,9 @@
  * counter itself unbroken (design §3.6). Check 9 asks whether the
  * mission artifacts under `.artibot/missions/<id>/` are healthy, against the
  * ten-item list this file treats as canonical (Hardening §32). Check 10 asks
- * whether the route receipt ↔ bind correlation left residue: unbound PreToolUse
- * receipts on one side, `skipped:unbound` spawns on the other
- * (`ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md` §2.3 invariant 3).
+ * whether the bind writer's 1:1 guarantee held (`ROUTE-RECEIPT-PRETOOLUSE-DESIGN.md`
+ * §2.3 invariant 1) and reports the unbound receipts and `skipped:unbound`
+ * spawns beside that verdict without comparing them (invariant 3).
  *
  * ── Why this module reads nothing ──────────────────────────────────────────
  * Every input arrives as an argument. The caller — the `/doctor` command — is
@@ -978,46 +978,45 @@ function isLegacyBindConflict(c) {
 }
 
 /**
- * Check 10 — Route Bind Residue (design §2.3 invariant 3, and invariant 1).
+ * Check 10 — Route Bind Residue (design §2.3 invariant 1; the two counts of
+ * invariant 3 are reported, not judged).
  *
- * Two counts from two files, judged side by side:
+ * The verdict is `conflicts`, the join's invariant-1 list (a `tool_use_id` bound
+ * twice, an `agent_id` bound twice, a receipt written twice). The bind writer
+ * enforces 1:1 by construction, so one live conflict is a writer guarantee
+ * broken and is `fail`, the same severity Check 8 gives a broken superset
+ * invariant.
+ *
+ * Two counts from two files ride along, reported and never compared:
  *   - `unboundReceipts` — `route.selected` receipts in the central ledger that
  *     no `route.bound` line names (`lib/replay/route-bind.js#joinRouteBinds`,
  *     `unbound_receipts.length`).
  *   - `unboundSpawns` — distinct `agentId`s whose spawn record carries
  *     `route_ledger: 'skipped:unbound'` (`route-bind.js#countUnboundSpawns`).
- * The design's rule: both non-zero AND different means the correlation went
- * wrong somewhere, because every unbound receipt should have produced exactly
- * one unbound spawn and vice versa. Equal non-zero counts are NOT a pass on
- * correctness — see "cannot see" — they are the absence of that one signal.
+ * They count different populations, so unequal counts are not a signal: 6
+ * unbound receipts against 313 unbound spawns, no live conflict (this repo's
+ * ledger, 2026-10-14).
  *
- * Both counts are REQUIRED. A residue verdict reached from one file is a
- * comparison with nothing on the other side, so a missing count is
- * `unmeasured`, never a narrower pass. Zero-on-both is a real pass only when
- * both files were read; a caller that could not open the spawn ledger must pass
- * `undefined`, not `0`.
- *
- * `conflicts` is the join's invariant-1 list (a `tool_use_id` bound twice, an
- * `agent_id` bound twice, a receipt written twice). The bind writer enforces
- * 1:1 by construction, so one conflict is a writer guarantee broken and is
- * `fail`, the same severity Check 8 gives a broken superset invariant. It is
- * optional: absent means NOT COUNTED and is reported as such under `counts`,
- * never folded into the verdict.
+ * Both counts are still REQUIRED, though neither decides anything: a count
+ * from a file that was not read is not a measurement, so a missing count is
+ * `unmeasured`, never a narrower pass (and it is checked before `conflicts`).
+ * A caller that could not open the spawn ledger must pass `undefined`, not `0`.
+ * `conflicts` is optional: absent means NOT COUNTED and is reported as such
+ * under `counts`, never folded into the verdict.
  *
  * Legacy conflicts ({@link RESUME_REBIND_FIXED_AT}) are counted apart as
  * `legacyConflicts` and do not fail; `conflicts` and a finding hold only live ones.
  *
  * WHAT THIS CANNOT SEE: whether a bound pair is the RIGHT pair (a FIFO bind to
- * the wrong receipt reads as bound); asymmetries that are legitimate by design
- * (SDK/scheduler spawns have no receipt; cancelled tool calls have no spawn;
- * receipts past the bind side's 10-minute window or 128 KB tail); whether
- * the two files cover the same time span — they rotate independently; which
- * hook version wrote a legacy row (only its `ts` is read); and whether the fix
- * works — a ledger in which nothing was resumed since the cutoff is conflict-free too.
+ * the wrong receipt reads as bound); a MISSED bind (it adds one unbound receipt
+ * and one unbound spawn to counts nobody compares); whether the two files cover
+ * the same time span — they rotate independently; which hook version wrote a
+ * legacy row (only its `ts` is read); and whether the fix works — a ledger in
+ * which nothing was resumed since the cutoff is conflict-free too.
  *
  * @param {object} input - Check inputs.
- * @param {number} [input.unboundReceipts] - from the ledger join.
- * @param {number} [input.unboundSpawns] - from the spawn ledger.
+ * @param {number} [input.unboundReceipts] - from the ledger join; reported only.
+ * @param {number} [input.unboundSpawns] - from the spawn ledger; reported only.
  * @param {object[]} [input.conflicts] - `joinRouteBinds().conflicts`; absent = not counted.
  * @returns {{status: string, findings: object[], counts: {unboundReceipts: number|null,
  *   unboundSpawns: number|null, conflicts: number|null, legacyConflicts: number|null}}}
@@ -1044,7 +1043,7 @@ export function checkRouteBindResidue(input = {}) {
       status: CheckStatus.UNMEASURED,
       findings: [{
         code: 'residue-inputs-absent', status: CheckStatus.UNMEASURED, absent,
-        detail: `not supplied: ${absent.join(', ')} — residue was not compared, not compared and found equal`,
+        detail: `not supplied: ${absent.join(', ')} — not counted, not counted and found zero`,
       }],
       counts,
     };
@@ -1054,13 +1053,6 @@ export function checkRouteBindResidue(input = {}) {
     findings.push({
       code: 'route-bind-conflict', status: CheckStatus.FAIL, conflicts: live,
       detail: `${live.length} invariant-1 violation(s): a tool_use_id or agent_id bound more than once — the bind writer's 1:1 guarantee broke`,
-    });
-  }
-  if (unboundReceipts > 0 && unboundSpawns > 0 && unboundReceipts !== unboundSpawns) {
-    findings.push({
-      code: 'route-bind-residue-mismatch', status: CheckStatus.WARN,
-      unboundReceipts, unboundSpawns,
-      detail: `${unboundReceipts} unbound receipt(s) vs ${unboundSpawns} unbound spawn(s) — the correlation missed somewhere (design §2.3 invariant 3)`,
     });
   }
   return { status: worstOf(findings.map((f) => f.status)), findings, counts };

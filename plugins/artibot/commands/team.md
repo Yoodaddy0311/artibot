@@ -273,10 +273,10 @@ TaskUpdate(taskId="{id}", owner="{teammate-name}", status="in_progress")
 **생략하고 SendMessage 기반으로 진행**한다 — 없는 도구를 호출하려다 턴을 태우지 마라. "disabled" 응답을 한 번 받은
 도구는 다시 부르지 않는다.
 
-판단 기준은 **도구의 실제 존재 여부와 호출 응답**이지 환경변수가 아니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`
-미설정은 도구 부재를 뜻하지 않는다 — CLI 2.1.220 headless 실측에서 변수 유무와 무관하게 `Task*`
-7종이 모두 존재했고, 실제로 도구를 지운 것은 `--tools` 허용목록뿐이었다 (대화형 표면과 타 CLI
-버전은 미확인).
+판단 기준은 **도구의 실제 존재 여부와 호출 응답**이다. 공식 문서(`tools-reference#task-tool-availability`, CLI v2.1.268+)상 `Task*` 는
+구세대 모델에만 기본 제공되고(경계 모델 목록은 그 문서가 정본), 그 뒤 모델은 `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` · `--allowedTools` · `--tools`
+로 opt-in 해야 생긴다. 서브에이전트와 in-process 팀원은 리더 세션을 따른다. 이 플러그인은 opt-in 을 요구하지 않는다 — 위 단계는 도구가 없으면
+건너뛴다. (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` 는 `Task*` 를 좌우하지 않았다 — CLI 2.1.220 headless 실측.)
 
 1. 태스크 레코드 대신 **Phase 2 스폰 프롬프트의 작업 명세**가 배정이다. 범위·파일·성공기준을
    프롬프트에 이미 실어 보냈으므로 배정 정보는 소실되지 않는다.

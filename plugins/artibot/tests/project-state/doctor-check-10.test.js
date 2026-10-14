@@ -2,9 +2,10 @@
  * `/doctor` Check 10 — Route Bind Residue — and the D9 rewrite of Check 7.
  *
  * ── What these tests DO establish ─────────────────────────────────────────
- * That `checkRouteBindResidue` returns the verdict design §2.3 invariant 3
- * specifies for hand-built counts, that `unmeasured` is returned whenever a
- * count was not supplied (and that `0` is not `undefined`), that an
+ * That `checkRouteBindResidue` judges the invariant-1 conflicts alone and
+ * reports the two residue counts without comparing them (no pair of counts is
+ * a verdict), that `unmeasured` is returned whenever a count was not supplied
+ * (and that `0` is not `undefined`), that an
  * `agent_bound_twice` conflict dated wholly before the v4.71.8 resume fix is
  * counted apart as legacy while every other conflict still fails, and that
  * `commands/doctor.md` says what the code does: ten checks, a `routing`
@@ -15,10 +16,11 @@
  *   integers built here. The tree that landed this file went from 0/0 and no
  *   spawns.ndjson (02:1x, `unmeasured`) to 3 receipts / 3 binds / 0 unbound
  *   (02:34, `pass`) once its review agents spawned — one live pass, recorded
- *   in `commands/doctor.md` Check 10. The warn and fail rows were each read
- *   once off this repo's ledger (2026-10-14: 6 unbound receipts against 311
- *   unbound spawns, and 5 legacy `agent_bound_twice` conflicts before the
- *   legacy rule existed), through the real ports and not through `/doctor`.
+ *   in `commands/doctor.md` Check 10. The fail row was read once off this
+ *   repo's ledger (2026-10-14: 5 legacy `agent_bound_twice` conflicts before
+ *   the legacy rule existed), through the real ports and not through
+ *   `/doctor`; the same read gave 6 unbound receipts against 313 unbound
+ *   spawns, which is why the counts are not compared.
  * - **That the cutoff suits any ledger but this repo's.** `RESUME_REBIND_FIXED_AT`
  *   is read off that one ledger (latest conflicting row 2026-10-13T09:19:38.198Z)
  *   and the v4.71.8 release time; the bounds test pins it against those two
@@ -86,17 +88,14 @@ describe('checkRouteBindResidue()', () => {
     expect(equal.counts).toEqual({ unboundReceipts: 2, unboundSpawns: 2, conflicts: 0, legacyConflicts: 0 });
   });
 
-  it('passes when only one side is non-zero (a legitimate asymmetry is not a mismatch)', () => {
-    expect(checkRouteBindResidue({ unboundReceipts: 0, unboundSpawns: 4 }).status).toBe(CheckStatus.PASS);
-    expect(checkRouteBindResidue({ unboundReceipts: 4, unboundSpawns: 0 }).status).toBe(CheckStatus.PASS);
-  });
-
-  it('warns when both are non-zero and different (invariant 3)', () => {
-    const r = checkRouteBindResidue({ unboundReceipts: 3, unboundSpawns: 2 });
-    expect(r.status).toBe(CheckStatus.WARN);
-    expect(codes(r)).toEqual(['route-bind-residue-mismatch']);
-    expect(r.findings[0]).toMatchObject({ unboundReceipts: 3, unboundSpawns: 2 });
-    expect(r.findings[0].detail).toContain('invariant 3');
+  it('passes on unequal counts, non-zero or not: they measure different populations, so no pair is a verdict', () => {
+    // 2026-10-14, this repo's live ledger: 6 unbound receipts against 313 unbound spawns, no live conflict.
+    for (const [unboundReceipts, unboundSpawns] of [[0, 4], [4, 0], [3, 2], [6, 313]]) {
+      const r = checkRouteBindResidue({ unboundReceipts, unboundSpawns, conflicts: [] });
+      expect(r.status, `${unboundReceipts}/${unboundSpawns}`).toBe(CheckStatus.PASS);
+      expect(r.findings).toEqual([]);
+      expect(r.counts).toMatchObject({ unboundReceipts, unboundSpawns });
+    }
   });
 
   it('fails on any invariant-1 conflict, and the conflict list rides on the finding', () => {
@@ -109,12 +108,12 @@ describe('checkRouteBindResidue()', () => {
     expect(r.counts.legacyConflicts).toBe(0);
   });
 
-  it('ranks fail above warn when both apply', () => {
+  it('fails on a live conflict whatever the counts, and adds no second finding for them', () => {
     const r = checkRouteBindResidue({
       unboundReceipts: 3, unboundSpawns: 1, conflicts: [{ type: 'agent_bound_twice' }],
     });
     expect(r.status).toBe(CheckStatus.FAIL);
-    expect(codes(r)).toEqual(['route-bind-conflict', 'route-bind-residue-mismatch']);
+    expect(codes(r)).toEqual(['route-bind-conflict']);
   });
 
   it('reports conflicts as not counted (null) when the join was not supplied', () => {
@@ -137,9 +136,7 @@ describe('checkRouteBindResidue() — legacy conflicts (the v4.71.8 resume fix, 
   const rebind = (lastTs, extra = {}) => ({
     type: 'agent_bound_twice', agent_id: 'agent-a', tool_use_ids: ['tu-1', 'tu-2'], count: 2, last_ts: lastTs, ...extra,
   });
-  const check = (conflicts, counts = {}) => checkRouteBindResidue({
-    unboundReceipts: 0, unboundSpawns: 0, conflicts, ...counts,
-  });
+  const check = (conflicts) => checkRouteBindResidue({ unboundReceipts: 0, unboundSpawns: 0, conflicts });
 
   it('sets aside agent_bound_twice conflicts dated wholly before the fix: pass, counted as legacy', () => {
     const r = check([rebind('2026-10-13T09:19:38.198Z'), rebind('2026-09-22T05:28:21.447Z', { agent_id: 'agent-b' })]);
@@ -186,13 +183,6 @@ describe('checkRouteBindResidue() — legacy conflicts (the v4.71.8 resume fix, 
       expect(check([rebind(lastTs)]).status, String(lastTs)).toBe(CheckStatus.FAIL);
     }
     expect(check([null]).status).toBe(CheckStatus.FAIL);
-  });
-
-  it('does not let a legacy conflict hide a residue mismatch', () => {
-    const r = check([rebind('2026-10-13T09:19:38.198Z')], { unboundReceipts: 3, unboundSpawns: 2 });
-    expect(r.status).toBe(CheckStatus.WARN);
-    expect(codes(r)).toEqual(['route-bind-residue-mismatch']);
-    expect(r.counts.legacyConflicts).toBe(1);
   });
 
   it('keeps the cutoff between the last conflicting row on record and the v4.71.8 release', () => {
@@ -253,17 +243,22 @@ describe('commands/doctor.md — Check 10', () => {
     expect(ten).toContain('spawns.ndjson');
   });
 
-  it('states the four status rows in the code\'s order and the undefined-not-zero rule', () => {
-    const rows = ['**unmeasured**', '**fail**', '**warn**', '**pass**'];
+  it('states the three status rows in the code\'s order, no warn row, and the undefined-not-zero rule', () => {
+    const rows = ['**unmeasured**', '**fail**', '**pass**'];
     let last = -1;
     for (const row of rows) {
       const i = ten.indexOf(row);
       expect(i, row).toBeGreaterThan(last);
       last = i;
     }
+    expect(ten).not.toMatch(/^\|.*\*\*warn\*\*/m);
     expect(ten).toContain('pass `undefined`, not `0`');
     expect(ten).toContain('unmeasured is not a pass');
     expect(ten).toContain('NOT a `--fix` target');
+  });
+
+  it('says why the counts are not compared: they measure different populations', () => {
+    expect(ten).toContain('different populations');
   });
 
   it('sets legacy conflicts apart: names the cutoff, the fix, the kind it covers and the count', () => {

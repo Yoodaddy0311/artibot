@@ -18,7 +18,7 @@
 
 | 항목 | 판정 | 결과 |
 |---|---|---|
-| doctor Check 10 옛 `agent_bound_twice` | 발전 | 고정 컷오프 `RESUME_REBIND_FIXED_AT`(v4.71.8 릴리스 시각) 이전의 이 종류만 `legacyConflicts` 로 분리. 원장 실측 fail → **warn**. 실측 정정: 충돌 5건은 id 5개다("4개 id" 아님) |
+| doctor Check 10 옛 `agent_bound_twice` | 발전 | 고정 컷오프 `RESUME_REBIND_FIXED_AT`(v4.71.8 릴리스 시각) 이전의 이 종류만 `legacyConflicts` 로 분리. 원장 실측 fail → warn(2차에서 잔여 warn 도 버려 → **pass**). 실측 정정: 충돌 5건은 id 5개다("4개 id" 아님) |
 | `workflow-status.js` 비배열 `tasks`/`events` | 발전 | 쓰기 거부 + stderr 한 줄. 인접 결함 `tasks:[null]` 은 이 리포에 생산자가 없어 버림 |
 | `team-idle-handler` 의 `autoStopIdle`·`stop:true` | 버림 | 문서에 없는 출력 필드이고 출하 config 에도 없음. 훅 201 → 108줄. 옛 JSDoc 의 "`continue:false` = 계속 일함" 은 현행 hooks 문서와 반대였다(현행: 팀원을 멈춤) |
 | `/task clear` 도구 | 발전 | `TaskUpdate(status="deleted")`, 태스크마다 1회(공식 문서 근거, 호스트 실측 아님) |
@@ -30,9 +30,10 @@
 | 로컬 브랜치 `docs/v4710-followup-o` | 종결 | 추가 줄이 master V5-BACKLOG 에 그대로 있음을 확인하고 `git branch -D` |
 | cowork 옛 표기(ZIP 고정) · split-wave24 suspended 2건 | 유지 | 다음 cowork 릴리스 / done 조작 금지 |
 
-남은 것:
-- Check 10 의 남은 warn `route-bind-residue-mismatch`(unbound receipt 6 대 unbound spawn 311, 그중 310 이 컷오프 이전 id): 같은 append-only 구조라 영구 warn 이다. 311 이 설계상 비대칭인지는 미확인. 다음 판정 대상이다.
-- 요청 밖 발견(docs 팀원, 공식 `tools-reference.md` 2026-10-14 curl): Task 도구(TaskCreate/Update/List/Get)는 Opus 4.7·Sonnet 4.6·Haiku 4.5 이전 모델에만 기본 제공이고, 그 뒤 모델은 opt-in 이다(`CLAUDE_CODE_ENABLE_TODO_TOOLS=1` 등). 10-13 점검의 "팀원 7/8 disabled" 가 이 메커니즘인지는 추론이다.
+2차(같은 날):
+- Check 10 `route-bind-residue-mismatch` warn → **버림**. spawn 쪽 unbound 313 의 원인을 분해했다(수정 전 resume 재START 222 · `no-receipt` Agent 호출 40 · forked-skill 20 · Workflow `agent()` 20 · 다른 agent 에 묶인 receipt 10 · 미확인 1). receipt 쪽 6 과는 다른 집단이다. 진짜 bind 누락은 두 수를 똑같이 1씩 올리고, receipt 훅이 죽으면 receipt 쪽이 0이 되어 규칙이 침묵한다. 그래서 이 규칙이 잡는 것은 정상 비대칭뿐이었다. 라이브 판정은 warn → **pass**. 재현 스크립트는 이 PC scratchpad `residue-311\`(세션 5cf4c941)에 있다. 선택안이던 "`countUnboundSpawns` 가 bound id 를 빼게 하기"는 정보용 수치라 하지 않았다.
+  - 알려진 한계(기존 그대로): 카운트가 하나 빠지면 conflicts 보다 먼저 `unmeasured` 가 된다. 그래서 spawn 파일이 없고 라이브 충돌이 있으면 상태는 fail 이 아니라 unmeasured 다(`counts.conflicts` 에는 찍힌다).
+- Task 도구 opt-in → **문서화(유지)**. 공식 `tools-reference.md`(2026-10-14 curl, CLI v2.1.268+, 설치본 2.1.299): `Task*`·`TodoWrite` 는 구세대 모델에만 기본 제공이고, 그 뒤 모델은 `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` · `--allowedTools` · `--tools` 로 opt-in 한다. 서브에이전트와 in-process 팀원은 리더 세션을 따른다. 리더(Opus 5.5)와 팀원 모두 도구 목록에 Task 도구가 없다(실측). Artibot 은 이미 도구가 없어도 동작한다. 남아 있던 무조건 호출은 `save.md` TaskList 1곳이었고 고쳤다. env 설정은 권하지 않는다(도구 정의가 컨텍스트를 먹는다). 오너가 공유 task list UI 를 원할 때만 고를 선택지다. 10-13 의 "disabled for this session" 응답이 같은 현상인지는 미확인이다.
 
 ## v4.71.8 (2026-10-13 KST, 세션 f518ab8b — /autopilot 자율 런, 리더 실측)
 

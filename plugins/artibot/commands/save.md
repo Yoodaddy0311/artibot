@@ -40,7 +40,7 @@ Parse $ARGUMENTS:
 4. **테스트 상태**: `lib/core/test-status.js` 의 `getLastTestStatus`
 5. **Advisor 신호**: `lib/learning/auto-spawn-advisor.js` 의 `readPendingSuggestions` (consumed/resolved 제외)
 6. **세션 메모리**: 최근 5개 키워드 (recallSessionMemory)
-7. **TaskList**: TaskList tool → 미완료 작업 + in_progress
+7. **TaskList**: TaskList tool → 미완료 작업 + in_progress (도구가 없거나 "disabled for this session" 이면 재시도 없이 빈 배열 — `(작업 데이터 없음)`)
 
 ### Phase A½: 체크포인트 (§31 순서 · runtime.checkpoint.saveOnSave 가 true 일 때만)
 
