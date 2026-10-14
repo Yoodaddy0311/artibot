@@ -223,6 +223,50 @@ describe('workflow-status', () => {
       expect(mockState.writes.filter((w) => /current-teammates\.json$/.test(w.path))).toHaveLength(1);
       expect(said()).not.toContain('team state left untouched');
     });
+
+    // main() spreads the file's `tasks` and `events`. A value that is not a list is not a state this
+    // hook can add to: a string spread into its characters and was written back as those, a number,
+    // an object or a boolean threw before anything was printed. So it is left alone like an
+    // unreadable file, and the event is still worked out over a fresh state.
+    it.each([
+      ['a tasks value that is a string', '{"agents":{},"tasks":"abc"}'],
+      ['an events value that is a string', '{"agents":{},"events":"abc"}'],
+      ['a tasks value that is a number', '{"agents":{},"tasks":5}'],
+      ['an events value that is a number', '{"agents":{},"events":5}'],
+      ['a tasks value that is an object', '{"agents":{},"tasks":{"a":1}}'],
+      ['an events value that is an object', '{"agents":{},"events":{"a":1}}'],
+      ['an events value that is 0 (falsy, but not absent)', '{"agents":{},"events":0}'],
+    ])('writes nothing and prints what a missing file prints when the file has %s', async (_label, text) => {
+      const reference = await referenceOutput();
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = true;
+      mockState.fileContent = text;
+      setStdin(SESSION);
+
+      await runHookFresh();
+
+      expect(mockState.writes).toEqual([]);
+      expect(await lastOutput()).toEqual(reference);
+      expect(said()).toContain('team state left untouched');
+    });
+
+    it.each([
+      ['tasks and events absent', '{"agents":{}}'],
+      ['tasks and events null', '{"agents":{},"tasks":null,"events":null}'],
+    ])('POSITIVE CONTROL: %s is the same as an empty list - defaulted and written, not refused', async (_label, text) => {
+      process.argv = ['node', 'workflow-status.js', 'teammate-update'];
+      mockState.fileExists = true;
+      mockState.fileContent = text;
+      setStdin(SESSION);
+
+      await runHookFresh();
+
+      const written = mockState.writes.find((w) => w.path === '/state/workflow-status.json');
+      expect(written.data.tasks).toEqual([]);
+      expect(written.data.events).toHaveLength(1);
+      expect(written.data.agents.a1).toBeDefined();
+      expect(said()).not.toContain('team state left untouched');
+    });
   });
 
   it('maps a teammate-update with currentTask to in_progress status', async () => {

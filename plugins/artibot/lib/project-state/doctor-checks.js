@@ -946,6 +946,38 @@ function countOrNull(v) {
 }
 
 /**
+ * The instant before which an `agent_bound_twice` conflict is LEGACY for Check 10.
+ *
+ * Commit 48e85610 ("a resumed teammate no longer re-binds") stopped a resume
+ * START from binding a second receipt to an agent id that already had one. It
+ * shipped in v4.71.8, whose release was published 2026-10-13T11:21:46Z. The
+ * ledger is append-only, so the conflicts the old hook wrote before then would
+ * fail every later run (measurement: commands/doctor.md, Check 10). A fixed
+ * constant on purpose, not a config key: moving it later would set aside rows
+ * an updated install wrote.
+ */
+export const RESUME_REBIND_FIXED_AT = '2026-10-13T11:21:46Z';
+const RESUME_REBIND_FIXED_MS = Date.parse(RESUME_REBIND_FIXED_AT);
+
+/**
+ * Is this conflict legacy: written wholly before the resume fix, by the bug
+ * that fix removed? An allowlist. Only an `agent_bound_twice` whose latest row
+ * (`last_ts`, from `joinRouteBinds`) predates the cutoff qualifies, and
+ * `last_ts` counts only in the one form the join emits, `toISOString()` text:
+ * `Date.parse` alone reads `'2000'` or `'2026-09-22'` as old instants. Any other
+ * kind, a `last_ts` that is null or in another form, or a non-object entry is
+ * live, so a conflict the fix did not address or that cannot be dated is never set aside.
+ *
+ * @param {unknown} c - one entry of `joinRouteBinds().conflicts`
+ * @returns {boolean}
+ */
+function isLegacyBindConflict(c) {
+  if (c?.type !== 'agent_bound_twice' || typeof c.last_ts !== 'string') return false;
+  const t = Date.parse(c.last_ts);
+  return t < RESUME_REBIND_FIXED_MS && new Date(t).toISOString() === c.last_ts;
+}
+
+/**
  * Check 10 — Route Bind Residue (design §2.3 invariant 3, and invariant 1).
  *
  * Two counts from two files, judged side by side:
@@ -972,28 +1004,37 @@ function countOrNull(v) {
  * optional: absent means NOT COUNTED and is reported as such under `counts`,
  * never folded into the verdict.
  *
+ * Legacy conflicts ({@link RESUME_REBIND_FIXED_AT}) are counted apart as
+ * `legacyConflicts` and do not fail; `conflicts` and a finding hold only live ones.
+ *
  * WHAT THIS CANNOT SEE: whether a bound pair is the RIGHT pair (a FIFO bind to
  * the wrong receipt reads as bound); asymmetries that are legitimate by design
  * (SDK/scheduler spawns have no receipt; cancelled tool calls have no spawn;
- * receipts past the bind side's 10-minute window or 128 KB tail); and whether
- * the two files cover the same time span — they rotate independently.
+ * receipts past the bind side's 10-minute window or 128 KB tail); whether
+ * the two files cover the same time span — they rotate independently; which
+ * hook version wrote a legacy row (only its `ts` is read); and whether the fix
+ * works — a ledger in which nothing was resumed since the cutoff is conflict-free too.
  *
  * @param {object} input - Check inputs.
  * @param {number} [input.unboundReceipts] - from the ledger join.
  * @param {number} [input.unboundSpawns] - from the spawn ledger.
  * @param {object[]} [input.conflicts] - `joinRouteBinds().conflicts`; absent = not counted.
  * @returns {{status: string, findings: object[], counts: {unboundReceipts: number|null,
- *   unboundSpawns: number|null, conflicts: number|null}}} The verdict and counts.
+ *   unboundSpawns: number|null, conflicts: number|null, legacyConflicts: number|null}}}
+ *   The verdict and counts; `conflicts` is the live count, `legacyConflicts` the set-aside one.
  */
 export function checkRouteBindResidue(input = {}) {
   const src = input ?? {};
   const unboundReceipts = countOrNull(src.unboundReceipts);
   const unboundSpawns = countOrNull(src.unboundSpawns);
-  const conflicts = Array.isArray(src.conflicts) ? src.conflicts : null;
+  const all = Array.isArray(src.conflicts) ? src.conflicts : null;
+  const live = all?.filter((c) => !isLegacyBindConflict(c)) ?? null;
+  const legacy = all?.filter(isLegacyBindConflict) ?? null;
   const counts = {
     unboundReceipts,
     unboundSpawns,
-    conflicts: conflicts === null ? null : conflicts.length,
+    conflicts: live === null ? null : live.length,
+    legacyConflicts: legacy === null ? null : legacy.length,
   };
   const absent = [];
   if (unboundReceipts === null) absent.push('unboundReceipts (ledger join)');
@@ -1009,10 +1050,10 @@ export function checkRouteBindResidue(input = {}) {
     };
   }
   const findings = [];
-  if (conflicts !== null && conflicts.length > 0) {
+  if (live !== null && live.length > 0) {
     findings.push({
-      code: 'route-bind-conflict', status: CheckStatus.FAIL, conflicts,
-      detail: `${conflicts.length} invariant-1 violation(s): a tool_use_id or agent_id bound more than once — the bind writer's 1:1 guarantee broke`,
+      code: 'route-bind-conflict', status: CheckStatus.FAIL, conflicts: live,
+      detail: `${live.length} invariant-1 violation(s): a tool_use_id or agent_id bound more than once — the bind writer's 1:1 guarantee broke`,
     });
   }
   if (unboundReceipts > 0 && unboundSpawns > 0 && unboundReceipts !== unboundSpawns) {

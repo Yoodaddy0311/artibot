@@ -12,6 +12,28 @@
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
 
+## 2026-10-14 컴팩트 정리 (세션 5cf4c941, 미릴리스)
+
+오너 가치관 추가: **컴팩트**. 과설계·미사용은 버리고, 살릴 가치가 있거나 덜 구축된 것만 키우며, 큰 과설계는 리더가 통제한다. 후속 항목마다 버림 / 발전 / 유지 판정을 붙이고, "나중에"는 판정으로 치지 않는다.
+
+| 항목 | 판정 | 결과 |
+|---|---|---|
+| doctor Check 10 옛 `agent_bound_twice` | 발전 | 고정 컷오프 `RESUME_REBIND_FIXED_AT`(v4.71.8 릴리스 시각) 이전의 이 종류만 `legacyConflicts` 로 분리. 원장 실측 fail → **warn**. 실측 정정: 충돌 5건은 id 5개다("4개 id" 아님) |
+| `workflow-status.js` 비배열 `tasks`/`events` | 발전 | 쓰기 거부 + stderr 한 줄. 인접 결함 `tasks:[null]` 은 이 리포에 생산자가 없어 버림 |
+| `team-idle-handler` 의 `autoStopIdle`·`stop:true` | 버림 | 문서에 없는 출력 필드이고 출하 config 에도 없음. 훅 201 → 108줄. 옛 JSDoc 의 "`continue:false` = 계속 일함" 은 현행 hooks 문서와 반대였다(현행: 팀원을 멈춤) |
+| `/task clear` 도구 | 발전 | `TaskUpdate(status="deleted")`, 태스크마다 1회(공식 문서 근거, 호스트 실측 아님) |
+| `team.md:53` 이름 스폰 서술 · 에이전트 2·4단계 `TaskUpdate` | 종결 | `8fde2443`(v4.71.8)이 이미 고침. 후속 문구가 낡았던 것 |
+| 서빙 티어 대 영수증 `requested_model` 대조 | 버림 | `servedModel` 이 이미 서빙 진실이다. 대조가 없어서 깨지는 것이 없다 |
+| 128 KB 창 밖 resume 종단 테스트 | 버림 | `skipped:already-bound` 가드가 있고, 릴리스 뒤 라이브 발생 0 |
+| 라이브 측정 대기(TeammateIdle 키·TaskStop·거부 stderr 라벨·조건부 줄 준수·SessionEnd 창 닫기·유령 행) | 버림 | 결과에 따라 할 일이 정해진 항목이 없다. 자연히 관측되면 그때 기록한다 |
+| `subagent-handler.js` 분할 | 종결 | `48e85610` 에서 973 → 772줄(`(Get-Content f).Count`; `Measure-Object -Line` 은 빈 줄을 빼서 738 로 나온다) |
+| 로컬 브랜치 `docs/v4710-followup-o` | 종결 | 추가 줄이 master V5-BACKLOG 에 그대로 있음을 확인하고 `git branch -D` |
+| cowork 옛 표기(ZIP 고정) · split-wave24 suspended 2건 | 유지 | 다음 cowork 릴리스 / done 조작 금지 |
+
+남은 것:
+- Check 10 의 남은 warn `route-bind-residue-mismatch`(unbound receipt 6 대 unbound spawn 311, 그중 310 이 컷오프 이전 id): 같은 append-only 구조라 영구 warn 이다. 311 이 설계상 비대칭인지는 미확인. 다음 판정 대상이다.
+- 요청 밖 발견(docs 팀원, 공식 `tools-reference.md` 2026-10-14 curl): Task 도구(TaskCreate/Update/List/Get)는 Opus 4.7·Sonnet 4.6·Haiku 4.5 이전 모델에만 기본 제공이고, 그 뒤 모델은 opt-in 이다(`CLAUDE_CODE_ENABLE_TODO_TOOLS=1` 등). 10-13 점검의 "팀원 7/8 disabled" 가 이 메커니즘인지는 추론이다.
+
 ## v4.71.8 (2026-10-13 KST, 세션 f518ab8b — /autopilot 자율 런, 리더 실측)
 
 ### 출하 결과
@@ -35,8 +57,8 @@
 
 ### 남은 것
 
-- ~~`caa3d2eb` 오너 cherry-pick~~ — 2026-10-14 처리: master `ebd6b069`(같은 내용, V5-BACKLOG 1줄). 로컬 브랜치 `docs/v4710-followup-o` 는 남아 있다.
-- doctor Check 10: 과거 원장의 `agent_bound_twice` 5건(4개 id)이 append-only 원장에 남아 계속 FAIL 로 읽힌다(hooks 팀원 재구성, 실제 `/doctor` 미실행). 창·기준선 처리 결정 필요. 수정 전후 행이 섞여 unbound KPI 가 두 체제를 함께 센다(투영: 308 → 88).
+- ~~`caa3d2eb` 오너 cherry-pick~~ — 2026-10-14 처리: master `ebd6b069`(같은 내용, V5-BACKLOG 1줄). 로컬 브랜치 `docs/v4710-followup-o` 는 2026-10-14 삭제.
+- (2026-10-14 컴팩트 정리 절에서 판정: Check 10 · `workflow-status.js` · `/task clear` · 라이브 미측정 · `requested_model` 대조) doctor Check 10: 과거 원장의 `agent_bound_twice` 5건(4개 id)이 append-only 원장에 남아 계속 FAIL 로 읽힌다(hooks 팀원 재구성, 실제 `/doctor` 미실행). 창·기준선 처리 결정 필요. 수정 전후 행이 섞여 unbound KPI 가 두 체제를 함께 센다(투영: 308 → 88).
 - artibot-cowork 의 같은 옛 줄(에이전트 11 · `commands/sdk.md`)과 `/team` 관련 문서 — 다음 cowork 릴리스(ZIP 고정).
 - `workflow-status.js`: 유효 객체인데 `tasks`/`events` 가 문자열이면 문자 배열로 다시 쓰인다(state2 팀원 실측, 현실성 낮음). 그 밖의 비배열 타입은 TypeError 로 훅이 죽고 파일은 그대로.
 - `commands/task.md` 의 `clear` 가 어떤 도구로 수행되는지 미확인. `/task` 의 `allowed-tools` 확장이 호스트 권한 프롬프트에 주는 영향 미확인.

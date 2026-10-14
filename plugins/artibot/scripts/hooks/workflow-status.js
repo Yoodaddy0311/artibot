@@ -12,7 +12,7 @@ import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/ind
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath } from '../../lib/core/hook-utils.js';
+import { cleanupStaleStateTmpFiles, createErrorHandler, extractAgentId, extractAgentRole, getStatePath as getStateFilePath, logHookError } from '../../lib/core/hook-utils.js';
 import { withFileLock } from '../../lib/core/file-lock.js';
 import { resolveScopedStatePath } from '../../lib/core/runtime-state.js';
 import { readStateForUpdate } from '../../lib/runtime/subagent-state-guard.js';
@@ -28,6 +28,9 @@ const PHASE_NAMES = {
 
 const freshState = () => ({ agents: {}, tasks: [], events: [], workflow: null });
 
+// What main() can add to: a list, or no value (null is the same as absent, as it is for `agents`).
+const isListOrAbsent = (value) => value === undefined || value === null || Array.isArray(value);
+
 /**
  * The shared team state this event starts from, and whether it may be written back.
  *
@@ -35,11 +38,13 @@ const freshState = () => ({ agents: {}, tasks: [], events: [], workflow: null })
  * and SubagentStop already keep for their half of the file: only a read's own ENOENT is a missing
  * file (a fresh state, and the write creates it). A file that cannot be read (EBUSY or EPERM from a
  * scanner, say), is not JSON, is not an object, or has an `agents` that is not an object is NOT
- * replaced. It comes back as `writable: false` over a fresh state, so the event is still worked out
- * (the dashboard is printed as it always was) but nothing derived from what was never read is
- * saved; the guard says why once on stderr. This hook runs on SubagentStart, SubagentStop,
- * TeammateIdle and Notification, so while its own load failed open it replaced the file even on the
- * events where subagent-handler refused to.
+ * replaced. Nor is one whose `tasks` or `events` is not a list: main() spreads both, so a string
+ * would come out as its characters and a number or an object would throw. It comes back as
+ * `writable: false` over a fresh state, so the event is still worked out (the dashboard is printed
+ * as it always was) but nothing derived from what was never read is saved; the guard (this
+ * function, for `tasks` and `events`) says why once on stderr. This hook runs on SubagentStart,
+ * SubagentStop, TeammateIdle and Notification, so while its own load failed open it replaced the
+ * file even on the events where subagent-handler refused to.
  *
  * The keys a valid object lacks (`tasks`, `events`, `workflow`) are defaulted by main().
  *
@@ -47,6 +52,10 @@ const freshState = () => ({ agents: {}, tasks: [], events: [], workflow: null })
  */
 function loadState() {
   const read = readStateForUpdate(getStateFilePath(), { hook: 'workflow-status' });
+  if (read !== null && !(isListOrAbsent(read.tasks) && isListOrAbsent(read.events))) {
+    logHookError('workflow-status', 'team state left untouched (tasks or events is not a list)');
+    return { state: freshState(), writable: false };
+  }
   return read === null
     ? { state: freshState(), writable: false }
     : { state: read, writable: true };

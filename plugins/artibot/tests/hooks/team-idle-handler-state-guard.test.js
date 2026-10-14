@@ -20,7 +20,10 @@
  *   - POSITIVE CONTROLS: the same hook on a healthy file keeps every other row and records the
  *     key names of a payload with no `agent_id`, and reports pending tasks it can read; a missing
  *     file is created; with the preload aimed at another path the hook still writes, so
- *     "unchanged" is not an artefact of a hook that never writes.
+ *     "unchanged" is not an artefact of a hook that never writes;
+ *   - a config that still carries the removed `team.autoStopIdle` (with `maxIdleCount`) changes
+ *     neither the message nor the state: no `stop` in the output, no `idleCounts` written. The
+ *     config is planted through CLAUDE_PLUGIN_ROOT.
  *
  * WHAT GREEN HERE DOES NOT PROVE
  *   - That a real scanner's sharing violation surfaces as EBUSY from `readFileSync`: the fault is
@@ -29,9 +32,6 @@
  *     label (`hook` option) is pinned in subagent-state-guard.test.js.
  *   - That a corrupt file is replaced later: that is SessionEnd's merge
  *     (`_team-state.js#mergeSessionSnapshot`, its own suite).
- *   - The auto-stop branch (`team.autoStopIdle`, off in the shipped config): the idle counters it
- *     would write are never written on a refused read, which this suite reaches only by the
- *     default (disabled) config.
  *
  * @module tests/hooks/team-idle-handler-state-guard
  */
@@ -102,12 +102,14 @@ function makeSandbox(label) {
 }
 
 /** One firing of the hook as the host spawns it: `node team-idle-handler.js`, payload on stdin. */
-function run(sb, input, { ebusyPath } = {}) {
+function run(sb, input, { ebusyPath, pluginRoot } = {}) {
   const env = { ...process.env, HOME: sb.home, USERPROFILE: sb.home, ARTIBOT_HOOK_FIRED_DIRECT: 'off' };
   // The host session ids and the state-dir seam must not leak into the child.
   for (const key of ['CLAUDE_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'ARTIBOT_STATE_DIR', 'ARTIBOT_STATE_DIR_HOME']) {
     delete env[key];
   }
+  // Where the plugin config is read from, for the one case that plants a config.
+  if (pluginRoot) env.CLAUDE_PLUGIN_ROOT = pluginRoot;
   const args = [HOOK];
   if (ebusyPath) {
     args.unshift('--import', pathToFileURL(sb.preload).href);
@@ -285,5 +287,34 @@ describe('team-idle-handler over a team-state file it cannot read (child process
     expect(out.stderr).not.toContain('team state left untouched');
     expect(stateNow().idlePayloadWithoutAgentId.keys).toEqual(Object.keys(WITHOUT_ID).sort());
     expect(stateNow().agents[OTHER]).toBeDefined();
+  });
+});
+
+describe('team-idle-handler and the removed team.autoStopIdle option (child process, real files)', () => {
+  let sb;
+  beforeEach(() => { sb = makeSandbox('autostop'); });
+  afterEach(() => {
+    try { rmSync(sb.root, { recursive: true, force: true }); } catch { /* noop */ }
+  });
+
+  // `stop: true` is not a TeammateIdle output field the host documents, so the option could only
+  // change the message. It is gone; a config that still carries it must change nothing. The code
+  // that had the option printed `stop: true` for exactly this config, which is how this case is
+  // known to reach the config at all.
+  it('ignores a leftover team.autoStopIdle: same message, no stop, no idle counter written', () => {
+    writeFileSync(sb.statePath, JSON.stringify(seed()));
+    const pluginRoot = path.join(sb.root, 'plugin');
+    mkdirSync(pluginRoot);
+    writeFileSync(
+      path.join(pluginRoot, 'artibot.config.json'),
+      JSON.stringify({ team: { autoStopIdle: true, maxIdleCount: 1 } }),
+    );
+
+    const out = run(sb, WITH_ID, { pluginRoot });
+
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe(reference.withId.stdout);
+    expect(JSON.parse(out.stdout)).not.toHaveProperty('stop');
+    expect(JSON.parse(readFileSync(sb.statePath, 'utf-8')).idleCounts).toBeUndefined();
   });
 });

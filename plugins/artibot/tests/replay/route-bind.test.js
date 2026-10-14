@@ -131,15 +131,51 @@ describe('joinRouteBinds()', () => {
       bind('tu-1', 'agent-a'), bind('tu-1', 'agent-b'), // one tool_use bound twice
       bind('tu-2', 'agent-a'), // one agent bound twice (tu-1 and tu-2)
     ]);
+    const lastTs = '2026-09-05T02:00:00.000Z';
     expect(j.conflicts).toEqual([
-      { type: 'tool_use_bound_twice', tool_use_id: 'tu-1', agent_ids: ['agent-a', 'agent-b'], count: 2 },
-      { type: 'agent_bound_twice', agent_id: 'agent-a', tool_use_ids: ['tu-1', 'tu-2'], count: 2 },
+      { type: 'tool_use_bound_twice', tool_use_id: 'tu-1', agent_ids: ['agent-a', 'agent-b'], count: 2, last_ts: lastTs },
+      { type: 'agent_bound_twice', agent_id: 'agent-a', tool_use_ids: ['tu-1', 'tu-2'], count: 2, last_ts: lastTs },
     ]);
+  });
+
+  it('dates a bind conflict by its latest row, whatever order the lines arrive in', () => {
+    const events = [
+      receipt('tu-1'), receipt('tu-2'),
+      bind('tu-1', 'agent-a', {}, '2026-10-13T09:19:38.198Z'),
+      bind('tu-2', 'agent-a', {}, '2026-10-13T09:00:00.000Z'), // written earlier, listed later
+    ];
+    for (const input of [events, [...events].reverse()]) {
+      expect(joinRouteBinds(input).conflicts).toMatchObject([
+        { type: 'agent_bound_twice', agent_id: 'agent-a', last_ts: '2026-10-13T09:19:38.198Z' },
+      ]);
+    }
+  });
+
+  it('picks the latest instant, not the latest text, when the offsets differ', () => {
+    const j = joinRouteBinds([
+      receipt('tu-1'), receipt('tu-2'),
+      bind('tu-1', 'agent-a', {}, '2026-10-13T20:00:00+09:00'), // 11:00Z, but sorts after the next line as text
+      bind('tu-2', 'agent-a', {}, '2026-10-13T11:30:00.000Z'),
+    ]);
+    expect(j.conflicts[0].last_ts).toBe('2026-10-13T11:30:00.000Z');
+  });
+
+  it('leaves a conflict undated (null) when any one of its rows has no usable ts', () => {
+    for (const bad of [undefined, '', 'not-a-time', 42]) {
+      const j = joinRouteBinds([
+        receipt('tu-1'), receipt('tu-2'),
+        bind('tu-1', 'agent-a', {}, '2026-09-05T02:00:00.000Z'),
+        bind('tu-2', 'agent-a', { ts: bad }),
+      ]);
+      expect(j.conflicts, String(bad)).toHaveLength(1);
+      expect(j.conflicts[0].last_ts, String(bad)).toBeNull();
+    }
   });
 
   it('reports a receipt written twice as a conflict and keeps the first', () => {
     const j = joinRouteBinds([receipt('tu-1'), receipt('tu-1')]);
     expect(j.receipts).toBe(1);
+    // No `last_ts` on this kind: `/doctor` Check 10 can only set a dated bind conflict aside as legacy.
     expect(j.conflicts).toEqual([{ type: 'receipt_duplicate', tool_use_id: 'tu-1', session_id: SID }]);
   });
 

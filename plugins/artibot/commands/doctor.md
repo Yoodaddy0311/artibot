@@ -664,24 +664,41 @@ and performs NO I/O. This command reads two files and hands over two counts:
    double-counted. When `spawns.ndjson` is absent, pass `undefined`, not `0`:
    zero unbound spawns in a file that does not exist is not a measurement.
 3. Call `checkRouteBindResidue({ unboundReceipts, unboundSpawns, conflicts })`
-   with `conflicts` = `route_binds.conflicts`.
+   with `conflicts` = `route_binds.conflicts`, the whole list: the judge sets
+   legacy conflicts apart itself (below).
 
 Status for this check — **first matching row wins**:
 
 | Condition | Status |
 |---|---|
 | Either count was not supplied (a file was not read) | **unmeasured** |
-| `conflicts` non-empty — a `tool_use_id` or an `agent_id` bound more than once, or a receipt written twice (invariant 1) | **fail** |
+| A live conflict — a `tool_use_id` or an `agent_id` bound more than once, or a receipt written twice (invariant 1); legacy conflicts (below) are not live | **fail** |
 | Both counts non-zero AND different | **warn** |
 | Otherwise | **pass** |
+
+**Legacy conflicts (informational).** An `agent_bound_twice` conflict whose
+latest row predates `RESUME_REBIND_FIXED_AT` (`doctor-checks.js`,
+2026-10-13T11:21:46Z, when v4.71.8 was published) is counted apart as
+`legacyConflicts` and does not fail the check. Commit 48e85610 ("a resumed
+teammate no longer re-binds") removed its cause, and the ledger is append-only,
+so rows the old hook wrote would fail every later run. `joinRouteBinds` dates
+each bind conflict with `last_ts`, the latest of its rows. The rule is an
+allowlist: another kind (`tool_use_bound_twice`, `receipt_duplicate`), a
+conflict with any row at or after the cutoff, and one whose `last_ts` is null
+(a row it could not date) all stay live and fail. `counts.conflicts` is the live
+count only. Measured 2026-10-14 on this repo's ledger: 5 conflicts, all
+`agent_bound_twice`, over 11 bind rows, the latest at 2026-10-13T09:19:38.198Z.
+The verdict was fail before this rule; with it those 5 read as legacy and the
+verdict is warn, from the residue row alone (6 unbound receipts, 311 unbound
+spawns).
 
 Report BOTH counts together with the session scope and BOTH absolute file
 paths — both are SHARED under `<git-common-dir>/artibot/`:
 `<git-common-dir>/artibot/ledger.jsonl` and
 `<git-common-dir>/artibot/spawns.ndjson`, falling back to
 `.artibot/runtime/ledger.jsonl` and `.artibot/runtime/spawns.ndjson` when git
-cannot answer (ADR-011 §5 ③) — the conflict count (or "not
-counted" when the join was not read), and the bind side's own bounds — a
+cannot answer (ADR-011 §5 ③) — the live conflict count and the `legacyConflicts`
+count (or "not counted" when the join was not read), and the bind side's own bounds — a
 10-minute candidate window and a 128 KB ledger tail
 (`subagent-handler.js#RECEIPT_WINDOW_MS`, `#RECEIPT_TAIL_BYTES` — the latter is
 an alias for `lib/runtime/ledger-tail.js#DEFAULT_TAIL_BYTES`, which owns the
@@ -700,8 +717,9 @@ lines over 3 distinct agent ids (`route_ledger`: 3 `ok:bound`, 1
 conflicts 0 (all `confidence: exact`, `prompt_id+name`), and
 `checkRouteBindResidue` returned **pass** — one live end-to-end run. Before
 those spawns (02:1x) the same tree held 0/0 and no spawn ledger, which is what
-the `unmeasured` row is for. The warn and fail rows have been exercised on
-fixtures only.
+the `unmeasured` row is for. The warn and fail rows were exercised on fixtures
+only until 2026-10-14, when this repo's real ledger drove both (the legacy
+conflicts paragraph above).
 
 **What this check cannot see** (§9 — state it next to the gate):
 
@@ -736,6 +754,12 @@ fixtures only.
   Once the install is current, an `unmeasured` on the spawn side means the
   one-time migration (ADR-011 §1회 이관 절차) has not been run yet, not that
   nothing spawned.
+- **Whether a legacy conflict is really gone, or whether the fix works.** A
+  conflict is set aside on its rows' `ts` alone; the check cannot tell which
+  hook version wrote them. It cannot show the fix works either: a ledger in
+  which nothing was resumed since the cutoff has no conflict dated after it
+  too. An install still running the pre-fix hook keeps writing conflicts dated
+  after the cutoff, and those fail.
 
 ## Output Format
 
@@ -752,7 +776,7 @@ ARTIBOT HEALTH CHECK
 [check-7-icon] Explainability: {n} session event lines (24h), {n} cron files, trail legacy(frozen) {exists|absent}/{n}, last {timestamp}
 [check-8-icon] State parity: {status} at state_version {n} ({n} gaps, {n} unpaired), root {path}
 [check-9-icon] Artifacts: {n}/10 items measured, {n} failing, {n} missions read
-[check-10-icon] Route bind: {n} unbound receipts / {n} unbound spawns, {n} conflicts
+[check-10-icon] Route bind: {n} unbound receipts / {n} unbound spawns, {n} conflicts, {n} legacy
 
 Status: {HEALTHY|DEGRADED|UNHEALTHY} ({passed}/{total} checks passed)
 ```

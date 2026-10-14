@@ -50,7 +50,7 @@ Remove all completed tasks from the list.
    - `update`: Modify specified task with TaskUpdate, re-validate dependencies
    - `complete`: Verify task output, mark done with TaskUpdate, check if unblocks other tasks
    - `block`: Mark blocked with TaskUpdate, identify dependent tasks affected
-   - `clear`: Remove completed tasks, compact list
+   - `clear`: Find completed tasks with TaskList, delete each with TaskUpdate(taskId, status="deleted") (one call per task)
 4. **Verify**: Ensure single task in_progress at a time. Validate no circular dependencies
 5. **Report**: Output updated task board
 

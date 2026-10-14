@@ -13,13 +13,17 @@
  *
  * WHAT IS PINNED (the hook as a child process, on real files)
  *   - a corrupt file (truncated JSON, text, empty, `null`, an array, an `agents` that is not an
- *     object) and a healthy file whose read fails with EBUSY (a preload makes `fs.readFileSync`
- *     throw for that one path) stay byte for byte as they were across START and STOP, for every
- *     event type the script takes; exit code 0, one stderr line, no temp or lock file left;
+ *     object, a `tasks` or `events` that is not a list) and a healthy file whose read fails with
+ *     EBUSY (a preload makes `fs.readFileSync` throw for that one path) stay byte for byte as they
+ *     were across START and STOP, for every event type the script takes; exit code 0, one stderr
+ *     line, no temp or lock file left;
  *   - stdout is the bytes a missing file gives for the same payload, which is what the old
  *     fail-open path printed for every case above but JSON `null` (there it died on
  *     `null.agents`, exit 0, nothing on stdout; measured 2026-10-13 against git HEAD), and the
  *     roster file of the session is not written;
+ *   - the `tasks` or `events` that is not a list is a separate old defect, not that path: the hook
+ *     spread it, so a string was written back as its characters and a number threw before anything
+ *     was printed (exit 0, empty stdout; measured 2026-10-14 against git HEAD);
  *   - POSITIVE CONTROLS: the same hook on a healthy file adds and closes its row, keeps the other
  *     session's row and the unrelated top-level keys, and writes the roster; a missing file is
  *     created; with the preload aimed at another path the hook still writes, so "unchanged" is not
@@ -85,6 +89,8 @@ const CORRUPT = [
   ['JSON null', 'null'],
   ['a JSON array', '[1,2]'],
   ['an agents value that is not an object', '{"agents":[],"events":[1]}'],
+  ['an events value that is a string', '{"agents":{},"events":"abc"}'],
+  ['a tasks value that is a number', '{"agents":{},"tasks":5}'],
 ];
 
 const payload = (event, extra = {}) => ({

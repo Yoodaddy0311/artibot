@@ -26,7 +26,8 @@
  *   1. 1:1 — one `tool_use_id` binds at most one `agent_id` and vice versa.
  *      Violations are listed in `conflicts[]`. `bindRoute` enforces this by
  *      construction on the writer side, so a conflict here means a writer
- *      guarantee broke, not a normal outcome.
+ *      guarantee broke, not a normal outcome. A bind conflict carries
+ *      `last_ts` ({@link latestTs}); judging its age is the caller's job.
  *   3. RESIDUE — receipts that never bound (`unbound_receipts[]`), reported
  *      beside the spawn ledger's `skipped:unbound` count (`countUnboundSpawns`).
  *      The two numbers come from two different files with two different
@@ -174,8 +175,24 @@ function byRecord(a, b) {
 }
 
 /**
+ * The latest instant among the rows of one bind conflict, as an ISO string, or
+ * null when any row has no parseable `ts`. Rows are compared as INSTANTS, not
+ * as text (`TS_RE` in `event-writer.js` admits a numeric offset), and one
+ * undatable row leaves the whole conflict undated: a judge may call a conflict
+ * old only when every row of it can be dated.
+ *
+ * @param {object[]} members - the bind records of one conflict
+ * @returns {string|null}
+ */
+function latestTs(members) {
+  const ms = members.map((m) => (isStr(m.ts) ? Date.parse(m.ts) : NaN));
+  return ms.some(Number.isNaN) ? null : new Date(Math.max(...ms)).toISOString();
+}
+
+/**
  * Group bind lines by one key and list the keys that appear more than once —
- * invariant 1 in both directions, run once per direction.
+ * invariant 1 in both directions, run once per direction. Each conflict carries
+ * `last_ts` ({@link latestTs}) so a judge can tell an old conflict from a new one.
  *
  * @param {object[]} binds
  * @param {'tool_use_id'|'agent_id'} key - the side being checked
@@ -198,6 +215,7 @@ function conflictsOn(binds, key, other, type) {
       [key]: value,
       [`${other}s`]: members.map((m) => m[other]).filter((v) => v !== null).sort(cmp),
       count: members.length,
+      last_ts: latestTs(members),
     });
   }
   return out.sort((a, b) => cmp(a[key], b[key]));
@@ -221,8 +239,9 @@ function conflictsOn(binds, key, other, type) {
  * }} `bound` pairs a receipt with its bind; `unbound_receipts` are receipts no
  *   bind names; `orphan_binds` are binds whose receipt is not in the input
  *   (rotated out, or a window this read did not cover); `conflicts` are
- *   invariant-1 violations; `ignored.pre_tool_use_only` counts `route.selected`
- *   lines that are not PreToolUse receipts (the retired `spawn:` shape).
+ *   invariant-1 violations (a bind conflict carries `last_ts`);
+ *   `ignored.pre_tool_use_only` counts `route.selected` lines that are not
+ *   PreToolUse receipts (the retired `spawn:` shape).
  */
 export function joinRouteBinds(ordered) {
   const list = Array.isArray(ordered) ? ordered : [];

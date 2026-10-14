@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 컴팩트 정리 (2026-10-14)
+
+- `/doctor` Check 10: v4.71.8 의 재개 재바인드 수정(`48e85610`) 이전에 쓰인 `agent_bound_twice` 충돌을 `legacyConflicts` 로 따로 센다. append-only 원장에 남은 5건 때문에 이 검사가 영구 FAIL 이던 것을 풀었다. 컷오프는 고정 상수(`RESUME_REBIND_FIXED_AT`, 릴리스 시각)이고, 다른 종류이거나 컷오프 이후 행이 하나라도 있거나 시각을 매길 수 없는 충돌은 그대로 FAIL 이다. 이 리포 원장 실측은 fail → warn 이다. 남은 warn 은 unbound 잔여 대조(6 대 311)다.
+- `workflow-status`: 공유 상태 파일의 `tasks`·`events` 가 배열이 아니면(문자열·숫자·객체·`0`·`""`) 쓰지 않고 stderr 한 줄을 남긴다. 전에는 문자열이 문자 배열로 다시 쓰이거나 TypeError 로 훅이 죽었다. `null`·없음은 전처럼 기본값이다.
+- `team-idle-handler`: 문서에 없는 `stop: true` 출력과 그것만 켜던 `team.autoStopIdle`·`maxIdleCount` 옵션을 지웠다(출하 config 에 없음, 소비처는 이 훅뿐). 모듈을 import 하지 않던 재구현 테스트도 지웠다.
+- `/task clear`: 수행 도구를 `TaskUpdate(taskId, status="deleted")`(태스크마다 1회)로 적었다.
+
 ## [4.71.8] — 2026-10-13
 
 `v4.71.7`(`3d0a4c0a`) 이후 11 커밋 = **93 files +5,140/−459**(`git rev-list --count v4.71.7..8fde2443` · `git diff --shortstat v4.71.7 8fde2443`, 2026-10-13 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `f9459206`·`0c8ff7b4`·`425220ad` 3개는 인계 문서 커밋이고 내용 커밋은 8개다.
