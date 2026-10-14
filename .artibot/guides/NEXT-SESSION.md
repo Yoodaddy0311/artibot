@@ -1,4 +1,4 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-13 KST 갱신, **v4.71.8** — v4.71.7 이후 11 커밋(내용 8) + 릴리스 커밋: 공유 상태 파일 fail-closed · 재개 팀원 이중 bind 차단 · SubagentStop 서빙 모델 · Task 도구 disabled 내성 · /team 예산표·{sid} · 카탈로그 thinkingNote · master = 태그 `4f91e0c7` · 이 PC 설치 4.71.8(재시작 전, 로드 미확인))
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-13 KST 갱신, **v4.71.8** — v4.71.7 이후 11 커밋(내용 8) + 릴리스 커밋: 공유 상태 파일 fail-closed · 재개 팀원 이중 bind 차단 · SubagentStop 서빙 모델 · Task 도구 disabled 내성 · /team 예산표·{sid} · 카탈로그 thinkingNote · master = 태그 `4f91e0c7` · 이 PC 설치 4.71.8, 2026-10-14 재시작 후 로드 확인)
 
 > 이전 헤더(2026-10-12, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-12 KST 갱신, **v4.71.7** — v4.71.6 이후 13 커밋(내용 11) + 릴리스 커밋: Sonnet 5.5 cache read 0.10 · haiku 티어 = Haiku 5.5 · route-scorer cost 바닥 · SessionEnd 병합 · YAML 꼬리 주석 · test-status 정화 · 명령 문서 정정 · master = 태그 `3d0a4c0a` · 이 PC 설치 4.71.7(재시작 전, 로드 미확인))
 
@@ -40,7 +40,8 @@
 - artibot-cowork 의 같은 옛 줄(에이전트 11 · `commands/sdk.md`)과 `/team` 관련 문서 — 다음 cowork 릴리스(ZIP 고정).
 - `workflow-status.js`: 유효 객체인데 `tasks`/`events` 가 문자열이면 문자 배열로 다시 쓰인다(state2 팀원 실측, 현실성 낮음). 그 밖의 비배열 타입은 TypeError 로 훅이 죽고 파일은 그대로.
 - `commands/task.md` 의 `clear` 가 어떤 도구로 수행되는지 미확인. `/task` 의 `allowed-tools` 확장이 호스트 권한 프롬프트에 주는 영향 미확인.
-- 라이브 미측정: 재시작 뒤 SubagentStop 행에 `servedModel`·`servedDrift` 가 찍히는지, 거부 경로 stderr 라벨, 팀원이 새 조건부 줄을 따르는지, TeammateIdle(Agent 도구 서브에이전트에서는 0회 — 추론: Agent Teams 팀원이 아니라서)·TaskStop.
+- 재시작 후 로드 실측(2026-10-14, 세션 5cf4c941): 세션 transcript 의 플러그인 캐시 경로는 `4.71.8` 만(2건), 옛 버전 0. doc-updater 프로브(`model:"sonnet"`) 의 `.git/artibot/spawns.ndjson` STOP 행에 `servedModel:"claude-sonnet-5-5"`·`servedTier:"sonnet"`·`servedDrift:true` — 서브에이전트 transcript `"model"` 도 `claude-sonnet-5-5` 2/2. `servedDrift:true` 는 정책 티어(`canonicalModel:"opus"`) 대 서빙 티어 비교라 라우팅된 sonnet 스폰에서 설계대로다(`spawn-ledger.js` SERVED COLUMNS 주석).
+- 라이브 미측정: 거부 경로 stderr 라벨, 팀원이 새 조건부 줄을 따르는지, TeammateIdle(Agent 도구 서브에이전트에서는 0회 — 추론: Agent Teams 팀원이 아니라서)·TaskStop.
 - 서빙 티어 대 영수증 `requested_model` 대조는 STOP 경로에 영수증 조회가 없어 구현하지 않았다 — `lib/replay` 쪽 읽기 시점 조인이 권고.
 - ~~git-ignored 스크래치 폴더 삭제 결정~~ — 2026-10-14 오너 지시로 삭제: 안의 `jx` 는 없는 경로(`C:\Users\HeechangLee\Desktop\Artibot\…`)를 가리키는 junction 하나뿐이었고, 링크만 지운 뒤 빈 폴더를 지웠다(이 PC 전용, git 추적 밖).
 
