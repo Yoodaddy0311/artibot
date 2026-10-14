@@ -25,7 +25,7 @@
 ### 이번 세션에서 알게 된 함정
 
 - **작업 중인 팀원에게 보낸 메시지는 턴이 끝날 때까지 배달되지 않는다**(이 세션 실측 2회: 승인 메시지가 팀원 DONE 뒤에 도착). 소유 밖 파일 허락 같은 결정은 스폰 프롬프트에 미리 넣는다.
-- 권한 분류기가 `git cherry-pick caa3d2eb` 를 다시 거부했다(Git Destructive). 내용을 손으로 옮기는 우회는 하지 않았다 — **오너가 직접 cherry-pick** 한다.
+- 권한 분류기가 `git cherry-pick caa3d2eb` 를 다시 거부했다(Git Destructive). 내용을 손으로 옮기는 우회는 하지 않았다. 2026-10-14 오너가 명시적으로 맡긴 뒤에는 통과했다(master `ebd6b069`).
 - Bash PreToolUse 훅이 명령 문자열에 단어 "Shutdown" 만 있어도 system shutdown 으로 차단한다(오탐, 팀원 보고 2회). 그 단어는 Grep 도구로 찾는다.
 - 측정 원장은 `.git/artibot/spawns.ndjson`(9,890행, START 1,547)이다. `.artibot/ledger/spawns.ndjson`(1,347행)은 다른 파일이라 같은 수치가 안 나온다.
 
@@ -35,14 +35,14 @@
 
 ### 남은 것
 
-- `caa3d2eb`(로컬 브랜치 `docs/v4710-followup-o`, 이 PC 전용) — 오너 cherry-pick.
+- ~~`caa3d2eb` 오너 cherry-pick~~ — 2026-10-14 처리: master `ebd6b069`(같은 내용, V5-BACKLOG 1줄). 로컬 브랜치 `docs/v4710-followup-o` 는 남아 있다.
 - doctor Check 10: 과거 원장의 `agent_bound_twice` 5건(4개 id)이 append-only 원장에 남아 계속 FAIL 로 읽힌다(hooks 팀원 재구성, 실제 `/doctor` 미실행). 창·기준선 처리 결정 필요. 수정 전후 행이 섞여 unbound KPI 가 두 체제를 함께 센다(투영: 308 → 88).
 - artibot-cowork 의 같은 옛 줄(에이전트 11 · `commands/sdk.md`)과 `/team` 관련 문서 — 다음 cowork 릴리스(ZIP 고정).
 - `workflow-status.js`: 유효 객체인데 `tasks`/`events` 가 문자열이면 문자 배열로 다시 쓰인다(state2 팀원 실측, 현실성 낮음). 그 밖의 비배열 타입은 TypeError 로 훅이 죽고 파일은 그대로.
 - `commands/task.md` 의 `clear` 가 어떤 도구로 수행되는지 미확인. `/task` 의 `allowed-tools` 확장이 호스트 권한 프롬프트에 주는 영향 미확인.
 - 라이브 미측정: 재시작 뒤 SubagentStop 행에 `servedModel`·`servedDrift` 가 찍히는지, 거부 경로 stderr 라벨, 팀원이 새 조건부 줄을 따르는지, TeammateIdle(Agent 도구 서브에이전트에서는 0회 — 추론: Agent Teams 팀원이 아니라서)·TaskStop.
 - 서빙 티어 대 영수증 `requested_model` 대조는 STOP 경로에 영수증 조회가 없어 구현하지 않았다 — `lib/replay` 쪽 읽기 시점 조인이 권고.
-- git-ignored 스크래치 폴더 `plugins/artibot/UsersHeechangLee…scratchpad/`(깨진 symlink `jx`) — 지울지 오너 결정.
+- ~~git-ignored 스크래치 폴더 삭제 결정~~ — 2026-10-14 오너 지시로 삭제: 안의 `jx` 는 없는 경로(`C:\Users\HeechangLee\Desktop\Artibot\…`)를 가리키는 junction 하나뿐이었고, 링크만 지운 뒤 빈 폴더를 지웠다(이 PC 전용, git 추적 밖).
 
 ## v4.71.7 (2026-10-12 KST, 릴리스 엔지니어 팀원)
 
