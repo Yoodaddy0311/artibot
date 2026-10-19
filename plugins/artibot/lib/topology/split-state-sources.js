@@ -244,6 +244,20 @@ export function normalizeEvents(raw) {
 export const MISSION_BINDING_KEY = 'missionBinding';
 
 /**
+ * Whether a parsed `plan.json` carries the binding KEY at all. Presence only:
+ * nothing about the record is judged here (`parseMissionBinding`, the run files
+ * and the store do that), so the answer is the same whatever state the record,
+ * `run.json` or the canary switch is in. A caller asks this FIRST, and reads or
+ * judges a record only for a plan that has one.
+ *
+ * @param {unknown} plan - a parsed `plan.json`, or anything at all
+ * @returns {boolean}
+ */
+export function carriesMissionBinding(plan) {
+  return isPlainObject(plan) && Object.hasOwn(plan, MISSION_BINDING_KEY);
+}
+
+/**
  * The binding record's closed key set — an ALLOWLIST: a key outside it makes
  * the record invalid rather than being carried along, so a future field has to
  * change this list and its readers together.

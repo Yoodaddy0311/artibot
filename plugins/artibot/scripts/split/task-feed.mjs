@@ -88,7 +88,7 @@
 import path from 'node:path';
 import { readJsonFileSync } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
-import { readRunJson } from '../../lib/git/split-run-file.js';
+import { readPlanJson, readRunJson } from '../../lib/git/split-run-file.js';
 import { createStateStore } from '../../lib/project-state/state-manager.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
 import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
@@ -96,6 +96,7 @@ import { bindRunToMission, readMissionBinding } from '../../lib/topology/split-s
 import {
   attachRunOps,
   BINDING_DISABLED,
+  carriesMissionBinding,
   foreignRunLimbs,
   honorsBinding,
   missionEnvFromBinding,
@@ -219,19 +220,30 @@ export function selectLegacyMission(state, sessionId) {
  *
  * `honorBinding` is the canary switch as a port (`true`, or a function
  * returning `true`; anything else — absent included — is OFF, see
- * `split-state-sources.js#honorsBinding`). It is asked only when the run
- * carries a record, so a legacy run never reaches the config.
+ * `split-state-sources.js#honorsBinding`).
  *
- * Reads plan.json / run.json (through `readMissionBinding`), so a corrupt
- * file throws — callers are record-only and turn that into a skip.
+ * THE ORDER IS THE CONTRACT (SH-11 pre-flip item L2): the plan's own key first,
+ * the switch second, the record last. A plan with no `missionBinding` key is a
+ * legacy run and the switch is not asked (a legacy run never reaches the
+ * config); a plan with one is asked the switch BEFORE `readMissionBinding`, which
+ * parses the record and opens `run.json` for the F3 cross-check, so a record the
+ * switch is not honouring is neither judged nor allowed to make this call depend
+ * on a file the OFF path ignores. Only a run that carries a record and honours it
+ * is read.
+ *
+ * Reads plan.json (and run.json, for a honoured record), so a corrupt file
+ * throws — callers are record-only and turn that into a skip.
  *
  * @param {{ parentRoot: string, state: object, sessionId: unknown, honorBinding?: boolean|(() => boolean) }} p
  * @returns {{ mode: 'bound', missionId: string, binding: Readonly<object> } | { mode: 'legacy', missionId: string|null, binding?: Readonly<{status: 'disabled'}> } | { mode: 'rejected', reason: string, missionId: string|null }}
  */
 export function resolveRunMission({ parentRoot, state, sessionId, honorBinding }) {
+  const legacyMission = () => selectLegacyMission(state, sessionId).missionId ?? null;
+  if (!carriesMissionBinding(readPlanJson(parentRoot))) return { mode: 'legacy', missionId: legacyMission() };
+  if (!honorsBinding(honorBinding)) return { mode: 'legacy', missionId: legacyMission(), binding: BINDING_DISABLED };
   const probe = readMissionBinding({ runDir: path.join(parentRoot, '.artibot', 'split') });
-  if (probe.status === 'none') return { mode: 'legacy', missionId: selectLegacyMission(state, sessionId).missionId ?? null };
-  if (!honorsBinding(honorBinding)) return { mode: 'legacy', missionId: selectLegacyMission(state, sessionId).missionId ?? null, binding: BINDING_DISABLED };
+  // The key was there a moment ago; a whole-file plan write that dropped it since reads as "no record".
+  if (probe.status === 'none') return { mode: 'legacy', missionId: legacyMission() };
   if (probe.status === 'invalid') return { mode: 'rejected', reason: probe.reason, missionId: null };
   const missionId = probe.binding.mission_id;
   if (!state?.active_missions?.[missionId]) return { mode: 'rejected', reason: 'binding-dangling', missionId };
