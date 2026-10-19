@@ -28,10 +28,13 @@
  *     weakened until it stopped meaning anything.
  *   - DYNAMIC. Static text cannot see a write reached through an injected port,
  *     which is the only way this module could write at all. So the controller
- *     is run across a fixture matrix with every port recording, and the six
- *     write ports must show zero calls while `reconcile` must never see
- *     `apply: true` — even though the caller passes `apply: true` in the
- *     options, which is the forwarding mistake the run reproduces on purpose.
+ *     is run across a fixture matrix with every port recording, and every port
+ *     outside the eight READ_PORTS must show zero calls. That is an ALLOWLIST
+ *     over whatever the REAL StateStore exposes, so a binding the store grows
+ *     tomorrow is a write until someone lists it as a read; a six-name write
+ *     list was tried first and never saw `writeProjection`. `reconcile` must
+ *     never see `apply: true` — even though the caller passes `apply: true` in
+ *     the options, which is the forwarding mistake the run reproduces on purpose.
  *
  * THE DENOMINATOR IS IN THE TEST NAME. "Zero writes" is trivially true of a
  * controller that calls nothing, so the count of writes is reported against N,
@@ -40,7 +43,9 @@
  *
  * SELF-VERIFICATION. The audit is a function, and one `it` points it at a fake
  * controller that claims a task and calls `reconcile({ apply: true })`. If the
- * audit does not go red on that, every green above it is meaningless.
+ * audit does not go red on that, every green above it is meaningless. Two more
+ * aim it at a controller calling `writeProjection` (the six-name list was green
+ * on it) and at one calling a store method this file has never named.
  *
  * ── WHAT THIS GATE CANNOT SEE (rules §9) ───────────────────────────────────
  *   - TEAMMATE B'S MODULE. Only `lib/checkpoint/resume-controller.js` is
@@ -49,10 +54,10 @@
  *   - STEP 10. "Resume" is out of scope for the controller, so nothing here
  *     says anything about whether the eventual resume performs its transitions
  *     correctly. This gate pins the REPORT, not the resume.
- *   - THE REAL PORTS. Every port below is a fake. That the real
- *     `state-manager.js` bindings have the shapes assumed here is checked by
- *     their own tests, not by this file. If `getLease` were to acquire a write
- *     side effect upstream, this gate would stay green.
+ *   - THE REAL PORTS' BEHAVIOR. The NAMES come from the real store (opened
+ *     once, no method called); every port below is a fake. That the real
+ *     bindings behave as assumed is checked by their own tests, not by this
+ *     file: if `getLease` acquired a write side effect, this gate stays green.
  *   - INDIRECT WRITES. A port that is read-only by name but writes internally
  *     (say a `reconcile` implementation that ignored `apply`) is invisible
  *     here; the gate measures what the CONTROLLER asks for, not what a port
@@ -65,8 +70,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 
 import { buildResumeReport } from '../../lib/checkpoint/resume-controller.js';
+import { createStateStore } from '../../lib/project-state/state-manager.js';
 
 const SOURCE_URL = new URL('../../lib/checkpoint/resume-controller.js', import.meta.url);
 const SOURCE = readFileSync(SOURCE_URL, 'utf-8');
@@ -75,17 +82,36 @@ const MISSION = 'm-1';
 const NOW_MS = Date.parse('2026-09-14T12:00:00.000Z');
 
 /**
- * The six state-changing bindings on the StateStore, re-measured for SH-11
- * pre-flip condition 2 at `lib/project-state/state-manager.js:543-549`
- * (`buildStoreApi`; first measured 2026-09-14 at `:431-435`, when there were
- * five) — every write the store exposes, and none of them may be called. The
- * sixth, `updateTask`, is the single-node door that condition added
- * (`lib/project-state/task-update.js`): a node write is exactly the kind of
- * write "Restore Task Graph" is one keystroke from. They sit immediately below
- * the three read bindings this controller does use (`:540-542`), which is the
- * whole reason the gate exists.
+ * The ALLOWLIST: the eight ports `buildResumeReport` declares (`ports.*` in its
+ * JSDoc), the only names the controller may call. The first four are methods of
+ * the real StateStore; the rest come from the checkpoint service, `lease.js`,
+ * model policy and a clock. `reconcile` is allowed with `apply: false` only,
+ * which the `applyTrue` count carries.
  */
-const WRITE_PORTS = Object.freeze(['updateMission', 'updateTask', 'claimTask', 'releaseTask', 'heartbeatWorker', 'appendEvent']);
+const STORE_READ_PORTS = Object.freeze(['getMission', 'getTaskGraph', 'getLease', 'reconcile']);
+const READ_PORTS = Object.freeze([...STORE_READ_PORTS, 'latestValid', 'isLeaseExpired', 'resolveModel', 'now']);
+
+/** A CANARY, not the gate's list: the store writes known on 2026-10-19, so a derivation that comes back short cannot pass. */
+const KNOWN_WRITES = Object.freeze(['updateMission', 'updateTask', 'claimTask', 'releaseTask', 'heartbeatWorker', 'appendEvent', 'writeProjection']);
+
+/** @param {object} store - A StateStore. @returns {string[]} Its function-valued members. */
+const storeMethods = (store) => Object.keys(store).filter((name) => typeof store[name] === 'function');
+
+/**
+ * The store's methods minus the allowlist. "Write" means "may not be called": it
+ * includes store READS this controller does not use (`getState`, `getProjection`,
+ * `renderProjection`) until someone lists them.
+ */
+const writePortsOf = (store, allowed = READ_PORTS) => storeMethods(store).filter((name) => !allowed.includes(name));
+
+/**
+ * The real store, opened only to read its method NAMES (construction does no I/O
+ * and no method is called). Guarded: a store that starts requiring more options
+ * must turn one `it` red, not fail collection and take the read-order pins below with it.
+ */
+const openStore = () => createStateStore({ projectRoot: os.tmpdir(), sessionId: 'resume-contract-names', appendEvent: () => ({ ok: false }) });
+const REAL_STORE = (() => { try { return openStore(); } catch { return null; } })();
+const WRITE_PORTS = Object.freeze(REAL_STORE === null ? [] : writePortsOf(REAL_STORE));
 
 /** Tokens that would mean the module reached for I/O or a clock of its own. */
 const FORBIDDEN_TOKENS = Object.freeze([
@@ -166,9 +192,10 @@ const FIXTURES = Object.freeze([
  *
  * @param {object} over - Per-fixture overrides; `null` removes a read port.
  * @param {Array<{port: string, args: unknown[]}>} calls - Shared call log.
+ * @param {string[]} writePorts - Store methods to bind as recording violations.
  * @returns {object} The ports.
  */
-function recordingPorts(over, calls) {
+function recordingPorts(over, calls, writePorts) {
   const reads = {
     latestValid: validCheckpoint(CHECKPOINT),
     getMission: () => MISSION_RECORD,
@@ -185,7 +212,7 @@ function recordingPorts(over, calls) {
     if (fn === null) continue;
     bind(name, fn);
   }
-  for (const name of WRITE_PORTS) bind(name, () => ({ ok: true }));
+  for (const name of writePorts) bind(name, () => ({ ok: true }));
   return ports;
 }
 
@@ -198,10 +225,14 @@ function recordingPorts(over, calls) {
  * a caller's flag into `reconcile` is the exact mistake this gate exists to
  * catch, so the matrix supplies the flag rather than assuming nobody will.
  *
+ * A call to anything outside {@link READ_PORTS} counts as a write, named here or
+ * not; `writePorts` is only what gets BOUND so a call is recorded, not lost to a TypeError.
+ *
  * @param {Function} build - A `(ports, options) => Promise<object>` controller.
- * @returns {Promise<{total: number, writes: Array<string>, applyTrue: number, fixtures: number}>} Audit.
+ * @param {string[]} [writePorts] - Store methods to bind as violations; defaults to the real store's.
+ * @returns {Promise<{total: number, writes: Array<string>, applyTrue: number, fixtures: number, bound: number}>} Audit.
  */
-async function auditPortUse(build) {
+async function auditPortUse(build, writePorts = WRITE_PORTS) {
   const calls = [];
   let applyTrue = 0;
   for (const fixture of FIXTURES) {
@@ -210,13 +241,14 @@ async function auditPortUse(build) {
     over.reconcile = (opts) => { if (opts?.apply === true) applyTrue += 1; return inner(opts); };
     // A controller that throws still must not have written, so the throw is
     // swallowed here and judged by the counts below rather than by rejection.
-    await build(recordingPorts(over, calls), { missionId: MISSION, apply: true }).catch(() => null);
+    await build(recordingPorts(over, calls, writePorts), { missionId: MISSION, apply: true }).catch(() => null);
   }
   return {
     total: calls.length,
-    writes: calls.filter((c) => WRITE_PORTS.includes(c.port)).map((c) => c.port),
+    writes: calls.filter((c) => !READ_PORTS.includes(c.port)).map((c) => c.port),
     applyTrue,
     fixtures: FIXTURES.length,
+    bound: writePorts.length,
   };
 }
 
@@ -224,24 +256,32 @@ async function auditPortUse(build) {
  * The verdict, separated from the assertions so the same judgement can be
  * applied to a deliberately bad controller.
  *
- * @param {{total: number, writes: string[], applyTrue: number}} audit - Audit result.
+ * @param {{total: number, writes: string[], applyTrue: number, bound: number}} audit - Audit result.
  * @returns {{pass: boolean, reasons: string[]}} Verdict.
  */
 function verdict(audit) {
   const reasons = [];
-  if (audit.writes.length > 0) reasons.push(`write ports called: ${audit.writes.join(', ')}`);
+  if (audit.writes.length > 0) reasons.push(`ports outside the read allowlist called (counted as writes): ${audit.writes.join(', ')}`);
   if (audit.applyTrue > 0) reasons.push(`reconcile called with apply:true ${audit.applyTrue} time(s)`);
   if (audit.total < 20) reasons.push(`only ${audit.total} port calls — the matrix did not exercise the controller`);
+  if (audit.bound === 0) reasons.push('no write ports were bound — the audit counted against nothing');
   return { pass: reasons.length === 0, reasons };
 }
 
 const AUDIT = await auditPortUse(buildResumeReport);
 
 describe('resume controller performs no transition', () => {
-  it(`write ports called 0/${AUDIT.total} times (N = total port calls across ${AUDIT.fixtures} fixtures)`, () => {
+  it(`write ports called 0/${AUDIT.total} times (N = total port calls across ${AUDIT.fixtures} fixtures, ${AUDIT.bound} store methods bound as writes)`, () => {
     expect(AUDIT.writes).toEqual([]);
     expect(AUDIT.total).toBeGreaterThanOrEqual(20);
     expect(AUDIT.fixtures).toBe(FIXTURES.length);
+  });
+
+  it('derives the write set from the real StateStore rather than from a list kept here', () => {
+    expect(REAL_STORE, 'createStateStore threw, so no write set could be derived').not.toBeNull();
+    expect(WRITE_PORTS).toEqual(expect.arrayContaining(KNOWN_WRITES));
+    // A listed store read the store no longer has is a rename this gate would stop noticing.
+    for (const name of STORE_READ_PORTS) expect(storeMethods(REAL_STORE), `${name} is not a StateStore method`).toContain(name);
   });
 
   it(`reconcile saw apply:true 0/${AUDIT.fixtures} times, though every caller passed it`, () => {
@@ -302,6 +342,18 @@ async function writingController(ports, options) {
   return { mission_id: options.missionId, steps: [], blocked_by: [], resumable: true, evidence: {} };
 }
 
+/**
+ * The shipped controller plus one extra call to `name`. The call floor is
+ * cleared, so that call is the only thing that can turn the verdict red.
+ * @param {string} name - Port the extra call goes to.
+ * @returns {Function} A `(ports, options) => Promise<object>` controller.
+ */
+const controllerAlsoCalling = (name) => async (ports, options) => {
+  const report = await buildResumeReport(ports, options);
+  ports[name]?.();
+  return report;
+};
+
 describe('the audit itself', () => {
   it('goes red on a controller that claims a task, so a green above is not vacuous', async () => {
     const bad = verdict(await auditPortUse(writingController));
@@ -326,6 +378,25 @@ describe('the audit itself', () => {
     expect(audit.writes).toContain('claimTask');
     expect(audit.writes).toContain('appendEvent');
     expect(audit.applyTrue).toBe(FIXTURES.length);
+  });
+
+  it('goes red on a controller that calls writeProjection, the write the six-name list never named', async () => {
+    const bad = verdict(await auditPortUse(controllerAlsoCalling('writeProjection')));
+    expect(bad.pass).toBe(false);
+    expect(bad.reasons.join(' ')).toContain('writeProjection');
+  });
+
+  it('goes red on a store method this file has never heard of: the write set grows with the store', async () => {
+    const grown = writePortsOf({ ...REAL_STORE, purgeMission: () => ({ ok: true }) });
+    const bad = verdict(await auditPortUse(controllerAlsoCalling('purgeMission'), grown));
+    expect(grown).toContain('purgeMission');
+    expect(bad.reasons.join(' ')).toContain('purgeMission');
+  });
+
+  it('goes red when no write port was bound, so an empty derivation cannot read as a clean run', async () => {
+    const bad = verdict(await auditPortUse(buildResumeReport, []));
+    expect(bad.pass).toBe(false);
+    expect(bad.reasons.join(' ')).toContain('no write ports were bound');
   });
 });
 
@@ -396,7 +467,7 @@ describe('the audit itself', () => {
 /**
  * Both documents are read behind an existence guard. An unguarded top-level
  * `readFileSync` would turn a missing file into a COLLECTION error, taking the
- * 22 report-only pins above this line down with it — a gate that deletes other
+ * report-only pins above this line down with it — a gate that deletes other
  * gates when it fails. The absence is instead reported as a normal red by the
  * first assertion in each describe below, so this stays fail-closed.
  *
