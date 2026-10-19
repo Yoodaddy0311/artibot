@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.9** — v4.71.8 이후 8 커밋(내용 3) + 릴리스 커밋: 2026-10-14 컴팩트 정리(doctor Check 10 옛 충돌 분리 · `workflow-status` 비배열 거부 · `team-idle-handler` 정리 · `/task clear`) · master = 태그 `2e14407b` · 이 PC 설치 4.71.9(재시작 전, 로드 미확인) · 태그 뒤 master 에 v5 4줄기(`ead76030`)와 `/rea` 가 착지, 다음 릴리스에 실린다)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.10** — v4.71.9 이후 15 커밋(내용 13 · 문서 2) + 릴리스 커밋: `/rea`(명령 80 → 81) · SH-11 사용자 스위치 · lease-tick store-only · 테스트 게이트 3종 allowlist · master = 태그 대상 `c7ba5138` · 이 PC 설치 4.71.10(재시작 전, 로드 미확인))
+
+> 이전 헤더(2026-10-19, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.9** — v4.71.8 이후 8 커밋(내용 3) + 릴리스 커밋: 2026-10-14 컴팩트 정리(doctor Check 10 옛 충돌 분리 · `workflow-status` 비배열 거부 · `team-idle-handler` 정리 · `/task clear`) · master = 태그 `2e14407b` · 이 PC 설치 4.71.9(재시작 전, 로드 미확인) · 태그 뒤 master 에 v5 4줄기(`ead76030`)와 `/rea` 가 착지, 다음 릴리스에 실린다)
 
 > 이전 헤더(2026-10-13, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-13 KST 갱신, **v4.71.8** — v4.71.7 이후 11 커밋(내용 8) + 릴리스 커밋: 공유 상태 파일 fail-closed · 재개 팀원 이중 bind 차단 · SubagentStop 서빙 모델 · Task 도구 disabled 내성 · /team 예산표·{sid} · 카탈로그 thinkingNote · master = 태그 `4f91e0c7` · 이 PC 설치 4.71.8, 2026-10-14 재시작 후 로드 확인)
 
@@ -13,6 +15,37 @@
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.71.10 (2026-10-19 KST, 리더 실측)
+
+### 출하 결과
+
+- 릴리스 커밋 `c7ba5138 release: v4.71.10`, 주석 태그 `v4.71.10`. v4.71.9 이후 15 커밋(내용 13 · 문서 2) + 릴리스 커밋이고, 15 커밋의 범위는 63 files +6,262/−313(`git diff --shortstat v4.71.9 42189d50`)이다. 주요 내용은 `/rea`(명령 80 → 81) · SH-11 사용자 스위치 · lease-tick store-only · 테스트 게이트 3종 allowlist(CHANGELOG [4.71.10]).
+- 사전 트리 CI 런 39207356249(`ci/pre-4-71-10` @ `42189d50`)에서 N 을 읽었다. 릴리스 커밋 CI 런 39213652152: check-run 7개 전부 success. Ubuntu Node 20 · 22 · 24 세 레그 모두 `Tests 27602 passed | 47 skipped (27649)` → N = 27,649, Windows 레그는 `Tests 27652 passed | 20 skipped (27672)`.
+- release.yml 런 39215216597: Validate before release · Create GitHub Release · Sync README badges 3잡 success. GitHub Release "Artibot v4.71.10" 공개(2026-10-19T07:23:55Z, draft·prerelease 아님). 배지 동기화 봇 커밋 없음(`c7ba5138..origin/master` 봇 커밋 0). 열린 이슈 0. 임시 브랜치 `ci/pre-4-71-10`·`ci/release-4-71-10` 삭제.
+- 검수(code-reviewer) PASS. 낮은 등급 제안 1건: 루트 README 의 4.71.10 문단에 CHANGELOG 의 「이 경고는 CLI 출력에 나오지 않는다」(`snapshot:write-failed`) 유보가 빠져 있다(생략일 뿐 모순은 아니다) — 다음 docs 묶음으로 미룬다.
+- 로컬 게이트 관측(릴리스 팀원 실측, 커밋 메시지에도 기록): 이 PC 에서 기본 워커(31)로 그대로 돌린 `npm run ci` 는 부하 타임아웃으로 RED(27,672 중 30 실패, 19파일 — 단독 재실행 19/19 통과). `npm test -- --maxWorkers=8` 로 단계를 체인하면 green. `VITEST_MAX_WORKERS=8` 환경변수는 `state-dir-cleanup.test.js` 3건을 깨므로 쓰지 말 것.
+
+### 설치 (이 PC)
+
+- 마켓 사본 ff(`2e14407b` → `c7ba5138`) → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot`(4.71.9 → 4.71.10) → `bash plugins/artibot/install.sh files`. installed_plugins.json artibot@artibot 4.71.10, gitCommitSha `c7ba5138`, lastUpdated 2026-10-19T07:30:15Z. 캐시 4.71.10 의 `commands/rea.md`·`vendor/rea/skill/SKILL.md` 는 소스와 CR 제거 sha256 일치, 명령 파일 수 81 = 81. 전역 사본 `~/.claude/artibot` 은 4.71.10. **재시작 후 로드 확인·`/rea` 노출 확인은 미실시.**
+
+### 다른 PC 에서 할 일
+
+① `git pull` → ② 설치 4.71.10(마켓 사본 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/install.sh files`; `npm run sync:local`·`npm run release` 금지) → ③ 재시작 후 상태줄 ⟨v4.71.10⟩ 와 `/rea` 노출 확인.
+
+### 다음 할 일
+
+- 재시작 후 상태줄 ⟨v4.71.10⟩ 확인(설치본 로드).
+- `/rea` 실기: setup 승인 → 재시작 → REA 툴 노출 확인.
+- 다음 /split 웨이브(planner 계획 → auditor 감사 REPAIR_REQUIRED 반영본, 20건 중 반증 1 · 미확인 1). 5줄기, 부채 1/5:
+  - W-1 SH-05·CA-17: code/spec/quality-reviewer 정의 파일에 v2 verdict + claim_audit 출력 지시 추가. 원장 `review.completed` 0행, `review.claim_audit` 5행(2026-10-01, 전부 리더 프롬프트를 받은 code-reviewer 산출) — 빠진 건 정의 파일 지시와 v2 판정문. `review-verdict-adapter.test.js` 어휘 핀·On Start 줄 핀 때문에 기존 줄은 불변, 추가만.
+  - W-2 SH-11: `scripts/ledger/v51-census.mjs` 가 `scripts/split/task-feed.mjs#applyUserBindingSwitch` 를 재사용해 사용자 스위치 파일 값을 반영. 설치기 보존 정적 테스트는 이미 있음(`tests/scripts/task-feed-user-switch.test.js`).
+  - W-3 CA-05: `lib/checkpoint/save-checkpoint.js`(이미 있음)를 감싸는 CLI `scripts/checkpoint/save-checkpoint.mjs` + `commands/save.md` 배선. 재구현 금지, 출하 config(false) 바이트 불변, 플립 없음.
+  - W-4 CA-04 L0b (조건부·고위험, 먼저 뺄 후보): `lib/security/human-gate-enforce.js#decideHumanGate` 를 PreToolUse 경로에서 기록 전용 호출. 현재 테스트 밖 호출자 0.
+  - W-5 부채: `split-completion-evidence.test.js` 두 beforeAll(:86 git 27회, :229 41회), `state-dir-cleanup.test.js:186-193` deny-list → allowlist, `main-entry.test.js:41`·`dispatcher-utils.test.js:175` 고정 BASE → mkdtemp(realpath), `tests/setup/state-dir.js` REACH 주석.
+  - 공유 파일(CHANGELOG·README·V5-BACKLOG·NEXT-SESSION)은 리더 통합 전용. 첫 dispatch 전 `~/.claude/artibot/split-mission-binding.json` 에 `{"enabled":true}` 를 써서 SH-11 표본을 채운다.
+- V5-BACKLOG 문서 정정(리더 몫, 감사 확정 4건; 줄번호는 2026-10-19 기준이고 행은 V5-BACKLOG.md, B 항목은 V5-RESCOPE-20260930.md 의 줄이다): SH-02 행(:106)이 B6(:187) 미반영, CA-09 행(:148 todo/—)이 SH-12 행(:116)의 report-only 회수 착지 미반영, CA-08 행(:147)이 B1(:182) 미반영, CA-01 행(:140)이 B2(:183) 미반영. §1 제목(:11)은 아직 `59dafab4` 기준.
 
 ## v4.71.9 (2026-10-19 KST, 리더 실측 — CI·release 런·태그·installed_plugins.json 은 통합 팀원이 다시 읽어 확인)
 
@@ -30,6 +63,8 @@
 
 - 통합 배치 1 = master `ead76030`: v5 4줄기 — SH-11 · SH-12 · CA-14 · 테스트 게이트 부채(CHANGELOG [Unreleased] 「v5 웨이브 재개 4줄기」).
 - 통합 배치 2 = `/rea`(명령 80 → 81): 업스트림 REA 스킬 vendor · 동기화 스크립트 · 명령 · 방화벽 테스트(`d273c437` · `44c8498e` · `8e313d71`, CHANGELOG [Unreleased] 「/rea」). 같은 배치의 문서 커밋이 이 절과 V5-BACKLOG 머리를 기록했다.
+
+→ 이 두 배치는 v4.71.10 으로 출하됐다(위 절).
 
 ### 다른 PC 에서 할 일
 
