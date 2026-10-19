@@ -7,11 +7,11 @@
  * steps whose names are all verbs — "Restore Task Graph", "Find expired worker
  * leases", "Reconcile Ledger". Every one of those names is one keystroke away
  * from the write that Shadow forbids: `getLease` sits beside `claimTask` on the
- * same store object (`lib/project-state/state-manager.js:542` and `:546`,
- * re-measured for SH-11 pre-flip condition 2; the 2026-09-14 lines were `:430`
- * and `:432`), and
+ * same store object (`lib/project-state/state-manager.js#getLease` and `#claimTask`,
+ * both bindings of `#buildStoreApi`; cited by symbol, not by line number, because
+ * line citations to these files drifted between measurements), and
  * `reconcile` repairs the snapshot the moment it is handed `apply: true`
- * (`lib/project-state/reconcile.js:51`, the `if (drifted && opts.apply === true)`
+ * (`lib/project-state/reconcile.js#reconcileStore`, the `if (drifted && opts.apply === true)`
  * branch). A controller that took one of those turns would still return a
  * perfectly well-formed report, all unit tests would stay green, and the only
  * trace would be a rewritten snapshot nobody asked for. There is no error and

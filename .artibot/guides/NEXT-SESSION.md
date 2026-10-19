@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-13 KST 갱신, **v4.71.8** — v4.71.7 이후 11 커밋(내용 8) + 릴리스 커밋: 공유 상태 파일 fail-closed · 재개 팀원 이중 bind 차단 · SubagentStop 서빙 모델 · Task 도구 disabled 내성 · /team 예산표·{sid} · 카탈로그 thinkingNote · master = 태그 `4f91e0c7` · 이 PC 설치 4.71.8, 2026-10-14 재시작 후 로드 확인)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.9** — v4.71.8 이후 8 커밋(내용 3) + 릴리스 커밋: 2026-10-14 컴팩트 정리(doctor Check 10 옛 충돌 분리 · `workflow-status` 비배열 거부 · `team-idle-handler` 정리 · `/task clear`) · master = 태그 `2e14407b` · 이 PC 설치 4.71.9(재시작 전, 로드 미확인) · 태그 뒤 master 에 v5 4줄기(`ead76030`)와 `/rea` 가 착지, 다음 릴리스에 실린다)
+
+> 이전 헤더(2026-10-13, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-13 KST 갱신, **v4.71.8** — v4.71.7 이후 11 커밋(내용 8) + 릴리스 커밋: 공유 상태 파일 fail-closed · 재개 팀원 이중 bind 차단 · SubagentStop 서빙 모델 · Task 도구 disabled 내성 · /team 예산표·{sid} · 카탈로그 thinkingNote · master = 태그 `4f91e0c7` · 이 PC 설치 4.71.8, 2026-10-14 재시작 후 로드 확인)
 
 > 이전 헤더(2026-10-12, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-12 KST 갱신, **v4.71.7** — v4.71.6 이후 13 커밋(내용 11) + 릴리스 커밋: Sonnet 5.5 cache read 0.10 · haiku 티어 = Haiku 5.5 · route-scorer cost 바닥 · SessionEnd 병합 · YAML 꼬리 주석 · test-status 정화 · 명령 문서 정정 · master = 태그 `3d0a4c0a` · 이 PC 설치 4.71.7(재시작 전, 로드 미확인))
 
@@ -11,6 +13,33 @@
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.71.9 (2026-10-19 KST, 리더 실측 — CI·release 런·태그·installed_plugins.json 은 통합 팀원이 다시 읽어 확인)
+
+### 출하 결과
+
+- 릴리스 커밋 `2e14407b release: v4.71.9`, 주석 태그 `v4.71.9`(태그 객체 `f9a5306b`). v4.71.8 이후 8 커밋(내용 3 · 문서 5) + 릴리스 커밋이고, 내용은 2026-10-14 컴팩트 정리다(CHANGELOG [4.71.9] · 아래 해당 절 — 그 절의 「미릴리스」는 작성 당시 표기이고 변경은 이 릴리스에 실렸다).
+- CI 런 39193062451(헤드 `2e14407b`): Validate Node 20 · 22 · 24 · Node 22 on Windows 4잡 success. Ubuntu 세 레그 모두 `Tests 27322 passed | 47 skipped (27369)` → N = 27,369, Windows 레그는 `Tests 27372 passed | 20 skipped (27392)`.
+- release.yml 런 39194151007: Validate before release · Create GitHub Release · Sync README badges 3잡 success. GitHub Release "Artibot v4.71.9" 공개(github-actions[bot], 2026-10-19T03:23:27Z, draft·prerelease 아님). 배지 동기화 봇 커밋 없음(`2e14407b..origin/master` 에 github-actions 작성 커밋 0, 2026-10-19 `git log` 실측). 열린 이슈 0.
+
+### 설치 (이 PC)
+
+- 마켓 사본 ff(`4f91e0c7` → `2e14407b`) → `claude plugin update artibot@artibot`(4.71.8 → 4.71.9) → `bash plugins/artibot/install.sh files`. installed_plugins.json artibot@artibot 4.71.9, gitCommitSha `2e14407b`, lastUpdated 2026-10-19T03:32:27Z. 캐시 4.71.9 는 소스와 2064 파일을 비교해 누락 0 · 상이 0, 전역 사본 `~/.claude/artibot` 은 4.71.9(이 두 가지는 리더 실측, 통합 팀원 미재확인). **재시작 후 로드 확인은 미실시.**
+
+### 같은 날 이후 착지 (다음 릴리스에 실린다)
+
+- 통합 배치 1 = master `ead76030`: v5 4줄기 — SH-11 · SH-12 · CA-14 · 테스트 게이트 부채(CHANGELOG [Unreleased] 「v5 웨이브 재개 4줄기」).
+- 통합 배치 2 = `/rea`(명령 80 → 81): 업스트림 REA 스킬 vendor · 동기화 스크립트 · 명령 · 방화벽 테스트(`d273c437` · `44c8498e` · `8e313d71`, CHANGELOG [Unreleased] 「/rea」). 같은 배치의 문서 커밋이 이 절과 V5-BACKLOG 머리를 기록했다.
+
+### 다른 PC 에서 할 일
+
+① `git pull` → ② 설치 4.71.9(마켓 사본 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/install.sh files`; `npm run sync:local`·`npm run release` 금지) → ③ 재시작 후 상태줄 ⟨v4.71.9⟩ 확인.
+
+### 다음 할 일
+
+- 재시작 후 상태줄 ⟨v4.71.9⟩ 확인(설치본 로드).
+- SH-11 로컬 스위치를 켜고(`~/.claude/artibot/split-mission-binding.json` 에 `{"enabled":true}` — 2026-10-19 이 PC 에서 `ls` 로 본 시점에는 이 파일이 없었다) 다음 /split 웨이브를 돌려 SH-11 · SH-12 의 라이브 표본을 채운다.
+- `/rea` 실기: setup 승인 → 재시작 → REA 툴 노출 확인.
 
 ## 2026-10-14 컴팩트 정리 (세션 5cf4c941, 미릴리스)
 

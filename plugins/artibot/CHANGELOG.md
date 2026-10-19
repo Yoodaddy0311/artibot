@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`recommendControllerTransition` 제거 (CA-14 기각)**: 프로덕션 호출자가 처음부터 0, reclaim 은 CA-09 소관. `controller_observation`·`CONTROLLER_OBSERVATIONS`·barrel 은 그대로. 테스트 −12. (`9154ef9c`·`5ce6b9db`)
 - **테스트 게이트 deny-list → allowlist**: resume-contract-report-only 의 쓰기 포트를 실 스토어에서 파생(42→50), main-entry-symlink 는 실행마다 mkdtemp(realpath(os.tmpdir()))(5→8), vitest-root-config 자식 env 는 플랫폼 이름 allowlist(13→17). 출하 코드 변경 0. (`b6861691`·`fc89edc4`·`bd3e6aa0`)
 
+### /rea (2026-10-19)
+
+- **`/rea` 추가(명령 80 → 81)**: 업스트림 REA 리버스 엔지니어링 툴킷(npm `rea-agents`, 6.7.0 고정)을 업스트림 자체 설치 절차(`doctor` → `setup --dry-run` → 사용자 승인 → `setup --yes` → 재시작)로 연결해 쓰게 한다. 업스트림 스킬은 `vendor/rea` 에 바이트 그대로 들어 있고(MIT, `NOTICE` 참조) `scripts/vendor/sync-rea.mjs` 로만 갱신한다. 테스트가 파일별 sha256 과 명령 · 스킬 · 패키지 버전 3중 일치를 고정한다. 사전 승인은 읽기 전용 호출뿐이다 — `Read`, `node --version`, 그리고 `doctor` 와 `setup --dry-run` 의 정확히 그 명령 두 개. REA 툴은 사전 승인하지 않아 툴 호출은 업스트림처럼 호스트 권한 확인을 그대로 거친다. 첫 실행은 npx 로 약 258 MiB(frida 네이티브 바이너리)를 설치하고, npx 는 shrinkwrap 없이 실행 시점에 의존성을 해석한다. setup 승인 → 재시작 → REA 툴 노출의 실기는 미검증이다. (`d273c437`·`44c8498e`·`8e313d71`)
+
 ## [4.71.9] — 2026-10-19
 
 `v4.71.8`(`4f91e0c7`) 이후 8 커밋 = **19 files +621/−461**(`git rev-list --count v4.71.8..38d05e8a` · `git diff --shortstat v4.71.8 38d05e8a`, 2026-10-19 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `2ede06e1`·`ebd6b069`·`1fda87e6`·`f40f255a` 4개는 인계·백로그 문서 커밋이고 `38d05e8a` 는 ADR-014 문서 커밋이라 내용 커밋은 3개(`96314449`·`17122647`·`2589232a`)다.
