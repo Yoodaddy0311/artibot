@@ -64,17 +64,24 @@
  * LF checkout (CI) imports them without it. That is why the negative control
  * cannot use the checkout's own script: on CI it passed without the plugin.
  *
- * EVERY CHILD GETS A SCRUBBED ENV. This file runs inside a vitest worker whose
- * env carries what the setup file assigned (read from its source below, so a
- * variable added there later is scrubbed too) and what the runner injects
+ * EVERY CHILD GETS A CLOSED ENV. This file runs inside a vitest worker whose
+ * env carries what the setup file assigned, what the runner injects
  * (`VITEST*`, `TEST`, `NODE_ENV`, `FORCE_TTY` from the pool; `BASE_URL`,
  * `MODE`, `DEV`, `PROD`, `SSR` mirrored from `import.meta.env` — all 18 keys
- * listed by a probe fixture on vitest 4.0.18, none present in the shell).
- * Inherited, the setup's pair makes a child look sandboxed whether or not ITS
- * config ran the setup. Measured 2026-09-28: the minus-`setupFiles` control
- * was GREEN under the inherited env (1 passed, 12 filtered) and red once
- * scrubbed; the real-config run and layer 2 gave the same verdict under both
- * envs.
+ * listed by a probe fixture on vitest 4.0.18, none present in the shell), and
+ * whatever the host session exported. Inherited, the setup's pair makes a
+ * child look sandboxed whether or not ITS config ran the setup. Measured
+ * 2026-09-28: the minus-`setupFiles` control was GREEN under the inherited env
+ * (1 passed, 12 filtered) and red once scrubbed; the real-config run and
+ * layer 2 gave the same verdict under both envs.
+ *
+ * The scrub began as a DENY-list of exactly those names, which is fail-open for
+ * every variable injected after it was written. It is an ALLOWLIST now
+ * (`CHILD_ALLOWED_ENV`): a child is handed only the platform plumbing named
+ * there, so a runner key, a setup variable in any spelling, or a variable the
+ * host exports tomorrow is absent without anyone having listed it.
+ * `isParentRunKey` and the names read from the setup source survive as a
+ * CROSS-CHECK that the allowlist never admits one of them.
  *
  * The autopilot project's serial spelling is pinned on the root config too, by
  * `tests/firewall/vitest-autopilot-serial.test.js`.
@@ -105,13 +112,18 @@
  *     mechanism above is read off vite 7.3.2; a vite that skips a CRLF
  *     hashbang itself would turn the negative control green and this gate
  *     red — re-measure then rather than dropping the control.
- *   - **An injected key outside the scrub.** A later runner that injects a
- *     new variable passes it to the child. The minus-`setupFiles` control
- *     turns the gate red if that variable masks the autopilot-store resolver;
- *     masking of anything else is invisible.
- *   - **A setup variable assigned in another spelling.** The name extraction
- *     reads `process.env.NAME =` only; `process.env['NAME'] =` or
- *     `Object.assign(process.env, …)` in the setup file is not scrubbed.
+ *   - **A variable the child needs that the allowlist lacks.** That fails
+ *     loudly (a non-zero exit is thrown with both streams), not silently. It
+ *     has been observed on one host only: there a child spawned with an EMPTY
+ *     env still showed eleven names the platform adds (HOMEDRIVE, HOMEPATH,
+ *     LOGONSERVER, PATH, SYSTEMDRIVE, SYSTEMROOT, TEMP, USERDOMAIN, USERNAME,
+ *     USERPROFILE, WINDIR) and both probe files passed on it, 2026-10-19. So
+ *     the list is not proven a MINIMUM even there, and the Linux leg is
+ *     unmeasured.
+ *   - **The cross-check's spelling.** The setup-name extraction reads
+ *     `process.env.NAME =` only; `process.env['NAME'] =` or
+ *     `Object.assign(process.env, …)` in the setup file would slip past the
+ *     cross-check, though not past the allowlist itself.
  *   - **Coverage from the root.** `coverage` is compared as an object and its
  *     relative paths share the absolute `root`; no coverage run is made.
  *   - **Runtime serialism.** Project membership is observed, not whether two
@@ -152,14 +164,40 @@ const SETUP_ENV_KEYS = [
 /** Runner-injected worker keys that carry no `VITEST`/`VITE_` prefix. */
 const RUNNER_ENV_KEYS = ['TEST', 'NODE_ENV', 'FORCE_TTY', 'BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR'];
 
-/** @param {string} key @returns {boolean} */
+/**
+ * What the parent run is known to have put in this worker. Not the filter any
+ * more — only the cross-check that the allowlist below never admits one.
+ * @param {string} key @returns {boolean}
+ */
 const isParentRunKey = (key) => SETUP_ENV_KEYS.includes(key) || RUNNER_ENV_KEYS.includes(key)
   || key.startsWith('VITEST') || key.startsWith('VITE_');
 
-/** This worker's env minus what the parent run put there — see the header. */
-const CHILD_ENV = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => !isParentRunKey(key)),
+/**
+ * The ONLY names a child is handed: platform plumbing, so it finds the same
+ * executables, home and temp dir. Every other name, listed anywhere or not, is
+ * absent. A name goes here only with a reason a child needs it.
+ */
+const CHILD_ALLOWED_ENV = Object.freeze([
+  'PATH', 'PATHEXT', // find executables
+  'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', // the same user home (`os.homedir()`)
+  'TMPDIR', 'TMP', 'TEMP', // the same `os.tmpdir()`
+  'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC', // Windows APIs and `cmd.exe`
+]);
+
+/** Windows env names are case-insensitive (`Path` is `PATH`); POSIX ones are not. */
+const foldName = (name) => (process.platform === 'win32' ? name.toUpperCase() : name);
+const ALLOWED = new Set(CHILD_ALLOWED_ENV.map(foldName));
+
+/**
+ * @param {Record<string, string|undefined>} parentEnv - The env to reduce.
+ * @returns {Record<string, string>} Its allowlisted entries, names spelled as given.
+ */
+const buildChildEnv = (parentEnv) => Object.fromEntries(
+  Object.entries(parentEnv).filter(([key, value]) => ALLOWED.has(foldName(key)) && typeof value === 'string'),
 );
+
+/** This worker's env reduced to the allowlist — see the header. */
+const CHILD_ENV = buildChildEnv(process.env);
 
 /** @param {string} p @returns {string} */
 const norm = (p) => path.resolve(p).toLowerCase();
@@ -243,9 +281,9 @@ describe('vitest started in the repo root resolves the plugin projects', () => {
   });
 });
 
-describe('child env scrub', () => {
+describe('child env allowlist', () => {
   it('reads the setup variables from the setup file itself', () => {
-    // A regex that stopped matching would scrub nothing and fail open.
+    // A regex that stopped matching would leave the cross-check below empty.
     expect(SETUP_ENV_KEYS).toEqual(expect.arrayContaining([
       'ARTIBOT_STATE_DIR', 'ARTIBOT_STATE_DIR_HOME',
       'ARTIBOT_AUTOPILOT_STORE_DIR', 'ARTIBOT_AUTOPILOT_STORE_DIR_ROOT',
@@ -254,8 +292,40 @@ describe('child env scrub', () => {
   });
 
   it('hands children none of the parent run keys present in this worker', () => {
+    // The cross-check: the allowlist must never admit what the parent run set.
     expect(Object.keys(process.env).filter(isParentRunKey)).toContain('VITEST');
     expect(Object.keys(CHILD_ENV).filter(isParentRunKey)).toEqual([]);
+  });
+
+  it('hands children only allowlisted names, and the PATH this worker really has', () => {
+    expect(Object.keys(CHILD_ENV).filter((key) => !ALLOWED.has(foldName(key)))).toEqual([]);
+    // Not vacuous: a filter that dropped everything would pass the line above.
+    const pathName = Object.keys(process.env).find((key) => foldName(key) === 'PATH');
+    expect(pathName, 'this worker has no PATH to hand on').toBeDefined();
+    expect(CHILD_ENV[pathName]).toBe(process.env[pathName]);
+  });
+
+  it('drops a variable nobody has listed yet, the fail-open the deny-list had', () => {
+    const unlisted = ['ARTIBOT_FUTURE_INJECTED_FLAG', 'NEW_RUNNER_FLAG', 'CLAUDE_CODE_SESSION_ID', 'NODE_OPTIONS'];
+    // Control: what the parent run is known to set cannot see these, so a
+    // filter built on it would hand every one of them to the child.
+    for (const key of unlisted) expect(isParentRunKey(key), key).toBe(false);
+    const child = buildChildEnv({ ...process.env, ...Object.fromEntries(unlisted.map((key) => [key, '1'])) });
+    for (const key of unlisted) expect(child, key).not.toHaveProperty(key);
+  });
+
+  it('keeps the plumbing a child needs, so a filter that dropped everything could not pass', () => {
+    const pathName = process.platform === 'win32' ? 'Path' : 'PATH';
+    expect(buildChildEnv({ [pathName]: 'p', HOME: 'h', ARTIBOT_STATE_DIR: 's' })).toEqual({ [pathName]: 'p', HOME: 'h' });
+  });
+
+  it('a real child started with CHILD_ENV sees none of the parent run keys', () => {
+    const probe = 'process.stdout.write(JSON.stringify(Object.keys(process.env)))';
+    const res = spawnSync(process.execPath, ['-e', probe], { env: CHILD_ENV, encoding: 'utf8', timeout: 30_000 });
+    expect(res.status, res.stderr).toBe(0);
+    const seen = JSON.parse(res.stdout);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter(isParentRunKey)).toEqual([]);
   });
 });
 
