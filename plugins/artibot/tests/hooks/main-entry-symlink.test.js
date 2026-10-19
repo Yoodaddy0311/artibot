@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -44,10 +44,36 @@ const MAIN_ENTRY = pathToFileURL(
   path.resolve(HERE, '..', '..', 'scripts', 'hooks', '_main-entry.js'),
 ).href;
 
-// Same base as main-entry.test.js: the OS temp dir is `…\HEECHA~1\…` on
-// Windows and its tilde is itself one of the bugs that file covers, which
-// would mask whether a failure here came from the link or from the path shape.
-const BASE = path.join(os.homedir(), 'AppData', 'Local', 'Temp', 'artibot-main-entry-symlink-test');
+/**
+ * Create this run's scratch directory: a fresh `mkdtemp` directory directly
+ * under the canonical spelling of the OS temp dir.
+ *
+ * @returns {string} Absolute path of the new, empty directory.
+ */
+function makeBase() {
+  return mkdtempSync(path.join(realpathSync.native(os.tmpdir()), 'artibot-main-entry-symlink-'));
+}
+
+// ONE DIRECTORY PER RUN. `mkdtemp` hands every vitest process its own base, so
+// two processes on one machine (two worktrees, two terminals) cannot delete and
+// recreate each other's `real` and `link`. The fixed
+// `…/artibot-main-entry-symlink-test` this replaces did exactly that. Measured
+// 2026-10-19 on this Windows host by starting two copies of this file at once,
+// 6 rounds, 12 process runs: 2 clean, 2 red, and 8 reported "passed" with 4 of
+// 5 cases SKIPPED — `setupLink` below reports a refused link as a skip, so the
+// collision surfaced as a green file rather than a red one.
+//
+// CANONICAL TEMP DIR, not `os.tmpdir()` as it comes. On Windows that is the
+// 8.3 form `…\HEECHA~1\…`, and its tilde is itself one of the path shapes
+// main-entry.test.js covers, which would mask whether a failure here came from
+// the link or from the path shape. On macOS `/var` is itself a link to
+// `/private/var` (documented behavior, not measured on this host), which would
+// turn the DIRECT run into a linked run too.
+// `realpathSync.native` spells the temp dir the way the module's own
+// `import.meta.url` will, so the only link in play is LINK. A temp dir that
+// cannot be created is NOT a skip: it throws at load, loudly. Only a refused
+// LINK is a skip, as `setupLink` documents.
+const BASE = makeBase();
 const REAL = path.join(BASE, 'real');
 const LINK = path.join(BASE, 'link');
 
@@ -57,7 +83,8 @@ const PROBE = [
 ].join('\n');
 
 /**
- * Create REAL/, its probe, and a LINK -> REAL directory link.
+ * Create REAL/ inside this run's BASE, its probe, and a LINK -> REAL directory
+ * link.
  *
  * Junctions (`mklink /J`) need no administrator rights and no Developer Mode,
  * unlike symbolic links on Windows; POSIX gets a plain directory symlink.
@@ -66,7 +93,6 @@ const PROBE = [
  */
 function setupLink() {
   try {
-    rmSync(BASE, { recursive: true, force: true });
     mkdirSync(REAL, { recursive: true });
     writeFileSync(path.join(REAL, 'probe.mjs'), PROBE, 'utf8');
     if (process.platform === 'win32') {
@@ -140,5 +166,28 @@ describe('isMainEntry (link traversal)', () => {
 
     const out = execFileSync(process.execPath, [runner], { encoding: 'utf8' });
     expect(JSON.parse(out).main).toBe(false);
+  });
+});
+
+describe('the scratch tree belongs to this run alone', () => {
+  it('is a mkdtemp directory directly under the canonical OS temp dir', () => {
+    expect(path.dirname(BASE)).toBe(realpathSync.native(os.tmpdir()));
+    expect(path.basename(BASE)).toMatch(/^artibot-main-entry-symlink-[A-Za-z0-9]{6}$/);
+  });
+
+  it('is spelled the way realpath spells it, so the direct run crosses no link', () => {
+    // Red here would mean "still resolves true when run through the real path"
+    // runs through a link already (an 8.3 short name, macOS /var), and the two
+    // directions pinned above could no longer be told apart.
+    expect(realpathSync.native(BASE)).toBe(BASE);
+  });
+
+  it('is not shared: a second run is handed a different directory', () => {
+    const other = makeBase();
+    try {
+      expect(other).not.toBe(BASE);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
   });
 });
