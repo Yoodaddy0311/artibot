@@ -47,6 +47,19 @@
  * write with no paired event would silently break the 1:1 pairing the
  * firewall gate asserts.
  *
+ * ── The one declared exception: a store-only commit (design D11) ───────────
+ * `heartbeatWorker({storeOnly: true})` skips the ledger step: a lease renewal is the
+ * store's alone. Its journal records carry `store_only: true` and the `reason` the row
+ * would have had, and the three readers of `ledger ⊇ store` leave a version out only when
+ * the JOURNAL declares it (`journal.js#storeOnlyVersions`). Claim, release and update never
+ * forward the flag, so a write with no paired event stays the lost-update signature.
+ *
+ * ── A snapshot that cannot be written is a warning, not a failed write ─────
+ * The snapshot is a cache of the journal (`loadSnapshot` rebuilds it). A rename that ran
+ * out of retries AFTER the journal took the write used to throw, and callers reported a
+ * landed write as lost. It is now `ok:true` plus {@link SNAPSHOT_WRITE_FAILED_WARNING}; a
+ * failed JOURNAL append is still a throw — that one is the record.
+ *
  * ── Concurrency: what protects a write, and what does not ─────────────────
  * `lib/core/file-lock.js#withFileLock` is exclusive (short of a holder slower
  * than LOCK_STALE_MS; see the key digest below) and fails closed: a commit that
@@ -94,7 +107,7 @@ import { readClock } from '../core/clock.js';
 import { atomicWriteTextSync, ensureDirSync, readJsonFileSync } from '../core/file.js';
 import { withFileLock } from '../core/file-lock.js';
 import { createLease, isLeaseExpired, renewLease } from './lease.js';
-import { applyRecord, readJournal, reduceProjectState } from './journal.js';
+import { applyRecord, readJournal, reduceProjectState, STORE_ONLY_FIELD } from './journal.js';
 import { buildProjection, clone, renderProjection } from './projection.js';
 import { reconcileStore } from './reconcile.js';
 import { validateMissionId, validateSnapshot } from './validate.js';
@@ -118,6 +131,13 @@ export const PROJECTION_RELATIVE = path.join('.artibot', 'state.yaml');
  * so `/doctor` can count unguarded writes rather than assume there are none.
  */
 export const CAS_SKIPPED_WARNING = 'cas:skipped';
+
+/**
+ * Prefix of the warning on an `ok:true` commit whose snapshot could not be written though
+ * the journal (the record) took the write. Test it with `startsWith`; the text after it
+ * names the error and the version.
+ */
+export const SNAPSHOT_WRITE_FAILED_WARNING = 'snapshot:write-failed';
 
 /**
  * The `source` values a store may stamp on its `state.updated` events.
@@ -185,7 +205,7 @@ export { FALLBACK_RELATIVE, resolveStoreLocation, STORE_DIR_NAME } from './store
 // cycle through state-manager.js would be fragile at module-init time.
 export {
   STORE_RECORD_KINDS, SNAPSHOT_SCHEMA_VERSION,
-  emptySnapshot, readJournal, reduceProjectState,
+  emptySnapshot, readJournal, reduceProjectState, storeOnlyVersions,
 } from './journal.js';
 
 /**
@@ -309,15 +329,17 @@ function loadSnapshot(ctx) {
  * @param {object} ctx - Store context.
  * @param {object} params - Commit parameters.
  * @param {string} params.missionId - Mission the write belongs to.
- * @param {string} params.reason - Why the write happened; lands in the ledger event.
+ * @param {string} params.reason - Why the write happened; lands in the ledger event (store-only: the journal records).
  * @param {number} [params.expectedVersion] - CAS guard; omit to skip the check.
  * @param {(snapshot: object) => {records?: object[], errors?: string[]}} params.plan -
  *   Produces the records for this write from the CURRENT snapshot.
+ * @param {boolean} [params.storeOnly=false] - Skip the paired ledger event and declare the
+ *   commit on its journal records (design D11). Only `heartbeatWorker` forwards it.
  * @returns {object} `{ok, state_version, records, warnings}` or a failure shape.
  */
-function commit(ctx, { missionId, reason, expectedVersion, plan }) {
+function commit(ctx, { missionId, reason, expectedVersion, plan, storeOnly = false }) {
   ensureDirSync(ctx.paths.dir);
-  const result = withFileLock(ctx.paths.snapshot, () => commitLocked(ctx, { missionId, reason, expectedVersion, plan }));
+  const result = withFileLock(ctx.paths.snapshot, () => commitLocked(ctx, { missionId, reason, expectedVersion, plan, storeOnly }));
   if (result.ok && ctx.renderProjectionFile) writeProjection(ctx, result.snapshot);
   return result;
 }
@@ -329,7 +351,7 @@ function commit(ctx, { missionId, reason, expectedVersion, plan }) {
  * @param {object} params - Same parameters as `commit`.
  * @returns {object} Commit result, including the committed snapshot on success.
  */
-function commitLocked(ctx, { missionId, reason, expectedVersion, plan }) {
+function commitLocked(ctx, { missionId, reason, expectedVersion, plan, storeOnly }) {
   const { snapshot, warnings: readWarnings } = loadSnapshot(ctx);
   if (expectedVersion !== undefined && expectedVersion !== snapshot.state_version) {
     return {
@@ -353,7 +375,9 @@ function commitLocked(ctx, { missionId, reason, expectedVersion, plan }) {
 
   const ts = readClock(ctx.now, 'state-manager');
   const nextVersion = snapshot.state_version + 1;
-  const stamped = records.map((r) => ({ v: 1, ts, state_version: nextVersion, ...r }));
+  // A store-only commit declares itself on EVERY record and keeps the reason its ledger row would have had.
+  const declared = storeOnly ? { [STORE_ONLY_FIELD]: true, reason } : {};
+  const stamped = records.map((r) => ({ v: 1, ts, state_version: nextVersion, ...declared, ...r }));
 
   const draft = clone(snapshot);
   const applyWarnings = [];
@@ -364,18 +388,40 @@ function commitLocked(ctx, { missionId, reason, expectedVersion, plan }) {
   const errors = validateSnapshot(draft);
   if (errors.length > 0) return { ok: false, conflict: false, errors, warnings: [...warnings, ...applyWarnings] };
 
-  const ledger = emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior: snapshot, reason, records });
-  if (!ledger.ok) return { ok: false, conflict: false, errors: ledger.errors, warnings };
+  if (!storeOnly) {
+    const ledger = emitStateUpdated(ctx, { missionId, ts, nextVersion, draft, prior: snapshot, reason, records });
+    if (!ledger.ok) return { ok: false, conflict: false, errors: ledger.errors, warnings };
+  }
 
   // Journal first, then the snapshot: the journal is the record, the snapshot
   // is its cache, and loadSnapshot prefers the journal when they disagree.
   appendFileSync(ctx.paths.journal, stamped.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
-  atomicWriteTextSync(ctx.paths.snapshot, JSON.stringify(draft, null, 2) + '\n');
+  const snapshotWarning = writeSnapshot(ctx, draft);
 
   return {
     ok: true, state_version: nextVersion, records: stamped, snapshot: draft,
-    warnings: [...warnings, ...applyWarnings],
+    warnings: [...warnings, ...applyWarnings, ...(snapshotWarning === null ? [] : [snapshotWarning])],
+    ...(storeOnly ? { storeOnly: true } : {}),
   };
+}
+
+/**
+ * Write the snapshot cache once the journal has taken the commit. A failure is a warning, never a
+ * throw: the write has landed, `loadSnapshot` rebuilds a stale snapshot, the next commit rewrites it.
+ * Throwing made callers report a landed write as lost (`lane-lease.mjs`: `skipped:store-threw:EPERM …`).
+ *
+ * @param {object} ctx - Store context.
+ * @param {object} draft - The committed snapshot.
+ * @returns {string|null} The warning for the commit result, or null when the snapshot landed.
+ */
+function writeSnapshot(ctx, draft) {
+  try {
+    atomicWriteTextSync(ctx.paths.snapshot, JSON.stringify(draft, null, 2) + '\n');
+    return null;
+  } catch (err) {
+    return `${SNAPSHOT_WRITE_FAILED_WARNING}: ${err.message} — the journal holds version ${draft.state_version}; `
+      + 'the snapshot is a cache, the next read rebuilds it from the journal';
+  }
 }
 
 /**
@@ -697,15 +743,20 @@ function releaseTask(ctx, { missionId, taskId, owner, token, status = 'queued', 
  * and design §3.5 requires the source to travel with the derived instant so a
  * reader can tell the two apart.
  *
+ * `storeOnly: true` (the boolean, nothing looser) is the opt-out of design D11: the renewal
+ * commits with NO paired `state.updated`, its journal records declare it, and the result
+ * carries `storeOnly: true`. This is the only writer that forwards the flag.
+ *
  * @param {object} ctx - Store context.
  * @param {object} params - Heartbeat parameters.
  * @returns {object} Commit result.
  */
-function heartbeatWorker(ctx, { missionId, taskId, owner, heartbeatSource = 'lane-heartbeat', expectedVersion, reason }) {
+function heartbeatWorker(ctx, { missionId, taskId, owner, heartbeatSource = 'lane-heartbeat', expectedVersion, reason, storeOnly = false }) {
   return commit(ctx, {
     missionId,
     reason: reason ?? `worker.heartbeat:${taskId}`,
     expectedVersion,
+    storeOnly: storeOnly === true,
     plan: (snapshot) => {
       const task = findTask(snapshot, missionId, taskId);
       if (!task) return { errors: [`heartbeatWorker: no task '${taskId}' in mission ${missionId}`] };

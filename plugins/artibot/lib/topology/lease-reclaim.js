@@ -82,19 +82,22 @@
  * holds (a lane it renews, or a suspended one). A lapsed lease on such a lane
  * is reported as `protected`, not as a candidate.
  *
- * ── What a tick writes to the ledger (D11 / §9), and why it is not "nothing" ─
+ * ── What a tick writes (D11 / §9): the store, and nothing in the ledger ────
  * The canon says heartbeats update the store only and the central ledger gets
- * only `task.claimed/released` (design D11, §9 row, `ledger-events.allowlist.json`
- * `task.claimed`). But a renewal is a store commit, and the store appends its
- * own `state.updated` for EVERY commit: `ledger ⊇ store` is the canon's own
- * invariant (design §1-2; `state-manager.js` has no opt-out), and a no-op
- * ledger port would make each tick an `extraInStore` version — the exact
- * signature `/doctor` Check 8 reads as a lost update. A store-only write mode
- * needs `state-manager.js` and `reconcile.js` (not this lane's). Until then a
- * tick writes the store's pairing row with its OWN reason ({@link
- * LEASE_TICK_REASON}) and `heartbeat_source` ({@link LEASE_TICK_SOURCE}),
- * distinct from the lane-state emitter's `split.lane-lease` / `lane-heartbeat`,
- * and the 45-minute cap bounds it at 32 rows per lane-day. No new event name.
+ * only `task.claimed/released` (design D11, §9 row). A renewal is therefore a
+ * STORE-ONLY commit (`state-manager.js#heartbeatWorker({ storeOnly: true })`): no
+ * `state.updated` row, however many ticks the 45-minute cadence makes. Its journal
+ * records are marked `store_only: true` and carry {@link LEASE_TICK_REASON}; the
+ * node carries {@link LEASE_TICK_SOURCE}, distinct from the lane-state emitter's
+ * `lane-heartbeat` (which still pairs — it is the leader's declaration).
+ * `ledger ⊇ store` is still the canon's invariant, so its three readers —
+ * `/doctor` Check 8 (`doctor-checks.js#compareLedgerVersions`),
+ * `reconcile.js#compareLedger` and the Resume Contract's `LEDGER_EXTRA_IN_STORE` —
+ * leave out exactly the versions the journal declares store-only
+ * (`journal.js#storeOnlyVersions`); Check 8 counts them in a `store-only-versions`
+ * finding. What that cannot see: a lost tick. The ledger comparison skips it by
+ * design; only the journal's own sequence (`checkStateVersionGaps`) sees a hole,
+ * and the next tick renews again. No new event name.
  *
  * ── What it cannot see (rules §9, written next to the code) ────────────────
  * It judges leases by clock and liveness by two weak signals, not by watching
@@ -138,7 +141,7 @@ export const LANE_TASK_TITLE_PREFIX = '/split limb ';
 /** Journal/ledger `reason` of the release a reclaim makes (the event is the store's own `state.updated`). */
 export const LEASE_RECLAIM_REASON = 'split.lease-reclaim';
 
-/** Journal/ledger `reason` of a tick's renewal — distinct from `lane-lease.mjs#LANE_LEASE_REASON`. */
+/** `reason` on the journal records of a tick's renewal (a store-only commit has no ledger row) — distinct from `lane-lease.mjs#LANE_LEASE_REASON`. */
 export const LEASE_TICK_REASON = 'split.lease-tick';
 
 /** `heartbeat_source` a tick stamps — distinct from the lane-state emitter's `lane-heartbeat`. */

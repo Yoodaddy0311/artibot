@@ -26,12 +26,18 @@
  * reported separately because conflating them would hide the serious one
  * inside the benign one.
  *
+ * ONE declared exception (design D11): a version the JOURNAL declares store-only (a lease
+ * heartbeat committed with `heartbeatWorker({storeOnly: true})` — every record marked and
+ * heartbeat-shaped, `journal.js#storeOnlyVersions`) has no event by design, so it is not
+ * `extraInStore`. It is listed under `storeOnly` instead, so "nothing extra" and "extra, but
+ * declared" stay distinguishable. A lost store-only write cannot show in this comparison.
+ *
  * @module lib/project-state/reconcile
  */
 
 import path from 'node:path';
 import { atomicWriteTextSync, ensureDirSync, readJsonFileSync } from '../core/file.js';
-import { readJournal, reduceProjectState } from './journal.js';
+import { readJournal, reduceProjectState, storeOnlyVersions } from './journal.js';
 import { renderProjection } from './projection.js';
 
 /**
@@ -46,7 +52,7 @@ import { renderProjection } from './projection.js';
  * @param {object} [opts] - Reconcile options.
  * @param {number[]} [opts.ledgerVersions] - `state_version` values seen in the ledger.
  * @param {boolean} [opts.apply=false] - Rewrite the snapshot when it has drifted.
- * @returns {object} `{ok, drifted, applied, gaps, missingInStore, extraInStore, warnings}`.
+ * @returns {object} `{ok, drifted, applied, gaps, missingInStore, extraInStore, storeOnly, warnings}`.
  */
 export function reconcileStore(ctx, opts = {}) {
   const { records, torn } = readJournal(ctx.paths.journal);
@@ -76,7 +82,7 @@ export function reconcileStore(ctx, opts = {}) {
     applied,
     storeVersion: rebuilt.state_version,
     snapshotVersion: onDisk?.state_version ?? null,
-    ...compareLedger(storeVersions, opts.ledgerVersions),
+    ...compareLedger(storeVersions, opts.ledgerVersions, storeOnlyVersions(records)),
     warnings,
   };
 }
@@ -86,23 +92,27 @@ export function reconcileStore(ctx, opts = {}) {
  *
  * @param {number[]} storeVersions - Versions present in the journal.
  * @param {number[]|undefined} ledgerVersions - Versions seen in the ledger.
- * @returns {{gaps: number[], missingInStore: number[], extraInStore: number[]}} Comparison.
+ * @param {number[]} [storeOnly=[]] - Versions the journal declares store-only (no event by design).
+ * @returns {{gaps: number[], missingInStore: number[], extraInStore: number[], storeOnly: number[]}} Comparison.
  */
-function compareLedger(storeVersions, ledgerVersions) {
+function compareLedger(storeVersions, ledgerVersions, storeOnly = []) {
   const gaps = [];
   for (let i = 1; i <= (storeVersions.at(-1) ?? 0); i += 1) {
     if (!storeVersions.includes(i)) gaps.push(i);
   }
-  if (!Array.isArray(ledgerVersions)) return { gaps, missingInStore: [], extraInStore: [] };
+  if (!Array.isArray(ledgerVersions)) return { gaps, missingInStore: [], extraInStore: [], storeOnly };
   const ledgerSet = new Set(ledgerVersions);
+  const declared = new Set(storeOnly);
   return {
     gaps,
     // In the ledger but not the store: a crash between the ledger append and
     // the journal append. The `ledger ⊇ store` invariant still holds.
     missingInStore: ledgerVersions.filter((v) => !storeVersions.includes(v)),
     // In the store but not the ledger: the invariant is BROKEN — a write
-    // landed with no event, which is the lost-update signature.
-    extraInStore: storeVersions.filter((v) => !ledgerSet.has(v)),
+    // landed with no event, which is the lost-update signature. A version the
+    // journal declares store-only (design D11) is the one thing that is not.
+    extraInStore: storeVersions.filter((v) => !ledgerSet.has(v) && !declared.has(v)),
+    storeOnly,
   };
 }
 

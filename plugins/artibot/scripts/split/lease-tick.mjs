@@ -33,16 +33,16 @@
  * LIMIT, unmeasured: the pid probe has no start-time check, so a dead session
  * whose pid the OS reused reads as alive until its lock line goes.
  *
- * ── What a tick writes (and why the ledger is not silent) ─────────────────
- * Each renewal is a store commit stamped `heartbeat_source: 'lease-tick'`
- * with ledger reason `split.lease-tick` — told apart from the lane-state
- * emitter's `lane-heartbeat` / `split.lane-lease`. The canon (design D11, §9)
- * wants heartbeats in the store only; the store appends its own `state.updated`
- * for EVERY commit (`ledger ⊇ store`, no opt-out in `state-manager.js`), and a
- * no-op ledger port would make every tick an `extraInStore` version that
- * `/doctor` Check 8 reads as a lost update. So a tick costs one pairing row,
- * at most 32 per lane-day, and D11's store-only mode is a `state-manager.js`
- * change (not this script's) — see `lib/topology/lease-reclaim.js`.
+ * ── What a tick writes: the store, and nothing else (design D11, §9) ──────
+ * Each renewal is a STORE-ONLY commit (`heartbeatWorker({ storeOnly: true })`)
+ * stamped `heartbeat_source: 'lease-tick'` — told apart from the lane-state
+ * emitter's `lane-heartbeat`. The canon wants heartbeats in the store only and
+ * the central ledger to get `task.claimed/released`, so a tick appends NOTHING
+ * to the ledger. The commit's journal records carry `store_only: true` and the
+ * reason `split.lease-tick` (the row it no longer writes), and the three readers
+ * of `ledger ⊇ store` leave such a declared version out of the comparison — see
+ * `lib/topology/lease-reclaim.js`. The lane-state emitter and a reclaim are NOT
+ * ticks and still pair: one is the leader's declaration, the other a release.
  *
  * ── RECLAIM: explicit ids only (ADV-1) ────────────────────────────────────
  * `watch.mjs` (or this script without the flag) prints the lapsed lane leases
@@ -150,7 +150,8 @@ export function parseArgs(argv) {
  * pins its two callers). A refusal is `{ok:false, errors:['cadence:<why>']}`;
  * `syncLaneLease` reports it as `refused:cadence:<why>`, which the caller turns
  * back into a `skipped:` outcome. The verdict it judged on is left in `seen`
- * (by task id) for the output.
+ * (by task id) for the output. What it lets through is a STORE-ONLY commit
+ * (`storeOnly: true`): the ledger gets no row for a tick.
  *
  * @param {object} store - StateStore.
  * @param {{ nowMs: number, seen: Map<string, object> }} ctx
@@ -163,7 +164,7 @@ function gateCadence(store, { nowMs, seen }) {
       const verdict = heartbeatCadence(store.getLease(params.missionId, params.taskId), nowMs);
       seen.set(params.taskId, verdict);
       if (!verdict.due) return { ok: false, conflict: false, errors: [`${CADENCE_REFUSAL}:${verdict.reason}`] };
-      return store.heartbeatWorker({ ...params, heartbeatSource: LEASE_TICK_SOURCE, reason: LEASE_TICK_REASON });
+      return store.heartbeatWorker({ ...params, heartbeatSource: LEASE_TICK_SOURCE, reason: LEASE_TICK_REASON, storeOnly: true });
     },
   };
 }

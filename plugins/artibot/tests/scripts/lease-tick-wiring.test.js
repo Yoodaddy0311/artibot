@@ -8,11 +8,17 @@
  *    (ADV-4);
  *  - child processes against a temp git repo through the REAL `openFeedStore`
  *    and the REAL central ledger writer: a lease the real feeder claimed in the
- *    past is renewed AS A TICK (`heartbeat_source` lease-tick, ledger reason
- *    split.lease-tick — the row the SH-12 measurement reads), an immediate
- *    second tick writes nothing, a listed lapsed id is released and an unlisted
- *    one is not, `--apply-reclaim` with no list exits 1 with the ledger
- *    byte-identical, and `watch.mjs` (S0) wrote nothing to the same store.
+ *    past is renewed AS A TICK (`heartbeat_source` lease-tick) as a STORE-ONLY
+ *    commit — the central ledger is byte-identical across it (design D11) and the
+ *    journal holds the declared commit that the SH-12 measurement counts — an
+ *    immediate second tick writes nothing, a listed lapsed id is released (and
+ *    still pairs) and an unlisted one is not, `--apply-reclaim` with no list exits
+ *    1 with the ledger byte-identical, `watch.mjs` (S0) wrote nothing to the same
+ *    store, and `/doctor` Check 8 reads the real files those processes left as
+ *    healthy;
+ *  - the `lease-tick` procedure in `skills/split/references/operations.md` carries
+ *    the wiring (when to start the loop, how to count a live renewal) and no longer
+ *    claims a tick writes a ledger row.
  *
  * What it cannot see (rules §9): a live leader session, pid reuse, a
  * wall-clock wait. The dead pid is a number no host hands out, not a session
@@ -25,9 +31,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkLedgerStateParity, CheckStatus } from '../../lib/project-state/doctor-checks.js';
 import { resolveGitCommonDir } from '../../lib/project-state/git-common-dir.js';
-import { createStateStore } from '../../lib/project-state/state-manager.js';
-import { appendLedgerEvent } from '../../lib/runtime/ledger.js';
+import { storeOnlyVersions } from '../../lib/project-state/journal.js';
+import { createStateStore, readJournal } from '../../lib/project-state/state-manager.js';
+import { appendLedgerEvent, readLedgerCensus } from '../../lib/runtime/ledger.js';
 import { LEASE_RECLAIM_REASON, LEASE_TICK_REASON } from '../../lib/topology/lease-reclaim.js';
 import { LANE_LEASE_REASON } from '../../scripts/split/lane-lease.mjs';
 import { feedLimb } from '../../scripts/split/task-feed.mjs';
@@ -256,21 +264,47 @@ describe('production wiring — the REAL openFeedStore and the REAL central ledg
     expect(Math.abs(Date.now() - Date.parse(lease.heartbeat_at))).toBeLessThan(5 * MIN);
     expect(Date.parse(lease.expires_at) - Date.parse(lease.heartbeat_at)).toBe(24 * H);
     expect(reader.getTaskGraph(MISSION).tasks.find((t) => t.id === 'auth')).toMatchObject({ status: 'claimed', heartbeat_source: 'lease-tick' });
-    // The row the SH-12 measurement reads — and it is a tick row, not a lane-state row.
-    expect(rowsWith(LEASE_TICK_REASON)).toHaveLength(1);
+    // Design D11 (SH-12 follow-up c): the renewal is a STORE-ONLY commit. The central ledger the REAL writer keeps is
+    // byte-identical across the real tick — not a tick row, not a lane-state row — and the evidence that a live
+    // renewal happened is in the store's journal: one commit declared store-only, whose node says `lease-tick`.
+    expect(fs.readFileSync(ledgerPath(), 'utf-8')).toBe(ledgerBefore);
+    expect(rowsWith(LEASE_TICK_REASON)).toHaveLength(0);
     expect(rowsWith(LANE_LEASE_REASON)).toHaveLength(0);
-    expect(rowsWith(LEASE_TICK_REASON)[0]).toMatchObject({ mission_id: MISSION, session_id: SESSION });
+    const declared = () => storeOnlyVersions(readJournal(reader.paths.journal).records);
+    expect(declared()).toHaveLength(1);
+    const beatRecord = readJournal(reader.paths.journal).records.find((r) => r.store_only === true && r.kind === 'task.upsert');
+    expect(beatRecord).toMatchObject({ mission_id: MISSION, reason: LEASE_TICK_REASON, task: { id: 'auth', heartbeat_source: 'lease-tick' } });
+    // The live-renewal count the procedure documents (operations.md, lease-tick): journal lines that carry the tick
+    // reason AND are the node record, counted with plain substring tests the way two greps would. Run here against the
+    // journal the REAL processes wrote, so the documented route is a measured one.
+    const documentedCount = () => fs.readFileSync(reader.paths.journal, 'utf-8').split('\n')
+      .filter((l) => l.includes('"reason":"split.lease-tick"') && l.includes('"kind":"task.upsert"')).length;
+    expect(documentedCount()).toBe(1);
 
     const second = runJson(SCRIPT);
     expect(second.leases.heartbeat.lanes.find((l) => l.limb === 'auth').outcome).toBe('skipped:not-due');
-    expect(rowsWith(LEASE_TICK_REASON)).toHaveLength(1);
+    expect(declared()).toHaveLength(1);
+    expect(documentedCount()).toBe(1);
+    expect(fs.readFileSync(ledgerPath(), 'utf-8')).toBe(ledgerBefore);
 
     // Release exactly one of the two reported ids.
     const applied = runJson(SCRIPT, ['--apply-reclaim', idOf('billing')]);
     expect(applied.leases.reclaim.results).toEqual([{ id: idOf('billing'), missionId: MISSION, taskId: 'billing', outcome: 'reclaimed:queued' }]);
     expect(reader.getLease(MISSION, 'billing')).toBe(null);
     expect(reader.getLease(MISSION, 'carol')?.owner).toBe('carol');
-    expect(rowsWith(LEASE_RECLAIM_REASON)).toHaveLength(1);
+    expect(rowsWith(LEASE_RECLAIM_REASON)).toHaveLength(1); // a release is not a heartbeat: it still pairs
+
+    // /doctor Check 8 over the REAL files those processes wrote: the declared tick is left out of the comparison and
+    // counted, and nothing is read as a lost update. (The exemption is what holds this: the ledger has no row for it.)
+    const parity = checkLedgerStateParity({
+      events: readLedgerCensus(repo).events,
+      journal: readJournal(reader.paths.journal).records,
+      projection: reader.renderProjection(),
+      project: path.basename(repo),
+    });
+    expect(parity.findings.map((f) => f.code)).not.toContain('ledger-subset-violation');
+    expect(parity.status).toBe(CheckStatus.PASS);
+    expect(parity.findings.find((f) => f.code === 'store-only-versions')).toMatchObject({ count: 1 });
   }, 180_000);
 
   it('--apply-reclaim with no list: exit 1, a refusal on stderr, nothing on stdout, and the ledger is byte-identical', () => {
@@ -292,4 +326,61 @@ describe('production wiring — the REAL openFeedStore and the REAL central ledg
     expect(out.leases.reclaim).toMatchObject({ available: false, reason: 'no-session-id' });
     expect(out.leases.heartbeat).toMatchObject({ available: false, reason: 'no-session-id', renewed: 0 });
   }, 60_000);
+});
+
+describe('operations.md — the lease-tick procedure carries the wiring (SH-12: nothing renews a lease on a clock unless someone starts the loop)', () => {
+  // Prose pins, and they say so: a document that tells the leader to start the loop is not a loop that ran. The
+  // live heartbeat count is still unmeasured until a real wave does it (see the "못 보는 것" bullet pinned below).
+  const OPERATIONS = path.join(PLUGIN_ROOT, 'skills', 'split', 'references', 'operations.md');
+  const text = fs.readFileSync(OPERATIONS, 'utf-8').replace(/\r\n/g, '\n');
+  const sectionOf = (heading) => {
+    const start = text.indexOf(`\n## ${heading}`);
+    expect(start, `${heading} section`).toBeGreaterThan(-1);
+    const end = text.indexOf('\n## ', start + 1);
+    return text.slice(start, end === -1 ? text.length : end);
+  };
+  const leaseTick = () => sectionOf('lease-tick');
+
+  it('tells the leader to start ONE loop per wave, right after the first dispatch, and gives the command', () => {
+    const s = leaseTick();
+    expect(s).toContain('웨이브당 1회');
+    expect(s).toContain('첫 `dispatch` 직후');
+    expect(s).toMatch(/while true; do node "<pluginRoot>\/scripts\/split\/lease-tick\.mjs" --parent "<parentRoot>"[^\n]*; sleep 900; done/);
+    expect(s).toContain('run_in_background');
+  });
+
+  it('is reachable from the dispatch procedure, where the leader is when a wave starts', () => {
+    const d = sectionOf('dispatch <limb>');
+    expect(d).toContain('lease-tick');
+    expect(d).toContain('웨이브당 1회');
+  });
+
+  it('says what a tick writes now: the store only — and how to count a live renewal without the ledger', () => {
+    const s = leaseTick();
+    expect(s).toContain('중앙 원장에는 아무것도 남기지 않는다');
+    expect(s).toContain('"reason":"split.lease-tick"');
+    expect(s).toContain('"kind":"task.upsert"');
+    expect(s).toContain('store-only-versions');
+    expect(s).toContain('project-state.jsonl');
+  });
+
+  it('names the three readers that leave a declared store-only version out, and what the declaration is', () => {
+    const s = leaseTick();
+    for (const reader of ['compareLedgerVersions', 'compareLedger', 'LEDGER_EXTRA_IN_STORE', 'storeOnlyVersions', 'store_only']) {
+      expect(s, reader).toContain(reader);
+    }
+  });
+
+  it('no longer claims a tick costs a ledger row, or that the store cannot be told not to', () => {
+    const s = leaseTick();
+    expect(s).not.toContain('원장 무음이 아니다');
+    expect(s).not.toContain('끄는 길이 없다');
+    expect(s).not.toContain('아직 충족되지 않았다');
+  });
+
+  it('keeps the honest limits next to the gate: a lost store-only write is invisible to the ledger comparison, and the live count is unmeasured', () => {
+    const s = leaseTick();
+    expect(s).toContain('checkStateVersionGaps');
+    expect(s).toMatch(/라이브[^\n]*미확인/);
+  });
 });

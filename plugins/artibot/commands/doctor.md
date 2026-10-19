@@ -444,7 +444,7 @@ Status for this check — **first matching row wins**:
 | Condition | Status |
 |---|---|
 | Any of events / journal / projection was not read | **unmeasured** |
-| A store version has no paired `state.updated` event | **fail** |
+| A store version has no paired `state.updated` event, and the journal does not declare it store-only | **fail** |
 | The journal fold does not reproduce the projection | **fail** |
 | A `state_version` is missing, repeated, or goes backwards | **fail** |
 | A ledger version has not reached the store yet | **warn** |
@@ -479,6 +479,18 @@ store is behind and the superset invariant still holds. A version in the store
 but not the ledger is a committed write with no event, which is that invariant
 broken and the exact signature lost-update detection exists to see.
 
+**Store-only versions are left out, and counted.** A lease heartbeat that the
+`/split` `lease-tick` writes (`heartbeatWorker({ storeOnly: true })`, design D11)
+has no `state.updated` by design. The store marks every journal record of such a
+commit `store_only: true`, and `checkLedgerStateParity` leaves a version out of the
+superset comparison only when EVERY record at it carries that mark and is a
+`task.upsert` or `lease.set` (`lib/project-state/journal.js#storeOnlyVersions`). An
+unmarked version, a marked version of another kind, one unmarked record among marked
+ones, or a mark that is not the boolean `true` is still the lost update above. The
+versions left out are reported as a `store-only-versions` finding with status `pass`
+and a `count` — print it: it is the live count of heartbeat renewals, and "not
+compared" must read differently from "compared and paired".
+
 **unmeasured is not a pass.** All three inputs are required, because a parity
 claim made without one of them is a partial comparison reported as a whole one.
 A store that has never been written has nothing to compare, and that reads as
@@ -491,6 +503,10 @@ unmeasured rather than healthy.
   indistinguishable from both being right.
 - **A lost write that never reached either store or ledger.** The counter only
   exposes writes that got a number; a write that died before CAS leaves no hole.
+- **A lost store-only write.** Those versions are excluded from the ledger comparison
+  by design, so no ledger reading can miss them; only `checkStateVersionGaps` (the
+  journal's own sequence) sees a hole. The `store_only` mark is a declaration the
+  store writes into its journal, not a signature.
 - **Which worktree the history it read came from.** The ledger and the store
   journal are SHARED by every linked worktree under `<git-common-dir>/artibot/`
   (ADR-011), so the events and the version sets compared here are the sum of

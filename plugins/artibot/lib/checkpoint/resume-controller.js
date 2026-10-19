@@ -42,7 +42,10 @@
  *     `missingInStore` merely means the store is behind and does not. This
  *     mirrors the distinction `lib/project-state/reconcile.js` already draws in
  *     its own header, rather than inventing a second reading of the same two
- *     fields.
+ *     fields. One declared exception (design D11): a version the store lists
+ *     under `storeOnly` — a lease heartbeat, committed with no ledger row by
+ *     design — is not extra, and is subtracted from `extraInStore` here even if
+ *     the injected port left it in.
  *
  * WHAT IT IS NOT ALLOWED TO DECIDE. Whether a completed action result may be
  * REUSED is marked undecided in design §8.6, so step 6 counts them and stops.
@@ -424,6 +427,11 @@ function stepLeases(ports, missionId, graph, blocks) {
  * This step reads the store and not the checkpoint, so it runs even when there
  * is no valid checkpoint to resume from.
  *
+ * `storeOnly` is the exemption list (design D11) and is read as an ALLOWLIST: only the
+ * integer versions of an actual array are subtracted from `extraInStore`, so a
+ * malformed value declares nothing and the extra version still blocks. The list is
+ * reported in the evidence either way.
+ *
  * @param {object} ports - Injected ports.
  * @param {{add: Function}} blocks - Reason collector.
  * @returns {object} The step entry.
@@ -440,11 +448,14 @@ function stepLedger(ports, blocks) {
     blocks.add(R.LEDGER_UNKNOWN);
     return makeStep(8, null, { error: messageOf(err) });
   }
+  const storeOnly = asArray(result?.storeOnly);
+  const declared = new Set(storeOnly.filter(Number.isInteger));
   const evidence = {
     drifted: result?.drifted === true,
     applied: result?.applied === true,
     gaps: asArray(result?.gaps),
-    extraInStore: asArray(result?.extraInStore),
+    extraInStore: asArray(result?.extraInStore).filter((version) => !declared.has(version)),
+    storeOnly,
     missingInStore: asArray(result?.missingInStore),
     warnings: asArray(result?.warnings),
     storeVersion: result?.storeVersion ?? null,

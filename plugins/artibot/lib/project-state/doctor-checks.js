@@ -52,7 +52,7 @@
  */
 
 import { buildProjection, renderProjection } from './projection.js';
-import { reduceProjectState } from './journal.js';
+import { reduceProjectState, storeOnlyVersions } from './journal.js';
 
 /** The four verdicts every check in this module returns. */
 export const CheckStatus = Object.freeze({
@@ -201,6 +201,14 @@ function versionSet(records, pick) {
  * store but not the ledger is a committed write with no event, which is the
  * invariant broken and the lost-update signature itself.
  *
+ * ONE declared exception (design D11, SH-12): a version the JOURNAL declares store-only — a
+ * lease heartbeat committed with `heartbeatWorker({storeOnly: true})`, every record marked and
+ * heartbeat-shaped, `journal.js#storeOnlyVersions` — has no `state.updated` by design, so it is
+ * not a violation. It is NOT silently dropped either: the versions left out of the comparison
+ * are counted in a `pass` finding, because "not compared" must read differently from "compared
+ * and paired". A lost store-only write is invisible to this comparison by construction; only
+ * `checkStateVersionGaps` (the journal's own sequence) can see a hole in it.
+ *
  * @param {object[]} journal - Store records.
  * @param {object[]} events - Ledger events.
  * @returns {object[]} Findings.
@@ -213,8 +221,10 @@ function compareLedgerVersions(journal, events) {
   );
   const ledgerSet = new Set(ledger);
   const storeSet = new Set(store);
+  const declared = new Set(storeOnlyVersions(journal));
   const findings = [];
-  const extraInStore = store.filter((v) => !ledgerSet.has(v));
+  const extraInStore = store.filter((v) => !ledgerSet.has(v) && !declared.has(v));
+  const leftOut = store.filter((v) => !ledgerSet.has(v) && declared.has(v));
   const missingInStore = ledger.filter((v) => !storeSet.has(v));
   if (extraInStore.length > 0) {
     findings.push({
@@ -226,6 +236,13 @@ function compareLedgerVersions(journal, events) {
     findings.push({
       code: 'store-behind-ledger', status: CheckStatus.WARN, versions: missingInStore,
       detail: 'ledger version(s) absent from the store — a crash between the two appends; the invariant holds',
+    });
+  }
+  if (leftOut.length > 0) {
+    findings.push({
+      code: 'store-only-versions', status: CheckStatus.PASS,
+      count: leftOut.length, first: leftOut[0], last: leftOut[leftOut.length - 1],
+      detail: `${leftOut.length} committed store version(s) are declared store-only (lease heartbeats, design D11) and were NOT compared against the ledger — they have no state.updated by design, and a lost one would not show here`,
     });
   }
   return findings;

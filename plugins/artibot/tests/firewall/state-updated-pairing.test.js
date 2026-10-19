@@ -26,12 +26,21 @@
  *  - **state.yaml.** The projection is deliberately outside the transaction,
  *    so a failed render cannot fail a committed write. Its determinism IS
  *    checked below, but its absence is not a pairing violation.
+ *  - **A LOST store-only write.** One declared exception to the 1:1 rule exists
+ *    (design D11): a lease heartbeat committed with `heartbeatWorker({storeOnly})`
+ *    has no event BY DESIGN, so the pairing check cannot see it go missing. What
+ *    keeps the exception from widening is pinned below (it is the heartbeat's alone,
+ *    declared on the journal records, allowlisted by kind); what still sees a hole
+ *    in the store-only versions is the journal's own sequence
+ *    (`doctor-checks.js#checkStateVersionGaps`), not the ledger.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ledgerFilePath, writeEvent } from '../../lib/runtime/event-writer.js';
-import { createStateStore, readJournal, reduceProjectState } from '../../lib/project-state/state-manager.js';
+import {
+  createStateStore, readJournal, reduceProjectState, storeOnlyVersions,
+} from '../../lib/project-state/state-manager.js';
 import {
   cleanup, makeStore, mission, MISSION_ID, seed, task,
 } from '../project-state/helpers.js';
@@ -106,6 +115,52 @@ describe('1:1 pairing — one committed write, one state.updated', () => {
     const { records } = readJournal(store.paths.journal);
     expect(records.filter((r) => r.state_version === 2)).toHaveLength(2);
     expect(ledgerVersions(ledger)).toEqual([1, 2]);
+  });
+});
+
+describe('the one declared exception — a store-only heartbeat has no event, and says so (design D11)', () => {
+  const claimedStore = () => {
+    const made = store$();
+    seed(made.store, [task('W-1')]);
+    made.store.claimTask({ missionId: MISSION_ID, taskId: 'W-1', owner: 'a', ttlMs: 60_000 });
+    return made;
+  };
+  const beat = (store, extra) => store.heartbeatWorker({ missionId: MISSION_ID, taskId: 'W-1', owner: 'a', ...extra });
+
+  it('refines the rule rather than dropping it: store versions = ledger versions + declared store-only versions, exactly', () => {
+    const { store, ledger } = claimedStore();
+    beat(store, { storeOnly: true });
+    beat(store, { storeOnly: true });
+    beat(store);
+    store.releaseTask({ missionId: MISSION_ID, taskId: 'W-1', owner: 'a', status: 'done' });
+
+    const { records } = readJournal(store.paths.journal);
+    const declared = storeOnlyVersions(records);
+    const stored = [...new Set(records.map((r) => r.state_version))];
+
+    expect(ledgerVersions(ledger)).toEqual([1, 2, 5, 6]);
+    expect(declared).toEqual([3, 4]);
+    expect([...ledgerVersions(ledger), ...declared].sort((a, b) => a - b)).toEqual(stored);
+    expect(store.reconcile({ ledgerVersions: ledgerVersions(ledger) }))
+      .toMatchObject({ gaps: [], missingInStore: [], extraInStore: [], storeOnly: [3, 4] });
+  });
+
+  it('is the heartbeat\'s alone: no other writer emits fewer events than it commits, whatever it is asked', () => {
+    const { store, ledger } = store$();
+    seed(store, [task('W-1')]);
+    store.claimTask({ missionId: MISSION_ID, taskId: 'W-1', owner: 'a', storeOnly: true });
+    store.updateMission(MISSION_ID, (m) => m, { reason: 'touch', storeOnly: true });
+    store.releaseTask({ missionId: MISSION_ID, taskId: 'W-1', owner: 'a', storeOnly: true });
+    expect(ledgerVersions(ledger)).toEqual([1, 2, 3, 4]);
+    expect(storeOnlyVersions(readJournal(store.paths.journal).records)).toEqual([]);
+  });
+
+  it('needs no ledger at all: a store-only commit lands while the ledger port refuses every event, and the ordinary one on the same port stays fail-closed', () => {
+    const { store, ledger } = claimedStore();
+    ledger.state.refuse = true;
+    expect(beat(store, { storeOnly: true }).ok).toBe(true);
+    expect(beat(store).ok).toBe(false);
+    expect(store.getState().state_version).toBe(3);
   });
 });
 

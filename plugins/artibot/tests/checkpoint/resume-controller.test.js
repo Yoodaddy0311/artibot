@@ -517,6 +517,49 @@ describe('step 8 — Reconcile Ledger (report-only)', () => {
     const report = await buildResumeReport(ports, { missionId: MISSION });
     expect(stepOf(report, 8).ok).toBe(true);
   });
+
+  describe('versions the store declares store-only (design D11 — a heartbeat renewal has no ledger row)', () => {
+    const resume = (reconcileResult) => buildResumeReport(
+      makePorts({ reconcile: () => ({ ...RECONCILE_CLEAN, ...reconcileResult }) }),
+      { missionId: MISSION },
+    );
+
+    it('does not block on an extra-in-store version the store declares store-only, and shows the declaration', async () => {
+      const report = await resume({ extraInStore: [5, 6], storeOnly: [5, 6] });
+      expect(report.blocked_by).toEqual([]);
+      expect(stepOf(report, 8)).toMatchObject({ ok: true, evidence: { extraInStore: [], storeOnly: [5, 6] } });
+    });
+
+    it('still blocks on an extra version that is NOT declared, and names only that one', async () => {
+      const report = await resume({ extraInStore: [5, 6], storeOnly: [5] });
+      expect(report.blocked_by).toContain(RESUME_BLOCK_REASONS.LEDGER_EXTRA_IN_STORE);
+      expect(stepOf(report, 8)).toMatchObject({ ok: false, evidence: { extraInStore: [6], storeOnly: [5] } });
+    });
+
+    it.each([
+      ['a string', 'all'],
+      ['numbers as strings', ['5']],
+      ['null', null],
+      ['an object', { 5: true }],
+      ['a number', 5],
+    ])('reads %s as no declaration at all: the extra version still blocks', async (_label, storeOnly) => {
+      const report = await resume({ extraInStore: [5], storeOnly });
+      expect(report.blocked_by).toContain(RESUME_BLOCK_REASONS.LEDGER_EXTRA_IN_STORE);
+      expect(stepOf(report, 8).evidence).toMatchObject({ extraInStore: [5], storeOnly: expect.any(Array) });
+    });
+
+    it('lists the declaration even when nothing is extra, and an absent one reads as an empty list', async () => {
+      expect(stepOf(await resume({ storeOnly: [3] }), 8)).toMatchObject({ ok: true, evidence: { storeOnly: [3] } });
+      expect(stepOf(await resume({}), 8).evidence.storeOnly).toEqual([]);
+    });
+
+    it('does not let a declaration hide drift or a hole in the store sequence', async () => {
+      const drifted = await resume({ ok: false, drifted: true, extraInStore: [5], storeOnly: [5] });
+      expect(drifted.blocked_by).toEqual([RESUME_BLOCK_REASONS.LEDGER_DRIFT]);
+      const gaps = await resume({ gaps: [4], storeOnly: [5] });
+      expect(gaps.blocked_by).toEqual([RESUME_BLOCK_REASONS.LEDGER_GAPS]);
+    });
+  });
 });
 
 describe('step 9 — Re-evaluate model (recorded, never selected)', () => {

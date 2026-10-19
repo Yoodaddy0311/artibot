@@ -13,9 +13,11 @@
  *  - cadence: no write before min(ttl/3, 45 min), one at it, a renewal
  *    restarts the clock, 48h of polls every 15 minutes renew exactly 64 times
  *    and the lease never lapses, the TTL does not grow (SP-05), and a poll is
- *    not a write — the ledger gains a row per RENEWAL only;
+ *    not a write — and a RENEWAL is a store-only commit: the central ledger gains
+ *    no row at all (design D11; lease-tick-store-only.test.js owns that claim);
  *  - a tick is distinguishable from the lane-state emitter: its own
- *    `heartbeat_source` (`lease-tick`) and ledger reason (`split.lease-tick`);
+ *    `heartbeat_source` (`lease-tick`) on the node, and — because it has no ledger
+ *    row — its reason (`split.lease-tick`) on the journal records of the commit;
  *  - who is renewed: only a lane with POSITIVE liveness evidence (ADV-4 — a
  *    live lock pid, or lane-state activity inside the TTL window); a lane that
  *    ages out stops being renewed and its lease lapses into the report; a
@@ -42,7 +44,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createStateStore } from '../../lib/project-state/state-manager.js';
+import { createStateStore, readJournal } from '../../lib/project-state/state-manager.js';
 import {
   classifyLaneLiveness,
   findReclaimCandidates,
@@ -203,8 +205,9 @@ describe('renewLaneHeartbeats — cadence with a fake clock, against a real stor
     expect(ledger.length).toBe(events);
   });
 
-  it('renews at exactly 45 minutes through syncLaneLease: one commit, stamped as a tick — heartbeat_source lease-tick, reason split.lease-tick', () => {
-    const events = updates().length;
+  it('renews at exactly 45 minutes through syncLaneLease: one STORE-ONLY commit, stamped as a tick — heartbeat_source lease-tick, journal reason split.lease-tick, no ledger row', () => {
+    const events = ledger.length;
+    const version = store.getState().state_version;
     at(T0 + 45 * MIN);
 
     const r = poll();
@@ -220,23 +223,28 @@ describe('renewLaneHeartbeats — cadence with a fake clock, against a real stor
     expect(task().heartbeat_source).toBe(LEASE_TICK_SOURCE);
     expect(task().heartbeat_source).toBe('lease-tick');
     expect(task().status).toBe('claimed');
-    expect(updates().length).toBe(events + 1);
-    expect(updates().at(-1).data.reason).toBe(LEASE_TICK_REASON);
-    expect(new Set(ledger.map((e) => e.event))).toEqual(new Set(['state.updated'])); // no new event name
+    // D11: the commit took a store version and the central ledger took nothing; the journal says why.
+    expect(store.getState().state_version).toBe(version + 1);
+    expect(ledger.length).toBe(events);
+    expect(readJournal(store.paths.journal).records.filter((x) => x.state_version === version + 1).map((x) => [x.kind, x.store_only, x.reason]))
+      .toEqual([['task.upsert', true, LEASE_TICK_REASON], ['lease.set', true, LEASE_TICK_REASON]]);
+    expect(new Set(ledger.map((e) => e.event))).toEqual(new Set(['state.updated'])); // the fixture's rows: no new event name
   });
 
-  it('a tick is told apart from the lane-state emitter by BOTH the source and the ledger reason', () => {
+  it('a tick is told apart from the lane-state emitter: by the source on the node, and by the ledger — the tick leaves no row, the emitter one', () => {
     at(T0 + 45 * MIN);
     expect(outcome(poll())).toBe('renewed');
     expect(task().heartbeat_source).toBe('lease-tick');
-    const tickRows = updates().filter((e) => e.data.reason === LEASE_TICK_REASON).length;
+    expect(updates().filter((e) => e.data.reason === LEASE_TICK_REASON)).toHaveLength(0);
+    const rows = updates().length;
 
-    // The lane-state path (lane-lease.mjs) still stamps what it always did.
+    // The lane-state path (lane-lease.mjs) still stamps what it always did, and still pairs.
     at(T0 + 50 * MIN);
     expect(syncLaneLease({ parentRoot: root, limb: 'auth', state: 'active', sessionId: SESSION }, { openStore: () => store, config: OFF }).outcome).toBe('renewed');
     expect(task().heartbeat_source).toBe('lane-heartbeat');
+    expect(updates()).toHaveLength(rows + 1);
     expect(updates().at(-1).data.reason).toBe(LANE_LEASE_REASON);
-    expect(updates().filter((e) => e.data.reason === LEASE_TICK_REASON)).toHaveLength(tickRows);
+    expect(updates().filter((e) => e.data.reason === LEASE_TICK_REASON)).toHaveLength(0);
     expect(LANE_LEASE_REASON).not.toBe(LEASE_TICK_REASON);
   });
 
@@ -261,9 +269,12 @@ describe('renewLaneHeartbeats — cadence with a fake clock, against a real stor
       expect(Date.parse(lease.expires_at) - Date.parse(lease.heartbeat_at), `poll ${i}: ttl`).toBe(24 * H);
     }
     expect(renewedAt).toEqual(Array.from({ length: 64 }, (_, k) => (k + 1) * 0.75));
-    // The fixture's own rows — mission seed, the feeder's graph merge, the claim — are not ticks; the tick rows are exactly the 64.
-    expect(updates().filter((e) => e.data.reason === LEASE_TICK_REASON)).toHaveLength(64);
-    expect(updates()).toHaveLength(3 + 64);
+    // The fixture's own rows — mission seed, the feeder's graph merge, the claim — are the only ledger rows: the 64 ticks
+    // are store versions (3 + 64), each one declared store-only in the journal, and none of them is a row.
+    expect(updates().filter((e) => e.data.reason === LEASE_TICK_REASON)).toHaveLength(0);
+    expect(updates()).toHaveLength(3);
+    expect(store.getState().state_version).toBe(3 + 64);
+    expect(readJournal(store.paths.journal).records.filter((x) => x.store_only === true && x.kind === 'task.upsert')).toHaveLength(64);
   });
 
   it('a lapsed lease on a lane with liveness evidence is renewed back, not left to lapse', () => {
@@ -384,14 +395,16 @@ describe('renewLaneHeartbeats — cadence with a fake clock, against a real stor
     expect(store.getLease(MISSION, 'auth').owner).toBe('intruder');
   });
 
-  it('two due lanes are both renewed, one commit each', () => {
+  it('two due lanes are both renewed, one store commit each and no ledger row', () => {
     feed('billing');
     const events = updates().length;
+    const version = store.getState().state_version;
     at(T0 + 45 * MIN);
     const r = poll([lane({ limb: 'auth' }), lane({ limb: 'billing' })]);
     expect(r.lanes.map((l) => l.outcome)).toEqual(['renewed', 'renewed']);
     expect(r.renewed).toBe(2);
-    expect(updates().length).toBe(events + 2);
+    expect(store.getState().state_version).toBe(version + 2);
+    expect(updates().length).toBe(events);
   });
 
   it('no session id → available:false, the renewable lane says skipped:no-session-id, and no store is opened', () => {
@@ -514,7 +527,7 @@ describe('tick / applyLeaseReclaim / main — the writer end to end on a real st
     expect(r.leases.reclaim.candidates[0]).toMatchObject({ laneOps: 'done', action: 'release-to-queued' });
     expect(store.getLease(MISSION, 'billing')?.owner).toBe('billing');
     expect(store.getLease(MISSION, 'carol')?.owner).toBe('carol');
-    expect(updates().length).toBe(before + 1); // the auth renewal only
+    expect(updates().length).toBe(before); // the auth renewal is a store-only commit: no ledger row (D11), nothing else is written
     expect(r.at).toBe(iso(T0 + 25 * H));
     expect(JSON.parse(JSON.stringify(r))).toEqual(r);
   });

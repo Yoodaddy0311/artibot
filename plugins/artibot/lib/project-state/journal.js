@@ -33,6 +33,27 @@ export const STORE_RECORD_KINDS = Object.freeze([
   'task.upsert', 'task.remove', 'lease.set', 'lease.clear', 'meta.upsert',
 ]);
 
+/**
+ * The mark a store-only commit stamps on EVERY record it writes (design D11: a lease heartbeat
+ * is the store's alone — the central ledger gets no `state.updated` for it).
+ *
+ * The three readers of the `ledger ⊇ store` invariant — `/doctor` Check 8
+ * (`doctor-checks.js#compareLedgerVersions`), the store's own `reconcile.js#compareLedger` and
+ * the Resume Contract's step 8 (`lib/checkpoint/resume-controller.js`) — leave a version out of
+ * that comparison only when {@link storeOnlyVersions} says the JOURNAL declared it. The
+ * declaration lives in the journal, not in the caller's word, because the journal is the one
+ * artefact all three can read and the one the store writes in the same lock as the version.
+ */
+export const STORE_ONLY_FIELD = 'store_only';
+
+/**
+ * The record kinds a store-only commit may hold: what a heartbeat renewal writes — the task node
+ * with its new `heartbeat_*` fields, and the renewed lease. An ALLOWLIST, so a future writer that
+ * asks for store-only and writes anything else (a mission, a graph, a release) is NOT exempt and
+ * reads as the lost update it would be, instead of being waved through by the mark alone.
+ */
+export const STORE_ONLY_RECORD_KINDS = Object.freeze(['task.upsert', 'lease.set']);
+
 /** Snapshot schema version. Bumping it is a migration, not a patch. */
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
@@ -171,6 +192,39 @@ export function reduceProjectState(records, opts = {}) {
     if (typeof record.project === 'string') state.project = record.project;
   }
   return { state, warnings };
+}
+
+/**
+ * The versions the journal declares store-only: the ones a `ledger ⊇ store` comparison must
+ * not read as "a write committed with no event".
+ *
+ * A version qualifies only if EVERY record carrying it has `store_only === true` (the boolean,
+ * nothing looser) AND is one of {@link STORE_ONLY_RECORD_KINDS}. One unmarked record, or one record
+ * of another kind, and the version is an ordinary unpaired write — the lost-update signature — so
+ * the rule fails closed. It is read per version, never per file: a version reused by two commits
+ * (the CAS slot claimed twice) is exempt only if both runs are.
+ *
+ * WHAT THIS CANNOT SEE: the mark is a declaration in a file the store writes, not a signature. A
+ * hand-written line carrying it is believed, and a lost store-only write is exactly as invisible
+ * to a ledger comparison as the design intends — only the journal's own version sequence
+ * (`doctor-checks.js#checkStateVersionGaps`) can see a hole in it.
+ *
+ * @param {unknown} records - Journal records, as `readJournal(...).records` returns them.
+ * @returns {number[]} Sorted distinct versions; `[]` for anything that is not an array.
+ * @example
+ * storeOnlyVersions(readJournal(journalPath).records); // [3, 4, 7]
+ */
+export function storeOnlyVersions(records) {
+  if (!Array.isArray(records)) return [];
+  /** @type {Map<number, boolean>} version -> whether every record seen at it qualifies */
+  const exempt = new Map();
+  for (const record of records) {
+    const version = record?.state_version;
+    if (!Number.isInteger(version)) continue;
+    const qualifies = record[STORE_ONLY_FIELD] === true && STORE_ONLY_RECORD_KINDS.includes(record.kind);
+    exempt.set(version, (exempt.get(version) ?? true) && qualifies);
+  }
+  return [...exempt].filter(([, ok]) => ok).map(([version]) => version).sort((a, b) => a - b);
 }
 
 /**

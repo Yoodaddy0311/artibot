@@ -6,7 +6,10 @@ import {
   emptySnapshot,
   readJournal,
   reduceProjectState,
+  STORE_ONLY_FIELD,
+  STORE_ONLY_RECORD_KINDS,
   STORE_RECORD_KINDS,
+  storeOnlyVersions,
 } from '../../lib/project-state/journal.js';
 
 const MID = 'M-20260902-001';
@@ -182,5 +185,92 @@ describe('readJournal', () => {
     const out = readJournal(file);
     expect(out.records).toHaveLength(1);
     expect(out.torn).toBe(1);
+  });
+});
+
+describe('storeOnlyVersions — the versions a ledger comparison may leave out (design D11)', () => {
+  // A heartbeat renewal commits two records, a `task.upsert` and a `lease.set`, under ONE
+  // state_version. The rule is an ALLOWLIST read per version: every record at the version
+  // must carry the mark AND be one of those two kinds, or the version is not exempt.
+  const marked = (version, kind, extra) => rec(kind, { state_version: version, [STORE_ONLY_FIELD]: true, ...extra });
+  const beat = (version) => [
+    marked(version, 'task.upsert', { task: task('T-1') }),
+    marked(version, 'lease.set', { task_id: 'T-1', lease }),
+  ];
+
+  it('names the mark and the two record kinds a heartbeat renewal writes', () => {
+    expect(STORE_ONLY_FIELD).toBe('store_only');
+    expect([...STORE_ONLY_RECORD_KINDS]).toEqual(['task.upsert', 'lease.set']);
+  });
+
+  it('lists a version whose every record is marked and heartbeat-shaped', () => {
+    expect(storeOnlyVersions(beat(3))).toEqual([3]);
+  });
+
+  it('returns sorted distinct versions, however the records are ordered', () => {
+    expect(storeOnlyVersions([...beat(7), ...beat(3), ...beat(5)])).toEqual([3, 5, 7]);
+  });
+
+  it('is empty for an ordinary journal, an empty one and input that is not an array', () => {
+    expect(storeOnlyVersions([
+      rec('mission.upsert', { mission: mission() }),
+      rec('graph.upsert', { graph: graph() }),
+    ])).toEqual([]);
+    expect(storeOnlyVersions([])).toEqual([]);
+    for (const bad of [undefined, null, 'x', 7, {}]) expect(storeOnlyVersions(bad)).toEqual([]);
+  });
+
+  it.each([
+    ['mission.upsert', { mission: mission() }],
+    ['graph.upsert', { graph: graph() }],
+    ['mission.remove', {}],
+    ['task.remove', { task_id: 'T-1' }],
+    ['lease.clear', { task_id: 'T-1' }],
+    ['meta.upsert', { meta: {} }],
+    ['an unknown kind', {}],
+  ])('does NOT exempt a marked %s: the mark alone is not the rule', (kind, extra) => {
+    const name = kind === 'an unknown kind' ? 'mission.teleport' : kind;
+    expect(storeOnlyVersions([marked(2, name, extra)])).toEqual([]);
+  });
+
+  it('does NOT exempt a version where one record is unmarked, or one is a disallowed kind', () => {
+    expect(storeOnlyVersions([beat(2)[0], rec('lease.set', { state_version: 2, task_id: 'T-1', lease })])).toEqual([]);
+    expect(storeOnlyVersions([...beat(2), marked(2, 'mission.upsert', { mission: mission() })])).toEqual([]);
+    // The neighbour version is judged on its own records, not on the failed one's.
+    expect(storeOnlyVersions([...beat(2), rec('lease.set', { state_version: 2, task_id: 'T-1', lease }), ...beat(3)])).toEqual([3]);
+  });
+
+  it('reads the mark strictly: only the boolean true counts', () => {
+    for (const mark of ['true', 1, {}, [], null, false, 'store_only']) {
+      expect(storeOnlyVersions([
+        rec('task.upsert', { state_version: 4, [STORE_ONLY_FIELD]: mark, task: task('T-1') }),
+        rec('lease.set', { state_version: 4, [STORE_ONLY_FIELD]: mark, task_id: 'T-1', lease }),
+      ]), JSON.stringify(mark)).toEqual([]);
+    }
+  });
+
+  it('ignores records that carry no integer state_version, and non-object entries', () => {
+    expect(storeOnlyVersions([
+      null, 7, 'x',
+      { kind: 'task.upsert', [STORE_ONLY_FIELD]: true },
+      { kind: 'task.upsert', [STORE_ONLY_FIELD]: true, state_version: '3' },
+      { kind: 'task.upsert', [STORE_ONLY_FIELD]: true, state_version: 3.5 },
+    ])).toEqual([]);
+  });
+
+  it('is not fooled by the mark sitting on a version that also has an unmarked twin elsewhere in the file', () => {
+    // A version reused by two commits (the CAS slot claimed twice): one exempt run does not make the other exempt.
+    expect(storeOnlyVersions([...beat(6), rec('mission.upsert', { state_version: 6, mission: mission() })])).toEqual([]);
+  });
+
+  it('does not change the fold: a marked record folds exactly like an unmarked one', () => {
+    const plain = [
+      rec('mission.upsert', { mission: mission() }),
+      rec('graph.upsert', { graph: graph([task('T-1')]) }),
+      rec('task.upsert', { state_version: 2, task: task('T-1', { heartbeat_source: 'lease-tick' }) }),
+      rec('lease.set', { state_version: 2, task_id: 'T-1', lease }),
+    ];
+    const withMarks = plain.map((r) => (r.state_version === 2 ? { ...r, [STORE_ONLY_FIELD]: true } : r));
+    expect(reduceProjectState(withMarks)).toEqual(reduceProjectState(plain));
   });
 });
