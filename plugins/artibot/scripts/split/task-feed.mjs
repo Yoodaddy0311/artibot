@@ -82,10 +82,29 @@
  * output instead of silent. `lib/topology` is L4 and never reads config, so
  * the key reaches it as the `honorBinding` port of {@link resolveRunMission}.
  *
+ * ── WHERE THE KEY LIVES (SH-11 pre-flip item 5) ──────────────────────────
+ * The SHIPPED value sits in the plugin root's `artibot.config.json`. In
+ * production that root is a version-scoped cache directory, and every install /
+ * `/update` copies the shipped config over it (and over the marketplace copy and
+ * `~/.claude/artibot/artibot.config.json`), so a value turned ON there was put
+ * back to `false` without a word. The durable place is the user file
+ * {@link USER_BINDING_SWITCH_FILE} at the root of the artibot state directory —
+ * `{ "enabled": true | false }`, next to `model-routing.json`, which is kept out
+ * of the shipped config for the same reason. A well-formed file decides (`false`
+ * is a local kill switch that outlives a release that ships ON); an ABSENT file
+ * leaves the shipped value in charge; one that is there but cannot be read as
+ * that shape reads OFF. {@link missionBindingEnabled} applies it whenever it
+ * reads the shipped config itself; an INJECTED `config` is the whole answer, and
+ * `dispatch.mjs` — the one production injector — calls
+ * {@link applyUserBindingSwitch} on the config it loads, so the four readers of
+ * the key cannot disagree.
+ *
  * @module scripts/split/task-feed
  */
 
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { readJsonFileSync } from '../../lib/core/file.js';
 import { getPluginRoot } from '../../lib/core/platform.js';
 import { readPlanJson, readRunJson } from '../../lib/git/split-run-file.js';
@@ -99,6 +118,8 @@ import {
   carriesMissionBinding,
   foreignRunLimbs,
   honorsBinding,
+  isPlainObject,
+  MISSION_BINDING_ENABLED_CONFIG_PATH,
   missionEnvFromBinding,
   ownsFromPlan,
   readMissionBindingEnabled,
@@ -130,20 +151,99 @@ export function readShippedConfigSync() {
 }
 
 /**
+ * File name of the user-level SH-11 switch, at the ROOT of the artibot state
+ * directory (`resolveArtibotDir()`, `~/.claude/artibot` — where
+ * `model-routing.json` lives). See "WHERE THE KEY LIVES" in the module header.
+ */
+export const USER_BINDING_SWITCH_FILE = 'split-mission-binding.json';
+
+/**
+ * Absolute path of the user switch file. `resolveArtibotDir()` is called every
+ * time (never the import-time constant), so a test can isolate it.
+ *
+ * @param {string} [dir] - state directory; defaults to `resolveArtibotDir()`
+ * @returns {string}
+ */
+export function userBindingSwitchPath(dir = resolveArtibotDir()) {
+  return path.resolve(dir, USER_BINDING_SWITCH_FILE);
+}
+
+/**
+ * Read the user switch file. Never throws.
+ *
+ *  - `absent`   — no file (or no directory): the user has no opinion.
+ *  - `set`      — `{ "enabled": true | false }`, the literal values only. Other keys
+ *                 (a hand-written note) are ignored, a BOM is tolerated.
+ *  - `unusable` — there is a file and it cannot be read as that: unreadable, not
+ *                 JSON, not an object, `enabled` missing or not a boolean. The
+ *                 `reason` says which. A caller treats it as OFF.
+ *
+ * @param {{ dir?: string }} [opts]
+ * @returns {{ status: 'absent' } | { status: 'set', enabled: boolean } | { status: 'unusable', reason: string }}
+ */
+export function readUserBindingSwitch({ dir } = {}) {
+  let text;
+  try {
+    text = readFileSync(userBindingSwitchPath(dir), 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { status: 'absent' };
+    return { status: 'unusable', reason: `unreadable: ${err?.code ?? err?.message ?? 'error'}` };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch (err) {
+    return { status: 'unusable', reason: `invalid JSON: ${err.message}` };
+  }
+  if (!isPlainObject(parsed)) return { status: 'unusable', reason: 'not a JSON object' };
+  if (typeof parsed.enabled !== 'boolean') return { status: 'unusable', reason: '"enabled" must be the literal true or false' };
+  return { status: 'set', enabled: parsed.enabled };
+}
+
+/** `obj` with `value` at `keys`, built on copies along the path: nothing in `obj` is mutated and branches off the path are shared. */
+function withConfigPath(obj, keys, value) {
+  const [head, ...rest] = keys;
+  const base = isPlainObject(obj) ? obj : {};
+  return { ...base, [head]: rest.length === 0 ? value : withConfigPath(base[head], rest, value) };
+}
+
+/**
+ * The config with the user switch laid over the canary key, on a copy.
+ *
+ * An ABSENT file returns `config` itself (identity, `null` included). A `set`
+ * file replaces the key with its value; an `unusable` one with `false` — an
+ * intent that cannot be read must not leave a behaviour change on. The file is
+ * the owner's own decision, so a `null` / key-less shipped config does not veto
+ * it: the key is built where it is missing. Only the one allowlisted path is
+ * touched, whatever else the file says.
+ *
+ * @param {object|null} config - the shipped / loaded config
+ * @param {{ dir?: string }} [opts]
+ * @returns {object|null}
+ */
+export function applyUserBindingSwitch(config, { dir } = {}) {
+  const found = readUserBindingSwitch({ dir });
+  if (found.status === 'absent') return config;
+  return withConfigPath(config, MISSION_BINDING_ENABLED_CONFIG_PATH.split('.'), found.status === 'set' && found.enabled);
+}
+
+/**
  * Whether the SH-11 canary key (`split.missionBinding.enabled`) is on. The one
  * reader the split tooling shares; only a literal `true` counts.
  *
  * `ports.config` wins when it is given at all — `null` there means "no config"
  * and is OFF, it never falls through to the file (a test that injects `null`
- * must not be handed the host's real configuration). Only an ABSENT `config`
- * reads the shipped file.
+ * must not be handed the host's real configuration), and the user file is not
+ * consulted either: an injected config is the whole answer. Only an ABSENT
+ * `config` reads the shipped file, with the user switch file laid over it
+ * ({@link applyUserBindingSwitch}).
  *
- * @param {{ config?: object|null }} [ports]
+ * @param {{ config?: object|null, switchDir?: string }} [ports] - `switchDir` is the test seam for the state directory the user file is read from
  * @returns {boolean}
  */
 export function missionBindingEnabled(ports = {}) {
-  const config = ports?.config === undefined ? readShippedConfigSync() : ports.config;
-  return readMissionBindingEnabled(config);
+  if (ports?.config !== undefined) return readMissionBindingEnabled(ports.config);
+  return readMissionBindingEnabled(applyUserBindingSwitch(readShippedConfigSync(), { dir: ports?.switchDir }));
 }
 
 /**

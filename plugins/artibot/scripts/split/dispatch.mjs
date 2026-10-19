@@ -31,7 +31,9 @@
  *
  * The SH-11 canary key `split.missionBinding.enabled` ships `false`: with it off
  * dispatch binds nothing and a run that already carries a record is dispatched
- * by the legacy path (its results say `binding: { status: 'disabled' }`).
+ * by the legacy path (its results say `binding: { status: 'disabled' }`). A
+ * local choice that must outlive `/update` lives in the user file
+ * `~/.claude/artibot/split-mission-binding.json` (`task-feed.mjs#applyUserBindingSwitch`).
  *
  * Exit codes: 0 ok · 1 refused / error (message on stderr, or JSON with --json).
  *
@@ -47,7 +49,7 @@ import { getRepoIdentity, repoShortName } from '../../lib/git/repo-identity.js';
 import { forkPointForLimb, readRunJson, updatePlanJson, windowForLimb } from '../../lib/git/split-run-file.js';
 import { isLaneOpsState } from '../../lib/supervisor/contracts.js';
 import { setLaneState } from './lane-state.mjs';
-import { feedLimb } from './task-feed.mjs';
+import { applyUserBindingSwitch, feedLimb } from './task-feed.mjs';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { limbsFromPlan } from '../../lib/git/split-dispatch.js';
 import { loadConfig } from '../../lib/core/config.js';
@@ -269,7 +271,10 @@ export async function runDispatch(args, opts = {}) {
 
   let config = opts.config === undefined ? null : opts.config;
   if (config === null && opts.config === undefined) {
-    try { config = await loadConfig(); } catch { config = null; }
+    // The user-level SH-11 switch (`task-feed.mjs#applyUserBindingSwitch`) is laid over the loaded config HERE,
+    // because this config is injected into the lane write and the feeder below, and an injected config is the
+    // whole answer there: without it dispatch would be the one reader of the key that never sees the user's choice.
+    try { config = applyUserBindingSwitch(await loadConfig()); } catch { config = null; }
   }
   const dispatchCfg = config?.split?.dispatch && typeof config.split.dispatch === 'object' ? config.split.dispatch : {};
 
