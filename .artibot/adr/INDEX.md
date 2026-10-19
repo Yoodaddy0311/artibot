@@ -35,5 +35,6 @@
 | 011 | linked worktree 원장 위치 — StateStore 와 같은 git-common-dir 동거(안 a) | active | 2026-09-11 | — | [`ADR-011-worktree-ledger-store.md`](./ADR-011-worktree-ledger-store.md) |
 | 012 | Wave 10 편성 — 8창 롤링 + 감사 결함(F01~F10)을 로드맵 선행 불변식으로 흡수 (오너 결정 E1·E2·E3·G1 확정 기록) | active | 2026-09-14 | — | [`ADR-012-wave-10-편성-8창-롤링-감사-결함을-로드맵-선행-불변식으로-흡수.md`](./ADR-012-wave-10-편성-8창-롤링-감사-결함을-로드맵-선행-불변식으로-흡수.md) |
 | 013 | Shadow 의 outcome.md(accepted:null) 생성은 기록 산출 — Canary #14 완료 게이트 강제(CA-13)와 분리 (SH-01 플립 조건 d 의 증거, 백로그 §4-h D3 는 열지 않음) | active | 2026-09-29 | — | [`ADR-013-shadow-outcome-record-vs-canary-enforce.md`](./ADR-013-shadow-outcome-record-vs-canary-enforce.md) |
+| 014 | /rea 도입 방식 — npm rea-agents 무수정 실행 + 업스트림 setup 경로 + 배포 스킬 바이트 벤더링 (오너 선택 2026-10-19) | active | 2026-10-19 | — | [`ADR-014-rea-도입-방식-npm-rea-agents-무수정-실행-업스트림-setup-경로-배포-스킬-바이트-벤더링.md`](./ADR-014-rea-도입-방식-npm-rea-agents-무수정-실행-업스트림-setup-경로-배포-스킬-바이트-벤더링.md) |
 
-총 13 건. `ageDays` 열은 두지 않는다 — 정적 파일에 적힌 경과일은 쓰는 순간 낡는다.
+총 14 건. `ageDays` 열은 두지 않는다 — 정적 파일에 적힌 경과일은 쓰는 순간 낡는다.
