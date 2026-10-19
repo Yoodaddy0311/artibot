@@ -1,0 +1,19 @@
+Artibot
+Copyright (c) Artience. Licensed under the Business Source License 1.1
+(see LICENSE at the repository root).
+
+This plugin includes third-party material that is NOT covered by that license.
+
+plugins/artibot/vendor/rea/    MIT License
+    Unmodified copies of files from the npm package rea-agents
+    (https://github.com/morluto/rea), Copyright (c) 2026 morluto: the REA skill
+    (skill/), LICENSE and DISCLAIMER.md.
+    These files stay under the MIT License in vendor/rea/LICENSE, which must
+    accompany every copy of them. UPSTREAM.json in the same folder records the
+    exact release, the npm integrity hash and a SHA-256 for every file.
+    DISCLAIMER.md is the upstream project's own responsible-use statement; the
+    /rea command links to it.
+
+The rea-agents package itself (the engine /rea runs through npx) is not
+distributed with Artibot. It is fetched from the npm registry when used, under
+the licenses it ships with (see THIRD_PARTY_NOTICES.md inside that package).

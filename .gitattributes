@@ -31,3 +31,14 @@ plugins/artibot/tests/fixtures/ups-task-notification-2026-09-04.txt -text
 # 2026-09-14 Windows CI checkout with core.autocrlf=true rewrote them to CRLF
 # and the gate went red on bytes the blob never contained.
 plugins/artibot/tests/evals/fixtures/routebench/corpus/*.jsonl -text
+
+# /rea vendored upstream text -- byte-immutable, sha256-pinned in UPSTREAM.json.
+#
+# plugins/artibot/vendor/rea/ holds the skill, LICENSE and DISCLAIMER.md of the
+# npm package rea-agents, copied byte-for-byte; tests/vendor/rea-vendor.test.js
+# compares every file's sha256 with the pin. All nine upstream files are LF-only
+# (measured on the 6.7.0 tarball: 0 CR bytes in each), so `core.autocrlf=true`
+# (this Windows host's default) would check them out as CRLF and break every pin
+# on a fresh clone. `-text` rather than `eol=lf` for the same reason as above:
+# the bytes must round-trip unmodified in BOTH directions.
+plugins/artibot/vendor/rea/** -text

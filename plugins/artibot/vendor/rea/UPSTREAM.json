@@ -1,0 +1,24 @@
+{
+  "package": "rea-agents",
+  "version": "6.7.0",
+  "integrity": "sha512-yhIx2ioJYYT1C/tONfYeitC6LhnKmCh+ZwRUOgYuhSc733lGhkkt73zhug9WmLgxoMdKuqIYGCoBfD4fXkOhFw==",
+  "repository": "https://github.com/morluto/rea",
+  "license": "MIT",
+  "files": {
+    "DISCLAIMER.md": "200fed9113e41239ac91d7161db71b00669b9989307ae0e1dce404ccb73265f6",
+    "LICENSE": "798f9e4d18e49b30bf2f12696c8ced73dc4e1413da375a333d01281543a1ea8b",
+    "skill/SKILL.md": "fbcd39d6abe803cf7aa49c1880815bc8e22ba2af87a23681944f687bb7629eb1",
+    "skill/references/android-applications.md": "67a9237d76a5b736640c6404f5e1fe01d83369848142feb7e11d78f4a5e62732",
+    "skill/references/connection-and-recovery.md": "a33760c84ae100f6ffd27d666e515956c5014ac33a6ee2414807833ae666a2b1",
+    "skill/references/evidence-workflows.md": "2bdee98a843d018cf850c706111bb74c459ba8640da00799e9208122e4d5ab80",
+    "skill/references/javascript-applications.md": "aaa78502a3e95268f6269e75f373908045291fedf6ddd106001555ed06bb2bf6",
+    "skill/references/native-and-artifacts.md": "18b8828aec6476be03ca92bdb9506c47cc9ef8c1415c37d33e4af2f8c55cf8f9",
+    "skill/references/runtime-observation.md": "fea85e2005a8fd1c86a946eeede24c20e57592a1deb36576b45216e9854803c8"
+  },
+  "notes": [
+    "Vendored byte-for-byte from the npm tarball named above (MIT, see LICENSE). Never edit by hand: run scripts/vendor/sync-rea.mjs <version>.",
+    "Mapping: package/skills/reverse-engineer-anything/** -> skill/**, package/LICENSE -> LICENSE, package/DISCLAIMER.md -> DISCLAIMER.md. THIRD_PARTY_NOTICES.md, which DISCLAIMER.md links to, is not vendored: it covers the engine components and the engine is not vendored.",
+    "GATE COVERAGE: nothing under vendor/ is scanned by the Artibot doc and text gates (validate-doc-links, validate-md-rendering, the citation gate, unicode-hygiene, the skill lint): they walk commands/, skills/, docs/, agents/ and the root docs only. This tree is third-party text protected by the sha256 pins in \"files\" and by the hidden-character scan, both in tests/vendor/rea-vendor.test.js. Green proves the bytes equal what is pinned here, not that the text is correct or safe.",
+    "Version pin: \"version\" above must equal every rea-agents@x.y.z in commands/rea.md and in skill/SKILL.md."
+  ]
+}
