@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.9] — 2026-10-19
+
+`v4.71.8`(`4f91e0c7`) 이후 8 커밋 = **19 files +621/−461**(`git rev-list --count v4.71.8..38d05e8a` · `git diff --shortstat v4.71.8 38d05e8a`, 2026-10-19 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `2ede06e1`·`ebd6b069`·`1fda87e6`·`f40f255a` 4개는 인계·백로그 문서 커밋이고 `38d05e8a` 는 ADR-014 문서 커밋이라 내용 커밋은 3개(`96314449`·`17122647`·`2589232a`)다.
+
 ### 컴팩트 정리 (2026-10-14)
 
 - `/doctor` Check 10: v4.71.8 의 재개 재바인드 수정(`48e85610`) 이전에 쓰인 `agent_bound_twice` 충돌을 `legacyConflicts` 로 따로 센다. append-only 원장에 남은 5건 때문에 이 검사가 영구 FAIL 이던 것을 풀었다. 컷오프는 고정 상수(`RESUME_REBIND_FIXED_AT`, 릴리스 시각)이고, 다른 종류이거나 컷오프 이후 행이 하나라도 있거나 시각을 매길 수 없는 충돌은 그대로 FAIL 이다. 이 리포 원장 실측은 fail → warn 이다.
