@@ -6,7 +6,7 @@
  *   1. **A foreign controller is never overwritten.** `held` and `expired` both
  *      return the CALLER'S OWN object by reference, and this suite asserts both
  *      identity (`toBe`) and bytes (`JSON.stringify`). Reclaiming an expired
- *      lease is CA-14's decision, and an Observe-stage module that quietly took
+ *      lease is CA-09's decision, and an Observe-stage module that quietly took
  *      the slot would make the later decision unobservable — the evidence of
  *      who held it would already be gone.
  *   2. **An unreadable controller is passed through, never thrown on.** The
