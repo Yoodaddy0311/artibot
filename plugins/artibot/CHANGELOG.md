@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### v5 웨이브 재개 4줄기 (2026-10-19)
+
+`v4.71.9`(`2e14407b`) 이후 줄기 4개 = 9 커밋 = **34 files +3,013/−280**(`git diff --shortstat 2e14407b HEAD`, 2026-10-19 문서 커밋 직전의 통합 브랜치에서 측정 — 문서 커밋은 이 수치에 없다). 오너 결정(2026-10-19)으로 재개한 줄기이고 출하 설정값은 바뀌지 않았다.
+
+- **SH-11 켜기 전 조건 ⑤·L2 수리 + `lane-state --list` 정본 경유**: 키를 플러그인 루트 config 한 곳에서만 읽어 `/update` 가 켠 값을 되돌리던 것을 `~/.claude/artibot/split-mission-binding.json` 이 덮도록 수리(dispatch 포함 네 판독기 일치). `resolveRunMission` 은 plan 키 → 스위치 → 레코드 순. `--list` 는 `readWorkerState` 경유(첫 production 호출자). 출하값 false·끈 상태 바이트 골든 불변. 실제 `/update` 가 이 파일을 보존하는지는 미검증이다. (`f98d414b`·`ea84654a`·`898f3274`)
+- **lease-tick heartbeat 는 store-only (D11)**: 갱신이 중앙 원장에 아무것도 남기지 않는다. `heartbeatWorker({storeOnly:true})` 가 저널 레코드에 표시하고, Check 8·reconcile·Resume Contract 는 선언된 버전만 ledger⊇store 비교에서 뺀다(Check 8 이 store-only-versions 를 보고). reconcile 과 Resume Contract 는 `ledgerVersions` 를 넘기는 프로덕션 호출자가 없어 그 두 예외는 단위 테스트로만 핀돼 있다. 저널이 쓰기를 받은 뒤 스냅샷 rename 이 실패하면 throw 대신 ok:true + snapshot:write-failed(이 경고는 CLI 출력에 나오지 않는다). (`95e34ebd`)
+- **`recommendControllerTransition` 제거 (CA-14 기각)**: 프로덕션 호출자가 처음부터 0, reclaim 은 CA-09 소관. `controller_observation`·`CONTROLLER_OBSERVATIONS`·barrel 은 그대로. 테스트 −12. (`9154ef9c`·`5ce6b9db`)
+- **테스트 게이트 deny-list → allowlist**: resume-contract-report-only 의 쓰기 포트를 실 스토어에서 파생(42→50), main-entry-symlink 는 실행마다 mkdtemp(realpath(os.tmpdir()))(5→8), vitest-root-config 자식 env 는 플랫폼 이름 allowlist(13→17). 출하 코드 변경 0. (`b6861691`·`fc89edc4`·`bd3e6aa0`)
+
 ## [4.71.9] — 2026-10-19
 
 `v4.71.8`(`4f91e0c7`) 이후 8 커밋 = **19 files +621/−461**(`git rev-list --count v4.71.8..38d05e8a` · `git diff --shortstat v4.71.8 38d05e8a`, 2026-10-19 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `2ede06e1`·`ebd6b069`·`1fda87e6`·`f40f255a` 4개는 인계·백로그 문서 커밋이고 `38d05e8a` 는 ADR-014 문서 커밋이라 내용 커밋은 3개(`96314449`·`17122647`·`2589232a`)다.

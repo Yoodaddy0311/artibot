@@ -632,7 +632,7 @@
           "type": "integer"
         }
       },
-      "spec": "lane 6 §5-② #17. Every writer that touches the state store appends this inside the same transaction, append FIRST and projection second. state_version increases monotonically, so a GAP in the numbering is direct evidence of a lost update -- which is how the decision-trail class of loss stops being something you only find by measuring for it (/doctor Check 8-②)."
+      "spec": "lane 6 §5-② #17. Every writer that touches the state store appends this inside the same transaction, append FIRST and projection second. state_version increases monotonically, so a GAP in the numbering is direct evidence of a lost update -- which is how the decision-trail class of loss stops being something you only find by measuring for it (/doctor Check 8-②). Exception (D11): heartbeatWorker({storeOnly:true}) commits have no event; the journal declares them (store_only:true) and ledger numbering gaps at those versions are expected."
     },
     "mission.checkpointed": {
       "required": [],
