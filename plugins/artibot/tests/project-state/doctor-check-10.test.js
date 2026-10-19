@@ -4,8 +4,8 @@
  * ── What these tests DO establish ─────────────────────────────────────────
  * That `checkRouteBindResidue` judges the invariant-1 conflicts alone and
  * reports the two residue counts without comparing them (no pair of counts is
- * a verdict), that `unmeasured` is returned whenever a count was not supplied
- * (and that `0` is not `undefined`), that an
+ * a verdict), that a count that was not supplied reads `unmeasured` unless a
+ * live conflict already fails the check (and that `0` is not `undefined`), that an
  * `agent_bound_twice` conflict dated wholly before the v4.71.8 resume fix is
  * counted apart as legacy while every other conflict still fails, and that
  * `commands/doctor.md` says what the code does: ten checks, a `routing`
@@ -59,7 +59,7 @@ function section(md, n) {
 const codes = (r) => r.findings.map((f) => f.code);
 
 describe('checkRouteBindResidue()', () => {
-  it('is unmeasured when either count is missing, and says which', () => {
+  it('is unmeasured when either count is missing and no conflict is live, and says which', () => {
     const noSpawns = checkRouteBindResidue({ unboundReceipts: 3 });
     expect(noSpawns.status).toBe(CheckStatus.UNMEASURED);
     expect(noSpawns.findings[0].absent).toEqual(['unboundSpawns (spawn ledger)']);
@@ -116,6 +116,21 @@ describe('checkRouteBindResidue()', () => {
     expect(codes(r)).toEqual(['route-bind-conflict']);
   });
 
+  it('fails on a live conflict even when a count is missing, and still reports the missing count', () => {
+    const conflicts = [{ type: 'tool_use_bound_twice', tool_use_id: 'tu-1', agent_ids: ['a', 'b'], count: 2 }];
+    // The motivating case: no spawns.ndjson, so `unboundSpawns` is undefined.
+    const noSpawns = checkRouteBindResidue({ unboundReceipts: 0, conflicts });
+    expect(noSpawns.status).toBe(CheckStatus.FAIL);
+    expect(codes(noSpawns)).toEqual(['route-bind-conflict', 'residue-inputs-absent']);
+    expect(noSpawns.findings[0].conflicts).toEqual(conflicts);
+    expect(noSpawns.findings[1]).toMatchObject({ status: CheckStatus.UNMEASURED, absent: ['unboundSpawns (spawn ledger)'] });
+    expect(noSpawns.counts).toEqual({ unboundReceipts: 0, unboundSpawns: null, conflicts: 1, legacyConflicts: 0 });
+
+    const noCounts = checkRouteBindResidue({ conflicts });
+    expect(noCounts.status).toBe(CheckStatus.FAIL);
+    expect(noCounts.findings[1].absent).toHaveLength(2);
+  });
+
   it('reports conflicts as not counted (null) when the join was not supplied', () => {
     const r = checkRouteBindResidue({ unboundReceipts: 1, unboundSpawns: 1 });
     expect(r.status).toBe(CheckStatus.PASS);
@@ -143,6 +158,13 @@ describe('checkRouteBindResidue() — legacy conflicts (the v4.71.8 resume fix, 
     expect(r.status).toBe(CheckStatus.PASS);
     expect(r.findings).toEqual([]);
     expect(r.counts).toEqual({ unboundReceipts: 0, unboundSpawns: 0, conflicts: 0, legacyConflicts: 2 });
+  });
+
+  it('keeps a missing count unmeasured when every conflict is legacy: set aside, never a fail', () => {
+    const r = checkRouteBindResidue({ unboundReceipts: 0, conflicts: [rebind('2026-10-13T09:19:38.198Z')] });
+    expect(r.status).toBe(CheckStatus.UNMEASURED);
+    expect(codes(r)).toEqual(['residue-inputs-absent']);
+    expect(r.counts).toMatchObject({ conflicts: 0, legacyConflicts: 1 });
   });
 
   it('fails on a conflict whose latest row is at or after the cutoff, and not one millisecond earlier', () => {
@@ -244,7 +266,7 @@ describe('commands/doctor.md — Check 10', () => {
   });
 
   it('states the three status rows in the code\'s order, no warn row, and the undefined-not-zero rule', () => {
-    const rows = ['**unmeasured**', '**fail**', '**pass**'];
+    const rows = ['**fail**', '**unmeasured**', '**pass**'];
     let last = -1;
     for (const row of rows) {
       const i = ten.indexOf(row);
@@ -253,6 +275,7 @@ describe('commands/doctor.md — Check 10', () => {
     }
     expect(ten).not.toMatch(/^\|.*\*\*warn\*\*/m);
     expect(ten).toContain('pass `undefined`, not `0`');
+    expect(ten).toContain('A missing count never hides a live conflict');
     expect(ten).toContain('unmeasured is not a pass');
     expect(ten).toContain('NOT a `--fix` target');
   });

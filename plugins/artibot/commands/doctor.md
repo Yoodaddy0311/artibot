@@ -671,9 +671,13 @@ Status for this check — **first matching row wins**:
 
 | Condition | Status |
 |---|---|
-| Either count was not supplied (a file was not read) | **unmeasured** |
 | A live conflict — a `tool_use_id` or an `agent_id` bound more than once, or a receipt written twice (invariant 1); legacy conflicts (below) are not live | **fail** |
+| Either count was not supplied (a file was not read) | **unmeasured** |
 | Otherwise | **pass** |
+
+A missing count never hides a live conflict: the fail row comes first, and the
+result then carries a `residue-inputs-absent` finding beside the
+`route-bind-conflict` one.
 
 The counts are reported, not compared: they measure different populations
 (2026-10-14: 6 unbound receipts against 313 unbound spawns, no live conflict),
@@ -751,7 +755,8 @@ paragraph above).
   per-tree. What this cannot see is an INSTALL older than that rule: the hooks
   run from the install, so an old `spawn-ledger.js` keeps writing the tree-local
   `.artibot/ledger/` file, the shared path holds no spawn file at all, the spawn
-  count comes back `undefined`, and the verdict is `unmeasured`.
+  count comes back `undefined`, and the verdict is `unmeasured` (`fail` when a
+  live conflict exists).
   Once the install is current, an `unmeasured` on the spawn side means the
   one-time migration (ADR-011 §1회 이관 절차) has not been run yet, not that
   nothing spawned.

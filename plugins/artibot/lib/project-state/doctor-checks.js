@@ -999,7 +999,9 @@ function isLegacyBindConflict(c) {
  *
  * Both counts are still REQUIRED, though neither decides anything: a count
  * from a file that was not read is not a measurement, so a missing count is
- * `unmeasured`, never a narrower pass (and it is checked before `conflicts`).
+ * an `unmeasured` finding, never a narrower pass. It does not hide a conflict
+ * either: the findings combine by `worstOf` (`fail` outranks `unmeasured`), so
+ * a live conflict is `fail` with the missing count reported after it.
  * A caller that could not open the spawn ledger must pass `undefined`, not `0`.
  * `conflicts` is optional: absent means NOT COUNTED and is reported as such
  * under `counts`, never folded into the verdict.
@@ -1038,21 +1040,17 @@ export function checkRouteBindResidue(input = {}) {
   const absent = [];
   if (unboundReceipts === null) absent.push('unboundReceipts (ledger join)');
   if (unboundSpawns === null) absent.push('unboundSpawns (spawn ledger)');
-  if (absent.length > 0) {
-    return {
-      status: CheckStatus.UNMEASURED,
-      findings: [{
-        code: 'residue-inputs-absent', status: CheckStatus.UNMEASURED, absent,
-        detail: `not supplied: ${absent.join(', ')} — not counted, not counted and found zero`,
-      }],
-      counts,
-    };
-  }
   const findings = [];
   if (live !== null && live.length > 0) {
     findings.push({
       code: 'route-bind-conflict', status: CheckStatus.FAIL, conflicts: live,
       detail: `${live.length} invariant-1 violation(s): a tool_use_id or agent_id bound more than once — the bind writer's 1:1 guarantee broke`,
+    });
+  }
+  if (absent.length > 0) {
+    findings.push({
+      code: 'residue-inputs-absent', status: CheckStatus.UNMEASURED, absent,
+      detail: `not supplied: ${absent.join(', ')} — not counted, not counted and found zero`,
     });
   }
   return { status: worstOf(findings.map((f) => f.status)), findings, counts };
