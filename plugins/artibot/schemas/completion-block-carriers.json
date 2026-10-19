@@ -18,8 +18,8 @@
       "split.md"
     ],
     "grepDerivedBeyondDesignNamed": [],
-    "measuredAt": "2026-09-28T06:11:46Z",
-    "denominator": 80,
+    "measuredAt": "2026-10-19T03:05:09Z",
+    "denominator": 81,
     "denominatorScope": "plugins/artibot/commands/*.md",
     "markerScan": {
       "M1_📊_작업_진행률": [

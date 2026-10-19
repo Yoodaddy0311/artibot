@@ -72,6 +72,31 @@ unaffected.
 
 ---
 
+## REA (optional, user-level, not in `.mcp.json`)
+
+`/rea` drives [REA](https://github.com/morluto/rea), a third-party reverse-engineering
+MCP server (npm package `rea-agents`, MIT). It is deliberately **not** one of the
+three servers above and is not declared in `plugins/artibot/.mcp.json`: declaring it
+there would attach its tools and a server start-up to every session of every user.
+
+Instead `/rea` follows the upstream procedure: `doctor`, then `setup --dry-run`, then
+(only after you approve the plan) `setup --yes`, then a restart. Setup adds a `rea`
+entry to your **user-level** Claude Code config and installs upstream's skill in your
+personal skills folder; the dry-run plan lists both before anything is written. The
+registered command is pinned to the same `rea-agents` version as the skill text
+vendored in `plugins/artibot/vendor/rea`.
+
+Verify with `claude mcp list` after the restart (expect `rea` to show as connected).
+To undo, run `claude mcp remove --scope user rea` and delete the
+`.claude/skills/reverse-engineer-anything` folder in your home directory.
+
+The first run installs the package and its dependencies through `npx`: it takes a
+while and uses hundreds of MB of disk, and the optional dependency `frida` downloads
+a native binary from GitHub in an install script. The supply-chain notes are in
+`commands/rea.md`.
+
+---
+
 ## References
 
 - context7: <https://github.com/upstash/context7>
