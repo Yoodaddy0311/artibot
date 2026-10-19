@@ -37,10 +37,21 @@
  *
  * `--list` prints every plan limb with its current state (`unknown` when the
  * key is absent or outside the allowlist — the same answer the reader gives).
- * It reads the run.json PROJECTION, which a bound run rewrites from the store
- * on every successful write; it is stale only in the window where a store
- * commit succeeded and the projection failed (the write says so), and the
- * canonical answer for that window is `readWorkerState`, not this table.
+ * It asks `lib/topology/split-state.js#readWorkerState`, the one door for "what
+ * is this worker doing", so the table is the canonical answer for every run:
+ *  - a run that carries no record, or whose record the canary switch is not
+ *    honouring, is answered from `run.json.lanes` exactly as before (a record
+ *    the switch ignores ends the human table with a `binding: disabled` line);
+ *  - a BOUND run with the switch ON is answered from the bound mission's Task
+ *    Graph node, so a store commit whose `run.json` projection did not land
+ *    still lists correctly. Every row then carries `source` (`store` · `run.json`
+ *    · `null`), and a binding that cannot be read (`unread` — no session id or
+ *    the store would not open · `dangling` · `invalid`) falls back to the
+ *    projection AND says so in a `binding:` line. A read never refuses: this is
+ *    a status table, and the writer is the one that exits 1 on a bad binding.
+ *
+ * `listLaneStates` returns the rows; `readLaneStates` also returns the binding
+ * report the footer is made from.
  *
  * ── A run with a `missionBinding` (SH-11) ───────────────────────────────
  * The write goes to the bound mission's Task Graph node (`ops` + `status` in
@@ -76,9 +87,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { isLaneOpsState, LANE_OPS_STATES } from '../../lib/supervisor/contracts.js';
-import { readRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
-import { writeWorkerState } from '../../lib/topology/split-state.js';
+import { isLaneOpsState, LANE_OPS_STATES, LANE_OPS_TO_V11_STATUS } from '../../lib/supervisor/contracts.js';
+import { readPlanJson, readRunJson, windowForLimb } from '../../lib/git/split-run-file.js';
+import { readWorkerState, writeWorkerState } from '../../lib/topology/split-state.js';
+import { BINDING_DISABLED, carriesMissionBinding } from '../../lib/topology/split-state-sources.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { syncLaneLease } from './lane-lease.mjs';
 import { missionBindingEnabled, openFeedStore, sessionIdFromEnv } from './task-feed.mjs';
@@ -89,7 +101,7 @@ export const HELP = `usage: node scripts/split/lane-state.mjs <limb> <state> [--
   <state>            one of: ${LANE_OPS_STATES.join(' | ')}
   --window <session> record the window (session name) alongside the state
   --note <text>      free-form note (why / what is next)
-  --list             print every plan limb with its current ops state
+  --list             print every plan limb with its current ops state (a bound run, key on: from its mission's Task Graph node)
   --json             machine output
 
 Writes run.json.lanes[<limb>] = { state, since, window?, note?, projected_from, updated_at } atomically; every other run.json key is preserved.
@@ -220,27 +232,122 @@ export function setLaneState({ limb, state, window = null, note = null }, opts =
 }
 
 /**
- * Every plan limb with its current ops state (`unknown` when unreadable).
+ * The StateStore a `--list` read of a BOUND run goes through. Asked in the order
+ * that keeps every other run out of it: the plan's own key first, then the canary
+ * switch, and only then a store — so a run with no record never reads config or
+ * opens anything, and a record the switch is not honouring is not consulted
+ * (`readWorkerState` then answers `disabled`, from `run.json`).
  *
- * @param {{ cwd?: string }} [opts]
- * @returns {Array<{ limb: string, state: string, since: string|null, window: string|null, note: string|null }>}
+ * @param {string} parentRoot
+ * @param {object} opts - the `readLaneStates` options
+ * @returns {{ honored: boolean, store: object|null, unread: string|null }} `unread` says why a honoured binding has no store to read
  */
-export function listLaneStates(opts = {}) {
-  const parentRoot = path.resolve(opts.cwd ?? process.cwd());
-  const run = readRunJson(parentRoot);
-  return planLimbs(parentRoot).map((limb) => {
-    const e = currentEntry(run, limb);
-    return { limb, state: e.state ?? 'unknown', since: e.since, window: e.window ?? windowForLimb(run, limb), note: e.note };
-  });
+function storeForRead(parentRoot, opts) {
+  if (!carriesMissionBinding(readPlanJson(parentRoot)) || !missionBindingEnabled(opts)) return { honored: false, store: null, unread: null };
+  try {
+    const store = openBoundStore(parentRoot, opts);
+    return { honored: true, store, unread: store ? null : 'no session id to open the StateStore with' };
+  } catch (err) {
+    return { honored: true, store: null, unread: `opening the StateStore threw: ${err?.message ?? err}` };
+  }
 }
 
-/** Fixed-width table. */
+const textOrNull = (v) => (typeof v === 'string' ? v : null);
+
+/**
+ * The ops word `readWorkerState` reports for one worker, or `unknown`. A lane
+ * entry's own hand-added `ops_state` key rides along in the record next to the
+ * word the reader derived, and would read as a state when the entry's real
+ * `state` is one the allowlist rejects; for `run.json` the v1.1 status derived
+ * from the real word is the witness that tells the two apart.
+ *
+ * @param {object|undefined} w - a `readWorkerState` worker record
+ * @returns {string}
+ */
+function opsWordOf(w) {
+  const word = w?.ops_state;
+  if (!isLaneOpsState(word)) return 'unknown';
+  if (w.source === 'run.json' && LANE_OPS_TO_V11_STATUS[word] !== w.status) return 'unknown';
+  return word;
+}
+
+/**
+ * Every plan limb with its current ops state (`unknown` when unreadable),
+ * answered by `lib/topology/split-state.js#readWorkerState`, plus the binding
+ * report the human footer is made from.
+ *
+ * @param {{ cwd?: string, sessionId?: string|null, openStore?: (root: string, sid: string) => object, config?: object|null }} [opts] - `config` / `sessionId` / `openStore` matter for a run that carries a `missionBinding` only
+ * @returns {{ rows: Array<{ limb: string, state: string, since: string|null, window: string|null, note: string|null, source?: string|null }>, binding: object|null, unread: string|null }} `source` is on every row exactly when `binding` is a report other than `disabled`; `binding` is `null` for a run that carries no record
+ */
+export function readLaneStates(opts = {}) {
+  const parentRoot = path.resolve(opts.cwd ?? process.cwd());
+  const limbs = planLimbs(parentRoot);
+  const run = readRunJson(parentRoot);
+  const bound = storeForRead(parentRoot, opts);
+  const ask = (store) => readWorkerState({
+    runDir: path.join(parentRoot, '.artibot', 'split'),
+    ...(store ? { store } : {}),
+    honorBinding: () => bound.honored,
+  });
+  let read;
+  let unread = bound.unread;
+  try {
+    read = ask(bound.store);
+  } catch (err) {
+    // A store that throws WHEN READ (a locked or damaged journal) must not take the status table with it: the
+    // projection answers and the footer says why. A throw that is not the store's (a damaged run.json) recurs
+    // in the retry below and stays loud.
+    if (!bound.store) throw err;
+    unread = `reading the StateStore threw: ${err?.message ?? err}`;
+    read = ask(null);
+  }
+  const binding = read.binding ?? null;
+  const showSource = binding !== null && binding.status !== BINDING_DISABLED.status;
+  const rows = limbs.map((limb) => {
+    const w = read.workers[limb];
+    const row = { limb, state: opsWordOf(w), since: textOrNull(w?.since), window: textOrNull(w?.window) ?? windowForLimb(run, limb), note: textOrNull(w?.note) };
+    return showSource ? { ...row, source: w?.source ?? null } : row;
+  });
+  return { rows, binding, unread };
+}
+
+/**
+ * Every plan limb with its current ops state (`unknown` when unreadable).
+ *
+ * @param {Parameters<typeof readLaneStates>[0]} [opts]
+ * @returns {ReturnType<typeof readLaneStates>['rows']}
+ */
+export function listLaneStates(opts = {}) {
+  return readLaneStates(opts).rows;
+}
+
+/** Fixed-width table; a `source` column appears only when the rows carry one. */
 function renderTable(rows) {
-  const cols = ['limb', 'state', 'since', 'window', 'note'];
+  const cols = ['limb', 'state', 'since', 'window', 'note', ...(rows.some((r) => 'source' in r) ? ['source'] : [])];
   const cell = (r, c) => String(r[c] ?? '-');
   const widths = Object.fromEntries(cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => cell(r, c).length))]));
   const line = (r) => cols.map((c) => cell(r, c).padEnd(widths[c])).join('  ').trimEnd();
   return [line(Object.fromEntries(cols.map((c) => [c, c]))), ...rows.map(line)].join('\n');
+}
+
+/**
+ * The line under the table when the binding is anything but healthy: where the
+ * rows came from, so a run.json projection is never read as the canonical node.
+ *
+ * @param {object|null} binding - `readWorkerState`'s `binding` report
+ * @param {string|null} unread - why a honoured binding had no store
+ * @returns {string} `''` for a run with no record or a healthy binding, else one line ending in a newline
+ */
+function bindingFooter(binding, unread) {
+  if (binding === null || binding.status === 'bound') return '';
+  const behind = 'rows are the run.json projection and may be behind the store';
+  const lines = {
+    disabled: 'binding: disabled (the record in plan.json is not consulted: the canary key is not a literal true) - rows are the run.json lanes',
+    unread: `binding: unread (${unread ?? 'the StateStore was not read'}) - ${behind}`,
+    dangling: `binding: dangling (mission ${binding.mission_id} is not in the StateStore) - ${behind}`,
+    invalid: `binding: invalid (${binding.reason}) - ${behind}`,
+  };
+  return `${lines[binding.status] ?? `binding: ${binding.status} - ${behind}`}\n`;
 }
 
 /**
@@ -283,8 +390,8 @@ export function main(argv, opts = {}) {
   }
   try {
     if (args.list) {
-      const rows = listLaneStates(opts);
-      out(args.json ? `${JSON.stringify(rows, null, 2)}\n` : `${renderTable(rows)}\n`);
+      const { rows, binding, unread } = readLaneStates(opts);
+      out(args.json ? `${JSON.stringify(rows, null, 2)}\n` : `${renderTable(rows)}\n${bindingFooter(binding, unread)}`);
       return 0;
     }
     if (!args.limb || !args.state) {

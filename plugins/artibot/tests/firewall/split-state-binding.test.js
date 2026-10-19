@@ -308,7 +308,7 @@ const PRODUCTION_ROOTS = Object.freeze(['lib', 'scripts']);
  */
 const SWITCHED_CALLS = Object.freeze({
   writeWorkerState: Object.freeze(['scripts/split/lane-state.mjs']),
-  readWorkerState: Object.freeze([]),
+  readWorkerState: Object.freeze(['scripts/split/lane-state.mjs']),
   resolveRunMission: Object.freeze(['scripts/split/lane-lease.mjs', 'scripts/split/task-feed.mjs']),
 });
 
@@ -487,6 +487,10 @@ describe('SH-11 switch gate — the scanners can say "1 hit" (a mutated copy goe
     const write = callSites(read('scripts/split/lane-state.mjs'), 'writeWorkerState');
     expect(write).toHaveLength(1);
     expect(write[0].args).toMatch(/\bhonorBinding\b/);
+    // `lane-state --list` is the one production reader (SH-11): it carries the port too.
+    const list = callSites(read('scripts/split/lane-state.mjs'), 'readWorkerState');
+    expect(list).toHaveLength(1);
+    expect(list[0].args).toMatch(/\bhonorBinding\b/);
     // The declaration in task-feed.mjs is not a call, so exactly the one real call remains.
     expect(callSites(read('scripts/split/task-feed.mjs'), 'resolveRunMission')).toHaveLength(1);
     expect(callSites(read('scripts/split/lane-lease.mjs'), 'resolveRunMission')).toHaveLength(1);
@@ -498,6 +502,23 @@ describe('SH-11 switch gate — the scanners can say "1 hit" (a mutated copy goe
     expect(mutated).not.toBe(src);
     const [site] = callSites(mutated, 'writeWorkerState');
     expect(site.args).not.toMatch(/\bhonorBinding\b/);
+  });
+
+  it('a read without the port is reported: the port removed from the real lane-state readWorkerState call', () => {
+    const src = read('scripts/split/lane-state.mjs');
+    const mutated = src.replace(/honorBinding: \(\) => bound\.honored,/, '');
+    expect(mutated).not.toBe(src);
+    const [site] = callSites(mutated, 'readWorkerState');
+    expect(site.args).not.toMatch(/\bhonorBinding\b/);
+  });
+
+  it('lane-state --list asks the plan\'s own key, then the canary switch, then opens a store — in that order, and a store only for a run that passed both', () => {
+    const body = functionBody(read('scripts/split/lane-state.mjs'), 'storeForRead');
+    expect(body, 'storeForRead must exist').not.toBeNull();
+    const at = (needle) => body.indexOf(needle);
+    expect(at('carriesMissionBinding(')).toBeGreaterThan(-1);
+    expect(at('carriesMissionBinding(')).toBeLessThan(at('missionBindingEnabled(opts)'));
+    expect(at('missionBindingEnabled(opts)')).toBeLessThan(at('openBoundStore('));
   });
 
   it('a fourth caller is reported by the list: a namespace call in a new file is a call', () => {

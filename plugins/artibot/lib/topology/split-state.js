@@ -85,9 +85,9 @@
  *    port — a bound write's `worker.claimed` / `task.released` therefore still
  *    skips as `skipped:no-port` / `skipped:missing:<key>`, and the store's own
  *    `state.updated` is the only line a bound lane write adds to the ledger.
- *    The read has no production caller at all: no CLI, hook or middleware calls
- *    `readWorkerState`, so "canonical reads take the store from the binding" is
- *    measured by `tests/topology/split-state.test.js`, not by live traffic.
+ *    The read has ONE production caller, `scripts/split/lane-state.mjs` (`--list`;
+ *    no hook or middleware calls it), so "canonical reads take the store from the
+ *    binding" is measured by tests, not by live traffic (no live run is bound).
  *    Whether the leader's `lane-state` child process sees the session id the
  *    store needs is a host fact — measured for a Bash tool call on 2026-09-21
  *    (Wave 16), not re-measured for this path.
