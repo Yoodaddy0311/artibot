@@ -1,7 +1,7 @@
 ---
 description: (Artibot) REA(Reverse Engineer Anything)로 바이너리·Electron/JS 앱·APK·펌웨어·브라우저 대상을 역공학 조사 — 업스트림 morluto/rea 스킬을 그대로 따른다. 이중 용도 도구라 합법·허가된 분석에만 쓴다. REA MCP 가 연결돼 있지 않으면 업스트림 setup 절차(진단, dry-run, 사용자 승인, 적용, 재시작)로 안내한다
 argument-hint: '<조사할 앱·바이너리·폴더 경로 또는 알고 싶은 것>'
-allowed-tools: [Read, Bash(node --version), Bash(npx -y rea-agents@6.7.0 doctor:*), Bash(npx -y rea-agents@6.7.0 setup --client claude_code --dry-run:*), mcp__rea]
+allowed-tools: [Read, Bash(node --version), Bash(npx -y rea-agents@6.7.0 doctor --client claude_code --json), Bash(npx -y rea-agents@6.7.0 setup --client claude_code --dry-run --json)]
 ---
 
 # /rea
@@ -22,7 +22,7 @@ REA(Reverse Engineer Anything, morluto/rea, MIT)로 앱·바이너리를 역공�
 
 1. 스킬을 Read 한다: `${CLAUDE_PLUGIN_ROOT}/vendor/rea/skill/SKILL.md` (호스트가 이 커맨드를 불러올 때 플러그인 경로를 채워 넣는다). 변수 참조가 그대로 보이거나 파일이 없으면 `rea setup` 이 설치한 사본 — 홈 폴더의 `.claude/skills/reverse-engineer-anything/SKILL.md` — 을 Read 한다(같은 내용). 둘 다 없으면 연결된 서버의 툴 목록과 입력 스키마를 따르고, 스킬을 읽지 못했다고 알린다.
 2. SKILL.md 가 시키는 대로 `$ARGUMENTS` 를 조사한다. 문구를 고치거나 요약으로 갈음하지 않는다. SKILL.md 가 가리키는 `references/*.md` 는 SKILL.md 와 같은 폴더에서, 해당 주제가 나올 때만 Read 한다.
-3. 대상 프로그램 실행·런타임 관찰·장치 조작은 사용자가 요청한 범위 안에서만, 실행 전에 한 번 확인한다. 이 커맨드는 `mcp__rea` 를 사전 승인 목록에 두므로 호스트의 승인 프롬프트가 생략될 수 있다 — 그 몫까지 사용자 확인이 채워야 한다.
+3. 대상 프로그램 실행·런타임 관찰·장치 조작은 사용자가 요청한 범위 안에서만 한다. REA 툴 호출은 업스트림과 같이 호스트 권한 확인을 거친다 — 이 커맨드는 REA 툴을 사전 승인하지 않는다.
 
 ## 3. 연결돼 있지 않을 때 — 업스트림 절차 그대로
 

@@ -13,8 +13,10 @@
  *   4. license      LICENSE is the MIT text and UPSTREAM.json says MIT.
  *   5. hidden text  no zero-width / bidi / tag characters in the vendored text.
  *   6. attributes   .gitattributes keeps `-text` on the tree (see below).
- *   7. rea.md       its pre-approved Bash patterns and its fenced commands stay
- *                   inside the set ADR-014 allows (allowlist; see checkCommand).
+ *   7. rea.md       what its allowed-tools pre-approves and which commands it
+ *                   fences stay inside the set ADR-014 allows: exact read-only
+ *                   command strings (no `*` or `:*` wildcard, no MCP tool), each
+ *                   one a fenced command verbatim (allowlist; see checkCommand).
  *
  * Every check is a pure function of a tree on disk, so each is also run on a temp
  * copy with the bytes tampered DIRECTLY (not through git or a checkout): a check
@@ -37,6 +39,11 @@
  *  - Prose. Check 7 pins the commands and tool patterns rea.md may run, not what
  *    its sentences say. "Ask before --yes" is a sentence; only the order of the
  *    fenced lines and the absence of `--yes` in allowed-tools are enforced.
+ *  - What the host does with everything NOT pre-approved. allowed-tools is a grant
+ *    (Claude Code docs: it "does not restrict which tools are available"; the
+ *    installed 2.1.303 puts it in alwaysAllowRules.command), so REA's tools, `--yes`
+ *    and any other command fall to the normal permission prompt. That is documented
+ *    and read from the binary, not exercised by this suite.
  *  - The live engine. Nothing here runs npx or talks to the registry.
  *
  * @module tests/vendor/rea-vendor
@@ -178,11 +185,23 @@ const FENCED_ALLOWED = [
   /^npx -y rea-agents@\d+\.\d+\.\d+ setup --client claude_code --yes$/,
   /^npx -y rea-agents@\d+\.\d+\.\d+ analyze-javascript-application <[^>\s]+> --json$/,
 ];
-const BASH_ALLOWED = [
+/**
+ * What rea.md may pre-approve in allowed-tools. That field is a GRANT, not a limit
+ * (Claude Code docs: it "does not restrict which tools are available"): whatever is
+ * listed runs without a permission prompt, everything else prompts. So the list is
+ * the exact set of read-only commands, written as whole strings. A rule with no `*`
+ * matches ONE command; a prefix rule (`:*` or a trailing `*`) also approves whatever
+ * is appended to it, e.g. `--dry-run --no-dry-run --yes`, and REA reads untrusted
+ * targets, so a prompt-injected target could use that gap. No MCP tool is listed:
+ * REA's tools go through the host permission prompt, exactly as upstream's do.
+ */
+const TOOLS_ALLOWED = [
+  /^Read$/,
   /^Bash\(node --version\)$/,
-  /^Bash\(npx -y rea-agents@\d+\.\d+\.\d+ doctor:\*\)$/,
-  /^Bash\(npx -y rea-agents@\d+\.\d+\.\d+ setup --client claude_code --dry-run:\*\)$/,
+  /^Bash\(npx -y rea-agents@\d+\.\d+\.\d+ doctor --client claude_code --json\)$/,
+  /^Bash\(npx -y rea-agents@\d+\.\d+\.\d+ setup --client claude_code --dry-run --json\)$/,
 ];
+const MCP_REASON = ' (REA tools go through the host permission prompt, as upstream)';
 
 function allowedTools(text) {
   const m = /^allowed-tools:\s*\[(.*)\]\s*$/m.exec(lf(text));
@@ -206,11 +225,16 @@ function checkCommand(text) {
   const problems = [];
   const tools = allowedTools(text);
   if (tools === null) return { problems: ['allowed-tools is not an inline [..] list'], tools: [], fenced: [] };
-  if (!tools.includes('mcp__rea')) problems.push('allowed-tools lacks mcp__rea');
-  for (const tool of tools.filter((t) => t.startsWith('Bash'))) {
-    if (!BASH_ALLOWED.some((re) => re.test(tool))) problems.push(`allowed-tools pre-approves ${tool}`);
-  }
   const fenced = fencedCommandLines(text);
+  for (const tool of tools) {
+    if (!TOOLS_ALLOWED.some((re) => re.test(tool))) {
+      problems.push(`allowed-tools pre-approves ${tool}${tool.startsWith('mcp__') ? MCP_REASON : ''}`);
+      continue;
+    }
+    // A pre-approved npx command is a fenced command verbatim, so the grant cannot drift from the doc.
+    const inner = /^Bash\((npx .+)\)$/.exec(tool)?.[1];
+    if (inner !== undefined && !fenced.includes(inner)) problems.push(`pre-approved command is not a fenced command verbatim: ${inner}`);
+  }
   for (const line of fenced) {
     if (!FENCED_ALLOWED.some((re) => re.test(line))) problems.push(`fenced command not on the allowlist: ${line}`);
   }
@@ -305,10 +329,13 @@ describe('rea-vendor / live tree', () => {
     expect(checkAttributes(rd(LIVE.attributesFile)).problems).toEqual([]);
   });
 
-  it('7. rea.md pre-approves only read-only commands and fences only allowlisted ones', () => {
+  it('7. rea.md pre-approves only exact read-only commands (no wildcard, no MCP tool) and fences only allowlisted ones', () => {
     const r = checkCommand(rd(LIVE.commandFile));
     expect(r.problems).toEqual([]);
-    expect(r.tools.length).toBeGreaterThan(2);
+    expect(r.tools).toContain('Read');
+    expect(r.tools.filter((t) => t.startsWith('mcp__'))).toEqual([]);
+    expect(r.tools.filter((t) => t.includes('*'))).toEqual([]);
+    expect(r.tools.filter((t) => t.startsWith('Bash(npx '))).toHaveLength(2);
     expect(r.fenced.length).toBeGreaterThanOrEqual(3);
   });
 });
@@ -496,8 +523,55 @@ describe('rea-vendor / negative controls', () => {
       }
     });
 
-    it('dropping mcp__rea from allowed-tools is red', () => {
-      expect(addedText(checkCommand, live(), live().replace(/, mcp__rea\b/, ''))).toEqual(['allowed-tools lacks mcp__rea']);
+    it('a prefix rule is red, including the old doctor and dry-run forms (the appended-flags hole)', () => {
+      for (const tool of [
+        `Bash(npx -y rea-agents@${version()} doctor:*)`,
+        `Bash(npx -y rea-agents@${version()} setup --client claude_code --dry-run:*)`,
+        `Bash(npx -y rea-agents@${version()} doctor --client claude_code --json:*)`,
+        `Bash(npx -y rea-agents@${version()} doctor --client claude_code --json *)`,
+        `Bash(npx -y rea-agents@${version()} setup --client claude_code --dry-run --json *)`,
+        'Bash(node --version *)',
+        'Bash(node *)',
+      ]) {
+        expect(addedText(checkCommand, live(), withTool(live(), tool)), tool).toEqual([`allowed-tools pre-approves ${tool}`]);
+      }
+    });
+
+    it('an exact string with something appended is red (--no-dry-run --yes smuggled behind --dry-run)', () => {
+      for (const tool of [
+        `Bash(npx -y rea-agents@${version()} setup --client claude_code --dry-run --no-dry-run --yes)`,
+        `Bash(npx -y rea-agents@${version()} setup --client claude_code --dry-run --json --yes)`,
+        `Bash(npx -y rea-agents@${version()} setup --client claude_code --dry-run --yes --json)`,
+        `Bash(npx -y rea-agents@${version()} doctor --client claude_code --json --fix)`,
+        `Bash(npx -y rea-agents@${version()} doctor --client codex --json)`,
+        `Bash(npx -y rea-agents@latest doctor --client claude_code --json)`,
+      ]) {
+        expect(addedText(checkCommand, live(), withTool(live(), tool)), tool).toEqual([`allowed-tools pre-approves ${tool}`]);
+      }
+    });
+
+    it('an MCP tool in allowed-tools is red: REA tools keep the host permission prompt, as upstream', () => {
+      for (const tool of ['mcp__rea', 'mcp__rea__open_binary', 'mcp__rea__*']) {
+        const added = addedText(checkCommand, live(), withTool(live(), tool));
+        expect(added, tool).toHaveLength(1);
+        expect(added[0], tool).toMatch(new RegExp(`^allowed-tools pre-approves ${tool.replace(/[*]/g, '\\*')} \\(REA tools go through the host permission prompt`));
+      }
+      // the original form of this entry, put back at the end of the live list, is red too
+      expect(addedText(checkCommand, live(), live().replace(/\]\n/, ', mcp__rea]\n'))).toHaveLength(1);
+    });
+
+    it('any tool nobody listed is red, not only Bash and MCP (Write, Edit, Glob, Agent)', () => {
+      for (const tool of ['Write', 'Edit', 'Glob', 'Agent', 'WebFetch']) {
+        expect(addedText(checkCommand, live(), withTool(live(), tool)), tool).toEqual([`allowed-tools pre-approves ${tool}`]);
+      }
+    });
+
+    it('a pre-approved npx command that is not a fenced command verbatim is red', () => {
+      const text = live();
+      const doctor = `npx -y rea-agents@${version()} doctor --client claude_code --json`;
+      const withoutFence = text.split('\n').filter((l) => l.trim() !== doctor).join('\n');
+      expect(withoutFence).not.toBe(text);
+      expect(addedText(checkCommand, text, withoutFence)).toEqual([`pre-approved command is not a fenced command verbatim: ${doctor}`]);
     });
 
     it('a fenced command outside the allowlist is red (update, uninstall, another client, a pipe)', () => {
@@ -518,12 +592,23 @@ describe('rea-vendor / negative controls', () => {
       const text = live();
       const dry = `npx -y rea-agents@${version()} setup --client claude_code --dry-run --json`;
       const yes = `npx -y rea-agents@${version()} setup --client claude_code --yes`;
-      const swapped = text.replace(dry, '@@DRY@@').replace(yes, dry).replace('@@DRY@@', yes);
+      // The dry-run command also sits in allowed-tools, so swap whole FENCE lines, not the first match.
+      const lines = text.split('\n');
+      const at = (cmd) => lines.findIndex((l) => l.trim() === cmd);
+      expect(at(dry)).toBeGreaterThan(-1);
+      expect(at(yes)).toBeGreaterThan(at(dry));
+      const swappedLines = [...lines];
+      [swappedLines[at(dry)], swappedLines[at(yes)]] = [lines[at(yes)], lines[at(dry)]];
+      const swapped = swappedLines.join('\n');
       expect(swapped).not.toBe(text);
       expect(addedText(checkCommand, text, swapped)).toEqual(['--dry-run must come before --yes']);
-      const noDry = text.replace(`${dry}\n`, '');
+      // With the dry-run fence line gone, its pre-approval no longer matches a fenced command either.
+      const noDry = lines.filter((l) => l.trim() !== dry).join('\n');
       expect(noDry).not.toBe(text);
-      expect(addedText(checkCommand, text, noDry)).toEqual(['--dry-run must come before --yes']);
+      expect(addedText(checkCommand, text, noDry)).toEqual([
+        `pre-approved command is not a fenced command verbatim: ${dry}`,
+        '--dry-run must come before --yes',
+      ]);
     });
 
     it('allowed-tools that is not an inline list is red instead of skipped', () => {
