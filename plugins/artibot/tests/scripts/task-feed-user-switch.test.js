@@ -129,7 +129,10 @@ describe('readUserBindingSwitch — absent, set, or unusable', () => {
   it('the default location is the artibot state directory ROOT — the directory the model-routing overrides use, not the plugin root', () => {
     expect(userBindingSwitchPath()).toBe(path.resolve(resolveArtibotDir(), USER_BINDING_SWITCH_FILE));
     expect(path.dirname(userBindingSwitchPath())).toBe(path.resolve(resolveArtibotDir()));
-    expect(path.relative(PLUGIN_ROOT, userBindingSwitchPath()).startsWith('..')).toBe(true);
+    // Outside the plugin root. Another drive (CI: checkout on D:, temp on C:) has no relative path, so path.relative
+    // returns the ABSOLUTE target there and `..` alone would call that "inside" -- same idiom as split-state-sources.test.js.
+    const rel = path.relative(PLUGIN_ROOT, userBindingSwitchPath());
+    expect(rel.startsWith('..') || path.isAbsolute(rel)).toBe(true);
     expect(path.basename(userBindingSwitchPath())).not.toBe('artibot.config.json'); // the one name the installers overwrite there
   });
 
