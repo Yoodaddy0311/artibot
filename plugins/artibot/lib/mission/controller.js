@@ -244,35 +244,6 @@ export function composeControllerMutator(base, { sessionId, now, ttlMs } = {}) {
 }
 
 /**
- * Say what a LATER stage could do about an observation. Recommends nothing
- * unless the caller opts in, and applies nothing in either case.
- *
- * OFF BY DEFAULT, and `null` rather than a "no action" record, because the two
- * are different claims: `null` says nobody asked, while `{reclaimable: false}`
- * says the question was put and the answer was no. Reclaim itself belongs to
- * CA-09, so nothing here writes a status, touches a lease or reads a clock —
- * the arguments are the whole input and a frozen record is the whole output.
- *
- * @param {unknown} observation - One of {@link CONTROLLER_OBSERVATIONS}.
- * @param {object} [options] - Caller opt-in.
- * @param {boolean} [options.enabled=false] - Literal `true` to get an answer. A
- *   merely truthy value is not enough: a gate that opens on `'no'` or `1` is a
- *   gate that opens by accident.
- * @returns {{observation: string, reclaimable: boolean}|null} A frozen
- *   recommendation, or `null` when switched off or handed an unknown word.
- * @example
- * recommendControllerTransition('expired'); // null — nobody asked
- * recommendControllerTransition('expired', { enabled: true }).reclaimable; // true
- */
-export function recommendControllerTransition(observation, { enabled = false } = {}) {
-  if (enabled !== true) return null;
-  if (!CONTROLLER_OBSERVATIONS.includes(observation)) return null;
-  // Only a lapsed claim is reclaimable. `held` deliberately is not: a live lease
-  // is the one case where taking the slot would destroy live evidence.
-  return Object.freeze({ observation, reclaimable: observation === 'expired' });
-}
-
-/**
  * Count controller coverage across a project-state snapshot.
  *
  * Ratios over an empty denominator are `null`, never 0 — the same rule as
