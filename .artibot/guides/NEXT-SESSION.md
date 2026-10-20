@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.10** — v4.71.9 이후 15 커밋(내용 13 · 문서 2) + 릴리스 커밋: `/rea`(명령 80 → 81) · SH-11 사용자 스위치 · lease-tick store-only · 테스트 게이트 3종 allowlist · master = 태그 대상 `c7ba5138` · 이 PC 설치 4.71.10(재시작 전, 로드 미확인))
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-20 KST 갱신, **v4.71.11** — v4.71.10 이후 9 커밋(내용 6 · 문서 3) + 릴리스 커밋: 훅 쓰기 8곳의 `ARTIBOT_STATE_DIR` 리졸버 이전 · 읽기 추적 임시파일 정리 · `/rea` 증거 view-request 헬퍼 · master = 태그 대상 `f33430eb` · 이 PC 설치 4.71.11(재시작 전, 로드 미확인))
+
+> 이전 헤더(2026-10-19, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.10** — v4.71.9 이후 15 커밋(내용 13 · 문서 2) + 릴리스 커밋: `/rea`(명령 80 → 81) · SH-11 사용자 스위치 · lease-tick store-only · 테스트 게이트 3종 allowlist · master = 태그 대상 `c7ba5138` · 이 PC 설치 4.71.10(재시작 전, 로드 미확인))
 
 > 이전 헤더(2026-10-19, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.9** — v4.71.8 이후 8 커밋(내용 3) + 릴리스 커밋: 2026-10-14 컴팩트 정리(doctor Check 10 옛 충돌 분리 · `workflow-status` 비배열 거부 · `team-idle-handler` 정리 · `/task clear`) · master = 태그 `2e14407b` · 이 PC 설치 4.71.9(재시작 전, 로드 미확인) · 태그 뒤 master 에 v5 4줄기(`ead76030`)와 `/rea` 가 착지, 다음 릴리스에 실린다)
 
@@ -15,6 +17,31 @@
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## v4.71.11 (2026-10-20 KST, 리더 실측)
+
+### 출하 결과
+
+- 릴리스 커밋 `f33430eb release: v4.71.11`, 주석 태그 `v4.71.11`(태그 객체 `9c00dbb2`). v4.71.10 이후 9 커밋(내용 6 · 문서 3) + 릴리스 커밋이고, 9 커밋의 범위는 36 files +3,026/−84(`git diff --shortstat v4.71.10 d969ee64`)이다. 내용은 둘이다. 하나는 훅이 `ARTIBOT_STATE_DIR` 를 받고도 실제 `~/.claude` 에 쓰던 여덟 곳을 리졸버로 옮기고 쌓이던 읽기 추적 임시파일을 정리하게 한 것(CHANGELOG 「`ARTIBOT_STATE_DIR`」 세 항목)이고, 다른 하나는 `/rea` 의 증거 view-request 헬퍼와 벤더 게이트 강화(`2459c624`·`af669c80`)다.
+- 사전 트리 `d969ee64` 의 CI 두 런(ci 브랜치 · master push)이 같은 값을 냈다. Ubuntu Node 20 · 22 · 24 세 레그 모두 `Tests 27820 passed | 47 skipped (27867)`(921 파일) → N = 27,867, Windows 레그 `Tests 27868 passed | 22 skipped (27890)`. 릴리스 커밋(`ci/release-4-71-11` @ `f33430eb`)의 check-run 7개는 전부 success.
+- release.yml 런 39393958534: Validate before release · Create GitHub Release · Sync README badges 3잡 success. GitHub Release "Artibot v4.71.11" 공개(2026-10-20T08:35:25Z, draft·prerelease 아님). 동기화 잡이 `Counted test cases: 27867` 과 「metadata already in sync」「README count prose already in sync」를 냈고 봇 커밋은 0이다(master 는 `f33430eb` 그대로). 새 badge-sync 브랜치·열린 이슈 0. `ci/release-4-71-11` 은 삭제했다.
+- 로컬에서 전체 `npm run ci` 는 돌리지 않았다(CI 가 정본이고, 릴리스 커밋은 버전 문자열·수치·CHANGELOG/README 산문만 바꾼다). 로컬 게이트는 release-check · sync-marketplace-meta --check · sync-readme-claims --check · validate-readme-claims --full · validate-model-policy 모두 exit 0, pre-push 10종은 ci 푸시 25 s · master 푸시 29 s · 태그 푸시 27 s 에 통과했다.
+
+### 설치 (이 PC)
+
+- 마켓 사본 ff(`c7ba5138` → `f33430eb`, clean · 조상 확인) → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot`(4.71.10 → 4.71.11) → `bash plugins/artibot/install.sh files`. installed_plugins.json artibot@artibot 4.71.11, gitCommitSha `f33430eb`. 캐시의 `plugins/artibot` 추적 파일 2,102개를 릴리스 커밋과 git blob sha 로 대조했다: 원본 일치 15 + CRLF 정규화 일치 2,087 + 누락 0 + 상이 0. 전역 복사본 `~/.claude/artibot` 의 코드 디렉터리와 루트 3파일 907개도 정규화 일치 907 · 누락 0 · 상이 0 이고 `package.json` 은 4.71.11 이다(상태줄 버전 출처). 옛 캐시 4.71.10 은 orphaned 로 병존한다. 재시작 전이라 로드는 미확인이다.
+- 알아 둘 것 둘. (1) 이 PC 의 `installPath` 가 Orca 프로필 junction 경로(`...\claude-profiles\<id>\home\plugins\cache\artibot\artibot\4.71.11`, 같은 디렉터리)로 기록됐다. 기능에는 영향이 없지만 그 프로필을 지우면 프로필 밖 세션에서 경로가 끊긴다. (2) `install.sh files` 는 오너가 고친 규칙 4개(agent-coordination · dev-protocol · question-recommendations · verification-discipline)를 덮지 않고 새 버전을 `.artibot-new` 로 옆에 뒀다. 병합은 오너 몫이다.
+
+### 다른 PC 에서 할 일
+
+① `git pull` → ② 설치 4.71.11(마켓 사본 ff → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot` → `bash plugins/artibot/install.sh files`; `npm run sync:local`·`npm run release` 금지) → ③ 재시작 후 상태줄 ⟨v4.71.11⟩ 확인.
+
+### 다음 할 일
+
+- v4.71.10 절의 「다음 할 일」(상태줄 확인 · `/rea` 실기 · 다음 /split 웨이브 W-1~W-5 · V5-BACKLOG 정정)은 그대로 유효하다.
+- **SessionStart 예산(결정 필요)**: 이 PC 에서 vitest 가 도는 동안 SessionStart 디스패처를 8번 돌리자 8번 모두 `session-start` · `memory-tracker`(5000 ms)가 끊겼고(`session-digest` 3000 ms 7번, `git-autopilot-setup` 5000 ms 6번도) 산출물은 0이었다. 조용할 때는 1.7~2.2 s, CPU 를 1개로 묶어도 4.1 s·타임아웃 0 이라 코어 수보다 디스크·프로세스 생성 경합으로 보이나 분해하지 않았다. 부하 중에 시작한 세션은 시작 배너와 마커를 잃는다. 선택지는 예산 상향(슬롯 30 s − 헤드룸 3 s 안에서, `hook-timeout-budget` 방화벽 테스트가 선언 예산을 검사한다)과 기동 비용 절감이다.
+- `tool-tracker` 의 반복 호출 감지가 실제로 발동하는지는 미확인이다. 호출마다 새 프로세스라 이력 저장 조건(루프 감지 또는 한 프로세스 안의 10번째 호출)이 코드상 충족되기 어렵고, 이 PC 의 실제 `~/.claude/artibot/loop-state.json` 이 없다(2026-10-20 측정). 이번 릴리스는 경로만 옮겼다.
+- 로컬 PoC 브랜치 `Yoodaddy0311/check-promptfoo-artibot-eval`(이 PC comber worktree, 푸시 안 함): `evals/promptfoo` 44파일, 커밋 6개 + master 병합 1개. 하네스 오프라인 게이트 7개 래퍼 34/34(`%TEMP%\pf\run` 에 js-yaml · nunjucks 두 패키지만 설치; promptfoo 본체는 지웠고 라이브 실행에는 `promptfoo@0.124.1` 재설치가 필요하다 — 고정 lockfile 은 함께 지워져 같은 705개 트리를 정확히 복원할 수는 없다). 본 평가(30행, 약 $6~7 추정)와 푸시 여부는 오너 결정이다.
 
 ## v4.71.10 (2026-10-19 KST, 리더 실측)
 
