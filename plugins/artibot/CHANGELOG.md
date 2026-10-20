@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.11] — 2026-10-20
+
+`v4.71.10`(`c7ba5138`) 이후 9 커밋 = **36 files +3,026/−84**(`git rev-list --count v4.71.10..d969ee64` · `git diff --shortstat v4.71.10 d969ee64`, 2026-10-20 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `25ac42ff`(v4.71.10 출하 결과 기록)·`c57e9c2f`·`af525ec7`(CHANGELOG 문구 정정) 3개는 문서 커밋이다. 내용은 둘이다. 하나는 훅이 `ARTIBOT_STATE_DIR` 를 받고도 실제 `~/.claude` 에 쓰던 여덟 곳을 리졸버로 옮긴 것(아래 `ARTIBOT_STATE_DIR` 세 항목). 다른 하나는 `/rea` 의 증거 view-request 헬퍼와 벤더 게이트 강화(`2459c624`·`af669c80`, 아래 첫 항목 — 이 두 커밋은 [Unreleased] 에 항목이 없어 릴리스에서 적었고, 커밋 메시지와 그 테스트에 근거한다). 테스트는 27,649 → 27,867(Ubuntu 3레그, 릴리스 직전 트리 `d969ee64` 의 CI 두 런이 같은 값). 알려진 한계(고치지 않음): 이 PC 에서 vitest 가 도는 동안 SessionStart 디스패처를 8번 돌렸더니 8번 모두 `session-start`·`memory-tracker`(5000 ms 예산)가 시간 초과로 끊겼다(조용할 때 1.7~2.2 s, CPU 를 1개로 묶으면 4.1 s·시간 초과 0). 부하 중에 시작한 세션은 시작 배너와 마커를 잃을 수 있다.
+
+### `/rea` — 증거 view-request 헬퍼와 벤더 게이트 강화 (2026-10-20)
+
+- **`scripts/rea/make-view-request.mjs`(새 파일)**: REA 증거 파일을 view-request 파일로 바꾼다. POSIX 에서는 소유자 전용 권한이고, JSON 은 바이트 그대로 복사하며, 이미 있는 요청 파일은 먼저 지워 권한(0600)이 덮어쓰기에도 적용되고, 요청 경로가 디렉터리면 종료 코드 1 이다. `commands/rea.md` 는 Read 허용을 홈의 스킬 사본으로 좁히고 웹 흐름과 증거 view-request 단계를 적었다.
+- **`scripts/vendor/sync-rea.mjs`**: 정확한 ustar magic, 대소문자 충돌 검사, 맨 `npx rea-agents`(고정되지 않은 지정자) 거부 게이트를 더했고, 일반 `@latest` 거부도 그대로 둔다(`af669c80` 이 새 게이트가 옛 검사를 대체하며 생긴 구멍을 다시 막았다). 실행기 정규식은 `-` 플래그 토큰 하나만 쓰도록 바꿔 `--` 플래그가 길게 이어져도 지수적 역추적을 하지 않는다(150개 플래그 창 케이스를 자식 프로세스와 시간 제한으로 시험). 한계: 512자 `BEFORE_WINDOW` 사각과, Check 8 이 backtick 으로 감싼 `/rea` 만 본다는 점은 문서화하고 시험으로 고정했다. 이 항목은 커밋 메시지와 테스트에 근거하며, 릴리스 준비에서 `/rea` 를 실행해 보지는 않았다.
+
 ### `ARTIBOT_STATE_DIR` 마무리 — 홈에서만 경로를 만들던 마지막 훅 출력 두 곳 (2026-10-20)
 
 - **리졸버를 거치지 않던 쓰기 두 곳**: `scripts/hooks/post-compact-rehydrate.js` 가 쓰는 `~/.claude/artibot-post-compact.json` 과 `~/.claude/artibot/post-compact/<stamp>.md` 는 이제 `lib/core/hook-utils.js#getPostCompactPath`·`getPostCompactDir` 로 경로를 정한다(출하값 `split.contextLifecycle.enabled=false` 라 게이트를 켠 세션만 썼다). `scripts/hooks/tool-tracker.js` 의 `loop-state.json`(루프 감지기 이력)은 쓰고 읽을 때마다 `resolveArtibotDir()` 로 경로를 묻는다. 홈과 짝지은 `ARTIBOT_STATE_DIR` 일 때만 경로가 바뀌고, override 가 없거나 다른 홈용이거나 기본 위치를 가리키면 예전 경로 그대로다. `getStatePath`·`getPreCompactPath`·`getPostCompactPath` 는 "리다이렉트인가" 판정을 비공개 함수 하나로 공유한다(동작은 같고 기존 경로 테스트가 그대로 통과한다).

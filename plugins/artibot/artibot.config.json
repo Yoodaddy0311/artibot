@@ -1,5 +1,5 @@
 {
-  "version": "4.71.10",
+  "version": "4.71.11",
   "devProtocol": {
     "verifyMode": "advisory",
     "writeGuardMode": "block",
