@@ -7,7 +7,8 @@
 
 import path from 'node:path';
 import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { getHomeDir, normalizeDirPath } from './platform.js';
+import { resolveArtibotDir } from './config.js';
+import { getHomeDir, normalizeDirPath, sameDirPath } from './platform.js';
 
 // -------------------------------------------------------------------------
 // Path Validation
@@ -147,10 +148,26 @@ export function getArtibotDataDir() {
 
 /**
  * Get the artibot state file path (~/.claude/artibot-state.json).
+ *
+ * The shared team-state file sits one level ABOVE the artibot data dir, so it needs its own
+ * answer when `resolveArtibotDir()` is redirected (`ARTIBOT_STATE_DIR` paired with the home in
+ * force): `<state dir>/artibot-state.json`, inside the sandbox the override names. A hooked
+ * session handed an override used to read-modify-write the real `~/.claude/artibot-state.json`
+ * (reported by the owner's promptfoo PoC, 2026-10-19: its top-level `sessionId`/`cwd` and an
+ * `agents` row were overwritten). Not redirected — no override, one minted for another home,
+ * one without a recorded home, or one naming `~/.claude/artibot` itself — the answer is the
+ * home-derived path, unchanged. Asked on every call. Every reader and writer of the file takes
+ * the path from here (`pre-compact`, `session-end`, `session-start`, `subagent-handler`,
+ * `team-idle-handler`, `workflow-status`, `_team-state`), so they cannot disagree about which
+ * file it is.
  * @returns {string}
  */
 export function getStatePath() {
-  return path.join(getClaudeDir(), 'artibot-state.json');
+  const stateDir = resolveArtibotDir();
+  if (sameDirPath(stateDir, getArtibotDataDir())) {
+    return path.join(getClaudeDir(), 'artibot-state.json');
+  }
+  return path.join(stateDir, 'artibot-state.json');
 }
 
 /**

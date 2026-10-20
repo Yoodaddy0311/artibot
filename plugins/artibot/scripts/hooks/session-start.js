@@ -10,7 +10,9 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, sta
 import path from 'node:path';
 import os from 'node:os';
 import { checkForUpdate, resolveUpdateCheckPolicy } from '../../lib/core/version-checker.js';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { createErrorHandler, getStatePath } from '../../lib/core/hook-utils.js';
+import { getHomeDir, sameDirPath } from '../../lib/core/platform.js';
 import { migrateLegacyFile, resolveGlobalStatePath, resolveScopedStatePath, sweepSessionDirs } from '../../lib/core/runtime-state.js';
 import { getLastTestStatus } from '../../lib/core/test-status.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
@@ -589,6 +591,27 @@ async function appendHandoffBanner(lines, { startTimeMs = Date.now() } = {}) {
 }
 
 /**
+ * Directory that holds the update-check cache (`update-check.json`).
+ *
+ * `<home>/.claude/artibot` with the `home` the caller was given — unchanged — while the
+ * state-dir resolver is NOT redirected. When it IS (`ARTIBOT_STATE_DIR` paired with the home in
+ * force) the cache goes inside the sandbox the override names: a hooked session handed an
+ * override used to write the real `~/.claude/artibot/update-check.json` (reported by the owner's
+ * promptfoo PoC, 2026-10-19). "Redirected" is judged the way `lib/autopilot/session-store.js`
+ * judges it, by comparing what the resolver returns with the home-derived default, not by
+ * whether the variable is set — the resolver drops an override it cannot place.
+ * @param {string} home
+ * @returns {string}
+ */
+function updateCheckCacheDir(home) {
+  const stateDir = resolveArtibotDir();
+  if (sameDirPath(stateDir, path.join(getHomeDir(), '.claude', 'artibot'))) {
+    return path.join(home, '.claude', 'artibot');
+  }
+  return stateDir;
+}
+
+/**
  * Non-blocking update notification — any error is swallowed. Wrapped with a
  * 2000ms outer timeout so the update check never consumes more than 2 seconds,
  * leaving ample headroom within the 5000ms hook limit. CRITICAL: the timer
@@ -615,7 +638,7 @@ async function checkUpdateBounded(version, home, lines, { config, processEnv = p
     return;
   }
   try {
-    const cacheDir = path.join(home, '.claude', 'artibot');
+    const cacheDir = updateCheckCacheDir(home);
     const updatePromise = checkForUpdate(version, cacheDir);
     let timeoutHandle;
     const timeoutPromise = new Promise((_, reject) => {

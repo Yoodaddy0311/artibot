@@ -539,6 +539,72 @@ describe('session-start hook', () => {
     });
   });
 
+  // The update check's cache (`update-check.json`) lives in the directory handed to
+  // `checkForUpdate`. That directory was `<home>/.claude/artibot` whatever the state-dir
+  // seam said, so a hooked session handed `ARTIBOT_STATE_DIR` still wrote the REAL
+  // `~/.claude/artibot/update-check.json` (owner's promptfoo PoC, 2026-10-19). It now follows
+  // `resolveArtibotDir()` — and keeps the home it was given while nothing is redirected.
+  describe('update check cache directory (state-dir resolver)', () => {
+    const ENV_KEYS = ['USERPROFILE', 'HOME', 'ARTIBOT_STATE_DIR', 'ARTIBOT_STATE_DIR_HOME'];
+    const HOME = path.join(path.sep, 'tmp', 'su-home');
+    const OTHER_HOME = path.join(path.sep, 'tmp', 'su-other-home');
+    const STATE = path.join(path.sep, 'tmp', 'su-state');
+    let savedEnv;
+
+    beforeEach(() => {
+      savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+      for (const k of ENV_KEYS) delete process.env[k];
+      process.env.USERPROFILE = HOME;
+      process.env.HOME = HOME;
+    });
+
+    afterEach(() => {
+      for (const k of ENV_KEYS) {
+        if (savedEnv[k] === undefined) delete process.env[k];
+        else process.env[k] = savedEnv[k];
+      }
+    });
+
+    /** The directory `main()` handed to the one `checkForUpdate` call it made. */
+    async function cacheDirOfTheCheck() {
+      mockState.readStdinResult = Promise.resolve(JSON.stringify({}));
+      await importAndWait();
+      expect(mockState.checkForUpdateCalls).toHaveLength(1);
+      return mockState.checkForUpdateCalls[0][1];
+    }
+
+    it('hands the check the override when ARTIBOT_STATE_DIR is paired with the home in force', async () => {
+      process.env.ARTIBOT_STATE_DIR = STATE;
+      process.env.ARTIBOT_STATE_DIR_HOME = HOME;
+
+      expect(await cacheDirOfTheCheck()).toBe(STATE);
+    });
+
+    it('keeps <home>/.claude/artibot when no override is set', async () => {
+      expect(await cacheDirOfTheCheck()).toBe(path.join(HOME, '.claude', 'artibot'));
+    });
+
+    it('keeps <home>/.claude/artibot when the override was minted for another home', async () => {
+      process.env.ARTIBOT_STATE_DIR = STATE;
+      process.env.ARTIBOT_STATE_DIR_HOME = OTHER_HOME;
+
+      expect(await cacheDirOfTheCheck()).toBe(path.join(HOME, '.claude', 'artibot'));
+    });
+
+    it('keeps <home>/.claude/artibot when the override carries no recorded home', async () => {
+      process.env.ARTIBOT_STATE_DIR = STATE;
+
+      expect(await cacheDirOfTheCheck()).toBe(path.join(HOME, '.claude', 'artibot'));
+    });
+
+    it('keeps <home>/.claude/artibot when the override names that directory itself', async () => {
+      process.env.ARTIBOT_STATE_DIR = path.join(HOME, '.claude', 'artibot');
+      process.env.ARTIBOT_STATE_DIR_HOME = HOME;
+
+      expect(await cacheDirOfTheCheck()).toBe(path.join(HOME, '.claude', 'artibot'));
+    });
+  });
+
   describe('P3-3: long-context opt-in', () => {
     it('persists runtime/long-context-active.json when enabled=true', async () => {
       mockState.readFileSyncImpl = (filePath) => {

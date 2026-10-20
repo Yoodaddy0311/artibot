@@ -12,6 +12,7 @@
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { createErrorHandler, logHookError } from '../../lib/core/hook-utils.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
@@ -34,9 +35,17 @@ const MAX_ERROR_PATTERNS = 200;
 // Path Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * `<state dir>/memory` — `~/.claude/artibot/memory` unless `ARTIBOT_STATE_DIR` (paired with its
+ * home) redirects the state dir. Asked on every call. This used to join the home dir itself, so
+ * a hooked session handed an override still wrote `project-contexts.json` and
+ * `error-patterns.json` into the real home (reported by the owner's promptfoo PoC, 2026-10-19).
+ * It also read `USERPROFILE || HOME || ''`, which is a cwd-relative path when neither is set;
+ * the resolver falls back to `os.homedir()` instead.
+ * @returns {string}
+ */
 function getMemoryDir() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return path.join(home, '.claude', 'artibot', 'memory');
+  return path.join(resolveArtibotDir(), 'memory');
 }
 
 /**

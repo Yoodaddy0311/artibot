@@ -12,7 +12,7 @@
 
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../core/file.js';
-import { getHomeDir } from '../core/platform.js';
+import { resolveArtibotDir } from '../core/config.js';
 
 const EVALUATIONS_FILENAME = 'evaluations.json';
 const MAX_EVALUATIONS = 500;
@@ -29,11 +29,18 @@ const MAX_EVALUATIONS = 500;
 export const RUBRIC_VERSION = 2;
 
 /**
- * Get the evaluations file path (~/.claude/artibot/evaluations.json).
+ * Get the evaluations file path (`<state dir>/evaluations.json`).
+ *
+ * The state dir is `resolveArtibotDir()` — `~/.claude/artibot` unless `ARTIBOT_STATE_DIR`
+ * (paired with its home) redirects it — and is asked on every call, not read from the
+ * import-time `ARTIBOT_DIR` constant. A hooked session handed an override used to write its
+ * rows into the real `~/.claude/artibot/evaluations.json` (reported by the owner's promptfoo
+ * PoC, 2026-10-19: 4 records). Both `loadEvaluations` and `saveEvaluations` come through here,
+ * so reader and writer cannot name different files.
  * @returns {string}
  */
 export function getEvaluationsPath() {
-  return path.join(getHomeDir(), '.claude', 'artibot', EVALUATIONS_FILENAME);
+  return path.join(resolveArtibotDir(), EVALUATIONS_FILENAME);
 }
 
 /**
