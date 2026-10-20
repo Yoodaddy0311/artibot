@@ -30,6 +30,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { pruneStaleTrackingFiles, TRACKING_PREFIX } from '../../lib/core/read-tracking-sweep.js';
 import { getRepoRoot } from '../../lib/git/repo-root-cache.js';
 
 /** Files that are always allowed without a prior Read. */
@@ -528,8 +529,11 @@ function saveBlockFingerprint(stateDir, fingerprint) {
  * @returns {string}
  */
 function getTrackingPath(sessionId) {
-  return path.join(os.tmpdir(), `artibot-read-tracking-${sessionId}.json`);
+  return path.join(os.tmpdir(), `${TRACKING_PREFIX}${sessionId}.json`);
 }
+
+/** True once this process has swept the temp dir (see handleReadTracking). */
+let trackingSwept = false;
 
 /**
  * Lazily seed the in-memory cache for a session from disk.
@@ -605,6 +609,7 @@ function recordReadPath(sessionId, trackingPath, filePath) {
 
 // Test-only — reset all memoize state between vitest cases.
 export function __resetForTest() {
+  trackingSwept = false;
   sessionReadCache.clear();
   dirtySessions.clear();
   sessionPaths.clear();
@@ -627,6 +632,11 @@ function handleReadTracking(hookData) {
 
   try {
     const trackingPath = getTrackingPath(sessionId);
+    // This session's first Read in this temp dir: tidy up what earlier sessions left behind (once per process).
+    if (!trackingSwept && !existsSync(trackingPath)) {
+      trackingSwept = true;
+      pruneStaleTrackingFiles();
+    }
     recordReadPath(sessionId, trackingPath, filePath);
     process.stderr.write(`[artibot:pre-write-guard] Tracked read: ${filePath}\n`);
   } catch (err) {
