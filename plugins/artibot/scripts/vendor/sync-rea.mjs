@@ -128,7 +128,8 @@ const SPEC_RUN_RE = /^[0-9A-Za-z._+~^*=<>-]*/;
 /**
  * The text before a bare `rea-agents` ends in a package runner or installer followed only by flags.
  * A flag that takes a separate value (`--registry URL`) breaks the chain and hides the package, so
- * this under-reports, and so does a quoted name (`npx -y "rea-agents"`); it never reports prose
+ * this under-reports, and so does a quoted name (`npx -y "rea-agents"`) or a runner more than
+ * BEFORE_WINDOW (512) characters back, behind a longer flag run; it never reports prose
  * that merely names the package. The flag token is `-` then `[^\s=]*` so `--yes` has one parse:
  * `-{1,2}` let a run of `--` flags split two ways each and backtrack exponentially.
  */
@@ -318,8 +319,12 @@ function assertCoherent(version, pkg, files) {
   const stray = [...new Set(pins.filter((p) => p !== version))];
   if (stray.length > 0) throw new Error(`skill/SKILL.md pins ${stray.join(', ')} but the tarball is ${version}`);
   for (const [dest, buf] of files) {
-    const floating = [...new Set(floatingSpecifiers(buf.toString('utf8')))];
+    const text = buf.toString('utf8');
+    const floating = [...new Set(floatingSpecifiers(text))];
     if (floating.length > 0) throw new Error(`${dest} has a floating specifier (${floating.join(', ')}); the pin test forbids it`);
+    // floatingSpecifiers reads rea-agents only. Any other package on @latest (frida@latest, uvx tool@latest) floats too:
+    // this plain scan was the whole rule before it existed, and it stays beside it.
+    if (/@latest\b/.test(text)) throw new Error(`${dest} mentions @latest; the pin test forbids it`);
   }
 }
 

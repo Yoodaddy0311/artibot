@@ -16,7 +16,10 @@
  *  - What floatingSpecifiers cannot see. A bare `rea-agents` is reported only right
  *    after a package runner or installer and its flags; a flag that takes a separate
  *    value (`--registry URL`) hides it, and a name inside a sentence runs nothing so
- *    it is not reported. The 120 KB runs prove termination, not wall-clock speed.
+ *    it is not reported. A quoted name, and a runner more than 512 characters back
+ *    (a longer flag run), are not seen either. It reads rea-agents only: any other
+ *    package on @latest is the plain @latest scan's job. The 120 KB runs prove
+ *    termination, not wall-clock speed.
  *  - The decompression cap (MAX_TAR_BYTES). Exercising it needs a 512 MiB archive in
  *    memory, so it is read, not run.
  *  - Whether the vendored text is right or safe. Equal bytes prove provenance only.
@@ -285,6 +288,11 @@ describe('sync-rea / floatingSpecifiers', () => {
   it('does not report a quoted package name (documented blind spot)', () => {
     expect(floatingSpecifiers('npx -y "rea-agents"')).toEqual([]);
   });
+
+  it('does not report a bare name whose runner is more than 512 characters back, behind a longer flag run (documented blind spot)', () => {
+    expect(floatingSpecifiers(`npx${' --x'.repeat(200)} rea-agents`)).toEqual([]);
+    expect(floatingSpecifiers(`npx${' --x'.repeat(100)} rea-agents`)).toEqual(['rea-agents']);
+  });
 });
 
 describe('sync-rea / mapVendorPath (what may be written at all)', () => {
@@ -470,6 +478,14 @@ describe('sync-rea / buildPlan', () => {
   ])('refuses a vendored file that floats on %s, not only on @latest', (_name, text, message) => {
     const floating = tgz({ extra: [['package/skills/reverse-engineer-anything/references/c.md', text]] });
     expect(() => buildPlan({ version: '6.7.0', tgz: floating })).toThrow(message);
+  });
+
+  it('refuses ANY other package on @latest too: floatingSpecifiers reads rea-agents only, the plain scan covers the rest', () => {
+    for (const text of ['npx -y other-tool@latest\n', 'uvx tool@latest\n', 'npx -y frida@latest\nuvx tool@latest\n']) {
+      expect(floatingSpecifiers(text), text).toEqual([]);
+      const floating = tgz({ extra: [['package/skills/reverse-engineer-anything/references/c.md', text]] });
+      expect(() => buildPlan({ version: '6.7.0', tgz: floating }), text).toThrow(/skill\/references\/c\.md mentions @latest/);
+    }
   });
 
   it('lets prose name the package and the documented placeholder through', () => {

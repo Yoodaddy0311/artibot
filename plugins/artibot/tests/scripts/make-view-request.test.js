@@ -21,7 +21,7 @@
 
 import { execFileSync } from 'node:child_process';
 import {
-  existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -245,6 +245,34 @@ describe('make-view-request / main', () => {
     const t = setup();
     expect(main([t.evidence, t.request], { stdout: lines(), stderr: lines() })).toBe(0);
     expect(statSync(t.request).mode & 0o777).toBe(0o600);
+  });
+
+  it('refuses a directory at the request path and leaves it alone (only an older file or link is removed)', () => {
+    const t = setup();
+    mkdirSync(t.request);
+    writeFileSync(path.join(t.request, 'keep.txt'), 'x');
+    const io = { stdout: lines(), stderr: lines() };
+    expect(main([t.evidence, t.request], io)).toBe(1);
+    expect(io.stderr.text()).toMatch(/failed/);
+    expect(readFileSync(path.join(t.request, 'keep.txt'), 'utf8')).toBe('x');
+  });
+
+  // `mode` is applied only when a file is created, so the script removes an older request first.
+  it.skipIf(process.platform === 'win32')('replaces an older request instead of writing into it: world-readable becomes owner-only, a symlink is not followed', () => {
+    const t = setup();
+    writeFileSync(t.request, 'older request\n');
+    chmodSync(t.request, 0o644);
+    expect(main([t.evidence, t.request], { stdout: lines(), stderr: lines() })).toBe(0);
+    expect(statSync(t.request).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(t.request, 'utf8')).source.evidence).toEqual(EVIDENCE);
+
+    const elsewhere = path.join(t.dir, 'elsewhere.txt');
+    writeFileSync(elsewhere, 'untouched\n');
+    rmSync(t.request);
+    symlinkSync(elsewhere, t.request);
+    expect(main([t.evidence, t.request], { stdout: lines(), stderr: lines() })).toBe(0);
+    expect(lstatSync(t.request).isSymbolicLink()).toBe(false);
+    expect(readFileSync(elsewhere, 'utf8')).toBe('untouched\n');
   });
 });
 

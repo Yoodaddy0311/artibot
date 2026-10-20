@@ -155,11 +155,19 @@ function checkPins(t) {
   return { problems, version, counts: Object.fromEntries(Object.entries(sides).map(([k, v]) => [k, v.length])) };
 }
 
-/** Check 3. Any floating rea-agents, not only @latest; the placeholder UPSTREAM.json spells in its pin note is exempt. */
+/**
+ * Check 3. Any floating rea-agents (floatingSpecifiers; the placeholder UPSTREAM.json spells in its pin note is
+ * exempt) AND any other package on @latest: floatingSpecifiers reads rea-agents only, so frida@latest or
+ * uvx tool@latest needs the plain scan beside it. rea-agents@latest is named by the first, not counted twice.
+ */
 function checkNoFloating(t) {
   const files = [['commands/rea.md', rd(t.commandFile)], ['UPSTREAM.json', rd(path.join(t.vendorDir, 'UPSTREAM.json'))]];
   for (const rel of vendored(t)) files.push([rel, rd(abs(t, rel))]);
-  const problems = files.flatMap(([name, text]) => [...new Set(floatingSpecifiers(text))].map((spec) => `floating ${spec} in ${name}`));
+  const problems = files.flatMap(([name, text]) => {
+    const found = [...new Set(floatingSpecifiers(text))].map((spec) => `floating ${spec} in ${name}`);
+    if (/@latest\b/.test(text.replace(/rea-agents@latest\b/g, ''))) found.push(`@latest in ${name}`);
+    return found;
+  });
   return { problems, checked: files.length };
 }
 
@@ -274,7 +282,11 @@ function checkCommand(text) {
   return { problems, tools, fenced };
 }
 
-/** Check 8. The one prose rule: no sentence tells the user to type the command (`/rea` in code ticks). "# /rea" is only its name. */
+/**
+ * Check 8. The one prose rule: no sentence tells the user to type the command (`/rea` in code ticks). "# /rea" is only its name.
+ * Its limit, on purpose not widened: only `/rea` wrapped in backticks is caught. A bare /rea, another spelling of the
+ * instruction, or a different command's name ("/team") passes.
+ */
 function checkNoSlashInstruction(text) {
   const hits = lf(text).split('\n').filter((line) => line.includes('`/rea`'));
   return { problems: hits.map((line) => `rea.md tells the user to type /rea: ${line.trim().slice(0, 80)}`) };
@@ -525,6 +537,20 @@ describe('rea-vendor / negative controls', () => {
         expect(addedBy(checkNoFloating, (t) => edit(abs(t, file), (s) => `${s}${appended}`)), message).toEqual([`${message} in ${file}`]);
         expect(addedBy(checkNoFloating, (t) => edit(t.commandFile, (s) => `${s}${appended}`)), message).toEqual([`${message} in commands/rea.md`]);
       }
+    });
+
+    it('any other package on @latest is red too: floatingSpecifiers reads rea-agents only', () => {
+      const file = 'skill/references/evidence-workflows.md';
+      for (const appended of ['\nnpx -y other-tool@latest\n', '\nuvx tool@latest\n', '\nnpx -y frida@latest\n']) {
+        expect(addedBy(checkNoFloating, (t) => edit(abs(t, file), (s) => `${s}${appended}`)), appended).toEqual([`@latest in ${file}`]);
+        expect(addedBy(checkNoFloating, (t) => edit(t.commandFile, (s) => `${s}${appended}`)), appended).toEqual(['@latest in commands/rea.md']);
+      }
+      const upstream = addedBy(checkNoFloating, (t) => rewriteUpstream(t, (u) => ({ ...u, extra: 'npx -y other-tool@latest' })));
+      expect(upstream).toEqual(['@latest in UPSTREAM.json']);
+      // one file with both kinds names both; rea-agents@latest alone is still named once, by the rea-agents rule
+      const both = addedBy(checkNoFloating, (t) => edit(abs(t, file), (s) => `${s}\nrea-agents@next and other-tool@latest\n`));
+      expect(both).toEqual([`floating rea-agents@next in ${file}`, `@latest in ${file}`]);
+      expect(addedBy(checkNoFloating, (t) => edit(abs(t, file), (s) => `${s}\nrea-agents@latest\n`))).toEqual([`floating rea-agents@latest in ${file}`]);
     });
 
     it('the documented placeholder is not floating, a look-alike is, and a bare name in prose is not', () => {

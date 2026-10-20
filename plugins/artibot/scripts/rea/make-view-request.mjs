@@ -34,7 +34,7 @@
  * @module scripts/rea/make-view-request
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isMainEntry } from '../hooks/_main-entry.js';
 
@@ -143,7 +143,10 @@ export function main(argv, io = {}) {
   try {
     const view = args.view === null ? DEFAULT_VIEW : parseView(args.view);
     const request = buildViewRequest(readFileSync(args.evidence), view);
-    // The request embeds the whole evidence; on POSIX keep it owner-only (mode is ignored on Windows).
+    // The request embeds the whole evidence; on POSIX keep it owner-only (mode is ignored on Windows). `mode` only
+    // applies when the file is created, so an older request (maybe world-readable, maybe a symlink) is removed first.
+    // Only here, after the evidence and the view validated: a failed run leaves the earlier request in place.
+    rmSync(args.request, { force: true });
     writeFileSync(args.request, request, { mode: 0o600 });
     stdout.write(`[make-view-request] wrote ${args.request} (view: ${view.kind})\n`);
     return 0;
