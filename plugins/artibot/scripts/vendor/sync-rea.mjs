@@ -31,7 +31,9 @@
  *        package/DISCLAIMER.md                        ->  vendor/rea/DISCLAIMER.md
  *      Nothing else from the archive is ever written, whatever its path says.
  *   4. Refuses a tarball whose package.json is not rea-agents@<ver> under MIT,
- *      whose skill pins a different version, or that mentions @latest.
+ *      whose skill pins a different version, whose vendored text names a floating
+ *      rea-agents (@latest, @next, any other tag or range, or a bare `npx rea-agents`),
+ *      or two of whose vendored paths differ only by case.
  *   5. Rewrites vendor/rea (stale files removed), writes UPSTREAM.json, and
  *      re-pins every rea-agents@x.y.z in commands/rea.md to <ver>.
  *
@@ -117,6 +119,55 @@ export function substitutePins(text, version) {
   return { text: out, changed, total };
 }
 
+/** The one documentation literal that spells a version slot without being a specifier (UPSTREAM.json "Version pin" note). */
+export const DOC_PLACEHOLDER = `${PACKAGE_NAME}@x.y.z`;
+
+const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+/** What may follow `rea-agents@` before the specifier ends: version characters and range operators. */
+const SPEC_RUN_RE = /^[0-9A-Za-z._+~^*=<>-]*/;
+/**
+ * The text before a bare `rea-agents` ends in a package runner or installer followed only by flags.
+ * A flag that takes a separate value (`--registry URL`) breaks the chain and hides the package, so
+ * this under-reports, and so does a quoted name (`npx -y "rea-agents"`); it never reports prose
+ * that merely names the package. The flag token is `-` then `[^\s=]*` so `--yes` has one parse:
+ * `-{1,2}` let a run of `--` flags split two ways each and backtrack exponentially.
+ */
+const RUNNER_BEFORE_RE = /(?:^|[\s`"'(;&|])(?:npx|bunx|pnpx|npm\s+(?:exec|x|install|i|add|view|info|show|pack|update|up)|pnpm\s+(?:dlx|exec|add|install|i|update|up)|yarn\s+(?:dlx|add|global\s+add|up))(?:\s+-[^\s=]*(?:=\S*)?)*[\s=]+$/;
+const BEFORE_WINDOW = 512;
+const SPEC_WINDOW = 256;
+
+/** True when the name ending at `end` is really a longer word (`rea-agents-extra`, `rea-agents/dist`, `rea-agents.json`). */
+const continuesName = (src, end) => /^(?:[\w/-]|\.\w)/.test(src.slice(end, end + 2));
+
+/**
+ * Every floating `rea-agents` specifier in `text`, in order (duplicates kept):
+ *   - `rea-agents@<anything but an exact x.y.z[-pre]>`: @latest, @next, any other dist-tag, a range
+ *     (`^6.7.0`, `6.x`, `*`) or an empty `rea-agents@`;
+ *   - a bare `rea-agents` handed to a package runner or installer (`npx -y rea-agents`,
+ *     `npm i -g rea-agents`, `pnpm dlx rea-agents`), which resolves to @latest.
+ * `rea-agents@x.y.z` (DOC_PLACEHOLDER) is documentation, not a specifier. A bare name anywhere else,
+ * such as the JSON "package" value or a sentence about the package, runs nothing and is not reported.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function floatingSpecifiers(text) {
+  const src = String(text);
+  const found = [];
+  let at = src.indexOf(PACKAGE_NAME);
+  while (at !== -1) {
+    const end = at + PACKAGE_NAME.length;
+    if (src[end] === '@') {
+      const spec = SPEC_RUN_RE.exec(src.slice(end + 1, end + 1 + SPEC_WINDOW))[0].replace(/\.+$/, '');
+      const specifier = `${PACKAGE_NAME}@${spec}`;
+      if (!EXACT_VERSION_RE.test(spec) && specifier !== DOC_PLACEHOLDER) found.push(specifier);
+    } else if (!continuesName(src, end) && RUNNER_BEFORE_RE.test(src.slice(Math.max(0, at - BEFORE_WINDOW), at))) {
+      found.push(PACKAGE_NAME);
+    }
+    at = src.indexOf(PACKAGE_NAME, end);
+  }
+  return found;
+}
+
 export const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex');
 export const sriSha512 = (buf) => `sha512-${createHash('sha512').update(buf).digest('base64')}`;
 
@@ -129,6 +180,9 @@ function cString(buf, start, len) {
   const nul = slice.indexOf(0);
   return slice.subarray(0, nul === -1 ? slice.length : nul).toString('utf8');
 }
+
+/** POSIX ustar magic: "ustar" and a NUL at bytes 257-262 (an old-GNU header has "ustar  \0" there, a V7 header nothing). */
+const USTAR_MAGIC = Buffer.from('ustar\0', 'latin1');
 
 function checksumOk(header) {
   const stored = parseInt(cString(header, 148, 8).trim() || '0', 8);
@@ -181,7 +235,8 @@ export function readTar(buf) {
     else if (type === 'L') nextPath = cString(data, 0, data.length);
     else if (type !== 'g') {
       // ('g' is a global pax header: it names no single entry, so it is skipped.)
-      const prefix = cString(header, 257, 5) === 'ustar' ? cString(header, 345, 155) : '';
+      // Only a POSIX ustar header has a prefix at byte 345; there an old-GNU header keeps atime/ctime bytes.
+      const prefix = header.subarray(257, 263).equals(USTAR_MAGIC) ? cString(header, 345, 155) : '';
       const name = cString(header, 0, 100);
       const entryPath = nextPath ?? (prefix ? `${prefix}/${name}` : name);
       nextPath = null;
@@ -218,6 +273,24 @@ function pickPackageJson(tarEntries) {
   return JSON.parse(raw.data.toString('utf8'));
 }
 
+/**
+ * Two vendored paths that are one path on a case-insensitive disk (Windows, default macOS) would
+ * overwrite each other, so what the tree holds would depend on archive order and the disk. Folders
+ * count too. Segments are ASCII (SAFE_REL_RE), so lowercasing is exact case folding.
+ */
+function assertNoCaseCollision(dests) {
+  const spelled = new Map();
+  for (const dest of dests) {
+    const parts = dest.split('/');
+    for (let n = 1; n <= parts.length; n += 1) {
+      const prefix = parts.slice(0, n).join('/');
+      const first = spelled.get(prefix.toLowerCase());
+      if (first === undefined) spelled.set(prefix.toLowerCase(), prefix);
+      else if (first !== prefix) throw new Error(`tarball has ${first} and ${prefix}, which are one path on a case-insensitive disk`);
+    }
+  }
+}
+
 function collectVendored(tarEntries) {
   const files = new Map();
   for (const entry of tarEntries) {
@@ -227,6 +300,7 @@ function collectVendored(tarEntries) {
     if (files.has(dest)) throw new Error(`tarball repeats ${dest}`);
     files.set(dest, Buffer.from(entry.data));
   }
+  assertNoCaseCollision(files.keys());
   return new Map([...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
@@ -244,7 +318,8 @@ function assertCoherent(version, pkg, files) {
   const stray = [...new Set(pins.filter((p) => p !== version))];
   if (stray.length > 0) throw new Error(`skill/SKILL.md pins ${stray.join(', ')} but the tarball is ${version}`);
   for (const [dest, buf] of files) {
-    if (/@latest\b/.test(buf.toString('utf8'))) throw new Error(`${dest} mentions @latest; the pin test forbids it`);
+    const floating = [...new Set(floatingSpecifiers(buf.toString('utf8')))];
+    if (floating.length > 0) throw new Error(`${dest} has a floating specifier (${floating.join(', ')}); the pin test forbids it`);
   }
 }
 

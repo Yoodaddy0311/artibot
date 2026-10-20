@@ -11,8 +11,12 @@
  *    only the seam around them is exercised. The live 6.7.0 run is recorded in
  *    the lane report, not asserted here.
  *  - A real npm tarball. The reader is checked on hand-built archives (plain,
- *    pax, GNU long name, ustar prefix, bad checksum, truncation); the real one
- *    was parsed once by `--check`, which no test repeats.
+ *    pax, GNU long name, ustar prefix, old-GNU and junk magic, bad checksum,
+ *    truncation); the real one was parsed once by `--check`, which no test repeats.
+ *  - What floatingSpecifiers cannot see. A bare `rea-agents` is reported only right
+ *    after a package runner or installer and its flags; a flag that takes a separate
+ *    value (`--registry URL`) hides it, and a name inside a sentence runs nothing so
+ *    it is not reported. The 120 KB runs prove termination, not wall-clock speed.
  *  - The decompression cap (MAX_TAR_BYTES). Exercising it needs a 512 MiB archive in
  *    memory, so it is read, not run.
  *  - Whether the vendored text is right or safe. Equal bytes prove provenance only.
@@ -26,12 +30,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  applyPlan, buildPlan, diffPlan, findSpecifiers, main, mapVendorPath, packFromRegistry, parseArgs,
-  readTar, registryIntegrity, renderUpstream, sha256Hex, sriSha512, substitutePins,
+  applyPlan, buildPlan, diffPlan, findSpecifiers, floatingSpecifiers, main, mapVendorPath, packFromRegistry,
+  parseArgs, readTar, registryIntegrity, renderUpstream, sha256Hex, sriSha512, substitutePins, UPSTREAM_NOTES,
 } from '../../scripts/vendor/sync-rea.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -168,6 +172,121 @@ describe('sync-rea / specifiers and pins', () => {
   });
 });
 
+describe('sync-rea / floatingSpecifiers', () => {
+  it.each([
+    ['a dist-tag', 'run npx -y rea-agents@latest doctor', ['rea-agents@latest']],
+    ['other dist-tags', 'npx -y rea-agents@next doctor, then rea-agents@beta', ['rea-agents@next', 'rea-agents@beta']],
+    ['caret and tilde ranges', 'rea-agents@^6.7.0 rea-agents@~6.7.0', ['rea-agents@^6.7.0', 'rea-agents@~6.7.0']],
+    [
+      'partial, wildcard and comparator versions',
+      'rea-agents@6 rea-agents@6.7 rea-agents@6.x rea-agents@* rea-agents@>=6',
+      ['rea-agents@6', 'rea-agents@6.7', 'rea-agents@6.x', 'rea-agents@*', 'rea-agents@>=6'],
+    ],
+    ['a v prefix and a fourth number', 'rea-agents@v6.7.0 rea-agents@6.7.0.1', ['rea-agents@v6.7.0', 'rea-agents@6.7.0.1']],
+    ['an empty version', 'npx -y rea-agents@ doctor', ['rea-agents@']],
+    [
+      'placeholders other than the documented one',
+      'rea-agents@X.Y.Z rea-agents@x.y rea-agents@<version> rea-agents@x.y.z.extra',
+      ['rea-agents@X.Y.Z', 'rea-agents@x.y', 'rea-agents@<version>', 'rea-agents@x.y.z.extra'],
+    ],
+  ])('reports %s', (_name, text, expected) => {
+    expect(floatingSpecifiers(text)).toEqual(expected);
+  });
+
+  it('accepts an exact version however the sentence around it ends', () => {
+    const text = [
+      'npx -y rea-agents@6.7.0 doctor',
+      'pin `rea-agents@6.7.0`, then "rea-agents@6.7.0" (rea-agents@6.7.0) and rea-agents@6.7.0.',
+      '{"cmd": "npx -y rea-agents@6.7.0"} and a pre-release rea-agents@1.2.3-rc.1 are exact too',
+    ].join('\n');
+    expect(floatingSpecifiers(text)).toEqual([]);
+  });
+
+  it.each([
+    'npx rea-agents',
+    'npx -y rea-agents doctor --json',
+    'npx --yes --quiet rea-agents',
+    'npx -p rea-agents rea',
+    'npx --package=rea-agents rea',
+    'cmd.exe /d /c npx -y rea-agents doctor',
+    'run `npx -y rea-agents`',
+    'bunx rea-agents',
+    'pnpm dlx rea-agents',
+    'yarn dlx rea-agents',
+    'yarn global add rea-agents',
+    'npm install -g rea-agents',
+    'npm i --save-dev rea-agents',
+    'npm exec rea-agents',
+    'npm view rea-agents version',
+    'npx -y\nrea-agents',
+    'npx -y rea-agents.',
+  ])('reports a bare package handed to a runner or installer (it resolves to @latest): %j', (text) => {
+    expect(floatingSpecifiers(text)).toEqual(['rea-agents']);
+  });
+
+  it.each([
+    'the npm package `rea-agents` is MIT',
+    '"package": "rea-agents",',
+    'with a version-pinned `rea-agents` package or continue through the CLI.',
+    'npx some-other-tool rea-agents',
+    'mkdir -p rea-agents',
+    'npx -y rea-agents-extra doctor',
+    'npx -y my-rea-agents doctor',
+    'npx -y rea-agents.json',
+    'node_modules/rea-agents/dist/cli.js',
+    'rea-agents',
+    '',
+  ])('does not report a bare mention that runs nothing: %j', (text) => {
+    expect(floatingSpecifiers(text)).toEqual([]);
+  });
+
+  it('exempts only the documented placeholder, which the UPSTREAM.json version-pin note spells', () => {
+    expect(floatingSpecifiers('must equal every rea-agents@x.y.z in commands/rea.md')).toEqual([]);
+    expect(floatingSpecifiers(UPSTREAM_NOTES.join('\n'))).toEqual([]);
+    expect(UPSTREAM_NOTES.join('\n')).toContain('rea-agents@x.y.z');
+  });
+
+  it('does not carry regex state between calls (global-regex lastIndex trap)', () => {
+    const text = 'npx -y rea-agents@next';
+    expect(floatingSpecifiers(text)).toEqual(['rea-agents@next']);
+    expect(floatingSpecifiers(text)).toEqual(['rea-agents@next']);
+    expect(floatingSpecifiers(String(null))).toEqual([]);
+  });
+
+  it('terminates with the right answer on 120 KB single runs of each shape it scans', () => {
+    const n = 120_000;
+    const reps = 10_000;
+    expect(floatingSpecifiers(`npx${' '.repeat(n)}x`)).toEqual([]);
+    expect(floatingSpecifiers(`npx${' -a'.repeat(n / 3)} x`)).toEqual([]);
+    expect(floatingSpecifiers(`npx ${'-a '.repeat(20)}rea-agents`)).toEqual(['rea-agents']);
+    expect(floatingSpecifiers(`rea-agents@${'1'.repeat(n)}`)).toHaveLength(1);
+    expect(floatingSpecifiers('rea-agents '.repeat(reps))).toEqual([]);
+    expect(floatingSpecifiers('npx rea-agents '.repeat(reps))).toHaveLength(reps);
+    expect(floatingSpecifiers('rea-agents@'.repeat(reps))).toHaveLength(reps);
+  });
+
+  // The 120 KB runs above never reach the runner regex past the 20-flag line: it only scans the
+  // window before a `rea-agents`. These put a rea-agents after a long flag run so it does run.
+  it('scans a window full of `--` flags before rea-agents without exponential backtracking', () => {
+    const flags = 150; // 450 chars, inside the 512-char window; the old `-{1,2}` token needed ~2^150 steps
+    // The failing case runs in a child: a synchronous regex blocks the event loop, so vitest's own
+    // timeout could never fire and a regression would hang the run instead of failing it.
+    const probe = [
+      `import { floatingSpecifiers } from ${JSON.stringify(pathToFileURL(SCRIPT).href)};`,
+      `process.stdout.write(JSON.stringify(floatingSpecifiers('npx' + ' --'.repeat(${flags}) + ' x rea-agents')));`,
+    ].join('\n');
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8', timeout: 10_000 });
+    expect(JSON.parse(out)).toEqual([]);
+    expect(floatingSpecifiers(`npx${' --'.repeat(flags)} rea-agents`)).toEqual(['rea-agents']);
+    expect(floatingSpecifiers(`npx${' --yes'.repeat(80)} rea-agents`)).toEqual(['rea-agents']);
+    expect(floatingSpecifiers(`npx${' --registry=x'.repeat(30)} rea-agents`)).toEqual(['rea-agents']);
+  });
+
+  it('does not report a quoted package name (documented blind spot)', () => {
+    expect(floatingSpecifiers('npx -y "rea-agents"')).toEqual([]);
+  });
+});
+
 describe('sync-rea / mapVendorPath (what may be written at all)', () => {
   it.each([
     ['LICENSE', 'LICENSE'],
@@ -243,6 +362,16 @@ describe('sync-rea / readTar', () => {
     const long = `package/${'d'.repeat(130)}/file.md`;
     const buf = tar(entry('././@LongLink', `${long}\0`, { type: 'L' }), entry('x', 'gnu'), entry('name.md', 'pre', { prefix: 'package/some/dir' }));
     expect(readTar(buf).map((e) => e.path)).toEqual([long, 'package/some/dir/name.md']);
+  });
+
+  it('reads the prefix field only under the exact 6-byte POSIX magic "ustar\\0"', () => {
+    // Offset 345 holds a prefix in POSIX ustar, but atime/ctime bytes in an old-GNU header ("ustar  \0")
+    // and nothing in a V7 header; reading it there would put junk in front of the entry path.
+    const archive = (magic) => tar(entry('package/a.txt', 'a', { prefix: 'JUNK-FROM-GNU-TIMES', magic }));
+    expect(readTar(archive('ustar')).map((e) => e.path)).toEqual(['JUNK-FROM-GNU-TIMES/package/a.txt']);
+    for (const magic of ['ustar  ', 'ustar ', 'ustarX', 'ustar-', '']) {
+      expect(readTar(archive(magic)).map((e) => e.path), JSON.stringify(magic)).toEqual(['package/a.txt']);
+    }
   });
 
   it('does not let a global pax header rename the next entry', () => {
@@ -332,6 +461,33 @@ describe('sync-rea / buildPlan', () => {
     expect(() => buildPlan({ version: '6.7.0', tgz: tgzOf(entry('package/other.txt', 'x')) })).toThrow(/package\.json/);
     const dup = tgz({ extra: [['package/LICENSE', MIT]] });
     expect(() => buildPlan({ version: '6.7.0', tgz: dup })).toThrow(/repeats LICENSE/);
+  });
+
+  it.each([
+    ['@next', 'npx -y rea-agents@next doctor\n', /floating specifier \(rea-agents@next\)/],
+    ['a range', 'use rea-agents@^6.7.0\n', /floating specifier \(rea-agents@\^6\.7\.0\)/],
+    ['a bare npx', 'run npx -y rea-agents doctor\n', /floating specifier \(rea-agents\)/],
+  ])('refuses a vendored file that floats on %s, not only on @latest', (_name, text, message) => {
+    const floating = tgz({ extra: [['package/skills/reverse-engineer-anything/references/c.md', text]] });
+    expect(() => buildPlan({ version: '6.7.0', tgz: floating })).toThrow(message);
+  });
+
+  it('lets prose name the package and the documented placeholder through', () => {
+    const prose = 'The `rea-agents` package; docs say rea-agents@x.y.z when they mean "your version".\n';
+    const ok = tgz({ extra: [['package/skills/reverse-engineer-anything/references/c.md', prose]] });
+    expect(() => buildPlan({ version: '6.7.0', tgz: ok })).not.toThrow();
+  });
+
+  it('refuses two vendored paths that are one path on a case-insensitive disk (file or folder spelling)', () => {
+    const withExtra = (rel) => tgz({ extra: [[`package/skills/reverse-engineer-anything/${rel}`, 'x\n']] });
+    expect(() => buildPlan({ version: '6.7.0', tgz: withExtra('references/A.md') })).toThrow(
+      /skill\/references\/a\.md and skill\/references\/A\.md, which are one path on a case-insensitive disk/,
+    );
+    expect(() => buildPlan({ version: '6.7.0', tgz: withExtra('skill.md') })).toThrow(/skill\/SKILL\.md and skill\/skill\.md/);
+    expect(() => buildPlan({ version: '6.7.0', tgz: withExtra('References/c.md') })).toThrow(/skill\/references and skill\/References/);
+    // control: a new name in the same folder is fine, and an exact repeat still says "repeats"
+    expect(() => buildPlan({ version: '6.7.0', tgz: withExtra('references/c.md') })).not.toThrow();
+    expect(() => buildPlan({ version: '6.7.0', tgz: withExtra('references/a.md') })).toThrow(/repeats skill\/references\/a\.md/);
   });
 
   it('never vendors a path-traversal or look-alike entry, however it is spelled', () => {
