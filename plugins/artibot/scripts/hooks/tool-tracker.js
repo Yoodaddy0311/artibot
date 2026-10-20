@@ -12,13 +12,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
-import { createErrorHandler, extractAgentId, extractAgentRole, getArtibotDataDir, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
-/** Path to the persisted loop detector state file. */
-const LOOP_STATE_FILE = path.join(getArtibotDataDir(), 'loop-state.json');
+/**
+ * Path to the persisted loop detector state file. Asked on every use: it follows the state-dir
+ * resolver (`ARTIBOT_STATE_DIR` paired with the home in force) and is
+ * `~/.claude/artibot/loop-state.json` when nothing is redirected, exactly as before.
+ * @returns {string}
+ */
+function loopStateFile() {
+  return path.join(resolveArtibotDir(), 'loop-state.json');
+}
 
 /** Inactivity timeout (ms) after which persisted state is discarded. */
 const STATE_EXPIRY_MS = 30 * 60 * 1000;
@@ -40,8 +48,9 @@ let loopCallCounter = 0;
  */
 function loadLoopState() {
   try {
-    if (!existsSync(LOOP_STATE_FILE)) return null;
-    const data = JSON.parse(readFileSync(LOOP_STATE_FILE, 'utf-8'));
+    const file = loopStateFile();
+    if (!existsSync(file)) return null;
+    const data = JSON.parse(readFileSync(file, 'utf-8'));
     if (Date.now() - (data.lastUpdated || 0) > STATE_EXPIRY_MS) return null;
     return Array.isArray(data.history) ? data.history : null;
   } catch {
@@ -55,8 +64,9 @@ function loadLoopState() {
  */
 function saveLoopState(detector) {
   try {
-    mkdirSync(path.dirname(LOOP_STATE_FILE), { recursive: true });
-    atomicWriteSync(LOOP_STATE_FILE, JSON.stringify({
+    const file = loopStateFile();
+    mkdirSync(path.dirname(file), { recursive: true });
+    atomicWriteSync(file, JSON.stringify({
       history: detector.getLoopHistory(),
       lastUpdated: Date.now(),
     }, null, 2));

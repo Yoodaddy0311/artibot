@@ -147,6 +147,26 @@ export function getArtibotDataDir() {
 }
 
 /**
+ * Path of a state file that sits one level ABOVE the artibot data dir (`~/.claude/<fileName>`).
+ *
+ * Redirected (the resolver answers something other than the home-derived `~/.claude/artibot`:
+ * `ARTIBOT_STATE_DIR` paired with the home in force): `<state dir>/<fileName>`. Not redirected
+ * (no override, one minted for another home, one without a recorded home, or one naming
+ * `~/.claude/artibot` itself): the home-derived path, unchanged. One decision for every such
+ * file, so `getStatePath`, `getPreCompactPath` and `getPostCompactPath` cannot disagree about it.
+ * Asked on every call.
+ * @param {string} fileName
+ * @returns {string}
+ */
+function stateFileAboveDataDir(fileName) {
+  const stateDir = resolveArtibotDir();
+  if (sameDirPath(stateDir, getArtibotDataDir())) {
+    return path.join(getClaudeDir(), fileName);
+  }
+  return path.join(stateDir, fileName);
+}
+
+/**
  * Get the artibot state file path (~/.claude/artibot-state.json).
  *
  * The shared team-state file sits one level ABOVE the artibot data dir, so it needs its own
@@ -163,11 +183,7 @@ export function getArtibotDataDir() {
  * @returns {string}
  */
 export function getStatePath() {
-  const stateDir = resolveArtibotDir();
-  if (sameDirPath(stateDir, getArtibotDataDir())) {
-    return path.join(getClaudeDir(), 'artibot-state.json');
-  }
-  return path.join(stateDir, 'artibot-state.json');
+  return stateFileAboveDataDir('artibot-state.json');
 }
 
 /**
@@ -184,11 +200,36 @@ export function getStatePath() {
  * @returns {string}
  */
 export function getPreCompactPath() {
-  const stateDir = resolveArtibotDir();
-  if (sameDirPath(stateDir, getArtibotDataDir())) {
-    return path.join(getClaudeDir(), 'artibot-pre-compact.json');
-  }
-  return path.join(stateDir, 'artibot-pre-compact.json');
+  return stateFileAboveDataDir('artibot-pre-compact.json');
+}
+
+/**
+ * Get the PostCompact record path (~/.claude/artibot-post-compact.json).
+ *
+ * The latest-run record `post-compact-rehydrate.js` writes sits one level ABOVE the artibot data
+ * dir like the PreCompact snapshot, so it gets the same answer as {@link getPreCompactPath}:
+ * `<state dir>/artibot-post-compact.json` while `resolveArtibotDir()` is redirected
+ * (`ARTIBOT_STATE_DIR` paired with the home in force), the home-derived path, unchanged,
+ * otherwise. Found by the same 2026-10-20 hook-writer census; the hook is gated off in the
+ * shipped config (`split.contextLifecycle.enabled=false`), so only a session that turned the
+ * gate on ever wrote it. Asked on every call.
+ * @returns {string}
+ */
+export function getPostCompactPath() {
+  return stateFileAboveDataDir('artibot-post-compact.json');
+}
+
+/**
+ * Get the directory the PostCompact bundles (`post-compact-<stamp>.md`) are saved in
+ * (~/.claude/artibot/post-compact).
+ *
+ * It sits INSIDE the artibot data dir, so it is `resolveArtibotDir()` plus `post-compact`: the
+ * same directory as before while nothing is redirected, `<state dir>/post-compact` while it is.
+ * Asked on every call.
+ * @returns {string}
+ */
+export function getPostCompactDir() {
+  return path.join(resolveArtibotDir(), 'post-compact');
 }
 
 /**

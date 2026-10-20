@@ -69,6 +69,9 @@
  * Files written (both under `~/.claude`, never in the repo):
  *   `~/.claude/artibot-post-compact.json`            latest run, machine-readable
  *   `~/.claude/artibot/post-compact/<stamp>.md`      the bundle text + full compact_summary
+ *  Both paths come from `lib/core/hook-utils.js` (`getPostCompactPath`, `getPostCompactDir`), so a
+ *  session handed `ARTIBOT_STATE_DIR` paired with its home writes them inside that directory
+ *  instead; with no override they are exactly the two paths above.
  *
  * @module scripts/hooks/post-compact-rehydrate
  */
@@ -77,7 +80,9 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, getClaudeDir, getPreCompactPath, logHookError } from '../../lib/core/hook-utils.js';
+import {
+  createErrorHandler, getPostCompactDir, getPostCompactPath, getPreCompactPath, logHookError,
+} from '../../lib/core/hook-utils.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { readLatestHandoff } from '../../lib/handoff/handoff-store.js';
@@ -249,14 +254,13 @@ export function collectSplitEvidence(cwd, projectRoot) {
  * Persist the bundle. Returns the paths written (null on failure), never throws.
  * @param {object} record
  * @param {string} bundleText
- * @param {string} claudeDir
  * @returns {{ jsonPath: string|null, mdPath: string|null }}
  */
-function persist(record, bundleText, claudeDir) {
+function persist(record, bundleText) {
   const result = { jsonPath: null, mdPath: null };
   const stamp = String(record.savedAt).replace(/[:.]/g, '-');
   try {
-    const dir = path.join(claudeDir, 'artibot', 'post-compact');
+    const dir = getPostCompactDir();
     mkdirSync(dir, { recursive: true });
     const mdPath = path.join(dir, `post-compact-${stamp}.md`);
     const md = [
@@ -274,8 +278,8 @@ function persist(record, bundleText, claudeDir) {
     logHookError(HOOK_NAME, 'failed to write bundle markdown', err);
   }
   try {
-    mkdirSync(claudeDir, { recursive: true });
-    const jsonPath = path.join(claudeDir, 'artibot-post-compact.json');
+    const jsonPath = getPostCompactPath();
+    mkdirSync(path.dirname(jsonPath), { recursive: true });
     writeFileSync(jsonPath, JSON.stringify({ ...record, bundlePath: result.mdPath }, null, 2), 'utf-8');
     result.jsonPath = jsonPath;
   } catch (err) {
@@ -591,7 +595,7 @@ function measureContext({ evidence, hookData, bundle, sessionId, stamp, storeDir
 }
 
 /**
- * The machine-readable record written to `~/.claude/artibot-post-compact.json`.
+ * The machine-readable record written to `~/.claude/artibot-post-compact.json` ({@link getPostCompactPath}).
  *
  * @param {{ savedAt: string, event: string, sessionId: string|null, hookData: object,
  *           cwd: string, evidence: object, bundle: object, measured: object }} args
@@ -679,14 +683,13 @@ export async function main() {
   if (!lifecycle.enabled || !lifecycle.postCompactRehydrate) return;
 
   const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : process.cwd();
-  const claudeDir = getClaudeDir();
   // The snapshot pre-compact.js wrote: the same function, so a redirected state dir moves reader and writer together.
   const snapshotPath = getPreCompactPath();
   const evidence = await gatherEvidence(cwd, snapshotPath, hookData, lifecycle);
 
   const savedAt = new Date().toISOString();
   const stamp = savedAt.replace(/[:.]/g, '-');
-  const plannedMdPath = path.join(claudeDir, 'artibot', 'post-compact', `post-compact-${stamp}.md`);
+  const plannedMdPath = path.join(getPostCompactDir(), `post-compact-${stamp}.md`);
   const bundle = composeBundle(evidence, snapshotPath, plannedMdPath, lifecycle.maxRehydrateBytes);
 
   const sessionId = typeof hookData.session_id === 'string' ? hookData.session_id : null;
@@ -696,7 +699,7 @@ export async function main() {
   });
 
   const record = buildRecord({ savedAt, event, sessionId, hookData, cwd, evidence, bundle, measured });
-  const written = persist(record, bundle.text, claudeDir);
+  const written = persist(record, bundle.text);
   const identity = formatIdentity(bundle.identity, evidence.current.gitErrors);
   log(`bundle ${bundle.bytes}B/${bundle.maxBytes}B identity=${identity}${bundle.truncated ? ' truncated' : ''} → ${written.mdPath ?? 'unsaved'}`);
   log(formatPressureLine(measured.pressure, measured.pressureEvent, measured.contextReceipt));

@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
  * Every case uses a throwaway home; the real one is never touched.
  *
  * WHAT THIS FILE CANNOT SEE: the reader, `post-compact-rehydrate.js`. It asks the same
- * function, and its gate (`contextLifecycle.enabled`) is off in the shipped config.
+ * function, and its gate (`contextLifecycle.enabled`) is off in the shipped config; the reader is
+ * run as a child process, with the gate opened, by `tests/hooks/post-compact-rehydrate-state-dir.test.js`.
  */
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
