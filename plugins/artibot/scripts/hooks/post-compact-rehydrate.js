@@ -77,7 +77,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler, getClaudeDir, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, getClaudeDir, getPreCompactPath, logHookError } from '../../lib/core/hook-utils.js';
 import { loadConfig } from '../../lib/core/config.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { readLatestHandoff } from '../../lib/handoff/handoff-store.js';
@@ -680,7 +680,8 @@ export async function main() {
 
   const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : process.cwd();
   const claudeDir = getClaudeDir();
-  const snapshotPath = path.join(claudeDir, 'artibot-pre-compact.json');
+  // The snapshot pre-compact.js wrote: the same function, so a redirected state dir moves reader and writer together.
+  const snapshotPath = getPreCompactPath();
   const evidence = await gatherEvidence(cwd, snapshotPath, hookData, lifecycle);
 
   const savedAt = new Date().toISOString();

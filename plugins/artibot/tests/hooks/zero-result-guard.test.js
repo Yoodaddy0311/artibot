@@ -317,10 +317,23 @@ describe('buildOutput / handlePostToolUse', () => {
 });
 
 describe('counter file contract (WP-4 consumes this)', () => {
-  it('is named zero-result-guard-counter.json under ~/.claude/artibot/', () => {
+  it('is named zero-result-guard-counter.json under ~/.claude/artibot/ (no state-dir override)', () => {
     expect(COUNTER_FILENAME).toBe('zero-result-guard-counter.json');
-    const p = counterPath();
-    expect(p.endsWith(path.join('.claude', 'artibot', COUNTER_FILENAME))).toBe(true);
+    // tests/setup/state-dir.js gives every worker a default ARTIBOT_STATE_DIR override and counterPath() now follows it
+    // (tests/hooks/zero-result-guard-state-dir.test.js pins that). The statusline's contract is the production path,
+    // so the override is lifted for this one assertion.
+    const saved = { dir: process.env.ARTIBOT_STATE_DIR, home: process.env.ARTIBOT_STATE_DIR_HOME };
+    delete process.env.ARTIBOT_STATE_DIR;
+    delete process.env.ARTIBOT_STATE_DIR_HOME;
+    try {
+      const p = counterPath();
+      expect(p.endsWith(path.join('.claude', 'artibot', COUNTER_FILENAME))).toBe(true);
+    } finally {
+      if (saved.dir === undefined) delete process.env.ARTIBOT_STATE_DIR;
+      else process.env.ARTIBOT_STATE_DIR = saved.dir;
+      if (saved.home === undefined) delete process.env.ARTIBOT_STATE_DIR_HOME;
+      else process.env.ARTIBOT_STATE_DIR_HOME = saved.home;
+    }
   });
 });
 

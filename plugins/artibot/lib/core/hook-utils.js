@@ -171,6 +171,27 @@ export function getStatePath() {
 }
 
 /**
+ * Get the PreCompact snapshot path (~/.claude/artibot-pre-compact.json).
+ *
+ * Like `artibot-state.json` the snapshot sits one level ABOVE the artibot data dir, so it
+ * gets the same answer as {@link getStatePath}: `<state dir>/artibot-pre-compact.json`
+ * while `resolveArtibotDir()` is redirected (`ARTIBOT_STATE_DIR` paired with the home in
+ * force), the home-derived path, unchanged, otherwise. `pre-compact.js` wrote this file on
+ * every PreCompact event whatever the override said (found by the 2026-10-20 hook-writer
+ * census after the owner's promptfoo PoC). The writer (`pre-compact`) and the reader
+ * (`post-compact-rehydrate`) both take the path from here so they cannot disagree. Asked on
+ * every call.
+ * @returns {string}
+ */
+export function getPreCompactPath() {
+  const stateDir = resolveArtibotDir();
+  if (sameDirPath(stateDir, getArtibotDataDir())) {
+    return path.join(getClaudeDir(), 'artibot-pre-compact.json');
+  }
+  return path.join(stateDir, 'artibot-pre-compact.json');
+}
+
+/**
  * Check if a specific environment variable is truthy ('1' or 'true').
  * @param {string} varName - Environment variable name
  * @returns {boolean}

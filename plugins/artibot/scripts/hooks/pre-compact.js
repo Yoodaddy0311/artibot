@@ -11,7 +11,7 @@ import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { createErrorHandler, getClaudeDir, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, getPreCompactPath, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
 import { estimateTokens } from '../../lib/context/context-pressure.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
@@ -425,9 +425,8 @@ export async function main() {
   const raw = await readStdin();
   const hookData = tapDirectFiring(import.meta.url, parseJSON(raw)) ?? {};
 
-  const claudeDir = getClaudeDir();
   const statePath = getStatePath();
-  const compactBackupPath = path.join(claudeDir, 'artibot-pre-compact.json');
+  const compactBackupPath = getPreCompactPath();
 
   const currentState = loadCurrentState(statePath);
 
@@ -444,7 +443,7 @@ export async function main() {
   const snapshot = buildSnapshot({ hookData, currentState, summary, tokenEstimate });
 
   try {
-    mkdirSync(claudeDir, { recursive: true });
+    mkdirSync(path.dirname(compactBackupPath), { recursive: true });
     writeFileSync(compactBackupPath, JSON.stringify(snapshot, null, 2), 'utf-8');
 
     const message = formatSummaryMessage(summary, tokenEstimate);

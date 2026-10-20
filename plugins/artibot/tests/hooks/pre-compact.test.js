@@ -49,8 +49,15 @@ async function runHook() {
 // ---------------------------------------------------------------------------
 describe('pre-compact hook', () => {
   let stderrSpy;
+  let savedStateEnv;
 
   beforeEach(() => {
+    // tests/setup/state-dir.js hands every worker a default ARTIBOT_STATE_DIR override. The snapshot path now follows
+    // it (tests/hooks/pre-compact-state-dir.test.js pins that), while the cases below pin the production, NO-override
+    // path under ~/.claude, so the override is lifted for them.
+    savedStateEnv = { dir: process.env.ARTIBOT_STATE_DIR, home: process.env.ARTIBOT_STATE_DIR_HOME };
+    delete process.env.ARTIBOT_STATE_DIR;
+    delete process.env.ARTIBOT_STATE_DIR_HOME;
     vi.clearAllMocks();
     vi.resetModules();
     existsSync.mockReturnValue(false);
@@ -62,6 +69,10 @@ describe('pre-compact hook', () => {
   });
 
   afterEach(() => {
+    if (savedStateEnv.dir === undefined) delete process.env.ARTIBOT_STATE_DIR;
+    else process.env.ARTIBOT_STATE_DIR = savedStateEnv.dir;
+    if (savedStateEnv.home === undefined) delete process.env.ARTIBOT_STATE_DIR_HOME;
+    else process.env.ARTIBOT_STATE_DIR_HOME = savedStateEnv.home;
     stderrSpy.mockRestore();
   });
 

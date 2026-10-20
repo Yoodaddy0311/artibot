@@ -128,3 +128,29 @@ describe.skipIf(!hasJq)('statusline zero-result 세그먼트/백엔드 간 동�
     expect(runJq(jqExpr, json)).toBe(runNode(plainNodeExpr, json));
   });
 });
+
+// 카운터 위치 — 쓰기 측(scripts/hooks/zero-result-guard.js#counterPath)은 resolveArtibotDir() 를 따른다.
+// statusline.sh 는 같은 규칙을 STATE_ROOT/STATE_PAIRED 로 복제해 두었다. 셸을 실제로 돌리면 한 번에 수십 초가 걸려
+// (statusline.sh 머리 주석 참조) 소스 핀으로 고정한다: 기본은 $HOME 경로 그대로, 짝지은 override 일 때만 STATE_ROOT.
+// statusline-themed.sh 는 상태 전부를 $HOME 에서 읽는 파일이고 격리된 세션에서는 돌지 않으므로 이 규칙 밖이다.
+describe('statusline.sh 카운터 위치 — 쓰기 측과 같은 규칙', () => {
+  it('override 가 없으면 $HOME/.claude/artibot 의 카운터를 그대로 읽는다', () => {
+    expect(plainSrc).toMatch(/ZG_FILE="\$HOME\/\.claude\/artibot\/zero-result-guard-counter\.json"/);
+  });
+
+  it('STATE_PAIRED=1(짝지은 override)일 때만 STATE_ROOT 의 카운터로 바꾼다', () => {
+    expect(plainSrc).toMatch(
+      /if \[ "\$\{STATE_PAIRED:-0\}" = 1 \]; then ZG_FILE="\$STATE_ROOT\/zero-result-guard-counter\.json"; fi/,
+    );
+  });
+
+  it('STATE_ROOT/STATE_PAIRED 는 ZG_FILE 보다 앞에서 정해진다', () => {
+    const paired = plainSrc.indexOf('STATE_PAIRED=1');
+    const root = plainSrc.indexOf('STATE_ROOT="${USERPROFILE');
+    const zg = plainSrc.indexOf('ZG_FILE=');
+    expect(paired).toBeGreaterThan(-1);
+    expect(root).toBeGreaterThan(-1);
+    expect(paired).toBeLessThan(zg);
+    expect(root).toBeLessThan(zg);
+  });
+});

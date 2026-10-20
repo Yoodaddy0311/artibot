@@ -528,6 +528,9 @@ _zg_label() {
 
 ZG_LABEL=''
 ZG_FILE="$HOME/.claude/artibot/zero-result-guard-counter.json"
+# The writer (zero-result-guard.js#counterPath) follows resolveArtibotDir(): while ARTIBOT_STATE_DIR is paired
+# with the home in force, STATE_ROOT above IS that directory. Unset STATE_PAIRED (no override) keeps the line above.
+if [ "${STATE_PAIRED:-0}" = 1 ]; then ZG_FILE="$STATE_ROOT/zero-result-guard-counter.json"; fi
 if [ -f "$ZG_FILE" ]; then
   ZG_RAW=$(_zg_label "$ZG_FILE")
   if [ -n "$ZG_RAW" ]; then ZG_LABEL="🛡 ${ZG_RAW}"; fi

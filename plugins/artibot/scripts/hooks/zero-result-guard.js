@@ -71,7 +71,7 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
-import { getHomeDir } from '../../lib/core/platform.js';
+import { resolveArtibotDir } from '../../lib/core/config.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'zero-result-guard';
@@ -352,12 +352,17 @@ export function handlePostToolUse(hookData) {
 // ---------------------------------------------------------------------------
 
 /**
- * Absolute path of the counter file. Resolved per call rather than cached so a
- * test that redirects HOME/USERPROFILE gets the sandbox path.
+ * Absolute path of the counter file: `<state dir>/zero-result-guard-counter.json`, where the
+ * state dir is `resolveArtibotDir()` — `~/.claude/artibot` unless `ARTIBOT_STATE_DIR` (paired
+ * with the home in force) redirects it. Resolved per call rather than cached so a test that
+ * redirects HOME/USERPROFILE or the state dir gets the sandbox path. A hooked, non-interactive
+ * session handed an override used to bump the REAL counter (found by the 2026-10-20
+ * hook-writer census after the owner's promptfoo PoC). `statusline.sh` follows the same rule
+ * through its own STATE_ROOT.
  * @returns {string}
  */
 export function counterPath() {
-  return path.join(getHomeDir(), '.claude', 'artibot', COUNTER_FILENAME);
+  return path.join(resolveArtibotDir(), COUNTER_FILENAME);
 }
 
 /** Shape written to disk when nothing has fired yet. */
