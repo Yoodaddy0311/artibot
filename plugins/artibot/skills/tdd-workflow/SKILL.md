@@ -24,7 +24,7 @@ tokens: "~3K"
 category: "testing"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: f9fc5327
+source_hash: 48ad99b3
 whenNotToUse: "Do not apply the full RED-GREEN-REFACTOR cycle to throwaway scripts, one-off data migrations, or exploratory code that will be deleted within 24 hours. Also skip when adding tests to already-running legacy code under time pressure — defer to a dedicated coverage sprint instead."
 ---
 # TDD Workflow
@@ -32,8 +32,7 @@ whenNotToUse: "Do not apply the full RED-GREEN-REFACTOR cycle to throwaway scrip
 Use `$ARGUMENTS` to specify the test target (module, service, or component).
 
 ## Current State
-<!-- Dynamic context injected at activation -->
-!`npm test -- --reporter=dot 2>&1 | tail -5`
+Run the project's own test command (`npm test`, scoped to the target) when you need the current red/green state. Nothing runs at activation: the former `!` line here executed the WHOLE suite before this skill reached the model (≈4-5 min in this repo for 5 lines of output) — removed 2026-10-23, 10-04 audit A1.
 
 ## When This Skill Applies
 - Implementing new features (tests first)

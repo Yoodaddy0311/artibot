@@ -280,7 +280,9 @@ function buildSections(state, flags) {
     const used = humanize(state.tokens.used);
     const total = state.tokens.total ? humanize(state.tokens.total) : null;
     const tokenText = total ? `${used}/${total}` : used;
-    out.push(`tokens=${paint(tokenText, 'green')}`);
+    // Current-INPUT estimate (runtime-prompt.js writes chars/4 of the last prompt; output is 0 there) —
+    // not a session total and not billing (10-04 economics audit C3, 2026-10-23).
+    out.push(`input-est=${paint(tokenText, 'green')}`);
   }
 
   if (state.longContext) {
@@ -359,7 +361,7 @@ export async function renderFullDashboard({ pluginRoot, config, sessionId } = {}
   }
   const used = typeof state.tokens.used === 'number' ? humanize(state.tokens.used) : '—';
   const total = state.tokens.total ? humanize(state.tokens.total) : '';
-  lines.push(`tokens    : ${used}${total ? `/${total}` : ''}`);
+  lines.push(`input est : ${used}${total ? `/${total}` : ''}`); // current-input estimate, see pickTokens
   lines.push(`longCtx   : ${state.longContext ? paint('on', 'green') : paint('off', 'dim')}`);
   if (flags.showTeammates) {
     const tm = state.teammates.length > 0

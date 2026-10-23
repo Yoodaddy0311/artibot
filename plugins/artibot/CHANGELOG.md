@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 10-04 경제성 감사의 미착지 NECESSARY 착지 — 스킬 활성화 때 전체 테스트 실행 제거 · 스킬 본문 선읽기 OFF · 토큰 추정치 라벨 (2026-10-23)
+
+근거: `.artibot/REPORTS/plugin-economics-audit-2026-10-04.md` A1·C3·C5 와 `.artibot/guides/VERIFICATION-ECONOMICS-DESIGN.md` §0.1·§2.2·§4.3·§4.4 의 NECESSARY 판정, 그리고 `.artibot/guides/v5-design/practicality-improvement-20261023/06_PIPELINE_AUDIT.md` §3·§4 의 재확인. A1 의 조건("호스트가 `!` 줄을 실행하는지 미확인")은 호스트 문서(skills.md "Inject dynamic context" — 스킬 내용이 모델에 가기 **전에** 셸 명령을 실행)로 2026-10-23 확정됐다.
+
+- **스킬 활성화 때 전체 테스트가 돌던 줄 삭제(A1 + 신규)**: `skills/tdd-workflow/SKILL.md` 의 `` !`npm test -- --reporter=dot … | tail -5` `` 와 `skills/quality-framework/SKILL.md` 의 `` !`npm run lint … | tail -3` `` · `` !`npm test … | tail -5` `` 를 지우고, `## Current State` 헤딩(stage-b 기준선이 핀)은 남겨 "필요할 때 범위를 좁혀 직접 돌려라" 한 문장으로 바꿨다. 이 리포에서 그 줄은 활성화마다 전체 스위트(여기 232.8 s · 오너 PC 약 318 s)를 돌리고 모델에는 5줄만 넘겼다. quality-framework 쪽은 10-04 감사에 없던 항목이다. `git-unified`·`systematic-debugging` 의 `` !`git …` `` 줄 6개는 수십 ms 라 그대로 둔다. 두 파일의 `source_hash` 를 `lib/core/skill-hash.js#computeHash` 로 갱신했다(`tests/skills/source-hash-fresh.test.js` 가 RED → GREEN).
+- **`artibot.config.json#skills.lazyLoading.enabled` → `false`(C5)**: true 일 때 `lib/runtime/middleware/skills.js` 가 프롬프트마다 SKILL.md 114개(약 961 KB)를 읽어 들였으나 읽은 본문의 소비처가 없었다(감사 §4.4 실측). 네이티브 스킬 활성화와 이름 기반 추천은 이 스위치와 무관하다. `comment` 키를 더해 이유를 적었다.
+- **토큰 라벨(C3)**: `scripts/hooks/statusline.sh` 의 "Session token usage" 세그먼트는 `runtime-prompt.js#persistTokenUsage` 가 쓴 **마지막 입력의 chars/4 추정**(output 은 항상 0)이라 `~987K tok(입력 추정)` 으로 바꾸고 머리 주석에 출처·비(非)과금을 적었다(`tests/hooks/statusline-runtime-state.test.js` 의 라벨 핀 동반 갱신). `lib/tui/dashboard.js` 는 `tokens=` → `input-est=`, `tokens    :` → `input est :`. `marketplace.json` 의 `auditLog` 가 그 파일을 감사 로그처럼 가리키던 값을 "none — 입력 추정치, 원장은 `.git/artibot/ledger.jsonl`" 로 정정했다(`sync-marketplace-meta --check` 무변경 확인). 감사가 DEFER 로 둔 `kind`/`scope` 필드 추가는 하지 않았다.
+- **하지 않은 것(판정 변경)**: 06 §8 #3(b) "긴 설명 24+7개 축약" 은 기대 절감이 요청당 약 1.8K 토큰(고정 세의 8%)인데 설명은 스킬·에이전트 발화 레버라 품질 위험이 더 크다고 보아 **DEFER** 로 내렸다. 더 큰 레버는 `disable-model-invocation` 분류(스킬 105 · 커맨드 76 이 매 턴 목록에 실림)이고 그것은 발화 분모(오너 PC 의 Existence Audit) 뒤 오너 결정이다.
+- **검증**: `tests/runtime/middleware/skills*.test.js` · `token-usage.test.js` · `tests/firewall/constitution-stage-{a,b}*.test.js` · `tests/hooks/statusline-runtime-state.test.js` · `tests/firewall/runtime-state-survives-update.test.js` · `v5-config-firewall` · `tests/skills` 15파일 500건(해시 갱신 뒤 전건 그린) · `npm run skill:check`(desc 7 baselined · Red Flags 130 baselined, 신규 위반 0) · `npm run validate` · `sync-marketplace-meta --check` · `validate:readme:claims` · `validate-skills` 전부 통과 · `npm run lint` 0/0 · `docs:check` 603파일 0 broken.
+
 ### REPORT 검증 게이트 — `evidenceMode: 'deterministic'`(규칙 7) 배선: 트리의 vitest 스냅샷을 현재 HEAD 와 VERIFY 위임 시각에 결합 (2026-10-23)
 
 근거: `.artibot/guides/v5-design/practicality-improvement-20261023/05_REVISED_DESIGN.md` D-04(`'deterministic'` 모드). 아래 「검증 스냅샷이 측정한 트리의 git 정체를 적는다」(리포터 `gitSha`·`gitDirty`) 와 「REPORT 검증 게이트 — 설정 읽기 3상태와 `evidenceMode` 키」(규칙 6′) 위에 올라간다. 출하값은 그대로 `'ack'` 라 **출하 동작 변화 0** — `'ack'`·`'explicit-pass'` 에서는 어떤 포트도 건드리지 않는다(테스트가 throw 하는 포트로 핀).
