@@ -22,6 +22,7 @@
 
 - **무엇**: `.artibot/guides/v5-design/practicality-improvement-20261023/` 의 평가 문서(01~03)를 검증(04)하고 개정 설계(05)대로 코드 Wave 1~4 를 구현(루프 이력 세션별 매 호출 저장 · 미분류 Bash 수용 · REPORT 게이트 `evidenceMode` 키와 규칙 7 · 설정 읽기 3상태 · 리포터 `gitSha`), 파이프라인·토큰 점검(06)과 10-04 감사 NECESSARY 잔여 3건(스킬 활성화 때 전체 테스트 실행 제거 · lazyLoading OFF · 토큰 라벨)을 착지했다. 전체 vitest 28,090건 중 환경 요인 1건 외 그린. 모델에 보이는 키 두 개(`cognitive.loopDetector.advisory` · `autopilot.reportVerifyGate.evidenceMode`)는 OFF 출하.
 - **이 PC 에서 할 일과 오너 결정 8건**: 같은 폴더의 [07_PC_HANDOFF.md](v5-design/practicality-improvement-20261023/07_PC_HANDOFF.md) — 라이브 분모 3종(`verify-result-census` · `loop-detection-census` · `existence-audit`), `--plugin-dir` 호스트 통합 테스트, Windows 재현, 훅 지연 실측, 비교 실험 예산.
+- **바로 시작**: 리포 루트에서 `node .artibot/guides/v5-design/practicality-improvement-20261023/pc-handoff.mjs` — 점검(브랜치·설치본 vs 브랜치·claude 버전과 실험 플래그·상태 디렉터리·원장·vitest) + 07 §A 순서 + 새 세션에 붙일 킥오프 프롬프트를 출력한다(07 §0). 하위 명령 `census` · `tests` · `host-probe` · `experiment-plan`. 모델 호출 0, 쓰는 곳은 `evidence/`(census)와 `reports/`(experiment-plan)만.
 - **알아 둘 것**: 클라우드 컨테이너는 중첩 `claude -p` 인증이 안 되어 모델이 도구를 부르는 경로는 미검증이다(05 §8.1). `tool-tracker` 의 반복 호출 감지는 이제 cold start 에서 3회에 경고·5회에 차단 라벨이 나오고 파일이 `runtime/sessions/<sid>/loop-state.json` 에 생긴다(격리 재현) — v4.71.11 「다음 할 일」의 "발동 미확인" 항목은 이 브랜치가 닫는다(호스트 통합은 07 A-3).
 
 ## v4.71.11 (2026-10-20 KST, 리더 실측)
