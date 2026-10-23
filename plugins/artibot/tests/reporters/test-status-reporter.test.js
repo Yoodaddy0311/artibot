@@ -3,7 +3,8 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { deterministicLayerFrom } from '../../lib/verification/deterministic-source.js';
+import { deterministicLayerFrom, readSnapshotIdentity } from '../../lib/verification/deterministic-source.js';
+import { defaultReadGitIdentity as readGitIdentityOfThisCheckout } from './test-status-reporter.js';
 
 /**
  * tests/reporters/test-status-reporter.js — the vitest reporter that writes
@@ -94,6 +95,7 @@ async function loadIsolatedReporter() {
     loadedRoot,
     outputPath: path.join(root, 'runtime', 'last-test-result.json'),
     Reporter: mod.default,
+    mod,
   };
 }
 
@@ -153,11 +155,41 @@ describe('test-status-reporter — module count in the snapshot', () => {
    * The additions are ADDITIVE. `deterministic-source.js#parseResult` rejects a
    * payload missing any of the four counts, so dropping or renaming an existing
    * key here would make every snapshot read as `corrupt`. This list is the whole
-   * schema: the eight keys that existed before 2026-10-06, plus `schemaVersion`
-   * and `completion`. Nothing else — `selection`, `source`, `environment` and
-   * `runId` are in VERIFICATION-ECONOMICS-DESIGN §3.2 but were deferred.
+   * schema: the eight keys that existed before 2026-10-06, `schemaVersion` and
+   * `completion` (v2), and since v3 the git identity of the tree the run covered —
+   * `gitSha` and `gitDirty` — which the REPORT gate's SHA binding reads
+   * (practicality-improvement-20261023/05_REVISED_DESIGN.md D-04: a verdict must
+   * name the commit it measured, or a stale green survives a later edit). Nothing
+   * else — `selection`, `source`, `environment` and `runId` are in
+   * VERIFICATION-ECONOMICS-DESIGN §3.2 but were deferred.
+   *
+   * The identity is INJECTED here: the copied reporter's `PLUGIN_ROOT` is a temp
+   * directory outside any repository, so its default reader finds no git and
+   * omits both keys (the case right below pins that degradation).
    */
-  it('keeps the eight pre-existing keys and adds exactly schemaVersion and completion', async () => {
+  it('keeps the eight pre-existing keys and adds exactly schemaVersion, completion, gitSha and gitDirty', async () => {
+    const { loadedRoot, outputPath, Reporter } = await loadIsolatedReporter();
+    const reporter = new Reporter({ readGitIdentity: () => ({ gitSha: 'a'.repeat(40), gitDirty: false }) });
+    reporter.onTestRunStart();
+    reporter.onTestRunEnd([fakeModule(path.join(loadedRoot, 'tests', 'a.test.js'), ['passed'])]);
+
+    expect(Object.keys(readSnapshot(outputPath)).sort()).toEqual([
+      'completion',
+      'durationMs',
+      'failed',
+      'failedFiles',
+      'gitDirty',
+      'gitSha',
+      'modules',
+      'passed',
+      'schemaVersion',
+      'skipped',
+      'timestamp',
+      'totalTests',
+    ]);
+  });
+
+  it('omits both identity keys, and nothing else, when the plugin root is not inside a repository', async () => {
     const { loadedRoot, outputPath, Reporter } = await loadIsolatedReporter();
     const reporter = new Reporter();
     reporter.onTestRunStart();
@@ -281,7 +313,10 @@ describe('test-status-reporter — the completion record', () => {
   }
 
   it('stamps a schema version so a reader can tell a record that has completion from one that cannot', async () => {
-    expect((await snapshotOf(onePass(), [], 'passed')).schemaVersion).toBe(2);
+    // 2 added `completion`; 3 added the git identity (`gitSha`, `gitDirty`). The
+    // reader keys its completion rules on "version >= 2 or a completion key", so
+    // the bump cannot demote a v3 record to the v1 reading.
+    expect((await snapshotOf(onePass(), [], 'passed')).schemaVersion).toBe(3);
   });
 
   it('records vitest\'s reason and the unhandled-error count side by side, neither derived from the other', async () => {
@@ -474,5 +509,138 @@ describe('test-status-reporter — what the Stop gate concludes from what this r
 
   it('leaves a run unmeasured when only the modules were handed over', async () => {
     expect((await layerFrom(clean())).exitCode, 'unknown is not a clean run').toBeUndefined();
+  });
+});
+
+/**
+ * THE GIT IDENTITY (v3). A snapshot says which TREE it measured, or a verdict can
+ * be read against a tree it never saw: the Stop gate's freshness rule (F1) compares
+ * the run against the last edit by time, and the REPORT gate's SHA binding
+ * (05_REVISED_DESIGN.md D-04, rule 7) needs the commit itself. `gitSha` is
+ * `git rev-parse HEAD` and `gitDirty` is whether `git status --porcelain
+ * --untracked-files=no` printed anything, both run in the plugin root.
+ *
+ * Both keys are OMITTED — never `null`, never `''` — whenever git is missing, fails,
+ * times out or answers with something that is not a 40-hex id. A reader treats an
+ * absent key as "identity not recorded" (`deterministic-source.js#readSnapshotIdentity`),
+ * which is a different claim from "the tree had no commit".
+ *
+ * The reader is injectable through the constructor so these cases do not depend on
+ * the temp root being a repository; the default reader is exercised once against the
+ * real checkout this test file lives in, and once against a temp root that is not one.
+ */
+describe('test-status-reporter — the git identity of the measured tree', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+
+  /**
+   * @param {unknown} readGitIdentity
+   * @param {any[]} [endArgs]
+   * @returns {Promise<{ snapshot: Record<string, any>, text: string }>}
+   */
+  async function snapshotWith(readGitIdentity, endArgs = [[fakeModule('/x/tests/a.test.js', ['passed'])], [], 'passed']) {
+    const { outputPath, Reporter } = await loadIsolatedReporter();
+    const reporter = new Reporter({ readGitIdentity });
+    reporter.onTestRunStart();
+    reporter.onTestRunEnd(...endArgs);
+    const text = readFileSync(outputPath, 'utf-8');
+    return { snapshot: JSON.parse(text), text };
+  }
+
+  it('records the sha and the dirty flag the reader returned, verbatim', async () => {
+    const { snapshot } = await snapshotWith(() => ({ gitSha: SHA, gitDirty: true }));
+    expect(snapshot.gitSha).toBe(SHA);
+    expect(snapshot.gitDirty).toBe(true);
+  });
+
+  it('round-trips a clean tree as gitDirty false, a measured nothing rather than an omission', async () => {
+    const { snapshot } = await snapshotWith(() => ({ gitSha: SHA, gitDirty: false }));
+    expect(snapshot.gitDirty).toBe(false);
+    expect(Object.hasOwn(snapshot, 'gitDirty')).toBe(true);
+  });
+
+  it('omits both keys when the reader throws, and still writes the rest of the snapshot', async () => {
+    const { snapshot } = await snapshotWith(() => { throw new Error('git: not found (injected)'); });
+    expect(Object.hasOwn(snapshot, 'gitSha')).toBe(false);
+    expect(Object.hasOwn(snapshot, 'gitDirty')).toBe(false);
+    expect(snapshot).toMatchObject({ totalTests: 1, passed: 1, schemaVersion: 3 });
+  });
+
+  it('omits a key whose value is not the shape it promises, one key at a time', async () => {
+    const garbage = [
+      { gitSha: 'HEAD', gitDirty: 'yes' },
+      { gitSha: SHA.slice(0, 39), gitDirty: 1 },
+      { gitSha: SHA.toUpperCase(), gitDirty: null },
+      { gitSha: null, gitDirty: undefined },
+      { gitSha: 42, gitDirty: 'false' },
+    ];
+    for (const value of garbage) {
+      const { snapshot } = await snapshotWith(() => value);
+      expect(Object.hasOwn(snapshot, 'gitSha'), `gitSha=${JSON.stringify(value.gitSha)}`).toBe(false);
+      expect(Object.hasOwn(snapshot, 'gitDirty'), `gitDirty=${JSON.stringify(value.gitDirty)}`).toBe(false);
+    }
+  });
+
+  it('keeps a well-formed sha when only the dirty flag is garbage, and the other way round', async () => {
+    const onlySha = (await snapshotWith(() => ({ gitSha: SHA, gitDirty: 'dirty' }))).snapshot;
+    expect(onlySha.gitSha).toBe(SHA);
+    expect(Object.hasOwn(onlySha, 'gitDirty')).toBe(false);
+
+    const onlyDirty = (await snapshotWith(() => ({ gitSha: 'garbage', gitDirty: true }))).snapshot;
+    expect(Object.hasOwn(onlyDirty, 'gitSha')).toBe(false);
+    expect(onlyDirty.gitDirty).toBe(true);
+  });
+
+  it('omits both keys when the reader is not a function or returns a non-object', async () => {
+    for (const reader of [undefined, null, 'git', () => null, () => 'sha', () => [SHA]]) {
+      const { snapshot } = await snapshotWith(reader);
+      expect(Object.hasOwn(snapshot, 'gitSha'), `reader=${String(reader)}`).toBe(false);
+      expect(Object.hasOwn(snapshot, 'gitDirty'), `reader=${String(reader)}`).toBe(false);
+    }
+  });
+
+  /**
+   * The copy's plugin root is a temp directory. `GIT_CEILING_DIRECTORIES` stops
+   * git's upward search at the temp directory's parent for the duration of the
+   * call, so a machine whose temp directory happens to sit inside a repository (a
+   * home directory under version control) cannot turn this case into a sha.
+   */
+  it('exposes the default reader, which answers with nothing for a plugin root outside any repository', async () => {
+    const { root, mod } = await loadIsolatedReporter();
+    expect(typeof mod.defaultReadGitIdentity).toBe('function');
+
+    const previous = process.env.GIT_CEILING_DIRECTORIES;
+    process.env.GIT_CEILING_DIRECTORIES = path.dirname(root);
+    try {
+      expect(mod.defaultReadGitIdentity()).toEqual({});
+    } finally {
+      if (previous === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+      else process.env.GIT_CEILING_DIRECTORIES = previous;
+    }
+  });
+
+  it('reads this checkout with the default reader: a 40-hex sha and a boolean dirty flag', () => {
+    // The real module, not a copy: its PLUGIN_ROOT is this plugin directory, which
+    // is tracked by the repository this test file lives in. Importing it writes
+    // nothing — only `onTestRunEnd` does.
+    const identity = readGitIdentityOfThisCheckout();
+    expect(identity.gitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(typeof identity.gitDirty).toBe('boolean');
+  });
+
+  it('is read back by deterministic-source: the identity, and a sha clause in the evidence note', async () => {
+    const { snapshot, text } = await snapshotWith(() => ({ gitSha: SHA, gitDirty: false }));
+
+    expect(readSnapshotIdentity(text)).toEqual({
+      gitSha: SHA,
+      gitDirty: false,
+      measuredAtMs: Date.parse(snapshot.timestamp),
+    });
+
+    const ranAtMs = Date.parse(snapshot.timestamp);
+    const layer = deterministicLayerFrom({ resultJsonText: text, markerMtimeMs: ranAtMs - 5000, nowMs: ranAtMs + 1000 });
+    expect(layer.exitCode).toBe(0);
+    expect(layer.evidence[0].note).toBe(
+      `vitest total=1 passed=1 failed=0 skipped=0 modules=1 completion=passed unhandled=0 unfinished=0 sha=${SHA.slice(0, 12)} dirty=false`,
+    );
   });
 });
