@@ -235,18 +235,37 @@ describe('phaseForRecovery — purity', () => {
 });
 
 describe('loadRecoveryTransitionConfig', () => {
-  it('reads the shipped config and reports the gate OFF (today default)', () => {
-    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false });
+  // 05 D-05: the read says HOW it ended. `state` is an allowlist of four —
+  // 'on' / 'off' for a file that was read, 'invalid' for a file that does not
+  // parse (or parses to a non-object), 'missing' for a file that is not there.
+  // The boolean's meaning is unchanged and still fails open: every non-`true`
+  // read is OFF. The warning is the REPORT gate's job, not this loader's.
+  it('reads the shipped config and reports the gate OFF (today default), state off', () => {
+    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false, state: 'off', reason: null });
   });
 
-  it('returns false when the config file does not exist', () => {
+  it('returns false and state missing when the config file does not exist', () => {
     mocks.pluginRoot = path.join(os.tmpdir(), 'recovery-transition-nonexistent-dir');
-    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false });
+    expect(loadRecoveryTransitionConfig()).toEqual({
+      transitionFromVerdict: false, state: 'missing', reason: expect.any(String),
+    });
   });
 
-  it('returns false for broken JSON instead of throwing', () => {
+  it('returns false and state invalid for broken JSON instead of throwing', () => {
     mocks.pluginRoot = tmpRootWith('{ not json');
-    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false });
+    expect(loadRecoveryTransitionConfig()).toEqual({
+      transitionFromVerdict: false, state: 'invalid', reason: expect.any(String),
+    });
+  });
+
+  it.each([
+    ['an array', '[]'],
+    ['a string', '"x"'],
+    ['null', 'null'],
+    ['a number', '7'],
+  ])('returns false and state invalid when the document is %s, not an object', (_label, text) => {
+    mocks.pluginRoot = tmpRootWith(text);
+    expect(loadRecoveryTransitionConfig()).toMatchObject({ transitionFromVerdict: false, state: 'invalid' });
   });
 
   it.each([
@@ -254,21 +273,30 @@ describe('loadRecoveryTransitionConfig', () => {
     ['the number 1', '1'],
     ['null', 'null'],
     ['an object', '{}'],
-  ])('returns false when the flag is %s, not a boolean', (_label, literal) => {
+  ])('returns false, state off, when the flag is %s, not a boolean (a deliberate non-true, not a broken file)', (_label, literal) => {
     mocks.pluginRoot = tmpRootWith(
       `{"autopilot":{"recovery":{"transitionFromVerdict":${literal}}}}`,
     );
-    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false });
+    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false, state: 'off', reason: null });
   });
 
-  it('returns false when the autopilot/recovery branch is missing entirely', () => {
+  it('returns false, state off, when the autopilot/recovery branch is missing entirely', () => {
     mocks.pluginRoot = tmpRootWith('{"team":{"enabled":true}}');
-    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false });
+    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: false, state: 'off', reason: null });
   });
 
-  it('returns true only for a real boolean true', () => {
+  it('returns true, state on, only for a real boolean true', () => {
     mocks.pluginRoot = tmpRootWith('{"autopilot":{"recovery":{"transitionFromVerdict":true}}}');
-    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: true });
+    expect(loadRecoveryTransitionConfig()).toEqual({ transitionFromVerdict: true, state: 'on', reason: null });
+  });
+
+  it('tells the three EXP-D cases apart: deliberate off, invalid, missing', () => {
+    mocks.pluginRoot = tmpRootWith('{"autopilot":{"recovery":{"transitionFromVerdict":false}}}');
+    expect(loadRecoveryTransitionConfig().state).toBe('off');
+    mocks.pluginRoot = tmpRootWith('{"autopilot": ');
+    expect(loadRecoveryTransitionConfig().state).toBe('invalid');
+    mocks.pluginRoot = path.join(os.tmpdir(), 'recovery-transition-nonexistent-dir-2');
+    expect(loadRecoveryTransitionConfig().state).toBe('missing');
   });
 });
 

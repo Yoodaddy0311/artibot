@@ -41,6 +41,16 @@
  *      or unacknowledged VERIFY is reported as that, not as its result. The rule
  *      reads the slot itself, never the attempt stamp or the history around it;
  *      "Attempt scope of `verifyResult`" below says why.
+ *   6′. ONLY under evidenceMode `'explicit-pass'` (05 D-04 stage 2; shipped
+ *      `'ack'`, where this rule does not run): `recovery-record.js#foldVerify` of
+ *      `state.verifyResult` is exactly `'PASS'` — `status: 'PASS'`, `ok: true` or
+ *      `passed: true`, with no contradicting signal beside it. Anything else — an
+ *      absent slot, `{}`, prose, a lowercase `'fail'`, a nested layer result, a
+ *      bare string, `UNMEASURED` spelled out — gives `VERIFY_RESULT_UNMEASURED`:
+ *      not a pass and not a failure. Rule 6 is an allowlist of FAIL shapes; 6′ is
+ *      the allowlist of PASS shapes that closes the gap between them (04 EXP-C,
+ *      2026-10-23: seven non-FAIL shapes passed rule 6 beside a `done` ACK). It
+ *      runs after rule 6 on purpose: an explicit FAIL stays FAILED.
  *
  * ### Why rule 3 has no case-fold (decided 2026-09-29)
  *
@@ -172,7 +182,10 @@
  *     lowercase `'fail'`, `ok: 'false'`, a nested layer result
  *     (`verifyResult.mcp.ok`) and a non-object all pass. How often a driver
  *     writes no explicit signal is the SH-06 recorder's measurement, not
- *     something this gate enforces.
+ *     something this gate enforces — under `'ack'`. Under `'explicit-pass'`
+ *     every one of those shapes is refused as `VERIFY_RESULT_UNMEASURED` (rule
+ *     6′); `scripts/ledger/verify-result-census.mjs` counts, over a stored
+ *     store, how many REPORT-reached sessions that flip would add to the pauses.
  *   - `verifyResult` is attempt-scoped only by the engine's seal (section above), and
  *     only with the seal armed. A session that never went through a scoped hand-out
  *     (stored earlier, hand-driven, or run with both switches OFF) still has one
@@ -196,12 +209,31 @@
  * {@link scopeVerifyResultToAttempt} returns before it reads the state. The gate
  * itself obeys this switch alone.
  *
- * The switch is read from `<pluginRoot>/artibot.config.json` on every call, and
- * an unreadable file (missing, or JSON that does not parse) reads OFF with no
- * tick and no warning — see {@link loadReportVerifyGateConfig}. A corrupted
- * config therefore disables enforcement silently; nothing here can tell that
- * from a deliberate OFF. The seal's second key is read the same way, through
- * `recovery-transition.js#loadRecoveryTransitionConfig`.
+ * The switch is read from `<pluginRoot>/artibot.config.json` on every call. An
+ * unreadable file (missing, or JSON that does not parse) still reads OFF — fail
+ * open is the owner's standing decision (2026-10-05 #4, VERIFICATION-ECONOMICS
+ * §0.2: the fail-closed policy stays on the CA-04 / R-5 schedule) — but since
+ * 05 D-05 the read SAYS so: {@link loadReportVerifyGateConfig} returns a `state`
+ * from the allowlist {@link REPORT_VERIFY_CONFIG_STATES} ('on' · 'off' ·
+ * 'invalid' · 'missing') and a `reason`, and the two gate entry points
+ * ({@link gateReportOnVerify}, {@link refuseRecordedReport}) tick ONE
+ * `config-unreadable` warning per session, plus one stderr line, when the state
+ * is 'invalid' or 'missing' — guarded by an in-memory flag on the state object
+ * (`reportVerifyGateConfigWarned`), never by a new persist. A deliberate OFF
+ * ('off') stays byte for byte silent: no tick, no stderr, no field. The seal's
+ * second key is read the same way, through
+ * `recovery-transition.js#loadRecoveryTransitionConfig`, which returns the same
+ * tri-state; the seal itself warns nothing.
+ *
+ * ## evidenceMode (05 D-04 stage 2)
+ *
+ * `autopilot.reportVerifyGate.evidenceMode`, an allowlist of two values read by
+ * {@link readReportVerifyGateEvidenceMode}: `'ack'` (shipped — rules 1-6, the gate
+ * exactly as it was before the key existed) and `'explicit-pass'` (adds rule 6′).
+ * Any other value — absent, mistyped, a mode not yet wired — reads as `'ack'`
+ * with a `reason` on the loaded config, so an unknown mode never tightens the
+ * gate. A third mode, `'deterministic'` (rule 7: a fresh vitest snapshot bound to
+ * the current git SHA), is designed in 05 D-04 and is NOT wired here yet.
  *
  * @module lib/autopilot/report-verify-gate
  */
@@ -211,6 +243,7 @@ import path from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { mergeQueuedNotification, persist, tick } from './_engine-helpers.js';
 import { notifyPause } from './notification.js';
+import { foldVerify } from './recovery-record.js';
 import { loadRecoveryTransitionConfig } from './recovery-transition.js';
 
 /**
@@ -221,11 +254,42 @@ import { loadRecoveryTransitionConfig } from './recovery-transition.js';
 export const REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH = 'autopilot.reportVerifyGate.enforce';
 
 /**
+ * Config path of the evidence mode (05 D-04 stage 2). Exported for the same
+ * reason as the enforce path: one spelling shared by the reader and the pins.
+ * @type {string}
+ */
+export const REPORT_VERIFY_GATE_EVIDENCE_MODE_CONFIG_PATH = 'autopilot.reportVerifyGate.evidenceMode';
+
+/**
+ * The closed vocabulary of evidence modes — an allowlist. `'ack'` is the gate as
+ * it shipped before the key existed (rules 1-6); `'explicit-pass'` adds rule 6′.
+ * A value outside this list reads as `'ack'` ({@link readReportVerifyGateEvidenceMode}).
+ * @type {ReadonlyArray<'ack'|'explicit-pass'>}
+ */
+export const REPORT_VERIFY_EVIDENCE_MODES = Object.freeze(['ack', 'explicit-pass']);
+
+/** The mode an absent, unknown or unreadable value falls back to. */
+const DEFAULT_EVIDENCE_MODE = 'ack';
+
+/**
+ * How a config read ended — an allowlist (05 D-05). `'on'` and `'off'` mean the
+ * file was read and said so; `'invalid'` means it exists but does not parse, or
+ * parses to something that is not an object; `'missing'` means it could not be
+ * opened. Only the last two make a gate entry point warn.
+ * @type {ReadonlyArray<'on'|'off'|'invalid'|'missing'>}
+ */
+export const REPORT_VERIFY_CONFIG_STATES = Object.freeze(['on', 'off', 'invalid', 'missing']);
+
+/** The two states that are a reading problem rather than a setting. */
+const UNREADABLE_STATES = new Set(['invalid', 'missing']);
+
+/**
  * The closed vocabulary of {@link evaluateReportVerifyEvidence} codes.
  * @type {Readonly<{OK: 'ok', NO_VERIFY_ATTEMPT: 'NO_VERIFY_ATTEMPT',
  *   VERIFY_NOT_ACKED: 'VERIFY_NOT_ACKED', VERIFY_NOT_DONE: 'VERIFY_NOT_DONE',
  *   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE',
- *   VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED'}>}
+ *   VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED',
+ *   VERIFY_RESULT_UNMEASURED: 'VERIFY_RESULT_UNMEASURED'}>}
  */
 export const REPORT_VERIFY_CODES = Object.freeze({
   OK: 'ok',
@@ -234,6 +298,19 @@ export const REPORT_VERIFY_CODES = Object.freeze({
   VERIFY_NOT_DONE: 'VERIFY_NOT_DONE',
   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE',
   VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED',
+  VERIFY_RESULT_UNMEASURED: 'VERIFY_RESULT_UNMEASURED',
+});
+
+/**
+ * What a pause for a code tells the driver beyond the code itself. Only the codes
+ * with something to add appear here; every other pause keeps its three-line
+ * instruction and its tick data byte for byte.
+ * @type {Readonly<Record<string, string>>}
+ */
+const CODE_HINTS = Object.freeze({
+  VERIFY_RESULT_UNMEASURED: "evidenceMode 'explicit-pass': state.verifyResult 에 명시 PASS 가 없습니다. "
+    + "인정되는 형은 status: 'PASS' · ok: true · passed: true 셋뿐이고, 비어 있거나 자유형(산문·소문자 'fail'·"
+    + "중첩 mcp 결과·문자열)이면 UNMEASURED — 통과가 아닙니다. VERIFY 를 다시 돌려 그 결과를 세 형 중 하나로 통째로 쓰십시오.",
 });
 
 /** The one result status that counts as a completed verification. */
@@ -276,20 +353,147 @@ export function readReportVerifyGateEnforce(cfg) {
 }
 
 /**
- * Read the kill switch straight off `<pluginRoot>/artibot.config.json`
- * (precedent: `recovery-transition.js#loadRecoveryTransitionConfig`). A missing
- * file or broken JSON reads OFF — silently, with no tick and no warning, so a
- * corrupted config file disables enforcement without a trace. Never throws.
+ * A short, single-line account of an unknown value, for a `reason` field.
+ * `undefined` is spelled `absent` so an older config without the key reads
+ * differently from one that misspells it.
  *
- * @returns {{enforce: boolean}}
+ * @param {unknown} value
+ * @returns {string}
+ */
+function describeValue(value) {
+  if (value === undefined) return 'absent';
+  if (typeof value === 'string') return value === '' ? '""' : value.slice(0, 40);
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === 'string' ? text.slice(0, 40) : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Resolve the evidence mode from an already-read config object. An ALLOWLIST:
+ * exactly `'ack'` or `'explicit-pass'` is taken as written with `reason: null`;
+ * anything else — the key absent, a non-string, an unknown or differently cased
+ * spelling, a mode designed but not wired — reads as `'ack'` and the `reason`
+ * says what was found, so the fallback is visible and an unknown mode never
+ * tightens the gate.
+ *
+ * @param {unknown} cfg - Parsed `artibot.config.json`, or anything at all.
+ * @returns {{evidenceMode: 'ack'|'explicit-pass', reason: string|null}}
+ */
+export function readReportVerifyGateEvidenceMode(cfg) {
+  const value = REPORT_VERIFY_GATE_EVIDENCE_MODE_CONFIG_PATH
+    .split('.')
+    .reduce((node, key) => /** @type {any} */ (node)?.[key], cfg);
+  if (REPORT_VERIFY_EVIDENCE_MODES.includes(value)) return { evidenceMode: value, reason: null };
+  return { evidenceMode: DEFAULT_EVIDENCE_MODE, reason: `evidenceMode-unknown:${describeValue(value)}` };
+}
+
+/**
+ * One line of why a read failed: the error code when there is one, then the
+ * message, bounded so a reason never becomes a stack trace.
+ *
+ * @param {unknown} err
+ * @returns {string}
+ */
+function briefReason(err) {
+  const code = typeof err?.code === 'string' && err.code ? `${err.code}: ` : '';
+  const message = typeof err?.message === 'string' ? err.message : String(err);
+  return `${code}${message}`.slice(0, 160);
+}
+
+/**
+ * Read `<pluginRoot>/artibot.config.json` and say HOW the read ended (05 D-05).
+ * `'read'` carries the parsed object; `'invalid'` is a file that exists but does
+ * not parse, or parses to something that is not a plain object; `'missing'` is a
+ * file that could not be opened (ENOENT, EACCES, a plugin root that cannot be
+ * resolved). Never throws. A twin lives in `recovery-transition.js`, which this
+ * module imports and so cannot export to.
+ *
+ * @returns {{cfg: object|null, state: 'read'|'invalid'|'missing', reason: string|null}}
+ */
+function readPluginConfigFile() {
+  let text;
+  try {
+    text = readFileSync(path.join(getPluginRoot(), 'artibot.config.json'), 'utf8');
+  } catch (err) {
+    return { cfg: null, state: 'missing', reason: briefReason(err) };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { cfg: null, state: 'invalid', reason: briefReason(err) };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { cfg: null, state: 'invalid', reason: 'config is not a JSON object' };
+  }
+  return { cfg: parsed, state: 'read', reason: null };
+}
+
+/**
+ * Read the kill switch and the evidence mode straight off
+ * `<pluginRoot>/artibot.config.json` (precedent:
+ * `recovery-transition.js#loadRecoveryTransitionConfig`). Never throws.
+ *
+ * Tri-state (05 D-05): `enforce` keeps its meaning — only the literal `true` is
+ * ON, and a missing file or broken JSON still reads OFF (fail open, the standing
+ * owner decision) — but `state` now tells a deliberate `'off'` from an
+ * `'invalid'` or `'missing'` file, and `reason` says why. `evidenceMode` is
+ * `'ack'` whenever the file could not be read; when it could, it is the allowlist
+ * read of {@link readReportVerifyGateEvidenceMode}, whose fallback reason rides
+ * in `reason` (the file state is then `'on'`/`'off'`: an unknown mode is not an
+ * unreadable file). This loader itself warns nothing; the gate entry points do.
+ *
+ * @returns {{enforce: boolean, evidenceMode: 'ack'|'explicit-pass',
+ *   state: 'on'|'off'|'invalid'|'missing', reason: string|null}}
  */
 export function loadReportVerifyGateConfig() {
-  try {
-    const cfgPath = path.join(getPluginRoot(), 'artibot.config.json');
-    return { enforce: readReportVerifyGateEnforce(JSON.parse(readFileSync(cfgPath, 'utf8'))) };
-  } catch {
-    return { enforce: false };
+  const file = readPluginConfigFile();
+  if (file.state !== 'read') {
+    return { enforce: false, evidenceMode: DEFAULT_EVIDENCE_MODE, state: file.state, reason: file.reason };
   }
+  const enforce = readReportVerifyGateEnforce(file.cfg);
+  const mode = readReportVerifyGateEvidenceMode(file.cfg);
+  return { enforce, evidenceMode: mode.evidenceMode, state: enforce ? 'on' : 'off', reason: mode.reason };
+}
+
+/**
+ * Warn ONCE per session that the gate's config could not be read (05 D-05), and
+ * only then: a deliberate OFF, a valid ON and an injected config with no `state`
+ * all return before touching anything, so the pre-D-05 paths stay byte for byte.
+ *
+ * The guard is an in-memory flag on the state object
+ * (`reportVerifyGateConfigWarned`, set to the state that was warned about). It is
+ * not persisted here — the gate adds no write — though it rides along in whatever
+ * persist the engine does next, which is how "once per session" survives a
+ * second process. Enforcement is NOT changed: the caller reads OFF as before.
+ *
+ * @param {unknown} state - Live session state; anything that is not an object is left alone.
+ * @param {unknown} config - The loaded (or injected) gate config.
+ * @returns {void}
+ */
+function warnConfigUnreadable(state, config) {
+  const cfgState = /** @type {any} */ (config)?.state;
+  if (!UNREADABLE_STATES.has(cfgState)) return;
+  if (state === null || typeof state !== 'object' || Array.isArray(state)) return;
+  const live = /** @type {Record<string, unknown>} */ (state);
+  if (live.reportVerifyGateConfigWarned) return;
+  live.reportVerifyGateConfigWarned = cfgState;
+  const raw = /** @type {any} */ (config)?.reason;
+  const reason = typeof raw === 'string' && raw ? raw : 'unknown';
+  const text = `config unreadable: ${cfgState} (${reason}); enforcement reads OFF`;
+  tick(/** @type {any} */ (live.sessionId), {
+    phase: 'REPORT',
+    type: 'config-unreadable',
+    level: 'warn',
+    message: `autopilot.reportVerifyGate ${text}`,
+    data: { state: cfgState, reason },
+  });
+  try {
+    process.stderr.write(`[artibot:report-verify-gate] ${text}\n`);
+  } catch { /* a closed stderr must not reach the engine */ }
 }
 
 /**
@@ -311,15 +515,22 @@ function verdict(code, started = null, slot = null) {
 
 /**
  * Decide whether the session holds VERIFY evidence for the work being reported.
- * Pure: reads `state` (`attemptJournal`, `activePhaseAttempt` and, for rule 6,
- * `verifyResult`), never mutates it. It does not read `verifyResultScope` or
- * `verifyResultHistory`: see {@link scopeVerifyResultToAttempt} for why. The rule is
- * in the module header.
+ * Pure: reads `state` (`attemptJournal`, `activePhaseAttempt` and, for rules 6
+ * and 6′, `verifyResult`), never mutates it. It does not read `verifyResultScope`
+ * or `verifyResultHistory`: see {@link scopeVerifyResultToAttempt} for why. The
+ * rule is in the module header.
+ *
+ * `opts.evidenceMode` selects the rule set: `'explicit-pass'` adds rule 6′ after
+ * rule 6; anything else — the argument omitted, `'ack'`, a mode not in
+ * {@link REPORT_VERIFY_EVIDENCE_MODES} — is `'ack'`, under which this function
+ * is byte for byte what it was before the option existed.
  *
  * @param {object} state
+ * @param {{evidenceMode?: unknown}} [opts]
  * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null}}
  */
-export function evaluateReportVerifyEvidence(state) {
+export function evaluateReportVerifyEvidence(state, opts = undefined) {
+  const evidenceMode = /** @type {any} */ (opts)?.evidenceMode === 'explicit-pass' ? 'explicit-pass' : DEFAULT_EVIDENCE_MODE;
   const journal = Array.isArray(state?.attemptJournal) ? state.attemptJournal : [];
   const active = state?.activePhaseAttempt;
   const slot = active && typeof active === 'object' && active.phase === 'VERIFY' ? active : null;
@@ -337,6 +548,11 @@ export function evaluateReportVerifyEvidence(state) {
   if (vIdx < eIdx) return verdict(REPORT_VERIFY_CODES.STALE_BEFORE_EXECUTE, started, slot);
   if (slot) return verdict(REPORT_VERIFY_CODES.VERIFY_NOT_ACKED, started, slot);
   if (hasExplicitVerifyFail(state?.verifyResult)) return verdict(REPORT_VERIFY_CODES.VERIFY_RESULT_FAILED, started);
+  // Rule 6′ — the PASS allowlist, 'explicit-pass' only. After rule 6 so an
+  // explicit FAIL is still FAILED, never UNMEASURED.
+  if (evidenceMode === 'explicit-pass' && foldVerify(state?.verifyResult) !== 'PASS') {
+    return verdict(REPORT_VERIFY_CODES.VERIFY_RESULT_UNMEASURED, started);
+  }
   return verdict(REPORT_VERIFY_CODES.OK, started);
 }
 
@@ -482,9 +698,12 @@ function handsOutVerifyFirst(state, nextTarget, phases, verifyAt) {
  *
  * @param {Iterable<unknown>} states - Parsed session states; the loader's `[]`
  *   backfill of a missing journal is not needed, a missing journal reads the same.
- * @param {{nextTarget?: (state: object) => unknown, phases?: readonly string[]}} [opts]
+ * @param {{nextTarget?: (state: object) => unknown, phases?: readonly string[],
+ *   evidenceMode?: unknown}} [opts]
  *   `engine-state.js#nextTarget` and `#PHASES`, passed in because that module
  *   imports this one (the same reason as `refuseRecordedReport`'s `livePhases`).
+ *   `evidenceMode` is handed to {@link evaluateReportVerifyEvidence} as is;
+ *   omitted, the census counts under `'ack'`, exactly as before.
  * @returns {{total: number, unreadable: number, byCode: Record<string, number>,
  *   terminal: number, live: number, liveWithoutEvidence: number, pauseAtReport: number|null}}
  * @throws {TypeError} when `states` is not an iterable object: a zero census of
@@ -494,7 +713,7 @@ export function censusReportVerifyEvidence(states, opts = {}) {
   if (states === null || typeof states !== 'object' || typeof states[Symbol.iterator] !== 'function') {
     throw new TypeError('states must be an iterable of session states');
   }
-  const { nextTarget, phases } = opts ?? {};
+  const { nextTarget, phases, evidenceMode } = opts ?? {};
   const measurable = typeof nextTarget === 'function' && Array.isArray(phases) && phases.includes('VERIFY');
   const verifyAt = measurable ? phases.indexOf('VERIFY') : -1;
   const byCode = Object.fromEntries(Object.values(REPORT_VERIFY_CODES).map((code) => [code, 0]));
@@ -507,7 +726,7 @@ export function censusReportVerifyEvidence(states, opts = {}) {
       continue;
     }
     census.total += 1;
-    const { code } = evaluateReportVerifyEvidence(state);
+    const { code } = evaluateReportVerifyEvidence(state, { evidenceMode });
     byCode[code] += 1;
     if (TERMINAL_PHASES.has(state.phase)) {
       census.terminal += 1;
@@ -543,6 +762,7 @@ export function censusReportVerifyEvidence(states, opts = {}) {
  */
 function pauseForVerify(state, result) {
   const reason = `report-verify-evidence-missing:${result.code}`;
+  const hint = CODE_HINTS[result.code];
   tick(state.sessionId, {
     phase: 'REPORT',
     type: 'phase-end',
@@ -560,7 +780,9 @@ function pauseForVerify(state, result) {
     type: 'pause',
     level: 'warn',
     message: `Autopilot paused: ${reason}`,
-    data: { code: result.code, attemptId: result.attemptId },
+    // `hint` only for the codes that have one (CODE_HINTS), so every other
+    // pause tick keeps its two-key data byte for byte.
+    data: { code: result.code, attemptId: result.attemptId, ...(hint ? { hint } : {}) },
   });
   const note = notifyPause(state.sessionId, reason);
   return {
@@ -574,6 +796,7 @@ function pauseForVerify(state, result) {
       'Autopilot 세션이 REPORT 직전에 일시정지되었습니다 — 현재 작업 결과에 대응하는 VERIFY 완료 근거가 없습니다.',
       `사유: ${reason}`,
       '/autopilot:resume <sessionId> 로 재개하면 VERIFY 부터 다시 실행합니다.',
+      ...(hint ? [hint] : []),
     ],
   };
 }
@@ -587,14 +810,21 @@ function pauseForVerify(state, result) {
  * touching anything, so events.ndjson and the report's Phase Timeline are exactly
  * what they were without the gate.
  *
- * @param {object} state - Live session state (mutated only when pausing).
- * @param {{enforce?: boolean}} [config] - Injectable for tests; omitted, it is
- *   read from `artibot.config.json`.
+ * An unreadable config (`state` 'invalid' or 'missing' on the loaded object)
+ * warns once per session and reads OFF — see {@link loadReportVerifyGateConfig};
+ * the deliberate-OFF path is untouched by that.
+ *
+ * @param {object} state - Live session state (mutated only when pausing, or to
+ *   set the once-per-session warning flag).
+ * @param {{enforce?: boolean, evidenceMode?: unknown, state?: string, reason?: string|null}} [config]
+ *   Injectable for tests; omitted, it is read from `artibot.config.json`.
  * @returns {object|null}
  */
 export function gateReportOnVerify(state, config = undefined) {
-  if ((config ?? loadReportVerifyGateConfig())?.enforce !== true) return null;
-  const result = evaluateReportVerifyEvidence(state);
+  const cfg = config ?? loadReportVerifyGateConfig();
+  warnConfigUnreadable(state, cfg);
+  if (cfg?.enforce !== true) return null;
+  const result = evaluateReportVerifyEvidence(state, { evidenceMode: cfg?.evidenceMode });
   if (!result.ok) return pauseForVerify(state, result);
   // ON only: a passed gate leaves a trace, so an enforced run can later show
   // WHICH VERIFY attempt it accepted — the pause path is not the only record.
@@ -623,6 +853,7 @@ export function gateReportOnVerify(state, config = undefined) {
  */
 function pauseRecordedReport(state, result, claimedStatus) {
   const reason = `report-verify-evidence-missing:${result.code}`;
+  const hint = CODE_HINTS[result.code];
   state.phase = 'PAUSED';
   state.lastPhase = 'REPORT';
   state.pendingPhase = 'VERIFY';
@@ -636,6 +867,7 @@ function pauseRecordedReport(state, result, claimedStatus) {
       code: result.code,
       attemptId: result.attemptId,
       claimedStatus: typeof claimedStatus === 'string' ? claimedStatus : null,
+      ...(hint ? { hint } : {}),
     },
   });
   let note = null;
@@ -668,15 +900,21 @@ function pauseRecordedReport(state, result, claimedStatus) {
  * and every refusal is `kept`: fail-closed, refused and never paused. Only an
  * array counts; a string would answer `includes` by substring.
  *
- * @param {object} state - Live session state (mutated only when pausing).
+ * An unreadable config (`state` 'invalid' or 'missing' on the object the caller
+ * loaded) warns once per session before the OFF read, as the engine path does.
+ *
+ * @param {object} state - Live session state (mutated only when pausing, or to
+ *   set the once-per-session warning flag).
  * @param {{status?: unknown}} [payload] - The REPORT result being recorded.
- * @param {{enforce?: boolean}} [config] - The switch, injected by the caller.
+ * @param {{enforce?: boolean, evidenceMode?: unknown, state?: string, reason?: string|null}} [config]
+ *   The switch and the mode, injected by the caller.
  * @param {readonly string[]} [livePhases] - Phases a refusal may pause from.
  * @returns {boolean}
  */
 export function refuseRecordedReport(state, payload, config, livePhases = []) {
+  warnConfigUnreadable(state, config);
   if (config?.enforce !== true) return false;
-  const result = evaluateReportVerifyEvidence(state);
+  const result = evaluateReportVerifyEvidence(state, { evidenceMode: config?.evidenceMode });
   if (result.ok) {
     tick(state?.sessionId, {
       phase: 'REPORT',
