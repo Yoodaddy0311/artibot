@@ -476,18 +476,22 @@ if [ -n "$LONGCTX_FILE" ]; then
   fi
 fi
 
-# ─── Session token usage (from runtime-prompt.js) ───────────────────────────
+# ─── Current-input token ESTIMATE (from runtime-prompt.js) ─────────────────
+# `totalTokens` is chars/4 of the LAST prompt (runtime-prompt.js#persistTokenUsage,
+# token-usage middleware; output tokens are always 0 there). It is NOT a session
+# total, NOT model output and NOT billing — those live in the usage.receipt ledger
+# rows. Label it as the estimate it is (10-04 economics audit C3, 2026-10-23).
 TOKEN_LABEL=''
 state_file token-usage-session.json; TOKEN_FILE="$STATE_FILE"
 if [ -n "$TOKEN_FILE" ]; then
   RAW_TOKENS=$(_json_file_get "$TOKEN_FILE" '.totalTokens' '0')
   if [ -n "$RAW_TOKENS" ] && [ "$RAW_TOKENS" -gt 0 ] 2>/dev/null; then
     if [ "$RAW_TOKENS" -ge 1000000 ]; then
-      TOKEN_LABEL="~$(( RAW_TOKENS / 1000000 ))M tokens"
+      TOKEN_LABEL="~$(( RAW_TOKENS / 1000000 ))M tok(입력 추정)"
     elif [ "$RAW_TOKENS" -ge 1000 ]; then
-      TOKEN_LABEL="~$(( RAW_TOKENS / 1000 ))K tokens"
+      TOKEN_LABEL="~$(( RAW_TOKENS / 1000 ))K tok(입력 추정)"
     else
-      TOKEN_LABEL="~${RAW_TOKENS} tokens"
+      TOKEN_LABEL="~${RAW_TOKENS} tok(입력 추정)"
     fi
   fi
 fi

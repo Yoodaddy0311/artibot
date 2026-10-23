@@ -1287,8 +1287,9 @@
   },
   "skills": {
     "lazyLoading": {
-      "enabled": true,
-      "maxConcurrent": 5
+      "enabled": false,
+      "maxConcurrent": 5,
+      "comment": "2026-10-23: false (10-04 economics audit C5, NECESSARY). true made lib/runtime/middleware/skills.js read every SKILL.md body (114 files, ~961 KB, ~30 ms) on every prompt with zero consumers of the loaded text; native skill activation and the name-based recommendations do not depend on it (tests/runtime/middleware/skills.test.js has the enabled:false case). Set true only if a consumer of the preloaded bodies appears."
     }
   },
   "retention": {

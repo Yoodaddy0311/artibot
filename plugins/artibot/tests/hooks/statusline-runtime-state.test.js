@@ -462,7 +462,8 @@ describe.skipIf(!BASH.ok)('statusline.sh — end to end, fed by the real hook wr
 
     const effort = JSON.parse(readFileSync(resolveSessionStatePath('sess-A', 'current-effort.json'), 'utf8')).effort;
     const tokens = JSON.parse(readFileSync(resolveSessionStatePath('sess-A', 'token-usage-session.json'), 'utf8')).totalTokens;
-    const tokenLabel = tokens >= 1000 ? `~${Math.floor(tokens / 1000)}K tokens` : `~${tokens} tokens`;
+    // Labelled as the current-input ESTIMATE it is (10-04 audit C3, 2026-10-23), not a session total.
+    const tokenLabel = tokens >= 1000 ? `~${Math.floor(tokens / 1000)}K tok(입력 추정)` : `~${tokens} tok(입력 추정)`;
 
     expect(r.stdout).toContain(`🎚 ${effort}`);
     expect(r.stdout).toContain('👥 alpha');

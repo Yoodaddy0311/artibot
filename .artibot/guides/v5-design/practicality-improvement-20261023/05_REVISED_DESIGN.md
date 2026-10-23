@@ -223,7 +223,7 @@
 | D-04 2단계 `evidenceMode` `'explicit-pass'`(규칙 6′) | 착지, 키 `'ack'` 출하 | `717981c0` | `'ack'` 바이트 불변(기존 94건 그대로) | `tests/autopilot/report-verify-gate.test.js` |
 | D-04 `'deterministic'`(규칙 7) — 리포터 `gitSha`·`gitDirty`(schemaVersion 3) + `deterministic-source.js#readSnapshotIdentity` + 판정 모듈 + 게이트 배선 | 착지, 키 `'ack'` 출하 | `7ef479f7` · `93add847` · 이 커밋 | 리포터 스냅샷에 두 키 추가(소비처 15파일 그린). 게이트는 `'ack'` 에서 포트를 건드리지 않는다 | `tests/verification/deterministic-source-identity.test.js` 23 · `tests/autopilot/verify-evidence-deterministic.test.js` 22 · `tests/autopilot/report-verify-gate-deterministic.test.js` 22 |
 | D-05 설정 읽기 3상태 + 세션당 1회 경고 | 착지 | `717981c0` | 있음 — invalid·missing 일 때만 warn tick + stderr 1줄; 명시 off 는 바이트 불변; enforce 는 그대로 fail-open(오너 결정 #4 유지) | `report-verify-gate.test.js` · `recovery-transition.test.js` 65 |
-| D-06 C3 라벨 정정 · 02 비용 컬럼 | **미착수** | — | VERIFICATION-ECONOMICS §4.3 범위 그대로 남음 | — |
+| D-06 C3 라벨 정정 · 02 비용 컬럼 | 라벨 정정 **착지**(statusline·dashboard·marketplace auditLog); `kind`/`scope` 필드는 감사 DEFER 그대로; 02 비용 컬럼 정의는 05 §4 문서로 완료 | 같은 날 뒤 커밋(CHANGELOG 「10-04 경제성 감사의 미착지 NECESSARY 착지」) | 표시 문구만 바뀜 | `tests/hooks/statusline-runtime-state.test.js` 라벨 핀 |
 | D-07 격리 런북 시운전 · Phase 1 pilot | **미착수**(오너 예산 결정 뒤) | — | — | — |
 | Wave 0 라이브 분모 3종 | **미착수**(이 체크아웃에 원장·세션 스토어 없음) | — | 오너 PC 에서 `node scripts/ledger/verify-result-census.mjs` · `node scripts/ledger/loop-detection-census.mjs` | — |
 

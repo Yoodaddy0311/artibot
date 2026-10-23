@@ -132,10 +132,12 @@
 
 ## 8. 권고 (problem-validation 4-check)
 
+> 적용 상태(2026-10-23, 같은 날 뒤 커밋): #1 · #2 · #4 **착지**(CHANGELOG 「10-04 경제성 감사의 미착지 NECESSARY 착지」). #3(a) 는 오너 결정·Existence Audit 대기, #3(b) 는 아래 재판정으로 **DEFER**. #5~#7 은 PC·오너로 넘김([07](07_PC_HANDOFF.md)).
+
 **NECESSARY**
 1. `skills/tdd-workflow/SKILL.md:36` · `skills/quality-framework/SKILL.md:45-46` 의 `!` 줄 삭제(헤딩 유지). 근거 §3. 비용: 활성화당 전체 테스트 1회 → 0. 테스트: `tests/firewall/constitution-stage-b*.test.js` 가 헤딩 기준선을 핀 — 줄만 지우면 그린(추론, 감사 §2.2 와 동일 서술).
 2. `artibot.config.json#skills.lazyLoading.enabled` → `false`(C5). `tests/runtime/middleware/skills.test.js` 에 enabled:false 케이스가 이미 있다(감사 §4.4).
-3. 설명 세 축소, 두 갈래. (a) **매 턴 목록에서 빼기**: 스킬 114 중 `disable-model-invocation: true` 는 9, 커맨드 81 중 5 뿐이다(grep). Anthropic 문서는 "배포·커밋·코드 생성처럼 사람이 `/name` 으로 부르는 **작업형** 내용은 `disable-model-invocation: true`" 를 권한다 — 커맨드 76·스킬 105 를 작업형/지식형으로 분류해 작업형을 모델 목록에서 빼면 설명 세의 상당 부분이 사라진다(절감 폭은 분류 결과에 따름; 발화 분모 없이 어느 스킬이 모델 발화에 의존하는지 모르므로 **Existence Audit 선행 + 오너 결정**). (b) **줄이기**: 에이전트 설명 24개(>500자)를 300자 안으로, 스킬 설명 7개(>500자)를 500자 안으로 — 매 요청 ≈3~4K 토큰 절감(추정). 설명은 **발화 레버**다(`plugins/artibot/CLAUDE.md` "Auto-invoke Principle") — 트리거 어휘(`triggers`·`when_to_use`)는 지키고 산문만 줄인다. `scripts/ci/lint-skill-descriptions.js` 의 R1 trigger floor 가 하한을 지킨다.
+3. 설명 세 축소, 두 갈래. (a) **매 턴 목록에서 빼기**: 스킬 114 중 `disable-model-invocation: true` 는 9, 커맨드 81 중 5 뿐이다(grep). Anthropic 문서는 "배포·커밋·코드 생성처럼 사람이 `/name` 으로 부르는 **작업형** 내용은 `disable-model-invocation: true`" 를 권한다 — 커맨드 76·스킬 105 를 작업형/지식형으로 분류해 작업형을 모델 목록에서 빼면 설명 세의 상당 부분이 사라진다(절감 폭은 분류 결과에 따름; 발화 분모 없이 어느 스킬이 모델 발화에 의존하는지 모르므로 **Existence Audit 선행 + 오너 결정**). (b) **줄이기**(재판정 → **DEFER**): 에이전트 설명 24개(>500자)·스킬 설명 7개(>500자)의 산문을 줄이면 매 요청 ≈1.8K 토큰(고정 세의 약 8%, opus 캐시 읽기로 200요청당 약 $0.07) 절감 추정 — 트리거 목록은 지켜야 하므로 더 못 줄인다. 절감이 작고 설명은 발화 레버라 품질 위험이 크다(problem-validation check 4). (a) 가 끝나 분모가 있을 때 함께 한다. 설명은 **발화 레버**다(`plugins/artibot/CLAUDE.md` "Auto-invoke Principle") — 트리거 어휘(`triggers`·`when_to_use`)는 지키고 산문만 줄인다. `scripts/ci/lint-skill-descriptions.js` 의 R1 trigger floor 가 하한을 지킨다.
 4. C3 토큰 라벨 정정(05 D-06 (a), 감사 §4.3 범위 그대로).
 
 **PARTIAL(오너 결정 동반)**

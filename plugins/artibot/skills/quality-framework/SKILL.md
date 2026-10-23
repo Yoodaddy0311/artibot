@@ -33,7 +33,7 @@ agents:
 tokens: "~3K"
 category: "code-quality"
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
-source_hash: 84c2bf46
+source_hash: f3771b3a
 whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfix. For single-file changes under 50 lines, run only the blocking gates (Steps 1, 2, 4, 5). Reserve full cycle execution for release candidates and architecture-level changes."
 ---
 
@@ -42,8 +42,7 @@ whenNotToUse: "Do not run the full 8-step ATLAS cycle on every micro-PR or hotfi
 **Automated | Tested | Learned | Adaptive | Secure**
 
 ## Current State
-!`npm run lint 2>&1 | tail -3`
-!`npm test 2>&1 | tail -5`
+Run the project's lint and test commands yourself, scoped to what changed, when a verdict needs them. Nothing runs at activation: the former `!` lines here executed `npm run lint` and the WHOLE test suite before this skill reached the model (≈4-5 min in this repo for 8 lines of output) — removed 2026-10-23.
 
 ## When This Skill Applies
 - Code review and quality assessment
