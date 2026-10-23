@@ -12,6 +12,7 @@
 3. [03_IMPLEMENTATION_HANDOFF.md](03_IMPLEMENTATION_HANDOFF.md) — Claude Code/Codex/Dot을 위한 읽기·구현·검수 인수인계 명세
 4. [04_VALIDATION_REPORT.md](04_VALIDATION_REPORT.md) — 01~03 의 주장을 소스·호스트 문서·격리 재현(EXP-A~D, API 호출 0)으로 대조한 검증 보고. 판정표·D0~D6 연결성 감사표·재현 스크립트·미확인 목록
 5. [05_REVISED_DESIGN.md](05_REVISED_DESIGN.md) — 검증을 통과한 것만 기존 부품 위에 다시 설계한 개정판. 정정표·D-01~D-07·P1/P2 처분표·실험 매니페스트·Wave 재편·오너 결정 항목
+6. [06_PIPELINE_AUDIT.md](06_PIPELINE_AUDIT.md) — 구현 뒤 파이프라인·토큰 점검(API 호출 0): 매 요청 고정 컨텍스트 세(≈22K 토큰)와 티어별 비용, 도구 호출당 훅 프로세스 수·지연, 스킬 활성화 시 전체 테스트 실행(확정), 10-04 감사의 미착지 NECESSARY 3건, 끊긴 배선 감사의 한계, 오픈소스 비교, 유무 차이 중 지금 말할 수 있는 것
 
 ## 이 설계가 기존 문서와 갖는 관계
 
