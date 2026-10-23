@@ -9,65 +9,84 @@
  */
 
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 import { resolveArtibotDir } from '../../lib/core/config.js';
+import { resolveSessionStatePath } from '../../lib/core/runtime-state.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
-/**
- * Path to the persisted loop detector state file. Asked on every use: it follows the state-dir
- * resolver (`ARTIBOT_STATE_DIR` paired with the home in force) and is
- * `~/.claude/artibot/loop-state.json` when nothing is redirected, exactly as before.
- * @returns {string}
- */
-function loopStateFile() {
-  return path.join(resolveArtibotDir(), 'loop-state.json');
-}
-
 /** Inactivity timeout (ms) after which persisted state is discarded. */
 const STATE_EXPIRY_MS = 30 * 60 * 1000;
 
-/**
- * Loop-state flush cadence (v4.7.3 perf — perf-auditor A1.2). Previously the
- * detector state was written every PostToolUse fire; now we flush once per N
- * calls or immediately when a loop is detected. Recovery semantics unchanged
- * — detector history persists across crashes within the expiry window, with
- * worst-case loss of N-1 entries at process kill.
- */
-const LOOP_STATE_FLUSH_INTERVAL = 10;
-let loopCallCounter = 0;
+/** Detection rows kept per state file (newest last). `scripts/ledger/loop-detection-census.mjs` reads them. */
+const MAX_DETECTIONS = 50;
 
 /**
- * Load persisted loop detector history from disk.
- * Returns null if the file is missing, expired, or corrupt.
- * @returns {Array<{ tool: string, fingerprint: string }> | null}
+ * Where this payload's loop history lives.
+ *
+ * SESSION-SCOPED when the payload names a usable `session_id` —
+ * `<state dir>/runtime/sessions/<id>/loop-state.json`, the O2 layout every other
+ * session file uses (`lib/core/runtime-state.js#resolveSessionStatePath`). One flat
+ * file for every session mixed the main thread, its subagents (the host fires this
+ * hook inside them too) and concurrent sessions into one history, so a repeat in one
+ * place counted against another. Without a usable id the file is the flat
+ * `<state dir>/loop-state.json` it always was. Both follow the state-dir resolver
+ * (`ARTIBOT_STATE_DIR` paired with the home in force), asked on every call.
+ *
+ * @param {unknown} sessionId - `hookData.session_id`, any shape
+ * @returns {string}
  */
-function loadLoopState() {
+function loopStateFile(sessionId) {
+  return resolveSessionStatePath(sessionId, 'loop-state.json')
+    ?? path.join(resolveArtibotDir(), 'loop-state.json');
+}
+
+/**
+ * Load persisted loop detector state from disk.
+ * Returns null if the file is missing, expired, or corrupt. A file written before
+ * `detections` existed reads with an empty list — the history is what matters.
+ * @param {string} file
+ * @returns {{ history: Array<{ tool: string, fingerprint: string }>, detections: Array<object> } | null}
+ */
+function loadLoopState(file) {
   try {
-    const file = loopStateFile();
     if (!existsSync(file)) return null;
     const data = JSON.parse(readFileSync(file, 'utf-8'));
     if (Date.now() - (data.lastUpdated || 0) > STATE_EXPIRY_MS) return null;
-    return Array.isArray(data.history) ? data.history : null;
+    if (!Array.isArray(data.history)) return null;
+    return { history: data.history, detections: Array.isArray(data.detections) ? data.detections : [] };
   } catch {
     return null;
   }
 }
 
 /**
- * Save loop detector history to disk for cross-process persistence.
+ * Save loop detector state to disk — on EVERY call.
+ *
+ * This hook is a new process per PostToolUse (`_posttooluse-dispatcher.js#spawnHook`),
+ * so there is no "every Nth call" inside one process: the v4.7.3 cadence that flushed
+ * on the 10th call or on a detection never fired on a cold start, the file was never
+ * created, and the detector could not accumulate the history it needed to detect
+ * anything (reproduced 2026-10-23: six identical calls, no file, no warning; the
+ * owner's PC had no file on 2026-10-20). One atomic write of at most 20 entries per
+ * call is the price of a detector that works; the same process already writes two
+ * learning files per call.
+ *
+ * @param {string} file
  * @param {object} detector - Loop detector instance
+ * @param {Array<object>} detections - rows to persist alongside the history
  */
-function saveLoopState(detector) {
+function saveLoopState(file, detector, detections) {
   try {
-    const file = loopStateFile();
     mkdirSync(path.dirname(file), { recursive: true });
     atomicWriteSync(file, JSON.stringify({
       history: detector.getLoopHistory(),
+      detections,
       lastUpdated: Date.now(),
     }, null, 2));
   } catch {
@@ -75,11 +94,93 @@ function saveLoopState(detector) {
   }
 }
 
-/** Loop detector instance restored from persisted state when available. */
-const restoredHistory = loadLoopState();
-const loopDetector = createLoopDetector(
-  restoredHistory ? { initialHistory: restoredHistory } : {},
-);
+/**
+ * A short, argument-free handle for a detector fingerprint. The fingerprint itself
+ * is `tool::JSON(args)` and may carry paths or command text; only this digest is
+ * written to the detections list.
+ * @param {string} fingerprint
+ * @returns {string} first 12 hex characters of sha256
+ */
+function fingerprintDigest(fingerprint) {
+  return createHash('sha256').update(String(fingerprint ?? '')).digest('hex').slice(0, 12);
+}
+
+/**
+ * Restore this session's history, record the call, flush, and report.
+ * Runs BEFORE classification so an unclassifiable Bash command still counts.
+ *
+ * @param {object} hookData
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @returns {import('../../lib/cognitive/loop-detector.js').LoopDetectionResult}
+ */
+function trackLoop(hookData, toolName, toolInput) {
+  const file = loopStateFile(hookData?.session_id);
+  const restored = loadLoopState(file);
+  const detector = createLoopDetector(restored ? { initialHistory: restored.history } : {});
+  const result = detector.detectLoop({ tool: toolName, args: toolInput });
+  const prior = restored?.detections ?? [];
+  const detections = result.detected
+    ? [...prior, {
+      ts: Date.now(),
+      tool: toolName,
+      severity: result.severity,
+      count: result.count,
+      fingerprint_sha12: fingerprintDigest(result.fingerprint),
+    }].slice(-MAX_DETECTIONS)
+    : prior;
+  saveLoopState(file, detector, detections);
+  return result;
+}
+
+/**
+ * `cognitive.loopDetector.advisory`, read off `<pluginRoot>/artibot.config.json` at
+ * the moment of a detection (so the read costs nothing on the common path). Only
+ * the literal `true` is ON; a missing key, another type, a missing or unreadable
+ * file all read OFF — the kill-switch convention of `report-verify-gate.js`.
+ * @returns {boolean}
+ */
+function readLoopAdvisory() {
+  try {
+    const cfg = JSON.parse(readFileSync(path.join(PLUGIN_ROOT, 'artibot.config.json'), 'utf-8'));
+    return cfg?.cognitive?.loopDetector?.advisory === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Surface a detected loop.
+ *
+ * ALWAYS: one stderr line. The host discards the stderr of a hook that exits 0, so
+ * this line reaches the debug log and nothing else — it is a trace, not a signal.
+ *
+ * WHEN THE ADVISORY KEY IS ON: one JSON document on stdout carrying
+ * `hookSpecificOutput.additionalContext`, which the host inserts beside the tool
+ * result (PostToolUse and PostToolUseFailure both accept it) and which the PostToolUse
+ * dispatcher concatenates with its siblings' (`_dispatcher-utils.js#mergeResults`).
+ * Stdout is otherwise never written: the dispatcher parses it as JSON, and the direct
+ * PostToolUseFailure registration hands it to the host as-is — hence the payload's own
+ * `hook_event_name`. Not a block: the tool has already run.
+ *
+ * @param {object} hookData
+ * @param {string} toolName
+ * @param {import('../../lib/cognitive/loop-detector.js').LoopDetectionResult} result
+ */
+function emitLoopSignals(hookData, toolName, result) {
+  if (!result.detected) return;
+  const label = result.severity === 'block' ? 'LOOP BLOCKED' : 'LOOP WARNING';
+  process.stderr.write(
+    `[artibot:${label}] Tool "${toolName}" called ${result.count}x with same args (severity: ${result.severity})\n`
+  );
+  if (!readLoopAdvisory()) return;
+  const hookEventName = typeof hookData?.hook_event_name === 'string' && hookData.hook_event_name
+    ? hookData.hook_event_name
+    : 'PostToolUse';
+  const additionalContext = `[artibot:loop] ${toolName} called ${result.count}x with identical arguments `
+    + `(severity: ${result.severity}). Change the input or the approach before repeating this call.`;
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext } }));
+}
 
 // Dynamic import for tool-learner (ESM, relative to plugin root)
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
@@ -174,15 +275,16 @@ const MIN_SUBSTANTIVE_LENGTH = 10;
  * NOT fix it: scoreResult's 0.0 branch tests `result.error`, so an
  * `output`-wrapped failure still scores 1.0. The key name is the whole fix.
  *
- * ── What this fix does NOT reach ──
- * Only failures of commands that {@link classifyBashCommand} recognises get
- * scored at all. That helper matches on the command's LEADING TOKEN, so
- * `cd x && …`, `VAR=… ; …` and other compound forms return null, buildContext
- * returns null, and main() returns before scoring — no row is written, with or
- * without this branch. Those failures remain invisible to tool learning, and
- * since `cd x && …` is the dominant command shape in this repo the blind spot
- * is large. Tracked separately; do not infer from "0.0 rows now exist" that
- * every failure is being captured.
+ * ── What this fix did NOT reach until 2026-10-23 ──
+ * Only failures of commands that {@link classifyBashCommand} recognised were
+ * scored at all: it matched on the command's LEADING TOKEN, so `cd x && …`,
+ * `VAR=… ; …` and other compound forms returned null, buildContext returned
+ * null, and main() returned before scoring — no row, with or without this
+ * branch — and since `cd x && …` is the dominant command shape in this repo the
+ * blind spot was large. Closed by D-03: {@link buildContext} now yields
+ * `bash:unknown:shell` for a command no rule names, and the classifier first
+ * strips one leading `cd … &&` and leading `NAME=value` assignments
+ * ({@link normalizeBashCommand}).
  *
  * @param {object} hookData
  * @returns {object}
@@ -228,7 +330,15 @@ export async function main() {
 
   if (!toolName || SKIP_TOOLS.has(toolName)) return;
 
-  // Build context key from tool usage pattern
+  // Loop detection first, for every tracked tool: an unclassifiable Bash command
+  // must still count toward a repeat (D-01/D-03, 2026-10-23). This also flushes
+  // the session's history to disk on every call.
+  const loopResult = trackLoop(hookData, toolName, toolInput);
+  emitLoopSignals(hookData, toolName, loopResult);
+
+  // Build context key from tool usage pattern. Never null since 2026-10-23 — an
+  // unclassifiable Bash command is `bash:unknown:shell` — the guard stays for a
+  // future branch that opts out.
   const context = buildContext(toolName, toolInput);
   if (!context) return;
 
@@ -247,26 +357,6 @@ export async function main() {
   // basename of the resolved project root, not of the raw cwd: the shell's
   // directory moves mid-session, which split one project across several names.
   const project = path.basename(resolveProjectRoot(hookData?.cwd)) || null;
-
-  // Loop detection: check for repetitive tool call patterns
-  const loopResult = loopDetector.detectLoop({ tool: toolName, args: toolInput });
-
-  // v4.7.3 perf: flush detector state every Nth call OR immediately on loop
-  // detection. Loop alerts must surface in real-time; benign tool calls can
-  // tolerate worst-case N-1 entries of lost history on crash.
-  loopCallCounter += 1;
-  if (loopResult.detected || loopCallCounter % LOOP_STATE_FLUSH_INTERVAL === 0) {
-    saveLoopState(loopDetector);
-  }
-
-  if (loopResult.detected) {
-    const label = loopResult.severity === 'block' ? 'LOOP BLOCKED' : 'LOOP WARNING';
-    // Claude Code parses PostToolUse stdout as JSON — alert text goes to
-    // stderr (matcher * triggers on every tool, prior stdout polluted JSON).
-    process.stderr.write(
-      `[artibot:${label}] Tool "${toolName}" called ${loopResult.count}x with same args (severity: ${loopResult.severity})\n`
-    );
-  }
 
   // Dynamically import tool-learner and record (modules memoized in
   // toolLearnerModulePromise / lifelongLearnerModulePromise — first call
@@ -310,7 +400,9 @@ export async function main() {
 
 /**
  * Build a context key from tool name and input.
- * Returns null for inputs we can't meaningfully classify.
+ * Every tool yields a key; a Bash command the classifier cannot name is
+ * `bash:unknown:shell` (since 2026-10-23 — before that it was null and the call
+ * was dropped before scoring and loop detection).
  *
  * @param {string} toolName
  * @param {object} input
@@ -338,7 +430,10 @@ function buildContext(toolName, input) {
     case 'Bash': {
       const cmd = input.command || '';
       const verb = classifyBashCommand(cmd);
-      return verb ? `bash:${verb}:shell` : null;
+      // `unknown`, never null: a command the classifier cannot name is still a
+      // Bash call with an exit code, and dropping it hid the dominant shape of this
+      // repo (`cd x && …`) from learning and loop detection alike (2026-10-23).
+      return `bash:${verb ?? 'unknown'}:shell`;
     }
 
     case 'Edit': {
@@ -515,14 +610,46 @@ function extractExtFromGlob(pattern) {
 }
 
 /**
+ * ONE leading `cd <path> &&` or `cd <path> ;` — the shape this repo's commands take
+ * most often. Anchored; a quoted path may hold spaces, an unquoted one may not.
+ */
+const LEADING_CD = /^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
+
+/** One leading `NAME=value ` assignment (`CI=1 npm test`). Anchored; applied repeatedly. */
+const LEADING_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+/;
+
+/**
+ * Strip the two prefixes the classifier may look past, then lower-case.
+ *
+ * An ALLOWLIST of two, not a growing regex: a directory hop and environment
+ * assignments change nothing about what the command does. A pipeline, a `;` chain
+ * that is not a `cd`, a subshell or a heredoc stays as written and classifies as
+ * whatever its first token is — usually nothing, which is `unknown`, which is
+ * honest.
+ *
+ * @param {string} cmd
+ * @returns {string}
+ */
+function normalizeBashCommand(cmd) {
+  let s = cmd.trim().replace(LEADING_CD, '');
+  for (;;) {
+    const next = s.replace(LEADING_ASSIGNMENT, '');
+    if (next === s) break;
+    s = next;
+  }
+  return s.trim().toLowerCase();
+}
+
+/**
  * Classify a bash command into a category verb.
  * @param {string} cmd
- * @returns {string|null}
+ * @returns {string|null} null when no rule names it (the caller files it as `unknown`)
  */
 function classifyBashCommand(cmd) {
-  const trimmed = cmd.trim().toLowerCase();
+  const trimmed = normalizeBashCommand(cmd);
 
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?test/.test(trimmed)) return 'test';
+  if (/^(npx\s+)?vitest\b/.test(trimmed)) return 'test';
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?build/.test(trimmed)) return 'build';
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?lint/.test(trimmed)) return 'lint';
   if (/^(npm|pnpm|yarn|bun)\s+install/.test(trimmed)) return 'install';

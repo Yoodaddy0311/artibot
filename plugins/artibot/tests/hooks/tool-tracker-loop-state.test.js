@@ -7,40 +7,57 @@ import { fileURLToPath } from 'node:url';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 
 /**
- * The loop detector's persisted state follows the state-dir resolver (child process).
+ * The loop detector's persisted state, run the way the host runs the hook: one
+ * `node tool-tracker.js` process per PostToolUse payload on stdin.
  *
- * `scripts/hooks/tool-tracker.js` restores the detector's history from, and flushes it to,
- * `loop-state.json` — `~/.claude/artibot/loop-state.json`, whatever `ARTIBOT_STATE_DIR` said. The
- * flush happens when a loop is detected (or at every 10th call inside one process), so a hooked,
- * non-interactive session handed an override that repeated one tool call wrote the REAL file (found by
- * the 2026-10-20 hook-writer census after the owner's promptfoo PoC; no test covered this file at all).
+ * WHERE THE FILE IS. `scripts/hooks/tool-tracker.js` restores the detector's history
+ * from, and flushes it to, a `loop-state.json` that is SESSION-scoped when the payload
+ * carries a `session_id` — `<state dir>/runtime/sessions/<session_id>/loop-state.json`,
+ * the O2 layout of `lib/core/runtime-state.js#resolveScopedStatePath` — and the flat
+ * `<state dir>/loop-state.json` (pre-O2 location, byte-identical) when it does not.
+ * `<state dir>` is `~/.claude/artibot`, or `ARTIBOT_STATE_DIR` when that override is
+ * paired with the home in force (`lib/core/config.js#resolveArtibotDir`).
  *
- * This runs the hook the way the host runs it — `node tool-tracker.js`, a PostToolUse payload on
- * stdin — with the state file pre-seeded by the real detector so that ONE more identical call
- * crosses the warn threshold. That makes a single spawn exercise both directions: the history is
- * RESTORED from the file in force (otherwise the fresh detector sees one call and detects nothing)
- * and FLUSHED back to it (the entry count grows by one).
+ * WHY COLD START IS TESTED. Until 2026-10-23 the flush ran only when a loop was
+ * detected or on the 10th call of ONE process, and the hook is a new process per call
+ * — so on a fresh machine the file was never created, the history never grew past one
+ * entry, and the detector could not fire (EXP-A of
+ * `.artibot/guides/v5-design/practicality-improvement-20261023/04_VALIDATION_REPORT.md`
+ * §7: 6 identical calls, no file, no warning; the owner's PC had no file either,
+ * NEXT-SESSION 2026-10-20). The pre-seeded cases below were the only coverage and
+ * stayed green through that: a seeded file hides the cold start. The cold-start cases
+ * are the ones that were RED before the fix.
  *
- * Every case uses a throwaway home; the real one is never touched.
+ * Every case uses a throwaway home; the real one is never touched. The host session
+ * ids and the state-dir seam the vitest setup exports are stripped from the child env
+ * unless a case sets them, so each case decides its own layout.
  */
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'tool-tracker.js');
 
-const CALL = { tool: 'Read', args: { file_path: path.join(os.tmpdir(), 'loop-subject.js') } };
+const SUBJECT = path.join(os.tmpdir(), 'loop-subject.js');
+const CALL = { tool: 'Read', args: { file_path: SUBJECT } };
+const SESSION = 'sess-loop-state-sd';
 
 /**
- * How many identical calls must already be on file for the next one to be flagged. Derived from the
- * detector itself rather than hard-coded, so a retuned warn threshold moves this with it.
+ * How many identical calls must already be on file for the next one to be flagged
+ * `warn`, and how many identical calls in total reach `block`. Both derived from the
+ * detector itself rather than hard-coded, so a retuned threshold moves them.
  */
-const SEEDED = (() => {
+const { SEEDED, BLOCK } = (() => {
   const detector = createLoopDetector();
   let calls = 0;
-  do { calls += 1; } while (!detector.detectLoop(CALL).detected);
-  return calls - 1;
+  let firstDetected = null;
+  for (;;) {
+    calls += 1;
+    const r = detector.detectLoop(CALL);
+    if (r.detected && firstDetected === null) firstDetected = calls;
+    if (r.severity === 'block') return { SEEDED: firstDetected - 1, BLOCK: calls };
+  }
 })();
 
-describe('tool-tracker — loop-state.json follows ARTIBOT_STATE_DIR', () => {
+describe('tool-tracker — loop-state.json: session-scoped, flushed every call', () => {
   let tmp;
   let home;
   let stateDir;
@@ -56,19 +73,27 @@ describe('tool-tracker — loop-state.json follows ARTIBOT_STATE_DIR', () => {
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
-  const homeFile = () => path.join(home, '.claude', 'artibot', 'loop-state.json');
-  const stateFile = () => path.join(stateDir, 'loop-state.json');
+  /** The state dir the hook resolves without an override: `<home>/.claude/artibot`. */
+  const homeRoot = () => path.join(home, '.claude', 'artibot');
+  /** Session-scoped file under a state root (O2 layout). */
+  const sessionFile = (root, sid = SESSION) => path.join(root, 'runtime', 'sessions', sid, 'loop-state.json');
+  /** The flat, sessionless file under a state root (pre-O2 location, unchanged). */
+  const flatFile = (root) => path.join(root, 'loop-state.json');
 
-  /** A state file holding `SEEDED` identical calls, written the way the hook writes it. */
-  function seed(file) {
+  /** A state file holding `n` identical calls, written the way the hook writes it. */
+  function seed(file, n = SEEDED, extra = {}) {
     const detector = createLoopDetector();
-    for (let i = 0; i < SEEDED; i += 1) detector.detectLoop(CALL);
+    for (let i = 0; i < n; i += 1) detector.detectLoop(CALL);
     mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ history: detector.getLoopHistory(), lastUpdated: Date.now() }), 'utf-8');
+    writeFileSync(file, JSON.stringify({ history: detector.getLoopHistory(), lastUpdated: Date.now(), ...extra }), 'utf-8');
   }
 
-  /** One firing of the same call; `override` is `undefined` for none, or the `{ dir, mintedFor }` pair. */
-  function fire(override) {
+  /**
+   * One firing of the hook.
+   * @param {{ dir: string, mintedFor: string } | undefined} override the state-dir pair, or none
+   * @param {object} [payloadPatch] fields merged over the default payload (`session_id: null` removes it)
+   */
+  function fire(override, payloadPatch = {}) {
     const env = {
       ...process.env,
       HOME: home,
@@ -76,7 +101,6 @@ describe('tool-tracker — loop-state.json follows ARTIBOT_STATE_DIR', () => {
       ARTIBOT_HOOK_FIRED_DIRECT: 'off',
       CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
     };
-    // The host session ids and the state-dir seam must not leak into the child unless a case sets them.
     for (const key of ['CLAUDE_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'ARTIBOT_STATE_DIR', 'ARTIBOT_STATE_DIR_HOME']) {
       delete env[key];
     }
@@ -89,9 +113,11 @@ describe('tool-tracker — loop-state.json follows ARTIBOT_STATE_DIR', () => {
       tool_name: CALL.tool,
       tool_input: CALL.args,
       tool_response: { content: 'a result that is long enough to count as substantive output' },
-      session_id: 'sess-loop-state-sd',
+      session_id: SESSION,
       cwd: tmp,
+      ...payloadPatch,
     };
+    if (payload.session_id === null) delete payload.session_id;
     const res = spawnSync(process.execPath, [HOOK], {
       input: JSON.stringify(payload),
       encoding: 'utf-8',
@@ -100,41 +126,129 @@ describe('tool-tracker — loop-state.json follows ARTIBOT_STATE_DIR', () => {
       windowsHide: true,
       timeout: 30000,
     });
-    return { status: res.status, stderr: String(res.stderr || '') };
+    return { status: res.status, stdout: String(res.stdout || ''), stderr: String(res.stderr || '') };
   }
 
-  const history = (file) => JSON.parse(readFileSync(file, 'utf-8')).history;
+  /** Fire `n` times; returns the LAST result. */
+  function fireTimes(n, override, payloadPatch) {
+    let last = null;
+    for (let i = 0; i < n; i += 1) {
+      last = fire(override, payloadPatch);
+      expect(last.status, `spawn ${i + 1}/${n} stderr: ${last.stderr}`).toBe(0);
+    }
+    return last;
+  }
 
-  it('restores from and flushes to the file inside the override, and leaves ~/.claude alone', () => {
-    seed(stateFile());
+  const read = (file) => JSON.parse(readFileSync(file, 'utf-8'));
+  const history = (file) => read(file).history;
 
-    const out = fire({ dir: stateDir, mintedFor: home });
+  describe('the state-dir override (intents unchanged since v4.71.11, layout now per session)', () => {
+    it('restores from and flushes to the file inside the override, and leaves ~/.claude alone', () => {
+      seed(sessionFile(stateDir));
 
-    expect(out.status).toBe(0);
-    expect(out.stderr).toContain('LOOP WARNING');
-    expect(history(stateFile())).toHaveLength(SEEDED + 1);
-    expect(existsSync(homeFile())).toBe(false);
+      const out = fire({ dir: stateDir, mintedFor: home });
+
+      expect(out.status).toBe(0);
+      expect(out.stderr).toContain('LOOP WARNING');
+      expect(history(sessionFile(stateDir))).toHaveLength(SEEDED + 1);
+      expect(existsSync(homeRoot())).toBe(false);
+    });
+
+    it('keeps using <home>/.claude/artibot when no override is set (production invariance)', () => {
+      seed(sessionFile(homeRoot()));
+
+      const out = fire();
+
+      expect(out.status).toBe(0);
+      expect(out.stderr).toContain('LOOP WARNING');
+      expect(history(sessionFile(homeRoot()))).toHaveLength(SEEDED + 1);
+      expect(existsSync(stateDir)).toBe(false);
+    });
+
+    it('ignores an override minted for another home (a child handed its own HOME)', () => {
+      seed(sessionFile(homeRoot()));
+
+      const out = fire({ dir: stateDir, mintedFor: path.join(tmp, 'some-other-home') });
+
+      expect(out.status).toBe(0);
+      expect(out.stderr).toContain('LOOP WARNING');
+      expect(history(sessionFile(homeRoot()))).toHaveLength(SEEDED + 1);
+      expect(existsSync(stateDir)).toBe(false);
+    });
   });
 
-  it('keeps using ~/.claude/artibot/loop-state.json when no override is set (production invariance)', () => {
-    seed(homeFile());
+  describe('cold start — no file anywhere, one process per call (RED before 2026-10-23)', () => {
+    it(`creates the file on the first call and warns on call ${SEEDED + 1}`, () => {
+      const first = fire();
+      expect(first.status).toBe(0);
+      expect(existsSync(sessionFile(homeRoot())), 'first call must flush').toBe(true);
+      expect(history(sessionFile(homeRoot()))).toHaveLength(1);
+      expect(first.stderr).not.toContain('LOOP');
 
-    const out = fire();
+      const last = fireTimes(SEEDED, undefined);
+      expect(last.stderr).toContain('LOOP WARNING');
+      expect(history(sessionFile(homeRoot()))).toHaveLength(SEEDED + 1);
+    });
 
-    expect(out.status).toBe(0);
-    expect(out.stderr).toContain('LOOP WARNING');
-    expect(history(homeFile())).toHaveLength(SEEDED + 1);
-    expect(existsSync(stateDir)).toBe(false);
+    it(`reaches the block label on call ${BLOCK}`, () => {
+      const last = fireTimes(BLOCK, undefined);
+      expect(last.stderr).toContain('LOOP BLOCKED');
+      expect(last.stderr).toContain(`called ${BLOCK}x`);
+    });
+
+    it('keeps sessions apart: a repeat in session A says nothing about session B', () => {
+      const a = fireTimes(SEEDED + 1, undefined, { session_id: 'sess-A' });
+      expect(a.stderr).toContain('LOOP WARNING');
+
+      const b = fire(undefined, { session_id: 'sess-B' });
+      expect(b.status).toBe(0);
+      expect(b.stderr).not.toContain('LOOP');
+      expect(history(sessionFile(homeRoot(), 'sess-B'))).toHaveLength(1);
+      expect(history(sessionFile(homeRoot(), 'sess-A'))).toHaveLength(SEEDED + 1);
+    });
+
+    it('a payload with no session_id uses the flat file, where it always was', () => {
+      const out = fire(undefined, { session_id: null });
+      expect(out.status).toBe(0);
+      expect(existsSync(flatFile(homeRoot()))).toBe(true);
+      expect(history(flatFile(homeRoot()))).toHaveLength(1);
+      expect(existsSync(path.join(homeRoot(), 'runtime', 'sessions'))).toBe(false);
+    });
   });
 
-  it('ignores an override minted for another home (a child handed its own HOME)', () => {
-    seed(homeFile());
+  describe('detections — what the file records about a detected loop (D-02 stage 1)', () => {
+    it('appends one detection row per detected call, with a hashed fingerprint and no raw arguments', () => {
+      fireTimes(SEEDED + 1, undefined);
+      const state = read(sessionFile(homeRoot()));
 
-    const out = fire({ dir: stateDir, mintedFor: path.join(tmp, 'some-other-home') });
+      expect(Array.isArray(state.detections)).toBe(true);
+      expect(state.detections).toHaveLength(1);
+      const [row] = state.detections;
+      expect(Object.keys(row).sort()).toEqual(['count', 'fingerprint_sha12', 'severity', 'tool', 'ts']);
+      expect(row.tool).toBe('Read');
+      expect(row.severity).toBe('warn');
+      expect(row.count).toBe(SEEDED + 1);
+      expect(row.fingerprint_sha12).toMatch(/^[0-9a-f]{12}$/);
+      expect(typeof row.ts).toBe('number');
+      expect(JSON.stringify(state.detections)).not.toContain(SUBJECT);
+    });
 
-    expect(out.status).toBe(0);
-    expect(out.stderr).toContain('LOOP WARNING');
-    expect(history(homeFile())).toHaveLength(SEEDED + 1);
-    expect(existsSync(stateFile())).toBe(false);
+    it('a file written before detections existed is still restored, and gains the field', () => {
+      seed(sessionFile(homeRoot()));
+      expect(read(sessionFile(homeRoot())).detections).toBeUndefined();
+
+      const out = fire();
+
+      expect(out.stderr).toContain('LOOP WARNING');
+      const state = read(sessionFile(homeRoot()));
+      expect(state.history).toHaveLength(SEEDED + 1);
+      expect(state.detections).toHaveLength(1);
+    });
+
+    it('never writes a JSON document to stdout while the advisory key is off (shipped value)', () => {
+      const last = fireTimes(SEEDED + 1, undefined);
+      expect(last.stderr).toContain('LOOP WARNING');
+      expect(last.stdout).toBe('');
+    });
   });
 });

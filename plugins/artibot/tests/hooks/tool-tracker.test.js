@@ -47,9 +47,23 @@ function extractExtFromGlob(pattern) {
   return match ? match[1].toLowerCase() : null;
 }
 
+const LEADING_CD = /^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
+const LEADING_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+/;
+
+function normalizeBashCommand(cmd) {
+  let s = cmd.trim().replace(LEADING_CD, '');
+  for (;;) {
+    const next = s.replace(LEADING_ASSIGNMENT, '');
+    if (next === s) break;
+    s = next;
+  }
+  return s.trim().toLowerCase();
+}
+
 function classifyBashCommand(cmd) {
-  const trimmed = cmd.trim().toLowerCase();
+  const trimmed = normalizeBashCommand(cmd);
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?test/.test(trimmed)) return 'test';
+  if (/^(npx\s+)?vitest\b/.test(trimmed)) return 'test';
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?build/.test(trimmed)) return 'build';
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?lint/.test(trimmed)) return 'lint';
   if (/^(npm|pnpm|yarn|bun)\s+install/.test(trimmed)) return 'install';
@@ -82,7 +96,7 @@ function buildContext(toolName, input) {
     case 'Bash': {
       const cmd = input.command || '';
       const verb = classifyBashCommand(cmd);
-      return verb ? `bash:${verb}:shell` : null;
+      return `bash:${verb ?? 'unknown'}:shell`;
     }
     case 'Edit': {
       const ext = extractExt(input.file_path);
@@ -294,8 +308,16 @@ describe('tool-tracker hook (pure function tests)', () => {
       expect(buildContext('Bash', { command: 'tsc --noEmit' })).toBe('bash:typecheck:shell');
     });
 
-    it('returns null for unclassifiable Bash command', () => {
-      expect(buildContext('Bash', { command: 'some-unknown-tool --flag' })).toBeNull();
+    it('files an unclassifiable Bash command as bash:unknown:shell, never null (D-03, 2026-10-23)', () => {
+      expect(buildContext('Bash', { command: 'some-unknown-tool --flag' })).toBe('bash:unknown:shell');
+      expect(buildContext('Bash', { command: 'echo hi | grep h' })).toBe('bash:unknown:shell');
+      expect(buildContext('Bash', { command: '' })).toBe('bash:unknown:shell');
+    });
+
+    it('looks past one leading cd and leading assignments before classifying (D-03)', () => {
+      expect(buildContext('Bash', { command: 'cd plugins/artibot && npm test' })).toBe('bash:test:shell');
+      expect(buildContext('Bash', { command: 'CI=1 npm test' })).toBe('bash:test:shell');
+      expect(buildContext('Bash', { command: 'cd "/tmp/with space" ; CI=1 FORCE_COLOR=0 npm run build' })).toBe('bash:build:shell');
     });
 
     it('builds context for Edit tool', () => {
@@ -631,6 +653,39 @@ describe('tool-tracker hook (pure function tests)', () => {
 
     it('returns null for unknown commands', () => {
       expect(classifyBashCommand('some-random-binary --flag')).toBeNull();
+    });
+
+    describe('normalisation before classifying (D-03, 2026-10-23 — an allowlist of two prefixes)', () => {
+      it('strips ONE leading cd <path> && or cd <path> ;', () => {
+        expect(classifyBashCommand('cd plugins/artibot && npm test')).toBe('test');
+        expect(classifyBashCommand('cd /tmp/x; git status')).toBe('git');
+        expect(classifyBashCommand('cd "/tmp/with space" && npm run lint')).toBe('lint');
+      });
+
+      it('strips leading NAME=value assignments, repeatedly', () => {
+        expect(classifyBashCommand('CI=1 npm test')).toBe('test');
+        expect(classifyBashCommand('CI=1 FORCE_COLOR=0 npm run build')).toBe('build');
+        expect(classifyBashCommand('NODE_OPTIONS="--max-old-space-size=4096" node server.js')).toBe('execute');
+      });
+
+      it('strips both, cd first', () => {
+        expect(classifyBashCommand('cd x && CI=1 npm test')).toBe('test');
+      });
+
+      it('names vitest a test runner, with or without npx', () => {
+        expect(classifyBashCommand('npx vitest run tests/x.test.js')).toBe('test');
+        expect(classifyBashCommand('vitest --run')).toBe('test');
+      });
+
+      it('does not look past a second cd, a pipeline, or a non-cd chain', () => {
+        expect(classifyBashCommand('cd a && cd b && npm test')).toBeNull();
+        expect(classifyBashCommand('echo hi | grep h')).toBeNull();
+        expect(classifyBashCommand('true; npm test')).toBeNull();
+      });
+
+      it('leaves an unknown command unknown after stripping', () => {
+        expect(classifyBashCommand('cd x && bash scripts/run.sh')).toBeNull();
+      });
     });
   });
 
