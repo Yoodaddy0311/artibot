@@ -50,7 +50,7 @@
  * `tests/setup/state-dir.js` (ARTIBOT_AUTOPILOT_STORE_DIR); PRD and report
  * files go to a mkdtemp directory through `options.projectRoot` below.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -85,11 +85,15 @@ vi.mock('../../lib/autopilot/report-verify-gate.js', async (importOriginal) => {
 
 const {
   REPORT_VERIFY_CODES,
+  REPORT_VERIFY_CONFIG_STATES,
+  REPORT_VERIFY_EVIDENCE_MODES,
   REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH,
+  REPORT_VERIFY_GATE_EVIDENCE_MODE_CONFIG_PATH,
   censusReportVerifyEvidence,
   evaluateReportVerifyEvidence,
   loadReportVerifyGateConfig,
   readReportVerifyGateEnforce,
+  readReportVerifyGateEvidenceMode,
   refuseRecordedReport,
   scopeVerifyResultToAttempt,
 } = await vi.importActual('../../lib/autopilot/report-verify-gate.js');
@@ -259,7 +263,7 @@ describe('evaluateReportVerifyEvidence — rule B', () => {
     expect(Object.isFrozen(REPORT_VERIFY_CODES)).toBe(true);
     expect(Object.values(REPORT_VERIFY_CODES).sort()).toEqual([
       'NO_VERIFY_ATTEMPT', 'STALE_BEFORE_EXECUTE', 'VERIFY_NOT_ACKED', 'VERIFY_NOT_DONE',
-      'VERIFY_RESULT_FAILED', 'ok',
+      'VERIFY_RESULT_FAILED', 'VERIFY_RESULT_UNMEASURED', 'ok',
     ]);
   });
 });
@@ -347,6 +351,104 @@ describe('evaluateReportVerifyEvidence — an explicit FAIL in state.verifyResul
 });
 
 // ---------------------------------------------------------------------------
+// 1c. Rule 6′ — evidenceMode 'explicit-pass' (05 D-04 stage 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seven shapes 04 EXP-C (2026-10-23) showed passing rule 6 beside a `done`
+ * acknowledgement: none states a failure, and none states a PASS either. Under
+ * 'ack' they pass (pinned above as the deliberate blind spots); under
+ * 'explicit-pass' every one is UNMEASURED — not a pass, not a failure.
+ */
+const NOT_A_PASS = [
+  ['absent', undefined],
+  ['null', null],
+  ['an empty object', {}],
+  ['a bare string', 'FAIL'],
+  ['a lowercase status', { status: 'fail' }],
+  ['a nested layer result', { mcp: { ok: false } }],
+  ['free-form prose', { summary: 'tests not run' }],
+];
+/** The three shapes `commands/autopilot.md` tells a driver to write for a pass. */
+const EXPLICIT_PASS = [
+  ['status PASS', { status: 'PASS' }],
+  ['ok true', { ok: true }],
+  ['passed true', { passed: true }],
+];
+const EXPLICIT = Object.freeze({ evidenceMode: 'explicit-pass' });
+const UNMEASURED_VERDICT = { ok: false, code: 'VERIFY_RESULT_UNMEASURED', attemptId: 'v1', checkpointSha: null };
+
+describe("evaluateReportVerifyEvidence — rule 6′ under evidenceMode 'explicit-pass'", () => {
+  it.each(NOT_A_PASS)('should return VERIFY_RESULT_UNMEASURED for a done acknowledgement beside %s', (_label, verifyResult) => {
+    expect(evaluateReportVerifyEvidence(withResult(verifyResult), EXPLICIT)).toEqual(UNMEASURED_VERDICT);
+  });
+
+  it.each(NOT_A_PASS)("control: under 'ack' %s still passes, and 'ack' is what no second argument means", (_label, verifyResult) => {
+    const spelled = evaluateReportVerifyEvidence(withResult(verifyResult), { evidenceMode: 'ack' });
+    expect(spelled).toMatchObject({ ok: true, code: 'ok' });
+    expect(evaluateReportVerifyEvidence(withResult(verifyResult))).toEqual(spelled);
+  });
+
+  it.each(EXPLICIT_PASS)('should pass %s under both modes', (_label, verifyResult) => {
+    expect(evaluateReportVerifyEvidence(withResult(verifyResult), EXPLICIT)).toMatchObject({ ok: true, code: 'ok' });
+    expect(evaluateReportVerifyEvidence(withResult(verifyResult))).toMatchObject({ ok: true, code: 'ok' });
+  });
+
+  it('should keep rule 6 ahead of rule 6′: an explicit FAIL is FAILED, never UNMEASURED', () => {
+    for (const shape of [{ status: 'FAIL' }, { ok: false }, { passed: false }, { status: 'PASS', ok: false }, { status: 'FAIL', ok: true }]) {
+      expect(evaluateReportVerifyEvidence(withResult(shape), EXPLICIT).code, JSON.stringify(shape)).toBe('VERIFY_RESULT_FAILED');
+    }
+  });
+
+  it('should read a spelled-out UNMEASURED as UNMEASURED, not as a pass', () => {
+    expect(evaluateReportVerifyEvidence(withResult({ status: 'UNMEASURED' }), EXPLICIT).code).toBe('VERIFY_RESULT_UNMEASURED');
+  });
+
+  it('should pass exactly the shapes foldVerify reads as PASS (allowlist parity with recovery-record.js)', () => {
+    const shapes = [
+      undefined, null, 'FAIL', [], {}, { status: 'PASS' }, { status: 'FAIL' }, { status: 'UNMEASURED' },
+      { ok: true }, { ok: false }, { passed: true }, { passed: false }, { status: 'fail' }, { ok: 'true' },
+      { lint: 'x' }, { mcp: { ok: true } }, { status: 'PASS', ok: true }, { ok: true, passed: true },
+      { status: 'PASS', ok: false }, { status: 'pass' },
+    ];
+    for (const shape of shapes) {
+      expect(evaluateReportVerifyEvidence(withResult(shape), EXPLICIT).ok, JSON.stringify(shape)).toBe(foldVerify(shape) === 'PASS');
+    }
+  });
+
+  it.each([
+    ['NO_VERIFY_ATTEMPT', stateOf([])],
+    ['VERIFY_NOT_ACKED', stateOf([started('v1', 'VERIFY')])],
+    ['VERIFY_NOT_DONE', stateOf([started('v1', 'VERIFY'), acked('v1', 'VERIFY', 'failed')])],
+    ['STALE_BEFORE_EXECUTE', stateOf([...EVIDENCE, started('e2', 'EXECUTE')])],
+    ['VERIFY_NOT_ACKED', stateOf(EVIDENCE, { attemptId: 'v2', phase: 'VERIFY', status: 'started', checkpointSha: null })],
+  ])('should still answer %s before rule 6′ when the result slot is empty', (code, s) => {
+    expect(evaluateReportVerifyEvidence({ ...s, verifyResult: null }, EXPLICIT).code).toBe(code);
+  });
+
+  it("should treat any mode outside the allowlist as 'ack' (an unknown mode never tightens the gate)", () => {
+    for (const evidenceMode of ['deterministic', 'ACK', 'explicit_pass', '', 1, true, null, {}]) {
+      expect(evaluateReportVerifyEvidence(withResult(null), { evidenceMode }).code, String(evidenceMode)).toBe('ok');
+    }
+    expect(evaluateReportVerifyEvidence(withResult(null), null).code).toBe('ok');
+    expect(evaluateReportVerifyEvidence(withResult(null), 'explicit-pass').code).toBe('ok');
+  });
+
+  it('should read the state without changing it', () => {
+    const s = withResult({ summary: 'prose' });
+    const before = JSON.stringify(s);
+    evaluateReportVerifyEvidence(s, EXPLICIT);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
+  it('should carry the new code in the frozen vocabulary, seven codes in all', () => {
+    expect(REPORT_VERIFY_CODES.VERIFY_RESULT_UNMEASURED).toBe('VERIFY_RESULT_UNMEASURED');
+    expect(Object.isFrozen(REPORT_VERIFY_CODES)).toBe(true);
+    expect(Object.values(REPORT_VERIFY_CODES)).toHaveLength(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. Kill switch
 // ---------------------------------------------------------------------------
 
@@ -368,7 +470,50 @@ describe('kill switch reader', () => {
 
   it('should read the shipped config as ON (owner decision 2026-09-30)', () => {
     expect(REPORT_VERIFY_GATE_ENFORCE_CONFIG_PATH).toBe('autopilot.reportVerifyGate.enforce');
-    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true });
+    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true, evidenceMode: 'ack', state: 'on', reason: null });
+  });
+});
+
+describe('evidenceMode reader (05 D-04 stage 2)', () => {
+  const at = (value) => ({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: value } } });
+
+  it('should name its config path and the closed, frozen allowlist of two modes', () => {
+    expect(REPORT_VERIFY_GATE_EVIDENCE_MODE_CONFIG_PATH).toBe('autopilot.reportVerifyGate.evidenceMode');
+    expect(REPORT_VERIFY_EVIDENCE_MODES).toEqual(['ack', 'explicit-pass']);
+    expect(Object.isFrozen(REPORT_VERIFY_EVIDENCE_MODES)).toBe(true);
+  });
+
+  it('should read exactly the two allowlisted modes, with no reason', () => {
+    expect(readReportVerifyGateEvidenceMode(at('ack'))).toEqual({ evidenceMode: 'ack', reason: null });
+    expect(readReportVerifyGateEvidenceMode(at('explicit-pass'))).toEqual({ evidenceMode: 'explicit-pass', reason: null });
+  });
+
+  it.each([
+    ['deterministic', 'deterministic'], // designed in 05 D-04, not wired: reads as ack until it is
+    ['ACK', 'ACK'],
+    ['', '""'],
+    [1, '1'],
+    [true, 'true'],
+    [null, 'null'],
+    [{}, '{}'],
+  ])("should read %j as 'ack' and say why", (value, shown) => {
+    expect(readReportVerifyGateEvidenceMode(at(value))).toEqual({ evidenceMode: 'ack', reason: `evidenceMode-unknown:${shown}` });
+  });
+
+  it("should read an absent key, the wrong parent and a non-object config as 'ack', reason absent", () => {
+    const configs = [
+      { autopilot: { reportVerifyGate: { enforce: true } } },
+      { reportVerifyGate: { evidenceMode: 'explicit-pass' } },
+      {}, null, undefined, 'x', 42,
+    ];
+    for (const cfg of configs) {
+      expect(readReportVerifyGateEvidenceMode(cfg), JSON.stringify(cfg)).toEqual({ evidenceMode: 'ack', reason: 'evidenceMode-unknown:absent' });
+    }
+  });
+
+  it("should ship 'ack': the config this checkout ships reads ON, mode ack, with no reason", () => {
+    expect(SHIPPED_CONFIG.autopilot.reportVerifyGate.evidenceMode).toBe('ack');
+    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true, evidenceMode: 'ack', state: 'on', reason: null });
   });
 });
 
@@ -1758,6 +1903,7 @@ describe('censusReportVerifyEvidence', () => {
 
     expect(c.byCode).toEqual({
       ok: 1, NO_VERIFY_ATTEMPT: 0, VERIFY_NOT_ACKED: 1, VERIFY_NOT_DONE: 1, STALE_BEFORE_EXECUTE: 1, VERIFY_RESULT_FAILED: 1,
+      VERIFY_RESULT_UNMEASURED: 0,
     });
     expect(c.pauseAtReport).toBe(4);
   });
@@ -1854,7 +2000,7 @@ describe('the shipped switch, with nothing injected', () => {
 
   it('should read ON from the config this checkout ships', () => {
     expect(SHIPPED_CONFIG.autopilot.reportVerifyGate.enforce).toBe(true);
-    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true });
+    expect(loadReportVerifyGateConfig()).toEqual({ enforce: true, evidenceMode: 'ack', state: 'on', reason: null });
   });
 
   it('should leave CA-03 OFF: the flip did not switch the recovery transition on', () => {
@@ -1962,22 +2108,74 @@ describe('loadReportVerifyGateConfig — the config file at the plugin root', ()
     ['a config without the key', { autopilot: {} }, false],
   ])('should read %s', (_label, cfg, expected) => {
     withPluginRoot(JSON.stringify(cfg), () => {
-      expect(loadReportVerifyGateConfig()).toEqual({ enforce: expected });
+      expect(loadReportVerifyGateConfig()).toEqual({
+        enforce: expected, evidenceMode: 'ack', state: expected ? 'on' : 'off', reason: 'evidenceMode-unknown:absent',
+      });
     });
   });
 
-  // The other half of "never throws": OFF is what a broken file reads as, with no
-  // tick and no warning. A corrupted artibot.config.json silently disables the gate.
-  it('should read OFF, without a trace, from a config that does not parse', () => {
+  // The other half of "never throws": OFF is what a broken file reads as — and
+  // since 05 D-05 the read SAYS it was broken (`state: 'invalid'`), so a corrupted
+  // artibot.config.json no longer disables the gate indistinguishably from a
+  // deliberate OFF. The loader itself still ticks nothing; the warning is the
+  // gate entry points' job (section 10).
+  it('should read OFF and say invalid from a config that does not parse', () => {
     withPluginRoot('{ "autopilot": ', () => {
-      expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+      expect(loadReportVerifyGateConfig()).toEqual({
+        enforce: false, evidenceMode: 'ack', state: 'invalid', reason: expect.any(String),
+      });
     });
   });
 
-  it('should read OFF when the plugin root holds no config at all', () => {
+  it('should read OFF and say missing when the plugin root holds no config at all', () => {
     withPluginRoot(undefined, () => {
-      expect(loadReportVerifyGateConfig()).toEqual({ enforce: false });
+      expect(loadReportVerifyGateConfig()).toEqual({
+        enforce: false, evidenceMode: 'ack', state: 'missing', reason: expect.any(String),
+      });
     });
+  });
+
+  it('should tell a deliberate OFF from an unreadable file (04 EXP-D, the three cases side by side)', () => {
+    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: false, evidenceMode: 'ack' } } }), () => {
+      expect(loadReportVerifyGateConfig()).toEqual({ enforce: false, evidenceMode: 'ack', state: 'off', reason: null });
+    });
+    withPluginRoot('{ "autopilot": { "reportVerifyGate": { "enforce": true, ', () => {
+      expect(loadReportVerifyGateConfig()).toMatchObject({ enforce: false, evidenceMode: 'ack', state: 'invalid' });
+    });
+    withPluginRoot(undefined, () => {
+      expect(loadReportVerifyGateConfig()).toMatchObject({ enforce: false, evidenceMode: 'ack', state: 'missing' });
+    });
+  });
+
+  it.each([['an array', '[]'], ['a string', '"x"'], ['null', 'null'], ['a number', '42']])(
+    'should read a document that is %s as invalid, not as a config that says OFF',
+    (_label, text) => {
+      withPluginRoot(text, () => {
+        expect(loadReportVerifyGateConfig()).toMatchObject({ enforce: false, state: 'invalid' });
+      });
+    },
+  );
+
+  it('should read the string "true" as a deliberate off, never as on and never as invalid', () => {
+    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: 'true' } } }), () => {
+      expect(loadReportVerifyGateConfig()).toMatchObject({ enforce: false, state: 'off' });
+    });
+  });
+
+  it("should read evidenceMode 'explicit-pass' from the file, and an unknown spelling as ack with a reason", () => {
+    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: 'explicit-pass' } } }), () => {
+      expect(loadReportVerifyGateConfig()).toEqual({ enforce: true, evidenceMode: 'explicit-pass', state: 'on', reason: null });
+    });
+    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: 'deterministic' } } }), () => {
+      expect(loadReportVerifyGateConfig()).toEqual({
+        enforce: true, evidenceMode: 'ack', state: 'on', reason: 'evidenceMode-unknown:deterministic',
+      });
+    });
+  });
+
+  it('should answer every read from the closed state vocabulary', () => {
+    expect(REPORT_VERIFY_CONFIG_STATES).toEqual(['on', 'off', 'invalid', 'missing']);
+    expect(Object.isFrozen(REPORT_VERIFY_CONFIG_STATES)).toBe(true);
   });
 });
 
@@ -2039,3 +2237,219 @@ function enterStateAt(state, phase) {
   state.pendingPhase = null;
   saveSession(state);
 }
+
+// ---------------------------------------------------------------------------
+// 9. evidenceMode 'explicit-pass' at the two entry points (05 D-04 stage 2)
+// ---------------------------------------------------------------------------
+
+describe("the gate under evidenceMode 'explicit-pass'", () => {
+  /** A started session standing at REPORT with rule-B evidence and an EMPTY result slot. */
+  async function unmeasuredAtReport(label) {
+    const sessionId = await start(label);
+    return {
+      ...loadSession(sessionId), attemptJournal: [...EVIDENCE], activePhaseAttempt: null, verifyResult: null, phase: 'REPORT',
+    };
+  }
+
+  it('engine path: should pause with VERIFY_RESULT_UNMEASURED and name the three accepted shapes', async () => {
+    const state = await unmeasuredAtReport('xp-engine');
+
+    const result = gateReportOnVerify(state, { enforce: true, evidenceMode: 'explicit-pass' });
+
+    expect(result).toMatchObject({
+      type: 'pause',
+      code: 'VERIFY_RESULT_UNMEASURED',
+      reason: 'report-verify-evidence-missing:VERIFY_RESULT_UNMEASURED',
+      attemptId: 'v1',
+    });
+    const text = result.instructions.join('\n');
+    for (const needle of ["status: 'PASS'", 'ok: true', 'passed: true', 'UNMEASURED']) expect(text).toContain(needle);
+    expect(state).toMatchObject({ phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY', pausedReason: result.reason });
+    const pauses = readEvents(state.sessionId).filter((e) => e.type === 'pause');
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0].data).toMatchObject({ code: 'VERIFY_RESULT_UNMEASURED' });
+  });
+
+  it("engine path control: the same session passes under 'ack' and leaves one gate tick", async () => {
+    const state = await unmeasuredAtReport('xp-engine-ack');
+
+    expect(gateReportOnVerify(state, { enforce: true, evidenceMode: 'ack' })).toBeNull();
+
+    expect(state.phase).toBe('REPORT');
+    expect(gateTicks(state.sessionId)).toHaveLength(1);
+  });
+
+  it('engine path: should let an explicit PASS through under explicit-pass', async () => {
+    const state = { ...await unmeasuredAtReport('xp-engine-pass'), verifyResult: { status: 'PASS' } };
+
+    expect(gateReportOnVerify(state, { enforce: true, evidenceMode: 'explicit-pass' })).toBeNull();
+
+    expect(state.phase).toBe('REPORT');
+    expect(gateTicks(state.sessionId)).toHaveLength(1);
+  });
+
+  it('driver path: should refuse the REPORT and pause with the same code', async () => {
+    const state = await unmeasuredAtReport('xp-driver');
+
+    expect(refuseRecordedReport(state, { status: 'done' }, { enforce: true, evidenceMode: 'explicit-pass' }, PHASES)).toBe(true);
+
+    expect(state).toMatchObject({
+      phase: 'PAUSED', lastPhase: 'REPORT', pendingPhase: 'VERIFY',
+      pausedReason: 'report-verify-evidence-missing:VERIFY_RESULT_UNMEASURED',
+    });
+    const pauses = readEvents(state.sessionId).filter((e) => e.type === 'pause');
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0].data).toMatchObject({ code: 'VERIFY_RESULT_UNMEASURED', claimedStatus: 'done' });
+  });
+
+  it("driver path control: under 'ack' the same REPORT is let through with one gate tick", async () => {
+    const state = await unmeasuredAtReport('xp-driver-ack');
+
+    expect(refuseRecordedReport(state, { status: 'done' }, { enforce: true, evidenceMode: 'ack' }, PHASES)).toBe(false);
+
+    expect(state.phase).toBe('REPORT');
+    expect(gateTicks(state.sessionId)).toHaveLength(1);
+  });
+
+  it('should take the mode from the plugin root config when nothing is injected', async () => {
+    const state = await unmeasuredAtReport('xp-file');
+    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: 'explicit-pass' } } }), () => {
+      gateMode.shipped = true;
+
+      expect(gateReportOnVerify(state)).toMatchObject({ type: 'pause', code: 'VERIFY_RESULT_UNMEASURED' });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. An unreadable config warns once per session and reads OFF (05 D-05)
+// ---------------------------------------------------------------------------
+
+describe('config-unreadable warning', () => {
+  const warnings = (sessionId) => readEvents(sessionId).filter((e) => e.type === 'config-unreadable');
+  let stderr;
+  beforeEach(() => {
+    stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+  afterEach(() => {
+    stderr.mockRestore();
+  });
+  const stderrLines = () => stderr.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('[artibot:report-verify-gate]'));
+
+  /** A started session at REPORT with rule-B evidence: under ON it would pass, under OFF nothing happens. */
+  async function evidencedAtReport(label) {
+    const sessionId = await start(label);
+    return { ...loadSession(sessionId), attemptJournal: [...EVIDENCE], activePhaseAttempt: null, phase: 'REPORT' };
+  }
+
+  // The loaded shapes the loader produces for the three EXP-D cases (section 8
+  // pins the loader itself). Injected here so the warning path is measured in
+  // the sandboxed store: `withPluginRoot` moves CLAUDE_PLUGIN_ROOT, and the
+  // autopilot store override is honoured only for the root it was minted for,
+  // so ticks written while the root is moved land in another directory.
+  const INVALID = { enforce: false, evidenceMode: 'ack', state: 'invalid', reason: 'SyntaxError: Unexpected end of JSON input' };
+  const MISSING = { enforce: false, evidenceMode: 'ack', state: 'missing', reason: 'ENOENT: no such file or directory' };
+  const DELIBERATE_OFF = { enforce: false, evidenceMode: 'ack', state: 'off', reason: null };
+  const VALID_ON = { enforce: true, evidenceMode: 'ack', state: 'on', reason: null };
+
+  it('engine path: should warn once for an invalid config, read OFF, and let REPORT proceed', async () => {
+    const state = await evidencedAtReport('cfg-invalid');
+
+    expect(gateReportOnVerify(state, INVALID)).toBeNull();
+    expect(gateReportOnVerify(state, INVALID)).toBeNull();
+
+    const w = warnings(state.sessionId);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({
+      phase: 'REPORT', level: 'warn', type: 'config-unreadable', data: { state: 'invalid', reason: INVALID.reason },
+    });
+    expect(w[0].message).toContain('enforcement reads OFF');
+    expect(state.reportVerifyGateConfigWarned).toBe('invalid');
+    expect(stderrLines()).toHaveLength(1);
+    expect(stderrLines()[0]).toContain('config unreadable: invalid');
+    expect(state.phase).toBe('REPORT');
+    expect(gateTicks(state.sessionId)).toHaveLength(0);
+  });
+
+  it('engine path: should warn with state missing when the file is not there', async () => {
+    const state = await evidencedAtReport('cfg-missing');
+
+    expect(gateReportOnVerify(state, MISSING)).toBeNull();
+
+    const w = warnings(state.sessionId);
+    expect(w).toHaveLength(1);
+    expect(w[0].data).toMatchObject({ state: 'missing' });
+    expect(state.reportVerifyGateConfigWarned).toBe('missing');
+  });
+
+  it('should stay byte-identical for a deliberate OFF: no event, no flag, no stderr', async () => {
+    const state = await evidencedAtReport('cfg-off');
+    const before = JSON.stringify(state);
+
+    expect(gateReportOnVerify(state, DELIBERATE_OFF)).toBeNull();
+    // The pre-D-05 injection shape, which has no `state` at all, is OFF too.
+    expect(gateReportOnVerify(state, { enforce: false })).toBeNull();
+
+    expect(JSON.stringify(state)).toBe(before);
+    expect(warnings(state.sessionId)).toHaveLength(0);
+    expect(stderrLines()).toHaveLength(0);
+  });
+
+  it('should not warn for a valid ON config either: the pass trace is the only new event', async () => {
+    const state = await evidencedAtReport('cfg-on');
+
+    expect(gateReportOnVerify(state, VALID_ON)).toBeNull();
+
+    expect(warnings(state.sessionId)).toHaveLength(0);
+    expect(state.reportVerifyGateConfigWarned).toBeUndefined();
+    expect(gateTicks(state.sessionId)).toHaveLength(1);
+  });
+
+  it('driver path: should warn once too, through the config its caller loaded', async () => {
+    const state = await evidencedAtReport('cfg-driver');
+
+    expect(refuseRecordedReport(state, { status: 'done' }, MISSING, PHASES)).toBe(false);
+    expect(refuseRecordedReport(state, { status: 'done' }, MISSING, PHASES)).toBe(false);
+
+    expect(warnings(state.sessionId)).toHaveLength(1);
+    expect(state.reportVerifyGateConfigWarned).toBe('missing');
+    expect(stderrLines()).toHaveLength(1);
+  });
+
+  it('should warn once for the session even when both entry points see the unreadable config', async () => {
+    const state = await evidencedAtReport('cfg-both');
+
+    expect(gateReportOnVerify(state, INVALID)).toBeNull();
+    expect(refuseRecordedReport(state, { status: 'done' }, INVALID, PHASES)).toBe(false);
+
+    expect(warnings(state.sessionId)).toHaveLength(1);
+    expect(stderrLines()).toHaveLength(1);
+  });
+
+  it('end to end: the real loader against a broken plugin-root config feeds the same warning once', async () => {
+    const state = await evidencedAtReport('cfg-e2e');
+
+    withPluginRoot('{ "autopilot": ', () => {
+      gateMode.shipped = true;
+      expect(gateReportOnVerify(state)).toBeNull();
+      expect(gateReportOnVerify(state)).toBeNull();
+      // Read inside the moved root: the store the ticks went to is resolved
+      // against the plugin root in force (see the note above INVALID).
+      const w = warnings(state.sessionId);
+      expect(w).toHaveLength(1);
+      expect(w[0].data).toMatchObject({ state: 'invalid' });
+    });
+
+    expect(state.reportVerifyGateConfigWarned).toBe('invalid');
+    expect(stderrLines()).toHaveLength(1);
+    expect(state.phase).toBe('REPORT');
+  });
+
+  it('should never throw or warn when the state is not an object', () => {
+    for (const bad of [null, undefined, 'x', 42, []]) {
+      expect(() => gateReportOnVerify(bad, INVALID)).not.toThrow();
+      expect(() => refuseRecordedReport(bad, { status: 'done' }, INVALID, PHASES)).not.toThrow();
+    }
+    expect(stderrLines()).toHaveLength(0);
+  });
+});

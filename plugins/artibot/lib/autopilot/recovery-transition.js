@@ -186,21 +186,67 @@ export function phaseForRecovery(row) {
 }
 
 /**
+ * One line of why a read failed: the error code when there is one, then the
+ * message, bounded so a reason never becomes a stack trace.
+ *
+ * @param {unknown} err
+ * @returns {string}
+ */
+function briefReason(err) {
+  const code = typeof err?.code === 'string' && err.code ? `${err.code}: ` : '';
+  const message = typeof err?.message === 'string' ? err.message : String(err);
+  return `${code}${message}`.slice(0, 160);
+}
+
+/**
+ * Read `<pluginRoot>/artibot.config.json` and say HOW the read ended (05 D-05).
+ * A twin of `report-verify-gate.js#readPluginConfigFile` — that module imports
+ * this one, so the helper cannot be shared without a cycle, and the two are kept
+ * in step by their tests. Never throws.
+ *
+ * @returns {{cfg: object|null, state: 'read'|'invalid'|'missing', reason: string|null}}
+ */
+function readPluginConfigFile() {
+  let text;
+  try {
+    text = readFileSync(path.join(getPluginRoot(), 'artibot.config.json'), 'utf8');
+  } catch (err) {
+    return { cfg: null, state: 'missing', reason: briefReason(err) };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { cfg: null, state: 'invalid', reason: briefReason(err) };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { cfg: null, state: 'invalid', reason: 'config is not a JSON object' };
+  }
+  return { cfg: parsed, state: 'read', reason: null };
+}
+
+/**
  * Read the CA-03 gate straight off `<pluginRoot>/artibot.config.json`, the
  * `engine.js#loadRunnerConfig` precedent. Only a real boolean `true` opens the
  * gate: a missing file, broken JSON, the string `"true"` and `1` all read as
  * OFF. Never throws.
  *
- * @returns {{transitionFromVerdict: boolean}}
+ * Tri-state (05 D-05): the boolean keeps its meaning and still fails open, but
+ * `state` tells a deliberate `'off'` (the file was read and the flag is not
+ * `true`) from an `'invalid'` file (does not parse, or is not an object) and a
+ * `'missing'` one (could not be opened), and `reason` says why for the last two.
+ * `'on'` is the literal `true`. The allowlist is the gate's
+ * `report-verify-gate.js#REPORT_VERIFY_CONFIG_STATES`. This loader warns
+ * nothing; its callers (`engine-state.js#recordPhaseResult`, the VERIFY seal)
+ * read the boolean exactly as before.
+ *
+ * @returns {{transitionFromVerdict: boolean, state: 'on'|'off'|'invalid'|'missing', reason: string|null}}
  */
 export function loadRecoveryTransitionConfig() {
-  try {
-    const cfgPath = path.join(getPluginRoot(), 'artibot.config.json');
-    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
-    return { transitionFromVerdict: cfg?.autopilot?.recovery?.transitionFromVerdict === true };
-  } catch {
-    return { transitionFromVerdict: false };
-  }
+  const file = readPluginConfigFile();
+  if (file.state !== 'read') return { transitionFromVerdict: false, state: file.state, reason: file.reason };
+  const on = file.cfg?.autopilot?.recovery?.transitionFromVerdict === true;
+  return { transitionFromVerdict: on, state: on ? 'on' : 'off', reason: null };
 }
 
 /**
