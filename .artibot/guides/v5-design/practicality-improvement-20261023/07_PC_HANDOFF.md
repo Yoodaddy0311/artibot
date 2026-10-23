@@ -1,6 +1,6 @@
 # 07. PC 인수인계 — 클라우드 세션이 못 한 것, 사용자 PC 와 오너 결정으로 넘기는 것 (2026-10-23)
 
-- **출발점**: `git fetch origin && git checkout claude/jolly-newton-qmi4eb` (master `6149446e` 위 12 커밋: 문서 4 + 코드 6 + 기록 2). 이 폴더의 [README](README.md) 가 목차다. 클라우드 세션(Linux 컨테이너, 중첩 `claude` 인증 불가, 라이브 원장·세션 스토어 없음)에서 할 수 있는 것은 전부 끝냈고([05 §8](05_REVISED_DESIGN.md)·[06](06_PIPELINE_AUDIT.md)), 아래는 **그 PC 에서만** 되는 것과 **오너만** 정할 수 있는 것이다.
+- **출발점**: `git fetch origin && git checkout claude/jolly-newton-qmi4eb` (master `6149446e` 위의 커밋 전부 — 수는 `git log --oneline origin/master..claude/jolly-newton-qmi4eb` 로 센다; 문서 커밋·코드 커밋(RED→GREEN 단위)·측정 기록 커밋 세 종류다). 이 폴더의 [README](README.md) 가 목차다. 클라우드 세션(Linux 컨테이너, 중첩 `claude` 인증 불가, 라이브 원장·세션 스토어 없음)에서 할 수 있는 것은 전부 끝냈고([05 §8](05_REVISED_DESIGN.md)·[06](06_PIPELINE_AUDIT.md)), 아래는 **그 PC 에서만** 되는 것과 **오너만** 정할 수 있는 것이다.
 - 표기: ☐ 할 일 · 예상 소요 · 산출물. 수치는 실행 뒤 재현 명령과 함께 05 §8.1 또는 06 에 덧붙인다(규율: 수치에는 재현 명령).
 
 ## A. PC 에서 돌릴 것 (API 비용 0)
@@ -43,4 +43,4 @@
 ## E. 이 브랜치의 상태
 
 - 코드 변경은 전부 테스트와 함께 있고(전체 vitest 28,090건 중 환경 요인 1건 외 그린 — 05 §8.1), 모델에 보이는 두 키는 OFF 다. 바로 바뀐 운영 동작은 넷이다: 루프 이력이 세션별로 매 호출 저장됨 · 미분류 Bash 가 학습 행에 들어감 · 설정 읽기 실패가 경고로 보임 · 두 스킬이 활성화 때 전체 테스트를 돌리지 않음(+ 스킬 본문 선읽기 OFF, 토큰 라벨 정정).
-- PR 은 열지 않았다. 열 때는 커밋 12개를 그대로(각 커밋이 RED→GREEN 단위) 또는 레인별로 묶는다.
+- PR 은 열지 않았다. 열 때는 커밋을 그대로(코드 커밋 각각이 RED→GREEN 단위) 또는 레인별로 묶는다.
