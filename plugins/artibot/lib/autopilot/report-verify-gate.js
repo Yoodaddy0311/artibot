@@ -51,6 +51,19 @@
  *      the allowlist of PASS shapes that closes the gap between them (04 EXP-C,
  *      2026-10-23: seven non-FAIL shapes passed rule 6 beside a `done` ACK). It
  *      runs after rule 6 on purpose: an explicit FAIL stays FAILED.
+ *   7. ONLY under evidenceMode `'deterministic'` (05 D-04; it implies 6′): the
+ *      vitest reporter snapshot (`lib/verification/deterministic-source.js#RESULT_FILE_RELPATH`
+ *      under the repo root) names the tree being reported — its `gitSha` is HEAD —
+ *      and is a fresh pass: written at or after vS's `at`, judged by the source's
+ *      own allowlist (exit 0, completion clean). Decided by
+ *      `./verify-evidence-deterministic.js#evaluateDeterministicEvidence`:
+ *      `VERIFY_EVIDENCE_MISSING` (nothing measured this tree — no snapshot, no
+ *      identity, no HEAD, an unusable hand-out instant, any other unmeasured
+ *      source verdict), `VERIFY_EVIDENCE_STALE` (another commit, or a run older
+ *      than the hand-out), `VERIFY_EVIDENCE_FAILED` (the fresh run failed). Last
+ *      on purpose: what the driver wrote (6, 6′) is judged before what the tree
+ *      shows, so a pause names the nearer cause first. The pass carries the
+ *      source's one-line account in `detail`, so the gate tick says WHICH run.
  *
  * ### Why rule 3 has no case-fold (decided 2026-09-29)
  *
@@ -227,17 +240,28 @@
  *
  * ## evidenceMode (05 D-04 stage 2)
  *
- * `autopilot.reportVerifyGate.evidenceMode`, an allowlist of two values read by
+ * `autopilot.reportVerifyGate.evidenceMode`, an allowlist of three values read by
  * {@link readReportVerifyGateEvidenceMode}: `'ack'` (shipped — rules 1-6, the gate
- * exactly as it was before the key existed) and `'explicit-pass'` (adds rule 6′).
- * Any other value — absent, mistyped, a mode not yet wired — reads as `'ack'`
- * with a `reason` on the loaded config, so an unknown mode never tightens the
- * gate. A third mode, `'deterministic'` (rule 7: a fresh vitest snapshot bound to
- * the current git SHA), is designed in 05 D-04 and is NOT wired here yet.
+ * exactly as it was before the key existed), `'explicit-pass'` (adds rule 6′) and
+ * `'deterministic'` (adds rules 6′ and 7). Any other value — absent, mistyped,
+ * differently cased — reads as `'ack'` with a `reason` on the loaded config, so an
+ * unknown mode never tightens the gate.
+ *
+ * Rules 1-6′ are pure over `state`. Rule 7 alone reads the world: the snapshot
+ * file under the repo root and `git rev-parse HEAD`, through the ports in
+ * `opts.evidence` of {@link evaluateReportVerifyEvidence} (tests inject them; the
+ * defaults do the two reads, and HEAD is read FRESH on every call rather than
+ * through `lib/git/repo-root-cache.js#getHeadSha`, whose per-process cache would
+ * outlive the autopilot checkpoints that move HEAD). The repo root is
+ * `state.options.projectRoot`, falling back to the process cwd like
+ * `engine.js` does for its own file writes. What rule 7 cannot see is written
+ * beside it in `verify-evidence-deterministic.js` (test layer only; a dirty tree
+ * is reported, not gated; installed-plugin sessions have no snapshot at all).
  *
  * @module lib/autopilot/report-verify-gate
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
@@ -245,6 +269,7 @@ import { mergeQueuedNotification, persist, tick } from './_engine-helpers.js';
 import { notifyPause } from './notification.js';
 import { foldVerify } from './recovery-record.js';
 import { loadRecoveryTransitionConfig } from './recovery-transition.js';
+import { DETERMINISTIC_EVIDENCE_CODES, evaluateDeterministicEvidence } from './verify-evidence-deterministic.js';
 
 /**
  * Config path of the kill switch. Exported so the firewall pin and the reader
@@ -262,11 +287,12 @@ export const REPORT_VERIFY_GATE_EVIDENCE_MODE_CONFIG_PATH = 'autopilot.reportVer
 
 /**
  * The closed vocabulary of evidence modes — an allowlist. `'ack'` is the gate as
- * it shipped before the key existed (rules 1-6); `'explicit-pass'` adds rule 6′.
- * A value outside this list reads as `'ack'` ({@link readReportVerifyGateEvidenceMode}).
- * @type {ReadonlyArray<'ack'|'explicit-pass'>}
+ * it shipped before the key existed (rules 1-6); `'explicit-pass'` adds rule 6′;
+ * `'deterministic'` adds rules 6′ and 7 (05 D-04). A value outside this list reads
+ * as `'ack'` ({@link readReportVerifyGateEvidenceMode}).
+ * @type {ReadonlyArray<'ack'|'explicit-pass'|'deterministic'>}
  */
-export const REPORT_VERIFY_EVIDENCE_MODES = Object.freeze(['ack', 'explicit-pass']);
+export const REPORT_VERIFY_EVIDENCE_MODES = Object.freeze(['ack', 'explicit-pass', 'deterministic']);
 
 /** The mode an absent, unknown or unreadable value falls back to. */
 const DEFAULT_EVIDENCE_MODE = 'ack';
@@ -289,7 +315,10 @@ const UNREADABLE_STATES = new Set(['invalid', 'missing']);
  *   VERIFY_NOT_ACKED: 'VERIFY_NOT_ACKED', VERIFY_NOT_DONE: 'VERIFY_NOT_DONE',
  *   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE',
  *   VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED',
- *   VERIFY_RESULT_UNMEASURED: 'VERIFY_RESULT_UNMEASURED'}>}
+ *   VERIFY_RESULT_UNMEASURED: 'VERIFY_RESULT_UNMEASURED',
+ *   VERIFY_EVIDENCE_MISSING: 'VERIFY_EVIDENCE_MISSING',
+ *   VERIFY_EVIDENCE_STALE: 'VERIFY_EVIDENCE_STALE',
+ *   VERIFY_EVIDENCE_FAILED: 'VERIFY_EVIDENCE_FAILED'}>}
  */
 export const REPORT_VERIFY_CODES = Object.freeze({
   OK: 'ok',
@@ -299,6 +328,11 @@ export const REPORT_VERIFY_CODES = Object.freeze({
   STALE_BEFORE_EXECUTE: 'STALE_BEFORE_EXECUTE',
   VERIFY_RESULT_FAILED: 'VERIFY_RESULT_FAILED',
   VERIFY_RESULT_UNMEASURED: 'VERIFY_RESULT_UNMEASURED',
+  // Rule 7 (05 D-04, evidenceMode 'deterministic'): one spelling, owned by the
+  // module that decides them, so the two vocabularies cannot drift apart.
+  VERIFY_EVIDENCE_MISSING: DETERMINISTIC_EVIDENCE_CODES.MISSING,
+  VERIFY_EVIDENCE_STALE: DETERMINISTIC_EVIDENCE_CODES.STALE,
+  VERIFY_EVIDENCE_FAILED: DETERMINISTIC_EVIDENCE_CODES.FAILED,
 });
 
 /**
@@ -311,6 +345,14 @@ const CODE_HINTS = Object.freeze({
   VERIFY_RESULT_UNMEASURED: "evidenceMode 'explicit-pass': state.verifyResult 에 명시 PASS 가 없습니다. "
     + "인정되는 형은 status: 'PASS' · ok: true · passed: true 셋뿐이고, 비어 있거나 자유형(산문·소문자 'fail'·"
     + "중첩 mcp 결과·문자열)이면 UNMEASURED — 통과가 아닙니다. VERIFY 를 다시 돌려 그 결과를 세 형 중 하나로 통째로 쓰십시오.",
+  VERIFY_EVIDENCE_MISSING: "evidenceMode 'deterministic': 이 트리를 측정한 vitest 스냅샷이 없습니다 — "
+    + "리포 루트의 plugins/artibot/runtime/last-test-result.json 이 없거나, git 정체(gitSha)가 없거나(구 리포터·git 없음), "
+    + "HEAD 를 읽지 못했거나, 소스가 UNMEASURED 로 판정했습니다. 이 체크아웃에서 npm test 를 다시 돌린 뒤 VERIFY 를 재실행하십시오. "
+    + "설치본(플러그인 캐시) 세션에는 스냅샷이 없어 이 모드가 항상 여기서 멈춥니다.",
+  VERIFY_EVIDENCE_STALE: "evidenceMode 'deterministic': vitest 스냅샷이 이 트리나 이 attempt 를 덮지 않습니다 — "
+    + "다른 커밋을 측정했거나 VERIFY 위임 시각보다 먼저 쓰였습니다. 현재 HEAD 에서 npm test 를 다시 돌린 뒤 VERIFY 를 재실행하십시오.",
+  VERIFY_EVIDENCE_FAILED: "evidenceMode 'deterministic': VERIFY 위임 뒤 이 HEAD 에서 돈 npm test 가 실패했습니다 — "
+    + "드라이버의 verifyResult 와 무관하게 결정적 증거가 FAIL 입니다. 실패를 고친 뒤 VERIFY 를 재실행하십시오.",
 });
 
 /** The one result status that counts as a completed verification. */
@@ -499,38 +541,116 @@ function warnConfigUnreadable(state, config) {
 /**
  * Build one verdict. `checkpointSha` is known only while a VERIFY slot is still
  * open: journal rows do not carry it, and the ACK clears the slot that did.
+ * `detail` is present only when rule 7 ran (both ways: the refusal's reason, or
+ * the accepted run's one-line account), so every verdict of rules 1-6′ keeps
+ * its four keys byte for byte.
  * @param {string} code
  * @param {object|null} started - the vS journal row, when found
  * @param {object|null} slot - an open VERIFY `activePhaseAttempt`, when present
- * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null}}
+ * @param {string} [detail] - rule 7's account, when it ran
+ * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null, detail?: string}}
  */
-function verdict(code, started = null, slot = null) {
+function verdict(code, started = null, slot = null, detail = undefined) {
   return {
     ok: code === REPORT_VERIFY_CODES.OK,
     code,
     attemptId: started?.attemptId ?? slot?.attemptId ?? null,
     checkpointSha: slot?.checkpointSha ?? null,
+    ...(typeof detail === 'string' && detail ? { detail } : {}),
   };
 }
 
 /**
+ * The two reads rule 7 makes when nothing is injected. HEAD is read fresh on every
+ * call — see the module header for why the per-process cache is wrong here. Each
+ * port answers `null` for anything it cannot produce; the decision module turns
+ * that into MISSING, never into a verdict.
+ * @type {{readFile: (file: string) => string|null, headSha: (cwd: string) => string|null}}
+ */
+const DEFAULT_EVIDENCE_PORTS = Object.freeze({
+  readFile: (file) => {
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return null;
+    }
+  },
+  headSha: (cwd) => {
+    try {
+      return execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+      }).trim();
+    } catch {
+      return null;
+    }
+  },
+});
+
+/**
+ * The mode `opts.evidenceMode` names, or `'ack'` for anything outside the allowlist.
+ * @param {unknown} value
+ * @returns {'ack'|'explicit-pass'|'deterministic'}
+ */
+function resolveEvidenceMode(value) {
+  return REPORT_VERIFY_EVIDENCE_MODES.includes(/** @type {any} */ (value))
+    ? /** @type {any} */ (value)
+    : DEFAULT_EVIDENCE_MODE;
+}
+
+/**
+ * Where rule 7 looks for the snapshot: an injected root, else the session's
+ * project root (`state.options.projectRoot`, the same source `engine.js` uses for
+ * its PRD and report files), else the process cwd.
+ * @param {object} state
+ * @param {unknown} opts
+ * @returns {string}
+ */
+function evidenceRepoRoot(state, opts) {
+  const injected = /** @type {any} */ (opts)?.evidence?.repoRoot;
+  if (typeof injected === 'string' && injected) return injected;
+  const fromState = state?.options?.projectRoot;
+  return typeof fromState === 'string' && fromState ? fromState : process.cwd();
+}
+
+/**
+ * Rule 7 for one verdict: the deterministic evidence bound to this tree and this
+ * VERIFY hand-out. Only called under `'deterministic'`, after rules 1-6′ passed.
+ * @param {object} state
+ * @param {object} started - the vS journal row (its `at` is the hand-out instant)
+ * @param {unknown} opts - `opts.evidence` may carry `ports`, `repoRoot`, `nowMs`
+ * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null, detail?: string}}
+ */
+function deterministicVerdict(state, started, opts) {
+  const injected = /** @type {any} */ (opts)?.evidence;
+  const ports = injected?.ports && typeof injected.ports === 'object' ? injected.ports : DEFAULT_EVIDENCE_PORTS;
+  const nowMs = Number.isFinite(injected?.nowMs) ? Number(injected.nowMs) : Date.now();
+  const ev = evaluateDeterministicEvidence(ports, {
+    repoRoot: evidenceRepoRoot(state, opts), verifyStartedAt: started?.at, nowMs,
+  });
+  return verdict(ev.ok ? REPORT_VERIFY_CODES.OK : ev.code, started, null, ev.reason);
+}
+
+/**
  * Decide whether the session holds VERIFY evidence for the work being reported.
- * Pure: reads `state` (`attemptJournal`, `activePhaseAttempt` and, for rules 6
- * and 6′, `verifyResult`), never mutates it. It does not read `verifyResultScope`
- * or `verifyResultHistory`: see {@link scopeVerifyResultToAttempt} for why. The
- * rule is in the module header.
+ * Rules 1-6′ are pure: they read `state` (`attemptJournal`, `activePhaseAttempt`
+ * and, for rules 6 and 6′, `verifyResult`) and never mutate it. They do not read
+ * `verifyResultScope` or `verifyResultHistory`: see
+ * {@link scopeVerifyResultToAttempt} for why. The rule is in the module header.
  *
  * `opts.evidenceMode` selects the rule set: `'explicit-pass'` adds rule 6′ after
- * rule 6; anything else — the argument omitted, `'ack'`, a mode not in
+ * rule 6; `'deterministic'` adds 6′ and then rule 7, which reads the vitest
+ * snapshot and HEAD through `opts.evidence` (`{ports?: {readFile, headSha},
+ * repoRoot?: string, nowMs?: number}` — tests inject them; omitted, the two real
+ * reads run). Anything else — the argument omitted, `'ack'`, a mode not in
  * {@link REPORT_VERIFY_EVIDENCE_MODES} — is `'ack'`, under which this function
- * is byte for byte what it was before the option existed.
+ * is byte for byte what it was before the option existed and touches no port.
  *
  * @param {object} state
- * @param {{evidenceMode?: unknown}} [opts]
- * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null}}
+ * @param {{evidenceMode?: unknown, evidence?: {ports?: object, repoRoot?: string, nowMs?: number}}} [opts]
+ * @returns {{ok: boolean, code: string, attemptId: string|null, checkpointSha: string|null, detail?: string}}
  */
 export function evaluateReportVerifyEvidence(state, opts = undefined) {
-  const evidenceMode = /** @type {any} */ (opts)?.evidenceMode === 'explicit-pass' ? 'explicit-pass' : DEFAULT_EVIDENCE_MODE;
+  const evidenceMode = resolveEvidenceMode(/** @type {any} */ (opts)?.evidenceMode);
   const journal = Array.isArray(state?.attemptJournal) ? state.attemptJournal : [];
   const active = state?.activePhaseAttempt;
   const slot = active && typeof active === 'object' && active.phase === 'VERIFY' ? active : null;
@@ -548,11 +668,13 @@ export function evaluateReportVerifyEvidence(state, opts = undefined) {
   if (vIdx < eIdx) return verdict(REPORT_VERIFY_CODES.STALE_BEFORE_EXECUTE, started, slot);
   if (slot) return verdict(REPORT_VERIFY_CODES.VERIFY_NOT_ACKED, started, slot);
   if (hasExplicitVerifyFail(state?.verifyResult)) return verdict(REPORT_VERIFY_CODES.VERIFY_RESULT_FAILED, started);
-  // Rule 6′ — the PASS allowlist, 'explicit-pass' only. After rule 6 so an
+  // Rule 6′ — the PASS allowlist, every mode but 'ack'. After rule 6 so an
   // explicit FAIL is still FAILED, never UNMEASURED.
-  if (evidenceMode === 'explicit-pass' && foldVerify(state?.verifyResult) !== 'PASS') {
+  if (evidenceMode !== DEFAULT_EVIDENCE_MODE && foldVerify(state?.verifyResult) !== 'PASS') {
     return verdict(REPORT_VERIFY_CODES.VERIFY_RESULT_UNMEASURED, started);
   }
+  // Rule 7 — the tree's own evidence, 'deterministic' only, after what the driver wrote.
+  if (evidenceMode === 'deterministic') return deterministicVerdict(state, started, opts);
   return verdict(REPORT_VERIFY_CODES.OK, started);
 }
 
@@ -780,9 +902,13 @@ function pauseForVerify(state, result) {
     type: 'pause',
     level: 'warn',
     message: `Autopilot paused: ${reason}`,
-    // `hint` only for the codes that have one (CODE_HINTS), so every other
-    // pause tick keeps its two-key data byte for byte.
-    data: { code: result.code, attemptId: result.attemptId, ...(hint ? { hint } : {}) },
+    // `hint` only for the codes that have one (CODE_HINTS), and `detail` only
+    // when rule 7 ran, so every other pause tick keeps its two-key data byte for byte.
+    data: {
+      code: result.code, attemptId: result.attemptId,
+      ...(hint ? { hint } : {}),
+      ...(result.detail ? { detail: result.detail } : {}),
+    },
   });
   const note = notifyPause(state.sessionId, reason);
   return {
@@ -797,6 +923,7 @@ function pauseForVerify(state, result) {
       `사유: ${reason}`,
       '/autopilot:resume <sessionId> 로 재개하면 VERIFY 부터 다시 실행합니다.',
       ...(hint ? [hint] : []),
+      ...(result.detail ? [`근거: ${result.detail}`] : []),
     ],
   };
 }
@@ -816,24 +943,28 @@ function pauseForVerify(state, result) {
  *
  * @param {object} state - Live session state (mutated only when pausing, or to
  *   set the once-per-session warning flag).
- * @param {{enforce?: boolean, evidenceMode?: unknown, state?: string, reason?: string|null}} [config]
- *   Injectable for tests; omitted, it is read from `artibot.config.json`.
+ * @param {{enforce?: boolean, evidenceMode?: unknown, state?: string, reason?: string|null,
+ *   evidence?: {ports?: object, repoRoot?: string, nowMs?: number}}} [config]
+ *   Injectable for tests; omitted, it is read from `artibot.config.json`. `evidence`
+ *   is a test seam for rule 7's reads (the loader never sets it).
  * @returns {object|null}
  */
 export function gateReportOnVerify(state, config = undefined) {
   const cfg = config ?? loadReportVerifyGateConfig();
   warnConfigUnreadable(state, cfg);
   if (cfg?.enforce !== true) return null;
-  const result = evaluateReportVerifyEvidence(state, { evidenceMode: cfg?.evidenceMode });
+  const result = evaluateReportVerifyEvidence(state, { evidenceMode: cfg?.evidenceMode, evidence: cfg?.evidence });
   if (!result.ok) return pauseForVerify(state, result);
   // ON only: a passed gate leaves a trace, so an enforced run can later show
   // WHICH VERIFY attempt it accepted — the pause path is not the only record.
+  // `detail` rides only when rule 7 ran (which run was accepted); every other
+  // pass tick keeps its three-key data byte for byte.
   tick(state?.sessionId, {
     phase: 'REPORT',
     type: 'report-verify-gate',
     level: 'info',
     message: `REPORT verify evidence: ${result.code}`,
-    data: { code: result.code, attemptId: result.attemptId, enforced: true },
+    data: { code: result.code, attemptId: result.attemptId, enforced: true, ...(result.detail ? { detail: result.detail } : {}) },
   });
   return null;
 }
@@ -868,6 +999,7 @@ function pauseRecordedReport(state, result, claimedStatus) {
       attemptId: result.attemptId,
       claimedStatus: typeof claimedStatus === 'string' ? claimedStatus : null,
       ...(hint ? { hint } : {}),
+      ...(result.detail ? { detail: result.detail } : {}),
     },
   });
   let note = null;
@@ -906,22 +1038,26 @@ function pauseRecordedReport(state, result, claimedStatus) {
  * @param {object} state - Live session state (mutated only when pausing, or to
  *   set the once-per-session warning flag).
  * @param {{status?: unknown}} [payload] - The REPORT result being recorded.
- * @param {{enforce?: boolean, evidenceMode?: unknown, state?: string, reason?: string|null}} [config]
- *   The switch and the mode, injected by the caller.
+ * @param {{enforce?: boolean, evidenceMode?: unknown, state?: string, reason?: string|null,
+ *   evidence?: {ports?: object, repoRoot?: string, nowMs?: number}}} [config]
+ *   The switch and the mode, injected by the caller (`evidence` is rule 7's test seam).
  * @param {readonly string[]} [livePhases] - Phases a refusal may pause from.
  * @returns {boolean}
  */
 export function refuseRecordedReport(state, payload, config, livePhases = []) {
   warnConfigUnreadable(state, config);
   if (config?.enforce !== true) return false;
-  const result = evaluateReportVerifyEvidence(state, { evidenceMode: config?.evidenceMode });
+  const result = evaluateReportVerifyEvidence(state, { evidenceMode: config?.evidenceMode, evidence: config?.evidence });
   if (result.ok) {
     tick(state?.sessionId, {
       phase: 'REPORT',
       type: 'report-verify-gate',
       level: 'info',
       message: `REPORT verify evidence: ${result.code}`,
-      data: { code: result.code, attemptId: result.attemptId, enforced: true, via: 'recordPhaseResult' },
+      data: {
+        code: result.code, attemptId: result.attemptId, enforced: true, via: 'recordPhaseResult',
+        ...(result.detail ? { detail: result.detail } : {}),
+      },
     });
     return false;
   }

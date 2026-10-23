@@ -208,3 +208,24 @@
 4. **비교 실험 예산(USD)** 과 B 군 정의 승인 — 프로젝트 `CLAUDE.md` 의 Artibot 절 제거를 기본으로 한다.
 5. **IMP/D 항목의 거처**: 이 폴더 유지 vs [V5-BACKLOG](../V5-BACKLOG.md) §3 부채 트랙 행 등재(진행률 불산입 트랙이라 README 의 원칙과 양립).
 6. (선택) D-04 의 `git_sha` 가 설치본 세션에서 항상 MISSING 인 한계를 수용할지 — `deterministic-source.js` R1 결정과 같은 선.
+
+## 8. 구현 기록 (2026-10-23, 브랜치 `claude/jolly-newton-qmi4eb`)
+
+§5 의 코드 Wave 1~4 를 세 레인(파일 소유권으로 분할, 각자 격리 worktree, RED → GREEN)으로 병렬 구현해 한 브랜치에 선형으로 얹었다. 모델에 보이는 변화는 전부 키 뒤에 있고 출하값은 OFF 다. 라이브 분모(Wave 0)와 비교 실험(Wave 5~6)은 이 체크아웃에서 할 수 없어 미착수다.
+
+| 설계 항목 | 상태 | 커밋 | 출하 동작 변화 | 핀 |
+|---|---|---|---|---|
+| D-01 루프 이력 영속화(호출마다 flush · 세션 경로 · 감지를 분류 앞으로) | 착지 | `91218643` | 있음 — Observe 복원(stderr 만, 모델 가시 변화 0). 격리 재현: cold start 3회 경고 · 5회 차단 라벨 · `runtime/sessions/<sid>/loop-state.json` 생성 | `tests/hooks/tool-tracker-loop-state.test.js` 10 |
+| D-02 1단계 detections 누적 + 판독기 | 착지 | `91218643` | 상태 파일 안 `detections[]`(해시만), `scripts/ledger/loop-detection-census.mjs` 읽기 전용 | `tests/ledger/loop-detection-census.test.js` 19 |
+| D-02 2단계 권고 additionalContext | 착지, 키 OFF | `91218643` | `cognitive.loopDetector.advisory` 출하 `false` → stdout 바이트 0 그대로 | `tests/hooks/tool-tracker-advisory.test.js` 7 |
+| D-03 미분류 Bash 수용 + 접두 2종 + vitest→test | 착지 | `91218643` | 있음 — Observe(학습 행 추가, 명령 본문 저장 0). 격리 재현: `cd … && CI=1 npm test` → `bash:test:shell` | `tests/hooks/tool-tracker-bash-receipt.test.js` 10 |
+| D-04 1단계 census | 착지 | `717981c0` | `scripts/ledger/verify-result-census.mjs` 읽기 전용 | `tests/ledger/verify-result-census.test.js` 26 |
+| D-04 2단계 `evidenceMode` `'explicit-pass'`(규칙 6′) | 착지, 키 `'ack'` 출하 | `717981c0` | `'ack'` 바이트 불변(기존 94건 그대로) | `tests/autopilot/report-verify-gate.test.js` |
+| D-04 `'deterministic'`(규칙 7) — 리포터 `gitSha`·`gitDirty`(schemaVersion 3) + `deterministic-source.js#readSnapshotIdentity` + 판정 모듈 + 게이트 배선 | 착지, 키 `'ack'` 출하 | `7ef479f7` · `93add847` · 이 커밋 | 리포터 스냅샷에 두 키 추가(소비처 15파일 그린). 게이트는 `'ack'` 에서 포트를 건드리지 않는다 | `tests/verification/deterministic-source-identity.test.js` 23 · `tests/autopilot/verify-evidence-deterministic.test.js` 22 · `tests/autopilot/report-verify-gate-deterministic.test.js` 22 |
+| D-05 설정 읽기 3상태 + 세션당 1회 경고 | 착지 | `717981c0` | 있음 — invalid·missing 일 때만 warn tick + stderr 1줄; 명시 off 는 바이트 불변; enforce 는 그대로 fail-open(오너 결정 #4 유지) | `report-verify-gate.test.js` · `recovery-transition.test.js` 65 |
+| D-06 C3 라벨 정정 · 02 비용 컬럼 | **미착수** | — | VERIFICATION-ECONOMICS §4.3 범위 그대로 남음 | — |
+| D-07 격리 런북 시운전 · Phase 1 pilot | **미착수**(오너 예산 결정 뒤) | — | — | — |
+| Wave 0 라이브 분모 3종 | **미착수**(이 체크아웃에 원장·세션 스토어 없음) | — | 오너 PC 에서 `node scripts/ledger/verify-result-census.mjs` · `node scripts/ledger/loop-detection-census.mjs` | — |
+
+규칙 7 의 결정 순서는 `lib/autopilot/verify-evidence-deterministic.js` 헤더의 표(1~9)이고, 게이트 안에서는 규칙 6 → 6′ → 7 순이다: 드라이버가 쓴 것(6·6′)을 트리가 보여 주는 것(7)보다 먼저 판정해 pause 가 가까운 원인을 먼저 말한다. 규칙 7 이 못 보는 것은 그 모듈 헤더에 적었다(테스트 층만 · 더러운 트리는 `근거:` 에 적되 막지 않음 · 설치본 세션은 스냅샷이 없어 항상 MISSING). §6 의 미확인 중 "서브에이전트 payload 의 `session_id`" · "설치본 호스트의 PostToolUse additionalContext" · "`usage-cost-table.mjs --projects-dir` 의 B 군 적용" · Windows 재현은 그대로 미확인이다.
+

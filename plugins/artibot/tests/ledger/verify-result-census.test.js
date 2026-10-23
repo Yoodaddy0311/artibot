@@ -58,6 +58,9 @@ const STDOUT_KEYS = [
 const ZERO_CODES = {
   ok: 0, NO_VERIFY_ATTEMPT: 0, VERIFY_NOT_ACKED: 0, VERIFY_NOT_DONE: 0,
   STALE_BEFORE_EXECUTE: 0, VERIFY_RESULT_FAILED: 0, VERIFY_RESULT_UNMEASURED: 0,
+  // Rule 7 codes of evidenceMode 'deterministic' (2026-10-23). The census never
+  // runs that mode (it reads stored sessions, not the live tree), so always 0.
+  VERIFY_EVIDENCE_MISSING: 0, VERIFY_EVIDENCE_STALE: 0, VERIFY_EVIDENCE_FAILED: 0,
 };
 
 /** @type {string} */

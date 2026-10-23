@@ -261,8 +261,11 @@ describe('evaluateReportVerifyEvidence — rule B', () => {
 
   it('should only ever answer from the closed, frozen code vocabulary', () => {
     expect(Object.isFrozen(REPORT_VERIFY_CODES)).toBe(true);
+    // Ten since 2026-10-23: the three VERIFY_EVIDENCE_* codes of evidenceMode
+    // 'deterministic' (rule 7, report-verify-gate-deterministic.test.js).
     expect(Object.values(REPORT_VERIFY_CODES).sort()).toEqual([
-      'NO_VERIFY_ATTEMPT', 'STALE_BEFORE_EXECUTE', 'VERIFY_NOT_ACKED', 'VERIFY_NOT_DONE',
+      'NO_VERIFY_ATTEMPT', 'STALE_BEFORE_EXECUTE', 'VERIFY_EVIDENCE_FAILED', 'VERIFY_EVIDENCE_MISSING',
+      'VERIFY_EVIDENCE_STALE', 'VERIFY_NOT_ACKED', 'VERIFY_NOT_DONE',
       'VERIFY_RESULT_FAILED', 'VERIFY_RESULT_UNMEASURED', 'ok',
     ]);
   });
@@ -427,7 +430,7 @@ describe("evaluateReportVerifyEvidence — rule 6′ under evidenceMode 'explici
   });
 
   it("should treat any mode outside the allowlist as 'ack' (an unknown mode never tightens the gate)", () => {
-    for (const evidenceMode of ['deterministic', 'ACK', 'explicit_pass', '', 1, true, null, {}]) {
+    for (const evidenceMode of ['strict', 'ACK', 'explicit_pass', '', 1, true, null, {}]) {
       expect(evaluateReportVerifyEvidence(withResult(null), { evidenceMode }).code, String(evidenceMode)).toBe('ok');
     }
     expect(evaluateReportVerifyEvidence(withResult(null), null).code).toBe('ok');
@@ -441,10 +444,11 @@ describe("evaluateReportVerifyEvidence — rule 6′ under evidenceMode 'explici
     expect(JSON.stringify(s)).toBe(before);
   });
 
-  it('should carry the new code in the frozen vocabulary, seven codes in all', () => {
+  it('should carry the new code in the frozen vocabulary, ten codes in all (the three rule-7 codes included)', () => {
     expect(REPORT_VERIFY_CODES.VERIFY_RESULT_UNMEASURED).toBe('VERIFY_RESULT_UNMEASURED');
     expect(Object.isFrozen(REPORT_VERIFY_CODES)).toBe(true);
-    expect(Object.values(REPORT_VERIFY_CODES)).toHaveLength(7);
+    // 7 + the three evidence codes of evidenceMode 'deterministic' (report-verify-gate-deterministic.test.js).
+    expect(Object.values(REPORT_VERIFY_CODES)).toHaveLength(10);
   });
 });
 
@@ -477,19 +481,19 @@ describe('kill switch reader', () => {
 describe('evidenceMode reader (05 D-04 stage 2)', () => {
   const at = (value) => ({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: value } } });
 
-  it('should name its config path and the closed, frozen allowlist of two modes', () => {
+  it('should name its config path and the closed, frozen allowlist of three modes', () => {
     expect(REPORT_VERIFY_GATE_EVIDENCE_MODE_CONFIG_PATH).toBe('autopilot.reportVerifyGate.evidenceMode');
-    expect(REPORT_VERIFY_EVIDENCE_MODES).toEqual(['ack', 'explicit-pass']);
+    expect(REPORT_VERIFY_EVIDENCE_MODES).toEqual(['ack', 'explicit-pass', 'deterministic']);
     expect(Object.isFrozen(REPORT_VERIFY_EVIDENCE_MODES)).toBe(true);
   });
 
-  it('should read exactly the two allowlisted modes, with no reason', () => {
+  it('should read exactly the three allowlisted modes, with no reason', () => {
     expect(readReportVerifyGateEvidenceMode(at('ack'))).toEqual({ evidenceMode: 'ack', reason: null });
     expect(readReportVerifyGateEvidenceMode(at('explicit-pass'))).toEqual({ evidenceMode: 'explicit-pass', reason: null });
+    expect(readReportVerifyGateEvidenceMode(at('deterministic'))).toEqual({ evidenceMode: 'deterministic', reason: null });
   });
 
   it.each([
-    ['deterministic', 'deterministic'], // designed in 05 D-04, not wired: reads as ack until it is
     ['ACK', 'ACK'],
     ['', '""'],
     [1, '1'],
@@ -1904,6 +1908,9 @@ describe('censusReportVerifyEvidence', () => {
     expect(c.byCode).toEqual({
       ok: 1, NO_VERIFY_ATTEMPT: 0, VERIFY_NOT_ACKED: 1, VERIFY_NOT_DONE: 1, STALE_BEFORE_EXECUTE: 1, VERIFY_RESULT_FAILED: 1,
       VERIFY_RESULT_UNMEASURED: 0,
+      VERIFY_EVIDENCE_MISSING: 0,
+      VERIFY_EVIDENCE_STALE: 0,
+      VERIFY_EVIDENCE_FAILED: 0,
     });
     expect(c.pauseAtReport).toBe(4);
   });
@@ -2166,9 +2173,9 @@ describe('loadReportVerifyGateConfig — the config file at the plugin root', ()
     withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: 'explicit-pass' } } }), () => {
       expect(loadReportVerifyGateConfig()).toEqual({ enforce: true, evidenceMode: 'explicit-pass', state: 'on', reason: null });
     });
-    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: 'deterministic' } } }), () => {
+    withPluginRoot(JSON.stringify({ autopilot: { reportVerifyGate: { enforce: true, evidenceMode: 'strict' } } }), () => {
       expect(loadReportVerifyGateConfig()).toEqual({
-        enforce: true, evidenceMode: 'ack', state: 'on', reason: 'evidenceMode-unknown:deterministic',
+        enforce: true, evidenceMode: 'ack', state: 'on', reason: 'evidenceMode-unknown:strict',
       });
     });
   });
