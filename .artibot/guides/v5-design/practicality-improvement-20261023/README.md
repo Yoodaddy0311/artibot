@@ -1,6 +1,6 @@
 # ARTIBOT 실용성 검증 및 개선 설계 (2026-10-23)
 
-> **상태: PROPOSAL / NOT IMPLEMENTED / NOT MEASURED**
+> **상태: PROPOSAL / NOT IMPLEMENTED / NOT MEASURED** — 2026-10-23 검증 보고(04)와 개정 설계안(05) 추가. 01·02 와 05 가 어긋나면 05 가 이긴다(05 §0 정정표). 원문 01~03 은 보존.
 > **대상:** ARTIBOT v4.71.11, 기준 커밋 6149446eb5fc88d0537f07cb04010ba5ce4aa2a1
 > **목표:** 순정 Claude Code와 비교하여 독립 검증 성공률, 성공당 비용, 실행시간, 사람 개입을 실제로 개선하는 최소 하네스 확립
 > **주의:** 이 폴더는 설계 문서일 뿐이다. 운영 코드, 설정, 배포, 테스트 결과, v5 진행률을 변경하지 않는다.
@@ -10,6 +10,8 @@
 1. [01_IMPLEMENTATION_DESIGN.md](01_IMPLEMENTATION_DESIGN.md) — 확인된 결함, 18개 개선 항목, 최소 구조, 수정 계약 및 단계별 실행
 2. [02_BASELINE_ROI_PROTOCOL.md](02_BASELINE_ROI_PROTOCOL.md) — ARTIBOT 미사용 기준선, 4군 A/B/C/D, 공격 실험, 토큰·비용·ROI 산식
 3. [03_IMPLEMENTATION_HANDOFF.md](03_IMPLEMENTATION_HANDOFF.md) — Claude Code/Codex/Dot을 위한 읽기·구현·검수 인수인계 명세
+4. [04_VALIDATION_REPORT.md](04_VALIDATION_REPORT.md) — 01~03 의 주장을 소스·호스트 문서·격리 재현(EXP-A~D, API 호출 0)으로 대조한 검증 보고. 판정표·D0~D6 연결성 감사표·재현 스크립트·미확인 목록
+5. [05_REVISED_DESIGN.md](05_REVISED_DESIGN.md) — 검증을 통과한 것만 기존 부품 위에 다시 설계한 개정판. 정정표·D-01~D-07·P1/P2 처분표·실험 매니페스트·Wave 재편·오너 결정 항목
 
 ## 이 설계가 기존 문서와 갖는 관계
 
@@ -17,6 +19,7 @@
 - 본 문서의 IMP-01~18은 **독립적인 개선 제안 ID**이며, V5-BACKLOG의 항목 완료 상태에 합산하지 않는다.
 - 기존 설계에서 명시한 원칙(한 가지 정본, Evidence First, Observe → Shadow → Canary → GA, 사람 승인 게이트, worktree/세션 상태 격리)을 유지한다.
 - 구현자는 설계에 인용된 기준 SHA와 실제 체크아웃을 대조한다. 이미 수정된 문제는 중복 구현하지 않는다.
+- 2026-10-23 검증 결과(04): IMP-01~05 는 격리 재현으로 확인된 실제 단절, IMP-06 은 이미 구현(`lib/economics/usage-receipt.js`), IMP-08 은 이미 측정·결정(NEXT-SESSION 2026-10-20), IMP-16·17 은 기존 설계 문서와 중복. 02 §4 의 attempt 레코드는 기존 `usage.receipt` 스키마와 겹쳐 05 §4 의 실험 매니페스트 + 원장 조인으로 대체한다.
 - 2026-10-23까지의 코드 점검을 토대로 한 *가설/제안*을 포함한다. 사용자 PC의 실사용 A/B 결과는 아직 없다.
 
 ## 최우선 목표
