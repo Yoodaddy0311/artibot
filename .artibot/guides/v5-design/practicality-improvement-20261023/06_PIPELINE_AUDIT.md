@@ -43,7 +43,7 @@
 
 읽는 법: 세션 하나가 요청 200회면 opus 기준 약 $0.9 가 **플러그인이 있다는 사실만으로** 나간다(캐시가 전부 맞을 때). 5분 넘게 쉬어 캐시가 식으면 그 요청은 20배다. 이것이 "플러그인 유무 차이" 중 지금 숫자로 말할 수 있는 **유일한** 항목이고, 편익 쪽 숫자는 없다(§7).
 
-**못 보는 것**: 토큰은 문자 ÷ 4 추정이다(한국어 설명은 토큰당 문자가 적어 **과소**일 수 있다). 호스트가 설명을 전부 싣는지는 skills.md 의 서술(`description` 으로 스킬을 고른다, `when_to_use` 와 합쳐 1,536자 캡)에서 추론했고, 커맨드·에이전트 설명의 정확한 노출 형식은 **미확인**이다. 실제 과금은 `usage.receipt` 의 `cached_input_tokens` 로 확인해야 한다 — B 군(플러그인 없음)과 짝지으면 그 차이가 곧 이 표다.
+**못 보는 것**: 토큰은 문자 ÷ 4 추정이다(한국어 설명은 토큰당 문자가 적어 **과소**일 수 있다). 스킬 설명이 매 턴 실리는 것은 호스트 문서가 명시한다(skills.md 2026-10-23: "Every skill in the skill listing adds to your context on every turn", `description`+`when_to_use` 는 1,536자에서 잘림; `disable-model-invocation: true` 면 모델에게 지시가 가지 않는다). 커맨드·에이전트 설명의 정확한 노출 형식은 **미확인**이다. 실제 과금은 `usage.receipt` 의 `cached_input_tokens` 로 확인해야 한다 — B 군(플러그인 없음)과 짝지으면 그 차이가 곧 이 표다.
 
 ## 2. 훅 지연과 프로세스 수 — 도구 호출마다 얹히는 것
 
@@ -96,7 +96,27 @@
 
 ## 6. 비슷한 오픈소스와의 비교
 
-(웹 조사 결과를 §6 에 넣는다 — 작성 중)
+웹 조사(별도 에이전트, 모든 페이지 2026-10-23 열람, GitHub 페이지·releases 피드만 사용, 리포 도구 미사용). ★·이슈·커밋 수는 그 날 페이지 값이고 "n/s" 는 README 에 없음. README 가 주장한 수치는 **주장**으로 표기했다 — 어느 것도 방법·베이스라인이 공개돼 있지 않다.
+
+| 프로젝트 | 유형 · 설치 | 공개 규모 | 완료 게이트 | 자기 효과 측정 | 컨텍스트 비용 언급 | 활동 |
+|---|---|---|---|---|---|---|
+| ruvnet/ruflo (구 claude-flow) | 멀티에이전트 오케스트레이터 · plugin+npm+MCP | 98~100+ agents · 60+ commands · 30 skills · 27 hooks · 314 MCP tools(README 내 불일치) | `ruflo verify` 는 공급망 서명 검증, 테스트 기반 완료 게이트 n/s | LangGraph·AutoGen·CrewAI 대비 cold start·RSS(stub LLM, "orchestration cost only"); vanilla Claude Code 비교 없음; "routing 89%" 링크 없음 | n/s | 78.5k★ · v3.59.17 2026-10-22 |
+| SuperClaude_Framework | 커맨드·설정 팩 · pipx(플러그인 아님) | 30 commands · 20 agents · 8 MCP servers | 리서치용 confidence 0.6/0.8, 테스트 게이트 n/s | "2-3x faster, 30-50% fewer tokens" (주장, 방법 없음) | "Reduced framework footprint"(수치 없음) | 23.9k★ · v4.3.0 2026-03-22 |
+| BMAD-METHOD | 애자일 방법론+에이전트 팩 · npx/plugin | n/s(모듈 6) | TEA 애드온: PASS/CONCERNS/FAIL 릴리스 판정 | 없음 | TEA "one step file at a time" | 54.5k★ · v6.12.4 2026-10-14 |
+| obra/superpowers | 스킬 라이브러리+방법론 · 공식 마켓 plugin | 스킬 15 나열 | RED-GREEN-REFACTOR·verification-before-completion·2단계 리뷰(스킬 지시로 강제) | v6.4.2 "plans 1/4 시간·1/3 토큰"(자기 이전 버전 대비, 런 수 없음) | SKILL.md 20,000바이트 테스트(compaction 재부착 생존) | 303.8k★ · v7.0.1 2026-10-21 |
+| disler/claude-code-hooks-mastery | 훅 데모 팩 · settings.json | 13 hook 이벤트(11 자동검증) · commands 5 | PreToolUse 위험 명령 차단 · lint/type 차단 | 없음 | 모든 이벤트 JSON 로그 · 60 s 한도 | 3.9k★ · 마지막 커밋 2026-02-01 |
+| ccusage/ccusage | 사용량 트래커 CLI | 소스 18종 | 해당 없음 | 사용자 토큰·USD 집계(자기 효과 아님) | n/s | 19.1k★ · v20.0.41 2026-10-22 |
+| oh-my-claudecode | 멀티에이전트 오케스트레이터 · plugin/npm | 19 agents · 8 modes | "tests/build/lint/typecheck 통과까지 team-verify → team-fix 루프"(지시) | "라우팅으로 30-50% 토큰 절감"(주장) | `omc session friction report`(context-bloat 진단) · Jev 2000 ms timeout | 40.2k★ · v5.7.9 2026-10-22 |
+| smtg-ai/claude-squad | TUI 세션 매니저(tmux+worktree) | n/s | 수동 리뷰 | 없음 | n/s | 8.6k★ · v1.0.20 2026-08-20 |
+| Anthropic 공식 plugins · claude-plugins-official | 예제 13개 + 마켓 ≈315 항목 | 예제는 commands 1~4 · agents 0~6 · skills 0~7 · 훅 단일 이벤트 | code-review confidence 필터; 마켓 "Anthropic cannot verify" | 없음 | 문서: "스킬 목록의 모든 스킬이 매 턴 컨텍스트에 더해진다" · listing 1,536자 캡 · SKILL.md 500줄 · compaction 재부착 5k/25k 토큰 · additionalContext 10,000자 캡 · "SessionStart 훅은 빠르게" | 43.9k★ · 2026-10-22 |
+| affaan-m/everything-claude-code | 에이전트 하네스 · plugin/npx | 71 agents · 311 skills · 97 command shims · 훅 15 이벤트 | TDD gated RED→GREEN, fresh-context 자기 리뷰, GateGuard | "sonnet ~60% cost reduction"(주장) | on-demand skills vs always-loaded rules 구분 · SessionStart 8,000자 캡 · MCP ≤10/tools ≤80 | 286.7k★ · v2.2.3 2026-10-01 |
+| wshobson/agents | 멀티 하네스 플러그인 마켓 | plugins 94 · agents 202 · skills 185 · commands 105 | 구조 validate; LLM judge 는 "experimental, not validated" | 없음 | 8 KB 참조 분할(Codex) | 41.6k★ · 2026-10-17 |
+
+**종합**
+- **규모**: Artibot(81 commands · 114 skills · 30 agents · 15+ hook 이벤트)은 공개 수치로 "중대형" 이다. commands 는 ruflo(60+)·SuperClaude(30)보다 많고 wshobson(105)·ECC(97)와 비슷하다. skills 114 는 ruflo(30)·superpowers(15)보다 훨씬 많지만 ECC(311)·wshobson(185)보다 적다. **훅 층은 공개된 것 중 가장 조밀하다**(PreToolUse 9 등록 + PostToolUse 12 핸들러 디스패처 + 세션 디스패처 4; 훅 수를 밝힌 곳은 ruflo "27" 과 hooks-mastery "13 이벤트" 뿐). 자체 테스트 수(≈28k)를 밝힌 비교 대상은 없다.
+- **필드에 있고 Artibot 에 없는 것**: 멀티 하네스 배포(Codex·Cursor 등), MCP 서버 동봉, 방법론 서사(RED-GREEN·애자일 페르소나·"Mandatory workflows"), 공식 마켓플레이스 등재. **Artibot 에 있고 필드에 드문 것**: 프로젝트별 JSONL 이벤트 원장, **훅으로 완료를 결정적으로 막는 REPORT 게이트**(OMC·ECC·superpowers 의 "evidence-based completion" 은 스킬·프롬프트 지시다; Stop 훅 루프는 Anthropic 예제 ralph-wiggum 만), zero-runtime-deps 명시. 모델 라우팅은 OMC·wshobson·ECC 에도 있다.
+- **vanilla Claude Code 대비 통제 비교를 공개한 프로젝트는 0개다.** 숫자가 있는 곳은 전부 다른 프레임워크 대비(ruflo, stub LLM)이거나 자기 이전 버전 대비(superpowers, 런 수 없음)이거나 방법 없는 주장(SuperClaude·OMC·ECC "30~60%")이다. 따라서 [02](02_BASELINE_ROI_PROTOCOL.md)의 B/C 짝 비교를 실제로 돌려 공개하면 **이 필드에서 첫 통제 수치**가 된다 — 그 전까지 "플러그인이 낫다" 는 어느 프로젝트도 증명하지 못한 주장이다(우리 포함).
+- **컨텍스트 절약을 명시한 쪽**: Anthropic 문서(progressive disclosure, 1,536자 캡, 500줄, 5k/25k 재부착, SessionStart 빠르게), ECC(on-demand skills vs always-loaded rules, SessionStart 8,000자 캡), superpowers(20,000바이트 테스트), TEA(step 파일 하나씩), OMC(context-bloat 리포트). **훅당 지연을 수치로 공개한 곳은 없다** — §2 의 벤치와 §1 의 주입 문자수를 공개하면 사실상 유일한 데이터다. 그리고 Anthropic 문서가 확인해 준 사실 하나: `disable-model-invocation: true` 인 스킬은 모델에게 **지시가 가지 않는다**(= 매 턴 목록에서 빠진다). 이 리포는 스킬 114 중 9, 커맨드 81 중 5 만 그렇게 표시돼 있어 **스킬 105 + 커맨드 76 의 설명이 매 턴 실린다** — §1 의 세를 줄이는 가장 큰 레버다(§8 #3).
 
 ## 7. "플러그인을 썼을 때와 안 썼을 때" — 지금 말할 수 있는 것
 
@@ -115,7 +135,7 @@
 **NECESSARY**
 1. `skills/tdd-workflow/SKILL.md:36` · `skills/quality-framework/SKILL.md:45-46` 의 `!` 줄 삭제(헤딩 유지). 근거 §3. 비용: 활성화당 전체 테스트 1회 → 0. 테스트: `tests/firewall/constitution-stage-b*.test.js` 가 헤딩 기준선을 핀 — 줄만 지우면 그린(추론, 감사 §2.2 와 동일 서술).
 2. `artibot.config.json#skills.lazyLoading.enabled` → `false`(C5). `tests/runtime/middleware/skills.test.js` 에 enabled:false 케이스가 이미 있다(감사 §4.4).
-3. 에이전트 설명 24개(>500자)를 300자 안으로, 스킬 설명 7개(>500자)를 500자 안으로 — 매 요청 ≈3~4K 토큰 절감(추정). 단, 설명은 **발화 레버**다(`plugins/artibot/CLAUDE.md` "Auto-invoke Principle": 설명 품질이 스킬 발화를 결정) — 트리거 어휘(`triggers`·`when_to_use`)는 지키고 산문만 줄인다. `scripts/ci/lint-skill-descriptions.js` 의 R1 trigger floor 가 하한을 지킨다.
+3. 설명 세 축소, 두 갈래. (a) **매 턴 목록에서 빼기**: 스킬 114 중 `disable-model-invocation: true` 는 9, 커맨드 81 중 5 뿐이다(grep). Anthropic 문서는 "배포·커밋·코드 생성처럼 사람이 `/name` 으로 부르는 **작업형** 내용은 `disable-model-invocation: true`" 를 권한다 — 커맨드 76·스킬 105 를 작업형/지식형으로 분류해 작업형을 모델 목록에서 빼면 설명 세의 상당 부분이 사라진다(절감 폭은 분류 결과에 따름; 발화 분모 없이 어느 스킬이 모델 발화에 의존하는지 모르므로 **Existence Audit 선행 + 오너 결정**). (b) **줄이기**: 에이전트 설명 24개(>500자)를 300자 안으로, 스킬 설명 7개(>500자)를 500자 안으로 — 매 요청 ≈3~4K 토큰 절감(추정). 설명은 **발화 레버**다(`plugins/artibot/CLAUDE.md` "Auto-invoke Principle") — 트리거 어휘(`triggers`·`when_to_use`)는 지키고 산문만 줄인다. `scripts/ci/lint-skill-descriptions.js` 의 R1 trigger floor 가 하한을 지킨다.
 4. C3 토큰 라벨 정정(05 D-06 (a), 감사 §4.3 범위 그대로).
 
 **PARTIAL(오너 결정 동반)**
@@ -148,7 +168,7 @@ node scripts/ci/triage-wiring-gaps.mjs
 
 ## 10. 미확인
 
-- 호스트가 커맨드·에이전트 설명을 시스템 프롬프트에 **어떤 형식·전량**으로 싣는지(스킬은 문서로 추론, 1,536자 캡만 명시).
+- 호스트가 커맨드·에이전트 설명을 시스템 프롬프트에 **어떤 형식·전량**으로 싣는지(스킬은 문서로 확인됨 — §1; 커맨드·에이전트는 미확인).
 - 토큰 수(문자 ÷ 4 추정; 한국어 비율이 높아 실제는 더 클 수 있다).
 - 호스트가 PreToolUse 훅 9종을 병렬로 띄우는지와 호스트 IPC 지연(gap review P-13 도 미확인).
 - SessionStart 자식 11 vs 10 의 출처.
