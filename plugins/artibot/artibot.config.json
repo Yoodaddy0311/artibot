@@ -972,6 +972,10 @@
     "system2": {
       "maxRetries": 3,
       "sandboxEnabled": true
+    },
+    "loopDetector": {
+      "advisory": false,
+      "comment": "D-02 stage 2 (Canary, 2026-10-23; design .artibot/guides/v5-design/practicality-improvement-20261023/05_REVISED_DESIGN.md). Shipped false. The loop detector in scripts/hooks/tool-tracker.js (3 identical consecutive calls = warn, 5 = block) always writes one stderr line, which the host discards for a hook that exits 0 — so with this key OFF a detected loop changes nothing the model sees (byte-identical to every release before). true = on a detected loop the hook ALSO returns hookSpecificOutput.additionalContext on stdout, which the host inserts beside the tool result (PostToolUse and PostToolUseFailure both accept it; the PostToolUse dispatcher concatenates it with its siblings'). Advisory only: the tool has already run and nothing is blocked. Only the literal true reads ON; 'true', 1, a missing key or an unreadable config read OFF. Flip after scripts/ledger/loop-detection-census.mjs has shown the warn/block counts and a false-positive review of the top fingerprints (test re-runs, polling, tail) — owner decision, 05 §7 #1."
     }
   },
   "learning": {

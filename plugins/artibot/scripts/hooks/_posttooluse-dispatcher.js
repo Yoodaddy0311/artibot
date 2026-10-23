@@ -15,7 +15,9 @@
  *   6. post-bash-failure.js   Bash              (3s)   — bash failure recovery
  *   7. post-write-tdd.js      Edit / Write      (3s)   — TDD advisory
  *   8. mark-main-agent-edit.js Edit/Write/Multi (3s)   — agent ownership tag
- *   9. tool-tracker.js        *                 (3s)   — universal tracker
+ *   9. tool-tracker.js        *                 (3s)   — tool usage + loop tracker (every tool;
+ *                                                        a Bash row no longer needs a classifiable
+ *                                                        command — `bash:unknown:shell` since 2026-10-23)
  *  10. tool-used-record.js    Skill             (3s)   — Existence Audit carrier (skill key, SH-29)
  *  11. webfetch-cache-post.js WebFetch          (5s)   — webfetch cache write
  *  12. zero-result-guard.js   Grep / Glob       (3s)   — zero-result scope nudge
