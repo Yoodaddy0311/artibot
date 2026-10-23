@@ -7,7 +7,7 @@
  * A denominator with no numerator answers nothing, so this module supplies the
  * only numerator the repo can produce today without lying: the outcome of the
  * last `npm test`, as written by
- * `tests/reporters/test-status-reporter.js` (:51-52, :125-140).
+ * `tests/reporters/test-status-reporter.js#onTestRunEnd`.
  *
  * WHY NOT THE OTHER LAYERS. lint, tsc and build leave no exit code anywhere a
  * hook can read (the PostToolUse Bash hooks read `tool_response.exit_code` and
@@ -55,6 +55,28 @@
  * `completion=… unhandled=… unfinished=…` to the evidence note; the three new
  * UNMEASURED outcomes keep the reason-only shape and are told apart by their
  * hash (`REASONS.interrupted`, `.unfinished`, `.completionUnreadable`).
+ *
+ * ── THE GIT IDENTITY (records that carry `gitSha`, "v3") ────────────────────
+ * F1 dates a run against the last edit; it cannot say WHICH commit the run
+ * measured, so a verdict could be read against a tree it never saw. Since
+ * `schemaVersion: 3` the reporter records `gitSha` (`git rev-parse HEAD`) and
+ * `gitDirty` (tracked files differ from HEAD), both omitted when git could not
+ * answer. This module exposes them two ways, and decides nothing on them:
+ *
+ *   - {@link readSnapshotIdentity} returns the raw values for a caller that
+ *     binds a verdict to a commit — the REPORT gate's rule 7
+ *     (`.artibot/guides/v5-design/practicality-improvement-20261023/05_REVISED_DESIGN.md`
+ *     D-04) compares `gitSha` with the tree it is about to report on.
+ *   - The evidence note gains ` sha=<12 hex>` and, when recorded, ` dirty=<bool>`
+ *     after the completion clause, so a ledger reader with nothing but the row
+ *     can still see which tree a pass described. The sha is the anchor: a dirty
+ *     flag without a usable sha writes no clause at all.
+ *
+ * `reason` is untouched, and a v1/v2 record (no `gitSha`) writes byte for byte
+ * what it always wrote. But `unified-verifier.js#buildVerificationId` hashes the
+ * evidence note, so a v3 record's `verification_id` now changes with the sha and
+ * the dirty flag. That is the point — passes of different trees are different
+ * verdicts — and it is also a reading rule: tally v3 rows by `result`, not by hash.
  *
  * ── THE TWO LOCATIONS, AND WHY THEY DIFFER (owner decision R1) ──────────────
  * The result file is read under the REPO root, not the plugin root. The
@@ -137,6 +159,71 @@ export const REASONS = Object.freeze({
  * `tests/reporters/test-status-reporter.test.js` is what keeps them in step.
  */
 const COMPLETION_REASONS = Object.freeze(['passed', 'interrupted', 'failed']);
+
+/**
+ * What counts as a recorded git identity: 7 to 40 lowercase hex digits — the
+ * full id the reporter writes, or an abbreviation another writer might. An
+ * allowlist: `HEAD`, a branch name, upper case or an empty string are not ids.
+ */
+const GIT_SHA_RE = /^[0-9a-f]{7,40}$/;
+
+/** How many hex digits of the sha the evidence note carries. */
+const SHA_NOTE_DIGITS = 12;
+
+/** @param {Record<string, any>} r @returns {string|null} */
+function readGitSha(r) {
+  return typeof r.gitSha === 'string' && GIT_SHA_RE.test(r.gitSha) ? r.gitSha : null;
+}
+
+/** @param {Record<string, any>} r @returns {boolean|null} */
+function readGitDirty(r) {
+  return typeof r.gitDirty === 'boolean' ? r.gitDirty : null;
+}
+
+/**
+ * The identity as one evidence-note clause, or `''` when the record names no
+ * usable sha. The dirty flag rides only beside a sha — alone it anchors nothing.
+ *
+ * @param {Record<string, any>} r
+ * @returns {string}
+ */
+function identityNoteClause(r) {
+  const sha = readGitSha(r);
+  if (sha === null) return '';
+  const dirty = readGitDirty(r);
+  return ` sha=${sha.slice(0, SHA_NOTE_DIGITS)}${dirty === null ? '' : ` dirty=${dirty}`}`;
+}
+
+/**
+ * Read the git identity a reporter snapshot carries, without judging the run.
+ *
+ * Pure, never throws, and independent of the four counts: a gate binding a
+ * verdict to a commit needs the sha even from a record this module would call
+ * `corrupt`, and `measuredAtMs` is the one timestamp both sides can compare. A
+ * field that is missing or not in the promised shape reads as `null` — "not
+ * recorded" — and text that is not a JSON object reads as all `null`.
+ *
+ * @param {unknown} resultJsonText Contents of the reporter file, or anything.
+ * @returns {{ gitSha: string|null, gitDirty: boolean|null, measuredAtMs: number|null }}
+ */
+export function readSnapshotIdentity(resultJsonText) {
+  const none = { gitSha: null, gitDirty: null, measuredAtMs: null };
+  if (typeof resultJsonText !== 'string') return none;
+  let parsed;
+  try {
+    parsed = JSON.parse(resultJsonText);
+  } catch {
+    return none;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return none;
+  const r = /** @type {Record<string, any>} */ (parsed);
+  const measuredAtMs = typeof r.timestamp === 'string' ? Date.parse(r.timestamp) : Number.NaN;
+  return {
+    gitSha: readGitSha(r),
+    gitDirty: readGitDirty(r),
+    measuredAtMs: Number.isFinite(measuredAtMs) ? measuredAtMs : null,
+  };
+}
 
 /** @param {unknown} v @returns {boolean} */
 function isCount(v) {
@@ -323,6 +410,8 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
     reasonClause = verdict.clause;
     noteClause = completionNoteClause(completion);
   }
+  // v3 only: `''` for a record without a usable sha, so v1/v2 notes stay byte-identical.
+  const identityClause = identityNoteClause(result);
 
   return {
     exitCode,
@@ -335,14 +424,15 @@ export function deterministicLayerFrom({ resultJsonText, markerMtimeMs, nowMs } 
     // filter matching every file counts the same as no filter, and the vitest
     // reporter API exposes no filter, so no "was targeted" flag is written.
     // The completion clause (v2 only) rides here for the same reason: it is the
-    // only place a later reader can see how the run ended.
+    // only place a later reader can see how the run ended. The identity clause
+    // (v3 only) comes last, so every older clause keeps its place.
     evidence: [{
       kind: 'file',
       file: RESULT_FILE_RELPATH,
       line: 1,
       measured_at: timestamp,
       note: `vitest total=${totalTests} passed=${passed} failed=${failed} `
-        + `skipped=${skipped}${modulesClause}${noteClause}`,
+        + `skipped=${skipped}${modulesClause}${noteClause}${identityClause}`,
     }],
   };
 }
