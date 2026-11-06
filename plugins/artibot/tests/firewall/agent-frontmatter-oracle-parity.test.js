@@ -19,9 +19,12 @@
  *   - 항목 뒤 인라인 주석: firewall·export-to-tool 은 벗기고, registry·skill-exporter 는
  *     `SendMessage   # DM` 을 항목 이름으로 남긴다(NEXT-SESSION.md 의 consumeBlockList
  *     줄 끝 주석 결함). 출하된 30개가 주석을 잃어 지금은 휴면이고, 확장 에이전트는 여전히 걸린다.
+ *     → 2026-10-12 `2a228bcb` 가 registry 에 `stripTrailingComment` 를 넣어 registry 쪽은
+ *       고쳐졌다(이 표가 RED 가 되어 재판정, 2026-11-07). skill-exporter 는 여전히 남긴다.
  *   - `scripts/validate-agent-frontmatter.js` 는 registry 파서의 사본이다. 6개 함수 중 4개가
  *     같고, `extractFrontmatterLines` 는 표현이 다르며(동치 여부 미확인), `consumeBlockList`
- *     는 `-` 단독 항목 분기가 사본에만 있다(함수 단위 diff, 2026-10-07).
+ *     는 `-` 단독 항목 분기가 사본에만 있다(함수 단위 diff, 2026-10-07). `2a228bcb` 이후
+ *     사본의 `consumeBlockList` 도 registry 의 `stripTrailingComment` 를 import 해 쓴다.
  *
  * ── 이 게이트가 못 보는 것 (rules section 9 — 게이트 옆에 적어라) ────────────
  *  1. **호스트의 실제 규칙.** `hostVisibleTools` 는 n=5 관측("첫 `---` 에서 닫힌다")을 옮긴
@@ -181,14 +184,14 @@ const REPLICAS = [
 const FULL = ['Read', 'Grep', 'SendMessage', 'TaskUpdate'];
 /** 주석 앞 항목만 — 호스트가 보게 되는 모양이자 skill-exporter 가 내놓는 모양. */
 const HEAD = ['Read', 'Grep'];
-/** 인라인 주석이 항목 이름에 남은 모양 — registry·skill-exporter 의 알려진 결함. */
+/** 인라인 주석이 항목 이름에 남은 모양 — skill-exporter 의 알려진 결함 (registry 는 2a228bcb 에서 고쳐짐). */
 const POLLUTED = ['Read', 'Grep', 'SendMessage   # DM', 'TaskUpdate'];
 
 const VERDICTS = {
   clean: { 'firewall-lenient': FULL, 'runtime-registry': FULL, 'export-to-tool': FULL, 'skill-exporter': FULL, 'ci-extract': undefined },
   dash: { 'firewall-lenient': FULL, 'runtime-registry': FULL, 'export-to-tool': FULL, 'skill-exporter': HEAD, 'ci-extract': undefined },
   plain: { 'firewall-lenient': FULL, 'runtime-registry': FULL, 'export-to-tool': FULL, 'skill-exporter': HEAD, 'ci-extract': undefined },
-  inline: { 'firewall-lenient': FULL, 'runtime-registry': POLLUTED, 'export-to-tool': FULL, 'skill-exporter': POLLUTED, 'ci-extract': undefined },
+  inline: { 'firewall-lenient': FULL, 'runtime-registry': FULL, 'export-to-tool': FULL, 'skill-exporter': POLLUTED, 'ci-extract': undefined },
 };
 
 /** 엄격 오라클의 판정: 규칙 집합(정렬). 빈 배열 = 통과. */
