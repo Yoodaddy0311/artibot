@@ -24,7 +24,8 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-write.js\"",
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ],
         "priority": "critical",
@@ -36,7 +37,8 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash.js\"",
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ],
         "priority": "critical",

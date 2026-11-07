@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 보안 — 보안 가드 2개가 timeout·크래시에도 막는다 (`onFailure: "block"`)
+
+- **무엇**: `hooks/hooks.json` 의 `pre-write.js`(Write|Edit — 민감 파일·비밀값 가드)와 `pre-bash.js`(Bash|PowerShell — 위험 명령 가드)에 `"onFailure": "block"`. 두 훅은 프로세스 안의 예외는 이미 catch 꼬리에서 block 했다("Safety check failed due to hook error. Blocking by default."). 남은 구멍은 호스트가 훅을 **자기 timeout(5초)으로 끊은 경우**와 **catch 꼬리가 생기기 전에 죽은 경우**(예: import 실패)였고, 그때는 도구 호출이 진행됐다. 이제 둘 다 block 이다.
+- **호스트 근거 (2026-11-07, 설치된 CLI 의 번들 스키마·문자열을 읽은 것 — 라이브 크래시 프로브는 아님)**: 2.1.319 는 command 훅의 `onFailure` 를 읽고, `"block"` 이면 timeout 으로 끊긴 훅과 non-blocking error 로 끝난 훅을 block 으로 센다(Stop·SubagentStop·TaskCompleted·TeammateIdle 에서는 무시). 2.1.108 의 command 훅 스키마는 `.strict()` 없는 zod object 라 모르는 키를 버린다 — 그래서 2.1.295 미만 호스트에서는 보호가 없을 뿐 깨지지 않는다(추론: 같은 2.1.x 가 v4.6.4 의 `args[]` 를 조용히 무시한 기록과 맞는다).
+- **붙이지 않은 것**: `bash-risk-guard.js` 는 헤더가 정한 fail-open 보조 층(위에 fail-closed 인 `pre-bash.js` 가 있다)이라 제외 — 2026-11-07 NEXT-SESSION 이 이 훅을 대상에 넣었던 것은 코드 계약과 어긋나 바로잡았다. `pre-write-guard`·`git-autopilot-guard`·`pre-write-checkpoint` 도 catch 꼬리는 block 이지만 안전이 아니라 작업 흐름 가드라서, 이 PC 의 가짜 timeout(2026-10-12 gap review P-17) 한 번에 모든 쓰기가 막히는 쪽을 택하지 않았다. 관찰 훅 3개(route·intent·webfetch-cache)는 fail-open 그대로.
+- **게이트**: `tests/hooks-schema-shape.test.js` 7a(값은 `continue`·`block` 만) · 7b(`block` 이 정확히 두 보안 가드에만, PreToolUse 에만 — allowlist) · 7c(`block` 을 단 훅은 catch 꼬리에 `blockReason:` 이 있어야 하고, `bash-risk-guard.js` 는 이 술어에 걸리지 않아야 한다). 음성 대조: 메모리 위 문서에서 pre-bash 의 키를 빼거나 bash-risk-guard·Stop 에 키를 더하면 7b 가 다른 목록을 낸다(적용 확인 포함). 지문 `f1f8a496… → 1f73c788…`.
+- **이 게이트가 못 보는 것**: 호스트가 실제 세션에서 크래시·timeout 을 block 으로 바꾸는지(라이브 프로브 미실행 — 미확인), 2.1.295~2.1.318 사이 버전의 동작(2.1.108·2.1.319 두 점만 읽었다).
+
 ## [4.71.14] — 2026-11-07
 
 `v4.71.13`(`43a0b6cd`) 이후 7 커밋 = **75 files +1,261/−5,415**(`git rev-list --count v4.71.13..5cf7db71` · `git diff --shortstat v4.71.13 5cf7db71`, 2026-11-07 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 2개(`e19265c7`·`afe4a680`)는 dependabot PR #124(setup-node 7.1.0 · upload-artifact 7.0.2 · action-gh-release 3.0.3, 새 SHA 3개는 각 태그와 일치 확인)이다. 나머지 5개는 같은 날의 /ultraplan(최근 3주 고스타 오픈소스 대조 — 그대로 들여올 기법 0건, 근거는 아래 각 항목)과 그 실행(/autopilot `ap-20261107-103519-emzcad`)이다. 테스트는 28,206 → 28,046(Ubuntu 3레그, `5cf7db71` 의 CI 세 레그가 같은 값; Windows 레그 28,069) — 줄어든 것은 지운 모듈 13개의 테스트 12파일 때문이다.

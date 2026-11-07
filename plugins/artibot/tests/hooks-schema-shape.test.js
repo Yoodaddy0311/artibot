@@ -57,6 +57,28 @@ import { fileURLToPath } from 'node:url';
  *      regression gate: 6a allowlists the syntax (fail-closed), 6b simulates
  *      the host's match rule and pins each PreToolUse group to its intended
  *      tool set, 6c proves the simulator reproduces the measured A/B.
+ *   7. `onFailure: "block"` sits on exactly the two guard-registry security
+ *      hooks (pre-write.js, pre-bash.js) — an allowlist, so a new entry cannot
+ *      inherit it silently. Host facts, read from the installed CLI's own
+ *      bundled schema and strings (2026-11-07, not a live crash probe):
+ *        - 2.1.319: `onFailure` is a field of the command hook; with "block",
+ *          a hook the host stopped after ITS timeout, or one that ended in a
+ *          non-blocking error (a crash before the hook's catch tail exists,
+ *          e.g. a failed import), counts as a block. Without it both let the
+ *          tool call run. Ignored on Stop/SubagentStop/TaskCompleted/
+ *          TeammateIdle.
+ *        - 2.1.108: the command hook schema is a plain zod object, no
+ *          `.strict()`, so an older host drops the unknown key — the same way
+ *          2.1.x dropped `args[]` (header above). No protection there, no
+ *          breakage either.
+ *      Precondition 7c: a hook gets "block" only if its own error tail already
+ *      blocks (`blockReason:` in its catch handler). That keeps the host's
+ *      answer to a crash identical to the hook's answer to an exception.
+ *      bash-risk-guard.js fails that test on purpose: its header makes it a
+ *      fail-open layer above pre-bash.js. The other Write|Edit hooks with a
+ *      blocking tail (pre-write-guard, git-autopilot-guard,
+ *      pre-write-checkpoint) are workflow, not safety; a spurious timeout on
+ *      this machine (gap review 2026-10-12, P-17) would stop every write.
  */
 
 const PLUGIN_ROOT = path.resolve(
@@ -150,6 +172,24 @@ const PRETOOLUSE_INTENT = {
   // by name (its WRITE_TOOLS allowlist is {Write, Edit}).
   'intent-observe-pre.js': WRITE_TOOLS,
 };
+
+/** The only values the host reads for a command hook's `onFailure`. */
+const ON_FAILURE_VALUES = ['continue', 'block'];
+
+/**
+ * Hooks that carry `onFailure: "block"` (header §7). An allowlist: adding one
+ * here is a deliberate decision, and 7c makes it prove a blocking error tail.
+ */
+const ON_FAILURE_BLOCK = ['pre-bash.js', 'pre-write.js'];
+
+/** Same shape as `createErrorHandler(…, { blockReason: … })` — the comment
+ *  "omits a blockReason" in bash-risk-guard.js does not match. */
+const BLOCKING_TAIL_RE = /\bblockReason:\s*\S/;
+
+/** @param {string} script basename under scripts/hooks */
+function hasBlockingErrorTail(script) {
+  return BLOCKING_TAIL_RE.test(readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hooks', script), 'utf-8'));
+}
 
 describe('hooks.json schema shape', () => {
   it('the command pattern requires the QUOTED path and rejects the unquoted spelling (self-check)', () => {
@@ -264,6 +304,31 @@ describe('hooks.json schema shape', () => {
     // Measured on Write/Edit/Read/Bash; MultiEdit/NotebookEdit follow from the unanchored rule (see WRITE_TOOLS).
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('Write|Edit', t))).toEqual(WRITE_TOOLS);
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('*', t))).toEqual(TOOL_UNIVERSE);
+  });
+
+  it('7a. onFailure, where present, is a value the host reads ("continue" | "block")', () => {
+    for (const { event, entry } of iterHookEntries(HOOKS_DOC)) {
+      if (entry.onFailure === undefined) continue;
+      expect(ON_FAILURE_VALUES, `${event}: onFailure=${JSON.stringify(entry.onFailure)}`).toContain(entry.onFailure);
+    }
+  });
+
+  it('7b. onFailure "block" sits on exactly the security guards, and only on PreToolUse', () => {
+    const blocking = [];
+    for (const { event, entry } of iterHookEntries(HOOKS_DOC)) {
+      if (entry.onFailure !== 'block') continue;
+      blocking.push(`${event}:${entry.command.match(COMMAND_RE)?.[1]}`);
+    }
+    expect(blocking.sort()).toEqual(ON_FAILURE_BLOCK.map((s) => `PreToolUse:${s}`).sort());
+  });
+
+  it('7c. every onFailure "block" hook already blocks from its own error tail', () => {
+    for (const script of ON_FAILURE_BLOCK) {
+      expect(hasBlockingErrorTail(script), `${script}: no blockReason in its catch handler`).toBe(true);
+    }
+    // Self-check: the predicate tells the two shell guards apart. bash-risk-guard
+    // is fail-open by contract (its header) and must not pass for a blocking one.
+    expect(hasBlockingErrorTail('bash-risk-guard.js')).toBe(false);
   });
 
   it('SHA1 fingerprint of {description, hooks} matches snapshot', () => {
