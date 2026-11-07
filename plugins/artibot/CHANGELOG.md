@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.16] — 2026-11-08
+
+`v4.71.15`(`4f63ccc5`) 이후 2 커밋 = **12 files +124/−659**(`git rev-list --count v4.71.15..51bed492` · `git diff --shortstat v4.71.15 51bed492`, 2026-11-08 측정 — 릴리스 커밋은 이 수치에 없다): 삭제 1 + 기록(`1d3ed827`) · 게이트 1(`51bed492`). 테스트 28,049 → 28,033(Ubuntu 3레그, `51bed492` CI 런 `42393712170`; Windows 28,072 → 28,056) — 줄어든 16건은 지운 `triage-wiring-gaps` 테스트 전부다. 07 §B 오너 결정 8건과 PC 실측은 `.artibot/guides/v5-design/practicality-improvement-20261023/07_PC_HANDOFF.md` §B·§E, dmi 분류 제안(적용 0)은 같은 폴더 `08_DMI_PROPOSAL.md`.
+
 ### 삭제 — 실행할 수 없던 배선 감사 도구 (오너 결정 2026-11-08, 07 §B-8)
 
 - **`scripts/ci/triage-wiring-gaps.mjs`(458줄)와 테스트 `tests/ci/triage-wiring-gaps.test.js`(16건)를 지웠다.** 입력 `plugins/artibot/docs/wiring-audit-result.json` 은 gitignore 이고 생성기가 리포에 없어 실행하면 `audit input not found` 였다(06 §0 #6). 이 PC 에도 입력 파일이 없다. `package.json`·`.github/` 참조 0. 마지막 보고는 `docs/WIRING-AUDIT-2026-05-30.md`.
