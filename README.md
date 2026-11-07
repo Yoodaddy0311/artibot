@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.71.11-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.71.12-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.11** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.12** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.71.11` |
+| `version` | Plugin version | `4.71.12` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.71.12** (2026-11-07) — Six fixes made on another machine in October and never pushed now ship, so v4.71.7–v4.71.11 went out without them: 11 commits, 54 files +2,285/−309 since v4.71.11 (`git diff --shortstat v4.71.11 f81c3e5b`, measured 2026-11-07; the release commit is not in these numbers; 2 of the 11 are document commits). **Agent frontmatter no longer truncates**: comment lines containing `---` inside the frontmatter of all 30 agents made the host close it early and cut each `tools` list; they are gone (0 of 30 close early) and a strict frontmatter gate keeps them out. **Supply chain**: the bundled MCP servers, including the cowork plugin's context7, are pinned to exact versions instead of `@latest`, and every `npm ci` in CI and release now fails closed instead of falling back to `npm install`. **Installer** unregisters the dead nightly auto-learning schedule (run the installer, or `schtasks /delete /tn ArtibotAutoLearning /f`). **Firewall** requires the `artibot:` prefix on `subagent_type` call sites. Tests 27,867 → 27,983 (Ubuntu ×3, same value on each leg).
 
 **4.71.11** (2026-10-20) — Hooks that were handed `ARTIBOT_STATE_DIR` stop writing the real `~/.claude`, and `/rea` gets an evidence view-request helper: 9 commits, 36 files +3,026/−84 since v4.71.10 (`git diff --shortstat v4.71.10 d969ee64`, measured 2026-10-20; the release commit is not in these numbers; 3 of the 9 are document commits). **Eight hook writers now follow the state-dir resolver**: `evaluations.json`, the `memory/` directory, the shared `artibot-state.json` and the update-check cache (the owner's promptfoo PoC of 2026-10-19 saw nine evaluation, project-context and error-pattern records from a sandboxed run land in the real store), then the PreCompact snapshot, the zero-result counter (the status line reads it from the same place), the PostCompact record and bundle directory, and the loop detector's `loop-state.json`. They ask `resolveArtibotDir()` at call time; with no override, an override minted for another home, or one naming `~/.claude/artibot` itself, every path is byte-identical to before. A static census of the hook and library code (home-path builders classified as read or write) finds no hook-reachable home write left; indirect paths were not traced. **Temp files**: `pre-write-guard` removes `artibot-read-tracking-*.json` older than 7 days from the temp directory once per session, on its first Read (295 files / 1.9 MB were there on the dev machine, 277 of them older than 7 days). **`/rea`**: `scripts/rea/make-view-request.mjs` turns an REA evidence file into a view-request file (owner-only mode on POSIX, byte-exact JSON copy, an existing request file is removed first so the mode applies); the command narrows its Read grant to the home skill copy; `scripts/vendor/sync-rea.mjs` checks the exact ustar magic and case collisions, refuses a bare `npx rea-agents` and any `@latest`, and its runner regex can no longer backtrack exponentially on a run of `--` flags. Tests 27,649 → 27,867 on the Ubuntu legs (921 files). Not verified: a live session handed `ARTIBOT_STATE_DIR` against this release (the first four writers were checked live on a pre-release tree, the other four by child-process tests, mutations and the census); whether the loop detector's repeat-call detection ever fires (one process per tool call, and the dev machine has no `loop-state.json`); the `/rea` items rest on the commit messages and their tests, not on a live `/rea` run. Known and not changed: the SessionStart hooks `session-start` and `memory-tracker` (5 s budgets) timed out in 8 of 8 dispatcher runs while a vitest run was going on the dev machine, so a session started under that load can lose its start-up banner and markers. Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 

@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.12] — 2026-11-07
+
+`v4.71.11`(`9c00dbb2`) 이후 11 커밋 = **54 files +2,285/−309**(`git rev-list --count v4.71.11..f81c3e5b` · `git diff --shortstat v4.71.11 f81c3e5b`, 2026-11-07 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `a5119cec`·`6149446e` 2개는 v4.71.11 출하 기록 문서 커밋이다. 나머지 9개 가운데 6개는 2026-10-06~07 다른 PC 에서 만들고 푸시되지 않았던 커밋을 `cherry-pick -x` 로 옮긴 것이다(2026-11-06 전수조사가 발견). 그래서 v4.71.7~v4.71.11 은 아래 결함을 고치지 않은 채 출하됐다. 테스트는 27,867 → 27,983(Ubuntu 3레그, `f81c3e5b` 의 CI 세 레그가 같은 값. Windows 레그는 28,006).
+
+### 에이전트 frontmatter — 호스트가 주석 안의 `---` 에서 frontmatter 를 닫던 결함 (`e6982b5e`)
+
+- **결함**: 에이전트 30개 파일의 frontmatter 안에 들여쓴 주석 44줄이 있었고, 그중 35줄이 `---` 를 포함했다. 호스트는 frontmatter 를 첫 `---` 부분문자열에서 닫는다. 그래서 30개 전부 `tools` 목록이 그 지점에서 잘렸다. 2026-11-06 감사관이 이 결함이 있는 설치본(4.71.6)에서 자기 정의에 있는 TaskList·TaskUpdate·TaskGet 을 호출하지 못하는 것을 라이브로 관측했다.
+- **수정**: 주석을 모두 걷어냈다(착지 트리 실측: 주석 0 · `---` 포함 줄 0 · 조기 닫힘 0 / 30). `scripts/ci/ci-utils.js#checkStrictAgentFrontmatter` 엄격 오라클과 `validate-agents.js` 게이트, 복제 파서들의 판정을 표로 고정한 `tests/firewall/agent-frontmatter-oracle-parity.test.js` 를 더했다.
+- **표 재고정 (`ab20a10d`)**: 그 표는 merge-base 기준으로 쓰여 runtime-registry 의 인라인 주석 결함을 고정하고 있었다. origin `2a228bcb`(10-12)가 그 결함을 고쳤으므로 registry 칸을 정상값으로 옮겼다. skill-exporter 의 같은 결함은 그대로 표에 남겼다.
+
+### 설치·CI·공급망 고정
+
+- **nightly 자동학습 예약 해제 (`2b187208`)**: `211712e3`(2026-07-09)가 러너 `scripts/run-auto-learning.js` 를 지운 뒤에도 그 전에 등록된 예약(Windows 작업 `ArtibotAutoLearning` 03:00 또는 crontab 줄)이 매번 `MODULE_NOT_FOUND` 로 끝났다. `install.sh`·`install.ps1` 은 이제 설치된 러너가 없고 등록 마커가 있으면 마커가 가리키는 항목을 지우고 마커를 정리한다. 실패해도 설치는 멈추지 않고 한 줄 명령을 경고로 알린다. 한계: 설치 스크립트를 실행해야 해제된다. 마켓플레이스 업데이트만 한 PC 는 `schtasks /delete /tn ArtibotAutoLearning /f` 를 직접 실행해야 한다.
+- **MCP 서버 정확 버전 고정 (`d512bcda`, `f81c3e5b`)**: 번들 MCP 3종을 `@latest` 대신 정확한 버전으로 고정했다(context7 4.1.1 · playwright-mcp-server 1.0.12 · chrome-devtools-mcp 1.10.1). 그때 일부러 남겼던 artibot-cowork 의 context7 `@latest` 도 같은 4.1.1 로 고정하고 `artibot-cowork.plugin` ZIP 을 다시 팩했다. `tests/mcp/mcp-config.test.js` 가 두 플러그인의 context7 항목이 같도록 강제한다.
+- **`npm ci` fail-closed (`0ab78961`, `0a80e62e`)**: `ci.yml`·`self-control.yml`·`release.yml` 의 설치 단계에서 `|| npm install` 폴백을 걷어냈다. 락파일이 package.json 과 어긋나면 이제 잡이 red 가 된다. 예외 하나: `release.yml` sync-readmes 잡의 설치는 정보용 테스트 수 집계에만 쓰이고 릴리스가 이미 만들어진 뒤라 `continue-on-error` 로 두고, 실패하면 집계 단계를 건너뛴다(node_modules 없이 `npx vitest` 가 비고정 vitest 를 받아오지 않도록). 한계: release.yml 의 새 경로는 이 릴리스의 태그 푸시가 첫 실행이다.
+
+### firewall — 하위 에이전트 호출 접두 게이트
+
+- **`artibot:` 접두 강제 (`c3c9ac3a`)**: 접두 없는 이름은 `~/.claude/agents` 에 남은 낡은 평면 사본이 있으면 그쪽으로 해석된다(2026-10-06 감사 실측: 실제 스폰 382건 중 216건). `commands/team.md` Phase 4 교차검수 호출을 `artibot:code-reviewer` 로 고쳤고, `agent-name-references.test.js` 가 commands·agents·skills·rules·output-styles·templates 의 `subagent_type=` 호출 지점에 `artibot:` + 출하 에이전트 이름을 요구한다. 템플릿 자리표시자와 artibot-cowork 는 면제다.
+- **내장 면제 범위 (`9846f762`)**: 접두 없이 불러도 되는 호스트 내장 에이전트를 Explore 와 Plan 둘로 되돌렸다. general-purpose 를 면제에 넣으면 같은 집합을 쓰는 `Agent(<name>)` 검사까지 넓어지기 때문이다.
+
 ## [4.71.11] — 2026-10-20
 
 `v4.71.10`(`c7ba5138`) 이후 9 커밋 = **36 files +3,026/−84**(`git rev-list --count v4.71.10..d969ee64` · `git diff --shortstat v4.71.10 d969ee64`, 2026-10-20 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 `25ac42ff`(v4.71.10 출하 결과 기록)·`c57e9c2f`·`af525ec7`(CHANGELOG 문구 정정) 3개는 문서 커밋이다. 내용은 둘이다. 하나는 훅이 `ARTIBOT_STATE_DIR` 를 받고도 실제 `~/.claude` 에 쓰던 여덟 곳을 리졸버로 옮긴 것(아래 `ARTIBOT_STATE_DIR` 세 항목). 다른 하나는 `/rea` 의 증거 view-request 헬퍼와 벤더 게이트 강화(`2459c624`·`af669c80`, 아래 첫 항목 — 이 두 커밋은 [Unreleased] 에 항목이 없어 릴리스에서 적었고, 커밋 메시지와 그 테스트에 근거한다). 테스트는 27,649 → 27,867(Ubuntu 3레그, 릴리스 직전 트리 `d969ee64` 의 CI 두 런이 같은 값). 알려진 한계(고치지 않음): 이 PC 에서 vitest 가 도는 동안 SessionStart 디스패처를 8번 돌렸더니 8번 모두 `session-start`·`memory-tracker`(5000 ms 예산)가 시간 초과로 끊겼다(조용할 때 1.7~2.2 s, CPU 를 1개로 묶으면 4.1 s·시간 초과 0). 부하 중에 시작한 세션은 시작 배너와 마커를 잃을 수 있다.
