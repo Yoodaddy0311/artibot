@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.71.12-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.71.13-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.12** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.13** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.71.12` |
+| `version` | Plugin version | `4.71.13` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.71.13** (2026-11-07) — The loop detector can now fire, the REPORT gate gains opt-in evidence modes, and two skills stop running the test suite when they activate: 17 commits, 41 files +6,551/−232 since v4.71.12 (`git diff --shortstat v4.71.12 9d4c222d`, measured 2026-11-07; the release commit is not in these numbers; 9 of the 17 are document commits). 15 come from the 2026-10-23 cloud-session branch `claude/jolly-newton-qmi4eb` (cherry-picked); 2 fix that branch's tests (a dashboard label pin that was red on every platform, and two rule-7 test files that were red on Windows only). **Loop detection**: `tool-tracker` saves its history on every call, per session (`runtime/sessions/<sid>/loop-state.json`), so the warn (3 identical calls) and block (5) labels can fire under the one-process-per-call hook model; unclassified Bash commands are recorded as `bash:unknown:shell`; detections are logged for `scripts/ledger/loop-detection-census.mjs`. Showing the warning to the model (`cognitive.loopDetector.advisory`) ships off. **REPORT gate**: config reads tell missing or invalid apart from off and warn once per session; `autopilot.reportVerifyGate.evidenceMode` adds `'explicit-pass'` and `'deterministic'` (the vitest snapshot now records `gitSha` and `gitDirty`), shipped as `'ack'`, which behaves as before. **Economics**: `tdd-workflow` and `quality-framework` no longer run the test suite on activation, skill-body preloading is off, and the status-line token figure is labelled as the input estimate it is. Tests 27,983 → 28,206 (Ubuntu ×3, same value on each leg; Windows 28,229). Not verified: the live census, host-integration run and hook-latency measurement from the branch's PC handoff (`07_PC_HANDOFF.md` §A). Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
 **4.71.12** (2026-11-07) — Six fixes made on another machine in October and never pushed now ship, so v4.71.7–v4.71.11 went out without them: 11 commits, 54 files +2,285/−309 since v4.71.11 (`git diff --shortstat v4.71.11 f81c3e5b`, measured 2026-11-07; the release commit is not in these numbers; 2 of the 11 are document commits). **Agent frontmatter no longer truncates**: comment lines containing `---` inside the frontmatter of all 30 agents made the host close it early and cut each `tools` list; they are gone (0 of 30 close early) and a strict frontmatter gate keeps them out. **Supply chain**: the bundled MCP servers, including the cowork plugin's context7, are pinned to exact versions instead of `@latest`, and every `npm ci` in CI and release now fails closed instead of falling back to `npm install`. **Installer** unregisters the dead nightly auto-learning schedule (run the installer, or `schtasks /delete /tn ArtibotAutoLearning /f`). **Firewall** requires the `artibot:` prefix on `subagent_type` call sites. Tests 27,867 → 27,983 (Ubuntu ×3, same value on each leg).
 

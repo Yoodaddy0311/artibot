@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.13] — 2026-11-07
+
+`v4.71.12`(`82d970ed`) 이후 17 커밋 = **41 files +6,551/−232**(`git rev-list --count v4.71.12..9d4c222d` · `git diff --shortstat v4.71.12 9d4c222d`, 2026-11-07 측정 — 릴리스 커밋은 이 수치에 없다). 15개는 2026-10-23 클라우드 세션 브랜치 `claude/jolly-newton-qmi4eb` 를 `cherry-pick -x` 로 옮긴 것이고(그중 9개는 문서 커밋, 첫 커밋은 PR #125 의 `c493f163` 와 트리가 같다), 2개는 착지 때 고친 브랜치 테스트 결함이다(아래 첫 항목). 바로 바뀌는 운영 동작은 넷이다: 루프 감지 이력을 호출마다 세션별로 저장 · 미분류 Bash 를 `bash:unknown:shell` 로 기록 · 설정 읽기 실패를 경고로 표시 · 두 스킬이 활성화 때 전체 테스트를 돌리지 않음(+ 스킬 본문 선읽기 OFF, 토큰 라벨 정정). 모델에게 보이는 두 키 `cognitive.loopDetector.advisory`·`autopilot.reportVerifyGate.evidenceMode` 는 `false`·`'ack'` 로 출하한다. 테스트는 27,983 → 28,206(Ubuntu 3레그, `9d4c222d` 의 CI 세 레그가 같은 값. Windows 레그는 28,229).
+
+### 착지 때 고친 브랜치 테스트 결함 2건 (`c3989ce5`, `9d4c222d`)
+
+- **대시보드 라벨 핀 (`c3989ce5`)**: 아래 「10-04 경제성 감사…」 항목이 `lib/tui/dashboard.js` 의 `tokens=` 를 `input-est=` 로 바꿨는데 `tests/tui/dashboard.test.js` 는 옛 철자를 그대로 핀하고 있었다. 브랜치의 전체 스위트 실행(`4d2ea5a1` 이 기록한 실행)이 그 커밋보다 앞서서, 브랜치 끝에서는 모든 플랫폼에서 3건이 red 였다. 양성 핀은 새 라벨로 바꿨고, 라벨 이름만 바뀌면 공허하게 통과할 음성 핀 2개는 `input-est=` 를 보게 했다. 라벨을 옛 철자로 되돌린 뮤턴트(적용을 grep 으로 확인, 해시로 복원)에서 양성 핀 3건이 red.
+- **rule-7 테스트의 경로 (`9d4c222d`)**: `verify-evidence-deterministic.js` 는 `path.join` 으로 스냅샷 경로를 만드는데, 두 테스트 파일의 가짜 포트는 POSIX 문자열만 받아 Windows 에서 25건이 `VERIFY_EVIDENCE_MISSING` 으로 떨어졌다. 모듈은 두 플랫폼에서 맞다. 테스트가 같은 `path.join` 값을 쓰게 했다(POSIX 에서는 바이트 동일).
+- **알아 둘 것**: 브랜치 코드 26파일(문서 제외)은 줄 단위로 검수하지 않았다. 근거는 브랜치의 RED→GREEN 테스트 · CI 4레그 · Windows 에서 돌린 406파일 · 추가 코드 4,939줄의 외부 전송 패턴 검색 0건이다. `07_PC_HANDOFF.md` §A 의 라이브 측정(census 3종 · 호스트 통합 · 훅 지연)은 이 릴리스 시점에 하지 않았다.
+
 ### 10-04 경제성 감사의 미착지 NECESSARY 착지 — 스킬 활성화 때 전체 테스트 실행 제거 · 스킬 본문 선읽기 OFF · 토큰 추정치 라벨 (2026-10-23)
 
 근거: `.artibot/REPORTS/plugin-economics-audit-2026-10-04.md` A1·C3·C5 와 `.artibot/guides/VERIFICATION-ECONOMICS-DESIGN.md` §0.1·§2.2·§4.3·§4.4 의 NECESSARY 판정, 그리고 `.artibot/guides/v5-design/practicality-improvement-20261023/06_PIPELINE_AUDIT.md` §3·§4 의 재확인. A1 의 조건("호스트가 `!` 줄을 실행하는지 미확인")은 호스트 문서(skills.md "Inject dynamic context" — 스킬 내용이 모델에 가기 **전에** 셸 명령을 실행)로 2026-10-23 확정됐다.
