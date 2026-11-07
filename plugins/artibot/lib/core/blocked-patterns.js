@@ -338,11 +338,41 @@ const BLOCKED_PATTERNS = Object.freeze([
     category: 'filesystem',
   },
   { pattern: /sudo\s+rm\s/i, label: 'sudo rm', category: 'filesystem' },
-  { pattern: /del\s+\/s\s+\/q/i, label: 'del /s /q (Windows recursive delete)', category: 'filesystem' },
-  { pattern: /del\s+\/s/i, label: 'Windows recursive delete', category: 'filesystem' },
-  { pattern: /rmdir\s+\/s\s+\/q/i, label: 'rmdir /s /q (Windows recursive delete)', category: 'filesystem' },
-  { pattern: /rmdir\s+\/s/i, label: 'Windows recursive rmdir', category: 'filesystem' },
+  // cmd.exe spells the same deletes `erase` and `rd` (S1 cross-check,
+  // 2026-11-07: `cmd /c rd /s /q` and `cmd /c erase /s /q` walked through).
+  // Widened in place, so the rule count and labels do not move. `rd` alone
+  // takes a `\b`: it ends ordinary words (`forward /s`, `C:\standard /s`).
+  // `del` and `rmdir` keep their old unbounded spelling, so nothing they
+  // matched before stops matching.
+  { pattern: /(?:del|erase)\s+\/s\s+\/q/i, label: 'del /s /q (Windows recursive delete)', category: 'filesystem' },
+  { pattern: /(?:del|erase)\s+\/s/i, label: 'Windows recursive delete', category: 'filesystem' },
+  { pattern: /(?:\brd|rmdir)\s+\/s\s+\/q/i, label: 'rmdir /s /q (Windows recursive delete)', category: 'filesystem' },
+  { pattern: /(?:\brd|rmdir)\s+\/s/i, label: 'Windows recursive rmdir', category: 'filesystem' },
   { pattern: /:\s*>\s*\//i, label: 'truncate file', category: 'filesystem' },
+  // PowerShell recursive forced delete (S1, owner-approved 2026-11-07). The
+  // host's PowerShell tool reaches this catalogue through pre-bash.js. The
+  // command word is Remove-Item or one of its built-in aliases (ri, rm, rmdir,
+  // rd, del, erase); PowerShell binds a parameter by any unambiguous prefix and
+  // case-insensitively, so Recurse is `-r` … `-recurse` and Force is `-fo` …
+  // `-force` (`-f` alone is ambiguous with -Filter and fails to bind). En dash,
+  // em dash and horizontal bar are accepted as the parameter dash, and
+  // `-Recurse:$true` binds like `-Recurse`. Both flags must sit in the same
+  // command: the windows stop at a newline and at `;` `|` `&`. No target is
+  // required, because pipeline input (`Get-ChildItem x | Remove-Item -Recurse
+  // -Force`) carries none — which is also why `rm` is listed here even though
+  // the bash `rm recursive+force (any target)` rule above reads `rm -r -fo x`.
+  // Recurse alone and Force alone stay unmatched; widening is an owner decision.
+  // The windows are `{0,192}`, the repo convention for a run that can cross
+  // whitespace (tests/helpers/regex-scan.js); the flag tokens are nested
+  // optionals, not `\w*` runs around a mandatory letter (the 2026-09-22 shape).
+  // NOT SEEN: splatting (`Remove-Item @p`), .NET calls
+  // (`[IO.Directory]::Delete($p, $true)`), and `-Recurse:$false`, which this
+  // over-blocks. L2 (lib/autopilot/safety.js) carries no PowerShell rule.
+  {
+    pattern: /(?:^|[^\w-])(?:remove-item|ri|rm|rmdir|rd|del|erase)(?![\w-])(?=[^\n;|&]{0,192}\s[-–—―]r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?![\w-]))(?=[^\n;|&]{0,192}\s[-–—―]fo(?:r(?:c(?:e)?)?)?(?![\w-]))/i,
+    label: 'Remove-Item -Recurse -Force (PowerShell)',
+    category: 'filesystem',
+  },
 
   // ── Disk / device ───────────────────────────────────────────────────
   { pattern: /mkfs\./i, label: 'format filesystem', category: 'disk' },
@@ -383,6 +413,10 @@ const BLOCKED_PATTERNS = Object.freeze([
   { pattern: />\s*\/dev\/sd/i, label: 'write to disk device', category: 'disk' },
   { pattern: /format\s+[a-z]:/i, label: 'format drive (Windows)', category: 'disk' },
   { pattern: /diskpart/i, label: 'diskpart (Windows disk management)', category: 'disk' },
+  // PowerShell Storage-module cmdlets (S1, owner-approved 2026-11-07). They have
+  // no built-in alias. A bare mention (`Get-Help Format-Volume`) blocks too.
+  { pattern: /\bformat-volume\b/i, label: 'Format-Volume (PowerShell)', category: 'disk' },
+  { pattern: /\bclear-disk\b/i, label: 'Clear-Disk (PowerShell)', category: 'disk' },
 
   // ── Permission escalation ───────────────────────────────────────────
   { pattern: /chmod\s+-R\s+777/i, label: 'chmod 777 recursive', category: 'permission' },

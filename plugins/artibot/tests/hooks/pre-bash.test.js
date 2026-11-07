@@ -35,7 +35,7 @@ const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
  */
 function makeHookData(command, opts = {}) {
   const data = {
-    tool_name: 'Bash',
+    tool_name: opts.toolName ?? 'Bash',
     tool_input: { command },
   };
   if (opts.cwd !== undefined) data.cwd = opts.cwd;
@@ -228,6 +228,47 @@ describe('pre-bash hook', () => {
       ['rmdir /s C:\\project', 'Windows recursive rmdir'],
     ])('blocks: %s (%s)', async (command, _label) => {
       readStdin.mockResolvedValue(makeHookData(command));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+    });
+  });
+
+  describe('PowerShell tool', () => {
+    it.each([
+      ['Remove-Item -Recurse -Force C:\\proj\\build'],
+      ['Remove-Item C:\\proj\\build `\n  -Recurse -Force'],
+      ['Format-Volume -DriveLetter D'],
+      ['Clear-Disk -Number 1 -RemoveData'],
+    ])('blocks: %s', async (command) => {
+      readStdin.mockResolvedValue(makeHookData(command, { toolName: 'PowerShell' }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'block' }),
+      );
+    });
+
+    it.each([
+      ['Get-ChildItem -Recurse'],
+      ['Remove-Item .\\a.txt'],
+    ])('passes through: %s', async (command) => {
+      readStdin.mockResolvedValue(makeHookData(command, { toolName: 'PowerShell' }));
+
+      await runHook();
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(writeStdout).not.toHaveBeenCalled();
+    });
+
+    it('any other tool name still runs the Bash chain — never zero guards', async () => {
+      readStdin.mockResolvedValue(makeHookData('rm -rf /', { toolName: 'SomethingElse' }));
 
       await runHook();
       await new Promise((r) => setTimeout(r, 50));

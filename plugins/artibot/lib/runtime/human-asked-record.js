@@ -285,8 +285,18 @@ export function humanResolvedIdempotencyKey(sessionId, questionId, decision) {
  * safe, which is a different statement from "no row matched".
  */
 const SUBJECT_KEY = Object.freeze({
-  Bash: 'command', Write: 'file_path', Edit: 'file_path',
+  Bash: 'command', PowerShell: 'command', Write: 'file_path', Edit: 'file_path',
 });
+
+/**
+ * Tools whose subject is a shell command. Both are classified in the Bash shape
+ * (`{tool: 'Bash', command}`), because the gate matrix reads command text and
+ * has no PowerShell rows. Added 2026-11-07: without a PowerShell row every
+ * PowerShell block in a session collapsed to one subject and one question_id.
+ * The hash input is `gate|subject` and names no tool, so a Bash id is unchanged
+ * and the same command text gets the same id under either shell.
+ */
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 
 /**
  * Pull the raw subject out of a PreToolUse payload for one tool.
@@ -323,7 +333,7 @@ function subjectOf(hookData, tool) {
  */
 function classifySubject(subject, tool, gates) {
   if (SUBJECT_KEY[tool] === undefined || subject === '') return { subject: '', hits: [] };
-  const input = tool === 'Bash' ? { tool: 'Bash', command: subject } : { tool, path: subject };
+  const input = SHELL_TOOLS.has(tool) ? { tool: 'Bash', command: subject } : { tool, path: subject };
   return { subject, hits: gates.classify(input).hits };
 }
 

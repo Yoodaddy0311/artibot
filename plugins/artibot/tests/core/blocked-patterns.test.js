@@ -779,6 +779,8 @@ describe('blocked-patterns', () => {
       ['git push -f', 192, (n) => `git push ${'x'.repeat(n - 1)} -f`],
       ['curl pipe to interpreter', 192, (n) => `curl ${'a'.repeat(n)}|sh`],
       ['wget pipe to interpreter', 192, (n) => `wget ${'a'.repeat(n)}|sh`],
+      // Two windows; this pair measures the Recurse one (` -Force ` is 8 of the n chars).
+      ['Remove-Item -Recurse -Force (PowerShell)', 192, (n) => `Remove-Item -Force ${'a'.repeat(n - 8)} -Recurse`],
     ];
 
     it.each(BOUNDARY)('%s matches at exactly %d window chars', (label, width, make) => {

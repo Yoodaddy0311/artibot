@@ -61,6 +61,26 @@ describe('evaluateBashRisk', () => {
   });
 });
 
+describe('evaluateBashRisk — PowerShell tool', () => {
+  it('inspects PowerShell calls with the same L2 rules', () => {
+    const r = evaluateBashRisk({ tool_name: 'PowerShell', tool_input: { command: 'git push --force origin main' } });
+    expect(r?.decision).toBe('block');
+  });
+
+  it('stays silent on Remove-Item -Recurse -Force: L2 has no PowerShell-native rule (L1 pre-bash.js blocks it)', () => {
+    expect(evaluateBashRisk({
+      tool_name: 'PowerShell',
+      tool_input: { command: 'Remove-Item -Recurse -Force C:\\proj\\build' },
+    })).toBeNull();
+  });
+
+  it('leaves tool names outside the allowlist untouched', () => {
+    for (const tool_name of ['powershell', 'PowerShellX', 'Pwsh', 'constructor', 'Write']) {
+      expect(evaluateBashRisk({ tool_name, tool_input: { command: 'git push --force origin main' } }), tool_name).toBeNull();
+    }
+  });
+});
+
 describe('findActiveSession', () => {
   const makeStore = (sessions, mtimes = {}) => ({
     listSessions: () => Object.keys(sessions),

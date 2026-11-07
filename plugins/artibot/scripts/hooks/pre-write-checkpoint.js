@@ -65,11 +65,11 @@ async function main() {
 
 if (isMainEntry(import.meta.url)) {
   // NOTE: `createErrorHandler` prints a BLOCK whenever it is given a
-  // `blockReason`, so this tail fails closed even though the wording below says
-  // "Approving". Both the behaviour and the string are unchanged by CA-04 and
-  // pinned byte-for-byte in tests/hooks/pretooluse-passthrough.test.js.
+  // `blockReason`, so this tail fails closed. The wording used to say
+  // "Approving" over those block bytes; it now says what the bytes do (O5,
+  // 2026-11-07). Pinned byte-for-byte in tests/hooks/pretooluse-passthrough.test.js.
   main().catch(createErrorHandler('pre-write-checkpoint', {
     writeStdout,
-    blockReason: 'File checkpoint hook error. Approving by default.',
+    blockReason: 'File checkpoint hook error. Blocking by default.',
   }));
 }

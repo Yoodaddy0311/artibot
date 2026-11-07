@@ -44,16 +44,24 @@ function echoCommand(cmd) {
 }
 
 /**
+ * Shell tools whose `command` this guard grades — an allowlist of exact host
+ * tool names. classifyRisk's rules are bash-shaped; under PowerShell they still
+ * catch the spellings both shells share (`git push --force`), not
+ * PowerShell-native ones (S1, 2026-11-07 — L1 in pre-bash.js carries those).
+ */
+const RISK_TOOLS = new Set(['Bash', 'PowerShell']);
+
+/**
  * Pure classification of a hook payload. Returns the stdout envelope to emit,
- * or null to stay silent (approve). Only Bash calls are inspected — every
- * other tool passes through untouched so this hook never interferes with
- * Write/Edit/etc.
+ * or null to stay silent (approve). Only shell calls (RISK_TOOLS) are
+ * inspected — every other tool passes through untouched so this hook never
+ * interferes with Write/Edit/etc.
  *
  * @param {object} hookData - Parsed PreToolUse payload
  * @returns {{ decision?: string, reason?: string, message?: string, matchedId?: string }|null}
  */
 export function evaluateBashRisk(hookData) {
-  if (extractToolName(hookData) !== 'Bash') return null;
+  if (!RISK_TOOLS.has(extractToolName(hookData))) return null;
 
   const command = hookData?.tool_input?.command || '';
   if (!command) return null;

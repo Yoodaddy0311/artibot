@@ -320,8 +320,8 @@ describe('ReDoS 정적 스캔 — 1-b 카탈로그 게이트 (L1·L2)', () => {
   });
 
   // 분모 고정 — it.each 가 "0개를 훑고 통과"하는 공허한 그린이 되지 않도록.
-  it('L1 39 · L2 27 패턴을 훑는다', () => {
-    expect(BLOCKED_PATTERNS).toHaveLength(39);
+  it('L1 42 · L2 27 패턴을 훑는다', () => {
+    expect(BLOCKED_PATTERNS).toHaveLength(42);
     expect(DANGEROUS_PATTERNS).toHaveLength(27);
   });
 });

@@ -104,20 +104,29 @@ function oneLine(reason) {
 }
 
 /**
+ * Shell tools the judge reads — exact host names, an allowlist. The
+ * PermissionRequest matcher is `*`, so a PowerShell request reaches this hook;
+ * until 2026-11-07 the judge returned null (clean) for anything but Bash, and
+ * an allowlisted PowerShell entry was auto-approved with no danger filter.
+ */
+const JUDGED_TOOLS = new Set(['Bash', 'PowerShell']);
+
+/**
  * The production judge: the union of the two canonical PreToolUse blockers.
  * Returns `null` when the call is clean, or the reason to withhold approval.
  *
- * Bash only. The pre/Write guards (`sensitive-file`, `content-secret`) are
- * `artibot-policy`, so `executeChain` skips them outside the plugin repo — a
- * cwd-dependent verdict is not a verdict, and this filter takes no cwd.
+ * Shell tools only (JUDGED_TOOLS). The pre/Write guards (`sensitive-file`,
+ * `content-secret`) are `artibot-policy`, so `executeChain` skips them outside
+ * the plugin repo — a cwd-dependent verdict is not a verdict, and this filter
+ * takes no cwd.
  *
  * @param {{toolName: string, toolInput: object}} call
  * @returns {{kind: 'destructive'|'guard-block'|'unjudgeable', reason: string}|null}
  */
 export function defaultJudge({ toolName, toolInput }) {
-  if (toolName !== 'Bash') return null;
+  if (!JUDGED_TOOLS.has(toolName)) return null;
 
-  // A Bash call whose command we cannot read is not a call we cleared. Neither
+  // A shell call whose command we cannot read is not a call we cleared. Neither
   // judge can see a non-string, so "no match" here would mean "not looked at".
   const command = toolInput?.command;
   if (typeof command !== 'string' || !command) {
@@ -131,7 +140,8 @@ export function defaultJudge({ toolName, toolInput }) {
 
   // No `cwd` option: all three pre/Bash guards are security-critical and run
   // under any cwd, so omitting it changes nothing except the dependency.
-  const verdict = executeChain('pre', 'Bash', { tool_name: 'Bash', tool_input: toolInput });
+  // The call's own chain: PowerShell carries PowerShell-only variants there.
+  const verdict = executeChain('pre', toolName, { tool_name: toolName, tool_input: toolInput });
   if (verdict?.decision === 'block') {
     const guardName = verdict.guardName || 'guard';
     // `guard-block` 은 도달 불가 — 가드 throw 시 executeChain 이 block+guardName 을 내는 경로 전용.

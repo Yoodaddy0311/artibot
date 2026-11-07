@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PreToolUse hook for Bash.
+ * PreToolUse hook for the shell tools (Bash, PowerShell — see chainToolOf).
  * Thin wrapper delegating to guard-registry, plus an append-only record of the
  * blocks it already makes (T-39).
  *
@@ -36,7 +36,7 @@
  */
 
 import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
-import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { createErrorHandler, extractToolName } from '../../lib/core/hook-utils.js';
 import { executeChain, registerBuiltinGuards, resetGuards } from '../../lib/core/guard-registry.js';
 import { recordHumanAsked } from '../../lib/runtime/human-asked-record.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
@@ -55,6 +55,19 @@ export { buildQuestionId } from '../../lib/runtime/human-asked-record.js';
  * frozen by the invariance gate.
  */
 const HOOK_ERROR_REASON = 'Safety check failed due to hook error. Blocking by default.';
+
+/**
+ * The guard-chain tool for a payload — an allowlist. Only the host's exact
+ * `PowerShell` gets its own chain; every other value, including the null
+ * payload on the error tail, keeps the `Bash` chain this hook always ran. A
+ * name with no registered guards would make executeChain approve, so nothing
+ * here may pass a payload's tool name through unchecked.
+ * @param {object|null} hookData
+ * @returns {'Bash'|'PowerShell'}
+ */
+function chainToolOf(hookData) {
+  return extractToolName(hookData) === 'PowerShell' ? 'PowerShell' : 'Bash';
+}
 
 /**
  * The parsed payload of the turn in flight, kept so the fail-closed tail can
@@ -77,13 +90,14 @@ export async function main() {
   resetGuards();
   registerBuiltinGuards();
 
-  const result = executeChain('pre', 'Bash', hookData, {
+  const tool = chainToolOf(hookData);
+  const result = executeChain('pre', tool, hookData, {
     cwd: hookData?.cwd || process.cwd(),
   });
 
   if (result.decision === 'block') {
     writeStdout({ decision: 'block', reason: result.reason });
-    await recordHumanAsked({ hookData, tool: 'Bash', reason: result.reason });
+    await recordHumanAsked({ hookData, tool, reason: result.reason });
   }
   // Not blocked: PASSTHROUGH. Nothing is written (see the header).
 }
@@ -101,7 +115,7 @@ export async function handleHookError(err) {
     writeStdout,
     blockReason: HOOK_ERROR_REASON,
   })(err);
-  await recordHumanAsked({ hookData: lastHookData, tool: 'Bash', reason: HOOK_ERROR_REASON });
+  await recordHumanAsked({ hookData: lastHookData, tool: chainToolOf(lastHookData), reason: HOOK_ERROR_REASON });
 }
 
 // Direct-run guard: importing this module (tests) must not execute the hook.

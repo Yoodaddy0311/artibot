@@ -233,6 +233,49 @@ describe('defaultJudge/판정은 명령 문자열만 본다 (cwd 비의존)', ()
   });
 });
 
+describe('defaultJudge/PowerShell 도 같은 위험 필터를 거친다 (S1 교차검수, 2026-11-07)', () => {
+  // PermissionRequest 매처는 `*` 라 PowerShell 요청도 이 훅에 온다. 종전에는
+  // toolName !== 'Bash' 면 null(= 깨끗함)이라, allowlist 에 PowerShell 을 둔
+  // 사용자는 위험 필터 없이 자동 승인을 받았다.
+  const PS_DELETE = `Remove-Item -Recurse -${'Force'} C:\\proj\\build`;
+
+  it('PowerShell 고유 파괴 명령은 destructive 로 보류', () => {
+    const v = defaultJudge({ toolName: 'PowerShell', toolInput: { command: PS_DELETE } });
+    expect(v?.kind).toBe('destructive');
+    expect(v?.reason).toContain('Remove-Item -Recurse -Force (PowerShell)');
+  });
+
+  it('PowerShell 체인으로 판정한다 — 백틱 줄이음도 보류', () => {
+    const command = 'Remove-Item C:\\proj\\build `\n  -Recurse -Force';
+    expect(defaultJudge({ toolName: 'PowerShell', toolInput: { command } })?.kind).toBe('destructive');
+  });
+
+  it('allowlist 에 PowerShell 을 둬도 파괴 명령은 자동 승인되지 않는다', () => {
+    const out = evaluatePermission({
+      toolName: 'PowerShell',
+      toolInput: { command: PS_DELETE },
+      allowlist: [{ tool: 'PowerShell' }],
+    });
+    expect(out.decision).toBeNull();
+    expect(out.withheld?.kind).toBe('destructive');
+  });
+
+  it('안전한 PowerShell 명령은 allow, 읽을 수 없는 명령은 unjudgeable', () => {
+    expect(evaluatePermission({
+      toolName: 'PowerShell',
+      toolInput: { command: 'Get-ChildItem -Recurse' },
+      allowlist: [{ tool: 'PowerShell' }],
+    }).decision).toBe('allow');
+    expect(defaultJudge({ toolName: 'PowerShell', toolInput: {} })?.kind).toBe('unjudgeable');
+  });
+
+  it('허용목록 밖 이름은 여전히 판정 대상이 아니다', () => {
+    for (const toolName of ['powershell', 'constructor', 'Write']) {
+      expect(defaultJudge({ toolName, toolInput: { command: PS_DELETE } }), toolName).toBeNull();
+    }
+  });
+});
+
 describe('evaluatePermission/이 필터가 못 보는 것 (알려진 구멍을 고정한다)', () => {
   // 측정 2026-09-10: pre/Write 가드(sensitive-file·content-secret)는
   // artibot-policy 라 executeChain 이 플러그인 리포 밖 cwd 에서 건너뛴다.

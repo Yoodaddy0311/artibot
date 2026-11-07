@@ -116,7 +116,7 @@ function hostMatches(matcher, tool) {
 }
 
 /** Tools the PreToolUse groups are exercised against. Includes the ones that must NOT fire. */
-const TOOL_UNIVERSE = ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read', 'Grep', 'Glob', 'Agent', 'WebFetch', 'WebSearch'];
+const TOOL_UNIVERSE = ['Bash', 'PowerShell', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read', 'Grep', 'Glob', 'Agent', 'WebFetch', 'WebSearch'];
 
 /**
  * `Write|Edit` under the host rule. The regex is UNANCHORED, so it also
@@ -138,8 +138,11 @@ const PRETOOLUSE_INTENT = {
   'pre-write-guard.js': WRITE_TOOLS,
   'git-autopilot-guard.js': WRITE_TOOLS,
   'pre-write-checkpoint.js': WRITE_TOOLS,
-  'pre-bash.js': ['Bash'],
-  'bash-risk-guard.js': ['Bash'],
+  // The host's PowerShell tool is a shell too (S1, 2026-11-07): both shell
+  // guards fire on it. The Bash-only lint/portability guards are scoped inside
+  // guard-registry, not here.
+  'pre-bash.js': ['Bash', 'PowerShell'],
+  'bash-risk-guard.js': ['Bash', 'PowerShell'],
   'route-observe-pre.js': ['Agent'],
   'webfetch-cache-pre.js': ['WebFetch'],
   // Stage-2 S1 confirmation (mission promotion). Host-side the unanchored
@@ -256,6 +259,8 @@ describe('hooks.json schema shape', () => {
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('tool == "Bash"', t))).toEqual([]);
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('tool == "Write" || tool == "Edit"', t))).toEqual(TOOL_UNIVERSE);
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('Bash', t))).toEqual(['Bash']);
+    // Follows from the same unanchored rule; not separately measured on the host.
+    expect(TOOL_UNIVERSE.filter((t) => hostMatches('Bash|PowerShell', t))).toEqual(['Bash', 'PowerShell']);
     // Measured on Write/Edit/Read/Bash; MultiEdit/NotebookEdit follow from the unanchored rule (see WRITE_TOOLS).
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('Write|Edit', t))).toEqual(WRITE_TOOLS);
     expect(TOOL_UNIVERSE.filter((t) => hostMatches('*', t))).toEqual(TOOL_UNIVERSE);

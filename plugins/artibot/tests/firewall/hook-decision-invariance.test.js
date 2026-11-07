@@ -197,8 +197,16 @@ describe('pre-bash hook: decision invariance under ledger conditions', () => {
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
   });
 
+  // The same hook serves the PowerShell tool since S1 (2026-11-07), so its
+  // bytes must be ledger-independent there too.
+  const POWERSHELL = [
+    { command: 'Get-ChildItem -Recurse', blocked: false },
+    { command: 'Remove-Item -Recurse -Force C:\\tmp\\artibot-inv', blocked: true },
+  ];
+  const toolOf = (command) => (POWERSHELL.some((p) => p.command === command) ? 'PowerShell' : 'Bash');
+
   it('emits byte-identical stdout for every command in every ledger condition', () => {
-    const commands = [...APPROVED, ...BLOCKED.map((b) => b.command)];
+    const commands = [...APPROVED, ...BLOCKED.map((b) => b.command), ...POWERSHELL.map((p) => p.command)];
     /** @type {Map<string, string[]>} */
     const byCommand = new Map(commands.map((c) => [c, []]));
     const errorStdouts = [];
@@ -206,7 +214,7 @@ describe('pre-bash hook: decision invariance under ledger conditions', () => {
     for (const name of ['A', 'B', 'C', 'D']) {
       const { cwd } = condition(name);
       for (const command of commands) {
-        const payload = { tool_name: 'Bash', tool_input: { command }, session_id: SESSION_ID };
+        const payload = { tool_name: toolOf(command), tool_input: { command }, session_id: SESSION_ID };
         if (cwd !== null) payload.cwd = cwd;
         byCommand.get(command).push(runHook(payload).stdout);
       }
@@ -224,6 +232,12 @@ describe('pre-bash hook: decision invariance under ledger conditions', () => {
 
   it('passes the safe commands through (no decision) and blocks the dangerous ones', () => {
     const { cwd } = condition('A');
+    for (const { command, blocked } of POWERSHELL) {
+      const out = runHook({ tool_name: 'PowerShell', tool_input: { command }, cwd, session_id: SESSION_ID });
+      expect(out.status, `exit code for PowerShell: ${command}`).toBe(0);
+      if (blocked) expect(JSON.parse(out.stdout).decision, `PowerShell: ${command}`).toBe('block');
+      else expect(out.stdout, `expected zero bytes for PowerShell: ${command}`).toBe('');
+    }
     for (const command of APPROVED) {
       const out = runHook({ tool_name: 'Bash', tool_input: { command }, cwd, session_id: SESSION_ID });
       // Passthrough (CA-04): a command no guard blocks is not GRANTED, so stdout is zero bytes.

@@ -1211,12 +1211,14 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
   // 2026-09-14: 이 줄기 브리프는 분모를 39 + 26 + 29 = 94 로 적었으나 실측은
   // **39 + 27 + 29 = 95** 다(L2 는 27개 — 헬퍼 추출 전후 hit 집합을 덤프해
   // 대조하면서 드러났다). 문서의 수치가 아니라 이 it 이 정본이다.
-  it('scans 95 patterns across the three catalogues (39 + 27 + 29)', () => {
-    expect(BLOCKED_PATTERNS).toHaveLength(39);
+  // 2026-11-07: L1 39 → 42 (S1 PowerShell rules: Remove-Item recurse+force,
+  // Format-Volume, Clear-Disk). L2 is unchanged — it has no PowerShell rule.
+  it('scans 98 patterns across the three catalogues (42 + 27 + 29)', () => {
+    expect(BLOCKED_PATTERNS).toHaveLength(42);
     expect(DANGEROUS_PATTERNS).toHaveLength(27);
     const hg = HUMAN_GATE_MATRIX.reduce((n, row) => n + row.patterns.length, 0);
     expect(hg).toBe(29);
-    expect(BLOCKED_PATTERNS.length + DANGEROUS_PATTERNS.length + hg).toBe(95);
+    expect(BLOCKED_PATTERNS.length + DANGEROUS_PATTERNS.length + hg).toBe(98);
     // 2026-09-23: 95 중 2 는 소스가 없는 스캐너 행이라 정규식 스캔은 93 이다.
     const scannerRows = [
       ...BLOCKED_PATTERNS.map((p) => scanTargetOf('L1', p.label, p.pattern)),

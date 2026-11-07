@@ -160,7 +160,9 @@ if (isMainEntry(import.meta.url)) {
     createErrorHandler('git-autopilot-guard', {
       exit: true,
       writeStdout,
-      blockReason: '[artibot:git-autopilot-guard] Guard check failed — allowing as safe fallback',
+      // A blockReason makes this tail print a BLOCK (fail-closed); the wording
+      // said "allowing" until O5 (2026-11-07). Pinned in pretooluse-passthrough.
+      blockReason: '[artibot:git-autopilot-guard] Guard check failed. Blocking by default.',
     })
   );
 }

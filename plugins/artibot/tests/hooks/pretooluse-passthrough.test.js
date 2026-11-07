@@ -384,6 +384,24 @@ describe('pre-bash.js: pass writes nothing, block is unchanged', () => {
   });
 });
 
+describe('pre-bash.js under the PowerShell tool: pass writes nothing, block is unchanged', () => {
+  it.each([
+    ['a recursive listing', { command: 'Get-ChildItem -Recurse' }],
+    ['a single-file Remove-Item', { command: 'Remove-Item .\\a.txt' }],
+    ['an empty command', { command: '' }],
+  ])('passes through: %s', (label, toolInput) => {
+    expectPassthrough(runHook('pre-bash.js', hostPayload('PowerShell', toolInput)), label);
+  });
+
+  it('CONTROL: Remove-Item -Recurse -Force is blocked and recorded', () => {
+    const r = makeRoot('pb-ps-block');
+    const out = runHook('pre-bash.js', hostPayload('PowerShell', { command: 'Remove-Item -Recurse -Force C:\\tmp\\data' }, { cwd: r }), {}, r);
+    const parsed = expectBlock(out, 'Remove-Item -Recurse -Force');
+    expect(parsed.reason).toContain('"Remove-Item -Recurse -Force (PowerShell)"');
+    expect(askedIn(r)).toHaveLength(1);
+  });
+});
+
 describe('pre-write.js: pass writes nothing, block is unchanged', () => {
   it.each([
     ['Write of a normal file', 'Write', { file_path: () => path.join(root, 'src', 'a.js'), content: 'const x = 1;\n' }],
@@ -444,13 +462,21 @@ describe('fail-closed tail is unchanged', () => {
     );
   });
 
-  it('pre-write-checkpoint.js blocks on a hook error (its wording says "Approving", its behaviour is a block)', () => {
-    // Pinned as-is: this limb changes no tail. `createErrorHandler` prints a
-    // block whenever it is given a `blockReason`, and this hook gives it one, so
-    // the reason string promises the opposite of what the bytes do.
+  it('pre-write-checkpoint.js blocks on a hook error and its wording says so', () => {
+    // `createErrorHandler` prints a block whenever it is given a `blockReason`.
+    // The reason used to read "Approving by default." over those block bytes;
+    // the behaviour stayed fail-closed and the wording now matches it (O5,
+    // owner decision 2026-11-07).
     const out = runErrorTail('pre-write-checkpoint.js');
     expect(out.status).toBe(0);
-    expect(out.stdout).toBe('{"decision":"block","reason":"File checkpoint hook error. Approving by default."}');
+    expect(out.stdout).toBe('{"decision":"block","reason":"File checkpoint hook error. Blocking by default."}');
+  });
+
+  it('git-autopilot-guard.js blocks on a hook error and its wording says so', () => {
+    // Same mismatch, same fix: the reason said "allowing as safe fallback".
+    const out = runErrorTail('git-autopilot-guard.js');
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe('{"decision":"block","reason":"[artibot:git-autopilot-guard] Guard check failed. Blocking by default."}');
   });
 });
 

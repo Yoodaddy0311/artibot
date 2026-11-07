@@ -360,7 +360,93 @@ const ENV_VAR_BLOCKLIST = new Set([
 // denylist. Measured 2026-08-30: `rm -rf /` blocked, `rm -rf / --force-with-lease`
 // allowed.
 
-/** Check dangerous Bash commands. */
+/**
+ * Extra variants for the PowerShell tool (S1, 2026-11-07). The two variants
+ * checkDangerousCommand builds are bash-shaped, and PowerShell reads a line by
+ * other rules:
+ *   - blankPrinterSegments splits with bash quoting, where `\` escapes. In
+ *     PowerShell it does not, so `echo "a\"; ri -r -fo C:\x; \""` is one echo
+ *     to bash and a live delete to PowerShell; the bash pass blanked it whole
+ *     and the call was approved (measured before this change). The RAW command
+ *     is scanned as well, which gives up the printer exemption: a mention via
+ *     `echo` or `Write-Host` blocks under PowerShell. That is the fail-closed
+ *     side, and double-quoted PowerShell strings run `$(…)` anyway.
+ *   - the backtick is PowerShell's escape and line-continuation character:
+ *     `Re`move-Item` runs Remove-Item, and a backtick before a newline joins two
+ *     lines into one command. Neither bash variant reads that. The continuation
+ *     is joined BEFORE the other escapes are dropped — the same ordering
+ *     normalizeCommand needs for `\` + newline.
+ *   - the rule windows stop at `;` `|` `&`, including one inside a quoted
+ *     path, so `Remove-Item "C:/R&D" -Recurse -Force` walked through (found
+ *     by the cross-check, 2026-11-07). blankQuotedSeparators adds a
+ *     same-length variant with only the QUOTED separators blanked.
+ * The bash variants stay in the list, so the PowerShell verdict for a text is
+ * never weaker than the Bash verdict for it.
+ *
+ * @param {string} command - raw command
+ * @param {string} scanned - printer-blanked command
+ * @param {string} normalized - normalizeCommand(scanned)
+ * @returns {string[]}
+ */
+function powerShellVariants(command, scanned, normalized) {
+  const unescaped = unescapePowerShell(command);
+  const unquoted = blankQuotedSeparators(command);
+  return [...new Set([
+    scanned, normalized, command, normalizeCommand(command), unescaped, normalizeCommand(unescaped),
+    unquoted, unescapePowerShell(unquoted),
+  ])];
+}
+
+/** Joins backtick continuations, then drops the remaining backtick escapes. */
+function unescapePowerShell(text) {
+  return text.replace(/`\r?\n/g, ' ').replace(/`(.)/g, '$1');
+}
+
+/** PowerShell's quote families: ASCII plus the typographic quotes it also accepts. */
+const PS_DOUBLE_QUOTES = '"\u201C\u201D\u201E';
+const PS_SINGLE_QUOTES = '\'\u2018\u2019\u201A\u201B';
+const SEPARATORS = ';|&';
+
+/**
+ * The same command with every `;` `|` `&` INSIDE a PowerShell string replaced
+ * by a space — same length, everything else byte-identical. One linear pass:
+ * a backtick escapes the next character inside double quotes, and a doubled
+ * quote is a literal quote in either family. Misreading a quote can only blank
+ * MORE separators, which widens a window toward a block; the unblanked variants
+ * stay in the list, so no verdict can get weaker through this function.
+ *
+ * @param {string} command
+ * @returns {string}
+ */
+function blankQuotedSeparators(command) {
+  const out = [];
+  let family = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (family === null) {
+      if (PS_DOUBLE_QUOTES.includes(ch)) family = PS_DOUBLE_QUOTES;
+      else if (PS_SINGLE_QUOTES.includes(ch)) family = PS_SINGLE_QUOTES;
+      out.push(ch);
+    } else if (family === PS_DOUBLE_QUOTES && ch === '`' && i + 1 < command.length) {
+      const next = command[i + 1];
+      out.push(ch, SEPARATORS.includes(next) ? ' ' : next);
+      i += 1;
+    } else if (family.includes(ch)) {
+      if (i + 1 < command.length && family.includes(command[i + 1])) {
+        out.push(ch, command[i + 1]);
+        i += 1;
+      } else {
+        family = null;
+        out.push(ch);
+      }
+    } else {
+      out.push(SEPARATORS.includes(ch) ? ' ' : ch);
+    }
+  }
+  return out.join('');
+}
+
+/** Check dangerous shell commands (Bash, PowerShell). */
 function checkDangerousCommand(ctx) {
   const command = ctx.toolInput?.command || '';
   if (!command) return null;
@@ -378,7 +464,9 @@ function checkDangerousCommand(ctx) {
   // reason text keep reading the RAW command.
   const scanned = blankPrinterSegments(command);
   const normalized = normalizeCommand(scanned);
-  const variants = [scanned, normalized];
+  const variants = ctx.toolName === 'PowerShell'
+    ? powerShellVariants(command, scanned, normalized)
+    : [scanned, normalized];
 
   for (const { pattern, label, safeOverrides } of BLOCKED_PATTERNS) {
     for (const variant of variants) {
@@ -623,10 +711,14 @@ function isInspectableFile(filePath) {
  *     project that legitimately writes its own secrets).
  */
 export function registerBuiltinGuards() {
+  // PowerShell shares the dangerous-command catalogue (S1, 2026-11-07).
+  // path-portability and bash-lint read bash syntax and stay Bash-only.
+  // env-var-exposure is not widened: its only post-phase caller, quality-gate.js,
+  // returns early for anything but Edit and Write, so it never runs for a shell.
   registerGuard({
     name: 'dangerous-command',
     phase: 'pre',
-    tools: ['Bash'],
+    tools: ['Bash', 'PowerShell'],
     category: 'security-critical',
     check: checkDangerousCommand,
   });
