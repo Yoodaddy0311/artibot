@@ -429,7 +429,7 @@ function Install-Assets {
       }
     }
     if ($stale -gt 0) {
-      Write-Warn2 "$stale previously flat-copied agent/command files remain in ~/.claude/{agents,commands} (duplicated with the native plugin) - run '.\install.ps1 uninstall' to remove them or '-Flat' to refresh"
+      Write-Warn2 "$stale previously flat-copied agent/command files remain in ~/.claude/{agents,commands} (duplicated with the native plugin) - delete or move the unwanted ones by name, or '-Flat' to refresh; '.\install.ps1 uninstall' also deletes ~/.claude/rules/artibot (including rules you edited) and ~/.claude/artibot"
     }
   } else {
     Copy-MdFiles -SrcDir (Join-Path $ScriptDir 'agents')   -DstDir (Join-Path $ClaudeDir 'agents')   -Label 'Agents'

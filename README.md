@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.71.13-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.71.14-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.13** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.14** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.71.13` |
+| `version` | Plugin version | `4.71.14` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.71.14** (2026-11-07) — The PowerShell shell tool is guarded, 13 unused modules are gone, and Korean prompts are scored fairly: 7 commits, 75 files +1,261/−5,415 since v4.71.13 (`git diff --shortstat v4.71.13 5cf7db71`, measured 2026-11-07; the release commit is not in these numbers; 2 of the 7 are dependabot PR #124). **Security**: the PreToolUse dangerous-command checks now also run for the PowerShell tool (previously only Bash), with the owner-approved patterns `Remove-Item -Recurse -Force` (aliases, abbreviations, dash variants), `Format-Volume` and `Clear-Disk`; quoting and backtick tricks measured to slip past are blocked; on PowerShell even a quoted mention of such a command is blocked. **Cleanup**: 13 lib modules with no consumer outside their own tests were deleted (2,202 lines, and 3,012 more in their own spec files), and the docs that described them as wired were corrected. **Auto-invoke**: the names the model must be able to start are one constant, and a firewall test fails on any new `disable-model-invocation`. **Router**: Korean and Japanese step words were never matched (`\b` is ASCII-only in JavaScript); they now count, Hangul length is weighted, and English scores are byte-identical (9,327 outputs). Researched and not adopted, with reasons in the CHANGELOG: recent high-star open-source harnesses offered no technique to adopt as-is, PreToolUse hook consolidation (the host already runs matching hooks in parallel), and `onFailure: "block"` (needs Claude Code v2.1.295+). Tests 28,206 → 28,046 (Ubuntu ×3, same value on each leg; Windows 28,069) — the drop is the 12 deleted test files. Not verified: the host firing the new PowerShell matcher (needs a restart). Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
 **4.71.13** (2026-11-07) — The loop detector can now fire, the REPORT gate gains opt-in evidence modes, and two skills stop running the test suite when they activate: 17 commits, 41 files +6,551/−232 since v4.71.12 (`git diff --shortstat v4.71.12 9d4c222d`, measured 2026-11-07; the release commit is not in these numbers; 9 of the 17 are document commits). 15 come from the 2026-10-23 cloud-session branch `claude/jolly-newton-qmi4eb` (cherry-picked); 2 fix that branch's tests (a dashboard label pin that was red on every platform, and two rule-7 test files that were red on Windows only). **Loop detection**: `tool-tracker` saves its history on every call, per session (`runtime/sessions/<sid>/loop-state.json`), so the warn (3 identical calls) and block (5) labels can fire under the one-process-per-call hook model; unclassified Bash commands are recorded as `bash:unknown:shell`; detections are logged for `scripts/ledger/loop-detection-census.mjs`. Showing the warning to the model (`cognitive.loopDetector.advisory`) ships off. **REPORT gate**: config reads tell missing or invalid apart from off and warn once per session; `autopilot.reportVerifyGate.evidenceMode` adds `'explicit-pass'` and `'deterministic'` (the vitest snapshot now records `gitSha` and `gitDirty`), shipped as `'ack'`, which behaves as before. **Economics**: `tdd-workflow` and `quality-framework` no longer run the test suite on activation, skill-body preloading is off, and the status-line token figure is labelled as the input estimate it is. Tests 27,983 → 28,206 (Ubuntu ×3, same value on each leg; Windows 28,229). Not verified: the live census, host-integration run and hook-latency measurement from the branch's PC handoff (`07_PC_HANDOFF.md` §A). Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 

@@ -11,6 +11,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.14] — 2026-11-07
+
+`v4.71.13`(`43a0b6cd`) 이후 7 커밋 = **75 files +1,261/−5,415**(`git rev-list --count v4.71.13..5cf7db71` · `git diff --shortstat v4.71.13 5cf7db71`, 2026-11-07 측정 — 릴리스 커밋은 이 수치에 없다). 이 중 2개(`e19265c7`·`afe4a680`)는 dependabot PR #124(setup-node 7.1.0 · upload-artifact 7.0.2 · action-gh-release 3.0.3, 새 SHA 3개는 각 태그와 일치 확인)이다. 나머지 5개는 같은 날의 /ultraplan(최근 3주 고스타 오픈소스 대조 — 그대로 들여올 기법 0건, 근거는 아래 각 항목)과 그 실행(/autopilot `ap-20261107-103519-emzcad`)이다. 테스트는 28,206 → 28,046(Ubuntu 3레그, `5cf7db71` 의 CI 세 레그가 같은 값; Windows 레그 28,069) — 줄어든 것은 지운 모듈 13개의 테스트 12파일 때문이다.
+
+### 보안 — PowerShell 셸 툴에도 위험 명령 차단 (`25b394e0`)
+
+- **결함**: PreToolUse 보안 가드(`pre-bash`·`bash-risk-guard`)가 `Bash` 에만 걸려 있어, 셸 툴이 PowerShell 인 PC 에서는 위험 명령 차단이 0이었다. 호스트가 이 이름을 보내는 근거: 이 리포 원장에 PostToolUse 디스패처가 쓴 `tool: "PowerShell"` 행 23건(2026-10-04~).
+- **수정**: matcher `Bash|PowerShell`. 툴 이름은 허용목록으로만 매핑한다(정확히 `'PowerShell'` 이면 PowerShell, 그 밖은 전부 Bash) — 이상한 `tool_name` 이 가드 0개 체인(= approve)으로 새지 않는다. PowerShell 에는 dangerous-command 가드만 걸고(bash-lint·path-portability 는 Bash 전용), 백틱 줄이음·이스케이프를 푼 변형과 따옴표 안 `;|&` 를 비운 변형도 검사한다(bash 기준 정규화가 PowerShell 따옴표를 잘못 읽는 우회를 실측으로 막음). 오너 승인 패턴: `Remove-Item -Recurse -Force`(별칭 ri/rm/rmdir/rd/del/erase · 파라미터 축약 · 대시 변형), `Format-Volume`, `Clear-Disk`; 기존 cmd.exe 규칙은 제자리에서 `rd /s`·`erase /s` 까지 넓혔다(패턴 수 42 유지). PermissionRequest 자동 승인도 PowerShell 을 같은 체인으로 판정하고, human.asked 는 PowerShell 에 별도 subject 키를 준다(Bash id 바이트 불변).
+- **메시지 정합(O5)**: `git-autopilot-guard`·`pre-write-checkpoint` 의 에러 경로가 "allowing"/"Approving by default" 라고 말하면서 실제로는 block 을 냈다 — 동작(fail-closed)은 그대로 두고 문구를 맞췄다.
+- **알아 둘 것**: PowerShell 에서는 원문도 검사하므로 위험 명령을 **문자열로 언급만 해도** 막힌다(`Write-Host "Remove-Item …"`, PowerShell 로 친 `git commit -m "…Remove-Item…"`). Bash 는 기존 면제를 유지한다. 우회는 `git commit -F <파일>`. 정규식으로 못 잡는 형태(파이프라인 `gci | ri`, `iex` 문자열 연결, `-EncodedCommand`, `[IO.Directory]::Delete`)는 테스트 옆 NOT SEEN 에 적었다. ReDoS: 200 KB 입력에서 체인 최대 72.9 ms(선형). 호스트가 새 matcher 를 실제로 발화하는지는 재시작 후 확인 대상이다(미확인).
+
+### 정리 — 소비처 없는 lib 모듈 13개 삭제 (`012c5248`)
+
+- 리포 전역(정적·동적 import, `import(toFileUrl(...))`, hooks.json·dispatch-table 문자열, md, package scripts)에서 테스트 밖 소비처 0 을 파일마다 재확인한 뒤 지웠다: `core/error-codes` · `core/rules-csv-loader` · `runtime/sprint-contract` · `runtime/middleware/{skill-trigger,aci-constraint,context-reset}` · `utils/progress-renderer` · `learning/ledger/learning-bridge` · `orchestration/{handoff-filter,canceler,dag,status}` · `recovery/plan-repair`(lib 2,202줄 + 테스트 3,012줄). 오너 승인(2026-11-07).
+- 거짓이 된 문서를 함께 고쳤다: CLAUDE.md 정직성 노트(미들웨어 4개가 "다른 진입점에서 배선된다"고 했으나 하나도 등록돼 있지 않았다 → 14 module files, otel-middleware 는 유지·미배선), README 모듈 수 17→14, `grpoRouting` 설정 주석의 "skillPolicy 를 LIVE 로 읽는다", intelligence 출력 스타일의 ACI·context-reset·sprint-contract 지표와 지어낸 대시보드 수치, orchestration-patterns 스킬의 `filterHandoffHistory()`.
+- 남긴 것: otel-middleware · conflict-detector · tool-guardrails · agent-as-tool · cmd-allowlist(설계 대상이거나 스킬 문서가 지목).
+- 오픈소스 도구 대조: knip(12.6k★, 6.44.2)을 이 리포에 1회 돌렸더니 미사용 파일 510개를 냈고 그중 `scripts/hooks` 76개는 전부 실제로 쓰이는 훅이었다 — hooks.json·디스패치 테이블·동적 import 를 못 본다. 그래서 삭제 판정은 자체 census 로 했고 knip 은 쓰지 않았다.
+
+### firewall — 자동 발동 집합 상수 + `disable-model-invocation` 래칫 (`ab50e9cf`)
+
+- 자동 발동 이름이 세 곳(Canary 허용목록, recommend 힌트 대상, CLAUDE.md 산문)에 흩어져 있던 것을 `lib/cognitive/auto-invoke.js#AUTO_INVOKE_NAMES` 하나로 모았다(앞 둘은 import, 복제 아님).
+- `tests/firewall/auto-invoke-dmi-guard.test.js`: 예외 목록 밖에 dmi 가 생기거나, 예외가 더는 dmi 가 아니거나, 자동 발동 이름에 모델이 부를 표면이 없으면 red. 오너 결정: 새 dmi 는 붙이지 않는다(Auto-invoke 원칙과 충돌). 기존 dmi 14개 중 4개(codex·setup·session-worklog·scheduled-learning)는 커밋·문서 어디에도 사유가 없어 "unverified" 로 기록했다.
+
+### 라우터 — 한국어·일본어 단계어가 실제로 셈에 들어간다 (`43a33e5b`)
+
+- `router.js#STEP_PATTERNS` 의 한국어·일본어 대안이 JS `\b`(ASCII 단어 경계) 안에 있어 한 번도 매치되지 않았다(한국어 18문장 중 0). `\b` 는 ASCII 대안에만 남겼다. 한글은 길이 보너스에서 음절당 2.4 로 센다(조정 쌍 LSQ 2.45 / 중앙값 2.39). `보안`→risk, `인증`→backend.
+- ko/en 18쌍(조정 전 분리): 조정 세트 7→8/9, 홀드아웃 7→8/9. 영어는 3,109 입력 × 3 컨텍스트 = 9,327 출력이 바이트 동일(뮤턴트는 78 차이).
+
+### 문서 (`5cf7db71`)
+
+- `agents/refactor-cleaner.md`: archived 된 depcheck, TS 전용 ts-prune, 정의되지 않은 `npm run build` 를 지시하던 것을 "그 프로젝트 package.json 의 스크립트를 먼저 확인 후 실행" + knip 버전 고정·worktree 사본·보고 전용·`--fix` 금지로 바꿨다.
+- 실용성 인수인계 문서(NEXT-SESSION · 07_PC_HANDOFF · README · pc-handoff.mjs)가 삭제된 브랜치를 가리키던 것을 master 기준으로 정정했다.
+
+### 이 PC 에서 한 것 (코드 밖)
+
+- `~/.claude/agents` 의 낡은 평면 사본 31개(2026-09-09 판: `model: fable`, frontmatter 를 일찍 닫던 주석 포함, 플러그인과 바이트 동일 0/31)를 `~/.claude/agents.bak-20261107/` 로 옮겼다. 매 턴 에이전트 목록이 두 번 실리던 것(21,204B + 20,994B, 2026-10-06 실측)이 사라진 것을 이 세션에서 호스트 통지("30개 bare 에이전트 타입 사용 불가")로 확인했다. 되돌리려면 폴더를 다시 옮기면 된다. `./install.sh uninstall` 은 쓰지 마라 — `rules/artibot` 전체와 `~/.claude/artibot` 까지 지운다. 설치기(`install.sh`·`install.ps1`)의 평면 사본 경고가 바로 그 uninstall 을 권하고 있었으므로(릴리스 커밋) 이름으로 지우거나 옮기라고 안내하고 uninstall 의 삭제 범위를 적도록 바꿨다.
+
+### 하지 않은 것 (근거와 함께)
+
+- **PreToolUse 훅 통합**: 호스트가 매칭된 훅을 병렬로 실행한다("Claude Code runs the matching hooks in parallel", hooks-guide) — 합쳐도 얻는 것은 CPU 뿐이고, spawn 디스패처에 보안 가드를 넣으면 자식 timeout·크래시 때 block 이 사라져 fail-open 이 된다. 닫음.
+- **`onFailure: "block"`**: 호스트 문서상 PreToolUse 훅이 timeout·실패하면 도구 호출은 진행된다(fail-open). `"onFailure": "block"` 이 이를 막지만 Claude Code v2.1.295 이상이 필요하고 이 PC 는 2.1.291 이다 — 호스트 업그레이드 뒤 보안 가드에 붙일 후속 작업.
+- 출력 압축·출력 색인·플러그인 팩 분할·스킬 스코프 훅(커뮤니티 선례)은 보류, 외부 CLI·상주 워커·호스팅 업로드 계열은 DATA POLICY 로 거절.
+
 ## [4.71.13] — 2026-11-07
 
 `v4.71.12`(`82d970ed`) 이후 17 커밋 = **41 files +6,551/−232**(`git rev-list --count v4.71.12..9d4c222d` · `git diff --shortstat v4.71.12 9d4c222d`, 2026-11-07 측정 — 릴리스 커밋은 이 수치에 없다). 15개는 2026-10-23 클라우드 세션 브랜치 `claude/jolly-newton-qmi4eb` 를 `cherry-pick -x` 로 옮긴 것이고(그중 9개는 문서 커밋, 첫 커밋은 PR #125 의 `c493f163` 와 트리가 같다), 2개는 착지 때 고친 브랜치 테스트 결함이다(아래 첫 항목). 바로 바뀌는 운영 동작은 넷이다: 루프 감지 이력을 호출마다 세션별로 저장 · 미분류 Bash 를 `bash:unknown:shell` 로 기록 · 설정 읽기 실패를 경고로 표시 · 두 스킬이 활성화 때 전체 테스트를 돌리지 않음(+ 스킬 본문 선읽기 OFF, 토큰 라벨 정정). 모델에게 보이는 두 키 `cognitive.loopDetector.advisory`·`autopilot.reportVerifyGate.evidenceMode` 는 `false`·`'ack'` 로 출하한다. 테스트는 27,983 → 28,206(Ubuntu 3레그, `9d4c222d` 의 CI 세 레그가 같은 값. Windows 레그는 28,229).

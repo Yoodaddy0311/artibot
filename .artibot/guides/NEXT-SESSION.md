@@ -18,6 +18,14 @@
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
 
+## v4.71.12 ~ v4.71.14 (2026-11-07 KST, 리더 실측)
+
+- **하루에 세 번 릴리스**: v4.71.12(다른 PC 에서 미푸시였던 세션 1 의 6커밋 착지 — 에이전트 frontmatter 잘림·MCP 고정·CI fail-closed·nightly 해제), v4.71.13(jolly-newton 15커밋: 루프 감지 세션별 저장·REPORT 게이트 evidenceMode·스킬 활성화 때 전체 테스트 제거), v4.71.14(PowerShell 보안 가드·데드 모듈 13개 삭제·자동 발동 집합 상수·라우터 한국어). 각 절은 `plugins/artibot/CHANGELOG.md`.
+- **v4.71.14 의 출발점**: `/ultraplan` 이 최근 3주 고스타 오픈소스(Anthropic 1st-party + 커뮤니티 13개 + 데드코드 도구)를 대조해 "그대로 들여올 기법 0, 실제 통증은 내부"로 판정했다. PRD 는 `docs/PRD/oss-lightweight-ultraplan-20261107.md`(docs/ 는 gitignore — 이 PC 에만 있다).
+- **다음 세션 첫 일**: (1) Claude Code 재시작 후 PowerShell 로 위험 명령 1회 → block 이 오는지(새 matcher 의 호스트 발화는 미확인) (2) 호스트를 v2.1.295 이상으로 올린 뒤 보안 PreToolUse 훅(pre-bash·bash-risk-guard·pre-write-guard)에 `"onFailure": "block"` — 지금은 훅이 timeout·크래시하면 도구 호출이 진행된다(호스트 문서) (3) 07_PC_HANDOFF §A 라이브 측정(census 3종·host-probe·훅 지연)은 여전히 미실행.
+- **오너 손이 필요한 것**: `C:\c` 폴더 삭제(자동 모드 분류기 거부), `git stash clear`(Artibot 자체 가드가 차단; 11건은 `refs/stash-archive/2026-11-07/` 에 보존). `~/.claude/agents` 평면 사본 31개는 `~/.claude/agents.bak-20261107/` 로 옮겼다 — 설치기는 네이티브 캐시가 있으면 다시 복사하지 않는다.
+- **알려진 미결**: session-worklog 스킬은 설명이 "Automatic" 인데 dmi 다(사유 미기록) · "감사합니다" 가 라우터에서 audit 으로 위험 점수를 받는다(기존) · PowerShell 에서는 위험 명령을 문자열로 언급만 해도 막힌다(의도된 트레이드오프).
+
 ## 브랜치 `claude/jolly-newton-qmi4eb` 인수인계 (2026-10-23 클라우드 세션 실측 · 2026-11-07 master 착지 → v4.71.13)
 
 - **무엇**: `.artibot/guides/v5-design/practicality-improvement-20261023/` 의 평가 문서(01~03)를 검증(04)하고 개정 설계(05)대로 코드 Wave 1~4 를 구현(루프 이력 세션별 매 호출 저장 · 미분류 Bash 수용 · REPORT 게이트 `evidenceMode` 키와 규칙 7 · 설정 읽기 3상태 · 리포터 `gitSha`), 파이프라인·토큰 점검(06)과 10-04 감사 NECESSARY 잔여 3건(스킬 활성화 때 전체 테스트 실행 제거 · lazyLoading OFF · 토큰 라벨)을 착지했다. 전체 vitest 28,090건 중 환경 요인 1건 외 그린 — 이 수치는 브랜치 `13b8069a` 시점의 실행이다(05 §8.1). 브랜치의 전체 스위트 실행이 대시보드 라벨을 바꾼 커밋보다 앞서서, 브랜치 끝은 모든 플랫폼에서 3건 red 였다(CHANGELOG [4.71.13]). 모델에 보이는 키 두 개(`cognitive.loopDetector.advisory` · `autopilot.reportVerifyGate.evidenceMode`)는 OFF 출하.

@@ -584,7 +584,7 @@ flat_copy_skipped() {
     local leftovers
     leftovers="$(count_flat_leftovers)"
     if [ "${leftovers:-0}" -gt 0 ]; then
-      warn "${leftovers} previously flat-copied agent/command files remain in ~/.claude/{agents,commands} (duplicated with the native plugin) — run './install.sh uninstall' to remove them or '--flat' to refresh"
+      warn "${leftovers} previously flat-copied agent/command files remain in ~/.claude/{agents,commands} (duplicated with the native plugin) — delete or move the unwanted ones by name, or '--flat' to refresh; './install.sh uninstall' also deletes ~/.claude/rules/artibot (including rules you edited) and ~/.claude/artibot"
     fi
   fi
   return 0
