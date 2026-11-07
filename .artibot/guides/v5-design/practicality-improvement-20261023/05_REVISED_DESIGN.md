@@ -238,3 +238,13 @@
 
 규칙 7 의 결정 순서는 `lib/autopilot/verify-evidence-deterministic.js` 헤더의 표(1~9)이고, 게이트 안에서는 규칙 6 → 6′ → 7 순이다: 드라이버가 쓴 것(6·6′)을 트리가 보여 주는 것(7)보다 먼저 판정해 pause 가 가까운 원인을 먼저 말한다. 규칙 7 이 못 보는 것은 그 모듈 헤더에 적었다(테스트 층만 · 더러운 트리는 `근거:` 에 적되 막지 않음 · 설치본 세션은 스냅샷이 없어 항상 MISSING). §6 의 미확인 중 "서브에이전트 payload 의 `session_id`" · "설치본 호스트의 PostToolUse additionalContext" · "`usage-cost-table.mjs --projects-dir` 의 B 군 적용" · Windows 재현은 그대로 미확인이다.
 
+### 8.2 오너 PC 실측 (2026-11-07 23:35 KST · Windows 11 10.0.26200 · Node 22.19.0 · claude 2.1.319 · 설치본 4.71.14 = HEAD `70b63650` · API 호출 0)
+
+- **§A-1 설치·로드**: `pc-handoff.mjs`(인자 없음) → ok 8 · warn 2(작업 브랜치 · 미커밋 변경) · fail 0. 설치본 커밋 = HEAD, 상태 디렉터리에 세션 3개 · `loop-state.json` 은 세션별 2개(`826ca925` 는 11-06, 4.71.13 설치 전이라 없음).
+- **§A-2 라이브 분모 3종** — `pc-handoff.mjs census` → [`evidence/pc-handoff-census-20261107.md`](../evidence/pc-handoff-census-20261107.md):
+  - `verify-result-census.mjs`: 세션 파일 8 · REPORT 도달 2 · fold PASS 0 / FAIL 0 / UNMEASURED 2 · `wouldPauseUnderExplicitPass` **0** — 두 세션은 `ack` 에서도 이미 `NO_VERIFY_ATTEMPT` 라 `explicit-pass` 로 바꿔 **늘어나는** pause 가 없다. 표본 2라 07 §B-2(evidenceMode 목표값)의 근거로는 약하다.
+  - `loop-detection-census.mjs`: `files=3 sessions=2 warn=0 block=0 status=measured:no-detections`. 파일 3 = 세션별 2 + 세션 없는 평면 파일 1. 이 세션의 이력 20건에도 감지 0 — 07 §B-1 의 "오탐 표본"은 아직 없다.
+  - `existence-audit.mjs --cwd . --plugin-root plugins/artibot`: `entries 672 · measured 254 · unmeasured 418 · eventsReceived 5793`. 06 §8 #3(a) 분류의 입력이고, 분류(오너 결정 07 §B-6)는 하지 않았다.
+- **§A-4 Windows 재현** — `pc-handoff.mjs tests`(= `npx vitest run tests/hooks/tool-tracker-loop-state.test.js tests/hooks/tool-tracker-bash-receipt.test.js tests/autopilot/report-verify-gate-deterministic.test.js --maxWorkers=4`): **3 파일 · 46 건 전부 통과**, vitest exit 0, 8 s. §8.1 끝의 "Windows 재현 미확인" 은 이 세 파일에 한해 닫힌다. 전체 스위트(`tests --full`)는 이 PC 의 메모리 압박으로 중단된 전례가 있어 돌리지 않았고 CI(Windows 레그 28,069, v4.71.14)를 전체 게이트로 둔다.
+- **§A-3 호스트 통합 · §A-5 훅 지연**: **미실행** — 둘 다 모델 호출이 든다(07 의 규칙대로 비용 확인 뒤). 따라서 D-01·D-03 의 호스트 통합 PASS 는 여전히 미확인이다.
+
