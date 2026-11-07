@@ -29,6 +29,7 @@ import {
 import { getLastTestStatus } from '../core/test-status.js';
 import { readPendingSuggestions } from '../learning/auto-spawn-advisor.js';
 import { createSessionMemory } from '../learning/session-memory.js';
+import { asClock } from './clock.js';
 
 // ---------------------------------------------------------------------------
 // Defaults / constants
@@ -264,19 +265,6 @@ function msToDays(ms) {
 }
 
 /**
- * Normalize a caller-supplied `now` into a clock function returning a Date.
- * Internally this module treats `now` as a clock (`now()` → Date), but callers
- * naturally reach for `Date.now()` (a number) — accept function | number | Date
- * | undefined so neither convention crashes.
- */
-function asClock(now) {
-  if (typeof now === 'function') return now;
-  if (typeof now === 'number' && Number.isFinite(now)) return () => new Date(now);
-  if (now instanceof Date) return () => now;
-  return () => new Date();
-}
-
-/**
  * Derive the git-sync dashboard + recommended actions from a collected
  * gitState. Pure function — no git, no I/O — so the exact warning/action logic
  * is unit-testable. Every field is defensive against partial/degraded state.
@@ -287,7 +275,7 @@ function asClock(now) {
  * on another machine and never pushed here — so this checkout cannot see it.
  *
  * @param {object} gitState — shape of {@link ZERO_GIT_STATE}
- * @param {{ now?: () => Date }} [opts]
+ * @param {{ now?: (() => Date) | Date | number }} [opts]
  * @returns {{
  *   dirty: boolean,
  *   dirtyCount: number,
@@ -580,7 +568,7 @@ function buildMetaBlock(gitState, now, tsStart) {
  * @param {(args: string[], opts?: object) => string} [options.gitRunner]
  * @param {Array<object>} [options.taskList]
  * @param {Array<{ prompt: string, rationale: string, priority: string }>} [options.firstPrompts]
- * @param {() => Date} [options.now]
+ * @param {(() => Date) | Date | number} [options.now]
  * @param {() => number|Promise<number>} [options.readStateVersion] — optional
  *   port returning the project-state version this handoff is derived from.
  *   Sync or async; any failure or non-version value degrades to `null`. The
@@ -667,7 +655,9 @@ function renderStateTable(data) {
     '|---|---|',
     `| Branch | \`${g.branch ?? '(unknown)'}\` @ \`${g.shortHash ?? '----'}\` |`,
     `| Tree | ${tree} |`,
-    `| WIP | ${wipCell} |`,
+    // 미푸시 = wip-stats scope (no remote-tracking ref holds it). Keep the
+    // word "WIP" first: session-start.js#parseHandoffBannerFields keys on it.
+    `| WIP (미푸시) | ${wipCell} |`,
     `| Tests | ${testCell} |`,
     `| Lint | ${lintCell} |`,
     `| Unpushed | ${unpushed} |`,
@@ -847,7 +837,7 @@ function renderFrontmatter(meta) {
  * before scanning for `## N.` headings.
  *
  * @param {object} data — from {@link collectHandoffData}
- * @param {{ now?: () => Date }} [options]
+ * @param {{ now?: (() => Date) | Date | number }} [options]
  * @returns {string}
  */
 export function renderHandoffMarkdown(data, options = {}) {

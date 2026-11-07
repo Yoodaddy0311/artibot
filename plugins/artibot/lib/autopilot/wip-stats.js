@@ -7,6 +7,16 @@
  * surfaces accumulation so SessionStart can advise the user to run the
  * /squash command before pushing.
  *
+ * Scope: only WIP commits NOT YET ON A REMOTE count — reachable from `branch`
+ * and not from any remote-tracking ref (`git log <branch> --not --remotes`).
+ * Commits a remote already holds can no longer be squashed "before push", so
+ * counting them made the advisory permanent: 2026-11-08 this repo had 51 WIP
+ * subjects in 2,249 commits, all 51 already on origin/master, 0 unpushed.
+ * With no remote configured nothing is excluded (full history, as before).
+ * `@{u}..HEAD` was rejected: on a branch with no upstream git exits 128,
+ * which the safe default turns into 0 and so hides a never-pushed branch.
+ * Freshness is the last fetch/push — no network call is made here.
+ *
  * All public helpers return safe defaults (0, 0, false) on git failures so
  * the SessionStart banner never throws or blocks on a degraded git state.
  *
@@ -56,9 +66,22 @@ export function isWipSubject(subject) {
 }
 
 /**
- * Count WIP commits reachable from `branch` (HEAD by default), optionally
- * limited via `since` (a git-recognized timestamp or relative date such as
- * `2 days ago`). Returns 0 on any git error.
+ * Revision range shared by both counters so their scopes cannot drift:
+ * `branch` minus everything any remote-tracking ref already holds. `--` stays
+ * last so `branch` is never read as a path.
+ *
+ * @param {string} branch
+ * @returns {string[]}
+ */
+function unpushedRange(branch) {
+  return [branch, '--not', '--remotes', '--'];
+}
+
+/**
+ * Count WIP commits reachable from `branch` (HEAD by default) that no
+ * remote-tracking ref holds yet, optionally limited via `since` (a
+ * git-recognized timestamp or relative date such as `2 days ago`). Returns 0
+ * on any git error.
  *
  * @param {string} [branch='HEAD']
  * @param {{ since?: string, git?: (args: string[], opts?: object) => string, cwd?: string }} [opts]
@@ -68,8 +91,7 @@ export function countWipCommits(branch = 'HEAD', opts = {}) {
   const git = opts.git ?? defaultGitRunner;
   const args = ['log', '--pretty=%s'];
   if (opts.since) args.push(`--since=${opts.since}`);
-  args.push(branch);
-  args.push('--');
+  args.push(...unpushedRange(branch));
 
   let out;
   try {
@@ -88,7 +110,8 @@ export function countWipCommits(branch = 'HEAD', opts = {}) {
 
 /**
  * Return the age (in milliseconds) of the oldest WIP commit reachable from
- * `branch`. Returns 0 if no WIP commit exists or git fails.
+ * `branch` that no remote-tracking ref holds yet — the same range as
+ * {@link countWipCommits}. Returns 0 if no such WIP commit exists or git fails.
  *
  * @param {string} [branch='HEAD']
  * @param {{ git?: (args: string[], opts?: object) => string, cwd?: string, now?: () => number }} [opts]
@@ -99,7 +122,7 @@ export function getOldestWipAgeMs(branch = 'HEAD', opts = {}) {
   const now = opts.now ?? Date.now;
   // Tab-separated: epoch seconds <TAB> subject. Tab is safer than space because
   // commit subjects contain spaces.
-  const args = ['log', '--pretty=%at%x09%s', branch, '--'];
+  const args = ['log', '--pretty=%at%x09%s', ...unpushedRange(branch)];
 
   let out;
   try {
@@ -168,7 +191,7 @@ export function formatAdvisoryLine(count, ageMs, opts = {}) {
   const ageHint = ageHours < 1
     ? `${Math.max(1, Math.round(ageMs / 60_000))}m`
     : `${ageHours.toFixed(ageHours >= 10 ? 0 : 1)}h`;
-  return `[artibot:wip] ${count} WIP commit(s) (oldest ${ageHint} ago) — consider /squash before push`;
+  return `[artibot:wip] ${count} unpushed WIP commit(s) (oldest ${ageHint} ago) — consider /squash before push`;
 }
 
 /**

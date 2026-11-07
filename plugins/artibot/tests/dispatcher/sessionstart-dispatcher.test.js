@@ -65,7 +65,11 @@ import { ledgerFilePath } from '../../lib/runtime/ledger.js';
  * here 2026-09-04T04:39Z, same for all three non-disabled payloads: merged
  * stdout is 934 bytes from cwd=PLUGIN_ROOT against 521 bytes from a non-git
  * cwd. The whole delta is git-derived content only a real repo can produce —
- * the `[artibot:wip] 37 WIP commit(s)` line, and the repo-scoped
+ * the `[artibot:wip] …` advisory line (then `37 WIP commit(s)`, counted over
+ * all history; since 2026-11-08 lib/autopilot/wip-stats.js counts only WIP no
+ * remote-tracking ref holds, prints `N unpushed WIP commit(s)`, and in a fully
+ * pushed checkout prints nothing — so today's delta is smaller; the 934/521
+ * bytes above were not re-measured), and the repo-scoped
  * `[artibot:handoff]` Next-P0 line degrading to a generic fallback. Exit
  * status (0), JSON validity, and the presence of a string
  * `hookSpecificOutput.additionalContext` are identical under both, so every

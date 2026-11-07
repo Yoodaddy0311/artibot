@@ -7,6 +7,7 @@
  *
  * Public API:
  *   - writeHandoff(markdown, { projectRoot, keep, throttleMs, now, exec })
+ *     `now` = clock fn | Date | epoch ms (lib/handoff/clock.js#asClock)
  *   - listHandoffs(projectRoot)
  *   - pruneHandoffs(projectRoot, { keep, exec })
  *   - readLatestHandoff(projectRoot)
@@ -35,6 +36,8 @@ import { mkdir, readdir, readFile, rename, rm, stat, unlink, utimes, writeFile }
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import crypto from 'node:crypto';
+
+import { asClock } from './clock.js';
 
 const HANDOFF_FILE = 'HANDOFF.md';
 const ARCHIVE_DIR = path.join('.artibot', 'handoffs');
@@ -440,7 +443,7 @@ async function resolveArchiveTarget(projectRoot, archiveDir, now, throttleMs, tr
  *   projectRoot: string,
  *   keep?: number,
  *   throttleMs?: number,
- *   now?: () => Date,
+ *   now?: (() => Date) | Date | number,
  *   exec?: ExecFn,
  *   rename?: RenameFn,
  *   sleep?: SleepFn,
@@ -458,7 +461,8 @@ export async function writeHandoff(markdown, options) {
   if (typeof markdown !== 'string') throw new TypeError('markdown must be string');
   const { projectRoot } = options ?? {};
   if (!projectRoot) throw new TypeError('projectRoot is required');
-  const now = options.now ?? (() => new Date());
+  // Same rule as collectHandoffData: /save passes one `now` to both.
+  const now = asClock(options.now);
   const exec = options.exec ?? defaultExec;
   const keep = resolveKeep(options.keep);
   const throttleMs = resolveThrottleMs(options.throttleMs);

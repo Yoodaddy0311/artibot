@@ -198,6 +198,20 @@ describe('parseHandoffBannerFields (banner regex)', () => {
     expect(fields.wip).toBeGreaterThanOrEqual(3); // first match in section
   });
 
+  // §1's WIP count comes from lib/autopilot/wip-stats.js, which since
+  // 2026-11-08 counts only WIP no remote-tracking ref holds. The row label
+  // says so, and the one consumer that reads the row back — this banner
+  // regex, `(?:WIP|…)\D*?(\d+)` — must still find the count under the new label.
+  it('round-trips the unpushed WIP row: label names the scope, banner still reads the count', () => {
+    const md = renderHandoffMarkdown(
+      { wip: { count: 4, oldestAgeMs: 120_000, advisory: null } },
+      { now: new Date(2026, 4, 19, 11, 30) },
+    );
+    const row = md.split('\n').find((l) => l.startsWith('| WIP'));
+    expect(row).toBe('| WIP (미푸시) | 4개 (oldest 2m) |');
+    expect(parseHandoffBannerFields(md).wip).toBe(4);
+  });
+
   it('returns safe zeros on empty input', () => {
     expect(parseHandoffBannerFields('')).toEqual({ p0: null, unresolved: 0, wip: 0 });
     expect(parseHandoffBannerFields(null)).toEqual({ p0: null, unresolved: 0, wip: 0 });

@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 03시대 KST 갱신, **v4.71.16** — v4.71.15 이후 2 커밋(`1d3ed827` 배선 감사 도구 삭제 + 마무리 기록 · `51bed492` 루트 문서 하한 109 → 124) + 릴리스 커밋 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영 · 남은 오너 손 4건은 아래 「2026-11-08 마무리」 절, 원격 브랜치 삭제 목록에 `ci/release-v4.71.16` 이 더해진다)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 03시대 KST 갱신, **v4.71.16 착지·태그·GitHub Release·설치 완료**(재시작 전, 로드 미확인) · 그 뒤 미릴리스 수정 3건([Unreleased]: WIP 경보 범위 · `writeHandoff` 의 Date · 로컬 cpSync 크래시) · 오너 손 항목은 아래 「2026-11-08 v4.71.16 이후」 절의 표가 최신)
+
+> 이전 헤더(2026-11-08 03시대, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 03시대 KST 갱신, **v4.71.16** — v4.71.15 이후 2 커밋(`1d3ed827` 배선 감사 도구 삭제 + 마무리 기록 · `51bed492` 루트 문서 하한 109 → 124) + 릴리스 커밋 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영 · 남은 오너 손 4건은 아래 「2026-11-08 마무리」 절, 원격 브랜치 삭제 목록에 `ci/release-v4.71.16` 이 더해진다)
 
 > 이전 헤더(2026-11-08 01시대, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 01시대 KST 갱신, **v4.71.15 착지·설치·로드 확인** — 태그 `v4.71.15` = `4f63ccc5`(원격 동일) · 이 PC 설치본 4.71.15 가 이 세션에 로드됨(실측) · 07 §B 오너 결정 8건 확정 · 배선 감사 도구 삭제(미릴리스, [Unreleased]) · 남은 것은 오너 손 4건 — 아래 「2026-11-08 마무리」 절)
 
@@ -23,6 +25,36 @@
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## 2026-11-08 v4.71.16 이후 (리더 실측 — 세션 `2df2db09`, `/team` 팀원 5명: investigator · tdd-guide ×2 · code-reviewer · 리더)
+
+- **v4.71.16 릴리스 결과**: master = 태그 `v4.71.16` = `dcb6b1b9`(pre-push landing-flow: 필수 컨텍스트 4 + 체크 런 7 그린). Release 런 `42399575876` — Validate · **GitHub Release 게시(18:11Z)** · README 배지 동기화 모두 success(배지는 릴리스 커밋이 이미 맞춰 착지 커밋 없음). 설치: 마켓 사본 ff `4f63ccc` → `dcb6b1b` → `claude plugin marketplace update artibot` → `claude plugin update artibot@artibot`(4.71.15 → 4.71.16) → `install.sh files` 를 **마켓 사본에서** 실행(팀원이 리포 트리를 편집 중이라). `installed_plugins.json` 4.71.16 · `dcb6b1b9`. **재시작 전 — 로드 미확인**(확인법: 캐시 `4.71.16/.in_use/<claude.exe PID>`). 설치기가 오너가 고친 `~/.claude/rules/artibot/verification-discipline.md` 를 지키고 새 판을 옆에 `verification-discipline.md.artibot-new` 로 두었다.
+- **미릴리스 수정 3건**(CHANGELOG [Unreleased]) — 조사관이 원인 판정, tdd-guide 2명이 RED→GREEN, code-reviewer APPROVE(제안 5건 중 4건 반영, 1건은 문서화된 트레이드오프), 리더 재측정 19파일 645/645:
+  - WIP 경보가 이미 푸시된 이력 51건을 세던 거짓 경보 → 미푸시 WIP 만(`--not --remotes`). 이 리포 값 0.
+  - `writeHandoff` 가 Date 를 받으면 `TypeError` → `lib/handoff/clock.js#asClock` 공유, 잘못된 Date 는 벽시계로 폴백. `/save` 실제 쓰기 1회로 확인(03:20 아카이브 `2026-11-08-0320`).
+  - 로컬 vitest 세그폴트 = **Node 22.19.0 native `fs.cpSync` 재귀 복사가 win32 비ASCII 원본 경로에서 0xC0000005**(한글 경로 버그 3번째 클래스). 두 테스트에 `filter: () => true` → 로컬 71/71. 운영 코드의 `fs/promises#cp` 는 안전(프로브).
+- **오너 손이 필요한 것 (최신 — 아래 「마무리」 절의 표를 대체)**: 에이전트 시도는 각 1회, 막히면 우회하지 않았다.
+
+  | # | 할 일 | 막힌 이유 | 명령 |
+  |---|---|---|---|
+  | 1 | 원격 브랜치 7개 삭제(전부 master 에 내용 있음 — 근거는 아래 절 표) | 분류기 `[Git Destructive]` (2회) | `git push origin --delete chore/sync-readme-badges-v4.50.0 ci/split-wave19-b16-20260923 ci/onfailure-block-20261107 ci/release-v4.71.15 ci/wrapup-20261108 ci/release-v4.71.16 ci/fixes-20261108` 뒤 `git fetch --prune` |
+  | 2 | `git stash clear` (11건 = archive ref 11개 1:1) | Artibot bash 가드 | 그대로 |
+  | 3 | `C:\c` 삭제 | Artibot PowerShell 가드(`Remove-Item -Recurse -Force`) | `Remove-Item -Recurse -Force C:\c` |
+  | 4 | `%TEMP%` 의 `artibot-auto-*` · `artibot-activation-*` 샌드박스 90개(일부가 실제 리포 `lib/`·`commands/`·`skills/`·`agents/` 로 가는 junction 보유) | 분류기 `[Shared Scratch Sweep]` | **`Remove-Item -Recurse` 금지**(junction 을 따라갈 위험). 링크를 먼저 끊는 아래 스크립트 — 에이전트가 실행해 보지 못한 미검증 스크립트이니 리포에서 `git status --porcelain` 을 전후로 확인 |
+  | 5 | `verification-discipline.md.artibot-new` 병합 여부 | 오너 소유 규칙 | 두 파일 diff 후 결정 |
+  | 6 | 재시작 → 4.71.16 로드 확인 → 스킬 목록 설명 잘림 재관측 | 재시작 필요 | 평면 커맨드 79개는 **이동 완료**(`~/.claude/commands.bak-20261108`, `hey.md` 만 남김) — 08 §4 |
+
+  ```js
+  // clean-sandboxes.mjs — node clean-sandboxes.mjs (미검증: 실행 전후 리포 git status 확인)
+  import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+  const re = /^artibot-(auto-(absent|nomod|off|on)|activation-(partial|wiring|bare))-/;
+  const cut = (dir) => { for (const e of fs.readdirSync(dir)) { const p = path.join(dir, e); const st = fs.lstatSync(p);
+    if (st.isSymbolicLink()) { try { fs.unlinkSync(p); } catch { fs.rmdirSync(p); } } else if (st.isDirectory()) cut(p); } };
+  let n = 0;
+  for (const name of fs.readdirSync(os.tmpdir())) { if (!re.test(name)) continue;
+    const d = path.join(os.tmpdir(), name); cut(d); fs.rmSync(d, { recursive: true, force: true }); n++; }
+  console.log('removed', n);
+  ```
 
 ## 2026-11-08 마무리 (v4.71.15 착지 뒤, 리더 실측 — 세션 `2df2db09`, 호스트 2.1.319)
 

@@ -224,7 +224,12 @@ function makeSandbox(prefix, { mutateConfig = () => {}, dropAutoActivateModule =
       if (entry.isDirectory()) symlinkSync(from, to, linkType);
       else copyFileSync(from, to);
     }
-    cpSync(path.join(realLib, 'cognitive'), path.join(sandboxLib, 'cognitive'), { recursive: true });
+    // Node 22.19 win32: native cpSyncCopyDir crashes (0xC0000005) on a non-ASCII source
+    // path (`바탕 화면`); any `filter` forces cpSync onto its JS copy path instead.
+    cpSync(path.join(realLib, 'cognitive'), path.join(sandboxLib, 'cognitive'), {
+      recursive: true,
+      filter: () => true,
+    });
     rmSync(path.join(sandboxLib, 'cognitive', 'auto-activate.js'), { force: true });
   }
   const config = JSON.parse(readFileSync(REAL_CONFIG_PATH, 'utf-8'));

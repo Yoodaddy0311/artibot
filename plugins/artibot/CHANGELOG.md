@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 수정 — `/save` 의 WIP 경보가 이미 푸시된 이력을 세던 것
+
+- **`lib/autopilot/wip-stats.js#countWipCommits` · `#getOldestWipAgeMs` 가 아직 원격에 없는 WIP 만 센다.** 두 함수가 같은 `#unpushedRange` (`<branch> --not --remotes --`)를 쓴다. 전에는 범위 없이 전체 이력을 세어, 이 리포에서는 HEAD 2,249 커밋 중 이미 origin 에 있는 WIP 51건으로 SessionStart `[artibot:wip]` 줄과 `/save` §1·§5 가 영구히 "squash 하라"고 경보했다(2026-11-08 조사관 실측). 수정 뒤 이 리포 값은 0 · 경보 없음(리더 실측). 원격이 없는 리포는 전처럼 전체를 센다. `@{u}..HEAD` 는 upstream 없는 브랜치에서 exit 128 → 0 으로 숨어 기각했다. 트레이드오프: 원격이 여럿이면 어느 원격(fork 등)에든 있는 커밋을 제외한다(검수관 실측, 문서화). 문구는 `N unpushed WIP commit(s)`, HANDOFF §1 칸은 `WIP (미푸시)` — SessionStart 배너의 `parseHandoffBannerFields` 가 "WIP" 단어로 이 행을 읽으므로 단어를 앞에 두었다(왕복 테스트).
+
+### 수정 — `writeHandoff` 가 Date 를 받으면 던지던 것
+
+- **`lib/handoff/handoff-store.js#writeHandoff` 의 `now` 가 Date · epoch ms · 시계 함수를 모두 받는다.** builder 에만 있던 정규화를 새 모듈 `lib/handoff/clock.js#asClock`(import 0)로 옮겨 builder·store 가 공유한다. 전에는 `/save` 문서대로 Date 를 넘기면 `TypeError: now is not a function` 이었다(쓰기 전에 실패, 손상 없음). 검수 중 반증: 잘못된 Date(`new Date(NaN)`)가 통과해 지워지지 않는 `NaN-NaN-NaN-NaNNaN.md` 아카이브를 조용히 쓰는 경로가 생겼다 → 유효한 Date 만 받고 나머지는 벽시계로 폴백하게 막았다(builder 헤더의 `NaN` 도 같이 사라짐).
+
+### 수정 — 로컬(한글 경로)에서 테스트 2개 파일이 워커째 죽던 것
+
+- **`tests/hooks/runtime-prompt-auto-activate.test.js#makeSandbox` · `runtime-prompt-activation-wiring.test.js#makeSandboxWithoutActivationModule` 의 재귀 `cpSync` 에 `filter: () => true`.** Node 22.19.0 의 native 디렉터리 복사(`cpSyncCopyDir`)가 win32 에서 **원본** 경로에 비ASCII 문자(`바탕 화면`)가 있으면 0xC0000005 로 프로세스를 죽인다(조사관·팀원 실측: 한글·`café` 경로 크래시, ASCII·공백만 정상, `status=3221225477`). `filter` 가 있으면 Node 가 JS 복사 경로를 탄다. CI(ASCII 경로)는 원래 통과했고 로컬은 이제 71/71. 리포 전역에서 재귀 `cpSync` 는 이 2곳뿐이고, 운영 코드의 `fs/promises#cp`(`lib/core/marketplace-installer.js`)는 같은 조건에서 정상(프로브). 크래시로 `afterAll` 이 못 돌아 `%TEMP%` 에 샌드박스 디렉터리가 쌓여 있다(2026-11-08 기준 90개, 실제 리포를 가리키는 junction 포함) — 지울 때는 링크를 먼저 끊는다.
+
+- 테스트 +19(`tests/handoff/clock.test.js` 6 · `handoff-store-now.test.js` 5 · `save-flow.integration.test.js` +1 · `wip-stats.test.js` +7), 기존 기대값 변경 0. 관련 19파일 645/645(리더, 2026-11-08 03:3x). 낡은 주석 2곳(`sessionstart-dispatcher.test.js` 의 옛 경보 문구, `lib/planning/artifacts.js` 헤더의 `now` 계약)과 방화벽 픽스처의 줄번호 인용(`handoff-store.js:39` → `#HANDOFF_FILE`)을 고쳤다.
+
 ## [4.71.16] — 2026-11-08
 
 `v4.71.15`(`4f63ccc5`) 이후 2 커밋 = **12 files +124/−659**(`git rev-list --count v4.71.15..51bed492` · `git diff --shortstat v4.71.15 51bed492`, 2026-11-08 측정 — 릴리스 커밋은 이 수치에 없다): 삭제 1 + 기록(`1d3ed827`) · 게이트 1(`51bed492`). 테스트 28,049 → 28,033(Ubuntu 3레그, `51bed492` CI 런 `42393712170`; Windows 28,072 → 28,056) — 줄어든 16건은 지운 `triage-wiring-gaps` 테스트 전부다. 07 §B 오너 결정 8건과 PC 실측은 `.artibot/guides/v5-design/practicality-improvement-20261023/07_PC_HANDOFF.md` §B·§E, dmi 분류 제안(적용 0)은 같은 폴더 `08_DMI_PROPOSAL.md`.

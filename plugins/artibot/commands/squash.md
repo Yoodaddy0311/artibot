@@ -14,7 +14,7 @@ false by default since v4.7.8); this command is the manual squash gate.
 
 ## When to run
 
-- After SessionStart shows `[artibot:wip] N WIP commit(s) ...` advisory
+- After SessionStart shows `[artibot:wip] N unpushed WIP commit(s) ...` advisory (counts only WIP no remote-tracking ref holds yet)
 - Before `git push` or `/git pr`
 - Before opening a code review
 

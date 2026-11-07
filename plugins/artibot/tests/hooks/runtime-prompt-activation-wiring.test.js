@@ -123,8 +123,11 @@ function makeSandboxWithoutActivationModule(prefix) {
     if (entry.isDirectory()) symlinkSync(from, to, linkType);
     else copyFileSync(from, to);
   }
+  // Node 22.19 win32: native cpSyncCopyDir crashes (0xC0000005) on a non-ASCII source
+  // path (`바탕 화면`); any `filter` forces cpSync onto its JS copy path instead.
   cpSync(path.join(realLib, 'observability'), path.join(sandboxLib, 'observability'), {
     recursive: true,
+    filter: () => true,
   });
   rmSync(path.join(sandboxLib, 'observability', 'activation-observed.js'), { force: true });
   return root;

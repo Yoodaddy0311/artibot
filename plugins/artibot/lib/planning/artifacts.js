@@ -5,9 +5,10 @@
  * Design rules:
  *   - Pure & non-destructive: never overwrite an existing file. On collision,
  *     a `-NN` suffix is appended so prior artifacts survive.
- *   - `now` is injectable for deterministic tests. Convention (matches
- *     `lib/handoff/handoff-store.js`): `now` is a function `() => Date`, called
- *     as `now()`. Defaults to `() => new Date()`.
+ *   - `now` is injectable for deterministic tests: a clock function
+ *     `() => Date` or a Date (see `resolveNow`); anything else means
+ *     `new Date()`. Narrower than `lib/handoff/clock.js#asClock`, which
+ *     also takes epoch ms and rejects an invalid Date — this module does not.
  *   - Korean-path safe (path.join only), atomic writes, auto-created dirs.
  *   - Failure-tolerant: returns `{ ok: false, error }` instead of throwing.
  *

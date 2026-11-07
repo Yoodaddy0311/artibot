@@ -71,7 +71,7 @@
     {
       "basename": "HANDOFF.md",
       "anchor": "generator-code",
-      "evidence": "plugins/artibot/lib/handoff/handoff-store.js:39 — const HANDOFF_FILE = 'HANDOFF.md'",
+      "evidence": "plugins/artibot/lib/handoff/handoff-store.js#HANDOFF_FILE — const HANDOFF_FILE = 'HANDOFF.md'",
       "reason": "추적 파일은 0건이다(gitignore 로 로컬 산출물). 하지만 생성기가 실재하므로 언제든 `git add -f` 로 인덱스에 들어올 수 있고, 그때 헤더 없이 들어오면 #6 이 잡아야 한다. 이름을 목록에서 빼면 그 경로가 통째로 열린다."
     },
     {

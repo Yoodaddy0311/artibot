@@ -1,10 +1,17 @@
 /**
  * Unit tests for lib/autopilot/wip-stats.js.
  *
- * All git interactions are stubbed via dependency injection (the `git` option),
- * so these tests run in any directory and never spawn a child process.
+ * Most git interactions are stubbed via dependency injection (the `git`
+ * option). Two suites use the real runner on purpose: the shell-safety suite,
+ * and the unpushed-scope suite, which builds a throwaway repo + bare remote in
+ * os.tmpdir() because only real git can show which commits a remote already
+ * holds.
  */
 
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   countWipCommits,
@@ -222,6 +229,11 @@ describe('formatAdvisoryLine', () => {
     expect(line).toContain('/squash');
     expect(line).toContain('[artibot:wip]');
   });
+
+  it('names the unpushed scope so the count is not read as all history', () => {
+    const line = formatAdvisoryLine(12, 60 * 60 * 1000);
+    expect(line).toMatch(/^\[artibot:wip\] 12 unpushed WIP commit\(s\) \(oldest /);
+  });
 });
 
 // v4.8.0 H-1: defaultGitRunner now uses execFileSync (argv form) instead of
@@ -246,6 +258,105 @@ describe('countWipCommits / getOldestWipAgeMs — real runner shell-safety', () 
     // ref name to `git log`. git will report `unknown revision` and we return 0.
     const evilBranch = 'HEAD;rm -rf /';
     expect(countWipCommits(evilBranch)).toBe(0);
+  });
+});
+
+// The advisory says "consider /squash before push". Before this suite the two
+// counters walked ALL history reachable from HEAD, so on this repo (2,249
+// commits, 51 WIP subjects, every one already on origin/master — measured
+// 2026-11-08) SessionStart and /save raised a WIP warning that could never
+// clear. Scope = reachable from `branch` and NOT from any remote-tracking ref
+// (`--not --remotes`). With no remote at all that excludes nothing, so a
+// local-only repo keeps the old full-history count.
+describe('countWipCommits / getOldestWipAgeMs — only WIP not yet on a remote', () => {
+  const OLD_DATE = '2020-01-01T00:00:00Z';
+  let tmp;
+  let repo;
+
+  function git(cwd, args, env = {}) {
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, ...env },
+    });
+  }
+
+  function commit(subject, env) {
+    git(repo, ['commit', '-q', '--allow-empty', '--no-verify', '-m', subject], env);
+  }
+
+  beforeEach(() => {
+    tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'wip-scope-')));
+    repo = path.join(tmp, 'work');
+    git(tmp, ['init', '-q', 'work']);
+    git(repo, ['config', 'user.email', 'test@example.com']);
+    git(repo, ['config', 'user.name', 'test']);
+    git(repo, ['config', 'commit.gpgsign', 'false']);
+  });
+  afterEach(() => { rmSync(tmp, { recursive: true, force: true }); });
+
+  function pushAllToBareRemote() {
+    git(tmp, ['init', '-q', '--bare', 'remote.git']);
+    git(repo, ['remote', 'add', 'origin', path.join(tmp, 'remote.git')]);
+    git(repo, ['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
+  }
+
+  it('does not count WIP commits a remote-tracking ref already holds', () => {
+    commit('wip: pushed', { GIT_AUTHOR_DATE: OLD_DATE, GIT_COMMITTER_DATE: OLD_DATE });
+    pushAllToBareRemote();
+    commit('wip: unpushed');
+    commit('feat: unpushed non-wip');
+
+    expect(countWipCommits('HEAD', { cwd: repo })).toBe(1);
+  });
+
+  it('measures oldest age over unpushed WIP only (a pushed 2020 WIP does not set it)', () => {
+    commit('wip: pushed', { GIT_AUTHOR_DATE: OLD_DATE, GIT_COMMITTER_DATE: OLD_DATE });
+    pushAllToBareRemote();
+    commit('wip: unpushed');
+
+    const ageMs = getOldestWipAgeMs('HEAD', { cwd: repo });
+    expect(ageMs).toBeGreaterThanOrEqual(0);
+    expect(ageMs).toBeLessThan(24 * 60 * 60 * 1000);
+  });
+
+  it('returns 0 for both when every WIP commit is already pushed', () => {
+    commit('wip: pushed', { GIT_AUTHOR_DATE: OLD_DATE, GIT_COMMITTER_DATE: OLD_DATE });
+    pushAllToBareRemote();
+
+    expect(countWipCommits('HEAD', { cwd: repo })).toBe(0);
+    expect(getOldestWipAgeMs('HEAD', { cwd: repo })).toBe(0);
+  });
+
+  it('keeps counting full history when the repo has no remote at all', () => {
+    commit('wip: a', { GIT_AUTHOR_DATE: OLD_DATE, GIT_COMMITTER_DATE: OLD_DATE });
+    commit('wip: b');
+
+    expect(countWipCommits('HEAD', { cwd: repo })).toBe(2);
+    expect(getOldestWipAgeMs('HEAD', { cwd: repo })).toBeGreaterThan(365 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe('countWipCommits / getOldestWipAgeMs — the two ranges agree', () => {
+  function captureArgs(fn) {
+    let captured = null;
+    fn((args) => { captured = args; return ''; });
+    return captured;
+  }
+
+  it('both pass `<branch> --not --remotes --` as the revision range', () => {
+    const countArgs = captureArgs((git) => countWipCommits('feature', { git }));
+    const ageArgs = captureArgs((git) => getOldestWipAgeMs('feature', { git }));
+    const tail = ['feature', '--not', '--remotes', '--'];
+    expect(countArgs.slice(-4)).toEqual(tail);
+    expect(ageArgs.slice(-4)).toEqual(tail);
+  });
+
+  it('keeps --since ahead of the revision range', () => {
+    const args = captureArgs((git) => countWipCommits('HEAD', { git, since: '2 days ago' }));
+    expect(args).toEqual(['log', '--pretty=%s', '--since=2 days ago', 'HEAD', '--not', '--remotes', '--']);
   });
 });
 

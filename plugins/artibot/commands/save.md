@@ -36,7 +36,7 @@ Parse $ARGUMENTS:
    - upstream(origin) tip 시각: `git log -1 --format=%ct @{u}` (마지막 fetch 기준 — 네트워크 호출 없음)
    - 이 값들로 `deriveGitSyncStatus(gitState, { now })` 가 dirty/ahead/behind/staleDays/githubLagDays/otherMachineRisk 와 경고·권장액션을 합성
 2. **최근 커밋**: `git log -10 --format='%h|%s|%ar'`
-3. **WIP 카운트**: `lib/autopilot/wip-stats.js` 의 `countWipCommits` + `getOldestWipAgeMs`
+3. **WIP 카운트 (미푸시)**: `lib/autopilot/wip-stats.js` 의 `countWipCommits` + `getOldestWipAgeMs` — 원격 추적 ref 에 아직 없는 WIP 만 센다 (`<branch> --not --remotes`, 원격이 없으면 전체 이력)
 4. **테스트 상태**: `lib/core/test-status.js` 의 `getLastTestStatus`
 5. **Advisor 신호**: `lib/learning/auto-spawn-advisor.js` 의 `readPendingSuggestions` (consumed/resolved 제외)
 6. **세션 메모리**: 최근 5개 키워드 (recallSessionMemory)
@@ -83,7 +83,7 @@ Parse $ARGUMENTS:
 
 ### Phase C: 저장 (~0.2s)
 
-1. `lib/handoff/handoff-store.js` 의 `writeHandoff(markdown, { projectRoot, keep, now })` 호출
+1. `lib/handoff/handoff-store.js` 의 `writeHandoff(markdown, { projectRoot, keep, now })` 호출 — `now` 는 Phase B 에 넘긴 값 그대로 (Date · epoch ms · 시계 함수 모두 허용, `lib/handoff/clock.js#asClock` 공용 규칙)
 2. 반환: `{ latestPath, archivePath, pruned, throttled, protectedTracked, pruneSkipped }`
    - `latestPath`: `<projectRoot>/.artibot/HANDOFF.md` (덮어쓰기)
    - `archivePath`: `<projectRoot>/.artibot/handoffs/YYYY-MM-DD-HHMM.md` (회전)
@@ -136,7 +136,7 @@ Parse $ARGUMENTS:
 | 회전 후 보관 | N / keep=30 (prune N · 추적 보호 N) |
 | 아카이브 무결성 | `.artibot/handoffs` M 0 / D 0 (git 아님 · 미확인 시 그대로 표기) |
 | Advisor 흡수 | N marked / N skipped |
-| WIP 커밋 | N (oldest ~Nh) |
+| WIP 커밋 (미푸시) | N (oldest ~Nh) |
 | 미해결 결정 | N |
 | 진행 중 작업 | N |
 | 체크포인트 | M-… → cp-… (resumable ✓/✗) · 스킵(config off / 활성 mission 없음 / session 없음) · 거부(validate 사유) · 오류(threw:…) |
