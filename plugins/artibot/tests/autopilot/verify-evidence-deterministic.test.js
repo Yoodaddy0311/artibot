@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DETERMINISTIC_EVIDENCE_CODES as C,
@@ -14,6 +15,8 @@ import { REASONS, RESULT_FILE_RELPATH } from '../../lib/verification/determinist
 const HEAD = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
 const REPO = '/repo';
+// The module joins with node:path, so on Windows the port sees `\repo\plugins\…`.
+const SNAPSHOT_FILE = path.join(REPO, ...RESULT_FILE_RELPATH.split('/'));
 const HAND_OUT = '2026-10-23T10:00:00.000Z';
 const RUN_AFTER = '2026-10-23T10:05:00.000Z';
 const RUN_BEFORE = '2026-10-23T09:55:00.000Z';
@@ -41,7 +44,7 @@ function ports({ text = snapshot(), head = HEAD, readThrows = false, headThrows 
   return {
     readFile: (p) => {
       if (readThrows) throw new Error('EACCES');
-      return p === `${REPO}/${RESULT_FILE_RELPATH}` ? text : null;
+      return p === SNAPSHOT_FILE ? text : null;
     },
     headSha: () => {
       if (headThrows) throw new Error('git missing');
@@ -72,7 +75,7 @@ describe('rule 7 — the one pass', () => {
     const seen = [];
     const p = { readFile: (file) => { seen.push(file); return snapshot(); }, headSha: () => HEAD };
     run(p);
-    expect(seen).toEqual([`${REPO}/${RESULT_FILE_RELPATH}`]);
+    expect(seen).toEqual([SNAPSHOT_FILE]);
   });
 
   it('accepts a numeric hand-out instant too', () => {

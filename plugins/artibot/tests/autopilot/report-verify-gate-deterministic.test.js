@@ -50,6 +50,8 @@ const RUN_AFTER = '2026-10-23T10:05:00.000Z';
 const RUN_BEFORE = '2026-10-23T09:55:00.000Z';
 const NOW = Date.parse('2026-10-23T10:10:00.000Z');
 const REPO = '/fixture-repo';
+// The module joins with node:path, so on Windows the port sees `\fixture-repo\plugins\…`.
+const SNAPSHOT_FILE = path.join(REPO, ...RESULT_FILE_RELPATH.split('/'));
 
 const row = (attemptId, phase, event, reason = null, at = '2026-10-23T09:50:00.000Z') => ({
   attemptId, phase, event, from: null, to: null, reason, at,
@@ -77,7 +79,7 @@ function ports({ text = snapshot(), head = HEAD } = {}) {
   const calls = [];
   return {
     calls,
-    readFile: (file) => { calls.push(['readFile', file]); return file === `${REPO}/${RESULT_FILE_RELPATH}` ? text : null; },
+    readFile: (file) => { calls.push(['readFile', file]); return file === SNAPSHOT_FILE ? text : null; },
     headSha: (cwd) => { calls.push(['headSha', cwd]); return head; },
   };
 }
@@ -182,7 +184,7 @@ describe("evaluateReportVerifyEvidence — rule 7 under 'deterministic'", () => 
       evidenceMode: 'deterministic', evidence: { ports: p, nowMs: NOW },
     });
     expect(v.ok).toBe(true);
-    expect(p.calls[0]).toEqual(['readFile', `${REPO}/${RESULT_FILE_RELPATH}`]);
+    expect(p.calls[0]).toEqual(['readFile', SNAPSHOT_FILE]);
     expect(p.calls[1]).toEqual(['headSha', REPO]);
   });
 
