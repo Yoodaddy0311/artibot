@@ -123,7 +123,7 @@ export function configure(config = {}) {
  */
 const DOMAIN_KEYWORDS = Object.freeze({
   frontend:       ['component', 'ui', 'css', 'react', 'vue', 'responsive', 'accessibility', '컴포넌트', '프론트', 'コンポーネント', 'フロントエンド', '组件', '前端', '界面'],
-  backend:        ['api', 'database', 'server', 'endpoint', 'service', 'auth', 'db', '서버', '백엔드', 'データベース', 'サーバー', 'バックエンド', '服务器', '后端', '数据库', '接口'],
+  backend:        ['api', 'database', 'server', 'endpoint', 'service', 'auth', 'db', '서버', '백엔드', '인증', 'データベース', 'サーバー', 'バックエンド', '服务器', '后端', '数据库', '接口'],
   security:       ['security', 'vulnerability', 'threat', 'compliance', 'encrypt', 'xss', 'injection', 'audit', '보안', '취약', '감사', 'セキュリティ', '監査', '脆弱性', '安全', '漏洞', '审计', '加密'],
   infrastructure: ['deploy', 'docker', 'ci/cd', 'monitoring', 'k8s', 'terraform', '배포', 'インフラ', 'デプロイ', '部署', '监控', '容器'],
   testing:        ['test', 'e2e', 'coverage', 'spec', 'jest', 'playwright', '테스트', 'テスト', '単体テスト', '测试', '单元测试', '覆盖率'],
@@ -158,21 +158,34 @@ const RISK_KEYWORDS = [
   'production', 'critical', 'security', 'migration', 'breaking',
   'delete', 'drop', 'remove all', 'force push', 'rollback',
   'audit', 'deploy',
-  '운영', '프로덕션', '마이그레이션', '삭제', '중요', '감사', '배포',
+  '운영', '프로덕션', '마이그레이션', '삭제', '중요', '감사', '배포', '보안',
   '本番', 'マイグレーション', '削除', 'デプロイ', '監査',
 ];
 
 /**
  * Step-count indicator patterns.
  * Each entry is [regex, estimated step count].
+ * `\b` wraps only the ASCII alternatives: JS `\b` is an ASCII word boundary, so
+ * CJK alternatives inside it never matched (2026-11-07). The fix revives the
+ * Japanese entries (それから/次に/フェーズ/さらに) too. Korean entries translate
+ * the English ones; bare 다음 is left out because it also means "the following".
+ * 그리고 is counted by the conjunction pass in estimateSteps, as English "and" is.
  * @type {[RegExp, number][]}
  */
 const STEP_PATTERNS = [
-  [/\b(?:then|after that|next|afterwards|그리고|다음에|그런 다음|それから|次に)\b/gi, 1],
-  [/\b(?:step \d|phase \d|단계|フェーズ)\b/gi, 1],
-  [/\b(?:first|second|third|fourth|fifth|1\.|2\.|3\.|4\.|5\.)/gi, 1],
-  [/\b(?:and also|additionally|furthermore|또한|さらに)\b/gi, 1],
+  [/\b(?:then|after that|next|afterwards)\b|다음에|그런 다음|그 다음|그 후|그 뒤|それから|次に/gi, 1],
+  [/\b(?:step \d|phase \d)\b|단계|フェーズ/gi, 1],
+  [/\b(?:first|second|third|fourth|fifth|1\.|2\.|3\.|4\.|5\.)|먼저|첫째|둘째|셋째|넷째|다섯째/gi, 1],
+  [/\b(?:and also|additionally|furthermore)\b|또한|추가로|게다가|さらに/gi, 1],
 ];
+
+/**
+ * English characters one Hangul syllable stands for, for the length bonus in
+ * estimateSteps. Measured 2026-11-07 on 18 ko/en request pairs: TRAIN (9) LSQ
+ * 2.45, median 2.39; per-pair range 1.38-3.60. On that corpus any value in
+ * 2.0-3.0 moves the same rows across 150, so the exact value is not load-bearing.
+ */
+const HANGUL_LENGTH_WEIGHT = 2.4;
 
 // ---------------------------------------------------------------------------
 // Circular Buffer
@@ -602,9 +615,12 @@ function estimateSteps(lower) {
     stepCount += Math.floor(sentences.length / 2);
   }
 
-  // Input length as a soft signal (long inputs tend to be multi-step)
-  if (lower.length > 150) stepCount += 1;
-  if (lower.length > 300) stepCount += 1;
+  // Input length as a soft signal (long inputs tend to be multi-step). Hangul
+  // syllables count at English-equivalent width; ASCII input is unaffected.
+  const hangul = (lower.match(/[가-힣]/g) || []).length;
+  const length = lower.length + hangul * (HANGUL_LENGTH_WEIGHT - 1);
+  if (length > 150) stepCount += 1;
+  if (length > 300) stepCount += 1;
 
   // Normalize: 1 step = 0.0, 2 steps = 0.2, 4+ steps = 0.6+
   return Math.min(1, (stepCount - 1) * 0.2);
