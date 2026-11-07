@@ -149,7 +149,7 @@ describe('renderStatusLine', () => {
     expect(out).toContain('/implement');
     expect(out).toContain('effort=xhigh');
     expect(out).toContain('budget=128K');
-    expect(out).toContain('tokens=45K');
+    expect(out).toContain('input-est=45K');
     expect(out).toContain('longCtx=on');
   });
 
@@ -163,7 +163,7 @@ describe('renderStatusLine', () => {
     expect(out).toContain('/plan');
     expect(out).toContain('effort=medium');
     expect(out).not.toContain('budget=');
-    expect(out).not.toContain('tokens=');
+    expect(out).not.toContain('input-est=');
     expect(out).not.toContain('longCtx=');
   });
 
@@ -240,7 +240,7 @@ describe('renderStatusLine', () => {
     writeRuntime(root, 'token-usage-session.json', { totalTokens: 1234 });
     const out = await renderStatusLine({ pluginRoot: root, config: ENABLED });
     // Malformed effort is simply dropped; tokens still render.
-    expect(out).toContain('tokens=');
+    expect(out).toContain('input-est=');
   });
 });
 
@@ -461,7 +461,7 @@ describe('readDashboardState — session-scoped state (O2)', () => {
 
       expect(line).toContain('effort=low');
       expect(line).not.toContain('ghost');
-      expect(line).not.toContain('tokens=');
+      expect(line).not.toContain('input-est=');
       expect(line).not.toContain('team=');
       expect(line).not.toContain('longCtx=');
     } finally {
@@ -501,7 +501,7 @@ describe('renderFullDashboard', () => {
     expect(out).toContain('command');
     expect(out).toContain('/plan');
     expect(out).toContain('effort');
-    expect(out).toContain('tokens');
+    expect(out).toContain('input est');
     expect(out.split('\n').length).toBeGreaterThan(3);
   });
 });
