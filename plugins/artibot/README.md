@@ -1546,7 +1546,7 @@ orchestrator는 **코드를 직접 작성하지 않습니다**. 팀을 구성하
 {
   "context7": {
     "command": "npx",
-    "args": ["-y", "@upstash/context7-mcp@latest"]
+    "args": ["-y", "@upstash/context7-mcp@4.1.1"]
   }
 }
 ```

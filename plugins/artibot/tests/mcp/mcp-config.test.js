@@ -93,3 +93,21 @@ describe('.mcp.json — server registry', () => {
     }
   });
 });
+
+// The sibling artibot-cowork plugin ships its own .mcp.json. It floated context7
+// on @latest after the artibot pin landed (census 2026-11-06), because nothing
+// read that file. It must carry the same exact pin as the artibot entry.
+describe('artibot-cowork .mcp.json — same pin as artibot', () => {
+  const coworkConfig = readJson('../artibot-cowork/.mcp.json');
+  const artibotConfig = readJson('.mcp.json');
+
+  it('registers only context7', () => {
+    expect(Object.keys(coworkConfig.mcpServers)).toEqual(['context7']);
+  });
+
+  it('pins context7 to exactly the version the artibot plugin ships', () => {
+    expect(coworkConfig.mcpServers.context7).toEqual(artibotConfig.mcpServers.context7);
+    const pkg = coworkConfig.mcpServers.context7.args[1];
+    expect(pkg.slice(pkg.lastIndexOf('@') + 1)).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+});

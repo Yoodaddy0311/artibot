@@ -826,7 +826,7 @@ Artibot integrates with MCP servers for extended capabilities:
 {
   "context7": {
     "command": "npx",
-    "args": ["-y", "@upstash/context7-mcp@latest"]
+    "args": ["-y", "@upstash/context7-mcp@4.1.1"]
   }
 }
 ```
