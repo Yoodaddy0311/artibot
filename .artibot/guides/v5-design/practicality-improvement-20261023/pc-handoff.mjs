@@ -8,7 +8,7 @@
  *
  *   (none) | start     check + the ordered next steps + the kickoff prompt
  *   check              branch / HEAD / clean · node · claude --version and flags ·
- *                      installed plugin vs this branch · state dir · ledger · vitest
+ *                      installed plugin vs this checkout · state dir · ledger · vitest
  *   census             run the three live denominators (07 §A-2) and write the
  *                      evidence file  [--out <file>] [--state-dir <dir>]
  *                      [--store-dir <dir>] [--since <iso|epoch-ms>] [--dry-run]
@@ -68,8 +68,13 @@ const EVIDENCE_DIR = path.join(REPO_ROOT, '.artibot', 'guides', 'v5-design', 'ev
 const DOC_REL = toPosix(path.relative(REPO_ROOT, DOC_DIR));
 const SELF_REL = `${DOC_REL}/pc-handoff.mjs`;
 
-/** The branch this handoff lives on (07 §0). */
-const BRANCH = 'claude/jolly-newton-qmi4eb';
+/**
+ * The branch this work lives on (07 §0). The cloud branch `claude/jolly-newton-qmi4eb`
+ * was cherry-picked onto master on 2026-11-07 and deleted.
+ */
+const BRANCH = 'master';
+/** The first release that carries this work. */
+const LANDED_IN = '4.71.13';
 /** Host version the cloud measurements (04 · 05 §8.1 · 06) were taken on. */
 const CLOUD_HOST_VERSION = '2.1.309';
 /** Flags the D-07 arm commands and 02 §2 pre-checks rely on. */
@@ -275,7 +280,7 @@ function checkInstalled(repo) {
   const result = { version: null, sha: null, installPath: null, branchVersion };
   const registry = readJson(file);
   if (!registry) {
-    say('warn', `설치 레지스트리를 읽지 못했다: ${file} — 이 브랜치는 "claude --plugin-dir ${PLUGIN_ROOT}" 로 한 세션만 태우는 것이 안전하다(§A-1)`);
+    say('warn', `설치 레지스트리를 읽지 못했다: ${file} — 이 체크아웃은 "claude --plugin-dir ${PLUGIN_ROOT}" 로 한 세션만 태울 수 있다(§A-1)`);
     return result;
   }
   const { entry, count } = pickInstalled(registry);
@@ -286,7 +291,7 @@ function checkInstalled(repo) {
   const { version = null, gitCommitSha = null, installPath = null, lastUpdated = null } = entry;
   say('info', `설치본 artibot@artibot ${version ?? '?'} @ ${gitCommitSha ? gitCommitSha.slice(0, 8) : '?'} (lastUpdated ${lastUpdated ?? '?'}${count > 1 ? ` · 항목 ${count}개 중 첫째` : ''})`);
   const same = version === branchVersion;
-  say(same ? 'ok' : 'info', `브랜치 package.json ${branchVersion} ${same ? '= 설치본' : `≠ 설치본 ${version} — 릴리스 전이면 정상; 이 브랜치의 변경은 설치본에 없다`}`);
+  say(same ? 'ok' : 'info', `브랜치 package.json ${branchVersion} ${same ? '= 설치본' : `≠ 설치본 ${version} — 이 작업은 ${LANDED_IN} 에 실렸다; 설치본이 그보다 낮으면 설치본에 없다(§A-1)`}`);
   if (gitCommitSha && repo.head) {
     if (gitCommitSha === repo.head) say('ok', '설치본 커밋 = HEAD');
     else {
@@ -313,7 +318,7 @@ function checkState() {
     const loopFiles = sids.filter((s) => existsSync(path.join(sessionsRoot, s, 'loop-state.json'))).length
       + (existsSync(path.join(dir, 'loop-state.json')) ? 1 : 0);
     const toolHistory = existsSync(path.join(dir, 'tool-history.json')) ? '있음' : '없음';
-    say('info', `상태 디렉터리 ${dir}: 세션 ${sids.length}개 · loop-state.json ${loopFiles}개(D-01 은 설치본이 이 브랜치를 포함한 뒤부터 쌓임) · tool-history.json ${toolHistory}`);
+    say('info', `상태 디렉터리 ${dir}: 세션 ${sids.length}개 · loop-state.json ${loopFiles}개(D-01 은 설치본이 ${LANDED_IN} 이상이 된 뒤부터 쌓임) · tool-history.json ${toolHistory}`);
     Object.assign(result, { sessions: sids.length, loopFiles });
   }
   say(result.ledger ? 'info' : 'warn', result.ledger
@@ -684,12 +689,12 @@ function experimentPlan(flags) {
 // start — check + next steps + kickoff prompt
 // ---------------------------------------------------------------------------
 
-const KICKOFF = `브랜치 ${BRANCH} 의 인수인계를 이어서 진행해줘. 먼저 ${DOC_REL}/07_PC_HANDOFF.md 를 읽어. 러너는 같은 폴더의 pc-handoff.mjs 이고 리포 루트에서 node 로 돌린다(인자 없이 돌리면 점검과 다음 순서가 나온다). 순서는 07 §A 그대로다: (1) check 로 설치본·로드 확인 — 릴리스 전이면 --plugin-dir 로 한 세션만, (2) census 로 라이브 분모 3종을 evidence/ 에 기록하고 evidence/README 표에 행을 더해, (3) tests 로 Windows 재현(전체는 --full), (4) host-probe 가 출력한 명령으로 호스트 통합 테스트 — 비용(몇 센트)을 먼저 말하고 내 확인을 받은 뒤 실행, 끝나면 host-probe --verify, (5) claude --debug 로 훅 지연 1회. 수치는 전부 재현 명령과 함께 05 §8.1 에 덧붙이고, 07 §B 의 결정 8건은 기본값대로 두되 내가 정할 것을 질문 목록으로 올려. 비교 실험(§C)은 예산 결정 전에는 experiment-plan 의 골격 생성까지만. 커밋은 이 브랜치에만 하고 PR 은 열지 마.`;
+const KICKOFF = `${BRANCH} 에 착지한(v${LANDED_IN}) 2026-10-23 실용성 작업의 PC 인수인계를 이어서 진행해줘. 먼저 ${DOC_REL}/07_PC_HANDOFF.md 를 읽어. 러너는 같은 폴더의 pc-handoff.mjs 이고 리포 루트에서 node 로 돌린다(인자 없이 돌리면 점검과 다음 순서가 나온다). 순서는 07 §A 그대로다: (1) check 로 설치본·로드 확인 — 설치본이 ${LANDED_IN} 미만이면 갱신하거나 --plugin-dir 로 한 세션만, (2) census 로 라이브 분모 3종을 evidence/ 에 기록하고 evidence/README 표에 행을 더해, (3) tests 로 Windows 재현(전체는 --full), (4) host-probe 가 출력한 명령으로 호스트 통합 테스트 — 비용(몇 센트)을 먼저 말하고 내 확인을 받은 뒤 실행, 끝나면 host-probe --verify, (5) claude --debug 로 훅 지연 1회. 수치는 전부 재현 명령과 함께 05 §8.1 에 덧붙이고, 07 §B 의 결정 8건은 기본값대로 두되 내가 정할 것을 질문 목록으로 올려. 비교 실험(§C)은 예산 결정 전에는 experiment-plan 의 골격 생성까지만. 커밋은 ${BRANCH} 에서 딴 작업 브랜치에만 하고(${BRANCH} 에 직접 커밋·푸시하지 마) PR 은 열지 마.`;
 
 function printNextSteps() {
   console.log(`
 ## 다음 순서 (07 §A — 각 줄이 러너 명령, 모델 호출은 4번만)
-1. 설치·로드 확인: 위 check 의 "설치본" 줄. 릴리스 전이면 설치본을 바꾸지 않고 --plugin-dir ${toPosix(path.relative(REPO_ROOT, PLUGIN_ROOT))} 로 한 세션만 태운다 (§A-1)
+1. 설치·로드 확인: 위 check 의 "설치본" 줄. 설치본이 ${LANDED_IN} 미만이면 갱신하거나(NEXT-SESSION 절차), 설치본을 바꾸지 않고 --plugin-dir ${toPosix(path.relative(REPO_ROOT, PLUGIN_ROOT))} 로 한 세션만 태운다 (§A-1)
 2. node ${SELF_REL} census                 → ${toPosix(path.relative(REPO_ROOT, EVIDENCE_DIR))}/pc-handoff-census-<날짜>.md (라이브 분모 3종, §A-2)
 3. node ${SELF_REL} tests [--full]         → Windows 재현 3파일 / 전체는 --maxWorkers=8 (§A-4)
 4. node ${SELF_REL} host-probe             → 호스트 통합 명령 출력(몇 센트) → 실행 뒤 host-probe --verify (§A-3)
