@@ -395,10 +395,15 @@ export const ROOT_SCAN_TREE_FILES = Object.freeze(['.artibot/project.md']);
  *   → 109 (guides 86 · adr 14 · archive 4 · SPLIT 4 · project.md 1); the v5
  *   re-scope document and measurement runbook took the old 95 floor to where
  *   dropping the ADR tree (14) no longer went below it.
+ * Re-measured 2026-11-08 on ci/wrapup-20261108 @ 1d3ed827 (same command)
+ *   → 124 (guides 100 · adr 15 · archive 4 · SPLIT 4 · project.md 1). The
+ *   floor had drifted 14 below the canon (123 at v4.71.15), so the ADR-drop
+ *   self-check sat one file from the edge; one new guide document pushed it
+ *   over (124 − 15 = 109, not below 109). Pinned back at the measured count.
  * Count with `-z`: five ADR filenames are Korean and a non-`-z` listing wraps
  * them in C-quotes, which hides them from a `$`-anchored grep (86, not 95).
  */
-export const MIN_ROOT_TREE_DOC_FILES = 109;
+export const MIN_ROOT_TREE_DOC_FILES = 124;
 
 /**
  * Is a repo-relative POSIX path inside the root-tree scan scope?

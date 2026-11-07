@@ -242,11 +242,13 @@ describe('ROOT_SCAN_TREES / ROOT_SCAN_TREE_FILES / MIN_ROOT_TREE_DOC_FILES const
     expect(Object.isFrozen(ROOT_SCAN_TREE_FILES)).toBe(true);
   });
 
-  it('floor is pinned at the measured count (109 on 2026-09-30), not padded', () => {
+  it('floor is pinned at the measured count (124 on 2026-11-08), not padded', () => {
     // Reproduce: git ls-files -z -- <trees> <files> | tr '\0' '\n' | grep -c '\.md$'
     // Pinned exactly like MIN_ROOT_DOC_FILES: the canon shrinking should go
     // RED until the deletion is deliberate, and growth means raising this.
-    expect(MIN_ROOT_TREE_DOC_FILES).toBe(109);
+    // 109 (2026-09-30) had drifted 14 below the canon, which left the
+    // ADR-drop self-check one file away from passing vacuously.
+    expect(MIN_ROOT_TREE_DOC_FILES).toBe(124);
   });
 });
 
