@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-10-20 KST 갱신, **v4.71.11** — v4.71.10 이후 9 커밋(내용 6 · 문서 3) + 릴리스 커밋: 훅 쓰기 8곳의 `ARTIBOT_STATE_DIR` 리졸버 이전 · 읽기 추적 임시파일 정리 · `/rea` 증거 view-request 헬퍼 · master = 태그 대상 `f33430eb` · 이 PC 설치 4.71.11(재시작 전, 로드 미확인))
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 KST 갱신, **v4.71.15** — v4.71.14 이후 3 커밋(보안 1 · 문서 2) + 릴리스 커밋: 보안 가드 2개 `onFailure: "block"` · 07 §A 다섯 항목 실측 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영. 헤더가 v4.71.11 에서 멈춰 있던 v4.71.12~14 는 아래 절에)
+
+> 이전 헤더(2026-10-20, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-20 KST 갱신, **v4.71.11** — v4.71.10 이후 9 커밋(내용 6 · 문서 3) + 릴리스 커밋: 훅 쓰기 8곳의 `ARTIBOT_STATE_DIR` 리졸버 이전 · 읽기 추적 임시파일 정리 · `/rea` 증거 view-request 헬퍼 · master = 태그 대상 `f33430eb` · 이 PC 설치 4.71.11(재시작 전, 로드 미확인))
 
 > 이전 헤더(2026-10-19, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-19 KST 갱신, **v4.71.10** — v4.71.9 이후 15 커밋(내용 13 · 문서 2) + 릴리스 커밋: `/rea`(명령 80 → 81) · SH-11 사용자 스위치 · lease-tick store-only · 테스트 게이트 3종 allowlist · master = 태그 대상 `c7ba5138` · 이 PC 설치 4.71.10(재시작 전, 로드 미확인))
 
@@ -18,14 +20,15 @@
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
 
-## v4.71.14 이후 마무리 (2026-11-07 23:20~ KST, 리더 실측 — 재시작 뒤 세션, 호스트 2.1.319)
+## v4.71.15 (2026-11-07 23:20 ~ 11-08 KST, 리더 실측 — 재시작 뒤 세션, 호스트 2.1.319)
 
 - **아래 절 「다음 세션 첫 일」의 처리**:
   - (1) PowerShell 가드의 호스트 발화 — **실측 PASS**. PowerShell 툴로 `Get-Help Format-Volume …`(막혀도 안 막혀도 무해한 프로브)를 보내자 `PreToolUse:PowerShell hook error: DANGEROUS COMMAND DETECTED: "Format-Volume (PowerShell)"` 로 막혔고, `$PSVersionTable.PSVersion` 은 통과했다(5.1.26100.9711).
-  - (2) `onFailure: "block"` — 오너가 호스트를 2.1.291 → **2.1.319** 로 올려 선행 조건이 풀렸다. **대상은 `pre-bash.js` · `pre-write.js` 두 개로 바로잡았다**: 이 절이 적었던 `bash-risk-guard` 는 헤더가 정한 fail-open 보조 층이고, `pre-write-guard` 는 보안이 아니라 Write-Before-Read 가드다. Write|Edit 의 보안 가드(민감 파일·비밀값)는 `pre-write.js` 다. 근거·게이트·못 보는 것은 CHANGELOG [Unreleased]. **master 착지는 이 절 아래 커밋, 릴리스·설치는 미정** — 설치본(4.71.14)에는 아직 없다.
-  - (3) 07 §A — §A-1 · §A-2(census 3종) · §A-4(Windows 재현 3파일 46/46) 실행, 결과는 `v5-design/practicality-improvement-20261023/05_REVISED_DESIGN.md` §8.2. **§A-3 호스트 통합 · §A-5 훅 지연은 모델 호출 비용이라 미실행**(오너 확인 대기).
-- **오너 손이 필요한 것 (갱신)**: `C:\c`(41 MB, 안에 `Users\` 하나 — 폴더 수정 시각 2026-09-05 02:22) 삭제 · `git stash clear`(11건, `refs/stash-archive/2026-11-07/` 보존) — 둘 다 그대로. 여기에 **원격 브랜치 2개 삭제**가 더해졌다 — 자동 모드 분류기가 `git push origin --delete` 를 `[Git Destructive]` 로 거부했다. 내용은 둘 다 master 에 있다: `chore/sync-readme-badges-v4.50.0` = `b15850efbeb4c764fa72123f2f1fc341a470e79b`(`git cherry` 가 `-` = 같은 패치가 master 에 있음), `ci/split-wave19-b16-20260923` = `bf029aedcd78fd35b7a95bec8e410fd9e3d0d55e`(머지 커밋, 두 부모 `89f1cfec` · `cec3e6b3` 모두 master 조상). 명령: `git push origin --delete chore/sync-readme-badges-v4.50.0 ci/split-wave19-b16-20260923`.
-- **미추적 파일(2026-10-06 부터 미결)**: `v.4.71.2/` · `v.4.71.3/` · `v.4.71.5/`(외부 재검수 패키지) · `.artibot/REPORTS/` 옛 보고서 12항목(파일 11 · 폴더 1, `git status --porcelain .artibot/REPORTS`) · `plugins/artibot/.artibot/` — 처리 방침은 여전히 오너 결정.
+  - (2) `onFailure: "block"` — 오너가 호스트를 2.1.291 → **2.1.319** 로 올려 선행 조건이 풀렸다. **대상은 `pre-bash.js` · `pre-write.js` 두 개로 바로잡았다**: 이 절이 적었던 `bash-risk-guard` 는 헤더가 정한 fail-open 보조 층이고, `pre-write-guard` 는 보안이 아니라 Write-Before-Read 가드다. Write|Edit 의 보안 가드(민감 파일·비밀값)는 `pre-write.js` 다. 근거·게이트·라이브 프로브는 CHANGELOG [4.71.15]. 착지 `9719cebf`, 오너 결정으로 v4.71.15 릴리스·설치. **라이브 실측(2.1.319, `--plugin-dir` 사본)**: import 실패 훅 + `block` → 막힘 · 같은 훅 + 키 없음 → 명령 실행됨(이전의 구멍) · 9초 훅 + `block` → timed out 막힘.
+  - (3) 07 §A — 다섯 항목 모두 한 번씩 실행: §A-1 · §A-2(census 3종) · §A-4(Windows 3파일 46/46) 는 비용 0, §A-3 · §A-5 는 오너 승인(상한 약 $0.6) 뒤 $0.5344. D-01 호스트 통합 PASS, D-03 은 행 귀속 미확인, Write 1회 훅 벽시계 ≈ 414 ms(병렬, n=1). 결과 `v5-design/practicality-improvement-20261023/05_REVISED_DESIGN.md` §8.2, 증거 `v5-design/evidence/pc-handoff-host-probe-20261108.md`.
+  - **프로브 비용 함정**: `--max-budget-usd` 는 턴이 끝난 뒤 검사된다. 기본 모델(Opus)의 첫 턴이 캐시 쓰기 58,793 토큰으로 $0.48 이라 상한 $0.2 를 1턴 만에 넘었다. 훅 프로브는 `--model claude-haiku-5-5`(실행당 약 $0.01)로.
+- **오너 손이 필요한 것 (갱신)**: `C:\c`(41 MB, 안에 `Users\` 하나 — 폴더 수정 시각 2026-09-05 02:22) 삭제 · `git stash clear`(11건, `refs/stash-archive/2026-11-07/` 보존) — 둘 다 그대로. 여기에 **원격 브랜치 2개 삭제**가 더해졌다 — 자동 모드 분류기가 `git push origin --delete` 를 `[Git Destructive]` 로 거부했다. 내용은 둘 다 master 에 있다: `chore/sync-readme-badges-v4.50.0` = `b15850efbeb4c764fa72123f2f1fc341a470e79b`(`git cherry` 가 `-` = 같은 패치가 master 에 있음), `ci/split-wave19-b16-20260923` = `bf029aedcd78fd35b7a95bec8e410fd9e3d0d55e`(머지 커밋, 두 부모 `89f1cfec` · `cec3e6b3` 모두 master 조상). 명령: `git push origin --delete chore/sync-readme-badges-v4.50.0 ci/split-wave19-b16-20260923`. 이번 착지에 쓴 `ci/onfailure-block-20261107`(= master 에 ff 된 `3cae1ca8`)과 릴리스용 `ci/release-v4.71.15` 도 같은 이유로 지우지 못하고 남는다(RELEASE.md 5단계의 마지막 줄).
+- **미추적 파일 — 결정됨(2026-11-08 오너)**: `v.4.71.2/` · `v.4.71.3/` · `v.4.71.5/` · `.artibot/REPORTS/` 옛 보고서 12항목 · `plugins/artibot/.artibot/` 을 **이 PC 의 `.git/info/exclude`** 에 등록했다(파일은 그대로, 커밋·푸시 없음, 줄을 지우면 다시 보인다). 다른 PC 에는 영향이 없다.
 
 ## v4.71.12 ~ v4.71.14 (2026-11-07 KST, 리더 실측)
 

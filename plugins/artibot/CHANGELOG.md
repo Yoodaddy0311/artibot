@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.15] — 2026-11-08
+
+`v4.71.14`(`70b63650`) 이후 3 커밋 = **11 files +430/−3**(`git rev-list --count v4.71.14..bcce56da` · `git diff --shortstat v4.71.14 bcce56da`, 2026-11-08 측정 — 릴리스 커밋은 이 수치에 없다): 보안 1(`9719cebf`) · 문서 2(`3cae1ca8` PC census·Windows 재현, `bcce56da` 호스트 프로브). 테스트 28,046 → 28,049(Ubuntu 3레그, `3cae1ca8` CI; Windows 28,072) — 늘어난 3건은 `hooks-schema-shape` 7a·7b·7c.
+
 ### 보안 — 보안 가드 2개가 timeout·크래시에도 막는다 (`onFailure: "block"`)
 
 - **무엇**: `hooks/hooks.json` 의 `pre-write.js`(Write|Edit — 민감 파일·비밀값 가드)와 `pre-bash.js`(Bash|PowerShell — 위험 명령 가드)에 `"onFailure": "block"`. 두 훅은 프로세스 안의 예외는 이미 catch 꼬리에서 block 했다("Safety check failed due to hook error. Blocking by default."). 남은 구멍은 호스트가 훅을 **자기 timeout(5초)으로 끊은 경우**와 **catch 꼬리가 생기기 전에 죽은 경우**(예: import 실패)였고, 그때는 도구 호출이 진행됐다. 이제 둘 다 block 이다.
@@ -19,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **게이트**: `tests/hooks-schema-shape.test.js` 7a(값은 `continue`·`block` 만) · 7b(`block` 이 정확히 두 보안 가드에만, PreToolUse 에만 — allowlist) · 7c(`block` 을 단 훅은 catch 꼬리에 `blockReason:` 이 있어야 하고, `bash-risk-guard.js` 는 이 술어에 걸리지 않아야 한다). 음성 대조: 메모리 위 문서에서 pre-bash 의 키를 빼거나 bash-risk-guard·Stop 에 키를 더하면 7b 가 다른 목록을 낸다(적용 확인 포함). 지문 `f1f8a496… → 1f73c788…`.
 - **라이브 프로브 (2026-11-08, 2.1.319, `--plugin-dir` 사본에서 `pre-bash.js` 만 바꿔 Bash `echo` 1회)**: import 실패로 죽는 훅 + `block` → **막힘**(`failed; blocking because onFailure is "block"`) · 같은 훅 + 키 없음(대조) → **echo 실행됨** = 이번 변경 전의 구멍 · 9초 자는 훅 + `block` → **막힘**(`timed out; …`). 3/3 예측대로. 증거: `.artibot/guides/v5-design/evidence/pc-handoff-host-probe-20261108.md`.
 - **이 게이트가 못 보는 것**: 2.1.295~2.1.318 사이 버전의 동작(2.1.108 스키마와 2.1.319 실행만 봤다), `pre-write.js` 쪽의 라이브 크래시(프로브는 `pre-bash.js` 만 — 같은 호스트 경로라고 보는 것은 추론).
+
+### 실측 — 07 §A 다섯 항목을 오너 PC 에서 한 번씩 (`3cae1ca8` · `bcce56da`)
+
+- §A-1 설치본 = HEAD · §A-2 라이브 분모 3종(`evidence/pc-handoff-census-20261107.md`, 홈 경로는 `~`) · §A-4 Windows 재현 3파일 46/46 · §A-3 호스트 통합 — D-01 PASS(history 4, warn 1 at count 3), D-03 은 행에 세션 id 가 없어 귀속 미확인 · §A-5 Write 1회의 PreToolUse 다섯 훅 병렬 330~414 ms(n=1). 결과는 `.artibot/guides/v5-design/practicality-improvement-20261023/05_REVISED_DESIGN.md` §8.2.
+- 비용: 중첩 `claude -p` 6회 $0.5344(오너 승인 상한 약 $0.6). `--max-budget-usd` 는 턴이 끝난 뒤 검사돼, 기본 모델 첫 턴이 캐시 쓰기만으로 $0.48 을 써 상한 $0.2 를 넘었다 — 프로브는 Haiku 로 돌릴 것.
 - **바뀌는 실패 양상 (2.1.295 이상)**: 훅이 **아예 못 도는** 환경 — 훅 셸의 PATH 에 `node` 가 없거나(exit 127), 부하로 node 기동이 5초를 넘는 경우 — 에서는 이전엔 도구 호출이 그냥 진행됐지만 이제 **모든 Bash·PowerShell·Write·Edit 호출이 막힌다**. 호스트 안내문은 "The user needs to do this; Claude should not change the hook" 이라 모델이 스스로 풀 수 없다. 풀어 주는 길: 플러그인을 끄거나(`claude plugin disable artibot@artibot`), 설치본 `hooks/hooks.json` 의 해당 두 항목에서 `"onFailure": "block"` 을 지운다. 사용자 설정이 플러그인 훅의 `onFailure` 를 덮어쓸 수 있는지는 미확인이다.
 
 ## [4.71.14] — 2026-11-07
