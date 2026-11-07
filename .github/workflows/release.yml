@@ -73,13 +73,13 @@ jobs:
           cache-dependency-path: plugins/artibot/package-lock.json
 
       - name: Install dependencies
-        # The fallback keeps --ignore-scripts. Without it, `npm ci` failing (a
-        # lockfile that has drifted from package.json is the usual cause) would
-        # silently downgrade to an install that DOES run lifecycle scripts —
-        # arbitrary preinstall/postinstall code from the dependency tree, on a
-        # runner holding a write-scoped token. The flag exists to prevent that,
-        # so the degraded path is exactly where it must not be dropped.
-        run: npm ci --ignore-scripts || npm install --ignore-scripts
+        # No fallback on purpose, same rule as ci.yml. When `npm ci` fails,
+        # usually because the lockfile has drifted from package.json, this job
+        # must go red: it gates the release, and a fallback install would ship
+        # a release validated against whatever npm resolved instead of the
+        # lockfile. --ignore-scripts stays so no dependency lifecycle code runs
+        # on a runner that holds a write-scoped token.
+        run: npm ci --ignore-scripts
 
       - name: Verify version matches tag
         run: |
@@ -513,11 +513,15 @@ jobs:
           sed -i -E "s#(\[\`artibot\`\]\(\./plugins/artibot/\) [|] Claude Code \(developer CLI\) [|] )\*\*[0-9]+\.[0-9]+\.[0-9]+\*\*#\1**${VERSION}**#" README.md
 
       - name: Install plugin dependencies (for test count)
+        # No fallback install, same rule as the validate job: a drifted lockfile
+        # must not be papered over with whatever npm resolves. This install only
+        # feeds the informational test count, and the release already exists by
+        # now, so a failure here must not stop the badge landing either:
+        # continue-on-error, and the count step below is skipped on failure.
+        id: deps
+        continue-on-error: true
         working-directory: plugins/artibot
-        # Same reasoning as the validate job's install step: the fallback must
-        # keep --ignore-scripts, or an `npm ci` failure quietly re-enables
-        # lifecycle scripts on a runner that holds a write-scoped token.
-        run: npm ci --ignore-scripts || npm install --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Count test cases
         # marketplace.json `qualityMetrics.tests` is a test-CASE count, not a
@@ -525,7 +529,12 @@ jobs:
         # release self-corrects the metric. Informational: a vitest failure here
         # must never block the release (mirrors the validate job's policy), so we
         # fall back to leaving the field unchanged when the count can't be read.
+        # Skipped when the install above failed: without node_modules, `npx
+        # vitest` would download an unpinned vitest from the registry instead.
+        # A skipped step leaves `tests` empty, which the next step treats as
+        # "leave the field unchanged".
         id: testcount
+        if: steps.deps.outcome == 'success'
         continue-on-error: true
         working-directory: plugins/artibot
         run: |
