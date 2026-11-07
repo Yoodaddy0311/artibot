@@ -27,7 +27,6 @@ const OWNED_FILES = new Set([
   'guardrails.js',
   'tool-guardrails.js',
   'agent-as-tool.js',
-  'handoff-filter.js',
   'trace.js',
   'ndjson.js',
   'cmd-allowlist.js',

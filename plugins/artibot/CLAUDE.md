@@ -6,13 +6,13 @@ Auto-loads when Claude accesses `plugins/artibot/`.
 
 Claude Native Agent Teams API (named `Agent` spawns into the session's single implicit team + SendMessage + TaskCreate family) + 30 agents + 114 skills + 81 commands. ESM only, `"type": "module"`, zero runtime deps, Node >=20.
 
-> **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from the **17 module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; of the other six, four (aci-constraint, context-reset, otel-middleware, skill-trigger) are wired by other entry points or opt-in, and two (workflow-mode, mission-ledger) are helpers imported by `tasks.js`, not stages.
+> **Honesty note (runtime middleware):** the default prompt pipeline runs an **11-stage** chain (`create-artibot-agent.js#defaultPipeline`) composed from the **14 module files** in `lib/runtime/middleware/`. "11-stage" = the assembled default chain, not the module count; of the other three, two (workflow-mode, mission-ledger) are helpers imported by `tasks.js`, and `otel-middleware` is not registered in `create-artibot-agent.js#middlewareRegistry` (no importer in lib/ or scripts/ — kept, not wired).
 
 ## 5-Layer Architecture
 
 | Layer | Dir | Responsibility |
 |---|---|---|
-| 5 Runtime | `lib/runtime/` | 11-stage default middleware chain (of 17 module files), agent factory |
+| 5 Runtime | `lib/runtime/` | 11-stage default middleware chain (of 14 module files), agent factory |
 | 4 Cognitive | `lib/cognitive/` | System 1/2 routing, EFFORT_POLICY |
 | 3 Learning | `lib/learning/` | memory, lifelong, knowledge-transfer, swarm sync |
 | 2 Auxiliary | `lib/{adapters,swarm,privacy,visual,git,...}/` | Domain services |
@@ -56,7 +56,7 @@ Routing: see [docs/ORCHESTRATION-ROUTING.md](docs/ORCHESTRATION-ROUTING.md) — 
 
 ## Auto-invoke Principle
 
-Never tell the user to type slash-commands. Detect intent and trigger the right command/skill/agent without surfacing the slash syntax. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened.
+Never tell the user to type slash-commands. Detect intent and trigger the right command/skill/agent without surfacing the slash syntax. Users include non-developers. Applies to `/team`, `/implement`, `/plan`, `/code-review`, `/verify`, `/daily` — all commands. Inner command workflows (phases, checklists) must run in full, never shortened. The set in code: `lib/cognitive/auto-invoke.js#AUTO_INVOKE_NAMES`; `disable-model-invocation` blocks the model's Skill call, so a new one needs a reason in `DMI_EXCEPTIONS` (`tests/firewall/auto-invoke-dmi-guard.test.js`).
 
 **How it actually fires (hybrid, not pure code-autofire).** There is no hook that deterministically executes a command from a regex. "Auto-invoke" is two cooperating mechanisms:
 

@@ -13,14 +13,14 @@ whenNotToUse:
   - "Single-agent task with no delegation"
   - "Trivial scripts that do not need an LLM"
   - "Cases already covered by Agent Teams API native handoff"
-source_hash: a3349292
+source_hash: fe27f55e
 ---
 
 # Orchestration Patterns
 
 ## Overview
 
-Five canonical patterns for composing multiple agents. Pick exactly one per workflow. All patterns are local — no external orchestrator or queue is required. Maps to Artibot primitives: `agentAsTool()`, `filterHandoffHistory()`, Agent Teams API, `runAll()` guardrails.
+Five canonical patterns for composing multiple agents. Pick exactly one per workflow. All patterns are local — no external orchestrator or queue is required. Maps to Artibot primitives: `agentAsTool()`, Agent Teams API, `runAll()` guardrails. The handoff history filter is a practice to apply in the handoff brief, not a library call.
 
 ## When to Use
 
@@ -49,7 +49,7 @@ Five canonical patterns for composing multiple agents. Pick exactly one per work
 | Pattern | When | Artibot primitive |
 |---|---|---|
 | Agents as tools | Caller is the planner; sub-agents are utilities | `agentAsTool({name, description})` |
-| Handoff | Specialist takes over the conversation | Agent Teams + `filterHandoffHistory()` |
+| Handoff | Specialist takes over the conversation | Agent Teams + a brief that omits tool-call noise |
 | Deterministic workflow | Steps are fixed; no branching needed | Plain function pipeline |
 | Parallelization | N independent subtasks | `Promise.all` + reducer |
 | LLM-as-Judge | Quality gate after generation | Two-agent loop with explicit threshold |

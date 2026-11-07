@@ -360,7 +360,7 @@ export function createArtibotAgent(options = {}) {
         if (isEnabled('subagents')) await runMiddleware('subagents', mwSubagents, state);
         // Phase 3.5: extension hooks (run registered pre-command hooks)
         await runExtensionHooks(extensions, 'pre-command', state);
-        // Phase 4: guardrail (reads subagents/tasks tool lists + ACI constraints)
+        // Phase 4: guardrail (reads subagents/tasks tool lists)
         if (isEnabled('guardrail')) await runMiddleware('guardrail', mwGuardrail, state);
         // Phase 5: summarization (reads final userPrompt)
         if (isEnabled('summarization')) await runMiddleware('summarization', mwSummarization, state);

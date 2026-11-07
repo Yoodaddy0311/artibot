@@ -16,9 +16,6 @@ Uses the shared token system from `tokens.md` plus feature-specific symbols:
 
 | Token | Symbol | Feature |
 |-------|--------|---------|
-| `feature-aci` | ⚡ | ACI tool constraints applied |
-| `feature-context-reset` | 🔄 | Context window reset with handoff |
-| `feature-sprint-contract` | 📋 | Sprint contract negotiated |
 | `feature-eval-separated` | 🔍 | Independent evaluator active |
 | `feature-source-fetched` | 📡 | Authoritative source referenced |
 | `feature-cognitive` | 🧠 | Cognitive routing decision |
@@ -30,18 +27,18 @@ Uses the shared token system from `tokens.md` plus feature-specific symbols:
 Appear as a single line at the start of a response when a feature activates:
 
 ```
-⚡ ACI: tdd-guide → test tools only
+📡 Source: TypeScript 5.8 docs referenced
 ```
 
 ```
-📡 Source: TypeScript 5.8 docs referenced
+🛡️ Guardrail: protected path write blocked
 ```
 
 ### Rules
 
 - One indicator per activated feature, max 3 per response
 - Place before the main response body, separated by a blank line
-- In compressed mode use short form: `[⚡ACI:test-tools]`
+- In compressed mode use short form: `[📡src:ts-docs]`
 - Omit indicators when no features activated
 
 ## Session Dashboard
@@ -50,13 +47,10 @@ Shown on `/daily` command or session close. Uses pipe-aligned layout:
 
 ```
 --- Session Intelligence Report ---
-| ⚡ ACI Constraints    : 12x (accuracy +15%)
-| 🔄 Context Resets     : 2x (quality maintained)
-| 📋 Sprint Contracts   : 3x (3/3 achieved)
-| 🔍 Independent Evals  : 5x (bias removed)
-| 📡 Source Fetches     : 8x (latest docs)
-| 🧠 Cognitive Route    : 47x (S1 73% / S2 27%)
-| 📊 Token Efficiency   : 15x (23% saved)
+| 🔍 Independent Evals  : 5x
+| 📡 Source Fetches     : 8x
+| 🧠 Cognitive Route    : 47x (S1 34 / S2 13)
+| 🛡️ Guardrail Blocks   : 2x
 ```
 
 ### Rules

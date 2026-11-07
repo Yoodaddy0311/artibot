@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { createLifecycleMiddleware } from '../../../lib/runtime/middleware/lifecycle.js';
-import { createCanceler } from '../../../lib/orchestration/canceler.js';
 
 function makeState(overrides = {}) {
   return {
@@ -23,6 +22,25 @@ function makeDag() {
       ['task-2', { name: 'task-2', graph: ['task-1'] }],
       ['task-3', { name: 'task-3', graph: ['task-2'] }],
     ]),
+  };
+}
+
+// Duck-typed stand-in for the optional `canceler` option. Cancels the direct
+// dependents of `taskId` in a makeDag()-shaped graph.
+function makeCanceler() {
+  const cancelled = new Set();
+  return {
+    cancelDownstream(dag, taskId) {
+      const out = [];
+      for (const [name, node] of dag.graph) {
+        if (node.graph.includes(taskId)) {
+          cancelled.add(name);
+          out.push(name);
+        }
+      }
+      return out;
+    },
+    isCancelled: (id) => cancelled.has(id),
   };
 }
 
@@ -96,7 +114,7 @@ describe('middleware/lifecycle', () => {
 
   describe('cancelDownstream integration', () => {
     it('does not cancel when execution succeeds', async () => {
-      const canceler = createCanceler({ now: fixedNow });
+      const canceler = makeCanceler();
       const dag = makeDag();
 
       const mw = createLifecycleMiddleware({
@@ -121,7 +139,7 @@ describe('middleware/lifecycle', () => {
     });
 
     it('works without dag (no downstream)', async () => {
-      const canceler = createCanceler({ now: fixedNow });
+      const canceler = makeCanceler();
       const mw = createLifecycleMiddleware({
         now: fixedNow,
         canceler,

@@ -57,7 +57,6 @@ plugins/artibot/lib/
   recovery/
     recovery-controller.js
     failure-classifier.js
-    plan-repair.js
 
   economics/
     model-catalog.js
