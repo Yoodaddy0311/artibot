@@ -426,8 +426,9 @@ export function partitionFrozenHistory(content) {
 //      wiring-audit-result.json, NOT docs/ at the repo root, and it is
 //      UNTRACKED — .gitignore:24 ignores `plugins/artibot/docs/*`, so it exists
 //      only on machines that ran the audit and `git log` on it returns nothing.
-//      No generator ships in this repo (scripts/ci/triage-wiring-gaps.mjs
-//      READS it), so it cannot be regenerated to check staleness; the local copy
+//      No generator ships in this repo (its only reader, triage-wiring-gaps.mjs,
+//      was deleted 2026-11-08 by owner decision), so it cannot be regenerated
+//      to check staleness; the local copy
 //      is dated 2026-05-30 by FILE MTIME ONLY — the JSON carries no generated-at
 //      field, and the sibling docs/WIRING-AUDIT-2026-05-30.md is the same date.
 //      Search all FOUR top-level keys when checking it — confirmedRealGaps,

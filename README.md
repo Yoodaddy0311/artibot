@@ -893,7 +893,7 @@ plugins/artibot/
 |   +-- dispatch-table.json      # Per-event hook tables (PostToolUse 12 entries)
 +-- scripts/
 |   +-- hooks/                   # 79 hook scripts (ESM)
-|   +-- ci/                      # 20 CI scripts
+|   +-- ci/                      # 19 CI scripts
 |   +-- evals/                   # Runtime eval suite
 |   +-- utils/
 +-- lib/

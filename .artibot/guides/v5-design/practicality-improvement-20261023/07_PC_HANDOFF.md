@@ -48,6 +48,19 @@ node .artibot/guides/v5-design/practicality-improvement-20261023/pc-handoff.mjs 
 | 7 | `rules/verification-discipline.md` 12,910자 축약(사례 서술 분리) — 오너가 손본 규칙 4개와 겹침 | 현행 | 06 §8 #5 · NEXT-SESSION v4.71.11 |
 | 8 | 정적 배선 감사 도구(`triage-wiring-gaps.mjs`)의 입력 재생성 경로 복원 vs 폐기 | 현행(실행 불가) | 06 §0 #6 |
 
+**2026-11-08 오너 결정** (§A 다섯 항목의 결과를 입력으로 — 05 §8.2):
+
+| # | 결정 | 입력이 된 실측 |
+|---|---|---|
+| 1 | 기본값 유지(키 OFF, deny 없음) | `loop-detection-census` warn 0 · block 0 — 오탐 표본 없음. 감지 자체는 호스트에서 작동(D-01 PASS) |
+| 2 | 기본값 유지(`'ack'`) | `wouldPauseUnderExplicitPass` 0, 단 REPORT 도달 세션 2 — 근거로 약함 |
+| 3 | 기본값 유지(결정 #4) | 새 입력 없음 |
+| 4 | **API 0 시운전까지만** — 본 실험 예산은 그 뒤. 시운전은 같은 날 **PASS**(아래 §E) | 프로브 비용: Opus 첫 턴 $0.48(캐시 쓰기 58,793 토큰), Haiku 실행당 ≈ $0.01 |
+| 5 | 기본값 유지(이 폴더) | — |
+| 6 | **분류 제안서만** → [08_DMI_PROPOSAL.md](08_DMI_PROPOSAL.md)(적용 0) | existence-audit 분모 스킬 3 · 커맨드 8 |
+| 7 | 현행 유지 | 06 은 12,910자, 2026-11-08 은 11,061자(UTF-16 단위; 파일 20,354 B) — 이미 줄어 있다 |
+| 8 | **폐기** — 스크립트와 테스트 16건 삭제(CHANGELOG [Unreleased]) | 입력 gitignore · 생성기 없음 · 이 PC 에도 입력 없음 · `package.json`·`.github/` 참조 0 |
+
 ## C. 비교 실험 (결정 4 뒤, API 비용 발생)
 
 - 절차는 [02](02_BASELINE_ROI_PROTOCOL.md) 를 [05 §4](05_REVISED_DESIGN.md) 로 고친 것. 격리는 05 D-07(`CLAUDE_CONFIG_DIR` · `--setting-sources project` · `--plugin-dir` · `--bare`; 프로젝트 `CLAUDE.md` 의 Artibot 절 제거).
@@ -63,3 +76,5 @@ node .artibot/guides/v5-design/practicality-improvement-20261023/pc-handoff.mjs 
 - 코드 변경은 전부 테스트와 함께 있고(전체 vitest 28,090건 중 환경 요인 1건 외 그린 — 05 §8.1, 브랜치 `13b8069a` 시점. 그 실행이 대시보드 라벨을 바꾼 커밋보다 앞서서 브랜치 끝은 모든 플랫폼에서 3건 red 였다 — CHANGELOG [4.71.13]), 모델에 보이는 두 키는 OFF 다. 바로 바뀐 운영 동작은 넷이다: 루프 이력이 세션별로 매 호출 저장됨 · 미분류 Bash 가 학습 행에 들어감 · 설정 읽기 실패가 경고로 보임 · 두 스킬이 활성화 때 전체 테스트를 돌리지 않음(+ 스킬 본문 선읽기 OFF, 토큰 라벨 정정).
 - PR 은 열지 않았다. 2026-11-07 브랜치 15 커밋을 `cherry-pick -x` 로 그대로(코드 커밋 각각이 RED→GREEN 단위) master 에 옮기고 테스트 결함 2건(`c3989ce5` · `9d4c222d`)을 고쳐 v4.71.13(`43a0b6cd`)으로 릴리스했다. 테스트 수 Ubuntu 28,206 · Windows 28,229(CHANGELOG [4.71.13]). 원격 브랜치는 삭제됐다. §A 의 라이브 측정은 릴리스 시점까지 하지 않았다.
 - **2026-11-07 23:35 KST 오너 PC(설치본 4.71.14, claude 2.1.319)**: §A-1 · §A-2 · §A-4 실행 — 결과와 재현 명령은 05 §8.2, 증거는 `evidence/pc-handoff-census-20261107.md`. §A-3(호스트 통합) · §A-5(훅 지연)는 오너 승인 뒤 2026-11-08 00:1x KST 에 실행 — D-01 호스트 통합 PASS, D-03 은 행 귀속 미확인, 훅 지연 Write 1회 ≈ 414 ms(병렬, n=1). 05 §8.2 · `evidence/pc-handoff-host-probe-20261108.md`. **§A 는 이로써 다섯 항목 모두 한 번씩 실행됐다.** 남은 것은 §B 오너 결정과 §C 비교 실험(예산 결정 뒤).
+- **2026-11-08 01:xx KST(설치본 4.71.15 로드 — 아래)**: §B 8건 결정(위 표). §C 의 "첫 시운전(API 0)" 실행 — **PASS**: §A-3 의 Haiku 프로브 transcript(`086b6598-…`, sha256 앞 16자 `075c8afee1286c9c`)를 원장 없는 격리 디렉터리 `<scratch>/pilot-b/config/projects/C--pilot-b-task01/` 에 복사하고 `node plugins/artibot/scripts/ledger/usage-cost-table.mjs --ledger <없는 파일> --projects-dir <scratch>/pilot-b/config/projects --live-session 086b6598-8ced-41ca-8fe1-573356fc9c96 --json` → exit 0 · `live.status ok` · 파일 1 · 영수증 1 · 읽기 실패 0 · 요청 3 · **$0.00988**(`price_status verified`) — §A-3 의 "Haiku 실행당 ≈ $0.01" 과 맞는다. 05 §6 의 "`--projects-dir` 의 B 군 적용" 은 **접기 경로에 한해** 닫힌다. 못 본 것: 이 transcript 는 `--plugin-dir` 로 Artibot 을 태운 세션의 것이라 진짜 B 군(플러그인 없음) transcript 는 아니다(형식은 호스트가 같게 쓴다 — 추론) · `subagents/` 디렉터리 접기(spawn 0).
+- **설치본 로드(실측)**: `~/.claude/plugins/cache/artibot/artibot/4.71.15/.in_use/5300` 이 있고 PID 5300 = 이 세션의 `claude.exe`(시작 00:57:30, 설치 00:41 뒤). 캐시 `hooks/hooks.json` sha256 `dde4cc4d…` = 리포 HEAD, `onFailure: "block"` 2곳. 같은 캐시 루트의 `4.71.14/` 은 `.orphaned_at` 표식이 붙었고, 그 `hooks.json` 도 `onFailure` 2곳을 가진다(태그 `70b63650` 의 파일은 0곳 — 11-07 23:54 에 덮어써졌다). "캐시 디렉터리 N = 태그 N" 은 4.71.14 에선 거짓이다.

@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 KST 갱신, **v4.71.15** — v4.71.14 이후 3 커밋(보안 1 · 문서 2) + 릴리스 커밋: 보안 가드 2개 `onFailure: "block"` · 07 §A 다섯 항목 실측 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영. 헤더가 v4.71.11 에서 멈춰 있던 v4.71.12~14 는 아래 절에)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 01시대 KST 갱신, **v4.71.15 착지·설치·로드 확인** — 태그 `v4.71.15` = `4f63ccc5`(원격 동일) · 이 PC 설치본 4.71.15 가 이 세션에 로드됨(실측) · 07 §B 오너 결정 8건 확정 · 배선 감사 도구 삭제(미릴리스, [Unreleased]) · 남은 것은 오너 손 4건 — 아래 「2026-11-08 마무리」 절)
+
+> 이전 헤더(2026-11-08, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 KST 갱신, **v4.71.15** — v4.71.14 이후 3 커밋(보안 1 · 문서 2) + 릴리스 커밋: 보안 가드 2개 `onFailure: "block"` · 07 §A 다섯 항목 실측 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영. 헤더가 v4.71.11 에서 멈춰 있던 v4.71.12~14 는 아래 절에)
 
 > 이전 헤더(2026-10-20, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-10-20 KST 갱신, **v4.71.11** — v4.71.10 이후 9 커밋(내용 6 · 문서 3) + 릴리스 커밋: 훅 쓰기 8곳의 `ARTIBOT_STATE_DIR` 리졸버 이전 · 읽기 추적 임시파일 정리 · `/rea` 증거 view-request 헬퍼 · master = 태그 대상 `f33430eb` · 이 PC 설치 4.71.11(재시작 전, 로드 미확인))
 
@@ -19,6 +21,24 @@
 > 이전 헤더(2026-09-15, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-09-15 KST 갱신, AsusHeechangLee 머신, master = 9165196f = v4.62.0 + Wave 10 13/13 + **Wave 11 9/9 착지** · 호스트 재시작 완료(09-15 09:06, `session.ended` 라이브 시작) · 정리: 빈 dir 4 + 브랜치 6 + unlocked worktree 2 완료, locked worktree 8 + 브랜치 8 은 창 종료 뒤 `--teardown` 순서로 · Wave 11 오너 결정 4건 확정(DESIGN 부록 0-2 후속(4)) · 4.63.0 체크리스트 충족 3/6 · Wave 12 정찰 8건)
 
 > 다른 머신에서는 `git pull` → 설치본 확인 → **이 파일을 직접 Read** 하고 시작한다. 로컬 전용(`.artibot/HANDOFF.md`·`.artibot/split/`·`runtime/split/`·`.artibot/runtime/`)은 이 머신에만 있다. 아래 수치는 각 절의 세션 리더 실측이다.
+
+## 2026-11-08 마무리 (v4.71.15 착지 뒤, 리더 실측 — 세션 `2df2db09`, 호스트 2.1.319)
+
+- **릴리스 결과(아래 절 헤더가 "미반영"이라 적은 것)**: 태그 `v4.71.15` → `4f63ccc5`(`git ls-remote --tags origin v4.71.15` 동일). 원격 런 3종 success — Release `42387544304`(Validate · Create GitHub Release · Sync README badges) · CI `42387514964` · Plugin Validation `42387515063`(`gh run list`). `installed_plugins.json` = 4.71.15 · `gitCommitSha 4f63ccc5`.
+- **로드 실측**: 캐시 `4.71.15/.in_use/5300` 이 있고 PID 5300 = 이 세션의 `claude.exe`(시작 00:57:30 KST, 설치 00:41 뒤). 캐시 `hooks.json` sha256 = 리포 HEAD, `onFailure: "block"` 2곳(`pre-write.js` · `pre-bash.js`). **함정**: `4.71.14/` 캐시(`.orphaned_at` 표식)의 `hooks.json` 도 `onFailure` 2곳인데 태그 `70b63650` 의 파일은 0곳이다 — 11-07 23:54 에 덮어써졌다. 캐시 디렉터리 이름만으로 내용을 판정하지 않는다(나머지 차이는 CRLF 뿐, `diff <(tr -d '\r' …)` 0줄).
+- **07 §B 오너 결정 8건**: #1·#2·#3·#5 기본값 유지 · #4 **API 0 시운전까지만** — 같은 날 실행 **PASS**(격리 projects 디렉터리 + 원장 없음 → 영수증 1 · $0.00988 · `price_status verified`) · #6 **분류 제안서만** → [08_DMI_PROPOSAL.md](v5-design/practicality-improvement-20261023/08_DMI_PROPOSAL.md) · #7 현행 유지 · #8 **폐기**(스크립트 458줄 + 테스트 16건 삭제, README `20 → 19 CI scripts`, CHANGELOG [Unreleased]). 표와 근거는 [07 §B · §E](v5-design/practicality-improvement-20261023/07_PC_HANDOFF.md).
+- **새 발견(08 §3)**: `~/.claude/commands/` 에 평면 사본 80파일 — Artibot 79(2026-09-09, **39개가 리포와 내용이 다름**) + 오너 소유 `hey.md`(Averify). 그래서 이 세션의 스킬 목록에 Artibot 커맨드가 접두 없는 낡은 사본과 `artibot:` 사본으로 두 번 실리고, 목록 뒤쪽 Artibot 스킬 101개 중 99개가 설명 없이 이름만 실렸다(이 세션 컨텍스트 수동 계수). 원인이 호스트 목록 예산 초과라는 것은 추론.
+- **오너 손이 필요한 것 (갱신 — 전부 확인 끝, 명령만 남음)**:
+
+  | # | 할 일 | 안전 근거(실측) | 명령 |
+  |---|---|---|---|
+  | 1 | 원격 브랜치 5개 삭제 | `chore/sync-readme-badges-v4.50.0`: `git cherry` `-` = 같은 패치가 `0f383b63`(#110)으로 master 에 있음(merge-tree 충돌은 그 줄이 뒤에 바뀐 탓) · `ci/split-wave19-b16-20260923`: master 와 merge-tree 결과 = master 트리(no-op) · `ci/onfailure-block-20261107` · `ci/release-v4.71.15` · `ci/wrapup-20261108`: master 조상 | `git push origin --delete chore/sync-readme-badges-v4.50.0 ci/split-wave19-b16-20260923 ci/onfailure-block-20261107 ci/release-v4.71.15 ci/wrapup-20261108` 뒤 `git fetch --prune` |
+  | 2 | `git stash clear` | 11건 전부 `refs/stash-archive/2026-11-07/` 의 11개 ref 와 SHA 1:1 일치 | `git stash clear` |
+  | 3 | `C:\c` 삭제 | 41 MB · 2,450 파일 · 안은 `Users\nowhe\AppData\Local\Temp\claude\C--Users-nowhe-OneDrive-------AI-artibot\<세션 id>\` — 옛 세션 스크래치(세션 `12a11836` · `92b67ac9`). 경로 변환 잔재로 보임(추론) | `Remove-Item -Recurse -Force C:\c` |
+  | 4 | 평면 커맨드 사본 79개 이동(`hey.md` 는 남김) | 08 §3 — 되돌리기 1줄 | 08 §3 의 PowerShell 4줄 → 재시작 → 목록에서 설명 잘림이 줄었는지 확인 |
+
+  로컬 브랜치 `backup/session1-master` 는 원본 보존용이라 그대로 둔다(지우려면 오너 결정).
+- **`/save` 의 "WIP 51 (oldest 327611m)"**: 출처 미확인. 미푸시 0 이라 squash 할 것이 없다 — 쫓지 않았다.
 
 ## v4.71.15 (2026-11-07 23:20 ~ 11-08 KST, 리더 실측 — 재시작 뒤 세션, 호스트 2.1.319)
 

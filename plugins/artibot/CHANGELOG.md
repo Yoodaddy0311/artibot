@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 삭제 — 실행할 수 없던 배선 감사 도구 (오너 결정 2026-11-08, 07 §B-8)
+
+- **`scripts/ci/triage-wiring-gaps.mjs`(458줄)와 테스트 `tests/ci/triage-wiring-gaps.test.js`(16건)를 지웠다.** 입력 `plugins/artibot/docs/wiring-audit-result.json` 은 gitignore 이고 생성기가 리포에 없어 실행하면 `audit input not found` 였다(06 §0 #6). 이 PC 에도 입력 파일이 없다. `package.json`·`.github/` 참조 0. 마지막 보고는 `docs/WIRING-AUDIT-2026-05-30.md`.
+- README 카운트 `20 CI scripts` → `19`(`npm run sync:readme:claims`, 리포 README 와 플러그인 README 각 1줄), `readme-claims-registry.js` 의 주석 1곳이 이 파일을 "입력을 읽는 도구"로 가리키던 문장을 삭제 사실로 고쳤다. 로직 변경 0.
+
 ## [4.71.15] — 2026-11-08
 
 `v4.71.14`(`70b63650`) 이후 3 커밋 = **11 files +430/−3**(`git rev-list --count v4.71.14..bcce56da` · `git diff --shortstat v4.71.14 bcce56da`, 2026-11-08 측정 — 릴리스 커밋은 이 수치에 없다): 보안 1(`9719cebf`) · 문서 2(`3cae1ca8` PC census·Windows 재현, `bcce56da` 호스트 프로브). 테스트 28,046 → 28,049(Ubuntu 3레그, `3cae1ca8` CI; Windows 28,072) — 늘어난 3건은 `hooks-schema-shape` 7a·7b·7c.
