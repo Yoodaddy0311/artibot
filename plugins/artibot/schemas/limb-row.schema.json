@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "limb-row.schema.json",
+  "title": "ArtibotLimbRow",
+  "description": "One limb row, as the landing side reads it. The seam between the two limb providers: a /split plan.json row and a bound /orca run.json row must satisfy this ONE contract, because scripts/split/land.mjs (branch, affectedPaths, worktreePath, forkPoint) and lib/git/limb-completion.js (branch, base) read exactly these fields whichever provider made the row. Four keys are required: limb, branch, worktreePath, affectedPaths. This schema describes a row that can be LANDED, so branch and worktreePath are non-empty strings: an /orca row that compileRun just produced and bindLimb has not filled yet (branch and worktreePath are null) is deliberately NOT valid here, because land refuses it ('limb has no branch in plan'). lib/git/orca-plan.js#validateLimbRow is the hand-written twin (draft-07 cannot be run at runtime: the plugin ships no validator); its { allowUnbound: true } variant accepts null for branch and worktreePath and is what the run-file reader uses. tests/firewall/limb-row-contract.test.js keeps the two in agreement on a battery of rows and runs real /split producer output through both. Other keys are open on purpose: /split rows carry worktreeName, wave, rolling, plannedBranch, promptPath and more, none of which land reads.",
+  "type": "object",
+  "required": ["limb", "branch", "worktreePath", "affectedPaths"],
+  "properties": {
+    "limb": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,30}$",
+      "description": "Limb slug, 2-31 characters. Same pattern as lib/git/limb-completion.js (SLUG) and commands/split.md."
+    },
+    "branch": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The limb branch name WITHOUT refs/heads/ (land.mjs passes it to git as refs/heads/<branch>). Non-blank."
+    },
+    "worktreePath": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "Absolute path of the limb worktree. land.mjs runs eslint there, and reports UNSUPPORTED without it. Non-blank."
+    },
+    "affectedPaths": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "\\S" },
+      "description": "Owned paths (the land allowlist). Empty is a valid claim of nothing: land then fails every changed file, which is the fail-closed answer for a limb whose ownership was never known."
+    },
+    "forkPoint": {
+      "type": ["string", "null"],
+      "pattern": "\\S",
+      "description": "Where the worktree really branched from; write-once. land base order is --base, then forkPoint, then plan.base. null or absent = not recorded."
+    },
+    "taskIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "\\S" },
+      "description": "Plan task ids. In an /orca row these are the PLAN's ids, not Orca Task ids."
+    },
+    "deps": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,30}$" },
+      "description": "Names of the limbs that must have landed before this one starts. /orca only; a /split row has none."
+    },
+    "worktreeId": {
+      "type": ["string", "null"],
+      "pattern": "\\S",
+      "description": "Orca worktree id, the limb's stable key. /orca only."
+    },
+    "dispatches": {
+      "type": "array",
+      "description": "Add-only dispatch receipts. /orca only. taskId is the ORCA Task id.",
+      "items": {
+        "type": "object",
+        "required": ["dispatchId", "taskId", "kind", "at"],
+        "properties": {
+          "dispatchId": { "type": "string", "pattern": "\\S" },
+          "taskId": { "type": "string", "pattern": "\\S" },
+          "kind": { "enum": ["initial", "retry", "rework"] },
+          "at": { "type": "string", "pattern": "\\S" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
