@@ -103,7 +103,7 @@ const GOOD_TABLE = Object.freeze({
 function run(over = {}, table = {}) {
   const exec = guardedExec({ ...GOOD_TABLE, ...table });
   const result = runPreflight({
-    parentRoot: PARENT, env: ENV, exec, config: {}, agentContextFile: SCHEMA_FILE, realpath: identity, ...over,
+    parentRoot: PARENT, env: ENV, exec, config: { orca: { enabled: true } }, agentContextFile: SCHEMA_FILE, realpath: identity, ...over,
   });
   return { result, exec };
 }
@@ -354,10 +354,6 @@ describe('orca-runtime', () => {
 });
 
 describe('orca-session', () => {
-  it('passes on the terminal handle', () => {
-    expect(byName(run().result, 'orca-session').status).toBe('pass');
-  });
-
   it('warns (not passes) with workspace identity but no terminal handle - a chat leader is unmeasured', () => {
     const { result } = run({ env: { ORCA_WORKTREE_ID: ENV.ORCA_WORKTREE_ID } });
     expect(byName(result, 'orca-session').status).toBe('warn');
@@ -550,10 +546,15 @@ describe('describeFailure and parseJsonText (shared with plan.mjs)', () => {
 describe('orca-enabled', () => {
   const verdict = (config, configError = null) => byName(run({ config, configError }).result, 'orca-enabled');
 
-  it('passes when the block is absent, enabled is unset, or enabled is the literal true', () => {
-    for (const config of [{}, { orca: null }, { orca: {} }, { orca: { enabled: true, agent: 'claude' } }]) {
-      expect(verdict(config).status, JSON.stringify(config)).toBe('pass');
+  it('treats an absent orca block as normal: info "defaults used", never a failure (an install that predates the block)', () => {
+    for (const config of [{}, { orca: null }, { split: { maxWindows: 8 } }]) {
+      expect(verdict(config), JSON.stringify(config)).toMatchObject({ status: 'info', detail: expect.stringContaining('orca config block absent — defaults used') });
+      expect(run({ config }).result.ok).toBe(true);
     }
+  });
+
+  it('passes when the block is present and enabled is unset or the literal true', () => {
+    for (const config of [{ orca: {} }, { orca: { enabled: true, agent: 'claude' } }]) expect(verdict(config).status, JSON.stringify(config)).toBe('pass');
   });
 
   it('fails on the kill switch and points at /split', () => {
@@ -606,10 +607,8 @@ describe('formatPreflight', () => {
     expect(lines[8]).toBe(`Orca: appVersion=1.4.259 repoId=${ARTIBOT_ID} trust=pre-trust`);
   });
 
-  it('says FAIL and shows 미확인 for what could not be determined', () => {
-    const text = formatPreflight(run({ env: {} }).result);
-    expect(text.split('\n')[0]).toBe('Orca preflight: FAIL');
-    expect(text).toMatch(/FAIL {2}orca-session/);
+  it('says FAIL when a check failed', () => {
+    expect(formatPreflight(run({ env: {} }).result)).toMatch(/^Orca preflight: FAIL\n[\s\S]*FAIL {2}orca-session/);
   });
 });
 

@@ -13,7 +13,8 @@
  *                       subdirectory, a linked worktree) is `warn`; a path and a terminal that name different repos is `fail`
  *   orca-verbs          REQUIRED_ORCA_COMMANDS (verbs + flags DESIGN 4.4 uses) all exist in the CLI schema
  *   git-version         git >= 2.38
- *   orca-enabled        artibot.config.json#orca.enabled is not the kill switch
+ *   orca-enabled        the kill switch is an explicit artibot.config.json#orca.enabled=false; an absent orca block is
+ *                       `info` ("defaults used"), never a failure
  *   permission-posture  ALWAYS `info`: Orca's permission mode has no CLI surface, so it is shown, never judged
  *
  * `ok` is false when any check is `fail`; the CLI then exits 1. `warn` and `info` never fail the run.
@@ -401,14 +402,23 @@ function checkGit(exec) {
     : outcome(name, 'fail', `git ${major}.${minor} 은 너무 낮다(>= ${need} 필요)`);
 }
 
-/** orca-enabled: only an absent key or a literal `true` lets /orca run; `false` is the kill switch; anything else fails closed. */
+/**
+ * orca-enabled: the kill switch is an explicit `orca.enabled: false`, nothing else.
+ *
+ * An ABSENT `orca` block is normal, not a failure: an install whose artibot.config.json predates the block reads
+ * `config.orca === undefined` after `loadConfig` (its DEFAULTS carry no `orca` key, like `split`), and the documented
+ * defaults apply - `enabled` true, `agent` "claude", `branchPrefix` "orca/", `launch.requireApproval` true,
+ * `stallCheckMinutes` 30. It is reported as `info`. This script reads only `enabled`; the others belong to the scripts
+ * that use them. A block that is present but malformed (not an object, or a non-boolean `enabled`) fails closed:
+ * a value somebody wrote on purpose, such as the string "false", must not read as "on".
+ */
 function checkEnabled(config, configError) {
   const name = 'orca-enabled';
   if (config === null || config === undefined) {
     return outcome(name, 'fail', `artibot.config.json 을 읽지 못해 킬스위치를 확인할 수 없다${configError ? ` - ${configError}` : ''}`);
   }
   const block = config.orca;
-  if (block === undefined || block === null) return outcome(name, 'pass', '설정에 orca 블록이 없다 - 기본 enabled=true');
+  if (block === undefined || block === null) return outcome(name, 'info', 'orca config block absent — defaults used (enabled=true)');
   if (typeof block !== 'object' || Array.isArray(block)) return outcome(name, 'fail', 'orca 설정 블록이 객체가 아니다');
   if (block.enabled === undefined) return outcome(name, 'pass', 'orca.enabled 미지정 - 기본 true');
   if (block.enabled === true) return outcome(name, 'pass', 'orca.enabled=true');

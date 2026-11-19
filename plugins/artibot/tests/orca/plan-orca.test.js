@@ -600,6 +600,13 @@ describe('runPlan - preflight warnings are carried into the report', () => {
     const doc = planOk({}, ctx);
     expect(doc.warnings.some((warning) => warning.startsWith('preflight orca-session:'))).toBe(true);
   });
+
+  it('plans normally when the config has no orca block (an install that predates it): info is neither a failure nor a warning', () => {
+    for (const config of [{ split: CONFIG.split }, { ...CONFIG, orca: { enabled: true } }]) {
+      const doc = planOk({ dryRun: true }, world({ ctx: { config } }).ctx);
+      expect(doc.warnings).toEqual([]);
+    }
+  });
 });
 
 describe('formatPlan', () => {
