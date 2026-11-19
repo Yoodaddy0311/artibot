@@ -125,6 +125,8 @@ export const RUNTIME_EXCLUDE_ENTRIES = Object.freeze([
   '**/.artibot/HANDOFF.md',
   '**/.artibot/handoffs/',
   '**/.artibot/split/',
+  // /orca run state: run.json holds absolute worktree paths and the objective text.
+  '**/.artibot/orca/',
   '**/.artibot/scorecard.json',
   '**/.artibot/media/',
 ]);

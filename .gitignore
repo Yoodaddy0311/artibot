@@ -165,3 +165,10 @@ reports/*
 # Claude Code plan-mode ephemeral state — machine-local absolute paths, stale
 # across sessions. Never commit.
 .plan-state.json
+
+# /orca run state (.artibot/orca/run.json: plan limbs, Orca run id, dispatch receipts;
+# holds absolute worktree paths) - per-machine local record, never committed. Appended at
+# the END so the `.gitignore:N` citations above stay valid. Every .artibot rule in this file
+# must also be an entry of lib/project-state/runtime-exclude.js#RUNTIME_EXCLUDE_ENTRIES
+# (tests/firewall/runtime-exclude-drift.test.js compares the two lists).
+.artibot/orca/

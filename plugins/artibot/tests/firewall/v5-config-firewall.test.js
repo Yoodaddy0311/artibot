@@ -177,8 +177,12 @@ const TOPOLOGY_MODES = Object.freeze(['solo', 'subagent', 'team', 'autopilot', '
  * 둔다")에 따라 `projectBootstrap`(gitExclude·rulesDigest) 1건이 더해졌다. 읽는 곳은
  * `lib/project-state/project-bootstrap.js#resolveProjectBootstrapPolicy` 하나다.
  * 같은 기간 다른 줄기가 최상위 키를 더하면 이 수는 그만큼 더 올라가야 한다.
+ *
+ * 2026-11-19: 33 → 34. /orca P1(줄기 orca-config)이 최상위 `orca` 1건(enabled·agent·
+ * branchPrefix·worktreeSetup·launch·stallCheckMinutes)을 더했다. 키 형태·브랜치 접두와 훅
+ * 정규식의 대조·.gitignore 규칙은 `tests/firewall/orca-config-firewall.test.js` 가 따로 핀한다.
  */
-const EXPECTED_TOP_LEVEL_COUNT = 33;
+const EXPECTED_TOP_LEVEL_COUNT = 34;
 
 /**
  * 정책 버킷이 결정하는 30 에이전트 전건. `FABLE_AGENTS` 는 `fable.allowlist` 10종의
