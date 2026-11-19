@@ -1,13 +1,13 @@
 /**
- * 사람 게이트 단일 정본 표 — `HUMAN_GATE_MATRIX` (HG-01 … HG-13).
+ * 사람 게이트 단일 정본 표 — `HUMAN_GATE_MATRIX` (HG-01 … HG-14).
  *
  * 설계 정본: ARTIBOT-5.0-DESIGN §3.5 "사람 게이트 단일 지점" · 레인 5 §1-D(강제 지점
  * 실측 10행) · §3-C(코드 강제 단일 지점) · §5-③(`.artibot/project.md#Human Approval
- * Boundaries` 본문 = 이 13행). 행 구성은 v5 설계 패키지
+ * Boundaries` 본문 = 이 14행). 행 구성은 v5 설계 패키지
  * `.artibot/guides/v5-design/package/11_SAFE_AUTONOMY_HUMAN_GATES.md` 의 게이트 표
  * **10행** + vNext `.artibot/guides/vnext-design/09_SECURITY_GOVERNANCE.md` 의 Action
  * Risk Matrix 중 `secret/credential change`·`permission escalation`·`security policy
- * disable` **3행** = 13행이다.
+ * disable` **3행** + /orca 설계 §4.6-3 의 HG-14 **1행** = 14행이다.
  *
  * ── Observe 단계의 계약 (PRD §3 "행동 변화 0") ──────────────────────────────
  *  이 모듈은 **분류·기록만** 한다. 어떤 차단도 새로 만들지 않는다. `classify()` 가
@@ -53,7 +53,7 @@ export const GATE_PROBES = Object.freeze(['command', 'path', 'both']);
 
 /**
  * @typedef {Object} HumanGateRow
- * @property {string} id - `HG-01` … `HG-13`
+ * @property {string} id - `HG-01` … `HG-14`
  * @property {string} action - 행동 이름(정본 표의 행)
  * @property {'auto'|'policy'|'human'} default
  * @property {'hook'|'prose'|'none'} enforcement - 2026-09-02 현행
@@ -71,7 +71,7 @@ export const GATE_PROBES = Object.freeze(['command', 'path', 'both']);
  */
 
 /**
- * HG-01 … HG-13. 순서는 v5 §11 표 10행 → vNext §09 3행.
+ * HG-01 … HG-14. 순서는 v5 §11 표 10행 → vNext §09 3행 → /orca 설계 1행.
  * @type {ReadonlyArray<HumanGateRow>}
  */
 export const HUMAN_GATE_MATRIX = Object.freeze([
@@ -413,6 +413,62 @@ export const HUMAN_GATE_MATRIX = Object.freeze([
     ]),
     existingCoverage: Object.freeze([]),
     evidence: 'vNext 09 "security policy disable | X | human" · 레인 5 §3-C 행 7 · artibot.config.json 의 git.autopilot.bypassPrePushHooks',
+  }),
+  Object.freeze({
+    id: 'HG-14',
+    action: '에이전트 프로세스 스폰',
+    default: 'human',
+    enforcement: 'none',
+    enforcementNote: '분류 전용(/orca 설계 §4.6-3). 훅 강제는 없고 ENFORCEABLE_GATE_IDS(human-gate-enforce.js)에도 넣지 않았다 — 편입은 CA-04 강제가 켜질 때 따로 정한다. 적중은 원장에 행을 남기지 않는다: pre-bash 는 block 일 때만 human.asked 를 쓴다. launch 승인 없는 스폰의 검출은 이 행이 아니라 /orca status 의 confirm-launch 쌍 점검 몫이다(설계 §4.6-3, 구현은 별도 줄기)',
+    policyRef: null,
+    probe: 'command',
+    tools: Object.freeze(['Bash']),
+    // FORMS — 허용 목록이다. `orca agent-context --json` 스키마(Orca 1.4.259, commandCount
+    // 334, 2026-11-19 실측)에서 에이전트 프로세스를 띄우는 usage 로 확인한 4형을 동사 이름으로
+    // 열거했다: `orchestration worker-start (--agent <agent> | --terminal <handle>)` ·
+    // `worktree create [--agent <id>] [--prompt <text>]` · `agent launch --agent <id>` ·
+    // `automations create … --provider <agent>` / `automations run <id>`. "스폰이 아닌 것"을
+    // 빼는 부정 목록은 쓰지 않았다. 동작 실측은 worker-start 와 `--agent` 없는 worktree create
+    // 뿐이다(설계 §10 P0-4·P0-5) — 나머지 형이 실제로 에이전트를 띄우는지는 스키마 usage 로만
+    // 봤다(미실측). `orca` 뒤의 `(?:\.(?:exe|cmd))?` 는 Orca 1.4.259 Windows 설치의 bin 폴더에
+    // 실재하는 실행 파일 이름(orca.exe · orca.cmd, 2026-11-19 `ls` 실측)이다.
+    //
+    // WINDOW BOUND (ReDoS). `worktree create … --agent` 만 사이에 임의 구간이 낀다. 그 구간은
+    // `[^\n]{0,192}` — HG-07 과 같은 4.60.0 관례이고 `HG_SCAN_ALLOWLIST` 는 늘리지 않았다.
+    // `--agent` 는 `(?=[\s=]|$)` 로 닫아 `--agent-x` 같은 접두 플래그를 잡지 않는다.
+    // 규칙 단독 실측(창 반복 시작점 `'orca worktree create '`, 3회 중앙값, node v24.15.0,
+    // 2026-11-19 14:1x KST): 20,480 / 40,962 / 122,880B = 0.65 / 1.08 / 2.84ms. 창이 없는
+    // `[^\n]*` 변이(출하 안 함)는 같은 프로세스에서 10.11 / 42.82 / 392.91ms. 나머지 형과 `\s+`
+    // 단일 런 스윕 수치는 tests/security/human-gates.test.js 의 'HG-14 — classify 는 quantifier
+    // 위치마다 …' 블록 주석에 있다.
+    //
+    // WHAT IT GIVES UP — 분류 전용 행이라 놓침은 관측 손실이고, 막혀야 할 것이 풀리는 일은
+    // 없다. 아래는 같은 테스트 파일이 핀으로 고정한 사각이다(고치려면 핀과 이 주석을 함께):
+    //  · `--agent` 가 `create` 뒤 192자를 넘거나, 개행 너머(줄 연속 `\`+개행 다음 줄에 들여쓴 것 ·
+    //    여러 줄 `--prompt` 뒤)에 있으면 못 본다 — 창이 개행을 못 넘는다.
+    //  · 동사 앞에 전역 플래그가 오면 못 본다(`orca --json status` 는 유효한 호출임을 실측).
+    //  · 따옴표로 닫힌 실행 파일 경로(`"…\orca.exe" agent launch`)는 못 본다.
+    //  · tools 는 Bash 하나다 — PowerShell 도구 호출은 이 행이 안 본다(단 block 뒤 human.asked
+    //    기록은 PowerShell 을 Bash 모양으로 바꿔 분류하므로 그 경로만 예외다).
+    //  · 호출이 아니라 **말하기**(커밋 메시지·heredoc 안의 문서)도 걸린다 — 다른 행과 같은 원문 매칭.
+    // 스폰할 수 있으나 이 행에 넣지 않은 verb(리더 결정 사안, 미구현): `orchestration send`(끝난
+    // 워커에 보내면 새 터미널·세션으로 다시 열린다 — 설계 §10 P0-15), `terminal create --command`,
+    // `automations edit`.
+    //
+    // GATES: tests/autopilot/safety.test.js 가 이 행을 세 번째 카탈로그로 정적 스캔(창 ≤ 192),
+    // tests/firewall/human-gate-matrix-selfcheck.test.js 가 구조 핀·양성/음성 예시,
+    // tests/security/human-gates.test.js 가 행 정의·정확한 창 원문·192/193 경계·형태별 양성/음성·
+    // 알려진 사각·단일 런 스윕, tests/firewall/project-md-contract.test.js 가 project.md 표와의
+    // 일치를 본다. 못 보는 것: 실제 명령 분포에 대한 오탐·미탐률(미측정), 그리고 위 FORMS 의
+    // 미실측 형이 실제로 스폰하는지.
+    patterns: Object.freeze([
+      /\borca(?:\.(?:exe|cmd))?\s+orchestration\s+worker-start\b/i,
+      /\borca(?:\.(?:exe|cmd))?\s+worktree\s+create\b[^\n]{0,192}\s--agent(?=[\s=]|$)/i,
+      /\borca(?:\.(?:exe|cmd))?\s+agent\s+launch\b/i,
+      /\borca(?:\.(?:exe|cmd))?\s+automations\s+(?:create|run)\b/i,
+    ]),
+    existingCoverage: Object.freeze([]),
+    evidence: '/orca 설계 §4.6-3 "HG-14 에이전트 프로세스 스폰"(분류 전용) · §10 P0-16·P0-18 (2026-11-19 실측): 워커는 권한 프롬프트를 건너뛰는 모드로 뜨고 리더의 스폰 명령은 프롬프트 없이 통과한다 — 스폰 앞의 사람 게이트는 launch 승인 하나뿐이다. 명령 형태는 orca agent-context --json 스키마 usage(2026-11-19)',
   }),
 ]);
 

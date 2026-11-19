@@ -1213,12 +1213,14 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
   // 대조하면서 드러났다). 문서의 수치가 아니라 이 it 이 정본이다.
   // 2026-11-07: L1 39 → 42 (S1 PowerShell rules: Remove-Item recurse+force,
   // Format-Volume, Clear-Disk). L2 is unchanged — it has no PowerShell rule.
-  it('scans 98 patterns across the three catalogues (42 + 27 + 29)', () => {
+  // 2026-11-19: HG 29 → 33 (HG-14 "에이전트 프로세스 스폰", 패턴 4개 — /orca 설계
+  // §4.6-3). L1 · L2 는 그대로다.
+  it('scans 102 patterns across the three catalogues (42 + 27 + 33)', () => {
     expect(BLOCKED_PATTERNS).toHaveLength(42);
     expect(DANGEROUS_PATTERNS).toHaveLength(27);
     const hg = HUMAN_GATE_MATRIX.reduce((n, row) => n + row.patterns.length, 0);
-    expect(hg).toBe(29);
-    expect(BLOCKED_PATTERNS.length + DANGEROUS_PATTERNS.length + hg).toBe(98);
+    expect(hg).toBe(33);
+    expect(BLOCKED_PATTERNS.length + DANGEROUS_PATTERNS.length + hg).toBe(102);
     // 2026-09-23: 95 중 2 는 소스가 없는 스캐너 행이라 정규식 스캔은 93 이다.
     const scannerRows = [
       ...BLOCKED_PATTERNS.map((p) => scanTargetOf('L1', p.label, p.pattern)),
@@ -1267,10 +1269,10 @@ describe('ReDoS 정적 스캔 — 규칙 소스에 무제한 런이 없다', () 
 
   // 분모 고정. 위 it.each 가 "0개를 훑고 통과"하는 공허한 그린이 되지 않도록.
   // 숫자가 움직이면 HG 표가 바뀐 것이므로 읽고 나서 고치는 게 맞다.
-  it('scans all 29 human-gate patterns across 13 rows', () => {
-    expect(HUMAN_GATE_MATRIX).toHaveLength(13);
+  it('scans all 33 human-gate patterns across 14 rows', () => {
+    expect(HUMAN_GATE_MATRIX).toHaveLength(14);
     const total = HUMAN_GATE_MATRIX.reduce((n, row) => n + row.patterns.length, 0);
-    expect(total).toBe(29);
+    expect(total).toBe(33);
     // HG-10 은 patterns 가 비어 있다(패턴화 불가 선언). 그 행이 있어도
     // flatMap 이 무너지지 않는다는 것을 여기서 함께 본다.
     expect(HUMAN_GATE_MATRIX.filter((row) => row.patterns.length === 0).map((r) => r.id))

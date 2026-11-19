@@ -158,10 +158,10 @@
  *     classifyRisk 전체 경로의 합산 비용.
  *  6. `[]]` 같은 JS 문자클래스 극단 문법(파싱 실패 시 fail-closed 로 보고한다).
  *  7. **스캔 밖에 있는 리포의 나머지 정규식.** 이 스캔이 훑는 것은 네 카탈로그뿐
- *     이다 — BLOCKED_PATTERNS(L1 39) · DANGEROUS_PATTERNS(L2 27) ·
- *     HUMAN_GATE_MATRIX(HG 13행 29패턴) = 95패턴(2026-09-14 실측 분모) +
- *     ENFORCE_PATTERNS(HGE 8, 2026-09-28) = 103패턴. 분모 핀은 따로다 —
- *     safety.test.js 의 95 핀(세 카탈로그)과 HGE 8 핀. (HGE 는 등록 당일 12 였고,
+ *     이다 — BLOCKED_PATTERNS(L1 42) · DANGEROUS_PATTERNS(L2 27) ·
+ *     HUMAN_GATE_MATRIX(HG 14행 33패턴) = 102패턴(2026-11-19 실측 분모) +
+ *     ENFORCE_PATTERNS(HGE 8, 2026-09-28) = 110패턴. 분모 핀은 따로다 —
+ *     safety.test.js 의 102 핀(세 카탈로그)과 HGE 8 핀. (HGE 는 등록 당일 12 였고,
  *     curl loopback 판정이 lib/security/human-gate-curl.js 의 문자열 상태기계로 옮겨
  *     가며 정규식 4개가 사라졌다 — 그 상태기계는 정규식이 아니라 이 스캔 밖이고,
  *     선형성 근거는 tests/security/human-gate-enforce-redos.test.js 다.)

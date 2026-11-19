@@ -2,9 +2,9 @@
  * Firewall — `lib/security/human-gates.js` 의 `HUMAN_GATE_MATRIX` 자기검증.
  *
  * ── 무엇을 지키는가 ────────────────────────────────────────────────────────
- *  A. **13행이 실재한다.** 매트릭스가 비어 있지 않고, id 가 HG-01…HG-13 로 빠짐없이
+ *  A. **14행이 실재한다.** 매트릭스가 비어 있지 않고, id 가 HG-01…HG-14 로 빠짐없이
  *     이어진다. 행 구성 근거는 v5 `11_SAFE_AUTONOMY_HUMAN_GATES.md` 게이트 표 10행 +
- *     vNext `09_SECURITY_GOVERNANCE.md` Action Risk Matrix 의 3행이다(레인 5 §3-C).
+ *     vNext `09_SECURITY_GOVERNANCE.md` Action Risk Matrix 의 3행(레인 5 §3-C) + /orca 설계 §4.6-3 의 1행이다.
  *  B. **모든 행이 판정 가능하다.** 각 행은 `patterns`·`policyRef`·`undetectable`
  *     선언 중 하나 이상을 갖는다. `undetectable` 은 **최대 1행**만 허용한다 —
  *     면제가 번지면 표 자체가 무의미해진다.
@@ -139,6 +139,12 @@ const EXAMPLES = {
     positive: { tool: 'Write', path: 'plugins/artibot/artibot.config.json' },
     negative: { tool: 'Write', path: 'plugins/artibot/package.json' },
   },
+  // 같은 명사(orchestration)의 읽기 verb 를 음성으로 둔다 — `orca status` 같은 먼 음성은
+  // 패턴이 `orca` 한 단어에 걸려도 통과하므로 변별력이 없다.
+  'HG-14': {
+    positive: { tool: 'Bash', command: 'orca orchestration worker-start --task task_1 --worktree wt-1 --agent claude --json' },
+    negative: { tool: 'Bash', command: 'orca orchestration worker-list --run run_1 --json' },
+  },
 };
 
 describe('human-gate matrix — 구성 (A)', () => {
@@ -147,9 +153,9 @@ describe('human-gate matrix — 구성 (A)', () => {
     expect(HUMAN_GATE_MATRIX.length).toBeGreaterThan(0);
   });
 
-  it('HG-01…HG-13 13행이 빠짐없이 이어진다', () => {
+  it('HG-01…HG-14 14행이 빠짐없이 이어진다', () => {
     const ids = HUMAN_GATE_MATRIX.map((row) => row.id);
-    const expected = Array.from({ length: 13 }, (_, i) => `HG-${String(i + 1).padStart(2, '0')}`);
+    const expected = Array.from({ length: 14 }, (_, i) => `HG-${String(i + 1).padStart(2, '0')}`);
     expect(ids).toEqual(expected);
   });
 
@@ -406,7 +412,7 @@ describe('human-gate matrix — 무제한 런 0 (G)', () => {
       }
     }
     expect(offenders).toEqual([]);
-    expect(byKey.size).toBe(29);
+    expect(byKey.size).toBe(33);
   });
 
   it('예외 목록은 실재하고, 전부 ^ 앵커이며, 유령 항목이 없다', () => {
@@ -434,8 +440,8 @@ describe('human-gate matrix — 무제한 런 0 (G)', () => {
   it('예외는 HG-11 두 건뿐이다 — 등록처는 헬퍼 하나다', () => {
     expect([...HG_SCAN_ALLOWLIST].sort()).toEqual(['HG-11[0]', 'HG-11[1]']);
     // 분모 고정. 위 it.each 아닌 루프들이 "0개를 돌고 통과"하지 않도록.
-    expect(byKey.size).toBe(29);
-    expect(HUMAN_GATE_MATRIX).toHaveLength(13);
+    expect(byKey.size).toBe(33);
+    expect(HUMAN_GATE_MATRIX).toHaveLength(14);
   });
 });
 

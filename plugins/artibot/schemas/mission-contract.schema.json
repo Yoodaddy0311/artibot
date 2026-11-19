@@ -129,7 +129,7 @@
         "human_gates": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "HUMAN_GATE_MATRIX identifiers (HG-01 through HG-13) this mission expects to hit. Enforcement lives in the PreToolUse hook, not here."
+          "description": "HUMAN_GATE_MATRIX identifiers (HG-01 through HG-14) this mission expects to hit. Enforcement lives in the PreToolUse hook, not here."
         }
       }
     },

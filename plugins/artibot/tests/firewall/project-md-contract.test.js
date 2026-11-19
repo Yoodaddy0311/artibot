@@ -12,14 +12,14 @@
  *
  * ── 왜 문서가 매트릭스를 import 하지 않는가 ─────────────────────────────────
  * 렌더하면 갈라지지 않지만, 마크다운은 코드를 실행하지 않는다. 사람이 읽는
- * 파일에 13행을 **글자로** 쓰는 것이 선언의 요점이다(설계가 "선언" 이라 부른 것이
+ * 파일에 14행을 **글자로** 쓰는 것이 선언의 요점이다(설계가 "선언" 이라 부른 것이
  * 이것이다). 대신 이 테스트가 매번 두 벌을 대조한다. 갈라지면 레드다.
  *
  * ── 기대값을 이 파일에 박지 않는 이유 ───────────────────────────────────────
  * 세 축의 기대값을 전부 **추적 정본에서 파싱해 온다**:
  *   1. 필수 절 목록  ← `.artibot/guides/v5-design/package-v1.1/18_PROJECT_TEMPLATE.md`
  *   2. 원칙 14 제목  ← `.artibot/guides/v5-design/package/01_PHILOSOPHY_CONSTITUTION.md`
- *   3. 게이트 13행    ← `lib/security/human-gates.js#HUMAN_GATE_MATRIX`
+ *   3. 게이트 14행    ← `lib/security/human-gates.js#HUMAN_GATE_MATRIX`
  * 기대값을 테스트 안에 문자열로 박으면 정본이 바뀔 때 고쳐야 할 자리가 둘이
  * 되고, 그중 하나만 고치면 게이트가 조용히 다른 것을 지킨다. 정본이 움직여서
  * 여기가 레드가 되는 것은 **의도**다 — 게이트의 오작동이 아니다.
@@ -225,7 +225,7 @@ describe('project.md 계약 — 분모', () => {
   it('정본에서 비어 있지 않은 기대값이 파싱된다', () => {
     expect(h2Headings(templateText).length).toBeGreaterThanOrEqual(8);
     expect(constitutionPrinciples(constitutionText)).toHaveLength(14);
-    expect(HUMAN_GATE_MATRIX).toHaveLength(13);
+    expect(HUMAN_GATE_MATRIX).toHaveLength(14);
   });
 });
 
@@ -298,10 +298,10 @@ describe('Core Principles — 헌법 14원칙이 정본 위치와 함께 있다'
   });
 });
 
-describe('Human Approval Boundaries — 선언 13행이 매트릭스와 일치한다', () => {
+describe('Human Approval Boundaries — 선언 14행이 매트릭스와 일치한다', () => {
   const rows = tableRows(projectText ?? '', GATE_SECTION).filter((c) => /^HG-\d+$/.test(c[0]));
 
-  it('데이터 행이 정확히 13행이다', () => {
+  it('데이터 행이 정확히 14행이다', () => {
     expect(rows).toHaveLength(HUMAN_GATE_MATRIX.length);
   });
 

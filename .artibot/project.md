@@ -128,7 +128,7 @@ v5 헌법 14원칙(`.artibot/guides/v5-design/package/01_PHILOSOPHY_CONSTITUTION
 
 사람이 승인해야 하는 것의 정본 선언. **선언은 여기, 강제는 훅**(설계 §3.5 층 분리).
 행 자체의 단일 진실원은 `p/lib/security/human-gates.js#HUMAN_GATE_MATRIX` 이고,
-`p/tests/firewall/project-md-contract.test.js` 가 아래 13행의 id·행동·기본값을 그 표와 대조한다.
+`p/tests/firewall/project-md-contract.test.js` 가 아래 14행의 id·행동·기본값을 그 표와 대조한다.
 
 **allowlist 형이다.** 매칭되지 않은 행동은 "안전" 이 아니라 **미분류**다. 이 표는 미분류를
 통과로 해석하지 않는다.
@@ -151,9 +151,10 @@ v5 헌법 14원칙(`.artibot/guides/v5-design/package/01_PHILOSOPHY_CONSTITUTION
 | HG-11 | 시크릿·크리덴셜 변경 | human | hook | — |
 | HG-12 | 권한 상승 (설정·훅·디스패치 자기수정) | human | none | — |
 | HG-13 | 보안 정책 비활성화 | human | none | — |
+| HG-14 | 에이전트 프로세스 스폰 | human | none | — |
 
 **주의 — 이 표가 말하지 않는 것.** `기본` 은 "무엇이 사람 승인을 요구하는가" 이고
-`강제` 는 "오늘 코드가 실제로 무엇을 막는가" 다. 둘이 어긋난 자리(HG-07·HG-12·HG-13 =
+`강제` 는 "오늘 코드가 실제로 무엇을 막는가" 다. 둘이 어긋난 자리(HG-07·HG-12·HG-13·HG-14 =
 human 인데 강제 none)는 **알려진 구멍**이지 승인 면제가 아니다. 훅 block 은 "묻기" 의
 트리거이지 대체물이 아니다 — 대화형이면 즉시 질문, 비대화형이면 PAUSE 한다.
 

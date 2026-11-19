@@ -133,12 +133,13 @@ describe('getGateRow', () => {
 describe('HUMAN_GATE_MATRIX — 소비자가 쓰는 축', () => {
   // HG-07 외부 시스템 쓰기는 v5 §11 표에서 policy 였으나 OD-1(파괴·배포·외부쓰기·
   // 제품결정 = 단계 무관 항상 사람)이 이겨 human 으로 승격됐다. 그래서 policy 는 1행.
-  it('기본값 분포가 설계와 일치한다 (auto 5 · policy 1 · human 7)', () => {
+  // 2026-11-19: HG-14 에이전트 프로세스 스폰(/orca 설계 §4.6-3, human)이 더해져 human 7 → 8.
+  it('기본값 분포가 설계와 일치한다 (auto 5 · policy 1 · human 8)', () => {
     const counts = HUMAN_GATE_MATRIX.reduce((acc, row) => {
       acc[row.default] = (acc[row.default] || 0) + 1;
       return acc;
     }, {});
-    expect(counts).toEqual({ auto: 5, policy: 1, human: 7 });
+    expect(counts).toEqual({ auto: 5, policy: 1, human: 8 });
   });
 
   it('HG-07 은 OD-1 승격 행이다 — policyRef 를 유지한 채 human', () => {
@@ -519,5 +520,240 @@ describe('HG-09 — 창 교체가 바꾼 것과 바꾸지 않은 것 (행동 7�
   ])('%s', (_label, command, expected) => {
     const hit = ids({ tool: 'Bash', command }).includes('HG-09');
     expect(hit).toBe(expected);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// HG-14 에이전트 프로세스 스폰 — 행 정의 · 형태별 양성 · 음성 · 창 경계 · 알려진 사각
+// ───────────────────────────────────────────────────────────────────────────
+//
+// /orca 설계 §4.6-3 의 **분류 전용** 행이다(default human · enforcement none). 강제 대상
+// 집합(ENFORCEABLE_GATE_IDS)은 이 행이 편입되지 않았음을 tests/security/human-gate-enforce.test.js
+// 가 따로 고정한다. 적중은 원장에 행을 남기지 않는다 — 훅은 block 때만 human.asked 를
+// 쓴다. 그래서 이 행이 "launch 승인 없이 스폰했다"를 잡아 주는 것이 아니다. 그 검출은 /orca
+// status 의 confirm-launch 쌍 점검이 맡는다(설계 §4.6-3).
+//
+// 명령 형태의 출처는 `orca agent-context --json` 스키마의 usage 줄이다(Orca 1.4.259 ·
+// commandCount 334, 2026-11-19 실측): worker-start `(--agent <agent> | --terminal
+// <handle>)`, worktree create `[--agent <id>] [--prompt <text>]`, agent launch `--agent <id>`,
+// automations create `--provider <agent> --prompt <text>`, automations run `<id>`.
+// **동작 실측이 아니라 스키마 실측이다** — 동작은 worker-start 와 `--agent` 없는 worktree
+// create 만 P0 에서 실행해 봤다. `--agent` 를 단 worktree create · agent launch ·
+// automations create|run 이 실제로 에이전트를 띄우는지는 미실측이다.
+//
+// 이 블록이 못 보는 것: 실제 명령 분포에 대한 오탐·미탐률(미측정), 훅이 이 행을 어떻게
+// 소비하는지(소비처는 auto-activate 의 프롬프트 스크린과 block 뒤 human.asked 기록뿐).
+
+describe('HG-14 — 행 정의 (설계 §4.6-3 · 리더 결정)', () => {
+  it('분류 전용 human 행이다 — 강제 0 · 정책 키 0 · Bash command 만 본다', () => {
+    const row = getGateRow('HG-14');
+    expect(row).toMatchObject({
+      id: 'HG-14',
+      action: '에이전트 프로세스 스폰',
+      default: 'human',
+      enforcement: 'none',
+      policyRef: null,
+      probe: 'command',
+    });
+    expect([...row.tools]).toEqual(['Bash']);
+    expect([...row.existingCoverage]).toEqual([]);
+    expect(row.undetectable).toBeUndefined();
+  });
+
+  it('패턴 4개가 문서화된 순서(worker-start · worktree create --agent · agent launch · automations)다', () => {
+    const sources = getGateRow('HG-14').patterns.map((pattern) => pattern.source);
+    expect(sources).toHaveLength(4);
+    expect(sources[0]).toContain('worker-start');
+    expect(sources[1]).toContain('worktree');
+    expect(sources[2]).toContain('launch');
+    expect(sources[3]).toContain('automations');
+    for (const pattern of getGateRow('HG-14').patterns) {
+      expect(pattern.flags, pattern.source).toBe('i');
+    }
+  });
+
+  it('worktree create 규칙의 원문이 바운드된 창을 갖는다 — 창을 넓히거나 무제한으로 되돌리지 말 것', () => {
+    const source = getGateRow('HG-14').patterns[1].source;
+    expect(source).toBe(
+      /\borca(?:\.(?:exe|cmd))?\s+worktree\s+create\b[^\n]{0,192}\s--agent(?=[\s=]|$)/i.source,
+    );
+    expect(source).toContain('[^\\n]{0,192}');
+    expect(source).not.toContain('[^\\n]*');
+  });
+});
+
+describe('HG-14 — 형태별 양성', () => {
+  it.each([
+    ['worker-start (설계 §4.4-7 의 실제 줄)',
+      'orca orchestration worker-start --task task_1 --worktree wt-1 --agent claude --model claude-sonnet-5-5 --json'],
+    ['worker-start --terminal (기존 터미널에 붙이는 형)',
+      'orca orchestration worker-start --spec-file brief.md --terminal term_1'],
+    ['worktree create --agent',
+      'orca worktree create --name limb-a --branch orca/limb-a-ab12cd --agent claude --prompt "go" --json'],
+    ['worktree create --agent=값', 'orca worktree create --name limb-a --agent=claude'],
+    ['worktree create 의 --agent 가 줄 끝', 'orca worktree create --name limb-a --agent'],
+    ['agent launch', 'orca agent launch --agent claude --worktree wt-1 --prompt "go" --json'],
+    ['automations create',
+      'orca automations create --name nightly --trigger daily --prompt "go" --provider claude'],
+    ['automations run', 'orca automations run auto_1 --json'],
+    ['실행 파일 접미 .exe', 'orca.exe orchestration worker-start --task task_1 --agent claude'],
+    ['실행 파일 접미 .cmd', 'orca.cmd agent launch --agent claude'],
+    ['경로 접두(POSIX)', '/opt/orca/bin/orca agent launch --agent claude'],
+    ['경로 접두(Windows)', 'C:\\tools\\orca\\bin\\orca.exe agent launch --agent claude'],
+    ['체인 뒤쪽', 'cd repo && orca orchestration worker-start --task task_1 --agent claude'],
+    ['대소문자 무관', 'ORCA Orchestration Worker-Start --task t --agent claude'],
+    ['공백·탭 여러 개', 'orca   orchestration \t worker-start --task t'],
+  ])('%s', (_label, command) => {
+    expect(ids({ tool: 'Bash', command })).toContain('HG-14');
+  });
+
+  it('스폰 형은 다른 행을 열지 않는다 — 정본 4형은 HG-14 단독 적중이다', () => {
+    for (const command of [
+      'orca orchestration worker-start --task task_1 --worktree wt-1 --agent claude --json',
+      'orca worktree create --name limb-a --agent claude --json',
+      'orca agent launch --agent claude --worktree wt-1 --json',
+      'orca automations run auto_1 --json',
+    ]) {
+      expect(ids({ tool: 'Bash', command }), command).toEqual(['HG-14']);
+    }
+  });
+});
+
+describe('HG-14 — 음성 (읽기 verb · 스폰이 아닌 쓰기 · 이웃 단어)', () => {
+  it.each([
+    ['status', 'orca status --json'],
+    ['worktree list', 'orca worktree list --json'],
+    ['worktree show', 'orca worktree show --worktree wt-1 --json'],
+    ['설계의 worktree create — --agent 가 없다(스폰은 다음 줄의 worker-start)',
+      'orca worktree create --name limb-a --branch orca/limb-a-ab12cd --base-branch origin/master --parent-worktree active --setup skip --json'],
+    ['worktree create 의 --agent- 접두 플래그', 'orca worktree create --name limb-a --agent-x y'],
+    ['worker-list', 'orca orchestration worker-list --run run_1 --json'],
+    ['task-create', 'orca orchestration task-create --spec "x" --json'],
+    ['check --peek', 'orca orchestration check --run run_1 --peek --json'],
+    ['inbox', 'orca orchestration inbox --terminal run:run_1 --json'],
+    ['agent hooks status', 'orca agent hooks status --json'],
+    ['agent-context', 'orca agent-context --json'],
+    ['automations list', 'orca automations list --json'],
+    ['automations show', 'orca automations show auto_1 --json'],
+    ['automations runs — run 의 복수형', 'orca automations runs auto_1 --json'],
+    ['worker-startup — worker-start 의 접두어', 'orca orchestration worker-startup'],
+    ['sorca — orca 가 아닌 단어', 'sorca orchestration worker-start --task t --agent claude'],
+    ['orca 가 아닌 프로그램의 같은 verb', 'claude agent launch --agent x'],
+    ['무관한 명령', 'git status --porcelain'],
+  ])('%s → HG-14 아님', (_label, command) => {
+    expect(ids({ tool: 'Bash', command })).not.toContain('HG-14');
+  });
+
+  it('도구 allowlist — Write·Edit 의 path 나 PowerShell 도구는 이 행을 열지 않는다', () => {
+    expect(ids({ tool: 'Write', path: 'orca orchestration worker-start' })).not.toContain('HG-14');
+    expect(ids({ tool: 'Edit', path: 'orca agent launch --agent claude' })).not.toContain('HG-14');
+    // probe 가 command 뿐이라 Bash 라도 path 만 주면 보지 않는다.
+    expect(ids({ tool: 'Bash', path: 'orca agent launch --agent claude' })).not.toContain('HG-14');
+  });
+});
+
+describe('HG-14 — worktree create … --agent 창 경계 (192 매치 / 193 miss)', () => {
+  // 창은 `create` 직후부터 `--agent` 앞의 공백 **직전**까지다. `create\b` 가 서려면 창이
+  // 비단어 문자(공백)로 시작해야 하므로 filler 는 공백 하나 + x 로 n 글자를 채운다.
+  /** @param {number} n @returns {string} */
+  const filler = (n) => ` ${'x'.repeat(n - 1)}`;
+
+  it('창 192 는 HG-14, 193 은 미분류', () => {
+    expect(filler(192)).toHaveLength(192);
+    expect(ids({ tool: 'Bash', command: `orca worktree create${filler(192)} --agent claude` }))
+      .toContain('HG-14');
+    expect(ids({ tool: 'Bash', command: `orca worktree create${filler(193)} --agent claude` }))
+      .not.toContain('HG-14');
+  });
+
+  it('짧은 실제 명령은 창 폭과 무관하게 계속 걸린다 (회귀 방지)', () => {
+    expect(ids({ tool: 'Bash', command: 'orca worktree create --name limb-a --agent claude' }))
+      .toContain('HG-14');
+  });
+});
+
+describe('HG-14 — 알려진 사각 (분류되지 않는다 — 고치려면 lib 의 행 주석과 이 핀을 함께 갱신)', () => {
+  // 이 핀들은 "안전하다"는 주장이 아니라 "여기는 안 본다"는 기록이다. 분류 전용 행이라
+  // 놓쳐도 막혀야 할 것이 풀리는 것은 아니고 관측을 잃는다(설계 §4.6-3).
+  it.each([
+    ['동사 앞의 전역 플래그 — `orca --json status` 는 유효한 호출이다',
+      'orca --json orchestration worker-start --task t --agent claude'],
+    ['--agent 가 줄 연속(\\ + 개행) 다음 줄에 들여써 있다 — 창이 개행을 못 넘는다',
+      'orca worktree create --name w \\\n  --agent claude'],
+    ['--agent 가 여러 줄 --prompt 뒤에 있다 — 같은 이유',
+      'orca worktree create --name w --prompt "a\nb" --agent claude'],
+    ['따옴표로 닫힌 실행 파일 경로', '"C:/tools/orca/bin/orca.exe" agent launch --agent claude'],
+  ])('%s', (_label, command) => {
+    expect(ids({ tool: 'Bash', command })).not.toContain('HG-14');
+  });
+
+  it('PowerShell 도구는 보지 않는다 — tools 는 Bash 하나다', () => {
+    expect(ids({ tool: 'PowerShell', command: 'orca agent launch --agent claude' })).toEqual([]);
+  });
+});
+
+describe('HG-14 — classify 는 quantifier 위치마다 긴 단일 런에서도 성장 비율이 선형 범위 안이다', () => {
+  // 정적 스캐너(regex-scan.js)는 부정 클래스·`.` 만 보고 **긍정 클래스 무제한 런 `\s+` 는 못 본다**
+  // (그 파일 "못 보는 것" 1번). 이 행에는 `\s+` 가 패턴마다 2개씩 있어서, 그 선형성의 근거는
+  // 이 스윕뿐이다. 촘촘한 반복만 쓰면 인접 quantifier 의 백트래킹이 짧아 2차식이 숨으므로
+  // 동사 사이마다 **긴 단일 런**(공백·탭·CRLF)과 창 안 런, 창 반복 시작점을 각각 둔다.
+  //
+  // ── 실측 (node v24.15.0, Windows 11, 2026-11-19 14:1x KST, 다른 줄기 부하 있음, 3회 중앙값,
+  //    회차마다 다른 payload — 별도 프로브의 같은 호출이라 코드는 남기지 않았다) ──
+  //   규칙 단독, 20,480 / 40,962 / 122,880B:
+  //     worktree create 규칙, 창 반복 시작점 `'orca worktree create '`
+  //                                       0.65 / 1.08 / 2.84ms    growth(6배) 4.38
+  //     같은 규칙의 창 없는 `[^\n]*` 변이(출하 안 함 — 게이트가 RED 를 내야 하는 모양)
+  //                                       10.11 / 42.82 / 392.91ms  growth 38.88
+  //     4개 패턴 중 최댓값, 동사 사이·orca 뒤 단일 런(공백·탭·LF·CRLF) × 6개 머리 = 24형
+  //                                       최대 0.32ms @122,880B, growth ≤ 1.07
+  //   바닥 4ms 를 넣은 growth(아래 게이트와 같은 식)는 위 프로브 9형(4개 패턴 최댓값)에서
+  //   1.01~1.60 이다. 임계 18 은 선형(≈6)과 2차식(≈36) 사이다. 창을 없애면 위 변이처럼
+  //   바닥 포함 28, 바닥 없이 39 로 넘는다.
+  //
+  // 못 보는 것: 이 블록은 **크기에 따라 스케일되는** 입력만 본다. 반복 그룹 `(?:…)*` 은 이 행에
+  // 0개라서 겹치는 선택지의 지수식 백트래킹은 이 스윕의 모양으로 보지 않는다(생기면 따로 본다).
+  // 게이트로 박은 양성 대조(창 넓힌 변이가 RED 가 되는가)는 없다 — 위 변이는 프로브에서 한 번
+  // 쟀을 뿐이다. 창이 넓어지는 회귀는 정적 스캐너와 위 정확한 원문 핀이 먼저 잡는다.
+  const PAD = '12345 '; // 6바이트: 회차 표식(5바이트)이 덮어쓰는 자리. 규칙에 걸리는 부분은 그 뒤다.
+
+  /** @type {[string, (n: number) => string][]} */
+  const HG14_SCALED_PAYLOADS = [
+    ['orca 뒤 공백 런', (n) => `${PAD}orca${' '.repeat(n - PAD.length - 4)}`],
+    ['동사 사이 CRLF 런', (n) => `${PAD}orca orchestration${fill('\r\n', n - PAD.length - 18)}`],
+    ['worktree 뒤 탭 런', (n) => `${PAD}orca worktree${'\t'.repeat(n - PAD.length - 13)}`],
+    ['창 안 단일 런(공백+x)', (n) => `${PAD}orca worktree create${fill(' x', n - PAD.length - 20)}`],
+    ['창 반복 시작점', (n) => PAD + fill('orca worktree create ', n - PAD.length)],
+    // 끝을 z 로 닫는다 — 잘린 꼬리가 `--agent` 로 끝나면 `$` 룩어헤드가 맞아 버린다.
+    ['--agent- 룩어헤드 miss 반복', (n) => `${PAD}${fill('orca worktree create --agent-x ', n - PAD.length - 1)}z`],
+    ['agent·automations 반복', (n) => PAD + fill('orca agent orca automations ', n - PAD.length)],
+  ];
+
+  it.each(HG14_SCALED_PAYLOADS)(
+    '%s: t(122,880) < 18 × t(20,480)',
+    (_name, build) => {
+      /** @param {number} n @returns {number} */
+      const run = (n) => medianOverTagged(build, n);
+      const t20480 = run(20_480);
+      const t40962 = run(40_962);
+      // 회귀 시 120KB 측정으로 넘어가기 전에 여기서 빨리 실패시킨다.
+      expect(t40962).toBeLessThan(200);
+      const t122880 = run(122_880);
+      expect(growth(t122880, t20480)).toBeLessThan(18);
+    },
+    30_000,
+  );
+
+  it('payload 가 주장하는 바이트 크기로 만들어지고 규칙에 걸리지 않는다 — 회차 표식을 박은 뒤에도', () => {
+    for (const [name, build] of HG14_SCALED_PAYLOADS) {
+      for (const n of [20_480, 40_962, 122_880]) {
+        expect(build(n), name).toHaveLength(n);
+        expect(tagged(build, n, 0), name).toHaveLength(n);
+        // 회차마다 실제로 다른 문자열이어야 V8 의 (regex, string) 캐시를 피한다.
+        expect(tagged(build, n, 0), name).not.toBe(tagged(build, n, 1));
+        // 비매치여야 전 구간을 실제로 훑는 측정이다 — 첫 후보에서 매치가 끝나면 빨라 보일 뿐이다.
+        expect(ids({ tool: 'Bash', command: tagged(build, n, 0) }), name).not.toContain('HG-14');
+      }
+    }
   });
 });
