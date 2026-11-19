@@ -1,0 +1,587 @@
+{
+  "schemaVersion": 1,
+  "commandCount": 334,
+  "commands": [
+    {
+      "command": "agent-context",
+      "path": [
+        "agent-context"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Print the machine-readable command schema for agents",
+      "usage": "orca agent-context [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration check",
+      "path": [
+        "orchestration",
+        "check"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Check this agent's messages",
+      "usage": "orca orchestration check [--terminal <handle>] [--run <run_id>] [--ack <delivery_id>] [--unread | --peek | --all] [--types <type,...>] [--format] [--wait] [--timeout-ms <n>] [--retry-request <id>] [--json]\n  default: return the bound Run's oldest unread FIFO batch and mark it handled.\n  --ack: optional; acknowledges a batch from an older Orca that does not mark it.\n  --peek: return only unread messages without marking them read.\n  --all: return recent messages for the handle; does not mark read.\n  --wait: block until a matching message arrives or --timeout-ms expires.\n          Emits JSON keepalive lines to stderr every 15s so the caller can\n          tell the process is alive. `_keepalive` is unrelated to heartbeat\n          messages; `_heartbeat` remains as a deprecated compatibility alias.\n          Filter with `jq \"select(._keepalive|not)\"` when merging streams.",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "terminal",
+        "run",
+        "ack",
+        "unread",
+        "peek",
+        "all",
+        "types",
+        "format",
+        "wait",
+        "timeout-ms",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration deny",
+      "path": [
+        "orchestration",
+        "deny"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Deny a worker's permission prompt with a reason; the worker carries on",
+      "usage": "orca orchestration deny --dispatch <dispatch_id> --prompt <approval_id> --reason <text> [--from <handle>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "dispatch",
+        "prompt",
+        "reason",
+        "from",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration inbox",
+      "path": [
+        "orchestration",
+        "inbox"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Show messages across (or for) recipients",
+      "usage": "orca orchestration inbox [--limit <n>] [--terminal <handle>] [--full] [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "limit",
+        "terminal",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration reply",
+      "path": [
+        "orchestration",
+        "reply"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Reply to a message",
+      "usage": "orca orchestration reply --id <msg_id> --body <text> [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "id",
+        "body",
+        "run",
+        "from",
+        "on",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration run-create",
+      "path": [
+        "orchestration",
+        "run-create"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Create and bind a lightweight orchestration Run",
+      "usage": "orca orchestration run-create --objective <text> [--from <handle>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "objective",
+        "from",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration run-use",
+      "path": [
+        "orchestration",
+        "run-use"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Resume coordinating a Run",
+      "usage": "orca orchestration run-use --id <run_id> [--from <handle>] [--takeover-legacy] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "id",
+        "from",
+        "takeover-legacy",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration send",
+      "path": [
+        "orchestration",
+        "send"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Send an inter-agent message",
+      "usage": "orca orchestration send --subject <text> [--to <run:id|dispatch:id|legacy_handle>] [--on <server>] [--run <run_id>] [--from <handle>] [--body <text>] [--type <type>] [--priority <level>] [--thread-id <id>] [--payload <json>] [--task-id <id>] [--dispatch-id <id>] [--outcome <succeeded|failed>] [--files-modified <csv>] [--report-path <path>] [--phase <text>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "to",
+        "on",
+        "run",
+        "from",
+        "subject",
+        "body",
+        "type",
+        "priority",
+        "thread-id",
+        "payload",
+        "task-id",
+        "dispatch-id",
+        "dispatch-capability",
+        "retry-request",
+        "outcome",
+        "files-modified",
+        "report-path",
+        "phase",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration task-create",
+      "path": [
+        "orchestration",
+        "task-create"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Create an orchestration task",
+      "usage": "orca orchestration task-create (--spec <text> | --spec-file <path|->) [--task-title <text>] [--display-name <text>] [--deps <json_array>] [--parent <task_id>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "spec",
+        "spec-file",
+        "task-title",
+        "display-name",
+        "deps",
+        "parent",
+        "run",
+        "from",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration task-list",
+      "path": [
+        "orchestration",
+        "task-list"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "List orchestration tasks",
+      "usage": "orca orchestration task-list [--status <status>] [--ready] [--brief] [--run <run_id>] [--from <handle>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "status",
+        "ready",
+        "brief",
+        "run",
+        "from",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration task-update",
+      "path": [
+        "orchestration",
+        "task-update"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Update a task status",
+      "usage": "orca orchestration task-update --id <task_id> --status <status> [--result <text>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "id",
+        "status",
+        "result",
+        "run",
+        "from",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration worker-list",
+      "path": [
+        "orchestration",
+        "worker-list"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "List supervised worker terminal resource accounting",
+      "usage": "orca orchestration worker-list [--run <run_id>] [--terminal-state <active|reclaimable|retained|release_pending|release_unknown|released>] [--include-remote] [--on <server>] [--cursor <cursor>] [--limit <1-100>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "run",
+        "terminal-state",
+        "include-remote",
+        "on",
+        "cursor",
+        "limit",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration worker-release",
+      "path": [
+        "orchestration",
+        "worker-release"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Release the terminal of one settled supervised worker",
+      "usage": "orca orchestration worker-release --dispatch <dispatch_id> [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "dispatch",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration worker-show",
+      "path": [
+        "orchestration",
+        "worker-show"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Inspect one supervised worker Dispatch",
+      "usage": "orca orchestration worker-show --dispatch <dispatch_id> [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "dispatch",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "orchestration worker-start",
+      "path": [
+        "orchestration",
+        "worker-start"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Start one supervised worker on the Run home or a connected Orca server",
+      "usage": "orca orchestration worker-start (--task <task_id> | --spec <text> | --spec-file <path|->) [--keep-open] [--on <saved-environment>] [--worktree <current|selector|new-child|new-top-level>] (--agent <agent> | --terminal <handle>) [--task-title <text>] [--deps <json_array>] [--parent <task_id>] [--model <id>] [--effort <level>] [--name <name>] [--repo <selector>] [--base-branch <ref>] [--display-name <text>] [--comment <text>] [--setup <run|skip|inherit>] [--retry-of <dispatch_id>] [--timeout-ms <n>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json] [--full]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "task",
+        "spec",
+        "spec-file",
+        "keep-open",
+        "task-title",
+        "deps",
+        "parent",
+        "on",
+        "worktree",
+        "name",
+        "repo",
+        "base-branch",
+        "display-name",
+        "comment",
+        "setup",
+        "agent",
+        "model",
+        "effort",
+        "terminal",
+        "retry-of",
+        "timeout-ms",
+        "run",
+        "from",
+        "retry-request",
+        "full"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "repo list",
+      "path": [
+        "repo",
+        "list"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "List repos registered in Orca",
+      "usage": "orca repo list [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "status",
+      "path": [
+        "status"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Show app/runtime/graph readiness",
+      "usage": "orca status [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "terminal read",
+      "path": [
+        "terminal",
+        "read"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Read bounded terminal output",
+      "usage": "orca terminal read [--terminal <handle>] [--cursor <n>] [--limit <n>] [--screen] [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "terminal",
+        "cursor",
+        "limit",
+        "screen"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "worktree create",
+      "path": [
+        "worktree",
+        "create"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Create a new Orca-managed worktree",
+      "usage": "orca worktree create --name <name> [--repo <selector>|--project <id-or-name> [--host <host>]|--project-host-setup <id>] [--agent <id>] [--prompt <text>] [--model <id>] [--effort <level>] [--surface chat|terminal] [--setup run|skip|inherit] [--base-branch <ref>] [--branch <name>] [--reference <url-or-jira-key>...] [--reference-site <id>] [--issue <number>] [--pr <number>] [--linear-issue <identifier-or-url>] [--gitlab-issue <number-or-url>] [--gitlab-mr <number-or-url>] [--comment <text>] [--parent-worktree <selector> [--parent-environment <environment>]] [--no-parent] [--run-hooks] [--activate] [--retry-launch <operationId>] [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "repo",
+        "project",
+        "host",
+        "project-host-setup",
+        "name",
+        "agent",
+        "prompt",
+        "model",
+        "effort",
+        "surface",
+        "retry-launch",
+        "base-branch",
+        "branch",
+        "reference",
+        "reference-site",
+        "issue",
+        "pr",
+        "linear-issue",
+        "gitlab-issue",
+        "gitlab-mr",
+        "comment",
+        "setup",
+        "parent-worktree",
+        "parent-environment",
+        "no-parent",
+        "run-hooks",
+        "activate"
+      ],
+      "positionalArgs": [],
+      "repeatableFlags": [
+        "reference"
+      ]
+    },
+    {
+      "command": "worktree list",
+      "path": [
+        "worktree",
+        "list"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "List Orca-managed worktrees",
+      "usage": "orca worktree list [--repo <selector>] [--limit <n>] [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "repo",
+        "limit"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "worktree ps",
+      "path": [
+        "worktree",
+        "ps"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Show a compact orchestration summary across worktrees",
+      "usage": "orca worktree ps [--limit <n>] [--agent-wait] [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "limit",
+        "agent-wait"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "worktree rm",
+      "path": [
+        "worktree",
+        "rm"
+      ],
+      "aliases": [
+        [
+          "worktree",
+          "remove"
+        ],
+        [
+          "worktree",
+          "delete"
+        ]
+      ],
+      "argumentMode": "parsed",
+      "summary": "Remove a Git worktree or a folder workspace entry from Orca",
+      "usage": "orca worktree rm --worktree <selector> [--force] [--delete-branch] [--run-hooks] [--allow-failed-archive-hook] [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "worktree",
+        "force",
+        "delete-branch",
+        "run-hooks",
+        "allow-failed-archive-hook"
+      ],
+      "positionalArgs": []
+    },
+    {
+      "command": "worktree show",
+      "path": [
+        "worktree",
+        "show"
+      ],
+      "aliases": [],
+      "argumentMode": "parsed",
+      "summary": "Show one worktree",
+      "usage": "orca worktree show --worktree <selector> [--json]",
+      "flags": [
+        "help",
+        "json",
+        "pairing-code",
+        "environment",
+        "worktree"
+      ],
+      "positionalArgs": []
+    }
+  ]
+}

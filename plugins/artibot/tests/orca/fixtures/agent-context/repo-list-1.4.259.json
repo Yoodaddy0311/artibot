@@ -1,0 +1,122 @@
+{
+  "id": "8d7659b6-9b52-4b22-baa2-a4edac5bb44b",
+  "ok": true,
+  "result": {
+    "repos": [
+      {
+        "id": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642",
+        "path": "<HOME>/Desktop/AI/Artibot",
+        "displayName": "Artibot",
+        "badgeColor": "#737373",
+        "addedAt": 1792392249063,
+        "kind": "git",
+        "externalWorktreeVisibilityLegacy": false,
+        "gitUsername": "<GH_USER>",
+        "hookSettings": {
+          "mode": "auto",
+          "setupRunPolicy": "run-by-default",
+          "setupAgentStartupPolicy": "start-immediately",
+          "scripts": {
+            "setup": "npm install",
+            "archive": ""
+          },
+          "commandSourcePolicy": "local-only"
+        },
+        "repoIcon": {
+          "type": "image",
+          "src": "https://github.com/<GH_USER>.png?size=64",
+          "source": "github",
+          "label": "<GH_USER>/artibot"
+        },
+        "upstream": null,
+        "gitRemoteIdentity": {
+          "canonicalKey": "github.com/<GH_USER>/artibot",
+          "remoteName": "origin",
+          "remoteUrl": "https://github.com/<GH_USER>/artibot.git"
+        },
+        "projectHostSetupMethod": "imported-existing-folder",
+        "agentWorkspaceTrust": "pre-trust",
+        "externalWorktreeVisibility": "hide"
+      },
+      {
+        "id": "154fc440-97bb-4b06-b459-8c5c6c4f6ff6",
+        "path": "<HOME>\\Desktop\\AI\\Other-A",
+        "displayName": "Other-A",
+        "badgeColor": "#737373",
+        "addedAt": 1793078088259,
+        "kind": "git",
+        "externalWorktreeVisibilityLegacy": true,
+        "externalWorktreeVisibility": "hide",
+        "gitUsername": "<GH_USER>",
+        "folderUpgradeGitRootPath": "<HOME>/Desktop/AI/Other-A",
+        "upstream": null,
+        "gitRemoteIdentity": null,
+        "agentWorkspaceTrust": "pre-trust",
+        "hookSettings": {
+          "mode": "auto",
+          "setupRunPolicy": "run-by-default",
+          "setupAgentStartupPolicy": "start-immediately",
+          "scripts": {
+            "setup": "",
+            "archive": ""
+          }
+        }
+      },
+      {
+        "id": "f6b2ada0-13b3-49c2-b7a2-971f35cf0553",
+        "path": "<HOME>/Desktop/AI/Other-B",
+        "displayName": "Other-B",
+        "badgeColor": "#737373",
+        "addedAt": 1795052246089,
+        "kind": "git",
+        "externalWorktreeVisibilityLegacy": false,
+        "externalWorktreeVisibility": "show",
+        "worktreeBaseRef": "origin/integ/next",
+        "repoIcon": {
+          "type": "image",
+          "src": "https://github.com/<GH_USER>.png?size=64",
+          "source": "github",
+          "label": "<GH_USER>/other-b"
+        },
+        "upstream": null,
+        "gitRemoteIdentity": {
+          "canonicalKey": "github.com/<GH_USER>/other-b",
+          "remoteName": "origin",
+          "remoteUrl": "https://github.com/<GH_USER>/other-b.git"
+        },
+        "projectHostSetupMethod": "imported-existing-folder",
+        "gitUsername": "<GH_USER>",
+        "hookSettings": {
+          "mode": "auto",
+          "setupRunPolicy": "run-by-default",
+          "setupAgentStartupPolicy": "start-immediately",
+          "scripts": {
+            "setup": "",
+            "archive": ""
+          }
+        }
+      },
+      {
+        "id": "4a3886cd-2188-45b3-9c16-bf941b77826f",
+        "path": "<HOME>\\Desktop\\AI\\Other-C",
+        "displayName": "Other-C",
+        "badgeColor": "#737373",
+        "addedAt": 1795054867275,
+        "kind": "folder",
+        "gitUsername": "",
+        "hookSettings": {
+          "mode": "auto",
+          "setupRunPolicy": "run-by-default",
+          "setupAgentStartupPolicy": "start-immediately",
+          "scripts": {
+            "setup": "",
+            "archive": ""
+          }
+        }
+      }
+    ]
+  },
+  "_meta": {
+    "runtimeId": "b82cdb82-951f-4bb1-97b0-88035ebbcb74"
+  }
+}
