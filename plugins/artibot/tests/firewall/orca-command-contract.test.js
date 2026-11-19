@@ -62,7 +62,7 @@ const SUBCOMMANDS = ['plan', 'launch', 'status', 'integrate', 'close', 'resume',
 const REQUIRED_TOOLS = ['Bash', 'Read', 'Write', 'SendMessage', 'AskUserQuestion'];
 /** 리더가 한 줄씩 직접 치는 변경 verb — 설계안 §4.1-4 ∪ §11.2. 스크립트는 이것을 부르지 않고 출력만 한다. */
 const LEADER_MUTATING_VERBS = [
-  'run-create', 'task-create', 'worktree create', 'worker-start', 'send', 'reply',
+  'run-create', 'run-use', 'task-create', 'worktree create', 'worker-start', 'send', 'reply',
   'deny', 'task-update', 'worker-release', 'worktree rm', 'terminal close',
 ];
 const LABELS = ['보고 계약', '중계 계약'];
@@ -292,7 +292,7 @@ describe('서브커맨드와 리더 허용 목록', () => {
     SUBCOMMANDS.forEach((name, i) => expect(rows[i][0]).toMatch(new RegExp('^`' + name + '[ `]')));
   });
 
-  it('변경 verb 는 리더가 한 줄씩 직접 친다 — 허용 목록 11개가 전부 있다', () => {
+  it('변경 verb 는 리더가 한 줄씩 직접 친다 — 허용 목록 12개(run-use 포함)가 전부 있다', () => {
     const line = orcaMd.split('\n').find((l) => l.includes('허용 목록:'));
     expect(line, '허용 목록 줄이 없다').toBeDefined();
     expect(line).toContain('변경 verb 는 리더가 한 줄씩 직접 친다');
@@ -544,6 +544,13 @@ describe('close', () => {
     for (const i of order) expect(i).toBeGreaterThanOrEqual(0);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(close).toContain('**전부 통과한 뒤에만** 닫는 명령을 출력한다');
+  });
+
+  it('후속 줄기는 선행 줄기를 close 하기 전에 시작한다 — close 가 착지 증거인 브랜치를 지우고 status 는 없는 줄기를 착지로 세지 않는다', () => {
+    const rule = '**후속 줄기가 이 줄기의 착지를 기다리면 후속을 먼저 시작한 뒤 close 한다**';
+    expect(close).toContain(rule);
+    expect(close).toContain('브랜치·worktree 가 모두 없는 줄기를 착지로 세지 않는다');
+    expect(close.replace(rule, '')).not.toContain(rule); // 양성 대조: 문장을 지우면 이 핀이 잡는다
   });
 
   it('--abandon 은 비파괴 teardown 뒤 worktree·브랜치를 남기고 처분은 Orca 에 남긴다', () => {

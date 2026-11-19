@@ -28,7 +28,7 @@ toolset: team
 ## 불변식 — 판단은 코드, 행동은 리더
 
 1. **진실원은 git.** 완료 = 줄기 브랜치 first-parent 선상 마지막 `Split-Limb` 트레일러가 `done`(`lib/git/limb-completion.js#readLimbCompletion`). `worker_done` 은 "지금 다시 읽으라"는 신호이지 완료가 아니다. **착지** = 트레일러 `done`(커밋 > 0) ∧ `git fetch` 뒤 줄기 tip 이 `origin/master` 의 조상 — 둘 다 본다(커밋 0 인 줄기는 tip 이 base 라 조상 검사만으로는 "착지"로 읽힌다).
-2. **스크립트는 Orca 읽기 verb 만 부른다**(`status` · `repo list` · `agent-context` · `worktree show|list|ps` · `orchestration worker-list|task-list|worker-show|inbox|check --peek` · `terminal read`). **변경 verb 는 리더가 한 줄씩 직접 친다** — 허용 목록: `run-create` · `task-create` · `worktree create` · `worker-start` · `send` · `reply` · `deny` · `task-update` · `worker-release` · `worktree rm` · `terminal close`. 목록 밖의 변경 verb 는 쓰지 않는다. 스크립트가 워커를 띄우면 permission laundering 이다 — 훅과 호스트 권한 프롬프트가 보는 것은 리더가 친 명령이다.
+2. **스크립트는 Orca 읽기 verb 만 부른다**(`status` · `repo list` · `agent-context` · `worktree show|list|ps` · `orchestration worker-list|task-list|worker-show|inbox|check --peek` · `terminal read`). **변경 verb 는 리더가 한 줄씩 직접 친다** — 허용 목록: `run-create` · `run-use`(세션↔Run 바인딩, resume 이 쓴다) · `task-create` · `worktree create` · `worker-start` · `send` · `reply` · `deny` · `task-update` · `worker-release` · `worktree rm` · `terminal close`. 목록 밖의 변경 verb 는 쓰지 않는다. 스크립트가 워커를 띄우면 permission laundering 이다 — 훅과 호스트 권한 프롬프트가 보는 것은 리더가 친 명령이다.
 3. **폴링 금지.** 메일을 소비하는 `check` 는 리더 자신만, 기상 문구가 가리킬 때 한다. 스크립트·점검은 `check --peek` 와 `inbox` 만 쓴다.
 4. **식별은 Orca 가 발급한 id**(worktree id · Task id · dispatch id)로 한다. 이름·경로·브랜치를 예측하지 않고, 만든 뒤 `bind.mjs` 가 읽어 기록한다. 줄기의 키 = worktree id.
 5. **Orca 의 Task DAG(`--deps`)는 쓰지 않는다.** `worker_done` 이 Task 를 정산하므로 트레일러가 없거나 land 가 FAIL 이어도 후속이 ready 로 보인다. 시작 판정은 우리 순수 함수 하나(`status.mjs --next`), Task 는 줄기를 시작하는 순간 `--deps` 없이 만든다.
@@ -87,7 +87,7 @@ node --input-type=module -e "import path from 'node:path';import {pathToFileURL}
 
 ### close
 
-줄기가 더 이상 작업 대상이 아닐 때 `node "<pluginRoot>/scripts/orca/close.mjs" <limb> --json` 을 돌린다. 이 스크립트가 **착지 두 조건**(또는 `--abandon`) → `report.md` 를 부모의 오케스트레이션 상태 폴더로 복사 → junction teardown → reparse point 0 → 워킹트리 청결 순으로 확인하고, **전부 통과한 뒤에만** 닫는 명령을 출력한다. 리더는 **출력된 줄만, 출력된 플래그 그대로** 친다: `worker-release --dispatch <id>` → `worktree rm`. 플래그를 더하거나 바꾸지 않는다. junction 은 삭제 **전에** teardown 한다 — 안 하면 `git status` 가 junction 대상의 내용을 untracked 로 나열해 Orca 가 삭제를 거부한다(P0-8).
+줄기가 더 이상 작업 대상이 아닐 때 `node "<pluginRoot>/scripts/orca/close.mjs" <limb> --json` 을 돌린다. 이 스크립트가 **착지 두 조건**(또는 `--abandon`) → `report.md` 를 부모의 오케스트레이션 상태 폴더로 복사 → junction teardown → reparse point 0 → 워킹트리 청결 순으로 확인하고, **전부 통과한 뒤에만** 닫는 명령을 출력한다. 리더는 **출력된 줄만, 출력된 플래그 그대로** 친다: `worker-release --dispatch <id>` → `worktree rm`. 플래그를 더하거나 바꾸지 않는다. junction 은 삭제 **전에** teardown 한다 — 안 하면 `git status` 가 junction 대상의 내용을 untracked 로 나열해 Orca 가 삭제를 거부한다(P0-8). **후속 줄기가 이 줄기의 착지를 기다리면 후속을 먼저 시작한 뒤 close 한다** — close 는 착지 증거인 브랜치를 지우고, `status.mjs` 는 브랜치·worktree 가 모두 없는 줄기를 착지로 세지 않는다(착지 증거 없음).
 
 **replay 규칙**(P0-8, Windows 실측): ① 종료코드를 믿지 않는다 — `.git/worktrees/<name>` 삭제가 Permission denied 로 실패해도 worktree 폴더는 이미 지워졌을 수 있다 ② `git worktree list` · 브랜치 목록 · `orca worktree list` 로 판정한다(`close.mjs` 출력에 검증 명령 3개가 같이 나온다) ③ 남아 있으면 **동일 플래그로 1회** 다시 친다(다른 플래그로 다시 치면 Orca 가 거부한다) ④ `.git/worktrees/<name>` 관리 디렉터리 잔여는 허용한다(`git worktree prune` 도 같은 오류) ⑤ 완료 기준 = git 등록 0 ∧ 브랜치 0 ∧ Orca 목록 0.
 
