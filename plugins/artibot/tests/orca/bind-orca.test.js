@@ -671,6 +671,19 @@ describe('PROMPT-TEMPLATE.md — 이 템플릿을 보는 다른 게이트는 없
   });
 });
 
+describe('픽스처 위생 — 실제 GitHub 계정·사용자 경로가 영수증에 남아 있지 않다 (SR-5)', () => {
+  it('모든 영수증의 github: 식별자는 중립 자리표시자이고 드라이브 문자 사용자 경로도 없다', () => {
+    const names = fs.readdirSync(FIXTURES);
+    expect(names.length).toBeGreaterThanOrEqual(29); // not a vacuous scan
+    for (const name of names) {
+      const text = readText(FIXTURES, name);
+      for (const id of text.match(/github:[^"\s]*/g) ?? []) expect([name, id]).toEqual([name, 'github:example/repo']);
+      expect([name, /[A-Za-z]:[\\/]+Users[\\/]/.test(text)]).toEqual([name, false]);
+    }
+    expect(names.filter((name) => name.endsWith('.json') && readText(FIXTURES, name).includes('github:'))).toEqual(['wt-a-show.json', 'wt-a.json']); // the scan does see the placeholder where it is
+  });
+});
+
 describe('실제 직접 실행 — 진입 가드', () => {
   it('node bind.mjs --help 는 사용법을 낸다', () => {
     expect(execFileSync(process.execPath, [SCRIPT, '--help'], { encoding: 'utf-8', windowsHide: true })).toContain('usage:');

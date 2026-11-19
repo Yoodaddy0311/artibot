@@ -166,8 +166,14 @@ beforeAll(() => {
     nodir: addLimb(world, 'lim-nodir', { junction: false, report: null }),
     gone: addLimb(world, 'lim-gone', { junction: false, report: null }),
     failing: addLimb(world, 'lim-failing'),
+    nl: addLimb(world, 'lim-nl'), // run.json tampered: a newline inside a dispatch id
+    sq: addLimb(world, 'lim-sq', { trailer: 'wip' }), // run.json tampered: a typographic quote inside a task id
+    nm: addLimb(world, 'lim-nm'), // a real node_modules (not the link slot) holding links: direct and scoped children
   };
-  for (const key of ['landed', 'dirty', 'foreign', 'nodir', 'gone', 'failing']) land(world, L[key].branch);
+  for (const key of ['landed', 'dirty', 'foreign', 'nodir', 'gone', 'failing', 'nl', 'nm']) land(world, L[key].branch);
+  fs.mkdirSync(path.join(L.nm.wt, 'tools', 'node_modules', '@scope'), { recursive: true });
+  fs.symlinkSync(path.join(world.repo, ...NODE_MODULES), path.join(L.nm.wt, 'tools', 'node_modules', 'pkg-link'), 'junction');
+  fs.symlinkSync(path.join(world.repo, ...NODE_MODULES), path.join(L.nm.wt, 'tools', 'node_modules', '@scope', 'scoped-link'), 'junction');
   fs.writeFileSync(path.join(L.dirty.wt, 'scratch.txt'), 'uncommitted work\n');
   fs.mkdirSync(path.join(L.foreign.wt, 'tools'), { recursive: true });
   fs.symlinkSync(path.join(world.repo, ...NODE_MODULES), path.join(L.foreign.wt, 'tools', 'link'), 'junction');
@@ -185,6 +191,9 @@ beforeAll(() => {
     boundRow(L.nodir, [dispatch('ctx_333333333333', 'task_333333333333')]),
     boundRow(L.gone, [dispatch('ctx_444444444444', 'task_444444444444')]),
     boundRow(L.failing, [dispatch('ctx_555555555555', 'task_555555555555')]),
+    boundRow(L.nl, [dispatch('ctx_bad\nrelease', 'task_666666666666')]),
+    boundRow(L.sq, [dispatch('ctx_777777777777', 'task_7\u{201C}77')]),
+    boundRow(L.nm, [dispatch('ctx_888888888888', 'task_888888888888')]),
     { limb: 'lim-unbound', taskIds: ['lim-unbound'], affectedPaths: [], deps: [], worktreeId: null, worktreePath: null, branch: null, forkPoint: null, dispatches: [] },
   ]);
 }, 180_000);
@@ -318,6 +327,8 @@ describe('실패는 자기 step 에서 멈추고 삭제 명령을 내지 않는�
     expect(stepNames(result)).toEqual(['landing:PASS', 'report:PASS', 'teardown:PASS', 'reparse:PASS', 'clean:FAIL']);
     expect(result.error).toContain('scratch.txt');
     expect(result.error).toContain('삭제하면 사라진다');
+    expect(result.error).toContain('teardown 이 이미 junction 을 제거했다');
+    expect(result.error).toContain('bind.mjs worktree 를 다시 실행(멱등)해 junction 을 복구한다');
     expect(fs.existsSync(path.join(world.repo, '.artibot', 'orca', 'lim-dirty', 'report.md'))).toBe(true);
     expect(fs.existsSync(path.join(L.dirty.wt, 'scratch.txt'))).toBe(true);
   });
@@ -338,6 +349,15 @@ describe('실패는 자기 step 에서 멈추고 삭제 명령을 내지 않는�
     expect(stepNames(result)).toEqual(['landing:PASS', 'report:PASS', 'teardown:FAIL']);
     expect(result.error).toContain('not a reparse point');
     expect(isLink(L.failing.link)).toBe(true);
+  });
+
+  it('설정에 없는 node_modules 안의 직계·@scope 링크는 reparse 에서 닫힌다 — 이전에는 node_modules 내부를 안 봐서 통과했다 (SR-2 음성 대조)', () => {
+    const { result } = close('lim-nm');
+    expect(result.ok).toBe(false);
+    expect(stepNames(result)).toEqual(['landing:PASS', 'report:PASS', 'teardown:PASS', 'reparse:FAIL']);
+    expect(result.error).toContain('reparse point 가 남아 있다(2)');
+    expect(result.error).toContain('tools/node_modules/pkg-link');
+    expect(result.error).toContain('tools/node_modules/@scope/scoped-link');
   });
 
   it('탐색 상한을 넘으면 reparse point 0 을 증명하지 못한 것으로 닫는다 (작은 상한으로 검증)', () => {
@@ -362,6 +382,16 @@ describe('실패는 자기 step 에서 멈추고 삭제 명령을 내지 않는�
     expect([drifted.ok, drifted.error]).toEqual([false, expect.stringContaining('체크아웃 루트여야 한다')]);
     const notRepo = close('lim-landed', { deps: { cwd: tempDir('orca-empty-') } }).result;
     expect([notRepo.ok, notRepo.error, notRepo.checks]).toEqual([false, expect.stringContaining('git 리포가 아니다'), undefined]);
+  });
+
+  it('변조된 run.json 의 id(개행 · 유니코드 따옴표)는 모든 guard 를 통과해도 명령을 내지 않는다 — 사유와 함께 거부 (SR-4)', () => {
+    const landed = close('lim-nl').result;
+    expect(landed).toMatchObject({ ok: false, error: expect.stringContaining('명령 줄을 안전하게 만들 수 없다') });
+    expect(landed.checks.map((c) => c.ok)).toEqual([true, true, true, true, true]); // every guard passed; only the command line was refused
+    expect(landed.commands).toBeUndefined();
+    const abandoned = close('lim-sq', { abandon: true }).result;
+    expect(abandoned).toMatchObject({ ok: false, error: expect.stringContaining('명령 줄을 안전하게 만들 수 없다') });
+    expect(abandoned.commands).toBeUndefined();
   });
 
   it('브랜치와 worktree 가 모두 없으면 이미 닫힌 것 — 할 일이 없다', () => {
@@ -414,16 +444,21 @@ describe('--abandon — worktree 와 브랜치는 남기고 처분만 Orca 에 �
 // ── building blocks ─────────────────────────────────────────────────────────
 
 describe('findReparsePoints — 실제 junction 탐지', () => {
-  it('junction 을 찾되 따라 들어가지 않고, .git 과 일반 node_modules 내부는 들어가지 않는다', () => {
+  it('junction 을 찾되 따라 들어가지 않는다 — 일반 node_modules 는 직계 자식과 @scope 직계 자식까지만 보고, 그 아래(패키지 내부)는 들어가지 않는다 (SR-2)', () => {
     const root = tempDir('orca-walk-');
     const target = tempDir('orca-walk-target-');
     fs.writeFileSync(path.join(target, 'inside.txt'), 'x');
     fs.mkdirSync(path.join(root, 'a', 'b'), { recursive: true });
     fs.mkdirSync(path.join(root, 'node_modules', 'pkg'), { recursive: true });
-    fs.symlinkSync(target, path.join(root, 'node_modules', 'pkg', 'hidden-link'), 'junction'); // inside a real node_modules: not entered
+    fs.mkdirSync(path.join(root, 'node_modules', '@scope'), { recursive: true });
+    fs.symlinkSync(target, path.join(root, 'node_modules', 'pkg', 'deep-link'), 'junction'); // inside a package: not entered
+    fs.symlinkSync(target, path.join(root, 'node_modules', 'direct-link'), 'junction'); // node_modules/<pkg>
+    fs.symlinkSync(target, path.join(root, 'node_modules', '@scope', 'scoped-link'), 'junction'); // node_modules/@<scope>/<pkg>
     fs.symlinkSync(target, path.join(root, 'a', 'b', 'link'), 'junction');
     const walk = findReparsePoints(root);
-    expect(walk.found.map(toPosix)).toEqual([toPosix(path.join(root, 'a', 'b', 'link'))]);
+    expect(walk.found.map(toPosix).sort()).toEqual([
+      toPosix(path.join(root, 'a', 'b', 'link')), toPosix(path.join(root, 'node_modules', '@scope', 'scoped-link')), toPosix(path.join(root, 'node_modules', 'direct-link')),
+    ].sort());
     expect(walk.capped).toBe(false);
     expect(walk.unreadable).toEqual([]);
   });
@@ -433,6 +468,14 @@ describe('findReparsePoints — 실제 junction 탐지', () => {
     const target = tempDir('orca-walk-target-');
     fs.symlinkSync(target, path.join(root, 'node_modules'), 'junction');
     expect(findReparsePoints(root).found).toHaveLength(1);
+  });
+
+  it('node_modules 의 자식도 같은 상한을 쓴다 — 자식이 많은 node_modules 에서 상한에 닿으면 증명 실패(capped)', () => {
+    const root = tempDir('orca-walk-');
+    fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
+    for (let i = 0; i < 6; i += 1) fs.mkdirSync(path.join(root, 'node_modules', `pkg${i}`));
+    expect(findReparsePoints(root, { maxEntries: 4 }).capped).toBe(true);
+    expect(findReparsePoints(root).capped).toBe(false);
   });
 
   it('상한을 넘으면 capped, 깨끗한 폴더는 found 0', () => {

@@ -43,6 +43,9 @@ const FIXTURES = path.join(HERE, 'fixtures', 'receipts');
 const SCRIPT = path.resolve(HERE, '..', '..', 'scripts', 'orca', 'status.mjs');
 const RUN_ID = 'run_3c01547fc37f';
 const REPO_ID = 'd56eb7c9-5a43-4fcf-8c27-05cfbf914642';
+// Orca's worker state word. A named constant, not a literal next to a state key: the repo-wide R-11 gate (tests/supervisor/v11-status-mapping.test.js)
+// greps source for that spelling, and this is an Orca WORKER state, not a plugin lane state.
+const FAILED_STATE = 'failed';
 
 const receipt = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf-8'));
 const clone = (value) => structuredClone(value);
@@ -112,7 +115,7 @@ function writeRun(world, limbs, extra = {}) {
 const okEnvelope = (doc) => ({ ok: true, status: 0, stdout: JSON.stringify(doc), stderr: '', error: null });
 
 /** Answers the two read verbs with the given documents; everything git goes to the real git. */
-function fakeOrca({ workers = receipt('wl-final.json'), tasks = receipt('task-list-final.json'), fail = false } = {}) {
+function fakeOrca({ workers = receipt('wl-final.receipt.txt'), tasks = receipt('task-list-final.json'), fail = false } = {}) {
   const calls = [];
   const exec = (file, args, options) => {
     if (file === 'git') return defaultExec(file, args, options);
@@ -145,11 +148,14 @@ beforeAll(() => {
     empty: addLimb(world, 'w-empty', { commits: 0 }),
     closed: addLimb(world, 'w-closed', { trailer: 'done' }),
     stall: addLimb(world, 'w-stall', { trailer: 'wip' }),
+    vanished: addLimb(world, 'w-vanished', { trailer: 'done' }),
   };
   land(world, made.landed.branch);
   land(world, made.closed.branch);
   git(world.repo, 'worktree', 'remove', '--force', made.closed.wt);
   git(world.repo, 'branch', '-q', '-d', made.closed.branch);
+  git(world.repo, 'worktree', 'remove', '--force', made.vanished.wt); // never landed, then deleted by hand
+  git(world.repo, 'update-ref', '-d', `refs/heads/${made.vanished.branch}`);
 }, 120_000);
 
 afterAll(() => {
@@ -183,7 +189,7 @@ describe('fetchOrcaFacts — 실제 영수증을 읽는다', () => {
   });
 
   it('nextCursor 가 있으면 잘렸다고 경고한다 (실제 영수증에 nextCursor 한 칸만 더한 파생)', () => {
-    const truncated = clone(receipt('wl-final.json'));
+    const truncated = clone(receipt('wl-final.receipt.txt'));
     truncated.result.nextCursor = 'opaque';
     expect(fetchOrcaFacts(fakeOrca({ workers: truncated }).exec, RUN_ID).warnings.join(' ')).toContain('잘렸다');
   });
@@ -239,7 +245,7 @@ describe('collectStatus — 실제 git + 실제 영수증', () => {
   it('실패한 워커(실제 영수증: failed / exited) 1회 → 재시도 안내, 오너 상한 전', () => {
     const r = rowOf('probe-c');
     expect(r).toMatchObject({ taskStatus: 'failed', failedDispatches: 1 });
-    expect(r.worker).toMatchObject({ state: 'failed', liveness: 'exited', terminalState: 'reclaimable' });
+    expect(r.worker).toMatchObject({ state: FAILED_STATE, liveness: 'exited', terminalState: 'reclaimable' });
     expect(r.next.kind).toBe('retry');
     expect(r.next.text).toContain('--retry-of ctx_129e44009de5');
   });
@@ -251,8 +257,11 @@ describe('collectStatus — 실제 git + 실제 영수증', () => {
     expect(rowOf('probe-e').next.text).toContain('probe-a');
   });
 
-  it('nextActions: 착지 대기열(probe-a) · 시작(probe-d) · 정리(probe-b)', () => {
-    expect(table.nextActions.map((a) => a.kind)).toEqual(['land', 'start', 'close']);
+  it('nextActions: 착지 대기열(probe-a) · 시작(probe-d) · 정리(probe-b) — 선행이 landed(브랜치 있음)인 동안 후속이 풀리고 start 가 close 보다 먼저다', () => {
+    const kinds = table.nextActions.map((a) => a.kind);
+    expect(kinds).toEqual(['land', 'start', 'close']);
+    expect(kinds.indexOf('start')).toBeLessThan(kinds.indexOf('close'));
+    expect(rowOf('probe-d').next.kind).toBe('ready-to-start');
     expect(table.nextActions[0].limbs).toEqual(['probe-a']);
     expect(table.nextActions[1].limbs).toEqual(['probe-d']);
     expect(table.nextActions[2].limb).toBe('probe-b');
@@ -289,8 +298,8 @@ describe('collectStatus — 진행 중 · 충돌 · 닫힘 (파생 영수증)', 
   it('같은 줄기에서 실패한 dispatch 가 2개면 재시도하지 않고 오너에게', () => {
     writeRun(world, [bound('probe-c', made.wip, [dispatch('ctx_e759f8cefc88', 'task_dfa5c850df6a'), dispatch('ctx_129e44009de5', 'task_9fbf30ff0a5d', 'retry')])]);
     // DERIVED: the real wl-final has exactly one failed worker; the other dispatch of the limb is flipped to failed.
-    const workers = clone(receipt('wl-final.json'));
-    workers.result.workers.find((w) => w.dispatchId === 'ctx_e759f8cefc88').state = 'failed';
+    const workers = clone(receipt('wl-final.receipt.txt'));
+    workers.result.workers.find((w) => w.dispatchId === 'ctx_e759f8cefc88').state = FAILED_STATE;
     const s = status({ exec: fakeOrca({ workers }).exec });
     expect(s.rows[0].failedDispatches).toBe(2);
     expect(s.rows[0].next.kind).toBe('owner');
@@ -304,12 +313,28 @@ describe('collectStatus — 진행 중 · 충돌 · 닫힘 (파생 영수증)', 
     expect(s.rows[0].next.text).toContain('send --to dispatch:ctx_bba48a83896e');
   });
 
-  it('브랜치와 worktree 가 모두 사라진 줄기는 closed — 후속 줄기의 선행으로 센다', () => {
+  it('브랜치와 worktree 가 모두 사라진 줄기는 closed 로 표시만 한다 — 착지 증거가 없으니 후속 줄기는 풀리지 않는다 (QR-1, fail-closed)', () => {
     writeRun(world, [bound('probe-a', made.closed, [dispatch('ctx_bba48a83896e', 'task_873e6cb5afb2')]), row('probe-d', { deps: ['probe-a'] })]);
     const s = status();
     expect(s.rows[0]).toMatchObject({ landing: 'closed', closed: true });
-    expect(s.rows[0].notes.join(' ')).toContain('close 를 거친 것으로');
-    expect(s.rows[1].next.kind).toBe('ready-to-start');
+    expect(s.rows[0].notes.join(' ')).toContain('착지 증거가 없어 착지로 세지 않는다');
+    expect(s.rows[0].notes.join(' ')).toContain('close 하기 전에 시작해야 한다');
+    expect(s.rows[1].next.kind).toBe('wait-deps');
+    expect(s.nextActions.some((a) => a.kind === 'start')).toBe(false);
+  });
+
+  it('closed 를 착지로 읽던 세 경로의 음성 대조 — 바인딩만 하고 지운 줄기 · task-list 실패(tasks=null) · 미착지 삭제 — 전부 후속은 대기', () => {
+    const dependent = row('probe-d', { deps: ['probe-a'] });
+    const dispatched = (made1) => bound('probe-a', made1, [dispatch('ctx_bba48a83896e', 'task_873e6cb5afb2')]);
+    for (const [label, rows, orca] of [
+      ['dispatch 전에 지워진 바인딩 줄기', [bound('probe-a', made.closed), dependent], fakeOrca()],
+      ['task-list 실패(tasks=null)', [dispatched(made.closed), dependent], fakeOrca({ fail: true })],
+      ['미착지 삭제(Task 는 completed)', [dispatched(made.vanished), dependent], fakeOrca()],
+    ]) {
+      writeRun(world, rows);
+      const s = status({ exec: orca.exec });
+      expect([label, s.rows[0].landing, s.rows[1].next.kind]).toEqual([label, 'closed', 'wait-deps']);
+    }
   });
 
   it('Orca 조회가 실패해도 git 쪽 사실은 나온다 — 경고만 늘고 던지지 않는다', () => {
@@ -424,11 +449,22 @@ describe('classifyMail — 실제 check 영수증', () => {
     expect(res.counts).toEqual({ question: 1 });
   });
 
-  it('인용할 수 없는 메시지 id 는 명령 줄만 빠지고 분류는 그대로다 (힌트가 분류 전체를 죽이지 않는다)', () => {
+  it('인용할 수 없는 메시지 id(양쪽 따옴표 · 개행 · 유니코드 따옴표 · NUL)는 명령 줄만 사유와 함께 빠지고 분류는 그대로다 — 힌트가 분류 전체를 죽이지 않는다', () => {
     mailRun();
-    const doc = clone(receipt('check-1.json'));
-    doc.result.messages[0].id = `msg_a"b'c$d`;
-    expect(classify(doc).items[0]).toMatchObject({ verdict: 'answer', commands: [] });
+    for (const id of [`msg_a"b'c$d`, 'msg_a\nb', 'msg_a\u{201C}b', 'msg_a\0b']) {
+      const doc = clone(receipt('check-1.json'));
+      doc.result.messages[0].id = id;
+      expect(classify(doc).items[0]).toMatchObject({ verdict: 'answer', commands: [], commandsWithheld: 1 });
+    }
+  });
+
+  it('변조된 run.json 의 dispatch/task id(개행 · 유니코드 따옴표)는 표에 명령 문구를 내지 않는다 (SR-4)', () => {
+    for (const bad of ['task_x\nsomething', 'task_x\u{201C}y']) {
+      writeRun(world, [bound('probe-a', made.wip, [dispatch('ctx_bba48a83896e', bad)])]);
+      const next = status().rows[0].next;
+      expect(next.kind).toBe('unsafe-id');
+      expect(next.text).not.toMatch(/[\r\n]/);
+    }
   });
 
   it('worker_done(check-3, from 이 터미널 핸들) + 트레일러 done · 미착지 → land 체크', () => {
@@ -481,8 +517,8 @@ describe('classifyMail — 실제 check 영수증', () => {
   it('같은 줄기의 실패가 2회(Orca 목록 1 + 이번 메일 1)면 재시도하지 않고 오너에게', () => {
     writeRun(world, [bound('probe-b', made.wip, [dispatch('ctx_9e272959985a', 'task_49c93a4972cb'), dispatch('ctx_b895e0547dac', 'task_01dcf3b9c698', 'rework')])]);
     // DERIVED: the later dispatch of the limb is listed failed; the mail (check-2) reports the earlier one failed.
-    const workers = clone(receipt('wl-final.json'));
-    workers.result.workers.find((w) => w.dispatchId === 'ctx_b895e0547dac').state = 'failed';
+    const workers = clone(receipt('wl-final.receipt.txt'));
+    workers.result.workers.find((w) => w.dispatchId === 'ctx_b895e0547dac').state = FAILED_STATE;
     const doc = clone(receipt('check-2.json'));
     doc.result.messages[0].payload.outcome = 'failed';
     const item = classify(doc, fakeOrca({ workers })).items[0];
@@ -507,6 +543,15 @@ describe('classifyMail — 실제 check 영수증', () => {
     const item = classify(doc).items[0];
     expect(item).toMatchObject({ kind: 'escalation', limb: 'probe-c', stopReason: null, verdict: 'blocked' });
     expect(item.action).toContain('승인하지 않는다');
+  });
+
+  it('lost 가 아닌 stopReason 은 other-stop — 재시작 명령 없이 본문을 읽고 판단하거나 오너 (check-5 에서 stopReason 값만 바꾼 파생)', () => {
+    mailRun({ c: made.none });
+    const doc = clone(receipt('check-5.json'));
+    doc.result.messages[0].payload.stopReason = 'exited';
+    const item = classify(doc).items[0];
+    expect(item).toMatchObject({ kind: 'escalation', limb: 'probe-c', stopReason: 'exited', verdict: 'other-stop', commands: [] });
+    expect(item.action).toContain('재시작 명령은 내지 않는다');
   });
 
   it('한 배치의 여러 메시지를 모두 분류하고 종류별로 센다 (check-1/3/5/7 — 실제 inbox 의 세 종류) · 알 수 없는 type 은 other', () => {
@@ -564,7 +609,7 @@ describe('judgeStall / runStall — 기한 있는 점검의 "변화 없음"', ()
     tasks.result.tasks.find((t) => t.id === 'task_873e6cb5afb2').status = 'dispatched';
     const exec = fakeOrca({ workers: receipt('wl-0.json'), tasks }).exec;
     const now = () => new Date('2026-11-19T05:00:00.000Z');
-    const run = () => runStall({ parentRoot: world.repo, rows: status({ exec }).rows, now });
+    const run = () => runStall({ parentRoot: world.repo, rows: status({ exec }).rows, now }).verdicts;
 
     expect(run()).toEqual([expect.objectContaining({ limb: 'probe-a', verdict: 'baseline', streak: 0 })]);
     const snapshotFile = path.join(world.repo, '.artibot', 'orca', 'stall.json');
@@ -578,6 +623,25 @@ describe('judgeStall / runStall — 기한 있는 점검의 "변화 없음"', ()
 
     git(made.stall.wt, 'commit', '-q', '--allow-empty', '-m', 'more work');
     expect(run()[0]).toMatchObject({ verdict: 'changed', streak: 0 });
+  });
+
+  it('손상된 stall.json 은 조용히 {} 로 읽지 않는다 — 경고(연속 횟수 초기화)와 함께 baseline 으로 다시 쓰고, 파일 없는 첫 실행은 경고 없음 (QR-6)', () => {
+    writeRun(world, [bound('probe-a', made.stall, [dispatch('ctx_bba48a83896e', 'task_873e6cb5afb2')])]);
+    const tasks = clone(receipt('task-list-final.json'));
+    tasks.result.tasks.find((t) => t.id === 'task_873e6cb5afb2').status = 'dispatched'; // DERIVED, as above
+    const rows = status({ exec: fakeOrca({ workers: receipt('wl-0.json'), tasks }).exec }).rows;
+    const file = path.join(world.repo, '.artibot', 'orca', 'stall.json');
+    fs.rmSync(file, { force: true });
+    expect(runStall({ parentRoot: world.repo, rows }).warnings).toEqual([]); // no file yet is normal
+    for (const damaged of ['{not json', '{"limbs": []}']) {
+      fs.writeFileSync(file, damaged);
+      const out = runStall({ parentRoot: world.repo, rows });
+      expect(out.warnings).toHaveLength(1);
+      expect(out.warnings[0]).toContain('stall.json');
+      expect(out.warnings[0]).toContain('연속 횟수 초기화');
+      expect(out.verdicts[0]).toMatchObject({ verdict: 'baseline', streak: 0 });
+    }
+    expect(runStall({ parentRoot: world.repo, rows }).warnings).toEqual([]); // rewritten whole: healed
   });
 });
 

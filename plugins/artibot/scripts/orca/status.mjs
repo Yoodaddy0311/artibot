@@ -22,11 +22,24 @@
  * ancestor of everything and must not read as landed, `landingState`). The
  * plugin writes no lane vocabulary of its own.
  *
+ * `closed` (branch AND worktree both gone) is SHOWN, never counted as landed:
+ * nothing proves it landed, and a limb that was bound and then deleted — or any
+ * limb while task-list failed — would otherwise release its dependents (fail
+ * closed). Dependents start BEFORE the predecessor is closed (`nextActions`
+ * orders land -> start -> close); after a close the leader confirms the landing
+ * in git and starts them by hand.
+ *
+ * Printed command lines refuse control characters and typographic quotes
+ * (`shellQuote`): a value of that kind in run.json or in a message is withheld
+ * WITH a reason (`commandsWithheld`, an `unsafe-id` row), never printed.
+ *
  * `mail` classifies the output of `orca orchestration check --json`. A limb is
  * found through `payload.dispatchId` → `run.json` dispatches, never through
  * `from`: `question.from` is a dispatch id but `worker_done.from` is a terminal
  * handle (P0 receipts 2026-11-19). `worker_done` succeeded without a trailer is
- * "not done — send it back".
+ * "not done — send it back". An `escalation` restarts only for `stopReason: lost`
+ * (the one value ever observed); any other stop word is `other-stop` — read the
+ * body, no restart command.
  *
  * `--stall` (the §4.4 "bounded check" criterion, partly): compares the in-flight
  * limbs with the snapshot the previous `--stall` run left in
@@ -134,10 +147,16 @@ export function callOrcaJson(exec, argv, options = {}) {
 // ── command lines the leader types (printed, never run) ──────────────────────
 
 const BARE_TOKEN = /^[A-Za-z0-9_@%+=:,./-]+$/;
+/** What no printed command line may carry: any control character (CR, LF, NUL, ESC ...) and the typographic quotes U+2018-U+201F (SR-4). */
+const UNQUOTABLE = /[\p{Cc}\u{2018}-\u{201F}]/u;
 
-/** Quote one token for bash / PowerShell; refuses a token it cannot quote safely. */
+/** True when a value could break out of, or split, a printed command line. */
+export const isUnsafeToken = (value) => UNQUOTABLE.test(String(value));
+
+/** Quote one token for bash / PowerShell; refuses a token it cannot quote safely — control characters and typographic quotes are refused outright. */
 export function shellQuote(token) {
   const text = String(token);
+  if (isUnsafeToken(text)) throw new Error(`cannot quote a token with a control character or a typographic quote: ${JSON.stringify(text)}`);
   if (text !== '' && BARE_TOKEN.test(text)) return text;
   if (!/["$`\\]/.test(text)) return `"${text}"`;
   if (!text.includes("'")) return `'${text}'`;
@@ -323,7 +342,7 @@ export function observeLimb(row, ctx) {
   const { complete, reason, lastTrailer, commitCount } = git.completion;
   const notes = [
     ...(git.ancestor === null && git.tip !== null ? [`${ctx.integrationRef} 와의 조상 관계를 읽지 못했다 — 착지로 세지 않는다(--fetch 로 참조를 갱신해 보라)`] : []),
-    ...(closed ? ['브랜치·worktree 모두 없음 — close 를 거친 것으로 보고 착지로 센다(사용자가 UI 에서 직접 지웠다면 이 가정이 틀린다 — 미확인)'] : []),
+    ...(closed ? ['브랜치·worktree 모두 없음 — 착지 증거가 없어 착지로 세지 않는다. 후속 줄기는 선행 줄기를 close 하기 전에 시작해야 한다. 이미 닫았다면 git 으로 착지를 확인한 뒤 리더가 후속을 직접 시작한다'] : []),
   ];
   return { ...out, closed, landing: closed ? 'closed' : git.landing, trailer: { complete, reason, lastTrailer }, commits: commitCount, tip: git.tip, notes };
 }
@@ -334,6 +353,9 @@ const isSettled = (row) => (row.worker ? SETTLED_WORKER.has(row.worker.state) : 
 const isInFlight = (row) => row.latest !== null && !isSettled(row) && row.landing !== 'closed' && row.landing !== 'landed';
 
 function nextForDispatched(row, runFile) {
+  if (isUnsafeToken(row.latest.taskId) || isUnsafeToken(row.latest.dispatchId)) {
+    return { kind: 'unsafe-id', text: 'run.json 의 dispatch/task id 에 제어문자·유니코드 따옴표가 있다 — 명령을 내지 않는다(변조 의심, run.json 을 확인)' };
+  }
   const workerFailed = row.worker?.state === 'failed' || row.taskStatus === 'failed';
   if (workerFailed && row.landing === 'done-unlanded') {
     return { kind: 'conflict', text: `worker 는 failed 로 정산됐는데 브랜치에 트레일러 done 이 있다 — git 이 진실원이다. 보고 본문을 읽고 land 체크(node ${scriptPath('split', 'land.mjs')} ${row.limb} --plan ${toPosix(runFile)}) 여부를 정한다` };
@@ -352,7 +374,7 @@ function nextForDispatched(row, runFile) {
 
 /** The per-limb next action: a decision table over the measured facts and the landed set. */
 export function nextForRow(row, ctx) {
-  if (row.landing === 'closed') return { kind: 'closed', text: '닫힘 — 할 일 없음' };
+  if (row.landing === 'closed') return { kind: 'closed', text: '닫힘(브랜치·worktree 없음) — 착지 증거 없음: git 으로 착지를 확인하기 전에는 후속 줄기를 풀지 않는다' };
   if (row.landing === 'landed') return { kind: 'close', text: `착지됨 — node ${scriptPath('orca', 'close.mjs')} ${row.limb}` };
   if (!row.bound) {
     const blocked = row.deps.filter((dep) => !ctx.landed.has(dep));
@@ -400,7 +422,8 @@ export function collectStatus({ parentRoot, exec = defaultExec, capacity = DEFAU
   warnings.push(...facts.warnings);
   const ctx = { parentRoot, exec, facts, integrationRef, runFile: orcaRunPath(parentRoot) };
   const measured = run.limbs.map((row) => observeLimb(row, ctx));
-  const landed = new Set(measured.filter((r) => r.landing === 'landed' || r.landing === 'closed').map((r) => r.limb));
+  // `closed` (branch and worktree both gone) is SHOWN, never counted: nothing proves it landed (QR-1, fail closed).
+  const landed = new Set(measured.filter((r) => r.landing === 'landed').map((r) => r.limb));
   const rows = measured.map((r) => ({ ...r, inFlight: isInFlight(r), next: nextForRow(r, { landed, runFile: ctx.runFile }) }));
   const observed = {
     landed: [...landed], capacity,
@@ -477,6 +500,10 @@ function classifyEscalation(item, owner, ctx) {
   if (!item.stopReason) {
     return { ...item, verdict: 'blocked', action: '워커가 막혔다고 올렸다 — 승인하지 않는다. 줄기 범위 밖 요청이면 deny, 범위 안이면 오너에게 올린다' };
   }
+  if (item.stopReason !== 'lost') {
+    // Only `lost` was ever observed (P0-20). An unknown stop word must not trigger a restart: read the body, or hand it to the owner.
+    return { ...item, verdict: 'other-stop', action: `워커가 stopReason ${JSON.stringify(String(item.stopReason))} 로 멈췄다고 올렸다 — P0 가 관측한 값은 lost 뿐이다. 재시작 명령은 내지 않는다: 본문을 읽고 판단하거나 오너에게 올린다` };
+  }
   const git = owner ? gitOf(owner, ctx) : null;
   if (git?.completion.complete) {
     return { ...item, verdict: 'lost-complete', action: `워커 정지(${item.stopReason}) — 그러나 트레일러 done 이 있다: 완료 경로(land 체크)로 간다`, commands: [`node ${scriptPath('split', 'land.mjs')} ${owner.row.limb} --plan ${toPosix(orcaRunPath(ctx.parentRoot))}`] };
@@ -532,7 +559,9 @@ export function classifyMail({ doc, parentRoot, exec = defaultExec }) {
   const ctx = { run, parentRoot, exec, facts, batchFailures, integrationRef: run.integrationRef ?? 'origin/master' };
   const items = messages.map((msg) => {
     const item = classifyMessage(msg, ctx);
-    return { ...item, commands: item.commands.filter((c) => typeof c === 'string') };
+    const commands = item.commands.filter((c) => typeof c === 'string');
+    const withheld = item.commands.length - commands.length;
+    return { ...item, commands, ...(withheld > 0 ? { commandsWithheld: withheld } : {}) };
   });
   const counts = {};
   for (const item of items) counts[item.kind] = (counts[item.kind] ?? 0) + 1;
@@ -550,11 +579,21 @@ export function judgeStall(previous, current) {
 
 const stallPath = (parentRoot) => path.join(parentRoot, '.artibot', 'orca', 'stall.json');
 
+const STALL_RESET = '직전 스냅샷을 모르므로 이번을 기준선으로 다시 쓴다(연속 횟수 초기화)';
+
+/** The previous snapshot as `{ limbs, warning }`. A missing file is normal (first run); a damaged one is REPORTED, never read as empty in silence (QR-6). */
 function readStallSnapshot(parentRoot) {
+  let text;
   try {
-    const doc = JSON.parse(fs.readFileSync(stallPath(parentRoot), 'utf-8'));
-    return doc && typeof doc.limbs === 'object' && doc.limbs !== null ? doc.limbs : {};
-  } catch { return {}; }
+    text = fs.readFileSync(stallPath(parentRoot), 'utf-8');
+  } catch (err) {
+    return { limbs: {}, warning: err?.code === 'ENOENT' ? null : `stall.json 을 읽지 못했다(${err?.code ?? err?.message}) — ${STALL_RESET}` };
+  }
+  try {
+    const doc = JSON.parse(text);
+    if (doc && typeof doc.limbs === 'object' && doc.limbs !== null && !Array.isArray(doc.limbs)) return { limbs: doc.limbs, warning: null };
+  } catch { /* reported below */ }
+  return { limbs: {}, warning: `stall.json 이 손상돼 있다(JSON 이 아니거나 limbs 가 없다) — ${STALL_RESET}` };
 }
 
 const STALL_ACTION = {
@@ -565,7 +604,7 @@ const STALL_ACTION = {
 
 /** Judge every in-flight limb against the previous snapshot, then store the new one. */
 export function runStall({ parentRoot, rows, now = () => new Date() }) {
-  const previous = readStallSnapshot(parentRoot);
+  const { limbs: previous, warning } = readStallSnapshot(parentRoot);
   const limbs = {};
   const verdicts = rows.filter((r) => r.inFlight).map((r) => {
     const current = { tip: r.tip, taskStatus: r.taskStatus, workerState: r.worker?.state ?? null };
@@ -575,7 +614,7 @@ export function runStall({ parentRoot, rows, now = () => new Date() }) {
     return { limb: r.limb, ...judged, action };
   });
   atomicWriteJsonSync(stallPath(parentRoot), { schema_version: STALL_SCHEMA_VERSION, at: now().toISOString(), limbs });
-  return verdicts;
+  return { verdicts, warnings: warning ? [warning] : [] };
 }
 
 // ── rendering ────────────────────────────────────────────────────────────────
@@ -621,6 +660,7 @@ function renderMail(result) {
   const lines = result.items.map((i) => [
     `[${i.kind}${i.priority === 'high' ? ' HIGH' : ''}] ${i.id} · limb ${cell(i.limb)} · dispatch ${cell(i.dispatchId)} → ${i.verdict}`,
     `    ${i.action}`, ...i.commands.map((c) => `    $ ${c}`),
+    ...(i.commandsWithheld ? [`    (명령 ${i.commandsWithheld}개는 값에 제어문자·유니코드 따옴표가 있거나 안전하게 인용할 수 없어 내지 않았다 — 메일·run.json 의 값을 확인)`] : []),
   ].join('\n'));
   return [`mail: ${result.items.length}건 (${Object.entries(result.counts).map(([k, v]) => `${k} ${v}`).join(' · ')})`, ...lines, ...result.warnings.map((w) => `warning: ${w}`)].join('\n');
 }
@@ -696,8 +736,8 @@ function runCli(args, deps) {
   const rows = args.limb ? doc.rows.filter((r) => r.limb === args.limb) : doc.rows;
   if (args.limb && rows.length === 0) return { result: { ok: false, error: `limb "${args.limb}" 이 run.json 에 없다` }, text: `limb "${args.limb}" 이 run.json 에 없다` };
   const stall = args.stall ? runStall({ parentRoot, rows: doc.rows, now: deps.now }) : null;
-  const shown = { ...doc, rows, ...(stall ? { stall } : {}) };
-  const parts = [args.next ? renderNext(shown) : renderStatus(shown, { detail: args.limb !== null }), ...(stall ? [renderStall(stall)] : [])];
+  const shown = { ...doc, rows, ...(stall ? { stall: stall.verdicts, warnings: [...doc.warnings, ...stall.warnings] } : {}) };
+  const parts = [args.next ? renderNext(shown) : renderStatus(shown, { detail: args.limb !== null }), ...(stall ? [renderStall(stall.verdicts)] : [])];
   return { result: shown, text: parts.join('\n\n') };
 }
 

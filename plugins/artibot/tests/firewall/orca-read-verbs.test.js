@@ -220,6 +220,12 @@ const EXPECTED_VERBS = Object.freeze({
 
 const verbSet = (scan) => [...new Set(scan.invocations.map((i) => i.verb))].sort();
 
+/** What is wrong with a script module READ_ONLY_ORCA_VERBS export ([] = fine). A missing export is a problem, never a skip. */
+function verbExportProblems(mod) {
+  if (!Array.isArray(mod?.READ_ONLY_ORCA_VERBS)) return ['READ_ONLY_ORCA_VERBS is not exported as an array'];
+  return mod.READ_ONLY_ORCA_VERBS.filter((verb) => !ALLOWED_VERBS.includes(verb)).map((verb) => `"${verb}" is not on the allowlist`);
+}
+
 // ── 1. the real tree ────────────────────────────────────────────────────────
 
 describe('scripts/orca/*.mjs — 실제 파일은 읽기 verb 허용 목록 안이다', () => {
@@ -251,10 +257,10 @@ describe('scripts/orca/*.mjs — 실제 파일은 읽기 verb 허용 목록 안�
     }
   });
 
-  it('양성 대조군: 스캐너는 실제 코드에서 호출을 실제로 본다 (status ≥ 2, bind ≥ 1, preflight 가 있으면 ≥ 1)', () => {
+  it('양성 대조군: 스캐너는 실제 코드에서 호출을 실제로 본다 (status ≥ 2, bind ≥ 1, preflight ≥ 1 — 파일이 없으면 읽기 실패로 RED)', () => {
     expect(scanFile(ORCA_SCRIPTS, 'status.mjs').invocations.length).toBeGreaterThanOrEqual(2);
     expect(scanFile(ORCA_SCRIPTS, 'bind.mjs').invocations.length).toBeGreaterThanOrEqual(1);
-    if (orcaScriptFiles.includes('preflight.mjs')) expect(scanFile(ORCA_SCRIPTS, 'preflight.mjs').invocations.length).toBeGreaterThanOrEqual(1);
+    expect(scanFile(ORCA_SCRIPTS, 'preflight.mjs').invocations.length).toBeGreaterThanOrEqual(1);
   });
 
   it('lib/git/orca-*.js 는 Orca 를 전혀 부르지 않는다 (순수 판정 + 상태 파일 입출력)', () => {
@@ -271,11 +277,16 @@ describe('런타임 guard 와 이 게이트는 같은 목록을 쓴다', () => {
     expect([...RUNTIME_ALLOWLIST].sort()).toEqual([...ALLOWED_VERBS].sort());
   });
 
-  it('L4 preflight 의 READ_ONLY_ORCA_VERBS 가 있으면 허용 목록의 부분집합이다', async () => {
-    if (!orcaScriptFiles.includes('preflight.mjs')) return;
-    const mod = await import('../../scripts/orca/preflight.mjs');
-    if (!Array.isArray(mod.READ_ONLY_ORCA_VERBS)) return;
-    for (const verb of mod.READ_ONLY_ORCA_VERBS) expect(ALLOWED_VERBS).toContain(verb);
+  it('L4 preflight 는 READ_ONLY_ORCA_VERBS 를 배열로 내보내고 그것은 허용 목록의 부분집합이다 — 파일·export 부재는 건너뜀이 아니라 RED (QR-2)', async () => {
+    expect(orcaScriptFiles).toContain('preflight.mjs');
+    expect(verbExportProblems(await import('../../scripts/orca/preflight.mjs'))).toEqual([]);
+  });
+
+  it('verbExportProblems 자기검증 — export 가 없거나 배열이 아니거나 허용 밖 verb 가 있으면 문제로 잡는다 (위 단언이 공허하지 않다는 증명)', () => {
+    expect(verbExportProblems({})).toHaveLength(1);
+    expect(verbExportProblems({ READ_ONLY_ORCA_VERBS: 'status' })).toHaveLength(1);
+    expect(verbExportProblems({ READ_ONLY_ORCA_VERBS: ['status', 'orchestration worker-start'] })).toEqual(['"orchestration worker-start" is not on the allowlist']);
+    expect(verbExportProblems({ READ_ONLY_ORCA_VERBS: ['status', 'repo list'] })).toEqual([]);
   });
 
   it('실제 코드에서 읽어 낸 argv 는 런타임 guard 도 통과시킨다 (정적 판정과 동적 판정의 교차 확인)', () => {
@@ -351,6 +362,14 @@ describe('assertReadOnlyOrcaArgv — 변경 verb 는 실행 경로에 못 들어
 });
 
 describe('명령 줄 출력 — shellQuote / cmdLine', () => {
+  it('제어문자(CR · LF · NUL · ESC)와 유니코드 따옴표(U+2018-U+201F)가 든 값은 거부한다 — 명령 줄을 쪼개거나 속일 수 있다 (SR-4)', () => {
+    for (const bad of ['a\rb', 'a\nb', 'a\0b', 'a\u{1B}[31mb', 'a\u{2018}b', 'a\u{201C}b', 'a\u{201F}b']) {
+      expect(() => shellQuote(bad)).toThrow(/control character or a typographic quote/);
+      expect(() => cmdLine('orca', 'status', bad)).toThrow(/control character or a typographic quote/);
+    }
+    for (const fine of ['a\u{2017}b', 'a\u{2020}b']) expect(() => shellQuote(fine)).not.toThrow(); // the range is exact: one code point either side is allowed
+  });
+
   it('안전한 토큰은 그대로, 공백·특수문자는 따옴표, 따옴표로 못 감싸면 거부 — cmdLine 은 이어 붙인다', () => {
     expect(shellQuote('ctx_bba48a83896e')).toBe('ctx_bba48a83896e');
     expect(shellQuote('id:abc::C:/a b/c')).toBe('"id:abc::C:/a b/c"');

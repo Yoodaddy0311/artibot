@@ -22,11 +22,20 @@
  *                the clean check: a junction makes `git status` list its target's
  *                contents as untracked (P0-8, 2026-11-19) and Orca then refuses
  *                the removal.
- *   4. reparse   no reparse point is left in the worktree (bounded walk, `.git`
- *                and `node_modules` contents not entered). A junction followed by
- *                a recursive delete would take the PARENT's files with it.
+ *   4. reparse   no reparse point is left in the worktree (bounded walk: `.git` is
+ *                not entered; a real `node_modules` is looked at one level — its
+ *                direct children and the children of its `@<scope>` folders — and
+ *                nothing below a package). A junction followed by a recursive
+ *                delete would take the PARENT's files with it.
  *   5. clean     `git status --porcelain` is empty — a forced removal would drop
- *                uncommitted work silently. (`--abandon` only reports it.)
+ *                uncommitted work silently. (`--abandon` only reports it.) The
+ *                failure text says the teardown ALREADY removed the junction and
+ *                that `bind.mjs worktree` (idempotent) puts it back.
+ *
+ * A value in run.json that no command line can carry (a newline, NUL, ESC or a
+ * typographic quote U+2018-U+201F — a tampered or damaged file) does not slip
+ * through quoting: every guard may pass, but the close then FAILS with the reason
+ * and prints no command (`shellQuote` refuses such a token).
  *
  * Exit codes are not the truth about removal (§10 change 4): the first
  * `worktree rm` can fail on Windows with Permission denied on
@@ -50,6 +59,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { atomicWriteBytes, checkParentIsRoot, cmdLine, defaultExec, loadRun, observeLimbGit, runWorktreeSetup, toPosix } from './status.mjs';
+
+/** Said when a later guard (clean tree) stops the close AFTER the teardown step already removed the node_modules junction. */
+export const JUNCTION_RESTORE_NOTE = 'teardown 이 이미 junction 을 제거했다 — 작업을 이어가려면 bind.mjs worktree 를 다시 실행(멱등)해 junction 을 복구한다';
 
 const MAX_WALK_ENTRIES = 100_000;
 const MAX_REPORT_VERSIONS = 99;
@@ -114,9 +126,12 @@ export function copyReport(source, destDir) {
 
 /**
  * Bounded walk for reparse points (junctions / symlinks). Links are reported, never followed;
- * `.git` and the CONTENTS of real `node_modules` directories are not entered (a `node_modules`
- * entry that is itself a link is still reported). Unreadable directories and a hit on the entry
- * cap are returned — the caller must treat either as "not proven".
+ * `.git` is not entered. A REAL `node_modules` is looked at one level only: its direct children
+ * (`node_modules/<pkg>`) and the children of its `@<scope>` folders (`node_modules/@<scope>/<pkg>`) are
+ * lstat-ed and a link among them is reported (pnpm-style layouts are made of exactly those links);
+ * nothing below a package is entered (SR-2). A `node_modules` entry that is itself a link is reported
+ * too. Every entry looked at counts toward the cap. Unreadable directories and a hit on the cap are
+ * returned — the caller must treat either as "not proven".
  *
  * @returns {{ found: string[], scanned: number, capped: boolean, unreadable: string[] }}
  */
@@ -124,9 +139,9 @@ export function findReparsePoints(root, { maxEntries = MAX_WALK_ENTRIES } = {}) 
   const found = [];
   const unreadable = [];
   let scanned = 0;
-  const stack = [root];
+  const stack = [{ dir: root, kind: 'tree' }];
   while (stack.length > 0) {
-    const dir = stack.pop();
+    const { dir, kind } = stack.pop();
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { unreadable.push(dir); continue; }
     for (const entry of entries) {
@@ -137,10 +152,19 @@ export function findReparsePoints(root, { maxEntries = MAX_WALK_ENTRIES } = {}) 
       let isLink;
       try { isLink = fs.lstatSync(full).isSymbolicLink(); } catch { unreadable.push(full); continue; }
       if (isLink) found.push(full);
-      else if (entry.isDirectory() && entry.name !== 'node_modules') stack.push(full);
+      else if (entry.isDirectory()) {
+        const next = nextWalkKind(kind, entry.name);
+        if (next !== null) stack.push({ dir: full, kind: next });
+      }
     }
   }
   return { found, scanned, capped: false, unreadable };
+}
+
+/** Which walk a REAL directory gets: the tree is walked fully, a real node_modules one level, an @scope folder inside it one level, nothing deeper. */
+function nextWalkKind(parentKind, name) {
+  if (parentKind === 'tree') return name === 'node_modules' ? 'modules' : 'tree';
+  return parentKind === 'modules' && name.startsWith('@') ? 'scope' : null;
 }
 
 // ── the guard steps ──────────────────────────────────────────────────────────
@@ -189,7 +213,7 @@ function stepReparse(ctx) {
   if (walk.capped || walk.unreadable.length > 0) {
     return fail('reparse', `reparse point 0 을 증명하지 못했다 — ${walk.capped ? `${walk.scanned}개에서 탐색 상한` : `읽을 수 없는 경로 ${walk.unreadable.length}개`}`, { walk });
   }
-  return pass('reparse', `reparse point 0 (항목 ${walk.scanned}개 확인, .git·node_modules 내부 제외)`, { walk });
+  return pass('reparse', `reparse point 0 (항목 ${walk.scanned}개 확인 — .git 제외, node_modules 는 직계·@scope 직계만)`, { walk });
 }
 
 function stepClean(ctx) {
@@ -201,7 +225,8 @@ function stepClean(ctx) {
   const shown = dirty.slice(0, DIRTY_LINES_SHOWN).join(' | ');
   const more = dirty.length > DIRTY_LINES_SHOWN ? ` … 외 ${dirty.length - DIRTY_LINES_SHOWN}건` : '';
   const detail = `커밋되지 않은 변경 ${dirty.length}건: ${shown}${more}`;
-  return ctx.abandon ? pass('clean', `(--abandon: 정보) ${detail}`) : fail('clean', `${detail} — 삭제하면 사라진다. 커밋하거나 오너가 버리기로 한 뒤 다시`);
+  if (ctx.abandon) return pass('clean', `(--abandon: 정보) ${detail}`);
+  return fail('clean', `${detail} — 삭제하면 사라진다. 커밋하거나 오너가 버리기로 한 뒤 다시. ${JUNCTION_RESTORE_NOTE}`);
 }
 
 const STEPS = Object.freeze([stepLanding, stepReport, stepTeardown, stepReparse, stepClean]);
@@ -266,7 +291,14 @@ export function runClose(args, deps) {
     checks.push(check);
     if (!check.ok) return { ok: false, limb: args.limb, abandon: args.abandon, error: `${check.name}: ${check.detail}`, checks };
   }
-  const plan = args.abandon ? abandonPlan(run, row) : removalPlan(run, row);
+  let plan;
+  try {
+    plan = args.abandon ? abandonPlan(run, row) : removalPlan(run, row);
+  } catch (err) {
+    // A value in run.json that no command line can carry safely (a newline, NUL, ESC or a typographic quote — a tampered or
+    // damaged file): every guard passed, but no command is printed, and the reason says why (SR-4).
+    return { ok: false, limb: args.limb, abandon: args.abandon, error: `명령 줄을 안전하게 만들 수 없다 — 명령을 내지 않는다(run.json 의 id·경로 값을 확인): ${err?.message ?? err}`, checks };
+  }
   return { ok: true, limb: args.limb, abandon: args.abandon, alreadyClosed: false, checks, ...plan };
 }
 
