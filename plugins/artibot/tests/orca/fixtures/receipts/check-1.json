@@ -1,0 +1,1 @@
+{"ok":true,"result":{"messages":[{"id":"msg_df15f47841f9","type":"question","from":"ctx_9e272959985a","body":"p0 probe: which color, red or blue?","payload":{"taskId":"task_49c93a4972cb","dispatchId":"ctx_9e272959985a","options":["red","blue"]}}]}}

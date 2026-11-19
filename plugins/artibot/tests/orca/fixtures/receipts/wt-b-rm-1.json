@@ -1,0 +1,11 @@
+{
+  "id": "0daa0ae1-9a37-488f-a27c-448c71ef9e70",
+  "ok": false,
+  "error": {
+    "code": "runtime_error",
+    "message": "Command failed: git -c core.longpaths=true worktree remove --force -- <HOME>/orca/workspaces/Artibot/orca-p0-b\nerror: failed to delete '.git/worktrees/orca-p0-b': Permission denied\n"
+  },
+  "_meta": {
+    "runtimeId": "b82cdb82-951f-4bb1-97b0-88035ebbcb74"
+  }
+}

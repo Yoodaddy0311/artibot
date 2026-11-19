@@ -1,0 +1,11 @@
+{
+  "id": "46bf2630-b169-4346-a7ea-6e63c6547dd5",
+  "ok": false,
+  "error": {
+    "code": "runtime_error",
+    "message": "Failed to delete worktree at <HOME>/orca/workspaces/Artibot/orca-p0-a. ?? jtest/sentinel.txt\n?? jtest/sub/inner.txt\n?? p0-a-fanout.txt\n?? p0-a-git.txt"
+  },
+  "_meta": {
+    "runtimeId": "b82cdb82-951f-4bb1-97b0-88035ebbcb74"
+  }
+}

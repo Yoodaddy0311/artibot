@@ -1,0 +1,120 @@
+{
+  "id": "3bfdf935-d7da-423d-ac38-274cd5d18146",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/orca/workspaces/Artibot/orca-p0-a",
+      "identity": {
+        "key": "wt2:local:382bab95-6d7e-4fdb-aa2c-28c49f6bd66e",
+        "executionHostId": "local",
+        "instanceId": "382bab95-6d7e-4fdb-aa2c-28c49f6bd66e"
+      },
+      "instanceId": "382bab95-6d7e-4fdb-aa2c-28c49f6bd66e",
+      "repoId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642",
+      "projectId": "github:yoodaddy0311/artibot",
+      "hostId": "local",
+      "projectHostSetupId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "<HOME>/orca/workspaces/Artibot/orca-p0-a",
+      "head": "dcb6b1b9106362de910b4dbad51c04b07b350322",
+      "branch": "refs/heads/orca/p0-a-fcb0gj",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "orca-p0-a",
+      "displayNameMode": "fixed",
+      "comment": "",
+      "linkedIssue": null,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1795061800467,
+      "lastActivityAt": 1795061800466,
+      "createdAt": 1795061800466,
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1795061795842,
+        "callerTerminalHandle": "term_2747e765-a54f-447f-92b7-70e00104957e"
+      },
+      "baseRef": "refs/remotes/origin/master",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/Desktop/AI/Artibot",
+      "childWorktreeIds": [],
+      "lineage": {
+        "worktreeId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/orca/workspaces/Artibot/orca-p0-a",
+        "worktreeInstanceId": "382bab95-6d7e-4fdb-aa2c-28c49f6bd66e",
+        "parentWorktreeId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/Desktop/AI/Artibot",
+        "parentWorktreeInstanceId": "87bb521f-0b12-4596-9065-b544b05d1782",
+        "origin": "cli",
+        "capture": {
+          "source": "explicit-cli-flag",
+          "confidence": "explicit"
+        },
+        "createdAt": 1795061800467
+      },
+      "workspaceLineage": {
+        "childWorkspaceKey": "worktree:d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/orca/workspaces/Artibot/orca-p0-a",
+        "childInstanceId": "382bab95-6d7e-4fdb-aa2c-28c49f6bd66e",
+        "parentWorkspaceKey": "worktree:d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/Desktop/AI/Artibot",
+        "parentInstanceId": "87bb521f-0b12-4596-9065-b544b05d1782",
+        "origin": "cli",
+        "capture": {
+          "source": "explicit-cli-flag",
+          "confidence": "explicit"
+        },
+        "createdAt": 1795061800467
+      },
+      "git": {
+        "path": "<HOME>/orca/workspaces/Artibot/orca-p0-a",
+        "head": "dcb6b1b9106362de910b4dbad51c04b07b350322",
+        "branch": "refs/heads/orca/p0-a-fcb0gj",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": {
+      "worktreeId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/orca/workspaces/Artibot/orca-p0-a",
+      "worktreeInstanceId": "382bab95-6d7e-4fdb-aa2c-28c49f6bd66e",
+      "parentWorktreeId": "d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/Desktop/AI/Artibot",
+      "parentWorktreeInstanceId": "87bb521f-0b12-4596-9065-b544b05d1782",
+      "origin": "cli",
+      "capture": {
+        "source": "explicit-cli-flag",
+        "confidence": "explicit"
+      },
+      "createdAt": 1795061800467
+    },
+    "workspaceLineage": {
+      "childWorkspaceKey": "worktree:d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/orca/workspaces/Artibot/orca-p0-a",
+      "childInstanceId": "382bab95-6d7e-4fdb-aa2c-28c49f6bd66e",
+      "parentWorkspaceKey": "worktree:d56eb7c9-5a43-4fcf-8c27-05cfbf914642::<HOME>/Desktop/AI/Artibot",
+      "parentInstanceId": "87bb521f-0b12-4596-9065-b544b05d1782",
+      "origin": "cli",
+      "capture": {
+        "source": "explicit-cli-flag",
+        "confidence": "explicit"
+      },
+      "createdAt": 1795061800467
+    },
+    "warnings": [],
+    "catalogVersion": {
+      "epoch": "f32897b5-4567-4f1f-8f80-84ac559afc0a",
+      "sequence": 224
+    }
+  },
+  "_meta": {
+    "runtimeId": "b82cdb82-951f-4bb1-97b0-88035ebbcb74"
+  }
+}

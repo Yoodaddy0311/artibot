@@ -1,0 +1,11 @@
+{
+  "id": "1d381f1b-69ce-4105-9527-550b9e6e8998",
+  "ok": false,
+  "error": {
+    "code": "runtime_error",
+    "message": "Orca already accepted removal of <HOME>/orca/workspaces/Artibot/orca-p0-a with a different branch choice. That cleanup may already have run; check the branch before retrying."
+  },
+  "_meta": {
+    "runtimeId": "b82cdb82-951f-4bb1-97b0-88035ebbcb74"
+  }
+}
