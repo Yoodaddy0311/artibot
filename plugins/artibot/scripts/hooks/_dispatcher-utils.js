@@ -195,6 +195,20 @@ export function spawnHook(scriptPath, payload, opts) {
       });
     }
 
+    // A child that exits without reading stdin (an early opt-out return) closes
+    // the pipe while a payload above the pipe buffer is still being written. The
+    // stream then emits 'error' ASYNCHRONOUSLY — EPIPE on POSIX, `write EOF` on
+    // Windows (measured 2026-11-21) — which the try/catch below cannot see, and
+    // with no listener Node makes it an uncaught exception: the dispatcher exited
+    // 1 and the slot's merged output was lost (review L1). The child not wanting
+    // its input is not a failure, so the error is noted and the exit/timeout
+    // handlers settle the promise as usual.
+    if (child.stdin) {
+      child.stdin.on('error', (err) => {
+        process.stderr.write(`[artibot:${dispatcherName}] ${name} stdin closed early: ${err.code || err.message}\n`);
+      });
+    }
+
     try {
       child.stdin.end(JSON.stringify(payload || {}));
     } catch (err) {

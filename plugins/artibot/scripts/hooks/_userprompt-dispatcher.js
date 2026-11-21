@@ -223,10 +223,19 @@ async function safeRun(fn, payload, name, onError) {
  * stdout the child emits is intentionally discarded because the dispatcher
  * already owns this process's stdout for the merged response.
  *
+ * Exported, with `options`, for the stdin-EPIPE harness only
+ * (`tests/hooks/userprompt-dispatcher-gitsave-stdin-epipe.test.js`); `main()`
+ * always calls it with the payload alone, i.e. the real script and budget.
+ *
  * @param {object} payload
+ * @param {object} [options]
+ * @param {string} [options.scriptPath] child script — TEST-ONLY override
+ * @param {number} [options.timeoutMs] kill budget — TEST-ONLY override
  * @returns {Promise<void>}
  */
-function runGitAutopilotSave(payload) {
+export function runGitAutopilotSave(payload, options = {}) {
+  const scriptPath = options.scriptPath || GIT_AUTOPILOT_SAVE;
+  const timeoutMs = options.timeoutMs || GIT_AUTOPILOT_TIMEOUT_MS;
   return new Promise((resolve) => {
     let resolved = false;
     const finish = () => {
@@ -237,7 +246,7 @@ function runGitAutopilotSave(payload) {
 
     let child;
     try {
-      child = spawn(process.execPath, [GIT_AUTOPILOT_SAVE], {
+      child = spawn(process.execPath, [scriptPath], {
         stdio: ['pipe', 'pipe', 'inherit'],
         windowsHide: true,
       });
@@ -249,9 +258,9 @@ function runGitAutopilotSave(payload) {
 
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      process.stderr.write(`[artibot:${HOOK_NAME}] git-autopilot-save timed out after ${GIT_AUTOPILOT_TIMEOUT_MS}ms\n`);
+      process.stderr.write(`[artibot:${HOOK_NAME}] git-autopilot-save timed out after ${timeoutMs}ms\n`);
       finish();
-    }, GIT_AUTOPILOT_TIMEOUT_MS);
+    }, timeoutMs);
 
     child.on('error', (err) => {
       clearTimeout(timer);
@@ -265,6 +274,20 @@ function runGitAutopilotSave(payload) {
 
     // Drain child stdout so the OS pipe buffer never fills up.
     if (child.stdout) child.stdout.on('data', () => {});
+
+    // A child that exits without reading stdin (git-autopilot-save's early
+    // opt-out returns) closes the pipe while a payload above the pipe buffer is
+    // still being written. The stream then emits 'error' ASYNCHRONOUSLY — EPIPE
+    // on POSIX, `write EOF` on Windows (measured 2026-11-21) — which the
+    // try/catch below cannot see; with no listener Node turns it into an
+    // uncaught exception that kills this whole dispatcher (the same defect as
+    // `_dispatcher-utils.js#spawnHook` review L1). The child not wanting its
+    // input is not a failure: note it and let exit/timeout settle the promise.
+    if (child.stdin) {
+      child.stdin.on('error', (err) => {
+        process.stderr.write(`[artibot:${HOOK_NAME}] git-autopilot-save stdin closed early: ${err.code || err.message}\n`);
+      });
+    }
 
     try {
       child.stdin.end(JSON.stringify(payload));

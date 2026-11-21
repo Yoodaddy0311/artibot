@@ -197,8 +197,15 @@ function readSessionState(fileName, sessionId, pluginRoot) {
  *   taskBudget: number|null,
  *   tokens: {used: number|null, total: number|null},
  *   longContext: boolean,
+ *   longContextHostApplied: boolean,
  *   teammates: Array<{name: string, status?: string}>
  * }>}
+ *   `longContext` = a long-context marker with `enabled: true` exists (the config
+ *   asked for 1M). `longContextHostApplied` = that marker ALSO says, with a literal
+ *   `hostApplied: true`, that the host got the header. session-start.js writes
+ *   `hostApplied: false` (a hook cannot change the host's env), and a marker
+ *   without the field came from the same never-applied path, so both read false
+ *   (review 2026-11-21, L4).
  */
 export async function readDashboardState(pluginRoot, opts = {}) {
   const empty = {
@@ -207,6 +214,7 @@ export async function readDashboardState(pluginRoot, opts = {}) {
     taskBudget: null,
     tokens: { used: null, total: null },
     longContext: false,
+    longContextHostApplied: false,
     teammates: [],
   };
   if (!pluginRoot || typeof pluginRoot !== 'string') return empty;
@@ -218,6 +226,7 @@ export async function readDashboardState(pluginRoot, opts = {}) {
   const longCtxJson = readSessionState('long-context-active.json', sessionId, pluginRoot);
   const teammatesJson = readSessionState('current-teammates.json', sessionId, pluginRoot);
 
+  const longContext = Boolean(longCtxJson && longCtxJson.enabled === true);
   const taskBudget =
     budgetJson && typeof budgetJson.budget === 'number' && budgetJson.budget > 0
       ? budgetJson.budget
@@ -228,7 +237,8 @@ export async function readDashboardState(pluginRoot, opts = {}) {
     command: pickString([[budgetJson, 'command'], [effortJson, 'command']]),
     taskBudget,
     tokens: pickTokens(tokenJson),
-    longContext: Boolean(longCtxJson && longCtxJson.enabled === true),
+    longContext,
+    longContextHostApplied: longContext && longCtxJson.hostApplied === true,
     teammates: pickTeammates(teammatesJson),
   };
 }
@@ -286,7 +296,10 @@ function buildSections(state, flags) {
   }
 
   if (state.longContext) {
-    out.push(`longCtx=${paint('on', 'green', 'bold')}`);
+    // "on" only when the host got the header; otherwise the config merely asked (L4).
+    out.push(state.longContextHostApplied
+      ? `longCtx=${paint('on', 'green', 'bold')}`
+      : `longCtx=${paint('requested', 'yellow')}`);
   }
 
   if (flags.showTeammates && state.teammates.length > 0) {
@@ -339,6 +352,17 @@ export async function renderStatusLine({ pluginRoot, config, sessionId } = {}) {
 }
 
 /**
+ * The full dashboard's long-context value: on / requested / off (see readDashboardState).
+ * @param {{longContext: boolean, longContextHostApplied: boolean}} state
+ * @returns {string}
+ */
+function longContextLabel(state) {
+  if (!state.longContext) return paint('off', 'dim');
+  if (state.longContextHostApplied) return paint('on', 'green');
+  return paint('requested (host not applied)', 'yellow');
+}
+
+/**
  * Render a multi-line dashboard for full-screen or log output.
  *
  * @param {{pluginRoot: string, config: object, sessionId?: string|null}} inputs
@@ -362,7 +386,7 @@ export async function renderFullDashboard({ pluginRoot, config, sessionId } = {}
   const used = typeof state.tokens.used === 'number' ? humanize(state.tokens.used) : '—';
   const total = state.tokens.total ? humanize(state.tokens.total) : '';
   lines.push(`input est : ${used}${total ? `/${total}` : ''}`); // current-input estimate, see pickTokens
-  lines.push(`longCtx   : ${state.longContext ? paint('on', 'green') : paint('off', 'dim')}`);
+  lines.push(`longCtx   : ${longContextLabel(state)}`);
   if (flags.showTeammates) {
     const tm = state.teammates.length > 0
       ? state.teammates

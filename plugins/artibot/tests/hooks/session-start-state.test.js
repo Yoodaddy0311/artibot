@@ -81,6 +81,17 @@ describe('activateLongContext — session-scoped marker', () => {
     expect(process.env.ANTHROPIC_BETA).toContain('context-1m-test');
   });
 
+  it('the marker says the host did NOT get the header — hostApplied:false (L4, 2026-11-21)', () => {
+    // The env change is made in this hook's own process, a child of the host; a
+    // child's process.env never reaches its parent. `enabled` means "the config
+    // asked for it", nothing more, so the marker must not let a reader call it on.
+    activateLongContext(ENABLED, 'sess-A');
+    const file = path.join(stateDir, 'runtime', 'sessions', 'sess-A', 'long-context-active.json');
+    const marker = JSON.parse(readFileSync(file, 'utf8'));
+    expect(marker.hostApplied).toBe(false);
+    expect(marker.enabled).toBe(true); // kept: older readers key on it
+  });
+
   it('two sessions get two markers, and the flat one is not written', () => {
     activateLongContext(ENABLED, 'sess-A');
     activateLongContext(ENABLED, 'sess-B');

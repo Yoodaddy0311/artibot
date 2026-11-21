@@ -141,7 +141,8 @@ describe('renderStatusLine', () => {
       budget: 128000,
     });
     writeRuntime(root, 'token-usage-session.json', { totalTokens: 45000 });
-    writeRuntime(root, 'long-context-active.json', { enabled: true });
+    // "on" needs the host to have the header (L4); the not-applied case is pinned below.
+    writeRuntime(root, 'long-context-active.json', { enabled: true, hostApplied: true });
 
     const out = await renderStatusLine({ pluginRoot: root, config: ENABLED });
 
@@ -503,5 +504,80 @@ describe('renderFullDashboard', () => {
     expect(out).toContain('effort');
     expect(out).toContain('input est');
     expect(out.split('\n').length).toBeGreaterThan(3);
+  });
+});
+
+// L4 (review 2026-11-21): session-start.js#activateLongContext sets ANTHROPIC_BETA in
+// its OWN process, a child of the host — the change never reaches the host's requests.
+// The marker used to say only `enabled: true`, and this dashboard rendered that as
+// `longCtx=on`. The writer now records `hostApplied: false`; "on" needs a literal
+// `hostApplied: true`, and a marker without the field (written by an older version,
+// by the same never-applied path) reads as requested, not on. "Literal" means the JSON
+// boolean: a string "true" is requested, and a string `enabled: "true"` is no marker at
+// all. scripts/hooks/statusline.sh reads both fields the same way (its `_json_file_true`,
+// pinned by tests/hooks/statusline-long-context-label.test.js) — the two used to disagree
+// on `hostApplied: "true"` (xcC LOW, 2026-11-21).
+describe('long-context marker — requested is not applied (L4)', () => {
+  let root;
+
+  beforeEach(() => {
+    root = makeFixture();
+    disableColor();
+  });
+
+  afterEach(() => {
+    restoreColor();
+    cleanupFixture(root);
+  });
+
+  const NOT_APPLIED = [
+    ['the writer\'s marker', { enabled: true, hostApplied: false }],
+    ['a pre-field marker', { enabled: true }],
+    ['a non-boolean field', { enabled: true, hostApplied: 'true' }],
+  ];
+
+  for (const [label, marker] of NOT_APPLIED) {
+    it(`${label} renders as requested, never "on"`, async () => {
+      writeRuntime(root, 'current-effort.json', { effort: 'high', command: '/plan' });
+      writeRuntime(root, 'long-context-active.json', marker);
+
+      const state = await readDashboardState(root);
+      expect(state.longContext).toBe(true); // shape kept: the marker is present
+      expect(state.longContextHostApplied).toBe(false);
+
+      const line = await renderStatusLine({ pluginRoot: root, config: ENABLED });
+      expect(line).toContain('longCtx=requested');
+      expect(line).not.toContain('longCtx=on');
+
+      const full = await renderFullDashboard({ pluginRoot: root, config: ENABLED });
+      expect(full).toMatch(/longCtx\s+: requested \(host not applied\)/);
+    });
+  }
+
+  it('only a literal hostApplied:true renders as on', async () => {
+    writeRuntime(root, 'current-effort.json', { effort: 'high', command: '/plan' });
+    writeRuntime(root, 'long-context-active.json', { enabled: true, hostApplied: true });
+
+    const state = await readDashboardState(root);
+    expect(state.longContextHostApplied).toBe(true);
+    expect(await renderStatusLine({ pluginRoot: root, config: ENABLED })).toContain('longCtx=on');
+    expect(await renderFullDashboard({ pluginRoot: root, config: ENABLED })).toMatch(/longCtx\s+: on/);
+  });
+
+  it('a string enabled:"true" is not a marker (statusline.sh parity)', async () => {
+    writeRuntime(root, 'current-effort.json', { effort: 'high', command: '/plan' });
+    writeRuntime(root, 'long-context-active.json', { enabled: 'true', hostApplied: true });
+    const state = await readDashboardState(root);
+    expect(state.longContext).toBe(false);
+    expect(state.longContextHostApplied).toBe(false);
+  });
+
+  it('no marker: no section, full view says off', async () => {
+    writeRuntime(root, 'current-effort.json', { effort: 'high', command: '/plan' });
+    const state = await readDashboardState(root);
+    expect(state.longContext).toBe(false);
+    expect(state.longContextHostApplied).toBe(false);
+    expect(await renderStatusLine({ pluginRoot: root, config: ENABLED })).not.toContain('longCtx=');
+    expect(await renderFullDashboard({ pluginRoot: root, config: ENABLED })).toMatch(/longCtx\s+: off/);
   });
 });

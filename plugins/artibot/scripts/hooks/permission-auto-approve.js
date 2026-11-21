@@ -2,19 +2,28 @@
 /**
  * PermissionRequest auto-approve hook.
  *
- * Reads `artibot.config.json.permissions` (an allowlist of `{tool, command?}`
- * patterns) and silently auto-approves matching tool calls so non-developer
+ * Reads `artibot.config.json.permissions.autoApprove` (an allowlist of
+ * `{tool, commandPattern?}` entries) and silently auto-approves matching tool calls so non-developer
  * users don't see permission dialogs for routine, safe operations.
  *
  * Defaults are conservative: ONLY the user-defined allowlist auto-approves.
  * All other requests fall through (no decision emitted), preserving the
  * default Claude Code permission flow.
  *
+ * ── WHICH ENTRY MAY APPROVE A SHELL CALL (2026-11-21) ───────────────────────
+ *  A Bash/PowerShell call is approved only through an entry that NAMES that
+ *  tool (`{tool:'Bash'}`) or carries a `commandPattern`. A wildcard (`tool:'*'`
+ *  or no `tool`) without a `commandPattern` still covers every other tool but
+ *  never a shell call — that call is withheld as `wildcard-shell`, before any
+ *  judge runs (see entryCoversTool). Until 2026-11-21 `{tool:'*'}` approved
+ *  any shell command neither judge lists, e.g. `… | base64 -d | bash`.
+ *
  * ── DANGER FILTER CONTRACT ──────────────────────────────────────────────────
  *  An allowlist match is NECESSARY but NOT SUFFICIENT. A `{tool:'*'}` entry
- *  used to auto-approve a force push; it no longer can. After a match, a Bash
- *  call is put to the UNION of the two judges that actually block Bash at
- *  PreToolUse, and any hit withholds the approval:
+ *  used to auto-approve a force push; it no longer can. After a match by an
+ *  entry that covers the tool, a shell call is put to the UNION of the two
+ *  judges that actually block Bash at PreToolUse, and any hit withholds the
+ *  approval:
  *    - `lib/core/guard-registry.js#executeChain` ('pre' phase, built-in guards
  *      incl. the `dangerous-command` guard over
  *      `lib/core/blocked-patterns.js#BLOCKED_PATTERNS`), and
@@ -41,6 +50,9 @@
  *
  *  두 목록 밖 파괴 명령은 통과한다. 합집합은 어느 한쪽만 쓸 때보다 넓을 뿐이고,
  *  충분하다는 뜻이 아니다 — 이 필터의 상한은 두 정본 목록의 상한이다.
+ *  와일드카드는 셸을 못 덮게 됐지만 `{tool:'Bash'}` 처럼 도구를 명시한 항목이나
+ *  느슨한 commandPattern(`.*`)은 사용자가 고른 범위라 그대로 두 판정기만 거친다 —
+ *  그 경우 위 목록 밖 명령(예: `find . -delete`)은 여전히 allow 된다.
  *
  *  통과(allow)는 안전 증명이 아니라 "이 훅이 아는 두 목록에 안 걸렸다"일 뿐이다.
  *  실제 차단은 PreToolUse 가 한다. 이 훅은 승인을 아낄 뿐 거부하지 않는다.
@@ -160,6 +172,31 @@ export function defaultJudge({ toolName, toolInput }) {
 }
 
 /**
+ * Whether a MATCHED allowlist entry may authorize this tool. An allowlist of
+ * the conditions under which an entry covers a shell call (JUDGED_TOOLS):
+ *   - the entry names that tool exactly (`{tool:'Bash'}`), or
+ *   - the entry constrains the command (`commandPattern` is set).
+ * A wildcard (`tool:'*'` or no `tool`) without a `commandPattern` meets
+ * neither, so it never covers a shell call. Every other tool is covered by any
+ * matching entry, as before.
+ *
+ * Why an allowlist and not more patterns (review 2026-11-21, L3): with
+ * `{tool:'*'}` the commands `echo … | base64 -d | bash`, `find . -delete`,
+ * `ls > ~/.bashrc` and an `>> ~/.ssh/authorized_keys` append were all allowed —
+ * neither judge lists them, and no finite list of shell commands can. What the
+ * wildcard grants had to shrink instead.
+ *
+ * @param {object} entry - an entry for which matchesAllowEntry was true
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+export function entryCoversTool(entry, toolName) {
+  if (!JUDGED_TOOLS.has(toolName)) return true;
+  if (entry.tool === toolName) return true;
+  return typeof entry.commandPattern === 'string' && entry.commandPattern.length > 0;
+}
+
+/**
  * Decide whether this hook spends its auto-approval on a tool call.
  * Pure: no I/O, no stdout — the caller owns both.
  *
@@ -172,8 +209,22 @@ export function evaluatePermission({ toolName, toolInput, allowlist }, deps = {}
   const list = Array.isArray(allowlist) ? allowlist : [];
   if (list.length === 0) return { decision: null };
 
-  const matched = list.find((e) => matchesAllowEntry(e, toolName, toolInput));
-  if (!matched) return { decision: null };
+  const matching = list.filter((e) => matchesAllowEntry(e, toolName, toolInput));
+  if (matching.length === 0) return { decision: null };
+
+  const matched = matching.find((e) => entryCoversTool(e, toolName));
+  if (!matched) {
+    // Matched only by a pattern-less wildcard: not ours to approve. Named so
+    // a user who expected the wildcard to cover the shell can see why.
+    return {
+      decision: null,
+      withheld: {
+        kind: 'wildcard-shell',
+        reason: `a wildcard entry without commandPattern does not cover ${toolName}; `
+          + `name the tool or add a commandPattern`,
+      },
+    };
+  }
 
   let withheld;
   try {

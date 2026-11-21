@@ -54,10 +54,14 @@ function loadConfig() {
 
 /**
  * P3-3: 1M context opt-in. When `runtime.longContext.enabled` is true in
- * artibot.config.json, append the beta header to ANTHROPIC_BETA (advisory,
- * child-process only — Claude Code picks it up when spawned from this env)
- * and persist long-context-active.json so statusline/observability
- * surfaces the activated state.
+ * artibot.config.json, append the beta header to ANTHROPIC_BETA and persist
+ * long-context-active.json so statusline/observability can show the request.
+ *
+ * It does NOT turn the 1M window on (review 2026-11-21, L4): this hook is a CHILD
+ * of Claude Code and a child's `process.env` never reaches its parent, so the
+ * host's requests never carry the header. The marker therefore records
+ * `hostApplied: false` (`enabled` kept for older readers), and statusline.sh /
+ * lib/tui/dashboard.js show it as requested, not on.
  *
  * O2: SESSION-scoped — `<state dir>/runtime/sessions/<session_id>/long-context-active.json`
  * (the flat `<state dir>/runtime/` file when the payload has no session id), where
@@ -88,12 +92,13 @@ export function activateLongContext(config, sessionId) {
       markerPath,
       JSON.stringify({
         enabled: true,
+        hostApplied: false,
         betaHeader,
         activatedAt: new Date().toISOString(),
       }) + '\n',
     );
   } catch {
-    // Non-critical: long-context activation is advisory
+    // Non-critical: the marker is advisory (and the request never reaches the host anyway)
   }
 }
 

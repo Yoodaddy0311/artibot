@@ -94,6 +94,12 @@ const SPAWNED_SCRIPT_PATH = new RegExp(
  * axis fails open: a brand-new spawner would simply not be scanned for.
  *
  * Measured 2026-09-04T05:2xZ: 6 of 620 `*.test.js` files.
+ *
+ * 2026-11-21: + `tests/hooks/userprompt-dispatcher-gitsave-stdin-epipe.test.js`
+ * (review xcC MED). It spawns a node driver that IMPORTS `_userprompt-dispatcher.js`
+ * (main() does not run) and calls `runGitAutopilotSave` against a stand-in child,
+ * never the real git-autopilot-save. Registered rather than worded around the
+ * matcher; its spawn passes `cwd` = its mkdtemp directory.
  */
 const KNOWN_DISPATCHER_SPAWNERS = [
   'tests/dispatcher/posttooluse-dispatcher.test.js',
@@ -102,6 +108,7 @@ const KNOWN_DISPATCHER_SPAWNERS = [
   'tests/dispatcher/stop-dispatcher.test.js',
   'tests/dispatcher/subagentstop-dispatcher.test.js',
   'tests/firewall/ups-stdout-allowlist.test.js',
+  'tests/hooks/userprompt-dispatcher-gitsave-stdin-epipe.test.js',
   'tests/hooks/userprompt-dispatcher.test.js',
 ];
 

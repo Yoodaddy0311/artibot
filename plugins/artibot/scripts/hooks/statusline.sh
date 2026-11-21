@@ -467,14 +467,49 @@ if [ -n "$TEAM_FILE" ] && command -v node >/dev/null 2>&1; then
 fi
 
 # ─── Long context mode (1M window indicator) ────────────────────────────────
+# session-start.js writes this marker when runtime.longContext.enabled is on, but
+# it cannot apply the header to the host (a hook's env never reaches its parent),
+# so it records hostApplied:false. The plain "🪟 1M" needs a literal
+# hostApplied:true; anything else is shown as requested (review 2026-11-21, L4).
+# The second read forks only for an opted-in session (the option ships off).
+# Extracted and run by tests/hooks/statusline-long-context-label.test.js.
+# >>> artibot-longctx-label >>>
+# Both fields count only as a JSON BOOLEAN true, the same test as
+# lib/tui/dashboard.js#readDashboardState (`=== true`). `_json_file_get` cannot
+# be used for that: `jq -r` and its node fallback both print the STRING "true"
+# exactly like the boolean, so a marker with "true" showed the plain 1M label
+# here while the dashboard showed it as requested (xcC LOW, 2026-11-21).
+_json_file_true() {
+  # Usage: _json_file_true <file> <dot-path> — prints "true" only for boolean true
+  local file="$1" path="$2"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r "if ($path) == true then \"true\" else \"false\" end" "$file" 2>/dev/null || echo false
+  elif command -v node >/dev/null 2>&1; then
+    ARTIBOT_SL_FILE_CONTENT=$(cat "$file" 2>/dev/null || true) node -e "
+      try {
+        let v = JSON.parse(process.env.ARTIBOT_SL_FILE_CONTENT || '{}');
+        for (const k of '$path'.replace(/^\./,'').split('.')) v = v && v[k];
+        process.stdout.write(v === true ? 'true' : 'false');
+      } catch { process.stdout.write('false'); }
+    " 2>/dev/null || echo false
+  else
+    echo false
+  fi
+}
 LONGCTX_LABEL=''
 state_file long-context-active.json; LONGCTX_FILE="$STATE_FILE"
 if [ -n "$LONGCTX_FILE" ]; then
-  LONGCTX_ENABLED=$(_json_file_get "$LONGCTX_FILE" '.enabled' 'false')
+  LONGCTX_ENABLED=$(_json_file_true "$LONGCTX_FILE" '.enabled')
   if [ "$LONGCTX_ENABLED" = "true" ]; then
-    LONGCTX_LABEL="🪟 1M"
+    LONGCTX_APPLIED=$(_json_file_true "$LONGCTX_FILE" '.hostApplied')
+    if [ "$LONGCTX_APPLIED" = "true" ]; then
+      LONGCTX_LABEL="🪟 1M"
+    else
+      LONGCTX_LABEL="🪟 1M 요청(미적용)"
+    fi
   fi
 fi
+# <<< artibot-longctx-label <<<
 
 # ─── Current-input token ESTIMATE (from runtime-prompt.js) ─────────────────
 # `totalTokens` is chars/4 of the LAST prompt (runtime-prompt.js#persistTokenUsage,

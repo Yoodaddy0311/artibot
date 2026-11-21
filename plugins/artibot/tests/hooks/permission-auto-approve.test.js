@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   defaultJudge,
+  entryCoversTool,
   evaluatePermission,
   matchesAllowEntry,
 } from '../../scripts/hooks/permission-auto-approve.js';
@@ -93,11 +94,11 @@ describe('matchesAllowEntry/regex command match', () => {
 // ---------------------------------------------------------------------------
 
 describe('evaluatePermission/danger filter (pure, judge injected)', () => {
-  it('와일드카드 allowlist 라도 파괴적 명령은 보류 (defaultJudge)', () => {
+  it('도구를 명시한 allowlist 라도 파괴적 명령은 보류 (defaultJudge)', () => {
     const out = evaluatePermission({
       toolName: 'Bash',
       toolInput: { command: FORCE_PUSH },
-      allowlist: [{ tool: '*' }],
+      allowlist: [{ tool: 'Bash' }],
     });
     expect(out.decision).toBeNull();
     expect(out.withheld?.kind).toBe('destructive');
@@ -119,7 +120,7 @@ describe('evaluatePermission/danger filter (pure, judge injected)', () => {
       {
         toolName: 'Bash',
         toolInput: { command: 'git status' },
-        allowlist: [{ tool: '*' }],
+        allowlist: [{ tool: 'Bash' }],
       },
       {
         judge: () => {
@@ -172,7 +173,7 @@ describe('evaluatePermission/합집합이 실제로 작동한다는 증거', () 
     const out = evaluatePermission({
       toolName: 'Bash',
       toolInput: { command: L2_ONLY_DANGER },
-      allowlist: [{ tool: '*' }],
+      allowlist: [{ tool: 'Bash' }],
     });
     expect(out.decision).toBeNull();
     expect(out.withheld?.kind).toBe('destructive');
@@ -190,7 +191,7 @@ describe('evaluatePermission/합집합이 실제로 작동한다는 증거', () 
     const out = evaluatePermission({
       toolName: 'Bash',
       toolInput: { command: 'dd if=a.img of=b.img' },
-      allowlist: [{ tool: '*' }],
+      allowlist: [{ tool: 'Bash' }],
     });
     expect(out.decision).toBeNull();
     expect(out.withheld?.kind).toBe('destructive');
@@ -276,6 +277,121 @@ describe('defaultJudge/PowerShell 도 같은 위험 필터를 거친다 (S1 교�
   });
 });
 
+describe('evaluatePermission/와일드카드 항목은 셸 도구를 승인하지 않는다 (L3, 2026-11-21)', () => {
+  // 검수 2026-11-21: opt-in `{tool:'*'}` 하나로 아래 명령이 전부 allow 였다. 두 정본
+  // 판정기 어느 쪽 목록에도 없는 셸 명령은 통과하므로(헤더 "이 필터가 못 보는 것"),
+  // 부정 목록을 늘리는 대신 "셸 호출을 승인할 수 있는 항목"을 허용 목록으로 좁힌다:
+  // 그 도구 이름을 명시했거나(`{tool:'Bash'}`) commandPattern 으로 명령을 제한한 항목만.
+  const UNLISTED_DANGER = [
+    `echo eA== | base64 -d | ${'ba'}sh`,
+    `find . ${'-del'}ete`,
+    'ls > ~/.bashrc',
+    'echo ssh-ed25519 AAAA >> ~/.ssh/authorized_keys',
+  ];
+  const WILDCARDS = [[{ tool: '*' }], [{}]];
+
+  it('측정: 이 명령들은 두 판정기 어느 쪽 목록에도 걸리지 않는다 — 판정기로는 못 막는다', () => {
+    for (const command of UNLISTED_DANGER) {
+      expect(defaultJudge({ toolName: 'Bash', toolInput: { command } }), command).toBeNull();
+    }
+  });
+
+  it('commandPattern 없는 와일드카드는 Bash 를 승인하지 않고, 판정기도 부르지 않는다', () => {
+    for (const allowlist of WILDCARDS) {
+      for (const command of [...UNLISTED_DANGER, 'git status']) {
+        let calls = 0;
+        const out = evaluatePermission(
+          { toolName: 'Bash', toolInput: { command }, allowlist },
+          { judge: () => { calls += 1; return null; } },
+        );
+        expect(out.decision, `${JSON.stringify(allowlist)} ${command}`).toBeNull();
+        expect(out.withheld?.kind).toBe('wildcard-shell');
+        expect(calls).toBe(0);
+      }
+    }
+  });
+
+  it('PowerShell 도 같다', () => {
+    const out = evaluatePermission({
+      toolName: 'PowerShell',
+      toolInput: { command: 'Get-ChildItem' },
+      allowlist: [{ tool: '*' }],
+    });
+    expect(out.decision).toBeNull();
+    expect(out.withheld?.kind).toBe('wildcard-shell');
+  });
+
+  it('commandPattern 을 단 와일드카드, 도구 이름을 명시한 항목은 여전히 승인한다(판정기 통과 시)', () => {
+    expect(evaluatePermission({
+      toolName: 'Bash',
+      toolInput: { command: 'git status' },
+      allowlist: [{ tool: '*', commandPattern: '^git status$' }],
+    }).decision).toBe('allow');
+    expect(evaluatePermission({
+      toolName: 'Bash',
+      toolInput: { command: 'git status' },
+      allowlist: [{ tool: 'Bash' }],
+    }).decision).toBe('allow');
+  });
+
+  it('와일드카드 옆에 셸을 승인하는 항목이 있으면 그 항목이 이긴다 — 순서 무관', () => {
+    const narrow = { tool: 'Bash', commandPattern: '^npm test$' };
+    for (const allowlist of [[{ tool: '*' }, narrow], [narrow, { tool: '*' }]]) {
+      expect(evaluatePermission({ toolName: 'Bash', toolInput: { command: 'npm test' }, allowlist }).decision)
+        .toBe('allow');
+      const other = evaluatePermission({ toolName: 'Bash', toolInput: { command: `find . ${'-del'}ete` }, allowlist });
+      expect(other.decision).toBeNull();
+      expect(other.withheld?.kind).toBe('wildcard-shell');
+    }
+  });
+
+  // 검수 2026-11-21 xcC LOW: commandPattern 이 "있긴 하지만 명령을 제한하지 않는" 값.
+  // matchesAllowEntry 는 '' 와 0 을 "패턴 없음"으로 보고(모든 명령에 매치), 배열은
+  // RegExp 가 문자열로 강제 변환해(['.+'] → /.+/) 역시 모든 명령에 매치한다. 그래서
+  // 셸 승인 여부는 entryCoversTool 의 "비어 있지 않은 문자열" 조건 하나에 달려 있다.
+  const NON_RESTRICTING_PATTERNS = [
+    ['빈 문자열', ''],
+    ['숫자 0', 0],
+    ['숫자 123', 123],
+    ['배열', ['.+']],
+    ['객체', { source: '.+' }],
+    ['null', null],
+  ];
+
+  it.each(NON_RESTRICTING_PATTERNS)('entryCoversTool: 와일드카드 + commandPattern=%s 는 셸을 덮지 않는다', (_label, commandPattern) => {
+    expect(entryCoversTool({ tool: '*', commandPattern }, 'Bash')).toBe(false);
+    expect(entryCoversTool({ commandPattern }, 'PowerShell')).toBe(false);
+  });
+
+  it.each(NON_RESTRICTING_PATTERNS)('evaluatePermission: 와일드카드 + commandPattern=%s 는 승인하지 않고 판정기도 부르지 않는다', (_label, commandPattern) => {
+    // '123' 을 넣어 숫자 패턴(/123/)도 매치 단계를 통과하게 한다 — 매치되고도 보류돼야 한다.
+    const command = `find . ${'-del'}ete 123`;
+    let calls = 0;
+    const out = evaluatePermission(
+      { toolName: 'Bash', toolInput: { command }, allowlist: [{ tool: '*', commandPattern }] },
+      { judge: () => { calls += 1; return null; } },
+    );
+    expect(out.decision).toBeNull();
+    expect(calls).toBe(0);
+    // 매치 단계를 통과한 경우에만 withheld 가 붙는다. 이 입력에서는 6종 모두 통과한다.
+    expect(out.withheld?.kind).toBe('wildcard-shell');
+  });
+
+  it('entryCoversTool: 도구 이름을 명시했거나 셸이 아닌 도구면 패턴 값과 무관하게 덮는다', () => {
+    expect(entryCoversTool({ tool: 'Bash', commandPattern: '' }, 'Bash')).toBe(true);
+    expect(entryCoversTool({ tool: '*', commandPattern: 0 }, 'Read')).toBe(true);
+    expect(entryCoversTool({ tool: '*', commandPattern: '^git status$' }, 'Bash')).toBe(true);
+  });
+
+  it('셸이 아닌 도구에 대한 와일드카드 의미는 그대로다', () => {
+    expect(evaluatePermission({
+      toolName: 'Read',
+      toolInput: { file_path: 'a.js' },
+      allowlist: [{ tool: '*' }],
+    }).decision).toBe('allow');
+  });
+});
+
 describe('evaluatePermission/이 필터가 못 보는 것 (알려진 구멍을 고정한다)', () => {
   // 측정 2026-09-10: pre/Write 가드(sensitive-file·content-secret)는
   // artibot-policy 라 executeChain 이 플러그인 리포 밖 cwd 에서 건너뛴다.
@@ -333,7 +449,7 @@ describe('evaluatePermission/이 필터가 못 보는 것 (알려진 구멍을 �
     const out = evaluatePermission({
       toolName: 'Bash',
       toolInput: { command: 123 },
-      allowlist: [{ tool: '*' }],
+      allowlist: [{ tool: 'Bash' }],
     });
     expect(out.decision).toBeNull();
     expect(out.withheld?.kind).toBe('unjudgeable');
@@ -378,8 +494,8 @@ describe('permission-auto-approve 훅 스폰 (실제 자식 프로세스)', () =
     rmSync(sandbox, { recursive: true, force: true });
   });
 
-  it('와일드카드 + 파괴적 명령 → stdout 0바이트, stderr 보류 1줄, exit 0', () => {
-    const r = runHook([{ tool: '*' }], {
+  it('도구 명시 항목 + 파괴적 명령 → stdout 0바이트, stderr 보류 1줄, exit 0', () => {
+    const r = runHook([{ tool: 'Bash' }], {
       tool_name: 'Bash',
       tool_input: { command: FORCE_PUSH },
       cwd: sandbox,
@@ -414,8 +530,20 @@ describe('permission-auto-approve 훅 스폰 (실제 자식 프로세스)', () =
     expect(r.stderr).toBe('');
   });
 
-  it('deny 는 절대 내지 않는다 — 보류는 결정 없음이다', () => {
+  it('와일드카드 + 판정기 목록 밖 셸 명령 → stdout 0바이트, stderr wildcard-shell 1줄 (L3)', () => {
     const r = runHook([{ tool: '*' }], {
+      tool_name: 'Bash',
+      tool_input: { command: `find . ${'-del'}ete` },
+      cwd: sandbox,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('auto-approve withheld: wildcard-shell');
+    expect(r.stderr.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('deny 는 절대 내지 않는다 — 보류는 결정 없음이다', () => {
+    const r = runHook([{ tool: 'Bash' }], {
       tool_name: 'Bash',
       tool_input: { command: FORCE_PUSH },
       cwd: sandbox,

@@ -40,21 +40,31 @@ const NO_COMMAND_SUGGEST_FLAG = /--no-command-suggest\b/i;
 
 // ─── ADR patterns ──────────────────────────────────────────────────────────
 // "A vs B" comparison — case-insensitive, requires non-trivial tokens on both
-// sides. The `\S{2,}` floor blocks single-char noise like "a vs b".
-const ADR_VS_PATTERN = /\b\S{2,}\s+vs\.?\s+\S{2,}\b/i;
+// sides. The `\S{2,64}` floor blocks single-char noise like "a vs b".
+//
+// Every token run in this file is BOUNDED (`\S{2,64}`, never open-ended): an
+// unbounded run backtracks across a long whitespace-free input in O(n^2) —
+// measured 2026-11-21, 32,768 x '가' took 8.2 s and a 128K-char prompt stalled
+// the UserPromptSubmit slot (review M1). Patterns unanchored on the left still
+// match a longer token by its last 64 chars; the ones that open with `\b`
+// (ADR_VS_PATTERN, the English forms) no longer match an ASCII word longer than
+// 64 chars, because the tail starts mid-word. The bound alone is not enough (two
+// bounded runs around one separator are 64 x 64 per start), which is why
+// classifyCommandIntent also reads at most CLASSIFY_MAX_CHARS of the prompt.
+const ADR_VS_PATTERN = /\b\S{2,64}\s+vs\.?\s+\S{2,64}\b/i;
 // Korean comparative question forms: "X 와 Y 중에", "X 쓸까 Y 쓸까", "어떤 게 좋아"
 const ADR_KO_COMPARE_PATTERNS = [
-  /(\S{2,})\s*(?:와|과)\s*(\S{2,})\s*(?:중에|중에서|중)/,
-  /(\S{2,})\s*(?:쓸까|쓸지|할까|할지|좋을까|좋을지)\s*(\S{2,})\s*(?:쓸까|쓸지|할까|할지|좋을까|좋을지)/,
+  /(\S{2,64})\s*(?:와|과)\s*(\S{2,64})\s*(?:중에|중에서|중)/,
+  /(\S{2,64})\s*(?:쓸까|쓸지|할까|할지|좋을까|좋을지)\s*(\S{2,64})\s*(?:쓸까|쓸지|할까|할지|좋을까|좋을지)/,
   /어떤\s*(?:게|것이|것을|걸|거를|라이브러리|프레임워크|스택|디비|db|기술|언어|툴|도구)[^\n]{0,40}?(?:좋(?:아|을|은)|쓰는?\s*게\s*좋|선택|골라|골랐|추천|괜찮)/i,
   /(?:기술|스택|아키텍처|라이브러리|프레임워크|디비|db|데이터베이스)\s*(?:선택|결정|고르|뭐|어떤)/i,
 ];
 // English ADR triggers
 const ADR_EN_PATTERNS = [
-  /\bshould\s+(?:i|we)\s+use\s+\S{2,}\s+or\s+\S{2,}/i,
+  /\bshould\s+(?:i|we)\s+use\s+\S{2,64}\s+or\s+\S{2,64}/i,
   /\bwhich\s+(?:is|one\s+is)\s+better\s+(?:for|between)?\b/i,
   /\b(?:tech|technology|stack|library|framework|database)\s+(?:choice|decision|selection)\b/i,
-  /\bchoose\s+between\s+\S{2,}\s+(?:and|or)\s+\S{2,}/i,
+  /\bchoose\s+between\s+\S{2,64}\s+(?:and|or)\s+\S{2,64}/i,
 ];
 
 // Negative ADR signals — phrases that contain "vs" or "선택" but mean something
@@ -71,17 +81,17 @@ const ADR_NEGATIVE_PATTERNS = [
 const MIGRATE_KO_PATTERNS = [
   /마이그레이션|마이그레이트/i,
   /(?:DB|데이터베이스|디비|시스템|서버|스택|인프라|서비스|라이브러리|프레임워크)\s*(?:이전|이관|전환|교체|갈아|옮기)/i,
-  /(\S{2,})\s*에서\s*(\S{2,})\s*(?:로|으로)\s*(?:이전|이관|전환|교체|갈아|옮기|마이그|migrate|이동)/i,
-  /(\S{2,})\s*(?:→|->)\s*(\S{2,})\s*(?:이전|이관|전환|교체|마이그|migrate)/i,
+  /(\S{2,64})\s*에서\s*(\S{2,64})\s*(?:로|으로)\s*(?:이전|이관|전환|교체|갈아|옮기|마이그|migrate|이동)/i,
+  /(\S{2,64})\s*(?:→|->)\s*(\S{2,64})\s*(?:이전|이관|전환|교체|마이그|migrate)/i,
   /(?:점진적|단계적|무중단|zero[-\s]?downtime)\s*(?:이전|이관|전환|교체|배포|롤아웃)/i,
 ];
 // English migration triggers
 const MIGRATE_EN_PATTERNS = [
-  /\bmigrate\s+from\s+\S{2,}\s+to\s+\S{2,}/i,
+  /\bmigrate\s+from\s+\S{2,64}\s+to\s+\S{2,64}/i,
   /\bmigration\s+(?:from|to|plan|strategy|path)\b/i,
   /\b(?:roll\s?out|rollout)\s+(?:plan|strategy)\b/i,
-  /\bswitch\s+from\s+\S{2,}\s+to\s+\S{2,}/i,
-  /\bmove\s+from\s+\S{2,}\s+to\s+\S{2,}\s+(?:database|db|stack|service|provider|system)/i,
+  /\bswitch\s+from\s+\S{2,64}\s+to\s+\S{2,64}/i,
+  /\bmove\s+from\s+\S{2,64}\s+to\s+\S{2,64}\s+(?:database|db|stack|service|provider|system)/i,
   /\b(?:zero[-\s]?downtime|blue[-\s]?green|canary)\s+(?:deployment|rollout|migration)/i,
 ];
 
@@ -158,6 +168,26 @@ function collectMatches(prompt, patterns) {
 }
 
 /**
+ * Most characters of a prompt the classifier reads. A longer prompt is read as
+ * its first and last CLASSIFY_MAX_CHARS / 2 characters, joined by a newline:
+ * the head keeps a question typed before a paste, the tail one typed after it.
+ * What lies between is not classified — a decision phrase buried mid-paste is
+ * missed, which is the price of a bounded cost (an advisory hint, not a gate).
+ */
+export const CLASSIFY_MAX_CHARS = 4096;
+
+/**
+ * The part of the prompt the classifier reads (see CLASSIFY_MAX_CHARS).
+ * @param {string} prompt
+ * @returns {string}
+ */
+function classificationWindow(prompt) {
+  if (prompt.length <= CLASSIFY_MAX_CHARS) return prompt;
+  const half = Math.floor(CLASSIFY_MAX_CHARS / 2);
+  return `${prompt.slice(0, half)}\n${prompt.slice(-half)}`;
+}
+
+/**
  * Classify the prompt into ADR / Migrate / null.
  *
  * Decision order:
@@ -166,11 +196,14 @@ function collectMatches(prompt, patterns) {
  *      (e.g. "PostgreSQL 에서 MongoDB 로 마이그" matches both families but the
  *      action is clearly migrate). ADR is the catch-all comparison family.
  *
- * @param {string} prompt
+ * Only classificationWindow(rawPrompt) is read — at most CLASSIFY_MAX_CHARS.
+ *
+ * @param {string} rawPrompt
  * @returns {{ command: 'adr'|'migrate', matched: string[] }|null}
  */
-export function classifyCommandIntent(prompt) {
-  if (!prompt || typeof prompt !== 'string') return null;
+export function classifyCommandIntent(rawPrompt) {
+  if (!rawPrompt || typeof rawPrompt !== 'string') return null;
+  const prompt = classificationWindow(rawPrompt);
 
   const migrateBlocked = anyMatch(prompt, MIGRATE_NEGATIVE_PATTERNS);
   const adrBlocked = anyMatch(prompt, ADR_NEGATIVE_PATTERNS);

@@ -306,7 +306,7 @@ Prefer specific subcommands you actually use, e.g.:
 
 If you need a broader policy, scope it to a directory (`Bash(npm run *:/path/to/project)`) or to a single repo via the project-local `settings.json` rather than the global allowlist.
 
-The Artibot `permission-auto-approve` hook (`scripts/hooks/permission-auto-approve.js`) accepts regex patterns from `artibot.config.json.permissions.autoApprove[].commandPattern`. Patterns like `.*` or unanchored `.+` for high-risk tools (`Bash`, `PowerShell`, `Write`) effectively disable approval prompts entirely — anchor them (`^git status$`) and keep them as narrow as possible.
+The Artibot `permission-auto-approve` hook (`scripts/hooks/permission-auto-approve.js`) accepts regex patterns from `artibot.config.json.permissions.autoApprove[].commandPattern`. Patterns like `.*` or unanchored `.+` for high-risk tools (`Bash`, `PowerShell`, `Write`) effectively disable approval prompts entirely — anchor them (`^git status$`) and keep them as narrow as possible. A wildcard entry (`{"tool": "*"}` or an entry with no `tool`) WITHOUT a `commandPattern` does not auto-approve `Bash`/`PowerShell` at all (since 2026-11-21 it is withheld as `wildcard-shell`); a shell call needs an entry that names the tool or constrains the command. Naming the tool without a pattern (`{"tool": "Bash"}`) still auto-approves every command the two PreToolUse danger judges do not list (e.g. `find . -delete`), so prefer an anchored pattern there too.
 
 ---
 
