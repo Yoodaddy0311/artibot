@@ -90,6 +90,33 @@ export function hookPath(name) {
 }
 
 /**
+ * Attach the one 'error' listener a spawned child's stdin needs before the
+ * payload is written to it.
+ *
+ * A child that exits without reading stdin (an early opt-out return) closes
+ * the pipe while a payload above the pipe buffer is still being written. The
+ * stream then emits 'error' ASYNCHRONOUSLY — EPIPE on POSIX, `write EOF` on
+ * Windows (measured 2026-11-21) — which a try/catch around `stdin.end()` cannot
+ * see, and with no listener Node makes it an uncaught exception: the dispatcher
+ * exited 1 and the slot's merged output was lost (review L1). The child not
+ * wanting its input is not a failure, so the error is only noted; the caller's
+ * exit/timeout handlers settle as usual.
+ *
+ * Shared by `spawnHook` and `_userprompt-dispatcher.js#runGitAutopilotSave`.
+ * The stderr line is `[artibot:<tag>] <name> stdin closed early: <code|message>`.
+ *
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {string} tag dispatcher tag inside `[artibot:...]`
+ * @param {string} name child name for the log line
+ */
+export function guardChildStdin(child, tag, name) {
+  if (!child.stdin) return;
+  child.stdin.on('error', (err) => {
+    process.stderr.write(`[artibot:${tag}] ${name} stdin closed early: ${err.code || err.message}\n`);
+  });
+}
+
+/**
  * Spawn a hook child process with the given payload on stdin.
  *
  * Resolution is guaranteed:
@@ -195,19 +222,9 @@ export function spawnHook(scriptPath, payload, opts) {
       });
     }
 
-    // A child that exits without reading stdin (an early opt-out return) closes
-    // the pipe while a payload above the pipe buffer is still being written. The
-    // stream then emits 'error' ASYNCHRONOUSLY — EPIPE on POSIX, `write EOF` on
-    // Windows (measured 2026-11-21) — which the try/catch below cannot see, and
-    // with no listener Node makes it an uncaught exception: the dispatcher exited
-    // 1 and the slot's merged output was lost (review L1). The child not wanting
-    // its input is not a failure, so the error is noted and the exit/timeout
-    // handlers settle the promise as usual.
-    if (child.stdin) {
-      child.stdin.on('error', (err) => {
-        process.stderr.write(`[artibot:${dispatcherName}] ${name} stdin closed early: ${err.code || err.message}\n`);
-      });
-    }
+    // Before the write: an early-exiting child turns it into an async stdin
+    // 'error' the try/catch below cannot see (see guardChildStdin, review L1).
+    guardChildStdin(child, dispatcherName, name);
 
     try {
       child.stdin.end(JSON.stringify(payload || {}));

@@ -404,8 +404,7 @@
       "main>withFileLock()": 106
     },
     "scripts/hooks/_dispatcher-utils.js": {
-      "spawnHook": 73,
-      "spawnHook>Promise()": 54
+      "spawnHook": 69
     },
     "scripts/hooks/_plan-observe-record.js": {
       "recordPlanArtifact": 67,
@@ -413,9 +412,6 @@
     },
     "scripts/hooks/_review-stop-record.js": {
       "writeReviewArtifact": 60
-    },
-    "scripts/hooks/_userprompt-dispatcher.js": {
-      "runGitAutopilotSave": 52
     },
     "scripts/learning-diag.js": {
       "renderGrpo": 58

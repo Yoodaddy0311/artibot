@@ -68,7 +68,7 @@ import { isMainEntry } from './_main-entry.js';
 // bug (UTF-8 corruption at the 64KB chunk boundary) exist in two places at
 // once. The shared reader also wraps the `for await` in try/catch, which this
 // copy did not; behavior on a stdin error stays fail-open ({} then exit 0).
-import { createFatalHandler, isUnsafeMergeKey, readPayload } from './_dispatcher-utils.js';
+import { createFatalHandler, guardChildStdin, isUnsafeMergeKey, readPayload } from './_dispatcher-utils.js';
 import { recordHookFired } from './_hook-fired-record.js';
 
 const HOOK_NAME = '_userprompt-dispatcher';
@@ -275,19 +275,10 @@ export function runGitAutopilotSave(payload, options = {}) {
     // Drain child stdout so the OS pipe buffer never fills up.
     if (child.stdout) child.stdout.on('data', () => {});
 
-    // A child that exits without reading stdin (git-autopilot-save's early
-    // opt-out returns) closes the pipe while a payload above the pipe buffer is
-    // still being written. The stream then emits 'error' ASYNCHRONOUSLY — EPIPE
-    // on POSIX, `write EOF` on Windows (measured 2026-11-21) — which the
-    // try/catch below cannot see; with no listener Node turns it into an
-    // uncaught exception that kills this whole dispatcher (the same defect as
-    // `_dispatcher-utils.js#spawnHook` review L1). The child not wanting its
-    // input is not a failure: note it and let exit/timeout settle the promise.
-    if (child.stdin) {
-      child.stdin.on('error', (err) => {
-        process.stderr.write(`[artibot:${HOOK_NAME}] git-autopilot-save stdin closed early: ${err.code || err.message}\n`);
-      });
-    }
+    // Before the write: git-autopilot-save's early opt-out returns leave the
+    // pipe closed, and the resulting async stdin 'error' would otherwise kill
+    // this whole dispatcher (see `_dispatcher-utils.js#guardChildStdin`).
+    guardChildStdin(child, HOOK_NAME, 'git-autopilot-save');
 
     try {
       child.stdin.end(JSON.stringify(payload));
