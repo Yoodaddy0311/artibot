@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 수정 — `/theme` 가 읽지 못한 `~/.claude/settings.json` 을 통째로 덮어쓰던 것 (HIGH)
+
+- **`scripts/theme-apply.js#parseSettingsText` · `#writeSettings`.** 전에는 `readJson(SETTINGS, {})` 가 파싱 실패를 `{}` 로 바꿨고, 다음 쓰기가 파일 전체를 `statusLine`+`outputStyle` 만으로 교체했다. 그래서 주석·끝 쉼표·UTF-8 BOM 이 하나라도 있으면 사용자의 `permissions`·`hooks`·`env` 가 사라졌는데도 exit 0 과 `✓ statusLine → themed` 가 찍혔다(2026-11-21 품질 검수관 실측, 리더가 코드로 재확인). 이제 apply·reset 은 첫 쓰기 **전에** settings 를 검사한다. JSON 객체가 아니면 어떤 표면도 바꾸지 않고 exit 1 로 멈추며, BOM 은 벗겨서 읽는다. 빈 파일(0바이트·공백만)은 지킬 데이터가 없어 `{}` 로 본다. 첫 변경 전 원본을 `settings.json.artibot-backup` 에 바이트 그대로 한 번 복사하고, 쓰기는 `lib/core/file.js#atomicWriteJsonSync` 를 거친다. rename 은 디렉터리 항목을 바꾸므로, 심볼릭 링크면 대상을 풀어 그쪽을 교체하고(링크 유지) POSIX 권한(예: 0600)은 쓴 뒤 되돌린다. 이 회귀는 교차검수관이 짚었다. 회귀 테스트는 `tests/scripts/theme-apply-settings-safety.test.js` 13건(POSIX 전용 2건은 win32 에서 skip)으로, 실제 스크립트를 임시 HOME 에서 자식 프로세스로 돌린다. 수정 전 8건 RED, 수정 후 GREEN. 교차검수관이 HEAD 사본에서 결함을 재현하고 새 코드에서 사라짐을 확인했다. 한계: Windows Terminal·VS Code settings 쪽은 원래도 파싱 실패 시 건너뛰었으므로 바꾸지 않았다(비원자 쓰기는 그대로).
+
 ### 수정 — `/save` 의 WIP 경보가 이미 푸시된 이력을 세던 것
 
 - **`lib/autopilot/wip-stats.js#countWipCommits` · `#getOldestWipAgeMs` 가 아직 원격에 없는 WIP 만 센다.** 두 함수가 같은 `#unpushedRange` (`<branch> --not --remotes --`)를 쓴다. 전에는 범위 없이 전체 이력을 세어, 이 리포에서는 HEAD 2,249 커밋 중 이미 origin 에 있는 WIP 51건으로 SessionStart `[artibot:wip]` 줄과 `/save` §1·§5 가 영구히 "squash 하라"고 경보했다(2026-11-08 조사관 실측). 수정 뒤 이 리포 값은 0 · 경보 없음(리더 실측). 원격이 없는 리포는 전처럼 전체를 센다. `@{u}..HEAD` 는 upstream 없는 브랜치에서 exit 128 → 0 으로 숨어 기각했다. 트레이드오프: 원격이 여럿이면 어느 원격(fork 등)에든 있는 커밋을 제외한다(검수관 실측, 문서화). 문구는 `N unpushed WIP commit(s)`, HANDOFF §1 칸은 `WIP (미푸시)` — SessionStart 배너의 `parseHandoffBannerFields` 가 "WIP" 단어로 이 행을 읽으므로 단어를 앞에 두었다(왕복 테스트).

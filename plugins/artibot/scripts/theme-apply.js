@@ -18,9 +18,10 @@
  * Usage: node theme-apply.js <theme|reset|list> [--json]
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { atomicWriteJsonSync } from '../lib/core/file.js';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { buildOutputStyle, buildStatuslinePalette, buildVscodeTerminalColors, buildWtScheme, isTheme, THEME_NAMES, THEMES, VSCODE_TERMINAL_KEYS } from './theme/registry.js';
 import { isMainEntry } from './hooks/_main-entry.js';
@@ -85,6 +86,62 @@ function readJson(p, fallback = null) {
 function writeJson(p, obj) {
   mkdirSync(join(p, '..'), { recursive: true });
   writeFileSync(p, JSON.stringify(obj, null, 2) + '\n');
+}
+
+/**
+ * Parse settings.json text without ever inventing a replacement for it.
+ *
+ * `null` text (file absent) is a legitimate empty object — first run. A UTF-8
+ * BOM is stripped (Windows editors add one). Anything else that is not a JSON
+ * object — comments, trailing commas, an array — yields `ok: false`, and the
+ * caller must then leave the file alone: the old `readJson(SETTINGS, {})` turned
+ * that case into `{}` and the next write erased the user's permissions/hooks/env.
+ *
+ * @param {string|null} text - File contents, or `null` when the file is absent.
+ * @returns {{ ok: true, data: object } | { ok: false }}
+ */
+const BOM = String.fromCharCode(0xfeff);
+
+export function parseSettingsText(text) {
+  // Absent or blank (BOM/whitespace only) holds no user data — treat as `{}`.
+  if (text === null || text.trim() === '') return { ok: true, data: {} };
+  try {
+    const data = JSON.parse(text.startsWith(BOM) ? text.slice(1) : text);
+    if (data && typeof data === 'object' && !Array.isArray(data)) return { ok: true, data };
+  } catch { /* unparseable — reported as ok:false below */ }
+  return { ok: false };
+}
+
+function readSettings() {
+  return parseSettingsText(existsSync(SETTINGS) ? readFileSync(SETTINGS, 'utf8') : null);
+}
+
+const SETTINGS_UNREADABLE =
+  `${SETTINGS} 를 JSON 객체로 읽지 못해 아무것도 바꾸지 않았습니다 ` +
+  '(주석·끝 쉼표 등). 파일을 고친 뒤 다시 실행하세요.';
+
+/**
+ * Write settings.json atomically, keeping a one-time byte copy of the original.
+ *
+ * tmp→rename replaces the directory entry, so two things the old in-place
+ * `writeFileSync` kept for free are restored by hand: a symlinked settings.json
+ * (dotfile managers) is resolved and its TARGET is replaced, so the link stays a
+ * link; and the file mode (e.g. 0600) is re-applied after the rename instead of
+ * falling back to the umask default. Windows has no POSIX mode to keep.
+ */
+function writeSettings(obj) {
+  const exists = existsSync(SETTINGS);
+  const target = exists ? realpathSync(SETTINGS) : SETTINGS;
+  const backup = SETTINGS + '.artibot-backup';
+  if (exists && !existsSync(backup)) copyFileSync(target, backup);
+  const mode = exists ? statSync(target).mode & 0o777 : null;
+  atomicWriteJsonSync(target, obj);
+  if (mode === null || process.platform === 'win32') return;
+  try {
+    chmodSync(target, mode);
+  } catch (err) {
+    process.stderr.write(`⚠ ${target} 권한(${mode.toString(8)}) 복원 실패: ${err.message}\n`);
+  }
 }
 
 // ── Pure helpers (exported for tests) ────────────────────────────────────────
@@ -206,9 +263,8 @@ function captureVscodeColors(settings) {
 
 // ── I/O actions ──────────────────────────────────────────────────────────────
 
-function captureBackup() {
+function captureBackup(settings) {
   if (existsSync(BACKUP)) return; // first apply only
-  const settings = readJson(SETTINGS, {});
   let prevStatus = settings.statusLine && settings.statusLine.command;
   if (!prevStatus || /statusline-(themed|neon)\.sh/.test(prevStatus)) prevStatus = DEFAULT_STATUSLINE;
   const wtPath = findWtSettings();
@@ -220,15 +276,21 @@ function captureBackup() {
   writeJson(BACKUP, { prevStatus, prevColorScheme, prevOutputStyle, prevVscodeColors, savedAt: new Date().toISOString() });
 }
 
+/**
+ * @returns {string[]|null} Notes, or `null` when settings.json is unreadable —
+ *   in which case nothing at all was written (checked before the first write).
+ */
 function applyTheme(name) {
+  const read = readSettings();
+  if (!read.ok) return null;
+  const settings = read.data;
   const notes = [];
-  captureBackup();
+  captureBackup(settings);
 
   // 1. statusline palette + command + output-style activation (one settings write)
   writeJson(join(RUNTIME, 'current-theme.json'), buildStatuslinePalette(name));
-  const settings = readJson(SETTINGS, {});
   // outputStyle matches the output-style file's frontmatter `name` (= theme label)
-  writeJson(SETTINGS, withOutputStyle(withStatusLine(settings, THEMED_STATUSLINE), THEMES[name].label));
+  writeSettings(withOutputStyle(withStatusLine(settings, THEMED_STATUSLINE), THEMES[name].label));
   notes.push('statusLine → themed (재시작 또는 화면 갱신 시 반영)');
 
   // 2. Windows Terminal scheme (best-effort)
@@ -263,11 +325,13 @@ function applyTheme(name) {
   return notes;
 }
 
+/** @returns {string[]|null} Notes, or `null` when settings.json is unreadable (nothing written). */
 function resetTheme() {
+  const read = readSettings();
+  if (!read.ok) return null;
   const notes = [];
   const b = readJson(BACKUP, {});
-  const settings = readJson(SETTINGS, {});
-  writeJson(SETTINGS, restoreSettings(settings, b, DEFAULT_STATUSLINE));
+  writeSettings(restoreSettings(read.data, b, DEFAULT_STATUSLINE));
   notes.push('statusLine + output-style → 기본 복원');
 
   const wtPath = findWtSettings();
@@ -301,6 +365,7 @@ function main() {
   }
   if (arg === 'reset') {
     const notes = resetTheme();
+    if (notes === null) { process.stderr.write(`✗ ${SETTINGS_UNREADABLE}\n`); process.exit(1); }
     process.stdout.write('테마 원복:\n' + notes.map((n) => `  ✓ ${n}`).join('\n') + '\n');
     return;
   }
@@ -309,6 +374,7 @@ function main() {
     process.exit(1);
   }
   const notes = applyTheme(arg);
+  if (notes === null) { process.stderr.write(`✗ ${SETTINGS_UNREADABLE}\n`); process.exit(1); }
   process.stdout.write(`테마 적용: ${THEMES[arg].label}\n` + notes.map((n) => `  ✓ ${n}`).join('\n') + '\n');
 }
 

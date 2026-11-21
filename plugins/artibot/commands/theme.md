@@ -64,6 +64,7 @@ Bash: F="scripts/theme-apply.js"; ENGINE=""; grep -q '"name"[[:space:]]*:[[:spac
 
 - Windows Terminal 미설치/미발견 시 → 색상 단계는 자동 스킵(나머지는 적용). 다른 터미널은 컬러 스킴 수동 적용 안내.
 - WT settings.json은 적용 전 `settings.json.artibot-backup`으로 백업됨.
+- `~/.claude/settings.json`도 첫 변경 전에 `settings.json.artibot-backup`으로 원본 바이트 그대로 1회 백업되고, 쓰기는 원자적(tmp→rename)이다. 이 파일이 JSON 객체로 읽히지 않으면(주석·끝 쉼표·배열) **아무 표면도 바꾸지 않고** exit 1 로 멈춘다. UTF-8 BOM 은 벗기고 읽는다.
 - statusLine/colorScheme 이전값은 `runtime/theme-backup.json`에 백업 → `reset`이 복원.
 - output-style은 정보 가독성을 해치지 않는다(코드블록·표·file:line은 장식 안 함).
 
