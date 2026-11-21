@@ -15,7 +15,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { atomicWriteSync } from '../../scripts/utils/index.js';
+import { atomicWriteJsonSync } from './file.js';
 import { getPluginRoot } from './platform.js';
 import { computeHash, extractSkillBody } from './skill-hash.js';
 
@@ -68,12 +68,19 @@ export async function buildSkillHashCache() {
  * Persist the cache to `.claude-cache/skill-hashes.json` atomically.
  * Never throws — returns false on failure.
  *
+ * The writer is `./file.js#atomicWriteJsonSync`, which throws on every failure
+ * (mkdir, serialize, write, rename), so the catch below is what turns a lost
+ * write into `false`. Until 2026-11-21 (review M7) the writer was the hook
+ * helper `scripts/utils/index.js#atomicWriteSync` (an L1 -> scripts edge) that
+ * logged an I/O failure and returned normally — this function then said `true`
+ * for a cache that never reached disk.
+ *
  * @param {object} data - Cache data from buildSkillHashCache.
- * @returns {boolean} True on success, false on failure.
+ * @returns {boolean} True when the cache file now holds `data`, false otherwise.
  */
 export function persistSkillHashCache(data) {
   try {
-    atomicWriteSync(cachePath(), data);
+    atomicWriteJsonSync(cachePath(), data);
     return true;
   } catch {
     return false;

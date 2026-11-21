@@ -109,28 +109,48 @@ function retryFsOp(fn) {
  * On final failure logs to stderr and best-effort unlinks the tmp file so
  * `~/.claude/artibot-state.json.tmp.<pid>` orphans do not accumulate.
  *
+ * NEVER THROWS — hooks call this on their exit path, where a throw would turn a
+ * lost state write into a crashed hook. The outcome is the return value instead
+ * (2026-11-21 review M4): before, a failed write returned `undefined` exactly like
+ * a successful one, so a caller could not tell "written" from "logged and lost"
+ * and `_team-state.js#mergeSessionSnapshot` reported `wrote: true` either way.
+ * Every step that can fail — creating the directory, serializing `data`, writing
+ * the tmp file, the rename — answers `false` with a stderr line.
+ *
+ * lib/ must not call this (layer rule, enforced in eslint.config.js): lib code
+ * uses `lib/core/file.js#atomicWriteJsonSync`, which throws so its caller decides.
+ *
  * @param {string} filePath - Destination file path
  * @param {string|object} data - String content or object to serialize as JSON
+ * @returns {boolean} true when the destination now holds `data`; false otherwise
  */
 export function atomicWriteSync(filePath, data) {
-  const dir = dirname(filePath);
-  // mkdirSync({ recursive: true }) is idempotent on Node >=10.12 — never throws EEXIST.
-  mkdirSync(dir, { recursive: true });
   const tmpPath = filePath + '.tmp.' + process.pid;
-  const payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  let payload;
+  try {
+    // mkdirSync({ recursive: true }) is idempotent for an existing directory, but it
+    // throws when a path component is a file (EEXIST/ENOTDIR) or is not creatable.
+    mkdirSync(dirname(filePath), { recursive: true });
+    payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  } catch (err) {
+    process.stderr.write(`[artibot:atomicWrite] cannot prepare ${filePath}: ${err?.code || ''} ${err?.message}\n`);
+    return false;
+  }
 
   const writeErr = retryFsOp(() => writeFileSync(tmpPath, payload, 'utf-8'));
   if (writeErr) {
     safeUnlinkTmp(tmpPath);
     process.stderr.write(`[artibot:atomicWrite] tmp write failed for ${filePath}: ${writeErr.code || ''} ${writeErr.message}\n`);
-    return; // graceful: never throw out of a hook write
+    return false;
   }
 
   const renameErr = retryFsOp(() => renameSync(tmpPath, filePath));
   if (renameErr) {
     safeUnlinkTmp(tmpPath);
     process.stderr.write(`[artibot:atomicWrite] rename failed for ${filePath}: ${renameErr.code || ''} ${renameErr.message}\n`);
+    return false;
   }
+  return true;
 }
 
 /**
@@ -138,11 +158,24 @@ export function atomicWriteSync(filePath, data) {
  * Uses manual construction instead of pathToFileURL() because the latter
  * percent-encodes non-ASCII characters (e.g., Korean 바탕 화면 -> %EB%B0%94...),
  * which Node.js import() on Windows cannot resolve back to filesystem paths.
+ *
+ * Three ASCII characters are still encoded, because a URL parser gives them a
+ * meaning whatever this helper intends (2026-11-21 review L2): `#` would start a
+ * fragment and `?` a query (the rest of the path is dropped), and a literal `%`
+ * would be read as an escape (`%41` -> `A`). `%` is encoded FIRST so the escapes
+ * produced for `#` and `?` are not encoded a second time. Hangul and spaces stay
+ * literal. tests/scripts/utils-to-file-url.test.js imports through a real `#`
+ * directory in a child node.
+ *
  * @param {string} filePath - Absolute filesystem path
  * @returns {string} file:// URL string
  */
 export function toFileUrl(filePath) {
-  const forward = filePath.replace(/\\/g, '/');
+  const forward = filePath
+    .replace(/\\/g, '/')
+    .replace(/%/g, '%25')
+    .replace(/#/g, '%23')
+    .replace(/\?/g, '%3F');
   // Windows absolute paths need file:///C:/... (empty authority)
   if (/^[A-Z]:/i.test(forward)) {
     return `file:///${forward}`;

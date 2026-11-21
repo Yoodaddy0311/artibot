@@ -2,6 +2,50 @@ import { BASE_RULES, SCRIPT_RULE_OVERRIDES } from './eslint.shared-rules.js';
 import js from '@eslint/js';
 import globals from 'globals';
 
+// -----------------------------------------------------------------------------
+// lib/ -> scripts/ boundary (2026-11-21 review M7). scripts/ is the hook/CLI
+// layer on top of lib/, so a lib module must not import it. Every lib layer
+// block below (L1-L5) carries this pattern next to its layer pattern — a flat
+// config block REPLACES an earlier block's no-restricted-imports options for
+// the files it matches, so the pattern has to be in each block, not in one.
+//
+// One exception, by module: scripts/hooks/_main-entry.js, which answers "is
+// this file the process entry point" for lib modules with a CLI mode. Its
+// STATIC imports are node: builtins only; its one non-builtin dependency is a
+// deferred `import('./_hook-seen-marker.js')` (plus injected lib/project-state
+// loaders) inside `tapDirectFiring`, a path the lib importers never take — they
+// call `isMainEntry` only. Which lib files may use it is pinned separately by
+// the census in tests/firewall/lib-scripts-boundary-lint.test.js.
+//
+// A regex with a negative lookahead, not a gitignore `group`: measured
+// 2026-11-21, `['**/scripts/**', '!**/scripts/hooks/_main-entry.js']` still
+// matches the exempt file (gitignore cannot re-include a file under an
+// excluded directory). The regex is tested against the specifier's string
+// value; eslint compiles it case-insensitively by default. Separators are
+// `[/\\]`, not `/`: Node 22.19 on Windows resolves `'../../scripts\\utils\\index.js'`
+// and `'../..\\scripts/utils/index.js'` to the real module (probed 2026-11-21),
+// and a slash-only pattern reported neither.
+//
+// What it cannot see (no-restricted-imports reads only the literal source of
+// import/export declarations):
+//   - dynamic imports, computed (`import(path.join(...))`) AND literal
+//     (`import('../../scripts/x.js')`) — the census in the test above does
+//     catch the literal form;
+//   - `createRequire(import.meta.url)('../../scripts/x.js')` — census misses it too;
+//   - absolute paths and `file:` URLs (`/repo/.../scripts/x.js`,
+//     `file:///C:/.../scripts/x.js`) — the regex is anchored on `./` / `../`;
+//     the census, unanchored, flags them.
+//
+// Exported (eslint reads only the default export) so
+// tests/firewall/layer-registration-coverage.test.js can count THIS pattern by
+// identity in every layer block, instead of guessing it from a substring.
+// -----------------------------------------------------------------------------
+export const LIB_SCRIPTS_BOUNDARY = Object.freeze({
+  regex: String.raw`^(?:\.\.?[/\\])+(?:[^/\\]+[/\\])*scripts[/\\](?!hooks[/\\]_main-entry\.js$)`,
+  message:
+    'Layer violation: lib/ must not import from scripts/ (the hook/CLI layer above lib). Move the helper into lib/ — the only exception is scripts/hooks/_main-entry.js.',
+});
+
 export default [
   // ---------------------------------------------------------------------------
   // Generated output. An `ignores`-only entry is a global ignore in flat config.
@@ -75,15 +119,22 @@ export default [
   // ---------------------------------------------------------------------------
   {
     // L1 Core: must not import from ANY higher layer (L2/L3/L4/L5).
-    // utils/ = pure leaf helpers (core tier); imported downward by all layers.
-    files: ['lib/core/**/*.{js,mjs}', 'lib/utils/**/*.{js,mjs}'],
+    //
+    // `lib/utils/**` was registered here until 2026-11-21 (review L8). No
+    // lib/utils/ directory exists and nothing imports one, so the entry was
+    // inert — and an inert registration reads as "utils is an L1 directory"
+    // to the next reader. Removed; re-register it if the directory is created.
+    files: ['lib/core/**/*.{js,mjs}'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
+          LIB_SCRIPTS_BOUNDARY,
           {
-            // Every directory registered by an L2/L3/L4 block below must also
-            // appear here, plus runtime (L5, which has no block of its own
-            // because nothing sits above it). Registration and prohibition are
+            // Every directory registered by an L2/L3/L4/L5 block below must
+            // also appear here. (Until 2026-11-21 runtime/ had no block of its
+            // own and was listed by hand; it now has one — see the L5 block —
+            // so the completeness test derives it like the rest.)
+            // Registration and prohibition are
             // two separate hand-maintained lists, so one can drift from the
             // other with nothing visibly wrong: a directory registered below
             // but absent here is a directory lib/core may import freely.
@@ -130,9 +181,12 @@ export default [
     // genesis/ (added 2026-08-22): `/go` blueprint renderers. It was in NO
     // layer block, so the allowlist-shaped gate applied zero layer rules to it
     // — fail-open by omission, not by decision. Placed at L2 on two measured
-    // grounds: its own imports are node built-ins + `./_shared.js` only (zero
-    // lib/* edges), and its only consumers are `commands/go.md` (runtime
-    // dynamic import) and tests — no lib module imports it. That is the same
+    // grounds: its own imports are node built-ins + `./_shared.js`, whose one
+    // lib/* edge is a downward re-export of `../core/file.js#atomicWriteText`
+    // (L2 -> L1, the allowed direction; added 2026-11-21 review M8 — at
+    // registration time there were zero lib/* edges), and its only consumers
+    // are `commands/go.md` (runtime dynamic import) and tests — no lib module
+    // imports it. That is the same
     // "domain service a command drives" profile as release/ visual/ tui/, not
     // the shared-leaf profile of core/ utils/ (L1). Registering is therefore
     // non-breaking today and forward-protective tomorrow.
@@ -194,6 +248,7 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
+          LIB_SCRIPTS_BOUNDARY,
           {
             // topology/ joins cognitive/ at L4 (see the L4 block below), so it
             // belongs in every group that already names cognitive. Omitting it
@@ -227,6 +282,7 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
+          LIB_SCRIPTS_BOUNDARY,
           {
             group: ['**/cognitive/**', '**/topology/**', '**/runtime/**'],
             message:
@@ -274,12 +330,27 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
+          LIB_SCRIPTS_BOUNDARY,
           {
             group: ['**/runtime/**'],
             message:
               'Layer violation: lib/cognitive (L4) must not import from the runtime (L5) layer. Upper layers import lower only (5->4->3->2->1).',
           },
         ],
+      }],
+    },
+  },
+  {
+    // L5 Runtime: the top layer, so there is no higher lib layer to forbid.
+    // This block exists for the lib/ -> scripts/ boundary alone (2026-11-21
+    // review M7): before it, lib/runtime was in no block, so it was the one
+    // lib directory where a scripts/ import was not even expressible as a lint
+    // error. It carries no layer `group` on purpose — adding one would forbid
+    // nothing (every other lib directory is below it).
+    files: ['lib/runtime/**/*.{js,mjs}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [LIB_SCRIPTS_BOUNDARY],
       }],
     },
   },

@@ -271,8 +271,10 @@ function readStateForMerge(statePath) {
  *
  * @param {string} statePath - Path of the state file
  * @param {{sessionId: string|null, endedAt: string, startedAt: *, cwd: string, metadata: object}} snapshot
- * @returns {boolean} Whether the merged state was handed to atomicWriteSync (which logs and
- *   returns on a failure of its own); false when the snapshot was skipped
+ * @returns {boolean} Whether the merged state is now on disk: atomicWriteSync's own answer.
+ *   false when the snapshot was skipped (lock not taken, file unreadable) AND when the write
+ *   itself failed — before 2026-11-21 (review M4) that second case returned true, because
+ *   atomicWriteSync logged the failure and returned undefined like a success.
  */
 export function mergeSessionSnapshot(statePath, snapshot) {
   let wrote = false;
@@ -283,8 +285,7 @@ export function mergeSessionSnapshot(statePath, snapshot) {
       const kept = Object.fromEntries(
         Object.entries(prior).filter(([key]) => !FINISHED_TEAM_KEYS.includes(key)),
       );
-      atomicWriteSync(statePath, pruneAgents({ ...kept, ...snapshot }));
-      wrote = true;
+      wrote = atomicWriteSync(statePath, pruneAgents({ ...kept, ...snapshot })) === true;
     });
   } catch (err) {
     logHookError('session-end', 'Failed to save state', err);

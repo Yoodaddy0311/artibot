@@ -53,7 +53,9 @@ describe('skill-hash-cache', () => {
     });
 
     it('persistSkillHashCache returns false on bad input', () => {
-      // atomicWriteSync handles JSON.stringify; circular refs throw.
+      // lib/core/file.js#atomicWriteJsonSync calls JSON.stringify; a circular ref throws there
+      // and persistSkillHashCache's catch answers false. A failed rename is pinned separately in
+      // tests/core/atomic-write-honest-result.test.js.
       const circular = {};
       circular.self = circular;
       expect(persistSkillHashCache(circular)).toBe(false);

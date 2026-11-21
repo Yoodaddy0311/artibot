@@ -201,10 +201,11 @@ export async function main(argv) {
     lastSetupAt: new Date().toISOString(),
   };
 
-  try {
-    atomicWriteSync(configPath, config);
-  } catch (err) {
-    logHookError('git-autopilot-setup', 'Failed to write config', err);
+  // atomicWriteSync never throws (2026-11-21 review M4): it logs the cause to
+  // stderr and answers false. That false IS the failure — the try/catch that
+  // used to stand here could no longer fire, so a lost write printed "Created".
+  if (atomicWriteSync(configPath, config) !== true) {
+    logHookError('git-autopilot-setup', 'Failed to write config', new Error(`atomicWriteSync returned false for ${configPath}`));
     return 'error';
   }
 

@@ -10,16 +10,37 @@
  * file locks to coexist with concurrent writers, and never throw — they
  * return a structured report so callers can log without try/catch.
  *
+ * The write is `./file.js#atomicWriteJsonSync`, which THROWS on failure, so a
+ * failed write lands in rotateJsonArray's catch and is reported as
+ * `rotated: false` with an `error`. Until 2026-11-21 (review M7) this module
+ * imported the hook helper `scripts/utils/index.js#atomicWriteSync` instead —
+ * an L1 -> scripts edge, and a writer that logged and returned like a success,
+ * so a failed rotation was reported as `rotated: true`.
+ *
  * @module lib/core/rotation
  */
 
-import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteSync, parseJSON } from '../../scripts/utils/index.js';
-import { readFileSync } from 'node:fs';
+import { atomicWriteJsonSync } from './file.js';
 import { withFileLock } from './file-lock.js';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * JSON.parse that answers null for text that is not JSON (the caller then
+ * reports `unsupported-shape`). Local on purpose: the shared helper of the same
+ * name lives in scripts/, which lib/ must not import.
+ * @param {string} text
+ * @returns {unknown|null}
+ */
+function parseJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Trim a JSON array file by age (entries older than `maxAgeDays`) and/or
@@ -77,7 +98,7 @@ export function rotateJsonArray(filePath, options = {}) {
       }
 
       const next = isArrayShape ? kept : { ...parsed, entries: kept };
-      atomicWriteSync(filePath, next);
+      atomicWriteJsonSync(filePath, next);
       return { rotated: true, before, after, removed: before - after };
     });
   } catch (err) {

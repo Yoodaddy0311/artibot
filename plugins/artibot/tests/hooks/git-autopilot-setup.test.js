@@ -25,6 +25,9 @@ const mockState = {
   // Tests that need allowlisted behavior override this with the artibot URL.
   execFileSyncImpl: () => { throw new Error('git config failed'); },
   atomicWrites: [],
+  // The real helper never throws and answers true/false (2026-11-21 review M4);
+  // the mock keeps that contract so main() sees a SUCCESSFUL write by default.
+  atomicWriteResult: true,
   stdoutChunks: [],
   stderrChunks: [],
 };
@@ -35,6 +38,7 @@ const mockState = {
 vi.mock('../../scripts/utils/index.js', () => ({
   atomicWriteSync: vi.fn((file, data) => {
     mockState.atomicWrites.push({ file, data });
+    return mockState.atomicWriteResult;
   }),
 }));
 
@@ -70,6 +74,7 @@ function resetState() {
   mockState.execSyncImpl = () => '/fake/repo/root\n';
   mockState.execFileSyncImpl = () => { throw new Error('git config failed'); };
   mockState.atomicWrites = [];
+  mockState.atomicWriteResult = true;
   mockState.stdoutChunks = [];
   mockState.stderrChunks = [];
 }
@@ -143,6 +148,30 @@ describe('git-autopilot-setup opt-in policy', () => {
       // SessionStart JSON parser. See git-autopilot-setup.js:198.
       expect(mockState.stdoutChunks).toHaveLength(0);
       expect(mockState.stderrChunks.join('')).toContain('Created');
+    });
+  });
+
+  describe('config write failure (atomicWriteSync answers false)', () => {
+    // atomicWriteSync stopped throwing in review M4 and answers false instead, so
+    // the old try/catch around it could no longer fire: a failed write printed
+    // "Created" and returned 'created' (xcA LOW). The false answer IS the failure.
+    it('returns "error", logs via logHookError and prints no Created/Updated line', async () => {
+      mockState.existsSyncResults = {
+        'autopilot.json': false,
+        'plugin.json': false,
+      };
+      mockState.atomicWriteResult = false;
+      const { logHookError } = await import('../../lib/core/hook-utils.js');
+
+      const outcome = await mainFn(['--init']);
+
+      expect(outcome).toBe('error');
+      expect(mockState.atomicWrites).toHaveLength(1);
+      expect(logHookError).toHaveBeenCalledTimes(1);
+      expect(logHookError.mock.calls[0][0]).toBe('git-autopilot-setup');
+      const err = mockState.stderrChunks.join('');
+      expect(err).not.toContain('Created');
+      expect(err).not.toContain('Updated');
     });
   });
 

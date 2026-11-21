@@ -8,7 +8,8 @@
 
 import path from 'node:path';
 import { exists, readTextFile } from './file.js';
-import { estimateTokens } from './index.js';
+// The leaf, not './index.js': importing the barrel that re-exports this module was a cycle.
+import { estimateTokens } from './token-estimate.js';
 
 // ---------------------------------------------------------------------------
 // Constants

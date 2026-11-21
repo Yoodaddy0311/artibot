@@ -25,28 +25,16 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainEntry } from './hooks/_main-entry.js';
+// The shared helper, not a copy. Until 2026-11-21 this file carried a hand-made
+// "mirror" of it (no reason recorded for copying), and the mirror kept the old
+// behaviour after the original learned to encode `%`, `#` and `?` (review L2).
+// Re-exported below so tests/scripts/gen-model-catalog-docs.test.js keeps its import.
+import { toFileUrl } from './utils/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(__dirname, '..');
 const CATALOG_SRC = join(PLUGIN_ROOT, 'lib', 'core', 'model-catalog.js');
 const OUT_PATH = join(PLUGIN_ROOT, 'docs', 'CLAUDE-MODEL-CATALOG.md');
-
-/**
- * Convert an absolute filesystem path to a file:// URL for dynamic import().
- * Manual construction (not pathToFileURL) so Korean/space path segments are not
- * percent-encoded into something Node's import() cannot resolve on Windows.
- * Mirrors scripts/utils/index.js#toFileUrl.
- *
- * @param {string} filePath - Absolute filesystem path.
- * @returns {string} file:// URL string.
- */
-function toFileUrl(filePath) {
-  const forward = filePath.replace(/\\/g, '/');
-  if (/^[A-Z]:/i.test(forward)) {
-    return `file:///${forward}`;
-  }
-  return `file://${forward}`;
-}
 
 /** The tier rows, in the order the table lists them. */
 const TIER_ORDER = Object.freeze(['fable', 'opus', 'sonnet', 'haiku']);

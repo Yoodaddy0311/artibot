@@ -4,7 +4,8 @@
  * @module lib/core/agent-memory-snapshot
  */
 
-import { estimateTokens } from './index.js';
+// The leaf, not './index.js': importing the barrel that re-exports this module was a cycle.
+import { estimateTokens } from './token-estimate.js';
 
 /** Maximum snapshot budget in estimated tokens */
 const MAX_TOKENS = 500;

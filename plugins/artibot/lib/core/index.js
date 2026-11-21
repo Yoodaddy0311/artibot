@@ -26,20 +26,10 @@ export function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-/** Approximate characters per token for budget estimation. */
-export const CHARS_PER_TOKEN = 4;
-
-/**
- * Estimate token count from character content.
- * Canonical implementation — other modules should import this.
- * @param {string} text - Raw text content
- * @param {number} [charsPerToken=4] - Characters-per-token ratio
- * @returns {number} Estimated token count
- */
-export function estimateTokens(text, charsPerToken = CHARS_PER_TOKEN) {
-  if (!text || typeof text !== 'string') return 0;
-  return Math.ceil(text.length / charsPerToken) + 1;
-}
+// Token estimate: defined in the leaf ./token-estimate.js and re-exported here so the
+// public lib/core API is unchanged. Modules inside lib/core import the leaf, never this
+// barrel (2026-11-21 review L7 — two of them did, forming a cycle through index.js).
+export { CHARS_PER_TOKEN, estimateTokens } from './token-estimate.js';
 
 export { loadConfig, getConfig, resetConfig, ARTIBOT_DIR } from './config.js';
 export { Cache, defaultCache } from './cache.js';

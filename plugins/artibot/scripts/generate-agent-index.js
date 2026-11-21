@@ -14,6 +14,7 @@
 
 import path from 'node:path';
 import { atomicWriteSync, getPluginRoot, toFileUrl } from './utils/index.js';
+import { isMainEntry } from './hooks/_main-entry.js';
 
 const LIFECYCLE_ORDER = ['build', 'review', 'verify', 'operate', 'marketing', 'null'];
 
@@ -123,24 +124,49 @@ function renderIndex(agents) {
 }
 
 /**
- * Main entrypoint. Soft-fails with stderr + exit 0.
+ * Build INDEX.md and write it. Never throws: every outcome is one line on
+ * stdout ("wrote …") or stderr ("failed: …").
  *
- * @returns {Promise<void>}
+ * @param {object} [options]
+ * @param {string} [options.outPath] destination — TEST-ONLY override; the CLI
+ *   always writes `<plugin root>/agents/INDEX.md`
+ * @returns {Promise<boolean>} true when the index was written
  */
-async function main() {
+export async function generateAgentIndex(options = {}) {
   try {
     const { loadAgentRegistry } = await importRegistry();
     const map = await loadAgentRegistry();
     const agents = [...map.values()];
     const doc = renderIndex(agents);
-    const outPath = path.join(getPluginRoot(), 'agents', 'INDEX.md');
-    atomicWriteSync(outPath, doc);
+    const outPath = options.outPath || path.join(getPluginRoot(), 'agents', 'INDEX.md');
+    // atomicWriteSync never throws (2026-11-21 review M4) — it logs the cause and
+    // answers false, which the catch below can no longer see. Report it here.
+    if (atomicWriteSync(outPath, doc) !== true) {
+      process.stderr.write(`[generate-agent-index] failed: could not write ${outPath}\n`);
+      return false;
+    }
     process.stdout.write(`[generate-agent-index] wrote ${agents.length} agents to ${outPath}\n`);
+    return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[generate-agent-index] failed: ${msg}\n`);
+    return false;
   }
+}
+
+/**
+ * Main entrypoint. Soft-fails with stderr + exit 0.
+ *
+ * @returns {Promise<void>}
+ */
+async function main() {
+  await generateAgentIndex();
   process.exit(0);
 }
 
-main();
+// Direct-run guard: importing this module (tests) must not regenerate the real
+// INDEX.md or call process.exit. `node scripts/generate-agent-index.js` is
+// unaffected.
+if (isMainEntry(import.meta.url)) {
+  main();
+}
