@@ -41,9 +41,16 @@ import { generateReport } from '../../lib/autopilot/report-generator.js';
 import { startAutopilot } from '../../lib/autopilot/engine.js';
 import { deleteSessionArtifacts, loadSession, saveSession } from '../../lib/autopilot/session-store.js';
 
-/** True when `child` is `parent` or beneath it. */
+/**
+ * True when `child` is `parent` or beneath it, both compared in canonical
+ * spelling. Canonicalizing only the parent failed on the GitHub Windows runner
+ * (2026-11-21): its os.tmpdir() is the 8.3 `C:\Users\RUNNER~1\…`, an explicit
+ * projectRoot keeps that short spelling verbatim, and a long parent vs a short
+ * child is never "inside" by `path.relative`.
+ */
 function inside(parent, child) {
-  const rel = path.relative(realpathSync.native(parent), child);
+  const canon = (p) => { try { return realpathSync.native(p); } catch { return path.resolve(p); } };
+  const rel = path.relative(canon(parent), canon(child));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 

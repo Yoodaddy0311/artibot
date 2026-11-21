@@ -22,6 +22,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -116,5 +117,47 @@ describe('peerNotice — "this repo" is the project root, not the shell cwd', ()
     expect(r.status).toBe('pass');
     // `tmp` is an ANCESTOR of the repo — overlap counts it, as before.
     expect(r.detail).toMatch(/^2 peer session\(s\) in this repo: sibling, elsewhere$/);
+  });
+});
+
+/**
+ * Windows 8.3 short names (2026-11-21, GitHub Windows runner: os.tmpdir() is
+ * `C:\Users\RUNNER~1\AppData\Local\Temp`). `resolveProjectRoot` answers in the
+ * LONG spelling, so any side compared without canonicalizing kept the short one
+ * and never matched: peerNotice counted 0 of 2, and a holder whose recorded cwd
+ * no longer exists resolved to a SHORT-spelled root and passed as "other
+ * worktree" (fail-open). The short spelling is derived here with cmd's `%~sI`
+ * so this runs on any Windows host, not only one whose TEMP is already short.
+ * Only `tmp` (ASCII) is shortened — cmd's output codepage would mangle the
+ * Korean segment below it.
+ */
+describe.runIf(process.platform === 'win32')('8.3 short-name spellings (win32)', () => {
+  /** `tmp` in 8.3 form, or null when the volume has short names disabled. */
+  function shortTmp() {
+    const out = execFileSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${tmp}") do @echo %~sI"`], {
+      encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true,
+    }).trim();
+    return out && out.toLowerCase() !== tmp.toLowerCase() ? out : null;
+  }
+
+  it('peerNotice counts short-spelled peers against a long-spelled project root', (ctx) => {
+    const short = shortTmp();
+    if (!short) ctx.skip(); // 8.3 generation off on this volume: nothing to exercise
+    const sRepo = path.join(short, '내 리포');
+    const r = runIndividualCheck(
+      'peerNotice',
+      { cwd: path.join(sRepo, 'plugins', 'artibot'), featureKey: 'task-a' },
+      { listAgents: () => [{ name: 'sibling', cwd: path.join(sRepo, 'docs') }, { name: 'elsewhere', cwd: short }] },
+    );
+    expect(r.detail).toMatch(/^2 peer session\(s\) in this repo: sibling, elsewhere$/);
+  });
+
+  it('repoConcurrency fails for a holder whose short-spelled cwd no longer exists', (ctx) => {
+    const short = shortTmp();
+    if (!short) ctx.skip();
+    const sRepo = path.join(short, '내 리포');
+    const r = check(path.join(repo, 'plugins', 'artibot'), path.join(sRepo, 'gone', 'deleted-subdir'));
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/same repo\+tree: task-b/);
   });
 });

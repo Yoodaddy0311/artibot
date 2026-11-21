@@ -39,7 +39,7 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { statfsSync } from 'node:fs';
+import { realpathSync, statfsSync } from 'node:fs';
 import path from 'node:path';
 import { resolveProjectRoot as defaultResolveProjectRoot } from '../git/project-root.js';
 import { getRepoIdentity as defaultGetRepoIdentity } from '../git/repo-identity.js';
@@ -248,14 +248,24 @@ function checkGoalContractLint(ctx) {
 }
 
 /**
- * Normalise a path for same-tree comparison. Windows paths are compared
- * case-insensitively; `null` when the input is not a usable string.
+ * Normalise a path for same-tree comparison: canonical spelling
+ * (`realpathSync.native` expands Windows 8.3 short names and symlinks), then
+ * case-folded on Windows; `null` when the input is not a usable string.
+ *
+ * Canonical, not just resolved: `projectTreeKey` goes through
+ * `resolveProjectRoot`, which returns the LONG spelling, so a side compared as
+ * resolved-only keeps a short `C:\Users\RUNNER~1\…` and never matches.
+ * Measured 2026-11-21 on the GitHub Windows runner (os.tmpdir() is
+ * `C:\Users\RUNNER~1\AppData\Local\Temp`): `peerNotice` counted 0 of 2 peers.
+ * Same fix shape as `worktree-manager.js#canonicalPath`. A path that does not
+ * exist falls back to its resolved spelling.
  * @param {unknown} p
  * @returns {string|null}
  */
 function treeKey(p) {
   if (typeof p !== 'string' || !p) return null;
-  const resolved = path.resolve(p);
+  let resolved = path.resolve(p);
+  try { resolved = realpathSync.native(resolved); } catch { /* not on disk — compare as resolved */ }
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 

@@ -39,9 +39,14 @@ import { deleteSessionArtifacts, loadSession, saveSession } from '../../lib/auto
 import { readEvents } from '../../lib/autopilot/telemetry.js';
 import { isLocked, releaseLock } from '../../lib/autopilot/lock.js';
 
-/** True when `child` is `parent` or beneath it (case-insensitive on win32). */
+/**
+ * True when `child` is `parent` or beneath it (case-insensitive on win32), both
+ * in canonical spelling — an 8.3 tmpdir (`C:\Users\RUNNER~1\…`, the GitHub
+ * Windows runner) must not make a long parent and a short child look disjoint.
+ */
 function inside(parent, child) {
-  const rel = path.relative(realpathSync.native(parent), child);
+  const canon = (p) => { try { return realpathSync.native(p); } catch { return path.resolve(p); } };
+  const rel = path.relative(canon(parent), canon(child));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
