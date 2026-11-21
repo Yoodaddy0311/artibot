@@ -251,4 +251,27 @@ describe('tool-tracker — loop-state.json: session-scoped, flushed every call',
       expect(last.stdout).toBe('');
     });
   });
+
+  // F2 (review-fixes 2026-11-21, xcB LOW-2): trackLoop's catch used to cover the
+  // locked body too, so an error thrown INSIDE the lock was logged as "lock not
+  // taken" and the same body re-ran unlocked — which threw again and ended main()
+  // before the usage row was recorded. A restored history holding a non-object
+  // entry is one real way the body throws (countConsecutiveTrailing reads
+  // `.fingerprint` off every trailing entry).
+  describe('an error inside the locked body is not reported as a lock failure', () => {
+    it('logs the real failure once, does not re-run unlocked, and still records the usage row', () => {
+      const file = sessionFile(homeRoot());
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ history: [null], lastUpdated: Date.now() }), 'utf-8');
+
+      const out = fire();
+
+      expect(out.status).toBe(0);
+      expect(out.stderr).not.toContain('lock not taken');
+      expect(out.stderr).toContain('loop tracking failed inside the state lock');
+      expect(out.stderr.split('loop tracking failed').length - 1).toBe(1);
+      const usage = read(path.join(homeRoot(), 'tool-history.json'));
+      expect(Object.values(usage.contexts).flat()).toHaveLength(1);
+    });
+  });
 });

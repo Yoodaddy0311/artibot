@@ -23,6 +23,15 @@ vi.mock('node:fs/promises', () => ({
 const fsModule = await import('node:fs/promises');
 const fs = fsModule.default;
 
+// saveHistory writes through lib/core/file.js#atomicWriteJsonSync under a file
+// lock (M2, 2026-11-21), not through fs/promises. The spy records the exact
+// bytes the real writer would produce, so assertions read the same JSON text.
+const { writeSpy } = vi.hoisted(() => ({ writeSpy: vi.fn() }));
+vi.mock('../../lib/core/file.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  atomicWriteJsonSync: (p, data) => writeSpy(p, `${JSON.stringify(data, null, 2)}\n`),
+}));
+
 describe('tool-learner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -40,7 +49,7 @@ describe('tool-learner', () => {
   describe('recordUsage()', () => {
     it('does not write to disk immediately (uses batch buffer)', async () => {
       await recordUsage('Read', 'search:file', 1.0);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
     });
 
     it('marks buffer as dirty after recording', async () => {
@@ -53,13 +62,13 @@ describe('tool-learner', () => {
     it('writes to disk after flush', async () => {
       await recordUsage('Read', 'search:file', 1.0);
       await flushToDisk();
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
     });
 
     it('clamps score to 0-1 range', async () => {
       await recordUsage('Read', 'search:file', 1.5);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record.score).toBeLessThanOrEqual(1.0);
       expect(record.score).toBeGreaterThanOrEqual(0);
@@ -82,21 +91,21 @@ describe('tool-learner', () => {
 
       await recordUsage('Grep', 'search:file', 0.9);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['search:file']).toHaveLength(2);
     });
 
     it('creates new context bucket when none exists', async () => {
       await recordUsage('Grep', 'analyze:typescript', 0.7);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['analyze:typescript']).toHaveLength(1);
     });
 
     it('updates aggregates for the tool', async () => {
       await recordUsage('Read', 'search:file', 0.9);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.aggregates['Read']).toBeDefined();
       expect(content.aggregates['Read'].totalUses).toBe(1);
       expect(content.aggregates['Read'].avgScore).toBe(0.9);
@@ -118,14 +127,14 @@ describe('tool-learner', () => {
 
       await recordUsage('Read', 'search:file', 1.0);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['search:file'].length).toBeLessThanOrEqual(200);
     });
 
     it('stores meta.command and meta.domain in record', async () => {
       await recordUsage('Read', 'search:file', 1.0, { command: '/analyze', domain: 'frontend' });
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record.command).toBe('/analyze');
       expect(record.domain).toBe('frontend');
@@ -135,7 +144,7 @@ describe('tool-learner', () => {
     it('stores meta.agentId as callingAgent on the record', async () => {
       await recordUsage('Read', 'search:file', 1.0, { agentId: 'frontend-developer' });
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record.callingAgent).toBe('frontend-developer');
     });
@@ -146,7 +155,7 @@ describe('tool-learner', () => {
         agentType: 'orchestrator',
       });
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record.parentAgent).toBe('orchestrator');
     });
@@ -154,7 +163,7 @@ describe('tool-learner', () => {
     it('does not persist callingAgent when agentId is "unknown" (sentinel from extractAgentId)', async () => {
       await recordUsage('Read', 'search:file', 1.0, { agentId: 'unknown' });
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record.callingAgent).toBeUndefined();
     });
@@ -165,7 +174,7 @@ describe('tool-learner', () => {
         agentType: 'main',
       });
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record.parentAgent).toBeUndefined();
     });
@@ -173,7 +182,7 @@ describe('tool-learner', () => {
     it('omits callingAgent and parentAgent fields entirely when meta is empty (backward compat)', async () => {
       await recordUsage('Read', 'search:file', 1.0);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['search:file'][0];
       expect(record).not.toHaveProperty('callingAgent');
       expect(record).not.toHaveProperty('parentAgent');
@@ -184,34 +193,34 @@ describe('tool-learner', () => {
   describe('batch write buffer', () => {
     it('does not write to disk on recordUsage (deferred write)', async () => {
       await recordUsage('Read', 'search:file', 1.0);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
       expect(_getBufferState().dirty).toBe(true);
     });
 
     it('flushes to disk after FLUSH_INTERVAL_MS (5000ms)', async () => {
       await recordUsage('Read', 'search:file', 1.0);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
 
       // Advance timers past the flush interval
       await vi.advanceTimersByTimeAsync(5000);
 
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
     });
 
     it('flushToDisk writes when dirty', async () => {
       await recordUsage('Read', 'search:file', 0.8);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
 
       await flushToDisk();
 
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
       expect(_getBufferState().dirty).toBe(false);
       expect(_getBufferState().hasTimer).toBe(false);
     });
 
     it('flushToDisk is a no-op when not dirty', async () => {
       await flushToDisk();
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
     });
 
     it('flushToDisk clears the pending timer', async () => {
@@ -227,12 +236,12 @@ describe('tool-learner', () => {
       await recordUsage('Grep', 'search:config', 0.8);
       await recordUsage('Task', 'analyze:typescript', 0.9);
 
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
 
       await flushToDisk();
 
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['search:file']).toHaveLength(1);
       expect(content.contexts['search:config']).toHaveLength(1);
       expect(content.contexts['analyze:typescript']).toHaveLength(1);
@@ -249,16 +258,16 @@ describe('tool-learner', () => {
 
       // Only one write after timer fires
       await vi.advanceTimersByTimeAsync(5000);
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
     });
 
     it('shutdownToolLearner calls flushToDisk', async () => {
       await recordUsage('Read', 'search:file', 1.0);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
 
       await shutdownToolLearner();
 
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
       expect(_getBufferState().dirty).toBe(false);
     });
 
@@ -289,11 +298,11 @@ describe('tool-learner', () => {
       _clearCache();
 
       await pruneOldRecords(90 * 24 * 60 * 60 * 1000);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
       expect(_getBufferState().dirty).toBe(true);
 
       await flushToDisk();
-      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -451,7 +460,7 @@ describe('tool-learner', () => {
 
       await pruneOldRecords(90 * 24 * 60 * 60 * 1000);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['old:context']).toBeUndefined();
     });
 
@@ -490,7 +499,7 @@ describe('tool-learner', () => {
       _clearCache();
 
       await pruneOldRecords(90 * 24 * 60 * 60 * 1000);
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
       expect(_getBufferState().dirty).toBe(false);
     });
   });
@@ -657,7 +666,7 @@ describe('tool-learner', () => {
       // Trigger loadHistory and then flush to inspect resulting structure
       await recordUsage('Grep', 'search:file', 0.8);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       // GRPO comparison storage was retired — no grpo fields are written.
       expect(content.grpoGroups).toBeUndefined();
       expect(content.grpoScores).toBeUndefined();
@@ -736,21 +745,21 @@ describe('tool-learner', () => {
     it('clamps negative scores to 0', async () => {
       await recordUsage('Read', 'clamp:test', -0.5);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['clamp:test'][0].score).toBe(0);
     });
 
     it('clamps NaN to 0', async () => {
       await recordUsage('Read', 'clamp:nan', NaN);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['clamp:nan'][0].score).toBe(0);
     });
 
     it('clamps non-number to 0', async () => {
       await recordUsage('Read', 'clamp:string', 'not-a-number');
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       expect(content.contexts['clamp:string'][0].score).toBe(0);
     });
   });
@@ -834,7 +843,7 @@ describe('tool-learner', () => {
     it('does not include command or domain fields when meta is empty', async () => {
       await recordUsage('Read', 'test:nometa', 0.8);
       await flushToDisk();
-      const content = JSON.parse(fs.writeFile.mock.calls[0][1]);
+      const content = JSON.parse(writeSpy.mock.calls[0][1]);
       const record = content.contexts['test:nometa'][0];
       expect(record.command).toBeUndefined();
       expect(record.domain).toBeUndefined();
@@ -846,7 +855,7 @@ describe('tool-learner', () => {
     it('flushToDisk is a no-op when history is null and not dirty', async () => {
       _clearCache();
       await flushToDisk();
-      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(writeSpy).not.toHaveBeenCalled();
     });
   });
 

@@ -21,7 +21,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { atomicWriteJsonSync } from '../lib/core/file.js';
+import { atomicWriteTextSync } from '../lib/core/file.js';
 import { getPluginRoot } from '../lib/core/platform.js';
 import { buildOutputStyle, buildStatuslinePalette, buildVscodeTerminalColors, buildWtScheme, isTheme, THEME_NAMES, THEMES, VSCODE_TERMINAL_KEYS } from './theme/registry.js';
 import { isMainEntry } from './hooks/_main-entry.js';
@@ -131,11 +131,30 @@ const SETTINGS_UNREADABLE =
  */
 function writeSettings(obj) {
   const exists = existsSync(SETTINGS);
-  const target = exists ? realpathSync(SETTINGS) : SETTINGS;
   const backup = SETTINGS + '.artibot-backup';
-  if (exists && !existsSync(backup)) copyFileSync(target, backup);
+  if (exists && !existsSync(backup)) copyFileSync(realpathSync(SETTINGS), backup);
+  writeUserFileAtomic(SETTINGS, JSON.stringify(obj, null, 2) + '\n');
+}
+
+/**
+ * Replace a user-owned file atomically (tmp sibling + rename), the way
+ * {@link writeSettings} does: a symlink is resolved and its TARGET replaced so
+ * the link survives, and the POSIX mode is re-applied after the rename.
+ *
+ * Used for ~/.claude/settings.json and, since 2026-11-21 (L19), the Windows
+ * Terminal and VS Code settings.json on apply and reset — those were rewritten
+ * in place, so a write torn part way (disk full, killed process) left the
+ * user's terminal/editor settings truncated. `text` is written byte-for-byte,
+ * so each caller keeps its own format (WT: 4-space indent, no trailing newline).
+ *
+ * @param {string} p - Path as found (may be a symlink)
+ * @param {string} text - Full new content
+ */
+function writeUserFileAtomic(p, text) {
+  const exists = existsSync(p);
+  const target = exists ? realpathSync(p) : p;
   const mode = exists ? statSync(target).mode & 0o777 : null;
-  atomicWriteJsonSync(target, obj);
+  atomicWriteTextSync(target, text);
   if (mode === null || process.platform === 'win32') return;
   try {
     chmodSync(target, mode);
@@ -299,7 +318,7 @@ function applyTheme(name) {
     const wt = readJson(wtPath, null);
     if (wt) {
       if (!existsSync(wtPath + '.artibot-backup')) writeFileSync(wtPath + '.artibot-backup', readFileSync(wtPath, 'utf8'));
-      writeFileSync(wtPath, JSON.stringify(withWtScheme(wt, buildWtScheme(name)), null, 4));
+      writeUserFileAtomic(wtPath, JSON.stringify(withWtScheme(wt, buildWtScheme(name)), null, 4));
       notes.push(`Windows Terminal → "ARTIBOT ${THEMES[name].label}" 적용`);
     } else { notes.push('Windows Terminal settings.json 파싱 실패 — 색상 스킵'); }
   } else {
@@ -312,7 +331,7 @@ function applyTheme(name) {
     const vs = readJson(vsPath, null);
     if (vs) {
       if (!existsSync(vsPath + '.artibot-backup')) writeFileSync(vsPath + '.artibot-backup', readFileSync(vsPath, 'utf8'));
-      writeJson(vsPath, withVscodeTerminal(vs, buildVscodeTerminalColors(name)));
+      writeUserFileAtomic(vsPath, JSON.stringify(withVscodeTerminal(vs, buildVscodeTerminalColors(name)), null, 2) + '\n');
       notes.push('VS Code 통합 터미널 색 적용 (저장 시 자동 반영)');
     } else { notes.push('VS Code settings.json 파싱 실패 — 색상 스킵 (주석 있으면 수동)'); }
   }
@@ -338,7 +357,7 @@ function resetTheme() {
   if (wtPath) {
     const wt = readJson(wtPath, null);
     if (wt) {
-      writeFileSync(wtPath, JSON.stringify(restoreWtDefaults(wt, b.prevColorScheme), null, 4));
+      writeUserFileAtomic(wtPath, JSON.stringify(restoreWtDefaults(wt, b.prevColorScheme), null, 4));
       notes.push('Windows Terminal colorScheme → 이전값 복원');
     }
   }
@@ -347,7 +366,7 @@ function resetTheme() {
   if (vsPath) {
     const vs = readJson(vsPath, null);
     if (vs) {
-      writeJson(vsPath, restoreVscodeTerminal(vs, b.prevVscodeColors));
+      writeUserFileAtomic(vsPath, JSON.stringify(restoreVscodeTerminal(vs, b.prevVscodeColors), null, 2) + '\n');
       notes.push('VS Code 통합 터미널 색 → 이전값 복원');
     }
   }

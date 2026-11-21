@@ -21,7 +21,14 @@
  *   - `artibot.config.json` is only mutated via atomic tmp-rename.
  *   - No shell, no network, no git.
  *   - No prototype pollution (FORBIDDEN_KEYS filter).
- *   - Read/write failures never throw to callers.
+ *   - Read/write failures never throw to callers. A failure row that did not
+ *     reach disk is reported, not hidden: `persisted: false` on the result
+ *     (and on `result.emergency`), plus one stderr line.
+ *   - Every read-modify-write of a state file runs under
+ *     `lib/core/file-lock.js#withFileLock` (see {@link lockedUpdate}).
+ *     Unlocked, N processes recording at once lost rows — measured 2026-11-21
+ *     with 12 real processes: 4-8 of 12 kept (v1), 5-11 of 12 (emergency) —
+ *     which could keep a real burst of failures under the trip threshold.
  *
  * @module lib/learning/kill-switch
  */
@@ -29,7 +36,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { atomicWriteJsonSync, readJsonFile, writeJsonFile } from '../core/file.js';
+import { atomicWriteJsonSync, readJsonFile } from '../core/file.js';
+import { withFileLock } from '../core/file-lock.js';
 import { getPluginRoot } from '../core/platform.js';
 
 // ---------------------------------------------------------------------------
@@ -109,7 +117,48 @@ function resolveKsOptions(config) {
  * @returns {Promise<{features: object}>}
  */
 async function loadState(filePath) {
-  const raw = await readJsonFile(filePath);
+  return normalizeState(await readJsonFile(filePath));
+}
+
+/**
+ * Read and parse a state file for {@link lockedUpdate}. Never throws.
+ *
+ * What a read may conclude is an allowlist: ENOENT (no file yet) and content
+ * that does not parse both yield `raw: null` — the caller's defaults, which a
+ * write may replace, as before. EVERY other read error (EBUSY while another
+ * process renames over the file on Windows, EACCES, EMFILE, …) comes back as
+ * `readError`, never as "missing": read as missing, it let the next write put
+ * defaults over the real state (review xcB 2026-11-21: a tripped feature was
+ * un-tripped and the result said `persisted: true`).
+ *
+ * @param {string} filePath
+ * @returns {{ raw: unknown, readError: NodeJS.ErrnoException|null }}
+ */
+function readStateFile(filePath) {
+  let text;
+  try {
+    text = readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    return { raw: null, readError: err?.code === 'ENOENT' ? null : err };
+  }
+  try { return { raw: JSON.parse(text), readError: null }; } catch { return { raw: null, readError: null }; }
+}
+
+/**
+ * Synchronous {@link loadState}, for use inside a lock. Never throws.
+ * @param {string} filePath
+ * @returns {{ state: {features: object}, readError: NodeJS.ErrnoException|null }}
+ */
+function loadStateSync(filePath) {
+  const { raw, readError } = readStateFile(filePath);
+  return { state: normalizeState(raw), readError };
+}
+
+/**
+ * @param {unknown} raw - parsed file content, or null
+ * @returns {{features: object}}
+ */
+function normalizeState(raw) {
   const state = { features: Object.create(null) };
   if (!raw || typeof raw !== 'object') return state;
   const features = raw.features;
@@ -147,23 +196,29 @@ function emergencyCooldownHours(config) {
   return Number.isFinite(n) && n > 0 ? n : EMERGENCY_COOLDOWN_HOURS;
 }
 
+/** @returns {{failures: Array, tripped: boolean, trippedAt: string|null, cooldownUntil: string|null}} */
+function emptyEmergencyState() {
+  return { failures: [], tripped: false, trippedAt: null, cooldownUntil: null };
+}
+
 /**
- * Read emergency state, defaulting on missing/corrupt file. Never throws.
+ * Read emergency state, defaulting on a missing/corrupt file; any other read
+ * error is returned as `readError` (see {@link readStateFile}). Never throws.
  * @param {string} filePath
+ * @returns {{ state: {failures: Array, tripped: boolean, trippedAt: string|null, cooldownUntil: string|null}, readError: NodeJS.ErrnoException|null }}
  */
 function readEmergencyState(filePath) {
-  const defaults = { failures: [], tripped: false, trippedAt: null, cooldownUntil: null };
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
-    return {
-      failures: Array.isArray(parsed.failures) ? parsed.failures : [],
-      tripped: Boolean(parsed.tripped),
-      trippedAt: typeof parsed.trippedAt === 'string' ? parsed.trippedAt : null,
-      cooldownUntil: typeof parsed.cooldownUntil === 'string' ? parsed.cooldownUntil : null,
-    };
-  } catch {
-    return defaults;
-  }
+  const { raw, readError } = readStateFile(filePath);
+  if (!raw || typeof raw !== 'object') return { state: emptyEmergencyState(), readError };
+  return {
+    state: {
+      failures: Array.isArray(raw.failures) ? raw.failures : [],
+      tripped: Boolean(raw.tripped),
+      trippedAt: typeof raw.trippedAt === 'string' ? raw.trippedAt : null,
+      cooldownUntil: typeof raw.cooldownUntil === 'string' ? raw.cooldownUntil : null,
+    },
+    readError,
+  };
 }
 
 /**
@@ -197,6 +252,52 @@ function setMasterEnabled(enabled, pluginRoot) {
   } catch (err) {
     process.stderr.write(`[artibot:kill-switch] config write failed: ${err.message}\n`);
     return false;
+  }
+}
+
+/**
+ * One locked read-modify-write of a state file: re-read under the lock, let
+ * `mutate` change the fresh copy in place, write it atomically.
+ *
+ * Never throws for I/O. When the lock cannot be taken (ELOCKTIMEOUT after its
+ * 2s wait, or a create error such as an unwritable directory) `mutate` still
+ * runs on an unlocked read so the caller gets a real answer, but nothing is
+ * written — an unlocked write is the lost update this exists to prevent — and
+ * the result says `persisted: false`. The same holds when the re-read under
+ * the lock fails for any reason other than a missing or unparseable file:
+ * `mutate` runs on the defaults `read` returned and nothing is written, so a
+ * transient read error can never put defaults over the real state. An error
+ * thrown by `mutate` itself is not an I/O failure and propagates.
+ *
+ * @template T
+ * @param {string} filePath
+ * @param {(filePath: string) => { state: object, readError: Error|null }} read - never-throwing loader
+ * @param {(state: object) => T} mutate
+ * @returns {{ value: T, persisted: boolean }}
+ */
+function lockedUpdate(filePath, read, mutate) {
+  let entered = false;
+  try {
+    return withFileLock(filePath, () => {
+      entered = true;
+      const { state, readError } = read(filePath);
+      const value = mutate(state);
+      if (readError) {
+        process.stderr.write(`[artibot:kill-switch] state re-read failed for ${filePath} (${readError.code ?? 'error'}); left as is, not persisted\n`);
+        return { value, persisted: false };
+      }
+      try {
+        atomicWriteJsonSync(filePath, state);
+        return { value, persisted: true };
+      } catch (err) {
+        process.stderr.write(`[artibot:kill-switch] state write failed for ${filePath}: ${err?.code ?? ''} ${err?.message ?? err}\n`);
+        return { value, persisted: false };
+      }
+    });
+  } catch (err) {
+    if (entered) throw err;
+    process.stderr.write(`[artibot:kill-switch] state lock not taken for ${filePath} (${err?.code ?? 'error'}); not persisted\n`);
+    return { value: mutate(read(filePath).state), persisted: false };
   }
 }
 
@@ -249,7 +350,10 @@ export async function isKillSwitchTripped(config, opts = {}) {
  * @param {{feature: string, error?: string, timestamp?: string}} entry
  * @param {object} [config]
  * @param {{pluginRoot?: string, now?: number}} [opts]
- * @returns {Promise<{tripped: boolean, count: number, emergency?: {tripped: boolean, failuresPast1h: number, masterDisabled: boolean}}>}
+ * @returns {Promise<{tripped: boolean, count: number, persisted?: boolean, emergency?: {tripped: boolean, failuresPast1h: number, cooldownUntil: string|null, masterDisabled: boolean, persisted: boolean}}>}
+ *   `persisted` is false when the per-feature row did not reach disk (lock not
+ *   taken, or the write failed); `tripped`/`count` then describe the unsaved
+ *   state. Absent on the early return for an unusable feature name.
  */
 export async function recordFailure(entry, config, opts = {}) {
   const feature = typeof entry?.feature === 'string' ? entry.feature : null;
@@ -257,19 +361,20 @@ export async function recordFailure(entry, config, opts = {}) {
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
   const { threshold, windowMs } = resolveKsOptions(config);
   const filePath = resolveStatePath(config, opts.pluginRoot);
-  const state = await loadState(filePath);
 
-  // v1 per-feature update
-  const prev = state.features[feature] || { failures: [], trippedAt: null };
-  const cutoff = now - windowMs;
-  const recent = prev.failures.filter((f) => Number.isFinite(f?.at) && f.at >= cutoff);
-  recent.push({ at: now, error: String(entry.error || '').slice(0, 500) });
-  const tripped = recent.length >= threshold;
-  state.features[feature] = {
-    failures: recent,
-    trippedAt: tripped ? (prev.trippedAt || new Date(now).toISOString()) : prev.trippedAt,
-  };
-  try { await writeJsonFile(filePath, state); } catch { /* best-effort */ }
+  // v1 per-feature update, re-read under the lock.
+  const { value: v1, persisted } = lockedUpdate(filePath, loadStateSync, (state) => {
+    const prev = state.features[feature] || { failures: [], trippedAt: null };
+    const cutoff = now - windowMs;
+    const recent = prev.failures.filter((f) => Number.isFinite(f?.at) && f.at >= cutoff);
+    recent.push({ at: now, error: String(entry.error || '').slice(0, 500) });
+    const tripped = recent.length >= threshold;
+    state.features[feature] = {
+      failures: recent,
+      trippedAt: tripped ? (prev.trippedAt || new Date(now).toISOString()) : prev.trippedAt,
+    };
+    return { tripped: Boolean(state.features[feature].trippedAt), count: recent.length };
+  });
 
   // Emergency global branch (opt-in via config)
   let emergency;
@@ -278,8 +383,9 @@ export async function recordFailure(entry, config, opts = {}) {
   }
 
   return {
-    tripped: Boolean(state.features[feature].trippedAt),
-    count: recent.length,
+    tripped: v1.tripped,
+    count: v1.count,
+    persisted,
     ...(emergency ? { emergency } : {}),
   };
 }
@@ -292,10 +398,20 @@ export async function recordFailure(entry, config, opts = {}) {
  *   resetKillSwitch(config)            // Wave 2: emergency reset + master re-enable
  *   resetKillSwitch()                  // full reset of both state files
  *
+ * Both state files are written under their locks ({@link lockedUpdate}), so a
+ * `recordFailure` in flight cannot write its pre-reset read back over the
+ * reset. A global reset writes whole and does not read the files, so a read
+ * error never blocks it; a lock not taken or a failed write does.
+ *
  * @param {string|object} [featureOrConfig]
  * @param {object} [maybeConfig]
  * @param {{pluginRoot?: string}} [opts]
- * @returns {Promise<{reset: boolean, masterRestored?: boolean}>}
+ * @returns {Promise<{reset: boolean, persisted?: boolean, masterRestored?: boolean}>}
+ *   `reset` is false only when there was nothing to reset (unknown or
+ *   forbidden feature). `persisted` says whether the reset reached disk — for
+ *   the global form, BOTH files. `masterRestored` is attempted only when the
+ *   emergency state was actually cleared: re-enabling the master switch over
+ *   a still-tripped state on disk would leave the two disagreeing.
  */
 export async function resetKillSwitch(featureOrConfig, maybeConfig, opts = {}) {
   // Detect calling convention
@@ -306,23 +422,33 @@ export async function resetKillSwitch(featureOrConfig, maybeConfig, opts = {}) {
     const filePath = resolveStatePath(config, opts.pluginRoot);
     const state = await loadState(filePath);
     if (!state.features[feature]) return { reset: false };
-    state.features[feature] = { failures: [], trippedAt: null };
-    try { await writeJsonFile(filePath, state); } catch { /* ignore */ }
-    return { reset: true };
+    // Locked so a failure another process records meanwhile for a DIFFERENT
+    // feature is not erased by this write.
+    const { persisted } = lockedUpdate(filePath, loadStateSync, (fresh) => {
+      fresh.features[feature] = { failures: [], trippedAt: null };
+    });
+    return { reset: true, persisted };
   }
 
   // Object or undefined → emergency + global reset
   const config = featureOrConfig;
   const emergencyPath = resolveEmergencyStatePath(config, opts.pluginRoot);
-  const fresh = { failures: [], tripped: false, trippedAt: null, cooldownUntil: null };
-  try { atomicWriteJsonSync(emergencyPath, fresh); } catch { /* ignore */ }
+  const emergency = lockedUpdate(
+    emergencyPath,
+    () => ({ state: emptyEmergencyState(), readError: null }),
+    () => undefined,
+  );
 
   // Also clear v1 state
   const v1Path = resolveStatePath(config, opts.pluginRoot);
-  try { await writeJsonFile(v1Path, { features: Object.create(null) }); } catch { /* ignore */ }
+  const v1 = lockedUpdate(
+    v1Path,
+    () => ({ state: { features: Object.create(null) }, readError: null }),
+    () => undefined,
+  );
 
-  const masterRestored = setMasterEnabled(true, opts.pluginRoot);
-  return { reset: true, masterRestored };
+  const masterRestored = emergency.persisted ? setMasterEnabled(true, opts.pluginRoot) : false;
+  return { reset: true, masterRestored, persisted: emergency.persisted && v1.persisted };
 }
 
 // ---------------------------------------------------------------------------
@@ -344,9 +470,28 @@ export async function getKillSwitchState(config, opts = {}) {
     return { tripped: false, failuresPast1h: 0, cooldownUntil: null };
   }
   const filePath = resolveEmergencyStatePath(config, opts.pluginRoot);
-  const state = readEmergencyState(filePath);
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
 
+  // Unlocked first look; the common case (nothing expired) never takes the lock.
+  const { state: peek } = readEmergencyState(filePath);
+  if (!applyExpiry(peek, now)) return snapshotOf(peek);
+
+  // Something expired: redo it on a fresh read under the lock, so a failure
+  // another process appended since the peek is not pruned away by this write.
+  const { value } = lockedUpdate(filePath, readEmergencyState, (state) => {
+    applyExpiry(state, now);
+    return snapshotOf(state);
+  });
+  return value;
+}
+
+/**
+ * Apply cooldown expiry and the rolling-hour prune to `state` in place.
+ * @param {{failures: Array, tripped: boolean, trippedAt: string|null, cooldownUntil: string|null}} state
+ * @param {number} now
+ * @returns {boolean} true when anything changed
+ */
+function applyExpiry(state, now) {
   let changed = false;
   if (state.tripped && state.cooldownUntil && Date.parse(state.cooldownUntil) <= now) {
     state.tripped = false;
@@ -360,13 +505,17 @@ export async function getKillSwitchState(config, opts = {}) {
     state.failures = recent;
     changed = true;
   }
-  if (changed) {
-    try { atomicWriteJsonSync(filePath, state); } catch { /* ignore */ }
-  }
+  return changed;
+}
 
+/**
+ * @param {{failures: Array, tripped: boolean, cooldownUntil: string|null}} state
+ * @returns {{tripped: boolean, failuresPast1h: number, cooldownUntil: string|null}}
+ */
+function snapshotOf(state) {
   return {
     tripped: state.tripped,
-    failuresPast1h: recent.length,
+    failuresPast1h: state.failures.length,
     cooldownUntil: state.cooldownUntil,
   };
 }
@@ -378,7 +527,16 @@ export async function getKillSwitchState(config, opts = {}) {
  * @param {{feature: string, error?: string, timestamp?: string}} entry
  * @param {object} [config]
  * @param {{pluginRoot?: string, now?: number}} [opts]
- * @returns {Promise<{tripped: boolean, failuresPast1h: number, cooldownUntil: string|null, masterDisabled: boolean}>}
+ * The append and the threshold check run on a fresh read under the state
+ * file's lock ({@link lockedUpdate}), so concurrent failures all count. When
+ * the lock is not taken the trip decision is still made (on an unlocked read)
+ * — failing toward a disabled master switch is the safe side — but the row is
+ * not written and `persisted` is false.
+ *
+ * @param {{feature: string, error?: string, timestamp?: string}} entry
+ * @param {object} [config]
+ * @param {{pluginRoot?: string, now?: number}} [opts]
+ * @returns {Promise<{tripped: boolean, failuresPast1h: number, cooldownUntil: string|null, masterDisabled: boolean, persisted: boolean}>}
  */
 async function recordEmergencyFailure(entry, config, opts = {}) {
   const filePath = resolveEmergencyStatePath(config, opts.pluginRoot);
@@ -387,33 +545,28 @@ async function recordEmergencyFailure(entry, config, opts = {}) {
   const nowMs = Number.isFinite(opts.now) ? opts.now : Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
-  const state = readEmergencyState(filePath);
-  state.failures.push({
-    feature: String(entry.feature),
-    error: entry.error ? String(entry.error).slice(0, 500) : null,
-    timestamp: entry.timestamp || nowIso,
+  const { value, persisted } = lockedUpdate(filePath, readEmergencyState, (state) => {
+    state.failures.push({
+      feature: String(entry.feature),
+      error: entry.error ? String(entry.error).slice(0, 500) : null,
+      timestamp: entry.timestamp || nowIso,
+    });
+    state.failures = failuresPastHour(state.failures, nowMs);
+
+    let masterDisabled = false;
+    if (!state.tripped && state.failures.length >= max) {
+      state.tripped = true;
+      state.trippedAt = nowIso;
+      state.cooldownUntil = new Date(nowMs + cooldownHours * ONE_HOUR_MS).toISOString();
+      masterDisabled = setMasterEnabled(false, opts.pluginRoot);
+      process.stderr.write(
+        `[artibot:kill-switch-tripped feature=${entry.feature} failures=${state.failures.length}]\n`,
+      );
+    }
+    return { ...snapshotOf(state), masterDisabled };
   });
-  state.failures = failuresPastHour(state.failures, nowMs);
 
-  let masterDisabled = false;
-  if (!state.tripped && state.failures.length >= max) {
-    state.tripped = true;
-    state.trippedAt = nowIso;
-    state.cooldownUntil = new Date(nowMs + cooldownHours * ONE_HOUR_MS).toISOString();
-    masterDisabled = setMasterEnabled(false, opts.pluginRoot);
-    process.stderr.write(
-      `[artibot:kill-switch-tripped feature=${entry.feature} failures=${state.failures.length}]\n`,
-    );
-  }
-
-  try { atomicWriteJsonSync(filePath, state); } catch { /* ignore */ }
-
-  return {
-    tripped: state.tripped,
-    failuresPast1h: state.failures.length,
-    cooldownUntil: state.cooldownUntil,
-    masterDisabled,
-  };
+  return { ...value, persisted };
 }
 
 // ---------------------------------------------------------------------------

@@ -25,16 +25,16 @@ import {
   getDirtyState,
   loadHistory,
   markDirty,
+  MAX_RECORDS_PER_KEY,
   MIN_SAMPLES,
+  notePendingRecord,
+  notePrune,
   rebuildAggregates,
   saveHistory,
   setHistory,
   suggestFromRelated,
   updateAggregate,
 } from './tool-history.js';
-
-/** Maximum records kept per context key to prevent unbounded growth */
-const MAX_RECORDS_PER_KEY = 200;
 
 /**
  * @typedef {Object} UsageRecord
@@ -74,24 +74,31 @@ const MAX_RECORDS_PER_KEY = 200;
 // ---------------------------------------------------------------------------
 
 /**
- * Flush pending changes to disk immediately.
- * No-op if there are no unsaved changes.
- * @returns {Promise<void>}
+ * Flush pending changes to disk immediately, and cancel the debounce timer.
+ *
+ * When the save does not land (lock wait exceeded, or the re-read under the
+ * lock failed — see tool-history.js#saveHistory) this resolves false and the
+ * rows stay queued in memory, but nothing re-arms a retry: they are written
+ * only if a later save runs IN THIS PROCESS (the next recordUsage arms the
+ * timer again). A hook process exits after its one flush, so there a false
+ * means those rows are lost; the stderr line from saveHistory is the trace.
+ *
+ * @returns {Promise<boolean>} true when written or nothing was pending;
+ *   false when the save did not reach disk.
  */
 export async function flushToDisk() {
   const { dirty } = getDirtyState();
   clearDirtyState();
-  if (!dirty) return;
-  await saveHistory();
+  if (!dirty) return true;
+  return saveHistory();
 }
 
 /**
  * Graceful shutdown: flush any pending writes to disk.
- * Call at plugin teardown to ensure no data is lost.
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} the {@link flushToDisk} result
  */
 export async function shutdownToolLearner() {
-  await flushToDisk();
+  return flushToDisk();
 }
 
 // Register process exit handler to persist pending changes
@@ -154,6 +161,8 @@ export async function recordUsage(tool, context, score, meta = {}) {
   // Update aggregates
   updateAggregate(history, tool, record);
 
+  // Queued for the save's merge onto the file on disk (tool-history.js#saveHistory).
+  notePendingRecord(record);
   markDirty(flushToDisk);
 }
 
@@ -238,6 +247,8 @@ export async function pruneOldRecords(retentionMs = 90 * 24 * 60 * 60 * 1000) {
   // Rebuild aggregates from remaining data
   if (pruned > 0) {
     rebuildAggregates(history);
+    // Re-applied to the file on disk at save time, which may hold other rows.
+    notePrune(cutoff);
     markDirty(flushToDisk);
   }
 
@@ -246,11 +257,13 @@ export async function pruneOldRecords(retentionMs = 90 * 24 * 60 * 60 * 1000) {
 
 /**
  * Reset all learning data. Use with caution.
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} true when the empty history reached disk; false
+ *   when the lock was not taken within its wait (the file is left as it was,
+ *   and the reset is retried by the next save in this process).
  */
 export async function resetHistory() {
   setHistory(createEmptyHistory());
-  await saveHistory();
+  return saveHistory();
 }
 
 // ---------------------------------------------------------------------------

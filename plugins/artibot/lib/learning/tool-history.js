@@ -8,8 +8,11 @@
  */
 
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ARTIBOT_DIR, round } from '../core/index.js';
+import { atomicWriteJsonSync } from '../core/file.js';
+import { withFileLock } from '../core/file-lock.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -17,6 +20,9 @@ import { ARTIBOT_DIR, round } from '../core/index.js';
 
 const HISTORY_DIR = ARTIBOT_DIR;
 const HISTORY_PATH = path.join(HISTORY_DIR, 'tool-history.json');
+
+/** Maximum records kept per context key to prevent unbounded growth */
+export const MAX_RECORDS_PER_KEY = 200;
 
 /** Minimum sample size before trusting a recommendation */
 export const MIN_SAMPLES = 3;
@@ -39,6 +45,20 @@ let _dirty = false;
 
 /** Pending flush timer reference */
 let _flushTimer = null;
+
+/**
+ * Records this process appended since its last successful save. A save merges
+ * exactly these onto the latest file on disk, so another process's rows that
+ * landed in between survive (see {@link saveHistory}).
+ * @type {import('./tool-learner.js').UsageRecord[]}
+ */
+let _pending = [];
+
+/** Cutoff (Unix ms) of a prune run since the last save, re-applied on merge. */
+let _pruneCutoff = null;
+
+/** Set by {@link setHistory}: the next save writes the in-memory history whole. */
+let _replace = false;
 
 // ---------------------------------------------------------------------------
 // Persistence
@@ -69,15 +89,148 @@ export async function loadHistory() {
 
 /**
  * Persist history to disk.
- * @returns {Promise<void>}
+ *
+ * One critical section under `lib/core/file-lock.js#withFileLock`: re-read the
+ * file, merge, atomic write. The PostToolUse tracker is one process per tool
+ * call and the host fires parallel calls at once; the old load-early,
+ * write-whole-later shape let the last writer erase everyone else's rows
+ * (review measurement N=16: 1/16 kept; reproduced 2026-11-21 at 6-10/16 by
+ * tests/hooks/tool-tracker-concurrency.test.js).
+ *
+ * Merge rule — the file on disk is the base whenever it parses as a history:
+ *   - the records THIS process appended since its last save are added to it
+ *     (per-key cap and aggregates applied as recordUsage does);
+ *   - a prune run since the last save is re-applied to it by cutoff;
+ *   - after {@link setHistory} (reset) the in-memory history is written whole,
+ *     without reading the file.
+ * What the re-read may conclude is an allowlist ({@link readDiskHistory}):
+ * ENOENT means "no file" and an unparseable file is not a history — both are
+ * replaced by the in-memory history, as before. ANY other read error (EBUSY
+ * while another process renames over the file on Windows, EACCES, EMFILE, …)
+ * writes nothing: treating it as "no file" wrote the in-memory copy whole and
+ * erased every row another process had added since this one loaded (review
+ * xcB 2026-11-21, on a copy: 61 rows -> 51, worst 1, with `true` returned).
+ *
+ * NOT covered: a reset in one process does not stop another process that
+ * loaded before it from merging its own pending rows back afterwards; and a
+ * prune only re-applies its cutoff, so another process's rows older than the
+ * cutoff written after the prune survive until the next prune.
+ *
+ * @returns {Promise<boolean>} true when written; false when nothing was loaded,
+ *   the lock was not taken within its wait (ELOCKTIMEOUT), or the re-read
+ *   failed — non-fatal so a hook keeps its slot, with one stderr line. The
+ *   pending rows stay queued, but only a later save IN THIS PROCESS can write
+ *   them; a hook process that exits after a false loses them. Any other error
+ *   (lock create, write) is thrown.
  */
 export async function saveHistory() {
-  if (!_history) return;
+  if (!_history) return false;
 
-  _history.lastUpdated = Date.now();
-  await fs.mkdir(HISTORY_DIR, { recursive: true });
-  const content = JSON.stringify(_history, null, 2) + '\n';
-  await fs.writeFile(HISTORY_PATH, content, 'utf-8');
+  let outcome;
+  try {
+    outcome = withFileLock(HISTORY_PATH, () => {
+      const disk = _replace ? { history: null } : readDiskHistory();
+      if (disk.error) return { readError: disk.error };
+      const next = mergeOnto(disk.history);
+      atomicWriteJsonSync(HISTORY_PATH, next);
+      return { written: next };
+    });
+  } catch (err) {
+    if (err?.code !== 'ELOCKTIMEOUT') throw err;
+    process.stderr.write(`[artibot:tool-history] lock not taken within its wait; ${_pending.length} row(s) not saved\n`);
+    return false;
+  }
+  if (outcome.readError) {
+    process.stderr.write(`[artibot:tool-history] re-read under the lock failed (${outcome.readError.code ?? 'error'}); file left as is, ${_pending.length} row(s) not saved\n`);
+    return false;
+  }
+  _history = outcome.written;
+  _pending = [];
+  _pruneCutoff = null;
+  _replace = false;
+  return true;
+}
+
+/**
+ * The latest history on disk.
+ *
+ * `history` is null when the file is missing (ENOENT) or does not parse as a
+ * history — the two outcomes {@link saveHistory} may overwrite. Every other
+ * read error comes back as `error` instead, never as "missing".
+ *
+ * @returns {{ history: import('./tool-learner.js').ToolHistory|null, error?: NodeJS.ErrnoException }}
+ */
+function readDiskHistory() {
+  let text;
+  try {
+    text = readFileSync(HISTORY_PATH, 'utf-8');
+  } catch (err) {
+    return err?.code === 'ENOENT' ? { history: null } : { history: null, error: err };
+  }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return { history: null }; }
+  if (!parsed || typeof parsed !== 'object' || !parsed.version || parsed.version < 1) return { history: null };
+  return {
+    history: {
+      ...parsed,
+      contexts: parsed.contexts && typeof parsed.contexts === 'object' ? parsed.contexts : {},
+      aggregates: parsed.aggregates && typeof parsed.aggregates === 'object' ? parsed.aggregates : {},
+    },
+  };
+}
+
+/**
+ * Build what {@link saveHistory} writes. `disk` is a fresh parse owned by the
+ * caller, so it is extended in place.
+ *
+ * @param {import('./tool-learner.js').ToolHistory|null} disk
+ * @returns {import('./tool-learner.js').ToolHistory}
+ */
+function mergeOnto(disk) {
+  if (_replace || !disk) return { ..._history, lastUpdated: Date.now() };
+
+  for (const rec of _pending) {
+    const rows = [...(disk.contexts[rec.context] ?? []), rec];
+    disk.contexts[rec.context] = rows.length > MAX_RECORDS_PER_KEY
+      ? rows.slice(-MAX_RECORDS_PER_KEY)
+      : rows;
+    updateAggregate(disk, rec.tool, rec);
+  }
+  if (_pruneCutoff !== null) {
+    for (const [ctx, rows] of Object.entries(disk.contexts)) {
+      const kept = rows.filter((r) => r.timestamp >= _pruneCutoff);
+      if (kept.length === 0) delete disk.contexts[ctx];
+      else disk.contexts[ctx] = kept;
+    }
+    rebuildAggregates(disk);
+  }
+  disk.lastUpdated = Date.now();
+  return disk;
+}
+
+/**
+ * Queue a record this process appended, for the next {@link saveHistory} merge.
+ * @param {import('./tool-learner.js').UsageRecord} record
+ */
+export function notePendingRecord(record) {
+  _pending = [..._pending, record];
+}
+
+/**
+ * Remember a prune cutoff so the next {@link saveHistory} re-applies it to the
+ * file on disk. The latest (largest) cutoff wins.
+ * @param {number} cutoff - Unix ms; records older than this are dropped
+ */
+export function notePrune(cutoff) {
+  _pruneCutoff = _pruneCutoff === null ? cutoff : Math.max(_pruneCutoff, cutoff);
+}
+
+/**
+ * Path of the persisted history (frozen at import, like `ARTIBOT_DIR`).
+ * @returns {string}
+ */
+export function getHistoryPath() {
+  return HISTORY_PATH;
 }
 
 /**
@@ -130,6 +283,11 @@ export function createEmptyHistory() {
  */
 export function setHistory(history) {
   _history = history;
+  // A wholesale replacement (reset): the next save writes it as-is instead of
+  // merging onto the file, and rows queued before it are part of what it replaced.
+  _replace = true;
+  _pending = [];
+  _pruneCutoff = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +448,9 @@ export function getConfidence(count) {
 export function clearCache() {
   _history = null;
   _dirty = false;
+  _pending = [];
+  _pruneCutoff = null;
+  _replace = false;
   if (_flushTimer) {
     clearTimeout(_flushTimer);
     _flushTimer = null;

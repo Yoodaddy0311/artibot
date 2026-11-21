@@ -4,6 +4,9 @@
  * @module tests/learning/tool-history
  */
 
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock node:fs/promises before importing the module
@@ -18,6 +21,15 @@ vi.mock('node:fs/promises', () => ({
 const fsModule = await import('node:fs/promises');
 const fs = fsModule.default;
 
+// saveHistory writes through lib/core/file.js#atomicWriteJsonSync under a file
+// lock (M2, 2026-11-21), not through fs/promises. The spy records the exact
+// bytes the real writer would produce, so assertions read the same JSON text.
+const { writeSpy } = vi.hoisted(() => ({ writeSpy: vi.fn() }));
+vi.mock('../../lib/core/file.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  atomicWriteJsonSync: (p, data) => writeSpy(p, `${JSON.stringify(data, null, 2)}\n`),
+}));
+
 import {
   clampScore,
   clearCache,
@@ -28,9 +40,12 @@ import {
   getBufferState,
   getConfidence,
   getDirtyState,
+  getHistoryPath,
   loadHistory,
   markDirty,
   MIN_SAMPLES,
+  notePendingRecord,
+  notePrune,
   rebuildAggregates,
   saveHistory,
   setHistory,
@@ -132,14 +147,14 @@ describe('loadHistory()', () => {
 describe('saveHistory()', () => {
   it('writes JSON to disk', async () => {
     await loadHistory();
-    await saveHistory();
-    expect(fs.mkdir).toHaveBeenCalled();
-    expect(fs.writeFile).toHaveBeenCalledTimes(1);
+    expect(await saveHistory()).toBe(true);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(writeSpy.mock.calls[0][0]).toBe(getHistoryPath());
   });
 
   it('does nothing if history is not loaded', async () => {
     await saveHistory();
-    expect(fs.writeFile).not.toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 
   it('updates lastUpdated timestamp', async () => {
@@ -149,6 +164,86 @@ describe('saveHistory()', () => {
     await saveHistory();
     expect(h.lastUpdated).toBeGreaterThanOrEqual(before);
   });
+});
+
+// ---------------------------------------------------------------------------
+// saveHistory() merge under the file lock (M2, 2026-11-21)
+//
+// The real file at getHistoryPath() lives in the per-worker state dir that
+// tests/setup/state-dir.js points ARTIBOT_STATE_DIR at; only the WRITE is
+// spied, so the re-read under the lock sees whatever these tests put there.
+// ---------------------------------------------------------------------------
+describe('saveHistory() merges onto the latest file on disk', () => {
+  const rec = (tool, context, timestamp) => ({ tool, context, score: 1, timestamp });
+
+  /** Write a history file as another process would have. */
+  function seedDisk(contexts) {
+    mkdirSync(path.dirname(getHistoryPath()), { recursive: true });
+    writeFileSync(getHistoryPath(), JSON.stringify({ version: 2, contexts, aggregates: {}, lastUpdated: 1 }));
+  }
+
+  beforeEach(() => { rmSync(getHistoryPath(), { force: true }); });
+  afterEach(() => { rmSync(getHistoryPath(), { force: true }); });
+
+  it('adds only this process\'s pending rows to rows another process wrote', async () => {
+    const h = await loadHistory(); // fs/promises mock: ENOENT -> empty
+    const mine = rec('Grep', 'search:any', Date.now());
+    h.contexts['search:any'] = [mine];
+    notePendingRecord(mine);
+    seedDisk({ 'search:any': [rec('Read', 'search:any', 5)], 'read:js:file': [rec('Read', 'read:js:file', 6)] });
+
+    expect(await saveHistory()).toBe(true);
+
+    const written = JSON.parse(writeSpy.mock.calls[0][1]);
+    expect(written.contexts['search:any'].map((r) => r.tool)).toEqual(['Read', 'Grep']);
+    expect(written.contexts['read:js:file']).toHaveLength(1);
+    expect(written.aggregates.Grep.totalUses).toBe(1);
+  });
+
+  it('does not add the same pending row twice across two saves', async () => {
+    const h = await loadHistory();
+    const mine = rec('Grep', 'search:any', Date.now());
+    h.contexts['search:any'] = [mine];
+    notePendingRecord(mine);
+    seedDisk({});
+    await saveHistory();
+    // The second save re-reads the file the first one "wrote".
+    writeFileSync(getHistoryPath(), writeSpy.mock.calls[0][1]);
+    await saveHistory();
+    expect(JSON.parse(writeSpy.mock.calls[1][1]).contexts['search:any']).toHaveLength(1);
+  });
+
+  it('writes the in-memory history whole after setHistory (reset), ignoring disk', async () => {
+    seedDisk({ 'search:any': [rec('Read', 'search:any', 5)] });
+    setHistory(createEmptyHistory());
+    await saveHistory();
+    expect(JSON.parse(writeSpy.mock.calls[0][1]).contexts).toEqual({});
+  });
+
+  it('re-applies a prune cutoff to rows on disk', async () => {
+    await loadHistory();
+    seedDisk({ old: [rec('Read', 'old', 10)], fresh: [rec('Read', 'fresh', 5_000)] });
+    notePrune(1_000);
+    await saveHistory();
+    const written = JSON.parse(writeSpy.mock.calls[0][1]);
+    expect(Object.keys(written.contexts)).toEqual(['fresh']);
+    expect(written.aggregates.Read.totalUses).toBe(1);
+  });
+
+  it('returns false and writes nothing when the lock is held past its wait', async () => {
+    vi.useRealTimers(); // the lock's wait is wall-clock; frozen Date.now never times out
+    await loadHistory();
+    const lockPath = `${getHistoryPath()}.lock`;
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    // A live holder on this host (our own pid, fresh timestamp) is never stale.
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, host: hostname(), token: 'other', timestamp: Date.now() }));
+    try {
+      expect(await saveHistory()).toBe(false);
+      expect(writeSpy).not.toHaveBeenCalled();
+    } finally {
+      rmSync(lockPath, { force: true });
+    }
+  }, 10_000);
 });
 
 // ---------------------------------------------------------------------------

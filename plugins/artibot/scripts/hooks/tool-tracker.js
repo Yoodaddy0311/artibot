@@ -16,6 +16,7 @@ import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 import { resolveArtibotDir } from '../../lib/core/config.js';
 import { resolveSessionStatePath } from '../../lib/core/runtime-state.js';
+import { withFileLock } from '../../lib/core/file-lock.js';
 import { createLoopDetector } from '../../lib/cognitive/loop-detector.js';
 import { resolveProjectRoot } from '../../lib/git/project-root.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
@@ -66,7 +67,8 @@ function loadLoopState(file) {
 }
 
 /**
- * Save loop detector state to disk — on EVERY call.
+ * Save loop detector state to disk — on EVERY call that took the state lock
+ * (see {@link trackLoop}; the caller holds it).
  *
  * This hook is a new process per PostToolUse (`_posttooluse-dispatcher.js#spawnHook`),
  * so there is no "every Nth call" inside one process: the v4.7.3 cadence that flushed
@@ -109,6 +111,25 @@ function fingerprintDigest(fingerprint) {
  * Restore this session's history, record the call, flush, and report.
  * Runs BEFORE classification so an unclassifiable Bash command still counts.
  *
+ * The load → append → save is one critical section under
+ * `lib/core/file-lock.js#withFileLock`. The host fires PostToolUse for parallel
+ * tool calls at the same moment, one process each; unlocked, every process read
+ * the same old file and the last writer erased the rest (review measurement
+ * N=16: 3/16 kept; reproduced 2026-11-21 at 1-2/16 over 3 rounds by
+ * tests/hooks/tool-tracker-concurrency.test.js).
+ *
+ * When the lock cannot be taken (ELOCKTIMEOUT after its 2s wait, or a create
+ * error) the call is still checked against what is on disk, but NOT written:
+ * an unlocked write is exactly the lost update this lock exists to stop, and a
+ * hook must not fail its slot over a learning file. That one call is then
+ * missing from the history — the cost is stated, not hidden (stderr line).
+ *
+ * An error thrown INSIDE the lock (the detector over a malformed restored
+ * history, say) is a different failure: it is logged as itself, the body is not
+ * re-run unlocked (it would throw again), and the call reports no loop so the
+ * rest of the hook — the usage row — still runs. `entered` tells the two apart,
+ * as in `lib/learning/kill-switch.js#lockedUpdate`.
+ *
  * @param {object} hookData
  * @param {string} toolName
  * @param {object} toolInput
@@ -116,6 +137,32 @@ function fingerprintDigest(fingerprint) {
  */
 function trackLoop(hookData, toolName, toolInput) {
   const file = loopStateFile(hookData?.session_id);
+  let entered = false;
+  try {
+    return withFileLock(file, () => {
+      entered = true;
+      return recordLoopCall(file, toolName, toolInput, true);
+    });
+  } catch (err) {
+    if (entered) {
+      logHookError('tool-tracker', 'loop tracking failed inside the state lock; this call is not checked or persisted', err);
+      return { detected: false, severity: 'none', count: 0 };
+    }
+    logHookError('tool-tracker', `loop-state lock not taken (${err?.code ?? 'error'}); this call is not persisted`, err);
+    return recordLoopCall(file, toolName, toolInput, false);
+  }
+}
+
+/**
+ * The read-modify-write body of {@link trackLoop}.
+ *
+ * @param {string} file
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @param {boolean} persist - false when the lock was not taken
+ * @returns {import('../../lib/cognitive/loop-detector.js').LoopDetectionResult}
+ */
+function recordLoopCall(file, toolName, toolInput, persist) {
   const restored = loadLoopState(file);
   const detector = createLoopDetector(restored ? { initialHistory: restored.history } : {});
   const result = detector.detectLoop({ tool: toolName, args: toolInput });
@@ -129,7 +176,7 @@ function trackLoop(hookData, toolName, toolInput) {
       fingerprint_sha12: fingerprintDigest(result.fingerprint),
     }].slice(-MAX_DETECTIONS)
     : prior;
-  saveLoopState(file, detector, detections);
+  if (persist) saveLoopState(file, detector, detections);
   return result;
 }
 

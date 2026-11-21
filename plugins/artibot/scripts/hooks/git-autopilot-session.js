@@ -8,11 +8,12 @@
  * @module scripts/hooks/git-autopilot-session
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { parseJSON, readStdin } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { atomicWriteJsonSync } from '../../lib/core/file.js';
 import { autoResolveAll } from './git-autopilot-merge.js';
 import { isAutopilotAllowed } from '../../lib/autopilot/repo-identity.js';
 import { BUILTIN_WORKTREE_BRANCH_PREFIX, isSplitLimbBranch } from '../../lib/git/repo-identity.js';
@@ -133,14 +134,22 @@ function isPullThrottled(repoRoot) {
  * Persist the last-pull timestamp into `.git/autopilot.json`.
  * Errors are swallowed — throttling is advisory, not critical.
  *
+ * Written atomically (tmp sibling + rename): this file is also the autopilot
+ * CONFIG, so an in-place write torn part way (disk full, killed process) left
+ * it unparseable and loadConfig() turned autopilot off for the repo without a
+ * word. Exported for tests/hooks/git-autopilot-session-pull-timestamp.test.js.
+ *
  * @param {string} repoRoot
  */
-function recordPullTimestamp(repoRoot) {
+export function recordPullTimestamp(repoRoot) {
   try {
     const configPath = gitPath(repoRoot, 'autopilot.json');
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     config.lastPullAt = new Date().toISOString();
-    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    // The atomic writer creates missing parents; a hook must never create a
+    // git directory, so write only into one that is already there.
+    if (!existsSync(path.dirname(configPath))) return;
+    atomicWriteJsonSync(configPath, config);
   } catch {
     // Ignore — throttling will fall back to pulling next time
   }
