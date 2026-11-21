@@ -130,7 +130,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 // toFileUrl: 한글 경로 안전 (pathToFileURL 의 percent-encoding 회피 — utils/index.js 참고)
 const toFileUrl = (p) => {
-  const f = p.replace(/\\/g, '/');
+  const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 // 플러그인을 **찾는** 코드라 엔진 승격 불가. 세 보정(프로브 파일 = import 할 파일 /

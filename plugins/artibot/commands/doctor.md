@@ -820,7 +820,7 @@ If `--json` is set, output a structured JSON object:
 ```json
 {
   "timestamp": "ISO-8601",
-  "version": "4.13.1",
+  "version": "<artibot.config.json version, from Check 1>",
   "checks": {
     "config": { "status": "pass", "details": {} },
     "agents": { "status": "pass", "details": {} },
@@ -849,9 +849,13 @@ When `--fix` (or `--dry-run`) is passed, after the 7 diagnostic checks above com
 
 ### Invocation
 
-Import the module with a Korean-path-safe `file://` URL (the plugin root contains non-ASCII path segments — never pass a bare relative path to `import()`; build `file:///` manually as in `scripts/utils/index.js > toFileUrl()`):
+Import the module with a Korean-path-safe `file://` URL (the plugin root contains non-ASCII path segments — never pass a bare relative path to `import()`; build it exactly as `scripts/utils/index.js#toFileUrl` does — backslashes to `/`, then `%` to `%25`, `#` to `%23` and `?` to `%3F` (a `#` or `?` in the plugin path would otherwise cut the URL), and `file:///` before a drive letter. A slash command cannot import that helper, so the copy is inline below:
 
 ```js
+const toFileUrl = (p) => {
+  const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
+  return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
+};
 const { runDoctorFix } = await import(toFileUrl(join(pluginRoot, 'lib/core/doctor-fix.js')));
 // dryRun defaults to TRUE — pass { dryRun: false } only under --fix.
 const report = runDoctorFix(diagnostics, { dryRun: !hasFixFlag });

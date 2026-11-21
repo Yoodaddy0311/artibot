@@ -95,7 +95,7 @@ import path from 'node:path';
 // toFileUrl: 한글 경로 안전 (pathToFileURL은 percent-encoding 때문에
 // Windows 한글 경로에서 import() 실패 — scripts/utils/index.js#toFileUrl 참고)
 const toFileUrl = (p) => {
-  const f = p.replace(/\\/g, '/');
+  const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 

@@ -49,17 +49,28 @@ REA(Reverse Engineer Anything, morluto/rea, MIT)로 앱·바이너리·웹 페�
    `--install-hopper` 는 따로 필요하고 따로 승인받은 경우에만 붙인다.
 5. **재시작**: Claude Code 를 다시 시작하도록 안내한다(MCP 등록은 시작할 때 읽는다). 재시작하면 이 대화는 이어지지 않으므로, 떠나기 전에 원래 요청(대상과 알고 싶은 것)을 한 줄로 정리해 보여주고 다시 시작한 뒤에 그 요청을 한 번 더 말해 달라고 부탁한다. 요청을 다시 받으면 REA 툴이 실제로 나타났는지 확인한 뒤 조사를 이어간다. 계속 안 보이면 setup 을 반복하지 말고 클라이언트의 MCP 시작 오류를 본다.
 
-등록 전에도 로컬 JavaScript·Electron 대상(폴더 또는 ASAR)은 CLI 로 바로 조사할 수 있다(툴 등록과 네이티브 엔진이 필요 없다). 웹 대상에는 이 경로가 없다. 아래 명령은 사전 승인 목록에 없으므로 평소 권한 규칙대로 처리된다. CLI 의 JSON 은 전체 분석 결과라 매우 클 수 있으니 파일로 받고, 그 파일 전체를 Read 하지 않는다. 요약 보기만 읽는다:
+등록 전에도 로컬 JavaScript·Electron 대상(폴더 또는 ASAR)은 CLI 로 바로 조사할 수 있다(툴 등록과 네이티브 엔진이 필요 없다). 웹 대상에는 이 경로가 없다. 아래 명령은 사전 승인 목록에 없으므로 평소 권한 규칙대로 처리된다. CLI 의 JSON 은 전체 분석 결과라 매우 클 수 있으니 파일로 받고, 그 파일 전체를 Read 하지 않는다. 요약 보기만 읽는다.
+
+먼저 플러그인 루트를 찾는다. 작업 폴더는 사용자 프로젝트이지 이 플러그인이 아니고 `CLAUDE_PLUGIN_ROOT` 는 Bash 도구에서 자주 비어 있다. 아래를 한 번 실행해 출력된 절대경로를 따옴표로 감싸 `<pluginRoot>` 로 쓴다. `artibot plugin root not found - run /update` 가 나오면 그렇다고 알리고 이 CLI 경로를 쓰지 않는다:
+
+```bash
+F="scripts/rea/make-view-request.mjs"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+[ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
+[ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+[ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+[ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
+```
 
 ```bash
 npx -y rea-agents@6.7.0 analyze-javascript-application <절대경로> --json > <증거파일>
-node "${CLAUDE_PLUGIN_ROOT}/scripts/rea/make-view-request.mjs" <증거파일> <요청파일>
+node "<pluginRoot>/scripts/rea/make-view-request.mjs" <증거파일> <요청파일>
 npx -y rea-agents@6.7.0 inspect-analysis-view <요청파일>
 ```
 
 - 리다이렉트(`>`)는 Bash 도구에서 실행한다. Windows PowerShell 5.1 의 `>` 는 출력을 UTF-16 으로 다시 써서 JSON 을 못 쓰게 만든다.
 - `<증거파일>` 과 `<요청파일>` 은 6 의 "파일 위치" 규칙대로 OS 임시 폴더에 둔다.
-- 두 번째 줄은 업스트림 레시피의 jq 변환(증거를 inline source 로 감싸 summary 보기를 요청)을 node 만으로 하는 변환기다. jq 를 설치하지 않는다. 플러그인 경로가 채워지지 않아 변수 참조가 그대로 보이면, 설치된 플러그인 폴더에서 `scripts/rea/make-view-request.mjs` 를 찾아 절대경로로 쓴다.
+- 두 번째 줄은 업스트림 레시피의 jq 변환(증거를 inline source 로 감싸 summary 보기를 요청)을 node 만으로 하는 변환기다. jq 를 설치하지 않는다. 경로는 위 루트 탐색 블록이 정한다.
 - 다른 보기(모듈 목록, 모듈 하나)는 같은 변환기에 `--view '<JSON 객체>'` 를 붙여 요청 파일만 다시 만든 뒤 세 번째 줄을 다시 실행한다. view 모양은 업스트림 references/javascript-applications.md 의 예시를 따른다.
 
 ## 4. 웹 대상 (URL)

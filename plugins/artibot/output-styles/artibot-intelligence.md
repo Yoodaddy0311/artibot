@@ -12,7 +12,7 @@ not as separate sections that break response flow.
 
 ## Design Tokens
 
-Uses the shared token system from `tokens.md` plus feature-specific symbols:
+Uses the shared token system from `docs/design-tokens.md` plus feature-specific symbols:
 
 | Token | Symbol | Feature |
 |-------|--------|---------|

@@ -149,7 +149,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 // toFileUrl: 한글 경로 안전 (pathToFileURL percent-encoding 회피)
 const toFileUrl = (p) => {
-  const f = p.replace(/\\/g, '/');
+  const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 const home = process.env.USERPROFILE ?? process.env.HOME ?? '';

@@ -219,14 +219,28 @@ describe('partitionFrozenHistory', () => {
     expect(liveText, 'release-note counts stay out').not.toContain('117개 스킬');
   });
 
-  it('does not match single-digit or "N+" forms (validator parity)', () => {
-    // "70+ slash commands" and "1 command" must be left alone — same guarantee
-    // the live README relies on (root README lines for "70+" and "1 command").
+  it('does not match single-digit forms', () => {
     const cmd = CLAIM_PATTERNS.find((p) => p.label === 'commands');
-    const reA = new RegExp(cmd.regex.source, cmd.regex.flags);
-    expect(reA.exec('70+ slash commands')).toBeNull();
-    const reB = new RegExp(cmd.regex.source, cmd.regex.flags);
-    expect(reB.exec('1 command')).toBeNull();
+    const re = new RegExp(cmd.regex.source, cmd.regex.flags);
+    expect(re.exec('1 command')).toBeNull();
+  });
+
+  // Reversed 2026-11-21 (review L14). This test used to assert the OPPOSITE —
+  // that "70+ slash commands" must stay unbound — and so it protected the drift:
+  // the root README said "70+" and INSTALL.md said "70+ commands" while the
+  // directory held 81, and no gate looked. A floor claim is still a count claim;
+  // the `+` lives in group 2 so the rewriter keeps it, the same contract the
+  // `tests` key already uses ("9,900+ tests" heals to "14,953+ tests").
+  it.each([
+    ['commands', '70+ slash commands', '70', '+ slash commands'],
+    ['commands', '70+ commands', '70', '+ commands'],
+    ['skills', '100+ skills', '100', '+ skills'],
+    ['agents', '25+ specialist agents', '25', '+ specialist agents'],
+  ])('%s binds the "N+" floor form %j and keeps the + in the tail', (label, prose, num, tail) => {
+    const p = CLAIM_PATTERNS.find((x) => x.label === label);
+    const m = new RegExp(p.regex.source, p.regex.flags).exec(prose);
+    expect(m, `${label} must bind "${prose}"`).not.toBeNull();
+    expect([m[1], m[2]]).toEqual([num, tail]);
   });
 
   it('ciScripts deliberately DOES match single digits (unlike the others)', () => {

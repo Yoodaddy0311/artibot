@@ -37,6 +37,14 @@ const NC = '\x1b[0m';
 
 const errors = [];
 const warnings = [];
+// Lockstep labels that already have a specific error (file missing, version
+// line or badge missing, plugin entry missing); the generic "No version found"
+// pass below skips them so one fault is reported once.
+const reportedLabels = new Set();
+function reportLabel(label, message) {
+  reportedLabels.add(label);
+  errors.push(message);
+}
 
 function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf-8'));
@@ -57,7 +65,7 @@ const sources = [
 
 const versions = sources.map(([label, file]) => {
   if (!existsSync(file)) {
-    errors.push(`Missing version file: ${label}`);
+    reportLabel(label, `Missing version file: ${label}`);
     return { label, version: null };
   }
   return { label, version: readJson(file).version || null };
@@ -70,10 +78,10 @@ if (existsSync(agentsPath)) {
   const match = agentsBody.match(/Current plugin version:\s*\*\*([^*]+)\*\*/);
   versions.push({ label: 'AGENTS.md', version: match ? match[1].trim() : null });
   if (!match) {
-    errors.push('AGENTS.md missing "Current plugin version: **X.Y.Z**" line');
+    reportLabel('AGENTS.md', 'AGENTS.md missing "Current plugin version: **X.Y.Z**" line');
   }
 } else {
-  errors.push('Missing version file: AGENTS.md');
+  reportLabel('AGENTS.md', 'Missing version file: AGENTS.md');
   versions.push({ label: 'AGENTS.md', version: null });
 }
 
@@ -86,14 +94,14 @@ const READMES = [
 ];
 for (const [label, file] of READMES) {
   if (!existsSync(file)) {
-    errors.push(`Missing version file: ${label}`);
+    reportLabel(label, `Missing version file: ${label}`);
     versions.push({ label, version: null });
     continue;
   }
   const badge = readFileSync(file, 'utf-8').match(/badge\/version-([0-9]+\.[0-9]+\.[0-9]+)-/);
   versions.push({ label, version: badge ? badge[1] : null });
   if (!badge) {
-    errors.push(`${label} missing version badge "badge/version-X.Y.Z-"`);
+    reportLabel(label, `${label} missing version badge "badge/version-X.Y.Z-"`);
   }
 }
 
@@ -104,9 +112,10 @@ const rootMarketplacePath = path.join(REPO_ROOT, '.claude-plugin', 'marketplace.
 if (existsSync(rootMarketplacePath)) {
   const mkt = readJson(rootMarketplacePath);
   const artibotEntry = Array.isArray(mkt.plugins) ? mkt.plugins.find((p) => p?.name === 'artibot') : null;
-  versions.push({ label: '<repo>/.claude-plugin/marketplace.json#/plugins[artibot].version', version: artibotEntry?.version ?? null });
+  const entryLabel = '<repo>/.claude-plugin/marketplace.json#/plugins[artibot].version';
+  versions.push({ label: entryLabel, version: artibotEntry?.version ?? null });
   if (!artibotEntry) {
-    errors.push('<repo>/.claude-plugin/marketplace.json missing artibot plugin entry');
+    reportLabel(entryLabel, '<repo>/.claude-plugin/marketplace.json missing artibot plugin entry');
   }
 } else {
   errors.push('Missing version file: <repo>/.claude-plugin/marketplace.json');
@@ -121,17 +130,30 @@ if (existsSync(publicMarketplacePath)) {
   errors.push('Missing version file: plugins/artibot/marketplace.json');
 }
 
-const distinct = new Set(versions.map((v) => v.version).filter(Boolean));
+// A lockstep entry with no usable version is an ERROR, not a skip. Until
+// 2026-11-21 the mismatch check below ran on `.filter(Boolean)`, so a file whose
+// version key was missing (null) simply left the comparison and the rest agreed
+// with each other — exit 0 (review L15). Only a non-empty string counts.
+// A label that already carries a specific error above is not reported twice.
+const isVersion = (v) => typeof v === 'string' && v.trim() !== '';
+for (const v of versions) {
+  if (!isVersion(v.version) && !reportedLabels.has(v.label)) errors.push(`No version found in ${v.label}`);
+}
+
+const distinct = new Set(versions.map((v) => v.version).filter(isVersion));
 if (distinct.size > 1) {
   errors.push('Version mismatch across files:');
   versions.forEach((v) => errors.push(`    ${v.label}: ${v.version ?? '(missing)'}`));
 }
 
-const canonicalVersion = versions[0].version;
+const canonicalVersion = isVersion(versions[0].version) ? versions[0].version : null;
 
 // 2. CHANGELOG entry
 const changelogPath = path.join(PLUGIN_ROOT, 'CHANGELOG.md');
-if (existsSync(changelogPath) && canonicalVersion) {
+if (existsSync(changelogPath) && !canonicalVersion) {
+  // Say so: silently skipping is how a versionless package.json used to pass.
+  errors.push('CHANGELOG.md check skipped: package.json has no version to look up');
+} else if (existsSync(changelogPath) && canonicalVersion) {
   const changelog = readFileSync(changelogPath, 'utf-8');
   const headingRegex = new RegExp(`^##\\s*\\[?${canonicalVersion.replace(/\./g, '\\.')}\\]?`, 'm');
   if (!headingRegex.test(changelog)) {

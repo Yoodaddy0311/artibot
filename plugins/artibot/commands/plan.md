@@ -196,7 +196,7 @@ await supersede({ projectRoot, kind, oldSlug, newPath, now }) → { ok, oldPath 
 import path from 'node:path';
 import fs from 'node:fs';
 const toFileUrl = (p) => {
-  const f = p.replace(/\\/g, '/');
+  const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 const home = process.env.USERPROFILE ?? process.env.HOME ?? '';

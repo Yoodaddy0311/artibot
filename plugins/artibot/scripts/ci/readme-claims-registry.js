@@ -446,18 +446,33 @@ export function partitionFrozenHistory(content) {
 //      matches prose in the file's own `description` (`*-dispatcher.js`,
 //      `dispatch-table-loader.js`) and the `.js` inside the string `hooks.json`.
 //      Intersect against the real directory listing before believing any of it.
-// ---------------------------------------------------------------------------
+//   8. The bare Korean "N개 커맨드" (without 슬래시). Measured 2026-11-21 its only
+//      live occurrence was the plugin README tree line `[47개 커맨드].md`, which
+//      sits under three listed files and so meant "the REST", not the total —
+//      the same remainder-vs-total ambiguity that keeps "N개 전문 에이전트"
+//      unbound above. Binding it to actuals.commands would have demanded 81
+//      where a remainder (78) was meant. The line was reworded to carry no
+//      number (the total is gated two lines up as "81개 슬래시 커맨드").
+//
+// The "N+" floor form ("70+ slash commands"). Until 2026-11-21 the main
+// skills/commands/agents patterns put whitespace straight after group 1, so a
+// `+` unbound the claim; the root README's "70+ slash commands" and INSTALL.md's
+// "70+ commands" sat beside an actual 81 with no gate looking (review L14), and
+// a registry test even asserted they must stay unbound. The optional `\+` lives
+// in group 2, as in the `tests` pattern, so the rewriter preserves a floor
+// claim as a floor. Census on adding it, across SCAN_TARGETS: +2 bindings, both
+// `commands` (README.md:614, INSTALL.md:68); 0 new for skills and agents.
 export const CLAIM_PATTERNS = [
-  { key: 'skills', regex: /(\d{2,3})(\s+(?:domain\s+)?skills?\b)/gi, label: 'skills', lang: 'en' },
+  { key: 'skills', regex: /(\d{2,3})(\+?\s+(?:domain\s+)?skills?\b)/gi, label: 'skills', lang: 'en' },
   { key: 'skills', regex: /(\d{2,3})(\s+skill\s+director(?:y|ies))/gi, label: 'skill dirs', lang: 'en' },
   // `slash[- ]command` covers the hyphenated compound. Measured 2026-09-05,
   // AGENTS.md:8 read "54 slash-command definitions" against an actual 79 and no
   // pattern bound it — the hyphen alone was the whole gap.
-  { key: 'commands', regex: /(\d{2,3})(\s+(?:slash[-\s])?commands?\b)/gi, label: 'commands', lang: 'en' },
+  { key: 'commands', regex: /(\d{2,3})(\+?\s+(?:slash[-\s])?commands?\b)/gi, label: 'commands', lang: 'en' },
   // `specialist|specialized` for the same reason: AGENTS.md:7 said
   // "29 specialized agent definitions" (actual 30) and only "specialist" was
   // listed, so the adjective silently unbound the claim.
-  { key: 'agents', regex: /(\d{2,3})(\s+(?:specialist\s+|specialized\s+)?agents?\b)/gi, label: 'agents', lang: 'en' },
+  { key: 'agents', regex: /(\d{2,3})(\+?\s+(?:specialist\s+|specialized\s+)?agents?\b)/gi, label: 'agents', lang: 'en' },
   { key: 'agents', regex: /(\d{2,3})(\s+(?:specialist\s+|specialized\s+)?agent\s+definitions?)/gi, label: 'agent defs', lang: 'en' },
   { key: 'hookRegistrations', regex: /(\d{2,3})(\s+hook\s+registrations?)/gi, label: 'hook regs', lang: 'en' },
   { key: 'hookScripts', regex: /(\d{2,3})(\s+hook\s+scripts?)/gi, label: 'hook scripts', lang: 'en' },

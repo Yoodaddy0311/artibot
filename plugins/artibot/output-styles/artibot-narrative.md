@@ -31,7 +31,7 @@ Rules:
 ### 2. Support (Evidence Layer)
 
 A concise table or bullet list that backs the hero claim with data.
-Use `artibot-report` table format with severity tokens from `tokens.md`.
+Use `artibot-report` table format with severity tokens from `docs/design-tokens.md`.
 
 ```markdown
 | # | Severity | Finding | Location |
@@ -106,7 +106,7 @@ Hero: Design assessment → Support: Component health → Detail: Dependency ana
 
 ## Token Integration
 
-This style uses tokens from `tokens.md`:
+This style uses tokens from `docs/design-tokens.md`:
 
 - **Status**: `status-ok` through `status-error` for finding severity
 - **Severity**: `severity-critical` through `severity-low` in support tables

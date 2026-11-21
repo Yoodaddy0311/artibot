@@ -24,7 +24,7 @@
     }
   ],
   "license": "BUSL-1.1",
-  "licenseFile": "./LICENSE",
+  "licenseFile": "../../LICENSE",
   "repository": {
     "type": "git",
     "url": "https://github.com/Yoodaddy0311/artibot",

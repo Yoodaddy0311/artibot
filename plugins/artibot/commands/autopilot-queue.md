@@ -41,7 +41,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 // toFileUrl: 한글 경로 안전 (utils/index.js 참고)
 const toFileUrl = (p) => {
-  const f = p.replace(/\\/g, '/');
+  const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
   return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
 };
 // 후보 순서: env → 아래 hostRoot 리터럴(호스트가 써 넣은 경로, "$" 로 시작하면 미치환이라 건너뜀) → 캐시(숫자 내림차순) → mirror

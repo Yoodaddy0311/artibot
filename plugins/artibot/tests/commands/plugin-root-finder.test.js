@@ -38,7 +38,7 @@
  * -- What this file gates --------------------------------------------------------
  *  1. Every carrier's block is byte-identical to the canonical text for its kind
  *     (only `F` differs), sits in a fence, probes a file that exists, and its
- *     `<pluginRoot>` uses are present. 11 carriers; the set is exact.
+ *     `<pluginRoot>` uses are present. 16 carriers; the set is exact.
  *  2. A ratchet: no command, skill or agent may tell Claude to run a cwd-relative
  *     `node scripts/...`, `bash plugins/artibot/scripts/...`, `require('./lib/...')`,
  *     `import('./lib/...')`, or a `Glob` under `plugins/artibot/`. Known exceptions
@@ -124,7 +124,20 @@ const finderFor = (file, kind = 'command') => canonicalLines(kind).join('\n').re
  */
 const CARRIERS = [
   { file: 'commands/export.md', probe: 'scripts/export-to-tool.mjs', uses: ['<pluginRoot>/scripts/export-to-tool.mjs'] },
-  { file: 'commands/ship.md', probe: 'scripts/build-pr-description.mjs', uses: ['<pluginRoot>/scripts/build-pr-description.mjs'] },
+  // ship.md keeps ONE block (the probe predates route-lifecycle.mjs) and its
+  // Implementation step reuses the same <pluginRoot> for the lifecycle router.
+  {
+    file: 'commands/ship.md',
+    probe: 'scripts/build-pr-description.mjs',
+    uses: ['<pluginRoot>/scripts/build-pr-description.mjs', 'node "<pluginRoot>/scripts/route-lifecycle.mjs" ship "$ARGUMENTS"'],
+  },
+  // The lifecycle phase commands (review L13, 2026-11-21): they ran the router from the bare token.
+  ...['design', 'marketing', 'review', 'spec'].map((phase) => ({
+    file: `commands/${phase}.md`,
+    probe: 'scripts/route-lifecycle.mjs',
+    uses: [`node "<pluginRoot>/scripts/route-lifecycle.mjs" ${phase} "$ARGUMENTS"`],
+  })),
+  { file: 'commands/rea.md', probe: 'scripts/rea/make-view-request.mjs', uses: ['node "<pluginRoot>/scripts/rea/make-view-request.mjs" <증거파일> <요청파일>'] },
   { file: 'commands/squash.md', probe: 'scripts/squash-wip.mjs', uses: ['<pluginRoot>/scripts/squash-wip.mjs'] },
   {
     file: 'commands/resume.md',
@@ -208,7 +221,7 @@ describe('plugin-root finder: the copies in the carriers', () => {
   it('scans a plausible number of documents (0 violations is not 0 documents)', () => {
     expect(SCANNED.length).toBeGreaterThan(180);
     expect(SCANNED.filter((rel) => rel.startsWith('agents/')).length).toBeGreaterThanOrEqual(30);
-    expect(CARRIERS.length).toBe(11);
+    expect(CARRIERS.length).toBe(16);
   });
 
   it.each(CARRIERS.map((c) => [c.file, c]))('%s holds exactly one fenced block, identical to the canonical text for its kind', (_file, carrier) => {
@@ -442,6 +455,47 @@ describe('plugin-root finder: commands never use the :- spelling the host does n
   it('no registered exception is stale', () => {
     const stale = [...COLON_DASH_EXCEPTIONS.keys()].filter((rel) => !colonDash.has(rel));
     expect(stale).toEqual([]);
+  });
+});
+
+/**
+ * A script run straight from the host token: `node "${CLAUDE_PLUGIN_ROOT}/scripts/x.mjs"`.
+ * The host substitutes the token in command text, but only with the INSTALLED copy (so
+ * inside the source repo it runs the cache, not the tree being edited), and a host that
+ * leaves the token unreplaced hands bash an empty variable: `node "/scripts/x.mjs"`,
+ * MODULE_NOT_FOUND. The finder block covers both; a bare token has no fallback (review
+ * L13, 2026-11-21: design, marketing, review, ship, spec, rea).
+ * Not covered: the token inside a `Read` path (rea.md, index.md), which carry their own
+ * prose fallback, and a chain such as `REC="${CLAUDE_PLUGIN_ROOT}/$F"` that falls back on
+ * its own; neither is a direct `node`/`bash` run.
+ */
+const TOKEN_RUN = /\b(?:node|bash|sh)\s+(?:--[\w-]+(?:=\S+)?\s+)*["']?\$\{CLAUDE_PLUGIN_ROOT(?::-)?\}\//;
+
+describe('plugin-root finder: commands never run a script straight from the host token (ratchet)', () => {
+  const direct = scanTree((line) => TOKEN_RUN.test(line), SCANNED.filter((rel) => rel.startsWith('commands/')));
+
+  it('no command runs `node "${CLAUDE_PLUGIN_ROOT}/..."` without the finder', () => {
+    const problems = [...direct].map(([rel, lines]) => `${rel}:${lines.join(',')} runs a script from the bare host token`);
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+
+  it('the matcher flags the bare forms and leaves the finder forms alone (self-check)', () => {
+    for (const bad of [
+      `   node "${TOKEN}/scripts/route-lifecycle.mjs" spec "$ARGUMENTS"`,
+      `node "${TOKEN}/scripts/rea/make-view-request.mjs" <a> <b>`,
+      `bash ${TOKEN}/scripts/x.sh`,
+      `node --input-type=module "${TOKEN_ENV}/lib/x.js"`,
+    ]) {
+      expect(TOKEN_RUN.test(bad), bad).toBe(true);
+    }
+    for (const ok of [
+      'node "<pluginRoot>/scripts/route-lifecycle.mjs" spec "$ARGUMENTS"',
+      `F="scripts/x.mjs"; R=""; P="$HOME/.claude/plugins"; T="${TOKEN}"`,
+      `[ -f "$REC" ] || REC="${TOKEN}/$F"`,
+      `1. Read \`${TOKEN}/vendor/rea/skill/SKILL.md\``,
+    ]) {
+      expect(TOKEN_RUN.test(ok), ok).toBe(false);
+    }
   });
 });
 

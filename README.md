@@ -63,7 +63,7 @@ Most Claude Code plugins use simple sub-agent (unnamed, fire-and-forget) delegat
 - **Conversation-to-Memory** -- Auto-extracts rules and decisions from user messages (Korean/English), injects into skills dynamically
 - **Project CLAUDE.md Seeding** -- `install.sh` auto-generates project-level CLAUDE.md with Artibot methodology and DEV protocol
 - **Runtime Middleware Pipeline** -- 11-stage middleware engine (lifecycle, router, memory, skills, tasks, subagents, guardrail, summarization, token-usage, checkpoint, cache-roi) for runtime context injection
-- **Output Design System** -- 7 output styles with design tokens (tokens.md) and narrative template for consistent formatting
+- **Output Design System** -- 7 output styles with design tokens (`plugins/artibot/docs/design-tokens.md`) and narrative template for consistent formatting
 - **Forked Context Skills** -- All 114 skills run in isolated forked context for clean execution without cross-contamination
 - **HTTP Webhook Notifications** -- Session events sent to Slack, Discord, or custom endpoints via configurable webhooks
 - **Cross-Platform Compatible** -- Works with Gemini CLI, OpenAI Codex, and Cursor via platform adapters
@@ -611,7 +611,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Commands
 
-70+ slash commands across development, marketing, and workflow automation. Key commands: `/sc` (smart router), `/implement`, `/team`, `/code-review`, `/save`/`/resume`.
+81 slash commands across development, marketing, and workflow automation. Key commands: `/sc` (smart router), `/implement`, `/team`, `/code-review`, `/save`/`/resume`.
 
 <details>
 <summary>Development Commands</summary>
@@ -905,7 +905,7 @@ plugins/artibot/
 |   +-- privacy/                 # PII protection (pii-detector, pii-scrubber, homoglyph, token-rotation, differential-privacy)
 |   +-- learning/                # Lifelong learning (39 modules: memory, GRPO, pattern-analyzer, tool-history, rule-extractor, skill-injector, knowledge-demotion, etc.)
 |   +-- adapters/                # Cross-platform adapters
-+-- output-styles/               # 7 output styles (default, compressed, intelligence, mentor, narrative, report, team-dashboard) + tokens.md
++-- output-styles/               # 7 output styles (default, compressed, intelligence, mentor, narrative, report, team-dashboard); token table in docs/design-tokens.md
 +-- templates/                   # 5 writing templates
 +-- artibot.config.json          # Plugin config (Agent Teams settings)
 +-- package.json                 # Node.js ESM runtime
@@ -923,7 +923,7 @@ Key settings in `artibot.config.json`:
 | `version` | Plugin version | `4.71.16` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
-| `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. Even a matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
+| `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. A Bash/PowerShell call is covered only by an entry that names the tool (`{tool:"Bash"}`) or carries a `commandPattern` — a wildcard (`{tool:"*"}` or no `tool`) without a pattern never auto-approves a shell call (withheld as `wildcard-shell`, normal prompt). A covered shell command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
 | `updateCheck.enabled` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` (also `false`/`off`/`no`) wins over config. When off: no network call, no cache write | `true` |
 | `cognitive.system1.maxLatency` | System 1 max response time (ms) (unused — engine removed) | `100` |
 | `cognitive.system1.minConfidence` | System 1 minimum confidence (unused — engine removed) | `0.6` |

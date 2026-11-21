@@ -225,7 +225,7 @@ Key fields in `artibot.config.json` (file is auto-validated against schema):
 |---|---|---|
 | `version` | `4.71.16` | Synced across plugin.json / package.json / artibot.config.json |
 | `cognitive.router.threshold` | `0.4` | System 1 ↔ System 2 boundary |
-| `permissions.autoApprove` | `[]` | PermissionRequest allowlist `{tool, commandPattern}` (not the `settings.json` allowlist). A matched Bash command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive/unjudgeable commands fall back to the normal prompt |
+| `permissions.autoApprove` | `[]` | PermissionRequest allowlist `{tool, commandPattern}` (not the `settings.json` allowlist). A Bash/PowerShell call is covered only by an entry that names the tool (`{tool:"Bash"}`) or has a `commandPattern`; a pattern-less wildcard (`{tool:"*"}`, `{}`) never auto-approves a shell call (`wildcard-shell`, normal prompt). A covered shell command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive/unjudgeable commands fall back to the normal prompt |
 | `updateCheck.enabled` | `true` | Session-start update check. Env `ARTIBOT_UPDATE_CHECK=0` wins over config. Off = no network call, no cache write |
 | `projectBootstrap.gitExclude` | `true` | SessionStart: writes a managed block (`# >>> artibot runtime >>>`) into `<git common dir>/info/exclude` so the `.artibot/` runtime files (state.yaml, runtime/, ledger/, transcripts/ ...) are not committed by `git add .`. Never edits your `.gitignore`, shared by every worktree, no-op outside git. Env `ARTIBOT_PROJECT_BOOTSTRAP=off` wins over config and turns off both `projectBootstrap` rows |
 | `projectBootstrap.rulesDigest` | `true` | SessionStart: when `~/.claude/rules/artibot/` holds no rules (the manifest `rules` field is not auto-loaded by the host), injects a digest of them (at most 1,500 bytes) with the directory of the full texts. Injects nothing once the rules are installed |
@@ -463,8 +463,8 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### Output Design System (v1.14.0+)
 
-- 7개 출력 스타일: default, compressed, intelligence, mentor, narrative, report, team-dashboard (+ 공용 토큰 문서 `tokens.md`)
-- Design Token 시스템 (`tokens.md`): 일관된 포맷팅을 위한 디자인 토큰
+- 7개 출력 스타일: default, compressed, intelligence, mentor, narrative, report, team-dashboard (+ 공용 토큰 문서 `docs/design-tokens.md` — 출력 스타일이 아니라 참조 문서)
+- Design Token 시스템 (`docs/design-tokens.md`): 일관된 포맷팅을 위한 디자인 토큰
 
 
 ### Codex 크로스체크 통합 (v2.1.0+)
@@ -487,7 +487,7 @@ Artibot의 핵심 엔진은 Claude Code의 **Agent Teams API**입니다. 단순�
 
 ### Visual Progress Dashboard (v2.8.0+)
 
-- **한-줄 Statusline**: `[artibot] /implement · effort=xhigh · budget=128K · tokens=45K · longCtx=on` 포맷으로 현재 명령·effort·토큰·long-context 상태를 한눈에 표시
+- **한-줄 Statusline**: `[artibot] · /implement · effort=xhigh · budget=128K · input-est=45K · longCtx=requested` 포맷으로 현재 명령·effort·토큰·long-context 상태를 한눈에 표시. long-context 는 `runtime.longContext.enabled` 로 **요청만** 기록된다 — 훅은 호스트(Claude Code)의 환경변수를 바꿀 수 없어 1M 헤더가 실제 요청에 실리지 않으므로 `requested` 로 표시되고, 마커가 `hostApplied: true` 일 때만 `on` 이다
 - **Opt-in**: `artibot.config.json`의 `dashboard.enabled` 플래그 (기본 false). 섹션별 on/off: `showEffort`, `showTaskBudget`, `showTeammates`
 - **Zero-crash**: runtime JSON 파일 누락/파손 시 해당 섹션만 생략. TTY가 아니거나 `NO_COLOR=1`이면 ANSI 색상 자동 비활성화
 - 렌더러: `scripts/statusline.sh` / `scripts/statusline.js` → `lib/tui/dashboard.js`
@@ -1603,7 +1603,7 @@ plugins/artibot/
 │   ├── sc.md                    #   메인 라우터
 │   ├── orchestrate.md           #   팀 오케스트레이션 (네임드 Agent 스폰)
 │   ├── spawn.md                 #   팀 스폰 (병렬 실행)
-│   └── [47개 커맨드].md
+│   └── [나머지 커맨드].md
 ├── skills/                      # 114개 스킬 디렉토리 (forked context 격리)
 │   ├── orchestration/           #   위임 모드 선택 + 팀 라우팅
 │   ├── delegation/              #   Sub-Agent/Team 위임 전략
@@ -1626,7 +1626,7 @@ plugins/artibot/
 │   ├── privacy/                 # 프라이버시 (6): pii-scrubber, pii-detector, homoglyph-detector, token-rotation, differential-privacy
 │   ├── system/                  # 시스템 (2): lsp-client
 │   └── context/                 # 컨텍스트 (2): session
-├── output-styles/               # 7개 출력 스타일 (default, compressed, intelligence, mentor, narrative, report, team-dashboard) + tokens.md
+├── output-styles/               # 7개 출력 스타일 (default, compressed, intelligence, mentor, narrative, report, team-dashboard) — 토큰 표는 docs/design-tokens.md
 ├── templates/                   # 5개 작성 템플릿
 ├── artibot.config.json          # 플러그인 설정 (Agent Teams 포함)
 ├── package.json                 # Node.js ESM 런타임
@@ -1725,7 +1725,7 @@ Claude Code 하네스 아키텍처에서 영감받은 13개 신규 모듈 도입
 - `artibot.config.json`에 `runtime.middleware` 배열 등록
 
 ### Output Design System (v1.14.0)
-- `output-styles/tokens.md`: 디자인 토큰 시스템 (색상, 간격, 타이포그래피 토큰)
+- `docs/design-tokens.md`: 디자인 토큰 시스템 (색상, 간격, 타이포그래피 토큰)
 - `output-styles/artibot-narrative.md`: 내러티브 스타일 템플릿
 - 7개 출력 스타일로 확장 (기존 4개 + tokens, narrative, statusline)
 

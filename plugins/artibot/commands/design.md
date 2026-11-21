@@ -26,11 +26,19 @@ Parse $ARGUMENTS:
    - Current dependency graph
    - Existing design patterns in use
    - Technology stack and framework constraints
-3. **Delegate**: Resolve the route via the CLI bridge, then spawn the agent:
+3. **Delegate**: Find the plugin root, resolve the route via the CLI bridge, then spawn the agent. The working directory is the user's project, not this plugin, and `CLAUDE_PLUGIN_ROOT` is often empty in the Bash tool, so run this once and use the absolute path it prints as `<pluginRoot>`, quoted:
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/route-lifecycle.mjs" design "$ARGUMENTS"
+   F="scripts/route-lifecycle.mjs"; R=""; P="$HOME/.claude/plugins"; T="${CLAUDE_PLUGIN_ROOT}"
+   for d in plugins/artibot .; do [ -f "$d/$F" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"artibot"' "$d/.claude-plugin/plugin.json" 2>/dev/null && R="$d" && break; done
+   [ -z "$R" ] && [ -n "$T" ] && [ -f "$T/$F" ] && R="$T"
+   [ -z "$R" ] && for v in $(ls -1 "$P/cache/artibot/artibot" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr); do [ -f "$P/cache/artibot/artibot/$v/$F" ] && R="$P/cache/artibot/artibot/$v" && break; done
+   [ -z "$R" ] && for m in $(ls -1 "$P/marketplaces" 2>/dev/null); do [ -f "$P/marketplaces/$m/plugins/artibot/$F" ] && R="$P/marketplaces/$m/plugins/artibot" && break; done
+   [ -n "$R" ] && (cd "$R" && { pwd -W 2>/dev/null || pwd; }) || echo "artibot plugin root not found - run /update"
    ```
-   This calls `routeLifecycle('design', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line (default agent: `architect`). Route to Agent(<resolved agent>) for:
+   ```bash
+   node "<pluginRoot>/scripts/route-lifecycle.mjs" design "$ARGUMENTS"
+   ```
+   This calls `routeLifecycle('design', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line (default agent: `architect`). If the finder prints `artibot plugin root not found - run /update` or the command fails, say so in one line and use the default agent `architect`. Route to Agent(<resolved agent>) for:
    - Requirements analysis from target description
    - Design alternative generation (N options)
    - Trade-off matrix evaluation per alternative

@@ -1,10 +1,8 @@
----
-name: artibot-tokens
-description: Semantic design token system for consistent output styling across all Artibot output-styles
-keep-coding-instructions: true
----
-
 # Design Tokens
+
+> Reference document, not an output style. It lived in `output-styles/tokens.md` until
+> 2026-11-21, where its frontmatter made the host list it as a selectable style
+> ("artibot-tokens"). Styles cite it by this path: `docs/design-tokens.md`.
 
 Shared semantic tokens referenced by all output-styles. Each token maps an intent
 to a concrete symbol, label, or format. Output-styles override presentation but

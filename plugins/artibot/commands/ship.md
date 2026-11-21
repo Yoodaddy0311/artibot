@@ -77,11 +77,11 @@ Cross-reference with legacy commands that map to this lifecycle:
 
 When invoked, this command:
 1. Parses the user's request (text after the slash command)
-2. Resolves the route via the CLI bridge:
+2. Resolves the route via the CLI bridge. `<pluginRoot>` is the path printed by the finder block in **Auto-description workflow** step 2 above — run that block once now if it has not run yet (with or without `--auto-description`; its probe file `build-pr-description.mjs` ships in the same `scripts/` directory as `route-lifecycle.mjs`):
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/route-lifecycle.mjs" ship "$ARGUMENTS"
+   node "<pluginRoot>/scripts/route-lifecycle.mjs" ship "$ARGUMENTS"
    ```
-   This calls `routeLifecycle('ship', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line.
+   This calls `routeLifecycle('ship', { hint })` from `lib/core/lifecycle-router.js` and prints the `{agent, toolset, skills, candidates}` resolution as a single JSON line. If the finder prints `artibot plugin root not found - run /update` or the command fails, say so in one line and use the default agent `devops-engineer`.
 3. Spawns the resolved agent via Agent() tool with the appropriate prompt
 4. Reports back with the agent's findings
 
