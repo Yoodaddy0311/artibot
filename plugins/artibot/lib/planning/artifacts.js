@@ -16,7 +16,11 @@
  */
 
 import path from 'node:path';
-import { ensureDir, exists, listFiles } from '../core/file.js';
+// `atomicWriteText` is the core writer, not a local copy: the copy that lived
+// here renamed ONCE, so a transient Windows destination lock (EPERM/EBUSY/
+// EACCES — antivirus, indexer) failed a PRD/ADR/INDEX write that the core
+// writer retries through (M8, 2026-11-21).
+import { atomicWriteText, ensureDir, exists, listFiles } from '../core/file.js';
 import fs from 'node:fs/promises';
 import { syncTodo as syncPlanState } from './plan-state.js';
 
@@ -120,26 +124,6 @@ async function nonCollidingPath(dir, base, ext) {
   }
   // Astronomically unlikely fallback.
   return path.join(dir, `${base}-${Date.now()}${ext}`);
-}
-
-/**
- * Atomic text write via a tmp sibling + rename. Mirrors atomicWriteJson but
- * for raw markdown so readers never observe a partial file.
- * @param {string} filePath
- * @param {string} content
- * @returns {Promise<void>}
- */
-async function atomicWriteText(filePath, content) {
-  await ensureDir(path.dirname(filePath));
-  const rand = Math.random().toString(36).slice(2, 8);
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${rand}`;
-  try {
-    await fs.writeFile(tmp, content, 'utf-8');
-    await fs.rename(tmp, filePath);
-  } catch (err) {
-    try { await fs.unlink(tmp); } catch { /* best-effort */ }
-    throw err;
-  }
 }
 
 /**

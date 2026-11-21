@@ -68,11 +68,15 @@ export const REQUIRED_FIELDS_FULL = Object.freeze([
  * Required fields of the reduced (system1) contract.
  *
  * Design §3.1 describes the reduced contract as `{goal, explicit_requests,
- * intent_confidence}`. `intent_confidence` is NOT required here: its producer
- * is `lib/intent/confidence.js` (T-24), which has not landed, and requiring a
- * field nothing can populate would make every system1 contract invalid for a
- * reason unrelated to the contract. It stays in the reduced allowlist so it is
- * accepted the moment T-24 supplies it.
+ * intent_confidence}`. `intent_confidence` is NOT required here. Its producer,
+ * `lib/intent/confidence.js#computeIntentConfidence` (T-24), has landed, but
+ * nothing passes its output to the compiler — measured 2026-11-21: outside
+ * tests, no file under `lib/` or `scripts/` calls it, and
+ * `lib/mission/compiler.js` only passes through what a caller supplies.
+ * Requiring a field no path populates would make every system1 contract
+ * invalid for a reason unrelated to the contract. It stays in the reduced
+ * allowlist so it is accepted as soon as a caller supplies it; making it
+ * required is a separate decision once one does.
  */
 export const REQUIRED_FIELDS_REDUCED = Object.freeze([
   'goal',

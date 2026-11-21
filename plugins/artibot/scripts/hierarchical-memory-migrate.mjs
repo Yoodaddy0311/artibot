@@ -32,7 +32,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainEntry } from './hooks/_main-entry.js';
 
 const LEGACY_FILES = Object.freeze([
@@ -257,10 +257,13 @@ export async function runApply({
   let runMigration = migrator;
   if (!runMigration) {
     // Dynamic import so the script stays usable even when the plugin tree is
-    // missing (e.g., uninstalled). The Korean path case is handled via
-    // pathToFileURL — same pattern used by scripts/utils/index.js.
+    // missing (e.g., uninstalled). The own directory comes from
+    // `fileURLToPath`, not `new URL(...).pathname`: `.pathname` keeps the
+    // percent-encoding (a Korean or space path never resolves — re-encoded to
+    // `%25EB...`) and stripping its leading `/` made POSIX paths relative to
+    // cwd (M6, 2026-11-21). `pathToFileURL` then builds the import specifier.
     const modulePath = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname.replace(/^\//, '')),
+      path.dirname(fileURLToPath(import.meta.url)),
       '..',
       'lib',
       'learning',

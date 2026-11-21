@@ -1031,3 +1031,58 @@ describe('v4.6.4 regression: 0-fabrication causing 0.198 merge drag', () => {
     expect(merged.tools.Read.successRate).toBeCloseTo(expected, 3);
   });
 });
+
+// L6 (2026-11-21): `mergeWeights` copied every key of both weight files into a
+// fresh object and looked entries up with `cat[key]`. Weight files are
+// downloaded swarm data. A JSON `__proto__` key is an OWN property after
+// `JSON.parse`, and assigning it onto the merged object re-parents that object;
+// a `constructor` key on one side made the other side's lookup return the
+// inherited `Object` function. Unsafe keys are skipped and lookups are own-only.
+describe('mergeWeights() - prototype-shaped keys from downloaded weights', () => {
+  const entry = { successRate: 0.9, sampleSize: 4 };
+
+  it('skips a category-level __proto__ key instead of re-parenting the category', () => {
+    const global_ = JSON.parse(
+      '{"tools":{"__proto__":{"polluted":1,"successRate":1},"Read":{"successRate":0.5,"sampleSize":2}}}',
+    );
+    const merged = mergeWeights({ tools: {} }, global_);
+    expect(Object.getPrototypeOf(merged.tools)).toBe(Object.prototype);
+    expect(merged.tools.polluted).toBeUndefined();
+    expect(Object.keys(merged.tools)).toEqual(['Read']);
+    expect({}.polluted).toBeUndefined();
+  });
+
+  it.each(['constructor', 'prototype'])('skips a category-level %s key', (bad) => {
+    const global_ = JSON.parse(`{"tools":{"${bad}":{"successRate":1,"sampleSize":3},"Read":${JSON.stringify(entry)}}}`);
+    const local = JSON.parse(`{"tools":{"Read":${JSON.stringify(entry)}}}`);
+    const merged = mergeWeights(local, global_);
+    expect(Object.hasOwn(merged.tools, bad)).toBe(false);
+    expect(Object.keys(merged.tools)).toEqual(['Read']);
+  });
+
+  it('skips an entry-level __proto__ key on the blended (both-sides) path', () => {
+    const local = JSON.parse('{"tools":{"Read":{"successRate":0.5,"sampleSize":2,"__proto__":{"x":1}}}}');
+    const global_ = JSON.parse('{"tools":{"Read":{"successRate":0.7,"sampleSize":2,"__proto__":{"x":2}}}}');
+    const merged = mergeWeights(local, global_);
+    expect(Object.getPrototypeOf(merged.tools.Read)).toBe(Object.prototype);
+    expect(merged.tools.Read.x).toBeUndefined();
+    expect(Object.keys(merged.tools.Read).sort()).toEqual(['sampleSize', 'successRate']);
+  });
+
+  it('drops an entry-level unsafe key on the one-side copy path too', () => {
+    const global_ = JSON.parse('{"tools":{"Grep":{"successRate":0.7,"sampleSize":2,"__proto__":{"x":2}}}}');
+    const merged = mergeWeights({ tools: {} }, global_);
+    expect(Object.hasOwn(merged.tools.Grep, '__proto__')).toBe(false);
+    expect(merged.tools.Grep.x).toBeUndefined();
+    expect(merged.tools.Grep.successRate).toBe(0.7);
+  });
+
+  it('does not treat an inherited name on one side as an entry (own-key lookup)', () => {
+    // `toString` exists on every object through the prototype; only the global
+    // side carries it as data. Before: localCat.toString (a function) was taken
+    // as the local entry and blended.
+    const global_ = { tools: { toString: { successRate: 0.6, sampleSize: 3 } } };
+    const merged = mergeWeights({ tools: {} }, global_);
+    expect(merged.tools.toString).toEqual({ successRate: 0.6, sampleSize: 3 });
+  });
+});

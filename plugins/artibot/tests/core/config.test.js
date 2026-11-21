@@ -38,7 +38,8 @@ describe('config', () => {
       readJsonFile.mockResolvedValue(null);
       const config = await loadConfig();
       expect(config.version).toBe('1.0.0');
-      expect(config.team.enabled).toBe(false);
+      // Absent key = ON, matching the sole owner `lib/core/team-config.js#isTeamEnabled`.
+      expect(config.team.enabled).toBe(true);
       expect(config.team.maxTeammates).toBe(7);
       expect(config.automation.intentDetection).toBe(true);
       expect(config.automation.ambiguityThreshold).toBe(50);
@@ -209,6 +210,41 @@ describe('config', () => {
       await loadConfig();
       resetConfig();
       expect(() => getConfig()).toThrow('Config not loaded');
+    });
+  });
+
+  describe('team.enabled default agrees with isTeamEnabled', () => {
+    // M5 (2026-11-21): DEFAULTS said `team.enabled: false` while the sole owner of
+    // the meaning (`isTeamEnabled`) reads an ABSENT key as ON. A config file
+    // without `team.enabled` was therefore OFF through `loadConfig()` and ON
+    // through every surface that reads the raw file.
+    //
+    // SCOPE OF "same answer": the `null` row is the ABSENT file only. `readJsonFile`
+    // also returns `null` for a MALFORMED file, and there the two sides do NOT
+    // agree: `loadConfig()` falls back to DEFAULTS (team ON) while the three
+    // raw-file hooks (`auto-team-trigger.js#loadTeamConfig`,
+    // `auto-command-suggest.js#loadConfig`, `autopilot-nlu-trigger.js#isEnabled`)
+    // catch the parse error and fail closed (OFF). That divergence is by design
+    // on the hook side and is not asserted here.
+    it.each([
+      ['file missing (absent, not malformed)', null],
+      ['file without a team block', { version: '2.0.0' }],
+      ['team block without enabled', { team: { maxTeammates: 3 } }],
+      ['team block with only autoApply:true', { team: { autoApply: true } }],
+    ])('%s: loadConfig and raw-file readers give the same answer', async (_label, raw) => {
+      const { isTeamEnabled } = await import('../../lib/core/team-config.js');
+      readJsonFile.mockResolvedValue(raw);
+      const config = await loadConfig(true);
+      expect(isTeamEnabled(config.team)).toBe(isTeamEnabled(raw?.team));
+      expect(isTeamEnabled(config.team)).toBe(true);
+    });
+
+    it('an explicit false still wins over the default', async () => {
+      const { isTeamEnabled } = await import('../../lib/core/team-config.js');
+      readJsonFile.mockResolvedValue({ team: { enabled: false } });
+      const config = await loadConfig(true);
+      expect(config.team.enabled).toBe(false);
+      expect(isTeamEnabled(config.team)).toBe(false);
     });
   });
 });

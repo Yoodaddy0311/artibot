@@ -26,10 +26,20 @@
  * -----------------------------
  *  - It does not interpret. `goal` is taken from the caller; with no caller
  *    goal it falls back to the first explicit request VERBATIM and says so in
- *    `meta.goalSource`. Real interpretation is `lib/intent/interpreter.js`
- *    (T-24), which has not landed.
- *  - It does not produce `intent_confidence`. That is `lib/intent/confidence.js`
- *    (T-24); this module passes through whatever the caller supplies.
+ *    `meta.goalSource`. Real interpretation is
+ *    `lib/intent/interpreter.js#interpretIntent` (T-24), which HAS landed
+ *    (8710e3f1) but does not feed this compiler: measured 2026-11-21, neither
+ *    production caller of `compileMission` passes a `goal` —
+ *    `lib/runtime/middleware/tasks.js` passes `{ prompt, intent, nowMs, system }`
+ *    (its own `interpretIntent()` call serves the question gate only), and
+ *    `scripts/hooks/intent-observe-pre.js#compilePromotion` (registered in
+ *    `hooks/hooks.json`) passes `{ prompt, stage, completion, missionId,
+ *    intentRevision, status, system }`. So the live goal is still the verbatim
+ *    fallback.
+ *  - It does not produce `intent_confidence`. That is
+ *    `lib/intent/confidence.js#computeIntentConfidence` (T-24, also landed in
+ *    8710e3f1, no caller outside tests as of 2026-11-21); this module passes
+ *    through whatever the caller supplies.
  *  - Request extraction is a surface-pattern matcher over two documented
  *    allowlists: Korean request endings and one-sentence connectives. A request
  *    phrased as a statement produces no entry and the whole-prompt fallback

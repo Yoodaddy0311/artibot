@@ -9,7 +9,8 @@
  *
  * @module lib/autopilot/engine
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import os from 'node:os';
 import nodePath from 'node:path';
 import { getPluginRoot } from '../core/platform.js';
 import { generatePRD } from './prd-generator.js';
@@ -35,6 +36,7 @@ import { enterPhase, nextTarget, recordPhaseResult, safeAppendLesson } from './e
 import { buildBlockedResult, resolveAutopilotConsent } from './consent-gate.js';
 import { acquireLock, isLocked, releaseLock } from './lock.js';
 import { getRepoIdentity } from '../git/repo-identity.js';
+import { resolveProjectRoot } from '../git/project-root.js';
 import { loadAllowList } from './mcp-verifier.js';
 import { buildFastTeamInstruction, demoteFastToStandard, loadFastProfileConfig, planFastExecution, retainFastIntegrationWorktree } from './fast-execution.js';
 import { isAttemptArmed, journalAttempt, openPhaseAttempt, reconcileAttemptOnResume } from './phase-attempt.js';
@@ -114,9 +116,11 @@ export function runPhase0Intake(state) {
     sessionId: state.sessionId,
     options: { ...state.options, mode: state.mode },
     priorLessons: state.priorLessons,
-    // Artifact root override (undefined = real project root, unchanged default).
-    // Tests pass options.projectRoot so PRDs land in a tmpdir instead of the
-    // developer's docs/PRD/.
+    // Pinned at start by `pinProjectRoot` (the user's project), back-filled
+    // on resume by `backfillProjectRoot`; tests pass options.projectRoot so
+    // PRDs land in a tmpdir instead of the developer's docs/PRD/. Undefined
+    // only for a pre-pin session with no lockScope (non-git start) — the
+    // generator then resolves the project from the process cwd.
     projectRoot: state.options?.projectRoot,
   });
   state.prdPath = filePath;
@@ -637,6 +641,116 @@ function lockOpts(state) {
   return scope && typeof scope === 'object' && typeof scope.repoIdentity === 'string' ? scope : {};
 }
 
+/**
+ * Pin `options.projectRoot` to the user's project when the caller left it
+ * empty, ONCE at start, so the PRD, the report, the lock scope and the REPORT
+ * gate's evidence root all name the same directory — and keep naming it on a
+ * resume from another cwd. Resolved from the process cwd (the shell the command
+ * driver runs in) by `lib/git/project-root.js#resolveProjectRoot`.
+ *
+ * M11 (2026-11-21): nothing filled this, and the generators then fell back to
+ * `<pluginRoot>/../..` — inside `~/.claude/plugins/` for an installed plugin,
+ * where a real run's PRD was measured landing.
+ *
+ * A caller value is kept verbatim only when it is a NATIVE absolute path
+ * (tests point it at a tmpdir). Anything else — `.` or another relative path
+ * (names wherever the next process stands), an MSYS `/c/Users/…` on win32
+ * (rooted but drive-relative: it resolves to `C:\c\Users\…`) — is replaced
+ * by the resolved project and reported with one `project-root-replaced` tick.
+ * A final root inside the plugin tree is kept but reported with one
+ * `project-root-in-plugin-tree` warn tick: it is the M11 symptom, and only
+ * the operator can say whether it is intended.
+ * @param {object} state
+ * @returns {void}
+ */
+function pinProjectRoot(state) {
+  const given = state.options?.projectRoot;
+  const supplied = given !== undefined && given !== null && !(typeof given === 'string' && given.trim() === '');
+  if (!isNativeAbsolute(given)) {
+    state.options = { ...state.options, projectRoot: resolveProjectRoot(process.cwd()) };
+    if (supplied) {
+      tick(state.sessionId, {
+        phase: 'INTAKE',
+        type: 'project-root-replaced',
+        level: 'warn',
+        message: `options.projectRoot ${JSON.stringify(given)} is not a native absolute path — using ${state.options.projectRoot}`,
+        data: { given: typeof given === 'string' ? given : String(given), projectRoot: state.options.projectRoot },
+      });
+    }
+  }
+  reportPluginTreeRoot(state);
+}
+
+/**
+ * A native absolute path for this platform. On win32 that means a drive
+ * (`C:\` / `C:/`) or UNC (`\\host\share`) prefix — `path.isAbsolute` also
+ * accepts the rooted, drive-relative `/c/Users` and `\foo`, which resolve
+ * against the CURRENT drive. Elsewhere, `path.isAbsolute`.
+ * @param {unknown} p
+ * @returns {boolean}
+ */
+function isNativeAbsolute(p) {
+  if (typeof p !== 'string' || p.trim() === '') return false;
+  if (process.platform === 'win32') return /^[A-Za-z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
+  return nodePath.isAbsolute(p);
+}
+
+/**
+ * True when `child` is `parent` or lies beneath it, compared in canonical
+ * spelling (short names, symlinks); a path that does not exist compares as
+ * resolved.
+ * @param {string} parent
+ * @param {string} child
+ * @returns {boolean}
+ */
+function isWithinDir(parent, child) {
+  const canon = (p) => { try { return realpathSync.native(p); } catch { return nodePath.resolve(p); } };
+  const rel = nodePath.relative(canon(parent), canon(child));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${nodePath.sep}`) && !nodePath.isAbsolute(rel));
+}
+
+/**
+ * One warn tick when the pinned project root lies inside the plugin's own tree
+ * (`getPluginRoot()`) or the host plugin store (`~/.claude/plugins`). Never
+ * throws: an observation must not block a start.
+ * @param {object} state
+ * @returns {void}
+ */
+function reportPluginTreeRoot(state) {
+  try {
+    const root = state.options?.projectRoot;
+    if (typeof root !== 'string' || !root) return;
+    const trees = [getPluginRoot(), nodePath.join(os.homedir(), '.claude', 'plugins')];
+    const hit = trees.find((t) => typeof t === 'string' && t && isWithinDir(t, root));
+    if (!hit) return;
+    tick(state.sessionId, {
+      phase: 'INTAKE',
+      type: 'project-root-in-plugin-tree',
+      level: 'warn',
+      message: `Project root ${root} is inside the plugin tree ${hit} — PRD and report will be written there`,
+      data: { projectRoot: root, pluginTree: hit },
+    });
+  } catch { /* observation only */ }
+}
+
+/**
+ * Back-fill `options.projectRoot` for a session stored before the pin existed,
+ * from the directory it recorded at ITS start (`lockScope.cwd`), so resume and
+ * abort write the PRD/report into that session's project rather than into
+ * whatever repository the resuming process stands in. In memory only — the
+ * next `persist` records it. Leaves `lockScope` untouched (the lock key must
+ * not move) and does nothing when there is no usable `lockScope.cwd`
+ * (non-git start): there is no record to back-fill from.
+ * @param {object} state
+ * @returns {void}
+ */
+function backfillProjectRoot(state) {
+  if (isNativeAbsolute(state.options?.projectRoot)) return;
+  const scopeCwd = state.lockScope && typeof state.lockScope === 'object' ? state.lockScope.cwd : undefined;
+  if (!isNativeAbsolute(scopeCwd)) return;
+  state.options = { ...state.options, projectRoot: resolveProjectRoot(scopeCwd) };
+}
+
 export async function startAutopilot({ task, mode, options, sessionId, consentOverride } = {}) {
   if (!task || typeof task !== 'string') {
     throw new TypeError('task is required');
@@ -648,6 +762,7 @@ export async function startAutopilot({ task, mode, options, sessionId, consentOv
   if (!consent.allowed) return buildBlockedResult(consent);
 
   const state = makeInitialState({ task, mode, options, sessionId });
+  pinProjectRoot(state);
   if (consent.receipt) state.consentReceipt = consent.receipt;
   retainExecuteRunnerSelection(state);
 
@@ -762,6 +877,7 @@ export async function resumeAutopilot(
 
   if (state.phase === 'COMPLETED') return { phase: 'COMPLETED', status: 'noop' };
   if (state.phase === 'ABORTED') return { phase: 'ABORTED', status: 'noop' };
+  backfillProjectRoot(state);
 
   // F4: Symmetric lock contract with startAutopilot. If a different live
   // session holds the featureKey lock, pause this resume. If we already hold
@@ -954,6 +1070,7 @@ export async function abortAutopilot(sessionId, { graceful = true } = {}) {
   if (!sessionId) throw new TypeError('sessionId required');
   const state = loadSession(sessionId);
   if (!state) throw new Error(`session not found: ${sessionId}`);
+  backfillProjectRoot(state);
   enterPhase(state, 'ABORTED');
   state.abortedAt = new Date().toISOString();
   state.summary = state.summary || `Aborted ${graceful ? 'gracefully' : 'forcefully'} by user.`;

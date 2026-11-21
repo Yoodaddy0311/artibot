@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   defaultMemoryDir,
@@ -234,6 +236,69 @@ describe('runApply', () => {
     expect(out.error).toBe('migration-failed');
     // Backup still exists so we can recover
     expect(out.backup).toMatch(/backup-/);
+  });
+
+  // M6 (2026-11-21): with no injected migrator, runApply resolved its own
+  // directory via `new URL(import.meta.url).pathname.replace(/^\//, '')`. That
+  // keeps percent-encoding (a non-ASCII or space path never resolves) and, on
+  // POSIX, strips the root so the path turns relative to cwd. Every earlier
+  // test injected `migrator`, so the real load path was never exercised.
+  it('loads the real migrate.js when no migrator is injected', async () => {
+    const { log, lines } = collector();
+    const out = await runApply({ memoryDir: dir, log });
+    expect(lines.join(' | ')).not.toMatch(/cannot load migrate\.js/);
+    expect(out.error).toBeUndefined();
+    expect(out.ok).toBe(true);
+    expect(typeof out.result.totalTagged).toBe('number');
+  });
+
+  it('resolves migrate.js from a Korean + space + "#" install path', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hm-migrate-root-'));
+    const install = path.join(root, '바탕 화면 #1', 'artibot');
+    try {
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      const srcScripts = path.resolve(here, '..', '..', 'scripts');
+      await fs.mkdir(path.join(install, 'scripts', 'hooks'), { recursive: true });
+      await fs.mkdir(path.join(install, 'lib', 'learning', 'memory'), { recursive: true });
+      await fs.copyFile(
+        path.join(srcScripts, 'hierarchical-memory-migrate.mjs'),
+        path.join(install, 'scripts', 'hierarchical-memory-migrate.mjs')
+      );
+      await fs.copyFile(
+        path.join(srcScripts, 'hooks', '_main-entry.js'),
+        path.join(install, 'scripts', 'hooks', '_main-entry.js')
+      );
+      // A stub migrator at the location runApply derives from its own URL —
+      // reaching it proves the derivation, not the real migration logic.
+      await fs.writeFile(
+        path.join(install, 'lib', 'learning', 'memory', 'migrate.js'),
+        'export async function runMigration() { return { totalTagged: 4242, reports: [] }; }',
+        'utf8'
+      );
+      await fs.writeFile(path.join(install, 'package.json'), '{"type":"module"}', 'utf8');
+      // Run under plain Node, not vitest: vite's own loader rejects a `%23`
+      // file URL before the script ever runs, which would test vite, not us.
+      const driver = path.join(install, 'driver.mjs');
+      await fs.writeFile(
+        driver,
+        [
+          "import { runApply } from './scripts/hierarchical-memory-migrate.mjs';",
+          'const lines = [];',
+          'const out = await runApply({ memoryDir: process.argv[2], log: (m) => lines.push(String(m)) });',
+          'process.stdout.write(JSON.stringify({ ok: out.ok, error: out.error ?? null,',
+          '  totalTagged: out.result?.totalTagged ?? null, lines }));',
+        ].join('\n'),
+        'utf8'
+      );
+      const run = spawnSync(process.execPath, [driver, dir], { encoding: 'utf8', timeout: 30000 });
+      expect(run.status, run.stderr).toBe(0);
+      const out = JSON.parse(run.stdout);
+      expect(out.lines.join(' | ')).not.toMatch(/cannot load migrate\.js/);
+      expect(out.ok).toBe(true);
+      expect(out.totalTagged).toBe(4242);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
 

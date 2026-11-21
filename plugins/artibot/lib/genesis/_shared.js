@@ -3,12 +3,20 @@
  * Korean-path safe, atomic. Net-new for the `/genesis` MVP renderers
  * (tree-gen / flow-gen / dataset-gen).
  *
- * Design note (option A, locked): these mirror the *module-private* helpers in
- * `lib/planning/artifacts.js` (atomicWriteText / nonCollidingPath / slugify /
- * resolveNow). artifacts.js does not export them, so we re-define them here
- * inside the genesis namespace rather than modify the stable file. This is the
- * only sanctioned re-definition (low-level fs primitives only) — higher-level
+ * Design note (option A, locked): nonCollidingPath / slugify / resolveNow
+ * mirror the *module-private* helpers in `lib/planning/artifacts.js`.
+ * artifacts.js does not export them, so they are re-defined here inside the
+ * genesis namespace rather than modify the stable file. This is the only
+ * sanctioned re-definition (low-level fs primitives only) — higher-level
  * artifact writers (writePRD etc.) are reused, never re-implemented.
+ *
+ * `atomicWriteText` is NOT re-defined: it is the canonical
+ * `lib/core/file.js#atomicWriteText`, re-exported. The "artifacts.js does not
+ * export it" reason above never applied to it — core exports it publicly, and
+ * genesis (L2) importing core (L1) is the allowed direction. The local copy
+ * that used to live here renamed once with no retry, so a transient Windows
+ * destination lock (EPERM/EBUSY/EACCES) failed a blueprint write the core
+ * writer rides out (M8, 2026-11-21).
  *
  * Rules:
  *   - Pure & non-destructive: never overwrite an existing file. On collision a
@@ -24,6 +32,8 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
+
+export { atomicWriteText } from '../core/file.js';
 
 /** @typedef {() => Date} NowFn */
 
@@ -98,26 +108,6 @@ export async function nonCollidingPath(dir, base, ext) {
   }
   // Astronomically unlikely fallback.
   return path.join(dir, `${base}-${Date.now()}${ext}`);
-}
-
-/**
- * Atomic text write via a tmp sibling + rename so readers never observe a
- * partial file. Creates parent directories first.
- * @param {string} filePath
- * @param {string} content
- * @returns {Promise<void>}
- */
-export async function atomicWriteText(filePath, content) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const rand = Math.random().toString(36).slice(2, 8);
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${rand}`;
-  try {
-    await fs.writeFile(tmp, content, 'utf-8');
-    await fs.rename(tmp, filePath);
-  } catch (err) {
-    try { await fs.unlink(tmp); } catch { /* best-effort */ }
-    throw err;
-  }
 }
 
 /**

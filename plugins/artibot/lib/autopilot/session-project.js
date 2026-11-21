@@ -17,8 +17,22 @@
  * `null` outside a git repository), none carries `options.projectRoot`, and none
  * has a top-level `cwd`. `prdPath` is deliberately NOT used as a key: all four
  * point into the plugin's own tree (`.../marketplaces/artibot/docs/PRD/...`)
- * because `generatePRD` defaults its root to `<pluginRoot>/../..` when the
- * caller omits `projectRoot`, so it says where the PRD landed, not whose it is.
+ * because `generatePRD` then defaulted its root to `<pluginRoot>/../..` when the
+ * caller omitted `projectRoot`, so it says where the PRD landed, not whose it is.
+ *
+ * SINCE 2026-11-21 (M11): `engine.js#startAutopilot` pins `options.projectRoot`
+ * (`engine.js#pinProjectRoot` — the user's project resolved from the process
+ * cwd by `lib/git/project-root.js#resolveProjectRoot`) when the caller left it
+ * empty, and both generators fall back to that same resolution instead of the
+ * plugin tree. So a session STARTED after that change carries
+ * `options.projectRoot`, and `recordedProject` reads it alongside
+ * `lockScope.cwd`. A session stored before it carries none until it is next
+ * resumed or aborted: `engine.js#backfillProjectRoot` then fills
+ * `options.projectRoot` from `resolveProjectRoot(lockScope.cwd)` (the same
+ * repository, at or above the recorded `lockScope.cwd`) and the next persist
+ * records it. A pre-pin session never resumed since, or one with no
+ * `lockScope` (non-git start), still matches the 2026-09-30 description above.
+ * `prdPath` stays out of the key for every generation.
  *
  * THE THREE ANSWERS:
  *   match     the session's repo identity equals the asker's, OR the asker is

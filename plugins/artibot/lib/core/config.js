@@ -79,7 +79,12 @@ export const ARTIBOT_DIR = resolveArtibotDir();
 const DEFAULTS = {
   version: '1.0.0',
   agents: { taskBased: {} },
-  team: { enabled: false, maxTeammates: 7 },
+  // `enabled: true` = the absent-key meaning of the sole owner,
+  // `lib/core/team-config.js#isTeamEnabled` (`!== false`). This default used to
+  // be `false`, so a config file with no `team.enabled` was OFF through
+  // `loadConfig()` and ON through every reader of the raw file (M5, 2026-11-21).
+  // An explicit `false` in the file still overrides it via `deepMerge`.
+  team: { enabled: true, maxTeammates: 7 },
   swarm: {
     enabled: false,
     optIn: false,

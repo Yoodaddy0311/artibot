@@ -212,7 +212,7 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
    import fs from 'node:fs';
    // toFileUrl: 한글 경로 안전 (pathToFileURL의 percent-encoding 회피 — utils/index.js 참고)
    const toFileUrl = (p) => {
-     const f = p.replace(/\\/g, '/');
+     const f = p.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); // % first — same as utils/index.js#toFileUrl
      return /^[A-Z]:/i.test(f) ? `file:///${f}` : `file://${f}`;
    };
    // Plugin location candidates (이 순서):
@@ -242,6 +242,7 @@ Goal Contract 슬롯이 없는 PRD는 기존 7-phase 단방향 흐름 (Phase 0~6
    - `mode`: `default` | `night` | `plan` | `resume` | `status` | `abort`
    - `options`: `{ maxDuration, budgetTokens, budgetUsd?, notify, team, checkpoint, fast }` — `--budget`/`--budget-usd` 값은 **숫자로 파싱해 넘긴다**(`makeInitialState`가 숫자 문자열은 한 번 더 강제 변환하고, 숫자가 아니면 기본 2,000,000 토큰으로 fail-closed 한다 — 문자열이 그대로 저장되면 한도가 사라지는 것이 아니라 기본값이 적용된다)
    - `--fast`와 `-fast`는 모두 `options.fast = true`로 정규화한다. `fast-profile` public API는 boolean `fast`만 소비하며 별칭을 다시 해석하지 않는다.
+   - `options.projectRoot`: **사용자 프로젝트 루트**를 절대경로로 넣는다. 규칙은 `lib/git/project-root.js#resolveProjectRoot` 와 같다: ① `.git` 이 있는 가장 가까운 상위 디렉터리(= `git rev-parse --show-toplevel`), ② git 이 아니면 홈 디렉터리를 제외한 상위 중 `.artibot` 또는 `package.json` 이 있는 **가장 바깥** 디렉터리, ③ 둘 다 없으면 현재 디렉터리. **`pluginRoot` 를 넣지 마라** — PRD(`docs/PRD/`)·보고서(`reports/AUTOPILOT/`)·잠금 범위가 이 값을 쓴다. 비우면 엔진(`lib/autopilot/engine.js#startAutopilot` → `pinProjectRoot`)이 프로세스 cwd 에서 같은 규칙(`lib/git/project-root.js#resolveProjectRoot`)으로 채운다. 예전에는 아무도 채우지 않아 생성기가 `<pluginRoot>/../..` 로 떨어졌고, 설치본에서는 그게 `~/.claude/plugins/cache/artibot/docs/PRD/` 였다(2026-11-21 실측).
    - `sessionId`: `:resume`/`:status`/`:abort` 인 경우만
 
 ### Step 1.5 — Pre-flight Gate (default 모드 자동)
@@ -265,7 +266,7 @@ if (pfInstr?.suppress) { /* warnings: state.preflightWarnings에 누적 + 계속
 
 | mode | 호출 | 다음 단계 |
 |------|------|-----------|
-| `default` / `night` / `plan` | `engine.startAutopilot({ task, mode, options })` → `{ sessionId, prdPath, instruction }` | Step 3 (Phase 진행) |
+| `default` / `night` / `plan` | `engine.startAutopilot({ task, mode, options: { ...options, projectRoot } })` → `{ sessionId, prdPath, instruction }` — `projectRoot` 는 Step 1 의 사용자 프로젝트 루트 | Step 3 (Phase 진행) |
 | `resume` | `engine.resumeAutopilot(sessionId)` 직전 `detectInterruptedPhase(state)` 호출 — interrupted 검출 시 `engine.buildRecoveryNote(state)` 한국어 안내를 큐에 푸시 후 정상 resume. 판정 근거는 세션의 `events.ndjson`(`phase-start` 뒤에 짝 `phase-end` 가 없으면 중단)이므로 **`state.sessionId` 가 있는 상태를 넘겨야 한다** — `loadSession` 결과를 그대로 전달하면 된다. **미ACK attempt 가 있으면 배너가 "재진입"이 아니라 PAUSE 안내를 낸다** — 단 VERIFY 의 첫 미ACK 는 1회 재실행 안내다 (아래 Step 3 의 ADR-005 2단 주석 참조) | Step 3 (재진입 Phase 부터 — 단 미ACK attempt 는 PAUSE, VERIFY 첫 미ACK 는 1회 재실행) |
 | `status` | `engine.getStatus(sessionId?)` → `SessionState` | 상태 표 출력 후 종료 |
 | `abort` | `engine.abortAutopilot(sessionId, { graceful: true })` → `AbortResult` | 결과 표 출력 후 종료 |

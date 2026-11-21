@@ -490,28 +490,73 @@ export function mergeWeights(local, global_, ratio) {
   for (const category of ['tools', 'errors', 'commands', 'teams', 'agents', 'quality']) {
     const localCat = local[category] ?? {};
     const globalCat = global_[category] ?? {};
-    const allKeys = new Set([...Object.keys(localCat), ...Object.keys(globalCat)]);
+    const allKeys = safeKeys(localCat, globalCat);
 
     merged[category] = {};
 
     for (const key of allKeys) {
-      const localEntry = localCat[key];
-      const globalEntry = globalCat[key];
+      const localEntry = ownValue(localCat, key);
+      const globalEntry = ownValue(globalCat, key);
 
       if (localEntry && globalEntry) {
         // Both exist: weighted average of numeric fields
         merged[category][key] = mergeEntries(localEntry, globalEntry, localRatio, globalRatio);
       } else if (localEntry) {
         // Local only: keep with local weight
-        merged[category][key] = { ...localEntry };
+        merged[category][key] = safeCopy(localEntry);
       } else {
         // Global only: keep with global weight
-        merged[category][key] = { ...globalEntry };
+        merged[category][key] = safeCopy(globalEntry);
       }
     }
   }
 
   return merged;
+}
+
+/**
+ * Keys that must never be copied out of a weight file. Weight files are
+ * downloaded swarm data; after `JSON.parse` a `"__proto__"` key is an OWN
+ * property, and assigning it onto a fresh object re-parents that object
+ * (L6, 2026-11-21). Same set as `lib/swarm/git-backend.js#UNSAFE_WEIGHT_KEYS`
+ * and `lib/core/config.js#UNSAFE_MERGE_KEYS`.
+ */
+const UNSAFE_MERGE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Union of the own enumerable keys of `a` and `b`, unsafe keys removed.
+ * @param {object} a
+ * @param {object} b
+ * @returns {Set<string>}
+ */
+function safeKeys(a, b) {
+  const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})]);
+  for (const bad of UNSAFE_MERGE_KEYS) keys.delete(bad);
+  return keys;
+}
+
+/**
+ * `obj[key]` only when it is the object's own property — an inherited name
+ * (`toString`, `constructor`) on one side must read as absent, not as the
+ * prototype's function.
+ * @param {object} obj
+ * @param {string} key
+ * @returns {unknown}
+ */
+function ownValue(obj, key) {
+  return obj !== null && typeof obj === 'object' && Object.hasOwn(obj, key) ? obj[key] : undefined;
+}
+
+/**
+ * Shallow copy without the unsafe keys (`{ ...entry }` would carry an own
+ * `__proto__` data property along).
+ * @param {object} entry
+ * @returns {object}
+ */
+function safeCopy(entry) {
+  const out = {};
+  for (const key of safeKeys(entry, null)) out[key] = entry[key];
+  return out;
 }
 
 /**
@@ -530,15 +575,15 @@ function mergeEntries(localEntry, globalEntry, localRatio, globalRatio) {
   // legacy uploads with fabricated 0 fields (root cause of the 0.198 drag).
   const localSamples = typeof localEntry.sampleSize === 'number' ? localEntry.sampleSize : 0;
   const globalSamples = typeof globalEntry.sampleSize === 'number' ? globalEntry.sampleSize : 0;
-  if (localSamples === 0 && globalSamples > 0) return { ...globalEntry };
-  if (globalSamples === 0 && localSamples > 0) return { ...localEntry };
+  if (localSamples === 0 && globalSamples > 0) return safeCopy(globalEntry);
+  if (globalSamples === 0 && localSamples > 0) return safeCopy(localEntry);
 
   const merged = {};
-  const allKeys = new Set([...Object.keys(localEntry), ...Object.keys(globalEntry)]);
+  const allKeys = safeKeys(localEntry, globalEntry);
 
   for (const key of allKeys) {
-    const localVal = localEntry[key];
-    const globalVal = globalEntry[key];
+    const localVal = ownValue(localEntry, key);
+    const globalVal = ownValue(globalEntry, key);
 
     if (key === 'sampleSize' && typeof localVal === 'number' && typeof globalVal === 'number') {
       // Sum sample sizes

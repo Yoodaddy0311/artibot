@@ -9,7 +9,7 @@
 
 import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { getPluginRoot } from '../core/platform.js';
+import { resolveProjectRoot } from '../git/project-root.js';
 import { loadSession } from './session-store.js';
 import { renderProfile } from './profile-renderer.js';
 import { renderTimelineTable, summarizeSession } from './replay.js';
@@ -17,10 +17,13 @@ import { diffSession, renderDiffTable } from './phase-diff.js';
 import { getSessionCost, renderCostBlock } from './cost-tracker.js';
 
 /**
- * @returns {string} project root one level above plugin root
+ * Same fallback as `prd-generator.js#getProjectRoot` (M11, 2026-11-21): the
+ * user's project resolved from the process cwd, not `<pluginRoot>/../..`, which
+ * pointed into `~/.claude/plugins/` for an installed plugin.
+ * @returns {string}
  */
 function getProjectRoot() {
-  return path.resolve(getPluginRoot(), '..', '..');
+  return resolveProjectRoot(process.cwd());
 }
 
 /**
@@ -492,7 +495,8 @@ export function buildReportData(state) {
  * - `deriveAll` defaults to **false** as of the autopilot cleanup pass —
  *   pm/exec/casual profiles are opt-in (set `deriveAll: true` or `style: 'all'`).
  *   Old callers expecting all four profiles must now pass `deriveAll: true`.
- * - `projectRoot` defaults to the resolved project root. Tests should pass an
+ * - `projectRoot` defaults to the user's project root resolved from the process
+ *   cwd (see `getProjectRoot`). Tests should pass an
  *   explicit `projectRoot` (e.g. tmpdir) to avoid touching the real project tree.
  *
  * @param {string} sessionId

@@ -169,11 +169,16 @@ async function readSkillMd(skillName) {
  * Atomic: a crash mid-write leaves the previous SKILL.md intact rather than a
  * half-injected file. `atomicWriteText` creates the skill directory itself.
  *
- * The cost of that atomicity is a new failure mode: the write now ends in a
- * rename, which on Windows can throw EPERM/EBUSY when antivirus, the file
- * indexer, or another process momentarily holds the target (see the hardening
- * note at scripts/utils/index.js:102-110). `atomicWriteText` does not retry, so
- * such a failure propagates to the caller rather than being absorbed.
+ * The write ends in a rename, which on Windows can throw EPERM/EBUSY/EACCES
+ * when antivirus, the file indexer, or another process momentarily holds the
+ * target (see the hardening note on `scripts/utils/index.js#atomicWriteSync`).
+ * `lib/core/file.js#atomicWriteText` retries exactly those three codes
+ * (`TRANSIENT_RENAME_CODES`, `MAX_RENAME_ATTEMPTS` = 5, ~150ms of backoff via
+ * `renameWithRetryAsync`) and throws the last error once every attempt failed,
+ * so only a lock that outlasts the retries — or any other errno, which is not
+ * retried — propagates to the caller. (This note used to say the writer did
+ * not retry; that stopped being true when the core writer gained the retry —
+ * L20, re-checked 2026-11-21.)
  *
  * @param {string} skillName
  * @param {string} content

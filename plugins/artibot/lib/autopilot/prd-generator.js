@@ -11,14 +11,24 @@ import path from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureDirSync } from '../core/file.js';
-import { getPluginRoot } from '../core/platform.js';
+import { resolveProjectRoot } from '../git/project-root.js';
 
 /**
- * Resolve the project root one level above the plugin root.
+ * The USER's project — resolved from the process cwd by
+ * `lib/git/project-root.js#resolveProjectRoot` (nearest `.git`, then git, then
+ * the outermost weak marker, then cwd) — used only when the caller passed no
+ * `projectRoot`. The engine pins `options.projectRoot` at start
+ * (`engine.js#startAutopilot`), so this fallback serves direct callers and
+ * sessions stored before that pin existed.
+ *
+ * It used to be `<pluginRoot>/../..`, which is the repository root only in a
+ * source checkout. In an installed plugin it named a directory inside
+ * `~/.claude/plugins/` (measured 2026-11-21: a real run's PRD landed in
+ * `~/.claude/plugins/cache/artibot/docs/PRD/`) — M11.
  * @returns {string}
  */
 function getProjectRoot() {
-  return path.resolve(getPluginRoot(), '..', '..');
+  return resolveProjectRoot(process.cwd());
 }
 
 /**
@@ -204,7 +214,8 @@ ${goalContractSection}## 3. 범위 (Scope)
  * Generate a PRD file for the given task.
  * Writes to `<projectRoot>/docs/PRD/{slug}-{sessionId}.md`.
  *
- * `projectRoot` defaults to the resolved project root (one level above plugin root).
+ * `projectRoot` defaults to the user's project root resolved from the process
+ * cwd (see `getProjectRoot` — never the plugin's own tree).
  * Tests should pass an explicit `projectRoot` (e.g. tmpdir) to avoid touching
  * the real project tree.
  *

@@ -2,11 +2,17 @@
  * Firewall — a test that reaches an autopilot artifact writer must redirect the
  * artifact root.
  *
- * `generatePRD` and `generateReport` fall back to the resolved project root when
- * the caller omits `projectRoot` (`lib/autopilot/prd-generator.js:220`,
- * `lib/autopilot/report-generator.js:394-396`), so a test that runs the engine
- * without pinning a root writes real files into the developer's `docs/PRD/` and
- * `reports/AUTOPILOT/`. This is not hypothetical: until 5d30cf6b the three
+ * `generatePRD` and `generateReport` fall back to a resolved project root when
+ * the caller omits `projectRoot` (`lib/autopilot/prd-generator.js#getProjectRoot`
+ * via `#generatePRD`, `lib/autopilot/report-generator.js#getProjectRoot` via
+ * `#generateReport`), and `lib/autopilot/engine.js#startAutopilot` now pins
+ * `options.projectRoot` from the same resolution when it is empty
+ * (`#pinProjectRoot`, M11 2026-11-21). Since M11 that root is the user's project
+ * resolved from the process cwd (`lib/git/project-root.js#resolveProjectRoot`)
+ * instead of `<pluginRoot>/../..` — and for a test run, whose cwd sits inside
+ * this checkout, both answers are this repository. So a test that runs the
+ * engine without pinning a root still writes real files into the developer's
+ * `docs/PRD/` and `reports/AUTOPILOT/`; M11 moved the fallback, not the leak. This is not hypothetical: until 5d30cf6b the three
  * crash-recovery smoke cases wrote three PRDs into the repo on every run, and
  * `docs/PRD/` had accumulated 5,840 untracked files by the time it was noticed.
  *
@@ -24,8 +30,10 @@
  * test.js` and `tests/learning/skill-freshness.test.js` both call a
  * `generateReport()` that belongs to an unrelated module, and neither may be
  * swept in. Both import paths accept the barrel `lib/autopilot/index.js` as well
- * as the concrete module: it re-exports all seven entry points (`index.js:9-13`,
- * `:20`, `:87`, `:119`), and keying only on `engine.js` silently missed
+ * as the concrete module: it re-exports all seven entry points (the five engine
+ * entries in `lib/autopilot/index.js`'s first `export { … }` block, plus
+ * `generatePRD` and `generateReport` in its `./prd-generator.js` and
+ * `./report-generator.js` re-export blocks), and keying only on `engine.js` silently missed
  * `engine.execute-worktree.test.js` and `engine.runner.test.js` in a first pass.
  *
  * WHAT THIS GATE CANNOT SEE — do not read a green run as more than it is:
@@ -39,8 +47,8 @@
  *   - **Subprocess spawns of scripts.** A test that `execFile`s a hook or CLI
  *     which runs the engine shows nothing in its own source. The crash smoke is
  *     caught only because the child program is a string literal in the parent.
- *   - **Non-`projectRoot` artifact writers.** `lib/planning/artifacts.js:368`
- *     (`writePRD`) also writes `docs/PRD/`, but is fail-closed — it returns
+ *   - **Non-`projectRoot` artifact writers.** `lib/planning/artifacts.js#writePRD`
+ *     also writes `docs/PRD/`, but is fail-closed — it returns
  *     `{ok:false,'projectRoot required'}` with no fallback, so it cannot leak
  *     and is deliberately out of scope. The ratchet below still watches it, so
  *     that if the fallback is ever added someone has to revisit this decision.
@@ -96,8 +104,9 @@ const TIER1_WRITERS = [
 
 /**
  * Tier 2 — engine entry points that reach a writer transitively.
- * `runPhase0Intake` calls `generatePRD` (`engine.js:127`); `runPhase6Report`
- * and `abortAutopilot` call `generateReport` (`engine.js:561`, `:955`);
+ * `runPhase0Intake` calls `generatePRD` (`engine.js#runPhase0Intake`);
+ * `runPhase6Report` and `abortAutopilot` call `generateReport`
+ * (`engine.js#runPhase6Report`, `engine.js#abortAutopilot`);
  * `startAutopilot` and `resumeAutopilot` drive those phases.
  */
 const TIER2_ENGINE_ENTRIES = /\b(startAutopilot|resumeAutopilot|abortAutopilot|runPhase0Intake|runPhase6Report)\s*\(/;

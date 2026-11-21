@@ -41,6 +41,7 @@
 import { execFileSync, execSync } from 'node:child_process';
 import { statfsSync } from 'node:fs';
 import path from 'node:path';
+import { resolveProjectRoot as defaultResolveProjectRoot } from '../git/project-root.js';
 import { getRepoIdentity as defaultGetRepoIdentity } from '../git/repo-identity.js';
 import { isLocked as defaultIsLocked, listLocks as defaultListLocks } from './lock.js';
 import { appendEvent as defaultAppendEvent } from './telemetry.js';
@@ -259,6 +260,29 @@ function treeKey(p) {
 }
 
 /**
+ * Same-tree key for a directory: its PROJECT ROOT, then {@link treeKey}.
+ *
+ * Load-bearing since M11 (2026-11-21): `engine.js#pinProjectRoot` makes every
+ * new lock holder record the project root as `cwd`, while the command driver
+ * passes preflight the raw shell cwd (`commands/autopilot.md` Step 1.5). A raw
+ * compare then called one checkout two trees whenever the shell sat in a
+ * subdirectory, downgrading `repoConcurrency` fail -> warn. Normalizing BOTH
+ * sides also covers holders written before M11, which recorded a raw cwd.
+ * A linked worktree has its own `.git` file, so it stays a separate tree.
+ * Resolution failure falls back to the raw path (never throws).
+ * @param {unknown} p
+ * @param {object} deps - `deps.resolveProjectRoot` overrides the resolver
+ * @returns {string|null}
+ */
+function projectTreeKey(p, deps) {
+  if (typeof p !== 'string' || !p) return null;
+  const resolve = typeof deps?.resolveProjectRoot === 'function' ? deps.resolveProjectRoot : defaultResolveProjectRoot;
+  let root = p;
+  try { root = resolve(p) || p; } catch { /* keep the raw path */ }
+  return treeKey(root);
+}
+
+/**
  * Build the allowlist matcher from `ctx.options.repoConcurrency.allow`.
  * Entries are exact feature keys or `prefix*`. Non-array → nothing allowed.
  * @param {object} ctx
@@ -277,11 +301,12 @@ function buildAllowMatcher(ctx) {
  * @param {Array<{ holder: object, stale: boolean }>} locks
  * @param {object} ctx
  * @param {string} identity
+ * @param {object} [deps]
  * @returns {{ blocked: string[], isolated: string[], allowed: string[], stale: string[], unattributed: number }}
  */
-function partitionPeers(locks, ctx, identity) {
+function partitionPeers(locks, ctx, identity, deps = {}) {
   const allowed = buildAllowMatcher(ctx);
-  const ownTree = treeKey(ctx.cwd);
+  const ownTree = projectTreeKey(ctx.cwd, deps);
   const out = { blocked: [], isolated: [], allowed: [], stale: [], unattributed: 0 };
   for (const entry of locks) {
     const h = entry?.holder;
@@ -296,7 +321,7 @@ function partitionPeers(locks, ctx, identity) {
     if (key === ctx.featureKey) continue; // lockFree owns the same-key case
     if (entry.stale) { out.stale.push(key); continue; }
     if (allowed(key)) { out.allowed.push(key); continue; }
-    const peerTree = treeKey(h.cwd);
+    const peerTree = projectTreeKey(h.cwd, deps);
     // Unknown peer cwd is treated as the same tree: fail-closed.
     if (peerTree === null || ownTree === null || peerTree === ownTree) out.blocked.push(key);
     else out.isolated.push(key);
@@ -313,7 +338,7 @@ function checkRepoConcurrency(ctx, deps) {
     const identity = resolveIdentity(ctx, deps);
     if (!identity) return result('repoConcurrency', 'warn', 'repo-identity-unavailable');
     const list = deps.listLocks || defaultListLocks;
-    const peers = partitionPeers(list() || [], ctx, identity);
+    const peers = partitionPeers(list() || [], ctx, identity, deps);
     const notes = [];
     // The engine writes repoIdentity into every lock it can attribute, so a
     // live lock without one was written by another plugin version (or by a
@@ -336,14 +361,19 @@ function checkRepoConcurrency(ctx, deps) {
 }
 
 /**
- * Does `peerCwd` overlap `ownCwd` — same dir, or one inside the other?
+ * Does `peerCwd` overlap this project — same dir, or one inside the other?
+ * The OWN side is widened to its project root ("this repo", per the module
+ * header), so a peer in a sibling subdirectory of the same checkout counts; a
+ * raw shell cwd missed it. The peer side stays raw: where the peer sits is the
+ * question, not which project it would resolve to.
  * @param {unknown} peerCwd
  * @param {unknown} ownCwd
+ * @param {object} [deps]
  * @returns {boolean}
  */
-function cwdOverlaps(peerCwd, ownCwd) {
+function cwdOverlaps(peerCwd, ownCwd, deps = {}) {
   const a = treeKey(peerCwd);
-  const b = treeKey(ownCwd);
+  const b = projectTreeKey(ownCwd, deps);
   if (a === null || b === null) return false;
   if (a === b) return true;
   return a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
@@ -363,7 +393,7 @@ function checkPeerNotice(ctx, deps) {
     }
     const agents = lister();
     const rows = Array.isArray(agents) ? agents : [];
-    const peers = rows.filter((a) => a && typeof a === 'object' && cwdOverlaps(a.cwd, ctx.cwd));
+    const peers = rows.filter((a) => a && typeof a === 'object' && cwdOverlaps(a.cwd, ctx.cwd, deps));
     const names = peers.map((a) => (typeof a.name === 'string' && a.name) || '?');
     return result('peerNotice', 'pass', `${peers.length} peer session(s) in this repo${names.length ? `: ${names.join(', ')}` : ''}`);
   } catch (err) {
