@@ -11,6 +11,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.71.17] — 2026-11-22
+
+`v4.71.16`(`dcb6b1b9`) 이후 14 커밋 = **175 files +10,965/−854**(`git rev-list --count v4.71.16..de6387ec` · `git diff --shortstat v4.71.16 de6387ec`, 2026-11-22 측정 — 릴리스 커밋은 이 수치에 없다). 내역:
+- 10 커밋(`766251df`~`2ee834f1`): 11-21 전수 검수 잔여 28건, `/theme` 설정 보호, WIP 경보 범위, `writeHandoff` 의 Date, 8.3 경로
+- 4 커밋: 11-22 핸드오프 잔여와 교차검수가 찾은 기존 결함(`c821222f` learning · `1cc9ed5c` hooks · `ea6a6095` scripts · `de6387ec` autopilot)
+
+로컬 테스트(Windows, 커밋 전 정지 트리)는 28,529건 중 28,477 통과 · 52 skip · 0 실패다. Ubuntu CI 수치는 이 문단을 쓸 때 미측정이다(`ci/release-v4.71.17` 런에서 확정).
+
+### 수정 — 2026-11-22 v4.71.16 핸드오프 잔여 + 교차검수가 찾은 기존 결함 (`/team` 4레인)
+
+11-21 핸드오프의 P1·P2 항목을 레인 4개(A 런타임 루트 · B 정직한 쓰기 · C learning · D autopilot)가 구현했다. 레인끼리 교차검수 4건 · 재검수 2건 · 표적 확인 1건을 거쳤고, 지적된 결함은 담당 레인이 고쳤다. 검수에서 나온 MED 4건(kill-switch master 재시도 · 배너의 거짓 정지 · 수동 재활성화 뒤 무력화 · 기능별 트립 무배너)은 모두 HEAD 부터 있던 결함이다. 각 수정의 RED → GREEN 과 음성 대조(뮤턴트)는 구현자·검수자가 사본에서 측정했다.
+
+- **kill-switch 읽기 fail-closed (오너 결정 2026-11-22, 권장안).** `lib/learning/kill-switch.js` 의 모든 상태 읽기가 `#readStateFile`(= `lib/core/file.js#readTextAllowMissing`) 허용 목록을 거친다. ENOENT·JSON 파싱 실패만 기본값(미트립)이고, 그 밖의 읽기 오류는 `tripped=true` + stderr 1줄이다. 전에는 `isKillSwitchTripped` → `loadState` → `readJsonFile` 이 EBUSY 를 "미트립" 으로 읽었다(fail-open). emergency 분기의 락 없는 peek 와 락 안 재읽기, 두 구멍도 같은 규칙으로 막았다. 합성 부하(독자 4명 × 약 120만 회 검사)에서 거짓 트립 0.
+- **kill-switch 트립이 효과 없이 남던 경로 3개.** ① 트립 순간 config 읽기가 일시 오류면 `masterEnabled` 가 켜진 채 쿨다운(24h) 동안 남았다 → emergency 상태에 `masterDisabled` 를 기록하고, 다음 실패 때마다 다시 끈다. ② reset 도중 트립이 끼면 "트립 + master 켜짐" 이 남았다(3/3 재현) → 클리어와 master 복구를 emergency 락 안의 한 구간으로 묶었다. ③ 트립 중 사용자가 master 를 다시 켜면 남은 쿨다운 동안 kill switch 가 동작하지 않았다 → 설정 **파일**에서 다시 켜진 것을 보면 재무장한다(파일을 못 읽으면 재무장하지 않음). 재시도·재무장 판정 전에 만료를 먼저 적용한다. 덤으로 `resetKillSwitch(feature)` 가 없는 기능에 빈 엔트리를 만들고 `reset:true` 를 돌려주던 것(재현)도 고쳤다.
+- **세션 시작 kill-switch 배너는 사실만 말한다.** 문구 조립을 `lib/learning/kill-switch-banner.js`(순수 함수)로 옮겼다. "일시 중지" 는 실제 게이트(`lib/learning/self-control-gates.js#resolveSelfControlGates`)가 막을 때만 말한다. 테스트가 시나리오마다 실제 게이트를 돌려 대조한다. 기능별 트립은 기능 이름과 함께 알린다. 전에는 emergency 트립이 아니면 배너 없이 그 기능이 영구 정지했다. 존재하지 않는 `/artibot:reset-kill-switch` 안내는 실제 재활성 방법으로 바꿨다: config `ago.selfControl.masterEnabled` 를 되돌리고 기능 항목을 지운다. 경로는 백틱으로 감쌌고, 배너 속 커맨드가 실재하는지 테스트가 확인한다. `scripts/hooks/session-start.js` 는 799 → 791줄이다.
+- **learning 잔여 4건.**
+  - tool-learner 지연 flush 의 처리되지 않은 rejection(타이머 경로에서 약 5.1초 뒤 exit 1, 실측) → `#flushDeferred`.
+  - `scripts/hooks/tool-tracker.js#loadLoopState` 가 잘못된 이력과 읽기 오류를 조용히 덮어써 루프 감지가 리셋됐다(실측 1,2,3,1) → 허용 목록 읽기 + 검증. 읽기 오류면 그 호출은 저장하지 않는다.
+  - `masterEnabled` 쓰기에 `withFileLock` 을 걸었다.
+  - `parseHistory` 를 공유한다(truthy 비객체 `contexts`·`aggregates` → `{}`).
+- **플러그인 캐시 루트에 `runtime/` 이 쌓이던 것 (M11 계열).** `skill-discovery-inject.js`·`webfetch-cache-pre.js`·`webfetch-cache-post.js` 가 `path.resolve(pluginRoot,'..','..')` 를 리포 루트로 써서, 설치본에서는 `~/.claude/plugins/cache/artibot/runtime/` 에 썼다. 호스트는 이 폴더를 고아 플러그인으로 표시했다. 옮긴 곳:
+  - 하루 게이트와 webfetch 캐시 → 전역 `~/.claude/artibot/runtime/`
+  - `scripts/hooks/pre-compact.js` 상태 → 세션 폴더 `~/.claude/artibot/runtime/sessions/<sid>/` (7일 sweep)
+  `lib/core/runtime-state.js` 헤더와 `tests/firewall/runtime-state-survives-update.test.js` 에 등록했다. 옛 코드는 테스트 하네스를 돌릴 때마다 리포 `runtime/state/` 에 md 를 2개씩 남겼는데(60개 누적) 이제 0이다. 옛 위치의 파일은 옮기지 않는다(아래 정리 안내).
+- **webfetch 캐시: 원자적 쓰기 + 바이트 상한.** `webfetch-cache-post.js#persistCacheEntry` 가 `atomicWriteJson` 을 쓰고, 실패하면 `persisted:false` 를 돌려준다. "256 KB" 상한은 실제로는 UTF-16 문자 수라서 한글은 768 KiB 가 저장됐다. 이를 262,144 바이트(코드포인트 경계에서 자름)로 고쳤다.
+- **스킬의 거짓 서술 정정.** `skills/source-driven-development/SKILL.md` 는 "304 재검증 · If-None-Match · 반복 fetch 는 거의 공짜" 라고 썼지만, 훅은 HTTP 요청을 하지 않는다. 서술을 실제 동작으로 고쳤다. 그 거짓을 고정하던 테스트는, 지운 옛 문장 20개를 원문 그대로 금지하는 단언으로 바꿨다. 외부 통신 검사는 `tests/helpers/no-egress.js` 로 모았다. 훅 4개는 import 지정자 허용 목록(fail-closed)으로 검사하고, pre-compact 의 git 실행은 리터럴 3종으로 고정했다. 이 검사가 못 보는 것(말을 바꾼 거짓, 간접 import, eval)은 헬퍼와 테스트 머리말에 적었다.
+- **쓰기 실패를 성공으로 보고하던 스크립트 4곳.** `scripts/inject-source-hash.js` 는 쓰기 실패면 exit 1, `scripts/migrate-command-toolsets.js` 는 `failed` 행과 exit 1 을 낸다. `scripts/swarm-init.js` ×2 는 config 쓰기가 실패하면 opt-in 동의를 기록하기 전에 중단한다. 전에는 실패해도 동의까지 기록했다(RED 실측). `scripts/bench/hook-latency.mjs` 는 자식 stdin 가드를 공유한다. 전에는 1 MB 페이로드에서 `write EOF` 로 exit 1 이었다(실측).
+- **autopilot preflight L1~L4 + engine 분리.**
+  - L1: 존재하지 않는 경로의 짧은 이름이나 링크 표기를 가장 가까운 실재 상위 폴더 기준으로 정규화한다(`lib/autopilot/preflight.js#canonicalSpelling`). peerNotice 집계에 적용되며, repoConcurrency 판정은 바뀌지 않는다(실측).
+  - L2: 드라이브 루트 peer 의 포함 관계를 판정한다(`#keyContains`).
+  - L3: 자기 키를 검사당 한 번만 계산한다.
+  - L4: 한글 TEMP 에서 8.3 케이스를 skip 한다.
+  - engine.js 의 pin 클러스터를 `lib/autopilot/project-root-pin.js` 로 옮겼다(109/109줄 동일, engine.js 1123 → 1012줄).
+- **50/800 문구.** 출하 문서·설치기·cursor-adapter·스킬의 "< 50 / < 800" 을 게이트 기준인 "≤ 50(주석·빈 줄 제외) / ≤ 800" 으로 바꿨다(install.ps1 은 ASCII `<=`). size-ratchet 기준선도 조였다(engine.js 1012, `initSwarm` 해소).
+- 로컬 `npm run ci`(리더, 2026-11-22 20:20~20:25, 커밋 전, 실행 전후 트리 해시 동일): 964 파일, 28,529건 중 28,477 통과 · 52 skip · 0 실패.
+- **업데이트 후 정리(수동, 선택).** 더는 아무도 쓰거나 읽지 않는 옛 위치: `~/.claude/plugins/cache/artibot/runtime/`, 개발 트리의 `runtime/state/`·`runtime/cache/webfetch/`. 설치기는 사용자 rules 를 덮어쓰지 않으므로, 바뀐 규칙은 `~/.claude/rules/artibot/quality-gates.md.artibot-new` 로 따로 생긴다.
+- **백로그 (근거와 함께 이번 범위에서 뺀 것).**
+  - 설계 결정이 필요한 것: 게이트가 emergency 상태를 직접 보는 설계, 기능별 트립을 푸는 공식 수단(커맨드나 만료).
+  - kill-switch 잔여: 만료된 트립이 남긴 master off 를 배너가 알리지 않음, `masterDisabled` 가 없는 예전 트립은 재무장되지 않음.
+  - 정리·누적: 세션 없는 flat pre-compact 파일 누적, `cache/webfetch` tmp sweep, 훅 12곳의 `atomicWriteSync` 반환값 무시(마커 파일류).
+  - 크기 상한 근접: `session-start.js` 791줄, `tool-tracker.js` 797줄.
+  - core 원자 rename 이 독자 경합에서 유실됨(합성 부하에서만 측정).
+
 ### 수정 — 2026-11-21 전수 검수 잔여 MED 11 · LOW 17 (오토파일럿 `ap-20261121-082645-n17e3v`)
 
 검수 잔여 MED 12 · LOW 20 중 수정 28건(M1~M11 · L1~L9 · L11~L16 · L19 · L20), 변경 불필요 3건(M12 · L10 · L17), 보고만 1건(L18). PRD 는 수정 건수를 "26" 으로 적었으나 목록을 세면 28 이다(12+20 = 28+3+1). 레인 A~F 가 구현하고, 독립 검수자 6명의 교차검수(spec 대조 + 레인별 적대 검수)와 그 지적을 고친 수정 라운드 F1~F4 를 거쳤다. 각 항목의 수정 전 RED → 수정 후 GREEN 은 구현자·수정자가 측정했다.
@@ -18,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **동시성·원자쓰기(M2 · M3 · L5 · L19).** `scripts/hooks/tool-tracker.js#trackLoop`·`lib/learning/tool-history.js#saveHistory` 가 `withFileLock` 아래에서 디스크를 다시 읽고 병합한 뒤 원자적으로 쓴다. `lib/learning/kill-switch.js#lockedUpdate` 도 같은 방식이고 `persisted` 를 돌려준다. 교차검수자 실측(동시 16~32 프로세스): HEAD 는 5라운드 중 2라운드에서 history 852행이 통째로 사라졌고, 새 코드는 유실 0, 3초 타임아웃 초과 0/112. 수정 라운드에서 락 안 재읽기의 읽기 오류(EBUSY 등)를 "파일 없음"으로 처리해 덮어쓰고도 성공을 보고하던 기존 결함도 막았다 — ENOENT·JSON 파싱 실패만 교체하고, 그 밖의 읽기 오류는 쓰지 않고 `false`/`persisted:false`. 전역 `resetKillSwitch()` 도 락 아래로 옮겼다.
 - **훅 견고성·보안(M1 · L1 · L3 · L4).** `auto-command-suggest.js` 가 입력을 앞 2048자 + 뒤 2048자로 자르고 `\S{2,64}` 를 쓴다 — `'와'×4096` 이 46,142ms → 97ms(교차검수자 측정), 정상 프롬프트 159개 분류 결과 동일. `permission-auto-approve.js#entryCoversTool` 은 commandPattern 없는 와일드카드 항목으로 셸 도구(Bash·PowerShell)를 자동승인하지 않는다(`withheld: 'wildcard-shell'`). 자식 stdin 에 `'error'` 핸들러를 달아, 자식이 먼저 죽을 때 `write EOF` 로 디스패처 전체가 죽던 경로를 닫았다(`_dispatcher-utils.js#spawnHook`, 수정 라운드에서 같은 패턴인 `_userprompt-dispatcher.js#runGitAutopilotSave` 까지). long-context 라벨은 호스트가 실제로 적용했을 때(`hostApplied === true`)만 "on" 이고, statusline 도 boolean `true` 만 인정한다.
 - **코어 I/O·레이어(M4 · M7 · L2 · L7 · L8).** `scripts/utils/index.js#atomicWriteSync` 는 throw 대신 boolean 을 돌려주고, 반환값을 무시하던 `git-autopilot-setup.js`·`generate-agent-index.js` 는 이제 실패를 실패로 보고한다. lib→scripts 정적 import 는 `eslint.config.js#LIB_SCRIPTS_BOUNDARY` 로 L1~L5 전 블록에서 막힌다(예외는 `scripts/hooks/_main-entry.js` 하나, 경로 구분자 `/`·`\` 둘 다). 현재 lib 의 해당 import 는 2건이고 둘 다 예외다. `toFileUrl` 이 `%`·`#`·`?` 를 인코딩하고, 커맨드 문서의 인라인 사본 7곳을 정본과 맞췄다(`tests/commands/to-file-url-parity.test.js`). `lib/core/token-estimate.js` 를 리프로 분리했다(공개 export 125개 동일).
-- **설정·경로(M5 · M6 · M8 · M11 · L6 · L9 · L20).** 오토파일럿 산출물(PRD·보고서)이 플러그인 캐시 안에 쓰이던 것을 프로젝트 루트로 고정했다(`lib/autopilot/engine.js#pinProjectRoot` — 이 세션의 PRD 가 `~/.claude/plugins/cache/artibot/docs/PRD/` 에 생긴 것이 이 결함이다). 수정 라운드에서 이 변경이 만든 회귀 — preflight 가 하위 디렉터리에서 시작한 같은 트리의 동시 세션을 "다른 worktree" 로 보고 통과시키던 fail-open — 를 `lib/autopilot/preflight.js#projectTreeKey` 정규화로 닫았고, projectRoot 가 없는 기존 세션은 resume/abort 때 `lockScope.cwd` 로 채운다(`#backfillProjectRoot`). `config.js` 의 `team.enabled` 기본값이 `isTeamEnabled` 와 같아졌고, `pattern-packager.js` 는 `__proto__`·`constructor`·`prototype` 키를 거른다.
+- **설정·경로(M5 · M6 · M8 · M11 · L6 · L9 · L20).** 오토파일럿 산출물(PRD·보고서)이 플러그인 캐시 안에 쓰이던 것을 프로젝트 루트로 고정했다(`lib/autopilot/project-root-pin.js#pinProjectRoot` — 이 세션의 PRD 가 `~/.claude/plugins/cache/artibot/docs/PRD/` 에 생긴 것이 이 결함이다). 수정 라운드에서 이 변경이 만든 회귀 — preflight 가 하위 디렉터리에서 시작한 같은 트리의 동시 세션을 "다른 worktree" 로 보고 통과시키던 fail-open — 를 `lib/autopilot/preflight.js#projectTreeKey` 정규화로 닫았고, projectRoot 가 없는 기존 세션은 resume/abort 때 `lockScope.cwd` 로 채운다(`lib/autopilot/project-root-pin.js#backfillProjectRoot`). `config.js` 의 `team.enabled` 기본값이 `isTeamEnabled` 와 같아졌고, `pattern-packager.js` 는 `__proto__`·`constructor`·`prototype` 키를 거른다.
 - **릴리스·CI·문서(M10 · L11~L16).** lifecycle 커맨드 6개가 플러그인 루트를 폴백 체인으로 찾는다. `release-check.js` 는 버전이 없으면 오류를 내고(같은 label 에 중복 출력 없음), readme-claims 가 `81+` 형태도 센다. `output-styles/tokens.md` 를 `docs/design-tokens.md` 로 옮겼다(출력 스타일 7개). 수정 라운드에서 rea.md 의 finder 블록 6줄을 정확한 문자열로 허용 목록에 넣어 `tests/vendor/rea-vendor.test.js` RED 3건을 풀었다(사전 승인 범위는 그대로).
 - **크기 ratchet 게이트(M9, 신규).** `tests/firewall/size-ratchet.test.js` 가 ESLint API 로 lib/·scripts/·bin/·server/ 의 800줄 초과 파일과 50줄 초과 함수(주석·빈 줄 제외)를 기준선 `tests/firewall/fixtures/size-ratchet-baseline.json`(2026-11-21 실측: 622파일 중 17 · 함수 159)과 대조한다. 새 위반·증가·기준선 부재·eslint 로드 실패는 RED, 감소는 GREEN(+ `SIZE_RATCHET_UPDATE=tighten` 안내). 못 보는 것(테스트 파일, 한도 아래 증가, 분할로 피하기 등)은 테스트 헤더에 적었다.
 - 로컬 `npm run ci`(리더, 2026-11-21 22:58~23:02, 커밋 전): 테스트 28,368건 중 28,315 통과 · 52 skip · 1 실패. 실패 1건은 doctor.md Self-Heal 절을 HEAD 와 바이트 비교하는 `doctor-checks-8-9` 로, 커밋 전에는 실패하도록 되어 있는 테스트다. 이번 범위 밖이라 보고만 남긴 것: 목록 밖 도구에 대한 와일드카드 승인 의미, learning 잔여 4건(beforeExit catch 등), `atomicWriteSync` 반환값을 무시하는 호출부 4곳.

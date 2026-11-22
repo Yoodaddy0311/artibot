@@ -1,6 +1,6 @@
 # Artibot
 
-[![Version](https://img.shields.io/badge/version-4.71.16-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.71.17-blue?style=flat-square)](plugins/artibot/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square)](package.json)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](plugins/artibot/tests/)
@@ -15,7 +15,7 @@ This repository ships **two complementary plugins** under one marketplace:
 
 | Plugin | Target | Version | Best for |
 |---|---|---|---|
-| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.16** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
+| [`artibot`](./plugins/artibot/) | Claude Code (developer CLI) | **4.71.17** | full Agent Teams orchestration, TDD, code review, security audits, RLVR learning, MCP server, **Goal-driven autopilot**, **`/learning` diagnostics**, **`/save` + `/resume` single-shot handoff**, **`/go` → `/orchestrate` build-sequence hand-off**, **ambient conversation ledger (no-command capture)**, **safety boost (machineId frontmatter, git-lock fail, 10m throttle)** |
 | [`artibot-cowork`](./plugins/artibot-cowork/) | Claude Cowork (knowledge workers) | **3.1.0** | marketing campaigns, long-form writing, AEO/GEO content, KR-market SEO, AI-slop detection, **Claude Design, Routines, Ultraplan, Monitor** |
 
 Both plugins share the same DEV protocol, Korean market expertise, data-sovereignty policy, and 6-stage content quality pipeline. They differ only in **target environment** and **skill mix**.
@@ -920,7 +920,7 @@ Key settings in `artibot.config.json`:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `version` | Plugin version | `4.71.16` |
+| `version` | Plugin version | `4.71.17` |
 | `cognitive.router.threshold` | System 1/2 boundary | `0.4` |
 | `cognitive.router.adaptRate` | Per-feedback adjustment step | `0.05` |
 | `permissions.autoApprove` | PermissionRequest allowlist (`{tool, commandPattern}`) — distinct from the `settings.json` permission allowlist. A Bash/PowerShell call is covered only by an entry that names the tool (`{tool:"Bash"}`) or carries a `commandPattern` — a wildcard (`{tool:"*"}` or no `tool`) without a pattern never auto-approves a shell call (withheld as `wildcard-shell`, normal prompt). A covered shell command still passes the PreToolUse danger judges (`guard-registry` + `classifyRisk`); destructive or unjudgeable commands are never auto-approved (they fall back to the normal prompt) | `[]` |
@@ -1054,6 +1054,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide on adding skills, agen
 You can install **both** in the same Anthropic account — `artibot` runs in your Claude Code terminal sessions, `artibot-cowork` runs in your Cowork chat. They never interfere because they target different runtimes.
 
 ## Version
+
+**4.71.17** (2026-11-22) — The kill switch now fails closed, every trip actually stops work, and nothing writes runtime state into the plugin cache: 14 commits, 175 files +10,965/−854 since v4.71.16 (`git diff --shortstat v4.71.16 de6387ec`; the release commit is not in these numbers). **Kill switch**: a state file that cannot be read now counts as tripped (EBUSY used to read as "not tripped"). Three paths left a trip with no effect, and each one now takes effect: a failed master-disable write is retried; a reset that races a trip no longer leaves the master on (reproduced 3/3); a manual re-enable re-arms the switch. The session-start banner claims a pause only when the real gate blocks, names per-feature trips (these used to stop a feature silently and permanently), and points at real recovery steps instead of a command that does not exist. **Runtime state**: the skill-discovery day gate, the WebFetch cache and pre-compact state no longer land in `~/.claude/plugins/cache/artibot/runtime/`; they now live in `~/.claude/artibot/runtime/` (pre-compact state per session). **Honesty**: four scripts that reported failed writes as success now fail. The WebFetch skill no longer claims 304 revalidation (the hooks make no HTTP request). The cache cap is 262,144 bytes (Korean text used to store 768 KiB). **Also**: the 11-21 review backlog (28 fixes), `/theme` settings protection, autopilot preflight L1–L4, and `engine.js` split (1123 → 1012 lines). Local tests: 28,477 passed / 52 skipped of 28,529 (Windows, before commit). Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
 **4.71.16** (2026-11-08) — A CI tool that could not run is gone, and a docs gate that had gone slack is tight again: 2 commits, 12 files +124/−659 since v4.71.15 (`git diff --shortstat v4.71.15 51bed492`; the release commit is not in these numbers). **Removed**: `scripts/ci/triage-wiring-gaps.mjs` and its 16 tests — its input is gitignored and no generator ships, so every run ended in `audit input not found` (owner decision; README CI-script count 20 → 19). **Gate**: the root-tree docs floor (`MIN_ROOT_TREE_DOC_FILES`) is re-pinned from 109 to the measured 124. It had drifted 14 below the real count, so the self-check that drops the ADR tree and expects a failure was one file from passing vacuously — one new design document tipped it, and CI went red on all four legs before the fix. Now losing a single canon document fails. **Recorded**: the owner's eight 07 §B decisions, an API-free pilot of the cost table on an isolated projects directory (one receipt, $0.00988), and a `disable-model-invocation` proposal that changes nothing yet. Tests 28,049 → 28,033 (Ubuntu ×3; Windows 28,056) — the 16 removed tests. Details in [`plugins/artibot/CHANGELOG.md`](plugins/artibot/CHANGELOG.md).
 
