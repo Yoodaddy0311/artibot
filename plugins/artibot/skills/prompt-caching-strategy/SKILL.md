@@ -28,7 +28,7 @@ category: "optimization"
 risk: safe
 version: "1.0.0"
 lastVerified: "2026-04-01"
-source_hash: eecf587c
+source_hash: a46dd7f6
 whenNotToUse: "Platforms that do not support prompt caching (e.g., non-Anthropic APIs) or single-turn tasks where prompt structure changes every request and no static prefix exists to cache."
 ---
 
@@ -106,7 +106,7 @@ system-reminder 태그 내:
 
 ## Quality Gates                          ← 핵심 제약 조건
 - Read before write
-- Functions < 50 lines, files < 800 lines
+- Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines
 - 80%+ test coverage
 
 ## Agent Delegation                       ← 위임 규칙

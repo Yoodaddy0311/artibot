@@ -27,7 +27,7 @@ paths:
 
 ## Code Standards
 - Immutable patterns: create new objects, never mutate
-- Functions < 50 lines, files < 800 lines
+- Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines
 - Proper error handling on all async operations
 - No hardcoded secrets or credentials
 - Follow existing project import style

@@ -21,8 +21,10 @@
  *  1. A real Windows sharing violation. The injected error is EIO, which neither writer
  *     retries; an EPERM/EBUSY that clears inside the retry budget is a success and is
  *     covered by tests/core/file-atomic-write-retry.test.js, not here.
- *  2. Callers other than the three named above. `saveState`, team-idle-handler and
- *     inject-source-hash ignore the return value today; nothing here pins that they should.
+ *  2. Callers other than the three named above. `_team-state.js#saveState` and
+ *     team-idle-handler still ignore the return value; nothing here pins that they should.
+ *     inject-source-hash, migrate-command-toolsets and swarm-init check it since 2026-11-22 —
+ *     pinned in tests/scripts/<name>.test.js, not here.
  *  3. Whether a hook that receives `false` does anything useful with it.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

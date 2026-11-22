@@ -524,7 +524,7 @@ describe('CursorAdapter', () => {
     it('includes coding standards section', () => {
       const manifest = adapter.generateManifest();
       expect(manifest.content).toContain('## Coding Standards');
-      expect(manifest.content).toContain('Functions < 50 lines');
+      expect(manifest.content).toContain('Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines');
     });
 
     it('includes project structure section', () => {

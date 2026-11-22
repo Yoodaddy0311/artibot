@@ -878,7 +878,7 @@ seed_project_claude_md() {
 
 ### Quality Gates
 - Read before write (no blind modifications)
-- Functions < 50 lines, files < 800 lines
+- Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines
 - Immutable patterns (create new objects, never mutate)
 - 80%+ test coverage target
 ARTIBOT_SECTION
@@ -908,7 +908,7 @@ ARTIBOT_SECTION
 
 ### Quality Gates
 - Read before write (no blind modifications)
-- Functions < 50 lines, files < 800 lines
+- Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines
 - Immutable patterns (create new objects, never mutate)
 - 80%+ test coverage target
 PROJECT_CLAUDE
@@ -988,7 +988,7 @@ render_memory_seed() {
 - **Agents**: ${mem_agent_count} specialized agents — use \`Agent()\` to delegate
 - **Commands**: \`/sc\` routes to optimal command/agent/skill automatically
 - **DEV Protocol**: Decompose → Execute → Verify (mandatory for all code changes)
-- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
+- **Quality**: 80%+ test coverage, immutable patterns, functions ≤ 50 lines
 
 ## Workflow Tips
 - Complex features: start with \`/sc plan [feature]\` or use planner agent

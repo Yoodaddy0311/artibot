@@ -117,7 +117,7 @@ export class CursorAdapter extends BaseAdapter {
       '- Test-driven development with 80%+ coverage',
       '',
       '## Coding Standards',
-      '- Functions < 50 lines, files < 800 lines',
+      '- Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines',
       '- No deep nesting (> 4 levels)',
       '- Proper error handling on all operations',
       '- Input validation on all external data',

@@ -317,7 +317,7 @@ Detailed planning lives in `_reports/horizon-2-3-roadmap.md` (kept in `_reports/
 
 1. Fork, branch from `master`.
 2. Follow DEV Protocol: **Decompose → Execute (read before write) → Verify (re-read after change)**.
-3. Quality gates: functions < 50 lines, files < 800 lines, immutable patterns, 80%+ coverage target.
+3. Quality gates: functions ≤ 50 lines (comments and blank lines not counted) and files ≤ 800 lines (`tests/firewall/size-ratchet.test.js` fails new or grown violations), immutable patterns, 80%+ coverage target.
 4. Run before PR:
    ```bash
    npm run ci           # validate + skill:check + lint + test + eval:runtime

@@ -17,7 +17,7 @@
  *   - Only filesystem touch is read-only existence checks under the plugin root.
  *   - Never throws: malformed input yields safe empty results / nulls.
  *   - Immutable: returned objects are deep-frozen.
- *   - Functions < 50 lines, file < 800 lines.
+ *   - Functions ≤ 50 lines (comments and blank lines not counted), file ≤ 800 lines.
  *
  * @module lib/core/preset-packs
  */

@@ -103,7 +103,7 @@ v5 헌법 14원칙(`.artibot/guides/v5-design/package/01_PHILOSOPHY_CONSTITUTION
 - **단일 진실원(사람 게이트)** — `p/lib/security/human-gates.js#HUMAN_GATE_MATRIX`. 이 문서의 Human Approval Boundaries 는 그 표의 **선언 사본**이며, 파이어월이 양쪽을 대조한다.
 - **게이트는 vitest 로만** — 스크립트형 게이트 금지(자기 기준선을 파괴하며 통과한 선례가 있다). 게이트 파일이 없으면 red = fail-closed.
 - **읽기 후 쓰기** — 대상 파일을 읽지 않고 수정하지 않는다.
-- **함수 < 50줄 · 파일 < 800줄 · 불변 패턴**(spread/신규 생성, 변형 금지).
+- **함수 ≤ 50줄(주석·빈 줄 제외) · 파일 ≤ 800줄 · 불변 패턴**(spread/신규 생성, 변형 금지). 신규·증가 위반은 `p/tests/firewall/size-ratchet.test.js` 가 잡는다.
 
 요약 이전원: `plugins/artibot/CLAUDE.md:11-21, 79-82`.
 

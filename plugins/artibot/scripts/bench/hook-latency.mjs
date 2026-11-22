@@ -154,6 +154,7 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { guardChildStdin } from '../hooks/_dispatcher-utils.js';
 import { isMainEntry } from '../hooks/_main-entry.js';
 import { loadDispatchTable } from '../../lib/dispatcher/dispatch-table-loader.js';
 
@@ -815,15 +816,14 @@ export async function runOnce(slotName, sandbox, opts = {}) {
     };
 
     child.on('error', () => { finish(); });
-    child.on('exit', (code) => {
-      exitMs = performance.now() - started;
-      exitCode = code;
-    });
+    child.on('exit', (code) => { exitMs = performance.now() - started; exitCode = code; });
     child.on('close', () => { finish(); });
 
     if (child.stdout) child.stdout.on('data', (chunk) => { stdoutBytes += chunk.length; });
     if (child.stderr) child.stderr.on('data', (chunk) => { stderrText += chunk.toString('utf-8'); });
 
+    // A child that exits unread fails the write ASYNC (EPIPE / `write EOF`); the catch cannot see it.
+    guardChildStdin(child, 'hook-latency', slotName);
     try {
       child.stdin.end(JSON.stringify(payload));
     } catch { /* exit/close handlers still settle the promise */ }

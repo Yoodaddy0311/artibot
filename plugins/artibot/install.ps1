@@ -1015,7 +1015,7 @@ $script:ArtibotSection = @'
 
 ### Quality Gates
 - Read before write (no blind modifications)
-- Functions < 50 lines, files < 800 lines
+- Functions <= 50 lines (comments and blank lines not counted), files <= 800 lines
 - Immutable patterns (create new objects, never mutate)
 - 80%+ test coverage target
 '@
@@ -1128,7 +1128,7 @@ function Get-MemorySeed {
 - **Agents**: $agentCount specialized agents - use ``Agent()`` to delegate
 - **Commands**: ``/sc`` routes to optimal command/agent/skill automatically
 - **DEV Protocol**: Decompose -> Execute -> Verify (mandatory for all code changes)
-- **Quality**: 80%+ test coverage, immutable patterns, functions < 50 lines
+- **Quality**: 80%+ test coverage, immutable patterns, functions <= 50 lines
 
 ## Workflow Tips
 - Complex features: start with ``/sc plan [feature]`` or use planner agent

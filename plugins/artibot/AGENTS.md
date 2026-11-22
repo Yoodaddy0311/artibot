@@ -41,7 +41,7 @@ Run these from `plugins/artibot/`.
 ### Quality gates
 
 - Read before write (no blind modifications)
-- Functions < 50 lines, files < 800 lines
+- Functions ≤ 50 lines (comments and blank lines not counted), files ≤ 800 lines — `tests/firewall/size-ratchet.test.js` fails new or grown violations in lib/ scripts/ bin/ server/
 - Immutable patterns (spread/create new, never mutate)
 - No hardcoded secrets or credentials (use env vars / `${ENV_VAR}` placeholders)
 - Coverage CI gate (`scripts/ci/validate-coverage.js`): Statements 85 / Branches 76 / Functions 85 / Lines 85 (the `vitest.config.js` local gate is 80/76/80/80)

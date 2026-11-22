@@ -36,7 +36,7 @@ Parse $ARGUMENTS:
 |----------|--------|
 | Security | Injection, secrets, auth, input validation, XSS, CSRF |
 | Correctness | Logic errors, edge cases, null checks, error handling |
-| Quality | Complexity, duplication, naming, file size (<800 lines) |
+| Quality | Complexity, duplication, naming, file size (≤ 800 lines) |
 | Performance | O(n^2+) algorithms, memory leaks, unnecessary re-renders |
 | Patterns | Immutability, SOLID violations, framework conventions |
 | Tests | Coverage gaps, missing edge case tests, test isolation |

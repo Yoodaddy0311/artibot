@@ -23,7 +23,7 @@
  *   - Pure lookup logic, no side effects, no console output
  *   - Never throws: returns a safe null/1.0/[] on any bad input
  *   - Immutable: every exported object is deep-frozen
- *   - Functions < 50 lines, file < 800 lines
+ *   - Functions ≤ 50 lines (comments and blank lines not counted), file ≤ 800 lines
  *
  * @module lib/core/model-catalog
  */

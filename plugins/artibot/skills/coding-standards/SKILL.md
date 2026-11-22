@@ -35,7 +35,7 @@ tokens: "~3K"
 category: "code-quality"
 version: "1.0.0"
 lastVerified: "2026-06-08"
-source_hash: 1485b174
+source_hash: f8dcb26c
 whenNotToUse: "Do not apply Artibot-specific coding standards to code in vendor directories, generated files, or repositories you do not own. Do not enforce the 50-line function limit on data-heavy configuration objects or lookup tables where density is intentional."
 ---
 
@@ -84,7 +84,7 @@ See `${CLAUDE_SKILL_DIR}/references/file-organization.md` for rules.
 - Files: kebab-case for modules, PascalCase for components
 
 ### Code Quality Checklist
-- [ ] Functions <50 lines, files <800 lines
+- [ ] Functions ≤50 lines (comments and blank lines not counted), files ≤800 lines
 - [ ] Minimum code only: generate exactly what the request requires. No unrequested abstractions, helper utilities, or extra options (YAGNI).
 - [ ] No deep nesting (>4 levels)
 - [ ] Proper error handling on all operations
@@ -102,9 +102,9 @@ Progress:
 - [ ] Step 1: Read existing code and identify patterns in use
 - [ ] Step 2: Apply immutability — no mutations, spread/create new
 - [ ] Step 3: Validate error handling — fail fast, explicit, contextual
-- [ ] Step 4: Check file organization — <800 lines, feature-grouped
+- [ ] Step 4: Check file organization — ≤800 lines, feature-grouped
 - [ ] Step 5: Enforce naming conventions — verbs, prefixes, casing
-- [ ] Step 6: Run code quality checklist (functions <50 lines, no console.log)
+- [ ] Step 6: Run code quality checklist (functions ≤50 lines, no console.log)
 - [ ] Step 7: Validate input on all external data boundaries
 ```
 
@@ -160,8 +160,8 @@ Progress:
 
 | Rule | Limit | Action on Violation |
 |------|-------|---------------------|
-| Function length | <50 lines | Extract helper functions |
-| File length | <800 lines | Split by responsibility |
+| Function length | ≤50 lines (comments and blank lines not counted) | Extract helper functions |
+| File length | ≤800 lines | Split by responsibility |
 | Nesting depth | <4 levels | Early returns, extract methods |
 | Mutation | 0 allowed | Spread/map/filter/reduce |
 
