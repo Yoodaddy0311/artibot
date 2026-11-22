@@ -1,7 +1,7 @@
 /**
  * Preflight tree comparison after M11 (2026-11-21).
  *
- * `engine.js#pinProjectRoot` made every new lock holder record the PROJECT
+ * `project-root-pin.js#pinProjectRoot` made every new lock holder record the PROJECT
  * ROOT as its `cwd` (`resolveLockScope` reads `options.projectRoot`), while the
  * command driver still hands preflight the raw shell cwd
  * (`commands/autopilot.md` Step 1.5: `runPreflight({ cwd: process.cwd(), … })`).
@@ -21,13 +21,14 @@
  * @module tests/autopilot/preflight-project-root
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { runIndividualCheck } from '../../lib/autopilot/preflight.js';
+import { resolveProjectRoot as realResolveProjectRoot } from '../../lib/git/project-root.js';
 
 let tmp;
 let repo;
@@ -118,6 +119,64 @@ describe('peerNotice — "this repo" is the project root, not the shell cwd', ()
     // `tmp` is an ANCESTOR of the repo — overlap counts it, as before.
     expect(r.detail).toMatch(/^2 peer session\(s\) in this repo: sibling, elsewhere$/);
   });
+
+  it('counts a peer at the filesystem root — an ancestor like any other', () => {
+    // A root key already ends in a separator; appending another one made the
+    // containment test `c:\\` and missed every path beneath it.
+    const r = runIndividualCheck(
+      'peerNotice',
+      { cwd: path.join(repo, 'plugins', 'artibot'), featureKey: 'task-a' },
+      { listAgents: () => [{ name: 'at-root', cwd: path.parse(repo).root }] },
+    );
+    expect(r.detail).toBe('1 peer session(s) in this repo: at-root');
+  });
+
+  it('does not count a sibling whose name merely starts with the project folder name, either way round', () => {
+    // Containment is by path SEGMENT: `…\내 리포2` is not inside `…\내 리포`, and
+    // `…\내 리` does not contain it. A bare string prefix said both were.
+    const longer = path.join(tmp, '내 리포2');
+    const shorter = path.join(tmp, '내 리');
+    mkdirSync(path.join(longer, 'src'), { recursive: true });
+    mkdirSync(shorter, { recursive: true });
+    const r = runIndividualCheck(
+      'peerNotice',
+      { cwd: path.join(repo, 'plugins', 'artibot'), featureKey: 'task-a' },
+      { listAgents: () => [{ name: 'longer', cwd: path.join(longer, 'src') }, { name: 'shorter', cwd: shorter }] },
+    );
+    expect(r.detail).toBe('0 peer session(s) in this repo');
+  });
+
+  it('counts a peer whose cwd no longer exists below a link to the checkout', () => {
+    // realpath fails on the deleted tail, so the link spelling was kept and the
+    // peer never matched the canonical project root. The nearest EXISTING
+    // ancestor is canonicalized instead. A directory junction on win32 (no
+    // admin needed), a plain symlink elsewhere.
+    const linkDir = mkdtempSync(path.join(tmp, 'link-'));
+    const alias = path.join(linkDir, 'alias');
+    symlinkSync(repo, alias, 'junction');
+    expect(existsSync(path.join(alias, 'docs'))).toBe(true); // the link really resolves
+    const gone = path.join(alias, 'gone', 'deleted-subdir');
+    expect(existsSync(gone)).toBe(false);
+    const r = runIndividualCheck(
+      'peerNotice',
+      { cwd: path.join(repo, 'plugins', 'artibot'), featureKey: 'task-a' },
+      { listAgents: () => [{ name: 'gone', cwd: gone }] },
+    );
+    expect(r.detail).toBe('1 peer session(s) in this repo: gone');
+  });
+
+  it('resolves the own project root once per check, not once per row', () => {
+    const resolveProjectRoot = vi.fn((p) => realResolveProjectRoot(p));
+    const rows = ['docs', 'plugins', 'missing', 'plugins/artibot/lib', 'docs']
+      .map((rel, i) => ({ name: `p${i}`, cwd: path.join(repo, rel) }));
+    const r = runIndividualCheck(
+      'peerNotice',
+      { cwd: path.join(repo, 'plugins', 'artibot'), featureKey: 'task-a' },
+      { listAgents: () => rows, resolveProjectRoot },
+    );
+    expect(r.detail).toBe('5 peer session(s) in this repo: p0, p1, p2, p3, p4'); // denominator
+    expect(resolveProjectRoot).toHaveBeenCalledTimes(1);
+  });
 });
 
 /**
@@ -132,12 +191,18 @@ describe('peerNotice — "this repo" is the project root, not the shell cwd', ()
  * Korean segment below it.
  */
 describe.runIf(process.platform === 'win32')('8.3 short-name spellings (win32)', () => {
-  /** `tmp` in 8.3 form, or null when the volume has short names disabled. */
+  /**
+   * `tmp` in 8.3 form, or null when there is no usable one: short names are
+   * disabled on the volume, or cmd's echo came back in the OEM codepage and
+   * decoded into a path that does not exist (a non-ASCII segment ABOVE `tmp`,
+   * e.g. a Korean TEMP). A mangled spelling must skip, not run the cases.
+   */
   function shortTmp() {
     const out = execFileSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${tmp}") do @echo %~sI"`], {
       encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true,
     }).trim();
-    return out && out.toLowerCase() !== tmp.toLowerCase() ? out : null;
+    if (!out || out.toLowerCase() === tmp.toLowerCase() || !existsSync(out)) return null;
+    return out;
   }
 
   it('peerNotice counts short-spelled peers against a long-spelled project root', (ctx) => {
@@ -150,6 +215,19 @@ describe.runIf(process.platform === 'win32')('8.3 short-name spellings (win32)',
       { listAgents: () => [{ name: 'sibling', cwd: path.join(sRepo, 'docs') }, { name: 'elsewhere', cwd: short }] },
     );
     expect(r.detail).toMatch(/^2 peer session\(s\) in this repo: sibling, elsewhere$/);
+  });
+
+  it('peerNotice counts a peer whose short-spelled cwd no longer exists', (ctx) => {
+    const short = shortTmp();
+    if (!short) ctx.skip();
+    const gone = path.join(short, '내 리포', 'gone', 'deleted-subdir');
+    expect(existsSync(gone)).toBe(false);
+    const r = runIndividualCheck(
+      'peerNotice',
+      { cwd: path.join(repo, 'plugins', 'artibot'), featureKey: 'task-a' },
+      { listAgents: () => [{ name: 'gone', cwd: gone }] },
+    );
+    expect(r.detail).toBe('1 peer session(s) in this repo: gone');
   });
 
   it('repoConcurrency fails for a holder whose short-spelled cwd no longer exists', (ctx) => {

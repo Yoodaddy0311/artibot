@@ -53,7 +53,7 @@
       "id": "autopilot-driver",
       "description": "autopilot engine Phase 3 CROSS_CHECK driver instruction vocabulary (state.crossCheck.verdict)",
       "file": "plugins/artibot/lib/autopilot/engine.js",
-      "cited_line": 440,
+      "cited_line": 439,
       "vocabulary": ["pass", "warn", "fail"]
     }
   ],

@@ -2,7 +2,7 @@
  * `options.projectRoot` validation at start and back-fill on resume/abort
  * (Phase 3 cross-check follow-up F3, 2026-11-21).
  *
- * START: `engine.js#pinProjectRoot` used to keep any non-empty caller string
+ * START: `project-root-pin.js#pinProjectRoot` (then in `engine.js`) used to keep any non-empty caller string
  * verbatim. A relative `.` names wherever the NEXT process happens to stand; an
  * MSYS spelling `/c/Users/…` is "absolute" to win32 `path.isAbsolute` but
  * resolves to `C:\c\Users\…`. Both are now replaced by the project resolved

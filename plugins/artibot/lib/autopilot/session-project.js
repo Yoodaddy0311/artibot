@@ -21,13 +21,13 @@
  * caller omitted `projectRoot`, so it says where the PRD landed, not whose it is.
  *
  * SINCE 2026-11-21 (M11): `engine.js#startAutopilot` pins `options.projectRoot`
- * (`engine.js#pinProjectRoot` — the user's project resolved from the process
+ * (`project-root-pin.js#pinProjectRoot` — the user's project resolved from the process
  * cwd by `lib/git/project-root.js#resolveProjectRoot`) when the caller left it
  * empty, and both generators fall back to that same resolution instead of the
  * plugin tree. So a session STARTED after that change carries
  * `options.projectRoot`, and `recordedProject` reads it alongside
  * `lockScope.cwd`. A session stored before it carries none until it is next
- * resumed or aborted: `engine.js#backfillProjectRoot` then fills
+ * resumed or aborted: `project-root-pin.js#backfillProjectRoot` then fills
  * `options.projectRoot` from `resolveProjectRoot(lockScope.cwd)` (the same
  * repository, at or above the recorded `lockScope.cwd`) and the next persist
  * records it. A pre-pin session never resumed since, or one with no

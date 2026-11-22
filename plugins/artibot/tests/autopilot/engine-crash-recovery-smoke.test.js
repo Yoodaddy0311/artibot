@@ -55,13 +55,14 @@ const created = new Set();
 // Artifact root for the children. `startAutopilot` runs the real
 // `generatePRD`, whose `projectRoot` falls back to the resolved project root
 // (`lib/autopilot/prd-generator.js:220`) — so without this every run wrote three
-// real files into the developer's `docs/PRD/`. `engine.js:135` forwards
-// `state.options.projectRoot` to the generator (and `:561`/`:955` forward the
-// same value to `generateReport`), so pointing it at a tmpdir keeps the whole
-// artifact side of the engine out of the repo.
+// real files into the developer's `docs/PRD/`. `engine.js#runPhase0Intake`
+// forwards `state.options.projectRoot` to the generator (and
+// `#runPhase6Report`/`#abortAutopilot` forward the same value to
+// `generateReport`), so pointing it at a tmpdir keeps the whole artifact side
+// of the engine out of the repo.
 //
 // It is not artifact-only, though: `resolveLockScope` takes the same value as
-// its cwd (`engine.js:618`), and a tmpdir is not a git repo — so the feature
+// its cwd (`engine.js#resolveLockScope`), and a tmpdir is not a git repo — so the feature
 // lock resolves to no repo identity, falls back to its legacy unscoped key, and
 // emits one extra `lock-scope-unresolved` event (measured: 4 events with the
 // tmpdir root vs 3 with the real one). Harmless here, but do not read

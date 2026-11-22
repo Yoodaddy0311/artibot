@@ -7,7 +7,7 @@
  * via `#generatePRD`, `lib/autopilot/report-generator.js#getProjectRoot` via
  * `#generateReport`), and `lib/autopilot/engine.js#startAutopilot` now pins
  * `options.projectRoot` from the same resolution when it is empty
- * (`#pinProjectRoot`, M11 2026-11-21). Since M11 that root is the user's project
+ * (`lib/autopilot/project-root-pin.js#pinProjectRoot`, M11 2026-11-21). Since M11 that root is the user's project
  * resolved from the process cwd (`lib/git/project-root.js#resolveProjectRoot`)
  * instead of `<pluginRoot>/../..` — and for a test run, whose cwd sits inside
  * this checkout, both answers are this repository. So a test that runs the

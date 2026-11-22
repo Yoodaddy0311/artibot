@@ -248,31 +248,62 @@ function checkGoalContractLint(ctx) {
 }
 
 /**
- * Normalise a path for same-tree comparison: canonical spelling
+ * Canonical spelling of an absolute, resolved path: `realpathSync.native` of
+ * the path itself or, when it is not on disk, of its NEAREST EXISTING ANCESTOR
+ * with the missing tail re-appended as written.
+ *
+ * A peer's cwd is often a directory that is already gone (a removed worktree, a
+ * finished temp run). Falling back to the whole resolved spelling kept a short
+ * `C:\Users\RUNNER~1\…` (or a symlinked) prefix that the existing part of the
+ * path could have expanded, so `peerNotice` never counted it. What this cannot
+ * fix: a short-spelled segment that is itself gone stays as written — its long
+ * name went with it.
+ *
+ * It changes no `repoConcurrency` verdict. A holder cwd goes through
+ * `resolveProjectRoot` first, which answers with an EXISTING root whenever an
+ * ancestor has `.git` or a weak marker; what is left (nothing on disk) is
+ * compared for EQUALITY with the asker's existing tree, which no spelling of a
+ * missing path can equal.
+ * @param {string} resolved
+ * @returns {string}
+ */
+function canonicalSpelling(resolved) {
+  const tail = [];
+  let dir = resolved;
+  for (;;) {
+    try { return path.join(realpathSync.native(dir), ...tail); } catch { /* not on disk — climb */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) return resolved;
+    tail.unshift(path.basename(dir));
+    dir = parent;
+  }
+}
+
+/**
+ * Normalise a path for same-tree comparison: {@link canonicalSpelling}
  * (`realpathSync.native` expands Windows 8.3 short names and symlinks), then
  * case-folded on Windows; `null` when the input is not a usable string.
  *
  * Canonical, not just resolved: `projectTreeKey` goes through
- * `resolveProjectRoot`, which returns the LONG spelling, so a side compared as
- * resolved-only keeps a short `C:\Users\RUNNER~1\…` and never matches.
- * Measured 2026-11-21 on the GitHub Windows runner (os.tmpdir() is
- * `C:\Users\RUNNER~1\AppData\Local\Temp`): `peerNotice` counted 0 of 2 peers.
- * Same fix shape as `worktree-manager.js#canonicalPath`. A path that does not
- * exist falls back to its resolved spelling.
+ * `resolveProjectRoot`, which answers in the LONG spelling whenever its start
+ * exists, so a side compared as resolved-only keeps a short
+ * `C:\Users\RUNNER~1\…` and never matches. Measured 2026-11-21 on the GitHub
+ * Windows runner (os.tmpdir() is `C:\Users\RUNNER~1\AppData\Local\Temp`):
+ * `peerNotice` counted 0 of 2 peers. Same fix shape as
+ * `worktree-manager.js#canonicalPath`.
  * @param {unknown} p
  * @returns {string|null}
  */
 function treeKey(p) {
   if (typeof p !== 'string' || !p) return null;
-  let resolved = path.resolve(p);
-  try { resolved = realpathSync.native(resolved); } catch { /* not on disk — compare as resolved */ }
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  const canonical = canonicalSpelling(path.resolve(p));
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
 }
 
 /**
  * Same-tree key for a directory: its PROJECT ROOT, then {@link treeKey}.
  *
- * Load-bearing since M11 (2026-11-21): `engine.js#pinProjectRoot` makes every
+ * Load-bearing since M11 (2026-11-21): `project-root-pin.js#pinProjectRoot` makes every
  * new lock holder record the project root as `cwd`, while the command driver
  * passes preflight the raw shell cwd (`commands/autopilot.md` Step 1.5). A raw
  * compare then called one checkout two trees whenever the shell sat in a
@@ -371,22 +402,35 @@ function checkRepoConcurrency(ctx, deps) {
 }
 
 /**
- * Does `peerCwd` overlap this project — same dir, or one inside the other?
- * The OWN side is widened to its project root ("this repo", per the module
- * header), so a peer in a sibling subdirectory of the same checkout counts; a
- * raw shell cwd missed it. The peer side stays raw: where the peer sits is the
- * question, not which project it would resolve to.
- * @param {unknown} peerCwd
- * @param {unknown} ownCwd
- * @param {object} [deps]
+ * True when tree key `child` is `parent` or lies beneath it. A filesystem-root
+ * key (`c:\`, `/`) already ends in a separator; appending another one made the
+ * prefix `c:\\` and the root contained nothing.
+ * @param {string} parent
+ * @param {string} child
  * @returns {boolean}
  */
-function cwdOverlaps(peerCwd, ownCwd, deps = {}) {
-  const a = treeKey(peerCwd);
-  const b = projectTreeKey(ownCwd, deps);
-  if (a === null || b === null) return false;
-  if (a === b) return true;
-  return a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
+function keyContains(parent, child) {
+  if (parent === child) return true;
+  return child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+}
+
+/**
+ * Does a peer overlap this project — same dir, or one inside the other (a peer
+ * in an ANCESTOR, the filesystem root included, counts)? Takes keys, not paths,
+ * so `checkPeerNotice` derives the own key once per check instead of once per
+ * row. The OWN key is the project root ({@link projectTreeKey} — "this repo",
+ * per the module header), so a peer in a sibling subdirectory of the same
+ * checkout counts. The PEER key is not widened — where the peer sits is the
+ * question, not which project it would resolve to — but it is canonicalized
+ * like the own one ({@link treeKey}), so a short or symlinked spelling of the
+ * same place still matches.
+ * @param {string|null} peerKey
+ * @param {string|null} ownKey
+ * @returns {boolean}
+ */
+function keysOverlap(peerKey, ownKey) {
+  if (peerKey === null || ownKey === null) return false;
+  return keyContains(ownKey, peerKey) || keyContains(peerKey, ownKey);
 }
 
 /**
@@ -403,7 +447,8 @@ function checkPeerNotice(ctx, deps) {
     }
     const agents = lister();
     const rows = Array.isArray(agents) ? agents : [];
-    const peers = rows.filter((a) => a && typeof a === 'object' && cwdOverlaps(a.cwd, ctx.cwd, deps));
+    const ownKey = projectTreeKey(ctx.cwd, deps);
+    const peers = rows.filter((a) => a && typeof a === 'object' && keysOverlap(treeKey(a.cwd), ownKey));
     const names = peers.map((a) => (typeof a.name === 'string' && a.name) || '?');
     return result('peerNotice', 'pass', `${peers.length} peer session(s) in this repo${names.length ? `: ${names.join(', ')}` : ''}`);
   } catch (err) {
