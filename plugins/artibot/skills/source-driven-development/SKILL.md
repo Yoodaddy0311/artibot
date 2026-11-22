@@ -1,7 +1,7 @@
 ---
 context: fork
 name: source-driven-development
-description: "Grounds every framework, library, and SDK implementation decision in current official documentation rather than training data. Auto-activates when framework-specific code is requested, a version migration is underway, or best-practice verification is needed. Pairs with sdd-cache hook for cheap revalidation. Triggers: framework, library, SDK, current best practice, official docs, MDN, deprecated, migration, API reference, version migration, 공식 문서, 마이그레이션, 최신 문서, API 레퍼런스, 공식 문서 보고 짜줘, 이 라이브러리 최신 방식으로 써줘, 마이그레이션 가이드 따라줘"
+description: "Grounds every framework, library, and SDK implementation decision in current official documentation rather than training data. Auto-activates when framework-specific code is requested, a version migration is underway, or best-practice verification is needed. Triggers: framework, library, SDK, current best practice, official docs, MDN, deprecated, migration, API reference, version migration, 공식 문서, 마이그레이션, 최신 문서, API 레퍼런스, 공식 문서 보고 짜줘, 이 라이브러리 최신 방식으로 써줘, 마이그레이션 가이드 따라줘"
 lang: [en]
 platforms: [claude-code, gemini-cli, codex-cli, cursor]
 level: 2
@@ -33,7 +33,7 @@ allowed-tools:
 tokens: "~5K"
 category: "workflow"
 whenNotToUse: "Pure business logic with no framework dependency (data structures, loops, conditionals). Internal helpers that don't touch any third-party API. The user explicitly opts for speed over verification ('just do it quickly'). Offline sessions where WebFetch is unavailable AND no Context7 cache hit exists — fall back to explicit unverified flags."
-source_hash: f7d3d128
+source_hash: 81555505
 ---
 
 # Source-Driven Development
@@ -113,7 +113,7 @@ Preferred fetch order:
 1. `mcp__plugin_artibot_context7__resolve-library-id` then `mcp__plugin_artibot_context7__query-docs` — best when the library is registered with Context7 (most major frameworks are)
 2. `WebFetch` of the canonical doc URL — when Context7 doesn't cover it
 
-The `webfetch-cache-pre.js` and `webfetch-cache-post.js` hooks (from Squad C, Adoption ID AD-24, also called `sdd-cache`) automatically handle HTTP 304 revalidation, so repeated fetches of the same doc page within a session are nearly free. See § Cache-Aware Operation below.
+The `webfetch-cache-pre.js` and `webfetch-cache-post.js` hooks (from Squad C, Adoption ID AD-24, a port of agent-skills' `sdd-cache`) keep a local copy of what each WebFetch call returned. They make no HTTP request of their own, revalidate nothing and never answer a WebFetch from the cache, so they do not make a repeat fetch any cheaper (whether the host's WebFetch tool caches on its own is outside these hooks). See § Cache-Aware Operation below.
 
 **Be precise:**
 
@@ -182,18 +182,16 @@ Honesty about non-verification beats false confidence every time.
 
 ## Cache-Aware Operation
 
-Squad C's `webfetch-cache-pre.js` / `webfetch-cache-post.js` hooks (the Artibot port of agent-skills' sdd-cache, Adoption ID AD-24) intercept WebFetch calls and:
+Squad C's `webfetch-cache-pre.js` / `webfetch-cache-post.js` hooks (the Artibot port of agent-skills' sdd-cache, Adoption ID AD-24) observe WebFetch calls. Unlike the upstream sdd-cache they never make an HTTP request (DATA POLICY: no egress from a hook), so nothing is revalidated against the origin — no `HEAD` request, no conditional request:
 
-1. On `WebFetch.pre`: compute a cache key from the URL, look up `runtime/cache/webfetch/<sha>.json`, send `If-None-Match` / `If-Modified-Since` headers if available
-2. On `WebFetch.post`: if upstream returned 304, serve cached body; otherwise update cache with new ETag/Last-Modified + body
+1. Before WebFetch (`webfetch-cache-pre.js`, PreToolUse): computes `sha1(url)` and reads only the metadata of `~/.claude/artibot/runtime/cache/webfetch/<sha1>.json` (`fetchedAt`, `etag`, `lastModified`, size). It emits an informational hint (`disk hit … fetchedAt=…` or `miss …`) and never blocks or replaces the call.
+2. After WebFetch (`webfetch-cache-post.js`, PostToolUse): stores the text the tool returned (capped at 262,144 UTF-8 bytes, never cut inside a code point) with `fetchedAt`, plus `etag` / `lastModified` only when the tool response exposes headers (otherwise `null`).
 
 For source-driven-development this means:
-- Re-fetching the same doc page within minutes is ~free (304 response, no body transfer)
-- The cache lives at `runtime/cache/webfetch/`, gitignored, never leaves the user's machine (DATA POLICY compliant)
-- HEAD request is the only revalidation traffic — no body is transmitted unless content actually changed
-- See `plugins/artibot/docs/webfetch-cache.md` for the cache key format and TTL policy
-
-If the cache hit is fresh (within the cache's freshness window), you can skip the WebFetch entirely. The hook surfaces this via a hint in the WebFetch tool result; persona just reads the cached body.
+- These hooks do NOT make a repeat fetch cheaper: they never serve a WebFetch from the cache. Reuse what you already fetched in this conversation instead of fetching it again.
+- There is no TTL, freshness check or eviction: an entry stays until it is deleted and is only as current as its `fetchedAt`.
+- The cache lives in the user's artibot state dir (`~/.claude/artibot/runtime/cache/webfetch/`), outside every repository, and never leaves the user's machine (DATA POLICY compliant)
+- If WebFetch is unavailable (offline), an entry for the exact URL is a local JSON file whose `content` holds the text the tool returned for that earlier call, which may not cover what you need now. Cite it with its `fetchedAt` date, never as current documentation.
 
 ## Source Hierarchy
 
@@ -227,10 +225,10 @@ If only non-authoritative sources exist, flag the answer as `UNVERIFIED:` and st
 | Rationalization | Why it's wrong | What to do instead |
 |---|---|---|
 | "I'm confident about this API" | Training data contains outdated API signatures that look correct but break against current versions; confidence is not evidence | Fetch the doc page; if docs say what you remember, the citation costs nothing extra |
-| "Fetching docs wastes tokens" | Hallucinating an API wastes far more — user spends an hour debugging, then discovers the function signature changed; one fetch prevents hours of rework. The sdd-cache hook makes repeat fetches near-free | Fetch on first use; rely on cache for revalidation in the same session |
+| "Fetching docs wastes tokens" | Hallucinating an API wastes far more — user spends an hour debugging, then discovers the function signature changed; one fetch prevents hours of rework | Fetch on first use; reuse that fetch for the rest of the session instead of fetching again |
 | "The docs won't have what I need" | If officials docs don't cover the pattern, that's information — the pattern may not be officially recommended; flag as `UNVERIFIED:` is the honest answer | Search the docs first; if absent, mark unverified explicitly |
 | "I'll just mention it might be outdated" | A vague disclaimer doesn't help the user; either verify and cite, or clearly flag as `UNVERIFIED:` | No hedging — verify or flag |
-| "Simple task, no need to check" | Simple tasks become templates copied across the codebase; one outdated form handler becomes ten | Verify even simple framework-specific patterns; the cache makes it cheap |
+| "Simple task, no need to check" | Simple tasks become templates copied across the codebase; one outdated form handler becomes ten | Verify even simple framework-specific patterns; one fetch costs less than ten copies of a stale pattern |
 | "The user wants speed, not verification" | Speed without verification ships bugs that cost more than the verification time | Confirm explicitly: "Do you want me to skip verification? I'll mark code as UNVERIFIED if so." |
 | "I checked Stack Overflow, that's good enough" | Stack Overflow drifts faster than docs; popular answers are often outdated; SO is not authoritative | Use SO for hints, then verify against official docs before citing |
 | "The framework is well-known, training data is enough" | Well-known frameworks have the most active deprecation churn; React Hooks, Next.js App Router, Tailwind v4 all reshaped APIs across recent major versions | Always verify framework-specific code regardless of framework popularity |
@@ -246,7 +244,7 @@ If only non-authoritative sources exist, flag the answer as `UNVERIFIED:` and st
 - Delivering code without citations for framework-specific decisions
 - Fetching the docs homepage rather than a specific reference page
 - Silently picking one when two official sources conflict
-- Ignoring the `webfetch-cache` hint that says "cached body available"
+- Treating a cached WebFetch entry as current documentation — it is never revalidated; cite its `fetchedAt`
 
 ## Verification
 
@@ -260,12 +258,11 @@ After implementing with source-driven-development:
 - [ ] No deprecated APIs used (cross-checked against migration guides)
 - [ ] Conflicts between docs and existing code surfaced to the user
 - [ ] Anything not verified is explicitly flagged `UNVERIFIED:`
-- [ ] WebFetch cache hits leveraged (no redundant body transfers when 304 was available)
+- [ ] Anything taken from a local WebFetch cache entry is cited with its `fetchedAt` date, not presented as current
 
 ## See Also
 
 - [persona-distill](../persona-distill/SKILL.md) — applies the same source-citation discipline to persona authoring
-- `plugins/artibot/docs/webfetch-cache.md` — cache key format, freshness, eviction (from Squad C)
-- `plugins/artibot/scripts/hooks/webfetch-cache-pre.js` — pre-fetch revalidation hook
-- `plugins/artibot/scripts/hooks/webfetch-cache-post.js` — post-fetch cache write hook
+- `plugins/artibot/scripts/hooks/webfetch-cache-pre.js` — pre-fetch lookup (reports whether a local copy exists; no HTTP); its header documents the key and the storage path
+- `plugins/artibot/scripts/hooks/webfetch-cache-post.js` — post-fetch cache write hook (262,144-byte cap; the entry format is in its header)
 - Benchmark source: `runtime/benchmark/agent-skills-benchmark.md` (Adoption ID AD-32)

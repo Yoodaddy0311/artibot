@@ -28,8 +28,14 @@
  * WHAT IS WHERE (each verified against its writer, see the O2 report):
  *   SESSION  current-effort.json · current-task-budget.json · token-usage-session.json
  *            · current-teammates.json · long-context-active.json
+ *            · pre-compact-<ts>.md (scripts/hooks/pre-compact.js, 2026-11-22)
  *   GLOBAL   user-profile.json · first-run-state.json · self-control-welcomed.marker
  *            · macro-suggestions.json · memory-metrics.json
+ *            · last-session-date.txt (scripts/hooks/skill-discovery-inject.js, 2026-11-22)
+ *            · cache/webfetch/<sha1>.json (scripts/hooks/webfetch-cache-pre.js#cacheDir, 2026-11-22)
+ * The three 2026-11-22 entries used to be written under `<pluginRoot>/../../runtime/`, which for
+ * an installed plugin is the marketplace cache dir; they are not migrated (a lost day gate costs
+ * one extra first-of-day notice, the cache and the pre-compact notes are disposable).
  *
  * READING A SESSION FILE (who may fall back to what). A reader that knows its session —
  * a usable `session_id` — reads THAT session's file and nothing else: no flat file, no

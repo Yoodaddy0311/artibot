@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -28,7 +30,7 @@ vi.mock('node:fs', async () => {
 
 const { readStdin, writeStdout } = await import('../../scripts/utils/index.js');
 const { createErrorHandler } = await import('../../lib/core/hook-utils.js');
-const { readFileSync, existsSync, writeFileSync, mkdirSync, statSync } = await import('node:fs');
+const { readFileSync, existsSync, writeFileSync, mkdirSync, statSync, mkdtempSync, rmSync } = await import('node:fs');
 
 /**
  * Import the hook and run its entry point. The module carries a direct-run
@@ -44,20 +46,47 @@ async function runHook() {
   await mod.main().catch(createErrorHandler('pre-compact'));
 }
 
+/**
+ * The snapshot writes (`artibot-pre-compact.json`). Found by path, not by call index: the hook
+ * also writes the AD-40 markdown state file (`pre-compact-<ts>.md`), before the snapshot.
+ *
+ * @returns {unknown[][]} the matching `writeFileSync` calls
+ */
+function snapshotCalls() {
+  return writeFileSync.mock.calls.filter((c) => String(c[0]).endsWith('artibot-pre-compact.json'));
+}
+
+/** @returns {unknown[]} the one snapshot `writeFileSync` call */
+function snapshotCall() {
+  const calls = snapshotCalls();
+  expect(calls).toHaveLength(1);
+  return calls[0];
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 describe('pre-compact hook', () => {
   let stderrSpy;
   let savedStateEnv;
+  let sandboxHome;
 
   beforeEach(() => {
     // tests/setup/state-dir.js hands every worker a default ARTIBOT_STATE_DIR override. The snapshot path now follows
     // it (tests/hooks/pre-compact-state-dir.test.js pins that), while the cases below pin the production, NO-override
     // path under ~/.claude, so the override is lifted for them.
-    savedStateEnv = { dir: process.env.ARTIBOT_STATE_DIR, home: process.env.ARTIBOT_STATE_DIR_HOME };
+    savedStateEnv = {
+      dir: process.env.ARTIBOT_STATE_DIR,
+      home: process.env.ARTIBOT_STATE_DIR_HOME,
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+    };
     delete process.env.ARTIBOT_STATE_DIR;
     delete process.env.ARTIBOT_STATE_DIR_HOME;
+    sandboxHome = mkdtempSync(path.join(os.tmpdir(), 'artibot-pre-compact-home-'));
+    // Both home variables: lib/core/platform.js#getHomeDir reads USERPROFILE first, then HOME.
+    process.env.USERPROFILE = sandboxHome;
+    process.env.HOME = sandboxHome;
     vi.clearAllMocks();
     vi.resetModules();
     existsSync.mockReturnValue(false);
@@ -69,11 +98,28 @@ describe('pre-compact hook', () => {
   });
 
   afterEach(() => {
-    if (savedStateEnv.dir === undefined) delete process.env.ARTIBOT_STATE_DIR;
-    else process.env.ARTIBOT_STATE_DIR = savedStateEnv.dir;
-    if (savedStateEnv.home === undefined) delete process.env.ARTIBOT_STATE_DIR_HOME;
-    else process.env.ARTIBOT_STATE_DIR_HOME = savedStateEnv.home;
+    const restore = { ARTIBOT_STATE_DIR: savedStateEnv.dir, ARTIBOT_STATE_DIR_HOME: savedStateEnv.home,
+      HOME: savedStateEnv.HOME, USERPROFILE: savedStateEnv.USERPROFILE };
+    for (const [key, value] of Object.entries(restore)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(sandboxHome, { recursive: true, force: true });
     stderrSpy.mockRestore();
+  });
+
+  // The fs writes below are mocked, but the paths are real: with the override lifted they would name the
+  // developer's own ~/.claude. A per-test home keeps them in a throwaway tree even if an import stops
+  // being mocked (review INFO, 2026-11-22). This case is the proof that the sandbox is in force.
+  it('creates and writes nothing outside the per-test home', async () => {
+    readStdin.mockResolvedValue(JSON.stringify({ session_id: 'sess-sandbox' }));
+
+    await runHook();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const touched = [...mkdirSync.mock.calls, ...writeFileSync.mock.calls].map((c) => path.resolve(String(c[0])));
+    expect(touched.length).toBeGreaterThanOrEqual(3); // state dir + state file + snapshot
+    for (const p of touched) expect(p.startsWith(path.resolve(sandboxHome) + path.sep), p).toBe(true);
   });
 
   describe('snapshot creation', () => {
@@ -87,8 +133,8 @@ describe('pre-compact hook', () => {
         expect.stringContaining('.claude'),
         { recursive: true },
       );
-      expect(writeFileSync).toHaveBeenCalledTimes(1);
-      const writePath = writeFileSync.mock.calls[0][0];
+      expect(snapshotCalls()).toHaveLength(1);
+      const writePath = snapshotCall()[0];
       expect(writePath).toContain('artibot-pre-compact.json');
     });
 
@@ -98,7 +144,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot).toHaveProperty('savedAt');
       expect(snapshot.reason).toBe('pre-compact');
@@ -118,7 +164,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.state.agents).toBeDefined();
       expect(snapshot.state.agents['builder-01'].active).toBe(true);
@@ -132,7 +178,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.state).toEqual({});
     });
@@ -145,7 +191,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.state).toEqual({});
     });
@@ -164,7 +210,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.summary.decisions).toBeDefined();
       expect(snapshot.summary.decisions.length).toBe(2);
@@ -183,7 +229,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.summary.decisions).toEqual([]);
     });
@@ -199,7 +245,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.summary.decisions).toEqual([]);
     });
@@ -229,7 +275,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot).toHaveProperty('summary');
       expect(snapshot).toHaveProperty('savedAt');
@@ -241,7 +287,7 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const writtenContent = writeFileSync.mock.calls[0][1];
+      const writtenContent = snapshotCall()[1];
       const snapshot = JSON.parse(writtenContent);
       expect(snapshot.reason).toBe('pre-compact');
     });
@@ -266,10 +312,10 @@ describe('pre-compact hook', () => {
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
 
-      const encoding = writeFileSync.mock.calls[0][2];
+      const encoding = snapshotCall()[2];
       expect(encoding).toBe('utf-8');
       // Verify it's formatted (indented)
-      const content = writeFileSync.mock.calls[0][1];
+      const content = snapshotCall()[1];
       expect(content).toContain('\n');
     });
   });
@@ -313,10 +359,8 @@ describe('pre-compact hook', () => {
 
   // ── PR-CX02 ────────────────────────────────────────────────────────────────
   // The snapshot is the only thing PostCompact can read, so what it does and
-  // does not carry is a contract. `writePreCompactState` never reaches its
-  // own `writeFileSync` here (the mocked `scripts/utils/index.js` leaves
-  // `getPluginRoot` undefined, so it throws into its own try/catch), which is
-  // why call 0 is the snapshot for every case below.
+  // does not carry is a contract. The hook also writes the markdown state file
+  // (`writePreCompactState`), so the snapshot is found by path, not by index.
   describe('pressure inputs carried in the snapshot', () => {
     /**
      * @returns {Promise<object>} the parsed snapshot JSON
@@ -325,7 +369,7 @@ describe('pre-compact hook', () => {
       readStdin.mockResolvedValue(JSON.stringify(hookData));
       await runHook();
       await new Promise((r) => setTimeout(r, 50));
-      return JSON.parse(writeFileSync.mock.calls[0][1]);
+      return JSON.parse(snapshotCall()[1]);
     }
 
     it('pins tokenEstimate at chars/4 + 1 for a known message fixture', async () => {

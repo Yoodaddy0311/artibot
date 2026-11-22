@@ -33,6 +33,13 @@
  * pluginRoots, the same HOME". Version A is deleted outright before B reads, as
  * the host does on update.
  *
+ * Since 2026-11-22 also the three writers that took `<pluginRoot>/../..` for a
+ * repository root — for an installed plugin that is the marketplace cache dir
+ * (`~/.claude/plugins/cache/artibot/`), where a stray
+ * `runtime/state/last-session-date.txt` was measured: the skill-discovery day
+ * gate (`maybeInject`), the WebFetch cache (`persistCacheEntry`) and the
+ * pre-compact markdown state (`pre-compact.js`, as a child process).
+ *
  * ── what it cannot see ──────────────────────────────────────────────────────
  * - A real Claude Code session: the hook payloads here are synthesized. That the
  *   host's `SubagentStart`/`SubagentStop` `session_id` names the PARENT session was
@@ -61,6 +68,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { handleUserPromptSubmit } from '../../scripts/hooks/runtime-prompt.js';
+import { maybeInject } from '../../scripts/hooks/skill-discovery-inject.js';
+import { cacheDir, cacheKey, loadCachedMeta } from '../../scripts/hooks/webfetch-cache-pre.js';
+import { persistCacheEntry } from '../../scripts/hooks/webfetch-cache-post.js';
 import { NATIVE_EFFORT_ENV_VARS } from '../../lib/cognitive/native-effort.js';
 import { resolveArtibotDir } from '../../lib/core/config.js';
 import { _resetPathCache, configureProfilePath, getProfile } from '../../lib/core/user-profile.js';
@@ -73,6 +83,7 @@ import { makeVersionRoot } from '../helpers/linked-plugin-root.js';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WORKFLOW_STATUS = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'workflow-status.js');
+const PRE_COMPACT = path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'pre-compact.js');
 
 /** Everything O2 moved out of `<pluginRoot>/runtime/`. */
 const MOVED_FILES = Object.freeze([
@@ -374,6 +385,59 @@ describe('O2 — legacy state is migrated once (copy-if-absent)', () => {
 
     expect(next.runsSoFar).toBe(4);
     expect(readJson(flatFile('first-run-state.json')).globalRuns).toBe(4);
+  });
+});
+
+/** `<cache>/artibot/runtime` — where `<version root>/../..` used to put state. */
+const besideCacheDir = (root) => path.join(path.dirname(path.dirname(root)), 'runtime');
+
+describe('writers that took <pluginRoot>/../.. for a repository root (2026-11-22)', () => {
+  it('the skill-discovery day gate is GLOBAL state and survives an update', async () => {
+    const a = makeVersionRoot(base, '4.70.0');
+    const b = makeVersionRoot(base, '4.71.0');
+    process.env.CLAUDE_PLUGIN_ROOT = a;
+
+    expect(await maybeInject(a)).toBe(true);
+    expect(existsSync(flatFile('last-session-date.txt'))).toBe(true);
+    expect(existsSync(besideCacheDir(a))).toBe(false);
+
+    rmSync(a, { recursive: true, force: true });
+    process.env.CLAUDE_PLUGIN_ROOT = b;
+    expect(await maybeInject(b)).toBe(false); // the same day: version B honours A's gate
+  });
+
+  it('a WebFetch cache entry written under version A is a hit under version B', async () => {
+    const a = makeVersionRoot(base, '4.70.0');
+    const b = makeVersionRoot(base, '4.71.0');
+    const url = 'https://example.com/o2-webfetch';
+    process.env.CLAUDE_PLUGIN_ROOT = a;
+
+    const written = await persistCacheEntry(url, 'body', { etag: null, lastModified: null });
+    expect(written.persisted).toBe(true);
+    expect(existsSync(path.join(stateDir(), 'runtime', 'cache', 'webfetch', `${cacheKey(url)}.json`))).toBe(true);
+    expect(existsSync(besideCacheDir(a))).toBe(false);
+
+    rmSync(a, { recursive: true, force: true });
+    process.env.CLAUDE_PLUGIN_ROOT = b;
+    expect(await loadCachedMeta(cacheDir(), cacheKey(url))).not.toBeNull();
+  });
+
+  it('the pre-compact markdown state is SESSION state, outside the plugin tree, and outlives version A', () => {
+    const a = makeVersionRoot(base, '4.70.0');
+    const r = spawnSync(process.execPath, [PRE_COMPACT], {
+      input: JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'manual', session_id: 'sess-A', cwd: project }),
+      encoding: 'utf8',
+      cwd: project,
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: a, ARTIBOT_HOOK_FIRED_DIRECT: 'off' },
+    });
+    expect(r.status, r.stderr).toBe(0);
+
+    const { stateFilePath } = readJson(path.join(home, '.claude', 'artibot-pre-compact.json'));
+    expect(path.dirname(stateFilePath)).toBe(path.dirname(sessionFile('sess-A', 'x')));
+    expect(existsSync(besideCacheDir(a))).toBe(false);
+
+    rmSync(a, { recursive: true, force: true });
+    expect(readFileSync(stateFilePath, 'utf8')).toContain('event: pre-compact');
   });
 });
 

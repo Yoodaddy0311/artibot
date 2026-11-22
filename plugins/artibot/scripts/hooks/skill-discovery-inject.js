@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 /**
- * SessionStart helper hook — injects the using-agent-skills meta-skill prose
- * into systemContext exactly once per local-day so the agent rediscovers
- * Artibot's full skill catalogue at the top of each fresh day without bloating
- * every session start. (Exact count is intentionally not hard-coded here — it
- * lives only in scripts/ci/readme-claims-registry.js#collectActuals, derived
- * from a live scan of the `skills/` SKILL.md directories, so it never goes
- * stale.)
+ * SessionStart helper — a once-per-local-day gate for the using-agent-skills
+ * meta-skill. Two entry points, and only the first one runs today:
+ *   - `maybeInject()`: called in-process by session-start.js. It ONLY writes the
+ *     day gate and answers true on the day's first call; it injects nothing.
+ *   - `main()`: the stand-alone hook that WOULD inject the meta-skill prose as
+ *     SessionStart additionalContext (`decide`). It is not registered in
+ *     hooks/hooks.json or hooks/dispatch-table.json (grep, 2026-11-22), so the
+ *     prose is not injected anywhere at present.
+ * (The skill count is not hard-coded here — scripts/ci/readme-claims-registry.js
+ * #collectActuals derives it from a live scan of `skills/`.)
  *
- * Gating: `runtime/state/last-session-date.txt` holds today's local date
+ * Gating: `<state dir>/runtime/last-session-date.txt` holds today's local date
  * (YYYY-MM-DD). When the file already contains today's value, this hook
  * exits with a benign continue so session-start.js can carry on without
- * additional context cost.
+ * additional context cost. The gate is GLOBAL state — one user, one day, any
+ * project, any plugin build — so it lives in the artibot state dir
+ * (`lib/core/runtime-state.js`), never beside the plugin root: an installed
+ * plugin's `<pluginRoot>/../..` is the marketplace cache dir (2026-11-22, a
+ * stray `~/.claude/plugins/cache/artibot/runtime/state/` was measured there).
  *
  * Adoption: AD-23 (`using-agent-skills` meta-skill auto-injection).
  *
@@ -28,20 +35,19 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { resolveGlobalStatePath } from '../../lib/core/runtime-state.js';
 import { isMainEntry } from './_main-entry.js';
 
 const HOOK_NAME = 'skill-discovery-inject';
 
 /**
- * Resolve the absolute path to the gate state file.
- * @param {string} pluginRoot
+ * Absolute path of the once-per-day gate: `<state dir>/runtime/last-session-date.txt`.
+ * Not migrated from the old `<pluginRoot>/../../runtime/state/` copy — a missing gate
+ * costs at most one extra first-of-day surfacing.
  * @returns {string}
  */
-function gatePath(pluginRoot) {
-  // Repo-root-relative runtime dir (parent of plugin root). Fallback to
-  // pluginRoot/runtime if the structure is unfamiliar.
-  const repoRoot = path.resolve(pluginRoot, '..', '..');
-  return path.join(repoRoot, 'runtime', 'state', 'last-session-date.txt');
+function gatePath() {
+  return resolveGlobalStatePath('runtime/last-session-date.txt');
 }
 
 /**
@@ -148,15 +154,17 @@ export function decide({ pluginRoot: _pluginRoot, stamp, lastDate, skillBody }) 
 }
 
 /**
- * Programmatic entry — used by session-start.js to chain in-process without
- * spawning a second hook process. Returns true when the inject ran.
- * @param {string} [pluginRoot]
+ * Programmatic entry — used by session-start.js in-process. Writes the day gate
+ * only; it does NOT inject the meta-skill (only the unregistered `main()` would).
+ * Returns true on the first call of the local day, false otherwise.
+ * @param {string} [_pluginRoot] - accepted for the session-start.js call; it no
+ *   longer decides where the gate lives (see {@link gatePath}).
  * @returns {Promise<boolean>}
  */
-export async function maybeInject(pluginRoot = getPluginRoot()) {
+export async function maybeInject(_pluginRoot) {
   try {
     const stamp = todayStamp();
-    const filePath = gatePath(pluginRoot);
+    const filePath = gatePath();
     const lastDate = await readLastDate(filePath);
     if (lastDate === stamp) return false;
     await writeGate(filePath, stamp);
@@ -172,7 +180,7 @@ async function main() {
 
   const pluginRoot = getPluginRoot();
   const stamp = todayStamp();
-  const filePath = gatePath(pluginRoot);
+  const filePath = gatePath();
   const lastDate = await readLastDate(filePath);
   const skillBody = await loadMetaSkill(pluginRoot);
 

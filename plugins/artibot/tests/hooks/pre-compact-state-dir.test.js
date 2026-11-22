@@ -49,16 +49,18 @@ describe('pre-compact — the snapshot follows ARTIBOT_STATE_DIR', () => {
   const homeFile = () => path.join(home, '.claude', 'artibot-pre-compact.json');
   const stateFile = () => path.join(stateDir, 'artibot-pre-compact.json');
 
-  /** One firing; `override` is `undefined` for none, or the `{ dir, mintedFor }` pair. */
-  function fire(override) {
-    // CLAUDE_PLUGIN_ROOT keeps the hook's other artifact (<plugin root>/../../runtime/state/pre-compact-*.md) inside the
-    // throwaway tree instead of the repository checkout the test runs from.
+  /**
+   * One firing; `override` is `undefined` for none, or the `{ dir, mintedFor }` pair. The plugin root is a
+   * throwaway path so that a regression back to `<plugin root>/../..` lands inside `tmp`, where the last case
+   * can see it, and never in the repository checkout the test runs from.
+   */
+  function fire(override, pluginRoot = path.join(tmp, 'plugins', 'artibot')) {
     const env = {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
       ARTIBOT_HOOK_FIRED_DIRECT: 'off',
-      CLAUDE_PLUGIN_ROOT: path.join(tmp, 'plugins', 'artibot'),
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
     };
     // The host session ids and the state-dir seam must not leak into the child unless a case sets them.
     for (const key of ['CLAUDE_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'ARTIBOT_STATE_DIR', 'ARTIBOT_STATE_DIR_HOME']) {
@@ -104,5 +106,22 @@ describe('pre-compact — the snapshot follows ARTIBOT_STATE_DIR', () => {
     expect(out.status).toBe(0);
     expect(existsSync(homeFile())).toBe(true);
     expect(existsSync(stateDir)).toBe(false);
+  });
+
+  // 2026-11-22: the markdown state went to `<plugin root>/../../runtime/state/`, which for an installed plugin
+  // is the marketplace cache dir. Its one reader is this session's PostCompact (it lists `stateFilePath` only
+  // when the identity gate passes), so it is SESSION state: `<state dir>/runtime/sessions/<sid>/`.
+  it('keeps the markdown state in the session dir, nothing beside an installed plugin root', () => {
+    const installed = path.join(tmp, 'plugins', 'cache', 'artibot', 'artibot', '4.71.16');
+    mkdirSync(installed, { recursive: true });
+
+    const out = fire({ dir: stateDir, mintedFor: home }, installed);
+
+    expect(out.status).toBe(0);
+    const { stateFilePath } = JSON.parse(readFileSync(stateFile(), 'utf-8'));
+    expect(path.dirname(stateFilePath)).toBe(path.join(stateDir, 'runtime', 'sessions', SID));
+    expect(path.basename(stateFilePath)).toMatch(/^pre-compact-.+\.md$/);
+    expect(readFileSync(stateFilePath, 'utf-8')).toContain('event: pre-compact');
+    expect(existsSync(path.join(tmp, 'plugins', 'cache', 'artibot', 'runtime'))).toBe(false);
   });
 });

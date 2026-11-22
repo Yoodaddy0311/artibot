@@ -4,8 +4,9 @@
  *
  * Adoption AD-24 (TRANSFORM of agent-skills sdd-cache). Cache key is
  * SHA-1 of the requested URL; entries live under
- * `runtime/cache/webfetch/<sha>.json`. The original benchmark performs
- * an HTTP HEAD revalidation on every reuse — that violates Artibot's
+ * `<state dir>/runtime/cache/webfetch/<sha>.json` ({@link cacheDir}).
+ * The original benchmark performs an HTTP HEAD revalidation on every
+ * reuse — that violates Artibot's
  * DATA POLICY (no external HTTP from a hook). Instead we publish the
  * cache key and a `cached` flag in the hookSpecificOutput so downstream
  * tooling (statusline, post-hook) can correlate the request with disk
@@ -19,20 +20,22 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import { createErrorHandler } from '../../lib/core/hook-utils.js';
+import { resolveRuntimeDir } from '../../lib/core/runtime-state.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
 const HOOK_NAME = 'webfetch-cache-pre';
 
 /**
- * Resolve the cache directory for WebFetch entries.
- * @param {string} [pluginRoot]
+ * The WebFetch cache directory: `<state dir>/runtime/cache/webfetch`. The cache is
+ * URL-keyed, so it is GLOBAL state (one per user, shared by every project and plugin
+ * build — `lib/core/runtime-state.js`). It is not derived from the plugin root: for an
+ * installed plugin `<pluginRoot>/../..` is the marketplace cache dir (2026-11-22).
  * @returns {string}
  */
-export function cacheDir(pluginRoot = getPluginRoot()) {
-  const repoRoot = path.resolve(pluginRoot, '..', '..');
-  return path.join(repoRoot, 'runtime', 'cache', 'webfetch');
+export function cacheDir() {
+  return path.join(resolveRuntimeDir(), 'cache', 'webfetch');
 }
 
 /**

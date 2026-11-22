@@ -7,11 +7,12 @@
  * @module scripts/hooks/pre-compact
  */
 
-import { getPluginRoot, parseJSON, readStdin, writeStdout } from '../utils/index.js';
+import { parseJSON, readStdin, writeStdout } from '../utils/index.js';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createErrorHandler, getPreCompactPath, getStatePath, logHookError } from '../../lib/core/hook-utils.js';
+import { resolveScopedStatePath } from '../../lib/core/runtime-state.js';
 import { estimateTokens } from '../../lib/context/context-pressure.js';
 import { isMainEntry, tapDirectFiring } from './_main-entry.js';
 
@@ -283,20 +284,30 @@ function captureGitState() {
 }
 
 /**
- * AD-40: write a markdown state snapshot under runtime/state/. The file is
- * intentionally human-readable so anyone resuming a session (human or
+ * AD-40: write a markdown state snapshot of the session's git state. The file
+ * is intentionally human-readable so anyone resuming a session (human or
  * model) can scan it without parsing JSON. Failures are swallowed.
+ *
+ * SESSION state (`lib/core/runtime-state.js`):
+ * `<state dir>/runtime/sessions/<session_id>/pre-compact-<ts>.md`. Its one reader is
+ * this session's PostCompact — `post-compact-rehydrate.js` lists the snapshot's
+ * `stateFilePath` only when the identity gate passes. Session dirs are removed by
+ * `runtime-state.js#sweepSessionDirs` (idle > 7 days, at most 256 kept), so files written
+ * there do not pile up. A payload with no usable session id writes the flat
+ * `<state dir>/runtime/pre-compact-<ts>.md` instead, which NO sweep removes: those
+ * accumulate (how often the host sends no session id is unmeasured). It used to go to
+ * `<pluginRoot>/../../runtime/state/`, which for an installed plugin is the
+ * marketplace cache dir (2026-11-22).
  * @param {ReturnType<typeof captureGitState>} state
+ * @param {unknown} sessionId - the payload's `session_id`
  * @returns {string|null} absolute path of the written file, or null on failure
  */
-function writePreCompactState(state) {
+function writePreCompactState(state, sessionId) {
   try {
-    const repoRoot = path.resolve(getPluginRoot(), '..', '..');
-    const dir = path.join(repoRoot, 'runtime', 'state');
-    mkdirSync(dir, { recursive: true });
     // Sanitise ISO ts for filesystem (no colons on Windows)
     const fileStamp = state.capturedAt.replace(/[:.]/g, '-');
-    const filePath = path.join(dir, `pre-compact-${fileStamp}.md`);
+    const filePath = resolveScopedStatePath(sessionId, `pre-compact-${fileStamp}.md`);
+    mkdirSync(path.dirname(filePath), { recursive: true });
     const safeStatus = (state.gitStatus || '(clean / unavailable)').trimEnd();
     const body = [
       '---',
@@ -391,7 +402,7 @@ function buildSnapshot({ hookData, currentState, summary, tokenEstimate }) {
   // AD-40: capture git/cwd snapshot for human-readable resume context.
   // Wrapped per-call internally so failures never reach the main flow.
   const gitState = captureGitState();
-  const stateFilePath = writePreCompactState(gitState);
+  const stateFilePath = writePreCompactState(gitState, hookData.session_id);
   return {
     savedAt: new Date().toISOString(),
     reason: 'pre-compact',

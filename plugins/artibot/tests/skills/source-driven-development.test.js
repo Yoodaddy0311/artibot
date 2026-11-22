@@ -5,9 +5,11 @@
  * @see plugins/artibot/skills/source-driven-development/SKILL.md
  */
 import { beforeAll, describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+
+import { findEgress } from '../helpers/no-egress.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +23,18 @@ let skillText;
 beforeAll(() => {
   skillText = readFileSync(SKILL_PATH, 'utf8');
 });
+
+/**
+ * The text of one `## ` section, heading included, up to the next `## ` heading.
+ * @param {string} heading - e.g. '## Cache-Aware Operation'
+ * @returns {string}
+ */
+function sectionOf(heading) {
+  const start = skillText.indexOf(heading);
+  if (start === -1) return '';
+  const end = skillText.indexOf('\n## ', start + heading.length);
+  return skillText.slice(start, end === -1 ? undefined : end);
+}
 
 // ---------------------------------------------------------------------------
 // Frontmatter parsing helper (lightweight; intentionally local to this file)
@@ -199,9 +213,69 @@ describe('source-driven-development sdd-cache integration', () => {
     expect(skillText).toMatch(/##\s*Cache-Aware Operation/);
   });
 
-  it('references HTTP 304 revalidation pattern', () => {
-    expect(skillText).toMatch(/304/);
-    expect(skillText).toMatch(/If-None-Match|ETag/);
+  // The hooks make no HTTP request (webfetch-cache-pre.js header: "NO HTTP / fetch / external
+  // egress") and never answer a WebFetch from the cache. Until 2026-11-22 the skill promised
+  // upstream sdd-cache behaviour instead (304 revalidation, conditional headers, "skip the WebFetch
+  // entirely") and this test pinned /304/. What the skill may claim is scoped to the HOOKS: whether
+  // the host's WebFetch tool caches on its own is not something this repository can verify.
+  it('describes the cache as local-only with no HTTP revalidation, matching the hook source', () => {
+    const section = sectionOf('## Cache-Aware Operation');
+    expect(section).toMatch(/never make an HTTP request/);
+    expect(section).toMatch(/no TTL/);
+    expect(section).toMatch(/do NOT make a repeat fetch cheaper/);
+    expect(section).toMatch(/never serve a WebFetch from the cache/);
+    expect(section).toMatch(/262,144 UTF-8 bytes/); // webfetch-cache-post.js#MAX_BYTES, a byte cap
+    // TRADE-OFF (lane D review, 2026-11-22): this vocabulary ban also turns an HONEST negation red —
+    // "the hooks do not send If-None-Match" or "there is no 304 revalidation" would fail here. It
+    // stays because it is what catches regressions c1/c2 (the old claims put back). If the skill
+    // ever needs such a negation, change this regex (e.g. allow the token only in a sentence that
+    // also says "not"/"no"), do not reword the skill around the test.
+    expect(skillText).not.toMatch(/\b304\b|If-None-Match|If-Modified-Since|near-free|cheap revalidation/);
+    expect(skillText).not.toMatch(/skip the WebFetch/i);
+    for (const hook of ['webfetch-cache-pre.js', 'webfetch-cache-post.js']) {
+      const src = readFileSync(resolve(PLUGIN_ROOT, 'scripts', 'hooks', hook), 'utf8');
+      expect(findEgress(src), hook).toEqual([]);
+    }
+  });
+
+  // Every false sentence the 2026-11-22 correction removed, VERBATIM. Extracted with
+  // `git diff HEAD -U0 -- skills/source-driven-development/SKILL.md | grep '^-'` (HEAD 2ee834f1);
+  // list markers ("- ", "1. ", "- [ ] ") are stripped so a sentence put back as prose is caught
+  // too, and whitespace is collapsed on both sides. The last two are this correction's own
+  // overreach about the host tool, removed again the same day. Lines that were TRUE and only
+  // reworded (e.g. the post-hook "See Also" entry) are not listed.
+  //
+  // WHAT THIS GATE CANNOT SEE: a falsehood put back in OTHER words. The vocabulary check above
+  // (304, If-None-Match, near-free, …) catches the obvious tokens, but a paraphrase such as "they
+  // handle revalidation automatically, so repeated fetches are nearly free" (review mutant g1) or
+  // "if the hit is fresh you can skip the fetch and read the cached body" (g3) passes both checks.
+  // No regex closes that; it is left to review against webfetch-cache-pre.js / -post.js.
+  const REMOVED_FALSE_SENTENCES = Object.freeze([
+    'Pairs with sdd-cache hook for cheap revalidation.',
+    'automatically handle HTTP 304 revalidation, so repeated fetches of the same doc page within a session are nearly free.',
+    "hooks (the Artibot port of agent-skills' sdd-cache, Adoption ID AD-24) intercept WebFetch calls and:",
+    'On `WebFetch.pre`: compute a cache key from the URL, look up `runtime/cache/webfetch/<sha>.json`, send `If-None-Match` / `If-Modified-Since` headers if available',
+    'On `WebFetch.post`: if upstream returned 304, serve cached body; otherwise update cache with new ETag/Last-Modified + body',
+    'Re-fetching the same doc page within minutes is ~free (304 response, no body transfer)',
+    "The cache lives at `runtime/cache/webfetch/`, gitignored, never leaves the user's machine (DATA POLICY compliant)",
+    'HEAD request is the only revalidation traffic — no body is transmitted unless content actually changed',
+    'See `plugins/artibot/docs/webfetch-cache.md` for the cache key format and TTL policy',
+    "If the cache hit is fresh (within the cache's freshness window), you can skip the WebFetch entirely.",
+    'The hook surfaces this via a hint in the WebFetch tool result; persona just reads the cached body.',
+    'The sdd-cache hook makes repeat fetches near-free',
+    'Fetch on first use; rely on cache for revalidation in the same session',
+    'Verify even simple framework-specific patterns; the cache makes it cheap',
+    'Ignoring the `webfetch-cache` hint that says "cached body available"',
+    'WebFetch cache hits leveraged (no redundant body transfers when 304 was available)',
+    '`plugins/artibot/docs/webfetch-cache.md` — cache key format, freshness, eviction (from Squad C)',
+    '`plugins/artibot/scripts/hooks/webfetch-cache-pre.js` — pre-fetch revalidation hook',
+    'so every WebFetch still goes to the network and a repeat fetch costs the same as the first.',
+    'A repeat fetch of the same page is NOT cheaper: WebFetch runs again in full.',
+  ]);
+  const squash = (s) => s.replace(/\s+/g, ' ');
+
+  it.each(REMOVED_FALSE_SENTENCES)('never brings back the removed false sentence: %s', (sentence) => {
+    expect(squash(skillText)).not.toContain(squash(sentence));
   });
 
   it('confirms cache stays local (DATA POLICY)', () => {
@@ -220,8 +294,12 @@ describe('source-driven-development sdd-cache integration', () => {
 // ---------------------------------------------------------------------------
 
 describe('source-driven-development cross-links', () => {
-  it('links to webfetch-cache documentation', () => {
-    expect(skillText).toContain('webfetch-cache.md');
+  // `plugins/artibot/docs/*` is gitignored (.gitignore:26) and docs/webfetch-cache.md was never
+  // committed, so a link to it is dead in every checkout and install. The hook sources ship.
+  it('points at the shipped hook sources, not the unshipped docs page', () => {
+    expect(skillText).not.toContain('webfetch-cache.md');
+    expect(skillText).toContain('scripts/hooks/webfetch-cache-pre.js');
+    expect(existsSync(resolve(PLUGIN_ROOT, 'scripts', 'hooks', 'webfetch-cache-pre.js'))).toBe(true);
   });
 
   it('links to persona-distill (See Also section)', () => {

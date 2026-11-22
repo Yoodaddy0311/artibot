@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { findEgress, globalNetNames, importSpecifiers } from '../helpers/no-egress.js';
+import { pointStateDirAt } from '../helpers/state-dir.js';
+
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const HOOKS_DIR = path.resolve(TEST_DIR, '..', '..', 'scripts', 'hooks');
 
@@ -14,6 +17,7 @@ const {
   loadMetaSkill,
   formatInjectContext,
   decide,
+  maybeInject,
 } = await import('../../scripts/hooks/skill-discovery-inject.js');
 
 function makeTempDir() {
@@ -142,13 +146,64 @@ describe('skill-discovery-inject hook', () => {
     });
   });
 
+  // Measured 2026-11-22: an installed plugin (pluginRoot = `~/.claude/plugins/cache/
+  // artibot/artibot/4.71.16`) wrote the gate to `~/.claude/plugins/cache/artibot/runtime/
+  // state/last-session-date.txt`, because `<pluginRoot>/../..` was taken to be a repo root.
+  // The gate is GLOBAL state (one user, one day), so it lives in the artibot state dir.
+  describe('maybeInject() — where the once-per-day gate lives', () => {
+    let stateDir;
+    let restoreStateDir;
+
+    beforeEach(() => {
+      stateDir = path.join(tmp, 'state');
+      restoreStateDir = pointStateDirAt(stateDir);
+    });
+    afterEach(() => { restoreStateDir(); });
+
+    const stateGate = () => path.join(stateDir, 'runtime', 'last-session-date.txt');
+
+    it.each([
+      ['an installed plugin (marketplace cache)', ['plugins', 'cache', 'artibot', 'artibot', '4.71.16']],
+      ['a dev checkout', ['repo', 'plugins', 'artibot']],
+    ])('writes the gate to the state dir, nothing beside the plugin root, for %s', async (_label, segments) => {
+      const pluginRoot = path.join(tmp, ...segments);
+      mkdirSync(pluginRoot, { recursive: true });
+
+      expect(await maybeInject(pluginRoot)).toBe(true);
+
+      expect(existsSync(path.resolve(pluginRoot, '..', '..', 'runtime'))).toBe(false);
+      expect(existsSync(path.join(pluginRoot, 'runtime'))).toBe(false);
+      expect(readFileSync(stateGate(), 'utf-8').trim()).toBe(todayStamp());
+    });
+
+    it('fires once per day per user, whichever plugin root asks', async () => {
+      const installed = path.join(tmp, 'plugins', 'cache', 'artibot', 'artibot', '4.71.16');
+      const checkout = path.join(tmp, 'repo', 'plugins', 'artibot');
+      mkdirSync(installed, { recursive: true });
+      mkdirSync(checkout, { recursive: true });
+
+      expect(await maybeInject(installed)).toBe(true);
+      expect(await maybeInject(checkout)).toBe(false);
+    });
+  });
+
+  // Shared scanner (tests/helpers/no-egress.js — its header lists the layers and what a
+  // source-text scan cannot see). Layer 1 is the fail-closed one: the modules this hook uses
+  // today (measured 2026-11-22); any new import goes red, whatever its name.
   describe('no-egress invariant', () => {
-    it('source must not import HTTP/fetch APIs', () => {
-      const src = readFileSync(path.join(HOOKS_DIR, 'skill-discovery-inject.js'), 'utf-8');
-      expect(src).not.toMatch(/\bfetch\s*\(/);
-      expect(src).not.toMatch(/from\s+['"]node:https?['"]/);
-      expect(src).not.toMatch(/require\(['"]node:https?['"]\)/);
-      expect(src).not.toMatch(/from\s+['"]axios['"]/);
+    const ALLOWED_IMPORTS = ['node:fs/promises', 'node:path', '../utils/index.js',
+      '../../lib/core/hook-utils.js', '../../lib/core/runtime-state.js', './_main-entry.js'];
+    const src = () => readFileSync(path.join(HOOKS_DIR, 'skill-discovery-inject.js'), 'utf-8');
+
+    it('imports only allow-listed modules and uses no network global', () => {
+      const imports = importSpecifiers(src());
+      expect(imports.length).toBeGreaterThan(0);
+      expect(imports.filter((s) => !ALLOWED_IMPORTS.includes(s))).toEqual([]);
+      expect(globalNetNames(src())).toEqual([]);
+    });
+
+    it('matches none of the deny-list patterns', () => {
+      expect(findEgress(src())).toEqual([]);
     });
   });
 });
