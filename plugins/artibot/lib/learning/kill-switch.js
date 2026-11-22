@@ -36,9 +36,10 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { atomicWriteJsonSync, readJsonFile } from '../core/file.js';
+import { atomicWriteJsonSync, readTextAllowMissing } from '../core/file.js';
 import { withFileLock } from '../core/file-lock.js';
 import { getPluginRoot } from '../core/platform.js';
+import { emergencyBannerLine, featureBannerLine } from './kill-switch-banner.js';
 
 // ---------------------------------------------------------------------------
 // Per-feature (v1) constants
@@ -112,46 +113,47 @@ function resolveKsOptions(config) {
 }
 
 /**
- * Load per-feature state; always returns valid shape.
- * @param {string} filePath
- * @returns {Promise<{features: object}>}
- */
-async function loadState(filePath) {
-  return normalizeState(await readJsonFile(filePath));
-}
-
-/**
- * Read and parse a state file for {@link lockedUpdate}. Never throws.
- *
- * What a read may conclude is an allowlist: ENOENT (no file yet) and content
- * that does not parse both yield `raw: null` — the caller's defaults, which a
- * write may replace, as before. EVERY other read error (EBUSY while another
- * process renames over the file on Windows, EACCES, EMFILE, …) comes back as
- * `readError`, never as "missing": read as missing, it let the next write put
- * defaults over the real state (review xcB 2026-11-21: a tripped feature was
- * un-tripped and the result said `persisted: true`).
- *
+ * Read and parse a state file; never throws. EVERY read in this module goes through here (checks and
+ * locked re-reads). Allowlist (`core/file.js#readTextAllowMissing`): ENOENT or unparseable content is
+ * `raw: null` — defaults a write may replace, "not tripped" to a check. ANY other error (EBUSY while a
+ * rename lands on Windows, EACCES, EMFILE, …) is `readError`, never "missing": as missing it let a write
+ * put defaults over real state (xcB 2026-11-21: a trip undone, `persisted: true`) and a check answer
+ * "not tripped" for a file it never saw (owner decision 2026-11-22 — {@link unreadableMeansTripped}).
  * @param {string} filePath
  * @returns {{ raw: unknown, readError: NodeJS.ErrnoException|null }}
  */
 function readStateFile(filePath) {
   let text;
   try {
-    text = readFileSync(filePath, 'utf-8');
+    text = readTextAllowMissing(filePath);
   } catch (err) {
-    return { raw: null, readError: err?.code === 'ENOENT' ? null : err };
+    return { raw: null, readError: err };
   }
+  if (text === null) return { raw: null, readError: null };
   try { return { raw: JSON.parse(text), readError: null }; } catch { return { raw: null, readError: null }; }
 }
 
 /**
- * Synchronous {@link loadState}, for use inside a lock. Never throws.
+ * Load per-feature state in its valid shape, plus the read error if the file
+ * exists but could not be read (see {@link readStateFile}). Never throws.
  * @param {string} filePath
  * @returns {{ state: {features: object}, readError: NodeJS.ErrnoException|null }}
  */
 function loadStateSync(filePath) {
   const { raw, readError } = readStateFile(filePath);
   return { state: normalizeState(raw), readError };
+}
+
+/**
+ * Fail-closed answer of a CHECK whose state file exists but could not be read: tripped, one stderr
+ * line ("not tripped" is the unsafe guess). Writes differ: {@link lockedUpdate} writes nothing.
+ * @param {string} filePath
+ * @param {NodeJS.ErrnoException} readError
+ * @returns {true}
+ */
+function unreadableMeansTripped(filePath, readError) {
+  process.stderr.write(`[artibot:kill-switch] state unreadable at ${filePath} (${readError?.code ?? 'error'}); treated as tripped (fail-closed)\n`);
+  return true;
 }
 
 /**
@@ -204,8 +206,10 @@ function emptyEmergencyState() {
 /**
  * Read emergency state, defaulting on a missing/corrupt file; any other read
  * error is returned as `readError` (see {@link readStateFile}). Never throws.
+ * `masterDisabled` (whether the trip's master-switch write landed, see
+ * {@link recordEmergencyFailure}) is carried only when the file holds a boolean.
  * @param {string} filePath
- * @returns {{ state: {failures: Array, tripped: boolean, trippedAt: string|null, cooldownUntil: string|null}, readError: NodeJS.ErrnoException|null }}
+ * @returns {{ state: {failures: Array, tripped: boolean, trippedAt: string|null, cooldownUntil: string|null, masterDisabled?: boolean}, readError: NodeJS.ErrnoException|null }}
  */
 function readEmergencyState(filePath) {
   const { raw, readError } = readStateFile(filePath);
@@ -216,6 +220,7 @@ function readEmergencyState(filePath) {
       tripped: Boolean(raw.tripped),
       trippedAt: typeof raw.trippedAt === 'string' ? raw.trippedAt : null,
       cooldownUntil: typeof raw.cooldownUntil === 'string' ? raw.cooldownUntil : null,
+      ...(typeof raw.masterDisabled === 'boolean' ? { masterDisabled: raw.masterDisabled } : {}),
     },
     readError,
   };
@@ -235,24 +240,60 @@ function failuresPastHour(failures, nowMs = Date.now()) {
 }
 
 /**
- * Atomically flip `ago.selfControl.masterEnabled` in artibot.config.json.
+ * Read artibot.config.json, set `ago.selfControl.masterEnabled`, write it
+ * atomically. Throws on any read, parse or write error.
+ * @param {string} cfgPath
+ * @param {boolean} enabled
+ */
+function writeMasterEnabled(cfgPath, enabled) {
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+  cfg.ago = cfg.ago || {};
+  cfg.ago.selfControl = cfg.ago.selfControl || {};
+  cfg.ago.selfControl.masterEnabled = Boolean(enabled);
+  atomicWriteJsonSync(cfgPath, cfg);
+}
+
+/**
+ * Flip `ago.selfControl.masterEnabled` in artibot.config.json: re-read and atomic write under the config
+ * file's lock, like every state write here ({@link lockedUpdate}). Never throws. Lock not taken:
+ * re-enabling writes nothing (false); disabling (the trip) still writes, unlocked — the safe side, and
+ * the production gate passes `feature`, so this switch is the emergency trip's only effect. The lock
+ * orders only writers that take it; `macro-learner.js` and `scripts/swarm-init.js` take none.
+ *
  * @param {boolean} enabled
  * @param {string} [pluginRoot]
- * @returns {boolean} success
+ * @returns {boolean} true when the value was written
  */
 function setMasterEnabled(enabled, pluginRoot) {
   const cfgPath = resolveConfigJsonPath(pluginRoot);
+  let entered = false;
   try {
-    const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-    cfg.ago = cfg.ago || {};
-    cfg.ago.selfControl = cfg.ago.selfControl || {};
-    cfg.ago.selfControl.masterEnabled = Boolean(enabled);
-    atomicWriteJsonSync(cfgPath, cfg);
+    withFileLock(cfgPath, () => {
+      entered = true;
+      writeMasterEnabled(cfgPath, enabled);
+    });
     return true;
   } catch (err) {
-    process.stderr.write(`[artibot:kill-switch] config write failed: ${err.message}\n`);
-    return false;
+    if (entered) return configWriteFailed(err);
+    const action = enabled ? 'left as is' : 'disabling unlocked (the safe side)';
+    process.stderr.write(`[artibot:kill-switch] config lock not taken for ${cfgPath} (${err?.code ?? 'error'}); masterEnabled ${action}\n`);
+    if (enabled) return false;
+    try {
+      writeMasterEnabled(cfgPath, false);
+      return true;
+    } catch (writeErr) {
+      return configWriteFailed(writeErr);
+    }
   }
+}
+
+/**
+ * @param {unknown} err
+ * @returns {false}
+ */
+function configWriteFailed(err) {
+  process.stderr.write(`[artibot:kill-switch] config write failed: ${err?.message ?? err}\n`);
+  return false;
 }
 
 /**
@@ -315,6 +356,10 @@ function lockedUpdate(filePath, read, mutate) {
  * Pure read in the per-feature branch. The emergency branch may apply
  * cooldown-expiry side-effects via getKillSwitchState().
  *
+ * Fail-closed: a state file that exists but cannot be read (any error but
+ * ENOENT — {@link readStateFile}) answers true, in both calling conventions;
+ * a missing or unparseable file is still "nothing tripped".
+ *
  * @param {object} [config]
  * @param {{pluginRoot?: string, feature?: string, now?: number}} [opts]
  * @returns {Promise<boolean>}
@@ -322,7 +367,8 @@ function lockedUpdate(filePath, read, mutate) {
 export async function isKillSwitchTripped(config, opts = {}) {
   const feature = typeof opts.feature === 'string' ? opts.feature : null;
   const filePath = resolveStatePath(config, opts.pluginRoot);
-  const state = await loadState(filePath);
+  const { state, readError } = loadStateSync(filePath);
+  if (readError) return unreadableMeansTripped(filePath, readError);
 
   if (feature) {
     if (FORBIDDEN_KEYS.has(feature)) return false;
@@ -410,34 +456,19 @@ export async function recordFailure(entry, config, opts = {}) {
  *   `reset` is false only when there was nothing to reset (unknown or
  *   forbidden feature). `persisted` says whether the reset reached disk — for
  *   the global form, BOTH files. `masterRestored` is attempted only when the
- *   emergency state was actually cleared: re-enabling the master switch over
- *   a still-tripped state on disk would leave the two disagreeing.
+ *   emergency state was actually cleared, and inside the same lock
+ *   ({@link resetEmergencyAndMaster}): re-enabling the master switch over a
+ *   still-tripped state on disk would leave the two disagreeing.
  */
 export async function resetKillSwitch(featureOrConfig, maybeConfig, opts = {}) {
   // Detect calling convention
   if (typeof featureOrConfig === 'string') {
-    const feature = featureOrConfig;
-    const config = maybeConfig;
-    if (FORBIDDEN_KEYS.has(feature)) return { reset: false };
-    const filePath = resolveStatePath(config, opts.pluginRoot);
-    const state = await loadState(filePath);
-    if (!state.features[feature]) return { reset: false };
-    // Locked so a failure another process records meanwhile for a DIFFERENT
-    // feature is not erased by this write.
-    const { persisted } = lockedUpdate(filePath, loadStateSync, (fresh) => {
-      fresh.features[feature] = { failures: [], trippedAt: null };
-    });
-    return { reset: true, persisted };
+    return resetFeature(featureOrConfig, resolveStatePath(maybeConfig, opts.pluginRoot));
   }
 
   // Object or undefined → emergency + global reset
   const config = featureOrConfig;
-  const emergencyPath = resolveEmergencyStatePath(config, opts.pluginRoot);
-  const emergency = lockedUpdate(
-    emergencyPath,
-    () => ({ state: emptyEmergencyState(), readError: null }),
-    () => undefined,
-  );
+  const emergency = resetEmergencyAndMaster(resolveEmergencyStatePath(config, opts.pluginRoot), opts.pluginRoot);
 
   // Also clear v1 state
   const v1Path = resolveStatePath(config, opts.pluginRoot);
@@ -447,8 +478,64 @@ export async function resetKillSwitch(featureOrConfig, maybeConfig, opts = {}) {
     () => undefined,
   );
 
-  const masterRestored = emergency.persisted ? setMasterEnabled(true, opts.pluginRoot) : false;
-  return { reset: true, masterRestored, persisted: emergency.persisted && v1.persisted };
+  return { reset: true, masterRestored: emergency.masterRestored, persisted: emergency.persisted && v1.persisted };
+}
+
+/**
+ * The per-feature form of {@link resetKillSwitch}. "Nothing to reset" (`reset: false`) only after a read
+ * SHOWED the feature absent — the pre-check, or the locked re-read when the pre-check could not read
+ * (else an empty entry was created and `reset: true` answered — lane D 2026-11-22). Re-read failed too:
+ * nothing is known, `reset: true, persisted: false`, as before.
+ * @param {string} feature
+ * @param {string} filePath - the per-feature state file
+ * @returns {{reset: boolean, persisted?: boolean}}
+ */
+function resetFeature(feature, filePath) {
+  if (FORBIDDEN_KEYS.has(feature)) return { reset: false };
+  const { state, readError } = loadStateSync(filePath);
+  if (!readError && !state.features[feature]) return { reset: false };
+  let lockedReadFailed = false;
+  const read = (p) => {
+    const r = loadStateSync(p);
+    lockedReadFailed = Boolean(r.readError);
+    return r;
+  };
+  // Locked so a failure another process records meanwhile for a DIFFERENT
+  // feature is not erased by this write.
+  const { value: existed, persisted } = lockedUpdate(filePath, read, (fresh) => {
+    if (!fresh.features[feature]) return false;
+    fresh.features[feature] = { failures: [], trippedAt: null };
+    return true;
+  });
+  if (!existed && !lockedReadFailed) return { reset: false };
+  return { reset: true, persisted };
+}
+
+/**
+ * Clear the emergency state and re-enable the master switch as ONE critical section under the emergency
+ * lock; a trip ({@link recordEmergencyFailure}) flips the master inside that same lock, so the pairs
+ * serialize (reset-then-trip: tripped + off; trip-then-reset: clear + on). Restoring after the lock was
+ * released let a trip land in between and be undone (reproduced 3/3, kill-switch-reset-race.test.js).
+ * Lock order emergency → config, as the trip's: no deadlock. Restores only when the clear reached disk.
+ * @param {string} filePath - the emergency state file
+ * @param {string} [pluginRoot]
+ * @returns {{ persisted: boolean, masterRestored: boolean }}
+ */
+function resetEmergencyAndMaster(filePath, pluginRoot) {
+  try {
+    return withFileLock(filePath, () => {
+      try {
+        atomicWriteJsonSync(filePath, emptyEmergencyState());
+      } catch (err) {
+        process.stderr.write(`[artibot:kill-switch] state write failed for ${filePath}: ${err?.code ?? ''} ${err?.message ?? err}\n`);
+        return { persisted: false, masterRestored: false };
+      }
+      return { persisted: true, masterRestored: setMasterEnabled(true, pluginRoot) };
+    });
+  } catch (err) {
+    process.stderr.write(`[artibot:kill-switch] state lock not taken for ${filePath} (${err?.code ?? 'error'}); not persisted\n`);
+    return { persisted: false, masterRestored: false };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,9 +548,17 @@ export async function resetKillSwitch(featureOrConfig, maybeConfig, opts = {}) {
  * flips to false. `masterEnabled` is NOT auto-restored — user must
  * manually re-enable.
  *
+ * Fail-closed: when the state file exists but cannot be read — on the peek or
+ * on the re-read under the lock — the answer is `tripped: true` with
+ * `failuresPast1h: null` (unknown, not zero), `statePath` (the file that could
+ * not be read, for a caller to name) and one stderr line
+ * ({@link unreadableMeansTripped}); the file is left as is. A trip whose
+ * master-switch write has not landed carries `masterRetryPending: true`
+ * ({@link recordEmergencyFailure} retries it on the next failure).
+ *
  * @param {object} [config]
  * @param {{pluginRoot?: string, now?: number}} [opts]
- * @returns {Promise<{tripped: boolean, failuresPast1h: number, cooldownUntil: string|null}>}
+ * @returns {Promise<{tripped: boolean, failuresPast1h: number|null, cooldownUntil: string|null, statePath?: string, masterRetryPending?: true}>}
  */
 export async function getKillSwitchState(config, opts = {}) {
   if (!emergencyEnabled(config)) {
@@ -471,18 +566,75 @@ export async function getKillSwitchState(config, opts = {}) {
   }
   const filePath = resolveEmergencyStatePath(config, opts.pluginRoot);
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const unreadable = (readError) => ({
+    tripped: unreadableMeansTripped(filePath, readError), failuresPast1h: null, cooldownUntil: null, statePath: filePath,
+  });
 
   // Unlocked first look; the common case (nothing expired) never takes the lock.
-  const { state: peek } = readEmergencyState(filePath);
-  if (!applyExpiry(peek, now)) return snapshotOf(peek);
+  const { state: peek, readError } = readEmergencyState(filePath);
+  if (readError) return unreadable(readError);
+  if (!applyExpiry(peek, now)) return stateSnapshot(peek);
 
   // Something expired: redo it on a fresh read under the lock, so a failure
   // another process appended since the peek is not pruned away by this write.
-  const { value } = lockedUpdate(filePath, readEmergencyState, (state) => {
+  let lockedReadError = null;
+  const read = (p) => {
+    const r = readEmergencyState(p);
+    lockedReadError = r.readError;
+    return r;
+  };
+  const { value } = lockedUpdate(filePath, read, (state) => {
     applyExpiry(state, now);
-    return snapshotOf(state);
+    return stateSnapshot(state);
   });
-  return value;
+  return lockedReadError ? unreadable(lockedReadError) : value;
+}
+
+/**
+ * {@link snapshotOf} for {@link getKillSwitchState}: plus `masterRetryPending: true`
+ * while a trip's master-switch write has not landed (the key is absent otherwise).
+ * @param {{failures: Array, tripped: boolean, cooldownUntil: string|null, masterDisabled?: boolean}} state
+ * @returns {{tripped: boolean, failuresPast1h: number, cooldownUntil: string|null, masterRetryPending?: true}}
+ */
+function stateSnapshot(state) {
+  return state.tripped && state.masterDisabled === false
+    ? { ...snapshotOf(state), masterRetryPending: true }
+    : snapshotOf(state);
+}
+
+/**
+ * The emergency-switch banner line for a {@link getKillSwitchState} result (text and rules:
+ * `kill-switch-banner.js#emergencyBannerLine`); this resolves the files it names.
+ * @param {{tripped: boolean, failuresPast1h: number|null, statePath?: string, masterRetryPending?: true}} state
+ * @param {object} [config] - the loaded artibot config, the one the gate reads
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {string|null}
+ */
+export function describeKillSwitchStatus(state, config, opts = {}) {
+  return emergencyBannerLine(state, config, bannerPaths(config, opts.pluginRoot));
+}
+
+/**
+ * Every SessionStart kill-switch banner line: the emergency switch, then the features that
+ * tripped on their own — or the fail-closed line when their state cannot be read
+ * (`kill-switch-banner.js`). Never throws for I/O.
+ * @param {object} [config]
+ * @param {{pluginRoot?: string}} [opts]
+ * @returns {Promise<string[]>}
+ */
+export async function killSwitchBannerLines(config, opts = {}) {
+  const paths = bannerPaths(config, opts.pluginRoot);
+  const { state, readError } = loadStateSync(paths.featureStatePath);
+  const names = readError ? [] : Object.keys(state.features).filter((k) => state.features[k].trippedAt);
+  return [
+    emergencyBannerLine(await getKillSwitchState(config, { pluginRoot: opts.pluginRoot }), config, paths),
+    featureBannerLine({ names, readError, statePath: paths.featureStatePath }),
+  ].filter(Boolean);
+}
+
+/** @returns {{configPath: string, featureStatePath: string}} the files the banner's recovery advice names */
+function bannerPaths(config, pluginRoot) {
+  return { configPath: resolveConfigJsonPath(pluginRoot), featureStatePath: resolveStatePath(config, pluginRoot) };
 }
 
 /**
@@ -498,6 +650,7 @@ function applyExpiry(state, now) {
     state.trippedAt = null;
     state.cooldownUntil = null;
     state.failures = [];
+    delete state.masterDisabled; // belongs to the trip that just expired
     changed = true;
   }
   const recent = failuresPastHour(state.failures, now);
@@ -524,19 +677,26 @@ function snapshotOf(state) {
  * Record an emergency failure in the global rolling-hour log.
  * Trips globally at threshold and flips masterEnabled=false.
  *
- * @param {{feature: string, error?: string, timestamp?: string}} entry
- * @param {object} [config]
- * @param {{pluginRoot?: string, now?: number}} [opts]
  * The append and the threshold check run on a fresh read under the state
  * file's lock ({@link lockedUpdate}), so concurrent failures all count. When
  * the lock is not taken the trip decision is still made (on an unlocked read)
  * — failing toward a disabled master switch is the safe side — but the row is
  * not written and `persisted` is false.
  *
+ * The master switch is the trip's only effect in production (the gate passes
+ * `feature`, so it never reads the emergency state), so a trip whose write did
+ * not land must not be forgotten: the state records `masterDisabled`, and while
+ * it is `false` on a tripped state every later failure retries the write
+ * (fail-closed; lane D 2026-11-22: one EBUSY on the config read inside its lock
+ * left the trip without effect for its whole cooldown). Once the write has
+ * landed nothing re-flips it, and a state without the field (written before it
+ * existed) is not retried — unknown is not "failed".
+ *
  * @param {{feature: string, error?: string, timestamp?: string}} entry
  * @param {object} [config]
  * @param {{pluginRoot?: string, now?: number}} [opts]
  * @returns {Promise<{tripped: boolean, failuresPast1h: number, cooldownUntil: string|null, masterDisabled: boolean, persisted: boolean}>}
+ *   `masterDisabled`: this call disabled the master switch (at the trip, or on a retry).
  */
 async function recordEmergencyFailure(entry, config, opts = {}) {
   const filePath = resolveEmergencyStatePath(config, opts.pluginRoot);
@@ -546,6 +706,7 @@ async function recordEmergencyFailure(entry, config, opts = {}) {
   const nowIso = new Date(nowMs).toISOString();
 
   const { value, persisted } = lockedUpdate(filePath, readEmergencyState, (state) => {
+    settleBeforeFailure(state, nowMs, opts.pluginRoot);
     state.failures.push({
       feature: String(entry.feature),
       error: entry.error ? String(entry.error).slice(0, 500) : null,
@@ -559,14 +720,48 @@ async function recordEmergencyFailure(entry, config, opts = {}) {
       state.trippedAt = nowIso;
       state.cooldownUntil = new Date(nowMs + cooldownHours * ONE_HOUR_MS).toISOString();
       masterDisabled = setMasterEnabled(false, opts.pluginRoot);
+      state.masterDisabled = masterDisabled;
       process.stderr.write(
         `[artibot:kill-switch-tripped feature=${entry.feature} failures=${state.failures.length}]\n`,
       );
+    } else if (state.tripped && state.masterDisabled === false) {
+      masterDisabled = setMasterEnabled(false, opts.pluginRoot);
+      state.masterDisabled = masterDisabled;
     }
     return { ...snapshotOf(state), masterDisabled };
   });
 
   return { ...value, persisted };
+}
+
+/**
+ * Before a failure is counted: expire a trip whose cooldown has passed (else the
+ * retry below would switch the master off with no trip behind it — lane B probe A),
+ * then RE-ARM a live trip whose master write had landed but the user turned the
+ * master switch back on (the pause banner says how): the state starts over and this
+ * failure is its first. Without it the switch was inert for the rest of the cooldown
+ * (probe D). "Back on" is read from the config FILE the gate loads, not the caller's
+ * object, which can be stale; a file that cannot be read does not re-arm.
+ * @param {object} state - emergency state, changed in place
+ * @param {number} nowMs
+ * @param {string} [pluginRoot]
+ */
+function settleBeforeFailure(state, nowMs, pluginRoot) {
+  applyExpiry(state, nowMs);
+  if (!state.tripped || state.masterDisabled !== true || !masterBackOn(pluginRoot)) return;
+  Object.assign(state, emptyEmergencyState());
+  delete state.masterDisabled;
+  process.stderr.write('[artibot:kill-switch] master switch turned back on during a trip; emergency switch re-armed\n');
+}
+
+/** @returns {boolean} true only when artibot.config.json was read and its master switch is not off (the gate's rule) */
+function masterBackOn(pluginRoot) {
+  try {
+    const cfg = JSON.parse(readTextAllowMissing(resolveConfigJsonPath(pluginRoot)) ?? 'null');
+    return cfg !== null && typeof cfg === 'object' && cfg.ago?.selfControl?.masterEnabled !== false;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

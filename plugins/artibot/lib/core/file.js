@@ -512,6 +512,36 @@ export async function readTextFile(filePath) {
 }
 
 /**
+ * Synchronous UTF-8 read where ENOENT — and ONLY ENOENT — means "no file".
+ *
+ * For a read whose result decides what gets written back (a read-modify-write
+ * under a lock). The conclusions a read may draw are an allowlist: a missing
+ * file returns `null`; every other error (EBUSY while another process renames
+ * over the file on Windows, EACCES, EMFILE, EISDIR, …) is THROWN with its
+ * `code` intact. Reading those as "missing" let a writer put defaults over the
+ * real state (review xcB 2026-11-21). Contrast {@link readTextFile}, which
+ * returns `null` on any failure and is for reads that only display or advise.
+ *
+ * Parsing is the caller's: an empty file returns `''`, not `null`.
+ *
+ * @param {string} filePath - Absolute path to the text file.
+ * @returns {string|null} File contents, or `null` when the file does not exist.
+ * @throws {NodeJS.ErrnoException} Any read error other than ENOENT.
+ * @example
+ * let text;
+ * try { text = readTextAllowMissing(statePath); } catch (err) { return { readError: err }; }
+ * if (text === null) return { state: defaults };
+ */
+export function readTextAllowMissing(filePath) {
+  try {
+    return fsSync.readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/**
  * Ensure a directory exists, creating it recursively if needed.
  * Catches EEXIST errors that can occur on Windows + OneDrive due to
  * filesystem sync race conditions even with `recursive: true`.

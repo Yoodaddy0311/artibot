@@ -11,8 +11,9 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { atomicWriteSync, parseJSON, readStdin, toFileUrl } from '../utils/index.js';
+import { readTextAllowMissing } from '../../lib/core/file.js';
 import { createErrorHandler, extractAgentId, extractAgentRole, logHookError } from '../../lib/core/hook-utils.js';
 import { resolveArtibotDir } from '../../lib/core/config.js';
 import { resolveSessionStatePath } from '../../lib/core/runtime-state.js';
@@ -47,20 +48,73 @@ function loopStateFile(sessionId) {
     ?? path.join(resolveArtibotDir(), 'loop-state.json');
 }
 
+/** @param {unknown} v @returns {boolean} */
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
 /**
- * Load persisted loop detector state from disk.
- * Returns null if the file is missing, expired, or corrupt. A file written before
- * `detections` existed reads with an empty list — the history is what matters.
+ * A restored history entry reduced to the two keys the detector reads, or null
+ * when it is not a `{ tool: string, fingerprint: string }` object.
+ * @param {unknown} e
+ * @returns {{ tool: string, fingerprint: string } | null}
+ */
+function toHistoryEntry(e) {
+  return isPlainObject(e) && typeof e.tool === 'string' && typeof e.fingerprint === 'string'
+    ? { tool: e.tool, fingerprint: e.fingerprint }
+    : null;
+}
+
+/**
+ * A restored detection row reduced to the keys {@link recordLoopCall} writes, or
+ * null when any of them is missing or of the wrong shape.
+ * @param {unknown} r
+ * @returns {object | null}
+ */
+function toDetectionRow(r) {
+  if (!isPlainObject(r)) return null;
+  const { ts, tool, severity, count, fingerprint_sha12: sha } = r;
+  const ok = Number.isFinite(ts) && typeof tool === 'string' && (severity === 'warn' || severity === 'block')
+    && Number.isFinite(count) && typeof sha === 'string' && /^[0-9a-f]{12}$/.test(sha);
+  return ok ? { ts, tool, severity, count, fingerprint_sha12: sha } : null;
+}
+
+/**
+ * Load loop state for both paths of {@link trackLoop}. Read rule = `core/file.js#readTextAllowMissing`:
+ * missing is `state: null`; ANY other error is `readError` and the caller must not persist (read as
+ * "no file", one EBUSY wrote a fresh history over the real one — lane D 2026-11-22: 1,2,3,1, no warn/BLOCK).
  * @param {string} file
- * @returns {{ history: Array<{ tool: string, fingerprint: string }>, detections: Array<object> } | null}
+ * @returns {{ state: ReturnType<typeof parseLoopState>, readError: NodeJS.ErrnoException|null }}
  */
 function loadLoopState(file) {
+  let text;
   try {
-    if (!existsSync(file)) return null;
-    const data = JSON.parse(readFileSync(file, 'utf-8'));
-    if (Date.now() - (data.lastUpdated || 0) > STATE_EXPIRY_MS) return null;
+    text = readTextAllowMissing(file);
+  } catch (err) {
+    return { state: null, readError: err };
+  }
+  return { state: text === null ? null : parseLoopState(text), readError: null };
+}
+
+/**
+ * Parse and validate loop state before the detector sees it. Null if expired or corrupt: a non-numeric
+ * `lastUpdated` (NaN never expires) or ANY history entry that is not `{ tool, fingerprint }` strings — the
+ * detector counts CONSECUTIVE repeats, so closing up a hole could invent a run (and a null entry threw).
+ * Detection rows are an independent log: a malformed row is dropped alone, the list capped at
+ * MAX_DETECTIONS. Unknown keys are dropped from both; a file without `detections` reads an empty list.
+ * @param {string} text
+ * @returns {{ history: Array<{ tool: string, fingerprint: string }>, detections: Array<object> } | null}
+ */
+function parseLoopState(text) {
+  try {
+    const data = JSON.parse(text);
+    if (!isPlainObject(data) || !Number.isFinite(data.lastUpdated)) return null;
+    if (Date.now() - data.lastUpdated > STATE_EXPIRY_MS) return null;
     if (!Array.isArray(data.history)) return null;
-    return { history: data.history, detections: Array.isArray(data.detections) ? data.detections : [] };
+    const history = data.history.map(toHistoryEntry);
+    if (history.includes(null)) return null;
+    const detections = Array.isArray(data.detections)
+      ? data.detections.map(toDetectionRow).filter(Boolean).slice(-MAX_DETECTIONS)
+      : [];
+    return { history, detections };
   } catch {
     return null;
   }
@@ -124,11 +178,13 @@ function fingerprintDigest(fingerprint) {
  * hook must not fail its slot over a learning file. That one call is then
  * missing from the history — the cost is stated, not hidden (stderr line).
  *
- * An error thrown INSIDE the lock (the detector over a malformed restored
- * history, say) is a different failure: it is logged as itself, the body is not
- * re-run unlocked (it would throw again), and the call reports no loop so the
- * rest of the hook — the usage row — still runs. `entered` tells the two apart,
- * as in `lib/learning/kill-switch.js#lockedUpdate`.
+ * An error thrown INSIDE the lock is a different failure: it is logged as itself,
+ * the body is not re-run unlocked (it would throw again), and the call reports no
+ * loop so the rest of the hook — the usage row — still runs. `entered` tells the
+ * two apart, as in `lib/learning/kill-switch.js#lockedUpdate`. The one such error
+ * data on disk could cause — the detector reading `.fingerprint` off a `null`
+ * history entry — is stopped at the source by {@link loadLoopState}, which both
+ * paths read through; the unlocked fallback has no containment of its own.
  *
  * @param {object} hookData
  * @param {string} toolName
@@ -154,7 +210,8 @@ function trackLoop(hookData, toolName, toolInput) {
 }
 
 /**
- * The read-modify-write body of {@link trackLoop}.
+ * The read-modify-write body of {@link trackLoop}. An existing state file that cannot be read
+ * ({@link loadLoopState}) is left as is: the call is checked without history, nothing is written.
  *
  * @param {string} file
  * @param {string} toolName
@@ -163,7 +220,10 @@ function trackLoop(hookData, toolName, toolInput) {
  * @returns {import('../../lib/cognitive/loop-detector.js').LoopDetectionResult}
  */
 function recordLoopCall(file, toolName, toolInput, persist) {
-  const restored = loadLoopState(file);
+  const { state: restored, readError } = loadLoopState(file);
+  if (readError) {
+    logHookError('tool-tracker', `loop-state unreadable (${readError.code ?? 'error'}); this call is checked without history and not persisted`);
+  }
   const detector = createLoopDetector(restored ? { initialHistory: restored.history } : {});
   const result = detector.detectLoop({ tool: toolName, args: toolInput });
   const prior = restored?.detections ?? [];
@@ -176,7 +236,7 @@ function recordLoopCall(file, toolName, toolInput, persist) {
       fingerprint_sha12: fingerprintDigest(result.fingerprint),
     }].slice(-MAX_DETECTIONS)
     : prior;
-  if (persist) saveLoopState(file, detector, detections);
+  if (persist && !readError) saveLoopState(file, detector, detections);
   return result;
 }
 

@@ -10,8 +10,9 @@
  *     result. It now reports `persisted: false` (v1) and
  *     `emergency.persisted: false`.
  *
- * Not covered: artibot.config.json's own read-modify-write in setMasterEnabled
- * (it is only written at trip time), and cross-host locking.
+ * Not covered here: artibot.config.json's own read-modify-write in
+ * setMasterEnabled (locked since 2026-11-22 — see kill-switch-master-lock.test.js),
+ * and cross-host locking.
  */
 
 import { spawn } from 'node:child_process';

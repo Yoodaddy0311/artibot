@@ -101,9 +101,26 @@ export async function shutdownToolLearner() {
   return flushToDisk();
 }
 
+/**
+ * {@link flushToDisk} for the callers nobody awaits — the debounce timer and
+ * the `beforeExit` handler. saveHistory rethrows every error but ELOCKTIMEOUT
+ * (lock create, write), and a dropped rejected promise is an unhandled
+ * rejection, which ends the process with exit code 1. Here it is one stderr
+ * line instead; the rows stay queued in memory, as after a false return.
+ * @returns {Promise<void>}
+ */
+function flushDeferred() {
+  return flushToDisk().then(
+    () => undefined,
+    (err) => {
+      process.stderr.write(`[artibot:tool-learner] deferred flush failed (${err?.code ?? 'error'}): ${err?.message ?? err}\n`);
+    },
+  );
+}
+
 // Register process exit handler to persist pending changes
 process.on('beforeExit', () => {
-  flushToDisk();
+  flushDeferred();
 });
 
 // ---------------------------------------------------------------------------
@@ -163,7 +180,7 @@ export async function recordUsage(tool, context, score, meta = {}) {
 
   // Queued for the save's merge onto the file on disk (tool-history.js#saveHistory).
   notePendingRecord(record);
-  markDirty(flushToDisk);
+  markDirty(flushDeferred);
 }
 
 /**
@@ -249,7 +266,7 @@ export async function pruneOldRecords(retentionMs = 90 * 24 * 60 * 60 * 1000) {
     rebuildAggregates(history);
     // Re-applied to the file on disk at save time, which may hold other rows.
     notePrune(cutoff);
-    markDirty(flushToDisk);
+    markDirty(flushDeferred);
   }
 
   return pruned;

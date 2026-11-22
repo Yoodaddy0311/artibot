@@ -179,9 +179,11 @@ describe('resetKillSwitch(feature) — returns whether the reset reached disk', 
     await tripV1('autoCommit');
     await recordFailure({ feature: 'keep' }, cfg(), { pluginRoot: tmpDir });
     const before = readFileSync(v1Path, 'utf-8');
-    // The unlocked existence check goes through fs/promises (core/file.js#readJsonFile),
-    // so the first readFileSync of this path is the locked re-read.
-    failRead(v1Path, 'EBUSY');
+    // The unlocked existence check is the first readFileSync of this path (since
+    // 2026-11-22 every read here goes through readStateFile); let it through so
+    // the failure lands on the locked re-read. An unreadable pre-check is
+    // covered in kill-switch-read-fail-closed.test.js.
+    failRead(v1Path, 'EBUSY', 1);
     const res = await resetKillSwitch('autoCommit', cfg(), { pluginRoot: tmpDir });
     expect(fault.left).toBe(0);
     expect(res).toEqual({ reset: true, persisted: false });

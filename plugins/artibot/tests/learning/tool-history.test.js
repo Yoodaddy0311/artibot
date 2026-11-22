@@ -139,6 +139,46 @@ describe('loadHistory()', () => {
     expect(h.version).toBe(2);
     expect(h.contexts).toEqual({});
   });
+
+  // loadHistory and the locked re-read (readDiskHistory) share one validation.
+  // loadHistory used to keep any TRUTHY contexts/aggregates, so a number or a
+  // string survived the load and the next recordUsage threw a TypeError
+  // assigning a property to a primitive (ESM is strict mode).
+  for (const [label, bad] of [['a number', 5], ['a string', 'x'], ['true', true]]) {
+    it(`replaces contexts/aggregates that are ${label} with empty objects`, async () => {
+      fs.readFile.mockResolvedValueOnce(JSON.stringify({ version: 2, contexts: bad, aggregates: bad, lastUpdated: 1 }));
+      clearCache();
+      const h = await loadHistory();
+      expect(h.version).toBe(2);
+      expect(h.contexts).toEqual({});
+      expect(h.aggregates).toEqual({});
+      expect(() => { h.contexts['read:js:file'] = []; }).not.toThrow();
+    });
+  }
+
+  it('keeps the other top-level fields of a valid history', async () => {
+    const saved = { version: 2, contexts: { x: [] }, aggregates: { Read: { totalUses: 1 } }, lastUpdated: 7, extra: 'kept' };
+    fs.readFile.mockResolvedValueOnce(JSON.stringify(saved));
+    clearCache();
+    expect(await loadHistory()).toEqual(saved);
+  });
+
+  it('starts empty on any read error, not only ENOENT (read-only load; unchanged)', async () => {
+    fs.readFile.mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EBUSY' }));
+    clearCache();
+    const h = await loadHistory();
+    expect(h.contexts).toEqual({});
+  });
+
+  it('starts empty on content that is not a history (null, array, unparseable)', async () => {
+    for (const text of ['null', '[]', '{ half-written', '"x"']) {
+      fs.readFile.mockResolvedValueOnce(text);
+      clearCache();
+      const h = await loadHistory();
+      expect(h.version, text).toBe(2);
+      expect(h.contexts, text).toEqual({});
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

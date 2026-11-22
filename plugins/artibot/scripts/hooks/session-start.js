@@ -351,22 +351,17 @@ export async function maybeEmitFirstRunBanner(pluginRoot, config, lines) {
 }
 
 /**
- * AGO Self-Control Wave 2: Emergency Kill Switch status. Appends a warning
- * line when the kill switch is tripped.
+ * AGO Self-Control Wave 2: the kill-switch banner lines (emergency switch, features tripped on their
+ * own), worded by `lib/learning/kill-switch-banner.js` — a pause only where the production gate stops.
  * @param {string} pluginRoot
  * @param {object} config
  * @param {string[]} lines
  */
-async function appendKillSwitchStatus(pluginRoot, config, lines) {
+export async function appendKillSwitchStatus(pluginRoot, config, lines) {
   try {
     const ksPath = path.join(pluginRoot, 'lib', 'learning', 'kill-switch.js');
-    const { getKillSwitchState } = await import(toFileUrl(ksPath));
-    const ksState = await getKillSwitchState(config);
-    if (ksState.tripped) {
-      lines.push(
-        `[artibot:kill-switch-tripped — 연속 실패로 자가 통제가 일시 중지됐습니다. /artibot:reset-kill-switch로 재활성하세요.]`,
-      );
-    }
+    const { killSwitchBannerLines } = await import(toFileUrl(ksPath));
+    lines.push(...await killSwitchBannerLines(config, { pluginRoot }));
   } catch {
     // Non-critical
   }
@@ -686,20 +681,18 @@ async function primeSkillCache(pluginRoot) {
 }
 
 /**
- * AD-23: First-of-day skill discovery inject. Calls the in-process helper
- * from skill-discovery-inject.js so the using-agent-skills meta-skill
- * appears in systemContext exactly once per local-day. Best-effort: any
- * failure is swallowed so session start never fails.
+ * AD-23: records the once-per-local-day gate via skill-discovery-inject.js#maybeInject; nothing is
+ * injected (the injecting `main()` is not registered). Best-effort: never blocks session start.
  * @param {string} pluginRoot
  * @param {string[]} lines
  */
-async function maybeInjectSkillDiscovery(pluginRoot, lines) {
+export async function maybeInjectSkillDiscovery(pluginRoot, lines) {
   try {
     const modPath = path.join(pluginRoot, 'scripts', 'hooks', 'skill-discovery-inject.js');
     const { maybeInject } = await import(toFileUrl(modPath));
     const injected = await maybeInject(pluginRoot);
     if (injected) {
-      lines.push('[artibot:skill-discovery] using-agent-skills meta-skill surfaced (first session today).');
+      lines.push('[artibot:skill-discovery] first session today — day gate recorded (the meta-skill prose itself is not injected).');
     }
   } catch {
     // Non-critical: discovery inject must never block session start

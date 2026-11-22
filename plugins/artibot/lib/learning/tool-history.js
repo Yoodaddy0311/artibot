@@ -8,10 +8,9 @@
  */
 
 import fs from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ARTIBOT_DIR, round } from '../core/index.js';
-import { atomicWriteJsonSync } from '../core/file.js';
+import { atomicWriteJsonSync, readTextAllowMissing } from '../core/file.js';
 import { withFileLock } from '../core/file-lock.js';
 
 // ---------------------------------------------------------------------------
@@ -66,25 +65,49 @@ let _replace = false;
 
 /**
  * Load history from disk. Creates empty history if file doesn't exist.
+ *
+ * The content is judged by {@link parseHistory}, the same rule the locked
+ * re-read ({@link readDiskHistory}) applies. The read rule differs on purpose:
+ * this load only seeds the in-memory copy, and a save does not trust that copy
+ * for what is on disk — it re-reads the file under the lock, which surfaces
+ * every error but ENOENT, and merges this process's pending rows onto what it
+ * read. So ANY read error starts empty here. The in-memory copy is written
+ * whole only after a reset ({@link setHistory}), or when that re-read finds no
+ * file or a file that is not a history ({@link mergeOnto}).
+ *
  * @returns {Promise<import('./tool-learner.js').ToolHistory>}
  */
 export async function loadHistory() {
   if (_history) return _history;
 
+  let text = null;
   try {
-    const raw = await fs.readFile(HISTORY_PATH, 'utf-8');
-    _history = JSON.parse(raw);
-    if (!_history.version || _history.version < 1) {
-      _history = createEmptyHistory();
-    }
-    // Ensure required buckets exist on older histories (defensive).
-    _history.contexts = _history.contexts || {};
-    _history.aggregates = _history.aggregates || {};
+    text = await fs.readFile(HISTORY_PATH, 'utf-8');
   } catch {
-    _history = createEmptyHistory();
+    // Missing or unreadable: start empty (see above).
   }
-
+  _history = (text !== null && parseHistory(text)) || createEmptyHistory();
   return _history;
+}
+
+/**
+ * Parse file content as a history, or null when it is not one: unparseable,
+ * not an object, or `version` missing / below 1. `contexts` and `aggregates`
+ * that are not objects become `{}` — kept as-is, a number or string made the
+ * next recordUsage throw assigning a property to a primitive.
+ *
+ * @param {string} text
+ * @returns {import('./tool-learner.js').ToolHistory|null}
+ */
+function parseHistory(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object' || !parsed.version || parsed.version < 1) return null;
+  return {
+    ...parsed,
+    contexts: parsed.contexts && typeof parsed.contexts === 'object' ? parsed.contexts : {},
+    aggregates: parsed.aggregates && typeof parsed.aggregates === 'object' ? parsed.aggregates : {},
+  };
 }
 
 /**
@@ -155,28 +178,20 @@ export async function saveHistory() {
  * The latest history on disk.
  *
  * `history` is null when the file is missing (ENOENT) or does not parse as a
- * history — the two outcomes {@link saveHistory} may overwrite. Every other
- * read error comes back as `error` instead, never as "missing".
+ * history ({@link parseHistory}) — the two outcomes {@link saveHistory} may
+ * overwrite. Every other read error comes back as `error` instead, never as
+ * "missing" (`lib/core/file.js#readTextAllowMissing`).
  *
  * @returns {{ history: import('./tool-learner.js').ToolHistory|null, error?: NodeJS.ErrnoException }}
  */
 function readDiskHistory() {
   let text;
   try {
-    text = readFileSync(HISTORY_PATH, 'utf-8');
+    text = readTextAllowMissing(HISTORY_PATH);
   } catch (err) {
-    return err?.code === 'ENOENT' ? { history: null } : { history: null, error: err };
+    return { history: null, error: err };
   }
-  let parsed;
-  try { parsed = JSON.parse(text); } catch { return { history: null }; }
-  if (!parsed || typeof parsed !== 'object' || !parsed.version || parsed.version < 1) return { history: null };
-  return {
-    history: {
-      ...parsed,
-      contexts: parsed.contexts && typeof parsed.contexts === 'object' ? parsed.contexts : {},
-      aggregates: parsed.aggregates && typeof parsed.aggregates === 'object' ? parsed.aggregates : {},
-    },
-  };
+  return { history: text === null ? null : parseHistory(text) };
 }
 
 /**
