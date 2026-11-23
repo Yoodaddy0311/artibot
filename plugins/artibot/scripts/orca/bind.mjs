@@ -219,10 +219,13 @@ export function renderWorkerPrompt({ templateText, run, limb, binding, parentRoo
     .replaceAll('{BRIEF_PATH}', toPosix(path.join(limbDir(binding.worktreePath, limb), 'brief.md')))
     .replaceAll('{PARENT_BRIEF_PATH}', toPosix(path.join(limbDir(parentRoot, limb), 'brief.md')))
     .replaceAll('{REPORT_PATH}', toPosix(path.join(limbDir(binding.worktreePath, limb), 'report.md')));
-  return renderPrompt(withPaths, {
+  const rendered = renderPrompt(withPaths, {
     RUN: run.runId, LIMB: limb, WORKTREE_PATH: toPosix(binding.worktreePath), BRANCH: binding.branch, BASE: binding.forkPoint,
     PARENT_ROOT: toPosix(parentRoot), MODEL_POLICY: renderModelPolicy(config), REPORT_CONTRACT: contract,
   });
+  // The prompt a worker reads must not depend on how this checkout stored its line endings: a Windows clone with
+  // autocrlf holds the template and team.md as CRLF, and the real run that validated the flow used LF.
+  return rendered.replace(/\r\n/g, '\n');
 }
 
 /**

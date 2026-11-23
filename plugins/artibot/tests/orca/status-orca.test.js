@@ -495,7 +495,9 @@ describe('classifyMail — 실제 check 영수증', () => {
     const item = classify(receipt('check-5.json')).items[0];
     expect(item).toMatchObject({ kind: 'escalation', limb: 'probe-c', stopReason: 'lost', priority: 'high', verdict: 'lost-retry' });
     expect(item.commands[0]).toContain('worker-start --task task_9fbf30ff0a5d --retry-of ctx_129e44009de5');
-    expect(item.commands[0]).toContain(`--worktree "id:${REPO_ID}::`);
+    // shellQuote leaves a selector bare when every character is a safe token character (a /tmp path on Linux) and quotes it
+    // when it is not (a Windows temp path with backslashes) - the selector itself must be there either way.
+    expect(item.commands[0]).toMatch(new RegExp(`--worktree "?id:${REPO_ID}::`));
   });
 
   it('lost escalation 인데 브랜치에 트레일러 done 이 있으면 완료 경로(land 체크)', () => {

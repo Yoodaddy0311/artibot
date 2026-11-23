@@ -661,6 +661,18 @@ describe('PROMPT-TEMPLATE.md — 이 템플릿을 보는 다른 게이트는 없
     expect(prompt).toContain('SendMessage(to="main")');
   });
 
+  it('템플릿과 계약 블록이 CRLF 여도(Windows autocrlf 체크아웃) 렌더 결과에는 CR 이 없다', () => {
+    const crlf = (text) => text.replace(/\r?\n/g, '\r\n');
+    const contract = crlf(['[보고 계약]', '- 보고는 반드시 SendMessage(to="main") 로 보낸다.'].join('\n'));
+    const prompt = renderWorkerPrompt({
+      templateText: crlf(template), run: { runId: RUN_ID }, limb: 'lim-a', binding: { worktreePath: world.repo, branch: 'orca/lim-a-a1b2c3', forkPoint: world.base },
+      parentRoot: world.repo, config: CONFIG, contract,
+    });
+    expect(crlf('a\nb')).toContain('\r'); // positive control: the helper really produces CRLF
+    expect(prompt).not.toContain('\r');
+    expect(prompt.split('\n')[0]).toMatch(/^\[orca limb\] run=/);
+  });
+
   it('installLimbContract: 필수 절이 없는 브리프는 아무것도 쓰기 전에 거부', () => {
     const parent = tempDir('orca-parent-');
     const wt = tempDir('orca-wt-');
