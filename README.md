@@ -611,7 +611,7 @@ All teammates have their specialist tools + team collaboration tools (`SendMessa
 
 ## Commands
 
-81 slash commands across development, marketing, and workflow automation. Key commands: `/sc` (smart router), `/implement`, `/team`, `/code-review`, `/save`/`/resume`.
+82 slash commands across development, marketing, and workflow automation. Key commands: `/sc` (smart router), `/implement`, `/team`, `/code-review`, `/save`/`/resume`.
 
 <details>
 <summary>Development Commands</summary>
