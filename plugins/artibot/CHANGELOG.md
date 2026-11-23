@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.72.0] — 2026-11-23
+
+새 커맨드 **`/orca`** — `/split` 의 Orca 기판 버전. 사람이 창을 열고 "확인해줘" 로 재판독하던 일을 리더가 `orca` CLI 로 넘긴다: 리더가 줄기마다 worktree·Task·워커를 만들고, 워커가 끝나거나 막히거나 사라지면 Orca 가 리더를 깨운다. `/split` 의 계약(파일 소유권이 겹치지 않는 줄기 · git 트레일러 완료 판독 · 배치 랜딩)은 그대로이고 `/split` 은 지우지 않는다 — Orca 가 없거나 `orca.enabled=false` 면 사유를 내고 `/split` 을 안내한다.
+
+`v4.71.17`(`fdf8a344`) 이후 이 기능 11 커밋 = **77 files +13,378/−53**(`git diff --shortstat origin/master HEAD` @ `d1f189b2` 기준, 2026-11-23 측정 — 릴리스 커밋은 이 수치에 없다). 위에 업스트림 문서 동기화 1 커밋(`d1f189b2`)이 있다.
+
+### 추가
+- 커맨드 문서 `commands/orca.md`(계약·절차만 — 서브커맨드 plan · launch · status · integrate · close · resume · run), 스크립트 6종 `scripts/orca/{preflight,plan,bind,status,close,mark}.mjs`, 라이브러리 `lib/git/{orca-plan,orca-run-file}.js`, 워커 템플릿 `templates/orca/PROMPT-TEMPLATE.md`, 줄기 행 계약 `schemas/limb-row.schema.json`. 커맨드 수 81 → 82.
+- **불변식**: 완료의 진실원은 git(`Split-Limb: done` 트레일러) · 착지 = 트레일러 done ∧ 커밋 > 0 ∧ 줄기 tip 이 통합 ref 의 조상(커밋 0 인 줄기는 조상 검사만으로 "착지"가 되므로 둘 다 본다) · 스크립트는 Orca **읽기 verb 만** 부르고(AST 게이트 `orca-read-verbs`) 변경 verb 는 리더가 한 줄씩 친다 · 폴링 없음(기상은 Orca) · 권한 플래그 주입 없음.
+- **안전**: 사람 게이트 매트릭스에 HG-14(에이전트 프로세스 스폰 — 분류 전용, 원장에 행을 남기지 않는다) · 킬스위치 `artibot.config.json#orca.enabled` · `close` 는 가드 5단(착지 → report 복사 → junction teardown → reparse point 0 → 청결)을 모두 통과한 뒤에만 삭제 명령을 **출력**하고 실행하지 않는다 · 상태 파일은 .bak 먼저 · 잠금 · 원자적 쓰기 · 출력되는 명령에 제어문자·유니코드 따옴표가 든 값은 막는다.
+- 설정·무시 규칙: `orca` 설정 블록(`enabled` · `agent` · `branchPrefix` · `launch.requireApproval` · `stallCheckMinutes`), `.gitignore` 7줄, `RUNTIME_EXCLUDE_ENTRIES` 2건.
+
+### 측정 (2026-11-23)
+- **독립 교차검수**(opus 3인 — 스펙 · 품질 · 보안, 구현자 보고를 입력으로 주지 않음): 전원 APPROVE, BLOCKER 0. MAJOR 1(브랜치·worktree 가 모두 사라진 줄기를 착지로 세던 fail-open)은 수정했다.
+- **실 런 1회(변형)**: 이 PC(Windows)에서 실제 Orca 1.4.259 와 Sonnet 5.5 워커 3개로 줄기 3개(독립 2 + 의존 1)를 시작 → 착지 → 닫기까지 돌렸다. 병합 대상만 로컬 임시 원격이었다(CI 확인은 대체 조회). 사람 대기 22.5%(487 s / 2,167 s, 개입 3회), 닫은 뒤 git 등록 0 · 브랜치 0 · Orca 목록 0, 부모 `node_modules` 는 junction teardown 3번 전후 같았다(103 항목 · 2,181 파일), 워커 비용 약 $4.37.
+- **GitHub CI 가 찾은 플랫폼 의존 2건을 이 릴리스에서 고쳤다**: Ubuntu 에서 worktree 선택자의 인용 부호 기대값, Windows 러너에서 CRLF 체크아웃이 만든 `prompt.md` 첫 줄의 CR(이제 렌더 결과는 체크아웃과 무관하게 LF).
+- 테스트: GitHub CI(`ci/pre-orca-4720` @ `eb4c25a3`, 2026-11-23): Ubuntu Node 20 · 22 · 24 모두 976개 파일 · 29,377건 중 29,313 통과 · 64 skip · 0 실패, Windows 러너(Node 22)는 29,400건 중 29,376 통과 · 24 skip · 0 실패. 커버리지 게이트(Ubuntu): 문장 93.27 · 분기 87.00 · 함수 95.25 · 줄 94.83 (임계값 85/76/85/85). 이 PC 에서는 리베이스 전 트리(`d41113b6`)로 전체 스위트 933개 파일 · 28,908건 통과를 한 번 쟀고, 리베이스 뒤 트리는 CI 로 대신했다.
+
+### 알려진 한계 — 미확인 그대로
+- 실 런은 병합 대상이 로컬 임시 원격이라 **실제 GitHub CI·`origin/master` push** 경로, 실패 · 반송 · `lost` 경로, 문서만 보는 독립 리더 세션을 증명하지 못했다. 리더(설계자)가 문서를 보며 스크립트를 직접 쳤다.
+- POSIX 에서 `scripts/split/worktree-setup.mjs --teardown` 의 링크 제거는 미검증이다(Windows junction 만 실측). CI 의 Ubuntu 는 `/orca` 테스트를 통과했지만 close 의 실제 teardown 자식 프로세스는 win32 에서만 돈다.
+- `closed`(브랜치·worktree 없음)는 착지로 세지 않는다 — 후속 줄기는 선행 줄기를 close 하기 **전에** 시작한다. 이미 닫았다면 git 으로 착지를 확인한 뒤 리더가 직접 시작한다.
+- 후속: close 가 Orca 읽기로 id↔경로 일치와 워커 정산을 확인 · plan 단계에서 소유 경로가 git 무시 대상이면 경고(실 런에서 `docs/` 로 걸렸다) · `status.mjs`(784줄) 분리.
+
 ## [4.71.17] — 2026-11-22
 
 `v4.71.16`(`dcb6b1b9`) 이후 14 커밋 = **175 files +10,965/−854**(`git rev-list --count v4.71.16..de6387ec` · `git diff --shortstat v4.71.16 de6387ec`, 2026-11-22 측정 — 릴리스 커밋은 이 수치에 없다). 내역:

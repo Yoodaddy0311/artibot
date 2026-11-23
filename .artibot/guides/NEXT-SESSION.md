@@ -1,4 +1,6 @@
-# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-22 20시대 KST 갱신, **v4.71.17** — v4.71.16 이후 14 커밋(11-21 검수 잔여 28건 · 8.3 경로 10 커밋 + 11-22 `/team` 4레인 4 커밋: kill-switch fail-closed·트립 효과 보장·배너 사실화 · 플러그인 캐시 루트 runtime/ 제거 · 쓰기 실패 정직화 · preflight L1~L4) + 릴리스 커밋 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영 · 오너 손 항목·백로그는 `plugins/artibot/CHANGELOG.md` [4.71.17] 의 「업데이트 후 정리」·「백로그」 절)
+# NEXT-SESSION — 크로스머신 핸드오프 (2026-11-23 KST 갱신, **v4.72.0** — 새 커맨드 `/orca`(Orca 기판 `/split`, 명령 81 → 82) · v4.71.17 위 11 기능 커밋 + 릴리스 커밋 · 독립 교차검수 3인 APPROVE · 실 런(변형) 통과 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영 · 설계·보고서는 gitignore 경로 `.artibot/split/orca-command/DESIGN.md`(§10 P0 결과 · §11.6b 구현 편차)와 `reports/AUTOPILOT/ap-20261119-045204-wc7yxq.md` · 후속·한계는 `plugins/artibot/CHANGELOG.md` [4.72.0] 의 「알려진 한계」 절)
+
+> 이전 헤더(2026-11-22, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-11-22 20시대 KST 갱신, **v4.71.17** — v4.71.16 이후 14 커밋(11-21 검수 잔여 28건 · 8.3 경로 10 커밋 + 11-22 `/team` 4레인 4 커밋: kill-switch fail-closed·트립 효과 보장·배너 사실화 · 플러그인 캐시 루트 runtime/ 제거 · 쓰기 실패 정직화 · preflight L1~L4) + 릴리스 커밋 · 이 헤더는 릴리스 전에 썼다 — 태그 · master 착지 · 설치 결과는 미반영 · 오너 손 항목·백로그는 `plugins/artibot/CHANGELOG.md` [4.71.17] 의 「업데이트 후 정리」·「백로그」 절)
 
 > 이전 헤더(2026-11-08 03시대, 원문 보존 — H1 표식 `# ` 만 뺌): NEXT-SESSION — 크로스머신 핸드오프 (2026-11-08 03시대 KST 갱신, **v4.71.16 착지·태그·GitHub Release·설치 완료**(재시작 전, 로드 미확인) · 그 뒤 미릴리스 수정 3건([Unreleased]: WIP 경보 범위 · `writeHandoff` 의 Date · 로컬 cpSync 크래시) · 오너 손 항목은 아래 「2026-11-08 v4.71.16 이후」 절의 표가 최신)
 
